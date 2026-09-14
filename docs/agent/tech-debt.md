@@ -51,7 +51,7 @@
 
 | 项 | 内容 |
 |---|---|
-| 现状 | `ImgPath.java:13` 和上传接口（`U:166`、`G:82`、`G:283`）均使用 `System.getProperty("user.dir") + "\src\main\resources\static\img\"` |
+| 现状 | **修复前行号**：`ImgPath.java:13`、`U:166`、`G:82`、`G:283`。修复后上述坐标已失效，现对应 `U:172`、`G:88`、`G:289`；`ImgPath` 的路径拼接已被 `@Value` 注入 + `Paths.get(uploadDir)` 取代（见 `ImgPath.java:18`、`:25`）。原写法：`System.getProperty("user.dir") + "\src\main\resources\static\img\"` |
 | 问题 | 开发期 `user.dir` = 项目根，路径有效；打成 jar 后 `user.dir` = 运行目录，`src/main/resources/static/img/` 不存在 |
 | 影响 | ① 图片上传失败 ② `/img/**` 映射失效 ③ 部署到生产环境或换机运行立即暴露 |
 | 建议 | 改为可配置路径（`application.properties` 配 `app.upload-dir`），或改用 `classpath:/static/img/` + 外部上传目录分离 |
@@ -63,7 +63,7 @@
 
 | 项 | 内容 |
 |---|---|
-| 现状 | `U:186`、`G:105`、`G:294` 三处硬编码 `"http://localhost:8088/img/" + 文件名` |
+| 现状 | `U:192`、`G:111`、`G:300` 三处硬编码 `"http://localhost:8088/img/" + 文件名` |
 | 问题 | 换机、容器化、走反向代理或改端口后，落库的 URL 全部不可用；且前缀散落三处，改一处必漏两处 |
 | 建议 | 外置为 `app.upload-url-prefix`，三处统一注入 |
 | 优先级 | 中 |
@@ -73,8 +73,8 @@
 
 | 项 | 内容 |
 |---|---|
-| 现状 | `U:181-184` 与 `G:96-102` 用 `catch (Exception)` 捕获后仅 `System.out.println`，接口仍返回 `success:true` |
-| 问题 | 目录不可写、磁盘满、路径不存在时，用户看到「上传成功」但文件未落盘，故障极难定位。**注意 `G:290-292`（`goodsUp`）未加 catch，异常会向上抛**——三处上传点行为不一致 |
+| 现状 | `U:187-190` 与 `G:102-108` 用 `catch (Exception)` 捕获后仅 `System.out.println`，接口仍返回 `success:true` |
+| 问题 | 目录不可写、磁盘满、路径不存在时，用户看到「上传成功」但文件未落盘，故障极难定位。**注意 `G:296-298`（`goodsUp`）未加 catch，异常会向上抛**——三处上传点行为不一致 |
 | 建议 | 捕获后返回 `success:false` + 明确 `msg`，或至少改为 ERROR 级日志 |
 | 优先级 | 中 |
 | 状态 | 待确认 |

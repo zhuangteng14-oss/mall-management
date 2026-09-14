@@ -12,7 +12,7 @@
 ## 必读源码
 
 - Mall-management-server/src/main/java/com/minke/mallmanagement_controller/MallManagementGoodsController.java:160-210
-- Mall-management-server/src/main/java/com/minke/mallmanagement_controller/MallManagementMessage.java:30-70、240-330
+- Mall-management-server/src/main/java/com/minke/mallmanagement_controller/MallManagementMessage.java:30-70、236-370
 
 ## 约束
 
