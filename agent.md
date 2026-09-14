@@ -117,6 +117,18 @@ git rebase origin/main
 5. 分析阶段不写代码，只输出计划；确认后才输出 diff。
 6. 输出尽量用结构化 JSON，不要长篇解释。
 
+## 会话管理规则
+
+1. 一个 feature 一个会话。完成后输入 /clear，开新会话。
+2. 新会话开场只读三个文件：
+   - agent.md
+   - docs/agent/README.md
+   - docs/agent/context-packs/<当前任务>.md
+3. 不要整目录加载 docs/agent/。
+4. 上下文接近满时（Claude 提示或响应变慢）主动建议 /clear。
+5. 已完成的工作必须写入文件（文档或 commit），不能只存在于对话。
+6. 每次新会话开场，先执行 git log --oneline -5 了解当前位置。
+
 ## 技术选型（能引库就不自研）
 
 【目标态，当前项目尚未引入】
