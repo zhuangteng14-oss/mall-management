@@ -1,0 +1,27 @@
+# 前端
+**/node_modules/
+**/dist/
+**/.vite/
+**/*.local
+
+# 后端
+**/target/
+**/build/
+**/.gradle/
+**/*.log
+
+# IDE
+.idea/
+.vscode/
+*.iml
+
+# 系统
+.DS_Store
+Thumbs.db
+
+# 非代码文件
+*.docx
+
+# 日志
+logs/
+*.tmp
