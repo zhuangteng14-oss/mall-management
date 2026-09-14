@@ -57,7 +57,7 @@
 | 建议 | 改为可配置路径（`application.properties` 配 `app.upload-dir`），或改用 `classpath:/static/img/` + 外部上传目录分离 |
 | 验证步骤 | 1. 开发期不配 app.upload-dir，调 /mysqlLogin/updateAvatar 上传，确认落盘位置与改动前一致<br>2. 访问 http://localhost:8088/img/<文件名>，期望 200<br>3. mvn package 打 jar，在非项目根目录 java -jar 启动，指定 --app.upload-dir=<jar 外可写目录><br>4. 再次上传，确认文件落在配置目录且返回 URL 可访问<br>5. 重启进程后再次访问同一 URL<br>6. 回归 /mysqlLogin/getUserInfo，确认 image 字段格式不变<br>7. 回归 /mysqlGoods/goodsAdd、/mysqlGoods/goodsUp，确认 GoodImg 格式不变 |
 | 优先级 | 高（部署级阻塞） |
-| 状态 | 读侧已修复、写侧开发期已验证（1421a0c、本 commit），jar 场景待验证 |
+| 状态 | 读侧已修复、写侧开发期已验证（1421a0c、c5d74b4），jar 场景待验证 |
 
 ## TD-06 图片 URL 前缀硬编码为 localhost:8088
 
@@ -83,11 +83,11 @@
 
 | 项 | 内容 |
 |---|---|
-| 现状 | 开发期上传目录 `src/main/resources/static/img/` 受 Git 跟踪，新上传图片会成为未跟踪文件 |
+| 现状 | 开发期上传目录 `src/main/resources/static/img/` 受 Git 跟踪，新上传图片会成为未跟踪文件。**已实测发生**：写侧验证上传头像后，`git status` 出现未跟踪文件（后经人工清理） |
 | 问题 | 每轮开发验证都会污染 `git status`，易与真实代码改动混淆；且上传的用户图片被当作源码入库 |
 | 建议 | 改用 `.gitignore` 白名单例外（先忽略 `*.jpg/*.png` 再 `!` 放行初始 8 张），或开发期上传目录与生产一致改为 jar 外 |
 | 优先级 | 低 |
-| 状态 | 待确认 |
+| 状态 | 实测发生，待处理方案 |
 
 ## TD-09 静态资源修复的 jar 部署场景待验证
 
