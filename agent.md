@@ -36,6 +36,11 @@
 2. 禁止删除旧接口、旧字段、旧表、旧配置。
 3. 数据库变更只允许新增表、新增字段、新增索引；禁止删列、改类型、删表。
 4. 禁止直接修改或推送 main 分支。
+4.1 单人项目例外：当项目由单人开发、无独立 reviewer 时，允许
+    「本地 review + 直接合 main」，但必须满足：
+    - 合并前执行 git diff main...feature 逐行查看
+    - 合并 commit 信息中标注「self-reviewed」
+    - 有 CI 时确保 CI 通过
 5. 禁止对 main、dev 执行 force push、reset --hard、rebase。
 6. 只允许对自己的 feature 分支 rebase。
 7. 不确定的改动先输出方案，等人工确认，不要直接改代码。
