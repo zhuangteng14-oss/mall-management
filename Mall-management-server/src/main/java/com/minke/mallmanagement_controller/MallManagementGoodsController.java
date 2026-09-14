@@ -1,12 +1,15 @@
 package com.minke.mallmanagement_controller;
 
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.File;
 import java.io.IOException;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -19,6 +22,9 @@ public class MallManagementGoodsController {
 
     @Autowired
     private JdbcTemplate GoodjdbcTemplate;
+
+    @Value("${app.upload-dir:${user.dir}/src/main/resources/static/img/}")
+    private String uploadDir;
 
     //这是一个接口（用于提供和更新上架商品的可选类型）
     @RequestMapping(value = "/goodstype", method = {RequestMethod.GET, RequestMethod.POST})
@@ -79,7 +85,7 @@ public class MallManagementGoodsController {
         int OrderVolume = 0;
 
         // 图片保存路径
-        String uploadPath = System.getProperty("user.dir") + "\\src\\main\\resources\\static\\img\\";
+        Path uploadPath = Paths.get(uploadDir).toAbsolutePath().normalize();
 
         // 图片为空判断
         if (file.isEmpty()) {
@@ -90,7 +96,7 @@ public class MallManagementGoodsController {
 
         // 获取图片文件名
         String originalFilename = file.getOriginalFilename();
-        File saveFile = new File(uploadPath + originalFilename);
+        File saveFile = uploadPath.resolve(originalFilename).toFile();
 
         // 保存图片（已存在则不重复保存，不报错）
         try {
@@ -280,12 +286,12 @@ public class MallManagementGoodsController {
         // 图片默认沿用旧地址
         String goodImgUrl = "";
         // 图片保存路径
-        String uploadPath = System.getProperty("user.dir") + "\\src\\main\\resources\\static\\img\\";
+        Path uploadPath = Paths.get(uploadDir).toAbsolutePath().normalize();
 
         // 如果上传了新图片
         if (file != null && !file.isEmpty()) {
             String fileName = file.getOriginalFilename();
-            File saveFile = new File(uploadPath + fileName);
+            File saveFile = uploadPath.resolve(fileName).toFile();
             // 保存图片
             if (!saveFile.exists()) {
                 file.transferTo(saveFile);

@@ -1,6 +1,7 @@
 package com.minke.mallmanagement_controller;
 
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.*;
@@ -8,6 +9,8 @@ import org.springframework.web.multipart.MultipartFile;
 
 import java.io.File;
 import java.io.IOException;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.util.HashMap;
 import java.util.Map;
 
@@ -19,6 +22,9 @@ public class MallManagementUserController {
     //登录部分
     @Autowired
     private JdbcTemplate LoginjdbcTemplate;//调取Spring里封装好的jdbc
+
+    @Value("${app.upload-dir:${user.dir}/src/main/resources/static/img/}")
+    private String uploadDir;
 
     //这是一个接口（用于返回登录界面对应的数据，决定了此次登录去往哪个端【客户端or商家端】）
     @PostMapping("/loginSelect")
@@ -163,7 +169,7 @@ public class MallManagementUserController {
         Map<String, Object> result = new HashMap<>();
 
 
-        String uploadPath = System.getProperty("user.dir") + "\\src\\main\\resources\\static\\img\\";
+        Path uploadPath = Paths.get(uploadDir).toAbsolutePath().normalize();
 
         if (file.isEmpty()) {
             result.put("success", false);
@@ -172,7 +178,7 @@ public class MallManagementUserController {
         }
 
         String originalFilename = file.getOriginalFilename();
-        File saveFile = new File(uploadPath + originalFilename);
+        File saveFile = uploadPath.resolve(originalFilename).toFile();
 
         try {
             if (!saveFile.exists()) {
