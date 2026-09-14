@@ -12,7 +12,7 @@
 
 - Mall-management-server/src/main/java/com/minke/mallmanagement_server/ImgPath.java
 - Mall-management-server/src/main/java/com/minke/mallmanagement_controller/MallManagementUserController.java:150-200
-- Mall-management-server/src/main/java/com/minke/mallmanagement_controller/MallManagementGoodsController.java:70-110、270-300
+- Mall-management-server/src/main/java/com/minke/mallmanagement_controller/MallManagementGoodsController.java:70-115、270-305
 
 ## 约束
 
