@@ -121,3 +121,24 @@
 | 建议 | 先跑 `npm audit` 看详情，按 severity 分级；critical/high 优先，考虑 `npm audit fix` 或升级依赖 |
 | 优先级 | 中（有 critical 和 high） |
 | 状态 | 待确认 |
+
+## 已完成里程碑
+
+> 本节记录已交付的阶段性成果，与上方「活跃技术债」区分。新里程碑追加在最下方。
+
+### M1 — A2 基建（2026-09-18）
+
+| 项 | 交付物 | 证据 |
+|---|---|---|
+| smoke test | 4 用例：`LoginSelectSmokeTest`、`OrderPayIfUpSmokeTest`（成功分支 + 失败分支）、`ImgMappingSmokeTest` | `78f3ef1`、`8709e14` |
+| CI 配置 | GitHub Actions：后端 `./mvnw -B test` 全量 + 前端 `npm ci && npm run build`；JDK 17 / Node 20.17.0 / `~/.m2` 缓存 / surefire 报告 artifact | `417254e`、`bcada27` |
+| CI 实跑 | 5 次运行全绿（Run ID 35328548406、35329177960、35329430908、35330326189、35330643388） | `gh run list` |
+| paths-ignore | 纯文档 push 不触发 CI。实证：全仓库 5 次运行无一 `headSha` 为 `23dfaab` | `df99a53`、`c4807d9`、`23dfaab` |
+| workflow_dispatch | 手动触发按钮在 main 上可见（GitHub 仅对默认分支显示） | `8ecbf1a` |
+| 文档漂移修复 | project-map 目录树与结论、api-contract §4、agent.md 目录说明、Vue 版本事实错误 | `23dfaab` |
+| TD-10 处置 | `contextLoads()` 加 `@Disabled`，解除 CI 阻塞 | `c3cd9f6`、`d62e89d`、`4b84ee2` |
+| TD-11 登记 | 前端 36 个依赖漏洞（2 critical / 14 high / 18 moderate / 2 low） | `0eefced` |
+
+**硬性前置**：`Mall-management-server/mvnw` 可执行位 `100644 → 100755`，Linux runner 必需 —— `f7d6172`。
+
+**收尾状态**：主源 7 个 `.java`、测试源 5 个；全项目 5 用例 = smoke 层 4 个（CI 实跑）+ `contextLoads` 1 个（`@Disabled`）。

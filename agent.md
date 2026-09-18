@@ -131,6 +131,12 @@ git rebase origin/main
 5. 已完成的工作必须写入文件（文档或 commit），不能只存在于对话。
 6. 每次新会话开场，先执行 git log --oneline -5 了解当前位置。
 
+## 工具事实（已验证）
+
+- `gh` **不在本工具 bash 的 PATH 中**（Windows 安装器只写入用户 PATH，本工具的 bash 进程未继承），直接调用会得到 `command not found`（退出码 127）。须用绝对路径：`"/c/Program Files/GitHub CLI/gh.exe"`。
+- **`gh run list --commit <sha>` 会返回假阴性**：已用确知有运行的 `c4807d9` 做对照验证，同样返回空。查某个 commit 对应的 CI run，必须用 `gh run list --json headSha,...` 拉全量后本地比对，**不要用 `--commit` 过滤器**。
+- 本仓库为私有仓库，匿名 `api.github.com` 请求返回 404；查 CI 状态一律走 `gh`。
+
 ## 技术选型（能引库就不自研）
 
 【目标态，当前项目尚未引入】

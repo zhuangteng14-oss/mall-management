@@ -19,7 +19,7 @@
 | db-migration.md | 数据库变更记录 | 每次 DB 变更 | 每次变更时 |
 | concurrency-map.md | 并发、锁、事务现状 | 涉及并发时 | 并发逻辑变化时 |
 | cache-map.md | 缓存现状 | 涉及缓存时 | 缓存变化时 |
-| tech-debt.md | 活跃技术债 | 排期时 | 新增/关闭时 |
+| tech-debt.md | 活跃技术债 + 已完成里程碑 | 排期时 | 新增/关闭时 |
 | business-decisions.md | 待决策议题 | 遇到分歧时 | 决策后 |
 | context-packs/*.md | 任务上下文包 | 每个 feature 开场 | 该任务变化时 |
 | archive/*.md | 归档内容 | 追溯历史时 | 关闭时移入 |
