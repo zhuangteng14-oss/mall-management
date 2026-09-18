@@ -120,7 +120,7 @@
 | 问题 | 含 2 个 critical、14 个 high，可能影响安全性；当前不影响功能运行 |
 | 建议 | 先跑 `npm audit` 看详情，按 severity 分级；critical/high 优先，考虑 `npm audit fix` 或升级依赖 |
 | 优先级 | 中（有 critical 和 high） |
-| 状态 | 待确认 |
+| 状态 | 待确认（建议时机：A3 完成后、管理端开发前） |
 
 ## 已完成里程碑
 

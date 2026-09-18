@@ -20,6 +20,38 @@
 
 > 路径注意：主源包为 `com/minke/mallmanagement_controller/`（**无 `server` 段**），测试源为 `com/minke/mallmanagementserver/`，两者不一致，勿按惯例推断（agent.md 规则 9.1）。
 
+## 前置准备
+
+### 本地测试库（隔离开发库）
+
+1. 本地 MySQL 执行：
+
+   ```sql
+   CREATE DATABASE mall_management_test;
+   CREATE USER 'test'@'localhost' IDENTIFIED BY 'test123';
+   GRANT ALL ON mall_management_test.* TO 'test'@'localhost';
+   ```
+
+2. 导入表结构与种子数据：
+
+   ```bash
+   mysql -u test -ptest123 mall_management_test < mall_management_sql.sql
+   ```
+
+3. 切库配置：
+
+   ```bash
+   DB_URL=jdbc:mysql://localhost:3306/mall_management_test
+   ```
+
+   > 生效点在**服务端**，不在脚本：脚本只走 HTTP，连库的是被测的 Spring Boot 服务。要压测试库，须**启动被测服务时**把 `spring.datasource.url` 指向 `mall_management_test`。若脚本自身还需直连库做断言，则须额外提供 JDBC 驱动路径 —— 与「不依赖项目 classpath」冲突，届时再议。
+
+4. 跑完可保留库供复用，不 DROP。
+
+### CI 环境
+
+用 service container 起临时 MySQL，自动导入 `mall_management_sql.sql`。
+
 ## 约束
 
 - 目标 120 QPS
@@ -37,8 +69,6 @@
   - 只走 HTTP，**不依赖项目 classpath**，故可完全绕开 Maven
   - 不进 `surefire`，**`mvn test` 不会跑它** —— 避免 A2 定的「全量 `mvn test`」把每次 CI 都拖成必须起 MySQL
   - CI 侧**新增独立 job**（带 `mysql` service）跑此脚本；**原 backend job 保持零 MySQL、全量快速**
-
-- ⚠️ **待裁决**：本地跑 120 QPS 大量写入会污染开发库 `mall_management_sql`（CI 的 service container 是一次性的，天然隔离）；本地是否另起独立库。
 
 ## 验收标准
 
