@@ -107,5 +107,6 @@
 | 现状 | `MallManagementApplicationTests.contextLoads()` 依赖 JPA + `ddl-auto`，推测需要真实 MySQL 连接 |
 | 问题 | CI（无 MySQL）上该测试会红，整个 `mvn test` 失败 |
 | 建议 | 改为 `@WebMvcTest` 切片，或加 `@Disabled` 并新建切片测试，或 CI 增加 MySQL service |
+| 处置 | 已采用「加 `@Disabled`」临时规避：`MallManagementApplicationTests.contextLoads()` 禁用，Web 层覆盖由 `smoke/` 包承担。未采用 `@WebMvcTest` 改写法，因为会与 smoke 层重复且丢掉全上下文覆盖 |
 | 优先级 | 高（CI 阻塞） |
-| 状态 | 待确认 |
+| 状态 | 已临时规避（A3 阶段 CI 接入 MySQL service 后删除 `@Disabled` 重新启用，届时本项可关闭） |
