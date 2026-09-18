@@ -110,3 +110,13 @@
 | 处置 | 已采用「加 `@Disabled`」临时规避：`MallManagementApplicationTests.contextLoads()` 禁用，Web 层覆盖由 `smoke/` 包承担。未采用 `@WebMvcTest` 改写法，因为会与 smoke 层重复且丢掉全上下文覆盖 |
 | 优先级 | 高（CI 阻塞） |
 | 状态 | 已临时规避（A3 阶段 CI 接入 MySQL service 后删除 `@Disabled` 重新启用，届时本项可关闭） |
+
+## TD-11 前端依赖存在已知漏洞
+
+| 项 | 内容 |
+|---|---|
+| 现状 | `npm ci` 报告 36 个依赖漏洞：2 critical / 14 high / 18 moderate / 2 low |
+| 问题 | 含 2 个 critical、14 个 high，可能影响安全性；当前不影响功能运行 |
+| 建议 | 先跑 `npm audit` 看详情，按 severity 分级；critical/high 优先，考虑 `npm audit fix` 或升级依赖 |
+| 优先级 | 中（有 critical 和 high） |
+| 状态 | 待确认 |
