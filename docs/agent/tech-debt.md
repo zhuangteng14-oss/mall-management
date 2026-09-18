@@ -85,7 +85,7 @@
 |---|---|
 | 现状 | 开发期上传目录 `src/main/resources/static/img/` 受 Git 跟踪，新上传图片会成为未跟踪文件。**已实测发生**：写侧验证上传头像后，`git status` 出现未跟踪文件（后经人工清理） |
 | 问题 | 每轮开发验证都会污染 `git status`，易与真实代码改动混淆；且上传的用户图片被当作源码入库 |
-| 建议 | 改用 `.gitignore` 白名单例外（先忽略 `*.jpg/*.png` 再 `!` 放行初始 8 张），或开发期上传目录与生产一致改为 jar 外 |
+| 建议 | 改用 `.gitignore` 白名单例外（先忽略 `*.jpg/*.png` 再 `!` 放行初始 8 张），或开发期上传目录与生产一致改为 jar 外。**补充（2026-09-18）**：该白名单只覆盖 `*.jpg`/`*.png` 两种扩展名，而 `src/main/resources/static/img/` 下 `b000602fe1f47af8e0e4747ae1b3338c_720.jpeg` 的扩展名是 `.jpeg`，不在放行范围内，方案落地时需一并覆盖 |
 | 优先级 | 低 |
 | 状态 | 实测发生，待处理方案 |
 
@@ -98,4 +98,14 @@
 | 验证步骤 | 见 `docs/agent/tech-debt.md` TD-05 描述中的 7 步验证第 3、4、5 步 |
 | 建议 | 首次打 jar 部署前完成验证；验证通过后与 TD-05 一起关闭 |
 | 优先级 | 中 |
+| 状态 | 待确认 |
+
+## TD-10 contextLoads() 在无 MySQL 环境跑不通
+
+| 项 | 内容 |
+|---|---|
+| 现状 | `MallManagementApplicationTests.contextLoads()` 依赖 JPA + `ddl-auto`，推测需要真实 MySQL 连接 |
+| 问题 | CI（无 MySQL）上该测试会红，整个 `mvn test` 失败 |
+| 建议 | 改为 `@WebMvcTest` 切片，或加 `@Disabled` 并新建切片测试，或 CI 增加 MySQL service |
+| 优先级 | 高（CI 阻塞） |
 | 状态 | 待确认 |
