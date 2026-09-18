@@ -1,11 +1,17 @@
 name: CI
 
-# 触发：推送到 main，以及面向 main 的 PR
+# 触发：
+#   1. 推送到 main
+#   2. 面向 main 的 PR
+#   3. 手动触发（Actions 页面的 Run workflow 按钮）
+# 注意：GitHub 只对默认分支（main）显示手动触发按钮，
+# 故 workflow_dispatch 需合入 main 后才可通过界面验证。
 on:
   push:
     branches: [ main ]
   pull_request:
     branches: [ main ]
+  workflow_dispatch:
 
 # 同一分支上的新推送取消上一次仍在跑的构建
 concurrency:
