@@ -74,4 +74,4 @@
 ## 4. 待确认
 
 - 前端实际调用的接口子集与参数拼装方式 —— 前端源码未读。
-- `ImgPath.java` / `ImgConfig.java` 是否额外暴露静态资源路由（影响 `http://localhost:8088/img/` 前缀的可用性）—— Config 类未读。
+- ~~`ImgPath.java` / `ImgConfig.java` 是否额外暴露静态资源路由（影响 `http://localhost:8088/img/` 前缀的可用性）~~ **已关闭**：`ImgPath`（`@Configuration implements WebMvcConfigurer`）注册了 `/img/**` → `app.upload-dir` 的资源映射，故 `http://localhost:8088/img/<文件名>` 前缀可用；`ImgConfig` 只注册全局 `CorsFilter`，不涉及静态资源路由。证据：`ImgPath.java:15-16`、`:30-35`；`ImgConfig.java:9-12`。实证：A2 的 `ImgMappingSmokeTest` 已断言 `GET /img/default_user.png` → 200。

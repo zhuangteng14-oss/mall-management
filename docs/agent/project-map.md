@@ -13,7 +13,7 @@
 | 服务端口 | 8088 | `application.properties:3` |
 | 数据库 | MySQL 8.0.32，库 `mall_management_sql` | `mall_management_sql.sql:3` |
 | 数据访问 | `JdbcTemplate` 直接写裸 SQL 字符串 | 3 个 Controller 均 `@Autowired JdbcTemplate` |
-| 前端 | Vue CLI 工程（`vue.config.js`、`babel.config.js`）；**Vue 2 还是 Vue 3 待确认** | 前端目录树；`agent.md` 声称 Vue3 |
+| 前端 | Vue 3 CLI 工程（Vue CLI 5 / webpack 5，`vue.config.js`、`babel.config.js`） | `package.json:12`（`vue: ^3.2.13`）、`:13`（`vue-router: ^4.6.4`，Vue Router 4 仅支持 Vue 3）、`:20`（`@vue/cli-service: ~5.0.0`） |
 
 依赖实测（`pom.xml:32-68`）：`spring-boot-starter`、`-jdbc`、`-data-jpa`、`-web`、`-test`、`mysql-connector-java:8.0.33`、`lombok:1.18.46`。
 **未引入**：Redis、Spring Cache、Caffeine、Redisson、AOP 增强包。
@@ -22,10 +22,11 @@
 
 ```
 期末项目/
-├── agent.md                                项目开发 Agent 规范（288 行）
+├── agent.md                                项目开发 Agent 规范（224 行）
 ├── mall_management_sql.sql                 11 张表 DDL + 种子数据
 ├── scripts/                                ← 预留，后续放验证脚本
-├── docs/agent/                             项目文档 8 份（含 db-migration.md）
+├── docs/agent/                             项目文档 9 份（含 db-migration.md、business-decisions.md），另有 context-packs/ 与 archive/
+├── .github/workflows/ci.yml                GitHub Actions CI（后端全量测试 + 前端构建）
 ├── Mall-management-server/                 Spring Boot 后端
 │   ├── pom.xml  mvnw  mvnw.cmd  HELP.md
 │   ├── .idea/                              已被 Mall-management-server/.gitignore 忽略
@@ -41,10 +42,17 @@
 │       │       └── MallManagementGoodsController.java  /mysqlGoods
 │       ├── main/resources/application.properties
 │       ├── main/resources/static/img/                  8 张图片
-│       └── test/java/.../MallManagementApplicationTests.java   默认空测试
+│       ├── test/java/com/minke/mallmanagementserver/
+│       │   ├── MallManagementApplicationTests.java      全上下文冒烟测试（@Disabled，见 TD-10）
+│       │   └── smoke/
+│       │       ├── AbstractSmokeTest.java               smoke 基类（@WebMvcTest + 鉴权预留口子）
+│       │       ├── LoginSelectSmokeTest.java            /mysqlLogin/loginSelect（只读）
+│       │       ├── OrderPayIfUpSmokeTest.java           /mysqlGoods/orderPayIfUp（CAS 两分支）
+│       │       └── ImgMappingSmokeTest.java             /img/** 静态资源映射
+│       └── test/resources/application-smoke.properties  smoke profile 测试属性
 ├── Mall-management-web/
 │   ├── package.json                        外层空壳 npm 根，与内层重复
-│   └── mall-management-system/             前端工程（Vue 版本待确认）
+│   └── mall-management-system/             前端工程（Vue 3）
 │       ├── public/index.html  favicon.ico
 │       └── src/
 │           ├── main.js  App.vue
@@ -56,7 +64,7 @@
 
 ## 3. 后端架构：无分层
 
-**全项目仅 7 个 `.java` 源文件**（含启动类），32 个 HTTP 接口全部内联在 3 个 Controller 中，SQL 以字符串字面量形式写在方法体内。
+**主源 7 个 `.java`**（含启动类），**测试源 5 个**，共 12 个。32 个 HTTP 接口全部内联在 3 个 Controller 中，SQL 以字符串字面量形式写在方法体内。
 
 - **不存在** Service 层、Mapper/DAO 层、MyBatis XML、DTO/VO 层。
 - **不存在** 任何 `@Entity`——`mallmanagement_class/info.java` 是全项目唯一实体类，仅含 1 个 `imgName` 字段，且**未被任何类引用**（死代码）。
@@ -67,7 +75,7 @@
 
 ## 4. 前端结构
 
-Vue 2 CLI 工程，14 个页面视图 + 1 个组件 + 1 个路由表。页面按角色/场景划分（登录、首页、商品、购物车、订单中心、聊天、好友、用户信息等）。**路由与页面内部实现未读，待确认。**
+Vue 3 CLI 工程，14 个页面视图 + 1 个组件 + 1 个路由表。页面按角色/场景划分（登录、首页、商品、购物车、订单中心、聊天、好友、用户信息等）。**路由与页面内部实现未读，待确认。**
 
 `Mall-management-web/package.json` 与 `Mall-management-web/mall-management-system/package.json` 并存，前者疑为空壳，实际工程根为后者。
 
@@ -81,6 +89,7 @@ Vue 2 CLI 工程，14 个页面视图 + 1 个组件 + 1 个路由表。页面按
 | 全项目零缓存 | `cache-map.md` |
 | `ddl-auto=update` 与手写 DDL 脚本并存 | `db-schema.md` |
 | 11 张表中仅 `message` 有二级索引 | `db-schema.md` |
+| 测试：4 个测试类 / 5 个用例，其中 1 个因缺 MySQL 被 `@Disabled` | `tech-debt.md` TD-10 |
 
 ## 6. N+1 待优化清单（优先级：**高**）
 
@@ -98,4 +107,4 @@ Vue 2 CLI 工程，14 个页面视图 + 1 个组件 + 1 个路由表。页面按
 ## 7. 未覆盖 / 待确认
 
 - 前端各页面的接口调用关系、状态管理（是否用 Vuex/Pinia）、14 个页面的实际路由路径 —— 前端源码未读。
-- `ImgPath.java` / `ImgConfig.java` 的静态资源映射规则 —— Config 类未读。
+- ~~`ImgPath.java` / `ImgConfig.java` 的静态资源映射规则~~ **已关闭**：两者均为 `@Configuration`；`ImgPath implements WebMvcConfigurer`，在 `addResourceHandlers` 中把 `/img/**` 映射到 `app.upload-dir`，并由 `@PostConstruct` 用 `Files.createDirectories` 自动建目录；`ImgConfig` 仅注册全局 `CorsFilter`。实测 `@WebMvcTest` 可加载 `ImgPath`（A2 的 `ImgMappingSmokeTest` 依赖此行为）。证据：`ImgPath.java:15-16`、`:23-27`、`:30-35`；`ImgConfig.java:9-12`。

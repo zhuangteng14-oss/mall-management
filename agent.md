@@ -8,7 +8,7 @@
 项目根目录（Git 仓库根）/
 ├── agent.md
 ├── docs/agent/
-├── Mall-management-web/mall-management-system/     ← 前端 Vue 工程（Vue 版本待确认）
+├── Mall-management-web/mall-management-system/     ← 前端 Vue 3 工程
 └── Mall-management-server/                        ← 后端 Spring Boot
 ```
 
