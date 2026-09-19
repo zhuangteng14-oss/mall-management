@@ -17,6 +17,7 @@
 | api-contract.md | 接口契约 | 改接口或做前端时 | 接口变化时 |
 | db-schema.md | 表结构现状 | 涉及 DB 时 | 表结构变化时 |
 | db-migration.md | 数据库变更记录 | 每次 DB 变更 | 每次变更时 |
+| environment.md | 本地开发环境连接信息 | 环境变化时 | 环境变化时 |
 | concurrency-map.md | 并发、锁、事务现状 | 涉及并发时 | 并发逻辑变化时 |
 | cache-map.md | 缓存现状 | 涉及缓存时 | 缓存变化时 |
 | tech-debt.md | 活跃技术债 + 已完成里程碑 | 排期时 | 新增/关闭时 |
