@@ -32,10 +32,13 @@
    GRANT ALL ON mall_management_test.* TO 'test'@'localhost';
    ```
 
-2. 导入表结构与种子数据：
+2. 导入表结构与种子数据（**SQL 文件自带 CREATE DATABASE 和 USE，
+   必须过滤后导入，否则会切回原库名**）：
 
    ```bash
-   mysql -u test -ptest123 mall_management_test < mall_management_sql.sql
+   sed -E '/^CREATE DATABASE/d; /^USE /d' mall_management_sql.sql > /tmp/mall_import.sql
+   mysql -u test -ptest123 mall_management_test < /tmp/mall_import.sql
+   rm /tmp/mall_import.sql
    ```
 
 3. 切库配置：

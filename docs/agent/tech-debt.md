@@ -122,6 +122,29 @@
 | 优先级 | 中（有 critical 和 high） |
 | 状态 | 待确认（建议时机：A3 完成后、管理端开发前） |
 
+## TD-12 mall_management_sql.sql 自带建库语句
+
+| 项 | 内容 |
+|---|---|
+| 现状 | SQL 文件第 15 行 CREATE DATABASE、第 17 行 USE 硬编码库名 mall_management_sql |
+| 问题 | 导入到其他库时必须先过滤，实测已触发（A3 前置准备首次执行失败） |
+| 建议 | 长期拆分：一份"仅 Schema"供测试，一份"Schema + 建库"供生产 |
+| 优先级 | 低 |
+| 状态 | 待确认 |
+
+## TD-13 SQL 硬编码 schema 名，导致测试库隔离失效
+
+| 项 | 内容 |
+|---|---|
+| 现状 | `MallManagementGoodsController` **23 处**、`MallManagementUserController` **16 处** SQL 硬编码 schema 限定名 `mall_management_sql.`（合计 39 处）；`MallManagementMessage` **0 处**（SQL 不带前缀）。三个 Controller 共用同一个自动装配的 `JdbcTemplate` Bean，差异只在 SQL 字符串 |
+| 问题 | 切换 `spring.datasource.url` **无法**把 `/mysqlGoods/*`、`/mysqlLogin/*` 的读写切到其他库——服务连上测试库，SQL 仍定向到 `mall_management_sql`。又因 `/message/*` 不带前缀，同一进程内会**脑裂**：`/message` 的写入跟随 datasource，`/mysqlGoods`、`/mysqlLogin` 的写入留在 `mall_management_sql` |
+| 实测触发 | A3 前置准备按 context-pack 建 `mall_management_test` 并导入成功后，隔离对 `/mysqlGoods`、`/mysqlLogin` 实际无效。`orderAdd` 压测数据会落入开发库，而 `order` 表无删除接口，HTTP 层无法清理 |
+| 影响 | ① 一切依赖「切库做隔离测试」的方案失效；② 压测/集成测试污染开发库；③ 多实例部署时无法让实例指向不同库 |
+| 建议 | **方案 A**：移除 SQL 字符串中的 `mall_management_sql.` 前缀改用非限定表名（由 datasource 决定库），彻底但需改 39 处并全量回归；**方案 B**（A3 已采用）：保留硬编码，测试侧一律改用**独立 MySQL 实例**（库名仍为 `mall_management_sql`），绕开该问题 |
+| 与 TD-12 的关系 | TD-12 是 `mall_management_sql.sql` 自带建库语句；本项是 Java 源码硬编码库名。同属「库名硬编码」的两个面，触发点与修法不同，分列 |
+| 优先级 | 高（静默污染开发库，且在本任务中已实际触发一次流程失败） |
+| 状态 | 待确认（A3 采用方案 B 绕过，不阻塞当前里程碑；是否做方案 A 待定） |
+
 ## 已完成里程碑
 
 > 本节记录已交付的阶段性成果，与上方「活跃技术债」区分。新里程碑追加在最下方。
