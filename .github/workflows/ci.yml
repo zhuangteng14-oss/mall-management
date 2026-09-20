@@ -28,8 +28,10 @@ jobs:
   # ============================================================
   # 后端：Maven 测试
   # 当前无需 MySQL：3 个 smoke test 走 @WebMvcTest 切片 + Mockito 替身
-  # JdbcTemplate；MallManagementApplicationTests 由 @Disabled 跳过（TD-10）。
-  # MySQL service 计划在 A3 阶段引入。
+  # JdbcTemplate；MallManagementApplicationTests 由 A3_ENABLED 开关跳过（本 job 不设该
+  # 变量，故跳过而非失败；TD-10 已关闭 —— 真跑它的是 concurrency job，那里有 MySQL）。
+  # MySQL service 已引入，但落在下方 concurrency job；本 job 至今不需要 MySQL。
+  # （此前这里写「计划在 A3 阶段引入」，A3 落地后即过期，2026-09-20 更正。）
   # ============================================================
   backend:
     name: Backend tests
@@ -88,3 +90,167 @@ jobs:
       - name: 构建
         working-directory: Mall-management-web/mall-management-system
         run: npm run build
+
+  # ============================================================
+  # A3 并发测试（120 QPS）—— 阶段 E 的 CI 集成
+  # 被测对象是「后端 + MySQL 8.4」这一对，故自带 MySQL，不借 backend 的。
+  # 【首跑是观测跑】绿不等于通过，判定看报告里的 gates.failed 与 exitCode。
+  # ============================================================
+  concurrency:
+    name: A3 concurrency (120 QPS)
+    runs-on: ubuntu-latest
+    # 单测红了就没有必要花几分钟跑压测
+    needs: backend
+
+    # 覆盖 workflow 级 concurrency（那一层是 cancel-in-progress: true）：那会把一次
+    # 测量拦腰砍断 —— 被砍的运行没有报告（报告在结束时才落盘）、日志也是截断的，
+    # 是最难排查的一种红。测量宁可排队，不该被下一次推送取消。
+    concurrency:
+      group: a3-${{ github.ref }}
+      cancel-in-progress: false
+
+    # 【首跑是观测跑，不是门禁】A-S1-1 / A-S2b-1 / A-S4b-1 断言的是传输层
+    # （「5xx == 0 且连接错误 == 0」「success 比率 100%」）。CI 把压测器、后端、MySQL
+    # 挤在同一台机器上（本地是「压测器 + 后端在本机、MySQL 在另一台 VM」），
+    # 资源性假红的可能必须先实测一轮。反之若为迁就 CI 下调 --qps，TOCTOU / 锁争用
+    # 类缺陷可能不复现 → 假绿，更坏。门禁地位待首跑数据后再定。
+    continue-on-error: true
+
+    services:
+      mysql:
+        # 必须 8.4：P1 是硬门禁，要求 VERSION() 以 "8.4." 开头（8.0 / latest 必红）。
+        # 刻意不设 MYSQL_DATABASE：库由 SQL 文件第 15 行的 CREATE DATABASE 建
+        # （TD-12 已登记该行为），与本机 VM 的导入路径一致。
+        image: mysql:8.4
+        env:
+          MYSQL_ROOT_PASSWORD: '123456'
+          # 本 job 用不到（导入走容器内 socket，不经 TCP）；保留是为将来 ——
+          # P7 阴性对照默认以 root 走 TCP 连 127.0.0.1，当前被 --skip-negative-control
+          # 关掉了，谁若打开它，root@'%' 得在。
+          MYSQL_ROOT_HOST: '%'
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 --silent"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=12
+
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 配置 JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: temurin
+          cache: maven
+
+      # 用容器自带的 mysql 客户端（8.4，与 server 同版本），不用 runner 预装的：
+      # 预装版本不受控（当前 8.0，将来可能变），而导入应与 server 同版本。
+      # 容器内 mysql 默认走本地 socket，故不需要 -h。
+      #
+      # S0-1 定稿的 VM 形态是 `echo 123456 | sudo -S -p '' mysql < ...`：那里必须 sudo
+      # 是因为 root@localhost 是 auth_socket、root 无法 TCP 登录。容器里 root 可用
+      # 口令连接，故不套 sudo —— 别把 sudo -S 形式抄到这里。
+      - name: 导入库结构与种子数据
+        run: |
+          docker exec -i ${{ job.services.mysql.id }} mysql -uroot -p123456 -e "SELECT VERSION()"
+          docker exec -i ${{ job.services.mysql.id }} mysql -uroot -p123456 < mall_management_sql.sql
+          # test 账号的越权（GRANT ALL ON *.*）是 VM 上已登记的现状，这里刻意复刻，
+          # 不在 CI「顺手修好」：改了它，CI 测的环境就与 A3 记录的环境不是同一个。
+          docker exec -i ${{ job.services.mysql.id }} mysql -uroot -p123456 -e "CREATE USER IF NOT EXISTS 'test'@'%' IDENTIFIED BY 'test123'; GRANT ALL ON *.* TO 'test'@'%'; FLUSH PRIVILEGES;"
+
+      # 先 package 再起 jar：一次构建同时满足两件事 —— ① ~/.m2 里有了
+      # mysql-connector-java 8.0.33，run.sh 的 D3 定稿路径直接命中（回退分支不会走到）；
+      # ② 后台化的是 java 而不是 Maven 包装脚本，进程模型简单。
+      - name: 构建后端
+        working-directory: Mall-management-server
+        run: ./mvnw -B -DskipTests package
+
+      # 只由环境变量覆盖数据库地址；绝不改 application-a3.properties 的默认值（仍指 VM）。
+      - name: 启动后端（a3 profile）
+        working-directory: Mall-management-server
+        env:
+          SPRING_PROFILES_ACTIVE: a3
+          A3_DB_URL: jdbc:mysql://127.0.0.1:3306/mall_management_sql?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai&characterEncoding=utf-8
+        run: |
+          nohup java -jar target/Mall-management-server-*.jar > "$GITHUB_WORKSPACE/app.log" 2>&1 &
+          echo "$!" > /tmp/a3-app.pid
+
+      # 预热：等就绪（最多 120s）后打 5 个请求，削掉 Tomcat / Hikari / JIT 的冷启动峰。
+      # 本步刻意不判定、也尽量不失败 —— 就绪与否的权威判定是 run.sh 的 P5，它超时会
+      # 给出明确原因；这里失败只会把「启动慢」变成一句没人看得懂的 curl 错误。
+      # 边界：只预热通用路径（DispatcherServlet / JDBC / Hikari），order 系列的类不在
+      # 其中，它替代不了 S1 自己的爬坡。
+      - name: 预热后端
+        run: |
+          for i in $(seq 1 60); do
+            curl -sf -o /dev/null http://127.0.0.1:8088/mysqlGoods/goodstype && break
+            sleep 2
+          done
+          for i in $(seq 1 5); do
+            curl -s -o /dev/null -w "warmup $i → HTTP %{http_code} (%{time_total}s)\n" \
+              http://127.0.0.1:8088/mysqlGoods/goodstype || true
+          done
+
+      # TD-10 的关闭：@Disabled 换成 @EnabledIfEnvironmentVariable(named="A3_ENABLED")，
+      # 于是「有 MySQL 就真跑」不再需要改代码，只由本步的 env 打开；backend job 不设该
+      # 变量，那里的全量 mvn test 会自动跳过本测试。
+      #
+      # 连接目标走默认 profile（application.properties：localhost:3306/mall_management_sql，
+      # root/123456）—— 与本 job 的 MySQL service 及库名吻合（库由 SQL 文件自建）。
+      # 刻意不在此加 SPRING_PROFILES_ACTIVE=a3：a3 profile 的默认值指向 VM 的
+      # 192.168.229.129，那是给「上一个 step 启动的被测后端」用的，不是给本测试用的。
+      #
+      # @SpringBootTest 默认 webEnvironment=MOCK，不真起 Tomcat、不占 8088，
+      # 故与上一个 step 起的 jar 不冲突；本 step 只读（一条 SELECT 1），不写业务数据。
+      #
+      # 两个方法的职责不同，别混为一谈：contextLoads 只证明「全上下文能启动」——
+      # 实测（三探针，2026-09-20）库名不存在乃至端口无监听时它都 PASS；真正把
+      # 「连得上」变成断言的是 databaseIsReachable（SELECT 1），本 step 现在才会
+      # 因库不可达而变红。
+      - name: 全上下文启动冒烟 + 数据库可达性（由 A3_ENABLED 打开）
+        working-directory: Mall-management-server
+        env:
+          A3_ENABLED: "true"
+        run: ./mvnw -B -Dtest=MallManagementApplicationTests test
+
+      # --skip-negative-control 是必需的，不是图省事：P7 第一段就是「阴性对照库与目标库
+      # 是同一主机 → FAIL 对照无意义」并按 exit 2 短路，而 CI 里目标库本就是 127.0.0.1 上的
+      # service container，必然命中 —— 那条「本机不可达自动 skip」的路在 CI 不成立。
+      # 对照要证明的是「目标不是开发机上那个同名库」，CI 里不存在第二个库，无对象可对照。
+      # OD-4 在 CI 仍由 P2（主机串比对）+ P6（哨兵往返，证明后端与脚本同库）兜住。
+      #
+      # --ready-timeout-sec 180 = 默认 60 的三倍余量：P5 超时是 FAIL 不是 skip，
+      # 值给小了会把「GHA 冷启动慢」变成假红。这是 CI 与本地命令的一处**刻意不同**，
+      # 将来比对 QPS 时要知道。
+      - name: 运行 A3 并发测试
+        run: |
+          scripts/concurrency/run.sh \
+            --base-url http://127.0.0.1:8088 \
+            --jdbc-url "jdbc:mysql://127.0.0.1:3306/mall_management_sql?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai&characterEncoding=utf-8" \
+            --jdbc-user test --jdbc-password test123 \
+            --expect-db-host 127.0.0.1 \
+            --skip-negative-control \
+            --ready-timeout-sec 180 \
+            --run-id "ci${{ github.run_number }}"
+
+      # 先让后端退场再上传，app.log 的尾部不至于留在缓冲里。
+      - name: 停止后端
+        if: always()
+        run: kill "$(cat /tmp/a3-app.pid)" 2>/dev/null || true
+
+      # if: always() 不只是为了「失败也要留证据」：门禁红的那次运行恰恰是最需要看报告的。
+      # if-no-files-found: warn 与 backend job 一致 —— 若 run.sh 根本没跑起来，
+      # 这里再报一个 artifact 错误只会把真正的失败原因盖掉。
+      - name: 上传 A3 报告与日志
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: a3-concurrency-report
+          path: |
+            scripts/concurrency/reports/
+            app.log
+          if-no-files-found: warn

@@ -25,3 +25,13 @@ Thumbs.db
 # 日志
 logs/
 *.tmp
+
+# A3 并发测试临时产物
+# 每次运行生成新文件（report-<runId>.json / .md），不入库
+# classpath.txt 由 mvn dependency:build-classpath 生成
+# 注：scripts/concurrency/*.log 已由 **/*.log 规则覆盖，此处不重复
+scripts/concurrency/reports/
+scripts/concurrency/classpath.txt
+
+# A3 run.sh 的编译产物目录（javac -encoding UTF-8 两步编译的输出）
+.a3-out/
