@@ -274,7 +274,7 @@
 9. **哨兵前缀定案 `A3P-<runId8>`**（12 字符）。理由为**长度**，非实现简化：`goodstype.GoodType` 是 `char(20) NOT NULL`，严格模式下 >20 即 `ERROR 1406`。实测：`A3P-<runId8>`=12、`A3TEST-<runId8>`=15、`A3TEST-<runId8>-PROBE`=**21（已超 1）**、`A3TEST-<runId8>-PROBE-<host>`=**37**、H3 原式 `A3PROBE-<runId8>-<host>`=**32** —— **任何带 `PROBE` 字样的形式都塞不进 20**，故命名表那一行不可执行。选定式同时满足三件事：塞得进、**仍携带 runId**（可按 run 精确定位）、前缀可辨（可全局清扫）。
    ⚠️ **出处待补**：`docs/` 全域 grep 不到「D 组命名空间表」，磁盘上唯一记录的哨兵形态是本文第 198 行 G1 所引 H3 的 `A3PROBE-`。若确有一份 D 组命名表，落盘时须提供出处并同步改写。
 10. **cleanup 双规则**：`A3TEST-<runId>%`（run 作用域）+ **`A3P-%`（全局，无 runId 亦可清）**。全局清扫安全 —— 前缀是代码字面量，正常数据不可能命中，且探针行按构造即一次性，故**任何后续 run 都能自愈先前被 SIGKILL 留下的哨兵**（G1 所要的兜底）。*当前状态：阶段 D 未实现，P6 仅靠自身 DELETE。*
-11. **`goodstype.AUTO_INCREMENT` 会前进**：P6 每轮消耗 1 个自增值（实测 12→15），行删除后值不复用。故「P6 不留痕迹」不成立，报告须如实写「留自增计数前进」。
+11. **自增值会前进，行删了值不复用**：P6 每轮消耗 1 个（实测 12→15）；B-2 的 5 轮也消耗（`loginAdd` / `friendAdd` / `goodstype` 三处 INSERT 各自计数）。故「P6 不留痕迹」不成立，报告须如实写「留自增计数前进」。
 12. **N4 版本门禁 = TD-13 的补偿机制**（落盘时单独强调）：本机开发库与 VM 库同名，只验 `DATABASE()` 会让 8.0.32 静默通过，全部断言在错误数据上跑还全绿。`VERSION()` 判据实测接住：`DATABASE()=mall_management_sql ✓` 而 `VERSION()=8.0.32 ✗` → 拒。
 13. **R12 已当场核对**：`concurrency-map.md §5` 第 5 行确为 `loginAdd` TOCTOU，与 H3 `R12` 一致；第 9 行为 `order.OrderId` 无唯一索引，与 A-S2a-1 的 `basis` 一致。
 
