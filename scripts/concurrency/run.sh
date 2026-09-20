@@ -131,8 +131,12 @@ cd "$REPO" || die "无法进入 $REPO"
 echo "run.sh: java -cp <classes>$SEP<driver> ConcurrencyRunner $*"
 # --log-file 让报告能指回本次运行的完整日志。经 winpath 转成原生形态：Git Bash 自己
 # 也会替原生程序转，但那是环境行为（MSYS_NO_PATHCONV / MSYS2_ARG_CONV_EXCL 一设就没了），
-# 报告里的路径不该依赖调用者的环境变量。放在 "$@" 之后：调用方若显式传了 --log-file，
-# 后出现的那个生效（解析是后者覆盖前者），调用方的显式意图优先。
+# 报告里的路径不该依赖调用者的环境变量。
+#
+# ⚠️ 本参数放在 "$@" 之后，而解析是「后者覆盖前者」（o.logFile = value(...) 直接赋值），
+# 故实际生效的是 run.sh 这个路径，**调用方显式传的 --log-file 会被它覆盖**。
+# 此处早先写的是「调用方的显式意图优先」，与代码相反，2026-09-20 更正。
+# 若真要改成调用方优先，把这一个参数挪到 "$@" 之前 —— 那是改行为，不是改注释。
 java -cp "$OUT_W$SEP$DRV_W" ConcurrencyRunner "$@" --log-file "$(winpath "$LOG")" 2>&1 | tee "$LOG"
 rc="${PIPESTATUS[0]}"
 
