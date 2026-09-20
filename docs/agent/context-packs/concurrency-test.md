@@ -284,4 +284,12 @@
     - 三处约束不同、缺陷形态不同，故**信号极性不同**：`login/user/customerimage` 三表都有主键 → 撞键 `ERROR 1062` → 未捕获 → **HTTP 500**（信号=5xx>0，**与其它场景极性相反**：这里 5xx 是「缺陷复现」而非异常）；`goodstype`/`friend` 只有自增主键 → **插得出重复行**（信号=重复行≥2）。无全局 `@ControllerAdvice`，未捕获异常走 Spring 默认 500。
     - 每轮必须换新 `username`/`GoodType`/`friendPair`，否则第 2 轮起查重命中第 1 轮已写入的行，`loginAdd` 直接走「已存在」分支，不进并发窗口。三个 burst 之间**串行**，不混栅栏。
     - 默认 `--b-group-gate=false` → `A-B2-1` 落 `RECORD_ONLY`，不计退出码。刻意如此：**「本轮没复现」也可能只是竞态未重叠，不等于缺陷已修**，不该让一次没撞上的运行变红。显式开门禁时 `reproRounds>=1` → `EXPECTED_DEFECT_PRESENT`（PASS），`==0` → `DEFECT_FIXED`（FAIL，附「已修复 / 未重叠」两种可能）。
-    - 附带发现（未登记为断言，仅记录）：`loginAdd` 在 `usertype` 不等于「客户 / 商家」时会返回 `添加成功！` 而**实际不插任何行**（静默成功）。curl 复现（该请求未带 `charset`），`login` 行数不变。
+    - 附带发现已**登记为 TD-15**（不是只记录）：`loginAdd` 在 `usertype` 不等于「客户 / 商家」时返回 `添加成功！` 而**实际不插任何行**。curl 复现（该请求未带 `charset`），`login` 行数不变。影响不止数据丢失：它使「以响应体判成功」的测试口径在本端点失真，故 B-2 **同时用 JDBC 核对行数**，不能只数 `添加成功！`。
+
+20. **流程记录：2026-09-20 已提前修改正文「运行形态」一节**（原因：旧表述 `java Foo.java` 是本次 A3 级缺陷的**成因**，留着不改会让后来者照错的方式启动、原样复现该 bug）。属于「修正明显错误」，不是「落盘待定结论」；除此之外本清单各条仍按「脚本跑通后一次性并入正文」的约定留在清单里，未提前散落。
+
+21. **JSON 报告已落盘**（阶段 E 完成）。`scripts/concurrency/reports/a3-report-<runId>-<ts>.json`，UTF-8，手写 JSON（classpath 上没有 Jackson，不得引新依赖）。数据来源是 `REC` / `ASS` / `B2_ROUNDS` / preflight，**不解析 stdout 文本** —— 解析自己的打印串等于把「给人看的格式」变成契约。
+    - **报告带什么**：`launch`（启动方式 + 平台字符集 + 自检结果，**这条同时补上了「历史日志不记录启动方式」的缺口**）、`target`、`options`、`preflight` 全项、`assertions`（含 C4 的 `rounds`/`reproRounds`，**未做多轮计数的落 `null`，不拿别的数凑**）、`gates`、`scenarios`（7 段 + `cleanup`）、`b2PerRound`（结构化逐轮，不反解文本）、`logFile`（指回本次运行的完整日志）、`exitCode`。
+    - **报告不带什么**：S2a/S3/S4a 三段是栅栏型（burst）、没有 `Load`，故其取数是**手写 `rec()` 的头条计数**（如 `inconsistentOrders`），细粒度响应分类（哪几单、哪个 msg）只存在于断言 `detail` 与日志里。落盘时须如实写明这条边界，别让读者以为 JSON 里能查到全部证据。
+    - 报告写失败**不改变退出码**：报告是证据，不是判定；判定已由门禁断言与退出码给出。若因磁盘满/无权限就把语义上通过的运行改成失败，是把两件事混为一谈。但绝不静默 —— stderr 明确报错，且 stdout 摘要行落 `<<未落盘>>（见 stderr）`。
+    - 曾实现为死参数的教训（与 `--rounds`、`--report-dir` 同类）：`recLoad()` 一度**定义了却无人调用**，于是 S1/S2b/S4b 的均值与分位从未进 REC，报告里 `scenarios` 只有 `B2` 与 `cleanup` 两段。是**实测报告内容**才发现的，不是读代码发现的 —— 记此一笔：报告这类「汇总出口」必须打开实际产物验一遍，光看调用点存在不算数。
