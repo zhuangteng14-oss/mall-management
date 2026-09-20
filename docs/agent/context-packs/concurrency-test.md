@@ -182,7 +182,7 @@
 |---|---|---|
 | 1 | H2 —— 根 `.gitignore` 一处必须写「**追加**」而非「新增」 | `9b87ab9` 已含 27 行 `.gitignore`；见 `tech-debt.md` TD-02 更正记录 |
 | 2 | F1b / OD-1 —— `loginAdd` 的 B 组断言必须是「**无 HTTP 5xx**」，**不得**写「无重复行」 | `login` PK=`UserName`、`user` PK=`username`、`customerimage` PK=`UserName` → 重复行**不可能**产生；真实缺陷是未捕获 `DuplicateKeyException` → HTTP 500（`U:65-105` 无 try/catch） |
-| 3 | F4 **（已修正）** —— 种子 6 行订单全为 `(1,1,1)` 终态，故 **S2/S3/S4 三者都必须自建订单** | `mall_management_sql.sql` 的 order INSERT：Id 18–23 六行全部 `PayIf=1, DeliveryIf=1, ReceiveIf=1`；`orderPayIfUp` 的 WHERE 为 `PayIf=0` → 在种子订单上「恰好 1 次 `success:true`」**必然不成立**。原文只写 S3/S4 会让 A 组第一条断言必败 |
+| 3 | F4 **（已修正；2026-09-20 再收窄）** —— 种子 6 行订单全为 `(1,1,1)` 终态，故 **S3/S4 必须自建订单**；**S2 不在此列** | `mall_management_sql.sql` 的 order INSERT：Id 18–23 六行全部 `PayIf=1, DeliveryIf=1, ReceiveIf=1`；`orderPayIfUp` 的 WHERE 为 `PayIf=0` → 在种子订单上「恰好 1 次 `success:true`」**必然不成立**。修正对象是**支付 / 发货 / 收货**三场景，即 S3 与 S4 —— **上轮把 S2 一并写入是笔误，实为 S3**：S2 只调 `orderAdd` 自建订单（订单由被测端点自身创建），不存在「复用种子单」的问题。故原依据里「原文只写 S3/S4 会让 A 组第一条断言必败」一句的前提本身有误，一并更正 |
 | 4 | B-1 —— `order.OrderId` **无唯一索引**（主键仅 `Id`） | `mall_management_sql.sql` order 建表语句。pack 不得写成「有唯一约束兜底」 |
 | 5 | 澄清 1 —— `--b-group-gate` 默认 `false`、**只影响 B-2**（B-1 恒门禁、B-3 恒 record-only）；verdict 枚举 `PASS` / `EXPECTED_DEFECT_PRESENT` / `DEFECT_FIXED` / `RECORD_ONLY`；`rounds`、`reproRounds` 由脚本自动统计，**「≥3/5」不做运行时门禁**（仅作人工翻默认值的准入条件） | 本会话 2026-09-20 裁决 |
 | 6 | 澄清 4 —— B 组子前缀是 `<round>`（1..5，**同轮内 20 线程共享**），**不是** `<seq>`；行序号才用 `-S<seq>` / `-N<seq>` | 若跨轮共用同参，第 2 轮起 `loginAdd` 直接走「已存在」分支，**不进并发窗口**，后 4 轮等于白跑 |
