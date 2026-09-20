@@ -14,8 +14,8 @@
  *   - 只走 HTTP + JDBC
  *
  * 分阶段落地（锁 4，每阶段一个 commit）：
- *   阶段 A  参数解析 + 退出码 + 空壳场景        ← 本文件当前所处阶段
- *   阶段 B  P1–P4（JDBC 侧前置校验）
+ *   阶段 A  参数解析 + 退出码 + 空壳场景        已完成
+ *   阶段 B  P0 静态长度校验 + P1–P4（JDBC 侧） ← 本文件当前所处阶段
  *   阶段 C  P5–P7（HTTP 侧前置校验）
  *   阶段 D  六场景（S1 / S2a / S2b / S3 / S4a / S4b）
  *   阶段 E  run.sh 完整版 + dependency:build-classpath 解析
@@ -23,8 +23,15 @@
 
 import java.net.URI;
 import java.security.SecureRandom;
+import java.sql.Connection;
+import java.sql.DriverManager;
+import java.sql.ResultSet;
+import java.sql.SQLException;
+import java.sql.Statement;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 public class ConcurrencyRunner {
 
@@ -109,10 +116,20 @@ public class ConcurrencyRunner {
 
         banner(o);
 
-        // 阶段 A：仅做参数与退出码，场景为空壳。
-        // 阶段 B 起在 preflight() 前插入 P1–P4，阶段 C 插入 P5–P7，
-        // 任一前置失败一律 exit 2，不进入场景（H3 phase_0_preflight.purpose）。
-        System.out.println("[阶段 A] 骨架就绪：参数解析与退出码已实现，preflight 与场景待后续阶段。");
+        // H3 phase_0_preflight.purpose：产生任何业务流量之前，先证明「脚本连的是期望库」。
+        // 任一前置失败一律 exit 2，不进入场景。
+        // 注意：P1–P4 只覆盖「脚本自身」这一侧；「后端是否在同一个库上」由阶段 C 的 P6 哨兵往返给出
+        //       —— 因为本机开发库与 VM 库同名（TD-13），单看库名无法区分。
+        Map<String, String> pre = new LinkedHashMap<>();
+        boolean preOk = preflightStatic(o, pre) & preflightJdbc(o, pre);
+        printPreflight(pre);
+        if (!preOk) {
+            System.err.println("前置校验失败，未产生任何业务流量。退出码 2。");
+            System.exit(EXIT_PREFLIGHT_FAILED);
+            return;
+        }
+
+        System.out.println("[阶段 B] preflight P0–P4 已实现（JDBC 侧）；P5–P7 与场景待后续阶段。");
 
         int rc = 0;
         rc = Math.max(rc, runScenarioStubs(o));
@@ -120,6 +137,7 @@ public class ConcurrencyRunner {
         System.out.println();
         System.out.println("runId      : " + o.runId);
         System.out.println("target     : " + o.baseUrl + "  →  " + o.jdbcUrl);
+        System.out.println("preflight  : " + pre.size() + " 项，全部通过");
         System.out.println("gates      : 未实现（阶段 D）");
         System.out.println("report     : <未实现>（阶段 E）");
         System.exit(rc);
@@ -243,7 +261,158 @@ public class ConcurrencyRunner {
         return EXIT_PASS;
     }
 
+    // ===================== 前置校验 =====================
+
+    /**
+     * P0（H3 之外的追加项 —— 静态，无需连库）：
+     * 命名空间串长度断言。
+     *
+     * 起因：goodstype.GoodType / login.UserName / user.username / customerimage.UserName
+     * 均为 char(20)，而 B 组的 A3TEST-&lt;runId8&gt;-GT&lt;round&gt; 已达 19 字符，只剩 1 字符余量。
+     * MySQL 8.4 默认 strict mode 下超长直接 ERROR 1406，若不前移到这里，会在压测跑到一半才炸。
+     * 上限取自 mall_management_sql.sql 的建表语句，逐列核对（agent.md 规则 9.1）。
+     */
+    static boolean preflightStatic(Opt o, Map<String, String> pre) {
+        // {列, 上限, 该列会实际写入的最长取值}
+        String[][] checks = {
+            {"goodstype.GoodType",         "20", NS_PREFIX + o.runId + "-GT" + o.rounds},
+            {"login.UserName",             "20", NS_PREFIX + o.runId + "-U" + o.rounds},
+            {"user.username",              "20", NS_PREFIX + o.runId + "-U" + o.rounds},
+            {"customerimage.UserName",     "20", NS_PREFIX + o.runId + "-U" + o.rounds},
+            {"customerimage.CustomerId",   "20", "A3C-" + o.runId},
+            {"goods.MerchantId",           "20", "A3M-" + o.runId},
+            {"P6 探针 goodstype.GoodType", "20", "A3P-" + o.runId},
+            {"order.OrderId",              "40", NS_PREFIX + o.runId + "-N99999"},
+            {"order.CustomerId",           "40", "A3C-" + o.runId},
+            {"order.MerchantId",           "40", "A3M-" + o.runId},
+            {"friend.customerid",          "50", NS_PREFIX + o.runId + "-F1"},
+            {"friend.friendid",            "50", NS_PREFIX + o.runId + "-F2"},
+        };
+        // 逐列与「该列自己的上限」比对；再挑出余量最小的一列报告出来。
+        // 注意不要把各列的最长串直接和 char(20) 比 —— order.OrderId 是 varchar(40)，
+        // 它的 22 字符是合规的，混在一起讲会误导读者以为 P0 失效。
+        int minMargin = Integer.MAX_VALUE;
+        String tightCol = null;
+        int tightLen = 0;
+        int tightLimit = 0;
+        StringBuilder over = new StringBuilder();
+        boolean ok = true;
+        for (String[] c : checks) {
+            int limit = Integer.parseInt(c[1]);
+            int len = c[2].length();
+            int margin = limit - len;
+            if (margin < minMargin) {
+                minMargin = margin;
+                tightCol = c[0];
+                tightLen = len;
+                tightLimit = limit;
+            }
+            if (margin < 0) {
+                ok = false;
+                over.append("\n      [超长] ").append(c[0])
+                    .append(" 长度 ").append(len).append(" > 上限 ").append(limit)
+                    .append("  值=").append(c[2]);
+            }
+        }
+        pre.put("P0", (ok ? "PASS " : "FAIL ")
+                + checks.length + " 列逐列比对"
+                + (ok ? "通过；" : "，有超长；")
+                + "余量最小 " + tightCol + " " + tightLen + "/" + tightLimit
+                + "（余 " + minMargin + "）" + over);
+        return ok;
+    }
+
+    /**
+     * P1–P4（H3）：JDBC 侧前置校验。
+     * 顺序上先判 P2（主机）再判 P1（库名）—— 因本机开发库与 VM 库同名（TD-13），
+     * 只看到 DATABASE()=mall_management_sql 无法区分是哪台机器，必须先过主机门禁。
+     */
+    static boolean preflightJdbc(Opt o, Map<String, String> pre) {
+        try (Connection c = DriverManager.getConnection(o.jdbcUrl, o.jdbcUser, o.jdbcPassword)) {
+
+            // P2 主机门禁（OD-4：不符即 exit 2）
+            String host = hostOf(o.jdbcUrl);
+            boolean p2 = o.expectDbHost.equals(host);
+            pre.put("P2", (p2 ? "PASS" : "FAIL")
+                    + " 实际主机=" + host + " 期望主机=" + o.expectDbHost);
+            if (!p2) {
+                System.err.println("脚本连的不是期望主机，拒绝继续"
+                        + "（防「脚本连了 VM、后端连了本机」这一半错位）。");
+                return false;
+            }
+
+            // P1 连通 + 库名
+            String db = scalarString(c, "SELECT DATABASE()");
+            boolean p1 = "mall_management_sql".equals(db);
+            pre.put("P1", (p1 ? "PASS" : "FAIL")
+                    + " DATABASE()=" + db + "（TD-13 要求必须是 mall_management_sql）");
+            if (!p1) {
+                return false;
+            }
+
+            // P3 表数 11（兼 TD-01 校验：ddl-auto=update 启动后未反向改表）
+            int tables = scalarInt(c,
+                    "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = DATABASE()");
+            boolean p3 = tables == 11;
+            pre.put("P3", (p3 ? "PASS" : "FAIL") + " 表数=" + tables + "（期望 11）");
+
+            // P4 种子计数：确认是刚导入过的干净实例，而非被上一轮污染过的库
+            String seedSql = "SELECT "
+                    + "(SELECT COUNT(*) FROM mall_management_sql.`order`),"
+                    + "(SELECT COUNT(*) FROM mall_management_sql.goods),"
+                    + "(SELECT COUNT(*) FROM mall_management_sql.login),"
+                    + "(SELECT COUNT(*) FROM mall_management_sql.user),"
+                    + "(SELECT COUNT(*) FROM mall_management_sql.friend)";
+            int[] got = new int[5];
+            try (Statement s = c.createStatement(); ResultSet r = s.executeQuery(seedSql)) {
+                if (r.next()) {
+                    for (int i = 0; i < 5; i++) {
+                        got[i] = r.getInt(i + 1);
+                    }
+                }
+            }
+            // 期望 order=6 / goods=5 / login=5 / user=5 / friend=4（mall_management_sql.sql 逐行计数）
+            int[] want = {6, 5, 5, 5, 4};
+            String[] names = {"order", "goods", "login", "user", "friend"};
+            boolean p4 = true;
+            StringBuilder sb = new StringBuilder();
+            for (int i = 0; i < 5; i++) {
+                boolean e = got[i] == want[i];
+                p4 &= e;
+                sb.append(names[i]).append('=').append(got[i])
+                  .append(e ? "" : "(期望 " + want[i] + ")").append(' ');
+            }
+            pre.put("P4", (p4 ? "PASS" : "FAIL") + " " + sb.toString().trim());
+
+            return p1 && p3 && p4;
+
+        } catch (SQLException e) {
+            pre.put("P1", "FAIL JDBC 连接失败: " + e.getMessage());
+            return false;
+        }
+    }
+
+    static void printPreflight(Map<String, String> pre) {
+        System.out.println("--- 前置校验 ---");
+        for (Map.Entry<String, String> e : pre.entrySet()) {
+            System.out.println("  " + e.getKey() + "  " + e.getValue());
+        }
+        System.out.println();
+    }
+
     // ===================== 工具 =====================
+    static String scalarString(Connection c, String sql) throws SQLException {
+        try (Statement s = c.createStatement(); ResultSet r = s.executeQuery(sql)) {
+            return r.next() ? r.getString(1) : null;
+        }
+    }
+
+    static int scalarInt(Connection c, String sql) throws SQLException {
+        try (Statement s = c.createStatement(); ResultSet r = s.executeQuery(sql)) {
+            return r.next() ? r.getInt(1) : -1;
+        }
+    }
+
     static String randomHex(int n) {
         SecureRandom r = new SecureRandom();
         StringBuilder sb = new StringBuilder();
