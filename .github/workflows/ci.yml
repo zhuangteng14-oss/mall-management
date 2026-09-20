@@ -28,7 +28,8 @@ jobs:
   # ============================================================
   # 后端：Maven 测试
   # 当前无需 MySQL：3 个 smoke test 走 @WebMvcTest 切片 + Mockito 替身
-  # JdbcTemplate；MallManagementApplicationTests 由 @Disabled 跳过（TD-10）。
+  # JdbcTemplate；MallManagementApplicationTests 由 A3_ENABLED 开关跳过（本 job 不设该
+  # 变量，故跳过而非失败；TD-10 已关闭 —— 真跑它的是 concurrency job，那里有 MySQL）。
   # MySQL service 已引入，但落在下方 concurrency job；本 job 至今不需要 MySQL。
   # （此前这里写「计划在 A3 阶段引入」，A3 落地后即过期，2026-09-20 更正。）
   # ============================================================
@@ -193,6 +194,28 @@ jobs:
             curl -s -o /dev/null -w "warmup $i → HTTP %{http_code} (%{time_total}s)\n" \
               http://127.0.0.1:8088/mysqlGoods/goodstype || true
           done
+
+      # TD-10 的关闭：@Disabled 换成 @EnabledIfEnvironmentVariable(named="A3_ENABLED")，
+      # 于是「有 MySQL 就真跑」不再需要改代码，只由本步的 env 打开；backend job 不设该
+      # 变量，那里的全量 mvn test 会自动跳过本测试。
+      #
+      # 连接目标走默认 profile（application.properties：localhost:3306/mall_management_sql，
+      # root/123456）—— 与本 job 的 MySQL service 及库名吻合（库由 SQL 文件自建）。
+      # 刻意不在此加 SPRING_PROFILES_ACTIVE=a3：a3 profile 的默认值指向 VM 的
+      # 192.168.229.129，那是给「上一个 step 启动的被测后端」用的，不是给本测试用的。
+      #
+      # @SpringBootTest 默认 webEnvironment=MOCK，不真起 Tomcat、不占 8088，
+      # 故与上一个 step 起的 jar 不冲突；本 step 只读（一条 SELECT 1），不写业务数据。
+      #
+      # 两个方法的职责不同，别混为一谈：contextLoads 只证明「全上下文能启动」——
+      # 实测（三探针，2026-09-20）库名不存在乃至端口无监听时它都 PASS；真正把
+      # 「连得上」变成断言的是 databaseIsReachable（SELECT 1），本 step 现在才会
+      # 因库不可达而变红。
+      - name: 全上下文启动冒烟 + 数据库可达性（由 A3_ENABLED 打开）
+        working-directory: Mall-management-server
+        env:
+          A3_ENABLED: "true"
+        run: ./mvnw -B -Dtest=MallManagementApplicationTests test
 
       # --skip-negative-control 是必需的，不是图省事：P7 第一段就是「阴性对照库与目标库
       # 是同一主机 → FAIL 对照无意义」并按 exit 2 短路，而 CI 里目标库本就是 127.0.0.1 上的
