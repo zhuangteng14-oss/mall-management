@@ -129,8 +129,16 @@ DRV_W="$(winpath "$DRIVER")"
 cd "$REPO" || die "无法进入 $REPO"
 
 echo "run.sh: java -cp <classes>$SEP<driver> ConcurrencyRunner $*"
-java -cp "$OUT_W$SEP$DRV_W" ConcurrencyRunner "$@" 2>&1 | tee "$LOG"
+# --log-file 让报告能指回本次运行的完整日志。经 winpath 转成原生形态：Git Bash 自己
+# 也会替原生程序转，但那是环境行为（MSYS_NO_PATHCONV / MSYS2_ARG_CONV_EXCL 一设就没了），
+# 报告里的路径不该依赖调用者的环境变量。放在 "$@" 之后：调用方若显式传了 --log-file，
+# 后出现的那个生效（解析是后者覆盖前者），调用方的显式意图优先。
+java -cp "$OUT_W$SEP$DRV_W" ConcurrencyRunner "$@" --log-file "$(winpath "$LOG")" 2>&1 | tee "$LOG"
 rc="${PIPESTATUS[0]}"
+
+# 报告路径不在这里再打印一次：run.sh 无从知道 runId，只能挑「最新的 .json」，
+# 那可能是上一次运行留下的 —— 报一个陈旧的路径比不报更坏。运行器自己的
+# `report : <path>` 行才是权威（未落盘时它会打印 <<未落盘>>）。
 
 echo ""
 echo "run.sh: 日志 $LOG"

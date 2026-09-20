@@ -27,7 +27,8 @@
  *   阶段 B  P0 静态长度校验 + P1–P4（JDBC 侧）  已完成
  *   阶段 C  P5–P7（HTTP 侧前置校验）           已完成
  *   阶段 D  七段（S1 / S2a / S2b / S3 / S4a / S4b / B2）  已完成
- *   阶段 E  run.sh 完整版 + dependency:build-classpath 回退 + JSON 报告  ← 本文件当前所处阶段
+ *   阶段 E  run.sh 完整版 + dependency:build-classpath 回退 + JSON 报告  已完成
+ *   余下    CI 集成（ci.yml 加 concurrency job，见 H5）
  */
 
 import java.io.IOException;
@@ -38,6 +39,7 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
 import java.security.SecureRandom;
 import java.sql.Connection;
 import java.sql.DriverManager;
@@ -127,6 +129,9 @@ public class ConcurrencyRunner {
         // S4b 时长。H3 定 60s；OD-8（D2）尚未裁决，故做成可覆盖项，默认随 H3。
         int s4bDurationSec = 60;
         String reportDir = "scripts/concurrency/reports";
+        // 本进程的 stdout 日志落点。脚本自己不写日志（那是 run.sh 的 tee 干的），
+        // 只把它记进报告，好让「报告 → 同一次运行的完整日志」这条追溯链不断。
+        String logFile = null;
         boolean help = false;
 
         boolean has(String s) {
@@ -165,6 +170,7 @@ public class ConcurrencyRunner {
         "  --rounds <n>           B 组轮数（默认 5，同轮内线程共享同一 <round>）",
         "  --b-group-gate         将 B-2 提升为门禁（默认 false，仅影响 B-2）",
         "  --report-dir <dir>     报告输出目录（默认 scripts/concurrency/reports）",
+        "  --log-file <path>      本次运行的 stdout 日志落点（run.sh 传入；只被记进报告）",
         "",
         "清理:",
         "  --keep-data            跳过 finally 清理，保留数据以供人工查验",
@@ -277,12 +283,19 @@ public class ConcurrencyRunner {
         }
         printAssertions();
 
+        // 报告在 printAssertions 之后写：它要读 ASS 的最终 verdict，而 verdict 是
+        // 各场景跑完才定下来的。
+        String reportPath = writeReport(o, pre, rc);
+
         System.out.println();
         System.out.println("runId      : " + o.runId);
         System.out.println("target     : " + o.baseUrl + "  →  " + o.jdbcUrl);
         System.out.println("preflight  : " + pre.size() + " 项，全部通过");
         System.out.println("gates      : " + (rc == 0 ? "全部通过" : "失败 " + rc + " 项（见上表）"));
-        System.out.println("report     : <未实现>（阶段 E）");
+        // 「未落盘」必须显式可见：报告缺失时，stdout 摘要仍然像一次成功的运行，
+        // 只看这一行而不看 stderr 的人会以为证据齐了。
+        System.out.println("report     : " + (reportPath == null ? "<<未落盘>>（见 stderr；判定与退出码不受影响）" : reportPath));
+        System.out.println("exitCode   : " + rc);
         System.exit(rc);
     }
 
@@ -312,6 +325,7 @@ public class ConcurrencyRunner {
                 case "--expect-db-host": o.expectDbHost = value(a, ++i, v, k); break;
                 case "--run-id": o.runId = value(a, ++i, v, k); break;
                 case "--report-dir": o.reportDir = value(a, ++i, v, k); break;
+                case "--log-file": o.logFile = value(a, ++i, v, k); break;
                 case "--qps": o.qps = intValue(a, ++i, v, k); break;
                 case "--duration": o.durationSec = intValue(a, ++i, v, k); break;
                 case "--rounds": o.rounds = intValue(a, ++i, v, k); break;
@@ -522,6 +536,227 @@ public class ConcurrencyRunner {
         rec(scen, "maxMs", String.format("%.1f", ld.maxMs()));
         if (ld.offeredQps > 0 && ld.qpsNum() < ld.offeredQps * 0.95) {
             rec(scen, "note", "未达速（只记录，不门禁）");
+        }
+    }
+
+    // ===================== JSON 报告 =====================
+
+    /** schema 版本。字段有增删或语义变更时递增，供下游判断能不能读。 */
+    static final int REPORT_SCHEMA = 1;
+
+    /**
+     * 「像不像数」——决定 JSON 里写 `96.2` 还是 `"96.2"`。
+     *
+     * 不靠调用方额外声明类型：REC 的值一律存字符串（见 rec），若再让每个调用点带一个
+     * 类型标记，就多出一处会与值本身不一致的地方。判据取严，只认十进制整数与小数；
+     * `8.4.11-0ubuntu0.26.04.1` 这类版本号**不**匹配（它本来也不是数），仍按字符串写。
+     *
+     * ⚠️ 反过来，纯数字的**标识符**（如全数字的 runId）会被误判成数。故报告里由
+     * writeReport 直接写出的元数据一律走 jstr 强制加引号，自动判定只用于 REC 的取值。
+     */
+    static boolean looksNumeric(String s) {
+        return s != null && s.matches("-?\\d+(\\.\\d+)?");
+    }
+
+    /** JSON 字符串字面量。转义 " 与 \\ 及控制字符；非 ASCII 原样保留（报告按 UTF-8 写出）。 */
+    static String jstr(String s) {
+        if (s == null) {
+            return "null";
+        }
+        StringBuilder b = new StringBuilder("\"");
+        for (int i = 0; i < s.length(); i++) {
+            char c = s.charAt(i);
+            switch (c) {
+                case '"':  b.append("\\\""); break;
+                case '\\': b.append("\\\\"); break;
+                case '\n': b.append("\\n"); break;
+                case '\r': b.append("\\r"); break;
+                case '\t': b.append("\\t"); break;
+                default:
+                    // 其余控制字符（含 0x00–0x1F）必须转义，否则 JSON 非法；
+                    // 中文等非 ASCII 不转 —— 报告落盘为 UTF-8，转成「反斜杠 u 加四位
+                    // 十六进制」只会让人读不了。（不能把这个形式直接写进注释：javac 的
+                    // Unicode 转义预处理在词法分析之前，注释里同样会触发「非法的 Unicode
+                    // 转义」编译错误 —— 本行代码刚踩过一次。）
+                    if (c < 0x20) {
+                        b.append(String.format("\\u%04x", (int) c));
+                    } else {
+                        b.append(c);
+                    }
+            }
+        }
+        return b.append('"').toString();
+    }
+
+    /**
+     * 自动判定型的 JSON 值（用于 REC）：形如数字的按数字、true/false 按布尔，
+     * 其余（含 null）按字符串。
+     *
+     * 布尔也要判，否则同一个报告里会出现两种约定 —— options.bGroupGate 是运行器直接写的
+     * 裸 true，而 REC 里的 recordOnly 会写成字符串 "true"。机器读的报告不容这种不一致。
+     * 与数字同理，代价是「恰好等于 true/false 的字符串」会被当成布尔；REC 的键都是计数与
+     * 短标记，没有这种值。
+     */
+    static String jval(String s) {
+        if (s == null) {
+            return "null";
+        }
+        if (s.equals("true") || s.equals("false")) {
+            return s;
+        }
+        return looksNumeric(s) ? s : jstr(s);
+    }
+
+    /** 缩进工具，只为让报告人能读；缩进不参与语义。 */
+    static String ind(int n) {
+        StringBuilder b = new StringBuilder();
+        for (int i = 0; i < n; i++) {
+            b.append("  ");
+        }
+        return b.toString();
+    }
+
+    /** 写一个 `"key": value` 行。comma=false 时该行是所在对象的最后一项。 */
+    static void jline(StringBuilder sb, int depth, String key, String rawValue, boolean comma) {
+        sb.append(ind(depth)).append(jstr(key)).append(": ").append(rawValue).append(comma ? "," : "").append('\n');
+    }
+
+    /** 扁平字符串表 → JSON 对象（按 REC 的插入序，便于与 stdout 对照）。 */
+    static void jobject(StringBuilder sb, int depth, Map<String, String> m) {
+        sb.append("{\n");
+        int i = 0;
+        for (Map.Entry<String, String> e : m.entrySet()) {
+            jline(sb, depth + 1, e.getKey(), jval(e.getValue()), ++i < m.size());
+        }
+        sb.append(ind(depth)).append("}");
+    }
+
+    /**
+     * 写报告。**数据来源是 REC / ASS / B2_ROUNDS / pre，不解析 stdout 文本** ——
+     * 解析自己的打印串等于把「给人看的格式」变成契约，以后改一个字就静默失效。
+     *
+     * 返回落盘路径；写失败返回 null（且只在 stderr 报警，不改变退出码）。
+     * 理由：报告是**证据**，不是判定的一部分。判定已经由门禁断言与退出码给出；
+     * 若因为磁盘满/无权限就把一次语义上通过的运行改成失败，是把两件事混为一谈。
+     * 但绝不能静默 —— 故 stderr 明确报错，且 stdout 摘要行会落到「未落盘」。
+     */
+    static String writeReport(Opt o, Map<String, String> pre, int rc) {
+        StringBuilder sb = new StringBuilder();
+        sb.append("{\n");
+        jline(sb, 1, "schema", String.valueOf(REPORT_SCHEMA), true);
+        jline(sb, 1, "tool", jstr("a3-concurrency"), true);
+        jline(sb, 1, "runId", jstr(o.runId), true);
+        jline(sb, 1, "generatedAt", jstr(java.time.OffsetDateTime.now().toString()), true);
+        jline(sb, 1, "exitCode", String.valueOf(rc), true);
+
+        // launch：本次到底是哪种启动方式，事后必须能从报告里看出来。
+        // 此前日志不记录启动方式，导致「某次运行是不是受字符集缺陷影响」只能靠结果反推。
+        sb.append(ind(1)).append(jstr("launch")).append(": {\n");
+        jline(sb, 2, "mode", jstr("two-step-compile（javac -encoding UTF-8 + java -cp <out>）"), true);
+        jline(sb, 2, "fileEncoding", jstr(System.getProperty("file.encoding")), true);
+        jline(sb, 2, "nativeEncoding", jstr(System.getProperty("native.encoding")), true);
+        jline(sb, 2, "stdoutEncoding", jstr("UTF-8（forceUtf8Output 强制）"), true);
+        jline(sb, 2, "charsetSelfCheck", jstr("PASS"), false);
+        sb.append(ind(1)).append("},\n");
+
+        sb.append(ind(1)).append(jstr("target")).append(": {\n");
+        jline(sb, 2, "baseUrl", jstr(o.baseUrl), true);
+        jline(sb, 2, "jdbcUrl", jstr(o.jdbcUrl), true);
+        jline(sb, 2, "jdbcUser", jstr(o.jdbcUser), true);
+        jline(sb, 2, "jdbcPassword", jstr(mask(o.jdbcPassword)), true);
+        jline(sb, 2, "expectDbHost", jstr(o.expectDbHost), false);
+        sb.append(ind(1)).append("},\n");
+
+        sb.append(ind(1)).append(jstr("options")).append(": {\n");
+        jline(sb, 2, "qps", String.valueOf(o.qps), true);
+        jline(sb, 2, "durationSec", String.valueOf(o.durationSec), true);
+        jline(sb, 2, "rounds", String.valueOf(o.rounds), true);
+        jline(sb, 2, "bGroupGate", String.valueOf(o.bGroupGate), true);
+        jline(sb, 2, "keepData", String.valueOf(o.keepData), true);
+        jline(sb, 2, "resetDb", String.valueOf(o.resetDb), true);
+        jline(sb, 2, "s4bDurationSec", String.valueOf(o.s4bDurationSec), true);
+        jline(sb, 2, "scenarios", jstr(o.scenarios), false);
+        sb.append(ind(1)).append("},\n");
+
+        sb.append(ind(1)).append(jstr("preflight")).append(": ");
+        jobject(sb, 1, pre);
+        sb.append(",\n");
+
+        // assertions：一条断言一项，含 C4 要求的 rounds / reproRounds。
+        // 未做多轮计数的断言落 null —— 报告里宁可缺，不拿别的数凑。
+        sb.append(ind(1)).append(jstr("assertions")).append(": [\n");
+        for (int i = 0; i < ASS.size(); i++) {
+            Ass a = ASS.get(i);
+            sb.append(ind(2)).append("{\n");
+            jline(sb, 3, "id", jstr(a.id), true);
+            jline(sb, 3, "desc", jstr(a.desc), true);
+            jline(sb, 3, "gate", String.valueOf(a.gate), true);
+            jline(sb, 3, "verdict", jstr(a.verdict), true);
+            jline(sb, 3, "detail", jstr(a.detail), true);
+            jline(sb, 3, "rounds", a.rounds == null ? "null" : String.valueOf(a.rounds), true);
+            jline(sb, 3, "reproRounds", a.reproRounds == null ? "null" : String.valueOf(a.reproRounds), false);
+            sb.append(ind(2)).append(i + 1 < ASS.size() ? "},\n" : "}\n");
+        }
+        sb.append(ind(1)).append("],\n");
+
+        sb.append(ind(1)).append(jstr("gates")).append(": {\n");
+        int gateCount = 0;
+        for (Ass a : ASS) {
+            if (a.gate) {
+                gateCount++;
+            }
+        }
+        jline(sb, 2, "count", String.valueOf(gateCount), true);
+        jline(sb, 2, "failed", String.valueOf(gateFailures()), false);
+        sb.append(ind(1)).append("},\n");
+
+        sb.append(ind(1)).append(jstr("scenarios")).append(": {\n");
+        int i = 0;
+        for (Map.Entry<String, Map<String, String>> e : REC.entrySet()) {
+            sb.append(ind(2)).append(jstr(e.getKey())).append(": ");
+            jobject(sb, 2, e.getValue());
+            sb.append(++i < REC.size() ? ",\n" : "\n");
+        }
+        sb.append(ind(1)).append("},\n");
+
+        // B-2 逐轮明细：结构化数组，不从文本反解。
+        // A-B2-1 的 detail 里写「逐轮明细见报告 perRound」，指的就是这里。
+        sb.append(ind(1)).append(jstr("b2PerRound")).append(": [\n");
+        for (int k = 0; k < B2_ROUNDS.size(); k++) {
+            B2Round b = B2_ROUNDS.get(k);
+            sb.append(ind(2)).append("{\n");
+            jline(sb, 3, "round", String.valueOf(b.round), true);
+            jline(sb, 3, "login5xx", String.valueOf(b.login5xx), true);
+            jline(sb, 3, "loginOk", String.valueOf(b.loginOk), true);
+            jline(sb, 3, "loginExisted", String.valueOf(b.loginExisted), true);
+            jline(sb, 3, "loginUnclear", String.valueOf(b.loginUnclear), true);
+            jline(sb, 3, "goodstypeDupRows", String.valueOf(b.gtRows), true);
+            jline(sb, 3, "goodstypeOk", String.valueOf(b.gtOk), true);
+            jline(sb, 3, "friendDupRows", String.valueOf(b.frRows), true);
+            jline(sb, 3, "friendOk", String.valueOf(b.frOk), true);
+            jline(sb, 3, "verdict", jstr(b.verdict), false);
+            sb.append(ind(2)).append(k + 1 < B2_ROUNDS.size() ? "},\n" : "}\n");
+        }
+        sb.append(ind(1)).append("],\n");
+
+        // 追溯链：报告 → 同一次运行的完整 stdout 日志
+        jline(sb, 1, "logFile", jstr(o.logFile), false);
+        sb.append("}\n");
+
+        String ts = java.time.LocalDateTime.now()
+                .format(java.time.format.DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss"));
+        java.io.File dir = new java.io.File(o.reportDir);
+        if (!dir.isDirectory() && !dir.mkdirs()) {
+            System.err.println("[report] 无法创建目录 " + o.reportDir + "，报告未落盘（判定与退出码不受影响）");
+            return null;
+        }
+        java.io.File out = new java.io.File(dir, "a3-report-" + o.runId + "-" + ts + ".json");
+        try {
+            Files.writeString(out.toPath(), sb.toString(), StandardCharsets.UTF_8);
+            return out.getPath();
+        } catch (IOException e) {
+            System.err.println("[report] 写入失败: " + e.getMessage() + "，报告未落盘（判定与退出码不受影响）");
+            return null;
         }
     }
 
@@ -1015,6 +1250,10 @@ public class ConcurrencyRunner {
         String after = lockCounters(o);
         System.out.println("[记录] " + scene + " 锁计数 前=" + before + " 后=" + after
                 + "（1213=ER_LOCK_DEADLOCK 1205=ER_LOCK_WAIT_TIMEOUT；record-only，非门禁）");
+        // 锁计数是 record-only，不进任何断言 —— 若不单独记，报告里就完全没有它，
+        // 而「并发下有没有死锁/锁等待超时」正是这份报告该回答的问题之一。
+        rec(scene, "lockCountersBefore", before);
+        rec(scene, "lockCountersAfter", after);
     }
 
     static void guard(String name, Body b) {
@@ -1049,6 +1288,7 @@ public class ConcurrencyRunner {
         settle(a3, ld.bad("loginSelect") == 0 && ld.good("loginSelect") > 0,
                 "loginSelect 返回非 1 的次数=" + ld.bad("loginSelect") + "，返回 1 的次数=" + ld.good("loginSelect"));
         System.out.println("[S1] 只读 50% goodstype + 50% loginSelect  " + ld.line());
+        recLoad("S1", ld);
         ld.dumpSamples();
     }
 
@@ -1072,6 +1312,11 @@ public class ConcurrencyRunner {
         }
         settle(a2, rows == succ, "行数=" + rows + " == success 数=" + succ);
         System.out.println("[S2a] 20 线程同栅栏同 OrderId=" + orderId + " success=" + succ + " 行数=" + rows);
+        // 用 cs.size() 而不是再写一个 20：这个 20 在源码里是裸字面量（S2a 与 S4a 的六个
+        // burst 共 7 处），报告里再抄一遍就等于多一处会与代码不一致的地方。
+        rec("S2a", "burstCalls", cs.size());
+        rec("S2a", "successCount", succ);
+        rec("S2a", "rowsForSameOrderId", rows);
     }
 
     // ---------- S2b 下单（各 OrderId 唯一） ----------
@@ -1090,6 +1335,8 @@ public class ConcurrencyRunner {
                 + " 5xx=" + ld.http5xx.sum() + " connErr=" + ld.connErr.sum());
         settle(a2, rows == ld.ok.sum(), "行数=" + rows + " == success 数=" + ld.ok.sum());
         System.out.println("[S2b] 下单(独参) " + ld.line());
+        recLoad("S2b", ld);
+        rec("S2b", "orderRows", rows);
         ld.dumpSamples();
     }
 
@@ -1148,6 +1395,13 @@ public class ConcurrencyRunner {
         settle(a4, stateBad == 0, "PayIf/SettlementDate 不符的单数=" + stateBad);
         System.out.println("[S3] 支付 M=" + S3_M + " 单 × " + S3_T + " 线程同栅栏  合计 success=" + totalSucc
                 + " 异常单=" + badUnits + " 5xx=" + dbErr);
+        rec("S3", "orders", S3_M);
+        rec("S3", "threadsPerOrder", S3_T);
+        rec("S3", "prebuiltOk", preBuilt);
+        rec("S3", "totalSuccess", totalSucc);
+        rec("S3", "inconsistentOrders", badUnits);
+        rec("S3", "dbErrorResponses", dbErr);
+        rec("S3", "stateBadOrders", stateBad);
     }
 
     // ---------- S4a 状态机非法流转 + 跨接口竞态 ----------
@@ -1232,6 +1486,12 @@ public class ConcurrencyRunner {
 
         System.out.println("[S4a] 预置态 " + forged + "| 8 个 burst 完成"
                 + " payRace=" + paySucc + " dlyRace=" + dlySucc + " 不变式违反=" + viol);
+        // S2a/S3/S4a 是栅栏型（burst），没有 Load，故不走 recLoad；但取数与 Load 型
+        // 同等重要，否则报告里这三段只剩断言 detail 里的散文，读不出结构化数字。
+        rec("S4a", "burstCount", 8);
+        rec("S4a", "payRaceSuccess", paySucc);
+        rec("S4a", "deliveryRaceSuccess", dlySucc);
+        rec("S4a", "invariantViolations", viol);
         lockDelta(o, "S4a", lock0);
     }
 
@@ -1314,6 +1574,17 @@ public class ConcurrencyRunner {
 
         System.out.println("[S4b] 混合 " + ld.line() + " 各端点=add" + gAdd + "/pay" + gPay
                 + "/dly" + gDly + "/rcv" + gRcv + "/gs" + gGs + " 不变式违反=" + viol);
+        recLoad("S4b", ld);
+        rec("S4b", "okAdd", gAdd);
+        rec("S4b", "okPay", gPay);
+        rec("S4b", "okDelivery", gDly);
+        rec("S4b", "okReceive", gRcv);
+        rec("S4b", "okGoodstype", gGs);
+        // 这个 rows 是「本档 orderAdd 落库行数」（WHERE OrderId LIKE '<ns>-S4bN%'），
+        // 不是 order 表总行数 —— 别叫 orderRowsAtEnd，那会让人以为能直接读它比较表大小。
+        rec("S4b", "orderRowsFromLoad", rows);
+        rec("S4b", "invariantViolations", viol);
+        rec("S4b", "s4bDurationSec", o.s4bDurationSec);
         ld.dumpSamples();
         lockDelta(o, "S4b", lock0);
     }
@@ -1462,10 +1733,10 @@ public class ConcurrencyRunner {
                     + " friend重复行轮=" + frDupRounds;
         }
 
-        for (int i = 0; i < B2_ROUNDS.size(); i++) {
-            B2Round b = B2_ROUNDS.get(i);
-            rec("B2", "round" + (i + 1), b.line());
-        }
+        // 逐轮明细不落进 REC：REC 只存「聚合取数」用的标量，逐轮是结构化的，
+        // 由报告直接读 B2_ROUNDS 写成数组（见 writeReport 的 b2PerRound）。
+        // 早先把每轮的 line() 塞成 round1/round2… 的扁平字符串，等于把「给人看的
+        // 打印格式」变成报告的契约 —— 改一个字就静默失效。
         rec("B2", "rounds", n);
         rec("B2", "reproRounds", repro);
         rec("B2", "login5xxRounds", login5xxRounds);
@@ -1524,6 +1795,7 @@ public class ConcurrencyRunner {
     static void cleanup(Opt o) {
         String p = ns() + "%";
         int grand = 0;
+        rec("cleanup", "namespace", p);
         try (Connection c = DriverManager.getConnection(o.jdbcUrl, o.jdbcUser, o.jdbcPassword);
              Statement s = c.createStatement()) {
             System.out.println("[cleanup] 命名空间 " + p);
@@ -1546,6 +1818,7 @@ public class ConcurrencyRunner {
                 if (rows > 0 || del > 0) {
                     System.out.println("  " + pad(tbl, 16) + "首列命中行数=" + rows + " 删除=" + del);
                 }
+                rec("cleanup", "table." + tbl, del);
             }
             // 哨兵全局清扫：前缀是代码字面量，正常数据不可能命中；探针按构造即一次性，
             // 故这里可以不带 runId 清 —— 任何后续 run 都能自愈先前被 SIGKILL 留下的哨兵。
@@ -1555,9 +1828,15 @@ public class ConcurrencyRunner {
             System.out.println("  " + pad("goodstype(哨兵)", 16) + "删除=" + probe
                     + "（A3P-% 全局清扫，" + (probe == 0 ? "无残留" : "清掉了残留") + "）");
             System.out.println("[cleanup] 删除语句命中合计 " + grand + " 行（同一行可能被多列命中，故非去重行数）");
+            rec("cleanup", "probeRowsDeleted", probe);
+            rec("cleanup", "rowsDeletedTotal", grand);
+            rec("cleanup", "status", "OK");
         } catch (SQLException e) {
             System.err.println("[cleanup] 失败: " + e.getMessage()
                     + "  ← 残留需人工处理；命名空间 " + p + " 与 " + PROBE_PREFIX + "% 是查残留的两个前缀");
+            // 清理失败必须进报告：报告说「跑完了」而库里有残留，是最容易骗过下一位读者的组合
+            rec("cleanup", "status", "FAILED");
+            rec("cleanup", "error", e.getMessage());
         }
     }
 
