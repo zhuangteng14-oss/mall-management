@@ -21,13 +21,19 @@
  *   阶段 E  run.sh 完整版 + dependency:build-classpath 解析
  */
 
+import java.io.IOException;
 import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
 import java.security.SecureRandom;
 import java.sql.Connection;
 import java.sql.DriverManager;
+import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -38,6 +44,16 @@ public class ConcurrencyRunner {
     // ===================== 命名空间 =====================
     // 前缀固定为字面量，不接受调用方任意指定（H3 cleanup.safety_rails）
     static final String NS_PREFIX = "A3TEST-";
+
+    // P6 哨兵行前缀。刻意与 NS_PREFIX 分开：哨兵是「一次性写入即刻删除」的探针，
+    // 但若进程在写入与删除之间被 SIGKILL，它必须仍能被 cleanup 覆盖（见报告 cleanup 一节）。
+    static final String PROBE_PREFIX = "A3P-";
+
+    // P1 读到的服务端版本，供 P7 的版本比对使用（S0-5 第 3 步判据）
+    static String vmVersion = null;
+
+    // P6 本次使用的哨兵值，供阶段 D 的 cleanup 精确删除
+    static String probeGoodType = null;
 
     // ===================== 退出码（H3 report.exit_codes） =====================
     static final int EXIT_PASS = 0;             // 全部门禁通过
@@ -59,6 +75,14 @@ public class ConcurrencyRunner {
         boolean keepData = false;
         boolean cleanupOnly = false;
         boolean resetDb = false;
+        // P7 阴性对照：本机开发库与 VM 库同名（TD-13），只有主机名能区分，故必须反证一次
+        String negativeControlUrl = "jdbc:mysql://127.0.0.1:3306/mall_management_sql"
+                + "?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai";
+        String negativeControlUser = "root";
+        String negativeControlPassword = "123456";
+        boolean skipNegativeControl = false;
+        // P5 就绪探针等待上限（秒）。后端冷启动要跑 Hibernate ddl-auto=update 的校验，非瞬时。
+        int readyTimeoutSec = 60;
         String reportDir = "scripts/concurrency/reports";
         boolean help = false;
     }
@@ -88,6 +112,8 @@ public class ConcurrencyRunner {
         "  --keep-data            跳过 finally 清理，保留数据以供人工查验",
         "  --cleanup-only         仅按 --run-id 执行清理，不跑场景",
         "  --reset-db             重跑 mall_management_sql.sql（DROP 全部 11 表！仅限一次性实例）",
+        "  --skip-negative-control  跳过 P7 阴性对照（本机库不可达时会自动 skip，无需手动指定）",
+        "  --ready-timeout-sec N  P5 就绪探针等待上限，默认 60",
         "  --help                 显示本帮助",
         "",
         "退出码: 0=全部门禁通过  1=有门禁断言失败  2=前置校验失败");
@@ -122,6 +148,13 @@ public class ConcurrencyRunner {
         //       —— 因为本机开发库与 VM 库同名（TD-13），单看库名无法区分。
         Map<String, String> pre = new LinkedHashMap<>();
         boolean preOk = preflightStatic(o, pre) & preflightJdbc(o, pre);
+        if (preOk) {
+            preOk = preflightHttp(o, pre);   // P5–P7：需要后端在跑
+        } else {
+            pre.put("P5", "SKIP JDBC 侧前置未过，未做 HTTP 侧校验");
+            pre.put("P6", "SKIP 同上");
+            pre.put("P7", "SKIP 同上");
+        }
         printPreflight(pre);
         if (!preOk) {
             System.err.println("前置校验失败，未产生任何业务流量。退出码 2。");
@@ -129,7 +162,7 @@ public class ConcurrencyRunner {
             return;
         }
 
-        System.out.println("[阶段 B] preflight P0–P4 已实现（JDBC 侧）；P5–P7 与场景待后续阶段。");
+        System.out.println("[阶段 C] preflight P0–P7 已实现；六场景待阶段 D。");
 
         int rc = 0;
         rc = Math.max(rc, runScenarioStubs(o));
@@ -176,6 +209,11 @@ public class ConcurrencyRunner {
                 case "--keep-data": o.keepData = true; break;
                 case "--cleanup-only": o.cleanupOnly = true; break;
                 case "--reset-db": o.resetDb = true; break;
+                case "--negative-control-url": o.negativeControlUrl = value(a, ++i, v, k); break;
+                case "--negative-control-user": o.negativeControlUser = value(a, ++i, v, k); break;
+                case "--negative-control-password": o.negativeControlPassword = value(a, ++i, v, k); break;
+                case "--skip-negative-control": o.skipNegativeControl = true; break;
+                case "--ready-timeout-sec": o.readyTimeoutSec = intValue(a, ++i, v, k); break;
                 default:
                     throw new IllegalArgumentException("未知选项 " + k);
             }
@@ -236,6 +274,10 @@ public class ConcurrencyRunner {
         System.out.println("keepData       : " + o.keepData);
         System.out.println("cleanupOnly    : " + o.cleanupOnly);
         System.out.println("resetDb        : " + o.resetDb);
+        System.out.println("negControl     : " + (o.skipNegativeControl
+                ? "(已关闭)"
+                : hostOf(o.negativeControlUrl) + "  (P7 阴性对照)"));
+        System.out.println("readyTimeout   : " + o.readyTimeoutSec + "s  (P5)");
         System.out.println("reportDir      : " + o.reportDir);
         System.out.println();
     }
@@ -341,12 +383,21 @@ public class ConcurrencyRunner {
                 return false;
             }
 
-            // P1 连通 + 库名
+            // P1 连通 + 库名 + 服务端版本
+            // 版本这项是 S0-5 第 3 步的判据：只验「能连上」不够 —— 本机开发库与 VM 库同名
+            // （TD-13），8.0.32 同样连得上，若不比对版本，跑在 8.0.32 上会静默通过，
+            // 而 A-S4a-7 依赖的是 8.4 实测的隔离级别行为（锁 3）。
             String db = scalarString(c, "SELECT DATABASE()");
-            boolean p1 = "mall_management_sql".equals(db);
-            pre.put("P1", (p1 ? "PASS" : "FAIL")
-                    + " DATABASE()=" + db + "（TD-13 要求必须是 mall_management_sql）");
+            vmVersion = scalarString(c, "SELECT VERSION()");
+            boolean dbOk = "mall_management_sql".equals(db);
+            boolean verOk = vmVersion != null && vmVersion.startsWith("8.4.");
+            boolean p1 = dbOk && verOk;
+            pre.put("P1", (p1 ? "PASS " : "FAIL ")
+                    + "DATABASE()=" + db + "（TD-13 要求 mall_management_sql " + (dbOk ? "✓" : "✗")
+                    + "）；VERSION()=" + vmVersion + "（S0-5 要求 8.4.x " + (verOk ? "✓" : "✗") + "）");
             if (!p1) {
+                pre.put("P3", "SKIP P1 未过，未查表数");
+                pre.put("P4", "SKIP 同上");
                 return false;
             }
 
@@ -390,6 +441,202 @@ public class ConcurrencyRunner {
             pre.put("P1", "FAIL JDBC 连接失败: " + e.getMessage());
             return false;
         }
+    }
+
+    /**
+     * P5–P7（H3）：HTTP 侧前置校验。
+     *
+     * P5 联合就绪探针 —— 轮询 GET /mysqlGoods/goodstype 直到响应含 "success":true。
+     *   端口通不等于就绪：该端点 GET 会真落一次 DB（SELECT goodstype），
+     *   只有它返回成功才同时证明 Web 层与 Hikari 连接池都可用。
+     *   等待上限 --ready-timeout-sec（默认 60s），超时即 FAIL（不视为 skip）。
+     *
+     * P6 哨兵往返 —— JDBC 写一行 → HTTP 读回来 → 删除。证明「脚本写的」与「后端读的」是同一个库。
+     *   探针串已按 goodstype.GoodType 的 char(20) 上限重设计为 A3P-&lt;runId8&gt;（12 字符）：
+     *   H3 原式 A3PROBE-&lt;runId8&gt;-&lt;host&gt; 是 32 字符，在严格模式下必然 ERROR 1406。
+     *   主机判别码随行放在 GoodTypeNew（int）列：IPv4 第三段*1000 + 第四段
+     *   （VM 192.168.229.129 → 229129，本机 127.0.0.1 → 1）。
+     *
+     * P7 阴性对照（锁 1：host 为主，version 为辅 —— 任一个成立即通过）：
+     *   主判据 host —— P6 写进目标库的那行，在本机库中查不到（探针行的读取窗口留在删除之前，
+     *   否则「查不到」对两台机器都成立，判据会退化成恒真）；
+     *   辅判据 version —— 本机可达且本机 VERSION() ≠ 目标 VERSION()。
+     *   本机不可达 → 记 skip，不阻断（CI 上本就没有本机库）。
+     *   本机库全程只读：A3 未获授权改动本机库，阴性对照不需要写。
+     */
+    static boolean preflightHttp(Opt o, Map<String, String> pre) {
+        HttpClient http = HttpClient.newBuilder()
+                .connectTimeout(Duration.ofSeconds(5))
+                .version(HttpClient.Version.HTTP_1_1)
+                .build();
+        String url = o.baseUrl + "/mysqlGoods/goodstype";
+
+        // ---------- P5 联合就绪探针 ----------
+        long t0 = System.currentTimeMillis();
+        int code = -1;
+        String body = null;
+        String lastErr = null;
+        while (System.currentTimeMillis() - t0 < o.readyTimeoutSec * 1000L) {
+            try {
+                HttpResponse<String> r = httpGet(http, url);
+                code = r.statusCode();
+                body = r.body();
+                if (code == 200 && body != null && body.contains("\"success\":true")) {
+                    break;
+                }
+                lastErr = "HTTP " + code + "，响应中不含 \"success\":true";
+            } catch (Exception e) {
+                // ConnectException 的 getMessage() 常为 null，直接拼会出现「ConnectException: null」
+                lastErr = e.getClass().getSimpleName()
+                        + (e.getMessage() == null ? "（无附加信息）" : ": " + e.getMessage());
+                code = -1;
+                body = null;
+            }
+            try {
+                Thread.sleep(2000);
+            } catch (InterruptedException ie) {
+                Thread.currentThread().interrupt();
+                break;
+            }
+        }
+        long waited = (System.currentTimeMillis() - t0) / 1000;
+        boolean p5 = code == 200 && body != null && body.contains("\"success\":true");
+        pre.put("P5", (p5 ? "PASS" : "FAIL")
+                + " GET " + url + " → HTTP " + code + "，等待 " + waited + "s"
+                + (p5 ? "，含 \"success\":true（Web+DB 联合就绪）"
+                      : "（" + (lastErr == null ? "超时" : lastErr) + "）"));
+        if (!p5) {
+            // 显式记 SKIP 而不是直接少两行：前置表缺行与「没跑到」在报告里无法区分
+            pre.put("P6", "SKIP 后端未就绪，未做哨兵往返");
+            pre.put("P7", "SKIP 同上");
+            return false;
+        }
+
+        // ---------- P6 哨兵往返；P7 之后才删除 ----------
+        probeGoodType = PROBE_PREFIX + o.runId;
+        try {
+            boolean p6 = probeRoundTrip(o, http, url, pre);
+            if (!p6) {
+                pre.put("P7", "SKIP 哨兵未验证，阴性对照无从对照");
+                return false;
+            }
+            return negativeControl(o, pre);
+        } finally {
+            deleteProbeRow(o);
+        }
+    }
+
+    /** P6：写入哨兵行并确认后端经 HTTP 读得到。 */
+    static boolean probeRoundTrip(Opt o, HttpClient http, String url, Map<String, String> pre) {
+        int hostCode = hostCodeOf(o.expectDbHost);
+        try (Connection c = DriverManager.getConnection(o.jdbcUrl, o.jdbcUser, o.jdbcPassword)) {
+            try (PreparedStatement ps = c.prepareStatement(
+                    "INSERT INTO mall_management_sql.goodstype (GoodType, GoodTypeNew) VALUES (?, ?)")) {
+                ps.setString(1, probeGoodType);
+                ps.setInt(2, hostCode);
+                ps.executeUpdate();
+            }
+            String b = httpGet(http, url).body();
+            boolean seen = b != null && b.contains(probeGoodType);
+            // 相邻字段一并比对：列顺序与 Jackson 序列化顺序一致（ColumnMapRowMapper 用 LinkedHashMap），
+            // 因此 "GoodType":"A3P-xxx","GoodTypeNew":229129 应当紧邻出现。仅作强化证据，不作门禁。
+            boolean strict = b != null && b.contains(
+                    "\"GoodType\":\"" + probeGoodType + "\",\"GoodTypeNew\":" + hostCode);
+            pre.put("P6", (seen ? "PASS" : "FAIL")
+                    + " 哨兵 " + probeGoodType + "（" + probeGoodType.length() + " 字符，上限 20）"
+                    + " 经 HTTP 读回=" + seen + "，主机码 " + hostCode + " 随行=" + strict);
+            if (!seen) {
+                System.err.println("后端读不到脚本刚写入的哨兵行 —— 后端连的库与脚本连的库不是同一个。");
+            }
+            return seen;
+        } catch (SQLException e) {
+            pre.put("P6", "FAIL 哨兵往返失败: " + e.getMessage());
+            return false;
+        } catch (Exception e) {
+            pre.put("P6", "FAIL 哨兵往返失败: " + e.getClass().getSimpleName() + ": " + e.getMessage());
+            return false;
+        }
+    }
+
+    /** 删除哨兵行。best-effort：删不掉只告警，不让 finally 覆盖掉真正的失败原因。 */
+    static void deleteProbeRow(Opt o) {
+        if (probeGoodType == null) {
+            return;
+        }
+        try (Connection c = DriverManager.getConnection(o.jdbcUrl, o.jdbcUser, o.jdbcPassword);
+             PreparedStatement ps = c.prepareStatement(
+                     "DELETE FROM mall_management_sql.goodstype WHERE GoodType = ?")) {
+            ps.setString(1, probeGoodType);
+            int n = ps.executeUpdate();
+            System.out.println("[P6] 哨兵行清理：删除 " + n + " 行（" + probeGoodType + "）");
+        } catch (SQLException e) {
+            System.err.println("[P6] 哨兵行清理失败（cleanup 的 A3P-% 一项会兜底）: " + e.getMessage());
+        }
+    }
+
+    /** P7：阴性对照。锁 1 —— host 判据与 version 判据任一成立即通过；本机不可达记 skip。 */
+    static boolean negativeControl(Opt o, Map<String, String> pre) {
+        if (o.skipNegativeControl) {
+            pre.put("P7", "SKIP 已用 --skip-negative-control 显式关闭");
+            return true;
+        }
+        String ncHost = hostOf(o.negativeControlUrl);
+        if (o.expectDbHost.equals(ncHost)) {
+            pre.put("P7", "FAIL 阴性对照库与目标库是同一主机（" + ncHost + "），对照无意义");
+            return false;
+        }
+        try (Connection c = DriverManager.getConnection(
+                o.negativeControlUrl, o.negativeControlUser, o.negativeControlPassword)) {
+            // 主判据：探针行不在本机（此刻该行在目标库中仍存在）
+            int localProbeRows = scalarInt(c,
+                    "SELECT COUNT(*) FROM mall_management_sql.goodstype WHERE GoodType = '" + probeGoodType + "'");
+            boolean rowAbsent = localProbeRows == 0;
+            // 辅判据：本机版本 ≠ 目标版本（锁 1 —— 本机将来升级到 8.4 时此判据失效，故不单独作数）
+            String localVer = scalarString(c, "SELECT VERSION()");
+            boolean verDiff = localVer != null && !localVer.equals(vmVersion);
+            boolean p7 = rowAbsent || verDiff;
+            pre.put("P7", (p7 ? "PASS" : "FAIL")
+                    + " 本机(" + ncHost + ") 探针行数=" + localProbeRows + "→不在本机=" + rowAbsent
+                    + "；本机 VERSION()=" + localVer + " ≠ 目标 " + vmVersion + "→" + verDiff);
+            if (!p7) {
+                System.err.println("本机库与目标库未能区分 —— 可能本机 127.0.0.1 就是目标实例（隧道/端口转发）。");
+            }
+            return p7;
+        } catch (SQLException e) {
+            pre.put("P7", "SKIP 本机库不可达，阴性对照跳过（不阻断）: " + e.getMessage());
+            return true;
+        }
+    }
+
+    static HttpResponse<String> httpGet(HttpClient http, String url)
+            throws IOException, InterruptedException {
+        HttpRequest req = HttpRequest.newBuilder(URI.create(url))
+                .timeout(Duration.ofSeconds(10))
+                .GET()
+                .build();
+        return http.send(req, HttpResponse.BodyHandlers.ofString());
+    }
+
+    /**
+     * 主机判别码（放进 goodstype.GoodTypeNew 这个 int 列）。
+     * IPv4 → 第三段*1000 + 第四段（VM 192.168.229.129 → 229129，本机 127.0.0.1 → 1）。
+     * 非 IPv4（主机名等）退回 hashCode 截断；只要求「不同主机取到不同值」，不要求可逆。
+     */
+    static int hostCodeOf(String host) {
+        if (host == null) {
+            return 0;
+        }
+        String[] p = host.split("[.]");
+        if (p.length == 4) {
+            try {
+                int a = Integer.parseInt(p[2].trim());
+                int b = Integer.parseInt(p[3].trim());
+                return a * 1000 + b;
+            } catch (NumberFormatException ignore) {
+                // 落到下面的兜底
+            }
+        }
+        return Math.abs(host.hashCode() % 1000000);
     }
 
     static void printPreflight(Map<String, String> pre) {
