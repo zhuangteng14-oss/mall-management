@@ -109,3 +109,33 @@
 - TD-10（CI 无 MySQL 的临时规避；本任务激活后应为其补 MySQL service）
 - BD-01（`SettlementDate` 被付款/发货/收货三处覆写，涉及支付场景的读取口径）
 - BD-03（零鉴权 —— 并发脚本无需处理登录态，可直接压接口）
+
+## 落盘前 checklist（v1 — 仅含已取证条目）
+
+> 用途：本 pack 正文与探索结论之间**已出现漂移**。落盘时对着本表**逐项打勾**，不靠记忆。
+> 每条均附取证依据；无依据的条目一律不列入（`agent.md` 规则 9.1）。
+> 本段在 pack 正文落盘完成后应删除或压缩为「已核对」一行。
+
+| # | 核对项 | 依据（已取证） |
+|---|---|---|
+| 1 | H2 —— 根 `.gitignore` 一处必须写「**追加**」而非「新增」 | `9b87ab9` 已含 27 行 `.gitignore`；见 `tech-debt.md` TD-02 更正记录 |
+| 2 | F1b / OD-1 —— `loginAdd` 的 B 组断言必须是「**无 HTTP 5xx**」，**不得**写「无重复行」 | `login` PK=`UserName`、`user` PK=`username`、`customerimage` PK=`UserName` → 重复行**不可能**产生；真实缺陷是未捕获 `DuplicateKeyException` → HTTP 500（`U:65-105` 无 try/catch） |
+| 3 | F4 **（已修正）** —— 种子 6 行订单全为 `(1,1,1)` 终态，故 **S2/S3/S4 三者都必须自建订单** | `mall_management_sql.sql` 的 order INSERT：Id 18–23 六行全部 `PayIf=1, DeliveryIf=1, ReceiveIf=1`；`orderPayIfUp` 的 WHERE 为 `PayIf=0` → 在种子订单上「恰好 1 次 `success:true`」**必然不成立**。原文只写 S3/S4 会让 A 组第一条断言必败 |
+| 4 | B-1 —— `order.OrderId` **无唯一索引**（主键仅 `Id`） | `mall_management_sql.sql` order 建表语句。pack 不得写成「有唯一约束兜底」 |
+| 5 | 澄清 1 —— `--b-group-gate` 默认 `false`、**只影响 B-2**（B-1 恒门禁、B-3 恒 record-only）；verdict 枚举 `PASS` / `EXPECTED_DEFECT_PRESENT` / `DEFECT_FIXED` / `RECORD_ONLY`；`rounds`、`reproRounds` 由脚本自动统计，**「≥3/5」不做运行时门禁**（仅作人工翻默认值的准入条件） | 本会话 2026-09-20 裁决 |
+| 6 | 澄清 4 —— B 组子前缀是 `<round>`（1..5，**同轮内 20 线程共享**），**不是** `<seq>`；行序号才用 `-S<seq>` / `-N<seq>` | 若跨轮共用同参，第 2 轮起 `loginAdd` 直接走「已存在」分支，**不进并发窗口**，后 4 轮等于白跑 |
+| 7 | Q1=B / TD-13 —— 隔离策略必须写「**独立实例 + 同名库** `mall_management_sql`」，**不得**写成「切库名隔离」 | 硬编码前缀 39 处（Goods 23 + User 16 + Message 0），全部指向 `mall_management_sql` |
+| 8 | S0-3 —— 驱动路径由 **Maven 权威解析**（`dependency:build-classpath`），**不做 glob 猜测**；解析后**校验 jar major = 8** | `~/.m2` 同时存在 `com.mysql:mysql-connector-j:8.0.31` / `8.0.33` 与 `mysql:mysql-connector-java:8.0.28`，并有 `*.lastUpdated` 失败标记 → glob 会静默取到错误版本 |
+| 9 | S0-5 —— 必须 `SELECT VERSION()` 确认服务端确为 8.4.x；兼容失败时的兜底写「脚本侧 `$A3_JDBC_DRIVER` + 后端 a3 profile 临时 classpath 覆盖」，**不得**写成改 `pom.xml` | 硬约束：不改 `pom.xml`；`environment.md` 已定 MySQL 8.4 |
+| 10 | 禁止并发 —— 必须写明「两个 A3 运行**绝不**可同时作用于同一实例」 | P0 的 `A3TEST-%` 清理与 P4 的种子计数互斥 |
+| 11 | P4 种子计数 —— `order=6` / `goods=5` / `login=5` / `user=5`（已复核 ✓）；另 **`friend=4`**，B-2 跑完按 `+2 × 轮数` 计提 | `mall_management_sql.sql` 各表 INSERT 逐行计数 |
+| 12 | 约束节「**只走 HTTP，不依赖项目 classpath**」与已定的 **HTTP + JDBC** 冲突 → 须重写；前置准备第 3 步的「届时再议」已由「脚本形态 = HTTP+JDBC」**解决**，应改为结论 | 本文件 `约束` 节 vs `archive/progress-2026-09-19.md`「脚本形态 = HTTP + JDBC」 |
+| 13 | 前置准备第 1–3 步（建 `mall_management_test` 库）**已失效** → 须按 Q1=B 重写为「独立 MySQL 实例 + 同名库」 | Q1=B 裁决 + TD-13（本地测试库当前「建好了但用不上」） |
+| 14 | 必读文档行「tech-debt.md（**TD-01 ~ TD-11**）」**已过时** → 须补 TD-12、TD-13 | `tech-debt.md` 现有 TD-01 ~ TD-13 |
+| 15 | **待回填** —— H3 / H4 / H5 / H6 正文 | 未留存（见下节），须人工提供或确认可省略 |
+
+### H 组不可恢复的说明
+
+H1–H6 / F1–F6 的第一阶段探索正文**在任何本地转录中都不存在**：对项目全部 9 个转录文件穷举搜索 `F3` 的命中，全部落在 2026-09-20 本轮的搜索命令自身，以及 9-14 / 9-18 的其它任务（N+1、A2）上。上下文压缩只留下了章节名，正文未留存。
+
+故本 checklist 只收录**已取证条目**，不对 H3–H6 做推断补全（`agent.md` 规则 9.1）。第 15 项须由人工提供原文后补全，或明确确认可省略。
