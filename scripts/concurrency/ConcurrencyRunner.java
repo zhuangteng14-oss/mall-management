@@ -1,11 +1,20 @@
 /**
- * A3 并发测试执行器 —— Java 17 单文件源码启动。
+ * A3 并发测试执行器 —— Java 17，两步编译后运行（run.sh 封装）。
  *
- * 运行形态（H3）：
- *   java -cp <mysql-connector-j-8.0.33.jar> scripts/concurrency/ConcurrencyRunner.java \
+ * 运行形态（H3 定稿，后经字符集缺陷修正为两步编译）：
+ *   javac -encoding UTF-8 -d <out> scripts/concurrency/ConcurrencyRunner.java
+ *   java -cp <out>:<mysql-connector-j-8.0.33.jar> ConcurrencyRunner \
  *        --base-url http://localhost:8088 \
  *        --jdbc-url "jdbc:mysql://192.168.229.129:3306/mall_management_sql?..." \
  *        --expect-db-host 192.168.229.129
+ *
+ * 为什么不能用单文件源码模式（java ConcurrencyRunner.java，H3 原写法）：
+ *   启动器在运行期就地编译源文件，此时不使用任何编译期 -encoding，而按宿主平台
+ *   默认字符集读源码。Windows 上 file.encoding=GBK，源里中文字面量全部失真，
+ *   依赖中文响应体的断言静默落空 —— 同一脚本、同一机器，只因启动方式不同结论相反，
+ *   且不报任何错。实测：源码模式 + GBK 下 S3 由「异常单=0 / PASS」变成「异常单=10 /
+ *   FAIL」。故改为编译期用 -encoding UTF-8 钉死编码。charsetSelfCheck() 是这条
+ *   教训的守卫：任何人改回源码模式，会在 preflight 之前被 exit 2 挡下。
  *
  * 硬约束：
  *   - 不引任何新依赖：classpath 上只有 mysql-connector 一个 jar，
@@ -22,6 +31,7 @@
  */
 
 import java.io.IOException;
+import java.io.PrintStream;
 import java.net.URI;
 import java.net.URLEncoder;
 import java.net.http.HttpClient;
@@ -130,10 +140,16 @@ public class ConcurrencyRunner {
     }
 
     static final String HELP = String.join("\n",
-        "A3 并发测试执行器（Java 17 单文件源码启动）",
+        "A3 并发测试执行器（Java 17）",
         "",
-        "用法:",
-        "  java -cp <mysql-connector.jar> scripts/concurrency/ConcurrencyRunner.java [选项]",
+        "用法（必须两步，不要用单文件源码模式 java Foo.java）:",
+        "  javac -encoding UTF-8 -d <out> scripts/concurrency/ConcurrencyRunner.java",
+        "  java -cp <out>:<mysql-connector.jar> ConcurrencyRunner [选项]",
+        "",
+        "  为什么不能用 java Foo.java：单文件源码模式由启动器在运行期就地编译，不采用编译期",
+        "  -encoding，而按平台默认字符集读源文件。Windows 上 file.encoding=GBK 时源里中文串",
+        "  全部失真，依赖中文响应体的断言会静默落空、结论与 CI 相反且不报错。运行器有自检，",
+        "  命中即拒绝运行（exit 2）。run.sh 已封装两步。",
         "",
         "必需:",
         "  --jdbc-url <url>       脚本自身 JDBC 连接串（读侧与清理用）",
@@ -162,8 +178,24 @@ public class ConcurrencyRunner {
         "",
         "退出码: 0=全部门禁通过  1=有门禁断言失败  2=前置校验失败");
 
+    // ===================== 输出编码 =====================
+    // 编译期已用 -encoding UTF-8 钉死字面量（判定因此可信），但 System.out 默认按
+    // 平台字符集编码字节 —— Windows+GBK 下中文日志落成 GBK 字节，本机终端与 CI 都按
+    // UTF-8 读，看到的是乱码，将来的 JSON 报告更是直接读不出来。
+    // 所以这里把两路输出显式接成 UTF-8，而不是靠 -Dfile.encoding 去改 JVM 全局默认：
+    // 后者会连 JDBC 侧、文件读取一起动，属于掩盖症状；只约束「本程序写出去的字节」
+    // 才是根治。终端显示与判定因此一致，且与平台无关。
+    static void forceUtf8Output() {
+        System.setOut(new PrintStream(new java.io.FileOutputStream(java.io.FileDescriptor.out),
+                true, StandardCharsets.UTF_8));
+        System.setErr(new PrintStream(new java.io.FileOutputStream(java.io.FileDescriptor.err),
+                true, StandardCharsets.UTF_8));
+    }
+
     // ===================== main =====================
     public static void main(String[] args) {
+        forceUtf8Output();
+
         Opt o;
         try {
             o = parseArgs(args);
@@ -191,6 +223,26 @@ public class ConcurrencyRunner {
 
         banner(o);
 
+        // --cleanup-only 必须在 preflight 之前执行：清理是运维动作，不是测试轮次。
+        // 曾经的顺序是「先 preflight 再 cleanup」，结果是 P4 基线行数检查会把清理挡在门外 ——
+        // 库脏（正是需要清理时）→ P4 FAIL → exit 2 → 清理永远跑不到。要清脏库先得有干净库，
+        // 这是个死循环。本脚本自己刚踩过：一次 curl 探针留下 1 行 friend 就锁死了清理。
+        if (o.cleanupOnly) {
+            cleanup(o);
+            System.out.println("--cleanup-only：未产生任何业务流量。退出码 0。");
+            System.exit(EXIT_PASS);
+            return;
+        }
+
+        // 字符集自检在 cleanup-only 之后、preflight 之前：清理是无害的运维动作，
+        // 字符集坏了也照样该让它跑（同 P4 挡清理那个教训），但任何**判定**都不许在
+        // 字符集已失真的前提下产生。
+        if (!charsetSelfCheck()) {
+            System.err.println("前置校验失败，未产生任何业务流量。退出码 2。");
+            System.exit(EXIT_PREFLIGHT_FAILED);
+            return;
+        }
+
         // H3 phase_0_preflight.purpose：产生任何业务流量之前，先证明「脚本连的是期望库」。
         // 任一前置失败一律 exit 2，不进入场景。
         // 注意：P1–P4 只覆盖「脚本自身」这一侧；「后端是否在同一个库上」由阶段 C 的 P6 哨兵往返给出
@@ -210,13 +262,6 @@ public class ConcurrencyRunner {
             System.exit(EXIT_PREFLIGHT_FAILED);
             return;
         }
-        if (o.cleanupOnly) {
-            cleanup(o);
-            System.out.println("--cleanup-only：未产生任何业务流量。退出码 0。");
-            System.exit(EXIT_PASS);
-            return;
-        }
-
 
         System.out.println("[阶段 D] preflight P0–P7 通过，开始跑负载段：" + o.scenarios);
 
@@ -1514,6 +1559,51 @@ public class ConcurrencyRunner {
             System.err.println("[cleanup] 失败: " + e.getMessage()
                     + "  ← 残留需人工处理；命名空间 " + p + " 与 " + PROBE_PREFIX + "% 是查残留的两个前缀");
         }
+    }
+
+    // ===================== 源码字符集自检 =====================
+
+    /**
+     * 源码字符集自检 —— 在产生任何判定之前拒绝「静默错」。
+     *
+     * 起因（A3 级别缺陷，非 B-2 级别）：单文件源码启动 `java Foo.java` 由启动器**在运行期就地编译**，
+     * 此时**不使用**任何编译期 -encoding，而按宿主平台默认字符集解读源文件。Windows 上
+     * file.encoding=GBK，于是源里所有中文串被按 GBK 解成乱码：跑起来不报任何错，
+     * 但一切依赖中文响应体的断言（msg == 「订单不存在或已付款」、「数据库错误」前缀、
+     * loginAdd 的「添加成功！」…）全部静默落空。实测：源码模式 + GBK 下 S3 由
+     * 「异常单=0 / A-S3-1..2 PASS」变成「异常单=10 / FAIL」；加 -Dfile.encoding=UTF-8 后恢复。
+     * 即：**同一个脚本、同一台机器，只因启动方式不同，结论相反且不报错。**
+     *
+     * 检测办法：把期望码点写成数字字面量（数字不受字符集影响），与源里的中文字面量比较。
+     * 不一致 ⇒ 本次运行的源被按非 UTF-8 解读 ⇒ 中文断言不可信，直接拒绝运行。
+     * 不用「加 -Dfile.encoding=UTF-8」来兜：那是掩盖症状，且只在本地有效；
+     * 根治是改启动方式为两步（javac -encoding UTF-8 → java 跑 class），见 run.sh 与 HELP。
+     */
+    static boolean charsetSelfCheck() {
+        String literal = "添加成功！";
+        String byCodePoint = new String(new char[]{0x6DFB, 0x52A0, 0x6210, 0x529F, 0xFF01});
+        boolean ok = literal.equals(byCodePoint);
+        // 这行同时钉住历史缺口：此前日志不记录启动方式，事后无法判断某次运行是源码模式
+        // 还是两步编译。现在每次运行都把平台字符集与自检结果写进日志，可追溯。
+        System.out.println("charset        : file.encoding=" + System.getProperty("file.encoding")
+                + "  native.encoding=" + System.getProperty("native.encoding")
+                + "  stdout/stderr=强制 UTF-8（见 forceUtf8Output）");
+        System.out.println("                 启动方式=两步编译（javac -encoding UTF-8 + java -cp <out>…）"
+                + "  源码字面量自检=" + (ok ? "PASS（中文串未被字符集损坏）" : "FAIL（中文串已失真）"));
+        if (ok) {
+            return true;
+        }
+        System.err.println("【拒绝运行】源码被按非 UTF-8 字符集解读，中文串已失真：");
+        System.err.println("  源里的字面量 esc: " + esc(literal));
+        System.err.println("  期望码点   esc: " + esc(byCodePoint));
+        System.err.println("  影响：所有依赖中文响应体的断言（msg 比对、「数据库错误」前缀等）会静默落空，"
+                + "跑出来的 PASS/FAIL 不可信。");
+        System.err.println("  原因：单文件源码启动（java Foo.java）由启动器在运行期就地编译，"
+                + "不采用编译期 -encoding，而按平台默认字符集解读源文件。");
+        System.err.println("  处理：改用两步 —— javac -encoding UTF-8 -d <out> <本文件> 后 "
+                + "java -cp <out>:<mysql-connector.jar> ConcurrencyRunner（run.sh 即此做法）。");
+        System.err.println("        临时绕过可加 -Dfile.encoding=UTF-8，但那是掩盖症状，仅本地有效。");
+        return false;
     }
 
     // ===================== 前置校验 =====================
