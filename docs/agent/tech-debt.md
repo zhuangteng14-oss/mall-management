@@ -120,16 +120,20 @@
 | 优先级 | 中 |
 | 状态 | 待确认 |
 
-## TD-10 contextLoads() 在无 MySQL 环境跑不通
+## TD-10 `contextLoads()` 在无 MySQL 环境跑不通 — ✅ 已关闭（2026-09-20，D1 落地）
 
 | 项 | 内容 |
 |---|---|
-| 现状 | `MallManagementApplicationTests.contextLoads()` 依赖 JPA + `ddl-auto`，推测需要真实 MySQL 连接 |
-| 问题 | CI（无 MySQL）上该测试会红，整个 `mvn test` 失败 |
-| 建议 | 改为 `@WebMvcTest` 切片，或加 `@Disabled` 并新建切片测试，或 CI 增加 MySQL service |
-| 处置 | 已采用「加 `@Disabled`」临时规避：`MallManagementApplicationTests.contextLoads()` 禁用，Web 层覆盖由 `smoke/` 包承担。未采用 `@WebMvcTest` 改写法，因为会与 smoke 层重复且丢掉全上下文覆盖 |
-| 优先级 | 高（CI 阻塞） |
-| 状态 | 已临时规避（A3 阶段 CI 接入 MySQL service 后删除 `@Disabled` 重新启用，届时本项可关闭） |
+| 原文现状 | `MallManagementApplicationTests.contextLoads()` 依赖 JPA + `ddl-auto`，**推测**需要真实 MySQL 连接 |
+| 原文问题 | CI（无 MySQL）上该测试会红，整个 `mvn test` 失败 |
+| 原文处置 | 加 `@Disabled` 临时规避（`c3cd9f6`），Web 层覆盖由 `smoke/` 包承担；未改 `@WebMvcTest`，因会与 smoke 层重复且丢掉全上下文覆盖 |
+| **实测推翻原文前半段** | 「无 MySQL 会失败」**是错的**。三个阴性探针实测（数据见 `99206a5` 的 commit message、`worklog-2026-09-20-a3.md` §缺陷记录 4）：**库名不存在（服务器可达）**与**端口无监听（完全无库）**两种情况**都是整个类 `Failures 0` / BUILD SUCCESS**。根因 TD-01 —— `ddl-auto=update` 的 schema 管理是「尽力而为」（连不上只记 ERROR 日志、不终止启动），且本项目**无任何 `@Entity`**、本就无 schema 可导出；两条叠加，启动路径上**没有任何一处「连不上就必须失败」**。故 `@Disabled` 当初的理由本身不成立 |
+| 为什么必须补第二条 | 若 D1 只做「`@Disabled` 改环境开关」，CI 会多出一条**「库好不好都绿」**的步骤 —— 与 TD-15（以响应体判成功）、`recLoad()` 死代码同属「断言落空」那一族 |
+| 处置（D1，方案 A） | ① `@Disabled` → `@EnabledIfEnvironmentVariable(named="A3_ENABLED", matches="true")`（开关置于类上，将来新增方法不会漏）；② 新增 `databaseIsReachable()`：`JdbcTemplate` 跑一条 `SELECT 1`，**强制真连**。加后探针 2/3 分别变成 `Errors: 1` 与 BUILD FAILURE，且报错**只**指向 `databaseIsReachable` |
+| 刻意的克制 | 两个方法职责分开、不合并（`contextLoads` 证明「全上下文能启动」—— smoke 是 `@WebMvcTest` 切片，从不启动完整上下文，这一条本身仍有价值）；**只断言可达性、不断言 `VERSION()` 前缀**（本地开发库是 8.0.32，断言 8.4 会让它在本地变红；版本门禁由 A3 脚本 P1 承担）；未动 `pom.xml`、未动任何生产 profile、未引依赖 |
+| CI 接法 | `concurrency` job 加一步：`A3_ENABLED=true ./mvnw -B -Dtest=MallManagementApplicationTests test`。**backend job 不设该变量** —— 那里全量 `mvn test` 自动跳过本类（跳过不是失败），backend 仍零 MySQL |
+| 优先级 | — |
+| 状态 | 已关闭（2026-09-20） |
 
 ## TD-11 前端依赖存在已知漏洞
 
@@ -237,3 +241,5 @@
 **硬性前置**：`Mall-management-server/mvnw` 可执行位 `100644 → 100755`，Linux runner 必需 —— `f7d6172`。
 
 **收尾状态**：主源 7 个 `.java`、测试源 5 个；全项目 5 用例 = smoke 层 4 个（CI 实跑）+ `contextLoads` 1 个（`@Disabled`）。
+
+> 上句是 **A2 当时的快照**。A3 已改：`@Disabled` 换成 `A3_ENABLED` 环境开关，并新增 `databaseIsReachable()` → 全项目 6 用例（默认 SKIP 2 个）。见上方 TD-10（已关闭）。

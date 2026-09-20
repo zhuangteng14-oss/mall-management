@@ -11,7 +11,7 @@
 | 后端框架 | Spring Boot 3.4.5 | `pom.xml:8` |
 | JDK | Java 17 | `pom.xml:30` |
 | 服务端口 | 8088 | `application.properties:3` |
-| 数据库 | MySQL 8.0.32，库 `mall_management_sql` | `mall_management_sql.sql:3` |
+| 数据库 | 开发库 MySQL 8.0.32，库 `mall_management_sql`；A3 另有独立 VM 实例 8.4.11（库名**相同**，见 `environment.md`） | `mall_management_sql.sql:3` |
 | 数据访问 | `JdbcTemplate` 直接写裸 SQL 字符串 | 3 个 Controller 均 `@Autowired JdbcTemplate` |
 | 前端 | Vue 3 CLI 工程（Vue CLI 5 / webpack 5，`vue.config.js`、`babel.config.js`） | `package.json:12`（`vue: ^3.2.13`）、`:13`（`vue-router: ^4.6.4`，Vue Router 4 仅支持 Vue 3）、`:20`（`@vue/cli-service: ~5.0.0`） |
 
@@ -24,9 +24,12 @@
 期末项目/
 ├── agent.md                                项目开发 Agent 规范（224 行）
 ├── mall_management_sql.sql                 11 张表 DDL + 种子数据
-├── scripts/                                ← 预留，后续放验证脚本
+├── scripts/concurrency/                    A3 并发测试脚本（任务上下文见 context-packs/concurrency-test.md）
+│   ├── ConcurrencyRunner.java              单文件：6 场景负载 + 断言 + preflight P0–P7 + JSON 报告（2270 行）
+│   ├── run.sh                              两步编译（javac -encoding UTF-8 → java -cp）+ 驱动解析（Maven 回退）
+│   └── reports/                            运行日志与 JSON 报告（已 .gitignore，不入库）
 ├── docs/agent/                             项目文档 9 份（含 db-migration.md、business-decisions.md），另有 context-packs/ 与 archive/
-├── .github/workflows/ci.yml                GitHub Actions CI（后端全量测试 + 前端构建）
+├── .github/workflows/ci.yml                GitHub Actions CI（3 job：backend 全量测试 + frontend 构建 + concurrency 并发脚本）
 ├── Mall-management-server/                 Spring Boot 后端
 │   ├── pom.xml  mvnw  mvnw.cmd  HELP.md
 │   ├── .idea/                              已被 Mall-management-server/.gitignore 忽略
@@ -41,9 +44,10 @@
 │       │       ├── MallManagementMessage.java          /message
 │       │       └── MallManagementGoodsController.java  /mysqlGoods
 │       ├── main/resources/application.properties
+│       ├── main/resources/application-a3.properties    A3 profile：指向独立 MySQL 实例（同名库，TD-13）；含明文默认口令
 │       ├── main/resources/static/img/                  8 张图片
 │       ├── test/java/com/minke/mallmanagementserver/
-│       │   ├── MallManagementApplicationTests.java      全上下文冒烟测试（@Disabled，见 TD-10）
+│       │   ├── MallManagementApplicationTests.java      全上下文冒烟 + 真查库（`A3_ENABLED=true` 才跑，见 TD-10）
 │       │   └── smoke/
 │       │       ├── AbstractSmokeTest.java               smoke 基类（@WebMvcTest + 鉴权预留口子）
 │       │       ├── LoginSelectSmokeTest.java            /mysqlLogin/loginSelect（只读）
@@ -89,7 +93,7 @@ Vue 3 CLI 工程，14 个页面视图 + 1 个组件 + 1 个路由表。页面按
 | 全项目零缓存 | `cache-map.md` |
 | `ddl-auto=update` 与手写 DDL 脚本并存 | `db-schema.md` |
 | 11 张表中仅 `message` 有二级索引 | `db-schema.md` |
-| 测试：4 个测试类 / 5 个用例，其中 1 个因缺 MySQL 被 `@Disabled` | `tech-debt.md` TD-10 |
+| 测试：5 个测试类 / 6 个用例；`MallManagementApplicationTests` 的 2 个用例默认 SKIP，仅 `A3_ENABLED=true` 时跑（真连库） | `tech-debt.md` TD-10（已关闭） |
 
 ## 6. N+1 待优化清单（优先级：**高**）
 
