@@ -15,10 +15,10 @@
  *
  * 分阶段落地（锁 4，每阶段一个 commit）：
  *   阶段 A  参数解析 + 退出码 + 空壳场景        已完成
- *   阶段 B  P0 静态长度校验 + P1–P4（JDBC 侧） ← 本文件当前所处阶段
- *   阶段 C  P5–P7（HTTP 侧前置校验）
- *   阶段 D  六场景（S1 / S2a / S2b / S3 / S4a / S4b）
- *   阶段 E  run.sh 完整版 + dependency:build-classpath 解析
+ *   阶段 B  P0 静态长度校验 + P1–P4（JDBC 侧）  已完成
+ *   阶段 C  P5–P7（HTTP 侧前置校验）           已完成
+ *   阶段 D  七段（S1 / S2a / S2b / S3 / S4a / S4b / B2）  已完成
+ *   阶段 E  run.sh 完整版 + dependency:build-classpath 回退 + JSON 报告  ← 本文件当前所处阶段
  */
 
 import java.io.IOException;
@@ -50,6 +50,7 @@ import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.LongAdder;
 import java.util.function.BiPredicate;
+import java.util.function.Predicate;
 
 public class ConcurrencyRunner {
 
@@ -111,8 +112,8 @@ public class ConcurrencyRunner {
         boolean skipNegativeControl = false;
         // P5 就绪探针等待上限（秒）。后端冷启动要跑 Hibernate ddl-auto=update 的校验，非瞬时。
         int readyTimeoutSec = 60;
-        // 场景选择（阶段 D 可逐个跑）；H3 的六段负载即此六项
-        String scenarios = "S1,S2a,S2b,S3,S4a,S4b";
+        // 场景选择（阶段 D 可逐个跑）；H3 的六段负载即前六项，B2 是澄清 1 的 B 组（check-then-insert TOCTOU）
+        String scenarios = "S1,S2a,S2b,S3,S4a,S4b,B2";
         // S4b 时长。H3 定 60s；OD-8（D2）尚未裁决，故做成可覆盖项，默认随 H3。
         int s4bDurationSec = 60;
         String reportDir = "scripts/concurrency/reports";
@@ -155,7 +156,7 @@ public class ConcurrencyRunner {
         "  --reset-db             重跑 mall_management_sql.sql（DROP 全部 11 表！仅限一次性实例）",
         "  --skip-negative-control  跳过 P7 阴性对照（本机库不可达时会自动 skip，无需手动指定）",
         "  --ready-timeout-sec N  P5 就绪探针等待上限，默认 60",
-        "  --scenarios A,B         只跑指定负载段，默认 S1,S2a,S2b,S3,S4a,S4b",
+        "  --scenarios A,B         只跑指定负载段，默认 S1,S2a,S2b,S3,S4a,S4b,B2",
         "  --s4b-duration-sec N    S4b 混合负载时长，默认 60（H3 值；OD-8/ D2 未裁决）",
         "  --help                 显示本帮助",
         "",
@@ -209,13 +210,13 @@ public class ConcurrencyRunner {
             System.exit(EXIT_PREFLIGHT_FAILED);
             return;
         }
-
         if (o.cleanupOnly) {
             cleanup(o);
             System.out.println("--cleanup-only：未产生任何业务流量。退出码 0。");
             System.exit(EXIT_PASS);
             return;
         }
+
 
         System.out.println("[阶段 D] preflight P0–P7 通过，开始跑负载段：" + o.scenarios);
 
@@ -364,6 +365,12 @@ public class ConcurrencyRunner {
         final boolean gate;      // gate=true 进退出码；false 仅记录
         String verdict = "SKIP";
         String detail = "";
+        // C4 要求的复现率字段。null = 本断言未做多轮计数（报告里落 null，不拿别的数凑）。
+        // 目前只有 A-B2-1 会填：B-2 场景自己跑 --rounds 轮，逐轮判定后在场景内计数，
+        // 不靠外层循环、也不借别的断言的数来凑（reproRounds = 各轮 verdict 为
+        // EXPECTED_DEFECT_PRESENT 的轮数）。
+        Integer rounds = null;
+        Integer reproRounds = null;
 
         Ass(String id, String desc, boolean gate) {
             this.id = id;
@@ -374,11 +381,14 @@ public class ConcurrencyRunner {
 
     static final List<Ass> ASS = new ArrayList<>();
 
-    /** 期望 verdict 表。默认 PASS；A-S2a-1 例外 —— H3 明示其「当前应看到缺陷存在」。 */
+    /** 期望 verdict 表。默认 PASS；下列例外 —— H3 明示其「当前应看到缺陷存在」。 */
     static final Map<String, String> EXPECT = new LinkedHashMap<>();
 
     static {
         EXPECT.put("A-S2a-1", "EXPECTED_DEFECT_PRESENT");
+        // A-B2-1 同理：只有 --b-group-gate=true 时它才进门禁，此时「缺陷存在」才是通过。
+        // 不登记的话，门禁模式下缺陷真的复现了反而会被判失败（倒挂）。
+        EXPECT.put("A-B2-1", "EXPECTED_DEFECT_PRESENT");
     }
 
     static Ass ass(String id, String desc, boolean gate) {
@@ -436,6 +446,38 @@ public class ConcurrencyRunner {
             b.append(' ');
         }
         return b.toString();
+    }
+
+    // ===================== 场景数值记录（供 JSON 报告取数） =====================
+
+    /**
+     * 场景 → 键值。报告只从这里取数值，不去解析 stdout 文本
+     * （解析自己的打印串等于把「给人看的格式」变成契约，以后改一个字就悄悄失效）。
+     * 值一律存字符串，JSON 写出时按「像不像数」决定加不加引号，见 jval()。
+     */
+    static final Map<String, Map<String, String>> REC = new LinkedHashMap<>();
+
+    static void rec(String scen, String k, Object v) {
+        REC.computeIfAbsent(scen, x -> new LinkedHashMap<>()).put(k, String.valueOf(v));
+    }
+
+    /** 一档负载的全部计数与分位，一次记全，免得各场景各记一部分、口径不一。 */
+    static void recLoad(String scen, Load ld) {
+        rec(scen, "offeredQps", ld.offeredQps);
+        rec(scen, "achievedQps", ld.qpsOf());
+        rec(scen, "wallSec", String.format("%.1f", ld.elapsedMs() / 1000.0));
+        rec(scen, "n", ld.total());
+        rec(scen, "ok", ld.ok.sum());
+        rec(scen, "unexpected", ld.unexpected.sum());
+        rec(scen, "http5xx", ld.http5xx.sum());
+        rec(scen, "connErr", ld.connErr.sum());
+        rec(scen, "p50ms", String.format("%.1f", ld.msOf(0.50)));
+        rec(scen, "p95ms", String.format("%.1f", ld.msOf(0.95)));
+        rec(scen, "p99ms", String.format("%.1f", ld.msOf(0.99)));
+        rec(scen, "maxMs", String.format("%.1f", ld.maxMs()));
+        if (ld.offeredQps > 0 && ld.qpsNum() < ld.offeredQps * 0.95) {
+            rec(scen, "note", "未达速（只记录，不门禁）");
+        }
     }
 
     // ===================== HTTP 调用与负载 =====================
@@ -606,13 +648,29 @@ public class ConcurrencyRunner {
         }
 
         String pct() {
-            List<Long> v = new ArrayList<>(lat);
-            Collections.sort(v);
+            List<Long> v = sortedLat();
             if (v.isEmpty()) {
                 return "n=0";
             }
             return String.format("n=%d p50=%.1f p95=%.1f p99=%.1f max=%.1f(ms)",
                     v.size(), ms(v, 0.50), ms(v, 0.95), ms(v, 0.99), v.get(v.size() - 1) / 1e6);
+        }
+
+        /** 报告要的是数值而不是拼好的串；pct() 与本方法共用同一份排序，避免两条口径。 */
+        List<Long> sortedLat() {
+            List<Long> v = new ArrayList<>(lat);
+            Collections.sort(v);
+            return v;
+        }
+
+        double msOf(double q) {
+            List<Long> v = sortedLat();
+            return v.isEmpty() ? -1 : ms(v, q);
+        }
+
+        double maxMs() {
+            List<Long> v = sortedLat();
+            return v.isEmpty() ? -1 : v.get(v.size() - 1) / 1e6;
         }
 
         void dumpSamples() {
@@ -634,6 +692,30 @@ public class ConcurrencyRunner {
             return "null";
         }
         return s.length() <= 160 ? s : s.substring(0, 160) + "…";
+    }
+
+    /**
+     * 非 ASCII 转成「反斜杠 u 加四位十六进制」的转义形式。
+     * （不能把这个形式直接写进注释：javac 在词法分析之前先做 Unicode 转义预处理，
+     *   注释里的反斜杠 u 同样会触发「非法的 Unicode 转义」编译错误。）
+     * 起因：宿主 JVM 是 GBK 时，中文经 System.out 打到 UTF-8 终端会显示成乱码，
+     * 于是「响应体里到底有没有那几个字」这件事在终端上无法判断 —— 判定看着像坏了，
+     * 也可能只是打印坏了。转义后与终端字符集无关，可逐字节对照。
+     */
+    static String esc(String s) {
+        if (s == null) {
+            return "null";
+        }
+        StringBuilder b = new StringBuilder();
+        for (int i = 0; i < s.length(); i++) {
+            char c = s.charAt(i);
+            if (c >= 0x20 && c < 0x7F) {
+                b.append(c);
+            } else {
+                b.append(String.format("\\u%04x", (int) c));
+            }
+        }
+        return b.toString();
     }
 
     static final int PACE_THREADS = 32;
@@ -743,6 +825,34 @@ public class ConcurrencyRunner {
         return n;
     }
 
+    /** 通用计数。loginAdd 返回的是裸字符串（"添加成功！" / "0"）而非 JSON，successTrue() 对它无效。 */
+    static int countIf(List<Call> cs, Predicate<Resp> p) {
+        int n = 0;
+        for (Call c : cs) {
+            if (p.test(c.r)) {
+                n++;
+            }
+        }
+        return n;
+    }
+
+    /**
+     * 打印前 cap 条响应原文（码 + 体）。
+     * 起因：B-2 用 burst 而非 paced，没有 Load.dumpSamples 那层兜底 —— 结果是「计数对不上时
+     * 只能看到数字、看不到原因」。计数类断言旁边必须能打出原文，否则异常响应体无从取证。
+     */
+    static void dumpSamples(String scen, List<Call> cs, int cap) {
+        int shown = 0;
+        for (Call c : cs) {
+            if (shown >= cap) {
+                return;
+            }
+            System.out.println("      · " + scen + " HTTP " + c.r.code + " body=" + trunc(c.r.body)
+                    + "  [esc] " + trunc(esc(c.r.body)));
+            shown++;
+        }
+    }
+
     static Map<String, String> form(Object... kv) {
         Map<String, String> f = new LinkedHashMap<>();
         for (int i = 0; i + 1 < kv.length; i += 2) {
@@ -845,6 +955,9 @@ public class ConcurrencyRunner {
         }
         if (o.has("S4b")) {
             guard("S4b", () -> s4b(o));
+        }
+        if (o.has("B2")) {
+            guard("B2", () -> b2(o));
         }
         return gateFailures();
     }
@@ -1158,6 +1271,162 @@ public class ConcurrencyRunner {
                 + "/dly" + gDly + "/rcv" + gRcv + "/gs" + gGs + " 不变式违反=" + viol);
         ld.dumpSamples();
         lockDelta(o, "S4b", lock0);
+    }
+
+    /** B-2 逐轮明细。报告要的是嵌套数组，塞进 REC 的扁平字符串会丢结构。 */
+    static class B2Round {
+        int round, login5xx, loginOk, loginExisted, loginUnclear;
+        int gtRows, gtOk, frRows, frOk;
+        String verdict;
+
+        String line() {
+            return "第 " + round + " 轮  loginAdd(5xx=" + login5xx + " 成功=" + loginOk + " 已存在=" + loginExisted
+                    + " 未判定=" + loginUnclear + ")  goodstype(重复行=" + fmtRows(gtRows) + " 新增成功=" + gtOk + ")"
+                    + "  friendAdd(重复行=" + fmtRows(frRows) + " 申请成功=" + frOk + ")  → " + verdict;
+        }
+
+        static String fmtRows(int n) {
+            return n < 0 ? "未能核对" : String.valueOf(n);
+        }
+    }
+
+    static final List<B2Round> B2_ROUNDS = new ArrayList<>();
+
+    /**
+     * B-2：三处 check-then-insert（TOCTOU），各跑 o.rounds 轮（默认 5，H3 澄清 1 的 B 组轮数）。
+     *
+     * 三处端点的**表约束不同，故缺陷形态不同** —— 这是本场景的要点，不是细节：
+     *   · /mysqlLogin/loginAdd → 写 login / user / customerimage，三表**均有主键**
+     *     （login.UserName、user.username、customerimage.UserName）。所以并发同参**插不出重复行**：
+     *     check 与 insert 之间无锁 → 20 个请求全部穿过 check → 主键把第 2 个起的 INSERT 挡成
+     *     ERROR 1062 → 未捕获 → Spring 默认 500。**信号是 5xx，不是重复行。**
+     *   · /mysqlGoods/goodstype（POST）→ 写 goodstype，只有自增主键 → **能插出重复行**。
+     *   · /message/friendAdd → 写 friend，只有自增主键 → **能插出重复行**。
+     *
+     * 因此本轮 verdict 取「三处任一出现信号」：5xx>0 或任一表重复行≥2。
+     * 注意极性：B-2 里 **5xx 本身就是缺陷在显形**，与其它场景「5xx==0 才算过」相反。
+     * 故按裁决默认 record-only（--b-group-gate=false），要门禁须显式打开。
+     *
+     * 每轮必须换全新的 username / GoodType / 好友对：否则第 2 轮起 check 会命中第 1 轮写入的行，
+     * 请求直接走「已存在」分支、根本不进并发窗口，复现率会被自己伪造出来。
+     */
+    static void b2(Opt o) throws Exception {
+        final int TH = 20;
+        String pre = NS_PREFIX + o.runId;
+        int repro = 0;
+        int gtDupRounds = 0, frDupRounds = 0, login5xxRounds = 0;
+
+        B2_ROUNDS.clear();
+        for (int r = 1; r <= o.rounds; r++) {
+            B2Round b = new B2Round();
+            b.round = r;
+            String u = pre + "-U" + r;
+            String gt = pre + "-GT" + r;
+            String fA = pre + "-F" + r + "-A";
+            String fB = pre + "-F" + r + "-B";
+
+            // ---- 1) loginAdd 同 username ×20 ----
+            List<Call> a = burst(TH, i -> call("loginAdd", send(HTTP, o.baseUrl + "/mysqlLogin/loginAdd",
+                    form("username", u, "usertype", "客户", "userid", u,
+                         "password", "a3pass", "age", 20, "gender", "男"))));
+            b.login5xx = count5xx(a);
+            b.loginOk = countIf(a, x -> x.code == 200 && x.body.contains("添加成功"));
+            b.loginExisted = countIf(a, x -> x.code == 200 && x.body.trim().equals("0"));
+            // HTTP 200 但既不是「添加成功」也不是「0」→ 判不了，单列出来，不往任一格里硬塞
+            b.loginUnclear = TH - b.login5xx - b.loginOk - b.loginExisted;
+            if (b.login5xx > 0) {
+                login5xxRounds++;
+            }
+            if (b.loginUnclear > 0) {
+                System.out.println("[B-2] 第 " + r + " 轮 loginAdd 有 " + b.loginUnclear + " 条既非 5xx、"
+                        + "也非「添加成功」/「0」——原文如下（未判定数不为 0 时必看）:");
+                // 同一轮里把「期望字面量」与「实际响应体」都按字节打出来，
+                // 才能分清是响应不对还是判定不对（终端乱码时分不清）。
+                System.out.println("      期望字面量 esc: 添加成功=" + esc("添加成功")
+                        + "  单独0=" + esc("0"));
+                dumpSamples("loginAdd", a, 3);
+            }
+
+            // ---- 2) goodstype 同 GoodType ×20（GoodTypeNew 必须给：列是 NOT NULL，缺参会 NULL→失败）----
+            List<Call> g = burst(TH, i -> call("goodstype", send(HTTP, o.baseUrl + "/mysqlGoods/goodstype",
+                    form("GoodType", gt, "GoodTypeNew", 229121))));
+            b.gtOk = countMsg(g, "新增成功");
+            int gtRows = jdbcCount(o, "SELECT COUNT(*) FROM mall_management_sql.goodstype WHERE GoodType = ?", gt);
+            if (gtRows < 0) {
+                System.err.println("[B-2] goodstype 重复行数未能核对（JDBC 失败），本轮按未能核对记，不计入复现");
+            }
+            b.gtRows = gtRows;
+            if (gtRows >= 2) {
+                gtDupRounds++;
+            }
+            // 插了行却一条「新增成功」都没有 = 计数与响应体互相矛盾，必须打原文
+            if (gtRows >= 2 && b.gtOk == 0) {
+                System.out.println("[B-2] 第 " + r + " 轮 goodstype 行数=" + gtRows + " 但「新增成功」=0，"
+                        + "两者矛盾，响应原文如下:");
+                dumpSamples("goodstype", g, 3);
+            }
+
+            // ---- 3) friendAdd 同好友对 ×20 ----
+            List<Call> f = burst(TH, i -> call("friendAdd", send(HTTP, o.baseUrl + "/message/friendAdd",
+                    form("customerId", fA, "friendId", fB))));
+            b.frOk = countMsg(f, "好友申请已发送");
+            int frRows = jdbcCount(o, "SELECT COUNT(*) FROM mall_management_sql.friend "
+                    + "WHERE customerid = ? AND friendid = ?", fA, fB);
+            if (frRows < 0) {
+                System.err.println("[B-2] friend 重复行数未能核对（JDBC 失败），本轮按未能核对记，不计入复现");
+            }
+            b.frRows = frRows;
+            if (frRows >= 2) {
+                frDupRounds++;
+            }
+
+            boolean signal = b.login5xx > 0 || gtRows >= 2 || frRows >= 2;
+            b.verdict = signal ? "EXPECTED_DEFECT_PRESENT" : "DEFECT_FIXED";
+            if (signal) {
+                repro++;
+            }
+            B2_ROUNDS.add(b);
+            System.out.println("[B-2] " + b.line());
+        }
+
+        int n = B2_ROUNDS.size();
+        Ass summary = ass("A-B2-1", "B-2 三处 TOCTOU（loginAdd / goodstype / friendAdd）逐轮复现：rounds=" + n
+                + " reproRounds=" + repro + "；复现轮 < 全部轮 即为弱证据（可能只是竞态未重叠，不等于缺陷已修）",
+                o.bGroupGate);
+        summary.rounds = n;
+        summary.reproRounds = repro;
+        if (o.bGroupGate) {
+            // 门禁模式：verdict 按缺陷语义落，repro=0 即 FAIL
+            if (repro > 0) {
+                settleDefect(summary, true, "reproRounds=" + repro + "/" + n
+                        + "（loginAdd 出 5xx 的轮=" + login5xxRounds + "，goodstype 出重复行的轮=" + gtDupRounds
+                        + "，friendAdd 出重复行的轮=" + frDupRounds + "）");
+            } else {
+                // 缺陷未复现有两种可能，裁决要求两种都写出来，不能只报「已修复」
+                summary.verdict = "DEFECT_FIXED";
+                summary.detail = "reproRounds=0/" + n + " —— 两种可能：(a) 缺陷已被修复（check 与 insert 已原子化）；"
+                        + "(b) 本轮竞态未重叠（20 线程没同时穿过 check-and-insert 窗口）。"
+                        + "逐轮明细见上方 [B-2] 行与报告的 perRound，勿只看这一条下结论";
+            }
+        } else {
+            // record-only 模式：本场景 5xx 是缺陷显形信号，与其它场景「5xx==0 才算过」极性相反，
+            // 故默认不进退出码。verdict 落 RECORD_ONLY 而不是 DEFECT_FIXED —— 后者会谎称「缺陷已修」。
+            summary.verdict = "RECORD_ONLY";
+            summary.detail = "reproRounds=" + repro + "/" + n + "（--b-group-gate=false，不计入退出码）"
+                    + "；分类计数 login5xx轮=" + login5xxRounds + " goodstype重复行轮=" + gtDupRounds
+                    + " friend重复行轮=" + frDupRounds;
+        }
+
+        for (int i = 0; i < B2_ROUNDS.size(); i++) {
+            B2Round b = B2_ROUNDS.get(i);
+            rec("B2", "round" + (i + 1), b.line());
+        }
+        rec("B2", "rounds", n);
+        rec("B2", "reproRounds", repro);
+        rec("B2", "login5xxRounds", login5xxRounds);
+        rec("B2", "goodstypeDupRounds", gtDupRounds);
+        rec("B2", "friendDupRounds", frDupRounds);
+        rec("B2", "recordOnly", !o.bGroupGate);
     }
 
     /** S4b 预建单池：JDBC 批量插入。setup 不经端点，不影响 A-S4b-* 的判定。 */
