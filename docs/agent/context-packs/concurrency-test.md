@@ -63,12 +63,18 @@
 - 测试运行需 MySQL（CI 需加 service container）
 - 不影响现有 smoke test
 - 不改业务代码，只加测试
-- **运行形态（已定）**：产物放 `scripts/`（project-map 标注「预留，后续放验证脚本」），以 **Java 17 单文件源码启动**运行：
+- **运行形态（已定，2026-09-20 修正）**：产物放 `scripts/`（project-map 标注「预留，后续放验证脚本」），以 **Java 17 两步编译后运行**运行：
 
   ```bash
-  java scripts/concurrency/ConcurrencyRunner.java
+  javac -encoding UTF-8 -d <out> scripts/concurrency/ConcurrencyRunner.java
+  java -cp <out>:<mysql-connector.jar> ConcurrencyRunner [选项]
   ```
 
+  - ⚠️ **原定案是「单文件源码启动」`java scripts/concurrency/ConcurrencyRunner.java`，已作废**：
+    该模式由启动器在运行期就地编译，**不采用任何编译期 `-encoding`**，而按宿主平台默认
+    字符集解读源码。Windows 上 `file.encoding=GBK` → 源里中文字面量全部失真 → 所有依赖
+    中文响应体的断言静默落空、恒不命中。实测同脚本同机器，S3 由「异常单=0 / PASS」变成
+    「异常单=10 / FAIL」，且不报任何错。详见待落盘清单第 18 条。
   - 只走 HTTP，**不依赖项目 classpath**，故可完全绕开 Maven
   - 不进 `surefire`，**`mvn test` 不会跑它** —— 避免 A2 定的「全量 `mvn test`」把每次 CI 都拖成必须起 MySQL
   - CI 侧**新增独立 job**（带 `mysql` service）跑此脚本；**原 backend job 保持零 MySQL、全量快速**
@@ -257,4 +263,22 @@
 **阶段 D 实测发现**
 
 17. **S4b 性能退化 = `order.OrderId` 无索引 → CAS 全表扫（已登记 TD-14）**：`SHOW INDEX` 实测 `order` 只有 `PRIMARY(Id)`；三个 CAS 端点 WHERE 均以 `OrderId = ?` 起头，`EXPLAIN` 实测 `type=ALL`、`possible_keys` 空。同款 WHERE 的只读对照（16 线程 × 25，只变行数）：**6 行 p50=1ms → 6006 行 p50=51ms → 12006 行 p50=94ms**（12000 填充行测后已删，`order` 回到 6 行）。满负载档 `order` 约 1 万行 → CAS p50 由短档 5.5ms 涨至 **398.9ms**、达成 **68.3 QPS**（目标 120）。与 §5 行 9 是同一索引缺失的两个面（正确性 / 性能）。**A3 不加索引**。
-    ⚠️ 上述 `398.9ms / 68.3 QPS` 出自**背压之前**的负载发生器：开环提交 + 无界队列 → 7200 条按计划 60s 提交完毕、后端只能吃 68 QPS，积压队列在提交结束后又排空约 45s，于是 `achieved` 被算成排空期均值、墙钟 105s（读起来像「按 68 QPS 跑」，真相是「按 120 QPS 提交、被测端只吃 68」）。已修：`paced` 加 `Semaphore` 背压，提交速率被压到可持续速率，`achieved` 才等于真实达速率；`line()` 同时打印 `offered` / `achieved` / `wall`，未达速时标 `←未达速（只记录，不门禁）`。**修后的达速率待下一次运行重测**。
+    ⚠️ 上述 `398.9ms / 68.3 QPS` 出自**背压之前**的负载发生器：开环提交 + 无界队列 → 7200 条按计划 60s 提交完毕、后端只能吃 68 QPS，积压队列在提交结束后又排空约 45s，于是 `achieved` 被算成排空期均值、墙钟 105s（读起来像「按 68 QPS 跑」，真相是「按 120 QPS 提交、被测端只吃 68」）。已修：`paced` 加 `Semaphore` 背压，提交速率被压到可持续速率，`achieved` 才等于真实达速率；`line()` 同时打印 `offered` / `achieved` / `wall`，未达速时标 `←未达速（只记录，不门禁）`。
+    **修后重测（2026-09-20 全量档，两步编译，runId=4f11e708）**：`offered=120 achieved=63.0QPS wall=114.3s p50=496.1 p95=779.7 p99=842.4 max=1120.6(ms)`，不变式违反=0、5xx=0。即：`achieved` 从 68.3 降到 63.0，**不是变差，是变准** —— 旧值把排空期的高速段平均了进去；新值是背压下的真实持续吞吐。p50 从 398.9 升到 496.1 是因为旧值同样被排空期稀释。**结论不变且更硬：同一份 `order` 表、同款 WHERE，120 QPS 不可达，瓶颈是索引缺失（TD-14），不是负载发生器。**
+    ⚠️ 仍待办：`order` 表在 S4b 期间由 2880 条递增至约 1 万条，上述 p50 是**整个窗口的合并分位**，未按表大小分段；若要「行数 → 延迟」的严格曲线，须另做只读对照（同第 17 条前半的实验）。
+
+18. **A3 级缺陷：单文件源码启动使中文断言静默失效（已根治，须单独落盘）**。严重性**高于任何单条断言**：它让判定本身不可信，且**不报错**。
+    - 根因：`java Foo.java`（单文件源码启动）由启动器**在运行期就地编译**源文件，此时**不采用任何编译期 `-encoding`**，而按宿主平台默认字符集解读源码。Windows 上 `file.encoding=GBK` → 源中中文字面量全部失真。
+    - 实测（同一份脚本、同一台机器，唯一变量是启动方式）：源码模式 + GBK 下 **S3 由「异常单=0 / A-S3-2 PASS」变成「异常单=10 / FAIL」**。受影响断言 = 一切比对中文响应体的项：`msg == 「订单不存在或已付款」`（A-S3-2）、`msg` 以「数据库错误」开头（A-S3-3）、`添加成功！`（B-2 `loginAdd`）。它们失真后**恒不命中**，于是 S3 判成「异常单=10」，而 A-S3-3 这类「不得出现」型断言反而**恒真**（假绿）。
+    - 定位方式：B-2 首轮出现自相矛盾的数字（`goodstype` 重复行 10 行但「新增成功=0」、`loginAdd` 20/20 未判定）。拒绝猜测，加 `dumpSamples` + 非 ASCII 转义（`esc()`），做 A/B 对照（唯一变量 `-Dfile.encoding=UTF-8`）后确认：**响应体正确，是被编译进 class 的字面量失真**。
+    - 修法（根治，非掩盖）：改启动方式为两步编译，`javac -encoding UTF-8 -d <out>` 后 `java -cp <out>:<driver>`。**不用 `-Dfile.encoding=UTF-8`** —— 它改的是 JVM 全局默认，会连 JDBC 与文件读取一起动，属于掩盖症状。run.sh 封装这两步，本地与 CI 同一套逻辑。
+    - 运行期输出另接 UTF-8（`forceUtf8Output`）：编译期钉死的是**判定**，但 `System.out` 仍按平台字符集编码字节，中文日志会落成 GBK 字节（终端与 CI 都按 UTF-8 读 → 乱码；JSON 报告更是读不出来）。只约束「本程序写出去的字节」，不动 JVM 全局默认。
+    - 守卫：`charsetSelfCheck()` 在**产生任何判定之前**用码点字面量与源码字面量比对，失真则 `exit 2` 拒绝运行，并把两边转义形式打进日志。位置在 `--cleanup-only` 之后、preflight 之前 —— 清理该让它跑，判定不许在失真前提下产生。
+    - **影响范围已核：历史日志无假绿、无假红。** 两份含 S3 的日志（`a3_d2` / `a3_d_full`）均为「异常单=0 + A-S3-2 PASS」，说明那两次的中文比对确实命中了（源码模式下会显示 10）。⚠️ 遗留缺口：此前日志**不记录启动方式**，故「某次运行是哪种模式」无法事后判定，只能靠上述结果反推。已补：自检行现在把 `file.encoding` / `native.encoding` / 启动方式 / 自检结果写进每次运行的日志。
+    - 附带教训（已写进代码注释）：`javac` 的 Unicode 转义预处理在词法分析**之前**，故 `\uXXXX` 即使写在**注释里**也会触发「非法的 Unicode 转义」编译错误。
+
+19. **B-2 实测来源（`rounds=5 / reproRounds=5/5`）**：三处 check-then-insert 各 5 轮全中，共两次独立实测 —— ①背压/字符集修正前一次；②两步编译 + run.sh 下 `runId=f84fc015` 一次。两次逐轮数字一致：`loginAdd(5xx=9 成功=1 已存在=10 未判定=0)`、`goodstype` 重复行=新增成功数、`friendAdd` 重复行=申请成功数。
+    - 三处约束不同、缺陷形态不同，故**信号极性不同**：`login/user/customerimage` 三表都有主键 → 撞键 `ERROR 1062` → 未捕获 → **HTTP 500**（信号=5xx>0，**与其它场景极性相反**：这里 5xx 是「缺陷复现」而非异常）；`goodstype`/`friend` 只有自增主键 → **插得出重复行**（信号=重复行≥2）。无全局 `@ControllerAdvice`，未捕获异常走 Spring 默认 500。
+    - 每轮必须换新 `username`/`GoodType`/`friendPair`，否则第 2 轮起查重命中第 1 轮已写入的行，`loginAdd` 直接走「已存在」分支，不进并发窗口。三个 burst 之间**串行**，不混栅栏。
+    - 默认 `--b-group-gate=false` → `A-B2-1` 落 `RECORD_ONLY`，不计退出码。刻意如此：**「本轮没复现」也可能只是竞态未重叠，不等于缺陷已修**，不该让一次没撞上的运行变红。显式开门禁时 `reproRounds>=1` → `EXPECTED_DEFECT_PRESENT`（PASS），`==0` → `DEFECT_FIXED`（FAIL，附「已修复 / 未重叠」两种可能）。
+    - 附带发现（未登记为断言，仅记录）：`loginAdd` 在 `usertype` 不等于「客户 / 商家」时会返回 `添加成功！` 而**实际不插任何行**（静默成功）。curl 复现（该请求未带 `charset`），`login` 行数不变。
