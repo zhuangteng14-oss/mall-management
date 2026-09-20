@@ -67,12 +67,13 @@ echo 123456 | sudo -S -p '' mysql < /tmp/mall_management_sql.sql
 
 | 步 | 动作 | 实测结果 |
 |---|---|---|
-| 1 | `SPRING_PROFILES_ACTIVE=a3` 起服务，**先打一个请求**，再 grep 日志里 `HikariConfig` 的 `jdbcUrl` | 日志出现 `The following 1 profile is active: "a3"`；`jdbcUrl` 指向 `192.168.229.129:3306/mall_management_sql` |
+| 1 | `SPRING_PROFILES_ACTIVE=a3` 起服务，grep 日志里 `HikariConfig` 的 `jdbcUrl`。**本项目启动期 Hibernate 初始化即触发连接**，配置块在 `Tomcat started` **之前**已打印，**不需要额外请求**；若日后按 TD-01 移除 `spring-boot-starter-data-jpa` 致 Hikari 不再被触发，再改回「先打一个请求」 | 日志出现 `The following 1 profile is active: "a3"`；`jdbcUrl` 指向 `192.168.229.129:3306/mall_management_sql` |
 | 2 | 看 `ImgPath` 打印的 `目前图片所在本地位置为：` | 解析为 `<java.io.tmpdir>/a3-uploads/`，且该目录由 `Files.createDirectories` 自动创建 |
 | 3 | `SELECT VERSION()` | **`8.4.11-0ubuntu0.26.04.1`** —— 只验「能连上」不够：8.0.33 驱动连 8.0.x 也通，会让人误以为连的是 8.4 |
 | 4 | 宿主 JDBC 用 `pom.xml` 声明的 8.0.33 直连 | **连通 → 无需兜底，`pom.xml` 未改** |
 
-> ⚠️ 第 1 步的时机是判据的一部分：Hikari **懒初始化**，配置块在**第一次 `getConnection()`** 时才打印，服务启动日志里没有。要用日志确认连的是哪台库，**必须先打一个请求**。
+> ⚠️ **第 1 步的时机已更正（2026-09-20）**：原写「Hikari **懒初始化**，配置块在**第一次 `getConnection()`** 时才打印，服务启动日志里没有 —— 要用日志确认连的是哪台库，**必须先打一个请求**」，**该判断是错的**（用户指出，与 `worklog-2026-09-20-a3.md` 同一处更正）。实测本项目**启动期 Hibernate 初始化就会触发连接**，故 `HikariConfig` 块在 `Tomcat started` **之前**已打印，**不需要额外请求**。
+> 「先打一个请求」仍作为**备用路径**保留：TD-01 建议移除未使用的 `spring-boot-starter-data-jpa`（全部数据访问走 `JdbcTemplate`），届时 Hikari 不再被 Hibernate 触发，那一步才真的需要 —— 两种未来状态下这一行都说得通，故不删。
 
 ### CI 环境
 
