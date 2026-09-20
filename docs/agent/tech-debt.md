@@ -16,15 +16,32 @@
 | 优先级 | 中 |
 | 状态 | 待确认 |
 
-## TD-02 `.idea/` 与 Git 忽略规则
+## TD-02 `.idea/` 与 Git 忽略规则 — ✅ 已关闭（原文有误，2026-09-20 更正）
 
 | 项 | 内容 |
 |---|---|
-| 现状 | `.idea/` 存在于 `Mall-management-server/.idea/`；**本目录不是 Git 仓库**，不存在索引 |
-| 问题 | 根目录无 `.gitignore`；子项目 `.gitignore:17` 已包含 `.idea/`，忽略规则本身正确 |
-| 建议 | 若启用 Git，在根目录新建 `.gitignore` |
-| 优先级 | 低 |
-| 状态 | 待确认 |
+| 原文现状 | `.idea/` 存在于 `Mall-management-server/.idea/`；**本目录不是 Git 仓库**，不存在索引 |
+| 原文问题 | 根目录无 `.gitignore`；子项目 `.gitignore:17` 已包含 `.idea/`，忽略规则本身正确 |
+| 原文建议 | 若启用 Git，在根目录新建 `.gitignore` |
+| 更正 1 | **「根目录无 `.gitignore`」是错的**。根 `.gitignore`（27 行）由 `9b87ab9` 引入，且**与本 TD 在同一个 commit 落盘**（`git show --stat 9b87ab9 -- .gitignore` = `27 +`）。不存在「记录时正确、之后过时」的时间窗，**本 TD 自诞生起即错** |
+| 更正 2 | **「本目录不是 Git 仓库，不存在索引」是错的**。monorepo 初始化后 `Mall-management-server/` 属根仓库；`git ls-files Mall-management-server/.idea` 返回 0 条，是因被根 `.gitignore:14` 的 `.idea/` 规则忽略，**不是**「无仓库」。原句属「结果对、归因错」 |
+| 更正 3 | 原文建议已于 `9b87ab9` 落地，无需再动作 |
+| 结论 | 关闭。A3（本 feature）**只在根 `.gitignore` 末尾追加**两条 A3 临时产物规则（`scripts/concurrency/reports/`、`scripts/concurrency/classpath.txt`），**不新建、不覆盖** |
+| 教训 | 「文件存在与否」类断言必须当场 `ls` / `git ls-files` 取证，不得沿用文档推断（`agent.md` 规则 9.1）。2026-09-20 抽检 TD-01/06/07/08/10/12/13 共 **7 条**，**仅本项有此类错误**（TD-12 行号、TD-13 计数均精确命中），tech-debt.md 不构成系统性失真 |
+| 优先级 | — |
+| 状态 | 已关闭（2026-09-20） |
+
+> **附：验证忽略规则的正确姿势（避免测试假象）**
+>
+> `git check-ignore` 对**不存在**的路径会「假设类型」：**无尾斜杠假定为文件，有尾斜杠假定为目录**。故 `**/node_modules/`（尾斜杠 = 只匹配目录）对 `git check-ignore node_modules`（无斜杠）会报「未被忽略」——这是**命令假象，不是规则失效**。实测：
+>
+> | 命令 | 结果 |
+> |---|---|
+> | `git check-ignore --no-index -v node_modules` | 未命中（假象） |
+> | `git check-ignore --no-index -v node_modules/` | ✅ `.gitignore:2:**/node_modules/` |
+> | `git check-ignore --no-index -v some/nonexistent/node_modules/` | ✅ 命中（不存在的路径同样可靠） |
+>
+> 结论：**查目录规则一律带尾斜杠 + `--no-index`**。
 
 ## TD-03 `agent.md` 回滚规则自相矛盾
 
@@ -65,6 +82,7 @@
 | 项 | 内容 |
 |---|---|
 | 现状 | `U:192`、`G:111`、`G:300` 三处硬编码 `"http://localhost:8088/img/" + 文件名` |
+| 口径补充（2026-09-20） | 按「**生成落库 URL**」口径 = 3 处（即上式）；按「出现 `localhost:8088` **字面量**」口径 = **4 处** —— 漏计 `U:55` 的 `@RequestParam(value = "image", defaultValue = "http://localhost:8088/img/default_user.png")`（入参默认值，非生成 URL，但同属换机即失效的硬编码）。**修复时须一并外置为 `app.upload-url-prefix`**，否则下方「改一处必漏两处」实际是**漏三处** |
 | 问题 | 换机、容器化、走反向代理或改端口后，落库的 URL 全部不可用；且前缀散落三处，改一处必漏两处 |
 | 建议 | 外置为 `app.upload-url-prefix`，三处统一注入 |
 | 优先级 | 中 |

@@ -25,3 +25,9 @@ Thumbs.db
 # 日志
 logs/
 *.tmp
+
+# A3 并发测试临时产物
+# reports/ 每次运行覆盖；classpath.txt 由 mvn dependency:build-classpath 生成
+# 注：scripts/concurrency/*.log 已由上方 **/*.log 覆盖，此处不重复
+scripts/concurrency/reports/
+scripts/concurrency/classpath.txt
