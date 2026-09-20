@@ -222,3 +222,34 @@
 | D5 | **pack §B 候选新断言**：H3 的 S4a 用 `orderAdd` 直接构造 `(1,1,1)` 等前置态 —— 反证 `orderAdd` 的三个状态位**无任何校验**，客户端可直接伪造「已付款/已发货/已收货」的订单。此为 pack §B 未收录的缺陷类（状态伪造），是否登记为 B 组新条目？ | H3 `scenarios[3].sub_phases[0].setup` |
 | D6 | H3 verdict 枚举中的 `SKIPPED` 是否保留为**前置项状态**（P7 不可达时用），与断言 verdict 分离 | H3 `phase_0_preflight.P7` |
 | D7 | H3 `R12` 要求：改 pack 时同步 grep `concurrency-map.md §5` 第 5 行的 `loginAdd` 表述（`agent.md` 规则 9.2/9.3）—— 该动作**未进 checklist**，是否补为第 16 项 | H3 `risks.R12` |
+
+### 待落盘清单（脚本跑通后一次性并入正文；本清单即索引）
+
+> 口径：下列条目均已**实测或已定案**，按约定不在脚本跑通前散落进正文。
+> 标 ⚠️ 的是**未验证项或强度不足的判据**，落盘时**必须保留标记**。
+
+**S0 实测记录（已定稿）**
+
+1. **S0-1 导入命令**：`sudo` 需密码，且 `root@localhost` 为 `auth_socket` → root 无法 TCP 登录，`-p` 形式不可能。定稿 `echo 123456 | sudo -S -p '' mysql < /tmp/mall_management_sql.sql`（文件需先上传；库名已是 `mall_management_sql`，无需 `sed` 过滤）。含 11 条 `DROP TABLE IF EXISTS` → 仅 `--reset-db`、仅 VM/CI，**不得指向有真实数据的库**。
+2. **S0-2 账号与权限**：`test@'%'` 存在（`caching_sha2_password`），实为 `GRANT ALL ON *.*`（含 DELETE）；`test@'localhost'` 不存在；DELETE 实测通过 → cleanup 可行。**越权登记为新 TD**：「`test` 账号本应最小权限，本地/CI 因 cleanup 放 ALL，转生产前必须收紧」——登记，不改。
+3. **S0-5 启动验证四步**：VM `SELECT VERSION()` = `8.4.11-0ubuntu0.26.04.1`；宿主 JDBC 用 `pom.xml` 声明的 8.0.33 连通 → **无需回退，`pom.xml` 未改**；后端自证四步（`profile is active: "a3"` / jdbcUrl → 192.168.229.129 / `Database version: 8.4.11` / upload-dir / `Tomcat started on port 8088`）。
+4. **vmrun 通道配方**（将来复用）：`export MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL='*'` —— 否则 Git Bash 把 `/bin/sh` 改写成 Windows 路径，`runProgramInGuest` 全报「未找到文件」；**vmrun 不回传 guest stdout** → 落 guest 文件再 `CopyFileFromGuestToHost`；`getGuestIPAddress` 输出含 CRLF，勿用 `read -r` 捕获（会把 `\r` 并进路径）。实例 `D:\VMware\VMs\Ubuntu-MySQL-A3.vmx` @ `192.168.229.129`。
+5. **D3 驱动单条路径**定稿：`~/.m2/repository/com/mysql/mysql-connector-j/8.0.33/mysql-connector-j-8.0.33.jar`（`dependency:build-classpath` 解析后**只取单条** + 校验 major=8）。glob 陷阱：`mysql/mysql-connector-java/*/` 只有 8.0.28，且各版本均存在 `-sources.jar`。
+6. **P7 判据修正**（锁 1）：host 为主、version 为辅，任一成立即通过；已实装。
+7. **REPEATABLE-READ 表述修正**（锁 3）：写「A-S4a-7 依赖 **MySQL 默认的** REPEATABLE-READ（8.4 实测）」，**不得**写「本项目配置为 RR」。
+8. **`environment.md` 的历史重写警告需扩容**：明文凭据不止 `5da4127`，`application-a3.properties` 亦随 jar 出厂。
+
+**A3 脚本（阶段 A–C 已定案）**
+
+9. **哨兵前缀定案 `A3P-<runId8>`**（12 字符）。理由为**长度**，非实现简化：`goodstype.GoodType` 是 `char(20) NOT NULL`，严格模式下 >20 即 `ERROR 1406`。实测：`A3P-<runId8>`=12、`A3TEST-<runId8>`=15、`A3TEST-<runId8>-PROBE`=**21（已超 1）**、`A3TEST-<runId8>-PROBE-<host>`=**37**、H3 原式 `A3PROBE-<runId8>-<host>`=**32** —— **任何带 `PROBE` 字样的形式都塞不进 20**，故命名表那一行不可执行。选定式同时满足三件事：塞得进、**仍携带 runId**（可按 run 精确定位）、前缀可辨（可全局清扫）。
+   ⚠️ **出处待补**：`docs/` 全域 grep 不到「D 组命名空间表」，磁盘上唯一记录的哨兵形态是本文第 198 行 G1 所引 H3 的 `A3PROBE-`。若确有一份 D 组命名表，落盘时须提供出处并同步改写。
+10. **cleanup 双规则**：`A3TEST-<runId>%`（run 作用域）+ **`A3P-%`（全局，无 runId 亦可清）**。全局清扫安全 —— 前缀是代码字面量，正常数据不可能命中，且探针行按构造即一次性，故**任何后续 run 都能自愈先前被 SIGKILL 留下的哨兵**（G1 所要的兜底）。*当前状态：阶段 D 未实现，P6 仅靠自身 DELETE。*
+11. **`goodstype.AUTO_INCREMENT` 会前进**：P6 每轮消耗 1 个自增值（实测 12→15），行删除后值不复用。故「P6 不留痕迹」不成立，报告须如实写「留自增计数前进」。
+12. **N4 版本门禁 = TD-13 的补偿机制**（落盘时单独强调）：本机开发库与 VM 库同名，只验 `DATABASE()` 会让 8.0.32 静默通过，全部断言在错误数据上跑还全绿。`VERSION()` 判据实测接住：`DATABASE()=mall_management_sql ✓` 而 `VERSION()=8.0.32 ✗` → 拒。
+13. **R12 已当场核对**：`concurrency-map.md §5` 第 5 行确为 `loginAdd` TOCTOU，与 H3 `R12` 一致；第 9 行为 `order.OrderId` 无唯一索引，与 A-S2a-1 的 `basis` 一致。
+
+**待验证清单（⚠️ 落盘时不得省略）**
+
+14. ⚠️ **P6 的 FAIL 分支未实测**：本轮仅代码审阅。本地构造不出（需后端连另一个库，须重启用户的后端）。故「HTTP 读回=true」有实测，其反向分支无实测。
+15. ⚠️ **P5 就绪等待上限默认 60s 是本脚本取值**，H3 未规定；`--ready-timeout-sec` 可覆盖。落盘须写明，以免日后被当成 H3 的规定。
+16. ⚠️ **P7 主判据（host）在本环境分辨力有限**：探针行于 P7 后即删，且本机是独立实例，故「探针行不在本机」实测为真。它对「本机 = 目标的隧道/端口转发」有效，对「有人把脚本指向本机」**无效**（后者由 P1 的版本门禁负责）。已把读取窗口留在删除之前以尽量保留其分辨力，但**该判据强度弱于锁 1 的表述**，落盘时如实标注。
