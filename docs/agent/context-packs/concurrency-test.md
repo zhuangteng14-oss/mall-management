@@ -140,7 +140,7 @@
 | 设计推理 | 10（P0 清理与 P4 计数互斥） | ✅ 本会话推导 | `[ ]` 待 pack 正文落盘 |
 | 待实测 | 9（S0-5） | ⏳ 等实测，**不预设** | `[ ]` 待 S0-5 结果 |
 | pack 现存错误 | 12, 13, 14 | ✅ **3/3 确认存在** | `[ ]` **待修**（pack 现仍为错值） |
-| 未留存 | 15 | ⏳ 未在本地任何 artefact 中留存 | `[ ]` 待人工确认 |
+| 已回填 | 15 | ✅ 2026-09-20 自转录**自行定位并解出**（非人工提供） | `[x]` 已写入本文件下节 |
 
 > **「前 14 项是『待核对』还是『已核对通过』」—— 分两个维度，不能合成一个结论：**
 >
@@ -165,14 +165,60 @@
 | 12 | 约束节「**只走 HTTP，不依赖项目 classpath**」与已定的 **HTTP + JDBC** 冲突 → 须重写；前置准备第 3 步的「届时再议」已由「脚本形态 = HTTP+JDBC」**解决**，应改为结论 | 本文件 `约束` 节 vs `archive/progress-2026-09-19.md`「脚本形态 = HTTP + JDBC」 |
 | 13 | 前置准备第 1–3 步（建 `mall_management_test` 库）**已失效** → 须按 Q1=B 重写为「独立 MySQL 实例 + 同名库」 | Q1=B 裁决 + TD-13（本地测试库当前「建好了但用不上」） |
 | 14 | 必读文档行「tech-debt.md（**TD-01 ~ TD-11**）」**已过时** → 须补 TD-12、TD-13 | `tech-debt.md` 现有 TD-01 ~ TD-13 |
-| 15 | **待回填** —— H3 / H4 / H5 / H6 正文 | 未在本地**任何** artefact 中留存（9 个转录文件穷举 + 全仓库 grep，均 0 命中）→ 属「**从未落盘过**」，**不是遗漏**。见下节 |
+| 15 | H3 / H4 / H5 / H6 正文 —— **已回填**（见下节）：含 **4 处与已落盘冲突（C1–C4，一律以已落盘为准）**、**2 处 H3 自身缺口（G1–G2）**、**7 项待裁决（D1–D7）** | 正文**存在于本地转录**（`5574d7b3` 第 134 行，27208 字符，经 `json.loads` 解出）。原判「从未落盘」**为误** —— 根因见下节 |
 
-### H 组正文未能定位的说明（2026-09-20）
+### H3–H6 正文回填（2026-09-20）
 
-**已取证的事实：**
-- 全仓库 grep（`preflight` / `哨兵` / `--b-group-gate` / `expect-db-host`）→ **0 命中**，即第一阶段探索结论**从未落进任何文件**
-- 项目全部 **9 个**转录文件穷举 `F3` → 命中 4 个，但逐条抓定义句后：`5574d7b3` 的 11 处**全部落在 2026-09-20 本轮的命令与说明自身**；`2cbb3e66`（9-18）与 `d7f1f78d`（9-14）属其它任务（N+1、A2）
+**出处（已自行定位，无需人工提供）：**
+- 文件：`C:\Users\86159\.claude\projects\C--Users-86159-Desktop----------\5574d7b3-2969-4a05-9192-a50392eb19f5.jsonl` 第 **134** 行（27208 字符，`role=assistant`）
+- 解出方式：逐行 `json.loads` 后取 `message.content[].text` → `h-line134.txt`（脚本 `extract_h.py`）。**不可用 `sed` / `awk` 反转义**，见根因 3
+- 同源材料：第一阶段 A3 方案 JSON 在 `4d8d887a-df56-4ef4-a671-d2ad4444d423.jsonl` 第 **206** 行（13490 字符 → `plan-line206.txt`）；该份的 H4/H5 为 H 组前身
 
-**未能确定的部分：** 以 `F3` / `H3` 为**标签**的正文未找到，**不等于**结论正文不存在 —— 它可能以**其它标题**存在于转录中（F/H 编号可能是用户侧的命名，未必是我输出时的标题）。故不排除正文仍在转录中的可能，只是本轮无法定位。
+**检索失败根因（「从未落盘」的结论为误）：**
+1. 按 `H1`~`H6` / `F3` 这类**标签**检索，而正文的键是英文（`backend_to_vm_db` / `files_to_change` / `script_design` / `script_form_decision` / `ci_integration` / `verification_backend_on_vm`）—— 按键名一搜即得
+2. **更关键**：`F3` 的检索**确实命中过** `5574d7b3`，但该文件的全部命中被整体归因为「2026-09-20 本轮的命令与说明自身」而丢弃 —— 第 134 行（正文本身，其 `findings[2].id == "F3"`）就在其中。**命中是真的，归因是错的**，与 TD-02 更正 2、TD-07 的 catch 归因同属「结果对、归因错」
+3. Bash 工具会把命令串中的 `\\` 折叠为 `\`，故 `sed 's/\\n/\n/g'` 类反转义**静默失效**（`awk` 会报 `unterminated regexp`）。JSONL 内容的唯一正确解出路径是 `json.loads`
+4. 「探索结论从未落进任何文件」（全仓库 `preflight` / `哨兵` / `--b-group-gate` / `expect-db-host` grep 0 命中）**这条本身仍成立** —— 正文在转录里，不在仓库里
 
-**处理：** 不做推断补全（`agent.md` 规则 9.1），第 15 项待人工提供原文。若确实无法提供，则以本 checklist 的**已取证条目**为基线继续 —— 第 1–14 项覆盖了所有会直接影响实现的结论，且每项都有独立取证，**不依赖 H 组正文**。
+**H 组与已落盘冲突 —— 一律以已落盘为准（已落盘经过多轮修正）：**
+
+| # | H 组原文 | 已落盘（胜） | 性质 |
+|---|---|---|---|
+| C1 | H2 `files_to_change.new[]`：「`.gitignore` 根目录新增（TD-02 指出根目录无 `.gitignore`）」；H 组 `rollback.gitignore` 亦写「若该文件仅为本任务而建，可直接删文件」 | 根 `.gitignore` 早已存在（27 行，`9b87ab9`），A3 **只追加 2 条**，绝不新建 / 覆盖 / 删除 | 复现 TD-02 原错 |
+| C2 | H3 `driver_prerequisite.resolution_order`：glob `~/.m2/repository/com/mysql/**/{mysql-connector-j,mysql-connector-java}-*.jar` 取**首个匹配** | Maven 权威解析（`dependency:build-classpath`）+ 校验 jar major=8 | glob 必然取错版本（item 8 实测） |
+| C3 | H3 `report.schema_sketch.assertions[].verdict`：`PASS`/`FAIL`/`EXPECTED-DEFECT-PRESENT`/`DEFECT-FIXED`/`SKIPPED` | `PASS` / `EXPECTED_DEFECT_PRESENT` / `DEFECT_FIXED` / `RECORD_ONLY`（**下划线**） | 拼写 + 语义双差（见 D6） |
+| C4 | H3 `report.schema_sketch` 无 `rounds` / `reproRounds` 字段，亦无「复现率低」报告级提示 | 澄清 1 + 建议 4 选项 B：脚本自动统计、报告必带、弱证据在摘要行显式提示 | 缺字段 |
+
+> H 组**内部**亦自相矛盾一处：H3 `invocation` 用 `-cp <mysql-connector-jar>`（仅驱动），H5 第 8 步用 `-cp "$(cat /tmp/cp.txt)"`（全项目 classpath）；而 pack 约束节写「不依赖项目 classpath」。三方需统一，见 **D3**。
+
+**H3 自身的两个缺口（非与已落盘冲突，属新发现）：**
+
+| # | 缺口 | 后果 |
+|---|---|---|
+| G1 | `P6` 哨兵行前缀为 `A3PROBE-`，而 `cleanup.statements_sketch` 只清 `A3TEST-<runId>%` | 哨兵行不在清理语句覆盖范围内，仅靠「P6 后立即 DELETE」兜住；进程若在该窗口被 SIGKILL，哨兵行**永久残留**，且 `--cleanup-only --run-id` 也清不掉（前缀不同） |
+| G2 | `P4` 种子计数只写 `order=6 / goods=5 / login=5 / user=5`，漏 `friend` | 已由 item 11 补上（`friend=4`，B-2 跑完按 `+2 × 轮数` 计提） |
+
+**H4 / H5 / H6 与已落盘一致（无冲突），要点确认：**
+- **H4**：HTTP + JDBC；四条理由中「清理无 HTTP 通路」为决定性 —— `order`/`login`/`user`/`goodstype`/`friend` 五表全项目无删除接口
+- **H5**：第三个 job `concurrency`、无 `needs: backend`；service container **`mysql:8.4`**（与 `environment.md` 对齐；第一阶段那份 JSON 写的是 `mysql:8.0`，**H5 更晚，以 8.4 为准**）；**容器内库名就是 `mall_management_sql`，故 `CREATE DATABASE` / `USE` 正好落位、不需 sed 过滤**（与本地 `mall_management_test` 场景相反）；`--app.upload-dir=/tmp/a3-uploads/`；`if: always()` 上传报告 + `app.log`（供事后核对 Hikari 实际 jdbcUrl）
+- **H6**：五层验证 —— L1 启动日志（**只对 `HikariConfig` 开 DEBUG**，避免 `com.zaxxer.hikari.pool` 的每请求日志在 120 QPS 下刷屏并拖慢被测对象）/ L2 `--expect-db-host` 门禁 / L3 哨兵往返 / L4 阴性对照 / L5 旁证（不入脚本）。**关键洞察**：哨兵往返只能证明「HTTP 侧与 JDBC 侧同库」，**不能**证明「该库是虚拟机」（本机开发库同名，TD-13），必须叠加主机比对。H6 尚无 `SELECT VERSION()`（S0-5 是更晚的发现），亦未提「Hikari 懒初始化需先打请求才有配置块」—— 两项均已由已落盘内容补上
+- **场景计数口径澄清**：pack 验收标准写「**4 个**并发场景」（只读/下单/支付/混合 = S1/S2/S3/S4），H3 在各场景下设子相位，**实际负载段落为 6 个**（S1、S2a、S2b、S3、S4a、S4b）。此前「6 场景」的说法即源于此，**与「4 场景」不矛盾**
+
+**已随本轮回填当场核实的 H3 事实（`agent.md` 规则 9）：**
+- `SQL:99` login 种子含 `('123','123456',1,'pIzTWafaGp')` → S1 的 `loginSelect('123','123456')` 断言 `A-S1-3` 成立
+- `SQL:145/148/147`：`OrderId varchar(40)`、`Images varchar(100)`、`ProductInformation varchar(500)` → H3 的 `length_check`（命名空间串长 < 24）成立
+- `SQL:152-153`：`CreateTime` / `SettlementDate` 均为 `varchar(50)` → F6 成立（脚本直查该列须按字符串处理，不得按 TIMESTAMP 比较）
+- `SQL:48` `friend` 种子 4 行、`SQL:83` `goodstype` 种子 5 行 → 与 item 11 一致
+- `SQL:159` 种子 `OrderId` 形如 `ZHJC53759811`（4 大写字母 + 8 数字）→ 与 `A3TEST-` 前缀零碰撞
+
+**待裁决（本轮不预填，`agent.md` 规则 9.1）：**
+
+| # | 事项 | 出处 |
+|---|---|---|
+| D1 | **OD-3**：独立 job 架构下 backend job 仍零 MySQL，TD-10 的 `@Disabled` 删不掉。维持现状（TD-10 继续挂起），还是让 `concurrency` job 顺手跑一次 `-Dtest=MallManagementApplicationTests` 以真正关闭 TD-10？ | H3 `open_decisions` |
+| D2 | **OD-8**：S4b 混合负载时长 60s（CI 总时长增约 3–4 分钟）是否接受 | H3 `open_decisions` |
+| D3 | classpath 形态：H3「仅驱动 jar」vs H5「全项目 cp.txt」vs pack 约束「不依赖项目 classpath」—— 建议统一为「用 `dependency:build-classpath` 解析后**只提取 mysql-connector 单条** + 校验 major=8」，同时满足 H3 的窄 classpath 意图与 item 8 的「不靠 glob」 | H3 `invocation` / H5 step 8 / pack 约束节 |
+| D4 | **item 3 措辞收窄**：H3 的 S2 只调 `orderAdd`（订单由被测端点自身创建），不存在「复用种子单」问题；F4 的修正对象是**支付/发货/收货**三场景。故 item 3「S2/S3/S4 三者」中的 **S2 应删**，收窄为「S3/S4」 | item 3 vs H3 `scenarios[1]` / `findings F4` |
+| D5 | **pack §B 候选新断言**：H3 的 S4a 用 `orderAdd` 直接构造 `(1,1,1)` 等前置态 —— 反证 `orderAdd` 的三个状态位**无任何校验**，客户端可直接伪造「已付款/已发货/已收货」的订单。此为 pack §B 未收录的缺陷类（状态伪造），是否登记为 B 组新条目？ | H3 `scenarios[3].sub_phases[0].setup` |
+| D6 | H3 verdict 枚举中的 `SKIPPED` 是否保留为**前置项状态**（P7 不可达时用），与断言 verdict 分离 | H3 `phase_0_preflight.P7` |
+| D7 | H3 `R12` 要求：改 pack 时同步 grep `concurrency-map.md §5` 第 5 行的 `loginAdd` 表述（`agent.md` 规则 9.2/9.3）—— 该动作**未进 checklist**，是否补为第 16 项 | H3 `risks.R12` |
