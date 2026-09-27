@@ -1,5 +1,6 @@
 package com.minke.mallmanagement_controller;
 
+import com.minke.mallmanagement_service.GoodsTypeCacheService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -23,6 +24,9 @@ public class MallManagementGoodsController {
     @Autowired
     private JdbcTemplate GoodjdbcTemplate;
 
+    @Autowired
+    private GoodsTypeCacheService goodsTypeCacheService;
+
     @Value("${app.upload-dir:${user.dir}/src/main/resources/static/img/}")
     private String uploadDir;
 
@@ -33,40 +37,14 @@ public class MallManagementGoodsController {
             @RequestParam(required = false) Integer GoodTypeNew
     ) {
         // GET 请求：查询所有类型
+        // 分支判定权保留在此处 —— 路由与「GET 带 GoodType 参数走写分支」等边角行为均不变。
+        // 缓存注解在 Service 上（@Cacheable 只覆盖 listTypes()，写分支不在其方法体内）。
         if (GoodType == null) {
-            String sql = "SELECT Id, GoodType, GoodTypeNew FROM mall_management_sql.goodstype";
-            List<Map<String, Object>> list = GoodjdbcTemplate.queryForList(sql);
-            Map<String, Object> result = new HashMap<>();
-            result.put("success", true);
-            result.put("list", list);
-            return result;
+            return goodsTypeCacheService.listTypes();
         }
 
         // POST 请求：新增类型
-        try {
-            String checkSql = "SELECT COUNT(*) FROM mall_management_sql.goodstype WHERE GoodType = ?";
-            Integer count = GoodjdbcTemplate.queryForObject(checkSql, Integer.class, GoodType);
-            if (count > 0) {
-                Map<String, Object> result = new HashMap<>();
-                result.put("success", false);
-                result.put("msg", "类型已存在");
-                return result;
-            }
-
-            String insertSql = "INSERT INTO mall_management_sql.goodstype (GoodType, GoodTypeNew) VALUES (?, ?)";
-            GoodjdbcTemplate.update(insertSql, GoodType, GoodTypeNew);
-
-            Map<String, Object> result = new HashMap<>();
-            result.put("success", true);
-            result.put("msg", "新增成功");
-            return result;
-        } catch (Exception e) {
-            e.printStackTrace();
-            Map<String, Object> result = new HashMap<>();
-            result.put("success", false);
-            result.put("msg", "新增失败");
-            return result;
-        }
+        return goodsTypeCacheService.addType(GoodType, GoodTypeNew);
     }
 
     //这是一个接口用于上架商品
