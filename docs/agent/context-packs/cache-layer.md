@@ -310,9 +310,12 @@ orderPayIfUp 3 | loginSelect 1 | loginAdd 1 | friendAdd 1
 | 风险 | 说明 | 应对 |
 |---|---|---|
 | ~~RESP3 协议兼容~~ **（已关闭 2026-09-27）** | **已验证**：Lettuce **6.4.2** 与 Redis **8.0.5** 协商到 **RESP3**（`CLIENT INFO` 返回 `resp=3`），`SET`/`GET` 往返正常。§11 原登记的风险**当前不成立**——不是「有风险但未触发」，是**根本没走那条路**（原假设「Lettuce 默认可能走 RESP2」与实测相反） | 若将来升级 Lettuce 或 Redis，**需重验此条** |
+| commons-pool2 缺失 → 池配置静默忽略 | Spring Boot 只在 classpath 有 commons-pool2 时才启用 Lettuce 池；否则 spring.data.redis.lettuce.pool.* 不报错、不生效。**已解决**（2026-09-27）：pom.xml 已加 commons-pool2:2.12.1，探针实测 maxTotal=8/maxIdle=4/minIdle=1 与配置逐项一致 | 若将来移除依赖，此坑复现 |
 | **Redis 单点无 HA** | VM 上是单实例 Redis，无主从 / 哨兵 / 集群。它挂了二级缓存全失效 | 降级必须第一天就做（§9）；雪崩靠 TTL 抖动 |
 | **降级缺失即 5xx** | 若 Redis 故障上抛异常，`A-S1-1` / `A-S4b-1` 立刻挂 | 降级是硬约束，不是优化项 |
 | **缓存污染 A3 证据** | 缓存落在「先查后插」的查重查询上 → `A-B2-1` 假绿 | §0 硬约束 + §0.1 的结构保证 |
+| ~~P6 与缓存冲突~~ **（已解决 2026-09-27）** | **原现象**：A3 的 P6 是「哨兵往返」—— 脚本用裸 JDBC 直写一行 `A3P-<runId8>`，再 `GET /mysqlGoods/goodstype` 读回。B1 给该端点加缓存后，读回的是**缓存填充时刻的旧列表**，哨兵行必然不在其中 → **结构性 FAIL，重跑多少次都一样**（不是偶发）。**根因**：P6 的隐含前提是「HTTP 读回来的内容 == 库里的内容」，缓存正是打破这个前提的东西 —— 所以**换探针接口是打地鼠**（改成 `goodsSelect` 只是把爆炸推迟到给它加缓存那天）。 | **新方案**：新增 `GET /health/db`（`@Profile("a3")`，**自身永不加 `@Cacheable`**），由后端报自己连的 `@@server_uuid`，脚本 JDBC 侧查同一个变量逐字段对比。**不依赖任何被缓存的数据，故与缓存永久正交**。P5 就绪探测一并搬过去（它同样被缓存静默削弱：命中时不碰 DB，就不再能证明 Hikari/MySQL 可用），P7 阴性对照改用 `server_uuid` 比对。A3 全量已复测通过（23/23 门禁、`reproRounds=5/5`）。详见 `concurrency-test.md §脚本内置校验 P0–P7` |
+| **两级缓存尚未生效（方案 B 只落了一半）** | pom 里 Caffeine + Redis 并存，但 **Spring Boot 实测只装配 RedisCacheManager** —— `CacheType` 的枚举顺序里 `REDIS` 排在 `CAFFEINE` **之前**，Redis 胜出。故 §8 定的「Caffeine(L1) + Redis(L2)」目前是**单级 Redis** | **登记为待办**，不假装已实现；写方案 B 的收益时不得按两级算。要启用需显式提供 `CacheManager` bean（或 `CacheManagerCustomizer`）。**下一步将写 `CacheManager` 显式覆盖，让 Caffeine 真正成为 L1** |
 | **性能基线不可比** | 加缓存后 S4b 的 QPS 与 A3 记录不可直接对比 | 对比时显式声明「缓存已启用」 |
 | **`userSelect` 的失效面** | `userSelect` 无对应写接口，但 `updateUserInfo`（`U:228`）可改 username / 头像 | 第一版给短 TTL；或让 `updateUserInfo` 一并 evict（需先确认其影响面） |
 | **新增 Service 层** | 项目原为「无分层」架构，B1 首次引入 Service bean | 只抽**被缓存的读路径**所需的极薄 Service，不全面重构分层；`project-map.md §3` 需在实现后同步更新 |
