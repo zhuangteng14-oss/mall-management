@@ -112,6 +112,31 @@ vmrun -T ws -gu ubuntu -gp 123456 runProgramInGuest "D:\VMware\VMs\Ubuntu-MySQL-
 
 > 文件搬运用 `CopyFileFromHostToGuest` / `CopyFileFromGuestToHost`；要改 guest 上的文件内容，用 `runProgramInGuest` + guest 侧 `sh -c`。
 
+## 主机侧手测的字符集坑（2026-09-27 实测踩中）
+
+**症状**：在 Git Bash（本机代码页为 **GBK**）里手敲 `curl -X POST -d "GoodType=电子用品&..."` 打中文接口，**看起来成功、HTTP 200、`success:true`**，但库里多了一行乱码，而且**去重逻辑完全没拦住**。
+
+**成因**：curl 把 shell 里的中文字符按 **GBK** 编码成字节发出去，服务端按 **UTF-8** 解码 → 得到一串替换字符 → 业务侧的 `SELECT COUNT(*) WHERE GoodType = ?` 用**正确的 UTF-8 中文**去查 → 匹配不上（查到的是乱码行）→ 判定「类型不存在」→ 静默 INSERT。
+
+**实测证据**（B1 缓存验证时踩中）：
+
+```
+Id=598  GoodType HEX = EFBFBD EFBFBD EFBFBD EFBFBD EFBFBD EFBFBD C6B7
+        └─ 6 个 U+FFFD（UTF-8 替换字符）        └─ GBK 的「品」残留
+```
+
+`EFBFBD` 是 U+FFFD 的 UTF-8 编码 —— 出现它就意味着**某一环拿错误编码解过字节**，是编码不匹配的指纹。
+
+**与 A3 的字符集缺陷同源**：脚本侧 `run.sh` 要用 `javac -encoding UTF-8` 两步编译，本质是同一个问题的另一面 —— Windows 默认编码不是 UTF-8，凡「中文必经之路」都要显式指定编码。**A3 脚本不受影响**（它走 JDBC，连接参数 `characterEncoding` 已固定），**只有手测会中招**。
+
+**处置**：
+
+- curl 提交中文一律用 `--data-urlencode`（curl 负责 URL 编码，不经 shell 的字节直传），或显式 `Content-Type: application/x-www-form-urlencoded; charset=UTF-8` + 已 UTF-8 编码的 body
+- **更稳的做法**：手测走浏览器 / Postman，或写成 `.jsh`（`jshell`）脚本走 JDBC —— 本项目排查库内容时就是这么干的（临时脚本用完即弃，不进仓库）
+- 判据若依赖「查重拦住了」这类**阴性结果**，先怀疑编码，再怀疑逻辑
+
+> 归档说明：这条**不属于** `cache-layer.md §11` 的范畴（那里是缓存机制的坑），是**开发环境/工具链**的坑，故落在本文件。
+
 ## ⚠️ 安全提醒：含明文密码的文件清单
 
 **两个文件含明文密码，且都已进入 git 历史：**
