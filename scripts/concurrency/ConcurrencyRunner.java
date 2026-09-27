@@ -70,15 +70,17 @@ public class ConcurrencyRunner {
     // 前缀固定为字面量，不接受调用方任意指定（H3 cleanup.safety_rails）
     static final String NS_PREFIX = "A3TEST-";
 
-    // P6 哨兵行前缀。刻意与 NS_PREFIX 分开：哨兵是「一次性写入即刻删除」的探针，
-    // 但若进程在写入与删除之间被 SIGKILL，它必须仍能被 cleanup 覆盖（见报告 cleanup 一节）。
+    // 【旧版哨兵前缀 —— 只为清理历史残留而保留】
+    // 2026-09-27 起 P6 不再是「哨兵往返」，改为库身份对比（GET /health/db vs 脚本 JDBC），
+    // 本脚本【不再写入】A3P- 行。常量与 cleanup 里的 A3P-% 清扫语句保留：旧版脚本若在
+    // 写入与删除之间被 SIGKILL，会留下 A3P- 行；该前缀是代码字面量、正常数据不可能命中，
+    // 故不带 runId 全局清扫，任何后续 run 都能自愈。
     static final String PROBE_PREFIX = "A3P-";
 
-    // P1 读到的服务端版本，供 P7 的版本比对使用（S0-5 第 3 步判据）
+    // P1 读到的服务端版本（S0-5 第 3 步判据）。
+    // 2026-09-27 起 P7 不再用它：P7 改为 server_uuid 对比。原 version 辅判据随
+    // 本机升级到 8.4 即自动失效（本机 2026-09-27 实测 8.0.32），本就靠不住。
     static String vmVersion = null;
-
-    // P6 本次使用的哨兵值，供阶段 D 的 cleanup 精确删除
-    static String probeGoodType = null;
 
     // 本轮 runId 与全局 HttpClient（场景与前置校验共用同一个连接池）
     static String RUN_ID = null;
@@ -251,7 +253,8 @@ public class ConcurrencyRunner {
 
         // H3 phase_0_preflight.purpose：产生任何业务流量之前，先证明「脚本连的是期望库」。
         // 任一前置失败一律 exit 2，不进入场景。
-        // 注意：P1–P4 只覆盖「脚本自身」这一侧；「后端是否在同一个库上」由阶段 C 的 P6 哨兵往返给出
+        // 注意：P1–P4 只覆盖「脚本自身」这一侧；「后端是否连在同一个库实例上」由阶段 C 的
+        //       P6 库身份对比给出（GET /health/db 报的 @@server_uuid vs 脚本 JDBC 查的）
         //       —— 因为本机开发库与 VM 库同名（TD-13），单看库名无法区分。
         Map<String, String> pre = new LinkedHashMap<>();
         boolean preOk = preflightStatic(o, pre) & preflightJdbc(o, pre);
@@ -1789,7 +1792,7 @@ public class ConcurrencyRunner {
     }
 
     /**
-     * 按命名空间清理 + 全局清扫哨兵（G1 的兜底）。
+     * 按命名空间清理 + 全局清扫旧版哨兵残留（G1 的兜底）。
      * A3 从不写 message / user_conversation_read，故这两表不纳入 —— 不是遗漏，是范围。
      */
     static void cleanup(Opt o) {
@@ -1820,13 +1823,14 @@ public class ConcurrencyRunner {
                 }
                 rec("cleanup", "table." + tbl, del);
             }
-            // 哨兵全局清扫：前缀是代码字面量，正常数据不可能命中；探针按构造即一次性，
-            // 故这里可以不带 runId 清 —— 任何后续 run 都能自愈先前被 SIGKILL 留下的哨兵。
+            // 旧版哨兵残留全局清扫。2026-09-27 起 P6 不再写 A3P- 行，本语句只为清理
+            // 旧版脚本（及被 SIGKILL 的进程）留下的残留而保留。前缀是代码字面量，
+            // 正常数据不可能命中，故不带 runId 清 —— 任何后续 run 都能自愈。
             int probe = s.executeUpdate("DELETE FROM mall_management_sql.goodstype WHERE GoodType LIKE '"
                     + PROBE_PREFIX + "%'");
             grand += probe;
-            System.out.println("  " + pad("goodstype(哨兵)", 16) + "删除=" + probe
-                    + "（A3P-% 全局清扫，" + (probe == 0 ? "无残留" : "清掉了残留") + "）");
+            System.out.println("  " + pad("goodstype(旧哨兵残余)", 16) + "删除=" + probe
+                    + "（A3P-% 残留清扫，" + (probe == 0 ? "无残留" : "清掉了残留") + "）");
             System.out.println("[cleanup] 删除语句命中合计 " + grand + " 行（同一行可能被多列命中，故非去重行数）");
             rec("cleanup", "probeRowsDeleted", probe);
             rec("cleanup", "rowsDeletedTotal", grand);
@@ -1905,7 +1909,6 @@ public class ConcurrencyRunner {
             {"customerimage.UserName",     "20", NS_PREFIX + o.runId + "-U" + o.rounds},
             {"customerimage.CustomerId",   "20", "A3C-" + o.runId},
             {"goods.MerchantId",           "20", "A3M-" + o.runId},
-            {"P6 探针 goodstype.GoodType", "20", "A3P-" + o.runId},
             {"order.OrderId",              "40", NS_PREFIX + o.runId + "-N99999"},
             {"order.CustomerId",           "40", "A3C-" + o.runId},
             {"order.MerchantId",           "40", "A3M-" + o.runId},
@@ -2031,27 +2034,39 @@ public class ConcurrencyRunner {
     /**
      * P5–P7（H3）：HTTP 侧前置校验。
      *
-     * P5 联合就绪探针 —— 轮询 GET /mysqlGoods/goodstype 直到响应含 "success":true。
-     *   端口通不等于就绪：该端点 GET 会真落一次 DB（SELECT goodstype），
-     *   只有它返回成功才同时证明 Web 层与 Hikari 连接池都可用。
+     * 【2026-09-27 整体改版：从「哨兵往返」到「库身份对比」】
+     * 原 P5/P6 共享一个前提：「HTTP 读回来的内容 == 库里的内容」。B1 给
+     * GET /mysqlGoods/goodstype 加缓存后该前提破裂，两条断言同时受伤：
+     *   - P5 缓存命中时一次 DB 都不碰 → 退化成「Web 就绪」，Hikari 挂了也能绿（静默）；
+     *   - P6 裸 JDBC 直写哨兵行再经 HTTP 读回 → 缓存返回填充时刻的旧列表 →
+     *     哨兵行必然读不到 → 结构性 FAIL（重跑多少次都一样，非偶发）。
+     * 病根是同一个假设，故 P5 与 P6 同源同修：改为让后端自报库身份。
+     *
+     * P5 联合就绪探针 —— 轮询 GET /health/db 直到响应含 "success":true。
+     *   端口通不等于就绪：该端点会真落一次 DB（SELECT @@server_uuid, …），且【永不被缓存】
+     *   （HealthController 无 @Cacheable，且只 @Profile("a3") 生效），
+     *   故它返回成功才同时证明 Web 层与 Hikari 连接池都可用。
      *   等待上限 --ready-timeout-sec（默认 60s），超时即 FAIL（不视为 skip）。
      *
-     * P6 哨兵往返 —— JDBC 写一行 → HTTP 读回来 → 删除。证明「脚本写的」与「后端读的」是同一个库。
-     *   探针串已按 goodstype.GoodType 的 char(20) 上限重设计为 A3P-&lt;runId8&gt;（12 字符）：
-     *   H3 原式 A3PROBE-&lt;runId8&gt;-&lt;host&gt; 是 32 字符，在严格模式下必然 ERROR 1406。
-     *   主机判别码随行放在 GoodTypeNew（int）列：IPv4 第三段*1000 + 第四段
-     *   （VM 192.168.229.129 → 229129，本机 127.0.0.1 → 1）。
+     * P6 库身份对比 —— 脚本 JDBC 查 @@server_uuid / @@hostname / DATABASE() / @@port，
+     *   与 /health/db 报的逐字段比。证明「后端连的库实例」与「脚本连的库实例」是同一个。
+     *   本方案不依赖任何被缓存的数据，故与缓存【永久正交】。
+     *   判定：主判据 server_uuid 一致 → PASS；hostname 不一致只告警（克隆 VM 可能保留
+     *   原主机名）；database / port / version 只作参考，不参与判定 —— 实测 database 与
+     *   port 在两台机器上必然相同（判别力为零），version 随本机升级到 8.4 即失效。
      *
-     * P7 阴性对照（锁 1：host 为主，version 为辅 —— 任一个成立即通过）：
-     *   主判据 host —— P6 写进目标库的那行，在本机库中查不到（探针行的读取窗口留在删除之前，
-     *   否则「查不到」对两台机器都成立，判据会退化成恒真）；
-     *   辅判据 version —— 本机可达且本机 VERSION() ≠ 目标 VERSION()。
-     *   本机不可达 → 记 skip，不阻断（CI 上本就没有本机库）。
+     * P7 阴性对照 —— 本机库（--negative-control-url）的 @@server_uuid 必须 ≠ /health/db
+     *   报的 server_uuid。两者相同即说明后端连到了开发机上的同名库（TD-13：两库同名，
+     *   单看库名区分不出）。本机不可达，或本机没有同名库（驱动抛 Unknown database，
+     *   走同一个 SQLException 分支）→ 记 skip，不阻断（CI 上本就没有本机库）。
      *   本机库全程只读：A3 未获授权改动本机库，阴性对照不需要写。
+     *
+     * 【P5/P6/P7 共用一次 HTTP】P5 轮询循环最后一次成功的响应体就是 /health/db 的 body，
+     *   P6/P7 直接复用它，不再另发请求 —— 既省一次调用，也天然避免两次调用之间状态漂移。
      */
     static boolean preflightHttp(Opt o, Map<String, String> pre) {
         HttpClient http = HTTP;
-        String url = o.baseUrl + "/mysqlGoods/goodstype";
+        String url = o.baseUrl + "/health/db";
 
         // ---------- P5 联合就绪探针 ----------
         long t0 = System.currentTimeMillis();
@@ -2085,79 +2100,89 @@ public class ConcurrencyRunner {
         boolean p5 = code == 200 && body != null && body.contains("\"success\":true");
         pre.put("P5", (p5 ? "PASS" : "FAIL")
                 + " GET " + url + " → HTTP " + code + "，等待 " + waited + "s"
-                + (p5 ? "，含 \"success\":true（Web+DB 联合就绪）"
+                + (p5 ? "，含 \"success\":true（Web+DB 联合就绪；该端点不被缓存）"
                       : "（" + (lastErr == null ? "超时" : lastErr) + "）"));
         if (!p5) {
             // 显式记 SKIP 而不是直接少两行：前置表缺行与「没跑到」在报告里无法区分
-            pre.put("P6", "SKIP 后端未就绪，未做哨兵往返");
+            pre.put("P6", "SKIP 后端未就绪，未做库身份对比");
             pre.put("P7", "SKIP 同上");
             return false;
         }
 
-        // ---------- P6 哨兵往返；P7 之后才删除 ----------
-        probeGoodType = PROBE_PREFIX + o.runId;
-        try {
-            boolean p6 = probeRoundTrip(o, http, url, pre);
-            if (!p6) {
-                pre.put("P7", "SKIP 哨兵未验证，阴性对照无从对照");
-                return false;
-            }
-            return negativeControl(o, pre);
-        } finally {
-            deleteProbeRow(o);
+        // ---------- P6 库身份对比 / P7 阴性对照；共用上面那一次 /health/db 的响应体 ----------
+        if (!dbIdentityCheck(o, body, pre)) {
+            pre.put("P7", "SKIP 库身份未验证，阴性对照无从对照");
+            return false;
         }
+        return negativeControl(o, body, pre);
     }
 
-    /** P6：写入哨兵行并确认后端经 HTTP 读得到。 */
-    static boolean probeRoundTrip(Opt o, HttpClient http, String url, Map<String, String> pre) {
-        int hostCode = hostCodeOf(o.expectDbHost);
+    /**
+     * P6：库身份对比（原「哨兵往返」，2026-09-27 改）。
+     *
+     * 判定：主判据 server_uuid 一致 → PASS；不一致 → FAIL。
+     *   辅判据 hostname 不一致 → 只告警（克隆 VM 可能保留原主机名），仍 PASS。
+     *   参考项 database / port / version → 只报告，不参与判定（理由见方法内注释）。
+     *
+     * 用 contains 而非解析 JSON：与既有风格一致，且脚本无 JSON 库、不引新依赖。
+     * 逐字段而非整串比对，是为了 FAIL 时能指出【是哪个字段不一致】。
+     * 本方法不写库：原方案每轮消耗 1 个 goodstype 自增值，「P6 不留痕迹」不成立；
+     * 改版后 P6 全程只读，自增差额这一项已消失。
+     */
+    static boolean dbIdentityCheck(Opt o, String body, Map<String, String> pre) {
+        String uuid, host, db, port, ver;
         try (Connection c = DriverManager.getConnection(o.jdbcUrl, o.jdbcUser, o.jdbcPassword)) {
-            try (PreparedStatement ps = c.prepareStatement(
-                    "INSERT INTO mall_management_sql.goodstype (GoodType, GoodTypeNew) VALUES (?, ?)")) {
-                ps.setString(1, probeGoodType);
-                ps.setInt(2, hostCode);
-                ps.executeUpdate();
-            }
-            String b = httpGet(http, url).body();
-            boolean seen = b != null && b.contains(probeGoodType);
-            // 相邻字段一并比对：列顺序与 Jackson 序列化顺序一致（ColumnMapRowMapper 用 LinkedHashMap），
-            // 因此 "GoodType":"A3P-xxx","GoodTypeNew":229129 应当紧邻出现。仅作强化证据，不作门禁。
-            boolean strict = b != null && b.contains(
-                    "\"GoodType\":\"" + probeGoodType + "\",\"GoodTypeNew\":" + hostCode);
-            pre.put("P6", (seen ? "PASS" : "FAIL")
-                    + " 哨兵 " + probeGoodType + "（" + probeGoodType.length() + " 字符，上限 20）"
-                    + " 经 HTTP 读回=" + seen + "，主机码 " + hostCode + " 随行=" + strict);
-            if (!seen) {
-                System.err.println("后端读不到脚本刚写入的哨兵行 —— 后端连的库与脚本连的库不是同一个。");
-            }
-            return seen;
+            uuid = scalarString(c, "SELECT @@server_uuid");
+            host = scalarString(c, "SELECT @@hostname");
+            db   = scalarString(c, "SELECT DATABASE()");
+            port = scalarString(c, "SELECT @@port");
+            ver  = scalarString(c, "SELECT VERSION()");
         } catch (SQLException e) {
-            pre.put("P6", "FAIL 哨兵往返失败: " + e.getMessage());
-            return false;
-        } catch (Exception e) {
-            pre.put("P6", "FAIL 哨兵往返失败: " + e.getClass().getSimpleName() + ": " + e.getMessage());
+            pre.put("P6", "FAIL 库身份对比失败（脚本侧 JDBC）: " + e.getMessage());
             return false;
         }
+        if (body == null) {
+            pre.put("P6", "FAIL 库身份对比失败：/health/db 响应体为空");
+            return false;
+        }
+
+        boolean uuidOk = uuid != null && body.contains("\"serverUuid\":\"" + uuid + "\"");
+        boolean hostOk = host != null && body.contains("\"hostname\":\"" + host + "\"");
+        // 参考项：仅报告。实测 database 与 port 在 VM 与本机上必然相同（两库同名 TD-13、
+        // 同为 3306），判别力为零；version 会随本机升级到 8.4 而失效。三者都不作判据。
+        boolean dbOk   = db   != null && body.contains("\"database\":\"" + db   + "\"");
+        boolean portOk = port != null && body.contains("\"port\":"       + port);
+        boolean verOk  = ver  != null && body.contains("\"version\":\""  + ver  + "\"");
+
+        pre.put("P6", (uuidOk ? "PASS " : "FAIL ")
+                + "库身份对比（GET /health/db vs 脚本 JDBC）"
+                + " server_uuid=" + uuid + "→" + (uuidOk ? "一致" : "**不一致**")
+                + "；hostname=" + host + "→" + (hostOk ? "一致"
+                        : "不一致（⚠️ 克隆 VM 可能保留原主机名，不据此判定）")
+                + "；参考项 database=" + (dbOk ? "一致" : "不一致")
+                + " port=" + (portOk ? "一致" : "不一致")
+                + " version=" + (verOk ? "一致" : "不一致"));
+        if (!uuidOk) {
+            System.err.println("后端报的 server_uuid 与脚本连的库不一致 —— 后端不在同一个库实例上。"
+                    + "\n  /health/db 原始响应：" + body);
+        }
+        return uuidOk;
     }
 
-    /** 删除哨兵行。best-effort：删不掉只告警，不让 finally 覆盖掉真正的失败原因。 */
-    static void deleteProbeRow(Opt o) {
-        if (probeGoodType == null) {
-            return;
-        }
-        try (Connection c = DriverManager.getConnection(o.jdbcUrl, o.jdbcUser, o.jdbcPassword);
-             PreparedStatement ps = c.prepareStatement(
-                     "DELETE FROM mall_management_sql.goodstype WHERE GoodType = ?")) {
-            ps.setString(1, probeGoodType);
-            int n = ps.executeUpdate();
-            System.out.println("[P6] 哨兵行清理：删除 " + n + " 行（" + probeGoodType + "）");
-        } catch (SQLException e) {
-            System.err.println("[P6] 哨兵行清理失败（cleanup 的 A3P-% 一项会兜底）: " + e.getMessage());
-        }
-    }
-
-    /** P7：阴性对照。锁 1 —— host 判据与 version 判据任一成立即通过；本机不可达记 skip。 */
-    static boolean negativeControl(Opt o, Map<String, String> pre) {
+    /**
+     * P7：阴性对照（2026-09-27 改）。
+     *
+     * 判据：本机库的 @@server_uuid 必须 ≠ /health/db 报的 server_uuid。
+     *   两者相同 → 后端连的就是开发机上的同名库（TD-13：两库同名，单看库名区分不出）→ FAIL。
+     *   本机不可达，或本机没有同名库（驱动抛 Unknown database，走同一个 SQLException 分支）
+     *   → SKIP 不阻断（CI 上本就没有本机库）。
+     *   本机库全程只读：A3 未获授权改动本机库，阴性对照不需要写。
+     *
+     * 原方案的两条判据都已被替换：主判据「哨兵行不在本机」随哨兵机制一起删除；
+     * 辅判据「本机 VERSION() ≠ 目标」随本机升级到 8.4 即自动失效。server_uuid 不会烂掉 ——
+     * 它在 MySQL 初始化数据目录时生成、全局唯一，克隆虚拟机也不会重复。
+     */
+    static boolean negativeControl(Opt o, String healthBody, Map<String, String> pre) {
         if (o.skipNegativeControl) {
             pre.put("P7", "SKIP 已用 --skip-negative-control 显式关闭");
             return true;
@@ -2169,23 +2194,22 @@ public class ConcurrencyRunner {
         }
         try (Connection c = DriverManager.getConnection(
                 o.negativeControlUrl, o.negativeControlUser, o.negativeControlPassword)) {
-            // 主判据：探针行不在本机（此刻该行在目标库中仍存在）
-            int localProbeRows = scalarInt(c,
-                    "SELECT COUNT(*) FROM mall_management_sql.goodstype WHERE GoodType = '" + probeGoodType + "'");
-            boolean rowAbsent = localProbeRows == 0;
-            // 辅判据：本机版本 ≠ 目标版本（锁 1 —— 本机将来升级到 8.4 时此判据失效，故不单独作数）
-            String localVer = scalarString(c, "SELECT VERSION()");
-            boolean verDiff = localVer != null && !localVer.equals(vmVersion);
-            boolean p7 = rowAbsent || verDiff;
+            String localUuid = scalarString(c, "SELECT @@server_uuid");
+            String localHost = scalarString(c, "SELECT @@hostname");
+            // 本机的 uuid 出现在 /health/db 响应里 → 后端连的就是本机库 → 对照失败
+            boolean backendIsLocal = localUuid != null && healthBody != null
+                    && healthBody.contains("\"serverUuid\":\"" + localUuid + "\"");
+            boolean p7 = !backendIsLocal;
             pre.put("P7", (p7 ? "PASS" : "FAIL")
-                    + " 本机(" + ncHost + ") 探针行数=" + localProbeRows + "→不在本机=" + rowAbsent
-                    + "；本机 VERSION()=" + localVer + " ≠ 目标 " + vmVersion + "→" + verDiff);
+                    + " 本机(" + ncHost + ") server_uuid=" + localUuid + " / hostname=" + localHost
+                    + " → 后端报的是本机库=" + backendIsLocal
+                    + (p7 ? "（两库可区分）" : "（后端连到了开发机上的同名库，TD-13）"));
             if (!p7) {
-                System.err.println("本机库与目标库未能区分 —— 可能本机 127.0.0.1 就是目标实例（隧道/端口转发）。");
+                System.err.println("后端连的就是本机的开发库 —— 目标库与开发库未能区分。");
             }
             return p7;
         } catch (SQLException e) {
-            pre.put("P7", "SKIP 本机库不可达，阴性对照跳过（不阻断）: " + e.getMessage());
+            pre.put("P7", "SKIP 本机库不可达或本机无同名库，阴性对照跳过（不阻断）: " + e.getMessage());
             return true;
         }
     }
@@ -2197,28 +2221,6 @@ public class ConcurrencyRunner {
                 .GET()
                 .build();
         return http.send(req, HttpResponse.BodyHandlers.ofString());
-    }
-
-    /**
-     * 主机判别码（放进 goodstype.GoodTypeNew 这个 int 列）。
-     * IPv4 → 第三段*1000 + 第四段（VM 192.168.229.129 → 229129，本机 127.0.0.1 → 1）。
-     * 非 IPv4（主机名等）退回 hashCode 截断；只要求「不同主机取到不同值」，不要求可逆。
-     */
-    static int hostCodeOf(String host) {
-        if (host == null) {
-            return 0;
-        }
-        String[] p = host.split("[.]");
-        if (p.length == 4) {
-            try {
-                int a = Integer.parseInt(p[2].trim());
-                int b = Integer.parseInt(p[3].trim());
-                return a * 1000 + b;
-            } catch (NumberFormatException ignore) {
-                // 落到下面的兜底
-            }
-        }
-        return Math.abs(host.hashCode() % 1000000);
     }
 
     static void printPreflight(Map<String, String> pre) {
