@@ -15,6 +15,65 @@
 | 服务端版本 | 8.4.11-0ubuntu0.26.04.1（`SELECT VERSION()` 实测） |
 | 表数量 | 11（已导入 mall_management_sql.sql） |
 
+## A3 虚拟机 Redis 环境（VMware）
+
+同一台 VM（192.168.229.129）上另装了 Redis。
+
+| 项 | 值 |
+|---|---|
+| 版本 | redis-server 8.0.5（`Redis server v=8.0.5 ... bits=64`），redis-cli 8.0.5 |
+| 端口 | 6379 |
+| 监听 | `bind 0.0.0.0 -::1`（IPv4 全接口 + IPv6 回环） |
+| 密码 | 有，`123456`（`requirepass`） |
+| 配置文件 | `/etc/redis/redis.conf` |
+| 原始配置备份 | `/etc/redis/redis.conf.a3bak`（**改动前的原版**：`bind 127.0.0.1 -::1` + `protected-mode yes` + 无密码） |
+| systemd 服务 | `redis-server`（另有软链别名 `redis.service`），已 `enabled` 开机自启 |
+| 防火墙 | `ufw` 为 `inactive`，无需放行 |
+| 包来源 | `universe`，包名 `redis-server`（`5:8.0.5-1`） |
+
+**不是 valkey。** Ubuntu 26.04 源里 `valkey-server` 是**独立包**（9.0.4，main），装 `redis-server` 不会牵连它 —— `apt-cache show redis-server` 显示依赖只有 `redis-tools`，实际只拉 `liblzf1 / redis-tools / redis-server` 三个；`which valkey-server` 为空。
+
+### 相对原版做的三处改动
+
+| 行 | 原值 | 现值 | 原因 |
+|---|---|---|---|
+| 88 | `bind 127.0.0.1 -::1` | `bind 0.0.0.0 -::1` | 让主机能连 |
+| 112 | `protected-mode yes` | `protected-mode no` | 同上，配合 bind 放开 |
+| 文末 | （无） | `requirepass 123456` | 加口令，抵消前两项放开的暴露面 |
+
+- **`-::1` 不能省**：Java `InetAddress.getByName("localhost")` 可能优先解析 `::1`，只写 `0.0.0.0` 会让 Spring 配 `localhost:6379` 连不上。实测 `redis-cli -h 127.0.0.1` / `-h ::1` / `-h localhost` 三条路径均 `PONG`。
+- `requirepass` 追加在**文件末尾**（原版第 1068 行的 `# requirepass foobared` 是注释，未动）。回滚删掉文末那段 `===== A3 项目新增 =====` 注释块即可。
+
+### 连接与验证
+
+```bash
+redis-cli -h 192.168.229.129 -a 123456 --no-auth-warning ping   # → PONG
+redis-cli -h 192.168.229.129 ping                               # → NOAUTH Authentication required.
+```
+
+| 检查 | 结果 |
+|---|---|
+| VM 内 `redis-cli -a 123456 ping` | `PONG` |
+| VM 内 `redis-cli ping`（无密码） | `NOAUTH Authentication required.` |
+| VM 内 `redis-cli -a wrongpass ping` | `WRONGPASS invalid username-password pair or user is disabled.` |
+| 主机侧 TCP + RESP | 通，`AUTH` → `+OK`，`PING` → `+PONG` |
+
+⚠️ **主机（Git Bash）上没有 `nc`。** 凡写 `nc -zv` 处都要换等价手段：
+
+```bash
+# 1) bash /dev/tcp 发真实 RESP（推荐：验的是协议，不只是端口）
+timeout 6 bash -c 'exec 3<>/dev/tcp/192.168.229.129/6379
+printf "AUTH 123456\r\n" >&3; IFS= read -r -t 3 l <&3; echo "$l"'   # → +OK
+
+# 2) PowerShell 只验端口
+powershell.exe -NoProfile -Command "(Test-NetConnection -ComputerName 192.168.229.129 -Port 6379).TcpTestSucceeded"
+```
+
+两个坑（都踩过）：
+
+1. **别用 `head -c N` 读 RESP 回复**：非 tty 下 stdout 块缓冲，字节数凑不够就被 `timeout` 杀掉、缓冲区整个丢掉 —— 现象是「连上了却什么都没读到」。用 `IFS= read -r -t 3` 逐行读。
+2. `/dev/tcp` 只能证 TCP 可达；**加密码后**「端口通」≠「能用」，认证是否生效要靠方式 1 实测出 `+OK` / `-NOAUTH`。
+
 ## 用 `a3` profile 让后端连这台实例
 
 后端默认连**本机开发库**（`application.properties`）。要连 VM 上的 A3 实例，起服务时挂 `a3` profile：
@@ -59,7 +118,7 @@ vmrun -T ws -gu ubuntu -gp 123456 runProgramInGuest "D:\VMware\VMs\Ubuntu-MySQL-
 
 | 文件 | 内容 | 引入 commit |
 |---|---|---|
-| `docs/agent/environment.md`（本文件） | SSH `ubuntu/123456`、MySQL `test/test123` | `5da4127` 起 |
+| `docs/agent/environment.md`（本文件） | SSH `ubuntu/123456`、MySQL `test/test123`、**Redis `requirepass 123456`** | `5da4127` 起；Redis 口令为 2026-09-27 新增 |
 | `Mall-management-server/src/main/resources/application-a3.properties` | 同一套 MySQL 口令作默认值（`${A3_DB_PASSWORD:test123}`），**且随 jar 一起分发** | `c37cb8e` |
 
 仓库转公开前，必须二选一（**两个文件都适用**）：
