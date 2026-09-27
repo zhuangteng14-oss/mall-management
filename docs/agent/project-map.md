@@ -99,14 +99,18 @@ Vue 3 CLI 工程，14 个页面视图 + 1 个组件 + 1 个路由表。页面按
 
 以下接口在循环内逐条发起查询，**单次请求的 SQL 次数随数据量线性增长**。此处仅记录，**未改代码**。
 
+行号约定（与 `cache-map.md §6` 一致）：`G:` = `MallManagementGoodsController.java`，`M:` = `MallManagementMessage.java`；查询记「SQL 定义行 → 执行行」区间，方法调用记调用行。
+
 | 接口 | 文件行号 | 涉及表 | 优先级 |
 |---|---|---|---|
-| `POST /mysqlGoods/goodsSelectHome` | `G:182-202`（内层 `G:188`） | goods → login | 高 |
-| `POST /message/conversations` | `M:35-66`（内层 `M:48-50`） | message → user_conversation_read | 高 |
-| `POST /message/friendSelect` | `M:313-319` | friend → user → customerimage/merchantimage | 高 |
-| `POST /message/selectFriend` | `M:242-248` | friend → user → customerimage/merchantimage | 高 |
+| `POST /mysqlGoods/goodsSelectHome` | 全量查 `G:184-185`，循环 `G:188-208`，内层查询 `G:194-200` | goods → login | 高 |
+| `POST /message/conversations` | 外层查 `M:33`，循环 `M:35-66`，内层查询 `M:48-50` | message → user_conversation_read | 高 |
+| `POST /message/friendSelect` | 外层查 `M:309-311`，循环 `M:313-319`，内层调用 `M:315` | friend → user → customerimage/merchantimage | 高 |
+| `POST /message/selectFriend` | 外层查 `M:238-240`，循环 `M:242-248`，内层调用 `M:244` | friend → user → customerimage/merchantimage | 高 |
 
-注：后两行内层调用的 `getUserInfoById`（`M:330-369`）自身含 2 条 SQL（`M:331` 查 user、`M:349`/`M:353` 查头像），故每轮循环实际产生 2 条查询。
+注：后两行内层调用的 `getUserInfoById`（`M:330-369`）自身含 2 条 SQL（`M:331-333` 查 user、`M:349-350`/`M:353-354` 查头像），故每轮循环实际产生 2 条查询，复杂度为 **1 + 2N**。
+
+> 2026-09-27 校正：`goodsSelectHome` 原记 `G:182-202`（内层 `G:188`）有误——`G:188` 是 `for` 循环头不是查询，循环体在 `G:208` 闭合。其余三行原记的循环范围无误。缓存选型侧的同名清单见 `cache-map.md §6`（两节职责不同，重叠 3 行）。
 
 ## 7. 未覆盖 / 待确认
 

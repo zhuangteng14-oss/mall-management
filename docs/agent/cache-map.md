@@ -57,15 +57,24 @@
 
 以下为按现有代码实测出的 N+1 与高频只读场景，**当前均为零缓存、每次请求直查数据库**：
 
+行号约定：`G:` = `MallManagementGoodsController.java`，`M:` = `MallManagementMessage.java`。查询记**「SQL 定义行 → 执行行」区间**，方法调用记**调用行**。
+
 | 接口 | 现状问题 | 证据 |
 |---|---|---|
-| `GET /mysqlGoods/goodstype` | 商品类型字典，几乎不变但每次全表查 | `G:31` |
-| `POST /mysqlGoods/goodsSelectHome` | 先全量查 `goods`，再**为每个商品单独查一次** `login` 取商家名（N+1） | `G:182-202`，内层查询 `G:188` |
-| `POST /message/conversations` | 查完会话列表后，**为每个会话单独查一次** `user_conversation_read`（N+1） | `M:35-66`，内层查询 `M:48-50` |
-| `POST /mysqlGoods/goodsSelect` | 商家商品列表，读多写少 | `G:160` |
-| `POST /message/friendSelect` | 好友列表，每个好友触发一次用户信息查询（N+1） | `M:313-319` |
+| `GET /mysqlGoods/goodstype` | 商品类型字典，几乎不变但每次全表查 | `G:37-38` |
+| `POST /mysqlGoods/goodsSelectHome` | 先全量查 `goods`，再**为每个商品单独查一次** `login` 取商家名（N+1，1+N） | 全量查 `G:184-185`，循环 `G:188-208`，内层查询 `G:194-200` |
+| `POST /message/conversations` | 查完会话列表后，**为每个会话单独查一次** `user_conversation_read`（N+1，1+N） | 外层查 `M:33`，循环 `M:35-66`，内层查询 `M:48-50` |
+| `POST /message/selectFriend` | 好友申请列表，每个申请人触发一次用户信息查询（N+1，**1+2N**） | 外层查 `M:238-240`，循环 `M:242-248`，内层调用 `M:244` |
+| `POST /message/friendSelect` | 好友列表，每个好友触发一次用户信息查询（N+1，**1+2N**） | 外层查 `M:309-311`，循环 `M:313-319`，内层调用 `M:315` |
+| `POST /mysqlGoods/goodsSelect` | 商家商品列表，读多写少 | `G:166-167` |
+
+**`1+2N` 的由来**：`selectFriend` / `friendSelect` 的内层调用的是私有方法 `getUserInfoById`（定义 `M:330-369`），**该方法自身含 2 条 SQL** —— `M:331-333` 查 `user`，再按用户类型走 `M:349-350`（`customerimage`）或 `M:353-354`（`merchantimage`）查头像。故每轮循环实际产生 **2** 条查询。（对照：`getOrCreateConversation` 也调它，但只调 1 次，是常数 3 条，**不构成 N+1**。）
 
 其中 N+1 问题**优先应通过 SQL 改写（JOIN / IN 批量查询）解决**，而非靠缓存掩盖——缓存在此只会延长脏数据窗口。真正适合缓存的仅类型字典一类低频变更数据。
+
+> **与 `project-map.md §6`（「N+1 待优化清单」）的关系**：两节**职责不同**——本节服务**缓存选型**（故含 `goodstype`、`goodsSelect` 两个非 N+1 行），`project-map.md §6` 服务 **SQL 改写**（`fix-n-plus-one.md` 读的是那一节，只收 N+1，独有 `selectFriend`）。两节有 3 行重叠（`goodsSelectHome` / `conversations` / `friendSelect`），**需两处维护**。
+>
+> 2026-09-27 修正：补 `selectFriend`（此前只在 `project-map.md §6` 登记）；修 3 处坐标错误（`goodstype` 原 `G:31` 是方法签名行、`goodsSelectHome` 内层原 `G:188` 是循环头、`goodsSelect` 原 `G:160` 是注解行）。缓存侧完整方案见 `context-packs/cache-layer.md`。
 
 ## 7. 若要引入缓存
 
