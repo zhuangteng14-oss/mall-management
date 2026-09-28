@@ -2,6 +2,7 @@ package com.minke.mallmanagementserver.smoke;
 
 import com.minke.mallmanagement_service.GoodsCacheService;
 import com.minke.mallmanagement_service.GoodsTypeCacheService;
+import com.minke.mallmanagement_service.UserCacheService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -59,6 +60,22 @@ public abstract class AbstractSmokeTest {
 
     @MockitoBean
     protected GoodsCacheService goodsCacheService;
+
+    /**
+     * 同上一条的同一类问题，第三次遇到：{@code MallManagementMessage}
+     * （userSelect）也 {@code @Autowired} 了一个 {@code @Service}（UserCacheService）。
+     *
+     * <p>2026-09-28 补：userSelect 上缓存（+ 负缓存）时引入。漏掉它同样会在
+     * <b>上下文加载期</b>就失败（{@code No qualifying bean of type ...
+     * UserCacheService}），且失败的是**全部 4 个 smoke 用例**，而不是只失败
+     * 与 userSelect 相关的那一个 —— 因为 {@code @WebMvcTest} 无参会加载全部 3 个
+     * Controller，任何一个的依赖缺失都会拖垮共享的上下文。
+     *
+     * <p>默认替身返回 null（=「查无此人」）。本基类的 3 个子类都不调用
+     * /message/userSelect，故无需 stub。
+     */
+    @MockitoBean
+    protected UserCacheService userCacheService;
 
     /**
      * 预留的鉴权口子。将来接入认证后，在此返回需要附加的请求头

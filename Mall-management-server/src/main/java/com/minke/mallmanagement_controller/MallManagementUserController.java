@@ -1,5 +1,6 @@
 package com.minke.mallmanagement_controller;
 
+import com.minke.mallmanagement_service.UserCacheService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -22,6 +23,9 @@ public class MallManagementUserController {
     //登录部分
     @Autowired
     private JdbcTemplate LoginjdbcTemplate;//调取Spring里封装好的jdbc
+
+    @Autowired
+    private UserCacheService userCacheService;
 
     @Value("${app.upload-dir:${user.dir}/src/main/resources/static/img/}")
     private String uploadDir;
@@ -104,6 +108,15 @@ public class MallManagementUserController {
                     usernameAdd, password, role, merchantidAdd
             );
         }
+        // ⚠️ 本方法的唯一出口 —— 若新增 return 请确认：
+        //    ① 该分支不改库，或
+        //    ② 在该分支前也调 userCacheService.evictPublic(id)
+        // 现有两条 return：上面「用户已存在」那条只跑了 SELECT（未改 user）；本方法无 try/catch，
+        // INSERT 抛异常时经异常退出、而 @Transactional 会回滚 ⇒ 异常路径也不改库
+        // ⇒ 唯一出口覆盖 100% 的可能改库路径。
+        // 清的是 userPublic::<id> 的**正条目与负条目两者**：新注册的 id 此前若被查过，
+        // 缓存里可能是「不存在」的负条目，不清则本用户到 TTL 前都读不到自己。
+        userCacheService.evictPublic(id);
         return "添加成功！";
     }
 

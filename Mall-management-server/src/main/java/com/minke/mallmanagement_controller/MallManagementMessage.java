@@ -1,5 +1,6 @@
 package com.minke.mallmanagement_controller;
 
+import com.minke.mallmanagement_service.UserCacheService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.web.bind.annotation.*;
@@ -16,6 +17,9 @@ public class MallManagementMessage {
 
     @Autowired
     private JdbcTemplate MessagejdbcTemplate;
+
+    @Autowired
+    private UserCacheService userCacheService;
 
     // ===================== 消息相关接口（基于会话表） =====================
     @PostMapping("/conversations")
@@ -155,36 +159,43 @@ public class MallManagementMessage {
     }
     // ===================== 好友相关接口 =====================
     //搜索好友时显示数据
+    // 读路径（SELECT + 取首行）搬到 UserCacheService.publicInfo()，本方法只保留路由 + 响应组装。
+    // 【本方法在 userSelect 上缓存这件事里的角色】只组装响应，**不挂任何缓存注解** ——
+    //   · Service 返回 null（业务 0 行）→ 本方法构造 marker ⇒ 该 null 已被缓存（负缓存，防 ID 枚举穿透）
+    //   · Service 抛异常（技术失败）→ 本方法同样构造 marker ⇒ 但**异常不进缓存**（@Cacheable 遇异常不写）
+    // 两条路径的响应体与引入 UserCacheService 之前**逐字段相同**（零契约变更）。
+    // ⚠️ 代价：技术异常与「查无此人」在响应**文案**上仍不可区分（既有瑕疵，见 §11，本笔不动）。
+    // ⚠️ 缓存体是 Service 返回的裸行 Map，形状耦合**具体列名**（§10 边界第 4 条形态②）。
     @PostMapping("/userSelect")
     public Map<String, Object> userSelect(@RequestParam("userId") String userId) {
         Map<String, Object> result = new HashMap<>();
-        String sql = "SELECT customerid, merchantid, username, usertype, gender FROM user WHERE customerid = ? OR merchantid = ?";
+        Map<String, Object> user;
         try {
-            List<Map<String, Object>> userList = MessagejdbcTemplate.queryForList(sql, userId, userId);
-            if (!userList.isEmpty()) {
-                Map<String, Object> user = userList.get(0);
-                String usertype = (String) user.get("usertype");
-                String id;
-                if ("客户".equals(usertype)) {           // 改为中文
-                    id = (String) user.get("customerid");
-                } else if ("商家".equals(usertype)) {     // 改为中文
-                    id = (String) user.get("merchantid");
-                } else {
-                    id = (String) user.get("customerid");
-                    if (id == null) id = (String) user.get("merchantid");
-                }
-                Map<String, Object> resultUser = new HashMap<>();
-                resultUser.put("id", id);
-                resultUser.put("username", user.get("username"));
-                resultUser.put("usertype", usertype);
-                resultUser.put("gender", user.get("gender"));
-                resultUser.put("image", null);   // 无 image 字段，设为 null
-                result.put("success", true);
-                result.put("user", resultUser);
-                return result;
-            }
+            user = userCacheService.publicInfo(userId);
         } catch (Exception e) {
             e.printStackTrace();
+            user = null;
+        }
+        if (user != null) {
+            String usertype = (String) user.get("usertype");
+            String id;
+            if ("客户".equals(usertype)) {           // 改为中文
+                id = (String) user.get("customerid");
+            } else if ("商家".equals(usertype)) {     // 改为中文
+                id = (String) user.get("merchantid");
+            } else {
+                id = (String) user.get("customerid");
+                if (id == null) id = (String) user.get("merchantid");
+            }
+            Map<String, Object> resultUser = new HashMap<>();
+            resultUser.put("id", id);
+            resultUser.put("username", user.get("username"));
+            resultUser.put("usertype", usertype);
+            resultUser.put("gender", user.get("gender"));
+            resultUser.put("image", null);   // 无 image 字段，设为 null
+            result.put("success", true);
+            result.put("user", resultUser);
+            return result;
         }
         result.put("success", false);
         result.put("msg", "用户不存在");
