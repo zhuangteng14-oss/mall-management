@@ -298,6 +298,18 @@ orderPayIfUp 3 | loginSelect 1 | loginAdd 1 | friendAdd 1
 
 > **降级不是优化项，是 B1 的硬约束**（见 §10 核心原则）。若不实现降级，`A-S1-1` / `A-S4b-1` 会把 Redis 的任何抖动传导为 HTTP 5xx。
 
+### §9.1 本项目的落地状态（2026-09-28 核对）
+
+上面那张表是**设计**，不是现状。逐项核对如下 —— **设计写了不等于生效**，本仓刚因「机制已写但从未被调用」吃过一次亏（见 §11「机制已写 ≠ 机制生效」）：
+
+| 项 | 现状 | 依据 / 落地条件 |
+|---|---|---|
+| **击穿** | ✅ **已生效**（2026-09-28，`f693bdb`） | `@Cacheable(sync = true)` 是单飞的**开关**：不加它时 Spring 只走 `Cache#get(key)`，`TwoLevelCache.get(key, Callable)` 从不被调用。实测冷 L1 + 冷 L2 打 20 并发：修复前 **20 次 DB 查询**、修复后 **1 次**（`Redis GET` 增量 +20 → +1，L2 探测同样被合并）。**规则：本仓所有 `@Cacheable` 默认加 `sync = true`**，除非有理由不加 —— 约束是只允许单 `cacheNames`、不能与 `unless` 同用 |
+| **穿透** | ⚠️ **机制未验证**（不是「已实现」） | L2 侧 `cache-null-values` 默认开、L1 侧用 `SimpleValueWrapper` 包 null —— 链条存在，但**当前无任何接口会返回 null**（`goodstype::all` 恒返回列表），故该路径从未被执行过。**落地时机**：`userSelect` / `friendSelect` 上缓存时（它们是零鉴权可枚举 ID 的最大受害面）。落地时必须：只对按 ID 查的读路径开负缓存、负 TTL 明显短于正 TTL（30–60s）、写路径**按 key** `@CacheEvict`（只 `allEntries` 会让「新建后读不到」的窗口拖到 TTL 到期） |
+| **布隆过滤器** | ❌ **不采纳**（不是待办） | 本项目无键基数数据、缓存只有个位数 key，布隆的复杂度换不来收益。明确记为**不采纳**，避免它日后冒充欠债 |
+| **雪崩（同时过期）** | ❌ **不实现 TTL 抖动**（触发条件写死） | L1 固定 60s、L2 固定 5m 全局同刻，但当前只有 **1 个键** → 纯理论问题。**触发条件：某缓存族的 key 数 > ~10**。届时方案：L1 用 Caffeine 自定义 `Expiry` 加 0–20% 随机；L2 的 `entryTtl` 是静态的，需换逐键 TTL 供应商 |
+| **雪崩（Redis 整体不可达）** | ⚠️ **代价未测** | 本项目真正会发生的雪崩是**这个**：Redis 一挂，全站读回落 DB。降级已保证 `5xx = 0`，但每次读要付一次「连不上」的代价 —— **该代价有多大尚未实测**（首连 vs 后续是否同样昂贵？秒级则降级虽不 5xx 却会把 DB 拖垮）。测出结论再决定是否需要「冷却窗口」（把已有的 `l2Healthy` 扩展成 fail-fast 窗口）；**不测就做冷却窗口是拍脑袋** |
+
 ---
 
 ## 10. 演进影响分析
@@ -341,6 +353,8 @@ orderPayIfUp 3 | loginSelect 1 | loginAdd 1 | friendAdd 1
 | **缓存污染 A3 证据** | 缓存落在「先查后插」的查重查询上 → `A-B2-1` 假绿 | §0 硬约束 + §0.1 的结构保证 |
 | ~~P6 与缓存冲突~~ **（已解决 2026-09-27）** | **原现象**：A3 的 P6 是「哨兵往返」—— 脚本用裸 JDBC 直写一行 `A3P-<runId8>`，再 `GET /mysqlGoods/goodstype` 读回。B1 给该端点加缓存后，读回的是**缓存填充时刻的旧列表**，哨兵行必然不在其中 → **结构性 FAIL，重跑多少次都一样**（不是偶发）。**根因**：P6 的隐含前提是「HTTP 读回来的内容 == 库里的内容」，缓存正是打破这个前提的东西 —— 所以**换探针接口是打地鼠**（改成 `goodsSelect` 只是把爆炸推迟到给它加缓存那天）。 | **新方案**：新增 `GET /health/db`（`@Profile("a3")`，**自身永不加 `@Cacheable`**），由后端报自己连的 `@@server_uuid`，脚本 JDBC 侧查同一个变量逐字段对比。**不依赖任何被缓存的数据，故与缓存永久正交**。P5 就绪探测一并搬过去（它同样被缓存静默削弱：命中时不碰 DB，就不再能证明 Hikari/MySQL 可用），P7 阴性对照改用 `server_uuid` 比对。A3 全量已复测通过（23/23 门禁、`reproRounds=5/5`）。详见 `concurrency-test.md §脚本内置校验 P0–P7` |
 | ~~两级缓存尚未生效（方案 B 只落了一半）~~ **（已解决 2026-09-28）** | **原现象**：pom 里 Caffeine + Redis 并存，但 **Spring Boot 实测只装配 RedisCacheManager** —— `CacheType` 的枚举顺序里 `REDIS` 排在 `CAFFEINE` **之前**，Redis 胜出。故 §8 定的「Caffeine(L1) + Redis(L2)」实际是**单级 Redis**。**处置**：新增 `CacheConfig` 提供 `@Primary CacheManager`（`TwoLevelCacheManager` 组合 Caffeine L1 + Redis L2，见 §8）。**六项实测**：① `--debug` 自动装配报告显示 `CacheAutoConfiguration` 因 `@ConditionalOnMissingBean(types: CacheManager)` 失配而退回；② GET#2 起 Redis `commandstats` 计数**冻结**（L1 命中不打网络，单级 Redis 必增）；③ 重启后仅 L2 命中（`get` +1、`set` 不变、DB SQL 0，即**不回刷 L2 TTL**）；④ `evict` 两级同清；⑤ Redis 不可达时回落 DB 且 **5xx=0**，恢复时 `markL2Up` 记录一次状态翻转；⑥ A3 全量回归 `exitCode=0`、门禁 0 failed(23)、`A-B2-1` 仍 `EXPECTED_DEFECT_PRESENT reproRounds=5/5`。**遗留待观测**：`app.cache.caffeine.max-size=1000` 是**防御性上界**（无键基数依据，当前仅 1 个键），待 Micrometer 观测后调整 | 若将来新增 `spring.cache.redis.*` 属性，**必须**在 `CacheConfig.l2Configuration` 里同步映射，否则该属性被静默忽略（本项目已因 commons-pool2 缺失踩过一次同类坑） |
+| **机制已写 ≠ 机制生效**（2026-09-28 新增的风险类型） | **实例**：`TwoLevelCache.get(key, Callable)` 完整实现了单飞（Caffeine 原子 load + 只在真正执行 loader 时才写 L2），但 `@Cacheable` 不加 `sync = true` 时 Spring 只走 `Cache#get(key)` —— 该方法**从不被调用**，击穿防护整整一轮是**死代码**；`3678719` 的 message 第 5 条还把它当已生效的设计写了（纠正见 `f693bdb`）。**同类未验证项**：穿透的空值缓存链（同样无接口触发，见 §9.1） | 判据不是「代码写了」，而是「**有入口在走 + 有能证伪它的实测数字**」。新增机制时一并给出触发它的入口与实测；凡「代码在、调用方不在」的机制一律标**未验证**，不标「已实现」。本仓同款前例：`recLoad()` 定义了却无人调用，S1/S2b/S4b 的均值与分位从未进报告（`concurrency-test.md` 记过） |
+| **单飞是 per-JVM 的** | Caffeine 在进程内，`sync = true` 只在**单个 JVM 内**合并同 key 的并发未命中。多实例部署时 N 个实例最多产生 **N** 次 DB 加载，不是 1 次 | 分布式锁是唯一真解；本项目单实例，不划算，按已知限制登记。若将来多实例：先测「N 实例冷启时的 DB 峰值」再决定是否上分布式锁 |
 | **性能基线不可比** | 加缓存后 S4b 的 QPS 与 A3 记录不可直接对比 | 对比时显式声明「缓存已启用」。**（2026-09-28 补）本行即 §8 工程取舍段的实测序列**：S4b 61.5（无缓存）→ 66.0（单级）→ 69.6（两级）；跨状态对比必须声明状态，且**报告元数据目前不记录缓存状态**（已实测比对，见 §8），引用旧报告时只能靠时间线推断 |
 | **`userSelect` 的失效面** | `userSelect` 无对应写接口，但 `updateUserInfo`（`U:228`）可改 username / 头像 | 第一版给短 TTL；或让 `updateUserInfo` 一并 evict（需先确认其影响面） |
 | **新增 Service 层** | 项目原为「无分层」架构，B1 首次引入 Service bean | 只抽**被缓存的读路径**所需的极薄 Service，不全面重构分层；`project-map.md §3` 需在实现后同步更新 |
