@@ -5,6 +5,7 @@ import com.minke.mallmanagement_service.GoodsTypeCacheService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.cache.annotation.CacheEvict;
+import org.springframework.cache.annotation.Caching;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
@@ -53,15 +54,32 @@ public class MallManagementGoodsController {
     }
 
     //这是一个接口用于上架商品
-    // ⚠️ 写商品必须清 goodsHome（否则首页列表永不更新）。三点必读：
-    //   1. allEntries=true 在本 cacheName 上是**零精度损失**：goodsHome 只有 'all' 一个键，
-    //      清整片 == 清那一个键；且结构上不会出现「改了 key 忘了改 evict」的失配。
-    //   2. beforeInvocation=false（默认，**调用后**清）+ 本方法内部 try/catch 吞异常、永远正常
+    // ⚠️ 写商品必须清**两个** cacheName（否则首页列表 / 该商家的商品列表永不更新）。四点必读：
+    //   1. 两条 evict 的精度不同，各自成立：
+    //      · goodsHome 用 allEntries=true —— 在本 cacheName 上是**零精度损失**：只有 'all' 一个键，
+    //        清整片 == 清那一个键；且结构上不会出现「改了 key 忘了改 evict」的失配。
+    //      · goodsByMerchant 用 key="#MerchantId" **精确清** —— 本方法的写入集合由 MerchantId 限定
+    //        （INSERT 的 MerchantId 列 = 入参）⇒ 改动集合 ⊆ 该键的集合，**不存在漏清**；反过来
+    //        多清一次是保守无害的。⚠️ 已知边界：MerchantId 是 char(20) 且 MySQL 比较**忽略尾空格
+    //        与大小写**，而缓存键是字符串精确比较 ⇒ 传 "1 " 能改到 "1" 的行，却清不到
+    //        goodsByMerchant::1（陈旧到 TTL 自愈）。要对此免疫就只能 allEntries，代价是别家列表
+    //        被顺带清。见 cache-layer.md §11。
+    //   2. 为什么是 @Caching 而不是两个 @CacheEvict：Spring 的 @CacheEvict **不是 @Repeatable**
+    //      （spring-context 6.2.6 实证：常量池无 Repeatable，且该包下**没有** CacheEvicts /
+    //      Cacheables 容器类 —— 可自行 `unzip -l spring-context-*.jar | grep cache/annotation/` 复核）
+    //      ⇒ 同一方法上写两个同名注解**不可编译**。单个 @CacheEvict(cacheNames={A,B}) 只能表达
+    //      **同精度**的多命名空间；本例两条精度不同，故 @Caching 是唯一写法（它也更能兼容
+    //      将来混 evict + put 的场景）。
+    //   3. beforeInvocation=false（默认，**调用后**清）+ 本方法内部 try/catch 吞异常、永远正常
     //      返回 ⇒ 等价于「每次调用都清」。多清一次是保守且无害的（代价 = 下次冷读回填）。
-    //   3. ⚠️ 本注解使本方法所在的 bean 被 **CGLIB 代理**（此前 Controller 无代理）。
+    //      （提前 return 的路径 —— 如 G:83 图片为空 —— 也会清：注解是挂在方法上的，与代码位置无关。）
+    //   4. ⚠️ 本注解使本方法所在的 bean 被 **CGLIB 代理**（此前 Controller 无代理）。
     //      goodsAdd / goodsUp / goodsDe **不在 A3 的接口覆盖面内** ⇒ A3 全绿证明不了这三个
     //      接口的路由没被代理打坏，必须另打真实请求验证（本轮验证 b 组）。
-    @CacheEvict(cacheNames = "goodsHome", allEntries = true)
+    @Caching(evict = {
+            @CacheEvict(cacheNames = "goodsHome", allEntries = true),
+            @CacheEvict(cacheNames = "goodsByMerchant", key = "#MerchantId")
+    })
     @PostMapping("/goodsAdd")
     public Map<String, Object> goodsAdd(
             @RequestParam("MerchantId") String MerchantId,
@@ -149,22 +167,17 @@ public class MallManagementGoodsController {
     }
 
     //这是一个接口（用于显示商家端查看商品页面外部内容）
+    // 方法体搬到 GoodsCacheService.listByMerchant()（逐字搬运，含 SQL / try-catch / 返回结构）。
+    // 本方法只保留路由与委托 —— 无参数分支（只有一个必填 @RequestParam），故不需要像
+    // goodstype 那样在这里保留分支判定。⚠️ 形参名 MerchantId 必须保留：@RequestParam 未写显式名
+    // 依赖它解析，Service 侧 key="#MerchantId" 也依赖同一个形参名（-parameters 已开）。
+    // 缓存：cacheName = goodsByMerchant、key = #MerchantId、sync = true（单飞防击穿）；
+    //      失效面 = goodsAdd / goodsUp / goodsDe，**按 MerchantId 精确清**（见那三个方法的 @Caching）。
     @PostMapping("/goodsSelect")
     public Map<String, Object> goodsSelect(
             @RequestParam String MerchantId
     ) {
-        Map<String, Object> result = new HashMap<>();
-        try {
-            String sql = "SELECT * FROM mall_management_sql.goods WHERE MerchantId = ?";
-            List<Map<String, Object>> list = GoodjdbcTemplate.queryForList(sql, MerchantId);
-            result.put("success", true);
-            result.put("list", list);
-        } catch (Exception e) {
-            e.printStackTrace();
-            result.put("success", false);
-            result.put("msg", "查询失败");
-        }
-        return result;
+        return goodsCacheService.listByMerchant(MerchantId);
     }
 
     //这是一个接口（用于返回商品对应的所有信息）
@@ -179,9 +192,12 @@ public class MallManagementGoodsController {
     }
 
     // 这是一个接口（用于下架商品）
-    // ⚠️ @CacheEvict 的三点理由同 goodsAdd（allEntries 在本 cacheName 上零精度损失 /
-    //    调用后清 + 吞异常 ⇒ 等价于「每次调用都清」/ 本注解使 bean 被 CGLIB 代理，A3 不覆盖本接口）。
-    @CacheEvict(cacheNames = "goodsHome", allEntries = true)
+    // ⚠️ @Caching 两条 evict 的四点理由同 goodsAdd（零精度损失 / 精确清 / 注解不可重复 / CGLIB 代理）。
+    //    本方法删除集合由 MerchantId 限定（WHERE 的首个条件）⇒ 精确清不漏。
+    @Caching(evict = {
+            @CacheEvict(cacheNames = "goodsHome", allEntries = true),
+            @CacheEvict(cacheNames = "goodsByMerchant", key = "#MerchantId")
+    })
     @PostMapping("/goodsDe")
     public Map<String, Object> goodsDe(
             @RequestParam("MerchantId") String MerchantId,
@@ -236,9 +252,15 @@ public class MallManagementGoodsController {
     }
 
     //这是一个接口（用于更新商品数据）
-    // ⚠️ @CacheEvict 的三点理由同 goodsAdd（allEntries 在本 cacheName 上零精度损失 /
-    //    调用后清 + 吞异常 ⇒ 等价于「每次调用都清」/ 本注解使 bean 被 CGLIB 代理，A3 不覆盖本接口）。
-    @CacheEvict(cacheNames = "goodsHome", allEntries = true)
+    // ⚠️ @Caching 两条 evict 的四点理由同 goodsAdd（零精度损失 / 精确清 / 注解不可重复 / CGLIB 代理）。
+    //    本方法更新集合由 MerchantId 限定（WHERE 首个条件）⇒ 精确清不漏。
+    //    本方法**会改 GoodName**，但 goodsByMerchant 的键只含 MerchantId、不含 GoodName
+    //    ⇒ 不存在「旧键变垃圾」的问题，精确清依然成立。反之，将来若缓存以 GoodName 为键段的投影
+    //    （goodsCodes / goodsPrice），改名后**旧键清不掉** ⇒ 那类投影只能用 allEntries（见 §11）。
+    @Caching(evict = {
+            @CacheEvict(cacheNames = "goodsHome", allEntries = true),
+            @CacheEvict(cacheNames = "goodsByMerchant", key = "#MerchantId")
+    })
     @PostMapping("/goodsUp")
     public Map<String, Object> goodsUp(
             @RequestParam("MerchantId") String MerchantId,

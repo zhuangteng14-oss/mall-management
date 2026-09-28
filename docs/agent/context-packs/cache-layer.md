@@ -104,7 +104,7 @@ Redis 已就绪：`192.168.229.129:6379`，redis-server **8.0.5**，`requirepass
 |---|---|---|---|---|---|
 | `/mysqlGoods/goodstype` | **GET** | 类型字典，几乎不变。A3 负载中 S1 占 **50%**（`L:1279-1280`）、S4b 占 **2/20 槽**（`L:1532`+`L:1549`） | `v1:goodstype:all` | 长（30–60min） | POST 新增时 evict 该键 |
 | `/mysqlGoods/goodsSelectHome` | POST | 首页商品全量 + 商家名。读多，无参 | `v1:goods:home` | 短（1–5min） | goodsAdd / goodsUp / goodsDe 全清 |
-| `/mysqlGoods/goodsSelect` | POST | 商家商品列表（`G:166-167`，`WHERE MerchantId = ?`），读多写少 | `v1:goods:m:{MerchantId}` | 中（5–10min） | 按 MerchantId 清 |
+| `/mysqlGoods/goodsSelect` | POST | 商家商品列表（`WHERE MerchantId = ?`），读多写少。✅ **已落地**（2026-09-28）：读路径 `GoodsCacheService.listByMerchant()`，单条 SQL **无 N+1**。⚠️ `MerchantId` 无索引（`db-schema.md §索引缺失` `G:160`）⇒ 库侧是**全表扫**，缓存是掩盖而非修复 | **`goodsByMerchant::<MerchantId>`**（`key="#MerchantId"`；§10 的 `v1:` 前缀仍未加） | 全局 L2 5m / L1 60s（`CacheConfig` 用 `cacheDefaults`，**无 per-cacheName TTL 配置** ⇒ 新增 cacheName 零配置） | **按 key 精确清**：`goodsAdd` / `goodsUp` / `goodsDe` 各挂 `@Caching(evict = { goodsHome 全清, goodsByMerchant `key="#MerchantId"` })` |
 | `/mysqlGoods/productCodePrice` | POST | 单点价格，结果稳定 | `v1:goods:price:{MerchantId}:{GoodName}:{ProductCode}` | 中 | goodsUp / goodsDe |
 | `/mysqlGoods/GoodsProductCodeSelect` | POST | 型号列表（`G:343`），读 | `v1:goods:codes:{MerchantId}:{GoodName}` | 中 | goodsAdd / goodsUp / goodsDe |
 | `/message/userSelect` | POST | 用户公开信息（`M:163`） | `v1:user:pub:{userId}` | 中 | 无对应写接口（见 §11 风险表） |
@@ -112,7 +112,9 @@ Redis 已就绪：`192.168.229.129:6379`，redis-server **8.0.5**，`requirepass
 | `/message/selectFriend` | POST | 待处理好友申请，per-user（`M:238-240`） | `v1:friend:req:{friendId}` | 短 | friendAdd / friendUp / friendDe |
 | `/message/conversations` | POST | 会话列表（`M:25-32`），per-user（`currentId`），读多写少 | `v1:conv:list:{currentId}` | 短（1–5min） | `send`（新消息）+ `history`（**写** `last_read_time`）。按 key 清：`history` 只改一对会话的已读时间，全清会让其他用户的会话列表无谓失效 |
 
-> **落地后的键形态**：上表「键设计」列是**设计建议**（含 §10 的版本前缀）；实际落地为 `<cacheName>::<key>` 两段拼出（`@Cacheable(cacheNames=…, key=…)`）。已落地的两个：`goodstype::all`（`f693bdb` 之前）、`goodsHome::all`（2026-09-28，本轮）——**当前均未加 `v1:` 前缀**，前缀仍是建议值。加它的代价见 §11「`goodsHome` 的形状耦合」：形状变更时必须记得 bump，否则新旧条目会在同一片键里混住。
+> **落地后的键形态**：上表「键设计」列是**设计建议**（含 §10 的版本前缀）；实际落地为 `<cacheName>::<key>` 两段拼出（`@Cacheable(cacheNames=…, key=…)`）。已落地的三个：`goodstype::all`（`f693bdb` 之前）、`goodsHome::all`、`goodsByMerchant::<MerchantId>`（后两个均为 2026-09-28）——**当前均未加 `v1:` 前缀**，前缀仍是建议值。加它的代价见 §11「`goodsHome` / `goodsSelect` 的形状耦合」：形状变更时必须记得 bump，否则新旧条目会在同一片键里混住。
+>
+> **命名规则（2026-09-28 定）**：`cacheName` = **表名 + 投影名（camelCase）**，无投影时用表名 —— `goodstype` / `goodsHome` / `goodsByMerchant` /（将来）`goodsCodes` / `goodsPrice`。收益：同族的键仍能被 `KEYS goods*` 一眼看全，而失效精度可以**逐投影**不同。**同一张 `goods` 表分裂成两个 cacheName 是有意的**：`goodsHome` 是全局单键（只能整片清，allEntries 在那里零精度损失），`goodsByMerchant` 是按键数=商家数的键空间（可精确清，allEntries 在那里**不是**零精度损失）；合并后一片键空间无法只对其中一个投影精确清。合并（B）与 evict 单入口（D）两条待办及其触发条件见 §11。
 >
 > **本节与 §7 的关系**：本表是「哪些接口可缓存」的完整候选；§7 是**落地顺序**（风险从低到高）。本节新增行不等于「纳入本轮」。 
 
@@ -241,7 +243,7 @@ orderPayIfUp 3 | loginSelect 1 | loginAdd 1 | friendAdd 1
 
 1. **基础设施** —— `pom.xml` 加 `spring-boot-starter-cache` + `caffeine` + `spring-boot-starter-data-redis`；启动类加 `@EnableCaching`；`application-a3.properties` 配 `spring.data.redis.host` / `port` / `password`。
 2. **`goodstype` GET** —— 先做它：**无参数、无用户态、写侧只有 1 个 POST**，失效面最小。**落地方式见 §0.1**（抽极薄 Service，`@Cacheable` 只覆盖 `G:37-38`）。**POST 的 `G:47-48` 查重一行都不许碰。**
-3. **商品类** —— 键开始带业务标识。`goodsSelectHome` ✅ **已落地**（2026-09-28：`goodsHome::all`（无参单键）+ `sync = true`；失效面 = `goodsAdd`/`goodsUp`/`goodsDe` 三个写接口各挂 `@CacheEvict(allEntries)`；读路径搬到 `GoodsCacheService.listHome()`）；`goodsSelect` 待做。
+3. **商品类** —— 键开始带业务标识。`goodsSelectHome` ✅ **已落地**（2026-09-28：`goodsHome::all`（无参单键）+ `sync = true`；失效面 = `goodsAdd`/`goodsUp`/`goodsDe` 三个写接口各挂 evict；读路径搬到 `GoodsCacheService.listHome()`）；`goodsSelect` ✅ **已落地**（2026-09-28：`goodsByMerchant::<MerchantId>`（`key="#MerchantId"`）+ `sync = true`；同样那三个写接口**按 key 精确清**（`@Caching` 两条：`goodsHome` 全清 + `goodsByMerchant` 精确）；读路径搬到 `GoodsCacheService.listByMerchant()`。⚠️ 该表 `MerchantId` 无索引，库侧是全表扫）；`productCodePrice` / `GoodsProductCodeSelect` 待做 —— ⚠️ 两者的键含 `GoodName`，而 `goodsUp` **会改 `GoodName`** ⇒ 改名后旧键清不掉，**只能用 allEntries**（见 §11）。
 4. **per-user 类**（`friendSelect` / `selectFriend` / `userSelect`）—— 需处理好友关系变更的失效。
 5. **order 列表类** —— 放最后。收益最低（变化最频繁）、风险最高（打乱 A3 性能基线）。
 
@@ -312,7 +314,7 @@ orderPayIfUp 3 | loginSelect 1 | loginAdd 1 | friendAdd 1
 | 项 | 现状 | 依据 / 落地条件 |
 |---|---|---|
 | **击穿** | ✅ **已生效**（2026-09-28，`f693bdb`） | `@Cacheable(sync = true)` 是单飞的**开关**：不加它时 Spring 只走 `Cache#get(key)`，`TwoLevelCache.get(key, Callable)` 从不被调用。实测冷 L1 + 冷 L2 打 20 并发：修复前 **20 次 DB 查询**、修复后 **1 次**（`Redis GET` 增量 +20 → +1，L2 探测同样被合并）。**规则：本仓所有 `@Cacheable` 默认加 `sync = true`**，除非有理由不加 —— 约束是只允许单 `cacheNames`、不能与 `unless` 同用 |
-| **穿透** | ⚠️ **机制未验证**（不是「已实现」） | L2 侧 `cache-null-values` 默认开、L1 侧用 `SimpleValueWrapper` 包 null —— 链条存在，但**当前无任何接口会返回 null**（`goodstype::all` 恒返回列表），故该路径从未被执行过。**落地时机**：`userSelect` / `friendSelect` 上缓存时（它们是零鉴权可枚举 ID 的最大受害面）。落地时必须：只对按 ID 查的读路径开负缓存、负 TTL 明显短于正 TTL（30–60s）、写路径**按 key** `@CacheEvict`（只 `allEntries` 会让「新建后读不到」的窗口拖到 TTL 到期） |
+| **穿透** | ⚠️ **机制未验证**（不是「已实现」） | L2 侧 `cache-null-values` 默认开、L1 侧用 `SimpleValueWrapper` 包 null —— 链条存在，但**当前无任何接口会返回 null**（`goodstype::all` 恒返回列表），故该路径从未被执行过。**（2026-09-28 补）首个「按 ID 入参 + 零鉴权 + 已上缓存」的接口已经出现** —— `goodsSelect`（`goodsByMerchant::<MerchantId>`），但它**从不返回 null**、0 行是 `success:true, list: []` ⇒ **仍不触发本行的路径**；它的键空间问题另见 §11「`goodsSelect` 的键空间随入参无界」。**落地时机**：`userSelect` / `friendSelect` 上缓存时（它们是零鉴权可枚举 ID 的最大受害面）。落地时必须：只对按 ID 查的读路径开负缓存、负 TTL 明显短于正 TTL（30–60s）、写路径**按 key** `@CacheEvict`（只 `allEntries` 会让「新建后读不到」的窗口拖到 TTL 到期） |
 | **布隆过滤器** | ❌ **不采纳**（不是待办） | 本项目无键基数数据、缓存只有个位数 key，布隆的复杂度换不来收益。明确记为**不采纳**，避免它日后冒充欠债 |
 | **雪崩（同时过期）** | ❌ **不实现 TTL 抖动**（触发条件写死） | L1 固定 60s、L2 固定 5m 全局同刻，但当前只有 **1 个键** → 纯理论问题。**触发条件：某缓存族的 key 数 > ~10**。届时方案：L1 用 Caffeine 自定义 `Expiry` 加 0–20% 随机；L2 的 `entryTtl` 是静态的，需换逐键 TTL 供应商 |
 | **雪崩（Redis 整体不可达）** | ✅ **代价已测 + 冷却窗口已实现**（2026-09-28，`84cd200`） | 本项目真正会发生的雪崩是**这个**：Redis 一挂，全站读回落 DB。降级已保证 `5xx = 0`（`84cd200` 后 A3 复核：`A-S1-1` / `A-S4b-1` 均 `5xx=0 connErr=0`，报告 `a3-report-077eebf9`），但每次读仍要付一次「连不上」的代价。**代价已测，且两种故障差别很大**（均为本轮可复核的**首个冷读**，DB 本身约 2.5ms）：① **连接被拒**（端口关闭 = Redis 进程真挂了）→ **325ms**，之后亚毫秒级；② **SYN 被丢弃**（`192.0.2.1:6379`，TEST-NET）→ **3.40s**；③ **连得上但永不响应**（accept 后不回字节）→ **3.38s**。即**「秒级」只在网络路径黑洞时成立，真实故障（进程挂 = 端口关闭）是亚秒级**。**应对已实现**：冷却窗口 —— 窗口内所有 L2 操作直接跳过（零网络代价，只读一个 volatile），到期后由 CAS 选出的**唯一**一个请求探测一次（窗口 30s / 探测超时 200ms / `PROBE_INFLIGHT` 1s 互斥，启动期校验 1s > 200ms，违反即 WARN）。**黑洞端点实测**（7 样本，每样本 = 一次 `@CacheEvict` + 一次冷读）：首个冷读 3.376s → 之后 4~7ms、端点 accept 增量 **0**；窗口到期那一个样本 233ms（探测）、accept **+1**；探测失败即重设窗口，之后又回到 4ms。全程 `5xx=0`、`ERROR=0`、DB 查询数 = 请求数（确证回落 DB）。**探测代价**见下段 |
@@ -370,9 +372,20 @@ orderPayIfUp 3 | loginSelect 1 | loginAdd 1 | friendAdd 1
 | **单飞是 per-JVM 的** | Caffeine 在进程内，`sync = true` 只在**单个 JVM 内**合并同 key 的并发未命中。多实例部署时 N 个实例最多产生 **N** 次 DB 加载，不是 1 次 | 分布式锁是唯一真解；本项目单实例，不划算，按已知限制登记。若将来多实例：先测「N 实例冷启时的 DB 峰值」再决定是否上分布式锁 |
 | **性能基线不可比** | 加缓存后 S4b 的 QPS 与 A3 记录不可直接对比 | 对比时显式声明「缓存已启用」。**（2026-09-28 补）本行即 §8 工程取舍段的实测序列**：S4b 61.5（无缓存）→ 66.0（单级）→ 69.6（两级）；跨状态对比必须声明状态，且**报告元数据目前不记录缓存状态**（已实测比对，见 §8），引用旧报告时只能靠时间线推断 |
 | **`userSelect` 的失效面** | **（2026-09-28 实测修正）** 原文写「`userSelect` 无对应写接口，但 `updateUserInfo`（`U:228`）可改 username / 头像」——**两条都不成立**：①`U:237` 的 UPDATE 只写 `email`/`address`/`selfintroduction`，**不改 username**；②头像根本不在 `user` 表（`updateAvatar` 写的是 `customerimage`（`U:210`）/`merchantimage`（`U:212`））。⇒ 与 `userSelect` 被缓存的 5 列（`customerid`/`merchantid`/`username`/`usertype`/`gender`，`M:161`）**无交集**，`userSelect` 上缓存时**不需要** evict | **唯一脏源是 `loginAdd`**（`user` 表只有 INSERT 新行 + 一条不含缓存列的 UPDATE）：新行能被**已缓存的键**命中，仅当客户端传入的 `id`/`customerid`/`merchantid` 与已存在值相同（`loginAdd` 的 `id` 是入参，客户端可控）。陈旧上界 = L2 TTL（5m）/ L1 TTL（60s），自愈。若要彻底关掉：给 `loginAdd` 挂 evict（代价 = 每次注册清一片，实施时再定 cacheName） |
-| **`goodsHome` 的形状耦合（`SELECT *`）** | 缓存体 = 「`goods` 表**列全集**的快照」：给表加列后，**旧条目缺该列 → 响应字段缺失直到 TTL**（L2 5m / L1 60s）。同形问题：`Price`(DECIMAL) / 时间列等非 String/Integer 值经 L2 序列化往返后**类型与精度是否原样**（本轮 a‑4 逐字段比对，见 commit） | 沿用 §10 约定：**响应形状变更 ⇒ bump 键版本**。本轮**未加** `v1:` 前缀（与既有 `goodstype::all` 一致，见 §2 注），所以这一行是加前缀之前唯一的提醒 |
+| **`goodsHome` / `goodsSelect` 的形状耦合（`SELECT *`）** | 两者是**同一张表、同一条 `SELECT *`**（`GoodsCacheService.listHome()` 与 `listByMerchant()`）⇒ 缓存体 = 「`goods` 表**列全集**的快照」，列集合完全相同：给表加列后，**旧条目缺该列 → 响应字段缺失直到 TTL**（L2 5m / L1 60s）。**列类型已实证**（`CREATE TABLE goods`）：`Price` 是 **`double`，不是 DECIMAL** ⇒ 「12.50 / 12.5 / 12.500」这类**尾零精度**问题在类型层面不存在，只需验**类型不漂移**（往返后仍是 `Double`，不是 `BigDecimal`/`String`）；且该表**没有任何时间列** ⇒「时间列类型」在本表上**无对象可测**（不是跳过，是不存在 —— 本仓三张已缓存表 `goodstype`/`goods` 均无时间列） | 沿用 §10 约定：**响应形状变更 ⇒ bump 键版本**。本轮**未加** `v1:` 前缀（与既有 `goodstype::all` 一致，见 §2 注），所以这一行是加前缀之前唯一的提醒 |
 | **`goodsHome` 的体积与 N+1** | ①无分页 `SELECT *` ⇒ 缓存体随表增长（本轮实测 `STRLEN goodsHome::all`，见 commit）；②该接口是 1 + N 查询（§4 第 1 行）——缓存把它摊薄为「每 TTL 一次」，是**掩盖而非修复**；③冷启动/失效后的首个请求仍付 1 + N。**代码坐标已变**：读路径从 `MallManagementGoodsController.goodsSelectHome()`（原 `G:157-196`）搬到 `GoodsCacheService.listHome()`，§4 表里的 `G:` 坐标随之过期 | 体积/键基数上量后（表行数上千或缓存键 > ~10）再决定分页或放弃缓存该接口；N+1 仍归 `fix-n-plus-one`（B1 不改 SQL） |
-| **新增 Service 层** | 项目原为「无分层」架构，B1 首次引入 Service bean | 只抽**被缓存的读路径**所需的极薄 Service，不全面重构分层（2026-09-28：已落地 `GoodsTypeCacheService`、`GoodsCacheService` 两个 —— 后者只含读方法，写路径与 `@CacheEvict` 留在 Controller；`project-map.md §3` 需在实现后同步更新） |
+| **精确 evict 的两条边界**（2026-09-28 新增） | ① **MySQL 比较 ≠ 缓存键比较**：`MerchantId` 是 `char(20)` 且默认 collation（`utf8mb4_0900_ai_ci`）**忽略尾空格与大小写**，而缓存键是**字符串精确比较** ⇒ 写侧传 `"1 "` 能改到 `"1"` 的行，却只清 `goodsByMerchant::1 `、清不到读侧用的 `goodsByMerchant::1` ⇒ 陈旧到 TTL 自愈。这是**精确清相对 allEntries 的唯一新增风险**（allEntries 对这类输入免疫，代价是别家列表被顺带清）。② **`@CacheEvict` 不是 `@Repeatable`**（spring-context 6.2.6 实证：常量池无 `Repeatable`，且该包下**没有** `CacheEvicts` / `Cacheables` 容器类 —— `unzip -l spring-context-*.jar \| grep cache/annotation/` 可复核）⇒ 一个方法要挂**两条不同精度**的 evict **只有** `@Caching(evict={…})` 一条路；单个 `@CacheEvict(cacheNames={A,B})` 只能表达**同精度**的多命名空间 | 两条均**登记为已知边界，本轮不改语义**：① 接受 TTL 内陈旧；若要免疫则退回 allEntries。② 已写进三个写接口的注释（含上面的复核命令），免得后人以为能写两个 `@CacheEvict` |
+| **`goodsSelect` 的键空间随入参无界** | 本接口零鉴权（BD-03）且 `MerchantId` 是任意入参 ⇒ 任何人可造键（`goodsByMerchant::<任意值>`）。**低危**：L1 有 `app.cache.caffeine.max-size=1000` 硬上界、L2 条目随 TTL（5m）过期，每条目是一个小列表或空列表 —— 与 `productSearch` 的无界（拼 SQL + 键空间双无界，§3）**不同量级**。⬆️ **最容易被误判的一点**：0 行结果是 `success:true, list: []`，**空结果被正常缓存**，这不是「空值缓存（负缓存）机制」⇒ §9.1「穿透：机制未验证」的结论**不因本接口改变** | 登记；若键基数上量（> ~10，与 §9.1 雪崩的触发条件同源）再考虑「只缓存已存在的商家」或加负 TTL。判据：随机造 N 个 id 后数 `KEYS goodsByMerchant*` |
+| **新增 Service 层** | 项目原为「无分层」架构，B1 首次引入 Service bean | 只抽**被缓存的读路径**所需的极薄 Service，不全面重构分层（2026-09-28：已落地 `GoodsTypeCacheService`、`GoodsCacheService` 两个 —— 后者现含两个读方法 `listHome()` / `listByMerchant()`，写路径与 evict **仍留在 Controller**（现为 `@Caching`）；`project-map.md §3` 需在实现后同步更新，**单独一笔**） |
+
+### §11 附：两项带触发条件的待办（2026-09-28 立项，本轮均**不做**）
+
+| 待办 | 现状 | 触发条件 | 本轮不做的理由 |
+|---|---|---|---|
+| **B. 合并 goods 族 cacheName**（合成一个 `goods`） | `goodsHome`（全局单键，1 键）+ `goodsByMerchant`（按商家，键数 = 商家数） | goods 族读接口 **≥3 且全部是 allEntries 失效面**时 | 本轮 `goodsSelect` 要的是**精确清**（§2 登记即「按 MerchantId 清」），合并后一片键空间**无法只对其中一个投影精确清** ⇒ 与 A′ 直接冲突。合并还需给键加投影前缀（否则 `'all'` 与 `MerchantId="all"` **撞键**，零鉴权下入参可控），代价 = 重改 `da616a6` 的键名，并使其键名类实测记录（`EXISTS goodsHome::all` / `STRLEN goodsHome::all`）在代码里再也搜不到、需注记 |
+| **D. evict 收敛成 Service 单入口** | 两条 evict 分别挂在 3 个写接口上（共 6 行注解） | 写接口的 evict 清单 **≥4 条**，或**第二张表的读接口上缓存**时 | ① 语义从「注解自动清」变「**显式调用清**」：漏写那一行调用是**静默**的（不报错、陈旧到 TTL 自愈），属本表「机制已写 ≠ 机制生效」同类；而注解挂在方法上时**提前 return 也会清**（`goodsAdd` 的图片为空分支即是），placement 无关。② 它改的是**已验证单元**（`da616a6` 的 b 组证据针对 Controller 上的注解），须单独一笔、独立验证。**注**：D 比 A′ 更符合 §10「缓存注解挂 Service 方法」，且是**唯一**能真正解决「写接口清单膨胀」的一条路 —— 三个写接口还写 `productsales`，将来缓存该表的读接口时仍要动这三处，**合并 cacheName 消不掉「表数」** |
+
+（另有欠账一条：`project-map.md §3` 的分层说明需与本笔同步 —— 单独一笔，不混主题。）
 
 ---
 
