@@ -217,4 +217,79 @@ public class GoodsCacheService {
         }
         return result;
     }
+
+    /**
+     * 原 Controller 的 GoodsProductCodeSelect()（G:347-366），逐字搬运：SQL 原样、queryForList 原样、
+     * try/catch 原样、返回结构原样。
+     *
+     * 【为什么与 goodsPrice 分成两个 cacheName】
+     * 同一张表的两个投影，**值形状**不同：本方法返回 List&lt;String&gt;（型号列表），
+     * priceByTriple() 返回单点 {price, goodImg}。合成一片键空间会让同一 cacheName 里混住两种值形状
+     * —— @Cacheable 按谁先命中返回谁，触发类型混淆（Cache#get(key, type) 路径直接
+     * IllegalStateException）。本方法与 priceByTriple() 是「cacheName = 表名 + 投影名」
+     * 里「同族同表、按投影名分裂」的一对实例（另一个同族分裂是 goodsHome / goodsByMerchant，
+     * 分裂理由不同：那对是**失效精度**不同，见 §11 待办 B）。
+     *
+     * 【key = #MerchantId + '::' + #GoodName】
+     * 顺序取**由粗到细**，与 SQL 的 WHERE 顺序一致；落到 Redis 是
+     * `goodsCodes::&lt;MerchantId&gt;::&lt;GoodName&gt;`。与 priceByTriple() 同一套拼接规则
+     * （显式 `+ '::' +`，不用 SpEL 内联 list）—— L2 的键是 key 对象 toString() 后与 cacheName 拼成
+     * （RedisCache + StringRedisSerializer）⇒ list 形态既不可读也不更安全。
+     * ⚠️ 二维：两个分量都由客户端可控（MerchantId 来自注册入参 userid，见 UserController:58）⇒
+     *    `A::B::C` 存在两种拆法。与三维键同一判据：拆法数量受内嵌 `::` 总数约束，两个分量不含 `::`
+     *    时解析唯一；实测当前 4 组 (MerchantId, GoodName) 的两分量均不含 `::` ⇒ 对真实数据不可达，
+     *    构造得出也只是零鉴权（BD-03）下本就能直接读的东西 ⇒ 非新增能力。边界见 §11。
+     *
+     * 【失效面 = goodsAdd / goodsUp / goodsDe，三个**全部 allEntries**】
+     * 与 priceByTriple() 同因：键含 GoodName，而 goodsUp 会改 GoodName，它的 WHERE 是
+     * (MerchantId, ProductCode) —— **旧 GoodName 既不在入参、也无处可查** ⇒ 旧键构造不出；
+     * 且精确清会呈现「**条件性正确**」（未改名时对、改名时**静默**漏）—— 测试全绿、只在改名时错。
+     * 判据（可机械执行）：取键的每个分量，问写接口的 WHERE/入参**是否含它的旧值**；缺一个即不可精确。
+     * ⚠️ 本 cacheName 的 evict **先于读接口落地**（2026-09-28 随 priceByTriple 一并挂上，
+     *    彼时本方法还不存在）⇒ 落地前每次写都在清一个**空片**（L2 侧建出空命名空间 + 一次 no-op 清理）。
+     *    本仓的顺序是「先加 evict 再加读」，不常见，登记见 §11。
+     *
+     * ⚠️ `sync = true` 不是可选优化，是单飞的**开关**，必须留着：
+     *    不加它时 Spring 走 `Cache#get(key)`（并发未命中各自回落 DB），
+     *    `TwoLevelCache` 里用于合并并发未命中的 `get(key, Callable)` 根本不会被调用。
+     * 另：sync=true 要求本注解只声明一个 cacheNames 且不能用 unless（此处均满足）。
+     *
+     * ⚠️ 本方法**不会返回 null**：无型号时是 `success:true, list: []`，异常是 `success:false`
+     *    的 map。同 goodsSelect —— 空列表是**被正常缓存的值**，不是「空值缓存（负缓存）机制」
+     *    ⇒ cache-layer.md §9.1「穿透：机制未验证」的结论不因本接口改变。
+     *
+     * ⚠️ 值序**未定义**：SQL 是 `SELECT DISTINCT ProductCode`，**无 ORDER BY**，EXPLAIN 为
+     *    `type=ALL … Using where; Using temporary` ⇒ 返回序由临时表决定，MySQL 不保证。
+     *    实测连跑 6 次序稳定（唯一的 k≥2 组是 [IJ-555, IF-55]），但那是**实测稳定**、
+     *    不是**保证相同** ⇒ 「缓存体与冷查逐字节相同」这条判据在本接口上强度弱于另两个投影。
+     *    **不修**（加 ORDER BY 属于改 SQL，超出本笔边界；且读侧按下拉框列表用，序无业务含义）。
+     *
+     * ⚠️ 形状耦合的形态与另两个投影都不同：本投影是**单列**，且经
+     *    `queryForList(sql, String.class)` 取值 —— `SingleColumnRowMapper` 走的是**列序号 1**，
+     *    **不是列名** ⇒ 若有人把 SQL 改选成另一列（如 `SELECT DISTINCT GoodImg`），**不报错**、
+     *    仍然返回 List&lt;String&gt;，只是语义悄悄变了。列**改名/删除**则 SQL 自身报错（响亮，非静默）。
+     *    即「耦合于**被选中的那一列**」，与 priceByTriple 的「耦合于**具体列名**」不同形态。见 §11。
+     *
+     * ⚠️ `goods.MerchantId` 无索引（只有 PRIMARY(Id)）⇒ 库侧是**全表扫 + 临时表**
+     *    （EXPLAIN：type=ALL、rows=5、Using temporary）。缓存把这笔代价摊薄为「每 TTL 一次」，
+     *    是**掩盖而非修复**（与另两个投影同性质）。
+     */
+    @Cacheable(cacheNames = "goodsCodes",
+            key = "#MerchantId + '::' + #GoodName", sync = true)
+    public Map<String, Object> listCodes(String MerchantId, String GoodName) {
+        Map<String, Object> result = new HashMap<>();
+        String sql = "SELECT DISTINCT ProductCode FROM mall_management_sql.goods "
+                + "WHERE MerchantId=? AND GoodName=?";
+
+        try {
+            List<String> productCodeList = jdbcTemplate.queryForList(sql,
+                    String.class, MerchantId, GoodName);
+            result.put("success", true);
+            result.put("list", productCodeList);
+        } catch (Exception e) {
+            e.printStackTrace();
+            result.put("success", false);
+        }
+        return result;
+    }
 }

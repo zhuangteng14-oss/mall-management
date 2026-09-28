@@ -344,25 +344,21 @@ public class MallManagementGoodsController {
     }
 
     // 这是一个接口（根据商家ID和商品名称，获取所有不同的 ProductCode 型号列表）
+    // 方法体与缓存注解都搬到 GoodsCacheService.listCodes()（逐字搬运，含 SQL / try/catch /
+    // 返回结构）。本方法只保留路由与委托。
+    // ⚠️ 形参名必须保留：@RequestParam 未写显式名依赖它解析，Service 侧
+    // key="#MerchantId + '::' + #GoodName" 也依赖同一组形参名（-parameters 已开）。
+    // 缓存：cacheName = goodsCodes、key = #MerchantId + '::' + #GoodName、sync = true（单飞防击穿）；
+    //      失效面 = goodsAdd / goodsUp / goodsDe，三个都 allEntries —— 键含 GoodName，而 goodsUp
+    //      会改 GoodName（其 WHERE 是 (MerchantId, ProductCode)，旧 GoodName 构造不出）。
+    //      ⚠️ 这三条 evict 在本方法存在之前就挂上了（2026-09-28，随 goodsPrice 那笔），
+    //      即「evict 清单领先于读接口落地」—— 落地前每次写都在清一个空片。见 §11「先加 evict 再加读」。
     @PostMapping("/GoodsProductCodeSelect")
     public Map<String, Object> GoodsProductCodeSelect(
             @RequestParam("MerchantId") String MerchantId,
             @RequestParam("GoodName") String GoodName
     ) {
-        Map<String, Object> result = new HashMap<>();
-        String sql = "SELECT DISTINCT ProductCode FROM mall_management_sql.goods "
-                + "WHERE MerchantId=? AND GoodName=?";
-
-        try {
-            List<String> productCodeList = GoodjdbcTemplate.queryForList(sql,
-                    String.class, MerchantId, GoodName);
-            result.put("success", true);
-            result.put("list", productCodeList);
-        } catch (Exception e) {
-            e.printStackTrace();
-            result.put("success", false);
-        }
-        return result;
+        return goodsCacheService.listCodes(MerchantId, GoodName);
     }
 
 
