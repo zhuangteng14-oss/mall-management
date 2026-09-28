@@ -25,8 +25,10 @@ import java.util.concurrent.Callable;
  *   读  → 返回 null（视作未命中，由调用方回落 DB）
  *   写 / 失效 → 静默跳过
  * 绝不上抛：上抛会把 Redis 抖动传导为 HTTP 5xx，直接打挂 A3 的 A-S1-1 / A-S4b-1。
- * 「状态翻转才打日志」由 {@link L2HealthProbe} 负责，且状态是**全局一份**（不是每个缓存名
- * 一份）—— 本类只把每次 L2 操作的成败喂给它。
+ * L2 是否「现在值得碰」由 {@link L2HealthProbe} 判定（**全局一份**，不是每个缓存名一份）：
+ * 每次 L2 操作前先问它，冷却窗口内直接跳过 —— 也就是「Redis 挂了」这个全局事实在这里
+ * 只体现为一次 volatile 读，而不是每次操作都去撞一遍网络。本类只负责把每次 L2 操作的
+ * 成败喂回去（markOk / markFailed）。
  *
  * 只吞 DataAccessException，不吞 RuntimeException 全集：序列化失败（SerializationException）
  * 之类的编程错误必须照常上抛 —— 那属于「缓存放了不该放的东西」，要在开发期暴露，
@@ -162,6 +164,9 @@ public class TwoLevelCache implements Cache {
     }
 
     // ================= L2 访问 + 降级 =================
+    // 每个 L2 操作都先问 probe.isL2UsableNow()：冷却窗口内直接跳过，零网络代价。
+    // ⚠️ 该方法**可能阻塞 ≤ 探测超时**（窗口到期时，唯一抢到探测权的线程会同步 PING 一次），
+    //    且探测者本人也走降级路径 —— 见 L2HealthProbe.isL2UsableNow() 的注释。
 
     private ValueWrapper l1Get(Object key) {
         // L1 里存的必然是 ValueWrapper（见类注释），故强转安全
@@ -170,6 +175,10 @@ public class TwoLevelCache implements Cache {
 
     private ValueWrapper l2Get(Object key) {
         if (l2 == null) {
+            return null;
+        }
+        if (!probe.isL2UsableNow()) {
+            // 冷却中（或本线程刚探完）：视作 L2 未命中 —— 与「Redis 连不上」同一条降级路径
             return null;
         }
         try {
@@ -186,6 +195,9 @@ public class TwoLevelCache implements Cache {
         if (l2 == null) {
             return;
         }
+        if (!probe.isL2UsableNow()) {
+            return;   // 冷却中：跳过写（与降级路径一致）
+        }
         try {
             l2.put(key, value);
             probe.markOk();
@@ -196,6 +208,11 @@ public class TwoLevelCache implements Cache {
 
     private void l2Evict(Object key) {
         if (l2 == null) {
+            return;
+        }
+        if (!probe.isL2UsableNow()) {
+            // 冷却中：跳过失效。L2 里可能因此留下一个旧值，但：
+            //   (a) 这段时间本就没在读 L2，(b) L2 TTL（a3 为 5m）是陈旧上界的兜底
             return;
         }
         try {
@@ -209,6 +226,9 @@ public class TwoLevelCache implements Cache {
     private void l2Clear() {
         if (l2 == null) {
             return;
+        }
+        if (!probe.isL2UsableNow()) {
+            return;   // 冷却中：跳过整片失效（同上，L2 TTL 兜底）
         }
         try {
             l2.clear();
