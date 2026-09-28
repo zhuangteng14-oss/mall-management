@@ -260,6 +260,31 @@ orderPayIfUp 3 | loginSelect 1 | loginAdd 1 | friendAdd 1
 
 > 方案 B 与 §0.1 的 Service 抽取是同一件事的两半：Service 提供**注解落点**，两级 `CacheManager` 提供**注解背后的实现**。
 
+### 工程取舍（2026-09-28 补）
+
+> **【诚实定位】两级缓存在本项目规模下的实际收益是 5%（S4b：单级 Redis `66.0` → 两级 `69.6` QPS），代价是 423 行基础设施（`wc -l`：`TwoLevelCache` 233 + `TwoLevelCacheManager` 73 + `CacheConfig` 117；另 `application.properties` 配置段 13 行） + L1/L2 一致性窗口（60s）。这是「展示性设计」，不是「工程必需」。**工程最优解是单级 Redis（Spring Boot 自动装配，0 行）—— 在当前单实例、1 个缓存键的规模下完全够用。选两级是为了展示「L1+L2 + 降级 + evict 传播」的完整设计。若将来嫌复杂，撤 L1 只留 L2 的改动很小。
+
+**依据**：S4b 有一组实测序列（同一脚本、同一后端、同一断言集、同为「全量档」中的 S4b 段，仅缓存状态不同；全部可在 `scripts/concurrency/reports/` 复核）：
+
+| 缓存状态 | 报告 | S4b `achieved` | `wall` | 日期 |
+|---|---|---|---|---|
+| 无缓存 | `a3-report-7c58cc9f-20260920-214724` | **61.5** QPS | 117.0 s | 09-20 |
+| 无缓存 | `a3-report-b1aec22d-20260920-215211` | **60.5** QPS | 118.9 s | 09-20（同晚、同配置） |
+| 单级 Redis | `a3-report-506a0997-20260927-210332`（⚠️ 归属为推断，见下） | **66.0** QPS | 109.1 s | 09-27 |
+| 两级 | `a3-report-128b0b45-20260928-141106` | **69.6** QPS | 103.4 s | 09-28 |
+
+四轮均 `ok=7200 / 5xx=0 / gates 0 failed(23)`。**同配置的两次（60.5 与 61.5）差 1.6%，即本压测在「同状态」下的运行间噪声底 ≈ 2%。** 故单级→两级的 5.5%（66.0 → 69.6）**只比噪声底大一倍多**，方向确凿（单调，且与「L1 命中不打网络」的预期一致），但**不宜当作精确百分点引用**。
+
+三条必须一起说的话：
+
+1. **S4b 不是缓存的主场**：goodstype 只占其负载 **2/20 槽（10%）**，且该档绝对值被 **TD-14（`order` 无索引）** 主导 —— 缓存能触及的性能面就那么大。真正该看缓存收益的档是 S1（goodstype 占 50%），但 S1 在各轮都已打满 119.9/120，**天花板效应**使它同样给不出收益数字。
+2. **同份数据在 CI 上实测 119.9 QPS**（CI #8）—— 这台机器上的 S4b 是**环境受限**的（压测器与 MySQL 跨机经 VM 网络），本就不适合做百分比级对比（`concurrency-test.md §实测数据` 已有此结论）。
+3. **报告的元数据不记录缓存状态**：已实测比对两次不同代码状态的报告（09-27 与 09-28），除 `jdbcUrl` 与日期外**逐字段相同**。故 66.0 归属「单级 Redis」**不是报告中可取证的事实，而是时间线推断**：`TwoLevelCache.java` / `TwoLevelCacheManager.java` / `CacheConfig.java` 的落盘时间是 **09-28 13:51–14:24**，晚于该轮压测的 09-27 21:03；而 09-27 19:52 的 `dd5d3e1` 已引入 Redis + Caffeine 依赖。**→ 附带待办：A3 报告应增加一个「后端状态」字段（缓存开关 / commit），否则日后无法回溯任一轮的测量条件。**
+
+> ⚠️ 早期叙述里的 **`63.0`（满负载档）与 `96.2`（长档）** 两个数出自 `archive/worklog-2026-09-20-a3.md` 与 `tech-debt.md TD-14`，**其原始报告不在 `reports/` 目录中，无法本地复核**，故本表不引用它们。引用这两个数时须注明「叙述记录，报告未留档」。
+
+**结论**：收益方向确凿、量级为**个位数百分比**（单级→两级 ≈ 5%，无缓存→两级 ≈ 13%）；代价是约 400 行基础设施与一个一致性窗口。**这不是「当前规模下的最优解」，是一次刻意的完整设计演示。**
+
 ---
 
 ## 9. 穿透 / 击穿 / 雪崩 / 降级
@@ -315,8 +340,8 @@ orderPayIfUp 3 | loginSelect 1 | loginAdd 1 | friendAdd 1
 | **降级缺失即 5xx** | 若 Redis 故障上抛异常，`A-S1-1` / `A-S4b-1` 立刻挂 | 降级是硬约束，不是优化项 |
 | **缓存污染 A3 证据** | 缓存落在「先查后插」的查重查询上 → `A-B2-1` 假绿 | §0 硬约束 + §0.1 的结构保证 |
 | ~~P6 与缓存冲突~~ **（已解决 2026-09-27）** | **原现象**：A3 的 P6 是「哨兵往返」—— 脚本用裸 JDBC 直写一行 `A3P-<runId8>`，再 `GET /mysqlGoods/goodstype` 读回。B1 给该端点加缓存后，读回的是**缓存填充时刻的旧列表**，哨兵行必然不在其中 → **结构性 FAIL，重跑多少次都一样**（不是偶发）。**根因**：P6 的隐含前提是「HTTP 读回来的内容 == 库里的内容」，缓存正是打破这个前提的东西 —— 所以**换探针接口是打地鼠**（改成 `goodsSelect` 只是把爆炸推迟到给它加缓存那天）。 | **新方案**：新增 `GET /health/db`（`@Profile("a3")`，**自身永不加 `@Cacheable`**），由后端报自己连的 `@@server_uuid`，脚本 JDBC 侧查同一个变量逐字段对比。**不依赖任何被缓存的数据，故与缓存永久正交**。P5 就绪探测一并搬过去（它同样被缓存静默削弱：命中时不碰 DB，就不再能证明 Hikari/MySQL 可用），P7 阴性对照改用 `server_uuid` 比对。A3 全量已复测通过（23/23 门禁、`reproRounds=5/5`）。详见 `concurrency-test.md §脚本内置校验 P0–P7` |
-| **两级缓存尚未生效（方案 B 只落了一半）** | pom 里 Caffeine + Redis 并存，但 **Spring Boot 实测只装配 RedisCacheManager** —— `CacheType` 的枚举顺序里 `REDIS` 排在 `CAFFEINE` **之前**，Redis 胜出。故 §8 定的「Caffeine(L1) + Redis(L2)」目前是**单级 Redis** | **登记为待办**，不假装已实现；写方案 B 的收益时不得按两级算。要启用需显式提供 `CacheManager` bean（或 `CacheManagerCustomizer`）。**下一步将写 `CacheManager` 显式覆盖，让 Caffeine 真正成为 L1** |
-| **性能基线不可比** | 加缓存后 S4b 的 QPS 与 A3 记录不可直接对比 | 对比时显式声明「缓存已启用」 |
+| ~~两级缓存尚未生效（方案 B 只落了一半）~~ **（已解决 2026-09-28）** | **原现象**：pom 里 Caffeine + Redis 并存，但 **Spring Boot 实测只装配 RedisCacheManager** —— `CacheType` 的枚举顺序里 `REDIS` 排在 `CAFFEINE` **之前**，Redis 胜出。故 §8 定的「Caffeine(L1) + Redis(L2)」实际是**单级 Redis**。**处置**：新增 `CacheConfig` 提供 `@Primary CacheManager`（`TwoLevelCacheManager` 组合 Caffeine L1 + Redis L2，见 §8）。**六项实测**：① `--debug` 自动装配报告显示 `CacheAutoConfiguration` 因 `@ConditionalOnMissingBean(types: CacheManager)` 失配而退回；② GET#2 起 Redis `commandstats` 计数**冻结**（L1 命中不打网络，单级 Redis 必增）；③ 重启后仅 L2 命中（`get` +1、`set` 不变、DB SQL 0，即**不回刷 L2 TTL**）；④ `evict` 两级同清；⑤ Redis 不可达时回落 DB 且 **5xx=0**，恢复时 `markL2Up` 记录一次状态翻转；⑥ A3 全量回归 `exitCode=0`、门禁 0 failed(23)、`A-B2-1` 仍 `EXPECTED_DEFECT_PRESENT reproRounds=5/5`。**遗留待观测**：`app.cache.caffeine.max-size=1000` 是**防御性上界**（无键基数依据，当前仅 1 个键），待 Micrometer 观测后调整 | 若将来新增 `spring.cache.redis.*` 属性，**必须**在 `CacheConfig.l2Configuration` 里同步映射，否则该属性被静默忽略（本项目已因 commons-pool2 缺失踩过一次同类坑） |
+| **性能基线不可比** | 加缓存后 S4b 的 QPS 与 A3 记录不可直接对比 | 对比时显式声明「缓存已启用」。**（2026-09-28 补）本行即 §8 工程取舍段的实测序列**：S4b 61.5（无缓存）→ 66.0（单级）→ 69.6（两级）；跨状态对比必须声明状态，且**报告元数据目前不记录缓存状态**（已实测比对，见 §8），引用旧报告时只能靠时间线推断 |
 | **`userSelect` 的失效面** | `userSelect` 无对应写接口，但 `updateUserInfo`（`U:228`）可改 username / 头像 | 第一版给短 TTL；或让 `updateUserInfo` 一并 evict（需先确认其影响面） |
 | **新增 Service 层** | 项目原为「无分层」架构，B1 首次引入 Service bean | 只抽**被缓存的读路径**所需的极薄 Service，不全面重构分层；`project-map.md §3` 需在实现后同步更新 |
 
