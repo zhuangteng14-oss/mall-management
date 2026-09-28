@@ -1,8 +1,10 @@
 package com.minke.mallmanagement_controller;
 
+import com.minke.mallmanagement_service.GoodsCacheService;
 import com.minke.mallmanagement_service.GoodsTypeCacheService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.cache.annotation.CacheEvict;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
@@ -27,6 +29,9 @@ public class MallManagementGoodsController {
     @Autowired
     private GoodsTypeCacheService goodsTypeCacheService;
 
+    @Autowired
+    private GoodsCacheService goodsCacheService;
+
     @Value("${app.upload-dir:${user.dir}/src/main/resources/static/img/}")
     private String uploadDir;
 
@@ -48,6 +53,15 @@ public class MallManagementGoodsController {
     }
 
     //这是一个接口用于上架商品
+    // ⚠️ 写商品必须清 goodsHome（否则首页列表永不更新）。三点必读：
+    //   1. allEntries=true 在本 cacheName 上是**零精度损失**：goodsHome 只有 'all' 一个键，
+    //      清整片 == 清那一个键；且结构上不会出现「改了 key 忘了改 evict」的失配。
+    //   2. beforeInvocation=false（默认，**调用后**清）+ 本方法内部 try/catch 吞异常、永远正常
+    //      返回 ⇒ 等价于「每次调用都清」。多清一次是保守且无害的（代价 = 下次冷读回填）。
+    //   3. ⚠️ 本注解使本方法所在的 bean 被 **CGLIB 代理**（此前 Controller 无代理）。
+    //      goodsAdd / goodsUp / goodsDe **不在 A3 的接口覆盖面内** ⇒ A3 全绿证明不了这三个
+    //      接口的路由没被代理打坏，必须另打真实请求验证（本轮验证 b 组）。
+    @CacheEvict(cacheNames = "goodsHome", allEntries = true)
     @PostMapping("/goodsAdd")
     public Map<String, Object> goodsAdd(
             @RequestParam("MerchantId") String MerchantId,
@@ -154,48 +168,20 @@ public class MallManagementGoodsController {
     }
 
     //这是一个接口（用于返回商品对应的所有信息）
+    // 方法体与缓存注解都搬到 GoodsCacheService.listHome()（逐字搬运，含 SQL / per-row 兜底 /
+    // 异常处理）。本方法只保留路由与委托 —— 原分支结构为空（无参数、无 GET/POST 分支），
+    // 故不需要像 goodstype 那样在这里保留分支判定。
+    // 缓存：cacheName = goodsHome、key = 'all'（全局单键）、sync = true（单飞防击穿）；
+    //      失效面 = goodsAdd / goodsUp / goodsDe（三者都挂 @CacheEvict）。
     @PostMapping("/goodsSelectHome")
     public Map<String, Object> goodsSelectHome() {
-        Map<String, Object> result = new HashMap<>();
-        try {
-            // 1. 先查所有商品
-            String sql = "SELECT * FROM mall_management_sql.goods";
-            List<Map<String, Object>> goodsList = GoodjdbcTemplate.queryForList(sql);
-
-            // 2. 循环根据商品里的 MerchantId 查 login 表的 UserName
-            for (Map<String, Object> goods : goodsList) {
-                // 拿到商品里的商家ID
-                Object merchantIdObj = goods.get("MerchantId");
-
-                try {
-                    // 重点：login 表用 id = ? 匹配！！！
-                    String userSql = "SELECT UserName FROM mall_management_sql.login WHERE id = ?";
-
-                    String userName = GoodjdbcTemplate.queryForObject(
-                            userSql,
-                            new Object[]{merchantIdObj},
-                            String.class
-                    );
-
-                    // 把用户名放进商品数据
-                    goods.put("UserName", userName);
-                } catch (Exception e) {
-                    // 查不到就为空
-                    goods.put("UserName", "");
-                }
-            }
-
-            result.put("success", true);
-            result.put("list", goodsList);
-        } catch (Exception e) {
-            e.printStackTrace();
-            result.put("success", false);
-            result.put("msg", "查询失败");
-        }
-        return result;
+        return goodsCacheService.listHome();
     }
 
     // 这是一个接口（用于下架商品）
+    // ⚠️ @CacheEvict 的三点理由同 goodsAdd（allEntries 在本 cacheName 上零精度损失 /
+    //    调用后清 + 吞异常 ⇒ 等价于「每次调用都清」/ 本注解使 bean 被 CGLIB 代理，A3 不覆盖本接口）。
+    @CacheEvict(cacheNames = "goodsHome", allEntries = true)
     @PostMapping("/goodsDe")
     public Map<String, Object> goodsDe(
             @RequestParam("MerchantId") String MerchantId,
@@ -250,6 +236,9 @@ public class MallManagementGoodsController {
     }
 
     //这是一个接口（用于更新商品数据）
+    // ⚠️ @CacheEvict 的三点理由同 goodsAdd（allEntries 在本 cacheName 上零精度损失 /
+    //    调用后清 + 吞异常 ⇒ 等价于「每次调用都清」/ 本注解使 bean 被 CGLIB 代理，A3 不覆盖本接口）。
+    @CacheEvict(cacheNames = "goodsHome", allEntries = true)
     @PostMapping("/goodsUp")
     public Map<String, Object> goodsUp(
             @RequestParam("MerchantId") String MerchantId,

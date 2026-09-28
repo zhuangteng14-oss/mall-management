@@ -96,7 +96,7 @@ Redis 已就绪：`192.168.229.129:6379`，redis-server **8.0.5**，`requirepass
 
 ---
 
-## 2. 可缓存接口清单（8 条）
+## 2. 可缓存接口清单（9 条）
 
 > **注解语义**：这里的「可缓存」是**方法级**判断——Spring 的 `@Cacheable` 挂在 **Service 方法**上，与 HTTP 方法是 POST 无关。POST 只是传输语义，缓存的是**方法返回值**。故本表列了多个 POST 接口，不代表「按 HTTP 方法缓」。
 
@@ -110,6 +110,11 @@ Redis 已就绪：`192.168.229.129:6379`，redis-server **8.0.5**，`requirepass
 | `/message/userSelect` | POST | 用户公开信息（`M:163`） | `v1:user:pub:{userId}` | 中 | 无对应写接口（见 §11 风险表） |
 | `/message/friendSelect` | POST | 好友列表，per-user（`M:309-311`） | `v1:friend:list:{customerId}` | 短 | friendAdd / friendUp / friendDe |
 | `/message/selectFriend` | POST | 待处理好友申请，per-user（`M:238-240`） | `v1:friend:req:{friendId}` | 短 | friendAdd / friendUp / friendDe |
+| `/message/conversations` | POST | 会话列表（`M:25-32`），per-user（`currentId`），读多写少 | `v1:conv:list:{currentId}` | 短（1–5min） | `send`（新消息）+ `history`（**写** `last_read_time`）。按 key 清：`history` 只改一对会话的已读时间，全清会让其他用户的会话列表无谓失效 |
+
+> **落地后的键形态**：上表「键设计」列是**设计建议**（含 §10 的版本前缀）；实际落地为 `<cacheName>::<key>` 两段拼出（`@Cacheable(cacheNames=…, key=…)`）。已落地的两个：`goodstype::all`（`f693bdb` 之前）、`goodsHome::all`（2026-09-28，本轮）——**当前均未加 `v1:` 前缀**，前缀仍是建议值。加它的代价见 §11「`goodsHome` 的形状耦合」：形状变更时必须记得 bump，否则新旧条目会在同一片键里混住。
+>
+> **本节与 §7 的关系**：本表是「哪些接口可缓存」的完整候选；§7 是**落地顺序**（风险从低到高）。本节新增行不等于「纳入本轮」。 
 
 **per-user 键的由来**：这些接口的结果**随传入 ID 变化**（`MerchantId` / `customerId` / `friendId` / `userId`），属于「用户态参数」。键必须含该 ID，**不能用一个全局键**——否则 A 用户看到 B 用户的数据。键用**业务标识**，不用行号、不用自增主键。
 
@@ -122,10 +127,12 @@ Redis 已就绪：`192.168.229.129:6379`，redis-server **8.0.5**，`requirepass
 | **`/mysqlLogin/getUserInfo`** | **认证接口** | 虽然键不含密码，但它是认证接口——**缓存命中后返回的可能是旧用户信息**（密码改了、头像改了都滞后）。**认证接口的缓存风险 > 收益。安全判断不是性能判断。** |
 | `/mysqlLogin/loginSelect` | 认证接口 | 键**天然包含明文密码**（`U:38-41`）。缓存它 = 把口令当缓存键长期驻留，Redis 里 `KEYS *` 可直接 dump 出来。**建议永不缓存** |
 | `/mysqlGoods/productSearch` | 注入面 + 键空间无界 | `G:365` 把关键词**逐字符**拼进 SQL（`for (String s : keys)`），键空间无界 → 缓存等于给穿透攻击开一个不限长的靶子 |
+| **`/message/getOrCreateConversation`** | **键空间 + 体积双无界**（读接口，但不宜缓存） | ⚠️ 先澄清一个易误判点：名字叫 getOrCreate，**实测是纯读** —— `M:121-155` 内**没有任何 INSERT**（只有 1 次 `getUserInfoById`（2 条 SQL）+ 1 条 message 查询），故它**不是**「伪读实写」，与 `history` 不同类。它不上缓存的理由在键与体积：①**键含 4 个参数**（`currentId`/`currentType`/`otherId`/`otherType`，即「用户对」）⇒ 键空间 ~O(N²)；②正文是**全量历史消息**（无分页）⇒ 缓存体随 `send` 单调增长、无上界；③失效面 = 每个活跃用户对，`send` 要精确清对应键。第一版的收益不抵这三项复杂度 |
 | `orderPayIfUp` / `orderReceiveIfUp` / `orderDeliveryIfUp` | 写（CAS） | 条件 UPDATE 实现的 CAS，是**全项目唯一正确的并发控制**。缓存会摧毁其语义 |
 | `orderAdd` / `goodsAdd` / `goodsUp` / `goodsDe` / `loginAdd` / `friendAdd` / `friendUp` / `friendDe` / `send` | 写 | 写接口不进缓存；它们只做 **evict** |
+| **`/mysqlLogin/updateAvatar`** / **`/mysqlLogin/updateUserInfo`** | 写（**同时是 `userSelect` 失效面的判断依据**） | 写接口不进缓存。它们被单独列出是因为 §11 有一条风险行曾断言「`updateUserInfo` 可改 username / 头像」，**实测不成立**：`updateAvatar` 只写 `customerimage`（`U:210`）/ `merchantimage`（`U:212`）两张**别的表**；`updateUserInfo` 的 UPDATE 只写 `email`/`address`/`selfintroduction`（`U:237`）。与 `userSelect` 被缓存的 5 列（`customerid`/`merchantid`/`username`/`usertype`/`gender`，`M:161`）**无交集** ⇒ `userSelect` 上缓存时**不需要**为这两个写接口挂 evict（详见 §11 该行） |
 | `/message/history` | **写**（伪装成读） | `M:88` 每次请求 upsert `user_conversation_read.last_read_time = NOW()` —— **名为查询，实为写**。缓存会让已读时间永远不更新 |
-| 4 个 order 列表查询 | 高频变化 | 订单状态流转频繁；且缓存会破坏 A3 性能基线的可比性（见 §6） |
+| 4 个 order 列表查询：`orderSelect`（`G:412`）/ `orderDeliveryIfSelect`（`G:432`）/ `orderDeliverySelect`（`G:450`）/ `historicalOrdersSelect`（`G:478`） | 高频变化 | 订单状态流转频繁（三个 `*IfUp` 是条件 UPDATE 的 CAS，见上一行）；且缓存会破坏 A3 性能基线的可比性（见 §6） |
 
 ---
 
@@ -234,7 +241,7 @@ orderPayIfUp 3 | loginSelect 1 | loginAdd 1 | friendAdd 1
 
 1. **基础设施** —— `pom.xml` 加 `spring-boot-starter-cache` + `caffeine` + `spring-boot-starter-data-redis`；启动类加 `@EnableCaching`；`application-a3.properties` 配 `spring.data.redis.host` / `port` / `password`。
 2. **`goodstype` GET** —— 先做它：**无参数、无用户态、写侧只有 1 个 POST**，失效面最小。**落地方式见 §0.1**（抽极薄 Service，`@Cacheable` 只覆盖 `G:37-38`）。**POST 的 `G:47-48` 查重一行都不许碰。**
-3. **商品类**（`goodsSelectHome` / `goodsSelect`）—— 键开始带业务标识。
+3. **商品类** —— 键开始带业务标识。`goodsSelectHome` ✅ **已落地**（2026-09-28：`goodsHome::all`（无参单键）+ `sync = true`；失效面 = `goodsAdd`/`goodsUp`/`goodsDe` 三个写接口各挂 `@CacheEvict(allEntries)`；读路径搬到 `GoodsCacheService.listHome()`）；`goodsSelect` 待做。
 4. **per-user 类**（`friendSelect` / `selectFriend` / `userSelect`）—— 需处理好友关系变更的失效。
 5. **order 列表类** —— 放最后。收益最低（变化最频繁）、风险最高（打乱 A3 性能基线）。
 
@@ -362,8 +369,10 @@ orderPayIfUp 3 | loginSelect 1 | loginAdd 1 | friendAdd 1
 | **机制已写 ≠ 机制生效**（2026-09-28 新增的风险类型） | **实例**：`TwoLevelCache.get(key, Callable)` 完整实现了单飞（Caffeine 原子 load + 只在真正执行 loader 时才写 L2），但 `@Cacheable` 不加 `sync = true` 时 Spring 只走 `Cache#get(key)` —— 该方法**从不被调用**，击穿防护整整一轮是**死代码**；`3678719` 的 message 第 5 条还把它当已生效的设计写了（纠正见 `f693bdb`）。**同类未验证项**：穿透的空值缓存链（同样无接口触发，见 §9.1） | 判据不是「代码写了」，而是「**有入口在走 + 有能证伪它的实测数字**」。新增机制时一并给出触发它的入口与实测；凡「代码在、调用方不在」的机制一律标**未验证**，不标「已实现」。本仓同款前例：`recLoad()` 定义了却无人调用，S1/S2b/S4b 的均值与分位从未进报告（`concurrency-test.md` 记过） |
 | **单飞是 per-JVM 的** | Caffeine 在进程内，`sync = true` 只在**单个 JVM 内**合并同 key 的并发未命中。多实例部署时 N 个实例最多产生 **N** 次 DB 加载，不是 1 次 | 分布式锁是唯一真解；本项目单实例，不划算，按已知限制登记。若将来多实例：先测「N 实例冷启时的 DB 峰值」再决定是否上分布式锁 |
 | **性能基线不可比** | 加缓存后 S4b 的 QPS 与 A3 记录不可直接对比 | 对比时显式声明「缓存已启用」。**（2026-09-28 补）本行即 §8 工程取舍段的实测序列**：S4b 61.5（无缓存）→ 66.0（单级）→ 69.6（两级）；跨状态对比必须声明状态，且**报告元数据目前不记录缓存状态**（已实测比对，见 §8），引用旧报告时只能靠时间线推断 |
-| **`userSelect` 的失效面** | `userSelect` 无对应写接口，但 `updateUserInfo`（`U:228`）可改 username / 头像 | 第一版给短 TTL；或让 `updateUserInfo` 一并 evict（需先确认其影响面） |
-| **新增 Service 层** | 项目原为「无分层」架构，B1 首次引入 Service bean | 只抽**被缓存的读路径**所需的极薄 Service，不全面重构分层；`project-map.md §3` 需在实现后同步更新 |
+| **`userSelect` 的失效面** | **（2026-09-28 实测修正）** 原文写「`userSelect` 无对应写接口，但 `updateUserInfo`（`U:228`）可改 username / 头像」——**两条都不成立**：①`U:237` 的 UPDATE 只写 `email`/`address`/`selfintroduction`，**不改 username**；②头像根本不在 `user` 表（`updateAvatar` 写的是 `customerimage`（`U:210`）/`merchantimage`（`U:212`））。⇒ 与 `userSelect` 被缓存的 5 列（`customerid`/`merchantid`/`username`/`usertype`/`gender`，`M:161`）**无交集**，`userSelect` 上缓存时**不需要** evict | **唯一脏源是 `loginAdd`**（`user` 表只有 INSERT 新行 + 一条不含缓存列的 UPDATE）：新行能被**已缓存的键**命中，仅当客户端传入的 `id`/`customerid`/`merchantid` 与已存在值相同（`loginAdd` 的 `id` 是入参，客户端可控）。陈旧上界 = L2 TTL（5m）/ L1 TTL（60s），自愈。若要彻底关掉：给 `loginAdd` 挂 evict（代价 = 每次注册清一片，实施时再定 cacheName） |
+| **`goodsHome` 的形状耦合（`SELECT *`）** | 缓存体 = 「`goods` 表**列全集**的快照」：给表加列后，**旧条目缺该列 → 响应字段缺失直到 TTL**（L2 5m / L1 60s）。同形问题：`Price`(DECIMAL) / 时间列等非 String/Integer 值经 L2 序列化往返后**类型与精度是否原样**（本轮 a‑4 逐字段比对，见 commit） | 沿用 §10 约定：**响应形状变更 ⇒ bump 键版本**。本轮**未加** `v1:` 前缀（与既有 `goodstype::all` 一致，见 §2 注），所以这一行是加前缀之前唯一的提醒 |
+| **`goodsHome` 的体积与 N+1** | ①无分页 `SELECT *` ⇒ 缓存体随表增长（本轮实测 `STRLEN goodsHome::all`，见 commit）；②该接口是 1 + N 查询（§4 第 1 行）——缓存把它摊薄为「每 TTL 一次」，是**掩盖而非修复**；③冷启动/失效后的首个请求仍付 1 + N。**代码坐标已变**：读路径从 `MallManagementGoodsController.goodsSelectHome()`（原 `G:157-196`）搬到 `GoodsCacheService.listHome()`，§4 表里的 `G:` 坐标随之过期 | 体积/键基数上量后（表行数上千或缓存键 > ~10）再决定分页或放弃缓存该接口；N+1 仍归 `fix-n-plus-one`（B1 不改 SQL） |
+| **新增 Service 层** | 项目原为「无分层」架构，B1 首次引入 Service bean | 只抽**被缓存的读路径**所需的极薄 Service，不全面重构分层（2026-09-28：已落地 `GoodsTypeCacheService`、`GoodsCacheService` 两个 —— 后者只含读方法，写路径与 `@CacheEvict` 留在 Controller；`project-map.md §3` 需在实现后同步更新） |
 
 ---
 
