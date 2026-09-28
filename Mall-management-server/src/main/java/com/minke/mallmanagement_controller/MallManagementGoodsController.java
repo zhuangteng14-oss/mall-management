@@ -54,8 +54,9 @@ public class MallManagementGoodsController {
     }
 
     //这是一个接口用于上架商品
-    // ⚠️ 写商品必须清**两个** cacheName（否则首页列表 / 该商家的商品列表永不更新）。四点必读：
-    //   1. 两条 evict 的精度不同，各自成立：
+    // ⚠️ 写商品必须清**四个** cacheName（否则首页列表 / 该商家的商品列表 / 型号列表 / 单点价格
+    //    永不更新）。五点必读：
+    //   1. 四条 evict 分两种精度，各自成立：
     //      · goodsHome 用 allEntries=true —— 在本 cacheName 上是**零精度损失**：只有 'all' 一个键，
     //        清整片 == 清那一个键；且结构上不会出现「改了 key 忘了改 evict」的失配。
     //      · goodsByMerchant 用 key="#MerchantId" **精确清** —— 本方法的写入集合由 MerchantId 限定
@@ -64,11 +65,18 @@ public class MallManagementGoodsController {
     //        与大小写**，而缓存键是字符串精确比较 ⇒ 传 "1 " 能改到 "1" 的行，却清不到
     //        goodsByMerchant::1（陈旧到 TTL 自愈）。要对此免疫就只能 allEntries，代价是别家列表
     //        被顺带清。见 cache-layer.md §11。
-    //   2. 为什么是 @Caching 而不是两个 @CacheEvict：Spring 的 @CacheEvict **不是 @Repeatable**
+    //      · goodsCodes / goodsPrice 各用 allEntries=true —— **不是「顺手统一」**：两者的键都含
+    //        GoodName，而 goodsUp 会改 GoodName 且它的 WHERE 是 (MerchantId, ProductCode)
+    //        ⇒ 旧 GoodName 既不在入参、也无处可查 ⇒ 旧键构造不出。更要紧的是**形态**：精确清在
+    //        「未改名」时正确、改名时**静默**漏清（条件性正确）—— 测试里全绿、只在改名时错，
+    //        比整片清危险。判据：写接口的 WHERE/入参**是否含键的每个分量的旧值**，缺一个即不可精确。
+    //        ⚠️ 代价与前两者不同：这两个 cacheName 的键数随 商家 × 商品名（× 型号）增长，每次写
+    //        整片清（L2 侧按前缀 SCAN 删），不像 goodsHome 那样零损失。见 §11。
+    //   2. 为什么是 @Caching 而不是四个 @CacheEvict：Spring 的 @CacheEvict **不是 @Repeatable**
     //      （spring-context 6.2.6 实证：常量池无 Repeatable，且该包下**没有** CacheEvicts /
     //      Cacheables 容器类 —— 可自行 `unzip -l spring-context-*.jar | grep cache/annotation/` 复核）
     //      ⇒ 同一方法上写两个同名注解**不可编译**。单个 @CacheEvict(cacheNames={A,B}) 只能表达
-    //      **同精度**的多命名空间；本例两条精度不同，故 @Caching 是唯一写法（它也更能兼容
+    //      **同精度**的多命名空间；本例四条分两种精度，故 @Caching 是唯一写法（它也更能兼容
     //      将来混 evict + put 的场景）。
     //   3. beforeInvocation=false（默认，**调用后**清）+ 本方法内部 try/catch 吞异常、永远正常
     //      返回 ⇒ 等价于「每次调用都清」。多清一次是保守且无害的（代价 = 下次冷读回填）。
@@ -76,9 +84,15 @@ public class MallManagementGoodsController {
     //   4. ⚠️ 本注解使本方法所在的 bean 被 **CGLIB 代理**（此前 Controller 无代理）。
     //      goodsAdd / goodsUp / goodsDe **不在 A3 的接口覆盖面内** ⇒ A3 全绿证明不了这三个
     //      接口的路由没被代理打坏，必须另打真实请求验证（本轮验证 b 组）。
+    //   5. 为什么**本方法**也要清 goodsPrice：它会改变一个**已存在**三元组的答案 —— 0 行→1 行
+    //      （失败变价格）、1 行→2 行（价格变失败：goods 表无唯一约束、本方法不查重，而
+    //      queryForMap 遇 >1 行抛异常 ⇒ 响应变 {success:false}）。docs §2 该行原把失效面写成
+    //      goodsUp / goodsDe 两处，**漏了本方法**（本轮订正）。
     @Caching(evict = {
             @CacheEvict(cacheNames = "goodsHome", allEntries = true),
-            @CacheEvict(cacheNames = "goodsByMerchant", key = "#MerchantId")
+            @CacheEvict(cacheNames = "goodsByMerchant", key = "#MerchantId"),
+            @CacheEvict(cacheNames = "goodsCodes", allEntries = true),
+            @CacheEvict(cacheNames = "goodsPrice", allEntries = true)
     })
     @PostMapping("/goodsAdd")
     public Map<String, Object> goodsAdd(
@@ -192,11 +206,18 @@ public class MallManagementGoodsController {
     }
 
     // 这是一个接口（用于下架商品）
-    // ⚠️ @Caching 两条 evict 的四点理由同 goodsAdd（零精度损失 / 精确清 / 注解不可重复 / CGLIB 代理）。
-    //    本方法删除集合由 MerchantId 限定（WHERE 的首个条件）⇒ 精确清不漏。
+    // ⚠️ @Caching 四条 evict 的五点理由同 goodsAdd（零损失 / 精确清 / 两个 allEntries 的理由 /
+    //    注解不可重复 / CGLIB 代理）。
+    //    · goodsByMerchant：本方法删除集合由 MerchantId 限定（WHERE 的首个条件）⇒ 精确清不漏。
+    //    · goodsCodes / goodsPrice：⚠️ 本条**单看是能精确清的** —— 它们的键分别由
+    //      (MerchantId, GoodName) 与 (MerchantId, GoodName, ProductCode) 组成，而本方法的 WHERE
+    //      恰好就是这三段、全在入参。但同一个 cacheName 上不能既精确又整片清（goodsUp 那条因改名
+    //      做不到精确）⇒ 三个写接口取**一致的 allEntries**，避免「哪条是哪种精度」的记忆负担。
     @Caching(evict = {
             @CacheEvict(cacheNames = "goodsHome", allEntries = true),
-            @CacheEvict(cacheNames = "goodsByMerchant", key = "#MerchantId")
+            @CacheEvict(cacheNames = "goodsByMerchant", key = "#MerchantId"),
+            @CacheEvict(cacheNames = "goodsCodes", allEntries = true),
+            @CacheEvict(cacheNames = "goodsPrice", allEntries = true)
     })
     @PostMapping("/goodsDe")
     public Map<String, Object> goodsDe(
@@ -228,38 +249,42 @@ public class MallManagementGoodsController {
     }
 
     //这是一个接口（用于根据商品的不同型号切换显示对应的价格）
+    // 方法体搬到 GoodsCacheService.priceByTriple()（逐字搬运，含 SQL / queryForMap / try-catch /
+    // 返回结构）。本方法只保留路由与委托 —— 无形参分支。
+    // 缓存：cacheName = goodsPrice、key = #MerchantId + '::' + #GoodName + '::' + #ProductCode
+    //      （**三维复合键**，本项目首个）、sync = true（单飞防击穿）；
+    //      失效面 = goodsAdd / goodsUp / goodsDe **三者，全部 allEntries** —— 理由
+    //      （goodsUp 改 GoodName ⇒ 旧键构造不出，且精确清会呈现「条件性正确」）见
+    //      GoodsCacheService.priceByTriple() 的注释与本文件 goodsAdd 的注释第 1 点。
+    // ⚠️ 形参名必须保留：@RequestParam 与 Service 侧 SpEL 的三段都依赖它们（-parameters 已开，
+    //    javap 该方法的 MethodParameters 可见 MerchantId / GoodName / ProductCode）。
     @PostMapping("/productCodePrice")
     public Map<String, Object> productCodePrice(
             @RequestParam("MerchantId") String MerchantId,
             @RequestParam("GoodName") String GoodName,
             @RequestParam("ProductCode") String ProductCode
     ) {
-        Map<String, Object> result = new HashMap<>();
-        String sql = "SELECT Price, GoodImg FROM mall_management_sql.goods "
-                + "WHERE MerchantId=? AND GoodName=? AND ProductCode=?";
-
-        try {
-            Map<String, Object> map = GoodjdbcTemplate.queryForMap(sql,
-                    MerchantId, GoodName, ProductCode);
-            result.put("success", true);
-            result.put("price", map.get("Price"));
-            result.put("goodImg", map.get("GoodImg")); // 🔥 新增：返回图片
-        } catch (Exception e) {
-            e.printStackTrace();
-            result.put("success", false);
-        }
-        return result;
+        return goodsCacheService.priceByTriple(MerchantId, GoodName, ProductCode);
     }
 
     //这是一个接口（用于更新商品数据）
-    // ⚠️ @Caching 两条 evict 的四点理由同 goodsAdd（零精度损失 / 精确清 / 注解不可重复 / CGLIB 代理）。
-    //    本方法更新集合由 MerchantId 限定（WHERE 首个条件）⇒ 精确清不漏。
-    //    本方法**会改 GoodName**，但 goodsByMerchant 的键只含 MerchantId、不含 GoodName
-    //    ⇒ 不存在「旧键变垃圾」的问题，精确清依然成立。反之，将来若缓存以 GoodName 为键段的投影
-    //    （goodsCodes / goodsPrice），改名后**旧键清不掉** ⇒ 那类投影只能用 allEntries（见 §11）。
+    // ⚠️ @Caching 四条 evict 的五点理由同 goodsAdd（零损失 / 精确清 / 两个 allEntries 的理由 /
+    //    注解不可重复 / CGLIB 代理）。
+    //    · goodsByMerchant：本方法更新集合由 MerchantId 限定（WHERE 首个条件）⇒ 精确清不漏。
+    //      本方法**会改 GoodName**，但该 cacheName 的键只含 MerchantId、不含 GoodName
+    //      ⇒ 不存在「旧键变垃圾」的问题，精确清依然成立。
+    //    · goodsCodes / goodsPrice：**正是本方法的改名**使这两个投影只能 allEntries —— 两者的键都
+    //      含 GoodName，而本方法的 WHERE 是 (MerchantId, ProductCode)，**旧 GoodName 既不在入参、
+    //      也无处可查**（方法体内无任何 SELECT）⇒ 旧键 `M::旧G[::P]` 构造不出。而且改名的同时
+    //      新键也要清（同一行从旧三元组搬到新三元组）⇒ 精确清需要清两个、其中一个无解。
+    //      ⚠️ 若硬写精确清，它在**未改名**时看着完全正确（`M::G::P` 里的 G 就是入参），只在改名时
+    //      静默漏清 —— 这种「条件性正确」比整片清危险得多（测试全绿）。本方法还改 Price / GoodImg
+    //      ⇒ goodsPrice 的值本就该整片清。见 §11「精确 evict 的边界」。
     @Caching(evict = {
             @CacheEvict(cacheNames = "goodsHome", allEntries = true),
-            @CacheEvict(cacheNames = "goodsByMerchant", key = "#MerchantId")
+            @CacheEvict(cacheNames = "goodsByMerchant", key = "#MerchantId"),
+            @CacheEvict(cacheNames = "goodsCodes", allEntries = true),
+            @CacheEvict(cacheNames = "goodsPrice", allEntries = true)
     })
     @PostMapping("/goodsUp")
     public Map<String, Object> goodsUp(

@@ -144,4 +144,77 @@ public class GoodsCacheService {
         }
         return result;
     }
+
+    /**
+     * 原 Controller 的 productCodePrice()（G:231-252），逐字搬运：SQL 原样、queryForMap 原样、
+     * try/catch 原样、返回结构原样（含 goodImg 这个与列名 GoodImg **不同名**的 JSON 键）。
+     *
+     * 【为什么与 goodsCodes 分成两个 cacheName】
+     * 同一张表的**不同投影**：本方法返回单点 {price, goodImg}，listCodes() 返回 List&lt;String&gt;。
+     * 合成一片键空间会让同一 cacheName 里混住两种值形状 —— @Cacheable 按谁先命中返回谁，触发
+     * 类型混淆（Cache#get(key, type) 路径直接 IllegalStateException）。“cacheName = 表名 + 投影名”
+     * 这条命名规则的「投影名」段即为此设（本方法是该规则的第 2 个实例）。
+     *
+     * 【key = #MerchantId + '::' + #GoodName + '::' + #ProductCode】
+     * 顺序取**由粗到细**，与 SQL 的 WHERE 顺序一致；落到 Redis 是
+     * `goodsPrice::&lt;MerchantId&gt;::&lt;GoodName&gt;::&lt;ProductCode&gt;`。
+     * 用显式拼接而非 SpEL 内联 list（{#a,#b,#c}）：L2 的键是 key 对象 toString() 后与 cacheName
+     * 拼成（RedisCache + StringRedisSerializer）⇒ list 形态既不可读**也不更安全**。
+     * ⚠️ 三个分量都由客户端可控（MerchantId 来自注册入参 userid，见 UserController:58）⇒
+     *    `X::Y::Z::W` 存在多种拆法。但拆法数量受「内嵌 `::` 总数」约束：两个不同三元组要给出同一
+     *    字符串，双方的内嵌分隔符数量必须相等 ⇒ 真实分量不含 `::` 时解析唯一。实测当前 5 个三元组
+     *    的三个分量**均不含 `::`** ⇒ 对真实数据**不可达**；即便构造出来（需双方都内嵌 `::`），读到
+     *    的也是零鉴权（BD-03）下本就能直接读的东西 ⇒ 非新增能力。边界见 §11。
+     *
+     * 【失效面 = goodsAdd / goodsUp / goodsDe，三个**全部 allEntries**】
+     * 本 cacheName 的键含 GoodName，而 goodsUp 会改 GoodName，它的 WHERE 是
+     * (MerchantId, ProductCode) —— **旧 GoodName 既不在入参、也无处可查** ⇒ 旧键构造不出。
+     * 更要紧的是失效的**形态**：精确清在「未改名」时正确、改名时**静默**漏清（条件性正确）——
+     * 测试里全绿、只在改名时错，比整片清更危险。故一律 allEntries。
+     * 判据（可机械执行）：取键的每个分量，问写接口的 WHERE/入参**是否含它的旧值**；缺一个即不可精确。
+     * ⚠️ goodsDe 单看**能**精确清（三元组全在入参），但同一 cacheName 上不能既精确又全清
+     *    （goodsUp 那条做不到）⇒ 三个写接口取一致的 allEntries。见 §11「精确 evict 的边界」。
+     * 代价（明说）：本 cacheName 的键数 = 商家 × 商品名 × 型号，是三个新投影里增长最快的一个；
+     * 每次写要整片清（L2 侧是按前缀 SCAN 删），不像 goodsHome 的 allEntries 是零精度损失。
+     *
+     * ⚠️ 本方法是**首个会把失败当值缓存**的接口：queryForMap 在 0 行时抛
+     *    EmptyResultDataAccessException（&gt;1 行抛 IncorrectResultSizeDataAccessException），
+     *    两者都被 catch 吞成 {success:false} —— 一个**正常返回的非 null Map** ⇒ 会被缓存到 TTL
+     *    （a3 为 5m）。即失败的生命周期从「瞬时」变成「TTL」。
+     *    常规解法 unless 被 sync=true 禁止（spring-context 6.2.6 实证报文：`…sync=true operation
+     *    does not support the unless attribute on '<method>'`），而放弃 sync 是**已实测的回归**
+     *    （20 并发冷读 20 次 DB → 1 次，§9.1 击穿行）⇒ 接受失败被缓存，靠写接口的 allEntries 自愈
+     *    （现网唯一来源是前端用**未保存**的表单名查询，保存时即被清掉）。
+     *    「把异常上移到 Controller 以绕过缓存」这条方案**已被考虑并否决** —— 理由见 §11（语义错位）。
+     *
+     * ⚠️ 重复三元组：goods 表只有 PRIMARY(Id)、**无唯一约束**，而 goodsAdd 不做查重 ⇒ 可造出两行同
+     *    三元组 ⇒ 本接口从「价格」变成「失败」，且该失败被缓存到 TTL。实测当前 0 个重复三元组
+     *    （5 三元组 = 5 行）⇒ 该分支不可达。**不修**（建唯一索引属另一主题）。
+     *
+     * ⚠️ 形状耦合与两个 SELECT * 的投影**不同**：本投影是**显式两列** ⇒ goods 表加列不影响；
+     *    但列**改名/删除**会让 map.get("Price"/"GoodImg") 静默取不到 → 响应里 null，编译期无感。
+     *    即「耦合于具体列名」而非「耦合于列集合」。见 §11。
+     *
+     * ⚠️ goods.MerchantId 无索引（只有 PRIMARY(Id)）⇒ 库侧是**全表扫**（与另两个投影同）。
+     *    缓存把这笔代价摊薄为「每 TTL 一次」，是**掩盖而非修复**。
+     */
+    @Cacheable(cacheNames = "goodsPrice",
+            key = "#MerchantId + '::' + #GoodName + '::' + #ProductCode", sync = true)
+    public Map<String, Object> priceByTriple(String MerchantId, String GoodName, String ProductCode) {
+        Map<String, Object> result = new HashMap<>();
+        String sql = "SELECT Price, GoodImg FROM mall_management_sql.goods "
+                + "WHERE MerchantId=? AND GoodName=? AND ProductCode=?";
+
+        try {
+            Map<String, Object> map = jdbcTemplate.queryForMap(sql,
+                    MerchantId, GoodName, ProductCode);
+            result.put("success", true);
+            result.put("price", map.get("Price"));
+            result.put("goodImg", map.get("GoodImg")); // 响应键与列名 GoodImg 不同名
+        } catch (Exception e) {
+            e.printStackTrace();
+            result.put("success", false);
+        }
+        return result;
+    }
 }
