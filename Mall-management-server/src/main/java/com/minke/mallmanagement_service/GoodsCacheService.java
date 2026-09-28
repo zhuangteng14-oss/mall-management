@@ -1,7 +1,9 @@
 package com.minke.mallmanagement_service;
 
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.cache.annotation.CacheEvict;
 import org.springframework.cache.annotation.Cacheable;
+import org.springframework.cache.annotation.Caching;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 
@@ -10,18 +12,22 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * goods 的**读**承载层 —— 缓存注解的落点（与 GoodsTypeCacheService 同一套路）。
+ * goods 的**承载层** —— 缓存注解的落点：四个读方法（@Cacheable）+ 写路径的失效面
+ * （@CacheEvict，见 evictByMerchant()）。与 GoodsTypeCacheService 同一套路。
  *
  * 【为什么必须独立成类，而不是把注解挂在 Controller 上】
  * Spring 缓存基于 AOP 代理，同类内自调用不经过代理，@Cacheable 会静默失效。
  * 故被缓存的读方法必须位于与本类调用方不同的 bean 中。
  *
- * 【为什么这里只有读方法，写路径却留在 Controller】
- * 与 GoodsTypeCacheService 不同：本类的写路径（goodsAdd / goodsUp / goodsDe）没有搬进来。
- * 依据 cache-layer.md §11「只抽被缓存的读路径所需的极薄 Service，不全面重构分层」——
- * 那三个写接口的方法体又长又杂（图片落盘、异常吞噬、多表更新），为挂一个 evict 而整体搬家
- * 属于无收益的大改。故它们留在 Controller，@CacheEvict 也挂在 Controller 方法上
- * （Spring 的缓存注解对任何 bean 生效，不限于 @Service）。
+ * 【为什么只有**失效面**搬进来，三个写方法体却留在 Controller】
+ * goodsAdd / goodsUp / goodsDe 的方法体又长又杂（图片落盘、异常吞噬、多表更新），为挂一个
+ * evict 而整体搬家属于无收益的大改 —— 依据 cache-layer.md §11「只抽被缓存的读路径所需的
+ * 极薄 Service，不全面重构分层」。故 2026-09-28（D 笔）的收敛方式是：**方法体留在
+ * Controller，四个 cacheName 的 evict 收敛到本类的 evictByMerchant()**，Controller 侧只加
+ * 一行显式调用。
+ *   收益：加 cacheName 只改一处；Controller 不再持有缓存注解 ⇒ 恢复无代理（有防回归测试）。
+ *   代价：失效从「注解自动清」变「显式调用清」——**漏写调用是静默的**（编译/运行都不报）。
+ *         见 evictByMerchant() 的注释与 §11「显式 evict ≠ 注解 evict」。
  *
  * 本类只搬运逻辑、不改语义：SQL 原样、per-row 兜底原样、返回结构原样、异常处理原样。
  */
@@ -291,5 +297,74 @@ public class GoodsCacheService {
             result.put("success", false);
         }
         return result;
+    }
+
+    // ==================== 写路径：唯一的失效入口 ====================
+
+    /**
+     * goods 三个写接口（goodsAdd / goodsUp / goodsDe）共用的**唯一失效入口** —— 显式调用。
+     *
+     * 【三条约束 —— 少一条即静默失效，见 §11】
+     * ① 必须 **public**：Spring 代理只拦 public 方法，挂到非 public 上会**静默**不生效。
+     * ② 形参名必须叫 **MerchantId**：`key = "#MerchantId"` 依赖它（-parameters 已开）。若改名，
+     *    SpEL 会**响亮**抛 SpelEvaluationException —— 这是本方法里唯一「失败会响」的地方。
+     * ③ **不得在本类内部调用**：自调用不走代理 ⇒ 注解静默失效（同本类第 16 行的读侧约束）。
+     *
+     * 【调用点的位置：唯一出口之前，且不早于写库】
+     * 三个写方法各自**只有一个出口**，且**全部 JDBC 语句都在 try 内、catch 一律吞异常**
+     * ⇒ 凡改过库的调用必然走到那个出口；反之提前 return（goodsAdd「图片为空」）与早抛异常
+     * （goodsUp 的 file.transferTo 在 try 之外）两条路径**都没改库**。故「单出口调用一次」
+     * 可证明地覆盖 100% 的可能改库路径 —— 该前提精确地是「所有 JDBC 都在 try 内」，
+     * 将来新增 return 分支会破坏它，故三个调用点旁都留了警告注释。
+     * ⚠️ 不能改成「进方法就清」：先清后写会在「清完 → 写完」窗口内被并发读回填**旧值**，
+     *    那正是 @CacheEvict(beforeInvocation = true) 的经典风险。
+     *
+     * 【四条 evict 的精度，逐条成立】
+     * · goodsHome 用 allEntries=true —— 本 cacheName 上是**零精度损失**：只有 'all' 一个键，
+     *   清整片 == 清那一个键；且结构上不会出现「改了 key 忘了改 evict」的失配。
+     * · goodsByMerchant 用 key="#MerchantId" **精确清** —— 三个写接口的写入集合都由 MerchantId
+     *   限定（WHERE 里都有它）⇒ 改动集合 ⊆ 该键的集合，**不存在漏清**；多清一次是保守无害的。
+     *   ⚠️ 已知边界：MerchantId 是 char(20) 且 MySQL 比较**忽略尾空格与大小写**，而缓存键是字符串
+     *   精确比较 ⇒ 传 "1 " 能改到 "1" 的行、却清不到 goodsByMerchant::1（陈旧到 TTL 自愈）。
+     *   要对此免疫就只能 allEntries，代价是别家列表被顺带清。见 §11。
+     * · goodsCodes / goodsPrice 各用 allEntries=true —— **不是「顺手统一」**：两者的键都含
+     *   GoodName，而 goodsUp 会改 GoodName 且它的 WHERE 是 (MerchantId, ProductCode)
+     *   ⇒ 旧 GoodName 既不在入参、也无处可查（方法体内无任何 SELECT）⇒ 旧键构造不出。更要紧的是
+     *   **形态**：精确清在「未改名」时正确、改名时**静默**漏清（条件性正确）—— 测试里全绿、
+     *   只在改名时错，比整片清危险。判据（可机械执行）：取键的每个分量，问写接口的 WHERE/入参
+     *   **是否含它的旧值**，缺一个即不可精确。
+     *   ⚠️ goodsDe **单看是能精确清的**（WHERE 恰好就是那三段、全在入参），但同一个 cacheName 上
+     *   不能既精确又整片清 ⇒ 三个写接口取**一致的 allEntries**，免去「哪条是哪种精度」的记忆负担。
+     *   ⚠️ 代价与前两者不同：这两个 cacheName 的键数随 商家 × 商品名（× 型号）增长，每次写整片清
+     *   （L2 侧按前缀 SCAN 删），不像 goodsHome 那样零损失。见 §11。
+     *
+     * 【为什么是 @Caching 而不是四个 @CacheEvict】
+     * Spring 的 @CacheEvict **不是 @Repeatable**（spring-context 6.2.6 实证：常量池无 Repeatable，
+     * 且该包下**没有** CacheEvicts 容器类）⇒ 同一方法上写两个同名注解**不可编译**。单个
+     * @CacheEvict(cacheNames={A,B}) 只能表达**同精度**的多命名空间；本例四条分两种精度，
+     * 故 @Caching 是唯一写法。
+     *
+     * 【beforeInvocation=false（默认）+ 显式调用 ⇒ 等价于「每次改库都清」】
+     * 多清一次是保守且无害的（代价 = 下次冷读回填）。
+     * ⚠️ 开放问题（已登记 §11，不阻塞）：beforeInvocation=false 在**方法抛异常**时到底执不执行，
+     *    未实测。**无论答案如何都不改变本方法的正确性**：那条异常路径不改库，清与不清都对。
+     *
+     * 【为什么 goodsAdd 也要清 goodsPrice —— 它会改变一个**已存在**三元组的答案】
+     * 0 行 → 1 行（失败变价格）、1 行 → 2 行（价格变失败：goods 表无唯一约束、goodsAdd 不查重，
+     * 而 queryForMap 遇 >1 行抛异常 ⇒ 响应变 {success:false}）。docs §2 该行原把失效面写成
+     * goodsUp / goodsDe 两处，**漏了 goodsAdd**（2026-09-28 订正）。
+     *
+     * 【CGLIB】注解落在本类 ⇒ GoodsCacheService 被代理（本来因四个读方法就是代理）。
+     * Controller 侧的 @Caching 撤除后**不再被代理**，有防回归测试断言（MallManagementApplicationTests）。
+     */
+    @Caching(evict = {
+            @CacheEvict(cacheNames = "goodsHome", allEntries = true),
+            @CacheEvict(cacheNames = "goodsByMerchant", key = "#MerchantId"),
+            @CacheEvict(cacheNames = "goodsCodes", allEntries = true),
+            @CacheEvict(cacheNames = "goodsPrice", allEntries = true)
+    })
+    public void evictByMerchant(String MerchantId) {
+        // 方法体刻意留空：失效面全部由注解声明，本方法只负责「被调到」。
+        // ⚠️ 不要在这里写业务逻辑 —— 它会在**任何**调用路径上执行，且抛异常会打断调用方的写接口。
     }
 }
