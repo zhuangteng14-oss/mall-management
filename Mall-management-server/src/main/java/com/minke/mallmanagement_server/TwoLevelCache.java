@@ -1,7 +1,5 @@
 package com.minke.mallmanagement_server;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.cache.Cache;
 import org.springframework.cache.support.SimpleValueWrapper;
 import org.springframework.dao.DataAccessException;
@@ -27,7 +25,8 @@ import java.util.concurrent.Callable;
  *   读  → 返回 null（视作未命中，由调用方回落 DB）
  *   写 / 失效 → 静默跳过
  * 绝不上抛：上抛会把 Redis 抖动传导为 HTTP 5xx，直接打挂 A3 的 A-S1-1 / A-S4b-1。
- * 只按「状态翻转」打日志（健康→故障、故障→恢复），避免 Redis 长时间不可用时刷爆日志。
+ * 「状态翻转才打日志」由 {@link L2HealthProbe} 负责，且状态是**全局一份**（不是每个缓存名
+ * 一份）—— 本类只把每次 L2 操作的成败喂给它。
  *
  * 只吞 DataAccessException，不吞 RuntimeException 全集：序列化失败（SerializationException）
  * 之类的编程错误必须照常上抛 —— 那属于「缓存放了不该放的东西」，要在开发期暴露，
@@ -35,20 +34,23 @@ import java.util.concurrent.Callable;
  */
 public class TwoLevelCache implements Cache {
 
-    private static final Logger log = LoggerFactory.getLogger(TwoLevelCache.class);
-
     private final String name;
     /** L1：Caffeine 原生实例，value 一律是 {@link Cache.ValueWrapper}。 */
     private final com.github.benmanes.caffeine.cache.Cache<Object, Object> l1;
     /** L2：RedisCache（可能为 null —— L2 拒绝动态创建该缓存名时退化为仅 L1）。 */
     private final Cache l2;
-    /** L2 健康状态，仅用于把日志压成「状态翻转」而不是每请求一行。 */
-    private volatile boolean l2Healthy = true;
+    /**
+     * L2 健康状态 —— 由 {@link TwoLevelCacheManager} 注入的**共享**实例。
+     * 不在这里持有副本：状态必须是全局一份，理由见 {@link L2HealthProbe} 类注释。
+     */
+    private final L2HealthProbe probe;
 
-    TwoLevelCache(String name, com.github.benmanes.caffeine.cache.Cache<Object, Object> l1, Cache l2) {
+    TwoLevelCache(String name, com.github.benmanes.caffeine.cache.Cache<Object, Object> l1,
+                  Cache l2, L2HealthProbe probe) {
         this.name = name;
         this.l1 = l1;
         this.l2 = l2;
+        this.probe = probe;
     }
 
     @Override
@@ -172,10 +174,10 @@ public class TwoLevelCache implements Cache {
         }
         try {
             ValueWrapper wrapper = l2.get(key);
-            markL2Up();
+            probe.markOk();
             return wrapper;
         } catch (DataAccessException e) {
-            markL2Down(e);
+            probe.markFailed(e);
             return null;
         }
     }
@@ -186,9 +188,9 @@ public class TwoLevelCache implements Cache {
         }
         try {
             l2.put(key, value);
-            markL2Up();
+            probe.markOk();
         } catch (DataAccessException e) {
-            markL2Down(e);
+            probe.markFailed(e);
         }
     }
 
@@ -198,9 +200,9 @@ public class TwoLevelCache implements Cache {
         }
         try {
             l2.evict(key);
-            markL2Up();
+            probe.markOk();
         } catch (DataAccessException e) {
-            markL2Down(e);
+            probe.markFailed(e);
         }
     }
 
@@ -210,24 +212,9 @@ public class TwoLevelCache implements Cache {
         }
         try {
             l2.clear();
-            markL2Up();
+            probe.markOk();
         } catch (DataAccessException e) {
-            markL2Down(e);
-        }
-    }
-
-    private void markL2Down(DataAccessException e) {
-        if (l2Healthy) {
-            l2Healthy = false;
-            log.warn("L2(Redis) 不可达，缓存 '{}' 降级为「仅 L1 + 直接回落 DB」；"
-                    + "本次故障期间不再逐次记录。原因：{}", name, e.toString());
-        }
-    }
-
-    private void markL2Up() {
-        if (!l2Healthy) {
-            l2Healthy = true;
-            log.warn("L2(Redis) 已恢复，缓存 '{}' 回到两级模式", name);
+            probe.markFailed(e);
         }
     }
 }

@@ -35,12 +35,20 @@ public class TwoLevelCacheManager implements CacheManager {
     private final Duration l1TimeToLive;
     private final long l1MaxSize;
     private final CacheManager l2;
+    /**
+     * L2 健康状态 —— **同一个实例发给所有** TwoLevelCache（不是一个缓存名一个）。
+     * 「Redis 挂了」是全局事实，per-cache 的状态会让一次故障变成 N 条告警；
+     * 详见 {@link L2HealthProbe} 类注释。
+     */
+    private final L2HealthProbe probe;
     private final ConcurrentMap<String, TwoLevelCache> caches = new ConcurrentHashMap<>();
 
-    public TwoLevelCacheManager(Duration l1TimeToLive, long l1MaxSize, CacheManager l2) {
+    public TwoLevelCacheManager(Duration l1TimeToLive, long l1MaxSize, CacheManager l2,
+                                L2HealthProbe probe) {
         this.l1TimeToLive = l1TimeToLive;
         this.l1MaxSize = l1MaxSize;
         this.l2 = l2;
+        this.probe = probe;
     }
 
     @Override
@@ -56,7 +64,7 @@ public class TwoLevelCacheManager implements CacheManager {
                     .expireAfterWrite(l1TimeToLive)
                     .recordStats()   // 便于观测命中率（TwoLevelCache.getNativeCache()）
                     .build();
-            return new TwoLevelCache(n, l1, l2Cache);
+            return new TwoLevelCache(n, l1, l2Cache, probe);
         });
     }
 

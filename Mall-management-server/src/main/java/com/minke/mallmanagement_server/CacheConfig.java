@@ -36,6 +36,9 @@ import java.time.Duration;
  *
  * 【两级 TTL 的关系】L1 TTL 应当 ≤ L2 TTL，且推荐明显更短：
  * L1 没有跨节点失效通道（见 TwoLevelCacheManager 类注释），短 TTL 是当前唯一的兜底。
+ *
+ * 【不在本类范围内的】L2 健康状态与探活通道见 {@link L2ProbeConfig}：本类只装配
+ * CacheManager，健康判定由 {@link TwoLevelCache} 喂给 {@link L2HealthProbe}。
  */
 @Configuration
 @EnableConfigurationProperties(CacheProperties.class)
@@ -51,6 +54,7 @@ public class CacheConfig {
     @Primary
     public CacheManager cacheManager(RedisConnectionFactory connectionFactory,
                                      CacheProperties cacheProperties,
+                                     L2HealthProbe l2HealthProbe,
                                      @Value("${app.cache.caffeine.max-size:1000}") long l1MaxSize,
                                      @Value("${app.cache.caffeine.time-to-live:60s}") Duration l1TimeToLive) {
         RedisCacheManager l2 = RedisCacheManager.builder(connectionFactory)
@@ -63,7 +67,8 @@ public class CacheConfig {
         // 有这一行，「属性被读到」就是启动即可取证的事实，不靠「值相同所以无害」。
         log.info("两级缓存已装配：L1 Caffeine(maxSize={}, ttl={}) -> L2 Redis(ttl={})",
                 l1MaxSize, l1TimeToLive, cacheProperties.getRedis().getTimeToLive());
-        return new TwoLevelCacheManager(l1TimeToLive, l1MaxSize, l2);
+        // l2HealthProbe 由 L2ProbeConfig 提供、全局一份：所有缓存名共用同一个健康状态
+        return new TwoLevelCacheManager(l1TimeToLive, l1MaxSize, l2, l2HealthProbe);
     }
 
     /**
