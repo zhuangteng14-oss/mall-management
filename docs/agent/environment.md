@@ -74,6 +74,8 @@ powershell.exe -NoProfile -Command "(Test-NetConnection -ComputerName 192.168.22
 1. **别用 `head -c N` 读 RESP 回复**：非 tty 下 stdout 块缓冲，字节数凑不够就被 `timeout` 杀掉、缓冲区整个丢掉 —— 现象是「连上了却什么都没读到」。用 `IFS= read -r -t 3` 逐行读。
 2. `/dev/tcp` 只能证 TCP 可达；**加密码后**「端口通」≠「能用」，认证是否生效要靠方式 1 实测出 `+OK` / `-NOAUTH`。
 
+**主机的完整探针手段（2026-09-28 B1 验证用，方法留存）**：主机上**没有 redis-cli**，但用 **Python 标准库裸 RESP**（`socket` 手写 `AUTH` / `GET` / `SET` / `TTL` / `EXISTS` / `INFO commandstats`）就能完整探针 —— B1 验证「L2 键是否存在、TTL 剩多少、本轮实际发了几条命令」全靠它（**`commandstats` 的增量是「L1 真的挡住了网络」的判据**）。验证「L2 恢复」分支同理：**主机侧起一个 TCP 转发**指向 VM 的 `6379`，应用指向转发器，转发器的停/起就造出「端点不可达 → 可达」的翻转 —— 不必重启应用，也不必碰 VM 上的 Redis 进程。**方法记在本文件，脚本用完即删、不进仓库**（同下文字符集坑末尾的约定）。
+
 ## 用 `a3` profile 让后端连这台实例
 
 后端默认连**本机开发库**（`application.properties`）。要连 VM 上的 A3 实例，起服务时挂 `a3` profile：
@@ -87,6 +89,7 @@ SPRING_PROFILES_ACTIVE=a3 ./mvnw spring-boot:run    # IDE 里则设同名环境�
 - 库名与开发库**同名**（TD-13：39 处 schema 前缀硬编码在 SQL 里，切库名切不走）。故日志里看到 `mall_management_sql` **不能**说明连的是哪台 —— 要么看 `jdbcUrl` 的主机串，要么 `SELECT VERSION()`（开发库 8.0.32 / VM 8.4.11）
 - 驱动：`pom.xml` 声明 8.0.33，实测直连 8.4.11 成功，**无需改 `pom.xml`**
 - 上传目录已外置到 `${java.io.tmpdir}/a3-uploads/`，A3 期间不写仓库目录（TD-08）
+- **两级缓存参数在 `application.properties`（不在 a3 profile）**：`app.cache.caffeine.time-to-live=60s` / `app.cache.caffeine.max-size=1000`，装配见 `CacheConfig`（`@Primary CacheManager` = Caffeine L1 + Redis L2，设计见 `cache-layer.md §8`）。**不变量：L1 TTL ≤ `spring.cache.redis.time-to-live`**（a3 profile 为 `5m`）—— L1 没有跨节点失效通道，违反时陈旧窗口被放大到 L1 TTL，故启动期 WARN（`CacheConfig.warnIfL1OutlivesL2`）。自检：启动日志有一行 `两级缓存已装配：L1 Caffeine(maxSize=1000, ttl=PT1M) -> L2 Redis(ttl=PT5M)`，**用 ASCII 片段 `Caffeine(maxSize=` 检索**（日志为 GBK 字节，中文 pattern 匹配不到）—— 属性有没有被真正读到，看这一行，不靠推断
 
 ### 导入数据（在 guest 上执行）
 
