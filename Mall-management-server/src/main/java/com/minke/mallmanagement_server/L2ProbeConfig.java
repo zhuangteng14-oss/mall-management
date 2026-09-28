@@ -39,8 +39,10 @@ import java.util.Objects;
  * 这个后果在 A3 上是**看不出来的**（缓存照样能读能写），所以只能靠结构上不给它
  * 注册进容器的机会。探测通道因此是普通对象，生命周期由 L2HealthProbe 负责。
  *
- * 【为什么探测超时这么短】见 L2HealthProbe 类注释第 2 条：黑洞端点上主通道每次读要付
- * 6.13s（实测），探测必须远短于此，否则「每 cooldown 秒挑一个请求慢 6 秒」。
+ * 【为什么探测超时这么短】见 L2HealthProbe 类注释第 2 条：主通道冷读在故障端点上实测
+ * 3.38s（accept 后不回字节）/ 3.40s（SYN 被丢弃，192.0.2.1 TEST-NET）—— 探测超时必须远短于此，
+ * 否则「每 cooldown 秒挑一个请求慢 3 秒」。而探测本身实测稳态 233ms、进程内首次 0.5~0.8s：
+ * **200ms 是超时上限，不是实测耗时**。
  *
  * 【启动期两道校验 + 一次自检】都只 WARN，不阻断启动 —— Redis 不可用本来就是被允许的
  * 降级场景（cache-layer.md §9 有专门的降级断言），配置疑点不该让应用起不来。
@@ -96,7 +98,8 @@ public class L2ProbeConfig {
             standalone.setPassword(RedisPassword.of(redisProperties.getPassword()));
         }
 
-        // 三层超时都设成 probeTimeout —— 缺任一层，「探测 ≤200ms」就是空话：
+        // 三层超时都设成 probeTimeout —— 缺任一层，「探测在 200ms 超时内返回」就是空话
+        // （200ms 是超时**上限**：实测稳态约 233ms、进程内首次 0.5~0.8s，见 L2HealthProbe 类注释第 2 条）：
         //   RedisURI.timeout（由下面的 commandTimeout 带入）—— Lettuce 的默认命令/建连超时
         //   TimeoutOptions.fixedTimeout —— 命令超时；
         //     connectionTimeout() 让建连阶段也受它约束

@@ -165,7 +165,8 @@ public class TwoLevelCache implements Cache {
 
     // ================= L2 访问 + 降级 =================
     // 每个 L2 操作都先问 probe.isL2UsableNow()：冷却窗口内直接跳过，零网络代价。
-    // ⚠️ 该方法**可能阻塞 ≤ 探测超时**（窗口到期时，唯一抢到探测权的线程会同步 PING 一次），
+    // ⚠️ 该方法**可能阻塞**（窗口到期时，唯一抢到探测权的线程会同步 PING 一次；代价见
+    //    L2HealthProbe 类注释第 2 条：不可达时稳态约 233ms、进程内首次 0.5~0.8s），
     //    且探测者本人也走降级路径 —— 见 L2HealthProbe.isL2UsableNow() 的注释。
 
     private ValueWrapper l1Get(Object key) {
