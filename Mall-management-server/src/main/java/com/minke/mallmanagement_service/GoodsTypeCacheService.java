@@ -32,8 +32,16 @@ public class GoodsTypeCacheService {
     /**
      * 原 Controller 的 GET 分支（G:37-42），逐字搬运。
      * 无参数、无用户态 → 全局单键缓存。
+     *
+     * ⚠️ `sync = true` 不是可选优化，是单飞的**开关**，必须留着：
+     *    不加它时 Spring 走 `Cache#get(key)`（两条路都各自回落 DB），
+     *    `TwoLevelCache` 里用于合并并发未命中的 `get(key, Callable)`
+     *    根本不会被调用 —— 即击穿防护是一段死代码。
+     *    实测（2026-09-28，冷 L1 + 冷 L2 打 20 并发）：
+     *    不加 sync → **20 次 DB 查询**（零合并）；加 sync → 1 次。
+     * 另：sync=true 要求本注解只声明一个 cacheNames 且不能用 unless（此处均满足）。
      */
-    @Cacheable(cacheNames = "goodstype", key = "'all'")
+    @Cacheable(cacheNames = "goodstype", key = "'all'", sync = true)
     public Map<String, Object> listTypes() {
         String sql = "SELECT Id, GoodType, GoodTypeNew FROM mall_management_sql.goodstype";
         List<Map<String, Object>> list = jdbcTemplate.queryForList(sql);
