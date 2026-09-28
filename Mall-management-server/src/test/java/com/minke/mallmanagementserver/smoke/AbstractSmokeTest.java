@@ -1,5 +1,7 @@
 package com.minke.mallmanagementserver.smoke;
 
+import com.minke.mallmanagement_service.GoodsCacheService;
+import com.minke.mallmanagement_service.GoodsTypeCacheService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -38,6 +40,25 @@ public abstract class AbstractSmokeTest {
      */
     @MockitoBean
     protected JdbcTemplate jdbcTemplate;
+
+    /**
+     * 同上一条的同一类问题：{@code @WebMvcTest} 无参加载全部 3 个 Controller，
+     * 其中 {@code MallManagementGoodsController} 还 {@code @Autowired} 了两个
+     * 缓存 Service，而 {@code @Service} 不在 Web 切片内 ⇒ 切片里必须也给替身。
+     *
+     * <p>2026-09-28 补：goodstype 与 goodsSelectHome 上缓存时各引入一个 Service，
+     * 漏掉它们会让 4 个 smoke 用例在**上下文加载期**就失败（报
+     * {@code No qualifying bean of type ... GoodsTypeCacheService}），
+     * 与 {@code JdbcTemplate} 那条是同一个成因、同一个修法。
+     *
+     * <p>默认替身返回 null —— 本基类的 3 个子类都不调用走缓存的两个端点
+     * （goodstype / goodsSelectHome），故无需 stub。
+     */
+    @MockitoBean
+    protected GoodsTypeCacheService goodsTypeCacheService;
+
+    @MockitoBean
+    protected GoodsCacheService goodsCacheService;
 
     /**
      * 预留的鉴权口子。将来接入认证后，在此返回需要附加的请求头
