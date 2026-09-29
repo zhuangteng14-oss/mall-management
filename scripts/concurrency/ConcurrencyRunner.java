@@ -447,7 +447,10 @@ public class ConcurrencyRunner {
     static final Map<String, String> EXPECT = new LinkedHashMap<>();
 
     static {
-        EXPECT.put("A-S2a-1", "EXPECTED_DEFECT_PRESENT");
+        // A-S2a-1 已于 B2（2026-09-29）移出本表：Redisson 锁 + 临界区内先查后插落地后，
+        // 「20 并发同 OrderId 插 20 行」成为历史，该断言已翻成正向断言（期望 rows == 1），
+        // 不再属于「缺陷存在型」。只删登记项而不改断言体的话，verdict 会落 DEFECT_FIXED，
+        // 而本表的默认期望是 PASS ⇒ 门禁仍然红（两处必须同时改）。
         // A-B2-1 同理：只有 --b-group-gate=true 时它才进门禁，此时「缺陷存在」才是通过。
         // 不登记的话，门禁模式下缺陷真的复现了反而会被判失败（倒挂）。
         EXPECT.put("A-B2-1", "EXPECTED_DEFECT_PRESENT");
@@ -1298,7 +1301,7 @@ public class ConcurrencyRunner {
     // ---------- S2a 下单（同参同 OrderId） ----------
 
     static void s2a(Opt o) throws InterruptedException {
-        Ass a1 = ass("A-S2a-1", "JDBC count(order WHERE OrderId=?) >= 2", true);
+        Ass a1 = ass("A-S2a-1", "JDBC count(order WHERE OrderId=?) == 1", true);
         Ass a2 = ass("A-S2a-2", "该 OrderId 行数 == 本轮 success:true 响应数", true);
         String orderId = ns() + "-DUP";
         final Map<String, String> f = orderForm(orderId, 0, 0, 0);
@@ -1306,11 +1309,13 @@ public class ConcurrencyRunner {
         int succ = countSuccess(cs);
         int rows = jdbcCount(o, "SELECT COUNT(*) FROM mall_management_sql.`order` WHERE OrderId = ?", orderId);
         if (rows < 0) {
-            // 查询失败不能被当成「缺陷已修复」—— -1 < 2 会走到 DEFECT_FIXED，那是假红
-            settle(a1, false, "JDBC 行数查询失败（-1），无法判定缺陷是否仍存在");
+            // 查询失败不能被当成「修复生效」—— -1 与 1 一样都不说明「没插重复行」，那是假红
+            settle(a1, false, "JDBC 行数查询失败（-1），无法判定是否仍插重复行");
         } else {
-            settleDefect(a1, rows >= 2,
-                    "行数=" + rows + "（>=2 即缺陷存在；若为 1 说明已被唯一索引修复，需同步改断言）"
+            // B2 之前本断言是 settleDefect(rows >= 2)（缺陷存在型）。修复 = 「锁 + 临界区内先查后插」，
+            // 两条缺一不可：锁单独只把 20 个并发变成串行、每个照旧裸 INSERT，仍插 20 行。
+            settle(a1, rows == 1,
+                    "行数=" + rows + "（== 1 才是修复生效；>= 2 说明查重窗口仍在）"
                     + " 5xx=" + count5xx(cs));
         }
         settle(a2, rows == succ, "行数=" + rows + " == success 数=" + succ);

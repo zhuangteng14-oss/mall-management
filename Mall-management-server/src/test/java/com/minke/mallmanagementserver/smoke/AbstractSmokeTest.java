@@ -1,9 +1,11 @@
 package com.minke.mallmanagementserver.smoke;
 
+import com.minke.mallmanagement_service.DistributedLockService;
 import com.minke.mallmanagement_service.FriendCacheService;
 import com.minke.mallmanagement_service.GoodsCacheService;
 import com.minke.mallmanagement_service.GoodsTypeCacheService;
 import com.minke.mallmanagement_service.UserCacheService;
+import org.junit.jupiter.api.BeforeEach;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -15,6 +17,10 @@ import org.springframework.test.web.servlet.request.MockMvcRequestBuilders;
 
 import java.util.Collections;
 import java.util.Map;
+import java.util.function.Supplier;
+
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.when;
 
 /**
  * smoke test 基类。
@@ -94,6 +100,35 @@ public abstract class AbstractSmokeTest {
      */
     @MockitoBean
     protected FriendCacheService friendCacheService;
+
+    /**
+     * 同上一条的同一类问题，第五次遇到：B2 引入 {@code DistributedLockService} 后，
+     * {@code MallManagementGoodsController}（4 个端点）与 {@code MallManagementMessage}
+     * （friendAdd）都 {@code @Autowired} 了它。漏掉它同样在**上下文加载期**就失败
+     * （{@code No qualifying bean of type ... DistributedLockService}），拖垮全部 smoke 用例。
+     *
+     * <p>⚠️ **但与上面四处有一处关键不同：本替身不能只靠「默认返回 null」**。
+     * 那四处缺的 Service 只在子类**不调用**的端点上，默认 null 无害；而本笔的锁落在
+     * {@code orderPayIfUp} 上，且 {@link OrderPayIfUpSmokeTest} **真调**该端点 ⇒ 不 stub 的话
+     * 端点返回空体（{@code runLocked} 默认返 null），断言 {@code $.msg} 会全红。
+     * 故基类必须把模板方法 stub 成「直接把 action 跑掉」（= 视为拿到了锁，等价于锁路径上的正常分支）。
+     */
+    @MockitoBean
+    protected DistributedLockService distributedLockService;
+
+    /**
+     * 锁替身的行为：**直接执行 action**（不做任何互斥、不碰 Redis）。
+     *
+     * <p>为什么不逐用例 stub：smoke 测的是 Controller 的分支与响应文案，锁是**穿过它的一层**；
+     * 放基类一处，既避免 4 个子类各写一遍，也让「锁在切片里恒为直通」成为一个显式事实
+     * （否则读用例的人会以为端点上的互斥在 smoke 里也被验证了 —— 它不在，锁的验证在
+     * {@code DistributedLockServiceTest} 与 A3）。
+     */
+    @BeforeEach
+    void stubLockAsDirectRun() {
+        when(distributedLockService.runLocked(any(), any(), any()))
+                .thenAnswer(invocation -> ((Supplier<?>) invocation.getArgument(2)).get());
+    }
 
     /**
      * 预留的鉴权口子。将来接入认证后，在此返回需要附加的请求头

@@ -97,6 +97,28 @@
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-actuator</artifactId>
         </dependency>
+
+        <!-- 分布式锁（B2）：Redisson 的**核心**包，刻意不用 redisson-spring-boot-starter。
+             理由不是风格偏好：starter 的 RedissonAutoConfigurationV2 会注册自己的
+             RedissonConnectionFactory，而 Boot 的 Lettuce 工厂是
+             @ConditionalOnMissingBean(RedisConnectionFactory.class) ⇒ **Lettuce 被静默顶掉**
+             （a3 的连接池与 spring.data.redis.timeout 一并失效，且 A3 上看不出来）——
+             与 L2ProbeConfig 类注释警告的是同一种失效形态。核心包绕开自动装配，配置从
+             RedisProperties 派生（同源 ⇒ 不存在「改了配置只改一处」的漂移）。
+             同理不引 redisson-spring-data-34：那是给 Redisson 版 CacheManager /
+             ConnectionFactory 用的，本项目两个都不需要。
+
+             版本 3.46.0 的取舍（依据可复核）：Boot 3.4.5 的 dependencyManagement 把
+             io.netty 统一到 4.1.119.Final（spring-boot-dependencies-3.4.5.pom:154），
+             而 Maven Central 上 redisson-parent 声明的是 3.46.0 → 4.1.118（被向上抬，
+             补丁级、向后兼容）、3.47.0~3.50.0 → 4.1.121（会被**向下**压到 4.1.119）——
+             降级方向才是 NoSuchMethodError 的风险面，故取 3.46.0。
+             复核命令：./mvnw dependency:tree -Dincludes=io.netty 应显示 4.1.119.Final。 -->
+        <dependency>
+            <groupId>org.redisson</groupId>
+            <artifactId>redisson</artifactId>
+            <version>3.46.0</version>
+        </dependency>
     </dependencies>
 
     <build>

@@ -1,5 +1,7 @@
 package com.minke.mallmanagement_controller;
 
+import com.minke.mallmanagement_service.DistributedLockService;
+import com.minke.mallmanagement_service.DistributedLockService.LockName;
 import com.minke.mallmanagement_service.FriendCacheService;
 import com.minke.mallmanagement_service.UserCacheService;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -26,6 +28,10 @@ public class MallManagementMessage {
     // **本 Controller 不持有任何缓存注解、不被代理**（有防回归测试断言，同 goods 那套）。
     @Autowired
     private FriendCacheService friendCacheService;
+
+    // B2 的锁。与缓存注解同理：注解全在别的类身上 ⇒ 本 Controller 不被代理（有防回归测试断言）。
+    @Autowired
+    private DistributedLockService distributedLockService;
 
     // ===================== 消息相关接口（基于会话表） =====================
     @PostMapping("/conversations")
@@ -209,9 +215,22 @@ public class MallManagementMessage {
     }
 
     //为好友表添加待处理的数据
+    // ⚠️ B2：方法体在 Redisson 锁下执行，锁 key = pairKey(customerId, friendId)（**无序对**，
+    //    理由见 DistributedLockService.pairKey 的 javadoc —— 本接口的查重 SQL 是 OR 双向的，
+    //    按入参顺序拼会让 A→B 与 B→A 各持一把锁），指标 tag = friend-add。
+    //    锁在这里只把「查 + 插」合成原子（既有查重已正确，锁补的是 TOCTOU）；
+    //    拿不到锁 ⇒ fail-open 直行原路径 —— 与下面「唯一出口」注释的约定 ① 一致（该分支不改库，
+    //    故天然不必动 evictPair）。
     @PostMapping("/friendAdd")
     public Map<String, Object> friendAdd(@RequestParam("customerId") String customerId,
                                          @RequestParam("friendId") String friendId) {
+        return distributedLockService.runLocked(LockName.FRIEND_ADD,
+                DistributedLockService.pairKey(customerId, friendId),
+                () -> friendAddLocked(customerId, friendId));
+    }
+
+    /** friendAdd 的临界区：**原方法体逐字未动**（B2 的边界），含唯一出口处的 evictPair。 */
+    private Map<String, Object> friendAddLocked(String customerId, String friendId) {
         Map<String, Object> result = new HashMap<>();
         if (customerId.equals(friendId)) {
             result.put("success", false);
