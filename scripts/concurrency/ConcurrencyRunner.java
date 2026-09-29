@@ -126,8 +126,9 @@ public class ConcurrencyRunner {
         boolean skipNegativeControl = false;
         // P5 就绪探针等待上限（秒）。后端冷启动要跑 Hibernate ddl-auto=update 的校验，非瞬时。
         int readyTimeoutSec = 60;
-        // 场景选择（阶段 D 可逐个跑）；H3 的六段负载即前六项，B2 是澄清 1 的 B 组（check-then-insert TOCTOU）
-        String scenarios = "S1,S2a,S2b,S3,S4a,S4b,B2";
+        // 场景选择（阶段 D 可逐个跑）；H3 的六段负载即前六项，B2 是澄清 1 的 B 组（check-then-insert TOCTOU），
+        // C 是 B3 的时间线核对（record-only：不进退出码，见 guardSoft）
+        String scenarios = "S1,S2a,S2b,S3,S4a,S4b,B2,C";
         // S4b 时长。H3 定 60s；OD-8（D2）尚未裁决，故做成可覆盖项，默认随 H3。
         int s4bDurationSec = 60;
         String reportDir = "scripts/concurrency/reports";
@@ -180,7 +181,8 @@ public class ConcurrencyRunner {
         "  --reset-db             重跑 mall_management_sql.sql（DROP 全部 11 表！仅限一次性实例）",
         "  --skip-negative-control  跳过 P7 阴性对照（本机库不可达时会自动 skip，无需手动指定）",
         "  --ready-timeout-sec N  P5 就绪探针等待上限，默认 60",
-        "  --scenarios A,B         只跑指定负载段，默认 S1,S2a,S2b,S3,S4a,S4b,B2",
+        "  --scenarios A,B         只跑指定负载段，默认 S1,S2a,S2b,S3,S4a,S4b,B2,C"
+                + "（C 为 record-only：不进退出码）",
         "  --s4b-duration-sec N    S4b 混合负载时长，默认 60（H3 值；OD-8/ D2 未裁决）",
         "  --help                 显示本帮助",
         "",
@@ -1180,6 +1182,35 @@ public class ConcurrencyRunner {
         }
     }
 
+    /**
+     * 多行查询：每行取成 Object[]（按 SELECT 的列序）。异常返回 null —— 与 jdbcCount 的 -1 同义。
+     * 返回值刻意不在这里折叠成空表：调用方要能区分「查不到行」与「没查成」，否则一次 JDBC 失败
+     * 会被读成「时间线一行都没有」。
+     */
+    static List<Object[]> jdbcRows(Opt o, String sql, Object... args) {
+        try (Connection c = DriverManager.getConnection(o.jdbcUrl, o.jdbcUser, o.jdbcPassword);
+             PreparedStatement ps = c.prepareStatement(sql)) {
+            for (int i = 0; i < args.length; i++) {
+                ps.setObject(i + 1, args[i]);
+            }
+            try (ResultSet r = ps.executeQuery()) {
+                int n = r.getMetaData().getColumnCount();
+                List<Object[]> out = new ArrayList<>();
+                while (r.next()) {
+                    Object[] row = new Object[n];
+                    for (int i = 0; i < n; i++) {
+                        row[i] = r.getObject(i + 1);
+                    }
+                    out.add(row);
+                }
+                return out;
+            }
+        } catch (SQLException e) {
+            System.err.println("[JDBC] 查询失败: " + e.getMessage() + "  ← " + sql);
+            return null;
+        }
+    }
+
     /** 单行订单的状态三元组；不存在或异常返回 null。 */
     static int[] jdbcOrderState(Opt o, String orderId) {
         try (Connection c = DriverManager.getConnection(o.jdbcUrl, o.jdbcUser, o.jdbcPassword);
@@ -1245,6 +1276,11 @@ public class ConcurrencyRunner {
         if (o.has("B2")) {
             guard("B2", () -> b2(o));
         }
+        // C 组放最后：它的取数一律带自己的命名空间前缀（<ns>-C%），与前面各段互不干扰；
+        // 排在最后还让它的排空等待落在一个安静的进程上（不受前段在途任务影响）。
+        if (o.has("C")) {
+            guardSoft("C", () -> c(o));
+        }
         return gateFailures();
     }
 
@@ -1270,6 +1306,26 @@ public class ConcurrencyRunner {
             x.verdict = "FAIL";
             x.detail = e.getClass().getSimpleName() + ": " + e.getMessage();
             System.err.println("[" + name + "] 执行异常: ");
+            e.printStackTrace(System.err);
+        }
+    }
+
+    /**
+     * 与 {@link #guard} 同理，但异常断言的 gate 落 **false** —— C 组整体 record-only。
+     *
+     * <p>它的数据源 {@code order_state_transition} 由人工落盘的
+     * {@code mall_management_sql.sql} 追加（本笔交人工落盘），DDL 未落盘时本组必然报错，
+     * 而那是「没跑成」、不是「跑出来有问题」。若沿用 {@link #guard}（它建的异常断言
+     * gate=true），一个非门禁场景就能把 CI 门禁弄红 —— 与「C 组不进退出码」直接矛盾。
+     */
+    static void guardSoft(String name, Body b) {
+        try {
+            b.run();
+        } catch (Throwable e) {
+            Ass x = ass(name + "-异常", "负载段 " + name + " 执行抛异常（record-only，不进退出码）", false);
+            x.verdict = "FAIL";
+            x.detail = e.getClass().getSimpleName() + ": " + e.getMessage();
+            System.err.println("[" + name + "] 执行异常（record-only）: ");
             e.printStackTrace(System.err);
         }
     }
@@ -1597,6 +1653,336 @@ public class ConcurrencyRunner {
         lockDelta(o, "S4b", lock0);
     }
 
+    // ---------- C 订单状态流转时间线（B3 新增，record-only）----------
+
+    /** 三位组合：合法 5 个在前、伪造 3 个在后（伪造组合正是时间线要如实记下的前态）。 */
+    static final String[] C_BITS = {"000", "100", "110", "111", "101", "010", "001", "011"};
+
+    /**
+     * 排空窗口。⚠️ 必须远大于本场景 burst 的墙钟（7 次 burst × 20 + 8 次下单 ≈ 百毫秒量级），
+     * 这是 B1 的教训：窗口与 burst 墙钟同量级时，「还没写完」与「写丢了」分不开。
+     * 达到期望行数即提前返回，故它不是固定等待。
+     */
+    static final long C_DRAIN_TIMEOUT_MS = 10_000;
+
+    /**
+     * 收敛后的静默窗口。两个窗口抓的不是同一类错，故不能只留一个：
+     *   · 收敛（行数到达期望值）抓**漏写的行**；
+     *   · 静默后复读抓**多写的行**（重复投递 / 重复流转 —— 多出来的行只会让行数超过期望值，
+     *     收敛条件 `>=` 已提前满足，不复读就永远看不见）。
+     * 300ms 约为单条 INSERT 的百倍量级，不至于靠运气。
+     */
+    static final long C_QUIESCE_MS = 300;
+
+    /**
+     * C 组：B3 新增的订单状态流转时间线（{@code order_state_transition}）的可核对性 ——
+     * 也就是 C3「时间线视图」的数据源到底可不可信。
+     *
+     * <h2>【两条断言各验什么】</h2>
+     * C-1 落库行数 == 四个端点的 success 之和；C-2 逐单重放时间线，末态必须等于
+     * {@code order} 表的实际三位。前者证「没漏没多」，后者证「顺序与内容自洽、且与权威状态一致」。
+     *
+     * <h2>【为什么期望成功数是先按状态机写死的，不是从响应里读出来的】</h2>
+     * 「行数 == 成功数」这个等式在守卫整体失灵时**两边一起错**、等式照样成立
+     * （20 个并发支付被全放行 ⇒ 20 行、20 个 success）。故每条 burst 的期望成功数先按
+     * 状态机写死、再与响应比：预测先红，等式才有资格当证据。
+     *
+     * <h2>【record-only】</h2>
+     * 两条断言 gate=false，不进退出码。理由与 {@link #guardSoft} 同：时间线表由人工落盘的
+     * {@code mall_management_sql.sql} 追加，DDL 未落盘时本组必然 FAIL —— 那是「没跑成」，
+     * 不是「跑出来有问题」。但 verdict 照落 PASS/FAIL（不落 RECORD_ONLY）：若也落 RECORD_ONLY，
+     * 就分不出「数据对」与「压根没读成」了 —— 而 C3 恰恰需要知道前者。
+     */
+    static void c(Opt o) throws InterruptedException {
+        String lock0 = lockCounters(o);
+        Ass a1 = ass("C-1", "时间线行数 == 四端点 success 之和（各端点 success 另与状态机预测值比对）", false);
+        Ass a2 = ass("C-2", "时间线可重放：首行 from=NONE、逐行首尾相接、末行 to == order 表现值", false);
+
+        final String pre = ns() + "-C";
+        final String like = pre + "%";
+        final String countSql =
+                "SELECT COUNT(*) FROM mall_management_sql.order_state_transition WHERE OrderId LIKE ?";
+
+        // 基线取增量：--keep-data 且复用 --run-id 时上一次运行的行还在库里，
+        // 直接比绝对值会把上轮的残留算成这轮写的。
+        int base = jdbcCount(o, countSql, like);
+        if (base < 0) {
+            settle(a1, false, "时间线表不可读（DDL 未落盘？）—— 见上方 [JDBC] 行");
+            settle(a2, false, "同上：表都不存在，重放无从谈起");
+            rec("C", "tableReadable", false);
+            System.out.println("[C] order_state_transition 不可读，C 组跳过（record-only，不影响退出码）");
+            return;
+        }
+        rec("C", "tableReadable", true);
+
+        // ---- 1) 八个三位组合各出生一单 ----
+        // 伪造的 3 个组合也造出来：时间线要能如实记下「从非法态来」，那是 TD-17 唯一入口的观测面。
+        int addOk = 0;
+        Map<String, String> idOfBits = new LinkedHashMap<>();
+        for (String bits : C_BITS) {
+            String id = pre + bits;
+            idOfBits.put(bits, id);
+            Resp r = send(HTTP, o.baseUrl + "/mysqlGoods/orderAdd",
+                    orderForm(id, bits.charAt(0) - '0', bits.charAt(1) - '0', bits.charAt(2) - '0'));
+            if (r.successTrue()) {
+                addOk++;
+            }
+        }
+
+        // ---- 2) 七条 burst：一条三连链、一条伪造态转移、三次必被守卫拒 ----
+        String chain = idOfBits.get("000");    // CREATED → PAID → SHIPPED → COMPLETED（同单三连）
+        String forged = idOfBits.get("010");   // 伪造态 ILLEGAL_DELIVERED_UNPAID → PAY → SHIPPED
+        String paid = idOfBits.get("100");     // 已付款：PAY 必被拒
+        String pr = idOfBits.get("101");       // 已收货：DELIVER 与 RECEIVE 必被拒
+
+        int chainPay = burstSuccess(o, "C-pay", "/mysqlGoods/orderPayIfUp", chain);
+        int chainDly = burstSuccess(o, "C-dly", "/mysqlGoods/orderDeliveryIfUp", chain);
+        int chainRcv = burstSuccess(o, "C-rcv", "/mysqlGoods/orderReceiveIfUp", chain);
+        int forgedPay = burstSuccess(o, "C-forgedPay", "/mysqlGoods/orderPayIfUp", forged);
+        int paidAgain = burstSuccess(o, "C-paidAgain", "/mysqlGoods/orderPayIfUp", paid);
+        int prDly = burstSuccess(o, "C-prDly", "/mysqlGoods/orderDeliveryIfUp", pr);
+        int prRcv = burstSuccess(o, "C-prRcv", "/mysqlGoods/orderReceiveIfUp", pr);
+
+        int payOk = chainPay + forgedPay;
+        int dlyOk = chainDly;
+        int rcvOk = chainRcv;
+        boolean predicted = addOk == C_BITS.length
+                && chainPay == 1 && chainDly == 1 && chainRcv == 1 && forgedPay == 1
+                && paidAgain == 0 && prDly == 0 && prRcv == 0;
+        int expectedNew = addOk + payOk + dlyOk + rcvOk;
+
+        // ---- 3) 排空：有界轮询等收敛，再静默窗口复读 ----
+        int converged = waitForRows(o, like, base + expectedNew);
+        Thread.sleep(C_QUIESCE_MS);
+        int delta = jdbcCount(o, countSql, like) - base;
+
+        // 被拒的两次 burst 必须一行都不写：拒绝不是转移，时间线里没有它的位置。
+        // 两次 burst 各 20 条，只要混进去一条，这两单的行数就会 > 1（出生那行恒为 1）。
+        int paidRows = jdbcCount(o, countSql, paid);
+        int prRows = jdbcCount(o, countSql, pr);
+
+        boolean a1ok = predicted && delta == expectedNew && paidRows == 1 && prRows == 1;
+        settle(a1, a1ok, "add=" + addOk + "/8 pay=" + payOk + "(预测 2) dly=" + dlyOk + "(1) rcv=" + rcvOk
+                + "(1) 伪造态 pay=" + forgedPay + "(1) 被拒三次=" + paidAgain + "/" + prDly + "/" + prRcv
+                + "(0/0/0) 时间线增量=" + delta + "/" + expectedNew
+                + " 被拒单行数=" + paidRows + "/" + prRows + "(1/1) 收敛读数=" + converged);
+        if (!a1ok) {
+            // 只在**对不上**时读进程内指标：运行器的证据链是「接口响应 + 数据库」两层，
+            // 都是权威状态；计数器只在权威状态对不上时才有资格当旁证。
+            // 正常路径上「async.rejected==0」其实由 C-1 蕴含（丢一条任务必使行数 < 成功数），
+            // 故不单列一条断言 —— 可派生的值不重复取（同埋点规范第 6 条）。
+            dumpStateMetrics(o);
+        }
+
+        // ---- 4) 逐单重放 ----
+        // 排序键是 (OccurredAt, Id)：OccurredAt 在**锁的临界区内**取，同单的转移被锁串行化
+        // ⇒ 它才是发生顺序。Id 在 INSERT 时才由自增分配，而落库是 4 条线程并发做的 ——
+        // 同单两次转移的 INSERT 理论上可以倒序落库，故 Id **单排**不足以为序，只作破平。
+        Map<String, int[]> bitsOf = new LinkedHashMap<>();
+        for (Object[] r : rowsOrEmpty(o,
+                "SELECT OrderId, PayIf, DeliveryIf, ReceiveIf FROM mall_management_sql.`order` "
+              + "WHERE OrderId LIKE ? ORDER BY OrderId", like)) {
+            bitsOf.put(str(r[0]), new int[]{
+                    ((Number) r[1]).intValue(), ((Number) r[2]).intValue(), ((Number) r[3]).intValue()});
+        }
+        Map<String, List<Object[]>> tlOf = new LinkedHashMap<>();
+        for (Object[] r : rowsOrEmpty(o,
+                "SELECT OrderId, FromState, ToState, Id FROM mall_management_sql.order_state_transition "
+              + "WHERE OrderId LIKE ? ORDER BY OrderId, OccurredAt, Id", like)) {
+            tlOf.computeIfAbsent(str(r[0]), x -> new ArrayList<>()).add(r);
+        }
+
+        CReplay rp = replay(bitsOf, tlOf);
+
+        settle(a2, rp.clean(), "重放单数=" + rp.checked + " 无时间线的单=" + rp.missing
+                + " 首行非 NONE=" + rp.firstNotNone + " 链断=" + rp.chainBroken
+                + " 末态不符=" + rp.lastMismatch
+                + (rp.example.isEmpty() ? "" : "；例：" + rp.example)
+                + "；Id 序与 OccurredAt 序不一致的单=" + rp.idOrderDiffers
+                + "（此数是为让上面那条排序判断有实测依据，不靠推断）");
+
+        System.out.println("[C] 时间线增量 " + delta + " 行（期望 " + expectedNew + "）"
+                + " 重放 " + rp.checked + " 单：无时间线=" + rp.missing + " 链断=" + rp.chainBroken
+                + " 末态不符=" + rp.lastMismatch + " Id 序异常单=" + rp.idOrderDiffers);
+        rec("C", "addOk", addOk);
+        rec("C", "payOk", payOk);
+        rec("C", "deliveryOk", dlyOk);
+        rec("C", "receiveOk", rcvOk);
+        rec("C", "rejectedTransitions", paidAgain + prDly + prRcv);
+        rec("C", "timelineRowsDelta", delta);
+        rec("C", "timelineRowsExpected", expectedNew);
+        rec("C", "convergedRows", converged);
+        rec("C", "ordersReplayed", rp.checked);
+        rec("C", "ordersWithoutTimeline", rp.missing);
+        rec("C", "chainBreaks", rp.chainBroken);
+        rec("C", "lastStateMismatches", rp.lastMismatch);
+        rec("C", "idOrderDiffersFromOccurredAt", rp.idOrderDiffers);
+        rec("C", "recordOnly", true);
+        lockDelta(o, "C", lock0);
+    }
+
+    /** 逐单重放的结果。**分开计数**而不是一个 boolean：每一项对应一类不同的坏法，混成一个数就分不出坏在哪。 */
+    static final class CReplay {
+        int checked;
+        int missing;
+        int firstNotNone;
+        int chainBroken;
+        int lastMismatch;
+        int idOrderDiffers;
+        String example = "";
+
+        /** `checked > 0` 也在判据里：一单都没读到（查询失败）不能被当成「没有坏单」。 */
+        boolean clean() {
+            return checked > 0 && missing == 0 && firstNotNone == 0 && chainBroken == 0 && lastMismatch == 0;
+        }
+    }
+
+    /**
+     * C-2 的**全部**判断都在这里：首行必须 NONE（出生占位），相邻两行必须首尾相接，
+     * 末行必须等于按三位**独立算出**的状态名。
+     *
+     * <p>抽成静态方法不是为了复用，是为了它能被直接驱动 —— 本场景其余部分都是 I/O
+     * （起后端、连库），只有这一段是纯判断，而它恰好是 C-2 的全部内容。
+     * 抽出来才能用假表做突变对照（见开发期探针），不必等 CI。
+     *
+     * <p>入参行格式是本方法的契约（与 {@link #c} 里的两条 SELECT 列序一致）：
+     * {@code bitsOf} 的值是 {@code [PayIf, DeliveryIf, ReceiveIf]}；
+     * {@code tlOf} 的行是 {@code [OrderId, FromState, ToState, Id]}，且**已按 (OccurredAt, Id) 排好序**
+     * —— 排序由 SQL 负责（见 {@link #c} 里那段排序键的说明），本方法不再排。
+     */
+    static CReplay replay(Map<String, int[]> bitsOf, Map<String, List<Object[]>> tlOf) {
+        CReplay out = new CReplay();
+        for (Map.Entry<String, int[]> e : bitsOf.entrySet()) {
+            String id = e.getKey();
+            int[] b = e.getValue();
+            List<Object[]> tl = tlOf.get(id);
+            out.checked++;
+            if (tl == null || tl.isEmpty()) {
+                out.missing++;
+                continue;
+            }
+            if (!"NONE".equals(str(tl.get(0)[1]))) {
+                out.firstNotNone++;
+            }
+            long prevId = Long.MIN_VALUE;
+            boolean ascending = true;
+            for (int i = 0; i < tl.size(); i++) {
+                long rid = ((Number) tl.get(i)[3]).longValue();
+                if (rid < prevId) {
+                    ascending = false;
+                }
+                prevId = rid;
+                if (i > 0 && !str(tl.get(i)[1]).equals(str(tl.get(i - 1)[2]))) {
+                    out.chainBroken++;
+                }
+            }
+            if (!ascending) {
+                out.idOrderDiffers++;
+            }
+            String wantLast = stateName(b[0], b[1], b[2]);
+            String gotLast = str(tl.get(tl.size() - 1)[2]);
+            if (!wantLast.equals(gotLast)) {
+                out.lastMismatch++;
+                if (out.example.isEmpty()) {
+                    out.example = id + "：时间线末态=" + gotLast + "，实际三位=" + b[0] + b[1] + b[2]
+                            + " → 独立算得 " + wantLast;
+                }
+            }
+        }
+        return out;
+    }
+
+    /** 对单个 orderId 打 20 并发，返回 success:true 的条数。 */
+    static int burstSuccess(Opt o, String tag, String path, String orderId) throws InterruptedException {
+        List<Call> cs = burst(20, i -> call(tag, send(HTTP, o.baseUrl + path, form("orderId", orderId))));
+        return countSuccess(cs);
+    }
+
+    /**
+     * 排空判据：有界轮询**等行数收敛到期望值**，不睡一个猜出来的时长。
+     * 返回最后一次读数（未收敛时它 < want，调用方的等值断言据此判红）。
+     */
+    static int waitForRows(Opt o, String like, int want) {
+        String sql = "SELECT COUNT(*) FROM mall_management_sql.order_state_transition WHERE OrderId LIKE ?";
+        long t0 = System.currentTimeMillis();
+        int polls = 0;
+        int got = -1;
+        while (System.currentTimeMillis() - t0 < C_DRAIN_TIMEOUT_MS) {
+            got = jdbcCount(o, sql, like);
+            polls++;
+            if (got >= want) {
+                break;
+            }
+            try {
+                Thread.sleep(50);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                break;
+            }
+        }
+        rec("C", "drainPolls", polls);
+        rec("C", "drainElapsedMs", System.currentTimeMillis() - t0);
+        rec("C", "drainTimeoutMs", C_DRAIN_TIMEOUT_MS);
+        return got;
+    }
+
+    /**
+     * 三位 → 状态名的**独立副本**（从 {@code OrderState} 枚举抄来）。
+     * 刻意不共享代码：运行器与应用分属两个编译单元、不共享类路径，而这里要证的正是
+     * 「应用写进时间线的名字，与我们独立算出的名字一致」—— 共用同一份映射就成了自证。
+     * 应用里改了枚举名，这里会红，那是有意的提醒。
+     */
+    static String stateName(int pay, int dly, int rcv) {
+        if (pay == 0 && dly == 0 && rcv == 0) {
+            return "CREATED";
+        }
+        if (pay == 1 && dly == 0 && rcv == 0) {
+            return "PAID";
+        }
+        if (pay == 1 && dly == 1 && rcv == 0) {
+            return "SHIPPED";
+        }
+        if (pay == 1 && dly == 0 && rcv == 1) {
+            return "RECEIVED_NODELIVERY";
+        }
+        if (pay == 1 && dly == 1 && rcv == 1) {
+            return "COMPLETED";
+        }
+        if (pay == 0 && dly == 1 && rcv == 0) {
+            return "ILLEGAL_DELIVERED_UNPAID";
+        }
+        if (pay == 0 && dly == 0 && rcv == 1) {
+            return "ILLEGAL_RECEIVED_UNPAID";
+        }
+        if (pay == 0 && dly == 1 && rcv == 1) {
+            return "ILLEGAL_DELIVERED_RECEIVED_UNPAID";
+        }
+        return "UNCLASSIFIED";
+    }
+
+    /**
+     * 只在 C-1 对不上时调用的旁证：把 B3 的计数与队列深度原文打出来。
+     * 见 {@link #c} 里「为什么正常路径不读 metrics」。
+     */
+    static void dumpStateMetrics(Opt o) {
+        System.out.println("[C] 时间线对不上，B3 指标原文（旁证，不判定）:");
+        for (String m : new String[]{"mall.order.state.transitions", "mall.order.state.timeline.writes",
+                "mall.order.state.async.rejected", "mall.order.state.async.queue.depth",
+                "mall.order.state.illegal"}) {
+            Resp r = send(HTTP, o.baseUrl + "/actuator/metrics/" + m, null);
+            System.out.println("  HTTP " + r.code + "  " + m + "  → " + trunc(r.body));
+        }
+    }
+
+    static List<Object[]> rowsOrEmpty(Opt o, String sql, Object... args) {
+        List<Object[]> rows = jdbcRows(o, sql, args);
+        return rows == null ? List.of() : rows;
+    }
+
+    static String str(Object v) {
+        return v == null ? "" : String.valueOf(v);
+    }
+
     /** B-2 逐轮明细。报告要的是嵌套数组，塞进 REC 的扁平字符串会丢结构。 */
     static class B2Round {
         int round, login5xx, loginOk, loginExisted, loginUnclear;
@@ -1786,6 +2172,10 @@ public class ConcurrencyRunner {
 
     static {
         CLEANUP_COLS.put("order", new String[]{"OrderId", "CustomerId", "MerchantId"});
+        // B3 新增的时间线表。紧挨 order 放：它是 order 的 1:N 派生行，两者一起读才看得出
+        // 「订单清了、它的转移记录也必须一起清」——否则下一轮的 P4 种子计数虽不受影响
+        // （它只数 order），但按 OrderId LIKE 的核对会读到上一轮的残留。
+        CLEANUP_COLS.put("order_state_transition", new String[]{"OrderId"});
         CLEANUP_COLS.put("goods", new String[]{"MerchantId", "GoodName", "ProductCode", "GoodType"});
         CLEANUP_COLS.put("goodstype", new String[]{"GoodType"});
         CLEANUP_COLS.put("login", new String[]{"UserName", "Id"});
@@ -1994,11 +2384,22 @@ public class ConcurrencyRunner {
                 return false;
             }
 
-            // P3 表数 11（兼 TD-01 校验：ddl-auto=update 启动后未反向改表）
+            // P3 表数（兼 TD-01 校验：ddl-auto=update 启动后未反向改表）
+            // 期望 11 张基线表；若 order_state_transition 已在（B3 新增，追加在
+            // mall_management_sql.sql 末尾、人工落盘），则期望 12。
+            // 刻意不写死 12：运行器与那份 SQL 是两笔改动，谁先落都要能跑。
+            // 但**多出来的那一张必须是它** —— 否则「12」只是「多了一张表」，
+            // 正是 TD-01 要抓的反向改表（ddl-auto=update 反向建出来的表）。
+            // 名字比较套 LOWER()：Linux 上表名区分大小写（lower_case_table_names=0），
+            // 而 information_schema 的排序规则各版本不一致，归一化后两端都成立。
             int tables = scalarInt(c,
                     "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = DATABASE()");
-            boolean p3 = tables == 11;
-            pre.put("P3", (p3 ? "PASS" : "FAIL") + " 表数=" + tables + "（期望 11）");
+            int timelineTable = scalarInt(c,
+                    "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = DATABASE() "
+                  + "AND LOWER(table_name) = 'order_state_transition'");
+            boolean p3 = tables == 11 + timelineTable;
+            pre.put("P3", (p3 ? "PASS" : "FAIL") + " 表数=" + tables + "（期望 11 + " + timelineTable
+                    + "；order_state_transition " + (timelineTable == 1 ? "在" : "不在") + "）");
 
             // P4 种子计数：确认是刚导入过的干净实例，而非被上一轮污染过的库
             String seedSql = "SELECT "
