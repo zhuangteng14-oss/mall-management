@@ -217,3 +217,19 @@ insert  into `user_conversation_read`(`user_id`,`user_type`,`other_id`,`other_ty
 /*!40014 SET FOREIGN_KEY_CHECKS=@OLD_FOREIGN_KEY_CHECKS */;
 /*!40014 SET UNIQUE_CHECKS=@OLD_UNIQUE_CHECKS */;
 /*!40111 SET SQL_NOTES=@OLD_SQL_NOTES */;
+
+-- ============================================================
+-- Migration: B3 订单状态流转时间线  Date: 2026-09-29
+-- ============================================================
+CREATE TABLE IF NOT EXISTS `order_state_transition` (
+  `Id` bigint NOT NULL AUTO_INCREMENT COMMENT '自增主键。⚠️ 不保证同单内与发生顺序一致：落库是 4 条线程并发 INSERT，Id 在 INSERT 时才分配 —— 同单内排序请用 OccurredAt',
+  `OrderId` varchar(40) NOT NULL COMMENT '订单号，对应 `order`.OrderId',
+  `Action` varchar(16) NOT NULL COMMENT '动作 tag：create/pay/deliver/receive（OrderAction.tag()）',
+  `FromState` varchar(40) NOT NULL COMMENT '转移前状态名；出生为 NONE；越界取值写 UNCLASSIFIED',
+  `ToState` varchar(40) NOT NULL COMMENT '转移后状态名',
+  `OccurredAt` datetime(3) NOT NULL COMMENT '转移发生时刻（在订单锁的临界区内取）；同单内按它排序，与 created_at 之差即队列延迟',
+  `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '行落库时刻（agent.md 数据库管理规则 8）',
+  `updated_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '本表 append-only，恒等于 created_at；为规则 8 保留',
+  PRIMARY KEY (`Id`),
+  KEY `idx_order_state_transition_order` (`OrderId`,`OccurredAt`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='订单状态流转时间线（B3 新增；C3 时间线视图的数据源）';
