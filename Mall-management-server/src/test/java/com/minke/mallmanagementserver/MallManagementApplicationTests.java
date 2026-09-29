@@ -1,6 +1,7 @@
 package com.minke.mallmanagementserver;
 
 import com.minke.mallmanagement_controller.MallManagementGoodsController;
+import com.minke.mallmanagement_controller.MallManagementMessage;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
 import org.springframework.aop.framework.Advised;
@@ -48,6 +49,9 @@ class MallManagementApplicationTests {
 
     @Autowired
     private MallManagementGoodsController goodsController;
+
+    @Autowired
+    private MallManagementMessage messageController;
 
     /**
      * 全上下文启动冒烟。
@@ -112,6 +116,26 @@ class MallManagementApplicationTests {
                         + " advisors = " + describeAdvisors());
         assertFalse(goodsController instanceof Advised,
                 "MallManagementGoodsController 实现了 Advised —— 它是个代理。advisors = " + describeAdvisors());
+    }
+
+    /**
+     * CGLIB 防回归（{@link #goodsControllerIsNotAopProxied()} 的孪生）：{@code MallManagementMessage}
+     * 也不应被代理。
+     *
+     * <p>背景（2026-09-29）：friendSelect / selectFriend 上缓存时，两个 {@code @Cacheable} 与
+     * {@code evictPair} 的 {@code @Caching} **全部落在 {@code FriendCacheService}**，Controller 侧只加
+     * 三行「调 evictPair()」的显式调用 ⇒ 本 bean 保持无代理。这条断言把这个状态钉住。
+     *
+     * <p>⚠️ 与 goods 那条同一成因，也同样**必须**在完整上下文里查：{@code @WebMvcTest} 切片不导入
+     * {@code ProxyCachingConfiguration} ⇒ 切片里有没有注解都是 false（假阴性）。
+     */
+    @Test
+    void messageControllerIsNotAopProxied() {
+        assertFalse(AopUtils.isAopProxy(messageController),
+                "MallManagementMessage 被代理了 —— 检查是否有人把缓存注解挂回了 Controller。"
+                        + " advisors = " + describeAdvisors());
+        assertFalse(messageController instanceof Advised,
+                "MallManagementMessage 实现了 Advised —— 它是个代理。advisors = " + describeAdvisors());
     }
 
     /** 失败信息用：把 advisor 链打出来，便于一眼看出是不是 CacheInterceptor。 */

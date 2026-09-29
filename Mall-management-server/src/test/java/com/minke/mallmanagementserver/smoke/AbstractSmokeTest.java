@@ -1,5 +1,6 @@
 package com.minke.mallmanagementserver.smoke;
 
+import com.minke.mallmanagement_service.FriendCacheService;
 import com.minke.mallmanagement_service.GoodsCacheService;
 import com.minke.mallmanagement_service.GoodsTypeCacheService;
 import com.minke.mallmanagement_service.UserCacheService;
@@ -76,6 +77,23 @@ public abstract class AbstractSmokeTest {
      */
     @MockitoBean
     protected UserCacheService userCacheService;
+
+    /**
+     * 同上一条的同一类问题，第四次遇到：{@code MallManagementMessage}
+     * （friendSelect / selectFriend）又 {@code @Autowired} 了一个 {@code @Service}
+     * （FriendCacheService）。
+     *
+     * <p>2026-09-29 补：friendSelect / selectFriend 上缓存时引入。漏掉它同样会在
+     * <b>上下文加载期</b>就失败（{@code No qualifying bean of type ...
+     * FriendCacheService}），且失败的是**全部 smoke 用例**，而不是只失败与好友相关的
+     * 那几个 —— 因为 {@code @WebMvcTest} 无参会加载全部 3 个 Controller，任何一个的
+     * 依赖缺失都会拖垮共享的上下文。
+     *
+     * <p>默认替身返回 null（=「没有好友/没有申请」的替身，实际返回 null 而非空列表）。
+     * 本基类的 3 个子类都不调用 /message/friendSelect 或 /message/selectFriend，故无需 stub。
+     */
+    @MockitoBean
+    protected FriendCacheService friendCacheService;
 
     /**
      * 预留的鉴权口子。将来接入认证后，在此返回需要附加的请求头
