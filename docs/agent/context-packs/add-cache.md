@@ -1,5 +1,12 @@
 # context-pack: add-cache
 
+> ⚠️ **本文已作废（2026-09-27）**：B1 方案已由
+> `cache-layer.md` 取代。本文所述「先做 Caffeine、
+> 多实例才上 Redis」与 B1 裁决的两级缓存
+> （Caffeine + Redis 同时）冲突。
+> 保留本文仅为历史上下文，**不要按本文实施**。
+> 权威方案见 `cache-layer.md`。
+
 ## 任务
 
 引入缓存层（从零开始）

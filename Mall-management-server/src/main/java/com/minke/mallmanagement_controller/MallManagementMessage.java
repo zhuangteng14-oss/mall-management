@@ -1,5 +1,7 @@
 package com.minke.mallmanagement_controller;
 
+import com.minke.mallmanagement_service.FriendCacheService;
+import com.minke.mallmanagement_service.UserCacheService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.web.bind.annotation.*;
@@ -16,6 +18,14 @@ public class MallManagementMessage {
 
     @Autowired
     private JdbcTemplate MessagejdbcTemplate;
+
+    @Autowired
+    private UserCacheService userCacheService;
+
+    // 好友两族（friendList / friendRequests）的缓存承载层。缓存注解全在它身上 ⇒
+    // **本 Controller 不持有任何缓存注解、不被代理**（有防回归测试断言，同 goods 那套）。
+    @Autowired
+    private FriendCacheService friendCacheService;
 
     // ===================== 消息相关接口（基于会话表） =====================
     @PostMapping("/conversations")
@@ -155,36 +165,43 @@ public class MallManagementMessage {
     }
     // ===================== 好友相关接口 =====================
     //搜索好友时显示数据
+    // 读路径（SELECT + 取首行）搬到 UserCacheService.publicInfo()，本方法只保留路由 + 响应组装。
+    // 【本方法在 userSelect 上缓存这件事里的角色】只组装响应，**不挂任何缓存注解** ——
+    //   · Service 返回 null（业务 0 行）→ 本方法构造 marker ⇒ 该 null 已被缓存（负缓存，防 ID 枚举穿透）
+    //   · Service 抛异常（技术失败）→ 本方法同样构造 marker ⇒ 但**异常不进缓存**（@Cacheable 遇异常不写）
+    // 两条路径的响应体与引入 UserCacheService 之前**逐字段相同**（零契约变更）。
+    // ⚠️ 代价：技术异常与「查无此人」在响应**文案**上仍不可区分（既有瑕疵，见 §11，本笔不动）。
+    // ⚠️ 缓存体是 Service 返回的裸行 Map，形状耦合**具体列名**（§10 边界第 4 条形态②）。
     @PostMapping("/userSelect")
     public Map<String, Object> userSelect(@RequestParam("userId") String userId) {
         Map<String, Object> result = new HashMap<>();
-        String sql = "SELECT customerid, merchantid, username, usertype, gender FROM user WHERE customerid = ? OR merchantid = ?";
+        Map<String, Object> user;
         try {
-            List<Map<String, Object>> userList = MessagejdbcTemplate.queryForList(sql, userId, userId);
-            if (!userList.isEmpty()) {
-                Map<String, Object> user = userList.get(0);
-                String usertype = (String) user.get("usertype");
-                String id;
-                if ("客户".equals(usertype)) {           // 改为中文
-                    id = (String) user.get("customerid");
-                } else if ("商家".equals(usertype)) {     // 改为中文
-                    id = (String) user.get("merchantid");
-                } else {
-                    id = (String) user.get("customerid");
-                    if (id == null) id = (String) user.get("merchantid");
-                }
-                Map<String, Object> resultUser = new HashMap<>();
-                resultUser.put("id", id);
-                resultUser.put("username", user.get("username"));
-                resultUser.put("usertype", usertype);
-                resultUser.put("gender", user.get("gender"));
-                resultUser.put("image", null);   // 无 image 字段，设为 null
-                result.put("success", true);
-                result.put("user", resultUser);
-                return result;
-            }
+            user = userCacheService.publicInfo(userId);
         } catch (Exception e) {
             e.printStackTrace();
+            user = null;
+        }
+        if (user != null) {
+            String usertype = (String) user.get("usertype");
+            String id;
+            if ("客户".equals(usertype)) {           // 改为中文
+                id = (String) user.get("customerid");
+            } else if ("商家".equals(usertype)) {     // 改为中文
+                id = (String) user.get("merchantid");
+            } else {
+                id = (String) user.get("customerid");
+                if (id == null) id = (String) user.get("merchantid");
+            }
+            Map<String, Object> resultUser = new HashMap<>();
+            resultUser.put("id", id);
+            resultUser.put("username", user.get("username"));
+            resultUser.put("usertype", usertype);
+            resultUser.put("gender", user.get("gender"));
+            resultUser.put("image", null);   // 无 image 字段，设为 null
+            result.put("success", true);
+            result.put("user", resultUser);
+            return result;
         }
         result.put("success", false);
         result.put("msg", "用户不存在");
@@ -228,24 +245,23 @@ public class MallManagementMessage {
             result.put("success", false);
             result.put("msg", e.getMessage());
         }
+        // ⚠️ 本方法的唯一出口 —— 三个写接口共用同一模式（最完整的注释在 friendUp 的唯一出口上方），
+        //    若新增 return 请确认：① 该分支不改库，或 ② 在该分支前也调 evictPair()。
+        // 本方法只有 1 条写语句、在 try 内、catch 吞异常（该语句抛错时未改库）⇒ 唯一出口覆盖
+        // 100% 的可能改库路径。⚠️ 上面**两处**提前 return（`customerId.equals(friendId)` 与
+        // 「已存在」分支）都只跑 SELECT、未改库 ⇒ 不必清。
+        friendCacheService.evictPair(customerId, friendId);
         return result;
     }
 
     //查询好友表内对应申请人的待处理信息
+    // 读路径搬到 FriendCacheService.listRequests()，本方法只保留路由 + 响应组装（同 friendSelect 那套）。
+    // 不挂缓存注解；0 行同样是 `{success:true, list:[]}`（**成功空值**，不上负缓存）。
     @PostMapping("/selectFriend")
     public Map<String, Object> selectFriend(@RequestParam("friendId") String friendId) {
         Map<String, Object> result = new HashMap<>();
-        String sql = "SELECT customerid FROM friend WHERE friendid = ? AND if_friend = 0";
         try {
-            List<Map<String, Object>> rows = MessagejdbcTemplate.queryForList(sql, friendId);
-            List<Map<String, Object>> applicants = new ArrayList<>();
-            for (Map<String, Object> row : rows) {
-                String customerId = (String) row.get("customerid");
-                Map<String, Object> userInfo = getUserInfoById(customerId);
-                if (userInfo != null) {
-                    applicants.add(userInfo);
-                }
-            }
+            List<Map<String, Object>> applicants = friendCacheService.listRequests(friendId);
             result.put("success", true);
             result.put("list", applicants);
         } catch (Exception e) {
@@ -276,6 +292,15 @@ public class MallManagementMessage {
             result.put("success", false);
             result.put("msg", e.getMessage());
         }
+        // ⚠️ 本方法的唯一出口 —— **无条件**放在这里，**不能**塞进上面的 if (updated > 0) 分支里。
+        //    理由：本方法**没有 @Transactional**，却有**两条**写语句。若 UPDATE 提交后 INSERT 抛错
+        //    ⇒ 走 catch ⇒ 返回 {success:false}，**但库已经被改了**（(customerId, friendId) 已成
+        //    if_friend = 1）⇒ 把清缓存挂在「成功分支」上会让这条路径漏清。
+        //    ⚠️ 这与 UserCacheService.evictPublic() 的论证**方向相反**：那里靠「loginAdd 是
+        //    @Transactional、异常路径回滚 ⇒ 不改库」证明唯一出口覆盖 100%；这里是「无事务 ⇒
+        //    异常路径**可能已经改库**」⇒ 出口必须无条件覆盖。
+        //    三个写接口共用同一模式，若新增 return 请确认：① 该分支不改库，或 ② 在该分支前也调它。
+        friendCacheService.evictPair(customerId, friendId);
         return result;
     }
 
@@ -298,25 +323,28 @@ public class MallManagementMessage {
             result.put("success", false);
             result.put("msg", e.getMessage());
         }
+        // ⚠️ 本方法的唯一出口 —— 三个写接口共用同一模式（最完整的注释在 friendUp 的唯一出口上方），
+        //    若新增 return 请确认：① 该分支不改库，或 ② 在该分支前也调 evictPair()。
+        // 本方法只有 1 条写语句、在 try 内、catch 吞异常（该语句抛错时未改库）⇒ 唯一出口覆盖 100%。
+        friendCacheService.evictPair(customerId, friendId);
         return result;
     }
 
     //打印好友界面的好友信息
+    // 读路径（外层 SELECT + 逐行 enrich）搬到 FriendCacheService.listFriends()，本方法只保留路由 + 响应组装。
+    // 【本方法在 friendSelect 上缓存这件事里的角色】只组装响应，**不挂任何缓存注解** ——
+    //   · 正常路径：Service 返回列表（**含空列表 `[]`**）⇒ 该列表已被缓存（cacheName = friendList）
+    //   · 技术异常：Service **上抛** ⇒ 缓存不写入 ⇒ 由下面**既有**的 catch 构造 marker
+    // ⚠️ 与 userSelect 的差异：这里 0 行返回的是 `{success:true, list:[]}`（**成功空值**），
+    //   不是失败 marker ⇒ **不需要**（也不应该）翻译成 null 去套负缓存。空列表照样被缓存 ⇒
+    //   同 key 再读不再打 DB，防穿透在「重复打同一键」这一层已经成立。
+    // ⚠️ 缓存体是裸 List<Map>，形状耦合**具体列名**（§10 边界第 4 条形态②）。
     @PostMapping("/friendSelect")
     public Map<String, Object> friendSelect(@RequestParam("customerId") String customerId) {
         Map<String, Object> result = new HashMap<>();
-        // 增加 AND friendid != ? 防止返回自己
-        String sql = "SELECT friendid FROM friend WHERE customerid = ? AND if_friend = 1 AND friendid != ?";
+        // 增加 AND friendid != ? 防止返回自己（该条件在 Service 的 SQL 里，逐字未动）
         try {
-            List<Map<String, Object>> rows = MessagejdbcTemplate.queryForList(sql, customerId, customerId);
-            List<Map<String, Object>> friendList = new ArrayList<>();
-            for (Map<String, Object> row : rows) {
-                String friendId = (String) row.get("friendid");
-                Map<String, Object> userInfo = getUserInfoById(friendId);
-                if (userInfo != null) {
-                    friendList.add(userInfo);
-                }
-            }
+            List<Map<String, Object>> friendList = friendCacheService.listFriends(customerId);
             result.put("success", true);
             result.put("list", friendList);
         } catch (Exception e) {

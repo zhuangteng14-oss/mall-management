@@ -162,8 +162,13 @@ jobs:
           # 不在 CI「顺手修好」：改了它，CI 测的环境就与 A3 记录的环境不是同一个。
           docker exec -i ${{ job.services.mysql.id }} mysql -uroot -p123456 -e "CREATE USER IF NOT EXISTS 'test'@'%' IDENTIFIED BY 'test123'; GRANT ALL ON *.* TO 'test'@'%'; FLUSH PRIVILEGES;"
 
-      # 先 package 再起 jar：一次构建同时满足两件事 —— ① ~/.m2 里有了
-      # mysql-connector-java 8.0.33，run.sh 的 D3 定稿路径直接命中（回退分支不会走到）；
+      # 先 package 再起 jar：一次构建同时满足两件事 —— ① pom 声明的是
+      # mysql:mysql-connector-java:8.0.33，但该 artifact 是 **relocation pom**，
+      # 实际 jar 落在 com.mysql:mysql-connector-j:8.0.33 —— 而 run.sh 的 D3 定稿路径
+      # 写的就是这条新坐标，故直接命中（回退分支不会走到）。
+      # ⚠️ 命中的理由是 relocation，**不是「名字相同」**：pom 里那个名字下本地只有
+      # .pom 没有 jar。将来 pom 升版本时，run.sh 的 D3 路径必须同步改，否则会静默
+      # 落到回退分支（2026-09-28 订正）。
       # ② 后台化的是 java 而不是 Maven 包装脚本，进程模型简单。
       - name: 构建后端
         working-directory: Mall-management-server

@@ -1,16 +1,23 @@
 package com.minke.mallmanagementserver;
 
+import com.minke.mallmanagement_controller.MallManagementGoodsController;
+import com.minke.mallmanagement_controller.MallManagementMessage;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
+import org.springframework.aop.framework.Advised;
+import org.springframework.aop.support.AopUtils;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.JdbcTemplate;
 
+import java.util.Arrays;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 
 /**
- * 全上下文启动冒烟 + 数据库可达性。
+ * 全上下文启动冒烟 + 数据库可达性 + Controller 缓存代理状态。
  *
  * <p>两个测试都由环境变量开关控制：仅当 {@code A3_ENABLED=true} 时执行，其余情况
  * （含 {@code backend} job 的全量 {@code mvn test}）自动跳过 —— 跳过不是失败，故
@@ -39,6 +46,12 @@ class MallManagementApplicationTests {
 
     @Autowired
     private JdbcTemplate jdbcTemplate;
+
+    @Autowired
+    private MallManagementGoodsController goodsController;
+
+    @Autowired
+    private MallManagementMessage messageController;
 
     /**
      * 全上下文启动冒烟。
@@ -73,6 +86,64 @@ class MallManagementApplicationTests {
         Integer one = jdbcTemplate.queryForObject("SELECT 1", Integer.class);
         assertNotNull(one, "SELECT 1 返回 null");
         assertEquals(1, one.intValue());
+    }
+
+    /**
+     * CGLIB 防回归：goods 的三个写接口撤掉 {@code @Caching} 后，Controller <b>不应</b>再被代理。
+     *
+     * <p>背景（2026-09-28，D 笔）：此前四个 cacheName 的 evict 挂在 Controller 的三个写方法上
+     * ⇒ 本 bean 被 CGLIB 代理；evict 收敛到 {@code GoodsCacheService.evictByMerchant()} 后
+     * Controller 恢复无代理。这条断言把这个状态<b>钉住</b>：将来有人再往 Controller 上挂缓存
+     * 注解，本测试会红。
+     *
+     * <p>判据用两条，而不是「类名含不含 {@code $$SpringCGLIB$$}」：{@code isAopProxy} 只回答
+     * 「被代理了」；真出事时失败信息里把 {@code getAdvisors()} 打出来，<b>CacheInterceptor 在
+     * 不在</b>才是「就是缓存注解把它代理了」的直接证据。
+     *
+     * <p>⚠️ 必须在<b>完整上下文</b>里查：{@code @WebMvcTest} 切片不会导入 {@code @EnableCaching}
+     * 带的 {@code ProxyCachingConfiguration} ⇒ 切片里<b>有没有注解都是 false</b>（假阴性）。
+     * 这是本断言留在 {@code @SpringBootTest} 里的原因。
+     *
+     * <p>⚠️ 本方法<b>不依赖数据库</b>（上下文能起即可，同 {@link #contextLoads()}），却因类级
+     * 开关而只在 {@code A3_ENABLED=true} 时执行 —— 这是<b>刻意</b>的：类级开关的一条设计目的
+     * 就是「将来新增方法不会漏」（见类注释），为它把开关下沉到方法级会破坏那条保证。
+     * CI 的实际覆盖不减：concurrency job 设了 {@code A3_ENABLED}，本断言在那里会跑。
+     */
+    @Test
+    void goodsControllerIsNotAopProxied() {
+        assertFalse(AopUtils.isAopProxy(goodsController),
+                "MallManagementGoodsController 被代理了 —— 检查是否有人把缓存注解挂回了 Controller。"
+                        + " advisors = " + describeAdvisors());
+        assertFalse(goodsController instanceof Advised,
+                "MallManagementGoodsController 实现了 Advised —— 它是个代理。advisors = " + describeAdvisors());
+    }
+
+    /**
+     * CGLIB 防回归（{@link #goodsControllerIsNotAopProxied()} 的孪生）：{@code MallManagementMessage}
+     * 也不应被代理。
+     *
+     * <p>背景（2026-09-29）：friendSelect / selectFriend 上缓存时，两个 {@code @Cacheable} 与
+     * {@code evictPair} 的 {@code @Caching} **全部落在 {@code FriendCacheService}**，Controller 侧只加
+     * 三行「调 evictPair()」的显式调用 ⇒ 本 bean 保持无代理。这条断言把这个状态钉住。
+     *
+     * <p>⚠️ 与 goods 那条同一成因，也同样**必须**在完整上下文里查：{@code @WebMvcTest} 切片不导入
+     * {@code ProxyCachingConfiguration} ⇒ 切片里有没有注解都是 false（假阴性）。
+     */
+    @Test
+    void messageControllerIsNotAopProxied() {
+        assertFalse(AopUtils.isAopProxy(messageController),
+                "MallManagementMessage 被代理了 —— 检查是否有人把缓存注解挂回了 Controller。"
+                        + " advisors = " + describeAdvisors());
+        assertFalse(messageController instanceof Advised,
+                "MallManagementMessage 实现了 Advised —— 它是个代理。advisors = " + describeAdvisors());
+    }
+
+    /** 失败信息用：把 advisor 链打出来，便于一眼看出是不是 CacheInterceptor。 */
+    private String describeAdvisors() {
+        if (goodsController instanceof Advised advised) {
+            return Arrays.toString(advised.getAdvisors());
+        }
+        return "（非 Advised）";
     }
 
 }

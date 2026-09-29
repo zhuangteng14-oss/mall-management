@@ -245,3 +245,21 @@
 **收尾状态**：主源 7 个 `.java`、测试源 5 个；全项目 5 用例 = smoke 层 4 个（CI 实跑）+ `contextLoads` 1 个（`@Disabled`）。
 
 > 上句是 **A2 当时的快照**。A3 已改：`@Disabled` 换成 `A3_ENABLED` 环境开关，并新增 `databaseIsReachable()` → 全项目 6 用例（默认 SKIP 2 个）。见上方 TD-10（已关闭）。
+
+### M2 — A3 并发测试（2026-09-20）
+
+| 项 | 交付物 | 证据 |
+|---|---|---|
+| 并发脚本 | `scripts/concurrency/ConcurrencyRunner.java` **2270 行**（单文件、不引新依赖，只用 JDK 内置 `HttpClient` + `ExecutorService` + JDBC）+ `scripts/concurrency/run.sh` **151 行**（两步编译 + 驱动解析，校验 jar major=8） | `333ae1a` … `6465655`（阶段 A–E） |
+| 负载与校验 | **6 个负载段落**（S1 / S2a / S2b / S3 / S4a / S4b —— 与「4 场景」不矛盾，见 pack §场景计数口径澄清）；负载走 HTTP、断言与清理走 JDBC（五张表都没有删除接口）；preflight P0–P7 全 PASS | pack §验收标准、§脚本内置校验 P0–P7 |
+| a3 profile | `application-a3.properties` **57 行** —— 指向独立 MySQL 实例（库名仍为 `mall_management_sql`，TD-13 所迫） | `c37cb8e` |
+| 字符集根治 | 放弃「单文件源码启动」（由启动器就地编译、不采用编译期 `-encoding` → 宿主 `file.encoding=GBK` 使源码中文字面量失真 → 依赖中文响应体的断言**静默落空**）→ 改**两步编译** `javac -encoding UTF-8` + `java -cp <out>`；`charsetSelfCheck()` 每次运行自检，并把 `file.encoding` / 启动方式写进日志与 JSON 报告 | `6ae41d5` |
+| CI job | `.github/workflows/ci.yml` 增至 **256 行**，新增第三个 job `concurrency`（`needs: backend`、service container `mysql:8.4`、job 级 `concurrency` 覆盖 `cancel-in-progress`、`continue-on-error: true`） | `af75b97` |
+| CI 首跑 | **通过——结论见 artifact `a3-concurrency-report`**。**`concurrency` job 仍是观测跑，不是门禁** —— 门禁地位待裁决，本条在裁决前不改 | `ci.yml:252`；pack §CI 集成 |
+| TD 变更 | **登记 TD-14 / TD-15 / TD-16 / TD-17**；**关闭 TD-10**（D1 落地：`@Disabled` → `A3_ENABLED` 环境开关 + 新增 `databaseIsReachable()` 以 `SELECT 1` 强制真连库）；**修正 TD-14 定性**（「120 QPS 不可达」改判为本地环境属性，非索引缺失一因所致） | `6934886` / `1150e89` / `dce2307` / `27d3205` / `99206a5`；`a4225ad` |
+| 文档 | pack **356 行** + worklog **246 行** + `environment.md` **70 行**（均为**落盘时**行数；pack 与 worklog 其后因 TD-14 定性修正增至 368 / 247） | `3137776` / `54fdd35` / `e3a9ada` |
+| 实测缺陷 | B-2 三处 TOCTOU `rounds=5 / reproRounds=5/5`（两次独立实测逐轮数字一致）；A-S2a-1：**20 并发同参 `orderAdd` 插出 20 行**（`5xx=0`）；S4b 本地 `63.0` / `96.2` QPS vs **CI 同档 `119.9` QPS / p50 6.3ms**；TD-14 行数对照 6 行 p50 1ms → 6006 行 51ms → 12006 行 94ms | pack §实测数据；本地报告 `scripts/concurrency/reports/a3-report-*.json` |
+
+**硬性前置**：`scripts/concurrency/run.sh` 可执行位 `100644 → 100755`，Linux runner 必需 —— `d47371a`。
+
+**收尾状态**：A3 全部合入 `main`（`fc4e0fe`，PR #3）；CI 三 job 全绿；`concurrency` job 仍是观测跑（门禁地位待定）。**零业务 Java 改动**（除 D1 那一个测试类）；全项目 6 用例 = smoke 层 4 + `contextLoads` / `databaseIsReachable` 2（默认 SKIP 2 个，同 M1 脚注口径）。

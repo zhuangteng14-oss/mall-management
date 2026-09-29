@@ -35,6 +35,14 @@ LOG_DIR="${A3_LOG_DIR:-$REPO/scripts/concurrency/reports}"
 MVNW="$REPO/Mall-management-server/mvnw"
 POM="$REPO/Mall-management-server/pom.xml"
 
+# DRIVER_FROM 是「驱动从哪来」的说明文字，收尾时打印。**必须先给默认值**：
+# 本脚本 set -u，而它有**三条**取值分支，早先只有两条赋值（见下面的驱动解析段）
+# ⇒ 走 `A3_DRIVER_JAR` 那条时，收尾的 echo 触发 unbound variable，脚本在
+# `exit "$rc"` 之前就死掉 —— 表现是 run.sh 恒以 1 退出，**即使 A3 全部通过**。
+# 这正是本仓最怕的那类「跑完了但退出码不可信」（同族：cache-layer.md §11
+# 「机制已写 ≠ 机制生效」）。修于 2026-09-28；引入点是 6ae41d5（建脚本那一笔）。
+DRIVER_FROM=""
+
 die() {
   echo "run.sh: $*" >&2
   exit 2
@@ -83,6 +91,7 @@ ok_driver() {
 DRIVER="${A3_DRIVER_JAR:-}"
 if [ -n "$DRIVER" ]; then
   ok_driver "$DRIVER" || die "A3_DRIVER_JAR=$DRIVER 不是可用的 mysql-connector 8.x jar"
+  DRIVER_FROM="A3_DRIVER_JAR 环境变量"
 else
   # 首选：D3 定稿的单条路径（不 glob —— glob 会撞上 -sources.jar 与旧版 8.0.28）
   D3="$HOME/.m2/repository/com/mysql/mysql-connector-j/8.0.33/mysql-connector-j-8.0.33.jar"
@@ -100,8 +109,15 @@ else
         -Dmdep.outputFile="$CPFILE" -DincludeScope=runtime ) >&2 \
       || die "dependency:build-classpath 失败（首次需要网络拉取依赖）"
     [ -f "$CPFILE" ] || die "build-classpath 未产出 $CPFILE"
-    # 取那一条驱动；有多条就报错，不静默挑第一条
-    matches="$(tr ':' '\n' < "$CPFILE" | grep -E 'mysql-connector-j(a)?-[0-9]' | grep -v -E -- '-sources\.jar|-javadoc\.jar' || true)"
+    # 取那一条驱动；有多条就报错，不静默挑第一条。
+    # ⚠️ 分隔符必须用 $SEP（第 55-58 行按平台算），**不能写死 ':'**：Maven 的
+    # -Dmdep.outputFile 在 Windows 上按 ';' 分隔。写死 ':' 的后果不是「切不出来」
+    # 而是「切出一段假的」——切点落在盘符那个冒号上，整条 classpath 变成若干片段，
+    # 含驱动的那段尾部粘着 ';C'，ok_driver 的 `[ -f ]` 拒绝它，而 die 打印的却是
+    # 一截被截断的路径，读起来像「jar 有问题」。Linux 上两种写法等价（都 ':'），
+    # 故该缺陷只在 Windows 显现（修于 2026-09-28）。
+    # 本行所在分支此前从未被真跑过，本次修复同时是它的首次端到端验证。
+    matches="$(tr "$SEP" '\n' < "$CPFILE" | grep -E 'mysql-connector-j(a)?-[0-9]' | grep -v -E -- '-sources\.jar|-javadoc\.jar' || true)"
     cnt="$(printf '%s\n' "$matches" | grep -c . || true)"
     [ "$cnt" -eq 1 ] || die "回退解析出 $cnt 条 mysql 驱动（要求恰好 1 条）：$(printf '%s ' $matches)"
     ok_driver "$matches" || die "回退解析到的驱动不合格: $matches"

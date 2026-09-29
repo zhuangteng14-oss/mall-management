@@ -1,5 +1,7 @@
 package com.minke.mallmanagement_controller;
 
+import com.minke.mallmanagement_service.GoodsCacheService;
+import com.minke.mallmanagement_service.GoodsTypeCacheService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -23,6 +25,12 @@ public class MallManagementGoodsController {
     @Autowired
     private JdbcTemplate GoodjdbcTemplate;
 
+    @Autowired
+    private GoodsTypeCacheService goodsTypeCacheService;
+
+    @Autowired
+    private GoodsCacheService goodsCacheService;
+
     @Value("${app.upload-dir:${user.dir}/src/main/resources/static/img/}")
     private String uploadDir;
 
@@ -33,43 +41,22 @@ public class MallManagementGoodsController {
             @RequestParam(required = false) Integer GoodTypeNew
     ) {
         // GET 请求：查询所有类型
+        // 分支判定权保留在此处 —— 路由与「GET 带 GoodType 参数走写分支」等边角行为均不变。
+        // 缓存注解在 Service 上（@Cacheable 只覆盖 listTypes()，写分支不在其方法体内）。
         if (GoodType == null) {
-            String sql = "SELECT Id, GoodType, GoodTypeNew FROM mall_management_sql.goodstype";
-            List<Map<String, Object>> list = GoodjdbcTemplate.queryForList(sql);
-            Map<String, Object> result = new HashMap<>();
-            result.put("success", true);
-            result.put("list", list);
-            return result;
+            return goodsTypeCacheService.listTypes();
         }
 
         // POST 请求：新增类型
-        try {
-            String checkSql = "SELECT COUNT(*) FROM mall_management_sql.goodstype WHERE GoodType = ?";
-            Integer count = GoodjdbcTemplate.queryForObject(checkSql, Integer.class, GoodType);
-            if (count > 0) {
-                Map<String, Object> result = new HashMap<>();
-                result.put("success", false);
-                result.put("msg", "类型已存在");
-                return result;
-            }
-
-            String insertSql = "INSERT INTO mall_management_sql.goodstype (GoodType, GoodTypeNew) VALUES (?, ?)";
-            GoodjdbcTemplate.update(insertSql, GoodType, GoodTypeNew);
-
-            Map<String, Object> result = new HashMap<>();
-            result.put("success", true);
-            result.put("msg", "新增成功");
-            return result;
-        } catch (Exception e) {
-            e.printStackTrace();
-            Map<String, Object> result = new HashMap<>();
-            result.put("success", false);
-            result.put("msg", "新增失败");
-            return result;
-        }
+        return goodsTypeCacheService.addType(GoodType, GoodTypeNew);
     }
 
     //这是一个接口用于上架商品
+    // ⚠️ 写商品必须清**四个** cacheName（否则首页列表 / 该商家的商品列表 / 型号列表 / 单点价格
+    //    永不更新）。失效面与全部理由已收敛到 GoodsCacheService.evictByMerchant() 的 javadoc
+    //    （D 笔，2026-09-28）：注解一处、理由一处，本方法只负责**在唯一出口前调用它**。
+    // ⚠️ 提前 return 分支（图片为空）**不再清缓存** —— 该路径一行未改库，清它是纯浪费
+    //    （goodsCodes / goodsPrice 的整片清要 SCAN 删）。这是**设计选择，非缺陷**，见 §11。
     @PostMapping("/goodsAdd")
     public Map<String, Object> goodsAdd(
             @RequestParam("MerchantId") String MerchantId,
@@ -153,71 +140,47 @@ public class MallManagementGoodsController {
             result.put("msg", "商品上架失败");
         }
 
+        // ⚠️ 本方法的唯一出口 —— 三个写接口共用同一模式，若新增 return 请确认：
+        //    ① 该分支不改库，或
+        //    ② 在该分支前也调 evictByMerchant()
+        // 现有全部 JDBC 都在 try 内、catch 吞异常 ⇒ 唯一出口覆盖 100% 的可能改库路径。
+        goodsCacheService.evictByMerchant(MerchantId);
         return result;
     }
 
     //这是一个接口（用于显示商家端查看商品页面外部内容）
+    // 方法体搬到 GoodsCacheService.listByMerchant()（逐字搬运，含 SQL / try-catch / 返回结构）。
+    // 本方法只保留路由与委托 —— 无参数分支（只有一个必填 @RequestParam），故不需要像
+    // goodstype 那样在这里保留分支判定。⚠️ 形参名 MerchantId 必须保留：@RequestParam 未写显式名
+    // 依赖它解析，Service 侧 key="#MerchantId" 也依赖同一个形参名（-parameters 已开）。
+    // 缓存：cacheName = goodsByMerchant、key = #MerchantId、sync = true（单飞防击穿）；
+    //      失效面 = goodsAdd / goodsUp / goodsDe 在各自唯一出口前**显式调用**
+    //      GoodsCacheService.evictByMerchant()（D 笔，2026-09-28；注解已搬到该 Service 方法上，
+    //      控制器不再被代理）—— 其中**本 cacheName 那一条按 MerchantId 精确清**。
     @PostMapping("/goodsSelect")
     public Map<String, Object> goodsSelect(
             @RequestParam String MerchantId
     ) {
-        Map<String, Object> result = new HashMap<>();
-        try {
-            String sql = "SELECT * FROM mall_management_sql.goods WHERE MerchantId = ?";
-            List<Map<String, Object>> list = GoodjdbcTemplate.queryForList(sql, MerchantId);
-            result.put("success", true);
-            result.put("list", list);
-        } catch (Exception e) {
-            e.printStackTrace();
-            result.put("success", false);
-            result.put("msg", "查询失败");
-        }
-        return result;
+        return goodsCacheService.listByMerchant(MerchantId);
     }
 
     //这是一个接口（用于返回商品对应的所有信息）
+    // 方法体与缓存注解都搬到 GoodsCacheService.listHome()（逐字搬运，含 SQL / per-row 兜底 /
+    // 异常处理）。本方法只保留路由与委托 —— 原分支结构为空（无参数、无 GET/POST 分支），
+    // 故不需要像 goodstype 那样在这里保留分支判定。
+    // 缓存：cacheName = goodsHome、key = 'all'（全局单键）、sync = true（单飞防击穿）；
+    //      失效面 = goodsAdd / goodsUp / goodsDe 在各自唯一出口前**显式调用**
+    //      GoodsCacheService.evictByMerchant()（D 笔，2026-09-28；注解在 Service 上）。
     @PostMapping("/goodsSelectHome")
     public Map<String, Object> goodsSelectHome() {
-        Map<String, Object> result = new HashMap<>();
-        try {
-            // 1. 先查所有商品
-            String sql = "SELECT * FROM mall_management_sql.goods";
-            List<Map<String, Object>> goodsList = GoodjdbcTemplate.queryForList(sql);
-
-            // 2. 循环根据商品里的 MerchantId 查 login 表的 UserName
-            for (Map<String, Object> goods : goodsList) {
-                // 拿到商品里的商家ID
-                Object merchantIdObj = goods.get("MerchantId");
-
-                try {
-                    // 重点：login 表用 id = ? 匹配！！！
-                    String userSql = "SELECT UserName FROM mall_management_sql.login WHERE id = ?";
-
-                    String userName = GoodjdbcTemplate.queryForObject(
-                            userSql,
-                            new Object[]{merchantIdObj},
-                            String.class
-                    );
-
-                    // 把用户名放进商品数据
-                    goods.put("UserName", userName);
-                } catch (Exception e) {
-                    // 查不到就为空
-                    goods.put("UserName", "");
-                }
-            }
-
-            result.put("success", true);
-            result.put("list", goodsList);
-        } catch (Exception e) {
-            e.printStackTrace();
-            result.put("success", false);
-            result.put("msg", "查询失败");
-        }
-        return result;
+        return goodsCacheService.listHome();
     }
 
     // 这是一个接口（用于下架商品）
+    // ⚠️ 四条 evict 的理由同 goodsAdd，已收敛到 GoodsCacheService.evictByMerchant() 的 javadoc
+    //    （D 笔，2026-09-28）。本条只需知道一件事：**本方法单看是能精确清的** —— 它的 WHERE
+    //    恰好就是键的那三段、全在入参；取 allEntries 是为了与 goodsUp（因改名做不到精确）保持
+    //    **同一精度**，免去「哪条是哪种精度」的记忆负担。
     @PostMapping("/goodsDe")
     public Map<String, Object> goodsDe(
             @RequestParam("MerchantId") String MerchantId,
@@ -244,34 +207,39 @@ public class MallManagementGoodsController {
             result.put("success", false);
             result.put("msg", "下架失败");
         }
+        // ⚠️ 本方法的唯一出口 —— 三个写接口共用同一模式，若新增 return 请确认：
+        //    ① 该分支不改库，或
+        //    ② 在该分支前也调 evictByMerchant()
+        // 现有全部 JDBC 都在 try 内、catch 吞异常 ⇒ 唯一出口覆盖 100% 的可能改库路径。
+        goodsCacheService.evictByMerchant(MerchantId);
         return result;
     }
 
     //这是一个接口（用于根据商品的不同型号切换显示对应的价格）
+    // 方法体搬到 GoodsCacheService.priceByTriple()（逐字搬运，含 SQL / queryForMap / try-catch /
+    // 返回结构）。本方法只保留路由与委托 —— 无形参分支。
+    // 缓存：cacheName = goodsPrice、key = #MerchantId + '::' + #GoodName + '::' + #ProductCode
+    //      （**三维复合键**，本项目首个）、sync = true（单飞防击穿）；
+    //      失效面 = goodsAdd / goodsUp / goodsDe **三者，全部 allEntries** —— 理由
+    //      （goodsUp 改 GoodName ⇒ 旧键构造不出，且精确清会呈现「条件性正确」）见
+    //      GoodsCacheService.priceByTriple() 的注释与本文件 goodsAdd 的注释第 1 点。
+    // ⚠️ 形参名必须保留：@RequestParam 与 Service 侧 SpEL 的三段都依赖它们（-parameters 已开，
+    //    javap 该方法的 MethodParameters 可见 MerchantId / GoodName / ProductCode）。
     @PostMapping("/productCodePrice")
     public Map<String, Object> productCodePrice(
             @RequestParam("MerchantId") String MerchantId,
             @RequestParam("GoodName") String GoodName,
             @RequestParam("ProductCode") String ProductCode
     ) {
-        Map<String, Object> result = new HashMap<>();
-        String sql = "SELECT Price, GoodImg FROM mall_management_sql.goods "
-                + "WHERE MerchantId=? AND GoodName=? AND ProductCode=?";
-
-        try {
-            Map<String, Object> map = GoodjdbcTemplate.queryForMap(sql,
-                    MerchantId, GoodName, ProductCode);
-            result.put("success", true);
-            result.put("price", map.get("Price"));
-            result.put("goodImg", map.get("GoodImg")); // 🔥 新增：返回图片
-        } catch (Exception e) {
-            e.printStackTrace();
-            result.put("success", false);
-        }
-        return result;
+        return goodsCacheService.priceByTriple(MerchantId, GoodName, ProductCode);
     }
 
     //这是一个接口（用于更新商品数据）
+    // ⚠️ 四条 evict 的理由同 goodsAdd，已收敛到 GoodsCacheService.evictByMerchant() 的 javadoc
+    //    （D 笔，2026-09-28）。本条只需知道一件事：**正是本方法的改名**使 goodsCodes / goodsPrice
+    //    只能 allEntries —— 两者的键都含 GoodName，而本方法的 WHERE 是 (MerchantId, ProductCode)，
+    //    旧 GoodName 既不在入参、也无处可查（方法体内无任何 SELECT）⇒ 旧键 `M::旧G[::P]` 构造不出；
+    //    而改名的同时新键也要清 ⇒ 精确清需要清两个、其中一个无解。见 §11「精确 evict 的边界」。
     @PostMapping("/goodsUp")
     public Map<String, Object> goodsUp(
             @RequestParam("MerchantId") String MerchantId,
@@ -326,29 +294,30 @@ public class MallManagementGoodsController {
             result.put("success", false);
             result.put("msg", "商品更新失败");
         }
+        // ⚠️ 本方法的唯一出口 —— 三个写接口共用同一模式，若新增 return 请确认：
+        //    ① 该分支不改库，或
+        //    ② 在该分支前也调 evictByMerchant()
+        // 现有全部 JDBC 都在 try 内、catch 吞异常 ⇒ 唯一出口覆盖 100% 的可能改库路径。
+        goodsCacheService.evictByMerchant(MerchantId);
         return result;
     }
 
     // 这是一个接口（根据商家ID和商品名称，获取所有不同的 ProductCode 型号列表）
+    // 方法体与缓存注解都搬到 GoodsCacheService.listCodes()（逐字搬运，含 SQL / try/catch /
+    // 返回结构）。本方法只保留路由与委托。
+    // ⚠️ 形参名必须保留：@RequestParam 未写显式名依赖它解析，Service 侧
+    // key="#MerchantId + '::' + #GoodName" 也依赖同一组形参名（-parameters 已开）。
+    // 缓存：cacheName = goodsCodes、key = #MerchantId + '::' + #GoodName、sync = true（单飞防击穿）；
+    //      失效面 = goodsAdd / goodsUp / goodsDe，三个都 allEntries —— 键含 GoodName，而 goodsUp
+    //      会改 GoodName（其 WHERE 是 (MerchantId, ProductCode)，旧 GoodName 构造不出）。
+    //      ⚠️ 这三条 evict 在本方法存在之前就挂上了（2026-09-28，随 goodsPrice 那笔），
+    //      即「evict 清单领先于读接口落地」—— 落地前每次写都在清一个空片。见 §11「先加 evict 再加读」。
     @PostMapping("/GoodsProductCodeSelect")
     public Map<String, Object> GoodsProductCodeSelect(
             @RequestParam("MerchantId") String MerchantId,
             @RequestParam("GoodName") String GoodName
     ) {
-        Map<String, Object> result = new HashMap<>();
-        String sql = "SELECT DISTINCT ProductCode FROM mall_management_sql.goods "
-                + "WHERE MerchantId=? AND GoodName=?";
-
-        try {
-            List<String> productCodeList = GoodjdbcTemplate.queryForList(sql,
-                    String.class, MerchantId, GoodName);
-            result.put("success", true);
-            result.put("list", productCodeList);
-        } catch (Exception e) {
-            e.printStackTrace();
-            result.put("success", false);
-        }
-        return result;
+        return goodsCacheService.listCodes(MerchantId, GoodName);
     }
 
 
