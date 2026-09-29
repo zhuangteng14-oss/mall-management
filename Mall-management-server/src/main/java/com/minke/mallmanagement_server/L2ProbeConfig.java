@@ -61,6 +61,7 @@ public class L2ProbeConfig {
     @Bean
     public L2HealthProbe l2HealthProbe(RedisConnectionFactory redisConnectionFactory,
                                        RedisProperties redisProperties,
+                                       MallCacheMetrics cacheMetrics,
                                        @Value("${app.cache.l2-probe.timeout:200ms}") Duration probeTimeout,
                                        @Value("${app.cache.l2-probe.cooldown:30s}") Duration cooldown) {
         LettuceConnectionFactory probeChannel = createProbeChannel(redisProperties, probeTimeout);
@@ -76,7 +77,14 @@ public class L2ProbeConfig {
                 probeChannel.getHostName(), probeChannel.getPort(), probeChannel.getDatabase());
 
         selfCheckProbeChannel(probeChannel);
-        return new L2HealthProbe(probeChannel, cooldown);
+        L2HealthProbe probe = new L2HealthProbe(probeChannel, cooldown, cacheMetrics);
+        // L2 健康状态出口：gauge mall.cache.l2.up（1=可用 0=处于冷却窗口内）。
+        // 传 lambda 而不是 probe 本身：把 probe 交给 MallCacheMetrics 会构成 bean 循环引用
+        // （probe ← metrics ← probe）。代价是取值对象没有别的强引用，必须由
+        // MallCacheMetrics 自己存一份 —— 否则一次 GC 后 gauge 静默变 NaN（见 bindL2Up）。
+        // isHealthy() 是纯读取：scrape 本指标**不会**触发探测（isL2UsableNow() 才会）。
+        cacheMetrics.bindL2Up(probe::isHealthy);
+        return probe;
     }
 
     /**

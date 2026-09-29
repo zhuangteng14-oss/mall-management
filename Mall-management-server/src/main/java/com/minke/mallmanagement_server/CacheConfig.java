@@ -55,6 +55,7 @@ public class CacheConfig {
     public CacheManager cacheManager(RedisConnectionFactory connectionFactory,
                                      CacheProperties cacheProperties,
                                      L2HealthProbe l2HealthProbe,
+                                     MallCacheMetrics cacheMetrics,
                                      @Value("${app.cache.caffeine.max-size:1000}") long l1MaxSize,
                                      @Value("${app.cache.caffeine.time-to-live:60s}") Duration l1TimeToLive) {
         RedisCacheManager l2 = RedisCacheManager.builder(connectionFactory)
@@ -68,7 +69,8 @@ public class CacheConfig {
         log.info("两级缓存已装配：L1 Caffeine(maxSize={}, ttl={}) -> L2 Redis(ttl={})",
                 l1MaxSize, l1TimeToLive, cacheProperties.getRedis().getTimeToLive());
         // l2HealthProbe 由 L2ProbeConfig 提供、全局一份：所有缓存名共用同一个健康状态
-        return new TwoLevelCacheManager(l1TimeToLive, l1MaxSize, l2, l2HealthProbe);
+        // cacheMetrics 同理全局一份（Bean），只做记录、不参与装配决策
+        return new TwoLevelCacheManager(l1TimeToLive, l1MaxSize, l2, l2HealthProbe, cacheMetrics);
     }
 
     /**

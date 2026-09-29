@@ -41,14 +41,17 @@ public class TwoLevelCacheManager implements CacheManager {
      * 详见 {@link L2HealthProbe} 类注释。
      */
     private final L2HealthProbe probe;
+    /** 观测出口 —— 全应用唯一一份，转交给每个 TwoLevelCache（见 {@link MallCacheMetrics}）。 */
+    private final MallCacheMetrics metrics;
     private final ConcurrentMap<String, TwoLevelCache> caches = new ConcurrentHashMap<>();
 
     public TwoLevelCacheManager(Duration l1TimeToLive, long l1MaxSize, CacheManager l2,
-                                L2HealthProbe probe) {
+                                L2HealthProbe probe, MallCacheMetrics metrics) {
         this.l1TimeToLive = l1TimeToLive;
         this.l1MaxSize = l1MaxSize;
         this.l2 = l2;
         this.probe = probe;
+        this.metrics = metrics;
     }
 
     @Override
@@ -64,7 +67,10 @@ public class TwoLevelCacheManager implements CacheManager {
                     .expireAfterWrite(l1TimeToLive)
                     .recordStats()   // 便于观测命中率（TwoLevelCache.getNativeCache()）
                     .build();
-            return new TwoLevelCache(n, l1, l2Cache, probe);
+            // L1 观测桩（size / evictions）在这里绑：每个缓存名的 L1 只在这里创建一次，
+            // 且 evictions 单调（FunctionCounter 的前提）—— 换个地方绑就会破这两个前提
+            metrics.bindL1(n, l1);
+            return new TwoLevelCache(n, l1, l2Cache, probe, metrics);
         });
     }
 

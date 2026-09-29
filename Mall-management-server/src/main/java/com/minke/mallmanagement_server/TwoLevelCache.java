@@ -1,5 +1,7 @@
 package com.minke.mallmanagement_server;
 
+import com.minke.mallmanagement_server.MallCacheMetrics.EvictResult;
+import com.minke.mallmanagement_server.MallCacheMetrics.L2Result;
 import org.springframework.cache.Cache;
 import org.springframework.cache.support.SimpleValueWrapper;
 import org.springframework.dao.DataAccessException;
@@ -47,12 +49,19 @@ public class TwoLevelCache implements Cache {
      */
     private final L2HealthProbe probe;
 
+    /**
+     * 观测出口 —— 全应用唯一一份（见 {@link MallCacheMetrics}）。
+     * 本类只在**既有分支上各记一笔**，不据它做任何判定（判定仍在上面的两处）。
+     */
+    private final MallCacheMetrics metrics;
+
     TwoLevelCache(String name, com.github.benmanes.caffeine.cache.Cache<Object, Object> l1,
-                  Cache l2, L2HealthProbe probe) {
+                  Cache l2, L2HealthProbe probe, MallCacheMetrics metrics) {
         this.name = name;
         this.l1 = l1;
         this.l2 = l2;
         this.probe = probe;
+        this.metrics = metrics;
     }
 
     @Override
@@ -115,13 +124,21 @@ public class TwoLevelCache implements Cache {
         // 只有真正执行了 loader 的那次才回写 L2（避免 L2 命中路径把 TTL 无谓地续期）。
         // 用数组承载：lambda 需要一个可写的闭包槽位。
         boolean[] loadedHere = {false};
+        // 观测用：本次是否真的进入了 mappingFunction。三种情形互斥且完备（口径见 MallCacheMetrics）：
+        //   ran=false                  → 被别的线程的加载合并（Caffeine 单飞的 follower）
+        //   ran=true, loadedHere=false → loader 路径内命中 L2（已由 l2Get 计数，不重复记）
+        //   ran=true, loadedHere=true  → 真正发起了回落 DB 的加载（loads）
+        boolean[] mappingRan = {false};
 
         Object mapped = l1.get(key, k -> {
+            mappingRan[0] = true;
             ValueWrapper fromL2 = l2Get(k);
             if (fromL2 != null) {
                 return fromL2;
             }
             loadedHere[0] = true;
+            // 在 loader **被调用前**计数：失败那次同样打了 DB，对 DB 的压力一样大
+            metrics.loadedFromDb(name, k);
             try {
                 return new SimpleValueWrapper(valueLoader.call());
             } catch (Exception e) {
@@ -133,6 +150,8 @@ public class TwoLevelCache implements Cache {
         ValueWrapper wrapper = (ValueWrapper) mapped;
         if (loadedHere[0]) {
             l2Put(key, wrapper.get());
+        } else if (!mappingRan[0]) {
+            metrics.singleflightMerged(name, key);
         }
         return (T) wrapper.get();
     }
@@ -171,23 +190,29 @@ public class TwoLevelCache implements Cache {
 
     private ValueWrapper l1Get(Object key) {
         // L1 里存的必然是 ValueWrapper（见类注释），故强转安全
-        return (ValueWrapper) l1.getIfPresent(key);
+        ValueWrapper wrapper = (ValueWrapper) l1.getIfPresent(key);
+        // L1 的读只此一处，两条读路径都经过它 ⇒ hit+miss 即 L1 收到的全部读请求数
+        metrics.l1Request(name, key, wrapper != null);
+        return wrapper;
     }
 
     private ValueWrapper l2Get(Object key) {
         if (l2 == null) {
-            return null;
+            return null;   // 装配期就没有 L2：配置事实、非请求事件，故不计数（见 MallCacheMetrics）
         }
         if (!probe.isL2UsableNow()) {
             // 冷却中（或本线程刚探完）：视作 L2 未命中 —— 与「Redis 连不上」同一条降级路径
+            metrics.l2Request(name, key, L2Result.DEGRADED);
             return null;
         }
         try {
             ValueWrapper wrapper = l2.get(key);
             probe.markOk();
+            metrics.l2Request(name, key, wrapper != null ? L2Result.HIT : L2Result.MISS);
             return wrapper;
         } catch (DataAccessException e) {
             probe.markFailed(e);
+            metrics.l2Request(name, key, L2Result.ERROR);
             return null;
         }
     }
@@ -214,13 +239,16 @@ public class TwoLevelCache implements Cache {
         if (!probe.isL2UsableNow()) {
             // 冷却中：跳过失效。L2 里可能因此留下一个旧值，但：
             //   (a) 这段时间本就没在读 L2，(b) L2 TTL（a3 为 5m）是陈旧上界的兜底
+            metrics.evicted(name, false, EvictResult.SKIPPED_DEGRADED, key);
             return;
         }
         try {
             l2.evict(key);
             probe.markOk();
+            metrics.evicted(name, false, EvictResult.EVICTED, key);
         } catch (DataAccessException e) {
             probe.markFailed(e);
+            metrics.evicted(name, false, EvictResult.ERROR, key);
         }
     }
 
@@ -229,13 +257,17 @@ public class TwoLevelCache implements Cache {
             return;
         }
         if (!probe.isL2UsableNow()) {
-            return;   // 冷却中：跳过整片失效（同上，L2 TTL 兜底）
+            // 冷却中：跳过整片失效（同上，L2 TTL 兜底）
+            metrics.evicted(name, true, EvictResult.SKIPPED_DEGRADED, null);
+            return;
         }
         try {
             l2.clear();
             probe.markOk();
+            metrics.evicted(name, true, EvictResult.EVICTED, null);
         } catch (DataAccessException e) {
             probe.markFailed(e);
+            metrics.evicted(name, true, EvictResult.ERROR, null);
         }
     }
 }
