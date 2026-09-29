@@ -112,7 +112,7 @@ Vue 3 CLI 工程，14 个页面视图 + 1 个组件 + 1 个路由表。页面按
 
 > 2026-09-29 校正（两件，勿混淆）：① **上表后两行的 `M:` 坐标原记 `M:309-311` / `M:238-240`（`getUserInfoById` 原记 `M:330-369`、`M:331-333`、`M:349-350`、`M:353-354`），实测**四组各漂移 +11**——本表已换成搬迁前真实值 `M:320-322` / `M:249-251`。证据：以 `git show 549f74f:MallManagementMessage.java` 逐行核对（该 commit 即本笔改动前状态），非推算。② 同日起这两处的读路径**已搬到 `FriendCacheService`**（B1 缓存笔），Controller 只剩路由。⚠️ **缓存把 1 + 2N 摊薄为「每 TTL 一次」，是掩盖而非修复** —— 与 `cache-layer.md` §11 附 `goodsHome` 行同款注记；解 N+1 只能改 SQL（JOIN / IN 批量），仍归 `fix-n-plus-one`。
 
-> 2026-09-27 校正：`goodsSelectHome` 原记 `G:182-202`（内层 `G:188`）有误——`G:188` 是 `for` 循环头不是查询，循环体在 `G:208` 闭合。其余三行原记的循环范围无误。缓存选型侧的同名清单见 `cache-map.md §6`（两节职责不同，重叠 3 行）。
+> 2026-09-27 校正：`goodsSelectHome` 原记 `G:182-202`（内层 `G:188`）有误——`G:188` 是 `for` 循环头不是查询，循环体在 `G:208` 闭合。其余三行原记的循环范围无误。缓存选型侧的同名清单见 `cache-map.md §6`（两节职责不同，**重叠 4 行**：`goodsSelectHome` / `conversations` / `friendSelect` / `selectFriend`；原记「3 行」漏了 2026-09-27 才补进 `cache-map.md §6` 的 `selectFriend` —— 2026-09-29 订正，与 `cache-map.md §6` 同句同改）。
 
 ## 7. 未覆盖 / 待确认
 
