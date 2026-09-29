@@ -1,5 +1,7 @@
 package com.minke.mallmanagement_controller;
 
+import com.minke.mallmanagement_service.DistributedLockService;
+import com.minke.mallmanagement_service.DistributedLockService.LockName;
 import com.minke.mallmanagement_service.GoodsCacheService;
 import com.minke.mallmanagement_service.GoodsTypeCacheService;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -30,6 +32,9 @@ public class MallManagementGoodsController {
 
     @Autowired
     private GoodsCacheService goodsCacheService;
+
+    @Autowired
+    private DistributedLockService distributedLockService;
 
     @Value("${app.upload-dir:${user.dir}/src/main/resources/static/img/}")
     private String uploadDir;
@@ -356,6 +361,11 @@ public class MallManagementGoodsController {
     }
 
     //创建订单时要录入数据库的信息
+    // ⚠️ B2：整段临界区在 Redisson 锁下执行（锁 key = OrderId，指标 tag = order-add）。
+    //    锁**单独**拦不住重复行 —— 20 个请求排队进场、每个照样裸 INSERT，只是把并发变成串行、
+    //    仍插 20 行；本笔的修复是「锁 + 临界区内先查后插」**两条，缺一不可**（见 orderAddLocked）。
+    //    拿不到锁（Redis 不可达 / 争用超时）⇒ fail-open 直行；对 orderAdd 的完整推演见
+    //    DistributedLockService.runLocked 的 javadoc。
     @PostMapping("/orderAdd")
     public Map<String, Object> orderAdd(
             @RequestParam("CustomerId") String CustomerId,
@@ -368,7 +378,44 @@ public class MallManagementGoodsController {
             @RequestParam("DeliveryIf") int DeliveryIf,
             @RequestParam("ReceiveIf") int ReceiveIf
     ) {
+        return distributedLockService.runLocked(LockName.ORDER_ADD, OrderId, () -> orderAddLocked(
+                CustomerId, MerchantId, OrderId, Price, ProductInformation, Images, PayIf, DeliveryIf, ReceiveIf));
+    }
+
+    /**
+     * orderAdd 的临界区。**原方法体逐字未动**（B2 的边界：只加一层锁，不动既有分支），
+     * 仅在开头**插入**了查重。
+     *
+     * <p>⚠️ 本方法**不得**加 {@code @Transactional}（加了则本笔的修复立刻失效）：事务的提交发生在
+     * 方法返回**之后**，而锁在 {@code runLocked} 的 {@code finally} 里、即方法返回**之前**已释放 ——
+     * 后进者拿到锁后的 {@code COUNT(*)} 在 RR 下读的是自己事务开始时的快照、**看不到前一个未提交的行**
+     * ⇒ 仍插 2 行。不加事务时 autocommit 让 INSERT 在释放锁**之前**就提交，这正是查重成立的前提。
+     */
+    private Map<String, Object> orderAddLocked(
+            String CustomerId, String MerchantId, String OrderId, float Price,
+            String ProductInformation, String Images, int PayIf, int DeliveryIf, int ReceiveIf) {
         Map<String, Object> result = new HashMap<>();
+        // ⚠️ 临界区内先查后插 —— 这一段是 B2 对「同一 OrderId 落库 2 行」的真修复（A-S2a-1）：
+        //    · 只有锁：并发变串行，但每个请求照旧裸 INSERT ⇒ 仍插 20 行；
+        //    · 只有查重：查与插之间的 TOCTOU 窗口仍在 ⇒ 两个请求可以同时查到 0 行。
+        //    OrderId 由前端每次下单生成（ProductPage.vue 的 generateOrderId()）、**不复用** ⇒
+        //    查重不会挡掉正常下单，只会挡「同一 OrderId 的重复提交」。
+        try {
+            Integer sameOrderId = GoodjdbcTemplate.queryForObject(
+                    "SELECT COUNT(*) FROM mall_management_sql.`order` WHERE OrderId = ?",
+                    Integer.class, OrderId);
+            if (sameOrderId != null && sameOrderId > 0) {
+                result.put("success", false);
+                result.put("msg", "订单已存在，请勿重复提交");
+                return result;
+            }
+        } catch (Exception e) {
+            // 查重本身失败（例如库连不上）：**不阻断下单**，继续走原来的 INSERT 路径 ——
+            // 与本次改动之前的行为一致（原先没有这一步，照样 INSERT，由下面的 catch 兜住）。
+            // 这条 fail-open 与本方法的锁一样是刻意的：查重是「防重复」的加固，不是下单的前置条件。
+            e.printStackTrace();
+        }
+
         String sql = "INSERT INTO mall_management_sql.order " +
                 "(OrderId, CustomerId, MerchantId, Price, ProductInformation, Images, PayIf, DeliveryIf, ReceiveIf, CreateTime) " +
                 "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())";
@@ -493,8 +540,18 @@ public class MallManagementGoodsController {
 
 
     //付款按钮更新信息
+    // ⚠️ B2：方法体在 Redisson 锁下执行（锁 key = orderId，指标 tag = order-pay）。
+    //    条件 UPDATE（AND PayIf = 0）本来就是正确的并发控制 ⇒ **锁在这里净正确性收益为 0**；
+    //    买到的是「同单状态流转串行化 + 统一的取锁观测口径」，代价是每请求多一次 Redis 往返。
+    //    拿不到锁 ⇒ fail-open 直行 ⇒ 争用下仍恰好一个成功、其余 19 个返回**原**文案 ——
+    //    A-S3-2 的守门对象正是这条：锁不许新发任何拒绝文案。
     @PostMapping("/orderPayIfUp")
     public Map<String, Object> orderPayIfUp(@RequestParam("orderId") String orderId) {
+        return distributedLockService.runLocked(LockName.ORDER_PAY, orderId, () -> orderPayIfUpLocked(orderId));
+    }
+
+    /** orderPayIfUp 的临界区：**原方法体逐字未动**（B2 的边界）。 */
+    private Map<String, Object> orderPayIfUpLocked(String orderId) {
         Map<String, Object> result = new HashMap<>();
         String sql = "UPDATE mall_management_sql.`order` SET PayIf = 1, SettlementDate = NOW() WHERE OrderId = ? AND PayIf = 0";
         try {
@@ -515,8 +572,14 @@ public class MallManagementGoodsController {
     }
 
     //收货按钮更新信息
+    // ⚠️ B2：锁 key = orderId，指标 tag = order-receive。净正确性收益为 0（理由同 orderPayIfUp）。
     @PostMapping("/orderReceiveIfUp")
     public Map<String, Object> orderReceiveIfUp(@RequestParam("orderId") String orderId) {
+        return distributedLockService.runLocked(LockName.ORDER_RECEIVE, orderId, () -> orderReceiveIfUpLocked(orderId));
+    }
+
+    /** orderReceiveIfUp 的临界区：**原方法体逐字未动**（B2 的边界）。 */
+    private Map<String, Object> orderReceiveIfUpLocked(String orderId) {
         Map<String, Object> result = new HashMap<>();
         String sql = "UPDATE mall_management_sql.`order` SET ReceiveIf = 1, SettlementDate = NOW() WHERE OrderId = ? AND PayIf = 1 AND ReceiveIf = 0";
         try {
@@ -537,8 +600,14 @@ public class MallManagementGoodsController {
     }
 
     //发货按钮更新信息
+    // ⚠️ B2：锁 key = orderId，指标 tag = order-delivery。净正确性收益为 0（理由同 orderPayIfUp）。
     @PostMapping("/orderDeliveryIfUp")
     public Map<String, Object> orderDeliveryIfUp(@RequestParam("orderId") String orderId) {
+        return distributedLockService.runLocked(LockName.ORDER_DELIVERY, orderId, () -> orderDeliveryIfUpLocked(orderId));
+    }
+
+    /** orderDeliveryIfUp 的临界区：**原方法体逐字未动**（B2 的边界）。 */
+    private Map<String, Object> orderDeliveryIfUpLocked(String orderId) {
         Map<String, Object> result = new HashMap<>();
         String sql = "UPDATE mall_management_sql.`order` SET DeliveryIf = 1, SettlementDate = NOW() WHERE OrderId = ? AND PayIf = 1 AND DeliveryIf = 0 AND ReceiveIf = 0";
         try {

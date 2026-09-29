@@ -147,6 +147,32 @@ jobs:
           distribution: temurin
           cache: maven
 
+      # B2 起 Redis：锁是**只能在真 Redis 上验**的东西，而本 job 的五个写路径全部走锁 ——
+      # 没有它，A-S2a-1 会因为**环境**而红（不是缺陷）。
+      #
+      # ⚠️ 刻意用「步骤里 docker run」而不是 services：官方 redis 镜像的 entrypoint
+      # **不接受**用环境变量传 redis-server 参数（已核实 7.4 的 docker-entrypoint.sh —— 它只处理
+      # 「首个参数以 - 开头」这一种形式，而 services 只能给 options、给不了 command），
+      # 本 job 又必须带 --requirepass：口令要与 application-a3.properties 的
+      # ${A3_REDIS_PASSWORD:123456} 对齐（本 job 不设该变量 ⇒ 生效值就是 123456）。
+      #
+      # 就绪用**显式等 PONG**（等不到即 exit 1），语义同 service 的 health-check：
+      # 后端若在 Redis 就绪前起来，第一次取锁失败就会把锁打进冷却窗口，
+      # 那之后的 A-S2a-1 测的就不是锁、而是冷却。
+      - name: 启动 Redis（B2：分布式锁的真后端）
+        run: |
+          docker run -d --name a3-redis -p 6379:6379 redis:7 redis-server --requirepass 123456
+          for i in $(seq 1 30); do
+            if docker exec a3-redis redis-cli --no-auth-warning -a 123456 ping 2>/dev/null | grep -q PONG; then
+              echo "redis 已就绪（第 ${i} 次探测）"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "redis 未在 30s 内就绪："
+          docker logs a3-redis || true
+          exit 1
+
       # 用容器自带的 mysql 客户端（8.4，与 server 同版本），不用 runner 预装的：
       # 预装版本不受控（当前 8.0，将来可能变），而导入应与 server 同版本。
       # 容器内 mysql 默认走本地 socket，故不需要 -h。
@@ -174,12 +200,15 @@ jobs:
         working-directory: Mall-management-server
         run: ./mvnw -B -DskipTests package
 
-      # 只由环境变量覆盖数据库地址；绝不改 application-a3.properties 的默认值（仍指 VM）。
+      # 只由环境变量覆盖数据库/Redis 地址；绝不改 application-a3.properties 的默认值（仍指 VM）——
+      # Redis 同样走环境变量覆盖（B2），理由与数据库一致：那份文件是「VM 上长什么样」的记录。
+      # 口令**不覆盖**：a3 的 ${A3_REDIS_PASSWORD:123456} 默认值就与本 job 起的那只 Redis 一致。
       - name: 启动后端（a3 profile）
         working-directory: Mall-management-server
         env:
           SPRING_PROFILES_ACTIVE: a3
           A3_DB_URL: jdbc:mysql://127.0.0.1:3306/mall_management_sql?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai&characterEncoding=utf-8
+          SPRING_DATA_REDIS_HOST: 127.0.0.1
         run: |
           nohup java -jar target/Mall-management-server-*.jar > "$GITHUB_WORKSPACE/app.log" 2>&1 &
           echo "$!" > /tmp/a3-app.pid
@@ -209,6 +238,11 @@ jobs:
       # 刻意不在此加 SPRING_PROFILES_ACTIVE=a3：a3 profile 的默认值指向 VM 的
       # 192.168.229.129，那是给「上一个 step 启动的被测后端」用的，不是给本测试用的。
       #
+      # ⚠️ 但默认 profile 下 application.properties **不含**任何 spring.data.redis.*（B2 新增，
+      # 2026-09-29）⇒ 必须由下面两个环境变量补上，否则会走 Boot 默认（localhost:6379、无口令），
+      # 在有口令的 Redis 上是 NOAUTH。而 NOAUTH 的表现是**四路全 degraded 而不是报错** ——
+      # LockSceneRedisTest 的每个场景都显式断言 degraded == 0，就是要把这两种情况分开报。
+      #
       # @SpringBootTest 默认 webEnvironment=MOCK，不真起 Tomcat、不占 8088，
       # 故与上一个 step 起的 jar 不冲突；本 step 只读（一条 SELECT 1），不写业务数据。
       #
@@ -216,11 +250,17 @@ jobs:
       # 实测（三探针，2026-09-20）库名不存在乃至端口无监听时它都 PASS；真正把
       # 「连得上」变成断言的是 databaseIsReachable（SELECT 1），本 step 现在才会
       # 因库不可达而变红。
-      - name: 全上下文启动冒烟 + 数据库可达性（由 A3_ENABLED 打开）
+      #
+      # LockSceneRedisTest（B2）同一步跑：四个锁场景（等待/冲突/超时/死锁）需要真 Redis，
+      # 而它是「锁在真争用下也对」的唯一证据 —— mock 不会互相排他。它另有一条判据
+      # 直接驳回「环境不通」：degraded != 0 时失败信息会指向连接而不是锁。
+      - name: 全上下文启动冒烟 + 数据库可达性 + 锁场景（由 A3_ENABLED 打开）
         working-directory: Mall-management-server
         env:
           A3_ENABLED: "true"
-        run: ./mvnw -B -Dtest=MallManagementApplicationTests test
+          SPRING_DATA_REDIS_HOST: 127.0.0.1
+          SPRING_DATA_REDIS_PASSWORD: "123456"
+        run: ./mvnw -B -Dtest=MallManagementApplicationTests,LockSceneRedisTest test
 
       # --skip-negative-control 是必需的，不是图省事：P7 第一段就是「阴性对照库与目标库
       # 是同一主机 → FAIL 对照无意义」并按 exit 2 短路，而 CI 里目标库本就是 127.0.0.1 上的
@@ -241,6 +281,21 @@ jobs:
             --skip-negative-control \
             --ready-timeout-sec 180 \
             --run-id "ci${{ github.run_number }}"
+
+      # B2 取证：A3 运行器**不读** metrics（它只看接口响应与数据库），故不补这一步，
+      # 锁指标在 A3 上就是零证据 —— 而「锁到底有没有在真流量下工作」正是本笔要证的东西。
+      # 放在停止后端**之前**：进程一退，这些数就没了；if: always() 让门禁红的那次也留证。
+      # ⚠️ 只读、不判定：判定在 run.sh 的门禁里（A-S2a-1 等），这里失败不该把原因盖掉。
+      - name: 采集锁指标（B2 取证，不判定）
+        if: always()
+        run: |
+          for m in mall.lock.acquires mall.lock.holds mall.lock.up; do
+            echo "=== /actuator/metrics/$m ==="
+            curl -s "http://127.0.0.1:8088/actuator/metrics/$m" || true
+            echo
+          done
+          echo "=== 锁键残留（正常运行应为空：取锁→释放会删键）==="
+          docker exec a3-redis redis-cli --no-auth-warning -a 123456 --scan --pattern 'mall:lock:*' || true
 
       # 先让后端退场再上传，app.log 的尾部不至于留在缓冲里。
       - name: 停止后端
