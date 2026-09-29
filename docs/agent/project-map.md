@@ -90,10 +90,14 @@ Vue 3 CLI 工程，14 个页面视图 + 1 个组件 + 1 个路由表。页面按
 | 全项目仅 1 处事务边界，多处多表写无事务保护 | `concurrency-map.md` |
 | 订单三状态位用条件 UPDATE 实现 CAS，是全项目唯一正确的并发控制 | `concurrency-map.md` |
 | `productsales.OrderVolume` 从未被更新，订单量统计功能失效 | `concurrency-map.md` |
-| 全项目零缓存 | `cache-map.md` |
+| 全项目零缓存（**2026-09-14 时**；B1 自 2026-09-27 起逐笔落地，现行见右栏第二项） | `cache-map.md`（顶部有时效标注）/ `context-packs/cache-layer.md` |
 | `ddl-auto=update` 与手写 DDL 脚本并存 | `db-schema.md` |
 | 11 张表中仅 `message` 有二级索引 | `db-schema.md` |
-| 测试：5 个测试类 / 6 个用例；`MallManagementApplicationTests` 的 2 个用例默认 SKIP，仅 `A3_ENABLED=true` 时跑（真连库） | `tech-debt.md` TD-10（已关闭） |
+| 测试：5 个可执行测试类（+1 抽象基类 `smoke/AbstractSmokeTest`）/ **11** 个用例（2026-09-29 实测）；`MallManagementApplicationTests` 的 **4** 个用例在未设 `A3_ENABLED` 时不执行，设 `true` 时真连库 | `tech-debt.md` TD-10（已关闭） |
+
+> ⚠️ 时效口径：本表**逐行反映当前结论**；凡单元格内标注「（**…时**）」的，才是**该时刻**的值 —— 只有上面「零缓存」一行属于此列，其余各行**未受缓存迁移影响**（B1 只搬读路径，未动 DDL / 事务 / 订单逻辑），不必整体打折读。
+>
+> 上表「测试」行的原计数（6 / 2）是 **2026-09-20**（`e3a9ada` 写入，再上一版 `23dfaab` 2026-09-18 记 4 / 5）的值；B1 期间新增 `L2HealthProbeConcurrencyTest`（3 个用例）与 `messageControllerIsNotAopProxied`（1 个）等 ⇒ 现值已**就地改为 11 / 4**（2026-09-29 实测，与回归输出「Tests run 11」一致）。该行不在缓存主题内，与本笔合并只因**同一张表**：留旧数会让上一段「本表逐行反映当前结论」变成假话。
 
 ## 6. N+1 待优化清单（优先级：**高**）
 
