@@ -1,5 +1,6 @@
 package com.minke.mallmanagement_server;
 
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -59,6 +60,13 @@ class L2HealthProbeConcurrencyTest {
     private static final Duration SHORT_COOLDOWN = Duration.ofMillis(20);
 
     private final AtomicInteger pingCount = new AtomicInteger();
+
+    /**
+     * 观测出口。本测试**不断言**指标（那是 MallCacheMetricsTest 的事），只为满足构造器签名
+     * —— C1 把 MallCacheMetrics 加成了 L2HealthProbe 的构造参数。用 SimpleMeterRegistry：
+     * 不起 Spring 上下文，且每个测试方法一份新实例（JUnit 每个方法新建测试对象）⇒ 计数天然隔离。
+     */
+    private final MallCacheMetrics metrics = new MallCacheMetrics(new SimpleMeterRegistry());
 
     @BeforeEach
     void setUp() {
@@ -148,7 +156,7 @@ class L2HealthProbeConcurrencyTest {
         });
         RedisConnectionFactory factory = mock(RedisConnectionFactory.class);
         when(factory.getConnection()).thenReturn(connection);
-        L2HealthProbe probe = new L2HealthProbe(factory, SHORT_COOLDOWN);
+        L2HealthProbe probe = new L2HealthProbe(factory, SHORT_COOLDOWN, metrics);
 
         ExecutorService pool = Executors.newFixedThreadPool(CONCURRENCY);
         CyclicBarrier barrier = new CyclicBarrier(CONCURRENCY + 1);
@@ -239,6 +247,6 @@ class L2HealthProbeConcurrencyTest {
     private L2HealthProbe probeOver(RedisConnection connection) {
         RedisConnectionFactory factory = mock(RedisConnectionFactory.class);
         when(factory.getConnection()).thenReturn(connection);
-        return new L2HealthProbe(factory, COOLDOWN);
+        return new L2HealthProbe(factory, COOLDOWN, metrics);
     }
 }

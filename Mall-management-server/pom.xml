@@ -89,6 +89,14 @@
             <groupId>org.apache.commons</groupId>
             <artifactId>commons-pool2</artifactId>
         </dependency>
+
+        <!-- 可观测性（C1）：Actuator 提供 /actuator/metrics 等端点，Micrometer 由它带入
+             （micrometer-core 是 starter 的传递依赖，无需单独声明；不引入 Prometheus registry
+             —— 本项目没有拉取式抓取方，加它只是多一个依赖）。埋点见 MallCacheMetrics。 -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-actuator</artifactId>
+        </dependency>
     </dependencies>
 
     <build>

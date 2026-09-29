@@ -99,9 +99,28 @@ public class L2HealthProbe implements DisposableBean {
      */
     private volatile boolean down;
 
-    L2HealthProbe(RedisConnectionFactory probeConnectionFactory, Duration cooldown) {
+    /**
+     * 观测出口（C1）—— 全应用唯一一份。本类只在既有判定处各记一笔，
+     * **不据它做任何判定**：探测与降级逻辑完全不受埋点影响。
+     */
+    private final MallCacheMetrics metrics;
+
+    L2HealthProbe(RedisConnectionFactory probeConnectionFactory, Duration cooldown,
+                  MallCacheMetrics metrics) {
         this.probeConnectionFactory = probeConnectionFactory;
         this.cooldown = cooldown;
+        this.metrics = metrics;
+    }
+
+    /**
+     * 是否处于健康态（无冷却窗口）—— **纯读取，无副作用**，供观测使用（mall.cache.l2.up）。
+     *
+     * ⚠️ 不能拿 {@link #isL2UsableNow()} 代替：那个方法在窗口到期时会抢占探测权并同步 PING
+     * （即 scrape 一次 /actuator/metrics 就可能触发一次真实探测 —— 观测行为会改变被观测对象）。
+     * 本方法只读一个 volatile，故可以被任意频繁地调用。
+     */
+    public boolean isHealthy() {
+        return probeAllowedAtNanos.get() == HEALTHY;
     }
 
     /**
@@ -137,6 +156,7 @@ public class L2HealthProbe implements DisposableBean {
         if (down) {
             down = false;
             log.warn("L2(Redis) 已恢复，回到两级模式");
+            metrics.recovered();   // 与这行 WARN 同一处判定 ⇒ 计数天然「只在翻转时 +1」
         }
     }
 
@@ -152,6 +172,7 @@ public class L2HealthProbe implements DisposableBean {
             log.warn("L2(Redis) 不可达，全部两级缓存降级为「仅 L1 + 直接回落 DB」；"
                     + "故障期间不再逐次记录，每 {}s 才由单个请求探测一次。原因：{}",
                     cooldown.toSeconds(), cause.toString());
+            metrics.degraded();   // 同上：只在真实翻转时计数，故障期间的每次失败不再重复记
         }
     }
 
@@ -177,11 +198,16 @@ public class L2HealthProbe implements DisposableBean {
      * 那里是业务读路径，不能被降级掩盖编程错误）。
      */
     private void probeNow() {
+        long startedAtNanos = System.nanoTime();
         try (RedisConnection connection = probeConnectionFactory.getConnection()) {
             connection.ping();
             markOk();
+            metrics.probe(true, System.nanoTime() - startedAtNanos);
         } catch (Exception e) {
             markFailed(e);
+            // 计数与计时都记「探测」这个动作本身：探测失败时调用方走的是同一个降级路径
+            // （补 3），故失败那次的耗时同样是真代价（上限 = 探测超时）
+            metrics.probe(false, System.nanoTime() - startedAtNanos);
         }
     }
 }
