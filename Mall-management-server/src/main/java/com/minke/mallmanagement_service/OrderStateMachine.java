@@ -60,6 +60,16 @@ public class OrderStateMachine {
     /** 三位里出现 {0,1} 之外取值时的状态名。只有 {@code orderAdd} 的伪造路径能造出来。 */
     public static final String UNCLASSIFIED = "UNCLASSIFIED";
 
+    /**
+     * 时间线里「没有前态」的占位名 —— 只用于 {@link OrderAction#CREATE}。
+     *
+     * <p>下单**不是转移**（{@link #updateSql} 拒收 CREATE），所以它没有 from 可言；
+     * 但时间线若从第一次转移才开始记，那么「只下过单、还没付款」的订单在表里**一行都没有**，
+     * 而它的初始三位**在别处不可恢复**（{@code order} 表只存当前值）。
+     * 故出生这一笔照记，用本占位名诚实地表示「前面没有状态」，而不是留空让人猜是「没读到」。
+     */
+    public static final String NO_PREVIOUS_STATE = "NONE";
+
     private static final String TABLE = "mall_management_sql.`order`";
 
     /** 一条守卫谓词：`列 = 值`。 */
@@ -237,6 +247,27 @@ public class OrderStateMachine {
         return OrderState.isCanonical(payIf, deliveryIf, receiveIf)
                 ? OrderState.of(payIf, deliveryIf, receiveIf).name()
                 : UNCLASSIFIED;
+    }
+
+    /**
+     * 三位组合的**非法形状**；合法时返回 {@code null}。
+     *
+     * <p>这是 TD-17 的探测口径：{@code orderAdd} 的三个状态位由客户端直传，是伪造态唯一的门
+     * （{@code ConcurrencyRunner} 的 S4a 正是从这个门造前置条件）。**只分类、不拦截**
+     * —— 拦截是另一笔、需业务裁决（见类注释的「姿态」段），本类只负责把「是什么形状」说清楚。
+     *
+     * @return {@code "010"} / {@code "001"} / {@code "011"}（{0,1} 内的非法组合，按
+     *         PayIf-DeliveryIf-ReceiveIf 顺序拼）、{@code "non_binary"}（越界取值，
+     *         例如 {@code orderAdd} 收了 2）；合法组合 ⇒ {@code null}
+     */
+    public String illegalShape(int payIf, int deliveryIf, int receiveIf) {
+        if (!OrderState.isCanonical(payIf, deliveryIf, receiveIf)) {
+            // 越界取值先归一：否则 shape 的取值会随客户端传什么都变，tag 基数失去上界。
+            return "non_binary";
+        }
+        return OrderState.of(payIf, deliveryIf, receiveIf).legal()
+                ? null
+                : "" + payIf + deliveryIf + receiveIf;
     }
 
     // ===================== 内部 =====================

@@ -4,6 +4,9 @@ import com.minke.mallmanagement_service.DistributedLockService;
 import com.minke.mallmanagement_service.DistributedLockService.LockName;
 import com.minke.mallmanagement_service.GoodsCacheService;
 import com.minke.mallmanagement_service.GoodsTypeCacheService;
+import com.minke.mallmanagement_service.OrderAction;
+import com.minke.mallmanagement_service.OrderStateMachine;
+import com.minke.mallmanagement_service.OrderTransitionRecorder;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -35,6 +38,19 @@ public class MallManagementGoodsController {
 
     @Autowired
     private DistributedLockService distributedLockService;
+
+    // ===== B3：订单状态机与它的观测出口 =====
+    // 两个都是 @Service/@Component ⇒ **不在 @WebMvcTest 切片里**，故 AbstractSmokeTest 必须
+    // 提供替身，否则全部 smoke 用例在**上下文加载期**就红（该基类里这个坑已记录过五次）。
+    // 其中 OrderStateMachine 用的是**真 bean**（@Import）：它无依赖，且让 golden copy 钉住的
+    // 那条 UPDATE 语句真的流经 smoke 用例 —— 比给它一个返回 null 的替身强得多。
+
+    @Autowired
+    private OrderStateMachine orderStateMachine;
+
+    /** 观测编排（读回三位 / 推前后态 / 投递时间线）。本类只管分支与文案，观测全权交给它。 */
+    @Autowired
+    private OrderTransitionRecorder orderTransitionRecorder;
 
     @Value("${app.upload-dir:${user.dir}/src/main/resources/static/img/}")
     private String uploadDir;
@@ -434,6 +450,9 @@ public class MallManagementGoodsController {
             if (rows > 0) {
                 result.put("success", true);
                 result.put("msg", "订单添加成功");
+                // B3：只在**真的插进去之后**观测出生。放在这里而不是方法开头，是因为
+                // 「订单已存在」那条早退分支并没有产生一个新状态，不该记成一次出生。
+                orderTransitionRecorder.created(OrderId, PayIf, DeliveryIf, ReceiveIf);
             } else {
                 result.put("success", false);
                 result.put("msg", "订单添加失败");
@@ -550,25 +569,9 @@ public class MallManagementGoodsController {
         return distributedLockService.runLocked(LockName.ORDER_PAY, orderId, () -> orderPayIfUpLocked(orderId));
     }
 
-    /** orderPayIfUp 的临界区：**原方法体逐字未动**（B2 的边界）。 */
+    /** orderPayIfUp 的临界区：**响应文案与分支逐字未变**（B3 只把 SQL 字面量收敛进状态机，并加上观测）。 */
     private Map<String, Object> orderPayIfUpLocked(String orderId) {
-        Map<String, Object> result = new HashMap<>();
-        String sql = "UPDATE mall_management_sql.`order` SET PayIf = 1, SettlementDate = NOW() WHERE OrderId = ? AND PayIf = 0";
-        try {
-            int rows = GoodjdbcTemplate.update(sql, orderId);
-            if (rows > 0) {
-                result.put("success", true);
-                result.put("msg", "付款成功");
-            } else {
-                result.put("success", false);
-                result.put("msg", "订单不存在或已付款");
-            }
-        } catch (Exception e) {
-            e.printStackTrace();
-            result.put("success", false);
-            result.put("msg", "数据库错误：" + e.getMessage());
-        }
-        return result;
+        return casTransition(OrderAction.PAY, orderId, "付款成功", "订单不存在或已付款");
     }
 
     //收货按钮更新信息
@@ -578,25 +581,9 @@ public class MallManagementGoodsController {
         return distributedLockService.runLocked(LockName.ORDER_RECEIVE, orderId, () -> orderReceiveIfUpLocked(orderId));
     }
 
-    /** orderReceiveIfUp 的临界区：**原方法体逐字未动**（B2 的边界）。 */
+    /** orderReceiveIfUp 的临界区：**响应文案与分支逐字未变**（B3 只把 SQL 字面量收敛进状态机，并加上观测）。 */
     private Map<String, Object> orderReceiveIfUpLocked(String orderId) {
-        Map<String, Object> result = new HashMap<>();
-        String sql = "UPDATE mall_management_sql.`order` SET ReceiveIf = 1, SettlementDate = NOW() WHERE OrderId = ? AND PayIf = 1 AND ReceiveIf = 0";
-        try {
-            int rows = GoodjdbcTemplate.update(sql, orderId);
-            if (rows > 0) {
-                result.put("success", true);
-                result.put("msg", "收货成功");
-            } else {
-                result.put("success", false);
-                result.put("msg", "订单未付款或已收货");
-            }
-        } catch (Exception e) {
-            e.printStackTrace();
-            result.put("success", false);
-            result.put("msg", "数据库错误：" + e.getMessage());
-        }
-        return result;
+        return casTransition(OrderAction.RECEIVE, orderId, "收货成功", "订单未付款或已收货");
     }
 
     //发货按钮更新信息
@@ -606,23 +593,51 @@ public class MallManagementGoodsController {
         return distributedLockService.runLocked(LockName.ORDER_DELIVERY, orderId, () -> orderDeliveryIfUpLocked(orderId));
     }
 
-    /** orderDeliveryIfUp 的临界区：**原方法体逐字未动**（B2 的边界）。 */
+    /** orderDeliveryIfUp 的临界区：**响应文案与分支逐字未变**（B3 只把 SQL 字面量收敛进状态机，并加上观测）。 */
     private Map<String, Object> orderDeliveryIfUpLocked(String orderId) {
+        return casTransition(OrderAction.DELIVER, orderId, "发货成功", "订单不存在或未付款或已发货/已收货");
+    }
+
+    // ==================== B3：状态转移的观测出口 ====================
+
+    /**
+     * 三个 CAS 端点的**共同临界区**。B2 之前它们是三段逐字重复的方法体；B3 把 SQL 收敛进
+     * {@link OrderStateMachine} 后，三段之间只剩「动作」与「两条文案」不同，故合成一处 ——
+     * 不是为省行数，而是为了让「同一处改动要同时改三遍、漏一遍就静默漂移」这件事不再可能。
+     *
+     * <p>⚠️ **分支与文案一个字节都没变**：{@code rows > 0} → 成功文案；{@code rows == 0} →
+     * 原样的失败文案（三条各不相同，故由参数传入）；异常 → {@code "数据库错误：" + e.getMessage()}。
+     * 这是 A3 的 A-S3-2（20 并发支付里恰好 19 个返回逐字「订单不存在或已付款」）保持绿的前提。
+     *
+     * <p>观测全部委托给 {@link OrderTransitionRecorder}，**在 UPDATE 返回的这一处立刻调用**
+     * （即仍在临界区内）—— 理由见该类注释。本方法因此只剩「执行 + 分支 + 文案」。
+     *
+     * <p>观测路径**全程 fail-soft**：读回失败、投递失败，都不影响响应体。
+     * 状态位已经在 {@code order} 表里改完了，这才是真值；时间线与指标是过程记录。
+     */
+    private Map<String, Object> casTransition(OrderAction action, String orderId,
+                                              String okMsg, String noRowsMsg) {
         Map<String, Object> result = new HashMap<>();
-        String sql = "UPDATE mall_management_sql.`order` SET DeliveryIf = 1, SettlementDate = NOW() WHERE OrderId = ? AND PayIf = 1 AND DeliveryIf = 0 AND ReceiveIf = 0";
+        // SQL 由状态机生成，与 B2 之前硬编码的字面量逐字符相同 ——
+        // 由 OrderStateMachineTest.updateSqlIsByteForByteTheLegacyLiteral 钉死。
+        String sql = orderStateMachine.updateSql(action);
         try {
             int rows = GoodjdbcTemplate.update(sql, orderId);
             if (rows > 0) {
                 result.put("success", true);
-                result.put("msg", "发货成功");
+                result.put("msg", okMsg);
+                orderTransitionRecorder.applied(action, orderId);
             } else {
                 result.put("success", false);
-                result.put("msg", "订单不存在或未付款或已发货/已收货");
+                result.put("msg", noRowsMsg);
+                // 守卫没命中：重复流转 / 单不存在。**既有行为**，本笔不新增任何拒绝文案。
+                orderTransitionRecorder.rejected(action, orderId);
             }
         } catch (Exception e) {
             e.printStackTrace();
             result.put("success", false);
             result.put("msg", "数据库错误：" + e.getMessage());
+            orderTransitionRecorder.errored(action, orderId);
         }
         return result;
     }

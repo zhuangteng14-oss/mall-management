@@ -207,6 +207,34 @@ class OrderStateMachineTest {
     }
 
     @Test
+    @DisplayName("illegalShape：3 个伪造组合各有形状名，合法为 null，越界归一为 non_binary（tag 基数有上界）")
+    void illegalShapeNamesOnlyTheForgedCombinations() {
+        assertThat(machine.illegalShape(0, 1, 0)).isEqualTo("010");
+        assertThat(machine.illegalShape(0, 0, 1)).isEqualTo("001");
+        assertThat(machine.illegalShape(0, 1, 1)).isEqualTo("011");
+
+        assertThat(machine.illegalShape(1, 1, 1)).as("合法态没有形状").isNull();
+        assertThat(machine.illegalShape(0, 0, 0)).isNull();
+        assertThat(machine.illegalShape(1, 0, 1)).as("未发货即收货是合法的").isNull();
+
+        assertThat(machine.illegalShape(2, 0, 0)).as("越界不产生新取值").isEqualTo("non_binary");
+        assertThat(machine.illegalShape(-1, 7, 9)).isEqualTo("non_binary");
+    }
+
+    @Test
+    @DisplayName("任何成功转移之后必然合法 ⇒ 转移后的形状检测只抓越界，**不抓伪造**")
+    void illegalShapeHasNoForgerySignalAfterATransition() {
+        for (OrderAction action : new OrderAction[]{PAY, DELIVER, RECEIVE}) {
+            for (OrderState from : machine.guardAdmits(action)) {
+                OrderState to = machine.apply(action, from);
+                assertThat(machine.illegalShape(to.payIf(), to.deliveryIf(), to.receiveIf()))
+                        .as("%s: %s → %s 之后不该报出伪造形状", action, from, to)
+                        .isNull();
+            }
+        }
+    }
+
+    @Test
     @DisplayName("OrderState.of 反过来**拒绝**越界取值 —— 观测路径要靠 isCanonical 先判，或用 stateName")
     void ofRejectsNonCanonicalBits() {
         assertThatThrownBy(() -> OrderState.of(2, 2, 2))
@@ -228,6 +256,13 @@ class OrderStateMachineTest {
         }
         assertThat(OrderStateMachine.UNCLASSIFIED.length())
                 .isLessThanOrEqualTo(OrderStateMachine.STATE_NAME_MAX_LEN);
+        assertThat(OrderStateMachine.NO_PREVIOUS_STATE.length())
+                .as("时间线里「没有前态」的占位名也要塞得进同一列")
+                .isLessThanOrEqualTo(OrderStateMachine.STATE_NAME_MAX_LEN);
+        assertThat(OrderStateMachine.NO_PREVIOUS_STATE)
+                .as("占位名不能与任何真实状态名撞车，否则时间线里分不出「出生」和「从前态 X 来」")
+                .isNotIn(java.util.Arrays.stream(OrderState.values()).map(Enum::name).toList())
+                .isNotEqualTo(OrderStateMachine.UNCLASSIFIED);
         assertThat(max).as("当前最长的是 ILLEGAL_DELIVERED_RECEIVED_UNPAID")
                 .isEqualTo(ILLEGAL_DELIVERED_RECEIVED_UNPAID.name().length());
     }

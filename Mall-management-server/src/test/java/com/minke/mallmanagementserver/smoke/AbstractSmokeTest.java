@@ -4,10 +4,13 @@ import com.minke.mallmanagement_service.DistributedLockService;
 import com.minke.mallmanagement_service.FriendCacheService;
 import com.minke.mallmanagement_service.GoodsCacheService;
 import com.minke.mallmanagement_service.GoodsTypeCacheService;
+import com.minke.mallmanagement_service.OrderStateMachine;
+import com.minke.mallmanagement_service.OrderTransitionRecorder;
 import com.minke.mallmanagement_service.UserCacheService;
 import org.junit.jupiter.api.BeforeEach;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
+import org.springframework.context.annotation.Import;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
@@ -35,6 +38,11 @@ import static org.mockito.Mockito.when;
  */
 @WebMvcTest
 @ActiveProfiles("smoke")
+// B3：把**真的** OrderStateMachine 拉进 Web 切片。它没有依赖、只是一张纯函数转移表，
+// 且它生成的 UPDATE 语句正是 golden copy 钉住的那条 —— 用真 bean，smoke 用例就顺带验证了
+// 「生成的 SQL 能穿过 JdbcTemplate 调用而不炸」；换成替身则 updateSql 返回 null，
+// 下面那句 when(jdbcTemplate.update(anyString(), …)) 便匹配不上，两个用例会一起静默走错分支。
+@Import(OrderStateMachine.class)
 public abstract class AbstractSmokeTest {
 
     @Autowired
@@ -115,6 +123,24 @@ public abstract class AbstractSmokeTest {
      */
     @MockitoBean
     protected DistributedLockService distributedLockService;
+
+    /**
+     * 同一类问题，第六次遇到：B3 让 {@code MallManagementGoodsController} 多依赖一个
+     * {@code @Service}（{@code OrderTransitionRecorder}，观测编排）。它不在 Web 切片里，
+     * 漏掉同样在**上下文加载期**就红、拖垮全部 smoke 用例
+     * （{@code OrderStateMachine} 由类上的 {@code @Import} 用真 bean 解决）。
+     *
+     * <p>替身的方法**全是 void**（{@code applied} / {@code rejected} / {@code errored} /
+     * {@code created}），故默认替身就是「什么都不做」，无需在任何子类里 stub ——
+     * 这与 {@code DistributedLockService} 那个必须 stub 的替身恰好相反。
+     *
+     * <p>推论：smoke 里**观测是空转的**（不代表它在生产里也空转）。观测编排的分支验证在
+     * {@code OrderTransitionRecorderTest}，指标/线程池/时间线的语义分别在
+     * {@code MallOrderStateMetricsTest} / {@code OrderStateExecutorTest} /
+     * {@code OrderTimelineWriterTest}，端到端在 A3 的 C 组场景。
+     */
+    @MockitoBean
+    protected OrderTransitionRecorder orderTransitionRecorder;
 
     /**
      * 锁替身的行为：**直接执行 action**（不做任何互斥、不碰 Redis）。
