@@ -238,8 +238,12 @@ public class MallManagementGoodsController {
     }
 
     //这是一个接口（用于根据商品的不同型号切换显示对应的价格）
-    // 方法体搬到 GoodsCacheService.priceByTriple()（逐字搬运，含 SQL / queryForMap / try-catch /
-    // 返回结构）。本方法只保留路由与委托 —— 无形参分支。
+    // 【2026-09-30 改】SQL 仍在 GoodsCacheService.priceByTriple()（缓存注解的落点），但
+    // **try/catch 与响应组装搬回了本方法** —— 那是让 Service 侧能「技术异常上抛」的前提，
+    // 而上抛是「不写入缓存」的**唯一**表达方式（sync=true 禁用 unless）。与
+    // UserCacheService.publicInfo() / MallManagementUserController.userSelect 同款。
+    // ⚠️ 平行地：不得把 catch 挪回 Service 的**同类内另一个**方法 —— 自调用不走代理，
+    //    @Cacheable 会静默失效（cache-layer.md §11 ㊸③）。要那样做就必须拆成第二个 bean。
     // 缓存：cacheName = goodsPrice、key = #MerchantId + '::' + #GoodName + '::' + #ProductCode
     //      （**三维复合键**，本项目首个）、sync = true（单飞防击穿）；
     //      失效面 = goodsAdd / goodsUp / goodsDe **三者，全部 allEntries** —— 理由
@@ -253,7 +257,27 @@ public class MallManagementGoodsController {
             @RequestParam("GoodName") String GoodName,
             @RequestParam("ProductCode") String ProductCode
     ) {
-        return goodsCacheService.priceByTriple(MerchantId, GoodName, ProductCode);
+        Map<String, Object> result = new HashMap<>();
+        try {
+            Map<String, Object> row =
+                    goodsCacheService.priceByTriple(MerchantId, GoodName, ProductCode);
+            if (row == null) {
+                // 业务事实：该三元组不存在（Service 侧 0 行 ⇒ null，且该 null 会被负缓存）。
+                // 与下面的 catch 分支落**同一个** marker —— 响应逐字段与改前一致，
+                // 变的只有缓存行为（改前缓存的是失败 marker，现在缓存的是 null）。
+                result.put("success", false);
+                return result;
+            }
+            result.put("success", true);
+            result.put("price", row.get("Price"));
+            result.put("goodImg", row.get("GoodImg")); // 响应键与列名 GoodImg 不同名
+        } catch (Exception e) {
+            // 技术异常（含 Service 侧「>1 行」抛出的 IncorrectResultSizeDataAccessException）：
+            // 这里接住 ⇒ 仍是 200 + {success:false}，**不是 500**（对调用方零契约变更）。
+            e.printStackTrace();
+            result.put("success", false);
+        }
+        return result;
     }
 
     //这是一个接口（用于更新商品数据）
