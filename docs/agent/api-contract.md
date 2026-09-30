@@ -66,7 +66,7 @@
 - ⚠️ `G:24 goodstype` POST：同为「先查后插」（`G:42`→`G:51`）。返回 `{success:false,msg:"类型已存在"}` 而非 `"0"`，与 `loginAdd` 风格不一致。
 - `M:73 history` 非幂等：除查询外还会 upsert `user_conversation_read.last_read_time = NOW()`（`M:85-88`），每次调用都刷新时间戳。
 - `M:96 send` 非幂等：每次调用插入一条新 `message`（`M:103`）。
-- `G:384 orderAdd` 非幂等：每次调用插入一条新 `order`；`OrderId` 由调用方提供且**无唯一约束**，可重复下单号。
+- `G:384 orderAdd` **仍非幂等**：每次调用插入一条新 `order`。⚠️ **原文**写「`OrderId` 由调用方提供且**无唯一约束**，可重复下单号」—— **2026-09-30 S1a（`1e2fcfa`）已加 UNIQUE `uk_order_orderId`**，同单号第二次调用会被 DB 拒（`orderAdd` 把它吞成 **HTTP 200 + `msg="数据库错误…"`**，见 TD-14 / `A-S2a-1c`）。**但「非幂等」这条没变**：拦的只是「同单号重复插入」，不同单号照旧每调一次插一行 ⇒ 幂等性仍不由接口保证。
 - `G:67 goodsAdd` / `G:215 goodsDe` / `G:269 goodsUp`：均同时写 `goods` 与 `productsales` 两张表，**无事务保护**（见 `concurrency-map.md`）。
 - `G:521/543/565` 三个订单状态接口是全项目唯一带并发防护的写接口，详见 `concurrency-map.md` 正面案例。
 - `G:350 productSearch`：`keyword` 未加 `@RequestParam` 显式命名，依赖参数名保留（编译需 `-parameters`）。关键词被逐字符拼进 SQL 字符串（`G:361`），因拆分粒度为单字符**无法构造多字符注入**，但含 `'` 会使 SQL 语法错误。

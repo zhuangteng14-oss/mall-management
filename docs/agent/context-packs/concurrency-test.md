@@ -197,7 +197,7 @@ A3 的结论只有在「确实压到了目标环境」时才成立。故脚本�
 
 | 断言 | 预期结果 | 依据 |
 |---|---|---|
-| 并发同参 `orderAdd` 不产生重复 `OrderId` | **预期失败** | `concurrency-map.md` §5 第 9 行（`order.OrderId` 无唯一索引，主键是自增 `Id`） |
+| 并发同参 `orderAdd` 不产生重复 `OrderId` | ~~**预期失败**~~ → ✅ **PASS**（2026-09-30 S1a 翻转） | ~~`concurrency-map.md` §5 第 9 行（`order.OrderId` 无唯一索引，主键是自增 `Id`）~~ → §5 第 9 行**已标记「已消除」**（`1e2fcfa`）；本断言同日拆为 **`A-S2a-1a`（锁指标增量 == 20）/ `1b`（rows == 1）/ `1c`（msg 无「数据库错误」）**，见 `cache-layer.md:233` |
 | 并发同参 `loginAdd` **不产生 HTTP 5xx** —— **不得**写成「不产生重复行」 | **预期失败**（信号 = **5xx > 0**） | `concurrency-map.md` §5 第 5 行（`U:61` → `U:81` TOCTOU）。三表 `login` / `user` / `customerimage` **都有主键**（`UserName` / `username` / `UserName`）→ 重复行**不可能**产生；真实缺陷是未捕获的 `DuplicateKeyException` → HTTP 500（`U:65-105` 无 try/catch）。**此行的信号极性与其它各处相反**：这里的 5xx 是「缺陷复现」而非异常 |
 | 并发同参 `friendAdd` / `goodstype`(POST) 不产生重复行 | **预期失败**（信号 = **重复行 ≥ 2**） | `concurrency-map.md` §5 第 6–8、10 行（TOCTOU；`friend` 仅 PK `id`、`goodstype` 仅 PK 自增 → 两表可**真的插出重复行**） |
 | 并发下无死锁 / 无锁等待超时（MySQL 1213 / 1205） | 待实测 | 当前 `order` 仅 6 行种子数据，全表扫描代价极低，**小表上绿色不构成有意义的证据**，需在大数据量下复测 |
@@ -239,7 +239,7 @@ A3 的结论只有在「确实压到了目标环境」时才成立。故脚本�
 > 本节只放**结论性数字**；完整的发现过程、踩过的坑与原始日志见 `docs/agent/archive/worklog-2026-09-20-a3.md`。
 
 - **B-2 三处 check-then-insert 全部复现（`rounds=5 / reproRounds=5/5`）**，两次独立实测（背压 / 字符集修正前一次；两步编译 + `run.sh` 下 `runId=f84fc015` 一次），逐轮数字一致：`loginAdd` → `5xx=9 成功=1 已存在=10 未判定=0`；`goodstype` 重复行数 = 新增成功数；`friendAdd` 重复行数 = 申请成功数。**信号极性不同**：`login` / `user` / `customerimage` 三表有主键 → 撞键 `ERROR 1062` → 未捕获 → **HTTP 500**（信号 = 5xx>0，**与其它各处相反**：此处 5xx 是「缺陷复现」而非异常）；`goodstype` / `friend` 只有自增主键 → **真的插出重复行**（信号 = 重复行 ≥ 2）。无全局 `@ControllerAdvice`，未捕获异常走 Spring 默认 500。
-- **S4b 性能退化 = TD-14（`order.OrderId` 无索引）**：`SHOW INDEX` 实测 `order` 只有 `PRIMARY(Id)`；三个 CAS 端点 WHERE 均以 `OrderId = ?` 起头，`EXPLAIN` 实测 `type=ALL`、`possible_keys` 空。同款 WHERE 的只读对照（16 线程 × 25，只变行数）：**6 行 p50=1ms → 6006 行 p50=51ms → 12006 行 p50=94ms**（12000 填充行测后已删，`order` 回到 6 行）。满负载档（`order` 约 1 万行）：`offered=120 achieved=63.0 QPS wall=114.3s p50=496.1 p95=779.7 p99=842.4 max=1120.6(ms)`；S4b 长档（60s，从 6 行起）：`offered=120 achieved=96.2 QPS wall=74.8s p50=292.4 p95=538.7 p99=625.6 max=860.1(ms)`，四条门禁断言全 PASS、不变式违反 = 0、5xx = 0。
+- **S4b 性能退化 = TD-14（`order.OrderId` 无索引）**：`SHOW INDEX` 实测 `order` 只有 `PRIMARY(Id)`；三个 CAS 端点 WHERE 均以 `OrderId = ?` 起头，`EXPLAIN` 实测 `type=ALL`、`possible_keys` 空。同款 WHERE 的只读对照（16 线程 × 25，只变行数）：**6 行 p50=1ms → 6006 行 p50=51ms → 12006 行 p50=94ms**（12000 填充行测后已删，`order` 回到 6 行）。满负载档（`order` 约 1 万行）：`offered=120 achieved=63.0 QPS wall=114.3s p50=496.1 p95=779.7 p99=842.4 max=1120.6(ms)`；S4b 长档（60s，从 6 行起）：`offered=120 achieved=96.2 QPS wall=74.8s p50=292.4 p95=538.7 p99=625.6 max=860.1(ms)`，四条门禁断言全 PASS、不变式违反 = 0、5xx = 0。（🔄 **2026-09-30 S1a**：以上是**加索引之前**的记录 —— `order.OrderId` 现已有 UNIQUE `uk_order_orderId`（`1e2fcfa`），本条描述的全表扫退化**已消除**；数字保留作历史对照。）
   - **结论（2026-09-21 修正定性）：无索引的代价要在同一环境内用行数对照来证 —— 只读对照（6 行 → 12006 行，p50 1ms → 94ms）就是那个证据。** 原写「120 QPS 不可达，瓶颈是索引缺失」，**归因错误**：CI 首跑（CI #8）同一档 S4b 实测 `achieved=119.9 QPS / p50=6.3ms` —— 同一份 SQL、同一后端、同一断言集，**同份数据在 CI 上可达 120 QPS**。故「本地达不到」= 本地环境（VM 的网络 / 磁盘）属性 + 索引缺失的叠加，不能记成索引缺失一因所致。两个本地数字的差（96.2 vs 63.0）仍成立，其唯一实质差异是窗口开始时 `order` 已有多少行。
   - ⚠️ `achieved` 的旧值（68.3 QPS / p50 398.9ms）出自**背压之前**的负载发生器（开环提交 + 无界队列 → 积压队列在提交结束后又排空，`achieved` 被算成排空期均值）。加了 `Semaphore` 背压后 68.3 → 63.0 **不是变差，是变准**；`line()` 同时打印 `offered` / `achieved` / `wall`，未达速时标 `←未达速（只记录，不门禁）`。
   - ⚠️ 96.2 vs 63.0 的对比有**未排除的混杂因素**（全量档里 S4b 不是首段，后端 / 连接池 / JIT 已热；热态本应更快却更慢，混杂方向与观测差**相反**），只能算**同向旁证**。严格曲线须把行数当唯一变量，即上一条只读对照。
@@ -272,7 +272,7 @@ A3 的结论只有在「确实压到了目标环境」时才成立。故脚本�
 - TD-10（CI 无 MySQL 的临时规避）—— **已关闭**（D1 落地：concurrency job 以 `A3_ENABLED=true` 跑真连库断言）
 - TD-12（`mall_management_sql.sql` 自带建库语句 → 导入到哪个实例都会建同名库；也是 CI 容器内「正好落位」的原因）
 - TD-13（39 处硬编码 `mall_management_sql.` 前缀 → 必须「独立实例 + 同名库」；`DATABASE()` 单独无法区分主机，故 P1 的 `VERSION()` 门禁是它的补偿）
-- TD-14（`order.OrderId` 无索引 —— S4b 性能退化的根因；正确性与性能是同一缺失的两面。**A3 不加索引**）
+- TD-14（`order.OrderId` 无索引 —— S4b 性能退化的根因；正确性与性能是同一缺失的两面）—— ✅ **2026-09-30 S1a（`1e2fcfa`）已加 UNIQUE `uk_order_orderId`**。⚠️ 原文尾注「**A3 不加索引**」**已作废**：该前提是「`mall_management_sql.sql` 不得修改」，已被规则 v2 取代（新增索引**无条件允许**）⇒ 现在 A3 跑在**已加索引**的库上，S4b 的对照数字随之换了口径
 - TD-15（`loginAdd` 返回「添加成功！」而不插行 → B-2 必须同时用 JDBC 核对行数）
 - TD-16（`--reset-db` 是死参数 —— 声明了破坏性语义，实际什么都不做）
 - TD-17（`orderAdd` 不校验三个状态位，可伪造终态订单 —— **登记不门禁**，A3 不为它新增断言）
@@ -336,7 +336,7 @@ A3 的结论只有在「确实压到了目标环境」时才成立。故脚本�
 | 1 | `[x]` | H2 —— 根 `.gitignore` 一处必须写「**追加**」而非「新增」 | `9b87ab9` 已含 27 行 `.gitignore`；见 `tech-debt.md` TD-02 更正记录 | §约束 |
 | 2 | `[x]` | F1b / OD-1 —— `loginAdd` 的 B 组断言必须是「**无 HTTP 5xx**」，**不得**写「无重复行」 | `login` PK=`UserName`、`user` PK=`username`、`customerimage` PK=`UserName` → 重复行**不可能**产生；真实缺陷是未捕获 `DuplicateKeyException` → HTTP 500（`U:65-105` 无 try/catch） | §验收标准 B 组第 2 行（原「loginAdd…不产生重复行」一行**已按本项拆开改写**） |
 | 3 | `[x]` | F4 **（已修正；2026-09-20 再收窄）** —— 种子 6 行订单全为 `(1,1,1)` 终态，故 **S3/S4 必须自建订单**；**S2 不在此列** | `mall_management_sql.sql` 的 order INSERT：Id 18–23 六行全部 `PayIf=1, DeliveryIf=1, ReceiveIf=1`；`orderPayIfUp` 的 WHERE 为 `PayIf=0` → 在种子订单上「恰好 1 次 `success:true`」**必然不成立**。修正对象是**支付 / 发货 / 收货**三场景，即 S3 与 S4 —— **上轮把 S2 一并写入是笔误，实为 S3**：S2 只调 `orderAdd` 自建订单（订单由被测端点自身创建），不存在「复用种子单」的问题。故原依据里「原文只写 S3/S4 会让 A 组第一条断言必败」一句的前提本身有误，一并更正 | §验收标准 A 组（含「种子单必败」的说明） |
-| 4 | `[x]` | B-1 —— `order.OrderId` **无唯一索引**（主键仅 `Id`） | `mall_management_sql.sql` order 建表语句。pack 不得写成「有唯一约束兜底」 | §验收标准 B 组第 1 行 |
+| 4 | `[x]` | ~~B-1 —— `order.OrderId` **无唯一索引**（主键仅 `Id`）~~ → ✅ **2026-09-30 S1a 已加 UNIQUE `uk_order_orderId`**（`1e2fcfa`） | 原依据 `mall_management_sql.sql` order 建表语句。⚠️ 原文「pack **不得**写成『有唯一约束兜底』」**自 S1a 起反转** —— 现在 DB 层**确实**有唯一约束兜底（`A-S2a-1b` 断言的正是它） | §验收标准 B 组第 1 行（同日已同步翻转） |
 | 5 | `[x]` | 澄清 1 —— `--b-group-gate` 默认 `false`、**只影响 B-2**（B-1 恒门禁、B-3 恒 record-only）；verdict 枚举 `PASS` / `EXPECTED_DEFECT_PRESENT` / `DEFECT_FIXED` / `RECORD_ONLY`；`rounds`、`reproRounds` 由脚本自动统计，**「≥3/5」不做运行时门禁**（仅作人工翻默认值的准入条件） | 本会话 2026-09-20 裁决 | §判定口径（verdict）与门禁 |
 | 6 | `[x]` | 澄清 4 —— B 组子前缀是 `<round>`（1..5，**同轮内 20 线程共享**），**不是** `<seq>`；行序号才用 `-S<seq>` / `-N<seq>` | 若跨轮共用同参，第 2 轮起 `loginAdd` 直接走「已存在」分支，**不进并发窗口**，后 4 轮等于白跑 | §判定口径（verdict）与门禁 |
 | 7 | `[x]` | Q1=B / TD-13 —— 隔离策略必须写「**独立实例 + 同名库** `mall_management_sql`」，**不得**写成「切库名隔离」 | 硬编码前缀 39 处（Goods 23 + User 16 + Message 0），全部指向 `mall_management_sql` | §前置准备「目标环境」 |
@@ -348,7 +348,7 @@ A3 的结论只有在「确实压到了目标环境」时才成立。故脚本�
 | 13 | `[x]` | 前置准备第 1–3 步（建 `mall_management_test` 库）**已失效** → 须按 Q1=B 重写为「独立 MySQL 实例 + 同名库」 | Q1=B 裁决 + TD-13（本地测试库当前「建好了但用不上」） | §前置准备「目标环境」 |
 | 14 | `[x]` | 必读文档行「tech-debt.md（**TD-01 ~ TD-11**）」**已过时** → 须补 TD-12、TD-13 | `tech-debt.md` 现有 TD-01 ~ TD-13；本轮实际补到 **TD-01 ~ TD-17**（TD-14/15/16/17 均在本任务期间登记） | §必读文档 |
 | 15 | `[x]` | H3 / H4 / H5 / H6 正文 —— **已回填**（见 §附录 A）：4 处与已落盘冲突（C1–C4，**一律以已落盘为准**）保留在附录 A；2 处 H3 自身缺口（G1–G2）已在正文解决；7 项待裁决（D1–D7）**均已裁决并落地**（D1→§CI 集成、D2→§判定口径、D3→§约束、D4→§验收标准、D5→TD-17、D6→§判定口径、D7→本表第 16 项） | 正文**存在于本地转录**（`5574d7b3` 第 134 行，27208 字符，经 `json.loads` 解出）。原判「从未落盘」**为误** —— 根因见 §元教训「实例 3」 | §附录 A |
-| 16 | `[x]` | R12 —— **改本 pack 时须同步 grep `concurrency-map.md` §5**：第 5 行的 `loginAdd` 表述（以及第 9 行的 `order.OrderId`）是否仍与 pack 的 B 组断言口径一致 | H3 `risks.R12`；`agent.md` 规则 9.2 / 9.3（**引用外部文档的结论必须回原文核对**）。已当场核对过一次：第 5 行确为 `loginAdd` TOCTOU、第 9 行确为 `order.OrderId` 无唯一索引，与本 pack `A-S2a-1` 的 `basis` 一致。列为 checklist 项的理由：这是**每次改 pack 都要重做**的动作，不是一次性核对 —— 上游 §5 若增删行，pack 的 `basis` 会静默失准 | 本表（**动作项**，每次改 pack 重做） |
+| 16 | `[x]` | R12 —— **改本 pack 时须同步 grep `concurrency-map.md` §5**：第 5 行的 `loginAdd` 表述（以及第 9 行的 `order.OrderId`）是否仍与 pack 的 B 组断言口径一致 | H3 `risks.R12`；`agent.md` 规则 9.2 / 9.3（**引用外部文档的结论必须回原文核对**）。已当场核对过一次：第 5 行确为 `loginAdd` TOCTOU、第 9 行**当时**确为 `order.OrderId` 无唯一索引。⚠️ **2026-09-30 S1a 后第 9 行已改为「已消除」**（`1e2fcfa`），本 pack B 组第 1 行与 `A-S2a-1` 亦同日翻转 —— R12 下次重做时须按**新口径**核对（第 9 行现在应读作「有 UNIQUE 兜底」）。列为 checklist 项的理由：这是**每次改 pack 都要重做**的动作，不是一次性核对 —— 上游 §5 若增删行，pack 的 `basis` 会静默失准 | 本表（**动作项**，每次改 pack 重做） |
 
 ### 附录 A —— H3–H6 与已落盘的冲突表（2026-09-20）
 
