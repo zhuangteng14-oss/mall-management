@@ -112,7 +112,7 @@ TD-01（ddl-auto）、TD-03（回滚规则矛盾）、TD-04/06/07/08（锚点与
 
 | # | 项 | 位置 | 为何会撞 | 归属 | 工作量 |
 |---|---|---|---|---|---|
-| 1 | **`orderAddLocked` 不得加 `@Transactional`** | javadoc `GoodsController:405` | 锁在 `runLocked` 的 `finally` 先释放、事务提交在方法返回**之后** ⇒ 后进者的 `COUNT(*)` 在 RR 下读自己事务开始时的快照、**看不到前一个未提交的行** ⇒ 仍插 2 行。全项目**唯一「禁止用标准注解」处** —— ✅ **已登记**（`### D.1`，2026-09-30 本笔），不再「无处登记」 | **三层前（新层须知）** ✅ **本笔落定** | 小（登记）✅ / 中（设计规避） |
+| 1 | **`orderAddLocked` 不得加 `@Transactional`** | javadoc `GoodsController:433-441`（禁令句 **`:437`**；方法声明 `:442`） | 锁在 `runLocked` 的 `finally` 先释放、事务提交在方法返回**之后** ⇒ 后进者的 `COUNT(*)` 在 RR 下读自己事务开始时的快照、**看不到前一个未提交的行** ⇒ 仍插 2 行。全项目**唯一「禁止用标准注解」处** —— ✅ **已登记**（`### D.1`，2026-09-30 本笔），不再「无处登记」 | **三层前（新层须知）** ✅ **本笔落定** | 小（登记）✅ / 中（设计规避） |
 | 2 | 无全局异常处理 / 无拦截器 | `@ControllerAdvice` / `@ExceptionHandler` / `HandlerInterceptor` = **0** | 新层抛出的异常无统一出口。**2026-09-30 实测（限定版）**：**框架层**错误出口已实测 —— 缺必填参数→**400**、未知路由→**404**，两者均落 **Boot 默认错误体**（`{timestamp,status,error,path}`，非本仓自造）；**业务层**异常出口**未验** | **三层内（三层产出）** | 中 |
 | 3 | 两套 CORS 机制并存 | `ImgConfig` 全局 `CorsFilter` + 4 处裸 `@CrossOrigin`（`MallManagementGoodsController:27` / `MallManagementUserController:20` / `MallManagementMessage:18` / `HealthController:37`） | CorsFilter 先于 DispatcherServlet ⇒ handler 级**静默失效** | **三层内（拦截器层）** | 小 |
 | 4 | `ddl-auto=update` + 零 `@Entity` | `application.properties:12`、`pom.xml:51`（TD-01） | 一旦有人加 `@Entity` 即反向 `ALTER TABLE`；`show-sql=true` 同刻全量打 SQL。**DAO 选型已定（`### D.4`）⇒ 不引 JPA ⇒ 本风险不会自行发生**；⚠️ 但 `spring-boot-starter-data-jpa` **不删**（`agent.md:36-37`「禁止删除旧配置」） | **三层前（定 DAO）** ✅ **本笔落定：`JdbcClient` 短期 + jOOQ 长期**（`### D.4`）；⚠️ **结论本笔落、实现随三层第一笔（订单域开工）** | 小 |
@@ -128,7 +128,7 @@ TD-01（ddl-auto）、TD-03（回滚规则矛盾）、TD-04/06/07/08（锚点与
 
 | 项 | 内容 |
 |---|---|
-| **禁令** | **`orderAddLocked` 不得加 `@Transactional`** —— 与本文 **`:49` 约束 4** 是同一句。源头：`MallManagementGoodsController.orderAddLocked` 的 javadoc + `DistributedLockService` 类 javadoc「调用点的两条硬要求」（第一颗 bullet） |
+| **禁令** | **`orderAddLocked` 不得加 `@Transactional`** —— 与本文 **`:49` 约束 4** 是同一句。源头：`MallManagementGoodsController` 的 javadoc `:433-441`（禁令句 **`:437`**；方法声明 `:442`） + `DistributedLockService` 类 javadoc「调用点的两条硬要求」（第一颗 bullet） |
 | **理由 ① 锁外事务** | 事务的提交发生在**方法返回之后**，而锁在 `runLocked` 的 `finally` 里、即方法**返回之前**已释放 ⇒ 后进者拿到锁后的 `SELECT COUNT(*)` 在 **RR** 下读的是自己事务开始时的快照、**看不到前一个未提交的行** ⇒ 仍插 2 行。**不加事务时 autocommit 让 INSERT 在释放锁之前就提交** —— 这正是临界区查重成立的前提（`A-S2a-1b`：20 并发同 `OrderId` 落库 **20 → 1**，靠的就是这一条） |
 | **理由 ② 跨 bean 调用** | 临界区是**传给另一个 bean**（`DistributedLockService`）的 **lambda**，锁的持有者是那个 bean、不是本方法 ⇒ **没有「锁内的 bean 方法边界」可以挂事务**。且两个 Controller 被测试**钉死为无 AOP 代理**（`MallManagementApplicationTests:113` `goodsControllerIsNotAopProxied` / `:133` `messageControllerIsNotAopProxied`）⇒ 注解式 AOP 在这里**结构上不可用**，锁只能是方法体内的显式调用（同类内自调用同样不走代理，同仓 `MallManagementGoodsController:245` 的同一论证） |
 | **⚠️ 不可外推** | 本禁令**只管被打锁的方法体**。它的反面是 **C#2**：`goodsAdd`（**没有**打锁）的事务边界**应当**加 `@Transactional` —— 只记住半边就会踩另一边 |
@@ -284,7 +284,7 @@ TD-01（ddl-auto）、TD-03（回滚规则矛盾）、TD-04/06/07/08（锚点与
 
 > 进度**不在本文维护** —— 本文 `:4` 自述「只做提取与归属，不含新事实」，全项目进度属跨文档状态，放这里会与各 pack 打架。
 > **权威进度表**：`docs/agent/progress.md`（2026-09-30 新建；命名约定见其 **§0**）。
-> 与本文相关的两笔（三层前准备）：**笔 1 前端走查** / **笔 2 文档补节** ——
-> 笔 2 须覆盖 `D#1`（`§D#1` 登记）、`D#4`（DAO 选型）、C3 数据源清单、A3 覆盖矩阵、**`§G` 现状复校**；
-> 另有两条**阻塞落笔**的裁决 `C#2` / `C#6`，见 `progress.md §5-B`。
+> 与本文相关的两笔（三层前准备）**均已收尾（2026-09-30）**：**笔 1 前端走查**（结果分流入 `api-contract.md` + `defect-survey.md`）/ **笔 2 文档补节** ——
+> 笔 2 的 5 项**全部落定**：`D#1`（**`### D.1`**）、`D#4`（**`### D.4`**）、C3 数据源清单（`selection-status.md §6`）、A3 覆盖矩阵（**§H**）、`§G` 现状复校（**G 表已存在**，#11 / #12）；
+> 另有两条**阻塞落笔**的裁决 `C#2` / `C#6` **仍未裁**，见 `progress.md §5-B`。
 

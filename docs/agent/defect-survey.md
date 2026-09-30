@@ -199,7 +199,7 @@
 
 **Class B —— 语义未定，须先裁决**（不能动手）：
 1. `goodsUp` 改名粒度（改一条还是批量）
-2. `goodsAdd` / `goods` / `productsales` 的事务边界 —— 「**半成品商品**」的修法是给 `goodsAdd` 加 `@Transactional`；注意 `orderAdd` 那条「不得加 `@Transactional`」（`GoodsController:405-408`）**不适用于此处**
+2. `goodsAdd` / `goods` / `productsales` 的事务边界 —— 「**半成品商品**」的修法是给 `goodsAdd` 加 `@Transactional`；注意 `orderAdd` 那条「不得加 `@Transactional`」（`GoodsController:433-441`）**不适用于此处**
 3. `productsales` 硬删 vs 软删
 4. 时间线的动作集是否需要 cancel/refund
 5. `BD-01` 的 `SettlementDate` 归谁
