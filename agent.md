@@ -34,7 +34,10 @@
 
 1. 所有功能实现不能阻碍旧功能运作，必须保持向后兼容。
 2. 禁止删除旧接口、旧字段、旧表、旧配置。
-3. 数据库变更只允许新增表、新增字段、新增索引；禁止删列、改类型、删表。
+3. 数据库变更**只允许追加，禁止删除**。追加分两档：
+   (a) 无条件允许：新增表、新增字段、新增索引（含 `UNIQUE` 唯一索引）。
+   (b) 有条件允许：新增外键（FK）、修改列类型 —— 条件见「数据库管理规则」4。
+   仍然禁止：删表、删列、删字段、删已有索引与约束（见「数据库管理规则」2）。
 4. 禁止直接修改或推送 main 分支。
 4.1 单人项目例外：当项目由单人开发、无独立 reviewer 时，允许以下操作：
     (a) 本地 review + 直接合并 feature 到 main
@@ -57,6 +60,7 @@
 
 1. mall_management_sql.sql 位于项目根目录，是数据库权威 Schema，已纳入 Git。
 2. 禁止删除或修改 mall_management_sql.sql 里已有的表、字段、索引、约束。
+   本规则与硬性约束 3 精神同形：**禁破坏，不禁演进** —— 允许的演进方式见规则 3。
 3. 所有数据库变更只允许追加到 mall_management_sql.sql 末尾，格式：
 
 ```sql
@@ -66,9 +70,26 @@
 CREATE TABLE IF NOT EXISTS xxx (...);
 ALTER TABLE xxx ADD COLUMN new_col VARCHAR(64) DEFAULT NULL;
 CREATE INDEX idx_xxx ON xxx(col);
+CREATE UNIQUE INDEX uk_xxx ON xxx(col);
+ALTER TABLE xxx ADD CONSTRAINT fk_xxx FOREIGN KEY (col) REFERENCES yyy(col);
+-- 改列类型（禁止 MODIFY COLUMN）：影子列 —— 新增新类型列 → 回填 → 切读 → 停用旧列（**不删旧列**）
+ALTER TABLE xxx ADD COLUMN new_col_v2 VARCHAR(128) DEFAULT NULL COMMENT '影子列：替代 old_col（新类型 <T>），旧列停用不删';
+UPDATE xxx SET new_col_v2 = <转换表达式> WHERE new_col_v2 IS NULL;  -- 回填；大表须分批
 ```
 
-4. 禁止使用 DROP TABLE、DROP COLUMN、MODIFY COLUMN 改变类型。
+> 三类新增 DDL 的前置（UNIQUE / FK / 影子列）：`CREATE UNIQUE INDEX` 须**先跑重复行检测**（每个库都是 0
+> 才能建；MySQL 无 `CREATE INDEX IF NOT EXISTS`，幂等性由「导入 = 先 DROP 再 CREATE」保证）；
+> `ADD CONSTRAINT ... FOREIGN KEY` 须**先确认子表无孤儿行**；改列类型须**回填完成并切读后**才能停用旧列。
+
+4. 禁止使用 `DROP TABLE`、`DROP COLUMN`；**禁止用 `MODIFY COLUMN` 改变已有列的类型** —— 改类型一律走规则 3 的
+   影子列写法。规则 3(b) 的「有条件允许」项，四项前置**缺一不可**：
+   ① 正向 SQL（追加到 `.sql` 末尾，格式见规则 3）
+   ② 回滚 SQL（**逻辑废弃**语义，见下）
+   ③ 迁移脚本（含幂等探测）
+   ④ 先在同版本 VM 上验证，再 **A3 全量绿**
+   四项不满足一律按禁止处理；变更另须按规则 5 记入 `docs/agent/db-migration.md`。
+   ⚠️ **回滚 SQL 的语义 = 逻辑废弃，不是物理删除**：对「新增字段 / 新增表」类变更，回滚写「保留列 / 表 +
+   置 NULL / 停用」，**不得**写 `DROP COLUMN` / `DROP TABLE`。这消除本规则与规则 5（须登记回滚 SQL）的既有矛盾。
 5. 每次数据库变更必须同步在 docs/agent/db-migration.md 里记录：
    功能名、变更类型、涉及表、SQL、回滚 SQL。
 6. 读取表结构时优先读：
@@ -185,7 +206,7 @@ git rebase origin/main
    - docs: 更新xxx
    - chore: 更新xxx
 4. 不要删除旧接口、旧字段，保持向后兼容。
-5. 数据库变更只允许新增表、新增字段，不要直接删列改类型。
+5. 数据库变更只允许追加（新增表 / 字段 / 索引，及「有条件允许」的 FK / 改列类型）—— 详见「数据库管理规则」3、4。
 6. 一个功能如果同时改前后端，就在同一个 feature 分支里完成。
 7. 新增监控、日志、管理端功能时，不得阻塞主业务线程。
 8. 实时日志、指标推送优先使用 SSE 或 WebSocket，并设置超时与断线重连。
