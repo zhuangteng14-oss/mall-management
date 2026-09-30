@@ -57,7 +57,7 @@
 | 项 | 位置 | 后果 | 档位 |
 |---|---|---|---|
 | 三处上传零类型校验，目录整体作静态资源回源 | `MallManagementGoodsController:106-113` / `:282-287`；`MallManagementUserController:193-199`；`ImgPath.java:34` | 可传 `.html`/`.svg`，同源存储型 XSS 面 | 亲读 + 推断(可利用性) |
-| **同名文件静默跳过、DB 照样记 URL** | `GoodsController:111-113,119`；`UserController:197-199,205` | 商家 B 传同名 `1.jpg` → 文件不落盘、DB 指向**商家 A 的图**、接口返回 `success:true` | 亲读 |
+| **同名文件静默跳过、DB 照样记 URL** — ✅ **已修复（A 批 `efe7959`，同名策略 C）** | 原 `GoodsController:111-113,119`；`UserController:197-199,205` | 原：商家 B 传同名 `1.jpg` → 文件不落盘、DB 指向**商家 A 的图**、接口返回 `success:true`。现：同名**同内容** → 复用磁盘那份；同名**异内容** → 改名另存 `<原名>_<8hex><扩展名>`；落盘失败 → `{success:false, msg}` 且在**写库之前**返回（三处统一） | 亲读 |
 | catch 归因一律「已存在」 | `GoodsController:114-116`；`UserController:200-203` | 磁盘满/权限错被说成「已存在」，排查方向被带偏 | 亲读 |
 | `spring.servlet.multipart.*` 完全未配 | 全仓 0 命中 | 走 Boot 默认 1MB，超限抛 `MaxUploadSizeExceededException` → 无全局异常处理 → 用户拿框架错误体 | 亲读(框架) |
 | 无全局异常处理 / 无拦截器（除 CorsFilter） | 全仓 `@ControllerAdvice`/`@ExceptionHandler`/`HandlerInterceptor` = **0** | 未捕获异常走 Boot 默认错误体（含 `timestamp/path`），错误文案与 HTTP 码全项目不统一 | 亲读 |
@@ -86,7 +86,7 @@
 | 默认 profile 无 `spring.data.redis.*` | `application.properties` 全文（a3 有 6 项） | 静默连 `localhost:6379` 无口令，或 WARN 后永久走库 —— **性能静默退化除日志外无出口** | 亲读 |
 | **生产 = 默认 profile** | 只有 default 与 a3，无 dev/prod | 跑的是「开发期路径 + root/123456 + 无 Redis 配置 + 无 L2 TTL」这套 | 亲读 |
 | `upload-dir` 默认解析到 CWD 下**源码目录** | `application.properties:111` | 打 jar 后写 jar 旁边或直接失败 | 亲读 |
-| **上传目录不可写 ⇒ 整个应用起不来** | `ImgPath.java:23-27` `@PostConstruct` | 非核心功能把服务整体拖死，无降级 | 亲读 |
+| **上传目录不可写 ⇒ 整个应用起不来** — ✅ **已修复（A 批 `70eace2`）** | 原 `ImgPath.java:23-27` `@PostConstruct` | 原：非核心功能把服务整体拖死，无降级。现：`initUploadDir` 不再抛异常 —— 失败只打 `[WARN]` 并继续启动；目录不可用时**不注册** `/img/**`（请求落 404，刻意不兜假目录）；失败推迟到真正落盘那一刻，由上传入口显式返回 `{success:false, msg}`。**取证**：`app.upload-dir` 指向必然建不出的路径，改前 `BeanCreationException` → `Failed to load ApplicationContext`，改后两条 WARN + `Tests run: 4, Failures: 0` | 亲读 |
 | MySQL 不可达 ⇒ 启动失败 | `HikariConfig.initializationFailTimeout=1` | 无「先起再自愈」路径；纯内存的缓存/锁路径也被拖死 | 推断 |
 | `show-sql=true` 在默认 profile 且 a3 未覆盖 | `application.properties:11` | 当前空转（零 `@Entity`），**加实体即刻全量打 SQL** —— 埋在降级路径上的地雷 | 亲读 |
 | `printStackTrace()` × 20 + `System.out.println` × 5 | `GoodsController`(11) / `MallManagementMessage:188,413` / `UserController:216,257` / `GoodsCacheService:96,147,221,296` / `GoodsTypeCacheService:79` | 异常只进 stdout，无级别、无 logger 名、无上下文；线上故障无 ERROR 级可检索记录 | 亲读 |
@@ -179,6 +179,7 @@
 | 时间线索引 | 注释点名的索引与 DDL 不一致 | `OrderTimelineWriter.java:47-48` |
 | `L2HealthProbe` 翻转计数 | check-then-act，并发下**会多记** | `L2HealthProbe.java:154-177` |
 | `cleanup()` 整轮清理 | **单表失败即中止整轮** —— 十余张表的 `SELECT`/`DELETE` 与外层 `for` 共用一个 `try`，任一表不存在（`SQLSyntaxErrorException`）即跳到单一 `catch`（`:2251`），其后所有表**静默漏清**。2026-09-30 的 P4 变红即此因：B3 把 `order_state_transition` 加进 `CLEANUP_COLS`（`:2178`）而 VM 未建表 ⇒ 排在它后面的 `login`/`user`/`friend` 全部漏清，残留 10 行 | `ConcurrencyRunner.java:2210-2258` |
+| 时间线的**存在性** = 「写入 fail-soft + 翻转时一行 WARN + `result=error` 指标」 | 控制确实**都在**，只是**都写在没人消费的地方**：表由**人肉**追加到 `mall_management_sql.sql` 后手工落盘（`:224` `CREATE TABLE IF NOT EXISTS`，无对应 `DROP`），而写入侧 `OrderTimelineWriter` 是刻意 **total catch**（`:108-111`：抛出去只会被线程池吞掉）+ **明确不重投**（`:24`「`result=error` 就是这一条时间线永久丢了」）—— 两者合起来 ⇒ 表不存在时应用**照常运行**、没有任何一环会喊。VM 上 `2026-09-29 ~ 2026-09-30`（B3 合并到本次建表）的**全部订单流转永久缺条、不可回补**（append-only 观测数据，无源可重放）。已闭合的一半：本次建表 + C 组首次真跑 ⇒ 「B3 从未在 VM 上验证过」不再成立；未闭合的一半就是历史缺条本身 —— **C3 若直接读这张表**，须知那段是空的，不能当成「那段时间没有流转」（类注释 `:42` 也把「一次性对齐」指给了 C3）。⚠️ 本条是**某台实例的历史数据状态**，非仓内可复核的代码事实：受影响面仅 VM，本地与 CI 各自重导 `.sql`，不受影响 | `OrderTimelineWriter.java:108-111`；`mall_management_sql.sql:224` |
 
 **共性**：控制**写在文档/注释/日志里**，而**不写在被执行的路径上**。审计时读文档会得出「已覆盖」的错结论。
 
@@ -191,7 +192,7 @@
 2. `goodstype.GoodTypeNew` 不许显式传 NULL 打 `NOT NULL DEFAULT '0'`
 3. `login.Id` 唯一性（前提 C）
 4. 三处上传提取 basename + 类型白名单
-5. 同名文件不静默跳过
+5. ~~同名文件不静默跳过~~ ✅ **已完成（A 批 `efe7959`，同名策略 C）**
 6. `l2Put` 冷却路径补指标（对齐另三条）
 7. `L2HealthProbe.down` 改 CAS（对齐注释的承诺）
 8. 文档锚点 → 符号名；TD-04/06/07 更正；`db-schema.md` 的 11 表/索引口径更正（**已完成**）
