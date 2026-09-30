@@ -3,9 +3,10 @@
 > **证据来源**：`mall_management_sql.sql` 全部 CREATE TABLE 段（行号为该文件行号）、`application.properties`、`pom.xml`。**`.sql` 是唯一权威源，本文件只做记录，不反向约束。**
 > **行号约定**：本文件全部 `:N` 均为 `.sql` 的**文件真实行号（LF 计数）**，不是任何工具归一化行尾后的行号。（该文件行尾为 CRLF，`tr '\r' '\n'` 之类的读取会把行号翻倍 —— 已实证对撞：真实 `146` 与归一化 `292` 同为 `` `Price` float NOT NULL,``。）
 > 表数量：**12** —— 11 张原始表 + `order_state_transition`（B3 于 2026-09-29 追加在 `.sql` 末尾的 Migration 块，`:221-235`）。
+> `.sql` 末尾另有一段 S1a 追加的 Migration 块（`:236-245`，2026-09-30），**只含一条 `CREATE UNIQUE INDEX`，不建表** —— 故表数仍为 12。
 > 全部为 `ENGINE=InnoDB`、`utf8mb4_0900_ai_ci`。
 >
-> ⚠️ 该 `.sql` 行尾是 CRLF（235 个 `\n` / 236 个 `\r`，含 1 个裸 CR）。用会把行尾归一化的编辑器改它，diff 会变成整份文件重写 —— 改前先确认 diff 只有预期行。
+> ⚠️ 该 `.sql` 行尾是 CRLF（245 个 `\n` / 246 个 `\r`，含 1 个裸 CR —— 2026-09-30 S1a 追加后**重新实测**，原为 235 / 236）。用会把行尾归一化的编辑器改它，diff 会变成整份文件重写 —— 改前先确认 diff 只有预期行。
 >
 > **完整字段清单 / 索引基线 / 外键关系见 §6–§9**（2026-09-30 补齐，逐列逐索引以 `.sql` 为准）。
 
@@ -20,7 +21,7 @@
 | `login` | 登录凭证与角色 | `UserName` | Password, **Role**(1=客户 2=商家), Id | — | 仅主键 | `:89-95` |
 | `merchantimage` | 商家头像 | `UserName` | MerchantId, image | — | 仅主键 | `:105-110` |
 | `message` | 聊天消息 | `id` (自增) | from_id, from_type, to_id, to_type, content, create_time | — | 主键 + **`idx_from_to(from_id,to_id)`** + **`idx_create_time(create_time)`** | `:120-131` |
-| `order` | 订单 | `Id` (自增) | **`OrderId`**(业务单号), MerchantId, CustomerId, Price, ProductInformation, Images, CreateTime, SettlementDate | **`PayIf`/`DeliveryIf`/`ReceiveIf` 三状态位**（CAS 更新）；`SettlementDate` 被三处操作覆写 | 仅主键 | `:141-155` |
+| `order` | 订单 | `Id` (自增) | **`OrderId`**(业务单号), MerchantId, CustomerId, Price, ProductInformation, Images, CreateTime, SettlementDate | **`PayIf`/`DeliveryIf`/`ReceiveIf` 三状态位**（CAS 更新）；`SettlementDate` 被三处操作覆写 | 主键 + **`uk_order_orderId(OrderId)`**（UNIQUE，S1a `:245`） | `:141-155` |
 | `productsales` | 商品销量统计 | `Id` (自增) | ProductCode, MerchantId, GoodName | **`OrderVolume`：恒为 0，全项目从未更新** | 仅主键 | `:165-172` |
 | `user` | 用户档案 | `username` | usertype, customerid, merchantid, gender, age, email, selfintroduction, address | — | 仅主键 | `:182-193` |
 | `user_conversation_read` | 会话最后已读时间 | **复合** `(user_id, user_type, other_id, other_type)` | last_read_time | 复合主键天然支撑 `ON DUPLICATE KEY UPDATE` upsert | 主键即索引 | `:203-210` |
@@ -30,7 +31,7 @@
 
 ## 2. 索引现状
 
-**12 张表中 2 张有二级索引（共 3 个）**：`message` 2 个（`idx_from_to`、`idx_create_time`）、`order_state_transition` 1 个（`idx_order_state_transition_order`）。其余 **10 张表除主键外无任何索引**；全库**除主键外零个 UNIQUE**（完整基线见 §7）。已知高频查询列缺索引：
+**12 张表中 3 张有二级索引（共 4 个）**：`message` 2 个（`idx_from_to`、`idx_create_time`）、`order_state_transition` 1 个（`idx_order_state_transition_order`）、**`order` 1 个（`uk_order_orderId`，UNIQUE）**。其余 **9 张表除主键外无任何索引**；全库**除主键外 1 个 UNIQUE**（`uk_order_orderId`，2026-09-30 S1a `:236-245` 新增；完整基线见 §7）。已知高频查询列缺索引：
 
 | 查询位置 | SQL 条件 | 涉及表 | 现况 |
 |---|---|---|---|
@@ -39,7 +40,7 @@
 | `G:434` | `order WHERE CustomerId = ?` | `order` | `CustomerId` 无索引 |
 | `G:452` | `order WHERE MerchantId = ?` | `order` | `MerchantId` 无索引 |
 | `M:331` | `user WHERE customerid = ? OR merchantid = ?` | `user` | 两列均无索引；且 `OR` 无法走单列索引 |
-| `orderPayIfUp` / `orderDeliveryIfUp` / `orderReceiveIfUp` + `OrderStateMachine.selectBitsSql()` | `order WHERE OrderId = ?` | `order` | **`OrderId` 无索引，且无 UNIQUE** → 三个 CAS 端点与转移后读回**每次都全表扫描**。已登记 **TD-14**（`tech-debt.md:171`，含 2026-09-21 定性修正：本地 120 QPS 不可达属环境属性，索引代价须**同环境**对照举证）。**这是 B2 fail-open + B3 并发热点的根**：唯一性无约束、索引无兜底，一旦锁回落直行（`tech-debt.md:275` 三路 fail-open），就只剩应用层「先查后写」在守 —— 守不住 |
+| `orderPayIfUp` / `orderDeliveryIfUp` / `orderReceiveIfUp` + `OrderStateMachine.selectBitsSql()` | `order WHERE OrderId = ?` | `order` | ✅ **已消除（2026-09-30 S1a，`1e2fcfa`）** —— `uk_order_orderId` 一次解决索引与唯一性两面。**原状**：`OrderId` 无索引，且无 UNIQUE → 三个 CAS 端点与转移后读回每次都全表扫描。已登记 **TD-14**（`tech-debt.md:172`，含 2026-09-21 定性修正：本地 120 QPS 不可达属环境属性，索引代价须**同环境**对照举证）。**曾是** B2 fail-open + B3 并发热点的根：唯一性无约束、索引无兜底，一旦锁回落直行（`tech-debt.md:280` 三路 fail-open），就只剩应用层「先查后写」在守。⚠️ 唯一性现已由 DB 兜底，但**失败响应仍被 `orderAddLocked` 的 catch 吞成 200 + msg**（故 `A-S2a-1c` 数的是 msg 而非 5xx） |
 | `GoodsCacheService.priceByTriple` 回源 | `goods WHERE MerchantId = ? AND GoodName = ? AND ProductCode = ?` | `goods` | 三元组无索引（B1 缓存回源路径，命中缺失即全表扫） |
 | `MallManagementGoodsController.productSearch` | `goods WHERE GoodType = ? AND (… OR GoodName LIKE '%x%')` | `goods` | `GoodType` 无索引；且 `LIKE '%x%'` 本身也无法走索引 |
 | 销量维护 | `productsales WHERE ProductCode = ? AND MerchantId = ?` | `productsales` | 无索引；亦无 `(ProductCode, MerchantId)` UNIQUE → 可写重复行 |
@@ -199,7 +200,7 @@
 | `Id` | int | **PK**, NOT NULL AUTO_INCREMENT | `AUTO_INCREMENT=24`（内部主键，业务不使用） |
 | `MerchantId` | **varchar(40)** | NOT NULL | 比 `goods.MerchantId` 的 char(20) 宽 |
 | `CustomerId` | **varchar(40)** | NOT NULL | 比 `user.customerid` 的 char(20) 宽 |
-| `OrderId` | varchar(40) | NOT NULL | **业务单号；既无唯一约束也无索引**（前提 A 的出处）。与 `order_state_transition.OrderId` 逐字同型 |
+| `OrderId` | varchar(40) | NOT NULL | **业务单号**。原为「既无唯一约束也无索引」（前提 A 的出处）—— **2026-09-30 S1a 已加 UNIQUE `uk_order_orderId`**（`:245`），前提 A 的 DB 面由此消解。与 `order_state_transition.OrderId` 逐字同型 |
 | `Price` | **float** | NOT NULL | 与 `goods.Price` 的 double 不同型 |
 | `ProductInformation` | varchar(500) | NOT NULL | 冗余快照文本（如 `222:IJ-555；222:IF-55`） |
 | `Images` | varchar(100) | NOT NULL | |
@@ -271,14 +272,14 @@
 | `login` | `UserName` | 无 | **无**（`Id` 非唯一） |
 | `merchantimage` | `UserName` | 无 | **无** |
 | `message` | `id` | `idx_from_to(from_id,to_id)`、`idx_create_time(create_time)` | **无** |
-| `order` | `Id` | 无 | **无**（`OrderId` 非唯一、无索引） |
+| `order` | `Id` | **`uk_order_orderId(OrderId)`** | **有 1 个**（`OrderId`，UNIQUE，S1a） |
 | `productsales` | `Id` | 无 | **无** |
 | `user` | `username` | 无 | **无**（`customerid`/`merchantid` 非唯一） |
 | `user_conversation_read` | 复合 4 列 | 无 | **无** |
 | `order_state_transition` | `Id` | `idx_order_state_transition_order(OrderId, OccurredAt)` | **无** |
 
-**汇总**：12 张表；主键 12 个（1 个复合）；二级索引 **3 个**（分布 2 张表）；**全库除主键外零个 UNIQUE 约束**。
-「无唯一约束」不是遗漏，而是 §4「前提清单」里 A/B/C 三条的出处 —— 全靠应用层保证。
+**汇总**：12 张表；主键 12 个（1 个复合）；二级索引 **4 个**（分布 3 张表）；**全库除主键外 1 个 UNIQUE 约束**（`order.uk_order_orderId`，2026-09-30 S1a）。
+唯一约束只此 1 个，也不是遗漏 —— 它是 `defect-survey.md §二 前提清单`里 A/B/C 三条的出处，到 2026-09-30 为止只有**前提 A 的 DB 面**被认领（S1a），B / B′ / C 仍全靠应用层保证。（原文此处引「§4「前提清单」」，但本文件 §4 是 `SettlementDate` 语义，前提清单实际在 `defect-survey.md` —— 一并更正。）
 
 ---
 
@@ -301,13 +302,15 @@
 | `customerimage.CustomerId` | `user.customerid` | |
 | `merchantimage.MerchantId` | `user.merchantid` | |
 
-> ⚠️ **`order_state_transition.OrderId → order.OrderId` 这个 FK 现在建不起来 —— 不是「没建」，是「建不了」**：MySQL/InnoDB 要求**被引用列上有索引**（该列须为该索引的最左前缀列），而 `order.OrderId` **无任何索引**。故要建 FK 必须先给 `order.OrderId` 建索引。
+> ⚠️ **`order_state_transition.OrderId → order.OrderId` 这个 FK 现在建不起来 —— 不是「没建」，是「建不了」**：MySQL/InnoDB 要求**被引用列上有索引**（该列须为该索引的最左前缀列），而 `order.OrderId` **当时无任何索引**。故要建 FK 必须先给 `order.OrderId` 建索引。
 >
 > ✅ **本机实测（8.0.32，用完即 DROP 并复核删净）**：
 > - 父列**无索引** → `ERROR 1822 (HY000): Failed to add the foreign key constraint. Missing index for constraint 'fk1' in the referenced table 'p'`
 > - 父列**仅有一个非唯一索引** → **ACCEPTED**（且真生效：插孤儿行被拒 `ERROR 1452`）
 >
-> ⇒ 精确表述是「**要求有索引，不要求唯一索引或主键**」（InnoDB 甚至不强制被引用键唯一，这是它对 SQL 标准的一处偏离）。**注意**：因此这条 FK 的阻塞点**只有「无索引」这一个**，与 `OrderId` 不保证唯一是**两件事**（后者属前提 A，影响的是时间线能否指向不存在的订单，而非 FK 能否创建）。故时间线与订单的引用完整性**只能靠应用层**，且时间线里完全可以存在指向不存在订单的 `OrderId`。
+> ⇒ 精确表述是「**要求有索引，不要求唯一索引或主键**」（InnoDB 甚至不强制被引用键唯一，这是它对 SQL 标准的一处偏离）。**注意**：因此这条 FK 的阻塞点**只有「无索引」这一个**，与 `OrderId` 不保证唯一是**两件事**（后者属前提 A，影响的是时间线能否指向不存在的订单，而非 FK 能否创建）。
+>
+> 🔄 **2026-09-30 更新（S1a）**：`uk_order_orderId` 落地后，阻塞点**已消失** —— 该 FK 现在**建得起来**（唯一索引同样满足「被引用列有索引」）。但**本笔未建 FK**：规则 v2 把新增 FK 列为「**有条件允许**」（四项前置），是否建按 `selection-status.md` 的触发条件。另：`order.OrderId` 现在唯一了，但**时间线 → 订单的引用完整性仍只能靠应用层** —— 唯一索引只管 `order` 自己那一侧，`order_state_transition` 上仍无 FK，其中仍可存在指向不存在订单的 `OrderId`。
 
 ---
 
@@ -338,18 +341,18 @@
 
 ---
 
-## 10. ⚠️ 全库除主键外 **零个 UNIQUE** —— 所有唯一性都靠应用层
+## 10. ⚠️ 全库除主键外只有 **1 个 UNIQUE** —— 唯一性仍基本靠应用层
 
-> 本节单独成节，因为它是整份 schema 最重的一条：**业务主键全是约定，不是约束。**
+> 本节单独成节，因为它是整份 schema 最重的一条：**业务主键几乎全是约定，不是约束。**（2026-09-30 S1a 之前是「全是」；`order.OrderId` 是第一个例外。）
 
 ### 10.1 事实
-12 张表 → 12 个主键（其中 1 个复合）→ 3 个二级索引 → **非主键 UNIQUE：0 个**。
+12 张表 → 12 个主键（其中 1 个复合）→ 4 个二级索引 → **非主键 UNIQUE：1 个**（`order.uk_order_orderId`，2026-09-30 S1a 新增）。
 
 ### 10.2 本应是业务键、实际只是「约定」的列
 
 | 业务键 | 位置 | 现状 | 后果 | 登记 / 前提 |
 |---|---|---|---|---|
-| `order.OrderId` | `order` | **无索引、无 UNIQUE** | 重复单号可写入；`order_state_transition.OrderId` 可指向不存在的订单 | **TD-14**；前提 A |
+| `order.OrderId` | `order` | ✅ **有 UNIQUE**（`uk_order_orderId`，2026-09-30 S1a） | 重复单号写不进去（`A-S2a-1b`/`1c` 实测）；但 `order_state_transition.OrderId` **仍可**指向不存在的订单（无 FK，见 §8） | **TD-14**（已修）；前提 A（DB 面已消解） |
 | `goods (MerchantId, GoodName, ProductCode)` | `goods` | 无 | 三元组重复 → `queryForMap` 多行即抛 → **失败被当值缓存满 TTL** | 前提 B（B1 `priceByTriple`） |
 | `goods (MerchantId, ProductCode)` | `goods` | 无 | 与三元组并存且**互相冲突** | 前提 B′ |
 | `login.Id` | `login` | 无 | 同一业务号可对多条账号 | 前提 C |
@@ -357,7 +360,7 @@
 | `friend (customerid, friendid)` | `friend` | 无 | 重复好友对可写入 → `friendList::<cid>` 与 `friendRequests::<fid>` 两个缓存都会重复列出 | **新前提候选**（原普查清单未列，见下注） |
 | `productsales (ProductCode, MerchantId)` | `productsales` | 无 | 重复销量行 | — |
 | `goodstype.GoodType` | `goodstype` | 无 | 类型名可重复 | — |
-| `login.UserName` | `login` | **PK ✓** | 全库仅有两个真正被约束的唯一性之一（另一个是 `user.username`） | — |
+| `login.UserName` | `login` | **PK ✓** | 两个主键级唯一性之一（另一个是 `user.username`）；`order.OrderId` 于 2026-09-30 成为**第三个**真正被约束的唯一性（唯一索引，非主键） | — |
 
 > ⚠️ **编号提醒**：本次收到「`friend` 无唯一约束 → 前提 B′」，但普查报告里 **B′ 是 `goods (MerchantId, ProductCode)`**；`friend` 这条在原清单中**没有**，属**新前提**。上表按「新前提候选」记，**不并入 B′**，以免串号 —— 若你的 B′ 另有所指请更正。
 
@@ -368,7 +371,10 @@
 | 笔 | 对策 | 覆盖到的 | 覆盖不到的 |
 |---|---|---|---|
 | B1 | **查重 + 缓存**（`priceByTriple` 先查后缓存） | 命中唯一时 | 唯一性未约束 ⇒ 查重会命中多行并抛，而**失败又被当值缓存**（前提 B 的传导链） |
-| B2 | **分布式锁**（`order-add`/`order-pay`/`order-receive`/`order-delivery`/`friend-add` 五落点） | 锁可用时 | 锁是**三路 fail-open**（`tech-debt.md:275`）⇒ 锁不可用即回落到无锁原路径 |
-| B3 | **谓词守卫（CAS）** | 同一动作只成功一次（守卫互斥 + InnoDB 行锁） | 保证不了 `OrderId` 唯一；也保证不了时间线的 `from`（要读回，且读回必须在锁内） |
+| B2 | **分布式锁**（`order-add`/`order-pay`/`order-receive`/`order-delivery`/`friend-add` 五落点） | 锁可用时 | 锁是**三路 fail-open**（`tech-debt.md:280`）⇒ 锁不可用即回落到无锁原路径 |
+| B3 | **谓词守卫（CAS）** | 同一动作只成功一次（守卫互斥 + InnoDB 行锁） | 保证不了 `OrderId` 唯一（**该点 2026-09-30 由 S1a 的 UNIQUE 认领**）；也保证不了时间线的 `from`（要读回，且读回必须在锁内） |
 
-⇒ **三笔都在替数据库补唯一性，而三笔的补法没有一笔覆盖「锁不可用」这一档。** 这是「局部推理极强、组合推理缺席」的结构性后果：每一笔在自己的边界内都正确，而**边界本身（唯一性不是约束）从未被任何一笔认领**。
+⇒ **三笔都在替数据库补唯一性，而三笔的补法没有一笔覆盖「锁不可用」这一档。** 这是「局部推理极强、组合推理缺席」的结构性后果：
+每一笔在自己的边界内都正确，而**边界本身（唯一性不是约束）从未被任何一笔认领**。
+
+> 🔄 **2026-09-30 S1a 是第一次有笔认领这条边界**：`order.OrderId` 的 UNIQUE 由 DB 自己执行 —— 锁**全部 fail-open 也拦得住重复单号**（这正是 `A-S2a-1b` 在兜的那一层）。但**只认领了一条**（前提 A 的 DB 面）：B / B′ / C 与 `order_state_transition → order` 的引用完整性至今仍无约束。
