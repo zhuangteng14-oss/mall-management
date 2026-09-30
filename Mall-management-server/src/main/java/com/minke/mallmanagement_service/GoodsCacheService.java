@@ -4,6 +4,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.cache.annotation.CacheEvict;
 import org.springframework.cache.annotation.Cacheable;
 import org.springframework.cache.annotation.Caching;
+import org.springframework.dao.IncorrectResultSizeDataAccessException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 
@@ -30,6 +31,9 @@ import java.util.Map;
  *         见 evictByMerchant() 的注释与 §11「显式 evict ≠ 注解 evict」。
  *
  * 本类只搬运逻辑、不改语义：SQL 原样、per-row 兜底原样、返回结构原样、异常处理原样。
+ * ⚠️ **唯一例外（2026-09-30，P0 #2）**：priceByTriple() —— 它原样照搬的 `queryForMap` + 全 catch
+ * 恰好构成「把失败当值缓存」。该方法的「返回结构原样 + 异常处理原样」已**有意**放弃，
+ * 理由与边界全部写在它自己的 javadoc 里（搜索「曾把失败当值缓存」）。其余五个方法未动。
  */
 @Service
 public class GoodsCacheService {
@@ -152,11 +156,12 @@ public class GoodsCacheService {
     }
 
     /**
-     * 原 Controller 的 productCodePrice()（G:231-252），逐字搬运：SQL 原样、queryForMap 原样、
-     * try/catch 原样、返回结构原样（含 goodImg 这个与列名 GoodImg **不同名**的 JSON 键）。
+     * 原 Controller 的 productCodePrice()（G:231-252）的**读路径**承载层：SQL 原样、cacheName 与 key 见下。
+     * ⚠️ 【2026-09-30 起不再是「逐字搬运」】`queryForMap` → `queryForList`，且 try/catch 与响应组装
+     * （含 `goodImg` 这个与列名 `GoodImg` **不同名**的 JSON 键）**搬回 Controller** —— 理由见下「曾把失败当值缓存」段。
      *
      * 【为什么与 goodsCodes 分成两个 cacheName】
-     * 同一张表的**不同投影**：本方法返回单点 {price, goodImg}，listCodes() 返回 List&lt;String&gt;。
+     * 同一张表的**不同投影**：本投影缓存单行 `Map`（键 = 列名 Price / GoodImg，**或 null**），listCodes() 缓存 List&lt;String&gt;。
      * 合成一片键空间会让同一 cacheName 里混住两种值形状 —— @Cacheable 按谁先命中返回谁，触发
      * 类型混淆（Cache#get(key, type) 路径直接 IllegalStateException）。“cacheName = 表名 + 投影名”
      * 这条命名规则的「投影名」段即为此设（本方法是该规则的第 2 个实例）。
@@ -183,22 +188,51 @@ public class GoodsCacheService {
      * 代价（明说）：本 cacheName 的键数 = 商家 × 商品名 × 型号，是三个新投影里增长最快的一个；
      * 每次写要整片清（L2 侧是按前缀 SCAN 删），不像 goodsHome 的 allEntries 是零精度损失。
      *
-     * ⚠️ 本方法是**首个会把失败当值缓存**的接口：queryForMap 在 0 行时抛
-     *    EmptyResultDataAccessException（&gt;1 行抛 IncorrectResultSizeDataAccessException），
-     *    两者都被 catch 吞成 {success:false} —— 一个**正常返回的非 null Map** ⇒ 会被缓存到 TTL
-     *    （a3 为 5m）。即失败的生命周期从「瞬时」变成「TTL」。
-     *    常规解法 unless 被 sync=true 禁止（spring-context 6.2.6 实证报文：`…sync=true operation
-     *    does not support the unless attribute on '<method>'`），而放弃 sync 是**已实测的回归**
-     *    （20 并发冷读 20 次 DB → 1 次，§9.1 击穿行）⇒ 接受失败被缓存，靠写接口的 allEntries 自愈
-     *    （现网唯一来源是前端用**未保存**的表单名查询，保存时即被清掉）。
-     *    「把异常上移到 Controller 以绕过缓存」这条方案**已被考虑并否决** —— 理由见 §11（语义错位）。
+     * ⚠️ 【2026-09-30 改：本方法**曾**把失败当值缓存 —— 现在不会了】
+     * 原实现用 `queryForMap`：0 行抛 EmptyResultDataAccessException、**&gt;1 行抛
+     * IncorrectResultSizeDataAccessException**，两者都被 catch 吞成 `{success:false}` ——
+     * 一个**正常返回的非 null Map** ⇒ 被 @Cacheable 缓存到 TTL（a3 为 5m）：失败的生命周期
+     * 从「瞬时」变成「TTL」。其中 **&gt;1 行那条最毒** —— 它在 TTL 内**不会因数据被修好而
+     * 自愈**；0 行那条至少还会被写接口的 allEntries 清掉（见下方理由 ③）。
      *
-     * ⚠️ 重复三元组：goods 表只有 PRIMARY(Id)、**无唯一约束**，而 goodsAdd 不做查重 ⇒ 可造出两行同
-     *    三元组 ⇒ 本接口从「价格」变成「失败」，且该失败被缓存到 TTL。实测当前 0 个重复三元组
-     *    （5 三元组 = 5 行）⇒ 该分支不可达。**不修**（建唯一索引属另一主题）。
+     * 【曾接受它的三条理由（照实留档）】
+     * ① `unless` 被 `sync=true` 禁止（spring-context 6.2.6 实证报文：`…sync=true operation
+     *    does not support the unless attribute on '<method>'`）；
+     * ② 放弃 `sync` 是**已实测的回归**（20 并发冷读 20 次 DB → 1 次，§9.1 击穿行）；
+     * ③ 0 行在现网只有一个来源 —— 前端用**未保存**的表单名查询（`GoodsUp.vue` 的 `switchPrice`），
+     *    保存时即被 `goodsUp` 的 allEntries 清掉 ⇒ 自愈。
+     * 三条**至今成立**；变的是**有了不牺牲 ①②③ 的第四种解法**。
+     *
+     * 【为何改：把「0 行」与「技术异常」在**类型层面**分开】
+     * 解法不是新发明，是仓内**已有**的模式（`UserCacheService.publicInfo()`，2026-09-28 落地；
+     * cache-layer.md §11 ㊹⑤ 已把它登记为「新模式」，并写明它与「方案 X 不采纳」**方向相反、
+     * 不冲突**：方案 X 是把**业务失败**包装成技术异常去骗过缓存；本解是把**技术异常如实上抛**）：
+     * <ol>
+     *   <li>**0 行 → `null`**（业务事实：查无此三元组）⇒ 是**值** ⇒ 被缓存（负缓存 / 防穿透）。
+     *       防穿透**与改前持平**：改前 0 行同样被缓存，只是缓存的是 marker 而不是 null。</li>
+     *   <li>**&gt;1 行 → 异常上抛**（不 catch）⇒ @Cacheable 遇异常不写入 ⇒ 该失败**不固化到
+     *       TTL**，数据一修好，下一次读取立刻正确。</li>
+     * </ol>
+     * 实现上只把 `queryForMap` 换成 `queryForList`（0 行不再抛，成为一个 `isEmpty()` 分支），
+     * 其余（cacheName、key 拼接、sync=true、失效面）**一字未动**。
+     *
+     * 【返回契约随之改变（调用方只有一处）】本方法不再返回 `{success, price, goodImg}`，而是返回
+     * **裸行**（键 = 列名 `Price` / `GoodImg`）或 `null`；成型（catch + 组装响应）移到
+     * `MallManagementGoodsController.productCodePrice()` —— 与 `UserCacheService.publicInfo()` /
+     * `MallManagementUserController.userSelect` 同款。
+     * ⚠️ 成型**不能**改放本类内的另一个方法再由本方法调用：自调用不走代理 ⇒ @Cacheable 静默失效
+     * （本类头注释与 §11 ㊸③ 各记过一次）。
+     *
+     * 【本次没动的两件事（边界）】
+     * ① 第 1/2 环：`goods` 表**无三元组唯一约束**、`goodsAdd` 不查重，且 collation 是
+     *    `utf8mb4_0900_ai_ci`（大小写/重音不敏感）⇒ 仍可造出「只差大小写」的两行使本接口失败。
+     *    改后该失败**不再被缓存**（这正是本次要关的那一环），但**失败本身依旧存在** ——
+     *    实测当前 0 个重复三元组 ⇒ 该分支不可达；建唯一索引属另一主题（schema 变更）。
+     * ② 响应文案：0 行与技术异常在 Controller 侧落**同一个** `{success:false}`，调用方仍分不出
+     *    「真没有」还是「后端出错」—— 既有瑕疵（§11 ㊹④），改它是可观测的契约变更，须单列一笔。
      *
      * ⚠️ 形状耦合与两个 SELECT * 的投影**不同**：本投影是**显式两列** ⇒ goods 表加列不影响；
-     *    但列**改名/删除**会让 map.get("Price"/"GoodImg") 静默取不到 → 响应里 null，编译期无感。
+     *    但列**改名/删除**会让 `row.get("Price"/"GoodImg")` 静默取不到 → 响应里 null，编译期无感（取值点现已移到 Controller，但两个字面量的源头仍是本方法的 SELECT）。
      *    即「耦合于具体列名」而非「耦合于列集合」。见 §11。
      *
      * ⚠️ goods.MerchantId 无索引（只有 PRIMARY(Id)）⇒ 库侧是**全表扫**（与另两个投影同）。
@@ -207,21 +241,26 @@ public class GoodsCacheService {
     @Cacheable(cacheNames = "goodsPrice",
             key = "#MerchantId + '::' + #GoodName + '::' + #ProductCode", sync = true)
     public Map<String, Object> priceByTriple(String MerchantId, String GoodName, String ProductCode) {
-        Map<String, Object> result = new HashMap<>();
         String sql = "SELECT Price, GoodImg FROM mall_management_sql.goods "
                 + "WHERE MerchantId=? AND GoodName=? AND ProductCode=?";
 
-        try {
-            Map<String, Object> map = jdbcTemplate.queryForMap(sql,
-                    MerchantId, GoodName, ProductCode);
-            result.put("success", true);
-            result.put("price", map.get("Price"));
-            result.put("goodImg", map.get("GoodImg")); // 响应键与列名 GoodImg 不同名
-        } catch (Exception e) {
-            e.printStackTrace();
-            result.put("success", false);
+        List<Map<String, Object>> rows =
+                jdbcTemplate.queryForList(sql, MerchantId, GoodName, ProductCode);
+
+        if (rows.isEmpty()) {
+            // 0 行 = 业务事实（查无此三元组），作为**值**返回 ⇒ 被 @Cacheable 负缓存。
+            // 与改前的差别不是「该不该缓存」，而是「缓存 null，而不是缓存一个失败 marker」。
+            return null;
         }
-        return result;
+        if (rows.size() > 1) {
+            // 多行 = 数据完整性异常（前提 B 不成立：三元组无唯一约束，而 collation
+            // utf8mb4_0900_ai_ci 大小写/重音不敏感 ⇒ 两行只差大小写即可同时命中）。
+            // ⚠️ 这一条**必须抛**，不能像改前那样吞成 {success:false}：吞下去它就是一个
+            //    「正常返回的非 null Map」⇒ 被缓存满 TTL，且 TTL 内不因数据修好而自愈。
+            // 类型与改前 queryForMap 抛的**同一个**；queryForList 自己不会为多行抛，故显式构造。
+            throw new IncorrectResultSizeDataAccessException(1, rows.size());
+        }
+        return rows.get(0);   // 裸行（键 = 列名 Price / GoodImg）；成型由 Controller 负责
     }
 
     /**
@@ -350,9 +389,12 @@ public class GoodsCacheService {
      *    未实测。**无论答案如何都不改变本方法的正确性**：那条异常路径不改库，清与不清都对。
      *
      * 【为什么 goodsAdd 也要清 goodsPrice —— 它会改变一个**已存在**三元组的答案】
-     * 0 行 → 1 行（失败变价格）、1 行 → 2 行（价格变失败：goods 表无唯一约束、goodsAdd 不查重，
-     * 而 queryForMap 遇 >1 行抛异常 ⇒ 响应变 {success:false}）。docs §2 该行原把失效面写成
+     * 0 行 → 1 行（失败变价格）、1 行 → 2 行（价格变失败：goods 表无唯一约束、goodsAdd 不查重
+     * ⇒ 两行都命中 ⇒ `rows.size() &gt; 1` ⇒ 响应变 {success:false}）。docs §2 该行原把失效面写成
      * goodsUp / goodsDe 两处，**漏了 goodsAdd**（2026-09-28 订正）。
+     * ⚠️ 2026-09-30（P0 #2）后，括号里那半句只对**响应**成立、对**缓存**不成立：该异常不再被缓存
+     *    （数据一修好即自愈）；但「goodsAdd 能改变一个**已存在**三元组的答案」这个
+     *    **失效理由本身**不变 ⇒ 仍必须清。
      *
      * 【CGLIB】注解落在本类 ⇒ GoodsCacheService 被代理（本来因四个读方法就是代理）。
      * Controller 侧的 @Caching 撤除后**不再被代理**，有防回归测试断言（MallManagementApplicationTests）。
