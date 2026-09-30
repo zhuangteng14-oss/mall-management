@@ -178,7 +178,7 @@ public class ConcurrencyRunner {
         "清理:",
         "  --keep-data            跳过 finally 清理，保留数据以供人工查验",
         "  --cleanup-only         仅按 --run-id 执行清理，不跑场景",
-        "  --reset-db             重跑 mall_management_sql.sql（DROP 全部 11 表！仅限一次性实例）",
+        "  --reset-db             重跑 mall_management_sql.sql（DROP 11 张 —— 12 张中除 order_state_transition 外；仅限一次性实例）",
         "  --skip-negative-control  跳过 P7 阴性对照（本机库不可达时会自动 skip，无需手动指定）",
         "  --ready-timeout-sec N  P5 就绪探针等待上限，默认 60",
         "  --scenarios A,B         只跑指定负载段，默认 S1,S2a,S2b,S3,S4a,S4b,B2,C",
