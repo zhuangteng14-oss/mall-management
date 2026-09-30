@@ -1695,8 +1695,8 @@ public class ConcurrencyRunner {
      */
     static void c(Opt o) throws InterruptedException {
         String lock0 = lockCounters(o);
-        Ass a1 = ass("C-1", "时间线行数 == 四端点 success 之和（各端点 success 另与状态机预测值比对）", false);
-        Ass a2 = ass("C-2", "时间线可重放：首行 from=NONE、逐行首尾相接、末行 to == order 表现值", false);
+        Ass a1 = ass("C-1", "时间线行数 == 四端点 success 之和（各端点 success 另与状态机预测值比对）", true);
+        Ass a2 = ass("C-2", "时间线可重放：首行 from=NONE、逐行首尾相接、末行 to == order 表现值", true);
 
         final String pre = ns() + "-C";
         final String like = pre + "%";
