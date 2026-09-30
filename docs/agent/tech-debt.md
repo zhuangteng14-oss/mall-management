@@ -297,7 +297,7 @@
 | 时间线（两类分工） | `OrderTransitionRecorder`(187) —— 在 UPDATE 返回后**立刻**于临界区内判定/读回三位/埋点/入队（`submitTimeline` → `executor.submit`）；`OrderTimelineWriter`(137) —— 时间线的**唯一写入点**，跑异步线程、**永不抛**（fail-soft，`result=error` 即该条永久丢，不重投）。读回在 UPDATE **之后**、由新态**精确反推** `FromState`（非近似） | `428293f` |
 | 观测 | `MallOrderStateMetrics`(267) —— **6 个 `mall.order.state.*` 指标**（`transitions` / `illegal` / `async.duration` / `async.queue.depth` / `async.rejected` / `timeline.writes`） | `428293f` |
 | 建表 | `order_state_transition` 追加至 `mall_management_sql.sql:221-235`：bigint PK + `idx_order_state_transition_order(OrderId, OccurredAt)`；**全库唯一带列 COMMENT 的表**、唯一 `datetime(3)` 列 | `e93a499` |
-| A3 扩展 | `ConcurrencyRunner.java` +407/-6：新增 **C 组时间线核对**（**record-only**，不门禁）；P3 表数判据改为「随 DDL 是否落盘走」 | `4bc78d2` |
+| A3 扩展 | `ConcurrencyRunner.java` +407/-6：新增 **C 组时间线核对**（**record-only**，不门禁；⚠️ **2026-09-30 起升为门禁，见 `5544362`**，代码与 `--help` 的旧注释由 `5f1ad21` 清理）；P3 表数判据改为「随 DDL 是否落盘走」 | `4bc78d2` |
 | 配置 | `application.properties` +26（B3 节） | `428293f` |
 | 合并与 CI | PR #7 合入 `main`（`148e77b`）；CI `success`（headSha = `148e77b`） | `gh run list` |
 

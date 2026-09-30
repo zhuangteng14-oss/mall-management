@@ -3,6 +3,7 @@
 > **定位**：三层重构**开工时读**。上游是 `defect-survey.md`（缺陷普查）+ `selection-status.md`（选型现状）+ `db-schema.md`（schema 视图）。
 > 本文**只做提取与归属**，不含新事实 —— 每条都能追到那三份文档之一。
 > 定稿：2026-09-30（`origin/main` = `e930b30`）。
+> **修订：2026-09-30（`origin/main` = `3917cd3`）** —— C 组已升门禁（`5544362`）、P0 #1～#4 已修、新增 **G. 缺陷修复归属**。
 
 ## 任务
 
@@ -51,7 +52,7 @@
 
 - 后端 `cd Mall-management-server && mvnw -B test` 全绿
 - 前端 `cd Mall-management-web/mall-management-system && npm run build` 通过
-- ⚠️ A3 的 **C 组（时间线核对）是 record-only、不门禁** —— 改了时间线 CI 照样绿，**别把它当回归**（见 E 档）
+- ✅ A3 的 **C 组（时间线核对）自 2026-09-30 起是门禁**（C-1/C-2 由 `gate=false` 升为 `true`，`5544362`） —— 改坏时间线，**CI 会红**。⚠️ 本文**定稿时**它还是 record-only（`e930b30` 早于 `5544362`），见 E 档与「最容易漏的两条」
 - ⚠️ 种子行数 `6/5/5/5/4` 是 **P4 判据基线**，改种子数据会先让 P4 变红（`db-schema.md §6.0`）
 
 各阶段验收见文末「开工顺序建议」。
@@ -66,10 +67,10 @@ TD-01（ddl-auto）、TD-03（回滚规则矛盾）、TD-04/06/07/08（锚点与
 
 | # | 项 | 位置 | 为什么是 P0 | 归属 | 工作量 |
 |---|---|---|---|---|---|
-| 1 | **L2 条目永不过期** | `CacheConfig.java:110-112` + 默认 profile 无 TTL | `time-to-live` = null ⇒ `defaultCacheConfig()` ⇒ **TTL = -1**。`goodstype::all` 写入后永久陈旧，L1 60s 到期还从 L2 读回永不失效的旧值 | **并行（环境层）** ⚠️ 但属 P0，别拖到三层后 | 小 |
-| 2 | **失败被当值缓存（B+E 合成链）** | `GoodsCacheService:186-198` + `:211-219` + 前提 B/E | collation 大小写不敏感 + 三元组无唯一约束 ⇒ 多行 ⇒ `queryForMap` 抛 ⇒ 被当值缓存 ⇒ `priceByTriple` 退化成「把失败缓存满整个 TTL」 | **三层内（DAO / Service）** | 小 |
-| 3 | **同名文件静默跳过，DB 记别人的图** | `GoodsController:111-113,119`、`UserController:197-199,205` | 商家 B 传同名 `1.jpg` → 文件不落盘、DB 指向**商家 A 的图**、返回 `success:true` | **三层内（Controller / Service）** —— 与 B#5 同一件事 | 小 |
-| 4 | **上传目录不可写 ⇒ 整个应用起不来** | `ImgPath.java:23-27`（`@PostConstruct`） | 非核心功能拖死服务，无降级 | **三层内（Service，启动期）** | 小 |
+| 1 | **L2 条目永不过期** | `CacheConfig.java:110-112` + 默认 profile 无 TTL | `time-to-live` = null ⇒ `defaultCacheConfig()` ⇒ **TTL = -1**。`goodstype::all` 写入后永久陈旧，L1 60s 到期还从 L2 读回永不失效的旧值 | ✅ **已修**（`743ab4c`，A 批）—— 原归属「并行（环境层） ⚠️ 别拖到三层后」 | 小 |
+| 2 | **失败被当值缓存（B+E 合成链）** | `GoodsCacheService:186-198` + `:211-219` + 前提 B/E | collation 大小写不敏感 + 三元组无唯一约束 ⇒ 多行 ⇒ `queryForMap` 抛 ⇒ 被当值缓存 ⇒ `priceByTriple` 退化成「把失败缓存满整个 TTL」 | ✅ **已修**（`88a14e4`，PR #10）—— 原归属「三层内（DAO / Service）」。⚠️ **只关掉「失败被固化到 TTL」这一环**：第 1/2 环（collation + 三元组无唯一约束）仍在，**失败本身仍存在** | 小 |
+| 3 | **同名文件静默跳过，DB 记别人的图** | `GoodsController:111-113,119`、`UserController:197-199,205` | 商家 B 传同名 `1.jpg` → 文件不落盘、DB 指向**商家 A 的图**、返回 `success:true` | ✅ **已修**（`efe7959`，A 批，同名策略 C）—— 原归属「三层内（Controller / Service）」，与 B#5 同一件事 | 小 |
+| 4 | **上传目录不可写 ⇒ 整个应用起不来** | `ImgPath.java:23-27`（`@PostConstruct`） | 非核心功能拖死服务，无降级 | ✅ **已修**（`70eace2`，A 批，启动降级）—— 原归属「三层内（Service，启动期）」 | 小 |
 | 5 | **`getUserInfo` null ⇒ HTTP 200 + 0 字节** | 全仓 `ResponseBodyAdvice` / `@ControllerAdvice` = 0 | 写路径整段在 `if (body != null)` 内 ⇒ 前端拿「成功」但无内容 | **三层内（全局异常出口）** | 小 |
 
 ## A′. 与三层并行 —— 安全 / 环境
@@ -126,7 +127,7 @@ TD-01（ddl-auto）、TD-03（回滚规则矛盾）、TD-04/06/07/08（锚点与
 | 全库除主键外**零 UNIQUE** | ✅ 已确证（§10） | 三层必须承认：唯一性是应用层约定，不是约束 |
 | `order_state_transition.OrderId → order.OrderId` 的 FK | ⚠️ **建不起来** | 阻塞点只是「父列无索引」**这一条**，与「不保证唯一」是两件事（§8 有实测） |
 | 种子行数 = P4 判据基线 `6/5/5/5/4` | ⚠️ 门禁输入 | 改种子数据会**先让 P4 变红**（§6.0） |
-| A3 C 组（时间线核对）是 **record-only** | ⚠️ **不门禁** | 改时间线会**静默**通过 C 组 |
+| A3 C 组（时间线核对）**曾是 record-only**，2026-09-30 起升为**门禁**（`5544362`） | ✅ **门禁**（C-1/C-2） | 改坏时间线 **CI 会红**。⚠️ 本行原写「不门禁 / 静默通过」—— 那是**定稿时**（`e930b30`）的结论，**已过期** |
 | `mall_management_sql.sql` **CRLF + 1 个裸 CR** | ⚠️ 陷阱 | 用会归一化行尾的编辑器改它，diff 变成整份重写 |
 
 ## F. 三层中做 —— 三层本身的产出，不是前置
@@ -137,10 +138,42 @@ TD-01（ddl-auto）、TD-03（回滚规则矛盾）、TD-04/06/07/08（锚点与
 
 ---
 
+## G. 缺陷修复归属（2026-09-30 定）
+
+> **本节只做一件事**：给「还不知道谁来修」的缺陷指定**认领阶段**。`defect-survey.md` 病 0 说「四层都缺」，
+> 那四层**不等于**本文的 A～F 档 —— 本节是它们的映射表。
+> ⚠️ **「认领」≠「已做」**：右两列分开写，**现状一栏全部是 2026-09-30 复核的结果**，不是计划。
+> ⚠️ 已修的 P0 #1～#4 **不在此表**（见上方 **A. P0 级**，归属栏已改标 ✅ 与落地 commit）。
+
+| 缺陷 | 出处 | 认领阶段 | 现状（2026-09-30 复核） |
+|---|---|---|---|
+| **服务端零价格校验**：`orderAdd` 的 `Price` 由客户端直传直落库 | 病 B；本文 **B#1** | **三层期间（Service 校验）** —— 只做 `Price >= 0` + 上界；⚠️ 按 `goods` 表**重算**属 **C 档**（那是换真值源，不是加校验） | ⏳ **未做** —— `MallManagementGoodsController.orderAdd` 仍是 `@RequestParam("Price") float`，方法体内无重算、无比对 |
+| **状态位拦截**（TD-17：三个状态位可直传出终态订单） | 病 B；**TD-17**；本文 **C#6** | **三层期间（校验层）** —— 前置是**裁决**「拦截 vs 观测」 | ⏳ **未做**（C#6 两方案未裁）。⚠️ 拦截会使 A3 的 S4a **全部 8 条断言失去前置**（H3 正是用 `orderAdd` 造的前置态） |
+| **长度边界（字符数量）**：`productsales.GoodName char(20)` vs `goods.GoodName char(40)` | 病 G（`SQL:169` vs `:57`） | **三层期间（Service 校验，长度上界）** —— ⚠️ schema 侧**不改类型**（本文「约束 1」只允许新增表 / 字段 / 索引），只能在 Service 拦 | ⏳ **未做**。21–40 字符名写 `productsales` 报 **Error 1406**（**实测**，用户可见失败）；⚠️ `.sql` **导入会话**非严格 ⇒ 导入期**静默截断** |
+| **搜索 SQL**：`productSearch` 逐字 `OR GoodName LIKE` | 病 C（`:72`）；`api-contract.md:72` | **三层期间（DAO）** —— 参数化与 schema 前缀在抽 DAO 时自然改完 | ⏳ **未做** —— `keyword.trim().split("")` 每字符一个 OR；单引号即 SQL 语法错误；`SELECT *` 无 schema 前缀、无 `LIMIT` |
+| **身份伪造**：登录是**业务接口级判断**，不是框架鉴权 | 病 A；**BD-03** | **鉴权阶段**（**三层后单独做**，见「三层范围定义」） | ⏳ **未做** —— 32 个接口零鉴权、无拦截器、无 Spring Security |
+| **文件白名单**：三处上传零类型校验（可传 `.html` / `.svg`） | 病 B；本文 **B#5** | **三层内（Service 校验层）；C3 复用** | ⏳ **未做** —— 本文 **B#5** 的另一半（basename 提取 / 同名策略）已由 `efe7959` 修 |
+| **分页** | `api-contract.md:11`「无分页参数，列表接口全量返回」；病 C（`productSearch` / `goodsDe` 均无 `LIMIT`） | **C3 顺带** | ⏳ **未做** |
+| **订单幂等**：`orderAdd` 非幂等（`OrderId` 由调用方提供、且无唯一约束） | `api-contract.md:69`；**TD-14** | **C3 后** | ⏳ **未做** —— DB 侧加索引属 schema 变更（本文「约束 1」允许**新增索引**） |
+
+### G.1 ⚠️ 前端鉴权显示 ≠ 安全边界
+
+> **一句话**：前端按 `sessionStorage` 切页面，那只是**显示**；安全边界只能在**后端拦截器**上。
+> （本小节的**前端**两条事实是 2026-09-30 亲读源码所得，其余均可追到病 A 与 `BD-03`。）
+
+| 事实 | 位置 | 说明 |
+|---|---|---|
+| 前端只有**页面级分支**：无路由守卫、无请求拦截器 | `ProductPage.vue`（`sessionStorage.getItem('merchantid')` 真 / 假 ⇒ `/merchant` 或 `/customer`）、`FriendRoom.vue`、`LoginPage.vue`（按 `/loginSelect` 返回的 `role` 跳三处）；`beforeEach` / `axios.interceptors` 全仓 **0 命中** | 登录后把 `merchantid` / `role` 放进 `sessionStorage`，各页面读它决定去哪个页面 ⇒ **换浏览器、手写 `sessionStorage`、或直接 `curl`**，这一层分支全部绕开 |
+| 后端**零鉴权、零拦截器** | `BD-03`：全项目 32 个接口零鉴权，无拦截器、无 Spring Security；`WebMvcConfigurer` 全仓只有 `ImgPath` 一个实现，且**不含 `addInterceptors`** | 「身份」不是会话，而是**请求参数**：`MerchantId` / `CustomerId` 由调用方自报（`goodsAdd` / `goodsDe` / `goodsUp` / `orderAdd` / `productCodePrice` 全部如此）。服务端**没有任何一步**核对「这个 MerchantId 是不是你」 |
+| ⇒ 前端那一层只能防误操作 | 同上 | 它挡得住「点错了按钮」，挡不住任何一个会用 `curl` 的人 |
+
+**归属**：**鉴权阶段**（三层后单独做）。BD-03 的三个方案里建议的 A / B **都是拦截器 + 令牌**（A：拦截器 + Redis Session；B：JWT + 拦截器）——
+「真安全在后端拦截器」是**既有裁决**，不是本节的新主张。落地位置与依赖见 **D#3（拦截器层）**、**D#2（全局异常出口）**：没有全局异常出口时，拦截器抛出的 401 / 403 会走 Boot 默认错误体。
+
 ## 最容易漏的两条
 
 1. **D#1** —— `@Transactional` 禁令**无处登记**，新层必然踩；且它与 **C#2** 是同一约束的两面（一边**必须加**、一边**禁止加**），只记住半边就会踩另一边。
-2. **E 档「C 组 record-only」** —— 改了时间线，CI 却是绿的。
+2. **E 档「C 组」** —— ⚠️ **此条已过期**：2026-09-30 `5544362` 起 C-1/C-2 是门禁，改了时间线 CI **会红**。仍留在「最容易漏」里，是因为它描述的陷阱换了形状、并没消失 —— **从旧文档读到「不门禁」的人，会以为时间线没有护栏**。
 
 ## 待验 —— 开工前不该当成已知
 
