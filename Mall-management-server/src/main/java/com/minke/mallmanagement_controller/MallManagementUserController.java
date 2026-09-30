@@ -190,13 +190,16 @@ public class MallManagementUserController {
             return result;
         }
 
-        String originalFilename = UploadStorage.storedName(file);
-
+        String originalFilename;
         try {
-            UploadStorage.store(uploadPath, originalFilename, file);
+            originalFilename = UploadStorage.store(uploadPath, file);
         } catch (Exception e) {
-            // 就算保存失败，也不崩溃！
-            System.out.println("文件已存在，继续更新头像");
+            // 显式失败。原先这里是「就算保存失败，也不崩溃！」→ 吞掉异常继续写库，
+            // DB 记下一个指向不存在文件的 URL，前端却弹「成功」。
+            e.printStackTrace();
+            result.put("success", false);
+            result.put("msg", "头像保存失败");
+            return result;
         }
 
         String imageUrl = "http://localhost:8088/img/" + originalFilename;
