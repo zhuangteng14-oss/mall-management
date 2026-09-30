@@ -178,6 +178,7 @@
 | `max-size=4` 生效 | **结构性不可达** | 同上 |
 | 时间线索引 | 注释点名的索引与 DDL 不一致 | `OrderTimelineWriter.java:47-48` |
 | `L2HealthProbe` 翻转计数 | check-then-act，并发下**会多记** | `L2HealthProbe.java:154-177` |
+| `cleanup()` 整轮清理 | **单表失败即中止整轮** —— 十余张表的 `SELECT`/`DELETE` 与外层 `for` 共用一个 `try`，任一表不存在（`SQLSyntaxErrorException`）即跳到单一 `catch`（`:2251`），其后所有表**静默漏清**。2026-09-30 的 P4 变红即此因：B3 把 `order_state_transition` 加进 `CLEANUP_COLS`（`:2178`）而 VM 未建表 ⇒ 排在它后面的 `login`/`user`/`friend` 全部漏清，残留 10 行 | `ConcurrencyRunner.java:2210-2258` |
 
 **共性**：控制**写在文档/注释/日志里**，而**不写在被执行的路径上**。审计时读文档会得出「已覆盖」的错结论。
 

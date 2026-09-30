@@ -127,7 +127,7 @@ public class ConcurrencyRunner {
         // P5 就绪探针等待上限（秒）。后端冷启动要跑 Hibernate ddl-auto=update 的校验，非瞬时。
         int readyTimeoutSec = 60;
         // 场景选择（阶段 D 可逐个跑）；H3 的六段负载即前六项，B2 是澄清 1 的 B 组（check-then-insert TOCTOU），
-        // C 是 B3 的时间线核对（record-only：不进退出码，见 guardSoft）
+        // C 是 B3 的时间线核对（C-1/C-2 为门禁，进退出码；见 c() 的 javadoc）
         String scenarios = "S1,S2a,S2b,S3,S4a,S4b,B2,C";
         // S4b 时长。H3 定 60s；OD-8（D2）尚未裁决，故做成可覆盖项，默认随 H3。
         int s4bDurationSec = 60;
@@ -181,8 +181,7 @@ public class ConcurrencyRunner {
         "  --reset-db             重跑 mall_management_sql.sql（DROP 全部 11 表！仅限一次性实例）",
         "  --skip-negative-control  跳过 P7 阴性对照（本机库不可达时会自动 skip，无需手动指定）",
         "  --ready-timeout-sec N  P5 就绪探针等待上限，默认 60",
-        "  --scenarios A,B         只跑指定负载段，默认 S1,S2a,S2b,S3,S4a,S4b,B2,C"
-                + "（C 为 record-only：不进退出码）",
+        "  --scenarios A,B         只跑指定负载段，默认 S1,S2a,S2b,S3,S4a,S4b,B2,C",
         "  --s4b-duration-sec N    S4b 混合负载时长，默认 60（H3 值；OD-8/ D2 未裁决）",
         "  --help                 显示本帮助",
         "",
@@ -1311,12 +1310,15 @@ public class ConcurrencyRunner {
     }
 
     /**
-     * 与 {@link #guard} 同理，但异常断言的 gate 落 **false** —— C 组整体 record-only。
+     * 与 {@link #guard} 同理，但异常断言的 gate 落 **false**。
      *
-     * <p>它的数据源 {@code order_state_transition} 由人工落盘的
-     * {@code mall_management_sql.sql} 追加（本笔交人工落盘），DDL 未落盘时本组必然报错，
-     * 而那是「没跑成」、不是「跑出来有问题」。若沿用 {@link #guard}（它建的异常断言
-     * gate=true），一个非门禁场景就能把 CI 门禁弄红 —— 与「C 组不进退出码」直接矛盾。
+     * <p>现状（2026-09-30 C 组升门禁起）：C-1/C-2 已是门禁，C 场景若抛异常，它们会停在
+     * 默认 verdict {@code SKIP} ⇒ SKIP ≠ PASS ⇒ 本组照样红（见 {@link #c} 的 javadoc）。
+     * 故这条 gate=false 的异常断言如今**只是多留一行显式的异常记录**，它红不红已不改判定。
+     *
+     * <p>保留 gate=false 的**原有理由已随升门禁失效**：曾担心「DDL 未落盘时 C 组必然报错，
+     * 那是『没跑成』不是『跑出来有问题』，若用 {@link #guard} 的 gate=true 就会让一个非门禁
+     * 场景把 CI 弄红」。该情形现由 P3 在负载段之前拦下（表数 ≠ 11 + 1 ⇒ 退出码 2）。
      */
     static void guardSoft(String name, Body b) {
         try {
@@ -1653,7 +1655,7 @@ public class ConcurrencyRunner {
         lockDelta(o, "S4b", lock0);
     }
 
-    // ---------- C 订单状态流转时间线（B3 新增，record-only）----------
+    // ---------- C 订单状态流转时间线（B3 新增；C-1/C-2 为门禁）----------
 
     /** 三位组合：合法 5 个在前、伪造 3 个在后（伪造组合正是时间线要如实记下的前态）。 */
     static final String[] C_BITS = {"000", "100", "110", "111", "101", "010", "001", "011"};
@@ -1687,11 +1689,25 @@ public class ConcurrencyRunner {
      * （20 个并发支付被全放行 ⇒ 20 行、20 个 success）。故每条 burst 的期望成功数先按
      * 状态机写死、再与响应比：预测先红，等式才有资格当证据。
      *
-     * <h2>【record-only】</h2>
-     * 两条断言 gate=false，不进退出码。理由与 {@link #guardSoft} 同：时间线表由人工落盘的
-     * {@code mall_management_sql.sql} 追加，DDL 未落盘时本组必然 FAIL —— 那是「没跑成」，
-     * 不是「跑出来有问题」。但 verdict 照落 PASS/FAIL（不落 RECORD_ONLY）：若也落 RECORD_ONLY，
-     * 就分不出「数据对」与「压根没读成」了 —— 而 C3 恰恰需要知道前者。
+     * <h2>【门禁】</h2>
+     * 两条断言 gate=true，进退出码 —— 本组是「时间线不坏」的唯一自动护栏。
+     *
+     * <p>曾为 record-only（gate=false），理由是「时间线表由人工落盘的 {@code mall_management_sql.sql}
+     * 追加，DDL 未落盘时本组必然 FAIL —— 那是『没跑成』，不是『跑出来有问题』」。2026-09-30 升为
+     * 门禁，因为该理由的两半都已不成立：
+     * <ul>
+     *   <li>P3 已断言「表数 = 11 + timelineTable」，表缺失在<b>负载段之前</b>就以退出码 2 拦下
+     *       ⇒ 「DDL 未落盘」不可能再伪装成 C 组 FAIL；</li>
+     *   <li>本组已在 VM 上首次真跑并全绿（run-id pre3l-b），不再有「从未验证过」的未知。</li>
+     * </ul>
+     * 故升门禁后的 FAIL 只剩一种含义：时间线真的不对。
+     *
+     * <p>⚠️ verdict 照落 PASS/FAIL（不落 RECORD_ONLY）：若落 RECORD_ONLY，就分不出「数据对」
+     * 与「压根没读成」了 —— 而 C3 恰恰需要知道前者。
+     *
+     * <p>⚠️ 本场景若自身抛异常、或走了下面「表不可读」的提前 return，C-1/C-2 会停在默认
+     * verdict {@code SKIP}，而 SKIP ≠ PASS ⇒ <b>照样算门禁失败</b>。故不存在「本组悄悄没跑成、
+     * 退出码却是 0」的组合。
      */
     static void c(Opt o) throws InterruptedException {
         String lock0 = lockCounters(o);
@@ -1710,7 +1726,8 @@ public class ConcurrencyRunner {
             settle(a1, false, "时间线表不可读（DDL 未落盘？）—— 见上方 [JDBC] 行");
             settle(a2, false, "同上：表都不存在，重放无从谈起");
             rec("C", "tableReadable", false);
-            System.out.println("[C] order_state_transition 不可读，C 组跳过（record-only，不影响退出码）");
+            System.out.println("[C] order_state_transition 不可读，C 组跳过 —— C-1/C-2 已 settle 为 FAIL，"
+                    + "退出码=1（本组已是门禁）");
             return;
         }
         rec("C", "tableReadable", true);

@@ -129,7 +129,7 @@
 
 > **12 张表的 ENGINE / CHARSET / COLLATE 完全一致**，且逐字等于库级默认值（`:15` `CREATE DATABASE ... DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci`）⇒ **没有任何表声明自己的字符集**，全套吃库级默认。
 > `AUTO_INCREMENT` = DDL 中的现值（导入基线）。
-> **种子行数即 A3 的 P4 判据基线**：`ConcurrencyRunner.java:2404-2427` 只查 `order/goods/login/user/friend` 五张，期望 `6/5/5/5/4`，与本表**逐字一致**（其注释即写「`mall_management_sql.sql` 逐行计数」）。P4 的用途是「确认是刚导入过的干净实例，而非被上一轮污染过的库」⇒ 种子行数是**门禁输入而非装饰**，改种子数据会先让 P4 变红。
+> **种子行数即 A3 的 P4 判据基线**：`ConcurrencyRunner.java:2421-2444`（2026-09-30 修正：原写 `:2404-2427`，因同日那笔 C 组升门禁的注释重写使本段整体下移 17 行）只查 `order/goods/login/user/friend` 五张，期望 `6/5/5/5/4`，与本表**逐字一致**（其注释即写「`mall_management_sql.sql` 逐行计数」）。P4 的用途是「确认是刚导入过的干净实例，而非被上一轮污染过的库」⇒ 种子行数是**门禁输入而非装饰**，改种子数据会先让 P4 变红。
 
 ### 6.1 `customerimage`（`:23-28`）
 | 字段 | 类型 | 约束 | 备注 |
