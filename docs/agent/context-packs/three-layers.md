@@ -198,6 +198,66 @@ TD-01（ddl-auto）、TD-03（回滚规则矛盾）、TD-04/06/07/08（锚点与
 **归属**：**鉴权阶段**（三层后单独做）。BD-03 的三个方案里建议的 A / B **都是拦截器 + 令牌**（A：拦截器 + Redis Session；B：JWT + 拦截器）——
 「真安全在后端拦截器」是**既有裁决**，不是本节的新主张。落地位置与依赖见 **D#3（拦截器层）**、**D#2（全局异常出口）**：没有全局异常出口时，拦截器抛出的 401 / 403 会走 Boot 默认错误体。
 
+## H. A3 覆盖矩阵 —— A3 保护了什么（2026-09-30 实测）
+
+> **本节只回答一个问题**：改三层时，**哪些东西坏了 A3 会报警**。
+> 事实来源：`scripts/concurrency/ConcurrencyRunner.java`（2795 行，`亲读`）。
+> ⚠️ 已有的 `concurrency-map.md`（13 行）只有「**有什么问题**」、**没有「保护范围」列** —— 本节是它的补集。
+
+### H.1 A3 实际打到的端点 —— 9 个（8 个业务端点 + 1 个探针）
+
+| 端点 | 脚本里的角色 | 出现行（均为 `ConcurrencyRunner.java` 行号） |
+|---|---|---|
+| `/mysqlGoods/orderAdd` | **前置态构造**（S4a 的 H3 —— 三个状态位是入参、可任意置位）+ 并发写 | `:1441 :1494 :1525 :1594 :1623 :1700 :1842` |
+| `/mysqlGoods/orderPayIfUp` | 并发 CAS | `:1541 :1626 :1704 :1855` |
+| `/mysqlGoods/orderDeliveryIfUp` | 并发 CAS | `:1602 :1605 :1608 :1626 :1708 :1856` |
+| `/mysqlGoods/orderReceiveIfUp` | 并发 CAS | `:1611 :1614 :1617 :1712 :1857` |
+| `/mysqlGoods/goodstype` | 读侧基线（S1） | `:1399 :1715 :2178` |
+| `/mysqlLogin/loginSelect` | 读侧基线（S1） | `:1400` |
+| `/mysqlLogin/loginAdd` | TOCTOU 观测（B-2 段） | `:2156` |
+| `/message/friendAdd` | TOCTOU 观测（B-2 段） | `:2197` |
+| `/health/db` | **探针，不是被压端点** —— P5 就绪 / P6 库身份 / P7 阴性对照 | `:2592` |
+
+⇒ **受 A3 保护的业务端点 = 8 个**（上表除 `/health/db`）。
+
+### H.2 门禁项 —— `gate = true` 者失败即脚本退出码 1
+
+| 段 | 门禁项 | 编号 | 行 |
+|---|---|---|---|
+| S1 | 3 | `A-S1-1` / `A-S1-2` / `A-S1-3` | `:1393-1395` |
+| S2a | 4 | `A-S2a-1a` / `A-S2a-1b` / `A-S2a-1c` / `A-S2a-2` | `:1431-1434` |
+| S2b | 2 | `A-S2b-1` / `A-S2b-2` | `:1491-1492` |
+| S3 | 4 | `A-S3-1` … `A-S3-4` | `:1515-1518` |
+| **S4a** | **8** | `A-S4a-1` … `A-S4a-8` | `:1577-1584` |
+| S4b | 4 | `A-S4b-1` … `A-S4b-4` | `:1668-1671` |
+| **C** | **2** | `C-1` / `C-2` | `:1814-1815` |
+| **合计** | **27** | | |
+
+⚠️ **若按「C 组升门禁之前」的口径数是 25 项**（27 − `C-1` / `C-2`）—— `C-1`/`C-2` 自 2026-09-30（`5544362`）起才由 record-only **升为门禁**。**现口径 27。**
+
+⚠️ **另有三类不计入上表**（都不是 `Ass.gate`，别合并计数）：
+
+- **条件门禁 1 项**：`A-B2-1`（`:2220`，`gate = --b-group-gate`，默认 `false`）—— 也是全脚本**唯一**被 `EXPECT` 覆盖的断言（`:459` 静态块仅一条：`A-B2-1` → `EXPECTED_DEFECT_PRESENT`）；
+- **动态异常门禁最多 7 项**：`guard(...)`（`:1359`）在负载段抛异常时补一条 `gate = true` 的 `*-异常`，调用点 7 个（`:1313` / `:1316` / `:1319` / `:1322` / `:1325` / `:1328` / `:1331`）；
+- **前置校验 P0–P7 共 8 项**（`:2415` 起，写进 `Map<String,String> pre`）—— 失败走**退出码 2**，与门禁（退出码 1）是**两套机制**。其中 **P4** 的判据就是「种子行数 = `6/5/5/5/4`」（同 §验收标准）。
+
+⚠️ **本节「门禁」指脚本退出码，不等于「CI 拦 merge」**：`concurrency` job 目前是 `continue-on-error: true`（`.github/workflows/ci.yml:117`，**观测跑**，门禁地位同 M2 / M3 / M4 未裁）。§验收标准 里「改坏时间线 CI 会红」是同一口径。
+
+### H.3 不在覆盖范围内的端点 —— **只有单测**
+
+`api-contract.md §2` 共 **33** 个路由，A3 打到 **9** 个（§H.1）⇒ 其余 **24** 个 **A3 一个都没打**：
+
+| 族 | 未覆盖 | 是哪些 |
+|---|---|---|
+| `/mysqlLogin` | 3 / 5 | `getUserInfo`、`updateAvatar`、`updateUserInfo` |
+| `/message` | 9 / 10 | `conversations`、`history`、`send`、`getOrCreateConversation`、`userSelect`、`selectFriend`、`friendUp`、`friendDe`、`friendSelect` |
+| `/mysqlGoods` | 12 / 17 | `goodsAdd`、`goodsSelect`、`goodsSelectHome`、`goodsDe`、`productCodePrice`、`goodsUp`、`GoodsProductCodeSelect`、`productSearch`、`orderSelect`、`orderDeliveryIfSelect`、`orderDeliverySelect`、`historicalOrdersSelect` |
+| `/health` | 0 / 1 | — |
+
+⇒ **这 24 个的护栏只有单测**（全项目 `@Test` **111** 处 / **15** 个测试类，见 `tech-debt.md` M4），而**单测不跑并发路径** ⇒ 三层改动它们时，A3 **不会替你报警**。
+
+⚠️ **「断言口径盖不到」≠「端点没被调到」** —— 两个已知实例是 **TD-15**（`loginAdd` 无 else）与 **TD-17**（三个状态位可直传出终态）：`tech-debt.md:224` 逐字把它们归因于「**都是 A3 的断言口径盖不到的地方**」。⚠️ 别把两者混为一谈 —— `loginAdd` 本身**就在** A3 的 B-2 段里被调（§H.1），漏的是**断言**，不是调用。
+
 ## 最容易漏的两条
 
 1. **D#1** —— `@Transactional` 禁令 **2026-09-30 已登记**（`### D.1`，本笔）。⚠️ 但**登记 ≠ 记住**：它仍是新层最容易踩的一条。且它与 **C#2** 是同一约束的两面（一边**必须加**、一边**禁止加**），只记住半边就会踩另一边。
