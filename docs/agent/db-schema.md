@@ -2,6 +2,7 @@
 
 > **证据来源**：`mall_management_sql.sql` 全部 CREATE TABLE 段（行号为该文件行号）、`application.properties`、`pom.xml`。**`.sql` 是唯一权威源，本文件只做记录，不反向约束。**
 > **行号约定**：本文件全部 `:N` 均为 `.sql` 的**文件真实行号（LF 计数）**，不是任何工具归一化行尾后的行号。（该文件行尾为 CRLF，`tr '\r' '\n'` 之类的读取会把行号翻倍 —— 已实证对撞：真实 `146` 与归一化 `292` 同为 `` `Price` float NOT NULL,``。）
+> **Java 坐标约定（2026-09-30 补）**：`G:` / `M:` / `U:` = 对应 Controller 的**语句行**（**不是** route 注解行，与 `api-contract.md` 的口径**相反**，两文件不要互抄）。B1 / B2 / B3 之后若干读写路径已搬到 `mallmanagement_service` 下的 Service ⇒ 本文件出现 `GoodsCacheService:` / `UserCacheService:` / `OrderStateMachine:` 等前缀，那是**跨文件搬迁**、不是行号漂移。**全文件 Java 坐标已于 2026-09-30 对 HEAD 逐条复核并替换** —— 原一版系统性偏旧（成因同 `api-contract.md:4`：各笔新代码插入后未同步）。
 > 表数量：**12** —— 11 张原始表 + `order_state_transition`（B3 于 2026-09-29 追加在 `.sql` 末尾的 Migration 块，`:221-235`）。
 > `.sql` 末尾另有一段 S1a 追加的 Migration 块（`:236-245`，2026-09-30），**只含一条 `CREATE UNIQUE INDEX`，不建表** —— 故表数仍为 12。
 > 全部为 `ENGINE=InnoDB`、`utf8mb4_0900_ai_ci`。
@@ -35,11 +36,11 @@
 
 | 查询位置 | SQL 条件 | 涉及表 | 现况 |
 |---|---|---|---|
-| `G:188` | `login WHERE id = ?` | `login` | `Id` 无索引；`goodsSelectHome` 中对每个商品执行一次 |
-| `G:160` | `goods WHERE MerchantId = ?` | `goods` | `MerchantId` 无索引 |
-| `G:434` | `order WHERE CustomerId = ?` | `order` | `CustomerId` 无索引 |
-| `G:452` | `order WHERE MerchantId = ?` | `order` | `MerchantId` 无索引 |
-| `M:331` | `user WHERE customerid = ? OR merchantid = ?` | `user` | 两列均无索引；且 `OR` 无法走单列索引 |
+| `GoodsCacheService:81` | `login WHERE id = ?` | `login` | `Id` 无索引；`goodsSelectHome` 中对每个商品执行一次（读路径 B1 已搬到该 Service；原记 `G:188`） |
+| `GoodsCacheService:146` | `goods WHERE MerchantId = ?` | `goods` | `MerchantId` 无索引（读路径 B1 已搬到该 Service；原记 `G:160`） |
+| `G:507` | `order WHERE CustomerId = ?` | `order` | `CustomerId` 无索引（原记 `G:434`） |
+| `G:525` | `order WHERE MerchantId = ?` | `order` | `MerchantId` 无索引（原记 `G:452`） |
+| `UserCacheService:81` | `user WHERE customerid = ? OR merchantid = ?` | `user` | 两列均无索引；且 `OR` 无法走单列索引（`userSelect` 读路径已搬到该 Service；原记 `M:331`）。⚠️ HEAD 中**同形 SQL 共 3 处**：另有 `FriendCacheService:151`（`friendList` 的逐行 enrich）与 `M:378`（`MallManagementMessage.getUserInfoById()`，私有辅助） |
 | `orderPayIfUp` / `orderDeliveryIfUp` / `orderReceiveIfUp` + `OrderStateMachine.selectBitsSql()` | `order WHERE OrderId = ?` | `order` | ✅ **已消除（2026-09-30 S1a，`1e2fcfa`）** —— `uk_order_orderId` 一次解决索引与唯一性两面。**原状**：`OrderId` 无索引，且无 UNIQUE → 三个 CAS 端点与转移后读回每次都全表扫描。已登记 **TD-14**（`tech-debt.md:172`，含 2026-09-21 定性修正：本地 120 QPS 不可达属环境属性，索引代价须**同环境**对照举证）。**曾是** B2 fail-open + B3 并发热点的根：唯一性无约束、索引无兜底，一旦锁回落直行（`tech-debt.md:280` 三路 fail-open），就只剩应用层「先查后写」在守。⚠️ 唯一性现已由 DB 兜底，但**失败响应仍被 `orderAddLocked` 的 catch 吞成 200 + msg**（故 `A-S2a-1c` 数的是 msg 而非 5xx） |
 | `GoodsCacheService.priceByTriple` 回源 | `goods WHERE MerchantId = ? AND GoodName = ? AND ProductCode = ?` | `goods` | 三元组无索引（B1 缓存回源路径，命中缺失即全表扫） |
 | `MallManagementGoodsController.productSearch` | `goods WHERE GoodType = ? AND (… OR GoodName LIKE '%x%')` | `goods` | `GoodType` 无索引；且 `LIKE '%x%'` 本身也无法走索引 |
@@ -80,15 +81,17 @@
 
 | 操作 | 写入语句 | 证据 |
 |---|---|---|
-| 付款 | `SET PayIf = 1, SettlementDate = NOW()` | `G:524` |
-| 收货 | `SET ReceiveIf = 1, SettlementDate = NOW()` | `G:546` |
-| 发货 | `SET DeliveryIf = 1, SettlementDate = NOW()` | `G:568` |
+| 付款 | `SET PayIf = 1, SettlementDate = NOW()` | `OrderStateMachine:113` |
+| 收货 | `SET ReceiveIf = 1, SettlementDate = NOW()` | `OrderStateMachine:115` |
+| 发货 | `SET DeliveryIf = 1, SettlementDate = NOW()` | `OrderStateMachine:117` |
+
+> **2026-09-30 坐标更正**：这三行原先硬编码在 `MallManagementGoodsController`（旧坐标 `G:524` / `G:546` / `G:568`）。B2 起三处 UPDATE 改由 `OrderStateMachine.updateSql()` **生成**（`SET` 子句来自 `setClause()`，`OrderStateMachine:125-127`；`setClause` 本体在 `:130-133`），上表行号即 `:113-118` javadoc 里逐条写明的三个字面量。⚠️ 该 javadoc 自己还记着**更早一版**的坐标（`原 G:556` / `G:584` / `G:612`）—— 两套旧坐标都不要再用。
 
 ### 4.2 覆盖行为
 
 三个操作**写的是同一列**，后发生者覆盖先发生者。正常流转（付款→发货→收货）下该列最终值 = **收货时间**；只付款未发货时 = **付款时间**。因此该列**无法稳定表示任何一个业务时间点**，取值取决于订单停在哪个状态。
 
-另：该列在 `orderSelect`、`orderDeliveryIfSelect`、`orderDeliverySelect` 中**均未被查询**；仅 `historicalOrdersSelect`（`G:502`）取出用于历史订单展示，并按 `SettlementDate DESC` 排序（`G:505`）。
+另：该列在 `orderSelect`、`orderDeliveryIfSelect`、`orderDeliverySelect` 中**均未被查询**；仅 `historicalOrdersSelect`（路由 `G:567`）取出用于历史订单展示（SQL `G:575`），并按 `SettlementDate DESC` 排序（`G:578`）。
 
 ### 4.3 三种可选方案（**待业务确认**）
 
@@ -98,7 +101,7 @@
 | **B 只付款写** | 三处中仅付款保留赋值，发货/收货不再写该列 | 改动小；若业务需要发货/收货时间，仍需另加字段 |
 | **C 拆三字段** | 拆为 `PayTime` / `DeliveryTime` / `ReceiveTime` 三列 | 语义最清晰；需改 DDL + 三处 UPDATE + 相关查询，改动最大 |
 
-**决策依据应由业务方给出**：该列当前实际承担的是「历史订单展示与排序」（`G:502`、`G:505`），需先确认业务上到底要展示哪个时间点。
+**决策依据应由业务方给出**：该列当前实际承担的是「历史订单展示与排序」（`G:575`、`G:578`），需先确认业务上到底要展示哪个时间点。
 
 ## 5. 待确认（其他）
 
