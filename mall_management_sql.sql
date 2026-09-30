@@ -233,3 +233,13 @@ CREATE TABLE IF NOT EXISTS `order_state_transition` (
   PRIMARY KEY (`Id`),
   KEY `idx_order_state_transition_order` (`OrderId`,`OccurredAt`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='订单状态流转时间线（B3 新增；C3 时间线视图的数据源）';
+-- ============================================================
+-- Migration: S1a 订单号唯一索引  Date: 2026-09-30
+-- 依据：TD-14（order.OrderId 无索引）· defect-survey 病 C · P0 #2 第 1 环
+-- 前置：order 侧重复行检测为 0（本机 7/7、VM 6/6，2026-09-30 实测）
+-- 回滚：DROP INDEX `uk_order_orderId` ON `order`;
+--       （规则 v2：回滚 = 逻辑废弃；该语句执行前须人工确认）
+-- 幂等：「导入 = 先 DROP 后 CREATE」（本文件头部含 DROP TABLE IF EXISTS `order`），
+--       且 MySQL 无 CREATE INDEX IF NOT EXISTS ⇒ 只在全量重导时执行。
+-- ============================================================
+CREATE UNIQUE INDEX `uk_order_orderId` ON `order` (`OrderId`);

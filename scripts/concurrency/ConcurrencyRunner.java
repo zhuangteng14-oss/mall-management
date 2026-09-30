@@ -448,6 +448,8 @@ public class ConcurrencyRunner {
     static final Map<String, String> EXPECT = new LinkedHashMap<>();
 
     static {
+            // 2026-09-30 S1a：A-S2a-1 进一步拆为 A-S2a-1a / 1b / 1c（锁指标增量 / rows==1 / 查重文案），
+        //   三条同为正向断言（期望 PASS），全部留在本表之外。
         // A-S2a-1 已于 B2（2026-09-29）移出本表：Redisson 锁 + 临界区内先查后插落地后，
         // 「20 并发同 OrderId 插 20 行」成为历史，该断言已翻成正向断言（期望 rows == 1），
         // 不再属于「缺陷存在型」。只删登记项而不改断言体的话，verdict 会落 DEFECT_FIXED，
@@ -470,7 +472,7 @@ public class ConcurrencyRunner {
 
     /**
      * 缺陷存在型断言的结算。DEFECT_FIXED 是「红」：不是被测对象变好，而是断言已与现状脱节，
-     * 必须同步改断言（H3 对 A-S2a-1 的原话）。
+     * 必须同步改断言（H3 对 A-S2a-1 的原话；该断言 2026-09-30 已拆为 1a/1b/1c，三条均为正向断言）。
      */
     static void settleDefect(Ass x, boolean defectPresent, String detail) {
         x.verdict = defectPresent ? "EXPECTED_DEFECT_PRESENT" : "DEFECT_FIXED";
@@ -1251,6 +1253,59 @@ public class ConcurrencyRunner {
         }
     }
 
+    /**
+     * 读 {@code mall.lock.acquires} 的某个 (lock,result) 组合的**当前累计值**（Micrometer 计数器是
+     * 进程级累计，故只能比增量）。返回 -1 = 读不到 —— 调用方必须把 -1 当「无法判定」而不是 0，
+     * 否则指标侧一坏，断言反而会假绿。
+     *
+     * <p>用 {@code contains("value":)} 取数而非解析 JSON：本脚本 classpath 上只有 mysql-connector
+     * （类头硬约束），与既有风格一致。
+     */
+    static double lockAcquires(Opt o, String lock, String result) {
+        Resp r = send(HTTP, o.baseUrl + "/actuator/metrics/mall.lock.acquires?tag=lock:" + lock
+                + "&tag=result:" + result, null);
+        if (r.code == 404) {
+            return 0;   // 计数器尚未注册（本进程从未取过该锁）—— 语义上就是 0
+        }
+        if (r.code != 200) {
+            return -1;
+        }
+        String key = "\"value\":";
+        int i = r.body.indexOf(key);
+        if (i < 0) {
+            return -1;
+        }
+        int j = i + key.length();
+        while (j < r.body.length() && r.body.charAt(j) == ' ') {
+            j++;
+        }
+        int k = j;
+        while (k < r.body.length()) {
+            char ch = r.body.charAt(k);
+            if (Character.isDigit(ch) || ch == '.' || ch == '-' || ch == '+' || ch == 'e' || ch == 'E') {
+                k++;
+            } else {
+                break;
+            }
+        }
+        if (k == j) {
+            return -1;
+        }
+        try {
+            return Double.parseDouble(r.body.substring(j, k));
+        } catch (NumberFormatException e) {
+            return -1;
+        }
+    }
+
+    /** 数值展示：整数值去掉尾部 .0，便于与 --help / 报告里的整数口径对齐。 */
+    static String numStr(double d) {
+        if (Double.isNaN(d) || Double.isInfinite(d)) {
+            return String.valueOf(d);
+        }
+        return (d == Math.rint(d)) ? String.valueOf((long) d) : String.valueOf(d);
+    }
+
     // ===================== 负载段 =====================
 
     static int runScenarios(Opt o) {
@@ -1358,31 +1413,76 @@ public class ConcurrencyRunner {
 
     // ---------- S2a 下单（同参同 OrderId） ----------
 
+    /**
+     * S2a —— 20 线程同栅栏、同 OrderId 下单。三条断言各证一层（2026-09-30 S1a 拆分）：
+     * <ul>
+     *   <li><b>1a</b> 锁指标增量 == 20 —— 证「锁真的被取到 20 次」。用场景前后增量而非字面 == 20：
+     *       {@code mall.lock.acquires} 是**进程级累计**计数器（{@code MallLockMetrics:109}
+     *       {@code registry.counter(...).increment()}），且 S1 等更早的场景也打过同一把锁。</li>
+     *   <li><b>1b</b> rows == 1 —— DB 层兜底。⚠️ 唯一索引落地后它**恒真**，故单靠它已不足以证修复；
+     *       它的价值退化为「没插重复行」的必要条件。</li>
+     *   <li><b>1c</b> msg 里「数据库错误」== 0 —— 证「临界区内的查重分支真的执行了」。
+     *       ⚠️ 这里**不能**数 5xx：唯一索引落地后，锁若失效，并发 INSERT 会撞
+     *       {@code uk_order_orderId}，而 INSERT 的 catch 把它吞成 **200 + msg="数据库错误：Duplicate
+     *       entry..."**（不是 5xx）⇒ {@code count5xx} 在本场景恒为 0，可观测差异只在 msg 里。</li>
+     * </ul>
+     */
     static void s2a(Opt o) throws InterruptedException {
-        Ass a1 = ass("A-S2a-1", "JDBC count(order WHERE OrderId=?) == 1", true);
+        Ass a1a = ass("A-S2a-1a", "锁指标增量 mall.lock.acquires{lock=order-add,result=acquired} == 20", true);
+        Ass a1b = ass("A-S2a-1b", "JDBC count(order WHERE OrderId=?) == 1", true);
+        Ass a1c = ass("A-S2a-1c", "20 个响应里含「数据库错误」的 == 0", true);
         Ass a2 = ass("A-S2a-2", "该 OrderId 行数 == 本轮 success:true 响应数", true);
         String orderId = ns() + "-DUP";
         final Map<String, String> f = orderForm(orderId, 0, 0, 0);
+
+        // 1a 的读数窗口：burst 前后各读一次（沿用 lockDelta 的「每场景前后增量」形状）。
+        // 场景是顺序执行的（runScenarios 一串 if），且 S2a 排在 S4b / B2 / C 之前 ⇒ 窗口内只有本 burst。
+        double b = lockAcquires(o, "order-add", "acquired");
         List<Call> cs = burst(20, i -> call("orderAdd", send(HTTP, o.baseUrl + "/mysqlGoods/orderAdd", f)));
+        double af = lockAcquires(o, "order-add", "acquired");
+
         int succ = countSuccess(cs);
+        int dbErrs = countDbError(cs);   // 既有 helper（:1121），语义即 says("数据库错误")
         int rows = jdbcCount(o, "SELECT COUNT(*) FROM mall_management_sql.`order` WHERE OrderId = ?", orderId);
+
+        // --- 1a 锁生效（直接证据）---
+        if (b < 0 || af < 0) {
+            // 指标读不到时**恒失败**：把「读不到」当 0 会让断言假绿
+            settle(a1a, false, "指标不可读（before=" + numStr(b) + " after=" + numStr(af)
+                    + "）—— 这是环境问题，不是「锁没生效」；查 /actuator/metrics 是否可达");
+        } else {
+            double d = af - b;
+            settle(a1a, d == 20, "增量=" + numStr(d) + "（20 线程同锁 key ⇒ 预期 20）before="
+                    + numStr(b) + " after=" + numStr(af));
+        }
+
+        // --- 1b DB 兜底 ---
         if (rows < 0) {
             // 查询失败不能被当成「修复生效」—— -1 与 1 一样都不说明「没插重复行」，那是假红
-            settle(a1, false, "JDBC 行数查询失败（-1），无法判定是否仍插重复行");
+            settle(a1b, false, "JDBC 行数查询失败（-1），无法判定是否仍插重复行");
         } else {
             // B2 之前本断言是 settleDefect(rows >= 2)（缺陷存在型）。修复 = 「锁 + 临界区内先查后插」，
             // 两条缺一不可：锁单独只把 20 个并发变成串行、每个照旧裸 INSERT，仍插 20 行。
-            settle(a1, rows == 1,
+            settle(a1b, rows == 1,
                     "行数=" + rows + "（== 1 才是修复生效；>= 2 说明查重窗口仍在）"
-                    + " 5xx=" + count5xx(cs));
+                    + " 5xx=" + count5xx(cs) + "（⚠️ 本场景 5xx 恒为 0，理由见 1c）");
         }
+
+        // --- 1c 查重分支真的执行 ---
+        settle(a1c, dbErrs == 0,
+                "含「数据库错误」的响应=" + dbErrs + " 条（>0 = 撞 uk_order_orderId ⇒ 锁/查重未生效）");
+
         settle(a2, rows == succ, "行数=" + rows + " == success 数=" + succ);
-        System.out.println("[S2a] 20 线程同栅栏同 OrderId=" + orderId + " success=" + succ + " 行数=" + rows);
+        String delta = (b < 0 || af < 0) ? "不可读" : numStr(af - b);
+        System.out.println("[S2a] 20 线程同栅栏同 OrderId=" + orderId + " success=" + succ
+                + " 行数=" + rows + " 锁增量=" + delta + " 数据库错误=" + dbErrs);
         // 用 cs.size() 而不是再写一个 20：这个 20 在源码里是裸字面量（S2a 与 S4a 的六个
         // burst 共 7 处），报告里再抄一遍就等于多一处会与代码不一致的地方。
         rec("S2a", "burstCalls", cs.size());
         rec("S2a", "successCount", succ);
         rec("S2a", "rowsForSameOrderId", rows);
+        rec("S2a", "lockAcquiresDelta", delta);
+        rec("S2a", "dbErrorResponses", dbErrs);
     }
 
     // ---------- S2b 下单（各 OrderId 唯一） ----------
