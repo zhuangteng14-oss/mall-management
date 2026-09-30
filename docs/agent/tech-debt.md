@@ -72,7 +72,7 @@
 | 问题 | 开发期 `user.dir` = 项目根，路径有效；打成 jar 后 `user.dir` = 运行目录，`src/main/resources/static/img/` 不存在 |
 | 影响 | ① 图片上传失败 ② `/img/**` 映射失效 ③ 部署到生产环境或换机运行立即暴露 |
 | 建议 | 改为可配置路径（`application.properties` 配 `app.upload-dir`），或改用 `classpath:/static/img/` + 外部上传目录分离 |
-| 验证步骤 | 1. 开发期不配 app.upload-dir，调 /mysqlLogin/updateAvatar 上传，确认落盘位置与改动前一致<br>2. 访问 http://localhost:8088/img/<文件名>，期望 200<br>3. mvn package 打 jar，在非项目根目录 java -jar 启动，指定 --app.upload-dir=<jar 外可写目录><br>4. 再次上传，确认文件落在配置目录且返回 URL 可访问<br>5. 重启进程后再次访问同一 URL<br>6. 回归 /mysqlLogin/getUserInfo，确认 image 字段格式不变<br>7. 回归 /mysqlGoods/goodsAdd、/mysqlGoods/goodsUp，确认 GoodImg 格式不变 |
+| 验证步骤 | 1. 开发期不配 app.upload-dir，调 /mysqlLogin/updateAvatar 上传，确认落盘位置与改动前一致<br>2. 访问 http://localhost:8088/img/<文件名>，期望 200<br>3. mvn package 打 jar，在非项目根目录 java -jar 启动，指定 --app.upload-dir=<jar 外可写目录><br>4. 再次上传，确认文件落在配置目录且返回 URL 可访问<br>5. 重启进程后再次访问同一 URL<br>6. 回归 /mysqlLogin/getUserInfo，确认 image 字段格式不变<br>7. 回归 /mysqlGoods/goodsAdd、/mysqlGoods/goodsUp，确认 GoodImg 格式不变 —— ⚠️ **例外（A 批 `efe7959` 策略 C）**：同名**不同内容**时，落盘名与 URL 尾段为 `<原名>_<8hex><扩展名>`，`GoodImg` 格式**有意**变化，不是回归。同名同内容仍复用原名，格式不变 |
 | 回归保护 | 读侧的 `/img/**` 映射已由 `ImgMappingSmokeTest`（A2 新增）纳入 CI 覆盖，含「已存在文件 200 且内容非空」与「不存在文件 404」正反两条断言，可防 TD-05 读侧回归。jar 场景仍无覆盖（见 TD-09） |
 | 优先级 | 高（部署级阻塞） |
 | 状态 | 读侧已修复、写侧开发期已验证（1421a0c、c5d74b4），jar 场景待验证 |
@@ -92,12 +92,12 @@
 
 | 项 | 内容 |
 |---|---|
-| 现状 | `U:187-190` 与 `G:102-108` 用 `catch (Exception)` 捕获后仅 `System.out.println`，接口仍返回 `success:true` |
-| 问题 | 目录不可写、磁盘满、路径不存在时，用户看到「上传成功」但文件未落盘，故障极难定位。**注意 `G:296-298`（`goodsUp`）未加 catch，异常会向上抛**——三处上传点行为不一致 |
-| 补充（2026-09-20） | **异常消息把失败原因归错了**：两处 catch 都打印「已存在」。`G:106-108` → `System.out.println("商品图片已存在，继续上架")`；`U:187-190` → 注释「就算保存失败，也不崩溃！」+ `System.out.println("文件已存在，继续更新头像")`。但真正的「已存在」已被紧邻上方的 `if (!saveFile.exists())` 拦下，**根本不会进 catch** —— 故 catch 分支里的「已存在」归因**几乎总是错的**（磁盘满 / 目录不可写 / 路径非法一律被说成「已存在」），排查方向被彻底带偏。属「结果对、归因错」在生产代码中的实例，与 TD-02 的错误类型同源 |
+| 现状 | ~~`U:187-190` 与 `G:102-108` 用 `catch (Exception)` 捕获后仅 `System.out.println`，接口仍返回 `success:true`~~ ✅ **已修复（A 批 `efe7959`）**：三处上传点统一为**写库之前**返回 `{success:false, msg}` —— 站点① `goodsAdd` / ② `updateAvatar` 原为吞异常继续写库，站点③ `goodsUp` 原为异常冒泡（500），现三处行为一致，不再有 500 也不再有静默脏数据 |
+| 问题 | ~~目录不可写、磁盘满、路径不存在时，用户看到「上传成功」但文件未落盘，故障极难定位。**注意 `G:296-298`（`goodsUp`）未加 catch，异常会向上抛**——三处上传点行为不一致~~ **（已随上条修复：三处行为一致，均为写库前显式失败）** |
+| 补充（2026-09-20） | **异常消息把失败原因归错了**：两处 catch 都打印「已存在」。`G:106-108` → `System.out.println("商品图片已存在，继续上架")`；`U:187-190` → 注释「就算保存失败，也不崩溃！」+ `System.out.println("文件已存在，继续更新头像")`。但真正的「已存在」已被紧邻上方的 `if (!saveFile.exists())` 拦下，**根本不会进 catch** —— 故 catch 分支里的「已存在」归因**几乎总是错的**（磁盘满 / 目录不可写 / 路径非法一律被说成「已存在」），排查方向被彻底带偏。属「结果对、归因错」在生产代码中的实例，与 TD-02 的错误类型同源<br>**2026-09-30 补**：修复后 catch 分支不再打印「已存在」，改为「商品图片保存失败」/「头像保存失败」+ `printStackTrace()`。⚠️ **仍然没修**的是日志本身 —— `printStackTrace` + 无 logger 级属**病 D**（`defect-survey.md` 病 D「`printStackTrace()` × 20」行），不在本笔范围 |
 | 建议 | 捕获后返回 `success:false` + 明确 `msg`，或至少改为 ERROR 级日志 |
 | 优先级 | 中 |
-| 状态 | 待确认 |
+| 状态 | ✅ **已修复（A 批 `efe7959`）**；残留：异常日志仍为 `printStackTrace`（归病 D） |
 
 ## TD-08 开发期上传目录受 Git 跟踪
 
