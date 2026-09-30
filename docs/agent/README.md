@@ -20,7 +20,10 @@
 | environment.md | 本地开发环境连接信息 | 需要连本地 MySQL / 跑服务时 | 环境变化时 |
 | concurrency-map.md | 并发、锁、事务现状 | 涉及并发时 | 并发逻辑变化时 |
 | cache-map.md | 缓存现状 | 涉及缓存时 | 缓存变化时 |
+| defect-survey.md | 缺陷普查（七病 + 七前提 + Class A/B） | 排期时；做三层时的**输入** | 普查更新时 |
+| selection-status.md | 技术选型现状（对照 `agent.md` 目标态逐项核） | 涉及选型 / 排期时 | 选型变化时 |
 | tech-debt.md | 活跃技术债 + 已完成里程碑 | 排期时 | 新增/关闭时 |
+| progress.md | **全项目进度表（唯一真相源）** —— 命名约定见其 §0 | 排期时、开工前 | 状态变化时 |
 | business-decisions.md | 待决策议题 | 遇到分歧时 | 决策后 |
 | context-packs/*.md | 任务上下文包 | 每个 feature 开场 | 该任务变化时 |
 | archive/*.md | 归档内容 | 追溯历史时 | 关闭时移入 |
