@@ -50,7 +50,7 @@
 | 两套 CORS 机制并存 | 4 处裸 `@CrossOrigin`：`MallManagementGoodsController:27` / `MallManagementUserController:20` / `MallManagementMessage:18` / `HealthController:37` | CorsFilter 是 servlet filter，先于 DispatcherServlet ⇒ handler 级配置**静默失效**；将来有人只改 `@CrossOrigin` 收紧 → 改了不生效且无提示 | 亲读(框架) |
 | 全端点匿名可达 | `pom.xml` 无 spring-security；fat jar grep = 0 | 登录是业务接口级判断，不是框架鉴权 | 亲读 |
 | 登录口令明文进 stdout，随 CI artifact 扩散 | `MallManagementUserController.java:39` | `System.out.println(username + "," + password)`；`ci.yml:315` 上传 `app.log` | 亲读 |
-| `getUserInfo` 返回 null ⇒ **HTTP 200 + 0 字节响应体** | 全仓 `ResponseBodyAdvice`/`@ControllerAdvice` = 0 | 写路径整段在 `if (body != null)` 内（Spring 6.2.6 `AbstractMessageConverterMethodProcessor:359`）⇒ 前端拿到「成功」但无内容 | 亲读(框架) |
+| `getUserInfo` 返回 null ⇒ **HTTP 200 + 0 字节响应体** | 全仓 `ResponseBodyAdvice`/`@ControllerAdvice` = 0 | 写路径整段在 `if (body != null)` 内（Spring 6.2.6 `AbstractMessageConverterMethodProcessor:359`）⇒ 前端拿到「成功」但无内容。**前端后果（2026-09-30 实测 + 源码链）**：`LoginPage.vue:150` 的 `await userRes.json()` 对空体**必抛** `SyntaxError` ⇒ 落 `:172` 的兜底 `catch` ⇒ `:160-161` 的「未找到该用户，请查看对应账号密码有无写错…」**永远打不到（死代码）** —— 用户得到的是一句**与「密码写错」无关**的提示语，真实原因（后端异常）被吞掉 | 亲读(框架) + 实测(前端) |
 
 ### 病 B｜无校验层
 
@@ -69,7 +69,7 @@
 
 | 项 | 位置 | 后果 | 档位 |
 |---|---|---|---|
-| `productSearch` 逐字 `OR GoodName LIKE` | `GoodsController:346-367` | `keyword.trim().split("")` 每字符一个 OR；单引号即 SQL 语法错误；`SELECT *` **无 schema 前缀**、无 LIMIT | 亲读 |
+| `productSearch` 逐字 `OR GoodName LIKE` | `GoodsController:378-409`（⚠️ 原记 `:346-367` 为**旧坐标**，2026-09-30 对 HEAD 复核） | `keyword.trim().split("")` 每字符一个 OR；单引号即 SQL 语法错误；`SELECT *` **无 schema 前缀**、无 LIMIT。**另（2026-09-30 实测，B-1 并入本行）**：拼进 `LIKE '%…%'` 的字符**未做通配符转义** ⇒ `_`（任意单字符）与 `%`（任意串）**照常生效** ⇒ **关键词含下划线或百分号时返回全表**。对照实验：`zzzznonexistentzzzz`→**0** 条（对照成立）、`_`→**5**、`%`→**5**、`\_`→**5**、基线全表 = **5** ⇒ 三条通配符输入与全表**逐条相同**。⚠️ 该后果的**外溢**：本接口无分页（§1）⇒ 全表返回在数据量上量后即**单请求全表扫描** | 实测 |
 | `goodsDe` 两个 DELETE 返回值都不捕获 | `GoodsController:205-225` | `:224` 无条件 `success=true`；无 `@Transactional`、无归属校验、无 LIMIT | 亲读 |
 | `app.upload-dir` 默认值串**三处重复** | `ImgPath:18` / `GoodsController:55` / `UserController:30` | 改一处必漏两处（与 TD-06 同形态） | 亲读 |
 | `goodsUp` 的 WHERE 缺 `GoodName` | `GoodsController:281-290` 一带 | 批量改名的串改风险 | 亲读 |
@@ -125,7 +125,7 @@
 | 项 | 位置 | 后果 | 档位 |
 |---|---|---|---|
 | `order.Price` float vs `goods.Price` double | `SQL:146` vs `:58` | 同一语义两种精度 | 亲读 |
-| `CreateTime`/`SettlementDate` 存成 `varchar(50)` | `SQL:152-153` | 时间当字符串 | 亲读 |
+| `CreateTime`/`SettlementDate` 存成 `varchar(50)` | `SQL:152-153` | 时间当字符串。**前端 UX bug（2026-09-30 实测，与后端缺陷分开标注）**：`OrderCenter.vue:62` 的「待发货 / 已完成」两 tab **共用同一模板**渲染 `formatDateTime(order.CreateTime)`，而 `orderDeliverySelect` 的两条 SQL（`G:547-548`、`G:550-551`）**都不读 `CreateTime`** ⇒ **「已完成」tab 的「创建订单日期」整列空白**。⚠️ 归属：**后端 SQL 不读该列是既有设计**（`db-schema.md:91`、`business-decisions.md:15` 均记 `orderSelect`/`orderDeliveryIfSelect`/`orderDeliverySelect` 三处均未读取该列）；**前端不加空值兜底**是前端侧问题 —— 两者各记一半，**本轮都不改** | 亲读 + 实测(前端) |
 | `productsales.GoodName char(20)` vs `goods.GoodName char(40)` | `SQL:169` vs `:57` | 21–40 字符名写此表报 **Error 1406**（**实测**：本机 8.0.32 `@@sql_mode` 含 `STRICT_TRANS_TABLES` ⇒ 用户可见失败，**非静默截断**）。⚠️ 但 `.sql` **导入会话**是例外：`:13` 覆写 sql_mode 为 `NO_AUTO_VALUE_ON_ZERO`（非严格），`:216` 才恢复 ⇒ 导入期种子数据超长会**静默截断**。**TD 候选，未登记** | 实测 |
 | `order.MerchantId`/`CustomerId` varchar(40) vs 其余表 char(20)/varchar(50) | `SQL:286-288` | 同一业务号三种宽度、两种定长性，无 FK 兜底（`db-schema.md §9`） | 亲读 |
 | `login.UserName char(20)` PK + 五个明文种子账号 | `SQL:94`、`:99` | 明文口令。**唯一性本身没问题**（曾疑为缺陷，已自证否） | 亲读 |
