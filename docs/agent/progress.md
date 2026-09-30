@@ -89,22 +89,22 @@
 
 ---
 
-## 2. 三层前准备（当前所在的块）
+## 2. 三层前准备（**2026-09-30 已收尾**）
 
 | 笔 | 内容 | 状态 |
 |---|---|---|
-| **笔 1** | **前端走查** —— 静态审计（fetch/axios 调用 vs 后端路由表）+ 接口层 curl 走查 | ⏳ 待做 |
-| **笔 2** | **文档补节** —— 见下表 | ⏳ 待做 |
+| **笔 1** | **前端走查** —— 静态审计（fetch/axios 调用 vs 后端路由表）+ 接口层 curl 走查 | ✅ **已完成** —— 走查报告**未落盘**（按裁决分流入 `api-contract.md` + `defect-survey.md`），随 **PR #22** `69ac718` 合入 |
+| **笔 2** | **文档补节** —— 见下表 | ✅ **已完成**（**PR #22** `69ac718` + **PR #23** `b72bc80`） |
 
-**笔 2 应覆盖的 5 项**（前两项依 `three-layers.md:186-193` §开工顺序建议 —— 仓库明写它们**阻塞落笔**）：
+**笔 2 应覆盖的 5 项**（前两项依 `three-layers.md:272-279` §开工顺序建议 —— 仓库明写它们**阻塞落笔**）—— **5 项已全部落定（2026-09-30）**：
 
-| # | 项 | 出处 | 为什么必须先做 |
-|---|---|---|---|
-| 1 | **`D#1` 登记 `@Transactional` 禁令** | `three-layers.md:114` | `orderAddLocked` 是全项目**唯一「禁止用标准注解」处，且无处登记**；`:177` 说新层「**必然踩**」。纯文档动作，成本 ≈ 0 ⇒ **最易漏、最该先做** |
-| 2 | **`D#4` DAO 选型结论**（JdbcTemplate vs JPA） | `three-layers.md:117`、`:188` | 「**不定就没法落笔**」。另 `ddl-auto=update` + 零 `@Entity`（TD-01）—— 一旦有人加 `@Entity` 即反向 `ALTER TABLE` |
-| 3 | **C3 数据源清单** | — | C2/C3 均未开工；清单是 C3 的输入 |
-| 4 | **A3 覆盖矩阵**（明示保护范围） | `concurrency-map.md`（13 行，**无「保护范围」列**，`亲读`） | 现表只列「有什么问题」，不列「A3 保护了什么」 |
-| 5 | **`§G` 现状复校**（**不是新建**） | `three-layers.md:143-159` | ⚠️ G 表**已存在**（#11 落地、#12 修过一行），右列现状是 2026-09-30 的复核结果 ⇒ 若要的只是复校，**不要重写** |
+| # | 项 | 出处 | 状态 | 为什么必须先做 |
+|---|---|---|---|---|
+| 1 | **`D#1` 登记 `@Transactional` 禁令** | `three-layers.md:115` | ✅ **已完成**（**PR #23**；落点 **`### D.1`**） | `orderAddLocked` 是全项目**唯一「禁止用标准注解」处**（登记后不再「无处登记」）；`:263` 仍把它列为最易漏 |
+| 2 | **`D#4` DAO 选型结论**（JdbcTemplate vs JPA） | `three-layers.md:118`、`:274` | ✅ **已完成**（**PR #23**；落点 **`### D.4`** —— 结论 **`JdbcClient` 短期 + jOOQ 长期**） | 「**不定就没法落笔**」。另 `ddl-auto=update` + 零 `@Entity`（TD-01）—— 一旦有人加 `@Entity` 即反向 `ALTER TABLE` |
+| 3 | **C3 数据源清单** | — | ✅ **已完成**（**PR #23**；落点 **`selection-status.md §6`**） | C2/C3 均未开工；清单是 C3 的输入 |
+| 4 | **A3 覆盖矩阵**（明示保护范围） | `concurrency-map.md`（13 行，**无「保护范围」列**，`亲读`） | ✅ **已完成**（**PR #23**；落点 **`three-layers.md §H`** —— 8 业务端点 + 27 门禁，未覆盖 24 个标「靠单测」） | 现表只列「有什么问题」，不列「A3 保护了什么」 |
+| 5 | **`§G` 现状复校**（**不是新建**） | `three-layers.md:169-185` | ✅ **已存在**（**早于本批**：#11 落地、#12 修过一行；右列现状是 2026-09-30 复核结果） | ⚠️ 若要的只是复校，**不要重写** |
 
 > ⚠️ 本块另有 **2 条「阻塞落笔」的裁决**，性质是**裁决不是笔** ⇒ 列在 **§5-B**。
 
@@ -114,17 +114,17 @@
 
 批次顺序：**订单域 → 商品域 → 消息域 → 用户域 → 公共层**
 
-⚠️ **分批要按「方法」切，不能按「文件」切** —— 订单接口不在独立文件里：`orderAddLocked` 在 `GoodsController:405`（`three-layers.md:114`）、`orderAdd` 同在 `MallManagementGoodsController`（`:152`）。
+⚠️ **分批要按「方法」切，不能按「文件」切** —— 订单接口不在独立文件里：`orderAddLocked` 在 `GoodsController:442`（javadoc `:433-441`；`three-layers.md:115`）、`orderAdd` 同在 `MallManagementGoodsController`（`:418`，路由注解 `:417`）。
 
 | 域 | 主要所在 | 行数（`亲读` `wc -l`） | 备注 |
 |---|---|---|---|
 | **订单域** | `MallManagementGoodsController` 内的订单方法 + 已拆出的 `mallmanagement_service/Order*`（8 个类） | — | 状态机部分已在 B3 拆出 |
-| **商品域** | `MallManagementGoodsController` | 676 | SQL 硬编码 schema 名 23 处（`three-layers.md:139`） |
+| **商品域** | `MallManagementGoodsController` | 676 | SQL 硬编码 schema 名 23 处（`three-layers.md:165`） |
 | **消息域** | `MallManagementMessage` | 417 | SQL 硬编码 schema 名 **0** 处 ⇒ 同进程脑裂（TD-13） |
-| **用户域** | `MallManagementUserController` | 264 | SQL 硬编码 schema 名 16 处（`three-layers.md:139`） |
+| **用户域** | `MallManagementUserController` | 264 | SQL 硬编码 schema 名 16 处（`three-layers.md:165`） |
 | **公共层** | 新层 | — | `D#2` 全局异常出口 / `D#3` 拦截器与 CORS / `C#2` 事务边界 / `D#5` 配置收敛 |
 
-**拆层顺序**（`three-layers.md:190`）：Controller → **DAO** → Service ——「先把数据出口收成一处，Service 才有意义」。
+**拆层顺序**（`three-layers.md:276`）：Controller → **DAO** → Service ——「先把数据出口收成一处，Service 才有意义」。
 
 **基线**（`亲读`）：后端 **28 个 `.java`**（controller 4 / service 13 / server 10 / class 1）；DB 访问散在 **12 个文件**；`@Repository` = **0 个文件**、`@Mapper` = **0 个文件**。
 
@@ -152,7 +152,7 @@
 | 日志（Logback JSON） | ❌ 未实现，**未归属** | `:21` |
 | 死锁重试（Spring Retry） | ❌ 未实现，**未归属**；2026-09-30 已裁「**仍不需引入**」 | `:22` + `selection-status.md:73` 裁决注 |
 
-### 5-B. 阻塞三层落笔的两条裁决（`three-layers.md:189`）
+### 5-B. 阻塞三层落笔的两条裁决（`three-layers.md:275`）
 
 | 项 | 内容 | 出处 |
 |---|---|---|
@@ -174,7 +174,7 @@
   | `TD-09` | 静态资源修复的 jar 部署场景待验证 | ⚠️ **待确认**（**未关闭**）—— 依赖 `TD-05` | `:122` |
 
   ⚠️ **`TD-06` / `TD-08` / `TD-09` 三条均与「部署」直接相关**（换机 / 反代即失效、jar 场景未验、上传目录入库）⇒ 排「部署」时必须一起看，见 §4。
-- **开工前不该当成已知的三项待验**（`three-layers.md:180-184`）：① `goodstype.GoodTypeNew` 显式 NULL 的实际行为；② 上传路径穿越的**可利用性**（代码侧确证无 basename 提取，但取决于 Tomcat 是否剥离路径段 —— **探针出来前只能写「无校验」，不能写「可穿越」**）；③ 本机无 8.4 目标库 ⇒ C 组端到端跑不了
+- **开工前不该当成已知的三项待验**（`three-layers.md:266-270`）：① `goodstype.GoodTypeNew` 显式 NULL 的实际行为；② 上传路径穿越的**可利用性**（代码侧确证无 basename 提取，但取决于 Tomcat 是否剥离路径段 —— **探针出来前只能写「无校验」，不能写「可穿越」**）；③ 本机无 8.4 目标库 ⇒ C 组端到端跑不了
 
 ### 5-D. 复核时发现的文档漂移（不是进度，但会误导）
 
