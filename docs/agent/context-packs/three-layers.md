@@ -154,7 +154,7 @@ TD-01（ddl-auto）、TD-03（回滚规则矛盾）、TD-04/06/07/08（锚点与
 | **长度边界（字符数量）**：`productsales.GoodName char(20)` vs `goods.GoodName char(40)` | 病 G（`SQL:169` vs `:57`） | **三层期间（Service 校验，长度上界）** —— ⚠️ schema 侧**不改类型**（本文「约束 1」只允许新增表 / 字段 / 索引），只能在 Service 拦 | ⏳ **未做**。21–40 字符名写 `productsales` 报 **Error 1406**（**实测**，用户可见失败）；⚠️ `.sql` **导入会话**非严格 ⇒ 导入期**静默截断** |
 | **搜索 SQL**：`productSearch` 逐字 `OR GoodName LIKE` | 病 C（`:72`）；`api-contract.md:72` | **三层期间（DAO）** —— 参数化与 schema 前缀在抽 DAO 时自然改完 | ⏳ **未做** —— `keyword.trim().split("")` 每字符一个 OR；单引号即 SQL 语法错误；`SELECT *` 无 schema 前缀、无 `LIMIT` |
 | **身份伪造**：登录是**业务接口级判断**，不是框架鉴权 | 病 A；**BD-03** | **鉴权阶段**（**三层后单独做**，见「三层范围定义」） | ⏳ **未做** —— 32 个接口零鉴权、无拦截器、无 Spring Security |
-| **文件白名单**：三处上传零类型校验（可传 `.html` / `.svg`） | 病 B；本文 **B#5** | **三层内（Service 校验层）；C3 复用** | ⏳ **未做** —— 本文 **B#5** 的另一半（basename 提取 / 同名策略）已由 `efe7959` 修 |
+| **上传文件名**：**无 basename 提取**（路径穿越）+ 零类型白名单（可传 `.html` / `.svg`） | 病 B；本文 **B#5**；§七 Class A **#4** | **三层内（Service 校验层）；C3 复用** | ⏳ **未做** —— `UploadStorage.store()` 直接 `uploadDir.resolve(file.getOriginalFilename())`：**basename 与白名单两者都还在**（2026-09-30 复核）。已修的只有**同名策略**那一半（§七 Class A **#5** ✅ `efe7959`）。⚠️ **可穿越性仍待验** —— 取决于 Tomcat 是否在 `getSubmittedFileName()` 剥离路径段；探针出来前只能写「无校验」 |
 | **分页** | `api-contract.md:11`「无分页参数，列表接口全量返回」；病 C（`productSearch` / `goodsDe` 均无 `LIMIT`） | **C3 顺带** | ⏳ **未做** |
 | **订单幂等**：`orderAdd` 非幂等（`OrderId` 由调用方提供、且无唯一约束） | `api-contract.md:69`；**TD-14** | **C3 后** | ⏳ **未做** —— DB 侧加索引属 schema 变更（本文「约束 1」允许**新增索引**） |
 
