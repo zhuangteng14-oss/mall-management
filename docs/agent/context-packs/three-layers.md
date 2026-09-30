@@ -4,6 +4,7 @@
 > 本文**只做提取与归属**，不含新事实 —— 每条都能追到那三份文档之一。
 > 定稿：2026-09-30（`origin/main` = `e930b30`）。
 > **修订：2026-09-30（`origin/main` = `3917cd3`）** —— C 组已升门禁（`5544362`）、P0 #1～#4 已修、新增 **G. 缺陷修复归属**。
+> **修订（2026-09-30，`origin/main` = `2cc2338`）** —— **D#1 禁令已登记**（新增 `### D.1`）、**D#4 DAO 选型已定**（新增 `### D.4`）、新增 **H. A3 覆盖矩阵**。
 
 ## 任务
 
@@ -111,14 +112,39 @@ TD-01（ddl-auto）、TD-03（回滚规则矛盾）、TD-04/06/07/08（锚点与
 
 | # | 项 | 位置 | 为何会撞 | 归属 | 工作量 |
 |---|---|---|---|---|---|
-| 1 | **`orderAddLocked` 不得加 `@Transactional`** | javadoc `GoodsController:405` | 锁在 `runLocked` 的 `finally` 先释放、事务提交在方法返回**之后** ⇒ 后进者的 `COUNT(*)` 在 RR 下读自己事务开始时的快照、**看不到前一个未提交的行** ⇒ 仍插 2 行。全项目**唯一「禁止用标准注解」处，且无处登记** | **三层前（新层须知）** | 小（登记）/ 中（设计规避） |
+| 1 | **`orderAddLocked` 不得加 `@Transactional`** | javadoc `GoodsController:405` | 锁在 `runLocked` 的 `finally` 先释放、事务提交在方法返回**之后** ⇒ 后进者的 `COUNT(*)` 在 RR 下读自己事务开始时的快照、**看不到前一个未提交的行** ⇒ 仍插 2 行。全项目**唯一「禁止用标准注解」处** —— ✅ **已登记**（`### D.1`，2026-09-30 本笔），不再「无处登记」 | **三层前（新层须知）** ✅ **本笔落定** | 小（登记）✅ / 中（设计规避） |
 | 2 | 无全局异常处理 / 无拦截器 | `@ControllerAdvice` / `@ExceptionHandler` / `HandlerInterceptor` = **0** | 新层抛出的异常无统一出口。**2026-09-30 实测（限定版）**：**框架层**错误出口已实测 —— 缺必填参数→**400**、未知路由→**404**，两者均落 **Boot 默认错误体**（`{timestamp,status,error,path}`，非本仓自造）；**业务层**异常出口**未验** | **三层内（三层产出）** | 中 |
 | 3 | 两套 CORS 机制并存 | `ImgConfig` 全局 `CorsFilter` + 4 处裸 `@CrossOrigin`（`MallManagementGoodsController:27` / `MallManagementUserController:20` / `MallManagementMessage:18` / `HealthController:37`） | CorsFilter 先于 DispatcherServlet ⇒ handler 级**静默失效** | **三层内（拦截器层）** | 小 |
-| 4 | `ddl-auto=update` + 零 `@Entity` | `application.properties:12`、`pom.xml:51`（TD-01） | 一旦有人加 `@Entity` 即反向 `ALTER TABLE`；`show-sql=true` 同刻全量打 SQL | **三层前（定 DAO 走 JdbcTemplate 还是 JPA）** | 小 |
+| 4 | `ddl-auto=update` + 零 `@Entity` | `application.properties:12`、`pom.xml:51`（TD-01） | 一旦有人加 `@Entity` 即反向 `ALTER TABLE`；`show-sql=true` 同刻全量打 SQL。**DAO 选型已定（`### D.4`）⇒ 不引 JPA ⇒ 本风险不会自行发生**；⚠️ 但 `spring-boot-starter-data-jpa` **不删**（`agent.md:36-37`「禁止删除旧配置」） | **三层前（定 DAO）** ✅ **本笔落定：`JdbcClient` 短期 + jOOQ 长期**（`### D.4`）；⚠️ **结论本笔落、实现随三层第一笔（订单域开工）** | 小 |
 | 5 | `app.upload-dir` 默认值三处重复 | `ImgPath:18` / `GoodsController:55` / `UserController:30` | 改一处必漏两处（同 TD-06 形态） | 三层内（配置收敛） | 小 |
 | 6 | 落库 URL 前缀硬编码且未 URL 编码 | `GoodsController:119,289`、`UserController:205`、另 `UserController:59` | 换机 / 反代全体图片失效；中文 / 空格文件名拼非法 URL（仓内既有 `色款.jpg`） | 三层内（Service / 配置） | 小 |
 | 7 | 无 logger（`printStackTrace` × 20 + `println` × 5）、无日志配置、`open-in-view` 默认 true | 病 D | 观测层欠账 | 并行（观测） | 小～中 |
 | 8 | 无迁移工具 / 无 Dockerfile | 全仓 0 命中 | 属环境层 | 并行（环境层） | 中 |
+
+### D.1 📌 登记：`orderAddLocked` 的 `@Transactional` 禁令（2026-09-30 本笔落定）
+
+> **D#1 的原话是「无处登记」** —— 本节就是那处。**一句话**：新层里任何被打上
+> `DistributedLockService.runLocked` 的临界区，**都不得加 `@Transactional`**。
+
+| 项 | 内容 |
+|---|---|
+| **禁令** | **`orderAddLocked` 不得加 `@Transactional`** —— 与本文 **`:49` 约束 4** 是同一句。源头：`MallManagementGoodsController.orderAddLocked` 的 javadoc + `DistributedLockService` 类 javadoc「调用点的两条硬要求」（第一颗 bullet） |
+| **理由 ① 锁外事务** | 事务的提交发生在**方法返回之后**，而锁在 `runLocked` 的 `finally` 里、即方法**返回之前**已释放 ⇒ 后进者拿到锁后的 `SELECT COUNT(*)` 在 **RR** 下读的是自己事务开始时的快照、**看不到前一个未提交的行** ⇒ 仍插 2 行。**不加事务时 autocommit 让 INSERT 在释放锁之前就提交** —— 这正是临界区查重成立的前提（`A-S2a-1b`：20 并发同 `OrderId` 落库 **20 → 1**，靠的就是这一条） |
+| **理由 ② 跨 bean 调用** | 临界区是**传给另一个 bean**（`DistributedLockService`）的 **lambda**，锁的持有者是那个 bean、不是本方法 ⇒ **没有「锁内的 bean 方法边界」可以挂事务**。且两个 Controller 被测试**钉死为无 AOP 代理**（`MallManagementApplicationTests:113` `goodsControllerIsNotAopProxied` / `:133` `messageControllerIsNotAopProxied`）⇒ 注解式 AOP 在这里**结构上不可用**，锁只能是方法体内的显式调用（同类内自调用同样不走代理，同仓 `MallManagementGoodsController:245` 的同一论证） |
+| **⚠️ 不可外推** | 本禁令**只管被打锁的方法体**。它的反面是 **C#2**：`goodsAdd`（**没有**打锁）的事务边界**应当**加 `@Transactional` —— 只记住半边就会踩另一边 |
+| **现状** | 全项目**唯一一处「禁止用标准注解」**。`orderAddLocked` 目前**未加**（`亲读`：该方法体上无 `@Transactional`）；`@Transactional` 全仓 **10 处**（引 `selection-status.md §2`），均不在此方法上 |
+
+### D.4 📌 登记：DAO 选型结论（2026-09-30 本笔落定）
+
+> **结论**：**短期 `JdbcClient`，长期 `jOOQ`** —— **分两层，不是二选一**。
+> **结论本笔落、实现随三层第一笔（订单域开工）** —— 本笔**不动 `pom.xml`、不动任何 Java**。
+
+| 项 | 内容 |
+|---|---|
+| **短期（三层第一笔起）** | `JdbcClient` —— Spring 的 JDBC 门面（命名参数 + `RowMapper`），**零新依赖**：`spring-boot-starter-jdbc` 已在 `pom.xml:40`。`亲读`：本机 m2 的 `spring-jdbc-6.2.6.jar` 内含 `org/springframework/jdbc/core/simple/JdbcClient.class`（连同 `StatementSpec` / `MappedQuerySpec` 等 11 个 class）—— **不是推断，是解包实测** |
+| **为什么短期不用 JPA** | ① **TD-01**：引 JPA 就会有人加 `@Entity`，而 `ddl-auto=update`（`application.properties:12`）会**反向 `ALTER TABLE`**；② 三层第一笔的需求只是「唯一数据访问出口 + 消灭 39 处硬编码 schema 名」（**F#1**），JPA 的实体映射在这里是**净负担**。⚠️ `spring-boot-starter-data-jpa`（`pom.xml:51`）**保留不删**（`agent.md:36-37`） |
+| **长期（何时切 jOOQ）** | 等 **DAO 边界稳定**、且出现「类型安全的 SQL 构建 / 代码生成」的实际需求时。**现状（`亲读`）**：jOOQ **全仓 0 命中** —— `pom.xml` 无、`src` 无、`docs` 无；本机 m2 只有 `org/jooq/jooq-bom/3.19.32`（**BOM 元数据，无 jar**）⇒ 现在引入等于**新增一个依赖 + 一套生成流程**，而收益要等 DAO 边界定形才兑现 |
+| **与 D#1 / C#2 的关系** | DAO 层正是「事务边界」（**C#2**）的落点；而 **D#1** 是那条规则的**唯一例外** —— 两者必须一起读 |
 
 ## E. 三层前置 —— 开工前要知道的事实
 
@@ -172,9 +198,69 @@ TD-01（ddl-auto）、TD-03（回滚规则矛盾）、TD-04/06/07/08（锚点与
 **归属**：**鉴权阶段**（三层后单独做）。BD-03 的三个方案里建议的 A / B **都是拦截器 + 令牌**（A：拦截器 + Redis Session；B：JWT + 拦截器）——
 「真安全在后端拦截器」是**既有裁决**，不是本节的新主张。落地位置与依赖见 **D#3（拦截器层）**、**D#2（全局异常出口）**：没有全局异常出口时，拦截器抛出的 401 / 403 会走 Boot 默认错误体。
 
+## H. A3 覆盖矩阵 —— A3 保护了什么（2026-09-30 实测）
+
+> **本节只回答一个问题**：改三层时，**哪些东西坏了 A3 会报警**。
+> 事实来源：`scripts/concurrency/ConcurrencyRunner.java`（2795 行，`亲读`）。
+> ⚠️ 已有的 `concurrency-map.md`（13 行）只有「**有什么问题**」、**没有「保护范围」列** —— 本节是它的补集。
+
+### H.1 A3 实际打到的端点 —— 9 个（8 个业务端点 + 1 个探针）
+
+| 端点 | 脚本里的角色 | 出现行（均为 `ConcurrencyRunner.java` 行号） |
+|---|---|---|
+| `/mysqlGoods/orderAdd` | **前置态构造**（S4a 的 H3 —— 三个状态位是入参、可任意置位）+ 并发写 | `:1441 :1494 :1525 :1594 :1623 :1700 :1842` |
+| `/mysqlGoods/orderPayIfUp` | 并发 CAS | `:1541 :1626 :1704 :1855` |
+| `/mysqlGoods/orderDeliveryIfUp` | 并发 CAS | `:1602 :1605 :1608 :1626 :1708 :1856` |
+| `/mysqlGoods/orderReceiveIfUp` | 并发 CAS | `:1611 :1614 :1617 :1712 :1857` |
+| `/mysqlGoods/goodstype` | 读侧基线（S1） | `:1399 :1715 :2178` |
+| `/mysqlLogin/loginSelect` | 读侧基线（S1） | `:1400` |
+| `/mysqlLogin/loginAdd` | TOCTOU 观测（B-2 段） | `:2156` |
+| `/message/friendAdd` | TOCTOU 观测（B-2 段） | `:2197` |
+| `/health/db` | **探针，不是被压端点** —— P5 就绪 / P6 库身份 / P7 阴性对照 | `:2592` |
+
+⇒ **受 A3 保护的业务端点 = 8 个**（上表除 `/health/db`）。
+
+### H.2 门禁项 —— `gate = true` 者失败即脚本退出码 1
+
+| 段 | 门禁项 | 编号 | 行 |
+|---|---|---|---|
+| S1 | 3 | `A-S1-1` / `A-S1-2` / `A-S1-3` | `:1393-1395` |
+| S2a | 4 | `A-S2a-1a` / `A-S2a-1b` / `A-S2a-1c` / `A-S2a-2` | `:1431-1434` |
+| S2b | 2 | `A-S2b-1` / `A-S2b-2` | `:1491-1492` |
+| S3 | 4 | `A-S3-1` … `A-S3-4` | `:1515-1518` |
+| **S4a** | **8** | `A-S4a-1` … `A-S4a-8` | `:1577-1584` |
+| S4b | 4 | `A-S4b-1` … `A-S4b-4` | `:1668-1671` |
+| **C** | **2** | `C-1` / `C-2` | `:1814-1815` |
+| **合计** | **27** | | |
+
+⚠️ **若按「C 组升门禁之前」的口径数是 25 项**（27 − `C-1` / `C-2`）—— `C-1`/`C-2` 自 2026-09-30（`5544362`）起才由 record-only **升为门禁**。**现口径 27。**
+
+⚠️ **另有三类不计入上表**（都不是 `Ass.gate`，别合并计数）：
+
+- **条件门禁 1 项**：`A-B2-1`（`:2220`，`gate = --b-group-gate`，默认 `false`）—— 也是全脚本**唯一**被 `EXPECT` 覆盖的断言（`:459` 静态块仅一条：`A-B2-1` → `EXPECTED_DEFECT_PRESENT`）；
+- **动态异常门禁最多 7 项**：`guard(...)`（`:1359`）在负载段抛异常时补一条 `gate = true` 的 `*-异常`，调用点 7 个（`:1313` / `:1316` / `:1319` / `:1322` / `:1325` / `:1328` / `:1331`）；
+- **前置校验 P0–P7 共 8 项**（`:2415` 起，写进 `Map<String,String> pre`）—— 失败走**退出码 2**，与门禁（退出码 1）是**两套机制**。其中 **P4** 的判据就是「种子行数 = `6/5/5/5/4`」（同 §验收标准）。
+
+⚠️ **本节「门禁」指脚本退出码，不等于「CI 拦 merge」**：`concurrency` job 目前是 `continue-on-error: true`（`.github/workflows/ci.yml:117`，**观测跑**，门禁地位同 M2 / M3 / M4 未裁）。§验收标准 里「改坏时间线 CI 会红」是同一口径。
+
+### H.3 不在覆盖范围内的端点 —— **只有单测**
+
+`api-contract.md §2` 共 **33** 个路由，A3 打到 **9** 个（§H.1）⇒ 其余 **24** 个 **A3 一个都没打**：
+
+| 族 | 未覆盖 | 是哪些 |
+|---|---|---|
+| `/mysqlLogin` | 3 / 5 | `getUserInfo`、`updateAvatar`、`updateUserInfo` |
+| `/message` | 9 / 10 | `conversations`、`history`、`send`、`getOrCreateConversation`、`userSelect`、`selectFriend`、`friendUp`、`friendDe`、`friendSelect` |
+| `/mysqlGoods` | 12 / 17 | `goodsAdd`、`goodsSelect`、`goodsSelectHome`、`goodsDe`、`productCodePrice`、`goodsUp`、`GoodsProductCodeSelect`、`productSearch`、`orderSelect`、`orderDeliveryIfSelect`、`orderDeliverySelect`、`historicalOrdersSelect` |
+| `/health` | 0 / 1 | — |
+
+⇒ **这 24 个的护栏只有单测**（全项目 `@Test` **111** 处 / **15** 个测试类，见 `tech-debt.md` M4），而**单测不跑并发路径** ⇒ 三层改动它们时，A3 **不会替你报警**。
+
+⚠️ **「断言口径盖不到」≠「端点没被调到」** —— 两个已知实例是 **TD-15**（`loginAdd` 无 else）与 **TD-17**（三个状态位可直传出终态）：`tech-debt.md:224` 逐字把它们归因于「**都是 A3 的断言口径盖不到的地方**」。⚠️ 别把两者混为一谈 —— `loginAdd` 本身**就在** A3 的 B-2 段里被调（§H.1），漏的是**断言**，不是调用。
+
 ## 最容易漏的两条
 
-1. **D#1** —— `@Transactional` 禁令**无处登记**，新层必然踩；且它与 **C#2** 是同一约束的两面（一边**必须加**、一边**禁止加**），只记住半边就会踩另一边。
+1. **D#1** —— `@Transactional` 禁令 **2026-09-30 已登记**（`### D.1`，本笔）。⚠️ 但**登记 ≠ 记住**：它仍是新层最容易踩的一条。且它与 **C#2** 是同一约束的两面（一边**必须加**、一边**禁止加**），只记住半边就会踩另一边。
 2. **E 档「C 组」** —— ⚠️ **此条已过期**：2026-09-30 `5544362` 起 C-1/C-2 是门禁，改了时间线 CI **会红**。仍留在「最容易漏」里，是因为它描述的陷阱换了形状、并没消失 —— **从旧文档读到「不门禁」的人，会以为时间线没有护栏**。
 
 ## 待验 —— 开工前不该当成已知
@@ -185,7 +271,7 @@ TD-01（ddl-auto）、TD-03（回滚规则矛盾）、TD-04/06/07/08（锚点与
 
 ## 开工顺序建议
 
-1. **两条「新层须知」先定**：**D#4**（DAO 走 JdbcTemplate 还是 JPA）+ **D#1**（登记 `@Transactional` 禁令）—— 不定就没法落笔
+1. ✅ **两条「新层须知」已于 2026-09-30 定（本笔）**：**D#4** = **`JdbcClient` 短期 + jOOQ 长期**（`### D.4`）+ **D#1** = `@Transactional` 禁令**已登记**（`### D.1`） —— 原文「不定就没法落笔」的**前置已满足**，可落笔
 2. **裁决先行**：**C#2**（事务边界）、**C#6**（TD-17 拦截 vs 观测）—— 两条都阻塞落笔
 3. **拆层顺序**：Controller → **DAO** → Service —— 先把数据出口收成一处，Service 才有意义
 4. **三层内顺带做**：校验（B#1 / #3 / #4 / #5、C#6）、全局异常出口（A#5 / D#2）、拦截器与 CORS（D#3）、事务边界（C#2）、A#2 / A#3 / D#5 / D#6
