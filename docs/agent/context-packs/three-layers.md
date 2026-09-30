@@ -112,7 +112,7 @@ TD-01（ddl-auto）、TD-03（回滚规则矛盾）、TD-04/06/07/08（锚点与
 | # | 项 | 位置 | 为何会撞 | 归属 | 工作量 |
 |---|---|---|---|---|---|
 | 1 | **`orderAddLocked` 不得加 `@Transactional`** | javadoc `GoodsController:405` | 锁在 `runLocked` 的 `finally` 先释放、事务提交在方法返回**之后** ⇒ 后进者的 `COUNT(*)` 在 RR 下读自己事务开始时的快照、**看不到前一个未提交的行** ⇒ 仍插 2 行。全项目**唯一「禁止用标准注解」处，且无处登记** | **三层前（新层须知）** | 小（登记）/ 中（设计规避） |
-| 2 | 无全局异常处理 / 无拦截器 | `@ControllerAdvice` / `@ExceptionHandler` / `HandlerInterceptor` = **0** | 新层抛出的异常无统一出口 | **三层内（三层产出）** | 中 |
+| 2 | 无全局异常处理 / 无拦截器 | `@ControllerAdvice` / `@ExceptionHandler` / `HandlerInterceptor` = **0** | 新层抛出的异常无统一出口。**2026-09-30 实测（限定版）**：**框架层**错误出口已实测 —— 缺必填参数→**400**、未知路由→**404**，两者均落 **Boot 默认错误体**（`{timestamp,status,error,path}`，非本仓自造）；**业务层**异常出口**未验** | **三层内（三层产出）** | 中 |
 | 3 | 两套 CORS 机制并存 | `ImgConfig` 全局 `CorsFilter` + 4 处裸 `@CrossOrigin`（`MallManagementGoodsController:27` / `MallManagementUserController:20` / `MallManagementMessage:18` / `HealthController:37`） | CorsFilter 先于 DispatcherServlet ⇒ handler 级**静默失效** | **三层内（拦截器层）** | 小 |
 | 4 | `ddl-auto=update` + 零 `@Entity` | `application.properties:12`、`pom.xml:51`（TD-01） | 一旦有人加 `@Entity` 即反向 `ALTER TABLE`；`show-sql=true` 同刻全量打 SQL | **三层前（定 DAO 走 JdbcTemplate 还是 JPA）** | 小 |
 | 5 | `app.upload-dir` 默认值三处重复 | `ImgPath:18` / `GoodsController:55` / `UserController:30` | 改一处必漏两处（同 TD-06 形态） | 三层内（配置收敛） | 小 |
