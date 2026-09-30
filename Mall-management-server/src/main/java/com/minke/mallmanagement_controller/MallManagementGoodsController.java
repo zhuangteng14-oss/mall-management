@@ -7,13 +7,13 @@ import com.minke.mallmanagement_service.GoodsTypeCacheService;
 import com.minke.mallmanagement_service.OrderAction;
 import com.minke.mallmanagement_service.OrderStateMachine;
 import com.minke.mallmanagement_service.OrderTransitionRecorder;
+import com.minke.mallmanagement_service.UploadStorage;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
-import java.io.File;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.nio.file.Paths;
@@ -102,17 +102,18 @@ public class MallManagementGoodsController {
             return result;
         }
 
-        // 获取图片文件名
-        String originalFilename = file.getOriginalFilename();
-        File saveFile = uploadPath.resolve(originalFilename).toFile();
-
-        // 保存图片（已存在则不重复保存，不报错）
+        // 保存图片，并拿到**实际落盘**的文件名（同名同内容→复用；同名不同内容→改名另存）。
+        // 必须用返回值拼 URL —— 改名时它和上传时的文件名不一致。
+        String originalFilename;
         try {
-            if (!saveFile.exists()) {
-                file.transferTo(saveFile);
-            }
+            originalFilename = UploadStorage.store(uploadPath, file);
         } catch (Exception e) {
-            System.out.println("商品图片已存在，继续上架");
+            // 显式失败：以前这里吞掉异常继续写库，结果是 DB 记下 URL、盘上没有那个文件
+            // —— 静默脏数据，比 500 更难查。
+            e.printStackTrace();
+            result.put("success", false);
+            result.put("msg", "商品图片保存失败");
+            return result;
         }
 
         // 最终存入数据库的图片 URL
@@ -279,11 +280,18 @@ public class MallManagementGoodsController {
 
         // 如果上传了新图片
         if (file != null && !file.isEmpty()) {
-            String fileName = file.getOriginalFilename();
-            File saveFile = uploadPath.resolve(fileName).toFile();
-            // 保存图片
-            if (!saveFile.exists()) {
-                file.transferTo(saveFile);
+            // 保存图片，并用**实际落盘**的文件名拼 URL。
+            String fileName;
+            try {
+                fileName = UploadStorage.store(uploadPath, file);
+            } catch (Exception e) {
+                // TD-07 的「三处不一致」到此统一：三处落盘失败一律显式失败。
+                // 本处原先是让 IOException 冒泡 → 500，前端只能看到「更新失败」；
+                // 且此前已在别处写过盘，返回 500 让人以为整单没动。现在改成在写库前就返回。
+                e.printStackTrace();
+                result.put("success", false);
+                result.put("msg", "商品图片保存失败");
+                return result;
             }
             // 新图片访问地址
             goodImgUrl = "http://localhost:8088/img/" + fileName;
