@@ -80,7 +80,7 @@
 ## 7. 改造优先级建议
 
 1. **立即**：为 §5 中 #1–#4 的四处多表写补 `@Transactional`（成本最低、收益最直接）。
-2. **立即**：给 `friend(customerid, friendid)`、`order.OrderId`、`goodstype.GoodType` 加唯一索引，让数据库兜住 #5–#7 的 TOCTOU 竞态。
+2. **立即**：给 `friend(customerid, friendid)`、`goodstype.GoodType` 加唯一索引，让数据库兜住 #5–#7 的 TOCTOU 竞态。✅ **已完成 1/3**：`order.OrderId` 于 **2026-09-30 S1a（`1e2fcfa`）** 加了 UNIQUE `uk_order_orderId`（§5 第 9 行已标「已消除」）；剩余两项**未做**。
 3. **中期**：把 §3 的 CAS 模式推广到其余状态变更类写接口。
 4. **中期**：修复 `OrderVolume` 的统计逻辑（`orderAdd` 成功后递增，或改为查询时实时聚合）。
 
