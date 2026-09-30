@@ -221,6 +221,6 @@
 
 ## 十、边界
 
-- 全程**只读**（唯一写入是本次落盘的三份 `docs/agent/*`）；未碰 `db-migration.md`；未加 PR 评论；未做任何修复。
+- 全程**只读**（唯一写入是本次落盘的三份 `docs/agent/*`）；未碰 `db-migration.md`（**2026-09-30 更正**：B3 收尾时已登记 `order_state_transition`，见 `db-migration.md` 变更登记第 1 行）；未加 PR 评论；未做任何修复。
 - `order_state_transition` 落盘**已确证、本地可复核**：`/tmp/b3ci/a3-full.log:1421`（P3 表数=12）、`:1480`（C-1）、`:1481`（C-2）；机制是 `ci.yml:186` 整份导入 `.sql` 而 B3 建表在文件末尾。
 - 相关文件：`db-schema.md`（schema 完整视图）、`selection-status.md`（选型现状）、`tech-debt.md`（已登记项）。

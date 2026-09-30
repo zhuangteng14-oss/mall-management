@@ -25,7 +25,7 @@
 
 ## 项目背景
 
-- 技术栈：【目标态】Spring Boot + Vue3 + MySQL + Redis
+- 技术栈：Spring Boot + Vue3 + MySQL + Redis
 - 代码规模：约 3000 行，含本地数据库
 - 核心关注：多线程、并发、异步、Redis 缓存、乐观锁、分布式锁、状态机
 - 必须避免：缓存击穿、缓存雪崩、缓存穿透、分布式锁死锁、MySQL 死锁、状态机循环死锁、线程池死锁
@@ -141,15 +141,15 @@ git rebase origin/main
 
 ## 技术选型（能引库就不自研）
 
-【目标态，当前项目尚未引入】
+【本节 7 项是**目标态**。逐项落地现状见 `docs/agent/selection-status.md` —— **勿以本清单判断「是否已实现」**】
 
-- 分布式锁：Redisson
-- 本地缓存：Caffeine
-- 限流熔断：Resilience4j
-- 状态机：Spring StateMachine
-- 指标：Micrometer + Actuator
-- 日志：Logback JSON Encoder
-- 死锁重试：Spring Retry
+- 分布式锁：Redisson —— ✅ 已落地（B2）
+- 本地缓存：Caffeine —— ✅ 已落地（B1）
+- 限流熔断：Resilience4j —— ⬜ 未落地（触发条件见 `selection-status.md §4`）
+- 状态机：Spring StateMachine —— ⚠️ **未引库**：B3 以自研 `OrderStateMachine` 替代，与本条「能引库就不自研」背离，**待裁决**（`selection-status.md §5.1`）
+- 指标：Micrometer + Actuator —— ✅ 已落地（C1）
+- 日志：Logback JSON Encoder —— ⬜ 未落地（触发条件见 `selection-status.md §4`）
+- 死锁重试：Spring Retry —— ⬜ 未落地（触发条件见 `selection-status.md §4`）
 
 ## 缓存与锁的强制规范
 

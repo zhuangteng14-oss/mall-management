@@ -282,3 +282,40 @@
 **硬性前置**：① `pom.xml` 新增 **6 个依赖**（`spring-boot-starter-cache`、`caffeine`、`spring-boot-starter-data-redis`、`commons-pool2`、`spring-boot-starter-actuator`、`redisson:3.46.0`）；② **运行时需 Redis 实例** —— CI 的 `concurrency` job 内以步骤 `docker run -d --name a3-redis -p 6379:6379 redis:7 redis-server --requirepass 123456` 提供（**刻意不用 services**：官方 redis 镜像 entrypoint 不接受环境变量传参，见 `ci.yml:153-164`）。
 
 **收尾状态**：B1 / C1 / B2 三笔全合入 `main`（`dcf2d39` / `3f8c4b7` / `aacd2bb`，PR #4 / #5 / #6）；CI 三 job 全绿；`concurrency` job 仍是观测跑（`continue-on-error: true`，门禁地位同 M2 未裁）。全项目 **51 用例**（10 个可执行测试类，Failures 0 / Errors 0，默认 SKIP 8 = `LockSceneRedisTest` 4 + `MallManagementApplicationTests` 4；2026-09-29 21:04 本地实测）；主源 21 个 `.java`、测试源 11 个。观测出口 2 个，共 **15 个 `mall.*` 指标**。
+
+### M4 — B3 订单状态机 + 异步时间线（2026-09-30）
+
+> 标题日期 = 合并笔 `148e77b` 的**提交日（+0800 本地）** `2026-09-30 00:02`，**不取** GitHub / CI 显示的 `2026-09-29T16:02:35Z`。
+> 此即 M2 的覆辙处：`fc4e0fe` 本地为 `2026-09-21 00:10`，M2 标题却写 `2026-09-20`（用了 UTC 日期）。B3 的代码笔全在本地 `09-29 23:10–23:49`，唯合并笔跨了本地零点。
+
+| 项 | 交付物 | 证据 |
+|---|---|---|
+| 状态机（核心） | `OrderAction`(64) / `OrderState`(124) / `OrderStateMachine`(281) —— **无状态、描述性转移表**：守卫层（SQL 谓词 CAS）与语义层（状态名）显式分离、差集可测；**golden copy 回归闸**钉住线上 SQL 逐字符不变 | `b226357` |
+| 四个写方法接入 | `MallManagementGoodsController` +55/-40：`orderAdd`（`orderAddLocked:455` 记 **CREATE** —— 只在 `rows > 0` 之后记，「订单已存在」早退分支不记，因未产生新状态）+ `orderPayIfUp` / `orderReceiveIfUp` / `orderDeliveryIfUp` 三 CAS 端点（统一经 `casTransition` 记转移）。**CREATE 是必需项而非可选项** —— 时间线的第一条就是出生 | `428293f` |
+| 异步出口 | `OrderStateExecutor`(289) —— 单池 core2/max4 + `ArrayBlockingQueue(1024)` + discard-oldest-with-callback（**丢观测、不丢业务**）；`OccurredAt` 在**锁临界区内**取 | `428293f` |
+| 时间线（两类分工） | `OrderTransitionRecorder`(187) —— 在 UPDATE 返回后**立刻**于临界区内判定/读回三位/埋点/入队（`submitTimeline` → `executor.submit`）；`OrderTimelineWriter`(137) —— 时间线的**唯一写入点**，跑异步线程、**永不抛**（fail-soft，`result=error` 即该条永久丢，不重投）。读回在 UPDATE **之后**、由新态**精确反推** `FromState`（非近似） | `428293f` |
+| 观测 | `MallOrderStateMetrics`(267) —— **6 个 `mall.order.state.*` 指标**（`transitions` / `illegal` / `async.duration` / `async.queue.depth` / `async.rejected` / `timeline.writes`） | `428293f` |
+| 建表 | `order_state_transition` 追加至 `mall_management_sql.sql:221-235`：bigint PK + `idx_order_state_transition_order(OrderId, OccurredAt)`；**全库唯一带列 COMMENT 的表**、唯一 `datetime(3)` 列 | `e93a499` |
+| A3 扩展 | `ConcurrencyRunner.java` +407/-6：新增 **C 组时间线核对**（**record-only**，不门禁）；P3 表数判据改为「随 DDL 是否落盘走」 | `4bc78d2` |
+| 配置 | `application.properties` +26（B3 节） | `428293f` |
+| 合并与 CI | PR #7 合入 `main`（`148e77b`）；CI `success`（headSha = `148e77b`） | `gh run list` |
+
+**决策（B3 期间）—— 四项选型明确不补 + 登记触发条件**：Resilience4j 限流熔断（触发：出现第 2 个外部依赖，或需按接口限流）、Spring Retry 死锁重试（触发：出现多表写事务）、Logback JSON 编码器（触发：接入日志聚合）、线程池分池（触发：出现第 2 个异步出口且其任务不可丢）。⇒ **四项均三层前不必补**。
+
+**发现（B3 后普查，纯文档，`10da544`）**：
+
+| 文档 | 内容 | 规模 |
+|---|---|---|
+| `db-schema.md` | schema 完整视图：12 表（11 原始 + B3 追加 1）+ §6–§10 逐列 / 索引 / 外键 / 跨表类型基线 | +287/-4 |
+| `defect-survey.md` | 缺陷普查：**七病 + 七前提 + 元发现 + Class A/B 分岔**；三条总判断 ——「局部推理极强、组合推理缺席」/ 七前提 / 测试与缺陷不重叠 | 226 |
+| `selection-status.md` | 7 项选型逐项：**3 已落地 + 1 自研替代 + 3 未落地**；「切面 + 注解」整体未落地（全仓 `@interface` = 0） | 90 |
+
+**Class A 8 项 + Class B 6 项待裁决**（`defect-survey.md §7`），为三层前输入。
+
+**待裁决两处**（`selection-status.md §5`，本次**未动 `agent.md`**）：① `agent.md:142`「能引库就不自研」与 B3 自研状态机背离；② 「乐观锁」是否已被谓词守卫等效覆盖 —— 判定为**非等价替换**，是有意的语义差异（TD-17）。
+
+**硬性前置**：**无新增依赖** —— B3 全范围 `pom.xml` 零改动（`git diff --name-only 4ef77f1..148e77b -- Mall-management-server/pom.xml` 为空）。运行时需 Redis，同 M3（CI 内 `docker run ... redis:7 --requirepass`，刻意不用 services）。
+
+**收尾状态**：B3 合入 `main`（`148e77b`，PR #7）；CI 三 job 全绿；`concurrency` job 仍是观测跑（`continue-on-error: true`，门禁地位同 M2 / M3 未裁）。普查三份文档 `10da544` 为纯文档 ⇒ **`paths-ignore` 生效、未触发 CI**（实证：近 25 次运行无一 `headSha` = `10da544`）。全项目 **`@Test` 111 处**（15 个含测试的类；默认 SKIP 8 = `LockSceneRedisTest` 4 + `MallManagementApplicationTests` 4，均 `@EnabledIfEnvironmentVariable(A3_ENABLED)`）；主源 **28** 个 `.java`、测试源 **16** 个。观测出口累计 **21 个 `mall.*` 指标**（11 cache + 4 lock + 6 order.state）。
+
+**TD 变更**：**无** —— `tech-debt.md` 在 B3 全期间未被改动（最后一次改动 `4ef77f1` = M3 本身）。B3 的待落项共三笔，均属「声明过、从未落盘」：`db-migration.md` 的 B3 行、**M4 本条**、`agent.md` 技术选型最小改。
