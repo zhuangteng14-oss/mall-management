@@ -4,6 +4,7 @@
 > 本文**只做提取与归属**，不含新事实 —— 每条都能追到那三份文档之一。
 > 定稿：2026-09-30（`origin/main` = `e930b30`）。
 > **修订：2026-09-30（`origin/main` = `3917cd3`）** —— C 组已升门禁（`5544362`）、P0 #1～#4 已修、新增 **G. 缺陷修复归属**。
+> **修订（2026-09-30，`origin/main` = `2cc2338`）** —— **D#1 禁令已登记**（新增 `### D.1`）、**D#4 DAO 选型已定**（新增 `### D.4`）、新增 **H. A3 覆盖矩阵**。
 
 ## 任务
 
@@ -111,14 +112,39 @@ TD-01（ddl-auto）、TD-03（回滚规则矛盾）、TD-04/06/07/08（锚点与
 
 | # | 项 | 位置 | 为何会撞 | 归属 | 工作量 |
 |---|---|---|---|---|---|
-| 1 | **`orderAddLocked` 不得加 `@Transactional`** | javadoc `GoodsController:405` | 锁在 `runLocked` 的 `finally` 先释放、事务提交在方法返回**之后** ⇒ 后进者的 `COUNT(*)` 在 RR 下读自己事务开始时的快照、**看不到前一个未提交的行** ⇒ 仍插 2 行。全项目**唯一「禁止用标准注解」处，且无处登记** | **三层前（新层须知）** | 小（登记）/ 中（设计规避） |
+| 1 | **`orderAddLocked` 不得加 `@Transactional`** | javadoc `GoodsController:405` | 锁在 `runLocked` 的 `finally` 先释放、事务提交在方法返回**之后** ⇒ 后进者的 `COUNT(*)` 在 RR 下读自己事务开始时的快照、**看不到前一个未提交的行** ⇒ 仍插 2 行。全项目**唯一「禁止用标准注解」处** —— ✅ **已登记**（`### D.1`，2026-09-30 本笔），不再「无处登记」 | **三层前（新层须知）** ✅ **本笔落定** | 小（登记）✅ / 中（设计规避） |
 | 2 | 无全局异常处理 / 无拦截器 | `@ControllerAdvice` / `@ExceptionHandler` / `HandlerInterceptor` = **0** | 新层抛出的异常无统一出口。**2026-09-30 实测（限定版）**：**框架层**错误出口已实测 —— 缺必填参数→**400**、未知路由→**404**，两者均落 **Boot 默认错误体**（`{timestamp,status,error,path}`，非本仓自造）；**业务层**异常出口**未验** | **三层内（三层产出）** | 中 |
 | 3 | 两套 CORS 机制并存 | `ImgConfig` 全局 `CorsFilter` + 4 处裸 `@CrossOrigin`（`MallManagementGoodsController:27` / `MallManagementUserController:20` / `MallManagementMessage:18` / `HealthController:37`） | CorsFilter 先于 DispatcherServlet ⇒ handler 级**静默失效** | **三层内（拦截器层）** | 小 |
-| 4 | `ddl-auto=update` + 零 `@Entity` | `application.properties:12`、`pom.xml:51`（TD-01） | 一旦有人加 `@Entity` 即反向 `ALTER TABLE`；`show-sql=true` 同刻全量打 SQL | **三层前（定 DAO 走 JdbcTemplate 还是 JPA）** | 小 |
+| 4 | `ddl-auto=update` + 零 `@Entity` | `application.properties:12`、`pom.xml:51`（TD-01） | 一旦有人加 `@Entity` 即反向 `ALTER TABLE`；`show-sql=true` 同刻全量打 SQL。**DAO 选型已定（`### D.4`）⇒ 不引 JPA ⇒ 本风险不会自行发生**；⚠️ 但 `spring-boot-starter-data-jpa` **不删**（`agent.md:36-37`「禁止删除旧配置」） | **三层前（定 DAO）** ✅ **本笔落定：`JdbcClient` 短期 + jOOQ 长期**（`### D.4`）；⚠️ **结论本笔落、实现随三层第一笔（订单域开工）** | 小 |
 | 5 | `app.upload-dir` 默认值三处重复 | `ImgPath:18` / `GoodsController:55` / `UserController:30` | 改一处必漏两处（同 TD-06 形态） | 三层内（配置收敛） | 小 |
 | 6 | 落库 URL 前缀硬编码且未 URL 编码 | `GoodsController:119,289`、`UserController:205`、另 `UserController:59` | 换机 / 反代全体图片失效；中文 / 空格文件名拼非法 URL（仓内既有 `色款.jpg`） | 三层内（Service / 配置） | 小 |
 | 7 | 无 logger（`printStackTrace` × 20 + `println` × 5）、无日志配置、`open-in-view` 默认 true | 病 D | 观测层欠账 | 并行（观测） | 小～中 |
 | 8 | 无迁移工具 / 无 Dockerfile | 全仓 0 命中 | 属环境层 | 并行（环境层） | 中 |
+
+### D.1 📌 登记：`orderAddLocked` 的 `@Transactional` 禁令（2026-09-30 本笔落定）
+
+> **D#1 的原话是「无处登记」** —— 本节就是那处。**一句话**：新层里任何被打上
+> `DistributedLockService.runLocked` 的临界区，**都不得加 `@Transactional`**。
+
+| 项 | 内容 |
+|---|---|
+| **禁令** | **`orderAddLocked` 不得加 `@Transactional`** —— 与本文 **`:49` 约束 4** 是同一句。源头：`MallManagementGoodsController.orderAddLocked` 的 javadoc + `DistributedLockService` 类 javadoc「调用点的两条硬要求」（第一颗 bullet） |
+| **理由 ① 锁外事务** | 事务的提交发生在**方法返回之后**，而锁在 `runLocked` 的 `finally` 里、即方法**返回之前**已释放 ⇒ 后进者拿到锁后的 `SELECT COUNT(*)` 在 **RR** 下读的是自己事务开始时的快照、**看不到前一个未提交的行** ⇒ 仍插 2 行。**不加事务时 autocommit 让 INSERT 在释放锁之前就提交** —— 这正是临界区查重成立的前提（`A-S2a-1b`：20 并发同 `OrderId` 落库 **20 → 1**，靠的就是这一条） |
+| **理由 ② 跨 bean 调用** | 临界区是**传给另一个 bean**（`DistributedLockService`）的 **lambda**，锁的持有者是那个 bean、不是本方法 ⇒ **没有「锁内的 bean 方法边界」可以挂事务**。且两个 Controller 被测试**钉死为无 AOP 代理**（`MallManagementApplicationTests:113` `goodsControllerIsNotAopProxied` / `:133` `messageControllerIsNotAopProxied`）⇒ 注解式 AOP 在这里**结构上不可用**，锁只能是方法体内的显式调用（同类内自调用同样不走代理，同仓 `MallManagementGoodsController:245` 的同一论证） |
+| **⚠️ 不可外推** | 本禁令**只管被打锁的方法体**。它的反面是 **C#2**：`goodsAdd`（**没有**打锁）的事务边界**应当**加 `@Transactional` —— 只记住半边就会踩另一边 |
+| **现状** | 全项目**唯一一处「禁止用标准注解」**。`orderAddLocked` 目前**未加**（`亲读`：该方法体上无 `@Transactional`）；`@Transactional` 全仓 **10 处**（引 `selection-status.md §2`），均不在此方法上 |
+
+### D.4 📌 登记：DAO 选型结论（2026-09-30 本笔落定）
+
+> **结论**：**短期 `JdbcClient`，长期 `jOOQ`** —— **分两层，不是二选一**。
+> **结论本笔落、实现随三层第一笔（订单域开工）** —— 本笔**不动 `pom.xml`、不动任何 Java**。
+
+| 项 | 内容 |
+|---|---|
+| **短期（三层第一笔起）** | `JdbcClient` —— Spring 的 JDBC 门面（命名参数 + `RowMapper`），**零新依赖**：`spring-boot-starter-jdbc` 已在 `pom.xml:40`。`亲读`：本机 m2 的 `spring-jdbc-6.2.6.jar` 内含 `org/springframework/jdbc/core/simple/JdbcClient.class`（连同 `StatementSpec` / `MappedQuerySpec` 等 11 个 class）—— **不是推断，是解包实测** |
+| **为什么短期不用 JPA** | ① **TD-01**：引 JPA 就会有人加 `@Entity`，而 `ddl-auto=update`（`application.properties:12`）会**反向 `ALTER TABLE`**；② 三层第一笔的需求只是「唯一数据访问出口 + 消灭 39 处硬编码 schema 名」（**F#1**），JPA 的实体映射在这里是**净负担**。⚠️ `spring-boot-starter-data-jpa`（`pom.xml:51`）**保留不删**（`agent.md:36-37`） |
+| **长期（何时切 jOOQ）** | 等 **DAO 边界稳定**、且出现「类型安全的 SQL 构建 / 代码生成」的实际需求时。**现状（`亲读`）**：jOOQ **全仓 0 命中** —— `pom.xml` 无、`src` 无、`docs` 无；本机 m2 只有 `org/jooq/jooq-bom/3.19.32`（**BOM 元数据，无 jar**）⇒ 现在引入等于**新增一个依赖 + 一套生成流程**，而收益要等 DAO 边界定形才兑现 |
+| **与 D#1 / C#2 的关系** | DAO 层正是「事务边界」（**C#2**）的落点；而 **D#1** 是那条规则的**唯一例外** —— 两者必须一起读 |
 
 ## E. 三层前置 —— 开工前要知道的事实
 
@@ -174,7 +200,7 @@ TD-01（ddl-auto）、TD-03（回滚规则矛盾）、TD-04/06/07/08（锚点与
 
 ## 最容易漏的两条
 
-1. **D#1** —— `@Transactional` 禁令**无处登记**，新层必然踩；且它与 **C#2** 是同一约束的两面（一边**必须加**、一边**禁止加**），只记住半边就会踩另一边。
+1. **D#1** —— `@Transactional` 禁令 **2026-09-30 已登记**（`### D.1`，本笔）。⚠️ 但**登记 ≠ 记住**：它仍是新层最容易踩的一条。且它与 **C#2** 是同一约束的两面（一边**必须加**、一边**禁止加**），只记住半边就会踩另一边。
 2. **E 档「C 组」** —— ⚠️ **此条已过期**：2026-09-30 `5544362` 起 C-1/C-2 是门禁，改了时间线 CI **会红**。仍留在「最容易漏」里，是因为它描述的陷阱换了形状、并没消失 —— **从旧文档读到「不门禁」的人，会以为时间线没有护栏**。
 
 ## 待验 —— 开工前不该当成已知
@@ -185,7 +211,7 @@ TD-01（ddl-auto）、TD-03（回滚规则矛盾）、TD-04/06/07/08（锚点与
 
 ## 开工顺序建议
 
-1. **两条「新层须知」先定**：**D#4**（DAO 走 JdbcTemplate 还是 JPA）+ **D#1**（登记 `@Transactional` 禁令）—— 不定就没法落笔
+1. ✅ **两条「新层须知」已于 2026-09-30 定（本笔）**：**D#4** = **`JdbcClient` 短期 + jOOQ 长期**（`### D.4`）+ **D#1** = `@Transactional` 禁令**已登记**（`### D.1`） —— 原文「不定就没法落笔」的**前置已满足**，可落笔
 2. **裁决先行**：**C#2**（事务边界）、**C#6**（TD-17 拦截 vs 观测）—— 两条都阻塞落笔
 3. **拆层顺序**：Controller → **DAO** → Service —— 先把数据出口收成一处，Service 才有意义
 4. **三层内顺带做**：校验（B#1 / #3 / #4 / #5、C#6）、全局异常出口（A#5 / D#2）、拦截器与 CORS（D#3）、事务边界（C#2）、A#2 / A#3 / D#5 / D#6
