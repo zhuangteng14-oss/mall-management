@@ -230,7 +230,7 @@ orderPayIfUp 3 | loginSelect 1 | loginAdd 1 | friendAdd 1
 | **`A-S1-1`** | HTTP 5xx == 0 且连接错误 == 0 | ⚠️ **高风险** | 加 Redis 引入新故障点。Redis 不可达时若抛异常 → 5xx > 0 → **断言直接挂** |
 | **`A-S1-2`** | goodstype 响应全部 `success:true` | ⚠️ 是 | 若加 `@Cacheable`，返回的是缓存对象。**必须确认序列化后形状仍是 `{success:true, list:[...]}`** |
 | **`A-S1-3`** | `loginSelect('123','123456')` 每次返回 1 | ⚠️ 是（若缓存它） | 逻辑上 miss→DB、hit→缓存，结果不变；但键含明文密码，**建议不缓存**（§3） |
-| `A-S2a-1` / `A-S2a-2` | 同 OrderId 20 并发下单 → `count >= 2` / 行数 == 成功响应数 | ❌ 否 | `orderAdd` 是写，不缓存 |
+| `A-S2a-1a` / `A-S2a-1b` / `A-S2a-1c` / `A-S2a-2` | 同 OrderId 20 并发下单 → 锁指标增量 == 20 / 行数 == 1 / msg 无「数据库错误」/ 行数 == 成功响应数 | ❌ 否 | `orderAdd` 是写，不缓存。⚠️ 原写 `count >= 2` —— 那是 **B2 之前** `A-S2a-1`「缺陷存在型」的口径，**B2 把该断言翻正后即失效**；2026-09-30 S1a 又把它拆为 1a/1b/1c |
 | `A-S2b-1` / `A-S2b-2` | 唯一 OrderId 下单 → 成功率 100% / `count == 成功数` | ❌ 否 | 同上 |
 | `A-S3-1` … `A-S3-4` | CAS 付款：每单恰好 1 个 success / 其余 msg 正确 / 无「数据库错误」/ JDBC 核对 PayIf=1 | ❌ 否 | CAS 端点不缓存；`A-S3-4` 走 JDBC 直连，绕开缓存 |
 | `A-S4a-1` … `A-S4a-8` | 发货 / 收货 CAS 状态机 + 命名空间不变式 | ❌ 否 | 同上 |

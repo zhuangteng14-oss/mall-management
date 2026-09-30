@@ -65,7 +65,7 @@
 | 6 | TOCTOU 竞态 | `friendAdd` 先查再插，并发重复申请会写入重复行 | `M:205` → `M:219` |
 | 7 | TOCTOU 竞态 | `goodstype` POST 先查重再插，并发下可产生重复类型 | `G:42` → `G:51` |
 | 8 | 无唯一约束兜底 | `friend` 仅 PK `id`，`(customerid, friendid)` 无唯一键 —— 上述竞态**无数据库层兜底** | `SQL:43` |
-| 9 | 无唯一约束兜底 | `order.OrderId` 无唯一索引（主键是自增 `Id`），业务单号可重复 | `SQL:154` |
+| 9 | ~~无唯一约束兜底~~ ✅ **已消除（2026-09-30 S1a，`1e2fcfa`）** | ~~`order.OrderId` 无唯一索引（主键是自增 `Id`），业务单号可重复~~ → 已加 UNIQUE **`uk_order_orderId`**，DB 层兜底到位。应用层查重仍由 B2 的临界区「先查后插」负责，两条互补（`A-S2a-1b` 断言前者、`1c` 断言后者） | `SQL:154`；追加块 `SQL:245` |
 | 10 | 无唯一约束兜底 | `goodstype.GoodType` 无唯一索引，查重仅靠应用层 | `SQL:78` |
 | 11 | 无锁机制 | 全项目无 `synchronized`、无 `Lock`、无 `SELECT ... FOR UPDATE`、无 `@Version` 乐观锁版本列 | 3 个 Controller 全文 |
 | 12 | 无分布式锁 | 未引入 Redis / Redisson（见 `cache-map.md` 依赖实测），多实例部署时连应用层锁的基础设施都不具备 | `pom.xml:32-68` |
