@@ -1,5 +1,6 @@
 package com.minke.mallmanagement_controller;
 
+import com.minke.mallmanagement_service.UploadStorage;
 import com.minke.mallmanagement_service.UserCacheService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
@@ -8,7 +9,6 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
-import java.io.File;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.nio.file.Paths;
@@ -190,13 +190,10 @@ public class MallManagementUserController {
             return result;
         }
 
-        String originalFilename = file.getOriginalFilename();
-        File saveFile = uploadPath.resolve(originalFilename).toFile();
+        String originalFilename = UploadStorage.storedName(file);
 
         try {
-            if (!saveFile.exists()) {
-                file.transferTo(saveFile);
-            }
+            UploadStorage.store(uploadPath, originalFilename, file);
         } catch (Exception e) {
             // 就算保存失败，也不崩溃！
             System.out.println("文件已存在，继续更新头像");

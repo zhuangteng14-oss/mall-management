@@ -7,13 +7,13 @@ import com.minke.mallmanagement_service.GoodsTypeCacheService;
 import com.minke.mallmanagement_service.OrderAction;
 import com.minke.mallmanagement_service.OrderStateMachine;
 import com.minke.mallmanagement_service.OrderTransitionRecorder;
+import com.minke.mallmanagement_service.UploadStorage;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
-import java.io.File;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.nio.file.Paths;
@@ -103,14 +103,11 @@ public class MallManagementGoodsController {
         }
 
         // 获取图片文件名
-        String originalFilename = file.getOriginalFilename();
-        File saveFile = uploadPath.resolve(originalFilename).toFile();
+        String originalFilename = UploadStorage.storedName(file);
 
         // 保存图片（已存在则不重复保存，不报错）
         try {
-            if (!saveFile.exists()) {
-                file.transferTo(saveFile);
-            }
+            UploadStorage.store(uploadPath, originalFilename, file);
         } catch (Exception e) {
             System.out.println("商品图片已存在，继续上架");
         }
@@ -279,12 +276,11 @@ public class MallManagementGoodsController {
 
         // 如果上传了新图片
         if (file != null && !file.isEmpty()) {
-            String fileName = file.getOriginalFilename();
-            File saveFile = uploadPath.resolve(fileName).toFile();
+            String fileName = UploadStorage.storedName(file);
             // 保存图片
-            if (!saveFile.exists()) {
-                file.transferTo(saveFile);
-            }
+            // ⚠️ 刻意不 catch：goodsUp 现状即让 IOException 冒泡（TD-07 记的「三处不一致」之一）。
+            //    本 commit 是纯结构提取，不顺手统一 —— 统一在下一笔。
+            UploadStorage.store(uploadPath, fileName, file);
             // 新图片访问地址
             goodImgUrl = "http://localhost:8088/img/" + fileName;
         }
