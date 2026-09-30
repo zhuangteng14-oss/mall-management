@@ -19,11 +19,11 @@
 
 ---
 
-## 二、前提清单（多路径依赖、但没有任何东西保证）
+## 二、前提清单（多路径依赖；**原先**没有任何东西保证 —— 到 2026-09-30 为止只有 A 的 **DB 面**被 S1a 认领）
 
 | # | 前提 | 谁在依赖 | 保证它的东西 |
 |---|---|---|---|
-| A | `order.OrderId` 唯一 | 时间线主排序键、重放、C-2 | 前端 `Math.random()`，**无约束** |
+| A | `order.OrderId` 唯一 | 时间线主排序键、重放、C-2 | 前端 `Math.random()` **+ DB UNIQUE `order.OrderId`（`uk_order_orderId`，S1a-1 `1e2fcfa` 已加）** ⇒ **DB 面已保证**，应用层不再是唯一防线。⚠️ 本栏原写「**无约束**」；DB 之外的路径（`order_state_transition` 仍无 FK）见 `db-schema.md §8` |
 | B | `goods(MerchantId, GoodName, ProductCode)` 唯一 | `priceByTriple`、`queryForMap` | **无** |
 | B′ | `goods(MerchantId, ProductCode)` 唯一 | 与 B 并存的另一套键 | **无**，且**与 B 冲突** |
 | C | `login.Id` 唯一 | 用户身份 | 客户端直传 `userid`，**无** |

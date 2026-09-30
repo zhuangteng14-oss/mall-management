@@ -295,14 +295,14 @@
 | `goods.MerchantId` | `user.merchantid` / `login.Id` | |
 | `order.MerchantId` | 同上 | 类型不同（varchar(40) vs char(20)），见 §9 |
 | `order.CustomerId` | `user.customerid` / `login.Id` | 类型不同（varchar(40) vs char(20)） |
-| `order_state_transition.OrderId` | `order.OrderId` | **当前无法加 FK**（见下） |
+| `order_state_transition.OrderId` | `order.OrderId` | ⚠️ **未建 FK**（原文「当前无法加 FK」）—— 阻塞点已于 **2026-09-30 S1a（`1e2fcfa`）消失**：`order.OrderId` 现有 UNIQUE `uk_order_orderId`，同样满足「被引用列有索引」。**建得起来，但迄今未建**（规则 v2 把新增 FK 列为「有条件允许」）。详见下方 🔄 |
 | `productsales.(ProductCode, MerchantId, GoodName)` | `goods` 三元组 | 冗余派生表 |
 | `message.(from_id,to_id)` | 用户业务号 | 类型 varchar(50)，与 char(20) 不同 |
 | `friend.(customerid,friendid)` | 用户业务号 | 同上 |
 | `customerimage.CustomerId` | `user.customerid` | |
 | `merchantimage.MerchantId` | `user.merchantid` | |
 
-> ⚠️ **`order_state_transition.OrderId → order.OrderId` 这个 FK 现在建不起来 —— 不是「没建」，是「建不了」**：MySQL/InnoDB 要求**被引用列上有索引**（该列须为该索引的最左前缀列），而 `order.OrderId` **当时无任何索引**。故要建 FK 必须先给 `order.OrderId` 建索引。
+> ⚠️ **（S1a 之前）`order_state_transition.OrderId → order.OrderId` 这个 FK 建不起来 —— 不是「没建」，是「建不了」**（**现况见本块末尾 🔄**）：MySQL/InnoDB 要求**被引用列上有索引**（该列须为该索引的最左前缀列），而 `order.OrderId` **当时无任何索引**。故要建 FK 必须先给 `order.OrderId` 建索引。
 >
 > ✅ **本机实测（8.0.32，用完即 DROP 并复核删净）**：
 > - 父列**无索引** → `ERROR 1822 (HY000): Failed to add the foreign key constraint. Missing index for constraint 'fk1' in the referenced table 'p'`
