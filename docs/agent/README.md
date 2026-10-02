@@ -14,6 +14,7 @@
 |---|---|---|---|
 | agent.md | 规则约束 | 每个会话开场 | 规则变化时 |
 | project-map.md | 项目结构与现状 | 探索新功能时 | 结构变化时 |
+| ddd-package-plan.md | DDD 包结构规划（**定稿，未执行**） | 涉及分包 / 迁移排期时 | 规划变化时；执行完移入 archive/ |
 | api-contract.md | 接口契约 | 改接口或做前端时 | 接口变化时 |
 | db-schema.md | 表结构现状 | 涉及 DB 时 | 表结构变化时 |
 | db-migration.md | 数据库变更记录 | 每次 DB 变更 | 每次变更时 |
