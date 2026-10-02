@@ -16,10 +16,10 @@
 ## 必读源码
 
 - Mall-management-server/src/main/java/com/minke/mallmanagement/order/controller/OrderController.java（订单路由）+ `order/service/OrderService.java`（订单核心逻辑：`orderAdd` / `orderPayIfUp` / `orderReceiveIfUp` / `orderDeliveryIfUp`）
-- Mall-management-server/src/main/java/com/minke/mallmanagement/user/controller/UserController.java
+- Mall-management-server/src/main/java/com/minke/mallmanagement/user/controller/UserController.java（**仅路由**，三层第三笔后）+ `user/service/UserService.java`（业务体，`loginAdd` 的 `@Transactional` 在此）+ `user/dao/UserDao.java`（全部内联 SQL，含 `loginAdd` 的三表写入）
 - Mall-management-server/src/test/java/com/minke/mallmanagement/smoke/AbstractSmokeTest.java（参考基类设计）
 
-> 路径注意：主源与测试源**现已统一**在 `com/minke/`（2026-10-02 笔 1 挪包与笔 2 改名之前，主源是 `com/minke/mallmanagement_controller/`「**无 `server` 段**」、测试源是 `com/minke/mallmanagementserver/`，两者不一致）。下文凡引用旧路径者均属**历史记录**。
+> 路径注意：主源与测试源**现已统一**在 `com/minke/`（2026-10-02 笔 1 挪包与笔 2 改名之前，主源是 `com/minke/mallmanagement_controller/`「**无 `server` 段**」、测试源是 `com/minke/mallmanagementserver/`，两者不一致）。下文凡引用旧路径者均属**历史记录**。⚠️ **口径注**：本文所有 `:<行>` 为 **2026-10-02 实测**；重构后须重测。用户域旧 `U:<n>` 为三层前 264 行版 `UserController` 的历史坐标（2026-10-02 第三笔 `0c07e96` 后已重指）。
 
 ## 前置准备
 
@@ -27,7 +27,7 @@
 
 A3 **不复用本机开发库，也不是「切库名」**，而是**另起一个 MySQL 实例，库名仍叫 `mall_management_sql`**。理由（TD-13，实测）：
 
-- `GoodsController`（23 处）与 `UserController`（16 处）把 schema 名 `mall_management_sql.` **硬编码**在 SQL 语句里（合计 39 处；`MessageController` 为 0 处）。切库名切不走这 39 处写入，而 `/message/*` 会跟随 datasource —— 同一进程内**脑裂**。（⚠️ 2026-10-02 复测：合计仍 **39 处**（口径 = SQL 字面量），但已散到 **7 个文件** —— `UserController` 16 / `GoodsDao` 6 + `GoodsCacheService` 5 + `GoodsTypeCacheService` 3（goods 14）/ `OrderDao` 7 + `OrderStateMachine` 1 + `OrderTimelineWriter` 1（order 9）。`GoodsController` 那 23 处含**订单端点的 SQL 9 条**，订单笔拆出后 **23 = goods 14 + order 9** ⇒ 文件数 2 → 7、**总数不变**。逐处口径与证据见 `three-layers.md §F#1`；原记「45 处」是**口径混用**所致（商品侧取 SQL 字面量、订单侧连 javadoc / 注释一起数）。）
+- `GoodsController`（23 处）与 `UserController`（16 处）【⚠️ **2026-10-02 三层第三笔后：user 那 16 处已全在 `UserDao`**；goods 那 23 处已拆为 goods 14 + order 9，见下】把 schema 名 `mall_management_sql.` **硬编码**在 SQL 语句里（合计 39 处；`MessageController` 为 0 处）。切库名切不走这 39 处写入，而 `/message/*` 会跟随 datasource —— 同一进程内**脑裂**。（⚠️ 2026-10-02 复测：合计仍 **39 处**（口径 = SQL 字面量），但已散到 **7 个文件** —— `UserDao` 16 / `GoodsDao` 6 + `GoodsCacheService` 5 + `GoodsTypeCacheService` 3（goods 14）/ `OrderDao` 7 + `OrderStateMachine` 1 + `OrderTimelineWriter` 1（order 9）。`GoodsController` 那 23 处含**订单端点的 SQL 9 条**，订单笔拆出后 **23 = goods 14 + order 9** ⇒ 文件数 2 → 7、**总数不变**。逐处口径与证据见 `three-layers.md §F#1`；原记「45 处」是**口径混用**所致（商品侧取 SQL 字面量、订单侧连 javadoc / 注释一起数）。）
 - 故隔离只能靠**独立实例 + 保留同名库**。这同时意味着 `SELECT DATABASE()` **无法**区分「本机开发库」与「VM 库」（两者库名相同），必须叠加 `VERSION()` 门禁 —— 见 §脚本内置校验的 P1 与 N4。
 
 > ⚠️ **本节原先写的「本地建 `mall_management_test` 库 + `sed` 过滤导入 + 切 `DB_URL`」三步已作废**（2026-09-20 重写）：按 Q1=B 与 TD-13，那三步均不成立 —— 切库名切不走硬编码，且「脚本的 JDBC 断言」与「后端的读写」必须在同一个实例上才谈得上互相印证。
@@ -198,7 +198,7 @@ A3 的结论只有在「确实压到了目标环境」时才成立。故脚本�
 | 断言 | 预期结果 | 依据 |
 |---|---|---|
 | 并发同参 `orderAdd` 不产生重复 `OrderId` | ~~**预期失败**~~ → ✅ **PASS**（2026-09-30 S1a 翻转） | ~~`concurrency-map.md` §5 第 9 行（`order.OrderId` 无唯一索引，主键是自增 `Id`）~~ → §5 第 9 行**已标记「已消除」**（`1e2fcfa`）；本断言同日拆为 **`A-S2a-1a`（锁指标增量 == 20）/ `1b`（rows == 1）/ `1c`（msg 无「数据库错误」）**，见 `cache-layer.md:233` |
-| 并发同参 `loginAdd` **不产生 HTTP 5xx** —— **不得**写成「不产生重复行」 | **预期失败**（信号 = **5xx > 0**） | `concurrency-map.md` §5 第 5 行（`U:61` → `U:81` TOCTOU）。三表 `login` / `user` / `customerimage` **都有主键**（`UserName` / `username` / `UserName`）→ 重复行**不可能**产生；真实缺陷是未捕获的 `DuplicateKeyException` → HTTP 500（`U:65-105` 无 try/catch）。**此行的信号极性与其它各处相反**：这里的 5xx 是「缺陷复现」而非异常 |
+| 并发同参 `loginAdd` **不产生 HTTP 5xx** —— **不得**写成「不产生重复行」 | **预期失败**（信号 = **5xx > 0**） | `concurrency-map.md` §5 第 5 行（`UserDao.existsUserName:119` → `UserDao.insertUserCustomer:170` TOCTOU）。三表 `login` / `user` / `customerimage` **都有主键**（`UserName` / `username` / `UserName`）→ 重复行**不可能**产生；真实缺陷是未捕获的 `DuplicateKeyException` → HTTP 500（`UserService.loginAdd:125-160` 无 try/catch）。**此行的信号极性与其它各处相反**：这里的 5xx 是「缺陷复现」而非异常 |
 | 并发同参 `friendAdd` / `goodstype`(POST) 不产生重复行 | **预期失败**（信号 = **重复行 ≥ 2**） | `concurrency-map.md` §5 第 6–8、10 行（TOCTOU；`friend` 仅 PK `id`、`goodstype` 仅 PK 自增 → 两表可**真的插出重复行**） |
 | 并发下无死锁 / 无锁等待超时（MySQL 1213 / 1205） | 待实测 | 当前 `order` 仅 6 行种子数据，全表扫描代价极低，**小表上绿色不构成有意义的证据**，需在大数据量下复测 |
 
@@ -334,12 +334,12 @@ A3 的结论只有在「确实压到了目标环境」时才成立。故脚本�
 | # | 落地 | 核对项 | 依据（已取证） | 落盘位置（pack 正文） |
 |---|---|---|---|---|
 | 1 | `[x]` | H2 —— 根 `.gitignore` 一处必须写「**追加**」而非「新增」 | `9b87ab9` 已含 27 行 `.gitignore`；见 `tech-debt.md` TD-02 更正记录 | §约束 |
-| 2 | `[x]` | F1b / OD-1 —— `loginAdd` 的 B 组断言必须是「**无 HTTP 5xx**」，**不得**写「无重复行」 | `login` PK=`UserName`、`user` PK=`username`、`customerimage` PK=`UserName` → 重复行**不可能**产生；真实缺陷是未捕获 `DuplicateKeyException` → HTTP 500（`U:65-105` 无 try/catch） | §验收标准 B 组第 2 行（原「loginAdd…不产生重复行」一行**已按本项拆开改写**） |
+| 2 | `[x]` | F1b / OD-1 —— `loginAdd` 的 B 组断言必须是「**无 HTTP 5xx**」，**不得**写「无重复行」 | `login` PK=`UserName`、`user` PK=`username`、`customerimage` PK=`UserName` → 重复行**不可能**产生；真实缺陷是未捕获 `DuplicateKeyException` → HTTP 500（`UserService.loginAdd:125-160` 无 try/catch） | §验收标准 B 组第 2 行（原「loginAdd…不产生重复行」一行**已按本项拆开改写**） |
 | 3 | `[x]` | F4 **（已修正；2026-09-20 再收窄）** —— 种子 6 行订单全为 `(1,1,1)` 终态，故 **S3/S4 必须自建订单**；**S2 不在此列** | `mall_management_sql.sql` 的 order INSERT：Id 18–23 六行全部 `PayIf=1, DeliveryIf=1, ReceiveIf=1`；`orderPayIfUp` 的 WHERE 为 `PayIf=0` → 在种子订单上「恰好 1 次 `success:true`」**必然不成立**。修正对象是**支付 / 发货 / 收货**三场景，即 S3 与 S4 —— **上轮把 S2 一并写入是笔误，实为 S3**：S2 只调 `orderAdd` 自建订单（订单由被测端点自身创建），不存在「复用种子单」的问题。故原依据里「原文只写 S3/S4 会让 A 组第一条断言必败」一句的前提本身有误，一并更正 | §验收标准 A 组（含「种子单必败」的说明） |
 | 4 | `[x]` | ~~B-1 —— `order.OrderId` **无唯一索引**（主键仅 `Id`）~~ → ✅ **2026-09-30 S1a 已加 UNIQUE `uk_order_orderId`**（`1e2fcfa`） | 原依据 `mall_management_sql.sql` order 建表语句。⚠️ 原文「pack **不得**写成『有唯一约束兜底』」**自 S1a 起反转** —— 现在 DB 层**确实**有唯一约束兜底（`A-S2a-1b` 断言的正是它） | §验收标准 B 组第 1 行（同日已同步翻转） |
 | 5 | `[x]` | 澄清 1 —— `--b-group-gate` 默认 `false`、**只影响 B-2**（B-1 恒门禁、B-3 恒 record-only）；verdict 枚举 `PASS` / `EXPECTED_DEFECT_PRESENT` / `DEFECT_FIXED` / `RECORD_ONLY`；`rounds`、`reproRounds` 由脚本自动统计，**「≥3/5」不做运行时门禁**（仅作人工翻默认值的准入条件） | 本会话 2026-09-20 裁决 | §判定口径（verdict）与门禁 |
 | 6 | `[x]` | 澄清 4 —— B 组子前缀是 `<round>`（1..5，**同轮内 20 线程共享**），**不是** `<seq>`；行序号才用 `-S<seq>` / `-N<seq>` | 若跨轮共用同参，第 2 轮起 `loginAdd` 直接走「已存在」分支，**不进并发窗口**，后 4 轮等于白跑 | §判定口径（verdict）与门禁 |
-| 7 | `[x]` | Q1=B / TD-13 —— 隔离策略必须写「**独立实例 + 同名库** `mall_management_sql`」，**不得**写成「切库名隔离」 | 硬编码前缀 39 处（**2026-10-02 实测**：`UserController` 16 / goods 14 / order 9 / `MessageController` 0，散到 **7 个文件**；原记「Goods 23 + User 16」是重构前分布 —— goods 那 23 含订单端点 SQL 9 条），全部指向 `mall_management_sql`；口径见 `three-layers.md §F#1` | §前置准备「目标环境」 |
+| 7 | `[x]` | Q1=B / TD-13 —— 隔离策略必须写「**独立实例 + 同名库** `mall_management_sql`」，**不得**写成「切库名隔离」 | 硬编码前缀 39 处（**2026-10-02 实测**：`UserDao` 16 / goods 14 / order 9 / `MessageController` 0，散到 **7 个文件**；原记「Goods 23 + User 16」是重构前分布 —— goods 那 23 含订单端点 SQL 9 条），全部指向 `mall_management_sql`；口径见 `three-layers.md §F#1` | §前置准备「目标环境」 |
 | 8 | `[x]` | S0-3 —— 驱动路径由 **Maven 权威解析**（`dependency:build-classpath`），**不做 glob 猜测**；解析后**校验 jar major = 8** | 实测 `~/.m2/repository` 两个 groupId 下的真实状态：①**`pom.xml:57-61` 声明的坐标 `mysql:mysql-connector-java:8.0.33` 本地只有 `.pom`、没有 jar**（jar 因 relocation 落在 `com.mysql:mysql-connector-j:8.0.33`）；②按 `mysql/mysql-connector-java/*/*.jar` 去 glob，**唯一命中的是 `8.0.28`**（8.0.31/8.0.33 在该坐标下无 jar）→ 静默用上 8.0.28；③按 `com/mysql/**/*.jar` 去 glob 会同时命中 `8.0.31` 与 `8.0.33`，不排序则取到 8.0.31；④另有 3 个 `mysql/mysql-connector-j/8.0.33/*.lastUpdated` 失败标记（groupId 与 artifactId 混用导致的不存在坐标）。**结论：glob 猜测必然取错版本，必须走 Maven** | §约束（D3 单条路径） |
 | 9 | `[x]` | S0-5 —— 必须 `SELECT VERSION()` 确认服务端确为 8.4.x；兼容失败时的兜底写「脚本侧 `$A3_JDBC_DRIVER` + 后端 a3 profile 临时 classpath 覆盖」，**不得**写成改 `pom.xml` | 硬约束：不改 `pom.xml`；`environment.md` 已定 MySQL 8.4。**实测结果：服务端 `8.4.11-0ubuntu0.26.04.1`，驱动 8.0.33 连通，无需兜底** | §前置准备「启动验证（S0-5）」 |
 | 10 | `[x]` | 禁止并发 —— 必须写明「两个 A3 运行**绝不**可同时作用于同一实例」 | P0 的 `A3TEST-%` 清理与 P4 的种子计数互斥 | §命名空间与清理（末条） |

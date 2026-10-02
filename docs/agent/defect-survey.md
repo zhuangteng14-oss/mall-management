@@ -1,41 +1,57 @@
 # 缺陷与未实现功能普查（B3 合并后）
 
 > 范围：全部后端源码、`mall_management_sql.sql`、`docs/agent/*`、`.github/workflows/ci.yml`、`scripts/concurrency/*`。
-> 核查日期：2026-09-30。基线 `origin/main` = `148e77b`（B3 已合并）。
+> 核查日期：2026-09-30。基线 `origin/main` = `148e77b`（B3 已合并）。⚠️ **口径注**：**正文**的 `:<行>` 是 **2026-09-30 截面**（按本文规则不就地改）；**顶部追记块**里的 `:<行>` 才是 **2026-10-02 实测**，重构后须重测。
 > ⚠️ **2026-10-02 追记（不改正文 —— 正文锚点一律按当时状态读）**：本文的类名、路径与行号锚点是 **2026-09-30 截面**（基线 `148e77b`）。此后**三笔**改动了坐标：
 > - **笔 1**（`01df702`）按域挪包 —— 扁平 `mallmanagement_*` 4 包 → `goods`/`order`/`message`/`user`/`shared`，`info` 孤儿类删除。
 > - **笔 2**（PR #28）改名 + URL 规范化 —— `MallManagementGoodsController` / `MallManagementMessage` / `MallManagementUserController` → `GoodsController` / `MessageController` / `UserController`；订单 8 端点拆入 `OrderController`（三层第一笔在 PR #25 `28194b4` 已先落地）；`/mysqlGoods`、`/mysqlLogin` → `/goods`、`/order`、`/user`。
 > - **三层第二笔**（2026-10-02，商品域）—— 8 条内联 SQL 下沉 `GoodsDao` / `GoodsService`。
 >
-> **正文中已漂移的锚点**（右列 = **2026-10-02 实测**的现行位置）。⚠️ **用户域 / 消息域锚点本次复测全部精确命中、零漂移**（`UserController` :20 :30 :39 :47-49 :63-64 :70-71 :75 :193-199 :205 :216 :257；`MessageController` :18 :188 :413），**只有商品 / 订单两域漂了**：
+> **正文中已漂移的锚点**（右列 = **2026-10-02 实测**的现行位置）。⚠️ **用户域锚点在 2026-10-02 复测时确为零漂移，但同日三层第三笔（user 域，PR #32 `0c07e96`）后已整体失效** —— `UserController` 已重写为 **107 行**（只剩路由，无 SQL、无 `@Transactional`、无上传编排），旧 :20 :30 :39 :47-49 :63-64 :70-71 :75 :193-199 :205 :216 :257 **全部越界**；业务体现址 `UserService`、SQL 现址 `UserDao`。⚠️ 故**本表凡涉用户域的行**，其上一版「未漂」结论一律作废 —— 已就地按现行位置改写；主表未覆盖的用户域正文锚点另见本块**末尾的「三层第三笔补充追记」**。`MessageController` **仍零漂移**（:18 :188 :413）。**商品 / 订单 / 用户三域都漂了**：
 >
 > | 正文行 | 正文旧锚点 | 现行位置（2026-10-02 实测） |
 > |---|---|---|
-> | `:51` | 4 处裸 `@CrossOrigin`，含 `MallManagementGoodsController:27` | **现为 5 处**（订单拆出后多一处）：`GoodsController:38` / `UserController:20` / `MessageController:18` / **`OrderController:24`（新）** / `HealthController:37`。⚠️ `§五`（正文 `:159`，本表末几行）原写「TD-04 写 3 处、实为 **4**」⇒ 现值 **5** |
-> | `:60` | `MallManagementGoodsController:106-113` / `:282-287` | `GoodsService:96-117`（`goodsAdd` 上传段）/ `:265-281`（`goodsUp` 上传段）；`UserController:193-199` 未漂。⚠️ **原文写「`ImgPath.java:34` 未漂」，其实它也漂了**：现为 **`:78`**（`registry.addResourceHandler("/img/**")`；`@PostConstruct` 段 `:45-64`、整个 `addResourceHandlers` `:66-80`） |
-> | `:62` | `GoodsController:114-116`；`UserController:200-203` | ⚠️ **商品侧疑似已失效**：该 catch 的文案在 A 批 `efe7959` 已从「已存在」改为「商品图片保存失败」，现址 `GoodsService:110-117` / `:273-281` ⇒ 本行「catch 归因一律『已存在』」**在商品域已不成立**，只剩 `UserController:200-203` 一侧。**已复核（2026-10-02）**：两处的 `msg` 实测均为「**商品图片保存失败**」（`:115` / `:279`），读数时按此修正本行 |
+> | `:51` | 4 处裸 `@CrossOrigin`，含 `MallManagementGoodsController:27` | **现为 5 处**（订单拆出后多一处）：`GoodsController:38` / `UserController:42` / `MessageController:18` / **`OrderController:24`（新）** / `HealthController:37`。⚠️ `§五`（正文 `:159`，本表末几行）原写「TD-04 写 3 处、实为 **4**」⇒ 现值 **5** |
+> | `:60` | `MallManagementGoodsController:106-113` / `:282-287` | `GoodsService:96-117`（`goodsAdd` 上传段）/ `:265-281`（`goodsUp` 上传段）；`UserService.updateAvatar:254-264`（原 `UserController:193-199`）。⚠️ **原文写「`ImgPath.java:34` 未漂」，其实它也漂了**：现为 **`:78`**（`registry.addResourceHandler("/img/**")`；`@PostConstruct` 段 `:45-64`、整个 `addResourceHandlers` `:66-80`） |
+> | `:62` | `GoodsController:114-116`；`UserService.updateAvatar:257-264` | ⚠️ **商品侧疑似已失效**：该 catch 的文案在 A 批 `efe7959` 已从「已存在」改为「商品图片保存失败」，现址 `GoodsService:110-117` / `:273-281` ⇒ 本行「catch 归因一律『已存在』」**在商品域已不成立**，只剩 `UserService.updateAvatar:257-264`（原 `UserController:200-203`）一侧。**已复核（2026-10-02）**：两处的 `msg` 实测均为「**商品图片保存失败**」（`:115` / `:279`），读数时按此修正本行 |
 > | `:66` | `MallManagementGoodsController:390`（入参）→ `:435-449`（INSERT） | 入参 `OrderController:42-56`（`@RequestParam("Price") float` 在 `:47`）→ 逻辑 `OrderService.orderAdd:99`、临界区 `addLocked:124`；INSERT 落 `OrderDao.insertOrder:82-92` |
 > | `:73` | `GoodsController:378-409` | `GoodsDao.searchByKeyword:193-207`（关键字拼接 `:194-200`，`SELECT * FROM goods WHERE 1=1` 在 `:202-204`） |
 > | `:74` | `GoodsController:205-225` | `GoodsService.goodsDe:211-238`（两个 DELETE 现址 `GoodsDao.deleteGoods:128-132` / `deleteProductsales:135-139`；`success=true` 在 `GoodsService:225`，仍无条件） |
-> | `:75` | `ImgPath:18` / `GoodsController:55` / `UserController:30` | `GoodsService:69`（`@Value("${app.upload-dir:…}")`）；`UserController:30` **未漂**，但 ⚠️ **`ImgPath:18` 已漂至 `:17`**（同一行仍是 `@Value("${app.upload-dir:…}")`） |
+> | `:75` | `ImgPath:18` / `GoodsController:55` / `UserController:30` | `GoodsService:69`（`@Value("${app.upload-dir:…}")`）、`UserService:78`（构造器 `@Value`，原 `UserController:30`）；⚠️ **`ImgPath:18` 已漂至 `:17`**（同一行仍是 `@Value("${app.upload-dir:…}")`） |
 > | `:76` | `GoodsController:281-290` | `GoodsDao.updateGoods:154-165` + `GoodsDao.updateProductsalesGoodName:168-172`（调用点 `GoodsService:288,291`） |
-> | `:77` | `GoodsController:119,289`；`UserController:205`；`UserController:59` | `GoodsService:120` / `:283`；`UserController:205` / `:59` **实测未漂** |
+> | `:77` | `GoodsController:119,289`；`UserController:205`；`UserController:59` | `GoodsService:120` / `:283`；`UserService.updateAvatar:266` / `UserController.loginAdd:63`（原 `UserController:205` / `:59`，三层第三笔后分别下沉 / 重指） |
 > | `:78` | javadoc `GoodsController:401-409` | `OrderService` 类 javadoc `:25-45`（禁令 + 分层后理由①失效／②削弱的完整论证） |
-> | `:93` | `GoodsController`(11) | `GoodsService`(**7**) + `OrderService`(**7**)；全库 `printStackTrace` **20 → 23**、`System.out.println` **5 → 6**。⚠️ 分母变了，引用「×20 / ×5」须注明是 2026-09-30 截面 |
+> | `:93` | `GoodsController`(11) | `GoodsService`(**7**) + `OrderService`(**7**)；全库 `printStackTrace` **20 → 23 →（三层第三笔后）24**、`System.out.println` **5 → 6 →（三层第三笔后）7**（口径 = `grep -o` 含 javadoc / 注释里的字面提及；用户域那 4 / 2 里各有 1 处是 javadoc）。⚠️ 分母变了，引用「×20 / ×5」须注明是 2026-09-30 截面 |
 > | `:129` | `G:547-548` / `G:550-551`（`orderDeliverySelect` 两条 SQL） | `OrderDao.selectByMerchant:135-145`，两条 SELECT 在 `:138` / `:141` |
-> | `:145` | 「30 主源码」 | 现 **33 个主源 `.java`**（见 `progress.md §3` 基线复测） |
+> | `:145` | 「30 主源码」 | 现 **35 个主源 `.java`**（2026-10-02 三层第三笔后复测；见 `progress.md §3` 基线复测） |
 > | `:203` | `GoodsController:433-441` | `OrderService:25-45`（同上） |
 > | `:214` | `GoodsController:106-107,282-283` | `GoodsService:96-117`（`goodsAdd` 上传段，`file.isEmpty()` 早退在 `:101`）/ `:265-281`（`goodsUp` 上传段，判据 `file != null && !file.isEmpty()` 在 `:268`） |
-> | `:19`（判断 3） | 「**111 例绿**」 | **135 例**（2026-10-02 实测，= 真 `@Test` 注解数；19 个测试类）。⚠️ 口径：裸 `grep -c '@Test'` 会因 `@TestPropertySource`（3 处）与注释里的字面 `@Test`（`AbstractSmokeTest:69`）多计 3 → 得 138，**不能用**。同源订正见 `project-map.md:101` 与 `three-layers.md §H.3`（`:259`） |
+> | `:19`（判断 3） | 「**111 例绿**」 | **136 例**（2026-10-02 三层第三笔后实测，= 真 `@Test` 注解数；19 个测试类）。⚠️ 口径：裸 `grep -c '@Test'` 会因 `@TestPropertySource`（3 处）与注释里的字面 `@Test`（`AbstractSmokeTest:69`）多计 3 → 得 139，**不能用**。同源订正见 `project-map.md:101` 与 `three-layers.md §H.3`（`:259`） |
 > | `:36`（病 B+E 合成链） | `GoodsCacheService:211-219`（`queryForMap` 多行即抛）+ `:186-198`（把失败也当值缓存） | ✅ **该环已修**（A 批 `88a14e4`），现址 `GoodsCacheService.priceByTriple`（`:243-264`）：**0 行 → `null`** 在 `:250-253`（业务事实，仍被负缓存）、**多行 → 显式抛** `IncorrectResultSizeDataAccessException` 在 `:255-261`（`queryForList` 自己不为多行抛，故显式构造）。⚠️ 四环里的第 1/2 环（collation 大小写不敏感 + 三元组无唯一约束）**仍在** ⇒「失败本身」仍在，只关掉了「失败被固化到 TTL」 |
 > | `:115`-`:117`（观测层） | `L2HealthProbe.java:154-177` / `TwoLevelCache.java:220-233` / 回填竞态「已登记于 `cache-layer.md:371` 与 `:448③`」 | → `L2HealthProbe.markOk:155-162` 与 `markFailed:169-178`（两处各自的 check-then-act，原记跨两方法的 `:154-177` 边界不准）；→ `TwoLevelCache.l2Put:221-234`；→ 竞态登记现址 **`cache-layer.md:374`**（§10 调用点判据第 1 条：「并发读会把旧值回填进已清的空片」）与 **`:451③`**（§11「`loginAdd` 的 evict 发生在事务提交之前」）—— 两处均已用 `git show 148e77b` 逐行核对（旧 `:371` / `:448③` 即此两句） |
-> | `:159`（§五） | TD-04「写 3 处、实为 **4**」/ TD-06「实为 `U:205/G:119/G:289`」/ TD-07「实为 `G:110-116/U:196-203`」 | TD-04 现值 **5**（见上表 `:51` 行）；TD-06 商品侧现址 `GoodsService:120` / `:283`（`UserController:205` / `:59` 未漂）；TD-07 商品侧现址 `GoodsService:110-117` / `:273-281`，两处 `msg` 均为「**商品图片保存失败**」（`:115` / `:279`），`UserController:200-203` 未漂 |
+> | `:159`（§五） | TD-04「写 3 处、实为 **4**」/ TD-06「实为 `U:205/G:119/G:289`」/ TD-07「实为 `G:110-116/U:196-203`」 | TD-04 现值 **5**（见上表 `:51` 行）；TD-06 商品侧现址 `GoodsService:120` / `:283`（用户域：原 `UserController:205` / `:59` → 现 `UserService.updateAvatar:266` / `UserController.loginAdd:63`）；TD-07 商品侧现址 `GoodsService:110-117` / `:273-281`，两处 `msg` 均为「**商品图片保存失败**」（`:115` / `:279`），用户域对应处现址 `UserService.updateAvatar:257-264` |
 > | `:166`（§五） | 「3 处手写 `getConnection()`」 | **实为 2 处调用 + 1 处注释**：`L2HealthProbe:203`、`L2ProbeConfig:201` 是真调用（均 try-with-resources），`L2ProbeConfig:134` 是**注释里**的字面 `getConnection()`。故该条「与 Hikari `leakDetectionThreshold=0` 无关」的结论不变，但**「3 处」是数错的** |
 > | `:175`（§六） | `ConcurrencyRunner.java:340`（`--reset-db` 空实现） | **`:339`**（`case "--reset-db": o.resetDb = true;`；用法说明串在 `:181`）。⚠️ 另注：用法串本身写的是「DROP **11** 张 —— 12 张中除 `order_state_transition` 外」 |
 > | `:182`（§六） | `ConcurrencyRunner.java:2210-2258`，内引 `:2178` / `:2251` | `cleanup(Opt)`: **`:2310-2350`**；`CLEANUP_COLS` 定义 **`:2288`**（逐表 `put` 在 `:2291-2303`）、`for` 循环 `:2317`、**单点** `catch (SQLException)` **`:2350`** |
 > | `:222`（§九） | `ConcurrencyRunner.java:1523` 的 c7 / `:1481` 的 `A-S4a-7` | c7 的 `burst(40, …)` 在 **`:1625`**，门禁断言 `A-S4a-7` 在 **`:1583`**（「同一未付款单上 pay 与 delivery 同时释放」的注释在 `:1620`）。⚠️ 结论不变：pay×dly 因 `PayIf` 互斥**不可能双成功** |
 >
-> ⚠️ **两处「本笔自己引入」的坐标**（防误当老漂移）：`GoodsDao` / `GoodsService` 是 2026-10-02 才存在的文件，上表引用它们的行号**没有 2026-09-30 对应物**。另 `GoodsDao:33` 的 javadoc 里**字面写着** `` `mall_management_sql.` `` —— 用 `grep -c` 数 schema 前缀时会被误计入（实测 7，实为 6），口径见 `three-layers.md:166` F#1。
+> **⚠️ 三层第三笔补充追记（2026-10-02，用户域，PR #32 `0c07e96`）** —— 主表只覆盖了 6 处用户域相关行。**正文里其余的用户域锚点同样已失效**（`UserController` 现为 **107 行**、只剩路由；业务体在 `UserService`、内联 SQL 在 `UserDao`）。下列行号 = **2026-10-02 实测**的现行位置（格式 `<类>.<方法>:<行>`，行号 = 方法声明行）：
+>
+> | 正文旧锚点（本文 2026-09-30 截面） | 现行位置（2026-10-02 实测） |
+> |---|---|
+> | `MallManagementUserController.java:39` | `UserService.loginSelect:96`（`System.out.println(username + "," + password)`） |
+> | `MallManagementUserController:193-199` | `UserService.updateAvatar:254-264` |
+> | `UserController:197-199,205` | `UserService.updateAvatar:254-264,266` |
+> | `UserController:200-203` | `UserService.updateAvatar:257-264` |
+> | `UserController:30` | `UserService:78`（构造器 `@Value("${app.upload-dir:…}")`） |
+> | `UserController:205` / `:59` | `UserService.updateAvatar:266` / `UserController.loginAdd:63` |
+> | `UserController:70-71` / `:63-64` / `:75` | `UserService.loginAdd:129`（查重预检）/ `UserController:67-68`（`defaultValue="暂无数据"`）/ `UserService.loginAdd:132`（死 `int role;`） |
+> | `UserController:47-49` | `UserService.loginSelect:98-104` |
+> | `UserController:216,257`（`printStackTrace` ×2） | `UserService.updateAvatar:260,275`（另 `:312` 属 `updateUserInfo`） |
+> | `UserController:193-194`（上传路径穿越待验） | `UserService.updateAvatar:248-252`（仍**无 basename 提取**） |
+> | `UserController` :20 :30 :39 :47-49 :63-64 :70-71 :75 :193-199 :205 :216 :257（顶部 `:10` 行曾断言「零漂移」者） | **全部越界**（新 `UserController` 仅 107 行）；逐条现址见上表各行 |
+>
+> ⚠️ **两处「本笔自己引入」的坐标**（防误当老漂移）：`GoodsDao` / `GoodsService` / `UserService` / `UserDao` 是 2026-10-02（第一 / 二 / 三笔）才存在的文件，上表引用它们的行号**没有 2026-09-30 对应物**。另 `GoodsDao:33` 的 javadoc 里**字面写着** `` `mall_management_sql.` `` —— 用 `grep -c` 数 schema 前缀时会被误计入（实测 7，实为 6），口径见 `three-layers.md:166` F#1。
 > ⚠️ **「正文行」列怎么读**：它是**2026-09-30 截面**的行号（= 本追记块写第一版时的 `当前行号 − 25`）。本追记块自身会增行（2026-10-02 加了 8 行），**偏移量随之变化** ⇒ **请用「正文旧锚点」列的文本去 grep 定位，不要用行号换算**。
 >
 > **本文只记录与分级，不做任何修复。** 分级与锚点一律给可复核位置。

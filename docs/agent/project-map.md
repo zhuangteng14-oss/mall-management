@@ -3,7 +3,7 @@
 > **素材范围（原始快照，2026-09-14）**：3 个 Controller 全文、`mall_management_sql.sql` 全部 CREATE TABLE、`pom.xml` 的 `<dependencies>` 段、`application.properties`、目录树（已排除 `node_modules`/`dist`/`target`）。
 > 前端源码、Service/Mapper 层**未读**。无证据处标「待确认」。
 >
-> ⚠️ **2026-10-02 现状**：上述范围**均已扩读**，本文件凡再出现「未读」「3 个 Controller」字样，一律指**上面那天**，不代表现状 —— 仓内现有 **5 个 Controller**（4 业务 + `HealthController`，见 §3 末与 `api-contract.md`）；前端 `src/` 与各 Service / Dao 层**均已读**，成果分别是 `api-contract.md §5`（前端调用矩阵，2026-09-30 关闭）与 §2 目录树 / `three-layers.md`。
+> ⚠️ **2026-10-02 现状**：上述范围**均已扩读**，本文件凡再出现「未读」「3 个 Controller」字样，一律指**上面那天**，不代表现状 —— 仓内现有 **5 个 Controller**（4 业务 + `HealthController`，见 §3 末与 `api-contract.md`）；前端 `src/` 与各 Service / Dao 层**均已读**，成果分别是 `api-contract.md §5`（前端调用矩阵，2026-09-30 关闭）与 §2 目录树 / `three-layers.md`。⚠️ **口径注**：本文所有 `:<行>` 为 **2026-10-02 实测**；重构后须重测。用户域旧 `U:<n>` 为三层前 264 行版 `UserController` 的历史坐标（2026-10-02 第三笔 `0c07e96` 后已重指）。
 
 ## 1. 定位与技术栈
 
@@ -98,13 +98,13 @@ Vue 3 CLI 工程，14 个页面视图 + 1 个组件 + 1 个路由表。页面按
 | 全项目零缓存（**2026-09-14 时**；B1 自 2026-09-27 起逐笔落地，现行见右栏第二项） | `cache-map.md`（顶部有时效标注）/ `context-packs/cache-layer.md` |
 | `ddl-auto=update` 与手写 DDL 脚本并存 | `db-schema.md` |
 | **12** 张表中 **3 张**有二级索引（共 4 个）：`message` 2 + `order_state_transition` 1 + `order` 1（`uk_order_orderId`） | `db-schema.md` §5 |
-| 测试：**19** 个测试类 / **135** 个 `@Test` 用例（2026-10-02 实测，见下方口径注）；另有抽象基类 `smoke/AbstractSmokeTest`（自身**无** `@Test`）；`MallManagementApplicationTests` 的 **5** 个用例在未设 `A3_ENABLED` 时**全部 skip**，设 `true` 时真连库 | `tech-debt.md` TD-10（已关闭） |
+| 测试：**19** 个测试类 / **136** 个 `@Test` 用例（2026-10-02 实测，见下方口径注）；另有抽象基类 `smoke/AbstractSmokeTest`（自身**无** `@Test`）；`MallManagementApplicationTests` 的 **5** 个用例在未设 `A3_ENABLED` 时**全部 skip**，设 `true` 时真连库 | `tech-debt.md` TD-10（已关闭） |
 
 > ⚠️ 时效口径：本表**逐行反映当前结论**；凡单元格内标注「（**…时**）」的，才是**该时刻**的值 —— 只有上面「零缓存」一行属于此列，其余各行**未受缓存迁移影响**（B1 只搬读路径，未动 DDL / 事务 / 订单逻辑），不必整体打折读。
 >
-> 上表「测试」行的原计数（6 / 2）是 **2026-09-20**（`e3a9ada` 写入，再上一版 `23dfaab` 2026-09-18 记 4 / 5）的值；B1 期间新增 `L2HealthProbeConcurrencyTest`（3 个用例）与 `messageControllerIsNotAopProxied`（1 个）等 ⇒ 2026-09-29 曾就地改为 **11 / 4**。**2026-10-02 再次实测并改为 19 / 135**（原先只写类数不写口径，是那版数错的成因）。
+> 上表「测试」行的原计数（6 / 2）是 **2026-09-20**（`e3a9ada` 写入，再上一版 `23dfaab` 2026-09-18 记 4 / 5）的值；B1 期间新增 `L2HealthProbeConcurrencyTest`（3 个用例）与 `messageControllerIsNotAopProxied`（1 个）等 ⇒ 2026-09-29 曾就地改为 **11 / 4**。**2026-10-02 再次实测并改为 19 / 135 → 2026-10-02 三层第三笔后复测为 19 / 136**（原先只写类数不写口径，是那版数错的成因）。
 >
-> ⚠️ **计数口径（2026-10-02 定，防再数错）**：`@Test` 用例数**不能用** `grep -c '@Test'` 数 —— `@TestPropertySource`（本仓 3 处）与注释里的字面 `@Test`（`AbstractSmokeTest:69` 一处）都会被算进去，裸数得 **138**，实为 **135**。用 `grep -rEho '@Test([^A-Za-z]|$)'`（或 `^\s*@Test\s*$`）得 135，**与 surefire 的 `Tests run: 135` 逐字吻合**（135 含 9 个 skip：`MallManagementApplicationTests` 5 + `LockSceneRedisTest` 4）。同理「19 个测试类」= 含**真** `@Test` 注解的文件数 = surefire 报告份数（`AbstractSmokeTest` 是无 `@Test` 的抽象基类，不计）。
+> ⚠️ **计数口径（2026-10-02 定，防再数错）**：`@Test` 用例数**不能用** `grep -c '@Test'` 数 —— `@TestPropertySource`（本仓 3 处）与注释里的字面 `@Test`（`AbstractSmokeTest:69` 一处）都会被算进去，裸数得 **139**，实为 **136**。用 `grep -rEho '@Test([^A-Za-z]|$)'`（或 `^\s*@Test\s*$`）得 136，**与 surefire 的 `Tests run: 136` 逐字吻合**（136 含 9 个 skip：`MallManagementApplicationTests` 5 + `LockSceneRedisTest` 4）。同理「19 个测试类」= 含**真** `@Test` 注解的文件数 = surefire 报告份数（`AbstractSmokeTest` 是无 `@Test` 的抽象基类，不计）。
 >
 > 该行不在缓存主题内，与缓存笔合并只因**同一张表**：留旧数会让上一段「本表逐行反映当前结论」变成假话。
 
