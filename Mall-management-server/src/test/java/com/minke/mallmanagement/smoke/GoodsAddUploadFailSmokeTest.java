@@ -2,6 +2,7 @@ package com.minke.mallmanagement.smoke;
 
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.springframework.jdbc.core.PreparedStatementCreator;
 import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.test.context.TestPropertySource;
 
@@ -55,6 +56,13 @@ class GoodsAddUploadFailSmokeTest extends AbstractSmokeTest {
                 // ⇒ 失败分支必须带 msg，否则前端弹「失败：undefined」。
                 .andExpect(jsonPath("$.msg").value("商品图片保存失败"));
 
+        // ⚠️ 匹配器必须跟着 DAO 的实现换（三层第二笔，商品域）——否则这条断言会**变成空话**：
+        //    JdbcClient 的 update 落到 JdbcTemplate.update(PreparedStatementCreator) 这个
+        //    **单参重载**上（DefaultJdbcClient 源码：classicOps.update(statementCreatorForIndexedParams())），
+        //    不再是 update(String, Object...)。只留旧那条的话，DAO 无论怎么改都命中不了它，
+        //    用例照样绿 —— 与 AbstractSmokeTest 里记的那次是同一个坑，只是方向相反。
+        //    两条一起写：新的那条钉住现状，旧的那条防将来退回 JdbcTemplate。
+        verify(jdbcTemplate, never()).update(any(PreparedStatementCreator.class));
         verify(jdbcTemplate, never()).update(anyString(), any(Object[].class));
     }
     /**

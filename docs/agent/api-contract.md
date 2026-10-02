@@ -2,7 +2,9 @@
 
 > **证据来源**：5 个 Controller 全文。缩写：`U`=`UserController.java`、`M`=`MessageController.java`、`G`=`GoodsController.java`、`O`=`OrderController.java`、`H`=`HealthController.java`（数字为源码行号）。
 > **行号口径（2026-09-30 实测）**：`证据`列 = 该方法 **route 注解所在行**（`@PostMapping` / `@GetMapping` / `@RequestMapping`），**不是**方法签名行。全表行号已于 2026-09-30 对 HEAD 逐条复核并替换 —— 此前一版坐标系统性偏旧（偏 10~35 行，个别为负偏移），成因是各笔新代码插入后未同步。
-> **2026-10-02 复测（URL 规范化 + 订单端点拆分后）**：`/mysqlGoods` 一分为二 —— 商品 9 端点留 `GoodsController`（前缀 `/goods`，`G:` 行号整体 **−9**，因类 javadoc 与 import 调整）；订单 8 端点迁入新文件 `OrderController`（前缀 `/order`，记 `O:`）。`U:` / `M:` / `H:` 三列**原样保持**（那两个类只改类名与类级前缀，行数未变，行号零漂移）。
+> **2026-10-02 复测（URL 规范化 + 订单端点拆分后）**：`/mysqlGoods` 一分为二 —— 商品 9 端点留 `GoodsController`（前缀 `/goods`）；订单 8 端点迁入新文件 `OrderController`（前缀 `/order`，记 `O:`）。`U:` / `M:` / `H:` 三列**原样保持**（那两个类只改类名与类级前缀，行数未变，行号零漂移；2026-10-02 复测仍**精确命中**）。
+> ⚠️ **同版本复核（对账上一版的「`G:` 行号整体 −9」）**：以 `git show 8c5385e:…goods/controller/GoodsController.java`（**笔 2 后**状态）逐条实测，其 route 行为 **50 / 72 / 173 / 187 / 197 / 245 / 280 / 359 / 369** —— 与上一版表内 `G:` 值**逐条相同** ⇒ 那一栏在笔 2 时是**准的**，不是陈旧值。但「**整体 −9**」只是粗略说法：实测相对 2026-09-30 基线（`148e77b`，`:59 / :81 / :181 / :195 / :205 / :249 / :264 / :336 / :346`）是 `goodstype`/`goodsAdd` **−9**、`goodsSelect` 一族 **−8**、`productCodePrice` **−4**、`goodsUp` 之后反而 **+16 / +23 / +23**（因笔 2 在该段加了说明注释）⇒ 引用时**不要拿 −9 去换算全表**。
+> **2026-10-02 三层第二笔（商品域）又整体前移**：9 个端点的**路由仍在 `GoodsController`**，**业务体（SQL / try-catch / 响应组装）下沉到 `GoodsService`，SQL 出口收进 `GoodsDao`** ⇒ `G:` 现值 = **51 / 72 / 92 / 101 / 109 / 127 / 142 / 158 / 171**（实测，已重填），且它**只保证「路由还在哪一行」**；方法体位置另见 `/goods` 表下的「业务体现址」注。
 > **「幂等」判定标准**：*相同入参重复调用是否产生额外副作用（不重复写入）*。非 HTTP 语义幂等。
 > 所有接口均无鉴权、无统一返回体、无全局异常处理；5 个 Controller 均标 `@CrossOrigin`。入参均为 `@RequestParam`（query/form），无 `@RequestBody`。
 
@@ -44,15 +46,29 @@
 
 | 方法 | 路径 | 入参 | 返回 | 幂等 | 证据 |
 |---|---|---|---|---|---|
-| GET\|POST | `/goods/goodstype` | GET 无参；POST: GoodType, GoodTypeNew | GET `{success,list}`；POST `{success,msg}` | GET 是 / POST 是 ⚠️ | `G:50` |
+| GET\|POST | `/goods/goodstype` | GET 无参；POST: GoodType, GoodTypeNew | GET `{success,list}`；POST `{success,msg}` | GET 是 / POST 是 ⚠️ | `G:51` |
 | POST | `/goods/goodsAdd` | MerchantId, GoodName, Price, file(MultipartFile), GoodType, ProductCode, GoodTypeNew | `{success, msg, GoodImg}` | **否** | `G:72` |
-| POST | `/goods/goodsSelect` | MerchantId | `{success, list}` | 是 | `G:173` |
-| POST | `/goods/goodsSelectHome` | 无 | `{success, list}`（每行附 `UserName`） | 是 | `G:187` |
-| POST | `/goods/goodsDe` | MerchantId, GoodName, ProductCode | `{success, msg}` | 是 | `G:197` |
-| POST | `/goods/productCodePrice` | MerchantId, GoodName, ProductCode | `{success, price, goodImg}` | 是 | `G:245` |
-| POST | `/goods/goodsUp` | MerchantId, GoodName, Price, GoodType, ProductCode, file(可选) | `{success, msg}` | 是 | `G:280` |
-| POST | `/goods/GoodsProductCodeSelect` | MerchantId, GoodName | `{success, list[String]}` | 是 | `G:359` |
-| POST | `/goods/productSearch` | keyword（**未用 `@RequestParam` 显式命名**） | `{success, list}` | 是 | `G:369` |
+| POST | `/goods/goodsSelect` | MerchantId | `{success, list}` | 是 | `G:92` |
+| POST | `/goods/goodsSelectHome` | 无 | `{success, list}`（每行附 `UserName`） | 是 | `G:101` |
+| POST | `/goods/goodsDe` | MerchantId, GoodName, ProductCode | `{success, msg}` | 是 | `G:109` |
+| POST | `/goods/productCodePrice` | MerchantId, GoodName, ProductCode | `{success, price, goodImg}` | 是 | `G:127` |
+| POST | `/goods/goodsUp` | MerchantId, GoodName, Price, GoodType, ProductCode, file(可选) | `{success, msg}` | 是 | `G:142` |
+| POST | `/goods/GoodsProductCodeSelect` | MerchantId, GoodName | `{success, list[String]}` | 是 | `G:158` |
+| POST | `/goods/productSearch` | keyword（**未用 `@RequestParam` 显式命名**） | `{success, list}` | 是 | `G:171` |
+
+**业务体现址**（2026-10-02 三层第二笔后 —— 上表 `G:` 只是**路由行**，方法体已不在 Controller）：
+
+| 端点 | 路由（`GoodsController`） | 业务体（`GoodsService`） | SQL 出口（`GoodsDao`） |
+|---|---|---|---|
+| `goodstype` | `G:51-65` | ⚠️ **未下沉**（分支留 Controller，`GoodsTypeCacheService` 承接读写） | — |
+| `goodsAdd` | `G:72-83` | `GoodsService.goodsAdd` `:83-148` | `insertGoods` `:77-85`、`lastInsertId` `:103-105`、`insertProductsales` `:113-118` |
+| `goodsSelect` | `G:92-97` | `GoodsService.goodsSelect` `:159-161` | —（读路径走 `GoodsCacheService`） |
+| `goodsSelectHome` | `G:101-104` | `GoodsService.goodsSelectHome` `:164-166` | —（读路径走 `GoodsCacheService`） |
+| `goodsDe` | `G:109-116` | `GoodsService.goodsDe` `:211-238` | `deleteGoods` `:128-132`、`deleteProductsales` `:135-139` |
+| `productCodePrice` | `G:127-134` | `GoodsService.productCodePrice` `:184-206` | —（读路径走 `GoodsCacheService`） |
+| `goodsUp` | `G:142-152` | `GoodsService.goodsUp` `:252-306` | `updateGoods` `:154-165`、`updateProductsalesGoodName` `:168-172` |
+| `GoodsProductCodeSelect` | `G:158-164` | `GoodsService.GoodsProductCodeSelect` `:173-175` | —（读路径走 `GoodsCacheService`） |
+| `productSearch` | `G:171-174` | `GoodsService.productSearch` `:316-331` | `searchByKeyword` `:193-207` |
 
 ### /order — 8 个（订单域，2026-10-02 从 `GoodsController` 拆出）
 
@@ -79,13 +95,13 @@
 
 - ⚠️ `U:56 loginAdd`：靠「先 SELECT 查重再 INSERT」实现重复拦截（`U:70`→`U:80`），存在 TOCTOU 竞态（见 `concurrency-map.md`）。第二参数 `customerid`/`merchantid` 会被 `userid` 覆盖（`U:79`、`U:96`）。
 - ⚠️ `M:224 friendAdd`：同为「先查后插」（`M:240`→`M:253`），存在 TOCTOU 竞态。
-- ⚠️ `G:50 goodstype` POST：同为「先查后插」（**已搬**：`GoodsTypeCacheService:62`→`:71`）。返回 `{success:false,msg:"类型已存在"}` 而非 `"0"`，与 `loginAdd` 风格不一致。
+- ⚠️ `G:51 goodstype` POST：同为「先查后插」（**已搬**：`GoodsTypeCacheService:62`→`:71`）。返回 `{success:false,msg:"类型已存在"}` 而非 `"0"`，与 `loginAdd` 风格不一致。
 - `M:89 history` 非幂等：除查询外还会 upsert `user_conversation_read.last_read_time = NOW()`（`M:101-104`），每次调用都刷新时间戳。
 - `M:112 send` 非幂等：每次调用插入一条新 `message`（`M:119`）。
 - `O:42 orderAdd` **仍非幂等**：每次调用插入一条新 `order`。⚠️ **原文**写「`OrderId` 由调用方提供且**无唯一约束**，可重复下单号」—— **2026-09-30 S1a（`1e2fcfa`）已加 UNIQUE `uk_order_orderId`**，同单号第二次调用会被 DB 拒（`orderAdd` 把它吞成 **HTTP 200 + `msg="数据库错误…"`**，见 TD-14 / `A-S2a-1c`）。**但「非幂等」这条没变**：拦的只是「同单号重复插入」，不同单号照旧每调一次插一行 ⇒ 幂等性仍不由接口保证。
-- `G:72 goodsAdd` / `G:197 goodsDe` / `G:280 goodsUp`：均同时写 `goods` 与 `productsales` 两张表，**无事务保护**（见 `concurrency-map.md`）。
+- `G:72 goodsAdd` / `G:109 goodsDe` / `G:142 goodsUp`：均同时写 `goods` 与 `productsales` 两张表，**无事务保护**（见 `concurrency-map.md`）。⚠️ 2026-10-02 三层第二笔后，三者的**方法体**分别在 `GoodsService:83-148` / `:211-238` / `:252-306`（行号指路由，事务边界看方法体）。
 - `O:100/107/114` 三个订单状态接口是全项目唯一带并发防护的写接口，详见 `concurrency-map.md` 正面案例。
-- `G:369 productSearch`：`keyword` 未加 `@RequestParam` 显式命名，依赖参数名保留（编译需 `-parameters`）。关键词被逐字符拼进 SQL 字符串（`G:380`），因拆分粒度为单字符**无法构造多字符注入**，但含 `'` 会使 SQL 语法错误；⚠️ **后果不止于此**：`_` / `%` 未转义 ⇒ `'%_%'` 命中任何非空 `GoodName` ⇒ **关键词含下划线或百分号时返回全表**（2026-09-30 实测），见 `defect-survey.md` 病 B 同条。
+- `G:171 productSearch`：`keyword` 未加 `@RequestParam` 显式命名，依赖参数名保留（编译需 `-parameters`）。关键词被逐字符拼进 SQL 字符串（**2026-10-02 起在 `GoodsDao:194-200`**，原 `G:380`），因拆分粒度为单字符**无法构造多字符注入**，但含 `'` 会使 SQL 语法错误；⚠️ **后果不止于此**：`_` / `%` 未转义 ⇒ `'%_%'` 命中任何非空 `GoodName` ⇒ **关键词含下划线或百分号时返回全表**（2026-09-30 实测），见 `defect-survey.md` 病 B 同条。
 
 ## 4. 待确认
 

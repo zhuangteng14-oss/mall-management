@@ -9,7 +9,7 @@
 |---|---|
 | 现状 | `pom.xml:51` 引入 `spring-boot-starter-data-jpa` |
 | 实际数据访问 | 全部走 `JdbcTemplate`（`spring-boot-starter-jdbc`，`pom.xml:40`） |
-| 证据 | 全项目**不存在任何 `@Entity`**；`mallmanagement_class/info.java` 是唯一实体类，仅含 lombok 注解，无 JPA 注解，且未被任何类引用 |
+| 证据 | 全项目**不存在任何 `@Entity`**；原 `mallmanagement_class/info.java`（曾是全项目唯一 POJO，仅含 lombok 注解，无 JPA 注解，未被任何类引用）**已于 2026-10-02 笔 1 挪包时删除**（`01df702`）—— 故现在连「无注解的实体类」也没有了，本项证据比原记**更强** |
 | 问题 | 该依赖引入了 Hibernate 并激活了 `ddl-auto` 配置（`application.properties:12`），但项目没有任何 JPA 实体可供映射，依赖处于空转状态 |
 | 影响 | ① 增大构建产物、延长启动时间；② 保留了 `ddl-auto=update` 的生效条件，一旦有人误加 `@Entity` 即会反向 `ALTER TABLE`（详见 `db-schema.md` §3） |
 | 建议 | 移除该依赖；保留 JPA 但仅置 `ddl-auto=validate`/`none` 也可，两者是独立的处置手段，可只做其一 |
@@ -160,11 +160,11 @@
 
 | 项 | 内容 |
 |---|---|
-| 现状 | SQL 硬编码 schema 限定名 `mall_management_sql.` **45 处**（2026-10-02 实测，原记 39；已散到 **7 个文件**：`UserController` 16 / `OrderDao` 10 / `GoodsController` 6 / `GoodsCacheService` 5 / `GoodsTypeCacheService` 3 / `OrderTimelineWriter` 3 / `OrderStateMachine` 2）；`MessageController` **0 处**（SQL 不带前缀）。各 Controller / DAO 共用自动装配的 `JdbcTemplate` Bean，差异只在 SQL 字符串 |
+| 现状 | SQL 硬编码 schema 限定名 `mall_management_sql.` **45 处**（2026-10-02 实测，原记 39；已散到 **7 个文件**：`UserController` 16 / `OrderDao` 10 / **`GoodsDao` 6**（2026-10-02 三层重构第二笔由 `GoodsController` 搬入，**处数不变**）/ `GoodsCacheService` 5 / `GoodsTypeCacheService` 3 / `OrderTimelineWriter` 3 / `OrderStateMachine` 2）；`MessageController` **0 处**（SQL 不带前缀）。各 Controller / DAO 共用自动装配的 `JdbcTemplate` Bean，差异只在 SQL 字符串 |
 | 问题 | 切换 `spring.datasource.url` **无法**把 `/goods/*`、`/order/*`、`/user/*` 的读写切到其他库——服务连上测试库，SQL 仍定向到 `mall_management_sql`。又因 `/message/*` 不带前缀，同一进程内会**脑裂**：`/message` 的写入跟随 datasource，`/goods`、`/order`、`/user` 的写入留在 `mall_management_sql` |
 | 实测触发 | A3 前置准备按 context-pack 建 `mall_management_test` 并导入成功后，隔离对 `/goods`、`/order`、`/user` 实际无效。`orderAdd` 压测数据会落入开发库，而 `order` 表无删除接口，HTTP 层无法清理 |
 | 影响 | ① 一切依赖「切库做隔离测试」的方案失效；② 压测/集成测试污染开发库；③ 多实例部署时无法让实例指向不同库 |
-| 建议 | **方案 A**：移除 SQL 字符串中的 `mall_management_sql.` 前缀改用非限定表名（由 datasource 决定库），彻底但需改 39 处并全量回归；**方案 B**（A3 已采用）：保留硬编码，测试侧一律改用**独立 MySQL 实例**（库名仍为 `mall_management_sql`），绕开该问题 |
+| 建议 | **方案 A**：移除 SQL 字符串中的 `mall_management_sql.` 前缀改用非限定表名（由 datasource 决定库），彻底但需改 **45 处**（2026-10-02 实测；原记 39）并全量回归。⚠️ **两笔 DAO 重构的裁决都是「逐字保留前缀、不顺手清」**（`OrderDao` / `GoodsDao` 类 javadoc 有理由：只清一域会造出「一半有前缀、一半没有」的中间态）⇒ 方案 A 若要落地，必须是**跨四域的单独一笔**，不能夹带在任何一次分层搬运里；**方案 B**（A3 已采用）：保留硬编码，测试侧一律改用**独立 MySQL 实例**（库名仍为 `mall_management_sql`），绕开该问题 |
 | 与 TD-12 的关系 | TD-12 是 `mall_management_sql.sql` 自带建库语句；本项是 Java 源码硬编码库名。同属「库名硬编码」的两个面，触发点与修法不同，分列 |
 | 优先级 | 高（静默污染开发库，且在本任务中已实际触发一次流程失败） |
 | 状态 | 待确认（A3 采用方案 B 绕过，不阻塞当前里程碑；是否做方案 A 待定） |

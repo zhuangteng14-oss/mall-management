@@ -3,7 +3,11 @@
 > **定位**：全项目**唯一**的进度真相源。只记「做到哪了」，不记「怎么做」（怎么做见各 context-pack）。
 > **不重复**：缺陷明细见 `three-layers.md §G`、未决议题见 `business-decisions.md`、技术债见 `tech-debt.md`。本文只给**状态 + 证据**。
 > **维护规则**：状态变化时改本文，**不**在各 pack 里另立进度表 —— 2026-09-30 复核时已出现「同一件事两处各写一份、互相标过期」的情况。
-> ⚠️ **2026-10-02 追记**：本文 §「分域」等处的类名与行号是 **2026-09-30 截面**。此后 笔 1（`01df702`）按域挪包、笔 2 改名并规范化 URL —— `MallManagementGoodsController` / `MallManagementMessage` / `MallManagementUserController` 已改为 `GoodsController` / `MessageController` / `UserController`，订单端点拆入 `OrderController`；`/mysqlGoods`、`/mysqlLogin` 已规范化为 `/goods`、`/order`、`/user`。文内旧名 / 旧行号**按当时状态读**。
+> ⚠️ **2026-10-02 追记（两笔）**：本文的类名与行号原是 **2026-09-30 截面**。此后：
+> **笔 1**（`01df702`）按域挪包 —— 原扁平 `mallmanagement_*` 4 包 + `info` 孤儿类删除，改为 `goods`/`order`/`message`/`user`/`shared`。
+> **笔 2**（PR #28）改名 + URL 规范化 —— `MallManagementGoodsController` / `MallManagementMessage` / `MallManagementUserController` → `GoodsController` / `MessageController` / `UserController`，订单 8 端点拆入 `OrderController`；`/mysqlGoods`、`/mysqlLogin` → `/goods`、`/order`、`/user`。⚠️ 笔 2 **不只是改名**：它同时把订单域拆成 `OrderController`/`OrderService`/`OrderDao`（**三层第一笔**在 PR #25 `28194b4` 已先落地，见 §3）。
+> **三层第二笔**（2026-10-02，商品域）—— 8 条内联 SQL 下沉 `GoodsDao`/`GoodsService`；§3 与 §5-C 的 `G:` 坐标已就地改为现行 `GoodsService` 行号。
+> ⚠️ 正文中**未就地改**的旧名 / 旧行号，**按当时状态读**；已知残余漂移见 §5-D 与 `defect-survey.md` 顶部追记。
 > **复核基准**：2026-09-30，`origin/main` = `39224e8`；PR #1–#20 **全部 MERGED**（**这是 2026-09-30 的截面**）。⚠️ **此后已前进**：PR #21（progress 落盘）、PR #22（走查分流）**均已合**，`origin/main` = `69ac718`（2026-09-30）。最新落盘状态以「更新记录」一节为准。
 > **档位**：`亲读` = 本次逐行读 / grep / 命令实测；引他人文档处标**出处**（file:line），未亲验。
 
@@ -44,9 +48,14 @@
 
 | 问题 | 编号 A | 编号 B |
 |---|---|---|
-| 落库图片 URL 前缀硬编码 | **`TD-06`**（`tech-debt.md:81-90`）：以「生成落库 URL」口径 = `U:192` / `G:111` / `G:300` 三处，另 `U:55` 入参默认值 1 处 | **`three-layers.md §D#6`**（`:119`）：`GoodsController:119,289` / `UserController:205` / `UserController:59`，且**多列**「未 URL 编码」（中文 / 空格文件名拼出非法 URL） |
+| 落库图片 URL 前缀硬编码 | **`TD-06`**（`tech-debt.md:81-90`）：以「生成落库 URL」口径 = `U:192` / `G:111` / `G:300` 三处，另 `U:55` 入参默认值 1 处 | **`three-layers.md §D#6`**（`:121`）：`GoodsService:120,283` / `UserController:205` / `UserController:59`，且**多列**「未 URL 编码」（中文 / 空格文件名拼出非法 URL） |
 
 两者症状同类、位置**有交集但不重合** ⇒ 引用时必须注明用的是哪个编号（本表 §5-C 用 `TD-06`）。
+
+> ⚠️ **2026-10-02 三层第二笔后**：两栏的 `G:` 坐标口径**同时失准**，成因不同，**别当成同一件事**：
+> ① 左栏 `G:111` / `G:300` 是 `MallManagementGoodsController`（三层前名）的**旧类旧行号**——两处 URL 拼接现已随 `goodsAdd`/`goodsUp` 下沉到 `GoodsService:120` / `GoodsService:283`（本表已就地改为右栏口径）。
+> ② 右栏原写 `GoodsController:119,289`，那是**三层前的 Controller 内坐标**；本笔改动后 `GoodsController` 已不含这两行 ⇒ 已改为 `GoodsService:120,283`。
+> `UserController:205` / `:59` 侧**未受本笔影响，实测仍精确命中**（2026-10-02 复测）。⇒ 本表两栏现已**同一口径**（现行源码行号），差异只剩**范围**（左栏 4 处 / 右栏 4 处，左栏含 `U:55`、右栏含「未 URL 编码」一项）。
 
 ⚠️ **另有一处历史错位**（非本表造成，是计划与落地不同名）：
 `archive/worklog-2026-09-20-a3.md:232-236` 的计划是 B2=乐观锁/CAS、B3=分布式锁、B4=状态机、B5=线程池；**实际落地**是 B2=Redisson 锁（`8810efe`）、B3=状态机+异步（`b226357`），B4/B5 被 B3 吸收。**引用 `B2/B3` 时必须注明用的是哪一版。**
@@ -62,6 +71,7 @@
 | 2026-09-29 | B1 缓存 / C1 埋点 / B2 锁 / B3 状态机 | #4 #5 #6 #7 |
 | 2026-09-30 | A 批 P0 + P0 #2 + 缺陷归属 + G 表 + 规则 v2 + S1a-1 + S1a 文档 + progress 落盘 + 走查分流 | #8 #10–#22 |
 | 2026-10-01+ | 三层前准备其余 → 三层开工 → … | — |
+| 2026-10-02 | 订单域三层（#25 `28194b4`）→ 笔 1 DDD 挪包（#27 `01df702`）→ 笔 2 URL 规范化 + 订单拆 Controller + 类名对齐域（#28）→ **商品域三层（三层第二笔）** | #25 #27 #28 + 本笔 |
 
 ## 1. 项目级阶段
 
@@ -115,19 +125,26 @@
 
 批次顺序：**订单域 → 商品域 → 消息域 → 用户域 → 公共层**
 
-⚠️ **分批要按「方法」切，不能按「文件」切** —— 订单接口不在独立文件里：`orderAddLocked` 在 `GoodsController:442`（javadoc `:433-441`；`three-layers.md:115`）、`orderAdd` 同在 `MallManagementGoodsController`（`:418`，路由注解 `:417`）。
+进度（2026-10-02）：**订单域 ✅**（三层第一笔，PR #25 `28194b4`）→ **商品域 ✅**（三层第二笔，2026-10-02）→ 消息域 / 用户域 / 公共层 **⏳ 未动**
+
+⚠️ **分批要按「方法」切，不能按「文件」切** —— ~~订单接口不在独立文件里：`orderAddLocked` 在 `GoodsController:442`（javadoc `:433-441`；`three-layers.md:115`）、`orderAdd` 同在 `MallManagementGoodsController`（`:418`，路由注解 `:417`）。~~
+**2026-10-02 笔 2 已消解该形式**：订单 8 端点拆出 `order/controller/OrderController.java`（118 行，`@RequestMapping("/order")`），方法体进 `order/service/OrderService.java`（313 行）。现行坐标——`orderAdd` 路由 `OrderController:42-43`（方法签名 `:43`）→ 委托 `OrderService.orderAdd:99` → 打锁 `OrderService:110` 内 lambda 调 `addLocked`（私有，`OrderService:124`）；`@Transactional` 禁令的 javadoc 在 `OrderService:25-45`。
+⚠️ 但**「按方法切」的教训本身仍成立**，不是历史遗留：`addLocked`（`:124`）与 `casTransition`（`:212`）**同处一个临界区、必须同批**，两者之间还夹着 `OrderStateMachine` / `OrderTransitionRecorder` 的调用 —— 只按文件切仍会切错。`DistributedLockServiceTest.orderChainIsNotTransactional` 反射扫的正是 `OrderService` + `OrderDao` **两个** bean。
 
 | 域 | 主要所在 | 行数（`亲读` `wc -l`） | 备注 |
 |---|---|---|---|
-| **订单域** | `MallManagementGoodsController` 内的订单方法 + 已拆出的 `mallmanagement_service/Order*`（8 个类） | — | 状态机部分已在 B3 拆出 |
-| **商品域** | `MallManagementGoodsController` | 676 | SQL 硬编码 schema 名 23 处（`three-layers.md:165`） |
-| **消息域** | `MallManagementMessage` | 417 | SQL 硬编码 schema 名 **0** 处 ⇒ 同进程脑裂（TD-13） |
-| **用户域** | `MallManagementUserController` | 264 | SQL 硬编码 schema 名 16 处（`three-layers.md:165`） |
+| **订单域** | `order/controller/OrderController`（118 行，`/order` 8 端点）+ `order/service/OrderService`（313）+ `order/dao/OrderDao`（155）+ `order/model`、`order/metrics` | 586（三文件合计） | ✅ **已完成** —— **PR #25** `28194b4`「订单域三层重构」（早于笔 1/笔 2，故为**三层第一笔**）；状态机部分更早由 B3 拆出 |
+| **商品域** | `goods/controller/GoodsController`（176 行）+ `goods/service/GoodsService`（332）+ `goods/dao/GoodsDao`（208） | 716（三文件合计；原 `MallManagementGoodsController` 676） | ✅ **已完成**（2026-10-02 三层第二笔）—— SQL 硬编码 schema 名：`GoodsDao` **6** 处 +（读路径，非本笔搬动）`GoodsCacheService` 5 / `GoodsTypeCacheService` 3；见 `three-layers.md:166` F#1 与其中的**已知矛盾**段 |
+| **消息域** | `message/controller/MessageController`（原名 `MallManagementMessage`） | 417 | SQL 硬编码 schema 名 **0** 处 ⇒ 同进程脑裂（TD-13）。⏳ 三层**未做** |
+| **用户域** | `user/controller/UserController`（原名 `MallManagementUserController`） | 264 | SQL 硬编码 schema 名 16 处（`three-layers.md:166`）。⏳ 三层**未做** |
 | **公共层** | 新层 | — | `D#2` 全局异常出口 / `D#3` 拦截器与 CORS / `C#2` 事务边界 / `D#5` 配置收敛 |
 
 **拆层顺序**（`three-layers.md:276`）：Controller → **DAO** → Service ——「先把数据出口收成一处，Service 才有意义」。
 
-**基线**（`亲读`）：后端 **28 个 `.java`**（controller 4 / service 13 / server 10 / class 1）；DB 访问散在 **12 个文件**；`@Repository` = **0 个文件**、`@Mapper` = **0 个文件**。
+**基线**（`亲读`，**2026-09-30 截面**）：后端 **28 个 `.java`**（controller 4 / service 13 / server 10 / class 1）；DB 访问散在 **12 个文件**；`@Repository` = **0 个文件**、`@Mapper` = **0 个文件**。
+
+> ⚠️ 上一行是**截面值**，此后未逐笔同步。**2026-10-02 复测**（同「主源 `.java`」口径）：**33 个**（`goods` 5 / `order` 10 / `message` 2 / `user` 2 / `shared` 13 / 顶层启动类 1）；`@Repository` **2 个文件**（`OrderDao` / `GoodsDao`）、`@Service` **12 个文件**、`@RestController` **5 个文件**（四业务域 + `HealthController`）；`@Mapper` 仍 **0**（全项目零 MyBatis）。
+> 「DB 访问散在 12 个文件」一项**未重测** —— 它与「含 `mall_management_sql.` 前缀的文件数」（现 **7**，见 `three-layers.md:166` F#1）**不是同一口径**（前者含无前缀的读路径），引用时以 F#1 为准。
 
 ---
 

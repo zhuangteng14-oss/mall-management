@@ -12,7 +12,7 @@
 | JDK | Java 17 | `pom.xml:30` |
 | 服务端口 | 8088 | `application.properties:3` |
 | 数据库 | 开发库 MySQL 8.0.32，库 `mall_management_sql`；A3 另有独立 VM 实例 8.4.11（库名**相同**，见 `environment.md`） | `mall_management_sql.sql:3` |
-| 数据访问 | `JdbcTemplate` 直接写裸 SQL 字符串 | 3 个 Controller 均 `@Autowired JdbcTemplate` |
+| 数据访问 | `JdbcTemplate` 直接写裸 SQL 字符串（DAO 层用 `JdbcClient.create(JdbcTemplate)` 包一层） | ⚠️ **原记「3 个 Controller 均 `@Autowired JdbcTemplate`」现已不成立**：2026-10-02 时点，**订单与商品两域**的数据访问已分别收进 `OrderDao` / `GoodsDao`，两个 Controller 不再持有 `JdbcTemplate`；仍持有的只有 `MessageController`（`MessagejdbcTemplate`）与 `UserController`（`LoginjdbcTemplate`），另 `HealthController` 持有一个（探针用） |
 | 前端 | Vue 3 CLI 工程（Vue CLI 5 / webpack 5，`vue.config.js`、`babel.config.js`） | `package.json:12`（`vue: ^3.2.13`）、`:13`（`vue-router: ^4.6.4`，Vue Router 4 仅支持 Vue 3）、`:20`（`@vue/cli-service: ~5.0.0`） |
 
 依赖实测（`pom.xml:32-68`）：`spring-boot-starter`、`-jdbc`、`-data-jpa`、`-web`、`-test`、`mysql-connector-java:8.0.33`、`lombok:1.18.46`。
@@ -37,8 +37,8 @@
 │       ├── main/java/com/minke/
 │       │   ├── MallManagementApplication.java          启动类
 │       │   └── mallmanagement/                         按域分层（2026-10-02 笔 1 挪包；原扁平 mallmanagement_* 4 包 + info 孤儿类已删除）
-│       │       ├── goods/{controller,service}/         GoodsController（/goods 9 端点）+ GoodsCacheService / GoodsTypeCacheService
-│       │       ├── order/{controller,service,dao,model,metrics}/  OrderController（/order 8 端点）+ OrderService + OrderStateMachine 等
+│       │       ├── goods/{controller,service,dao}/      GoodsController（/goods 9 端点）+ GoodsService（8 方法，2026-10-02 三层第二笔）+ GoodsDao（8 条内联 SQL）+ GoodsCacheService / GoodsTypeCacheService（缓存读与 goodstype）
+│       │       ├── order/{controller,service,dao,model,metrics}/  OrderController（/order 8 端点）+ OrderService + OrderDao + OrderStateMachine 等
 │       │       ├── message/{controller,service}/       MessageController（/message 10 端点）+ FriendCacheService
 │       │       ├── user/{controller,service}/          UserController（/user 5 端点）+ UserCacheService
 │       │       └── shared/{cache,health,lock,upload}/  两级缓存 / HealthController / 分布式锁 / 上传（原 mallmanagement_server 的 ImgConfig、ImgPath 在此）

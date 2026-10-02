@@ -28,7 +28,9 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
  * {@link #updateSqlIsByteForByteTheLegacyLiteral}：本笔把三处硬编码 SQL 换成了「生成」。
  * 那笔交易的风险全部集中在一处 —— 生成的串与原来那个串**不再相同**，而行为随之静默改变。
  * 所以这里放的是**从改动前的源码逐字抄下来的 golden copy**（原
- * {@code MallManagementGoodsController:556 / 584 / 612}），断言逐字符相等。
+ * {@code MallManagementGoodsController:556 / 584 / 612} —— 该类 2026-10-02 已改名
+ * {@code GoodsController}，订单端点另拆入 {@code OrderController}，三处行号是**当时**的坐标），
+ * 断言逐字符相等。
  * 它变红 = 生成逻辑动了线上行为，**不是**测试需要更新。
  *
  * <p>其余各条守的是「状态机这张表本身自洽」，其中最要紧的是

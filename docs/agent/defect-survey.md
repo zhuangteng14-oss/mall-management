@@ -2,7 +2,32 @@
 
 > 范围：全部后端源码、`mall_management_sql.sql`、`docs/agent/*`、`.github/workflows/ci.yml`、`scripts/concurrency/*`。
 > 核查日期：2026-09-30。基线 `origin/main` = `148e77b`（B3 已合并）。
-> ⚠️ **2026-10-02 追记（不改正文）**：本文的类名、路径与行号锚点是 **2026-09-30 当时状态**。此后 笔 1（`01df702`）按域挪包、笔 2 改名并规范化 URL —— `MallManagementGoodsController` / `MallManagementMessage` / `MallManagementUserController` 已分别改为 `GoodsController` / `MessageController` / `UserController`（订单端点另拆入 `OrderController` / `OrderService`）；`/mysqlGoods`、`/mysqlLogin` 前缀已规范化为 `/goods`、`/order`、`/user`。文内旧名 / 旧路径 / 旧行号**一律按当时状态读**。
+> ⚠️ **2026-10-02 追记（不改正文 —— 正文锚点一律按当时状态读）**：本文的类名、路径与行号锚点是 **2026-09-30 截面**（基线 `148e77b`）。此后**三笔**改动了坐标：
+> - **笔 1**（`01df702`）按域挪包 —— 扁平 `mallmanagement_*` 4 包 → `goods`/`order`/`message`/`user`/`shared`，`info` 孤儿类删除。
+> - **笔 2**（PR #28）改名 + URL 规范化 —— `MallManagementGoodsController` / `MallManagementMessage` / `MallManagementUserController` → `GoodsController` / `MessageController` / `UserController`；订单 8 端点拆入 `OrderController`（三层第一笔在 PR #25 `28194b4` 已先落地）；`/mysqlGoods`、`/mysqlLogin` → `/goods`、`/order`、`/user`。
+> - **三层第二笔**（2026-10-02，商品域）—— 8 条内联 SQL 下沉 `GoodsDao` / `GoodsService`。
+>
+> **正文中已漂移的锚点**（右列 = **2026-10-02 实测**的现行位置）。⚠️ **用户域 / 消息域锚点本次复测全部精确命中、零漂移**（`UserController` :20 :30 :39 :47-49 :63-64 :70-71 :75 :193-199 :205 :216 :257；`MessageController` :18 :188 :413），**只有商品 / 订单两域漂了**：
+>
+> | 正文行 | 正文旧锚点 | 现行位置（2026-10-02 实测） |
+> |---|---|---|
+> | `:51` | 4 处裸 `@CrossOrigin`，含 `MallManagementGoodsController:27` | **现为 5 处**（订单拆出后多一处）：`GoodsController:38` / `UserController:20` / `MessageController:18` / **`OrderController:24`（新）** / `HealthController:37`。⚠️ `§五` 说「TD-04 写 3 处实为 4」⇒ 现值 **5**，该证据行需再改一次 |
+> | `:60` | `MallManagementGoodsController:106-113` / `:282-287` | `GoodsService:96-117`（`goodsAdd` 上传段）/ `:265-281`（`goodsUp` 上传段）；`UserController:193-199`、`ImgPath.java:34` 未漂 |
+> | `:62` | `GoodsController:114-116`；`UserController:200-203` | ⚠️ **商品侧疑似已失效**：该 catch 的文案在 A 批 `efe7959` 已从「已存在」改为「商品图片保存失败」，现址 `GoodsService:110-116` / `:273-279` ⇒ 本行「catch 归因一律『已存在』」**在商品域已不成立**，只剩 `UserController:200-203` 一侧。**待复核后决定是否降级本行** |
+> | `:66` | `MallManagementGoodsController:390`（入参）→ `:435-449`（INSERT） | 入参 `OrderController:42-56`（`@RequestParam("Price") float` 在 `:47`）→ 逻辑 `OrderService.orderAdd:99`、临界区 `addLocked:124`；INSERT 落 `OrderDao.insertOrder:82-92` |
+> | `:73` | `GoodsController:378-409` | `GoodsDao.searchByKeyword:193-207`（关键字拼接 `:194-200`，`SELECT * FROM goods WHERE 1=1` 在 `:202-204`） |
+> | `:74` | `GoodsController:205-225` | `GoodsService.goodsDe:211-238`（两个 DELETE 现址 `GoodsDao.deleteGoods:128-132` / `deleteProductsales:135-139`；`success=true` 在 `GoodsService:225`，仍无条件） |
+> | `:75` | `ImgPath:18` / `GoodsController:55` / `UserController:30` | `GoodsService:69`（`@Value("${app.upload-dir:…}")`）；另两处 `ImgPath:18`、`UserController:30` **未漂** |
+> | `:76` | `GoodsController:281-290` | `GoodsDao.updateGoods:154-165` + `GoodsDao.updateProductsalesGoodName:168-172`（调用点 `GoodsService:288,291`） |
+> | `:77` | `GoodsController:119,289`；`UserController:205`；`UserController:59` | `GoodsService:120` / `:283`；`UserController:205` / `:59` **实测未漂** |
+> | `:78` | javadoc `GoodsController:401-409` | `OrderService` 类 javadoc `:25-45`（禁令 + 分层后理由①失效／②削弱的完整论证） |
+> | `:93` | `GoodsController`(11) | `GoodsService`(**7**) + `OrderService`(**7**)；全库 `printStackTrace` **20 → 23**、`System.out.println` **5 → 6**。⚠️ 分母变了，引用「×20 / ×5」须注明是 2026-09-30 截面 |
+> | `:129` | `G:547-548` / `G:550-551`（`orderDeliverySelect` 两条 SQL） | `OrderDao.selectByMerchant:135-145`，两条 SELECT 在 `:138` / `:141` |
+> | `:145` | 「30 主源码」 | 现 **33 个主源 `.java`**（见 `progress.md §3` 基线复测） |
+> | `:203` | `GoodsController:433-441` | `OrderService:25-45`（同上） |
+> | `:214` | `GoodsController:106-107,282-283` | `GoodsService:96-117`（`goodsAdd` 上传段，`file.isEmpty()` 早退在 `:101`）/ `:265-281`（`goodsUp` 上传段，判据 `file != null && !file.isEmpty()` 在 `:268`） |
+>
+> ⚠️ **两处「本笔自己引入」的坐标**（防误当老漂移）：`GoodsDao` / `GoodsService` 是 2026-10-02 才存在的文件，上表引用它们的行号**没有 2026-09-30 对应物**。另 `GoodsDao:33` 的 javadoc 里**字面写着** `` `mall_management_sql.` `` —— 用 `grep -c` 数 schema 前缀时会被误计入（实测 7，实为 6），口径见 `three-layers.md:166` F#1。
 > **本文只记录与分级，不做任何修复。** 分级与锚点一律给可复核位置。
 >
 > **档位**：`亲读` = 逐行读过该文件；`亲读(框架)` = 从本机 `.m2` 抽框架源码/元数据核过；`实测` = 本机实跑探针；`推断` = 由亲读证据链推导，未实跑。
