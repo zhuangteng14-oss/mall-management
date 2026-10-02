@@ -34,8 +34,8 @@
 | **击穿**：逻辑过期 + Redisson 互斥重建 + Caffeine 本地兜底 | 部分 | Caffeine 本地兜底 ✅；互斥重建 ✅ **但用 Spring `sync=true` 的进程内 single-flight（`mall.cache.singleflight`），不是 Redisson 分布式互斥** ⇒ 多实例下每个实例各回源一次；**逻辑过期 ❌** |
 | **雪崩**：随机 TTL + 多级缓存 + Resilience4j 限流 | 部分 | 多级缓存 ✅；**随机 TTL ❌**（B1 明确不做，触发条件 = 某缓存族 key 数 > ~10）；**Resilience4j ❌** |
 | **穿透**：空值缓存 + 布隆过滤器 + 参数校验 | 部分 | 空值缓存 ✅（`549f74f` 首个负缓存，`userSelect`）；**布隆过滤器 ❌**；**参数校验 ❌**（无 validation 依赖，全仓 `@Valid` = 0） |
-| **分布式锁**：Redisson `tryLock(wait,lease)` + finally `isHeldByCurrentThread` | ✅ | B2；`tryLock` 4 处实命中。⚠️ 但取锁超时 / Redis 不可达 / 冷却窗口**三路 fail-open 回落原路径**（`tech-debt.md:280`）。⚠️ 此处原引 `:275` —— 该行号**在 S1a-2 之前就已偏 1**（实测该版本里目标表行在 **276**），S1a-2 的 +4 行把它推到 **280**，本笔一并更正 |
-| **MySQL 死锁**：固定加锁顺序 + 小事务 + `@Version` 乐观锁 + `@Retryable` | 部分 | `@Transactional` 10 处；**`@Version` ❌（0 命中）**；**`@Retryable` ❌（0 命中，且无 spring-retry）** |
+| **分布式锁**：Redisson `tryLock(wait,lease)` + finally `isHeldByCurrentThread` | ✅ | B2；`tryLock` **真实调用 1 处**（`DistributedLockService:249` 的 `lock.tryLock(wait, lease, MILLISECONDS)`）。⚠️ **2026-10-02 实测订正**：原记「4 处实命中」是把 `LockSceneService` 里**注释提到 `tryLock`** 的 3 行（`:57` / `:268` / `:269`）一并数了进去。⚠️ 但取锁超时 / Redis 不可达 / 冷却窗口**三路 fail-open 回落原路径**（`tech-debt.md:280`）。⚠️ 此处原引 `:275` —— 该行号**在 S1a-2 之前就已偏 1**（实测该版本里目标表行在 **276**），S1a-2 的 +4 行把它推到 **280**，本笔一并更正 |
+| **MySQL 死锁**：固定加锁顺序 + 小事务 + `@Version` 乐观锁 + `@Retryable` | 部分 | `@Transactional` **注解 1 处**（`UserController:57` 的 `loginAdd`）。⚠️ **2026-10-02 实测订正**：原记「10 处」是**把 javadoc / 注释里写到 `@Transactional` 的地方也数了进去** —— `grep -n "@Transactional"` 在 `src/main/java` 得 18 行，其中 **17 行是说明文字**（含 `OrderService:26` 那条**禁令**、`OrderDao:39`、`GoodsDao:52-55` 等），真注解只有 1 行。**`@Version` ❌（0 命中）**；**`@Retryable` ❌（0 命中，且无 spring-retry）** |
 | **状态机**：显式 transition + 乐观锁 + 流转日志 + 频次告警 | 部分 | 显式 transition ✅（B3 转移表）；流转日志 ✅（B3 `order_state_transition` 时间线）；**乐观锁 ❌**（改用谓词守卫 CAS —— 需判断是否算等效，见 §5）；**频次告警 ❌** |
 | **线程池**：分池 + 有界队列 + `orTimeout` + 明确拒绝策略 | 部分 | 有界队列 ✅（`ArrayBlockingQueue(1024)`）；明确拒绝策略 ✅（discard-oldest-with-callback）；**分池 ❌（B3 只有单池）**；**`orTimeout` ❌（0 命中）** |
 
@@ -54,7 +54,7 @@
 
 | 目标注解 | 现状 | 实际形态 |
 |---|---|---|
-| `@DistributedLock` | ❌ 无此注解 | B2 是**模板方法** `DistributedLockService.runLocked(...)`（`DistributedLock` 字符串的 8 处命中全是类名/文档，**无 `@interface`**） |
+| `@DistributedLock` | ❌ 无此注解 | B2 是**模板方法** `DistributedLockService.runLocked(...)`。⚠️ **2026-10-02 实测重数**：`DistributedLock` 字符串在 `src/main/java` **37 处**、全仓 tracked 文件 **92 处**，**每一处都是类名 `DistributedLockService`、import、或注释 / 文档**；**全仓 `@interface` = 0 命中**（只在两份文档的行文里出现过该字面量）⇒ 原记「8 处」口径不明，但**「无 `@interface`」这条结论不变** |
 | `@CacheProtect` | ❌ 无此注解 | B1 用 Spring 框架注解 `@Cacheable` / `@CacheEvict` / `@Caching`，无自研切面（**故无独立的 `ttl`/`jitter` 参数位** —— 这正是「随机 TTL 做不了」的结构原因：`entryTtl` 是静态的，见 `cache-layer.md` §9.1） |
 | `@StateTransition` | ❌ 无此注解 | B3 是**显式转移表调用**（`OrderStateMachine.updateSql(...)`），刻意的描述性姿态 |
 | `@Retryable` | ❌ 无此注解 | 无 spring-retry |
@@ -93,7 +93,7 @@
 
 | # | 用途 | 数据源 | 结论 | 依据 |
 |---|---|---|---|---|
-| 1 | **时序数据**（QPS / 缓存命中率 / 锁等待曲线） | 进程内存，**保留 30 分钟** | ✅ **不引 Prometheus** —— 单实例 + 内部管理系统，30 分钟窗口用**内存环**足够。⚠️ 这是**决定**、不是实测。触发条件（何时才需要 Prometheus）：**多实例部署**，或需要 **> 30 分钟**的历史留存 | 现事件环**按条数**限界、**不按时间**：`EVENT_CAPACITY = 512`（`MallCacheMetrics:115` / `MallLockMetrics:77` / `MallOrderStateMetrics:88`），其注释自述窗口「满负荷下数百毫秒」（cache）／「约 4 秒」（order.state）⇒ **远不够 C3 看曲线**，故 C3 另起一个**按时间**保留的内存序列，**与既有三份环并存**（不动它们）。全仓 `Prometheus` **0 命中**（本笔实测） |
+| 1 | **时序数据**（QPS / 缓存命中率 / 锁等待曲线） | 进程内存，**保留 30 分钟** | ✅ **不引 Prometheus** —— 单实例 + 内部管理系统，30 分钟窗口用**内存环**足够。⚠️ 这是**决定**、不是实测。触发条件（何时才需要 Prometheus）：**多实例部署**，或需要 **> 30 分钟**的历史留存 | 现事件环**按条数**限界、**不按时间**：`EVENT_CAPACITY = 512`（`MallCacheMetrics:115` / `MallLockMetrics:77` / `MallOrderStateMetrics:88`），其注释自述窗口「满负荷下数百毫秒」（cache）／「约 4 秒」（order.state）⇒ **远不够 C3 看曲线**，故 C3 另起一个**按时间**保留的内存序列，**与既有三份环并存**（不动它们）。⚠️ **2026-10-02 实测订正**：全仓 `Prometheus` 字面量 **2 处** —— `MallCacheMetrics:30` 的 javadoc（「…全小写点分（Prometheus 友好）」）与 `pom.xml:94` 的注释（「…不引入 Prometheus registry」）。**两处都不是依赖、不是代码**，原记「0 命中」已不成立，但**结论（不引 Prometheus）不变** |
 | 2 | **事件流**（最近事件原始列表） | 三份 512 槽环 | ⚠️ **扩到 8192 槽** —— **独立一笔**，**不在 C3 内做** | 三份环各自 `512`（见上）；`MallLockMetrics:23` 记「两份 512 槽数组（各约 4KB 引用）」⇒ 8192 = 512 × **16**，量级仍可忽略。**为什么必须独立成笔**：扩容会**改变现有断言的观察窗口**（`A-S2a-1a` 对 `mall.lock.acquires` 增量敏感等），要单独核 A3 —— 混进 C3 会让「改视图」与「改护栏口径」互相掩护 |
 | 3 | **指标 tag** | 现 **21 个** `mall.*` 指标的 tag 集 | ✅ **现状够** —— C3 **不新增 tag** | tag 全取自**封闭枚举**：`cache`（= cacheNames）/ `result` / `kind` / `to` / `lock`（= 5 个 `LockName`）；且有**基数铁律「key 绝不进 tag」**（`MallCacheMetrics:31-32`）—— C3 需要的分组维度（按缓存族 / 按锁名 / 按端点）**都已在既有 tag 里** |
 | 4 | **B3 时间线聚合索引** | `order_state_transition` | ⏸ **暂缓** —— **先给查询**，按实际查询形状再定索引 | 该表**现只有** `idx_order_state_transition_order(OrderId, OccurredAt)`（`db-schema.md:29`、`:282`）；`db-schema.md:29` 已明写它是「**C3 时间线视图的数据源**」。C3 的视图查询形状（按单 / 按时间区间 / 按动作）**尚未出现** ⇒ 现在加索引是**猜**。⚠️ 暂缓的理由是**没有依据**，**不是不允许** —— 加索引属**无条件允许**（`three-layers.md` 约束 1） |

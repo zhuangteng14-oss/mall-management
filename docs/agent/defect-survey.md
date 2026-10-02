@@ -11,13 +11,13 @@
 >
 > | 正文行 | 正文旧锚点 | 现行位置（2026-10-02 实测） |
 > |---|---|---|
-> | `:51` | 4 处裸 `@CrossOrigin`，含 `MallManagementGoodsController:27` | **现为 5 处**（订单拆出后多一处）：`GoodsController:38` / `UserController:20` / `MessageController:18` / **`OrderController:24`（新）** / `HealthController:37`。⚠️ `§五` 说「TD-04 写 3 处实为 4」⇒ 现值 **5**，该证据行需再改一次 |
-> | `:60` | `MallManagementGoodsController:106-113` / `:282-287` | `GoodsService:96-117`（`goodsAdd` 上传段）/ `:265-281`（`goodsUp` 上传段）；`UserController:193-199`、`ImgPath.java:34` 未漂 |
-> | `:62` | `GoodsController:114-116`；`UserController:200-203` | ⚠️ **商品侧疑似已失效**：该 catch 的文案在 A 批 `efe7959` 已从「已存在」改为「商品图片保存失败」，现址 `GoodsService:110-116` / `:273-279` ⇒ 本行「catch 归因一律『已存在』」**在商品域已不成立**，只剩 `UserController:200-203` 一侧。**待复核后决定是否降级本行** |
+> | `:51` | 4 处裸 `@CrossOrigin`，含 `MallManagementGoodsController:27` | **现为 5 处**（订单拆出后多一处）：`GoodsController:38` / `UserController:20` / `MessageController:18` / **`OrderController:24`（新）** / `HealthController:37`。⚠️ `§五`（正文 `:159`，本表末几行）原写「TD-04 写 3 处、实为 **4**」⇒ 现值 **5** |
+> | `:60` | `MallManagementGoodsController:106-113` / `:282-287` | `GoodsService:96-117`（`goodsAdd` 上传段）/ `:265-281`（`goodsUp` 上传段）；`UserController:193-199` 未漂。⚠️ **原文写「`ImgPath.java:34` 未漂」，其实它也漂了**：现为 **`:78`**（`registry.addResourceHandler("/img/**")`；`@PostConstruct` 段 `:45-64`、整个 `addResourceHandlers` `:66-80`） |
+> | `:62` | `GoodsController:114-116`；`UserController:200-203` | ⚠️ **商品侧疑似已失效**：该 catch 的文案在 A 批 `efe7959` 已从「已存在」改为「商品图片保存失败」，现址 `GoodsService:110-117` / `:273-281` ⇒ 本行「catch 归因一律『已存在』」**在商品域已不成立**，只剩 `UserController:200-203` 一侧。**已复核（2026-10-02）**：两处的 `msg` 实测均为「**商品图片保存失败**」（`:115` / `:279`），读数时按此修正本行 |
 > | `:66` | `MallManagementGoodsController:390`（入参）→ `:435-449`（INSERT） | 入参 `OrderController:42-56`（`@RequestParam("Price") float` 在 `:47`）→ 逻辑 `OrderService.orderAdd:99`、临界区 `addLocked:124`；INSERT 落 `OrderDao.insertOrder:82-92` |
 > | `:73` | `GoodsController:378-409` | `GoodsDao.searchByKeyword:193-207`（关键字拼接 `:194-200`，`SELECT * FROM goods WHERE 1=1` 在 `:202-204`） |
 > | `:74` | `GoodsController:205-225` | `GoodsService.goodsDe:211-238`（两个 DELETE 现址 `GoodsDao.deleteGoods:128-132` / `deleteProductsales:135-139`；`success=true` 在 `GoodsService:225`，仍无条件） |
-> | `:75` | `ImgPath:18` / `GoodsController:55` / `UserController:30` | `GoodsService:69`（`@Value("${app.upload-dir:…}")`）；另两处 `ImgPath:18`、`UserController:30` **未漂** |
+> | `:75` | `ImgPath:18` / `GoodsController:55` / `UserController:30` | `GoodsService:69`（`@Value("${app.upload-dir:…}")`）；`UserController:30` **未漂**，但 ⚠️ **`ImgPath:18` 已漂至 `:17`**（同一行仍是 `@Value("${app.upload-dir:…}")`） |
 > | `:76` | `GoodsController:281-290` | `GoodsDao.updateGoods:154-165` + `GoodsDao.updateProductsalesGoodName:168-172`（调用点 `GoodsService:288,291`） |
 > | `:77` | `GoodsController:119,289`；`UserController:205`；`UserController:59` | `GoodsService:120` / `:283`；`UserController:205` / `:59` **实测未漂** |
 > | `:78` | javadoc `GoodsController:401-409` | `OrderService` 类 javadoc `:25-45`（禁令 + 分层后理由①失效／②削弱的完整论证） |
@@ -26,8 +26,18 @@
 > | `:145` | 「30 主源码」 | 现 **33 个主源 `.java`**（见 `progress.md §3` 基线复测） |
 > | `:203` | `GoodsController:433-441` | `OrderService:25-45`（同上） |
 > | `:214` | `GoodsController:106-107,282-283` | `GoodsService:96-117`（`goodsAdd` 上传段，`file.isEmpty()` 早退在 `:101`）/ `:265-281`（`goodsUp` 上传段，判据 `file != null && !file.isEmpty()` 在 `:268`） |
+> | `:19`（判断 3） | 「**111 例绿**」 | **135 例**（2026-10-02 实测，= 真 `@Test` 注解数；19 个测试类）。⚠️ 口径：裸 `grep -c '@Test'` 会因 `@TestPropertySource`（3 处）与注释里的字面 `@Test`（`AbstractSmokeTest:69`）多计 3 → 得 138，**不能用**。同源订正见 `project-map.md:101` 与 `three-layers.md §H.3`（`:259`） |
+> | `:36`（病 B+E 合成链） | `GoodsCacheService:211-219`（`queryForMap` 多行即抛）+ `:186-198`（把失败也当值缓存） | ✅ **该环已修**（A 批 `88a14e4`），现址 `GoodsCacheService.priceByTriple`（`:243-264`）：**0 行 → `null`** 在 `:250-253`（业务事实，仍被负缓存）、**多行 → 显式抛** `IncorrectResultSizeDataAccessException` 在 `:255-261`（`queryForList` 自己不为多行抛，故显式构造）。⚠️ 四环里的第 1/2 环（collation 大小写不敏感 + 三元组无唯一约束）**仍在** ⇒「失败本身」仍在，只关掉了「失败被固化到 TTL」 |
+> | `:115`-`:117`（观测层） | `L2HealthProbe.java:154-177` / `TwoLevelCache.java:220-233` / 回填竞态「已登记于 `cache-layer.md:371` 与 `:448③`」 | → `L2HealthProbe.markOk:155-162` 与 `markFailed:169-178`（两处各自的 check-then-act，原记跨两方法的 `:154-177` 边界不准）；→ `TwoLevelCache.l2Put:221-234`；→ 竞态登记现址 **`cache-layer.md:374`**（§10 调用点判据第 1 条：「并发读会把旧值回填进已清的空片」）与 **`:451③`**（§11「`loginAdd` 的 evict 发生在事务提交之前」）—— 两处均已用 `git show 148e77b` 逐行核对（旧 `:371` / `:448③` 即此两句） |
+> | `:159`（§五） | TD-04「写 3 处、实为 **4**」/ TD-06「实为 `U:205/G:119/G:289`」/ TD-07「实为 `G:110-116/U:196-203`」 | TD-04 现值 **5**（见上表 `:51` 行）；TD-06 商品侧现址 `GoodsService:120` / `:283`（`UserController:205` / `:59` 未漂）；TD-07 商品侧现址 `GoodsService:110-117` / `:273-281`，两处 `msg` 均为「**商品图片保存失败**」（`:115` / `:279`），`UserController:200-203` 未漂 |
+> | `:166`（§五） | 「3 处手写 `getConnection()`」 | **实为 2 处调用 + 1 处注释**：`L2HealthProbe:203`、`L2ProbeConfig:201` 是真调用（均 try-with-resources），`L2ProbeConfig:134` 是**注释里**的字面 `getConnection()`。故该条「与 Hikari `leakDetectionThreshold=0` 无关」的结论不变，但**「3 处」是数错的** |
+> | `:175`（§六） | `ConcurrencyRunner.java:340`（`--reset-db` 空实现） | **`:339`**（`case "--reset-db": o.resetDb = true;`；用法说明串在 `:181`）。⚠️ 另注：用法串本身写的是「DROP **11** 张 —— 12 张中除 `order_state_transition` 外」 |
+> | `:182`（§六） | `ConcurrencyRunner.java:2210-2258`，内引 `:2178` / `:2251` | `cleanup(Opt)`: **`:2310-2350`**；`CLEANUP_COLS` 定义 **`:2288`**（逐表 `put` 在 `:2291-2303`）、`for` 循环 `:2317`、**单点** `catch (SQLException)` **`:2350`** |
+> | `:222`（§九） | `ConcurrencyRunner.java:1523` 的 c7 / `:1481` 的 `A-S4a-7` | c7 的 `burst(40, …)` 在 **`:1625`**，门禁断言 `A-S4a-7` 在 **`:1583`**（「同一未付款单上 pay 与 delivery 同时释放」的注释在 `:1620`）。⚠️ 结论不变：pay×dly 因 `PayIf` 互斥**不可能双成功** |
 >
 > ⚠️ **两处「本笔自己引入」的坐标**（防误当老漂移）：`GoodsDao` / `GoodsService` 是 2026-10-02 才存在的文件，上表引用它们的行号**没有 2026-09-30 对应物**。另 `GoodsDao:33` 的 javadoc 里**字面写着** `` `mall_management_sql.` `` —— 用 `grep -c` 数 schema 前缀时会被误计入（实测 7，实为 6），口径见 `three-layers.md:166` F#1。
+> ⚠️ **「正文行」列怎么读**：它是**2026-09-30 截面**的行号（= 本追记块写第一版时的 `当前行号 − 25`）。本追记块自身会增行（2026-10-02 加了 8 行），**偏移量随之变化** ⇒ **请用「正文旧锚点」列的文本去 grep 定位，不要用行号换算**。
+>
 > **本文只记录与分级，不做任何修复。** 分级与锚点一律给可复核位置。
 >
 > **档位**：`亲读` = 逐行读过该文件；`亲读(框架)` = 从本机 `.m2` 抽框架源码/元数据核过；`实测` = 本机实跑探针；`推断` = 由亲读证据链推导，未实跑。

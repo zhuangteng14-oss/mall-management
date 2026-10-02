@@ -27,7 +27,7 @@
 
 A3 **不复用本机开发库，也不是「切库名」**，而是**另起一个 MySQL 实例，库名仍叫 `mall_management_sql`**。理由（TD-13，实测）：
 
-- `GoodsController`（23 处）与 `UserController`（16 处）把 schema 名 `mall_management_sql.` **硬编码**在 SQL 语句里（合计 39 处；`MessageController` 为 0 处）。切库名切不走这 39 处写入，而 `/message/*` 会跟随 datasource —— 同一进程内**脑裂**。（⚠️ 2026-10-02 复测：合计已 **45 处**、散到 **7 个文件**（订单侧 SQL 与缓存 Service 各自带入），见 `three-layers.md §D`；此处 23/16/39 是当时的分布，结论不变。）
+- `GoodsController`（23 处）与 `UserController`（16 处）把 schema 名 `mall_management_sql.` **硬编码**在 SQL 语句里（合计 39 处；`MessageController` 为 0 处）。切库名切不走这 39 处写入，而 `/message/*` 会跟随 datasource —— 同一进程内**脑裂**。（⚠️ 2026-10-02 复测：合计仍 **39 处**（口径 = SQL 字面量），但已散到 **7 个文件** —— `UserController` 16 / `GoodsDao` 6 + `GoodsCacheService` 5 + `GoodsTypeCacheService` 3（goods 14）/ `OrderDao` 7 + `OrderStateMachine` 1 + `OrderTimelineWriter` 1（order 9）。`GoodsController` 那 23 处含**订单端点的 SQL 9 条**，订单笔拆出后 **23 = goods 14 + order 9** ⇒ 文件数 2 → 7、**总数不变**。逐处口径与证据见 `three-layers.md §F#1`；原记「45 处」是**口径混用**所致（商品侧取 SQL 字面量、订单侧连 javadoc / 注释一起数）。）
 - 故隔离只能靠**独立实例 + 保留同名库**。这同时意味着 `SELECT DATABASE()` **无法**区分「本机开发库」与「VM 库」（两者库名相同），必须叠加 `VERSION()` 门禁 —— 见 §脚本内置校验的 P1 与 N4。
 
 > ⚠️ **本节原先写的「本地建 `mall_management_test` 库 + `sed` 过滤导入 + 切 `DB_URL`」三步已作废**（2026-09-20 重写）：按 Q1=B 与 TD-13，那三步均不成立 —— 切库名切不走硬编码，且「脚本的 JDBC 断言」与「后端的读写」必须在同一个实例上才谈得上互相印证。
@@ -40,7 +40,7 @@ A3 **不复用本机开发库，也不是「切库名」**，而是**另起一�
 | 实例 | VMware `D:\VMware\VMs\Ubuntu-MySQL-A3.vmx` @ `192.168.229.129` |
 | SSH | `ubuntu` / `123456` |
 | MySQL | `test` / `test123`（`test@'%'`，服务端 **8.4.11**） |
-| 库 | `mall_management_sql`，11 张表 |
+| 库 | `mall_management_sql`，**12 张表**（原记 11；B3 于 2026-09-29 追加 `order_state_transition`） |
 
 **S0-1 导入命令（定稿）**：
 
@@ -117,7 +117,7 @@ A3 的结论只有在「确实压到了目标环境」时才成立。故脚本�
 | P0 | 静态长度检查（**13 列**） | 逐列与**该列自己的上限**比对，只查长度，**不约束 runId 格式** | 门禁 |
 | P1 | 连通 + 库名 + 服务端版本 | `DATABASE()` 必须是 `mall_management_sql` **且** `VERSION()` 必须以 `8.4.` 开头 | **硬门禁** |
 | P2 | 主机串比对 | `--expect-db-host` 与 `jdbcUrl` 里的 host 字面量相等 | 门禁（不符即 `exit 2`） |
-| P3 | 表数量 | 11 张（兼作 TD-01 校验：`ddl-auto=update` 启动后未反向改表） | 门禁（库脏即拒） |
+| P3 | 表数量 | **12 张** = `11` + `timelineTable`（B3 的 `order_state_transition`）。原记只写「11 张」；**脚本本身是对的**（`ConcurrencyRunner:2518` 断言 `11 + timelineTable`），是**本表漏了 `+1`**（兼作 TD-01 校验：`ddl-auto=update` 启动后未反向改表） | 门禁（库脏即拒） |
 | P4 | 种子计数 | `order=6` / `goods=5` / `login=5` / `user=5` / `friend=4` | 门禁（库脏即拒） |
 | P5 | 就绪探测（`GET /health/db`） | 响应含 `"success":true`。该端点**永不被缓存**，故仍能同时证明 Web + DB（见下「2026-09-27 改版」） | 门禁：**超时是 FAIL，不是 skip** |
 | P6 | **库身份对比** | `GET /health/db` 报的 `@@server_uuid` == 脚本 JDBC 查到的；`hostname` 不一致只告警，`database`/`port`/`version` 只报告 | 门禁 |
@@ -185,8 +185,8 @@ A3 的结论只有在「确实压到了目标环境」时才成立。故脚本�
 
 | 断言 | 依据 |
 |---|---|
-| 无重复支付：并发对同一 `OrderId` 调 `orderPayIfUp`，恰好 1 次 `success:true`，其余返回「订单不存在或已付款」 | `concurrency-map.md` §3（`G:527` 条件 UPDATE `… AND PayIf = 0`，SQL 在 `G:530`） |
-| 无非法状态流转：未付款发货/收货、重复发货、已收货后发货 —— 全部被拒 | `concurrency-map.md` §3（`G:549`、`G:571` 的 WHERE 条件，SQL 在 `G:552`、`G:574`） |
+| 无重复支付：并发对同一 `OrderId` 调 `orderPayIfUp`，恰好 1 次 `success:true`，其余返回「订单不存在或已付款」 | `concurrency-map.md` §3（路由 `OrderController:100` → `OrderService.payIfUp:179`；条件 UPDATE 的 `WHERE … AND PayIf = 0` 由 `OrderStateMachine` 生成 —— 守卫 `:90-91`、整句 `updateSql():123-127`。**2026-10-02 实测**；原记 `G:527`/`G:530` 已失效） |
+| 无非法状态流转：未付款发货/收货、重复发货、已收货后发货 —— 全部被拒 | `concurrency-map.md` §3（`OrderService.receiveIfUp:185` / `deliveryIfUp:191`；两条守卫在 `OrderStateMachine:93-100`。**2026-10-02 实测**；原记 `G:549`/`G:571` 已失效） |
 
 > ⚠️ **A 组的前置条件：S3 / S4 必须自建订单**（F4）。`mall_management_sql.sql` 的 order 种子 6 行（Id 18–23）**全部为 `(1,1,1)` 终态**，而 `orderPayIfUp` 的 WHERE 是 `PayIf = 0` → 在种子订单上「恰好 1 次 `success:true`」**必然不成立**，会让 A 组第 1 条断言必败。修正对象是**支付 / 发货 / 收货**三处（即 S3 与 S4），**S2 不在此列** —— S2 只调 `orderAdd`，订单由被测端点自身创建，不存在「复用种子单」的问题（**上轮曾把 S2 一并写入，是笔误**）。
 >
@@ -339,7 +339,7 @@ A3 的结论只有在「确实压到了目标环境」时才成立。故脚本�
 | 4 | `[x]` | ~~B-1 —— `order.OrderId` **无唯一索引**（主键仅 `Id`）~~ → ✅ **2026-09-30 S1a 已加 UNIQUE `uk_order_orderId`**（`1e2fcfa`） | 原依据 `mall_management_sql.sql` order 建表语句。⚠️ 原文「pack **不得**写成『有唯一约束兜底』」**自 S1a 起反转** —— 现在 DB 层**确实**有唯一约束兜底（`A-S2a-1b` 断言的正是它） | §验收标准 B 组第 1 行（同日已同步翻转） |
 | 5 | `[x]` | 澄清 1 —— `--b-group-gate` 默认 `false`、**只影响 B-2**（B-1 恒门禁、B-3 恒 record-only）；verdict 枚举 `PASS` / `EXPECTED_DEFECT_PRESENT` / `DEFECT_FIXED` / `RECORD_ONLY`；`rounds`、`reproRounds` 由脚本自动统计，**「≥3/5」不做运行时门禁**（仅作人工翻默认值的准入条件） | 本会话 2026-09-20 裁决 | §判定口径（verdict）与门禁 |
 | 6 | `[x]` | 澄清 4 —— B 组子前缀是 `<round>`（1..5，**同轮内 20 线程共享**），**不是** `<seq>`；行序号才用 `-S<seq>` / `-N<seq>` | 若跨轮共用同参，第 2 轮起 `loginAdd` 直接走「已存在」分支，**不进并发窗口**，后 4 轮等于白跑 | §判定口径（verdict）与门禁 |
-| 7 | `[x]` | Q1=B / TD-13 —— 隔离策略必须写「**独立实例 + 同名库** `mall_management_sql`」，**不得**写成「切库名隔离」 | 硬编码前缀 39 处（Goods 23 + User 16 + Message 0），全部指向 `mall_management_sql` | §前置准备「目标环境」 |
+| 7 | `[x]` | Q1=B / TD-13 —— 隔离策略必须写「**独立实例 + 同名库** `mall_management_sql`」，**不得**写成「切库名隔离」 | 硬编码前缀 39 处（**2026-10-02 实测**：`UserController` 16 / goods 14 / order 9 / `MessageController` 0，散到 **7 个文件**；原记「Goods 23 + User 16」是重构前分布 —— goods 那 23 含订单端点 SQL 9 条），全部指向 `mall_management_sql`；口径见 `three-layers.md §F#1` | §前置准备「目标环境」 |
 | 8 | `[x]` | S0-3 —— 驱动路径由 **Maven 权威解析**（`dependency:build-classpath`），**不做 glob 猜测**；解析后**校验 jar major = 8** | 实测 `~/.m2/repository` 两个 groupId 下的真实状态：①**`pom.xml:57-61` 声明的坐标 `mysql:mysql-connector-java:8.0.33` 本地只有 `.pom`、没有 jar**（jar 因 relocation 落在 `com.mysql:mysql-connector-j:8.0.33`）；②按 `mysql/mysql-connector-java/*/*.jar` 去 glob，**唯一命中的是 `8.0.28`**（8.0.31/8.0.33 在该坐标下无 jar）→ 静默用上 8.0.28；③按 `com/mysql/**/*.jar` 去 glob 会同时命中 `8.0.31` 与 `8.0.33`，不排序则取到 8.0.31；④另有 3 个 `mysql/mysql-connector-j/8.0.33/*.lastUpdated` 失败标记（groupId 与 artifactId 混用导致的不存在坐标）。**结论：glob 猜测必然取错版本，必须走 Maven** | §约束（D3 单条路径） |
 | 9 | `[x]` | S0-5 —— 必须 `SELECT VERSION()` 确认服务端确为 8.4.x；兼容失败时的兜底写「脚本侧 `$A3_JDBC_DRIVER` + 后端 a3 profile 临时 classpath 覆盖」，**不得**写成改 `pom.xml` | 硬约束：不改 `pom.xml`；`environment.md` 已定 MySQL 8.4。**实测结果：服务端 `8.4.11-0ubuntu0.26.04.1`，驱动 8.0.33 连通，无需兜底** | §前置准备「启动验证（S0-5）」 |
 | 10 | `[x]` | 禁止并发 —— 必须写明「两个 A3 运行**绝不**可同时作用于同一实例」 | P0 的 `A3TEST-%` 清理与 P4 的种子计数互斥 | §命名空间与清理（末条） |

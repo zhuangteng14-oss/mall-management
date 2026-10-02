@@ -1,7 +1,9 @@
 # 项目地图 — Mall-management
 
-> **素材范围**：3 个 Controller 全文、`mall_management_sql.sql` 全部 CREATE TABLE、`pom.xml` 的 `<dependencies>` 段、`application.properties`、目录树（已排除 `node_modules`/`dist`/`target`）。
+> **素材范围（原始快照，2026-09-14）**：3 个 Controller 全文、`mall_management_sql.sql` 全部 CREATE TABLE、`pom.xml` 的 `<dependencies>` 段、`application.properties`、目录树（已排除 `node_modules`/`dist`/`target`）。
 > 前端源码、Service/Mapper 层**未读**。无证据处标「待确认」。
+>
+> ⚠️ **2026-10-02 现状**：上述范围**均已扩读**，本文件凡再出现「未读」「3 个 Controller」字样，一律指**上面那天**，不代表现状 —— 仓内现有 **5 个 Controller**（4 业务 + `HealthController`，见 §3 末与 `api-contract.md`）；前端 `src/` 与各 Service / Dao 层**均已读**，成果分别是 `api-contract.md §5`（前端调用矩阵，2026-09-30 关闭）与 §2 目录树 / `three-layers.md`。
 
 ## 1. 定位与技术栈
 
@@ -15,20 +17,20 @@
 | 数据访问 | `JdbcTemplate` 直接写裸 SQL 字符串（DAO 层用 `JdbcClient.create(JdbcTemplate)` 包一层） | ⚠️ **原记「3 个 Controller 均 `@Autowired JdbcTemplate`」现已不成立**：2026-10-02 时点，**订单与商品两域**的数据访问已分别收进 `OrderDao` / `GoodsDao`，两个 Controller 不再持有 `JdbcTemplate`；仍持有的只有 `MessageController`（`MessagejdbcTemplate`）与 `UserController`（`LoginjdbcTemplate`），另 `HealthController` 持有一个（探针用） |
 | 前端 | Vue 3 CLI 工程（Vue CLI 5 / webpack 5，`vue.config.js`、`babel.config.js`） | `package.json:12`（`vue: ^3.2.13`）、`:13`（`vue-router: ^4.6.4`，Vue Router 4 仅支持 Vue 3）、`:20`（`@vue/cli-service: ~5.0.0`） |
 
-依赖实测（`pom.xml:32-68`）：`spring-boot-starter`、`-jdbc`、`-data-jpa`、`-web`、`-test`、`mysql-connector-java:8.0.33`、`lombok:1.18.46`。
-**未引入**：Redis、Spring Cache、Caffeine、Redisson、AOP 增强包。
+依赖实测（`pom.xml:32-122`，`<dependencies>` 段现 **13 项**）：`spring-boot-starter`、`-jdbc`、`-data-jpa`、`-web`、`-test`、`mysql-connector-java:8.0.33`、`lombok:1.18.46`，外加 B1 / B2 引入的 `spring-boot-starter-cache`（`:72`）、`com.github.ben-manes.caffeine:caffeine`（`:78`）、`spring-boot-starter-data-redis`（`:84`）、`org.redisson:redisson`（`:119`）。
+**仍未引入**：仅剩「AOP 增强包」（`spring-boot-starter-aop`）。⚠️ 原记「**未引入**：Redis、Spring Cache、Caffeine、Redisson、AOP 增强包」—— **前四者已先后落地**（B1 自 2026-09-27 起，见 `context-packs/cache-layer.md`；Redisson 于 B2，见 `concurrency-map.md §1`），该行只剩末一项成立。
 
 ## 2. 目录结构
 
 ```
 期末项目/
-├── agent.md                                项目开发 Agent 规范（224 行）
+├── agent.md                                项目开发 Agent 规范（253 行）
 ├── mall_management_sql.sql                 12 张表 DDL + 种子数据（11 张原始 + B3 于 2026-09-29 追加的 order_state_transition）
 ├── scripts/concurrency/                    A3 并发测试脚本（任务上下文见 context-packs/concurrency-test.md）
-│   ├── ConcurrencyRunner.java              单文件：6 场景负载 + 断言 + preflight P0–P7 + JSON 报告（2270 行）
+│   ├── ConcurrencyRunner.java              单文件：8 段负载（S1 / S2a / S2b / S3 / S4a / S4b / B2 / C）+ 断言 + preflight P0–P7 + JSON 报告（2795 行）
 │   ├── run.sh                              两步编译（javac -encoding UTF-8 → java -cp）+ 驱动解析（Maven 回退）
 │   └── reports/                            运行日志与 JSON 报告（已 .gitignore，不入库）
-├── docs/agent/                             项目文档 9 份（含 db-migration.md、business-decisions.md），另有 context-packs/ 与 archive/
+├── docs/agent/                             项目文档 14 份（含 db-migration.md、business-decisions.md、ddd-package-plan.md、selection-status.md 等），另有 context-packs/ 与 archive/
 ├── .github/workflows/ci.yml                GitHub Actions CI（3 job：backend 全量测试 + frontend 构建 + concurrency 并发脚本）
 ├── Mall-management-server/                 Spring Boot 后端
 │   ├── pom.xml  mvnw  mvnw.cmd  HELP.md
@@ -48,10 +50,12 @@
 │       ├── test/java/com/minke/
 │       │   ├── MallManagementApplicationTests.java      全上下文冒烟 + 真查库（`A3_ENABLED=true` 才跑，见 TD-10）
 │       │   └── mallmanagement/smoke/
-│       │       ├── AbstractSmokeTest.java               smoke 基类（@WebMvcTest + 鉴权预留口子）
+│       │       ├── AbstractSmokeTest.java               smoke 基类（@WebMvcTest + 鉴权预留口子；自身无 @Test）
 │       │       ├── LoginSelectSmokeTest.java            /user/loginSelect（只读）
 │       │       ├── OrderPayIfUpSmokeTest.java           /order/orderPayIfUp（CAS 两分支）
-│       │       └── ImgMappingSmokeTest.java             /img/** 静态资源映射
+│       │       ├── ImgMappingSmokeTest.java             /img/** 静态资源映射
+│       │       ├── GoodsAddUploadFailSmokeTest.java     /goods/goodsAdd 落盘失败：显式 success:false 且不写库（TD-07 收尾；自带 @TestPropertySource 指到 pom.xml/nope-img/）
+│       │       └── PriceTripleFailSmokeTest.java        /goods/productCodePrice 响应契约：裸行 / null / 抛异常三态仍为 200 + {success:false}
 │       └── test/resources/application-smoke.properties  smoke profile 测试属性
 ├── Mall-management-web/
 │   ├── package.json                        外层空壳 npm 根，与内层重复
@@ -80,7 +84,7 @@
 
 ## 4. 前端结构
 
-Vue 3 CLI 工程，14 个页面视图 + 1 个组件 + 1 个路由表。页面按角色/场景划分（登录、首页、商品、购物车、订单中心、聊天、好友、用户信息等）。**路由与页面内部实现未读，待确认。**
+Vue 3 CLI 工程，14 个页面视图 + 1 个组件 + 1 个路由表。页面按角色/场景划分（登录、首页、商品、购物车、订单中心、聊天、好友、用户信息等）。**路由与页面内部实现已读**（2026-09-30，原记「未读，待确认」已关闭）—— 路由表 `router/index.js` 共 7 条路由（hash 模式），各页面的接口调用与参数拼装见 `api-contract.md §5`。
 
 `Mall-management-web/package.json` 与 `Mall-management-web/mall-management-system/package.json` 并存，前者疑为空壳，实际工程根为后者。
 
@@ -120,10 +124,12 @@ Vue 3 CLI 工程，14 个页面视图 + 1 个组件 + 1 个路由表。页面按
 注：后两行内层调用的 `getUserInfoById`（搬迁前 `M:341-380`）自身含 2 条 SQL（`M:342-344` 查 user，`M:360-361` / `M:364-365` 按 `usertype` 二选一查 `customerimage` / `merchantimage`），故每轮循环实际产生 2 条查询，复杂度为 **1 + 2N**。搬迁后该方法在 `FriendCacheService.userInfoById()`。
 
 > 2026-09-29 校正（两件，勿混淆）：① **上表后两行的 `M:` 坐标原记 `M:309-311` / `M:238-240`（`getUserInfoById` 原记 `M:330-369`、`M:331-333`、`M:349-350`、`M:353-354`），实测**四组各漂移 +11**——本表已换成搬迁前真实值 `M:320-322` / `M:249-251`。证据：以 `git show 549f74f:MallManagementMessage.java` 逐行核对（该 commit 即本笔改动前状态），非推算。② 同日起这两处的读路径**已搬到 `FriendCacheService`**（B1 缓存笔），Controller 只剩路由。⚠️ **缓存把 1 + 2N 摊薄为「每 TTL 一次」，是掩盖而非修复** —— 与 `cache-layer.md` §11 附 `goodsHome` 行同款注记；解 N+1 只能改 SQL（JOIN / IN 批量），仍归 `fix-n-plus-one`。
+>
+> ⚠️ **2026-10-02 订正：本条①的「四组各漂移 +11」结论已作废。** 以 `git show 549f74f` 逐锚点比对，漂移**不是任何单一常数** —— 同一文件内 `friendAdd` 方法头 **+18**、其查重 SELECT **+25**、`selectFriend` 方法头 **+33**、`getUserInfoById` 方法头 **+36**、`friendSelect` 方法头 **+45** 并存。成因是两个方向相反的改动叠加：B1 把两个读接口的方法体**搬走**（该减）、B2 给 `friendAdd` 外包 `runLocked` + 补注释（该增）。⇒ 凡引用这两族 `M:` 坐标，一律**读到即重测**，不做任何加减法换算。②（读路径已搬到 `FriendCacheService`）**不受影响**。详见 `cache-layer.md §11 ㊷`。
 
 > 2026-09-27 校正：`goodsSelectHome` 原记 `G:182-202`（内层 `G:188`）有误——`G:188` 是 `for` 循环头不是查询，循环体在 `G:208` 闭合。其余三行原记的循环范围无误。缓存选型侧的同名清单见 `cache-map.md §6`（两节职责不同，**重叠 4 行**：`goodsSelectHome` / `conversations` / `friendSelect` / `selectFriend`；原记「3 行」漏了 2026-09-27 才补进 `cache-map.md §6` 的 `selectFriend` —— 2026-09-29 订正，与 `cache-map.md §6` 同句同改）。
 
 ## 7. 未覆盖 / 待确认
 
-- 前端各页面的接口调用关系、状态管理（是否用 Vuex/Pinia）、14 个页面的实际路由路径 —— 前端源码未读。
-- ~~`ImgPath.java` / `ImgConfig.java` 的静态资源映射规则~~ **已关闭**：两者均为 `@Configuration`；`ImgPath implements WebMvcConfigurer`，在 `addResourceHandlers` 中把 `/img/**` 映射到 `app.upload-dir`，并由 `@PostConstruct` 用 `Files.createDirectories` 自动建目录；`ImgConfig` 仅注册全局 `CorsFilter`。实测 `@WebMvcTest` 可加载 `ImgPath`（A2 的 `ImgMappingSmokeTest` 依赖此行为）。证据：`ImgPath.java:15-16`、`:23-27`、`:30-35`；`ImgConfig.java:9-12`。
+- ~~前端各页面的接口调用关系、14 个页面的实际路由路径~~ **已关闭（2026-09-30）**：前端源码已读，接口矩阵见 `api-contract.md §5`；路由路径见 `src/router/index.js`（7 条）。仍未定：前端**未**引入 Vuex/Pinia（`package.json` 无依赖、`src/` 无 `store/`），状态靠各页面的 `sessionStorage` + 组件内 `ref`。
+- ~~`ImgPath.java` / `ImgConfig.java` 的静态资源映射规则~~ **已关闭**：两者均为 `@Configuration`；`ImgPath implements WebMvcConfigurer`，在 `addResourceHandlers` 中把 `/img/**` 映射到 `app.upload-dir`，并由 `@PostConstruct` 用 `Files.createDirectories` 自动建目录；`ImgConfig` 仅注册全局 `CorsFilter`。实测 `@WebMvcTest` 可加载 `ImgPath`（A2 的 `ImgMappingSmokeTest` 依赖此行为）。证据：`ImgPath.java:17`（`@Value` 读 `app.upload-dir`）、`:45-64`（`@PostConstruct initUploadDir()`，含 `Files.createDirectories`）、`:66-80`（`addResourceHandlers`，`:78` 为 `registry.addResourceHandler("/img/**")`）；`ImgConfig.java:9-12`。（**2026-10-02 实测**；原记 `:15-16` / `:23-27` / `:30-35` 已失效 —— `ImgPath` 于按域分层后从 `mallmanagement_server` 挪进 `shared/upload/` 并补了大段注释。）
