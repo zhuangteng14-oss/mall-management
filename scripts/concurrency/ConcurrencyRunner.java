@@ -1396,8 +1396,8 @@ public class ConcurrencyRunner {
         Map<String, String> login = form("username", "123", "password", "123456");
         Load ld = paced(o.qps, o.qps * o.durationSec,
                 i -> (i & 1) == 0
-                        ? call("goodstype", send(HTTP, o.baseUrl + "/mysqlGoods/goodstype", null))
-                        : call("loginSelect", send(HTTP, o.baseUrl + "/mysqlLogin/loginSelect", login)),
+                        ? call("goodstype", send(HTTP, o.baseUrl + "/goods/goodstype", null))
+                        : call("loginSelect", send(HTTP, o.baseUrl + "/user/loginSelect", login)),
                 (i, r) -> r.code == 200 && ((i & 1) == 0
                         ? r.successTrue()
                         : r.body != null && "1".equals(r.body.trim())));
@@ -1438,7 +1438,7 @@ public class ConcurrencyRunner {
         // 1a 的读数窗口：burst 前后各读一次（沿用 lockDelta 的「每场景前后增量」形状）。
         // 场景是顺序执行的（runScenarios 一串 if），且 S2a 排在 S4b / B2 / C 之前 ⇒ 窗口内只有本 burst。
         double b = lockAcquires(o, "order-add", "acquired");
-        List<Call> cs = burst(20, i -> call("orderAdd", send(HTTP, o.baseUrl + "/mysqlGoods/orderAdd", f)));
+        List<Call> cs = burst(20, i -> call("orderAdd", send(HTTP, o.baseUrl + "/order/orderAdd", f)));
         double af = lockAcquires(o, "order-add", "acquired");
 
         int succ = countSuccess(cs);
@@ -1491,7 +1491,7 @@ public class ConcurrencyRunner {
         Ass a1 = ass("A-S2b-1", "success:true 比率 == 100%，无 5xx", true);
         Ass a2 = ass("A-S2b-2", "JDBC count(OrderId LIKE '<ns>-N%') == 成功响应数", true);
         Load ld = paced(o.qps, o.qps * o.durationSec,
-                i -> call("orderAdd", send(HTTP, o.baseUrl + "/mysqlGoods/orderAdd",
+                i -> call("orderAdd", send(HTTP, o.baseUrl + "/order/orderAdd",
                         orderForm(ns() + "-N" + i, 0, 0, 0))),
                 (i, r) -> r.successTrue());
         int rows = jdbcCount(o, "SELECT COUNT(*) FROM mall_management_sql.`order` WHERE OrderId LIKE ?",
@@ -1522,7 +1522,7 @@ public class ConcurrencyRunner {
         int preBuilt = 0;
         for (int i = 0; i < S3_M; i++) {
             String id = ns() + "-P" + i;
-            Resp r = send(HTTP, o.baseUrl + "/mysqlGoods/orderAdd", orderForm(id, 0, 0, 0));
+            Resp r = send(HTTP, o.baseUrl + "/order/orderAdd", orderForm(id, 0, 0, 0));
             if (r.successTrue()) {
                 preBuilt++;
             } else {
@@ -1538,7 +1538,7 @@ public class ConcurrencyRunner {
         StringBuilder per = new StringBuilder();
         for (String id : ids) {
             final Map<String, String> f = form("orderId", id);
-            List<Call> cs = burst(S3_T, i -> call("orderPayIfUp", send(HTTP, o.baseUrl + "/mysqlGoods/orderPayIfUp", f)));
+            List<Call> cs = burst(S3_T, i -> call("orderPayIfUp", send(HTTP, o.baseUrl + "/order/orderPayIfUp", f)));
             int s = countSuccess(cs);
             int m = countMsg(cs, "订单不存在或已付款");
             totalSucc += s;
@@ -1591,7 +1591,7 @@ public class ConcurrencyRunner {
         for (int k = 0; k < keys.length; k++) {
             String id = ns() + "-S4a" + keys[k];
             idOf.put(keys[k], id);
-            Resp r = send(HTTP, o.baseUrl + "/mysqlGoods/orderAdd",
+            Resp r = send(HTTP, o.baseUrl + "/order/orderAdd",
                     orderForm(id, flags[k][0], flags[k][1], flags[k][2]));
             forged.append(keys[k]).append('=').append(r.successTrue() ? "ok" : trunc(r.body)).append(' ');
         }
@@ -1599,31 +1599,31 @@ public class ConcurrencyRunner {
         String dlyMsg = "订单不存在或未付款或已发货/已收货";
         String rcvMsg = "订单未付款或已收货";
 
-        List<Call> c1 = burst(20, i -> call("dly-U", send(HTTP, o.baseUrl + "/mysqlGoods/orderDeliveryIfUp", form("orderId", idOf.get("U")))));
+        List<Call> c1 = burst(20, i -> call("dly-U", send(HTTP, o.baseUrl + "/order/orderDeliveryIfUp", form("orderId", idOf.get("U")))));
         settle(a1, countSuccess(c1) == 0 && countMsg(c1, dlyMsg) == 20, "succ=" + countSuccess(c1) + " msg 命中=" + countMsg(c1, dlyMsg));
 
-        List<Call> c2 = burst(20, i -> call("dly-P", send(HTTP, o.baseUrl + "/mysqlGoods/orderDeliveryIfUp", form("orderId", idOf.get("P")))));
+        List<Call> c2 = burst(20, i -> call("dly-P", send(HTTP, o.baseUrl + "/order/orderDeliveryIfUp", form("orderId", idOf.get("P")))));
         settle(a2, countSuccess(c2) == 1, "succ=" + countSuccess(c2));
 
-        List<Call> c3 = burst(20, i -> call("dly-PDR", send(HTTP, o.baseUrl + "/mysqlGoods/orderDeliveryIfUp", form("orderId", idOf.get("PDR")))));
+        List<Call> c3 = burst(20, i -> call("dly-PDR", send(HTTP, o.baseUrl + "/order/orderDeliveryIfUp", form("orderId", idOf.get("PDR")))));
         settle(a3, countSuccess(c3) == 0, "succ=" + countSuccess(c3));
 
-        List<Call> c4 = burst(20, i -> call("rcv-U", send(HTTP, o.baseUrl + "/mysqlGoods/orderReceiveIfUp", form("orderId", idOf.get("U")))));
+        List<Call> c4 = burst(20, i -> call("rcv-U", send(HTTP, o.baseUrl + "/order/orderReceiveIfUp", form("orderId", idOf.get("U")))));
         settle(a4, countSuccess(c4) == 0 && countMsg(c4, rcvMsg) == 20, "succ=" + countSuccess(c4) + " msg 命中=" + countMsg(c4, rcvMsg));
 
-        List<Call> c5 = burst(20, i -> call("rcv-PR", send(HTTP, o.baseUrl + "/mysqlGoods/orderReceiveIfUp", form("orderId", idOf.get("PR")))));
+        List<Call> c5 = burst(20, i -> call("rcv-PR", send(HTTP, o.baseUrl + "/order/orderReceiveIfUp", form("orderId", idOf.get("PR")))));
         settle(a5, countSuccess(c5) == 0, "succ=" + countSuccess(c5));
 
-        List<Call> c6 = burst(20, i -> call("rcv-PD", send(HTTP, o.baseUrl + "/mysqlGoods/orderReceiveIfUp", form("orderId", idOf.get("PD")))));
+        List<Call> c6 = burst(20, i -> call("rcv-PD", send(HTTP, o.baseUrl + "/order/orderReceiveIfUp", form("orderId", idOf.get("PD")))));
         settle(a6, countSuccess(c6) == 1, "succ=" + countSuccess(c6));
 
         // A-S4a-7：同一未付款单上 pay 与 delivery 同时释放。delivery 的 WHERE 要求 PayIf=1，
         // 故它最多在 pay 提交之后成功一次；不变式 NOT(DeliveryIf=1 AND PayIf=0) 是此项的真正判据。
         String raceId = ns() + "-S4aRACE";
-        Resp rr = send(HTTP, o.baseUrl + "/mysqlGoods/orderAdd", orderForm(raceId, 0, 0, 0));
+        Resp rr = send(HTTP, o.baseUrl + "/order/orderAdd", orderForm(raceId, 0, 0, 0));
         final Map<String, String> payF = form("orderId", raceId);
         List<Call> c7 = burst(40, i -> call(i % 2 == 0 ? "pay-race" : "dly-race",
-                send(HTTP, o.baseUrl + (i % 2 == 0 ? "/mysqlGoods/orderPayIfUp" : "/mysqlGoods/orderDeliveryIfUp"),
+                send(HTTP, o.baseUrl + (i % 2 == 0 ? "/order/orderPayIfUp" : "/order/orderDeliveryIfUp"),
                         payF)));
         int paySucc = 0;
         int dlySucc = 0;
@@ -1697,22 +1697,22 @@ public class ConcurrencyRunner {
         Load ld = paced(qps, total, i -> {
             int slot = i % 20;
             if (slot < 8) {
-                return call("orderAdd", send(HTTP, o.baseUrl + "/mysqlGoods/orderAdd",
+                return call("orderAdd", send(HTTP, o.baseUrl + "/order/orderAdd",
                         orderForm(ns() + "-S4bN" + iA.getAndIncrement(), 0, 0, 0)));
             }
             if (slot < 12) {
-                return call("orderPayIfUp", send(HTTP, o.baseUrl + "/mysqlGoods/orderPayIfUp",
+                return call("orderPayIfUp", send(HTTP, o.baseUrl + "/order/orderPayIfUp",
                         form("orderId", ns() + "-S4bPay" + iP.getAndIncrement())));
             }
             if (slot < 15) {
-                return call("orderDeliveryIfUp", send(HTTP, o.baseUrl + "/mysqlGoods/orderDeliveryIfUp",
+                return call("orderDeliveryIfUp", send(HTTP, o.baseUrl + "/order/orderDeliveryIfUp",
                         form("orderId", ns() + "-S4bDlv" + iD.getAndIncrement())));
             }
             if (slot < 18) {
-                return call("orderReceiveIfUp", send(HTTP, o.baseUrl + "/mysqlGoods/orderReceiveIfUp",
+                return call("orderReceiveIfUp", send(HTTP, o.baseUrl + "/order/orderReceiveIfUp",
                         form("orderId", ns() + "-S4bRcv" + iR.getAndIncrement())));
             }
-            return call("goodstype", send(HTTP, o.baseUrl + "/mysqlGoods/goodstype", null));
+            return call("goodstype", send(HTTP, o.baseUrl + "/goods/goodstype", null));
         }, (i, r) -> r.code == 200 && r.successTrue());
 
         settle(a1, ld.http5xx.sum() == 0 && ld.connErr.sum() == 0,
@@ -1839,7 +1839,7 @@ public class ConcurrencyRunner {
         for (String bits : C_BITS) {
             String id = pre + bits;
             idOfBits.put(bits, id);
-            Resp r = send(HTTP, o.baseUrl + "/mysqlGoods/orderAdd",
+            Resp r = send(HTTP, o.baseUrl + "/order/orderAdd",
                     orderForm(id, bits.charAt(0) - '0', bits.charAt(1) - '0', bits.charAt(2) - '0'));
             if (r.successTrue()) {
                 addOk++;
@@ -1852,13 +1852,13 @@ public class ConcurrencyRunner {
         String paid = idOfBits.get("100");     // 已付款：PAY 必被拒
         String pr = idOfBits.get("101");       // 已收货：DELIVER 与 RECEIVE 必被拒
 
-        int chainPay = burstSuccess(o, "C-pay", "/mysqlGoods/orderPayIfUp", chain);
-        int chainDly = burstSuccess(o, "C-dly", "/mysqlGoods/orderDeliveryIfUp", chain);
-        int chainRcv = burstSuccess(o, "C-rcv", "/mysqlGoods/orderReceiveIfUp", chain);
-        int forgedPay = burstSuccess(o, "C-forgedPay", "/mysqlGoods/orderPayIfUp", forged);
-        int paidAgain = burstSuccess(o, "C-paidAgain", "/mysqlGoods/orderPayIfUp", paid);
-        int prDly = burstSuccess(o, "C-prDly", "/mysqlGoods/orderDeliveryIfUp", pr);
-        int prRcv = burstSuccess(o, "C-prRcv", "/mysqlGoods/orderReceiveIfUp", pr);
+        int chainPay = burstSuccess(o, "C-pay", "/order/orderPayIfUp", chain);
+        int chainDly = burstSuccess(o, "C-dly", "/order/orderDeliveryIfUp", chain);
+        int chainRcv = burstSuccess(o, "C-rcv", "/order/orderReceiveIfUp", chain);
+        int forgedPay = burstSuccess(o, "C-forgedPay", "/order/orderPayIfUp", forged);
+        int paidAgain = burstSuccess(o, "C-paidAgain", "/order/orderPayIfUp", paid);
+        int prDly = burstSuccess(o, "C-prDly", "/order/orderDeliveryIfUp", pr);
+        int prRcv = burstSuccess(o, "C-prRcv", "/order/orderReceiveIfUp", pr);
 
         int payOk = chainPay + forgedPay;
         int dlyOk = chainDly;
@@ -2123,11 +2123,11 @@ public class ConcurrencyRunner {
      * B-2：三处 check-then-insert（TOCTOU），各跑 o.rounds 轮（默认 5，H3 澄清 1 的 B 组轮数）。
      *
      * 三处端点的**表约束不同，故缺陷形态不同** —— 这是本场景的要点，不是细节：
-     *   · /mysqlLogin/loginAdd → 写 login / user / customerimage，三表**均有主键**
+     *   · /user/loginAdd → 写 login / user / customerimage，三表**均有主键**
      *     （login.UserName、user.username、customerimage.UserName）。所以并发同参**插不出重复行**：
      *     check 与 insert 之间无锁 → 20 个请求全部穿过 check → 主键把第 2 个起的 INSERT 挡成
      *     ERROR 1062 → 未捕获 → Spring 默认 500。**信号是 5xx，不是重复行。**
-     *   · /mysqlGoods/goodstype（POST）→ 写 goodstype，只有自增主键 → **能插出重复行**。
+     *   · /goods/goodstype（POST）→ 写 goodstype，只有自增主键 → **能插出重复行**。
      *   · /message/friendAdd → 写 friend，只有自增主键 → **能插出重复行**。
      *
      * 因此本轮 verdict 取「三处任一出现信号」：5xx>0 或任一表重复行≥2。
@@ -2153,7 +2153,7 @@ public class ConcurrencyRunner {
             String fB = pre + "-F" + r + "-B";
 
             // ---- 1) loginAdd 同 username ×20 ----
-            List<Call> a = burst(TH, i -> call("loginAdd", send(HTTP, o.baseUrl + "/mysqlLogin/loginAdd",
+            List<Call> a = burst(TH, i -> call("loginAdd", send(HTTP, o.baseUrl + "/user/loginAdd",
                     form("username", u, "usertype", "客户", "userid", u,
                          "password", "a3pass", "age", 20, "gender", "男"))));
             b.login5xx = count5xx(a);
@@ -2175,7 +2175,7 @@ public class ConcurrencyRunner {
             }
 
             // ---- 2) goodstype 同 GoodType ×20（GoodTypeNew 必须给：列是 NOT NULL，缺参会 NULL→失败）----
-            List<Call> g = burst(TH, i -> call("goodstype", send(HTTP, o.baseUrl + "/mysqlGoods/goodstype",
+            List<Call> g = burst(TH, i -> call("goodstype", send(HTTP, o.baseUrl + "/goods/goodstype",
                     form("GoodType", gt, "GoodTypeNew", 229121))));
             b.gtOk = countMsg(g, "新增成功");
             int gtRows = jdbcCount(o, "SELECT COUNT(*) FROM mall_management_sql.goodstype WHERE GoodType = ?", gt);
@@ -2559,7 +2559,7 @@ public class ConcurrencyRunner {
      *
      * 【2026-09-27 整体改版：从「哨兵往返」到「库身份对比」】
      * 原 P5/P6 共享一个前提：「HTTP 读回来的内容 == 库里的内容」。B1 给
-     * GET /mysqlGoods/goodstype 加缓存后该前提破裂，两条断言同时受伤：
+     * GET /goods/goodstype 加缓存后该前提破裂，两条断言同时受伤：
      *   - P5 缓存命中时一次 DB 都不碰 → 退化成「Web 就绪」，Hikari 挂了也能绿（静默）；
      *   - P6 裸 JDBC 直写哨兵行再经 HTTP 读回 → 缓存返回填充时刻的旧列表 →
      *     哨兵行必然读不到 → 结构性 FAIL（重跑多少次都一样，非偶发）。
