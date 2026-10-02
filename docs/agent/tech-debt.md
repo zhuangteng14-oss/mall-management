@@ -1,7 +1,7 @@
 # 技术债清单 — Mall-management
 
 > 本文件只收录**技术层面**的建议与欠账，不收表结构事实、不收业务决策。
-> 相关文档：表结构事实 → `db-schema.md`；业务待裁决 → `business-decisions.md`；并发问题与改造优先级 → `concurrency-map.md` §7；缓存 → `cache-map.md`。
+> 相关文档：表结构事实 → `db-schema.md`；业务待裁决 → `business-decisions.md`；并发问题与改造优先级 → `concurrency-map.md` §7；缓存 → `cache-map.md`。⚠️ **口径注**：本文所有 `:<行>` 为 **2026-10-02 实测**；重构后须重测。用户域旧 `U:<n>` 仅保留在明确标注为「修复前 / 原记」的历史行。
 
 ## TD-01 移除未使用的 `spring-boot-starter-data-jpa` 依赖
 
@@ -59,7 +59,7 @@
 | 项 | 内容 |
 |---|---|
 | 现状 | `ImgConfig.java` 注册全局 `CorsFilter`（`addAllowedOriginPattern("*")`），同时 **5 个** Controller 各自标注 `@CrossOrigin` |
-| 证据 | `ImgConfig:11-22`（全局 `CorsFilter`）；**5 处**类级 `@CrossOrigin`：`GoodsController:38` / `OrderController:24` / `UserController:20` / `MessageController:18` / `HealthController:37`（**2026-10-02 实测**；原记「3 个 Controller」，订单拆出后新增 `OrderController:24` 一处） |
+| 证据 | `ImgConfig:11-22`（全局 `CorsFilter`）；**5 处**类级 `@CrossOrigin`：`GoodsController:38` / `OrderController:24` / `UserController:42` / `MessageController:44` / `HealthController:37`（**2026-10-03 实测**；原记「3 个 Controller」，订单拆出后新增 `OrderController:24` 一处；用户域 `:20` → `:42` 是三层第三笔 `0c07e96` 重写 `UserController` 所致；消息域 `:18` → `:44` 是三层第四笔 `8ed5fc1` 重写 `MessageController` 所致） |
 | 问题 | ① 全局 CORS 与局部 CORS 重复配置；② `allowedOriginPattern("*")` + `allowCredentials(true)` 组合在生产环境有安全风险 |
 | 建议 | 保留全局 `CorsFilter`，移除 **5 个** Controller 的 `@CrossOrigin`；生产环境将 `allowedOriginPattern` 收敛为具体域名 |
 | 优先级 | 中 |
@@ -69,7 +69,7 @@
 
 | 项 | 内容 |
 |---|---|
-| 现状 | **修复前行号**：`ImgPath.java:13`、`U:166`、`G:82`、`G:283`。修复后上述坐标已失效。⚠️ **2026-10-02 复测（原记的「现对应」也已再漂）**：三处 `Paths.get(uploadDir)` 现址 **`UserController:185`**（原记 `U:172`）、**`GoodsService:96`**（原记 `G:88`）、**`GoodsService:265`**（原记 `G:289`）；`ImgPath` 的路径拼接已被 `@Value` 注入 + `Paths.get(uploadDir)` 取代（见 **`ImgPath.java:17`** 的 `@Value`、**`:48`** 的 `Paths.get` / **`:49`** 的 `Files.createDirectories`；原记 `:18` / `:25`）。原写法：`System.getProperty("user.dir") + "\src\main\resources\static\img\"` |
+| 现状 | **修复前行号**：`ImgPath.java:13`、`U:166`、`G:82`、`G:283`。修复后上述坐标已失效。⚠️ **2026-10-02 复测（原记的「现对应」也已再漂）**：三处 `Paths.get(uploadDir)` 现址 **`UserService.updateAvatar:246`**（原记 `U:172`；2026-10-02 三层第三笔前为 `UserController:185`，现已随方法体下沉）、**`GoodsService:96`**（原记 `G:88`）、**`GoodsService:265`**（原记 `G:289`）；`ImgPath` 的路径拼接已被 `@Value` 注入 + `Paths.get(uploadDir)` 取代（见 **`ImgPath.java:17`** 的 `@Value`、**`:48`** 的 `Paths.get` / **`:49`** 的 `Files.createDirectories`；原记 `:18` / `:25`）。原写法：`System.getProperty("user.dir") + "\src\main\resources\static\img\"` |
 | 问题 | 开发期 `user.dir` = 项目根，路径有效；打成 jar 后 `user.dir` = 运行目录，`src/main/resources/static/img/` 不存在 |
 | 影响 | ① 图片上传失败 ② `/img/**` 映射失效 ③ 部署到生产环境或换机运行立即暴露 |
 | 建议 | 改为可配置路径（`application.properties` 配 `app.upload-dir`），或改用 `classpath:/static/img/` + 外部上传目录分离 |
@@ -82,8 +82,8 @@
 
 | 项 | 内容 |
 |---|---|
-| 现状 | `U:192`、`G:111`、`G:300` 三处硬编码 `"http://localhost:8088/img/" + 文件名`。⚠️ **2026-10-02 复测：三处现址** `UserController:205` / `GoodsService:120`（`goodsAdd`）/ `GoodsService:283`（`goodsUp`），`U:192` / `G:111` / `G:300` 均已失效 |
-| 口径补充（2026-09-20） | **本 TD 以「生成落库 URL」口径 = 3 处为准**（`U:192`、`G:111`、`G:300`，即上式；现址见上栏）。另按「出现 `localhost:8088` **字面量**」口径为 **4 处**：多出 `U:55` 的 `@RequestParam(value = "image", defaultValue = "http://localhost:8088/img/default_user.png")`（入参默认值，非生成 URL，但同属换机即失效的硬编码；**2026-10-02 复测仍在，现址 `UserController:59`**）。**修复时需一并处理该处** —— 只改这 3 处则修复不完整，下方「改一处必漏两处」实际是**漏三处** |
+| 现状 | `U:192`、`G:111`、`G:300` 三处硬编码 `"http://localhost:8088/img/" + 文件名`。⚠️ **2026-10-02 复测：三处现址** `UserService.updateAvatar:266` / `GoodsService:120`（`goodsAdd`）/ `GoodsService:283`（`goodsUp`），`U:192` / `G:111` / `G:300` 均已失效（用户域那处：`U:192` → 三层第二笔前 `UserController:205` → 第三笔后 `UserService.updateAvatar:266`） |
+| 口径补充（2026-09-20） | **本 TD 以「生成落库 URL」口径 = 3 处为准**（`U:192`、`G:111`、`G:300`，即上式；现址见上栏）。另按「出现 `localhost:8088` **字面量**」口径为 **4 处**：多出 `U:55` 的 `@RequestParam(value = "image", defaultValue = "http://localhost:8088/img/default_user.png")`（入参默认值，非生成 URL，但同属换机即失效的硬编码；**2026-10-02 复测仍在，现址 `UserController.loginAdd:63`**）。**修复时需一并处理该处** —— 只改这 3 处则修复不完整，下方「改一处必漏两处」实际是**漏三处** |
 | 问题 | 换机、容器化、走反向代理或改端口后，落库的 URL 全部不可用；且前缀散落三处，改一处必漏两处 |
 | 建议 | 外置为 `app.upload-url-prefix`，三处统一注入 |
 | 优先级 | 中 |
@@ -95,7 +95,7 @@
 |---|---|
 | 现状 | ~~`U:187-190` 与 `G:102-108` 用 `catch (Exception)` 捕获后仅 `System.out.println`，接口仍返回 `success:true`~~ ✅ **已修复（A 批 `efe7959`）**：三处上传点统一为**写库之前**返回 `{success:false, msg}` —— 站点① `goodsAdd` / ② `updateAvatar` 原为吞异常继续写库，站点③ `goodsUp` 原为异常冒泡（500），现三处行为一致，不再有 500 也不再有静默脏数据 |
 | 问题 | ~~目录不可写、磁盘满、路径不存在时，用户看到「上传成功」但文件未落盘，故障极难定位。**注意 `G:296-298`（`goodsUp`，现址 `GoodsService:273-281`）未加 catch，异常会向上抛**——三处上传点行为不一致~~ **（已随上条修复：三处行为一致，均为写库前显式失败）** |
-| 补充（2026-09-20） | **异常消息把失败原因归错了**：两处 catch 都打印「已存在」。`G:106-108`（现址 `GoodsService:110-117`）→ `System.out.println("商品图片已存在，继续上架")`；`U:187-190`（现址 `UserController:196-203`）→ 注释「就算保存失败，也不崩溃！」+ `System.out.println("文件已存在，继续更新头像")`。但真正的「已存在」已被紧邻上方的 `if (!saveFile.exists())` 拦下，**根本不会进 catch** —— 故 catch 分支里的「已存在」归因**几乎总是错的**（磁盘满 / 目录不可写 / 路径非法一律被说成「已存在」），排查方向被彻底带偏。属「结果对、归因错」在生产代码中的实例，与 TD-02 的错误类型同源<br>**2026-09-30 补**：修复后 catch 分支不再打印「已存在」，改为「商品图片保存失败」/「头像保存失败」+ `printStackTrace()`。⚠️ **仍然没修**的是日志本身 —— `printStackTrace` + 无 logger 级属**病 D**（`defect-survey.md` 病 D「`printStackTrace()` × 20」行），不在本笔范围 |
+| 补充（2026-09-20） | **异常消息把失败原因归错了**：两处 catch 都打印「已存在」。`G:106-108`（现址 `GoodsService:110-117`）→ `System.out.println("商品图片已存在，继续上架")`；`U:187-190`（现址 `UserService.updateAvatar:257-264`）→ 注释「就算保存失败，也不崩溃！」+ `System.out.println("文件已存在，继续更新头像")`。但真正的「已存在」已被紧邻上方的 `if (!saveFile.exists())` 拦下，**根本不会进 catch** —— 故 catch 分支里的「已存在」归因**几乎总是错的**（磁盘满 / 目录不可写 / 路径非法一律被说成「已存在」），排查方向被彻底带偏。属「结果对、归因错」在生产代码中的实例，与 TD-02 的错误类型同源<br>**2026-09-30 补**：修复后 catch 分支不再打印「已存在」，改为「商品图片保存失败」/「头像保存失败」+ `printStackTrace()`。⚠️ **仍然没修**的是日志本身 —— `printStackTrace` + 无 logger 级属**病 D**（`defect-survey.md` 病 D「`printStackTrace()` × 20」行），不在本笔范围 |
 | 建议 | 捕获后返回 `success:false` + 明确 `msg`，或至少改为 ERROR 级日志 |
 | 优先级 | 中 |
 | 状态 | ✅ **已修复（A 批 `efe7959`）**；残留：异常日志仍为 `printStackTrace`（归病 D） |
@@ -160,7 +160,7 @@
 
 | 项 | 内容 |
 |---|---|
-| 现状 | SQL 硬编码 schema 限定名 `mall_management_sql.` **39 处**（2026-10-02 逐处复核；口径 = **SQL 字面量**），已散到 **7 个文件**：`UserController` 16 / **goods 14** = `GoodsDao` 6 + `GoodsCacheService` 5 + `GoodsTypeCacheService` 3 / **order 9** = `OrderDao` 7 + `OrderStateMachine` 1 + `OrderTimelineWriter` 1；`MessageController` **0 处**（SQL 不带前缀）。⚠️ **总数与原记的 39 相等、分布全变**：开题时集中在 2 个 Controller（`git show 9b87ab9` 实测 = Goods 23 + User 16），而 goods 那份 23 里含**订单端点的 SQL 9 条** ⇒ 订单笔拆出后 **23 = goods 14 + order 9**，文件数 **2 → 7**。⚠️ 本行曾一度记为 **45 处** —— 那是**口径混用**：`GoodsDao` 按字面量取 6，`OrderDao` / `OrderStateMachine` / `OrderTimelineWriter` 却把 javadoc / 注释里的提及一并数了进去。改用统一口径 `grep -o "mall_management_sql\."` 连注释数得 **46 处**（多出的 7 处全在注释行：`OrderDao:22/25/26`、`GoodsDao:33`、`OrderStateMachine:113`、`OrderTimelineWriter:45/56`）。逐处分类见 `three-layers.md §F#1`。各 Controller / DAO 共用自动装配的 `JdbcTemplate` Bean，差异只在 SQL 字符串 |
+| 现状 | SQL 硬编码 schema 限定名 `mall_management_sql.` **39 处**（2026-10-02 逐处复核；口径 = **SQL 字面量**），已散到 **7 个文件**：`UserDao` 16 / **goods 14** = `GoodsDao` 6 + `GoodsCacheService` 5 + `GoodsTypeCacheService` 3 / **order 9** = `OrderDao` 7 + `OrderStateMachine` 1 + `OrderTimelineWriter` 1；`MessageDao` **0 处**（2026-10-03 三层第四笔 `8ed5fc1` 后口径修正：原记 `MessageController` 0 处 —— 本域 SQL 已全数下沉 `MessageDao`，该文件**仍 0 处**；本笔把原先逐字相同的一对 SQL 合并，**39 口径总数不变**）。⚠️ **总数与原记的 39 相等、分布全变**：开题时集中在 2 个 Controller（`git show 9b87ab9` 实测 = Goods 23 + User 16），而 goods 那份 23 里含**订单端点的 SQL 9 条** ⇒ 订单笔拆出后 **23 = goods 14 + order 9**，文件数 **2 → 7**。⚠️ 本行曾一度记为 **45 处** —— 那是**口径混用**：`GoodsDao` 按字面量取 6，`OrderDao` / `OrderStateMachine` / `OrderTimelineWriter` 却把 javadoc / 注释里的提及一并数了进去。改用统一口径 `grep -o "mall_management_sql\."` 连注释数得 **50 处**（2026-10-03 实测；多出的 **11 处**全在注释行：`OrderDao:22/25/26`、`GoodsDao:33`、`OrderStateMachine:113`、`OrderTimelineWriter:45/56`、`UserDao:20/31`、`MessageDao:36/225` —— 后两项用户域 +2 系三层第三笔 `0c07e96` 新写 `UserDao` 类 javadoc 引入，消息域 +2 系本笔新写 `MessageDao` 类 javadoc 引入；原记「46 处 / 7 处注释」漏记了这 4 处）。逐处分类见 `three-layers.md §F#1`。各 Controller / DAO 共用自动装配的 `JdbcTemplate` Bean，差异只在 SQL 字符串 |
 | 问题 | 切换 `spring.datasource.url` **无法**把 `/goods/*`、`/order/*`、`/user/*` 的读写切到其他库——服务连上测试库，SQL 仍定向到 `mall_management_sql`。又因 `/message/*` 不带前缀，同一进程内会**脑裂**：`/message` 的写入跟随 datasource，`/goods`、`/order`、`/user` 的写入留在 `mall_management_sql` |
 | 实测触发 | A3 前置准备按 context-pack 建 `mall_management_test` 并导入成功后，隔离对 `/goods`、`/order`、`/user` 实际无效。`orderAdd` 压测数据会落入开发库，而 `order` 表无删除接口，HTTP 层无法清理 |
 | 影响 | ① 一切依赖「切库做隔离测试」的方案失效；② 压测/集成测试污染开发库；③ 多实例部署时无法让实例指向不同库 |

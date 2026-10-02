@@ -3,7 +3,7 @@
 > **本文只查现状、只归类，不做任何实现。**
 > 证据来源：`agent.md:142-173`、`Mall-management-server/pom.xml`、`src/main/java` 实读、`git log`。
 > 核查日期：2026-09-30（B3 合并后，`origin/main` = `148e77b`；**本笔修订时** `origin/main` = `2cc2338` —— **§6 为本次新增**，§1–§5 仍是 `148e77b` 的截面）。
-> 档位：`亲读` = 逐行读过；`亲读(pom)` = grep 计数；`推断` = 由亲读证据链推导。
+> 档位：`亲读` = 逐行读过；`亲读(pom)` = grep 计数；`推断` = 由亲读证据链推导。⚠️ **口径注**：本文所有 `:<行>` 为 **2026-10-02 实测**；重构后须重测。用户域旧 `U:<n>` / `UserController:<n>` 为三层前 264 行版 `UserController` 的历史坐标（2026-10-02 第三笔 `0c07e96` 后已重指）。
 
 ---
 
@@ -35,7 +35,7 @@
 | **雪崩**：随机 TTL + 多级缓存 + Resilience4j 限流 | 部分 | 多级缓存 ✅；**随机 TTL ❌**（B1 明确不做，触发条件 = 某缓存族 key 数 > ~10）；**Resilience4j ❌** |
 | **穿透**：空值缓存 + 布隆过滤器 + 参数校验 | 部分 | 空值缓存 ✅（`549f74f` 首个负缓存，`userSelect`）；**布隆过滤器 ❌**；**参数校验 ❌**（无 validation 依赖，全仓 `@Valid` = 0） |
 | **分布式锁**：Redisson `tryLock(wait,lease)` + finally `isHeldByCurrentThread` | ✅ | B2；`tryLock` **真实调用 1 处**（`DistributedLockService:249` 的 `lock.tryLock(wait, lease, MILLISECONDS)`）。⚠️ **2026-10-02 实测订正**：原记「4 处实命中」是把 `LockSceneService` 里**注释提到 `tryLock`** 的 3 行（`:57` / `:268` / `:269`）一并数了进去。⚠️ 但取锁超时 / Redis 不可达 / 冷却窗口**三路 fail-open 回落原路径**（`tech-debt.md:280`）。⚠️ 此处原引 `:275` —— 该行号**在 S1a-2 之前就已偏 1**（实测该版本里目标表行在 **276**），S1a-2 的 +4 行把它推到 **280**，本笔一并更正 |
-| **MySQL 死锁**：固定加锁顺序 + 小事务 + `@Version` 乐观锁 + `@Retryable` | 部分 | `@Transactional` **注解 1 处**（`UserController:57` 的 `loginAdd`）。⚠️ **2026-10-02 实测订正**：原记「10 处」是**把 javadoc / 注释里写到 `@Transactional` 的地方也数了进去** —— `grep -n "@Transactional"` 在 `src/main/java` 得 18 行，其中 **17 行是说明文字**（含 `OrderService:26` 那条**禁令**、`OrderDao:39`、`GoodsDao:52-55` 等），真注解只有 1 行。**`@Version` ❌（0 命中）**；**`@Retryable` ❌（0 命中，且无 spring-retry）** |
+| **MySQL 死锁**：固定加锁顺序 + 小事务 + `@Version` 乐观锁 + `@Retryable` | 部分 | `@Transactional` **注解 1 处**（`UserService.loginAdd:124` 的 `loginAdd`；2026-10-02 三层第三笔前在 `UserController:57`）。⚠️ **2026-10-02 实测订正**：原记「10 处」是**把 javadoc / 注释里写到 `@Transactional` 的地方也数了进去** —— `grep -n "@Transactional"` 在 `src/main/java` 得 18 行，其中 **17 行是说明文字**（含 `OrderService:26` 那条**禁令**、`OrderDao:39`、`GoodsDao:52-55` 等），真注解只有 1 行。**`@Version` ❌（0 命中）**；**`@Retryable` ❌（0 命中，且无 spring-retry）** |
 | **状态机**：显式 transition + 乐观锁 + 流转日志 + 频次告警 | 部分 | 显式 transition ✅（B3 转移表）；流转日志 ✅（B3 `order_state_transition` 时间线）；**乐观锁 ❌**（改用谓词守卫 CAS —— 需判断是否算等效，见 §5）；**频次告警 ❌** |
 | **线程池**：分池 + 有界队列 + `orTimeout` + 明确拒绝策略 | 部分 | 有界队列 ✅（`ArrayBlockingQueue(1024)`）；明确拒绝策略 ✅（discard-oldest-with-callback）；**分池 ❌（B3 只有单池）**；**`orTimeout` ❌（0 命中）** |
 

@@ -59,18 +59,22 @@
 
 以下为按现有代码实测出的 N+1 与高频只读场景，**2026-09-14 时均为零缓存、每次请求直查数据库**（缓存落地后本表**逐行加注**，见各行与下方注记）：
 
-行号约定：`G:` = `GoodsController.java`（2026-10-02 前名 `MallManagementGoodsController.java`；本节 `G:` 值一律为**搬迁前**坐标），`M:` = `MessageController.java`（前名 `MallManagementMessage.java`）。查询记**「SQL 定义行 → 执行行」区间**，方法调用记**调用行**。
+行号约定：`G:` = `GoodsController.java`（2026-10-02 前名 `MallManagementGoodsController.java`；本节 `G:` 值一律为**搬迁前**坐标），`M:` = `MessageController.java`（前名 `MallManagementMessage.java`）。查询记**「SQL 定义行 → 执行行」区间**，方法调用记**调用行**。⚠️ **`M:` 坐标已于 2026-10-03 三层第四笔（message 域，`8ed5fc1`）后作废** —— `MessageController` 由 417 行重写为 **127 行**（只剩路由），旧 `M:<n>` 全部越界；本节现址一律写作 `MessageService.<方法>:<行>` / `MessageDao.<方法>:<行>`（后者沿用「SQL 定义行 → 执行行」区间）。
 
 | 接口 | 现状问题 | 证据 |
 |---|---|---|
 | `GET /goods/goodstype` | 商品类型字典，几乎不变但每次全表查 | `G:37-38`（**搬迁前坐标**；现 SQL 在 `GoodsTypeCacheService.listTypes()` `:46-47`，Controller 只剩 `GoodsController:60` 的调用 —— 见下注） |
 | `POST /goods/goodsSelectHome` | 先全量查 `goods`，再**为每个商品单独查一次** `login` 取商家名（N+1，1+N） | 全量查 `G:184-185`，循环 `G:188-208`，内层查询 `G:194-200`（**均为搬迁前坐标**；现整段在 `GoodsCacheService.listHome()`，Controller 只剩 `GoodsController:103` 的一行委托 —— 见下注） |
-| `POST /message/conversations` | 查完会话列表后，**为每个会话单独查一次** `user_conversation_read`（N+1，1+N） | 外层查 `M:33`，循环 `M:35-66`，内层查询 `M:48-50` |
+| `POST /message/conversations` | 查完会话列表后，**为每个会话单独查一次** `user_conversation_read`（N+1，1+N） | **2026-10-03 现址**：外层查 `MessageDao.selectConversations:112-120`，循环 `MessageService.getConversations:148-178`，内层查询 `MessageDao.selectLastReadTime:131-133`（**搬迁前**坐标 = `M:33` / `M:35-66` / `M:48-50`） |
 | `POST /message/selectFriend` | 好友申请列表，每个申请人触发一次用户信息查询（N+1，**1+2N**） | 外层查 `M:249-251`，循环 `M:253-259`，内层调用 `M:255`（**搬迁前坐标**；2026-09-29 起整段在 `FriendCacheService.listRequests()` —— 见下注） |
 | `POST /message/friendSelect` | 好友列表，每个好友触发一次用户信息查询（N+1，**1+2N**） | 外层查 `M:320-322`，循环 `M:324-330`，内层调用 `M:326`（**搬迁前坐标**；2026-09-29 起整段在 `FriendCacheService.listFriends()` —— 见下注） |
 | `POST /goods/goodsSelect` | 商家商品列表，读多写少 | `G:166-167`（**搬迁前坐标**；现 SQL 在 `GoodsCacheService.listByMerchant()` `:146` —— 方法体 `:143-156`，`@Cacheable` `:142`，Controller 只剩 `GoodsController:96` 的一行委托 —— 见下注） |
 
-**`1+2N` 的由来**：`selectFriend` / `friendSelect` 的内层调用的是私有方法 `getUserInfoById`（定义 `M:341-380`），**该方法自身含 2 条 SQL** —— `M:342-344` 查 `user`，再按用户类型走 `M:360-361`（`customerimage`）或 `M:364-365`（`merchantimage`）查头像。故每轮循环实际产生 **2** 条查询。（对照：`getOrCreateConversation` 也调它，但只调 1 次，是常数 3 条，**不构成 N+1**。）
+**`1+2N` 的由来**：`selectFriend` / `friendSelect` 的内层调用的是一个私有 `getUserInfoById`（**搬迁前**定义 = `M:341-380`），**它自身含 2 条 SQL** —— 查 `user`，再按用户类型走 `customerimage` 或 `merchantimage` 查头像。故每轮循环实际产生 **2** 条查询。（对照：`getOrCreateConversation` 也调它，但只调 1 次，是常数 3 条，**不构成 N+1**。）
+
+⚠️ **2026-10-03 现址（同形代码在仓里有**两份**，别串）**：
+- **两个 friend 读接口用哪份**：2026-09-29 起整段已在 `FriendCacheService` —— `listFriends()` `:91-105`（SQL `:92`）/ `listRequests()` `:119-131`（SQL `:120`），调的是 `FriendCacheService.userInfoById:150-191`（SQL `:151` 查 `user`；`:172` 查 `customerimage`；`:178` 查 `merchantimage`）。
+- **`getOrCreateConversation` 用哪份**：`MessageService.getUserInfoById:497-533`（**保留 catch**），SQL 已下沉 `MessageDao` —— `selectUserPublicInfo:174`、`selectCustomerImageByCustomerId:184`、`selectMerchantImageByMerchantId:190`。两份并存是**有意的**，不是漏删（见 `cache-layer.md §4`、`MessageDao` 类注释）。
 
 其中 N+1 问题**优先应通过 SQL 改写（JOIN / IN 批量查询）解决**，而非靠缓存掩盖——缓存在此只会延长脏数据窗口。真正适合缓存的仅类型字典一类低频变更数据。
 
@@ -83,6 +87,8 @@
 > ⚠️ **2026-10-02 订正：本条「四组各漂移 +11」的说法作废 —— 不要把 +11 当换算规则。** 以 `git show 549f74f` 逐锚点比对，实测漂移**不是任何单一常数**：同一文件内 `friendAdd` 方法头 **+18**（207→225）、其查重 SELECT **+25**（215→240）、`selectFriend` 方法头 **+33**（247→280）、`getUserInfoById` 方法头 **+36**（341→377）、`friendSelect` 方法头 **+45**（317→362）。成因是两个方向相反的改动叠加：B1 把两个读接口的方法体**搬走**（该减），B2 给 `friendAdd` 外包 `runLocked` + 补注释（该增）。⇒ 本节（含 `project-map.md §6`）两族 `M:` 坐标一律**读到即重测**。**坐标本身未在本笔改写**（消息域三层笔负责），此处只作废换算规则。另：本行尾注「`M:215-216` 未漂移」亦已被 B2 推翻 —— 现址 `M:240-241`（`friendAddLocked` 内）。详见 `cache-layer.md §11 ㊷`。
 >
 > ⚠️ **同日起这两个接口的读路径已搬到 `FriendCacheService`**（`listFriends()` / `listRequests()`，B1 缓存笔）：上表 `M:` 值是**搬迁前**位置，沿它到 Controller 只会找到路由与响应组装，实现与 SQL 在 Service（`FriendCacheService:92` / `:120` / `:150-191`）。缓存把这两处的 `1 + 2N` 摊薄为「每 TTL 一次」，是**掩盖而非修复**。
+>
+> ✅ **2026-10-03 结清：上四条 `M:` 欠账已随三层第四笔（message 域，`8ed5fc1`）全部改写完毕。** 本笔把 `M:` 坐标按三分处理：①**当前坐标**（`conversations` 行、`1+2N` 由来段）已重指为 `MessageDao` / `MessageService` / `FriendCacheService`；②**已陈旧但未标注**的（「同形 SQL 共 3 处」里的 `M:378`）已换为 `MessageService.getUserInfoById:499`；③**真历史**（本节「2026-09-29 修正」「2026-10-02 订正」两条记录里的 `M:` 实测值，以及 §11 ㊷ 的对照表）**保持原样不改写** —— 它们是「当时实测」的存档，不是当前坐标。⚠️ 上面第 83 行末句「**坐标本身未在本笔改写**（消息域三层笔负责）」**现已兑现**，那条欠账作废；但该行其余内容（+11 不是换算规则）**仍然有效**。
 >
 > **2026-09-29 修正（三个 `G:` 行的失效 —— 与上面两条不同源，不是 +11 漂移）**：上表三个 goods 行的 `G:` 值失效的原因是**读路径已整段搬进 Service**，且**搬迁日期各不相同**（`goodstype` 为 2026-09-27 `79d2a0d`；`goodsSelectHome` / `goodsSelect` 为 2026-09-28 `da616a6` / `accfe6d`）—— 故这些值自搬迁起就不再指 SQL，`G:` 一律按**搬迁前**位置读：
 > - `goodstype`：`G:37-38` → SQL 在 `GoodsTypeCacheService.listTypes()` `:46-47`，Controller 只剩 `GoodsController:60` 的调用。

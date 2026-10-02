@@ -119,7 +119,7 @@ com.minke
     │   ├── controller/  UserController           （原 MallManagementUserController，仅 /mysqlLogin）
     │   └── service/     UserCacheService
     └── message/
-        ├── controller/  MessageController        （消息 4 + 好友 5 + userSelect 1）
+        ├── controller/  MessageController        （消息 4 + 好友 5 + userSelect 1；三层后另有 MessageService / MessageDao）
         └── service/     FriendCacheService
 ```
 
@@ -351,3 +351,18 @@ OrderAction                               （mallmanagement_service）  ← 闭�
 - **验证**：`./mvnw -B clean test` → **130 通过 / 0 失败 / 0 错误 / 8 跳过**（与基线逐项一致）；`npm run build` → Build complete。
 - **内容哈希**：剥 `package`/`import` 行后逐文件比对，**46/49 逐字节相同**；3 个差异全部在 javadoc 注释内的包名引用（`{@link}` 3 处 + `{@code}` 散文 1 处），**零执行代码变化**。
 - **未完成**：Controller 拆分（R2）= 笔 2，待笔 1 合并后单独进行。
+
+---
+
+## §12 后续追记：三层重构对目录树的影响 · 2026-10-03
+
+> ⚠️ **本文件 §3「终态目录树」（`:98-124`）是 `01df702` 笔 1 挪包时的快照，不是现行清单。** 此后各域三层笔（Controller → Service → Dao）在每个域下**新增了 `dao/` 子包**，并把「域逻辑」从 Controller 搬进各自的 `service/` 类 —— 树里未逐一反映，引用前请以源码为准。
+
+| 域 | 三层笔 commit | `service/` 新增 | `dao/` 新增 | 树中已反映？ |
+|---|---|---|---|---|
+| order | 第一笔 PR #25 `28194b4` | `OrderService` | `OrderDao` | ✅ 树 `:110-111` 已有（order 是唯一在笔 1 当时就带 `dao/` 的域） |
+| goods | 第二笔 2026-10-02 | `GoodsService` | `GoodsDao` | ❌ 树 `:117` 只列 `GoodsCacheService · GoodsTypeCacheService` |
+| user | 第三笔 PR #32 `0c07e96` | `UserService` | `UserDao` | ❌ 树 `:120` 只列 `UserCacheService`；`:119` 的「仅 /mysqlLogin」亦已陈旧 |
+| message | 第四笔 `8ed5fc1` | `MessageService` | `MessageDao` | ❌ 树 `:122` 只列 `MessageController`（**已就地补注**，见该行括号） |
+
+**修法说明**：本文件 `:42` / `:185` / `:318-322` 三处锚点被新源码 javadoc 直接引用（`MessageService:40/:61/:68`、`MessageDao:161`、`MessageController:19`、`DistributedLockServiceTest:395`），故 §3 的改动一律**行数中性（1 行 → 1 行）**，本节**只追加在文件末尾**，确保上述锚点不漂。逐域现址见 `three-layers.md` 与 `progress.md §3`。

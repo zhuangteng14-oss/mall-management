@@ -1,7 +1,9 @@
 package com.minke.mallmanagement.smoke;
 
 import com.minke.mallmanagement.shared.lock.DistributedLockService;
+import com.minke.mallmanagement.message.dao.MessageDao;
 import com.minke.mallmanagement.message.service.FriendCacheService;
+import com.minke.mallmanagement.message.service.MessageService;
 import com.minke.mallmanagement.goods.dao.GoodsDao;
 import com.minke.mallmanagement.goods.service.GoodsCacheService;
 import com.minke.mallmanagement.goods.service.GoodsService;
@@ -86,19 +88,46 @@ import static org.mockito.Mockito.when;
 //    TransactionManager ⇒ TransactionAutoConfiguration 的 @EnableTransactionManagement 不生效
 //    ⇒ 既不建代理、也不开事务。所以「注册的三条 INSERT 是否真的同事务」**本切片测不了**，
 //    那是 MallManagementApplicationTests（@SpringBootTest，A3_ENABLED=true）与 A3 的 A-B2-1 的职责。
+// 三层第四笔（message 域）补 MessageService / MessageDao，理由同上：MessageController 现在只认
+// MessageService。用真 bean 之后：MessageService 的依赖全部有着落 —— MessageDao（本行）、
+// UserCacheService（替身，publicInfo 默认返回 null ⇒ userSelect 走「用户不存在」分支）、
+// FriendCacheService（替身，默认返回 null ⇒ 好友读端点走空体）、DistributedLockService（替身，
+// 且被 stubLockAsDirectRun 改成「直接执行 action」⇒ friendAdd 的临界区在切片里照跑）；
+// MessageDao 的 JdbcTemplate 就是下面那个 @MockitoBean ⇒ SQL 不出切片。
+// ⚠️ 本笔**没有**配套的 stub 改写要补：5 个 smoke 子类都不调用 /message/* 的任何端点
+//    （它们只打 orders / goods / user / 静态资源），故上面三个替身的默认行为足够。
+//    ⇒ **代价**：本域的 10 个端点在 smoke 里**零覆盖**，与 A3 只打 friendAdd 一处叠加后，
+//    见 MessageService 类注释「谁保护本笔」一节。
 @Import({OrderStateMachine.class, OrderService.class, OrderDao.class,
         GoodsService.class, GoodsDao.class,
-        UserService.class, UserDao.class})
+        UserService.class, UserDao.class,
+        MessageService.class, MessageDao.class})
 public abstract class AbstractSmokeTest {
 
     @Autowired
     protected MockMvc mockMvc;
 
     /**
-     * {@code @WebMvcTest} 无参时会加载全部 4 个 Controller，其中三个
-     * {@code @Autowired JdbcTemplate}。切片不包含 DataSource 自动配置，
-     * 故必须提供 JdbcTemplate 的替身，否则上下文启动失败。
-     * 放在基类，使不使用数据库的用例（如静态资源测试）也能共享同一套上下文。
+     * JdbcTemplate 替身。切片不包含 DataSource 自动配置，故必须提供一个 JdbcTemplate bean，
+     * 否则上下文启动失败。放在基类，使不使用数据库的用例（如静态资源测试）也能共享同一套上下文。
+     *
+     * <p>⚠️ <b>它存在的理由在本笔（三层第四笔，message 域）发生了转移，值得写清楚</b>：
+     * <ul>
+     *   <li><b>三层前</b>：{@code @WebMvcTest} 无参会加载全部 4 个 Controller，其中若干
+     *       {@code @Autowired JdbcTemplate}（写这句话时是三个）—— 替身是为了喂它们。</li>
+     *   <li><b>三层第一~四笔之后</b>：4 个 Controller 里**已经没有**任何一个再
+     *       {@code @Autowired JdbcTemplate} 了（订单域第一笔、商品域第二笔、user 域第三笔、
+     *       message 域本笔依次把它从各自 Controller 里挪走，本笔挪走的是最后一个
+     *       {@code MessageController.MessagejdbcTemplate}）。</li>
+     *   <li><b>现在它为什么还必须存在</b>：{@code AbstractSmokeTest} 用 {@code @Import} 拉进了
+     *       <b>真 bean</b> 的四个 DAO（{@code OrderDao} / {@code GoodsDao} / {@code UserDao} /
+     *       {@code MessageDao}），而它们的构造器都收 {@code JdbcTemplate} ⇒ 替身现在是**喂 DAO 的**。
+     *       ⚠️ 删掉它会当场在**上下文加载期**拖垮全部 smoke 用例
+     *       （{@code NoSuchBeanDefinitionException: JdbcTemplate}），与它最初的作用无关。</li>
+     * </ul>
+     * <p>⚠️ 顺带更正一处**陈旧计数**：本注释原写「其中三个 {@code @Autowired JdbcTemplate}」，
+     * 那个「三个」在订单/商品两笔之后就已经只剩一个（{@code MessageController}），本笔再清零。
+     * 本句按 2026-10-02 实测改写。
      */
     @MockitoBean
     protected JdbcTemplate jdbcTemplate;

@@ -43,6 +43,8 @@ import static org.mockito.Mockito.when;
 import com.minke.mallmanagement.order.dao.OrderDao;
 import com.minke.mallmanagement.order.service.OrderService;
 import com.minke.mallmanagement.order.model.OrderTransitionRecorder;
+import com.minke.mallmanagement.message.dao.MessageDao;
+import com.minke.mallmanagement.message.service.MessageService;
 
 /**
  * {@link DistributedLockService} 的机制实测 —— 四路结果、冷却、恢复、释放，全用假实现驱动。
@@ -363,11 +365,11 @@ class DistributedLockServiceTest {
         return client;
     }
 
-    // ==================== 三层第一笔（订单域）：临界区的「零事务边界」结构断言 ====================
+    // ============ 三层第一 / 第四笔：临界区的「零事务边界」结构断言（order + message 两条链）============
 
     /**
-     * **订单锁的临界区调用链上不得出现 {@code @Transactional}** —— {@code three-layers.md §D.1}
-     * 那条禁令的结构断言。
+     * **被打锁的临界区调用链上不得出现 {@code @Transactional}** —— {@code three-layers.md §D.1}
+     * 那条禁令的结构断言。<b>当前覆盖两条链：订单域（第一笔）+ message 域（第四笔）。</b>
      *
      * <h2>【为什么需要它，而 A3 不够】</h2>
      * 行为判据已经有了：{@code A-S2a-1c}（20 并发同 OrderId，响应里含「数据库错误」的 == 0）。
@@ -379,26 +381,50 @@ class DistributedLockServiceTest {
      * <h2>【为什么分层之后这条才真正必要】</h2>
      * D.1 原先有两条理由。理由①（<b>锁外事务</b>：提交晚于锁释放 ⇒ 后进者查重看不到未提交行）
      * 与分层无关，永远成立。理由②（<b>跨 bean 调用</b>：临界区是 lambda 调**本类私有方法**，
-     * 没有 bean 边界可挂事务）在分层后**不再成立** —— 现在链是
-     * {@code lambda → OrderService.addLocked → OrderDao.insertOrder}，**第一次真的有了跨 bean 调用**，
-     * 想加 `@Transactional` 就加得上。本断言就是补上那个消失的「结构上不可用」。
+     * 没有 bean 边界可挂事务）在分层后**不再成立** —— 现在两条链都**第一次真的有了跨 bean 调用**：
+     * <ul>
+     *   <li>订单：{@code lambda → OrderService.addLocked → OrderDao.insertOrder}（第一笔）；</li>
+     *   <li>message：{@code lambda → MessageService.friendAddLocked → MessageDao.insertFriendRequest /
+     *       selectFriendPair}（第四笔）。</li>
+     * </ul>
+     * 想加 {@code @Transactional} 就加得上。本断言就是补上那个消失的「结构上不可用」。
+     *
+     * <h2>【message 域的形态差：本断言按**整类**扫，故会连带扫到非临界区的方法】</h2>
+     * 扫描器是 {@code getDeclaredMethods()} ⇒ 扫 {@code MessageService} 时**必然**把
+     * {@link MessageService#friendUp} 这类**没有打锁**的方法也扫进去。这是「不单开 friend 域」
+     * （{@code ddd-package-plan.md:42} §3）的直接代价，**已被明确接受**。
+     * <p>⚠️ 请**正确读它**：「本类目前整体无事务」<b>不等于</b>「本类禁止事务」。反面例子是 C#2
+     * ——{@code friendUp} 与 {@code goodsAdd} 同族（无锁 + 多条写），按 D.1 的**不可外推**原则，
+     * 它**应当**加事务才是更好的形态。第四笔是**纯搬运**、刻意不动它（改它就是改行为），
+     * 所以它现在仍无事务、仍靠「唯一出口无条件清缓存」自保（见 {@code MessageService.friendUp}
+     * 的注释）。**将来谁要给 friendUp 补事务**，撞到的就是这条断言 —— 那时应把本断言改成
+     * 「按方法白名单」，而**不是**绕过它或给它开例外。第四笔已把这条路指出来，故意不改实现。
      *
      * <h2>【覆盖范围与不覆盖的东西】</h2>
-     * 扫三个在临界区内被调用的 bean 的类级与方法级注解（含私有方法）。⚠️ **不覆盖**：
+     * 扫**五**个在临界区内被调用的 bean 的类级与方法级注解（含私有方法）。⚠️ **不覆盖**：
      * ① 经元注解（自定义注解上再标 {@code @Transactional}）间接引入 —— 本断言只认注解的
      * <b>简单名</b>是 {@code Transactional} 的直标，元注解形态看不见；
      * ② 编程式事务（{@code TransactionTemplate} / 手工 {@code PlatformTransactionManager}）——
-     * 那不是注解，本断言构不到，只能靠 {@code A-S2a-1c}。
+     * 那不是注解，本断言构不到，只能靠 {@code A-S2a-1c}（订单）与 {@code A-B2-1}（message，
+     * 且那条门禁的覆盖力见 {@code MessageService} 类注释「谁保护本笔」）。
      * ③ 反向不成立：本断言**不**要求别处不许有事务 —— 反面是 C#2（{@code goodsAdd} **应当**加），
      * 只记住半边就会踩另一边。
+     *
+     * <p>⚠️ 方法名 {@code orderChainIsNotTransactional} 是**历史遗留的窄名**（本断言最初只覆盖订单）。
+     * 保留不改名的理由：多处文档以「类名.方法名」为锚引用它，改名会让那些锚当场失效。
+     * 第四笔的处理是**扩表**（ruling ③）而非改名或新开一条 —— 见 display name 已点明两条链。
      */
     @Test
-    @DisplayName("订单临界区调用链无 @Transactional（D#1 禁令的结构断言）")
+    @DisplayName("临界区调用链无 @Transactional（D#1 禁令的结构断言；order + message 两条链）")
     void orderChainIsNotTransactional() {
         List<Class<?>> criticalSectionBeans = List.of(
+                // —— 订单域链（三层第一笔）——
                 OrderService.class,           // 被打锁的临界区所属的 bean（addLocked / casTransition）
                 OrderDao.class,               // 临界区内被跨 bean 调用的数据出口
-                OrderTransitionRecorder.class // 临界区内被调用的观测出口
+                OrderTransitionRecorder.class, // 临界区内被调用的观测出口
+                // —— message 域链（三层第四笔）——
+                MessageService.class,         // 被打锁的临界区所属的 bean（friendAdd → friendAddLocked）
+                MessageDao.class              // 临界区内被跨 bean 调用的数据出口
         );
 
         // 阳性对照：先证明扫描器**真的看得见** @Transactional —— 否则「扫出空列表」可以是因为
@@ -413,9 +439,10 @@ class DistributedLockServiceTest {
             sites.addAll(transactionalSites(bean));
         }
         assertThat(sites)
-                .as("订单锁临界区调用链上出现了 @Transactional —— 提交会晚于锁释放，"
-                        + "查重随即失效、同一 OrderId 将插 2 行（D#1 / three-layers.md §D.1）。"
-                        + "若确有需要，先改 §D.1 并重跑 A3 的 A-S2a-1c，不要直接改这里")
+                .as("被打锁的临界区调用链上出现了 @Transactional（order 或 message）—— 提交会晚于锁释放，"
+                        + "查重随即失效：订单域同一 OrderId 将插 2 行、message 域同一好友对将插 2 行"
+                        + "（D#1 / three-layers.md §D.1）。"
+                        + "若确有需要，先改 §D.1 并重跑 A3 的 A-S2a-1c / A-B2-1，不要直接改这里")
                 .isEmpty();
     }
 
