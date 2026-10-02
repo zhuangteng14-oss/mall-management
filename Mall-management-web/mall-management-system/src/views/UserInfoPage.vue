@@ -93,7 +93,7 @@ const getUserData = async () => {
   if (!username) return
 
   try {
-    const res = await fetch('http://localhost:8088/mysqlLogin/getUserInfo', {
+    const res = await fetch('http://localhost:8088/user/getUserInfo', {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: new URLSearchParams({ username, password })
@@ -127,7 +127,7 @@ const doUpload = async (e) => {
   formData.append('file', file)
 
   try {
-    const res = await fetch('http://localhost:8088/mysqlLogin/updateAvatar', {
+    const res = await fetch('http://localhost:8088/user/updateAvatar', {
       method: 'POST',
       body: formData
     })
@@ -146,7 +146,7 @@ const doUpload = async (e) => {
 const saveUserInfo = async () => {
   const username = sessionStorage.getItem('loginUsername')
   try {
-    const res = await fetch('http://localhost:8088/mysqlLogin/updateUserInfo', {
+    const res = await fetch('http://localhost:8088/user/updateUserInfo', {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: new URLSearchParams({

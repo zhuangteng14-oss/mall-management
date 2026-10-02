@@ -147,7 +147,7 @@ const getUserInfo = async () => {
   if (!username) return
 
   try {
-    const res = await fetch('http://localhost:8088/mysqlLogin/getUserInfo', {
+    const res = await fetch('http://localhost:8088/user/getUserInfo', {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: new URLSearchParams({ username, password })
@@ -167,7 +167,7 @@ const getGoodsList = async () => {
   if (!merchantId) return
 
   try {
-    const res = await fetch('http://localhost:8088/mysqlGoods/goodsSelect', {
+    const res = await fetch('http://localhost:8088/goods/goodsSelect', {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: new URLSearchParams({ MerchantId: merchantId })
@@ -212,7 +212,7 @@ const doDeleteGoods = async () => {
   }
   const merchantId = sessionStorage.getItem('merchantid')
   try {
-    const res = await fetch('http://localhost:8088/mysqlGoods/goodsDe', {
+    const res = await fetch('http://localhost:8088/goods/goodsDe', {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: new URLSearchParams({
@@ -272,7 +272,7 @@ const closeModal = () => {
 const switchPrice = async (code) => {
   const merchantId = sessionStorage.getItem('merchantid')
   try {
-    const res = await fetch('http://localhost:8088/mysqlGoods/productCodePrice', {
+    const res = await fetch('http://localhost:8088/goods/productCodePrice', {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: new URLSearchParams({
@@ -324,7 +324,7 @@ const doUpdateGoods = async () => {
   }
 
   try {
-    const res = await fetch('http://localhost:8088/mysqlGoods/goodsUp', {
+    const res = await fetch('http://localhost:8088/goods/goodsUp', {
       method: 'POST',
       body: formData
     })

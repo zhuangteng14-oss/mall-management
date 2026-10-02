@@ -92,7 +92,7 @@ const loadHistoricalOrders = async () => {
   try {
     const params = new URLSearchParams()
     params.append('customerId', customerId)
-    const res = await fetch('http://localhost:8088/mysqlGoods/historicalOrdersSelect', {
+    const res = await fetch('http://localhost:8088/order/historicalOrdersSelect', {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: params.toString()

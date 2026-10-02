@@ -118,7 +118,7 @@ const isLogin = computed(() => {
 
 const getHomeImgAndGoods = async () => {
   try {
-    const res = await fetch('http://localhost:8088/mysqlGoods/goodsSelectHome', {
+    const res = await fetch('http://localhost:8088/goods/goodsSelectHome', {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     })
@@ -151,7 +151,7 @@ const searchByType = (typeName) => {
 
 const getGoodType = async () => {
   try {
-    const res = await fetch('http://localhost:8088/mysqlGoods/goodstype', {
+    const res = await fetch('http://localhost:8088/goods/goodstype', {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     })

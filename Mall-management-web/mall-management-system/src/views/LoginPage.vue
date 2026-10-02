@@ -128,7 +128,7 @@ export default {
         return;
       }
       try {
-        const res = await fetch("http://localhost:8088/mysqlLogin/loginSelect", {
+        const res = await fetch("http://localhost:8088/user/loginSelect", {
           method: "POST",
           headers: { "Content-Type": "application/x-www-form-urlencoded" },
           body: new URLSearchParams({
@@ -139,7 +139,7 @@ export default {
         const role = await res.text();
 
         // 登录成功后立即获取用户信息，保存商家ID / 客户ID
-        const userRes = await fetch("http://localhost:8088/mysqlLogin/getUserInfo", {
+        const userRes = await fetch("http://localhost:8088/user/getUserInfo", {
           method: "POST",
           headers: { "Content-Type": "application/x-www-form-urlencoded" },
           body: new URLSearchParams({ 
@@ -213,7 +213,7 @@ export default {
 
       let userid = this.genUserId();
       try {
-        const res = await fetch("http://localhost:8088/mysqlLogin/loginAdd", {
+        const res = await fetch("http://localhost:8088/user/loginAdd", {
           method: "POST",
           headers: { "Content-Type": "application/x-www-form-urlencoded" },
           body: new URLSearchParams({

@@ -71,11 +71,11 @@ const doSearch = async () => {
     let url, body;
     if (kw === '') {
       // 空搜索：调用获取全部商品接口
-      url = 'http://localhost:8088/mysqlGoods/goodsSelectHome'
+      url = 'http://localhost:8088/goods/goodsSelectHome'
       body = ''  // 该接口可能不需要参数，如果必须可传 'action=getAll' 等，根据后端调整
     } else {
       // 有关键词：调用搜索接口
-      url = 'http://localhost:8088/mysqlGoods/productSearch'
+      url = 'http://localhost:8088/goods/productSearch'
       body = `keyword=${encodeURIComponent(kw)}`
     }
     const res = await fetch(url, {
