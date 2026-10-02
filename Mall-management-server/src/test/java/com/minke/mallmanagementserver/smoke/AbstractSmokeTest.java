@@ -4,6 +4,8 @@ import com.minke.mallmanagement_service.DistributedLockService;
 import com.minke.mallmanagement_service.FriendCacheService;
 import com.minke.mallmanagement_service.GoodsCacheService;
 import com.minke.mallmanagement_service.GoodsTypeCacheService;
+import com.minke.mallmanagement_service.OrderDao;
+import com.minke.mallmanagement_service.OrderService;
 import com.minke.mallmanagement_service.OrderStateMachine;
 import com.minke.mallmanagement_service.OrderTransitionRecorder;
 import com.minke.mallmanagement_service.UserCacheService;
@@ -41,8 +43,22 @@ import static org.mockito.Mockito.when;
 // B3：把**真的** OrderStateMachine 拉进 Web 切片。它没有依赖、只是一张纯函数转移表，
 // 且它生成的 UPDATE 语句正是 golden copy 钉住的那条 —— 用真 bean，smoke 用例就顺带验证了
 // 「生成的 SQL 能穿过 JdbcTemplate 调用而不炸」；换成替身则 updateSql 返回 null，
-// 下面那句 when(jdbcTemplate.update(anyString(), …)) 便匹配不上，两个用例会一起静默走错分支。
-@Import(OrderStateMachine.class)
+// 两个用例会一起静默走错分支。
+//
+// 三层第一笔（订单域）补 OrderService / OrderDao：
+// ⚠️ 这两个**必须用 @Import 的真 bean，不能用 @MockitoBean 替身** —— 替身会让
+// OrderPayIfUpSmokeTest 的断言退化成「Controller 会转发」这个空命题（替身返回 null ⇒
+// 响应体是空的 ⇒ 恰恰是那个测试要防的东西）。用真 bean 之后：
+//   · OrderService 的依赖在切片里全部有着落 —— OrderDao（本行）、DistributedLockService
+//     （替身，且被 stubLockAsDirectRun 改成「直接执行 action」）、OrderStateMachine（真 bean）、
+//     OrderTransitionRecorder（替身，方法全 void ⇒ 默认即空转）；
+//   · OrderDao 的依赖 JdbcTemplate 就是下面那个 @MockitoBean ⇒ **它落回既有的替身**，
+//     SQL 仍不出切片。
+// 但这带来一处**必须同时改的配套**：OrderDao 走 JdbcClient，而 JdbcClient 的 update 落到
+// JdbcTemplate.update(PreparedStatementCreator) 这个**单参重载**上（不是
+// update(String, Object...)）—— 所以 OrderPayIfUpSmokeTest 的 stub 匹配器要跟着换，
+// 否则它会静默返回 0、走错分支而**仍然是绿的形状**。见该测试里的 ⚠️ 注。
+@Import({OrderStateMachine.class, OrderService.class, OrderDao.class})
 public abstract class AbstractSmokeTest {
 
     @Autowired

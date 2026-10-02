@@ -1,9 +1,9 @@
 package com.minke.mallmanagementserver.smoke;
 
 import org.junit.jupiter.api.Test;
+import org.springframework.jdbc.core.PreparedStatementCreator;
 
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -16,6 +16,17 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * 这一映射关系钉死，防止后续改动破坏 CAS 分支语义。
  *
  * <p>注意：本测试用 Mock 替换 JdbcTemplate，不触达真实数据库，故不会写入数据。
+ *
+ * <p>⚠️ <b>三层第一笔（订单域）换了 stub 的匹配器 —— 不换会「绿着走错分支」</b>：
+ * 订单 SQL 现在经由 {@code OrderDao} 的 {@code JdbcClient} 下发，而
+ * {@code JdbcClient.update()} 走的是 {@code classicOps.update(statementCreatorForIndexedParams())}
+ * （{@code DefaultJdbcClient} 源码），即落到 {@link org.springframework.jdbc.core.JdbcTemplate}
+ * 的 <b>{@code update(PreparedStatementCreator)} 单参重载</b>，**不再是**
+ * {@code update(String, Object...)}。
+ * 若沿用旧的 {@code anyString(), any(Object[].class)} 匹配器，这两条用例会在**未 stub 命中**的
+ * 情况下拿到 Mockito 的默认返回值 0 ⇒ (a) 的 {@code $.msg} 变成「订单不存在或已付款」而变红 ——
+ * 那还是好的；(b) 则会**碰巧仍然是绿的**，于是这个类就从「钉住 rows → 文案」退化成一个空壳。
+ * 换匹配器后，断言的仍是同一个映射关系，只是把「DAO 用什么签名下发 SQL」这件事也纳入了监视。
  */
 class OrderPayIfUpSmokeTest extends AbstractSmokeTest {
 
@@ -24,7 +35,7 @@ class OrderPayIfUpSmokeTest extends AbstractSmokeTest {
     /** (a) 条件 UPDATE 影响 1 行 → 付款成功。 */
     @Test
     void orderPayIfUp_CAS_branching_rowsAffected() throws Exception {
-        when(jdbcTemplate.update(anyString(), any(Object[].class))).thenReturn(1);
+        when(jdbcTemplate.update(any(PreparedStatementCreator.class))).thenReturn(1);
 
         mockMvc.perform(post("/mysqlGoods/orderPayIfUp")
                         .param("orderId", ORDER_ID))
@@ -36,7 +47,7 @@ class OrderPayIfUpSmokeTest extends AbstractSmokeTest {
     /** (b) 条件 UPDATE 影响 0 行（订单不存在或已付款）→ 返回失败。 */
     @Test
     void orderPayIfUp_CAS_branching_noRowsAffected() throws Exception {
-        when(jdbcTemplate.update(anyString(), any(Object[].class))).thenReturn(0);
+        when(jdbcTemplate.update(any(PreparedStatementCreator.class))).thenReturn(0);
 
         mockMvc.perform(post("/mysqlGoods/orderPayIfUp")
                         .param("orderId", ORDER_ID))

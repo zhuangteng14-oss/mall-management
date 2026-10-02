@@ -12,8 +12,12 @@ import org.redisson.client.RedisException;
 import org.redisson.config.Config;
 import org.redisson.config.SingleServerConfig;
 import org.springframework.boot.autoconfigure.data.redis.RedisProperties;
+import org.springframework.transaction.annotation.Transactional;
 
+import java.lang.annotation.Annotation;
+import java.lang.reflect.Method;
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
@@ -354,6 +358,94 @@ class DistributedLockServiceTest {
         RedissonClient client = mock(RedissonClient.class);
         when(client.getLock(anyString())).thenReturn(lock);
         return client;
+    }
+
+    // ==================== 三层第一笔（订单域）：临界区的「零事务边界」结构断言 ====================
+
+    /**
+     * **订单锁的临界区调用链上不得出现 {@code @Transactional}** —— {@code three-layers.md §D.1}
+     * 那条禁令的结构断言。
+     *
+     * <h2>【为什么需要它，而 A3 不够】</h2>
+     * 行为判据已经有了：{@code A-S2a-1c}（20 并发同 OrderId，响应里含「数据库错误」的 == 0）。
+     * 一旦有人给本链加上事务，查重失效 ⇒ 撞 {@code uk_order_orderId} ⇒ INSERT 的 catch 把它吞成
+     * 200 + {@code msg="数据库错误：Duplicate entry..."} ⇒ 那条断言变红。**但**：CI 的
+     * {@code concurrency} job 是 {@code continue-on-error: true}（{@code ci.yml:117}）⇒
+     * 它**不会拦 merge**，且本机跑不了 A3（无 8.4 目标库）。所以在本机/单测这一层补一条结构断言。
+     *
+     * <h2>【为什么分层之后这条才真正必要】</h2>
+     * D.1 原先有两条理由。理由①（<b>锁外事务</b>：提交晚于锁释放 ⇒ 后进者查重看不到未提交行）
+     * 与分层无关，永远成立。理由②（<b>跨 bean 调用</b>：临界区是 lambda 调**本类私有方法**，
+     * 没有 bean 边界可挂事务）在分层后**不再成立** —— 现在链是
+     * {@code lambda → OrderService.addLocked → OrderDao.insertOrder}，**第一次真的有了跨 bean 调用**，
+     * 想加 `@Transactional` 就加得上。本断言就是补上那个消失的「结构上不可用」。
+     *
+     * <h2>【覆盖范围与不覆盖的东西】</h2>
+     * 扫三个在临界区内被调用的 bean 的类级与方法级注解（含私有方法）。⚠️ **不覆盖**：
+     * ① 经元注解（自定义注解上再标 {@code @Transactional}）间接引入 —— 本断言只认注解的
+     * <b>简单名</b>是 {@code Transactional} 的直标，元注解形态看不见；
+     * ② 编程式事务（{@code TransactionTemplate} / 手工 {@code PlatformTransactionManager}）——
+     * 那不是注解，本断言构不到，只能靠 {@code A-S2a-1c}。
+     * ③ 反向不成立：本断言**不**要求别处不许有事务 —— 反面是 C#2（{@code goodsAdd} **应当**加），
+     * 只记住半边就会踩另一边。
+     */
+    @Test
+    @DisplayName("订单临界区调用链无 @Transactional（D#1 禁令的结构断言）")
+    void orderChainIsNotTransactional() {
+        List<Class<?>> criticalSectionBeans = List.of(
+                OrderService.class,           // 被打锁的临界区所属的 bean（addLocked / casTransition）
+                OrderDao.class,               // 临界区内被跨 bean 调用的数据出口
+                OrderTransitionRecorder.class // 临界区内被调用的观测出口
+        );
+
+        // 阳性对照：先证明扫描器**真的看得见** @Transactional —— 否则「扫出空列表」可以是因为
+        // 扫描器写错了（getDeclaredMethods 用错、注解取错），而不只是因为它真的干净。
+        // 这一条是防「假绿」的，不是防「脏」的。
+        assertThat(transactionalSites(PositivelyTransactionalFixture.class))
+                .as("阳性对照：扫描器必须能看见夹具上的 @Transactional")
+                .isNotEmpty();
+
+        List<String> sites = new ArrayList<>();
+        for (Class<?> bean : criticalSectionBeans) {
+            sites.addAll(transactionalSites(bean));
+        }
+        assertThat(sites)
+                .as("订单锁临界区调用链上出现了 @Transactional —— 提交会晚于锁释放，"
+                        + "查重随即失效、同一 OrderId 将插 2 行（D#1 / three-layers.md §D.1）。"
+                        + "若确有需要，先改 §D.1 并重跑 A3 的 A-S2a-1c，不要直接改这里")
+                .isEmpty();
+    }
+
+    /** 扫描一个类上直标的 {@code @Transactional}：类级 + 全部已声明方法级（**含私有**）。 */
+    private static List<String> transactionalSites(Class<?> bean) {
+        List<String> sites = new ArrayList<>();
+        if (hasTransactional(bean.getAnnotations())) {
+            sites.add(bean.getSimpleName() + "（类级）");
+        }
+        for (Method m : bean.getDeclaredMethods()) {
+            if (hasTransactional(m.getAnnotations())) {
+                sites.add(bean.getSimpleName() + "#" + m.getName() + "()");
+            }
+        }
+        return sites;
+    }
+
+    /**
+     * 按**简单名**判，同时覆盖 Spring 的 {@code org.springframework.transaction.annotation.Transactional}
+     * 与 Jakarta 的 {@code jakarta.transaction.Transactional} —— 两者语义在这里一样坏。
+     */
+    private static boolean hasTransactional(Annotation[] annotations) {
+        for (Annotation a : annotations) {
+            if ("Transactional".equals(a.annotationType().getSimpleName())) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** 阳性对照夹具。**故意**带注解；它是本文件里唯一合法出现 {@code @Transactional} 的地方。 */
+    @Transactional
+    private static class PositivelyTransactionalFixture {
     }
 
     /** 计数器的当前值；没注册过该 (name, tags) 组合时按 0 —— 即「这条时间序列不存在」。 */
