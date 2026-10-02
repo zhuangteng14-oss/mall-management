@@ -1,12 +1,8 @@
 package com.minke.mallmanagement_controller;
 
-import com.minke.mallmanagement_service.DistributedLockService;
-import com.minke.mallmanagement_service.DistributedLockService.LockName;
 import com.minke.mallmanagement_service.GoodsCacheService;
 import com.minke.mallmanagement_service.GoodsTypeCacheService;
-import com.minke.mallmanagement_service.OrderAction;
-import com.minke.mallmanagement_service.OrderStateMachine;
-import com.minke.mallmanagement_service.OrderTransitionRecorder;
+import com.minke.mallmanagement_service.OrderService;
 import com.minke.mallmanagement_service.UploadStorage;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
@@ -36,21 +32,14 @@ public class MallManagementGoodsController {
     @Autowired
     private GoodsCacheService goodsCacheService;
 
+    // ===== 订单域（三层重构第一笔，2026-10-02）=====
+    // 订单域的全部 SQL / 分支 / 文案已下沉到 OrderService（数据访问再下沉到 OrderDao）。
+    // ⚠️ 本类**不再**持有 DistributedLockService / OrderStateMachine / OrderTransitionRecorder：
+    // 三者的编排（取锁、生成 CAS 语句、观测投递）都已随方法体进 Service。
+    // 切片侧配套见 AbstractSmokeTest 的 @Import —— OrderService / OrderDao 用**真 bean**，
+    // 因为 OrderPayIfUpSmokeTest 要钉的是「rows → 文案」这段映射，mock 掉就只剩一句空命题。
     @Autowired
-    private DistributedLockService distributedLockService;
-
-    // ===== B3：订单状态机与它的观测出口 =====
-    // 两个都是 @Service/@Component ⇒ **不在 @WebMvcTest 切片里**，故 AbstractSmokeTest 必须
-    // 提供替身，否则全部 smoke 用例在**上下文加载期**就红（该基类里这个坑已记录过五次）。
-    // 其中 OrderStateMachine 用的是**真 bean**（@Import）：它无依赖，且让 golden copy 钉住的
-    // 那条 UPDATE 语句真的流经 smoke 用例 —— 比给它一个返回 null 的替身强得多。
-
-    @Autowired
-    private OrderStateMachine orderStateMachine;
-
-    /** 观测编排（读回三位 / 推前后态 / 投递时间线）。本类只管分支与文案，观测全权交给它。 */
-    @Autowired
-    private OrderTransitionRecorder orderTransitionRecorder;
+    private OrderService orderService;
 
     @Value("${app.upload-dir:${user.dir}/src/main/resources/static/img/}")
     private String uploadDir;
@@ -409,11 +398,11 @@ public class MallManagementGoodsController {
     }
 
     //创建订单时要录入数据库的信息
-    // ⚠️ B2：整段临界区在 Redisson 锁下执行（锁 key = OrderId，指标 tag = order-add）。
-    //    锁**单独**拦不住重复行 —— 20 个请求排队进场、每个照样裸 INSERT，只是把并发变成串行、
-    //    仍插 20 行；本笔的修复是「锁 + 临界区内先查后插」**两条，缺一不可**（见 orderAddLocked）。
-    //    拿不到锁（Redis 不可达 / 争用超时）⇒ fail-open 直行；对 orderAdd 的完整推演见
-    //    DistributedLockService.runLocked 的 javadoc。
+    // 方法体（锁编排 + 临界区内查重 + INSERT + 出生观测 + 全部文案）搬到 OrderService.orderAdd()。
+    // 本方法只保留路由与入参绑定 —— ⚠️ 形参名与顺序**必须**逐字保留：@RequestParam 未写显式名，
+    // 全靠形参名解析（-parameters 已开）。
+    // ⚠️ 取锁、查重、SELECT/INSERT 三段现在都在 Service 侧：本类**不再**引 DistributedLockService，
+    //    也**不再**直接引 JdbcTemplate 做订单 SQL —— 这是「数据出口收成一处」在本域的落地。
     @PostMapping("/orderAdd")
     public Map<String, Object> orderAdd(
             @RequestParam("CustomerId") String CustomerId,
@@ -426,251 +415,68 @@ public class MallManagementGoodsController {
             @RequestParam("DeliveryIf") int DeliveryIf,
             @RequestParam("ReceiveIf") int ReceiveIf
     ) {
-        return distributedLockService.runLocked(LockName.ORDER_ADD, OrderId, () -> orderAddLocked(
-                CustomerId, MerchantId, OrderId, Price, ProductInformation, Images, PayIf, DeliveryIf, ReceiveIf));
-    }
-
-    /**
-     * orderAdd 的临界区。**原方法体逐字未动**（B2 的边界：只加一层锁，不动既有分支），
-     * 仅在开头**插入**了查重。
-     *
-     * <p>⚠️ 本方法**不得**加 {@code @Transactional}（加了则本笔的修复立刻失效）：事务的提交发生在
-     * 方法返回**之后**，而锁在 {@code runLocked} 的 {@code finally} 里、即方法返回**之前**已释放 ——
-     * 后进者拿到锁后的 {@code COUNT(*)} 在 RR 下读的是自己事务开始时的快照、**看不到前一个未提交的行**
-     * ⇒ 仍插 2 行。不加事务时 autocommit 让 INSERT 在释放锁**之前**就提交，这正是查重成立的前提。
-     */
-    private Map<String, Object> orderAddLocked(
-            String CustomerId, String MerchantId, String OrderId, float Price,
-            String ProductInformation, String Images, int PayIf, int DeliveryIf, int ReceiveIf) {
-        Map<String, Object> result = new HashMap<>();
-        // ⚠️ 临界区内先查后插 —— 这一段是 B2 对「同一 OrderId 落库 2 行」的真修复（A-S2a-1）：
-        //    · 只有锁：并发变串行，但每个请求照旧裸 INSERT ⇒ 仍插 20 行；
-        //    · 只有查重：查与插之间的 TOCTOU 窗口仍在 ⇒ 两个请求可以同时查到 0 行。
-        //    OrderId 由前端每次下单生成（ProductPage.vue 的 generateOrderId()）、**不复用** ⇒
-        //    查重不会挡掉正常下单，只会挡「同一 OrderId 的重复提交」。
-        try {
-            Integer sameOrderId = GoodjdbcTemplate.queryForObject(
-                    "SELECT COUNT(*) FROM mall_management_sql.`order` WHERE OrderId = ?",
-                    Integer.class, OrderId);
-            if (sameOrderId != null && sameOrderId > 0) {
-                result.put("success", false);
-                result.put("msg", "订单已存在，请勿重复提交");
-                return result;
-            }
-        } catch (Exception e) {
-            // 查重本身失败（例如库连不上）：**不阻断下单**，继续走原来的 INSERT 路径 ——
-            // 与本次改动之前的行为一致（原先没有这一步，照样 INSERT，由下面的 catch 兜住）。
-            // 这条 fail-open 与本方法的锁一样是刻意的：查重是「防重复」的加固，不是下单的前置条件。
-            e.printStackTrace();
-        }
-
-        String sql = "INSERT INTO mall_management_sql.order " +
-                "(OrderId, CustomerId, MerchantId, Price, ProductInformation, Images, PayIf, DeliveryIf, ReceiveIf, CreateTime) " +
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())";
-        try {
-            int rows = GoodjdbcTemplate.update(sql,
-                    OrderId,
-                    CustomerId,
-                    MerchantId,
-                    Price,
-                    ProductInformation,
-                    Images,
-                    PayIf,
-                    DeliveryIf,
-                    ReceiveIf
-            );
-            if (rows > 0) {
-                result.put("success", true);
-                result.put("msg", "订单添加成功");
-                // B3：只在**真的插进去之后**观测出生。放在这里而不是方法开头，是因为
-                // 「订单已存在」那条早退分支并没有产生一个新状态，不该记成一次出生。
-                orderTransitionRecorder.created(OrderId, PayIf, DeliveryIf, ReceiveIf);
-            } else {
-                result.put("success", false);
-                result.put("msg", "订单添加失败");
-            }
-        } catch (Exception e) {
-            e.printStackTrace();
-            result.put("success", false);
-            result.put("msg", "数据库错误：" + e.getMessage());
-        }
-        return result;
+        return orderService.orderAdd(
+                CustomerId, MerchantId, OrderId, Price, ProductInformation, Images, PayIf, DeliveryIf, ReceiveIf);
     }
 
     //购物车搜索订单
+    // 方法体（SQL / try-catch / 返回结构）逐字搬到 OrderService.orderSelect()，本方法只保留路由与委托
+    // —— 与 goodsSelect / goodsSelectHome / GoodsProductCodeSelect 同款（「方法体搬到…本方法只保留路由与委托」）。
     @PostMapping("/orderSelect")
     public Map<String, Object> orderSelect(
             @RequestParam("customerId") String customerId
     ) {
-        Map<String, Object> result = new HashMap<>();
-        String sql = "SELECT OrderId, CustomerId, MerchantId, Price, ProductInformation, Images, PayIf, DeliveryIf, ReceiveIf,CreateTime,SettlementDate " +
-                "FROM mall_management_sql.`order` WHERE CustomerId = ? AND ReceiveIf != 1 ORDER BY CreateTime DESC";
-        try {
-            List<Map<String, Object>> list = GoodjdbcTemplate.queryForList(sql, customerId);
-            result.put("success", true);
-            result.put("list", list);
-        } catch (Exception e) {
-            e.printStackTrace();
-            result.put("success", false);
-            result.put("msg", "查询失败：" + e.getMessage());
-        }
-        return result;
+        return orderService.orderSelect(customerId);
     }
 
     //订单中心搜索订单
     @PostMapping("/orderDeliveryIfSelect")
     public Map<String, Object> orderDeliveryIfSelect(@RequestParam("merchantId") String merchantId) {
-        Map<String, Object> result = new HashMap<>();
-        String sql = "SELECT OrderId, CustomerId, MerchantId, Price, ProductInformation, Images, PayIf, DeliveryIf, ReceiveIf,CreateTime,SettlementDate " +
-                "FROM mall_management_sql.`order` WHERE MerchantId = ? AND ReceiveIf != 1 ORDER BY CreateTime DESC";
-        try {
-            List<Map<String, Object>> list = GoodjdbcTemplate.queryForList(sql, merchantId);
-            result.put("success", true);
-            result.put("list", list);
-        } catch (Exception e) {
-            e.printStackTrace();
-            result.put("success", false);
-            result.put("msg", "查询失败：" + e.getMessage());
-        }
-        return result;
+        return orderService.orderDeliveryIfSelect(merchantId);
     }
 
     //商家端已经完成订单信息
+    // ⚠️ status 的默认值 "active" 留在本方法：它是**入参绑定**（@RequestParam 的 defaultValue），
+    //    不是业务规则 —— 搬进 Service 就得在 Service 里再写一遍默认值，两处会漂移。
     @PostMapping("/orderDeliverySelect")
     public Map<String, Object> orderDeliverySelect(
             @RequestParam("merchantId") String merchantId,
             @RequestParam(value = "status", defaultValue = "active") String status
     ) {
-        Map<String, Object> result = new HashMap<>();
-        String sql;
-        if ("completed".equals(status)) {
-            sql = "SELECT OrderId, CustomerId, MerchantId, Price, ProductInformation, Images, PayIf, DeliveryIf, ReceiveIf,SettlementDate " +
-                    "FROM mall_management_sql.`order` WHERE MerchantId = ? AND ReceiveIf = 1 ORDER BY CreateTime DESC";
-        } else {
-            sql = "SELECT OrderId, CustomerId, MerchantId, Price, ProductInformation, Images, PayIf, DeliveryIf, ReceiveIf,SettlementDate " +
-                    "FROM mall_management_sql.`order` WHERE MerchantId = ? AND ReceiveIf != 1 ORDER BY CreateTime DESC";
-        }
-        try {
-            List<Map<String, Object>> list = GoodjdbcTemplate.queryForList(sql, merchantId);
-            result.put("success", true);
-            result.put("list", list);
-        } catch (Exception e) {
-            e.printStackTrace();
-            result.put("success", false);
-            result.put("msg", "查询失败：" + e.getMessage());
-        }
-        return result;
+        return orderService.orderDeliverySelect(merchantId, status);
     }
 
 
     //历史订单信息页面信息
+    // 方法体（含「用户ID不能为空」那条先于查库的分支）逐字搬到 OrderService.historicalOrdersSelect()。
     @PostMapping("/historicalOrdersSelect")
     public Map<String, Object> historicalOrdersSelect(@RequestParam("customerId") String customerId) {
-        Map<String, Object> result = new HashMap<>();
-        if (customerId == null || customerId.trim().isEmpty()) {
-            result.put("success", false);
-            result.put("msg", "用户ID不能为空");
-            return result;
-        }
-        String sql = "SELECT OrderId, MerchantId, ProductInformation, Images, SettlementDate " +
-                "FROM mall_management_sql.`order` " +
-                "WHERE CustomerId = ? AND ReceiveIf = 1 " +
-                "ORDER BY SettlementDate DESC";
-        try {
-            List<Map<String, Object>> list = GoodjdbcTemplate.queryForList(sql, customerId);
-            result.put("success", true);
-            result.put("list", list);
-        } catch (Exception e) {
-            e.printStackTrace();
-            result.put("success", false);
-            result.put("msg", "查询失败：" + e.getMessage());
-        }
-        return result;
+        return orderService.historicalOrdersSelect(customerId);
     }
 
 
 
     //付款按钮更新信息
-    // ⚠️ B2：方法体在 Redisson 锁下执行（锁 key = orderId，指标 tag = order-pay）。
-    //    条件 UPDATE（AND PayIf = 0）本来就是正确的并发控制 ⇒ **锁在这里净正确性收益为 0**；
-    //    买到的是「同单状态流转串行化 + 统一的取锁观测口径」，代价是每请求多一次 Redis 往返。
-    //    拿不到锁 ⇒ fail-open 直行 ⇒ 争用下仍恰好一个成功、其余 19 个返回**原**文案 ——
-    //    A-S3-2 的守门对象正是这条：锁不许新发任何拒绝文案。
+    // 方法体（取锁 + 状态机 SQL + 分支 + 文案 + 观测）逐字搬到 OrderService.payIfUp()。
+    // ⚠️ 锁 tag = order-pay 随之进 Service：A3 的 A-S2a-1a 是按 tag 读锁指标的，不许换。
+    // ⚠️ 两条文案「付款成功」/「订单不存在或已付款」也被 A-S3-2 逐字断言，且已随方法下沉
+    //    （不在本类留参数）—— 理由是文案与它对应的分支不可分，拆开会让同一处改动要改两处。
     @PostMapping("/orderPayIfUp")
     public Map<String, Object> orderPayIfUp(@RequestParam("orderId") String orderId) {
-        return distributedLockService.runLocked(LockName.ORDER_PAY, orderId, () -> orderPayIfUpLocked(orderId));
-    }
-
-    /** orderPayIfUp 的临界区：**响应文案与分支逐字未变**（B3 只把 SQL 字面量收敛进状态机，并加上观测）。 */
-    private Map<String, Object> orderPayIfUpLocked(String orderId) {
-        return casTransition(OrderAction.PAY, orderId, "付款成功", "订单不存在或已付款");
+        return orderService.payIfUp(orderId);
     }
 
     //收货按钮更新信息
-    // ⚠️ B2：锁 key = orderId，指标 tag = order-receive。净正确性收益为 0（理由同 orderPayIfUp）。
+    // ⚠️ B2：锁 tag = order-receive。净正确性收益为 0（理由同付款）。
     @PostMapping("/orderReceiveIfUp")
     public Map<String, Object> orderReceiveIfUp(@RequestParam("orderId") String orderId) {
-        return distributedLockService.runLocked(LockName.ORDER_RECEIVE, orderId, () -> orderReceiveIfUpLocked(orderId));
-    }
-
-    /** orderReceiveIfUp 的临界区：**响应文案与分支逐字未变**（B3 只把 SQL 字面量收敛进状态机，并加上观测）。 */
-    private Map<String, Object> orderReceiveIfUpLocked(String orderId) {
-        return casTransition(OrderAction.RECEIVE, orderId, "收货成功", "订单未付款或已收货");
+        return orderService.receiveIfUp(orderId);
     }
 
     //发货按钮更新信息
-    // ⚠️ B2：锁 key = orderId，指标 tag = order-delivery。净正确性收益为 0（理由同 orderPayIfUp）。
+    // ⚠️ B2：锁 tag = order-delivery。净正确性收益为 0（理由同付款）。
     @PostMapping("/orderDeliveryIfUp")
     public Map<String, Object> orderDeliveryIfUp(@RequestParam("orderId") String orderId) {
-        return distributedLockService.runLocked(LockName.ORDER_DELIVERY, orderId, () -> orderDeliveryIfUpLocked(orderId));
-    }
-
-    /** orderDeliveryIfUp 的临界区：**响应文案与分支逐字未变**（B3 只把 SQL 字面量收敛进状态机，并加上观测）。 */
-    private Map<String, Object> orderDeliveryIfUpLocked(String orderId) {
-        return casTransition(OrderAction.DELIVER, orderId, "发货成功", "订单不存在或未付款或已发货/已收货");
-    }
-
-    // ==================== B3：状态转移的观测出口 ====================
-
-    /**
-     * 三个 CAS 端点的**共同临界区**。B2 之前它们是三段逐字重复的方法体；B3 把 SQL 收敛进
-     * {@link OrderStateMachine} 后，三段之间只剩「动作」与「两条文案」不同，故合成一处 ——
-     * 不是为省行数，而是为了让「同一处改动要同时改三遍、漏一遍就静默漂移」这件事不再可能。
-     *
-     * <p>⚠️ **分支与文案一个字节都没变**：{@code rows > 0} → 成功文案；{@code rows == 0} →
-     * 原样的失败文案（三条各不相同，故由参数传入）；异常 → {@code "数据库错误：" + e.getMessage()}。
-     * 这是 A3 的 A-S3-2（20 并发支付里恰好 19 个返回逐字「订单不存在或已付款」）保持绿的前提。
-     *
-     * <p>观测全部委托给 {@link OrderTransitionRecorder}，**在 UPDATE 返回的这一处立刻调用**
-     * （即仍在临界区内）—— 理由见该类注释。本方法因此只剩「执行 + 分支 + 文案」。
-     *
-     * <p>观测路径**全程 fail-soft**：读回失败、投递失败，都不影响响应体。
-     * 状态位已经在 {@code order} 表里改完了，这才是真值；时间线与指标是过程记录。
-     */
-    private Map<String, Object> casTransition(OrderAction action, String orderId,
-                                              String okMsg, String noRowsMsg) {
-        Map<String, Object> result = new HashMap<>();
-        // SQL 由状态机生成，与 B2 之前硬编码的字面量逐字符相同 ——
-        // 由 OrderStateMachineTest.updateSqlIsByteForByteTheLegacyLiteral 钉死。
-        String sql = orderStateMachine.updateSql(action);
-        try {
-            int rows = GoodjdbcTemplate.update(sql, orderId);
-            if (rows > 0) {
-                result.put("success", true);
-                result.put("msg", okMsg);
-                orderTransitionRecorder.applied(action, orderId);
-            } else {
-                result.put("success", false);
-                result.put("msg", noRowsMsg);
-                // 守卫没命中：重复流转 / 单不存在。**既有行为**，本笔不新增任何拒绝文案。
-                orderTransitionRecorder.rejected(action, orderId);
-            }
-        } catch (Exception e) {
-            e.printStackTrace();
-            result.put("success", false);
-            result.put("msg", "数据库错误：" + e.getMessage());
-            orderTransitionRecorder.errored(action, orderId);
-        }
-        return result;
+        return orderService.deliveryIfUp(orderId);
     }
 }
