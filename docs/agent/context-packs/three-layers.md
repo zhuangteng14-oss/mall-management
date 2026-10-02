@@ -16,7 +16,7 @@
 |---|---|
 | **Controller** | 只做入参绑定 / 分支 / 文案 |
 | **Service** | 业务规则、事务边界、**校验** |
-| **DAO** | 数据访问出口；消灭硬编码 schema 名（**开题时记 39，2026-10-02 实测 45**，见 §F#1）。⚠️ 商品域只做到**部分**收敛：内联 8 条已进 `GoodsDao`，四个缓存读路径与 `goodstype` 的语句仍留在两个 Cache Service（那是 `@Cacheable` 的落点）—— 该域因此有**两条**数据访问路径，不是「唯一出口」 |
+| **DAO** | 数据访问出口；消灭硬编码 schema 名（**开题记 39；2026-10-02 复测仍 39，但已由 2 个文件散成 7 个**，见 §F#1）。⚠️ 商品域只做到**部分**收敛：内联 8 条已进 `GoodsDao`，四个缓存读路径与 `goodstype` 的语句仍留在两个 Cache Service（那是 `@Cacheable` 的落点）—— 该域因此有**两条**数据访问路径，不是「唯一出口」 |
 
 **另两层的归宿**（`defect-survey.md §三 病 0` 说「四层都缺」）：
 
@@ -72,9 +72,9 @@ TD-01（ddl-auto）、TD-03（回滚规则矛盾）、TD-04/06/07/08（锚点与
 | # | 项 | 位置 | 为什么是 P0 | 归属 | 工作量 |
 |---|---|---|---|---|---|
 | 1 | **L2 条目永不过期** | `CacheConfig.java:110-112` + 默认 profile 无 TTL | `time-to-live` = null ⇒ `defaultCacheConfig()` ⇒ **TTL = -1**。`goodstype::all` 写入后永久陈旧，L1 60s 到期还从 L2 读回永不失效的旧值 | ✅ **已修**（`743ab4c`，A 批）—— 原归属「并行（环境层） ⚠️ 别拖到三层后」 | 小 |
-| 2 | **失败被当值缓存（B+E 合成链）** | `GoodsCacheService:186-198` + `:211-219` + 前提 B/E | collation 大小写不敏感 + 三元组无唯一约束 ⇒ 多行 ⇒ `queryForMap` 抛 ⇒ 被当值缓存 ⇒ `priceByTriple` 退化成「把失败缓存满整个 TTL」 | ✅ **已修**（`88a14e4`，PR #10）—— 原归属「三层内（DAO / Service）」。⚠️ **只关掉「失败被固化到 TTL」这一环**：第 1/2 环（collation + 三元组无唯一约束）仍在，**失败本身仍存在** | 小 |
+| 2 | **失败被当值缓存（B+E 合成链）** | `GoodsCacheService.priceByTriple:243-264`（`@Cacheable` `:241-242`；0 行→null `:250-253`；多行抛 `:255-261`）+ 前提 B/E | collation 大小写不敏感 + 三元组无唯一约束 ⇒ 多行 ⇒ `queryForMap` 抛 ⇒ 被当值缓存 ⇒ `priceByTriple` 退化成「把失败缓存满整个 TTL」 | ✅ **已修**（`88a14e4`，PR #10）—— 原归属「三层内（DAO / Service）」。⚠️ **只关掉「失败被固化到 TTL」这一环**：第 1/2 环（collation + 三元组无唯一约束）仍在，**失败本身仍存在** | 小 |
 | 3 | **同名文件静默跳过，DB 记别人的图** | `GoodsService:109-120`（`UploadStorage.store` → `GoodImg` 拼接；三层前为 `GoodsController:100-111`）、`UserController:197-199,205` | 商家 B 传同名 `1.jpg` → 文件不落盘、DB 指向**商家 A 的图**、返回 `success:true` | ✅ **已修**（`efe7959`，A 批，同名策略 C）—— 原归属「三层内（Controller / Service）」，与 B#5 同一件事 | 小 |
-| 4 | **上传目录不可写 ⇒ 整个应用起不来** | `ImgPath.java:23-27`（`@PostConstruct`） | 非核心功能拖死服务，无降级 | ✅ **已修**（`70eace2`，A 批，启动降级）—— 原归属「三层内（Service，启动期）」 | 小 |
+| 4 | **上传目录不可写 ⇒ 整个应用起不来** | `ImgPath.java:45-64`（`@PostConstruct`） | 非核心功能拖死服务，无降级 | ✅ **已修**（`70eace2`，A 批，启动降级）—— 原归属「三层内（Service，启动期）」 | 小 |
 | 5 | **`getUserInfo` null ⇒ HTTP 200 + 0 字节** | 全仓 `ResponseBodyAdvice` / `@ControllerAdvice` = 0 | 写路径整段在 `if (body != null)` 内 ⇒ 前端拿「成功」但无内容 | **三层内（全局异常出口）** | 小 |
 
 ## A′. 与三层并行 —— 安全 / 环境
@@ -94,7 +94,7 @@ TD-01（ddl-auto）、TD-03（回滚规则矛盾）、TD-04/06/07/08（锚点与
 | 3 | `goodstype.GoodTypeNew` 不许显式传 NULL | `mall_management_sql.sql:76` | 三层内（Service 校验）。_行为本身待验，见「待验」_ | 小 |
 | 4 | `login.Id` 唯一性（前提 C） | 无约束，客户端直传 `userid` | 三层内（Service）；DB 侧加 UNIQUE 属 schema 变更 | 小 / 中 |
 | 5 | 三处上传提取 basename + 类型白名单 | `GoodsService:105-117`（goodsAdd）/ `:265-284`（goodsUp）、`UserController:193-199`（三层前为 `GoodsController:106-113,282-287`） | 三层内（Service）。⚠️ **路径穿越仍待验**，不得写成「可穿越」 | 小 |
-| 6 | `l2Put` 冷却路径补指标 | `TwoLevelCache.java:220-233` | 并行（观测） | 小 |
+| 6 | `l2Put` 冷却路径补指标 | `TwoLevelCache.java:221-234` | 并行（观测） | 小 |
 | 7 | `L2HealthProbe.down` 改 CAS | `L2HealthProbe.java:154-177` | 并行（观测） | 小 |
 | 8 | 文档锚点 → 符号名 | `defect-survey.md §五` | 独立（文档）。**TD-17 已于 2026-09-30 改完**；TD-04/06/07 待改 | 小～中 |
 
@@ -117,7 +117,7 @@ TD-01（ddl-auto）、TD-03（回滚规则矛盾）、TD-04/06/07/08（锚点与
 | 2 | 无全局异常处理 / 无拦截器 | `@ControllerAdvice` / `@ExceptionHandler` / `HandlerInterceptor` = **0** | 新层抛出的异常无统一出口。**2026-09-30 实测（限定版）**：**框架层**错误出口已实测 —— 缺必填参数→**400**、未知路由→**404**，两者均落 **Boot 默认错误体**（`{timestamp,status,error,path}`，非本仓自造）；**业务层**异常出口**未验** | **三层内（三层产出）** | 中 |
 | 3 | 两套 CORS 机制并存 | `ImgConfig` 全局 `CorsFilter` + 5 处裸 `@CrossOrigin`（`GoodsController:38` / `OrderController:24` / `UserController:20` / `MessageController:18` / `HealthController:37`） | CorsFilter 先于 DispatcherServlet ⇒ handler 级**静默失效** | **三层内（拦截器层）** | 小 |
 | 4 | `ddl-auto=update` + 零 `@Entity` | `application.properties:12`、`pom.xml:51`（TD-01） | 一旦有人加 `@Entity` 即反向 `ALTER TABLE`；`show-sql=true` 同刻全量打 SQL。**DAO 选型已定（`### D.4`）⇒ 不引 JPA ⇒ 本风险不会自行发生**；⚠️ 但 `spring-boot-starter-data-jpa` **不删**（`agent.md:36-37`「禁止删除旧配置」） | **三层前（定 DAO）** ✅ **本笔落定：`JdbcClient` 短期 + jOOQ 长期**（`### D.4`）；⚠️ **结论本笔落、实现随三层第一笔（订单域开工）** | 小 |
-| 5 | `app.upload-dir` 默认值三处重复 | `ImgPath:18` / `GoodsService:69` / `UserController:30` | 改一处必漏两处（同 TD-06 形态）。⚠️ 商品域那一处在 2026-10-02 从 `GoodsController` 的 `@Value` **字段**（`:46`）搬成了 `GoodsService` 构造器的 `@Value` **形参** —— 仍是三份，位置换了 | 三层内（配置收敛） | 小 |
+| 5 | `app.upload-dir` 默认值三处重复 | `ImgPath:17` / `GoodsService:69` / `UserController:30` | 改一处必漏两处（同 TD-06 形态）。⚠️ 商品域那一处在 2026-10-02 从 `GoodsController` 的 `@Value` **字段**（`:46`）搬成了 `GoodsService` 构造器的 `@Value` **形参** —— 仍是三份，位置换了 | 三层内（配置收敛） | 小 |
 | 6 | 落库 URL 前缀硬编码且未 URL 编码 | `GoodsService:120,283`、`UserController:205`、另 `UserController:59`（三层前商品侧为 `GoodsController:111,312`） | 换机 / 反代全体图片失效；中文 / 空格文件名拼非法 URL（仓内既有 `色款.jpg`） | 三层内（Service / 配置） | 小 |
 | 7 | 无 logger（`printStackTrace` × 20 + `println` × 5）、无日志配置、`open-in-view` 默认 true | 病 D | 观测层欠账 | 并行（观测） | 小～中 |
 | 8 | 无迁移工具 / 无 Dockerfile | 全仓 0 命中 | 属环境层 | 并行（环境层） | 中 |
@@ -133,7 +133,7 @@ TD-01（ddl-auto）、TD-03（回滚规则矛盾）、TD-04/06/07/08（锚点与
 | **理由 ① 锁外事务** | 事务的提交发生在**方法返回之后**，而锁在 `runLocked` 的 `finally` 里、即方法**返回之前**已释放 ⇒ 后进者拿到锁后的 `SELECT COUNT(*)` 在 **RR** 下读的是自己事务开始时的快照、**看不到前一个未提交的行** ⇒ 仍插 2 行。**不加事务时 autocommit 让 INSERT 在释放锁之前就提交** —— 这正是临界区查重成立的前提（`A-S2a-1b`：20 并发同 `OrderId` 落库 **20 → 1**，靠的就是这一条） |
 | **理由 ② 跨 bean 调用** | 临界区是**传给另一个 bean**（`DistributedLockService`）的 **lambda**，锁的持有者是那个 bean、不是本方法 ⇒ **没有「锁内的 bean 方法边界」可以挂事务**。且三个 Controller 被测试**钉死为无 AOP 代理**（`MallManagementApplicationTests:117` `goodsControllerIsNotAopProxied` / `:137` `messageControllerIsNotAopProxied` / `:157` `orderControllerIsNotAopProxied`）⇒ 注解式 AOP 在这里**结构上不可用**，锁只能是方法体内的显式调用（同类内自调用同样不走代理，同仓 `GoodsService:43-52` 的同一论证；⚠️ 2026-10-02 前该论证在 `GoodsController:236`，随 `productCodePrice` 的 catch 一起下沉） |
 | **⚠️ 不可外推** | 本禁令**只管被打锁的方法体**。它的反面是 **C#2**：`goodsAdd`（**没有**打锁）的事务边界**应当**加 `@Transactional` —— 只记住半边就会踩另一边 |
-| **现状** | 全项目**唯一一处「禁止用标准注解」**。`orderAddLocked` 目前**未加**（`亲读`：该方法体上无 `@Transactional`）；`@Transactional` 全仓 **10 处**（引 `selection-status.md §2`），均不在此方法上 |
+| **现状** | 全项目**唯一一处「禁止用标准注解」**。`orderAddLocked` 目前**未加**（`亲读`：该方法体上无 `@Transactional`）；`@Transactional` **注解**全仓只有 **1 处**（`UserController:57`，`loginAdd`），不在此方法上。⚠️ 原记「全仓 10 处」已在 **2026-10-02 实测订正为 1 处** —— 10 是**把 javadoc / 注释里提到 `@Transactional` 的地方也数了进去**（`grep -n "@Transactional"` 现得 18 行，其中仅 1 行是真注解）；同源订正见 `selection-status.md §2` 与 `concurrency-map.md §1` 的「仅 1 处」 |
 
 ### D.4 📌 登记：DAO 选型结论（2026-09-30 本笔落定）
 
@@ -163,7 +163,7 @@ TD-01（ddl-auto）、TD-03（回滚规则矛盾）、TD-04/06/07/08（锚点与
 
 | # | 项 | 位置 | 为什么不能提前做 |
 |---|---|---|---|
-| 1 | **SQL 硬编码 schema 名 45 处**（2026-10-02 实测；原记 39） | `UserController` 16 + `OrderDao` 10 + **`GoodsDao` 6**（2026-10-02 由 `GoodsController` 搬入，处数不变）+ `GoodsCacheService` 5 + `GoodsTypeCacheService` 3 + `OrderTimelineWriter` 3 + `OrderStateMachine` 2；`MessageController` **0** ⇒ 同进程脑裂（TD-13）。⚠️ 相较原记已**散到 7 个文件**（原 39 处集中在两个 Controller）—— 缓存笔与三层笔各带入一部分 | 抽 DAO 层时**自然**改完。⚠️ **本行与两笔的实际做法是一处已知矛盾**：订单笔（`OrderDao`）与商品笔（`GoodsDao`）的裁决都是「**逐字保留** schema 前缀，不顺手清」—— 理由是只清一域会造出「一半有前缀、一半没有」的中间态（`GoodsDao` 类 javadoc 有完整理由）。故本行说的「自然改完」**截至 2026-10-02 没有发生**；前缀的清除必须是**单独一笔跨四域**。列为三层前会让人以为要独立一笔重改 —— **比三层本身还大**。它是「为什么需要 DAO 层」的证据，不是它的前置 |
+| 1 | **SQL 硬编码 schema 名 39 处**（2026-10-02 实测；**与开题记的 39 相等**） | 口径 = **SQL 字面量**（不含注释 / javadoc 里的提及）。按域：**goods 14** = `GoodsDao` 6 + `GoodsCacheService` 5 + `GoodsTypeCacheService` 3；**order 9** = `OrderDao` 7 + `OrderStateMachine` 1 + `OrderTimelineWriter` 1；**`UserController` 16**；**`MessageController` 0** ⇒ 同进程脑裂（TD-13）。⚠️ **总数没变、分布全变**：开题时这 39 处**集中在 2 个 Controller**（`git show 9b87ab9` 实测 = `MallManagementGoodsController` **23** + `MallManagementUserController` **16**）—— 其中 goods 那份 23 里含**订单端点的 SQL 9 条**（`orderAdd` / 四个订单查询 / 三个 CAS UPDATE），2026-10-02 订单笔拆出后正好 **23 = goods 14 + order 9** ⇒ 文件数 **2 → 7**。⚠️ 若用 `grep -o "mall_management_sql\."` **连注释一起数**得 **46** 处（多出的 7 处是 javadoc / 注释），**不要**再把这个数当「SQL 处数」（原记的 45 就是这么来的：口径混用 —— 商品侧按字面量取 6、订单侧却按含注释取 10+3+2） | 抽 DAO 层时**自然**改完。⚠️ **本行与两笔的实际做法是一处已知矛盾**：订单笔（`OrderDao`）与商品笔（`GoodsDao`）的裁决都是「**逐字保留** schema 前缀，不顺手清」—— 理由是只清一域会造出「一半有前缀、一半没有」的中间态（`GoodsDao` 类 javadoc 有完整理由）。故本行说的「自然改完」**截至 2026-10-02 没有发生**；前缀的清除必须是**单独一笔跨四域**。列为三层前会让人以为要独立一笔重改 —— **比三层本身还大**。它是「为什么需要 DAO 层」的证据，不是它的前置 |
 
 ---
 
@@ -182,8 +182,8 @@ TD-01（ddl-auto）、TD-03（回滚规则矛盾）、TD-04/06/07/08（锚点与
 | **搜索 SQL**：`productSearch` 逐字 `OR GoodName LIKE` | 病 C（`:72`）；`api-contract.md:72` | **三层期间（DAO）** —— 参数化与 schema 前缀在抽 DAO 时自然改完（⚠️ 同 §F#1 的已知矛盾：两笔 DAO 的裁决都是「逐字搬运、不顺手改」，**DAO 已建而这两条一条都没改**） | ⏳ **未做** —— 现址 `GoodsDao.searchByKeyword`（`:193-207`，2026-10-02 由 `GoodsController:385-387` 的 SQL 构造搬入）：`keyword.trim().split("")` 每字符一个 OR；单引号即 SQL 语法错误；`SELECT *` 无 schema 前缀、无 `LIMIT` |
 | **身份伪造**：登录是**业务接口级判断**，不是框架鉴权 | 病 A；**BD-03** | **鉴权阶段**（**三层后单独做**，见「三层范围定义」） | ⏳ **未做** —— 32 个接口零鉴权、无拦截器、无 Spring Security |
 | **上传文件名**：**无 basename 提取**（路径穿越）+ 零类型白名单（可传 `.html` / `.svg`） | 病 B；本文 **B#5**；§七 Class A **#4** | **三层内（Service 校验层）；C3 复用** | ⏳ **未做** —— `UploadStorage.store()` 直接 `uploadDir.resolve(file.getOriginalFilename())`：**basename 与白名单两者都还在**（2026-09-30 复核）。已修的只有**同名策略**那一半（§七 Class A **#5** ✅ `efe7959`）。⚠️ **可穿越性仍待验** —— 取决于 Tomcat 是否在 `getSubmittedFileName()` 剥离路径段；探针出来前只能写「无校验」 |
-| **分页** | `api-contract.md:11`「无分页参数，列表接口全量返回」；病 C（`productSearch` / `goodsDe` 均无 `LIMIT`） | **C3 顺带** | ⏳ **未做** |
-| **订单幂等**：`orderAdd` 非幂等（`OrderId` 由调用方提供） | `api-contract.md:69`；**TD-14** | **C3 后** | ✅ **DB 面已做（2026-09-30 S1a，`1e2fcfa`）**：`uk_order_orderId` 已使「同单号重复插入」不可能。⏳ **接口面仍未做** —— 不同单号照旧每调一次插一行，幂等键仍由调用方负责（本文「约束 1」允许**新增索引**，S1a 正是依此落地） |
+| **分页** | `api-contract.md:15`「无分页参数，列表接口全量返回」；病 C（`productSearch` / `goodsDe` 均无 `LIMIT`） | **C3 顺带** | ⏳ **未做** |
+| **订单幂等**：`orderAdd` 非幂等（`OrderId` 由调用方提供） | `api-contract.md:77`（幂等列）/ `:101`（说明）；**TD-14** | **C3 后** | ✅ **DB 面已做（2026-09-30 S1a，`1e2fcfa`）**：`uk_order_orderId` 已使「同单号重复插入」不可能。⏳ **接口面仍未做** —— 不同单号照旧每调一次插一行，幂等键仍由调用方负责（本文「约束 1」允许**新增索引**，S1a 正是依此落地） |
 
 ### G.1 ⚠️ 前端鉴权显示 ≠ 安全边界
 
@@ -256,7 +256,7 @@ TD-01（ddl-auto）、TD-03（回滚规则矛盾）、TD-04/06/07/08（锚点与
 | `/order` | 4 / 8 | `orderSelect`、`orderDeliveryIfSelect`、`orderDeliverySelect`、`historicalOrdersSelect` |
 | `/health` | 0 / 1 | — |
 
-⇒ **这 24 个的护栏只有单测**（全项目 `@Test` **111** 处 / **15** 个测试类，见 `tech-debt.md` M4），而**单测不跑并发路径** ⇒ 三层改动它们时，A3 **不会替你报警**。
+⇒ **这 24 个的护栏只有单测**（全项目 `@Test` **135** 处 / **19** 个测试类，2026-10-02 实测，见 `tech-debt.md` M4），而**单测不跑并发路径** ⇒ 三层改动它们时，A3 **不会替你报警**。
 
 ⚠️ **「断言口径盖不到」≠「端点没被调到」** —— 两个已知实例是 **TD-15**（`loginAdd` 无 else）与 **TD-17**（三个状态位可直传出终态）：`tech-debt.md:224` 逐字把它们归因于「**都是 A3 的断言口径盖不到的地方**」。⚠️ 别把两者混为一谈 —— `loginAdd` 本身**就在** A3 的 B-2 段里被调（§H.1），漏的是**断言**，不是调用。
 

@@ -11,7 +11,7 @@
 
 全项目不存在任何形式的缓存层：无缓存依赖、无缓存配置、无缓存注解、无缓存管理器、无 Redis 连接。所有 32 个接口均直连 MySQL（`JdbcTemplate`）。
 
-## 2. 依赖实测（`pom.xml:32-68`）
+## 2. 依赖实测（`pom.xml:32-122`）
 
 `<dependencies>` 段共 7 项，全量列出：
 
@@ -33,7 +33,7 @@
 - `org.redisson:redisson` — 无
 - 任何其他缓存实现（EhCache、Hazelcast、Infinispan 等）— 无
 
-## 3. 配置实测（`application.properties`，共 13 行）
+## 3. 配置实测（`application.properties`，共 120 行）
 
 全文仅含应用名、端口、数据源、JPA 四类配置。**不存在**任何缓存相关配置项：
 
@@ -63,12 +63,12 @@
 
 | 接口 | 现状问题 | 证据 |
 |---|---|---|
-| `GET /goods/goodstype` | 商品类型字典，几乎不变但每次全表查 | `G:37-38`（**搬迁前坐标**；现 SQL 在 `GoodsTypeCacheService.listTypes()` `:46-47`，Controller 只剩 `G:47` 调用 —— 见下注） |
-| `POST /goods/goodsSelectHome` | 先全量查 `goods`，再**为每个商品单独查一次** `login` 取商家名（N+1，1+N） | 全量查 `G:184-185`，循环 `G:188-208`，内层查询 `G:194-200`（**均为搬迁前坐标**；现整段在 `GoodsCacheService.listHome()`，Controller 只剩 `G:176` 调用 —— 见下注） |
+| `GET /goods/goodstype` | 商品类型字典，几乎不变但每次全表查 | `G:37-38`（**搬迁前坐标**；现 SQL 在 `GoodsTypeCacheService.listTypes()` `:46-47`，Controller 只剩 `GoodsController:60` 的调用 —— 见下注） |
+| `POST /goods/goodsSelectHome` | 先全量查 `goods`，再**为每个商品单独查一次** `login` 取商家名（N+1，1+N） | 全量查 `G:184-185`，循环 `G:188-208`，内层查询 `G:194-200`（**均为搬迁前坐标**；现整段在 `GoodsCacheService.listHome()`，Controller 只剩 `GoodsController:103` 的一行委托 —— 见下注） |
 | `POST /message/conversations` | 查完会话列表后，**为每个会话单独查一次** `user_conversation_read`（N+1，1+N） | 外层查 `M:33`，循环 `M:35-66`，内层查询 `M:48-50` |
 | `POST /message/selectFriend` | 好友申请列表，每个申请人触发一次用户信息查询（N+1，**1+2N**） | 外层查 `M:249-251`，循环 `M:253-259`，内层调用 `M:255`（**搬迁前坐标**；2026-09-29 起整段在 `FriendCacheService.listRequests()` —— 见下注） |
 | `POST /message/friendSelect` | 好友列表，每个好友触发一次用户信息查询（N+1，**1+2N**） | 外层查 `M:320-322`，循环 `M:324-330`，内层调用 `M:326`（**搬迁前坐标**；2026-09-29 起整段在 `FriendCacheService.listFriends()` —— 见下注） |
-| `POST /goods/goodsSelect` | 商家商品列表，读多写少 | `G:166-167`（**搬迁前坐标**；现 SQL 在 `GoodsCacheService.listByMerchant()` `:142-143`，Controller 只剩 `G:164` 调用 —— 见下注） |
+| `POST /goods/goodsSelect` | 商家商品列表，读多写少 | `G:166-167`（**搬迁前坐标**；现 SQL 在 `GoodsCacheService.listByMerchant()` `:146` —— 方法体 `:143-156`，`@Cacheable` `:142`，Controller 只剩 `GoodsController:96` 的一行委托 —— 见下注） |
 
 **`1+2N` 的由来**：`selectFriend` / `friendSelect` 的内层调用的是私有方法 `getUserInfoById`（定义 `M:341-380`），**该方法自身含 2 条 SQL** —— `M:342-344` 查 `user`，再按用户类型走 `M:360-361`（`customerimage`）或 `M:364-365`（`merchantimage`）查头像。故每轮循环实际产生 **2** 条查询。（对照：`getOrCreateConversation` 也调它，但只调 1 次，是常数 3 条，**不构成 N+1**。）
 
@@ -80,12 +80,14 @@
 >
 > **2026-09-29 修正（`M:` 坐标 +11 漂移，与 `project-map.md §6` 同步）**：上表两个 friend 行与本段 `getUserInfoById` 的 `M:` 坐标**四组各漂移 +11** —— 原记 `M:238-240` / `M:242-248` / `M:244`（selectFriend）、`M:309-311` / `M:313-319` / `M:315`（friendSelect）、`M:330-369` / `M:331-333` / `M:349-350` / `M:353-354`（getUserInfoById），实测值为 `M:249-251` / `M:253-259` / `M:255`、`M:320-322` / `M:324-330` / `M:326`、`M:341-380` / `M:342-344` / `M:360-361` / `M:364-365`。**证据**：以 `git show 549f74f:MallManagementMessage.java` 逐行核对（该 commit 即上述代码搬迁前的状态），非推算。⚠️ **不是「整个 friend 块」**：`friendAdd` 自己的查重 SELECT（`M:215-216`）**未漂移** —— 下移发生在那两个读接口的方法体之后。⚠️ 搬迁后 Controller 里**仍有一份**同名同逻辑但保留 `catch` 的 `getUserInfoById`（现 `M:358-397`，供未上缓存的 `getOrCreateConversation` 使用）—— 两份并存是**有意的**，不是漏删，见 `cache-layer.md §4`。
 >
+> ⚠️ **2026-10-02 订正：本条「四组各漂移 +11」的说法作废 —— 不要把 +11 当换算规则。** 以 `git show 549f74f` 逐锚点比对，实测漂移**不是任何单一常数**：同一文件内 `friendAdd` 方法头 **+18**（207→225）、其查重 SELECT **+25**（215→240）、`selectFriend` 方法头 **+33**（247→280）、`getUserInfoById` 方法头 **+36**（341→377）、`friendSelect` 方法头 **+45**（317→362）。成因是两个方向相反的改动叠加：B1 把两个读接口的方法体**搬走**（该减），B2 给 `friendAdd` 外包 `runLocked` + 补注释（该增）。⇒ 本节（含 `project-map.md §6`）两族 `M:` 坐标一律**读到即重测**。**坐标本身未在本笔改写**（消息域三层笔负责），此处只作废换算规则。另：本行尾注「`M:215-216` 未漂移」亦已被 B2 推翻 —— 现址 `M:240-241`（`friendAddLocked` 内）。详见 `cache-layer.md §11 ㊷`。
+>
 > ⚠️ **同日起这两个接口的读路径已搬到 `FriendCacheService`**（`listFriends()` / `listRequests()`，B1 缓存笔）：上表 `M:` 值是**搬迁前**位置，沿它到 Controller 只会找到路由与响应组装，实现与 SQL 在 Service（`FriendCacheService:92` / `:120` / `:150-191`）。缓存把这两处的 `1 + 2N` 摊薄为「每 TTL 一次」，是**掩盖而非修复**。
 >
 > **2026-09-29 修正（三个 `G:` 行的失效 —— 与上面两条不同源，不是 +11 漂移）**：上表三个 goods 行的 `G:` 值失效的原因是**读路径已整段搬进 Service**，且**搬迁日期各不相同**（`goodstype` 为 2026-09-27 `79d2a0d`；`goodsSelectHome` / `goodsSelect` 为 2026-09-28 `da616a6` / `accfe6d`）—— 故这些值自搬迁起就不再指 SQL，`G:` 一律按**搬迁前**位置读：
-> - `goodstype`：`G:37-38` → SQL 在 `GoodsTypeCacheService.listTypes()` `:46-47`，Controller 只剩 `G:47` 的调用。
-> - `goodsSelectHome`：`G:184-185` / `G:188-208` / `G:194-200` → 整段在 `GoodsCacheService.listHome()`，Controller 只剩 `G:174` / `G:176`。⚠️ **旧 `G:188-208` 现在是 `goodsDe` 的方法体（写路径）** —— 照旧值去找读路径会读到 `DELETE FROM … goods / productsales`，这是本节三处 `G:` 失效里最该先修的一处（不是「读错行」，是「读到写」）。
-> - `goodsSelect`：`G:166-167` → SQL 在 `GoodsCacheService.listByMerchant()` `:142-143`，Controller 只剩 `G:160` / `G:164`。
+> - `goodstype`：`G:37-38` → SQL 在 `GoodsTypeCacheService.listTypes()` `:46-47`，Controller 只剩 `GoodsController:60` 的调用。
+> - `goodsSelectHome`：`G:184-185` / `G:188-208` / `G:194-200` → 整段在 `GoodsCacheService.listHome()`（`:67-105`：全量查 `:71-72`、循环 `:75-95`、内层 `:81-87`），Controller 只剩 `GoodsController:103` 的一行委托（经 `GoodsService.goodsSelectHome():164-166`）。⚠️ **旧 `G:188-208` 现在是 `goodsDe` 的方法体（写路径）** —— 照旧值去找读路径会读到 `DELETE FROM … goods / productsales`，这是本节三处 `G:` 失效里最该先修的一处（不是「读错行」，是「读到写」）。
+> - `goodsSelect`：`G:166-167` → SQL 在 `GoodsCacheService.listByMerchant()` `:146`（方法体 `:143-156`），Controller 只剩 `GoodsController:96` 的一行委托（经 `GoodsService.goodsSelect():159-161`）。
 > `cache-layer.md §11` 此前只就 `goodsHome` 一行标过这类「读路径已搬家」的失效，未覆盖上述三处；本节据此一次性补齐。
 
 ## 7. 若要引入缓存
