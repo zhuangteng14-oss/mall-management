@@ -1,7 +1,8 @@
-# DDD 包结构规划（**定稿，未执行**）
+# DDD 包结构规划（**已执行**）
 
-> **状态**：2026-10-02 定稿。**本文件只描述规划，未改动任何代码、未推分支。**
-> 执行时机另行安排；执行前请连同 `context-packs/three-layers.md` 一起读。
+> **状态**：2026-10-02 定稿，**同日已执行**（笔 1 挪包 `01df702`、笔 2 拆 Controller + URL 规范化，同一 PR）。本文件保留为**规划原稿**——正文的包结构、计数、URL 均为**规划当时**的状态。
+> ⚠️ **URL / 类名口径**：正文里的 `/mysqlLogin`、`/mysqlGoods` 是**笔 2 之前**的前缀；笔 2 已规范化为 `/user`（5）、`/goods`（商品 9）、`/order`（订单 8）。类名 `MallManagementGoodsController` / `MallManagementMessage` / `MallManagementUserController` 亦已分别改为 `GoodsController` / `MessageController` / `UserController`。故 A1 行「URL 一字不变」**已不成立**（现行契约见 `api-contract.md`）。
+> 执行前请连同 `context-packs/three-layers.md` 一起读。
 >
 > **素材范围**：`Mall-management-server/src/` 全量 `.java`（主代码 31 + 测试 20）、`import` 语句、包声明、Spring 注解、`pom.xml`、`application*.properties`。
 > **方法**：包级依赖图由脚本从**剥除注释与字符串字面量**后的源码提取（避免 javadoc 里的类名造出假边），每条可疑边再做 REAL-vs-javadoc 定向复核。无证据处标「待确认」。
@@ -37,7 +38,7 @@
 
 | # | 项 | 裁决 | 理由 |
 |---|---|---|---|
-| A1 | `MallManagementGoodsController`（17 端点） | **拆**：`goods.controller`(9) + `order.controller`(8) | 一个类干两件事，是当前架构最重的债。**URL 与形参一字不变——HTTP 契约不动** |
+| A1 | `MallManagementGoodsController`（17 端点） | **拆**：`goods.controller`(9) + `order.controller`(8) | 一个类干两件事，是当前架构最重的债。**~~URL 与形参一字不变——HTTP 契约不动~~**（⚠️ 2026-10-02 笔 2 已推翻：URL 前缀已规范化，见文首注） |
 | A2 | `MallManagementMessage`（10 端点） | **拆三**：消息 4 → `message.controller`；好友 5 → `message.controller`；`userSelect` 1 → `user.controller` | 好友属社交域，与消息同族；**不单开 `friend` 域**——好友与消息是同一社交域的两种投影 |
 | A3 | `MallOrderStateMetrics` | **`order.metrics`**（非 `shared`） | 解 §5 的 `shared↔order` 环；语义属于 order（它 import `OrderAction`） |
 | A4 | `FriendCacheService` | **`message`** | 与 A2 一致；**不归 user**——user 是账号/身份，好友是关系 |

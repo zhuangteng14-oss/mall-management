@@ -15,11 +15,11 @@
 
 ## 必读源码
 
-- Mall-management-server/src/main/java/com/minke/mallmanagement_controller/MallManagementGoodsController.java（订单核心：`orderAdd` / `orderPayIfUp` / `orderReceiveIfUp` / `orderDeliveryIfUp`）
-- Mall-management-server/src/main/java/com/minke/mallmanagement_controller/MallManagementUserController.java
-- Mall-management-server/src/test/java/com/minke/mallmanagementserver/smoke/AbstractSmokeTest.java（参考基类设计）
+- Mall-management-server/src/main/java/com/minke/mallmanagement/order/controller/OrderController.java（订单路由）+ `order/service/OrderService.java`（订单核心逻辑：`orderAdd` / `orderPayIfUp` / `orderReceiveIfUp` / `orderDeliveryIfUp`）
+- Mall-management-server/src/main/java/com/minke/mallmanagement/user/controller/UserController.java
+- Mall-management-server/src/test/java/com/minke/mallmanagement/smoke/AbstractSmokeTest.java（参考基类设计）
 
-> 路径注意：主源包为 `com/minke/mallmanagement_controller/`（**无 `server` 段**），测试源为 `com/minke/mallmanagementserver/`，两者不一致，勿按惯例推断（agent.md 规则 9.1）。
+> 路径注意：主源与测试源**现已统一**在 `com/minke/`（2026-10-02 笔 1 挪包与笔 2 改名之前，主源是 `com/minke/mallmanagement_controller/`「**无 `server` 段**」、测试源是 `com/minke/mallmanagementserver/`，两者不一致）。下文凡引用旧路径者均属**历史记录**。
 
 ## 前置准备
 
@@ -27,7 +27,7 @@
 
 A3 **不复用本机开发库，也不是「切库名」**，而是**另起一个 MySQL 实例，库名仍叫 `mall_management_sql`**。理由（TD-13，实测）：
 
-- `MallManagementGoodsController`（23 处）与 `MallManagementUserController`（16 处）把 schema 名 `mall_management_sql.` **硬编码**在 SQL 语句里（合计 39 处；`MallManagementMessage` 为 0 处）。切库名切不走这 39 处写入，而 `/message/*` 会跟随 datasource —— 同一进程内**脑裂**。
+- `GoodsController`（23 处）与 `UserController`（16 处）把 schema 名 `mall_management_sql.` **硬编码**在 SQL 语句里（合计 39 处；`MessageController` 为 0 处）。切库名切不走这 39 处写入，而 `/message/*` 会跟随 datasource —— 同一进程内**脑裂**。（⚠️ 2026-10-02 复测：合计已 **45 处**、散到 **7 个文件**（订单侧 SQL 与缓存 Service 各自带入），见 `three-layers.md §D`；此处 23/16/39 是当时的分布，结论不变。）
 - 故隔离只能靠**独立实例 + 保留同名库**。这同时意味着 `SELECT DATABASE()` **无法**区分「本机开发库」与「VM 库」（两者库名相同），必须叠加 `VERSION()` 门禁 —— 见 §脚本内置校验的 P1 与 N4。
 
 > ⚠️ **本节原先写的「本地建 `mall_management_test` 库 + `sed` 过滤导入 + 切 `DB_URL`」三步已作废**（2026-09-20 重写）：按 Q1=B 与 TD-13，那三步均不成立 —— 切库名切不走硬编码，且「脚本的 JDBC 断言」与「后端的读写」必须在同一个实例上才谈得上互相印证。
@@ -142,7 +142,7 @@ A3 的结论只有在「确实压到了目标环境」时才成立。故脚本�
 
 **P6 改版：从「哨兵往返」到「库身份对比」（2026-09-27）**
 
-原方案：JDBC 写一行 `A3P-<runId8>` → `GET /mysqlGoods/goodstype` 读回 → 删除，证明「脚本写的」与「后端读的」是同一个库。命名曾按 `goodstype.GoodType CHAR(20)` 的上限反复调整（`A3P-<runId8>`=12 字符塞得进；`A3TEST-<runId8>-PROBE`=21、H3 原式 `A3PROBE-<runId8>-<host>`=32 都塞不进）。
+原方案：JDBC 写一行 `A3P-<runId8>` → `GET /goods/goodstype`（当时前缀 `/mysqlGoods`）读回 → 删除，证明「脚本写的」与「后端读的」是同一个库。命名曾按 `goodstype.GoodType CHAR(20)` 的上限反复调整（`A3P-<runId8>`=12 字符塞得进；`A3TEST-<runId8>-PROBE`=21、H3 原式 `A3PROBE-<runId8>-<host>`=32 都塞不进）。
 
 **该方案的前提是「HTTP 读回来的内容 == 库里的内容」，而 B1 给这个端点加了缓存，前提破裂**：脚本用裸 JDBC 直写哨兵行（绕过应用），再从 HTTP 读回时拿到的是**缓存填充时刻的旧列表**，哨兵行必然不在其中 → 结构性 FAIL，重跑多少次都一样。这不是偶发，是设计冲突。
 

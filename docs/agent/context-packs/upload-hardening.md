@@ -10,9 +10,9 @@
 
 ## 必读源码
 
-- Mall-management-server/src/main/java/com/minke/mallmanagement_server/ImgPath.java
-- Mall-management-server/src/main/java/com/minke/mallmanagement_controller/MallManagementUserController.java:150-200
-- Mall-management-server/src/main/java/com/minke/mallmanagement_controller/MallManagementGoodsController.java:70-115、270-305
+- Mall-management-server/src/main/java/com/minke/mallmanagement/shared/upload/ImgPath.java
+- Mall-management-server/src/main/java/com/minke/mallmanagement/user/controller/UserController.java（当时 `mallmanagement_controller/MallManagementUserController.java:150-200`）
+- Mall-management-server/src/main/java/com/minke/mallmanagement/goods/controller/GoodsController.java（当时 `mallmanagement_controller/MallManagementGoodsController.java:70-115、270-305`）
 
 ## 约束
 

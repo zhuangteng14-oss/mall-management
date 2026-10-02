@@ -2,6 +2,7 @@
 
 > 范围：全部后端源码、`mall_management_sql.sql`、`docs/agent/*`、`.github/workflows/ci.yml`、`scripts/concurrency/*`。
 > 核查日期：2026-09-30。基线 `origin/main` = `148e77b`（B3 已合并）。
+> ⚠️ **2026-10-02 追记（不改正文）**：本文的类名、路径与行号锚点是 **2026-09-30 当时状态**。此后 笔 1（`01df702`）按域挪包、笔 2 改名并规范化 URL —— `MallManagementGoodsController` / `MallManagementMessage` / `MallManagementUserController` 已分别改为 `GoodsController` / `MessageController` / `UserController`（订单端点另拆入 `OrderController` / `OrderService`）；`/mysqlGoods`、`/mysqlLogin` 前缀已规范化为 `/goods`、`/order`、`/user`。文内旧名 / 旧路径 / 旧行号**一律按当时状态读**。
 > **本文只记录与分级，不做任何修复。** 分级与锚点一律给可复核位置。
 >
 > **档位**：`亲读` = 逐行读过该文件；`亲读(框架)` = 从本机 `.m2` 抽框架源码/元数据核过；`实测` = 本机实跑探针；`推断` = 由亲读证据链推导，未实跑。

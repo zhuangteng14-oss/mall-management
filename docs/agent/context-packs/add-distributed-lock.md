@@ -11,7 +11,7 @@
 
 ## 必读源码
 
-- MallManagementGoodsController.java 的 order 系列方法
+- `order/controller/OrderController.java` 与 `order/service/OrderService.java` 的 order 系列方法（2026-10-02 笔 2 之前，这些都挂在 `mallmanagement_controller/MallManagementGoodsController.java` 里）
 
 ## 约束
 

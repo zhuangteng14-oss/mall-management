@@ -36,8 +36,8 @@
 
 ## 必读源码
 
-- `MallManagementGoodsController.java`（最大；注意 `orderAddLocked` 的 `@Transactional` 禁令注释，见 D#1）
-- `MallManagementUserController.java`、`MallManagementMessage.java`
+- `GoodsController.java` / `OrderController.java`（商品与订单路由。订单的 `@Transactional` 禁令现随业务逻辑下沉，见 `OrderService` 类 javadoc 与 D#1）
+- `UserController.java`、`MessageController.java`
 - `mall_management_sql.sql`（权威 schema，**CRLF 陷阱**）
 
 ## 约束
@@ -80,7 +80,7 @@ TD-01（ddl-auto）、TD-03（回滚规则矛盾）、TD-04/06/07/08（锚点与
 
 | # | 项 | 位置 | 说明 | 归属 | 工作量 |
 |---|---|---|---|---|---|
-| 6 | 口令明文进 stdout + 随 CI artifact 扩散 | `MallManagementUserController.java:39`、`ci.yml:315` | 泄露成立，但不改变运行结果 | 并行（环境层）；**git 历史清理另计** | 小 / 中～大 |
+| 6 | 口令明文进 stdout + 随 CI artifact 扩散 | `UserController.java:39`、`ci.yml:315` | 泄露成立，但不改变运行结果 | 并行（环境层）；**git 历史清理另计** | 小 / 中～大 |
 | 7 | 生产 = 默认 profile | 只有 `default` 与 `a3` | 它把 #1、#8 串起来；修它本身就是环境层 | 并行（环境层） | 中 |
 | 8 | root:123456 与 Redis 口令明文 | `application.properties:6-7`、`application-a3.properties:31` | 同 #7 | 并行（环境层） | 小～中 |
 
@@ -112,9 +112,9 @@ TD-01（ddl-auto）、TD-03（回滚规则矛盾）、TD-04/06/07/08（锚点与
 
 | # | 项 | 位置 | 为何会撞 | 归属 | 工作量 |
 |---|---|---|---|---|---|
-| 1 | **`orderAddLocked` 不得加 `@Transactional`** | javadoc `GoodsController:433-441`（禁令句 **`:437`**；方法声明 `:442`） | 锁在 `runLocked` 的 `finally` 先释放、事务提交在方法返回**之后** ⇒ 后进者的 `COUNT(*)` 在 RR 下读自己事务开始时的快照、**看不到前一个未提交的行** ⇒ 仍插 2 行。全项目**唯一「禁止用标准注解」处** —— ✅ **已登记**（`### D.1`，2026-09-30 本笔），不再「无处登记」 | **三层前（新层须知）** ✅ **本笔落定** | 小（登记）✅ / 中（设计规避） |
+| 1 | **`orderAddLocked` 不得加 `@Transactional`** | 禁令现随订单逻辑下沉：`OrderService` 类 javadoc `:26`（全项目唯一禁令处）、`addLocked` 声明 `:124`、`OrderDao` 类 javadoc `:39`（原在 `GoodsController` javadoc，2026-10-02 随订单端点拆出） | 锁在 `runLocked` 的 `finally` 先释放、事务提交在方法返回**之后** ⇒ 后进者的 `COUNT(*)` 在 RR 下读自己事务开始时的快照、**看不到前一个未提交的行** ⇒ 仍插 2 行。全项目**唯一「禁止用标准注解」处** —— ✅ **已登记**（`### D.1`，2026-09-30 本笔），不再「无处登记」 | **三层前（新层须知）** ✅ **本笔落定** | 小（登记）✅ / 中（设计规避） |
 | 2 | 无全局异常处理 / 无拦截器 | `@ControllerAdvice` / `@ExceptionHandler` / `HandlerInterceptor` = **0** | 新层抛出的异常无统一出口。**2026-09-30 实测（限定版）**：**框架层**错误出口已实测 —— 缺必填参数→**400**、未知路由→**404**，两者均落 **Boot 默认错误体**（`{timestamp,status,error,path}`，非本仓自造）；**业务层**异常出口**未验** | **三层内（三层产出）** | 中 |
-| 3 | 两套 CORS 机制并存 | `ImgConfig` 全局 `CorsFilter` + 4 处裸 `@CrossOrigin`（`MallManagementGoodsController:27` / `MallManagementUserController:20` / `MallManagementMessage:18` / `HealthController:37`） | CorsFilter 先于 DispatcherServlet ⇒ handler 级**静默失效** | **三层内（拦截器层）** | 小 |
+| 3 | 两套 CORS 机制并存 | `ImgConfig` 全局 `CorsFilter` + 5 处裸 `@CrossOrigin`（`GoodsController:34` / `OrderController:24` / `UserController:20` / `MessageController:18` / `HealthController:37`） | CorsFilter 先于 DispatcherServlet ⇒ handler 级**静默失效** | **三层内（拦截器层）** | 小 |
 | 4 | `ddl-auto=update` + 零 `@Entity` | `application.properties:12`、`pom.xml:51`（TD-01） | 一旦有人加 `@Entity` 即反向 `ALTER TABLE`；`show-sql=true` 同刻全量打 SQL。**DAO 选型已定（`### D.4`）⇒ 不引 JPA ⇒ 本风险不会自行发生**；⚠️ 但 `spring-boot-starter-data-jpa` **不删**（`agent.md:36-37`「禁止删除旧配置」） | **三层前（定 DAO）** ✅ **本笔落定：`JdbcClient` 短期 + jOOQ 长期**（`### D.4`）；⚠️ **结论本笔落、实现随三层第一笔（订单域开工）** | 小 |
 | 5 | `app.upload-dir` 默认值三处重复 | `ImgPath:18` / `GoodsController:55` / `UserController:30` | 改一处必漏两处（同 TD-06 形态） | 三层内（配置收敛） | 小 |
 | 6 | 落库 URL 前缀硬编码且未 URL 编码 | `GoodsController:119,289`、`UserController:205`、另 `UserController:59` | 换机 / 反代全体图片失效；中文 / 空格文件名拼非法 URL（仓内既有 `色款.jpg`） | 三层内（Service / 配置） | 小 |
@@ -128,9 +128,9 @@ TD-01（ddl-auto）、TD-03（回滚规则矛盾）、TD-04/06/07/08（锚点与
 
 | 项 | 内容 |
 |---|---|
-| **禁令** | **`orderAddLocked` 不得加 `@Transactional`** —— 与本文 **`:49` 约束 4** 是同一句。源头：`MallManagementGoodsController` 的 javadoc `:433-441`（禁令句 **`:437`**；方法声明 `:442`） + `DistributedLockService` 类 javadoc「调用点的两条硬要求」（第一颗 bullet） |
+| **禁令** | **`orderAddLocked` 不得加 `@Transactional`** —— 与本文 **`:49` 约束 4** 是同一句。源头（2026-10-02 随订单端点拆出后现址）：`OrderService` 类 javadoc `:26`（禁令标题）、`addLocked` 声明 `:124`、`OrderDao` 类 javadoc `:39` + `DistributedLockService` 类 javadoc「调用点的两条硬要求」（第一颗 bullet） |
 | **理由 ① 锁外事务** | 事务的提交发生在**方法返回之后**，而锁在 `runLocked` 的 `finally` 里、即方法**返回之前**已释放 ⇒ 后进者拿到锁后的 `SELECT COUNT(*)` 在 **RR** 下读的是自己事务开始时的快照、**看不到前一个未提交的行** ⇒ 仍插 2 行。**不加事务时 autocommit 让 INSERT 在释放锁之前就提交** —— 这正是临界区查重成立的前提（`A-S2a-1b`：20 并发同 `OrderId` 落库 **20 → 1**，靠的就是这一条） |
-| **理由 ② 跨 bean 调用** | 临界区是**传给另一个 bean**（`DistributedLockService`）的 **lambda**，锁的持有者是那个 bean、不是本方法 ⇒ **没有「锁内的 bean 方法边界」可以挂事务**。且两个 Controller 被测试**钉死为无 AOP 代理**（`MallManagementApplicationTests:113` `goodsControllerIsNotAopProxied` / `:133` `messageControllerIsNotAopProxied`）⇒ 注解式 AOP 在这里**结构上不可用**，锁只能是方法体内的显式调用（同类内自调用同样不走代理，同仓 `MallManagementGoodsController:245` 的同一论证） |
+| **理由 ② 跨 bean 调用** | 临界区是**传给另一个 bean**（`DistributedLockService`）的 **lambda**，锁的持有者是那个 bean、不是本方法 ⇒ **没有「锁内的 bean 方法边界」可以挂事务**。且三个 Controller 被测试**钉死为无 AOP 代理**（`MallManagementApplicationTests:117` `goodsControllerIsNotAopProxied` / `:137` `messageControllerIsNotAopProxied` / `:157` `orderControllerIsNotAopProxied`）⇒ 注解式 AOP 在这里**结构上不可用**，锁只能是方法体内的显式调用（同类内自调用同样不走代理，同仓 `GoodsController:236` 的同一论证） |
 | **⚠️ 不可外推** | 本禁令**只管被打锁的方法体**。它的反面是 **C#2**：`goodsAdd`（**没有**打锁）的事务边界**应当**加 `@Transactional` —— 只记住半边就会踩另一边 |
 | **现状** | 全项目**唯一一处「禁止用标准注解」**。`orderAddLocked` 目前**未加**（`亲读`：该方法体上无 `@Transactional`）；`@Transactional` 全仓 **10 处**（引 `selection-status.md §2`），均不在此方法上 |
 
@@ -162,7 +162,7 @@ TD-01（ddl-auto）、TD-03（回滚规则矛盾）、TD-04/06/07/08（锚点与
 
 | # | 项 | 位置 | 为什么不能提前做 |
 |---|---|---|---|
-| 1 | **SQL 硬编码 schema 名 39 处** | `GoodsController` 23 + `UserController` 16；`MallManagementMessage` **0** ⇒ 同进程脑裂（TD-13） | 抽 DAO 层时**自然**改完。列为三层前会让人以为要独立一笔重改 39 处 —— **比三层本身还大**。它是「为什么需要 DAO 层」的证据，不是它的前置 |
+| 1 | **SQL 硬编码 schema 名 45 处**（2026-10-02 实测；原记 39） | `UserController` 16 + `OrderDao` 10 + `GoodsController` 6 + `GoodsCacheService` 5 + `GoodsTypeCacheService` 3 + `OrderTimelineWriter` 3 + `OrderStateMachine` 2；`MessageController` **0** ⇒ 同进程脑裂（TD-13）。⚠️ 相较原记已**散到 7 个文件**（原 39 处集中在两个 Controller）—— 缓存笔与三层笔各带入一部分 | 抽 DAO 层时**自然**改完。列为三层前会让人以为要独立一笔重改 —— **比三层本身还大**。它是「为什么需要 DAO 层」的证据，不是它的前置 |
 
 ---
 
@@ -175,7 +175,7 @@ TD-01（ddl-auto）、TD-03（回滚规则矛盾）、TD-04/06/07/08（锚点与
 
 | 缺陷 | 出处 | 认领阶段 | 现状（2026-09-30 复核） |
 |---|---|---|---|
-| **服务端零价格校验**：`orderAdd` 的 `Price` 由客户端直传直落库 | 病 B；本文 **B#1** | **三层期间（Service 校验）** —— 只做 `Price >= 0` + 上界；⚠️ 按 `goods` 表**重算**属 **C 档**（那是换真值源，不是加校验） | ⏳ **未做** —— `MallManagementGoodsController.orderAdd` 仍是 `@RequestParam("Price") float`，方法体内无重算、无比对 |
+| **服务端零价格校验**：`orderAdd` 的 `Price` 由客户端直传直落库 | 病 B；本文 **B#1** | **三层期间（Service 校验）** —— 只做 `Price >= 0` + 上界；⚠️ 按 `goods` 表**重算**属 **C 档**（那是换真值源，不是加校验） | ⏳ **未做** —— `OrderController.orderAdd` 仍是 `@RequestParam("Price") float`（入参绑定），业务逻辑在 `OrderService.orderAdd`，其中无重算、无比对 |
 | **状态位拦截**（TD-17：三个状态位可直传出终态订单） | 病 B；**TD-17**；本文 **C#6** | **三层期间（校验层）** —— 前置是**裁决**「拦截 vs 观测」 | ⏳ **未做**（C#6 两方案未裁）。⚠️ 拦截会使 A3 的 S4a **全部 8 条断言失去前置**（H3 正是用 `orderAdd` 造的前置态） |
 | **长度边界（字符数量）**：`productsales.GoodName char(20)` vs `goods.GoodName char(40)` | 病 G（`SQL:169` vs `:57`） | **三层期间（Service 校验，长度上界）** —— ⚠️ schema 侧**不改类型**（本文「约束 1」只允许新增表 / 字段 / 索引），只能在 Service 拦 | ⏳ **未做**。21–40 字符名写 `productsales` 报 **Error 1406**（**实测**，用户可见失败）；⚠️ `.sql` **导入会话**非严格 ⇒ 导入期**静默截断** |
 | **搜索 SQL**：`productSearch` 逐字 `OR GoodName LIKE` | 病 C（`:72`）；`api-contract.md:72` | **三层期间（DAO）** —— 参数化与 schema 前缀在抽 DAO 时自然改完 | ⏳ **未做** —— `keyword.trim().split("")` 每字符一个 OR；单引号即 SQL 语法错误；`SELECT *` 无 schema 前缀、无 `LIMIT` |
@@ -208,13 +208,13 @@ TD-01（ddl-auto）、TD-03（回滚规则矛盾）、TD-04/06/07/08（锚点与
 
 | 端点 | 脚本里的角色 | 出现行（均为 `ConcurrencyRunner.java` 行号） |
 |---|---|---|
-| `/mysqlGoods/orderAdd` | **前置态构造**（S4a 的 H3 —— 三个状态位是入参、可任意置位）+ 并发写 | `:1441 :1494 :1525 :1594 :1623 :1700 :1842` |
-| `/mysqlGoods/orderPayIfUp` | 并发 CAS | `:1541 :1626 :1704 :1855` |
-| `/mysqlGoods/orderDeliveryIfUp` | 并发 CAS | `:1602 :1605 :1608 :1626 :1708 :1856` |
-| `/mysqlGoods/orderReceiveIfUp` | 并发 CAS | `:1611 :1614 :1617 :1712 :1857` |
-| `/mysqlGoods/goodstype` | 读侧基线（S1） | `:1399 :1715 :2178` |
-| `/mysqlLogin/loginSelect` | 读侧基线（S1） | `:1400` |
-| `/mysqlLogin/loginAdd` | TOCTOU 观测（B-2 段） | `:2156` |
+| `/order/orderAdd` | **前置态构造**（S4a 的 H3 —— 三个状态位是入参、可任意置位）+ 并发写 | `:1441 :1494 :1525 :1594 :1623 :1700 :1842` |
+| `/order/orderPayIfUp` | 并发 CAS | `:1541 :1626 :1704 :1855` |
+| `/order/orderDeliveryIfUp` | 并发 CAS | `:1602 :1605 :1608 :1626 :1708 :1856` |
+| `/order/orderReceiveIfUp` | 并发 CAS | `:1611 :1614 :1617 :1712 :1857` |
+| `/goods/goodstype` | 读侧基线（S1） | `:1399 :1715 :2178` |
+| `/user/loginSelect` | 读侧基线（S1） | `:1400` |
+| `/user/loginAdd` | TOCTOU 观测（B-2 段） | `:2156` |
 | `/message/friendAdd` | TOCTOU 观测（B-2 段） | `:2197` |
 | `/health/db` | **探针，不是被压端点** —— P5 就绪 / P6 库身份 / P7 阴性对照 | `:2592` |
 
@@ -249,9 +249,10 @@ TD-01（ddl-auto）、TD-03（回滚规则矛盾）、TD-04/06/07/08（锚点与
 
 | 族 | 未覆盖 | 是哪些 |
 |---|---|---|
-| `/mysqlLogin` | 3 / 5 | `getUserInfo`、`updateAvatar`、`updateUserInfo` |
+| `/user` | 3 / 5 | `getUserInfo`、`updateAvatar`、`updateUserInfo` |
 | `/message` | 9 / 10 | `conversations`、`history`、`send`、`getOrCreateConversation`、`userSelect`、`selectFriend`、`friendUp`、`friendDe`、`friendSelect` |
-| `/mysqlGoods` | 12 / 17 | `goodsAdd`、`goodsSelect`、`goodsSelectHome`、`goodsDe`、`productCodePrice`、`goodsUp`、`GoodsProductCodeSelect`、`productSearch`、`orderSelect`、`orderDeliveryIfSelect`、`orderDeliverySelect`、`historicalOrdersSelect` |
+| `/goods` | 8 / 9 | `goodsAdd`、`goodsSelect`、`goodsSelectHome`、`goodsDe`、`productCodePrice`、`goodsUp`、`GoodsProductCodeSelect`、`productSearch` |
+| `/order` | 4 / 8 | `orderSelect`、`orderDeliveryIfSelect`、`orderDeliverySelect`、`historicalOrdersSelect` |
 | `/health` | 0 / 1 | — |
 
 ⇒ **这 24 个的护栏只有单测**（全项目 `@Test` **111** 处 / **15** 个测试类，见 `tech-debt.md` M4），而**单测不跑并发路径** ⇒ 三层改动它们时，A3 **不会替你报警**。

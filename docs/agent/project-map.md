@@ -36,22 +36,21 @@
 │   └── src/
 │       ├── main/java/com/minke/
 │       │   ├── MallManagementApplication.java          启动类
-│       │   ├── mallmanagement_class/info.java          唯一 POJO，未被任何类引用
-│       │   ├── mallmanagement_server/ImgConfig.java    CORS 全局过滤器（注册 CorsFilter Bean）
-│       │   ├── mallmanagement_server/ImgPath.java      /img/** → 本地 static/img/（ImgPath:15）
-│       │   └── mallmanagement_controller/
-│       │       ├── MallManagementUserController.java   /mysqlLogin
-│       │       ├── MallManagementMessage.java          /message
-│       │       └── MallManagementGoodsController.java  /mysqlGoods
+│       │   └── mallmanagement/                         按域分层（2026-10-02 笔 1 挪包；原扁平 mallmanagement_* 4 包 + info 孤儿类已删除）
+│       │       ├── goods/{controller,service}/         GoodsController（/goods 9 端点）+ GoodsCacheService / GoodsTypeCacheService
+│       │       ├── order/{controller,service,dao,model,metrics}/  OrderController（/order 8 端点）+ OrderService + OrderStateMachine 等
+│       │       ├── message/{controller,service}/       MessageController（/message 10 端点）+ FriendCacheService
+│       │       ├── user/{controller,service}/          UserController（/user 5 端点）+ UserCacheService
+│       │       └── shared/{cache,health,lock,upload}/  两级缓存 / HealthController / 分布式锁 / 上传（原 mallmanagement_server 的 ImgConfig、ImgPath 在此）
 │       ├── main/resources/application.properties
 │       ├── main/resources/application-a3.properties    A3 profile：指向独立 MySQL 实例（同名库，TD-13）；含明文默认口令
 │       ├── main/resources/static/img/                  8 张图片
-│       ├── test/java/com/minke/mallmanagementserver/
+│       ├── test/java/com/minke/
 │       │   ├── MallManagementApplicationTests.java      全上下文冒烟 + 真查库（`A3_ENABLED=true` 才跑，见 TD-10）
-│       │   └── smoke/
+│       │   └── mallmanagement/smoke/
 │       │       ├── AbstractSmokeTest.java               smoke 基类（@WebMvcTest + 鉴权预留口子）
-│       │       ├── LoginSelectSmokeTest.java            /mysqlLogin/loginSelect（只读）
-│       │       ├── OrderPayIfUpSmokeTest.java           /mysqlGoods/orderPayIfUp（CAS 两分支）
+│       │       ├── LoginSelectSmokeTest.java            /user/loginSelect（只读）
+│       │       ├── OrderPayIfUpSmokeTest.java           /order/orderPayIfUp（CAS 两分支）
 │       │       └── ImgMappingSmokeTest.java             /img/** 静态资源映射
 │       └── test/resources/application-smoke.properties  smoke profile 测试属性
 ├── Mall-management-web/
@@ -66,16 +65,18 @@
 └── 5122512025027 + 庄腾 + 项目部署说明文档.docx    非代码文件，不纳入管理
 ```
 
-## 3. 后端架构：无分层
+## 3. 后端架构（**B1 之前的原貌快照**）
 
-**主源 7 个 `.java`**（含启动类），**测试源 5 个**，共 12 个。32 个 HTTP 接口全部内联在 3 个 Controller 中，SQL 以字符串字面量形式写在方法体内。
+> ⚠️ **本节的计数与「无分层」判断是 B1 缓存笔之前的状态，此后未随各笔同步** —— 仓内现已有 Service 层、按域分层（见 §2 目录树与 `three-layers.md`）。本节保留以记录**起点**；引用主源/测试源数量或分层判断时，请以 §2 与 `api-contract.md` 为准。
 
-- **不存在** Service 层、Mapper/DAO 层、MyBatis XML、DTO/VO 层。
-- **不存在** 任何 `@Entity`——`mallmanagement_class/info.java` 是全项目唯一实体类，仅含 1 个 `imgName` 字段，且**未被任何类引用**（死代码）。
-- 无统一返回体：`/mysqlGoods` 的 order 系列返回 `Map{success,...}`，`/mysqlLogin/loginSelect` 返回裸 `int`，`getUserInfo` 失败时返回 `null`（HTTP 200 空体）。
-- 无鉴权、无拦截器、无全局异常处理；3 个 Controller 均标 `@CrossOrigin`。
+**原貌**：主源 7 个 `.java`（含启动类）、测试源 5 个。32 个 HTTP 接口全部内联在 3 个 Controller 中，SQL 以字符串字面量形式写在方法体内。
 
-接口分布：`/mysqlLogin` 5 个、`/message` 10 个、`/mysqlGoods` 17 个，详见 `api-contract.md`。
+- **原貌**：不存在 Service 层、Mapper/DAO 层、MyBatis XML、DTO/VO 层。
+- **不存在** 任何 `@Entity` —— 原 `mallmanagement_class/info.java`（全项目唯一 POJO，仅 1 个 `imgName` 字段，未被任何类引用）已于 **2026-10-02 笔 1 挪包时删除**。
+- 无统一返回体：`/order` 系列返回 `Map{success,...}`，`/user/loginSelect` 返回裸 `int`，`getUserInfo` 失败时返回 `null`（HTTP 200 空体）。
+- 无鉴权、无拦截器、无全局异常处理；**4 个业务 Controller**（`GoodsController` / `OrderController` / `MessageController` / `UserController`）均标 `@CrossOrigin`，运维口 `HealthController` 亦有。
+
+接口分布（2026-10-02 笔 2 后）：`/user` 5 个、`/message` 10 个、`/goods` 9 个、`/order` 8 个（另 `/health/db` 1 个运维接口），详见 `api-contract.md`。
 
 ## 4. 前端结构
 
@@ -103,11 +104,11 @@ Vue 3 CLI 工程，14 个页面视图 + 1 个组件 + 1 个路由表。页面按
 
 以下接口在循环内逐条发起查询，**单次请求的 SQL 次数随数据量线性增长**。此处仅记录，**未改代码**。
 
-行号约定（与 `cache-map.md §6` 一致）：`G:` = `MallManagementGoodsController.java`，`M:` = `MallManagementMessage.java`；查询记「SQL 定义行 → 执行行」区间，方法调用记调用行。
+行号约定（与 `cache-map.md §6` 一致）：`G:` = `GoodsController.java`（2026-10-02 前名 `MallManagementGoodsController.java`；本表 `G:` 值均为**搬迁前**坐标，见行内注），`M:` = `MessageController.java`（前名 `MallManagementMessage.java`）；查询记「SQL 定义行 → 执行行」区间，方法调用记调用行。
 
 | 接口 | 文件行号 | 涉及表 | 优先级 |
 |---|---|---|---|
-| `POST /mysqlGoods/goodsSelectHome` | 全量查 `G:184-185`，循环 `G:188-208`，内层查询 `G:194-200` | goods → login | 高 |
+| `POST /goods/goodsSelectHome` | 全量查 `G:184-185`，循环 `G:188-208`，内层查询 `G:194-200`（**均为搬迁前坐标**；现整段在 `GoodsCacheService.listHome()`） | goods → login | 高 |
 | `POST /message/conversations` | 外层查 `M:33`，循环 `M:35-66`，内层查询 `M:48-50` | message → user_conversation_read | 高 |
 | `POST /message/friendSelect` | 外层查 `M:320-322`，循环 `M:324-330`，内层调用 `M:326`（**均为搬迁前坐标**；2026-09-29 起整段在 `FriendCacheService.listFriends()`） | friend → user → customerimage/merchantimage | 高 |
 | `POST /message/selectFriend` | 外层查 `M:249-251`，循环 `M:253-259`，内层调用 `M:255`（**均为搬迁前坐标**；2026-09-29 起整段在 `FriendCacheService.listRequests()`） | friend → user → customerimage/merchantimage | 高 |

@@ -3,6 +3,7 @@
 > **定位**：全项目**唯一**的进度真相源。只记「做到哪了」，不记「怎么做」（怎么做见各 context-pack）。
 > **不重复**：缺陷明细见 `three-layers.md §G`、未决议题见 `business-decisions.md`、技术债见 `tech-debt.md`。本文只给**状态 + 证据**。
 > **维护规则**：状态变化时改本文，**不**在各 pack 里另立进度表 —— 2026-09-30 复核时已出现「同一件事两处各写一份、互相标过期」的情况。
+> ⚠️ **2026-10-02 追记**：本文 §「分域」等处的类名与行号是 **2026-09-30 截面**。此后 笔 1（`01df702`）按域挪包、笔 2 改名并规范化 URL —— `MallManagementGoodsController` / `MallManagementMessage` / `MallManagementUserController` 已改为 `GoodsController` / `MessageController` / `UserController`，订单端点拆入 `OrderController`；`/mysqlGoods`、`/mysqlLogin` 已规范化为 `/goods`、`/order`、`/user`。文内旧名 / 旧行号**按当时状态读**。
 > **复核基准**：2026-09-30，`origin/main` = `39224e8`；PR #1–#20 **全部 MERGED**（**这是 2026-09-30 的截面**）。⚠️ **此后已前进**：PR #21（progress 落盘）、PR #22（走查分流）**均已合**，`origin/main` = `69ac718`（2026-09-30）。最新落盘状态以「更新记录」一节为准。
 > **档位**：`亲读` = 本次逐行读 / grep / 命令实测；引他人文档处标**出处**（file:line），未亲验。
 
