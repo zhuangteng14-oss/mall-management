@@ -16,9 +16,9 @@ import java.util.HashMap;
 import java.util.Map;
 
 @RestController
-@RequestMapping("/mysqlLogin")
+@RequestMapping("/user")
 @CrossOrigin
-public class MallManagementUserController {
+public class UserController {
 
     //登录部分
     @Autowired

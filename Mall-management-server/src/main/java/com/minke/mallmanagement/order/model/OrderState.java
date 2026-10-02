@@ -14,7 +14,8 @@ package com.minke.mallmanagement.order.model;
  *
  * <h2>【为什么 RECEIVED_NODELIVERY 是合法的】</h2>
  * 因为它满足上面那条不变式。后端**确实放行**「未发货即收货」：接收端点的守卫是
- * {@code PayIf = 1 AND ReceiveIf = 0}（{@code MallManagementGoodsController:584}），
+ * {@code PayIf = 1 AND ReceiveIf = 0}（{@link OrderStateMachine} 的 {@code RECEIVE} 守卫；
+ * 原 {@code MallManagementGoodsController:584}），
  * 只看两位、不看 {@code DeliveryIf}。前端事实上一路挡着
  * （{@code ShoppingCart.vue:183-186} 点下去才弹「商家还在备货，不允许现在收货」），
  * 但那是**客户端在替后端兜规则**，不是后端的约束 —— 所以它必须作为一个显式状态存在，

@@ -24,7 +24,7 @@ import java.util.concurrent.atomic.AtomicLong;
  *
  * <h2>【为什么是显式 ThreadPoolExecutor，不是 {@code @Async}】</h2>
  * <ol>
- *   <li><b>调用点在锁的临界区里</b>：{@code MallManagementGoodsController} 的三个
+ *   <li><b>调用点在锁的临界区里</b>：{@code OrderService} 的三个
  *       {@code *Locked} 方法体在 {@code runLocked} 的 lambda 内。{@code @Async} 靠 Spring 代理生效，
  *       而**同类内部的 lambda 调用不经过代理** ⇒ 自调用，静默变成同步执行（不报错、不变红，
  *       只是没异步）。这正是本仓 B2 已经踩过的形状（{@code DistributedLockService} 类注释第 4 条：
@@ -121,7 +121,7 @@ public class OrderStateExecutor implements DisposableBean {
      * 投递一次时间线落库。**永不抛、永不阻塞**（除了入队本身），永不把异常带回调用方。
      *
      * <p>⚠️ 本方法**在订单锁的临界区内被调用**（与 UPDATE 同一处，见
-     * {@code MallManagementGoodsController}）。故这里只做「包装 + 入队」，不做任何 I/O：
+     * {@code OrderService}）。故这里只做「包装 + 入队」，不做任何 I/O：
      * 入队是 O(1) 的，代价纳秒级，不改变临界区的量级。
      *
      * @param orderId 业务键。**只用于事件流与丢弃计数**，绝不进 tag（基数无界）。
