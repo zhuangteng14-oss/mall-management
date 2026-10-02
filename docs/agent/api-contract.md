@@ -2,7 +2,7 @@
 
 > **证据来源**：5 个 Controller 全文。缩写：`U`=`UserController.java`、`M`=`MessageController.java`、`G`=`GoodsController.java`、`O`=`OrderController.java`、`H`=`HealthController.java`（数字为源码行号）。
 > **行号口径（2026-09-30 实测）**：`证据`列 = 该方法 **route 注解所在行**（`@PostMapping` / `@GetMapping` / `@RequestMapping`），**不是**方法签名行。全表行号已于 2026-09-30 对 HEAD 逐条复核并替换 —— 此前一版坐标系统性偏旧（偏 10~35 行，个别为负偏移），成因是各笔新代码插入后未同步。
-> **2026-10-02 复测（URL 规范化 + 订单端点拆分后）**：`/mysqlGoods` 一分为二 —— 商品 9 端点留 `GoodsController`（前缀 `/goods`）；订单 8 端点迁入新文件 `OrderController`（前缀 `/order`，记 `O:`）。`U:` / `M:` / `H:` 三列**原样保持**（那两个类只改类名与类级前缀，行数未变，行号零漂移；2026-10-02 复测仍**精确命中**）。⚠️ **但 `U:` 那一栏已于 2026-10-02 三层第三笔（user 域，`0c07e96`）后作废** —— `UserController` 已重写为 107 行（只剩路由，无 SQL、无 `@Transactional`），旧 `U:<n>`（34/56/124/176/241…）全部越界。`/user` 段 5 行已就地改为 `UserController.<方法>:<行>`，行号**沿用本表口径 = `@PostMapping` 行**（**不是**方法声明行，与 `db-schema.md:5` 相反，勿互抄）。⚠️ **口径注**：本文所有 `:<行>` 为 **2026-10-02 实测**；重构后须重测。
+> **2026-10-02 复测（URL 规范化 + 订单端点拆分后）**：`/mysqlGoods` 一分为二 —— 商品 9 端点留 `GoodsController`（前缀 `/goods`）；订单 8 端点迁入新文件 `OrderController`（前缀 `/order`，记 `O:`）。`U:` / `M:` / `H:` 三列**原样保持**（那两个类只改类名与类级前缀，行数未变，行号零漂移；2026-10-02 复测仍**精确命中**）。⚠️ **但 `U:` 那一栏已于 2026-10-02 三层第三笔（user 域，`0c07e96`）后作废** —— `UserController` 已重写为 107 行（只剩路由，无 SQL、无 `@Transactional`），旧 `U:<n>`（34/56/124/176/241…）全部越界。`/user` 段 5 行已就地改为 `UserController.<方法>:<行>`，行号**沿用本表口径 = `@PostMapping` 行**（**不是**方法声明行，与 `db-schema.md:5` 相反，勿互抄）。⚠️ **`M:` 那一栏同理，已于 2026-10-03 三层第四笔（message 域，`8ed5fc1`）后作废** —— `MessageController` 已重写为 **127 行**（只剩路由，无 SQL、无 `@Transactional`、无 `@RequestParam` 默认值），旧 `M:<n>`（34/37/89/112/137/181/224/279/294/327/361…）全部越界。`/message` 段 10 行已就地改为 `MessageController.<方法>:<行>`，行号**沿用本表口径 = `@PostMapping` 行**，方法体与 SQL 的现址见该表后的「业务体现址」。⚠️ **`H:` 那一栏未动**（`HealthController` 本笔未碰）。⚠️ **口径注**：本文所有 `:<行>` 为 **2026-10-03 实测**；重构后须重测。
 > ⚠️ **同版本复核（对账上一版的「`G:` 行号整体 −9」）**：以 `git show 8c5385e:…goods/controller/GoodsController.java`（**笔 2 后**状态）逐条实测，其 route 行为 **50 / 72 / 173 / 187 / 197 / 245 / 280 / 359 / 369** —— 与上一版表内 `G:` 值**逐条相同** ⇒ 那一栏在笔 2 时是**准的**，不是陈旧值。但「**整体 −9**」只是粗略说法：实测相对 2026-09-30 基线（`148e77b`，`:59 / :81 / :181 / :195 / :205 / :249 / :264 / :336 / :346`）是 `goodstype`/`goodsAdd` **−9**、`goodsSelect` 一族 **−8**、`productCodePrice` **−4**、`goodsUp` 之后反而 **+16 / +23 / +23**（因笔 2 在该段加了说明注释）⇒ 引用时**不要拿 −9 去换算全表**。
 > **2026-10-02 三层第二笔（商品域）又整体前移**：9 个端点的**路由仍在 `GoodsController`**，**业务体（SQL / try-catch / 响应组装）下沉到 `GoodsService`，SQL 出口收进 `GoodsDao`** ⇒ `G:` 现值 = **51 / 72 / 92 / 101 / 109 / 127 / 142 / 158 / 171**（实测，已重填），且它**只保证「路由还在哪一行」**；方法体位置另见 `/goods` 表下的「业务体现址」注。
 > **「幂等」判定标准**：*相同入参重复调用是否产生额外副作用（不重复写入）*。非 HTTP 语义幂等。
@@ -13,7 +13,7 @@
 - 全部路径无版本号、无 RESTful 语义，**全部 `POST`**，仅 **2 个 `GET`**：业务侧 `/goods/goodstype`、运维侧 `/health/db`（`@Profile("a3")`，`HealthController:43`，仅 a3 profile 下注册 —— 原记只列了 `goodstype`，漏了它）。
 - 失败返回不统一：`loginSelect` 返回 `0`；`getUserInfo` 返回 `null`（HTTP 200 空体）；`/goods` 与 `/order` 系列返回 `{success:false, msg}`。
 - 无分页参数，列表接口全量返回。
-- ⚠️ **「读接口」≠「无副作用」**：本表按**方法语义**分类，不按 HTTP 方法。`/message/history` 名字是查询，**实为写** —— 除 SELECT 外**无条件** upsert `user_conversation_read.last_read_time = NOW()`（`M:101-104`）⇒ 统计「读接口」或做只读性验证时**不得**把它算进去。
+- ⚠️ **「读接口」≠「无副作用」**：本表按**方法语义**分类，不按 HTTP 方法。`/message/history` 名字是查询，**实为写** —— 除 SELECT 外**无条件** upsert `user_conversation_read.last_read_time = NOW()`（SQL 在 `MessageDao.upsertLastReadTime:206-209`，由 `MessageService.getMessageHistory:200` 调用）⇒ 统计「读接口」或做只读性验证时**不得**把它算进去。
 
 ## 2. 接口清单（共 33 个）
 
@@ -31,16 +31,33 @@
 
 | 方法 | 路径 | 入参 | 返回 | 幂等 | 证据 |
 |---|---|---|---|---|---|
-| POST | `/message/conversations` | currentId, currentType | `{success, list[{other_id,other_type,last_time,unread}]}` | 是 | `M:37` |
-| POST | `/message/history` | currentId, currentType, otherId, otherType | `{success, list[...]}` | **否** ⚠️**写**（见 §1） | `M:89` |
-| POST | `/message/send` | fromId, fromType, toId, toType, content | `{success, msg}` | **否** | `M:112` |
-| POST | `/message/getOrCreateConversation` | currentId, currentType, otherId, otherType | `{success, otherUser, messages}` | 是 | `M:137` |
-| POST | `/message/userSelect` | userId | `{success, user{id,username,usertype,gender,image:null}}` | 是 | `M:181` |
-| POST | `/message/friendAdd` | customerId, friendId | `{success, msg}` | 是 ⚠️ | `M:224` |
-| POST | `/message/selectFriend` | friendId | `{success, list}` | 是 | `M:279` |
-| POST | `/message/friendUp` | customerId, friendId | `{success, msg}` | 是 | `M:294` |
-| POST | `/message/friendDe` | customerId, friendId | `{success, msg}` | 是 | `M:327` |
-| POST | `/message/friendSelect` | customerId | `{success, list}` | 是 | `M:361` |
+| POST | `/message/conversations` | currentId, currentType | `{success, list[{other_id,other_type,last_time,unread}]}` | 是 | `MessageController.getConversations:55` |
+| POST | `/message/history` | currentId, currentType, otherId, otherType | `{success, list[...]}` | **否** ⚠️**写**（见 §1） | `MessageController.getMessageHistory:61` |
+| POST | `/message/send` | fromId, fromType, toId, toType, content | `{success, msg}` | **否** | `MessageController.sendMessage:69` |
+| POST | `/message/getOrCreateConversation` | currentId, currentType, otherId, otherType | `{success, otherUser, messages}` | 是 | `MessageController.getOrCreateConversation:78` |
+| POST | `/message/userSelect` | userId | `{success, user{id,username,usertype,gender,image:null}}` | 是 | `MessageController.userSelect:90` |
+| POST | `/message/friendAdd` | customerId, friendId | `{success, msg}` | 是 ⚠️ | `MessageController.friendAdd:96` |
+| POST | `/message/selectFriend` | friendId | `{success, list}` | 是 | `MessageController.selectFriend:103` |
+| POST | `/message/friendUp` | customerId, friendId | `{success, msg}` | 是 | `MessageController.friendUp:109` |
+| POST | `/message/friendDe` | customerId, friendId | `{success, msg}` | 是 | `MessageController.friendDe:116` |
+| POST | `/message/friendSelect` | customerId | `{success, list}` | 是 | `MessageController.friendSelect:123` |
+
+**业务体现址**（2026-10-03 三层第四笔后 —— 上表 `MessageController.<方法>:<行>` 只是**路由行**，方法体已不在 Controller）：
+
+| 端点 | 路由（`MessageController`） | 业务体（`MessageService`，方法声明行） | SQL 出口（`MessageDao`，定义行-执行行） |
+|---|---|---|---|
+| `conversations` | `:55-59` | `getConversations` `:144-183` | `selectConversations` `:112-120`、`selectLastReadTime` `:131-133` |
+| `history` | `:61-67` | `getMessageHistory` `:194-206` | `selectMessagesBetween` `:149-152`、`upsertLastReadTime` `:206-209` |
+| `send` | `:69-76` | `sendMessage` `:213-230` | `insertMessage` `:214-216` |
+| `getOrCreateConversation` | `:78-85` | `getOrCreateConversation` `:240-266` | `selectMessagesBetween` `:149-152`（+ 经私有 `getUserInfoById` 的 3 条，见下） |
+| `userSelect` | `:90-93` | `userSelect` `:278-311` | —（读路径走 `UserCacheService.publicInfo()`） |
+| `friendAdd` | `:96-100` | `friendAdd` `:322-326` → 临界区 `friendAddLocked` `:342-381` | `selectFriendPair` `:233-234`、`insertFriendRequest` `:243-244` |
+| `selectFriend` | `:103-106` | `selectFriend` `:386-397` | —（读路径走 `FriendCacheService.listRequests()`） |
+| `friendUp` | `:109-113` | `friendUp` `:409-435` | `acceptFriendRequest` `:254-255`、`insertMutualFriend` `:275-276` |
+| `friendDe` | `:116-120` | `friendDe` `:441-461` | `deleteFriendRequest` `:281-282` |
+| `friendSelect` | `:123-126` | `friendSelect` `:472-484` | —（读路径走 `FriendCacheService.listFriends()`） |
+
+⚠️ **本域不是「数据出口收成一处」**：上表 `MessageDao` 之外还有 **2 个跨域缓存读路径**（`UserCacheService.publicInfo` / `FriendCacheService.listFriends`+`listRequests`，共 6 条语句）——按 `three-layers.md` 的 DAO 边界裁决（DAO 只收 Controller 内联 SQL）**不进** `MessageDao`。`getOrCreateConversation` 走的是 `MessageService` 里**另一份**私有 `getUserInfoById`（`:497-533`，`MessageDao.selectUserPublicInfo:174` + 两张 image 表 `:184`/`:190`），与 `FriendCacheService.userInfoById` 同名同逻辑但**保留 catch** —— 两份并存是**有意的**，不是漏删。
 
 ### /goods — 9 个（商品域，原 `/mysqlGoods` 的商品部分）
 
@@ -94,10 +111,10 @@
 ## 3. 逐条说明
 
 - ⚠️ `UserController.loginAdd:61`：靠「先 SELECT 查重再 INSERT」实现重复拦截（`UserDao.existsUserName:119` → `UserDao.insertUserCustomer:170`），存在 TOCTOU 竞态（见 `concurrency-map.md`）。第二参数 `customerid`/`merchantid` 会被 `userid` 覆盖（`UserService.loginAdd:136`、`:144`）。
-- ⚠️ `M:224 friendAdd`：同为「先查后插」（`M:240`→`M:253`），存在 TOCTOU 竞态。
+- ⚠️ `MessageController.friendAdd:96`（业务体 `MessageService.friendAdd:322`）：同为「先查后插」（查重 `MessageDao.selectFriendPair:233` → 插入 `MessageDao.insertFriendRequest:243`），存在 TOCTOU 竞态（B2 的 `runLocked` 已在 `MessageService.friendAdd:323` 把二者合成原子）。
 - ⚠️ `G:51 goodstype` POST：同为「先查后插」（**已搬**：`GoodsTypeCacheService:62`→`:71`）。返回 `{success:false,msg:"类型已存在"}` 而非 `"0"`，与 `loginAdd` 风格不一致。
-- `M:89 history` 非幂等：除查询外还会 upsert `user_conversation_read.last_read_time = NOW()`（`M:101-104`），每次调用都刷新时间戳。
-- `M:112 send` 非幂等：每次调用插入一条新 `message`（`M:119`）。
+- `MessageController.getMessageHistory:61` 非幂等：除查询外还会 upsert `user_conversation_read.last_read_time = NOW()`（`MessageDao.upsertLastReadTime:206-209`，调用点 `MessageService.getMessageHistory:200`），每次调用都刷新时间戳。
+- `MessageController.sendMessage:69` 非幂等：每次调用插入一条新 `message`（`MessageDao.insertMessage:214`，调用点 `MessageService.sendMessage:217`）。
 - `O:42 orderAdd` **仍非幂等**：每次调用插入一条新 `order`。⚠️ **原文**写「`OrderId` 由调用方提供且**无唯一约束**，可重复下单号」—— **2026-09-30 S1a（`1e2fcfa`）已加 UNIQUE `uk_order_orderId`**，同单号第二次调用会被 DB 拒（`orderAdd` 把它吞成 **HTTP 200 + `msg="数据库错误…"`**，见 TD-14 / `A-S2a-1c`）。**但「非幂等」这条没变**：拦的只是「同单号重复插入」，不同单号照旧每调一次插一行 ⇒ 幂等性仍不由接口保证。
 - `G:72 goodsAdd` / `G:109 goodsDe` / `G:142 goodsUp`：均同时写 `goods` 与 `productsales` 两张表，**无事务保护**（见 `concurrency-map.md`）。⚠️ 2026-10-02 三层第二笔后，三者的**方法体**分别在 `GoodsService:83-148` / `:211-238` / `:252-306`（行号指路由，事务边界看方法体）。
 - `O:100/107/114` 三个订单状态接口是全项目唯一带并发防护的写接口，详见 `concurrency-map.md` 正面案例。

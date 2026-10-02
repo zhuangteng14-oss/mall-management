@@ -5,7 +5,7 @@
 >
 > ⚠️ **2026-10-02 复测订正（本页多处）**：本文写于 **2026-09-14 截面**，此后 **B1/B2/B3 三笔**改动了架构与坐标。本次就地重测的是**坐标已冻结的部分**（商品/订单/shared 三层已完成的域），逐行标注「原记 → 2026-10-02 实测」。两点范围声明：
 > 1. **证据基础已变**：写时是 3 个 Controller，现为 **4 个业务 Controller**（`goods`/`order`/`message`/`user`）+ `shared/health/HealthController`；且**订单、商品两域的方法体已离开 Controller**（三层重构），旧 `G:` 坐标多数**已越界**（`GoodsController` 现仅 176 行）。
-> 2. **`U:` / `M:` 坐标本次不改**：用户域与消息域的三层重构**尚未做**，现在重指会在下一笔再漂一轮。文中凡命中这两域的锚点一律标「**待 user/message 笔重指**」，**不写新行号**。读到它们请**直接去源码重测**，不要做加减法。
+> 2. ~~**`U:` / `M:` 坐标本次不改**：用户域与消息域的三层重构**尚未做**，现在重指会在下一笔再漂一轮。文中凡命中这两域的锚点一律标「**待 user/message 笔重指**」，**不写新行号**。~~ ✅ **2026-10-03 结清**：两域的三层笔**都已落地**（user 域 `0c07e96`、message 域 `8ed5fc1`），本节 §4 里原先挂着「待 message 笔重指」的两行**已就地重指**（`UserController` 那一行在 2026-10-02 user 笔时即已重指）。**本条作废**。⚠️ 全文其余命中这两域的锚点（§1 #12 的 `MessageController.friendAdd` 等）**一并改完**；仍要「直接去源码重测」的只剩**未做三层的公共层**（`shared`）相关坐标。
 
 ## 1. 摘要
 
@@ -16,7 +16,7 @@
 | `productsales.OrderVolume` **从未被更新**，订单量统计功能失效（**非竞态问题**） | 高 |
 | 4 处多表写**无事务保护**（`goodsAdd`/`goodsUp`/`goodsDe`/`friendUp`） | 高 |
 | 3 处「先查后插」存在 **TOCTOU 竞态**，且无数据库唯一约束兜底 | 高 |
-| ~~无任何锁：无 `synchronized`/`Lock`/`FOR UPDATE`/`@Version`/Redis/Redisson~~ → ⚠️ **2026-10-02 已不成立**：**B2**（2026-09-30）引入 **Redisson 3.46.0** 分布式锁，`DistributedLockService.runLocked` 现有 **5 个业务调用点**（`OrderService` 4 + `MessageController` 1）。仍**确实**没有的是 `synchronized` / `FOR UPDATE` / `@Version`（全仓 0 命中）—— 「无锁」已从**事实**降级为**局部事实** | 中 |
+| ~~无任何锁：无 `synchronized`/`Lock`/`FOR UPDATE`/`@Version`/Redis/Redisson~~ → ⚠️ **2026-10-02 已不成立**：**B2**（2026-09-30）引入 **Redisson 3.46.0** 分布式锁，`DistributedLockService.runLocked` 现有 **5 个业务调用点**（`OrderService` 4 + `MessageService` 1）。仍**确实**没有的是 `synchronized` / `FOR UPDATE` / `@Version`（全仓 0 命中）—— 「无锁」已从**事实**降级为**局部事实** | 中 |
 | ~~无任何异步与线程池：无 `@Async`/`@Scheduled`/`CompletableFuture`/`ThreadPoolTaskExecutor`~~ → ⚠️ **2026-10-02 部分不成立**：**B3** 引入显式 `ThreadPoolExecutor`（`OrderStateExecutor:79`，`ArrayBlockingQueue(1024)`，`app.order.state.async.queue-capacity`）。四个字面量仍 0 命中，但「无线程池」不再为真 | 低（主流程仍同步；异步仅限订单状态事件） |
 
 ## 2. 唯一的 @Transactional
@@ -68,15 +68,15 @@
 | 1 | 多表写无事务 | `goodsAdd` 插 `goods` + `productsales`，第二次失败会留下无销量记录的孤儿商品 | `GoodsService:124`、`:131`（原记 `G:113`/`G:133`） |
 | 2 | 多表写无事务 | `goodsUp` 更新 `goods` + `productsales` 两表非原子 | `GoodsService:288`、`:291`（原记 `G:304`/`G:314`） |
 | 3 | 多表写无事务 | `goodsDe` 删 `goods` + `productsales` 两表非原子 | `GoodsService:220`、`:223`（原记 `G:227`/`G:231`） |
-| 4 | 多表写无事务 | `friendUp` 改单向 `if_friend=1` 后插入反向行，第二步失败会产生**单向好友**（半好友关系） | ~~`M:266`、`M:268`~~ —— **待 message 笔重指**（2026-10-02 实测已 +35） |
+| 4 | 多表写无事务 | `friendUp` 改单向 `if_friend=1` 后插入反向行，第二步失败会产生**单向好友**（半好友关系） | ~~`M:266`、`M:268`~~ ✅ **已重指（2026-10-03 message 笔 `8ed5fc1`）**：`MessageService.friendUp:412`（UPDATE，`MessageDao.acceptFriendRequest:254-255`）→ `:414`（INSERT，`MessageDao.insertMutualFriend:275-276`）。**竞态未修**（两条语句之间仍无事务，catch 吞异常 ⇒ 单向好友仍可产生） |
 | 5 | TOCTOU 竞态 | `loginAdd` 先 SELECT 查重再 INSERT，并发下两个请求可同时通过查重 | ~~`U:61` → `U:81`~~ ✅ **已重指（2026-10-02 user 笔 `0c07e96`）**：查重 `UserDao.existsUserName:119` → 第一条写语句 `UserDao.insertUserCustomer:170`（**竞态未修**，仍由 A3 `A-B2-1` 以 `EXPECTED_DEFECT_PRESENT` 钉住） |
-| 6 | TOCTOU 竞态 | `friendAdd` 先查再插，并发重复申请会写入重复行 | ~~`M:205` → `M:219`~~ —— **待 message 笔重指**（实测 `:240-241` → `:253`）；⚠️ **B2 已给该临界区加 `runLocked` 分布式锁**（见 §5 #12 注） |
+| 6 | TOCTOU 竞态 | `friendAdd` 先查再插，并发重复申请会写入重复行 | ~~`M:205` → `M:219`~~ ✅ **已重指（2026-10-03 message 笔 `8ed5fc1`）**：查重 `MessageService.friendAddLocked:349`（`MessageDao.selectFriendPair:233-234`）→ 插入 `:362`（`MessageDao.insertFriendRequest:243-244`）；⚠️ **B2 已给该临界区加 `runLocked` 分布式锁**（`MessageService.friendAdd:323`，见 §5 #12 注） |
 | 7 | TOCTOU 竞态 | `goodstype` POST 先查重再插，并发下可产生重复类型 | `GoodsTypeCacheService:62` → `:71`（原记 `G:42`/`G:51`） |
 | 8 | 无唯一约束兜底 | `friend` 仅 PK `id`，`(customerid, friendid)` 无唯一键 —— 上述竞态**无数据库层兜底** | `SQL:43` |
 | 9 | ~~无唯一约束兜底~~ ✅ **已消除（2026-09-30 S1a，`1e2fcfa`）** | ~~`order.OrderId` 无唯一索引（主键是自增 `Id`），业务单号可重复~~ → 已加 UNIQUE **`uk_order_orderId`**，DB 层兜底到位。应用层查重仍由 B2 的临界区「先查后插」负责，两条互补（`A-S2a-1b` 断言前者、`1c` 断言后者） | `SQL:154`；追加块 `SQL:245` |
 | 10 | 无唯一约束兜底 | `goodstype.GoodType` 无唯一索引，查重仅靠应用层 | `SQL:78` |
 | 11 | 无锁机制（**已部分消除**） | `synchronized` / `SELECT ... FOR UPDATE` / `@Version` 乐观锁版本列**仍全仓 0 命中**；但 ⚠️ **B2（2026-09-30）已引入 Redisson 应用层锁** ⇒ 「无锁」只剩后半句 | 主源全仓 grep（2026-10-02 复测） |
-| 12 | ~~无分布式锁~~ ✅ **已消除（B2，2026-09-30）** | ~~未引入 Redis / Redisson~~ → `DistributedLockService.runLocked`（`:237`）现有 **5 个业务调用点**（`OrderService:110/180/186/192` + `MessageController.friendAdd:227`）。⚠️ 覆盖**不是**全面的：§4 #4/#5 两处多表写**仍未打锁** | `pom.xml:82-85`（`spring-boot-starter-data-redis`）、`pom.xml:117-121`（`redisson 3.46.0`） |
+| 12 | ~~无分布式锁~~ ✅ **已消除（B2，2026-09-30）** | ~~未引入 Redis / Redisson~~ → `DistributedLockService.runLocked`（`:237`）现有 **5 个业务调用点**（`OrderService:110/180/186/192` + ~~`MessageController.friendAdd:227`~~ `MessageService.friendAdd:323`，2026-10-03 message 笔 `8ed5fc1` 重指）。⚠️ 覆盖**不是**全面的：§4 #4/#5 两处多表写**仍未打锁** | `pom.xml:82-85`（`spring-boot-starter-data-redis`）、`pom.xml:117-121`（`redisson 3.46.0`） |
 | 13 | 无异步 / 线程池（**已部分消除**） | `@Async`/`@Scheduled`/`CompletableFuture`/`ThreadPoolTaskExecutor` 四个字面量**仍 0 命中**，但 ⚠️ **B3 引入显式 `ThreadPoolExecutor`**（`OrderStateExecutor:79`，有界 `ArrayBlockingQueue(1024)`） | `OrderStateExecutor.java:79/100`、`application.properties`（`app.order.state.async.queue-capacity`） |
 
 ## 6. 连接池配置
