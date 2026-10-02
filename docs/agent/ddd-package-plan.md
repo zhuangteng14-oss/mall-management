@@ -67,8 +67,8 @@
 | 7 | `L2ProbeConfig` | `mallmanagement_server` | `shared.cache` | 分域笔 |
 | 8 | `DistributedLockService` | `mallmanagement_service` | `shared.lock` | 分域笔 |
 | 9 | `LockSceneService` | `mallmanagement_service` | `shared.lock` | 分域笔 |
-| 10 | `MallCacheMetrics` | `mallmanagement_server` | `shared.metrics` | 分域笔 |
-| 11 | `MallLockMetrics` | `mallmanagement_server` | `shared.metrics` | 分域笔 |
+| 10 | `MallCacheMetrics` | `mallmanagement_server` | `shared.cache` | 分域笔 |
+| 11 | `MallLockMetrics` | `mallmanagement_server` | `shared.lock` | 分域笔 |
 | 12 | `UploadStorage` | `mallmanagement_service` | `shared.upload` | 分域笔 |
 | 13 | `ImgPath` | `mallmanagement_server` | `shared.upload` | 分域笔 |
 | 14 | `ImgConfig` | `mallmanagement_server` | `shared.upload` | 分域笔 |
@@ -85,12 +85,12 @@
 | 25 | `GoodsCacheService` | `mallmanagement_service` | `goods.service` | 三层齐后 |
 | 26 | `GoodsTypeCacheService` | `mallmanagement_service` | `goods.service` | 三层齐后 |
 | 27 | `MallManagementGoodsController` | `mallmanagement_controller` | **拆分**：商品 9 → `goods.controller`；订单 8 → `order.controller` | 分域笔 |
-| 28 | `MallManagementUserController` | `mallmanagement_controller` | `user.controller`（并收编 §A2 移来的 `userSelect`） | 分域笔 |
-| 29 | `MallManagementMessage` | `mallmanagement_controller` | `message.controller`（消息 4 + 好友 5，共 9） | 分域笔 |
+| 28 | `MallManagementUserController` | `mallmanagement_controller` | `user.controller`（**仅 `/mysqlLogin` 5 端点**；`userSelect` 不并入，见 §11 裁决①） | 分域笔 |
+| 29 | `MallManagementMessage` | `mallmanagement_controller` | `message.controller`（消息 4 + 好友 5 + `userSelect` 1，共 10） | 分域笔 |
 | 30 | `UserCacheService` | `mallmanagement_service` | `user.service` | 三层齐后 |
 | 31 | `FriendCacheService` | `mallmanagement_service` | `message.service` | 三层齐后 |
 
-**计数核验**：`1(不动) + 1(删) + 5 + 2 + 2 + 3 + 1 + 1 + 1 + 1 + 6 + 2 + 1(GoodsController) + 1(UserController) + 1(Message) + 1(UserCacheService) + 1(FriendCacheService) = 31` ✅
+**计数核验**：`1(不动) + 1(删) + 6(shared.cache) + 3(shared.lock) + 3(shared.upload) + 1(shared.health) + 1(order.metrics) + 1(OrderService) + 1(OrderDao) + 6(order.model) + 2(goods.service) + 1(GoodsController) + 1(UserController) + 1(Message) + 1(UserCacheService) + 1(FriendCacheService) = 31` ✅
 
 ### 终态目录树
 
@@ -100,8 +100,8 @@ com.minke
 └── mallmanagement/
     ├── shared/
     │   ├── cache/     CacheConfig · TwoLevelCache · TwoLevelCacheManager · L2HealthProbe · L2ProbeConfig
-    │   ├── lock/      DistributedLockService(含内嵌 LockName) · LockSceneService
-    │   ├── metrics/   MallCacheMetrics · MallLockMetrics
+    │   │              MallCacheMetrics                      ← 不可再拆，见 §7
+    │   ├── lock/      DistributedLockService(含内嵌 LockName) · LockSceneService · MallLockMetrics
     │   ├── upload/    UploadStorage · ImgPath · ImgConfig
     │   └── health/    HealthController                      ← @Profile("a3")
     ├── order/
@@ -115,10 +115,10 @@ com.minke
     │   ├── controller/  GoodsController          （从 GoodsController 拆出 9 端点）
     │   └── service/     GoodsCacheService · GoodsTypeCacheService
     ├── user/
-    │   ├── controller/  UserController           （原 MallManagementUserController + userSelect）
+    │   ├── controller/  UserController           （原 MallManagementUserController，仅 /mysqlLogin）
     │   └── service/     UserCacheService
     └── message/
-        ├── controller/  MessageController        （消息 4 + 好友 5）
+        ├── controller/  MessageController        （消息 4 + 好友 5 + userSelect 1）
         └── service/     FriendCacheService
 ```
 
@@ -130,7 +130,7 @@ com.minke
 | | | 订单 **8** → `order.controller` | `orderAdd` · `orderSelect` · `orderDeliveryIfSelect` · `orderDeliverySelect` · `historicalOrdersSelect` · `orderPayIfUp` · `orderReceiveIfUp` · `orderDeliveryIfUp` |
 | `MallManagementMessage` `/message` | 10 | 消息 **4** → `message.controller` | `conversations` · `history` · `send` · `getOrCreateConversation` |
 | | | 好友 **5** → `message.controller` | `friendAdd` · `selectFriend` · `friendUp` · `friendDe` · `friendSelect` |
-| | | 用户 **1** → `user.controller` | `userSelect` |
+| | | 用户 **1** → `message.controller`（**留在本域**） | `userSelect` —— URL `/message/userSelect` 与其前缀同域；实现改为委托 `user.service`，见 §11 裁决① |
 | `MallManagementUserController` `/mysqlLogin` | 5 | `user.controller` | `loginSelect` · `loginAdd` · `getUserInfo` · `updateAvatar` · `updateUserInfo` |
 | `HealthController` `/health` | 1 | `shared.health` | `db`（`@Profile("a3")`） |
 
@@ -140,15 +140,16 @@ com.minke
 
 | 子包 | 收 | 类数 |
 |---|---|---|
-| `shared.cache` | `CacheConfig`、`TwoLevelCache`、`TwoLevelCacheManager`、`L2HealthProbe`、`L2ProbeConfig` | 5 |
-| `shared.lock` | `DistributedLockService`（含内嵌 `public enum LockName`）、`LockSceneService` | 2 |
-| `shared.metrics` | `MallCacheMetrics`、`MallLockMetrics` | 2 |
+| `shared.cache` | `CacheConfig`、`TwoLevelCache`、`TwoLevelCacheManager`、`L2HealthProbe`、`L2ProbeConfig`、`MallCacheMetrics` | 6 |
+| `shared.lock` | `DistributedLockService`（含内嵌 `public enum LockName`）、`LockSceneService`、`MallLockMetrics` | 3 |
 | `shared.upload` | `UploadStorage`、`ImgPath`、`ImgConfig` | 3 |
 | `shared.health` | `HealthController` | 1 |
 | `shared.config` | **（不设）** | 0 |
+| ~~`shared.metrics`~~ | **（已取消，见 §11 裁决 B）** | 0 |
 
-**两条排除理由**：
-- `MallOrderStateMetrics` **不进** `shared.metrics` —— 它 import `mallmanagement_service.OrderAction`（`MallOrderStateMetrics.java:3`，实测唯一一条域类型 import），放进 `shared` 会立造 `shared → order` 反向边（§5）。归 `order.metrics`。
+**三条排除理由**：
+- `MallOrderStateMetrics` **不进** `shared` —— 它 import `mallmanagement_service.OrderAction`（`MallOrderStateMetrics.java:3`，实测唯一一条域类型 import），放进 `shared` 会立造 `shared → order` 反向边（§5）。归 `order.metrics`。
+- `shared.metrics` **不设** —— 两个 Metrics 类各自与消费它的子系统存在**包私有构造器**耦合（`MallCacheMetricsTest` 需与 `MallCacheMetrics`、`TwoLevelCache`、`L2HealthProbe` 三者同包），`metrics` 一旦独立，该约束无法同时满足。裁决 B：`MallCacheMetrics` 随 `shared.cache`、`MallLockMetrics` 随 `shared.lock`（§11）。
 - `shared.config` **不设** —— 实测唯一的配置类 `ImgConfig` 属上传语义，1 个类的空包不值。
 
 ---
@@ -160,7 +161,7 @@ com.minke
 ```
                     ┌────────────────────────────┐
                     │  shared                     │
-                    │  cache · lock · metrics     │
+                    │  cache · lock               │
                     │  upload · health            │
                     └──────┬──────────┬───────────┘
                            │          │
@@ -204,6 +205,8 @@ OrderAction                               （mallmanagement_service）  ← 闭�
 **定稿后：环消失。** 因为 A3 把 `MallOrderStateMetrics` 放进 `order.metrics` ⇒ `order → order.metrics` 是**域内**边，`order.* → shared.*` 是**域 → 底座**边，不存在 `shared → order` 回望。
 
 > ⚠️ 这正是 A3 的判据：若照最初设想把 `MallOrderStateMetrics` 放进 `shared.metrics`，环会从「包环」升级为 **`shared ↔ order` 架构环** —— shared 是底座，依赖任何域都是最该禁止的一类。
+>
+> 补记（笔 1 裁决 B）：`shared.metrics` 这个包已**整体取消**——`MallCacheMetrics` 归 `shared.cache`、`MallLockMetrics` 归 `shared.lock`。上面这条推断所指向的落点（`order.metrics`）不变，只是「对照组」`shared.metrics` 不再存在。见 §11。
 
 ---
 
@@ -244,6 +247,27 @@ OrderAction                               （mallmanagement_service）  ← 闭�
 
 **好消息**：这些包私有成员**没有一条被跨包生产代码使用**（实测），因此细分子包**不会破生产代码**，只会破测试包的落位——迁移时这 5 对必须**成对搬**。另注：三个 Metrics 类的嵌套枚举/record 均为 `public`（`Outcome`/`Hold`/`Result`/`RejectReason`/`L2Result`/`EvictResult` 等），故 `DistributedLockService` 等**跨包**消费它们不受影响。
 
+**⚠️ 硬约束之二（笔 1 实测补入）——包私有成员的第二类：`shared` 内部的主代码 ↔ 主代码耦合**
+
+上面那张表全是「主代码 ↔ 测试」。实测还存在一条**主代码 ↔ 主代码**的包私有耦合，它比测试耦合更硬（破的是生产代码，不是测试）：
+
+| 常量 | 声明 | 消费方 | 消费方所在 |
+|---|---|---|---|
+| `L2HealthProbe.PROBE_INFLIGHT` | `L2HealthProbe.java:72`（`static final Duration`，**包私有**） | `L2ProbeConfig.java:77`（构造入参）、`:151`（校验）、`:154`（报错文案） | 主代码 |
+
+⇒ **`shared.cache` 不可再拆**。`L2ProbeConfig` 读 `L2HealthProbe.PROBE_INFLIGHT` 靠的是同包可见性；把两者分到不同子包（如 `shared.cache.probe` / `shared.cache.config`）会直接编译失败，且**没有任何测试会提前发现**——它挂在编译期，不在测试期。
+
+**⚠️ 硬约束之三（同上）——包私有构造器**
+
+全仓实测**只有 2 个类**有包私有构造器（枚举构造器为隐式 `private`，不属此类，且无外部使用）：
+
+| 类 | 包私有构造器 | 谁需要同包 |
+|---|---|---|
+| `L2HealthProbe` | `L2HealthProbe.java:109` `L2HealthProbe(RedisConnectionFactory, Duration, ...)` | `MallCacheMetricsTest:409` |
+| `TwoLevelCache` | `TwoLevelCache.java:59` `TwoLevelCache(String, Cache, Cache, ...)` | `MallCacheMetricsTest:390` |
+
+这正是裁决 B 的**成因**：`MallCacheMetricsTest` 一个测试类同时需要与 `MallCacheMetrics`（11 个包私有常量）、`TwoLevelCache`（包私有构造器）、`L2HealthProbe`（包私有构造器）三者同包。若 `shared.metrics` 独立存在，这个测试无处安放——**三选二，必然有一个编译不过**。取消 `shared.metrics` 是唯一不需要放宽可见性的解（见 §11 裁决 B）。
+
 ---
 
 ## §8 迁移风险（R1–R10）
@@ -266,7 +290,7 @@ OrderAction                               （mallmanagement_service）  ← 闭�
 ## §9 迁移顺序（**只列，不执行**）
 
 1. **先做纯移动、且域内三层已完成的**：`order`（12 个类）→ `order.*`
-2. **再做底座**：`shared.cache / shared.lock / shared.metrics / shared.upload / shared.health`（13 个类）
+2. **再做底座**：`shared.cache / shared.lock / shared.upload / shared.health`（13 个类）
 3. **然后做单域移动**：`user`、`goods`（缓存类）、`message`（`FriendCacheService`）
 4. **最后做两个拆分**：`GoodsController`（商品 / 订单）、`Message`（消息 / 好友 / 用户）
 5. **每步之后**：全量测试（当前基线 `130 / 0 / 0 / 8`）+ A3 **27 门禁**全绿，再进下一步
@@ -283,3 +307,46 @@ OrderAction                               （mallmanagement_service）  ← 闭�
 - 测试包的**统一拼写**（R6）具体选哪种，执行时定。
 - `MallManagementApplication` 是否移入 `com.minke.mallmanagement`——**未采纳**（§6 备选）。
 - 本文件**未覆盖前端**：前端 14 个页面里若有硬编码后端包名/类名，理论上不受影响（HTTP 契约不变），**未核**。
+
+---
+
+## §11 修订记录：笔 1（纯挪包）执行回填 · 2026-10-02
+
+本节由**用户裁决**改动本文件前述章节，逐条留痕。笔 1 = 纯挪包（49 搬运 + 1 删除），**不含** Controller 拆分（R2，留给笔 2）。
+
+### 裁决① —— `userSelect` 不拆，留 `message.controller`（§2 已改）
+
+原定把 `MallManagementMessage` 的 `userSelect` 端点到 `user.controller`。**改定：不拆**——`userSelect` 的 URL 是 `/message/userSelect`，与所在域前缀一致；域归属由 **Service** 表达（`MallManagementMessage.userSelect` 委托给 `user.service.UserService.getPublicInfo()`），Controller 只是 HTTP 适配器。
+
+⇒ 规划文档两处随之修正：`user.controller` **只 1 个类**（`UserController`，仅 `/mysqlLogin` 5 端点）；`userSelect` 归 `message.controller`（消息 4 + 好友 5 + `userSelect` 1 = 10）。文件数因此 **+1 降到 +0**。
+
+> 附带效果：`UserCacheService` 改名/定位为 `UserService` 一事**留给 user 域三层笔**，不在本规划内。
+
+### 裁决② 与 ③ —— 笔 2 的边界（**不含**注释；`MallManagementApplicationTests` 归 `com.minke`）
+
+- **②笔 2 含断言、不含注释**：`AbstractSmokeTest` 里「全部 3 个 Controller」那句**注释**不进笔 2（它是纯注释，另列第 3 笔或后续）；`MallManagementApplicationTests` 新增 `orderControllerIsNotAopProxied` **进**笔 2（防回归）。⇒ 笔 2 = 4 源文件 + 1 断言 = **5 文件**，正好贴 ≤5 判据。
+- **③测试包落点**：`MallManagementApplicationTests` → `com.minke`（贴启动类，Spring Boot 惯例）。**接受**——不追求全仓单一前缀。笔 1 已按此落位。
+
+### 裁决 B —— 取消 `shared.metrics`（§2 / §3 / §4 / §9 已改）
+
+原定 `MallCacheMetrics`、`MallLockMetrics` 同归 `shared.metrics`。执行时实测发现 `MallCacheMetricsTest` 需**同时**与 `MallCacheMetrics`（包私有常量）、`TwoLevelCache`、`L2HealthProbe`（后两者为包私有构造器）同包，`shared.metrics` 独立后无处安放该测试。
+
+三个候选处置：**A** 最小改动保留 `shared.metrics`；**B** 取消 `shared.metrics`，两类各随其子系统；**C** 放宽那 4 个成员的可见性（会**作废内容哈希证据**——可见性属被改动的代码行）。**用户裁决：B。**
+
+| 类 | 原定 | **改定** |
+|---|---|---|
+| `MallCacheMetrics` | `shared.metrics` | **`shared.cache`** |
+| `MallLockMetrics` | `shared.metrics` | **`shared.lock`** |
+| `MallCacheMetricsTest` | `shared.metrics` | **`shared.cache`** |
+| `MallLockMetricsTest` | `shared.metrics` | **`shared.lock`** |
+
+### 裁决④ —— `L2HealthProbe.PROBE_INFLIGHT` 回补（已写入 §7）
+
+补记为一类此前**未分析**的耦合：包私有**构造器**（此前 §7 只分析了字段/常量），以及一条**主代码 ↔ 主代码**的包私有耦合（`L2ProbeConfig` → `L2HealthProbe.PROBE_INFLIGHT`），并据此钉下「**`shared.cache` 不可再拆**」。
+
+### 执行结果（笔 1）
+
+- **范围**：49 文件换路径 + `info.java` 删除 + `MallManagementApplication` 原位不动 = 旧树 51 → 新树 50。
+- **验证**：`./mvnw -B clean test` → **130 通过 / 0 失败 / 0 错误 / 8 跳过**（与基线逐项一致）；`npm run build` → Build complete。
+- **内容哈希**：剥 `package`/`import` 行后逐文件比对，**46/49 逐字节相同**；3 个差异全部在 javadoc 注释内的包名引用（`{@link}` 3 处 + `{@code}` 散文 1 处），**零执行代码变化**。
+- **未完成**：Controller 拆分（R2）= 笔 2，待笔 1 合并后单独进行。
