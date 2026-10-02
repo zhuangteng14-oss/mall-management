@@ -3,6 +3,7 @@ package com.minke;
 import com.minke.mallmanagement.goods.controller.GoodsController;
 import com.minke.mallmanagement.message.controller.MessageController;
 import com.minke.mallmanagement.order.controller.OrderController;
+import com.minke.mallmanagement.user.controller.UserController;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
 import org.springframework.aop.framework.Advised;
@@ -56,6 +57,9 @@ class MallManagementApplicationTests {
 
     @Autowired
     private OrderController orderController;
+
+    @Autowired
+    private UserController userController;
 
     /**
      * 全上下文启动冒烟。
@@ -160,6 +164,39 @@ class MallManagementApplicationTests {
                         + " advisors = " + describeAdvisors(orderController));
         assertFalse(orderController instanceof Advised,
                 "OrderController 实现了 Advised —— 它是个代理。advisors = " + describeAdvisors(orderController));
+    }
+
+    /**
+     * CGLIB 防回归（第四条，也是**唯一一条钉住状态翻转**的）：{@code UserController} 不应被代理。
+     *
+     * <p>⚠️ <b>它与前三条的成因不同</b>：goods / message / order 三条钉的是「**从来没有**被代理」，
+     * 本条钉的是一次**真的翻转** —— 三层前（2026-10-02 及以前）本 bean **是被代理的**，
+     * 因为 {@code loginAdd} 上挂着全仓唯一那处真 {@code @Transactional}
+     * （{@code UserController:57}），Boot 的 {@code TransactionAutoConfiguration} 会为它建事务代理。
+     *
+     * <p>依据（两种测法，独立）：① 2026-10-02 user 域三层重构前，把本断言原样跑一遍
+     * —— {@code A3_ENABLED=true mvn test -Dtest=MallManagementApplicationTests} ——
+     * <b>本条为红</b>，失败信息里的 advisor 链含 {@code TransactionInterceptor}；
+     * ② 重构后同一命令为绿。所以这不是「照抄前面三条的惯例」，
+     * 它记录的是「{@code @Transactional} 随方法体下沉到 {@code UserService.loginAdd} 之后，
+     * Controller 恢复无代理」这个**可观测的状态变化**。
+     *
+     * <p>⚠️ 判据仍与前三条一致（{@code isAopProxy} + {@code instanceof Advised}），刻意
+     * <b>不</b>断言「类名里没有 {@code $$SpringCGLIB$$}」：真出事时失败信息里的 advisor 链
+     * 才是「是什么把它代理了」的直接证据 —— 本次是 {@code TransactionInterceptor}，
+     * 前三条例子里若出现则会是 {@code CacheInterceptor}。
+     *
+     * <p>⚠️ 同前三条：切片里恒为 {@code false}（{@code @WebMvcTest} 不导入
+     * {@code ProxyCachingConfiguration} / 事务后置处理器）⇒ <b>假阴性</b>，必须在完整上下文里查。
+     */
+    @Test
+    void userControllerIsNotAopProxied() {
+        assertFalse(AopUtils.isAopProxy(userController),
+                "UserController 被代理了 —— 三层前这是 @Transactional 造成的，"
+                        + "重构后若再出现，检查是否有人把 @Transactional / 缓存注解挂回了 Controller。"
+                        + " advisors = " + describeAdvisors(userController));
+        assertFalse(userController instanceof Advised,
+                "UserController 实现了 Advised —— 它是个代理。advisors = " + describeAdvisors(userController));
     }
 
     /** 失败信息用：把 advisor 链打出来，便于一眼看出是不是 CacheInterceptor。 */

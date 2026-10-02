@@ -10,7 +10,9 @@ import com.minke.mallmanagement.order.dao.OrderDao;
 import com.minke.mallmanagement.order.service.OrderService;
 import com.minke.mallmanagement.order.model.OrderStateMachine;
 import com.minke.mallmanagement.order.model.OrderTransitionRecorder;
+import com.minke.mallmanagement.user.dao.UserDao;
 import com.minke.mallmanagement.user.service.UserCacheService;
+import com.minke.mallmanagement.user.service.UserService;
 import org.junit.jupiter.api.BeforeEach;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
@@ -71,8 +73,22 @@ import static org.mockito.Mockito.when;
 // ⚠️ 配套（与订单域那次同一处坑，但方向不同）：GoodsAddUploadFailSmokeTest 里那条
 //    verify(jdbcTemplate, never()).update(String, Object...) 在本笔之后会**变成空话**
 //    —— JdbcClient 不再走那个重载。见该测试里已按 PreparedStatementCreator 改写的那两行。
+// 三层第三笔（user 域）补 UserService / UserDao，理由同上：UserController 现在只认 UserService。
+// 用真 bean 之后：UserService 的依赖全部有着落 —— UserDao（本行）、UserCacheService（替身）、
+// @Value app.upload-dir（有默认值）；UserDao 的 JdbcTemplate 就是下面那个 @MockitoBean ⇒ SQL 不出切片。
+// ⚠️ 配套（本笔真正踩到的那个坑）：user 域走 JdbcClient 的是**读**侧 ——
+//    JdbcClient 的 query(Class).single() 落到 JdbcTemplate.query(String, RowMapper, Object...)，
+//    **不是** queryForObject ⇒ LoginSelectSmokeTest 的旧 stub 不再命中。后果是「静默但可见」的：
+//    桩不中 ⇒ 返回 null ⇒ controller 的 role != null ? role : 0 返回 0 ⇒
+//    content().string("2") 变红。见该测试里已按 RowMapper 改写的那行。
+// ⚠️ 另记一条**切片与完整上下文的分歧**（不是缺陷，是切片的固有性质）：UserService.loginAdd 上的
+//    @Transactional 在本切片里是 **no-op** —— @WebMvcTest 不加载 DataSource ⇒ 没有
+//    TransactionManager ⇒ TransactionAutoConfiguration 的 @EnableTransactionManagement 不生效
+//    ⇒ 既不建代理、也不开事务。所以「注册的三条 INSERT 是否真的同事务」**本切片测不了**，
+//    那是 MallManagementApplicationTests（@SpringBootTest，A3_ENABLED=true）与 A3 的 A-B2-1 的职责。
 @Import({OrderStateMachine.class, OrderService.class, OrderDao.class,
-        GoodsService.class, GoodsDao.class})
+        GoodsService.class, GoodsDao.class,
+        UserService.class, UserDao.class})
 public abstract class AbstractSmokeTest {
 
     @Autowired
