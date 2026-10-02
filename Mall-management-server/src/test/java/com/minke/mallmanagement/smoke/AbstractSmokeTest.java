@@ -2,7 +2,9 @@ package com.minke.mallmanagement.smoke;
 
 import com.minke.mallmanagement.shared.lock.DistributedLockService;
 import com.minke.mallmanagement.message.service.FriendCacheService;
+import com.minke.mallmanagement.goods.dao.GoodsDao;
 import com.minke.mallmanagement.goods.service.GoodsCacheService;
+import com.minke.mallmanagement.goods.service.GoodsService;
 import com.minke.mallmanagement.goods.service.GoodsTypeCacheService;
 import com.minke.mallmanagement.order.dao.OrderDao;
 import com.minke.mallmanagement.order.service.OrderService;
@@ -58,7 +60,19 @@ import static org.mockito.Mockito.when;
 // JdbcTemplate.update(PreparedStatementCreator) 这个**单参重载**上（不是
 // update(String, Object...)）—— 所以 OrderPayIfUpSmokeTest 的 stub 匹配器要跟着换，
 // 否则它会静默返回 0、走错分支而**仍然是绿的形状**。见该测试里的 ⚠️ 注。
-@Import({OrderStateMachine.class, OrderService.class, OrderDao.class})
+//
+// 三层第二笔（商品域）补 GoodsService / GoodsDao，理由与订单域完全相同：GoodsController
+// 现在只认 GoodsService，而 @Service 不在 Web 切片内 —— 用替身会让
+// GoodsAddUploadFailSmokeTest 的「写库之前就返回」退化成一个空命题（替身不落盘也不查库，
+// 它当然不会被调用）。用真 bean 之后：GoodsService 的依赖全部有着落 —— GoodsDao（本行）、
+// GoodsCacheService（替身，其 evict 在切片里是空转）、@Value app.upload-dir（由
+// application-smoke.properties / 子类的 @TestPropertySource 提供）；
+// GoodsDao 的 JdbcTemplate 就是下面那个 @MockitoBean ⇒ SQL 不出切片。
+// ⚠️ 配套（与订单域那次同一处坑，但方向不同）：GoodsAddUploadFailSmokeTest 里那条
+//    verify(jdbcTemplate, never()).update(String, Object...) 在本笔之后会**变成空话**
+//    —— JdbcClient 不再走那个重载。见该测试里已按 PreparedStatementCreator 改写的那两行。
+@Import({OrderStateMachine.class, OrderService.class, OrderDao.class,
+        GoodsService.class, GoodsDao.class})
 public abstract class AbstractSmokeTest {
 
     @Autowired
@@ -75,7 +89,7 @@ public abstract class AbstractSmokeTest {
 
     /**
      * 同上一条的同一类问题：{@code @WebMvcTest} 无参加载全部 4 个 Controller，
-     * 其中 {@code GoodsController} 还 {@code @Autowired} 了两个
+     * 其中 {@code GoodsController} 还 {@code @Autowired} 了一个
      * 缓存 Service，而 {@code @Service} 不在 Web 切片内 ⇒ 切片里必须也给替身。
      *
      * <p>2026-09-28 补：goodstype 与 goodsSelectHome 上缓存时各引入一个 Service，
@@ -83,12 +97,27 @@ public abstract class AbstractSmokeTest {
      * {@code No qualifying bean of type ... GoodsTypeCacheService}），
      * 与 {@code JdbcTemplate} 那条是同一个成因、同一个修法。
      *
+     * <p>2026-10-02（三层第二笔，商品域）后本替身**只被 {@code GoodsController} 一处注入**
+     * —— 除 goodstype 外的 8 个端点已改由 {@code GoodsService} 转发（GoodsService 是
+     * 上面 @Import 的真 bean）。
+     *
      * <p>默认替身返回 null —— 本基类的 5 个子类都不调用走缓存的两个端点
      * （goodstype / goodsSelectHome），故无需 stub。
      */
     @MockitoBean
     protected GoodsTypeCacheService goodsTypeCacheService;
 
+    /**
+     * 同上一条的同一类问题，**但注入方在本笔换了人**：{@code GoodsController} 不再直接引它
+     * —— 现在引它的是被 {@code @Import} 拉进切片的**真 bean** {@code GoodsService}
+     * （三个写方法的唯一出口前要调 {@code evictByMerchant}）。
+     *
+     * <p>切片里它是替身 ⇒ evict 是空转；这一点必须显式知道：**smoke 不验证失效面**
+     * （那在 {@code cache-layer.md} 与 A3 的 S1/S2 读侧基线里守）。
+     *
+     * <p>默认替身返回 null。{@code PriceTripleFailSmokeTest} 会按用例 stub
+     * {@code priceByTriple}；其余子类不调走缓存的端点，故无需 stub。
+     */
     @MockitoBean
     protected GoodsCacheService goodsCacheService;
 

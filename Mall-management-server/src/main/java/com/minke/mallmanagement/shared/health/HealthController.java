@@ -17,7 +17,7 @@ import java.util.Map;
  * 【为什么需要它】
  * 加缓存之前，「HTTP 读回来的内容 == 库里的内容」是成立的，A3 的 P5（就绪探测）
  * 与 P6（哨兵往返）都建立在这个假设上。B1 给 goodstype 加缓存后该假设破裂：
- *   - P5 打 GET /mysqlGoods/goodstype，缓存命中时一次 DB 都不碰 →
+ *   - P5 打 GET /goods/goodstype（B1 当时前缀为 /mysqlGoods，2026-10-02 笔 2 规范化），缓存命中时一次 DB 都不碰 →
  *     它不再能证明「Hikari/MySQL 可用」，退化成「Web 层可用」；
  *   - P6 用裸 JDBC 直写哨兵行、再经 HTTP 读回，而缓存返回的是填充时刻的旧列表 →
  *     哨兵行必然读不到 → 结构性 FAIL（不是偶发，重跑多少次都一样）。
