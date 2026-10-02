@@ -12,7 +12,7 @@
 
 - Mall-management-server/src/main/java/com/minke/mallmanagement/shared/upload/ImgPath.java
 - Mall-management-server/src/main/java/com/minke/mallmanagement/user/controller/UserController.java（当时 `mallmanagement_controller/MallManagementUserController.java:150-200`）
-- Mall-management-server/src/main/java/com/minke/mallmanagement/goods/controller/GoodsController.java（当时 `mallmanagement_controller/MallManagementGoodsController.java:70-115、270-305`）
+- Mall-management-server/src/main/java/com/minke/mallmanagement/goods/service/GoodsService.java —— **上传处理的现址**：`goodsAdd` 的落盘段 `:96-117`（`file.isEmpty()` 早退 `:99`，`UploadStorage.store` `:109`）、`goodsUp` 的落盘段 `:265-281`（判据 `file != null && !file.isEmpty()` `:268`，`store` `:272`）。⚠️ **原指针 `goods/controller/GoodsController.java`（当时 `mallmanagement_controller/MallManagementGoodsController.java:70-115、270-305`）已失效** —— 2026-10-02 三层第二笔把商品 8 个方法体搬到 `GoodsService`，Controller 只剩路由与入参绑定，那里**没有任何上传代码**了。
 
 ## 约束
 

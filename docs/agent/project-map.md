@@ -23,7 +23,7 @@
 ```
 期末项目/
 ├── agent.md                                项目开发 Agent 规范（224 行）
-├── mall_management_sql.sql                 11 张表 DDL + 种子数据
+├── mall_management_sql.sql                 12 张表 DDL + 种子数据（11 张原始 + B3 于 2026-09-29 追加的 order_state_transition）
 ├── scripts/concurrency/                    A3 并发测试脚本（任务上下文见 context-packs/concurrency-test.md）
 │   ├── ConcurrencyRunner.java              单文件：6 场景负载 + 断言 + preflight P0–P7 + JSON 报告（2270 行）
 │   ├── run.sh                              两步编译（javac -encoding UTF-8 → java -cp）+ 驱动解析（Maven 回退）
@@ -93,12 +93,16 @@ Vue 3 CLI 工程，14 个页面视图 + 1 个组件 + 1 个路由表。页面按
 | `productsales.OrderVolume` 从未被更新，订单量统计功能失效 | `concurrency-map.md` |
 | 全项目零缓存（**2026-09-14 时**；B1 自 2026-09-27 起逐笔落地，现行见右栏第二项） | `cache-map.md`（顶部有时效标注）/ `context-packs/cache-layer.md` |
 | `ddl-auto=update` 与手写 DDL 脚本并存 | `db-schema.md` |
-| 11 张表中仅 `message` 有二级索引 | `db-schema.md` |
-| 测试：5 个可执行测试类（+1 抽象基类 `smoke/AbstractSmokeTest`）/ **11** 个用例（2026-09-29 实测）；`MallManagementApplicationTests` 的 **4** 个用例在未设 `A3_ENABLED` 时不执行，设 `true` 时真连库 | `tech-debt.md` TD-10（已关闭） |
+| **12** 张表中 **3 张**有二级索引（共 4 个）：`message` 2 + `order_state_transition` 1 + `order` 1（`uk_order_orderId`） | `db-schema.md` §5 |
+| 测试：**19** 个测试类 / **135** 个 `@Test` 用例（2026-10-02 实测，见下方口径注）；另有抽象基类 `smoke/AbstractSmokeTest`（自身**无** `@Test`）；`MallManagementApplicationTests` 的 **5** 个用例在未设 `A3_ENABLED` 时**全部 skip**，设 `true` 时真连库 | `tech-debt.md` TD-10（已关闭） |
 
 > ⚠️ 时效口径：本表**逐行反映当前结论**；凡单元格内标注「（**…时**）」的，才是**该时刻**的值 —— 只有上面「零缓存」一行属于此列，其余各行**未受缓存迁移影响**（B1 只搬读路径，未动 DDL / 事务 / 订单逻辑），不必整体打折读。
 >
-> 上表「测试」行的原计数（6 / 2）是 **2026-09-20**（`e3a9ada` 写入，再上一版 `23dfaab` 2026-09-18 记 4 / 5）的值；B1 期间新增 `L2HealthProbeConcurrencyTest`（3 个用例）与 `messageControllerIsNotAopProxied`（1 个）等 ⇒ 现值已**就地改为 11 / 4**（2026-09-29 实测，与回归输出「Tests run 11」一致）。该行不在缓存主题内，与本笔合并只因**同一张表**：留旧数会让上一段「本表逐行反映当前结论」变成假话。
+> 上表「测试」行的原计数（6 / 2）是 **2026-09-20**（`e3a9ada` 写入，再上一版 `23dfaab` 2026-09-18 记 4 / 5）的值；B1 期间新增 `L2HealthProbeConcurrencyTest`（3 个用例）与 `messageControllerIsNotAopProxied`（1 个）等 ⇒ 2026-09-29 曾就地改为 **11 / 4**。**2026-10-02 再次实测并改为 19 / 135**（原先只写类数不写口径，是那版数错的成因）。
+>
+> ⚠️ **计数口径（2026-10-02 定，防再数错）**：`@Test` 用例数**不能用** `grep -c '@Test'` 数 —— `@TestPropertySource`（本仓 3 处）与注释里的字面 `@Test`（`AbstractSmokeTest:69` 一处）都会被算进去，裸数得 **138**，实为 **135**。用 `grep -rEho '@Test([^A-Za-z]|$)'`（或 `^\s*@Test\s*$`）得 135，**与 surefire 的 `Tests run: 135` 逐字吻合**（135 含 9 个 skip：`MallManagementApplicationTests` 5 + `LockSceneRedisTest` 4）。同理「19 个测试类」= 含**真** `@Test` 注解的文件数 = surefire 报告份数（`AbstractSmokeTest` 是无 `@Test` 的抽象基类，不计）。
+>
+> 该行不在缓存主题内，与缓存笔合并只因**同一张表**：留旧数会让上一段「本表逐行反映当前结论」变成假话。
 
 ## 6. N+1 待优化清单（优先级：**高**）
 
