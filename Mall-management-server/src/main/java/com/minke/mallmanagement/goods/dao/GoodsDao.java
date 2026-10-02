@@ -32,7 +32,7 @@ import java.util.Map;
  * <ul>
  *   <li>{@code mall_management_sql.} 前缀（6 处）—— ⚠️ 本笔**不消灭**它。判据沿用订单笔：
  *       {@code three-layers.md §F#1} 说它「抽 DAO 层时自然改完」，但 {@code OrderDao}
- *       已明确把它判给单独一笔（跨四域 45 处，2026-10-02 实测），本笔只清商品域这 6 条
+ *       已明确把它判给单独一笔（跨四域 39 处，字面量口径，2026-10-02 实测），本笔只清商品域这 6 条
  *       会造出「一半有前缀、一半没有」的中间态。⚠️ <b>这与 §F#1 的口径是一处已知矛盾，
  *       不是疏漏</b> —— 已在文档里标出。</li>
  *   <li>⚠️ {@code productsales} 的 INSERT 写的是 {@code (MerchantId, GoodName, ProductCode,OrderVolume)}
