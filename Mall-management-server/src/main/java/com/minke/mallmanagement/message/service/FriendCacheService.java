@@ -144,8 +144,8 @@ public class FriendCacheService {
      *       已登记 §11 待办）。</li>
      * </ul>
      *
-     * <p>⚠️ Controller 里仍保留一份**同名同逻辑但保留 catch 的** {@code getUserInfoById}：它还被
-     * {@code getOrCreateConversation}（未上缓存、本笔不动）使用。两份并存是**有意的**，不是漏删。
+     * <p>⚠️ {@code MessageService} 里仍保留一份**同名同逻辑但保留 catch 的**私有 {@code getUserInfoById}：它还被
+     * {@code MessageService.getOrCreateConversation}（未上缓存、本笔不动）使用。两份并存是**有意的**，不是漏删。
      */
     private Map<String, Object> userInfoById(String userId) {
         String sql = "SELECT customerid, merchantid, username, usertype, gender FROM user WHERE customerid = ? OR merchantid = ?";

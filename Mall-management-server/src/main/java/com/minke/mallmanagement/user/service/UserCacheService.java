@@ -31,7 +31,7 @@ import java.util.Map;
  *   <li>技术异常 → **异常**（不是值）⇒ 不进缓存 ⇒ 下一次仍打 DB（不会被当成「查无此人」固化 TTL）</li>
  * </ul>
  *
- * Controller 侧收到 null 才构造 marker、收到异常也构造**同一个** marker ⇒ HTTP 响应
+ * {@code MessageService.userSelect} 收到 null 才构造 marker、收到异常也构造**同一个** marker ⇒ HTTP 响应
  * 逐字段与本类引入前**完全一致**（零契约变更）。代价是「技术异常」与「查无此人」在**响应
  * 文案**上仍不可区分 —— 那是既有瑕疵，本笔不动，已登记 cache-layer.md §11。
  *
