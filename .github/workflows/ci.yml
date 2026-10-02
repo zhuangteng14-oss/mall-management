@@ -221,12 +221,12 @@ jobs:
       - name: 预热后端
         run: |
           for i in $(seq 1 60); do
-            curl -sf -o /dev/null http://127.0.0.1:8088/mysqlGoods/goodstype && break
+            curl -sf -o /dev/null http://127.0.0.1:8088/goods/goodstype && break
             sleep 2
           done
           for i in $(seq 1 5); do
             curl -s -o /dev/null -w "warmup $i → HTTP %{http_code} (%{time_total}s)\n" \
-              http://127.0.0.1:8088/mysqlGoods/goodstype || true
+              http://127.0.0.1:8088/goods/goodstype || true
           done
 
       # TD-10 的关闭：@Disabled 换成 @EnabledIfEnvironmentVariable(named="A3_ENABLED")，

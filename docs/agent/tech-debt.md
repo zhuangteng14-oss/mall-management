@@ -73,7 +73,7 @@
 | 问题 | 开发期 `user.dir` = 项目根，路径有效；打成 jar 后 `user.dir` = 运行目录，`src/main/resources/static/img/` 不存在 |
 | 影响 | ① 图片上传失败 ② `/img/**` 映射失效 ③ 部署到生产环境或换机运行立即暴露 |
 | 建议 | 改为可配置路径（`application.properties` 配 `app.upload-dir`），或改用 `classpath:/static/img/` + 外部上传目录分离 |
-| 验证步骤 | 1. 开发期不配 app.upload-dir，调 /mysqlLogin/updateAvatar 上传，确认落盘位置与改动前一致<br>2. 访问 http://localhost:8088/img/<文件名>，期望 200<br>3. mvn package 打 jar，在非项目根目录 java -jar 启动，指定 --app.upload-dir=<jar 外可写目录><br>4. 再次上传，确认文件落在配置目录且返回 URL 可访问<br>5. 重启进程后再次访问同一 URL<br>6. 回归 /mysqlLogin/getUserInfo，确认 image 字段格式不变<br>7. 回归 /mysqlGoods/goodsAdd、/mysqlGoods/goodsUp，确认 GoodImg 格式不变 —— ⚠️ **例外（A 批 `efe7959` 策略 C）**：同名**不同内容**时，落盘名与 URL 尾段为 `<原名>_<8hex><扩展名>`，`GoodImg` 格式**有意**变化，不是回归。同名同内容仍复用原名，格式不变 |
+| 验证步骤 | 1. 开发期不配 app.upload-dir，调 /user/updateAvatar 上传，确认落盘位置与改动前一致<br>2. 访问 http://localhost:8088/img/<文件名>，期望 200<br>3. mvn package 打 jar，在非项目根目录 java -jar 启动，指定 --app.upload-dir=<jar 外可写目录><br>4. 再次上传，确认文件落在配置目录且返回 URL 可访问<br>5. 重启进程后再次访问同一 URL<br>6. 回归 /user/getUserInfo，确认 image 字段格式不变<br>7. 回归 /goods/goodsAdd、/goods/goodsUp，确认 GoodImg 格式不变 —— ⚠️ **例外（A 批 `efe7959` 策略 C）**：同名**不同内容**时，落盘名与 URL 尾段为 `<原名>_<8hex><扩展名>`，`GoodImg` 格式**有意**变化，不是回归。同名同内容仍复用原名，格式不变 |
 | 回归保护 | 读侧的 `/img/**` 映射已由 `ImgMappingSmokeTest`（A2 新增）纳入 CI 覆盖，含「已存在文件 200 且内容非空」与「不存在文件 404」正反两条断言，可防 TD-05 读侧回归。jar 场景仍无覆盖（见 TD-09） |
 | 优先级 | 高（部署级阻塞） |
 | 状态 | 读侧已修复、写侧开发期已验证（1421a0c、c5d74b4），jar 场景待验证 |
@@ -160,9 +160,9 @@
 
 | 项 | 内容 |
 |---|---|
-| 现状 | `MallManagementGoodsController` **23 处**、`MallManagementUserController` **16 处** SQL 硬编码 schema 限定名 `mall_management_sql.`（合计 39 处）；`MallManagementMessage` **0 处**（SQL 不带前缀）。三个 Controller 共用同一个自动装配的 `JdbcTemplate` Bean，差异只在 SQL 字符串 |
-| 问题 | 切换 `spring.datasource.url` **无法**把 `/mysqlGoods/*`、`/mysqlLogin/*` 的读写切到其他库——服务连上测试库，SQL 仍定向到 `mall_management_sql`。又因 `/message/*` 不带前缀，同一进程内会**脑裂**：`/message` 的写入跟随 datasource，`/mysqlGoods`、`/mysqlLogin` 的写入留在 `mall_management_sql` |
-| 实测触发 | A3 前置准备按 context-pack 建 `mall_management_test` 并导入成功后，隔离对 `/mysqlGoods`、`/mysqlLogin` 实际无效。`orderAdd` 压测数据会落入开发库，而 `order` 表无删除接口，HTTP 层无法清理 |
+| 现状 | SQL 硬编码 schema 限定名 `mall_management_sql.` **45 处**（2026-10-02 实测，原记 39；已散到 **7 个文件**：`UserController` 16 / `OrderDao` 10 / `GoodsController` 6 / `GoodsCacheService` 5 / `GoodsTypeCacheService` 3 / `OrderTimelineWriter` 3 / `OrderStateMachine` 2）；`MessageController` **0 处**（SQL 不带前缀）。各 Controller / DAO 共用自动装配的 `JdbcTemplate` Bean，差异只在 SQL 字符串 |
+| 问题 | 切换 `spring.datasource.url` **无法**把 `/goods/*`、`/order/*`、`/user/*` 的读写切到其他库——服务连上测试库，SQL 仍定向到 `mall_management_sql`。又因 `/message/*` 不带前缀，同一进程内会**脑裂**：`/message` 的写入跟随 datasource，`/goods`、`/order`、`/user` 的写入留在 `mall_management_sql` |
+| 实测触发 | A3 前置准备按 context-pack 建 `mall_management_test` 并导入成功后，隔离对 `/goods`、`/order`、`/user` 实际无效。`orderAdd` 压测数据会落入开发库，而 `order` 表无删除接口，HTTP 层无法清理 |
 | 影响 | ① 一切依赖「切库做隔离测试」的方案失效；② 压测/集成测试污染开发库；③ 多实例部署时无法让实例指向不同库 |
 | 建议 | **方案 A**：移除 SQL 字符串中的 `mall_management_sql.` 前缀改用非限定表名（由 datasource 决定库），彻底但需改 39 处并全量回归；**方案 B**（A3 已采用）：保留硬编码，测试侧一律改用**独立 MySQL 实例**（库名仍为 `mall_management_sql`），绕开该问题 |
 | 与 TD-12 的关系 | TD-12 是 `mall_management_sql.sql` 自带建库语句；本项是 Java 源码硬编码库名。同属「库名硬编码」的两个面，触发点与修法不同，分列 |
@@ -191,7 +191,7 @@
 
 | 项 | 内容 |
 |---|---|
-| 现状 | `MallManagementUserController.loginAdd` 的 `usertype` 分支只识别「客户」/「商家」两个值；取到其它值时既不插 `login` 也不插 `user`/`customerimage`，方法仍返回字符串 `添加成功！` |
+| 现状 | `UserController.loginAdd` 的 `usertype` 分支只识别「客户」/「商家」两个值；取到其它值时既不插 `login` 也不插 `user`/`customerimage`，方法仍返回字符串 `添加成功！` |
 | 问题 | **返回值与实际行为不符**：调用方无法区分「真的插入了一行」和「参数非法、被静默丢弃」。前端若拼错 `usertype`（或传空）会看到成功提示，而后台无任何数据落库，故障对使用者和日志都不可见 |
 | 实测发现 | A3 的 B-2 场景期间连带发现。用 curl 单独复现（该请求未带 `charset`）：响应为 `添加成功！`，而 JDBC 侧 `login` 行数**不变** |
 | 影响 | ① 数据静默丢失；② 掩盖前端调用错误；③ 使「以响应体判成功」的测试口径在本端点上失真 —— A3 的 B-2 因此不能只用 `添加成功！` 计数，必须同时用 JDBC 核对行数（已如此实现） |
@@ -218,7 +218,7 @@
 
 | 项 | 内容 |
 |---|---|
-| 现状 | `MallManagementGoodsController.orderAdd` 以 `int` 直接接收 `PayIf` / `DeliveryIf` / `ReceiveIf`，原样绑定进 `INSERT ... INTO mall_management_sql.order`，方法体内**无任何取值校验** —— 既无 `{0,1}` 白名单，也无「新建订单只能是初始态」的约束。`rows > 0` 即返回 `success: true`。 |
+| 现状 | `OrderController.orderAdd` 以 `int` 直接接收 `PayIf` / `DeliveryIf` / `ReceiveIf`，经 `OrderService.orderAdd` 原样绑定进 `INSERT ... INTO mall_management_sql.order`，**从入参绑定到落库均无任何取值校验** —— 既无 `{0,1}` 白名单，也无「新建订单只能是初始态」的约束。`rows > 0` 即返回 `success: true`。 |
 | 问题 | 三个状态位是**写入方的自选值**，不是状态机的输出：调用方可直接插入一条 `(1,1,1)` 的「已付款 + 已发货 + 已收货」订单，全程不经过付款 / 发货 / 收货。三个 CAS 端点（`orderPayIfUp` 的 `AND PayIf = 0`；`orderReceiveIfUp` 的 `AND PayIf = 1 AND ReceiveIf = 0`；`orderDeliveryIfUp` 的 `AND PayIf = 1 AND DeliveryIf = 0 AND ReceiveIf = 0`）防的是**并发重复流转**，其前提「必须先处于前一状态」在 `orderAdd` 这里根本不存在 —— 于是状态机可以从入口被绕过。 |
 | 实测发现 | H3 的 S4a 场景即以此构造前置态（用 `orderAdd` 直接造 `(1,1,1)` 终态订单）—— 一个**测试**手段，反过来说明**生产接口**具备同一能力。旁证（同一方法内，一并可读）：`Price` 是 `float` 且不校验正负（**该条已独立分级**，见 `defect-survey.md` 病 B「服务端零价格校验」——此处保留，因它是本条「伪造状态位」的**同方法实例**，搬走会削弱论证）；`OrderId` 不查重（即 TD-14 / B-1 的 `order.OrderId` 无唯一索引 —— **该条 2026-09-30 S1a 已修**，见 TD-14 落地行）。另：`SettlementDate` **不在** `orderAdd` 的列清单里，故伪造出来的终态单该列为空 —— 与 BD-01「由付款 / 发货 / 收货三处覆写」的假设不一致。 |
 | 影响 | ① 业务上可凭空造出「已收货」订单，影响对账与报表口径（连带上一条的 `SettlementDate` 为空）；② 绕过 BD-01 所依赖的流转时序；③ **A3 的 A 组「无非法状态流转」断言只在并发路径上成立**，与本次入口的伪造能力无关 —— 故 A3 不会因它变红。这一点与 TD-15 同因：**都是 A3 的断言口径盖不到的地方**，也是它们至今未被发现的原因。 |
@@ -226,7 +226,7 @@
 | 建议 | ① 新建订单只允许初始态：三个状态位**不接收客户端传值**，一律写 0（或直接在 SQL 里写常量）；若确需导入历史订单，另开一个带鉴权的管理端点。② 顺带补 `PayIf/DeliveryIf/ReceiveIf ∈ {0,1}` 与 `Price >= 0` 的校验（当前 `int` 连 2 都收）—— 其中 `Price` 一条已**独立分级**，见 `defect-survey.md` 病 B「服务端零价格校验」，此处不重复展开。 |
 | 优先级 | 中 —— 无鉴权（BD-03）放大了可达性；但它造成的是「不合业务时序的数据」而非数据不一致，且本项目定位为内部管理系统。 |
 | 状态 | 待确认（A3 登记，不在 A3 修 ——「不改业务代码」是 A3 的硬约束）。D5 裁决：**登记不门禁** —— A3 不为它新增断言，以免把「已知缺陷的复现」混进 A 组的回归证明。 |
-| 锚点更正（2026-09-30） | 本条原用 `G:` + 行号锚定（`G:390` / `G:398-400` / `G:403-417` / `G:527` / `G:549` / `G:571`），**六处全部漂移**（B2 / B3 往该 controller 加行所致）。已改为**符号名**锚定（`MallManagementGoodsController.orderAdd` / `.orderPayIfUp` / `.orderReceiveIfUp` / `.orderDeliveryIfUp`），行号锚点一律撤除；2026-09-30 核一次导航用行号：方法 `:386`、三状态位入参 `:393-395`、`INSERT` 绑定 `:435-449`、三 CAS `@PostMapping` `:567` / `:579` / `:591`。⚠️ 其中 `G:390` 是最阴的一种漂：它仍落在 `orderAdd` 方法体内（现为 `Price` 参数行），**看着是对的**。这是 `defect-survey.md §五`「锚点漂移」的**新证人**，也加固了 Class A #8（锚点改符号名）的理由 |
+| 锚点更正（2026-09-30） | 本条原用 `G:` + 行号锚定（`G:390` / `G:398-400` / `G:403-417` / `G:527` / `G:549` / `G:571`），**六处全部漂移**（B2 / B3 往该 controller 加行所致）。已改为**符号名**锚定（`MallManagementGoodsController.orderAdd` / `.orderPayIfUp` / `.orderReceiveIfUp` / `.orderDeliveryIfUp`）；⚠️ **2026-10-02 笔 2 后这四个符号已在 `OrderController`（入参绑定）/ `OrderService`（业务逻辑），行号锚点已全部失效** —— 符号名随之改指 `OrderController.orderAdd` 等，行号锚点一律撤除；2026-09-30 核一次导航用行号：方法 `:386`、三状态位入参 `:393-395`、`INSERT` 绑定 `:435-449`、三 CAS `@PostMapping` `:567` / `:579` / `:591`。⚠️ 其中 `G:390` 是最阴的一种漂：它仍落在 `orderAdd` 方法体内（现为 `Price` 参数行），**看着是对的**。这是 `defect-survey.md §五`「锚点漂移」的**新证人**，也加固了 Class A #8（锚点改符号名）的理由 |
 
 ## 已完成里程碑
 

@@ -132,7 +132,7 @@ onMounted(() => {
 
 const loadGoodsType = async () => {
   try {
-    const res = await fetch('http://localhost:8088/mysqlGoods/goodstype')
+    const res = await fetch('http://localhost:8088/goods/goodstype')
     const data = await res.json()
     if (data.success) {
       typeList.value = data.list
@@ -163,7 +163,7 @@ const handleImageChange = (e) => {
 
 const saveNewTypeToDB = async (typeName) => {
   try {
-    await fetch('http://localhost:8088/mysqlGoods/goodstype', {
+    await fetch('http://localhost:8088/goods/goodstype', {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: new URLSearchParams({
@@ -214,7 +214,7 @@ const submitGoods = async () => {
   formData.append('GoodTypeNew', realGoodTypeNew) // 用真实值！
 
   try {
-    const res = await fetch('http://localhost:8088/mysqlGoods/goodsAdd', {
+    const res = await fetch('http://localhost:8088/goods/goodsAdd', {
       method: 'POST',
       body: formData
     })

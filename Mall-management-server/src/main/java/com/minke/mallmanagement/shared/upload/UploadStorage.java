@@ -14,7 +14,7 @@ import java.util.Arrays;
  *
  * <p>【为什么是静态工具类，不是 {@code @Service}】
  * 本仓的 smoke 测试是 {@code @WebMvcTest} 切片，不导入 {@code @Service}/{@code @Component} ——
- * 见 {@code MallManagementGoodsController} 里关于 OrderStateMachine / OrderTransitionRecorder
+ * 见 {@link com.minke.mallmanagement.order.controller.OrderController} 里关于 OrderStateMachine / OrderTransitionRecorder
  * 的注释（那两个 bean 缺席会让切片在<b>上下文加载期</b>就红，故 AbstractSmokeTest 必须给替身）。
  * 落盘是无状态的纯函数，做成 bean 只会平白多一个需要替身的依赖点 ⇒ 用静态方法，
  * 对 Spring 上下文的影响为零。

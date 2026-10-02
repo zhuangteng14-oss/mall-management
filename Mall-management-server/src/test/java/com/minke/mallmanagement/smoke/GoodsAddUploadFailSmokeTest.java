@@ -14,7 +14,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 /**
- * 落盘失败的显式化：POST /mysqlGoods/goodsAdd 在图片写不进磁盘时**必须**
+ * 落盘失败的显式化：POST /goods/goodsAdd 在图片写不进磁盘时**必须**
  * 返回 {@code {success:false, msg}} 且在**写库之前**返回（TD-07 的「三处不一致」收尾）。
  *
  * <p>【怎么制造「必然写不进去」】把 {@code app.upload-dir} 指到一个<b>父路径是文件</b>的
@@ -41,7 +41,7 @@ class GoodsAddUploadFailSmokeTest extends AbstractSmokeTest {
         MockMultipartFile file = new MockMultipartFile(
                 "file", "1.jpg", "image/jpeg", "IMG".getBytes());
 
-        mockMvc.perform(request(multipart("/mysqlGoods/goodsAdd")
+        mockMvc.perform(request(multipart("/goods/goodsAdd")
                         .file(file)
                         .param("MerchantId", "SMOKE-M1")
                         .param("GoodName", "smoke-goods")
@@ -57,4 +57,18 @@ class GoodsAddUploadFailSmokeTest extends AbstractSmokeTest {
 
         verify(jdbcTemplate, never()).update(anyString(), any(Object[].class));
     }
+    /**
+     * URL 契约防回归（2026-10-02 笔 2）：旧路径必须**不再有 handler**。
+     *
+     * <p>为什么不能只断言「新路径通」：那样把旧映射一并留着也照样绿 —— 「换了前缀」这件事就
+     * 没有可观测证据。两个断言合起来才等价于「旧的不在、新的在」。
+     */
+    @Test
+    void oldPrefixHasNoHandlerAnyMore() throws Exception {
+        mockMvc.perform(request(multipart("/mysqlGoods/goodsAdd")
+                        .file(new MockMultipartFile(
+                                "file", "1.jpg", "image/jpeg", "IMG".getBytes()))))
+                .andExpect(status().isNotFound());
+    }
+
 }

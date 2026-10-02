@@ -105,7 +105,7 @@ const loadOrders = async () => {
   try {
     const params = new URLSearchParams()
     params.append('customerId', customerId)
-    const res = await fetch('http://localhost:8088/mysqlGoods/orderSelect', {
+    const res = await fetch('http://localhost:8088/order/orderSelect', {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: params.toString()
@@ -153,7 +153,7 @@ const handlePay = async (order) => {
   try {
     const params = new URLSearchParams()
     params.append('orderId', order.OrderId)
-    const res = await fetch('http://localhost:8088/mysqlGoods/orderPayIfUp', {
+    const res = await fetch('http://localhost:8088/order/orderPayIfUp', {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: params.toString()
@@ -187,7 +187,7 @@ const handleReceive = async (order) => {
   try {
     const params = new URLSearchParams()
     params.append('orderId', order.OrderId)
-    const res = await fetch('http://localhost:8088/mysqlGoods/orderReceiveIfUp', {
+    const res = await fetch('http://localhost:8088/order/orderReceiveIfUp', {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: params.toString()

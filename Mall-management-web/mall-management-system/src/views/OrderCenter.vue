@@ -122,9 +122,9 @@ const loadOrders = async () => {
     const params = new URLSearchParams()
     params.append('merchantId', merchantId)
     params.append('status', orderStatus.value)
-    let url = 'http://localhost:8088/mysqlGoods/orderDeliveryIfSelect'
+    let url = 'http://localhost:8088/order/orderDeliveryIfSelect'
     if (orderStatus.value === 'completed') {
-      url = 'http://localhost:8088/mysqlGoods/orderDeliverySelect'
+      url = 'http://localhost:8088/order/orderDeliverySelect'
     }
     const res = await fetch(url, {
       method: 'POST',
@@ -168,7 +168,7 @@ const handleDeliver = async (order) => {
   try {
     const params = new URLSearchParams()
     params.append('orderId', order.OrderId)
-    const res = await fetch('http://localhost:8088/mysqlGoods/orderDeliveryIfUp', {
+    const res = await fetch('http://localhost:8088/order/orderDeliveryIfUp', {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: params.toString()

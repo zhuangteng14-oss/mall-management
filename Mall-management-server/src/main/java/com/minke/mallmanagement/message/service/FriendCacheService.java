@@ -197,7 +197,7 @@ public class FriendCacheService {
      * （模板见 cache-layer.md §10「写路径 evict 的单入口」，本类是它的**第三个**实例）。
      *
      * <p>【调用方】三个写接口各一处：{@code friendAdd} / {@code friendUp} / {@code friendDe}
-     * （全在 {@code MallManagementMessage}）。全仓对 {@code friend} 表的写**只有这 4 条语句**
+     * （全在 {@code MessageController}）。全仓对 {@code friend} 表的写**只有这 4 条语句**
      * （两处 INSERT、一处 UPDATE、一处 DELETE），无 XML mapper、无触发器/存储过程 ⇒ 写面闭合。
      *
      * <h3>【为什么是三条，以及「双向」是什么】</h3>

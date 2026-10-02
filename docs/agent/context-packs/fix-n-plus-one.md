@@ -11,8 +11,8 @@
 
 ## 必读源码
 
-- Mall-management-server/src/main/java/com/minke/mallmanagement_controller/MallManagementGoodsController.java:160-210
-- Mall-management-server/src/main/java/com/minke/mallmanagement_controller/MallManagementMessage.java:30-70、236-370
+- Mall-management-server/src/main/java/com/minke/mallmanagement/goods/controller/GoodsController.java（当时 `mallmanagement_controller/MallManagementGoodsController.java:160-210`；`goodsSelectHome` 的读路径现已在 `GoodsCacheService.listHome()`）
+- Mall-management-server/src/main/java/com/minke/mallmanagement/message/controller/MessageController.java（当时 `mallmanagement_controller/MallManagementMessage.java:30-70、236-370`；两段 friend 读路径现已在 `FriendCacheService`）
 
 ## 约束
 

@@ -59,16 +59,16 @@
 
 以下为按现有代码实测出的 N+1 与高频只读场景，**2026-09-14 时均为零缓存、每次请求直查数据库**（缓存落地后本表**逐行加注**，见各行与下方注记）：
 
-行号约定：`G:` = `MallManagementGoodsController.java`，`M:` = `MallManagementMessage.java`。查询记**「SQL 定义行 → 执行行」区间**，方法调用记**调用行**。
+行号约定：`G:` = `GoodsController.java`（2026-10-02 前名 `MallManagementGoodsController.java`；本节 `G:` 值一律为**搬迁前**坐标），`M:` = `MessageController.java`（前名 `MallManagementMessage.java`）。查询记**「SQL 定义行 → 执行行」区间**，方法调用记**调用行**。
 
 | 接口 | 现状问题 | 证据 |
 |---|---|---|
-| `GET /mysqlGoods/goodstype` | 商品类型字典，几乎不变但每次全表查 | `G:37-38`（**搬迁前坐标**；现 SQL 在 `GoodsTypeCacheService.listTypes()` `:46-47`，Controller 只剩 `G:47` 调用 —— 见下注） |
-| `POST /mysqlGoods/goodsSelectHome` | 先全量查 `goods`，再**为每个商品单独查一次** `login` 取商家名（N+1，1+N） | 全量查 `G:184-185`，循环 `G:188-208`，内层查询 `G:194-200`（**均为搬迁前坐标**；现整段在 `GoodsCacheService.listHome()`，Controller 只剩 `G:176` 调用 —— 见下注） |
+| `GET /goods/goodstype` | 商品类型字典，几乎不变但每次全表查 | `G:37-38`（**搬迁前坐标**；现 SQL 在 `GoodsTypeCacheService.listTypes()` `:46-47`，Controller 只剩 `G:47` 调用 —— 见下注） |
+| `POST /goods/goodsSelectHome` | 先全量查 `goods`，再**为每个商品单独查一次** `login` 取商家名（N+1，1+N） | 全量查 `G:184-185`，循环 `G:188-208`，内层查询 `G:194-200`（**均为搬迁前坐标**；现整段在 `GoodsCacheService.listHome()`，Controller 只剩 `G:176` 调用 —— 见下注） |
 | `POST /message/conversations` | 查完会话列表后，**为每个会话单独查一次** `user_conversation_read`（N+1，1+N） | 外层查 `M:33`，循环 `M:35-66`，内层查询 `M:48-50` |
 | `POST /message/selectFriend` | 好友申请列表，每个申请人触发一次用户信息查询（N+1，**1+2N**） | 外层查 `M:249-251`，循环 `M:253-259`，内层调用 `M:255`（**搬迁前坐标**；2026-09-29 起整段在 `FriendCacheService.listRequests()` —— 见下注） |
 | `POST /message/friendSelect` | 好友列表，每个好友触发一次用户信息查询（N+1，**1+2N**） | 外层查 `M:320-322`，循环 `M:324-330`，内层调用 `M:326`（**搬迁前坐标**；2026-09-29 起整段在 `FriendCacheService.listFriends()` —— 见下注） |
-| `POST /mysqlGoods/goodsSelect` | 商家商品列表，读多写少 | `G:166-167`（**搬迁前坐标**；现 SQL 在 `GoodsCacheService.listByMerchant()` `:142-143`，Controller 只剩 `G:164` 调用 —— 见下注） |
+| `POST /goods/goodsSelect` | 商家商品列表，读多写少 | `G:166-167`（**搬迁前坐标**；现 SQL 在 `GoodsCacheService.listByMerchant()` `:142-143`，Controller 只剩 `G:164` 调用 —— 见下注） |
 
 **`1+2N` 的由来**：`selectFriend` / `friendSelect` 的内层调用的是私有方法 `getUserInfoById`（定义 `M:341-380`），**该方法自身含 2 条 SQL** —— `M:342-344` 查 `user`，再按用户类型走 `M:360-361`（`customerimage`）或 `M:364-365`（`merchantimage`）查头像。故每轮循环实际产生 **2** 条查询。（对照：`getOrCreateConversation` 也调它，但只调 1 次，是常数 3 条，**不构成 N+1**。）
 

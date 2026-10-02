@@ -16,7 +16,7 @@ import java.time.LocalDateTime;
 @RestController
 @RequestMapping("/message")
 @CrossOrigin
-public class MallManagementMessage {
+public class MessageController {
 
     @Autowired
     private JdbcTemplate MessagejdbcTemplate;

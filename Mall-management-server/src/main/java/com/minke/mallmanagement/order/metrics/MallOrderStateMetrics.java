@@ -69,7 +69,7 @@ import java.util.function.IntSupplier;
  * 与 C1 / B2 同量级：registry 按 Meter.Id 查表 + LongAdder 自增 + 一次数组赋值 + 一个小对象。
  * 全路径无锁、无 I/O、**无日志**（agent.md 第 7 条：新增监控不得阻塞主业务线程）。
  * ⚠️ 本类的调用点在本笔是**在订单锁的临界区内**（与 UPDATE 同一处，见
- * {@code MallManagementGoodsController}）—— 这是刻意的：观测与业务事实必须同点记录，
+ * {@link com.minke.mallmanagement.order.service.OrderService}）—— 这是刻意的：观测与业务事实必须同点记录，
  * 否则两个通道的口径会漂移。代价是纳秒级，不改变临界区的量级。
  */
 @Component

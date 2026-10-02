@@ -14,7 +14,7 @@ import com.minke.mallmanagement.shared.lock.DistributedLockService;
 
 /**
  * 订单域的服务层（三层重构第一笔：订单域）。**业务规则 + 锁编排 + 响应组装**；
- * 路由与入参绑定留在 {@code MallManagementGoodsController}，数据访问全在 {@link OrderDao}。
+ * 路由与入参绑定留在 {@link OrderController}，数据访问全在 {@link OrderDao}。
  *
  * <h2>【迁自哪里 —— 逐字搬运，不是重写】</h2>
  * 7 个方法体整段搬自 {@code MallManagementGoodsController}（{@code orderAddLocked} /

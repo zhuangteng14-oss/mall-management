@@ -218,8 +218,8 @@ public class GoodsCacheService {
      *
      * 【返回契约随之改变（调用方只有一处）】本方法不再返回 `{success, price, goodImg}`，而是返回
      * **裸行**（键 = 列名 `Price` / `GoodImg`）或 `null`；成型（catch + 组装响应）移到
-     * `MallManagementGoodsController.productCodePrice()` —— 与 `UserCacheService.publicInfo()` /
-     * `MallManagementUserController.userSelect` 同款。
+     * `GoodsController.productCodePrice()` —— 与 `UserCacheService.publicInfo()` /
+     * `UserController.userSelect` 同款。
      * ⚠️ 成型**不能**改放本类内的另一个方法再由本方法调用：自调用不走代理 ⇒ @Cacheable 静默失效
      * （本类头注释与 §11 ㊸③ 各记过一次）。
      *

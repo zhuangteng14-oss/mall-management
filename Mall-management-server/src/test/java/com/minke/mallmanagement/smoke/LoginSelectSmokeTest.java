@@ -10,7 +10,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 /**
- * 只读接口 smoke test：POST /mysqlLogin/loginSelect
+ * 只读接口 smoke test：POST /user/loginSelect
  *
  * <p>该接口是全项目入口，前端所有页面都先经过它。只读（仅 SELECT），无副作用。
  */
@@ -28,10 +28,24 @@ class LoginSelectSmokeTest extends AbstractSmokeTest {
         when(jdbcTemplate.queryForObject(anyString(), eq(Integer.class), any(Object[].class)))
                 .thenReturn(2);
 
-        mockMvc.perform(post("/mysqlLogin/loginSelect")
+        mockMvc.perform(post("/user/loginSelect")
                         .param("username", "smoke_user")
                         .param("password", "smoke_password"))
                 .andExpect(status().isOk())
                 .andExpect(content().string("2"));
     }
+    /**
+     * URL 契约防回归（2026-10-02 笔 2）：旧路径必须**不再有 handler**。
+     *
+     * <p>为什么不能只断言「新路径通」：那样把旧映射一并留着也照样绿 —— 「换了前缀」这件事就
+     * 没有可观测证据。两个断言合起来才等价于「旧的不在、新的在」。
+     */
+    @Test
+    void oldPrefixHasNoHandlerAnyMore() throws Exception {
+        mockMvc.perform(post("/mysqlLogin/loginSelect")
+                        .param("username", "smoke_user")
+                        .param("password", "smoke_password"))
+                .andExpect(status().isNotFound());
+    }
+
 }

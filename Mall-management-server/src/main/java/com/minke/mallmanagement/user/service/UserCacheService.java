@@ -93,7 +93,7 @@ public class UserCacheService {
      * `userPublic` 的**唯一失效入口** —— 显式调用（模板见 cache-layer.md §10
      * 「写路径 evict 的单入口」，本类是它的第二个实例）。
      *
-     * <p>【调用方】只有 `MallManagementUserController.loginAdd()` 一处：全仓对 `user` 表的写
+     * <p>【调用方】只有 `UserController.loginAdd()` 一处：全仓对 `user` 表的写
      * 只有 3 处（两条 INSERT 都在 `loginAdd`、一条 UPDATE 只写 `email`/`address`/
      * `selfintroduction`），而与 `userPublic` 缓存的 5 列
      * （`customerid`/`merchantid`/`username`/`usertype`/`gender`）**有交集的只有 `loginAdd`**。

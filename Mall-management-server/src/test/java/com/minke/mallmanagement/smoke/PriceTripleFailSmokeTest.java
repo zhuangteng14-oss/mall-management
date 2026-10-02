@@ -13,7 +13,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 /**
- * {@code POST /mysqlGoods/productCodePrice} 的**响应契约**实测 —— P0 #2 的另一半，2026-09-30。
+ * {@code POST /goods/productCodePrice} 的**响应契约**实测 —— P0 #2 的另一半，2026-09-30。
  *
  * <p>Service 侧的缓存行为在 {@code com.minke.mallmanagement.goods.service.GoodsPriceCacheTest}；本类只管一件事：
  * <b>Service 换成了「裸行 / null / 抛异常」三态之后，这条接口对调用方还是不是原来的样子</b>。
@@ -40,7 +40,9 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  */
 class PriceTripleFailSmokeTest extends AbstractSmokeTest {
 
-    private static final String URL = "/mysqlGoods/productCodePrice";
+    private static final String URL = "/goods/productCodePrice";
+    /** 笔 2 之前的前缀 —— 只用于「旧路径已下线」那条断言。 */
+    private static final String OLD_URL = "/mysqlGoods/productCodePrice";
 
     @Test
     @DisplayName("命中：裸行 → {success:true, price, goodImg}（key 映射在搬迁中原样保住）")
@@ -102,6 +104,21 @@ class PriceTripleFailSmokeTest extends AbstractSmokeTest {
                         .param("MerchantId", "SMOKE-M1")
                         .param("GoodName", "smoke-goods"))
                 .andExpect(status().isBadRequest());
+    }
+
+    /**
+     * URL 契约防回归（2026-10-02 笔 2）：旧路径必须**不再有 handler**。
+     *
+     * <p>为什么不能只断言「新路径通」：那样把旧映射一并留着也照样绿 —— 「换了前缀」这件事就
+     * 没有可观测证据。两个断言合起来才等价于「旧的不在、新的在」。
+     */
+    @Test
+    void oldPrefixHasNoHandlerAnyMore() throws Exception {
+        mockMvc.perform(post(OLD_URL)
+                        .param("MerchantId", "SMOKE-M1")
+                        .param("GoodName", "smoke-goods")
+                        .param("ProductCode", "SMOKE-P1"))
+                .andExpect(status().isNotFound());
     }
 
     private static Map<String, Object> row(Object... kv) {

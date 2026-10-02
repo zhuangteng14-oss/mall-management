@@ -167,7 +167,7 @@ const scroll = (d) => {
 // 加载商家信息
 const loadGoodsWithUser = async () => {
   try {
-    const res = await fetch('http://localhost:8088/mysqlGoods/goodsSelectHome', {
+    const res = await fetch('http://localhost:8088/goods/goodsSelectHome', {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
     })
@@ -181,7 +181,7 @@ const loadGoodsWithUser = async () => {
 // 加载所有型号的商品详情
 const loadAllItems = async () => {
   try {
-    const r1 = await fetch('http://localhost:8088/mysqlGoods/GoodsProductCodeSelect', {
+    const r1 = await fetch('http://localhost:8088/goods/GoodsProductCodeSelect', {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: `MerchantId=${sellerId}&GoodName=${goodName}`
@@ -190,7 +190,7 @@ const loadAllItems = async () => {
     const codes = d1.list || []
     const items = []
     for (let code of codes) {
-      const r2 = await fetch('http://localhost:8088/mysqlGoods/productCodePrice', {
+      const r2 = await fetch('http://localhost:8088/goods/productCodePrice', {
         method: 'POST',
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
         body: `MerchantId=${sellerId}&GoodName=${goodName}&ProductCode=${code}`
@@ -233,7 +233,7 @@ const openPopup = async () => {
 
 const loadPopupItems = async () => {
   try {
-    const r1 = await fetch('http://localhost:8088/mysqlGoods/GoodsProductCodeSelect', {
+    const r1 = await fetch('http://localhost:8088/goods/GoodsProductCodeSelect', {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: `MerchantId=${sellerId}&GoodName=${goodName}`
@@ -242,7 +242,7 @@ const loadPopupItems = async () => {
     const codes = d1.list || []
     const items = []
     for (let code of codes) {
-      const r2 = await fetch('http://localhost:8088/mysqlGoods/productCodePrice', {
+      const r2 = await fetch('http://localhost:8088/goods/productCodePrice', {
         method: 'POST',
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
         body: `MerchantId=${sellerId}&GoodName=${goodName}&ProductCode=${code}`
@@ -366,7 +366,7 @@ const handlePay = async (payIf) => {
     params.append('DeliveryIf', orderData.DeliveryIf)
     params.append('ReceiveIf', orderData.ReceiveIf)
 
-    const res = await fetch('http://localhost:8088/mysqlGoods/orderAdd', {
+    const res = await fetch('http://localhost:8088/order/orderAdd', {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: params.toString()

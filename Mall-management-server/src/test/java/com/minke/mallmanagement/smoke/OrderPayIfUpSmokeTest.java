@@ -9,7 +9,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 /**
- * 状态变更接口 smoke test：POST /mysqlGoods/orderPayIfUp
+ * 状态变更接口 smoke test：POST /order/orderPayIfUp
  *
  * <p>该接口是 api-contract.md 标注为「是（CAS）」的三个订单状态接口之一，
  * 也是全项目唯一正确的并发控制。这里把「条件 UPDATE 的影响行数 → 返回体」
@@ -37,7 +37,7 @@ class OrderPayIfUpSmokeTest extends AbstractSmokeTest {
     void orderPayIfUp_CAS_branching_rowsAffected() throws Exception {
         when(jdbcTemplate.update(any(PreparedStatementCreator.class))).thenReturn(1);
 
-        mockMvc.perform(post("/mysqlGoods/orderPayIfUp")
+        mockMvc.perform(post("/order/orderPayIfUp")
                         .param("orderId", ORDER_ID))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.success").value(true))
@@ -49,10 +49,23 @@ class OrderPayIfUpSmokeTest extends AbstractSmokeTest {
     void orderPayIfUp_CAS_branching_noRowsAffected() throws Exception {
         when(jdbcTemplate.update(any(PreparedStatementCreator.class))).thenReturn(0);
 
-        mockMvc.perform(post("/mysqlGoods/orderPayIfUp")
+        mockMvc.perform(post("/order/orderPayIfUp")
                         .param("orderId", ORDER_ID))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.success").value(false))
                 .andExpect(jsonPath("$.msg").value("订单不存在或已付款"));
     }
+    /**
+     * URL 契约防回归（2026-10-02 笔 2）：旧路径必须**不再有 handler**。
+     *
+     * <p>为什么不能只断言「新路径通」：那样把旧映射一并留着也照样绿 —— 「换了前缀」这件事就
+     * 没有可观测证据。两个断言合起来才等价于「旧的不在、新的在」。
+     */
+    @Test
+    void oldPrefixHasNoHandlerAnyMore() throws Exception {
+        mockMvc.perform(post("/mysqlGoods/orderPayIfUp")
+                        .param("orderId", ORDER_ID))
+                .andExpect(status().isNotFound());
+    }
+
 }

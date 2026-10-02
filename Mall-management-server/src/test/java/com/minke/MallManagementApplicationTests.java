@@ -1,7 +1,8 @@
 package com.minke;
 
-import com.minke.mallmanagement.goods.controller.MallManagementGoodsController;
-import com.minke.mallmanagement.message.controller.MallManagementMessage;
+import com.minke.mallmanagement.goods.controller.GoodsController;
+import com.minke.mallmanagement.message.controller.MessageController;
+import com.minke.mallmanagement.order.controller.OrderController;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
 import org.springframework.aop.framework.Advised;
@@ -48,10 +49,13 @@ class MallManagementApplicationTests {
     private JdbcTemplate jdbcTemplate;
 
     @Autowired
-    private MallManagementGoodsController goodsController;
+    private GoodsController goodsController;
 
     @Autowired
-    private MallManagementMessage messageController;
+    private MessageController messageController;
+
+    @Autowired
+    private OrderController orderController;
 
     /**
      * 全上下文启动冒烟。
@@ -112,14 +116,14 @@ class MallManagementApplicationTests {
     @Test
     void goodsControllerIsNotAopProxied() {
         assertFalse(AopUtils.isAopProxy(goodsController),
-                "MallManagementGoodsController 被代理了 —— 检查是否有人把缓存注解挂回了 Controller。"
-                        + " advisors = " + describeAdvisors());
+                "GoodsController 被代理了 —— 检查是否有人把缓存注解挂回了 Controller。"
+                        + " advisors = " + describeAdvisors(goodsController));
         assertFalse(goodsController instanceof Advised,
-                "MallManagementGoodsController 实现了 Advised —— 它是个代理。advisors = " + describeAdvisors());
+                "GoodsController 实现了 Advised —— 它是个代理。advisors = " + describeAdvisors(goodsController));
     }
 
     /**
-     * CGLIB 防回归（{@link #goodsControllerIsNotAopProxied()} 的孪生）：{@code MallManagementMessage}
+     * CGLIB 防回归（{@link #goodsControllerIsNotAopProxied()} 的孪生）：{@code MessageController}
      * 也不应被代理。
      *
      * <p>背景（2026-09-29）：friendSelect / selectFriend 上缓存时，两个 {@code @Cacheable} 与
@@ -132,15 +136,35 @@ class MallManagementApplicationTests {
     @Test
     void messageControllerIsNotAopProxied() {
         assertFalse(AopUtils.isAopProxy(messageController),
-                "MallManagementMessage 被代理了 —— 检查是否有人把缓存注解挂回了 Controller。"
-                        + " advisors = " + describeAdvisors());
+                "MessageController 被代理了 —— 检查是否有人把缓存注解挂回了 Controller。"
+                        + " advisors = " + describeAdvisors(messageController));
         assertFalse(messageController instanceof Advised,
-                "MallManagementMessage 实现了 Advised —— 它是个代理。advisors = " + describeAdvisors());
+                "MessageController 实现了 Advised —— 它是个代理。advisors = " + describeAdvisors(messageController));
+    }
+
+    /**
+     * CGLIB 防回归（第三条）：{@code OrderController} 不应被代理。
+     *
+     * <p>背景（2026-10-02，笔 2）：订单 8 个端点从 {@code GoodsController} 拆出时，
+     * <b>只搬了路由与入参绑定</b> —— 取锁、状态机编排、观测投递早在 PR #25 就下沉到
+     * {@code OrderService}，故本类身上没有任何 {@code @Cacheable} / {@code @Caching} /
+     * {@code @Transactional}。这条断言把这个「拆分后仍然无代理」的状态钉住：将来有人
+     * 图省事把缓存注解挂到订单 Controller 上，本测试会红。
+     *
+     * <p>⚠️ 同前两条：切片里恒为 false（假阴性），必须在完整上下文里查。
+     */
+    @Test
+    void orderControllerIsNotAopProxied() {
+        assertFalse(AopUtils.isAopProxy(orderController),
+                "OrderController 被代理了 —— 检查是否有人把缓存注解挂回了 Controller。"
+                        + " advisors = " + describeAdvisors(orderController));
+        assertFalse(orderController instanceof Advised,
+                "OrderController 实现了 Advised —— 它是个代理。advisors = " + describeAdvisors(orderController));
     }
 
     /** 失败信息用：把 advisor 链打出来，便于一眼看出是不是 CacheInterceptor。 */
-    private String describeAdvisors() {
-        if (goodsController instanceof Advised advised) {
+    private String describeAdvisors(Object controller) {
+        if (controller instanceof Advised advised) {
             return Arrays.toString(advised.getAdvisors());
         }
         return "（非 Advised）";
