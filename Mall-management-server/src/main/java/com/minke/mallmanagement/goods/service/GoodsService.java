@@ -150,28 +150,71 @@ public class GoodsService {
     // ==================== 读：四个走缓存的路径 ====================
 
     /**
-     * 商家端商品列表。**纯委托** —— 语句与 {@code @Cacheable} 都在
-     * {@link GoodsCacheService#listByMerchant}（裁决②）。
+     * 商家端商品列表。**委托 + 响应组装** —— 语句与 {@code @Cacheable} 都在
+     * {@link GoodsCacheService#listByMerchant}（裁决②）；try/catch 于 2026-10-03（② 笔）
+     * 从缓存侧**搬来本类**，理由见 {@link #cacheFailureMarker}。
      *
      * <p>⚠️ 形参名 {@code MerchantId} 必须保留：{@code @RequestParam} 未写显式名依赖它解析，
      * 缓存侧 {@code key="#MerchantId"} 也依赖同一个形参名（{@code -parameters} 已开）。
      */
     public Map<String, Object> goodsSelect(String MerchantId) {
-        return goodsCacheService.listByMerchant(MerchantId);
+        try {
+            return goodsCacheService.listByMerchant(MerchantId);
+        } catch (Exception e) {
+            e.printStackTrace();
+            return cacheFailureMarker("查询失败");
+        }
     }
 
-    /** 客户端首页商品列表。**纯委托** —— 注解与 {@code SELECT *} 都在 {@link GoodsCacheService#listHome}。 */
+    /** 客户端首页商品列表。**委托 + 响应组装** —— 注解与 {@code SELECT *} 都在 {@link GoodsCacheService#listHome}。 */
     public Map<String, Object> goodsSelectHome() {
-        return goodsCacheService.listHome();
+        try {
+            return goodsCacheService.listHome();
+        } catch (Exception e) {
+            e.printStackTrace();
+            return cacheFailureMarker("查询失败");
+        }
     }
 
     /**
-     * 某商家某商品的全部型号列表。**纯委托** —— 见 {@link GoodsCacheService#listCodes}。
+     * 某商家某商品的全部型号列表。**委托 + 响应组装** —— 见 {@link GoodsCacheService#listCodes}。
      *
      * <p>⚠️ 形参名必须保留，理由同 {@link #goodsSelect}。
      */
     public Map<String, Object> GoodsProductCodeSelect(String MerchantId, String GoodName) {
-        return goodsCacheService.listCodes(MerchantId, GoodName);
+        try {
+            return goodsCacheService.listCodes(MerchantId, GoodName);
+        } catch (Exception e) {
+            e.printStackTrace();
+            // ⚠️ 传 null ⇒ marker 里**没有 `msg` 键**。这不是省略，是与改前逐字相同：
+            //    缓存侧原来的 catch 就只 put 了 success（另两个投影有 msg）—— 别「补全」它。
+            return cacheFailureMarker(null);
+        }
+    }
+
+    /**
+     * 技术异常的响应 marker —— 与 2026-10-03（② 笔）之前缓存侧那三个 catch 分支**逐字段相同**。
+     *
+     * <p><b>为什么把 catch 从 {@code GoodsCacheService} 搬到本类</b>：那两个 catch 把技术异常吞成
+     * 一个**正常返回的非 null Map**，于是它被 {@code @Cacheable} 缓存满 TTL（a3 为 5m）——
+     * 失败的生命周期从「瞬时」变成「TTL」，且数据修好后调用方在 TTL 内看不到。
+     * 修法是让缓存方法**原样上抛**（{@code @Cacheable} 遇异常不写入，L1 / L2 都不写），
+     * 由本类接住并组装响应 ⇒ <b>对外零契约变更</b>（仍是 200 + 同一个 marker，**不是** 500）。
+     * 这与 {@link #productCodePrice} 的形状一致（那边也是 catch 在 Service、不在缓存方法）。
+     *
+     * <p><b>本类三个调用方共用它，但传参不同</b>：{@code goodsSelect} / {@code goodsSelectHome}
+     * 传 {@code "查询失败"}（改前有 msg），{@code GoodsProductCodeSelect} 传 {@code null}
+     * （改前无 msg）。两者的差别是**契约**，不是笔误。
+     *
+     * @param msg 为 {@code null} 时 marker 里不含 {@code msg} 键（与改前一致），不是写入一个 null
+     */
+    private static Map<String, Object> cacheFailureMarker(String msg) {
+        Map<String, Object> result = new HashMap<>();
+        result.put("success", false);
+        if (msg != null) {
+            result.put("msg", msg);
+        }
+        return result;
     }
 
     /**
