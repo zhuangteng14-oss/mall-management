@@ -127,7 +127,7 @@
 
 批次顺序：**订单域 → 商品域 → 消息域 → 用户域 → 公共层**
 
-进度（2026-10-03）：**订单域 ✅**（三层第一笔，PR #25 `28194b4`）→ **商品域 ✅**（三层第二笔，2026-10-02）→ **用户域 ✅**（三层第三笔，2026-10-02，PR #32 `0c07e96`）→ **消息域 ✅**（三层第四笔，2026-10-03，`8ed5fc1`）→ **公共层 ⏳ 未动**（`D#2` 全局异常出口 / `D#3` 拦截器与 CORS / `C#2` 事务边界 / `D#5` 配置收敛）。
+进度（2026-10-03）：**订单域 ✅**（三层第一笔，PR #25 `28194b4`）→ **商品域 ✅**（三层第二笔，2026-10-02）→ **用户域 ✅**（三层第三笔，2026-10-02，PR #32 `0c07e96`）→ **消息域 ✅**（三层第四笔，2026-10-03，`8ed5fc1`）→ **公共层 🟡 部分推进**（**2026-10-04 订正**，原写「⏳ 未动」）：**已合 3 笔** —— #34 CORS 收口（`D#3` 的 CORS 面）/ #35 `Result<T>` 统一响应体 / #36 全局异常出口 `GlobalExceptionHandler` + 写接口校验（`D#2`）；**未做**：`C#2` 事务边界 / `C#6` 状态位拦截 / `D#5` 配置收敛。
 
 ⚠️ **实际顺序与上行的计划顺序不同**：计划把**消息域排在用户域之前**，实际是**用户域先做**（2026-10-02）、消息域后做（2026-10-03）—— 两条路都不违反任何裁决，但引「批次顺序」时**以本行为准**，不要拿上行的计划顺序当执行史。
 
@@ -141,7 +141,10 @@
 | **商品域** | `goods/controller/GoodsController`（176 行）+ `goods/service/GoodsService`（332）+ `goods/dao/GoodsDao`（208） | 716（三文件合计；原 `MallManagementGoodsController` 676） | ✅ **已完成**（2026-10-02 三层第二笔）—— SQL 硬编码 schema 名：`GoodsDao` **6** 处 +（读路径，非本笔搬动）`GoodsCacheService` 5 / `GoodsTypeCacheService` 3；见 `three-layers.md:166` F#1 与其中的**已知矛盾**段 |
 | **消息域** | `message/controller/MessageController`（**127** 行，仅路由；原名 `MallManagementMessage`）+ `message/service/MessageService`（534）+ `message/dao/MessageDao`（284）；另有 `message/service/FriendCacheService`（268，缓存读路径，不属本笔） | 945（三文件合计；原 `MessageController` **417**） | ✅ **已完成**（2026-10-03 三层第四笔，`8ed5fc1`）—— SQL 硬编码 schema 名 **0** 处（原 Controller 0 处，现 `MessageDao` 仍 0 处）：**本域合了一对逐字相同 SQL 也没动 39 口径**，理由见 `MessageDao` 类 javadoc。`@Transactional` 禁令（不可加在 `friendAddLocked`）现由 `DistributedLockServiceTest` 的结构断言覆盖 `MessageService` + `MessageDao` 两个 bean；见 `three-layers.md:166` F#1 |
 | **用户域** | `user/controller/UserController`（**107** 行，仅路由；原名 `MallManagementUserController`）+ `user/service/UserService`（319）+ `user/dao/UserDao`（242） | 668（三文件合计；原 `UserController` **264**） | ✅ **已完成**（2026-10-02 三层第三笔，**PR #32** `0c07e96`）—— SQL 硬编码 schema 名 **16** 处全部下沉 `UserDao`；`loginAdd` 的 `@Transactional` 现挂 `UserService.loginAdd:124`；见 `three-layers.md:166` F#1 |
-| **公共层** | 新层 | — | `D#2` 全局异常出口 / `D#3` 拦截器与 CORS / `C#2` 事务边界 / `D#5` 配置收敛 |
+| **公共层** | `shared/web`（`GlobalExceptionHandler` / `Result<T>`）、`shared`（CORS 收口） | — | 🟡 **部分推进（2026-10-04 订正）**：`D#2` 全局异常出口 ✅（#36 `573463c` + `1bd05d3`）、`D#3` 的 CORS 面 ✅（#34 `23f5361`，删 5 处冗余 `@CrossOrigin`）+ 统一响应体 `Result<T>` ✅（#35 `ea2bf02` + `321773e`，28 端点）；**未做**：`C#2` 事务边界 / `C#6` 状态位拦截 / `D#5` 配置收敛 |
+
+> **TODO（2026-10-04，drift-fix 笔登记）**：公共层三笔（#34–#36）目前**无 context-pack** —— `docs/agent/context-packs/common-layer.md` **待建**（**本笔不建**）。建议登记到 `selection-status.md §8` 类 4（新功能引出）或**另起一笔**。
+> 另 3 处漂移待另开一笔：`progress.md:141-143` Controller 行数快照、`defect-survey.md:104/113/115/119/259/270` 表内旧坐标、追记内三处映射。
 
 **拆层顺序**（`three-layers.md:276`）：Controller → **DAO** → Service ——「先把数据出口收成一处，Service 才有意义」。
 

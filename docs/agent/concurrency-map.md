@@ -88,7 +88,7 @@
 ## 7. 改造优先级建议
 
 1. **立即**：为 §5 中 #1–#4 的四处多表写补 `@Transactional`（成本最低、收益最直接）。
-2. **立即**：给 `friend(customerid, friendid)`、`goodstype.GoodType` 加唯一索引，让数据库兜住 #5–#7 的 TOCTOU 竞态。✅ **已完成 1/3**：`order.OrderId` 于 **2026-09-30 S1a（`1e2fcfa`）** 加了 UNIQUE `uk_order_orderId`（§5 第 9 行已标「已消除」）；剩余两项**未做**。
+2. **立即**：给 `friend(customerid, friendid)`、`goodstype.GoodType` 加唯一索引，让数据库兜住 #5–#7 的 TOCTOU 竞态。✅ **已完成 1/3**：`order.OrderId` 于 **2026-09-30 S1a（`1e2fcfa`）** 加了 UNIQUE `uk_order_orderId`（§5 第 9 行已标「已消除」）。⚠️ **2026-10-04 订正（drift-fix 笔）**：原写「剩余两项**未做**」不准确 —— **(a) `friend`**：其 TOCTOU（#5/#6）**已被 B2 的 `runLocked` 覆盖**（CI `ci49` 2026-10-03：`friendDupRows` 恒 = 1、`friendDupRounds = 0/5`）⇒ **只剩唯一索引未建**（仍建议建，作为最后防线）；**(b) `goodstype`**：**仍会造重复行**（同一份 `ci49`：`goodstypeDupRows` 4 / 1 / 4 / 3 / 3，**4/5 轮复现**；根因 `GoodsTypeCacheService:71-72` 裸 `INSERT`、不在 B2 的 5 落点内）⇒ 本条对 `goodstype` 的「**立即**」**完全成立**（唯一索引 + 写入路径两者都未做）。
 3. **中期**：把 §3 的 CAS 模式推广到其余状态变更类写接口。
 4. **中期**：修复 `OrderVolume` 的统计逻辑（`orderAdd` 成功后递增，或改为查询时实时聚合）。
 

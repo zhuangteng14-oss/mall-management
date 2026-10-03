@@ -51,6 +51,8 @@
 > | `UserController:193-194`（上传路径穿越待验） | `UserService.updateAvatar:248-252`（仍**无 basename 提取**） |
 > | `UserController` :20 :30 :39 :47-49 :63-64 :70-71 :75 :193-199 :205 :216 :257（顶部 `:10` 行曾断言「零漂移」者） | **全部越界**（新 `UserController` 仅 107 行）；逐条现址见上表各行 |
 >
+> ⚠️ **2026-10-04：本块行号已再次漂移，见病 C 表现值；本块保留 2026-10-02 历史截面。**
+>
 > ⚠️ **两处「本笔自己引入」的坐标**（防误当老漂移）：`GoodsDao` / `GoodsService` / `UserService` / `UserDao` 是 2026-10-02（第一 / 二 / 三笔）才存在的文件，上表引用它们的行号**没有 2026-09-30 对应物**。另 `GoodsDao:33` 的 javadoc 里**字面写着** `` `mall_management_sql.` `` —— 用 `grep -c` 数 schema 前缀时会被误计入（实测 7，实为 6），口径见 `three-layers.md:166` F#1。
 > ⚠️ **「正文行」列怎么读**：它是**2026-09-30 截面**的行号（= 本追记块写第一版时的 `当前行号 − 25`）。本追记块自身会增行（2026-10-02 加了 8 行），**偏移量随之变化** ⇒ **请用「正文旧锚点」列的文本去 grep 定位，不要用行号换算**。
 >
@@ -121,14 +123,14 @@
 
 | 项 | 位置 | 后果 | 档位 |
 |---|---|---|---|
-| `productSearch` 逐字 `OR GoodName LIKE` | `GoodsController:378-409`（⚠️ 原记 `:346-367` 为**旧坐标**，2026-09-30 对 HEAD 复核） | `keyword.trim().split("")` 每字符一个 OR；单引号即 SQL 语法错误；`SELECT *` **无 schema 前缀**、无 LIMIT。**另（2026-09-30 实测，B-1 并入本行）**：拼进 `LIKE '%…%'` 的字符**未做通配符转义** ⇒ `_`（任意单字符）与 `%`（任意串）**照常生效** ⇒ **关键词含下划线或百分号时返回全表**。对照实验：`zzzznonexistentzzzz`→**0** 条（对照成立）、`_`→**5**、`%`→**5**、`\_`→**5**、基线全表 = **5** ⇒ 三条通配符输入与全表**逐条相同**。⚠️ 该后果的**外溢**：本接口无分页（§1）⇒ 全表返回在数据量上量后即**单请求全表扫描** | 实测 |
-| `goodsDe` 两个 DELETE 返回值都不捕获 | `GoodsController:205-225` | `:224` 无条件 `success=true`；无 `@Transactional`、无归属校验、无 LIMIT | 亲读 |
-| `app.upload-dir` 默认值串**三处重复** | `ImgPath:18` / `GoodsController:55` / `UserController:30` | 改一处必漏两处（与 TD-06 同形态） | 亲读 |
-| `goodsUp` 的 WHERE 缺 `GoodName` | `GoodsController:281-290` 一带 | 批量改名的串改风险 | 亲读 |
-| 落库 URL 前缀硬编码且未做 URL 编码 | `GoodsController:119,289`；`UserController:205`；另 `UserController:59` | 换机/反代即全体图片失效；中文/空格文件名（仓内既有 `色款.jpg`）拼出非法 URL | 亲读 |
-| **`orderAddLocked` 不得加 `@Transactional`** | javadoc `GoodsController:401-409` | 锁在 `runLocked` 的 `finally` 先释放、事务后提交 ⇒ 加了则去重立刻失效。**这是设计约束不是缺陷**，但它是全项目唯一「禁止用标准注解」处，无处登记 | 亲读 |
-| `loginAdd` 应用层 TOCTOU 预检 + 两个死参数 | `UserController:70-71`、`:63-64`（`defaultValue="暂无数据"`）、`:75`（死 `int role;`） | 预检在事务外；死参数误导调用方 | 亲读 |
-| `loginSelect` 广域 catch 吞掉一切 | `UserController:47-49` | 任何异常（含库连不上）都返回 `0` = 「登录失败」，与「密码错」不可区分 | 亲读 |
+| `productSearch` 逐字 `OR GoodName LIKE` | `GoodsService.productSearch:359` + `GoodsDao`（`LIKE` 拼装 `:198`）（⚠️ **2026-10-04 drift-fix 笔重指**：三层前坐标为 `GoodsController:378-409`，更早记 `:346-367`） | `keyword.trim().split("")` 每字符一个 OR；单引号即 SQL 语法错误；`SELECT *` **无 schema 前缀**、无 LIMIT。**另（2026-09-30 实测，B-1 并入本行）**：拼进 `LIKE '%…%'` 的字符**未做通配符转义** ⇒ `_`（任意单字符）与 `%`（任意串）**照常生效** ⇒ **关键词含下划线或百分号时返回全表**。对照实验：`zzzznonexistentzzzz`→**0** 条（对照成立）、`_`→**5**、`%`→**5**、`\_`→**5**、基线全表 = **5** ⇒ 三条通配符输入与全表**逐条相同**。⚠️ 该后果的**外溢**：本接口无分页（§1）⇒ 全表返回在数据量上量后即**单请求全表扫描** | 实测 |
+| `goodsDe` 两个 DELETE 返回值都不捕获 | `GoodsService.goodsDe:254`（两条 DELETE 在 `GoodsDao:128` / `:136`）（⚠️ **2026-10-04 drift-fix 笔重指**：原记 `GoodsController:205-225`，系三层前坐标） | `GoodsService.goodsDe` 内**唯一出口前**无条件 `success=true`；无 `@Transactional`、无归属校验、无 LIMIT | 亲读 |
+| `app.upload-dir` 默认值串**三处重复** | `ImgPath:17` / `GoodsService:69` / `UserService:78`（⚠️ **2026-10-04 drift-fix 笔重指**：原记 `ImgPath:18` / `GoodsController:55` / `UserController:30`，系三层前坐标） | 改一处必漏两处（与 TD-06 同形态） | 亲读 |
+| `goodsUp` 的 WHERE 缺 `GoodName` | `GoodsService.goodsUp:295` + `GoodsDao.updateGoods:154`（⚠️ **2026-10-04 drift-fix 笔重指**：原记 `GoodsController:281-290` 一带，系三层前坐标） | 批量改名的串改风险 | 亲读 |
+| 落库 URL 前缀硬编码且未做 URL 编码 | `GoodsService:120`（goodsAdd）/ `GoodsService:326`（goodsUp）/ `UserService:266`（updateAvatar）；另 `UserController:74`（`image` 的 `defaultValue` 内硬编码）（⚠️ **2026-10-04 drift-fix 笔重指**：原记 `GoodsController:119,289` / `UserController:205` / `UserController:59`，系三层前坐标） | 换机/反代即全体图片失效；中文/空格文件名（仓内既有 `色款.jpg`）拼出非法 URL | 亲读 |
+| **`orderAddLocked` 不得加 `@Transactional`** | `OrderService` 类 javadoc `:25-45`（禁令标题 `:26`）（⚠️ **2026-10-04 drift-fix 笔重指**：原记 javadoc `GoodsController:401-409`） | 锁在 `runLocked` 的 `finally` 先释放、事务后提交 ⇒ 加了则去重立刻失效。**这是设计约束不是缺陷**，但它是全项目唯一「禁止用标准注解」处，无处登记 | 亲读 |
+| `loginAdd` 应用层 TOCTOU 预检 + 两个死参数 | `UserService.loginAdd:129`（查重预检，`existsUserName`）、`UserController:78-79`（`defaultValue="暂无数据"`）、`UserService.loginAdd:132`（死 `int role;`）（⚠️ **2026-10-04 drift-fix 笔重指**：原记 `UserController:70-71` / `:63-64` / `:75`，系三层前坐标） | 预检在事务外；死参数误导调用方 | 亲读 |
+| `loginSelect` 广域 catch 吞掉一切 | `UserService.loginSelect:95`（声明；`try` `:98`、`catch` `:101`、`return 0` `:103`）（⚠️ **2026-10-04 drift-fix 笔重指**：原记 `UserController:47-49`，系三层前坐标） | 任何异常（含库连不上）都返回 `0` = 「登录失败」，与「密码错」不可区分 | 亲读 |
 
 ### 病 D｜无环境层（**最重的一族**）
 
@@ -182,6 +184,7 @@
 | `order.MerchantId`/`CustomerId` varchar(40) vs 其余表 char(20)/varchar(50) | `SQL:286-288` | 同一业务号三种宽度、两种定长性，无 FK 兜底（`db-schema.md §9`） | 亲读 |
 | `login.UserName char(20)` PK + 五个明文种子账号 | `SQL:94`、`:99` | 明文口令。**唯一性本身没问题**（曾疑为缺陷，已自证否） | 亲读 |
 | `BD-01`：付款/发货/收货三处覆写同一 `SettlementDate` | `OrderStateMachine.java:42-47` 自述 | 该列无法稳定表示任何业务时间点；B3 的时间线表在事实上取代其数据源，**但那是 C3 的事** | 亲读 |
+| **`goodstype.GoodType` 无唯一约束**（**2026-10-04 补登**，drift-fix 笔） | `db-schema.md:172`、`concurrency-map.md:77` | 类型名可重复，且**无应用层兜底**：写入路径 `GoodsTypeCacheService:71-72` 是**裸 `INSERT`**、**不在 B2 的 5 落点内** ⇒ 无锁 check-then-insert。A3 的 B-2 场景实测**会复现**：CI `ci49`（2026-10-03）`goodstypeDupRounds` = **4/5**（逐轮 `goodstypeDupRows` 4 / 1 / 4 / 3 / 3，判据 `>= 2`）。⚠️ 与 `friend` 侧**不同**：后者已被 B2 的 `runLocked` 覆盖（同一份 `ci49`：`friendDupRows` 恒 = 1、`friendDupRounds = 0/5`）⇒ 本行是 **B2 之后唯一仍会造重复行的 TOCTOU 站点**（`concurrency-map.md:91` 的「立即」据此**仍成立**）。归属见 §七 Class A 第 9 条 | 亲读 + 实测(CI) |
 
 **附带**：唯一库脚本是全库重建（11 条 `DROP TABLE`），而 B3 新表是 `CREATE TABLE IF NOT EXISTS` 且**无对应 DROP** ⇒ 本机重复导入会让旧 schema 留存、漂移不可见（CI 每次新容器，故只在开发机上）。
 
@@ -249,6 +252,7 @@
 6. `l2Put` 冷却路径补指标（对齐另三条）
 7. `L2HealthProbe.down` 改 CAS（对齐注释的承诺）
 8. 文档锚点 → 符号名；TD-04/06/07 更正；`db-schema.md` 的 11 表/索引口径更正（**已完成**）
+9. **给 `goodstype.GoodType` 加唯一索引** —— B2 之后**唯一仍会造重复行**的 TOCTOU 站点（写入路径不在 B2 的 5 落点内）。**2026-10-04 补登**（病 G 表内同名行）；依据 CI `ci49`（2026-10-03）`goodstypeDupRounds = 4/5`。⚠️ 与第 3 条（`login.Id`）同类，但**触发已满足、不等鉴权**
 
 **Class B —— 语义未定，须先裁决**（不能动手）：
 1. `goodsUp` 改名粒度（改一条还是批量）
