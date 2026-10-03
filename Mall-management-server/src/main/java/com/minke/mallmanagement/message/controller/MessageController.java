@@ -2,6 +2,7 @@ package com.minke.mallmanagement.message.controller;
 
 import com.minke.mallmanagement.message.service.MessageService;
 import com.minke.mallmanagement.shared.web.Result;
+import jakarta.validation.constraints.NotBlank;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.Map;
@@ -72,12 +73,18 @@ public class MessageController {
         return Result.of(messageService.getMessageHistory(currentId, currentType, otherId, otherType));
     }
 
+    // 笔 3：入参非空校验（只做非空/类型，不做业务规则 —— 价格/状态位的业务规则在 Service）。
+    // ⚠️ 刻意**不加类级 @Validated**：那会 CGLIB 代理本类，撞上 4 条 xxxControllerIsNotAopProxied。
+    //    Spring 6.1+ 对方法参数上的约束注解做**内建**校验（RequestMappingHandlerAdapter），
+    //    无代理 —— 该前提已实证（见 GlobalExceptionHandler 类注释）。
+    // ⚠️ 前端 ChatRoom.vue:315 有 if (!newMessage.value.trim()) return ⇒ 空串到不了这里，加它零风险。
     @PostMapping("/send")
-    public Result<Map<String, Object>> sendMessage(@RequestParam("fromId") String fromId,
-                                                   @RequestParam("fromType") String fromType,
-                                                   @RequestParam("toId") String toId,
-                                                   @RequestParam("toType") String toType,
-                                                   @RequestParam("content") String content) {
+    public Result<Map<String, Object>> sendMessage(
+            @NotBlank(message = "不能为空") @RequestParam("fromId") String fromId,
+            @NotBlank(message = "不能为空") @RequestParam("fromType") String fromType,
+            @NotBlank(message = "不能为空") @RequestParam("toId") String toId,
+            @NotBlank(message = "不能为空") @RequestParam("toType") String toType,
+            @NotBlank(message = "不能为空") @RequestParam("content") String content) {
         return Result.of(messageService.sendMessage(fromId, fromType, toId, toType, content));
     }
 
@@ -99,9 +106,12 @@ public class MessageController {
     }
 
     //为好友表添加待处理的数据（B2 的锁在 Service.friendAdd 里）
+    // 笔 3：非空校验。A3 的 B-2 打本端点时 customerId / friendId 各是 20 字符
+    // （ConcurrencyRunner.java:2197）⇒ 非空，不受影响。⚠️ 不要加 @Size —— 20 是**恰好**长度。
     @PostMapping("/friendAdd")
-    public Result<Map<String, Object>> friendAdd(@RequestParam("customerId") String customerId,
-                                                 @RequestParam("friendId") String friendId) {
+    public Result<Map<String, Object>> friendAdd(
+            @NotBlank(message = "不能为空") @RequestParam("customerId") String customerId,
+            @NotBlank(message = "不能为空") @RequestParam("friendId") String friendId) {
         return Result.of(messageService.friendAdd(customerId, friendId));
     }
 
