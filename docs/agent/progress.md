@@ -73,6 +73,7 @@
 | 2026-09-30 | A 批 P0 + P0 #2 + 缺陷归属 + G 表 + 规则 v2 + S1a-1 + S1a 文档 + progress 落盘 + 走查分流 | #8 #10–#22 |
 | 2026-10-01+ | 三层前准备其余 → 三层开工 → … | — |
 | 2026-10-02 | 订单域三层（#25 `28194b4`）→ 笔 1 DDD 挪包（#27 `01df702`）→ 笔 2 URL 规范化 + 订单拆 Controller + 类名对齐域（#28）→ **商品域三层（三层第二笔）** | #25 #27 #28 + 本笔 |
+| 2026-10-03 | 三层第四笔 **message 域**（`8ed5fc1`）→ 文档坐标重指（笔 B `481e72b`）→ `goodsSelectHome` 坐标重指（`bc0126a`）→ **公共层笔 1 CORS 收口**（#34 `3f6ba4f`，A3 27/27）→ **前端双审计落盘（§6）** | #33 #34 + 本笔 |
 
 ## 1. 项目级阶段
 
@@ -201,3 +202,44 @@
 ### 5-D. 复核时发现的文档漂移（不是进度，但会误导）
 
 - ~~`docs/agent/README.md` 的「文档职责」表**未登记** `defect-survey.md` 与 `selection-status.md`~~ —— ✅ **本笔已补**（`README.md` 两行）。依据：`three-layers.md:3` 明写「上游是 `defect-survey.md`（缺陷普查）+ `selection-status.md`（选型现状）+ `db-schema.md`」，其中前两份此前不在文档地图里。
+
+---
+
+## 6. 前端规范化（2026-10-03 双审计）
+
+> **口径**：`亲读` —— `Mall-management-web/mall-management-system/src` 全量 grep + 逐行读（只读，前端代码**一字未动**）。
+> **上游**：为公共层**笔 2**（统一响应体 `Result<T>`）/ **笔 3**（异常 + 校验）做的**依赖面体检**；起因 = `api-contract.md:9`「无统一返回体、无全局异常处理」。
+> **四项对账（沿用 `api-contract.md:135` 同口径，须自洽）**：`fetch(` **42** 处 ／ 不同路径 **31** 条 ／ 路由 **33** 条 ／ 差集 33−31 = 2（`getOrCreateConversation`、`/health/db` 无调用方）。
+> ⚠️ **51 ≠ 42**：**51** 是 `http://localhost:8088` 的**出现行数**。其中 **39** 行含字面量 `fetch(`，另 **12** 行不含（6 条 URL 赋值行 + 3 处图片 `src` + 3 处 CSS `url()`）；再另有 **3** 个 fetch 用变量 URL（行内无字面量）⇒ `fetch(` 调用数 **42** = 39 + 3。（逐条见 §6-B 的 P2.1）
+
+### 6-A. 依赖面（决定公共层笔能不能动）
+
+| 项 | 分布 | 归属 | 验收判据 | 依赖 |
+|---|---|---|---|---|
+| **P1.2 `getUserInfo` 空体** | 消费点 3：`LoginPage.vue:150`、`UserInfoPage.vue:101`、`GoodsUp.vue:155` —— 均 `await res.json()` **无判空**，靠外层 `catch` 兜 `SyntaxError`（后端失败 = HTTP 200 **空体**，`api-contract.md:14`） | **A** | ⚠️ **全审计最脆一条**：笔 2/3 **不得**把该响应包成**可解析 JSON** —— 一旦 `json()` 成功且无 `merchantid`/`customerid`，`LoginPage:154/157` 静默不写 sessionStorage、**不抛不报**。判据写死：失败路径必须继续**抛异常**落 `catch`；笔 3 异常白名单**必须排除** `UserController.getUserInfo` | 笔 2 + 笔 3 |
+| **P1.3 message 10 端点形态** | **10/10 全 `Map`**（无 String/null）；在用 9 个（`getOrCreateConversation` 无调用方） | **A** | 顶层 `success`/`msg`/`list`/`user` **一个都不能挪进 `data.*`**（`ChatRoom.vue:170` 直接 `return data.user`） | 笔 2 |
+| **P1.4 `goodstype` 双形态** | GET 无参→读 `list`（`GoodsAdd.vue:135`）；POST 带参→**不读响应**（`GoodsAdd.vue:166` fire-and-forget）；`HomePage.vue:154` 用 **POST 无参**→读 `list` | **A** | 两条路径都读**顶层** `list`；POST 无参分支须继续返 `{success,list}`。**已在笔 2 例外清单**（签名不动） | 笔 2 |
+| **P2.4 `success`/`msg` 读点** | `.success` **34 处**真实判定（另 3 处是 CSS 类 `.success-cover`/`.success-text`，非判定）；`.msg` **17 处** | **A** | 笔 2 的「JSON 字节等价」**由这 51 处定义** —— 顶层 `success`(bool)/`msg`(string) 键名与语义逐字不变 | 笔 2 |
+| **P1.1 无 `res.ok` 检查** | `res.ok`/`res.status`/`.statusText` 全 src **0 命中** | **B** | 前端**从不看状态码**，只读 body 的 `success` ⇒ 笔 3 若引入 4xx/5xx，前端**静默无感**（不报错、也不提示） | 独立笔 |
+| **P1.5 OPTIONS 预检** | `ImgConfig.CorsFilter`：`addAllowedMethod("*")`（Spring `checkHttpMethod` 对 `"*"` 直放行 ⇒ **含 OPTIONS**）、`addAllowedHeader("*")`（⇒放行 `Access-Control-Request-Headers`）、`addAllowedOriginPattern("*")` + `allowCredentials(true)`、`maxAge=3600` | **C** | **已覆盖，无需改**；且前端多为 `application/x-www-form-urlencoded`（simple request）⇒ 预检基本不触发 | — |
+
+> **P1.3 逐条**（10 端点 → 前端读的字段）：`conversations`→`success`+`list`（`ChatRoom:184`/`CustomerPage:97`/`MerchantPage:113`）；`history`→`success`(+`list`)（`ChatRoom:213`/`:279`）；`send`→`success`+`msg`（`ChatRoom:327`/`ProductPage:459`）；`userSelect`→`success`+`user`（`ChatRoom:164`/`FriendRoom:132`）；`friendAdd`→`success`+`msg`（`FriendRoom:159`）；`selectFriend`→`success`(+`list`)（`FriendRoom:194`）；`friendUp`/`friendDe`→`success`+`msg`（`FriendRoom:231` 变量 URL）；`friendSelect`→`success`(+`list`)（`FriendRoom:107`）；`getOrCreateConversation`→**无调用方**。
+
+### 6-B. 前端债（归一笔独立的「前端 API 层规范化」）
+
+| 项 | 分布 | 归属 | 验收判据 | 依赖 |
+|---|---|---|---|---|
+| **P2.1 硬编码 URL** | `http://localhost:8088` **51 处**（14 文件）= **42** fetch 调用（39 字面 + 3 变量：`GoodsSelect.vue:81`/`OrderCenter.vue:129`/`FriendRoom.vue:231`）+ **6** 条 URL 赋值行（`GoodsSelect:74/78`、`OrderCenter:125/127`、`FriendRoom:226/228`）+ **3** 图片 `src`（`FriendRoom:71`/`GoodsUp:9`/`UserInfoPage:7`）+ **3** CSS `url()`（`LoginPage:9/10/274`）；分布：ProductPage/FriendRoom 各 **7** 最多，CustomerPage/HistoricalOrders/MerchantPage 各 **1** | **B** | 收敛到 base URL 常量 + `.env`；与 `TD-06`（`tech-debt.md:90`，图片 URL 前缀硬编码）**同源** | 独立笔 |
+| **P2.2 无 API 层** | `src/` 仅 `App.vue`/`components`/`main.js`/`router`/`views`；无 `api/`/`services/`/`utils`；`axios`/`request(` **0 命中**；全部原生 `fetch(` | **B** | **P2.1/P2.3/P2.5/P2.7 的根因** —— 建层后其余四项收敛到一处 | 独立笔（**最先**） |
+| **P2.3 catch 错误点** | `try` **40** / `catch` **41**，覆盖**全部 42** 处 fetch（`ProductPage.vue` 2 个 try 各含 2 fetch）；全为 `console.error`/`alert`，无统一出口 | **B** | 收敛到 API 层统一 catch；`alert` 文案不属接口契约，可改 | 依赖 P2.2 |
+| **P2.5 环境变量** | `.env` / `VUE_APP_*` / `process.env` 全 src **0 命中**；`vue.config.js` **无 `proxy`** | **B** | 与 P2.1 同笔：base URL 走 `VUE_APP_*` | 依赖 P2.2 |
+| **P2.6 sessionStorage 直接用** | **71 处** API 调用 / **14 文件**（MerchantPage **9** 最多）；key：`merchantid`/`customerid`/`loginUsername`/**`loginPassword`（明文）**/`SEARCH_KEYWORD`/`SEARCH_RESULTS`/`PENDING_SEARCH_KEYWORD`/`FROM_PAGE` | **B** | ⚠️ **含独立安全债**：`loginPassword` **明文入 sessionStorage**（写：`LoginPage.vue:164/169`；读：`GoodsUp.vue:146`、`UserInfoPage.vue:92`），且被当凭据回传 `getUserInfo`/`updateUserInfo` —— 规范化笔须**单列**这条 | 独立笔（可并行） |
+| **P2.7 无超时/重试** | `AbortController`/`signal`/`timeout`/`retry` 全 src **0 命中** | **B** | API 层加超时 + 有限重试 | 依赖 P2.2 |
+
+### 6-C. 归类汇总
+
+- **A 类（公共层笔强制处理）——4 项**：P1.2、P1.3、P1.4、P2.4。
+- **B 类（独立笔「前端 API 层规范化」）——7 项**：P2.1、P2.2、P2.3、P2.5、P2.6、P2.7、P1.1。
+- **C 类（不规范但无 bug）——不列**：P1.5（OPTIONS 预检已覆盖）等。
+
+> **本节用法**：A 类 4 项是**公共层笔 2/3 的硬约束** —— 笔 2 落地前先跑「旧 `Map` vs 新 `Result<T>` 响应体**逐字（取字节）比对**」，判据即 6-A 的 P1.2/P1.3/P1.4/P2.4；B 类 7 项归一笔**独立**的「前端 API 层规范化」，**不在公共层三笔内**（边界：公共层三笔不动前端）。
