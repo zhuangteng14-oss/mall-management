@@ -10,6 +10,7 @@
 |---|---|---|---|---|---|---|---|---|
 | 1 | 2026-09-29 | B3 订单状态流转时间线 | 新增表 | `order_state_transition` | `mall_management_sql.sql:221-235` | `DROP TABLE IF EXISTS order_state_transition;`（见注意 5） | B3 `e93a499` | ✅ 已落盘（CI P3 表数 = 12 确证） |
 | 2 | 2026-09-30 | S1a 订单号唯一索引 | 新增索引 | `order` | `mall_management_sql.sql` 末尾 Migration 块（`CREATE UNIQUE INDEX uk_order_orderId`） | `DROP INDEX uk_order_orderId ON \`order\`;`（规则 v2：回滚 = 逻辑废弃，执行前须人工确认） | S1a-1 | ⏳ 待 VM 验证 |
+| 3 | 2026-10-04 | goodstype 类型名唯一索引 | 新增索引（UNIQUE） | `goodstype` | `mall_management_sql.sql:246-262`（Migration 块，`CREATE UNIQUE INDEX uk_goodstype_GoodType`） | `DROP INDEX uk_goodstype_GoodType ON \`goodstype\`;`（规则 v2：回滚 = 逻辑废弃，执行前须人工确认） | #11 `fix/goodstype-unique` | ⏳ 待 A3 复跑验证（判据见注意 7；⚠️ 前置与 #2 相反） |
 
 ## 登记格式
 
@@ -33,3 +34,4 @@ CREATE INDEX idx_xxx ON xxx(col);
 4. 本文件由文档化工作创建，用于补齐 `agent.md` 第 85 行要求的强制产物——该产物此前**不存在**，会导致第一次数据库变更无处登记。
 5. **本行的正向 SQL 不在此重复**：权威源即 `mall_management_sql.sql:221-235` 的 Migration 块（`CREATE TABLE IF NOT EXISTS`，8 列 + 主键 + `idx_order_state_transition_order`），逐列快照见 `db-schema.md §6.12`。三处各留一份 DDL 必有漂移，故本文件只登记「位置 + 回滚 + 执行证据」。
 6. **「新增表」的回滚 —— 2026-09-30 已由规则 v2 裁决**（与注意 1 同源，是同一矛盾的第二个面）：`agent.md` 数据库管理规则 4 禁止 `DROP TABLE`，而新增表唯一的**物理**回滚手段就是 `DROP TABLE`。规则 v2 的裁决是：新增表**不物理回滚**，改为「**保留表 + 停止写入**」；因该做法的代价是 schema 漂移**不可见**，故本文件**如实登记**原 `DROP TABLE` 语句并标注「**执行前必须人工确认**」。现状证据（未变）：`defect-survey.md §三 病 G` 记 —— 全库重建脚本的 11 条 `DROP TABLE` **不含** `order_state_transition`，故本机重复导入会残留旧表结构（CI 每次新容器，故只在开发机上）。
+7. **⚠️ 本条（#3 goodstype）的「重复行检测」前置与 #2（order）相反 —— 2026-10-04 记**：`agent.md` 数据库管理规则 3 要求 `CREATE UNIQUE INDEX` 前「**每个库重复行检测为 0** 才能建」。**#2 满足**（该块自述「本机 7/7、VM 6/6，2026-09-30 实测」均为 0）；**#3 不满足、且不可能满足** —— `goodstype` 的重复行恰恰是 A3 的 B-2 场景**自己在造**的：CI `ci49`（2026-10-03）实测 `goodstypeDupRounds = 4/5`（逐轮 `goodstypeDupRows` 4 / 1 / 4 / 3 / 3）。故 #3 的落盘路径**只能走「全量重导」**：`mall_management_sql.sql` 头部含 `DROP TABLE IF EXISTS \`goodstype\``，建表时表为空 ⇒ 索引必建成；**对已有重复行的既有库必须先人工去重再建，不可直接执行该迁移块**。这一差异已逐字写进 `mall_management_sql.sql:246-262` 的 Migration 块注释，两处口径必须一致。

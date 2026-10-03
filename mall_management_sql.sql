@@ -243,3 +243,20 @@ CREATE TABLE IF NOT EXISTS `order_state_transition` (
 --       且 MySQL 无 CREATE INDEX IF NOT EXISTS ⇒ 只在全量重导时执行。
 -- ============================================================
 CREATE UNIQUE INDEX `uk_order_orderId` ON `order` (`OrderId`);
+-- ============================================================
+-- Migration: goodstype 类型名唯一索引  Date: 2026-10-04
+-- 依据：defect-survey 病 G 表 2026-10-04 补登行 · selection-status §8 类 1 #10 / 类 2 #12
+-- 根因：写入路径 GoodsTypeCacheService.addType 是「SELECT COUNT(*) 查重 → INSERT」的
+--       check-then-insert，且【不在】B2 的 5 个分布式锁落点内 ⇒ 并发下会造重复行。
+-- 前置：⚠️ 与 uk_order_orderId 块【不同】—— goodstype 的重复行是【已实测存在】的：
+--       A3 的 B-2 场景（CI ci49，2026-10-03）goodstypeDupRounds = 4/5（逐轮 rows 4/1/4/3/3）。
+--       故 agent.md 规则 3「每个库重复行检测为 0 才能建」在本条【不成立】。
+--       兜法与 order 块相同：本文件头部含 DROP TABLE IF EXISTS `goodstype`，
+--       导入 = 先 DROP 后 CREATE ⇒ 全量重导路径上建表时表为空，索引必建成。
+--       ⚠️ 对【已有重复行的既有库】必须先人工去重再建，不可直接执行本块。
+-- 回滚：DROP INDEX `uk_goodstype_GoodType` ON `goodstype`;
+--       （规则 v2：回滚 = 逻辑废弃；该语句执行前须人工确认）
+-- 幂等：「导入 = 先 DROP 后 CREATE」，且 MySQL 无 CREATE INDEX IF NOT EXISTS ⇒ 只在全量重导时执行。
+-- 应用层：SELECT COUNT(*) 查重【保留】；catch 已区分 DuplicateKeyException（返回「类型已存在」）。
+-- ============================================================
+CREATE UNIQUE INDEX `uk_goodstype_GoodType` ON `goodstype` (`GoodType`);
