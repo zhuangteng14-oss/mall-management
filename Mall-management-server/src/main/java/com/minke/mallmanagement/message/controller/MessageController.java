@@ -41,7 +41,6 @@ import java.util.Map;
  */
 @RestController
 @RequestMapping("/message")
-@CrossOrigin
 public class MessageController {
 
     private final MessageService messageService;

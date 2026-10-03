@@ -3,7 +3,6 @@ package com.minke.mallmanagement.shared.health;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Profile;
 import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.web.bind.annotation.CrossOrigin;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
@@ -34,7 +33,6 @@ import java.util.Map;
 @RestController
 @RequestMapping("/health")
 @Profile("a3")
-@CrossOrigin
 public class HealthController {
 
     @Autowired

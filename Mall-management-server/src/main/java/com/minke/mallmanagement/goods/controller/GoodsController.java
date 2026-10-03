@@ -35,7 +35,6 @@ import java.util.Map;
  */
 @RestController
 @RequestMapping("/goods")
-@CrossOrigin
 public class GoodsController {
 
     @Autowired
