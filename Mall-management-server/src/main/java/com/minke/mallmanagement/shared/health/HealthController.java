@@ -38,6 +38,9 @@ public class HealthController {
     @Autowired
     private JdbcTemplate jdbcTemplate;
 
+    // ⚠️ 例外 5/5：本方法是全仓**唯一**用 LinkedHashMap 组装响应的端点（插入序），与其余
+    //    33 处 HashMap（桶序）不同 ⇒ 包进 Result（HashMap 基类）会改它的字节，而 A3 的
+    //    P5/P6/P7 读它。故本方法的签名与实现**一字不动**。见 shared/web/Result.java 类注释。
     @GetMapping("/db")
     public Map<String, Object> db() {
         // @@server_uuid 是纯 GLOBAL 变量（MySQL 拒绝以 @@session 读取），

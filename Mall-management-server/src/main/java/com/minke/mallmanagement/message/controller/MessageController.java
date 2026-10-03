@@ -1,6 +1,7 @@
 package com.minke.mallmanagement.message.controller;
 
 import com.minke.mallmanagement.message.service.MessageService;
+import com.minke.mallmanagement.shared.web.Result;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.Map;
@@ -38,6 +39,12 @@ import java.util.Map;
  * 改一个就断一个。⚠️ 本域**没有任何默认值**（与 user 域那五个 {@code defaultValue} 不同）。
  * <p>⚠️ 尤其：{@code getOrCreateConversation} 与 {@code history} 的四参数名/序必须一致 ——
  * 该端点三层前就<b>无前端调用方、无测试、无 A3 覆盖</b>，改错了没有任何断言会报。
+ *
+ * <h2>【响应体：全部 10 个端点已换成 {@link Result}】</h2>
+ * 只换**返回类型**：{@code Map<String,Object>} → {@code Result<Map<String,Object>>}，
+ * 方法体由 {@code return messageService.x(…)} 改为 {@code return Result.of(messageService.x(…))}。
+ * Service 返回值仍是 {@code Map}，URL 与参数一字未动；因 {@code Result.of} 逐条 put 保字节等价，
+ * 线上响应体逐字节不变。本类**没有**例外端点（10/10 全换）。
  */
 @RestController
 @RequestMapping("/message")
@@ -52,75 +59,75 @@ public class MessageController {
     // ===================== 消息相关接口（基于会话表） =====================
 
     @PostMapping("/conversations")
-    public Map<String, Object> getConversations(@RequestParam("currentId") String currentId,
-                                                @RequestParam("currentType") String currentType) {
-        return messageService.getConversations(currentId, currentType);
+    public Result<Map<String, Object>> getConversations(@RequestParam("currentId") String currentId,
+                                                        @RequestParam("currentType") String currentType) {
+        return Result.of(messageService.getConversations(currentId, currentType));
     }
 
     @PostMapping("/history")
-    public Map<String, Object> getMessageHistory(@RequestParam("currentId") String currentId,
-                                                 @RequestParam("currentType") String currentType,
-                                                 @RequestParam("otherId") String otherId,
-                                                 @RequestParam("otherType") String otherType) {
-        return messageService.getMessageHistory(currentId, currentType, otherId, otherType);
+    public Result<Map<String, Object>> getMessageHistory(@RequestParam("currentId") String currentId,
+                                                         @RequestParam("currentType") String currentType,
+                                                         @RequestParam("otherId") String otherId,
+                                                         @RequestParam("otherType") String otherType) {
+        return Result.of(messageService.getMessageHistory(currentId, currentType, otherId, otherType));
     }
 
     @PostMapping("/send")
-    public Map<String, Object> sendMessage(@RequestParam("fromId") String fromId,
-                                           @RequestParam("fromType") String fromType,
-                                           @RequestParam("toId") String toId,
-                                           @RequestParam("toType") String toType,
-                                           @RequestParam("content") String content) {
-        return messageService.sendMessage(fromId, fromType, toId, toType, content);
+    public Result<Map<String, Object>> sendMessage(@RequestParam("fromId") String fromId,
+                                                   @RequestParam("fromType") String fromType,
+                                                   @RequestParam("toId") String toId,
+                                                   @RequestParam("toType") String toType,
+                                                   @RequestParam("content") String content) {
+        return Result.of(messageService.sendMessage(fromId, fromType, toId, toType, content));
     }
 
     @PostMapping("/getOrCreateConversation")
-    public Map<String, Object> getOrCreateConversation(
+    public Result<Map<String, Object>> getOrCreateConversation(
             @RequestParam("currentId") String currentId,
             @RequestParam("currentType") String currentType,
             @RequestParam("otherId") String otherId,
             @RequestParam("otherType") String otherType) {
-        return messageService.getOrCreateConversation(currentId, currentType, otherId, otherType);
+        return Result.of(messageService.getOrCreateConversation(currentId, currentType, otherId, otherType));
     }
 
     // ===================== 好友相关接口 =====================
 
     //搜索好友时显示数据（读路径在 UserCacheService.publicInfo()，见 Service 的 userSelect）
     @PostMapping("/userSelect")
-    public Map<String, Object> userSelect(@RequestParam("userId") String userId) {
-        return messageService.userSelect(userId);
+    public Result<Map<String, Object>> userSelect(@RequestParam("userId") String userId) {
+        return Result.of(messageService.userSelect(userId));
     }
 
     //为好友表添加待处理的数据（B2 的锁在 Service.friendAdd 里）
     @PostMapping("/friendAdd")
-    public Map<String, Object> friendAdd(@RequestParam("customerId") String customerId,
-                                         @RequestParam("friendId") String friendId) {
-        return messageService.friendAdd(customerId, friendId);
+    public Result<Map<String, Object>> friendAdd(@RequestParam("customerId") String customerId,
+                                                 @RequestParam("friendId") String friendId) {
+        return Result.of(messageService.friendAdd(customerId, friendId));
     }
 
     //查询好友表内对应申请人的待处理信息（读路径在 FriendCacheService.listRequests()）
     @PostMapping("/selectFriend")
-    public Map<String, Object> selectFriend(@RequestParam("friendId") String friendId) {
-        return messageService.selectFriend(friendId);
+    public Result<Map<String, Object>> selectFriend(@RequestParam("friendId") String friendId) {
+        return Result.of(messageService.selectFriend(friendId));
     }
 
     //更新好友表内的数据，让两个用户互为好友
     @PostMapping("/friendUp")
-    public Map<String, Object> friendUp(@RequestParam("customerId") String customerId,
-                                        @RequestParam("friendId") String friendId) {
-        return messageService.friendUp(customerId, friendId);
+    public Result<Map<String, Object>> friendUp(@RequestParam("customerId") String customerId,
+                                                @RequestParam("friendId") String friendId) {
+        return Result.of(messageService.friendUp(customerId, friendId));
     }
 
     //删除掉不通过好友申请时。对应的待处理的好友申请数据
     @PostMapping("/friendDe")
-    public Map<String, Object> friendDe(@RequestParam("customerId") String customerId,
-                                        @RequestParam("friendId") String friendId) {
-        return messageService.friendDe(customerId, friendId);
+    public Result<Map<String, Object>> friendDe(@RequestParam("customerId") String customerId,
+                                                @RequestParam("friendId") String friendId) {
+        return Result.of(messageService.friendDe(customerId, friendId));
     }
 
     //打印好友界面的好友信息（读路径在 FriendCacheService.listFriends()）
     @PostMapping("/friendSelect")
-    public Map<String, Object> friendSelect(@RequestParam("customerId") String customerId) {
-        return messageService.friendSelect(customerId);
+    public Result<Map<String, Object>> friendSelect(@RequestParam("customerId") String customerId) {
+        return Result.of(messageService.friendSelect(customerId));
     }
 }
