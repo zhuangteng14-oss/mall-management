@@ -4,6 +4,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.cache.annotation.CacheEvict;
 import org.springframework.cache.annotation.Cacheable;
 import org.springframework.cache.annotation.Caching;
+import org.springframework.dao.EmptyResultDataAccessException;
 import org.springframework.dao.IncorrectResultSizeDataAccessException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
@@ -31,9 +32,19 @@ import java.util.Map;
  *         见 evictByMerchant() 的注释与 §11「显式 evict ≠ 注解 evict」。
  *
  * 本类只搬运逻辑、不改语义：SQL 原样、per-row 兜底原样、返回结构原样、异常处理原样。
- * ⚠️ **唯一例外（2026-09-30，P0 #2）**：priceByTriple() —— 它原样照搬的 `queryForMap` + 全 catch
+ * ⚠️ **例外一（2026-09-30，P0 #2）**：priceByTriple() —— 它原样照搬的 `queryForMap` + 全 catch
  * 恰好构成「把失败当值缓存」。该方法的「返回结构原样 + 异常处理原样」已**有意**放弃，
- * 理由与边界全部写在它自己的 javadoc 里（搜索「曾把失败当值缓存」）。其余五个方法未动。
+ * 理由与边界全部写在它自己的 javadoc 里（搜索「曾把失败当值缓存」）。
+ *
+ * ⚠️ **例外二（2026-10-03，② 笔）**：listHome() / listByMerchant() / listCodes() —— 与例外一是
+ * **同一缺陷的三个未清理实例**：它们的 `catch (Exception e)` 把技术异常吞成 `{success:false}`，
+ * 那是一个**正常返回的非 null Map** ⇒ 被 `@Cacheable` 缓存满 TTL（失败的生命周期从「瞬时」
+ * 变成「TTL」）。处置与例外一**同原则**（技术异常上抛 ⇒ 注解遇异常不写入），但**保留返回形状** ——
+ * 这三个的 0 行本来就返回 `success:true, list:[]`，不存在 priceByTriple 那种「0 行与异常被同一个
+ * `queryForMap` 折叠」的问题，故不需要改返回类型，只需把 try/catch 与响应组装**搬回**
+ * `GoodsService` 的三个调用方（`goodsSelectHome` / `goodsSelect` / `GoodsProductCodeSelect`）。
+ * `listHome()` 的 **per-row 兜底**同时收窄为 `catch (EmptyResultDataAccessException)` ——
+ * 只接「该商家在 login 无对应行」这个**业务**事实；>1 行与技术异常不再静默降级成 `""`。
  */
 @Service
 public class GoodsCacheService {
@@ -62,45 +73,54 @@ public class GoodsCacheService {
      * ⚠️ `SELECT *` ⇒ 缓存体是「列全集的快照」：goods 表加列后，旧条目缺该列、响应字段
      *    缺失直到 TTL。处置沿用 §10 约定（响应形状变更 ⇒ bump 键版本），本笔不加版本前缀
      *    （与既有 goodstype::all 保持一致）。
+ *
+ * ⚠️ **异常处理已改（2026-10-03，② 笔）**：原本**内外两层** `catch (Exception e)`，两者都把技术
+ *    异常吞成一个正常返回的 Map / 字段 ⇒ **被缓存满 TTL**。现在：
+ *    · **外层已删** —— 主查询失败即上抛 ⇒ `@Cacheable` 遇异常不写入（响应组装搬回
+ *      `GoodsService.goodsSelectHome()`，对调用方零契约变更：仍是 200 + `{success:false,msg:"查询失败"}`）。
+ *    · **内层收窄**为 `catch (EmptyResultDataAccessException)` —— 只接「该商家在 login 无对应行」
+ *      这个**业务**事实（即原注释的「查不到就为空」）。依据：`queryForObject` 对 0 行抛
+ *      `EmptyResultDataAccessException`、对 **>1 行**抛 `IncorrectResultSizeDataAccessException`，
+ *      而前者是后者的**子类**（spring-tx 6.2.6 `javap` 实证）⇒ 这个 catch 精确只命中 0 行；
+ *      **>1 行**（`login.Id` 无唯一约束 ⇒ schema 层可达）与技术异常一律上抛。
      */
     @Cacheable(cacheNames = "goodsHome", key = "'all'", sync = true)
     public Map<String, Object> listHome() {
         Map<String, Object> result = new HashMap<>();
-        try {
-            // 1. 先查所有商品
-            String sql = "SELECT * FROM mall_management_sql.goods";
-            List<Map<String, Object>> goodsList = jdbcTemplate.queryForList(sql);
 
-            // 2. 循环根据商品里的 MerchantId 查 login 表的 UserName
-            for (Map<String, Object> goods : goodsList) {
-                // 拿到商品里的商家ID
-                Object merchantIdObj = goods.get("MerchantId");
+        // 1. 先查所有商品
+        String sql = "SELECT * FROM mall_management_sql.goods";
+        List<Map<String, Object>> goodsList = jdbcTemplate.queryForList(sql);
 
-                try {
-                    // 重点：login 表用 id = ? 匹配！！！
-                    String userSql = "SELECT UserName FROM mall_management_sql.login WHERE id = ?";
+        // 2. 循环根据商品里的 MerchantId 查 login 表的 UserName
+        for (Map<String, Object> goods : goodsList) {
+            // 拿到商品里的商家ID
+            Object merchantIdObj = goods.get("MerchantId");
 
-                    String userName = jdbcTemplate.queryForObject(
-                            userSql,
-                            new Object[]{merchantIdObj},
-                            String.class
-                    );
+            try {
+                // 重点：login 表用 id = ? 匹配！！！
+                String userSql = "SELECT UserName FROM mall_management_sql.login WHERE id = ?";
 
-                    // 把用户名放进商品数据
-                    goods.put("UserName", userName);
-                } catch (Exception e) {
-                    // 查不到就为空
-                    goods.put("UserName", "");
-                }
+                String userName = jdbcTemplate.queryForObject(
+                        userSql,
+                        new Object[]{merchantIdObj},
+                        String.class
+                );
+
+                // 把用户名放进商品数据
+                goods.put("UserName", userName);
+            } catch (EmptyResultDataAccessException e) {
+                // 查不到就为空（业务事实：该商家在 login 表无对应行）
+                // ⚠️ 只接 0 行。EmptyResultDataAccessException 是
+                //    IncorrectResultSizeDataAccessException 的**子类**（spring-tx 6.2.6 javap 实证），
+                //    而 queryForObject 对 0 行抛子类、对 >1 行抛父类 ⇒ 这个 catch 精确只命中 0 行；
+                //    >1 行与技术异常一律上抛，不再静默降级成 ""（见类 javadoc「例外二」）。
+                goods.put("UserName", "");
             }
-
-            result.put("success", true);
-            result.put("list", goodsList);
-        } catch (Exception e) {
-            e.printStackTrace();
-            result.put("success", false);
-            result.put("msg", "查询失败");
         }
+
+        result.put("success", true);
+        result.put("list", goodsList);
         return result;
     }
 
@@ -125,9 +145,11 @@ public class GoodsCacheService {
      *    `TwoLevelCache` 里用于合并并发未命中的 `get(key, Callable)` 根本不会被调用。
      * 另：sync=true 要求本注解只声明一个 cacheNames 且不能用 unless（此处均满足）。
      *
-     * ⚠️ 本方法**不会返回 null**：0 行结果是 `success:true, list: []`，异常是 `success:false`
-     *    的 map。注意区分两件事 —— 空结果是**被正常缓存的值**，不是「空值缓存（负缓存）机制」
-     *    ⇒ cache-layer.md §9.1「穿透：机制未验证」的结论不因本接口改变。
+     * ⚠️ 本方法**成功时不会返回 null**：0 行结果是 `success:true, list: []` —— 空结果是**被正常
+     *    缓存的值**，不是「空值缓存（负缓存）机制」，故 cache-layer.md §9.1 的结论不因本接口改变。
+     *    **技术异常则原样上抛、不返回 map**（2026-10-03，② 笔）：原 `catch (Exception e)` 把它吞成
+     *    `{success:false}`，那是个非 null Map ⇒ 会被缓存满 TTL；try/catch 与响应组装已搬回
+     *    `GoodsService.goodsSelect()`。
      *
      * ⚠️ 键空间随入参无界：本接口零鉴权（BD-03）、MerchantId 是任意入参 ⇒ 任何人可造键。
      *    量级有界：L1 有 app.cache.caffeine.max-size=1000 硬上界、L2 条目随 TTL 过期，
@@ -142,16 +164,10 @@ public class GoodsCacheService {
     @Cacheable(cacheNames = "goodsByMerchant", key = "#MerchantId", sync = true)
     public Map<String, Object> listByMerchant(String MerchantId) {
         Map<String, Object> result = new HashMap<>();
-        try {
-            String sql = "SELECT * FROM mall_management_sql.goods WHERE MerchantId = ?";
-            List<Map<String, Object>> list = jdbcTemplate.queryForList(sql, MerchantId);
-            result.put("success", true);
-            result.put("list", list);
-        } catch (Exception e) {
-            e.printStackTrace();
-            result.put("success", false);
-            result.put("msg", "查询失败");
-        }
+        String sql = "SELECT * FROM mall_management_sql.goods WHERE MerchantId = ?";
+        List<Map<String, Object>> list = jdbcTemplate.queryForList(sql, MerchantId);
+        result.put("success", true);
+        result.put("list", list);
         return result;
     }
 
@@ -299,9 +315,12 @@ public class GoodsCacheService {
      *    `TwoLevelCache` 里用于合并并发未命中的 `get(key, Callable)` 根本不会被调用。
      * 另：sync=true 要求本注解只声明一个 cacheNames 且不能用 unless（此处均满足）。
      *
-     * ⚠️ 本方法**不会返回 null**：无型号时是 `success:true, list: []`，异常是 `success:false`
-     *    的 map。同 goodsSelect —— 空列表是**被正常缓存的值**，不是「空值缓存（负缓存）机制」
-     *    ⇒ cache-layer.md §9.1「穿透：机制未验证」的结论不因本接口改变。
+     * ⚠️ 本方法**成功时不会返回 null**：无型号时是 `success:true, list: []` —— 同 goodsSelect，
+     *    空列表是**被正常缓存的值**，不是「空值缓存（负缓存）机制」，故 cache-layer.md §9.1 的结论
+     *    不因本接口改变。**技术异常则原样上抛、不返回 map**（2026-10-03，② 笔）：原
+     *    `catch (Exception e)` 把它吞成 `{success:false}`（**无 `msg`**，与另两个投影不同）⇒ 会被
+     *    缓存满 TTL；try/catch 与响应组装已搬回 `GoodsService.GoodsProductCodeSelect()`，
+     *    迁移后 marker 仍是 `{success:false}` 且**不带 `msg`** —— 这是契约，别「补全」它。
      *
      * ⚠️ 值序**未定义**：SQL 是 `SELECT DISTINCT ProductCode`，**无 ORDER BY**，EXPLAIN 为
      *    `type=ALL … Using where; Using temporary` ⇒ 返回序由临时表决定，MySQL 不保证。
@@ -326,15 +345,10 @@ public class GoodsCacheService {
         String sql = "SELECT DISTINCT ProductCode FROM mall_management_sql.goods "
                 + "WHERE MerchantId=? AND GoodName=?";
 
-        try {
-            List<String> productCodeList = jdbcTemplate.queryForList(sql,
-                    String.class, MerchantId, GoodName);
-            result.put("success", true);
-            result.put("list", productCodeList);
-        } catch (Exception e) {
-            e.printStackTrace();
-            result.put("success", false);
-        }
+        List<String> productCodeList = jdbcTemplate.queryForList(sql,
+                String.class, MerchantId, GoodName);
+        result.put("success", true);
+        result.put("list", productCodeList);
         return result;
     }
 
