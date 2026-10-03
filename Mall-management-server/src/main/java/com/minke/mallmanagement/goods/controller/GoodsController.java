@@ -3,6 +3,7 @@ package com.minke.mallmanagement.goods.controller;
 import com.minke.mallmanagement.goods.service.GoodsService;
 import com.minke.mallmanagement.goods.service.GoodsTypeCacheService;
 import com.minke.mallmanagement.shared.web.Result;
+import jakarta.validation.constraints.NotBlank;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
@@ -78,14 +79,19 @@ public class GoodsController {
     // GoodsService.goodsAdd()，SQL 再下沉 GoodsDao。本方法只保留路由与入参绑定。
     // ⚠️ 提前 return 分支（图片为空 / 落盘失败）**不再清缓存** —— 该路径一行未改库，
     //    清它是纯浪费。这是**设计选择，非缺陷**，见 §11；该不变量随方法体进了 Service。
+    // 笔 3：只对 4 个**字符串**写参做非空校验。刻意**不碰**三个非字符串入参：
+    //   · file（MultipartFile）—— 非空由 @RequestParam 必填本身保证（缺失即 400）；
+    //   · Price（Double）—— 类型/范围属业务规则，归 Service；
+    //   · GoodTypeNew（int）—— ⚠️ **绝不能加 @Min(1)**：既有 smoke 用例与 A3 都发 0
+    //     （GoodsAddUploadFailSmokeTest.java:52、ConcurrencyRunner.java:1164-1166 的 PayIf 族同理）。
     @PostMapping("/goodsAdd")
     public Result<Map<String, Object>> goodsAdd(
-            @RequestParam("MerchantId") String MerchantId,
-            @RequestParam("GoodName") String GoodName,
+            @NotBlank(message = "不能为空") @RequestParam("MerchantId") String MerchantId,
+            @NotBlank(message = "不能为空") @RequestParam("GoodName") String GoodName,
             @RequestParam("Price") Double Price,
             @RequestParam("file") MultipartFile file,  // 图片用 MultipartFile
-            @RequestParam("GoodType") String GoodType,
-            @RequestParam("ProductCode") String ProductCode,
+            @NotBlank(message = "不能为空") @RequestParam("GoodType") String GoodType,
+            @NotBlank(message = "不能为空") @RequestParam("ProductCode") String ProductCode,
             @RequestParam("GoodTypeNew") int GoodTypeNew
     ) throws IOException {
         return Result.of(goodsService.goodsAdd(MerchantId, GoodName, Price, file, GoodType, ProductCode, GoodTypeNew));
@@ -133,11 +139,13 @@ public class GoodsController {
     //    （哪怕另起一个方法再自调用），缓存就会静默失效**（cache-layer.md §11 ㊸③）。
     // ⚠️ 形参名必须保留：@RequestParam 与 Service 侧 SpEL 的三段都依赖它们（-parameters 已开，
     //    javap 该方法的 MethodParameters 可见 MerchantId / GoodName / ProductCode）。
+    // 笔 3：非空校验。⚠️ 缺参**仍走 400**（@RequestParam 必填先于校验触发），
+    // 故 PriceTripleFailSmokeTest.missingParamStaysABadRequest 继续绿。
     @PostMapping("/productCodePrice")
     public Result<Map<String, Object>> productCodePrice(
-            @RequestParam("MerchantId") String MerchantId,
-            @RequestParam("GoodName") String GoodName,
-            @RequestParam("ProductCode") String ProductCode
+            @NotBlank(message = "不能为空") @RequestParam("MerchantId") String MerchantId,
+            @NotBlank(message = "不能为空") @RequestParam("GoodName") String GoodName,
+            @NotBlank(message = "不能为空") @RequestParam("ProductCode") String ProductCode
     ) {
         return Result.of(goodsService.productCodePrice(MerchantId, GoodName, ProductCode));
     }
