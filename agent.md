@@ -145,10 +145,11 @@ git rebase origin/main
 ## 会话管理规则
 
 1. 一个 feature 一个会话。完成后输入 /clear，开新会话。
-2. 新会话开场只读三个文件：
+2. 新会话开场只读四个文件：
    - agent.md
    - docs/agent/README.md
    - docs/agent/context-packs/<当前任务>.md
+   - docs/agent/selection-status.md（项目待办与优化总表 §8 + 新功能引出表 §9）
 3. 不要整目录加载 docs/agent/。
 4. 上下文接近满时（Claude 提示或响应变慢）主动建议 /clear。
 5. 已完成的工作必须写入文件（文档或 commit），不能只存在于对话。

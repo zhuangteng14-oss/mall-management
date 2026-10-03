@@ -7,6 +7,7 @@
 1. agent.md（规则）
 2. docs/agent/README.md（本文件）
 3. 当前任务的 context-pack
+4. docs/agent/selection-status.md（项目待办与优化总表 §8 + 新功能引出表 §9）
 
 ## 文档职责
 
@@ -22,7 +23,7 @@
 | concurrency-map.md | 并发、锁、事务现状 | 涉及并发时 | 并发逻辑变化时 |
 | cache-map.md | 缓存现状 | 涉及缓存时 | 缓存变化时 |
 | defect-survey.md | 缺陷普查（七病 + 七前提 + Class A/B） | 排期时；做三层时的**输入** | 普查更新时 |
-| selection-status.md | 技术选型现状（对照 `agent.md` 目标态逐项核） | 涉及选型 / 排期时 | 选型变化时 |
+| selection-status.md | 技术选型现状（对照 `agent.md` 目标态逐项核）+ **项目待办与优化总表（§8）** + **新功能引出表（§9）** | 涉及选型 / 排期 / **新功能立项**时 | 选型或待办状态变化时 |
 | tech-debt.md | 活跃技术债 + 已完成里程碑 | 排期时 | 新增/关闭时 |
 | progress.md | **全项目进度表（唯一真相源）** —— 命名约定见其 §0 | 排期时、开工前 | 状态变化时 |
 | business-decisions.md | 待决策议题 | 遇到分歧时 | 决策后 |
@@ -32,6 +33,6 @@
 ## 规则
 
 1. 一个 feature 一个会话，做完 /clear。
-2. 新会话开场只读：agent.md + README.md + 对应 context-pack。
+2. 新会话开场只读：agent.md + README.md + 对应 context-pack + selection-status.md。
 3. 不要整目录加载。
 4. 已完成的技术债移入 archive/。
