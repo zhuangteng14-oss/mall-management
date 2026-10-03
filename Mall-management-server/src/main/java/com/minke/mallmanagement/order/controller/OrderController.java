@@ -21,7 +21,6 @@ import java.util.Map;
  */
 @RestController
 @RequestMapping("/order")
-@CrossOrigin
 public class OrderController {
 
     // ===== 订单域（三层重构第一笔，2026-10-02）=====
