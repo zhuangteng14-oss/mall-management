@@ -74,7 +74,7 @@
 | 7 | TOCTOU 竞态 | `goodstype` POST 先查重再插，并发下可产生重复类型 | `GoodsTypeCacheService:62` → `:71`（原记 `G:42`/`G:51`） |
 | 8 | 无唯一约束兜底 | `friend` 仅 PK `id`，`(customerid, friendid)` 无唯一键 —— 上述竞态**无数据库层兜底** | `SQL:43` |
 | 9 | ~~无唯一约束兜底~~ ✅ **已消除（2026-09-30 S1a，`1e2fcfa`）** | ~~`order.OrderId` 无唯一索引（主键是自增 `Id`），业务单号可重复~~ → 已加 UNIQUE **`uk_order_orderId`**，DB 层兜底到位。应用层查重仍由 B2 的临界区「先查后插」负责，两条互补（`A-S2a-1b` 断言前者、`1c` 断言后者） | `SQL:154`；追加块 `SQL:245` |
-| 10 | 无唯一约束兜底 | `goodstype.GoodType` 无唯一索引，查重仅靠应用层 | `SQL:78` |
+| 10 | ~~无唯一约束兜底~~ ✅ **已消除（2026-10-04 #11，`fix/goodstype-unique`）** | ~~`goodstype.GoodType` 无唯一索引，查重仅靠应用层~~ → 已加 UNIQUE **`uk_goodstype_GoodType`**（`SQL:246-262`）；⚠️ 与前一行（#7 的 TOCTOU）**不是一回事**：#7 是「先查后插」这个窗口仍在，本行是「DB 层有没有兜底」—— 现在两处**互补**：应用层 SELECT 省正常路径的那次回查，UNIQUE 兜住并发穿过窗口的那一刻 | `SQL:74-79`（建表）；`SQL:246-262`（索引） |
 | 11 | 无锁机制（**已部分消除**） | `synchronized` / `SELECT ... FOR UPDATE` / `@Version` 乐观锁版本列**仍全仓 0 命中**；但 ⚠️ **B2（2026-09-30）已引入 Redisson 应用层锁** ⇒ 「无锁」只剩后半句 | 主源全仓 grep（2026-10-02 复测） |
 | 12 | ~~无分布式锁~~ ✅ **已消除（B2，2026-09-30）** | ~~未引入 Redis / Redisson~~ → `DistributedLockService.runLocked`（`:237`）现有 **5 个业务调用点**（`OrderService:110/180/186/192` + ~~`MessageController.friendAdd:227`~~ `MessageService.friendAdd:323`，2026-10-03 message 笔 `8ed5fc1` 重指）。⚠️ 覆盖**不是**全面的：§4 #4/#5 两处多表写**仍未打锁** | `pom.xml:82-85`（`spring-boot-starter-data-redis`）、`pom.xml:117-121`（`redisson 3.46.0`） |
 | 13 | 无异步 / 线程池（**已部分消除**） | `@Async`/`@Scheduled`/`CompletableFuture`/`ThreadPoolTaskExecutor` 四个字面量**仍 0 命中**，但 ⚠️ **B3 引入显式 `ThreadPoolExecutor`**（`OrderStateExecutor:79`，有界 `ArrayBlockingQueue(1024)`） | `OrderStateExecutor.java:79/100`、`application.properties`（`app.order.state.async.queue-capacity`） |
@@ -88,7 +88,7 @@
 ## 7. 改造优先级建议
 
 1. **立即**：为 §5 中 #1–#4 的四处多表写补 `@Transactional`（成本最低、收益最直接）。
-2. **立即**：给 `friend(customerid, friendid)`、`goodstype.GoodType` 加唯一索引，让数据库兜住 #5–#7 的 TOCTOU 竞态。✅ **已完成 1/3**：`order.OrderId` 于 **2026-09-30 S1a（`1e2fcfa`）** 加了 UNIQUE `uk_order_orderId`（§5 第 9 行已标「已消除」）。⚠️ **2026-10-04 订正（drift-fix 笔）**：原写「剩余两项**未做**」不准确 —— **(a) `friend`**：其 TOCTOU（#5/#6）**已被 B2 的 `runLocked` 覆盖**（CI `ci49` 2026-10-03：`friendDupRows` 恒 = 1、`friendDupRounds = 0/5`）⇒ **只剩唯一索引未建**（仍建议建，作为最后防线）；**(b) `goodstype`**：**仍会造重复行**（同一份 `ci49`：`goodstypeDupRows` 4 / 1 / 4 / 3 / 3，**4/5 轮复现**；根因 `GoodsTypeCacheService:71-72` 裸 `INSERT`、不在 B2 的 5 落点内）⇒ 本条对 `goodstype` 的「**立即**」**完全成立**（唯一索引 + 写入路径两者都未做）。
+2. **立即**：给 `friend(customerid, friendid)`、`goodstype.GoodType` 加唯一索引，让数据库兜住 #5–#7 的 TOCTOU 竞态。✅ **已完成 2/3**：`order.OrderId` 于 **2026-09-30 S1a（`1e2fcfa`）** 加了 UNIQUE `uk_order_orderId`（§5 第 9 行已标「已消除」）；`goodstype.GoodType` 于 **2026-10-04 #11（`fix/goodstype-unique`）** 加了 UNIQUE `uk_goodstype_GoodType`（`SQL:246-262`，§5 第 10 行已标「已消除」）。⚠️ **2026-10-04 订正（drift-fix 笔）**：原写「剩余两项**未做**」不准确 —— **(a) `friend`**：其 TOCTOU（#5/#6）**已被 B2 的 `runLocked` 覆盖**（CI `ci49` 2026-10-03：`friendDupRows` 恒 = 1、`friendDupRounds = 0/5`）⇒ **只剩唯一索引未建**（仍建议建，作为最后防线）；**(b) `goodstype`**：原「**仍会造重复行**」（同一份 `ci49`：`goodstypeDupRows` 4 / 1 / 4 / 3 / 3，**4/5 轮复现**；根因 `GoodsTypeCacheService:71-72` 裸 `INSERT`、不在 B2 的 5 落点内）—— ⚠️ **该状态已于 2026-10-04 #11 结束**：索引已建，DB 层兜底到位；**写入路径的锁化【不做】**（DB UNIQUE 已兜住并发穿过窗口的那一刻；加锁会动 B2 的 5 个落点、触发 A3 断言重校准，代价远大于收益）。⇒ 本条对 `goodstype` 的「**立即**」**已履行**。
 3. **中期**：把 §3 的 CAS 模式推广到其余状态变更类写接口。
 4. **中期**：修复 `OrderVolume` 的统计逻辑（`orderAdd` 成功后递增，或改为查询时实时聚合）。
 

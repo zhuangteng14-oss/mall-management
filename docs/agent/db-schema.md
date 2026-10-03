@@ -20,7 +20,7 @@
 | `customerimage` | 客户头像 | `UserName` | CustomerId, image | — | 仅主键 | `:23-28` |
 | `friend` | 好友关系（含待处理申请） | `id` (自增) | customerid, friendid, if_friend | **`if_friend` 状态位**：0=待处理 1=已通过 | 仅主键 | `:38-44` |
 | `goods` | 商品（按型号一行） | `Id` (自增) | MerchantId, GoodName, Price, GoodImg, GoodType, ProductCode, GoodTypeNew | — | 仅主键 | `:54-64` |
-| `goodstype` | 商品类型字典 | `Id` (自增) | GoodTypeNew, GoodType | — | 仅主键 | `:74-79` |
+| `goodstype` | 商品类型字典 | `Id` (自增) | GoodTypeNew, GoodType | — | **主键 + `uk_goodstype_GoodType(GoodType)`**（2026-10-04 #11） | `:74-79` |
 | `login` | 登录凭证与角色 | `UserName` | Password, **Role**(1=客户 2=商家), Id | — | 仅主键 | `:89-95` |
 | `merchantimage` | 商家头像 | `UserName` | MerchantId, image | — | 仅主键 | `:105-110` |
 | `message` | 聊天消息 | `id` (自增) | from_id, from_type, to_id, to_type, content, create_time | — | 主键 + **`idx_from_to(from_id,to_id)`** + **`idx_create_time(create_time)`** | `:120-131` |
@@ -34,7 +34,7 @@
 
 ## 2. 索引现状
 
-**12 张表中 3 张有二级索引（共 4 个）**：`message` 2 个（`idx_from_to`、`idx_create_time`）、`order_state_transition` 1 个（`idx_order_state_transition_order`）、**`order` 1 个（`uk_order_orderId`，UNIQUE）**。其余 **9 张表除主键外无任何索引**；全库**除主键外 1 个 UNIQUE**（`uk_order_orderId`，2026-09-30 S1a `:236-245` 新增；完整基线见 §7）。已知高频查询列缺索引：
+**12 张表中 4 张有二级索引（共 5 个）**：`message` 2 个（`idx_from_to`、`idx_create_time`）、`order_state_transition` 1 个（`idx_order_state_transition_order`）、**`order` 1 个（`uk_order_orderId`，UNIQUE）**、**`goodstype` 1 个（`uk_goodstype_GoodType`，UNIQUE，2026-10-04 #11 新增）**。其余 **8 张表除主键外无任何索引**；全库**除主键外 2 个 UNIQUE**（`uk_order_orderId`，2026-09-30 S1a `:236-245`；`uk_goodstype_GoodType`，2026-10-04 `:246-262`；完整基线见 §7）。已知高频查询列缺索引：
 
 | 查询位置 | SQL 条件 | 涉及表 | 现况 |
 |---|---|---|---|
@@ -169,7 +169,7 @@
 |---|---|---|---|
 | `Id` | int | **PK**, NOT NULL AUTO_INCREMENT | `AUTO_INCREMENT=12` |
 | `GoodTypeNew` | int | **NOT NULL DEFAULT '0'** | 与 `goods.GoodTypeNew` 可空不同 |
-| `GoodType` | char(20) | NOT NULL | **无唯一约束 → 类型名可重复** |
+| `GoodType` | char(20) | NOT NULL, **UNIQUE `uk_goodstype_GoodType`**（2026-10-04 #11，`mall_management_sql.sql:246-262`） | ~~无唯一约束 → 类型名可重复~~ ⇒ **已加唯一约束**，重复类型名写不进去。⚠️ 与 `goods.GoodType` **无 FK**（本库除两个 `uk_*` 外没有任何约束，见 §8） |
 
 ### 6.5 `login`（`:89-95`）
 | 字段 | 类型 | 约束 | 备注 |
@@ -273,7 +273,7 @@
 | `customerimage` | `UserName` | 无 | **无** |
 | `friend` | `id` | 无 | **无** |
 | `goods` | `Id` | 无 | **无** |
-| `goodstype` | `Id` | 无 | **无** |
+| `goodstype` | `Id` | **`uk_goodstype_GoodType(GoodType)`**（UNIQUE，2026-10-04 #11） | **有 1 个**（`GoodType`，UNIQUE，#11） |
 | `login` | `UserName` | 无 | **无**（`Id` 非唯一） |
 | `merchantimage` | `UserName` | 无 | **无** |
 | `message` | `id` | `idx_from_to(from_id,to_id)`、`idx_create_time(create_time)` | **无** |
@@ -283,8 +283,8 @@
 | `user_conversation_read` | 复合 4 列 | 无 | **无** |
 | `order_state_transition` | `Id` | `idx_order_state_transition_order(OrderId, OccurredAt)` | **无** |
 
-**汇总**：12 张表；主键 12 个（1 个复合）；二级索引 **4 个**（分布 3 张表）；**全库除主键外 1 个 UNIQUE 约束**（`order.uk_order_orderId`，2026-09-30 S1a）。
-唯一约束只此 1 个，也不是遗漏 —— 它是 `defect-survey.md §二 前提清单`里 A/B/C 三条的出处，到 2026-09-30 为止只有**前提 A 的 DB 面**被认领（S1a），B / B′ / C 仍全靠应用层保证。（原文此处引「§4「前提清单」」，但本文件 §4 是 `SettlementDate` 语义，前提清单实际在 `defect-survey.md` —— 一并更正。）
+**汇总**：12 张表；主键 12 个（1 个复合）；二级索引 **5 个**（分布 4 张表）；**全库除主键外 2 个 UNIQUE 约束**（`order.uk_order_orderId`，2026-09-30 S1a；`goodstype.uk_goodstype_GoodType`，2026-10-04 #11）。
+唯一约束只此 2 个，也不是遗漏 —— 它们是 `defect-survey.md §二 前提清单`里 A/B/C 三条的出处，到 2026-10-04 为止只有**前提 A 的 DB 面**（S1a）与 **`goodstype` 这条新前提**（#11）被认领，B / B′ / C 仍全靠应用层保证。（原文此处引「§4「前提清单」」，但本文件 §4 是 `SettlementDate` 语义，前提清单实际在 `defect-survey.md` —— 一并更正。）
 
 ---
 
@@ -346,12 +346,12 @@
 
 ---
 
-## 10. ⚠️ 全库除主键外只有 **1 个 UNIQUE** —— 唯一性仍基本靠应用层
+## 10. ⚠️ 全库除主键外只有 **2 个 UNIQUE** —— 唯一性仍基本靠应用层
 
-> 本节单独成节，因为它是整份 schema 最重的一条：**业务主键几乎全是约定，不是约束。**（2026-09-30 S1a 之前是「全是」；`order.OrderId` 是第一个例外。）
+> 本节单独成节，因为它是整份 schema 最重的一条：**业务主键几乎全是约定，不是约束。**（2026-09-30 S1a 之前是「全是」；`order.OrderId` 是第一个例外，`goodstype.GoodType` 于 **2026-10-04 #11** 成为第二个。）
 
 ### 10.1 事实
-12 张表 → 12 个主键（其中 1 个复合）→ 4 个二级索引 → **非主键 UNIQUE：1 个**（`order.uk_order_orderId`，2026-09-30 S1a 新增）。
+12 张表 → 12 个主键（其中 1 个复合）→ 5 个二级索引 → **非主键 UNIQUE：2 个**（`order.uk_order_orderId`，2026-09-30 S1a 新增；`goodstype.uk_goodstype_GoodType`，2026-10-04 #11 新增）。
 
 ### 10.2 本应是业务键、实际只是「约定」的列
 
@@ -364,7 +364,7 @@
 | `user.customerid` / `user.merchantid` | `user` | 无 | 同上；且 `login.Id` 按 `Role` **择一**指向它们 | 前提 A 同族 |
 | `friend (customerid, friendid)` | `friend` | 无 | 重复好友对可写入 → `friendList::<cid>` 与 `friendRequests::<fid>` 两个缓存都会重复列出 | **新前提候选**（原普查清单未列，见下注） |
 | `productsales (ProductCode, MerchantId)` | `productsales` | 无 | 重复销量行 | — |
-| `goodstype.GoodType` | `goodstype` | 无 | 类型名可重复 | — |
+| `goodstype.GoodType` | `goodstype` | ✅ **有 UNIQUE**（`uk_goodstype_GoodType`，2026-10-04 #11） | ~~类型名可重复~~ ⇒ 重复类型名写不进去（DB 层兜底）；应用层 `SELECT COUNT(*)` 查重**保留**（省一次正常路径的回查，且让并发输方拿到「类型已存在」而非「新增失败」） | — |
 | `login.UserName` | `login` | **PK ✓** | 两个主键级唯一性之一（另一个是 `user.username`）；`order.OrderId` 于 2026-09-30 成为**第三个**真正被约束的唯一性（唯一索引，非主键） | — |
 
 > ⚠️ **编号提醒**：本次收到「`friend` 无唯一约束 → 前提 B′」，但普查报告里 **B′ 是 `goods (MerchantId, ProductCode)`**；`friend` 这条在原清单中**没有**，属**新前提**。上表按「新前提候选」记，**不并入 B′**，以免串号 —— 若你的 B′ 另有所指请更正。
@@ -383,3 +383,6 @@
 每一笔在自己的边界内都正确，而**边界本身（唯一性不是约束）从未被任何一笔认领**。
 
 > 🔄 **2026-09-30 S1a 是第一次有笔认领这条边界**：`order.OrderId` 的 UNIQUE 由 DB 自己执行 —— 锁**全部 fail-open 也拦得住重复单号**（这正是 `A-S2a-1b` 在兜的那一层）。但**只认领了一条**（前提 A 的 DB 面）：B / B′ / C 与 `order_state_transition → order` 的引用完整性至今仍无约束。
+>
+> 🔄 **2026-10-04 #11 认领了第二条**：`goodstype.GoodType` 的 UNIQUE。它是**同一逻辑的第二个实例，但认领理由与 S1a 不同** —— S1a 兜的是「锁 fail-open 时的重复单号」，#11 兜的是「**根本没有锁**」：`GoodsTypeCacheService.addType` 的 check-then-insert **不在 B2 的 5 个锁落点内**，所以它连 fail-open 的锁都没有，唯一的防线从来就只有那条应用层 `SELECT COUNT(*)`。A3 的 B-2 场景实测（CI `ci49`，2026-10-03）**4/5 轮复现**，正是这条缺口的直接证据。
+> ⚠️ **本条与 S1a 的一条关键差异**：S1a 的迁移块能写「前置：每个库重复行检测为 0」（`order` 实测本机 7/7、VM 6/6 均为 0）；#11 的迁移块**不能**写 —— `goodstype` 的重复行是 A3 自己造的、**已实测存在**。故它只能走「全量重导」路径落盘，对既有库须先人工去重。逐字见 `mall_management_sql.sql:246-262` 与 `db-migration.md` 注意 7。

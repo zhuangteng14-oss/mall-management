@@ -116,6 +116,7 @@
 > **本表只管「待办」，不复制长理由**：选型现状见 §1–§3，四项未实现库的**长理由**见 §4（本表只指回 `§4:<行>`）。
 > **标注**：**【新拟】** = 本笔首次给出的可证伪门限；**【口述】** = 尚未落文档（仅在对话里）。**【文档】** = 已有文档锚点。
 > ⚠️ 本表为**快照**：`#10 goodstype` 与 `#12 friend` 的触发判据取自 **CI `ci49`（2026-10-03）**；其后若重跑 A3 须重判。
+> ✅ **2026-10-04 #11（`fix/goodstype-unique`）了结 `#10`** —— 唯一索引已落地，但**该笔不重跑 A3**（复跑由合并后的 CI 承担）。⇒ 本表 `#10` 那行引的 `ci49` 数值仍是**加索引前**的截面；**`#12 friend` 的触发判据仍待重判**，且须以新报告复核 `#10` 是否真归零（判据见 `db-migration.md` 注意 7）。
 
 ### 8.1 类 1 —— 必做（10 项）
 
@@ -130,14 +131,14 @@
 | 7 | C2 SSE 事件流 | 类 1 | 前置：三层后 | `progress.md:85`：全仓 `SseEmitter` / `text/event-stream` / `WebFlux` = **0 命中** | 独立笔 |
 | 8 | C3 管理端 | 类 1 | 前置：**依赖 #6 鉴权** | `progress.md:86` / `:162`；数据源清单**已定**（§6，PR #23） | 独立笔 |
 | 9 | 部署（打包 + systemd + nginx + profile） | 类 1 | 前置：三层后 | `progress.md:163`：无 Dockerfile；`TD-05 / 06 / 08 / 09` 四条与部署**直接相关**（`progress.md:199`） | 独立笔 |
-| 10 | **goodstype 唯一约束** | 类 1 ⚠️ **本笔升类** | 时机：**待指派**（本笔不代排）—— 触发**已满足** | **见类 2 `#12` 行**（升类依据全在那行） | 独立（schema 变更）· **待指派** |
+| 10 | **goodstype 唯一约束** | 类 1 ⚠️ **本笔升类** | 时机：**待指派**（本笔不代排）—— 触发**已满足** | ✅ **已完成（2026-10-04 #11，`fix/goodstype-unique`）** —— UNIQUE `uk_goodstype_GoodType` 已落库（`mall_management_sql.sql:246-262`）；catch 已区分 `DuplicateKeyException`（`GoodsTypeCacheService:93`，返回「类型已存在」而非「新增失败」）。⚠️ **写入路径不加分布式锁**（DB UNIQUE 已兜底；加锁会动 B2 的 5 落点、触发 A3 断言重校准）。⚠️ 验收判据（`b2PerRound[].goodstypeDupRows` 5 轮恒 = 1）**待 CI 复跑** | #11 `fix/goodstype-unique` |
 
 ### 8.2 类 2 —— 触发条件（11 行 = 10 有效 + 1 占位）
 
 | # | 项 | 分类 | 触发 / 时机 | 现状 | 归属 |
 |---|---|---|---|---|---|
 | 11 | `login.Id` 唯一索引 | 类 2 | 【新拟】实测同一 `Id` 多条 `login` 行（`GROUP BY Id HAVING COUNT(*)>1` 非空）；**或鉴权笔落地** | 已登记 —— `db-schema.md:180` / `:363`（前提 C）、`defect-survey.md:81`（病 C）、`three-layers.md:95` | 鉴权笔（服务侧）/ 独立（DB 侧） |
-| 12 | goodstype 唯一约束 ⚠️ **已升类 1 ⇒ 本行占位，不重复计数** | 类 2 → **已升类 1 `#10`** | 触发**已满足** | CI `ci49`（2026-10-03）**4/5 轮** `goodstypeDupRows ≥ 2`（逐轮 4 / 1 / 4 / 3 / 3）；代码级根因：`GoodsTypeCacheService:71-72` **裸 `INSERT`**、且**不在 B2 的 5 落点内**。已登记 —— `concurrency-map.md:77` + `:91`（「**立即**」）、`db-schema.md:172` | 独立（schema 变更）· 待指派（见 `#10`） |
+| 12 | goodstype 唯一约束 ⚠️ **已升类 1 ⇒ 本行占位，不重复计数** | 类 2 → **已升类 1 `#10`** | 触发**已满足** | ✅ **已完成（2026-10-04 #11，`fix/goodstype-unique`）** —— 见 `#10` 行。升类依据（本节原值）：CI `ci49`（2026-10-03）**4/5 轮** `goodstypeDupRows ≥ 2`（逐轮 4 / 1 / 4 / 3 / 3）；代码级根因：`GoodsTypeCacheService:71-72` **裸 `INSERT`**、且**不在 B2 的 5 落点内**。原登记 —— `concurrency-map.md:77` + `:91`、`db-schema.md:172` | #11 `fix/goodstype-unique` |
 | 13 | `friend` 唯一约束 | 类 2 | 触发**未满足**：`ci49` `friendDupRows` 恒 = **1**、`friendDupRounds = 0/5`（B2 的 `runLocked` 已覆盖 `MessageService.friendAdd`）。⚠️ `cache-layer.md:462` 的「12–19 条」是 **B1 时代**值，**已被 B2 证伪** | 已登记 —— `concurrency-map.md:75` / `:91`、`db-schema.md:365`、`defect-survey.md:85`（病 G） | 独立（schema 变更） |
 | 14 | query-timeout（`spring.jdbc.template`） | 类 2 | 实测单条 SQL P99 > 1s；或 `hikaricp.connections.pending` > 0 | 已登记 —— `cache-layer.md:434`（② 笔） | ② 笔（登记）；**未修** |
 | 15 | N+1 改 JOIN（`goodsHome` / `friendList` / `friendRequests`） | 类 2 | 【新拟】任一 N+1 接口实测 P99 > 1s —— 门限取「**摊薄失效点**」：缓存只把 1+2N 摊薄为「每 TTL 一次」、是**掩盖非修复**（`cache-layer.md:161`） | 已登记 —— `project-map.md:111-126`、`cache-map.md:60-97`、`context-packs/fix-n-plus-one.md`、`cache-layer.md:142-181` | 独立笔 `fix-n-plus-one` |

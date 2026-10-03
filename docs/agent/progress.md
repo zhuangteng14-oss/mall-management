@@ -145,6 +145,14 @@
 
 > **TODO（2026-10-04，drift-fix 笔登记）**：公共层三笔（#34–#36）目前**无 context-pack** —— `docs/agent/context-packs/common-layer.md` **待建**（**本笔不建**）。建议登记到 `selection-status.md §8` 类 4（新功能引出）或**另起一笔**。
 > 另 3 处漂移待另开一笔：`progress.md:141-143` Controller 行数快照、`defect-survey.md:104/113/115/119/259/270` 表内旧坐标、追记内三处映射。
+>
+> **TODO（2026-10-04，#11 `fix/goodstype-unique` 笔登记）**：本笔发现但**不修**的 4 点（方案 Q10，只登记）——
+> ① `A-B2-1` 的 signal 是「**或**」（`login5xx > 0 ‖ gtRows ≥ 2 ‖ frRows ≥ 2`）⇒ **单点修好它一动不动**（`login5xx` 每轮 5–9 撑着），拿它验收单点是**结构性做不到**。更好的形态是**三站点各一条独立断言**（`A-B2-lg` / `A-B2-gt` / `A-B2-fr`），聚合条退成摘要。⚠️ 动 A3 判据属另一笔。
+> ② `A-B2-1` 的 desc 写死「B-2 三处 TOCTOU（loginAdd / goodstype / friendAdd）」—— goodstype 修好后这句**名不副实**，须重述或降级。
+> ③ `AbstractSmokeTest:153` 注入了 `GoodsTypeCacheService` 却**零写用例** ⇒ 加索引后 smoke 层没有任何一处能发现 catch 文案写错（本笔的 `GoodsTypeUniqueIndexTest` 走的是「有真库」那条路，补不了 smoke 层）。
+> ④ B-2 场景的 goodstype 断言**只数「重复行数」，不数「响应文案分布」** ⇒ 修完后「19 条『类型已存在』/ 1 条『新增成功』」这个最直接的证据在报告里一个字都看不到（`b.gtOk` 只记成功数）。
+> **落点**：这 4 条**明写落在本挂账段**（M4 允许的三个落点里选它）—— **不落 `selection-status.md §8 类 4`**，理由是 §8 的编号空间（`#1..#33`）与 PR 号（`#34` CORS / `#35 Result<T>` / `#36 GlobalExceptionHandler`）**同形**，再给 §8 增 4 行会造出「§8 `#34`」与「PR `#34`」的混淆。
+> **下一笔已定名**：**「`defect-survey` 收口笔」**（起手时间未定）—— 内容 = `defect-survey.md` 的**前提清单** + **病 G 行** + **§七 Class A 第 9 条标完成**。⚠️ 本笔按方案 Q8 把 `defect-survey.md` **压掉**（不并入 #11），故必须有此落点，**不许让它变孤儿**。该笔与上一段 `common-layer.md` 待建**是两笔**，不合并。
 
 **拆层顺序**（`three-layers.md:276`）：Controller → **DAO** → Service ——「先把数据出口收成一处，Service 才有意义」。
 
