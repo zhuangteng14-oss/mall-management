@@ -116,7 +116,7 @@ Vue 3 CLI 工程，14 个页面视图 + 1 个组件 + 1 个路由表。页面按
 
 | 接口 | 文件行号 | 涉及表 | 优先级 |
 |---|---|---|---|
-| `POST /goods/goodsSelectHome` | 全量查 `G:184-185`，循环 `G:188-208`，内层查询 `G:194-200`（**均为搬迁前坐标**；现整段在 `GoodsCacheService.listHome()`） | goods → login | 高 |
+| `POST /goods/goodsSelectHome` | 全量查 `GoodsCacheService.listHome:71-72`，循环 `:75-95`，内层查询 `:81-87`（**2026-10-03 现址**；整段在 `GoodsCacheService.listHome()`，旧 `G:184-185`/`G:188-208`/`G:194-200` 系 `1421a0c` 截面、**非**搬迁前 —— 见 `cache-layer.md §4` 表注） | goods → login | 高 |
 | `POST /message/conversations` | **2026-10-03 现址**：外层查 `MessageDao.selectConversations:112-120`，循环 `MessageService.getConversations:148-178`，内层查询 `MessageDao.selectLastReadTime:131-133`（**搬迁前** = `M:33` / `M:35-66` / `M:48-50`） | message → user_conversation_read | 高 |
 | `POST /message/friendSelect` | 外层查 `M:320-322`，循环 `M:324-330`，内层调用 `M:326`（**均为搬迁前坐标**；2026-09-29 起整段在 `FriendCacheService.listFriends()`） | friend → user → customerimage/merchantimage | 高 |
 | `POST /message/selectFriend` | 外层查 `M:249-251`，循环 `M:253-259`，内层调用 `M:255`（**均为搬迁前坐标**；2026-09-29 起整段在 `FriendCacheService.listRequests()`） | friend → user → customerimage/merchantimage | 高 |

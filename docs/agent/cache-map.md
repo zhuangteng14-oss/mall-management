@@ -64,7 +64,7 @@
 | 接口 | 现状问题 | 证据 |
 |---|---|---|
 | `GET /goods/goodstype` | 商品类型字典，几乎不变但每次全表查 | `G:37-38`（**搬迁前坐标**；现 SQL 在 `GoodsTypeCacheService.listTypes()` `:46-47`，Controller 只剩 `GoodsController:60` 的调用 —— 见下注） |
-| `POST /goods/goodsSelectHome` | 先全量查 `goods`，再**为每个商品单独查一次** `login` 取商家名（N+1，1+N） | 全量查 `G:184-185`，循环 `G:188-208`，内层查询 `G:194-200`（**均为搬迁前坐标**；现整段在 `GoodsCacheService.listHome()`，Controller 只剩 `GoodsController:103` 的一行委托 —— 见下注） |
+| `POST /goods/goodsSelectHome` | 先全量查 `goods`，再**为每个商品单独查一次** `login` 取商家名（N+1，1+N） | 全量查 `GoodsCacheService.listHome:71-72`，循环 `:75-95`，内层查询 `:81-87`（**2026-10-03 现址**；整段在 `GoodsCacheService.listHome()`，旧 `G:184-185`/`G:188-208`/`G:194-200` 系 `1421a0c` 截面、**非**搬迁前 —— 见 `cache-layer.md §4` 表注；Controller 只剩 `GoodsController:103` 的一行委托 —— 见下注） |
 | `POST /message/conversations` | 查完会话列表后，**为每个会话单独查一次** `user_conversation_read`（N+1，1+N） | **2026-10-03 现址**：外层查 `MessageDao.selectConversations:112-120`，循环 `MessageService.getConversations:148-178`，内层查询 `MessageDao.selectLastReadTime:131-133`（**搬迁前**坐标 = `M:33` / `M:35-66` / `M:48-50`） |
 | `POST /message/selectFriend` | 好友申请列表，每个申请人触发一次用户信息查询（N+1，**1+2N**） | 外层查 `M:249-251`，循环 `M:253-259`，内层调用 `M:255`（**搬迁前坐标**；2026-09-29 起整段在 `FriendCacheService.listRequests()` —— 见下注） |
 | `POST /message/friendSelect` | 好友列表，每个好友触发一次用户信息查询（N+1，**1+2N**） | 外层查 `M:320-322`，循环 `M:324-330`，内层调用 `M:326`（**搬迁前坐标**；2026-09-29 起整段在 `FriendCacheService.listFriends()` —— 见下注） |
@@ -90,9 +90,9 @@
 >
 > ✅ **2026-10-03 结清：上四条 `M:` 欠账已随三层第四笔（message 域，`8ed5fc1`）全部改写完毕。** 本笔把 `M:` 坐标按三分处理：①**当前坐标**（`conversations` 行、`1+2N` 由来段）已重指为 `MessageDao` / `MessageService` / `FriendCacheService`；②**已陈旧但未标注**的（「同形 SQL 共 3 处」里的 `M:378`）已换为 `MessageService.getUserInfoById:499`；③**真历史**（本节「2026-09-29 修正」「2026-10-02 订正」两条记录里的 `M:` 实测值，以及 §11 ㊷ 的对照表）**保持原样不改写** —— 它们是「当时实测」的存档，不是当前坐标。⚠️ 上面第 83 行末句「**坐标本身未在本笔改写**（消息域三层笔负责）」**现已兑现**，那条欠账作废；但该行其余内容（+11 不是换算规则）**仍然有效**。
 >
-> **2026-09-29 修正（三个 `G:` 行的失效 —— 与上面两条不同源，不是 +11 漂移）**：上表三个 goods 行的 `G:` 值失效的原因是**读路径已整段搬进 Service**，且**搬迁日期各不相同**（`goodstype` 为 2026-09-27 `79d2a0d`；`goodsSelectHome` / `goodsSelect` 为 2026-09-28 `da616a6` / `accfe6d`）—— 故这些值自搬迁起就不再指 SQL，`G:` 一律按**搬迁前**位置读：
+> **2026-09-29 修正（三个 `G:` 行的失效 —— 与上面两条不同源，不是 +11 漂移）**：上表三个 goods 行的 `G:` 值失效的原因是**读路径已整段搬进 Service**，且**搬迁日期各不相同**（`goodstype` 为 2026-09-27 `79d2a0d`；`goodsSelectHome` / `goodsSelect` 为 2026-09-28 `da616a6` / `accfe6d`）—— 故这些值自搬迁起就不再指 SQL，`G:` 一律按**搬迁前**位置读（⚠️ **2026-10-03 订正：`goodsSelectHome` 那三值并非搬迁前，而是 `1421a0c` 截面、比搬迁前整体 +22** —— 见下行与 `cache-layer.md §4` 表注）：
 > - `goodstype`：`G:37-38` → SQL 在 `GoodsTypeCacheService.listTypes()` `:46-47`，Controller 只剩 `GoodsController:60` 的调用。
-> - `goodsSelectHome`：`G:184-185` / `G:188-208` / `G:194-200` → 整段在 `GoodsCacheService.listHome()`（`:67-105`：全量查 `:71-72`、循环 `:75-95`、内层 `:81-87`），Controller 只剩 `GoodsController:103` 的一行委托（经 `GoodsService.goodsSelectHome():164-166`）。⚠️ **旧 `G:188-208` 现在是 `goodsDe` 的方法体（写路径）** —— 照旧值去找读路径会读到 `DELETE FROM … goods / productsales`，这是本节三处 `G:` 失效里最该先修的一处（不是「读错行」，是「读到写」）。
+> - `goodsSelectHome`：`G:184-185` / `G:188-208` / `G:194-200`（⚠️ 此为 `1421a0c` 截面、**非**搬迁前 —— 比 `da616a6^` 整体 +22）→ 整段在 `GoodsCacheService.listHome()`（`:67-105`：全量查 `:71-72`、循环 `:75-95`、内层 `:81-87`），Controller 只剩 `GoodsController:103` 的一行委托（经 `GoodsService.goodsSelectHome():164-166`）。⚠️ **旧 `G:188-208` 现在是 `goodsDe` 的方法体（写路径）** —— 照旧值去找读路径会读到 `DELETE FROM … goods / productsales`，这是本节三处 `G:` 失效里最该先修的一处（不是「读错行」，是「读到写」）。
 > - `goodsSelect`：`G:166-167` → SQL 在 `GoodsCacheService.listByMerchant()` `:146`（方法体 `:143-156`），Controller 只剩 `GoodsController:96` 的一行委托（经 `GoodsService.goodsSelect():159-161`）。
 > `cache-layer.md §11` 此前只就 `goodsHome` 一行标过这类「读路径已搬家」的失效，未覆盖上述三处；本节据此一次性补齐。
 
