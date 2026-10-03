@@ -98,6 +98,15 @@
             <artifactId>spring-boot-starter-actuator</artifactId>
         </dependency>
 
+        <!-- 校验层（笔 3）：提供 Hibernate Validator（JSR-380 实现），即 Spring 的 Validator bean。
+             ⚠️ 只为「控制器方法参数上的约束注解」供 bean —— 不在任何 Controller 上加**类级**
+             {@code @Validated}：那会经 MethodValidationPostProcessor 建 CGLIB 代理，被
+             MallManagementApplicationTests 的 4 条 xxxControllerIsNotAopProxied 断言禁止。 -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-validation</artifactId>
+        </dependency>
+
         <!-- 分布式锁（B2）：Redisson 的**核心**包，刻意不用 redisson-spring-boot-starter。
              理由不是风格偏好：starter 的 RedissonAutoConfigurationV2 会注册自己的
              RedissonConnectionFactory，而 Boot 的 Lettuce 工厂是
