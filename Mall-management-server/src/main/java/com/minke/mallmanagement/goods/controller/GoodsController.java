@@ -2,6 +2,7 @@ package com.minke.mallmanagement.goods.controller;
 
 import com.minke.mallmanagement.goods.service.GoodsService;
 import com.minke.mallmanagement.goods.service.GoodsTypeCacheService;
+import com.minke.mallmanagement.shared.web.Result;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
@@ -32,6 +33,13 @@ import java.util.Map;
  *   <li>{@link GoodsTypeCacheService} —— **只服务 {@code goodstype} 一个端点**，
  *       因为它的 GET/POST 分支判定按裁决留在本类（见 {@link #goodstype}）。</li>
  * </ul>
+ *
+ * <h2>【响应体：8 个商品端点已换成 {@link Result}；{@code goodstype} 例外】</h2>
+ * 只换**返回类型**：{@code Map<String,Object>} → {@code Result<Map<String,Object>>}，
+ * 方法体由 {@code return goodsService.x(…)} 改为 {@code return Result.of(goodsService.x(…))}。
+ * Service 返回值仍是 {@code Map}，URL、参数、{@code throws IOException} 一字未动；
+ * 因 {@code Result.of} 逐条 put 保字节等价，线上响应体逐字节不变。
+ * ⚠️ {@code goodstype} **不换**（{@link Result} 类注释的例外 4/5），理由见该方法处注释。
  */
 @RestController
 @RequestMapping("/goods")
@@ -47,6 +55,8 @@ public class GoodsController {
     // ⚠️ 本方法是全类**唯一**没有随三层重构下沉的方法 —— 裁决③：GET/POST 的分支判定权
     //    留在 Controller（路由与「GET 带 GoodType 参数走写分支」等边角行为均不变）。
     //    缓存注解在 Service 上（@Cacheable 只覆盖 listTypes()，写分支不在其方法体内）。
+    // ⚠️ 例外 4/5：返回 Object 而非 Map —— GET/POST **双形态**（GoodType == null → {success,list}；
+    //    否则 → {success,msg}），无法用单一 Result<Map> 表达。别「顺手统一」。见 Result 类注释。
     @RequestMapping(value = "/goodstype", method = {RequestMethod.GET, RequestMethod.POST})
     public Object goodstype(
             @RequestParam(required = false) String GoodType,
@@ -69,7 +79,7 @@ public class GoodsController {
     // ⚠️ 提前 return 分支（图片为空 / 落盘失败）**不再清缓存** —— 该路径一行未改库，
     //    清它是纯浪费。这是**设计选择，非缺陷**，见 §11；该不变量随方法体进了 Service。
     @PostMapping("/goodsAdd")
-    public Map<String, Object> goodsAdd(
+    public Result<Map<String, Object>> goodsAdd(
             @RequestParam("MerchantId") String MerchantId,
             @RequestParam("GoodName") String GoodName,
             @RequestParam("Price") Double Price,
@@ -78,7 +88,7 @@ public class GoodsController {
             @RequestParam("ProductCode") String ProductCode,
             @RequestParam("GoodTypeNew") int GoodTypeNew
     ) throws IOException {
-        return goodsService.goodsAdd(MerchantId, GoodName, Price, file, GoodType, ProductCode, GoodTypeNew);
+        return Result.of(goodsService.goodsAdd(MerchantId, GoodName, Price, file, GoodType, ProductCode, GoodTypeNew));
     }
 
     //这是一个接口（用于显示商家端查看商品页面外部内容）
@@ -89,29 +99,29 @@ public class GoodsController {
     // ⚠️ 形参名 MerchantId 必须保留：@RequestParam 未写显式名依赖它解析，
     //    Service 侧 key="#MerchantId" 也依赖同一个形参名（-parameters 已开）。
     @PostMapping("/goodsSelect")
-    public Map<String, Object> goodsSelect(
+    public Result<Map<String, Object>> goodsSelect(
             @RequestParam String MerchantId
     ) {
-        return goodsService.goodsSelect(MerchantId);
+        return Result.of(goodsService.goodsSelect(MerchantId));
     }
 
     //这是一个接口（用于返回商品对应的所有信息）
     // 方法体与缓存注解在 GoodsCacheService.listHome()；本笔再上移一层（纯委托）。
     @PostMapping("/goodsSelectHome")
-    public Map<String, Object> goodsSelectHome() {
-        return goodsService.goodsSelectHome();
+    public Result<Map<String, Object>> goodsSelectHome() {
+        return Result.of(goodsService.goodsSelectHome());
     }
 
     // 这是一个接口（用于下架商品）
     // 方法体（两条 DELETE、无条件 success、唯一出口前 evict）逐字搬到 GoodsService.goodsDe()。
     // ⚠️ 四条 evict 的理由已收敛到 GoodsCacheService.evictByMerchant() 的 javadoc（D 笔，2026-09-28）。
     @PostMapping("/goodsDe")
-    public Map<String, Object> goodsDe(
+    public Result<Map<String, Object>> goodsDe(
             @RequestParam("MerchantId") String MerchantId,
             @RequestParam("GoodName") String GoodName,
             @RequestParam("ProductCode") String ProductCode
     ) {
-        return goodsService.goodsDe(MerchantId, GoodName, ProductCode);
+        return Result.of(goodsService.goodsDe(MerchantId, GoodName, ProductCode));
     }
 
     //这是一个接口（用于根据商品的不同型号切换显示对应的价格）
@@ -124,12 +134,12 @@ public class GoodsController {
     // ⚠️ 形参名必须保留：@RequestParam 与 Service 侧 SpEL 的三段都依赖它们（-parameters 已开，
     //    javap 该方法的 MethodParameters 可见 MerchantId / GoodName / ProductCode）。
     @PostMapping("/productCodePrice")
-    public Map<String, Object> productCodePrice(
+    public Result<Map<String, Object>> productCodePrice(
             @RequestParam("MerchantId") String MerchantId,
             @RequestParam("GoodName") String GoodName,
             @RequestParam("ProductCode") String ProductCode
     ) {
-        return goodsService.productCodePrice(MerchantId, GoodName, ProductCode);
+        return Result.of(goodsService.productCodePrice(MerchantId, GoodName, ProductCode));
     }
 
     //这是一个接口（用于更新商品数据）
@@ -139,7 +149,7 @@ public class GoodsController {
     // ⚠️ 形参 GoodType 是既有入参、方法体内未使用 —— 签名必须原样保留（前端在传，去掉即 400）。
     // ⚠️ 签名里的 throws IOException 与三层前一致（落盘异常已在 Service 侧 catch，本类不会抛）。
     @PostMapping("/goodsUp")
-    public Map<String, Object> goodsUp(
+    public Result<Map<String, Object>> goodsUp(
             @RequestParam("MerchantId") String MerchantId,
             @RequestParam("GoodName") String GoodName,
             @RequestParam("Price") Double Price,
@@ -147,7 +157,7 @@ public class GoodsController {
             @RequestParam("ProductCode") String ProductCode,
             @RequestParam(value = "file", required = false) MultipartFile file
     ) throws IOException {
-        return goodsService.goodsUp(MerchantId, GoodName, Price, GoodType, ProductCode, file);
+        return Result.of(goodsService.goodsUp(MerchantId, GoodName, Price, GoodType, ProductCode, file));
     }
 
     // 这是一个接口（根据商家ID和商品名称，获取所有不同的 ProductCode 型号列表）
@@ -155,11 +165,11 @@ public class GoodsController {
     // ⚠️ 形参名必须保留：@RequestParam 未写显式名依赖它解析，Service 侧
     //    key="#MerchantId + '::' + #GoodName" 也依赖同一组形参名（-parameters 已开）。
     @PostMapping("/GoodsProductCodeSelect")
-    public Map<String, Object> GoodsProductCodeSelect(
+    public Result<Map<String, Object>> GoodsProductCodeSelect(
             @RequestParam("MerchantId") String MerchantId,
             @RequestParam("GoodName") String GoodName
     ) {
-        return goodsService.GoodsProductCodeSelect(MerchantId, GoodName);
+        return Result.of(goodsService.GoodsProductCodeSelect(MerchantId, GoodName));
     }
 
 
@@ -168,8 +178,8 @@ public class GoodsController {
     // 动态 SQL 的构造随之下沉 GoodsDao.searchByKeyword()。
     // ⚠️ 该 SQL 的两个已知问题（逐字 LIKE 拼串 + 无 schema 前缀）**本笔不修** —— 见 GoodsDao。
     @PostMapping("/productSearch")
-    public Map<String, Object> productSearch(String keyword) {
-        return goodsService.productSearch(keyword);
+    public Result<Map<String, Object>> productSearch(String keyword) {
+        return Result.of(goodsService.productSearch(keyword));
     }
 
 }

@@ -1,5 +1,6 @@
 package com.minke.mallmanagement.user.controller;
 
+import com.minke.mallmanagement.shared.web.Result;
 import com.minke.mallmanagement.user.service.UserService;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
@@ -36,6 +37,14 @@ import java.util.Map;
  * 全部照搬 —— 前端 7 个调用点（{@code LoginPage.vue:131/142/216}、
  * {@code UserInfoPage.vue:96/130/149}、{@code GoodsUp.vue:150}）按这些名字传参，
  * 改一个就断一个。
+ *
+ * <h2>【响应体：{@code updateAvatar} / {@code updateUserInfo} 已换成 {@link Result}】</h2>
+ * 只换**返回类型**：{@code Map<String,Object>} → {@code Result<Map<String,Object>>}，
+ * 方法体由 {@code return userService.x(…)} 改为 {@code return Result.of(userService.x(…))}。
+ * Service 返回值仍是 {@code Map}，URL 与参数一字未动；因 §「字节等价」由
+ * {@code Result.of} 逐条 put 保证，线上响应体逐字节不变。
+ * ⚠️ 本类另 3 个端点**故意不换**（{@code loginSelect} / {@code loginAdd} / {@code getUserInfo}）——
+ * 它们是 {@link Result} 类注释里「例外 5 项」中的 3 项，理由逐条写在那里。
  */
 @RestController
 @RequestMapping("/user")
@@ -48,6 +57,8 @@ public class UserController {
     }
 
     //这是一个接口（用于返回登录界面对应的数据，决定了此次登录去往哪个端【客户端or商家端】）
+    // ⚠️ 例外 1/5：返回裸 int，A3 的 A-S1-3 断言 "1".equals(body.trim()) 逐字；
+    //    前端 res.text() 后比 "0"/"1"/"2"。包成 JSON ⇒ 门禁红 + 前端断。见 Result 类注释。
     @PostMapping("/loginSelect")
     public int loginSelect(
             @RequestParam("username") String username,       // 对应数据库 login 表的 UserName
@@ -57,6 +68,7 @@ public class UserController {
     }
 
     //这是一个接口（用于最早期的注册，只更新最基础的用户信息）
+    // ⚠️ 例外 2/5：返回裸 String，前端 text === "添加成功！" / === "0" 逐字。见 Result 类注释。
     @PostMapping("/loginAdd")
     public String loginAdd(
             @RequestParam(value = "image", defaultValue = "http://localhost:8088/img/default_user.png") String imageAdd,
@@ -76,6 +88,9 @@ public class UserController {
     }
 
     //这是一个接口（用于返回对应前端页面的用户信息）
+    // ⚠️ 例外 3/5：失败时返回 null（HTTP 200 **空体**）；前端三个调用点 await res.json()
+    //    无判空，靠外层 catch 兜 SyntaxError。包成可解析 JSON ⇒ 前端静默不写 sessionStorage。
+    //    —— 这是本类**唯一**故意保留 Map 返回类型的端点，别「顺手补齐」。见 Result 类注释。
     @PostMapping("/getUserInfo")
     public Map<String, Object> getUserInfo(
             @RequestParam("username") String username,
@@ -86,21 +101,21 @@ public class UserController {
 
     // 这是一个接口（用于更改前端用户的头像）
     @PostMapping("/updateAvatar")
-    public Map<String, Object> updateAvatar(
+    public Result<Map<String, Object>> updateAvatar(
             @RequestParam("username") String username,
             @RequestParam("file") MultipartFile file
     ) throws IOException {
-        return userService.updateAvatar(username, file);
+        return Result.of(userService.updateAvatar(username, file));
     }
 
     //这是一个接口（用于更新个人信息）
     @PostMapping("/updateUserInfo")
-    public Map<String, Object> updateUserInfo(
+    public Result<Map<String, Object>> updateUserInfo(
             @RequestParam("username") String username,
             @RequestParam("email") String email,
             @RequestParam("address") String address,
             @RequestParam("selfintroduction") String selfintroduction
     ) {
-        return userService.updateUserInfo(username, email, address, selfintroduction);
+        return Result.of(userService.updateUserInfo(username, email, address, selfintroduction));
     }
 }
