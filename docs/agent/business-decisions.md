@@ -43,7 +43,7 @@
 
 | 项 | 内容 |
 |---|---|
-| 现状 | 全项目 32 个接口零鉴权，无拦截器、无 Spring Security |
+| 现状 | 全项目 32 个接口**仍零鉴权**（认证侧未落地）；⚠️ **「无拦截器」自 2026-10-04 起不成立**（已有登录闸 `shared/web/AuthInterceptor`，开关 `app.auth.enabled` **默认 `false`** ⇒ 对现网零影响），无 Spring Security |
 | 问题 | 管理端需要「权限分级」时，必须先在服务端实现认证与授权 |
 | 可选方案 | A. 拦截器 + Redis Session（半天）/ B. JWT + 拦截器（1 天）/ C. Spring Security + JWT（3 天） |
 | 建议时机 | T2：业务功能完成后、管理端之前 |

@@ -78,7 +78,7 @@
 - **原貌**：不存在 Service 层、Mapper/DAO 层、MyBatis XML、DTO/VO 层。
 - **不存在** 任何 `@Entity` —— 原 `mallmanagement_class/info.java`（全项目唯一 POJO，仅 1 个 `imgName` 字段，未被任何类引用）已于 **2026-10-02 笔 1 挪包时删除**。
 - 无统一返回体：`/order` 系列返回 `Map{success,...}`，`/user/loginSelect` 返回裸 `int`，`getUserInfo` 失败时返回 `null`（HTTP 200 空体）。
-- 无鉴权、无拦截器、无全局异常处理；**4 个业务 Controller**（`GoodsController` / `OrderController` / `MessageController` / `UserController`）均标 `@CrossOrigin`，运维口 `HealthController` 亦有。
+- 无鉴权（~~无拦截器~~ ⚠️ **2026-10-04 起已有登录闸** `shared/web/AuthInterceptor`，开关 `app.auth.enabled` **默认 `false`** ⇒ 对现网零影响）、无全局异常处理；**4 个业务 Controller**（`GoodsController` / `OrderController` / `MessageController` / `UserController`）均标 `@CrossOrigin`，运维口 `HealthController` 亦有。
 
 接口分布（2026-10-02 笔 2 后）：`/user` 5 个、`/message` 10 个、`/goods` 9 个、`/order` 8 个（另 `/health/db` 1 个运维接口），详见 `api-contract.md`。
 
