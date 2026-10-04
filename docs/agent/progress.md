@@ -77,6 +77,7 @@
 | 2026-10-04 | #11 goodstype 唯一约束（fix/goodstype-unique）：DB UNIQUE + catch 语义修正 + 文档 ×5 + 单测 ×3 | #40 |
 | 2026-10-04 | `C#2` 商品域写事务边界（`fix/goods-write-tx`）：`GoodsService` 三处写方法加 `@Transactional` + catch 内带活跃事务判断的 `setRollbackOnly`（方案 A）+ 单测 ×6（含突变对照）+ 文档 ×6 + 主源码 javadoc ×2（`GoodsDao` / `UserService` 里被本笔改成假话的「未裁」与「真注解计数」） | #42 |
 | 2026-10-04 | `B#1` 价格校验（`fix/price-validation`）：`OrderService.orderAdd` **锁之前**加 `priceRejection`（正面判据 `Float.isFinite && Price >= 0 && Price <= 10^7`，非法 ⇒ 200 + `{success:false,msg:"价格不合法"}`、**不取锁不触库**）+ 单测 ×8（`OrderAddPriceGuardSmokeTest`，**无 `A3_ENABLED` 门控 ⇒ 在阻塞 job 真跑**；含 3 条阳性对照与 4 组突变对照）+ 文档 ×4（`three-layers.md` 3 行 / `selection-status.md` `#3` / `defect-survey.md` / `api-contract.md` 契约变更）+ 本节 §5-F | 本笔 |
+| 2026-10-04 | `C#6` 状态位拦截（`fix/order-state-guard`）：`OrderService.orderAdd` **锁之前**加**出生闸**（白名单 `{(0,0,0),(1,0,0)}`，**排在 `B#1` 价格闸之后**；非法 ⇒ 200 + `{success:false,msg:"订单状态不合法"}`、**不取锁不触库**）+ 指标 `mall.order.state.birth.rejected{shape}`（**5 值封闭枚举**：`010`/`001`/`011`/`non_binary`/`non_initial`）+ 单测 ×10（`OrderAddStateGuardSmokeTest`，**无 `A3_ENABLED` 门控 ⇒ 在阻塞 job 真跑**；含 3 组突变对照 7/3/7）+ **A3 适配**（S4a 前置态改走合法流转 + 新增门禁 `A-S4a-0`/`A-C6-1`/`A-C6-2`，`gates.count` 27 → 30）+ 文档 ×6 + 本节 §5-G | #45 |
 
 > ⚠️ **表格欠账的现状**：`C#2` 那一行原记 `本笔`，已由 **PR #42 合并后的 `docs/progress-42-record` 一笔补成 `#42`** —— 与 **#11 的做法相同**（#11 的记录也是合并后另起一笔 `37cafc3` 补的 `#40`）。当初为何不直接填：那一笔的文档与代码在**同一笔**落盘（先出 diff → 用户核 → commit → 开 PR），commit 时 PR 号尚不存在。仍欠的**只剩三处**：**2026-10-02 / 2026-10-03 两行**的 `+ 本笔`，以及本表**新增的 `2026-10-04 B#1` 行**（同理：该笔的文档与代码同笔落盘，commit 时 PR 号尚不存在；补法与 #42 同 —— 合并后另起一笔）。
 
@@ -333,11 +334,12 @@
 
 ⚠️ **代价（明写）**：`ConcurrencyRunner.stateName()` 末尾那三个 `ILLEGAL_*` 分支在 C 组里成为**死代码**。**保留不删** —— 理由与 `mall.order.state.illegal` 保留不删相同（**存量脏数据仍会被重放读到** + 删掉等于抹掉 TD-17 的历史口径）。
 
-**（5）挂账（3 条，落点 = 本挂账段）**：
+**（5）挂账（4 条，落点 = 本挂账段）**：
 
 1. **「今日拦截 N 次」在现行观测里给不出** —— `mall.order.state.birth.rejected` 是 **Micrometer counter = 进程生命周期累计**，**没有按日切的能力**；且本仓 `application.properties` 只暴露 `health,metrics`、**未接 Prometheus**（无时序库 = 无历史）。⇒ C3 要显示「今日」只有两条路：**(a)** 读本笔已发的**事件流**（每条带 `epochMilli` 墙钟）自行按日聚合；**(b)** 接 Prometheus / 时序库。⚠️ **本笔只保证「事件流里带够信息」**（`key` + `shape` + 时间戳），选 (a) 还是 (b) **留给 C3**。⚠️ **事件环只有 512 槽**（`MallOrderStateMetricsTest` 实测容量）⇒ 选 (a) 时**只能看「最近若干次」**、不能当真值用；这条限制由 C3 那笔处理，**不是本笔能关的**。
 2. **`birth.rejected` 的 tag 词表与 `illegal` 是两份字面量拷贝** —— `010`/`001`/`011`/`non_binary` 这 4 个值在 `OrderStateMachine.illegalShape` 与 `rejectionShape` 里各出现一次（后者多一个 `non_initial`）。⚠️ **判据没有两份**（`rejectionShape` 直接调 `illegalShape`，不是复制逻辑），但**词表字符串没有单一真值源** —— 现由 `OrderStateMachineTest.rejectionShapeNamesEveryRejection` 逐条对拍顶着，暂不抽常量。⇒ 将来 shape 取值要增删时，**两处一起改**，那条对拍测试会红。⚠️ **tag 只收 `illegalShape()` 归一后的取值**（含 `non_initial` 共 5 个），**三位原值绝不进 tag**（否则条数随客户端传什么涨 —— 基数无界；`MallOrderStateMetrics` 类注释是本仓基数铁律的唯一出处）。
 3. **两处「行数快照」被本笔进一步喂旧 —— 本笔明写「不改」，登记在此免得成孤儿**：`project-map.md:30`（`ConcurrencyRunner.java` **2795 行**）与 `ddd-package-plan.md:297`（「A3 **27 门禁**全绿」+ 基线 `130/0/0/8`）。⚠️ **三处数**都已陈旧：runner 实际 **2907 行**（**注意：2795 在本笔之前就已是旧值** —— 前序的笔已把它改到 2827，故这两处**不是本笔弄旧的**，只是本笔又添了约 80 行）、门禁实际 **30**、本地基线实际 **186/0/0/19**。⇒ **本笔不动它们**（超出裁决的 14 文件、且它们本就不准）；它们**归已有的「行数快照」欠账**（`progress.md:151` 登记）⇒ 那一笔动手时须连同本笔的新值一起改。⚠️ **另**：`three-layers.md:207` 的同款「2795 行」**本笔已就地改**（它在 §H，正是本笔大改的那一节）。
+4. **`A-S4a-6` 分不出 `(1,0,0)` 与 `(1,1,0)` —— 首次 CI 复跑那次假绿的成因（2026-10-04 收尾时登记）** —— `A-S4a-6` 的判据是「`orderReceiveIfUp` on `PD` ×20 → **`succ == 1`**」，**只数成败、不比对终态三位**。而 `RECEIVE` 的守卫只卡 `PayIf = 1 AND ReceiveIf = 0`（`OrderStateMachine.java:21`，**不要求 `DeliveryIf = 1`**）⇒ `(1,0,0)` 与 `(1,1,0)` **两种态都收得动**、都返回 1。⚠️ **两轮 CI 实测都 PASS**：首轮（run `37185693143`）`PD` 因夹具 URL 缺 `/order` 前缀而 404、塌在 `(1,0,0)`（**根本没建成**），这条**照绿**；夹具修好后的第二轮（run `37192169578`）`PD` 真的是 `(1,1,0)`，它**也绿**。⇒ 这条断言对「前置态到底对不对」**零信息量**，是那次 3 条红里唯一的假绿。**若要它变强**：判据改成同时比对**终态三位**（`(1,1,1)` vs `(1,0,1)`）。⚠️ **本笔不动**（属**断言强度增强**，不是本笔的拦截范围）—— 登记在此，免得被读成「`A-S4a-0` 已兜住一切」。
 
 **（6）⚠️ 本笔的验收边界 —— 判据在 CI 里真跑（同 §5-F 的结论，异于 §5-E）**：
 
