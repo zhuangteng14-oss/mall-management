@@ -4,6 +4,9 @@ import com.minke.mallmanagement.goods.dao.GoodsDao;
 import com.minke.mallmanagement.shared.upload.UploadStorage;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.interceptor.TransactionAspectSupport;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.nio.file.Path;
@@ -56,6 +59,33 @@ import java.util.Map;
  * 调用 {@link GoodsCacheService#evictByMerchant}。该调用随方法体一起从 Controller 搬来 ——
  * 逻辑在哪，它保护的失效就在哪。「早退分支不清缓存」（{@code goodsAdd} 的两条早退）也一并保留：
  * 那些路径一行未改库，清它是纯浪费。
+ *
+ * <h2>【C#2：三个写方法的事务边界（2026-10-04，{@code fix/goods-write-tx}）】</h2>
+ * {@link #goodsAdd} / {@link #goodsDe} / {@link #goodsUp} 各要写 {@code goods} + {@code productsales}
+ * **两张表**，改前无事务 ⇒ 第二条语句失败时第一条已提交，留下「半成品」（有商品行、无销量行）。
+ * 本笔给三者加 {@link Transactional}。落点与 D#1 的禁令**不冲突**，但有四处必须写清：
+ *
+ * <ol>
+ *   <li><b>D#1 不适用于本域</b>：那条禁令（{@code three-layers.md §D.1}）只管「被打上
+ *       {@code DistributedLockService.runLocked} 的临界区」（{@code orderAddLocked} /
+ *       {@code friendAddLocked}），理由是「锁在 {@code finally} 里先释放、事务提交在方法返回之后
+ *       ⇒ 后进者查重看到的是自己事务开始时的快照」。本域**无锁**（三个写方法都不走 {@code runLocked}）
+ *       ⇒ 不存在该竞争，事务在这里是安全的。{@code three-layers.md:51} 的「**不可外推**」正是为此：
+ *       {@code goodsAdd} 是 D#1 的**反面**，只记住半边就会踩另一边。</li>
+ *   <li>⚠️ <b>代理生效 ≠ 会回滚</b>：三个方法都**自己 catch 掉了** DAO 异常、**不 rethrow**
+ *       ⇒ Spring 看到的是正常返回 ⇒ 照常提交。故 catch 内必须显式标记回滚
+ *       （{@link #markRollbackOnlyIfActive()}）。少了这一步，「加了 {@code @Transactional}」是**假绿**
+ *       —— 这正是本笔最容易漏、也最难在代码评审里看出来的一处。</li>
+ *   <li>⚠️ <b>已知代价（本笔接受）</b>：{@code @Transactional} 覆盖**整个方法**，含
+ *       {@code UploadStorage.store()} 的磁盘 I/O ⇒ 方法执行期间持有 HikariCP 连接（默认池 10）。
+ *       当前单实例、低流量，接受；若将来出现连接池压力，升级到方案 B（{@code TransactionTemplate}
+ *       把事务边界收窄到只包两次 DAO 调用 —— 异常逃出回调即自动回滚、catch 天然落在事务外，
+ *       连 {@code setRollbackOnly} 都不需要）。</li>
+ *   <li>⚠️ <b>覆盖缺口，一并登记</b>：本域无锁，故 {@code DistributedLockServiceTest.orderChainIsNotTransactional}
+ *       那条 D#1 结构断言**不覆盖商品域**（它的扫描列表只有 order + message 两条链的 5 个 bean）。
+ *       将来若有人给 {@code goodsAdd} 加锁，**D#1 会适用而那处断言抓不到** ——
+ *       届时须同步把 {@code GoodsService} 扩进它的扫描列表。</li>
+ * </ol>
  */
 @Service
 public class GoodsService {
@@ -79,7 +109,12 @@ public class GoodsService {
      *
      * <p>⚠️ 两条早退（图片为空 / 落盘失败）都**不调** {@code evictByMerchant} —— 它们没有改库。
      * 唯一出口前的那次 evict 覆盖了 100% 可能改库的路径。
+     *
+     * <p>⚠️ <b>C#2（本笔）</b>：本方法写 {@code goods} + {@code productsales} 两表，已加
+     * {@link Transactional}；DB 块的 catch 内**必须**调 {@link #markRollbackOnlyIfActive()}，
+     * 理由与代价见类注释「C#2：三个写方法的事务边界」。
      */
+    @Transactional
     public Map<String, Object> goodsAdd(
             String MerchantId,
             String GoodName,
@@ -135,6 +170,10 @@ public class GoodsService {
             result.put("GoodImg", GoodImg);
         } catch (Exception e) {
             e.printStackTrace();
+            // ⚠️ 吞掉异常就必须配这一步：本方法**不 rethrow** ⇒ 不标记回滚的话，
+            //    @Transactional 看到的是正常返回、照常提交，第一步的 goods 行会留下
+            //    —— 那正是 C#2 要消掉的「半成品商品」。详见类注释「C#2」。
+            markRollbackOnlyIfActive();
             result.put("success", false);
             result.put("msg", "商品上架失败");
         }
@@ -142,7 +181,8 @@ public class GoodsService {
         // ⚠️ 本方法的唯一出口 —— 三个写接口共用同一模式，若新增 return 请确认：
         //    ① 该分支不改库，或
         //    ② 在该分支前也调 evictByMerchant()
-        // 现有全部 DAO 调用都在 try 内、catch 吞异常 ⇒ 唯一出口覆盖 100% 的可能改库路径。
+        // 现有全部 DAO 调用都在 try 内、catch 吞异常**且标记回滚**（C#2 起）
+        // ⇒ 唯一出口覆盖 100% 的可能改库路径；失败分支不留半成品。
         goodsCacheService.evictByMerchant(MerchantId);
         return result;
     }
@@ -250,7 +290,14 @@ public class GoodsService {
 
     // ==================== 写：下架 / 更新 ====================
 
-    /** 下架商品。方法体逐字搬自原 Controller（两条 DELETE、无条件 success、唯一出口前 evict）。 */
+    /**
+     * 下架商品。方法体逐字搬自原 Controller（两条 DELETE、无条件 success、唯一出口前 evict）。
+     *
+     * <p>⚠️ <b>C#2（本笔）</b>：本方法删 {@code goods} + {@code productsales} 两表，已加
+     * {@link Transactional}；DB 块的 catch 内**必须**调 {@link #markRollbackOnlyIfActive()}，
+     * 否则「删了 goods、没删 productsales」会留在库里。
+     */
+    @Transactional
     public Map<String, Object> goodsDe(
             String MerchantId,
             String GoodName,
@@ -269,13 +316,16 @@ public class GoodsService {
             result.put("msg", "商品下架成功");
         } catch (Exception e) {
             e.printStackTrace();
+            // ⚠️ 吞掉异常就必须配这一步（同 goodsAdd）：见类注释「C#2」。
+            markRollbackOnlyIfActive();
             result.put("success", false);
             result.put("msg", "下架失败");
         }
         // ⚠️ 本方法的唯一出口 —— 三个写接口共用同一模式，若新增 return 请确认：
         //    ① 该分支不改库，或
         //    ② 在该分支前也调 evictByMerchant()
-        // 现有全部 DAO 调用都在 try 内、catch 吞异常 ⇒ 唯一出口覆盖 100% 的可能改库路径。
+        // 现有全部 DAO 调用都在 try 内、catch 吞异常**且标记回滚**（C#2 起）
+        // ⇒ 唯一出口覆盖 100% 的可能改库路径；失败分支不留半成品。
         goodsCacheService.evictByMerchant(MerchantId);
         return result;
     }
@@ -291,7 +341,12 @@ public class GoodsService {
      * <p>⚠️ 本方法的**改名**正是使 {@code goodsCodes} / {@code goodsPrice} 的失效只能
      * {@code allEntries} 的原因：两者的键都含 {@code GoodName}，而本方法的 WHERE 是
      * {@code (MerchantId, ProductCode)}，旧名既不在入参、也无处可查（方法体内无任何 SELECT）。
+     *
+     * <p>⚠️ <b>C#2（本笔）</b>：本方法更新 {@code goods} + {@code productsales} 两表，已加
+     * {@link Transactional}；DB 块的 catch 内**必须**调 {@link #markRollbackOnlyIfActive()}，
+     * 否则「改了 goods 名、没改 productsales 名」会留在库里（两表名不一致）。
      */
+    @Transactional
     public Map<String, Object> goodsUp(
             String MerchantId,
             String GoodName,
@@ -337,13 +392,16 @@ public class GoodsService {
             result.put("msg", "商品更新成功");
         } catch (Exception e) {
             e.printStackTrace();
+            // ⚠️ 吞掉异常就必须配这一步（同 goodsAdd）：见类注释「C#2」。
+            markRollbackOnlyIfActive();
             result.put("success", false);
             result.put("msg", "商品更新失败");
         }
         // ⚠️ 本方法的唯一出口 —— 三个写接口共用同一模式，若新增 return 请确认：
         //    ① 该分支不改库，或
         //    ② 在该分支前也调 evictByMerchant()
-        // 现有全部 DAO 调用都在 try 内、catch 吞异常 ⇒ 唯一出口覆盖 100% 的可能改库路径。
+        // 现有全部 DAO 调用都在 try 内、catch 吞异常**且标记回滚**（C#2 起）
+        // ⇒ 唯一出口覆盖 100% 的可能改库路径；失败分支不留半成品。
         goodsCacheService.evictByMerchant(MerchantId);
         return result;
     }
@@ -371,5 +429,31 @@ public class GoodsService {
             e.printStackTrace();
         }
         return result;
+    }
+
+    // ==================== C#2：事务回滚标记 ====================
+
+    /**
+     * 三个写方法的 catch **共用**这一句：既然吞掉了异常、不 rethrow，就必须显式把当前事务
+     * 标成 rollback-only，否则 {@code @Transactional} 看到的是「正常返回」、照常提交，
+     * 第一步的写会留下 —— 加事务等于白加。
+     *
+     * <p><b>为什么必须有 {@code isActualTransactionActive()} 这道判断</b>：本方法要在
+     * **没有事务的上下文**里也安全。{@code @WebMvcTest} 切片（{@code AbstractSmokeTest}）
+     * 不加载 DataSource ⇒ 没有 {@code PlatformTransactionManager} ⇒
+     * {@code TransactionAutoConfiguration} 的 {@code @EnableTransactionManagement} 不生效
+     * ⇒ 既不建代理、也不开事务。此时若直接调
+     * {@link TransactionAspectSupport#currentTransactionStatus()} 会抛
+     * {@code NoTransactionException} —— 那会把切片的失败路径从「返回失败 map」变成「抛异常」，
+     * 是一次静默的行为回归。加了判断后，该上下文下本方法退化为**空操作**，行为与改前逐字相同。
+     *
+     * <p>⚠️ 回滚标记只对「当前事务」有效：三个写方法都是事务的最外层（调用方
+     * {@code GoodsController} 无事务），故标记落在自己这条新事务上，提交时静默回滚
+     * （{@code isLocalRollbackOnly()} 路径，**不抛** {@code UnexpectedRollbackException}）。
+     */
+    private static void markRollbackOnlyIfActive() {
+        if (TransactionSynchronizationManager.isActualTransactionActive()) {
+            TransactionAspectSupport.currentTransactionStatus().setRollbackOnly();
+        }
     }
 }

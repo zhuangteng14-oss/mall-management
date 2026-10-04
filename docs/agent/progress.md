@@ -75,6 +75,9 @@
 | 2026-10-02 | 订单域三层（#25 `28194b4`）→ 笔 1 DDD 挪包（#27 `01df702`）→ 笔 2 URL 规范化 + 订单拆 Controller + 类名对齐域（#28）→ **商品域三层（三层第二笔）** | #25 #27 #28 + 本笔 |
 | 2026-10-03 | 三层第四笔 **message 域**（`8ed5fc1`）→ 文档坐标重指（笔 B `481e72b`）→ `goodsSelectHome` 坐标重指（`bc0126a`）→ **公共层笔 1 CORS 收口**（#34 `3f6ba4f`，A3 27/27）→ **前端双审计落盘（§6）** | #33 #34 + 本笔 |
 | 2026-10-04 | #11 goodstype 唯一约束（fix/goodstype-unique）：DB UNIQUE + catch 语义修正 + 文档 ×5 + 单测 ×3 | #40 |
+| 2026-10-04 | `C#2` 商品域写事务边界（`fix/goods-write-tx`）：`GoodsService` 三处写方法加 `@Transactional` + catch 内带活跃事务判断的 `setRollbackOnly`（方案 A）+ 单测 ×6（含突变对照）+ 文档 ×6 + 主源码 javadoc ×2（`GoodsDao` / `UserService` 里被本笔改成假话的「未裁」与「真注解计数」） | 本笔 |
+
+> ⚠️ **本行的「本笔」未填 PR 号**：本笔的文档与代码在**同一笔**落盘（先出 diff → 用户核 → commit → 开 PR），故 commit 时 PR 号尚不存在。这与 **#11 的做法不同** —— #11 的 progress 记录是在 PR 合并后**另起一笔**（`37cafc3`）补的，所以那一行有 `#40`。另两处 `+ 本笔`（2026-10-02 / 2026-10-03 行）同理，是**长期已知的表格欠账**。
 
 ## 1. 项目级阶段
 
@@ -120,7 +123,7 @@
 | 4 | **A3 覆盖矩阵**（明示保护范围） | `concurrency-map.md`（13 行，**无「保护范围」列**，`亲读`） | ✅ **已完成**（**PR #23**；落点 **`three-layers.md §H`** —— 8 业务端点 + 27 门禁，未覆盖 24 个标「靠单测」） | 现表只列「有什么问题」，不列「A3 保护了什么」 |
 | 5 | **`§G` 现状复校**（**不是新建**） | `three-layers.md:169-185` | ✅ **已存在**（**早于本批**：#11 落地、#12 修过一行；右列现状是 2026-09-30 复核结果） | ⚠️ 若要的只是复校，**不要重写** |
 
-> ⚠️ 本块另有 **2 条「阻塞落笔」的裁决**，性质是**裁决不是笔** ⇒ 列在 **§5-B**。
+> ⚠️ 本块另有 **2 条「阻塞落笔」的裁决**，性质是**裁决不是笔** ⇒ 列在 **§5-B**。**2026-10-04 起实剩 1 条**：`C#2` 已裁并落地（`fix/goods-write-tx`），`C#6` 仍开着。
 
 ---
 
@@ -128,7 +131,7 @@
 
 批次顺序：**订单域 → 商品域 → 消息域 → 用户域 → 公共层**
 
-进度（2026-10-03）：**订单域 ✅**（三层第一笔，PR #25 `28194b4`）→ **商品域 ✅**（三层第二笔，2026-10-02）→ **用户域 ✅**（三层第三笔，2026-10-02，PR #32 `0c07e96`）→ **消息域 ✅**（三层第四笔，2026-10-03，`8ed5fc1`）→ **公共层 🟡 部分推进**（**2026-10-04 订正**，原写「⏳ 未动」）：**已合 3 笔** —— #34 CORS 收口（`D#3` 的 CORS 面）/ #35 `Result<T>` 统一响应体 / #36 全局异常出口 `GlobalExceptionHandler` + 写接口校验（`D#2`）；**未做**：`C#2` 事务边界 / `C#6` 状态位拦截 / `D#5` 配置收敛。
+进度（2026-10-03）：**订单域 ✅**（三层第一笔，PR #25 `28194b4`）→ **商品域 ✅**（三层第二笔，2026-10-02）→ **用户域 ✅**（三层第三笔，2026-10-02，PR #32 `0c07e96`）→ **消息域 ✅**（三层第四笔，2026-10-03，`8ed5fc1`）→ **公共层 🟡 部分推进**（**2026-10-04 订正**，原写「⏳ 未动」）：**已合 3 笔 + 本笔（未合）** —— #34 CORS 收口（`D#3` 的 CORS 面）/ #35 `Result<T>` 统一响应体 / #36 全局异常出口 `GlobalExceptionHandler` + 写接口校验（`D#2`）；**未做**：~~`C#2` 事务边界~~（**2026-10-04 本笔落地**，`fix/goods-write-tx`，见 §5-B）/ `C#6` 状态位拦截 / `D#5` 配置收敛。
 
 ⚠️ **实际顺序与上行的计划顺序不同**：计划把**消息域排在用户域之前**，实际是**用户域先做**（2026-10-02）、消息域后做（2026-10-03）—— 两条路都不违反任何裁决，但引「批次顺序」时**以本行为准**，不要拿上行的计划顺序当执行史。
 
@@ -142,7 +145,7 @@
 | **商品域** | `goods/controller/GoodsController`（176 行）+ `goods/service/GoodsService`（332）+ `goods/dao/GoodsDao`（208） | 716（三文件合计；原 `MallManagementGoodsController` 676） | ✅ **已完成**（2026-10-02 三层第二笔）—— SQL 硬编码 schema 名：`GoodsDao` **6** 处 +（读路径，非本笔搬动）`GoodsCacheService` 5 / `GoodsTypeCacheService` 3；见 `three-layers.md:166` F#1 与其中的**已知矛盾**段 |
 | **消息域** | `message/controller/MessageController`（**127** 行，仅路由；原名 `MallManagementMessage`）+ `message/service/MessageService`（534）+ `message/dao/MessageDao`（284）；另有 `message/service/FriendCacheService`（268，缓存读路径，不属本笔） | 945（三文件合计；原 `MessageController` **417**） | ✅ **已完成**（2026-10-03 三层第四笔，`8ed5fc1`）—— SQL 硬编码 schema 名 **0** 处（原 Controller 0 处，现 `MessageDao` 仍 0 处）：**本域合了一对逐字相同 SQL 也没动 39 口径**，理由见 `MessageDao` 类 javadoc。`@Transactional` 禁令（不可加在 `friendAddLocked`）现由 `DistributedLockServiceTest` 的结构断言覆盖 `MessageService` + `MessageDao` 两个 bean；见 `three-layers.md:166` F#1 |
 | **用户域** | `user/controller/UserController`（**107** 行，仅路由；原名 `MallManagementUserController`）+ `user/service/UserService`（319）+ `user/dao/UserDao`（242） | 668（三文件合计；原 `UserController` **264**） | ✅ **已完成**（2026-10-02 三层第三笔，**PR #32** `0c07e96`）—— SQL 硬编码 schema 名 **16** 处全部下沉 `UserDao`；`loginAdd` 的 `@Transactional` 现挂 `UserService.loginAdd:124`；见 `three-layers.md:166` F#1 |
-| **公共层** | `shared/web`（`GlobalExceptionHandler` / `Result<T>`）、`shared`（CORS 收口） | — | 🟡 **部分推进（2026-10-04 订正）**：`D#2` 全局异常出口 ✅（#36 `573463c` + `1bd05d3`）、`D#3` 的 CORS 面 ✅（#34 `23f5361`，删 5 处冗余 `@CrossOrigin`）+ 统一响应体 `Result<T>` ✅（#35 `ea2bf02` + `321773e`，28 端点）；**未做**：`C#2` 事务边界 / `C#6` 状态位拦截 / `D#5` 配置收敛 |
+| **公共层** | `shared/web`（`GlobalExceptionHandler` / `Result<T>`）、`shared`（CORS 收口） | — | 🟡 **部分推进（2026-10-04 订正）**：`D#2` 全局异常出口 ✅（#36 `573463c` + `1bd05d3`）、`D#3` 的 CORS 面 ✅（#34 `23f5361`，删 5 处冗余 `@CrossOrigin`）+ 统一响应体 `Result<T>` ✅（#35 `ea2bf02` + `321773e`，28 端点）；**未做**：~~`C#2` 事务边界~~（**2026-10-04 本笔落地**，`fix/goods-write-tx`；`GoodsService` 三处写方法各加 `@Transactional` + catch 内带活跃事务判断的 `setRollbackOnly`，单测 ×6）/ `C#6` 状态位拦截 / `D#5` 配置收敛 |
 
 > **TODO（2026-10-04，drift-fix 笔登记）**：公共层三笔（#34–#36）目前**无 context-pack** —— `docs/agent/context-packs/common-layer.md` **待建**（**本笔不建**）。建议登记到 `selection-status.md §8` 类 4（新功能引出）或**另起一笔**。
 > 另 3 处漂移待另开一笔：`progress.md:141-143` Controller 行数快照、`defect-survey.md:104/113/115/119/259/270` 表内旧坐标、追记内三处映射。
@@ -187,12 +190,12 @@
 | 日志（Logback JSON） | ❌ 未实现，**未归属** | `:21` |
 | 死锁重试（Spring Retry） | ❌ 未实现，**未归属**；2026-09-30 已裁「**仍不需引入**」 | `:22` + `selection-status.md:73` 裁决注 |
 
-### 5-B. 阻塞三层落笔的两条裁决（`three-layers.md:275`）
+### 5-B. 阻塞三层落笔的两条裁决（`three-layers.md:275`）—— **`C#2` 已落地，实剩 `C#6`**
 
-| 项 | 内容 | 出处 |
-|---|---|---|
-| **`C#2` 事务边界** | §C Class B —— 原文标注「**阻塞落笔**」 | `:99-108`、`:189` |
-| **`C#6` TD-17 拦截 vs 观测** | ⚠️ **拦截会使 A3 的 S4a 全部 8 条断言失去前置**（H3 正是用 `orderAdd` 造的前置态） | **`:108`**（§C 档定义）；复述于 `:153`（§G 表） |
+| 项 | 内容 | 出处 | 状态 |
+|---|---|---|---|
+| **`C#2` 事务边界** | §C Class B —— 原文标注「**阻塞落笔**」（**标题里的「两条」自此过期一半**，见下方 `C#6` 行） | `:99-108`、`:189` | ✅ **2026-10-04 已裁并落地**（`fix/goods-write-tx`）：三处**一起闭环**（`goodsAdd` / `goodsDe` / `goodsUp`），方案 A（`@Transactional` + catch 内 `setRollbackOnly`）。⚠️ **只加 `@Transactional` 不够**：三处 catch 都**吞异常、不 rethrow** ⇒ 不标回滚的话 AOP 看到的是正常返回、**照常提交**，留下「半成品商品」——那正是本项要消掉的东西，也是「加了注解就绿」的假绿路径 |
+| **`C#6` TD-17 拦截 vs 观测** | ⚠️ **拦截会使 A3 的 S4a 全部 8 条断言失去前置**（H3 正是用 `orderAdd` 造的前置态） | **`:108`**（§C 档定义）；复述于 `:153`（§G 表） | ⏳ **仍开着**（本笔不动） |
 
 ### 5-C. 其他未决（不在三层路径上）
 
@@ -214,6 +217,39 @@
 ### 5-D. 复核时发现的文档漂移（不是进度，但会误导）
 
 - ~~`docs/agent/README.md` 的「文档职责」表**未登记** `defect-survey.md` 与 `selection-status.md`~~ —— ✅ **本笔已补**（`README.md` 两行）。依据：`three-layers.md:3` 明写「上游是 `defect-survey.md`（缺陷普查）+ `selection-status.md`（选型现状）+ `db-schema.md`」，其中前两份此前不在文档地图里。
+
+### 5-E. 本笔（`fix/goods-write-tx`，2026-10-04）登记：**护栏失效 1 条（最高优先级）** + 遗留 1 条 + 未改的漂移 3 处
+
+**（1）挂账 —— 按优先级列；第一条不是漂移，是「护栏失效」（别让它沉到底）**：
+
+- ⚠️ **最高优先级｜本笔与 `#11` 的单测在 CI 里**从不执行** —— 不是「没被选中」，是**被 `A3_ENABLED` 门控跳过**。性质：护栏失效，不是文档漂移**。**两条独立原因叠加，产物实证**（`surefire-reports` 产物，已拉本地核对）：
+  1. `backend` job 跑**全量** `./mvnw -B test`（`ci.yml:51-55`；**该 job 是阻塞门禁**）但**不设** `A3_ENABLED` ⇒ 受 `@EnabledIfEnvironmentVariable` 门控的类**全部 `Skipped`**：产物里 `...GoodsWriteTxAtomicityTest.txt` 逐字为 `Tests run: 6, Failures: 0, Errors: 0, Skipped: 6`（`GoodsTypeUniqueIndexTest` 为 `Skipped: 3`，`MallManagementApplicationTests` 为 `Skipped: 6`）。
+  2. 唯一设 `A3_ENABLED=true` 的步骤（`ci.yml:257-263`）又把类名**写死**为 `MallManagementApplicationTests,LockSceneRedisTest` ⇒ 本笔的 6 条与 `#11` 的 `GoodsTypeUniqueIndexTest`(3) **都不在白名单内**。
+
+  两条合起来 ⇒ 二者**在 CI 里一次都没真正执行过**。CI 自己的注释 `ci.yml:232-234` 已写明这一机制（「*backend job 不设该变量，那里的全量 mvn test 会自动跳过本测试*」），`tech-debt.md:135` 同 —— **本条先前误把机制归给「`ci.yml:263` 的 `-Dtest=` 列表从未更新」（`-Dtest` 只解释第 2 条，解释不了第 1 条），2026-10-04 拉产物后订正**。它使「CI 绿」对本笔的原子性改动**零信息量**（验收边界见下方（5））。⚠️ 另注：**`continue-on-error: true`（`ci.yml:117`）属 `A3` `concurrency` job，不属 `backend`** —— `backend` 是阻塞的，它只是**跑不到**这些用例；别把非阻塞算到它头上。**本笔裁决（2026-10-04）**：**不动 CI 判据**（混进本笔会让 CI 报告把「门禁列表变更」与「行为变更」混为一谈）⇒ **另起一笔**；该笔至少要就「把这两类测试挪进 `A3_ENABLED` 步骤的白名单，还是索性去掉门控」给出裁决。
+- **本笔明写「不改」的遗留**：`DistributedLockServiceTest.java:396-401` 的 javadoc 拿 `goodsAdd` 当「将来 C#2」的举例；**C#2 落地后该举例成历史**（对象已加事务，不再有「将来」）。⚠️ 本笔**不改它**（用户 2026-10-04 裁决）—— 改它即第 7 个文件，为一句注释撑破预算是错的。
+
+**（2）本笔使其失真、但留而未改的 3 处（登记，别让它们成孤儿）**：
+
+| 处 | 原文要点 | 为何失真 | 最小改法 |
+|---|---|---|---|
+| `OrderService.java:61` | 「它的反面是 C#2 —— `goodsAdd` … **应当**加 `@Transactional`」 | 「**应当**」已兑现（2026-10-04 落地） | 句尾加「（**2026-10-04 已落地**）」。⚠️ 与 `three-layers.md §D.1` 的「不可外推」行是**同一句话的两个镜像**，那处已标 ✅ ⇒ 只改文档不改代码注释，正是本条禁令自己警告的「只记住半边」 |
+| `UserController.java:23` | 「**三层前** `loginAdd` 上挂着全仓**唯一一处真** `@Transactional`」 | 句首「三层前」把它**限定为史料**，作为史料仍真 | 可不动；若要防误读，在「唯一一处真」后加「（**当时**；2026-10-04 起为 4 处）」 |
+| `defect-survey.md:259` | **Class B** 第 2 条「`goodsAdd` / `goods` / `productsales` 的事务边界 —— … 修法是给 `goodsAdd` 加 `@Transactional`」 | 该条**已被 2026-10-04 裁决并落地**，不再属于「Class B —— 语义未定，**须先裁决**」 | 标 ✅ 已落地（或移出 Class B）。⚠️ **该行的坐标已在「`defect-survey` 收口笔」的清单里**（§3 的 TODO 列了 `:104/113/115/119/259/270`）⇒ 归那一笔；**但该笔的范围只写「表内旧坐标」，覆盖不到「Class B 归属」** ⇒ 那笔动手时须**一并**把它移出 Class B，别只改行号 |
+
+**（3）本笔还改了两个文件的行数（等于喂给已有的「行数快照」欠账）**：`GoodsService` **332 → 459 行**、`GoodsDao` **208 → 211 行** ⇒ 本文 `:145` 商品域行的行数快照**再旧一档**。该行属 §3 的「行数快照」欠账（见 `:151`），本笔**不另开一笔**订正它；那笔动手时**以本笔后的值为准**。
+
+**（4）本笔已就地改的同类失真（记账，供复核）**：`project-map.md:95`（「仅 1 处事务边界」）、`api-contract.md:119`（「无事务保护」+ 已失效的体范围）、`GoodsDao.java:52-56`（「C 档裁决、**未裁**」）、`UserService.java:32-35`（「真注解 1 处的计数**不变**」）、`three-layers.md:138` / `selection-status.md:39`（`grep @Transactional` 的 **18 行 / 1 行真注解** ⇒ 复测 **45 行 / 4 行**）。这 4 个文件**超出**用户 2026-10-04 裁决的「6 个文件」，理由：它们各自写着**被本笔改成假话的具体断言**（不是泛指），与计划已列的 `three-layers.md` / `concurrency-map.md` / `selection-status.md` 属**同一类不可压**（**用户 2026-10-04 已裁：并**）。
+
+**（5）⚠️ 本笔的验收边界（写进 PR 描述，逐字与此同）—— 比 #11 更弱，三点事实**：
+
+1. **本笔新增的 `GoodsWriteTxAtomicityTest`（6 条）在 CI 里从不执行**：`backend` job 全量**跑到它但被门控跳过**（产物实证 `Tests run: 6, Skipped: 6`），唯一 `A3_ENABLED=true` 的步骤又在 `-Dtest=` 白名单外（详见（1）的两条原因）；
+2. **A3 的 8 个受保护端点不含 goods 写端点**（`three-layers.md §H.3`：`/goods` 9 端点里 8 个未覆盖，正是 `goodsAdd` / `goodsDe` / `goodsUp`）⇒ A3 **不会**替本笔报警；
+3. ⇒ 本笔的验收证据**只有两条**：**agent 本地 `GoodsWriteTxAtomicityTest` 6/0 通过** + **A3 `concurrency` job 零回归**（而 A3 根本不碰这三个端点，故它只证明「**没撞坏别处**」，**不构成对本笔改动的验证**）。
+
+**本轮 CI 结果（两件产物均落本地后逐字核对，非看 job 颜色）**：`surefire-reports` = **158 tests / 0 failures / 0 errors / 19 skipped**（19 恰为 4 个 `A3_ENABLED` 门控类 3+6+4+6，**与本地未设该变量时逐字一致** ⇒ 第 1 条的两条原因在产物上被双向坐实）；`a3-concurrency-report` = **`exitCode` 0**、**`gates.failed` 0 / `gates.count` 27**（27 门全 PASS；另 1 条 `A-B2-1` 为 `RECORD_ONLY`，因 `--b-group-gate=false` 按设计不计入退出码）。三个 job 全绿。
+
+> **「CI 绿 ≠ 本笔被 CI 验证了」** —— 本 PR 合并后 CI 全绿，**不能**被读作「原子性已被 CI 验证」：绿的是上面第 3 条的**零回归**，**不是**那 6 条用例。
 
 ---
 

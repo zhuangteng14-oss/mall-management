@@ -52,9 +52,12 @@ import java.util.Map;
  * <h2>⚠️【与 {@code OrderDao} 相反：本类**可以**加 {@code @Transactional}】</h2>
  * 订单域的 {@code @Transactional} 禁令（{@code three-layers.md §D.1}）**只管被打锁的临界区**，
  * 商品域**无锁** ⇒ 本类不受它约束。反面是 **C#2**：{@code goodsAdd}（写 goods + productsales
- * 两张表）的事务边界**应当**加 {@code @Transactional} —— 那是 C 档裁决、**未裁**，
- * **本笔不加**（本笔是纯搬运，改事务边界是行为变更）。谨记 D#1 的那句话：只记住半边
- * 就会踩另一边 —— 这里是**另一边**。
+ * 两张表）的事务边界**应当**加 {@code @Transactional} —— ✅ **该裁决已于 2026-10-04 下达并落地**
+ * （{@code fix/goods-write-tx}），且范围**扩到三处**（{@code goodsAdd} + {@code goodsUp}
+ * + {@code goodsDe}）。⚠️ **落点在 {@code GoodsService} 的三个写方法上，不在本类** ——
+ * 本类的边界仍是「逐字搬运 SQL」，事务边界的宿主是 Service（见 {@code GoodsService} 类注释
+ * 的「C#2」段）；**本类照旧不加任何注解**。谨记 D#1 的那句话：只记住半边就会踩另一边
+ * —— 这里是**另一边**。
  */
 @Repository
 public class GoodsDao {
