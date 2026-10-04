@@ -1,7 +1,8 @@
 // src/api/http.js —— 前端 API 层「传输层」唯一出口
 //
-// 职责边界（本笔只做一件事）：
+// 职责边界（本笔做两件事）：
 //   ① 拼装请求：base URL 前缀 / Content-Type / body 形态
+//   ② 判定传输层结果：超时（→ 抛 TimeoutError）
 //
 // ⚠️ 本层**不判业务成功**。`body.success` 的语义各页不同（有的弹 msg、有的静默、
 //    有的走另一分支），统一判 = 一次性改 34 处行为 ⇒ 留在各 view 自己判。
@@ -12,6 +13,23 @@ const API_BASE = process.env.VUE_APP_API_BASE || ''
 
 // 静态资源（图片）前缀。⚠️ 与 API_BASE **分开命名** —— 反代可能给静态资源不同前缀。
 const ASSET_BASE = process.env.VUE_APP_ASSET_BASE || ''
+
+// ⚠️ 超时不能设小：后端 Redis 黑洞降级窗口的「首个冷读」实测 **3.376s / 3.40s / 3.38s**
+//    （`context-packs/cache-layer.md:329`，2026-09-28），该耗时**整个落在 HTTP 请求里**
+//    ⇒ 设 3s 会误杀正常请求。10s = 覆盖最坏冷读 + 余量。
+const DEFAULT_TIMEOUT = 10000
+// 带 FormData 的上传（图片体积不可控）。
+const UPLOAD_TIMEOUT = 30000
+
+/** 超时（AbortController 触发）。 */
+export class TimeoutError extends Error {
+  constructor(ms, url) {
+    super(`请求超时（${ms}ms）${url}`)
+    this.name = 'TimeoutError'
+    this.ms = ms
+    this.url = url
+  }
+}
 
 /** 相对路径 → 绝对 URL。已是绝对 URL 则原样返回（供「URL 变量」类调用点使用）。 */
 export function urlOf(path) {
@@ -55,8 +73,19 @@ function buildInit(method, body) {
   return init
 }
 
-async function request(path, { method = 'GET', body } = {}) {
-  return fetch(urlOf(path), buildInit(method, body))
+async function request(path, { method = 'GET', body, timeout } = {}) {
+  const url = urlOf(path)
+  const ms = timeout || (body instanceof FormData ? UPLOAD_TIMEOUT : DEFAULT_TIMEOUT)
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), ms)
+  try {
+    return await fetch(url, { ...buildInit(method, body), signal: controller.signal })
+  } catch (e) {
+    if (e.name === 'AbortError') throw new TimeoutError(ms, url)
+    throw e
+  } finally {
+    clearTimeout(timer)
+  }
 }
 
 export function get(path, opts) {
@@ -81,6 +110,8 @@ export const http = { get, post }
  *
  * ⚠️ 只接「原先就只写日志」的那类 catch —— 实测 **22 处**。改前就在**弹提示**或
  *    **改组件状态**的另 19 处一律没动 —— 那些是业务分支，不是日志出口（换掉 = 改行为）。
+ *
+ * ⚠️ 本函数对 TimeoutError **只记日志、不弹窗** —— 轮询类 catch 的网络抖动若弹窗会变成弹窗风暴。
  */
 export function handleApiError(e, msg) {
   const label = msg || '请求失败'
