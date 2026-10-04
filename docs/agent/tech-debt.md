@@ -324,3 +324,33 @@
 **收尾状态**：B3 合入 `main`（`148e77b`，PR #7）；CI 三 job 全绿；`concurrency` job 仍是观测跑（`continue-on-error: true`，门禁地位同 M2 / M3 未裁）。普查三份文档 `10da544` 为纯文档 ⇒ **`paths-ignore` 生效、未触发 CI**（实证：近 25 次运行无一 `headSha` = `10da544`）。全项目 **`@Test` 111 处**（15 个含测试的类；默认 SKIP 8 = `LockSceneRedisTest` 4 + `MallManagementApplicationTests` 4，均 `@EnabledIfEnvironmentVariable(A3_ENABLED)`）；主源 **28** 个 `.java`、测试源 **16** 个。观测出口累计 **21 个 `mall.*` 指标**（11 cache + 4 lock + 6 order.state）。
 
 **TD 变更**：**无** —— `tech-debt.md` 在 B3 全期间未被改动（最后一次改动 `4ef77f1` = M3 本身）。B3 的待落项共三笔，均属「声明过、从未落盘」：`db-migration.md` 的 B3 行、**M4 本条**、`agent.md` 技术选型最小改。
+
+### M5 — 三层重构（四域 + 公共层）🟡（2026-10-04）
+
+> 标题日期 = 收尾笔 PR #45（`473b6c1`）的**提交日（+0800 本地）** `2026-10-04 15:24`，**不取** GitHub / CI 显示的 `2026-10-04T07:24Z`（同 M4 口径）。
+> ⚠️ 与 M1–M4「单笔合并日」不同：本条覆盖 **2026-10-02 ~ 10-04 三天、PR #25–#46（22 个 PR / 35 笔非 merge commit / 106 个文件）** —— 因为三层重构本身就是跨多笔的批次（同 M3 覆盖 B1 / C1 / B2 三笔）。
+> ⚠️ **「三层重构 ✅」不是干净 ✅**：四域 **4/4** 已完成，但**公共层仍 🟡**（三笔已合，`D#5` 配置收敛**未做** —— 见 `progress.md §3`）。故标题带 🟡、不写「完成」，同 M3 的挂账注。
+> ⚠️ **边界**：本条**不含** 2026-09-30 的那一批（A 批 / G 表 / 规则 v2 / S1a 7 笔 / 三层前准备，**PR #8–#24**）。它落在 M4 里程碑落盘（`c57f7e7`，09-30 13:59）**之后** ⇒ M4 收录不到；本条按主题也不收。**该批现状只记在 `progress.md §1.1` / `§2`，尚无任何里程碑收录**（是否另立待裁 —— 已挂账于 `progress.md §5-H (1)`）。
+> ⚠️ 下表四域的 Controller / Service 行数为 **2026-10-04 `wc -l` 实测**。`progress.md §3` 表内同项快照（`118` / `313` / `176` / `332` / `107` / `319` / `127`）**已过期** —— 该漂移早在 `progress.md:153` 登记待修，**本次不修**。
+
+| 项 | 交付物 | 证据 |
+|---|---|---|
+| 订单域三层（**三层第一笔**） | `order/controller/OrderController`(129) + `order/service/OrderService`(495) + `order/dao/OrderDao`(155)，SQL 下沉 DAO；早于「笔 1 / 笔 2」故为三层首笔 | PR #25 `28194b4` |
+| DDD 挪包 | **49 文件**按域分层落位（纯挪包）；`info` 孤儿类删除；规划 `ddd-package-plan.md`（31 文件定位 + 七项裁决） | PR #26 `0466230`；PR #27 `01df702` |
+| URL 前缀规范化 | 订单 8 端点拆出 `OrderController`（`@RequestMapping("/order")`）+ 三个 Controller 改名对齐域；前端 **31 个调用点** + A3 脚本 **34 处** + CI 预热（`ci.yml:224`/`:229`）跟随 | PR #28 `8c5385e`、`2ced01c`、`c3c29fb`；`81629b5` |
+| 商品域三层（**第二笔**） | `GoodsController`(193) + `GoodsService`(459) + `GoodsDao`(211)；**8 条内联 SQL** 下沉 | PR #29 `4c1f31a` |
+| 用户域三层（**第三笔**） | `UserController`(121) + `UserService`(321) + `UserDao`(242)；SQL 硬编码 schema 名 **16 处**全部下沉 `UserDao` | PR #32 `0c07e96` |
+| 消息域三层（**第四笔**） | `MessageController`(143) + `MessageService`(534) + `MessageDao`(284)；schema 名 **0 处** | PR #33 `8ed5fc1` |
+| 公共层 笔 1/3 —— CORS | 删 **5 处**冗余 `@CrossOrigin` | PR #34 `23f5361` |
+| 公共层 笔 2/3 —— `Result<T>` | 统一响应体 + **逐字节等价回归闸**；**28 个端点**返回类型换成 `Result` | PR #35 `ea2bf02`、`321773e` |
+| 公共层 笔 3/3 —— 异常 + 校验 | `GlobalExceptionHandler`（`assignableTypes` 白名单 + 封闭异常清单，**不做通用兜底**）+ 写接口 `@NotBlank` ×14 | PR #36 `573463c`、`1bd05d3` |
+| 缓存 笔 ② | 三处列表读不再「把失败当值缓存」（catch 上抛 + 响应组装搬回 Service）；另登记「单飞等待**无超时/无上限**」 | PR #37 `f1c26a8`、`8635487` |
+| 收口与去漂 | `selection-status.md §8` 待办与优化总表 **33 项**（10 必做 + 10 触发 + 6 可能补 + 7 登记未修）+ `§9` 新功能引出表 **6 项**；drift-fix 一批（订正 B2 / 三层后已失效的旧结论） | PR #38 `fc17caf`；PR #39 `bc80c40` |
+| 清欠账 **4 笔** | `#11` goodstype 唯一约束（DDL `uk_goodstype_GoodType` + catch 拆 `DuplicateKeyException`）/ `C#2` 商品域写事务边界（三处写方法加 `@Transactional` + catch 内带活跃事务判断的 `setRollbackOnly`）/ `B#1` 价格闸 / `C#6` 出生闸 | PR #40 `62c5295`（落盘记录笔 #41 `37cafc3`）；PR #42 `ad39a1d`（记录笔 #43）；PR #44 `830d98f`；PR #45 `473b6c1`（记录笔 #46 `8c7236a`） |
+| A3 适配 | ①`c3c29fb` URL 前缀跟随（**判据一字未改** —— 门禁认 `call(...)` 标签、不认 URL 字面量）；②`473b6c1` 把 S4a 前置态由**手改库**改为走**合法流转** + 新增门禁 `A-S4a-0` / `A-C6-1` / `A-C6-2`（`gates.count` **27 → 30**）；③`c5b46da` 夹具推进 URL 补 `/order` 前缀（首轮 CI 实测抓到 **3 条红**，含 `A-S4a-0` 新上线即抓到东西） | `c3c29fb`、`473b6c1`、`c5b46da`；run `37185693143` → `37192169578` |
+
+**硬性前置**：① **新增 1 个依赖** —— `spring-boot-starter-validation`（PR #36 `573463c`，为控制器方法参数上的 `@NotBlank` 供 Validator bean；⚠️ **非「无新增依赖」**：`git diff --name-only 5db3c18..fa2a8e2 -- Mall-management-server/pom.xml` **非空**）。② **唯一 schema 变更 = 一条 DDL** —— `CREATE UNIQUE INDEX uk_goodstype_GoodType ON goodstype(GoodType)`（PR #40，`mall_management_sql.sql` 尾部追加块；⚠️ 对**已有重复行的既有库**须先人工去重再建，见该块注释），此外**无建表、无列变更**。③ **运行时需 Redis**，同 M3 / M4（CI 内 `docker run -d --name a3-redis -p 6379:6379 redis:7 redis-server --requirepass 123456`，**刻意不用 services**）。
+
+**收尾状态**：四域 + 公共层全部合入 `main`（收尾 PR #46 `fa2a8e2`，纯文档 ⇒ `paths-ignore` 生效）；**CI 判据已逐条核过的是 PR #45 那一轮** —— run `37192169578` 的 `a3-concurrency-report`：`gates.count == 30`（27 → 30 对上）、`gates.failed == 0`、`exitCode == 0`，S4a 8 条 + `C-1`/`C-2` 全 PASS；`surefire-reports` `Tests run: 186, Failures: 0, Errors: 0, Skipped: 19`。合并后 `main` 上的 run `37192450667`（`headSha` = `2e9d3f8`）为 `success` —— ⚠️ **run 级 `success` ≠ 三 job 全绿**：`concurrency` job **仍是观测跑**（`continue-on-error: true`），job 颜色**系统性无信息量**，只有拉 artifact 看得见（门禁地位**自 M2 起挂到本条，仍未裁** —— 连续第 4 条）。全项目 **`@Test` 186 处**（26 个含测试的类；默认 SKIP **19** = `MallManagementApplicationTests` 6 + `GoodsWriteTxAtomicityTest` 6 + `LockSceneRedisTest` 4 + `GoodsTypeUniqueIndexTest` 3，均需 `A3_ENABLED` / 真库 / 真 Redis）；2026-10-04 17:47 本地 `./mvnw -B test` 实测 `Tests run: 186, Failures: 0, Errors: 0, Skipped: 19`（BUILD SUCCESS）。主源 **39** 个 `.java`（`shared` 15 / `order` 10 / `goods` 5 / `user` 4 / `message` 4 / 顶层 1）、测试源 **27** 个 `.java`。观测出口累计 **22 个 `mall.*` 指标**（11 cache + 4 lock + **7** order.state —— 较 M4 的 21 多出 `mall.order.state.birth.rejected`，由 C#6 新增）。
+
+**TD 变更**：**关闭 TD-17**（`orderAdd` 不校验三个状态位，2026-10-04 C#6）—— 本期间**唯一**的状态翻转。`tech-debt.md` 在 M5 范围共被改动 **6 次** = 上述 1 次状态翻转（`473b6c1`）+ **5 次坐标 / 计数回归**（`81629b5` / `50bfe65` / `d3af49a` / `72a2e2e` / `481e72b`），逐笔可复核：`git log --no-merges --oneline 5db3c18..fa2a8e2 -- docs/agent/tech-debt.md`。**TD-16 仍挂** —— `--reset-db` **仍是死参数**，本期间只做了「标注未实现」，主体未动。
