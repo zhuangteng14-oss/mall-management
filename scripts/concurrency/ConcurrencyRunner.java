@@ -1604,11 +1604,25 @@ public class ConcurrencyRunner {
                     "add(" + birth[k][0] + birth[k][1] + birth[k][2] + ")");
             Resp r = send(HTTP, o.baseUrl + "/order/orderAdd",
                     orderForm(id, birth[k][0], birth[k][1], birth[k][2]));
-            boolean ok = r.successTrue();
+            // ⚠️ 每一步都同时卡 **HTTP 200** 与 success:true。只卡 success:true 是不够的：
+            // successTrue() 是裸子串匹配（"\"success\":true"），路由打错时的 404 响应体里没有它，
+            // 于是「路由错」与「业务拒绝」在旧判据下**长得一模一样**——2026-10-04 首次 CI 复跑
+            // 就栽在这里：推进步骤少写了 "/order/" 前缀打成 404，被当成「状态机拒绝」读了一轮。
+            // 卡上 code==200 后，路由类失败会带着 URL 与状态码直接喊出来。
+            boolean ok = r.code == 200 && r.successTrue();
+            String bad = ok ? null : "add HTTP " + r.code + " " + trunc(r.body);
             for (int i = 0; ok && i < advance[k].length; i++) {
-                Resp step = send(HTTP, o.baseUrl + "/" + advance[k][i], form("orderId", id));
-                ok = step.successTrue();
-                path.append('+').append(advance[k][i].replace("order", "").replace("IfUp", ""));
+                // ⚠️ 路径必须带 "/order/" 前缀（OrderController 是 @RequestMapping("/order")）。
+                // 这里曾写成 o.baseUrl + "/" + advance[k][i] ⇒ /orderDeliveryIfUp ⇒ 404。
+                String url = o.baseUrl + "/order/" + advance[k][i];
+                Resp step = send(HTTP, url, form("orderId", id));
+                boolean stepOk = step.code == 200 && step.successTrue();
+                if (stepOk) {
+                    path.append('+').append(advance[k][i].replace("order", "").replace("IfUp", ""));
+                } else {
+                    bad = path + " → " + url + " HTTP " + step.code + " " + trunc(step.body);
+                }
+                ok = stepOk;
             }
             // 前置态的判据取**库里那三位的实际值**，不是「每一步都返回了 success」——
             // 两者是不同的命题，而下面的 A-S4a-3/-5 完全押在「这单真的在 PDR / PR 态」上。
@@ -1616,16 +1630,23 @@ public class ConcurrencyRunner {
             boolean stateOk = got != null
                     && got[0] == want[k][0] && got[1] == want[k][1] && got[2] == want[k][2];
             preBuilt &= ok && stateOk;
+            // ⚠️ 失败时打的是**那一步**的响应体（bad），不是 add 的。原先写 trunc(r.body) 而 r 在循环里
+            // 从未重绑 ⇒ 推进步骤失败时仍打印 add 的 {"msg":"订单添加成功","success":true}，
+            // 与「FAILED」并排出现，把人往反方向带（看着像成功了却被判失败）。
             preStates.append(keys[k]).append('=')
                     .append(stateOk ? "ok"
                             : ok ? "态不符" + (got == null ? "无行" : got[0] + "/" + got[1] + "/" + got[2])
-                                 : "FAILED " + trunc(r.body))
+                                 : "FAILED " + bad)
                     .append('(').append(path).append(") ");
         }
-        // ⚠️ A-S4a-0 是**新增门禁**，把原先只打在 println 里的一句话升成判据。理由：
-        // C#6 之前 PD/PDR/PR 是直传伪造的，建不建得成从来没人看。那三个态若塌掉，
-        // A-S4a-3/-5 会**真空转绿**（订单不存在 ⇒ delivery/receive 当然 succ=0），
-        // 只有 A-S4a-6（期望 succ==1）会红。一条只在单个断言处报警的预置失败，等于没有报警。
+        // ⚠️ A-S4a-0 是**新增门禁**，把原先只打在 println 里的一句话升成判据。
+        // 它上线后第一次 CI 复跑就抓到了东西，同时**订正了本笔最初写在这段里的预言**：
+        // 本笔原写「前置态塌掉 ⇒ 订单不存在 ⇒ A-S4a-3/-5 真空转绿」。实测**不是**——
+        // 那次 404 让 PD/PDR/PR 停在 (1,0,0)，delivery/receive 的 succ 反而是 1，
+        // A-S4a-3/-5 **自己就红了**（A-S4a-6 倒是撞对期望值假绿：RECEIVE 守卫只卡
+        // PayIf=1 AND ReceiveIf=0，(1,0,0) 本就收得动）。
+        // 所以这条门禁的真实收益是**定位**而非「唯一的告警」：它的 detail 直接写「前置态没建成」，
+        // 把责任从「拦截逻辑」指回「测试夹具」，否则人会对着两条红的 A-S4a 去怀疑状态机。
         settle(a0, preBuilt, "前置态 " + preStates);
 
         String dlyMsg = "订单不存在或未付款或已发货/已收货";

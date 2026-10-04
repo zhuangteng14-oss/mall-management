@@ -307,7 +307,10 @@
 
 - 原挂账（`§5-F`（1）第 2 条）：「`ConcurrencyRunner.java:1653` 的 `[S4a] 预置态 …` **只被 `System.out.println`、从不被任何断言核** ⇒ `S4a` 的『前置态构造成功』在 A3 里**没有判据**」。
 - **本笔已修**：新增门禁 **`A-S4a-0`**（`ass(..., true)`，`ConcurrencyRunner.java:1577`），判据取**库里三位的实际值**（`jdbcOrderState(o, id)` == 目标三位），**不是**「每一步都返回了 success」；那行 `println` **保留**（读数照打）。
-- ⚠️ **而且本笔正好撞上那条挂账预言的场景** —— 它就是那行注释里举的例（「将来有人把校验层收紧到拒绝某些 `PayIf` 组合」）：C#6 收紧入参后，S4a 原用的 3 个前置态（`PD`/`PDR`/`PR`）**当场构造失败**。若没有 `A-S4a-0`，`A-S4a-3`/`A-S4a-5` 会**真空转绿**（订单压根不存在 ⇒ `succ = 0`，与「重复发货被拒」同一形状），只有 `A-S4a-6`（期望 `succ == 1`）会红。**一处报警 vs 三处静默，差别就是有没有这条门禁。**
+- ⚠️ **这条门禁上线后第一次 CI 复跑就抓到了东西，同时推翻了本笔最初写在这一行上的预言**（2026-10-04，PR #45 run `37185693143`，`gates.failed = 3` / `exitCode = 3`）：
+  - **原预言**（本笔初稿的写法）：「`PD`/`PDR`/`PR` 构造失败 ⇒ 订单压根不存在 ⇒ `A-S4a-3`/`-5` 真空转绿（`succ = 0`，与「重复发货被拒」同一形状），只有 `A-S4a-6` 会红」。**实测不成立** —— 那次失败把三单停在 **`(1,0,0)`**（不是「不存在」），`delivery`/`receive` 的 `succ` 反而是 **1** ⇒ `A-S4a-3`/`-5` **自己就红了**。真正假绿的是 **`A-S4a-6`**（期望 `succ == 1`，在 `(1,0,0)` 上也成立 —— `RECEIVE` 守卫只卡 `PayIf = 1 AND ReceiveIf = 0`，见 `OrderStateMachine.java:21`，**不要求 `DeliveryIf = 1`**）。
+  - **订正后的价值主张**：这条门禁的收益是**定位**，不是「唯一的告警」。它的 `detail` 直接写「前置态没建成」，把责任从「拦截逻辑」指回「测试夹具」；没有它，人会对着两条红的 `A-S4a` 去怀疑状态机。挂账原文那条命题（「S4a 的前置态构造成功在 A3 里没有判据」）**仍然成立，且已被本笔关闭**。
+  - ⚠️ **那次红的根因不是 C#6，是本笔新写的夹具 URL 少写了 `/order` 前缀**（`ConcurrencyRunner.java:1609` 当时写成 `o.baseUrl + "/" + advance[k][i]` ⇒ `/orderDeliveryIfUp` ⇒ **404**；`OrderController` 是 `@RequestMapping("/order")`，唯一路由是 `/order/orderDeliveryIfUp`）。已修，并给 setup 每一步补 **HTTP 200** 判据 —— 只卡 `successTrue()` 是不够的：它是裸子串匹配 `"\"success\":true"`，404 响应体里没有它 ⇒ **「路由错」与「业务拒绝」在旧判据下形状完全相同**，这正是它被误读一轮的原因。
 
 **（3）A3 适配：订正一处流传的说法 + 改哪几处**：
 
@@ -341,7 +344,7 @@
 | 项 | 结论 |
 |---|---|
 | 新测试在 `backend`（**阻塞门禁**）job 里 | ✅ **真跑** —— `OrderAddStateGuardSmokeTest`（10 用例）继承 `AbstractSmokeTest`（`@WebMvcTest` 切片 + `@MockitoBean JdbcTemplate`），**无门控、不连 MySQL/Redis** |
-| A3 侧新增门禁 | `A-S4a-0` / `A-C6-1` / `A-C6-2`，**静态计数 `gates.count` 27 → 30**（`ConcurrencyRunner.java:711-719` 的计数循环；31 条 `ass(` 中 30 条 `gate=true`，唯一 `false` 的是 `A-B2-1` 的 `o.bGroupGate`）。⚠️ **artifact 实测值待 CI 复跑**（本笔**不**在本地跑 A3 —— 它需 8.4 目标库，P1 版本门禁会拦下）。⚠️ **且 A3 的 `concurrency` job 是 `continue-on-error: true`（`ci.yml`）⇒ 不拦 merge** ⇒ 这三条只能算**旁证**，不能算验收证据 |
+| A3 侧新增门禁 | `A-S4a-0` / `A-C6-1` / `A-C6-2`，**静态计数 `gates.count` 27 → 30**（`ConcurrencyRunner.java:711-719` 的计数循环；31 条 `ass(` 中 30 条 `gate=true`，唯一 `false` 的是 `A-B2-1` 的 `o.bGroupGate`）。**artifact 实测 = 30 ✓**（2026-10-04 首次 CI 复跑，见下 (7)；本笔**不**在本地跑 A3 —— 它需 8.4 目标库，P1 版本门禁会拦下）。⚠️ **且 A3 的 `concurrency` job 是 `continue-on-error: true`（`ci.yml`）⇒ 不拦 merge** ⇒ 这三条只能算**旁证**，不能算验收证据 |
 | 突变对照 | 3 组（见下），判据 = **整类用例的红数分布**，不是「指定那条一定红」 |
 
 **突变对照（本笔实测，各在 `OrderAddStateGuardSmokeTest` 的 10 条上跑）**：
@@ -357,6 +360,22 @@
 **本轮本地结果**（`rm -rf target/surefire-reports` 后 `./mvnw -B test`）：`Tests run: 186, Failures: 0, Errors: 0, Skipped: 19`、`BUILD SUCCESS`。**166 → 186**（+20 = 新类 10 + `OrderStateMachineTest` +4 + `MallOrderStateMetricsTest` +3 + `OrderTransitionRecorderTest` +3）；**19 skipped 与基线逐字一致**（19 = 4 个 `A3_ENABLED` 门控类 3+6+4+6）⇒ 本笔**没碰门控**的旁证；新类**不在** skipped 里（它在 `backend` job 真跑）。
 
 > ⚠️ **CI 绿 ≠ 本笔被 CI 验证了**（同 §5-E 的告诫）：本 PR 合并后 A3 若全绿，**没有**验证本笔 —— A3 的 `concurrency` job 不拦 merge，且本笔新增的三条门禁也只证「A3 侧适配没塌」。真正的验收证据是上表 `backend` job 里真跑的 10 条 + 3 组突变对照。
+
+**（7）首次 CI 复跑实测（2026-10-04，PR #45，run `37185693143`）—— 一次「门禁抓到人」的完整记录**：
+
+⚠️ **整轮 run 的结论是 `success`，但 A3 job 是 `failure`** —— 这正是 `continue-on-error: true` 的效果：**job 颜色被系统性抹平，只有拉 artifact 才看得见**（`§5-E` 同款告诫的又一次实证）。artifact 落本地后的实测：
+
+| 判据 | 期望 | 实测 | |
+|---|---|---|---|
+| `gates.count` | 30 | **30** | ✅ 27 → 30 对上 |
+| `gates.failed` | 0 | **3** | ❌ |
+| `exitCode` | 0 | **3** | ❌ |
+| `A-S4a-0` / `A-C6-1` / `A-C6-2` | 三条 PASS | **FAIL** / PASS / PASS | ❌/✅/✅ |
+| `S4a` 8 条 + `C-1`/`C-2` | 全 PASS | `A-S4a-3`/`-5` **FAIL**，其余 6 条 + `C-1`/`C-2` PASS | ❌ |
+| `surefire` `Tests run` | 186 | **186, Failures: 0, Errors: 0, Skipped: 19** | ✅ 与本地逐字一致 |
+
+- **红的三条全因本笔新写的 A3 夹具 bug，与 C#6 无关**：`ConcurrencyRunner.java:1609` 少写 `/order` 前缀 ⇒ `PD`/`PDR`/`PR` 三单的推进调用全 404 ⇒ 停在 `(1,0,0)`。（C#6 本身由 `A-C6-1`/`A-C6-2` PASS 背书。）⇒ **已修**：补前缀 + setup 每一步卡 **HTTP 200** + 修 `preStates` 打错响应体（原来失败时打的是 `add` 的 `{"success":true}`，与 `FAILED` 并排，方向性地误导）。**A3 是本笔核心验收，故本笔在这三条红被修好之前不 merge。**
+- **本笔对 `A-S4a-0` 的价值主张已在 (2) 订正**：原预言「真空转绿」被实测推翻（塌成的不是「不存在」而是另一个错态 `(1,0,0)`），真实收益是**定位**。
 
 ---
 
