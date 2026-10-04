@@ -71,7 +71,7 @@ import { endpoints } from '../api/endpoints'
 import { getMerchantId, getCustomerId } from '../api/auth'
 
 const router = useRouter()
-const defaultAvatar = assetOf('/img/default-avatar.jpg')
+const defaultAvatar = assetOf('/img/default_user.png')
 
 const currentUserId = ref('')
 const friendList = ref([])

@@ -6,7 +6,7 @@
       <div class="top-section">
         <div class="avatar">
           <img 
-            :src="userInfo.image || assetOf('/img/default-avatar.jpg')" 
+            :src="userInfo.image || assetOf('/img/default_user.png')" 
             alt="头像" 
           />
         </div>

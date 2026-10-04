@@ -4,7 +4,7 @@
       <div class="avatar-wrap">
         <img 
           class="avatar" 
-          :src="userInfo.image || assetOf('/img/default-avatar.jpg')" 
+          :src="userInfo.image || assetOf('/img/default_user.png')" 
           alt="头像" 
         />
         <div class="username-box">
