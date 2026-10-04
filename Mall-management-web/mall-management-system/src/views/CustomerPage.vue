@@ -60,6 +60,9 @@ import ShoppingCart from './ShoppingCart.vue'
 import HistoricalOrders from './HistoricalOrders.vue'
 import ChatRoom from './ChatRoom.vue'
 import FriendRoom from './FriendRoom.vue'
+import { http, handleApiError } from '../api/http'
+import { endpoints } from '../api/endpoints'
+import { getMerchantId, getCustomerId, clearCredentials } from '../api/auth'
 
 const router = useRouter()
 const route = useRoute()
@@ -74,12 +77,12 @@ let unreadPollingTimer = null
 
 // 获取当前用户信息
 const getCurrentUser = () => {
-  const cid = sessionStorage.getItem('customerid')
+  const cid = getCustomerId()
   if (cid && cid !== 'null' && cid !== 'undefined') {
     return { id: cid, type: 'customer' }
   }
   // 兜底：也可能取到商家 ID（但客户端应只有客户）
-  const mid = sessionStorage.getItem('merchantid')
+  const mid = getMerchantId()
   if (mid && mid !== 'null' && mid !== 'undefined') {
     return { id: mid, type: 'merchant' }
   }
@@ -94,24 +97,19 @@ const fetchUnreadCount = async () => {
   params.append('currentId', user.id)
   params.append('currentType', user.type)
   try {
-    const res = await fetch('http://localhost:8088/message/conversations', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: params.toString()
-    })
+    const res = await http.post(endpoints.message.conversations, params.toString())
     const data = await res.json()
     if (data.success) {
       // 统计 unread 为 true 的会话数量
       unreadCount.value = data.list.filter(conv => conv.unread === true).length
     }
   } catch (err) {
-    console.error('获取未读消息数失败', err)
+    handleApiError(err, '获取未读消息数失败')
   }
 }
 
 const toLogin = () => {
-  sessionStorage.removeItem('loginUsername')
-  sessionStorage.removeItem('loginPassword')
+  clearCredentials()
   router.push('/login')
 }
 

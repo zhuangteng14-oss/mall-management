@@ -66,9 +66,12 @@
 <script setup>
 import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
+import { http, handleApiError, urlOf, assetOf } from '../api/http'
+import { endpoints } from '../api/endpoints'
+import { getMerchantId, getCustomerId } from '../api/auth'
 
 const router = useRouter()
-const defaultAvatar = 'http://localhost:8088/img/default-avatar.jpg'
+const defaultAvatar = assetOf('/img/default-avatar.jpg')
 
 const currentUserId = ref('')
 const friendList = ref([])
@@ -83,16 +86,16 @@ const pendingRequests = ref([])
 
 // 获取当前登录用户ID（优先取 merchantid，再取 customerid）
 const getCurrentUserId = () => {
-  let id = sessionStorage.getItem('merchantid')
+  let id = getMerchantId()
   if (id && id !== 'null' && id !== 'undefined') return id
-  id = sessionStorage.getItem('customerid')
+  id = getCustomerId()
   if (id && id !== 'null' && id !== 'undefined') return id
   return null
 }
 
 // 判断当前用户是否为商家
 const isMerchantUser = () => {
-  const mid = sessionStorage.getItem('merchantid')
+  const mid = getMerchantId()
   return mid && mid !== 'null' && mid !== 'undefined'
 }
 
@@ -104,18 +107,14 @@ const loadFriendList = async () => {
   const params = new URLSearchParams()
   params.append('customerId', uid)
   try {
-    const res = await fetch('http://localhost:8088/message/friendSelect', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: params.toString()
-    })
+    const res = await http.post(endpoints.message.friendSelect, params.toString())
     const data = await res.json()
     if (data.success) {
       // 过滤掉自己
       friendList.value = data.list.filter(f => f.id !== uid)
     }
   } catch (err) {
-    console.error('加载好友列表失败', err)
+    handleApiError(err, '加载好友列表失败')
   }
 }
 
@@ -129,11 +128,7 @@ const searchUser = async () => {
   const params = new URLSearchParams()
   params.append('userId', searchKeyword.value.trim())
   try {
-    const res = await fetch('http://localhost:8088/message/userSelect', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: params.toString()
-    })
+    const res = await http.post(endpoints.message.userSelect, params.toString())
     const data = await res.json()
     if (data.success) {
       searchResult.value = data.user
@@ -156,11 +151,7 @@ const addFriend = async (friendId) => {
   params.append('customerId', currentUserId.value)
   params.append('friendId', friendId)
   try {
-    const res = await fetch('http://localhost:8088/message/friendAdd', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: params.toString()
-    })
+    const res = await http.post(endpoints.message.friendAdd, params.toString())
     const data = await res.json()
     if (data.success) {
       alert('好友申请已发送')
@@ -191,11 +182,7 @@ const loadPendingRequests = async () => {
   const params = new URLSearchParams()
   params.append('friendId', uid)
   try {
-    const res = await fetch('http://localhost:8088/message/selectFriend', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: params.toString()
-    })
+    const res = await http.post(endpoints.message.selectFriend, params.toString())
     const data = await res.json()
     if (data.success) {
       pendingRequests.value = data.list
@@ -203,7 +190,7 @@ const loadPendingRequests = async () => {
       pendingRequests.value = []
     }
   } catch (err) {
-    console.error('加载申请失败', err)
+    handleApiError(err, '加载申请失败')
   }
 }
 
@@ -223,16 +210,12 @@ const handleRequest = async (applicantId, action) => {
   params.append('friendId', currentUserId.value)
   let url = ''
   if (action === 'agree') {
-    url = 'http://localhost:8088/message/friendUp'
+    url = urlOf(endpoints.message.friendUp)
   } else {
-    url = 'http://localhost:8088/message/friendDe'
+    url = urlOf(endpoints.message.friendDe)
   }
   try {
-    const res = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: params.toString()
-    })
+    const res = await http.post(url, params.toString())
     const data = await res.json()
     if (data.success) {
       alert(action === 'agree' ? '已添加为好友' : '已拒绝申请')
