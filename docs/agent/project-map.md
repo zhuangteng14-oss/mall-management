@@ -92,7 +92,7 @@ Vue 3 CLI 工程，14 个页面视图 + 1 个组件 + 1 个路由表。页面按
 
 | 结论 | 详见 |
 |---|---|
-| 全项目仅 1 处事务边界，多处多表写无事务保护 | `concurrency-map.md` |
+| 全项目事务边界 **4 处**（**2026-10-04 起**：`UserService.loginAdd` + C#2 的 `GoodsService` 三个写方法）；**多表写仍无事务保护的只剩 message 域 `friendUp`** | `concurrency-map.md` |
 | 订单三状态位用条件 UPDATE 实现 CAS，是全项目唯一正确的并发控制 | `concurrency-map.md` |
 | `productsales.OrderVolume` 从未被更新，订单量统计功能失效 | `concurrency-map.md` |
 | 全项目零缓存（**2026-09-14 时**；B1 自 2026-09-27 起逐笔落地，现行见右栏第二项） | `cache-map.md`（顶部有时效标注）/ `context-packs/cache-layer.md` |

@@ -5,6 +5,8 @@
 > 定稿：2026-09-30（`origin/main` = `e930b30`）。
 > **修订：2026-09-30（`origin/main` = `3917cd3`）** —— C 组已升门禁（`5544362`）、P0 #1～#4 已修、新增 **G. 缺陷修复归属**。
 > **修订（2026-09-30，`origin/main` = `2cc2338`）** —— **D#1 禁令已登记**（新增 `### D.1`）、**D#4 DAO 选型已定**（新增 `### D.4`）、新增 **H. A3 覆盖矩阵**。⚠️ **修订（2026-10-02，三层第三笔 = 用户域，PR #32 `0c07e96`）** —— 用户域 5 个端点的业务体与全部内联 SQL 下沉 `UserService` / `UserDao`；本文凡引用 `UserController:<n>` 处已就地重指为 `UserService.<方法>:<行>` / `UserDao.<方法>:<行>`（行号 = 方法声明行）。⚠️ **口径注**：本文所有 `:<行>` 为 **2026-10-02 实测**；重构后须重测。
+>
+> **修订（2026-10-04，`fix/goods-write-tx` = C#2 落地）** —— **C#2 已裁并落地**：商品域三个写方法（`GoodsService.goodsAdd` / `goodsUp` / `goodsDe`）加 `@Transactional` **+ catch 内标记回滚**。本文凡称 C#2「未裁 / 阻塞落笔 / 应当加」处已就地改为「✅ 已落地」，并订正 **D.1「现状」行的真注解计数（1 → 4 处）** —— 那个数被本笔改了。**D#1 禁令本身一字未动**。
 
 ## 任务
 
@@ -48,7 +50,7 @@
 2. 所有 DB 变更登记在 `db-migration.md`（含回滚 SQL）。**回滚 = 逻辑废弃、非物理删除** —— 原「回滚 vs 规则 4」的
    固有矛盾已由规则 v2 裁决（见 `business-decisions.md` BD-02、`tech-debt.md` TD-03）。
 3. **向后兼容**：不得删旧接口、旧字段。
-4. ⚠️ **`orderAddLocked` 不得加 `@Transactional`** —— 见 D#1。**这条不可外推到其他方法**；反面是 C#2（`goodsAdd` **应当**加）。
+4. ⚠️ **`orderAddLocked` 不得加 `@Transactional`** —— 见 D#1。**这条不可外推到其他方法**；反面是 C#2（`goodsAdd` **应当**加）—— ✅ **C#2 已于 2026-10-04 落地**（`fix/goods-write-tx`：商品域三个写方法 `goodsAdd` / `goodsUp` / `goodsDe` 加 `@Transactional` + catch 内标记回滚）。本禁令**不受影响**：它管的是「被打锁的临界区」，商品域无锁。
 
 ## 验收标准
 
@@ -103,7 +105,7 @@ TD-01（ddl-auto）、TD-03（回滚规则矛盾）、TD-04/06/07/08（锚点与
 | # | 项 | 卡住什么 | 归属 | 工作量 |
 |---|---|---|---|---|
 | 1 | `goodsUp` 改名粒度（一条 vs 批量） | — | 裁决先行 → 三层内实施 | 小 |
-| 2 | **`goodsAdd` / `goods` / `productsales` 事务边界** | **DAO / 事务层**：「半成品商品」的修法是给 `goodsAdd` 加 `@Transactional`。⚠️ 这是 **D#1 的反面** —— `orderAdd` 那条**不得加**只适用于它自己，**不要外推** | **三层内（DAO / 事务层）** | 中 |
+| 2 | **`goodsAdd` / `goods` / `productsales` 事务边界** | **DAO / 事务层**：「半成品商品」的修法是给 `goodsAdd` 加 `@Transactional`。⚠️ 这是 **D#1 的反面** —— `orderAdd` 那条**不得加**只适用于它自己，**不要外推** | ✅ **已落地（2026-10-04，`fix/goods-write-tx`）** —— 范围**扩到三处**（`goodsAdd` + `goodsUp` + `goodsDe`，同文件 / 同表对 / 同修法）；**落点是 Service 写方法**，不是 DAO。⚠️ 关键：三个方法都**自己吞异常**，故只加注解不够，catch 内须 `setRollbackOnly`（`GoodsService.markRollbackOnlyIfActive()`） | 中 |
 | 3 | `productsales` 硬删 vs 软删 | — | 裁决先行 → 三层内 | 小 |
 | 4 | 时间线动作集是否需 cancel/refund | B3 时间线扩展 / C3 视图 | 三层后（C3） | 小 / 中 |
 | 5 | `BD-01` `SettlementDate` 归谁 | `db-schema.md §4` 方案 A/B/C | 裁决先行 → 三层后（C3） | 小 / 中 |
@@ -132,8 +134,8 @@ TD-01（ddl-auto）、TD-03（回滚规则矛盾）、TD-04/06/07/08（锚点与
 | **禁令** | **`orderAddLocked` 不得加 `@Transactional`** —— 与本文 **`:49` 约束 4** 是同一句。源头（2026-10-02 随订单端点拆出后现址）：`OrderService` 类 javadoc `:26`（禁令标题）、`addLocked` 声明 `:124`、`OrderDao` 类 javadoc `:39` + `DistributedLockService` 类 javadoc「调用点的两条硬要求」（第一颗 bullet） |
 | **理由 ① 锁外事务** | 事务的提交发生在**方法返回之后**，而锁在 `runLocked` 的 `finally` 里、即方法**返回之前**已释放 ⇒ 后进者拿到锁后的 `SELECT COUNT(*)` 在 **RR** 下读的是自己事务开始时的快照、**看不到前一个未提交的行** ⇒ 仍插 2 行。**不加事务时 autocommit 让 INSERT 在释放锁之前就提交** —— 这正是临界区查重成立的前提（`A-S2a-1b`：20 并发同 `OrderId` 落库 **20 → 1**，靠的就是这一条） |
 | **理由 ② 跨 bean 调用** | 临界区是**传给另一个 bean**（`DistributedLockService`）的 **lambda**，锁的持有者是那个 bean、不是本方法 ⇒ **没有「锁内的 bean 方法边界」可以挂事务**。且三个 Controller 被测试**钉死为无 AOP 代理**（`MallManagementApplicationTests:117` `goodsControllerIsNotAopProxied` / `:137` `messageControllerIsNotAopProxied` / `:157` `orderControllerIsNotAopProxied`）⇒ 注解式 AOP 在这里**结构上不可用**，锁只能是方法体内的显式调用（同类内自调用同样不走代理，同仓 `GoodsService:43-52` 的同一论证；⚠️ 2026-10-02 前该论证在 `GoodsController:236`，随 `productCodePrice` 的 catch 一起下沉） |
-| **⚠️ 不可外推** | 本禁令**只管被打锁的方法体**。它的反面是 **C#2**：`goodsAdd`（**没有**打锁）的事务边界**应当**加 `@Transactional` —— 只记住半边就会踩另一边 |
-| **现状** | 全项目**唯一一处「禁止用标准注解」**。`orderAddLocked` 目前**未加**（`亲读`：该方法体上无 `@Transactional`）；`@Transactional` **注解**全仓只有 **1 处**（`UserService.loginAdd:124`，`loginAdd`），不在此方法上。⚠️ 原记「全仓 10 处」已在 **2026-10-02 实测订正为 1 处** —— 10 是**把 javadoc / 注释里提到 `@Transactional` 的地方也数了进去**（`grep -n "@Transactional"` 现得 18 行，其中仅 1 行是真注解）；同源订正见 `selection-status.md §2` 与 `concurrency-map.md §1` 的「仅 1 处」 |
+| **⚠️ 不可外推** | 本禁令**只管被打锁的方法体**。它的反面是 **C#2**：`goodsAdd`（**没有**打锁）的事务边界**应当**加 `@Transactional` —— 只记住半边就会踩另一边。✅ **C#2 已于 2026-10-04 落地**（`fix/goods-write-tx`，范围含 `goodsUp` / `goodsDe`）；本禁令本身**不变**，两个方向都仍是原状 |
+| **现状** | 全项目**唯一一处「禁止用标准注解」**。`orderAddLocked` 目前**未加**（`亲读`：该方法体上无 `@Transactional`）。⚠️ **真注解计数：2026-10-04 起是 4 处** —— `UserService.loginAdd:124` + C#2 新增的 `GoodsService.goodsAdd` / `goodsUp` / `goodsDe`（均**不在此方法上**、也不在任何被打锁的方法上，禁令未破）。⚠️ 原记「全仓 10 处」已在 **2026-10-02 实测订正为 1 处** —— 10 是**把 javadoc / 注释里提到 `@Transactional` 的地方也数了进去**（`grep -rn "@Transactional"` 在 `src/main/java` 于 **2026-10-04 复测得 45 行，其中 4 行是真注解**；2026-10-02 的旧值是 18 行 / 1 行 —— 本笔自己就添了 3 处真注解与若干说明文字）；同源订正见 `selection-status.md §2` 与 `concurrency-map.md §1` 的「仅 1 处」 |
 
 ### D.4 📌 登记：DAO 选型结论（2026-09-30 本笔落定）
 
@@ -145,7 +147,7 @@ TD-01（ddl-auto）、TD-03（回滚规则矛盾）、TD-04/06/07/08（锚点与
 | **短期（三层第一笔起）** | `JdbcClient` —— Spring 的 JDBC 门面（命名参数 + `RowMapper`），**零新依赖**：`spring-boot-starter-jdbc` 已在 `pom.xml:40`。`亲读`：本机 m2 的 `spring-jdbc-6.2.6.jar` 内含 `org/springframework/jdbc/core/simple/JdbcClient.class`（连同 `StatementSpec` / `MappedQuerySpec` 等 11 个 class）—— **不是推断，是解包实测** |
 | **为什么短期不用 JPA** | ① **TD-01**：引 JPA 就会有人加 `@Entity`，而 `ddl-auto=update`（`application.properties:12`）会**反向 `ALTER TABLE`**；② 三层第一笔的需求只是「唯一数据访问出口 + 消灭 39 处硬编码 schema 名」（**F#1**），JPA 的实体映射在这里是**净负担**。⚠️ `spring-boot-starter-data-jpa`（`pom.xml:51`）**保留不删**（`agent.md:36-37`） |
 | **长期（何时切 jOOQ）** | 等 **DAO 边界稳定**、且出现「类型安全的 SQL 构建 / 代码生成」的实际需求时。**现状（`亲读`）**：jOOQ **全仓 0 命中** —— `pom.xml` 无、`src` 无、`docs` 无；本机 m2 只有 `org/jooq/jooq-bom/3.19.32`（**BOM 元数据，无 jar**）⇒ 现在引入等于**新增一个依赖 + 一套生成流程**，而收益要等 DAO 边界定形才兑现 |
-| **与 D#1 / C#2 的关系** | DAO 层正是「事务边界」（**C#2**）的落点；而 **D#1** 是那条规则的**唯一例外** —— 两者必须一起读 |
+| **与 D#1 / C#2 的关系** | **D#1** 是那条规则的**唯一例外** —— 两者必须一起读。⚠️ 但 2026-10-04 落地时 **C#2 的落点是 Service 写方法（`GoodsService`），不是 DAO**：注解要挂在「一个 bean 的公开方法」上才有代理，而跨两表的两条语句由 Service 编排 ⇒ 挂 DAO 反而要合并方法（见 `GoodsService` 类注释「C#2」） |
 
 ## E. 三层前置 —— 开工前要知道的事实
 
@@ -262,7 +264,7 @@ TD-01（ddl-auto）、TD-03（回滚规则矛盾）、TD-04/06/07/08（锚点与
 
 ## 最容易漏的两条
 
-1. **D#1** —— `@Transactional` 禁令 **2026-09-30 已登记**（`### D.1`，本笔）。⚠️ 但**登记 ≠ 记住**：它仍是新层最容易踩的一条。且它与 **C#2** 是同一约束的两面（一边**必须加**、一边**禁止加**），只记住半边就会踩另一边。
+1. **D#1** —— `@Transactional` 禁令 **2026-09-30 已登记**（`### D.1`，本笔）。⚠️ 但**登记 ≠ 记住**：它仍是新层最容易踩的一条。且它与 **C#2** 是同一约束的两面（一边**必须加**、一边**禁止加**），只记住半边就会踩另一边。⚠️ **C#2 那半边已于 2026-10-04 落地**（`fix/goods-write-tx`）—— 落地的形状印证了这句话：真正的难点不在「加不加」，而在**加了之后 catch 会不会把回滚吞掉**。
 2. **E 档「C 组」** —— ⚠️ **此条已过期**：2026-09-30 `5544362` 起 C-1/C-2 是门禁，改了时间线 CI **会红**。仍留在「最容易漏」里，是因为它描述的陷阱换了形状、并没消失 —— **从旧文档读到「不门禁」的人，会以为时间线没有护栏**。
 
 ## 待验 —— 开工前不该当成已知
@@ -274,9 +276,9 @@ TD-01（ddl-auto）、TD-03（回滚规则矛盾）、TD-04/06/07/08（锚点与
 ## 开工顺序建议
 
 1. ✅ **两条「新层须知」已于 2026-09-30 定（本笔）**：**D#4** = **`JdbcClient` 短期 + jOOQ 长期**（`### D.4`）+ **D#1** = `@Transactional` 禁令**已登记**（`### D.1`） —— 原文「不定就没法落笔」的**前置已满足**，可落笔
-2. **裁决先行**：**C#2**（事务边界）、**C#6**（TD-17 拦截 vs 观测）—— 两条都阻塞落笔
+2. **裁决先行**：~~**C#2**（事务边界）~~ ✅ **2026-10-04 已裁并落地**（`fix/goods-write-tx`）、**C#6**（TD-17 拦截 vs 观测）—— ⚠️ **本条原写「两条都阻塞落笔」，现只剩 C#6 一条**
 3. **拆层顺序**：Controller → **DAO** → Service —— 先把数据出口收成一处，Service 才有意义
-4. **三层内顺带做**：校验（B#1 / #3 / #4 / #5、C#6）、全局异常出口（A#5 / D#2）、拦截器与 CORS（D#3）、事务边界（C#2）、A#2 / A#3 / D#5 / D#6
+4. **三层内顺带做**：校验（B#1 / #3 / #4 / #5、C#6）、全局异常出口（A#5 / D#2）、拦截器与 CORS（D#3）、~~事务边界（C#2）~~ ✅ **已于 2026-10-04 做**（但**未走三层**：四域三层早已完成，本笔记在公共层笔）、A#2 / A#3 / D#5 / D#6
 5. **并行**：A′#6–8、A#1（L2 TTL）、D#7 / D#8
 6. **三层后**：身份层（鉴权）；C#4 / C#5（C3 时间线）
 
@@ -288,5 +290,5 @@ TD-01（ddl-auto）、TD-03（回滚规则矛盾）、TD-04/06/07/08（锚点与
 > **权威进度表**：`docs/agent/progress.md`（2026-09-30 新建；命名约定见其 **§0**）。
 > 与本文相关的两笔（三层前准备）**均已收尾（2026-09-30）**：**笔 1 前端走查**（结果分流入 `api-contract.md` + `defect-survey.md`）/ **笔 2 文档补节** ——
 > 笔 2 的 5 项**全部落定**：`D#1`（**`### D.1`**）、`D#4`（**`### D.4`**）、C3 数据源清单（`selection-status.md §6`）、A3 覆盖矩阵（**§H**）、`§G` 现状复校（**G 表已存在**，#11 / #12）；
-> 另有两条**阻塞落笔**的裁决 `C#2` / `C#6` **仍未裁**，见 `progress.md §5-B`。
+> 另有两条**阻塞落笔**的裁决 `C#2` / `C#6` —— ⚠️ **本条已过期一半**：`C#2` 于 **2026-10-04 已裁并落地**（`fix/goods-write-tx`），**只剩 `C#6` 仍开着**，见 `progress.md §5-B`。
 

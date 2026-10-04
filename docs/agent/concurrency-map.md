@@ -11,23 +11,26 @@
 
 | 结论 | 严重度 |
 |---|---|
-| 全项目**仅 1 处** `@Transactional`（`loginAdd`，现址 `UserService.loginAdd:124`，方法声明 `:125`；2026-10-02 全仓复测仍**仅此 1 处**） | — |
+| 全项目**曾仅 1 处** `@Transactional`（`loginAdd`，现址 `UserService.loginAdd:124`）→ ⚠️ **2026-10-04 起为 4 处**：C#2 给商品域三个写方法（`GoodsService.goodsAdd` / `goodsUp` / `goodsDe`）各加一处。⚠️ 原记「全仓复测仅此 1 处」是 **2026-10-02** 的口径，**已过期** | — |
 | 订单三状态位用条件 UPDATE 实现 **CAS**，是全项目唯一正确的并发控制 | 正面案例 |
 | `productsales.OrderVolume` **从未被更新**，订单量统计功能失效（**非竞态问题**） | 高 |
-| 4 处多表写**无事务保护**（`goodsAdd`/`goodsUp`/`goodsDe`/`friendUp`） | 高 |
+| ~~4 处多表写**无事务保护**（`goodsAdd`/`goodsUp`/`goodsDe`/`friendUp`）~~ → ✅ **3 处已修（2026-10-04，C#2 `fix/goods-write-tx`）**：`goodsAdd` / `goodsUp` / `goodsDe` 加 `@Transactional` + catch 标回滚。⚠️ **`friendUp` 仍无事务**（message 域，本笔明确不并入） | 高 → **仅剩 `friendUp`** |
 | 3 处「先查后插」存在 **TOCTOU 竞态**，且无数据库唯一约束兜底 | 高 |
 | ~~无任何锁：无 `synchronized`/`Lock`/`FOR UPDATE`/`@Version`/Redis/Redisson~~ → ⚠️ **2026-10-02 已不成立**：**B2**（2026-09-30）引入 **Redisson 3.46.0** 分布式锁，`DistributedLockService.runLocked` 现有 **5 个业务调用点**（`OrderService` 4 + `MessageService` 1）。仍**确实**没有的是 `synchronized` / `FOR UPDATE` / `@Version`（全仓 0 命中）—— 「无锁」已从**事实**降级为**局部事实** | 中 |
 | ~~无任何异步与线程池：无 `@Async`/`@Scheduled`/`CompletableFuture`/`ThreadPoolTaskExecutor`~~ → ⚠️ **2026-10-02 部分不成立**：**B3** 引入显式 `ThreadPoolExecutor`（`OrderStateExecutor:79`，`ArrayBlockingQueue(1024)`，`app.order.state.async.queue-capacity`）。四个字面量仍 0 命中，但「无线程池」不再为真 | 低（主流程仍同步；异步仅限订单状态事件） |
 
-## 2. 唯一的 @Transactional
+## 2. 事务边界（曾「唯一的 @Transactional」，2026-10-04 起共 4 处）
 
 | 位置 | 方法 | 覆盖的写入 | 评价 |
 |---|---|---|---|
 | `UserService.loginAdd:125` | `loginAdd` | `user` 插入 + `customerimage`/`merchantimage` 插入 + `login` 插入（客户分支 `UserDao:170,186,205`；商家分支 `UserDao:178,193,211`） | ✅ **用法正确**。三表写入具备原子性，任一失败整体回滚。 |
+| `GoodsService.goodsAdd` | `goodsAdd` | `goods` 插入 + `productsales` 插入 | ✅ **C#2（2026-10-04）**。⚠️ 形状与上表**不同**：该方法**自己 catch 吞异常**（不 rethrow）⇒ 光加注解不成立，catch 内须显式 `setRollbackOnly`（见 `GoodsService.markRollbackOnlyIfActive()`）。判据：`GoodsWriteTxAtomicityTest` |
+| `GoodsService.goodsDe` | `goodsDe` | `goods` 删除 + `productsales` 删除 | ✅ 同上（两条 DELETE 的原子性） |
+| `GoodsService.goodsUp` | `goodsUp` | `goods` 更新 + `productsales` 改名 | ✅ 同上（防「两表名字不一致」） |
 
 > ✅ **`U:` 坐标已于 2026-10-02 三层第三笔（user 域，`0c07e96`）重指完毕** —— 原「待 user 笔重指」作废。`@Transactional` 现址 `UserService.loginAdd:124`（方法声明 `:125`），6 条分支 INSERT 现址见上表。原 `U:47` / `U:70,75,81` / `U:87,91,96` 均为三层前 264 行版 `UserController` 的历史坐标。
 
-四个业务 Controller 全文再无第二处 `@Transactional`（全仓复测：主源真实注解**仅 `UserService.loginAdd:124` 一处**，其余均为 javadoc 里的字面提及）。
+四个业务 Controller 全文无任何 `@Transactional`（那 4 条断言把 Controller 钉死为无代理，见 `MallManagementApplicationTests`）。⚠️ **主源真实注解计数已由 1 变 4**（2026-10-04：C#2 给上表后三条各加一处）；其余 `grep` 命中仍全是 javadoc 里的字面提及。⚠️ **4 处都不在任何被打锁的方法上** —— D#1 禁令未破。
 
 ## 3. 正面案例：order 三状态位 CAS
 
@@ -65,9 +68,9 @@
 
 | # | 缺失项 | 具体问题 | 证据 |
 |---|---|---|---|
-| 1 | 多表写无事务 | `goodsAdd` 插 `goods` + `productsales`，第二次失败会留下无销量记录的孤儿商品 | `GoodsService:124`、`:131`（原记 `G:113`/`G:133`） |
-| 2 | 多表写无事务 | `goodsUp` 更新 `goods` + `productsales` 两表非原子 | `GoodsService:288`、`:291`（原记 `G:304`/`G:314`） |
-| 3 | 多表写无事务 | `goodsDe` 删 `goods` + `productsales` 两表非原子 | `GoodsService:220`、`:223`（原记 `G:227`/`G:231`） |
+| 1 | ~~多表写无事务~~ ✅ **已消除（2026-10-04，C#2 `fix/goods-write-tx`）** | ~~`goodsAdd` 插 `goods` + `productsales`，第二次失败会留下无销量记录的孤儿商品~~ → 现 `@Transactional` + catch 标回滚 | `GoodsService.goodsAdd:118`（`@Transactional`）、两条写 `:159`、`:166`；回滚标记 `:176`。⚠️ 原记 `GoodsService:124`/`:131` 是**本笔改前的**坐标 |
+| 2 | ~~多表写无事务~~ ✅ **已消除（同上）** | ~~`goodsUp` 更新 `goods` + `productsales` 两表非原子~~ → 现 `@Transactional` + catch 标回滚 | `GoodsService.goodsUp:350`、两条写 `:386`、`:389`；回滚标记 `:396`。⚠️ 原记 `:288`/`:291` 是改前坐标 |
+| 3 | ~~多表写无事务~~ ✅ **已消除（同上）** | ~~`goodsDe` 删 `goods` + `productsales` 两表非原子~~ → 现 `@Transactional` + catch 标回滚 | `GoodsService.goodsDe:301`、两条写 `:310`、`:313`；回滚标记 `:320`。⚠️ 原记 `:220`/`:223` 是改前坐标 |
 | 4 | 多表写无事务 | `friendUp` 改单向 `if_friend=1` 后插入反向行，第二步失败会产生**单向好友**（半好友关系） | ~~`M:266`、`M:268`~~ ✅ **已重指（2026-10-03 message 笔 `8ed5fc1`）**：`MessageService.friendUp:412`（UPDATE，`MessageDao.acceptFriendRequest:254-255`）→ `:414`（INSERT，`MessageDao.insertMutualFriend:275-276`）。**竞态未修**（两条语句之间仍无事务，catch 吞异常 ⇒ 单向好友仍可产生） |
 | 5 | TOCTOU 竞态 | `loginAdd` 先 SELECT 查重再 INSERT，并发下两个请求可同时通过查重 | ~~`U:61` → `U:81`~~ ✅ **已重指（2026-10-02 user 笔 `0c07e96`）**：查重 `UserDao.existsUserName:119` → 第一条写语句 `UserDao.insertUserCustomer:170`（**竞态未修**，仍由 A3 `A-B2-1` 以 `EXPECTED_DEFECT_PRESENT` 钉住） |
 | 6 | TOCTOU 竞态 | `friendAdd` 先查再插，并发重复申请会写入重复行 | ~~`M:205` → `M:219`~~ ✅ **已重指（2026-10-03 message 笔 `8ed5fc1`）**：查重 `MessageService.friendAddLocked:349`（`MessageDao.selectFriendPair:233-234`）→ 插入 `:362`（`MessageDao.insertFriendRequest:243-244`）；⚠️ **B2 已给该临界区加 `runLocked` 分布式锁**（`MessageService.friendAdd:323`，见 §5 #12 注） |
@@ -87,7 +90,7 @@
 
 ## 7. 改造优先级建议
 
-1. **立即**：为 §5 中 #1–#4 的四处多表写补 `@Transactional`（成本最低、收益最直接）。
+1. ~~**立即**：为 §5 中 #1–#4 的四处多表写补 `@Transactional`（成本最低、收益最直接）。~~ ✅ **3/4 已完成（2026-10-04，C#2 `fix/goods-write-tx`）**：§5 #1–#3（`goodsAdd` / `goodsUp` / `goodsDe`）已加。⚠️ **#4 `friendUp` 仍未加**（message 域，本笔按裁决不并入）。⚠️ 它**不能照抄**本笔的做法：它**没有打锁**（`亲读` `MessageService.friendUp:409`，不在 `runLocked` 内）⇒ D#1 禁令在语义上**不适用于它**（`MessageService.java:92-95` 已写死这一条），它属**另一笔**、须先裁。
 2. **立即**：给 `friend(customerid, friendid)`、`goodstype.GoodType` 加唯一索引，让数据库兜住 #5–#7 的 TOCTOU 竞态。✅ **已完成 2/3**：`order.OrderId` 于 **2026-09-30 S1a（`1e2fcfa`）** 加了 UNIQUE `uk_order_orderId`（§5 第 9 行已标「已消除」）；`goodstype.GoodType` 于 **2026-10-04 #11（`fix/goodstype-unique`）** 加了 UNIQUE `uk_goodstype_GoodType`（`SQL:246-262`，§5 第 10 行已标「已消除」）。⚠️ **2026-10-04 订正（drift-fix 笔）**：原写「剩余两项**未做**」不准确 —— **(a) `friend`**：其 TOCTOU（#5/#6）**已被 B2 的 `runLocked` 覆盖**（CI `ci49` 2026-10-03：`friendDupRows` 恒 = 1、`friendDupRounds = 0/5`）⇒ **只剩唯一索引未建**（仍建议建，作为最后防线）；**(b) `goodstype`**：原「**仍会造重复行**」（同一份 `ci49`：`goodstypeDupRows` 4 / 1 / 4 / 3 / 3，**4/5 轮复现**；根因 `GoodsTypeCacheService:71-72` 裸 `INSERT`、不在 B2 的 5 落点内）—— ⚠️ **该状态已于 2026-10-04 #11 结束**：索引已建，DB 层兜底到位；**写入路径的锁化【不做】**（DB UNIQUE 已兜住并发穿过窗口的那一刻；加锁会动 B2 的 5 个落点、触发 A3 断言重校准，代价远大于收益）。⇒ 本条对 `goodstype` 的「**立即**」**已履行**。
 3. **中期**：把 §3 的 CAS 模式推广到其余状态变更类写接口。
 4. **中期**：修复 `OrderVolume` 的统计逻辑（`orderAdd` 成功后递增，或改为查询时实时聚合）。

@@ -29,10 +29,12 @@ import java.util.Map;
  * <p>方法名 = 端点名（同 {@code GoodsService} / {@code OrderService} 的约定），
  * 使「Controller 一行委托」的对应关系可以肉眼核对。
  *
- * <h2>⚠️【{@code loginAdd} 上的 {@code @Transactional} 是**唯一一处真注解**，且必须留在本类】</h2>
- * 它随方法体从 {@code UserController:57} 搬到本例 —— <b>不是新增</b>。全仓 {@code @Transactional}
- * 「真注解 1 处」的计数（{@code three-layers.md §D.1}、{@code selection-status.md}）**不变**，
- * 只是换了一个宿主类。事务边界 = <b>一次业务操作</b>（一次注册的三条 INSERT 要么全成、要么全不成）。
+ * <h2>⚠️【{@code loginAdd} 上的 {@code @Transactional} 必须留在本类】</h2>
+ * 它随方法体从 {@code UserController:57} 搬到本例 —— <b>不是新增</b>（搬到本例时，全仓真注解仍是 1 处）。
+ * ⚠️ **但那个计数早已变了**：2026-10-04 的 **C#2**（`fix/goods-write-tx`）给 {@code GoodsService}
+ * 的三个写方法各加了一处真注解 ⇒ **全仓真注解现为 4 处**（{@code three-layers.md §D.1}、
+ * {@code selection-status.md §2} 已同步）。**本类这一处不受影响** —— 它仍是 user 域唯一的事务边界，
+ * 只是换了一个宿主类而已。事务边界 = <b>一次业务操作</b>（一次注册的三条 INSERT 要么全成、要么全不成）。
  *
  * <p>⚠️ <b>绝不加 try/catch</b> —— 这一条有两个独立理由，别只记住一个：
  * <ol>

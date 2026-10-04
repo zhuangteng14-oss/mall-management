@@ -36,7 +36,7 @@
 | **雪崩**：随机 TTL + 多级缓存 + Resilience4j 限流 | 部分 | 多级缓存 ✅；**随机 TTL ❌**（B1 明确不做，触发条件 = 某缓存族 key 数 > ~10）；**Resilience4j ❌** |
 | **穿透**：空值缓存 + 布隆过滤器 + 参数校验 | 部分 | 空值缓存 ✅（`549f74f` 首个负缓存，`userSelect`）；**布隆过滤器 ❌**；**参数校验 ❌**（无 validation 依赖，全仓 `@Valid` = 0） |
 | **分布式锁**：Redisson `tryLock(wait,lease)` + finally `isHeldByCurrentThread` | ✅ | B2；`tryLock` **真实调用 1 处**（`DistributedLockService:249` 的 `lock.tryLock(wait, lease, MILLISECONDS)`）。⚠️ **2026-10-02 实测订正**：原记「4 处实命中」是把 `LockSceneService` 里**注释提到 `tryLock`** 的 3 行（`:57` / `:268` / `:269`）一并数了进去。⚠️ 但取锁超时 / Redis 不可达 / 冷却窗口**三路 fail-open 回落原路径**（`tech-debt.md:280`）。⚠️ 此处原引 `:275` —— 该行号**在 S1a-2 之前就已偏 1**（实测该版本里目标表行在 **276**），S1a-2 的 +4 行把它推到 **280**，本笔一并更正 |
-| **MySQL 死锁**：固定加锁顺序 + 小事务 + `@Version` 乐观锁 + `@Retryable` | 部分 | `@Transactional` **注解 1 处**（`UserService.loginAdd:124` 的 `loginAdd`；2026-10-02 三层第三笔前在 `UserController:57`）。⚠️ **2026-10-02 实测订正**：原记「10 处」是**把 javadoc / 注释里写到 `@Transactional` 的地方也数了进去** —— `grep -n "@Transactional"` 在 `src/main/java` 得 18 行，其中 **17 行是说明文字**（含 `OrderService:26` 那条**禁令**、`OrderDao:39`、`GoodsDao:52-55` 等），真注解只有 1 行。**`@Version` ❌（0 命中）**；**`@Retryable` ❌（0 命中，且无 spring-retry）** |
+| **MySQL 死锁**：固定加锁顺序 + 小事务 + `@Version` 乐观锁 + `@Retryable` | 部分 | `@Transactional` **注解 4 处**（2026-10-04 起）：`UserService.loginAdd:124`（2026-10-02 三层第三笔前在 `UserController:57`）+ **C#2 的商品域三处**（`GoodsService.goodsAdd` / `goodsUp` / `goodsDe`）。⚠️ **2026-10-02 实测订正**：原记「10 处」是**把 javadoc / 注释里写到 `@Transactional` 的地方也数了进去** —— `grep -rn "@Transactional"` 在 `src/main/java` 于 2026-10-02 得 18 行、**2026-10-04 复测得 45 行**（本笔自己添了 3 处真注解与若干说明文字），其中 **4 行是真注解、41 行是说明文字**（含 `OrderService:26` 那条**禁令**、`OrderDao:39`、`GoodsDao:52-56` 等）—— **该「1 处」已被 C#2 改为 4 处**。**`@Version` ❌（0 命中）**；**`@Retryable` ❌（0 命中，且无 spring-retry）** |
 | **状态机**：显式 transition + 乐观锁 + 流转日志 + 频次告警 | 部分 | 显式 transition ✅（B3 转移表）；流转日志 ✅（B3 `order_state_transition` 时间线）；**乐观锁 ❌**（改用谓词守卫 CAS —— 需判断是否算等效，见 §5）；**频次告警 ❌** |
 | **线程池**：分池 + 有界队列 + `orTimeout` + 明确拒绝策略 | 部分 | 有界队列 ✅（`ArrayBlockingQueue(1024)`）；明确拒绝策略 ✅（discard-oldest-with-callback）；**分池 ❌（B3 只有单池）**；**`orTimeout` ❌（0 命中）** |
 
@@ -123,7 +123,7 @@
 | # | 项 | 分类 | 触发 / 时机 | 现状 | 归属 |
 |---|---|---|---|---|---|
 | 1 | 缓存正确性收口 | 类 1 | 前置：② 笔已 merge（✅）⇒ **现在即可** | ⚠️ **文档无同名条目**（口径是你的编号）；最近锚点 = `cache-layer.md §11`（㊳–㊷ 登记表，多为「登记 + 接受」未复裁）+ `§0` 硬约束 + `§11 附` 待办 B / E / ㊸ | 待指派（缓存笔） |
-| 2 | `C#2` `goodsAdd` 事务边界 | 类 1 | 前置：**#1 缓存收口后**（依赖 #1）；原标「**阻塞落笔**」 | `three-layers.md:180` / `:277`。关键：`orderAddLocked` **禁** `@Transactional` 的**反面** = `goodsAdd`（**无锁**）**应当加**（`three-layers.md:51` / `:135`） | 公共层笔（`progress.md:130` / `:144`） |
+| 2 | `C#2` `goodsAdd` 事务边界 | 类 1 | 前置：**#1 依赖已裁放行**（2026-10-04 用户裁决；**#1 本身仍挂着、不消**）—— 理由：改动面不重叠（#1 落 `GoodsCacheService` / `cache-layer.md §11`，C#2 落 `GoodsService` 三个**写**方法） | ✅ **已完成（2026-10-04，`fix/goods-write-tx`）** —— 范围**扩到三处**（`goodsAdd` + `goodsUp` + `goodsDe`，同文件 / 同表对 / 同修法）；落点是 `GoodsService` 的三个写方法。⚠️ **真正的难点不是「加不加注解」**：三个方法都自己 catch 吞异常 ⇒ 必须配 `setRollbackOnly`（`GoodsService.markRollbackOnlyIfActive()`），否则只加 `@Transactional` 是**假绿**。判据：`GoodsWriteTxAtomicityTest`（6 用例，含突变对照）；⚠️ **A3 不打这三个端点**（`three-layers.md §H.3`），护栏只有单测。关键：`orderAddLocked` **禁** `@Transactional` 的**反面** = `goodsAdd`（**无锁**）**应当加**（`three-layers.md:51` / `:135`） | 公共层笔 |
 | 3 | `B#1` 价格校验（资损） | 类 1 | 前置：校验层（`three-layers.md:279`「三层内顺带做」）—— 四域三层**已完** ⇒ 现在即可 | `defect-survey.md:107` 病 B：「服务端零价格校验：`orderAdd` 的 `Price` 由客户端直传直落库」；自述「**唯一有金额语义的一条**，泛化条目盖不住」 | 校验层笔（`three-layers.md:279`） |
 | 4 | `C#6` 状态位拦截 | 类 1 | 前置：**须先裁决**「拦截 vs 观测」；⚠️ 拦截会使 A3 的 S4a **全部 8 条断言失去前置**（H3 用 `orderAdd` 造前置态） | `three-layers.md:180`（两方案未裁）、`progress.md:183`；`defect-survey.md` 病 B（TD-17） | **需裁决** → 再指派 |
 | 5 | 前端规范化（7 项 B 类） | 类 1 | 前置：无（**可并行**） | `progress.md §6-C`：B 类 7 项 = P2.1 / P2.2 / P2.3 / P2.5 / P2.6 / P2.7 / P1.1。⚠️ **P2.6 含独立安全债**：`loginPassword` **明文入 sessionStorage** | 独立笔「前端 API 层规范化」 |
@@ -172,7 +172,7 @@
 | 30 | `getUserInfoById` 副本（记为「第三份」） | 类 4 | — | ⚠️ **文档立场相反**：`api-contract.md:60` / `cache-map.md:77` 明写「两份并存是**有意的**，不是漏删」 | ⚠️ **需先与文档立场对齐**再定 |
 | 31 | 单飞等待无界 | 类 4 | 沿用 `cache-layer.md:434` 的 **4 条**触发条件 | `cache-layer.md:434`（② 笔登记，含失败路径退化） | ② 笔（登记） |
 | 32 | 雪崩形态 3（写后集中回填） | 类 4 | 同上 4 条（与 `#31` 是**同一实例的两个面**） | `cache-layer.md:434`：「与 §9.1『雪崩（同时过期）』行的**写后集中回填**是同一实例」 | 登记 |
-| 33 | `productsales` 二元组无 UNIQUE | 类 4 | 【新拟】实测出现重复 `(ProductCode, MerchantId)` 行；**或 `#2`（`goodsAdd` 事务边界）落地时一并加** | `db-schema.md:49`：「`productsales` 无索引，亦无 `(ProductCode, MerchantId)` UNIQUE → **可写重复行**」 | 独立（schema 变更） |
+| 33 | `productsales` 二元组无 UNIQUE | 类 4 | 【新拟】实测出现重复 `(ProductCode, MerchantId)` 行。⚠️ 原第二触发「**或 `#2` 落地时一并加**」**已过期**：`#2` 于 2026-10-04 落地（`fix/goods-write-tx`）**未**一并加该索引（本笔是行为变更、不含 schema 变更） | `db-schema.md:49`：「`productsales` 无索引，亦无 `(ProductCode, MerchantId)` UNIQUE → **可写重复行**」 | 独立（schema 变更） |
 
 ---
 
