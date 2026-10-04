@@ -115,7 +115,7 @@
 | catch 归因一律「已存在」 | `GoodsController:114-116`；`UserController:200-203` | 磁盘满/权限错被说成「已存在」，排查方向被带偏 | 亲读 |
 | `spring.servlet.multipart.*` 完全未配 | 全仓 0 命中 | 走 Boot 默认 1MB，超限抛 `MaxUploadSizeExceededException` → 无全局异常处理 → 用户拿框架错误体 | 亲读(框架) |
 | 无全局异常处理 / 无拦截器（除 CorsFilter） | 全仓 `@ControllerAdvice`/`@ExceptionHandler`/`HandlerInterceptor` = **0** | 未捕获异常走 Boot 默认错误体（含 `timestamp/path`），错误文案与 HTTP 码全项目不统一 | 亲读 |
-| `orderAdd` 三位状态位由客户端直传（TD-17） | `OrderStateMachine.java:36-38` 自述 | 伪造态唯一入口；**只观测不拦截**（D2），拦截需业务裁决 | 亲读 |
+| `orderAdd` 三位状态位由客户端直传（TD-17） — ✅ **已修复（C#6，2026-10-04 `fix/order-state-guard`）** | `OrderStateMachine.java:42-53`（C#6 更新段；⚠️ 原记自述 `:36-38` 现仍在，但已被本段订正） | 原：伪造态唯一入口，**只观测不拦截**（D2）。**现**：出生闸 `OrderState.isInitial`，白名单 `{(0,0,0),(1,0,0)}`，落在 `OrderService.orderAdd` 的 `runLocked` **之前**、**排在价格闸之后**；非法出生态 ⇒ **HTTP 200 + `{success:false,msg:"订单状态不合法"}`**，**不取锁、不触库**，同时记 `mall.order.state.birth.rejected{shape}` + 一行 WARN。⚠️ **白名单必须含 `(1,0,0)`** —— 生产前端 `ProductPage.vue:354` 就直传 `PayIf=1`（同页 `:342-343` 固定 `DeliveryIf:0`/`ReceiveIf:0`）⇒ 拒它 = 弄坏下单。⚠️ `(1,1,0)`/`(1,0,1)`/`(1,1,1)` 三条**合法但非初始**态**刻意被拒**。⚠️ **本笔不是「不变式前移」** —— 后者对这三条答「合法」、会**原样放行** `(1,1,0)`/`(1,0,1)`/`(1,1,1)`（TD-17 正文举的正是其中 `(1,1,1)`「出生即完成」）；⚠️ **存量脏行**不在本笔范围（`mall.order.state.illegal` 保留不删）。A3 侧适配见 `progress.md §5-G` | 亲读 |
 | **服务端零价格校验：`orderAdd` 的 `Price` 由客户端直传直落库** — ✅ **已做边界收窄（B#1，2026-10-04 `fix/price-validation`）** | `OrderController.orderAdd:53-67`（`@RequestParam("Price") float Price` 在 `:58`）→ `OrderService.orderAdd` → `OrderDao.insertOrder:82-92` 原样写入；改前方法体内**无重算、无比对**（从不查 `goods.Price`）。⚠️ **原记** `MallManagementGoodsController:390` → `:435-449` 是**三层前**坐标，已失效（与 `three-layers.md:94` 同一处漂移，B#1 一并订正） | 客户端可 POST 任意 `Price`（`float` 连正负都不校验，TD-17 旁证）。**仓内无支付网关** ⇒ 「可伪造价格」成立、「资损」是**条件后果**（一旦 `order.Price` 被下游当真值）。这是「无校验层」中**唯一有金额语义**的一条，泛化条目（§四）盖不住。**B#1 之后**：`OrderService.orderAdd` 在**锁之前**加 `priceRejection`（正面判据 `Float.isFinite && >= 0 && <= 10^7`；不通过 ⇒ HTTP 200 + `{success:false,msg:"价格不合法"}`，且**不取锁、不触库**）⇒ **「任意值」收窄为「有界值」**。⚠️ **本笔不是资损修复**：合法但有界范围内的「1 元的电视」仍挡不住 —— **真值源（支付侧）** 已独立挂账（落点 `progress.md` 挂账段） | 亲读 |
 | `goodstype.GoodTypeNew` 可被显式传 NULL 打 `NOT NULL DEFAULT '0'` | `mall_management_sql.sql:76` | 行为待验（见 §七） | 亲读 |
 
@@ -260,7 +260,7 @@
 3. `productsales` 硬删 vs 软删
 4. 时间线的动作集是否需要 cancel/refund
 5. `BD-01` 的 `SettlementDate` 归谁
-6. **TD-17 伪造态：观测已做，拦截需业务裁决**（拦截会使 A3 的 S4a 全部 8 条断言失去前置）
+6. **TD-17 伪造态：观测已做，拦截需业务裁决**（拦截会使 A3 的 S4a 全部 8 条断言失去前置） — ✅ **已裁并落地（C#6，2026-10-04 `fix/order-state-guard`）**：裁决取**拦截**（出生态白名单 `{(0,0,0),(1,0,0)}`，闸在 `OrderService.orderAdd` 的 `runLocked` **之前**、**价格闸之后**）。⚠️ **原括号里那句计数已实测订正**：S4a 的 5 个前置态**全是合法态** ⇒ 受影响 **3 条**（`A-S4a-3`/`-5`/`-6`，前置态 `PD`/`PR`/`PDR`），且**只变前置构造方式、断言语义 0 条变**；**真正被打断的是 C 组**（`C_BITS` 八组合要求全部出生）。A3 侧适配（新增 `A-S4a-0` / `A-C6-1` / `A-C6-2`，`gates.count` 27 → 30）见 `progress.md §5-G`。⇒ 本条**已不再属 Class B**（无须再裁）；留在此表只为留痕。
 
 ---
 

@@ -26,6 +26,12 @@ package com.minke.mallmanagement.order.model;
  * 三个 CAS 端点自己的守卫拦不住这种**出生即非法**的行 —— 它们只保证「流转」不乱，
  * 管不了「入土」时是什么。
  *
+ * <p>⚠️ <b>该入口已于 C#6（2026-10-04 `fix/order-state-guard`）关闭</b>：
+ * {@code OrderService.orderAdd} 在取锁之前用 {@link #isInitial} 挡掉非初始态
+ * ⇒ **API 路径再也造不出这 3 个非法态**。三个枚举常量**一个都不删**（它们仍是
+ * {@code OrderStateMachine.stateName(...)} 与时间线重放的词表，且存量脏数据可能已是这些态），
+ * 保留即「读得懂历史上出现过的值」。
+ *
  * <p>本枚举**不含**「未知 / 无法归类」这个哨兵值：{@link #of} 只承认 {0,1}，
  * 越界取值由调用方用 {@link #isCanonical} 判掉（观测路径请走
  * {@code OrderStateMachine.stateName(...)}，它永不抛）。
@@ -98,6 +104,39 @@ public enum OrderState {
     /** 三个状态位是否都落在 {0,1} 内 —— {@link #of} 的前置条件。 */
     public static boolean isCanonical(int payIf, int deliveryIf, int receiveIf) {
         return isBit(payIf) && isBit(deliveryIf) && isBit(receiveIf);
+    }
+
+    /**
+     * 是否为**下单可接受的初始态** —— 全仓**唯一**的判据处，由 {@code OrderService.orderAdd}
+     * 的出生闸（C#6，2026-10-04 `fix/order-state-guard`）调用。
+     *
+     * <p>取值是**恰好两个**：{@link #CREATED} {@code (0,0,0)} 与 {@link #PAID} {@code (1,0,0)}。
+     *
+     * <h2>⚠️ 为什么必须收 {@code (1,0,0)} —— 别把它当"多收了一个"，拒它会弄坏生产</h2>
+     * 下单页问「是否现在付款？」（{@code ProductPage.vue:354} 的 {@code PayIf: payIf ? 1 : 0}），
+     * 点「是」时**直接传 {@code PayIf=1}**，{@code DeliveryIf} / {@code ReceiveIf} 恒为 0
+     * （同文件 {@code :342-343}）。⇒ 生产环境**实际只会产生这两个组合**，「初始态」不是**一个**
+     * 状态而是 {@code {CREATED, PAID}} 两个 —— 这不是推断，是 {@link #PAID} 常量的 javadoc
+     * 早就写下的既成事实（它记着「{@code orderAdd} 直接造出 PAID」）。
+     * <p>因此**拒 {@code (1,0,0)} 会当场断掉「下单即付款」这条主流程**，而它并不是伪造态。
+     * 谁若认为「初始态只该有 (0,0,0)」（TD-17 建议①「一律写 0」的原话）请先改前端，
+     * 那是**另一笔**，不是收紧这道闸的理由。
+     *
+     * <h2>⚠️ 为什么只收这两个 —— 拒 {@code (1,1,0)} / {@code (1,0,1)} / {@code (1,1,1)}</h2>
+     * 这三条**是合法态**（满足 {@link #legal()}，即 A-S4a-8 的不变式），所以「只收合法态」
+     * 那种更宽的规则（= 把 {@code legal()} 前移）**拦不住它们** —— 而 TD-17 正文举的正是
+     * {@code (1,1,1)}「已付款+已发货+已收货」：客户端一个 POST 就能凭空造出终态订单，
+     * 全程不经过三个 CAS 端点。⇒ 判据必须是**初始态白名单**，不能是不变式。
+     * <p>这三条被拒是**刻意的**，{@code OrderAddStateGuardSmokeTest} 有 3 条用例逐条钉住
+     * —— 将来谁想把规则放宽成 {@code legal()}，会先红。
+     *
+     * <p>本判据与 {@link #legal()} 是**两个不同的规则，不可互相替代**：
+     * {@code legal()} 管「流转后的状态合不合法」（A-S4a-8 门禁），{@link #isInitial} 管
+     * 「出生时允许从哪几个状态开始」（C#6 出生闸）。前者是后者的**超集**。
+     */
+    public static boolean isInitial(int payIf, int deliveryIf, int receiveIf) {
+        return isCanonical(payIf, deliveryIf, receiveIf)
+                && deliveryIf == 0 && receiveIf == 0;
     }
 
     /**

@@ -4,6 +4,7 @@ import com.minke.mallmanagement.order.metrics.MallOrderStateMetrics.OrderStateEv
 import com.minke.mallmanagement.order.metrics.MallOrderStateMetrics.RejectReason;
 import com.minke.mallmanagement.order.metrics.MallOrderStateMetrics.Result;
 import com.minke.mallmanagement.order.model.OrderAction;
+import com.minke.mallmanagement.order.model.OrderStateMachine;
 import io.micrometer.core.instrument.Timer;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.DisplayName;
@@ -117,6 +118,70 @@ class MallOrderStateMetricsTest {
             assertThat(e.action()).as("非法态观测不是一次转移动作").isNull();
             assertThat(e.key()).isEqualTo(ORDER);
         });
+    }
+
+    // ================= birth.rejected（C#6 出生闸） =================
+
+    @Test
+    @DisplayName("birth.rejected：5 个 shape 各自计数，事件流带订单号 —— C3 的「今日拦截 N 次」读的就是这两条通道")
+    void birthRejectionsAreRecordedOnBothChannels() {
+        metrics.birthRejected("010", "ORDER-1");
+        metrics.birthRejected("001", "ORDER-2");
+        metrics.birthRejected("011", "ORDER-3");
+        metrics.birthRejected("non_binary", "ORDER-4");
+        metrics.birthRejected(OrderStateMachine.NON_INITIAL, "ORDER-5");
+
+        assertThat(count(MallOrderStateMetrics.BIRTH_REJECTED, "shape", "010")).isEqualTo(1.0);
+        assertThat(count(MallOrderStateMetrics.BIRTH_REJECTED, "shape", "001")).isEqualTo(1.0);
+        assertThat(count(MallOrderStateMetrics.BIRTH_REJECTED, "shape", "011")).isEqualTo(1.0);
+        assertThat(count(MallOrderStateMetrics.BIRTH_REJECTED, "shape", "non_binary")).isEqualTo(1.0);
+        assertThat(count(MallOrderStateMetrics.BIRTH_REJECTED, "shape", "non_initial")).isEqualTo(1.0);
+        assertThat(registry.find(MallOrderStateMetrics.BIRTH_REJECTED).counters())
+                .as("shape 是封闭枚举（5 个取值）—— 若把三位原值当 tag，这里的条数会随客户端传什么都涨")
+                .hasSize(5);
+
+        assertThat(metrics.recentEvents()).extracting(OrderStateEvent::kind).containsOnly("illegal");
+        assertThat(metrics.recentEvents()).extracting(OrderStateEvent::result).containsOnly("rejected");
+        assertThat(metrics.recentEvents()).extracting(OrderStateEvent::shape)
+                .containsExactly("010", "001", "011", "non_binary", "non_initial");
+        assertThat(metrics.recentEvents()).extracting(OrderStateEvent::key)
+                .as("被拦下的是**哪一单**必须看得出 —— 但订单号只进事件流，不进 tag")
+                .containsExactly("ORDER-1", "ORDER-2", "ORDER-3", "ORDER-4", "ORDER-5");
+        assertThat(registry.find(MallOrderStateMetrics.TRANSITIONS).counters())
+                .as("拦截不是一次状态转移，不许顺手记一笔 create ⇒ 两个指标永不相加")
+                .isEmpty();
+    }
+
+    @Test
+    @DisplayName("⚠️ birth.rejected 与 illegal 是两条**独立**序列：一个是「在门口挡下的」，一个是「已经落库的」")
+    void birthRejectedAndIllegalAreTwoIndependentSeries() {
+        metrics.illegal("010", ORDER);           // C#6 后 API 路径不可达，但存量脏数据仍可能触发
+        metrics.birthRejected("010", ORDER);
+
+        assertThat(count(MallOrderStateMetrics.ILLEGAL, "shape", "010"))
+                .as("落库之后观测到的非法态（过去时）").isEqualTo(1.0);
+        assertThat(count(MallOrderStateMetrics.BIRTH_REJECTED, "shape", "010"))
+                .as("在入口被闸挡下的请求（拦截时）").isEqualTo(1.0);
+        assertThat(registry.find(MallOrderStateMetrics.ILLEGAL).counters())
+                .as("名字只差一个词，但必须是两条序列 —— 这正是取名时避开 `mall.order.state.rejected` 的理由")
+                .hasSize(1);
+        assertThat(registry.find(MallOrderStateMetrics.BIRTH_REJECTED).counters()).hasSize(1);
+    }
+
+    @Test
+    @DisplayName("⚠️ 事件流里 kind=illegal 的两行靠 result 区分 —— 不新增 kind 是为了不动 OrderStateEvent 的 9 个字段")
+    void illegalKindCarriesTwoMeaningsDistinguishedByResult() {
+        metrics.illegal("010", ORDER);           // 落库后观测：没有 result
+        metrics.birthRejected("010", ORDER);     // 出生闸拦下：result == rejected
+
+        List<OrderStateEvent> events = metrics.recentEvents();
+        assertThat(events).hasSize(2);
+        assertThat(events).extracting(OrderStateEvent::kind)
+                .as("同一个 kind，不新造一个").containsOnly("illegal");
+        assertThat(events.get(0).result()).as("「已经落库的非法态」这条没有 result").isNull();
+        assertThat(events.get(1).result()).as("「在门口被挡下的」这条才有").isEqualTo("rejected");
+        assertThat(events).extracting(OrderStateEvent::shape).containsOnly("010");
+        assertThat(events).extracting(OrderStateEvent::key).containsOnly(ORDER);
     }
 
     // ================= timeline.writes =================

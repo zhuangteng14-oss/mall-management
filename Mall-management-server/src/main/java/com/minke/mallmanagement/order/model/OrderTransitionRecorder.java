@@ -141,8 +141,13 @@ public class OrderTransitionRecorder {
      * 只下过单、还没付款的订单否则在时间线里一行都没有，而它的初始三位在别处**不可恢复**
      * （{@code order} 表只存当前值）。前态用 {@link OrderStateMachine#NO_PREVIOUS_STATE} 占位。
      *
-     * <p>⚠️ **只观测、不拦截**（D2）：伪造出 {@code (0,1,0)} 照样下单成功。拦截会让 A3 的 S4a
-     * 全部 8 条断言失去前置构造，属另一笔、需业务裁决。
+     * <p>⚠️ **只观测、不拦截**（D2）：伪造出 {@code (0,1,0)} 照样下单成功。
+     * <b>2026-10-04（C#6）之后这句只剩下一半成立</b>：拦截已经发生，但**不在本方法**——
+     * 出生闸在 {@code OrderService.orderAdd} 的**锁外**（{@code OrderState.isInitial}），
+     * 非法请求**根本走不到本方法**。故本方法保住的原职责是「合法出生那一笔照记」，
+     * 而 {@code recordIllegalIfAny} 这条支路从此**在 API 路径上不可达**（留着给存量脏数据兜底）。
+     * ⚠️ 顺带订正原文的计数：C#6 落地前实测，受影响的是 A3 的 S4a **3 条**（不是全部 8 条）
+     * 与 **C 组**（{@code C_BITS} 八组合出生），已在同笔一并改造。
      */
     public void created(String orderId, int payIf, int deliveryIf, int receiveIf) {
         long occurredAt = System.currentTimeMillis();
@@ -173,6 +178,52 @@ public class OrderTransitionRecorder {
         if (shape != null) {
             metrics.illegal(shape, orderId);
         }
+    }
+
+    /**
+     * 下单出生闸（C#6）**拦下一次请求** —— 计数 + 发事件 + 一行 WARN 日志。**必须发事件**：
+     * 这是「今天有人试图从入口伪造状态」，与「时间线丢一条」同级，不许静默。
+     *
+     * <p>⚠️ <b>本方法不在锁的临界区内 —— 它是本类唯一一个这样的方法</b>。
+     * 类注释说「每个方法都在 UPDATE 返回之后立刻被调，就在临界区里」，那个描述对
+     * {@code applied} / {@code rejected} / {@code errored} / {@code created} 成立；本方法例外，
+     * 因为它被 {@code OrderService.orderAdd} 在 {@code runLocked} **之前**调用
+     * —— 闸在锁外是刻意的（非法请求不耗 Redis 往返、不污染锁指标，
+     * 见 {@code OrderService} 类注释）。⇒ <b>本方法内部不得做任何 I/O、不得加锁</b>：
+     * 计数器自增 + 一次数组赋值 + 一行日志，仅此而已。
+     *
+     * <p>⚠️ <b>shape 的取值由 {@code OrderStateMachine.rejectionShape} 判出</b>，本方法**只转发**，
+     * 不自己分类 —— 那 5 个取值是 {@code mall.order.state.birth.rejected} 的 tag 全集，
+     * 在这里另写一份分类必然与 {@code OrderState.isInitial} 漂移。
+     *
+     * <p>⚠️ <b>日志只打三位 + shape + 订单号，绝不打整个 payload</b>：{@code ProductInformation} /
+     * {@code Images} 是客户端拼的自由文本，进日志即日志注入 + 体积不可控。
+     *
+     * <h2>【下面那个 {@code shape == null} 分支为什么必须存在，而不是靠「不可达」省掉】</h2>
+     * 契约上它**不可达**：本方法只在 {@code OrderService} 判出 {@code !OrderState.isInitial}
+     * 时被调，而 {@code rejectionShape} 返回 {@code null} ⟺ {@code isInitial} ⇒ 两者**判据同源**，
+     * 由 {@code OrderStateMachineTest.rejectionShapeIsExactlyTheComplementOfIsInitial} 钉死。
+     * 但它仍然要挡一下，因为漏下去不是「记错一笔」而是**一次下单 500**：
+     * Micrometer 的 {@code ImmutableTag} 构造器对 key 与 value **都**调
+     * {@code Objects.requireNonNull}（2026-10-04 用 {@code javap -c} 在
+     * {@code micrometer-core-1.14.6.jar} 上核实）⇒ {@code counter(name, "shape", null)}
+     * 抛 NPE ⇒ 本方法在请求路径上（锁外）⇒ 一路冒泡成 5xx。
+     *
+     * <p>⚠️ <b>处置是「WARN 一行 + 直接 return」，不计数、不发事件、更不兜一个默认 shape</b>：
+     * 兜默认值会把「代码坏了」静默折进一条正常的时间序列里 —— 那正是本仓反复吃的亏。
+     * 这条 WARN 一旦出现，含义是「闸与观测漂移了」，该去看代码，不是去看指标。
+     */
+    public void rejectedAtBirth(int payIf, int deliveryIf, int receiveIf, String orderId) {
+        String shape = stateMachine.rejectionShape(payIf, deliveryIf, receiveIf);
+        if (shape == null) {
+            // 契约违约：闸放行了，却叫我来记一笔拦截。见 javadoc —— 不计数，只把它喊出来。
+            log.warn("出生闸观测被违约调用（本不该发生，闸判为放行）：PayIf={} DeliveryIf={} ReceiveIf={} 订单={}",
+                    payIf, deliveryIf, receiveIf, orderId);
+            return;
+        }
+        log.warn("下单出生闸拦截（C#6）：PayIf={} DeliveryIf={} ReceiveIf={} shape={} 订单={}",
+                payIf, deliveryIf, receiveIf, shape, orderId);
+        metrics.birthRejected(shape, orderId);
     }
 
     /**

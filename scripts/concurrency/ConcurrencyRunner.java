@@ -1574,6 +1574,7 @@ public class ConcurrencyRunner {
 
     static void s4a(Opt o) throws InterruptedException {
         String lock0 = lockCounters(o);
+        Ass a0 = ass("A-S4a-0", "五个前置态全部建成且**末态正确**（C#6 后 3 个改由合法流转推进）", true);
         Ass a1 = ass("A-S4a-1", "orderDeliveryIfUp on U ×20 → success == 0，msg 正确", true);
         Ass a2 = ass("A-S4a-2", "orderDeliveryIfUp on P ×20 → success == 1（重复发货被拒）", true);
         Ass a3 = ass("A-S4a-3", "orderDeliveryIfUp on PDR ×20 → success == 0", true);
@@ -1583,18 +1584,70 @@ public class ConcurrencyRunner {
         Ass a7 = ass("A-S4a-7", "同单 20 pay + 20 delivery 同栅栏：paySucc==1 且 deliverySucc<=1", true);
         Ass a8 = ass("A-S4a-8", "全命名空间不变式 NOT(PayIf=0 AND (DeliveryIf=1 OR ReceiveIf=1))", true);
 
-        // setup：三个状态位是 orderAdd 的入参，可任意置位 → 前置态直接构造（该「可伪造」本身是 D5 候选）
+        // setup：三个状态位是 orderAdd 的入参。**C#6（2026-10-04）之后 orderAdd 只收初始态
+        // {(0,0,0),(1,0,0)}** ⇒ PD / PDR / PR 这三个前置态**不能再靠直传伪造**，必须走合法流转推进
+        // （`add(1,0,0)` → 发货 → 收货）。这不是「绕过拦截」，恰恰是拦截落地后唯一的正常造法 ——
+        // 前端造出这些态走的也是这三步。⚠️ 5 个前置态本身**全是合法态**（A-S4a-8 的不变式全满足），
+        // 所以本段的断言语义**一条都没变**，变的只是前置构造方式。
         String[] keys = {"U", "P", "PD", "PDR", "PR"};
-        int[][] flags = {{0, 0, 0}, {1, 0, 0}, {1, 1, 0}, {1, 1, 1}, {1, 0, 1}};
+        int[][] birth = {{0, 0, 0}, {1, 0, 0}, {1, 0, 0}, {1, 0, 0}, {1, 0, 0}};
+        String[][] advance = {{}, {}, {"orderDeliveryIfUp"}, {"orderDeliveryIfUp", "orderReceiveIfUp"},
+                              {"orderReceiveIfUp"}};
+        int[][] want = {{0, 0, 0}, {1, 0, 0}, {1, 1, 0}, {1, 1, 1}, {1, 0, 1}};
         Map<String, String> idOf = new LinkedHashMap<>();
-        StringBuilder forged = new StringBuilder();
+        StringBuilder preStates = new StringBuilder();
+        boolean preBuilt = true;
         for (int k = 0; k < keys.length; k++) {
             String id = ns() + "-S4a" + keys[k];
             idOf.put(keys[k], id);
+            StringBuilder path = new StringBuilder(
+                    "add(" + birth[k][0] + birth[k][1] + birth[k][2] + ")");
             Resp r = send(HTTP, o.baseUrl + "/order/orderAdd",
-                    orderForm(id, flags[k][0], flags[k][1], flags[k][2]));
-            forged.append(keys[k]).append('=').append(r.successTrue() ? "ok" : trunc(r.body)).append(' ');
+                    orderForm(id, birth[k][0], birth[k][1], birth[k][2]));
+            // ⚠️ 每一步都同时卡 **HTTP 200** 与 success:true。只卡 success:true 是不够的：
+            // successTrue() 是裸子串匹配（"\"success\":true"），路由打错时的 404 响应体里没有它，
+            // 于是「路由错」与「业务拒绝」在旧判据下**长得一模一样**——2026-10-04 首次 CI 复跑
+            // 就栽在这里：推进步骤少写了 "/order/" 前缀打成 404，被当成「状态机拒绝」读了一轮。
+            // 卡上 code==200 后，路由类失败会带着 URL 与状态码直接喊出来。
+            boolean ok = r.code == 200 && r.successTrue();
+            String bad = ok ? null : "add HTTP " + r.code + " " + trunc(r.body);
+            for (int i = 0; ok && i < advance[k].length; i++) {
+                // ⚠️ 路径必须带 "/order/" 前缀（OrderController 是 @RequestMapping("/order")）。
+                // 这里曾写成 o.baseUrl + "/" + advance[k][i] ⇒ /orderDeliveryIfUp ⇒ 404。
+                String url = o.baseUrl + "/order/" + advance[k][i];
+                Resp step = send(HTTP, url, form("orderId", id));
+                boolean stepOk = step.code == 200 && step.successTrue();
+                if (stepOk) {
+                    path.append('+').append(advance[k][i].replace("order", "").replace("IfUp", ""));
+                } else {
+                    bad = path + " → " + url + " HTTP " + step.code + " " + trunc(step.body);
+                }
+                ok = stepOk;
+            }
+            // 前置态的判据取**库里那三位的实际值**，不是「每一步都返回了 success」——
+            // 两者是不同的命题，而下面的 A-S4a-3/-5 完全押在「这单真的在 PDR / PR 态」上。
+            int[] got = jdbcOrderState(o, id);
+            boolean stateOk = got != null
+                    && got[0] == want[k][0] && got[1] == want[k][1] && got[2] == want[k][2];
+            preBuilt &= ok && stateOk;
+            // ⚠️ 失败时打的是**那一步**的响应体（bad），不是 add 的。原先写 trunc(r.body) 而 r 在循环里
+            // 从未重绑 ⇒ 推进步骤失败时仍打印 add 的 {"msg":"订单添加成功","success":true}，
+            // 与「FAILED」并排出现，把人往反方向带（看着像成功了却被判失败）。
+            preStates.append(keys[k]).append('=')
+                    .append(stateOk ? "ok"
+                            : ok ? "态不符" + (got == null ? "无行" : got[0] + "/" + got[1] + "/" + got[2])
+                                 : "FAILED " + bad)
+                    .append('(').append(path).append(") ");
         }
+        // ⚠️ A-S4a-0 是**新增门禁**，把原先只打在 println 里的一句话升成判据。
+        // 它上线后第一次 CI 复跑就抓到了东西，同时**订正了本笔最初写在这段里的预言**：
+        // 本笔原写「前置态塌掉 ⇒ 订单不存在 ⇒ A-S4a-3/-5 真空转绿」。实测**不是**——
+        // 那次 404 让 PD/PDR/PR 停在 (1,0,0)，delivery/receive 的 succ 反而是 1，
+        // A-S4a-3/-5 **自己就红了**（A-S4a-6 倒是撞对期望值假绿：RECEIVE 守卫只卡
+        // PayIf=1 AND ReceiveIf=0，(1,0,0) 本就收得动）。
+        // 所以这条门禁的真实收益是**定位**而非「唯一的告警」：它的 detail 直接写「前置态没建成」，
+        // 把责任从「拦截逻辑」指回「测试夹具」，否则人会对着两条红的 A-S4a 去怀疑状态机。
+        settle(a0, preBuilt, "前置态 " + preStates);
 
         String dlyMsg = "订单不存在或未付款或已发货/已收货";
         String rcvMsg = "订单未付款或已收货";
@@ -1650,7 +1703,7 @@ public class ConcurrencyRunner {
         settle(a8, viol == 0, "违反行数=" + viol
                 + "（H3 原写「PR 型预置单排除在外」；此处未排除 —— PR 的 PayIf=1，本就不满足谓词，排除与否等价）");
 
-        System.out.println("[S4a] 预置态 " + forged + "| 8 个 burst 完成"
+        System.out.println("[S4a] 预置态 " + preStates + "| 8 个 burst 完成"
                 + " payRace=" + paySucc + " dlyRace=" + dlySucc + " 不变式违反=" + viol);
         // S2a/S3/S4a 是栅栏型（burst），没有 Load，故不走 recLoad；但取数与 Load 型
         // 同等重要，否则报告里这三段只剩断言 detail 里的散文，读不出结构化数字。
@@ -1757,11 +1810,22 @@ public class ConcurrencyRunner {
 
     // ---------- C 订单状态流转时间线（B3 新增；C-1/C-2 为门禁）----------
 
-    /** 三位组合：合法 5 个在前、伪造 3 个在后（伪造组合正是时间线要如实记下的前态）。 */
-    static final String[] C_BITS = {"000", "100", "110", "111", "101", "010", "001", "011"};
+    /**
+     * 出生闸（C#6）**拒收**的 6 个三位组合：3 个「合法但非初始」在前、3 个非法在后。
+     *
+     * <p>⚠️ 本数组在 C#6（2026-10-04）之前是 {@code C_BITS}（全部 8 个组合 —— 那时
+     * {@code orderAdd} 直收三位，8 个都能出生，含 3 个伪造态，用来让时间线记下「从非法态来」）。
+     * 拦截落地后 8 个里只有 2 个（{@code 000}/{@code 100}）能出生，剩下 6 个的职责从
+     * 「造出前置态」翻转成「**断言造不出来**」（A-C6-1）。三个「合法但非初始」必须留在名单里：
+     * 它们是不变式拦不住的，正是 TD-17 正文举的那类（{@code (1,1,1)} 已付款+已发货+已收货）。
+     *
+     * <p>顺序刻意与 {@code OrderStateMachine.rejectionShape} 的标签分组一致
+     * （非初始在前、非法形状在后），便于与本文件外的那份词表逐字对照。
+     */
+    static final String[] C_REFUSED = {"110", "111", "101", "010", "001", "011"};
 
     /**
-     * 排空窗口。⚠️ 必须远大于本场景 burst 的墙钟（7 次 burst × 20 + 8 次下单 ≈ 百毫秒量级），
+     * 排空窗口。⚠️ 必须远大于本场景 burst 的墙钟（8 次 burst × 20 + 3 次下单 ≈ 百毫秒量级），
      * 这是 B1 的教训：窗口与 burst 墙钟同量级时，「还没写完」与「写丢了」分不开。
      * 达到期望行数即提前返回，故它不是固定等待。
      */
@@ -1780,9 +1844,22 @@ public class ConcurrencyRunner {
      * C 组：B3 新增的订单状态流转时间线（{@code order_state_transition}）的可核对性 ——
      * 也就是 C3「时间线视图」的数据源到底可不可信。
      *
-     * <h2>【两条断言各验什么】</h2>
+     * <h2>【四条断言各验什么】</h2>
      * C-1 落库行数 == 四个端点的 success 之和；C-2 逐单重放时间线，末态必须等于
      * {@code order} 表的实际三位。前者证「没漏没多」，后者证「顺序与内容自洽、且与权威状态一致」。
+     *
+     * <p><b>C#6（2026-10-04）新增两条</b>，它们把「出生闸」这件事本身纳入证据链：
+     * <ul>
+     *   <li><b>A-C6-1</b>：6 个非白名单三位组合（3 个「合法但非初始」+ 3 个非法）逐个打
+     *       {@code orderAdd}，每条都必须「{@code success=false} + 文案逐字 + <b>库里查无此行</b>」。
+     *       ⚠️ 三条一起才算 —— 只看 {@code success} 会漏掉最坏的那种「返回了 false 却已经插进去」。
+     *       在本笔之前这 6 个组合是**合法输入**（8 个都能出生），职责从「造前置态」翻转成
+     *       「断言造不出来」；</li>
+     *   <li><b>A-C6-2</b>：{@code mall.order.state.birth.rejected} 的 shape 必须覆盖 4 个取值，
+     *       且 {@code non_initial} 这条序列**真的存在**。拦下了却记不下来，C3 的「今日拦截 N 次」
+     *       会系统性偏小且不报错 —— 这正是本笔要防的失败形态。</li>
+     * </ul>
+     * ⇒ 本组由「时间线不坏」扩为「时间线不坏 <b>且</b> 伪造入口确实关着、且拦截被如实记下」。
      *
      * <h2>【为什么期望成功数是先按状态机写死的，不是从响应里读出来的】</h2>
      * 「行数 == 成功数」这个等式在守卫整体失灵时**两边一起错**、等式照样成立
@@ -1790,7 +1867,7 @@ public class ConcurrencyRunner {
      * 状态机写死、再与响应比：预测先红，等式才有资格当证据。
      *
      * <h2>【门禁】</h2>
-     * 两条断言 gate=true，进退出码 —— 本组是「时间线不坏」的唯一自动护栏。
+     * 四条断言全部 gate=true，进退出码 —— 本组是「时间线不坏」的唯一自动护栏。
      *
      * <p>曾为 record-only（gate=false），理由是「时间线表由人工落盘的 {@code mall_management_sql.sql}
      * 追加，DDL 未落盘时本组必然 FAIL —— 那是『没跑成』，不是『跑出来有问题』」。2026-09-30 升为
@@ -1813,6 +1890,8 @@ public class ConcurrencyRunner {
         String lock0 = lockCounters(o);
         Ass a1 = ass("C-1", "时间线行数 == 四端点 success 之和（各端点 success 另与状态机预测值比对）", true);
         Ass a2 = ass("C-2", "时间线可重放：首行 from=NONE、逐行首尾相接、末行 to == order 表现值", true);
+        Ass a3c6 = ass("A-C6-1", "出生闸：6 个非白名单组合全部被拒（success=false + 文案 + 查无此行）", true);
+        Ass a4c6 = ass("A-C6-2", "出生闸的观测在场：birth.rejected 的 shape 覆盖 4 值（含 non_initial）", true);
 
         final String pre = ns() + "-C";
         final String like = pre + "%";
@@ -1832,39 +1911,67 @@ public class ConcurrencyRunner {
         }
         rec("C", "tableReadable", true);
 
-        // ---- 1) 八个三位组合各出生一单 ----
-        // 伪造的 3 个组合也造出来：时间线要能如实记下「从非法态来」，那是 TD-17 唯一入口的观测面。
+        // ---- 1) 出生：白名单里的两个组合各来一单；PR 单另走合法流转造（见下）----
+        // ⚠️ C#6（2026-10-04）之前这里造 8 个组合（含 3 个伪造态），因为 orderAdd 直收三位。
+        // 拦截落地后只有白名单 {@code {(0,0,0),(1,0,0)}} 能出生，剩下 6 个组合改由 A-C6-1
+        // 断言「被拒且**一行都没落**」。⇒ 副作用：时间线里**不再出现**「从非法态来」的行，
+        // 那部分覆盖是有意放弃的，已登记给
+        // {@code OrderStateMachineTest.onlyPayGuardAdmitsIllegalStates} 与
+        // {@code OrderAddStateGuardSmokeTest}（见 docs/agent/progress.md §5-G 的 D1 登记）。
+        String chain = pre + "000";     // CREATED → PAID → SHIPPED → COMPLETED（同单三连）
+        String paid = pre + "100";      // 已付款：PAY 必被拒
+        String pr = pre + "PR";         // 未发货即收货：DELIVER 与 RECEIVE 必被拒
+
+        String[] bornIds = {chain, paid, pr};
+        int[][] bornBits = {{0, 0, 0}, {1, 0, 0}, {0, 0, 0}};
         int addOk = 0;
-        Map<String, String> idOfBits = new LinkedHashMap<>();
-        for (String bits : C_BITS) {
-            String id = pre + bits;
-            idOfBits.put(bits, id);
+        for (int i = 0; i < bornIds.length; i++) {
             Resp r = send(HTTP, o.baseUrl + "/order/orderAdd",
-                    orderForm(id, bits.charAt(0) - '0', bits.charAt(1) - '0', bits.charAt(2) - '0'));
+                    orderForm(bornIds[i], bornBits[i][0], bornBits[i][1], bornBits[i][2]));
             if (r.successTrue()) {
                 addOk++;
             }
         }
 
-        // ---- 2) 七条 burst：一条三连链、一条伪造态转移、三次必被守卫拒 ----
-        String chain = idOfBits.get("000");    // CREATED → PAID → SHIPPED → COMPLETED（同单三连）
-        String forged = idOfBits.get("010");   // 伪造态 ILLEGAL_DELIVERED_UNPAID → PAY → SHIPPED
-        String paid = idOfBits.get("100");     // 已付款：PAY 必被拒
-        String pr = idOfBits.get("101");       // 已收货：DELIVER 与 RECEIVE 必被拒
+        // A-C6-1：6 个非白名单组合，每一条都必须「success=false + 文案逐字 + 库里**查无此行**」。
+        // ⚠️ 三条一起才算 —— 只看 success 会漏掉最坏的那种「返回了 false 却已经插进去」。
+        int refusedOk = 0;
+        StringBuilder refusedDetail = new StringBuilder();
+        for (String bits : C_REFUSED) {
+            String id = pre + bits;
+            Resp r = send(HTTP, o.baseUrl + "/order/orderAdd",
+                    orderForm(id, bits.charAt(0) - '0', bits.charAt(1) - '0', bits.charAt(2) - '0'));
+            if (!r.successTrue() && r.says("订单状态不合法") && jdbcOrderState(o, id) == null) {
+                refusedOk++;
+            } else {
+                refusedDetail.append(bits).append("→HTTP").append(r.code).append(' ')
+                        .append(trunc(r.body)).append("; ");
+            }
+        }
+        settle(a3c6, refusedOk == C_REFUSED.length && addOk == bornIds.length,
+                "放行 " + addOk + "/" + bornIds.length + "（白名单）  被拒 " + refusedOk + "/"
+                        + C_REFUSED.length + "（3 个合法但非初始 + 3 个非法，均须查无此行）"
+                        + (refusedDetail.length() == 0 ? "" : "；例外：" + refusedDetail));
+
+        // ---- 2) 八条 burst：一条三连链、PR 的两步合法推进、四次必被守卫拒 ----
+        // PR（未发货即收货）**只能**走合法流转造：`000 → pay → receive`（后端本就放行未发货收货）。
+        // C#6 之前它是直传 `(1,0,1)` 伪造的 —— 那条路已封。这两步各写 1 行时间线，算进期望值。
+        int prSetupPay = burstSuccess(o, "C-prSetupPay", "/order/orderPayIfUp", pr);
+        int prSetupRcv = burstSuccess(o, "C-prSetupRcv", "/order/orderReceiveIfUp", pr);
 
         int chainPay = burstSuccess(o, "C-pay", "/order/orderPayIfUp", chain);
         int chainDly = burstSuccess(o, "C-dly", "/order/orderDeliveryIfUp", chain);
         int chainRcv = burstSuccess(o, "C-rcv", "/order/orderReceiveIfUp", chain);
-        int forgedPay = burstSuccess(o, "C-forgedPay", "/order/orderPayIfUp", forged);
         int paidAgain = burstSuccess(o, "C-paidAgain", "/order/orderPayIfUp", paid);
         int prDly = burstSuccess(o, "C-prDly", "/order/orderDeliveryIfUp", pr);
         int prRcv = burstSuccess(o, "C-prRcv", "/order/orderReceiveIfUp", pr);
 
-        int payOk = chainPay + forgedPay;
+        int payOk = chainPay + prSetupPay;
         int dlyOk = chainDly;
-        int rcvOk = chainRcv;
-        boolean predicted = addOk == C_BITS.length
-                && chainPay == 1 && chainDly == 1 && chainRcv == 1 && forgedPay == 1
+        int rcvOk = chainRcv + prSetupRcv;
+        boolean predicted = addOk == bornIds.length
+                && chainPay == 1 && chainDly == 1 && chainRcv == 1
+                && prSetupPay == 1 && prSetupRcv == 1
                 && paidAgain == 0 && prDly == 0 && prRcv == 0;
         int expectedNew = addOk + payOk + dlyOk + rcvOk;
 
@@ -1873,16 +1980,33 @@ public class ConcurrencyRunner {
         Thread.sleep(C_QUIESCE_MS);
         int delta = jdbcCount(o, countSql, like) - base;
 
-        // 被拒的两次 burst 必须一行都不写：拒绝不是转移，时间线里没有它的位置。
-        // 两次 burst 各 20 条，只要混进去一条，这两单的行数就会 > 1（出生那行恒为 1）。
+        // 被拒的三次 burst 必须一行都不写：拒绝不是转移，时间线里没有它的位置。
+        // 三次 burst 各 20 条，只要混进去一条，这两单的行数就会超过各自的出生/流转行数。
         int paidRows = jdbcCount(o, countSql, paid);
         int prRows = jdbcCount(o, countSql, pr);
 
-        boolean a1ok = predicted && delta == expectedNew && paidRows == 1 && prRows == 1;
-        settle(a1, a1ok, "add=" + addOk + "/8 pay=" + payOk + "(预测 2) dly=" + dlyOk + "(1) rcv=" + rcvOk
-                + "(1) 伪造态 pay=" + forgedPay + "(1) 被拒三次=" + paidAgain + "/" + prDly + "/" + prRcv
+        boolean a1ok = predicted && delta == expectedNew && paidRows == 1 && prRows == 3;
+        settle(a1, a1ok, "add=" + addOk + "/3 pay=" + payOk + "(预测 2) dly=" + dlyOk + "(1) rcv=" + rcvOk
+                + "(2) PR 预置 pay/rcv=" + prSetupPay + "/" + prSetupRcv + "(1/1)"
+                + " 被拒三次=" + paidAgain + "/" + prDly + "/" + prRcv
                 + "(0/0/0) 时间线增量=" + delta + "/" + expectedNew
-                + " 被拒单行数=" + paidRows + "/" + prRows + "(1/1) 收敛读数=" + converged);
+                + " 被拒单行数=" + paidRows + "/" + prRows + "(1/3 —— PR 的 3 行 = 出生+付款+收货) 收敛读数=" + converged);
+
+        // A-C6-2：出生闸的**观测**必须在场。拦截本身是 A-C6-1 的证据，但 C3 的
+        // 「今日拦截 N 次」读的是 mall.order.state.birth.rejected{shape} —— 拦下了却记不下来，
+        // C3 的显示就会系统性偏小，而且**不报错**。故这条独立成门禁。
+        // 判据取「4 个 shape 都在 + non_initial 这条序列真的存在」：后者尤其重要，
+        // 它正是「合法但非初始」那 3 个组合的标号 —— 少写那条支路时，本组会红。
+        Resp br = send(HTTP, o.baseUrl + "/actuator/metrics/mall.order.state.birth.rejected", null);
+        Resp brNi = send(HTTP, o.baseUrl
+                + "/actuator/metrics/mall.order.state.birth.rejected?tag=shape:non_initial", null);
+        boolean shapesCovered = br.code == 200
+                && br.says("010") && br.says("001") && br.says("011") && br.says("non_initial");
+        boolean nonInitialCounted = brNi.code == 200 && brNi.says("COUNT");
+        settle(a4c6, shapesCovered && nonInitialCounted,
+                "HTTP " + br.code + " shape 覆盖 4 值=" + shapesCovered
+                        + "；non_initial 序列存在（HTTP " + brNi.code + "）=" + nonInitialCounted
+                        + (shapesCovered ? "" : "  ← 原文：" + trunc(br.body)));
         if (!a1ok) {
             // 只在**对不上**时读进程内指标：运行器的证据链是「接口响应 + 数据库」两层，
             // 都是权威状态；计数器只在权威状态对不上时才有资格当旁证。
@@ -1922,6 +2046,7 @@ public class ConcurrencyRunner {
                 + " 重放 " + rp.checked + " 单：无时间线=" + rp.missing + " 链断=" + rp.chainBroken
                 + " 末态不符=" + rp.lastMismatch + " Id 序异常单=" + rp.idOrderDiffers);
         rec("C", "addOk", addOk);
+        rec("C", "addRefusedExpect6", refusedOk);
         rec("C", "payOk", payOk);
         rec("C", "deliveryOk", dlyOk);
         rec("C", "receiveOk", rcvOk);
@@ -2048,6 +2173,14 @@ public class ConcurrencyRunner {
      * 刻意不共享代码：运行器与应用分属两个编译单元、不共享类路径，而这里要证的正是
      * 「应用写进时间线的名字，与我们独立算出的名字一致」—— 共用同一份映射就成了自证。
      * 应用里改了枚举名，这里会红，那是有意的提醒。
+     *
+     * <p>⚠️ <b>C#6（2026-10-04）之后，末尾那三个 {@code ILLEGAL_*} 分支在 C 组里已成为
+     * <b>死代码</b></b>：出生闸关掉伪造入口后，本组造的每一单都是从白名单组合出生的合法单，
+     * 时间线里不会再有「末态是非法态」的行。它们**保留不删** —— 理由与
+     * {@code mall.order.state.illegal} 保留不删相同：① 存量脏数据若还在库里，C-2 的重放
+     * 仍会读到它；② 删掉等于抹掉 TD-17 的历史口径。伪造态的形状分类覆盖已改由
+     * {@code OrderStateMachineTest} 与 {@code OrderAddStateGuardSmokeTest} 承担（见
+     * {@code C_REFUSED} 的 javadoc）。
      */
     static String stateName(int pay, int dly, int rcv) {
         if (pay == 0 && dly == 0 && rcv == 0) {
@@ -2085,7 +2218,7 @@ public class ConcurrencyRunner {
         System.out.println("[C] 时间线对不上，B3 指标原文（旁证，不判定）:");
         for (String m : new String[]{"mall.order.state.transitions", "mall.order.state.timeline.writes",
                 "mall.order.state.async.rejected", "mall.order.state.async.queue.depth",
-                "mall.order.state.illegal"}) {
+                "mall.order.state.illegal", "mall.order.state.birth.rejected"}) {
             Resp r = send(HTTP, o.baseUrl + "/actuator/metrics/" + m, null);
             System.out.println("  HTTP " + r.code + "  " + m + "  → " + trunc(r.body));
         }
