@@ -110,6 +110,9 @@
 
 <script setup>
 import { ref, onMounted } from 'vue'
+import { http, handleApiError } from '../api/http'
+import { endpoints } from '../api/endpoints'
+import { getMerchantId } from '../api/auth'
 
 const fileInput = ref(null)
 const previewImg = ref('')
@@ -132,13 +135,13 @@ onMounted(() => {
 
 const loadGoodsType = async () => {
   try {
-    const res = await fetch('http://localhost:8088/goods/goodstype')
+    const res = await http.get(endpoints.goods.goodstype)
     const data = await res.json()
     if (data.success) {
       typeList.value = data.list
     }
   } catch (err) {
-    console.error('加载类型失败')
+    handleApiError(err, '加载类型失败')
   }
 }
 
@@ -163,16 +166,12 @@ const handleImageChange = (e) => {
 
 const saveNewTypeToDB = async (typeName) => {
   try {
-    await fetch('http://localhost:8088/goods/goodstype', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: new URLSearchParams({
+    await http.post(endpoints.goods.goodstype, new URLSearchParams({
         GoodType: typeName,
         GoodTypeNew: 1
-      })
-    })
+      }))
   } catch (e) {
-    console.error('保存类型失败')
+    handleApiError(e, '保存类型失败')
   }
 }
 
@@ -185,7 +184,7 @@ const submitGoods = async () => {
   }
 
   const needSaveNewType = tempNewType.value && GoodType.value === tempNewType.value
-  const merchantid = sessionStorage.getItem('merchantid')
+  const merchantid = getMerchantId()
 
   // ==============================================
   // 🔥 核心修复：从数据库取真实 GoodTypeNew
@@ -214,10 +213,7 @@ const submitGoods = async () => {
   formData.append('GoodTypeNew', realGoodTypeNew) // 用真实值！
 
   try {
-    const res = await fetch('http://localhost:8088/goods/goodsAdd', {
-      method: 'POST',
-      body: formData
-    })
+    const res = await http.post(endpoints.goods.goodsAdd, formData)
     const data = await res.json()
 
     if (data.success) {

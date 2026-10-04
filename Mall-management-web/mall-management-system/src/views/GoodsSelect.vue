@@ -44,6 +44,8 @@
 <script setup>
 import { ref, onMounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
+import { http, handleApiError, urlOf } from '../api/http'
+import { endpoints } from '../api/endpoints'
 
 const router = useRouter()
 const route = useRoute()
@@ -71,25 +73,21 @@ const doSearch = async () => {
     let url, body;
     if (kw === '') {
       // 空搜索：调用获取全部商品接口
-      url = 'http://localhost:8088/goods/goodsSelectHome'
+      url = urlOf(endpoints.goods.goodsSelectHome)
       body = ''  // 该接口可能不需要参数，如果必须可传 'action=getAll' 等，根据后端调整
     } else {
       // 有关键词：调用搜索接口
-      url = 'http://localhost:8088/goods/productSearch'
+      url = urlOf(endpoints.goods.productSearch)
       body = `keyword=${encodeURIComponent(kw)}`
     }
-    const res = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: body
-    })
+    const res = await http.post(url, body)
     const data = await res.json()
     if (data.success) {
       goodsList.value = data.list || []
       saveState()
     }
   } catch (e) {
-    console.error('请求失败', e)
+    handleApiError(e, '请求失败')
   }
 }
 

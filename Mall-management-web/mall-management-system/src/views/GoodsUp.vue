@@ -6,7 +6,7 @@
       <div class="top-section">
         <div class="avatar">
           <img 
-            :src="userInfo.image || 'http://localhost:8088/img/default-avatar.jpg'" 
+            :src="userInfo.image || assetOf('/img/default-avatar.jpg')" 
             alt="头像" 
           />
         </div>
@@ -109,6 +109,9 @@
 
 <script setup>
 import { ref, onMounted } from 'vue'
+import { http, handleApiError, assetOf } from '../api/http'
+import { endpoints } from '../api/endpoints'
+import { getMerchantId, getUsername, getPassword } from '../api/auth'
 
 const goodsList = ref([])
 const userInfo = ref({})
@@ -142,20 +145,16 @@ onMounted(() => {
 // 获取用户信息
 // ------------------------------
 const getUserInfo = async () => {
-  const username = sessionStorage.getItem('loginUsername')
-  const password = sessionStorage.getItem('loginPassword')
+  const username = getUsername()
+  const password = getPassword()
   if (!username) return
 
   try {
-    const res = await fetch('http://localhost:8088/user/getUserInfo', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: new URLSearchParams({ username, password })
-    })
+    const res = await http.post(endpoints.user.getUserInfo, new URLSearchParams({ username, password }))
     const data = await res.json()
     userInfo.value = data
   } catch (e) {
-    console.log('获取用户信息失败')
+    handleApiError(e, '获取用户信息失败')
   }
 }
 
@@ -163,15 +162,11 @@ const getUserInfo = async () => {
 // 获取商品列表 + 同名合并（只显示一个）
 // ------------------------------
 const getGoodsList = async () => {
-  const merchantId = sessionStorage.getItem('merchantid')
+  const merchantId = getMerchantId()
   if (!merchantId) return
 
   try {
-    const res = await fetch('http://localhost:8088/goods/goodsSelect', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: new URLSearchParams({ MerchantId: merchantId })
-    })
+    const res = await http.post(endpoints.goods.goodsSelect, new URLSearchParams({ MerchantId: merchantId }))
     const data = await res.json()
     if (data.success) {
       goodsList.value = data.list
@@ -189,7 +184,7 @@ const getGoodsList = async () => {
       }))
     }
   } catch (e) {
-    console.log('获取商品失败')
+    handleApiError(e, '获取商品失败')
   }
 }
 
@@ -210,17 +205,13 @@ const doDeleteGoods = async () => {
     alert('请输入商品名和ProductCode')
     return
   }
-  const merchantId = sessionStorage.getItem('merchantid')
+  const merchantId = getMerchantId()
   try {
-    const res = await fetch('http://localhost:8088/goods/goodsDe', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: new URLSearchParams({
+    const res = await http.post(endpoints.goods.goodsDe, new URLSearchParams({
         MerchantId: merchantId,
         GoodName: delGoodName.value,
         ProductCode: delProductCode.value
-      })
-    })
+      }))
     const data = await res.json()
     if (data.success) {
       alert('下架成功')
@@ -270,17 +261,13 @@ const closeModal = () => {
 
 // 切换 ProductCode → 刷新价格 + 图片
 const switchPrice = async (code) => {
-  const merchantId = sessionStorage.getItem('merchantid')
+  const merchantId = getMerchantId()
   try {
-    const res = await fetch('http://localhost:8088/goods/productCodePrice', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: new URLSearchParams({
+    const res = await http.post(endpoints.goods.productCodePrice, new URLSearchParams({
         MerchantId: merchantId,
         GoodName: editForm.value.goodName,
         ProductCode: code
-      })
-    })
+      }))
     const data = await res.json()
     if (data.success) {
       editForm.value.price = data.price       // 价格
@@ -310,7 +297,7 @@ const doChangePic = (e) => {
 // 更新商品（含图片上传）
 // ------------------------------
 const doUpdateGoods = async () => {
-  const merchantId = sessionStorage.getItem('merchantid')
+  const merchantId = getMerchantId()
   const formData = new FormData()
 
   formData.append('MerchantId', merchantId)
@@ -324,10 +311,7 @@ const doUpdateGoods = async () => {
   }
 
   try {
-    const res = await fetch('http://localhost:8088/goods/goodsUp', {
-      method: 'POST',
-      body: formData
-    })
+    const res = await http.post(endpoints.goods.goodsUp, formData)
     const data = await res.json()
     if (data.success) {
       alert('更新成功')
