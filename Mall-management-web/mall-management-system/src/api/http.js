@@ -1,8 +1,8 @@
 // src/api/http.js —— 前端 API 层「传输层」唯一出口
 //
-// 职责边界（本笔做两件事）：
+// 职责边界（只做两件事）：
 //   ① 拼装请求：base URL 前缀 / Content-Type / body 形态
-//   ② 判定传输层结果：超时（→ 抛 TimeoutError）
+//   ② 判定传输层结果：超时 / 非 2xx（→ 抛类型化错误）
 //
 // ⚠️ 本层**不判业务成功**。`body.success` 的语义各页不同（有的弹 msg、有的静默、
 //    有的走另一分支），统一判 = 一次性改 34 处行为 ⇒ 留在各 view 自己判。
@@ -20,6 +20,17 @@ const ASSET_BASE = process.env.VUE_APP_ASSET_BASE || ''
 const DEFAULT_TIMEOUT = 10000
 // 带 FormData 的上传（图片体积不可控）。
 const UPLOAD_TIMEOUT = 30000
+
+/** 非 2xx。`status` / `body` 留给调用方与鉴权笔使用。 */
+export class HttpError extends Error {
+  constructor(status, body, url) {
+    super(`HTTP ${status} ${url}`)
+    this.name = 'HttpError'
+    this.status = status
+    this.body = body
+    this.url = url
+  }
+}
 
 /** 超时（AbortController 触发）。 */
 export class TimeoutError extends Error {
@@ -79,7 +90,20 @@ async function request(path, { method = 'GET', body, timeout } = {}) {
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), ms)
   try {
-    return await fetch(url, { ...buildInit(method, body), signal: controller.signal })
+    const res = await fetch(url, { ...buildInit(method, body), signal: controller.signal })
+
+    // ⚠️ 非 2xx 判定（P1.1）。改前非 2xx 也被当**正常响应**，靠 `data.success` 兜 ⇒
+    //    笔 3（PR #36）起后端对校验失败返回的 400（带 JSON body）**对用户完全不可见**。
+    if (!res.ok) {
+      let errBody = null
+      try { errBody = await res.json() } catch (e) { /* 非 JSON body（如 404 静态资源） */ }
+      // ⚠️ 此处待鉴权笔填充（见方案 §4 ②）：
+      //    401 ⇒ auth.clear() + 跳登录；403 ⇒ 提示无权限。
+      //    ⚠️ 若 BD-03 选 C（Spring Security），必须让后端配 authenticationEntryPoint 返回 401 JSON ——
+      //       否则默认 302 到登录页，fetch 会静默跟随并拿到 HTML ⇒ `res.json()` 抛 SyntaxError。
+      throw new HttpError(res.status, errBody, url)
+    }
+    return res
   } catch (e) {
     if (e.name === 'AbortError') throw new TimeoutError(ms, url)
     throw e
@@ -111,9 +135,14 @@ export const http = { get, post }
  * ⚠️ 只接「原先就只写日志」的那类 catch —— 实测 **22 处**。改前就在**弹提示**或
  *    **改组件状态**的另 19 处一律没动 —— 那些是业务分支，不是日志出口（换掉 = 改行为）。
  *
- * ⚠️ 本函数对 TimeoutError **只记日志、不弹窗** —— 轮询类 catch 的网络抖动若弹窗会变成弹窗风暴。
+ * ⚠️ 非 2xx（HttpError）自 P1.1 起**对用户可见**：改前这类响应被当正常响应静默处理。
+ *    注意本函数**只对 HttpError 弹窗**：TimeoutError（超时）不弹 —— 否则轮询类 catch
+ *    的网络抖动会变成弹窗风暴。
  */
 export function handleApiError(e, msg) {
   const label = msg || '请求失败'
   console.error(label, e)
+  if (e instanceof HttpError) {
+    alert(`${label}（HTTP ${e.status}）`)
+  }
 }
