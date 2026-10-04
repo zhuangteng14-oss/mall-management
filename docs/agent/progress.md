@@ -125,7 +125,7 @@
 | # | 项 | 出处 | 状态 | 为什么必须先做 |
 |---|---|---|---|---|
 | 1 | **`D#1` 登记 `@Transactional` 禁令** | `three-layers.md:115` | ✅ **已完成**（**PR #23**；落点 **`### D.1`**） | `orderAddLocked` 是全项目**唯一「禁止用标准注解」处**（登记后不再「无处登记」）；`:263` 仍把它列为最易漏 |
-| 2 | **`D#4` DAO 选型结论**（JdbcTemplate vs JPA） | `three-layers.md:118`、`:274` | ✅ **已完成**（**PR #23**；落点 **`### D.4`** —— 结论 **`JdbcClient` 短期 + jOOQ 长期**） | 「**不定就没法落笔**」。另 `ddl-auto=update` + 零 `@Entity`（TD-01）—— 一旦有人加 `@Entity` 即反向 `ALTER TABLE` |
+| 2 | **`D#4` DAO 选型结论**（JdbcTemplate vs JPA） | `three-layers.md:118`、`:274` | ✅ **已完成**（**PR #23**；落点 **`### D.4`** —— 结论 **`JdbcClient` 短期 + jOOQ 长期**） | 「**不定就没法落笔**」。另 `ddl-auto` + 零 `@Entity`（TD-01）—— ⚠️ 原文写「一旦有人加 `@Entity` 即反向 `ALTER TABLE`」；**该半句已于 2026-10-04 关闭**（TD-01 `B` 方案：`ddl-auto` 改 `validate`），另半句「JPA 依赖保留不删」**仍成立** |
 | 3 | **C3 数据源清单** | — | ✅ **已完成**（**PR #23**；落点 **`selection-status.md §6`**） | C2/C3 均未开工；清单是 C3 的输入 |
 | 4 | **A3 覆盖矩阵**（明示保护范围） | `concurrency-map.md`（13 行，**无「保护范围」列**，`亲读`） | ✅ **已完成**（**PR #23**；落点 **`three-layers.md §H`** —— 8 业务端点 + 27 门禁，未覆盖 24 个标「靠单测」） | 现表只列「有什么问题」，不列「A3 保护了什么」 |
 | 5 | **`§G` 现状复校**（**不是新建**） | `three-layers.md:169-185` | ✅ **已存在**（**早于本批**：#11 落地、#12 修过一行；右列现状是 2026-09-30 复核结果） | ⚠️ 若要的只是复校，**不要重写** |
@@ -419,6 +419,35 @@
 
 - **（1）行号过时。** `application-a3.properties` 写「`ImgPath.initUploadDir()` 的 `@PostConstruct` 调用 `Files.createDirectories(uploadPath)`（`ImgPath.java:23-27`）」。**实测**：`@PostConstruct` 在 **`ImgPath.java:45`**、`initUploadDir()` 在 **`:46`**、`Files.createDirectories(candidate)` 在 **`:49`**；`:23-27` 是字段 `uploadDir` 一带。
 - **（2）行为描述与代码相反（较重）。** 同一段继续写「若创建失败会**抛 `IOException` 使 Bean 初始化失败**——即「启动期炸」，**不会静默**」。但 `ImgPath.java:31-34` 的 javadoc 明写「**本方法刻意不抛异常**……此前签名是 `throws IOException`」⇒ **该行为已被改掉**，注释描述的是**旧行为**。**现状**：启动期只 **`WARN`**、不阻断；失败推迟到真正落盘那一刻，由上传入口显式返回 `{success:false,msg}`。
+### 5-L. TD-01 **`A` 方案**（删 `spring-boot-starter-data-jpa`）的实测结论 —— 本笔**不做**，仅登记（2026-10-04）
+
+> ⚠️ **本节编号**：原拟 `§5-K`，与 **PR #51（`be1b1e4`）** 新增的 `§5-K`（`application-a3.properties` 注释漂移）**撞号**，2026-10-04 合并 `origin/main`（`a107a2c`）时改为 **`§5-L`**；其后的两节顺延为 `§5-M` / `§5-N`。
+
+> **来源**：TD-01 裁决前，为回答「删掉依赖之后启动路径会怎样」做的一组实测（加 `HikariConfig=DEBUG`，对照跑 `update` / `validate` / 库不可达）。
+> 用户 2026-10-04 裁定走 **`B` 方案**（依赖保留、只改 `ddl-auto`）⇒ **本节结论本笔不使用**，登记备查。
+> ⚠️ **若未来改走 `A`，下列注释需同步改** —— 它们现在描述的都是「JPA 在、启动期建池」这一现状。
+
+- **（1）删 JPA 后，Hikari 连接池不再在启动期建立。** 依据（实测）：移除 `spring-boot-starter-data-jpa` 后单跑 `contextLoads()`，日志里**只有** `HikariConfig` 的构造行、**没有** `HikariPool-1 - configuration:` 块；直到 `databaseIsReachable()` 发出第一次 `getConnection()`，该块才在 **15.4s** 之后出现 ⇒ **池在首次取连接时才建**。
+- **（2）改走 `A` 时需同步改的三处注释**（改后它们会变成假话）：
+  - `application-a3.properties:12-17`（「本项目启动期 Hibernate 初始化即触发连接，HikariConfig 块在 Tomcat started【之前】已打印，【不需要额外请求】」—— ⚠️ 该块 `:16-17` 已自己预留了这条退路，措辞可直接复用）；
+  - `concurrency-test.md:70` / `:76`（同一时机论断）；
+  - `MallManagementApplicationTests.contextLoads()` 的 javadoc（现写「成因有二」，`A` 下**只剩「数据源懒连接」一条**）。
+- **（3）⚠️ 本节证据**不在仓库里**，且不可由 CI 复现。** 本轮有 **2 组探针作废并重跑**（均为**自捕**后丢弃）：① 环境变量 `LOGGING_LEVEL_..._HIKARICONFIG` 因 Spring 宽松绑定会**小写化**段名，而 logger 名大小写敏感 ⇒ 空探针（改用 `SPRING_APPLICATION_JSON`）；② `SPRING_DATASOURCE_HIKARI_CONNECTION_TIMEOUT` 被绑定器解读为 `spring.datasource.hikari.connection.timeout`，而在 `HikariDataSource` 上 `connection` 可经 `getConnection()` 绑定 ⇒ **绑定动作本身建立了一次连接**，污染整组运行（对照组的失败与 `tech-debt.md:131` 相矛盾，即由此发现）。⇒ 本节所有数字均为**人工执行、一次性**，引用时按「叙述记录」档读。
+
+### 5-M. `HealthController.java:42`「其余 **33 处** HashMap」 vs `Result.java:10`「全项目 **33 个端点**…**30 个**返回 `Map<String,Object>`」—— 数字对不上（登记，本笔不修）
+
+- **两处原文（逐字，2026-10-04 亲读）**：
+  - `HealthController.java:41-43`：「本方法是全仓**唯一**用 LinkedHashMap 组装响应的端点（插入序），与其余 **33 处** HashMap（桶序）不同 ⇒ 包进 Result（HashMap 基类）会改它的字节 …」（该行开头另标「**例外 5/5**」）
+  - `Result.java:10`：「全项目 **33 个端点**里 **30 个**返回 `Map<String,Object>`，前端按**顶层键**取值」
+- **对不上在哪**：`HealthController` 写「**其余** 33 处」⇒ 加上它自己应是 **34**；而 `Result.java` 写全项目**一共** 33 个端点。**若两个 33 指同一总数**，则 `HealthController` 的「其余」把自身也算了进去（应为 32）；**若不是同一总数**，则两处**共用 33 却各指一物**，无从判断哪个是笔误。⚠️ 第三个数「30 个返回 `Map`」与「例外 5/5」也**互不印证**（33−5=28，33−30=3）。
+- **端点数 33 已核实**（逐个数 `@*Mapping`：goods 9 / message 10 / order 8 / user 5 / health 1）；**「33 处 HashMap」「30 个」「5/5」三个数均未核实**。
+- **裁定（用户 2026-10-04）：登记到挂账段，本笔不修。** ⚠️ 若要查，须先定**分母**（「端点」？「返回 `Map` 的方法」？「会经 `Result` 的方法」？）—— 三者不同，不能互证。
+
+### 5-N. 本笔**不加**「更新记录」行（按 §5-H (3) 先例）—— 登记
+
+- **内容**：TD-01 笔（`chore/jpa-ddl-validate`）改了 `application.properties` / `application-a3.properties` + 8 份文档，但**未在 `## 更新记录` 加行**。
+- **理由**（与 §5-H (3) 同）：① 加行会让**表格欠账从 3 处变 4 处**（现欠：2026-10-02 行、2026-10-03 行、`B#1` 行的 PR 号）；② `## 更新记录` 在 §1 之前 ⇒ 加一行会使本文件**其后所有行号 +1**，与 §5-H (3) 的 +2、§5-I 的 +1 **叠加**，而本文件到处是**行号自指**；③ 本笔落点**已各自可查**：`tech-debt.md` TD-01（状态 → 已关闭，含分支与验收）、`db-schema.md` §3、§5-L。
+- ⚠️ **若用户要求补**：合并后另起一笔加行并填 PR 号（与 `#42` / `#45` 的补法相同）。
 
 ---
 

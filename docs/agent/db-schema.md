@@ -56,20 +56,20 @@
 
 | 项 | 内容 | 证据 |
 |---|---|---|
-| 配置 | `spring.jpa.hibernate.ddl-auto=update` | `application.properties:12` |
+| 配置 | `spring.jpa.hibernate.ddl-auto=validate`（2026-10-04 起；原 `update`） | `application.properties:29` |
 | 依赖 | `spring-boot-starter-data-jpa` 已引入 | `pom.xml:51` |
 | 手写 DDL | `mall_management_sql.sql`，**12** 张表完整 CREATE TABLE（11 原始 + B3 追加 1） | 全文件 |
 
 **当前实际生效的是手写 `mall_management_sql.sql`。**
-原因：全项目**不存在任何 `@Entity`**——既有的唯一一个 POJO 曾是 `mallmanagement_class/info.java`（仅 `@Data`/`@AllArgsConstructor`/`@NoArgsConstructor` 三个 lombok 注解、无 JPA 注解、0 引用），**该类已于 2026-10-02 笔 1 挪包时删除**（`01df702`）。Hibernate 无实体可映射，`ddl-auto=update` 当前是**空转**，不会修改任何表结构。⚠️ **结论不变但依据换了**：从「有一个无注解的实体类」变成「**一个实体类都没有**」——条文原写「info.java 是唯一实体类」，笔 1 之后该句本身已不成立（详见 `project-map.md` 与 `tech-debt.md` TD-01）。
+原因：全项目**不存在任何 `@Entity`**——既有的唯一一个 POJO 曾是 `mallmanagement_class/info.java`（仅 `@Data`/`@AllArgsConstructor`/`@NoArgsConstructor` 三个 lombok 注解、无 JPA 注解、0 引用），**该类已于 2026-10-02 笔 1 挪包时删除**（`01df702`）。Hibernate 无实体可映射，`ddl-auto` 当前是**空转**，不会修改任何表结构。⚠️ **结论不变但依据换了**：从「有一个无注解的实体类」变成「**一个实体类都没有**」——条文原写「info.java 是唯一实体类」，笔 1 之后该句本身已不成立（详见 `project-map.md` 与 `tech-debt.md` TD-01）。
 
 **这是隐患而非当前故障**，风险在于：
 
-1. **表结构漂移**：一旦有人给某个类加上 `@Entity`，Hibernate 启动时会按实体定义反向 `ALTER TABLE`。`update` 模式**只增不减**——会擅自加列但不删列，静默产生与 `mall_management_sql.sql` 不一致的表结构，且无任何报错。
-2. **命名策略冲突**：本表结构用 `UserName`/`MerchantId` 等大驼峰列名，与 Hibernate 默认的 snake_case 命名策略不一致，一旦映射实体会产生大量非预期的列名。
-3. **脚本失去权威性**：两份定义并存时，无法判断线上库结构以哪份为准。
+1. **表结构漂移** —— ✅ **已于 2026-10-04 关闭**（TD-01 **`B` 方案**）：`ddl-auto` 由 `update` 改为 **`validate`** ⇒ 即便有人给某个类加上 `@Entity`，Hibernate 也**不再按实体定义反向 `ALTER TABLE`**。原文要防的是 `update` 模式**只增不减**（擅自加列但不删列、**静默**产生与 `mall_management_sql.sql` 不一致的表结构且无任何报错）—— 那正是 `validate` 关掉的那条。
+2. **命名策略冲突** —— ⚠️ **口径已变：后果不是「列名被偷偷改掉」，而是「启动失败」**。本表结构用 `UserName`/`MerchantId` 等大驼峰列名，与 Hibernate 默认的 snake_case 命名策略不一致 ⇒ 一旦有人加 `@Entity`，`validate` 会因**映射与表不符**直接拒绝启动。这是**期望行为**：显式炸好过静默改表（同 §3 的处置口径）。
+3. **脚本失去权威性** —— ⚠️ **原口径已不成立**：`update` 下两份定义并存、无法判断线上库以哪份为准；**改成 `validate` 后 Hibernate 只校验、不写入** ⇒ `mall_management_sql.sql` 是**唯一权威**。本条随 ① 一并关闭。
 
-**建议**：改为 `spring.jpa.hibernate.ddl-auto=validate`（或 `none`），由 `mall_management_sql.sql` 统一管理表结构。
+**已落地（TD-01 `B` 方案，2026-10-04）**：`spring.jpa.hibernate.ddl-auto` 已由 `update` 改为 **`validate`**（`application.properties:29`），由 `mall_management_sql.sql` 统一管理表结构。⚠️ **选 `validate` 而不是 `none`**：两者都不自动改表，但 `none` 在误加 `@Entity` 时**静默通过**、要等运行期某条 SQL 报错才暴露 —— 属「静默 / 断言落空」那一族（TD-15）。**依赖本身不删**（这是 `B` 方案的另一半，理由见 `tech-debt.md` TD-01）。
 
 > 关于 `spring-boot-starter-data-jpa` 依赖本身的去留，属技术债而非表结构事实，已移入 `tech-debt.md`（TD-01）。
 
