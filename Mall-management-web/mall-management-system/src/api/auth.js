@@ -1,8 +1,11 @@
 // src/api/auth.js —— 认证状态模块（全仓**唯一**允许触碰登录态 sessionStorage 的地方）
 //
-// 收敛范围（实测 2026-10-04，切换自 `9add994`）：14 个 view 共 8 键 / 71 处，其中
-//   登录态 4 键 / **52 处** ← 本模块收
-//     merchantid 23 / loginUsername 12 / customerid 11 / loginPassword 6
+// 收敛范围（实测 2026-10-04，基线 `9add994`）：14 个 view 共 8 键 / **71 处（逐出现）**，其中
+//   登录态 4 键 / **54 处（逐出现）** ← 本模块收
+//     merchantid 24 / customerid 12 / loginUsername 12 / loginPassword 6
+//   ⚠️ 同组另有「行×键」口径 = **52**（merchantid 23 / loginUsername 12 / customerid 11 /
+//     loginPassword 6），差在 HomePage:116 同行两**键**、ProductPage:415/416 同行两**次出现**。
+//     **本文件一律用逐出现的 54**（与 §6-B 的「71 = 54 + 17」同口径）；别把 52 与 17 相加。
 //   ⚠️ 另 4 键 / **17 处是页面状态、不属认证、本笔一字未动**，仍留在各 view：
 //     SEARCH_KEYWORD 6 / SEARCH_RESULTS 5 / PENDING_SEARCH_KEYWORD 5 / FROM_PAGE 1
 //   —— 这条线要守住，否则本模块会变成杂物箱（见方案 §4）。
