@@ -1,11 +1,18 @@
 package com.minke.mallmanagement.user.controller;
 
+import com.minke.mallmanagement.shared.web.AuthInterceptor;
+import com.minke.mallmanagement.shared.web.AuthSession;
 import com.minke.mallmanagement.shared.web.Result;
 import com.minke.mallmanagement.user.service.UserService;
+import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
+import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
+import java.util.HashMap;
 import java.util.Map;
 
 /**
@@ -13,11 +20,34 @@ import java.util.Map;
  * 业务规则、上传编排、响应组装全在 {@link UserService}，SQL 全在
  * {@code com.minke.mallmanagement.user.dao.UserDao}。
  *
- * <h2>【本类收 5 个端点 —— 不含 {@code userSelect}】</h2>
+ * <h2>【本类收 7 个端点 —— 不含 {@code userSelect}】</h2>
  * {@code loginSelect} / {@code loginAdd} / {@code getUserInfo} / {@code updateAvatar} /
- * {@code updateUserInfo}。⚠️ {@code /message/userSelect} <b>不归本笔</b>：
- * 它的路由在 {@code MessageController}、服务在 {@code UserCacheService}，
+ * {@code updateUserInfo}，加鉴权笔 2 的 {@code me} / {@code logout}。⚠️ {@code /message/userSelect}
+ * <b>不归本笔</b>：它的路由在 {@code MessageController}、服务在 {@code UserCacheService}，
  * 只是碰巧读 {@code user} 域的表 —— 归 message 域那一笔。
+ *
+ * <h2>【鉴权笔 2：{@code loginSelect} 写会话，{@code me} / {@code logout} 读会话】</h2>
+ * 会话的读写全部经 {@link AuthSession}，本类**不出现**属性名字面量
+ * （{@link AuthInterceptor#SESSION_USER_ID} 只有它一处引用）。三条纪律：
+ * <ul>
+ *   <li>{@code loginSelect} <b>只在认证成功且拿到业务号时</b>才 {@code request.getSession()} ——
+ *       失败的登录**不发会话**（故形参是 {@link HttpServletRequest} 而**不是**
+ *       {@link jakarta.servlet.http.HttpSession}：后者由 MVC 注入，会无条件创建）；
+ *       HTTP 契约一字未动（返回仍是裸 {@code int}，见下「例外 1/5」）。</li>
+ *   <li>{@code /user/me} 无会话 ⇒ <b>401 + 与闸逐字节相同的响应体</b>。用的是
+ *       {@link AuthInterceptor#BODY_NOT_LOGGED_IN} 这个**共享常量**，不是
+ *       {@code Result.fail("未登录")} —— 后者实测序列化出 {@code msg} 在前，字节不同
+ *       （理由写在那个常量的 javadoc 里）。</li>
+ *   <li>{@code /user/logout} **不进白名单**、也不需要登录：无会话时是 no-op（幂等），
+ *       由 {@code AuthSession.logout} 的 {@code getSession(false)} 保证「不创建再销毁」。</li>
+ * </ul>
+ * ⚠️ 开关 {@code app.auth.enabled} 的默认值**仍是 {@code false}**（笔 2 不翻开关），
+ * 故 {@code /user/me} 的 401 分支在默认配置下**确实可达** —— 它不依赖闸。
+ *
+ * <h2>【新增 2 端点对「33 个端点」口径的影响 —— 只登记，不改 {@code Result}}】</h2>
+ * 全仓端点 33 → 35。{@code Result} 类注释里「33 个端点里 30 个返回 Map」与「33 处响应 Map」
+ * 两处口径**在本笔之后都已过时**（无论按哪个口径数）。本笔**不改 {@code Result}**，
+ * 只在 {@code progress.md §5-Q} 登记 —— 理由与「本笔不改更新记录行」同：避免夹带。
  *
  * <h2>【为什么本类现在**没有**任何注解式行为（{@code @Transactional} / 缓存）】</h2>
  * 三层前 {@code loginAdd} 上挂着全仓<b>唯一一处真 {@code @Transactional}</b>
@@ -62,9 +92,21 @@ public class UserController {
     @PostMapping("/loginSelect")
     public int loginSelect(
             @RequestParam("username") String username,       // 对应数据库 login 表的 UserName
-            @RequestParam("password") String password        // 对应数据库 login 表的 PassWord
+            @RequestParam("password") String password,       // 对应数据库 login 表的 PassWord
+            HttpServletRequest request                       // 鉴权笔 2：认证成功时在这里写会话
     ) {
-        return userService.loginSelect(username, password);
+        int role = userService.loginSelect(username, password);
+
+        // ⚠️ 只有认证成功（1 = 客户 / 2 = 商家）才继续；role = 0 时下面两步都不执行，
+        //    也就**不会**有会话被建出来（这正是形参取 HttpServletRequest 而非 HttpSession 的理由）。
+        if (role == 1 || role == 2) {
+            String businessId = userService.businessId(username, role);
+            if (businessId != null) {
+                // 会话里存的是**业务号**（customerid / merchantid），不是登录名 —— 见 AuthSession。
+                AuthSession.login(request.getSession(), businessId);
+            }
+        }
+        return role;
     }
 
     //这是一个接口（用于最早期的注册，只更新最基础的用户信息）
@@ -117,5 +159,72 @@ public class UserController {
             @RequestParam("selfintroduction") String selfintroduction
     ) {
         return Result.of(userService.updateUserInfo(username, email, address, selfintroduction));
+    }
+
+    // ==================== 鉴权笔 2 新增：会话侧的两个端点 ====================
+
+    /**
+     * 「我是谁」：按**会话**返回当前登录用户的公开信息。
+     *
+     * <p>与 {@link #getUserInfo} **并存、不替代**：那个是**凭据驱动**（每次都传
+     * username+password，供登录页与资料页用），本端点是**会话驱动**（凭 cookie 识别身份）。
+     * 前端本笔**不动**（接入是笔 4 / {@code P2.6}）—— 故今日无调用方，{@code api-contract.md §5}
+     * 的「无调用方」列表由 2 条变 4 条。
+     *
+     * <h3>三种出口</h3>
+     * <ul>
+     *   <li><b>无会话 / 会话里没有 userId ⇒ 401</b>，响应体 = {@link AuthInterceptor#BODY_NOT_LOGGED_IN}
+     *       （**共享常量**，与闸的 401 逐字节相同 —— 客户端分不出这个 401 是闸发的还是端点发的，
+     *       这是有意的）。⚠️ 用字面量而**不是** {@code Result.fail("未登录")}：后者的键序由
+     *       HashMap 桶序决定，实测得到 {@code {"msg":…,"success":…}}，字节不同。</li>
+     *   <li><b>有会话、但查不到这个业务号 ⇒ HTTP 200 + {@code {success:false,msg:"用户不存在"}}</b>。
+     *       注意这是 **200**，不是 404：会话是有效的，只是它指向的用户在库里没了。
+     *       ⚠️ 与 {@code getUserInfo} 失败时的「200 空体」**形状不同** —— 本端点答的是**可解析**的
+     *       JSON（前端若照 {@code getUserInfo} 的写法 {@code await res.json()} 不会炸）。</li>
+     *   <li><b>有会话且查得到 ⇒ HTTP 200 + {@code {success:true, customerid, merchantid, username,
+     *       usertype, gender}}</b>（顶层平铺，键集 = {@code UserCacheService.publicInfo} 的 5 列）。</li>
+     * </ul>
+     *
+     * <p>⚠️ 用 {@link HttpServletRequest} 取会话（{@code AuthSession.currentUserId}）——
+     * 无会话的请求**不会**因为打这个端点而获得一个会话。
+     */
+    @PostMapping("/me")
+    public ResponseEntity<Object> me(HttpServletRequest request) {
+        String userId = AuthSession.currentUserId(request);
+        if (userId == null) {
+            return ResponseEntity.status(HttpServletResponse.SC_UNAUTHORIZED)
+                    .contentType(MediaType.parseMediaType("application/json;charset=UTF-8"))
+                    .body(AuthInterceptor.BODY_NOT_LOGGED_IN);
+        }
+
+        Map<String, Object> userInfo = userService.publicInfo(userId);
+        if (userInfo == null) {
+            return ResponseEntity.ok(Result.fail("用户不存在"));
+        }
+        return ResponseEntity.ok(Result.ok(userInfo));
+    }
+
+    /**
+     * 退出登录。**幂等**：没有会话时也答成功（前端可以无脑调）。
+     *
+     * <p>⚠️ <b>刻意不在白名单里</b>（{@code WebAuthConfig.AUTH_WHITELIST} 一行不动）：
+     * 它不需要「未登录也能打」这条豁免 —— 无会话时它本来就是 no-op，而放它进白名单
+     * 等于给未来留一个「不需要身份就能触达」的写面。开关打开时的已知接缝（下表）。
+     *
+     * <p>⚠️ <b>已知接缝（登记，不修）</b>：开关 {@code app.auth.enabled=true} 时，
+     * 一个**会话已过期**的用户点「退出」会被闸先拦成 401（拿不到本方法那个 200）。
+     * 实践上无害（客户端对 401 与 200 都应清本地态），但要写下来：这是「闸在 Controller 之前」
+     * 的必然结果，不是本方法的缺陷。
+     *
+     * <p>响应体是 {@code {success:true, msg:"已退出"}} —— 键序由 HashMap 决定
+     * （实测为 {@code msg} 在前），本端点**不承诺**字节序，前端按 {@code data.success} 取值。
+     */
+    @PostMapping("/logout")
+    public Result<Map<String, Object>> logout(HttpServletRequest request) {
+        AuthSession.logout(request);
+
+        Map<String, Object> payload = new HashMap<>();
+        payload.put("msg", "已退出");
+        return Result.ok(payload);
     }
 }

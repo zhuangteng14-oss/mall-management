@@ -27,7 +27,8 @@ import java.util.List;
  * 判据刻意是「会话**且**带 {@code userId} 属性」，不是「有会话即可」。会话在 Servlet 语义里只是
  * 一块服务端存储，任何一个 {@code getSession()} 调用都能创建它 —— 拿「存在会话」当登录态，
  * 等于把闸的判定权交给「谁碰过 session」。故逐条判属性，并把属性名固化成公开常量
- * {@link #SESSION_USER_ID}：<b>写入方（鉴权笔 2 的登录端点）引用本常量，不另抄字面量</b>。
+ * {@link #SESSION_USER_ID}：<b>写入方（鉴权笔 2 的登录端点）引用本常量，不另抄字面量</b>
+ * ——该要求已于 2026-10-04（笔 2）落地：写入方是 {@link AuthSession}，它只引用本常量。
  *
  * <h2>【为什么本类不是 {@code @Component}】</h2>
  * 由 {@link WebAuthConfig} 显式 {@code new} 出来（开关与白名单都是构造参数）。两个好处：
@@ -47,6 +48,11 @@ import java.util.List;
  * 不写会话（登录端点尚未改造 —— 那是鉴权笔 2）、不做 RBAC、不做密码 hash、不引
  * Spring Security / JWT / 新依赖。⚠️ 故<b>开关打开时全站非白名单接口都会被拒</b> ——
  * 这正是默认 {@code false} 的理由。
+ *
+ * <p>⚠️ <b>2026-10-04（笔 2）后本句的「不写会话」已过时</b>：写入方已落地
+ * （{@link AuthSession}，由 {@code UserController.loginSelect} 在认证成功时调用）。
+ * 其余三条（RBAC / 密码 hash / 不引新依赖）仍然成立；开关的默认值**仍是 {@code false}**
+ * —— 笔 2 只把「认证侧」建起来，没有翻开关，故上面那两条 401 断言的适用面不变。
  */
 public class AuthInterceptor implements HandlerInterceptor {
 
@@ -62,8 +68,18 @@ public class AuthInterceptor implements HandlerInterceptor {
     /**
      * 401 响应体（逐字节固定）。键序 {@code success} → {@code msg}，与
      * {@link Result#fail(String)} 的写入序一致，但**不依赖** HashMap 的桶序来维持。
+     *
+     * <p>⚠️ <b>2026-10-04（笔 2）由 {@code private} 改为 {@code public}</b>：{@code /user/me}
+     * 在「开关关着、但端点自身要求登录」时也要答同一个 401，而**不能**用
+     * {@link Result#fail(String)} 拼 —— 实测（本机 JDK 17）：{@code new HashMap<>()} 里
+     * {@code success} 落 6 号桶、{@code msg} 落 0 号桶 ⇒ 迭代序是 {@code msg} 在前，
+     * 序列化得到 {@code {"msg":"未登录","success":false}}，与本字面量**不同字节**。
+     * 故改为共享常量：两处 401 的字节相同**由构造保证**，不再靠「两个字面量恰好一样」。
+     *
+     * <p>⚠️ {@code AuthGateSmokeTest.BODY_NOT_LOGGED_IN} 是**另一份独立副本**（不是引用本常量）——
+     * 那是刻意的：它是钉住本常量的**变更探测器**，把本常量改坏了它会红。
      */
-    private static final String BODY_NOT_LOGGED_IN = "{\"success\":false,\"msg\":\"未登录\"}";
+    public static final String BODY_NOT_LOGGED_IN = "{\"success\":false,\"msg\":\"未登录\"}";
 
     private static final AntPathMatcher MATCHER = new AntPathMatcher();
 

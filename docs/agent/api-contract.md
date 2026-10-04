@@ -6,26 +6,45 @@
 > ⚠️ **同版本复核（对账上一版的「`G:` 行号整体 −9」）**：以 `git show 8c5385e:…goods/controller/GoodsController.java`（**笔 2 后**状态）逐条实测，其 route 行为 **50 / 72 / 173 / 187 / 197 / 245 / 280 / 359 / 369** —— 与上一版表内 `G:` 值**逐条相同** ⇒ 那一栏在笔 2 时是**准的**，不是陈旧值。但「**整体 −9**」只是粗略说法：实测相对 2026-09-30 基线（`148e77b`，`:59 / :81 / :181 / :195 / :205 / :249 / :264 / :336 / :346`）是 `goodstype`/`goodsAdd` **−9**、`goodsSelect` 一族 **−8**、`productCodePrice` **−4**、`goodsUp` 之后反而 **+16 / +23 / +23**（因笔 2 在该段加了说明注释）⇒ 引用时**不要拿 −9 去换算全表**。
 > **2026-10-02 三层第二笔（商品域）又整体前移**：9 个端点的**路由仍在 `GoodsController`**，**业务体（SQL / try-catch / 响应组装）下沉到 `GoodsService`，SQL 出口收进 `GoodsDao`** ⇒ `G:` 现值 = **51 / 72 / 92 / 101 / 109 / 127 / 142 / 158 / 171**（实测，已重填），且它**只保证「路由还在哪一行」**；方法体位置另见 `/goods` 表下的「业务体现址」注。
 > **「幂等」判定标准**：*相同入参重复调用是否产生额外副作用（不重复写入）*。非 HTTP 语义幂等。
-> 所有接口均无鉴权、无统一返回体、无全局异常处理；~~5 个 Controller 均标 `@CrossOrigin`~~ ⚠️ **2026-10-04 订正：那 5 处 `@CrossOrigin` 已由 PR #34 `23f5361` 全部删除** ⇒ CORS 唯一出处 = `ImgConfig` 的全局 `CorsFilter`。入参均为 `@RequestParam`（query/form），无 `@RequestBody`。
+> ~~所有接口均无鉴权~~ ⚠️ **2026-10-04 订正（鉴权笔 1/2）**：鉴权闸（`AuthInterceptor` + `WebAuthConfig`）已落地，**默认关闭**（`app.auth.enabled=false`）⇒ 今日行为仍是"全部放行"；但 `/user/loginSelect`（认证成功后写会话）、`/user/me`、`/user/logout` 三个端点的**会话侧**已就位。无统一返回体、无全局异常处理；~~5 个 Controller 均标 `@CrossOrigin`~~ ⚠️ **2026-10-04 订正：那 5 处 `@CrossOrigin` 已由 PR #34 `23f5361` 全部删除** ⇒ CORS 唯一出处 = `ImgConfig` 的全局 `CorsFilter`。入参均为 `@RequestParam`（query/form），无 `@RequestBody`。
 
 ## 1. 通用约定
 
 - 全部路径无版本号、无 RESTful 语义，**全部 `POST`**，仅 **2 个 `GET`**：业务侧 `/goods/goodstype`、运维侧 `/health/db`（`@Profile("a3")`，`HealthController:43`，仅 a3 profile 下注册 —— 原记只列了 `goodstype`，漏了它）。
-- 失败返回不统一：`loginSelect` 返回 `0`；`getUserInfo` 返回 `null`（HTTP 200 空体）；`/goods` 与 `/order` 系列返回 `{success:false, msg}`。
+- 失败返回不统一：`loginSelect` 返回 `0`；`getUserInfo` 返回 `null`（HTTP 200 空体）；`/user/me` 无会话返回 **HTTP 401** + `{success:false,msg:"未登录"}`（与闸的 401 **逐字节相同**，共享常量 `AuthInterceptor.BODY_NOT_LOGGED_IN`）；`/goods` 与 `/order` 系列返回 `{success:false, msg}`。
 - 无分页参数，列表接口全量返回。
 - ⚠️ **「读接口」≠「无副作用」**：本表按**方法语义**分类，不按 HTTP 方法。`/message/history` 名字是查询，**实为写** —— 除 SELECT 外**无条件** upsert `user_conversation_read.last_read_time = NOW()`（SQL 在 `MessageDao.upsertLastReadTime:206-209`，由 `MessageService.getMessageHistory:200` 调用）⇒ 统计「读接口」或做只读性验证时**不得**把它算进去。
 
-## 2. 接口清单（共 33 个）
+## 2. 接口清单（共 35 个）
 
-### /user — 5 个
+> ⚠️ **33 → 35（2026-10-04，鉴权笔 2）**：`/user` 段新增 2 个会话侧端点（`me` / `logout`）。
+> `Result` 类注释里"33 个端点 / 33 处响应 Map"两处口径**在本笔之后都已过时**（无论按哪个口径数）——
+> 本笔**不改 `Result.java`**，只在 `progress.md §5-Q` 登记（避免夹带）。
+
+### /user — 7 个
+
+> ⚠️ **行号口径**：`UserController.<方法>:<行>` = 该方法的 `@PostMapping` 所在行（**不是**方法声明行）。
+> ⚠️ **2026-10-04（笔 2）本表 5 行全部重测**：旧值（`52 / 61 / 80 / 89 / 98`）已陈旧 **40~56 行**
+> —— 成因是三层第三笔之后该文件又经多次改动（`Result` 包装、类 javadoc 增行、本笔加形参与新端点），
+> 而本表只在 2026-10-02/03 对过账。
 
 | 方法 | 路径 | 入参 | 返回 | 幂等 | 证据 |
 |---|---|---|---|---|---|
-| POST | `/user/loginSelect` | username, password | `int`：1=客户 2=商家 0=失败 | 是 | `UserController.loginSelect:52` |
-| POST | `/user/loginAdd` | image(默认 default_user.png), username, usertype, userid, customerid(默认"暂无数据"), merchantid(默认"暂无数据"), password, age, gender | `String`：`"0"`=已存在 / `"添加成功！"` | 是 ⚠️ | `UserController.loginAdd:61` |
-| POST | `/user/getUserInfo` | username, password | `user` 全字段 + `image`；失败返回 `null` | 是 | `UserController.getUserInfo:80` |
-| POST | `/user/updateAvatar` | username, file(MultipartFile) | `{success, msg?, imageUrl?}` | 是 | `UserController.updateAvatar:89` |
-| POST | `/user/updateUserInfo` | username, email, address, selfintroduction | `{success, msg}` | 是 | `UserController.updateUserInfo:98` |
+| POST | `/user/loginSelect` | username, password | `int`：1=客户 2=商家 0=失败 | 是 | `UserController.loginSelect:92` |
+| POST | `/user/loginAdd` | image(默认 default_user.png), username, usertype, userid, customerid(默认"暂无数据"), merchantid(默认"暂无数据"), password, age, gender | `String`：`"0"`=已存在 / `"添加成功！"` | 是 ⚠️ | `UserController.loginAdd:114` |
+| POST | `/user/getUserInfo` | username, password | `user` 全字段 + `image`；失败返回 `null` | 是 | `UserController.getUserInfo:136` |
+| POST | `/user/updateAvatar` | username, file(MultipartFile) | `{success, msg?, imageUrl?}` | 是 | `UserController.updateAvatar:145` |
+| POST | `/user/updateUserInfo` | username, email, address, selfintroduction | `{success, msg}` | 是 | `UserController.updateUserInfo:154` |
+| POST | `/user/me` | **无**（凭会话 Cookie；**无 `@RequestParam`**） | 有会话：`{success, customerid, merchantid, username, usertype, gender}`（顶层平铺）；**无会话 ⇒ 401** + `{success:false,msg:"未登录"}`；查无此人 ⇒ 200 + `{success:false,msg:"用户不存在"}` | 是 | `UserController.me:191` |
+| POST | `/user/logout` | **无**（凭会话 Cookie） | `{success:true, msg:"已退出"}`；无会话时同样答成功（no-op，**不建会话**） | 是 | `UserController.logout:222` |
+
+> **会话侧三端点（2026-10-04 鉴权笔 2 新增/改造）**：
+> - `loginSelect` 在**认证成功且拿到业务号**时把**业务号**（`user.customerid` / `user.merchantid`）写进会话；
+>   **失败的登录不发会话**（形参取 `HttpServletRequest`，只在成功路径上 `getSession()`）。
+>   ⚠️ HTTP 契约**一字未动**（返回仍是裸 `int`，例外 1/5）。
+> - `me` / `logout` 与 `getUserInfo` **并存不替代**：那个是**凭据驱动**，这两个是**会话驱动**。
+> - ⚠️ **前端本笔不动** ⇒ 这两个新端点今日**无调用方**（接入是笔 4 / `P2.6`），见 §5 对账。
+> - 开关 `app.auth.enabled` **默认仍 `false`** ⇒ `me` 的 401 分支在默认配置下**可达**（不依赖闸）。
 
 ### /message — 10 个
 
@@ -139,7 +158,10 @@
 > **范围**：`Mall-management-web/mall-management-system/src` 全部 `.js` / `.vue`；下表文件均位于 `src/views/`。
 > **行号**：指**该 `fetch(` 调用的所在行**；标 ※ 者见下方「变量 URL」段。
 
-**四项对账**（须自洽）：前端 `fetch(` 调用点 **42** 处 ／ 不同路径 **31** 条 ／ 本文件路由 **33** 条 ／ 差集 **33 − 31 = 2**（即表末两行「无调用方」）。
+**四项对账**（须自洽）：前端 `fetch(` 调用点 **42** 处 ／ 不同路径 **31** 条 ／ 本文件路由 **35** 条 ／ 差集 **35 − 31 = 4**（即表末四行「无调用方」）。
+> ⚠️ **2026-10-04（鉴权笔 2）**：路由 **33 → 35**（新增 `/user/me`、`/user/logout`），
+> 前端 **42 / 31 两条不变**（本笔不动前端）⇒ 差集 **2 → 4**。**这个 4 是预期的，不是漏接** ——
+> 两个新端点的前端接入归笔 4 / `P2.6`。
 
 ⚠️ **前端无 HTTP 框架**：`axios` / `$http` / `XMLHttpRequest` / `EventSource` / `baseURL` 在全 `src` **0 命中**；全部走原生 `fetch(`；`vue.config.js` **无 `proxy`**；`main.js` 无拦截器、无全局配置；URL 全部硬编码 `http://localhost:8088/...`。
 
@@ -178,6 +200,8 @@
 | `/message/friendDe` | `FriendRoom.vue:228`※ |
 | ~~`/message/getOrCreateConversation`~~ | **无调用方**（前端 0 命中；`cache-layer.md` 记为**有意保留**的孤儿读接口） |
 | ~~`GET /health/db`~~ | **无前端调用方**（运维接口，消费者 = A3 脚本 P5/P6/P7） |
+| ~~`/user/me`~~ | **无调用方**（2026-10-04 笔 2 新增；前端接入归笔 4 / `P2.6`） |
+| ~~`/user/logout`~~ | **无调用方**（2026-10-04 笔 2 新增；同理） |
 
 ### 5.1 三处「变量 URL」（静态 grep 看不到，须读分支）
 
