@@ -78,6 +78,9 @@
 <script setup>
 /* eslint-disable no-undef */
 import { ref, onMounted } from 'vue'
+import { http, handleApiError, urlOf } from '../api/http'
+import { endpoints } from '../api/endpoints'
+import { getMerchantId, getUsername } from '../api/auth'
 
 defineProps({
   orderTab: { type: String, default: 'order' },
@@ -91,10 +94,12 @@ const orderList = ref([])
 const loading = ref(false)
 const orderStatus = ref('active')
 
-const getMerchantId = () => {
-  let merchantId = sessionStorage.getItem('merchantid')
+// ⚠️ 本地函数**不能**叫 getMerchantId —— 会遮蔽从 auth.js 导入的同名函数，
+//    使下面这行变成自我递归（本笔迁移时实际踩到，改名解决）。
+const currentMerchantId = () => {
+  let merchantId = getMerchantId()
   if (!merchantId || merchantId === 'null' || merchantId === 'undefined') {
-    merchantId = sessionStorage.getItem('loginUsername')
+    merchantId = getUsername()
   }
   return merchantId || null
 }
@@ -112,7 +117,7 @@ const formatDateTime = (dateStr) => {
 }
 
 const loadOrders = async () => {
-  const merchantId = getMerchantId()
+  const merchantId = currentMerchantId()
   if (!merchantId) {
     console.warn('未登录商家，无法获取订单')
     return
@@ -122,15 +127,11 @@ const loadOrders = async () => {
     const params = new URLSearchParams()
     params.append('merchantId', merchantId)
     params.append('status', orderStatus.value)
-    let url = 'http://localhost:8088/order/orderDeliveryIfSelect'
+    let url = urlOf(endpoints.order.orderDeliveryIfSelect)
     if (orderStatus.value === 'completed') {
-      url = 'http://localhost:8088/order/orderDeliverySelect'
+      url = urlOf(endpoints.order.orderDeliverySelect)
     }
-    const res = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: params.toString()
-    })
+    const res = await http.post(url, params.toString())
     const data = await res.json()
     if (data.success) {
       orderList.value = data.list
@@ -138,7 +139,7 @@ const loadOrders = async () => {
       console.error('获取订单失败', data.msg)
     }
   } catch (err) {
-    console.error('请求出错', err)
+    handleApiError(err, '请求出错')
   } finally {
     loading.value = false
   }
@@ -168,11 +169,7 @@ const handleDeliver = async (order) => {
   try {
     const params = new URLSearchParams()
     params.append('orderId', order.OrderId)
-    const res = await fetch('http://localhost:8088/order/orderDeliveryIfUp', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: params.toString()
-    })
+    const res = await http.post(endpoints.order.orderDeliveryIfUp, params.toString())
     const result = await res.json()
     if (result.success) {
       alert('发货成功！')

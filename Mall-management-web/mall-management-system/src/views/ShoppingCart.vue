@@ -72,6 +72,9 @@
 <script setup>
 /* eslint-disable no-undef */
 import { ref, onMounted } from 'vue'
+import { http, handleApiError } from '../api/http'
+import { endpoints } from '../api/endpoints'
+import { resolveBuyerId } from '../api/auth'
 
 defineProps({
   orderTab: { type: String, default: 'cart' },
@@ -84,16 +87,8 @@ const handleToggle = () => emit('toggle')
 const orderList = ref([])
 const loading = ref(false)
 
-const getBuyerId = () => {
-  let buyerId = sessionStorage.getItem('customerid')
-  if (!buyerId || buyerId === 'null' || buyerId === 'undefined') {
-    buyerId = sessionStorage.getItem('merchantid')
-  }
-  if (!buyerId || buyerId === 'null' || buyerId === 'undefined') {
-    buyerId = sessionStorage.getItem('loginUsername')
-  }
-  return buyerId || null
-}
+// 降级链已收敛到 src/api/auth.js:resolveBuyerId()（与 HistoricalOrders 逐字相同）。
+const getBuyerId = () => resolveBuyerId()
 
 const loadOrders = async () => {
   const customerId = getBuyerId()
@@ -105,11 +100,7 @@ const loadOrders = async () => {
   try {
     const params = new URLSearchParams()
     params.append('customerId', customerId)
-    const res = await fetch('http://localhost:8088/order/orderSelect', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: params.toString()
-    })
+    const res = await http.post(endpoints.order.orderSelect, params.toString())
     const data = await res.json()
     if (data.success) {
       orderList.value = data.list
@@ -117,7 +108,7 @@ const loadOrders = async () => {
       console.error('获取订单失败', data.msg)
     }
   } catch (err) {
-    console.error('请求出错', err)
+    handleApiError(err, '请求出错')
   } finally {
     loading.value = false
   }
@@ -153,11 +144,7 @@ const handlePay = async (order) => {
   try {
     const params = new URLSearchParams()
     params.append('orderId', order.OrderId)
-    const res = await fetch('http://localhost:8088/order/orderPayIfUp', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: params.toString()
-    })
+    const res = await http.post(endpoints.order.orderPayIfUp, params.toString())
     const result = await res.json()
     if (result.success) {
       alert('付款成功！')
@@ -187,11 +174,7 @@ const handleReceive = async (order) => {
   try {
     const params = new URLSearchParams()
     params.append('orderId', order.OrderId)
-    const res = await fetch('http://localhost:8088/order/orderReceiveIfUp', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: params.toString()
-    })
+    const res = await http.post(endpoints.order.orderReceiveIfUp, params.toString())
     const result = await res.json()
     if (result.success) {
       alert('收货成功！')
