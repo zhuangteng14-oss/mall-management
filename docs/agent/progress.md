@@ -80,6 +80,7 @@
 | 2026-10-04 | `C#6` 状态位拦截（`fix/order-state-guard`）：`OrderService.orderAdd` **锁之前**加**出生闸**（白名单 `{(0,0,0),(1,0,0)}`，**排在 `B#1` 价格闸之后**；非法 ⇒ 200 + `{success:false,msg:"订单状态不合法"}`、**不取锁不触库**）+ 指标 `mall.order.state.birth.rejected{shape}`（**5 值封闭枚举**：`010`/`001`/`011`/`non_binary`/`non_initial`）+ 单测 ×10（`OrderAddStateGuardSmokeTest`，**无 `A3_ENABLED` 门控 ⇒ 在阻塞 job 真跑**；含 3 组突变对照 7/3/7）+ **A3 适配**（S4a 前置态改走合法流转 + 新增门禁 `A-S4a-0`/`A-C6-1`/`A-C6-2`，`gates.count` 27 → 30）+ 文档 ×6 + 本节 §5-G | #45 |
 | 2026-10-04 | **前端 API 层规范化**（`fix/frontend-api-layer`，8 笔 = 5 搬家 + 3 改行为）：14 个 view 的 **42** 处裸 `fetch`（41 POST + 1 GET）、**51** 行硬编码基址（39 行 fetch 字面量 + 6 行 URL 赋值 + 3 处头像 URL + 3 行 CSS `url()`）、**54** 处登录态 `sessionStorage`（4 键：`merchantid` 24 / `customerid` 12 / `loginUsername` 12 / `loginPassword` 6）收敛到 `src/api/` 三层（`http` / `endpoints` / `auth`）+ 2 行 `.env`。**落地点与残留**：§6-B 的 `P2.1`（`LoginPage` 3 行 CSS 挂账保留）/ `P2.2` / `P2.3`（改 22 处纯日志 `catch`，另 19 处业务分支不动）/ `P2.5`，加 §6-A 的 `P1.1`；⚠️ `P2.7` **只落超时**（默认 10s / 上传 30s），**重试按裁决不做**；**`P2.6` 未落**（余 17 处页面状态键 `SEARCH_*` / `FROM_PAGE` 本笔一字未动）—— 已拆出单列一笔。3 笔改行为 = 超时 / 非 2xx 抛 `HttpError` 并对用户可见 / 3 处头像死链（`default-avatar.jpg` → `default_user.png`）。证据：保真 42/42（路径 + 方法 + body + Content-Type 四维）、5 门禁含反向对照（51→3 / 42→0 / 0→42 / 54→0 / 14→1）、8 笔逐笔 `lint=0 build=0`、32 个 `(方法, 路径)` 组合对后端 0 处不存在。**不关 `TD-06`**（根因在后端 4 处字面量） | #48 |
 | 2026-10-04 | **记录收尾 + 自查纠错**（`docs/progress-48-record`）：更新记录补 `#48` 行（行内带 **§6-B/§6-A 的落地点与残留**）→ 订正 `.env.production` 注释的 51 分解为 **39 fetch 字面量 + 6 URL 赋值行 + 3 处头像 URL + 3 CSS `url()` = 51**（纯注释、值零变更）→ 新增 **§5-I** 登记 #48 的 **2 处已知错误**（51 分解、`sessionStorage` 52 vs **54**）；**#48 的 PR body 同步订正**（GitHub 直改，2 处 + 回读校验）。⚠️ `8118741` 的提交信息**未修**（不改写已合并历史）⇒ 该 message 两个错数**永久留痕**，引用时按 §5-I 的 **39 / 54** 读 | #49 |
+| 2026-10-04 | **记录补号 + `54` 订正 + 鉴权调研登记**（`docs/progress-49-record`，3 提交 `c97bcc5` / `2cf0e64` / `651a375`）：① 更新记录补 `#49` 行；② **订正 `54` 的逐键拆分**（`progress.md` §1 的 `#48` 行 + §5-I (2) + `src/api/auth.js:3-8` **三处**；原写 `merchantid 23 / loginUsername 13 / customerid 12 / loginPassword 6` **对不上任何一套口径** ⇒ 统一为**逐出现** `merchantid 24 / customerid 12 / loginUsername 12 / loginPassword 6`），并**实测坐实**另有 `52`（**行×键**去重）与 `51`（涉及凭据的**行数**）两套口径 —— `52` 的病是**被与 `17` 相加去对 `71`**（混用）；③ 新增 **§5-J**：登记鉴权笔（`BD-03`）开工前调研 **3 条发现**（`AbstractSmokeTest:45` 计数 5→**8** / `UserService:98` 明文账号密码进 stdout / `login.Password char(20)` 装不下 bcrypt(60)）+ **1 条裁定**（`P2.6` **独立一笔**，时序 鉴权笔 → `P2.6` 笔）。⚠️ `8118741` 的提交信息**未修**（不改写已合并历史） | #50 |
 
 > ⚠️ **表格欠账的现状**：`C#2` 那一行原记 `本笔`，已由 **PR #42 合并后的 `docs/progress-42-record` 一笔补成 `#42`** —— 与 **#11 的做法相同**（#11 的记录也是合并后另起一笔 `37cafc3` 补的 `#40`）。当初为何不直接填：那一笔的文档与代码在**同一笔**落盘（先出 diff → 用户核 → commit → 开 PR），commit 时 PR 号尚不存在。仍欠的**只剩三处**：**2026-10-02 / 2026-10-03 两行**的 `+ 本笔`，以及本表**新增的 `2026-10-04 B#1` 行**（同理：该笔的文档与代码同笔落盘，commit 时 PR 号尚不存在；补法与 #42 同 —— 合并后另起一笔）。
 
@@ -410,6 +411,14 @@
 - **（3）`login.Password` 宽 `char(20)`，装不下 bcrypt。** 见 `db-schema.md:178`（`char(20)` 显式 / **明文**）。bcrypt 输出 **60** 字符 ⇒ hash 化**不能原地改列**（数据库规则禁 `MODIFY COLUMN`），只能走**影子列**（新增列 + 回填）。**待裁**：建议**单列一笔**（文件数 4–5），排在鉴权笔**之后**。
 - **（4）【裁定 · `P2.6` 独立一笔】** ⚠️ **前 3 条是「发现」（调研看到的事实），本条是「裁定」（用户做的决定）—— 性质不同，勿混。** 内容 = 删前端 **4 个读写口**（`LoginPage.vue:163-169` 写 / `GoodsUp.vue:145-146` 读 / `UserInfoPage.vue:91-92` 读）+ 拆 `UserService.java:185` 的 `selectRoleForProfile(username, password)` 重验。**前提** = 鉴权笔落地（凭据进 **httpOnly Cookie**）；**时序** = 鉴权笔 → `P2.6` 笔。
   - ⚠️ **口径（已订正，勿沿用旧说法）**：`P2.6` 的解**不是「选 A」**，而是「**凭据进 httpOnly Cookie**」；A 只是**默认就走这条路**、且不引入密钥管理 / 刷新 / CSRF 复杂度的那个（**最省事 ≠ 唯一**）。B 把 token 放 httpOnly Cookie **同样解**；放 `localStorage` 则**只减轻不消除**（token 有时限、可撤销、不可复用，价值低于密码 —— 故「明文换明文」这个说法**不成立**）。C 与 `P2.6` **无关**（其默认形状即 A）。
+
+### 5-K. `application-a3.properties` 注释漂移 **2 处**（鉴权笔调研附带发现；登记，未修）
+
+> **来源**：为鉴权笔 1 做**撞车面体检**时只读扫到，**与鉴权无关**。
+> **处置**：**本笔不动**（用户裁决：主题不符）。**归属** = 与「部署 / 上传」同族的那批笔（§5-C 的 `TD-05` / `TD-08` / `TD-09`）一并订正。
+
+- **（1）行号过时。** `application-a3.properties` 写「`ImgPath.initUploadDir()` 的 `@PostConstruct` 调用 `Files.createDirectories(uploadPath)`（`ImgPath.java:23-27`）」。**实测**：`@PostConstruct` 在 **`ImgPath.java:45`**、`initUploadDir()` 在 **`:46`**、`Files.createDirectories(candidate)` 在 **`:49`**；`:23-27` 是字段 `uploadDir` 一带。
+- **（2）行为描述与代码相反（较重）。** 同一段继续写「若创建失败会**抛 `IOException` 使 Bean 初始化失败**——即「启动期炸」，**不会静默**」。但 `ImgPath.java:31-34` 的 javadoc 明写「**本方法刻意不抛异常**……此前签名是 `throws IOException`」⇒ **该行为已被改掉**，注释描述的是**旧行为**。**现状**：启动期只 **`WARN`**、不阻断；失败推迟到真正落盘那一刻，由上传入口显式返回 `{success:false,msg}`。
 
 ---
 
