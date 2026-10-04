@@ -96,7 +96,7 @@ Vue 3 CLI 工程，14 个页面视图 + 1 个组件 + 1 个路由表。页面按
 | 订单三状态位用条件 UPDATE 实现 CAS，是全项目唯一正确的并发控制 | `concurrency-map.md` |
 | `productsales.OrderVolume` 从未被更新，订单量统计功能失效 | `concurrency-map.md` |
 | 全项目零缓存（**2026-09-14 时**；B1 自 2026-09-27 起逐笔落地，现行见右栏第二项） | `cache-map.md`（顶部有时效标注）/ `context-packs/cache-layer.md` |
-| `ddl-auto=update` 与手写 DDL 脚本并存 | `db-schema.md` |
+| `ddl-auto=validate` 与手写 DDL 脚本并存（2026-10-04 起；原 `update`，TD-01 `B` 方案） | `db-schema.md` |
 | **12** 张表中 **3 张**有二级索引（共 4 个）：`message` 2 + `order_state_transition` 1 + `order` 1（`uk_order_orderId`） | `db-schema.md` §5 |
 | 测试：**19** 个测试类 / **136** 个 `@Test` 用例（2026-10-02 实测，见下方口径注）；另有抽象基类 `smoke/AbstractSmokeTest`（自身**无** `@Test`）；`MallManagementApplicationTests` 的 **5** 个用例在未设 `A3_ENABLED` 时**全部 skip**，设 `true` 时真连库 | `tech-debt.md` TD-10（已关闭） |
 

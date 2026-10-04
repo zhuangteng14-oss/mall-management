@@ -124,7 +124,7 @@ public class ConcurrencyRunner {
         String negativeControlUser = "root";
         String negativeControlPassword = "123456";
         boolean skipNegativeControl = false;
-        // P5 就绪探针等待上限（秒）。后端冷启动要跑 Hibernate ddl-auto=update 的校验，非瞬时。
+        // P5 就绪探针等待上限（秒）。后端冷启动要跑 Hibernate ddl-auto=validate 的校验（2026-10-04 起为 validate，此前 update；两者都在启动期建池，耗时不因此改变），非瞬时。
         int readyTimeoutSec = 60;
         // 场景选择（阶段 D 可逐个跑）；H3 的六段负载即前六项，B2 是澄清 1 的 B 组（check-then-insert TOCTOU），
         // C 是 B3 的时间线核对（C-1/C-2 为门禁，进退出码；见 c() 的 javadoc）
@@ -2634,12 +2634,15 @@ public class ConcurrencyRunner {
                 return false;
             }
 
-            // P3 表数（兼 TD-01 校验：ddl-auto=update 启动后未反向改表）
+            // P3 表数（兼 TD-01 校验：启动后未反向改表）
+            // ⚠️ 2026-10-04 起 ddl-auto 已由 update 改为 validate（TD-01 B 方案），
+            // 本校验的判据不变 —— 从「查 update 没乱改表」变成「查 validate 没乱改表」。
             // 期望 11 张基线表；若 order_state_transition 已在（B3 新增，追加在
             // mall_management_sql.sql 末尾、人工落盘），则期望 12。
             // 刻意不写死 12：运行器与那份 SQL 是两笔改动，谁先落都要能跑。
             // 但**多出来的那一张必须是它** —— 否则「12」只是「多了一张表」，
-            // 正是 TD-01 要抓的反向改表（ddl-auto=update 反向建出来的表）。
+            // 正是 TD-01 要抓的反向改表（update 模式下按实体反向建出来的表；
+            // 现已是 validate，此判据保留为回归防线 —— 将来谁再改回 update 就会命中）。
             // 名字比较套 LOWER()：Linux 上表名区分大小写（lower_case_table_names=0），
             // 而 information_schema 的排序规则各版本不一致，归一化后两端都成立。
             int tables = scalarInt(c,

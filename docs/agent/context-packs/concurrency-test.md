@@ -117,7 +117,7 @@ A3 的结论只有在「确实压到了目标环境」时才成立。故脚本�
 | P0 | 静态长度检查（**13 列**） | 逐列与**该列自己的上限**比对，只查长度，**不约束 runId 格式** | 门禁 |
 | P1 | 连通 + 库名 + 服务端版本 | `DATABASE()` 必须是 `mall_management_sql` **且** `VERSION()` 必须以 `8.4.` 开头 | **硬门禁** |
 | P2 | 主机串比对 | `--expect-db-host` 与 `jdbcUrl` 里的 host 字面量相等 | 门禁（不符即 `exit 2`） |
-| P3 | 表数量 | **12 张** = `11` + `timelineTable`（B3 的 `order_state_transition`）。原记只写「11 张」；**脚本本身是对的**（`ConcurrencyRunner:2518` 断言 `11 + timelineTable`），是**本表漏了 `+1`**（兼作 TD-01 校验：`ddl-auto=update` 启动后未反向改表） | 门禁（库脏即拒） |
+| P3 | 表数量 | **12 张** = `11` + `timelineTable`（B3 的 `order_state_transition`）。原记只写「11 张」；**脚本本身是对的**（`ConcurrencyRunner:2518` 断言 `11 + timelineTable`），是**本表漏了 `+1`**（兼作 TD-01 校验：启动后未反向改表 —— 2026-10-04 起 `ddl-auto` 已是 **`validate`**（TD-01 `B` 方案），**本行判据不变**） | 门禁（库脏即拒） |
 | P4 | 种子计数 | `order=6` / `goods=5` / `login=5` / `user=5` / `friend=4` | 门禁（库脏即拒） |
 | P5 | 就绪探测（`GET /health/db`） | 响应含 `"success":true`。该端点**永不被缓存**，故仍能同时证明 Web + DB（见下「2026-09-27 改版」） | 门禁：**超时是 FAIL，不是 skip** |
 | P6 | **库身份对比** | `GET /health/db` 报的 `@@server_uuid` == 脚本 JDBC 查到的；`hostname` 不一致只告警，`database`/`port`/`version` 只报告 | 门禁 |
@@ -267,7 +267,7 @@ A3 的结论只有在「确实压到了目标环境」时才成立。故脚本�
 
 ## 相关 TD / BD
 
-- TD-01（`spring-boot-starter-data-jpa` 空转 + `ddl-auto=update`，CI 起库时需确认不反向改表）—— **同时是 D1 的根因**：无 `@Entity`，上下文加载根本不需要库，故 `contextLoads()` 连不上库也能过
+- TD-01（`spring-boot-starter-data-jpa` 空转 + `ddl-auto`，CI 起库时需确认不反向改表）—— ✅ **2026-10-04 已关闭（`B` 方案：依赖保留、`ddl-auto` 改 `validate`）**；P3 那条「未反向改表」的校验**照旧保留**。**同时是 D1 的根因**：无 `@Entity`，上下文加载根本不需要库，故 `contextLoads()` 连不上库也能过 —— ⚠️ **该根因不受 B 影响**（B 只把 `update` 换成 `validate`，仍是零 `@Entity`、仍空转）
 - TD-08（测试数据落盘污染 —— 选 `orderAdd` 系列可规避）
 - TD-10（CI 无 MySQL 的临时规避）—— **已关闭**（D1 落地：concurrency job 以 `A3_ENABLED=true` 跑真连库断言）
 - TD-12（`mall_management_sql.sql` 自带建库语句 → 导入到哪个实例都会建同名库；也是 CI 容器内「正好落位」的原因）

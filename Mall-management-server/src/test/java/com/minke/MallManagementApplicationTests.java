@@ -67,9 +67,9 @@ class MallManagementApplicationTests {
      * <p>⚠️ 它<b>只</b>证明「完整 Spring 上下文能启动」，<b>不</b>证明能连数据库。
      * 依据是 2026-09-20 的三个探针：库名不存在（{@code Unknown database}）、乃至端口
      * 无监听（{@code Connection refused}）时，本方法<b>依然 PASS</b>。成因有二：
-     * {@code spring.jpa.hibernate.ddl-auto=update} 的 schema 管理是「尽力而为」（失败
-     * 只记 ERROR 日志、不终止启动），且本项目无 {@code @Entity}（TD-01：JPA 空转），
-     * 本就无 schema 可导出 —— 两条叠加，启动路径上没有任何一处「连不上就必须失败」。
+     * {@code spring.jpa.hibernate.ddl-auto} 的 schema 管理是「尽力而为」（库不可达时失败只记
+     * ERROR 日志、不终止启动），且本项目无 {@code @Entity}（TD-01：JPA 空转），本就无 schema
+     * 可校验——两条叠加，启动路径上无一处「连不上就必须失败」。⚠️ 该值 2026-10-04 由 {@code update} 改为 {@code validate}，两条成因实测均不变。
      *
      * <p>它仍有独立价值：smoke 测试是 {@code @WebMvcTest} 切片，从不启动完整上下文。
      * 数据库可达性由 {@link #databaseIsReachable()} 承担，别把两者混为一谈。

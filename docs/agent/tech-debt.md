@@ -3,18 +3,18 @@
 > 本文件只收录**技术层面**的建议与欠账，不收表结构事实、不收业务决策。
 > 相关文档：表结构事实 → `db-schema.md`；业务待裁决 → `business-decisions.md`；并发问题与改造优先级 → `concurrency-map.md` §7；缓存 → `cache-map.md`。⚠️ **口径注**：本文所有 `:<行>` 为 **2026-10-02 实测**；重构后须重测。用户域旧 `U:<n>` 仅保留在明确标注为「修复前 / 原记」的历史行。
 
-## TD-01 移除未使用的 `spring-boot-starter-data-jpa` 依赖
+## TD-01 空转的 `spring-boot-starter-data-jpa` —— ✅ **已关闭（B 方案，2026-10-04）**
 
 | 项 | 内容 |
 |---|---|
-| 现状 | `pom.xml:51` 引入 `spring-boot-starter-data-jpa` |
+| 现状 | `pom.xml:51` 引入 `spring-boot-starter-data-jpa` —— **保留不删**（见「处置」） |
 | 实际数据访问 | 全部走 `JdbcTemplate`（`spring-boot-starter-jdbc`，`pom.xml:40`） |
 | 证据 | 全项目**不存在任何 `@Entity`**；原 `mallmanagement_class/info.java`（曾是全项目唯一 POJO，仅含 lombok 注解，无 JPA 注解，未被任何类引用）**已于 2026-10-02 笔 1 挪包时删除**（`01df702`）—— 故现在连「无注解的实体类」也没有了，本项证据比原记**更强** |
-| 问题 | 该依赖引入了 Hibernate 并激活了 `ddl-auto` 配置（`application.properties:12`），但项目没有任何 JPA 实体可供映射，依赖处于空转状态 |
-| 影响 | ① 增大构建产物、延长启动时间；② 保留了 `ddl-auto=update` 的生效条件，一旦有人误加 `@Entity` 即会反向 `ALTER TABLE`（详见 `db-schema.md` §3） |
-| 建议 | 移除该依赖；保留 JPA 但仅置 `ddl-auto=validate`/`none` 也可，两者是独立的处置手段，可只做其一 |
+| 问题 | 该依赖引入了 Hibernate 并激活了 `ddl-auto` 配置（`application.properties:29`），但项目没有任何 JPA 实体可供映射，依赖处于空转状态 |
+| 影响 | ① 增大构建产物、延长启动时间（**未处置，仍存在**）；② 保留了 `ddl-auto` 的生效条件，一旦有人误加 `@Entity` 即会反向 `ALTER TABLE`（详见 `db-schema.md` §3）—— ✅ **已由本笔消除** |
+| 处置 | **B 方案：依赖保留，只改配置。** `spring.jpa.hibernate.ddl-auto` 由 `update` 改为 **`validate`**（`application.properties:29`）。**选 B 的理由**：① 全局硬性约束 2「禁止删除旧接口、旧字段、旧表、旧配置」（`agent.md:36`）已被项目**两次**明确套用到这个依赖上（`three-layers.md:121`、`:148` 的「保留不删」半句），为省构建体积破约束不值；② 本行「建议」栏原文自己就列了 B 这个等价手段；③ B 恰好关掉**真正的隐患**（影响 ②），而 A（删依赖）的代价是豁免约束 + 改 9 份文档 + 实测连带。⚠️ **为何是 `validate` 而不是 `none`**：两者都**不会**自动改表，差别只在误加 `@Entity` 之后 —— `validate` **启动即失败**（显式炸），`none` **静默通过**、要等运行期某条 SQL 报错才暴露，后者正是 TD-15「静默 / 断言落空」那一族要防的形态。 |
 | 优先级 | 中 |
-| 状态 | 待确认 |
+| 状态 | ✅ **已关闭（B 方案，2026-10-04）** —— 分支 `chore/jpa-ddl-validate`。**验收**：① 实测 `validate` 与 `update` **启动时机与失败处置完全一致**（都在启动期建池；库不可达时都只记 ERROR、不终止启动）⇒ 未引入新的启动失败模式，`application-a3.properties:14-17` 与 `concurrency-test.md:70` 的「不需要额外请求」**依旧成立**；② 全量 `./mvnw -B test` = **186 run / 0 fail / 0 error / 19 skipped**，与同日 `main` 基线（同机实测）**逐项相同**；③ 文档同步：19 处引用点一并订正（8 文件）。⚠️ **影响 ① 未处置**（依赖仍在 ⇒ 构建体积与启动时间不变），本项关闭的是影响 ②。 |
 
 ## TD-02 `.idea/` 与 Git 忽略规则 — ✅ 已关闭（原文有误，2026-09-20 更正）
 
