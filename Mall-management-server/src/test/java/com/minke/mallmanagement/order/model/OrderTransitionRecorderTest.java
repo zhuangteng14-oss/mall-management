@@ -23,10 +23,11 @@ import static org.assertj.core.api.Assertions.assertThatCode;
  * {@link OrderTransitionRecorder} 的实测 —— 本笔里**分支最多、又最靠近锁**的一段代码。
  *
  * <h2>【为什么它必须有自己的单测】</h2>
- * 这段编排有四条真实分支（读回失败 / 命中 / 拒中 / 出生），而它跑在**订单锁的临界区内、
- * 与 UPDATE 同一处**。留在 Controller 里时，它只能被 HTTP + mock 触达，而 mock 掉指标之后
- * 分支本身就没法断言了 —— 等于「读代码觉得对」。抽成本类之后：
- * 真状态机 + 真指标 + **假 JdbcTemplate**，四条分支全部可确定性驱动，不起 Spring、不连库。
+ * 这段编排有五条真实分支（读回失败 / 命中 / 拒中 / 出生 / 出生闸拦截），前四条跑在**订单锁的
+ * 临界区内、与 UPDATE 同一处**（C#6 的第五条例外：它在锁**外**）。留在 Controller 里时，
+ * 它只能被 HTTP + mock 触达，而 mock 掉指标之后分支本身就没法断言了 —— 等于「读代码觉得对」。
+ * 抽成本类之后：真状态机 + 真指标 + **假 JdbcTemplate**，五条分支全部可确定性驱动，
+ * 不起 Spring、不连库。
  *
  * <h2>【一条被本文件证伪的直觉，别把它写回文档】</h2>
  * 我原本以为「转移之后再查一次非法形状」能捕获**伪造态**。实测下来它**不能**（见
@@ -43,6 +44,7 @@ class OrderTransitionRecorderTest {
 
     private static final String TRANSITIONS = "mall.order.state.transitions";
     private static final String ILLEGAL = "mall.order.state.illegal";
+    private static final String BIRTH_REJECTED = "mall.order.state.birth.rejected";
     private static final String TIMELINE_WRITES = "mall.order.state.timeline.writes";
 
     private static final String ORDER = "ORDER-REC-1";
@@ -223,13 +225,32 @@ class OrderTransitionRecorderTest {
         assertThat(count(ILLEGAL, "shape", "010")).isZero();
     }
 
+    /**
+     * ⚠️ <b>C#6（2026-10-04 {@code fix/order-state-guard}）之后，本条测的支路在 API 路径上不可达</b>
+     * —— 出生闸在 {@code OrderService.orderAdd} 的 <b>锁外</b>就把它挡掉
+     * （{@code OrderState.isInitial}），请求根本走不到 INSERT。所以这是**直接驱动方法**的
+     * 单元测试（旁路了闸），它证明的是「这个方法本身仍按原样工作」，<b>不是</b>
+     * 「伪造态还能从 API 进来」。两件事必须分开读：
+     * <ul>
+     *   <li>API 层「伪造态进不来」由 {@code OrderAddStateGuardSmokeTest} 钉死（跑在阻塞 job 里，
+     *       不靠 {@code A3_ENABLED} 门控）；</li>
+     *   <li>API 层的观测由
+     *       {@link #rejectedAtBirthRecordsOnBothChannelsAndNeverTouchesTheDatabase}
+     *       与 {@code mall.order.state.birth.rejected} 承担。</li>
+     * </ul>
+     *
+     * <p>⚠️ <b>顺带订正一处流传的说法</b>：本条原先的 {@code as(...)} 写的是「拦截会让 A3 的 S4a
+     * 八条断言失去前置构造」。2026-10-04 实测，受影响的是 S4a <b>3 条</b>（前置态是 PD / PR / PDR
+     * 的那三条 —— 它的 5 个前置态按 A-S4a-8 全是合法态，与伪造无关），以及 A3 的 <b>C 组</b>
+     * （{@code C_BITS} 八组合要求全部出生）。两处已在同笔一并改造。
+     */
     @Test
-    @DisplayName("伪造出生（(0,1,0)）：照样下单成功，但形状被记下来 —— TD-17 的探测器在这里")
+    @DisplayName("⚠️ 伪造出生（(0,1,0)）落库后仍被记形状 —— 但该支路已不在 API 路径上（见 javadoc）")
     void createdWithForgedBitsRecordsTheShape() {
         recorder.created(ORDER, 0, 1, 0);
 
         assertThat(count(TRANSITIONS, "action", "create", "result", "applied"))
-                .as("只观测、不拦截（D2）—— 拦截会让 A3 的 S4a 八条断言失去前置构造")
+                .as("本方法**自己没有变** —— 它照旧只观测、不拦截")
                 .isEqualTo(1.0);
         assertThat(count(ILLEGAL, "shape", "010")).isEqualTo(1.0);
         assertThat(writer.rows.get(0).to()).isEqualTo("ILLEGAL_DELIVERED_UNPAID");
@@ -288,6 +309,84 @@ class OrderTransitionRecorderTest {
         assertThat(count(ILLEGAL, "shape", "010"))
                 .as("观测不该跟着时间线一起被关掉 —— 伪造态的探测与落库无关")
                 .isEqualTo(1.0);
+    }
+
+    // ===================== 六、出生闸的观测出口（C#6）=====================
+
+    @Test
+    @DisplayName("出生闸拦下：两条通道都发，且**一次都不碰库**（闸在锁外、在 INSERT 之前）")
+    void rejectedAtBirthRecordsOnBothChannelsAndNeverTouchesTheDatabase() {
+        recorder.rejectedAtBirth(0, 1, 0, ORDER);
+
+        assertThat(count(BIRTH_REJECTED, "shape", "010")).isEqualTo(1.0);
+        assertThat(registry.find(BIRTH_REJECTED).counters()).hasSize(1);
+
+        List<OrderStateEvent> events = metrics.recentEvents();
+        assertThat(events).hasSize(1);
+        assertThat(events.get(0).kind()).isEqualTo("illegal");
+        assertThat(events.get(0).result())
+                .as("与「落库后的非法态观测」共用 kind，靠 result 区分（见 MallOrderStateMetrics 的事件语法）")
+                .isEqualTo("rejected");
+        assertThat(events.get(0).shape()).isEqualTo("010");
+        assertThat(events.get(0).key()).isEqualTo(ORDER);
+
+        assertThat(jdbc.queries).as("闸在锁外、在 INSERT 之前：一次都不读回三位").hasValue(0);
+        assertThat(writer.rows).as("没有出生，也就没有时间线").isEmpty();
+        assertThat(executor.submitted).isEmpty();
+        assertThat(count(TRANSITIONS, "action", "create", "result", "applied"))
+                .as("被拒不是一次「出生」，不许记成 create/applied ⇒ 两个指标永不相加")
+                .isZero();
+        assertThat(count(ILLEGAL, "shape", "010"))
+                .as("也**不是** illegal（那是「已经落库的」）—— 两条序列各记各的")
+                .isZero();
+    }
+
+    @Test
+    @DisplayName("⚠️ 7 次拦截只落进 5 个标号；其中 3 个「合法但非初始」是 illegalShape **答不出来**的")
+    void rejectedAtBirthIsBoundedAndCoversLegalButNonInitialStates() {
+        recorder.rejectedAtBirth(0, 1, 0, "O-010");
+        recorder.rejectedAtBirth(0, 0, 1, "O-001");
+        recorder.rejectedAtBirth(0, 1, 1, "O-011");
+        recorder.rejectedAtBirth(1, 1, 0, "O-110");
+        recorder.rejectedAtBirth(1, 0, 1, "O-101");
+        recorder.rejectedAtBirth(1, 1, 1, "O-111");
+        recorder.rejectedAtBirth(2, 0, 0, "O-OOR");
+
+        assertThat(registry.find(BIRTH_REJECTED).counters())
+                .as("7 次拦截 → 5 条时间序列。若把三位原值当 tag 就会是 7 条，且上界随客户端传什么都涨")
+                .hasSize(5);
+        assertThat(count(BIRTH_REJECTED, "shape", "010")).isEqualTo(1.0);
+        assertThat(count(BIRTH_REJECTED, "shape", "001")).isEqualTo(1.0);
+        assertThat(count(BIRTH_REJECTED, "shape", "011")).isEqualTo(1.0);
+        assertThat(count(BIRTH_REJECTED, "shape", "non_binary")).isEqualTo(1.0);
+        assertThat(count(BIRTH_REJECTED, "shape", OrderStateMachine.NON_INITIAL))
+                .as("⚠️ 少了这条支路，C3 的「今日拦截 N 次」会**漏记六分之三**且不报错")
+                .isEqualTo(3.0);
+        assertThat(metrics.recentEvents()).as("每次拦截都发一条事件，无一静默").hasSize(7);
+    }
+
+    /**
+     * ⚠️ <b>契约违约分支：本方法被要求记一笔「闸放行了」的输入。</b>
+     *
+     * <p>契约上不可达（闸与观测判据同源），但**必须挡**：{@code shape == null} 会一路走到
+     * {@code registry.counter(name, "shape", null)}，而 Micrometer 的 {@code ImmutableTag}
+     * 对 tag 值 {@code requireNonNull} ⇒ NPE ⇒ 本方法在请求路径上（锁外）⇒ 一次下单 5xx。
+     * 见 {@code OrderTransitionRecorder.rejectedAtBirth} 的 javadoc。
+     */
+    @Test
+    @DisplayName("契约违约（放行组合被送进来）：WARN 后**不计数、不抛** —— 抛了就是一次下单 500，兜默认值就是说谎")
+    void rejectedAtBirthRefusesToCountAContractViolation() {
+        assertThatCode(() -> recorder.rejectedAtBirth(0, 0, 0, ORDER))
+                .as("白名单内的组合不该出现在这条路径上，但不许因此把下单打成 5xx")
+                .doesNotThrowAnyException();
+        assertThatCode(() -> recorder.rejectedAtBirth(1, 0, 0, ORDER)).doesNotThrowAnyException();
+
+        assertThat(registry.find(BIRTH_REJECTED).counters())
+                .as("不兜一个默认 shape：那会把「代码坏了」静默折进一条正常的时间序列 —— 本仓反复吃的亏")
+                .isEmpty();
+        assertThat(metrics.recentEvents())
+                .as("也不发事件：事件流里不该出现一条含义不明的「拦截」")
+                .isEmpty();
     }
 
     // ===================== 工具 =====================

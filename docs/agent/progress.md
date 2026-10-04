@@ -191,12 +191,12 @@
 | 日志（Logback JSON） | ❌ 未实现，**未归属** | `:21` |
 | 死锁重试（Spring Retry） | ❌ 未实现，**未归属**；2026-09-30 已裁「**仍不需引入**」 | `:22` + `selection-status.md:73` 裁决注 |
 
-### 5-B. 阻塞三层落笔的两条裁决（`three-layers.md:275`）—— **`C#2` 已落地，实剩 `C#6`**
+### 5-B. 阻塞三层落笔的两条裁决（`three-layers.md:276`）—— ✅ **两条均已落地（2026-10-04 同日）**
 
 | 项 | 内容 | 出处 | 状态 |
 |---|---|---|---|
 | **`C#2` 事务边界** | §C Class B —— 原文标注「**阻塞落笔**」（**标题里的「两条」自此过期一半**，见下方 `C#6` 行） | `:99-108`、`:189` | ✅ **2026-10-04 已裁并落地**（`fix/goods-write-tx`）：三处**一起闭环**（`goodsAdd` / `goodsDe` / `goodsUp`），方案 A（`@Transactional` + catch 内 `setRollbackOnly`）。⚠️ **只加 `@Transactional` 不够**：三处 catch 都**吞异常、不 rethrow** ⇒ 不标回滚的话 AOP 看到的是正常返回、**照常提交**，留下「半成品商品」——那正是本项要消掉的东西，也是「加了注解就绿」的假绿路径 |
-| **`C#6` TD-17 拦截 vs 观测** | ⚠️ **拦截会使 A3 的 S4a 全部 8 条断言失去前置**（H3 正是用 `orderAdd` 造的前置态） | **`:108`**（§C 档定义）；复述于 `:153`（§G 表） | ⏳ **仍开着**（本笔不动） |
+| **`C#6` TD-17 拦截 vs 观测** | ⚠️ **原记「拦截会使 A3 的 S4a 全部 8 条断言失去前置」已实测订正** —— S4a 的 5 个前置态**全是合法态** ⇒ 只 **3 条**（`A-S4a-3`/`-5`/`-6`）的前置**构造方式**变、**断言语义 0 条变**；**真正被打断的是 C 组**（`C_BITS` 八组合要求全部出生）。详见 **§5-G** | **`:112`**（§C 档定义；⚠️ 原记 `:108` 指着的是上一行 `C#2`）；复述于 **`:182`**（§G 表；⚠️ 原记 `:153` 已漂） | ✅ **2026-10-04 已裁并落地**（`fix/order-state-guard`）：裁决取**拦截**，出生闸白名单 `{(0,0,0),(1,0,0)}`（**白名单必含 `(1,0,0)`** —— 生产前端 `ProductPage.vue:354` 直传 `PayIf=1`），闸在 `runLocked` **前**、**价格闸后**。登记见 **§5-G** |
 
 ### 5-C. 其他未决（不在三层路径上）
 
@@ -284,6 +284,79 @@
 | 该测试是否在 A3 覆盖面内 | ❌ A3 不打 goods 写端点 | ❌ `ConcurrencyRunner.java:1161` 里 `"Price"` **只出现一次且恒为 `"1.5"`**，`S4a` 8 条依赖**状态位**（TD-17）**不依赖 Price** ⇒ A3 零回归**不构成**对本笔改动的验证 |
 
 ⇒ 本笔的验收证据 = **CI `backend` job 里真跑的 8 条**（3 条阳性对照 + 4 组突变对照）+ A3 零回归（只证「没撞坏别处」）。**这是本笔强于 #11 与 C#2 的地方**：那两笔的单测在 CI 里形同虚设（§5-E），本笔的不会。
+
+### 5-G. `C#6`（`fix/order-state-guard`，2026-10-04）登记：**拦截落地 + A3 适配** + 关掉 §5-F 挂账第 2 条 + 挂账 3 条 + **订正一处流传的说法（5 份文档）**
+
+> 标题口径：与 §5-E / §5-F 对称，均按**笔号**命名。**本节下文自称「本笔」处，均指 `C#6`**。
+
+> **性质（头一句，防误读）**：本笔把 `orderAdd` 的三个状态位从「**客户端自选**」收窄成「**初始态白名单**」—— 接受 ⟺ `(PayIf,DeliveryIf,ReceiveIf) ∈ {(0,0,0),(1,0,0)}`。它**不是「不变式前移」** —— 后者只挡非法形状的 3 个组合（`010`/`001`/`011`），而 TD-17 正文举的 `(1,1,1)`「已付款 + 已发货 + 已收货」**是合法态**，照它会**原样放行**，落笔时只能写「不变式前移」而不能写「已修」，等于**假修**。⇒ 判据必须比「合法态」更严；这也是 `(1,1,0)` / `(1,0,1)` / `(1,1,1)` 三条**合法但非初始**态**刻意被拒**的理由（写 3 条测试钉死）。
+
+**（1）与 `B#1` 的关系：两个闸，不是同一个闸**：
+
+| | `B#1` 价格闸（§5-F） | 本笔 状态闸 |
+|---|---|---|
+| 落点 | `OrderService.orderAdd`，`runLocked` **之前** | 同左，**排在价格闸之后** |
+| 判据 | `Float.isFinite(Price) && Price >= 0 && Price <= 10^7` | `OrderState.isInitial(PayIf,DeliveryIf,ReceiveIf)` |
+| 失败响应 | HTTP 200 + `{success:false,msg:"价格不合法"}` | HTTP 200 + `{success:false,msg:"订单状态不合法"}` |
+| 观测 | 无（B#1 未埋点） | `mall.order.state.birth.rejected{shape}` + 一行 WARN + 事件流 |
+
+⚠️ **顺序不许对调**：`api-contract.md` 的 `B#1` 那条已把「价格不通过 ⇒ `msg="价格不合法"`」**写成对外承诺**（§5-F 称之为「已发布的契约」）⇒ 把状态闸挪到前面 = **静默收窄一条已发布契约**。有一条用例专门钉死这个顺序（`priceGateRunsFirst_whenBothGatesWouldReject`：`Price="NaN"` + 状态 `(0,1,0)` ⇒ 必须答 `msg="价格不合法"`，且 `rejectedAtBirth` 零调用）。
+⚠️ 两闸**不共用**失败通道的**代码**（各自一个 `private static Map` 方法），但**共用同一种形态**（200 + `{success:false,msg}`）—— 那是全仓业务失败的既有形状，不是本笔新造的。
+
+**（2）关掉 `§5-F` 挂账第 2 条（A3 空证据｜第二类实例）**：
+
+- 原挂账（`§5-F`（1）第 2 条）：「`ConcurrencyRunner.java:1653` 的 `[S4a] 预置态 …` **只被 `System.out.println`、从不被任何断言核** ⇒ `S4a` 的『前置态构造成功』在 A3 里**没有判据**」。
+- **本笔已修**：新增门禁 **`A-S4a-0`**（`ass(..., true)`，`ConcurrencyRunner.java:1577`），判据取**库里三位的实际值**（`jdbcOrderState(o, id)` == 目标三位），**不是**「每一步都返回了 success」；那行 `println` **保留**（读数照打）。
+- ⚠️ **而且本笔正好撞上那条挂账预言的场景** —— 它就是那行注释里举的例（「将来有人把校验层收紧到拒绝某些 `PayIf` 组合」）：C#6 收紧入参后，S4a 原用的 3 个前置态（`PD`/`PDR`/`PR`）**当场构造失败**。若没有 `A-S4a-0`，`A-S4a-3`/`A-S4a-5` 会**真空转绿**（订单压根不存在 ⇒ `succ = 0`，与「重复发货被拒」同一形状），只有 `A-S4a-6`（期望 `succ == 1`）会红。**一处报警 vs 三处静默，差别就是有没有这条门禁。**
+
+**（3）A3 适配：订正一处流传的说法 + 改哪几处**：
+
+⚠️ **订正（5 处、分布 4 份文档；另有 3 处代码 / 测试注释）**：`three-layers.md:112` / `:182`、`selection-status.md:128`、`defect-survey.md:263`、`progress.md` 的 §5-B `C#6` 行都写着「拦截会使 A3 的 S4a **全部 8 条断言失去前置**」。**2026-10-04 实测：不成立** —— S4a 的 5 个前置态 `{{0,0,0},{1,0,0},{1,1,0},{1,1,1},{1,0,1}}` 按 `A-S4a-8` 的不变式**全是合法态**，闸对其中 2 个完全透明，只有 3 个（`PD`/`PR`/`PDR`）的前置**构造方式**失效 ⇒ 受影响 **3 条**、且**断言语义 0 条变**（那 3 条的判据仍是「CAS 在目标态上的行为」）。**真正被打断的是 C 组**（`C_BITS` 八组合要求全部出生）。另 3 处代码 / 测试：`OrderStateMachine.java:42-53`（C#6 更新段，明写「不是『全部 8 条』」）、`OrderTransitionRecorder.created` 的 javadoc、`OrderTransitionRecorderTest.createdWithForgedBitsRecordsTheShape` 的陈旧 `as(...)` 文案。
+
+| 处 | 改前 | 改后 |
+|---|---|---|
+| `ConcurrencyRunner.s4a` 前置构造 | 5 个态全用 `orderAdd` 直传三位（含 3 个伪造态） | 2 个走白名单出生；`PD`/`PDR`/`PR` 走**合法流转**（`add(1,0,0)` → `orderDeliveryIfUp` → `orderReceiveIfUp`）。⚠️ **不是绕过拦截** —— 生产造这些态走的也是这几步；判据改取**库里三位实际值** |
+| `ConcurrencyRunner.C_BITS` | 8 个组合各出生一单（含 3 个伪造态） | 改名 **`C_REFUSED`**：6 个非白名单组合，职责从「造出前置态」**翻转**成「**断言造不出来**」（新增门禁 `A-C6-1`） |
+| C 组的 `PR` 单 | 直传 `(1,0,1)` 伪造 | 走 `000 → 付款 → 收货`（后端本就放行未发货收货）⇒ 该单时间线由 **1 行变 3 行**（出生 + 付款 + 收货）；`expectedNew` 由 **12 重算为 8** |
+| C 组的「伪造态 pay」burst | 在 `010` 单上打 20 并发 PAY | **删除** —— 该前置态已造不出来（覆盖登记见下（4）） |
+
+**（4）D1 裁决：`forged="010"` 那段删掉，覆盖**改为登记到别处**（不是净删覆盖）**：
+
+原 C 组用「伪造单 `010` 上的 PAY 必成功」证「时间线如实记下从非法态来的转移」。拦截后该前置态不存在 ⇒ 运行器里那条**不可保留**。**覆盖登记**（口径：删的是**运行器里的那一条**，覆盖本身另有承接）：
+
+- `OrderStateMachineTest.onlyPayGuardAdmitsIllegalStates`（**已存在**）：证「只有 PAY 的守卫接纳 `010`」；
+- `OrderAddStateGuardSmokeTest`（**本笔新增**）：证「`010` 等非法态在**入口**被拒」；
+- `OrderTransitionRecorderTest.createdWithForgedBitsRecordsTheShape`（**保留**、javadoc 已标该支路不在 API 路径上）：证「若库里有**存量**非法行，观测仍按原样记」。
+
+⚠️ **代价（明写）**：`ConcurrencyRunner.stateName()` 末尾那三个 `ILLEGAL_*` 分支在 C 组里成为**死代码**。**保留不删** —— 理由与 `mall.order.state.illegal` 保留不删相同（**存量脏数据仍会被重放读到** + 删掉等于抹掉 TD-17 的历史口径）。
+
+**（5）挂账（3 条，落点 = 本挂账段）**：
+
+1. **「今日拦截 N 次」在现行观测里给不出** —— `mall.order.state.birth.rejected` 是 **Micrometer counter = 进程生命周期累计**，**没有按日切的能力**；且本仓 `application.properties` 只暴露 `health,metrics`、**未接 Prometheus**（无时序库 = 无历史）。⇒ C3 要显示「今日」只有两条路：**(a)** 读本笔已发的**事件流**（每条带 `epochMilli` 墙钟）自行按日聚合；**(b)** 接 Prometheus / 时序库。⚠️ **本笔只保证「事件流里带够信息」**（`key` + `shape` + 时间戳），选 (a) 还是 (b) **留给 C3**。⚠️ **事件环只有 512 槽**（`MallOrderStateMetricsTest` 实测容量）⇒ 选 (a) 时**只能看「最近若干次」**、不能当真值用；这条限制由 C3 那笔处理，**不是本笔能关的**。
+2. **`birth.rejected` 的 tag 词表与 `illegal` 是两份字面量拷贝** —— `010`/`001`/`011`/`non_binary` 这 4 个值在 `OrderStateMachine.illegalShape` 与 `rejectionShape` 里各出现一次（后者多一个 `non_initial`）。⚠️ **判据没有两份**（`rejectionShape` 直接调 `illegalShape`，不是复制逻辑），但**词表字符串没有单一真值源** —— 现由 `OrderStateMachineTest.rejectionShapeNamesEveryRejection` 逐条对拍顶着，暂不抽常量。⇒ 将来 shape 取值要增删时，**两处一起改**，那条对拍测试会红。⚠️ **tag 只收 `illegalShape()` 归一后的取值**（含 `non_initial` 共 5 个），**三位原值绝不进 tag**（否则条数随客户端传什么涨 —— 基数无界；`MallOrderStateMetrics` 类注释是本仓基数铁律的唯一出处）。
+3. **两处「行数快照」被本笔进一步喂旧 —— 本笔明写「不改」，登记在此免得成孤儿**：`project-map.md:30`（`ConcurrencyRunner.java` **2795 行**）与 `ddd-package-plan.md:297`（「A3 **27 门禁**全绿」+ 基线 `130/0/0/8`）。⚠️ **三处数**都已陈旧：runner 实际 **2907 行**（**注意：2795 在本笔之前就已是旧值** —— 前序的笔已把它改到 2827，故这两处**不是本笔弄旧的**，只是本笔又添了约 80 行）、门禁实际 **30**、本地基线实际 **186/0/0/19**。⇒ **本笔不动它们**（超出裁决的 14 文件、且它们本就不准）；它们**归已有的「行数快照」欠账**（`progress.md:151` 登记）⇒ 那一笔动手时须连同本笔的新值一起改。⚠️ **另**：`three-layers.md:207` 的同款「2795 行」**本笔已就地改**（它在 §H，正是本笔大改的那一节）。
+
+**（6）⚠️ 本笔的验收边界 —— 判据在 CI 里真跑（同 §5-F 的结论，异于 §5-E）**：
+
+| 项 | 结论 |
+|---|---|
+| 新测试在 `backend`（**阻塞门禁**）job 里 | ✅ **真跑** —— `OrderAddStateGuardSmokeTest`（10 用例）继承 `AbstractSmokeTest`（`@WebMvcTest` 切片 + `@MockitoBean JdbcTemplate`），**无门控、不连 MySQL/Redis** |
+| A3 侧新增门禁 | `A-S4a-0` / `A-C6-1` / `A-C6-2`，**静态计数 `gates.count` 27 → 30**（`ConcurrencyRunner.java:711-719` 的计数循环；31 条 `ass(` 中 30 条 `gate=true`，唯一 `false` 的是 `A-B2-1` 的 `o.bGroupGate`）。⚠️ **artifact 实测值待 CI 复跑**（本笔**不**在本地跑 A3 —— 它需 8.4 目标库，P1 版本门禁会拦下）。⚠️ **且 A3 的 `concurrency` job 是 `continue-on-error: true`（`ci.yml`）⇒ 不拦 merge** ⇒ 这三条只能算**旁证**，不能算验收证据 |
+| 突变对照 | 3 组（见下），判据 = **整类用例的红数分布**，不是「指定那条一定红」 |
+
+**突变对照（本笔实测，各在 `OrderAddStateGuardSmokeTest` 的 10 条上跑）**：
+
+| 突变 | 红数 | 红的是哪几条 |
+|---|---|---|
+| ① 删掉出生闸（条件恒 false） | **7 / 10** | 全部 7 条「被拒」用例（2 条放行用例仍绿） |
+| ② 放宽成「只挡非法形状」（= `!isCanonical \|\| !legal()`） | **恰 3 / 10** | 只有 `shipped`(110) / `receivedNoDelivery`(101) / `completed`(111) 三条 —— **正是「合法但非初始」那三条**，与判据设计逐字对应 |
+| ③ 把闸挪进 `runLocked` **之内** | **7 / 10** | 全部 7 条「被拒」用例（`verify(lockService, never()).runLocked(...)` 同时失效） |
+
+⚠️ ②的红集**恰好等于**「白名单\{合法态\}」，不是「红了 3 条」的巧合 —— 它证明判据**确实停在「初始态」而不是「合法态」**上（R3 那种取法会让这 3 条红不了 ⇒ 假修）。
+
+**本轮本地结果**（`rm -rf target/surefire-reports` 后 `./mvnw -B test`）：`Tests run: 186, Failures: 0, Errors: 0, Skipped: 19`、`BUILD SUCCESS`。**166 → 186**（+20 = 新类 10 + `OrderStateMachineTest` +4 + `MallOrderStateMetricsTest` +3 + `OrderTransitionRecorderTest` +3）；**19 skipped 与基线逐字一致**（19 = 4 个 `A3_ENABLED` 门控类 3+6+4+6）⇒ 本笔**没碰门控**的旁证；新类**不在** skipped 里（它在 `backend` job 真跑）。
+
+> ⚠️ **CI 绿 ≠ 本笔被 CI 验证了**（同 §5-E 的告诫）：本 PR 合并后 A3 若全绿，**没有**验证本笔 —— A3 的 `concurrency` job 不拦 merge，且本笔新增的三条门禁也只证「A3 侧适配没塌」。真正的验收证据是上表 `backend` job 里真跑的 10 条 + 3 组突变对照。
 
 ---
 

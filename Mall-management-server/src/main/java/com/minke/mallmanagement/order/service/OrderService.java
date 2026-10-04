@@ -8,6 +8,7 @@ import java.util.List;
 import java.util.Map;
 import com.minke.mallmanagement.order.model.OrderAction;
 import com.minke.mallmanagement.order.dao.OrderDao;
+import com.minke.mallmanagement.order.model.OrderState;
 import com.minke.mallmanagement.order.model.OrderStateMachine;
 import com.minke.mallmanagement.order.model.OrderTransitionRecorder;
 import com.minke.mallmanagement.shared.lock.DistributedLockService;
@@ -86,6 +87,38 @@ import com.minke.mallmanagement.shared.lock.DistributedLockService;
  *   <li><b>为什么 200 而不是 400</b>：见 {@link #priceRejection} 的注释（{@code GlobalExceptionHandler}
  *       的**类级白名单**刻意排除 {@code OrderController}，挂约束注解会改它全部 8 个端点的错误体）。</li>
  * </ol>
+ *
+ * <h2>【C#6：出生状态闸 —— 关掉 TD-17 的伪造入口（2026-10-04，{@code fix/order-state-guard}）】</h2>
+ * 病源是 {@code tech-debt.md} TD-17：{@code orderAdd} 的三个状态位由客户端直传，
+ * 「调用方可直接插入一条 {@code (1,1,1)} 的『已付款+已发货+已收货』订单，全程不经过付款/发货/收货
+ * ⇒ 状态机可以从入口被绕过」。本笔在**同一处**（锁外、价格闸之后）加一道白名单闸，五条落定：
+ *
+ * <ol>
+ *   <li><b>规则 = 初始态白名单 {@code {(0,0,0), (1,0,0)}}，不是「只收合法态」</b>：
+ *       {@code (1,1,1)} 是**合法态**（满足 A-S4a-8 的不变式），「只收合法态」拦不住它
+ *       —— 那样落笔只能写「不变式前移」，不能写「TD-17 已修」。判据见
+ *       {@link OrderState#isInitial}。</li>
+ *   <li><b>⚠️ {@code (1,0,0)} 必须收</b>：生产前端「是否现在付款？」点「是」直传 {@code PayIf=1}
+ *       （{@code ProductPage.vue:354}，{@code DeliveryIf}/{@code ReceiveIf} 恒 0）
+ *       ⇒ 生产**实际只产生这两个组合**，「初始态」是两个不是一个。拒它会当场断掉「下单即付款」。
+ *       <b>后代若以为「初始态只该有 (0,0,0)」而删掉这一半，测试会先红</b>（3 条用例钉死）。</li>
+ *   <li><b>为什么也在锁外</b>：与 B#1 同位置 ⇒ {@link #addLocked} 的临界区**继续一字不动**
+ *       （B2 / D#1 的登记处），且非法请求**不取锁**（不耗 Redis、不污染锁指标
+ *       —— A3 的 {@code A-S2a-1a} 按 tag 读锁计数器）。本闸**不是事务边界**，
+ *       与 D#1 的 {@code @Transactional} 禁令无关；但**别搬进 {@code addLocked}**。</li>
+ *   <li><b>顺序：价格闸在前，本闸在后</b> —— 理由见 {@link #stateRejection} 的 javadoc
+ *       （B#1 已把「价格非法 ⇒ 价格不合法」写成对外契约，对调即静默收窄契约）。</li>
+ *   <li><b>失败仍走 200 + {@code {success:false,msg}}</b>：与 B#1、与全仓业务失败同通道。
+ *       文案 {@code "订单状态不合法"}，不复用 {@code "参数校验失败："} 前缀（那是入参**形状**）。</li>
+ * </ol>
+ *
+ * <p><b>⚠️ 本闸的验收证据在单测，不在 A3</b>：A3 的 {@code concurrency} job 是
+ * {@code continue-on-error: true}（{@code ci.yml}），不拦 merge；本闸的门禁是
+ * {@code OrderAddStateGuardSmokeTest}（{@code @WebMvcTest} 切片、**无 {@code A3_ENABLED} 门控**
+ * ⇒ 在 {@code backend} 阻塞 job 里真跑）。A3 侧只证**零回归** + 「非法态确实造不出来了」。
+ *
+ * <p>⚠️ <b>本闸不改变任何合法请求的行为</b>（白名单 ⟺ 生产前端本来就只发的那两个组合）
+ * ⇒ 对外契约的变更只落在**失败模式新增**上一类，与 B#1 同性质。
  */
 @Service
 public class OrderService {
@@ -120,6 +153,12 @@ public class OrderService {
      * <p>⚠️ <b>B#1 起，{@code Price} 在这里先过一道 {@link #priceRejection} —— 且这道闸在
      * {@code runLocked} <b>之前</b></b>。理由见类注释的 B#1 段：非法请求不取锁、不触库。
      * 这道校验**不改变**合法请求的任何行为（合法 ⇒ 返回 {@code null} ⇒ 这一段完全透明）。
+     *
+     * <p>⚠️ <b>C#6 起，三个状态位再过一道出生闸（{@link OrderState#isInitial}）——
+     * 同样在 {@code runLocked} <b>之前</b>，且<b>排在价格闸之后</b></b>。
+     * 接受 ⟺ {@code (PayIf,DeliveryIf,ReceiveIf) ∈ {(0,0,0),(1,0,0)}}；不通过 ⇒
+     * 记一次 {@code mall.order.state.birth.rejected{shape}} + 一行 WARN，返回
+     * {@code {success:false,msg:"订单状态不合法"}}。理由见类注释的 C#6 段。
      */
     public Map<String, Object> orderAdd(
             String CustomerId,
@@ -137,6 +176,14 @@ public class OrderService {
         Map<String, Object> rejection = priceRejection(Price);
         if (rejection != null) {
             return rejection;
+        }
+        // C#6：出生状态闸。**必须排在价格闸之后**（理由见 stateRejection 的 javadoc）。
+        // 同样在锁外：非法请求不取锁、不触库，addLocked 的临界区依旧逐字不动。
+        if (!OrderState.isInitial(PayIf, DeliveryIf, ReceiveIf)) {
+            // 观测与拦截同点：这一调用内部会记 mall.order.state.birth.rejected{shape} 与一行 WARN。
+            // ⚠️ 本方法在锁外调用 —— 是全类唯一不落在临界区里的观测调用点（见 OrderTransitionRecorder）。
+            orderTransitionRecorder.rejectedAtBirth(PayIf, DeliveryIf, ReceiveIf, OrderId);
+            return stateRejection();
         }
         return lockService.runLocked(LockName.ORDER_ADD, OrderId, () -> addLocked(
                 CustomerId, MerchantId, OrderId, Price, ProductInformation, Images, PayIf, DeliveryIf, ReceiveIf));
@@ -210,6 +257,39 @@ public class OrderService {
         Map<String, Object> result = new HashMap<>();
         result.put("success", false);
         result.put("msg", "价格不合法");
+        return result;
+    }
+
+    /**
+     * 出生状态闸的失败响应（C#6，2026-10-04 {@code fix/order-state-guard}）。
+     * 与 {@link #priceRejection} **同通道**：HTTP 200 + {@code {success:false, msg}}，且
+     * **不取锁、不触库**。文案 {@code "订单状态不合法"}：不含 A3 的两条逐字红线
+     * （{@code 数据库错误} / {@code "success":true}），也**不复用**笔 3 的
+     * {@code "参数校验失败："} 前缀（那个前缀的语义是「入参**形状**」，本条是**业务规则**）。
+     *
+     * <h2>【判据为什么是白名单 {@code {(0,0,0),(1,0,0)}}，而不是「合法态」】</h2>
+     * 判据在 {@link com.minke.mallmanagement.order.model.OrderState#isInitial}，
+     * 那里写了完整理由。一句话版本：{@code (1,1,1)}（已付款+已发货+已收货）**是合法态**，
+     * 只挡「非法态」的规则拦不住它 —— 而它正是 TD-17 正文举的例子。故必须从严。
+     * ⚠️ 而 {@code (1,0,0)} 必须**收**：生产前端「下单即付款」直传 {@code PayIf=1}
+     * （{@code ProductPage.vue:354}），拒它等于当场弄坏主流程。这两条都不是可选项。
+     *
+     * <h2>【⚠️ 为什么必须排在 {@link #priceRejection} <b>之后</b>】</h2>
+     * 不是"哪个更便宜"，是**契约**：{@code api-contract.md} 的 B#1 那条已经把
+     * 「价格不通过 ⇒ {@code msg="价格不合法"}」**写成对外承诺**。若状态闸在前，
+     * 一条「价格非法 **且** 状态非法」的请求会改返回 {@code "订单状态不合法"}
+     * ⇒ **静默收窄一条已发布的契约**。⇒ 顺序不许对调，由
+     * {@code OrderAddStateGuardSmokeTest} 的一条用例钉死。
+     *
+     * <h2>【它不是 D#1 的反面】</h2>
+     * 本闸是**纯分支 + 提前 return**：不是事务边界、不在临界区内。D#1 的
+     * {@code @Transactional} 禁令只约束被打上 {@code runLocked} 的临界区，与本闸无关。
+     * ⚠️ 但**别把它搬进 {@link #addLocked}** —— 那会让非法请求也过锁（与 B#1 同一条禁令）。
+     */
+    private static Map<String, Object> stateRejection() {
+        Map<String, Object> result = new HashMap<>();
+        result.put("success", false);
+        result.put("msg", "订单状态不合法");
         return result;
     }
 

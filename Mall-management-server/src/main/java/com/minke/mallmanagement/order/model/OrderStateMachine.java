@@ -34,10 +34,23 @@ import java.util.Map;
  * ⇒ 向后兼容（{@code agent.md} 规则 1）且 A3 的 A 组恒绿。
  * <p>**不**在本笔新增任何拒绝：拒绝 {@code PAID → RECEIVED_NODELIVERY}（未发货即收货）
  * 或卡死 {@code orderAdd} 的三位入参，都会改行为、断前端「下单即付款」的流程、
- * 并使 A3 的 S4a 全部 8 条断言失去前置（它正是靠 {@code orderAdd} 伪造前置态——
+ * 并使 A3 的 S4a 断言失去前置（它正是靠 {@code orderAdd} 造前置态——
  * {@code ConcurrencyRunner:1429-1430}）。强制化是单独一笔，需业务裁决。
  * <p>描述性 ≠ 没用：三处散落 SQL 收敛到一处；非法态从「没人知道」变成可观测；
  * 强制化只需改这一张表。
+ *
+ * <p>⚠️ <b>2026-10-04 更新（C#6，{@code fix/order-state-guard}）—— 上段的「另一笔」已经发生</b>：
+ * 出生闸落在 {@code OrderService.orderAdd}（用 {@link OrderState#isInitial}），
+ * <b>不在本类</b>；本类的 {@link #updateSql} / 三张守卫表 / {@link #illegalShape}
+ * <b>一字未动</b>，仍是描述性的。两件事别混：
+ * <ul>
+ *   <li><b>入口闸（C#6）</b>：管「出生时允许哪几个态」—— 白名单 {@code {(0,0,0),(1,0,0)}}；</li>
+ *   <li><b>本类（B3 姿态）</b>：管「流转时守卫是什么」—— 描述性，未强制化。</li>
+ * </ul>
+ * ⚠️ 另订正上段流传的一处计数：C#6 落地前的实测是 S4a <b>3 条</b>前置构造受影响
+ * （{@code A-S4a-3} / {@code -5} / {@code -6}，前置态 PD / PR / PDR），
+ * <b>不是「全部 8 条」</b> —— 另 5 条的前置是 {@code (0,0,0)} 或 {@code (1,0,0)}，闸对它们透明。
+ * 真正被打破的是 A3 的 <b>C 组</b>（{@code C_BITS} 八组合出生），已在同笔改造。
  *
  * <h2>【SettlementDate 为什么在 UPDATE 语句里】</h2>
  * {@link #updateSql} 带着 {@code SettlementDate = NOW()} 的尾巴，那是 BD-01 的遗留
@@ -256,6 +269,14 @@ public class OrderStateMachine {
      * （{@code ConcurrencyRunner} 的 S4a 正是从这个门造前置条件）。**只分类、不拦截**
      * —— 拦截是另一笔、需业务裁决（见类注释的「姿态」段），本类只负责把「是什么形状」说清楚。
      *
+     * <p>⚠️ <b>2026-10-04（C#6）：调用方的拦截仍不在本类，但本方法新多了一个下游</b>——
+     * {@code OrderService.orderAdd} 的出生闸**不直接**用本方法（它用
+     * {@link OrderState#isInitial}，因为白名单比"非法形状"更严：{@code (1,1,1)} 形状合法却仍要拒）；
+     * 而观测口那条路走的是 {@link #rejectionShape}——它**先调 {@code isInitial}** 判闸、
+     * 没通过才回头调本方法分类，把 {@code (1,1,1)} 这类"合法但非初始"的补成
+     * {@link #NON_INITIAL}。即：拦与不拦由 Service 决定，<b>「是什么形状」仍由本方法一处说了算</b>，
+     * 那条「tag 取值必须有上界」的规矩靠的就是这里的归一。
+     *
      * @return {@code "010"} / {@code "001"} / {@code "011"}（{0,1} 内的非法组合，按
      *         PayIf-DeliveryIf-ReceiveIf 顺序拼）、{@code "non_binary"}（越界取值，
      *         例如 {@code orderAdd} 收了 2）；合法组合 ⇒ {@code null}
@@ -268,6 +289,37 @@ public class OrderStateMachine {
         return OrderState.of(payIf, deliveryIf, receiveIf).legal()
                 ? null
                 : "" + payIf + deliveryIf + receiveIf;
+    }
+
+    /**
+     * 形状合法**但不是初始态** —— 出生闸拒因的第 5 个取值（C#6，2026-10-04）。
+     *
+     * <p>为什么需要第 5 个取值：C#6 的出生闸白名单是 {@code {(0,0,0),(1,0,0)}}，
+     * 它比 {@link #illegalShape} **更严** —— {@code (1,1,0)} / {@code (1,0,1)} / {@code (1,1,1)}
+     * 形状合法（满足 A-S4a-8 的不变式）、却仍要被拒。若不给他们一个 label，
+     * {@code mall.order.state.birth.rejected{shape}} 就会**漏记六分之三的拦截**
+     * （C3 的「今日拦截 N 次」将系统性偏小，而且不报错）。
+     */
+    public static final String NON_INITIAL = "non_initial";
+
+    /**
+     * 出生闸的**拒因标号**：放行时返回 {@code null}，否则返回一个**封闭枚举**里的标号
+     * —— 正好 5 个取值：{@code 010} / {@code 001} / {@code 011} / {@code non_binary} /
+     * {@link #NON_INITIAL}。这是 {@code mall.order.state.birth.rejected} 的 tag 唯一来源。
+     *
+     * <p>⚠️ <b>本方法必须与 {@link OrderState#isInitial} 同源</b> —— 它开头就直接调它，
+     * 不另写一份判据。两处各写一份的后果不是"冗余"，是**判定与标号会漂移**：
+     * 放行了却标了拒因（或反之），指标与响应体互相矛盾，且没有任何测试会天然发现。
+     *
+     * <p>顺序也有意义：先判"是不是初始态"（闸的真正判据），**没通过**才去分类形状。
+     * 反过来写会把 {@code (1,1,1)} 这类"形状合法却被拒"的请求漏成 {@code null}。
+     */
+    public String rejectionShape(int payIf, int deliveryIf, int receiveIf) {
+        if (OrderState.isInitial(payIf, deliveryIf, receiveIf)) {
+            return null;                    // 放行 —— 闸不拦
+        }
+        String illegal = illegalShape(payIf, deliveryIf, receiveIf);
+        return illegal != null ? illegal : NON_INITIAL;
     }
 
     // ===================== 内部 =====================

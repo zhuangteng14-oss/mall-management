@@ -38,6 +38,25 @@ import java.util.function.IntSupplier;
  *        观测到**非法状态位组合**的次数 —— TD-17 的探测器。合法集由 A-S4a-8 的不变式定义，
  *        3 个非法态只能由 orderAdd 的伪造入口造出。shape 是三位串；越界取值（orderAdd 收 int，
  *        连 2 都收）归一为 non_binary。**只观测、不拦截**：登记不门禁，是 D5 的既有裁决。
+ *        ⚠️ **2026-10-04（C#6）起，本序列在 API 路径上不可达** —— 出生闸在 INSERT 之前就
+ *        挡掉了非法态，而本计数只在 INSERT 成功之后（{@code OrderTransitionRecorder.created}）
+ *        才记。**保留、不删**（同 {@code agent.md} 规则 2）：① 存量脏数据与将来若重开入口时的
+ *        兜底观测；② 删它等于抹掉 TD-17 的历史口径。**它与 birth.rejected 不是重复埋点**：
+ *        一个记「已经落库的非法态」（过去时），一个记「在门口被挡下的」（拦截时）。
+ * mall.order.state.birth.rejected{shape=010|001|011|non_binary|non_initial}
+ *        下单出生闸（C#6）**拦下**的请求数。shape 由
+ *        {@code OrderStateMachine.rejectionShape} 判出，**5 个封闭取值**：
+ *        前 4 个与 {@code illegal} **共用同一份词表**（越界一律 non_binary），第 5 个
+ *        {@code non_initial} = 形状合法但不是初始态（{@code (1,1,0)}/{@code (1,0,1)}/{@code (1,1,1)}）
+ *        —— 少了它，C3 的「今日拦截 N 次」会**漏记六分之三**且不报错。
+ *        这一点是硬要求：shape 必须是封闭枚举，**三位原值绝不进 tag**（基数无界）。
+ *        ⚠️ 它记的是**被拒**,不是"出生失败"（后者是 {@code transitions{action=create,
+ *        result=applied}} 的反面，不在此处）；两者不可相加。
+ *        ⚠️ **本计数是进程生命周期累计，给不出「今日」** —— 要按日切，读**事件流**
+ *        （{@code recentEvents()} 带 {@code epochMilli} 墙钟）自行聚合，或接 Prometheus
+ *        （**本仓没有**，{@code application.properties} 只暴露 health/metrics）。
+ *        ⚠️ C#6 **未**为它加 {@code action} 之类的 tag：shape 已含全部信息，加维即造出
+ *        规范第 6 条禁止的冗余序列。
  * mall.order.state.timeline.writes{result=ok|error}
  *        时间线落库结果。result=error 即「这一条时间线永久丢了」——本笔取的是
  *        「丢最旧 + 计数」，允许丢，但**不许静默**。
@@ -58,9 +77,14 @@ import java.util.function.IntSupplier;
  * <h2>【事件语法】</h2>
  * <pre>
  *   kind=transition  action=…  from=&lt;状态名|none&gt;  to=&lt;状态名&gt;  result=applied|rejected|error  key=订单号
- *   kind=illegal     shape=010|001|011|non_binary                                        key=订单号
+ *   kind=illegal     result=（空）   shape=010|001|011|non_binary   落库后观测到非法态       key=订单号
+ *   kind=illegal     result=rejected shape=010|001|011|non_binary   C#6 出生闸**拦下**   key=订单号
  *   kind=async       result=ok|error|rejected（rejected 时 detail=queue_full|shutdown）    key=订单号
  * </pre>
+ * <b>{@code kind=illegal} 的两行靠 {@code result} 区分，不新增 {@code kind}</b>：
+ * 前者是「已经落库的非法态」（C#6 后 API 路径不可达，见上），后者是「在门口被挡下的」。
+ * 不新增 {@code kind} 是为了让 {@code OrderStateEvent}（9 字段的 record）**一个字段都不用改**
+ * —— 为一个新事件加一个 kind 值，却仍要复用 shape/key 两个字段，不值得动 record。
  * <b>成功的落库不发事件</b>（只计数）：一次转移会产生「transition + async」两条事件，
  * 512 槽在满负荷下只覆盖约 4 秒；把成功的 async 也记进去会砍半。而「顺序」对成功落库没有
  * 增量信息 —— 时间线表自己带 {@code At}。失败与丢弃**必须**发事件，因为那时「哪一单」才是关键。
@@ -79,6 +103,7 @@ public class MallOrderStateMetrics {
 
     static final String TRANSITIONS = "mall.order.state.transitions";
     static final String ILLEGAL = "mall.order.state.illegal";
+    static final String BIRTH_REJECTED = "mall.order.state.birth.rejected";
     static final String TIMELINE_WRITES = "mall.order.state.timeline.writes";
     static final String ASYNC_REJECTED = "mall.order.state.async.rejected";
     static final String ASYNC_QUEUE_DEPTH = "mall.order.state.async.queue.depth";
@@ -126,11 +151,42 @@ public class MallOrderStateMetrics {
     /**
      * 观测到非法状态位组合（TD-17 的产物）。**不拦截、不告警刷屏**，只计数 + 发事件。
      *
+     * <p>⚠️ <b>2026-10-04（C#6）起，本方法在 API 路径上不可达</b>：出生闸在 INSERT 之前挡掉了
+     * 非法态，而本方法只在 INSERT 成功之后（{@code OrderTransitionRecorder.created}）被调。
+     * <b>保留不删</b>（{@code agent.md} 规则 2），作存量脏数据的兜底观测 ——
+     * 它记的是「已经落库的非法态」，与 {@link #birthRejected} 记的「在门口被挡下的」是两回事。
+     *
      * @param shape 三位串（{@code 010} / {@code 001} / {@code 011}）或 {@code non_binary}
      */
     public void illegal(String shape, String orderId) {
         registry.counter(ILLEGAL, "shape", shape).increment();
         event("illegal", null, null, null, null, shape, orderId);
+    }
+
+    /**
+     * 下单出生闸（C#6）**拦下**一次请求。**与业务事实同点调用** —— 在
+     * {@code OrderService.orderAdd} 判定拒绝的同一处（锁**外**，故本方法不得做任何 I/O）。
+     *
+     * <p>⚠️ <b>{@code shape} 必须来自 {@code OrderStateMachine.rejectionShape(...)} </b>
+     * （5 个取值：{@code 010} / {@code 001} / {@code 011} / {@code non_binary} / {@code non_initial}）。
+     * 传三位原值会**直接打破基数铁律**：{@code @RequestParam int} 收任意整数，
+     * 时间序列数会随客户端传什么而爆炸。前 4 个取值与 {@link #illegal} 是同一份词表，
+     * 不是巧合，是刻意的 —— 两处的 shape 应当可直接对比。
+     *
+     * <p>记的是**被拒**，不是「出生失败」：{@code transitions{action=create,result=applied}}
+     * 记成功出生，本序列记被拒。两者**不可相加**成「出生尝试数」之外的任何东西。
+     *
+     * <p>⚠️ <b>本方法假定 {@code shape} 非 null</b>（它进 tag，而 Micrometer 的
+     * {@code ImmutableTag} 对 null 值 {@code requireNonNull} ⇒ 这里会抛 NPE）。
+     * 该前提由调用方 {@code OrderTransitionRecorder.rejectedAtBirth} 挡下
+     * —— 它在 {@code shape == null} 时 WARN 后直接返回，不到这里。
+     *
+     * @param shape   归一后的形状（5 值封闭枚举，见上）
+     * @param orderId 业务键。⚠️ 只进**事件流**的 {@code key}，**绝不进 tag**（基数无界）
+     */
+    public void birthRejected(String shape, String orderId) {
+        registry.counter(BIRTH_REJECTED, "shape", shape).increment();
+        event("illegal", null, null, null, "rejected", shape, orderId);
     }
 
     /**

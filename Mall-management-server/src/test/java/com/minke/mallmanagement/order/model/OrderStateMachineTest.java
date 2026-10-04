@@ -4,7 +4,9 @@ import com.minke.mallmanagement.order.model.OrderStateMachine.Predicate;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 
 import static com.minke.mallmanagement.order.model.OrderAction.CREATE;
 import static com.minke.mallmanagement.order.model.OrderAction.DELIVER;
@@ -282,5 +284,97 @@ class OrderStateMachineTest {
             assertThat(s.legal()).isEqualTo(legal.contains(s));
         }
         assertThat(legal).hasSize(5);
+    }
+
+    // ===================== 七、出生闸的拒因标号（C#6） =====================
+
+    @Test
+    @DisplayName("rejectionShape：白名单两条放行（null），其余各有标号；非法形状那段与 illegalShape **逐字一致**")
+    void rejectionShapeNamesEveryRejection() {
+        assertThat(machine.rejectionShape(0, 0, 0)).as("下单未付款").isNull();
+        assertThat(machine.rejectionShape(1, 0, 0)).as("下单即付款 —— 生产前端直传的就是它").isNull();
+
+        assertThat(machine.rejectionShape(0, 1, 0)).isEqualTo("010");
+        assertThat(machine.rejectionShape(0, 0, 1)).isEqualTo("001");
+        assertThat(machine.rejectionShape(0, 1, 1)).isEqualTo("011");
+
+        assertThat(machine.rejectionShape(2, 0, 0)).as("越界归一，不产生新取值").isEqualTo("non_binary");
+        assertThat(machine.rejectionShape(-1, 7, 9)).isEqualTo("non_binary");
+
+        // 前 4 个标号与 illegalShape 是**同一份词表**（刻意的，不是巧合）：两处的 shape 应当
+        // 可直接对比 —— 读 birth.rejected 的人不必再做一次映射才能和 illegal 对上。
+        int[][] shared = {{0, 1, 0}, {0, 0, 1}, {0, 1, 1}, {2, 0, 0}, {-1, 7, 9}};
+        for (int[] b : shared) {
+            assertThat(machine.rejectionShape(b[0], b[1], b[2]))
+                    .as("shape(%d,%d,%d) 必须与 illegalShape 同判", b[0], b[1], b[2])
+                    .isEqualTo(machine.illegalShape(b[0], b[1], b[2]));
+        }
+    }
+
+    @Test
+    @DisplayName("⚠️ 三个「合法但非初始」态**必须**各有标号 —— 「闸比合法态更严」这条裁决的钉子")
+    void rejectionShapeRejectsLegalButNonInitialStates() {
+        for (OrderState s : List.of(SHIPPED, RECEIVED_NODELIVERY, COMPLETED)) {
+            assertThat(s.legal()).as("%s 是合法态 —— 所以「只挡非法态」的规则拦不住它", s).isTrue();
+            assertThat(machine.rejectionShape(s.payIf(), s.deliveryIf(), s.receiveIf()))
+                    .as("%s 合法却必须被拒（否则 TD-17 正文举的 (1,1,1) 就漏过去了）", s)
+                    .isEqualTo(OrderStateMachine.NON_INITIAL);
+            assertThat(machine.illegalShape(s.payIf(), s.deliveryIf(), s.receiveIf()))
+                    .as("⚠️ 而 illegalShape 对 %s 恰恰答 null ⇒ 观测口若直接用它，"
+                            + "birth.rejected 会**漏记六分之三的拦截**且不报错", s)
+                    .isNull();
+        }
+    }
+
+    @Test
+    @DisplayName("rejectionShape 是 isInitial 的**严格补集**：全 8 个组合同判，白名单恰好 2 条")
+    void rejectionShapeIsExactlyTheComplementOfIsInitial() {
+        Set<String> shapes = new HashSet<>();
+        int accepted = 0;
+        for (int p = 0; p <= 1; p++) {
+            for (int d = 0; d <= 1; d++) {
+                for (int r = 0; r <= 1; r++) {
+                    String shape = machine.rejectionShape(p, d, r);
+                    assertThat(shape == null)
+                            .as("(%d,%d,%d)：rejectionShape 放行 ⟺ OrderState.isInitial —— 判据只有这一份",
+                                    p, d, r)
+                            .isEqualTo(OrderState.isInitial(p, d, r));
+                    if (shape == null) {
+                        accepted++;
+                    } else {
+                        shapes.add(shape);
+                    }
+                }
+            }
+        }
+        assertThat(accepted).as("白名单恰好 2 条 —— 不是 1（会弄坏「下单即付款」）也不是 3").isEqualTo(2);
+        assertThat(shapes)
+                .as("6 次拒绝只落进 4 个标号：3 个非法形状 + non_initial（若每个组合一个标号就是 6 条 ⇒ 基数失去上界）")
+                .containsExactlyInAnyOrder("010", "001", "011", OrderStateMachine.NON_INITIAL);
+
+        // 越界值也一律落进「拒」这一侧，且仍归一为 non_binary（不产生新取值）
+        int[][] outOfRange = {{2, 0, 0}, {0, 2, 0}, {0, 0, 2}, {-1, 0, 0}, {0, -1, 1}};
+        for (int[] b : outOfRange) {
+            assertThat(OrderState.isInitial(b[0], b[1], b[2]))
+                    .as("isInitial 必须先挡住越界（它内嵌 isCanonical）").isFalse();
+            assertThat(machine.rejectionShape(b[0], b[1], b[2]))
+                    .as("(%d,%d,%d) 归一到 non_binary", b[0], b[1], b[2])
+                    .isEqualTo("non_binary");
+        }
+    }
+
+    @Test
+    @DisplayName("NON_INITIAL 不与任何既有标号撞车 —— 撞了就会把两种拒因混成一条时间序列")
+    void nonInitialDoesNotCollideWithExistingLabels() {
+        for (OrderState s : OrderState.values()) {
+            assertThat(machine.illegalShape(s.payIf(), s.deliveryIf(), s.receiveIf()))
+                    .as("%s 的形状标号不能是 non_initial", s)
+                    .isNotEqualTo(OrderStateMachine.NON_INITIAL);
+        }
+        assertThat(machine.illegalShape(9, 9, 9)).isEqualTo("non_binary");
+        assertThat(OrderStateMachine.NON_INITIAL)
+                .as("三个「名字」都在同一套 tag/列里流转，彼此不许撞")
+                .isNotEqualTo(OrderStateMachine.UNCLASSIFIED)
+                .isNotEqualTo(OrderStateMachine.NO_PREVIOUS_STATE);
     }
 }
