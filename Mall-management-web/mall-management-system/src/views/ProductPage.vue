@@ -130,6 +130,9 @@
 <script setup>
 import { ref, onMounted, computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import { http, handleApiError } from '../api/http'
+import { endpoints } from '../api/endpoints'
+import { getMerchantId, getCustomerId } from '../api/auth'
 
 const route = useRoute()
 const router = useRouter()
@@ -142,9 +145,9 @@ const goodType = GoodType
 const productId = Id
 
 // 获取当前登录用户的ID（买家）
-let buyerId = sessionStorage.getItem('customerid')
+let buyerId = getCustomerId()
 if (!buyerId) {
-  buyerId = sessionStorage.getItem('merchantid')
+  buyerId = getMerchantId()
 }
 const customerId = buyerId || ''
 
@@ -167,34 +170,23 @@ const scroll = (d) => {
 // 加载商家信息
 const loadGoodsWithUser = async () => {
   try {
-    const res = await fetch('http://localhost:8088/goods/goodsSelectHome', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
-    })
+    const res = await http.post(endpoints.goods.goodsSelectHome)
     const data = await res.json()
     if (data.success) goodsWithUser.value = data.list
   } catch (e) {
-    console.error('获取商家名失败：', e)
+    handleApiError(e, '获取商家名失败：')
   }
 }
 
 // 加载所有型号的商品详情
 const loadAllItems = async () => {
   try {
-    const r1 = await fetch('http://localhost:8088/goods/GoodsProductCodeSelect', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: `MerchantId=${sellerId}&GoodName=${goodName}`
-    })
+    const r1 = await http.post(endpoints.goods.goodsProductCodeSelect, `MerchantId=${sellerId}&GoodName=${goodName}`)
     const d1 = await r1.json()
     const codes = d1.list || []
     const items = []
     for (let code of codes) {
-      const r2 = await fetch('http://localhost:8088/goods/productCodePrice', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: `MerchantId=${sellerId}&GoodName=${goodName}&ProductCode=${code}`
-      })
+      const r2 = await http.post(endpoints.goods.productCodePrice, `MerchantId=${sellerId}&GoodName=${goodName}&ProductCode=${code}`)
       const d2 = await r2.json()
       if (d2.success) {
         items.push({
@@ -211,7 +203,7 @@ const loadAllItems = async () => {
     if (matchGood) items.forEach((it) => { it.UserName = matchGood.UserName })
     allItems.value = items
   } catch (e) {
-    console.error(e)
+    handleApiError(e, '请求失败')
   }
 }
 
@@ -233,20 +225,12 @@ const openPopup = async () => {
 
 const loadPopupItems = async () => {
   try {
-    const r1 = await fetch('http://localhost:8088/goods/GoodsProductCodeSelect', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: `MerchantId=${sellerId}&GoodName=${goodName}`
-    })
+    const r1 = await http.post(endpoints.goods.goodsProductCodeSelect, `MerchantId=${sellerId}&GoodName=${goodName}`)
     const d1 = await r1.json()
     const codes = d1.list || []
     const items = []
     for (let code of codes) {
-      const r2 = await fetch('http://localhost:8088/goods/productCodePrice', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: `MerchantId=${sellerId}&GoodName=${goodName}&ProductCode=${code}`
-      })
+      const r2 = await http.post(endpoints.goods.productCodePrice, `MerchantId=${sellerId}&GoodName=${goodName}&ProductCode=${code}`)
       const d2 = await r2.json()
       if (d2.success) {
         items.push({
@@ -258,7 +242,7 @@ const loadPopupItems = async () => {
     }
     popupAllItems.value = items
   } catch (e) {
-    console.error(e)
+    handleApiError(e, '请求失败')
   }
 }
 
@@ -366,17 +350,13 @@ const handlePay = async (payIf) => {
     params.append('DeliveryIf', orderData.DeliveryIf)
     params.append('ReceiveIf', orderData.ReceiveIf)
 
-    const res = await fetch('http://localhost:8088/order/orderAdd', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: params.toString()
-    })
+    const res = await http.post(endpoints.order.orderAdd, params.toString())
     const result = await res.json()
     if (result.success) {
       alert('订单提交成功！')
       showPopup.value = false
       popupQty.value = {}
-      const isMerchant = !!sessionStorage.getItem('merchantid')
+      const isMerchant = !!getMerchantId()
       if (isMerchant) {
         router.push('/merchant?page=order')
       } else {
@@ -398,12 +378,12 @@ const searchKeyword = ref('')
 const handleSearch = () => {
   const keyword = searchKeyword.value.trim()
   sessionStorage.setItem('PENDING_SEARCH_KEYWORD', keyword)
-  const isMerchant = !!sessionStorage.getItem('merchantid')
+  const isMerchant = !!getMerchantId()
   router.push(isMerchant ? '/merchant' : '/customer')
 }
 
 const goBack = () => {
-  const isMerchant = !!sessionStorage.getItem('merchantid')
+  const isMerchant = !!getMerchantId()
   if (route.query.from === 'search') {
     router.push(isMerchant ? '/merchant?back=search' : '/customer?back=search')
   } else {
@@ -412,8 +392,8 @@ const goBack = () => {
 }
 
 const goUserCenter = () => {
-  const isMerchant = sessionStorage.getItem('merchantid') && sessionStorage.getItem('merchantid') !== 'null'
-  const isCustomer = sessionStorage.getItem('customerid') && sessionStorage.getItem('customerid') !== 'null'
+  const isMerchant = getMerchantId() && getMerchantId() !== 'null'
+  const isCustomer = getCustomerId() && getCustomerId() !== 'null'
   if (isMerchant) {
     router.push('/merchant?page=user')
   } else if (isCustomer) {
@@ -448,7 +428,7 @@ const consultProduct = async () => {
     productCode: selectedProduct.productCode
   };
   const messageContent = `[PROD]${JSON.stringify(productInfo)}`;
-  const fromType = sessionStorage.getItem('customerid') ? 'customer' : 'merchant';
+  const fromType = getCustomerId() ? 'customer' : 'merchant';
   const params = new URLSearchParams();
   params.append('fromId', customerId);
   params.append('fromType', fromType);
@@ -456,14 +436,10 @@ const consultProduct = async () => {
   params.append('toType', 'merchant');
   params.append('content', messageContent);
   try {
-    const res = await fetch('http://localhost:8088/message/send', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: params.toString()
-    });
+    const res = await http.post(endpoints.message.send, params.toString());
     const data = await res.json();
     if (data.success) {
-      const isMerchant = !!sessionStorage.getItem('merchantid');
+      const isMerchant = !!getMerchantId();
       const basePath = isMerchant ? '/merchant' : '/customer';
       router.push({
         path: basePath,

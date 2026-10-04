@@ -4,7 +4,7 @@
       <div class="avatar-wrap">
         <img 
           class="avatar" 
-          :src="userInfo.image || 'http://localhost:8088/img/default-avatar.jpg'" 
+          :src="userInfo.image || assetOf('/img/default_user.png')" 
           alt="头像" 
         />
         <div class="username-box">
@@ -77,6 +77,9 @@
 
 <script setup>
 import { ref, onMounted } from 'vue'
+import { http, handleApiError, assetOf } from '../api/http'
+import { endpoints } from '../api/endpoints'
+import { getUsername, getPassword } from '../api/auth'
 
 const userInfo = ref({})
 const idType = ref('')
@@ -88,16 +91,12 @@ onMounted(() => {
 })
 
 const getUserData = async () => {
-  const username = sessionStorage.getItem('loginUsername')
-  const password = sessionStorage.getItem('loginPassword')
+  const username = getUsername()
+  const password = getPassword()
   if (!username) return
 
   try {
-    const res = await fetch('http://localhost:8088/user/getUserInfo', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: new URLSearchParams({ username, password })
-    })
+    const res = await http.post(endpoints.user.getUserInfo, new URLSearchParams({ username, password }))
     const data = await res.json()
     userInfo.value = data
 
@@ -109,7 +108,7 @@ const getUserData = async () => {
       idValue.value = data.merchantid
     }
   } catch (e) {
-    console.log('获取用户信息失败')
+    handleApiError(e, '获取用户信息失败')
   }
 }
 
@@ -121,16 +120,13 @@ const doUpload = async (e) => {
   const file = e.target.files[0]
   if (!file) return
 
-  const username = sessionStorage.getItem('loginUsername')
+  const username = getUsername()
   const formData = new FormData()
   formData.append('username', username)
   formData.append('file', file)
 
   try {
-    const res = await fetch('http://localhost:8088/user/updateAvatar', {
-      method: 'POST',
-      body: formData
-    })
+    const res = await http.post(endpoints.user.updateAvatar, formData)
     const data = await res.json()
     if (data.success) {
       alert('头像更新成功')
@@ -144,18 +140,14 @@ const doUpload = async (e) => {
 }
 
 const saveUserInfo = async () => {
-  const username = sessionStorage.getItem('loginUsername')
+  const username = getUsername()
   try {
-    const res = await fetch('http://localhost:8088/user/updateUserInfo', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: new URLSearchParams({
+    const res = await http.post(endpoints.user.updateUserInfo, new URLSearchParams({
         username: username,
         email: userInfo.value.email || '',
         address: userInfo.value.address || '',
         selfintroduction: userInfo.value.selfintroduction || ''
-      })
-    })
+      }))
     const data = await res.json()
     if (data.success) {
       alert('个人信息保存成功')

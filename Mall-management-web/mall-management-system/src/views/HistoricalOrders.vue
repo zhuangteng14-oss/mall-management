@@ -28,20 +28,15 @@
 
 <script setup>
 import { ref, onMounted } from 'vue'
+import { http, handleApiError } from '../api/http'
+import { endpoints } from '../api/endpoints'
+import { resolveBuyerId } from '../api/auth'
 
 const orderList = ref([])
 const loading = ref(false)
 
-const getBuyerId = () => {
-  let buyerId = sessionStorage.getItem('customerid')
-  if (!buyerId || buyerId === 'null' || buyerId === 'undefined') {
-    buyerId = sessionStorage.getItem('merchantid')
-  }
-  if (!buyerId || buyerId === 'null' || buyerId === 'undefined') {
-    buyerId = sessionStorage.getItem('loginUsername')
-  }
-  return buyerId || null
-}
+// 降级链已收敛到 src/api/auth.js:resolveBuyerId()（与 ShoppingCart 逐字相同）。
+const getBuyerId = () => resolveBuyerId()
 
 const formatDateTime = (dateStr) => {
   if (!dateStr) return '未知'
@@ -92,11 +87,7 @@ const loadHistoricalOrders = async () => {
   try {
     const params = new URLSearchParams()
     params.append('customerId', customerId)
-    const res = await fetch('http://localhost:8088/order/historicalOrdersSelect', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: params.toString()
-    })
+    const res = await http.post(endpoints.order.historicalOrdersSelect, params.toString())
     const data = await res.json()
     if (data.success) {
       orderList.value = data.list
@@ -104,7 +95,7 @@ const loadHistoricalOrders = async () => {
       console.error('获取历史订单失败', data.msg)
     }
   } catch (err) {
-    console.error('请求出错', err)
+    handleApiError(err, '请求出错')
   } finally {
     loading.value = false
   }

@@ -94,6 +94,9 @@
 </template>
 
 <script>
+import { http } from '../api/http'
+import { endpoints } from '../api/endpoints'
+import { setMerchantId, setCustomerId, setCredentials } from '../api/auth'
 export default {
   name: "LoginPage",
   data() {
@@ -128,45 +131,35 @@ export default {
         return;
       }
       try {
-        const res = await fetch("http://localhost:8088/user/loginSelect", {
-          method: "POST",
-          headers: { "Content-Type": "application/x-www-form-urlencoded" },
-          body: new URLSearchParams({
+        const res = await http.post(endpoints.user.loginSelect, new URLSearchParams({
             username: this.loginAccount,
             password: this.loginPwd
-          })
-        });
+          }));
         const role = await res.text();
 
         // 登录成功后立即获取用户信息，保存商家ID / 客户ID
-        const userRes = await fetch("http://localhost:8088/user/getUserInfo", {
-          method: "POST",
-          headers: { "Content-Type": "application/x-www-form-urlencoded" },
-          body: new URLSearchParams({ 
+        const userRes = await http.post(endpoints.user.getUserInfo, new URLSearchParams({ 
             username: this.loginAccount, 
             password: this.loginPwd 
-          })
-        });
+          }));
         const userData = await userRes.json();
 
         // 自动保存ID，上架商品可用
         if (userData.merchantid) {
-          sessionStorage.setItem("merchantid", userData.merchantid);
+          setMerchantId(userData.merchantid);
         }
         if (userData.customerid) {
-          sessionStorage.setItem("customerid", userData.customerid);
+          setCustomerId(userData.customerid);
         }
 
         if(role === "0"){
           this.loginWarnText = "未找到该用户，请查看对应账号密码有无写错，或者前往右侧进行注册";
         }else if(role === "1"){
-          sessionStorage.setItem('loginUsername', this.loginAccount);
-          sessionStorage.setItem('loginPassword', this.loginPwd);
+          setCredentials(this.loginAccount, this.loginPwd);
           this.$router.push("/customer");
         }
         else if(role === "2"){
-          sessionStorage.setItem('loginUsername', this.loginAccount);
-          sessionStorage.setItem('loginPassword', this.loginPwd);
+          setCredentials(this.loginAccount, this.loginPwd);
           this.$router.push("/merchant");
         }
       } catch (e) {
@@ -213,18 +206,14 @@ export default {
 
       let userid = this.genUserId();
       try {
-        const res = await fetch("http://localhost:8088/user/loginAdd", {
-          method: "POST",
-          headers: { "Content-Type": "application/x-www-form-urlencoded" },
-          body: new URLSearchParams({
+        const res = await http.post(endpoints.user.loginAdd, new URLSearchParams({
             username: this.username,
             usertype: this.userType,
             userid: userid,
             password: this.pwd,
             age: this.age,
             gender: this.gender
-          }).toString()
-        });
+          }).toString());
         const text = await res.text();
         if (text === "添加成功！") {
           this.showSuccess = true;

@@ -67,6 +67,9 @@
 <script setup>
 import { ref, onMounted, onUnmounted, nextTick, watch, computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import { http, handleApiError } from '../api/http'
+import { endpoints } from '../api/endpoints'
+import { getMerchantId, getCustomerId } from '../api/auth'
 
 const route = useRoute()
 const router = useRouter()
@@ -129,26 +132,26 @@ const goToProduct = (productInfo) => {
 const initCurrentUser = () => {
   const path = window.location.pathname
   if (path.includes('/merchant')) {
-    const mid = sessionStorage.getItem('merchantid')
+    const mid = getMerchantId()
     if (mid && mid !== 'null' && mid !== 'undefined') {
       currentId.value = mid
       currentType.value = 'merchant'
       return
     }
   } else if (path.includes('/customer')) {
-    const cid = sessionStorage.getItem('customerid')
+    const cid = getCustomerId()
     if (cid && cid !== 'null' && cid !== 'undefined') {
       currentId.value = cid
       currentType.value = 'customer'
       return
     }
   }
-  let id = sessionStorage.getItem('merchantid')
+  let id = getMerchantId()
   if (id && id !== 'null' && id !== 'undefined') {
     currentId.value = id
     currentType.value = 'merchant'
   } else {
-    id = sessionStorage.getItem('customerid')
+    id = getCustomerId()
     if (id && id !== 'null' && id !== 'undefined') {
       currentId.value = id
       currentType.value = 'customer'
@@ -161,15 +164,11 @@ const initCurrentUser = () => {
 // 获取用户信息
 const fetchUserInfo = async (userId) => {
   try {
-    const res = await fetch('http://localhost:8088/message/userSelect', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: new URLSearchParams({ userId }).toString()
-    })
+    const res = await http.post(endpoints.message.userSelect, new URLSearchParams({ userId }).toString())
     const data = await res.json()
     if (data.success) return data.user
   } catch (err) {
-    console.error('获取用户信息失败', err)
+    handleApiError(err, '获取用户信息失败')
   }
   return null
 }
@@ -181,11 +180,7 @@ const loadConversations = async () => {
   params.append('currentId', currentId.value)
   params.append('currentType', currentType.value)
   try {
-    const res = await fetch('http://localhost:8088/message/conversations', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: params.toString()
-    })
+    const res = await http.post(endpoints.message.conversations, params.toString())
     const data = await res.json()
     if (data.success) {
       conversations.value = data.list
@@ -198,7 +193,7 @@ const loadConversations = async () => {
       }
     }
   } catch (err) {
-    console.error('加载会话列表失败', err)
+    handleApiError(err, '加载会话列表失败')
   }
 }
 
@@ -210,11 +205,7 @@ const loadMessages = async (otherId, otherType) => {
   params.append('otherId', otherId)
   params.append('otherType', otherType)
   try {
-    const res = await fetch('http://localhost:8088/message/history', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: params.toString()
-    })
+    const res = await http.post(endpoints.message.history, params.toString())
     const data = await res.json()
     if (data.success) {
       messages.value = data.list
@@ -222,7 +213,7 @@ const loadMessages = async (otherId, otherType) => {
       scrollToBottom()
     }
   } catch (err) {
-    console.error('加载消息失败', err)
+    handleApiError(err, '加载消息失败')
   }
 }
 
@@ -276,11 +267,7 @@ const pollUpdates = async () => {
     params.append('otherId', currentOther.value.id)
     params.append('otherType', currentOther.value.type)
     try {
-      const res = await fetch('http://localhost:8088/message/history', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: params.toString()
-      })
+      const res = await http.post(endpoints.message.history, params.toString())
       const data = await res.json()
       if (data.success) {
         const newMessages = data.list
@@ -294,7 +281,7 @@ const pollUpdates = async () => {
         }
       }
     } catch (err) {
-      console.error('轮询刷新消息失败', err)
+      handleApiError(err, '轮询刷新消息失败')
     }
   }
 }
@@ -324,11 +311,7 @@ const sendMessage = async () => {
   params.append('toType', currentOther.value.type)
   params.append('content', newMessage.value.trim())
   try {
-    const res = await fetch('http://localhost:8088/message/send', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: params.toString()
-    })
+    const res = await http.post(endpoints.message.send, params.toString())
     const data = await res.json()
     if (data.success) {
       const tempMsg = {
