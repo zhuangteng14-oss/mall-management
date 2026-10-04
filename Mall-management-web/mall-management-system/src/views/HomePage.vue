@@ -98,6 +98,9 @@
 <script setup>
 import { ref, onMounted, onUnmounted, computed } from 'vue'
 import { useRouter } from 'vue-router'
+import { http, handleApiError } from '../api/http'
+import { endpoints } from '../api/endpoints'
+import { isLoggedIn } from '../api/auth'
 
 const router = useRouter()
 // eslint-disable-next-line no-undef
@@ -112,23 +115,19 @@ const searchKeyword = ref('')
 
 let timer = null
 
-const isLogin = computed(() => {
-  return !!sessionStorage.getItem('loginUsername') || !!sessionStorage.getItem('merchantid')
-})
+// 「是否登录」的**唯一**判据已收敛到 src/api/auth.js:isLoggedIn()（鉴权笔的落点）。
+const isLogin = computed(() => isLoggedIn())
 
 const getHomeImgAndGoods = async () => {
   try {
-    const res = await fetch('http://localhost:8088/goods/goodsSelectHome', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    })
+    const res = await http.post(endpoints.goods.goodsSelectHome)
     const data = await res.json()
     if (data.success) {
       goodsList.value = data.list
       homeImgList.value = data.list
     }
   } catch (e) {
-    console.error('请求失败', e)
+    handleApiError(e, '请求失败')
   }
 }
 
@@ -151,16 +150,13 @@ const searchByType = (typeName) => {
 
 const getGoodType = async () => {
   try {
-    const res = await fetch('http://localhost:8088/goods/goodstype', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    })
+    const res = await http.post(endpoints.goods.goodstype)
     const data = await res.json()
     if (data.success) {
       goodTypeList.value = data.list
     }
   } catch (e) {
-    console.error('请求失败', e)
+    handleApiError(e, '请求失败')
   }
 }
 
