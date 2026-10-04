@@ -107,6 +107,63 @@ public class UserService {
     }
 
     /**
+     * 登录成功后的第二跳：把**账号**翻成**业务号**（鉴权笔 2 新增）。
+     *
+     * <p>{@code login} 表只存 {@code Role}，不存业务号；业务号在 {@code user} 表
+     * （{@code customerid} / {@code merchantid}）。故登录成功后要再查一次 {@code user}
+     * 才能拿到写进会话的那个值。查的是**既有**的 {@link UserDao#selectUserByUsername}
+     * （{@code SELECT *}），**不新增 SQL 字面量** —— 全仓「硬编码 schema 前缀 39 处」
+     * 是被多处文档引用的基线（TD-13），新增一条就变 40。
+     *
+     * <p>⚠️ <b>代价（已登记 {@code progress.md §5-Q}）</b>：每次**成功**登录多一次
+     * {@code SELECT *}。A3 的 S1 每轮约 1800 次 {@code loginSelect}（= 120 qps × 30 s × 50%），
+     * 若它们都是有效凭据，就是每轮多约 1800 次单行读。**失败的登录不查**（见下）。
+     *
+     * <p>⚠️ <b>失败一律返回 {@code null}，且不抛</b>：查不到（{@code singleRow()} 抛
+     * {@code EmptyResultDataAccessException}）、业务号列为 NULL、role 不是 1/2 —— 三种情形
+     * 对调用方是同一件事「这次登录没有可写入会话的身份」，形态与 {@link #loginSelect} 的
+     * 「查不到 = 0」一致。⚠️ 这**不是**在掩盖技术异常：{@code loginSelect} 那一步已经证明
+     * 凭据有效、库是通的；此处查不到只可能是数据本身缺失（{@code user} 行没建全）。
+     *
+     * @param role {@link #loginSelect} 的返回值（1 = 客户 → {@code customerid}；
+     *             2 = 商家 → {@code merchantid}）；其它值返回 {@code null}
+     */
+    public String businessId(String username, int role) {
+        if (role != 1 && role != 2) {
+            return null;
+        }
+        try {
+            Map<String, Object> row = userDao.selectUserByUsername(username);
+            if (row == null) {
+                return null;
+            }
+            Object businessId = (role == 1) ? row.get("customerid") : row.get("merchantid");
+            return (businessId == null) ? null : businessId.toString();
+        } catch (Exception e) {
+            // 用户行不存在 / 数据缺失 → 本次登录不写会话（调用方据此跳过）
+            return null;
+        }
+    }
+
+    /**
+     * 会话所指向用户的**公开信息**（鉴权笔 2 新增）—— {@code /user/me} 的读路径。
+     *
+     * <p>纯转调 {@link UserCacheService#publicInfo(String)}，本方法**不加工**：缓存的
+     * 两级、负缓存（0 行 → {@code null}）、以及「技术异常原样上抛」——三条语义全在那一层，
+     * 在这里复述一遍只会多出一个可能与之分歧的地方。
+     *
+     * <p>为什么要经过本类而不是让 {@code UserController} 直接注入 {@code UserCacheService}：
+     * 本类**已经持有**它（{@code loginAdd} 的失效面），多注入一处等于给 Controller
+     * 增加一个依赖面，而这里只需一行委托。
+     *
+     * <p>⚠️ 键是**业务号**（不是登录名）—— 与 {@link #businessId} 的产出同域，
+     * 见 {@link com.minke.mallmanagement.shared.web.AuthSession} 类注释。
+     */
+    public Map<String, Object> publicInfo(String userId) {
+        return userCacheService.publicInfo(userId);
+    }
+
+    /**
      * 注册（最早期版本：只写最基础的用户信息）。
      *
      * <p>三步：查重 → 按 {@code usertype} 分客户 / 商家两支各写三张表 → 清缓存。

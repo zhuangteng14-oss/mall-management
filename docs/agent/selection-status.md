@@ -169,7 +169,7 @@
 | 27 | `loginAdd` 无 else（TD-15） | 类 4 | 优先级「中」；**无触发条件** | `tech-debt.md:190-200`：`usertype` 非法值时返回「添加成功！」但**不插任何行**；状态「待确认（A3 登记，不在 A3 修）」 | 待指派 |
 | 28 | `productSearch` 拼 SQL（**病 C**） | 类 4 | 数据量上量后 ⇒ 单请求**全表扫描**（无分页） | `defect-survey.md:124` 病 C：逐字符 `OR GoodName LIKE`、`_` / `%` **未转义** ⇒ 实测「关键词含 `_` / `%` 时返回全表」；现址 `GoodsDao.productSearch`（`GoodName LIKE` 拼装在 `:198`） | 待指派 |
 | 29 | `goodsUp` 的 WHERE 缺 `GoodName` | 类 4 | 批量改名的**串改风险** | `defect-survey.md:127` 病 C | 待指派 |
-| 30 | `getUserInfoById` 副本（记为「第三份」） | 类 4 | — | ⚠️ **文档立场相反**：`api-contract.md:60` / `cache-map.md:77` 明写「两份并存是**有意的**，不是漏删」 | ⚠️ **需先与文档立场对齐**再定 |
+| 30 | `getUserInfoById` 副本（记为「第三份」） | 类 4 | — | ⚠️ **文档立场相反**：`api-contract.md:79`（2026-10-04 鉴权笔 2 +19 重指） / `cache-map.md:77` 明写「两份并存是**有意的**，不是漏删」 | ⚠️ **需先与文档立场对齐**再定 |
 | 31 | 单飞等待无界 | 类 4 | 沿用 `cache-layer.md:434` 的 **4 条**触发条件 | `cache-layer.md:434`（② 笔登记，含失败路径退化） | ② 笔（登记） |
 | 32 | 雪崩形态 3（写后集中回填） | 类 4 | 同上 4 条（与 `#31` 是**同一实例的两个面**） | `cache-layer.md:434`：「与 §9.1『雪崩（同时过期）』行的**写后集中回填**是同一实例」 | 登记 |
 | 33 | `productsales` 二元组无 UNIQUE | 类 4 | 【新拟】实测出现重复 `(ProductCode, MerchantId)` 行。⚠️ 原第二触发「**或 `#2` 落地时一并加**」**已过期**：`#2` 于 2026-10-04 落地（`fix/goods-write-tx`）**未**一并加该索引（本笔是行为变更、不含 schema 变更） | `db-schema.md:49`：「`productsales` 无索引，亦无 `(ProductCode, MerchantId)` UNIQUE → **可写重复行**」 | 独立（schema 变更） |
