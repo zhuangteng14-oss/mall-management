@@ -116,7 +116,7 @@
 | `spring.servlet.multipart.*` 完全未配 | 全仓 0 命中 | 走 Boot 默认 1MB，超限抛 `MaxUploadSizeExceededException` → 无全局异常处理 → 用户拿框架错误体 | 亲读(框架) |
 | 无全局异常处理 / 无拦截器（除 CorsFilter） | 全仓 `@ControllerAdvice`/`@ExceptionHandler`/`HandlerInterceptor` = **0** | 未捕获异常走 Boot 默认错误体（含 `timestamp/path`），错误文案与 HTTP 码全项目不统一 | 亲读 |
 | `orderAdd` 三位状态位由客户端直传（TD-17） | `OrderStateMachine.java:36-38` 自述 | 伪造态唯一入口；**只观测不拦截**（D2），拦截需业务裁决 | 亲读 |
-| **服务端零价格校验：`orderAdd` 的 `Price` 由客户端直传直落库** | `MallManagementGoodsController:390`（`@RequestParam("Price") float Price`）→ `:435-449` INSERT 原样写入；方法体内**无重算、无比对**（从不查 `goods.Price`） | 客户端可 POST 任意 `Price`（`float` 连正负都不校验，TD-17 旁证）。**仓内无支付网关** ⇒ 「可伪造价格」成立、「资损」是**条件后果**（一旦 `order.Price` 被下游当真值）。这是「无校验层」中**唯一有金额语义**的一条，泛化条目（§四）盖不住 | 亲读 |
+| **服务端零价格校验：`orderAdd` 的 `Price` 由客户端直传直落库** — ✅ **已做边界收窄（B#1，2026-10-04 `fix/price-validation`）** | `OrderController.orderAdd:53-67`（`@RequestParam("Price") float Price` 在 `:58`）→ `OrderService.orderAdd` → `OrderDao.insertOrder:82-92` 原样写入；改前方法体内**无重算、无比对**（从不查 `goods.Price`）。⚠️ **原记** `MallManagementGoodsController:390` → `:435-449` 是**三层前**坐标，已失效（与 `three-layers.md:94` 同一处漂移，B#1 一并订正） | 客户端可 POST 任意 `Price`（`float` 连正负都不校验，TD-17 旁证）。**仓内无支付网关** ⇒ 「可伪造价格」成立、「资损」是**条件后果**（一旦 `order.Price` 被下游当真值）。这是「无校验层」中**唯一有金额语义**的一条，泛化条目（§四）盖不住。**B#1 之后**：`OrderService.orderAdd` 在**锁之前**加 `priceRejection`（正面判据 `Float.isFinite && >= 0 && <= 10^7`；不通过 ⇒ HTTP 200 + `{success:false,msg:"价格不合法"}`，且**不取锁、不触库**）⇒ **「任意值」收窄为「有界值」**。⚠️ **本笔不是资损修复**：合法但有界范围内的「1 元的电视」仍挡不住 —— **真值源（支付侧）** 已独立挂账（落点 `progress.md` 挂账段） | 亲读 |
 | `goodstype.GoodTypeNew` 可被显式传 NULL 打 `NOT NULL DEFAULT '0'` | `mall_management_sql.sql:76` | 行为待验（见 §七） | 亲读 |
 
 ### 病 C｜无 DAO 层
