@@ -91,7 +91,7 @@ TD-01（ddl-auto）、TD-03（回滚规则矛盾）、TD-04/06/07/08（锚点与
 
 | # | 项 | 位置 | 归属 | 工作量 |
 |---|---|---|---|---|
-| 1 | **服务端零价格校验**（只做 `Price >= 0` + 上界） | 入参绑定 `GoodsController:76`；业务侧 `GoodsService.goodsAdd`（`:83-148`，**无任何校验**）—— 三层前为 `GoodsController:390 → :435-449`（⚠️ 该旧坐标在 2026-10-02 已是**越界行号**，本笔按现行源码重测） | **三层内（Service 校验）**。⚠️ 按 `goods` 表**重算**属 **C 档** —— 重算会改行为（客户端值被覆盖），是「换真值源」不是「加校验」 | 小 |
+| 1 | **服务端零价格校验**（只做 `Price >= 0` + 上界）— ✅ **已做（B#1，2026-10-04 `fix/price-validation`）** | 入参绑定 `OrderController.orderAdd:53-67`（`@RequestParam("Price") float Price` 在 `:58`）；业务侧 `OrderService.orderAdd`（改前**无任何校验**，现加 `priceRejection`，见本文 §G 同项）—— 三层前为 `MallManagementGoodsController:390 → :435-449`。⚠️ **2026-10-04 订正**：本行原记 `GoodsController:76` / `GoodsService.goodsAdd:83-148`，那是**商品域**坐标（与 §G 行同项对不上，属搬错坐标）；同表 §G 行的位置列本就是 `OrderController.orderAdd`，现按现行源码对齐 | **三层内（Service 校验）**。⚠️ 按 `goods` 表**重算**属 **C 档** —— 重算会改行为（客户端值被覆盖），是「换真值源」不是「加校验」。⚠️ **2026-10-04 补**：(b) 档在本接口**用现行契约做不到** —— 下单 payload 里**没有商品 ID、也没有数量**（`ProductInformation` 只记「买了哪几个」）⇒ 服务端**原则上**算不出总价，(b) 须先改接口契约，是**另一笔** | 小 |
 | 2 | `goodsUp` 的 WHERE 补 `GoodName` | `GoodsService:286-291`（两条 update 调用）→ `GoodsDao:154-165`（WHERE 的构造点；三层前为 `GoodsController:317-330`） | 三层内（DAO / Service） | 小 |
 | 3 | `goodstype.GoodTypeNew` 不许显式传 NULL | `mall_management_sql.sql:76` | 三层内（Service 校验）。_行为本身待验，见「待验」_ | 小 |
 | 4 | `login.Id` 唯一性（前提 C） | 无约束，客户端直传 `userid` | 三层内（Service）；DB 侧加 UNIQUE 属 schema 变更 | 小 / 中 |
@@ -178,7 +178,7 @@ TD-01（ddl-auto）、TD-03（回滚规则矛盾）、TD-04/06/07/08（锚点与
 
 | 缺陷 | 出处 | 认领阶段 | 现状（2026-09-30 复核） |
 |---|---|---|---|
-| **服务端零价格校验**：`orderAdd` 的 `Price` 由客户端直传直落库 | 病 B；本文 **B#1** | **三层期间（Service 校验）** —— 只做 `Price >= 0` + 上界；⚠️ 按 `goods` 表**重算**属 **C 档**（那是换真值源，不是加校验） | ⏳ **未做** —— `OrderController.orderAdd` 仍是 `@RequestParam("Price") float`（入参绑定），业务逻辑在 `OrderService.orderAdd`，其中无重算、无比对 |
+| **服务端零价格校验**：`orderAdd` 的 `Price` 由客户端直传直落库 | 病 B；本文 **B#1** | **三层期间（Service 校验）** —— 只做 `Price >= 0` + 上界；⚠️ 按 `goods` 表**重算**属 **C 档**（那是换真值源，不是加校验） | ✅ **已完成（B#1，2026-10-04 `fix/price-validation`）** —— 闸在 `OrderService.orderAdd` 的**锁之前**（`priceRejection`：正面判据 `Float.isFinite && >= 0 && <= 10^7`），非法价 ⇒ **HTTP 200 + `{success:false,msg:"价格不合法"}`** 且**不取锁、不触库**（上界依据 = `order.Price` 是 `float`、整数精确上限 2^24；**业务上界待裁**）。`OrderController.orderAdd` 仍是 `@RequestParam("Price") float`（入参绑定，未改）。⚠️ **仍无重算、无比对** —— 本笔是**边界收窄**不是换真值源：「1 元的电视」挡不住（真值源/支付侧另挂账）。判据 = `OrderAddPriceGuardSmokeTest`（8 用例，**无门控** ⇒ 在 `backend` 阻塞 job 真跑） |
 | **状态位拦截**（TD-17：三个状态位可直传出终态订单） | 病 B；**TD-17**；本文 **C#6** | **三层期间（校验层）** —— 前置是**裁决**「拦截 vs 观测」 | ⏳ **未做**（C#6 两方案未裁）。⚠️ 拦截会使 A3 的 S4a **全部 8 条断言失去前置**（H3 正是用 `orderAdd` 造的前置态） |
 | **长度边界（字符数量）**：`productsales.GoodName char(20)` vs `goods.GoodName char(40)` | 病 G（`SQL:169` vs `:57`） | **三层期间（Service 校验，长度上界）** —— ⚠️ schema 侧**不改类型**（本文「约束 1」只允许新增表 / 字段 / 索引），只能在 Service 拦 | ⏳ **未做**。21–40 字符名写 `productsales` 报 **Error 1406**（**实测**，用户可见失败）；⚠️ `.sql` **导入会话**非严格 ⇒ 导入期**静默截断** |
 | **搜索 SQL**：`productSearch` 逐字 `OR GoodName LIKE` | 病 C（`api-contract.md:88`，**2026-10-03 本笔 +17 重指**；原记 `:72` —— 该行当时已是空行，现址 `:88` 是 `productSearch` 的**业务体现址**行，`:74` 是路由行） | **三层期间（DAO）** —— 参数化与 schema 前缀在抽 DAO 时自然改完（⚠️ 同 §F#1 的已知矛盾：两笔 DAO 的裁决都是「逐字搬运、不顺手改」，**DAO 已建而这两条一条都没改**） | ⏳ **未做** —— 现址 `GoodsDao.searchByKeyword`（`:193-207`，2026-10-02 由 `GoodsController:385-387` 的 SQL 构造搬入）：`keyword.trim().split("")` 每字符一个 OR；单引号即 SQL 语法错误；`SELECT *` 无 schema 前缀、无 `LIMIT` |
@@ -278,7 +278,7 @@ TD-01（ddl-auto）、TD-03（回滚规则矛盾）、TD-04/06/07/08（锚点与
 1. ✅ **两条「新层须知」已于 2026-09-30 定（本笔）**：**D#4** = **`JdbcClient` 短期 + jOOQ 长期**（`### D.4`）+ **D#1** = `@Transactional` 禁令**已登记**（`### D.1`） —— 原文「不定就没法落笔」的**前置已满足**，可落笔
 2. **裁决先行**：~~**C#2**（事务边界）~~ ✅ **2026-10-04 已裁并落地**（`fix/goods-write-tx`）、**C#6**（TD-17 拦截 vs 观测）—— ⚠️ **本条原写「两条都阻塞落笔」，现只剩 C#6 一条**
 3. **拆层顺序**：Controller → **DAO** → Service —— 先把数据出口收成一处，Service 才有意义
-4. **三层内顺带做**：校验（B#1 / #3 / #4 / #5、C#6）、全局异常出口（A#5 / D#2）、拦截器与 CORS（D#3）、~~事务边界（C#2）~~ ✅ **已于 2026-10-04 做**（但**未走三层**：四域三层早已完成，本笔记在公共层笔）、A#2 / A#3 / D#5 / D#6
+4. **三层内顺带做**：校验（~~B#1~~ ✅ **已于 2026-10-04 做**（`fix/price-validation`；同样**未走三层** —— 四域三层早已完成，落公共层笔）、#3 / #4 / #5、C#6）、全局异常出口（A#5 / D#2）、拦截器与 CORS（D#3）、~~事务边界（C#2）~~ ✅ **已于 2026-10-04 做**（但**未走三层**：四域三层早已完成，本笔记在公共层笔）、A#2 / A#3 / D#5 / D#6
 5. **并行**：A′#6–8、A#1（L2 TTL）、D#7 / D#8
 6. **三层后**：身份层（鉴权）；C#4 / C#5（C3 时间线）
 

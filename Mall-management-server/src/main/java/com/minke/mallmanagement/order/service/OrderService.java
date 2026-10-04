@@ -65,6 +65,27 @@ import com.minke.mallmanagement.shared.lock.DistributedLockService;
  * 的调用点**与三层前同位置**（{@code addLocked} 内、{@code casTransition} 的 UPDATE 之后），
  * 没有搬出锁 —— 读回三位必须在锁内，否则并发的另一次转移会挤进来、把时间线的 {@code from}
  * 记成别人造成的状态（见该类注释）。A3 的 C-1 / C-2 是这条的门禁。
+ *
+ * <h2>【B#1：价格校验落在本类、且落在锁<b>之前</b>（2026-10-04，{@code fix/price-validation}）】</h2>
+ * 病源是 {@code defect-survey.md:107} 病 B：「**服务端零价格校验** —— {@code orderAdd} 的
+ * {@code Price} 客户端直传直落库」。本笔只做 {@link #priceRejection} 一处**边界收窄**，四条落定：
+ *
+ * <ol>
+ *   <li><b>为什么不「换真值源」</b>：按 {@code goods.Price} 重算属 **C 档**（{@code three-layers.md:94}
+ *       / {@code :181} 都写着「那是换真值源，不是加校验」），且**用现行契约做不到** —— 下单
+ *       payload 里**没有商品 ID、也没有数量**（{@code ProductInformation} 只记「买了哪几个」，
+ *       见 {@code ProductPage.vue:315-317} 的拼接），服务端拿不到数量就**原则上**算不出总价。
+ *       故本笔只走 (a) 档「加校验」；(b) 档要改接口契约，是**另一笔**。</li>
+ *   <li><b>⚠️ 本笔不消除资损，只是把「任意值」收窄成「有界值」</b>：{@code defect-survey.md:107}
+ *       自述「仓内无支付网关 ⇒『可伪造价格』成立、『资损』是**条件后果**」。本笔**挡不住
+ *       「1 元的电视」** —— 那需要支付侧的真值源，已作为独立条目挂账。</li>
+ *   <li><b>为什么在锁外</b>：{@link #addLocked} 的临界区因此**一字未动**（B2 / D#1 的登记处），
+ *       且非法请求**不取锁** ⇒ 不耗 Redis 往返、**不污染锁指标**（A3 的 {@code A-S2a-1a} 按 tag
+ *       读锁计数器）。⚠️ 校验**不是事务边界**，故它与 D#1 的 {@code @Transactional} 禁令
+ *       **无关**；但**别把它搬进 {@code addLocked}** —— 那会让非法请求也过锁。</li>
+ *   <li><b>为什么 200 而不是 400</b>：见 {@link #priceRejection} 的注释（{@code GlobalExceptionHandler}
+ *       的**类级白名单**刻意排除 {@code OrderController}，挂约束注解会改它全部 8 个端点的错误体）。</li>
+ * </ol>
  */
 @Service
 public class OrderService {
@@ -95,6 +116,10 @@ public class OrderService {
      * {@code DistributedLockService.runLocked} 的 javadoc。
      *
      * <p>形参名与顺序**必须**与三层前逐字一致：{@code @RequestParam} 依赖它们解析。
+     *
+     * <p>⚠️ <b>B#1 起，{@code Price} 在这里先过一道 {@link #priceRejection} —— 且这道闸在
+     * {@code runLocked} <b>之前</b></b>。理由见类注释的 B#1 段：非法请求不取锁、不触库。
+     * 这道校验**不改变**合法请求的任何行为（合法 ⇒ 返回 {@code null} ⇒ 这一段完全透明）。
      */
     public Map<String, Object> orderAdd(
             String CustomerId,
@@ -107,8 +132,85 @@ public class OrderService {
             int DeliveryIf,
             int ReceiveIf
     ) {
+        // B#1：价格闸。放在锁外 —— 一是让非法请求不耗 Redis、不污染锁指标；二是让 addLocked
+        // 的临界区保持逐字不动（B2 / D#1 的登记处就在那儿）。
+        Map<String, Object> rejection = priceRejection(Price);
+        if (rejection != null) {
+            return rejection;
+        }
         return lockService.runLocked(LockName.ORDER_ADD, OrderId, () -> addLocked(
                 CustomerId, MerchantId, OrderId, Price, ProductInformation, Images, PayIf, DeliveryIf, ReceiveIf));
+    }
+
+    /**
+     * 订单价格的**上界**。**两条依据，不是一个拍出来的数字**：
+     *
+     * <ol>
+     *   <li><b>技术锚</b>：{@code order.Price} 的列类型是 {@code float}
+     *       （{@code mall_management_sql.sql:146}）。float 的**整数精确上限是 2^24 = 16_777_216**
+     *       —— 超过它，相邻可表示值的间隔就 &gt; 1，金额会**静默失真**（存进去的已经不是传进来的数）。
+     *       ⇒ 上界必须**严格小于** 2^24。</li>
+     *   <li><b>不误杀既有数据</b>：种子 6 条 {@code order} 的最大 {@code Price} 是 22328
+     *       （{@code mall_management_sql.sql:159}）⇒ 10^7 约为它的 448 倍，留了充足余量。</li>
+     * </ol>
+     *
+     * <p>⚠️ <b>真正的业务上界需要业务输入，本笔不自证</b> —— 它作为**待裁项**挂账
+     * （{@code progress.md §5-F}）。本笔只保证「上界存在且不误杀既有数据」，不声称 10^7 就是对的。
+     */
+    private static final float MAX_ORDER_PRICE = 10_000_000f;
+
+    /**
+     * 价格守卫。**可接受 ⇒ 返回 {@code null}；否则返回既有的失败响应**（{@code {success:false, msg}}）。
+     *
+     * <p><b>判据写成正面形式（白名单），不是负面形式</b>：
+     * {@code 接受 ⟺ Float.isFinite(price) && price >= 0 && price <= MAX_ORDER_PRICE}。
+     * ⚠️ <b>不要把它改写成 {@code if (price < 0) reject}</b> —— 那是本笔最容易犯的错
+     * （机制上与 C#2 那条「只记住半边」同类）：{@code NaN < 0} 是 {@code false}，
+     * 负面写法会**把 NaN 放行**。而 {@code NaN} / {@code Infinity} / {@code -Infinity}
+     * 都是 {@code Float.valueOf} 的**合法输入**（Spring 的 {@code @RequestParam float} 绑定
+     * 正是走 {@code Float.valueOf}）⇒ **不能**假设「绑定成功 ⇒ 一定是有限数」。
+     *
+     * <p>⚠️ <b>{@code Float.isFinite} 是刻意的显式冗余，别误当成 NaN 的唯一防线</b>：
+     * 在**链式正面判据**下它逻辑上可去（{@code NaN >= 0f} 已为 {@code false}）。
+     * 2026-10-04 的突变对照实测（判据 = {@code OrderAddPriceGuardSmokeTest} 全类 8 条）：
+     * <ul>
+     *   <li>删掉 {@code Float.isFinite}、保留链式比较 ⇒ <b>0 条红</b>；</li>
+     *   <li>把判据改写成负面形式 {@code !(price < 0f) && !(price > MAX_ORDER_PRICE)} ⇒
+     *       <b>恰 1 条红</b>（{@code nan_isRejected}）—— NaN 被放行。</li>
+     * </ul>
+     * 即：<b>挡住 NaN 的是「判据取正面形式」这件事本身，不是 {@code isFinite}</b>。
+     * 两者仍一起保留 —— {@code isFinite} 让「有限性」逐字可见（读者不必自己推 NaN 的比较语义），
+     * 正面形式则保证无论从哪条路径进来，NaN/±Inf 都落不进「接受」分支。
+     *
+     * <p><b>下界为什么是 {@code >= 0} 而不是 {@code > 0}</b>：{@code three-layers.md:94} 与
+     * {@code :181} 两处都写「只做 {@code Price >= 0} + 上界」；且 {@code goods.Price} 无下界约束
+     * ⇒ 商家可以合法把商品设成 0 元，此时前端 {@code popupTotal} 会算出 0
+     * （{@code ProductPage.vue:297-299}）⇒ {@code > 0} 会**误杀免费商品订单**。
+     *
+     * <p><b>精度不校验</b>：{@code popupTotal} 是 JS 浮点求和 ⇒ 真实订单本来就可能带
+     * {@code 9.999999999999998} 这类尾数，加「≤2 位小数」会**误杀真实订单**；且存储是
+     * {@code float}，「小数位」在二进制浮点下**没有良定义**。金额精度是**独立债**
+     * （{@code order.Price} 是 float、{@code goods.Price} 是 double，同一个量两种精度），已挂账。
+     *
+     * <p><b>为什么返回 200 + 文案，而不是 4xx</b>：全仓的**业务失败**一律是 200 +
+     * {@code {success:false,msg}}（「订单已存在，请勿重复提交」与三条 CAS 文案皆然；
+     * {@code api-contract.md} 亦记 {@code orderAdd} 的 DB 拒绝是 200）。走 4xx 只有两条路：
+     * 在 {@code OrderController} 的参数上挂约束注解 —— 那条路被 {@code GlobalExceptionHandler}
+     * 的**类级白名单**挡住（它**刻意排除**了 {@code OrderController}，加进去会改该 Controller
+     * 全部 8 个端点的错误体）；或另立异常类型并扩白名单 —— 两者**都属未被裁决的契约变更**。
+     *
+     * <p>文案 {@code "价格不合法"}：不含 A3 逐字数的两条红线（{@code 数据库错误} /
+     * {@code "success":true}），且**不复用**笔 3 的 {@code "参数校验失败："} 前缀 ——
+     * 那个前缀的语义是「入参**形状**」，本笔是**业务规则**，两者刻意分开。
+     */
+    private static Map<String, Object> priceRejection(float price) {
+        if (Float.isFinite(price) && price >= 0f && price <= MAX_ORDER_PRICE) {
+            return null;
+        }
+        Map<String, Object> result = new HashMap<>();
+        result.put("success", false);
+        result.put("msg", "价格不合法");
+        return result;
     }
 
     /**
