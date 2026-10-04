@@ -222,7 +222,11 @@
 
 **（1）挂账 —— 按优先级列；第一条不是漂移，是「护栏失效」（别让它沉到底）**：
 
-- ⚠️ **最高优先级｜`ci.yml:263` 的 `-Dtest=` 列表自 B2（`8810efe`）起从未更新 ⇒ `#11` 与本笔的单测护栏在 CI 里形同虚设**。类名**写死**为 `MallManagementApplicationTests,LockSceneRedisTest`，任何新测试类都不会被执行 —— `GoodsTypeUniqueIndexTest`（#11）与 `GoodsWriteTxAtomicityTest`（本笔）**在 CI 里一次都没跑过**。**性质：护栏失效，不是文档漂移** —— 它使「CI 绿」对本笔的原子性改动**零信息量**（验收边界见下方（5））。⚠️ 另注：该 job 是 `continue-on-error: true`（`ci.yml:117`），**即便跑也不拦 merge**。**本笔裁决（2026-10-04）**：**不扩列表**（动 CI 判据属另一主题，混进本笔会让 CI 报告把「门禁列表变更」与「行为变更」混为一谈）⇒ **另起一笔**。
+- ⚠️ **最高优先级｜本笔与 `#11` 的单测在 CI 里**从不执行** —— 不是「没被选中」，是**被 `A3_ENABLED` 门控跳过**。性质：护栏失效，不是文档漂移**。**两条独立原因叠加，产物实证**（`surefire-reports` 产物，已拉本地核对）：
+  1. `backend` job 跑**全量** `./mvnw -B test`（`ci.yml:51-55`；**该 job 是阻塞门禁**）但**不设** `A3_ENABLED` ⇒ 受 `@EnabledIfEnvironmentVariable` 门控的类**全部 `Skipped`**：产物里 `...GoodsWriteTxAtomicityTest.txt` 逐字为 `Tests run: 6, Failures: 0, Errors: 0, Skipped: 6`（`GoodsTypeUniqueIndexTest` 为 `Skipped: 3`，`MallManagementApplicationTests` 为 `Skipped: 6`）。
+  2. 唯一设 `A3_ENABLED=true` 的步骤（`ci.yml:257-263`）又把类名**写死**为 `MallManagementApplicationTests,LockSceneRedisTest` ⇒ 本笔的 6 条与 `#11` 的 `GoodsTypeUniqueIndexTest`(3) **都不在白名单内**。
+
+  两条合起来 ⇒ 二者**在 CI 里一次都没真正执行过**。CI 自己的注释 `ci.yml:232-234` 已写明这一机制（「*backend job 不设该变量，那里的全量 mvn test 会自动跳过本测试*」），`tech-debt.md:135` 同 —— **本条先前误把机制归给「`ci.yml:263` 的 `-Dtest=` 列表从未更新」（`-Dtest` 只解释第 2 条，解释不了第 1 条），2026-10-04 拉产物后订正**。它使「CI 绿」对本笔的原子性改动**零信息量**（验收边界见下方（5））。⚠️ 另注：**`continue-on-error: true`（`ci.yml:117`）属 `A3` `concurrency` job，不属 `backend`** —— `backend` 是阻塞的，它只是**跑不到**这些用例；别把非阻塞算到它头上。**本笔裁决（2026-10-04）**：**不动 CI 判据**（混进本笔会让 CI 报告把「门禁列表变更」与「行为变更」混为一谈）⇒ **另起一笔**；该笔至少要就「把这两类测试挪进 `A3_ENABLED` 步骤的白名单，还是索性去掉门控」给出裁决。
 - **本笔明写「不改」的遗留**：`DistributedLockServiceTest.java:396-401` 的 javadoc 拿 `goodsAdd` 当「将来 C#2」的举例；**C#2 落地后该举例成历史**（对象已加事务，不再有「将来」）。⚠️ 本笔**不改它**（用户 2026-10-04 裁决）—— 改它即第 7 个文件，为一句注释撑破预算是错的。
 
 **（2）本笔使其失真、但留而未改的 3 处（登记，别让它们成孤儿）**：
@@ -239,9 +243,11 @@
 
 **（5）⚠️ 本笔的验收边界（写进 PR 描述，逐字与此同）—— 比 #11 更弱，三点事实**：
 
-1. `ci.yml:263` 的 `-Dtest=` 列表**写死**（见（1））⇒ **本笔新增的 `GoodsWriteTxAtomicityTest` 在 CI 里从不运行**；
+1. **本笔新增的 `GoodsWriteTxAtomicityTest`（6 条）在 CI 里从不执行**：`backend` job 全量**跑到它但被门控跳过**（产物实证 `Tests run: 6, Skipped: 6`），唯一 `A3_ENABLED=true` 的步骤又在 `-Dtest=` 白名单外（详见（1）的两条原因）；
 2. **A3 的 8 个受保护端点不含 goods 写端点**（`three-layers.md §H.3`：`/goods` 9 端点里 8 个未覆盖，正是 `goodsAdd` / `goodsDe` / `goodsUp`）⇒ A3 **不会**替本笔报警；
 3. ⇒ 本笔的验收证据**只有两条**：**agent 本地 `GoodsWriteTxAtomicityTest` 6/0 通过** + **A3 `concurrency` job 零回归**（而 A3 根本不碰这三个端点，故它只证明「**没撞坏别处**」，**不构成对本笔改动的验证**）。
+
+**本轮 CI 结果（两件产物均落本地后逐字核对，非看 job 颜色）**：`surefire-reports` = **158 tests / 0 failures / 0 errors / 19 skipped**（19 恰为 4 个 `A3_ENABLED` 门控类 3+6+4+6，**与本地未设该变量时逐字一致** ⇒ 第 1 条的两条原因在产物上被双向坐实）；`a3-concurrency-report` = **`exitCode` 0**、**`gates.failed` 0 / `gates.count` 27**（27 门全 PASS；另 1 条 `A-B2-1` 为 `RECORD_ONLY`，因 `--b-group-gate=false` 按设计不计入退出码）。三个 job 全绿。
 
 > **「CI 绿 ≠ 本笔被 CI 验证了」** —— 本 PR 合并后 CI 全绿，**不能**被读作「原子性已被 CI 验证」：绿的是上面第 3 条的**零回归**，**不是**那 6 条用例。
 
