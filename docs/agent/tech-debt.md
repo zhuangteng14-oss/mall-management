@@ -58,12 +58,12 @@
 
 | 项 | 内容 |
 |---|---|
-| 现状 | `ImgConfig.java` 注册全局 `CorsFilter`（`addAllowedOriginPattern("*")`），同时 **5 个** Controller 各自标注 `@CrossOrigin` |
-| 证据 | `ImgConfig:11-22`（全局 `CorsFilter`）；**5 处**类级 `@CrossOrigin`：`GoodsController:38` / `OrderController:24` / `UserController:42` / `MessageController:44` / `HealthController:37`（**2026-10-03 实测**；原记「3 个 Controller」，订单拆出后新增 `OrderController:24` 一处；用户域 `:20` → `:42` 是三层第三笔 `0c07e96` 重写 `UserController` 所致；消息域 `:18` → `:44` 是三层第四笔 `8ed5fc1` 重写 `MessageController` 所致） |
+| 现状 | `ImgConfig.java` 注册全局 `CorsFilter`（`addAllowedOriginPattern("*")`）；⚠️ ~~同时 **5 个** Controller 各自标注 `@CrossOrigin`~~ **2026-10-04 订正：那 5 处已由 PR #34 `23f5361` 全部删除** ⇒ 现为 **0 处** |
+| 证据 | `ImgConfig:11-22`（全局 `CorsFilter`）；⚠️ ~~**5 处**类级 `@CrossOrigin`：`GoodsController:38` / `OrderController:24` / `UserController:42` / `MessageController:44` / `HealthController:37`（**2026-10-03 实测**）~~ —— **该 5 处已于 PR #34 `23f5361` 删除**，上列坐标记录的是**删除前**的位置（原记「3 个 Controller」，订单拆出后曾增至 5 处；用户域 `:20` → `:42` 是三层第三笔 `0c07e96` 重写 `UserController` 所致；消息域 `:18` → `:44` 是三层第四笔 `8ed5fc1` 重写 `MessageController` 所致） |
 | 问题 | ① 全局 CORS 与局部 CORS 重复配置；② `allowedOriginPattern("*")` + `allowCredentials(true)` 组合在生产环境有安全风险 |
-| 建议 | 保留全局 `CorsFilter`，移除 **5 个** Controller 的 `@CrossOrigin`；生产环境将 `allowedOriginPattern` 收敛为具体域名 |
+| 建议 | 保留全局 `CorsFilter`（**PR #34 后已事实上唯一**）；⚠️ ~~移除 **5 个** Controller 的 `@CrossOrigin`~~ **已完成**（PR #34 `23f5361`）；**仍待办** —— 生产环境将 `allowedOriginPattern` 收敛为具体域名 |
 | 优先级 | 中 |
-| 状态 | 待确认 |
+| 状态 | 🟡 **部分关闭（2026-10-04 订正）** —— **重复配置面 ✅ 已关**（PR #34 `23f5361` 删 5 处 `@CrossOrigin`，与本节末「公共层 笔 1/3 —— CORS」的记录一致）；**通配风险面仍开**（`allowedOriginPattern("*")` + `allowCredentials(true)` 未收敛）。⚠️ 原「待确认」与本文件末节的「已合」记录**自相矛盾**，本次一并订正 |
 
 ## TD-05 静态资源路径依赖 `user.dir`，jar 部署时会失效
 
@@ -331,7 +331,7 @@
 > ⚠️ 与 M1–M4「单笔合并日」不同：本条覆盖 **2026-10-02 ~ 10-04 三天、PR #25–#46（22 个 PR / 35 笔非 merge commit / 106 个文件）** —— 因为三层重构本身就是跨多笔的批次（同 M3 覆盖 B1 / C1 / B2 三笔）。
 > ⚠️ **「三层重构 ✅」不是干净 ✅**：四域 **4/4** 已完成，但**公共层仍 🟡**（三笔已合，`D#5` 配置收敛**未做** —— 见 `progress.md §3`）。故标题带 🟡、不写「完成」，同 M3 的挂账注。
 > ⚠️ **边界**：本条**不含** 2026-09-30 的那一批（A 批 / G 表 / 规则 v2 / S1a 7 笔 / 三层前准备，**PR #8–#24**）。它落在 M4 里程碑落盘（`c57f7e7`，09-30 13:59）**之后** ⇒ M4 收录不到；本条按主题也不收。**该批现状只记在 `progress.md §1.1` / `§2`，尚无任何里程碑收录**（是否另立待裁 —— 已挂账于 `progress.md §5-H (1)`）。
-> ⚠️ 下表四域的 Controller / Service 行数为 **2026-10-04 `wc -l` 实测**。`progress.md §3` 表内同项快照（`118` / `313` / `176` / `332` / `107` / `319` / `127`）**已过期** —— 该漂移早在 `progress.md:153` 登记待修，**本次不修**。
+> ⚠️ 下表四域的 Controller / Service 行数为 **2026-10-04 `wc -l` 实测**。`progress.md §3` 表内同项快照（`118` / `313` / `176` / `332` / `107` / `319` / `127`）**已过期** —— 该漂移早在 `progress.md` §3 登记待修，**本次不修**。
 
 | 项 | 交付物 | 证据 |
 |---|---|---|

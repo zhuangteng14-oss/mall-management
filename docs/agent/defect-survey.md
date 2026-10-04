@@ -11,7 +11,7 @@
 >
 > | 正文行 | 正文旧锚点 | 现行位置（2026-10-02 实测） |
 > |---|---|---|
-> | `:51` | 4 处裸 `@CrossOrigin`，含 `MallManagementGoodsController:27` | **现为 5 处**（订单拆出后多一处）：`GoodsController:38` / `UserController:42` / `MessageController:44` / **`OrderController:24`（新）** / `HealthController:37`。⚠️ `§五`（正文 `:159`，本表末几行）原写「TD-04 写 3 处、实为 **4**」⇒ 现值 **5** |
+> | `:51` | 4 处裸 `@CrossOrigin`，含 `MallManagementGoodsController:27` | ~~**现为 5 处**（订单拆出后多一处）：`GoodsController:38` / `UserController:42` / `MessageController:44` / **`OrderController:24`（新）** / `HealthController:37`~~ ⇒ ⚠️ **2026-10-04 订正：这 5 处已由 PR #34 `23f5361` 全部删除 ⇒ 现为 0 处**（CORS 唯一出处 = `ImgConfig` 全局 `CorsFilter`）；本节下方各处「4 处 / 5 处裸 `@CrossOrigin`」一律按 **0** 读。⚠️ `§五`（正文 `:159`，本表末几行）原写「TD-04 写 3 处、实为 **4**」⇒ 现值 **0** |
 > | `:60` | `MallManagementGoodsController:106-113` / `:282-287` | `GoodsService:96-117`（`goodsAdd` 上传段）/ `:265-281`（`goodsUp` 上传段）；`UserService.updateAvatar:254-264`（原 `UserController:193-199`）。⚠️ **原文写「`ImgPath.java:34` 未漂」，其实它也漂了**：现为 **`:78`**（`registry.addResourceHandler("/img/**")`；`@PostConstruct` 段 `:45-64`、整个 `addResourceHandlers` `:66-80`） |
 > | `:62` | `GoodsController:114-116`；`UserService.updateAvatar:257-264` | ⚠️ **商品侧疑似已失效**：该 catch 的文案在 A 批 `efe7959` 已从「已存在」改为「商品图片保存失败」，现址 `GoodsService:110-117` / `:273-281` ⇒ 本行「catch 归因一律『已存在』」**在商品域已不成立**，只剩 `UserService.updateAvatar:257-264`（原 `UserController:200-203`）一侧。**已复核（2026-10-02）**：两处的 `msg` 实测均为「**商品图片保存失败**」（`:115` / `:279`），读数时按此修正本行 |
 > | `:66` | `MallManagementGoodsController:390`（入参）→ `:435-449`（INSERT） | 入参 `OrderController:42-56`（`@RequestParam("Price") float` 在 `:47`）→ 逻辑 `OrderService.orderAdd:99`、临界区 `addLocked:124`；INSERT 落 `OrderDao.insertOrder:82-92` |
@@ -101,7 +101,7 @@
 |---|---|---|---|
 | CORS 等价「任意 Origin + 允许凭据」 | `ImgConfig.java:14,17,21` | `addAllowedOriginPattern("*")` + `setAllowCredentials(true)` + `/**` ⇒ 任意站点可带凭据读全部响应。**合法且最宽**，不是配错是配太开 | 亲读(框架) |
 | 上条覆盖 actuator | 同上 + `application.properties:97` | 匿名跨源读 `/actuator/metrics`（连接池等基础设施画像） | 推断 |
-| 两套 CORS 机制并存 | 4 处裸 `@CrossOrigin`：`MallManagementGoodsController:27` / `MallManagementUserController:20` / `MallManagementMessage:18` / `HealthController:37` | CorsFilter 是 servlet filter，先于 DispatcherServlet ⇒ handler 级配置**静默失效**；将来有人只改 `@CrossOrigin` 收紧 → 改了不生效且无提示 | 亲读(框架) |
+| ~~两套 CORS 机制并存~~ **已消解（2026-10-04 订正）** | ~~4 处裸 `@CrossOrigin`：`MallManagementGoodsController:27` / `MallManagementUserController:20` / `MallManagementMessage:18` / `HealthController:37`~~ ⇒ **PR #34 `23f5361` 已删全部 5 处**（原记 4 处，三层拆分后实为 5 处）⇒ 现仅 `ImgConfig` 全局 `CorsFilter` 一套 | ~~CorsFilter 是 servlet filter，先于 DispatcherServlet ⇒ handler 级配置**静默失效**；将来有人只改 `@CrossOrigin` 收紧 → 改了不生效且无提示~~ ⇒ **机制已合并，此风险不再成立** | 亲读(框架) |
 | 全端点匿名可达 | `pom.xml` 无 spring-security；fat jar grep = 0 | 登录是业务接口级判断，不是框架鉴权 | 亲读 |
 | 登录口令明文进 stdout，随 CI artifact 扩散 | `MallManagementUserController.java:39` | `System.out.println(username + "," + password)`；`ci.yml:315` 上传 `app.log` | 亲读 |
 | `getUserInfo` 返回 null ⇒ **HTTP 200 + 0 字节响应体** | 全仓 `ResponseBodyAdvice`/`@ControllerAdvice` = 0 | 写路径整段在 `if (body != null)` 内（Spring 6.2.6 `AbstractMessageConverterMethodProcessor:359`）⇒ 前端拿到「成功」但无内容。**前端后果（2026-09-30 实测 + 源码链）**：`LoginPage.vue:150` 的 `await userRes.json()` 对空体**必抛** `SyntaxError` ⇒ 落 `:172` 的兜底 `catch` ⇒ `:160-161` 的「未找到该用户，请查看对应账号密码有无写错…」**永远打不到（死代码）** —— 用户得到的是一句**与「密码写错」无关**的提示语，真实原因（后端异常）被吞掉 | 亲读(框架) + 实测(前端) |
