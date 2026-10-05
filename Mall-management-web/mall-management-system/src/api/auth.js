@@ -85,6 +85,22 @@ export function clearMerchantId() {
   sessionStorage.removeItem(K.merchantId)
 }
 
+/** 清**全部**本地登录态（凭据 + 两个业务号）—— 供 **401 出口**用（`api/http.js`）。
+ *
+ *  ⚠️ **与「点退出」的现行清法故意不同**：`CustomerPage.vue:112` 只 `clearCredentials()`、
+ *     `MerchantPage.vue:131-132` 另加 `clearMerchantId()`，**两者都不清 `customerid`**
+ *     （本模块此前**根本没有**清它的出口）。本函数的语义是「**会话没了**」⇒ 本地身份**应当全清**，
+ *     故比「点退出」多清 `merchantid` 与 `customerid`。这是**有意**的，不是漏改。
+ *  ⚠️ 调用方**只有** `api/http.js` 的 401 出口**一处** —— 别顺手把 `CustomerPage` / `MerchantPage`
+ *     的 `toLogin()` 换成本函数：那是**改退出行为**，不属于本笔。
+ *  ⚠️ 这里对 `customerid` 直接 `removeItem` 而**不先补一个 `clearCustomerId()`**：本模块刻意按
+ *     「哪个页面清哪个键」组织（见 `clearMerchantId` 的注释），补对称出口是另一笔的事。 */
+export function clear() {
+  clearCredentials()
+  clearMerchantId()
+  sessionStorage.removeItem(K.customerId)
+}
+
 // ── ⚠️ 以下两处待鉴权笔填充（方案 §4 ③）：本笔为空实现 ──────────────────────────
 // BD-03 选 A（拦截器 + Redis Session）⇒ 这两个保持空（凭据走 Cookie，无需前端持有）。
 // BD-03 选 B/C（JWT）⇒ 在此实现 token 读写 ——「token 存哪」即 P2.6 的同一道题

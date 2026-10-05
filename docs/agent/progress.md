@@ -537,6 +537,48 @@
 
 ---
 
+### 5-S. 鉴权笔 4（`feat/auth-frontend`，2026-10-05）：**前端接上**（`credentials` + 401 出口）—— 登记 **6 条漂移** + **1 条新发现** + **1 条翻笔前置**
+
+> **性质**：**不翻开关**（`app.auth.enabled` 一行未动）。产出 = 前端两件事：① `credentials:'include'`；② **401 出口**（清态 + 跳转 + 风暴防护）。
+> ⚠️ **会话恢复 + `currentUser` 缓存**已按用户裁决**切走**（不是漏做）⇒ `/user/me` **至今仍无调用方**，故 `src/api/endpoints.js` **本笔不动**。
+> ⚠️ **`/user/logout` 本笔不接**（登记为**翻笔前置**，见 (4)）。
+
+- **（1）【裁决·用户】原裁「34」作废，正确值 = **35**。** 本笔复核：`goods` 的 handler 是 **9**（`goodstype` / `goodsAdd` / `goodsSelect` / `goodsSelectHome` / `goodsDe` / `productCodePrice` / `goodsUp` / `GoodsProductCodeSelect` / `productSearch`），**不是 8** ⇒ `message 10 / order 8 / goods 9 / user 7` = **34** 业务 + `HealthController./health/db` = **35**。
+  旁证：`api-contract.md:18`「共 **35** 个」+ `:81`「/goods — **9** 个」，与该表 9 行**逐行对得上**；§5 的四项对账「35 − 31 = 4」亦自洽。
+  ⇒ **`§5-R (4)` 与 3 个落点（`business-decisions.md:46`、`three-layers.md:185` / `:198`）仍写 34，是错的**。**订正单列一笔**（纯文档），**本笔不夹带**。
+  ⚠️ **一个会同名误认的数**：`http.js` 头注释与 §6-A P2.4 里的 **`34`** 指 **`.success` 的判定处数**（§6-A P2.4 行口径 = `.success` **34 处**真实判定），与端点数**无关**。引用「34」前先确认是哪一个。
+
+- **（2）【本笔落地】代码 3 处 + 文档 2 处，共 5 文件。**
+  - `src/api/http.js`：`buildInit` 加 `credentials:'include'`（**一行覆盖 42/42** —— 全 `src/` **只有本文件一处 `fetch(`**，42 处调用全经 `http.post/get`，含 3 处「变量 URL」）；新增 `UnauthorizedError extends HttpError` + `setUnauthorizedHandler` / `resetUnauthorizedLatch` / `handleUnauthorized`；`handleApiError` 对 `UnauthorizedError` **静默**（先判子类再判 `HttpError`）。
+  - `src/api/auth.js`：新增 **`clear()`**（清凭据 + `merchantid` + `customerid`）。
+  - `src/main.js`：注册 `setUnauthorizedHandler(() => router.push('/login'))` + `router.afterEach(() => resetUnauthorizedLatch())`。
+  - `api-contract.md:166`：**同行替换（净零）** ——「`main.js` 无拦截器、无全局配置」订正为「已注册 401 出口、仍无 HTTP 拦截器」。
+  - `progress.md`：本节。
+  ⚠️ **三条「为什么不那样做」的理由，一并记账：**
+  - **401 判 `status` 不判 `body`** —— 闸 401 与 `/user/me` 401 的响应体**逐字节相同**（§5-R (2) 第 10 条 `cmp` IDENTICAL）⇒ 判 body 等于判「字符串相等」；且后端明写 `Result` 键序**不承诺**（`UserController.java:219`）。
+  - **跳转走回调注册，不 `import router`** —— `router/index.js → views/* → api/http.js` 会成环；回调也让「跳哪」只写在 `main.js` **一处**（http.js 不硬编码 `#/login`，路由路径改了不会坏）。
+  - **闩锁复位挂「路由变化」而非「任一 2xx」** —— 闸开时白名单端点（如 `goodsSelectHome`）照常 2xx，挂 2xx 会让闩锁被反复**误复位**、等于没有。
+
+- **（3）【⚠️ 本笔最重要的诚实声明】401 出口在笔 4 期间**不可达 ⇒ **未验**。**
+  闸默认关 ⇒ 唯一的 401 来源本是 `/user/me`，而它**本笔无调用方**（会话恢复已切走）⇒ **`UnauthorizedError` 这条分支在默认配置下一次都不会触发**。
+  验收因此**只剩**：`npm run build` 通过 + 5 条 grep 判据 + 突变对照 A（撤 `credentials` ⇒ 手测 B3/B4/B6 变红）。**闩锁与 `clear()` 的实际行为，只能到「翻」那一笔才验得到**（原先的 B12 已由用户裁归翻笔）。
+  ⇒ **不许**把「401 出口已验」写进任何结论。
+
+- **（4）【翻笔前置登记】前端「退出」不调 `/user/logout`。**
+  实测全 `src/` **0 调用** —— 「退出」只清 sessionStorage（`CustomerPage.vue:112` / `MerchantPage.vue:131-132`）。
+  ⚠️ **闸一开这就成为真的没登出**：cookie 仍在，直开 `#/customer` 照样取到数据。⇒ **「退出调 `/user/logout`」列为翻笔前置**（翻笔本来就要动测试与 a3，那是它的时点）；并进笔 4 要改 `CustomerPage` + `MerchantPage` ⇒ **+2 文件、破 5**，故本笔不做。
+
+- **（5）【漂移登记 · 本笔不修】** 除 (1) 外另 **5** 条：
+  1. **`getUserInfo` 的消费点是 3，不是 5。** 实测 `grep -rn "getUserInfo" src/` = `LoginPage.vue:141` / `UserInfoPage.vue:99` / `GoodsUp.vue:153`（另 2 处是 `GoodsUp` 的本地函数名、1 处是 `endpoints.js:26`）。**三份独立旁证同为 3**：`UserController.java:133` javadoc「前端**三个**调用点」、§6-A P1.2「消费点 **3**」、`api-contract.md:171` 只列 3 个文件。⚠️ 「5」**最可能**来自 `endpoints.js` 的 `user:` 块恰好 5 条（**推断档，未证**）。
+  2. **§6-A P1.2 的行号过时**：写 `LoginPage.vue:150` / `UserInfoPage.vue:101` / `GoodsUp.vue:155` → 实测 **`:141` / `:99` / `:153`**（成因 = `#48` 前端笔挪行）。
+  3. **`api-contract.md:171` 同病 + §5 全表停摆**：写 `LoginPage.vue:142` / `GoodsUp.vue:150` / `UserInfoPage.vue:96` → 实测 **`:141` / `:153` / `:99`**；且 §5 矩阵全表行号停在 **2026-09-30**（`#48` 之前），此后**未重测**。
+  4. **§5-J (4) 与 §6-B P2.6 的行号过时**：写 `LoginPage.vue:163-169`（写）/ `GoodsUp.vue:145-146`（读）/ `UserInfoPage.vue:91-92`（读）→ 实测写 **`LoginPage.vue:148-153` + `:158` / `:162`**、读 **`GoodsUp.vue:148-149`** / **`UserInfoPage.vue:94-95`**。
+  5. **§6-A P1.1「`res.ok` / `res.status` / `.statusText` 全 `src` 0 命中」在 HEAD 即已失效** —— HEAD 的 `http.js` 已有 `if (!res.ok)`（HEAD `:97`）与 `res.status`（HEAD `:104`），**本笔后**分别位于 **`:151` / `:157`**（本笔又新增了 `res.status === 401`）。成因：`#48` 落地了 P1.1 却未回填本节。
+
+- **（6）【新发现 · 未核影响】** `ChatRoom.vue:133` 用 `window.location.pathname` 判路由（`path.includes('/merchant')` / `('/customer')`）—— **hash 路由下 `pathname` 恒为 `/`** ⇒ 两个分支**恒不命中**，实际总走兜底链（`merchantid` → `customerid`）。⚠️ **影响未核**（只有当某用户**同时**持有两个 id 且站在客户页时才可能给出不同结果）。
+
+---
+
 ## 6. 前端规范化（2026-10-03 双审计）
 
 > **口径**：`亲读` —— `Mall-management-web/mall-management-system/src` 全量 grep + 逐行读（只读，前端代码**一字未动**）。
