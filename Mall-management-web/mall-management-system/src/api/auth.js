@@ -143,10 +143,14 @@ export function setCredentials(username, password) {
   dropRestored()
 }
 
-/** 退出登录：清凭据。原本散在 `CustomerPage.vue:113-114` / `MerchantPage.vue:132-133`。
+/** 退出登录：清凭据。原本散在 `CustomerPage.vue:113-114`（**R1 后此点已迁到 `UserCenter.vue:37`**）/ `MerchantPage.vue:132-133`。
  *  ⚠️ **止血笔行为变更**：本函数**多清一个键** `role`（原只清 username / password）。
  *     理由：退出登录语义上就该清角色，留着会让下一次「已登录」判断带上上一轮的角色。
- *     影响面 = **两个退出点**：`CustomerPage.vue:112` 与 `MerchantPage.vue:131`（登记于 §5-V）。 */
+ *     影响面 = **两个退出点**：`UserCenter.vue:37` 与 `MerchantPage.vue:131`（登记于 §5-V）。
+ *     ⚠️ **按语（§5-X，2026-10-05）**：客户侧退出点由 `CustomerPage.vue:112` **迁到
+ *        `UserCenter.vue:37`** —— R1 把用户中心从 `CustomerPage` 的内联 markup 提成独立页面组件，
+ *        `toLogin()` 随 markup 一起搬家（**换文件，不只是换行号**）。`MerchantPage.vue:131` **未动**
+ *        （R1 只改客户壳）。本文件上方那句「原本散在 `CustomerPage.vue:113-114`」是**历史行号** —— `HEAD` 实测该块是 `:111-114`、`clearCredentials()` 在 `:112`（两值不一致，**成因未考**；R1 未动 `MerchantPage`）。 */
 export function clearCredentials() {
   sessionStorage.removeItem(K.username)
   sessionStorage.removeItem(K.password)
@@ -155,7 +159,7 @@ export function clearCredentials() {
 }
 
 /** 退出登录：额外清 merchantid（**仅** `MerchantPage.vue:134` 有这一条）。
- *  ⚠️ 单独一个函数而非并进 `clearCredentials()` —— CustomerPage 的退出**不清** merchantid，
+ *  ⚠️ 单独一个函数而非并进 `clearCredentials()` —— 客户侧（`UserCenter.vue`，R1 前在 `CustomerPage.vue`）的退出**不清** merchantid，
  *     合并就是改行为。 */
 export function clearMerchantId() {
   sessionStorage.removeItem(K.merchantId)
@@ -164,12 +168,12 @@ export function clearMerchantId() {
 
 /** 清**全部**本地登录态（凭据 + 两个业务号）—— 供 **401 出口**用（`api/http.js`）。
  *
- *  ⚠️ **与「点退出」的现行清法故意不同**：`CustomerPage.vue:112` 只 `clearCredentials()`、
+ *  ⚠️ **与「点退出」的现行清法故意不同**：`UserCenter.vue:37`（R1 后行号；原 `CustomerPage.vue:112`）只 `clearCredentials()`、
  *     `MerchantPage.vue:131-132` 另加 `clearMerchantId()`，**两者都不清 `customerid`**
  *     （本模块此前**根本没有**清它的出口）。本函数的语义是「**会话没了**」⇒ 本地身份**应当全清**，
  *     故比「点退出」多清 `merchantid` 与 `customerid`。这是**有意**的，不是漏改。
- *  ⚠️ 调用方**只有** `api/http.js` 的 401 出口**一处** —— 别顺手把 `CustomerPage` / `MerchantPage`
- *     的 `toLogin()` 换成本函数：那是**改退出行为**，不属于本笔。
+ *  ⚠️ 调用方**只有** `api/http.js` 的 401 出口**一处** —— 别顺手把 `UserCenter`（R1 前在
+ *     `CustomerPage`）/ `MerchantPage` 的 `toLogin()` 换成本函数：那是**改退出行为**，不属于本笔。
  *  ⚠️ 这里对 `customerid` 直接 `removeItem` 而**不先补一个 `clearCustomerId()`**：本模块刻意按
  *     「哪个页面清哪个键」组织（见 `clearMerchantId` 的注释），补对称出口是另一笔的事。
  *  ⚠️ **会话恢复笔**：本函数是「会话没了」⇒ 恢复态也必须一起丢（`clearCredentials` /

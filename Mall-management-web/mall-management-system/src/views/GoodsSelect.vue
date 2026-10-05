@@ -42,10 +42,18 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { http, handleApiError, urlOf } from '../api/http'
 import { endpoints } from '../api/endpoints'
+
+// ⚠️ 这个 name 是 `CustomerPage.vue` 里 `<KeepAlive :include="['HomeTab', 'GoodsSelect']">` 的
+//    **唯一**匹配依据。改名（含改文件名）会让缓存**静默失效** —— 不报错，只是切回来
+//    重新挂载（搜索态丢失）。改名前先 grep `include`。下一行那条 `eslint-disable-next-line` 是**必需**的
+//    （本仓 ESLint 未开 `vue/setup-compiler-macros` ⇒ 宏被判 `no-undef`）—— 本文件 `:165` 的 `defineExpose`
+//    早就带着同一条，这里是照抄。
+// eslint-disable-next-line no-undef
+defineOptions({ name: 'GoodsSelect' })
 
 const router = useRouter()
 const route = useRoute()
@@ -99,6 +107,21 @@ const searchByKeyword = async (kw) => {
   searchKeyword.value = kw
   await doSearch()
 }
+
+// ── R1（2026-10-05）：客户壳路由化后，搜索关键词改由 URL 承载 ─────────────────────
+// 客户壳的首页搜索框/分类点击 ⇒ `/customer/search?kw=xxx`（`views/customer/HomeTab.vue` 推的）
+// ⇒ 本条 watch 触发。`immediate: true` 覆盖「首挂载就带 kw」（含**直接输 URL** 与**刷新**）。
+//
+// ⚠️ **这是纯增量的第二条通道，没有替换任何东西**：
+//    · 商家壳（`MerchantPage.vue:24`）仍是 `<GoodsSelect ref="goodsSelectRef" />` **直挂**，
+//      走上面的 `defineExpose({ searchByKeyword })` ⇒ `searchByKeyword` **必须保留**；
+//    · 商家 URL 永远是 `/merchant` / `/merchant?back=search`，**永不带 `kw`** ⇒ 本 watch 在
+//      商家侧**恒不触发**（所以 R2 之前商家侧不会断）。
+// ⚠️ 下面的 `onMounted`（`back=search` ⇒ `loadState()`）同理**不能**改成 `onActivated`：
+//    `onActivated` 只在 `<KeepAlive>` 内触发，而商家侧是**直挂、无 KeepAlive** ⇒ 一改就断商家侧。
+watch(() => route.query.kw, (kw) => {
+  if (kw) searchByKeyword(kw)
+}, { immediate: true })
 
 // 跳转到商品详情页，携带 from=search 标记，并保存当前状态
 const toGoodsDetail = (goods) => {

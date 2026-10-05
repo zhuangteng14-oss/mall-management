@@ -2,74 +2,63 @@
   <div class="customer-page">
     <div class="top-nav">
       <div class="nav-left">
-        <button @click="curPage = 'home'" :class="{ active: curPage === 'home' }">商城主页</button>
+        <router-link to="/customer" class="nav-btn" :class="{ active: route.meta.tab === 'home' }">商城主页</router-link>
       </div>
       <div class="nav-right">
-        <button @click="curPage = 'msg'" :class="{ active: curPage === 'msg' }">
+        <router-link to="/customer/msg" class="nav-btn" :class="{ active: route.meta.tab === 'msg' }">
           消息
           <span v-if="unreadCount > 0" class="nav-red-dot"></span>
-        </button>
-        <button @click="curPage = 'cart'" :class="{ active: curPage === 'cart' }">购物车</button>
-        <!-- 用户中心按钮：内部状态切换，清除URL参数 -->
-        <button @click="goToUserCenter" :class="{ active: curPage === 'user' }">用户中心</button>
+        </router-link>
+        <router-link to="/customer/cart" class="nav-btn" :class="{ active: route.meta.tab === 'cart' }">购物车</router-link>
+        <router-link to="/customer/user" class="nav-btn" :class="{ active: route.meta.tab === 'user' }">用户中心</router-link>
       </div>
     </div>
 
     <div class="content">
-      <div v-show="curPage === 'home'" class="home-container">
-        <HomePage @go-search="goSearch" />
-      </div>
-
-      <div v-show="curPage === 'search'" class="page">
-        <GoodsSelect ref="goodsSelectRef" />
-      </div>
-
-      <div v-if="curPage === 'msg'" class="page">
-        <ChatRoom />
-      </div>
-
-      <div v-if="curPage === 'cart'" class="cart-container">
-        <ShoppingCart :showSwitch="false" />
-      </div>
-
-      <div v-if="curPage === 'user'" class="user-page">
-        <div class="user-menu">
-          <button @click="curSubPage = 'info'" :class="{ active: curSubPage === 'info' }">个人信息</button>
-          <button @click="curSubPage = 'history'" :class="{ active: curSubPage === 'history' }">历史购买记录</button>
-          <button @click="curSubPage = 'friend'" :class="{ active: curSubPage === 'friend' }">好友</button>
-          <button @click="curSubPage = 'chat'" :class="{ active: curSubPage === 'chat' }">消息</button>
-          <button @click="toLogin" class="logout">退出登录</button>
-        </div>
-
-        <UserInfoPage v-if="curSubPage === 'info'" />
-        <HistoricalOrders v-if="curSubPage === 'history'" />
-        <FriendRoom v-if="curSubPage === 'friend'" />
-        <ChatRoom v-if="curSubPage === 'chat'" />
+      <div :class="layoutClass">
+        <router-view v-slot="{ Component }">
+          <KeepAlive :include="CACHE_TABS">
+            <component :is="Component" />
+          </KeepAlive>
+        </router-view>
       </div>
     </div>
   </div>
 </template>
 
 <script setup>
-import { ref, nextTick, watch, onMounted, onUnmounted } from 'vue'
-import { useRouter, useRoute } from 'vue-router'
-import UserInfoPage from './UserInfoPage.vue'
-import HomePage from './HomePage.vue'
-import GoodsSelect from './GoodsSelect.vue'
-import ShoppingCart from './ShoppingCart.vue'
-import HistoricalOrders from './HistoricalOrders.vue'
-import ChatRoom from './ChatRoom.vue'
-import FriendRoom from './FriendRoom.vue'
+import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { http, handleApiError } from '../api/http'
 import { endpoints } from '../api/endpoints'
-import { getMerchantId, getCustomerId, clearCredentials } from '../api/auth'
+import { getMerchantId, getCustomerId } from '../api/auth'
 
-const router = useRouter()
+// ── R1（2026-10-05）：客户壳由「内部 `curPage` ref + `v-if`/`v-show`」改为「嵌套路由 + `<router-view>`」──
+// 壳现在只剩三件事：顶栏、内容区外壳、未读红点轮询。**页面选择权全交给路由**（见 `router/index.js`）。
+// 被删掉的：`curPage` / `curSubPage` / `goodsSelectRef` / 两个 `route.query` watcher /
+//   `goSearch` / `goToUserCenter`（顶栏改 `<router-link>`）—— 它们现在都是「路由」的职责。
+//
+// ⚠️ **本壳不会因切 tab 而重挂**（这是下面 `onMounted` 里那支未读轮询「只跑一次」的**唯一**依据）：
+//    `/customer` 是**父记录**，`children` 之间切换**不重建父实例**。
+//    后人若把子路由提成**平级记录**、或给壳加 `:key`（如 `<router-view :key="route.path">`），
+//    这个性质立刻消失 —— 表现是「每切一次 tab 就多一支 5s 轮询、永不回收」。
+//
+// ⚠️ `CACHE_TABS` 的匹配依据是**组件的 name**（不是路径）。这两个 name 写在
+//    `views/customer/HomeTab.vue` 与 `views/GoodsSelect.vue` 的 `defineOptions` 里 ——
+//    改名 = 缓存**静默失效**（不报错，只是切回来重新挂载、轮播重置）。改名前先 grep `include`。
+//    为什么只缓存这两个：R1 前 home / search 是 `v-show`（切走**不卸载**），其余是 `v-if`（卸载）
+//    ⇒ 只缓存这两个才与改前**逐字等价**。
+//    ⚠️ **别把 ChatRoom 加进来**：它有 2s 轮询（`ChatRoom.vue:369`），缓存 = 离开消息页后
+//    **后台继续轮询**（新行为，且与壳里那支 5s 未读轮询重复）。
+const CACHE_TABS = ['HomeTab', 'GoodsSelect']
+
 const route = useRoute()
+const router = useRouter()
 
-const curPage = ref('home')
-const curSubPage = ref('info')
-const goodsSelectRef = ref(null)
+// 内容区外壳类名随路由走（`meta.layout`）—— 与 R1 前那 5 个兄弟 div 的类名**一一对应**
+// （`.home-container` / `.page` / `.cart-container` / `.user-page`），所以布局逐字不变。
+// ⚠️ 布局类名的**所有权**留在本壳（页组件自己不带布局类），R6 抽 AppShell 时再谈归属。
+const layoutClass = computed(() => route.meta.layout || 'page')
 
 // 未读消息数量（用于顶部红点）
 const unreadCount = ref(0)
@@ -108,83 +97,23 @@ const fetchUnreadCount = async () => {
   }
 }
 
-const toLogin = () => {
-  clearCredentials()
-  router.push('/login')
-}
-
-const goSearch = async (keyword) => {
-  sessionStorage.removeItem('SEARCH_KEYWORD')
-  sessionStorage.removeItem('SEARCH_RESULTS')
-  curPage.value = 'search'
-  await nextTick()
-  if (goodsSelectRef.value) {
-    goodsSelectRef.value.searchByKeyword(keyword)
-  }
-}
-
-const handlePendingSearch = async () => {
-  const pendingKeyword = sessionStorage.getItem('PENDING_SEARCH_KEYWORD')
-  if (pendingKeyword !== null) {
-    sessionStorage.removeItem('PENDING_SEARCH_KEYWORD')
-    curPage.value = 'search'
-    await nextTick()
-    if (goodsSelectRef.value) {
-      goodsSelectRef.value.searchByKeyword(pendingKeyword)
-    }
-    return true
-  }
-  return false
-}
-
-watch(
-  () => route.query.back,
-  (back) => {
-    if (route.path === '/customer') {
-      curPage.value = back === 'search' ? 'search' : 'home'
-    }
-  },
-  { immediate: true }
-)
-
-watch(
-  () => route.query.page,
-  (newPage) => {
-    if (route.path === '/customer') {
-      if (newPage === 'cart') {
-        curPage.value = 'cart'
-      } else if (newPage === 'user') {
-        curPage.value = 'user'
-      } else if (newPage === 'chat') {
-        curPage.value = 'msg'
-      }
-    }
-  },
-  { immediate: true }
-)
-
-// 监听当前页面，如果进入消息页则立即清除红点数量（用户已进入消息界面）
-watch(curPage, (newVal) => {
-  if (newVal === 'msg') {
-    unreadCount.value = 0
-  }
+// 进入消息页则立即清红点（R1：改看路由 —— 壳里已无 `curPage`）
+watch(() => route.path, (p) => {
+  if (p === '/customer/msg') unreadCount.value = 0
 })
 
+// 跨页待搜索关键词（由商品详情页的搜索框写入，见 `ProductPage.vue:380`）
+// R1：改为**推路由** `/customer/search?kw=`（关键词由 URL 承载）；R1 前是
+//     置 `curPage='search'` + `nextTick` 后调子组件 ref，`<router-view>` 下没有 ref 可用。
+const handlePendingSearch = () => {
+  const pendingKeyword = sessionStorage.getItem('PENDING_SEARCH_KEYWORD')
+  if (pendingKeyword === null) return
+  sessionStorage.removeItem('PENDING_SEARCH_KEYWORD')
+  router.push({ path: '/customer/search', query: { kw: pendingKeyword } })
+}
+
 onMounted(async () => {
-  // 优先处理路由参数，不管是否有待处理搜索
-  if (route.query.page === 'cart') {
-    curPage.value = 'cart'
-  } else if (route.query.page === 'user') {
-    curPage.value = 'user'
-  } else if (route.query.page === 'chat') {
-    curPage.value = 'msg'
-  } else {
-    // 没有 page 参数，再处理搜索相关
-    const handled = await handlePendingSearch()
-    if (!handled && !route.query.back) {
-      curPage.value = 'home'
-    }
-  }
+  handlePendingSearch()
   // 启动轮询获取未读消息数
   await fetchUnreadCount()
   unreadPollingTimer = setInterval(fetchUnreadCount, 5000)
@@ -193,12 +122,6 @@ onMounted(async () => {
 onUnmounted(() => {
   if (unreadPollingTimer) clearInterval(unreadPollingTimer)
 })
-
-// 用户中心跳转方法：直接设置内部状态，并清除 URL 参数
-const goToUserCenter = () => {
-  curPage.value = 'user'
-  router.replace({ query: {} })
-}
 </script>
 
 <style scoped>
@@ -218,17 +141,21 @@ padding: 0 40px;
 border-bottom: 1px solid #eee;
 background: #fff;
 }
-.top-nav button {
-border: none;
-background: transparent;
-font-size: 15px;
-color: #333;
-cursor: pointer;
-padding: 6px 12px;
-border-radius: 4px;
-transition: 0.2s;
+/* R1：顶栏四个入口由 `button` 改成 `router-link`（渲染成 `a`）⇒ 选择器随之改；
+   加 `text-decoration: none`，其余属性与改前的 `.top-nav button` 逐条相同。 */
+.top-nav a {
+  display: inline-block;
+  border: none;
+  background: transparent;
+  font-size: 15px;
+  color: #333;
+  cursor: pointer;
+  padding: 6px 12px;
+  border-radius: 4px;
+  transition: 0.2s;
+  text-decoration: none;
 }
-.top-nav button.active {
+.top-nav a.active {
 color: #007bff;
 font-weight: 500;
 }
@@ -276,31 +203,9 @@ display: flex;
 gap: 30px;
 height: 100%;
 }
-.user-menu {
-display: flex;
-flex-direction: column;
-gap: 12px;
-width: 220px;
-}
-.user-menu button {
-padding: 12px 16px;
-border: 1px solid #eee;
-border-radius: 6px;
-background: #fff;
-text-align: left;
-font-size: 15px;
-cursor: pointer;
-transition: 0.2s;
-}
-.user-menu button.active {
-border-color: #007bff;
-background: #e6f7ff;
-color: #007bff;
-}
-.user-menu button.logout {
-border-color: #ff4d4f;
-color: #ff4d4f;
-}
+/* ⚠️ 用户中心左菜单的样式（`.user-menu*`）已随 markup 搬到 `UserCenter.vue` 自己的
+   `<style scoped>` 里（R1，2026-10-05）—— 各文件的样式各归其主，此处不再保留死规则。
+   `.user-page` 留在本壳：它是**布局容器**（`meta.layout`），不是菜单自己的样式。 */
 .empty-page {
 flex: 1;
 display: flex;

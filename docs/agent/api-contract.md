@@ -175,12 +175,12 @@
 | `/goods/goodstype` | `GoodsAdd.vue:135`（**裸 GET**，全文唯一非 POST 调用）、`GoodsAdd.vue:166`、`HomePage.vue:154` |
 | `/goods/goodsAdd` | `GoodsAdd.vue:217` |
 | `/goods/goodsSelect` | `GoodsUp.vue:170` |
-| `/goods/goodsSelectHome` | `HomePage.vue:121`、`ProductPage.vue:170`、`GoodsSelect.vue:74`※ |
+| `/goods/goodsSelectHome` | `HomePage.vue:121`、`ProductPage.vue:170`、`GoodsSelect.vue:84`※（R1 重指；原记 `:74`） |
 | `/goods/goodsDe` | `GoodsUp.vue:215` |
 | `/goods/goodsUp` | `GoodsUp.vue:327` |
 | `/goods/productCodePrice` | `GoodsUp.vue:275`、`ProductPage.vue:193`、`ProductPage.vue:245` |
 | `/goods/GoodsProductCodeSelect` | `ProductPage.vue:184`、`ProductPage.vue:236` |
-| `/goods/productSearch` | `GoodsSelect.vue:78`※ |
+| `/goods/productSearch` | `GoodsSelect.vue:88`※（R1 重指；原记 `:78`） |
 | `/order/orderAdd` | `ProductPage.vue:369` |
 | `/order/orderSelect` | `ShoppingCart.vue:108` |
 | `/order/orderDeliveryIfSelect` | `OrderCenter.vue:125`※ |
@@ -189,7 +189,7 @@
 | `/order/orderPayIfUp` | `ShoppingCart.vue:156` |
 | `/order/orderReceiveIfUp` | `ShoppingCart.vue:190` |
 | `/order/orderDeliveryIfUp` | `OrderCenter.vue:171` |
-| `/message/conversations` | `ChatRoom.vue:184`、`CustomerPage.vue:97`、`MerchantPage.vue:113` |
+| `/message/conversations` | `ChatRoom.vue:184`、`CustomerPage.vue:89`（R1 重指；原记 `:97` —— ⚠️ `:97` 在 `HEAD` 已漂 3，实为 `:100`）、`MerchantPage.vue:113` |
 | `/message/history` | `ChatRoom.vue:213`、`ChatRoom.vue:279` |
 | `/message/send` | `ChatRoom.vue:327`、`ProductPage.vue:459` |
 | `/message/userSelect` | `ChatRoom.vue:164`、`FriendRoom.vue:132` |
@@ -207,11 +207,11 @@
 
 | 文件 | 判定条件 | 两端取值 |
 |---|---|---|
-| `GoodsSelect.vue:71-80` | `kw === ''` | 空 → `goodsSelectHome`；非空 → `productSearch`（body = `keyword=<encodeURIComponent(kw)>`） |
+| `GoodsSelect.vue:82-90`（R1 重指；原记 `:71-80`） | `kw === ''` | 空 → `goodsSelectHome`；非空 → `productSearch`（body = `keyword=<encodeURIComponent(kw)>`） |
 | `OrderCenter.vue:122-129` | `orderStatus.value === 'completed'` | `orderDeliverySelect`；否则 `orderDeliveryIfSelect`（两分支同传 `merchantId` + `status`） |
 | `FriendRoom.vue:224-229` | `action === 'agree'` | `friendUp`；否则 `friendDe` |
 
-> ※ 这三处的 `fetch(` 本身分别为 `GoodsSelect.vue:81` / `OrderCenter.vue:129` / `FriendRoom.vue:231` —— 三者的 URL 都是变量，故上表标的是 **URL 赋值行**。
+> ※ 这三处的 `fetch(` 本身分别为 `GoodsSelect.vue:91`（R1 重指；原记 `:81`）/ `OrderCenter.vue:129` / `FriendRoom.vue:231` —— 三者的 URL 都是变量，故上表标的是 **URL 赋值行**。
 
 ### 5.2 未验区域（2026-09-30 边界）
 
