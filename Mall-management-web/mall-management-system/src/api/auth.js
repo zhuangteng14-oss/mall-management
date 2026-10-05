@@ -143,14 +143,18 @@ export function setCredentials(username, password) {
   dropRestored()
 }
 
-/** 退出登录：清凭据。原本散在 `CustomerPage.vue:113-114`（**R1 后此点已迁到 `UserCenter.vue:37`**）/ `MerchantPage.vue:132-133`。
+/** 退出登录：清凭据。原本散在 `CustomerPage.vue:113-114`（R1 后迁到 `UserCenter.vue`）/ `MerchantPage.vue:132-133`（**R2 后也迁到 `UserCenter.vue`**）。
  *  ⚠️ **止血笔行为变更**：本函数**多清一个键** `role`（原只清 username / password）。
  *     理由：退出登录语义上就该清角色，留着会让下一次「已登录」判断带上上一轮的角色。
- *     影响面 = **两个退出点**：`UserCenter.vue:37` 与 `MerchantPage.vue:131`（登记于 §5-V）。
- *     ⚠️ **按语（§5-X，2026-10-05）**：客户侧退出点由 `CustomerPage.vue:112` **迁到
- *        `UserCenter.vue:37`** —— R1 把用户中心从 `CustomerPage` 的内联 markup 提成独立页面组件，
- *        `toLogin()` 随 markup 一起搬家（**换文件，不只是换行号**）。`MerchantPage.vue:131` **未动**
- *        （R1 只改客户壳）。本文件上方那句「原本散在 `CustomerPage.vue:113-114`」是**历史行号** —— `HEAD` 实测该块是 `:111-114`、`clearCredentials()` 在 `:112`（两值不一致，**成因未考**；R1 未动 `MerchantPage`）。 */
+ *     影响面 = **一个退出点（同一函数、两个分支）**：`UserCenter.vue:52-55` 的 `toLogin()`（登记于 §5-V / §5-Y）。
+ *     ⚠️ **按语（§5-Y，2026-10-05）**：退出点的**形状**变过两次，别拿旧口径读 ——
+ *        ① R1 前：两个壳**各自内联**（客户 `CustomerPage.vue:111-114`、商家 `MerchantPage.vue:130-134`）；
+ *        ② R1 后：客户侧随 markup 迁到 `UserCenter.vue:37`（**换文件**），商家侧未动；
+ *        ③ **R2 后**：商家壳也路由化 ⇒ 两壳共用**同一个** `UserCenter.vue`，退出 = **同一函数的两分支**
+ *           （`UserCenter.vue:52-55`，`meta.logout === 'merchant'` ⇒ 多清 merchantid）——
+ *           这是**语义**变更（从「分文件」到「同文件两分支」），不只是行号重指（用户裁决 3 已认可）。
+ *        本文件上方那句「原本散在 `CustomerPage.vue:113-114`」是**历史行号** —— `HEAD` 实测该块是 `:111-114`、
+ *        `clearCredentials()` 在 `:112`（两值不一致，**成因未考**）。 */
 export function clearCredentials() {
   sessionStorage.removeItem(K.username)
   sessionStorage.removeItem(K.password)
@@ -158,8 +162,9 @@ export function clearCredentials() {
   dropRestored()
 }
 
-/** 退出登录：额外清 merchantid（**仅** `MerchantPage.vue:134` 有这一条）。
- *  ⚠️ 单独一个函数而非并进 `clearCredentials()` —— 客户侧（`UserCenter.vue`，R1 前在 `CustomerPage.vue`）的退出**不清** merchantid，
+/** 退出登录：额外清 merchantid（**仅商家侧那一支**：`UserCenter.vue:54`，`meta.logout === 'merchant'`；
+ *  R2 前在 `MerchantPage.vue:134`，R2 后商家退出也走共享的 `UserCenter.vue`）。
+ *  ⚠️ 单独一个函数而非并进 `clearCredentials()` —— 客户侧（`meta.logout` 缺省那支）的退出**不清** merchantid，
  *     合并就是改行为。 */
 export function clearMerchantId() {
   sessionStorage.removeItem(K.merchantId)
@@ -168,12 +173,13 @@ export function clearMerchantId() {
 
 /** 清**全部**本地登录态（凭据 + 两个业务号）—— 供 **401 出口**用（`api/http.js`）。
  *
- *  ⚠️ **与「点退出」的现行清法故意不同**：`UserCenter.vue:37`（R1 后行号；原 `CustomerPage.vue:112`）只 `clearCredentials()`、
- *     `MerchantPage.vue:131-132` 另加 `clearMerchantId()`，**两者都不清 `customerid`**
+ *  ⚠️ **与「点退出」的现行清法故意不同**：`UserCenter.vue:52-55`（**R2 起两壳共用同一个 `toLogin`**；
+ *     客户侧只 `clearCredentials()`、商家侧另加 `clearMerchantId()`）**两支都不清 `customerid`**
  *     （本模块此前**根本没有**清它的出口）。本函数的语义是「**会话没了**」⇒ 本地身份**应当全清**，
  *     故比「点退出」多清 `merchantid` 与 `customerid`。这是**有意**的，不是漏改。
- *  ⚠️ 调用方**只有** `api/http.js` 的 401 出口**一处** —— 别顺手把 `UserCenter`（R1 前在
- *     `CustomerPage`）/ `MerchantPage` 的 `toLogin()` 换成本函数：那是**改退出行为**，不属于本笔。
+ *  ⚠️ 调用方**只有** `api/http.js` 的 401 出口**一处** —— 别顺手把 `UserCenter` 的
+ *     `toLogin()` 换成本函数：那是**改退出行为**，不属于本笔。（R2 前这条还点了 `MerchantPage`，
+ *     它现在没有自己的退出点了 —— 商家退出也走 `UserCenter.vue`。）
  *  ⚠️ 这里对 `customerid` 直接 `removeItem` 而**不先补一个 `clearCustomerId()`**：本模块刻意按
  *     「哪个页面清哪个键」组织（见 `clearMerchantId` 的注释），补对称出口是另一笔的事。
  *  ⚠️ **会话恢复笔**：本函数是「会话没了」⇒ 恢复态也必须一起丢（`clearCredentials` /

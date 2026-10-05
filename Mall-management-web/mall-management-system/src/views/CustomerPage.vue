@@ -2,15 +2,28 @@
   <div class="customer-page">
     <div class="top-nav">
       <div class="nav-left">
-        <router-link to="/customer" class="nav-btn" :class="{ active: route.meta.tab === 'home' }">商城主页</router-link>
+        <router-link
+          v-for="item in CUSTOMER_NAV.left"
+          :key="item.tab"
+          :to="item.to"
+          class="nav-btn"
+          :class="{ active: route.meta.tab === item.tab }"
+        >
+          {{ item.label }}
+          <span v-if="item.badge === 'unread' && unreadCount > 0" class="nav-red-dot"></span>
+        </router-link>
       </div>
       <div class="nav-right">
-        <router-link to="/customer/msg" class="nav-btn" :class="{ active: route.meta.tab === 'msg' }">
-          消息
-          <span v-if="unreadCount > 0" class="nav-red-dot"></span>
+        <router-link
+          v-for="item in CUSTOMER_NAV.right"
+          :key="item.tab"
+          :to="item.to"
+          class="nav-btn"
+          :class="{ active: route.meta.tab === item.tab }"
+        >
+          {{ item.label }}
+          <span v-if="item.badge === 'unread' && unreadCount > 0" class="nav-red-dot"></span>
         </router-link>
-        <router-link to="/customer/cart" class="nav-btn" :class="{ active: route.meta.tab === 'cart' }">购物车</router-link>
-        <router-link to="/customer/user" class="nav-btn" :class="{ active: route.meta.tab === 'user' }">用户中心</router-link>
       </div>
     </div>
 
@@ -32,6 +45,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { http, handleApiError } from '../api/http'
 import { endpoints } from '../api/endpoints'
 import { getMerchantId, getCustomerId } from '../api/auth'
+import { CUSTOMER_NAV } from '../config/nav'
 
 // ── R1（2026-10-05）：客户壳由「内部 `curPage` ref + `v-if`/`v-show`」改为「嵌套路由 + `<router-view>`」──
 // 壳现在只剩三件事：顶栏、内容区外壳、未读红点轮询。**页面选择权全交给路由**（见 `router/index.js`）。
@@ -44,13 +58,18 @@ import { getMerchantId, getCustomerId } from '../api/auth'
 //    这个性质立刻消失 —— 表现是「每切一次 tab 就多一支 5s 轮询、永不回收」。
 //
 // ⚠️ `CACHE_TABS` 的匹配依据是**组件的 name**（不是路径）。这两个 name 写在
-//    `views/customer/HomeTab.vue` 与 `views/GoodsSelect.vue` 的 `defineOptions` 里 ——
+//    `views/HomeTab.vue` 与 `views/GoodsSelect.vue` 的 `defineOptions` 里 ——
 //    改名 = 缓存**静默失效**（不报错，只是切回来重新挂载、轮播重置）。改名前先 grep `include`。
 //    为什么只缓存这两个：R1 前 home / search 是 `v-show`（切走**不卸载**），其余是 `v-if`（卸载）
-//    ⇒ 只缓存这两个才与改前**逐字等价**。
+//    ⇒ 只缓存这两个才与改前**逐字等价**。⚠️ **两壳的 `CACHE_TABS` 逐字相同**（R2 起商家壳同构）。
 //    ⚠️ **别把 ChatRoom 加进来**：它有 2s 轮询（`ChatRoom.vue:369`），缓存 = 离开消息页后
 //    **后台继续轮询**（新行为，且与壳里那支 5s 未读轮询重复）。
 const CACHE_TABS = ['HomeTab', 'GoodsSelect']
+
+// R2（2026-10-05）：顶栏 4 个入口改由 `src/config/nav.js` 的表驱动（用户裁决 6）——
+//   单一事实源；R6 抽 `AppShell` 时两壳顶栏靠这份配置合并（两壳**唯一**差异 = 右起第 2 项）。
+//   `active` 判据仍是 `route.meta.tab`（**不是**路径前缀：父路径会让「商城主页」在所有子路由上高亮）。
+
 
 const route = useRoute()
 const router = useRouter()

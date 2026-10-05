@@ -121,7 +121,7 @@ export function assetOf(path) {
  * ⚠️ **2026-10-05 落地（鉴权笔 4）**：BD-03 选 A ⇒ 加 `credentials: 'include'`。
  *    「**一行覆盖 42/42**」的依据：全 `src/` **只有本文件一处 `fetch(`**（`grep -rn "fetch(" src/`
  *    只命中本文件的调用行；另两处在注释里）⇒ 42 处 API 调用**全部**经 `http.post/get`。
- *    含那 3 处「变量 URL」（`GoodsSelect.vue:91`（R1 重指；原记 `:81`）/ `OrderCenter.vue:129` / `FriendRoom.vue:231`）——
+ *    含那 3 处「变量 URL」（`GoodsSelect.vue:92`（R2 重指；R1 记 `:91`、原记 `:81`）/ `OrderCenter.vue:129` / `FriendRoom.vue:231`）——
  *    它们 `urlOf(...)` 之后同样交给 `http.post`，**没有**绕过本层。
  *    后端侧已现成：`ImgConfig` 的 CorsFilter = `addAllowedOriginPattern("*")` +
  *    `allowCredentials(true)` ⇒ Spring **回显具体 origin**（不是 `*`），浏览器接受带凭据的跨源请求；

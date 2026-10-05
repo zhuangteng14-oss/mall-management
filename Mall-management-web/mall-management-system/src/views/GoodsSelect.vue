@@ -47,11 +47,12 @@ import { useRouter, useRoute } from 'vue-router'
 import { http, handleApiError, urlOf } from '../api/http'
 import { endpoints } from '../api/endpoints'
 
-// ⚠️ 这个 name 是 `CustomerPage.vue` 里 `<KeepAlive :include="['HomeTab', 'GoodsSelect']">` 的
+// ⚠️ 这个 name 是**两个壳**里 `<KeepAlive :include="['HomeTab', 'GoodsSelect']">` 的
 //    **唯一**匹配依据。改名（含改文件名）会让缓存**静默失效** —— 不报错，只是切回来
 //    重新挂载（搜索态丢失）。改名前先 grep `include`。下一行那条 `eslint-disable-next-line` 是**必需**的
-//    （本仓 ESLint 未开 `vue/setup-compiler-macros` ⇒ 宏被判 `no-undef`）—— 本文件 `:165` 的 `defineExpose`
-//    早就带着同一条，这里是照抄。
+//    （本仓 `eslint-plugin-vue` 8.7.1 的 `vue3-essential` **不带** `vue/setup-compiler-macros`
+//    宏环境 ⇒ 宏被判 `no-undef`）—— 块级写法先例见 `ShoppingCart.vue:73` 的 `/* eslint-disable no-undef */`
+//    （R2 前此处引的是本文件自己的 `defineExpose`，那个宏已退役，见文件末按语）。
 // eslint-disable-next-line no-undef
 defineOptions({ name: 'GoodsSelect' })
 
@@ -108,17 +109,18 @@ const searchByKeyword = async (kw) => {
   await doSearch()
 }
 
-// ── R1（2026-10-05）：客户壳路由化后，搜索关键词改由 URL 承载 ─────────────────────
-// 客户壳的首页搜索框/分类点击 ⇒ `/customer/search?kw=xxx`（`views/customer/HomeTab.vue` 推的）
-// ⇒ 本条 watch 触发。`immediate: true` 覆盖「首挂载就带 kw」（含**直接输 URL** 与**刷新**）。
+// ── R1（2026-10-05）：客户壳路由化后，搜索关键词改由 URL 承载；R2 起**两壳同一套** ────────
+// 两壳的首页搜索框/分类点击 ⇒ `/customer/search?kw=xxx` / `/merchant/search?kw=xxx`
+// （`views/HomeTab.vue` 适配器推的，`base` 由路由记录给）⇒ 本条 watch 触发。
+// `immediate: true` 覆盖「首挂载就带 kw」（含**直接输 URL** 与**刷新**）。
 //
-// ⚠️ **这是纯增量的第二条通道，没有替换任何东西**：
-//    · 商家壳（`MerchantPage.vue:24`）仍是 `<GoodsSelect ref="goodsSelectRef" />` **直挂**，
-//      走上面的 `defineExpose({ searchByKeyword })` ⇒ `searchByKeyword` **必须保留**；
-//    · 商家 URL 永远是 `/merchant` / `/merchant?back=search`，**永不带 `kw`** ⇒ 本 watch 在
-//      商家侧**恒不触发**（所以 R2 之前商家侧不会断）。
-// ⚠️ 下面的 `onMounted`（`back=search` ⇒ `loadState()`）同理**不能**改成 `onActivated`：
-//    `onActivated` 只在 `<KeepAlive>` 内触发，而商家侧是**直挂、无 KeepAlive** ⇒ 一改就断商家侧。
+// ⚠️ **R2 起这是唯一的搜索入口通道**（R1 时它只是「纯增量的第二条通道」）：
+//    R1 的商家侧走组件 `ref`（`MerchantPage.vue` 直挂 + `defineExpose`），R2 路由化后那条
+//    通道整条退役（见文件末的按语）⇒ `searchByKeyword` 仍必须保留（本 watch 在调用它）。
+// ⚠️ 下面的 `onMounted`（`back=search` ⇒ `loadState()`）**不能**改成 `onActivated`：
+//    理由**已换**（结论不变）—— R2 起商家侧**也有** `<KeepAlive>` 了，但**离开壳会连缓存一起销毁**
+//    （`/product` 是 `/merchant` / `/customer` 的**兄弟**路由 ⇒ 壳卸载）⇒ 回到搜索页必**重新挂载**
+//    ⇒ `onMounted` 必触发。（R1 写的理由「商家侧直挂、无 KeepAlive」已失效，见 §5-X (3) 末按语。）
 watch(() => route.query.kw, (kw) => {
   if (kw) searchByKeyword(kw)
 }, { immediate: true })
@@ -160,9 +162,12 @@ onMounted(() => {
   }
 })
 
-// 暴露方法给父组件
-// eslint-disable-next-line no-undef
-defineExpose({ searchByKeyword })
+// ── R2（2026-10-05）：`defineExpose({ searchByKeyword })` **已退役**（用户裁决 5）─────────────
+// 它 R1 前的唯一调用方是商家壳的 `ref` 通道（`MerchantPage.vue` 的 `goSearch()` / `handlePendingSearch()`
+// 通过 `goodsSelectRef.value.searchByKeyword(...)` 直接调）—— R2 把商家壳也路由化后，
+// `<router-view>` 里拿不到子组件 ref，那条通道整条消失（关键词改由 `?kw=` 承载，见上一条 watch）。
+// ⇒ 删掉「暴露」这件事本身；`searchByKeyword` 函数**保留**（上面的 watch 在调用它）。
+// ⚠️ 与 R1 的差别只在**暴露**：R1 时它是「纯增量的第二条通道」，R2 起它是**唯一**通道。
 </script>
 
 
