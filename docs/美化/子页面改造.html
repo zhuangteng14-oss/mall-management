@@ -1,0 +1,810 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>子页面 · 改造方案（用户中心 / 历史订单 / 消息 / 好友）</title>
+<link rel="stylesheet" href="./node_modules/@fontsource-variable/noto-sans-sc/wght.css" />
+<link rel="stylesheet" href="./node_modules/@fontsource-variable/noto-serif-sc/wght.css" />
+<style>
+/* ═══════════════════════════════════════════════════════════════════════════
+   :root 与 主页改造.html 同源（青瓷绿那一套）。改一处要两边一起改。
+   ═══════════════════════════════════════════════════════════════════════════ */
+:root {
+  --fs-xs: 12px; --fs-sm: 14px; --fs-md: 16px; --fs-lg: 20px;
+  --fs-xl: 28px; --fs-2xl: 36px;
+  --fw-light: 300; --fw-reg: 400; --fw-med: 500; --fw-semi: 600;
+  --s1: 4px;  --s2: 8px;  --s3: 12px; --s4: 16px;
+  --s5: 24px; --s6: 32px; --s7: 48px; --s8: 64px;
+  --r1: 4px; --r2: 8px; --r3: 10px;
+
+  --bg:        #ffffff;
+  --surface:   #ffffff;
+  --surface-2: #f2f5f7;
+  --surface-3: #ebeef0;
+  --img:       #e5e9ec;
+  --ink:       #1b1e20;
+  --ink-2:     #4c5155;
+  --ink-3:     #63696d;
+  --line:      #dde2e5;
+  --line-2:    #d0d6d9;
+
+  /* 区块底：对纯白 ΔE00 = 2.71 —— 并排看得出是一块区域，又不会读成"一块颜色" */
+  --zone:      #f2f6f7;
+
+  --brand:       #3b7966;   /* 填充：按钮底、图标 */
+  --brand-ink:   #275e4e;   /* 文字：白/区块底上的小字（7.5:1 / 6.9:1） */
+  --brand-hover: #275e4e;
+  --brand-soft:  #d4f8eb;
+  --brand-tint:  #eefcf6;
+
+  --accent:      #b2422f;
+  --accent-soft: #ffe9e4;
+
+  --font: 'Noto Sans SC Variable', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --font-display: 'Noto Serif SC Variable', 'Songti SC', serif;
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+  font-family: var(--font);
+  background: var(--bg); color: var(--ink);
+  font-size: var(--fs-sm); line-height: 1.62;
+  -webkit-font-smoothing: antialiased;
+}
+/* 所有数字列一律等宽数字：订单号、ID、日期对不齐是最显眼的廉价感来源。
+   ⚠️ 用 tabular-nums，**不上 monospace 字体** —— "小数据配等宽字体"本身就是模板腔。 */
+.num { font-variant-numeric: tabular-nums; }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   预览控制条（不是你的页面，切页用）
+   ═══════════════════════════════════════════════════════════════════════════ */
+.bar {
+  position: sticky; top: 0; z-index: 100;
+  height: 52px; background: #14181c;
+  display: flex; align-items: center; gap: 8px; padding: 0 20px;
+}
+.bar-t { font-size: 13px; font-weight: 600; color: #fff; margin-right: 6px; white-space: nowrap; }
+.bar-t em { font-style: normal; color: #6fb8c9; }
+.bar button {
+  font-family: inherit; font-size: 12.5px; cursor: pointer;
+  padding: 6px 12px; border-radius: 6px;
+  border: 1px solid #333d45; background: #1d2429; color: #b0bec6;
+  transition: .15s; white-space: nowrap;
+}
+.bar button:hover { border-color: #56656f; color: #e8edf0; }
+.bar button.on { background: #2c6a7d; border-color: #4d9db3; color: #fff; font-weight: 600; }
+.bar .sep { width: 1px; height: 20px; background: #2e373e; margin: 0 4px; }
+.bar .hint { font-size: 11.5px; color: #6a7a84; margin-left: auto; }
+.bar a { font-size: 12.5px; color: #8fa6b0; text-decoration: none; padding: 6px 10px; white-space: nowrap; }
+.bar a:hover { color: #d6e3e8; }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   共用壳顶栏 —— 对应 AppShell.vue 的 .top-nav
+   原来：55px 白底 + #eee 下线，选中态是蓝色 #007bff 纯文字，未读点是 8px 纯红。
+   ⚠️ 这里多了一个全局搜索框。主页的搜索原本只在 HomePage 自己的 .search-section 里，
+      子页面没有 ⇒ 停在用户中心想搜商品必须先点回主页。搬上来顶栏才逐字一致。
+      代价：HomePage 的 .search-section 要删掉（否则主页出现两个搜索框）。
+   ═══════════════════════════════════════════════════════════════════════════ */
+.shell-nav {
+  position: sticky; top: 52px; z-index: 60;
+  height: 64px; background: var(--surface);
+  border-bottom: 1px solid var(--line);
+  display: flex; align-items: center; gap: var(--s5);
+  padding: 0 var(--s6);
+}
+.brand {
+  font-family: var(--font-display);
+  font-size: 21px; font-weight: var(--fw-semi); letter-spacing: .5px;
+  color: var(--brand); white-space: nowrap; text-decoration: none; flex: none;
+}
+.search {
+  flex: 1; max-width: 560px; height: 40px;
+  display: flex; align-items: center; gap: var(--s2);
+  background: var(--bg); border: 1px solid var(--line); border-radius: var(--r2);
+  padding: 0 4px 0 14px; transition: border-color .15s;
+}
+.search:focus-within { border-color: var(--brand); }
+.search svg { flex: none; color: var(--ink-3); }
+.search input {
+  flex: 1; min-width: 0; border: none; outline: none; background: transparent;
+  font: inherit; font-size: var(--fs-sm); color: var(--ink);
+}
+.search input::placeholder { color: var(--ink-3); }
+.search button {
+  flex: none; font: inherit; font-size: 13px; font-weight: var(--fw-med);
+  height: 32px; padding: 0 18px; border: none; border-radius: var(--r1);
+  background: var(--brand); color: #fff; cursor: pointer;
+}
+.search button:hover { background: var(--brand-hover); }
+
+.nav { display: flex; align-items: center; gap: var(--s1); margin-left: auto; flex: none; }
+.nav a {
+  font-size: var(--fs-sm); color: var(--ink-2); text-decoration: none;
+  padding: 8px 14px; border-radius: var(--r1); white-space: nowrap; transition: color .15s;
+}
+.nav a:hover { color: var(--ink); }
+.nav a.on { color: var(--brand-ink); font-weight: var(--fw-semi); }
+.nav .dot {
+  display: inline-block; width: 6px; height: 6px; border-radius: 50%;
+  background: var(--accent); margin-left: 5px; vertical-align: 2px;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   骨架。真实路由里「个人信息 / 历史订单 / 好友 / 消息」**都是** /customer/user
+   的子路由 ⇒ 四页本来就在同一个左菜单框里渲染。
+   ═══════════════════════════════════════════════════════════════════════════ */
+.stage { max-width: 1400px; margin: 0 auto; padding: var(--s6) var(--s6) var(--s8); }
+.page { display: none; }
+.page.on { display: block; }
+
+.uc { display: grid; grid-template-columns: 188px minmax(0, 1fr); gap: var(--s7); align-items: start; }
+.uc-menu { display: flex; flex-direction: column; position: sticky; top: 140px; }
+.uc-menu a, .uc-menu .out {
+  display: block; font-size: var(--fs-sm); color: var(--ink-2); text-decoration: none;
+  padding: 10px 0; border-bottom: 1px solid var(--line);
+  background: none; border-left: none; border-right: none; border-top: none;
+  text-align: left; cursor: pointer; font-family: inherit; transition: color .14s;
+}
+.uc-menu a:hover { color: var(--ink); }
+.uc-menu a.on { color: var(--brand-ink); font-weight: var(--fw-semi); }
+/* 末项底线去掉：`.out` 自带一条顶线，两条只隔 8px 会读成"没对齐的双线" */
+.uc-menu a:last-of-type { border-bottom: none; }
+.uc-menu .out { border-bottom: none; border-top: 1px solid var(--line-2); color: var(--ink-3); margin-top: var(--s2); }
+.uc-menu .out:hover { color: var(--accent); }
+
+.uc-main { min-width: 0; }
+
+/* 页面主标题 —— 宋体只出现在这一处，和首页的栏目名同一套字 */
+.ph { display: flex; align-items: baseline; gap: var(--s4); margin-bottom: var(--s5); }
+.ph h1 {
+  font-family: var(--font-display);
+  font-size: var(--fs-xl); font-weight: var(--fw-semi); letter-spacing: .5px; line-height: 1.2;
+}
+.ph .ph-n { font-size: var(--fs-sm); color: var(--ink-3); }
+.ph .ph-r { margin-left: auto; display: flex; gap: var(--s2); align-self: center; }
+
+/* 按钮：全站只有 实心 / 幽灵 / 文字 三种，够用 */
+.btn {
+  font: inherit; font-size: var(--fs-sm); font-weight: var(--fw-med);
+  padding: 7px 16px; border-radius: var(--r2); cursor: pointer;
+  border: 1px solid transparent; white-space: nowrap;
+  transition: background .15s, color .15s, border-color .15s;
+}
+.btn-solid { background: var(--brand); color: #fff; }
+.btn-solid:hover { background: var(--brand-hover); }
+.btn-ghost { background: transparent; color: var(--ink-2); border-color: var(--line-2); }
+.btn-ghost:hover { color: var(--brand-ink); border-color: var(--brand); }
+/* 文字钮：只给行内动作（复制、私信）。一屏八个描边按钮是模板腔的来源之一。 */
+.btn-text {
+  font: inherit; font-size: var(--fs-xs); color: var(--ink-3);
+  background: none; border: none; cursor: pointer; padding: 2px 0;
+  border-bottom: 1px solid var(--line-2); transition: color .14s, border-color .14s;
+}
+.btn-text:hover { color: var(--brand-ink); border-color: var(--brand); }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   一、个人信息
+   结构 = 一条**横铺**的身份条（头像 → 名字/ID → 竖线 → 三个只读属性 → 右侧动作）
+          + 一节三格的可修改字段（邮箱 / 常用地址 并排，自我介绍通栏）+ 右对齐保存。
+
+   为什么改成横铺：上一版是"上头像下事实"两行，头像和右侧按钮之间空出约 950px，
+   加上页面底部一大片白 —— 正是用户在原版上画红框骂的那块空地，我只是把它挪了个位置。
+   一行装满就没有中间那块洞。
+
+   字段口径照抄原版 UserInfoPage.vue，别自作聪明：
+     只读 3 个 = 用户类型 / 性别 / 年龄
+     可改 3 个 = 邮箱 / 常用地址 / 自我介绍
+   ⚠️ 上一版我把「邮箱」并进了只读属性组，等于用户没法改邮箱了 —— 那是功能回退，不是优化。
+   ═══════════════════════════════════════════════════════════════════════════ */
+.p-top {
+  background: var(--zone); border-radius: var(--r2);
+  padding: var(--s5) var(--s6); margin-bottom: var(--s6);
+}
+.p-band { display: flex; align-items: center; gap: var(--s5); }
+.p-av {
+  width: 64px; height: 64px; flex: none; border-radius: 50%;
+  background: var(--img); color: var(--ink-3);
+  display: flex; align-items: center; justify-content: center;
+}
+.p-id { min-width: 0; }
+.p-name {
+  font-family: var(--font-display);
+  font-size: var(--fs-xl); font-weight: var(--fw-semi); line-height: 1.15; letter-spacing: .5px;
+}
+.p-idline {
+  display: flex; align-items: center; gap: var(--s3);
+  margin-top: 3px; font-size: var(--fs-sm); color: var(--ink-3);
+}
+.p-idline b { font-weight: var(--fw-reg); color: var(--ink-2); font-variant-numeric: tabular-nums; }
+
+/* 只读属性：跟在竖线右边平铺。标签在上、值在下 —— 和字段区的"标签在上"同一套读法 */
+.p-facts {
+  display: flex; align-items: center; gap: var(--s7);
+  margin-left: var(--s4); padding-left: var(--s6);
+  border-left: 1px solid var(--line-2);
+}
+.p-facts dt { font-size: var(--fs-xs); color: var(--ink-3); margin-bottom: 2px; }
+.p-facts dd { font-size: var(--fs-md); color: var(--ink); font-variant-numeric: tabular-nums; }
+.p-band .btn { flex: none; margin-left: auto; }
+
+/* ── 资产总览：四格，格间发丝线。和"好友"页同一套线语言，不另起一种盒子 ──
+   值在右、标签在左，是"定义行"的读法；**不做"大数字 + 小标签"的统计英雄区** ——
+   那是 frontend-design 清单里点名的默认写法。 */
+.p-assets {
+  display: grid; grid-template-columns: repeat(4, minmax(0, 1fr));
+  border: 1px solid var(--line); border-radius: var(--r2);
+  overflow: hidden; margin-bottom: var(--s6);
+}
+.p-assets > div {
+  display: flex; align-items: baseline; justify-content: space-between; gap: var(--s3);
+  padding: var(--s4) var(--s5); border-right: 1px solid var(--line);
+}
+.p-assets > div:last-child { border-right: none; }
+.p-assets dt { font-size: var(--fs-sm); color: var(--ink-3); }
+.p-assets dd { font-size: var(--fs-lg); color: var(--ink); font-variant-numeric: tabular-nums; }
+.p-assets dd small { font-size: var(--fs-xs); color: var(--ink-3); margin-left: 2px; }
+
+/* ── 下半页两栏：左 = 可修改的信息（宽），右 = 账号与安全（窄） ── */
+.p-cols {
+  display: grid; grid-template-columns: minmax(0, 1.75fr) minmax(0, 1fr);
+  gap: var(--s7); align-items: start;
+}
+/* 账号与安全：三行"标签 / 值 / 动作"，行间发丝线 */
+.sec-list { list-style: none; }
+.sec-list li {
+  display: grid; grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center; gap: var(--s4);
+  padding: 13px 0; border-bottom: 1px solid var(--line);
+}
+.sec-list li:last-child { border-bottom: none; }
+.sec-list .k { font-size: var(--fs-sm); color: var(--ink-2); }
+.sec-list .v {
+  font-size: var(--fs-sm); color: var(--ink);
+  font-variant-numeric: tabular-nums; text-align: right;
+}
+.sec-list .v .tag { margin-left: var(--s3); font-size: var(--fs-xs); color: var(--brand-ink); }
+.sec-list .v .tag.muted { color: var(--ink-3); }
+.sec-list .v .btn-text { margin-left: var(--s3); }
+
+.sec > h2 {
+  font-size: var(--fs-md); font-weight: var(--fw-semi); color: var(--ink);
+  padding-top: var(--s4); border-top: 1px solid var(--line-2); margin-bottom: var(--s2);
+}
+.sec > p { font-size: var(--fs-sm); color: var(--ink-3); margin-bottom: var(--s4); }
+/* 两列并排 —— 一个输入框一条 1000px 是读不了的；两列既填满宽度又保住可读行长。
+   自我介绍通栏（.field.wide）—— 它是三行文本，挤在半边会把行压得很短 */
+.fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--s5); }
+.field { display: grid; gap: 6px; align-content: start; }
+.field.wide { grid-column: 1 / -1; }
+.field > label { font-size: var(--fs-sm); color: var(--ink-2); }
+.inp, .txa {
+  width: 100%; font: inherit; font-size: var(--fs-sm); color: var(--ink);
+  background: var(--surface); border: 1px solid var(--line-2); border-radius: var(--r2);
+  padding: 10px 14px; outline: none; transition: border-color .15s;
+}
+.inp::placeholder, .txa::placeholder { color: var(--ink-3); }
+.inp:focus, .txa:focus { border-color: var(--brand); }
+.txa { min-height: 104px; resize: vertical; line-height: 1.62; }
+/* 保存右对齐 —— 表单的收尾动作，靠右才读成"这一节到此为止" */
+.p-acts { display: flex; align-items: center; justify-content: flex-end; gap: var(--s4); margin-top: var(--s5); }
+.p-acts .tip { font-size: var(--fs-xs); color: var(--ink-3); }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   二、历史订单 —— 真表格
+   订单本来就是表格型数据（一行一单、字段一致）。原版做成一张张卡片，
+   六行占三屏、右边空一半。表格六列铺满 1400、行高压到 72，一屏看完六单。
+   ═══════════════════════════════════════════════════════════════════════════ */
+.ords { width: 100%; border-collapse: collapse; }
+.ords th {
+  text-align: left; font-weight: var(--fw-reg); font-size: var(--fs-xs); color: var(--ink-3);
+  padding: 0 var(--s4) 10px 0; border-bottom: 1px solid var(--line-2); white-space: nowrap;
+}
+.ords td {
+  padding: 12px var(--s4) 12px 0; border-bottom: 1px solid var(--line);
+  vertical-align: middle; font-size: var(--fs-sm); color: var(--ink-2);
+}
+.ords th:last-child, .ords td:last-child { padding-right: 0; }
+/* 行高亮是**扫读**需要，跟"每张卡片都加 hover 位移"不是一回事：只换底色，
+   不做过渡、不做位移、不加投影。 */
+.ords tbody tr:hover td { background: var(--zone); }
+.c-prod { width: 30%; } .c-num { width: 15%; } .c-nd { width: 14%; }
+.c-date { width: 19%; } .c-st { width: 11%; } .c-act { width: 11%; text-align: right; }
+.c-prod .in { display: flex; align-items: center; gap: var(--s3); }
+.thumb { width: 48px; height: 48px; flex: none; border-radius: var(--r1); background: var(--img); }
+.c-prod .nm { font-size: var(--fs-md); color: var(--ink); font-weight: var(--fw-med); line-height: 1.35; }
+.state {
+  display: inline-block; font-size: var(--fs-xs); color: var(--ink-3);
+  border: 1px solid var(--line-2); border-radius: var(--r1); padding: 1px 8px;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   三、消息 —— 双栏
+   原版是一个撑满半屏的"会话选择"下拉框 + 一面气泡墙。会话本质是**列表**，
+   藏进下拉框等于每次让用户多点一下；换成常驻左栏 + 固定右栏线程。
+   ═══════════════════════════════════════════════════════════════════════════ */
+.msgr {
+  display: grid; grid-template-columns: 296px minmax(0, 1fr);
+  border: 1px solid var(--line); border-radius: var(--r2); overflow: hidden;
+  height: min(680px, calc(100vh - 210px));
+}
+.convs { border-right: 1px solid var(--line); background: var(--zone); display: flex; flex-direction: column; min-height: 0; }
+.convs > h2 {
+  flex: none; font-size: var(--fs-sm); font-weight: var(--fw-semi); color: var(--ink-2);
+  padding: var(--s4) var(--s5) var(--s3);
+}
+.convs ul { list-style: none; overflow-y: auto; min-height: 0; }
+.convs li {
+  display: grid; grid-template-columns: 36px minmax(0, 1fr) auto;
+  align-items: center; gap: var(--s3);
+  padding: var(--s3) var(--s5); cursor: pointer;
+  border-top: 1px solid var(--line);
+}
+.convs li:first-child { border-top: none; }
+/* 选中项 = 白底 + 名字加粗。**不做左侧主色竖条** —— 那是典型的后台侧标，
+   消息列表里用底色的明度差已经足够指位。 */
+.convs li.on { background: var(--surface); }
+.convs li.on .cm b { color: var(--brand-ink); }
+.convs .cav { width: 36px; height: 36px; border-radius: 50%; background: var(--img); }
+.convs .cm { min-width: 0; }
+.convs .cm b { display: block; font-size: var(--fs-sm); font-weight: var(--fw-med); color: var(--ink); }
+.convs .cm span {
+  display: block; font-size: var(--fs-xs); color: var(--ink-3);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.convs .ct {
+  font-size: 11px; color: var(--ink-3); font-variant-numeric: tabular-nums;
+  align-self: start; padding-top: 2px;
+}
+.convs .unread {
+  display: inline-block; width: 6px; height: 6px; border-radius: 50%;
+  background: var(--accent); margin-left: 5px; vertical-align: 2px;
+}
+
+.thread { display: flex; flex-direction: column; min-height: 0; background: var(--surface); }
+.thread > header {
+  flex: none; display: flex; align-items: baseline; gap: var(--s3);
+  padding: var(--s4) var(--s5); border-bottom: 1px solid var(--line);
+}
+.thread > header b { font-size: var(--fs-md); font-weight: var(--fw-semi); color: var(--ink); }
+.thread > header .role { font-size: 11px; padding: 0 6px; }
+.thread > header span { font-size: var(--fs-xs); color: var(--ink-3); font-variant-numeric: tabular-nums; }
+.msgs {
+  flex: 1; min-height: 0; overflow-y: auto;
+  padding: var(--s5); display: flex; flex-direction: column; gap: var(--s4);
+}
+.msg { max-width: 66%; display: flex; flex-direction: column; gap: 3px; }
+.msg.other { align-self: flex-start; }
+.msg.self  { align-self: flex-end; align-items: flex-end; }
+.bubble { padding: 9px 14px; border-radius: var(--r2); font-size: var(--fs-sm); line-height: 1.6; }
+/* 对方浅灰面、自己釉色面。不用实心品牌色块 —— 一屏实心块连起来会变成一整片品牌色
+   （跟"底色不该是配色"同一条）。 */
+.msg.other .bubble { background: var(--surface-2); color: var(--ink); }
+.msg.self  .bubble { background: var(--brand-soft); color: var(--brand-ink); }
+.msg .t { font-size: 11px; color: var(--ink-3); font-variant-numeric: tabular-nums; }
+.pcard {
+  display: grid; grid-template-columns: 56px minmax(0, 1fr); gap: var(--s3);
+  width: 288px; padding: var(--s3);
+  background: var(--surface); border: 1px solid var(--line); border-radius: var(--r2); cursor: pointer;
+}
+.pcard .ph { width: 56px; height: 56px; border-radius: var(--r1); background: var(--img); }
+.pcard .pn { font-size: var(--fs-sm); color: var(--ink); line-height: 1.35; }
+.pcard .pd { font-size: var(--fs-xs); color: var(--ink-3); font-variant-numeric: tabular-nums; }
+.pcard .pp { font-size: var(--fs-sm); color: var(--accent); font-weight: var(--fw-med); font-variant-numeric: tabular-nums; }
+.thread > footer {
+  flex: none; display: flex; align-items: center; gap: var(--s3);
+  padding: var(--s3) var(--s5); border-top: 1px solid var(--line);
+}
+.thread > footer .inp { flex: 1; }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   四、好友 —— 发丝线网格
+   `gap:1px` + 网格底色 = 分隔线，不用给每格加边框。比"一排同款圆角白卡"
+   少一圈重复笔画，也扛得住几十个人。每格是一行（头像 | 名字+ID | 动作）。
+   ═══════════════════════════════════════════════════════════════════════════ */
+.frg {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+  gap: 1px; background: var(--line);
+  border: 1px solid var(--line); border-radius: var(--r2); overflow: hidden;
+}
+.frt {
+  display: grid; grid-template-columns: 44px minmax(0, 1fr) auto;
+  align-items: center; gap: var(--s3);
+  background: var(--surface); padding: var(--s4) var(--s5);
+}
+.frt .fav {
+  width: 44px; height: 44px; border-radius: 50%; background: var(--img); color: var(--ink-3);
+  display: flex; align-items: center; justify-content: center;
+}
+.frt .fn { display: flex; align-items: center; gap: var(--s2); min-width: 0; }
+.frt .fn b {
+  font-size: var(--fs-sm); font-weight: var(--fw-med); color: var(--ink);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.role {
+  flex: none; font-style: normal; font-size: 11px; line-height: 1.6;
+  padding: 0 6px; border-radius: 2px; color: var(--ink-2); background: var(--surface-3);
+}
+.frt .fid { font-size: var(--fs-xs); color: var(--ink-3); font-variant-numeric: tabular-nums; }
+
+/* 空状态：不是"一行灰字悬在空白里"，而是**把下一步动作放进这里**
+   （空屏幕是一次邀请，不如直接给它入口）。 */
+.empty { background: var(--zone); border-radius: var(--r2); padding: var(--s8) var(--s6); text-align: center; }
+.empty h2 { font-family: var(--font-display); font-size: var(--fs-lg); font-weight: var(--fw-semi); margin-bottom: var(--s2); }
+.empty p { font-size: var(--fs-sm); color: var(--ink-3); margin-bottom: var(--s5); }
+.empty .row { display: flex; gap: var(--s2); max-width: 460px; margin: 0 auto; }
+.empty .row .inp { flex: 1; background: var(--surface); }
+
+@media (max-width: 1080px) {
+  .uc { grid-template-columns: 1fr; gap: var(--s6); }
+  .uc-menu { position: static; flex-direction: row; flex-wrap: wrap; gap: var(--s5); }
+  .uc-menu a, .uc-menu .out { border-bottom: none; padding: 4px 0; }
+  .uc-menu .out { border-top: none; margin-top: 0; margin-left: auto; }
+  /* 身份条由横铺收成两行：第一行 = 头像 + 名字/ID + 动作（靠 flex:1 把按钮顶到右边），
+     第二行 = 三个只读属性通栏。竖线在换行后失去意义，撤掉。 */
+  .p-band { flex-wrap: wrap; }
+  .p-id { flex: 1; }
+  .p-band .btn { order: 1; margin-left: 0; }
+  .p-facts { order: 2; width: 100%; margin-left: 0; padding-left: 0; border-left: none; gap: var(--s6); }
+  /* 资产条降到两列；下方两栏改成上下叠 */
+  .p-assets { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .p-assets > div:nth-child(2n) { border-right: none; }
+  .p-assets > div:nth-child(-n+2) { border-bottom: 1px solid var(--line); }
+  .p-cols { grid-template-columns: 1fr; gap: var(--s6); }
+}
+@media (max-width: 860px) {
+  .msgr { grid-template-columns: 1fr; }
+  .convs { display: none; }
+  .fields { grid-template-columns: 1fr; }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   预留位可视化 —— 点顶部按钮打开，虚线框标出留给未来功能的位置
+   和 主页改造.html 同一套机制。**默认关闭**，所以不影响正常观看。
+
+   标记原则（重要，别乱加）：
+     只标「需求文档 / ER 模型写了」或「endpoints.js 里有端点但页面没用」的位置。
+     凭"感觉电商该有"的位置一律不标 —— 空盒子比没有更糟，
+     答辩时被问"这张表在哪"会答不上来。
+   ═══════════════════════════════════════════════════════════════════════════ */
+body.slots [data-slot] {
+  outline: 2px dashed #c8a24a;
+  outline-offset: 5px;
+  position: relative;
+}
+body.slots [data-slot]::after {
+  content: attr(data-slot);
+  position: absolute; top: -12px; left: 8px;
+  background: #c8a24a; color: #fff;
+  font-size: 10.5px; letter-spacing: .5px;
+  padding: 1px 8px; border-radius: 3px;
+  z-index: 5; white-space: nowrap;
+}
+/* 表头里的标记：标签往上顶会盖住上一行，改成压在表头线上 */
+body.slots th[data-slot]::after { top: auto; bottom: -11px; }
+/* 最后一列的标签靠右挂，否则会伸出表格右边界 */
+body.slots th.c-act[data-slot]::after { left: auto; right: 8px; }
+</style>
+</head>
+<body>
+
+<div class="bar">
+  <span class="bar-t">子页面改造 · <em>青瓷绿</em></span>
+  <button data-page="uc" class="on">个人信息</button>
+  <button data-page="ho">历史订单</button>
+  <button data-page="msg">消息</button>
+  <button data-page="fr">好友</button>
+  <button data-page="fr0">好友 · 空态</button>
+  <span class="sep"></span>
+  <button id="slotBtn">显示预留位</button>
+  <a href="./主页改造.html">← 回主页改造</a>
+  <span class="hint">只改这个预览文件 · 你项目源码未动</span>
+</div>
+
+<nav class="shell-nav">
+  <a class="brand">商城主页</a>
+  <div class="search">
+    <svg width="16" height="16" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.7">
+      <circle cx="9" cy="9" r="5.4"/><path d="m13.2 13.2 3.4 3.4" stroke-linecap="round"/>
+    </svg>
+    <input type="text" placeholder="搜索商品、品牌、分类" />
+    <button>搜索</button>
+  </div>
+  <div class="nav">
+    <a>消息<i class="dot"></i></a>
+    <a>购物车</a>
+    <a class="on">用户中心</a>
+  </div>
+</nav>
+
+<div class="stage">
+  <div class="uc">
+
+    <aside class="uc-menu">
+      <a data-for="uc">个人信息</a>
+      <a data-for="ho">历史购买记录</a>
+      <a data-for="fr fr0">好友</a>
+      <a data-for="msg">消息</a>
+      <button class="out">退出登录</button>
+    </aside>
+
+    <main class="uc-main">
+
+      <!-- ═══════════ 一、个人信息 ═══════════ -->
+      <div class="page on" data-page="uc">
+        <!-- 预留位：ER 的会员实体里带"会员积分"属性，需求 1.2 也把"会员管理"
+             列进了项目背景。接项目时最自然的落点就是身份条里这三个只读属性 ——
+             加一格"会员等级/积分"即可，不必新开区块。 -->
+        <div class="p-top" data-slot="预留 · 会员等级 / 积分（ER 会员实体有「会员积分」）">
+          <div class="p-band">
+            <div class="p-av">
+              <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                <circle cx="12" cy="8.4" r="3.9"/><path d="M4.8 20.2a7.2 7.2 0 0 1 14.4 0" stroke-linecap="round"/>
+              </svg>
+            </div>
+            <div class="p-id">
+              <div class="p-name">123</div>
+              <div class="p-idline">客户 ID <b class="num">plzTWafaGp</b><button class="btn-text">复制</button></div>
+            </div>
+            <dl class="p-facts">
+              <div><dt>用户类型</dt><dd>客户</dd></div>
+              <div><dt>性别</dt><dd>男</dd></div>
+              <div><dt>年龄</dt><dd>0</dd></div>
+            </dl>
+            <button class="btn btn-ghost">更换头像照片</button>
+          </div>
+        </div>
+
+        <!-- 资产总览 —— 账户页的"着陆区"。
+             积分有依据（ER 会员实体）；券 / 收藏 / 足迹是**提议**，等你裁决。 -->
+        <dl class="p-assets" data-slot="预留 · 账户资产（积分有依据；券 / 收藏 / 足迹待裁）">
+          <div><dt>积分</dt><dd>1,280</dd></div>
+          <div><dt>优惠券</dt><dd>3<small>张</small></dd></div>
+          <div><dt>收藏</dt><dd>12<small>件</small></dd></div>
+          <div><dt>浏览足迹</dt><dd>40<small>件</small></dd></div>
+        </dl>
+
+        <div class="p-cols">
+
+        <section class="sec">
+          <h2>可修改的信息</h2>
+          <p>留空即视为不修改。</p>
+          <div class="fields">
+            <div class="field">
+              <label for="email">邮箱</label>
+              <input id="email" class="inp" value="412254asdadsad@163.com" />
+            </div>
+            <div class="field">
+              <label for="addr">常用地址</label>
+              <input id="addr" class="inp" value="那就好啊开始干活苍溪县回家" />
+            </div>
+            <div class="field wide">
+              <label for="bio">自我介绍</label>
+              <textarea id="bio" class="txa">大肆夸奖打卡时间共发生开始广泛LHSKDH</textarea>
+            </div>
+          </div>
+          <div class="p-acts">
+            <button class="btn btn-solid">保存个人信息</button>
+          </div>
+        </section>
+
+        <!-- 账号与安全 —— 手机号有依据（ER 用户实体有手机号，login 表有密码）；
+             实名认证是提议。 -->
+        <section class="sec" data-slot="预留 · 账号与安全（ER 用户实体有手机号）">
+          <h2>账号与安全</h2>
+          <ul class="sec-list">
+            <li>
+              <span class="k">手机号</span>
+              <span class="v">138****8866<i class="tag">已绑定</i></span>
+            </li>
+            <li>
+              <span class="k">登录密码</span>
+              <span class="v">已设置<button class="btn-text">修改</button></span>
+            </li>
+            <li>
+              <span class="k">实名认证</span>
+              <span class="v"><i class="tag muted">未认证</i><button class="btn-text">去认证</button></span>
+            </li>
+          </ul>
+        </section>
+
+        </div><!-- /.p-cols -->
+      </div>
+
+      <!-- ═══════════ 二、历史订单 ═══════════ -->
+      <div class="page" data-page="ho">
+        <div class="ph">
+          <h1>历史订单</h1>
+          <span class="ph-n" id="ho-n"></span>
+        </div>
+        <table class="ords">
+          <thead>
+            <tr>
+              <th class="c-prod">商品</th>
+              <th class="c-num">旧订单号</th>
+              <th class="c-nd">商家 ID</th>
+              <th class="c-date">结单日期</th>
+              <!-- 预留位 ①：数据字典 6(3) 把订单状态定成枚举「待付款 / 已付款 / 已完成」，
+                   但 historicalOrdersSelect 目前只回已结单的，所以这一列现在恒为同一个值。
+                   接口一旦回多状态，这一列直接生效，不用改布局。 -->
+              <th class="c-st" data-slot="预留 · 状态枚举">状态</th>
+              <!-- 预留位 ②：需求 4.2 有「订单售后 / 退货」——顾客发起退货申请。
+                   这是顾客侧动作，天然属于订单行，落在这一列。 -->
+              <th class="c-act" data-slot="预留 · 申请退货"></th>
+            </tr>
+          </thead>
+          <tbody id="ho-body"></tbody>
+        </table>
+      </div>
+
+      <!-- ═══════════ 三、消息 ═══════════ -->
+      <div class="page" data-page="msg">
+        <div class="ph">
+          <h1>消息</h1>
+          <span class="ph-n" id="msg-n"></span>
+        </div>
+        <div class="msgr">
+          <aside class="convs">
+            <h2>全部会话</h2>
+            <ul id="conv-list"></ul>
+          </aside>
+          <section class="thread">
+            <header>
+              <b>声谷旗舰店</b>
+              <i class="role">商家</i>
+              <span>84sH27Lw</span>
+            </header>
+            <div class="msgs" id="msgs"></div>
+            <footer>
+              <input class="inp" placeholder="输入消息" />
+              <button class="btn btn-solid">发送</button>
+            </footer>
+          </section>
+        </div>
+      </div>
+
+      <!-- ═══════════ 四、好友 ═══════════ -->
+      <div class="page" data-page="fr">
+        <div class="ph">
+          <h1>好友</h1>
+          <span class="ph-n" id="fr-n"></span>
+          <div class="ph-r">
+            <button class="btn btn-ghost">搜索好友</button>
+            <button class="btn btn-ghost">好友申请 <b class="num" style="color:var(--accent)">2</b></button>
+          </div>
+        </div>
+        <div class="frg" id="fr-grid"></div>
+      </div>
+
+      <!-- ═══════════ 五、好友 · 空态 ═══════════ -->
+      <div class="page" data-page="fr0">
+        <div class="ph">
+          <h1>好友</h1>
+          <span class="ph-n">共 0 位</span>
+        </div>
+        <div class="empty">
+          <h2>还没有好友</h2>
+          <p>输入对方的商家 ID 或客户 ID，就能把人加进来。</p>
+          <div class="row">
+            <input class="inp" placeholder="例如 84sH27Lw" />
+            <button class="btn btn-solid">搜索</button>
+          </div>
+        </div>
+      </div>
+
+    </main>
+  </div>
+</div>
+
+<script>
+/* ─────────── 示例数据（接项目时换成接口返回） ─────────── */
+const ORDERS = [
+  ['无线蓝牙耳机 声谷标准版', '20240915102331', '84sH27Lw', '2024-09-15 10:23:31'],
+  ['不锈钢保温杯 500ml',     '20240912094017', '84sH27Lw', '2024-09-12 09:40:17'],
+  ['有机全麦面包 每日鲜',     '20240903182044', '9cKd31Vp', '2024-09-03 18:20:44'],
+  ['冷冻虾仁 净重 500g',      '20240827114302', '9cKd31Vp', '2024-08-27 11:43:02'],
+  ['抽纸 3 层 120 抽 × 6 包', '20240819091655', '84sH27Lw', '2024-08-19 09:16:55'],
+  ['现磨挂耳咖啡 10 袋装',    '20240806173021', '5tRq88Nb', '2024-08-06 17:30:21']
+]
+
+const CONVS = [
+  ['声谷旗舰店', '就是这款，库存还有 40 件', '10:18', true],
+  ['每日鲜',     '面包今天下午补货',         '昨天',  false],
+  ['李小明',     '好的，谢啦',               '周日',  false],
+  ['晨光文具',   '发票已经开好了',           '周五',  false],
+  ['海鲜直供',   '虾仁到货了',               '周四',  true],
+  ['王小雨',     '下次一起拼单',             '09-28', false]
+]
+
+const FRIENDS = [
+  ['声谷旗舰店', '商家', '84sH27Lw'],
+  ['每日鲜',     '商家', '9cKd31Vp'],
+  ['李小明',     '客户', 'plzTWafaGp'],
+  ['晨光文具',   '商家', '5tRq88Nb'],
+  ['王小雨',     '客户', 'k7Lm21Xz'],
+  ['海鲜直供',   '商家', '2nBv70Qd'],
+  ['陈晨',       '客户', 'w3Hf56Kt'],
+  ['烘焙工坊',   '商家', '8pZc44Rm'],
+  ['果蔬集市',   '商家', '4dYe19Ls'],
+  ['孙浩然',     '客户', 'r6Nw82Pj'],
+  ['粮油铺子',   '商家', '3qXm57Va'],
+  ['周宁',       '客户', 'h9Tk34Bc']
+]
+
+const MSGS = [
+  ['other', '您好，这款耳机今天下单可以当天发出。', '10:18'],
+  ['self',  '好的，我看看。', '10:20'],
+  ['self',  null, '10:21'],                       // null = 商品卡
+  ['other', '就是这款，库存还有 40 件。满 99 可以再叠一张生鲜专享券。', '10:23'],
+  ['self',  '那我直接下单了，麻烦帮忙留意包装。', '10:24'],
+  ['other', '好的，已经备注了。', '10:25']
+]
+
+const AVA = '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="8.4" r="3.9"/><path d="M4.8 20.2a7.2 7.2 0 0 1 14.4 0" stroke-linecap="round"/></svg>'
+const esc = s => s.replace(/&/g, '&amp;').replace(/</g, '&lt;')
+
+document.getElementById('ho-n').textContent = `共 ${ORDERS.length} 笔`
+document.getElementById('ho-body').innerHTML = ORDERS.map(([nm, no, mid, dt]) => `
+  <tr>
+    <td class="c-prod"><div class="in"><div class="thumb"></div><span class="nm">${esc(nm)}</span></div></td>
+    <td class="c-num num">${no}</td>
+    <td class="c-nd num">${mid}</td>
+    <td class="c-date num">${dt}</td>
+    <td class="c-st"><span class="state">已经结单</span></td>
+    <td class="c-act"><button class="btn-text">复制商家 ID</button></td>
+  </tr>`).join('')
+
+document.getElementById('msg-n').textContent = `${CONVS.length} 个会话`
+document.getElementById('conv-list').innerHTML = CONVS.map(([nm, last, t, unread], i) => `
+  <li class="${i === 0 ? 'on' : ''}">
+    <div class="cav"></div>
+    <div class="cm"><b>${esc(nm)}${unread && i !== 0 ? '<i class="unread"></i>' : ''}</b><span>${esc(last)}</span></div>
+    <time class="ct">${t}</time>
+  </li>`).join('')
+
+document.getElementById('msgs').innerHTML = MSGS.map(([who, text, t]) => {
+  const body = text === null
+    ? `<div class="pcard"><div class="ph"></div><div>
+         <div class="pn">无线蓝牙耳机 声谷标准版</div>
+         <div class="pd">型号 SG-BT-2024</div>
+         <div class="pp">¥129.00</div>
+       </div></div>`
+    : `<div class="bubble">${esc(text)}</div>`
+  return `<div class="msg ${who}">${body}<span class="t">${t}</span></div>`
+}).join('')
+
+document.getElementById('fr-n').textContent = `共 ${FRIENDS.length} 位`
+/* 预留位 ③：endpoints.js 的 message 域里已经有 friendUp / friendDe，
+   但现在的 FriendRoom.vue 只用了列表和私信。备注、删除好友落在这里。
+   虚线只标第一格 —— 12 格全标会糊成一片，标一格就够说明模式了。 */
+document.getElementById('fr-grid').innerHTML = FRIENDS.map(([nm, role, id], i) => `
+  <article class="frt">
+    <div class="fav">${AVA}</div>
+    <div>
+      <div class="fn"><b>${esc(nm)}</b><i class="role">${role}</i></div>
+      <div class="fid">${id}</div>
+    </div>
+    <button class="btn-text"${i === 0 ? ' data-slot="预留 · 备注 / 删除好友（friendUp / friendDe 已有端点）"' : ''}>私信</button>
+  </article>`).join('')
+
+/* ─────────── 切页 + 同步左菜单选中项 ─────────── */
+const bar = document.querySelector('.bar')
+const menuItems = document.querySelectorAll('.uc-menu a[data-for]')
+function go(key) {
+  document.querySelectorAll('.page').forEach(p => p.classList.toggle('on', p.dataset.page === key))
+  bar.querySelectorAll('button[data-page]').forEach(x => x.classList.toggle('on', x.dataset.page === key))
+  menuItems.forEach(a => a.classList.toggle('on', a.dataset.for.split(' ').includes(key)))
+  window.scrollTo(0, 0)
+}
+bar.querySelectorAll('button[data-page]').forEach(b => b.addEventListener('click', () => go(b.dataset.page)))
+
+/* ─────────── 预留位开关 ─────────── */
+const slotBtn = document.getElementById('slotBtn')
+slotBtn.addEventListener('click', () => {
+  const on = document.body.classList.toggle('slots')
+  slotBtn.classList.toggle('on', on)
+  slotBtn.textContent = on ? '隐藏预留位' : '显示预留位'
+})
+</script>
+</body>
+</html>

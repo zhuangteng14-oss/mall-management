@@ -1,0 +1,561 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<title>天青 · 完整色系</title>
+<link rel="stylesheet" href="./node_modules/@fontsource-variable/noto-sans-sc/wght.css" />
+<link rel="stylesheet" href="./node_modules/@fontsource-variable/noto-serif-sc/wght.css" />
+<style>
+/* ═══════════════════════════════════════════════════════════════════════════
+   天青 · 完整色系
+   数值全部由 system.mjs 算出（culori：OKLCH 生成 / WCAG 校验 / 色盲模拟 / CIEDE2000）
+   没有任何一个色值是手挑的。
+   ═══════════════════════════════════════════════════════════════════════════ */
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+:root {
+  /* 主色 · 青瓷绿（H 171°，取自汝窑天青釉实测值） */
+  --tq-50:#e1fff4; --tq-100:#d4f8eb; --tq-200:#bee9d9; --tq-300:#9bd2bf;
+  --tq-400:#75b49f; --tq-500:#549580; --tq-600:#3b7966; --tq-700:#275e4e;
+  --tq-800:#1b4639; --tq-900:#122f26;
+
+  /* 中性 · 暖灰（H 70°，彩度 ≤0.014 —— 不是纯灰） */
+  --n-50:#fdf9f6; --n-100:#f8f4f1; --n-200:#efeae6; --n-300:#e2ddd8;
+  --n-400:#c9c3bc; --n-500:#9e978f; --n-600:#7a736c; --n-700:#5a544e;
+  --n-800:#36322e; --n-900:#1c1a19;
+
+  /* 功能色 */
+  --success-ground:#e6f5e7; --success:#19883a; --success-hover:#006f29; --success-deep:#00581f;
+  --warning-ground:#f9efdf; --warning:#966800; --warning-hover:#795300; --warning-deep:#604100;
+  --danger-ground:#ffebe8;  --danger:#b9473f;  --danger-hover:#9e2d28;  --danger-deep:#811e1b;
+  --info-ground:#e5f2ff;    --info:#1075c5;    --info-hover:#005da2;    --info-deep:#004981;
+
+  /* 强调 · 朱砂（H 32°，彩度 0.155 刻意高于主色） */
+  --cin-50:#fff4f2; --cin-100:#ffe9e4; --cin-200:#ffd2c9; --cin-300:#ffac9b;
+  --cin-400:#f37e68; --cin-500:#d35c47; --cin-600:#b2422f; --cin-700:#8d2d1d;
+  --cin-800:#6b1f12; --cin-900:#49160d;
+
+  --bg: #faf9f7;
+  --ink: var(--n-900);
+  --ink-2: #4a5250;
+  /* ⚠️ 这里本来写 --n-600(#7a736c)，被检测器抓出在页底只有 4.4:1，差 0.1。
+     中性阶的 600 档不是给正文用的 —— 弱文字必须用 700 档（7.0:1）。
+     色阶生成了不等于每一档都能当文字色，这是两件事。 */
+  --ink-3: var(--n-700);
+  --line: #e7e3dc;
+
+  --font: 'Noto Sans SC Variable', -apple-system, 'Segoe UI', sans-serif;
+  --font-display: 'Noto Serif SC Variable', 'Songti SC', serif;
+}
+
+body {
+  font-family: var(--font);
+  background: var(--bg);
+  color: var(--ink);
+  font-size: 14px; line-height: 1.7;
+  -webkit-font-smoothing: antialiased;
+  padding: 56px 40px 96px;
+}
+.page { max-width: 1180px; margin: 0 auto; }
+
+h1 {
+  font-family: var(--font-display);
+  font-size: 34px; font-weight: 600; letter-spacing: 2px;
+  color: var(--tq-700);
+}
+.lede {
+  margin-top: 14px; font-size: 14.5px; color: var(--ink-2);
+  max-width: 780px; line-height: 1.9;
+}
+.lede b { color: var(--ink); }
+
+/* 区块 */
+section { margin-top: 56px; }
+.sh {
+  display: flex; align-items: baseline; gap: 14px;
+  padding-bottom: 12px; margin-bottom: 26px;
+  border-bottom: 1px solid var(--line);
+}
+.sh h2 {
+  font-family: var(--font-display);
+  font-size: 20px; font-weight: 600; letter-spacing: 1px;
+}
+.sh .why { font-size: 12.5px; color: var(--ink-3); }
+
+/* 色阶条 */
+.ramp { display: flex; }
+.ramp > div { flex: 1; }
+.ramp .sw { height: 76px; }
+.ramp .lb { padding-top: 7px; font-size: 12px; line-height: 1.5; }
+.ramp .lb b { display: block; font-weight: 600; font-size: 12.5px; }
+.ramp .lb code {
+  font-family: ui-monospace, Consolas, monospace;
+  font-size: 11.5px; color: var(--ink-3);
+}
+
+/* 功能色四族 */
+.funcs { display: grid; grid-template-columns: repeat(2, 1fr); gap: 20px; }
+.fam {
+  border: 1px solid var(--line); border-radius: 2px;
+  background: #fff; overflow: hidden;
+}
+.fam-h {
+  display: flex; align-items: baseline; gap: 10px;
+  padding: 14px 18px; border-bottom: 1px solid var(--line);
+}
+.fam-h b { font-size: 14px; font-weight: 600; }
+.fam-h code { font-family: ui-monospace, Consolas, monospace; font-size: 12px; color: var(--ink-3); }
+.fam-h .hue { margin-left: auto; font-size: 12px; color: var(--ink-3); }
+.fam-b { display: flex; }
+.fam-b > div { flex: 1; }
+.fam-b .c { height: 58px; }
+.fam-b .t { padding: 6px 10px 10px; font-size: 12px; line-height: 1.5; }
+.fam-b .t b { display: block; font-size: 12.5px; font-weight: 600; }
+.fam-b .t code { font-family: ui-monospace, Consolas, monospace; font-size: 11.5px; color: var(--ink-3); }
+.fam-f {
+  padding: 10px 18px; border-top: 1px solid var(--line);
+  font-size: 12.5px; color: var(--ink-2);
+}
+.fam-f .ok { color: var(--success-deep); font-weight: 600; }
+
+/* 通用表格 */
+table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+th, td { text-align: left; padding: 9px 12px; border-bottom: 1px solid var(--line); }
+th { font-weight: 600; font-size: 12.5px; letter-spacing: .6px; color: var(--ink-3); }
+td code { font-family: ui-monospace, Consolas, monospace; font-size: 11.5px; color: var(--ink-2); }
+td .pass { color: var(--success-deep); font-weight: 600; }
+.sw-inline {
+  display: inline-block; width: 13px; height: 13px; border-radius: 2px;
+  vertical-align: -2px; margin-right: 7px; border: 1px solid rgba(0,0,0,.07);
+}
+
+/* 分类色对照 */
+.catrow { display: flex; gap: 3px; margin-bottom: 8px; }
+.catrow > div { flex: 1; }
+.catrow .c { height: 60px; border-radius: 2px; }
+.catrow .t { padding-top: 6px; font-size: 12px; line-height: 1.5; }
+.catrow .t code { font-family: ui-monospace, Consolas, monospace; font-size: 11.5px; color: var(--ink-3); }
+/* ⚠️ 原来这里是 border-left: 3px 的强调条，被 side-tab 规则抓了 ——
+   我在主页那边刚说过"刻意不用左边竖条"，转头自己又用了一遍。
+   换成整圈细边 + 极浅底。 */
+.verdict {
+  border: 1px solid var(--cin-200);
+  background: var(--cin-50); padding: 18px 22px; border-radius: 2px;
+  font-size: 13px; line-height: 1.85; margin-top: 20px;
+}
+.verdict b { color: var(--cin-700); }
+.verdict code { font-family: ui-monospace, Consolas, monospace; background: var(--n-100); padding: 1px 5px; border-radius: 3px; font-size: 12px; }
+.num { font-family: ui-monospace, Consolas, monospace; font-weight: 600; }
+
+/* 渐变合法 / 违规对照 */
+.grads { display: grid; grid-template-columns: repeat(2, 1fr); gap: 20px; }
+.gbox { border: 1px solid var(--line); border-radius: 2px; background: #fff; overflow: hidden; }
+.gbox .demo { height: 108px; position: relative; }
+.gbox .cap { padding: 12px 16px; font-size: 12.5px; line-height: 1.7; }
+.gbox .cap b { display: block; font-size: 13px; margin-bottom: 3px; }
+.gbox.yes .cap b { color: var(--success-deep); }
+.gbox.no  .cap b { color: var(--danger-deep); }
+.gbox .cap span { color: var(--ink-2); }
+
+/* 组件示例 */
+.specimens { display: grid; grid-template-columns: repeat(2, 1fr); gap: 20px; }
+.spec {
+  border: 1px solid var(--line); border-radius: 2px; background: #fff;
+  padding: 20px; display: flex; flex-direction: column; gap: 16px;
+}
+.spec > h3 { font-size: 13px; font-weight: 600; letter-spacing: .5px; }
+.spec .row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+
+/* 状态徽标 */
+.badge {
+  font-size: 12.5px; font-weight: 500; padding: 3px 10px; border-radius: 2px;
+  letter-spacing: .3px;
+}
+/* 商品标签 */
+.tag {
+  font-size: 12px; font-weight: 500; padding: 2px 7px; border-radius: 2px;
+  letter-spacing: .3px;
+}
+/* 按钮 */
+.btn {
+  font: inherit; font-size: 13px; font-weight: 500;
+  padding: 8px 18px; border: none; border-radius: 3px;
+  color: #fff; cursor: default;
+}
+.btn.ghost { background: transparent; border: 1px solid var(--line); color: var(--ink); }
+/* 输入框 */
+.field { display: flex; flex-direction: column; gap: 5px; width: 100%; }
+.field label { font-size: 12px; color: var(--ink-2); }
+.field input {
+  font: inherit; font-size: 13px; padding: 8px 12px;
+  border: 1px solid var(--line); border-radius: 3px; background: #fff; color: var(--ink);
+}
+.field.err input { border-color: var(--danger); }
+.field.err .msg { font-size: 11.5px; color: var(--danger-deep); }
+.field.ok .msg { font-size: 11.5px; color: var(--success-deep); }
+
+/* 图表 */
+.chart { display: flex; align-items: flex-end; gap: 10px; height: 120px; }
+.chart > div { flex: 1; display: flex; flex-direction: column; justify-content: flex-end; align-items: center; gap: 6px; height: 100%; }
+.chart .bar { width: 100%; border-radius: 2px 2px 0 0; }
+.chart .cap2 { font-size: 10.5px; color: var(--ink-3); }
+
+.note { font-size: 12.5px; color: var(--ink-3); line-height: 1.8; margin-top: 14px; }
+.note code { font-family: ui-monospace, Consolas, monospace; background: var(--n-100); padding: 1px 5px; border-radius: 3px; }
+</style>
+</head>
+<body>
+<div class="page">
+
+<h1>天青 · 完整色系</h1>
+<p class="lede">
+  主页上你只看到灰和青瓷绿，那是<b>结构</b>问题，不是配色问题：主页是"逛"的页面，
+  没有任何状态需要表态，所以信号色没有落点。<br>
+  但完整的产品里色是分两层的：<b>主色只能有一个</b>（品牌识别），
+  <b>功能色该有一整套</b>（成功/警告/危险/信息，它们是信号，跟品牌无关）。
+  下面每一个数值都由 <code>system.mjs</code> 算出，没有一个是手挑的。
+</p>
+
+<!-- ═══════════ 主色阶 ═══════════ -->
+<section>
+  <div class="sh">
+    <h2>一、主色阶 · 青瓷绿</h2>
+    <span class="why">色相 171°，取自清凉寺汝窑天青釉实测色 L*61 a*−6 b*+1</span>
+  </div>
+  <div class="ramp">
+    <div><div class="sw" style="background:#e1fff4"></div><div class="lb"><b>50</b><code>#e1fff4</code></div></div>
+    <div><div class="sw" style="background:#d4f8eb"></div><div class="lb"><b>100</b><code>#d4f8eb</code></div></div>
+    <div><div class="sw" style="background:#bee9d9"></div><div class="lb"><b>200</b><code>#bee9d9</code></div></div>
+    <div><div class="sw" style="background:#9bd2bf"></div><div class="lb"><b>300</b><code>#9bd2bf</code></div></div>
+    <div><div class="sw" style="background:#75b49f"></div><div class="lb"><b>400</b><code>#75b49f</code></div></div>
+    <div><div class="sw" style="background:#549580"></div><div class="lb"><b>500</b><code>#549580</code></div></div>
+    <div><div class="sw" style="background:#3b7966"></div><div class="lb"><b>600</b><code>#3b7966</code></div></div>
+    <div><div class="sw" style="background:#275e4e"></div><div class="lb"><b>700</b><code>#275e4e</code></div></div>
+    <div><div class="sw" style="background:#1b4639"></div><div class="lb"><b>800</b><code>#1b4639</code></div></div>
+    <div><div class="sw" style="background:#122f26"></div><div class="lb"><b>900</b><code>#122f26</code></div></div>
+  </div>
+  <p class="note">
+    主页只用到 <b>100 / 600 / 700</b> 三档，这就是"看起来颜色少"的直接原因。
+    同一色相的 10 档本身就是一片色域，浅到几乎白、深到近墨。
+  </p>
+</section>
+
+<!-- ═══════════ 中性阶 ═══════════ -->
+<section>
+  <div class="sh">
+    <h2>二、中性阶 · 暖灰</h2>
+    <span class="why">色相 70°，彩度 ≤0.014，刻意不纯灰</span>
+  </div>
+  <div class="ramp">
+    <div><div class="sw" style="background:#fdf9f6"></div><div class="lb"><b>50</b><code>#fdf9f6</code></div></div>
+    <div><div class="sw" style="background:#f8f4f1"></div><div class="lb"><b>100</b><code>#f8f4f1</code></div></div>
+    <div><div class="sw" style="background:#efeae6"></div><div class="lb"><b>200</b><code>#efeae6</code></div></div>
+    <div><div class="sw" style="background:#e2ddd8"></div><div class="lb"><b>300</b><code>#e2ddd8</code></div></div>
+    <div><div class="sw" style="background:#c9c3bc"></div><div class="lb"><b>400</b><code>#c9c3bc</code></div></div>
+    <div><div class="sw" style="background:#9e978f"></div><div class="lb"><b>500</b><code>#9e978f</code></div></div>
+    <div><div class="sw" style="background:#7a736c"></div><div class="lb"><b>600</b><code>#7a736c</code></div></div>
+    <div><div class="sw" style="background:#5a544e"></div><div class="lb"><b>700</b><code>#5a544e</code></div></div>
+    <div><div class="sw" style="background:#36322e"></div><div class="lb"><b>800</b><code>#36322e</code></div></div>
+    <div><div class="sw" style="background:#1c1a19"></div><div class="lb"><b>900</b><code>#1c1a19</code></div></div>
+  </div>
+  <p class="note">
+    纯灰（<code>#888</code> 那一类）摆在暖色主色旁边会发脏，微微偏暖才压得住。
+    彩度随明度做钟形收缩，两端趋近 0，和主色阶同一套生成逻辑。
+  </p>
+</section>
+
+<!-- ═══════════ 功能色 ═══════════ -->
+<section>
+  <div class="sh">
+    <h2>三、功能色 · 四族</h2>
+    <span class="why">明度由反解得出（L 0.552），彩度 0.15 锁死，只换色相</span>
+  </div>
+
+  <div class="funcs">
+    <div class="fam">
+      <div class="fam-h"><b>成功</b><code>success</code><span class="hue">H 148°</span></div>
+      <div class="fam-b">
+        <div><div class="c" style="background:#e6f5e7"></div><div class="t"><b>浅底</b><code>#e6f5e7</code></div></div>
+        <div><div class="c" style="background:#19883a"></div><div class="t"><b>实色</b><code>#19883a</code></div></div>
+        <div><div class="c" style="background:#00581f"></div><div class="t"><b>深字</b><code>#00581f</code></div></div>
+        <div><div class="c" style="background:#006f29"></div><div class="t"><b>悬停</b><code>#006f29</code></div></div>
+      </div>
+      <div class="fam-f">白字压实色 <span class="ok">4.54:1</span> · 深字压浅底 <span class="ok">7.69:1</span></div>
+    </div>
+
+    <div class="fam">
+      <div class="fam-h"><b>警告</b><code>warning</code><span class="hue">H 78°</span></div>
+      <div class="fam-b">
+        <div><div class="c" style="background:#f9efdf"></div><div class="t"><b>浅底</b><code>#f9efdf</code></div></div>
+        <div><div class="c" style="background:#966800"></div><div class="t"><b>实色</b><code>#966800</code></div></div>
+        <div><div class="c" style="background:#604100"></div><div class="t"><b>深字</b><code>#604100</code></div></div>
+        <div><div class="c" style="background:#795300"></div><div class="t"><b>悬停</b><code>#795300</code></div></div>
+      </div>
+      <div class="fam-f">白字压实色 <span class="ok">4.91:1</span> · 深字压浅底 <span class="ok">8.18:1</span></div>
+    </div>
+
+    <div class="fam">
+      <div class="fam-h"><b>危险</b><code>danger</code><span class="hue">H 27°</span></div>
+      <div class="fam-b">
+        <div><div class="c" style="background:#ffebe8"></div><div class="t"><b>浅底</b><code>#ffebe8</code></div></div>
+        <div><div class="c" style="background:#b9473f"></div><div class="t"><b>实色</b><code>#b9473f</code></div></div>
+        <div><div class="c" style="background:#811e1b"></div><div class="t"><b>深字</b><code>#811e1b</code></div></div>
+        <div><div class="c" style="background:#9e2d28"></div><div class="t"><b>悬停</b><code>#9e2d28</code></div></div>
+      </div>
+      <div class="fam-f">白字压实色 <span class="ok">5.20:1</span> · 深字压浅底 <span class="ok">8.57:1</span></div>
+    </div>
+
+    <div class="fam">
+      <div class="fam-h"><b>信息</b><code>info</code><span class="hue">H 250°</span></div>
+      <div class="fam-b">
+        <div><div class="c" style="background:#e5f2ff"></div><div class="t"><b>浅底</b><code>#e5f2ff</code></div></div>
+        <div><div class="c" style="background:#1075c5"></div><div class="t"><b>实色</b><code>#1075c5</code></div></div>
+        <div><div class="c" style="background:#004981"></div><div class="t"><b>深字</b><code>#004981</code></div></div>
+        <div><div class="c" style="background:#005da2"></div><div class="t"><b>悬停</b><code>#005da2</code></div></div>
+      </div>
+      <div class="fam-f">白字压实色 <span class="ok">4.80:1</span> · 深字压浅底 <span class="ok">8.14:1</span></div>
+    </div>
+  </div>
+
+  <p class="note">
+    <b>明度是反解出来的，不是拍的。</b> 我最初把四族都锁在 L 0.62，结果白字全部不达标
+    （3.4~3.9:1）：黄和琥珀天生亮，白字压不住。改成对每个色相反解"白字刚够 4.5:1 的最高明度"，
+    再取四族里最苛刻的那个（成功 L 0.552）当公共明度，其余三族跟着它降。<br>
+    成功用的 <code>H 148°</code> 刻意避开主色 <code>H 171°</code>，否则"成功"和"品牌"会混成一件事。
+  </p>
+</section>
+
+<!-- ═══════════ 强调色 ═══════════ -->
+<section>
+  <div class="sh">
+    <h2>四、强调色 · 朱砂</h2>
+    <span class="why">H 32°，彩度 0.155，明显高于主色的 0.075，这是故意的</span>
+  </div>
+  <div class="ramp">
+    <div><div class="sw" style="background:#fff4f2"></div><div class="lb"><b>50</b><code>#fff4f2</code></div></div>
+    <div><div class="sw" style="background:#ffe9e4"></div><div class="lb"><b>100</b><code>#ffe9e4</code></div></div>
+    <div><div class="sw" style="background:#ffd2c9"></div><div class="lb"><b>200</b><code>#ffd2c9</code></div></div>
+    <div><div class="sw" style="background:#ffac9b"></div><div class="lb"><b>300</b><code>#ffac9b</code></div></div>
+    <div><div class="sw" style="background:#f37e68"></div><div class="lb"><b>400</b><code>#f37e68</code></div></div>
+    <div><div class="sw" style="background:#d35c47"></div><div class="lb"><b>500</b><code>#d35c47</code></div></div>
+    <div><div class="sw" style="background:#b2422f"></div><div class="lb"><b>600</b><code>#b2422f</code></div></div>
+    <div><div class="sw" style="background:#8d2d1d"></div><div class="lb"><b>700</b><code>#8d2d1d</code></div></div>
+    <div><div class="sw" style="background:#6b1f12"></div><div class="lb"><b>800</b><code>#6b1f12</code></div></div>
+    <div><div class="sw" style="background:#49160d"></div><div class="lb"><b>900</b><code>#49160d</code></div></div>
+  </div>
+  <p class="note">
+    它只管<b>价格</b>和<b>促销力度</b>。一整套阶梯是为了让"轻促 / 中促 / 强促"用不同档位表达。
+    彩度比主色高一倍是刻意的：价格要在满屏青瓷绿里被一眼捞出来，它必须比主色响。<br>
+    主页上的价格色 <code>#c0492f</code> 应该收编到这里，统一用 <code>--cin-600 #b2422f</code>。
+  </p>
+</section>
+
+<!-- ═══════════ 分类色 ═══════════ -->
+<section>
+  <div class="sh">
+    <h2>五、分类色 · 两版对照</h2>
+    <span class="why">这一节是工具给我上的一课</span>
+  </div>
+
+  <table style="margin-bottom:22px">
+    <tr><th style="width:130px">版本</th><th>分类 1–6</th><th style="width:170px">色盲下最小 ΔE00</th></tr>
+    <tr>
+      <td><b>等明度版</b><br><span style="font-size:12px;color:var(--ink-3)">L 0.70 / C 0.105 锁死</span></td>
+      <td>
+        <span class="sw-inline" style="background:#d88575"></span>
+        <span class="sw-inline" style="background:#b69c4b"></span>
+        <span class="sw-inline" style="background:#69b17e"></span>
+        <span class="sw-inline" style="background:#3bafc4"></span>
+        <span class="sw-inline" style="background:#879ae0"></span>
+        <span class="sw-inline" style="background:#c586bb"></span>
+      </td>
+      <td><span class="num" style="color:var(--danger-deep)">3.8</span> <span style="color:var(--danger-deep)">✗ 塌了</span></td>
+    </tr>
+    <tr>
+      <td><b>色盲可用版</b><br><span style="font-size:12px;color:var(--ink-3)">L 0.48–0.72 / C 0.10–0.16</span></td>
+      <td>
+        <span class="sw-inline" style="background:#da7395"></span>
+        <span class="sw-inline" style="background:#a2a546"></span>
+        <span class="sw-inline" style="background:#7e5703"></span>
+        <span class="sw-inline" style="background:#097b5f"></span>
+        <span class="sw-inline" style="background:#4b4fb3"></span>
+        <span class="sw-inline" style="background:#a192ff"></span>
+      </td>
+      <td><span class="num" style="color:var(--success-deep)">18.9</span> <span style="color:var(--success-deep)">✓</span></td>
+    </tr>
+  </table>
+
+  <div class="catrow">
+    <div><div class="c" style="background:#d88575"></div><div class="t"><code>#d88575</code></div></div>
+    <div><div class="c" style="background:#b69c4b"></div><div class="t"><code>#b69c4b</code></div></div>
+    <div><div class="c" style="background:#69b17e"></div><div class="t"><code>#69b17e</code></div></div>
+    <div><div class="c" style="background:#3bafc4"></div><div class="t"><code>#3bafc4</code></div></div>
+    <div><div class="c" style="background:#879ae0"></div><div class="t"><code>#879ae0</code></div></div>
+    <div><div class="c" style="background:#c586bb"></div><div class="t"><code>#c586bb</code></div></div>
+  </div>
+  <div class="catrow">
+    <div><div class="c" style="background:#da7395"></div><div class="t"><code>#da7395</code></div></div>
+    <div><div class="c" style="background:#a2a546"></div><div class="t"><code>#a2a546</code></div></div>
+    <div><div class="c" style="background:#7e5703"></div><div class="t"><code>#7e5703</code></div></div>
+    <div><div class="c" style="background:#097b5f"></div><div class="t"><code>#097b5f</code></div></div>
+    <div><div class="c" style="background:#4b4fb3"></div><div class="t"><code>#4b4fb3</code></div></div>
+    <div><div class="c" style="background:#a192ff"></div><div class="t"><code>#a192ff</code></div></div>
+  </div>
+
+  <div class="verdict">
+    <b>上面那条漂亮，下面那条能用。</b><br>
+    六个色相等间距铺开、明度彩度锁死，这是"设计过的色系"的标准做法，看着也整齐。
+    但它<b>三类色盲全部塌掉</b>：红色盲下分类4和分类6分不开，绿色盲下分类1和分类3分不开。这不是巧合，是必然的：
+    色盲丢掉的正是色相，而我只用了色相。<br><br>
+    于是让明度和彩度也参与进来，做三维搜索，让"最接近的一对尽量远"。
+    无约束时 ΔE00 能到 <span class="num">23.1</span>，但配色丑（酒红 / 橄榄 / 靛蓝）。
+    收进审美能接受的范围后掉到 <span class="num">18.9</span>，<b>好看要花掉约 18% 的色盲区分度</b>。
+    下面那条就是这个折中。<br><br>
+    <b>结论：分类色只能当辅助，必须同时有文字标签。</b>
+    只靠颜色区分 6 个分类的方案，在任何一档下都不可靠。
+  </div>
+</section>
+
+<!-- ═══════════ 渐变 ═══════════ -->
+<section>
+  <div class="sh">
+    <h2>六、渐变 · 什么算有活干</h2>
+    <span class="why">渐变不是不能used，是必须有职责</span>
+  </div>
+
+  <div class="grads">
+    <div class="gbox yes">
+      <div class="demo" style="background:linear-gradient(135deg,#bee9d9,#3b7966);display:flex;align-items:center;justify-content:center">
+        <span style="font-family:var(--font-display);font-size:24px;color:#fff;letter-spacing:3px">釉 面</span>
+      </div>
+      <div class="cap"><b>✓ 有职责：模拟材质</b><span>釉色会积在器物低处。两层径向渐变让釉在角上聚散。它是在<b>复现一种真实的材料</b>，不是在假装科技感。</span></div>
+    </div>
+
+    <div class="gbox yes">
+      <div class="demo" style="background:linear-gradient(160deg,#2f7979,#1b4639);display:flex;align-items:flex-end;padding:16px">
+        <span style="font-size:13px;color:#fff">图上压暗片，保证白字可读</span>
+      </div>
+      <div class="cap"><b>✓ 有职责：保可读性</b><span>图片上的文字压不住时，在底部叠一层到透明的黑。它的职责是让文字达到 4.5:1，可以量化验收。</span></div>
+    </div>
+
+    <div class="gbox no">
+      <div class="demo" style="display:flex;align-items:center;justify-content:center;background:#fff">
+        <span style="font-size:30px;font-weight:700;background:linear-gradient(90deg,#9bd2bf,#3bafc4);-webkit-background-clip:text;background-clip:text;color:transparent">渐变文字</span>
+      </div>
+      <div class="cap"><b>✗ 没职责：纯粹装饰</b><span>文字的任务是可读，渐变让它在浅色/深色模式下必有一半糊掉，还压不进任何对比度标准。<b>这是 AI 生成界面排第一的识别特征。</b></span></div>
+    </div>
+
+    <div class="gbox no">
+      <div class="demo" style="background:linear-gradient(135deg,#6b1f12,#1c1a19);position:relative;display:flex;align-items:center;justify-content:center">
+        <span style="font-size:15px;color:#4bd8e8;text-shadow:0 0 18px #4bd8e8">深色底 + 霓虹发光</span>
+      </div>
+      <div class="cap"><b>✗ 没职责：装"高级"</b><span>深底配青色光晕，是 2023 年之后最常见的一眼假。它不解决任何问题，只是把页面压暗再点一盏灯。</span></div>
+    </div>
+  </div>
+
+  <p class="note">
+    判断标准只有一条：<b>把这个渐变换成纯色，页面会损失什么？</b>
+    釉面会失去材质感、压暗片会让文字读不了，这两个有损失，留着。
+    渐变文字和霓虹发光换成纯色后只会更清楚，那就该换掉。
+  </p>
+</section>
+
+<!-- ═══════════ 落地示例 ═══════════ -->
+<section>
+  <div class="sh">
+    <h2>七、这些色落在哪里</h2>
+    <span class="why">功能色只在"有状态要表态"的地方出现</span>
+  </div>
+
+  <div class="specimens">
+
+    <div class="spec">
+      <h3>订单状态徽标</h3>
+      <div class="row">
+        <span class="badge" style="background:#f9efdf;color:#604100">待付款</span>
+        <span class="badge" style="background:#e5f2ff;color:#004981">已发货</span>
+        <span class="badge" style="background:#e6f5e7;color:#00581f">已完成</span>
+        <span class="badge" style="background:#ffebe8;color:#811e1b">退款中</span>
+        <span class="badge" style="background:#efeae6;color:#5a544e">已取消</span>
+      </div>
+      <p style="font-size:12.5px;color:var(--ink-2);line-height:1.75">
+        一律用<b>浅底 + 深字</b>，不用实色块。实色留给按钮，徽标是背景信息，
+        不该比"立即付款"更响。待付款用警告色，不是危险色：没付钱不是错误。
+      </p>
+    </div>
+
+    <div class="spec">
+      <h3>商品标签</h3>
+      <div class="row">
+        <span class="tag" style="background:#ffebe8;color:#811e1b">直降</span>
+        <span class="tag" style="background:#f9efdf;color:#604100">限时</span>
+        <span class="tag" style="background:#e6f5e7;color:#00581f">包邮</span>
+        <span class="tag" style="background:#e5f2ff;color:#004981">预售</span>
+        <span class="tag" style="background:#efeae6;color:#5a544e">临期</span>
+      </div>
+      <p style="font-size:12.5px;color:var(--ink-2);line-height:1.75">
+        一屏里最多出现两种标签色。满屏彩标会把"直降"这个真正该被看见的信息淹掉。所以
+        颜色的数量本身就是信息量，用多了等于没用。
+      </p>
+    </div>
+
+    <div class="spec">
+      <h3>表单校验</h3>
+      <div class="field err">
+        <label>收货手机号</label>
+        <input value="138 0013 800" />
+        <span class="msg">号码位数不对，应为 11 位</span>
+      </div>
+      <div class="field ok">
+        <label>收货人</label>
+        <input value="张岚" />
+        <span class="msg">已核对</span>
+      </div>
+      <p style="font-size:12.5px;color:var(--ink-2);line-height:1.75">
+        错误状态<b>同时</b>改边框色和给出文字，只靠红框，色盲用户和屏幕阅读器都收不到。
+        文字说明才是主要通道，颜色是加速通道。
+      </p>
+    </div>
+
+    <div class="spec">
+      <h3>按钮层级</h3>
+      <div class="row">
+        <button class="btn" style="background:#3b7966">加入购物车</button>
+        <button class="btn" style="background:#b2422f">立即购买</button>
+        <button class="btn ghost">收藏</button>
+      </div>
+      <p style="font-size:12.5px;color:var(--ink-2);line-height:1.75">
+        <b>一个界面里只允许一个实心主按钮。</b> 这里"立即购买"用朱砂抢权重是特例：
+        成交是唯一的终点动作，它压过品牌色是合理的。<br>
+        "收藏"用描边幽灵按钮，不参与竞争。
+      </p>
+    </div>
+
+    <div class="spec" style="grid-column:span 2">
+      <h3>图表</h3>
+      <div class="chart">
+        <div><div class="bar" style="height:42%;background:#9bd2bf"></div><span class="cap2">周一</span></div>
+        <div><div class="bar" style="height:66%;background:#75b49f"></div><span class="cap2">周二</span></div>
+        <div><div class="bar" style="height:51%;background:#9bd2bf"></div><span class="cap2">周三</span></div>
+        <div><div class="bar" style="height:88%;background:#3b7966"></div><span class="cap2">周四</span></div>
+        <div><div class="bar" style="height:73%;background:#549580"></div><span class="cap2">周五</span></div>
+        <div><div class="bar" style="height:95%;background:#275e4e"></div><span class="cap2">周六</span></div>
+        <div><div class="bar" style="height:79%;background:#549580"></div><span class="cap2">周日</span></div>
+      </div>
+      <p style="font-size:12.5px;color:var(--ink-2);line-height:1.75">
+        单个数据系列<b>不需要彩色</b>，用主色的深浅就够，高度已经在表达大小，
+        再上色是重复编码。功能色留给"这条线跌破了预警线"这类真正需要报警的时刻。
+      </p>
+    </div>
+
+  </div>
+</section>
+
+<p class="note" style="margin-top:48px;padding-top:20px;border-top:1px solid var(--line)">
+  全部数值由 <code>node system.mjs</code> 生成与校验。依赖 culori（OKLCH 生成 / 色域裁剪 / WCAG / 色盲模拟 / CIEDE2000）。
+  本页与 <code>主页改造.html</code> 均独立预览，未改动你项目的任何源码。
+</p>
+
+</div>
+</body>
+</html>
