@@ -1,5 +1,6 @@
 package com.minke.mallmanagement.smoke;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.minke.mallmanagement.shared.web.AuthInterceptor;
 import com.minke.mallmanagement.shared.web.WebAuthConfig;
 import org.junit.jupiter.api.BeforeEach;
@@ -19,6 +20,7 @@ import java.util.Map;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.contains;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -129,6 +131,29 @@ class AuthSessionSmokeTest extends AbstractSmokeTest {
         row.put("customerid", customerid);
         row.put("merchantid", merchantid);
         when(jdbcTemplate.queryForMap(anyString(), any(Object[].class))).thenReturn(row);
+    }
+
+    /**
+     * 桩：P2.6 第二跳「user 表整行」（{@code UserDao.selectUserByUsername} → {@code queryForMap}）。
+     *
+     * <p>⚠️ <b>必须是**可变** Map</b>（{@code HashMap}，不能图省事写 {@code Map.of}）：
+     * {@code profileOf} 会往这一行里 {@code put("image", …)}；不可变 Map 抛
+     * {@code UnsupportedOperationException}，而这个 put 恰在 profileOf **自己的 catch 里**
+     * ⇒ 图片被**静默丢弃**、{@code image} 键整个消失（本条第一次跑红就是踩的这个坑，
+     * 生产里 {@code queryForMap} 给的是可变行，故只有测试会踩）。
+     *
+     * <p>⚠️ {@code static} 是**必需**的：同文件里 {@link AuthSessionSwitchOnTest}（另一个**顶层**
+     * 类，不继承本类）也要用 —— 故由它 {@code AuthSessionSmokeTest.userRow(...)} 显式调用。
+     * 放基类 {@code AbstractSmokeTest} 也能过，但那是 5 个 smoke 类共用的切片接线文件，
+     * 为一条用例的桩去改它不划算（见 progress.md §5-AC 的「基类不改」裁定）。
+     */
+    static Map<String, Object> userRow(String idColumn, String id, String usertype, String gender) {
+        Map<String, Object> row = new HashMap<>();
+        row.put(idColumn, id);
+        row.put("username", SMOKE_USER);
+        row.put("usertype", usertype);
+        row.put("gender", gender);
+        return row;
     }
 
     /** 打一次 loginSelect，返回整个请求（用于从 request 里取会话）。 */
@@ -251,25 +276,45 @@ class AuthSessionSmokeTest extends AbstractSmokeTest {
     // ==================== 二、/user/me 读会话（3 条）====================
 
     /**
-     * 有会话 ⇒ 按会话返回身份，**顶层平铺**（键集 = {@code publicInfo} 的 5 列 + {@code success}）。
+     * 有会话 ⇒ 按会话返回**完整资料**，**顶层平铺**（键集 = {@code user} 表整行 + {@code image} + {@code success}）。
      *
      * <p>⚠️ 键必须**平铺**而不是塞进 {@code data}:前端全部按顶层键取值（见 {@code Result} 类注释），
-     * 故这里逐键断言，尤其 {@code customerid} —— 前端要靠它去调商家端接口。
+     * 故这里逐键断言，尤其 {@code customerid} —— 前端要靠它去调商家端接口。本条**兼钉映射一致性**：
+     * {@code /user/me} 去掉 {@code Result.ok} 加的 {@code success} 后，须逐键等于 {@code /user/getUserInfo} 的响应。
      */
     @Test
     void me_withSession_returnsIdentityFlattened() throws Exception {
-        when(userCacheService.publicInfo("C-1")).thenReturn(Map.<String, Object>of(
-                "customerid", "C-1",
-                "username", "smoke_user",
-                "usertype", "客户",
-                "gender", "男"));
+        // 两跳都要桩：① publicInfo（业务号 → 用户名）② user 表整行（用户名 → 资料行）
+        when(userCacheService.publicInfo("C-1"))
+                .thenReturn(Map.<String, Object>of("username", "smoke_user"));
+        when(jdbcTemplate.queryForMap(anyString(), any(Object[].class)))
+                .thenReturn(userRow("customerid", "C-1", "客户", "男"));
+        // 图片查询与凭据校验（role）共用 query(String, RowMapper, Object...) 这一个重载 ⇒ 用 SQL 子串把
+        // 两条**互斥**地钉住（role 那条 SQL 含 `login`、图片这条含 `customerimage`），不靠多桩的优先级。
+        when(jdbcTemplate.query(contains("login"), any(RowMapper.class), any(Object[].class)))
+                .thenReturn(List.of(1));
+        when(jdbcTemplate.query(contains("customerimage"), any(RowMapper.class), any(Object[].class)))
+                .thenReturn(List.of("avatar.png"));
 
-        mockMvc.perform(post("/user/me").session(loggedInSession("C-1")))
+        MvcResult meResult = mockMvc.perform(post("/user/me").session(loggedInSession("C-1")))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.success").value(true))
                 .andExpect(jsonPath("$.customerid").value("C-1"))
                 .andExpect(jsonPath("$.username").value("smoke_user"))
-                .andExpect(jsonPath("$.usertype").value("客户"));
+                .andExpect(jsonPath("$.usertype").value("客户"))
+                .andReturn();
+        // ⚠️ P2.6 映射一致性（本条的第二个钉子）：同一用户下 /user/me 去掉 Result.ok 补的 success 后，
+        //    必须**逐键等于** /user/getUserInfo 的响应 —— 这正是三个前端调用点「只换地址、不改模板」的依据。
+        String me = meResult.getResponse().getContentAsString();
+        assertThat(me).as("两跳的第二跳必须走通（image 来自 userDao.selectCustomerImage）").contains("avatar.png");
+        String cred = mockMvc.perform(post("/user/getUserInfo")
+                        .param("username", "smoke_user").param("password", "pw"))
+                .andReturn().getResponse().getContentAsString();
+        ObjectMapper mapper = new ObjectMapper();
+        Map<String, Object> mePayload = mapper.readValue(me, Map.class);
+        mePayload.remove("success");
+        assertThat(mePayload).as("/user/me 去 success 必须逐键等于 /user/getUserInfo 的响应")
+                .isEqualTo(mapper.readValue(cred, Map.class));
     }
 
     /**
@@ -404,6 +449,9 @@ class AuthSessionSwitchOnTest extends AbstractSmokeTest {
                 "username", "smoke_user",
                 "usertype", "商家",
                 "gender", "女"));
+        // 第二跳：publicInfo 只给到 username，P2.6 起还要查 user 表整行（否则应答里没有 merchantid）
+        when(jdbcTemplate.queryForMap(anyString(), any(Object[].class)))
+                .thenReturn(AuthSessionSmokeTest.userRow("merchantid", "M-9", "商家", "女"));
 
         MockHttpSession session = new MockHttpSession();
         session.setAttribute(AuthInterceptor.SESSION_USER_ID, "M-9");

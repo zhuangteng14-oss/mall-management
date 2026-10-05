@@ -35,7 +35,7 @@
 | POST | `/user/getUserInfo` | username, password | `user` 全字段 + `image`；失败返回 `null` | 是 | `UserController.getUserInfo:136` |
 | POST | `/user/updateAvatar` | username, file(MultipartFile) | `{success, msg?, imageUrl?}` | 是 | `UserController.updateAvatar:145` |
 | POST | `/user/updateUserInfo` | username, email, address, selfintroduction | `{success, msg}` | 是 | `UserController.updateUserInfo:154` |
-| POST | `/user/me` | **无**（凭会话 Cookie；**无 `@RequestParam`**） | 有会话：`{success, customerid, merchantid, username, usertype, gender}`（顶层平铺）；**无会话 ⇒ 401** + `{success:false,msg:"未登录"}`；查无此人 ⇒ 200 + `{success:false,msg:"用户不存在"}` | 是 | `UserController.me:191` |
+| POST | `/user/me` | **无**（凭会话 Cookie；**无 `@RequestParam`**） | 有会话：`user` 表**整行** + 头像 `image` + `success`（顶层平铺；**P2.6 起与 `/user/getUserInfo` 同一段逻辑产出 ⇒ 同一个 Map，只差 `success` 键**，见 §5-AC）；**无会话 ⇒ 401** + `{success:false,msg:"未登录"}`；查无此人 ⇒ 200 + `{success:false,msg:"用户不存在"}` | 是 | `UserController.me:191` |
 | POST | `/user/logout` | **无**（凭会话 Cookie） | `{success:true, msg:"已退出"}`；无会话时同样答成功（no-op，**不建会话**） | 是 | `UserController.logout:222` |
 
 > **会话侧三端点（2026-10-04 鉴权笔 2 新增/改造）**：
@@ -43,7 +43,7 @@
 >   **失败的登录不发会话**（形参取 `HttpServletRequest`，只在成功路径上 `getSession()`）。
 >   ⚠️ HTTP 契约**一字未动**（返回仍是裸 `int`，例外 1/5）。
 > - `me` / `logout` 与 `getUserInfo` **并存不替代**：那个是**凭据驱动**，这两个是**会话驱动**。
-> - ⚠️ **前端本笔不动** ⇒ 这两个新端点今日**无调用方**（接入是笔 4 / `P2.6`），见 §5 对账。
+> - ⚠️ **前端本笔不动** ⇒ 这两个新端点当日**无调用方**（接入是笔 4 / `P2.6`）。⚠️ **P2.6（2026-10-05）起 `/user/me` 已有调用方**（`main.js:28` 启动探针 + 3 个资料读点 = 4 处），`/user/logout` 仍 **0**，见 §5 对账。
 > - 开关 `app.auth.enabled` **默认仍 `false`** ⇒ `me` 的 401 分支在默认配置下**可达**（不依赖闸）。
 
 ### /message — 10 个
@@ -158,17 +158,17 @@
 > **范围**：`Mall-management-web/mall-management-system/src` 全部 `.js` / `.vue`；下表文件均位于 `src/views/`。
 > **行号**：指**该 `fetch(` 调用的所在行**；标 ※ 者见下方「变量 URL」段。
 
-**四项对账**（须自洽）：前端 `fetch(` 调用点 **42** 处 ／ 不同路径 **31** 条 ／ 本文件路由 **35** 条 ／ 差集 **35 − 31 = 4**（即表末四行「无调用方」）。
+**四项对账**（须自洽）：前端 `fetch(` 调用点 **42** 处 ／ 不同路径 **31** 条 ／ 本文件路由 **35** 条 ／ 差集 **35 − 31 = 4**（即表末四行「无调用方」）。 ⚠️ **基期 vs 现状（P2.6，2026-10-05）**：上列 **42 / 31 / 4 是 2026-10-03 的基期值**（本文件与 `progress.md` §6 其余「42」引用处同为基期口径）；**现状调用点 = 43** —— 会话恢复笔新增的 `main.js:28` 探针**未计入基期**（本笔实测 `grep -rn "http\.\(post\|get\)(" src/` = **43**）；**不同路径仍 31**（`/user/me` 进、`/user/getUserInfo` 出，互为抵消）⇒ **差集仍 4**，成员互换。
 > ⚠️ **2026-10-04（鉴权笔 2）**：路由 **33 → 35**（新增 `/user/me`、`/user/logout`），
 > 前端 **42 / 31 两条不变**（本笔不动前端）⇒ 差集 **2 → 4**。**这个 4 是预期的，不是漏接** ——
-> 两个新端点的前端接入归笔 4 / `P2.6`。
+> 两个新端点的前端接入归笔 4 / `P2.6`。⚠️ **P2.6（2026-10-05）后**：`/user/me` 由「无调用方」变为 3 个读点、`/user/getUserInfo` 反向**归零** ⇒ 差集**仍 4**、成员互换（见 `:201-204`）；`main.js:28` 的探针那 1 处**不在**本口径的 42 内（口径基期早于会话恢复笔）。
 
 ⚠️ **前端无 HTTP 框架**：`axios` / `$http` / `XMLHttpRequest` / `EventSource` / `baseURL` 在全 `src` **0 命中**；全部走原生 `fetch(`（且**唯一一处 `fetch(` 在 `src/api/http.js`**）；`vue.config.js` **无 `proxy`**；⚠️ **2026-10-05 订正（鉴权笔 4）**：`main.js` 原先「无拦截器、无全局配置」**已不成立** —— 它现在注册 **401 出口**（`setUnauthorizedHandler(router.push('/login'))` + `router.afterEach` 复位闩锁），但**仍无 HTTP 拦截器**；URL 全部硬编码 `http://localhost:8088/...`（⚠️ **此半句自 `#48` 起已过时** —— URL 已由 `VUE_APP_API_BASE` 提供，见 `progress.md §5-S`；**本笔不修**）。
 
 | 端点 | 调用点 |
 |---|---|
 | `/user/loginSelect` | `LoginPage.vue:131` |
-| `/user/getUserInfo` | `LoginPage.vue:142`、`GoodsUp.vue:150`、`UserInfoPage.vue:96` |
+| `/user/me`（**P2.6** 起；原 `/user/getUserInfo` 的 3 个调用点**全迁来**，该端点今日 **0 调用方**） | `LoginPage.vue:144`、`GoodsUp.vue:153`、`UserInfoPage.vue:99`（另 `main.js:28` 启动探针，未计入本表 42 口径） |
 | `/user/loginAdd` | `LoginPage.vue:216` |
 | `/user/updateAvatar` | `UserInfoPage.vue:130` |
 | `/user/updateUserInfo` | `UserInfoPage.vue:149` |
@@ -200,7 +200,7 @@
 | `/message/friendDe` | `FriendRoom.vue:228`※ |
 | ~~`/message/getOrCreateConversation`~~ | **无调用方**（前端 0 命中；`cache-layer.md` 记为**有意保留**的孤儿读接口） |
 | ~~`GET /health/db`~~ | **无前端调用方**（运维接口，消费者 = A3 脚本 P5/P6/P7） |
-| ~~`/user/me`~~ | **无调用方**（2026-10-04 笔 2 新增；前端接入归笔 4 / `P2.6`） |
+| ~~`/user/getUserInfo`~~ | **无调用方**（**P2.6**，2026-10-05 起：3 个调用点全改走 `/user/me`；端点保留的理由见 `UserService.getUserInfo` 的 javadoc） |
 | ~~`/user/logout`~~ | **无调用方**（2026-10-04 笔 2 新增；同理） |
 
 ### 5.1 三处「变量 URL」（静态 grep 看不到，须读分支）

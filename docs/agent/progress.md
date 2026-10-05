@@ -221,7 +221,7 @@
 
   ⚠️ **`TD-06` / `TD-08` / `TD-09` 三条均与「部署」直接相关**（换机 / 反代即失效、jar 场景未验、上传目录入库）⇒ 排「部署」时必须一起看，见 §4。
 - **开工前不该当成已知的三项待验**（`three-layers.md:266-270`）：① `goodstype.GoodTypeNew` 显式 NULL 的实际行为；② 上传路径穿越的**可利用性**（代码侧确证无 basename 提取，但取决于 Tomcat 是否剥离路径段 —— **探针出来前只能写「无校验」，不能写「可穿越」**）；③ 本机无 8.4 目标库 ⇒ C 组端到端跑不了
-- ⚠️ **文档悬空引用 3 条（2026-10-05 挂账；归属笔名 = `P2.6` 那笔，备选界面优化笔）**：① `progress.md:401` 引的 `HomePage.vue:116`（原文「同行两键」）**已悬空** —— 笔 3/8（`6639c1f`）把该文件的 `loginUsername` / `merchantid` **两键整体换掉**（现为 `:118` 注释 + `:119` 的 `isLogin = computed(...)`）⇒ 该文件现在**零处**凭据键；② `api/auth.js:118` 引的 `ShoppingCart.vue:88-93` / `HistoricalOrders.vue:36-41`（原文「收敛**逐字相同**的 2 处降级链」）**已悬空** —— 那两段现在只剩 `getBuyerId = () => resolveBuyerId()`。**两条都不是漂移，是悬空**（§5-W (5) 当时按「回放行内容」核，没核「这行还该不该有这个键」）。⚠️ ② 是 **R4 核实中新发现**。**为何不修**：两条都要重算 54/52 的逐出现口径（§5-I / §5-J 的记账结论）。**成因 / 归属 / 完整判据见 §5-Z (9) 第 5 条（① = 第 5 条本体、② = 其第 6 点）。** ⚠️ **③（R6 核实中新发现 = §5-AB (12) 的 D-new-1）**：`api/auth.js:44` 的**现在时**陈述「退出（**`CustomerPage` / `MerchantPage`** / `http.js` 的 401 出口）」**已悬空** —— R1 把客户退出、R2 把商家退出**都迁到了 `UserCenter.vue`**；**同一文件 `:146` 自己就写着这件事** ⇒ 本条是**自相矛盾**（`:44` 说「现在在两个壳」、`:146` 说「R1/R2 后都迁到 `UserCenter.vue`」）。⚠️ 各笔此前只核了自己改的文件 ⇒ 漏到 R6 才发现。**本笔不修**（用户裁决 D6：归 `P2.6`，与 ①② 同族 —— 都要动 `auth.js` 口径）。 ⚠️ **另挂一条待定（R6 裁决 D10）**：R4 遗留的「合并 `landingFor` 与 `roleKey`」（R4 的 D7 曾记为「R6 可选」）**移出 R6、改挂本段待定笔** —— 合并会动 R3 刚落码登记的 `router/index.js:192` / `:197`，且与 AppShell 无关（属 router 笔）。
+- ⚠️ **文档悬空引用 3 条（2026-10-05 挂账；归属笔名 = `P2.6` 那笔，备选界面优化笔）**：① `progress.md:401` 引的 `HomePage.vue:116`（原文「同行两键」）**已悬空** —— 笔 3/8（`6639c1f`）把该文件的 `loginUsername` / `merchantid` **两键整体换掉**（现为 `:118` 注释 + `:119` 的 `isLogin = computed(...)`）⇒ 该文件现在**零处**凭据键；② `api/auth.js:118` 引的 `ShoppingCart.vue:88-93` / `HistoricalOrders.vue:36-41`（原文「收敛**逐字相同**的 2 处降级链」）**已悬空** —— 那两段现在只剩 `getBuyerId = () => resolveBuyerId()`。**两条都不是漂移，是悬空**（§5-W (5) 当时按「回放行内容」核，没核「这行还该不该有这个键」）。⚠️ ② 是 **R4 核实中新发现**。**为何不修**：两条都要重算 54/52 的逐出现口径（§5-I / §5-J 的记账结论）。**成因 / 归属 / 完整判据见 §5-Z (9) 第 5 条（① = 第 5 条本体、② = 其第 6 点）。** ⚠️ **③（R6 核实中新发现 = §5-AB (12) 的 D-new-1）**：`api/auth.js:44` 的**现在时**陈述「退出（**`CustomerPage` / `MerchantPage`** / `http.js` 的 401 出口）」**已悬空** —— R1 把客户退出、R2 把商家退出**都迁到了 `UserCenter.vue`**；**同一文件 `:146` 自己就写着这件事** ⇒ 本条是**自相矛盾**（`:44` 说「现在在两个壳」、`:146` 说「R1/R2 后都迁到 `UserCenter.vue`」）。⚠️ 各笔此前只核了自己改的文件 ⇒ 漏到 R6 才发现。**本笔不修**（用户裁决 D6：归 `P2.6`，与 ①② 同族 —— 都要动 `auth.js` 口径）。 ⚠️ **另挂一条待定（R6 裁决 D10）**：R4 遗留的「合并 `landingFor` 与 `roleKey`」（R4 的 D7 曾记为「R6 可选」）**移出 R6、改挂本段待定笔** —— 合并会动 R3 刚落码登记的 `router/index.js:192` / `:197`，且与 AppShell 无关（属 router 笔）。 ⚠️ **三条已全部结清（P2.6，2026-10-05，见 §5-AC）**：① 在 `progress.md:402` **就地**加按语（`HomePage.vue:116` 标为**历史地址**）；② 在 `src/api/auth.js:118` **就地**加按语（那两处现只剩 `getBuyerId = () => resolveBuyerId()`）；③ 在 `src/api/auth.js:44` **就地**改成 `UserCenter.vue`（原写两个壳）。
 
 ### 5-D. 复核时发现的文档漂移（不是进度，但会误导）
 
@@ -399,7 +399,7 @@
 收尾写更新记录行时复核数字，发现 **#48 自身产物有 2 处数字错**（均为**我在 #48 里写错**的，非他人）：
 
 - **（1）51 行的分解错。** `.env.production` 的注释、#48 的 PR body、commit `8118741` 都写「51 = **42** 处 fetch 字面量 + 6 处 URL 赋值 + **3** 处 `:src` 头像」。**逐行实测**分解 = **39** fetch 字面量 + **6** URL 赋值行 + **3** 处头像 URL（2 处 `:src`：`GoodsUp:9` / `UserInfoPage:7`；1 处 `const defaultAvatar`：`FriendRoom:71`）+ **3** CSS `url()`（`LoginPage:9/10/274`）= **51**。原式**双算了 3 处**（那 3 个走变量 URL 的 fetch，其字面量正落在「6 处 URL 赋值行」内）、**又漏了 3 行 CSS** —— `42+6+3=51` 只是数字巧合。⚠️ **§6-B 的 P2.1 行本身是对的**（「42 fetch 调用（39 字面 + 3 变量）」），错的是 #48 对它的转述。
-- **（2）登录态 `sessionStorage`：`52` 与 `54` 是两套口径，`54` 才对得上 §6-B。** 逐出现实测 **54**（= `merchantid` **24** + `customerid` **12** + `loginUsername` **12** + `loginPassword` **6**），与 §6-B 的 P2.6「**71** 处 = **54** 凭据 + **17** 页面状态键」同口径；`8118741` 与 #48 的 PR body 写的 **52** 是另一套口径——「**行×键**」去重 = `merchantid` 23 / `loginUsername` 12 / `customerid` 11 / `loginPassword` 6（差在 `HomePage.vue:116` 同行两键、`ProductPage.vue:415`/`:416` 同行两次出现）；还有第三个数 **51** = 涉及凭据的行数。⚠️ **`52` 的病不在值，在被拿去与 `17` 相加对 `71`** —— 两口径混用（`52+17=69≠71`）。**本仓一律读逐出现的 `54`**；同一笔内 `489800d` 写的正是 **54**。
+- **（2）登录态 `sessionStorage`：`52` 与 `54` 是两套口径，`54` 才对得上 §6-B。** 逐出现实测 **54**（= `merchantid` **24** + `customerid` **12** + `loginUsername` **12** + `loginPassword` **6**），与 §6-B 的 P2.6「**71** 处 = **54** 凭据 + **17** 页面状态键」同口径；`8118741` 与 #48 的 PR body 写的 **52** 是另一套口径——「**行×键**」去重 = `merchantid` 23 / `loginUsername` 12 / `customerid` 11 / `loginPassword` 6（差在 `HomePage.vue:116` 同行两键、`ProductPage.vue:415`/`:416` 同行两次出现）；还有第三个数 **51** = 涉及凭据的行数。⚠️ **`52` 的病不在值，在被拿去与 `17` 相加对 `71`** —— 两口径混用（`52+17=69≠71`）。**本仓一律读逐出现的 `54`**；同一笔内 `489800d` 写的正是 **54**。 ⚠️ **按语（P2.6，2026-10-05，§5-AC）**：本句引的 **`HomePage.vue:116`（原文「同行两键」）已悬空** —— 笔 3/8（`6639c1f`）把该文件两键整体换掉 ⇒ 该地址是**历史地址**（写成时对、后失效，§5-Z (9) 第 5 条）；**今日**登录态 = **4 键**（登录密码键**归零**），故 54 / 6 是**基线历史值**，不是现状。
 - **处置**：`.env.production` 注释**已订正**（纯注释、**行为零变更**）；**#48 的 PR body 已订正**（GitHub 上直接改，无需 commit）；**`8118741` 的提交信息未修** —— 改它须改写 #48 已合并的历史，**不做**。⚠️ 残留：`8118741` 的 message 里那两个错数**永久留痕**，引用该 commit 的说明时按本条的 **39 / 54** 读。**另**：`src/api/auth.js:3-8` 的头注释**同病**（写 `52`，且把 `52` 与 `17` 相加去对 `71`）—— **本笔已订正为逐出现的 `54`**，并注明 `52` 是「行×键」口径（**纯注释、行为零变更**）。
 - ⚠️ **副作用一处**：本次给更新记录表加的行使本文件**其后行号 +1**（与 §5-H (3) 记的「§1 表使其后 +2」叠加）⇒ 文内**行号自指**再偏移 1 行；建议同 §5-H (3)，改用**节锚点**而非行号。⇒ ⚠️ **2026-10-04 已由 `docs/progress-53-record` 落地，见 §5-P。**
 
@@ -411,7 +411,7 @@
 - **（1）`AbstractSmokeTest.java:45` 计数过时。** javadoc 写「**5 个** smoke test 无需改动」，实测 **8 个**类 `extends AbstractSmokeTest`。纯文档漂移，无行为影响。
 - **（2）`UserService.java:98` 明文账号密码进 stdout。** 登录成功后 `System.out.println(username + "," + password)` ⇒ **明文凭据落进程日志**。⚠️ 但 `:94` 的 javadoc 明写这是「三层前就有的副作用，**照搬** —— 它不是调试残留」⇒ **刻意的**，故不是笔误、是**既存安全面**。**待裁**：并进鉴权笔（登录改造本就动这一处）还是单列。
 - **（3）`login.Password` 宽 `char(20)`，装不下 bcrypt。** 见 `db-schema.md:178`（`char(20)` 显式 / **明文**）。bcrypt 输出 **60** 字符 ⇒ hash 化**不能原地改列**（数据库规则禁 `MODIFY COLUMN`），只能走**影子列**（新增列 + 回填）。**待裁**：建议**单列一笔**（文件数 4–5），排在鉴权笔**之后**。
-- **（4）【裁定 · `P2.6` 独立一笔】** ⚠️ **前 3 条是「发现」（调研看到的事实），本条是「裁定」（用户做的决定）—— 性质不同，勿混。** 内容 = 删前端 **4 个读写口**（`LoginPage.vue:163-169` 写 / `GoodsUp.vue:145-146` 读 / `UserInfoPage.vue:91-92` 读）+ 拆 `UserService.java:185` 的 `selectRoleForProfile(username, password)` 重验。**前提** = 鉴权笔落地（凭据进 **httpOnly Cookie**）；**时序** = 鉴权笔 → `P2.6` 笔。
+- **（4）【裁定 · `P2.6` 独立一笔】** ⚠️ **前 3 条是「发现」（调研看到的事实），本条是「裁定」（用户做的决定）—— 性质不同，勿混。** 内容 = 删前端 **4 个读写口**（`LoginPage.vue:163-169` 写 / `GoodsUp.vue:145-146` 读 / `UserInfoPage.vue:91-92` 读）+ 拆 `UserService.java:185` 的 `selectRoleForProfile(username, password)` 重验。**前提** = 鉴权笔落地（凭据进 **httpOnly Cookie**）；**时序** = 鉴权笔 → `P2.6` 笔。 ⚠️ **已落地（P2.6，2026-10-05，§5-AC）**：本条 4 个行号**全部重指** —— 写口 `LoginPage.vue:163-169` → **`:158` / `:162`**（`setCredentials` 改名 `setUsername`、不再传密码）；读口 `GoodsUp.vue:145-146` → **`:148-149`**、`UserInfoPage.vue:91-92` → **`:94-95`**（均改走 `/user/me`，不再读密码）；`UserService.java:185` 的 `selectRoleForProfile(username, password)` 重验 —— ⚠️ **该地址在 HEAD 即已偏**（HEAD `:185` 是 `loginAdd` 形参行；`selectRoleForProfile` 的真实调用点 HEAD 在 **`:242`**）⇒ 本笔后为 **`:239`**（本笔把该方法的 javadoc 压掉 3 行，调用点上移）。
   - ⚠️ **口径（已订正，勿沿用旧说法）**：`P2.6` 的解**不是「选 A」**，而是「**凭据进 httpOnly Cookie**」；A 只是**默认就走这条路**、且不引入密钥管理 / 刷新 / CSRF 复杂度的那个（**最省事 ≠ 唯一**）。B 把 token 放 httpOnly Cookie **同样解**；放 `localStorage` 则**只减轻不消除**（token 有时限、可撤销、不可复用，价值低于密码 —— 故「明文换明文」这个说法**不成立**）。C 与 `P2.6` **无关**（其默认形状即 A）。
 
 ### 5-K. `application-a3.properties` 注释漂移 **2 处**（鉴权笔调研附带发现；登记，未修）
@@ -570,7 +570,7 @@
   ⚠️ **闸一开这就成为真的没登出**：cookie 仍在，直开 `#/customer` 照样取到数据。⇒ **「退出调 `/user/logout`」列为翻笔前置**（翻笔本来就要动测试与 a3，那是它的时点）；并进笔 4 要改 `CustomerPage` + `MerchantPage` ⇒ **+2 文件、破 5**，故本笔不做。⚠️ **按语（§5-Y，R2，2026-10-05）**：本条的**前提**已变 —— R1/R2 之后两个壳**都没有**自己的退出了（客户 R1、商家 R2 都迁到共用的 `UserCenter.vue`）⇒ 若「退出调 `/user/logout`」要落，落点是 **`UserCenter.vue:52-55` 那**一处**（不是两个壳）⇒ 文件数估计从「+2」降到 **+1**。本条描述的「退出只清 sessionStorage」在 **R2 后仍然成立**（行为未变，只是落点集中了）。⚠️ **再按语（§5-AB，R6，2026-10-05）**：R6 直接**删除**两个壳（非改写）⇒「并进笔 4 要改 `CustomerPage` + `MerchantPage` ⇒ **+2 文件、破 5**」的**前提整体消失**（笔 4 落的是前端传输层、未动壳，且两壳此后已删）；保留原句作历史记录。
 
 - **（5）【漂移登记 · 本笔不修】** 除 (1) 外另 **5** 条：
-  1. **`getUserInfo` 的消费点是 3，不是 5。** 实测 `grep -rn "getUserInfo" src/` = `LoginPage.vue:141` / `UserInfoPage.vue:99` / `GoodsUp.vue:153`（另 2 处是 `GoodsUp` 的本地函数名、1 处是 `endpoints.js:26`）。**三份独立旁证同为 3**：`UserController.java:133` javadoc「前端**三个**调用点」、§6-A P1.2「消费点 **3**」、`api-contract.md:171` 只列 3 个文件。⚠️ 「5」**最可能**来自 `endpoints.js` 的 `user:` 块恰好 5 条（**推断档，未证**）。
+  1. **`getUserInfo` 的消费点是 3，不是 5。** 实测 `grep -rn "getUserInfo" src/` = `LoginPage.vue:141` / `UserInfoPage.vue:99` / `GoodsUp.vue:153`（另 2 处是 `GoodsUp` 的本地函数名、1 处是 `endpoints.js:26`）。**三份独立旁证同为 3**：`UserController.java:133` javadoc「前端**三个**调用点」、§6-A P1.2「消费点 **3**」、`api-contract.md:171` 只列 3 个文件。⚠️ 「5」**最可能**来自 `endpoints.js` 的 `user:` 块恰好 5 条（**推断档，未证**）。⚠️ **按语（P2.6，2026-10-05，§5-AC）**：本条是**当时口径**；P2.6 起 `getUserInfo` 的消费点 = **0**（三处**全改走 `/user/me`**）⇒ `grep -rn "getUserInfo" src/` 今日只余 `GoodsUp.vue` 本地函数名等非调用命中，不再是 3。
   2. **§6-A P1.2 的行号过时**：写 `LoginPage.vue:150` / `UserInfoPage.vue:101` / `GoodsUp.vue:155` → 实测 **`:141` / `:99` / `:153`**（成因 = `#48` 前端笔挪行）。
   3. **`api-contract.md:171` 同病 + §5 全表停摆**：写 `LoginPage.vue:142` / `GoodsUp.vue:150` / `UserInfoPage.vue:96` → 实测 **`:141` / `:153` / `:99`**；且 §5 矩阵全表行号停在 **2026-09-30**（`#48` 之前），此后**未重测**。
   4. **§5-J (4) 与 §6-B P2.6 的行号过时**：写 `LoginPage.vue:163-169`（写）/ `GoodsUp.vue:145-146`（读）/ `UserInfoPage.vue:91-92`（读）→ 实测写 **`LoginPage.vue:148-153` + `:158` / `:162`**、读 **`GoodsUp.vue:148-149`** / **`UserInfoPage.vue:94-95`**。
@@ -629,7 +629,7 @@
 - **（3）读口顺序的实现对裁决**收严**了（请追认）**：裁决（本笔方案 §3.1）是「6 个写口全部**同步**缓存」。本笔实现为 6 个写口一律 `dropRestored()`（**整体作废**），而非逐字段同步。理由：本模块写口**只有两类调用方** —— 登录（`LoginPage.vue`）与退出（`CustomerPage` / `MerchantPage` / `http.js` 的 401 出口），两者都是**身份变更**。丢弃给出可证不变量「**任何一次写之后，读口 ≡ 笔前行为**」；逐字段同步反而留过期字段：新标签页恢复成商家 Y 之后再登录成客户 B、而 B 的 `merchantid` 为空（`LoginPage.vue:148` 的 `if` 跳过写）⇒ `restored.merchantId` 留着 Y、存储里是空的、「优先」就把 Y 读出来。**「优先」只在恢复窗口内生效**（窗口 = 启动到第一次本地写）。⚠️ **再按语（§5-AB，R6，2026-10-05）**：本条举证里的两个壳**已随 R6 删除** ⇒「本模块写口只有两类调用方（登录 / 退出）」这个**结论**未变，但退出侧的落点现在**只有** `UserCenter.vue:52-55`（+ `http.js` 的 401 出口），壳内已无写口。
 
 - **（4）恢复不了 / 已知残留（如实登记，均**非**回归）**：
-  - **password 恢复不了**：`/user/me` 只答 5 列（`customerid / merchantid / username / usertype / gender`）⇒ `GoodsUp.vue:148-149` 与 `UserInfoPage.vue:94-95`（拿密码做**真凭据校验**）在新标签页**仍失效**。⚠️ 改前新标签页的 `sessionStorage` 整个是空的，本来就取不到密码 ⇒ 本笔只是**没有把它们变好**。P2.6 的落点。
+  - **password 恢复不了**：`/user/me` 只答 5 列（`customerid / merchantid / username / usertype / gender`）⇒ `GoodsUp.vue:148-149` 与 `UserInfoPage.vue:94-95`（拿密码做**真凭据校验**）在新标签页**仍失效**。⚠️ 改前新标签页的 `sessionStorage` 整个是空的，本来就取不到密码 ⇒ 本笔只是**没有把它们变好**。P2.6 的落点。 ⚠️ **已结清（P2.6，2026-10-05，§5-AC）**：两页现均改走**会话驱动**的 `/user/me`（`GoodsUp.vue:148-149` / `UserInfoPage.vue:94-95`），**不再读密码** ⇒ 新标签页**可用**，本缺口消失。
   - **占位串会被当成真 id**：恢复字段判据与 `LoginPage.vue:148-153` **逐字对齐**（`if (x)` 只写真值，不加过滤）⇒ `loginAdd` 的默认值 `'暂无数据'` 会作为 `merchantid` 被恢复，恢复窗口内 `ProductPage` 的 `isMerchant` 判定会当成商家。⚠️ **不是本笔引入的新行为** —— 正常登录后 `LoginPage` 也把同一个值写进存储，改前同一条分支走到这里。**不修**（修 = 改 `LoginPage` 行为，不属本笔）。
   - **服务端会话已过期而本地存储还在**时不打探针（`isLoggedIn()` 为真直接返回）⇒ 要等某个业务请求 401 才发现。**既有**行为。
   - **匿名访客每次开页面多一次请求**：一次 401、无 DB 查询（`getSession(false)` 即返回）；后端不可用时至多白屏 **3000ms**（探针显式覆盖默认的 10s），仍 fail-open。
@@ -966,12 +966,12 @@
 | `progress.md` 自指（13 处 `progress.md:NN`） | 最大 `:747` | **零漂移** | 本节插在 `:904` 之后，**全部自指都在其前** |
 
   - ⚠️ **第 4 条漂移（落码中才发现，超出方案里那 3 条）**：「两壳顶栏**唯一**差异 = 右起第 2 项」这句**在 `src/` 内有 3 处**（不只是方案里写的 `nav.js:12`）—— `config/nav.js:12`、`router/index.js:30`、`CustomerPage.vue:70`。⚠️ **按语（§5-AA，R4，2026-10-05）**：本条的 `router/index.js:31` **是 R3 自己写错的地址**（实测那句在 **`:30`**；`:31` 是 R3 的标题行）—— **R4 已把 3 处同行订正为 `:30`**。见 §5-AA (11)D8。实测 `MERCHANT_NAV.left.to` 是 `/merchant`、`CUSTOMER_NAV.left.to` 是 `/customer` ⇒ **左项也差**。**3 处已全部同行订正**（只改注释、零行号漂移）；§5-Y (6) 那句作为 R2 的**如实记录保留原样 + 按语**。⚠️ **再按语（§5-AB，R6，2026-10-05）**：本条说的「3 处」中含 **`CustomerPage.vue:70`（已随两壳合一悬空）** —— 那句已搬进 `AppShell.vue:61-63`；另 2 处（`config/nav.js:12`、`router/index.js:30`）**地址未漂**。
-  - ⚠️ **第 5 条：一处「预存在的假话」，R3 查证但**不修**（登记）** —— `progress.md:401` 的「（差在 **`HomePage.vue:116`** 同行两键、`ProductPage.vue:415`/`:416` 同行两次出现）」**已失效**：实测 `HomePage.vue` **全文 0 处** `loginUsername` / `merchantid`（`grep` 零命中）。**追历史确认了成因**：`loginUsername` 曾在 `9b87ab9` / `2ced01c` 的 `:116`（当时确有 `!!loginUsername || !!merchantid` 两键同行）⇒ 该地址**写的时候是对的**；**笔 3/8（`6639c1f`「用户与登录域 3 个 view 迁到 API 层」）**把这段换成 `:118` 的注释 + `:119` 的 `isLogin = computed(() => isLoggedIn())` ⇒ 两键**从该文件整体消失**，地址自此悬空。⚠️ 即：它**不是「漂移」而是「悬空」** —— §5-W (5) 把 `progress.md:401` 列进「零漂移」清单时，它**当时就已经不对**了（当时的核法只回放行内容、没回放「这行还该不该有这个键」）。⚠️ `auth.js:108` 的同一地址**不算假话** —— 它写的是「**原**唯一**定义在 `HomePage.vue:116`」，`9b87ab9` 可证 ✓。⇒ **本笔不修**。⚠️ **挂账落点与归属（用户 2026-10-05 裁定 —— 必须是有笔名的挂账，不是孤儿待办）**：
+  - ⚠️ **第 5 条：一处「预存在的假话」，R3 查证但**不修**（登记）** —— `progress.md:401` 的「（差在 **`HomePage.vue:116`** 同行两键、`ProductPage.vue:415`/`:416` 同行两次出现）」**已失效**：实测 `HomePage.vue` **全文 0 处** `loginUsername` / `merchantid`（`grep` 零命中）。**追历史确认了成因**：`loginUsername` 曾在 `9b87ab9` / `2ced01c` 的 `:116`（当时确有 `!!loginUsername || !!merchantid` 两键同行）⇒ 该地址**写的时候是对的**；**笔 3/8（`6639c1f`「用户与登录域 3 个 view 迁到 API 层」）**把这段换成 `:118` 的注释 + `:119` 的 `isLogin = computed(() => isLoggedIn())` ⇒ 两键**从该文件整体消失**，地址自此悬空。⚠️ 即：它**不是「漂移」而是「悬空」** —— §5-W (5) 把 `progress.md:401` 列进「零漂移」清单时，它**当时就已经不对**了（当时的核法只回放行内容、没回放「这行还该不该有这个键」）。⚠️ `auth.js:108` 的同一地址**不算假话** —— 它写的是「**原**唯一**定义在 `HomePage.vue:116`」，`9b87ab9` 可证 ✓。⇒ **本笔不修**。⚠️ **挂账落点与归属（用户 2026-10-05 裁定 —— 必须是有笔名的挂账，不是孤儿待办）**： ⚠️ **本条第 5/6 点已结清（P2.6，2026-10-05，§5-AC）** —— 第 5 点的 `HomePage.vue:116`（`progress.md:402` 引用）与第 6 点的 `auth.js:118`（`ShoppingCart` / `HistoricalOrders`）均已在**原处**加按语、标为历史地址。
     1. **悬空事实**：`progress.md:401` 引的 `HomePage.vue:116`（原文「同行两键」）**已不存在** —— 该文件现在**零处** `loginUsername` / `merchantid`（`grep` 零命中）。
     2. **成因（已追历史）**：`9b87ab9` / `2ced01c` 时 `:116` **确有**那两键（`!!loginUsername || !!merchantid`，地址写得对）；**笔 3/8（`6639c1f`「用户与登录域 3 个 view 迁到 API 层」）**把它换成 `:118` 的注释 + `:119` 的 `isLogin = computed(() => isLoggedIn())` ⇒ 两键**整体消失**、地址自此悬空。⇒ 性质是**「悬空」不是「漂移」**。
     3. **为何本笔不修**：修它必须**重算 54 / 52 的逐出现口径**（那条口径本身是 §5-I / §5-J 的**记账结论**）—— 只改一个引用点、不动算术，等于把记账笔的结论改成**猜**。属记账笔，不属路由笔。
     4. **归属笔名 = `P2.6`（「sessionStorage 直接用」→ 凭据进 httpOnly Cookie）那笔** —— 它本来就要动 `auth.js` 的登录态口径与 `HomePage` 的 `isLogin` 来源，顺手重算一遍最省。**备选归属 = 界面优化笔**（若 `P2.6` 长期不动）。
-    6. **【同族第 2 条 —— R4 新发现，并入本挂账】** `api/auth.js:118` 引的 `ShoppingCart.vue:88-93` / `HistoricalOrders.vue:36-41` 称「收敛**逐字相同**的 2 处降级链（customerid → merchantid → loginUsername）」—— **实测那两段已无降级链**（现为 `const loading = ref(false)` + 注释 + `const getBuyerId = () => resolveBuyerId()`）⇒ 与第 5 条**同类（悬空）**、**同一成因**（都是「凭据键被 API 层笔搬走、引用未跟」）。⚠️ **为何并入同一挂账**：那段注释**逐个列出了三个凭据键名** ⇒ 与第 5 条一样牵动 **§5-I / §5-J 的 54/52 逐出现口径**，修它 = 重算同一笔账。⇒ **归属笔名 = `P2.6`**（备选界面优化笔），本笔（R4）**不修**。
+    6. **【同族第 2 条 —— R4 新发现，并入本挂账】** `api/auth.js:118` 引的 `ShoppingCart.vue:88-93` / `HistoricalOrders.vue:36-41` 称「收敛**逐字相同**的 2 处降级链（customerid → merchantid → loginUsername）」—— **实测那两段已无降级链**（现为 `const loading = ref(false)` + 注释 + `const getBuyerId = () => resolveBuyerId()`）⇒ 与第 5 条**同类（悬空）**、**同一成因**（都是「凭据键被 API 层笔搬走、引用未跟」）。⚠️ **为何并入同一挂账**：那段注释**逐个列出了三个凭据键名** ⇒ 与第 5 条一样牵动 **§5-I / §5-J 的 54/52 逐出现口径**，修它 = 重算同一笔账。⇒ **归属笔名 = `P2.6`**（备选界面优化笔），本笔（R4）**不修**。 ⚠️ **已结清（P2.6，2026-10-05）**：`api/auth.js:118` 就地加按语（§5-AC）。
     5. 另：`auth.js:108` 的同一地址**不算假话** —— 它写的是「**原**唯一**定义在 `HomePage.vue:116`」，`9b87ab9` 可证 ✓。
   - ⚠️ **第 6 条（R3 自身产生，已就地处置）**：`router/index.js` 的「全仓**没有任何代码 `router.push('/')`**」注释行 `:184` → **`:185`**（尾段改写 +1）。全仓**只有 §5-Z (12) 引它**，已同步改；无第二个引用点。
 
@@ -1118,7 +1118,7 @@
   ⚠️ **索引的用法（§5-P 口径）**：上列行号只是**按语落点**在写入时的坐标 —— 本文件在**这些行之前**一旦增删即会漂。**权威 = 各节自己的按语本身**：以 `§5-AB` 为关键字 grep 本文件 = **20 行**（**19 处按语** + 本索引行本身），本条只做索引、**不承担坐标承诺**。
 
 - **（12）本笔新发现的漂移 3 条（登记，**不修**）**：
-  - **D-new-1 `src/api/auth.js:44`**：现在时表述「前端写口只有两类调用方 —— 登录（`LoginPage.vue`）与退出（**`CustomerPage` / `MerchantPage`** / `http.js` 的 401 出口）」—— 自 R1/R2 起**已不成立**（退出点早已只在 `UserCenter.vue:52-55`），与同文件 `:146/:151` 的历史句**自相矛盾**。按**裁决 D6** → **P2.6 那笔**（凭据驱动 → 会话驱动）；本笔**不修、也不动 `auth.js`**（它就是 P2.6 的落点）。⚠️ 该行「两个壳」这半句随 R6 **一并悬空** —— P2.6 动手时**一起**处理。
+  - **D-new-1 `src/api/auth.js:44`**：现在时表述「前端写口只有两类调用方 —— 登录（`LoginPage.vue`）与退出（**`CustomerPage` / `MerchantPage`** / `http.js` 的 401 出口）」—— 自 R1/R2 起**已不成立**（退出点早已只在 `UserCenter.vue:52-55`），与同文件 `:146/:151` 的历史句**自相矛盾**。按**裁决 D6** → **P2.6 那笔**（凭据驱动 → 会话驱动）；本笔**不修、也不动 `auth.js`**（它就是 P2.6 的落点）。⚠️ 该行「两个壳」这半句随 R6 **一并悬空** —— P2.6 动手时**一起**处理。 ⚠️ **已结清（P2.6，2026-10-05，§5-AC）**：`src/api/auth.js:44` **就地**改成「退出（`UserCenter.vue` / `http.js` 的 401 出口）」，并注明原写的两个壳是 R1/R2 前的旧形状。
   - **D-new-2 `docs/agent/api-contract.md:195`**：引 `ChatRoom.vue:164`，实测 `:164` 是**注释行**（「获取用户信息」），代码在 `:167`。与 R4 的 D9 **同族**（都是「笔 4/8 之后契约表未重测」），**合并挂账**、**归属笔名待定**。
   - **D-new-3 `src/components/HelloWorld.vue`**：**孤儿文件**（Vue CLI 脚手架残留），全仓 **0 引用**（`grep -rn "HelloWorld" src/` 只命中自身）⇒ 归**界面优化笔**。
 
@@ -1148,6 +1148,55 @@
 
 ---
 
+### 5-AC. `P2.6` 凭据驱动 → 会话驱动（`feat/auth-session-driven`，2026-10-05）：**前端明文密码退场 + `/user/me` 成为唯一资料读口** —— 10 文件 = 8 代码 + 2 文档（⚠️「≤5」是 R1–R6 重构序列的预算，本笔由用户直接给定落码清单，**不受其限**）
+
+> **性质**：前端 **5 代码文件**（`api/auth.js` / `LoginPage.vue` / `GoodsUp.vue` / `UserInfoPage.vue` / `api/http.js`）+ 后端 **2 代码文件**（`user/service/UserService.java` / `user/controller/UserController.java`）+ **1 测试文件**（`smoke/AuthSessionSmokeTest.java`）+ **2 文档**（本文件 / `api-contract.md`）。
+> **来源**：§5-J (4) 的裁定（**2026-10-04**，用户）——「删前端 4 个读写口 + 拆 `UserService.java:185` 的凭据重验」；前提 = 鉴权笔的 **httpOnly Cookie 会话**（已由鉴权笔 1–4 + 会话恢复笔落地）。
+> **一句话**：把前端「自持明文密码、拿它去 `/user/getUserInfo` 换资料」这条**凭据驱动**老路，换成「凭 Cookie 会话、`/user/me` 直接答资料」的**会话驱动**新路。
+
+- **（1）两跳复用（裁决 D1）——`/user/me` 与 `/user/getUserInfo` 返回同一个 `Map`。**
+  `meInfo(userId)` = `publicInfo(userId)`（缓存读 `userPublic`，给 `username`）→ `profileOf(username)`（`user` 表整行 + 条件头像 `image`）。⇒ 两者**逐键相同、只差 `success` 键**（`Result.ok(Map)` 顶层平铺）。`profileOf` = **步骤 ②③ 的逐字搬移**（含无条件 `put("image", …)` 与吞异常 `catch`），故「同一张 Map」不是巧合而是**同一段代码**。
+  ⚠️ **最关键的坑（测试专属，已记入 `userRow` 的 javadoc）**：`profileOf` 的 `put("image", image)` 是**无条件**的 ⇒ 行 `Map` **不可变**时该 `put` 抛 `UnsupportedOperationException`、**被同块 `catch` 静默吞掉**、头像凭空消失。生产行**可变**（`queryForMap` 返回可变 `HashMap`）⇒ 只有测试会踩到。**本笔实测踩到两次**（初用 `Map.of` 造行 ⇒ `$.image` 断言红）。
+
+- **（2）后端改动（净 +57 行，全在 `UserService.java` ~`:220` 之后）。**
+  `UserService.java` **378 → 435**：新增 `private Map<String,Object> profileOf(String username)`（`:273`，步骤 ②③ 搬移）与 `public Map<String,Object> meInfo(String userId)`（两跳）。`getUserInfo(username, password)` **保留**（步骤①凭据校验 + `return profileOf(username)`）。⇒ `:32` / `:98` / `:185` **回放 IDENTICAL**（新增全在 `:220` 之后）；`selectRoleForProfile` 的**真实调用点** HEAD 在 **`:242`**、本笔后 **`:239`**（§5-J (4) 原记的 `:185` **在 HEAD 即已偏**，见 (6)）。
+  `UserController.java` **230 → 230（净零）**：`me` 改调 `userService.meInfo(userId)`（同行替换）；`me` 的 javadoc 与 `@RequestParam` 段**同行重写**；`:133-135` 的「前端三个调用点」**就地订正**为「P2.6 起 **0 个调用方**」。⇒ `:23` / `:150` / `:219` IDENTICAL；`:133` / `:171` **同行号变内容**（引用其旧文者须更新，已在下文 (6) 处理）。
+  ⚠️ **不变量（裁决 D1/D4）**：`UserCacheService` / `UserDao` / 任何 SQL **一字未动**；`image` 的跨表处理**留在 `profileOf`**、不下推 DAO；`updateAvatar` 的 `login.Role` 与 `profileOf` 的 `user.usertype` **不合并**；缓存载荷**不扩宽**。
+
+- **（3）前端改动（5 文件，全部**净零**）。**
+  `api/auth.js` **202 → 202**：`K.password` 删除（墓碑注释）、`getPassword()` 删除（墓碑）、`setCredentials` → **`setUsername`**（只写用户名）、`clearCredentials` 少清一键。头部 `:3-8` 就地改成**历史口径 vs 现状**（54 / 6 = 基线历史值；今日登录态 **4 键**、登录密码键归零），**避免写出该键字面量**（否则复检 `grep` 命中注释）。
+  `LoginPage.vue` **470 → 470**：登录成功后第二发改走 `POST /user/me`（`{allowUnauthorized:true}`）+ `setUsername`/`setRole`。`GoodsUp.vue` **590 → 590** / `UserInfoPage.vue` **261 → 261**：读口由 `/user/getUserInfo`（带密码）改为 `/user/me`（无参）；守卫由「有 `username`」改为 **`if (!isLoggedIn()) return`**（匿名访客仍**零请求**）。
+  `api/http.js` **221 → 221**：仅 `allowUnauthorized` 的注释（`:9-10`）改口径 —— 今日 **4 个调用点**（`main.js:28` 启动探针 + 三个资料读点 `LoginPage.vue:144` / `GoodsUp.vue:153` / `UserInfoPage.vue:99`）。**不是全局开关**，且**仍然照抛**（不吞异常）。
+  ⚠️ `role` **仍取自 `loginSelect` 的文本**（裁决 D5：**不**把 `role` 加进 `/user/me` 投影 —— 它属 `login` 表，加了就是口径分叉，见 `auth.js:99-106`）。C3 若要走恢复路径拿 `role`，是**另一笔**。
+
+- **（4）`AbstractSmokeTest`「待定」的**解决**（用户要求 ①）——**结论：**不改**，理由成文。**
+  新 stub（`queryForMap` 行 + `query(contains("login"))` + `query(contains("customerimage"))`）**只落在测试类本地**，不进共享基类；共享 `query(String, RowMapper, Object...)` 重载的歧义，用**不相交的 SQL 子串 matcher** 化解。⇒ 基类**不动**（**代码**文件数 8 而非 9；连 2 文档共 10）。跨两个顶层类共用的 `userRow(...)` 做成 **`static` 包级** helper、以 `AuthSessionSmokeTest.userRow(...)` 调用（`AuthSessionSmokeTest` 与 `AuthSessionSwitchOnTest` 是**同一文件的两个顶层类**，private 不共享）。**测试数 13 不变。**
+
+- **（5）验证（提交前全绿；本笔不 commit）。**
+  - 后端：`./mvnw -B test` = **209 run / 0 failures / 0 errors / 19 skipped / BUILD SUCCESS**。⚠️ 口径：surefire 目录**残留上次 .txt**，报数须**按时间戳过滤**（否则累加出 217/8 的假数，见 `surefire-stale-reports`）。
+  - 前端：`npm run build` **exit 0**；`npx eslint src --ext .vue,.js` **exit 0**。
+  - `grep -rn "loginPassword" src/` = **0**（复检要求）。
+  - 关键断言：`AuthSessionSmokeTest` 实测 `/user/me` 去 `success` **逐键等于** `/user/getUserInfo` 的响应（两跳端到端走通）。
+  - `dist` 结构探针：`loginPassword` **0** / `/user/me` **1** / `allowUnauthorized` **5** / `getUserInfo` **2**。
+  - 净零复核：`LoginPage.vue` 470、`GoodsUp.vue` 590、`UserInfoPage.vue` 261、`auth.js` 202、`http.js` 221、`UserController.java` 230、`api-contract.md` 220；`UserService.java` **+57**（有意）。
+
+- **（6）漂移结清 + 归属（用户要求 ②：**不留孤儿**）。**
+  - ✅ **三条悬空引用结清**（§5-C `:224`）：① `progress.md:402` 的 `HomePage.vue:116`（⚠️ §5-C 原记 `:401`，**内容实在 `:402`** —— 见 §5-Z (9) 第 5 条）② `api/auth.js:118`（`ShoppingCart` / `HistoricalOrders`）③ `api/auth.js:44`（两个壳 → `UserCenter.vue`）—— **均在原处加按语**（本笔落码时全部就地关闭）。
+  - ✅ **`api-contract.md`**（净零 220）：`:38`（`/user/me` 返回形态 → `user` 整行 + `image`）、`:46`、`:161-164`（差集成员互换、**仍 4**）、`:171`（行改键为 `/user/me`、`getUserInfo` 归零）、`:203`（行改键为 `/user/getUserInfo`）。
+  - ✅ **`progress.md` 就地按语**：`:224` / `:402` / `:414` / `:573` / `:632` / `:969` / `:974` / `:1121` / `:1162`。
+  - ⚠️ **本笔新发现的漂移（第 9 条）**：`progress.md:414` 引的 `UserService.java:185` **在 HEAD 即已偏**（HEAD `:185` 是 `loginAdd` 形参行；`selectRoleForProfile` 的真实调用点在 HEAD **`:242`**）⇒ 本笔后为 **`:239`**（javadoc 压缩 3 行 ⇒ 上移）。已并入 `:414` 的按语。
+  - ⚠️ **另发现（非本笔引入，**已就地补数**）**：`api-contract.md:161` 的 `42` 是 **2026-10-03 基期值**；**现状 = 43** —— 会话恢复笔的 `main.js:28` 探针未计入基期（本笔实测 `grep -rn "http\.\(post\|get\)(" src/` = **43**），**不同路径仍 31**（`/user/me` 进 / `/user/getUserInfo` 出）⇒ 差集仍 4。**处置 = 就地写「基期 42 / 现状 43」并注明来源**（`:161`）—— **不**指向已完成的笔（`#48`「前端 API 层规范化」已交付，不能再当归属）；§6 头部 / P2.1 / P2.3 及 §5-I / §5-S 里的 `42` 均为**基期口径**，按原样保留。
+  - ⚠️ **`WebAuthConfig.java:83-90` 缺守卫**（用户要求 ② 点名）：**归属笔名 = 界面优化笔（C3 笔）** —— 见「本笔不做」，本笔**不动**鉴权配置。
+  - ⚠️ **`/user/getUserInfo` 的最终去留**（= §5-J (4) 那一半的挂账）：**归属笔名 = 「跨四域清除 schema 前缀」笔**（或独立记账笔）—— 删它会使 `UserDao.selectRoleForProfile` 的 SQL 字面量消失，把全仓「硬编码 `mall_management_sql.` 前缀 = **39 处**」基线拉到 **38**、端点数 **35 → 34** ⇒ **必须与记账笔同批**，本笔**只保留、不删**。
+
+- **（7）手测项（留 T 批，本笔不单跑；用户裁定 六、不手测）**：**T-new-9** 登录成功后 `sessionStorage` **不再**有密码键（只有 `loginUsername` / `merchantid` / `customerid` / `role`）；**T-new-10** 开新标签页直入 `#/merchant/goodsUp` 与 `#/customer/user/info` ⇒ 头像 / 店名 / 10 列渲染正常（会话恢复 + `/user/me` 通路）；**T-new-11** 退出后再进这两页 ⇒ 回落默认头像、**无错误弹窗**（`isLoggedIn()` 为假 ⇒ 直接 return）。
+
+- **（8）本笔不做**（用户裁定 八）：不翻开关（`app.auth.enabled` **仍 `false`**）、不动 `ProductPage.vue`（R5 永久不做）、不动界面样式（界面优化笔）、不动 C3、不动 `ci.yml` / A3 脚本、不动 `UserCacheService` / `UserDao` / SQL、**不 merge**（PR 由用户合）。
+
+- **（9）不加「更新记录」行**（照 `§5-H (3)` / §5-N / §5-Q (4) / §5-T (7) 先例）。
+
+---
+
 ## 6. 前端规范化（2026-10-03 双审计）
 
 > **口径**：`亲读` —— `Mall-management-web/mall-management-system/src` 全量 grep + 逐行读（只读，前端代码**一字未动**）。
@@ -1159,7 +1208,7 @@
 
 | 项 | 分布 | 归属 | 验收判据 | 依赖 |
 |---|---|---|---|---|
-| **P1.2 `getUserInfo` 空体** | 消费点 3：`LoginPage.vue:150`、`UserInfoPage.vue:101`、`GoodsUp.vue:155` —— 均 `await res.json()` **无判空**，靠外层 `catch` 兜 `SyntaxError`（后端失败 = HTTP 200 **空体**，`api-contract.md:14`） | **A** | ⚠️ **全审计最脆一条**：笔 2/3 **不得**把该响应包成**可解析 JSON** —— 一旦 `json()` 成功且无 `merchantid`/`customerid`，`LoginPage:154/157` 静默不写 sessionStorage、**不抛不报**。判据写死：失败路径必须继续**抛异常**落 `catch`；笔 3 异常白名单**必须排除** `UserController.getUserInfo` | 笔 2 + 笔 3 |
+| **P1.2 `getUserInfo` 空体** | 消费点 3：`LoginPage.vue:150`、`UserInfoPage.vue:101`、`GoodsUp.vue:155` —— 均 `await res.json()` **无判空**，靠外层 `catch` 兜 `SyntaxError`（后端失败 = HTTP 200 **空体**，`api-contract.md:14`） | **A** | ⚠️ **全审计最脆一条**：笔 2/3 **不得**把该响应包成**可解析 JSON** —— 一旦 `json()` 成功且无 `merchantid`/`customerid`，`LoginPage:154/157` 静默不写 sessionStorage、**不抛不报**。判据写死：失败路径必须继续**抛异常**落 `catch`；笔 3 异常白名单**必须排除** `UserController.getUserInfo` | 笔 2 + 笔 3（⚠️ **P2.6 按语（2026-10-05，§5-AC）**：本行「消费点 3」及三个行号是**当时口径** —— `LoginPage:150`/`UserInfoPage:101`/`GoodsUp:155` 实测早已是 `:141`/`:99`/`:153`，**P2.6 后三处全改走 `/user/me`** ⇒ 该端点消费点 **0**；本条「失败必须继续抛异常」的判据对 `/user/me` 亦然（`allowUnauthorized` 只旁路 401 出口，**不吞异常**）） |
 | **P1.3 message 10 端点形态** | **10/10 全 `Map`**（无 String/null）；在用 9 个（`getOrCreateConversation` 无调用方） | **A** | 顶层 `success`/`msg`/`list`/`user` **一个都不能挪进 `data.*`**（`ChatRoom.vue:169` 直接 `return data.user`；⚠️ **R4 顺带订正**：原记 `:170` —— 写这句的 `6afaac2`（2026-10-03）当时**是对的**（基线 `9b87ab9` 的 `return data.user` 在 `:170`），**笔 4/8（`5990d07`，2026-10-04）把它搬到 `:169`**、文档未跟 ⇒ 属**漂移**不是错记，见 §5-AA (11)） | 笔 2 |
 | **P1.4 `goodstype` 双形态** | GET 无参→读 `list`（`GoodsAdd.vue:135`）；POST 带参→**不读响应**（`GoodsAdd.vue:166` fire-and-forget）；`HomePage.vue:154` 用 **POST 无参**→读 `list` | **A** | 两条路径都读**顶层** `list`；POST 无参分支须继续返 `{success,list}`。**已在笔 2 例外清单**（签名不动） | 笔 2 |
 | **P2.4 `success`/`msg` 读点** | `.success` **34 处**真实判定（另 3 处是 CSS 类 `.success-cover`/`.success-text`，非判定）；`.msg` **17 处** | **A** | 笔 2 的「JSON 字节等价」**由这 51 处定义** —— 顶层 `success`(bool)/`msg`(string) 键名与语义逐字不变 | 笔 2 |

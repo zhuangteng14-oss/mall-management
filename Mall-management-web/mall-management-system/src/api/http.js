@@ -6,8 +6,8 @@
 //   ③ **401 出口**（鉴权笔 4）：清本地登录态 + 触发**已注册**的跳转。
 //      ⚠️ **动作本体不在本层** —— 本层只 `clearAuth()` + 喊一声；「跳哪」由 `main.js` 决定
 //      （本层**不能** import router：`router → views → http` 会成环，见 `setUnauthorizedHandler`）。
-//      ⚠️ 可**按次旁路**：`{ allowUnauthorized: true }` —— 只给会话恢复笔的启动探针用
-//      （它注定收到 401，见 `request` 的 401 分支）。**不是**全局开关。
+//      ⚠️ 可**按次旁路**：`{ allowUnauthorized: true }` —— 今日 4 个调用点：会话恢复笔的启动探针
+//      （注定收到 401）+ P2.6 的三个资料读点（`LoginPage.vue` / `GoodsUp.vue` / `UserInfoPage.vue`，会话没了时照抛）。**不是**全局开关。
 //
 // ⚠️ 本层**不判业务成功**。`body.success` 的语义各页不同（有的弹 msg、有的静默、
 //    有的走另一分支），统一判 = 一次性改 34 处行为 ⇒ 留在各 view 自己判。

@@ -79,7 +79,7 @@
 import { ref, onMounted } from 'vue'
 import { http, handleApiError, assetOf } from '../api/http'
 import { endpoints } from '../api/endpoints'
-import { getUsername, getPassword } from '../api/auth'
+import { getUsername, isLoggedIn } from '../api/auth'
 
 const userInfo = ref({})
 const idType = ref('')
@@ -91,12 +91,12 @@ onMounted(() => {
 })
 
 const getUserData = async () => {
-  const username = getUsername()
-  const password = getPassword()
-  if (!username) return
+  if (!isLoggedIn()) return   // P2.6：判据由「有 username」改成「有登录态」（新标签页恢复来的身份也可用）
+  // ⚠️ 不再读密码（`getPassword` 已随 P2.6 退场）：本页只作资料展示，不做凭据校验。
 
   try {
-    const res = await http.post(endpoints.user.getUserInfo, new URLSearchParams({ username, password }))
+    // P2.6：改走**会话驱动**的 /user/me（无参）；`allowUnauthorized` 让 401 照抛给下面的 catch
+    const res = await http.post(endpoints.user.me, null, { allowUnauthorized: true })
     const data = await res.json()
     userInfo.value = data
 
