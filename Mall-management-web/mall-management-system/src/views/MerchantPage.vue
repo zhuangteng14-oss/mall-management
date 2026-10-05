@@ -3,7 +3,7 @@
     <div class="top-nav">
       <div class="nav-left">
         <router-link
-          v-for="item in MERCHANT_NAV.left"
+          v-for="item in navTop.left"
           :key="item.tab"
           :to="item.to"
           class="nav-btn"
@@ -15,7 +15,7 @@
       </div>
       <div class="nav-right">
         <router-link
-          v-for="item in MERCHANT_NAV.right"
+          v-for="item in navTop.right"
           :key="item.tab"
           :to="item.to"
           class="nav-btn"
@@ -44,8 +44,8 @@ import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { http, handleApiError } from '../api/http'
 import { endpoints } from '../api/endpoints'
-import { getMerchantId, getCustomerId } from '../api/auth'
-import { MERCHANT_NAV } from '../config/nav'
+import { getMerchantId, getCustomerId, isLoggedIn } from '../api/auth'
+import { MERCHANT_NAV, navFor } from '../config/nav'
 
 // ── R2（2026-10-05）：商家壳由「内部 `curPage` / `curSubPage` ref + `v-if`/`v-show`」改为
 //    「嵌套路由 + `<router-view>`」—— 与 R1 的 `CustomerPage.vue` 逐字同构（用户裁决：镜像 R1）──
@@ -140,6 +140,10 @@ onMounted(async () => {
 onUnmounted(() => {
   if (unreadPollingTimer) clearInterval(unreadPollingTimer)
 })
+
+// R3：顶栏的登录态分支 —— **在这里算一次**（`isLoggedIn()` 不是响应式，写成 `computed` 会**永远不
+//   更新**；见 `config/nav.js` 的 `navFor`）。壳每次进出都会重建 ⇒ 登录 / 退出 / 401 后必然重算，够用。
+const navTop = navFor(MERCHANT_NAV, isLoggedIn())
 </script>
 
 <style scoped>

@@ -3,7 +3,7 @@
     <div class="top-nav">
       <div class="nav-left">
         <router-link
-          v-for="item in CUSTOMER_NAV.left"
+          v-for="item in navTop.left"
           :key="item.tab"
           :to="item.to"
           class="nav-btn"
@@ -15,7 +15,7 @@
       </div>
       <div class="nav-right">
         <router-link
-          v-for="item in CUSTOMER_NAV.right"
+          v-for="item in navTop.right"
           :key="item.tab"
           :to="item.to"
           class="nav-btn"
@@ -44,8 +44,8 @@ import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { http, handleApiError } from '../api/http'
 import { endpoints } from '../api/endpoints'
-import { getMerchantId, getCustomerId } from '../api/auth'
-import { CUSTOMER_NAV } from '../config/nav'
+import { getMerchantId, getCustomerId, isLoggedIn } from '../api/auth'
+import { CUSTOMER_NAV, navFor } from '../config/nav'
 
 // ── R1（2026-10-05）：客户壳由「内部 `curPage` ref + `v-if`/`v-show`」改为「嵌套路由 + `<router-view>`」──
 // 壳现在只剩三件事：顶栏、内容区外壳、未读红点轮询。**页面选择权全交给路由**（见 `router/index.js`）。
@@ -67,7 +67,7 @@ import { CUSTOMER_NAV } from '../config/nav'
 const CACHE_TABS = ['HomeTab', 'GoodsSelect']
 
 // R2（2026-10-05）：顶栏 4 个入口改由 `src/config/nav.js` 的表驱动（用户裁决 6）——
-//   单一事实源；R6 抽 `AppShell` 时两壳顶栏靠这份配置合并（两壳**唯一**差异 = 右起第 2 项）。
+//   单一事实源；R6 抽 `AppShell` 时两壳顶栏靠这份配置合并（两壳差异只有两处：左项 `to` + 右起第 2 项）。
 //   `active` 判据仍是 `route.meta.tab`（**不是**路径前缀：父路径会让「商城主页」在所有子路由上高亮）。
 
 
@@ -141,6 +141,10 @@ onMounted(async () => {
 onUnmounted(() => {
   if (unreadPollingTimer) clearInterval(unreadPollingTimer)
 })
+
+// R3：顶栏的登录态分支 —— **在这里算一次**（`isLoggedIn()` 不是响应式，写成 `computed` 会**永远不
+//   更新**；见 `config/nav.js` 的 `navFor`）。壳每次进出都会重建 ⇒ 登录 / 退出 / 401 后必然重算，够用。
+const navTop = navFor(CUSTOMER_NAV, isLoggedIn())
 </script>
 
 <style scoped>
