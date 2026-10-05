@@ -96,7 +96,7 @@
 <script>
 import { http } from '../api/http'
 import { endpoints } from '../api/endpoints'
-import { setMerchantId, setCustomerId, setCredentials } from '../api/auth'
+import { setMerchantId, setCustomerId, setCredentials, setRole } from '../api/auth'
 export default {
   name: "LoginPage",
   data() {
@@ -155,11 +155,11 @@ export default {
         if(role === "0"){
           this.loginWarnText = "未找到该用户，请查看对应账号密码有无写错，或者前往右侧进行注册";
         }else if(role === "1"){
-          setCredentials(this.loginAccount, this.loginPwd);
+          setCredentials(this.loginAccount, this.loginPwd); setRole(role);   // ⚠️ 止血笔：同行追加，保持净零行数（防 `api-contract.md:172` 引的 `:216` 漂移）
           this.$router.push("/customer");
         }
         else if(role === "2"){
-          setCredentials(this.loginAccount, this.loginPwd);
+          setCredentials(this.loginAccount, this.loginPwd); setRole(role);   // ⚠️ 止血笔：同行追加，保持净零行数（防 `api-contract.md:172` 引的 `:216` 漂移）
           this.$router.push("/merchant");
         }
       } catch (e) {

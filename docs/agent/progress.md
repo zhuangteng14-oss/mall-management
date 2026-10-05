@@ -647,6 +647,44 @@
 
 ---
 
+### 5-V. 首页落点止血笔（`fix/home-landing`，2026-10-05）：`/` 加守卫按 `role` 分流 —— 并把 `role` 存下来
+
+> **性质**：前端 **3 代码文件 + 1 文档** / **0 新文件**。不动后端、不动 `ci.yml`、不动 A3 脚本、不动 `src/test/**`、不动其他前端文件。
+> **来源**：`/` 在 `router/index.js:12` **裸挂** `HomePage` ⇒ **无外壳 ⇒ 无导航栏**；未登录时还有 `.lock-mask` 引导登录（`HomePage.vue:4`）+ 三条守卫（`:135` / `:144` / `:165`），而**已登录时遮罩不渲染、三条守卫也不 return** ⇒ **卡在裸首页**。
+> **笔 5（§5-U）的角色**：它把「服务端已登录、前端不知道」（`JSESSIONID` 是 `HttpOnly`）这个**隐性状态**变**显性** ⇒ 遮罩消失、唯一出口关闭 ⇒ **放大器**，不是实现错误。**主因是首页设计债**（`/` 裸挂、`emit('go-search')` 无人接）。
+> ⚠️ **本笔只是止血，不是「已解决」**：`/` **仍**裸挂 `HomePage`、仍无导航栏；标准布局重构另起（R1–R4，`§十一` 分笔建议已出）。
+
+- **（1）改动 4 文件（3 代码 + 1 文档）**：
+  1. `src/api/auth.js`：`K.role = 'role'` + `getRole()`（与 `getMerchantId` 同形：恢复值优先、存储兜底）+ `setRole(v)`（写口 + `dropRestored()`）。
+  2. `src/views/LoginPage.vue`：`:158` / `:162` **同行**追加 `setRole(role)` —— **净零行数**（470 → 470），保 `api-contract.md:172` 引的 `:216` 不漂移。
+  3. `src/router/index.js`：`import { isLoggedIn, getRole, getMerchantId }` + `const ROLE_HOME = { '1': '/customer', '2': '/merchant' }` + `router.beforeEach`（只守 `/`；未登录放行；已登录 `ROLE_HOME[getRole()] || (getMerchantId() ? '/merchant' : '/customer')`）。
+  4. `docs/agent/progress.md`：本节。
+
+- **（2）⚠️ 行为变更：`clearCredentials()` 多清一个键 `role`**：原只 `removeItem` `username` / `password`，现加 `role`。理由：退出登录语义上就该清角色。**影响面 = 两个退出点** —— `CustomerPage.vue:112` 与 `MerchantPage.vue:131`。⚠️ `clear()`（401 出口）**不重复**清 `role`：它第一行就调 `clearCredentials()`，已覆盖。
+
+- **（3）⚠️ 写口 6 → 7**：新增 `setRole` 后，`auth.js` 头注释与 §5-U (3) 记的「**6 个写口**一律 `dropRestored()`」变为 **7 个**。头注释已**行内订正**（不引发行移），此处登记。
+
+- **（4）漂移登记**：
+  - ⚠️ **本笔新增一处内容变更**：`src/api/auth.js:3-8`（被 `progress.md:83` / `:402` / `:638` 引用）**内容改了** —— 「登录态 **4 键** / 54 处」→「**5 键** / 54 处」，并注明第 5 键 `role` 为**本笔新增、基线 `9add994` 时不入存储 ⇒ 不在 54 内**。**行数未变**（`:3-8` 仍在 `:3-8`）。
+  - ✅ **`progress.md:638` 那句「与 `HEAD` 比对 IDENTICAL」仍为真** —— 它是**笔 5 的历史陈述**（描述笔 5 当时未动 `:3-8`），本笔的改动不回溯它。**不改**。
+  - ✅ `router/index.js` **全仓无任何 inbound「文件:行号」引用** ⇒ 零漂移；其尾换行与 `HEAD` **一致**（都无）⇒ 非新披露。
+  - ✅ `LoginPage.vue` **净零**（470 → 470）⇒ `api-contract.md:170/171/172` 不破。
+  - ✅ `auth.js` 在 `K` 之下整体 **+20 行**：`auth.js` 自引用注释（指 `LoginPage.vue:148-153` / `:163-169`）**只是移位、不失效**（它们指 `LoginPage`，不指本文件）。全仓引 `auth.js` 行号处**只有 `:3-8`**（实测），**未被打断**。
+  - ✅ 指向本文件的数值引用：本笔只在 **§5-U 之后**追加，`## 6` 及其后整体下移，但**仓内无指向 `progress.md` 的活数值引用**（承 §5-P (3) / §5-T (6) / §5-U (5) 的结论）⇒ 无引用被打断。
+
+- **（5）⚠️ C3（管理员）缺口 —— 两处，都不是本笔能关上的**：
+  - **守卫本身改一行即可**：`ROLE_HOME` 是**唯一**的角色→落地页映射表。C3 加管理员时**只在本表加一行** `'3': '/admin'`（另需**后端支持** + 前端加 `#/admin` 路由）。⚠️ **不是「守卫不用改」** —— `/admin` 本笔还不存在，那一行必须加；但改动被压到 **1 处 1 行**（而非散落 5 处）。
+  - **⚠️ C3 仍要动后端**：把 `role` 加进 `/user/me` 投影。否则**管理员开新标签页拿不到 `role`**（`/user/me` 现只答 `usertype` —— 中文串「客户/商家」—— **不含 `role`**）⇒ 走 `getMerchantId()` 兜底 ⇒ **落到 `/customer`（管理员无 `merchantid`）= 错页**。**本笔不动后端**（止血保持小）。
+  - 本笔**刻意不从 `usertype` 反推 `role`**：那会让 `role` 有第二个来源（**口径分叉**），且要动笔 5 的 `restoreFromSession`，管理员（`usertype` 未知）仍映射不出来。
+
+- **（6）⚠️ 时序耦合（本守卫正确性的唯一前提）**：守卫读的是 `auth.js` 的**恢复态**。`main.js` 的顺序是 `await restoreIdentity()` ⇒ `app.use(router)`（**初始导航由此触发**），而本文件在 `main.js` 顶部被 import ⇒ 守卫在**模块加载时**注册，必然早于 `app.use(router)`。⚠️ **若将来有人把恢复挪到 `app.use(router)` 之后** ⇒ 守卫读到「匿名」⇒ 不重定向 ⇒ **首页再度卡死（不报错、不崩，最难查）**。已写进 `router/index.js` 守卫上方注释。
+
+- **（7）验证**：`npm run build` 通过（**无** `export 'xxx' was not found` 那条；仅 2 条**既有**体积警告）；`dist` 里 `beforeEach` **1 次** / `role` **6 次** ⇒ 接线**未被 tree-shake**；环检查 `router → api/auth` **不成环**（`grep -c "^import" src/api/auth.js` = **0**）。手测 **T1–T7** 见 PR 描述 —— **留给用户逐条跑，不代跑**。
+
+- **（8）不加「更新记录」行**（照 `§5-H (3)` / `§5-N` / `§5-Q (4)` / `§5-T (7)` 先例）。
+
+---
+
 ## 6. 前端规范化（2026-10-03 双审计）
 
 > **口径**：`亲读` —— `Mall-management-web/mall-management-system/src` 全量 grep + 逐行读（只读，前端代码**一字未动**）。

@@ -1,8 +1,8 @@
 // src/api/auth.js —— 认证状态模块（全仓**唯一**允许触碰登录态 sessionStorage 的地方）
 //
 // 收敛范围（实测 2026-10-04，基线 `9add994`）：14 个 view 共 8 键 / **71 处（逐出现）**，其中
-//   登录态 4 键 / **54 处（逐出现）** ← 本模块收
-//     merchantid 24 / customerid 12 / loginUsername 12 / loginPassword 6
+//   登录态 5 键 / **54 处（逐出现）** ← 本模块收（⚠️ 第 5 键 `role` 为**止血笔新增**，基线 `9add994` 时**不入存储** ⇒ 不在 54 内）
+//     merchantid 24 / customerid 12 / loginUsername 12 / loginPassword 6 **+ 新增 `role`**
 //   ⚠️ 同组另有「行×键」口径 = **52**（merchantid 23 / loginUsername 12 / customerid 11 /
 //     loginPassword 6），差在 HomePage:116 同行两**键**、ProductPage:415/416 同行两**次出现**。
 //     **本文件一律用逐出现的 54**（与 §6-B 的「71 = 54 + 17」同口径）；别把 52 与 17 相加。
@@ -18,6 +18,7 @@ const K = {
   password: 'loginPassword',
   merchantId: 'merchantid',
   customerId: 'customerid',
+  role: 'role',   // ⚠️ 止血笔新增：`loginSelect` 的 role（"1" 客户 / "2" 商家）。基线时该值只活在 `LoginPage` 的分支里、不入存储
 }
 
 function read(k) { return sessionStorage.getItem(k) }
@@ -37,8 +38,8 @@ function usable(v) { return v && v !== 'null' && v !== 'undefined' ? v : null }
 // 读口顺序：**恢复值优先、sessionStorage 兜底**（`restored === null` 时每个读口都与
 //    本笔之前**逐字等价** —— 这是本笔「零行为改动」的判据）。
 //
-// ⚠️ **维护纪律（6 个写口一律丢弃本对象，别改成「逐字段同步」）**：
-//    `setCredentials` / `setMerchantId` / `setCustomerId` / `clearCredentials` /
+// ⚠️ **维护纪律（7 个写口一律丢弃本对象，别改成「逐字段同步」）**：
+//    `setCredentials` / `setMerchantId` / `setCustomerId` / `setRole` / `clearCredentials` /
 //    `clearMerchantId` / `clear`。理由：本模块的写口**只有两类调用方** —— 登录
 //    （`LoginPage.vue`）与退出（`CustomerPage` / `MerchantPage` / `http.js` 的 401 出口），
 //    两者都是**身份变更**。丢弃 ⇒ 「任何一次写之后，读口 ≡ 笔前行为」这条不变量成立；
@@ -95,6 +96,15 @@ export function getMerchantId() { return pick('merchantId', K.merchantId) }
 
 export function getCustomerId() { return pick('customerId', K.customerId) }
 
+/** 角色 —— `loginSelect` 的 `role`（"1" 客户 / "2" 商家）。**止血笔新增**。
+ *  ⚠️ **不接恢复态**（`/user/me` 只答 `usertype` —— 中文串「客户/商家」—— **不含** `role`）
+ *     ⇒ 新标签页恢复时本口返回 **`null`**，调用方（`router/index.js` 的首页守卫）**必须自己兜底**
+ *     （现兜底 = `getMerchantId()`，与 `ProductPage.vue:381` 同口径）。**本笔刻意不从 `usertype` 反推**
+ *     —— 那会让 `role` 有第二个来源（口径分叉）。C3 加管理员时若要从恢复路径拿到 role，
+ *     须把 `role` 加进 `/user/me` 投影（登记于 §5-V）。
+ *  ⚠️ `pick` 仍照用（恢复值优先、存储兜底）⇒ 将来若 `/user/me` 真返回了 `role`，本口**一行不用改**。 */
+export function getRole() { return pick('role', K.role) }
+
 /** 是否已登录 —— 原**唯一**定义在 `HomePage.vue:116`（`!!loginUsername || !!merchantid`）。
  *  收敛到此处后，鉴权笔有了落点（改这里的判据即可）。
  *  ⚠️ 判据**一行未改**（仍是 `!!(username || merchantid)`），只是改从两个读口取
@@ -122,6 +132,10 @@ export function setMerchantId(v) { sessionStorage.setItem(K.merchantId, v); drop
 
 export function setCustomerId(v) { sessionStorage.setItem(K.customerId, v); dropRestored() }
 
+/** 写入角色（`LoginPage.vue` 登录成功后，与 `setCredentials` **同行**各写一次）。**止血笔新增**。
+ *  ⚠️ 与其余写口一样 `dropRestored()` —— 登录 = 身份变更，恢复态整体作废。 */
+export function setRole(v) { sessionStorage.setItem(K.role, v); dropRestored() }
+
 /** 登录成功后写入凭据（原 `LoginPage.vue:163-169`，role 为 "1"/"2" 时各写一次）。 */
 export function setCredentials(username, password) {
   sessionStorage.setItem(K.username, username)
@@ -129,10 +143,14 @@ export function setCredentials(username, password) {
   dropRestored()
 }
 
-/** 退出登录：清凭据。原本散在 `CustomerPage.vue:113-114` / `MerchantPage.vue:132-133`。 */
+/** 退出登录：清凭据。原本散在 `CustomerPage.vue:113-114` / `MerchantPage.vue:132-133`。
+ *  ⚠️ **止血笔行为变更**：本函数**多清一个键** `role`（原只清 username / password）。
+ *     理由：退出登录语义上就该清角色，留着会让下一次「已登录」判断带上上一轮的角色。
+ *     影响面 = **两个退出点**：`CustomerPage.vue:112` 与 `MerchantPage.vue:131`（登记于 §5-V）。 */
 export function clearCredentials() {
   sessionStorage.removeItem(K.username)
   sessionStorage.removeItem(K.password)
+  sessionStorage.removeItem(K.role)   // ⚠️ 止血笔新增（见上）
   dropRestored()
 }
 
@@ -156,7 +174,9 @@ export function clearMerchantId() {
  *     「哪个页面清哪个键」组织（见 `clearMerchantId` 的注释），补对称出口是另一笔的事。
  *  ⚠️ **会话恢复笔**：本函数是「会话没了」⇒ 恢复态也必须一起丢（`clearCredentials` /
  *     `clearMerchantId` 各自已丢一次，这里再丢一次是幂等兜底）—— 不丢就会在 401 出口
- *     清空存储后，读口仍从 `restored` 读出身份 ⇒「已登录」判断残留、跳登录后又弹回来。 */
+ *     清空存储后，读口仍从 `restored` 读出身份 ⇒「已登录」判断残留、跳登录后又弹回来。
+ *  ⚠️ **止血笔**：`role` 由第一行的 `clearCredentials()` 一并清掉 ⇒ 这里**不重复** removeItem(K.role)
+ *     （重复也是幂等的，但没必要）。 */
 export function clear() {
   clearCredentials()
   clearMerchantId()
