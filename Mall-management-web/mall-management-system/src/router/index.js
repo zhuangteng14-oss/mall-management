@@ -1,8 +1,8 @@
 import { createRouter, createWebHashHistory } from 'vue-router'
 import { isLoggedIn, getRole, getMerchantId } from '../api/auth'
 import LoginPage from '../views/LoginPage.vue'
-import CustomerPage from '../views/CustomerPage.vue'
-import MerchantPage from '../views/MerchantPage.vue'
+import AppShell from '../views/AppShell.vue'
+import { CUSTOMER_NAV, MERCHANT_NAV } from '../config/nav'
 import ProductPage from '../views/ProductPage.vue'
 import ShoppingCart from '../views/ShoppingCart.vue'
 // 👇 引入你新的搜索页面
@@ -22,12 +22,12 @@ import GoodsAdd from '../views/GoodsAdd.vue'
 import GoodsUp from '../views/GoodsUp.vue'
 
 // ── R1（2026-10-05）：`/customer` 由**一条平级记录**改为**父记录 + 子路由** ───────────
-// 5 个 tab 各自一条子路由，`CustomerPage` 只留顶栏 + `<router-view>`（壳/页面分层）。
+// 5 个 tab 各自一条子路由，壳只留顶栏 + `<router-view>`（壳/页面分层）。（R6 后壳 = `AppShell`；原为 `CustomerPage`，两壳已合一。）
 // 于是 tab 状态**就是 URL**：可深链、可刷新、可后退、可分享。
 //
 // ── R2（2026-10-05）：`/merchant` 照同一模板改造（用户裁决：镜像 R1）───────────────
-// 6 条子路由（home / search / msg / order / order/cart / user），`MerchantPage` 只留顶栏 + `<router-view>`。
-// ⚠️ 两壳的顶栏差异**只有两处**：左项「商城主页」的 `to`（各指自己的壳）+ 右起第 2 项（客户「购物车」⇄ 商家「订单中心」）—— 顶栏项已抽到 `src/config/nav.js`，为 R6 铺路（用户裁决 6）。
+// 6 条子路由（home / search / msg / order / order/cart / user），壳只留顶栏 + `<router-view>`（R6 后壳 = `AppShell`，原为 `MerchantPage`）。
+// ⚠️ 两壳的顶栏差异**只有两处**：左项「商城主页」的 `to`（各指自己的壳）+ 右起第 2 项（客户「购物车」⇄ 商家「订单中心」）—— 顶栏项 R2 起已抽到 `src/config/nav.js`（用户裁决 6），R6 起由 `AppShell` 消费。⚠️ **R6（2026-10-05）**：两条父记录的 `component` 换成同一个 `AppShell`，配置走 `props: { nav, base, role }`（`role` 是实质增量：两壳的 `getCurrentUser()` 降级链**顺序有意相反**）；两壳**不合并成一条记录**（`path` / `children` / `subMenu` / `logout` 全不同）⇒ 本句成为「两条记录的全部配置差异」的验收口径。逐条见 progress.md §5-AB。
 // ── R3（2026-10-05）：`/` 由「**裸挂 `HomePage` 的页面**」改为「**一条落点 redirect**」（R1/R2 都没碰、留给 R3 的收口）
 //    为什么进客户壳 / 未登录怎么办 / 守卫为何搬走 ⇒ 见尾部 `landingFor` 上方的整段注释。
 //
@@ -53,7 +53,7 @@ const routes = [
   { path: '/login', component: LoginPage },
   {
     path: '/customer',
-    component: CustomerPage,
+    component: AppShell, props: { nav: CUSTOMER_NAV, base: '/customer', role: 'customer' },
     children: [
       { path: '', component: HomeTab, props: { base: '/customer' }, meta: { tab: 'home', layout: 'home-container' } },
       { path: 'search', component: GoodsSelect, meta: { layout: 'page' } },
@@ -84,7 +84,7 @@ const routes = [
   },
   {
     path: '/merchant',
-    component: MerchantPage,
+    component: AppShell, props: { nav: MERCHANT_NAV, base: '/merchant', role: 'merchant' },
     children: [
       { path: '', component: HomeTab, props: { base: '/merchant' }, meta: { tab: 'home', layout: 'home-container' } },
       { path: 'search', component: GoodsSelect, meta: { layout: 'page' } },

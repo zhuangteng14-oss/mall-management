@@ -69,7 +69,7 @@ export function setUnauthorizedHandler(fn) { onUnauthorized = fn }
 
 /** 一次性闩锁：**同一次会话只处理一次 401**。挡两个来源：
  *    ① **并发突发** —— 一次挂载里可有多处请求同时 401（如 `ProductPage` 挂载打 7 处）；
- *    ② **轮询** —— `ChatRoom.pollUpdates` 2s 一轮、`Customer/MerchantPage.fetchUnreadCount`
+ *    ② **轮询** —— `ChatRoom.pollUpdates` 2s 一轮、`AppShell.fetchUnreadCount`（R6 前在两个壳里）
  *       5s 一轮 ⇒ 不挡就是 **12+ 次/分钟**的跳转 + 清态风暴。
  *  ⚠️ 复位**不做成「任一 2xx」**：闸开时白名单端点（如 `goodsSelectHome`）照常 2xx，
  *     那样闩锁会被反复误复位、等于没有。复位点 = **路由变化**（main.js 的 `router.afterEach`）。 */

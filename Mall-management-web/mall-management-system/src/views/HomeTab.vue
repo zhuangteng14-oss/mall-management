@@ -6,7 +6,7 @@
 import { useRouter } from 'vue-router'
 import HomePage from './HomePage.vue'
 
-// ⚠️ 这个 name 是 `CustomerPage.vue` / `MerchantPage.vue` 里 `<KeepAlive :include="['HomeTab', ...]">`
+// ⚠️ 这个 name 是 `AppShell.vue` 里 `<KeepAlive :include="['HomeTab', ...]">`（R6 前在两壳里）
 //    的**唯一**匹配依据。改名（含改文件名）会让缓存**静默失效** —— 不报错，只是每次切回来
 //    都重新挂载（轮播重置）。改名前先 grep `include`。
 //    下面两条 `eslint-disable-next-line` 是**必需**的：本仓 `eslint-plugin-vue` 是 **8.7.1**，
