@@ -146,7 +146,7 @@ public class UserService {
     }
 
     /**
-     * 会话所指向用户的**公开信息**（鉴权笔 2 新增）—— {@code /user/me} 的读路径。
+     * 会话所指向用户的**公开信息**（鉴权笔 2 新增）—— P2.6（2026-10-05）起是 {@link #meInfo} 的**第一跳**（{@code /user/me} 已改为答扩列后的完整资料）。
      *
      * <p>纯转调 {@link UserCacheService#publicInfo(String)}，本方法**不加工**：缓存的
      * 两级、负缓存（0 行 → {@code null}）、以及「技术异常原样上抛」——三条语义全在那一层，
@@ -219,17 +219,14 @@ public class UserService {
     }
 
     /**
-     * 取用户信息（前端各页面的用户资料）。
+     * 取用户信息（前端各页面的用户资料）—— **凭据驱动**那一半的残留（P2.6 起前端已无调用方）。
      *
-     * <p>三步，每步失败都返回 {@code null}（三层前如此）：① 账号密码校验 → ② {@code SELECT *}
-     * → ③ 按 {@code usertype} 补一个 {@code image} 字段。
+     * <p>两步：① 账号密码校验 → ② {@link #profileOf}（与 {@code /user/me} **共用同一份实现**）。
      *
-     * <p>⚠️ <b>第 ③ 步的「补」是无条件的 put</b>：只要 {@code usertype} 命中客户或商家，
-     * 就把查询结果（<b>可能是 {@code null}</b>）放进 {@code userInfo.image}。即「查到了但值为
-     * NULL」与「查不到」在这里**不可区分**，都表现为 {@code "image": null}；只有
-     * 「{@code usertype} 不是这两个」才整个 key 缺席。写回去时别把
-     * {@code put(image)} 改成 {@code if (image != null) put(image)} —— 那是 JSON
-     * {@code {"image":null}} 与 {@code {}} 的区别，前端 {@code UserInfoPage.vue:96} 的取值路径会变。
+     * <p>⚠️ <b>P2.6（2026-10-05）后本端点今日**没有**前端调用方</b>（三个调用点全改走会话驱动的
+     * {@code /user/me}），但**刻意保留**：删它会连带删掉 {@link UserDao#selectRoleForProfile}
+     * 那条 SQL ⇒ 全仓「硬编码 schema 前缀 39 处」的基线当场变 38、端点计数 35 变 34。
+     * 归属另一笔（「跨四域清除 schema 前缀」或单独记账笔），见 progress.md §5-AC。
      *
      * <p>⚠️ 返回值**可能为 {@code null}** —— Controller 原样透传，Spring 会把它序列化成空响应体
      * （不是 {@code "null"}）。三层前如此，不改。
@@ -247,6 +244,33 @@ public class UserService {
             return null;
         }
 
+        return profileOf(username);
+    }
+
+    /**
+     * 用户资料 = {@code user} 表整行 + 按 {@code usertype} 补的 {@code image}
+     * （P2.6，2026-10-05 抽自 {@link #getUserInfo} 的第 ②③ 步，**逐字搬运**）。
+     *
+     * <p>为什么要抽：{@code /user/me}（会话驱动）与 {@code /user/getUserInfo}（凭据驱动）
+     * <b>必须返回同一张 Map</b> —— 这是前端三个调用点能「只换地址、不改模板」的依据
+     * （验收断言见 {@code AuthSessionSmokeTest}）。
+     *
+     * <p>⚠️ <b>第 ③ 步的「补」是无条件的 put</b>：只要 {@code usertype} 命中客户或商家，
+     * 就把查询结果（<b>可能是 {@code null}</b>）放进 {@code userInfo.image}。即「查到了但值为
+     * NULL」与「查不到」在这里**不可区分**，都表现为 {@code "image": null}；只有
+     * 「{@code usertype} 不是这两个」才整个 key 缺席。写回去时别把
+     * {@code put(image)} 改成 {@code if (image != null) put(image)} —— 那是 JSON
+     * {@code {"image":null}} 与 {@code {}} 的区别，前端取值路径会变。
+     *
+     * <p>⚠️ <b>两步的失败面照搬 {@code getUserInfo} 的旧形状</b>：② 抛异常 ⇒ 返回 {@code null}；
+     * ③ 抛异常 ⇒ 只跳过 {@code image}（不改动已查到的行）。
+     *
+     * <p>⚠️ <b>别把这里和 {@link #updateAvatar} 的选表合并</b>：本方法按 {@code user.usertype}
+     * （中文）选表，{@code updateAvatar} 按 {@code login.Role}（数字）选表 —— 两条判据不同源。
+     *
+     * @param username 登录名（{@code user} 表主键；不是业务号 —— 业务号 → 用户名那一跳在 {@link #meInfo}）
+     */
+    private Map<String, Object> profileOf(String username) {
         // 2. 查询 user 表全部字段
         Map<String, Object> userInfo;
         try {
@@ -276,6 +300,39 @@ public class UserService {
         }
 
         return userInfo;
+    }
+
+    /**
+     * 会话所指向用户的**完整资料**（P2.6，2026-10-05）—— 扩列后 {@code /user/me} 的读路径。
+     *
+     * <p><b>两跳（本笔的核心设计，别改成「新写一条按业务号查整行的 SQL」）</b>：
+     * <ol>
+     *   <li><b>业务号 → 公开信息</b>：{@link #publicInfo}（走既有的 {@code userPublic} 缓存 +
+     *       负缓存）取 {@code username}。复用它的收益是**零新增 SQL 字面量** —— 新写一条带
+     *       {@code mall_management_sql.} 前缀的语句会把全仓基线 39 顶成 40。</li>
+     *   <li><b>用户名 → 资料行 + image</b>：{@link #profileOf}，与 {@code getUserInfo} 共用。</li>
+     * </ol>
+     *
+     * <p>⇒ 与 {@link #getUserInfo} 的唯一差别是<b>没有凭据校验</b>（身份来自会话）：
+     * 两者对同一用户返回**同一张 Map**（只差 Controller 包装的 {@code success} 键）。
+     *
+     * <p>⚠️ <b>为什么**不**加宽 {@code userPublic} 缓存</b>（本笔裁决 D1）：那条缓存被
+     * {@code /message/userSelect} 共用，且 {@link #updateUserInfo} 的「不清缓存」论证
+     * （本类类注释）正建立在「缓存负载 = 5 列、与 SET 的三列无交集」之上 —— 加宽会让那条
+     * 不变量当场作废。故本方法**只把缓存当跳板**，扩出来的 5 列每次实读、不进缓存
+     * ⇒ {@code updateUserInfo} / {@code updateAvatar} 都**不需要**新增失效点。
+     *
+     * @param userId 会话里的**业务号**（{@code customerid} / {@code merchantid}，见
+     *               {@link com.minke.mallmanagement.shared.web.AuthSession}）
+     * @return 查无此人 ⇒ {@code null}（Controller 翻成 200 + {@code {success:false}}）
+     */
+    public Map<String, Object> meInfo(String userId) {
+        Map<String, Object> publicRow = publicInfo(userId);
+        if (publicRow == null) {
+            return null;
+        }
+        Object username = publicRow.get("username");
+        return (username == null) ? null : profileOf(username.toString());
     }
 
     /**

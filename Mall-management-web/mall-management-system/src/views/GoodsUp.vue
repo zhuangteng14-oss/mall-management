@@ -111,7 +111,7 @@
 import { ref, onMounted } from 'vue'
 import { http, handleApiError, assetOf } from '../api/http'
 import { endpoints } from '../api/endpoints'
-import { getMerchantId, getUsername, getPassword } from '../api/auth'
+import { getMerchantId, isLoggedIn } from '../api/auth'
 
 const goodsList = ref([])
 const userInfo = ref({})
@@ -145,12 +145,12 @@ onMounted(() => {
 // 获取用户信息
 // ------------------------------
 const getUserInfo = async () => {
-  const username = getUsername()
-  const password = getPassword()
-  if (!username) return
+  if (!isLoggedIn()) return   // P2.6：判据由「有 username」改成「有登录态」（会话恢复来的身份同样算）
+  // ⚠️ 不再读密码（`getPassword` 已随 P2.6 退场）：本页只取展示用资料，不做凭据校验。
 
   try {
-    const res = await http.post(endpoints.user.getUserInfo, new URLSearchParams({ username, password }))
+    // P2.6：改走**会话驱动**的 /user/me（无参）；`allowUnauthorized` 让 401 照抛给下面的 catch
+    const res = await http.post(endpoints.user.me, null, { allowUnauthorized: true })
     const data = await res.json()
     userInfo.value = data
   } catch (e) {

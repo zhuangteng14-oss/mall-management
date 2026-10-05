@@ -64,9 +64,9 @@ import java.util.Map;
  * {@code image} 的 {@code http://localhost:8088/img/default_user.png}、
  * {@code customerid} / {@code merchantid} 的 {@code 暂无数据}，
  * 参数名 {@code userid}（对应 Java 变量 {@code id}）、{@code age}（{@code Integer}）等
- * 全部照搬 —— 前端 7 个调用点（{@code LoginPage.vue:131/142/216}、
- * {@code UserInfoPage.vue:96/130/149}、{@code GoodsUp.vue:150}）按这些名字传参，
- * 改一个就断一个。
+ * 全部照搬。⚠️ 调用点按 P2.6（2026-10-05）实测重列：{@code loginSelect}/{@code loginAdd} 在
+ * {@code LoginPage.vue}、{@code updateAvatar}/{@code updateUserInfo} 在 {@code UserInfoPage.vue}
+ * —— {@code getUserInfo} 的 3 个前端调用点已全部改走 {@code /user/me}（本笔后为 0）。
  *
  * <h2>【响应体：{@code updateAvatar} / {@code updateUserInfo} 已换成 {@link Result}】</h2>
  * 只换**返回类型**：{@code Map<String,Object>} → {@code Result<Map<String,Object>>}，
@@ -130,9 +130,9 @@ public class UserController {
     }
 
     //这是一个接口（用于返回对应前端页面的用户信息）
-    // ⚠️ 例外 3/5：失败时返回 null（HTTP 200 **空体**）；前端三个调用点 await res.json()
-    //    无判空，靠外层 catch 兜 SyntaxError。包成可解析 JSON ⇒ 前端静默不写 sessionStorage。
-    //    —— 这是本类**唯一**故意保留 Map 返回类型的端点，别「顺手补齐」。见 Result 类注释。
+    // ⚠️ 例外 3/5：失败时返回 null（HTTP 200 **空体**）；P2.6（2026-10-05）前三个前端调用点
+    //    靠外层 catch 兜 SyntaxError —— 三处**已全部改走 /user/me**（失败也是可解析 JSON），
+    //    故今日 **0 个调用方**。保留它、不改 Result 的理由见 service 层 getUserInfo。见 Result 类注释。
     @PostMapping("/getUserInfo")
     public Map<String, Object> getUserInfo(
             @RequestParam("username") String username,
@@ -164,12 +164,12 @@ public class UserController {
     // ==================== 鉴权笔 2 新增：会话侧的两个端点 ====================
 
     /**
-     * 「我是谁」：按**会话**返回当前登录用户的公开信息。
+     * 「我是谁」：按**会话**返回当前登录用户的**完整资料**（P2.6 扩列，见下）。
      *
      * <p>与 {@link #getUserInfo} **并存、不替代**：那个是**凭据驱动**（每次都传
-     * username+password，供登录页与资料页用），本端点是**会话驱动**（凭 cookie 识别身份）。
-     * 前端本笔**不动**（接入是笔 4 / {@code P2.6}）—— 故今日无调用方，{@code api-contract.md §5}
-     * 的「无调用方」列表由 2 条变 4 条。
+     * username+password），本端点是**会话驱动**（凭 cookie 识别身份）—— P2.6（2026-10-05）
+     * 起前端三处调用点（登录页 + 商家上架页 + 资料页）**已全部改走本端点**，{@code getUserInfo}
+     * 在前端**再无调用方**（端点保留的理由见那里）。
      *
      * <h3>三种出口</h3>
      * <ul>
@@ -181,8 +181,8 @@ public class UserController {
      *       注意这是 **200**，不是 404：会话是有效的，只是它指向的用户在库里没了。
      *       ⚠️ 与 {@code getUserInfo} 失败时的「200 空体」**形状不同** —— 本端点答的是**可解析**的
      *       JSON（前端若照 {@code getUserInfo} 的写法 {@code await res.json()} 不会炸）。</li>
-     *   <li><b>有会话且查得到 ⇒ HTTP 200 + {@code {success:true, customerid, merchantid, username,
-     *       usertype, gender}}</b>（顶层平铺，键集 = {@code UserCacheService.publicInfo} 的 5 列）。</li>
+     *   <li><b>有会话且查得到 ⇒ HTTP 200 + {@code {success:true, …}}</b>（顶层平铺，键集 = {@code user}
+     *       表整行 + 头像 {@code image}，即 {@link UserService#getUserInfo} 的同一张 Map）。</li>
      * </ul>
      *
      * <p>⚠️ 用 {@link HttpServletRequest} 取会话（{@code AuthSession.currentUserId}）——
@@ -197,7 +197,7 @@ public class UserController {
                     .body(AuthInterceptor.BODY_NOT_LOGGED_IN);
         }
 
-        Map<String, Object> userInfo = userService.publicInfo(userId);
+        Map<String, Object> userInfo = userService.meInfo(userId);
         if (userInfo == null) {
             return ResponseEntity.ok(Result.fail("用户不存在"));
         }

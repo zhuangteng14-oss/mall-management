@@ -96,7 +96,7 @@
 <script>
 import { http } from '../api/http'
 import { endpoints } from '../api/endpoints'
-import { setMerchantId, setCustomerId, setCredentials, setRole } from '../api/auth'
+import { setMerchantId, setCustomerId, setUsername, setRole } from '../api/auth'
 export default {
   name: "LoginPage",
   data() {
@@ -138,10 +138,10 @@ export default {
         const role = await res.text();
 
         // 登录成功后立即获取用户信息，保存商家ID / 客户ID
-        const userRes = await http.post(endpoints.user.getUserInfo, new URLSearchParams({ 
-            username: this.loginAccount, 
-            password: this.loginPwd 
-          }));
+        // P2.6（2026-10-05）：改走**会话驱动**的 /user/me —— 凭据只在上一发 loginSelect 里出现，
+        //   本发不再传 username/password。`allowUnauthorized`：role=0 时没有会话 ⇒ 这一发 401 也照抛，
+        //   由下面那个 catch 兜成「未识别到账户」（与改前「200 空体 ⇒ res.json() 抛 SyntaxError」同归）。
+        const userRes = await http.post(endpoints.user.me, null, { allowUnauthorized: true });
         const userData = await userRes.json();
 
         // 自动保存ID，上架商品可用
@@ -155,11 +155,11 @@ export default {
         if(role === "0"){
           this.loginWarnText = "未找到该用户，请查看对应账号密码有无写错，或者前往右侧进行注册";
         }else if(role === "1"){
-          setCredentials(this.loginAccount, this.loginPwd); setRole(role);   // ⚠️ 止血笔：同行追加，保持净零行数（防 `api-contract.md:172` 引的 `:216` 漂移）
+          setUsername(this.loginAccount); setRole(role);   // ⚠️ 止血笔：同行追加，保持净零行数（防 `api-contract.md:172` 引的 `:216` 漂移）；P2.6 起 setCredentials → setUsername（不再传密码）
           this.$router.push("/customer");
         }
         else if(role === "2"){
-          setCredentials(this.loginAccount, this.loginPwd); setRole(role);   // ⚠️ 止血笔：同行追加，保持净零行数（防 `api-contract.md:172` 引的 `:216` 漂移）
+          setUsername(this.loginAccount); setRole(role);   // ⚠️ 止血笔：同行追加，保持净零行数（防 `api-contract.md:172` 引的 `:216` 漂移）；P2.6 起 setCredentials → setUsername（不再传密码）
           this.$router.push("/merchant");
         }
       } catch (e) {
