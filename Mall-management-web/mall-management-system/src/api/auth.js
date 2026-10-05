@@ -26,25 +26,81 @@ function read(k) { return sessionStorage.getItem(k) }
  *  （`sessionStorage.setItem(k, null)` 会存成字符串 "null"）。 */
 function usable(v) { return v && v !== 'null' && v !== 'undefined' ? v : null }
 
+// ── 会话恢复态（会话恢复笔，2026-10-05）──────────────────────────────────────────
+// 来源：`POST /user/me`（读 **Cookie 会话**）。取数在 `main.js`（启动时一次），
+// 本模块只提供**张贴**口 `restoreFromSession` —— 本文件**零 import** 是成文前提
+// （见本文件头部与 `http.js` 顶部注释：`http.js → auth.js` 这条边已存在，反向加边就是真环）。
+//
+// ⚠️ **只存内存、不落 sessionStorage**：BD-03 选 A（凭据走 Cookie、前端不持有身份），
+//    把恢复来的身份写回存储会把「身份来自前端存储」这条老路重新焊死（与 P2.6 同一条线）。
+//
+// 读口顺序：**恢复值优先、sessionStorage 兜底**（`restored === null` 时每个读口都与
+//    本笔之前**逐字等价** —— 这是本笔「零行为改动」的判据）。
+//
+// ⚠️ **维护纪律（6 个写口一律丢弃本对象，别改成「逐字段同步」）**：
+//    `setCredentials` / `setMerchantId` / `setCustomerId` / `clearCredentials` /
+//    `clearMerchantId` / `clear`。理由：本模块的写口**只有两类调用方** —— 登录
+//    （`LoginPage.vue`）与退出（`CustomerPage` / `MerchantPage` / `http.js` 的 401 出口），
+//    两者都是**身份变更**。丢弃 ⇒ 「任何一次写之后，读口 ≡ 笔前行为」这条不变量成立；
+//    「逐字段同步」反而会留下过期字段：新标签页恢复成商家 Y 之后再登录成客户 B，
+//    若 B 的 `merchantid` 为空（`LoginPage.vue:148` 的 `if` 跳过了写），`restored.merchantId`
+//    会**留着 Y**，而 `sessionStorage` 里是空的 ⇒ 「优先」就把 Y 读出来了。
+let restored = null   // { username, merchantId, customerId }（各字段可为 null）| null
+
+function readRestored(field) { return restored ? restored[field] : null }
+
+/** 读口统一走这里：恢复值优先、存储兜底。 */
+function pick(field, k) { return readRestored(field) || read(k) }
+
+/** 写口统一走这里：本地一写，恢复态整体作废（理由见上方纪律）。 */
+function dropRestored() { restored = null }
+
+/**
+ * 把 `/user/me` 的响应贴成恢复态。**不取数、不发请求**（取数在 `main.js`）。
+ *
+ * ⚠️ 字段判据与 `LoginPage.vue:148-153` **逐字对齐**（`if (x)` 只写真值，不加额外过滤）——
+ *    加过滤就是改行为。
+ * ⚠️ `password` **恢复不了**：`/user/me` 只答 `customerid / merchantid / username /
+ *    usertype / gender` 五列。受影响的是 `GoodsUp.vue:148-149` 与 `UserInfoPage.vue:94-95`
+ *    （这两处拿密码做**真凭据校验**）⇒ 新标签页下仍不可用。**这不是回归** ——
+ *    改前新标签页的 sessionStorage 整个是空的，这两页本来就取不到密码。
+ * ⚠️ 三个字段全空 ⇒ **不置** `restored`（保持 `null`），读口继续走存储兜底。
+ * @param {object|null} info `/user/me` 的 JSON body（`{success, customerid, merchantid, username, ...}`）
+ * @returns {boolean} 是否贴上了**至少一个**身份字段
+ */
+export function restoreFromSession(info) {
+  if (!info) return false
+  const next = { username: null, merchantId: null, customerId: null }
+  if (info.username) next.username = info.username
+  if (info.merchantid) next.merchantId = info.merchantid
+  if (info.customerid) next.customerId = info.customerid
+  if (!next.username && !next.merchantId && !next.customerId) return false
+  restored = next
+  return true
+}
+
 // ── 读 ────────────────────────────────────────────────────────────────────────
 
-export function getUsername() { return read(K.username) }
+export function getUsername() { return pick('username', K.username) }
 
 /** ⚠️ P2.6 待处理点：这里是「密码明文在浏览器存储」的**唯一读口**。
  *  拆出的那一笔要把 K.password 换成模块级内存变量 —— 两个读点（GoodsUp / UserInfoPage）
  *  会因此变成「刷新后需重输」，这是**已知且已接受**的代价（路线 3）。
  *  ⚠️ 不能只删写口：`UserService.java:185` 用 `selectRoleForProfile(username, password)`
- *     做**真凭据校验**（role == null 即 return null）⇒ 前端无法在不知道密码的前提下保持行为。 */
+ *     做**真凭据校验**（role == null 即 return null）⇒ 前端无法在不知道密码的前提下保持行为。
+ *  ⚠️ **本口不接恢复态**（会话恢复笔）：没东西可接 —— `/user/me` 不返回密码。 */
 export function getPassword() { return read(K.password) }
 
-export function getMerchantId() { return read(K.merchantId) }
+export function getMerchantId() { return pick('merchantId', K.merchantId) }
 
-export function getCustomerId() { return read(K.customerId) }
+export function getCustomerId() { return pick('customerId', K.customerId) }
 
 /** 是否已登录 —— 原**唯一**定义在 `HomePage.vue:116`（`!!loginUsername || !!merchantid`）。
- *  收敛到此处后，鉴权笔有了落点（改这里的判据即可）。 */
+ *  收敛到此处后，鉴权笔有了落点（改这里的判据即可）。
+ *  ⚠️ 判据**一行未改**（仍是 `!!(username || merchantid)`），只是改从两个读口取
+ *     ⇒ 恢复了身份时自然为真，未恢复时与改前逐字等价（`pick` 的兜底就是原来的 `read`）。 */
 export function isLoggedIn() {
-  return !!(read(K.username) || read(K.merchantId))
+  return !!(getUsername() || getMerchantId())
 }
 
 /**
@@ -57,25 +113,27 @@ export function isLoggedIn() {
  *   这两处**本笔未动**，登记为「角色/身份判定的口径统一」另议。
  */
 export function resolveBuyerId() {
-  return usable(read(K.customerId)) || usable(read(K.merchantId)) || usable(read(K.username)) || null
+  return usable(getCustomerId()) || usable(getMerchantId()) || usable(getUsername()) || null
 }
 
 // ── 写 ────────────────────────────────────────────────────────────────────────
 
-export function setMerchantId(v) { sessionStorage.setItem(K.merchantId, v) }
+export function setMerchantId(v) { sessionStorage.setItem(K.merchantId, v); dropRestored() }
 
-export function setCustomerId(v) { sessionStorage.setItem(K.customerId, v) }
+export function setCustomerId(v) { sessionStorage.setItem(K.customerId, v); dropRestored() }
 
 /** 登录成功后写入凭据（原 `LoginPage.vue:163-169`，role 为 "1"/"2" 时各写一次）。 */
 export function setCredentials(username, password) {
   sessionStorage.setItem(K.username, username)
   sessionStorage.setItem(K.password, password)
+  dropRestored()
 }
 
 /** 退出登录：清凭据。原本散在 `CustomerPage.vue:113-114` / `MerchantPage.vue:132-133`。 */
 export function clearCredentials() {
   sessionStorage.removeItem(K.username)
   sessionStorage.removeItem(K.password)
+  dropRestored()
 }
 
 /** 退出登录：额外清 merchantid（**仅** `MerchantPage.vue:134` 有这一条）。
@@ -83,6 +141,7 @@ export function clearCredentials() {
  *     合并就是改行为。 */
 export function clearMerchantId() {
   sessionStorage.removeItem(K.merchantId)
+  dropRestored()
 }
 
 /** 清**全部**本地登录态（凭据 + 两个业务号）—— 供 **401 出口**用（`api/http.js`）。
@@ -94,11 +153,15 @@ export function clearMerchantId() {
  *  ⚠️ 调用方**只有** `api/http.js` 的 401 出口**一处** —— 别顺手把 `CustomerPage` / `MerchantPage`
  *     的 `toLogin()` 换成本函数：那是**改退出行为**，不属于本笔。
  *  ⚠️ 这里对 `customerid` 直接 `removeItem` 而**不先补一个 `clearCustomerId()`**：本模块刻意按
- *     「哪个页面清哪个键」组织（见 `clearMerchantId` 的注释），补对称出口是另一笔的事。 */
+ *     「哪个页面清哪个键」组织（见 `clearMerchantId` 的注释），补对称出口是另一笔的事。
+ *  ⚠️ **会话恢复笔**：本函数是「会话没了」⇒ 恢复态也必须一起丢（`clearCredentials` /
+ *     `clearMerchantId` 各自已丢一次，这里再丢一次是幂等兜底）—— 不丢就会在 401 出口
+ *     清空存储后，读口仍从 `restored` 读出身份 ⇒「已登录」判断残留、跳登录后又弹回来。 */
 export function clear() {
   clearCredentials()
   clearMerchantId()
   sessionStorage.removeItem(K.customerId)
+  dropRestored()
 }
 
 // ── ⚠️ 以下两处待鉴权笔填充（方案 §4 ③）：本笔为空实现 ──────────────────────────
