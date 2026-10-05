@@ -43,7 +43,7 @@
 
 | 项 | 内容 |
 |---|---|
-| 现状 | 全项目 **35** 个端点**仍零鉴权生效**（**handler 数口径**，见 `progress.md` §5-R (4) / §5-T；认证侧未启用 —— ⚠️ **2026-10-05 订正**：闸与会话**写入方**（笔 2 的 `UserController.loginSelect` → `AuthSession.login`）**均已落地，但闸默认关 ⇒ 认证链路未被启用**）；⚠️ **「无拦截器」自 2026-10-04 起不成立**（已有登录闸 `shared/web/AuthInterceptor`，开关 `app.auth.enabled` **默认 `false`** ⇒ 对现网零影响），无 Spring Security |
+| 现状 | 全项目 **35** 个端点**仍零鉴权生效**（**handler 数口径**，见 `progress.md` §5-R (4) / §5-T；认证侧未启用 —— ⚠️ **2026-10-05 订正**：闸与会话**写入方**（笔 2 的 `UserController.loginSelect` → `AuthSession.login`）**均已落地；⚠️ 同日「翻开关笔」已把开关翻 `true` ⇒ 认证链路自今日起启用**）；⚠️ **「无拦截器」自 2026-10-04 起不成立**（已有登录闸 `shared/web/AuthInterceptor`；⚠️ 开关 `app.auth.enabled` **2026-10-05 已翻 `true`** ⇒ 鉴权生效，白名单外无会话 = 401），无 Spring Security |
 | 问题 | 管理端需要「权限分级」时，必须先在服务端实现认证与授权 |
 | 可选方案 | A. 拦截器 + Redis Session（半天）/ B. JWT + 拦截器（1 天）/ C. Spring Security + JWT（3 天） |
 | 建议时机 | T2：业务功能完成后、管理端之前 |

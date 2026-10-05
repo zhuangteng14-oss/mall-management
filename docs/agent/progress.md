@@ -81,7 +81,7 @@
 | 2026-10-04 | **前端 API 层规范化**（`fix/frontend-api-layer`，8 笔 = 5 搬家 + 3 改行为）：14 个 view 的 **42** 处裸 `fetch`（41 POST + 1 GET）、**51** 行硬编码基址（39 行 fetch 字面量 + 6 行 URL 赋值 + 3 处头像 URL + 3 行 CSS `url()`）、**54** 处登录态 `sessionStorage`（4 键：`merchantid` 24 / `customerid` 12 / `loginUsername` 12 / `loginPassword` 6）收敛到 `src/api/` 三层（`http` / `endpoints` / `auth`）+ 2 行 `.env`。**落地点与残留**：§6-B 的 `P2.1`（`LoginPage` 3 行 CSS 挂账保留）/ `P2.2` / `P2.3`（改 22 处纯日志 `catch`，另 19 处业务分支不动）/ `P2.5`，加 §6-A 的 `P1.1`；⚠️ `P2.7` **只落超时**（默认 10s / 上传 30s），**重试按裁决不做**；**`P2.6` 未落**（余 17 处页面状态键 `SEARCH_*` / `FROM_PAGE` 本笔一字未动）—— 已拆出单列一笔。3 笔改行为 = 超时 / 非 2xx 抛 `HttpError` 并对用户可见 / 3 处头像死链（`default-avatar.jpg` → `default_user.png`）。证据：保真 42/42（路径 + 方法 + body + Content-Type 四维）、5 门禁含反向对照（51→3 / 42→0 / 0→42 / 54→0 / 14→1）、8 笔逐笔 `lint=0 build=0`、32 个 `(方法, 路径)` 组合对后端 0 处不存在。**不关 `TD-06`**（根因在后端 4 处字面量） | #48 |
 | 2026-10-04 | **记录收尾 + 自查纠错**（`docs/progress-48-record`）：更新记录补 `#48` 行（行内带 **§6-B/§6-A 的落地点与残留**）→ 订正 `.env.production` 注释的 51 分解为 **39 fetch 字面量 + 6 URL 赋值行 + 3 处头像 URL + 3 CSS `url()` = 51**（纯注释、值零变更）→ 新增 **§5-I** 登记 #48 的 **2 处已知错误**（51 分解、`sessionStorage` 52 vs **54**）；**#48 的 PR body 同步订正**（GitHub 直改，2 处 + 回读校验）。⚠️ `8118741` 的提交信息**未修**（不改写已合并历史）⇒ 该 message 两个错数**永久留痕**，引用时按 §5-I 的 **39 / 54** 读 | #49 |
 | 2026-10-04 | **记录补号 + `54` 订正 + 鉴权调研登记**（`docs/progress-49-record`，3 提交 `c97bcc5` / `2cf0e64` / `651a375`）：① 更新记录补 `#49` 行；② **订正 `54` 的逐键拆分**（`progress.md` §1 的 `#48` 行 + §5-I (2) + `src/api/auth.js:3-8` **三处**；原写 `merchantid 23 / loginUsername 13 / customerid 12 / loginPassword 6` **对不上任何一套口径** ⇒ 统一为**逐出现** `merchantid 24 / customerid 12 / loginUsername 12 / loginPassword 6`），并**实测坐实**另有 `52`（**行×键**去重）与 `51`（涉及凭据的**行数**）两套口径 —— `52` 的病是**被与 `17` 相加去对 `71`**（混用）；③ 新增 **§5-J**：登记鉴权笔（`BD-03`）开工前调研 **3 条发现**（`AbstractSmokeTest:45` 计数 5→**8** / `UserService:98` 明文账号密码进 stdout / `login.Password char(20)` 装不下 bcrypt(60)）+ **1 条裁定**（`P2.6` **独立一笔**，时序 鉴权笔 → `P2.6` 笔）。⚠️ `8118741` 的提交信息**未修**（不改写已合并历史） | #50 |
-| 2026-10-04 | **鉴权笔 1/3 —— 拦截器 + 白名单 + 401 出口**（`feat/auth-gate`）：`shared/web/AuthInterceptor`（开关关 → 放行／白名单 → 放行／会话有 `userId` → 放行／否则 **401 + `{"success":false,"msg":"未登录"}`** 且**不进 Controller**）+ `shared/web/WebAuthConfig`（注册在 `/**`，**故意不用 `excludePathPatterns`** ⇒ 白名单唯一出处是 `AUTH_WHITELIST`）+ 开关 `app.auth.enabled` **默认 `false`**（⚠️ **承重**：写死 `true` 当场红 **29** 条）+ 白名单 **12 条**（业务 8 + 基础设施 4）+ 单测 10 条；文档同步 **4 文件 6 处**（组 A）；新挂 **§5-O** 3 条（组 B，本笔之前就过时）。⚠️ **只做「拦」，不做「认」** —— 认证侧留笔 2 | #53 |
+| 2026-10-04 | **鉴权笔 1/3 —— 拦截器 + 白名单 + 401 出口**（`feat/auth-gate`）：`shared/web/AuthInterceptor`（开关关 → 放行／白名单 → 放行／会话有 `userId` → 放行／否则 **401 + `{"success":false,"msg":"未登录"}`** 且**不进 Controller**）+ `shared/web/WebAuthConfig`（注册在 `/**`，**故意不用 `excludePathPatterns`** ⇒ 白名单唯一出处是 `AUTH_WHITELIST`）+ 开关 `app.auth.enabled` **默认 `false`**（⚠️ **承重**：写死 `true` 当场红 **29** 条；⚠️ **按语（§5-AD，翻开关笔，2026-10-05）**：该「默认 `false`」**已于 2026-10-05 翻成 `true`**，「承重」改由两处 profile 显式 pin `false` 承担 —— 本行是当日如实记录，**保留原样**）+ 白名单 **12 条**（业务 8 + 基础设施 4）+ 单测 10 条；文档同步 **4 文件 6 处**（组 A）；新挂 **§5-O** 3 条（组 B，本笔之前就过时）。⚠️ **只做「拦」，不做「认」** —— 认证侧留笔 2 | #53 |
 
 > ⚠️ **表格欠账的现状**：`C#2` 那一行原记 `本笔`，已由 **PR #42 合并后的 `docs/progress-42-record` 一笔补成 `#42`** —— 与 **#11 的做法相同**（#11 的记录也是合并后另起一笔 `37cafc3` 补的 `#40`）。当初为何不直接填：那一笔的文档与代码在**同一笔**落盘（先出 diff → 用户核 → commit → 开 PR），commit 时 PR 号尚不存在。仍欠的**只剩三处**：**2026-10-02 / 2026-10-03 两行**的 `+ 本笔`，以及本表**新增的 `2026-10-04 B#1` 行**（同理：该笔的文档与代码同笔落盘，commit 时 PR 号尚不存在；补法与 #42 同 —— 合并后另起一笔）。
 
@@ -497,7 +497,7 @@
   ① **前端不带 cookie** —— `src/api/http.js:73` 的 `buildInit` **无** `credentials`（`:69` 自认「待鉴权笔填充」）；且前端 dev server 打 `:8088` 是**跨源** ⇒ 翻 `true` = 全站受保护端点 401。
   ② **测试套件红** —— 写死 `true` 实测红 **29** 条（记录在 `application.properties` 那条突变对照注，**笔 1 测的**）。⚠️ **本笔复核：这个数字现在已过时** —— `@WebMvcTest` **只声明在 `AbstractSmokeTest:47`**，其余 smoke 类**全部 `extends` 它** ⇒ 切片对**每一个** smoke 类生效（Spring 测试框架沿父类找注解，非 Java `@Inherited`）。而笔 1 之后又添了 `AuthGateSmokeTest` / `AuthSessionSmokeTest`（各自**两层**）⇒ **翻那一笔必须重测这个数，别直接沿用 29**。
   ③ **A3 全 401** —— CI A3 job 以 `SPRING_PROFILES_ACTIVE=a3` 起真 jar（`ci.yml:209`），`ConcurrencyRunner` 发**真实 HTTP** 打 `orderAdd` 等**非白名单**端点（`ConcurrencyRunner.java:108`）；而 `application-a3.properties` **不设** `app.auth.enabled` ⇒ **继承主配置** ⇒ 主配置一翻，A3 门禁全红，且 `continue-on-error: true` 会这个红**系统性抹平**（同 §5-E / §5-G 的告诫）。
-  ⇒ **翻的时机在笔 4（前端接 `credentials` + 401 处理）之后**；且「翻」**单列一笔** —— 它要改 **a3 加显式 `false` 护栏** + **smoke 类适配**（挂会话或加白名单），混进笔 4 会让 diff 伸进 `src/test/`。
+  ⇒ **翻的时机在笔 4（前端接 `credentials` + 401 处理）之后**；且「翻」**单列一笔** —— 它要改 **a3 加显式 `false` 护栏** + **smoke 类适配**（挂会话或加白名单），混进笔 4 会让 diff 伸进 `src/test/`。⚠️ **按语（§5-AD 翻开关笔，2026-10-05）：本条的预测已如期应验并已被护栏拆掉** —— 翻笔按本条「单列一笔 + a3 加显式 `false` + smoke 适配」三条照办：`application-a3.properties` 加 `app.auth.enabled=false`（故上面「不设 ⇒ 继承主配置 ⇒ 全 401」不再发生）、`src/test/resources/application-smoke.properties` 加同款 pin（10 个 smoke 类**零改动**全绿）；② 那个 29 **确已重测**（见 §5-AD）。
 
 - **（2）【受控取证 · 真容器】2026-10-05，`--app.auth.enabled=true` 起 jar（仅改启动参数）。**
   环境：JDK 17 / 本机 MySQL 8.0.32 / **Redis 未起**（`6379` 闭；按设计降级 —— L2 自检 WARN、锁 fail-open，进程照常起，**6.5s**）。端口 **8099**（避开 8088）。13 条逐条实测：
@@ -521,7 +521,7 @@
   ⇒ **[12]/[13] 是给笔 4 的现成结论**：后端 CORS 侧（`ImgConfig` 的 `addAllowedOriginPattern("*")` + `setAllowCredentials(true)`）**已支持跨源带凭据**，且**预检不会被闸拦**。⚠️ 但**浏览器是否真的带上 cookie**（`SameSite` / 跨源定义）**本机 curl 证不了**，笔 4 须**真浏览器实测**。
 
   ⚠️ **两条附带发现（本笔实测，非本笔造成）**：
-  - **(i) 本开关没有启动期生效值打印。** 启动日志里 ASCII `auth` **0 命中**，且 `WebAuthConfig` / `AuthInterceptor` **源码内无任何 logger / `println`** ⇒ 与 `app.lock.*` / `app.cache.*` / `app.order.state.*` 的「启动期打印生效值」惯例**不一致**：**闸开没开只能从行为反推**。⚠️ 因此「启动日志能读到 `app.auth.enabled` 生效值」**当不了验收判据**（除非另补一行自检日志 —— 那属「翻」那一笔）。
+  - **(i) 本开关没有启动期生效值打印。** 启动日志里 ASCII `auth` **0 命中**，且 `WebAuthConfig` / `AuthInterceptor` **源码内无任何 logger / `println`** ⇒ 与 `app.lock.*` / `app.cache.*` / `app.order.state.*` 的「启动期打印生效值」惯例**不一致**：**闸开没开只能从行为反推**。⚠️ 因此「启动日志能读到 `app.auth.enabled` 生效值」**当不了验收判据**（除非另补一行自检日志 —— 那属「翻」那一笔）。⚠️ **按语（§5-AD 翻开关笔，2026-10-05）：本条已结清** —— 翻笔在 `WebAuthConfig` 构造器补了一行启动自检日志（ASCII 片段 `AUTH`），**此后「启动日志读生效值」可当验收判据**。
   - **(ii) 取证副作用已还原。** 第 6 条**真写库**（改了 `user` 表 `customerid='pIzTWafaGp'` 行的 `email` / `address` / `selfintroduction`）。已按 `mall_management_sql.sql:197` 的种子值用 `UPDATE` **还原并读回核对**。⚠️ 教训：非白名单取证要挑**只读**端点，别顺手挑写端点。
 
 - **（3）【订正】4 处「同一事实」的引用点 —— 过时的是**子句**，不是整句。**
@@ -1185,8 +1185,8 @@
   - ✅ **`api-contract.md`**（净零 220）：`:38`（`/user/me` 返回形态 → `user` 整行 + `image`）、`:46`、`:161-164`（差集成员互换、**仍 4**）、`:171`（行改键为 `/user/me`、`getUserInfo` 归零）、`:203`（行改键为 `/user/getUserInfo`）。
   - ✅ **`progress.md` 就地按语**：`:224` / `:402` / `:414` / `:573` / `:632` / `:969` / `:974` / `:1121` / `:1162`。
   - ⚠️ **本笔新发现的漂移（第 9 条）**：`progress.md:414` 引的 `UserService.java:185` **在 HEAD 即已偏**（HEAD `:185` 是 `loginAdd` 形参行；`selectRoleForProfile` 的真实调用点在 HEAD **`:242`**）⇒ 本笔后为 **`:239`**（javadoc 压缩 3 行 ⇒ 上移）。已并入 `:414` 的按语。
-  - ⚠️ **另发现（非本笔引入，**已就地补数**）**：`api-contract.md:161` 的 `42` 是 **2026-10-03 基期值**；**现状 = 43** —— 会话恢复笔的 `main.js:28` 探针未计入基期（本笔实测 `grep -rn "http\.\(post\|get\)(" src/` = **43**），**不同路径仍 31**（`/user/me` 进 / `/user/getUserInfo` 出）⇒ 差集仍 4。**处置 = 就地写「基期 42 / 现状 43」并注明来源**（`:161`）—— **不**指向已完成的笔（`#48`「前端 API 层规范化」已交付，不能再当归属）；§6 头部 / P2.1 / P2.3 及 §5-I / §5-S 里的 `42` 均为**基期口径**，按原样保留。
-  - ⚠️ **`WebAuthConfig.java:83-90` 缺守卫**（用户要求 ② 点名）：**归属笔名 = 界面优化笔（C3 笔）** —— 见「本笔不做」，本笔**不动**鉴权配置。
+  - ⚠️ **另发现（非本笔引入，**已就地补数**）**：`api-contract.md:161` 的 `42` 是 **2026-10-03 基期值**；**现状 = 43** —— 会话恢复笔的 `main.js:28` 探针未计入基期（本笔实测 `grep -rn "http\.\(post\|get\)(" src/` = **43**），**不同路径仍 31**（`/user/me` 进 / `/user/getUserInfo` 出）⇒ 差集仍 4。**处置 = 就地写「基期 42 / 现状 43」并注明来源**（`:161`；⚠️ **按语（§5-AD 翻开关笔，2026-10-05）：这个「现状 43」同日又被翻笔推成 `44`**（`UserCenter.vue:64` 退出销会话 +1）⇒ 今日 `api-contract.md:161` 已写「现状 44 / 不同路径 32 / 差集 4 → 3」）—— **不**指向已完成的笔（`#48`「前端 API 层规范化」已交付，不能再当归属）；§6 头部 / P2.1 / P2.3 及 §5-I / §5-S 里的 `42` 均为**基期口径**，按原样保留。
+  - ⚠️ **`WebAuthConfig.java:90-95` 缺守卫**（用户要求 ② 点名；⚠️ **裁决 D5（翻开关笔，2026-10-05）：地址由原记 `:83-90` 订正为 `:90-95`，归属由「界面优化笔（C3 笔）」改指「前端路由守卫笔」** —— 理由：界面优化笔是**样式**笔，路由守卫不是样式；同 §5-AD D3）：**归属笔名 = 前端路由守卫笔** —— 见「本笔不做」，本笔**不动**鉴权配置。
   - ⚠️ **`/user/getUserInfo` 的最终去留**（= §5-J (4) 那一半的挂账）：**归属笔名 = 「跨四域清除 schema 前缀」笔**（或独立记账笔）—— 删它会使 `UserDao.selectRoleForProfile` 的 SQL 字面量消失，把全仓「硬编码 `mall_management_sql.` 前缀 = **39 处**」基线拉到 **38**、端点数 **35 → 34** ⇒ **必须与记账笔同批**，本笔**只保留、不删**。
 
 - **（7）手测项（留 T 批，本笔不单跑；用户裁定 六、不手测）**：**T-new-9** 登录成功后 `sessionStorage` **不再**有密码键（只有 `loginUsername` / `merchantid` / `customerid` / `role`）；**T-new-10** 开新标签页直入 `#/merchant/goodsUp` 与 `#/customer/user/info` ⇒ 头像 / 店名 / 10 列渲染正常（会话恢复 + `/user/me` 通路）；**T-new-11** 退出后再进这两页 ⇒ 回落默认头像、**无错误弹窗**（`isLoggedIn()` 为假 ⇒ 直接 return）。
@@ -1194,6 +1194,58 @@
 - **（8）本笔不做**（用户裁定 八）：不翻开关（`app.auth.enabled` **仍 `false`**）、不动 `ProductPage.vue`（R5 永久不做）、不动界面样式（界面优化笔）、不动 C3、不动 `ci.yml` / A3 脚本、不动 `UserCacheService` / `UserDao` / SQL、**不 merge**（PR 由用户合）。
 
 - **（9）不加「更新记录」行**（照 `§5-H (3)` / §5-N / §5-Q (4) / §5-T (7) 先例）。
+
+---
+
+### 5-AD. 翻开关笔（`feat/auth-enable-final`，2026-10-05）：`app.auth.enabled` **`false` → `true`** —— 鉴权自本笔起**真正生效**（≈15 文件 = 7 代码/配置 + 8 文档/注释）
+
+> **上游**：§5-R（鉴权笔 3「**不翻开关**」+ 真容器受控取证）／§5-S（鉴权笔 4：前端接上 `credentials` + 401 出口）／§5-U（会话恢复笔：启动探针）／§5-V·§5-W（`/` 落点守卫 + 登录提示条）／`P2.6`（§5-AC：凭据驱动 → 会话驱动）。**翻的前置条件至此全齐** —— 正是 §5-R `:499-500` 自己写下的三条（「翻的时机在笔 4 之后」「**单列一笔**」「要改 a3 显式 `false` 护栏 + smoke 类适配」）。
+
+**（1）为什么必须单列一笔（不是把一行 `false` 改成 `true`）** —— 翻会让**三处**同时变脸，任何一处没护栏就当场红：
+  ① **10 个 smoke 类**（`AbstractSmokeTest:47` 的 `@WebMvcTest` 切片扫到 `WebAuthConfig`）—— 打非白名单端点者**全被闸 401**；
+  ② **A3 真容器 job**（`SPRING_PROFILES_ACTIVE=a3`；`ConcurrencyRunner` 发**真实 HTTP** 打 `orderAdd` 等 **5 个非白名单**端点）—— 全 401，且 `continue-on-error: true` 会把这个红**系统性抹平**（同 §5-E / §5-G 的告诫）；
+  ③ **前端**（退出登录只清 `sessionStorage`、**不销服务端会话**）。
+
+**（2）三档现值表（翻后；`grep app.auth.enabled` 的权威口径 —— 可复核）**
+
+| 文件 | 值 | 理由 |
+|---|---|---|
+| `Mall-management-server/src/main/resources/application.properties` | **`true`** | **本笔落点** —— 主配置，现网生效 |
+| `.../src/main/resources/application-a3.properties` | **`false`**（本笔新加显式 pin） | A3 的 5 个非白名单端点 + `ConcurrencyRunner.lockAcquires()` 读 `/actuator/metrics/**`（**不在白名单**；`r.code != 200` ⇒ `-1`「无法判定」）—— 第二重保护面 |
+| `.../src/test/resources/application-smoke.properties` | **`false`**（本笔新加显式 pin） | `@ActiveProfiles("smoke")`（`AbstractSmokeTest:47-48`）激活 ⇒ 10 个 smoke 类**零改动**保持全绿 |
+
+> ⚠️ **`@Value("${app.auth.enabled:false}")` 的兜底**仍是 `false`（用户裁决 **D2**）—— 兜底是「属性**缺失**」的口子，与「主配置**现值**」是两件事。**不改它**：若改成 `true`，「**谁删了那一行**」就从「静默关」变成「静默开」（闸在无人察觉时生效），风险方向反了。⇒ 登记为**独立欠账**（`WebAuthConfig:118` 的兜底）。
+
+**（3）用户四项裁决（本笔照办）**
+  - **D1 文档订正范围（8 处纳入本笔）**：先前 6 份文档 + 2 处 javadoc 写着「开关**默认 `false`** ⇒ 对现网零影响」—— 翻后**全是假话**，本笔**就地全部订正**（清单见 (6)）。理由：不许假话。
+  - **D2 兜底仍 `false`**（见上表下注）。
+  - **D3** 6 条 `REACHABLE_BUT_NOT_PUBLIC` 端点的前端守卫缺口**不塞进界面优化笔（C3 是样式笔）** ⇒ 归属新的具名笔「**前端路由守卫笔**」。
+  - **D4 前端退出时序**：fire-and-forget + **fail-open** + `allowUnauthorized: true`（见 (5)）。
+  - **D5**（落码中接受的订正）：`progress.md:1189` 原把「`WebAuthConfig.java:83-90` 缺守卫」判给「界面优化笔（C3 笔）」，与 D3 冲突 ⇒ **改指「前端路由守卫笔」**，并把失效地址 `:83-90` 订正为实测 **`:90-95`**。
+
+**（4）四处核实（落码前必答；全部实测）**
+  1. **smoke profile 的激活机制**：Spring Boot **不**自动加载 `application-smoke.properties` ⇒ 必须核 `@ActiveProfiles`。实测 `AbstractSmokeTest:47-48` 有 `@ActiveProfiles("smoke")`，且 `@ActiveProfiles` 是 `@Inherited` ⇒ **10 个 smoke 子类全覆盖、基类零改动**。⚠️ 备选 (b) `src/test/resources/application.properties` **不可用**：它**屏蔽**主 `application.properties`（`target/test-classes` 先于 `target/classes`）⇒ `@SpringBootTest` 的 `MallManagementApplicationTests` 丢 `spring.datasource.*` 而启动失败。
+  2. **`/user/logout` 的方法**：`@PostMapping`（`UserController:222`）⇒ 前端写 `http.post`。
+  3. **启动探针**：`main.js:28` 调 `/user/me` **已带** `allowUnauthorized: true` ⇒ 翻后未登录访客**静默继续**，首页零变化。
+  4. **启动自检日志落点**：`WebAuthConfig` **构造器**（唯一读该 `@Value` 处），ASCII 片段 **`AUTH`**，与 `app.lock.*` / `app.cache.*` / `app.order.state.*` 的「启动期打印生效值」惯例对齐（结清 §5-R (i)）。
+
+**（5）前端退出（D4 落地，`UserCenter.vue:64`）**：`http.post(endpoints.user.logout, null, { allowUnauthorized: true }).catch(() => {})` —— **放在 `router.push('/login')` 之后**（保 `:52-55` 行号锚）。三条语义：闸开之后**只清本地 `sessionStorage` = 没登出**（cookie 还在，直开 `#/customer` 照样取数据）⇒ 必须销**服务端会话**；`allowUnauthorized` 让「未登录时点退出」**不进 401 出口**（不置闩锁、不重复跳转）；**不 `await` + `.catch` 吞掉** = fail-open（后端不可达 / 超时也不把用户困在「看起来还登着」的界面）。**残留**（服务端会话活到过期）是有意接受的代价。⚠️ `endpoints.js` 的 `logout` 行已注明「**不在白名单** ⇒ 未登录调它**必 401**」。
+
+**（6）本笔文件清单（≈15，破 ≤5 —— 用户已批）**
+  代码 / 配置 **7**：`application.properties`（翻值 + 同段注释改写，**净零**）／`application-a3.properties`（追加 pin 段）／`src/test/resources/application-smoke.properties`（追加 pin 段）／`AuthGateSmokeTest.java`（**净零**：文案就地改 + 层清单）／`AuthSessionSmokeTest.java`（**净零**：2 处文案）／`api/endpoints.js`（`user.logout` 1 行 + 头注释计数）／`views/UserCenter.vue`（+2 import，两处注释压缩吸收 ⇒ 锚点 `:52-55` 不漂）。
+  文档 / 注释 **8**：`progress.md`（本 § + `:84` / `:499` / `:524` / `:1188` / `:1189` 按语）／`api-contract.md`（`:9` / `:39` / `:46` / `:47` / `:161` / `:164` / `:204`）／`business-decisions.md:46`／`context-packs/three-layers.md:119`·`:185`·`:198`／`defect-survey.md:117`／`project-map.md:81`／`WebAuthConfig.java`（**净零 135 行**：+启动日志、javadoc 就地改）／`UserController.java`（**净零 230 行**：4 处 javadoc 就地改）。
+
+**（7）净零与行号回放（本笔核心手法）**：`WebAuthConfig.java` **135 行（净零）** ⇒ 三处外部引用（`progress.md:627` → `:97-113`、`:693` → `:103-107`、本节 → 6 端点块 **`:90-95`**）逐条回放**未漂**；`UserController.java` **230 行（净零）**；`UserCenter.vue` 的 `:24` / `:38` / `:44` / `:52-55` 未漂。
+
+**（8）落码后实测（全部本地可复核）**
+  - **前端**：`npm run build` ⇒ **exit 0**（`Compiled successfully in ~11.8s`）；`npx eslint src --ext .vue,.js` ⇒ **exit 0**（零输出）。
+  - **后端全套**：`./mvnw -B test` ⇒ **`209 / 0 / 0 / 19`**（**与翻前逐条同集合**）。⚠️ 目录先 `rm -rf target/surefire-reports` 再跑（防 §5-V 记过的 surefire 残留累加）⇒ 30 个报告文件、**0** 个含 `Failures/Errors`。⚠️ `MallManagementApplicationTests` 那 **6 条仍 `skipped`** —— 原因不是本笔，是它的 `@EnabledIfEnvironmentVariable(named = "A3_ENABLED", matches = "true")`（见下条）。
+  - **「主配置现值 = `true`」的显式探针**（用户验收第 4 条）：`A3_ENABLED=true ./mvnw -B test -Dtest=MallManagementApplicationTests` ⇒ **6 / 0 / 0 / 0 全绿**，且启动日志打出 `WebAuthConfig : …（AUTH）… app.auth.enabled=true …`。**为何这条能当探针**：该类是 `@SpringBootTest` 且**无 `@ActiveProfiles`、无 `@TestPropertySource`** ⇒ 生效值只可能来自**主 `application.properties:163`**。⚠️ 这是本笔**唯一**一次真启动主 profile 上下文（需本地 MySQL 可达）。
+  - **启动日志打印「生效值」而非常量**：全量跑里 `grep AUTH` **3 命中** —— `AuthGateSmokeTest` / `GoodsAddUploadFailSmokeTest` 打 `false`（smoke profile 的显式 pin），`AuthGateSwitchOnTest` 打 `true`（其 `@TestPropertySource` 覆盖）⇒ **同一行格式打出两个不同的值**。⚠️ 日志正文在 GBK 控制台是乱码，**ASCII 片段 `AUTH` 是唯一可 grep 的锚**（这正是选它的理由，同 `app.lock.*` 惯例）。
+  - **三档值 grep（可复核）**：`application.properties:163` = **`true`** ／ `application-a3.properties:98` = **`false`** ／ `src/test/resources/application-smoke.properties:31` = **`false`**。
+  - **净零**：`WebAuthConfig.java` **135**、`UserController.java` **230**、`api-contract.md` **220** —— 三处均与翻前一致。
+  - **`git diff --stat`**：**15 文件，175 insertions(+), 85 deletions(-)**。
+  - **新发现的漂移**：**无**。⚠️ 唯一一处连锁：`api-contract.md:161` 的「现状 43」同日被本笔推成 **44** ⇒ 已在 `progress.md:1188` 就地加按语（属同笔连锁，非新发现）。
 
 ---
 

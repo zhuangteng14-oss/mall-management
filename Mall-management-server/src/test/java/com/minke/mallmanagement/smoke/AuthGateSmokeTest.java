@@ -28,7 +28,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * 旧 answer（{@code getArgument(2)} 为 null）⇒ NPE。要绕开就得在本类里重写基类那个包级
  * {@code @BeforeEach} 再补一句 {@code reset(...)} —— 绕行代码比它绕开的问题更难懂。
  * 故改用最朴素的做法：同一文件两个**顶层**包级类，各拿一份上下文 ——
- * {@link AuthGateSmokeTest}（默认 OFF，2 条）+ {@link AuthGateSwitchOnTest}
+ * {@link AuthGateSmokeTest}（profile 钉 OFF，2 条）+ {@link AuthGateSwitchOnTest}
  * （{@code app.auth.enabled=true}，8 条）。两层**都是真集成**：真注册的拦截器 + MockMvc。
  *
  * <p>⚠️ 副作用（已知，可接受）：第二个类名不等于本文件名，故
@@ -67,14 +67,14 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * <ul>
  *   <li>把开关写死成「常开」（丢掉 {@code app.auth.enabled}）⇒ 本文件 OFF 层 **2/2** 红；
  *       <b>全量跑</b>另有既有的 8 个 smoke 类里的 7 个、共 **27** 条红（逐类见
- *       {@code WebAuthConfig} 的注释）—— 这是「开关必须默认 false」的直接证据；</li>
+ *       {@code WebAuthConfig} 的注释）—— 这是「smoke profile 必须钉 false」的直接证据；</li>
  *   <li>把会话判据放宽成「有会话即可」（丢掉 {@code SESSION_USER_ID} 属性判断）⇒
  *       **只** {@code withSessionButNoUserId_is401} 红（1/10）；</li>
  *   <li>丢掉白名单判定（对一切路径都要求登录）⇒ **4** 条红：
  *       {@code whitelist_allEntries_passTheGate} + 3 条放行用例（goodstype / loginSelect / img）。</li>
  * </ul>
  *
- * <p>⚠️ 本文件**不**验证闸的「认证侧」—— 本笔没有任何端点会把 userId 写进会话（那是鉴权笔 2）。
+ * <p>⚠️ 本文件**不**验证闸的「认证侧」—— 会话写入方在笔 2 已落地，由 {@link AuthSessionSmokeTest} 覆。
  */
 class AuthGateSmokeTest extends AbstractSmokeTest {
 
@@ -87,7 +87,7 @@ class AuthGateSmokeTest extends AbstractSmokeTest {
     /**
      * 「未登录可达」但**刻意不在白名单**里的端点。
      *
-     * <p>它们能被未登录用户打到，是**前端缺守卫**（`P2.6` 笔的活），不是把它们公开的理由。
+     * <p>它们能被未登录用户打到，是**前端缺守卫**（归属「前端路由守卫笔」，见 §5-AD D3），不是把它们公开的理由。
      * 本常量把这层区分钉成回归线：将来谁要放宽其中任何一条，必须**显式改这里并说明理由**。
      * 来源：2026-10-04 前端全量核实（16 处未登录可达调用点）。
      */
@@ -109,8 +109,8 @@ class AuthGateSmokeTest extends AbstractSmokeTest {
     @BeforeEach
     void switchOff_andTheGateIsReallyLoaded() {
         assertThat(authEnabled)
-                .as("⚠️ 本层前提是 app.auth.enabled=false（application.properties 的默认值）。"
-                        + "若为 true，说明有人改了默认值 —— 那会让本笔从「零影响」变成「全套件转红」")
+                .as("⚠️ 本层前提是 app.auth.enabled=false —— 来源是 application-smoke.properties 的"
+                        + "**显式 pin**（翻开关笔起；此前是 application.properties 的默认值）。若为 true，说明 pin 被删了")
                 .isFalse();
         assertThat(webAuthConfigBean)
                 .as("WebAuthConfig 没进上下文 ⇒ 本层「没被拦」是空命题（闸压根不在）")

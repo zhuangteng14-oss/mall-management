@@ -17,6 +17,8 @@
 import { computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { clearCredentials, clearMerchantId } from '../api/auth'
+import { http } from '../api/http'
+import { endpoints } from '../api/endpoints'
 
 // ── R1（2026-10-05）：用户中心从 `CustomerPage.vue` 的**内联 markup** 提成**独立页面组件** ──
 // 4 个子 tab 已各自成路由（见 `router/index.js`）⇒ 本文件**不再持有 `curSubPage`** —— 子页面选择权交给路由。
@@ -25,12 +27,10 @@ import { clearCredentials, clearMerchantId } from '../api/auth'
 // 菜单 = **数据**（路由记录的 `meta.subMenu`：客户 4 项 / 商家 6 项），退出语义 = `meta.logout`。
 //   ⇒ 两壳的差异全部落在**配置**里，本文件**零分支**（只在退出那一处分一次），
 //      R6 抽 `AppShell` 时二级导航已是配置化的（这正是 R2 作为「R6 预演」的实义）。
-//   ⇒ 代价（照实记）：退出点从「分文件」变成「**同一组件两分支**」——
-//      这是**语义**变更、不只是行号重指；`api/auth.js` 里四条按「两个退出点」写的注释已按新语义重写。
+//   ⇒ 代价（照实记）：退出点从「分文件」变成「**同一组件两分支**」—— **语义**变更、不只是行号重指；`api/auth.js` 的四条注释已按新语义重写。
 //
-// ⚠️ **本组件是「多根」（fragment）**：两个根 = 左菜单 + 右子页面，**合起来**正好是壳里
-//    `.user-page`（`display:flex` 行容器）的两个**直接**子元素 ⇒ 布局逐字等价。别在两者之间加包裹
-//    `div` —— 那会把 flex 容器多隔一层。
+// ⚠️ **本组件是「多根」（fragment）**：两个根 = 左菜单 + 右子页面，**合起来**正好是壳里 `.user-page`
+//    （`display:flex` 行容器）的两个**直接**子元素 ⇒ 布局逐字等价。别在两者之间加包裹 `div` —— 那会把 flex 容器多隔一层。
 // ⚠️ 下一行那条 `eslint-disable-next-line` 是**必需**的：本仓 `eslint-plugin-vue` 是 **8.7.1**，
 //    其 `vue3-essential` **不带** `vue/setup-compiler-macros` 宏环境 ⇒ 宏 `defineOptions` 被判
 //    `no-undef`、`npm run build` 直接红（先例见 `ShoppingCart.vue:73` 的块级 `/* eslint-disable no-undef */`）。
@@ -53,6 +53,15 @@ const toLogin = () => {
   clearCredentials()
   if (route.meta.logout === 'merchant') clearMerchantId()
   router.push('/login')
+  // ⚠️ 翻开关笔（2026-10-05）：**销服务端会话** —— 闸开之后，只清本地 = 没登出（cookie 还在，
+  //    直开 `#/customer` 照样取到数据）。
+  //    · `allowUnauthorized`：未登录时点退出**必 401**（`/user/logout` 不在白名单）⇒ 开了它就
+  //      **不进 401 出口**（不置闩锁、不重复跳转）；点退出永远无害。
+  //    · **不 await + `.catch` 吞掉**：fail-open —— 后端不可达/超时也不能把用户困在
+  //      「看起来还登着」的界面里。残留（服务端会话活到过期）是有意接受的代价。
+  //    · 放在 `router.push` **之后**：保住上面 `:52-55` 的行号锚（`auth.js` / `progress.md` 多处
+  //      按行号引这一段）；两条语句同一 tick，先后对行为无影响。
+  http.post(endpoints.user.logout, null, { allowUnauthorized: true }).catch(() => {})
 }
 </script>
 
