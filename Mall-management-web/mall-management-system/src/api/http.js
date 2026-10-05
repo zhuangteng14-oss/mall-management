@@ -6,6 +6,8 @@
 //   ③ **401 出口**（鉴权笔 4）：清本地登录态 + 触发**已注册**的跳转。
 //      ⚠️ **动作本体不在本层** —— 本层只 `clearAuth()` + 喊一声；「跳哪」由 `main.js` 决定
 //      （本层**不能** import router：`router → views → http` 会成环，见 `setUnauthorizedHandler`）。
+//      ⚠️ 可**按次旁路**：`{ allowUnauthorized: true }` —— 只给会话恢复笔的启动探针用
+//      （它注定收到 401，见 `request` 的 401 分支）。**不是**全局开关。
 //
 // ⚠️ 本层**不判业务成功**。`body.success` 的语义各页不同（有的弹 msg、有的静默、
 //    有的走另一分支），统一判 = 一次性改 34 处行为 ⇒ 留在各 view 自己判。
@@ -74,6 +76,8 @@ export function setUnauthorizedHandler(fn) { onUnauthorized = fn }
 let unauthorizedHandled = false
 export function resetUnauthorizedLatch() { unauthorizedHandled = false }
 
+/** 出口本体。⚠️ **只有一个调用点**（`request` 的 401 分支），且带 `allowUnauthorized` 的条件
+ *  —— 别在别处直接调它：绕开条件就等于恢复了「匿名访客一进站被踢」的老问题。 */
 function handleUnauthorized() {
   if (unauthorizedHandled) return
   unauthorizedHandled = true
@@ -138,7 +142,7 @@ function buildInit(method, body) {
   return init
 }
 
-async function request(path, { method = 'GET', body, timeout } = {}) {
+async function request(path, { method = 'GET', body, timeout, allowUnauthorized = false } = {}) {
   const url = urlOf(path)
   const ms = timeout || (body instanceof FormData ? UPLOAD_TIMEOUT : DEFAULT_TIMEOUT)
   const controller = new AbortController()
@@ -155,7 +159,12 @@ async function request(path, { method = 'GET', body, timeout } = {}) {
       // ⚠️ 仍然**抛**（不吞）：`progress.md §6-A P1.2` 写死「失败路径必须继续抛异常落 catch」，
       //    吞掉会让调用方拿不到东西却继续往下跑。本类另有一条：403 ⇒ 提示无权限（本笔不做）。
       if (res.status === 401) {
-        handleUnauthorized()
+        // ⚠️ `allowUnauthorized`（会话恢复笔）：**单次调用级**旁路，不做全局开关。
+        //    用处只有一个 —— 启动探针 `POST /user/me`（`main.js`）：匿名访客**注定**收到 401，
+        //    若照常触发出口，谁都没登录时一进站就被踢到 /login（首页本是公开页）。
+        //    ⚠️ 旁路时**不置闩锁**（连 `handleUnauthorized` 都不进）⇒ 不影响正常流的一次性语义。
+        //    ⚠️ **仍然照抛**：交调用方自己判「无会话」。本函数不吞异常。
+        if (!allowUnauthorized) handleUnauthorized()
         throw new UnauthorizedError(errBody, url)
       }
       throw new HttpError(res.status, errBody, url)

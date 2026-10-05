@@ -611,6 +611,42 @@
 
 ---
 
+### 5-U. 会话恢复笔（`feat/auth-restore`，2026-10-05）：新标签页 / 存储被清后**仍认得你** —— 启动探针 + 401 **单次**旁路
+
+> **性质**：前端 4 文件 / **0 新文件**。不动后端、不动 `ci.yml`、不动 A3 脚本、不动 `src/test/**`、不动 `src/views/**`、不动 8 键页面状态。
+> **来源**：笔 4 切走的 **Q4 块**独立成笔（`§5-S (2)` 登记过）。
+> ⚠️ **价值面只有后两档是本笔新增的**：① **同一标签页刷新** —— `sessionStorage` 按标签页存活，**改前就不丢**，本笔不加价值；② **新标签页** ③ **存储被清** —— 改前认不得，本笔靠 `POST /user/me`（读 **Cookie 会话**）恢复。
+
+- **（1）改动 4 文件（不是方案里写的 3 —— 漏算了 `endpoints.js`）**：
+  1. `src/api/endpoints.js`：`user:` 段新增 `me: '/user/me'`。⚠️ 该文件自称「全仓**唯一**允许出现后端路径字面量的文件」⇒ 探针**不能**硬编码路径，否则又添一处漂移。头注释那句「**31 个唯一端点**」按**同行替换**改写（它是 **view 抽取**口径，`me` **不是** view 抽取的）—— ⚠️ 这里**增删行会让 `endpoints.js:26` 漂移**，而 `progress.md:572` 正按行号引它。
+  2. `src/api/auth.js`：新增模块级 `restored` + `restoreFromSession(info)`；4 个读口改走 `pick()`。⚠️ **只存内存、不落 `sessionStorage`**（BD-03 选 A 的方向：凭据走 Cookie、前端不持有身份）。⚠️ `restoreFromSession` **只张贴、不取数** —— 本文件**零 import** 是成文前提（`http.js → auth.js` 这条边已存在，反向加边即真环）。
+  3. `src/api/http.js`：401 出口加**单次调用级**旁路 `{ allowUnauthorized: true }`（**不做**全局开关）。
+  4. `src/main.js`：`bootstrap()` 中 `await restoreIdentity()`，**排在 `app.use(router)` 之前**。
+
+- **（2）⚠️ 本笔最关键的坑（已解）**：`/user/me` **不在** `AUTH_WHITELIST`（`WebAuthConfig.java:97-113` 共 12 条，无它）⇒ 匿名访客**注定**收到 401 ⇒ 若照常走笔 4 的出口，**谁都没登录时一进站就被踢到 `/login`**（首页本是**公开页**）= 回归。故旁路为必需项，且旁路时**不置闩锁**（连 `handleUnauthorized` 都不进）。**判据 = 手测 T3**；突变对照 **B** = 撤 `allowUnauthorized` ⇒ T3 必变红。
+
+- **（3）读口顺序的实现对裁决**收严**了（请追认）**：裁决（本笔方案 §3.1）是「6 个写口全部**同步**缓存」。本笔实现为 6 个写口一律 `dropRestored()`（**整体作废**），而非逐字段同步。理由：本模块写口**只有两类调用方** —— 登录（`LoginPage.vue`）与退出（`CustomerPage` / `MerchantPage` / `http.js` 的 401 出口），两者都是**身份变更**。丢弃给出可证不变量「**任何一次写之后，读口 ≡ 笔前行为**」；逐字段同步反而留过期字段：新标签页恢复成商家 Y 之后再登录成客户 B、而 B 的 `merchantid` 为空（`LoginPage.vue:148` 的 `if` 跳过写）⇒ `restored.merchantId` 留着 Y、存储里是空的、「优先」就把 Y 读出来。**「优先」只在恢复窗口内生效**（窗口 = 启动到第一次本地写）。
+
+- **（4）恢复不了 / 已知残留（如实登记，均**非**回归）**：
+  - **password 恢复不了**：`/user/me` 只答 5 列（`customerid / merchantid / username / usertype / gender`）⇒ `GoodsUp.vue:148-149` 与 `UserInfoPage.vue:94-95`（拿密码做**真凭据校验**）在新标签页**仍失效**。⚠️ 改前新标签页的 `sessionStorage` 整个是空的，本来就取不到密码 ⇒ 本笔只是**没有把它们变好**。P2.6 的落点。
+  - **占位串会被当成真 id**：恢复字段判据与 `LoginPage.vue:148-153` **逐字对齐**（`if (x)` 只写真值，不加过滤）⇒ `loginAdd` 的默认值 `'暂无数据'` 会作为 `merchantid` 被恢复，恢复窗口内 `ProductPage` 的 `isMerchant` 判定会当成商家。⚠️ **不是本笔引入的新行为** —— 正常登录后 `LoginPage` 也把同一个值写进存储，改前同一条分支走到这里。**不修**（修 = 改 `LoginPage` 行为，不属本笔）。
+  - **服务端会话已过期而本地存储还在**时不打探针（`isLoggedIn()` 为真直接返回）⇒ 要等某个业务请求 401 才发现。**既有**行为。
+  - **匿名访客每次开页面多一次请求**：一次 401、无 DB 查询（`getSession(false)` 即返回）；后端不可用时至多白屏 **3000ms**（探针显式覆盖默认的 10s），仍 fail-open。
+
+- **（5）漂移登记**：
+  - ✅ **本笔自查逮到并已修**一处**自伤漂移**：`endpoints.js` 头注释先被写成 **3 行**（原 2 行）⇒ 该文件行号整体 **+1**，`endpoints.js:26`（被 `progress.md:572` 引用）从 `getUserInfo` 变成 `loginAdd`；**改回净零**后 `:26` 复原为 `getUserInfo`（实测 diff：该文件只在 `:7` 同行替换 + `:29` 起插 3 行）。
+  - ✅ `src/api/auth.js:3-8`（被 `progress.md:83` / `:402` 引用）**逐字未动**（实测与 `HEAD` 比对 IDENTICAL）。
+  - ⚠️ `progress.md:496` 引的 `src/api/http.js:73` / `:69` **在本笔之前**即已失效（笔 4 之后 `buildInit` 在 `:127`）；本笔后位于 **`:131`**。那处是**历史引文**（描述笔 4 前的状态），**不改**。
+  - ⚠️ **本笔新增一处失效**：`progress.md:572` 的「「5」最可能来自 `endpoints.js` 的 `user:` 块**恰好 5 条**」—— 本笔加了 `me` 后该块是 **6** 条。属**历史引文**（原已标「推断档，未证」），**不改**，在此登记。
+  - ⚠️ `src/main.js` 由「**无**尾换行」（笔 4 披露过）变为**有**尾换行；工作区 CRLF 警告一并披露（`core.autocrlf=true`，入库仍是 LF）。
+  - ✅ 指向本文件的数值引用：本笔只在 **§5-T 之后**追加，`## 6` 及其后整体下移，但**仓内无指向 `progress.md` 的活数值引用**（承 §5-P (3) / §5-T (6) 的结论）⇒ 无引用被打断。
+
+- **（6）验证**：`npm run build` 通过（**无** `export 'http' was not found` 那条 warning —— 即 `http.js` 的命名空间出口没被改坏）；`grep -rn "fetch(" src/` 仍**只有一处代码行**（`http.js` 的调用行，探针**没绕过**传输层）；`/user/me` 字面量**只**在 `endpoints.js`；`dist` 里 `allowUnauthorized:!0` 与 `"/user/me"` 均留存（**未被 tree-shake**），`credentials:"include"` 仍在。手测 **T1–T4 + 突变对照 B** 见 PR 描述 —— **留给用户逐条跑，不代跑**。
+
+- **（7）不加「更新记录」行**（照 `§5-H (3)` / §5-N / §5-Q (4) / `§5-T (7)` 先例）。
+
+---
+
 ## 6. 前端规范化（2026-10-03 双审计）
 
 > **口径**：`亲读` —— `Mall-management-web/mall-management-system/src` 全量 grep + 逐行读（只读，前端代码**一字未动**）。
