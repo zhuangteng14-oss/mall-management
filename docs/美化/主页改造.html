@@ -1,0 +1,975 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>商城主页 · 改造方案</title>
+<link rel="stylesheet" href="./node_modules/@fontsource-variable/noto-sans-sc/wght.css" />
+<link rel="stylesheet" href="./node_modules/@fontsource-variable/noto-serif-sc/wght.css" />
+<style>
+/* ═══════════════════════════════════════════════════════════════════════════
+   商城主页改造方案 · 独立预览
+   结构照着 HomePage.vue + CustomerPage.vue 的真实信息还原，但布局重排。
+   不引用你项目任何文件，不修改你项目任何代码。
+
+   几条硬规矩（全部来自 Impeccable 的反模式清单）：
+     禁 · 嵌套卡片        —— 卡片只有一层，商品区直接坐在页面底上
+     禁 · 柔和阴影铺满    —— 改用 1px 发丝线分隔
+     禁 · 统一大圆角      —— 圆角只用 4/8/10，不做 16px 的"泡泡感"
+     禁 · 侧边强调条      —— hover 用底色变化，不用左边竖条
+     禁 · 渐变文字 / 暗色发光 / 图标方块堆叠
+     用 · 暖调中性色      —— 不是纯灰，是带一点米黄的暖灰
+     用 · 真实字阶        —— 12/15/19/24/32，步进 ≥1.25，不做 12/12.2/12.5 这种
+     用 · 字重对比        —— 大字用 300，标签用 600，靠字重拉层级
+     用 · 一主色一锐色    —— 天青主色 + 朱砂只负责价格
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+:root {
+  /* ── 字阶：五档，步进 1.25 以上 ── */
+  --fs-xs: 12px;
+  --fs-sm: 15px;
+  --fs-md: 19px;
+  --fs-lg: 24px;
+  --fs-xl: 32px;
+
+  --fw-light: 300;
+  --fw-reg: 400;
+  --fw-med: 500;
+  --fw-semi: 600;
+
+  /* ── 间距：4px 基准 ── */
+  --s1: 4px;  --s2: 8px;  --s3: 12px; --s4: 16px;
+  --s5: 24px; --s6: 32px; --s7: 48px; --s8: 64px;
+
+  /* ── 圆角：克制 ── */
+  --r1: 4px; --r2: 8px; --r3: 10px;
+
+  /* ── 中性色：冷石墨灰，色相锁 228°（几乎无彩）──
+     这套灰走了三步才对，三步的错都留在这：
+     ① 最初页底 #faf9f7 / 图占位 #f6f4f0 只差 4.4%，卡片等于隐形、hover
+        等于没动（实测只摆 0.3% 明度，还摆反了）。所以第一件事是**拉明度台阶**。
+     ② 拉完我顺手用暖米色 #f3f0e9，被检测器以 cream-palette 抓出 ——
+        "暖奶油底"本身就是条件反射性的 AI 味。
+     ③ 换成青瓷染色的 #e9f2ef，整页发绿、太强眼。**问题不在深浅，在色相**：
+        底色一旦带色相，它就从"背景"变成了"配色"。青瓷绿该待在品牌层。
+     ④ 换成冷灰又压到 14.5%，太深：页头/副导航的白块"浮"在灰上，留白刺眼。
+        调到 7.9% 缓和了，但商品区卡片之间全是空隙，底色一深就成了画面主色
+        （用户："石墨占色六成"）。
+     ⑤ 所以底色交还给白。**关键前提是卡片自己已经能立住** —— 它内部是
+        "白面 + 21% 的边框 + 22% 的灰色图占位"，跟身后是什么颜色无关。
+        灰色从此只留在商品图占位里，那正是将来放照片的地方。
+     页底纯白，其余中性档仍按"对白的分离度"定义，所以整套灰阶不用重算。
+        ink-2 白底 8.0:1、图占位上 6.6:1  —— 图上的文字只能用它
+        ink-3 白底 5.6:1、页底 5.6:1       —— 只准用在白/页底/秒杀底上 */
+  --bg:        #ffffff;   /* 页面底：白。底色露出的面积最大，它不该是一种"颜色" */
+  --surface:   #ffffff;   /* 卡片面 */
+  --surface-2: #f2f5f7;   /* 卡内浅 inset：搜索框、次要标签底（白底上要够看得见） */
+  --surface-3: #ebeef0;   /* 更深的 inset */
+  --img:       #e5e9ec;   /* 商品图占位底：必须比卡片白面明显深，否则图区看不出来 */
+  --ink:       #1b1e20;
+  --ink-2:     #4c5155;
+  --ink-3:     #63696d;
+  --line:      #dde2e5;
+  --line-2:    #d0d6d9;
+
+  /* ── 强调色：朱砂，只给价格和促销 ──
+     收编到 system.mjs 生成的朱砂阶（H 32°），不再是一个孤立的十六进制 */
+  --accent:      #b2422f;   /* = 朱砂 600 */
+  --accent-soft: #ffe9e4;   /* = 朱砂 100 */
+  --cin-50:      #fff4f2;
+  --cin-100:     #ffe9e4;
+  --cin-200:     #ffd2c9;
+  --cin-300:     #ffac9b;
+  --cin-500:     #d35c47;
+  --cin-600:     #b2422f;
+  --cin-700:     #8d2d1d;
+  --cin-800:     #6b1f12;
+
+  /* ── 功能色（照抄 system.mjs 的输出，不要手写） ──
+     ⚠️ 我在这里第一遍手撸了一套 Tailwind 味的蓝绿黄红 —— 正是我上一轮批评的行为。
+        功能色的明度是反解出来的（L 0.552），手挑的色值对不上那套约束。 */
+  --success-ground: #e6f5e7; --success: #19883a; --success-deep: #00581f;
+  --warning-ground: #f9efdf; --warning: #966800; --warning-deep: #604100;
+  --danger-ground:  #ffebe8; --danger:  #b9473f; --danger-deep:  #811e1b;
+  --info-ground:    #e5f2ff; --info:    #1075c5; --info-deep:    #004981;
+
+  /* ── 二级导航（浅灰底）──
+     彩度 0.005，色相锁在冷中性 228，跟页底、区块底同一族，只是明度低一档。
+     对纯白的 ΔE00 = 4.87，比下面那块"区块底"（2.71）明显，才认得出是导航条。 */
+  --nav-bg:    #e6eaec;
+  --nav-tx:    #4c5155;   /* = ink-2，导航底 6.63:1 */
+  --nav-tx-hi: #1b1e20;   /* = ink，   导航底 13.84:1 */
+  --nav-hot:   #8d2d1d;   /* = cin-700，导航底 6.87:1 */
+
+  /* ── 区块底（竖栏 / 主图 / 功能入口条）──
+     只比页底白深一点点：对纯白 ΔE00 = 2.71 —— 并排能看出来，但不会读成"一块颜色"。
+     再深一档（ΔE00 > 4）就会变成上一次那个"白块浮在灰上"的老问题。 */
+  --zone:      #f2f6f7;
+
+  --font: 'Noto Sans SC Variable', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  /* 显示字体：宋体。只给品牌名和区块标题 —— 黑体正文 + 宋体标题是中文界面里
+     最有效的一档配对，比再加一级字号管用（检测器也会报 single-font）。 */
+  --font-display: 'Noto Serif SC Variable', 'Songti SC', serif;
+}
+
+/* ═══ 两套天青色阶（用顶部按钮切） ═══ */
+:root[data-hue="blue"] {
+  --brand:       #2f7979;   /* 填充：按钮底、图标、大字号 */
+  --brand-ink:   #1b5e5e;   /* 文字：页底上的小字（6.6:1）。填充≠文字，必须分开 */
+  --brand-hover: #1b5e5e;
+  --brand-soft:  #d0f8f7;
+  --brand-tint:  #effcfc;
+  --glaze-deep:  #dae4e4;   /* 釉：彩度压到 0.010。原来是 0.020，在冷灰页底上会读成绿块 */
+  --glaze-pale:  #f2f6f6;
+  --nav-now:     #1b5e5e;   /* = brand-ink（浅底上不需要另配浅色版） */
+}
+:root[data-hue="green"] {
+  --brand:       #3b7966;
+  --brand-ink:   #275e4e;
+  --brand-hover: #275e4e;
+  --brand-soft:  #d4f8eb;
+  --brand-tint:  #eefcf6;
+  --glaze-deep:  #dbe3de;
+  --glaze-pale:  #f1f4f3;
+  --nav-now:     #275e4e;
+}
+/* 对照用：你项目现在的颜色 */
+:root[data-hue="old"] {
+  --brand:       #00bcd4;   /* 页底上只有 2.0:1 —— 这就是现方案的问题，当小字用必然糊 */
+  --brand-ink:   #016b7d;
+  --brand-hover: #028fa8;
+  --brand-soft:  #e0f7fa;
+  --brand-tint:  #f0fdfe;
+  --glaze-deep:  #e2ebec;
+  --glaze-pale:  #f4f8f9;
+  --accent:      #ff4d4f;
+  --accent-soft: #ffebeb;
+  --nav-now:     #016b7d;
+  --r1: 4px; --r2: 6px; --r3: 12px;
+}
+
+body {
+  font-family: var(--font);
+  background: var(--bg);
+  color: var(--ink);
+  -webkit-font-smoothing: antialiased;
+  font-size: var(--fs-sm);
+  line-height: 1.6;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   顶部控制条（不属于你的页面，只是给你切换用）
+   ═══════════════════════════════════════════════════════════════════════════ */
+.bar {
+  position: sticky; top: 0; z-index: 100;
+  height: 52px;
+  background: #14181c;
+  display: flex; align-items: center; gap: 10px;
+  padding: 0 20px;
+}
+.bar-t {
+  font-size: 13px; font-weight: 600; color: #fff;
+  margin-right: 8px; white-space: nowrap;
+}
+.bar-t em { font-style: normal; color: #6fb8c9; }
+.bar button {
+  font-family: inherit; font-size: 12.5px; cursor: pointer;
+  padding: 6px 13px; border-radius: 6px;
+  border: 1px solid #333d45; background: #1d2429; color: #b0bec6;
+  transition: .15s; white-space: nowrap;
+}
+.bar button:hover { border-color: #56656f; color: #e8edf0; }
+.bar button.on { background: #2c6a7d; border-color: #4d9db3; color: #fff; font-weight: 600; }
+.bar .sep { width: 1px; height: 20px; background: #2e373e; margin: 0 4px; }
+.bar .hint { font-size: 11.5px; color: #6a7a84; margin-left: auto; }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   一、顶栏 —— 搜索移进来了
+   原来搜索独占 20vh 垂直空间悬在中部，现在并进顶栏，省下整屏高度。
+   ═══════════════════════════════════════════════════════════════════════════ */
+.hdr {
+  position: sticky; top: 52px; z-index: 60;
+  height: 64px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--line);
+  display: flex; align-items: center; gap: var(--s5);
+  padding: 0 var(--s6);
+}
+
+.brand {
+  font-family: var(--font-display);
+  font-size: 21px;
+  font-weight: var(--fw-semi);
+  letter-spacing: .5px;
+  color: var(--brand);
+  white-space: nowrap;
+  text-decoration: none;
+  flex: none;
+}
+
+/* 搜索：整条是一个带边框的容器，按钮是里面的小胶囊 —— 不做"输入框拼按钮"那种拼接感 */
+.search {
+  flex: 1;
+  max-width: 760px;   /* 原来 520 会在宽屏上留出 400px 空洞，把顶栏撑成两半 */
+  height: 40px;
+  display: flex; align-items: center; gap: var(--s2);
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: var(--r2);
+  padding: 0 4px 0 14px;
+  transition: border-color .15s, background .15s;
+}
+.search:focus-within { border-color: var(--brand); background: var(--surface); }
+.search svg { flex: none; color: var(--ink-3); }
+.search input {
+  flex: 1; min-width: 0;
+  border: none; outline: none; background: transparent;
+  font: inherit; font-size: var(--fs-sm); color: var(--ink);
+}
+.search input::placeholder { color: var(--ink-3); }
+.search button {
+  flex: none;
+  font: inherit; font-size: 13px; font-weight: var(--fw-med);
+  height: 32px; padding: 0 18px;
+  border: none; border-radius: var(--r1);
+  background: var(--brand); color: #fff;
+  cursor: pointer; transition: background .15s;
+}
+.search button:hover { background: var(--brand-hover); }
+
+.nav { display: flex; align-items: center; gap: var(--s1); margin-left: auto; flex: none; }
+.nav a {
+  position: relative;
+  font-size: var(--fs-sm);
+  color: var(--ink-2);
+  text-decoration: none;
+  padding: 8px 14px;
+  border-radius: var(--r1);
+  transition: .15s;
+  white-space: nowrap;
+}
+.nav a:hover { color: var(--ink); background: var(--surface-3); }
+.nav a.on { color: var(--brand-ink); font-weight: var(--fw-semi); }
+/* 未读点：改成主色，不再用扎眼的纯红 */
+.nav .dot {
+  position: absolute; top: 6px; right: 6px;
+  width: 6px; height: 6px; border-radius: 50%;
+  background: var(--accent);
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   二、主区
+   ═══════════════════════════════════════════════════════════════════════════ */
+.wrap { max-width: 1400px; margin: 0 auto; padding: var(--s5) var(--s6) 0; }
+
+/* ── 英雄区：分类栏 + 主视觉并排 ──
+   原来分类栏占 40% 宽、5 个词飘在垂直居中，左边一大片死白。
+   现在：分类栏收窄到 208px，"查看全部"钉在底部把高度自然撑满，不再有空旷感。
+
+   底色放在 .hero 上而不是左右两栏各自一份：这样中间那道 32px 的间距
+   也落在同一块底上，竖栏和主图读起来是**一块区域**，不是两个并排的盒子。
+
+   ⚠️ 加了底色之后必须补内边距。没有内边距时「全部分类」是贴着面板左边缘站的 ——
+      在白底上文字贴齐内容栏是对的（跟上面的页头、下面的秒杀块对齐），
+      但只要这块有了自己的底，贴边就从"对齐"变成了"顶到框上"。 */
+.hero {
+  display: grid;
+  grid-template-columns: 196px 1fr;
+  gap: var(--s6);
+  min-height: 368px;
+  background: var(--zone);
+  border-radius: var(--r2);
+  padding: var(--s5);
+}
+
+/* ── 分类栏：不做卡片盒子，做成一条"目录" ──
+   整页原来是 20 个同款圆角白盒子，这是"大众化"的病根。少一个盒子，少一分模板味。
+   改成上下发丝线 + 逐项分隔线，像书前的目录页。 */
+.cats {
+  display: flex; flex-direction: column;
+  border-top: 1px solid var(--line-2);
+}
+/* 「全部分类」：原来上下各一条线，自己夹成一条"标题栏"，跟上面那条导航撞脸。
+   去掉下边线之后它退回成目录页的一个栏目名，不再自成一块。 */
+.cats-h {
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-semi);
+  letter-spacing: 1.4px;
+  color: var(--ink-3);
+  padding: var(--s3) 0 var(--s4);
+}
+.cats ul { list-style: none; display: flex; flex-direction: column; }
+.cats li {
+  font-size: var(--fs-sm);
+  color: var(--ink-2);
+  padding: 10px 0;
+  border-bottom: 1px solid var(--line);
+  cursor: pointer;
+  transition: color .14s;
+  /* ⚠️ 刻意不用左边竖条 —— 那是 AI 生成界面最容易被认出的特征 */
+}
+.cats li:last-child { border-bottom: none; }
+.cats li:hover { color: var(--brand-ink); }
+.cats-more {
+  margin-top: auto;
+  font-size: var(--fs-xs);
+  color: var(--ink-3);
+  padding: var(--s3) 0 var(--s4);
+  border-top: 1px solid var(--line-2);
+  cursor: pointer;
+  transition: color .15s;
+}
+.cats-more:hover { color: var(--brand-ink); }
+
+/* 轮播外壳：本身不裁剪，只负责给指示点当定位参照。
+   ⚠️ 指示点挂在 .hero-main 上，不挂进 .glaze —— 带 overflow:hidden 的裁剪容器里
+      塞绝对定位子元素，检测器会报 clipped-overflow-container（将来放 tooltip 会被切）。 */
+.hero-main {
+  position: relative;
+  min-width: 0;
+  display: flex; flex-direction: column;
+}
+
+/* ── 主视觉：不是一块灰底占位，是一块"釉" ──
+   汝窑天青本来就是釉，釉会积在器物的低处。用两层径向渐变让釉在左上、右下聚散，
+   底下一层通体的淡青。中间压一条内缩发丝线当装裱边 —— 这块地方将来换成你的图，
+   框和指示点还留着，不会因为换了内容就散架。
+
+   ⚠️ 这里不写 overflow:hidden —— 有绝对定位子元素（.glaze-frame）的裁剪容器
+      会被检测器判成 clipped-overflow-container。圆角由 background 自己裁。 */
+.glaze {
+  flex: 1; min-height: 0;
+  position: relative;
+  border-radius: 2px;
+  display: flex; align-items: center; justify-content: center;
+  background:
+    radial-gradient(130% 120% at 6% 4%,    var(--glaze-deep) 0%, rgba(255,255,255,0) 58%),
+    radial-gradient(120% 130% at 98% 100%, var(--glaze-deep) 0%, rgba(255,255,255,0) 55%),
+    linear-gradient(168deg, var(--zone) 0%, var(--glaze-pale) 100%);
+}
+.glaze-frame {
+  position: absolute; inset: 14px;
+  border: 1px solid rgba(0, 0, 0, .07);
+  pointer-events: none;
+}
+
+/* 竖排小字 —— 中文界面里几乎见不到，一眼就不是模板 */
+.glaze-mark {
+  position: absolute; left: 30px; top: 50%;
+  transform: translateY(-50%);
+  writing-mode: vertical-rl;
+  font-family: var(--font-display);
+  font-size: 15px;
+  letter-spacing: .34em;
+  color: var(--brand-hover);     /* 不用 --brand：它在左侧釉色最浓处只有 4.4:1 */
+}
+
+.glaze-ct { text-align: center; }
+.glaze-k {
+  font-size: var(--fs-xs);
+  letter-spacing: .5em;
+  color: var(--ink-3);
+  margin-bottom: var(--s3);
+}
+.glaze-b {
+  font-family: var(--font-display);
+  font-size: 40px;
+  font-weight: var(--fw-med);
+  letter-spacing: .12em;
+  line-height: 1.25;
+  color: var(--brand-hover);
+}
+.glaze-s {
+  margin-top: var(--s4);
+  font-size: var(--fs-xs);
+  color: var(--ink-2);           /* ⚠️ 占位说明只能 ink-2：ink-3 在釉底上不够 4.5:1 */
+  letter-spacing: .04em;
+}
+.dots {
+  position: absolute; left: 30px; bottom: 26px;
+  display: flex; gap: 5px; z-index: 2;
+}
+/* ⚠️ 不 transition width —— 那是布局属性，会触发 layout thrash。
+   指示点这种小东西，宽度直接跳，只过渡颜色。 */
+.dots i {
+  width: 6px; height: 6px; border-radius: 50%;
+  background: rgba(28, 31, 30, .24);   /* 釉底是浅色，原来的浅灰点在上面等于没有 */
+  transition: background .25s;
+}
+.dots i.on { width: 20px; border-radius: 3px; background: var(--brand); }
+
+/* ── 功能入口条（预留位） ──
+   这一条是为了你后面要加的功能留的槽。现在放的是商城本来就会有的四项，
+   你可以按需要换掉或加项。点顶部"显示预留位"能看到它的边界。 */
+/* 原来是 4 个同款白盒子，现在是夹在两条发丝线之间的 4 格 —— 还是 4 个入口，
+   但不再是 4 个盒子。 */
+.quick {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  margin-top: var(--s6);
+  background: var(--zone);
+  border-radius: var(--r2);
+  /* 同样是补内边距。原来首项 padding-left: 0，是为了让「我的订单」的图标
+     和页面内容栏左对齐 —— 那是白底上的对齐规则，有了自己的底就不再适用。 */
+  padding: 0 var(--s5);
+}
+.quick a {
+  display: flex; align-items: center; gap: var(--s3);
+  padding: var(--s5) var(--s4);
+  text-decoration: none;
+  border-right: 1px solid var(--line);
+}
+/* 首末两格的内侧padding归零，靠 .quick 自己的 24px 内边距收边 —— 两边对齐同一档 */
+.quick a:first-child { padding-left: 0; }
+.quick a:last-child { border-right: none; padding-right: 0; }
+.quick .ic { color: var(--ink-3); flex: none; display: flex; transition: color .15s; }
+.quick a:hover .ic { color: var(--brand); }
+.quick .tx b { display: block; font-size: var(--fs-sm); font-weight: var(--fw-med); color: var(--ink); }
+.quick .tx span { font-size: var(--fs-xs); color: var(--ink-3); }
+
+/* ── 活动位（预留位） ──
+   原来是整条饱和青底横带，像块没做完的色板，一进页面就把眼睛全抢走了。
+   改成：安静的浅色底 + 一枚小标签。位置还在这儿，重量降下去。 */
+.promo {
+  margin-top: var(--s5);
+  display: flex; align-items: center; gap: var(--s4);
+  padding: var(--s3) var(--s4) var(--s3) var(--s3);   /* 上下都留白，不靠固定 height 硬撑 */
+  background: var(--brand-tint);
+  border-radius: 2px;
+}
+.promo b {
+  flex: none;
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-semi);
+  letter-spacing: .5px;
+  color: var(--ink);                    /* 用 ink 而不是品牌色：品牌色浅底上压不出 4.5:1 */
+  background: var(--surface);           /* 白底小牌压在浅青带上，靠明度差分开 */
+  padding: 3px 10px;
+  border-radius: var(--r1);
+}
+.promo span { font-size: var(--fs-xs); color: var(--ink-3); }
+
+/* ── 推荐区：商品直接坐在页面底上，不再套一层白卡 ── */
+.rec { margin-top: var(--s7); }
+.rec-h {
+  display: flex; align-items: baseline; justify-content: space-between;
+  padding-bottom: var(--s3);
+  border-bottom: 1px solid var(--line-2);
+  margin-bottom: var(--s5);
+}
+.rec-h h2 {
+  font-family: var(--font-display);
+  font-size: var(--fs-lg);
+  font-weight: var(--fw-semi);
+  letter-spacing: .5px;
+}
+.rec-h a { font-size: var(--fs-xs); color: var(--brand-ink); text-decoration: none; }
+.rec-h a:hover { text-decoration: underline; }
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+  gap: var(--s4);
+}
+
+/* 商品卡。v3 那版为了躲开"20 个同款白盒子"的通病，把卡拆成浮在页底上的
+   "图 + 字 + 一条线"，但拆过头了：图占位底和页底只差 4.4%，hover 前后只摆
+   0.3% 明度（还摆反了，越 hover 越亮），卡片等于隐形。
+   修正不是退回去当白盒子，而是承认一个事实：**卡片需要容器感，容器感来自
+   明度台阶，不来自圆角和阴影**。页底 / 卡片白面 / 图占位现在是 0 / 13.8% / 25.5%
+   三级，白面靠 8px 圆角 + 发丝线收边，不再加投影。
+   hover 三条同时变：边框细线转主色（274% 明度差）、图区转釉色、加购钮转实心。
+   仍然不做位移动画 —— image-hover-transform 是检测器明令的反模式。 */
+.card {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--r2);
+  overflow: hidden;
+  cursor: pointer;
+  transition: border-color .16s;
+}
+.card:hover { border-color: var(--brand); }
+
+.card-img {
+  aspect-ratio: 4 / 3;
+  background: var(--img);
+  display: flex; align-items: center; justify-content: center;
+  color: var(--ink-2); font-size: var(--fs-xs); letter-spacing: 3px;  /* 图占位上 ink-3 只有 4.4:1，用 ink-2 */
+  transition: background .2s;
+}
+.card:hover .card-img { background: var(--brand-soft); }
+
+.card-tx { padding: var(--s3) var(--s4) var(--s4); }
+.card-name {
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-reg);
+  color: var(--ink);
+  line-height: 1.45;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+  overflow: hidden;
+  min-height: 2.9em;
+}
+/* 标签：一屏里最多两种色。满屏彩标会把"直降"这个真正该被看见的信息淹掉 */
+.card-tags { margin-top: var(--s2); display: flex; gap: var(--s1); }
+.card-tags i {
+  font-style: normal; font-size: 12px; line-height: 1.5;
+  padding: 0 6px; border-radius: 2px;
+  color: var(--cin-700); background: var(--cin-100);
+}
+.card-tags i.plain { color: var(--ink-2); background: var(--surface-3); }
+
+.card-foot {
+  margin-top: var(--s2);
+  display: flex; align-items: center; justify-content: space-between; gap: var(--s2);
+}
+.card-price { display: flex; align-items: baseline; gap: 2px; color: var(--accent); }
+.card-price .sym { font-size: 13px; font-weight: var(--fw-med); }
+.card-price .int { font-size: 22px; font-weight: var(--fw-semi); letter-spacing: -.5px; }
+.card-price .dec { font-size: 14px; font-weight: var(--fw-med); }
+/* 划线价：价格锚。没有它，"129"就只是一个数字 */
+.card-price .was {
+  margin-left: var(--s2); font-size: 12px;
+  color: var(--ink-3); text-decoration: line-through;
+}
+/* 加购：平时是幽灵圆钮，hover 或卡片 hover 才转成实心 —— 12 个实心按钮会把货架变成按钮墙 */
+.card-buy {
+  flex: none; width: 30px; height: 30px; padding: 0;
+  display: flex; align-items: center; justify-content: center;
+  background: transparent; color: var(--ink-3);
+  border: 1px solid var(--line-2); border-radius: 50%;
+  cursor: pointer;
+  transition: background .15s, color .15s, border-color .15s;
+}
+.card:hover .card-buy, .card-buy:hover {
+  background: var(--brand); border-color: var(--brand); color: #fff;
+}
+.card-meta { margin-top: var(--s2); font-size: var(--fs-xs); color: var(--ink-3); }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   二级导航 —— 浅灰底
+   原来是白底 + 一条下边线，夹在白色页头和白色内容之间，并且它的首项
+   「全部商品分类」正好压在左栏那个「全部分类」小标题的正上方 —— 两块窄条
+   上下对齐、各带一条分界线，读起来就是"两条标题栏叠着"。
+   给它一个比页底深一档的底色（ΔE00 4.87），它自己就成为一条独立的带子，
+   那根下边线就不需要了。底色仍留在中性区，不带任何色相。
+   ═══════════════════════════════════════════════════════════════════════════ */
+.subnav { background: var(--nav-bg); }
+.subnav .inner {
+  max-width: 1400px; margin: 0 auto; padding: 0 var(--s6);
+  height: 46px; display: flex; align-items: center; gap: var(--s6);
+}
+.subnav a {
+  font-size: 13.5px; color: var(--nav-tx); text-decoration: none;
+  transition: color .15s; white-space: nowrap;
+}
+.subnav a:hover { color: var(--nav-tx-hi); }
+.subnav a.now { color: var(--nav-now); font-weight: var(--fw-semi); }
+.subnav a.hot { color: var(--nav-hot); font-weight: var(--fw-med); }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   限时秒杀 —— 全页唯一的"喇叭"
+   上一版我把促销整条改成安静的浅带，那是过度矫正：AI 味的问题是到处都响，
+   不是有地方响。卖场必须有一处把"今天该卖什么"喊出来。
+   这里的暖色底是有职责的，它表示时间压力，不是装饰。
+   整个页面只有这一个模块用暖底，它才喊得动。
+   ═══════════════════════════════════════════════════════════════════════════ */
+.flash {
+  margin-top: var(--s6);
+  background: var(--cin-100);   /* 页底调浅到 7.9% 后，原来的 cin-50 和它同明度，粉带会消失，压深一档 */
+  border: 1px solid var(--cin-200);
+  border-radius: var(--r2);     /* 原来是 2px。立着的面统一用 --r2，四角才有同一套圆度 */
+  padding: var(--s5) var(--s5) var(--s6);
+}
+.flash-h {
+  display: flex; align-items: baseline; gap: var(--s4);
+  padding-bottom: var(--s4); margin-bottom: var(--s5);
+  border-bottom: 1px solid var(--cin-200);
+}
+.flash-h h2 {
+  font-family: var(--font-display);
+  font-size: var(--fs-md); font-weight: var(--fw-semi);
+  color: var(--cin-700); letter-spacing: 1.5px;
+}
+.flash-h .cd { font-size: var(--fs-xs); color: var(--ink-2); }
+.flash-h .cd b {
+  font-family: ui-monospace, Consolas, monospace;
+  font-size: 14px; font-weight: var(--fw-semi); color: #fff;
+  background: var(--cin-600); padding: 2px 7px; border-radius: var(--r1);
+  margin: 0 1px; letter-spacing: .5px;
+}
+.flash-h .more {
+  margin-left: auto; font-size: var(--fs-xs);
+  color: var(--cin-700); text-decoration: none;
+}
+.flash-h .more:hover { text-decoration: underline; }
+
+.flash-g { display: grid; grid-template-columns: repeat(4, 1fr); gap: var(--s5); }
+.fl-item { cursor: pointer; }
+.fl-img {
+  aspect-ratio: 4 / 3;   /* 原来是 1:1，4 列下每张 310px 高，整个模块比首屏还高 */
+  background: var(--surface);
+  border-radius: 2px;
+  display: flex; align-items: center; justify-content: center;
+  color: var(--ink-2); font-size: var(--fs-xs); letter-spacing: 3px;
+}
+.fl-name {
+  margin-top: var(--s3); font-size: var(--fs-sm); color: var(--ink);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.fl-price { margin-top: var(--s1); display: flex; align-items: baseline; gap: var(--s2); }
+.fl-price .now { color: var(--cin-600); font-size: var(--fs-md); font-weight: var(--fw-semi); }
+.fl-price .was { color: var(--ink-3); font-size: var(--fs-xs); text-decoration: line-through; }
+.fl-meter { margin-top: var(--s2); display: flex; align-items: center; gap: var(--s3); }
+.fl-bar { flex: 1; height: 6px; border-radius: 3px; background: var(--cin-200); }
+.fl-bar i { display: block; height: 100%; background: var(--cin-500); border-radius: 3px; }
+.fl-meter span { font-size: 12px; color: var(--ink-2); white-space: nowrap; }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   券包 —— 让"现在买"有个具体的理由
+   ═══════════════════════════════════════════════════════════════════════════ */
+.tickets { margin-top: var(--s5); display: grid; grid-template-columns: repeat(3, 1fr); gap: var(--s4); }
+.ticket {
+  display: flex; align-items: center; gap: var(--s4);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--r2);
+  padding: var(--s4) var(--s4) var(--s4) var(--s5);
+  cursor: pointer;
+  transition: border-color .15s;
+}
+.ticket:hover { border-color: var(--cin-300); }
+.ticket .amt {
+  font-family: var(--font-display);
+  font-size: 27px; font-weight: var(--fw-semi); color: var(--cin-600);
+  line-height: 1; white-space: nowrap;
+}
+.ticket .amt small { font-size: 13px; font-weight: var(--fw-med); }
+.ticket .cond { flex: 1; min-width: 0; font-size: 12px; color: var(--ink-2); line-height: 1.5; }
+.ticket .cond b { display: block; font-size: 13.5px; font-weight: var(--fw-semi); color: var(--ink); }
+.ticket .get {
+  flex: none; font: inherit; font-size: 12.5px; font-weight: var(--fw-med);
+  color: var(--cin-700); background: var(--cin-100);
+  border: 1px solid var(--cin-200); border-radius: var(--r1);
+  padding: 5px 12px; cursor: pointer;
+  transition: background .15s;
+}
+.ticket .get:hover { background: var(--cin-200); }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   信任条 —— 原来只有页脚四个词，离"下单"这个决定太远了
+   ═══════════════════════════════════════════════════════════════════════════ */
+.trust {
+  margin-top: var(--s8);
+  display: grid; grid-template-columns: repeat(4, 1fr);
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+}
+.trust > div {
+  display: flex; align-items: center; gap: var(--s3);
+  padding: var(--s5) var(--s4);
+  border-right: 1px solid var(--line);
+}
+.trust > div:first-child { padding-left: 0; }
+.trust > div:last-child { border-right: none; }
+.trust .ic { color: var(--brand); flex: none; display: flex; }
+.trust b { display: block; font-size: 13.5px; font-weight: var(--fw-med); color: var(--ink); }
+.trust span { font-size: 12px; color: var(--ink-3); }
+
+/* ── 页脚：原来是一条 10vh 的亮青色横条，现在收成安静的细线区 ── */
+footer {
+  margin-top: var(--s8);
+  border-top: 1px solid var(--line);
+  padding: var(--s6) 0 var(--s7);
+}
+footer .inner {
+  max-width: 1400px; margin: 0 auto; padding: 0 var(--s6);
+  display: flex; align-items: center; justify-content: space-between;
+  font-size: var(--fs-xs); color: var(--ink-3);
+}
+footer .pts { display: flex; gap: var(--s6); }
+footer .pts span { letter-spacing: .5px; }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   预留位可视化 —— 点顶部按钮打开，虚线框标出留给未来功能的位置
+   ═══════════════════════════════════════════════════════════════════════════ */
+body.slots [data-slot] {
+  outline: 2px dashed #c8a24a;
+  outline-offset: 5px;
+  position: relative;
+}
+body.slots [data-slot]::after {
+  content: attr(data-slot);
+  position: absolute; top: -11px; left: 8px;
+  background: #c8a24a; color: #fff;
+  font-size: 10.5px; letter-spacing: .5px;
+  padding: 1px 8px; border-radius: 3px;
+  z-index: 5; white-space: nowrap;
+}
+</style>
+</head>
+<body>
+
+<div class="bar">
+  <div class="bar-t"><em>●</em> 商城主页改造 · 天青</div>
+  <button data-hue="blue" class="on">B 天青蓝</button>
+  <button data-hue="green">A 青瓷绿</button>
+  <button data-hue="old">你现在的配色</button>
+  <span class="sep"></span>
+  <button id="slotBtn">显示预留位</button>
+  <span class="hint">只改这个预览文件 · 你项目源码未动</span>
+</div>
+
+<!-- ═══════════ 顶栏 ═══════════ -->
+<header class="hdr">
+  <a class="brand" href="#">商城主页</a>
+
+  <div class="search">
+    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6">
+      <circle cx="7" cy="7" r="4.6"/><path d="M10.5 10.5 14 14" stroke-linecap="round"/>
+    </svg>
+    <input type="text" placeholder="搜索商品、品牌、分类" />
+    <button>搜索</button>
+  </div>
+
+  <nav class="nav">
+    <a class="on">消息<i class="dot"></i></a>
+    <a>购物车</a>
+    <a>用户中心</a>
+  </nav>
+</header>
+
+<!-- ═══════════ 二级导航 ═══════════ -->
+<nav class="subnav">
+  <div class="inner">
+    <a class="now">全部商品分类</a>
+    <a class="hot">今日秒杀</a>
+    <a class="hot">领券中心</a>
+    <a>品牌专区</a>
+    <a>会员中心</a>
+    <a>客户服务</a>
+  </div>
+</nav>
+
+<div class="wrap">
+
+  <!-- ═══════════ 英雄区：分类栏 + 主视觉 ═══════════ -->
+  <section class="hero">
+    <aside class="cats">
+      <div class="cats-h">全部分类</div>
+      <ul>
+        <li>电子用品</li>
+        <li>生活用品</li>
+        <li>服装</li>
+        <li>美食</li>
+        <li>运动用品</li>
+        <li>图书文具</li>
+      </ul>
+      <div class="cats-more">查看全部 →</div>
+    </aside>
+
+    <div class="hero-main">
+      <div class="glaze">
+        <span class="glaze-frame"></span>
+        <span class="glaze-mark">天青</span>
+        <div class="glaze-ct">
+          <p class="glaze-k">轮 播 位</p>
+          <p class="glaze-b">主 图 占 位</p>
+          <p class="glaze-s">建议 1600 × 640 · 换成你的图即可，框和指示点会留着</p>
+        </div>
+      </div>
+      <div class="dots"><i class="on"></i><i></i><i></i></div>
+    </div>
+  </section>
+
+  <!-- ═══════════ 功能入口（预留位）═══════════ -->
+  <section class="quick" data-slot="预留 · 功能入口">
+    <a>
+      <span class="ic"><svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="2" width="14" height="16" rx="2"/><path d="M7 7h6M7 11h6M7 15h3" stroke-linecap="round"/></svg></span>
+      <span class="tx"><b>我的订单</b><span>待收货 2 · 待付款 1</span></span>
+    </a>
+    <a>
+      <span class="ic"><svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M2 6a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2z"/><path d="M2 7l8 5 8-5"/></svg></span>
+      <span class="tx"><b>优惠券</b><span>3 张可用</span></span>
+    </a>
+    <a>
+      <span class="ic"><svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="10" cy="10" r="7.5"/><path d="M10 6v4.5l3 1.8" stroke-linecap="round"/></svg></span>
+      <span class="tx"><b>浏览记录</b><span>最近 18 件</span></span>
+    </a>
+    <a>
+      <span class="ic"><svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M17 12.5a1.5 1.5 0 0 1-1.5 1.5h-11A1.5 1.5 0 0 1 3 12.5v-6A1.5 1.5 0 0 1 4.5 5h11A1.5 1.5 0 0 1 17 6.5z"/><path d="M6.5 5v10" stroke-linecap="round"/></svg></span>
+      <span class="tx"><b>在线客服</b><span>9:00 – 21:00</span></span>
+    </a>
+  </section>
+
+  <!-- ═══════════ 限时秒杀 ═══════════ -->
+  <section class="flash" data-slot="预留 · 秒杀位">
+    <div class="flash-h">
+      <h2>限时秒杀</h2>
+      <span class="cd">距结束 <b id="cd-h">02</b>:<b id="cd-m">14</b>:<b id="cd-s">37</b></span>
+      <a class="more">全部秒杀 →</a>
+    </div>
+    <div class="flash-g" id="flash"></div>
+  </section>
+
+  <!-- ═══════════ 券包 ═══════════ -->
+  <section class="tickets" data-slot="预留 · 券包位" id="tickets"></section>
+
+  <!-- ═══════════ 推荐商品 ═══════════ -->
+  <section class="rec">
+    <div class="rec-h">
+      <h2>为你推荐</h2>
+      <a>查看全部</a>
+    </div>
+    <div class="grid" id="grid"></div>
+  </section>
+
+  <!-- ═══════════ 信任条 ═══════════ -->
+  <section class="trust" data-slot="预留 · 信任位">
+    <div>
+      <span class="ic"><svg width="19" height="19" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M10 2.2 3.5 5v4.6c0 3.9 2.7 7.4 6.5 8.2 3.8-.8 6.5-4.3 6.5-8.2V5z" stroke-linejoin="round"/><path d="m7.2 9.9 2 2 3.6-3.9" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
+      <span><b>正品保障</b><span>厂家直供，假一赔十</span></span>
+    </div>
+    <div>
+      <span class="ic"><svg width="19" height="19" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3.5 6.5A2 2 0 0 1 5.5 4.5h6a2 2 0 0 1 2 2v1.5" stroke-linecap="round"/><path d="M13.5 8h2l1.5 2.6v2.4a1 1 0 0 1-1 1h-1" stroke-linejoin="round"/><circle cx="7" cy="14.5" r="1.6"/><circle cx="13.5" cy="14.5" r="1.6"/></svg></span>
+      <span><b>次日达</b><span>当日 18 点前下单</span></span>
+    </div>
+    <div>
+      <span class="ic"><svg width="19" height="19" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M4 10a6 6 0 1 0 1.9-4.4" stroke-linecap="round"/><path d="M4 3.6V6h2.4" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
+      <span><b>七天无理由</b><span>不影响二次销售</span></span>
+    </div>
+    <div>
+      <span class="ic"><svg width="19" height="19" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="2.5" y="5" width="15" height="10" rx="1.6"/><path d="M2.5 9h15" stroke-linecap="round"/></svg></span>
+      <span><b>极速退款</b><span>审核通过秒到账</span></span>
+    </div>
+  </section>
+
+</div>
+
+<footer>
+  <div class="inner">
+    <div class="pts">
+      <span>轻松购物</span><span>极速配送</span><span>精致服务</span><span>畅选无忧</span>
+    </div>
+    <span>超市管理平台 · 商城</span>
+  </div>
+</footer>
+
+<script>
+/* ── 色相切换 ── */
+const bar = document.querySelector('.bar')
+document.documentElement.dataset.hue = 'blue'
+bar.querySelectorAll('button[data-hue]').forEach(b => {
+  b.onclick = () => {
+    document.documentElement.dataset.hue = b.dataset.hue
+    bar.querySelectorAll('button[data-hue]').forEach(x => x.classList.toggle('on', x === b))
+  }
+})
+
+/* ── 预留位开关 ── */
+const slotBtn = document.getElementById('slotBtn')
+slotBtn.onclick = () => {
+  const on = document.body.classList.toggle('slots')
+  slotBtn.classList.toggle('on', on)
+  slotBtn.textContent = on ? '隐藏预留位' : '显示预留位'
+}
+
+/* ── 商品卡 ──
+   补了三样：划线价（价格锚）、标签（一屏最多两色）、加购（动线终点）。
+   之前的卡只有"图+名+价"，那是目录，不是货架。 */
+const GOODS = [
+  { n: '无线蓝牙耳机', p: 129, was: 199, shop: '声谷旗舰店',  sold: '已售 1.2k', tags: [['直降'], ['包邮', 'plain']] },
+  { n: '不锈钢保温杯', p: 69,  was: 99,  shop: '物作生活',    sold: '已售 860',  tags: [['包邮', 'plain']] },
+  { n: '纯棉短袖 T 恤', p: 89, was: 139, shop: '本色良品',    sold: '已售 2.3k', tags: [['直降'], ['包邮', 'plain']] },
+  { n: '有机全麦面包', p: 15,  was: 0,   shop: '每日鲜',      sold: '已售 540',  tags: [['临期', 'plain']] },
+  { n: '专业防滑瑜伽垫', p: 158, was: 258, shop: '动觉运动',  sold: '已售 320',  tags: [['直降']] },
+  { n: '便携式榨汁机', p: 199, was: 0,   shop: '小厨电器',    sold: '已售 410',  tags: [['包邮', 'plain']] },
+  { n: '冷萃挂耳咖啡', p: 48,  was: 78,  shop: '晨汐咖啡',    sold: '已售 1.8k', tags: [['直降'], ['包邮', 'plain']] },
+  { n: '天然乳胶枕', p: 268, was: 0,     shop: '眠图家居',    sold: '已售 95',   tags: [['包邮', 'plain']] },
+  { n: '轻便跑步鞋', p: 329, was: 499,   shop: '逐风运动',    sold: '已售 670',  tags: [['直降']] },
+  { n: '玻璃保鲜盒套装', p: 79, was: 0,  shop: '小厨电器',    sold: '已售 1.1k', tags: [['包邮', 'plain']] },
+  { n: '智能体脂秤', p: 139, was: 199,   shop: '博健健康',    sold: '已售 780',  tags: [['直降']] },
+  { n: '香薰加湿器', p: 119, was: 0,     shop: '眠图家居',    sold: '已售 930',  tags: [['包邮', 'plain']] }
+]
+
+const CART_SVG = `<svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5">
+  <path d="M3 5h10l-1 8.4a1 1 0 0 1-1 .9H5a1 1 0 0 1-1-.9z" stroke-linejoin="round"/>
+  <path d="M6 5V3.9a2 2 0 1 1 4 0V5" stroke-linecap="round"/></svg>`
+
+const money = (n) => String(n).split('.')
+const yuan = (n) => {
+  const [i, d = '00'] = money(n)
+  return `<span class="sym">¥</span><span class="int">${i}</span><span class="dec">.${d}</span>`
+}
+
+document.getElementById('grid').innerHTML = GOODS.map(g => `
+  <div class="card">
+    <div class="card-img">商品图</div>
+    <div class="card-tx">
+      <div class="card-name">${g.n}</div>
+      <div class="card-tags">${g.tags.map(([t, c]) => `<i class="${c || ''}">${t}</i>`).join('')}</div>
+      <div class="card-foot">
+        <div class="card-price">
+          ${yuan(g.p)}
+          ${g.was ? `<span class="was">¥${g.was}</span>` : ''}
+        </div>
+        <button class="card-buy" aria-label="加入购物车">${CART_SVG}</button>
+      </div>
+      <div class="card-meta">${g.shop} · ${g.sold}</div>
+    </div>
+  </div>
+`).join('')
+
+/* ── 限时秒杀 ── */
+const FLASH = [
+  { n: '电动牙刷 · 声波款', now: 89,  was: 259, got: 82 },
+  { n: '空气炸锅 4.5L',     now: 219, was: 599, got: 68 },
+  { n: '纯棉四件套',        now: 149, was: 429, got: 91 },
+  { n: '颈椎按摩仪',        now: 179, was: 499, got: 47 }
+]
+
+document.getElementById('flash').innerHTML = FLASH.map(f => `
+  <div class="fl-item">
+    <div class="fl-img">商品图</div>
+    <div class="fl-name">${f.n}</div>
+    <div class="fl-price">
+      <span class="now">¥${f.now}</span>
+      <span class="was">¥${f.was}</span>
+    </div>
+    <div class="fl-meter">
+      <div class="fl-bar"><i style="width:${f.got}%"></i></div>
+      <span>已抢 ${f.got}%</span>
+    </div>
+  </div>
+`).join('')
+
+/* ── 券包 ── */
+const TICKETS = [
+  { amt: 30, unit: '元', title: '全场通用券', cond: '满 199 可用 · 3 天后到期' },
+  { amt: 10, unit: '元', title: '生鲜专享券', cond: '满 99 可用 · 限生鲜分类' },
+  { amt: 20, unit: '元', title: '新人首单券', cond: '无门槛 · 仅限首单使用' }
+]
+
+document.getElementById('tickets').innerHTML = TICKETS.map(t => `
+  <div class="ticket">
+    <span class="amt">¥${t.amt}<small>${t.unit}</small></span>
+    <span class="cond"><b>${t.title}</b>${t.cond}</span>
+    <button class="get">领取</button>
+  </div>
+`).join('')
+
+/* ── 倒计时 ──
+   只是让这个模块看起来是活的。真接进项目时应该用接口给的活动结束时间，
+   不要在这里写死。 */
+let left = 2 * 3600 + 14 * 60 + 37
+const pad = (n) => String(n).padStart(2, '0')
+setInterval(() => {
+  left = left > 0 ? left - 1 : 2 * 3600 + 14 * 60 + 37
+  document.getElementById('cd-h').textContent = pad(Math.floor(left / 3600))
+  document.getElementById('cd-m').textContent = pad(Math.floor(left % 3600 / 60))
+  document.getElementById('cd-s').textContent = pad(left % 60)
+}, 1000)
+</script>
+</body>
+</html>
