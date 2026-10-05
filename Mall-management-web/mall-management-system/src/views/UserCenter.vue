@@ -16,7 +16,7 @@
 <script setup>
 import { computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { clearCredentials, clearMerchantId } from '../api/auth'
+import { clearCredentials, clearMerchantId, clearToken } from '../api/auth'
 import { http } from '../api/http'
 import { endpoints } from '../api/endpoints'
 
@@ -53,15 +53,15 @@ const toLogin = () => {
   clearCredentials()
   if (route.meta.logout === 'merchant') clearMerchantId()
   router.push('/login')
-  // ⚠️ 翻开关笔（2026-10-05）：**销服务端会话** —— 闸开之后，只清本地 = 没登出（cookie 还在，
-  //    直开 `#/customer` 照样取到数据）。
-  //    · `allowUnauthorized`：未登录时点退出**必 401**（`/user/logout` 不在白名单）⇒ 开了它就
-  //      **不进 401 出口**（不置闩锁、不重复跳转）；点退出永远无害。
-  //    · **不 await + `.catch` 吞掉**：fail-open —— 后端不可达/超时也不能把用户困在
-  //      「看起来还登着」的界面里。残留（服务端会话活到过期）是有意接受的代价。
-  //    · 放在 `router.push` **之后**：保住上面 `:52-55` 的行号锚（`auth.js` / `progress.md` 多处
-  //      按行号引这一段）；两条语句同一 tick，先后对行为无影响。
-  http.post(endpoints.user.logout, null, { allowUnauthorized: true }).catch(() => {})
+  // ⚠️ 翻开关笔（2026-10-05）：**销服务端会话** —— 闸开之后，只清本地 = 没登出（cookie 还在，直开 `#/customer` 照样取到数据）。
+  //    · `allowUnauthorized`：未登录时点退出**必 401**（`/user/logout` 不在白名单）⇒ 开了它就**不进 401 出口**（不置闩锁、不重复跳转）；点退出永远无害。
+  //    · **不 await + `.catch` 吞掉**：fail-open —— 后端不可达/超时也不能把用户困在「看起来还登着」的界面里。残留（服务端会话活到过期）是有意接受的代价。
+  //    · 放在 `router.push` **之后**：保住上面 `:52-55` 的行号锚（`auth.js` / `progress.md` 多处按行号引这一段；两条语句同一 tick，先后对行为无影响）。
+  //    ⚠️ 多账户隔离笔（2026-10-06）：**销票放在 `.finally` 里**，不能提前 —— 票要在这次 POST 里送出去，
+  //      后端 `AuthSession.logout` 才销得掉它；提前清（或把它塞进上面的 `clearCredentials()`）会让这一发
+  //      带着空票出去 ⇒ 服务端那张票**活到 TTL**（最长 30 分钟）。`clearToken()` 只清**本页这张票**
+  //      （D6：指针只有在等于本页票时才一并清）⇒ 不误伤别的标签页。两套凭据同一次退出一起销。
+  http.post(endpoints.user.logout, null, { allowUnauthorized: true }).catch(() => {}).finally(() => clearToken())
 }
 </script>
 

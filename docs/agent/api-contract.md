@@ -15,28 +15,36 @@
 - 无分页参数，列表接口全量返回。
 - ⚠️ **「读接口」≠「无副作用」**：本表按**方法语义**分类，不按 HTTP 方法。`/message/history` 名字是查询，**实为写** —— 除 SELECT 外**无条件** upsert `user_conversation_read.last_read_time = NOW()`（SQL 在 `MessageDao.upsertLastReadTime:206-209`，由 `MessageService.getMessageHistory:200` 调用）⇒ 统计「读接口」或做只读性验证时**不得**把它算进去。
 
-## 2. 接口清单（共 35 个）
+## 2. 接口清单（共 36 个）
 
+> ⚠️ **35 → 36（2026-10-06，多账户隔离笔）**：`/user` 段再新增 1 个会话侧端点 —— `POST /user/token`
+> （铸 43 字符访问 token，`AuthTokenStore.mint`）。`### /user` 表 7 行 → **8 行**；本表 `UserController.<方法>:<行>`
+> 一并按 2026-10-06 实测**全部重填**（成因：本笔在 `UserController` 内插入 `token` 端点与类 javadoc）。
 > ⚠️ **33 → 35（2026-10-04，鉴权笔 2）**：`/user` 段新增 2 个会话侧端点（`me` / `logout`）。
 > `Result` 类注释里"33 个端点 / 33 处响应 Map"两处口径**在本笔之后都已过时**（无论按哪个口径数）——
 > 本笔**不改 `Result.java`**，只在 `progress.md §5-Q` 登记（避免夹带）。
 
-### /user — 7 个
+### /user — 8 个
 
 > ⚠️ **行号口径**：`UserController.<方法>:<行>` = 该方法的 `@PostMapping` 所在行（**不是**方法声明行）。
+> ⚠️ **2026-10-06（多账户隔离笔）本表 7 行全部重测**：`92 / 114 / 136 / 145 / 154 / 191 / 222`
+> → **`96 / 121 / 143 / 152 / 161 / 213 / 294`**（+`token` 行 `:263`）。全部 7 个旧值在 **HEAD 时是准的**
+> （已 `git show HEAD:…UserController.java` 逐条实测），**位移是 2026-10-06 多账户隔离笔造成的**
+> —— 该笔在 `loginSelect` 体、类 javadoc 处加行，并在 `me` 与 `logout` 之间插入 `token` 端点。
 > ⚠️ **2026-10-04（笔 2）本表 5 行全部重测**：旧值（`52 / 61 / 80 / 89 / 98`）已陈旧 **40~56 行**
 > —— 成因是三层第三笔之后该文件又经多次改动（`Result` 包装、类 javadoc 增行、本笔加形参与新端点），
 > 而本表只在 2026-10-02/03 对过账。
 
 | 方法 | 路径 | 入参 | 返回 | 幂等 | 证据 |
 |---|---|---|---|---|---|
-| POST | `/user/loginSelect` | username, password | `int`：1=客户 2=商家 0=失败 | 是 | `UserController.loginSelect:92` |
-| POST | `/user/loginAdd` | image(默认 default_user.png), username, usertype, userid, customerid(默认"暂无数据"), merchantid(默认"暂无数据"), password, age, gender | `String`：`"0"`=已存在 / `"添加成功！"` | 是 ⚠️ | `UserController.loginAdd:114` |
-| POST | `/user/getUserInfo` | username, password | `user` 全字段 + `image`；失败返回 `null` | 是 | `UserController.getUserInfo:136` |
-| POST | `/user/updateAvatar` | username, file(MultipartFile) | `{success, msg?, imageUrl?}` | 是 | `UserController.updateAvatar:145` |
-| POST | `/user/updateUserInfo` | username, email, address, selfintroduction | `{success, msg}` | 是 | `UserController.updateUserInfo:154` |
-| POST | `/user/me` | **无**（凭会话 Cookie；**无 `@RequestParam`**） | 有会话：`user` 表**整行** + 头像 `image` + `success`（顶层平铺；**P2.6 起与 `/user/getUserInfo` 同一段逻辑产出 ⇒ 同一个 Map，只差 `success` 键**，见 §5-AC）；**无会话 ⇒ 401** + `{success:false,msg:"未登录"}`；查无此人 ⇒ 200 + `{success:false,msg:"用户不存在"}` | 是 | `UserController.me:191` |
-| POST | `/user/logout` | **无**（凭会话 Cookie） | `{success:true, msg:"已退出"}`；无会话时同样答成功（no-op，**不建会话**）；⚠️ **闸开（2026-10-05）后**：无会话者在**闸处**即 401，进不到本方法（「答成功」只对**有会话**的调用方成立） | 是 | `UserController.logout:222` |
+| POST | `/user/loginSelect` | username, password | `int`：1=客户 2=商家 0=失败 | 是 | `UserController.loginSelect:96` |
+| POST | `/user/loginAdd` | image(默认 default_user.png), username, usertype, userid, customerid(默认"暂无数据"), merchantid(默认"暂无数据"), password, age, gender | `String`：`"0"`=已存在 / `"添加成功！"` | 是 ⚠️ | `UserController.loginAdd:121` |
+| POST | `/user/getUserInfo` | username, password | `user` 全字段 + `image`；失败返回 `null` | 是 | `UserController.getUserInfo:143` |
+| POST | `/user/updateAvatar` | username, file(MultipartFile) | `{success, msg?, imageUrl?}` | 是 | `UserController.updateAvatar:152` |
+| POST | `/user/updateUserInfo` | username, email, address, selfintroduction | `{success, msg}` | 是 | `UserController.updateUserInfo:161` |
+| POST | `/user/me` | **无**（凭会话 Cookie；**无 `@RequestParam`**） | 有会话：`user` 表**整行** + 头像 `image` + **`role`**（多账户隔离笔新增）+ `success`（顶层平铺；P2.6 起与 `/user/getUserInfo` 共用同一实现 `UserService.profileOf`，⚠️ 但多账户隔离笔起 `/user/me` 会先复制该 Map 再 `put("role")` ⇒ **两者不再是同一张 Map**，见 §5-AC／§5-AF）；⚠️ **cookie 会话的管理员降级作答：200 + `{success:true,role:3}`**（只给角色、不给资料）；**无会话 ⇒ 401** + `{success:false,msg:"未登录"}`；查无此人 ⇒ 200 + `{success:false,msg:"用户不存在"}` | 是 | `UserController.me:213` |
+| POST | `/user/token` | **无**（凭会话 Cookie；**无 `@RequestParam`**） | **授权口径**拿不到身份 ⇒ **401**（⚠️ 这一档**含**「cookie 会话是管理员」—— 管理员票**不能**由 cookie 换发）；拿得到 ⇒ `{success:true, token:"<43 字符 Base64URL>"}` | **否** ⚠️（每次铸**新**票，不回发既有票） | `UserController.token:263` |
+| POST | `/user/logout` | **无**（凭会话 Cookie） | `{success:true, msg:"已退出"}`；无会话时同样答成功（no-op，**不建会话**）；⚠️ **闸开（2026-10-05）后**：无会话者在**闸处**即 401，进不到本方法（「答成功」只对**有会话**的调用方成立） | 是 | `UserController.logout:294` |
 
 > **会话侧三端点（2026-10-04 鉴权笔 2 新增/改造）**：
 > - `loginSelect` 在**认证成功且拿到业务号**时把**业务号**（`user.customerid` / `user.merchantid`）写进会话；
@@ -45,6 +53,10 @@
 > - `me` / `logout` 与 `getUserInfo` **并存不替代**：那个是**凭据驱动**，这两个是**会话驱动**。
 > - ⚠️ **前端本笔不动** ⇒ 这两个新端点当日**无调用方**（接入是笔 4 / `P2.6`）。⚠️ **P2.6（2026-10-05）起 `/user/me` 已有调用方**（`main.js:28` 启动探针 + 3 个资料读点 = 4 处）；`/user/logout` 于**翻开关笔（2026-10-05）**起 **1 处**（`UserCenter.vue:64` 退出时销服务端会话），见 §5 对账。
 > - 开关 `app.auth.enabled` **已于 2026-10-05 翻 `true`**（翻开关笔）⇒ `me` 的 401 分支今日**由闸先发**（端点侧那一份响应体逐字节相同，见 `UserController.me`）；测试与 A3 各由 profile 显式 pin `false` 保住。
+> - ⚠️ **第 4 个会话侧端点 `token`（2026-10-06 多账户隔离笔）**：本标题的「三端点」是 2026-10-04 的口径，
+>   今日会话侧共 **4** 个。`token` 与上述三个不同的是：它**登在闸后**（不进 `AUTH_WHITELIST`）、
+>   也**不挂** `IdentityGuard`（没有「代表别人」的入参），且**非幂等**（每次铸新票）。
+>   ⚠️ 它与 `me` 在**口径**上分工：`token` 用**授权**口径（cookie 里的管理员换不到票），`me` 用**识别**口径（认得管理员但降级作答）。
 
 ### /message — 10 个
 

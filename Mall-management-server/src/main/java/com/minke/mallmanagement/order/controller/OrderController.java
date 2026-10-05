@@ -1,8 +1,11 @@
 package com.minke.mallmanagement.order.controller;
 
 import com.minke.mallmanagement.order.service.OrderService;
+import com.minke.mallmanagement.shared.web.IdentityGuard;
 import com.minke.mallmanagement.shared.web.Result;
+import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.Map;
@@ -28,6 +31,20 @@ import java.util.Map;
  * <p>⚠️ <b>{@code orderAdd} 的锁编排一行未碰</b>（B2 锁 tag 与 D#1 禁令）：取锁、临界区内查重、
  * SELECT/INSERT 三段都在 {@link OrderService#orderAdd}，本类只是把它的返回值多包一层 ——
  * 「不得碰」针对的是编排，不是返回类型。本类**仍然**不持有 {@code DistributedLockService}。
+ *
+ * <h2>【多账户隔离笔（2026-10-06）：5 个端点加**入参身份校验**】</h2>
+ * {@code orderAdd}（判 {@code CustomerId}）/ {@code orderSelect} / {@code orderDeliveryIfSelect} /
+ * {@code orderDeliverySelect} / {@code historicalOrdersSelect}（各判自己那个
+ * {@code customerId} / {@code merchantId}）⇒ 方法体第一行过
+ * {@link IdentityGuard#requireSelfOrAdmin}，拒则 403（返回类型随之改成
+ * {@code ResponseEntity<Object>}）。
+ * <p>⚠️ <b>{@code orderAdd} 只判 {@code CustomerId}，**绝不判 {@code MerchantId}</b>：
+ * 下单时那个 {@code MerchantId} 是**对端方**（卖给我东西的商家），客户当然要填别人的 ——
+ * 判它等于谁都下不了单。
+ * <p>⚠️ <b>3 个 {@code orderPayIfUp} / {@code orderReceiveIfUp} / {@code orderDeliveryIfUp}
+ * 本笔不加</b>：它们的入参只有 {@code orderId}，判「这张单是不是你的」得**回查资源归属**
+ * （拿 orderId 查订单行、比对 customer/merchant），是另一种判据形态，不在本笔的 13 条清单里
+ * —— 缺口登记在 {@code progress.md §5-AF}（**不修**，避免本笔夹带新主题）。
  */
 @RestController
 @RequestMapping("/order")
@@ -51,7 +68,7 @@ public class OrderController {
     // ⚠️ 笔 2（统一响应体）只把返回类型换成 Result：锁编排、CAS 语句、观测投递**一行未碰**
     //    （A3 的 A-S2a-1a 按 tag 读锁指标，B2 锁 tag = order-add 不变）。
     @PostMapping("/orderAdd")
-    public Result<Map<String, Object>> orderAdd(
+    public ResponseEntity<Object> orderAdd(
             @RequestParam("CustomerId") String CustomerId,
             @RequestParam("MerchantId") String MerchantId,
             @RequestParam("OrderId") String OrderId,
@@ -60,45 +77,75 @@ public class OrderController {
             @RequestParam("Images") String Images,
             @RequestParam("PayIf") int PayIf,
             @RequestParam("DeliveryIf") int DeliveryIf,
-            @RequestParam("ReceiveIf") int ReceiveIf
+            @RequestParam("ReceiveIf") int ReceiveIf,
+            HttpServletRequest request
     ) {
-        return Result.of(orderService.orderAdd(
-                CustomerId, MerchantId, OrderId, Price, ProductInformation, Images, PayIf, DeliveryIf, ReceiveIf));
+        // ⚠️ 第一行：订单只能下在**自己**名下（管理员豁免）—— 必须在取锁之前（否则白取一把锁）。
+        // ⚠️ 判的是 CustomerId，**不是** MerchantId（那是对端方，见类注释）—— 别「顺手」加。
+        if (!IdentityGuard.requireSelfOrAdmin(request, CustomerId)) {
+            return IdentityGuard.forbidden();
+        }
+        return ResponseEntity.ok(Result.of(orderService.orderAdd(
+                CustomerId, MerchantId, OrderId, Price, ProductInformation, Images, PayIf, DeliveryIf, ReceiveIf)));
     }
 
     //购物车搜索订单
     // 方法体（SQL / try-catch / 返回结构）逐字搬到 OrderService.orderSelect()，本方法只保留路由与委托
     // —— 与 goodsSelect / goodsSelectHome / GoodsProductCodeSelect 同款（「方法体搬到…本方法只保留路由与委托」）。
     @PostMapping("/orderSelect")
-    public Result<Map<String, Object>> orderSelect(
-            @RequestParam("customerId") String customerId
+    public ResponseEntity<Object> orderSelect(
+            @RequestParam("customerId") String customerId,
+            HttpServletRequest request
     ) {
-        return Result.of(orderService.orderSelect(customerId));
+        // ⚠️ 第一行：购物车只能查自己的订单（管理员豁免）。
+        if (!IdentityGuard.requireSelfOrAdmin(request, customerId)) {
+            return IdentityGuard.forbidden();
+        }
+        return ResponseEntity.ok(Result.of(orderService.orderSelect(customerId)));
     }
 
     //订单中心搜索订单
     @PostMapping("/orderDeliveryIfSelect")
-    public Result<Map<String, Object>> orderDeliveryIfSelect(@RequestParam("merchantId") String merchantId) {
-        return Result.of(orderService.orderDeliveryIfSelect(merchantId));
+    public ResponseEntity<Object> orderDeliveryIfSelect(
+            @RequestParam("merchantId") String merchantId,
+            HttpServletRequest request
+    ) {
+        // ⚠️ 第一行：商家端订单中心只能查自己的（管理员豁免）。
+        if (!IdentityGuard.requireSelfOrAdmin(request, merchantId)) {
+            return IdentityGuard.forbidden();
+        }
+        return ResponseEntity.ok(Result.of(orderService.orderDeliveryIfSelect(merchantId)));
     }
 
     //商家端已经完成订单信息
     // ⚠️ status 的默认值 "active" 留在本方法：它是**入参绑定**（@RequestParam 的 defaultValue），
     //    不是业务规则 —— 搬进 Service 就得在 Service 里再写一遍默认值，两处会漂移。
     @PostMapping("/orderDeliverySelect")
-    public Result<Map<String, Object>> orderDeliverySelect(
+    public ResponseEntity<Object> orderDeliverySelect(
             @RequestParam("merchantId") String merchantId,
-            @RequestParam(value = "status", defaultValue = "active") String status
+            @RequestParam(value = "status", defaultValue = "active") String status,
+            HttpServletRequest request
     ) {
-        return Result.of(orderService.orderDeliverySelect(merchantId, status));
+        // ⚠️ 第一行：商家端「已完成订单」只能看自己的（管理员豁免）。status 不是身份，不判。
+        if (!IdentityGuard.requireSelfOrAdmin(request, merchantId)) {
+            return IdentityGuard.forbidden();
+        }
+        return ResponseEntity.ok(Result.of(orderService.orderDeliverySelect(merchantId, status)));
     }
 
 
     //历史订单信息页面信息
     // 方法体（含「用户ID不能为空」那条先于查库的分支）逐字搬到 OrderService.historicalOrdersSelect()。
     @PostMapping("/historicalOrdersSelect")
-    public Result<Map<String, Object>> historicalOrdersSelect(@RequestParam("customerId") String customerId) {
-        return Result.of(orderService.historicalOrdersSelect(customerId));
+    public ResponseEntity<Object> historicalOrdersSelect(
+            @RequestParam("customerId") String customerId,
+            HttpServletRequest request
+    ) {
+        // ⚠️ 第一行：历史订单只能看自己的（管理员豁免）。
+        if (!IdentityGuard.requireSelfOrAdmin(request, customerId)) {
+            return IdentityGuard.forbidden();
+        }
+        return ResponseEntity.ok(Result.of(orderService.historicalOrdersSelect(customerId)));
     }
 
 

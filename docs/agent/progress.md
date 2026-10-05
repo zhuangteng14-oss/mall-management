@@ -531,7 +531,7 @@
   ⚠️ **后两者按 §5-P (1) 的先例做同行替换（`-1 +1` / `-2 +2` 净零）** —— 那两个文件被别处**按行号**引用，增删行会集体偏移。
 
 - **（4）【口径统一】端点数 = **35**（**handler 数口径**，2026-10-05 用户裁决）。⚠️ **订正（2026-10-05，单列笔见 §5-T）：本项原裁 34 作废** —— 成因是把 `goods` 漏数 1 条（原写 8，实为 **9**）。**
-  口径：**一个 handler 方法算 1 条，与它声明几种 HTTP 方法无关** —— `@GetMapping` / `@PostMapping` / `@RequestMapping(GET,POST)` / 同名多注解**都算 1 条**。理由：handler 数是**方法数**，稳定；HTTP 方法数会随「一个方法支持几种 HTTP」变，不稳定。⇒ **`/goodstype`（`GoodsController.java:61` 同时声明 `GET,POST`）算 1 条**。
+  口径：**一个 handler 方法算 1 条，与它声明几种 HTTP 方法无关** —— `@GetMapping` / `@PostMapping` / `@RequestMapping(GET,POST)` / 同名多注解**都算 1 条**。理由：handler 数是**方法数**，稳定；HTTP 方法数会随「一个方法支持几种 HTTP」变，不稳定。⇒ **`/goodstype`（`GoodsController.java:74` 同时声明 `GET,POST`）算 1 条**。
   逐域实测（4 个业务 Controller、去类级 `@RequestMapping`）：`message 10 / order 8 / goods 9 / user 7` = **34**（业务面）；**+ `HealthController./health/db`（`@Profile("a3")`）= 35**。
   ⚠️ **口径差的成因已对齐（2026-10-05 订正；原写「逐笔成因未完成对齐，不臆测」）。** `§5-M` 的「33」与 `§5-P (3)` 的「32」**同口径、当年均准确** —— 那两处逐个数出来的都是 `goods **9** / message 10 / order 8 / **user 5** / health 1`（**`goods 9` 与本项现在的实测一致，反证原写的 `goods 8` 是漏数**）；笔 2 新增 `/user/me` + `/user/logout` ⇒ `user **5 → 7**` ⇒ **33 → 35**（`:480` 已写此式）。⇒ **`§5-Q (2)` 的 35 从来是对的，本项原来的 34 才是错的**；原假设的「`/goodstype` 是否按 HTTP 方法拆成 2 条」**不是成因，作废**。⚠️ `§5-M` 与 `§5-P (3)` 的数字**按其字面保留**（已落盘、属历史；`:480` 已登记 §5-M 那句应改为 user 7 / 合计 35）⇒ **引用时一律以 handler 数 = 35 为准**。
   落点：本节 + `business-decisions.md`（BD-03 现状行）+ `three-layers.md`（`:185` / `:198`）—— 共 **4 处**已统一为 **35**（后 3 处为**同行替换、净零**）。
@@ -556,7 +556,7 @@
   - `api-contract.md:166`：**同行替换（净零）** ——「`main.js` 无拦截器、无全局配置」订正为「已注册 401 出口、仍无 HTTP 拦截器」。
   - `progress.md`：本节。
   ⚠️ **三条「为什么不那样做」的理由，一并记账：**
-  - **401 判 `status` 不判 `body`** —— 闸 401 与 `/user/me` 401 的响应体**逐字节相同**（§5-R (2) 第 10 条 `cmp` IDENTICAL）⇒ 判 body 等于判「字符串相等」；且后端明写 `Result` 键序**不承诺**（`UserController.java:219`）。
+  - **401 判 `status` 不判 `body`** —— 闸 401 与 `/user/me` 401 的响应体**逐字节相同**（§5-R (2) 第 10 条 `cmp` IDENTICAL）⇒ 判 body 等于判「字符串相等」；且后端明写 `Result` 键序**不承诺**（`UserController.java:291`）。
   - **跳转走回调注册，不 `import router`** —— `router/index.js → views/* → api/http.js` 会成环；回调也让「跳哪」只写在 `main.js` **一处**（http.js 不硬编码 `#/login`，路由路径改了不会坏）。
   - **闩锁复位挂「路由变化」而非「任一 2xx」** —— 闸开时白名单端点（如 `goodsSelectHome`）照常 2xx，挂 2xx 会让闩锁被反复**误复位**、等于没有。
 
@@ -570,7 +570,7 @@
   ⚠️ **闸一开这就成为真的没登出**：cookie 仍在，直开 `#/customer` 照样取到数据。⇒ **「退出调 `/user/logout`」列为翻笔前置**（翻笔本来就要动测试与 a3，那是它的时点）；并进笔 4 要改 `CustomerPage` + `MerchantPage` ⇒ **+2 文件、破 5**，故本笔不做。⚠️ **按语（§5-Y，R2，2026-10-05）**：本条的**前提**已变 —— R1/R2 之后两个壳**都没有**自己的退出了（客户 R1、商家 R2 都迁到共用的 `UserCenter.vue`）⇒ 若「退出调 `/user/logout`」要落，落点是 **`UserCenter.vue:52-55` 那**一处**（不是两个壳）⇒ 文件数估计从「+2」降到 **+1**。本条描述的「退出只清 sessionStorage」在 **R2 后仍然成立**（行为未变，只是落点集中了）。⚠️ **再按语（§5-AB，R6，2026-10-05）**：R6 直接**删除**两个壳（非改写）⇒「并进笔 4 要改 `CustomerPage` + `MerchantPage` ⇒ **+2 文件、破 5**」的**前提整体消失**（笔 4 落的是前端传输层、未动壳，且两壳此后已删）；保留原句作历史记录。
 
 - **（5）【漂移登记 · 本笔不修】** 除 (1) 外另 **5** 条：
-  1. **`getUserInfo` 的消费点是 3，不是 5。** 实测 `grep -rn "getUserInfo" src/` = `LoginPage.vue:141` / `UserInfoPage.vue:99` / `GoodsUp.vue:153`（另 2 处是 `GoodsUp` 的本地函数名、1 处是 `endpoints.js:26`）。**三份独立旁证同为 3**：`UserController.java:133` javadoc「前端**三个**调用点」、§6-A P1.2「消费点 **3**」、`api-contract.md:171` 只列 3 个文件。⚠️ 「5」**最可能**来自 `endpoints.js` 的 `user:` 块恰好 5 条（**推断档，未证**）。⚠️ **按语（P2.6，2026-10-05，§5-AC）**：本条是**当时口径**；P2.6 起 `getUserInfo` 的消费点 = **0**（三处**全改走 `/user/me`**）⇒ `grep -rn "getUserInfo" src/` 今日只余 `GoodsUp.vue` 本地函数名等非调用命中，不再是 3。
+  1. **`getUserInfo` 的消费点是 3，不是 5。** 实测 `grep -rn "getUserInfo" src/` = `LoginPage.vue:141` / `UserInfoPage.vue:99` / `GoodsUp.vue:153`（另 2 处是 `GoodsUp` 的本地函数名、1 处是 `endpoints.js:26`）。**三份独立旁证同为 3**：`UserController.java:140` javadoc「前端**三个**调用点」、§6-A P1.2「消费点 **3**」、`api-contract.md:171` 只列 3 个文件。⚠️ 「5」**最可能**来自 `endpoints.js` 的 `user:` 块恰好 5 条（**推断档，未证**）。⚠️ **按语（P2.6，2026-10-05，§5-AC）**：本条是**当时口径**；P2.6 起 `getUserInfo` 的消费点 = **0**（三处**全改走 `/user/me`**）⇒ `grep -rn "getUserInfo" src/` 今日只余 `GoodsUp.vue` 本地函数名等非调用命中，不再是 3。
   2. **§6-A P1.2 的行号过时**：写 `LoginPage.vue:150` / `UserInfoPage.vue:101` / `GoodsUp.vue:155` → 实测 **`:141` / `:99` / `:153`**（成因 = `#48` 前端笔挪行）。
   3. **`api-contract.md:171` 同病 + §5 全表停摆**：写 `LoginPage.vue:142` / `GoodsUp.vue:150` / `UserInfoPage.vue:96` → 实测 **`:141` / `:153` / `:99`**；且 §5 矩阵全表行号停在 **2026-09-30**（`#48` 之前），此后**未重测**。
   4. **§5-J (4) 与 §6-B P2.6 的行号过时**：写 `LoginPage.vue:163-169`（写）/ `GoodsUp.vue:145-146`（读）/ `UserInfoPage.vue:91-92`（读）→ 实测写 **`LoginPage.vue:148-153` + `:158` / `:162`**、读 **`GoodsUp.vue:148-149`** / **`UserInfoPage.vue:94-95`**。
@@ -1167,7 +1167,7 @@
   `api/auth.js` **202 → 202**：`K.password` 删除（墓碑注释）、`getPassword()` 删除（墓碑）、`setCredentials` → **`setUsername`**（只写用户名）、`clearCredentials` 少清一键。头部 `:3-8` 就地改成**历史口径 vs 现状**（54 / 6 = 基线历史值；今日登录态 **4 键**、登录密码键归零），**避免写出该键字面量**（否则复检 `grep` 命中注释）。
   `LoginPage.vue` **470 → 470**：登录成功后第二发改走 `POST /user/me`（`{allowUnauthorized:true}`）+ `setUsername`/`setRole`。`GoodsUp.vue` **590 → 590** / `UserInfoPage.vue` **261 → 261**：读口由 `/user/getUserInfo`（带密码）改为 `/user/me`（无参）；守卫由「有 `username`」改为 **`if (!isLoggedIn()) return`**（匿名访客仍**零请求**）。
   `api/http.js` **221 → 221**：仅 `allowUnauthorized` 的注释（`:9-10`）改口径 —— 今日 **4 个调用点**（`main.js:28` 启动探针 + 三个资料读点 `LoginPage.vue:144` / `GoodsUp.vue:153` / `UserInfoPage.vue:99`）。**不是全局开关**，且**仍然照抛**（不吞异常）。
-  ⚠️ `role` **仍取自 `loginSelect` 的文本**（裁决 D5：**不**把 `role` 加进 `/user/me` 投影 —— 它属 `login` 表，加了就是口径分叉，见 `auth.js:99-106`）。C3 若要走恢复路径拿 `role`，是**另一笔**。
+  ⚠️ `role` **仍取自 `loginSelect` 的文本**（裁决 D5：**不**把 `role` 加进 `/user/me` 投影 —— 它属 `login` 表，加了就是口径分叉，见 `auth.js:98-103`）。C3 若要走恢复路径拿 `role`，是**另一笔**。⚠️ **多账户隔离笔（2026-10-06）订正 —— 取代 P2.6 的 D5 口径**：`/user/me` 自本笔起**答 `role`**（身份的两条口径见 `AuthSession` 类注释；`auth.js:98-103` 已同步写订正）⇒ 恢复态**拿得到**角色，本口不再必然为 `null`。⚠️ 由此 C3 的口子**变了形**：不再是「另开一笔补 `role`」，而是「`role` 已在手，缺的是细粒度权限模型」（见 §5-AF (5)）。
 
 - **（4）`AbstractSmokeTest`「待定」的**解决**（用户要求 ①）——**结论：**不改**，理由成文。**
   新 stub（`queryForMap` 行 + `query(contains("login"))` + `query(contains("customerimage"))`）**只落在测试类本地**，不进共享基类；共享 `query(String, RowMapper, Object...)` 重载的歧义，用**不相交的 SQL 子串 matcher** 化解。⇒ 基类**不动**（**代码**文件数 8 而非 9；连 2 文档共 10）。跨两个顶层类共用的 `userRow(...)` 做成 **`static` 包级** helper、以 `AuthSessionSmokeTest.userRow(...)` 调用（`AuthSessionSmokeTest` 与 `AuthSessionSwitchOnTest` 是**同一文件的两个顶层类**，private 不共享）。**测试数 13 不变。**
@@ -1214,7 +1214,7 @@
 | `.../src/main/resources/application-a3.properties` | **`false`**（本笔新加显式 pin） | A3 的 5 个非白名单端点 + `ConcurrencyRunner.lockAcquires()` 读 `/actuator/metrics/**`（**不在白名单**；`r.code != 200` ⇒ `-1`「无法判定」）—— 第二重保护面 |
 | `.../src/test/resources/application-smoke.properties` | **`false`**（本笔新加显式 pin） | `@ActiveProfiles("smoke")`（`AbstractSmokeTest:47-48`）激活 ⇒ 10 个 smoke 类**零改动**保持全绿 |
 
-> ⚠️ **`@Value("${app.auth.enabled:false}")` 的兜底**仍是 `false`（用户裁决 **D2**）—— 兜底是「属性**缺失**」的口子，与「主配置**现值**」是两件事。**不改它**：若改成 `true`，「**谁删了那一行**」就从「静默关」变成「静默开」（闸在无人察觉时生效），风险方向反了。⇒ 登记为**独立欠账**（`WebAuthConfig:118` 的兜底）。
+> ⚠️ **`@Value("${app.auth.enabled:false}")` 的兜底**仍是 `false`（用户裁决 **D2**）—— 兜底是「属性**缺失**」的口子，与「主配置**现值**」是两件事。**不改它**：若改成 `true`，「**谁删了那一行**」就从「静默关」变成「静默开」（闸在无人察觉时生效），风险方向反了。⇒ 登记为**独立欠账**（`WebAuthConfig:137` 的兜底）。
 
 **（3）用户四项裁决（本笔照办）**
   - **D1 文档订正范围（8 处纳入本笔）**：先前 6 份文档 + 2 处 javadoc 写着「开关**默认 `false`** ⇒ 对现网零影响」—— 翻后**全是假话**，本笔**就地全部订正**（清单见 (6)）。理由：不许假话。
@@ -1225,7 +1225,7 @@
 
 **（4）四处核实（落码前必答；全部实测）**
   1. **smoke profile 的激活机制**：Spring Boot **不**自动加载 `application-smoke.properties` ⇒ 必须核 `@ActiveProfiles`。实测 `AbstractSmokeTest:47-48` 有 `@ActiveProfiles("smoke")`，且 `@ActiveProfiles` 是 `@Inherited` ⇒ **10 个 smoke 子类全覆盖、基类零改动**。⚠️ 备选 (b) `src/test/resources/application.properties` **不可用**：它**屏蔽**主 `application.properties`（`target/test-classes` 先于 `target/classes`）⇒ `@SpringBootTest` 的 `MallManagementApplicationTests` 丢 `spring.datasource.*` 而启动失败。
-  2. **`/user/logout` 的方法**：`@PostMapping`（`UserController:222`）⇒ 前端写 `http.post`。
+  2. **`/user/logout` 的方法**：`@PostMapping`（`UserController:294`）⇒ 前端写 `http.post`。
   3. **启动探针**：`main.js:28` 调 `/user/me` **已带** `allowUnauthorized: true` ⇒ 翻后未登录访客**静默继续**，首页零变化。
   4. **启动自检日志落点**：`WebAuthConfig` **构造器**（唯一读该 `@Value` 处），ASCII 片段 **`AUTH`**，与 `app.lock.*` / `app.cache.*` / `app.order.state.*` 的「启动期打印生效值」惯例对齐（结清 §5-R (i)）。
 
@@ -1250,6 +1250,120 @@
 **（9）手测与回滚点（用户裁决）**
   - **本笔不手测**（攒 T 批，同 R1–R6 / `P2.6`）。⚠️ **手测批在本笔 merge 之后启动** —— 范围 = **T1–T4 + T-new-1~11**（把 R1–R6 路由化、`P2.6` 会话驱动、以及本笔翻开关**一起**测）。理由：这三拨改动叠在同一条链路上（路由 → 会话 → 闸），分开测反而要重搭环境、且翻开关的真正效果（未登录直开 `#/customer` 该被拦）必须和前端一起看。
   - **回滚点（一行）**：`application.properties:163` 的 `app.auth.enabled` 改回 **`false`** 即回退本笔对现网的**全部**影响；`application-a3.properties` / `application-smoke.properties` 两处 pin **可留**（回退后它们是冗余，不是有害）。⚠️ 这是本笔把「开关现值」与「两处 pin」**分开**放的理由 —— 回滚只动一行，护栏不动。
+
+---
+
+### 5-AE. 手测批（R1–R6 + `P2.6` + 翻开关**合并一次跑**，2026-10-05）：**14 / 14 通过** —— ⑫ 的「通过」是**预期内的缺口**（前端路由守卫尚未做）
+
+**（1）范围**：T1–T4（R1 起攒：客户/商家分流、深链接刷新）+ T-new-1·2（R3 `/` 落点）+ T-new-3·4（R4 裸页收编）+ T-new-9·10·11（`P2.6` 会话驱动）+ 翻开关笔新增 2 条（匿名逛首页不被踢 / 退出真的登出）—— 重叠项合并后 **14 条**。四条线**在同一次手测里一起验**（理由见 §5-AD (9)）。
+
+**（2）结果**：**14 / 14 通过**。
+  - ⚠️ **档位 = 叙述记录（用户口述）**：本仓**无**逐条截图 / 响应体 / 日志落盘 ⇒ 本记录**不可本地复核**，只承载「用户报 14 条全绿」这一事实，不承载逐条证据。
+  - ⚠️ **产物条件（前置按语，必须与结果同读）**：本批的效力**以「dev server 已重启重编」为前提** —— 开跑前 8080 上那份 `/js/app.js` 里 `GoodsUp.vue` / `UserInfoPage.vue` 两个模块**仍是 `P2.6` 之前**的版本（调已删除的 `getPassword()` ⇒ `TypeError` ⇒ 页面对应字段全落兜底文案，如「未知用户」），而同包 `auth.js` 已是 `P2.6` 之后 ⇒ **混合陈旧产物**。
+    - **档位 = 实测**：① 拉 `http://localhost:8080/js/app.js` 后逐字核对（旧码为 `const password = getPassword()` + `endpoints.user.getUserInfo`）；② 同包 `auth.js` 模块的导出清单里**无** `getPassword`（只剩注释墓碑）；③ 后端 `POST /user/loginSelect` → `POST /user/me` 实登实测，返回**顶层平铺 11 键**，键名与模板要求逐字一致。
+    - 修法 = 重启 dev server + 硬刷新，**未改任何源码**（源码本就是对的）。
+    - ⇒ **⑧（新标签页进 `#/customer/user/info` 显示完整资料）通过，反证产物已刷新**（陈旧产物下该条必红）。**档位 = 推断**。
+
+**（3）⑫ 的「通过」怎么算**：⑫ = **未登录 / 无会话时直开受保护页**。现象 = 页面能打开但**空白**；Network 里 `POST /user/me` 返回 **401**。
+  - **判据不是「行为正常」而是「现象与已知缺口逐条吻合」**：前端**至今没有路由守卫** —— `router/index.js` 唯一的 `beforeEach` 是 `LEGACY_TAB` 归一器，**无鉴权分支** ⇒ 未登录照样能被路由送进受保护页；页内请求被闸 401、又无人拦截 ⇒ 空白页。与缺口描述一致 ⇒ 判**通过**（**不是回归**）。
+  - ⚠️ **该缺口有具名笔主 = 「前端路由守卫笔」**（§5-AC 的 D5 已把该笔登记为接管方，见 `progress.md:1189`）。本批**不修**，只登记「现象已在真环境验过」。
+  - ⚠️ 附带确认：`/user/me` 的 401 **没有**触发跳登录 —— 因为 `P2.6` 三个读点都带 `allowUnauthorized: true`（`UserInfoPage.vue:99` / `GoodsUp.vue:153` / `LoginPage.vue:144`），401 只落各页 `catch`。**这是设计如此**，不是 401 闩锁失效。
+
+**（4）本批不覆盖的两块**：
+  - **管理员（`role=3`）全链路** —— **C3 未落地**，`login` 表种子只有 role `1`/`2`（`mall_management_sql.sql:99`）⇒ **无对象可测**。
+  - **多账户串号**（同浏览器两标签页：标签 1 登客户、标签 2 登商家 ⇒ 回标签 1 的 `#/customer/user` 显示**商家**数据）—— 本批 14 条的判据都建立在**单账户**路径上，不含此项。成因 = **cookie 浏览器级共享**（HTTP 协议层约束：标签 2 的登录覆盖了 cookie）⇒ 前端身份不能再由 cookie 唯一决定。归属 = **「多账户隔离」笔**（`feat/auth-token-isolation`，2026-10-05 开；落码后按序分配小节号）。
+
+---
+
+### 5-AF. 多账户隔离笔（`feat/auth-token-isolation`，2026-10-06）：不透明 token 机制 + **13 端点入参身份校验** —— ⚠️ **落码完成、验证全绿**（验证见 (7)；commit 拆分见 (11)）
+
+**（1）治的病与两次改判**
+- **病**（§5-AE (4) 已登记本笔为归属）：同一浏览器两标签页**共用一份 cookie** ⇒ 标签 2 的登录把身份「抢」过去，回标签 1 刷页看到的是**商家**数据。根因 = 身份**只能**由 cookie（浏览器级共享）决定。
+- **改判 ① —— 入参身份校验（「填别人的 ID 改别人的数据」）并入本笔**。理由：与 token 同属「身份从哪来」这一个主题；且它是 **C3 的硬前置**（不先钉死「谁只能改自己的」，细粒度权限模型没有落点）；答辩必问「能改别人的商品吗」。
+- **改判 ② —— 管理员豁免本笔就做**。上一轮曾判「管理员也走自己那条校验」——**错**：管理员改他人数据**是职责**（驳回商家异常更新、处理异常订单、处理不合规描述）。本笔把门**开到「放行」为止**；管理员能改**哪些字段**、要不要审计日志 / 二次确认、前端入口 —— 全归 **C3**（见 (5)）。
+
+**（2）机制：不透明 token（`shared/web/AuthTokenStore.java`，新增）**
+- **形态**：32 字节 `SecureRandom` → Base64URL 无填充 = **43 字符**不透明串；表在**内存**（`ConcurrentHashMap`）。头名与方案前缀的**唯一出处**是 `AuthTokenStore.HEADER` / `BEARER`（前端 `http.js` 按它拼头）。
+- **不落 Redis**：理由与 `AuthSession` 同源（Redis 在本仓被定义为**可容忍的降级态** —— `application.properties` 明写、`management.health.redis.enabled=false`）；token 表若在 Redis，Redis 一挂就**从「不确定」变成「全部已登出」**。⚠️ 代价同 `AuthSession`、已同处登记：**多实例不共享、重启即丢**。
+- **绑 `userId`、不绑会话** —— 这是隔离的**唯一**诀窍：两标签页各登各的 ⇒ 表里**两条互不相干的记录**；标签 2 覆盖 cookie，覆盖不了标签 1 手里那张票。⚠️ 故 `mint` **每次调用都新铸**、**永不回发**既有 token（`AuthTokenStoreTest.mintTwice_producesTwoDistinctLiveTokens` 专门钉这一条：改成「同一 `userId` 复用一张票」= 隔离当场失效，而**别的用例照样全绿**）。
+- **有效期**：**30 分钟滑动**（每次命中把 `lastAccessAt` 推到当下）；过期项**没有后台清理线程**，只在 `mint` 时顺带扫一遍（登录频率低，一次 O(n)）。`≥ TTL` 即过期 —— 这个判据在 `resolveAt` 与 `purgeExpiredAt` 两处**逐字取齐**。
+- **不回落 cookie（裁决 D4）**：带了 `Authorization` 但票不认识 ⇒ **401**，**即便此时 cookie 会话是好的**。回落等于把隔离**静默降级**回「谁有 cookie 谁是身份」——正是本笔要治的病。
+- **两条口径（`AuthSession`）**：`authorize`（token → cookie 且 **role≠3** → `null`；**闸与全部业务端点**用）／`identify`（token → cookie **任意角色** → `null`；**只**给 `/user/me` 与 `IdentityGuard` 用）。可观测后果：**`role=3` 的 cookie 在业务端点是 401、在 `/user/me` 是 200 降级形状** `{success:true, role:3}`（认出「你是管理员」，但**不查资料**）。这条分叉是最容易被「顺手统一掉」的地方，端到端各钉一遍。
+- **闸的 4 档（`AuthInterceptor`）**：开关 → 白名单（12 条）→ `authorize` → **身份识别例外**（`WebAuthConfig.AUTH_IDENTITY_PATHS = ["/user/me"]`）。
+- **端点 +1**：新增 `POST /user/token`（凭**会话**铸票）—— ⚠️ **不在白名单**（无凭据 ⇒ 401），且**管理员 cookie 换不到票**（管理员身份只能由 token 承载）。
+- **localStorage 指针（裁决 D6）**：键名 `authToken` **同用在两个 store** —— `sessionStorage` = **本页的票**、`localStorage` = 「**最近登录**」指针（`role ≠ 3` 才发布，管理员从不发布）。清除规则 = **仅当指针 == 本页的票**才清（否则标签 1 退出会把标签 2 刚发布的指针一起抹掉）。
+- **⚠️ 已知边界（登记不修）**：浏览器「复制标签页」/ `window.open` **会复制 `sessionStorage`** ⇒ 复制出来的页**继承原页身份**，而不是「最近登录」。浏览器行为，前端管不了。
+
+**（3）入参身份校验：一处判据、13 个端点共用**
+`IdentityGuard.requireSelfOrAdmin(request, paramId)` → `boolean`（**不通过**时端点返 `IdentityGuard.forbidden()` = **403** + `Result.fail("无权操作该账户")`）：
+
+| 档 | 情形 | 结果 |
+|---|---|---|
+| 1 | 入参填**自己** | 放行（**所有**角色） |
+| 2 | 入参填**别人** + `role == 3` | 放行（**管理员豁免**） |
+| 3 | 入参填**别人** + 非管理员 | **403**（不是 401 —— **有身份、无权限**） |
+
+- **API 契约不变**：前端照旧传 `MerchantId` / `CustomerId`。
+- **13 个端点**：`GoodsController` 的 `goodsAdd` / `goodsSelect` / `goodsDe` / `goodsUp`；`OrderController` 的 `orderAdd` / `orderSelect` / `orderDeliveryIfSelect` / `orderDeliverySelect` / `historicalOrdersSelect`；`MessageController` 的 `friendAdd` / `friendUp` / `friendDe` / `friendSelect`。
+- **刻意排除的 2 个**：`productCodePrice` / `GoodsProductCodeSelect` —— 它们的 `MerchantId` 是**被浏览的商家**（对端），**不是调用者**；判它 = 把「逛店」判成越权。
+- **`identify() == null ⇒ 放行`**：闸关（`app.auth.enabled=false`，含 smoke / A3 两个 profile）时没有身份可言 ⇒ 10 个既有 smoke 类与 A3 **全绿不受影响**。
+
+**（4）测试面**：新增 **28** 条，总数 **237**
+- `shared/web/AuthTokenStoreTest`（**9**，纯单测、不起 Spring）：43 字符与 URL 安全字符集、**永不回发**、不认识 ⇒ `null`（含 `null` 入参）、过期边界（`TTL-1` 有效 / `≥TTL` 失效）、**滑动续期**、**懒清除**（判 `liveCount()`）、`mint` 顺带清扫、`revoke` 幂等、**只销指定那张**。
+- `smoke/AuthTokenSmokeTest`（**11**，闸开 + MockMvc）：无凭据铸票 ⇒ 401（**与闸同字节**）、**管理员 cookie 换不到票**、票可**替代** cookie、**票优先于 cookie**、不认识的票在 `/user/me` **与业务端点各钉一遍**（走的是闸的两条不同判定分支）⇒ 401、管理员 cookie 在业务端点 401 / 在 `/user/me` **降级形状**、管理员**票**拿得到完整资料、登出销**本请求那张**票、**不误伤别的标签页**。
+- `smoke/IdentityGuardSmokeTest`（**8**）：13 端点 × **三档**（档 1 / 档 3 / 档 2 **各扫一遍全部 13 个端点**）、**对端方参数不判**、**浏览侧 2 端点刻意不设防**（反向断言）、403 体形状、`null` 身份放行、`null` 入参放行。⚠️ 该文件带 `app.upload-dir=pom.xml/nope-img/` pin —— 走上传路径的用例**不得**写进 `src/main/resources/static/img/`（那是**真仓库目录**）。
+- **新增测试钩子**：`AuthTokenStore.mintAt(userId, role, nowMillis)`（**包级可见、仅供测试**，与既有 `resolveAt` 同源理由：30 分钟的过期路径**不能**靠 `Thread.sleep` 测）。它是「`mint` 顺带清扫过期项」那条用例存在的**唯一**理由。
+
+**（5）细粒度权限归 C3（登记，本笔不做）**：管理员能改**哪些字段**？审计日志？二次确认？管理员前端入口？—— 四问全归 **C3**。本笔只把「管理员**可以**改别人的数据」这扇门打开（(3) 档 2）。⚠️ **C3 的口子已因本笔变形**：`/user/me` 现**答 `role`** ⇒ C3 不必再「另开一笔补 `role`」（`progress.md:1170` 的 P2.6-D5 口径已就地订正）。
+
+**（6）前端影响（本笔）**：**无功能改动**（管理员暂无前端入口，前端照旧传自己的 `MerchantId`/`CustomerId`）。唯一落码 = `UserCenter.vue:64` 追加 `.finally(() => clearToken())`（退出时**销本页的票**；票必须在 `POST /user/logout` **之前**送出去，销的动作**之后**做）。⚠️ §5-AD (5) 引的该行是**行首前缀**，不再是整行原文。
+
+**（7）验证**（落码后、commit 前，全部**实测**）
+- `npm run build` → **`DONE` / exit 0**；`npx eslint src --ext .vue,.js` → **exit 0**。
+- `rm -rf target/surefire-reports && ./mvnw -B test` → **`Tests run: 237, Failures: 0, Errors: 0, Skipped: 19` — BUILD SUCCESS**（其中本笔新增 **28** 条 = 9 + 11 + 8；19 skipped 里 `MallManagementApplicationTests` 占 6 条 —— 该 6 条的 `@Disabled` 是本仓既有状态）。
+- **净零核查**（`git diff --numstat`）：`router/index.js` **5/5**、`UserCenter.vue` **10/10** —— 这两处**行数中性**，指向它们的既有行号**不漂**。其余文件是**功能新增**（不是注释改写），行数本就会涨。
+- ⚠️ **上述三条跑在代码冻结点之后**：其后只再动过**文档**（`api-contract.md` 端点表同步 ③ + 本文档 §5-AF 的裁定登记与状态措辞），**未再动任何 `.java` / `.js` / `.vue`** ⇒ build / eslint / 测试结论**继续有效**，不重跑。
+- **行号回放 —— 本笔改动的 7 个生产文件使引用它们的坐标位移。已就地修 6 处**（全在本文档，均为**一行换一行、净零**）：
+
+| 处 | 原引 | 现引 | 成因 |
+|---|---|---|---|
+| `progress.md:534` | `GoodsController.java:61` | **`:74`** | `GoodsController` 头部 javadoc 与入参注释增行 |
+| `progress.md:559` | `UserController.java:219` | **`:291`** | `UserController` 增 `/token`、重写两支 javadoc |
+| `progress.md:573` | `UserController.java:133` | **`:140`** | 同上 |
+| `progress.md:1170` | `auth.js:99-106` | **`:98-103`** | 见下「位移第二类」 |
+| `progress.md:1217` | `WebAuthConfig:118` | **`:137`** | 构造函数前新增两段 javadoc |
+| `progress.md:1228` | `UserController:222` | **`:294`** | 同 `:559` |
+
+- ⚠️ **位移第二类：`auth.js` 内部 −1/−2 —— 本笔新发现、本笔不改**。`auth.js` 相对 `HEAD` 的位移**不是** 0：`:64` 与 `:74` 各 −1、`:78` +1（头部三处净 −1），`:99` 那一块再 −1 ⇒ 各锚点：**`:99-106`→`:98-103`、`:108`→`:106`、`:118`→`:116`、`:146`→`:144`**（`:44` 未动）。⚠️ 这与 `auth.js:21` 注释里「合并两键以保住净零行数」的**意图相冲** —— 合并在 `:21` 处确实是 0 增减，但**文件别处的改写**把锚点带走了。本文档 §5-W / §5-X / §5-Z / §5-AC 里引 `auth.js:108`/`:118`/`:146` 的 **11 处**属「悬空/审计台账」（台账的**主语**就是这些地址），**本笔不改**（改了就篡改台账原话）。✅ **用户裁定（2026-10-06）：不改** —— 口径同上（唯一例外是 `auth.js:21` 那句**代码注释**，已改）。
+- ⚠️ **位移第三类：快照 / 史料文档 —— 不在本 PR 的改动面内、本笔不改**。筛子 = 「该行内容相对 `HEAD` 有变」，扫 `docs/` 命中 **12 份、79 处**：`defect-survey.md` 44、`context-packs/*` 13（`three-layers.md` 10 + 另 3 份各 1）、`tech-debt.md` 6、`cache-map.md` 6、`api-contract.md` 4、`concurrency-map.md` 3、`db-schema.md` / `ddd-package-plan.md` / `selection-status.md` 各 1。
+  - ⚠️ **79 是「候选」不是「已判位移」**：筛子只比**该行内容**，不含「行号是否真的动了」。反例：`api-contract.md` 那 4 处引 `UserCenter.vue:64` —— 行号**没动**，只是该行内追加了 `.finally(...)` ⇒ **引用仍有效**。79 处里另有**大半**是「原 → 现」对照表的**原址**列（`defect-survey.md` / `tech-debt.md` / `three-layers.md`，多带「原记 / 三层前 / ~~」标记）⇒ 本身即**史料地址**，不算漂。
+  - **逐条判过的那一小撮，全部在 `HEAD` 时已与所述不符**（⇒ 属**既有陈旧**，本笔只是让它们继续偏移）：`cache-map.md:66`/`:94` 引 `GoodsController:60` 说「只剩一行调用」，而 `HEAD` 该行是**注释**；`:67`/`:95` 引 `:103` 同理；`concurrency-map.md:41` 引 `OrderController:100`，`HEAD` 该行是 `historicalOrdersSelect` 的**签名**，而该表说的是 `orderPayIfUp`；`db-schema.md:96` 引 `OrderController:88` = `orderDeliverySelect` 的路由，而该处说的是 `historicalOrdersSelect`。✅ **用户裁定（2026-10-06）：只登记不修，派笔** —— 见下条。
+- 📌 **挂账（不留孤儿）｜「文档漂移清理笔」**（用户 2026-10-06 派定）：
+  - **范围**：上条那 12 份快照 / 史料文档、**79 处**候选（`defect-survey.md` 44 / `context-packs/*` 13 / `tech-debt.md` 6 / `cache-map.md` 6 / **`api-contract.md` 4** / `concurrency-map.md` 3 / `db-schema.md`、`ddd-package-plan.md`、`selection-status.md` 各 1）。⚠️ `api-contract.md` 那 4 处**已在本笔补做 ③ 时顺手处理**（见下条）⇒ 剩余 **11 份、75 处**候选。
+  - **处理原则**：只改「**现在时引用**」；「原 → 现」对照表的**原址列**（带「原记 / 三层前 / ~~」标记者）一律**保留**（本身即史料地址）。
+  - **判据**：逐条先判「在 `HEAD` 时是否已经不符」—— 已不符者记**既有陈旧**；在 `HEAD` 时准、被某笔带偏者，回指**造成位移的那一笔**。
+  - **不手测**；产出 = diff + 一份「判过 / 未判」账。
+- ✅ **另一条已在本笔补做（2026-10-06，用户裁定 ③）**：`api-contract.md` 端点表已同步本笔新增的 `POST /user/token` —— 计数 **35 → 36**、`### /user` **7 → 8 行**、新增 `token` 行；`/user/me` 契约行补上 **`role` 键**与**管理员降级作答 `{success:true,role:3}`**（并订正「与 `/user/getUserInfo` 同一个 Map」那句 —— 本笔起 `/user/me` 先复制再加 `role`）。⚠️ **顺手发现并修复**：该表 `### /user` 的 7 个行号**在 `HEAD` 时是准的、被本笔带偏**（`92 / 114 / 136 / 145 / 154 / 191 / 222` → **`96 / 121 / 143 / 152 / 161 / 213 / 294`**），已按实测重填。
+**（8）相邻缺口** —— 本笔刻意不覆盖，**归属笔名待用户裁定**
+- `orderPayIfUp` / `orderReceiveIfUp` / `orderDeliveryIfUp`：入参只有 `orderId` ⇒ 要判的是**资源归属**（「这单是不是我的」），形状与「入参填自己」**不同**，套不上 `requireSelfOrAdmin`。
+- `/message/send`：带 `fromId` ⇒ 可**冒名**发消息（与 13 端点同族，但判据是「`fromId` 必须是自己」）—— 本笔**未**纳入。
+
+**（9）手测项** —— T-iso 系列，**本笔未跑**，随下一批
+
+| 项 | 判据 |
+|---|---|
+| T-iso-1 | 标签 1 登客户 `123`、标签 2 登商家 `2222` ⇒ 回标签 1 刷 `#/customer/user` = **客户**资料、标签 2 刷 `#/merchant/user/info` = **商家**资料；Network 里两页各带**各自的** `Authorization` |
+| T-iso-2 | 再新开标签 3 ⇒ 落点 = **商家**（「最近登录」指针指向它） |
+| T-iso-3 | 标签 1 点退出 ⇒ 标签 2 **仍可用**；`localStorage` 指针**未被误清**（它指向标签 2） |
+| T-iso-4 | 存储面：`sessionStorage` 有 `authToken`（本页的票）；`localStorage` 有 `authToken`（指针；`role ≠ 3` 时） |
+| T-iso-5 | `#/customer/user/info` 直开 + 无会话 ⇒ 401（**既有缺口**，归「前端路由守卫笔」，不变） |
+| T-iso-6 | curl 带 `Authorization: Bearer …` 拿身份；**无效 token ⇒ 401**。⚠️ **管理员那半条挂 C3 前**（`login` 表无 `role=3` 种子 ⇒ 无账号可造） |
+| T-iso-7 | **本笔新增**：登录客户 → curl 发 `goodsUp`，`MerchantId` 填**别人** ⇒ **403** |
+
+**（10）本笔不做（不变）**：不顺手带别的主题；不动 `ProductPage.vue` / `ci.yml` / A3 脚本；不做「前端路由守卫笔」的活（⑫ 缺口仍归它）；**不修 CORS 通配**（归 CORS 收窄笔）；不做细粒度管理员权限模型（C3）；不做管理员前端入口（C3）。
+
+**（11）commit 拆分** —— **一个 PR、两个 commit**（用户 2026-10-06 批准）：① **token 机制**（`AuthTokenStore` + `AuthSession` 两条口径 + `AuthInterceptor` 4 档 + `/user/token` + 前端 token 存取与 D6 规则 + `AuthTokenStoreTest` 9 + `AuthTokenSmokeTest` 11）；② **13 端点入参校验**（`IdentityGuard` + 13 端点 + `IdentityGuardSmokeTest` 8 + 两条相邻边界用例）。两笔**一起 review、一起 merge**（拆分只为可读，不为分别上线）。**执行形态**：顺序提交 ① ② → push `feat/auth-token-isolation` → 开 PR（base `main`）。⚠️ **merge 由用户本人执行**；手测 T-iso-1~5 / T-iso-7 由用户跑完再 merge（T-iso-6 的管理员那半条挂 C3 前）。
+- ⚠️ **归属划界（免得两个 commit 互相依赖）**：`docs/agent/progress.md` 与 `docs/agent/api-contract.md` 两份文档**全进 ①**；`IdentityGuard.java` 与 `IdentityGuardSmokeTest.java`、三个 Controller **全进 ②**。① 单独 checkout 可编译可测（② 之前的 13 端点是**旧行为**：任何角色只要填对端方业务号就能改）。**已实测**：临时 worktree 装入 ① 的 18 个文件（不含 `IdentityGuard`）⇒ `./mvnw -B test` = **229 / 0 / 0 / 19** BUILD SUCCESS —— 229 = 237 − 8，差额正是 `IdentityGuardSmokeTest` 的 8 条；⚠️ ① 里 `AuthSession.java` / `UserController.java` / `AuthTokenStoreTest.java` 对 `IdentityGuard` 的 4 处提及**全是 javadoc `{@link}`**（无代码依赖，故 `javac` 过得去）。
 
 ---
 

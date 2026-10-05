@@ -112,11 +112,30 @@ public class WebAuthConfig implements WebMvcConfigurer {
             "/img/**",
             "/favicon.ico");
 
+    /**
+     * 「身份识别例外」表（多账户隔离笔，2026-10-06）—— 与 {@link #AUTH_WHITELIST} **不是一回事**，
+     * 别合并、也别互相搬条目：
+     * <ul>
+     *   <li>白名单 = <b>公开面</b>：不要身份也让你进（登录页、浏览面、静态资源）；</li>
+     *   <li>本表 = <b>识别面</b>：<b>要**有**身份</b>才放行，且只放行「说出你是谁」这一件事 ——
+     *       授权判据（{@link AuthSession#authorize}）在这一档是**不通过**的。</li>
+     * </ul>
+     * 今日只有一条 {@code /user/me}，它的语义本就是「告诉我我是谁」：管理员在**新标签页**里
+     * 没有本地 token、只有浏览器共享的 cookie 会话时，本表让他仍能问出「你是管理员」，
+     * 端点据此**降级作答**（只回 {@code role}，不回资料），前端便走「退回登录页」而不是
+     * 静默当匿名。⚠️ 业务端点**不在本表**、也不该进来 —— 它们对 {@code role=3} 的 cookie 一律 401。
+     *
+     * <p>⚠️ 不进 {@link #AUTH_WHITELIST} 是**刻意的**：白名单的判据是「公开面」，
+     * 而 {@code /user/me} 恰恰要身份；放进去会让那条语义破产，且会撞上
+     * {@code AuthGateSmokeTest.whitelist_allEntries_passTheGate} 的「条数 == 12」钉子。
+     */
+    public static final List<String> AUTH_IDENTITY_PATHS = List.of("/user/me");
+
     /** 全局唯一的拦截器实例。开关在**构造期**读入（改开关需重启，与其它 @Value 一致）。 */
     private final AuthInterceptor authInterceptor;
 
     public WebAuthConfig(@Value("${app.auth.enabled:false}") boolean authEnabled) {
-        this.authInterceptor = new AuthInterceptor(authEnabled, AUTH_WHITELIST);
+        this.authInterceptor = new AuthInterceptor(authEnabled, AUTH_WHITELIST, AUTH_IDENTITY_PATHS);
         // 把生效值打进启动日志（惯例同 app.lock.* / app.cache.* / app.order.state.*）：此前本开关没有
         // 任何启动期取证口，闸开没开只能从行为反推（progress.md §5-R）。ASCII 片段 "AUTH" 供 GBK 检索。
         log.info("登录闸已装配（AUTH）：app.auth.enabled={} 白名单 {} 条 —— 关闭时全部放行", authEnabled, AUTH_WHITELIST.size());

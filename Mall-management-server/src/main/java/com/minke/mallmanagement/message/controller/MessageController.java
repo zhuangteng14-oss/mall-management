@@ -1,8 +1,11 @@
 package com.minke.mallmanagement.message.controller;
 
 import com.minke.mallmanagement.message.service.MessageService;
+import com.minke.mallmanagement.shared.web.IdentityGuard;
 import com.minke.mallmanagement.shared.web.Result;
+import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.constraints.NotBlank;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.Map;
@@ -46,6 +49,19 @@ import java.util.Map;
  * 方法体由 {@code return messageService.x(…)} 改为 {@code return Result.of(messageService.x(…))}。
  * Service 返回值仍是 {@code Map}，URL 与参数一字未动；因 {@code Result.of} 逐条 put 保字节等价，
  * 线上响应体逐字节不变。本类**没有**例外端点（10/10 全换）。
+ *
+ * <h2>【多账户隔离笔（2026-10-06）：好友侧 4 个端点加**入参身份校验**】</h2>
+ * {@code friendAdd} / {@code friendUp} / {@code friendDe} / {@code friendSelect} 的
+ * {@code customerId} 是「**操作者自己**」⇒ 方法体第一行过
+ * {@link IdentityGuard#requireSelfOrAdmin}，拒则 403（返回类型随之改成
+ * {@code ResponseEntity<Object>}）。
+ * <p>⚠️ <b>{@code friendAdd} / {@code friendUp} / {@code friendDe} 里只判 {@code customerId}，
+ * **不判 {@code friendId}</b>：那是**对端方**（加/删的那个好友），本就该是别人。
+ * <p>⚠️ <b>本类另 6 个端点本笔不加</b>（不在 13 条清单里）：{@code send}（{@code fromId} —— 见下）、
+ * {@code conversations} / {@code history} / {@code getOrCreateConversation}（{@code currentId}）、
+ * {@code userSelect}（查任意用户，属浏览面语义）、{@code selectFriend}（{@code friendId} 是申请人、
+ * 不是操作者）。{@code send} 的缺口（能冒充别人发消息）形态与
+ * {@code orderPayIfUp} 同族，登记在 {@code progress.md §5-AF}，**本笔不修**。
  */
 @RestController
 @RequestMapping("/message")
@@ -109,10 +125,15 @@ public class MessageController {
     // 笔 3：非空校验。A3 的 B-2 打本端点时 customerId / friendId 各是 20 字符
     // （ConcurrencyRunner.java:2197）⇒ 非空，不受影响。⚠️ 不要加 @Size —— 20 是**恰好**长度。
     @PostMapping("/friendAdd")
-    public Result<Map<String, Object>> friendAdd(
+    public ResponseEntity<Object> friendAdd(
             @NotBlank(message = "不能为空") @RequestParam("customerId") String customerId,
-            @NotBlank(message = "不能为空") @RequestParam("friendId") String friendId) {
-        return Result.of(messageService.friendAdd(customerId, friendId));
+            @NotBlank(message = "不能为空") @RequestParam("friendId") String friendId,
+            HttpServletRequest request) {
+        // ⚠️ 第一行：只能以**自己**的名义加好友（管理员豁免）。friendId 是对端方，不判。
+        if (!IdentityGuard.requireSelfOrAdmin(request, customerId)) {
+            return IdentityGuard.forbidden();
+        }
+        return ResponseEntity.ok(Result.of(messageService.friendAdd(customerId, friendId)));
     }
 
     //查询好友表内对应申请人的待处理信息（读路径在 FriendCacheService.listRequests()）
@@ -123,21 +144,36 @@ public class MessageController {
 
     //更新好友表内的数据，让两个用户互为好友
     @PostMapping("/friendUp")
-    public Result<Map<String, Object>> friendUp(@RequestParam("customerId") String customerId,
-                                                @RequestParam("friendId") String friendId) {
-        return Result.of(messageService.friendUp(customerId, friendId));
+    public ResponseEntity<Object> friendUp(@RequestParam("customerId") String customerId,
+                                           @RequestParam("friendId") String friendId,
+                                           HttpServletRequest request) {
+        // ⚠️ 第一行：只能**自己**同意/处理别人的申请（管理员豁免）。friendId 是对端方，不判。
+        if (!IdentityGuard.requireSelfOrAdmin(request, customerId)) {
+            return IdentityGuard.forbidden();
+        }
+        return ResponseEntity.ok(Result.of(messageService.friendUp(customerId, friendId)));
     }
 
     //删除掉不通过好友申请时。对应的待处理的好友申请数据
     @PostMapping("/friendDe")
-    public Result<Map<String, Object>> friendDe(@RequestParam("customerId") String customerId,
-                                                @RequestParam("friendId") String friendId) {
-        return Result.of(messageService.friendDe(customerId, friendId));
+    public ResponseEntity<Object> friendDe(@RequestParam("customerId") String customerId,
+                                           @RequestParam("friendId") String friendId,
+                                           HttpServletRequest request) {
+        // ⚠️ 第一行：只能**自己**驳回申请（管理员豁免）。friendId 是对端方，不判。
+        if (!IdentityGuard.requireSelfOrAdmin(request, customerId)) {
+            return IdentityGuard.forbidden();
+        }
+        return ResponseEntity.ok(Result.of(messageService.friendDe(customerId, friendId)));
     }
 
     //打印好友界面的好友信息（读路径在 FriendCacheService.listFriends()）
     @PostMapping("/friendSelect")
-    public Result<Map<String, Object>> friendSelect(@RequestParam("customerId") String customerId) {
-        return Result.of(messageService.friendSelect(customerId));
+    public ResponseEntity<Object> friendSelect(@RequestParam("customerId") String customerId,
+                                               HttpServletRequest request) {
+        // ⚠️ 第一行：好友列表只能看自己的（管理员豁免）。
+        if (!IdentityGuard.requireSelfOrAdmin(request, customerId)) {
+            return IdentityGuard.forbidden();
+        }
+        return ResponseEntity.ok(Result.of(messageService.friendSelect(customerId)));
     }
 }

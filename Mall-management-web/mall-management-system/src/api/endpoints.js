@@ -4,7 +4,7 @@
 // 「路径字面量只允许出现在本文件」—— 后者强得多，且同样可 grep 自动化（方案 Q8）。
 //
 // 端点来源：14 个 view 里 **42 处 fetch + 6 处 URL 赋值**，逐条抽取
-// （2026-10-04，切换自 `9add994`）共 **31 个唯一端点**，按 M5 的四域分组（+2 条 `user.me` / `user.logout`：会话恢复笔与翻开关笔 2026-10-05 加、**非** view 抽取 ⇒ 本表实为 **33** 条）。
+// （2026-10-04，切换自 `9add994`）共 **31 个唯一端点**，按 M5 的四域分组（+2 条 `user.me` / `user.logout`：会话恢复笔与翻开关笔 2026-10-05 加，+1 条 `user.token`：多账户隔离笔 2026-10-06 加 —— 三条均**非** view 抽取 ⇒ 本表实为 **34** 条）。
 //
 // ⚠️ 路径里的 `GoodsProductCodeSelect` 是**大写开头**，与后端 `@PostMapping` 逐字一致，
 //    不是笔误 —— 改名会 404。
@@ -34,6 +34,10 @@ export const endpoints = {
     //    `UserCenter.vue:52` 的 `toLogin`）。**不在白名单** ⇒ 未登录时调它**必 401**
     //    ⇒ 调用点必须带 `allowUnauthorized: true`。
     logout: '/user/logout',
+    // ⚠️ 2026-10-06（多账户隔离笔）：铸票。**非** view 抽取。两个调用点：`LoginPage.vue` 登录成功后、
+    //    `main.js` 的 cookie 恢复补票。⚠️ 只在**授权口径**拿得到身份时可用 —— 管理员 cookie 换不到票
+    //    （后端 `UserController.token` 判的就是这一条），故调用点一律带 `allowUnauthorized: true` 自兜。
+    token: '/user/token',
   },
   message: {
     userSelect: '/message/userSelect',

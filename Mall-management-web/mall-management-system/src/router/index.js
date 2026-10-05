@@ -192,8 +192,8 @@ router.beforeEach((to) => {
 const ROLE_HOME = { '1': '/customer', '2': '/merchant' }
 
 /** `/` 的落点：未登录 ⇒ 客户壳；已登录 ⇒ 角色首页（role 优先、`getMerchantId()` 兜底 ——
- *  兜底**不是**边角：新标签页恢复时 `getRole()` 拿不到（`/user/me` 不含 `role`）⇒ 走兜底是常态；
- *  且它必须能区分商家，硬回 `/customer` 会把新标签页的商家送错页）。 */
+ *  兜底**不是**边角：`getRole()` 的主来源是 `sessionStorage`，新标签页里那份**是空的**（多账户隔离笔
+ *  起 `/user/me` 会答 `role`、恢复态能补上，但**没走成恢复**时仍只有兜底；且它须能区分商家）。 */
 function landingFor() {
   if (!isLoggedIn()) return '/customer'   // ← R3 的行为变更点（原：`return true`，停在裸页）
   return ROLE_HOME[getRole()] || (getMerchantId() ? '/merchant' : '/customer')
@@ -217,9 +217,9 @@ function landingFor() {
 const ROLE_CART = { '1': '/customer/cart', '2': '/merchant/order/cart' }
 const ROLE_SEARCH = { '1': '/customer/search', '2': '/merchant/search' }
 
-/** 当前角色键（`role` 优先、`getMerchantId()` 兜底 —— 与 `landingFor` 同口径、同理由：新标签页恢复时
- *  `getRole()` 拿不到 ⇒ 走兜底是常态）。匿名 ⇒ 两个都拿不到 ⇒ `'1'` ⇒ 落客户壳 —— 与 R3「未登录也进
- *  客户壳」的裁定一致（壳对匿名本来就安全，见 §5-Z (4)）。
+/** 当前角色键（`role` 优先、`getMerchantId()` 兜底 —— 与 `landingFor` 同口径、同理由：`getRole()` 的
+ *  主来源 `sessionStorage` 在新标签页里是空的；多账户隔离笔起恢复态能补上它，没补上时走兜底）。
+ *  匿名 ⇒ 两个都拿不到 ⇒ `'1'` ⇒ 落客户壳 —— 与 R3「未登录也进客户壳」的裁定一致（见 §5-Z (4)）。
  *  ⚠️ 与 `landingFor` 的兜底逻辑**是有意的两处**：不合并是为了不动 R3 刚落码登记的 `:192` / `:197`
  *  行号（用户裁决 D7）；R6 抽 `AppShell` 时可一并收敛。 */
 function roleKey() {
