@@ -345,7 +345,7 @@ watch(
       await openConversation(newOtherId, newOtherType)
       // eslint-disable-next-line no-unused-vars
       const { otherId, otherType, _t, ...rest } = route.query
-      router.replace({ query: { ...rest, page: 'chat' } })
+      router.replace({ query: rest })   // R4：清掉「`page: 'chat'`」残留（R1 前的壳内 `?page=` 约定，全仓已无读者）；`rest` 仍照旧剥掉上面三键
     }
   },
   { immediate: true }
@@ -364,7 +364,7 @@ onMounted(async () => {
     await openConversation(otherId, otherType)
     // eslint-disable-next-line no-unused-vars
     const { otherId: oid, otherType: otype, _t, ...rest } = route.query
-    router.replace({ query: { ...rest, page: 'chat' } })
+    router.replace({ query: rest })   // R4：同上（`onMounted` 支路）
   }
   pollingTimer = setInterval(() => pollUpdates(), 2000)
   document.addEventListener('click', handleClickOutside)
