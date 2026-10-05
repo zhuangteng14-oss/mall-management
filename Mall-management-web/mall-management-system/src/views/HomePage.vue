@@ -1,7 +1,7 @@
 /* eslint-disable */
 <template>
   <div class="home-page">
-    <div v-if="!isLogin" class="lock-mask" @click="showLoginModal = true"></div>
+    <div v-if="!isLogin" class="login-hint-bar" @click="router.push('/login')">未登录 · 点此登录后可搜索 / 购买</div>
 
     <div class="search-section">
       <div class="search-wrapper">
@@ -222,14 +222,14 @@ const getPriceDec = (price) => {
   background: #f5f5f5;
   position: relative;
 }
-.lock-mask {
-  position: absolute;
-  top: 0;
-  left: 0;
-  width: 100vw;
-  height: 100%;
-  z-index: 99;
-  cursor: not-allowed;
+.login-hint-bar {
+  width: 100%;
+  padding: 10px 16px;
+  background: #fff8e1;
+  color: #8a6d3b;
+  font-size: 13px;
+  text-align: center;
+  cursor: pointer;
 }
 .search-section {
   width: 100%;
