@@ -1221,7 +1221,7 @@
   - **D2 兜底仍 `false`**（见上表下注）。
   - **D3** 6 条 `REACHABLE_BUT_NOT_PUBLIC` 端点的前端守卫缺口**不塞进界面优化笔（C3 是样式笔）** ⇒ 归属新的具名笔「**前端路由守卫笔**」。
   - **D4 前端退出时序**：fire-and-forget + **fail-open** + `allowUnauthorized: true`（见 (5)）。
-  - **D5**（落码中接受的订正）：`progress.md:1189` 原把「`WebAuthConfig.java:83-90` 缺守卫」判给「界面优化笔（C3 笔）」，与 D3 冲突 ⇒ **改指「前端路由守卫笔」**，并把失效地址 `:83-90` 订正为实测 **`:90-95`**。
+  - **D5**（落码中接受的订正）：`progress.md:1189` 原把「`WebAuthConfig.java:83-90` 缺守卫」判给「界面优化笔（C3 笔）」，与 D3 冲突 ⇒ **改指「前端路由守卫笔」**，并把失效地址 `:83-90` 订正为实测 **`:90-95`**。⚠️ **`:90-95` 的来历（实测，非推算）**：区块首行 `h3` 在 HEAD 与本笔**都在 `:90`**（未动）；变的是**块尾 `:94` → `:95`** —— 本笔把末句另起一行（文件整体仍 135 行，那 +1 被上方注释压缩吸收）。规划期写的「`:89-94`」是**按「h3 会下移 1 行」推的、未实测**，故不采用。
 
 **（4）四处核实（落码前必答；全部实测）**
   1. **smoke profile 的激活机制**：Spring Boot **不**自动加载 `application-smoke.properties` ⇒ 必须核 `@ActiveProfiles`。实测 `AbstractSmokeTest:47-48` 有 `@ActiveProfiles("smoke")`，且 `@ActiveProfiles` 是 `@Inherited` ⇒ **10 个 smoke 子类全覆盖、基类零改动**。⚠️ 备选 (b) `src/test/resources/application.properties` **不可用**：它**屏蔽**主 `application.properties`（`target/test-classes` 先于 `target/classes`）⇒ `@SpringBootTest` 的 `MallManagementApplicationTests` 丢 `spring.datasource.*` 而启动失败。
@@ -1246,6 +1246,10 @@
   - **净零**：`WebAuthConfig.java` **135**、`UserController.java` **230**、`api-contract.md` **220** —— 三处均与翻前一致。
   - **`git diff --stat`**：**15 文件，175 insertions(+), 85 deletions(-)**。
   - **新发现的漂移**：**无**。⚠️ 唯一一处连锁：`api-contract.md:161` 的「现状 43」同日被本笔推成 **44** ⇒ 已在 `progress.md:1188` 就地加按语（属同笔连锁，非新发现）。
+
+**（9）手测与回滚点（用户裁决）**
+  - **本笔不手测**（攒 T 批，同 R1–R6 / `P2.6`）。⚠️ **手测批在本笔 merge 之后启动** —— 范围 = **T1–T4 + T-new-1~11**（把 R1–R6 路由化、`P2.6` 会话驱动、以及本笔翻开关**一起**测）。理由：这三拨改动叠在同一条链路上（路由 → 会话 → 闸），分开测反而要重搭环境、且翻开关的真正效果（未登录直开 `#/customer` 该被拦）必须和前端一起看。
+  - **回滚点（一行）**：`application.properties:163` 的 `app.auth.enabled` 改回 **`false`** 即回退本笔对现网的**全部**影响；`application-a3.properties` / `application-smoke.properties` 两处 pin **可留**（回退后它们是冗余，不是有害）。⚠️ 这是本笔把「开关现值」与「两处 pin」**分开**放的理由 —— 回滚只动一行，护栏不动。
 
 ---
 
