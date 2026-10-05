@@ -1,13 +1,13 @@
 // src/api/http.js —— 前端 API 层「传输层」唯一出口
 //
 // 职责边界（只做三件事）：
-//   ① 拼装请求：base URL 前缀 / Content-Type / body 形态 / **凭据**（`credentials: 'include'`）
+//   ① 拼装请求：base URL 前缀 / Content-Type / body 形态 / **凭据**（cookie 用 `credentials: 'include'`、token 用 `Authorization` 头 —— 都在 `buildInit`）
 //   ② 判定传输层结果：超时 / 非 2xx（→ 抛类型化错误）
 //   ③ **401 出口**（鉴权笔 4）：清本地登录态 + 触发**已注册**的跳转。
 //      ⚠️ **动作本体不在本层** —— 本层只 `clearAuth()` + 喊一声；「跳哪」由 `main.js` 决定
 //      （本层**不能** import router：`router → views → http` 会成环，见 `setUnauthorizedHandler`）。
-//      ⚠️ 可**按次旁路**：`{ allowUnauthorized: true }` —— 今日 4 个调用点：会话恢复笔的启动探针
-//      （注定收到 401）+ P2.6 的三个资料读点（`LoginPage.vue` / `GoodsUp.vue` / `UserInfoPage.vue`，会话没了时照抛）。**不是**全局开关。
+//      ⚠️ 可**按次旁路**：`{ allowUnauthorized: true }` —— **今日 7 处**：会话恢复笔的启动探针（注定收到 401）
+//      + P2.6 的三个资料读点（`LoginPage.vue` / `GoodsUp.vue` / `UserInfoPage.vue`）+ 翻开关笔的退出销会话 + 多账户隔离笔的 2 处铸票。**不是**全局开关。
 //
 // ⚠️ 本层**不判业务成功**。`body.success` 的语义各页不同（有的弹 msg、有的静默、
 //    有的走另一分支），统一判 = 一次性改 34 处行为 ⇒ 留在各 view 自己判。
@@ -17,7 +17,7 @@
 //
 // ⚠️ 401 出口（职责③）要清本地登录态 ⇒ 依赖 `auth.js`。`auth.js` 自身**无任何 import**
 //    ⇒ 反向依赖不存在，不成环（这与 router 的情况不同 —— 见职责③的注释）。
-import { clear as clearAuth } from './auth'
+import { clear as clearAuth, getToken } from './auth'
 
 const API_BASE = process.env.VUE_APP_API_BASE || ''
 
@@ -126,7 +126,8 @@ export function assetOf(path) {
  *    后端侧已现成：`ImgConfig` 的 CorsFilter = `addAllowedOriginPattern("*")` +
  *    `allowCredentials(true)` ⇒ Spring **回显具体 origin**（不是 `*`），浏览器接受带凭据的跨源请求；
  *    真容器实测见 `progress.md §5-R (2)` 的 [12] / [13]。
- *    ⚠️ 若日后改选 B（JWT），这里是加 `Authorization` 头的落点（`getToken()` 目前是空实现）。
+ *    ⚠️ **2026-10-06（多账户隔离笔）已在此加 `Authorization: Bearer <token>`**（就在本函数体末尾）——
+ *    这不是「改选 B」：票**由服务端签发**（`POST /user/token`），前端只负责携带，见 `auth.js` 末尾那节。
  */
 function buildInit(method, body) {
   const init = { method, credentials: 'include' }
@@ -139,6 +140,14 @@ function buildInit(method, body) {
     }
     if (hasBody) init.body = body
   }
+  // ⚠️ 多账户隔离笔（2026-10-06）：有票就带上（`Authorization: Bearer <token>`）。这一句让
+  //    「42/42 处 API 调用全都自动带票」—— 与 `credentials: 'include'` 同一手法（都收在本函数里）。
+  //    ⚠️ 有票时，**GET 无 body 那条路径不再「一个头都不带」**：它带且**只带**这一个头
+  //       （上面的 Content-Type 仍按原判据只发给 POST / 带 body 者）⇒ 不与「GET 不加内容头」那条判据冲突。
+  //    ⚠️ 票要 **`getToken()` 现取**、不做缓存：登录 / 认领 / 登出都可能在两次请求之间改它。
+  //    ⚠️ 头值逐字 `Bearer ` + 票（后端 `AuthTokenStore.BEARER` 大小写敏感，别改成小写）。
+  const token = getToken()
+  if (token) init.headers = { ...(init.headers || {}), Authorization: `Bearer ${token}` }
   return init
 }
 

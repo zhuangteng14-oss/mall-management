@@ -2,6 +2,7 @@ package com.minke.mallmanagement.user.controller;
 
 import com.minke.mallmanagement.shared.web.AuthInterceptor;
 import com.minke.mallmanagement.shared.web.AuthSession;
+import com.minke.mallmanagement.shared.web.AuthTokenStore;
 import com.minke.mallmanagement.shared.web.Result;
 import com.minke.mallmanagement.user.service.UserService;
 import jakarta.servlet.http.HttpServletRequest;
@@ -20,9 +21,10 @@ import java.util.Map;
  * 业务规则、上传编排、响应组装全在 {@link UserService}，SQL 全在
  * {@code com.minke.mallmanagement.user.dao.UserDao}。
  *
- * <h2>【本类收 7 个端点 —— 不含 {@code userSelect}】</h2>
+ * <h2>【本类收 8 个端点 —— 不含 {@code userSelect}】</h2>
  * {@code loginSelect} / {@code loginAdd} / {@code getUserInfo} / {@code updateAvatar} /
- * {@code updateUserInfo}，加鉴权笔 2 的 {@code me} / {@code logout}。⚠️ {@code /message/userSelect}
+ * {@code updateUserInfo}，加鉴权笔 2 的 {@code me} / {@code logout}，加多账户隔离笔的
+ * {@code token}（2026-10-06）。⚠️ {@code /message/userSelect}
  * <b>不归本笔</b>：它的路由在 {@code MessageController}、服务在 {@code UserCacheService}，
  * 只是碰巧读 {@code user} 域的表 —— 归 message 域那一笔。
  *
@@ -48,6 +50,8 @@ import java.util.Map;
  * 全仓端点 33 → 35。{@code Result} 类注释里「33 个端点里 30 个返回 Map」与「33 处响应 Map」
  * 两处口径**在本笔之后都已过时**（无论按哪个口径数）。本笔**不改 {@code Result}**，
  * 只在 {@code progress.md §5-Q} 登记 —— 理由与「本笔不改更新记录行」同：避免夹带。
+ * ⚠️ 2026-10-06（多账户隔离笔）再加 {@code POST /user/token} ⇒ 35 → **36**，上面两处口径
+ * 又远一格。{@code Result} 仍不动，登记见 {@code progress.md §5-AF}。
  *
  * <h2>【为什么本类现在**没有**任何注解式行为（{@code @Transactional} / 缓存）】</h2>
  * 三层前 {@code loginAdd} 上挂着全仓<b>唯一一处真 {@code @Transactional}</b>
@@ -103,7 +107,10 @@ public class UserController {
             String businessId = userService.businessId(username, role);
             if (businessId != null) {
                 // 会话里存的是**业务号**（customerid / merchantid），不是登录名 —— 见 AuthSession。
-                AuthSession.login(request.getSession(), businessId);
+                // ⚠️ 多账户隔离笔（2026-10-06）：**角色一并写进会话**（第三个实参）。那不是顺手加的：
+                //    `POST /user/token` 要把 role 写进 token 记录，而这里是 role 唯一的入口
+                //    （见 AuthInterceptor.SESSION_ROLE 的 javadoc：那是对 AuthSession「不存角色」的有意破）。
+                AuthSession.login(request.getSession(), businessId, role);
             }
         }
         return role;
@@ -161,51 +168,116 @@ public class UserController {
         return Result.of(userService.updateUserInfo(username, email, address, selfintroduction));
     }
 
-    // ==================== 鉴权笔 2 新增：会话侧的两个端点 ====================
+    // ============ 鉴权笔 2 新增（多账户隔离笔扩成 3 个）：身份侧端点 ============
 
     /**
-     * 「我是谁」：按**会话**返回当前登录用户的**完整资料**（P2.6 扩列，见下）。
+     * 「我是谁」：按**身份**返回当前登录用户的**完整资料**（P2.6 扩列，见下）。
      *
      * <p>与 {@link #getUserInfo} **并存、不替代**：那个是**凭据驱动**（每次都传
-     * username+password），本端点是**会话驱动**（凭 cookie 识别身份）—— P2.6（2026-10-05）
+     * username+password），本端点是**身份驱动**（凭 token 或 cookie 识别）—— P2.6（2026-10-05）
      * 起前端三处调用点（登录页 + 商家上架页 + 资料页）**已全部改走本端点**，{@code getUserInfo}
      * 在前端**再无调用方**（端点保留的理由见那里）。
      *
-     * <h3>三种出口</h3>
+     * <p>⚠️ 多账户隔离笔（2026-10-06）后判据由「cookie 会话」扩成
+     * {@link AuthSession#identify}（**识别**口径：token 优先；无 token 时 cookie **一律认**，
+     * 含 {@code role=3}）—— 这是它唯一的消费者，故第 2 种出口是本端点的特征行为。
+     *
+     * <h3>四种出口</h3>
      * <ul>
-     *   <li><b>无会话 / 会话里没有 userId ⇒ 401</b>，响应体 = {@link AuthInterceptor#BODY_NOT_LOGGED_IN}
+     *   <li><b>识别不出身份 ⇒ 401</b>，响应体 = {@link AuthInterceptor#BODY_NOT_LOGGED_IN}
      *       （**共享常量**，与闸的 401 逐字节相同 —— 客户端分不出这个 401 是闸发的还是端点发的，
      *       这是有意的）。⚠️ 用字面量而**不是** {@code Result.fail("未登录")}：后者的键序由
      *       HashMap 桶序决定，实测得到 {@code {"msg":…,"success":…}}，字节不同。</li>
-     *   <li><b>有会话、但查不到这个业务号 ⇒ HTTP 200 + {@code {success:false,msg:"用户不存在"}}</b>。
-     *       注意这是 **200**，不是 404：会话是有效的，只是它指向的用户在库里没了。
+     *   <li><b>身份来自 cookie 会话、且 {@code role=3}（管理员）⇒ HTTP 200 +
+     *       {@code {success:true,role:3}}</b> —— <b>降级作答</b>（多账户隔离笔新增）。
+     *       管理员身份只认 token（见 {@link AuthSession#authorize}），故这种请求**拿不到资料**；
+     *       但它有权知道「你是管理员」—— {@link AuthInterceptor} 第 ④ 档放它进来就是为这一句
+     *       （{@link WebAuthConfig#AUTH_IDENTITY_PATHS}：管理员在新标签页里没有本地 token、
+     *       只有浏览器共享的 cookie 时，前端据此**退回登录页**，而不是静默当匿名）。
+     *       ⚠️ 断的是**资料**，不是**身份** —— 别为了「一张干净的响应」把这一支删掉。</li>
+     *   <li><b>有身份、但查不到这个业务号 ⇒ HTTP 200 + {@code {success:false,msg:"用户不存在"}}</b>。
+     *       注意这是 **200**，不是 404：身份是有效的，只是它指向的用户在库里没了。
      *       ⚠️ 与 {@code getUserInfo} 失败时的「200 空体」**形状不同** —— 本端点答的是**可解析**的
      *       JSON（前端若照 {@code getUserInfo} 的写法 {@code await res.json()} 不会炸）。</li>
-     *   <li><b>有会话且查得到 ⇒ HTTP 200 + {@code {success:true, …}}</b>（顶层平铺，键集 = {@code user}
-     *       表整行 + 头像 {@code image}，即 {@link UserService#getUserInfo} 的同一张 Map）。</li>
+     *   <li><b>有身份且查得到 ⇒ HTTP 200 + {@code {success:true, …}}</b>（顶层平铺，键集 = {@code user}
+     *       表整行 + 头像 {@code image} <b>+ {@code role}</b>）。⚠️ {@code role} 是这个键集里
+     *       <b>唯一不来自 DAO 行</b>的键（多账户隔离笔新增，来源是本次请求的身份，不是
+     *       {@link UserService#meInfo} 的返回）—— 前端需要它在「新标签页恢复」时判断
+     *       这份身份能不能发布成本地指针（管理员不发布）。</li>
      * </ul>
      *
-     * <p>⚠️ 用 {@link HttpServletRequest} 取会话（{@code AuthSession.currentUserId}）——
-     * 无会话的请求**不会**因为打这个端点而获得一个会话。
+     * <p>⚠️ 用 {@link HttpServletRequest} 取身份（{@link AuthSession#identify}）——
+     * 没有身份的请求**不会**因为打这个端点而获得一个会话（{@link AuthSession} 的
+     * {@code getSession(false)} 纪律）。
      */
     @PostMapping("/me")
     public ResponseEntity<Object> me(HttpServletRequest request) {
-        String userId = AuthSession.currentUserId(request);
-        if (userId == null) {
-            return ResponseEntity.status(HttpServletResponse.SC_UNAUTHORIZED)
-                    .contentType(MediaType.parseMediaType("application/json;charset=UTF-8"))
-                    .body(AuthInterceptor.BODY_NOT_LOGGED_IN);
+        AuthSession.Identity identity = AuthSession.identify(request);
+        if (identity == null) {
+            return unauthorized();
         }
 
-        Map<String, Object> userInfo = userService.meInfo(userId);
+        // 降级作答：认出「你是管理员」，但不给资料（管理员身份只认 token）—— 见上第 2 种出口。
+        if (!identity.viaToken()
+                && identity.role() != null && identity.role() == AuthSession.ROLE_ADMIN) {
+            Map<String, Object> roleOnly = new HashMap<>();
+            roleOnly.put("role", identity.role());
+            return ResponseEntity.ok(Result.ok(roleOnly));
+        }
+
+        Map<String, Object> userInfo = userService.meInfo(identity.userId());
         if (userInfo == null) {
             return ResponseEntity.ok(Result.fail("用户不存在"));
         }
-        return ResponseEntity.ok(Result.ok(userInfo));
+        // ⚠️ 先**复制**再加 role，别往 meInfo 返回的那张 Map 上直接 put：那是 DAO 行的引用
+        //    （UserService.profileOf 已经在它上面 put 过 image），原地改会污染共享行／缓存。
+        //    字节序不受影响：Result.ok 是逐条 put 进一张全新的 16 桶 Result（见 Result.of 的实测）。
+        Map<String, Object> payload = new HashMap<>(userInfo);
+        payload.put("role", identity.role());
+        return ResponseEntity.ok(Result.ok(payload));
+    }
+
+    /**
+     * 铸一张**新**的访问 token（多账户隔离笔，2026-10-06）—— 前端登录成功后立刻打它，
+     * 把票存进**本标签页**（{@code sessionStorage}），此后本标签页的请求都带
+     * {@code Authorization: Bearer <token>}。
+     *
+     * <h3>两种出口</h3>
+     * <ul>
+     *   <li><b>授权口径拿不到身份 ⇒ 401</b>（同一共享常量）。⚠️ 这一档**包含**「cookie 会话是
+     *       管理员」：管理员身份只能由 token 承载，**不能**用一张管理员 cookie 换新票
+     *       （若允许，绕一圈就得到「管理员票可无限续期」的口子）。判据用的是
+     *       {@link AuthSession#currentUserId}（**授权**口径）而**不是**识别口径 ——
+     *       两个口径在本端点的差别就是这条安全属性。</li>
+     *   <li><b>拿得到 ⇒ HTTP 200 + {@code {success:true, token:"<43 字符>"}}</b>。</li>
+     * </ul>
+     *
+     * <p>⚠️ <b>每次调用都铸新票，不回发既有 token</b>（见 {@link AuthTokenStore#mint}）：
+     * 同一身份连打两次会得到两张**都能用**的票 —— 这是刻意的，「一标签页一票」正依赖它。
+     *
+     * <p>⚠️ 本端点**不进白名单**（它要身份），也**不挂** {@link IdentityGuard}：它没有任何
+     * 「代表别人」的入参 —— 铸出来的票永远绑调用者自己（{@code userId} 来自身份，不是入参）。
+     * ⚠️ 响应体只回 {@code token}，不回 {@code role}：调用方（登录页）手里已经有
+     * {@code loginSelect} 的返回值；「当前角色」要问的话有 {@code /user/me}。
+     */
+    @PostMapping("/token")
+    public ResponseEntity<Object> token(HttpServletRequest request) {
+        String userId = AuthSession.currentUserId(request);
+        if (userId == null) {
+            return unauthorized();
+        }
+
+        Map<String, Object> payload = new HashMap<>();
+        payload.put("token", AuthTokenStore.mint(userId, AuthSession.currentRole(request)));
+        return ResponseEntity.ok(Result.ok(payload));
     }
 
     /**
      * 退出登录。**幂等**：没有会话时也答成功（⚠️ 闸开后无会话者在闸处 401 —— 见下「已知接缝」）。
+     *
+     * <p>⚠️ 多账户隔离笔（2026-10-06）后它**同时销两套凭据**（{@link AuthSession#logout}：
+     * 先销本请求带来的 token，再 {@code invalidate()} 会话），且**只销本请求那一张票** ——
+     * 替别的标签页销票等于「一个标签页登出，全家掉线」，是隔离的反面。
      *
      * <p>⚠️ <b>刻意不在白名单里</b>（{@code WebAuthConfig.AUTH_WHITELIST} 一行不动）：
      * 它不需要「未登录也能打」这条豁免 —— **有会话时**它是幂等销会话（无会话则被闸 401），而放它进白名单
@@ -226,5 +298,19 @@ public class UserController {
         Map<String, Object> payload = new HashMap<>();
         payload.put("msg", "已退出");
         return Result.ok(payload);
+    }
+
+    /**
+     * 401 出口（多账户隔离笔抽成一处 —— {@code /user/me} 与 {@code /user/token} 共用）。
+     *
+     * <p>⚠️ 响应体是 {@link AuthInterceptor#BODY_NOT_LOGGED_IN} 这个**共享常量**而不是
+     * {@code Result.fail("未登录")}：后者实测键序是 {@code msg} 在前，**字节不同**（理由写在该常量
+     * 的 javadoc 里）。⛔ 别把这里改成 {@code Result.fail} 图省事 —— 那样本端点的 401 与闸的 401
+     * 就有了两套字节，而「客户端分不出这 401 是谁发的」是刻意的契约。
+     */
+    private static ResponseEntity<Object> unauthorized() {
+        return ResponseEntity.status(HttpServletResponse.SC_UNAUTHORIZED)
+                .contentType(MediaType.parseMediaType("application/json;charset=UTF-8"))
+                .body(AuthInterceptor.BODY_NOT_LOGGED_IN);
     }
 }

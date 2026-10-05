@@ -164,10 +164,20 @@ class AuthSessionSmokeTest extends AbstractSmokeTest {
                 .andReturn();
     }
 
-    /** 造一个「已登录」的会话（客户 C-1）。 */
+    /** 造一个「已登录」的会话（客户 C-1）。角色留空（老形状）。 */
     private static MockHttpSession loggedInSession(String businessId) {
+        return loggedInSession(businessId, null);
+    }
+
+    /**
+     * 同上，但**带上角色** —— 多账户隔离笔（2026-10-06）之后才有意义：
+     * {@code /user/me} 会把角色一起答出来，而 {@code role=3} 那一档还改变它的出口形状。
+     * 判据取 {@code Integer}（不是 {@code int}）：{@code SESSION_ROLE} 可以合法地不存在。
+     */
+    private static MockHttpSession loggedInSession(String businessId, Integer role) {
         MockHttpSession session = new MockHttpSession();
         session.setAttribute(AuthInterceptor.SESSION_USER_ID, businessId);
+        session.setAttribute(AuthInterceptor.SESSION_ROLE, role);
         return session;
     }
 
@@ -194,6 +204,10 @@ class AuthSessionSmokeTest extends AbstractSmokeTest {
         assertThat(session.getAttribute(AuthInterceptor.SESSION_USER_ID))
                 .as("会话里存的必须是**业务号**（客户 = customerid），不是登录名")
                 .isEqualTo("C-1");
+        assertThat(session.getAttribute(AuthInterceptor.SESSION_ROLE))
+                .as("多账户隔离笔（2026-10-06）起会话里还要有**角色**（loginSelect 的返回值原样带入）"
+                        + "—— 它是 POST /user/token 里 role 的唯一来源")
+                .isEqualTo(1);
     }
 
     /** 商家登录（{@code role=2}）⇒ 会话里是 {@code merchantid}（同一列位的另一支）。 */
@@ -210,6 +224,9 @@ class AuthSessionSmokeTest extends AbstractSmokeTest {
         assertThat(session.getAttribute(AuthInterceptor.SESSION_USER_ID))
                 .as("会话里存的必须是**业务号**（商家 = merchantid）")
                 .isEqualTo("M-9");
+        assertThat(session.getAttribute(AuthInterceptor.SESSION_ROLE))
+                .as("同上一支：角色一并写进会话（这一支是 2）")
+                .isEqualTo(2);
     }
 
     /**
@@ -276,11 +293,13 @@ class AuthSessionSmokeTest extends AbstractSmokeTest {
     // ==================== 二、/user/me 读会话（3 条）====================
 
     /**
-     * 有会话 ⇒ 按会话返回**完整资料**，**顶层平铺**（键集 = {@code user} 表整行 + {@code image} + {@code success}）。
+     * 有会话 ⇒ 按会话返回**完整资料**，**顶层平铺**（键集 = {@code user} 表整行 + {@code image}
+     * + {@code success} + {@code role}）。
      *
      * <p>⚠️ 键必须**平铺**而不是塞进 {@code data}:前端全部按顶层键取值（见 {@code Result} 类注释），
      * 故这里逐键断言，尤其 {@code customerid} —— 前端要靠它去调商家端接口。本条**兼钉映射一致性**：
-     * {@code /user/me} 去掉 {@code Result.ok} 加的 {@code success} 后，须逐键等于 {@code /user/getUserInfo} 的响应。
+     * {@code /user/me} 去掉 {@code Result.ok} 加的 {@code success} 与身份侧加的 {@code role} 后，
+     * 须逐键等于 {@code /user/getUserInfo} 的响应。
      */
     @Test
     void me_withSession_returnsIdentityFlattened() throws Exception {
@@ -296,15 +315,20 @@ class AuthSessionSmokeTest extends AbstractSmokeTest {
         when(jdbcTemplate.query(contains("customerimage"), any(RowMapper.class), any(Object[].class)))
                 .thenReturn(List.of("avatar.png"));
 
-        MvcResult meResult = mockMvc.perform(post("/user/me").session(loggedInSession("C-1")))
+        MvcResult meResult = mockMvc.perform(post("/user/me").session(loggedInSession("C-1", 1)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.success").value(true))
                 .andExpect(jsonPath("$.customerid").value("C-1"))
                 .andExpect(jsonPath("$.username").value("smoke_user"))
                 .andExpect(jsonPath("$.usertype").value("客户"))
+                .andExpect(jsonPath("$.role").value(1))
                 .andReturn();
         // ⚠️ P2.6 映射一致性（本条的第二个钉子）：同一用户下 /user/me 去掉 Result.ok 补的 success 后，
         //    必须**逐键等于** /user/getUserInfo 的响应 —— 这正是三个前端调用点「只换地址、不改模板」的依据。
+        //    ⚠️ 多账户隔离笔后 `role` 是 /user/me **独有**的键（loginSelect 的返回值，不是 DAO 行的列）
+        //    ⇒ 逐键比较前必须连同 success 一起摘掉这两个「信封键」。摘的是**本笔明知多出来的**键，
+        //    不是「比不过就删」—— 若哪天 DAO 行里真长出 role 列，这条会因 getUserInfo 侧也有它而继续绿，
+        //    故另有一条 jsonPath($.role) 在前面钉值。
         String me = meResult.getResponse().getContentAsString();
         assertThat(me).as("两跳的第二跳必须走通（image 来自 userDao.selectCustomerImage）").contains("avatar.png");
         String cred = mockMvc.perform(post("/user/getUserInfo")
@@ -313,7 +337,8 @@ class AuthSessionSmokeTest extends AbstractSmokeTest {
         ObjectMapper mapper = new ObjectMapper();
         Map<String, Object> mePayload = mapper.readValue(me, Map.class);
         mePayload.remove("success");
-        assertThat(mePayload).as("/user/me 去 success 必须逐键等于 /user/getUserInfo 的响应")
+        mePayload.remove("role");
+        assertThat(mePayload).as("/user/me 去 success 与 role 后必须逐键等于 /user/getUserInfo 的响应")
                 .isEqualTo(mapper.readValue(cred, Map.class));
     }
 

@@ -96,7 +96,7 @@
 <script>
 import { http } from '../api/http'
 import { endpoints } from '../api/endpoints'
-import { setMerchantId, setCustomerId, setUsername, setRole } from '../api/auth'
+import { setMerchantId, setCustomerId, setUsername, setRole, setToken, publishSharedToken } from '../api/auth'
 export default {
   name: "LoginPage",
   data() {
@@ -155,11 +155,11 @@ export default {
         if(role === "0"){
           this.loginWarnText = "未找到该用户，请查看对应账号密码有无写错，或者前往右侧进行注册";
         }else if(role === "1"){
-          setUsername(this.loginAccount); setRole(role);   // ⚠️ 止血笔：同行追加，保持净零行数（防 `api-contract.md:172` 引的 `:216` 漂移）；P2.6 起 setCredentials → setUsername（不再传密码）
+          setUsername(this.loginAccount); setRole(role); await this.mintToken(role);   // ⚠️ 止血笔：同行追加，保持净零行数（防 `api-contract.md:172` 引的 `:216` 漂移）；P2.6 起 setCredentials → setUsername；多账户隔离笔（2026-10-06）再加铸票（见 mintToken）
           this.$router.push("/customer");
         }
         else if(role === "2"){
-          setUsername(this.loginAccount); setRole(role);   // ⚠️ 止血笔：同行追加，保持净零行数（防 `api-contract.md:172` 引的 `:216` 漂移）；P2.6 起 setCredentials → setUsername（不再传密码）
+          setUsername(this.loginAccount); setRole(role); await this.mintToken(role);   // ⚠️ 止血笔：同行追加，保持净零行数（防 `api-contract.md:172` 引的 `:216` 漂移）；P2.6 起 setCredentials → setUsername；多账户隔离笔（2026-10-06）再加铸票（见 mintToken）
           this.$router.push("/merchant");
         }
       } catch (e) {
@@ -225,6 +225,30 @@ export default {
       } catch (e) {
         alert("网络异常");
       }
+    },
+
+    // ── 多账户隔离笔（2026-10-06）：登录成功后铸一张**本标签页专属**的访问票 ──────────
+    // 位置：只在 `role === "1" / "2"` 两个分支里被调用（**与 setRole 同行**追加，为的是保住本文件的净零行数）。
+    //   ⚠️ role === "0"（登录失败）**不能**调它：那时没有会话 ⇒ `/user/token` 必 401。
+    //   ⚠️ 这一发请求**必然带 cookie 会话**（上一发 `loginSelect` 刚建的）⇒ 后端按**授权口径**认出身份、
+    //      把 userId / role 写进票。这正是「票绑 userId 不绑会话」能成立的前提（见 `auth.js` 末尾那节）。
+    // 票的两个去向：
+    //   · `setToken`      —— 本标签页的 `sessionStorage`（此后所有请求都由 `http.js` 自动带上）；
+    //   · `publishSharedToken` —— `localStorage` 的「最近登录」指针，**让新标签页能认领一张票**。
+    //     ⚠️ **只有 role ≠ 3 才发布**（用户裁决 D6）。本笔的登录路径只会是 "1"/"2"（管理员没有登录入口
+    //        —— 归 C3 笔），判据仍先立在 `role !== "3"` 上，免得将来加管理员入口时**静默**发布出去。
+    // ⚠️ **fail-open**：铸票失败**不阻断登录** —— 没票时这一页照旧靠 cookie 认身份（与改前同形），
+    //    弹一条错误只会把「登录成功」变成一次报错。故这里**吞掉**异常，也不让 401 出口接管
+    //    （`allowUnauthorized: true`：真 401 时静默收场，不跳转 —— 我们正要去 /customer）。
+    async mintToken(role) {
+      try {
+        const res = await http.post(endpoints.user.token, null, { allowUnauthorized: true });
+        const data = await res.json();
+        if (data && data.token) {
+          setToken(data.token);
+          if (String(role) !== "3") publishSharedToken(data.token);
+        }
+      } catch (e) { /* fail-open：见上 */ }
     },
     goToLogin() {
       this.showSuccess = false;

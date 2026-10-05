@@ -179,7 +179,11 @@ class AuthGateSwitchOnTest extends AbstractSmokeTest {
                 .as("白名单条数 = 业务 8 + 基础设施 4。改这个数必须同时改 WebAuthConfig 的注释")
                 .hasSize(12);
 
-        AuthInterceptor gate = new AuthInterceptor(true, WebAuthConfig.AUTH_WHITELIST);
+        // ⚠️ 多账户隔离笔（2026-10-06）：构造参数由 2 个变 3 个（第 ④ 档 identityPaths）。
+        //    传真表而不是 List.of() —— 反断言那半段（REACHABLE_BUT_NOT_PUBLIC 必须被拦）正是靠
+        //    「表里没有它们」才成立，喂个空表会把那半段变成空命题。
+        AuthInterceptor gate = new AuthInterceptor(
+                true, WebAuthConfig.AUTH_WHITELIST, WebAuthConfig.AUTH_IDENTITY_PATHS);
 
         for (String path : WebAuthConfig.AUTH_WHITELIST) {
             MockHttpServletResponse response = new MockHttpServletResponse();

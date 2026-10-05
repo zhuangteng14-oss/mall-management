@@ -2,7 +2,6 @@ package com.minke.mallmanagement.shared.web;
 
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
-import jakarta.servlet.http.HttpSession;
 import org.springframework.util.AntPathMatcher;
 import org.springframework.web.servlet.HandlerInterceptor;
 
@@ -12,15 +11,23 @@ import java.util.List;
 /**
  * 登录闸（鉴权笔 **1**）—— <b>只判「放不放行」，不做认证本身</b>。
  *
- * <h2>【它判三件事，顺序固定】</h2>
+ * <h2>【它判四件事，顺序固定】</h2>
  * <ol>
  *   <li><b>总开关</b>（{@code app.auth.enabled}）—— 关着就 {@code return true}，全部放行。
  *       默认**关**，故本笔对现有行为**零影响**。</li>
  *   <li><b>白名单</b>（{@link WebAuthConfig#AUTH_WHITELIST}，唯一出处）—— 命中即放行。
  *       判据是<b>路径</b>（{@code AntPathMatcher}），与 HTTP 方法无关。</li>
- *   <li><b>会话</b>—— 存在服务端会话**且**会话里带 {@link #SESSION_USER_ID} 才算已登录。</li>
+ *   <li><b>凭据</b>（**授权**口径，{@link AuthSession#authorize}）—— token（{@code Authorization:
+ *       Bearer}）优先；无 token 时看服务端会话，且会话里要带 {@link #SESSION_USER_ID}。
+ *       ⚠️ {@code role=3}（管理员）的 cookie 在**这一档就被折成未登录** —— 管理员身份只能由
+ *       token 承载，理由见 {@link AuthSession#authorize}。</li>
+ *   <li><b>身份识别例外</b>（{@link WebAuthConfig#AUTH_IDENTITY_PATHS}，今日只有 {@code /user/me}）
+ *       —— 第 ③ 档不通过、但**识别**口径（{@link AuthSession#identify}）拿得到身份时放行。
+ *       目的是让前端能问出「你是管理员，但需要显式登录」并据此**退回登录页**，而不是静默当匿名。
+ *       ⚠️ 这条例外**只放宽「说出你是谁」**：端点必须自行降级作答（{@code /user/me} 对
+ *       cookie 来的 {@code role=3} 只回 {@code role}、不回资料），业务端点仍走 ③ 的 401。</li>
  * </ol>
- * 三条都不通过 ⇒ 写 401 + {@code {"success":false,"msg":"未登录"}} 并 {@code return false}，
+ * 四档都不通过 ⇒ 写 401 + {@code {"success":false,"msg":"未登录"}} 并 {@code return false}，
  * **请求不进 Controller**。
  *
  * <h2>【为什么「有会话」不等于「已登录」—— 这是本类最容易被放宽的一处】</h2>
@@ -31,10 +38,12 @@ import java.util.List;
  * ——该要求已于 2026-10-04（笔 2）落地：写入方是 {@link AuthSession}，它只引用本常量。
  *
  * <h2>【为什么本类不是 {@code @Component}】</h2>
- * 由 {@link WebAuthConfig} 显式 {@code new} 出来（开关与白名单都是构造参数）。两个好处：
+ * 由 {@link WebAuthConfig} 显式 {@code new} 出来（开关与两张表都是构造参数）。两个好处：
  * ① 白名单只有一处出处（配置类里的常量），不存在「注解里一份、代码里一份」的双写；
  * ② 本类**无需 Spring 上下文即可单测** —— 见 {@code AuthGateSmokeTest} 的白名单全表扫描用例
  * （{@code /health/db} 在 smoke profile 下无 handler，走 MockMvc 扫不到它，只能直调）。
+ * ⚠️ 2026-10-06（多账户隔离笔）：构造参数从 2 个变 3 个（多 {@code identityPaths}）⇒
+ * 调用点共 2 处，改动清单见 {@code progress.md §5-AF}。
  *
  * <h2>【为什么 401 响应体是字面量，而不是 {@code Result.fail("未登录")}】</h2>
  * {@link Result} 继承 {@code HashMap}，键序由 hash 桶决定 ⇒ 序列化出来可能是
@@ -66,6 +75,22 @@ public class AuthInterceptor implements HandlerInterceptor {
     public static final String SESSION_USER_ID = "userId";
 
     /**
+     * 会话里标记**角色**的属性名（1 = 客户 / 2 = 商家 / 3 = 管理员）。
+     *
+     * <p>⚠️ <b>2026-10-06（多账户隔离笔）新增 —— 这是对 {@link AuthSession} 类注释里
+     * 「不存角色」的**有意破**，不是误改</b>。消费者有两个，缺任一个这条就白加：
+     * <ol>
+     *   <li>{@code POST /user/token} 要往 token 记录里写 {@code role}，而 {@code role} 的唯一来源是
+     *       登录时 {@code login} 表的 {@code Role} 列 —— 会话是它此刻唯一的载体；</li>
+     *   <li>{@link AuthSession#authorize} 的「cookie 回落对 {@code role=3} 不授权」这条判据
+     *       本身就要读它（否则只能每次请求回查 {@code login} 表）。</li>
+     * </ol>
+     * ⚠️ 与 {@link #SESSION_USER_ID} 同一写入方（{@link AuthSession#login}）、同一读取方
+     * （{@link AuthSession}）—— 别在第二处抄 {@code "role"} 字面量。
+     */
+    public static final String SESSION_ROLE = "role";
+
+    /**
      * 401 响应体（逐字节固定）。键序 {@code success} → {@code msg}，与
      * {@link Result#fail(String)} 的写入序一致，但**不依赖** HashMap 的桶序来维持。
      *
@@ -89,9 +114,13 @@ public class AuthInterceptor implements HandlerInterceptor {
     /** 白名单（排除表）。副本，避免外部持有者事后改动而绕过闸。 */
     private final List<String> whitelist;
 
-    public AuthInterceptor(boolean enabled, List<String> whitelist) {
+    /** 身份识别例外表（第 ④ 档）。同样取副本，理由同上。 */
+    private final List<String> identityPaths;
+
+    public AuthInterceptor(boolean enabled, List<String> whitelist, List<String> identityPaths) {
         this.enabled = enabled;
         this.whitelist = List.copyOf(whitelist);
+        this.identityPaths = List.copyOf(identityPaths);
     }
 
     /** 总开关当前取值。仅供测试与启动期自检读取，不参与判定。 */
@@ -109,15 +138,23 @@ public class AuthInterceptor implements HandlerInterceptor {
 
         // ② 白名单。⚠️ 用 URI 减去 context-path，而不是 getServletPath() —— 后者在
         //    「按后缀/路径匹配」的配置下会被改写过，而排除表按完整业务路径书写。
+        //    ⚠️ uri 在第 ④ 档还要用，故在这里就先算出来（不是为 ② 一个人算的）。
         String uri = request.getRequestURI().substring(request.getContextPath().length());
         if (isWhitelisted(uri)) {
             return true;
         }
 
-        // ③ 会话。getSession(false)：**不存在就不创建** —— 否则本闸本身会给每个匿名请求
-        //    发一个会话，「有会话」这条判据立刻失去意义（见类注释）。
-        HttpSession session = request.getSession(false);
-        if (session != null && session.getAttribute(SESSION_USER_ID) != null) {
+        // ③ 凭据（**授权**口径）。Token 优先；无 token 时看 cookie 会话，但 role=3 的 cookie
+        //    在这一档就被折成未登录 —— 管理员身份只能由 token 承载（理由见 AuthSession.authorize）。
+        //    ⚠️ 判据只有 AuthSession 一处：本闸不再自己 getSession()/读属性（那是本笔之前的写法），
+        //    否则「闸认的会话」与「端点认的会话」会成为两处可能分歧的判据。
+        if (AuthSession.authorize(request) != null) {
+            return true;
+        }
+
+        // ④ 身份识别例外：授权口径不通过，但识别口径拿得到身份时放行 —— 只对 /user/me 那条路径
+        //    （见类注释第 ④ 条与 WebAuthConfig.AUTH_IDENTITY_PATHS）。
+        if (isIdentityPath(uri) && AuthSession.identify(request) != null) {
             return true;
         }
 
@@ -134,6 +171,22 @@ public class AuthInterceptor implements HandlerInterceptor {
             return false;
         }
         for (String pattern : whitelist) {
+            if (MATCHER.match(pattern, uri)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * 路径是否命中「身份识别例外」表（第 ④ 档）。与 {@link #isWhitelisted} 同一手法、同一可见性 ——
+     * 供测试直接调用（那几条用例要逐条钉「例外只放宽识别、不放宽业务」）。
+     */
+    boolean isIdentityPath(String uri) {
+        if (uri == null) {
+            return false;
+        }
+        for (String pattern : identityPaths) {
             if (MATCHER.match(pattern, uri)) {
                 return true;
             }

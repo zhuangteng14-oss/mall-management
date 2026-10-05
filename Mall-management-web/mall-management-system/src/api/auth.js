@@ -10,15 +10,15 @@
 //     SEARCH_KEYWORD 6 / SEARCH_RESULTS 5 / PENDING_SEARCH_KEYWORD 5 / FROM_PAGE 1
 //   —— 这条线要守住，否则本模块会变成杂物箱（见方案 §4）。
 //
-// ⚠️ 本模块当前**仍按原样读写 sessionStorage，行为与改前完全一致**。
-//    P2.6（安全债）**已落地（2026-10-05）** —— 密码半边退场、`/user/me` 成为前端唯一资料读口。
+// ⚠️ 本模块**原有 4 个身份键**的读写仍与改前逐字等价（`pick` 的兜底就是原来的 `read`）。
+//    P2.6（2026-10-05）密码半边退场；多账户隔离笔（2026-10-06）**另加**一个存储键 `authToken`（见文件末尾）。
 
 const K = {
   username: 'loginUsername',
   // `K.password` 的那个存储键名已随 P2.6（2026-10-05）删除：明文密码不再进任何存储（墓碑见下方 getPassword 原位置）
   merchantId: 'merchantid',
   customerId: 'customerid',
-  role: 'role',   // ⚠️ 止血笔新增：`loginSelect` 的 role（"1" 客户 / "2" 商家）。基线时该值只活在 `LoginPage` 的分支里、不入存储
+  role: 'role', token: 'authToken',   // ⚠️ 两个键**合并写在同一行**是为了保住本文件的净零行数（`:44`/`:98-103`/`:108`/`:118`/`:146` 全被文档按行号引）。`role`：止血笔新增（`loginSelect` 的 "1" 客户 / "2" 商家；基线时该值只活在 `LoginPage` 的分支里、不入存储）。`authToken`：多账户隔离笔（2026-10-06）新增 —— **同一个键名用在两个 store**（sessionStorage = 本页的票；localStorage = 「最近登录」指针），读写全在文件末尾那一节
 }
 
 function read(k) { return sessionStorage.getItem(k) }
@@ -61,21 +61,20 @@ function dropRestored() { restored = null }
  *
  * ⚠️ 字段判据与 `LoginPage.vue:148-153` **逐字对齐**（`if (x)` 只写真值，不加额外过滤）——
  *    加过滤就是改行为。
- * ⚠️ **P2.6（2026-10-05）后本段只剩历史意义**：`/user/me` 现在答的是 **`user` 表整行 + 头像
- *    `image`**（不再只是那 5 列），且 `GoodsUp.vue` / `UserInfoPage.vue` 已改走 `/user/me`、
- *    **不再需要密码** ⇒ 原先「密码恢复不了 ⇒ 这两页在新标签页不可用」的缺口**已消失**。
- *    本函数仍只取 username / merchantId / customerId 三个身份字段（**行为零变更**）。
- * ⚠️ 三个字段全空 ⇒ **不置** `restored`（保持 `null`），读口继续走存储兜底。
- * @param {object|null} info `/user/me` 的 JSON body（`{success, customerid, merchantid, username, ...}`）
+ * ⚠️ **P2.6（2026-10-05）后本段只剩历史意义**：`/user/me` 现在答 **`user` 表整行 + 头像 `image`**
+ *    （不再只是那 5 列），且 `GoodsUp.vue` / `UserInfoPage.vue` 已改走 `/user/me`（**不再需要密码**）⇒ 原缺口**已消失**。
+ * ⚠️ 多账户隔离笔（2026-10-06）**多贴一个 `role`**（`/user/me` 自本笔起答它，见那个读口的注释）：其余三字段**零变更**。
+ * ⚠️ **四个字段全空** ⇒ **不置** `restored`（保持 `null`），读口继续走存储兜底。
+ * @param {object|null} info `/user/me` 的 JSON body（`{success, customerid, merchantid, username, role, ...}`）
  * @returns {boolean} 是否贴上了**至少一个**身份字段
  */
 export function restoreFromSession(info) {
   if (!info) return false
-  const next = { username: null, merchantId: null, customerId: null }
-  if (info.username) next.username = info.username
-  if (info.merchantid) next.merchantId = info.merchantid
+  const next = { username: null, merchantId: null, customerId: null, role: null }
+  if (info.username) next.username = info.username; if (info.merchantid) next.merchantId = info.merchantid
   if (info.customerid) next.customerId = info.customerid
-  if (!next.username && !next.merchantId && !next.customerId) return false
+  if (info.role) next.role = info.role   // ⚠️ 与上面三个同行压缩是**故意的**：保住 `:108`/`:118`/`:146` 的行号
+  if (!next.username && !next.merchantId && !next.customerId && !next.role) return false
   restored = next
   return true
 }
@@ -96,13 +95,12 @@ export function getMerchantId() { return pick('merchantId', K.merchantId) }
 
 export function getCustomerId() { return pick('customerId', K.customerId) }
 
-/** 角色 —— `loginSelect` 的 `role`（"1" 客户 / "2" 商家）。**止血笔新增**。
- *  ⚠️ **不接恢复态**（P2.6 起 `/user/me` 答 `user` 表整行 —— 含 `usertype` 中文串「客户/商家」，但 `role` 在 `login` 表 ⇒ **不含** `role`）
- *     ⇒ 新标签页恢复时本口返回 **`null`**，调用方（`router/index.js` 的首页守卫）**必须自己兜底**
- *     （现兜底 = `getMerchantId()`，与 `ProductPage.vue:381` 同口径）。**本笔刻意不从 `usertype` 反推**
- *     —— 那会让 `role` 有第二个来源（口径分叉）。C3 加管理员时若要从恢复路径拿到 role，
- *     须把 `role` 加进 `/user/me` 投影（登记于 §5-V）。
- *  ⚠️ `pick` 仍照用（恢复值优先、存储兜底）⇒ 将来若 `/user/me` 真返回了 `role`，本口**一行不用改**。 */
+/** 角色 —— `loginSelect` 的 `role`（"1" 客户 / "2" 商家 / "3" 管理员）。**止血笔新增**。
+ *  ⚠️ 多账户隔离笔（2026-10-06）**订正**：`/user/me` 自本笔起**答 `role`**（它不是 `user` 表的 5 列之一，
+ *     而是本次请求的身份 —— 见 `UserController.me`）⇒ 恢复态**拿得到**角色，本口在恢复路径上不再必然为 `null`。
+ *     调用方（`router/index.js` 的首页守卫）的 `getMerchantId()` 兜底**仍留着**：匿名、或没走成恢复
+ *     （超时 / 后端不可达）时它仍是唯一出路。**本笔仍不从 `usertype` 反推**（那会让 `role` 有第二个来源）。
+ *  ⚠️ `pick` 照用（恢复值优先、存储兜底）—— 正因如此，`/user/me` 一答 `role`，本口**一行都不用改**。 */
 export function getRole() { return pick('role', K.role) }
 
 /** 是否已登录 —— 原**唯一**定义在 `HomePage.vue:116`（`!!loginUsername || !!merchantid`）。
@@ -191,12 +189,63 @@ export function clear() {
   clearCredentials()
   clearMerchantId()
   sessionStorage.removeItem(K.customerId)
+  clearToken()   // ⚠️ 多账户隔离笔（2026-10-06）：票也是凭据 ⇒ 「会话没了」时一并清（指针由 D6 判）
   dropRestored()
 }
 
-// ── ⚠️ 以下两处待鉴权笔填充（方案 §4 ③）：本笔为空实现 ──────────────────────────
-// BD-03 选 A（拦截器 + Redis Session）⇒ 这两个保持空（凭据走 Cookie，无需前端持有）。
-// BD-03 选 B/C（JWT）⇒ 在此实现 token 读写 ——「token 存哪」即 P2.6 的同一道题
-//   （localStorage 会被 XSS 读；httpOnly Cookie 则又回到 A 的形状）。
-export function getToken() { return null }
-export function setToken(/* token */) {}
+// ── token 读写（多账户隔离笔，2026-10-06）────────────────────────────────────────
+// 形状 = 「BD-03 的 **A 的显式传输变体**」：票由服务端签发（`POST /user/token`）、前端显式携带
+// （`Authorization: Bearer`，加头那一行在 `http.js` 的 `buildInit`）—— 不是 JWT、也不是 httpOnly
+// Cookie。⚠️ 别写成「改判 B」：B/C 那种「前端自己造凭据」的路一条都没走（见 §5-AF 的裁决口径）。
+//
+// 两个存储位 —— **同一个键名 `K.token`、两个 store，别混**：
+//   · `sessionStorage[K.token]` —— **本标签页**的票。隔离全靠它：sessionStorage 按标签页存活
+//     ⇒ 两个标签页各自登录、各持一张票，互不覆盖（而 cookie 会被后登录那个覆盖 —— 那正是要治的病）；
+//   · `localStorage[K.token]`   —— 「**最近登录**」指针（`role ≠ 3` 时才写）。新标签页的
+//     sessionStorage 是空的 ⇒ 靠它「认领」（`main.js` 启动时调 `adoptSharedToken`）。
+//     ⚠️ 它是**指针、不是凭据来源**：认领之后仍要用 `/user/me` 验一发（票可能已被撤销或过期）。
+//
+// ⚠️ **为什么不用 httpOnly Cookie 装票**：那样票由浏览器自动携带 ⇒ 又回到「谁有 cookie 谁是身份」，
+//    「一标签页一身份」当场落空。代价照实记：**XSS 可读走本存储**（P2.6 的同一条线，登记于 §5-AF）。
+// ⚠️ **管理员（role=3）永不发布指针**（用户裁决 D6）：管理员身份只能由 token 承载，留一个共享指针
+//    等于把「新标签页自动获得管理员身份」这条路焊回来。
+
+/** 本标签页的票（没有 ⇒ `null`）。
+ *  ⚠️ **只读 `sessionStorage`** —— 指针的「认领」是 `main.js` **显式**做的一步，不藏在这里：
+ *  读口保持「读到的一定是本页自己的票」这条语义，否则隔离会从读口漏掉（跨标签页串味）。 */
+export function getToken() { return usable(read(K.token)) }
+
+/** 写本标签页的票。
+ *  ⚠️ **刻意不 `dropRestored()`** —— 它与上面那 7 个身份写口不同：票**不是身份**
+ *  （本模块的身份读口只读 `restored` / 身份键，票里虽有 userId/role 但一个读口都不碰它）。
+ *  真正可能连坐的调用点（登录 / cookie 恢复）在写票的前后本来就会走身份写口。 */
+export function setToken(token) { sessionStorage.setItem(K.token, token) }
+
+/** 「最近登录」指针（`localStorage`；没有 ⇒ `null`）。 */
+export function getSharedToken() { return usable(localStorage.getItem(K.token)) }
+
+/** 发布指针 —— **只在 `role ≠ 3` 时调用**（两个调用点：`LoginPage.vue` 登录成功后 /
+ *  `main.js` 的 cookie 恢复补票）。 */
+export function publishSharedToken(token) { localStorage.setItem(K.token, token) }
+
+/** 清本标签页的票。⚠️ **D6 规则**：只有当「指针 == 本页这张票」时才**一并清指针** ——
+ *  `localStorage` 是共享的，A 页登出不该把 B 页刚发布的指针抹掉（那会让 B 页刷新后失去恢复能力）。
+ *  ⚠️ 本函数**不**清身份键（那是 `clearCredentials` / `clearMerchantId` 的活）；401 出口的
+ *  `clear()` 两者都调 —— 那是「会话没了」的语义，比「点退出」清得多，见 `clear()` 的注释。 */
+export function clearToken() {
+  const mine = getToken()
+  sessionStorage.removeItem(K.token)
+  if (mine && mine === getSharedToken()) localStorage.removeItem(K.token)
+}
+
+/** 认领指针（`main.js` 启动时、且**本标签页没有票**时调一次）：把共享指针搬进本页。
+ *  @returns {boolean} 是否认领到（供排查/测试）。
+ *  ⚠️ **不在此处验票**：认领之后 `main.js` 照常打 `/user/me`，带的就是这张票；票若已废，
+ *  那一发会 401 ⇒ 由 `restoreIdentity` 的 catch 丢掉它（`clearToken`）。 */
+export function adoptSharedToken() {
+  if (getToken()) return false
+  const shared = getSharedToken()
+  if (!shared) return false
+  setToken(shared)
+  return true
+}
