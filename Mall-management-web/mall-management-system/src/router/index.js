@@ -1,6 +1,5 @@
 import { createRouter, createWebHashHistory } from 'vue-router'
 import { isLoggedIn, getRole, getMerchantId } from '../api/auth'
-import HomePage from '../views/HomePage.vue'
 import LoginPage from '../views/LoginPage.vue'
 import CustomerPage from '../views/CustomerPage.vue'
 import MerchantPage from '../views/MerchantPage.vue'
@@ -28,8 +27,9 @@ import GoodsUp from '../views/GoodsUp.vue'
 //
 // ── R2（2026-10-05）：`/merchant` 照同一模板改造（用户裁决：镜像 R1）───────────────
 // 6 条子路由（home / search / msg / order / order/cart / user），`MerchantPage` 只留顶栏 + `<router-view>`。
-// ⚠️ 两壳的顶栏**唯一**差异 = 右起第 2 项（客户「购物车」⇄ 商家「订单中心」）—— 顶栏项已抽到
-//    `src/config/nav.js`，为 R6 抽 `AppShell` 铺路（用户裁决 6）。
+// ⚠️ 两壳的顶栏差异**只有两处**：左项「商城主页」的 `to`（各指自己的壳）+ 右起第 2 项（客户「购物车」⇄ 商家「订单中心」）—— 顶栏项已抽到 `src/config/nav.js`，为 R6 铺路（用户裁决 6）。
+// ── R3（2026-10-05）：`/` 由「**裸挂 `HomePage` 的页面**」改为「**一条落点 redirect**」（R1/R2 都没碰、留给 R3 的收口）
+//    为什么进客户壳 / 未登录怎么办 / 守卫为何搬走 ⇒ 见尾部 `landingFor` 上方的整段注释。
 //
 // ⚠️ `meta` 各键的分工（**壳与页都读它**，别随手删）：
 //   `tab`      —— 顶栏高亮（壳里的 `:class="{ active: route.meta.tab === item.tab }"`）。
@@ -49,7 +49,7 @@ import GoodsUp from '../views/GoodsUp.vue'
 //    `/…/user` 是「用户中心默认页」的短地址，`/…/user/info` 是显式地址。
 //    不设 `redirect` 是为了不依赖「有 children 的记录能不能同时挂 redirect」这一细节。两壳同法。
 const routes = [
-  { path: '/', component: HomePage },
+  { path: '/', redirect: landingFor },   // R3：不再是页面，只是落点（`landingFor` 在文件尾部 —— 函数声明提升，可先用后定义）
   { path: '/login', component: LoginPage },
   {
     path: '/customer',
@@ -170,32 +170,33 @@ router.beforeEach((to) => {
   return true                              // 无 `page`、无 `back` ⇒ 原样（`/…` 本就是首页）
 })
 
-// ── 首页落点守卫（止血笔，2026-10-05）────────────────────────────────────────────
-// 治的病：`#/` 裸挂 `HomePage`（**无外壳** ⇒ 无导航栏）。未登录时还有 `.login-hint-bar` 引导登录，
-//   已登录时提示条不渲染、三条守卫也不触发 ⇒ **卡在裸首页**（会话恢复笔把这个状态从
-//   「不可见」变成「可见」，见 progress.md §5-U / §5-V；未登录的整页锁已于 §5-W 改为提示条）。
+// ── 首页落点（R3 起是一条 redirect；前身是止血笔加的那条守卫，2026-10-05）──────────────
+// 治的病：`/` 曾裸挂 `HomePage`（**无外壳** ⇒ 无导航栏）；未登录有 `.login-hint-bar` 引导，已登录
+//   则提示条不渲染、三条守卫也不触发 ⇒ **卡在裸首页**（§5-U / §5-V；§5-W 把整页锁改成提示条）。
+// ⚠️ **R3 把「跳哪」从 `beforeEach` 搬到记录上的 `redirect`** —— 语义不变、位置更惯用；唯一的行为
+//   变更是**未登录不再停在 `/`，而是落 `/customer`**（匿名本来就进得了壳：`/customer` 子树无守卫）
+//   ⇒ 「`/` 裸挂首页」这个事实**在 R3 终结**（R1/R2 只动各自壳的子树）。逐条见 progress.md §5-Z。
 //
-// ⚠️ **时序耦合（本守卫正确性的唯一前提，别挪）**：本守卫读的是 `auth.js` 的**恢复态**，
-//    `main.js` 的顺序是 `await restoreIdentity()` ⇒ `app.use(router)`（初始导航由此触发）。
-//    本文件在 `main.js` 顶部被 import ⇒ 守卫在此**模块加载时**注册，必然早于 `app.use(router)`。
-//    若将来有人把恢复挪到 `app.use(router)` **之后**，守卫会读到「匿名」⇒ 不重定向 ⇒
-//    首页再度卡死（**不报错、不崩**，最难查）。改那行之前先看这段。
+// ⚠️ **时序耦合（本函数正确性的唯一前提，别挪）**：`landingFor` 读的是 `auth.js` 的**恢复态**；
+//    `main.js` 的顺序是 `await restoreIdentity()` ⇒ `app.use(router)`（初始导航由此触发，
+//    redirect 也在这一步求值）。若有人把恢复挪到 `app.use(router)` **之后**，`landingFor` 会读到
+//    「匿名」⇒ 已登录也被送进客户壳（**不报错、不崩**，最难查）。改那行之前先看这段。
 //
 // ⚠️ 「仅首次」不需要额外标志位：全仓**没有任何代码 `router.push('/')`**（两壳顶栏「商城主页」自
-//    R1/R2 起都是指向自己壳主页的 `<router-link>` —— **是路由跳转，但目标不是 `/`**）
-//    ⇒ 本守卫实际只在「应用入口」那一次 + 「手敲 `#/`」时触发。手敲也被送回 = 有意的（那正是卡死态）。
+//    R1/R2 起都是指向自己壳主页的 `<router-link>` —— **是路由跳转，但目标不是 `/`**）⇒ 本 redirect
+//    实际只在「应用入口」那一次 + 「手敲 `#/`」时触发（手敲也被送出 = 有意的）。
+//    ⚠️ 代价：`#/?a=b` 的 query 会被丢（redirect 不带 query）—— 实测无生产者，只有手敲会产生。
 //
 // ⚠️ `ROLE_HOME` 是**唯一**的角色→落地页映射表。C3 加管理员：**只在本表加一行**
 //    `'3': '/admin'`（另需后端把 `role` 加进 `/user/me` 投影 + 前端加 `#/admin` 路由，见 §5-V）。
 const ROLE_HOME = { '1': '/customer', '2': '/merchant' }
 
-router.beforeEach((to) => {
-  if (to.path !== '/') return true      // 只守根路径，其余一律放行
-  if (!isLoggedIn()) return true        // 未登录 ⇒ 停在公开落地页（锁引导保留，不回归）
-  // 已登录：role 优先，`getMerchantId()` 兜底。
-  // ⚠️ 兜底**不是**边角：新标签页恢复时 `getRole()` 拿不到（`/user/me` 不含 `role`）⇒ 走兜底是常态。
-  //    兜底必须能区分商家（硬回 `/customer` 会把新标签页的商家送错页）。
+/** `/` 的落点：未登录 ⇒ 客户壳；已登录 ⇒ 角色首页（role 优先、`getMerchantId()` 兜底 ——
+ *  兜底**不是**边角：新标签页恢复时 `getRole()` 拿不到（`/user/me` 不含 `role`）⇒ 走兜底是常态；
+ *  且它必须能区分商家，硬回 `/customer` 会把新标签页的商家送错页）。 */
+function landingFor() {
+  if (!isLoggedIn()) return '/customer'   // ← R3 的行为变更点（原：`return true`，停在裸页）
   return ROLE_HOME[getRole()] || (getMerchantId() ? '/merchant' : '/customer')
-})
+}
 
 export default router
