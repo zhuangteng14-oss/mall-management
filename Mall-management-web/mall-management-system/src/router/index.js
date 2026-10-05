@@ -41,7 +41,7 @@ const routes = [
       { path: '', component: HomeTab, meta: { tab: 'home', layout: 'home-container' } },
       { path: 'search', component: GoodsSelect, meta: { layout: 'page' } },
       { path: 'msg', component: ChatRoom, meta: { tab: 'msg', layout: 'page' } },
-      { path: 'cart', component: ShoppingCart, meta: { tab: 'cart', layout: 'cart-container' } },
+      { path: 'cart', component: ShoppingCart, props: { showSwitch: false }, meta: { tab: 'cart', layout: 'cart-container' } },   // ← ⚠️ **必须**传 false：R1 前客户壳是 `<ShoppingCart :showSwitch="false" />`，R1 落码时丢了 ⇒ 该页凭空多出 📋/🛒 开关（且无人监听 = 死控件）。`fix/legacy-chat-tab` 修（见 progress.md §5-X (16)2）
       {
         path: 'user',
         component: UserCenter,
@@ -76,9 +76,9 @@ const router = createRouter({
 //   ② `MerchantPage.vue` R2 才改（它推 `/merchant?page=order` —— 本守卫**不认 `/merchant`**）；
 //   ③ 书签 / 浏览器历史 / 手敲 URL 本来就不受代码控制。
 // 取舍：认出的 `page` 换成路径并**带走其余 query**（`otherId` / `otherType` / `_t` 是 `ChatRoom.vue`
-//   读的会话参数，丢了就打不开对应聊天）；认不出的 `page` 归位首页（顺带丢掉脏参数）；
+//   读的会话参数，丢了就打不开对应聊天）；⚠️ **`chat` 与 `msg` 两个键都要收** —— `chat` 才是**生产者实际推的**键（`FriendRoom.vue:246`、`ProductPage.vue:447`），`msg` 是 R1 前的历史键（旧 watcher 认它、且手敲 URL 也算）；R1 落码时误写成只收 `msg` ⇒ 「咨询商品 / 好友点聊天」两条客户流程落回主页并丢会话参数，`fix/legacy-chat-tab` 加回（见 progress.md §5-X (16)1）。认不出的 `page` 归位首页（顺带丢掉脏参数）；
 //   `back=search` 换成搜索页**且保留 `back`**（`GoodsSelect.vue:158` 仍靠它触发 `loadState()`）。
-const LEGACY_TAB = { cart: '/customer/cart', user: '/customer/user', msg: '/customer/msg' }
+const LEGACY_TAB = { cart: '/customer/cart', user: '/customer/user', msg: '/customer/msg', chat: '/customer/msg' }   // ⚠️ `chat` 与 `msg` 同指消息页、**都要在**（R1 漏 `chat`，`fix/legacy-chat-tab` 加回）
 
 router.beforeEach((to) => {
   if (to.path !== '/customer') return true   // 只认**精确** `/customer`；子路由与 `/merchant*` 全放行
