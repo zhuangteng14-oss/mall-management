@@ -9,12 +9,12 @@
 //   `to`    —— `<router-link>` 的目标。
 //   `badge` —— 可选；`'unread'` = 该项右侧显示未读红点（两壳都挂在「消息」项）。
 //
-// ⚠️ 两壳顶栏的差异**只有两处**：左项「商城主页」的 `to`（各指自己的壳 —— 客户 `/customer`、
+// ⚠️ 两套顶栏表（`CUSTOMER_NAV` / `MERCHANT_NAV`）的差异**只有两处**：左项「商城主页」的 `to`（各指自己的壳 —— 客户 `/customer`、
 //    商家 `/merchant`），以及右起第 2 项（客户「购物车」⇄ 商家「订单中心」）——
 //    其余（项数 / 文案 / `tab` / 红点）逐字同构
-//    ⇒ R6 抽 `AppShell` 时靠这份配置把两个壳合并成一个渲染 nav 的壳（见 progress.md §5-Y）。
+//    ⇒ **R6（2026-10-05）已落地**：`AppShell.vue` 靠这份配置把两个壳合并成一个渲染 nav 的壳 —— 本文件经路由记录的 `props.nav` 传入（见 progress.md §5-AB；R2 当初的预案见 §5-Y）。
 //    ⚠️ 本条 R3 订正：原文写「**唯一**差异 = 右起第 2 项」，漏了左项的 `to` 也差（同句在
-//    `router/index.js:30` 与 `CustomerPage.vue:70` 各有一处，已一并订正（⚠️ 地址 R4 订正：原写 `:31`，实测在 `:30` —— `:31` 是 R3 的标题行，见 §5-AA (11)D8）。
+//    `router/index.js:30` 与 `AppShell.vue:61-63`（R6 前在 `CustomerPage.vue:70`，该文件已随两壳合一删除）各有一处，已一并订正（⚠️ 地址 R4 订正：原写 `:31`，实测在 `:30` —— `:31` 是 R3 的标题行，见 §5-AA (11)D8）。
 export const CUSTOMER_NAV = {
   left: [
     { label: '商城主页', tab: 'home', to: '/customer' }
@@ -48,7 +48,7 @@ export const MERCHANT_NAV = {
 // ⚠️ **左项原样保留**：每个壳的「商城主页」仍指自己的壳（客户 `/customer` / 商家 `/merchant`）
 //    —— 匿名手敲 `#/merchant` 的人，看到的不该是「商城主页 → 客户壳」这种错指。
 // ⚠️ 顶栏**只换表、不换壳**：壳其余部分（内容区 / `layoutClass` / 5s 轮询）对匿名访客本来就是
-//    安全的（`CustomerPage.vue` 的 `getCurrentUser()` 无 cid/mid ⇒ 返回 `null` ⇒ 轮询空转），
+//    安全的（`AppShell.vue` 的 `getCurrentUser()` 无 cid/mid ⇒ 返回 `null` ⇒ 轮询空转；R6 前该函数在两壳里），
 //    本笔**不新增**任何守卫、也不给壳加「未登录分支渲染」。
 const ANON_RIGHT = [{ label: '登录', tab: 'login', to: '/login' }]
 
