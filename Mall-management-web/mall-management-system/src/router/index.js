@@ -123,9 +123,9 @@ const routes = [
     ]
   },
   { path: '/product', component: ProductPage },
-  { path: '/shoppingCart', component: ShoppingCart },
+  { path: '/shoppingCart', redirect: cartLanding },   // R4：僵尸裸页收编 —— 按角色落壳内购物车面（尾部 `cartLanding`；⚠️ 它**必须是函数声明**，理由见尾部注释）
   // 👇 新增搜索页面路由
-  { path: '/goodsSelect', component: GoodsSelect }
+  { path: '/goodsSelect', redirect: searchLanding }   // R4：僵尸裸页收编 —— 按角色落壳内搜索页（尾部 `searchLanding`）
 ]
 
 const router = createRouter({
@@ -197,6 +197,45 @@ const ROLE_HOME = { '1': '/customer', '2': '/merchant' }
 function landingFor() {
   if (!isLoggedIn()) return '/customer'   // ← R3 的行为变更点（原：`return true`，停在裸页）
   return ROLE_HOME[getRole()] || (getMerchantId() ? '/merchant' : '/customer')
+}
+
+// ── 裸页收编（R4，2026-10-05）──────────────────────────────────────────────────────
+// 治的病：`/shoppingCart` 与 `/goodsSelect` 是**基线 `9b87ab9` 起就没人生产**的僵尸路由
+//   （全仓 `push` / `replace` / `<router-link>` 皆 0 命中，基线树同样 0），却一直**裸挂** ——
+//   无外壳 ⇒ 无导航栏（与 R3 前的 `/` 同病）；且裸 `/shoppingCart` 还渲染一个**死控件**：
+//   `ShoppingCart` 的 `showSwitch` 默认 `true`（`ShoppingCart.vue:81`），而该记录**不传 `@toggle`**
+//   ⇒ 那个 📋/🛒 开关点了没反应 —— 与 §5-X (16)2 是同一类病症的**第三例**（这一例从基线就在）。
+// ⚠️ **为什么是 redirect 而不是删记录**：全仓**没有 catch-all**（`grep pathMatch` 零命中）⇒ 删记录 =
+//   手敲该 URL **白屏**（不是 404 页，是空白 + 控制台 warning）。R3 对 `/` 的裁定是「手敲也被送出 =
+//   有意的」，本笔沿用。
+// ⚠️ **为什么按角色分**（而不是「一律指客户壳」）：`/shoppingCart` 的商家落点**换组件**（`OrderPane`
+//   的 `meta.orderTab === 'cart'` 面，落点是 `/merchant/order/cart`）、`/goodsSelect` 的商家落点
+//   **换壳**。恒指客户壳会让商家手敲落错壳 —— 正是 R3 的 `landingFor` 刻意避开的错。
+// ⚠️ **`to.query` 透传**（本笔与 R3 的唯一手法差别）：R3 丢弃 `/` 的 query 是因为**无生产者**；
+//   这里 `kw` 有真实语义（`GoodsSelect.vue:124` 的 watch 读 `route.query.kw`）⇒ 手敲
+//   `#/goodsSelect?kw=手机` 能落到搜索页并生效。逐条见 `progress.md` §5-AA。
+const ROLE_CART = { '1': '/customer/cart', '2': '/merchant/order/cart' }
+const ROLE_SEARCH = { '1': '/customer/search', '2': '/merchant/search' }
+
+/** 当前角色键（`role` 优先、`getMerchantId()` 兜底 —— 与 `landingFor` 同口径、同理由：新标签页恢复时
+ *  `getRole()` 拿不到 ⇒ 走兜底是常态）。匿名 ⇒ 两个都拿不到 ⇒ `'1'` ⇒ 落客户壳 —— 与 R3「未登录也进
+ *  客户壳」的裁定一致（壳对匿名本来就安全，见 §5-Z (4)）。
+ *  ⚠️ 与 `landingFor` 的兜底逻辑**是有意的两处**：不合并是为了不动 R3 刚落码登记的 `:192` / `:197`
+ *  行号（用户裁决 D7）；R6 抽 `AppShell` 时可一并收敛。 */
+function roleKey() {
+  return getRole() || (getMerchantId() ? '2' : '1')
+}
+
+/** `/shoppingCart` 的落点。⚠️ **必须是函数声明、不能写成 `const` 箭头** —— `const routes` 在**模块体**
+ *  里就要求值（记录上写 `redirect: cartLanding` 是**读这个标识符**），箭头函数此刻还在 TDZ ⇒ 直接
+ *  `ReferenceError: Cannot access 'cartLanding' before initialization`。`landingFor` 能用是先例。 */
+function cartLanding(to) {
+  return { path: ROLE_CART[roleKey()], query: to.query }
+}
+
+/** `/goodsSelect` 的落点（同上：函数声明，理由见 `cartLanding`）。 */
+function searchLanding(to) {
+  return { path: ROLE_SEARCH[roleKey()], query: to.query }
 }
 
 export default router

@@ -14,7 +14,7 @@
 //    其余（项数 / 文案 / `tab` / 红点）逐字同构
 //    ⇒ R6 抽 `AppShell` 时靠这份配置把两个壳合并成一个渲染 nav 的壳（见 progress.md §5-Y）。
 //    ⚠️ 本条 R3 订正：原文写「**唯一**差异 = 右起第 2 项」，漏了左项的 `to` 也差（同句在
-//    `router/index.js:31` 与 `CustomerPage.vue:70` 各有一处，已一并订正）。
+//    `router/index.js:30` 与 `CustomerPage.vue:70` 各有一处，已一并订正（⚠️ 地址 R4 订正：原写 `:31`，实测在 `:30` —— `:31` 是 R3 的标题行，见 §5-AA (11)D8）。
 export const CUSTOMER_NAV = {
   left: [
     { label: '商城主页', tab: 'home', to: '/customer' }
