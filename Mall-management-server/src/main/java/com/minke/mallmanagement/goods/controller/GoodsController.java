@@ -2,9 +2,12 @@ package com.minke.mallmanagement.goods.controller;
 
 import com.minke.mallmanagement.goods.service.GoodsService;
 import com.minke.mallmanagement.goods.service.GoodsTypeCacheService;
+import com.minke.mallmanagement.shared.web.IdentityGuard;
 import com.minke.mallmanagement.shared.web.Result;
+import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.constraints.NotBlank;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
@@ -41,6 +44,16 @@ import java.util.Map;
  * Service 返回值仍是 {@code Map}，URL、参数、{@code throws IOException} 一字未动；
  * 因 {@code Result.of} 逐条 put 保字节等价，线上响应体逐字节不变。
  * ⚠️ {@code goodstype} **不换**（{@link Result} 类注释的例外 4/5），理由见该方法处注释。
+ *
+ * <h2>【多账户隔离笔（2026-10-06）：4 个端点加**入参身份校验**】</h2>
+ * {@code goodsAdd} / {@code goodsSelect} / {@code goodsDe} / {@code goodsUp} 的
+ * {@code MerchantId} 是「**调用者自己**」⇒ 方法体第一行过
+ * {@link IdentityGuard#requireSelfOrAdmin}，拒则 403（返回类型因此由
+ * {@code Result<Map<String,Object>>} 改为 {@code ResponseEntity<Object>}）。
+ * ⚠️ <b>另两个端点刻意不加</b>：{@code productCodePrice} 与 {@code GoodsProductCodeSelect}
+ * 的 {@code MerchantId} 是「**被浏览的商家**」（商品页在看别人的店），不是调用者 ——
+ * 判它们会把正常的浏览打断。二者**也在白名单里**，语义上属公开面。
+ * 判据全文见 {@link IdentityGuard}。
  */
 @RestController
 @RequestMapping("/goods")
@@ -85,16 +98,21 @@ public class GoodsController {
     //   · GoodTypeNew（int）—— ⚠️ **绝不能加 @Min(1)**：既有 smoke 用例与 A3 都发 0
     //     （GoodsAddUploadFailSmokeTest.java:52、ConcurrencyRunner.java:1164-1166 的 PayIf 族同理）。
     @PostMapping("/goodsAdd")
-    public Result<Map<String, Object>> goodsAdd(
+    public ResponseEntity<Object> goodsAdd(
             @NotBlank(message = "不能为空") @RequestParam("MerchantId") String MerchantId,
             @NotBlank(message = "不能为空") @RequestParam("GoodName") String GoodName,
             @RequestParam("Price") Double Price,
             @RequestParam("file") MultipartFile file,  // 图片用 MultipartFile
             @NotBlank(message = "不能为空") @RequestParam("GoodType") String GoodType,
             @NotBlank(message = "不能为空") @RequestParam("ProductCode") String ProductCode,
-            @RequestParam("GoodTypeNew") int GoodTypeNew
+            @RequestParam("GoodTypeNew") int GoodTypeNew,
+            HttpServletRequest request
     ) throws IOException {
-        return Result.of(goodsService.goodsAdd(MerchantId, GoodName, Price, file, GoodType, ProductCode, GoodTypeNew));
+        // ⚠️ 第一行：上架只能挂到**自己**名下（管理员豁免）—— 必须在落盘/写库之前。
+        if (!IdentityGuard.requireSelfOrAdmin(request, MerchantId)) {
+            return IdentityGuard.forbidden();
+        }
+        return ResponseEntity.ok(Result.of(goodsService.goodsAdd(MerchantId, GoodName, Price, file, GoodType, ProductCode, GoodTypeNew)));
     }
 
     //这是一个接口（用于显示商家端查看商品页面外部内容）
@@ -105,10 +123,15 @@ public class GoodsController {
     // ⚠️ 形参名 MerchantId 必须保留：@RequestParam 未写显式名依赖它解析，
     //    Service 侧 key="#MerchantId" 也依赖同一个形参名（-parameters 已开）。
     @PostMapping("/goodsSelect")
-    public Result<Map<String, Object>> goodsSelect(
-            @RequestParam String MerchantId
+    public ResponseEntity<Object> goodsSelect(
+            @RequestParam String MerchantId,
+            HttpServletRequest request
     ) {
-        return Result.of(goodsService.goodsSelect(MerchantId));
+        // ⚠️ 第一行：商家端「我的商品」只能看自己的（管理员豁免）。
+        if (!IdentityGuard.requireSelfOrAdmin(request, MerchantId)) {
+            return IdentityGuard.forbidden();
+        }
+        return ResponseEntity.ok(Result.of(goodsService.goodsSelect(MerchantId)));
     }
 
     //这是一个接口（用于返回商品对应的所有信息）
@@ -122,12 +145,17 @@ public class GoodsController {
     // 方法体（两条 DELETE、无条件 success、唯一出口前 evict）逐字搬到 GoodsService.goodsDe()。
     // ⚠️ 四条 evict 的理由已收敛到 GoodsCacheService.evictByMerchant() 的 javadoc（D 笔，2026-09-28）。
     @PostMapping("/goodsDe")
-    public Result<Map<String, Object>> goodsDe(
+    public ResponseEntity<Object> goodsDe(
             @RequestParam("MerchantId") String MerchantId,
             @RequestParam("GoodName") String GoodName,
-            @RequestParam("ProductCode") String ProductCode
+            @RequestParam("ProductCode") String ProductCode,
+            HttpServletRequest request
     ) {
-        return Result.of(goodsService.goodsDe(MerchantId, GoodName, ProductCode));
+        // ⚠️ 第一行：下架只能下自己的（管理员豁免）—— 必须在两条 DELETE 之前。
+        if (!IdentityGuard.requireSelfOrAdmin(request, MerchantId)) {
+            return IdentityGuard.forbidden();
+        }
+        return ResponseEntity.ok(Result.of(goodsService.goodsDe(MerchantId, GoodName, ProductCode)));
     }
 
     //这是一个接口（用于根据商品的不同型号切换显示对应的价格）
@@ -157,15 +185,21 @@ public class GoodsController {
     // ⚠️ 形参 GoodType 是既有入参、方法体内未使用 —— 签名必须原样保留（前端在传，去掉即 400）。
     // ⚠️ 签名里的 throws IOException 与三层前一致（落盘异常已在 Service 侧 catch，本类不会抛）。
     @PostMapping("/goodsUp")
-    public Result<Map<String, Object>> goodsUp(
+    public ResponseEntity<Object> goodsUp(
             @RequestParam("MerchantId") String MerchantId,
             @RequestParam("GoodName") String GoodName,
             @RequestParam("Price") Double Price,
             @RequestParam("GoodType") String GoodType,
             @RequestParam("ProductCode") String ProductCode,
-            @RequestParam(value = "file", required = false) MultipartFile file
+            @RequestParam(value = "file", required = false) MultipartFile file,
+            HttpServletRequest request
     ) throws IOException {
-        return Result.of(goodsService.goodsUp(MerchantId, GoodName, Price, GoodType, ProductCode, file));
+        // ⚠️ 第一行：改价/改图只能改自己的（管理员豁免）—— 必须在落盘与 UPDATE 之前。
+        //    这是本笔要堵的那一行 curl（改别人的商品）的正面判据。
+        if (!IdentityGuard.requireSelfOrAdmin(request, MerchantId)) {
+            return IdentityGuard.forbidden();
+        }
+        return ResponseEntity.ok(Result.of(goodsService.goodsUp(MerchantId, GoodName, Price, GoodType, ProductCode, file)));
     }
 
     // 这是一个接口（根据商家ID和商品名称，获取所有不同的 ProductCode 型号列表）
