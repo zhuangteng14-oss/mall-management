@@ -487,6 +487,54 @@
 - **（7）本笔**造成的**行号漂移 3 行 / 4 个引用 —— **已就地重指**（记账供复核）。** 本笔在 `api-contract.md` 的 §2 前部净插入 **19 行**（`### /user` 段前注 +9、`/user` 表 +10）⇒ 指向其后的行号引用集体偏移：`three-layers.md:184`（`:88` → **`:107`**；⚠️ **并顺带改正该行把 §2 写成「§3」** —— `/goods` 的「业务体现址」段在 `## 2. 接口清单` 下的 `### /goods`，不在 §3）、`three-layers.md:188`（`:94` / `:118` → **`:113`** / **`:137`**）、`selection-status.md:172`（`:60` → **`:79`**）。⚠️ 三个文件**均在本笔 6 文件清单内**，不属超范围；另 5 个引用（`db-schema.md:5` / `:6`、`progress.md:471` / `:480`、`:488`）指向 `api-contract.md` 的 `:4` / `:6` / `:9` / `:14` —— 均**在插入点之前**，实测**未漂**，**未动**。
 - ⚠️ **本节插入自身的副作用**（按 §5-P (6) 同口径）：本节插在 **§5-P 之后、`## 6` 之前**，共 **15 行** ⇒ 本文件 `## 6` 及其后所有行号**整体后移 15 行**（`## 6`：`477` → `492`）。已核：**仓内已跟踪文档中指向本文件的**数值**引用为空** —— §5-P (3) 已把 7 处外部引用改成节锚点，本文残余的 3 处（`:394` / `:469` / `:470`）是**引文/转换记录**（复述改动前的编号），**不是活引用** ⇒ **没有引用被这次偏移打破**。
 
+### 5-R. 鉴权笔 3（`chore/auth-preflight`，2026-10-05）：**不翻开关** + 真容器受控取证 + 「认证侧未落地」子句订正
+
+> **性质**：**本笔不翻开关、不改行为、不加/改测试**。产出 = ① 一次**真容器**受控取证（**只改启动参数，文件一字未动**）；② 订正 4 处「同一事实」引用点里那句**已过时**的子句；③ 登记 1 条**新的**口径不一致。
+> ⚠️ **开关仍在 `false`** —— `application.properties` 的 `app.auth.enabled=false` **一行未动**。**本笔没有翻**，翻是**独立一笔**（见 (1)）。
+
+- **（1）【裁决】本笔不翻；「翻」单列一笔，排在笔 4 之后。三条硬阻断（本笔复核，逐条给了现在的证据）：**
+  ① **前端不带 cookie** —— `src/api/http.js:73` 的 `buildInit` **无** `credentials`（`:69` 自认「待鉴权笔填充」）；且前端 dev server 打 `:8088` 是**跨源** ⇒ 翻 `true` = 全站受保护端点 401。
+  ② **测试套件红** —— 写死 `true` 实测红 **29** 条（记录在 `application.properties` 那条突变对照注，**笔 1 测的**）。⚠️ **本笔复核：这个数字现在已过时** —— `@WebMvcTest` **只声明在 `AbstractSmokeTest:47`**，其余 smoke 类**全部 `extends` 它** ⇒ 切片对**每一个** smoke 类生效（Spring 测试框架沿父类找注解，非 Java `@Inherited`）。而笔 1 之后又添了 `AuthGateSmokeTest` / `AuthSessionSmokeTest`（各自**两层**）⇒ **翻那一笔必须重测这个数，别直接沿用 29**。
+  ③ **A3 全 401** —— CI A3 job 以 `SPRING_PROFILES_ACTIVE=a3` 起真 jar（`ci.yml:209`），`ConcurrencyRunner` 发**真实 HTTP** 打 `orderAdd` 等**非白名单**端点（`ConcurrencyRunner.java:108`）；而 `application-a3.properties` **不设** `app.auth.enabled` ⇒ **继承主配置** ⇒ 主配置一翻，A3 门禁全红，且 `continue-on-error: true` 会这个红**系统性抹平**（同 §5-E / §5-G 的告诫）。
+  ⇒ **翻的时机在笔 4（前端接 `credentials` + 401 处理）之后**；且「翻」**单列一笔** —— 它要改 **a3 加显式 `false` 护栏** + **smoke 类适配**（挂会话或加白名单），混进笔 4 会让 diff 伸进 `src/test/`。
+
+- **（2）【受控取证 · 真容器】2026-10-05，`--app.auth.enabled=true` 起 jar（仅改启动参数）。**
+  环境：JDK 17 / 本机 MySQL 8.0.32 / **Redis 未起**（`6379` 闭；按设计降级 —— L2 自检 WARN、锁 fail-open，进程照常起，**6.5s**）。端口 **8099**（避开 8088）。13 条逐条实测：
+
+  | # | 请求 | 预期 | 实测 |
+  |---|---|---|---|
+  | 1 | `POST /goods/goodstype`（白名单）**无** cookie | 200 | **200**，返回商品类型列表 |
+  | 2 | `POST /user/updateUserInfo`（非白名单）**无** cookie | 401 | **401** `{"success":false,"msg":"未登录"}` |
+  | 3 | `POST /user/me` **无** cookie | 401 | **401**，同体 |
+  | 4 | `POST /user/loginSelect`（白名单）`123/123456` | 200 + Set-Cookie | **200** 体 `1`；`Set-Cookie: JSESSIONID=…; Path=/; HttpOnly` |
+  | 5 | `POST /user/me` **带该 cookie** | 200 | **200** `{"success":true,"customerid":"pIzTWafaGp","usertype":"客户",…}` |
+  | 6 | `POST /user/updateUserInfo` **带 cookie** | 非 401 | **200** `{"msg":"个人信息保存成功","success":true}` |
+  | 7 | `POST /user/logout` **带 cookie** | 200 | **200** `{"msg":"已退出","success":true}` |
+  | 8 | `POST /user/me` **logout 后**同一 cookie | 401 | **401**，同体（会话确已 `invalidate`） |
+  | 9 | 401 响应是否给匿名请求 **mint 会话** | 无 Set-Cookie | **`Set-Cookie` 计数 = 0** |
+  | 10 | 401 响应体是否**逐字节**等于常量 | 相同 | **`cmp` IDENTICAL**（byte-for-byte） |
+  | 11 | `GET /img/nope.png`（白名单命中、资源不存在） | 404（**不是** 401） | **404** |
+  | 12 | `POST /goods/goodstype` 带 `Origin: http://localhost:8080` | 回显 + 允许凭据 | `Access-Control-Allow-Origin: http://localhost:8080` + `Allow-Credentials: true` |
+  | 13 | `OPTIONS /user/updateUserInfo` 预检（**非白名单**） | 200（**CorsFilter 先于拦截器**） | **200** + 三条 `Access-Control-*` + `Allow-Credentials: true` |
+
+  ⇒ **[12]/[13] 是给笔 4 的现成结论**：后端 CORS 侧（`ImgConfig` 的 `addAllowedOriginPattern("*")` + `setAllowCredentials(true)`）**已支持跨源带凭据**，且**预检不会被闸拦**。⚠️ 但**浏览器是否真的带上 cookie**（`SameSite` / 跨源定义）**本机 curl 证不了**，笔 4 须**真浏览器实测**。
+
+  ⚠️ **两条附带发现（本笔实测，非本笔造成）**：
+  - **(i) 本开关没有启动期生效值打印。** 启动日志里 ASCII `auth` **0 命中**，且 `WebAuthConfig` / `AuthInterceptor` **源码内无任何 logger / `println`** ⇒ 与 `app.lock.*` / `app.cache.*` / `app.order.state.*` 的「启动期打印生效值」惯例**不一致**：**闸开没开只能从行为反推**。⚠️ 因此「启动日志能读到 `app.auth.enabled` 生效值」**当不了验收判据**（除非另补一行自检日志 —— 那属「翻」那一笔）。
+  - **(ii) 取证副作用已还原。** 第 6 条**真写库**（改了 `user` 表 `customerid='pIzTWafaGp'` 行的 `email` / `address` / `selfintroduction`）。已按 `mall_management_sql.sql:197` 的种子值用 `UPDATE` **还原并读回核对**。⚠️ 教训：非白名单取证要挑**只读**端点，别顺手挑写端点。
+
+- **（3）【订正】4 处「同一事实」的引用点 —— 过时的是**子句**，不是整句。**
+  原句「…**认证侧尚未落地** —— 没有任何端点会把 `AuthInterceptor.SESSION_USER_ID` 写进会话（那是鉴权笔 2）…」的**后半句已过时**（笔 2 已落地写入方：`UserController.loginSelect` → `AuthSession.login`）。
+  ⚠️ **「认证侧未生效」本身**（闸没开 ⇒ 认证链路未被启用）**仍是事实、保留** —— 整句删会掩盖「闸还没开」这个状态。
+  ⇒ 统一改为「**写入方已在笔 2 落地，但闸仍默认关（认证未生效）**」。落点 **4 处**：`application.properties`（那条「为什么默认关」注释块）、`WebAuthConfig` 类 javadoc、`business-decisions.md`（BD-03 现状行）、`three-layers.md`（`:185` / `:198`）。
+  ⚠️ **后两者按 §5-P (1) 的先例做同行替换（`-1 +1` / `-2 +2` 净零）** —— 那两个文件被别处**按行号**引用，增删行会集体偏移。
+
+- **（4）【口径统一】端点数 = **34**（**handler 数口径**，2026-10-05 用户裁决）。**
+  口径：**一个 handler 方法算 1 条，与它声明几种 HTTP 方法无关** —— `@GetMapping` / `@PostMapping` / `@RequestMapping(GET,POST)` / 同名多注解**都算 1 条**。理由：handler 数是**方法数**，稳定；HTTP 方法数会随「一个方法支持几种 HTTP」变，不稳定。⇒ **`/goodstype`（`GoodsController.java:61` 同时声明 `GET,POST`）算 1 条**。
+  逐域实测（4 个业务 Controller、去类级 `@RequestMapping`）：`message 10 / order 8 / goods 8 / user 7` = **33**（业务面）；**+ `HealthController./health/db`（`@Profile("a3")`）= 34**。
+  ⚠️ **旧口径作废，但只标注、不改其字面**（均已落盘，属历史）：`§5-M (3)` 的 **32** 与 `§5-Q (2)` 的笔 2 后 **35** —— 两者与本节的 **34** 不一致，成因**至少**含「`/goodstype` 是否按 HTTP 方法拆成 2 条」与「是否含 `/health/db`」两处口径差（**逐笔成因未完成对齐，不臆测**）。**一律以 handler 数 = 34 为准**，那两处按旧口径读。
+  落点：本节 + `business-decisions.md`（BD-03 现状行）+ `three-layers.md`（`:185` / `:198`）—— 共 **4 处**已统一为 34。
+
 ---
 
 ## 6. 前端规范化（2026-10-03 双审计）

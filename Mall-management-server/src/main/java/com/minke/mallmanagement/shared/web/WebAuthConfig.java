@@ -40,11 +40,14 @@ import java.util.List;
  * 默认值一旦改成 {@code true}，整个测试套件在第一秒就由绿转红。生产 / {@code @SpringBootTest} /
  * A3（真启动 jar）同样会加载本类。
  *
- * <h2>【为什么默认关：闸的认证侧还没落地】</h2>
- * 本笔只做「拦」不做「认证」—— 没有任何端点会把 {@link AuthInterceptor#SESSION_USER_ID}
- * 写进会话（那是鉴权笔 2）。故开关一旦打开，**全站非白名单接口立即不可用**（下单、发消息、
- * 上下架、改资料……）。默认 {@code false} ⇒ 拦截器 {@code preHandle} 第一句就 {@code return true}，
- * 生产与 A3 的行为与本笔之前**逐字节相同**。
+ * <h2>【为什么默认关：闸的认证侧还没生效】</h2>
+ * ⚠️ <b>2026-10-05 订正（{@code chore/auth-preflight}）</b>：本节原先的理由「没有任何端点会把
+ * {@link AuthInterceptor#SESSION_USER_ID} 写进会话（那是鉴权笔 2）」<b>已过时</b> —— <b>写入方
+ * 已在笔 2 落地</b>（{@code UserController.loginSelect} → {@link AuthSession#login}），
+ * <b>但闸仍默认关</b> ⇒ 认证链路至今未被启用（「认证侧尚未生效」仍是事实）。
+ * 故开关一旦打开，<b>全站非白名单接口立即不可用</b>（下单、发消息、上下架、改资料……）。
+ * 默认 {@code false} ⇒ 拦截器 {@code preHandle} 第一句就 {@code return true}，
+ * 生产与 A3 的行为与本笔之前<b>逐字节相同</b>。
  */
 @Configuration
 public class WebAuthConfig implements WebMvcConfigurer {
