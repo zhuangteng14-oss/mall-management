@@ -6,7 +6,7 @@
 > ⚠️ **同版本复核（对账上一版的「`G:` 行号整体 −9」）**：以 `git show 8c5385e:…goods/controller/GoodsController.java`（**笔 2 后**状态）逐条实测，其 route 行为 **50 / 72 / 173 / 187 / 197 / 245 / 280 / 359 / 369** —— 与上一版表内 `G:` 值**逐条相同** ⇒ 那一栏在笔 2 时是**准的**，不是陈旧值。但「**整体 −9**」只是粗略说法：实测相对 2026-09-30 基线（`148e77b`，`:59 / :81 / :181 / :195 / :205 / :249 / :264 / :336 / :346`）是 `goodstype`/`goodsAdd` **−9**、`goodsSelect` 一族 **−8**、`productCodePrice` **−4**、`goodsUp` 之后反而 **+16 / +23 / +23**（因笔 2 在该段加了说明注释）⇒ 引用时**不要拿 −9 去换算全表**。
 > **2026-10-02 三层第二笔（商品域）又整体前移**：9 个端点的**路由仍在 `GoodsController`**，**业务体（SQL / try-catch / 响应组装）下沉到 `GoodsService`，SQL 出口收进 `GoodsDao`** ⇒ `G:` 现值 = **51 / 72 / 92 / 101 / 109 / 127 / 142 / 158 / 171**（实测，已重填），且它**只保证「路由还在哪一行」**；方法体位置另见 `/goods` 表下的「业务体现址」注。
 > **「幂等」判定标准**：*相同入参重复调用是否产生额外副作用（不重复写入）*。非 HTTP 语义幂等。
-> ~~所有接口均无鉴权~~ ⚠️ **2026-10-04 订正（鉴权笔 1/2）**：鉴权闸（`AuthInterceptor` + `WebAuthConfig`）已落地，**默认关闭**（`app.auth.enabled=false`）⇒ 今日行为仍是"全部放行"；但 `/user/loginSelect`（认证成功后写会话）、`/user/me`、`/user/logout` 三个端点的**会话侧**已就位。无统一返回体、无全局异常处理；~~5 个 Controller 均标 `@CrossOrigin`~~ ⚠️ **2026-10-04 订正：那 5 处 `@CrossOrigin` 已由 PR #34 `23f5361` 全部删除** ⇒ CORS 唯一出处 = `ImgConfig` 的全局 `CorsFilter`。入参均为 `@RequestParam`（query/form），无 `@RequestBody`。
+> ~~所有接口均无鉴权~~ ⚠️ **2026-10-04 订正（鉴权笔 1/2）**：鉴权闸（`AuthInterceptor` + `WebAuthConfig`）已落地；⚠️ **2026-10-05 翻开关笔：`app.auth.enabled` 已由 `false` 翻成 `true`** ⇒ 该闸自今日起**真正生效**（白名单外无会话 = 401；原「**默认关闭**（`app.auth.enabled=false`）⇒ 行为仍是全部放行」已成史料）；但 `/user/loginSelect`（认证成功后写会话）、`/user/me`、`/user/logout` 三个端点的**会话侧**已就位。无统一返回体、无全局异常处理；~~5 个 Controller 均标 `@CrossOrigin`~~ ⚠️ **2026-10-04 订正：那 5 处 `@CrossOrigin` 已由 PR #34 `23f5361` 全部删除** ⇒ CORS 唯一出处 = `ImgConfig` 的全局 `CorsFilter`。入参均为 `@RequestParam`（query/form），无 `@RequestBody`。
 
 ## 1. 通用约定
 
@@ -36,15 +36,15 @@
 | POST | `/user/updateAvatar` | username, file(MultipartFile) | `{success, msg?, imageUrl?}` | 是 | `UserController.updateAvatar:145` |
 | POST | `/user/updateUserInfo` | username, email, address, selfintroduction | `{success, msg}` | 是 | `UserController.updateUserInfo:154` |
 | POST | `/user/me` | **无**（凭会话 Cookie；**无 `@RequestParam`**） | 有会话：`user` 表**整行** + 头像 `image` + `success`（顶层平铺；**P2.6 起与 `/user/getUserInfo` 同一段逻辑产出 ⇒ 同一个 Map，只差 `success` 键**，见 §5-AC）；**无会话 ⇒ 401** + `{success:false,msg:"未登录"}`；查无此人 ⇒ 200 + `{success:false,msg:"用户不存在"}` | 是 | `UserController.me:191` |
-| POST | `/user/logout` | **无**（凭会话 Cookie） | `{success:true, msg:"已退出"}`；无会话时同样答成功（no-op，**不建会话**） | 是 | `UserController.logout:222` |
+| POST | `/user/logout` | **无**（凭会话 Cookie） | `{success:true, msg:"已退出"}`；无会话时同样答成功（no-op，**不建会话**）；⚠️ **闸开（2026-10-05）后**：无会话者在**闸处**即 401，进不到本方法（「答成功」只对**有会话**的调用方成立） | 是 | `UserController.logout:222` |
 
 > **会话侧三端点（2026-10-04 鉴权笔 2 新增/改造）**：
 > - `loginSelect` 在**认证成功且拿到业务号**时把**业务号**（`user.customerid` / `user.merchantid`）写进会话；
 >   **失败的登录不发会话**（形参取 `HttpServletRequest`，只在成功路径上 `getSession()`）。
 >   ⚠️ HTTP 契约**一字未动**（返回仍是裸 `int`，例外 1/5）。
 > - `me` / `logout` 与 `getUserInfo` **并存不替代**：那个是**凭据驱动**，这两个是**会话驱动**。
-> - ⚠️ **前端本笔不动** ⇒ 这两个新端点当日**无调用方**（接入是笔 4 / `P2.6`）。⚠️ **P2.6（2026-10-05）起 `/user/me` 已有调用方**（`main.js:28` 启动探针 + 3 个资料读点 = 4 处），`/user/logout` 仍 **0**，见 §5 对账。
-> - 开关 `app.auth.enabled` **默认仍 `false`** ⇒ `me` 的 401 分支在默认配置下**可达**（不依赖闸）。
+> - ⚠️ **前端本笔不动** ⇒ 这两个新端点当日**无调用方**（接入是笔 4 / `P2.6`）。⚠️ **P2.6（2026-10-05）起 `/user/me` 已有调用方**（`main.js:28` 启动探针 + 3 个资料读点 = 4 处）；`/user/logout` 于**翻开关笔（2026-10-05）**起 **1 处**（`UserCenter.vue:64` 退出时销服务端会话），见 §5 对账。
+> - 开关 `app.auth.enabled` **已于 2026-10-05 翻 `true`**（翻开关笔）⇒ `me` 的 401 分支今日**由闸先发**（端点侧那一份响应体逐字节相同，见 `UserController.me`）；测试与 A3 各由 profile 显式 pin `false` 保住。
 
 ### /message — 10 个
 
@@ -158,10 +158,10 @@
 > **范围**：`Mall-management-web/mall-management-system/src` 全部 `.js` / `.vue`；下表文件均位于 `src/views/`。
 > **行号**：指**该 `fetch(` 调用的所在行**；标 ※ 者见下方「变量 URL」段。
 
-**四项对账**（须自洽）：前端 `fetch(` 调用点 **42** 处 ／ 不同路径 **31** 条 ／ 本文件路由 **35** 条 ／ 差集 **35 − 31 = 4**（即表末四行「无调用方」）。 ⚠️ **基期 vs 现状（P2.6，2026-10-05）**：上列 **42 / 31 / 4 是 2026-10-03 的基期值**（本文件与 `progress.md` §6 其余「42」引用处同为基期口径）；**现状调用点 = 43** —— 会话恢复笔新增的 `main.js:28` 探针**未计入基期**（本笔实测 `grep -rn "http\.\(post\|get\)(" src/` = **43**）；**不同路径仍 31**（`/user/me` 进、`/user/getUserInfo` 出，互为抵消）⇒ **差集仍 4**，成员互换。
+**四项对账**（须自洽）：前端 `fetch(` 调用点 **42** 处 ／ 不同路径 **31** 条 ／ 本文件路由 **35** 条 ／ 差集 **35 − 31 = 4**（即表末四行「无调用方」）。 ⚠️ **基期 vs 现状**：上列 **42 / 31 / 4 是 2026-10-03 的基期值**（本文件与 `progress.md` §6 其余「42」引用处同为基期口径）；**现状调用点 = 44** —— 会话恢复笔的 `main.js:28` 探针 + 翻开关笔的 `UserCenter.vue:64` 退出销会话**均未计入基期**（本笔实测 `grep -rn "http\.\(post\|get\)(" src/` = **44**）；**不同路径 = 32**（`/user/me` 进、`/user/getUserInfo` 出，互为抵消；翻开关笔又**进**一条 `/user/logout`）⇒ **差集 4 → 3**（`getOrCreateConversation` / `GET /health/db` / `/user/getUserInfo`；原第 4 条 `/user/logout` 已销账）。
 > ⚠️ **2026-10-04（鉴权笔 2）**：路由 **33 → 35**（新增 `/user/me`、`/user/logout`），
 > 前端 **42 / 31 两条不变**（本笔不动前端）⇒ 差集 **2 → 4**。**这个 4 是预期的，不是漏接** ——
-> 两个新端点的前端接入归笔 4 / `P2.6`。⚠️ **P2.6（2026-10-05）后**：`/user/me` 由「无调用方」变为 3 个读点、`/user/getUserInfo` 反向**归零** ⇒ 差集**仍 4**、成员互换（见 `:201-204`）；`main.js:28` 的探针那 1 处**不在**本口径的 42 内（口径基期早于会话恢复笔）。
+> 两个新端点的前端接入归笔 4 / `P2.6`。⚠️ **P2.6（2026-10-05）后**：`/user/me` 由「无调用方」变为 3 个读点、`/user/getUserInfo` 反向**归零** ⇒ 差集**仍 4**、成员互换（见 `:201-204`）；`main.js:28` 的探针那 1 处**不在**本口径的 42 内（口径基期早于会话恢复笔）。⚠️ **再现状（翻开关笔，2026-10-05）**：`/user/logout` 亦得 1 处（`UserCenter.vue:64`，退出时销服务端会话）⇒ 差集 **4 → 3**（见 `:161`）。
 
 ⚠️ **前端无 HTTP 框架**：`axios` / `$http` / `XMLHttpRequest` / `EventSource` / `baseURL` 在全 `src` **0 命中**；全部走原生 `fetch(`（且**唯一一处 `fetch(` 在 `src/api/http.js`**）；`vue.config.js` **无 `proxy`**；⚠️ **2026-10-05 订正（鉴权笔 4）**：`main.js` 原先「无拦截器、无全局配置」**已不成立** —— 它现在注册 **401 出口**（`setUnauthorizedHandler(router.push('/login'))` + `router.afterEach` 复位闩锁），但**仍无 HTTP 拦截器**；URL 全部硬编码 `http://localhost:8088/...`（⚠️ **此半句自 `#48` 起已过时** —— URL 已由 `VUE_APP_API_BASE` 提供，见 `progress.md §5-S`；**本笔不修**）。
 
@@ -201,7 +201,7 @@
 | ~~`/message/getOrCreateConversation`~~ | **无调用方**（前端 0 命中；`cache-layer.md` 记为**有意保留**的孤儿读接口） |
 | ~~`GET /health/db`~~ | **无前端调用方**（运维接口，消费者 = A3 脚本 P5/P6/P7） |
 | ~~`/user/getUserInfo`~~ | **无调用方**（**P2.6**，2026-10-05 起：3 个调用点全改走 `/user/me`；端点保留的理由见 `UserService.getUserInfo` 的 javadoc） |
-| ~~`/user/logout`~~ | **无调用方**（2026-10-04 笔 2 新增；同理） |
+| `/user/logout` | `UserCenter.vue:64`（**翻开关笔**，2026-10-05 起：退出时销服务端会话，`allowUnauthorized: true` + fail-open）—— 此前（2026-10-04 笔 2 起至翻开关笔前）**无调用方** |
 
 ### 5.1 三处「变量 URL」（静态 grep 看不到，须读分支）
 

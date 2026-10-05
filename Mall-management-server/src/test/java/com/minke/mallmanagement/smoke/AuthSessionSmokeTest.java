@@ -37,7 +37,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * 与 {@link AuthGateSmokeTest} 同一个理由（那里写得更细）：{@code app.auth.enabled} 在
  * {@code @TestPropertySource} 里**无法按用例改**，而「开关 OFF 对照」需要两份不同 property
  * 的上下文；{@code @Nested} 内部类会让 {@code @MockitoBean} 的替身不为内部类 reset。
- * 故同一文件两个**顶层**包级类：{@link AuthSessionSmokeTest}（默认 OFF，**10** 条）
+ * 故同一文件两个**顶层**包级类：{@link AuthSessionSmokeTest}（profile 钉 OFF，**10** 条）
  * + {@link AuthSessionSwitchOnTest}（{@code app.auth.enabled=true}，**3** 条）。
  *
  * <p>⚠️ 副作用（已知，可接受，与 {@code AuthGateSmokeTest} 同款）：第二个类名不等于本文件名，
@@ -95,8 +95,8 @@ class AuthSessionSmokeTest extends AbstractSmokeTest {
     @BeforeEach
     void switchOff_andTheGateIsReallyLoaded() {
         assertThat(authEnabled)
-                .as("⚠️ 本层前提是 app.auth.enabled=false（application.properties 的默认值）——"
-                        + "笔 2 **没有**翻开关。若为 true，说明有人改了默认值")
+                .as("⚠️ 本层前提是 app.auth.enabled=false —— 来源是 application-smoke.properties 的"
+                        + "**显式 pin**（翻开关笔起）。若为 true，说明 pin 被删了")
                 .isFalse();
         assertThat(webAuthConfigBean)
                 .as("WebAuthConfig 没进上下文 ⇒ 本层「未登录也打得到 /user/me」是空命题（闸压根不在）")
