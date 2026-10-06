@@ -50,13 +50,13 @@ import GoodsUp from '../views/GoodsUp.vue'
 //    不设 `redirect` 是为了不依赖「有 children 的记录能不能同时挂 redirect」这一细节。两壳同法。
 const routes = [
   { path: '/', redirect: landingFor },   // R3：不再是页面，只是落点（`landingFor` 在文件尾部 —— 函数声明提升，可先用后定义）
-  { path: '/login', component: LoginPage },
+  { path: '/login', component: LoginPage, meta: { public: true } },
   {
-    path: '/customer',
+    path: '/customer', meta: { roles: ['1', '3'] },   // ← 角色边界（2026-10-06，§5-AG (16)）：只有**客户**与**管理员**可进这个壳；`meta` 沿 `matched` 链合并 ⇒ 5 个子路由**自动继承**，无需逐条标。⚠️ 别挂到下一行的 `props.role` 上 —— 那是「**壳的种类**」，与本键同形异义
     component: AppShell, props: { nav: CUSTOMER_NAV, base: '/customer', role: 'customer' },
     children: [
-      { path: '', component: HomeTab, props: { base: '/customer' }, meta: { tab: 'home', layout: 'home-container' } },
-      { path: 'search', component: GoodsSelect, meta: { layout: 'page' } },
+      { path: '', component: HomeTab, props: { base: '/customer' }, meta: { tab: 'home', layout: 'home-container', public: true } },
+      { path: 'search', component: GoodsSelect, meta: { layout: 'page', public: true } },
       { path: 'msg', component: ChatRoom, meta: { tab: 'msg', layout: 'page' } },
       { path: 'cart', component: ShoppingCart, props: { showSwitch: false }, meta: { tab: 'cart', layout: 'cart-container' } },   // ← ⚠️ **必须**传 false：R1 前客户壳是 `<ShoppingCart :showSwitch="false" />`，R1 落码时丢了 ⇒ 该页凭空多出 📋/🛒 开关（且无人监听 = 死控件）。`fix/legacy-chat-tab` 修（见 progress.md §5-X (16)2）
       {
@@ -83,11 +83,11 @@ const routes = [
     ]
   },
   {
-    path: '/merchant',
+    path: '/merchant', meta: { roles: ['2', '3'] },   // ← 角色边界（同上）：只有**商家**与**管理员**可进（`'3'` = 管理员**两边都能进**，用户 2026-10-06 裁定；细粒度归 C3）
     component: AppShell, props: { nav: MERCHANT_NAV, base: '/merchant', role: 'merchant' },
     children: [
-      { path: '', component: HomeTab, props: { base: '/merchant' }, meta: { tab: 'home', layout: 'home-container' } },
-      { path: 'search', component: GoodsSelect, meta: { layout: 'page' } },
+      { path: '', component: HomeTab, props: { base: '/merchant' }, meta: { tab: 'home', layout: 'home-container', public: true } },
+      { path: 'search', component: GoodsSelect, meta: { layout: 'page', public: true } },
       { path: 'msg', component: ChatRoom, meta: { tab: 'msg', layout: 'page' } },
       // ⚠️ 两条 order 记录都设 `meta.tab = 'order'` ⇒ 顶栏「订单中心」**两面都亮**（与路由化前
       //    `curPage === 'order'` 的判据一致）；`meta.orderTab` 才是 `OrderPane` 的分面依据。
@@ -122,7 +122,7 @@ const routes = [
       }
     ]
   },
-  { path: '/product', component: ProductPage },
+  { path: '/product', component: ProductPage, meta: { public: true } },
   { path: '/shoppingCart', redirect: cartLanding },   // R4：僵尸裸页收编 —— 按角色落壳内购物车面（尾部 `cartLanding`；⚠️ 它**必须是函数声明**，理由见尾部注释）
   // 👇 新增搜索页面路由
   { path: '/goodsSelect', redirect: searchLanding }   // R4：僵尸裸页收编 —— 按角色落壳内搜索页（尾部 `searchLanding`）
@@ -172,7 +172,7 @@ router.beforeEach((to) => {
 
 // ── 首页落点（R3 起是一条 redirect；前身是止血笔加的那条守卫，2026-10-05）──────────────
 // 治的病：`/` 曾裸挂 `HomePage`（**无外壳** ⇒ 无导航栏）；未登录有 `.login-hint-bar` 引导，已登录
-//   则提示条不渲染、三条守卫也不触发 ⇒ **卡在裸首页**（§5-U / §5-V；§5-W 把整页锁改成提示条）。
+//   则提示条不渲染、三条守卫也不触发 ⇒ **卡在裸首页**（§5-U / §5-V；§5-W 把整页锁改成提示条）。⚠️ 该提示条与三条守卫已于 2026-10-06 删除（改判 2，§5-AG (13)）。
 // ⚠️ **R3 把「跳哪」从 `beforeEach` 搬到记录上的 `redirect`** —— 语义不变、位置更惯用；唯一的行为
 //   变更是**未登录不再停在 `/`，而是落 `/customer`**（匿名本来就进得了壳：`/customer` 子树无守卫）
 //   ⇒ 「`/` 裸挂首页」这个事实**在 R3 终结**（R1/R2 只动各自壳的子树）。逐条见 progress.md §5-Z。
@@ -205,7 +205,7 @@ function landingFor() {
 //   无外壳 ⇒ 无导航栏（与 R3 前的 `/` 同病）；且裸 `/shoppingCart` 还渲染一个**死控件**：
 //   `ShoppingCart` 的 `showSwitch` 默认 `true`（`ShoppingCart.vue:81`），而该记录**不传 `@toggle`**
 //   ⇒ 那个 📋/🛒 开关点了没反应 —— 与 §5-X (16)2 是同一类病症的**第三例**（这一例从基线就在）。
-// ⚠️ **为什么是 redirect 而不是删记录**：全仓**没有 catch-all**（`grep pathMatch` 零命中）⇒ 删记录 =
+// ⚠️ **为什么是 redirect 而不是删记录**：全仓**没有 catch-all**（`grep pathMatch` 只命中本行注释自身）⇒ 删记录 =
 //   手敲该 URL **白屏**（不是 404 页，是空白 + 控制台 warning）。R3 对 `/` 的裁定是「手敲也被送出 =
 //   有意的」，本笔沿用。
 // ⚠️ **为什么按角色分**（而不是「一律指客户壳」）：`/shoppingCart` 的商家落点**换组件**（`OrderPane`
@@ -237,5 +237,100 @@ function cartLanding(to) {
 function searchLanding(to) {
   return { path: ROLE_SEARCH[roleKey()], query: to.query }
 }
+
+// ── 前端路由守卫（`feat/router-guard`，2026-10-06）：未登录不得进「私人面」──────────────
+// 治的病：手测批 ⑫ —— **未登录 / 无会话时直开受保护页**（`#/customer/user/info` 等）能打开，
+//   但页内请求被闸 401、又无人接管 ⇒ **白屏 / 空壳**。逐条见 `progress.md` §5-AE (3) 与 §5-AG。
+//
+// ⚠️ **前端守卫 = UX，不是安全边界**。真正的边界在后端**两道**：① `AuthInterceptor` 四档
+//    （`app.auth.enabled` 自 2026-10-05 为 `true`）+ `AUTH_WHITELIST`；② `IdentityGuard` 的
+//    13 端点入参身份校验。任何人改 JS / 直连 API 都能绕过本守卫 —— 它**只**负责「别把用户
+//    送进一个注定空白的页」，不负责拦人。故本笔**不动**任何后端判据与白名单。
+//
+// ⚠️ **形态 = 默认拒绝 + 显式 `meta.public` 白名单**，与后端 `AUTH_WHITELIST` 同构
+//    （`WebAuthConfig.java:90-95` 的原话：「白名单是**公开面**，不是『未登录可达面』」）。
+//    为什么不用 `meta.requiresAuth` 逐条标注受保护页：那样**漏标一条 = 静默公开**，
+//    而默认拒绝下**漏标一条 = 静默受保护**（错得更安全）。红利：C3 加 `#/admin` 时
+//    **自动**落在受保护一侧，不需要回来改这里。
+//
+// ⚠️ **#1 不变量：`/login` 必须公开**（`:53` 的 `meta.public` 别删）。它同时是本守卫的落点与
+//    401 出口的落点（`main.js:49`）⇒ 一旦被标成「要登录」，就是**无限重定向**
+//    （未登录 → /login → 守卫又要登录 → /login …）。全站只有这一条会成环。
+//
+// ⚠️ **公开面 = 6 条**（`meta.public: true`）：`/login`、两壳的**首页**子路由、两壳的**搜索**子路由、
+//    `/product`。判据不是感觉，是**后端白名单**：这 6 条下的端点在 `AUTH_WHITELIST` 内，匿名
+//    拿得到数据（`HomePage` 的 `goodsSelectHome`/`goodstype`、`GoodsSelect` 的 `productSearch`、
+//    `ProductPage` 的三个商品端点）。反过来，**保护集 = 「该页全部端点都在白名单外」**——
+//    即 R3 的 `navFor()` 在匿名时已经藏起来的那三项（消息 / 购物车|订单中心 / 用户中心）。
+//    ⚠️ 两处**各自维护、无代码引用关系**（nav 管呈现、守卫管可达）：改一处**回头核另一处**，
+//    不会报错 —— 这是本笔唯一「静默分歧」型的风险。
+//    ⚠️ `/…/search` 判**公开**：它有数据（白名单）、`R4` 的 T-new-4 也期望匿名深链生效。
+//    原本与「首页点搜索仍弹登录提示」（R3 用户裁决 1，三条守卫在 `HomePage.vue`）**并存**；
+//    ⚠️ 该不一致已于 2026-10-06 **结清** —— 三条守卫拆除（改判 2，§5-AG (13)），两处判据现在一致。 ⚠️ **再按语（角色边界，2026-10-06，§5-AG (16)）**：本块的「公开面」在**已登录**一侧**收窄**了 —— 4 条**属某个壳**的公开面（两壳首页 / 搜索）从此只对**匿名**「任何人可进」，**已登录的跨壳用户会被踢回本角色首页**（判据在文件末尾第二条守卫）⇒ 读本块时**别把 `public` 当「谁都能进」**；`/login` 与 `/product` 这两条**壳外**公开面**不受影响**（仍是任何人）。
+//
+// ⚠️ **本条的判据只能是 `isLoggedIn()`**（不能是 `getRole()`）：这条划的是**登录**边界。
+//    ⚠️ 原文写「**角色**边界（客户能不能进商家壳）是 RBAC = C3 的事，本笔不做」**已于 2026-10-06 由用户改判**（C3 前必须先做）⇒ 落在**文件末尾的第二条守卫**（§5-AG (16)）；分工 = 本条管**匿名**、末尾那条管**壳归属**。⚠️ **两条的先后有意**：`public` 只豁免匿名 —— 若反过来先看 `public`，两壳首页/搜索这 4 条会漏检（正是用户实测到的现象）。
+//    ⚠️ `isLoggedIn()` **不是响应式**（读模块态 + `sessionStorage`）—— 守卫**每次导航都跑**，
+//    是全仓**唯一**吃它「取一次就够」性质的地方（`navFor` 那边相反，见 `config/nav.js` 的注释）。
+//    ⚠️ 时序前提：`landingFor` 上方那段「`main.js` 必须先 `await restoreIdentity()` 再
+//    `app.use(router)`」的耦合**本笔之后后果更强** —— 顺序坏了不只是「已登录被送进客户壳」，
+//    还会「已登录被判未登录 ⇒ 打不开任何受保护页」。
+//
+// ⚠️ **未匹配路径放行**（`to.matched.length === 0`）：全仓**没有 catch-all**，那种 URL 无组件
+//    可挂 ⇒ **零请求**，不在「受保护页」语义内。改它是 scope creep，本笔保持现状（白屏 + warning）。
+//
+// ⚠️ **为什么这段在文件末尾**：全仓对 `router/index.js` 有 **27 个**行号引用（`docs/` 26 + `config/nav.js:30`），
+//    **最大 `:227`** ⇒ 插在 `:239`(`searchLanding` 尾) 与 `:241`(`export default`) 之间**零漂移**
+//    （与 R3 §5-Z (10) 的「新增行落在被引用行最大行号之后」同一手法）。
+//    ⚠️ 放这儿**不影响语义**：注册序 = 执行序，但 `LEGACY_TAB` 归一化返回的是**新导航**
+//    （`pushWithRedirect` 递归）⇒ 全部守卫在新目标上**重跑一遍**，所以「谁先注册」对
+//    `#/customer?page=user` 这类旧 URL 的判定**不敏感**（实测，见 §5-AG 的探针）。
+//
+// ⚠️ **`redirect` query 的契约**：值 = `to.fullPath`（**带 query** —— `#/product?merchantId=..&goodName=..`
+//    的参数是 `ProductPage` 的必填输入，丢了就回不到原状态）。消费方是 `LoginPage.vue` 的
+//    `landingAfterLogin(role)`：它**角色校验 + 公开面豁免**后才回原目标，非法/缺失一律落角色首页
+//    （⇒ 无 query 时与本笔之前**逐字等价**）。⚠️ 改这里的 query 键名要同步改 `LoginPage.vue`
+//    与 `main.js:49` 两处 —— 三处是**同一条契约**，靠 `grep 'redirect'` 一次全命中。
+router.beforeEach((to) => {
+  if (to.matched.length === 0) return true      // 未匹配：无组件可挂、零请求，保持现状
+  if (to.meta.public === true) return true      // 公开面（6 条，见上）
+  if (isLoggedIn()) return true                 // 已登录：放行（⚠️ 本条只管**登录**；**角色**边界 = 文件末尾第二条守卫，2026-10-06，§5-AG (16)）
+  return { path: '/login', query: { redirect: to.fullPath } }
+})
+
+// ── 角色边界守卫（2026-10-06 用户裁定：C3 前必须做 —— 并入本笔；登记见 progress.md §5-AG (16)）──
+// 治的病（用户实测）：已登录**客户**手敲 `#/merchant/user/info` ⇒ 进**商家壳** + 拉**客户**数据
+//   （视觉与数据不一致）；反向同理。此前全仓**没有任何角色判据**（上面那条守卫的原文写着
+//   「只判登录，不判角色 —— C3」）⇒ 本笔把角色边界提前落地。
+//
+// ⚠️ **判据 = 路由记录上的 `meta.roles`（单一事实源）**：不新建文件、不新增 import、不另抄一张表。
+//   两条壳父记录（`:55` / `:86`）声明「谁能进这个壳」——客户壳 `['1','3']`、商家壳 `['2','3']`
+//   （`'3'` = 管理员，**两边都能进**，用户 2026-10-06 裁定；细粒度归 C3）。
+//   `meta` 沿 `matched` 链合并 ⇒ 子路由**自动继承**，无需逐条标（与 `meta.public` 同一机制）。
+//   ⚠️ `LoginPage.landingAfterLogin` 读的是**同一份数据**（`resolve(target).meta.roles`）——
+//      该文件 `:265-268` 早已写死这条口径：「角色校验不另抄一张表，而是复用守卫的 `meta`」。
+//   ⚠️ 兜底复用**本文件**的 `roleKey()`（`:225`，函数声明提升）：`getRole()` 的主来源是
+//      `sessionStorage`，新标签页里可能为空 ⇒ 与 `landingFor` / `cartLanding` **同一套兜底**，
+//      不新造第三份（⚠️ R6 裁决 D10 要合并的那两处**本笔不碰**，避免与待定笔撞车）。
+//
+// ⚠️ **顺序是本笔唯一容易做错的地方**：匿名判据（第一条 `return`）**必须在** `meta.roles` 之前 ——
+//   两壳**首页 / 搜索页是 `public`**，但它们**属某个壳**；若先看 `public` 就放行，已登录的跨壳
+//   用户会**漏检**（那正是用户实测的那 4 条）。⇒ 口径：**`public` 只豁免匿名；已登录一律再过 `roles`**。
+//
+// ⚠️ **为什么另起一条 `beforeEach`、而不是并进上面那条**：上面那条的注释块 + 5 行体被
+//   `progress.md` §5-AG (3)/(6) 按 **`:241-299`** / **`:298`** 整段引用 ⇒ 在它内部插行会让那两处
+//   **漂移**。⇒ 沿用「新增行落在被引行最大行号之后」的既有手法（R3 §5-Z (10) 先例）。
+//   ⚠️ 注册序 = 执行序：上面那条**先**跑 ⇒ 匿名在受保护页**先**被改成 `/login?redirect=…`
+//      （该次导航到此为止），角色判定只在「已登录」时才可能生效 —— 与「先登录、后角色」的直觉一致。
+//
+// ⚠️ **踢回哪 = 本角色首页（`ROLE_HOME`）、且不带 `redirect`**：目标页对这位用户**本就不合法**，
+//   登录完再回去也没用（同 `landingAfterLogin` 对非法目标的口径）。⚠️ `ROLE_HOME`（`:192`）今天
+//   只有 `'1'`/`'2'`；`'3'` 由 C3 补 —— 管理员两壳都进 ⇒ **走不到这里**，`|| '/customer'` 只是兜底。
+router.beforeEach((to) => {
+  if (!isLoggedIn()) return true                                        // 匿名：两壳首页 / 搜索照旧（R3 裁定**不变**）
+  const roles = to.meta.roles
+  if (!Array.isArray(roles) || roles.includes(roleKey())) return true   // 无 `roles`（`/login`、`/product`）或本壳 ⇒ 过
+  return { path: ROLE_HOME[roleKey()] || '/customer' }                  // 跨壳 ⇒ 送回**本角色**首页
+})
 
 export default router

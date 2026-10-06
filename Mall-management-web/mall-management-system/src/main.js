@@ -18,7 +18,7 @@ import { isLoggedIn, restoreFromSession, adoptSharedToken, getToken, setToken, p
 // ⚠️ **fail-open**：401 / 超时 / 网络错 / 非 JSON ⇒ 一律当「没有会话」，**静默**继续启动。
 //    这里**不**调 `handleApiError` —— 启动期不该弹窗（且它已对 UnauthorizedError 提前 return）。
 // ⚠️ 必须排在 `app.use(router)` **之前**：首次渲染就地读身份的地方
-//    （`ProductPage.vue:148-152` 的 `buyerId`、`HomePage.vue:119` 的 `isLogin` computed）
+//    （`ProductPage.vue:148-152` 的 `buyerId`、`HomePage.vue:119` 的 `isLogin` computed —— ⚠️ 后者已于 2026-10-06 删除、`:119` 现为按语，见 §5-AG (13)）
 //    在组件 setup 阶段把值**取一次就存下**，晚于挂载恢复就等于没恢复。
 // ⚠️ 已知不覆盖：同一标签页里 storage 还在、但**服务端会话已过期**时，`isLoggedIn()` 为真
 //    ⇒ 本函数直接返回、不做探针 ⇒ 要等某个业务请求 401 才会发现。这是**既有**行为，不在本笔。
@@ -46,7 +46,7 @@ async function bootstrap() {
   // ⚠️ 为什么不在 http.js 里直接 `router.push`：`router/index.js → views/* → api/http.js` 会成环
   //    ⇒ http.js 只负责「清态 + 抛 UnauthorizedError + 喊一声」，「跳哪」由图这里的路由决定
   //    （路径只写在这一处，将来改路由不会漏改传输层）。
-  setUnauthorizedHandler(() => { router.push('/login') })
+  setUnauthorizedHandler(() => { router.push({ path: '/login', query: { redirect: router.currentRoute.value.fullPath } }) })   // 前端路由守卫笔（2026-10-06）：带出事那一页的 fullPath ⇒ 与守卫同一条契约（`LoginPage.landingAfterLogin` 消费）。⚠️ 此刻 `handleUnauthorized` 尚未抛错，`currentRoute` 仍是用户所在页（`http.js` 的注释已记该时机）
 
   // 401 闩锁的**复位点 = 路由变化**：跳登录后闩锁置位（同一次会话只跳一次），
   // 用户再次导航时重新武装。⚠️ 不做成「任一 2xx 复位」—— 闸开时白名单端点（如 goodsSelectHome）
