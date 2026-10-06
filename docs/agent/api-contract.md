@@ -161,7 +161,7 @@
 ## 4. 待确认
 
 - ~~前端实际调用的接口子集与参数拼装方式 —— 前端源码未读。~~ **✅ 已关闭（2026-09-30）**：前端源码已读，矩阵见 **§5**。
-- ~~`ImgPath.java` / `ImgConfig.java` 是否额外暴露静态资源路由（影响 `http://localhost:8088/img/` 前缀的可用性）~~ **已关闭**：`ImgPath`（`@Configuration implements WebMvcConfigurer`）注册了 `/img/**` → `app.upload-dir` 的资源映射，故 `http://localhost:8088/img/<文件名>` 前缀可用；`ImgConfig` 只注册全局 `CorsFilter`，不涉及静态资源路由。证据（**2026-10-02 实测**；原记 `:15-16` / `:30-35` 已失效）：`ImgPath.java:17`（`@Value` 读 `app.upload-dir`）、`:45-64`（`@PostConstruct initUploadDir()`）、`:66-80`（`addResourceHandlers`，注册调用在 `:78`）；`ImgConfig.java:9-12`（`@Configuration` + `CorsFilter` bean）。实证：A2 的 `ImgMappingSmokeTest` 已断言 `GET /img/default_user.png` → 200。
+- ~~`ImgPath.java` / `ImgConfig.java` 是否额外暴露静态资源路由（影响 `http://localhost:8088/img/` 前缀的可用性）~~ **已关闭**：`ImgPath`（`@Configuration implements WebMvcConfigurer`）注册了 `/img/**` → `app.upload-dir` 的资源映射，故 `http://localhost:8088/img/<文件名>` 前缀可用；`ImgConfig` 只注册全局 `CorsFilter`，不涉及静态资源路由。证据（**2026-10-02 实测**；原记 `:15-16` / `:30-35` 已失效）：`ImgPath.java:17`（`@Value` 读 `app.upload-dir`）、`:45-64`（`@PostConstruct initUploadDir()`）、`:66-80`（`addResourceHandlers`，注册调用在 `:78`）；`ImgConfig.java:55-56` + `:67-68`（`@Configuration` + `@Bean corsFilter`；**原记 `:9-12`** —— ⚠️ **2026-10-06 CORS 收窄笔**新增 3 个 import + 类 javadoc ⇒ 其后行号整体下移，口径见 `progress.md` §5-AH）。实证：A2 的 `ImgMappingSmokeTest` 已断言 `GET /img/default_user.png` → 200。
 
 ## 5. 前端调用方矩阵（2026-09-30 实测，首次）
 

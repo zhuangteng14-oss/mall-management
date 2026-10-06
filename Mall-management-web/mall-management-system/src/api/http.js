@@ -123,8 +123,8 @@ export function assetOf(path) {
  *    只命中本文件的调用行；另两处在注释里）⇒ 42 处 API 调用**全部**经 `http.post/get`。
  *    含那 3 处「变量 URL」（`GoodsSelect.vue:92`（R2 重指；R1 记 `:91`、原记 `:81`）/ `OrderCenter.vue:129` / `FriendRoom.vue:231`）——
  *    它们 `urlOf(...)` 之后同样交给 `http.post`，**没有**绕过本层。
- *    后端侧已现成：`ImgConfig` 的 CorsFilter = `addAllowedOriginPattern("*")` +
- *    `allowCredentials(true)` ⇒ Spring **回显具体 origin**（不是 `*`），浏览器接受带凭据的跨源请求；
+ *    后端侧已现成（⚠️ 2026-10-06 CORS 收窄笔起 = **白名单化**，见下行按语）：`ImgConfig` 的 CorsFilter = `setAllowedOrigins(app.cors.allowed-origins)` +
+ *    `allowCredentials(true)` ⇒ Spring **回显具体 origin**（不是 `*`），浏览器接受带凭据的跨源请求；⚠️ **按语（CORS 收窄笔，2026-10-06，§5-AH）**：本行原写「`addAllowedOriginPattern("*")`」——**那个通配已被收窄**成字面量白名单（dev = `http://localhost:8080` + `http://127.0.0.1:8080`，prod 用 `APP_CORS_ALLOWED_ORIGINS` **整体替换**），但**结论不变**（仍回显具体 origin、仍允许凭据）⇒ dev 的 8080 → 8088 跨源与登录态流程**不受影响**；非白名单 origin 现在**被服务端当场拒**（403 + 零个 `Access-Control-*`，实测见 `docs/agent/progress.md` §5-AH (7) B1 档）—— **不是**「服务端照常处理、只靠浏览器拦」。
  *    真容器实测见 `progress.md §5-R (2)` 的 [12] / [13]。
  *    ⚠️ **2026-10-06（多账户隔离笔）已在此加 `Authorization: Bearer <token>`**（就在本函数体末尾）——
  *    这不是「改选 B」：票**由服务端签发**（`POST /user/token`），前端只负责携带，见 `auth.js` 末尾那节。
