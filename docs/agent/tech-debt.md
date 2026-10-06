@@ -58,12 +58,12 @@
 
 | 项 | 内容 |
 |---|---|
-| 现状 | `ImgConfig.java` 注册全局 `CorsFilter`（`addAllowedOriginPattern("*")`）；⚠️ ~~同时 **5 个** Controller 各自标注 `@CrossOrigin`~~ **2026-10-04 订正：那 5 处已由 PR #34 `23f5361` 全部删除** ⇒ 现为 **0 处** |
-| 证据 | `ImgConfig:11-22`（全局 `CorsFilter`）；⚠️ ~~**5 处**类级 `@CrossOrigin`：`GoodsController:38` / `OrderController:24` / `UserController:42` / `MessageController:44` / `HealthController:37`（**2026-10-03 实测**）~~ —— **该 5 处已于 PR #34 `23f5361` 删除**，上列坐标记录的是**删除前**的位置（原记「3 个 Controller」，订单拆出后曾增至 5 处；用户域 `:20` → `:42` 是三层第三笔 `0c07e96` 重写 `UserController` 所致；消息域 `:18` → `:44` 是三层第四笔 `8ed5fc1` 重写 `MessageController` 所致） |
-| 问题 | ① 全局 CORS 与局部 CORS 重复配置；② `allowedOriginPattern("*")` + `allowCredentials(true)` 组合在生产环境有安全风险 |
-| 建议 | 保留全局 `CorsFilter`（**PR #34 后已事实上唯一**）；⚠️ ~~移除 **5 个** Controller 的 `@CrossOrigin`~~ **已完成**（PR #34 `23f5361`）；**仍待办** —— 生产环境将 `allowedOriginPattern` 收敛为具体域名 |
+| 现状 | `ImgConfig.java` 注册全局 `CorsFilter`（~~`addAllowedOriginPattern("*")`~~ ⚠️ **2026-10-06 订正（CORS 收窄笔）：origin 侧已改为字面量白名单** —— `config.addAllowedOrigin(<逐项>)`，键 `app.cors.allowed-origins`，地址见下行「证据」；**通配在机制上已写不出**：配置含 `*` ⇒ 启动期直接失败。完整口径 + 四档取证见 `progress.md` **§5-AH**）；⚠️ ~~同时 **5 个** Controller 各自标注 `@CrossOrigin`~~ **2026-10-04 订正：那 5 处已由 PR #34 `23f5361` 全部删除** ⇒ 现为 **0 处** |
+| 证据 | `ImgConfig.java:67-79`（`@Bean corsFilter` 全体；**原记 `:11-22`** —— 本笔新增 3 个 import + 类 javadoc ⇒ 之后行号整体下移）+ `:88-110`（`applyAllowedOrigins`：解析 / 校验 / 启动期打印生效清单，本笔新增）；⚠️ ~~**5 处**类级 `@CrossOrigin`：`GoodsController:38` / `OrderController:24` / `UserController:42` / `MessageController:44` / `HealthController:37`（**2026-10-03 实测**）~~ —— **该 5 处已于 PR #34 `23f5361` 删除**，上列坐标记录的是**删除前**的位置（原记「3 个 Controller」，订单拆出后曾增至 5 处；用户域 `:20` → `:42` 是三层第三笔 `0c07e96` 重写 `UserController` 所致；消息域 `:18` → `:44` 是三层第四笔 `8ed5fc1` 重写 `MessageController` 所致） |
+| 问题 | ① 全局 CORS 与局部 CORS 重复配置（**PR #34 前**）；② ~~`allowedOriginPattern("*")` + `allowCredentials(true)` 组合在生产环境有安全风险~~ ⇒ ⚠️ **2026-10-06 订正：② 已消解** —— origin 侧白名单化后，`allowCredentials(true)` **只对白名单 origin 生效**；`allowedHeader` / `allowedMethod` / `maxAge` **刻意未动**（收窄它们挡不住攻击者、却带来真回归面，理由见 §5-AH） |
+| 建议 | 保留全局 `CorsFilter`（**PR #34 后已事实上唯一**）；⚠️ ~~移除 **5 个** Controller 的 `@CrossOrigin`~~ **已完成**（PR #34 `23f5361`）；⚠️ ~~**仍待办** —— 生产环境将 `allowedOriginPattern` 收敛为具体域名~~ ⇒ ✅ **已完成（2026-10-06，CORS 收窄笔）**：机制 = `addAllowedOrigin(String)` 逐条字面量（键 `app.cors.allowed-origins`；dev 值 = `http://localhost:8080,http://127.0.0.1:8080`）。⚠️ **生产部署时的唯一动作** = 设环境变量 `APP_CORS_ALLOWED_ORIGINS=https://你的域名`（**整体替换、不追加**）；**不设 = 拒绝全部跨源**（fail-closed + 启动期 WARN，进程照常起） |
 | 优先级 | 中 |
-| 状态 | 🟡 **部分关闭（2026-10-04 订正）** —— **重复配置面 ✅ 已关**（PR #34 `23f5361` 删 5 处 `@CrossOrigin`，与本节末「公共层 笔 1/3 —— CORS」的记录一致）；**通配风险面仍开**（`allowedOriginPattern("*")` + `allowCredentials(true)` 未收敛）。⚠️ 原「待确认」与本文件末节的「已合」记录**自相矛盾**，本次一并订正 |
+| 状态 | ✅ **已关闭（2026-10-06，CORS 收窄笔）** —— **两面均关**：**重复配置面** ✅（PR #34 `23f5361` 删 5 处 `@CrossOrigin`，与本文件末节「公共层 笔 1/3 —— CORS」的记录一致）+ **通配风险面** ✅（本笔：origin 侧字面量白名单，配置含 `*` **启动即失败**；非白名单 origin 由 `DefaultCorsProcessor` **当场拒**，不是「只靠浏览器拦」）。口径 / 四档取证 / 未收窄项的理由见 `progress.md` **§5-AH**。⚠️ 原记「🟡 部分关闭（2026-10-04 订正）」及更早的「待确认」**均已成史料** |
 
 ## TD-05 静态资源路径依赖 `user.dir`，jar 部署时会失效
 
@@ -341,7 +341,7 @@
 | 商品域三层（**第二笔**） | `GoodsController`(193) + `GoodsService`(459) + `GoodsDao`(211)；**8 条内联 SQL** 下沉 | PR #29 `4c1f31a` |
 | 用户域三层（**第三笔**） | `UserController`(121) + `UserService`(321) + `UserDao`(242)；SQL 硬编码 schema 名 **16 处**全部下沉 `UserDao` | PR #32 `0c07e96` |
 | 消息域三层（**第四笔**） | `MessageController`(143) + `MessageService`(534) + `MessageDao`(284)；schema 名 **0 处** | PR #33 `8ed5fc1` |
-| 公共层 笔 1/3 —— CORS | 删 **5 处**冗余 `@CrossOrigin` | PR #34 `23f5361` |
+| 公共层 笔 1/3 —— CORS | 删 **5 处**冗余 `@CrossOrigin`（⚠️ 本行只关 **TD-04 的「重复配置面」**；「通配风险面」由后一笔 **CORS 收窄笔**关闭，2026-10-06，见 `progress.md` §5-AH） | PR #34 `23f5361` |
 | 公共层 笔 2/3 —— `Result<T>` | 统一响应体 + **逐字节等价回归闸**；**28 个端点**返回类型换成 `Result` | PR #35 `ea2bf02`、`321773e` |
 | 公共层 笔 3/3 —— 异常 + 校验 | `GlobalExceptionHandler`（`assignableTypes` 白名单 + 封闭异常清单，**不做通用兜底**）+ 写接口 `@NotBlank` ×14 | PR #36 `573463c`、`1bd05d3` |
 | 缓存 笔 ② | 三处列表读不再「把失败当值缓存」（catch 上抛 + 响应组装搬回 Service）；另登记「单飞等待**无超时/无上限**」 | PR #37 `f1c26a8`、`8635487` |

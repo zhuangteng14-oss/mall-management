@@ -99,8 +99,8 @@
 
 | 项 | 位置 | 后果 | 档位 |
 |---|---|---|---|
-| CORS 等价「任意 Origin + 允许凭据」 | `ImgConfig.java:14,17,21` | `addAllowedOriginPattern("*")` + `setAllowCredentials(true)` + `/**` ⇒ 任意站点可带凭据读全部响应。**合法且最宽**，不是配错是配太开 | 亲读(框架) |
-| 上条覆盖 actuator | 同上 + `application.properties:97` | 匿名跨源读 `/actuator/metrics`（连接池等基础设施画像） | 推断 |
+| CORS 等价「任意 Origin + 允许凭据」 | ⚠️ **2026-10-06 订正（CORS 收窄笔）**：~~`ImgConfig.java:14,17,21`~~ ⇒ 现址 **`ImgConfig.java:70`**（白名单装配）/ **`:73`**（`setAllowCredentials(true)`）/ **`:77`**（`registerCorsConfiguration("/**")`） | ~~`addAllowedOriginPattern("*")` + `setAllowCredentials(true)` + `/**` ⇒ 任意站点可带凭据读全部响应。**合法且最宽**，不是配错是配太开~~ ⇒ ⚠️ **已收窄**：现为**字面量白名单**（键 `app.cors.allowed-origins`，dev = `http://localhost:8080` + `http://127.0.0.1:8080`；prod 靠 `APP_CORS_ALLOWED_ORIGINS` 整体替换），**非白名单 origin 当场被拒**（实测；口径 / 四档取证见 `progress.md` **§5-AH**）⇒ 原「任意站点…」**已成史料** | 亲读(框架) |
+| 上条覆盖 actuator | ~~同上 + `application.properties:97`~~ ⇒ **现值 `application.properties:124`**（`management.endpoints.web.exposure.include=health,metrics`）+ `WebAuthConfig.AUTH_WHITELIST`（**不含** `/actuator/**`） | ⚠️ **结论已两次失效**：① **2026-10-05 翻开关笔起** —— `app.auth.enabled=true` 且 actuator 不在白名单 ⇒ 匿名请求拿 **401**，「匿名读」不成立；② **2026-10-06 CORS 收窄笔起** —— 非白名单 origin 当场被拒。⇒ **保留为史料**（现值见 `progress.md` §5-AD / §5-AH） | 推断 |
 | ~~两套 CORS 机制并存~~ **已消解（2026-10-04 订正）** | ~~4 处裸 `@CrossOrigin`：`MallManagementGoodsController:27` / `MallManagementUserController:20` / `MallManagementMessage:18` / `HealthController:37`~~ ⇒ **PR #34 `23f5361` 已删全部 5 处**（原记 4 处，三层拆分后实为 5 处）⇒ 现仅 `ImgConfig` 全局 `CorsFilter` 一套 | ~~CorsFilter 是 servlet filter，先于 DispatcherServlet ⇒ handler 级配置**静默失效**；将来有人只改 `@CrossOrigin` 收紧 → 改了不生效且无提示~~ ⇒ **机制已合并，此风险不再成立** | 亲读(框架) |
 | 全端点匿名可达 | `pom.xml` 无 spring-security；fat jar grep = 0 | 登录是业务接口级判断，不是框架鉴权 | 亲读 |
 | 登录口令明文进 stdout，随 CI artifact 扩散 | `MallManagementUserController.java:39` | `System.out.println(username + "," + password)`；`ci.yml:315` 上传 `app.log` | 亲读 |
