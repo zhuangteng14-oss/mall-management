@@ -1,0 +1,465 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>消息 · B 稿 v4</title>
+<!--
+  ═══════════════════════════════════════════════════════════════════════════════
+  消息（ChatRoom）—— 界面优化笔 B 稿 **v2**（2026-10-06 重画）
+  ═══════════════════════════════════════════════════════════════════════════════
+  宿主：**同一个组件挂在 4 条路由上**（router/index.js 逐行核过）——
+    · `/customer/msg`       :59   meta.tab='msg'、layout='page'  → 客户壳顶栏「消息」高亮，无左菜单
+    · `/merchant/msg`       :93   同上，商家壳
+    · `/customer/user/chat` :79   `subMenu` 客户 **4 项**（:69-74，末项「消息」sub='chat'）
+    · `/merchant/user/chat` :121  商家 **6 项**（:102-109）
+    ⚠️ 后两条**没有自己的 `tab`**，`tab:'user'` 由父记录 `matched` 合并下来
+       （router/index.js:66-67 / :99）⇒ 顶栏亮的是「用户中心」，左菜单选中「消息」。
+  ⚠️ 四个视图的顶栏都按**仓库真在用的** `src/config/nav.js` 画（`CUSTOMER_NAV` / `MERCHANT_NAV`
+     = 左「商城主页」+ 右三项），**没有搜索框** —— 设计稿 `子页面改造.html:504-513` 里的
+     壳顶栏 `.search` 是 README「落地前必须先裁」第 1 条，尚未裁定。
+  ⇒ 本稿画 **5 个视图**：客户·消息 / 商家·消息 / 客户·用户中心·消息 / 商家·用户中心·消息 / 空态。
+    （四条的聊天区**逐字相同**，只有外壳不同 ⇒ 聊天区由一段 `body` 字符串注入四个挂载点。）
+
+  A 列对照（现有 ChatRoom.vue 378 行的每一件去哪了）：
+    保留并重画  头部「与 {username} 的会话」⇄「请选择一个会话」（:5-6）
+                / **会话列表**（原 `.dropdown-list`，数据来自 `message.conversations`，:177-198）
+                / 未读点（原 `.red-dot`，`conv.unread`，:25）
+                / 会话空文案「暂无会话」（原 `.dropdown-empty`，:27）
+                / 消息列表 self / other 两侧（:34-35）
+                / 商品消息卡片（`[PROD]` + JSON，:100-112；图 / 名称 / 型号 / 价格 / 可点进商品详情
+                  `goToProduct`，:115）
+                / 输入区「输入消息...」+【发送】 + 回车发送（:61-62）
+    保留机制    2s 轮询（`pollUpdates`，:260/369）、路由 query `otherId`·`otherType`（:340-352）——
+                都无视觉，不画。`alert()` 三处（:224 / :304 / :332）的**判据**改画成控件状态，
+                见下条 ③。
+
+  ── v1 为什么被退回 ──────────────────────────────────────────────────────────
+  ① **`height:80vh` 在壳里必溢出**：壳顶栏 60px + 80vh + 页面内边距 > 100vh
+     （ChatRoom.vue:383）⇒ 整页多出一截滚动条，而聊天区自己是内滚的 —— 两条滚动条打架；
+  ② **会话列表藏在下拉里**：`conversations` 自带 `unread`（:188-192），却只有展开那个
+     220px 下拉才看得见红点（:14-26）—— 「谁在等我回」这件事**必须展开一次**才知道，
+     而这个页面唯一的事就是回消息；
+  ③ **靠 `alert()` 告诉用户「请先选择一个会话」**（:304）：输入框在没选会话时和选了会话时
+     长得一模一样，回车弹窗才发现发不出去；
+  ④ **一页四套互不相干的色**：自己气泡 `#dcf8c5`（WhatsApp 绿，:489）、商品卡 `#fff3e0` +
+     `#ffcc80` + `#ff9800`（橙，:507/511/548）、发送按钮 `#007bff`（蓝，:570）、
+     会话下拉选中底 `#e6f7ff`（:445）—— 青瓷绿一个都没用上；
+  ⑤ **每个气泡下面都压一行 10px 的 `YYYY-MM-DD HH:MM:SS`**（:294/499）：15px 的正文配 10px 的
+     秒级时间戳，一屏下来是先读噪声再读内容；
+  ⑥ `border-radius:24px` 输入框 + `18px` 气泡 + `12px` 商品卡 + `6px` 下拉（:414/483/507/565）
+     —— 四个半径互不相干，frontend-design 反模板清单第 ④ 条的典型形态。
+
+  ── v2 重排 ─────────────────────────────────────────────────────────────────
+  · **高度按容器算**：`height:min(680px, calc(100vh - 180px))`，取代 `80vh`；整页不再多出滚动条。
+  · **会话列表从「下拉」改成左栏**（248px，常驻）：未读点、选中态、空文案「暂无会话」全部照搬，
+    数据同一个 `message.conversations` ⇒ **没有新增端点**。这是本稿**唯一需要用户点头的结构改动**
+    （原交互是「点开 220px 下拉再选」），已在交付说明里单列。
+  · **没选会话时输入框是「关」的**：输入框 `disabled` + 占位文案换成「请先选择一个会话」，
+    发送按钮置灰 —— 把 `alert()`（:304）的判据变成看得见的状态，不再等回车才弹窗。
+  · **颜色收进色板**：自己气泡 `--brand-tint`（青瓷绿最浅一档），对侧 `--surface-2`；
+    商品卡改发丝边 + 白底，价格用 `--accent`（朱砂只给价格）；发送按钮 `--brand`。
+  · **时间降噪**：日期收成一条居中的「今天」分隔线，气泡下只留 `HH:MM`（12px / `--ink-3`）——
+    秒级时间戳（`formatDateTime`，:294）不进气泡。
+  · **商品卡去掉 `→`**：反模板清单第 ⑤ 条点名「链接尾巴加 `→`」⇒ 改成 `--brand-ink` 的
+    「查看商品详情」，整张卡可点（`goToProduct` 不变）。
+  · 半径只用 `--r1` / `--r2` 两档；零阴影、零 `#hex`、零 `rgb()`。
+
+  ── 平台功能清单（8 条；覆盖率 8/8 = 100%）── v4 新增 ───────────────────────
+   # 条目                                   后端                              档     N  本笔怎么画
+   1 左会话列表（常驻、未读红点、选中态）    `message.conversations`           真     0  画
+   2 右当前会话头（对方名 / 会话 id）        `message.userSelect`              真     0  画
+   3 消息流（自己 / 对侧 / 商品卡三型）      `message.history`                 真     0  画
+   4 输入框 +【发送】+ 回车发送              `message.send`                    真     0  画
+   5 未选会话时输入区整条置灰               纯前端（把 :304 的 alert 变可见）  真     0  画
+   6 表情                                  纯前端：插入字符进输入框，走现有 send  真   0  画
+   7 图片消息                              无上传端点                          占位   4  画（超档·点名）
+   8 空态「暂无会话」                       `message.conversations` 返回空     真     0  画
+  真功能 7 / 占位 1 / 只登记 0 ⇒ 覆盖率 (7+1)/8 = **100%** ✔
+  ⚠️ 第 7 条的 N 在重画 GoodsUp 时按新口径由 2 改成 **4**：`endpoints.js` + `MessageController.java`
+     + `mall_management_sql.sql`（消息表要加一列存图 URL）+ `ChatRoom.vue`。旧口径漏了后端
+     `*Controller.java`，把「要新端点的功能」一律少算 1～2 处（README 有完整推导）。
+     ⚠️ 稳妥实现其实**不需要** `mall_management_sql.sql` 改动（图 URL 可塞进既有文本列），
+     那就是 3 处 —— 但那是个将就的做法，本笔按**正经实现**的数字标 4，并在角标里写明超档。
+  ⚠️ v3 的自查表把「表情 / 图片」整个漏掉了 —— 这正是 v4 判据换向要抓的那类「从现有 Vue 出发
+     看漏的东西」：`message.send` 只发文本，v3 就没往下问「正规 IM 的输入区还有什么」。
+
+  ── 占位清单（data-slot / data-future）：**1 块 / 视图，共 4 处** ────────────
+    ① 「图片」按钮 —— disabled + data-slot「预留 · 图片消息（动现有代码 2 处）」
+       + data-future「待 C3〈消息〉」+ title
+       （出现在 4 个聊天视图 a/b/c/d；空态 e 的输入区整条禁用，按钮不带角标）
+  ⚠️ 「图片」按钮只有 52px 宽、角标要 230px ⇒ 用 `.slot-stack` 把 `data-future` 挂到下边
+     （README 角标节；不加就会与左边的 slot 角标叠成一团）。
+  ⚠️ 会话与商品卡是**示例数据**（沿用既有样本：声谷旗舰店 / 84sH27Lw / 无线蓝牙耳机 声谷标准版 /
+     SG-BT-2024 / ¥129.00，见 `子页面改造.html` 的 CONVS 与 ShoppingCart-customer.html），
+     不是新端点、不是新字段。
+  ⚠️ **角标与 `.chat` 的 `overflow:hidden` 不冲突**：角标挂在 `.inp-area` 里的「图片」按钮上，
+     而 `.chat` 正是 `overflow:hidden` 的祖先 —— 必须确认按钮到 `.chat` 之间没有第二个裁切盒。
+     实测 `check-badges.mjs` 通过（角标向左伸进 `--s5` 的内边距内，没有越过 `.chat` 边界）。
+
+  ── 三问自查（v4 第四条）──────────────────────────────────────────────────
+    Q1 一眼能看出这是什么页吗？ ✔ 左会话栏 + 右消息流 + 底部输入区，IM 的标准三件套。
+    Q2 同模块不同状态一致吗？ ✔ 四个挂载点共用**同一份** `panel()` 渲染，只有外壳（左菜单有无）不同；
+       「未选会话」态只是输入区置灰，容器形态不动。
+    Q3 有异常区吗？ ✔ 「表情 / 图片」两个文字按钮补上后，输入区变成「工具 — 输入 — 发送」三段，
+       视线不再从输入框直接跳到发送。第一条 1080 截图复查：`.chat` 仍是 200px 竖栏，
+       工具按钮没有把输入框压到不可用（输入框 `flex:1;min-width:0` 会先让宽度）。
+  ═══════════════════════════════════════════════════════════════════════════════
+-->
+<link rel="stylesheet" href="../../../Mall-management-web/mall-management-system/src/assets/fonts/noto.css">
+<link rel="stylesheet" href="../../../Mall-management-web/mall-management-system/src/assets/fonts/mono.css">
+<!-- v5 收尾：'LXGW WenKai GB' 设计稿专用 link —— 理由/体积见 tokens.css 的 --font-display 段 -->
+<link rel="stylesheet" href="../../../../美化/node_modules/@free-fonts/lxgw-wenkai-gb/lxgw-wenkai-gb.css">
+<link rel="stylesheet" href="../../../Mall-management-web/mall-management-system/src/assets/tokens.css">
+<style>
+/* ── 预览条 + 预留位可视化：只是看稿工具，不进 Vue ─────────────────────────── */
+.bar{position:sticky;top:0;z-index:100;display:flex;align-items:center;gap:var(--s2);flex-wrap:wrap;
+     padding:var(--s2) var(--s4);background:var(--nav-bg);border-bottom:1px solid var(--line-2);font-size:var(--fs-xs)}
+.bar-t{font-weight:var(--fw-semi);color:var(--nav-tx-hi);margin-right:var(--s3)}
+.bar-t em{font-style:normal;color:var(--brand-ink)}
+.bar button{padding:2px var(--s3);border:1px solid var(--line);border-radius:var(--r1);background:var(--surface);color:var(--ink-2);font:inherit}
+.bar button.on{background:var(--brand);border-color:var(--brand);color:var(--bg)}
+.bar #slotBtn.on{background:var(--warning);border-color:var(--warning)}
+.bar .sep{width:1px;height:16px;background:var(--line-2);margin:0 var(--s2)}
+.bar .hint{margin-left:auto;color:var(--ink-3)}
+body.slots [data-slot],body.slots [data-future]{outline:2px dashed var(--warning);outline-offset:5px;position:relative}
+body.slots [data-future]{outline-color:var(--info)}
+body.slots [data-slot]::after,body.slots [data-future]::before{
+  position:absolute;top:-11px;font-size:10.5px;letter-spacing:.5px;padding:1px 8px;
+  border-radius:var(--r1);color:var(--bg);z-index:5;white-space:nowrap}
+body.slots [data-slot]::after{content:attr(data-slot);left:8px;background:var(--warning)}
+body.slots [data-future]::before{content:attr(data-future);right:8px;background:var(--info)}
+
+/* ── 基础 ─────────────────────────────────────────────────────────────────── */
+body{font-family:var(--font);font-size:var(--fs-sm);color:var(--ink);background:var(--bg);
+     -webkit-font-smoothing:antialiased}
+a{color:inherit;text-decoration:none}
+button,input{font:inherit;color:inherit}
+button{background:none;border:0;cursor:pointer}
+.page{display:none}
+.page.on{display:block}
+
+.nav-bar{display:flex;align-items:center;gap:var(--s5);height:60px;padding:0 var(--s7);
+         background:var(--surface);border-bottom:1px solid var(--line)}
+.brand{font-family:var(--font-display);font-size:var(--fs-lg);font-weight:var(--fw-semi);color:var(--brand-ink)}
+.nav-right{margin-left:auto;display:flex;align-items:center;gap:var(--s5);color:var(--nav-tx)}
+.nav-right a.on{color:var(--nav-now);font-weight:var(--fw-semi)}
+.dot{display:inline-block;width:6px;height:6px;margin-left:3px;border-radius:50%;
+     background:var(--accent);vertical-align:super}
+
+.wrap{max-width:1180px;margin:0 auto;padding:var(--s6) var(--s5) var(--s7)}
+/* 用户中心挂载点：左菜单 + 聊天区 */
+.split{display:grid;grid-template-columns:200px minmax(0,1fr);gap:var(--s6);align-items:start}
+.uc-menu a{display:block;padding:var(--s3) 0;border-bottom:1px solid var(--line);
+           font-size:var(--fs-sm);color:var(--ink-2)}
+.uc-menu a:hover{color:var(--ink)}
+.uc-menu a.on{color:var(--brand-ink);font-weight:var(--fw-semi)}
+
+/* ── 聊天面板 ─────────────────────────────────────────────────────────────── */
+.chat{display:grid;grid-template-columns:248px minmax(0,1fr);
+      /* ⚠️ 不是 80vh（ChatRoom.vue:383）：壳顶栏 60 + 预览条 40 + 上下内边距 80 已经吃掉 180
+         ⇒ 80vh 必然溢出，整页多一条滚动条跟聊天区自己的内滚打架 */
+      height:min(680px, calc(100vh - 180px));
+      border:1px solid var(--line-2);border-radius:var(--r2);overflow:hidden;background:var(--surface)}
+
+/* 左栏：会话列表（原为 220px 下拉，数据同一份 `message.conversations`）*/
+.rail{border-right:1px solid var(--line);display:flex;flex-direction:column;min-height:0;
+      background:var(--surface-2)}
+.rail-h{padding:var(--s4) var(--s5);border-bottom:1px solid var(--line);
+        font-size:var(--fs-xs);color:var(--ink-3)}
+.rail-list{flex:1;min-height:0;overflow-y:auto}
+.conv{display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:baseline;
+      gap:var(--s2);width:100%;text-align:left;padding:var(--s4) var(--s5);
+      border-bottom:1px solid var(--line)}
+/* ⚠️ 会话 id 是 15px、类型标签是 12px：两截都做 12px 时整列没有主次，
+   一列导航**得能扫**；id 用等宽是因为它是个标识符，不是句子 */
+.conv .ty{font-size:var(--fs-xs);color:var(--ink-3)}
+.conv .id{font-family:var(--font-mono);font-size:var(--fs-sm);color:var(--ink);
+          overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.conv .udot{width:6px;height:6px;border-radius:50%;background:var(--accent);align-self:center}
+.conv:hover{background:var(--surface)}
+.conv[aria-current="true"]{background:var(--brand-tint)}
+.conv[aria-current="true"] .id{color:var(--brand-ink);font-weight:var(--fw-med)}
+.rail-empty{padding:var(--s7) var(--s5);font-size:var(--fs-sm);color:var(--ink-3);text-align:center}
+
+/* 主列 */
+.main{display:flex;flex-direction:column;min-width:0;min-height:0}
+.chead{padding:var(--s4) var(--s5);border-bottom:1px solid var(--line);
+       display:flex;align-items:baseline;gap:var(--s4);flex-wrap:wrap}
+.chead h2{font-family:var(--font-display);font-size:var(--fs-lg);font-weight:var(--fw-med);
+          letter-spacing:-.01em}
+.chead .meta{font-family:var(--font-mono);font-size:var(--fs-xs);color:var(--ink-3)}
+.chead .none{font-size:var(--fs-lg);color:var(--ink-3)}
+
+.msgs{flex:1;min-height:0;overflow-y:auto;padding:var(--s5);
+      display:flex;flex-direction:column;gap:var(--s4)}
+/* ⚠️ 消息**贴底**（`scrollToBottom` 的静态等价物）：
+   不用 `justify-content:flex-end` —— 它在 `overflow-y:auto` 下会把溢出内容顶出可视区且滚不上去；
+   用首元素 `margin-top:auto`：内容不足时贴底，内容超出时正常从顶滚。 */
+.msgs>*:first-child{margin-top:auto}
+.day{align-self:center;font-size:var(--fs-xs);color:var(--ink-3)}
+.mi{display:flex}
+.mi.self{justify-content:flex-end}
+.bwrap{max-width:min(74%,460px);display:flex;flex-direction:column}
+.mi.self .bwrap{align-items:flex-end}
+.bub{padding:var(--s3) var(--s4);border-radius:var(--r2);font-size:var(--fs-sm);line-height:1.6}
+.mi.other .bub{background:var(--surface-2)}
+/* 自己的气泡 = 青瓷绿最浅一档（原 #dcf8c5 是 WhatsApp 绿，跟色板无关）*/
+.mi.self .bub{background:var(--brand-tint)}
+.bub.bare{padding:0;background:none}
+.tm{margin-top:var(--s1);font-size:var(--fs-xs);color:var(--ink-3)}
+
+/* 商品消息卡：发丝边 + 白底，朱砂只留给价格 */
+.pc{display:grid;grid-template-columns:64px minmax(0,1fr);gap:var(--s4);align-items:center;
+    width:320px;padding:var(--s3);text-align:left;background:var(--surface);
+    border:1px solid var(--line-2);border-radius:var(--r2)}
+.pc:hover{border-color:var(--brand)}
+.pc .th{width:64px;height:64px;border-radius:var(--r1);background:var(--img);border:1px solid var(--line)}
+.pc .nm{font-size:var(--fs-sm);line-height:1.4}
+.pc .dt{margin-top:2px;font-family:var(--font-mono);font-size:var(--fs-xs);color:var(--ink-3)}
+.pc .pr{margin-top:var(--s2);font-family:var(--font-display);color:var(--accent);
+        font-variant-numeric:tabular-nums}
+.pc .pr .u{font-size:var(--fs-xs)}
+.pc .pr .i{font-size:var(--fs-md)}
+.pc .pr .d{font-size:var(--fs-xs)}
+.pc .lk{display:block;margin-top:var(--s2);font-size:var(--fs-xs);color:var(--brand-ink);
+        font-weight:var(--fw-med)}
+
+/* 输入区：没选会话时整条是「关」的 */
+.inp-area{padding:var(--s4) var(--s5);border-top:1px solid var(--line);
+          display:flex;gap:var(--s3);align-items:center}
+.inp-area input{flex:1;min-width:0;height:40px;padding:0 var(--s4);border:1px solid var(--line-2);
+                border-radius:var(--r2);background:var(--surface)}
+.inp-area input:focus{outline:none;border-color:var(--brand);box-shadow:0 0 0 3px var(--brand-tint)}
+.inp-area input[disabled]{background:var(--surface-2);color:var(--ink-3);cursor:not-allowed}
+/* 表情 / 图片：用**文字小按钮**而不是 ☺ / 🖼 图标字。自托管 Noto 子集不保证有这些字形
+   （▾ / ▼ 就缺过，见 README），缺字会渲染成豆腐块；文字按钮零风险且更克制。 */
+.icon{height:40px;padding:0 var(--s3);border:1px solid var(--line-2);border-radius:var(--r2);
+      font-size:var(--fs-xs);color:var(--ink-2);flex:0 0 auto}
+.icon:hover{border-color:var(--ink-3);color:var(--ink)}
+.icon[disabled]{color:var(--ink-3);cursor:not-allowed}
+.send{height:40px;padding:0 var(--s6);border-radius:var(--r2);background:var(--brand);
+      color:var(--bg);font-weight:var(--fw-med);flex:0 0 auto}
+.send:hover{background:var(--brand-hover)}
+.send[disabled]{background:var(--surface-3);color:var(--ink-3);cursor:not-allowed}
+/* ⚠️ 「图片」按钮只有 52px 宽、角标要 230px ⇒ 两枚角标左右分挂会叠成一团。
+   `.slot-stack` 把 `data-future` 改挂下边（README 角标节）。 */
+body.slots .slot-stack[data-slot]::after{left:0}
+body.slots .slot-stack[data-future]::before{right:0;top:auto;bottom:-11px}
+
+@media (max-width:1080px){
+  .split{grid-template-columns:1fr}
+  .uc-menu{display:flex;flex-wrap:wrap;gap:var(--s5)}
+  .uc-menu a{border-bottom:0;padding:0}
+  /* ⚠️ 1080 下**只把会话栏收窄**（248→200），**不**改成顶部横排：
+     横排要占掉 rail-h + 一行 ≈ 150px 的高度，而聊天区总高是死的
+     ⇒ 消息区被压到 330px，最后一屏气泡直接被裁掉。竖栏只吃宽度不吃高度。 */
+  .chat{grid-template-columns:200px minmax(0,1fr);height:min(660px, calc(100vh - 200px))}
+  .bwrap{max-width:88%}
+  .pc{width:100%;max-width:340px}
+}
+/* 真正的窄屏（手机）才把会话栏横过来 —— 此时宽度本来就装不下两列 */
+@media (max-width:760px){
+  .chat{grid-template-columns:1fr;grid-template-rows:auto minmax(0,1fr)}
+  .rail{border-right:0;border-bottom:1px solid var(--line)}
+  .rail-h{padding-top:var(--s3);padding-bottom:var(--s3)}
+  .rail-list{display:flex;overflow-x:auto;overflow-y:hidden}
+  .conv{width:auto;flex:0 0 auto;border-bottom:0;border-right:1px solid var(--line)}
+}
+</style>
+</head>
+<body>
+
+<div class="bar">
+  <span class="bar-t">B 稿 v4 · 消息（ChatRoom） <em>4 挂载点 + 空态</em></span>
+  <button data-page="a" class="on">客户·消息</button>
+  <button data-page="b">商家·消息</button>
+  <button data-page="c">客户·用户中心·消息</button>
+  <button data-page="d">商家·用户中心·消息</button>
+  <button data-page="e">空态</button>
+  <span class="sep"></span>
+  <button id="slotBtn" title="本稿零占位块（ChatRoom 的端点都有）—— 点下去是空转">显示预留位 / 目标版</button>
+  <span class="hint">预览稿 · 项目源码未动</span>
+</div>
+
+<!-- ═══════════ 一、客户 · /customer/msg ═══════════ -->
+<section class="page on" data-page="a">
+  <nav class="nav-bar">
+    <a class="brand">商城主页</a>
+    <div class="nav-right"><a class="on">消息<i class="dot"></i></a><a>购物车</a><a>用户中心</a></div>
+  </nav>
+  <div class="wrap"><div id="stage-a"></div></div>
+</section>
+
+<!-- ═══════════ 二、商家 · /merchant/msg ═══════════ -->
+<section class="page" data-page="b">
+  <nav class="nav-bar">
+    <a class="brand">商城主页</a>
+    <div class="nav-right"><a class="on">消息<i class="dot"></i></a><a>订单中心</a><a>用户中心</a></div>
+  </nav>
+  <div class="wrap"><div id="stage-b"></div></div>
+</section>
+
+<!-- ═══════════ 三、客户 · /customer/user/chat ═══════════ -->
+<section class="page" data-page="c">
+  <nav class="nav-bar">
+    <a class="brand">商城主页</a>
+    <div class="nav-right"><a>消息<i class="dot"></i></a><a>购物车</a><a class="on">用户中心</a></div>
+  </nav>
+  <div class="wrap">
+    <div class="split">
+      <aside class="uc-menu">
+        <a>个人信息</a><a>历史购买记录</a><a>好友</a><a class="on">消息</a>
+      </aside>
+      <div id="stage-c"></div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══════════ 四、商家 · /merchant/user/chat ═══════════ -->
+<section class="page" data-page="d">
+  <nav class="nav-bar">
+    <a class="brand">商城主页</a>
+    <div class="nav-right"><a>消息<i class="dot"></i></a><a>订单中心</a><a class="on">用户中心</a></div>
+  </nav>
+  <div class="wrap">
+    <div class="split">
+      <aside class="uc-menu">
+        <a>个人信息</a><a>上架商品</a><a>查看商品</a>
+        <a>历史购买记录</a><a>好友</a><a class="on">消息</a>
+      </aside>
+      <div id="stage-d"></div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══════════ 五、空态 · 无会话 ═══════════ -->
+<section class="page" data-page="e">
+  <nav class="nav-bar">
+    <a class="brand">商城主页</a>
+    <div class="nav-right"><a class="on">消息<i class="dot"></i></a><a>购物车</a><a>用户中心</a></div>
+  </nav>
+  <div class="wrap"><div id="stage-e"></div></div>
+</section>
+
+<script>
+/* ── 会话样本：`other_id` / `other_type` / `unread` 三个字段与 `message.conversations`
+      的返回逐字同形（ChatRoom.vue:188-192）；用户名来自 `message.userSelect`（:167-169）。 */
+const PEERS_CUST = [
+  { ty: '商家', id: '84sH27Lw', unread: true,  name: '声谷旗舰店' },
+  { ty: '商家', id: 'A7k29Qz', unread: false, name: '木石杂货' },
+  { ty: '商家', id: 'M3p81Xv', unread: false, name: '青禾食品' }
+]
+const PEERS_MERC = [
+  { ty: '用户', id: 'C21f9Td', unread: true,  name: '林小满' },
+  { ty: '用户', id: 'Q8w3Lm',  unread: false, name: '周叙白' },
+  { ty: '用户', id: 'D5n47Rk', unread: false, name: '许知页' }
+]
+
+/* 消息行：kind = 'other' | 'self' | 'prod'（商品消息，恒为对侧发来） */
+const MSGS_CUST = [
+  { kind: 'other', t: '10:21', text: '在的，请问需要哪一款？' },
+  { kind: 'self',  t: '10:22', text: '无线蓝牙耳机 声谷标准版还有现货吗？' },
+  { kind: 'prod',  t: '10:24', good: '无线蓝牙耳机 声谷标准版', code: 'SG-BT-2024', i: '129', d: '00' },
+  { kind: 'self',  t: '10:26', text: '好的，我先拍一件。' }
+]
+const MSGS_MERC = [
+  { kind: 'other', t: '14:02', text: '这款还有现货吗？' },
+  { kind: 'prod',  t: '14:05', good: '无线蓝牙耳机 声谷标准版', code: 'SG-BT-2024', i: '129', d: '00' },
+  { kind: 'other', t: '14:06', text: '好的，我先拍一件。' }
+]
+
+/* ── 会话栏（原 220px 下拉 → 常驻左栏；未读点 / 选中态 / 空文案都照搬）──────── */
+function rail(peers, active) {
+  const head = '<div class="rail-h">会话 · ' + peers.length + '</div>'
+  const list = peers.length === 0
+    ? '<div class="rail-empty">暂无会话</div>'
+    : peers.map(p =>
+        '<button class="conv" type="button"' + (p.id === active ? ' aria-current="true"' : '') +
+        ' title="切换会话（数据来自 message.conversations，ChatRoom.vue:183）">' +
+        '<span class="ty">' + p.ty + '</span>' +
+        '<span class="id">' + p.id + '</span>' +
+        (p.unread ? '<span class="udot" title="未读"></span>' : '') +
+        '</button>').join('')
+  return '<div class="rail">' + head + '<div class="rail-list">' + list + '</div></div>'
+}
+
+/* ── 消息流 ──────────────────────────────────────────────────────────────── */
+function msgs(rows) {
+  if (rows.length === 0) return ''
+  const out = ['<div class="day">今天</div>']
+  for (const m of rows) {
+    const inner = m.kind === 'prod'
+      ? '<div class="pc" title="现有功能 goToProduct（ChatRoom.vue:115）">' +
+        '<div class="th"></div>' +
+        '<div><div class="nm">' + m.good + '</div>' +
+        '<div class="dt">型号：' + m.code + '</div>' +
+        '<div class="pr"><span class="u">¥</span><span class="i">' + m.i + '</span>' +
+        '<span class="d">.' + m.d + '</span></div>' +
+        '<span class="lk">查看商品详情</span></div></div>'
+      : m.text
+    out.push('<div class="mi ' + (m.kind === 'self' ? 'self' : 'other') + '">' +
+      '<div class="bwrap"><div class="bub' + (m.kind === 'prod' ? ' bare' : '') + '">' + inner + '</div>' +
+      '<div class="tm">' + m.t + '</div></div></div>')
+  }
+  return out.join('')
+}
+
+/* ── 整块聊天面板 ────────────────────────────────────────────────────────── */
+function panel(peers, active, rows) {
+  const peer = peers.find(p => p.id === active)
+  const head = peer
+    ? '<h2>与 ' + peer.name + ' 的会话</h2><span class="meta">' + peer.id + '</span>'
+    : '<span class="none">请选择一个会话</span>'
+  const input = peer
+    ? '<div class="inp-area">' +
+      '<button class="icon" type="button" title="表情 —— 纯前端：插入字符进输入框，走现有 message.send，不需要新端点">表情</button>' +
+      '<button class="icon slot-stack" type="button" disabled ' +
+        'data-slot="预留 · 图片消息（动现有代码 4 处）" data-future="待 C3〈消息〉" ' +
+        'title="待 C3〈消息〉——发图要先有上传端点：endpoints.js + MessageController.java + mall_management_sql.sql（消息表要加一列存图 URL）+ ChatRoom.vue = 4 处。**超档**（因清单点名而画出，见 README 挂账表）">图片</button>' +
+      '<input type="text" placeholder="输入消息..." title="回车发送（ChatRoom.vue:61）">' +
+      '<button class="send" type="button" title="现有端点 message.send（ChatRoom.vue:314）">发送</button></div>'
+    : '<div class="inp-area">' +
+      '<button class="icon" type="button" disabled title="未选择会话">表情</button>' +
+      '<button class="icon" type="button" disabled title="未选择会话">图片</button>' +
+      '<input type="text" placeholder="请先选择一个会话" disabled ' +
+      'title="ChatRoom.vue:304 的 alert 判据 —— 没选会话就发不出去，改成看得见的状态">' +
+      '<button class="send" type="button" disabled title="未选择会话">发送</button></div>'
+  return '<div class="chat">' + rail(peers, active) +
+    '<div class="main"><div class="chead">' + head + '</div>' +
+    '<div class="msgs">' + msgs(rows) + '</div>' + input + '</div></div>'
+}
+
+/* 四个挂载点：聊天区逐字相同，只有外壳不同 */
+document.getElementById('stage-a').innerHTML = panel(PEERS_CUST, '84sH27Lw', MSGS_CUST)
+document.getElementById('stage-b').innerHTML = panel(PEERS_MERC, 'C21f9Td', MSGS_MERC)
+document.getElementById('stage-c').innerHTML = panel(PEERS_CUST, '84sH27Lw', MSGS_CUST)
+document.getElementById('stage-d').innerHTML = panel(PEERS_MERC, 'C21f9Td', MSGS_MERC)
+document.getElementById('stage-e').innerHTML = panel([], '', [])
+
+/* ── 切页 ─────────────────────────────────────────────────────────────────── */
+const bar = document.querySelector('.bar')
+function go(key) {
+  document.querySelectorAll('.page').forEach(p => p.classList.toggle('on', p.dataset.page === key))
+  bar.querySelectorAll('button[data-page]').forEach(b => b.classList.toggle('on', b.dataset.page === key))
+  window.scrollTo(0, 0)
+}
+bar.querySelectorAll('button[data-page]').forEach(b => b.addEventListener('click', () => go(b.dataset.page)))
+
+/* ── 会话切换（本稿只做视觉：点哪条哪条亮）───────────────────────────────── */
+document.addEventListener('click', e => {
+  const c = e.target.closest('.conv')
+  if (!c) return
+  c.parentNode.querySelectorAll('.conv').forEach(x => x.setAttribute('aria-current', String(x === c)))
+})
+
+/* ── 预留位 / 目标版 开关 —— 本稿零占位块，点下去是空转 ───────────────────── */
+const slotBtn = document.getElementById('slotBtn')
+slotBtn.addEventListener('click', () => {
+  const on = document.body.classList.toggle('slots')
+  slotBtn.classList.toggle('on', on)
+  slotBtn.textContent = on ? '隐藏预留位 / 目标版' : '显示预留位 / 目标版'
+})
+</script>
+</body>
+</html>

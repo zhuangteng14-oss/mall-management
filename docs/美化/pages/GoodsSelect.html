@@ -1,0 +1,632 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>商品搜索 · B 稿 v5</title>
+<!--
+  ═══════════════════════════════════════════════════════════════════════════════
+  商品搜索 —— 界面优化笔 B 稿 **v5**（2026-10-06 判据换向后重画）
+  ═══════════════════════════════════════════════════════════════════════════════
+  宿主：**两个** —— `/customer/search`（router/index.js:59）与 `/merchant/search`（:90）。
+  两条路由挂的是**同一个** `GoodsSelect.vue` ⇒ 本稿两个视图的正文**逐字相同**，
+  差别只在壳顶栏右起第 2 项（`config/nav.js`：客户「购物车」⇄ 商家「订单中心」）。
+  ⚠️ 该路由**有意不设** `meta.tab`（router/index.js:38 注释）⇒ 停在搜索页时顶栏**所有项都不高亮**。
+
+  ── v4 相对 v2 的改动：**补上「左分类树」，并把排序条拆成两行** ──────────────
+  v2 缺用户清单点名的「左分类树」，排序条也缺「销量 / 有货 / 品牌 / 更多筛选」四项。
+  v2 已经画对的部分**逐字保留**：面包屑、56px 主视觉搜索框（按钮内嵌）、去盒子的发丝线
+  排序条、`auto-fill` 商品栅格、卡内三档字号（¥13 / 整数 24 宋体 / 小数 13）、发丝线分页。
+
+  ── v5 改了什么（两条，都对着用户的原始抱怨去）──────────────────────────────
+   用户原话：「搜索 / 购物车 / 个人页**色彩过于单一（只有少量按钮和文字是青瓷绿，
+   大块区域全是线条 + 留白）**」。搜索页对着这句话改两处：
+
+   ① **立一条全页唯一的用色规则：「当前态 = 青瓷绿 50 底」。**
+      落点三处（+hover 一处）：左树选中的二级分类 / 排序选中项 / 分页当前页 / 卡片 hover。
+      底是 `--brand-tint`，ΔE00/白 = **7.30** —— 挑它有据：同批 token 里 `--surface-2` 只有
+      **2.63**（拿它做选中态＝看不出来，v4 之前就是这么错的），`--zone` **2.71** 同理。
+      更关键的一条**语法更正**：v4 之前「选中」是用**绿色文字**表示的，而文字色该管**层级**、
+      底色才管**状态**。两者混用会让人在同一条栏里同时看见两处「绿」而分不清哪个是选中
+      （分类树里已经栽过一次，见下 ⑤）。
+   ② **删掉左栏那根 `border-right`。** 依据是四层语法：左栏 ⇄ 主栅格是**同级**两栏，
+      同级用**间距**、分区才用面/大留白，**线只该管分组**。同批稿里 UserCenter 的两个
+      `.uc-menu` 就是「无 border、靠 flex 间距」—— 搜索页这根竖线是**内部不一致**，
+      而且它是又一根加在「大块区域全是线条」上的线。⇒ 改为纯大留白
+      （`--s5` 栏内 + `--s6` 栅格 gap ≈ 52px 空白带）。
+      ⚠️ 分类树的**缩进引导线**（`.cat-l ul{border-left}`）**保留** —— 那一层是组内层级，
+      正是「线」该在的位置。
+
+   ⚠️ 我**没有**给搜索页发明一个侧栏底色面。理由要写清楚，因为 Q5 检查器会为此判 ✗：
+     调色板里 ΔE00/白 ≥ 4 的**中性**面根本不存在（`--zone` 2.71 / `--surface-2` 2.63 /
+     `--glaze-pale` 2.91，全在我自己定的「≥4 才算看得见」线下），唯一合格的是青瓷绿面
+     `--glaze-deep`(8.01)。把它铺满 260×1100 的侧栏 ≈ 全页 **10% 的绿** ——
+     那就撞上了「克制 > 堆砌」，且判据 B 给搜索页的用色口子**只有**卡片 hover 一处。
+     ⇒ 判据 B 说什么就做什么，不为了「统一」硬加色（用户原话）。
+
+  ── 实测到的后端事实（写稿前先查的，不是猜的）──────────────────────────────
+    · `GoodsController.goodstype`（:74-88）：GET 无参 ⇒ `GoodsTypeCacheService.listTypes()`，
+      SQL 逐字 = `SELECT Id, GoodType, GoodTypeNew FROM mall_management_sql.goodstype`
+      ⇒ 返回**扁平** `{success, list:[{Id, GoodType, GoodTypeNew}]}`，**不是树**。
+    · `goodstype` 表建表 + 数据（`mall_management_sql.sql:74-83`）：列 = `Id / GoodTypeNew /
+      GoodType`，5 行 = **电子用品 / 生活用品 / 服装 / 美食 / 运动用品**，`GoodTypeNew` **全为 0**。
+      ⇒ ★ **一级分类有真数据（一级名是真的），二级层级一条都没有**。
+        这条决定了分类树怎么画：一级写**真名**，二级只能写示意名 + 挂占位角标。
+    · `GoodsController.productSearch`（:222-225）：签名逐字 = `productSearch(String keyword)`
+      —— **只有 keyword**。无排序、无类目、无价格区间、无分页。
+    · `GoodsSelect.vue`（275 行）实测：第 89-90 行只对 `productSearch` 发
+      `keyword=` + `encodeURIComponent`，**全文没有调用过 `goodstype`**。
+      ⇒ 分类树在现有实现里**完全不存在**，但**数据源是现成的**（端点 + 5 条真数据都在）。
+
+  ── 平台功能清单（15 条；覆盖率 15/15 = 100%）─────────────────────────────
+   # 条目                                 后端证据                     档    N    本笔怎么画
+   1 面包屑（首页 / 商品搜索）             既有路由                     真    0    画
+   2 搜索框（56px，按钮内嵌）              `productSearch(keyword)`     真    0    画（真能搜）
+   3 左分类树（一级 + 二级，点击可筛）      一级有名无「筛」参数         占位  6    ⚠️超档，画（点名）
+   4 排序 · 综合                          现有默认序                   真    0    画（唯一真能用的排序项）
+   5 排序 · 销量                          `productsales.OrderVolume` 恒 0 占位 4  ⚠️超档，画（点名）
+   6 排序 · 价格 ↑ / ↓                    无 ORDER BY                  占位  4    ⚠️超档，画（点名）
+   7 排序 · 有货                          无库存列                     占位  5    ⚠️超档，画（点名）
+   8 筛选 · 品牌                          无品牌列                     占位  ≥5   ⚠️超档，画（点名）
+   9 筛选 · 价格区间                      无范围过滤                   占位  4    ⚠️超档，画（点名）
+  10 筛选 · 更多筛选（抽屉）              上面各项的聚合               占位  ≥6   ⚠️超档，画（点名）
+  11 商品栅格（4 列，自适应）             `productSearch` 返回         真    0    画
+  12 商品卡（图 / 两行名 / 衬线三档价）   `productSearch` 返回         真    0    画（跨页共性组件）
+  13「共 N 件」计数                      前端数组长度                 真    0    画
+  14 空态                                既有                         真    0    画
+  15 分页（首页/上/页码/下/末页）        无 LIMIT / COUNT             占位  4    ⚠️超档，画（点名）
+  真功能 7 / 占位 8 / 只登记 0 ⇒ 覆盖率 (7+8)/15 = **100%** ✔
+  ⚠️ **8 条占位里 7 条超档**，全部集中在「排序 / 筛选」这一条带上 —— 因为它们都要改
+     `searchByKeyword` 的 SQL 并加参数，最短链路就是 4 处（`GoodsDao` + `GoodsService` +
+     `GoodsController` + `GoodsSelect.vue`）。⇒ 本页是「覆盖率 vs ≤3 档」冲突最集中的一张：
+     严格按档执行只剩 7 条真功能，覆盖率 7/15 = 47%。冲突照 README 挂账表处理。
+
+  ── ★ 本页最有价值的一条区分：分类树「死的不是数据，是筛选参数」──────────────
+   `goodstype` 端点**现成、且有 5 条真数据**（不是空表）。所以分类树**不是**「后端什么都没有」
+   那种占位 —— 数据源是好的，缺的只是 `productSearch` 不接受类目参数。这意味着 D 笔要动的是
+   **查询链**，不是**造数据**。⇒ 头注必须写清楚，否则 D 笔会误以为要先补 `goodstype` 的数据。
+
+  ── 难度分辨：为什么二级分类按 **6** 标，而不是 2 ────────────────────────────
+   若只做「把二级分类名字显示出来」（不筛选）：改 `GoodsTypeCacheService.java`（SQL 取父子）
+   + `GoodsSelect.vue`（渲染） = **2 处**，**不超档** ⇒ 按判据该给真功能。
+   ⇒ 但那是**摆设**：点了没反应。正规平台的分类树点一下要出结果。
+   加上筛选（一级 + 二级都要能筛）：+ `GoodsDao` + `GoodsService` + `GoodsController`
+   = 合计 **6 处** ⇒ 超档。
+   ⇒ 本笔取严者（6），不取 2 —— 因为「画一个点了没反应的分类树」等于给自己发假进度。
+   这类「两种数法差一个数量级」的地方，本稿只有这一处，单列出来说明判据怎么落。
+
+  ── 跨页共性组件登记 ───────────────────────────────────────────────────────
+    · **商品卡**：与 `ProductPage.html` 推荐区、`ShoppingCart-customer.html` 猜你喜欢、
+      `UserCenter-customer.html` 收藏位**逐字同款**（`--img` 占位图 + 发丝边 + 两行名
+      `min-height:3em` + 衬线三档价）。**四处一起改，不许各自发挥。**
+    · **面包屑**：与全部内页同款（`--fs-xs`、分隔符与文字同色 `--ink-3`）。
+    · **空态**：与全部列表页同款（居中、宋体大字 + 一行说明）。
+    · **计数「共 N 件」**：与 `GoodsUp.html` 的列表计数同款（`--fs-xs` + `--ink-3`）。
+
+  ── 占位清单（data-slot / data-future）——角标只挂区块级 ────────────────────
+    · 左分类树整块 …………………………………………………………… N=6
+    · 排序 / 筛选条整块（内部 7 个控件各自 title 里写自己的 N）………… 最严 ≥6
+    · 分页整块 …………………………………………………………………… N=4
+  ⚠️ `check-drafts.mjs` 会数出 slots **7**，而可视区块只有 **3** 个 —— 差的 4 个是这么来的：
+     正文（分类树 + 排序条 + 分页）写成一份 `BODY` 常量，**注入 `customer` 与 `merchant` 两个视图**
+     （对应「同一组件挂两个路由」这一事实）⇒ 3 块 × 2 视图 = 6；`empty` 视图另画一份
+     （分类树 + 空态，**不含**排序条与分页）⇒ +1；合计 **7**。
+     ⚠️ 这与 `GoodsAdd.html` 的「校验态零角标」不矛盾：那边是**那些块根本没画**，
+     不是「画了故意不挂」；这边是**同一份 DOM 确实存在于两个视图里**。
+  ⚠️ 商品名 / 价格 / 件数 / 页码 / **二级分类名**均为示意 ——
+     二级分类名是示意**尤其要标**：`goodstype.GoodTypeNew` 全为 0，库里没有任何二级分类名可填，
+     画出来的「耳机 / 音箱」是照常识编的，不是查出来的（v2 头注只声明了商品名/价格/件数/页码，
+     本笔补上二级分类名这一条）。
+
+  ── 三问自查（v4 第四条）──────────────────────────────────────────────────
+    Q1 一眼能看出这是什么页吗？ ✔ 面包屑「首页 / 商品搜索」+ 56px 搜索框 + 左分类树 + 排序条
+       + 商品栅格 + 分页 —— 是搜索页的标准读法，不会和首页/详情页混淆。
+    Q2 同模块不同状态视觉一致吗？ ✔ 三个视图共用同一份 `.crumb` / `.search` / `.cat` / `.card`；
+       `empty` 只把主区的栅格换成一个 `.empty`，分类树与搜索框**照旧在位**（真实电商无结果时
+       左侧分类树也不会消失）。排序条在两态间不变。
+    Q3 有异常区吗？ ✔ 落笔时定下两条：
+       ① 排序项从 4 个涨到 5 个、筛选又多了品牌/价格/更多，一行**放不下**
+          ⇒ 拆成显式两行（r1 排序 + 计数，r2 筛选），**不靠 flex-wrap** ——
+          GoodsUp 踩过「wrap 折行位置随视口变、左竖线悬空」的坑。
+       ② 分类树占左栏后主区变窄 ⇒ 必须重算列数：`minmax(190px,1fr)` 在主区 848px 下是 **4 列**
+          （不是 v2 的 6 列），列距 24px 不能跟着缩。
+       **截图读回后又抓到五条（③④⑤⑥⑦）：**
+       ③ 【真缺陷】slots 态里分类树的角标**横跨到右邻的排序条上**，压住它的上边框
+          （GoodsUp 的「角标横跨到邻居」同款事故）。
+          ⚠️ **这一条我在头注里先写错了一版，改回来并把教训留下**：
+            我起初凭截图**目测**角标宽 242px，据此写「加宽到 260px 后已收回栏内」；
+            随后又目测了一次、读成 323px，于是改口说「加宽没用、得换挂法」，还写进了头注。
+            **两次目测都不作数** —— 用 `getComputedStyle` 量出来的实际值是 **237px**：
+              · 左栏 200px 时：角标占 [162, 399]，而主区左边缘在 **386** ⇒ 压住 13px（确实要修）
+              · 左栏 260px 时：主区左边缘在 **446** ⇒ 角标右边缘 399，净空 **47px** ✔
+            ⇒ 结论：**加宽到 260px 本来就是有效的**，不需要换挂法。栏宽就这么定了。
+            ⇒ 教训：**目测像素两次都不准；宽窄这类判断必须量**（`getBoundingClientRect` 一行的事）。
+              头注里凡带数字的结论，先量再写 —— 否则改口一次就要再改一次。
+       ④ 【真缺陷】分类树的两枚角标**撞在一起**：slot 角标占 [162,399]、future 角标右对齐
+          到栏右边缘占 [274,406]，横向重叠 125px，而 `::after` 画在 `::before` 之上
+          ⇒ **蓝色「待 C3〈搜索〉」被整个盖住、截图里根本看不见**。
+          ⇒ 把 future 角标挪到下沿（`top:auto;bottom:-11px`，下方是分类树之下的空白）；
+             slot 角标留在上沿默认位（与其他 9 份稿一致）。
+             另给 slot 角标加 `max-width:244px` + `white-space:normal` 作**护栏**
+             （实测 237 < 244 ⇒ 当前不换行；只是防以后改文案时又伸出去）。
+       ⑤ 1080 下左栏 260px + 主区只剩约 520px ⇒ `minmax(190px,1fr)` 掉到 **2 列**，
+          卡片被拉得又宽又扁、和 1440 的观感不是同一张稿 ⇒ `@media(max-width:1080px)` 下
+          分类树**改横排**（与 GoodsAdd / GoodsUp 的 `.uc-menu` 同一套处理），主区吃满整宽。
+       ⑤ 【真缺陷】分类栏里「全部商品」和「电子用品」**同时是绿色加粗** ——
+          前者是 `.cur`（当前项）、后者是 `.open`（已展开），两者被我用了同一套视觉语言
+          ⇒ 读起来像「两个都选中了」。⇒ 绿色+加粗**只留给选中**；「已展开」的一级
+          只是比其余一级深一档灰（`--ink` vs `--ink-2`）。
+       ⑥ 「全部商品」原本挂着 `.cur`，但示意里选中的是「电子用品 › 耳机 / 音箱」——
+          两个层级同时「选中」本身就是矛盾。⇒ 去掉「全部商品」的 `.cur`。
+
+  ── Q4 配色比例是否参考了成熟方案（v5 新增）──────────────────────────────
+   ⚠️ **没有照抄** Linear / Stripe / Vercel，理由写在《v5-配色分析.md》：那三家主色
+     OKLCH **C = 0.235 / 0.214 / 0.159**，我们 `--brand #3b7966` 只有 **0.072**，差 2~3 倍。
+     「主色 ≤10% 面积」这条经验的前提是**主色够响**；前提不成立时照抄只会更单调。
+   ⇒ 改用**两根轴**挑色（彩度 C ≲0.03 才像釉 + ΔE00/白 ≥ 4 才算看得见），
+     并据此认定全站唯一可用的重色就是 `--glaze-deep` 与 `--brand-tint` 两枚。
+   ⇒ 搜索页的量：**青瓷绿 0.60% / 朱砂 0.21% / 灰面 23.91% / 留白 74.04%**。
+     青瓷绿比 v4 的 0.17% 涨了 — 涨的全在「当前态」上，不是铺面。
+   ⚠️ **参考对象也是按页定的**：登录页要极简、个人页要有节奏、搜索页是**高密度内容页**，
+     它的正确参照是**淘宝/京东搜索结果页**（左树 + 两行筛选带 + 自适应栅格 + 居中分页），
+     而不是 Linear 那种营销页 —— 密度不同，用色量的合理值本来就不同。
+
+  ── Q5 同页分区视觉是否交替（v5 新增）—— **这一条本页判 ✗，我不掩饰** ──────
+   `measure-hierarchy.mjs` 实测：7 个分区容器里只认 **1 个真分区**（`grid-wrap`），
+   该分区**一个正面处理都没有、全靠留白** ⇒ 判 ✗ 同质。
+   ⚠️ 但这个 ✗ 我**不去改工具凑结论**（那是拿判据迁就结论），如实记账：
+     · 工具的分区阈值逐字是 `rb.height >= 70`（`measure-hierarchy.mjs:166`，
+       注释：「页标题 / 面包屑 / 工具条不是分区」）。本页**唯一带正面处理**的区是 `search`
+       —— 底色 `#3b7966`、ΔE00 **44.71**、填色 10%，即那枚搜索按钮 —— 但它的高只有 **56px**，
+       被这条阈值剔掉了。⇒ 这是一个**盲点**：只带一条细带作正面处理的页面，恒判 ✗。
+     · 而工具没判错的是**事实**：本页在整个「结果区」这个尺度上，确实没有面、也没有块。
+   ⇒ 该不该补一个面？**不该**，理由见上面「我**没有**给搜索页发明一个侧栏底色面」那一段
+     —— 补面只能补出 10% 的青瓷绿，撞「克制 > 堆砌」+ 判据 B。
+   ⇒ 因此本页 Q5 的处置是：**判 ✗、记录理由、不补面**。这与登录页是同一个处置
+      （「目标区间按页定，不按笔定」），区别是登录页的 ✗ 来自「极简是它的定位」，
+      本页的 ✗ 来自「唯一可用的面会撞更高的判据」。两页都**明确写下来**，不静默放过。
+
+  ── Q6 这份稿我为什么这样改？和上一版的根本差异是什么？（v5 新增）──────────
+   **根本差异：v4 把「选中」当文字色问题，v5 把它当底色问题。**
+     v4：选中项 = 绿色加粗文字（三个落点各自写一遍）。后果有二 ——
+     ① 文字色被同时用来表达「层级」和「状态」，两种含义打架（分类树 ⑤ 就是栽在这上面）；
+     ② 静态截图下「绿字」和「黑字」的强度差很弱，用户读到的就是「大块区域全是线条 + 留白」。
+     v5：选中项 = `--brand-tint` 底色（ΔE00 7.30，看得见），文字色**退回只管层级**。
+     一条规则（当前态 = 青瓷绿 50 底）统摄四处落点，而不是四处各写各的。
+   次要差异：删掉左栏 `border-right`（线不该管同级两栏）。
+   ⚠️ 一句话检验：**v4 的搜索页，把浏览器调成灰度，几乎分不出哪个分类是选中的；
+      v5 的能分出来**（底色块比文字色重得多）。这是这一版真正买到的东西。
+
+  ── 参考：淘宝 / 京东搜索结果页（左分类树 + 两行排序筛选带 + 自适应栅格 + 居中分页）、
+     Zalando 列表页（分类树可收起、筛选与排序分带）。
+  ═══════════════════════════════════════════════════════════════════════════════
+-->
+<!-- ⚠️ 本文件在 docs/美化/pages/ 下，比 docs/美化/*.html 深一层 ⇒ 资产前缀是**三级** `../../../` -->
+<link rel="stylesheet" href="../../../Mall-management-web/mall-management-system/src/assets/fonts/noto.css">
+<link rel="stylesheet" href="../../../Mall-management-web/mall-management-system/src/assets/fonts/mono.css">
+<!-- v5 收尾：'LXGW WenKai GB' 设计稿专用 link —— 理由/体积见 tokens.css 的 --font-display 段 -->
+<link rel="stylesheet" href="../../../../美化/node_modules/@free-fonts/lxgw-wenkai-gb/lxgw-wenkai-gb.css">
+<link rel="stylesheet" href="../../../Mall-management-web/mall-management-system/src/assets/tokens.css">
+<style>
+:root{ --d2: calc(var(--fs-2xl) * 1.00); }
+
+/* ── 预览条 + 预留位可视化：只是看稿工具，不进 Vue ─────────────────────────── */
+.bar{position:sticky;top:0;z-index:100;display:flex;align-items:center;gap:var(--s2);flex-wrap:wrap;
+     padding:var(--s2) var(--s4);background:var(--nav-bg);border-bottom:1px solid var(--line-2);font-size:var(--fs-xs)}
+.bar-t{font-weight:var(--fw-semi);color:var(--nav-tx-hi);margin-right:var(--s3)}
+.bar-t em{font-style:normal;color:var(--brand-ink)}
+.bar button{padding:2px var(--s3);border:1px solid var(--line);border-radius:var(--r1);background:var(--surface);color:var(--ink-2);font:inherit}
+.bar button.on{background:var(--brand);border-color:var(--brand);color:var(--bg)}
+.bar #slotBtn.on{background:var(--warning);border-color:var(--warning)}
+.bar .sep{width:1px;height:16px;background:var(--line-2);margin:0 var(--s2)}
+.bar .hint{margin-left:auto;color:var(--ink-3)}
+body.slots [data-slot],body.slots [data-future]{outline:2px dashed var(--warning);outline-offset:5px;position:relative}
+body.slots [data-future]{outline-color:var(--info)}
+body.slots [data-slot]::after,body.slots [data-future]::before{
+  position:absolute;top:-11px;font-size:10.5px;letter-spacing:.5px;padding:1px 8px;
+  border-radius:var(--r1);color:var(--bg);z-index:5;white-space:nowrap}
+body.slots [data-slot]::after{content:attr(data-slot);left:8px;background:var(--warning)}
+body.slots [data-future]::before{content:attr(data-future);right:8px;background:var(--info)}
+/* ⚠️ 这一段 v5 **重写过** —— 上一版留在这里的是一份**已被推翻的测量**，且与下面两行注释自相矛盾
+   （这里写「角标 323px、加宽到 260px 没用」，下面写「237px」）。实测（1440 视口，
+   **`document.fonts.ready` 之后再量**）：
+     · 角标自然宽 **238px**，从 x=162 起 ⇒ 占 [162, 400]
+     · 左栏右缘 **414** ⇒ 栏内放得下（余 14px）；主区左缘 **446** ⇒ **净空 46px**，压不到排序条
+     · 渲染高度 = 一个 line-height(14.17px) ⇒ **单行、没换行**
+   ⇒ 结论：260px 栏宽本来就够，**不需要换挂法、也不需要换行**。
+     下面那条 `max-width:244px` + `white-space:normal` 是**护栏**（238 < 244，当前不触发），
+     只为防以后改文案又伸出去 —— 不是修复某次已发生的溢出。
+   ⚠️ 教训：这件小事我**目测过两次**（先读成 242px、后读成 323px），两次都不作数，
+     第二次还据此写进头注说「加宽没用」。238 是 `getBoundingClientRect` 量出来的。
+     ⚠️ 并且**必须等字体落定**：同一枚角标在字体没加载完时量出的是 221px。
+     凡带像素数的结论，先量、且等 `fonts.ready` —— 否则改口一次就要再改一次。 */
+body.slots .cat[data-slot]::after{white-space:normal;line-height:1.35;max-width:244px}
+/* ⚠️ 分类树这一处**两枚角标会撞**：slot 角标占 [162,400]、future 角标右对齐到栏右缘占 [335,406]
+   ⇒ 横向重叠 65px，而 `::after` 画在 `::before` 之上 ⇒ **蓝角标被整个盖住**（截图里根本看不见）。
+   ⇒ 把 future 角标挪到下沿（下方是分类树之下的空白，不压任何内容）。
+   ⚠️ 与 ChatRoom 的 `.slot-stack`「窄元素换下沿」是同一手法。
+   ⚠️ 挪下沿的**只有 future 这一枚**；slot 角标留在上沿默认位（与其余 9 份稿一致）。 */
+body.slots .cat[data-future]::before{top:auto;bottom:-11px;max-width:132px;text-align:right}
+
+/* ── 基础 ─────────────────────────────────────────────────────────────────── */
+body{font-family:var(--font);font-size:var(--fs-sm);color:var(--ink);background:var(--bg);
+     -webkit-font-smoothing:antialiased}
+a{color:inherit;text-decoration:none}
+button,input{font:inherit;color:inherit}
+button{background:none;border:0;cursor:pointer}
+
+.nav-bar{display:flex;align-items:center;gap:var(--s5);height:60px;padding:0 var(--s7);
+         background:var(--surface);border-bottom:1px solid var(--line)}
+.brand{font-family:var(--font-display);font-size:var(--fs-lg);font-weight:var(--fw-semi);color:var(--brand-ink)}
+.nav-right{margin-left:auto;display:flex;align-items:center;gap:var(--s5);color:var(--nav-tx)}
+.nav-right a.on{color:var(--nav-now);font-weight:var(--fw-semi)}
+.dot{display:inline-block;width:6px;height:6px;margin-left:3px;border-radius:50%;
+     background:var(--accent);vertical-align:super}
+
+.wrap{max-width:1180px;margin:0 auto;padding:var(--s7) var(--s5) var(--s8)}
+.page{display:none}
+.page.on{display:block}
+
+/* 面包屑：分隔符**与文字同色**（同为 `--ink-3`）—— 用 `--line-2` 时对比度只有 1.47:1，
+   正是 check-contrast.mjs 要抓的「根本看不见」那一类。层级靠间距和字形区分。 */
+.crumb{display:flex;align-items:center;font-size:var(--fs-xs);color:var(--ink-3)}
+.crumb .sp{font-style:normal;padding:0 var(--s2)}
+.crumb .cur{color:var(--ink-2)}
+
+/* 页标题 */
+.page-h{margin-top:var(--s4);font-family:var(--font-display);font-size:var(--d2);font-weight:var(--fw-med);
+        line-height:1.15;letter-spacing:-.02em}
+
+/* 搜索框（主视觉）：56px，按钮嵌在框内 */
+.search{margin-top:var(--s6);display:flex;align-items:center;max-width:760px;height:56px;
+        border:1px solid var(--line-2);border-radius:var(--r3);background:var(--surface);
+        transition:border-color .15s,box-shadow .15s}
+.search:focus-within{border-color:var(--brand);box-shadow:0 0 0 3px var(--brand-tint)}
+.search input{flex:1;height:100%;padding:0 var(--s5);border:0;background:none;font-size:var(--fs-md)}
+.search input:focus{outline:none}
+.search .go{margin-right:6px;height:44px;padding:0 var(--s6);border-radius:var(--r2);
+            background:var(--brand);color:var(--bg);font-weight:var(--fw-med)}
+.search .go:hover{background:var(--brand-hover)}
+
+/* ⚠️ 左栏 260px 是被 slots 角标**逼出来**的：分类树角标文案宽约 242px，
+   栏宽 200px 时它会伸出到右邻的排序条上（GoodsUp 的「角标横跨到邻居」同款）。
+   260px 也正好落在淘宝/京东分类栏的量级上，不算为调试让步。 */
+.grid-wrap{margin-top:var(--s6);display:grid;grid-template-columns:260px minmax(0,1fr);gap:var(--s6);align-items:start}
+.main{min-width:0}
+
+/* ── 左分类树 ─────────────────────────────────────────────────────────────── */
+/* ⚠️ v5：这里原来有一根 `border-right:1px solid var(--line)`。
+   删掉的理由是**四层语法**：左栏 ⇄ 主栅格是**同级**两栏（不是分区内分组），
+   同级的分隔手段是间距、不是线；分区级才用大留白/面。同一批稿里
+   UserCenter 的两个 `.uc-menu` 就是「无 border、靠间距」——搜索页这根线是内部不一致。
+   而且它落在用户点名的那块「大块区域全是线条」上，等于又加了一根。
+   ⇒ 改为纯大留白：`--s5`(内) + `--s6`(栅格 gap) ≈ 56px 的空白带。
+   媒体查询里 1120px 以下那条 `border-right:0` 一并删除（已无对象），
+   竖向堆叠仍保留 `border-bottom`（那一层是**分区级**换行，用线是对的）。 */
+.cat{padding-right:var(--s5)}
+.cat-h{font-size:var(--fs-xs);color:var(--ink-3);margin-bottom:var(--s4)}
+.cat-l,.cat-l ul{list-style:none;margin:0;padding:0}
+.cat-l>li{border-bottom:1px solid var(--line);padding:var(--s3) 0}
+.cat-l>li:first-child{border-top:1px solid var(--line)}
+.lv1{display:block;font-size:var(--fs-sm);color:var(--ink-2);padding:var(--s1) 0}
+.lv1:hover{color:var(--ink)}
+/* ⚠️ 「已展开」和「已选中」必须是**两种**视觉语言，否则同一栏里会同时出现两处「绿+加粗」，
+   读起来像两个都选中了（v4 第一轮截图一眼可见）。
+   ⇒ 绿色+加粗**只留给选中**（`.on`，见下）；「已展开」的一级只是比其余一级深一档灰。 */
+li.open>.lv1{color:var(--ink)}
+.cat-l ul{margin-top:var(--s2);padding-left:var(--s3);border-left:1px solid var(--line)}
+.cat-l ul a{display:block;font-size:var(--fs-xs);color:var(--ink-3);padding:3px 0}
+.cat-l ul a:hover{color:var(--brand-ink)}
+/* ⚠️ v5：**「当前态 = 青瓷绿 50 底」** 是全页唯一的一条用色规则，出现在三个地方：
+     ① 左树里选中的**二级分类**（这里）  ② 排序里选中的项  ③ 分页的当前页
+   依据判据 A/B：`--brand-tint` ΔE00/白 = **7.30**，是「看得见 + 釉色」的那一档
+   （对比 `--surface-2` 的 2.63 —— 拿它做选中态等于看不出来）。
+   ⇒ 这一条**替代了**原来「选中=绿色文字」的做法：文字色只管层级，底色才管状态。 */
+.cat-l ul a.on{color:var(--brand-ink);font-weight:var(--fw-med);background:var(--brand-tint);
+               border-radius:var(--r1);padding:3px var(--s2);margin-left:calc(var(--s2) * -1)}
+.cat-more{padding-left:var(--s3);margin-top:var(--s2)}
+.cat-more button{font-size:var(--fs-xs);color:var(--ink-3)}
+.cat-more button:hover{color:var(--brand-ink)}
+.cat-more .car{display:inline-block;width:0;height:0;border-left:4px solid transparent;
+               border-right:4px solid transparent;border-top:5px solid currentColor;
+               margin-left:4px;vertical-align:middle}
+
+/* ── 排序 / 筛选条：去盒子，上下两条发丝线；**显式两行**，不靠 flex-wrap ────── */
+.toolbar{display:flex;flex-direction:column;gap:var(--s3);
+         padding:var(--s4) 0;border-top:1px solid var(--line);border-bottom:1px solid var(--line)}
+.trow{display:flex;align-items:center;gap:var(--s6);flex-wrap:wrap}
+.tgroup{display:flex;align-items:center;gap:var(--s4)}
+.tgroup>.lbl{font-size:var(--fs-xs);color:var(--ink-3);white-space:nowrap}
+/* 每个排序项都带 padding ⇒ 选中项加底色时**行高不跳**（v4 只在 .on 上加样式会推挤邻项）*/
+.sort{color:var(--ink-2);font-size:var(--fs-sm);padding:var(--s1) var(--s3);border-radius:var(--r1)}
+.sort:hover{color:var(--ink)}
+/* v5：选中态加 --brand-tint 底（与左树选中项、分页当前页同一条规则）*/
+.sort.on{color:var(--brand-ink);font-weight:var(--fw-semi);background:var(--brand-tint)}
+.sort[disabled]{cursor:not-allowed}
+.range{display:flex;align-items:center;gap:var(--s2);font-size:var(--fs-sm)}
+.range input{width:72px;height:32px;padding:0 var(--s2);border:1px solid var(--line-2);
+             border-radius:var(--r1);background:var(--surface-2);color:var(--ink-2);text-align:center;
+             font-variant-numeric:tabular-nums}
+.range .dash{color:var(--ink-3)}
+.pick{display:flex;align-items:center;gap:var(--s2);color:var(--ink-2);font-size:var(--fs-sm)}
+.pick[disabled]{cursor:not-allowed}
+/* ⚠️ 用 CSS 三角，不用 `▾` 字形 —— 自托管子集里没有该码位，实测回落成一个小点 */
+.pick .car{width:0;height:0;border-left:4px solid transparent;border-right:4px solid transparent;
+           border-top:5px solid currentColor;margin-left:2px}
+.trow .right{margin-left:auto;font-size:var(--fs-xs);color:var(--ink-3);white-space:nowrap}
+
+/* ── 商品栅格：auto-fill + 40px 行距（v2 从「等分六列 + 小间距」改过来的，保留）── */
+.grid{margin-top:var(--s6);display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:40px 24px}
+/* ⚠️ v5：卡片加 8px 内边距 + 等量负外边距 —— 这样 hover 的底色块才不会紧贴图边，
+   而**栅格间距一个字没变**（负外边距把那 8px 还回去了）。
+   ⚠️ 判据 B 原文：「搜索页 —— 卡片 hover 青瓷绿 50 底」。我照做，并且选 --brand-tint
+   不是因为它好看，是因为实测 ΔE00/白 = 7.30 ⇒ **hover 会真的被看见**；
+   原来的 `.card:hover .thumb{border-color:--line-2}` 只有 ΔE00 1.7，等于没反馈。 */
+.card{display:block;padding:var(--s2);margin:calc(var(--s2) * -1);
+      border-radius:var(--r2);transition:background .15s}
+.card:hover{background:var(--brand-tint)}
+/* 无图可放：底仍用 --img（tokens.css:81 就是为「商品图占位」定义的），
+   只加一圈发丝边 ⇒ 读成「空图框」而不是一块死灰 —— 不另造一个更浅的灰 */
+.thumb{aspect-ratio:1/1;border-radius:var(--r2);background:var(--img);border:1px solid var(--line)}
+/* ⚠️ `min-height:3em` = 两行：否则一行名 / 两行名的卡片价格不在同一水平线上 */
+.c-name{margin-top:var(--s3);font-size:var(--fs-sm);line-height:1.5;color:var(--ink-2);min-height:3em;
+        display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+/* 价格三档：¥ 13 / 整数 24 宋体 / 小数 13 —— 三段同号时卡里没有对比 */
+.c-price{margin-top:var(--s2);display:flex;align-items:baseline;color:var(--accent);
+         font-variant-numeric:tabular-nums}
+.c-price .sym{font-size:var(--fs-xs)}
+.c-price .int{font-family:var(--font-display);font-size:var(--fs-lg);font-weight:var(--fw-med);line-height:1}
+.c-price .dec{font-size:var(--fs-xs)}
+
+/* ── 空态 ─────────────────────────────────────────────────────────────────── */
+.empty{padding:var(--s8) 0;text-align:center;color:var(--ink-3)}
+.empty .big{font-family:var(--font-display);font-size:var(--fs-lg);color:var(--ink-2);margin-bottom:var(--s3)}
+
+/* ── 分页：发丝线文字按钮 ─────────────────────────────────────────────────── */
+.pager{margin-top:var(--s8);display:flex;justify-content:center;align-items:center;gap:var(--s2)}
+.pg{min-width:40px;height:36px;padding:0 var(--s3);border-radius:var(--r2);color:var(--ink-2);font-size:var(--fs-sm);
+    font-variant-numeric:tabular-nums}
+.pg:hover{background:var(--surface-2)}
+/* v5：当前页也用 --brand-tint 底（与左树选中项、排序选中项同一条规则）。
+   hover 仍留在 --surface-2：**hover 是瞬时反馈、当前页是状态**，两者不该同色。 */
+.pg.on{color:var(--brand-ink);font-weight:var(--fw-semi);background:var(--brand-tint)}
+.pg[disabled]{color:var(--ink-3);cursor:not-allowed}
+.pg[disabled]:hover{background:none}
+
+/* 1080：分类树**改横排**（与 GoodsAdd / GoodsUp 的 .uc-menu 同一套处理），主区吃满整宽。
+   ⚠️ 不这么做的话，左 260px 会把主区压到约 520px，栅格掉到 2 列、卡片又宽又扁 ——
+   与 1440 的观感不是同一张稿（Q3 第 ④ 条）。 */
+@media (max-width:1080px){
+  .grid-wrap{grid-template-columns:1fr;gap:var(--s5)}
+  .cat{padding-right:0;border-bottom:1px solid var(--line);padding-bottom:var(--s4)}
+  .cat-l{display:flex;flex-wrap:wrap;gap:0 var(--s5)}
+  .cat-l>li{border-bottom:0;padding:var(--s2) 0}
+  .cat-l>li:first-child{border-top:0}
+  /* ⚠️ 横排时**二级分类整层收掉**，只留一级。
+     第一版是把二级也摊平（缩进改 0）—— 截图一看层级彻底丢了：
+     「耳机 / 音箱 充电配件」浮在「电子用品 生活用品」下面，读不出谁是谁的子项，
+     反而比不显示更容易误读。⇒ 窄屏只留一级，这是响应式分类栏的通行做法。 */
+  .cat-l ul,.cat-more{display:none}
+}
+</style>
+</head>
+<body>
+
+<div class="bar">
+  <span class="bar-t">B 稿 v5 · 商品搜索 <em>双壳共用</em></span>
+  <button data-page="customer" class="on">客户顶栏</button>
+  <button data-page="merchant">商家顶栏</button>
+  <button data-page="empty">空态</button>
+  <span class="sep"></span>
+  <button id="slotBtn">显示预留位 / 目标版</button>
+  <span class="hint">预览稿 · 项目源码未动</span>
+</div>
+
+<!-- ═══════════ 一、客户顶栏 ═══════════ -->
+<section class="page on" data-page="customer">
+  <nav class="nav-bar">
+    <a class="brand">商城主页</a>
+    <div class="nav-right"><a>消息<i class="dot"></i></a><a>购物车</a><a>用户中心</a></div>
+  </nav>
+  <div class="wrap" id="body-customer"></div>
+</section>
+
+<!-- ═══════════ 二、商家顶栏（正文与客户视图逐字相同，只差顶栏右起第 2 项）═══════════ -->
+<section class="page" data-page="merchant">
+  <nav class="nav-bar">
+    <a class="brand">商城主页</a>
+    <div class="nav-right"><a>消息<i class="dot"></i></a><a>订单中心</a><a>用户中心</a></div>
+  </nav>
+  <div class="wrap" id="body-merchant"></div>
+</section>
+
+<!-- ═══════════ 三、空态（分类树与搜索框照旧在位，只有主区的栅格被换掉）═══════════ -->
+<section class="page" data-page="empty">
+  <nav class="nav-bar">
+    <a class="brand">商城主页</a>
+    <div class="nav-right"><a>消息<i class="dot"></i></a><a>购物车</a><a>用户中心</a></div>
+  </nav>
+  <div class="wrap" id="body-empty"></div>
+</section>
+
+<script>
+/* ⚠️ 本段整体是一个 **JS 模板字符串** ⇒ 里面的 HTML 注释**不许出现反引号**
+   （ProductPage 踩过：一个反引号提前截断字符串 ⇒ 整页白屏）。 */
+
+/* ── 左分类树：一级是**真名**（goodstype 表里 5 条），二级是**示意名**（库里没有）── */
+const CAT = `
+  <aside class="cat" data-slot="预留 · 左分类树（动现有代码 6 处 · 超档）" data-future="待 C3〈搜索〉"
+         title="待 C3〈搜索〉——★数据源是好的：goodstype 端点现成、表里 5 条真分类（电子用品/生活用品/服装/美食/运动用品）。缺的是**筛选参数**，不是数据。要能动：GoodsDao.java（SQL 加类目 where）+ GoodsService.java + GoodsController.java + GoodsSelect.vue（取值 + 传参）= 4 处；再加二级层级（GoodTypeNew 列存在但**数据全 0**）还要 GoodsTypeCacheService.java 改 SQL + 造数据 = 6 处。**超档**，因清单点名而画出（见 README 挂账表）">
+    <div class="cat-h">全部分类</div>
+    <ul class="cat-l">
+      <li><a class="lv1">全部商品</a></li>
+      <li class="open">
+        <a class="lv1">电子用品</a>
+        <ul>
+          <li><a class="on" title="二级分类名为示意 —— goodstype.GoodTypeNew 全为 0，库里无任何二级分类名">耳机 / 音箱</a></li>
+          <li><a>充电配件</a></li>
+        </ul>
+        <div class="cat-more"><button disabled title="暂无更多二级分类">更多<span class="car"></span></button></div>
+      </li>
+      <li>
+        <a class="lv1">生活用品</a>
+        <ul>
+          <li><a title="二级分类名为示意">保温杯 / 杯具</a></li>
+          <li><a>收纳整理</a></li>
+        </ul>
+      </li>
+      <li>
+        <a class="lv1">服装</a>
+        <ul>
+          <li><a title="二级分类名为示意">外套</a></li>
+          <li><a>配饰</a></li>
+        </ul>
+      </li>
+      <li>
+        <a class="lv1">美食</a>
+        <ul>
+          <li><a title="二级分类名为示意">烘焙轻食</a></li>
+          <li><a>咖啡 / 茶饮</a></li>
+        </ul>
+      </li>
+      <li>
+        <a class="lv1">运动用品</a>
+        <ul>
+          <li><a title="二级分类名为示意">健身器材</a></li>
+          <li><a>户外装备</a></li>
+        </ul>
+      </li>
+    </ul>
+  </aside>`
+
+/* ── 排序 / 筛选条：显式两行 ───────────────────────────────────────────── */
+const TOOLBAR = `
+  <div class="toolbar" data-slot="预留 · 排序 / 筛选（逐项 4～6 处 · 均超档）" data-future="待 C3〈搜索〉"
+       title="待 C3〈搜索〉——每个控件自己的 N 见其 title。共同点：都要改 searchByKeyword 的 SQL 并加参数，最短链路 4 处（GoodsDao + GoodsService + GoodsController + GoodsSelect.vue）">
+    <div class="trow">
+      <div class="tgroup">
+        <span class="lbl">排序</span>
+        <button class="sort on" disabled title="综合 —— 真功能：就是现在的默认返回序，前端不加参数即可，N=0">综合</button>
+        <button class="sort" disabled title="销量 —— 动现有代码 4 处（GoodsDao 加 join productsales + GoodsService + GoodsController + GoodsSelect.vue），**超档**。⚠️ 且 productsales.OrderVolume 全仓硬编码传 0、无 SELECT 读出 ⇒ 就算排了序也是全员并列">销量</button>
+        <button class="sort" disabled title="价格升序 —— 动现有代码 4 处（GoodsDao 的 SQL 加 ORDER BY + GoodsService + GoodsController + GoodsSelect.vue），**超档**">价格 ↑</button>
+        <button class="sort" disabled title="价格降序 —— 同上，4 处，**超档**">价格 ↓</button>
+        <button class="sort" disabled title="有货优先 —— 动现有代码 5 处（goods 表**无库存列**：mall_management_sql.sql + GoodsDao + GoodsService + GoodsController + GoodsSelect.vue），**超档**">有货</button>
+      </div>
+      <span class="right">共 <span id="cnt">16</span> 件</span>
+    </div>
+    <div class="trow">
+      <div class="tgroup">
+        <span class="lbl">品牌</span>
+        <button class="pick" disabled title="品牌筛选 —— 动现有代码 ≥5 处（goods 表**无品牌列**：mall_management_sql.sql + GoodsDao + GoodsService + GoodsController + GoodsSelect.vue），**超档**">全部品牌<span class="car"></span></button>
+      </div>
+      <div class="tgroup">
+        <span class="lbl">价格</span>
+        <div class="range">
+          <input type="text" value="0" disabled title="价格区间 —— 动现有代码 4 处（GoodsDao 的 SQL 加 BETWEEN + GoodsService + GoodsController + GoodsSelect.vue），**超档**">
+          <span class="dash">—</span>
+          <input type="text" value="500" disabled title="同上，4 处，**超档**">
+        </div>
+      </div>
+      <div class="tgroup">
+        <span class="lbl">更多</span>
+        <button class="pick" disabled title="更多筛选（抽屉）—— 上面各项的聚合，动现有代码 ≥6 处（各项之和 + 抽屉组件），**超档**">更多筛选<span class="car"></span></button>
+      </div>
+    </div>
+  </div>`
+
+/* ── 分页 ─────────────────────────────────────────────────────────────── */
+const PAGER = `
+  <nav class="pager" data-slot="预留 · 分页（动现有代码 4 处 · 超档）" data-future="待 C3〈搜索〉"
+       title="待 C3〈搜索〉——无 LIMIT / COUNT：GoodsDao.java（SQL 加 LIMIT + 一条 count）+ GoodsService.java + GoodsController.java + GoodsSelect.vue = 4 处，**超档**，因清单点名而画出。页码为示意。">
+    <button class="pg" disabled title="无分页端点">首页</button>
+    <button class="pg" disabled title="无分页端点">上一页</button>
+    <button class="pg on" disabled title="无分页端点">1</button>
+    <button class="pg" disabled title="无分页端点">2</button>
+    <button class="pg" disabled title="无分页端点">3</button>
+    <button class="pg" disabled title="无分页端点">下一页</button>
+    <button class="pg" disabled title="无分页端点">末页</button>
+  </nav>`
+
+/* ── 正文（一份，注入 customer 与 merchant 两个视图）───────────────────── */
+const BODY = `
+  <nav class="crumb"><a>首页</a><span class="sp">/</span><span class="cur">商品搜索</span></nav>
+  <h1 class="page-h">商品搜索</h1>
+
+  <div class="search">
+    <input type="text" value="蓝牙耳机" placeholder="搜索商品、品牌、分类">
+    <button class="go">搜索</button>
+  </div>
+
+  <div class="grid-wrap">
+    ${CAT}
+    <div class="main">
+      ${TOOLBAR}
+      <div class="grid"></div>
+      ${PAGER}
+    </div>
+  </div>`
+
+/* ── 空态：分类树与搜索框**照旧在位**，只有主区的栅格换成空态 ─────────────── */
+const BODY_EMPTY = `
+  <nav class="crumb"><a>首页</a><span class="sp">/</span><span class="cur">商品搜索</span></nav>
+  <h1 class="page-h">商品搜索</h1>
+
+  <div class="search">
+    <input type="text" value="zzz不存在的商品" placeholder="搜索商品、品牌、分类">
+    <button class="go">搜索</button>
+  </div>
+
+  <div class="grid-wrap">
+    ${CAT}
+    <div class="main">
+      <div class="empty">
+        <div class="big">没有找到相关商品</div>
+        <div>换个关键词，或去掉品牌与价格区间限制再试一次。</div>
+      </div>
+    </div>
+  </div>`
+
+document.getElementById('body-customer').innerHTML = BODY
+document.getElementById('body-merchant').innerHTML = BODY
+document.getElementById('body-empty').innerHTML = BODY_EMPTY
+
+/* ── 商品卡（示意数据）─────────────────────────────────────────────────── */
+const GOODS = [
+  ['无线蓝牙耳机 声谷标准版', 129.00], ['不锈钢保温杯 500ml', 69.00],
+  ['有机全麦面包 每日鲜', 19.90], ['机械键盘 静音红轴', 359.00],
+  ['便携充电宝 20000mAh', 149.00], ['纯棉抗菌毛巾 三条装', 39.90],
+  ['天然乳胶枕 护颈款', 199.00], ['冷萃咖啡液 十二瓶装', 88.00],
+  ['折叠雨伞 全自动款', 59.00], ['陶瓷马克杯 350ml', 29.90],
+  ['蓝牙音箱 便携防水', 239.00], ['桌面收纳盒 三层抽屉', 45.00],
+  ['主动降噪耳机 声谷 Pro', 499.00], ['羊毛混纺围巾 秋冬款', 118.00],
+  ['硅胶折叠水壶 便携', 35.00], ['速溶黑咖啡 三十条装', 79.00]
+]
+document.querySelectorAll('.grid').forEach(g => {
+  g.innerHTML = GOODS.map(([name, p]) => {
+    const [i, d] = p.toFixed(2).split('.')
+    return '<a class="card"><div class="thumb"></div><div class="c-name">' + name + '</div>' +
+      '<div class="c-price"><span class="sym">¥</span><span class="int">' + i + '</span>' +
+      '<span class="dec">.' + d + '</span></div></a>'
+  }).join('')
+})
+document.querySelectorAll('#cnt').forEach(el => { el.textContent = GOODS.length })
+
+/* ── 切页 ─────────────────────────────────────────────────────────────────── */
+const bar = document.querySelector('.bar')
+function go(key) {
+  document.querySelectorAll('.page').forEach(p => p.classList.toggle('on', p.dataset.page === key))
+  bar.querySelectorAll('button[data-page]').forEach(b => b.classList.toggle('on', b.dataset.page === key))
+  window.scrollTo(0, 0)
+}
+bar.querySelectorAll('button[data-page]').forEach(b => b.addEventListener('click', () => go(b.dataset.page)))
+
+/* ── 预留位 / 目标版 开关 —— 默认关闭 ─────────────────────────────────────── */
+const slotBtn = document.getElementById('slotBtn')
+slotBtn.addEventListener('click', () => {
+  const on = document.body.classList.toggle('slots')
+  slotBtn.classList.toggle('on', on)
+  slotBtn.textContent = on ? '隐藏预留位 / 目标版' : '显示预留位 / 目标版'
+})
+</script>
+</body>
+</html>

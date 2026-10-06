@@ -1,0 +1,1058 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>商品详情 · 公开页 · B 稿 v5</title>
+<!--
+  ═══════════════════════════════════════════════════════════════════════════════
+  商品详情 · 公开页 —— 界面优化笔 B 稿 **v4**（2026-10-06 判据换向后重画）
+  ═══════════════════════════════════════════════════════════════════════════════
+  宿主：`/product`（router/index.js:125），`meta.public: true` ⇒ **不进壳**：本页没有左菜单、
+        也没有壳顶栏（AppShell.vue 的 `.top-nav`），页顶自带一条导航。
+        ⚠️ README「落地前必须先裁」#1（壳搜索框）与本页无关 —— 本页本来就不进壳。
+
+  ── v3 为什么被退回（用户给的铁证，本笔认账）────────────────────────────────
+  v3 只有「图 + 名 + 规格 + 价 + 咨询 + 购入」—— 那是「一张图、一个价、一个按钮」。
+  正规商品详情页还有：面包屑 / 服务承诺条 / 商家卡 / 四 Tab / 评价区 / 推荐区。
+  v3 一个都没有。根因不是画得糙，是**判据拿错了**：v2/v3 从「现有 Vue 里有什么」出发，
+  必然只产出「换样式 + 补几个明显的缺」。
+
+  ── v4 判据（README「B 笔 v4」节）───────────────────────────────────────────
+  从「这一页在正规电商平台里该有什么」出发 → 先出清单 → 逐条给难度档：
+    · 有后端（能落在 `src/api/endpoints.js` 的 34 条端点上）→ **真功能**，直接画；
+    · 无后端 + 加它要改的**既有文件** ≤3 处 → **占位**（disabled + data-slot + 角标 + title）；
+    · 无后端 + 改既有文件 >3 处 → **不占位，只登记**。
+  「N 处」口径 = 让这一块真跑起来必须**修改的既有文件**条数（`.vue` / `.java` /
+    `endpoints.js` / `router/index.js`）；新建文件不计入，**新端点写进既有的 `endpoints.js` 算 1 处**。
+  ⚠️ 与 v4 原文的一处声明性偏差：原文举例「0 处（如猜你喜欢）→ 占位」，
+    但 `endpoints.js` 里**有 `goods.goodsSelectHome`** ⇒ 推荐区是**真功能**，本笔按真功能画。
+    同理，**既无后端、又零新增数据**的纯静态块（服务承诺条 / 售后保障 / 放大镜）
+    记 **真功能 N=0**（落码不欠后端任何东西），不标占位。
+
+  ── 平台功能清单（19 条；覆盖率 18/19 = 94.7%）─────────────────────────────
+   # 条目                                          后端                    档     N   本笔怎么画
+   1 面包屑（首页 / 分类 / 商品）                   `goods.goodstype`       真     0   画
+   2 图集：主图 + 4 缩略图 + 左右翻页               现有 `ProductPage.vue`  真     0   画
+   3 放大镜（悬停放大 + 角标）                      纯前端                  真     0   画（可交互）
+   4 商品名 / 商家名 / 商品类型                     `goodsSelect` 等        真     0   画
+   5 现价（大号衬线 + 朱砂，唯一强调色数字）        `productCodePrice`      真     0   画
+   6 划线原价 + 折扣角标                           无原价/折扣字段          占位   5   ⚠️超档，画（点名）
+   7 促销行：满减 + 优惠券领取                     无促销/券字段            占位   5   ⚠️超档，画（点名）
+   8 规格（型号）按钮组                            `productCodePrice`      真     0   画
+   9 数量 − 1 +                                    现有购入弹窗已有          真     0   画
+  10 【加入购物车】（主）                          无购物车端点              占位   3   画（data-slot）
+  11 【立即购买】（次）                            `order.orderAdd`        真     0   画
+  12 服务承诺条（正品 / 7天 / 极速退款 / 运费险）   纯静态                  真     0   画
+  13 商家卡（客服 + 进店逛逛）                     客服=`message.send`；进店=无  占位 ≥4 ⚠️超档，画（点名）
+  14 Tab ① 商品详情（长图 + 文字介绍）             无富文本字段              占位   6   ⚠️超档，画（点名）
+  15 Tab ② 规格参数（表格）                        无 SKU / 参数表           占位   6   ⚠️超档，画（点名）
+  16 Tab ③ 累计评价（评分 + 评价卡 + 图评 + 分页）  无评价端点                占位  ≥4  ⚠️超档，画（data-slot）※
+  17 Tab ④ 售后保障（政策说明）                    纯静态                  真     0   画
+  18 推荐区：猜你喜欢（栅格 ×4）                   **`goodsSelectHome`**   真     0   画
+  19 优惠券体系的**另外 4 个落点**（购物车 / 个人中心 / 结算 / 首页）  无  只登记  ≥4  不画
+  真功能 11 / 占位 7 / 只登记 1 ⇒ 覆盖率 (11+7)/19 = **94.7% ≥ 90%** ✔
+  ⚠️ **N 列在重画 GoodsUp 时按新口径重算过**（**本笔的自我纠错**，原先是 2 / 2 / 2 / 2 / 2 / 2）：
+     旧口径漏了后端那个 `*Controller.java`。反证：用户把「改状态机加退款态」举为**超档**例，
+     而它 = 3 个 `.vue` + `OrderState.java`；`.java` 若不计入它正好等于 3 ⇒ 是占位，自相矛盾。
+     ⇒ **要新端点的功能下限是 3 处**；要加数据库列的再 +2～3。
+     重算后本页 **7 个占位里只有 1 个（加入购物车，3 处）在档**，其余 6 个超档 ——
+     它们全部是用户 v4 清单**点名**要求画的，按 README「覆盖率优先」处理：画 + 真实 N 写进角标
+     + 在 README 挂账表里并排登记。**这两条判据不可能同时满足**（严格按 ≤3 则覆盖率掉到 1/19），
+     本笔记选择覆盖率，并把代价原样交给用户裁决。
+
+  ※ **评论区张力（必须披露）**：本笔边界写着「不做评论区」，而 v4 清单第 3 条又点名要求
+    「累计评价」Tab 且含评价卡 + 分页。本笔的裁法是：**画出来，但整块按占位处理**
+    （`disabled` + data-slot + 角标，不是可用的评论功能），既满足「一屏看得到平台全貌」，
+    也不越过「不做评论区」的边界。两块判据的冲突原样记在这里，不藏。
+
+  ── 跨页共性组件登记（README 表；本页是其中 4 个的样板）──────────────────────
+    · **商品卡**：本页推荐区用的卡 = 搜索页栅格 / 购物车猜你喜欢 / 个人中心收藏位 同款。
+      统一规则：`--img` 占位图 + 发丝边 + 两行名（`min-height:3em` 让价对齐）+ 衬线价三档。
+    · **服务承诺条**：商品详情 / 购物车 / 结算 三页同款（发丝线横排四格，等宽等重无底色）。
+    · **优惠券行**：商品详情 / 购物车 / 个人中心 / 结算 / 首页 五页同款（描边券框，面额衬线朱砂）。
+    · **商家卡**：商品详情 / 订单中心 同款（字标 + 店名 + 两个描边动作）。
+    · **面包屑**：全部内页同款，`--fs-xs`，**分隔符与文字同色**（`--ink-3`）。见 README 对比度事故。
+
+  ── 只登记（本页不画，留给 C3 / 后续笔）────────────────────────────────────
+    · 优惠券体系的另外 4 个落点（购物车可用券行 / 个人中心我的券 / 结算已用券 / 首页领券中心）
+      —— 合计动既有文件 ≥4 处（`endpoints.js` + 那 4 个页各 1 处）⇒ 超档，只登记。
+    · 退款 / 售后状态机、第三方登录、店铺主页、物流轨迹 —— 本页不出现或超档，见 README 总表。
+
+  ── 占位清单（data-slot / data-future；角标只挂区块级）──────────────────────
+    ① 划线原价 + 折扣角标   data-slot「预留 · 原价 / 折扣（动现有代码 2 处）」
+    ② 促销行（满减 / 领券） data-slot「预留 · 促销 / 优惠券（动现有代码 2 处）」
+    ③ 【加入购物车】        data-slot「预留 · 加入购物车（动现有代码 3 处）」
+    ④ 商家卡「进店逛逛」    data-slot「预留 · 店铺主页（动现有代码 2 处）」
+    ⑤ Tab 商品详情          data-slot「预留 · 详情富文本（动现有代码 2 处）」
+    ⑥ Tab 规格参数          data-slot「预留 · 规格参数（动现有代码 2 处）」
+    ⑦ Tab 累计评价          data-slot「预留 · 累计评价（动现有代码 2 处）」
+    全部同时带 data-future = 归属笔名，title 写明归属。
+  ⚠️ **既有功能一律不标 slot、不 disabled**：`‹ 返回` / 缩略图与左右翻页 / 型号按钮 /
+     数量控件 /【咨询商品】/【立即购买】/ 购入弹窗里的行右 `−` 删除 /【确认购入】/
+     付款确认的【是】【否】/ 推荐区（`goodsSelectHome` 是真的）。
+  ⚠️ 右侧「登录 / 注册」⇄「用户中心」是**同一入口的两态文案**（ProductPage.vue:15，判据 `isLogin`）
+     ⇒ 本稿用预览条两个 `data-page`（登录态 / 游客态）分别画，**不是两个控件**。
+  ⚠️ 本稿**只画事实**：不新增业务字段、不新增端点；商品名 / 店铺名 / 型号 / 价格为展示用样例。
+     ⚠️ 「销量 / 库存」**不画**：`endpoints.js` 里没有销量与库存端点，且它们在卡片上不构成
+     独立占位价值（挂在卡片上会让 D 笔以为有数可取），统一列入「不画」。
+  ⚠️ 角标是 `top:-11px` 的伪元素 ⇒ 挂点及其祖先**都不许 overflow:hidden**。
+     （本页唯一一处 overflow:hidden 在 `.stage` 上，用于放大镜裁切；`.stage` 内无任何角标。）
+
+  ── 三问自查（v4 第四条；打开截图后逐条过）─────────────────────────────────
+    Q1 一眼能看出这是什么页吗？
+       ✔ 能。顺序是「面包屑 → 大图 + 价格重心 → 购买动作 → 服务承诺 → 商家 → 四 Tab → 推荐」，
+         是商品详情页的标准阅读动线；不再是「一列等重的行」。
+    Q2 同一模块的不同状态视觉一致吗？
+       ✔ 登录态 / 游客态**只有顶栏右侧一项不同**（同一入口两态），正文逐字相同（同一份 JS 模板渲染）。
+       ✔ 四个 Tab 页用**同一个 Tab 条 + 同一个面板容器**，切换只换面板内容 —— 容器形态一致。
+    Q3 有哪个区域一眼看起来「不对劲」？
+       第一版 1080 下 `.gal` 折成单列后 `aspect-ratio:1/1` 变成 1032×1032 的灰板，把信息挤出屏
+       → 已给 `.gal{max-width:520px}` 封顶（v2 起就有，本次沿用）。1440 下复查：右栏比左栏图高，
+       底部不对齐 —— 商品详情页的正常形态（图是定高，信息是变的），不是错位。
+
+  ── 参考（v4 第七条：Linear / Stripe / Vercel / Arc）────────────────────────
+    结构上「一屏一重心、分区靠发丝线不靠色块」取 Linear 的设置页；
+    价格与 Ken 值三档拆字（`¥` / 整数 / 小数）取 Stripe 定价页的数字排法；
+    推荐区栅格的等重卡 + 大留白取 Vercel 的模板栅格。零阴影、零圆角色块、零渐变。
+    PDP 该有哪些块的**外部依据**（不是「像淘宝」）：
+      https://www.shopify.com/kr/blog/what-is-pdp-in-ecommerce （buy box / 信任信号 / 评价 / 推荐）
+      https://www.channelengine.com/nl/blog/amazon-product-detail-page （PDP 解剖）
+      https://knowledge.plytix.com/glossary/product-detail-page-pdp/ （术语与要素）
+
+  ── v5 改动（用户第 ③ 档：「商品详情 / 订单中心（微调，只按判据 A 校准比例）」）──
+  改前先拆了一次账，因为「浅面 37.19%」这个数**差点让我改错方向**。
+  用自写的一次性脚本按元素**实际涂色面积**分账（每个像素只记给最内层那个涂色元素，
+  视口 1440，整页 3146k px²）：
+    · `--img` 商品图占位        **34.37%**
+    · `--nav-bg` 导航条           2.43%
+    · **本页自身的装饰中性面**    **0.06%**
+  ⇒ 全页的"灰"几乎全是商品图占位（内容层）与那条全局导航（十页同值），
+    这一页**自己一块装饰面都没有**。若照「浅面超了 20%、要减灰」去改，方向是反的。
+  改法：给右信息栏 `.info` 铺 `--glaze-deep` —— 本页的「一个釉面主块」。
+  改后同一脚本复测：
+    · `--img` 33.48%（只随页面变高而稀释）    · `--nav-bg` 2.37%
+    · **釉面 `--glaze-deep` 11.85%（383k px²）**
+    · 本页自身装饰中性面 0.06% → **11.91%**，落进《配色分析》第 147 行的 10~20% 带
+  `measure-area.mjs` 复测：青瓷绿 0.68% → **0.64%**、朱砂 0.21% → **0.21%**。
+  青瓷绿仍远低于 1.5~3.5%，与 OrderCenter 同一笔账：补到 1.5% 需要一条 1180×24 的实色带
+  = 堆色，而用户已撤销堆色 ⇒ 不做；只按处方二补**频次**（服务承诺条四个 brand 圆点）。
+  ⚠️ 三个数的关系要写清楚，别让读者以为「进了 10~20% 就等于整页达标」：
+     · 按《配色分析》第 145 行那把尺子（它把 `--img` 算进「中性面 + 釉面」层），本页改前
+       **就已经出界**：浅面 37.19% > 20% 上限、留白 60.65% < 70% 下限。一个 34% 是商品图占位的
+       页面，留白永远进不了 70~85%（要进得把商品图缩小 —— 那是改结构，不是配色）。
+     · 那把尺子自己在第 147 行的理由栏已经点出这个例外：「现状个人页 14% 但其中 60% 是
+       商品图占位」。所以本笔按**装饰层**记账（= 中性面合计 − 商品图占位 − 全局导航），
+       这也正是处方一「唯一要大幅加的一层」所指的那一层。
+  ⚠️ **没做什么**：没动结构（`.info` 改前连一条 CSS 规则都没有）、没加第二种强调色、
+    没给下方 Tab / 详情 / 推荐区上色（那才是判据 B 说的「次区白」）、没动后端 / ci.yml / A3 脚本。
+
+  ── 右栏升成「面」的连带改动：栏内 5 根发丝线同时退役 ────────────────────────
+  这不是顺手多改，是**必须**改：`--line`#dde2e5 与 `--glaze-deep`#dbe3de 只差**蓝通道 7/255**
+  （R/G 差 ≤2）。1px 线在白底上是靠三个通道同时变化才看得见的，铺到釉面上就整根消失 ——
+  1440 试版 2x 放大图里一根都找不到。留着就是 5 道**不存在的边界**。
+    · `.promo` 外框 `border` + `border-radius`  → 删；分组改由组内缩进 `--s4` 承担
+    · `.promise` 上下两根 + 相邻格之间三根      → 删；改判据 C「同级用间距」，
+      并给每格一个 brand 小圆点，用的是 ShoppingCart `.pledge span::before` **逐字同款**
+    · `.shop` `border` + `border-radius`        → 删；分组由 `margin-top:--s6` 与 `--brand-soft`
+      方章承担（试版里这两样本就够）
+  判据 C 的原话是「同一种手段不跨层级复用」—— 分区既然已经用**面**划界，分区内就只剩
+  **间距**与内容本身。这 5 根线是这次升级的**代价**，不是赠品。
+  ⚠️ 顺带订正一条不成立的注释：`.shop` 原注写「跨页共性组件：商品详情 / 订单中心 同款」。
+    全批 grep：OrderCenter-merchant.html:522 与 ShoppingCart-customer.html:326 的 `.shop` 是
+    `{border-top:1px solid var(--line-2)}`（店铺分组表头；原记 :484/:324），与商家卡**只是撞车**。
+
+  ── Q4 ~ Q6（v5 新增；Q1~Q3 见上）───────────────────────────────────────────
+    Q4 配色比例参考了成熟方案吗？
+       ✔ 参考的是本笔**自己的两份分析**，不是临时找的图：
+         · 《v5-配色分析》第 144-151 行那张目标比例表（白 70~85% / 中性面+釉面 10~20% /
+           青瓷绿 1.5~3.5% / 朱砂 <0.5%），第 151 行明写「这是可复核的，不是形容词」；
+         · 同文第 125 行处方一「把色放到面上……大面积用釉色系承担『这页有色』的观感」。
+       ✔ 且印证了同一份分析对 Linear / Stripe / Vercel 的推翻：那三家主色 OKLCH 彩度
+         0.235 / 0.214 / 0.159，我们 `--brand` 只有 **0.072** —— 所以不照抄它们的高饱和主色块，
+         改走**低彩度釉面承担面积 + 小面积高对比（`--brand-ink`）承担重点**的路子。
+       ⚠️ 一条**没达标**：青瓷绿 0.64% 仍低于 1.5%。理由见上，不做堆色。
+    Q5 同页分区的视觉手段交替吗？
+       ✔ 改后 `measure-hierarchy.mjs --sel ".gal, .info, .tabs, .reco"` 判定
+         **✓ 有交替：面×2 + 块×1**（gal 686px 面 / 92% 填色 / ΔE00 5.13；
+         **info 812px 面 / 100% 填色 / ΔE00 8.01**；reco 459px 块 / 54% 填色；
+         tabs 55px 被工具的 70px 阈值剔出分布）。
+       ⚠️ **但 Q5 不是这次改动的理由** —— 做了突变对照（把 `.info` 那块面摘掉造一份基线，
+         同一 `--sel` 复跑）：改前**本来就是 ✓（面×1 + 盒子×1 + 块×1）**，那栏是被
+         `.acts .primary`（`立即购买`，`--brand` 实底 ΔE00 44.71）标成「盒子」的。
+         这次变的不是「有没有交替」，是 **info 这栏的划界手法从「盒子」升级成「面」**。
+         真理由是判据 A 处方一 + 判据 B，见上。（第二次靠突变对照拦住一个假的因果，
+         第一次是 ShoppingCart 的 `.paybar`。）
+       ⚠️ 工具的**已知坑（记录，未改工具）**：默认取根在这页会失效 —— 它抓到一个 1972px 的
+         内层容器，把整页当成**一个**分区（默认跑得「△ 线×1」）。必须用 `--sel` 指到真分区。
+         这与 GoodsSelect / ShoppingCart 的取根问题同源，是第 3 处。
+    Q6 这份稿我为什么这样改？和 v4 的根本差异是什么？
+       · 根本差异只有一条：**右信息栏从「白底 + 一堆发丝线」变成了一块釉面**。
+         v4 那一栏改前**连一条 CSS 规则都没有** —— 落码时它是一块纯白，分区完全靠 `.promo`
+         的框线、`.promise` 的四格线、`.shop` 的框线这三组线撑着。v5 把这三组线一起退役，
+         因为它们铺在釉面上等于不存在。
+       · 为什么用「面」而不是「再加点绿」：`--brand` 彩度只有 0.072，靠它做**面积**等于把一个
+         「釉」级别的色硬撑成大色块，会直接偏成「促销绿」。釉面（ΔE00 8.01）承担面积、
+         `--brand-ink` 承担重点，这正是《配色分析》第 125/127 行两条处方的分工。
+       · 与跨页语言的关系：全批第 **6** 处 `--glaze-deep` 面（前 5 处：LoginPage 品牌栏 /
+         OrderCenter 数据概览 / ShoppingCart 结算栏 / 两个 UserCenter 身份卡）。
+       ⚠️ **这片底有一处代价，实测数字摆在这里，不藏**：栏内 8 处 12px 的 `--ink-3` 小字
+         （促销 / 领券 / 满 199 可用 / 型号 / 数量 / 现货提示 / 加入购物车 / 店铺副标题）
+         对比度从白底的 **5.57:1** 落到釉面上的 **4.26:1**，低于正文 WCAG AA 的 4.5:1。
+         ⚠️ 这是**批级既有特征，不是本页新引入**：OrderCenter 的 `.stat .k`、
+         ShoppingCart 的 `.paybar .sel .cnt` / `.sums .d` 早已在 `--glaze-deep` 上用 `--ink-3`，
+         同一组数字。本笔**不在这页单方面改字色**（改了会让本页与其余 5 页不一致），
+         而是把它作为**批级待决项**上报：要么 6 页一起把面上的 `--ink-3` 提到 `--ink-2`
+         （6.14:1），要么接受 4.26:1。
+         ⚠️ `check-contrast.mjs` **不会**报它 —— 那支探针的判据是 **3:1**，只抓「根本看不见」
+         那种事故（它自己第 11-12 行的原话是「比正文 4.5:1 松」）。探针报 OK 只说明它查的那条
+         没问题，不说明这条没问题。
+  ═══════════════════════════════════════════════════════════════════════════════
+-->
+<link rel="stylesheet" href="../../../Mall-management-web/mall-management-system/src/assets/fonts/noto.css">
+<link rel="stylesheet" href="../../../Mall-management-web/mall-management-system/src/assets/fonts/mono.css">
+<!-- ⚠️ B 笔 v5 收尾：tokens.css 的 `--font-display` 换成了 'LXGW WenKai GB'（SIL OFL 1.1）。
+     自托管文件**这一笔还没进仓库**（用户简报的范围边界：设计稿阶段允许用本地 fontsource 试，
+     自托管留到落 Vue 那一步；实测成本见《v5-字体探索报告》：**只装 500 一档 = 12M / 491 片**，
+     是全字库口径，不能只挑「看起来用得到」的分片）。所以这一条**只在设计稿里存在**：
+     产品侧此刻会沿 `--font-display` 链**自动降级**回 Noto Serif SC —— 那正是链上第二位，
+     是**设计好的降级路径**，不是坏掉。 -->
+<link rel="stylesheet" href="../../../../美化/node_modules/@free-fonts/lxgw-wenkai-gb/lxgw-wenkai-gb.css">
+<link rel="stylesheet" href="../../../Mall-management-web/mall-management-system/src/assets/tokens.css">
+<style>
+:root{
+  /* 真实字阶：24(名称) → 36(现价) 步进 1.5，中间不插 32 —— tokens.css 明令「步进 ≥1.25」 */
+  --d-title: calc(var(--fs-lg) * 1.00);   /* 24px 衬线 —— 商品名 */
+  --d-price: calc(var(--fs-2xl) * 1.00);  /* 36px 衬线 —— 现价（本页唯一强调色数字） */
+}
+
+/* ── 预览条 + 预留位可视化：只是看稿工具，不进 Vue ─────────────────────────── */
+.bar{position:sticky;top:0;z-index:100;display:flex;align-items:center;gap:var(--s2);flex-wrap:wrap;
+     padding:var(--s2) var(--s4);background:var(--nav-bg);border-bottom:1px solid var(--line-2);font-size:var(--fs-xs)}
+.bar-t{font-weight:var(--fw-semi);color:var(--nav-tx-hi);margin-right:var(--s3)}
+.bar-t em{font-style:normal;color:var(--brand-ink)}
+.bar button{padding:2px var(--s3);border:1px solid var(--line);border-radius:var(--r1);background:var(--surface);color:var(--ink-2);font:inherit}
+.bar button.on{background:var(--brand);border-color:var(--brand);color:var(--bg)}
+.bar #slotBtn.on{background:var(--warning);border-color:var(--warning)}
+.bar .sep{width:1px;height:16px;background:var(--line-2);margin:0 var(--s2)}
+.bar .hint{margin-left:auto;color:var(--ink-3)}
+.bar .local{color:var(--ink-3)}
+body.slots [data-slot],body.slots [data-future]{outline:2px dashed var(--warning);outline-offset:5px;position:relative}
+body.slots [data-future]{outline-color:var(--info)}
+body.slots [data-slot]::after,body.slots [data-future]::before{
+  position:absolute;top:-11px;font-size:10.5px;letter-spacing:.5px;padding:1px 8px;
+  border-radius:var(--r1);color:var(--bg);z-index:5;white-space:nowrap}
+body.slots [data-slot]::after{content:attr(data-slot);left:8px;background:var(--warning)}
+body.slots [data-future]::before{content:attr(data-future);right:8px;background:var(--info)}
+/* ⚠️ 这里**原来**有一条 `.slot-stack`（把两个角标上下错开，专治窄元素），已删除 —— 记下为什么：
+   它解决的是**上下**叠，没解决**左右**叠。商家卡的「进店逛逛」按钮只有 90px，一旦角标文案里
+   写上 N（「动现有代码 4 处 · 超档」）就涨到 250px，挂按钮上时角标会横跨到左边的「客服」和
+   「声谷小店」上，1440 槽位截图里糊成一片。真正的解法是**把角标挂回区块级**（改挂整张 `.shop`），
+   而不是在窄元素上想办法 —— 这是「角标只挂区块级」的第三次应验。
+   `.slot-stack` 仍在 `ChatRoom.html` 的「图片」按钮上用着（那里角标文案短，挂得下）。 */
+
+/* ── 页面 ─────────────────────────────────────────────────────────────────── */
+body{font-family:var(--font);font-size:var(--fs-sm);color:var(--ink);background:var(--bg);
+     -webkit-font-smoothing:antialiased}
+a{color:inherit;text-decoration:none}
+button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}
+input{font:inherit;color:inherit}
+dl,dt,dd{margin:0}
+
+/* 自带顶栏：‹ 返回 + 品牌名 + 右侧一项（**无搜索框**——用户裁决） */
+.nav-bar{display:flex;align-items:center;gap:var(--s4);height:60px;padding:0 var(--s7);
+         background:var(--surface);border-bottom:1px solid var(--line)}
+.nav-back{font-size:var(--fs-md);color:var(--ink-2);padding:0 var(--s2)}
+.brand{font-family:var(--font-display);font-size:var(--fs-lg);font-weight:var(--fw-semi);color:var(--brand-ink)}
+.nav-right{margin-left:auto;display:flex;align-items:center;gap:var(--s5);
+           color:var(--nav-tx);font-weight:var(--fw-med)}
+
+.wrap{max-width:1180px;margin:0 auto;padding:var(--s5) var(--s5) var(--s8)}
+.page{display:none}
+.page.on{display:block}
+
+/* 面包屑：分隔符**与文字同色**（同为 --ink-3）——README 里记的对比度事故，
+   原先用 --line-2 时只有 1.47:1，正是 check-contrast.mjs 要抓的「根本看不见」 */
+.crumb{display:flex;align-items:center;font-size:var(--fs-xs);color:var(--ink-3)}
+.crumb a:hover{color:var(--brand-ink)}
+.crumb .sp{font-style:normal;padding:0 var(--s2)}
+
+/* ── 两栏：图集 56 / 信息 44 ─────────────────────────────────────────────── */
+.pd{margin-top:var(--s5);display:grid;grid-template-columns:minmax(0,56fr) minmax(0,44fr);
+    gap:var(--s8);align-items:start}
+
+/* 图集 —— .stage 唯一一处 overflow:hidden，用于放大镜裁切；里面没有任何角标 */
+.stage{position:relative;aspect-ratio:1/1;border:1px solid var(--line);border-radius:var(--r2);
+       background:var(--img);overflow:hidden}
+.zoom{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
+      color:var(--ink-3);font-size:var(--fs-xs);letter-spacing:.08em;
+      transition:transform .25s ease}
+.stage:hover .zoom{transform:scale(1.6)}
+/* ⚠️ 放大镜提示**常显**（不是 :hover 才出现）：截图是静态的，藏在 hover 里等于这份稿
+   没有放大镜这一项。悬停时只加深一档颜色，表示可交互 */
+.lens{position:absolute;right:var(--s4);bottom:var(--s4);display:flex;align-items:center;gap:var(--s1);
+      height:30px;padding:0 var(--s3);border-radius:var(--r1);border:1px solid var(--line-2);
+      background:var(--surface);color:var(--ink-3);font-size:var(--fs-xs);transition:color .2s}
+.stage:hover .lens{color:var(--ink)}
+.arw{position:absolute;top:50%;transform:translateY(-50%);width:38px;height:38px;border-radius:50%;
+     border:1px solid var(--line-2);background:var(--surface);color:var(--ink-2);line-height:1;
+     display:flex;align-items:center;justify-content:center}
+.arw:hover{border-color:var(--ink-3);color:var(--ink)}
+.arw.l{left:var(--s4)}
+.arw.r{right:var(--s4)}
+.thumbs{margin-top:var(--s4);display:flex;gap:var(--s3)}
+.thb{width:72px;aspect-ratio:1/1;border:1px solid var(--line);border-radius:var(--r1);
+     background:var(--img);cursor:pointer}
+.thb.on{border-color:var(--ink)}
+
+/* ── 右信息区 ───────────────────────────────────────────────────────────────
+   层级：商品名 24 衬线 / 现价 36 衬线朱砂 / 其余 12–15 无衬线。
+   一主色（--brand：动作）+ 一锐色（--accent：**只给价格和促销**，tokens.css:107-117）。 */
+
+/* ⚠️ v5：这一栏加**釉面底** —— 本页的「一个釉面主块」，落判据 B 的「主区有色、次区白」。
+   改前用 `_surface-split.mjs`（自己写的一次性脚本，按元素**实际涂色面积**分账，
+   每个像素只记给最内层那个涂色元素，视口 1440）拆过一遍，数字如下：
+     · 商品图占位 `--img`          **34.37%**
+     · 导航条 `--nav-bg`             2.43%
+     · **本页自身的装饰中性面**      **0.06%**   ← 要加的就是这一层
+   ⇒ 改前这一栏是**纯白**：全页的"灰"几乎全是商品图占位与那条全局导航，装饰层等于零。
+   两条判据同时指向这里：
+     ① 判据 A（《配色分析》第 125 行处方一）：「**把「色」放到面上**，而不是放到标记上。
+        大面积用釉色系承担『这页有色』的观感」；
+     ② 判据 B：「商品详情**主区有色**次区白」—— 这栏装的是价格与两个动作按钮，就是主区。
+   `--glaze-deep` **不是新发明**：全批已有 **5 处**同款面（LoginPage 品牌栏 / OrderCenter 数据概览 /
+   ShoppingCart 结算栏 / 两个 UserCenter 身份卡），本页补第 6 处，是这条跨页语言的收口。
+   `margin-left` 取 `--s5` 负值把面往左扩 24px、`padding-left` 再补回来 ⇒ **栏内文字 x 坐标不变**，
+   只有底色向外长出去。`padding-top:--s6` 让商品名与面顶留出呼吸位。
+   ⚠️ **没做什么**：没动结构（`.info` 本来就是这栏的容器，改前**一条 CSS 规则都没有**）、
+      没加第二种强调色、没给下方 Tab / 详情 / 推荐区上色（那才是"次区白"）。
+   ⚠️ 这片底**有代价**，两条都实测过、都记在页尾 Q6 里，不藏：栏内 5 处发丝线同时退役（下条注释），
+      8 处 12px 的 `--ink-3` 小字对比度从 5.57:1 落到 **4.26:1**（低于正文 AA 4.5:1）——
+      后者是**批级既有特征**（OrderCenter `.stat .k` / ShoppingCart `.paybar .sel .cnt` 早已如此），
+      本笔**不在这一页单方面改字色**，以免这一页与其余 5 页不一致；见页尾 Q6。 */
+/* ⚠️ v5 收尾：底从 `--glaze-deep` 换成**新增的 `--glaze-mid`**（#dbe3de → #e4e9e7）。
+   用户反馈「价格区浅绿底、浓度过头」。诊断：**不是面积问题**（这片底 ≈11.9% 视口，
+   本来就落在判据 A「中性面+釉面 10~20%」档内），是**彩度**问题 ——
+   ΔE00/白 8.01 → **5.58**，彩度 0.0109 → **0.006**，色相同时从 158.8 挪到 170.4（对齐主色）。
+   拆档理由、以及「为什么不选简报里另两个选项（整栏白底 / 白底+品牌色只给价格数字）」，
+   见《v5-配色分析.md》§收尾定案；一句话：另两个选项都会把本页从**全批第 6 处釉面**里摘出来，
+   而「撤面 ⇒ 线要加回来」会推翻 v5 整批工作。 */
+.info{background:var(--glaze-mid);border-radius:var(--r2);
+      padding:var(--s6) var(--s5);margin-left:calc(var(--s5) * -1)}
+
+/* ⚠️ v5 收尾：字重 `--fw-light`(300) → `--fw-med`(500)。
+   ⚠️ **订正**：本行初稿写的理由是「换族必须重校字重：文楷 300 笔画近于发丝、300 与 500 差更大」
+   —— 那是**推断**，随后被实测推翻（同屏对照见 `fontlab/shots/v5-weight-compare.png`）：
+   文楷 300/400/500 三档的渲染差**很小**（36px 下 400 与 500 几乎不可分），且**文楷 300 比
+   Noto Serif 300 更实**（字面更大、笔画更饱满）—— 也就是说「太细」这件事**换族本身就已经解决**。
+   改 500 的真理由是另外两条：
+   ① 用户点名（v5 收尾改 1 ②：「标题保持衬线但不要 300 细体（改 500）」）；
+   ② 若只自托管 500 一档（10.8 MiB / 491 片，方案见《v5-字体探索报告》§四），链上**没有 300**
+      ⇒ 声明 300 的元素仍会用 500 的字形渲染，**声明与渲染不符**；要保住 300 就得多装一档
+      （+11.4 MiB），而那 11.4 MiB 买到的正是上面实测「看不出差」的那点差别。
+   ⚠️ 本条**不是本页独有**：同一轮已把 10 份稿的 display 字重**批级统一到 500**（16 处，
+   `fontlab/unify-weight.mjs`），否则本页 500、其余 9 页 300 会成一处**新的批级不一致**。 */
+.pname{font-family:var(--font-display);font-size:var(--d-title);font-weight:var(--fw-med);
+       line-height:1.35;letter-spacing:-.01em}
+.priceline{margin-top:var(--s5);display:flex;align-items:baseline;gap:var(--s3);flex-wrap:wrap}
+/* ⚠️ v5 收尾：整串价格**统一到 display 族**。改前只有 `.int`（129）带 `--font-display`，
+   `¥` 与 `.00` 走 `--font` ⇒ 同一串价格**两族混排**，`¥` 与数字的碗口 / 收笔对不上，
+   36px 下看得出来（改前 1440 截图上「¥」比数字更方）。`.price` 上给族名，
+   三个子元素继承；`.dec` 再显式声明一次是因为它要跟 `.int` 同族而不是回落。
+   实测（本会话）：文楷的**数字天然等宽**、`tabular-nums` 是 no-op ⇒ 换族不破坏价格列对齐；
+   反之 Noto Serif SC 是全批**唯一**需要 `tabular-nums` 救的族，换掉它等于顺手拆掉一处隐患。 */
+.price{display:flex;align-items:baseline;color:var(--accent);font-variant-numeric:tabular-nums;
+       font-family:var(--font-display)}
+.price .sym{font-size:var(--fs-md)}
+.price .int{font-size:var(--d-price);font-weight:var(--fw-med);line-height:1}
+.price .dec{font-size:var(--fs-md);font-family:var(--font-display)}
+.was{font-size:var(--fs-sm);color:var(--ink-3);text-decoration:line-through;
+     font-variant-numeric:tabular-nums}
+.off{padding:1px var(--s2);border-radius:var(--r1);background:var(--accent-soft);color:var(--accent);
+     font-size:var(--fs-xs);font-weight:var(--fw-med);font-variant-numeric:tabular-nums}
+
+/* 促销行：标签 + 券框。不铺底色条（tokens.css 禁侧边强调条 / 禁阴影铺满）。
+   ⚠️ v5：外圈原来的 `border:1px solid var(--line)` + `border-radius:--r2` **删掉了**。
+   `--line`#dde2e5 对釉面 `--glaze-deep`#dbe3de 只差**蓝通道 7/255**（R/G 差 ≤2）；
+   1px 线在白底上是靠三个通道同时变化才看得见的，铺到釉面上就整根消失
+   （1440 试版 2x 放大图里一根都找不到）。留着就是一道**不存在的边界**。
+   ⇒ 分组改由「组内缩进 `--s4`」承担：促销 / 领券两行比下面的型号 / 数量深 16px，
+     仍然读得出是一组，且不再欠一根线。这正是判据 C 的落地 —— 分区既然已经用**面**划界，
+     分区内就只剩**间距**与内容本身（「同一种手段不跨层级复用」）。 */
+.promo{margin-top:var(--s5);display:flex;flex-direction:column;gap:var(--s3);
+       padding:var(--s4)}
+/* ⚠️ 用**网格**（固定标签列 + 内容列），不用 flex+wrap：flex 换行时第二行会回到容器左端，
+   第二张券就跑到「领券」标签的下面、与第一张券左端不齐（1440 首版截图抓到的错位） */
+.promo .r{display:grid;grid-template-columns:36px minmax(0,1fr);align-items:center;
+          gap:var(--s4);font-size:var(--fs-sm)}
+.promo .tag{font-size:var(--fs-xs);color:var(--ink-3)}
+.promo .cut{color:var(--ink-2)}
+.coupons{display:flex;gap:var(--s3);flex-wrap:wrap;align-items:center}
+/* ⚠️ 券框在窄栏里会被压到换行：「领取」折成「领/取」、「满 199 可用」折成两行。
+   ⇒ 券框整体 `flex:0 0 auto` 不吃压缩，内部两截 `nowrap`（1440 首版整行都折了，截图抓到） */
+.coupon{flex:0 0 auto;display:flex;align-items:center;gap:var(--s3);padding:var(--s2) var(--s3);
+        border:1px dashed var(--accent);border-radius:var(--r1)}
+.coupon .amt{font-family:var(--font-display);font-size:var(--fs-md);font-weight:var(--fw-med);
+             color:var(--accent);line-height:1;font-variant-numeric:tabular-nums;white-space:nowrap}
+.coupon .amt i{font-style:normal;font-size:var(--fs-xs);margin-right:1px}
+.coupon .cond{font-size:var(--fs-xs);color:var(--ink-3);white-space:nowrap}
+.coupon .get{flex:0 0 auto;height:26px;padding:0 var(--s3);border:1px solid var(--line-2);
+             border-radius:var(--r1);font-size:var(--fs-xs);color:var(--ink-2);white-space:nowrap}
+
+/* 型号：发丝线描边，选中只换描边色 + 字色，不给底色 */
+.pick{margin-top:var(--s6)}
+.pick .lbl{font-size:var(--fs-xs);color:var(--ink-3)}
+.pick .row{margin-top:var(--s3);display:flex;gap:var(--s3);flex-wrap:wrap}
+.md{height:36px;padding:0 var(--s5);border:1px solid var(--line-2);border-radius:var(--r1);
+    color:var(--ink-2);font-size:var(--fs-sm)}
+.md:hover{border-color:var(--ink-3)}
+.md.on{border-color:var(--brand);color:var(--brand-ink);font-weight:var(--fw-med)}
+
+/* 数量：与购入弹窗同款步进器（同一模块同一形态） */
+.qty{margin-top:var(--s6);display:flex;align-items:center;gap:var(--s4)}
+.qty .lbl{font-size:var(--fs-xs);color:var(--ink-3)}
+.stepper{display:flex;align-items:center;border:1px solid var(--line-2);border-radius:var(--r1)}
+.stepper button{width:36px;height:36px;color:var(--ink-2);line-height:1}
+.stepper button:hover{color:var(--brand-ink)}
+.stepper input{width:56px;height:36px;border:0;border-left:1px solid var(--line);
+               border-right:1px solid var(--line);text-align:center;background:var(--surface-2);
+               font-variant-numeric:tabular-nums}
+.stepper input:focus{outline:none;background:var(--surface)}
+.qty .stock{font-size:var(--fs-xs);color:var(--ink-3)}
+
+/* 动作：三级权重 —— 实心（立即购买）/ 描边（加入购物车，占位）*/
+.acts{margin-top:var(--s6);display:flex;gap:var(--s3)}
+.acts .b{height:52px;border-radius:var(--r2);font-size:var(--fs-md);font-weight:var(--fw-med)}
+.acts .primary{flex:1 1 auto;background:var(--brand);color:var(--bg)}
+.acts .primary:hover{background:var(--brand-hover)}
+.acts .ghost{flex:0 0 176px;border:1px solid var(--line-2);color:var(--ink-3)}
+.acts .ghost[disabled]{cursor:not-allowed}
+
+/* 服务承诺条：横排四格，等宽等重，靠**间距**分组（跨页共性组件 —— 登记在 GoodsAdd 页头注，
+   「文案必须与 ProductPage 承诺条**逐字一致**」；注意那条登记约束的是**文案**，不是样式，
+   购物车那边的同源件 `.pledge` 本来就是 brand 小圆点 + 上下发丝线，两页样式本就不同）。
+   ⚠️ v5：原来这四格是「上下各一根发丝线 + 相邻格之间一根竖线」，**四根线全删**。
+   右栏升成釉面之后它们**实测不可见** —— 不是"变淡"，是没了（原因与 `.promo` 那条逐字相同：
+   `--line` 对 `--glaze-deep` 只差蓝通道 7/255）。
+   ⇒ 改法：去线，四格交给 grid 等分间距（判据 C「**同级用间距**」）；另给每格一个 brand 小圆点作行标记，
+     用的就是 ShoppingCart `.pledge span::before{content:"·";color:var(--brand);margin-right:var(--s2);
+     font-weight:var(--fw-semi)}` —— **逐字同款**，跨页同源件终于长得一样了。
+   ⇒ 顺带这也是《配色分析》第 127 行处方二要的「青瓷绿**提高频次、不提高面积**」：
+     四个 `·` 加起来不到 0.01% 面积，但把"这页有青瓷绿"又往右推了一格。 */
+.promise{margin-top:var(--s6);display:grid;grid-template-columns:repeat(4,1fr)}
+.promise span{padding:var(--s3) 0;text-align:center;font-size:var(--fs-xs);color:var(--ink-2)}
+.promise span::before{content:"·";color:var(--brand);margin-right:var(--s2);font-weight:var(--fw-semi)}
+
+/* 商家卡。
+   ⚠️ v5：删掉 `border:1px solid var(--line)`（理由与 `.promo` / `.promise` 逐字相同：
+   `--line` 铺到 `--glaze-deep` 上整根消失）。分组由 `margin-top:--s6` 与左上角那块
+   `--brand-soft` 方章承担 —— 1440 试版里这两样本来就够，边框只是看不见的残留。
+   ⚠️ 同一处注释订正：上一版写「跨页共性组件：商品详情 / 订单中心 同款」——**这句不成立**。
+   全批 grep 结果：`.shop{` 只在本页是「商家卡」这一套规则；OrderCenter-merchant.html:522 与
+   ShoppingCart-customer.html:326 里的 `.shop` 是 `{border-top:1px solid var(--line-2)}`，
+   是**店铺分组表头**，只是**类名撞车**（v5 收尾实测；原记 :484 / :324），故本页不涉跨页同步。 */
+.shop{margin-top:var(--s6);display:flex;align-items:center;gap:var(--s4);
+      padding:var(--s4)}
+.shop .mark{width:44px;height:44px;flex:0 0 auto;border-radius:var(--r2);background:var(--brand-soft);
+            color:var(--brand-ink);font-family:var(--font-display);font-size:var(--fs-lg);
+            display:flex;align-items:center;justify-content:center}
+/* ⚠️ 店名与副标题都是 span：**不 display:block 会挤在同一行**（1440 首版「声谷小店 数码配件 ·
+   商品类型：影音耳机」连成一句，截图抓到）。同理两个操作按钮要 nowrap，否则「客服」折成「客/服」 */
+.shop .nm{display:block;font-size:var(--fs-sm);font-weight:var(--fw-med)}
+.shop .sub{display:block;margin-top:2px;font-size:var(--fs-xs);color:var(--ink-3)}
+.shop .ops{margin-left:auto;display:flex;gap:var(--s2);flex:0 0 auto}
+.shop .ops button{height:32px;padding:0 var(--s3);border:1px solid var(--line-2);border-radius:var(--r1);
+                  font-size:var(--fs-xs);color:var(--ink-2);white-space:nowrap}
+.shop .ops button:hover{border-color:var(--ink-3);color:var(--ink)}
+
+/* ── Tab 条 + 面板 ───────────────────────────────────────────────────────── */
+.tabs{margin-top:var(--s8);display:flex;gap:var(--s6);border-bottom:1px solid var(--line-2)}
+.tabs button{padding:var(--s4) 0;font-size:var(--fs-sm);color:var(--ink-3);
+             border-bottom:2px solid transparent;margin-bottom:-1px}
+.tabs button:hover{color:var(--ink-2)}
+.tabs button.on{color:var(--brand-ink);font-weight:var(--fw-med);border-bottom-color:var(--brand)}
+.tabs .cnt{font-size:var(--fs-xs);color:var(--ink-3);margin-left:var(--s1)}
+.panel{margin-top:var(--s6)}
+.para{max-width:68ch;font-size:var(--fs-sm);line-height:1.9;color:var(--ink-2)}
+.para+.para{margin-top:var(--s4)}
+.longimg{margin-top:var(--s5);aspect-ratio:3/1;border:1px solid var(--line);border-radius:var(--r2);
+         background:var(--img);display:flex;align-items:center;justify-content:center;
+         color:var(--ink-3);font-size:var(--fs-xs);letter-spacing:.08em}
+
+/* 规格参数表 */
+.spec{max-width:640px;font-size:var(--fs-sm)}
+.spec .r{display:flex;padding:var(--s3) 0;border-bottom:1px solid var(--line)}
+.spec .k{width:110px;flex:0 0 auto;font-size:var(--fs-xs);color:var(--ink-3);padding-top:2px}
+.spec .v{color:var(--ink-2)}
+
+/* 评价区：分数 + 好评率条 + 评价卡列表 + 图评 + 分页 */
+.rev{display:grid;grid-template-columns:200px minmax(0,1fr);gap:var(--s8);align-items:start}
+.score .n{font-family:var(--font-display);font-size:var(--fs-xl);font-weight:var(--fw-med);line-height:1;
+          font-variant-numeric:tabular-nums}
+.score .of{margin-top:var(--s2);font-size:var(--fs-xs);color:var(--ink-3)}
+/* 星级：实心 --ink、空心 --ink-3（不用 --line-2：那是 1.5:1，探针会判「看不见」）。
+   ⚠️ 不用 --accent —— tokens.css:107-117 明令朱砂「只给价格和促销」 */
+.stars{color:var(--ink);letter-spacing:2px}
+.stars .e{color:var(--ink-3)}
+.bars{margin-top:var(--s5);display:flex;flex-direction:column;gap:var(--s2)}
+.bars .b{display:flex;align-items:center;gap:var(--s3);font-size:var(--fs-xs);color:var(--ink-3)}
+.bars .b i{font-style:normal;width:34px;flex:0 0 auto;font-variant-numeric:tabular-nums}
+.bars .track{flex:1 1 auto;height:6px;border-radius:3px;background:var(--surface-3);overflow:hidden}
+.bars .fill{display:block;height:100%;background:var(--ink-2)}
+.shots{margin-top:var(--s5);display:flex;gap:var(--s2)}
+.shots .s{width:64px;aspect-ratio:1/1;border:1px solid var(--line);border-radius:var(--r1);background:var(--img)}
+.rlist{margin-top:var(--s1)}
+.rc{padding:var(--s5) 0;border-bottom:1px solid var(--line)}
+.rc .h{display:flex;align-items:center;gap:var(--s3);font-size:var(--fs-sm)}
+.rc .who{font-weight:var(--fw-med)}
+.rc .when{margin-left:auto;font-size:var(--fs-xs);color:var(--ink-3);font-variant-numeric:tabular-nums}
+.rc .txt{margin-top:var(--s3);font-size:var(--fs-sm);line-height:1.8;color:var(--ink-2);max-width:64ch}
+.rc .sku{margin-top:var(--s2);font-size:var(--fs-xs);color:var(--ink-3)}
+.pager{margin-top:var(--s5);display:flex;align-items:center;gap:var(--s2)}
+.pager button{min-width:32px;height:32px;padding:0 var(--s2);border:1px solid var(--line-2);
+              border-radius:var(--r1);font-size:var(--fs-xs);color:var(--ink-2)}
+.pager button.on{border-color:var(--brand);color:var(--brand-ink);font-weight:var(--fw-med)}
+.pager .gap{color:var(--ink-3);font-size:var(--fs-xs);padding:0 var(--s1)}
+
+/* 售后保障：三行政策，纯静态 */
+.pol{max-width:72ch}
+.pol .r{display:flex;gap:var(--s5);padding:var(--s5) 0;border-bottom:1px solid var(--line)}
+.pol .k{width:112px;flex:0 0 auto;font-size:var(--fs-sm);font-weight:var(--fw-med)}
+.pol .v{font-size:var(--fs-sm);line-height:1.9;color:var(--ink-2)}
+
+/* ── 推荐区（猜你喜欢）—— 卡与搜索页 / 购物车 / 个人中心同款 ──────────────── */
+.reco{margin-top:var(--s8);padding-top:var(--s7);border-top:1px solid var(--line-2)}
+.reco h2{font-family:var(--font-display);font-size:var(--fs-lg);font-weight:var(--fw-med);letter-spacing:-.01em}
+.reco .src{margin-top:var(--s2);font-size:var(--fs-xs);color:var(--ink-3)}
+.cards{margin-top:var(--s5);display:grid;grid-template-columns:repeat(4,1fr);gap:var(--s5)}
+.card{display:block}
+.card .ph{aspect-ratio:1/1;border:1px solid var(--line);border-radius:var(--r2);background:var(--img)}
+/* 名占 **min-height** 两行（line-height 1.5 ⇒ 2 行 = 3em）并夹到两行：
+   ⇒ 同排卡片的价永远在同一水平线上（跨页共性组件的统一规则）。
+   ⚠️ 写成 `max-height` 时名短的那张卡不会撑开，价就跟着上移、同一排对不齐 */
+.card .nm{margin-top:var(--s3);font-size:var(--fs-sm);line-height:1.5;min-height:3em;
+          display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+/* ⚠️ v5 收尾：与主价格行**同一处缺陷** —— `¥` / `.00` 走 `--font`、只有整数 `<b>` 走
+   `--font-display`，同一串价格两族混排。这里一并把整串归族。
+   ⚠️ 上一版我把这条写成「跨页同款件，搜索页 / 购物车 / 个人中心共用」——**这句没有依据**：
+   `grep -l '\.card \.pr' *.html` 全批**只有本页有**这个类名。跨页真正同源的是
+   `.c-price`（购物车 / 搜索）与 `.money`（GoodsAdd），它们的 `¥` 归族情况**本笔未核**，
+   已列入《v5-配色分析》收尾待决清单，等一次批级订正。 */
+.card .pr{margin-top:var(--s2);display:flex;align-items:baseline;color:var(--accent);
+          font-family:var(--font-display);font-variant-numeric:tabular-nums}
+.card .pr i{font-style:normal;font-size:var(--fs-xs);margin-right:1px}
+.card .pr b{font-family:var(--font-display);font-size:var(--fs-md);font-weight:var(--fw-med);line-height:1}
+.card .pr em{font-style:normal;font-size:var(--fs-xs)}
+
+/* ── 弹窗（购入 / 付款确认）───────────────────────────────────────────────── */
+/* ⚠️ 居中用子元素 margin:auto，**不用** align-items:center —— 后者在内容比视口高时
+   会把两端一起裁掉且滚不到（GoodsUp 弹窗踩过）；容器给 overflow:auto */
+.scrim{position:fixed;inset:0;z-index:200;display:flex;padding:var(--s5);overflow:auto;
+       /* 不用 rgba()：README 第 2 条「颜色只有 token，一个 #hex / rgb() 都不许有」 */
+       background:color-mix(in srgb, var(--ink) 34%, transparent)}
+.dlg{margin:auto;width:100%;max-width:520px;background:var(--surface);border:1px solid var(--line-2);
+     border-radius:var(--r3);padding:var(--s7)}
+.dlg-h{font-family:var(--font-display);font-size:var(--fs-lg);font-weight:var(--fw-med);letter-spacing:-.01em}
+.dlg-sub{margin-top:var(--s2);font-size:var(--fs-xs);color:var(--ink-3)}
+/* ── 购入弹窗的商品行（v5 收尾改 3）─────────────────────────────────────────────
+   整块从 ShoppingCart-customer.html 搬来。列头与商品行**共用一份列宽** ⇒ 天然对齐
+   （那边 `.list-head,.row` 就是这个写法，原样照搬）。层级照购物车：
+     缩略图 64 方图（最小）/ 名（最重）/ 单价（**最轻**的数字）/ 数量 / 小计（列表里最重的数字）。
+   ⚠️ 三处**有意不同**，逐条说清：
+     ① 少两列「勾选」与「操作」——购入弹窗只买一件，没有选项也没有删除；
+     ② 购物车 `.qty` 是 `button/span/button`，这里仍是 `.stepper`（`button/input/button`）——
+        真实实现是 `number` 输入（`title` 记着 min=0 / max=100）。**形态同款，只按行高收窄**
+        （36→28px），因为这一行的行高只有 64px 那一级；
+     ③ 列宽按 760px 弹窗重算（购物车那边是 1180px 页宽）。
+   ⚠️ 选择器**一律挂在 `.dlg` 下**：`.sub` 本页商家卡已经用了（`.shop .sub`），
+      `.li` 也太泛，不挂容器就会串。
+   ⚠️ **随标记一起删掉的六条**：`.drow` / `.drow.first` / `.drow .k` / `.picked` /
+      `.picked .li` / `.picked .li .x`（+ 一条 `:hover`）。不留死规则 ——
+      本页 v5 已经清过一次「指向不存在规则的死规则」，代价写在窄屏段注释里。 */
+.dlg .li-head,.dlg .li{display:grid;grid-template-columns:64px minmax(0,1fr) 80px 112px 104px;
+                       align-items:center;gap:var(--s4)}
+.dlg .li-head{margin-top:var(--s6);padding-bottom:var(--s3);font-size:var(--fs-xs);color:var(--ink-3)}
+/* ⚠️ 列头只有 4 个标签、商品行有 5 列 ⇒ 「商品」必须**跨前两列**（缩略图 + 名称），
+   否则后三个标签整体左移一列。第一版没写这条，1440 截图上「单价」标签落在名称列中间、
+   与小计数字对不上（Q3 自查抓到的）。 */
+.dlg .li-head > span:first-child{grid-column:1/3}
+.dlg .li-head .c-num{text-align:right}
+.dlg .li{padding:var(--s4) 0;border-bottom:1px solid var(--line-2)}
+.dlg .li .thumb{width:64px;aspect-ratio:1/1;border-radius:var(--r1);background:var(--img);
+                border:1px solid var(--line)}
+.dlg .li .nm{min-width:0}
+.dlg .li .nm .t{font-size:var(--fs-md);font-weight:var(--fw-med);line-height:1.35;color:var(--ink);
+                display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.dlg .li .opt{margin-top:var(--s2);display:flex;align-items:center;gap:var(--s2);flex-wrap:wrap}
+.dlg .li .opt .lbl{font-size:var(--fs-xs);color:var(--ink-3)}
+.dlg .li .opt .md{height:28px;padding:0 var(--s3);font-size:var(--fs-xs)}
+.dlg .li .unit{text-align:right;font-size:var(--fs-sm);color:var(--ink-3);
+               font-variant-numeric:tabular-nums}
+.dlg .li .stepper{justify-self:end}
+.dlg .li .stepper button{width:28px;height:28px;font-size:var(--fs-sm)}
+.dlg .li .stepper input{width:40px;height:28px;font-size:var(--fs-sm)}
+.dlg .li .sub{text-align:right;font-family:var(--font-display);font-size:var(--fs-lg);
+              font-weight:var(--fw-med);font-variant-numeric:tabular-nums}
+.dfoot{margin-top:var(--s5);display:flex;align-items:baseline;gap:var(--s5)}
+.dfoot .meta{font-size:var(--fs-xs);color:var(--ink-3)}
+.dtotal{margin-left:auto;display:flex;align-items:baseline;gap:var(--s2)}
+.dtotal .k{font-size:var(--fs-sm);color:var(--ink-2)}
+.dtotal .v{font-family:var(--font-display);font-size:var(--fs-xl);font-weight:var(--fw-med);
+           line-height:1;color:var(--accent);font-variant-numeric:tabular-nums}
+.dtotal .v i{font-style:normal;font-size:var(--fs-sm);margin-right:2px}
+.dacts{margin-top:var(--s6);display:flex;gap:var(--s3)}
+.dacts .b{height:46px;border-radius:var(--r2);font-size:var(--fs-md);font-weight:var(--fw-med)}
+.dacts .ok{flex:1 1 auto;background:var(--brand);color:var(--bg)}
+.dacts .ok:hover{background:var(--brand-hover)}
+.dacts .no{flex:0 0 120px;border:1px solid var(--line-2);color:var(--ink-2)}
+.dacts .no:hover{border-color:var(--ink-3)}
+
+/* ── 窄屏 ───────────────────────────────────────────────────────────────────
+   ① 1080：**仍然是两栏**，只把画廊收窄（56/44 → 44/56）。
+      ⚠️ 这一版最先写成「1080 直接折单列 + 画廊封顶 520px」，截出来是「520px 灰板 + 右边
+      512px 空白」——折行折得太早，页面上出现一块说不清的空地（Q3 自查抓到的）。
+   ② 820 以下才真正堆叠；那时**必须给图集封顶**，否则 `aspect-ratio:1/1` 落在整幅宽
+      （820 下 780px）会变成一块 780×780 的灰板，把信息全挤出首屏。 */
+@media (max-width:1080px){
+  .pd{grid-template-columns:minmax(0,44fr) minmax(0,56fr);gap:var(--s7)}
+  .thb{width:60px}
+  .acts .ghost{flex:1 1 0}
+  .rev{grid-template-columns:160px minmax(0,1fr);gap:var(--s7)}
+  .cards{grid-template-columns:repeat(2,1fr)}
+}
+@media (max-width:820px){
+  .pd{grid-template-columns:1fr;gap:var(--s7)}
+  .gal{max-width:520px}
+  .rev{grid-template-columns:1fr;gap:var(--s7)}
+  .promise{grid-template-columns:repeat(2,1fr)}
+  /* ⚠️ v5：这里原来有一条 `.promise span:nth-child(odd){border-left:0}`，
+     注释是「四格折两行后第 3 格会继承 `span+span` 的左边线」—— 那条 `span+span` 规则
+     已在 v5 连同另外四根发丝线一起删除（见上），所以这条成了**指向不存在规则的死规则**，
+     一并删掉。留着的代价：下一次改窄屏的人会以为竖线还在。 */
+  /* ⚠️ v5 新增：单列断点下右信息栏不再左扩。上面 `.info` 的 `margin-left:calc(var(--s5) * -1)`
+     是**双列时**为了把釉面往左长进栅格间隙（`--s8`=64px 里留 40px）而写的；折成单列后
+     它会把面板推到 **wrap 的 padding 边**（820 视口下即 x=0），而右缘仍在内容盒上
+     ⇒ 左右各差 24px 的**不对称**。这里归零，面板与 wrap 内容盒对齐。 */
+  .info{margin-left:0}
+}
+</style>
+</head>
+<body>
+
+<div class="bar">
+  <span class="bar-t">B 稿 v5 · 商品详情 <em>公开页 · 不进壳</em></span>
+  <button data-page="detail" class="on">登录态</button>
+  <button data-page="guest">游客态</button>
+  <span class="sep"></span>
+  <button data-page="t-spec">Tab · 规格参数</button>
+  <button data-page="t-rev">Tab · 累计评价</button>
+  <button data-page="t-as">Tab · 售后保障</button>
+  <span class="sep"></span>
+  <button data-page="dlg1">购入弹窗</button>
+  <button data-page="dlg2">付款确认</button>
+  <span class="sep"></span>
+  <button id="slotBtn">显示预留位 / 目标版</button>
+  <span class="hint">预览稿 · 项目源码未动 · <span class="local">Tab 三态为局部视图（只画 Tab 区 + 推荐区）</span></span>
+</div>
+
+<!-- ═══════════ 一、商品详情（登录态）+ 二、游客态 ═══════════ -->
+<section class="page on" data-page="detail">
+  <nav class="nav-bar">
+    <button class="nav-back">‹ 返回</button>
+    <a class="brand">商城</a>
+    <div class="nav-right"><a>用户中心</a></div>
+  </nav>
+  <div class="wrap"><div id="pd-detail"></div></div>
+</section>
+
+<section class="page" data-page="guest">
+  <nav class="nav-bar">
+    <button class="nav-back">‹ 返回</button>
+    <a class="brand">商城</a>
+    <div class="nav-right"><a>登录 / 注册</a></div>
+  </nav>
+  <div class="wrap"><div id="pd-guest"></div></div>
+</section>
+
+<!-- ═══════════ 三～五、三个 Tab 局部视图 ═══════════ -->
+<section class="page" data-page="t-spec">
+  <nav class="nav-bar">
+    <button class="nav-back">‹ 返回</button>
+    <a class="brand">商城</a>
+    <div class="nav-right"><a>用户中心</a></div>
+  </nav>
+  <div class="wrap"><div id="pd-t-spec"></div></div>
+</section>
+
+<section class="page" data-page="t-rev">
+  <nav class="nav-bar">
+    <button class="nav-back">‹ 返回</button>
+    <a class="brand">商城</a>
+    <div class="nav-right"><a>用户中心</a></div>
+  </nav>
+  <div class="wrap"><div id="pd-t-rev"></div></div>
+</section>
+
+<section class="page" data-page="t-as">
+  <nav class="nav-bar">
+    <button class="nav-back">‹ 返回</button>
+    <a class="brand">商城</a>
+    <div class="nav-right"><a>用户中心</a></div>
+  </nav>
+  <div class="wrap"><div id="pd-t-as"></div></div>
+</section>
+
+<!-- ═══════════ 六、购入弹窗 ═══════════ -->
+<section class="page" data-page="dlg1">
+  <nav class="nav-bar">
+    <button class="nav-back">‹ 返回</button>
+    <a class="brand">商城</a>
+    <div class="nav-right"><a>用户中心</a></div>
+  </nav>
+  <div class="scrim">
+    <!-- ⚠️ 宽度 760px 是**算出来的**，不是挑的：购物车那套商品行要五列才排得下，
+         520px（原值）里名称列只剩 ~110px，名字会被压成竖条。dlg2 的 420px 仍是原值。 -->
+    <div class="dlg" style="max-width:760px">
+      <div class="dlg-h">购入</div>
+      <div class="dlg-sub">下单后 48 小时内发出 · 支持 7 天无理由</div>
+
+      <!-- ⚠️ v5 收尾改 3：整块按 ShoppingCart-customer.html 的商品行重做。
+           列头与商品行**共用同一份列宽**（CSS 里 `.li-head,.li` 一条规则管两个选择器），
+           所以天然对齐 —— 这个写法就是从购物车那份稿原样搬来的。
+           改前的形态是「单价 / 型号 / 数量 三条 .drow + 一条 .picked 文字清单 + 删除」，
+           用户判为「简版，不如购物车那一版」。 -->
+      <div class="li-head">
+        <span>商品</span>
+        <span class="c-num">单价</span>
+        <span class="c-num">数量</span>
+        <span class="c-num">小计</span>
+      </div>
+
+      <div class="li">
+        <div class="thumb" title="商品缩略图（现有实现取商品图集第一张）"></div>
+        <div class="nm">
+          <div class="t">无线蓝牙耳机 声谷标准版 主动降噪 32 小时续航</div>
+          <!-- 型号挪到**名字下面的规格位**（购物车里那一行就是静态的「规格：…」）。
+               ⚠️ 类名必须还是 `.md`：本页脚本用 `document.querySelectorAll('.md')` 切换选中态，
+                  换类名这个控件就不响应点击了。窄屏那条 `@media` 也不受影响。 -->
+          <div class="opt">
+            <span class="lbl">型号</span>
+            <button class="md on">标准款</button>
+            <button class="md">降噪款</button>
+            <button class="md">旗舰款</button>
+          </div>
+        </div>
+        <div class="unit">¥129.00</div>
+        <div class="qty">
+          <span class="stepper">
+            <button title="减一（现有实现：number 输入 min=0）">−</button>
+            <input type="text" value="1" title="现有实现：number 输入，min=0 / max=100">
+            <button title="加一（现有实现：number 输入 max=100）">+</button>
+          </span>
+        </div>
+        <div class="sub">¥129.00</div>
+      </div>
+
+      <div class="dfoot">
+        <span class="meta">共 1 件 · 免运费</span>
+        <span class="dtotal">
+          <span class="k">合计</span>
+          <span class="v"><i>¥</i>129.00</span>
+        </span>
+      </div>
+
+      <div class="dacts">
+        <button class="b no" data-close>取消</button>
+        <button class="b ok" data-to="dlg2">确认购入</button>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══════════ 七、付款确认弹窗 ═══════════ -->
+<section class="page" data-page="dlg2">
+  <nav class="nav-bar">
+    <button class="nav-back">‹ 返回</button>
+    <a class="brand">商城</a>
+    <div class="nav-right"><a>用户中心</a></div>
+  </nav>
+  <div class="scrim">
+    <div class="dlg" style="max-width:420px">
+      <div class="dlg-h">是否现在付款？</div>
+      <div class="dlg-sub">确认购入后将生成订单（现有端点 order.orderAdd）。</div>
+      <div class="dacts">
+        <button class="b no" data-close>否</button>
+        <button class="b ok" data-close>是</button>
+      </div>
+    </div>
+  </div>
+</section>
+
+<script>
+/* ═══════════════════════════════════════════════════════════════════════════
+   正文由同一份模板渲染：登录态 / 游客态 / 三个 Tab 局部视图共用
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+const CRUMB = `
+  <nav class="crumb">
+    <a>首页</a><span class="sp">/</span>
+    <a>数码配件</a><span class="sp">/</span>
+    <span>无线蓝牙耳机</span>
+  </nav>`
+
+/* —— Tab 面板内容 —— */
+const PANELS = {
+  desc: `
+    <div class="panel">
+      <p class="para">声谷标准版是这一代的主力款：单耳 4.8g，入耳处用液态硅胶做了弧度，
+        长时间佩戴不压耳廓。蓝牙 5.3 双连，手机与笔记本之间切换不用重新配对。</p>
+      <p class="para">充电盒支持 10 分钟快充补 3 小时，通勤路上临时补电够用到下班。</p>
+      <div class="longimg" data-slot="预留 · 详情富文本（动现有代码 6 处 · 超档）" data-future="待 C3〈商品〉"
+           title="待 C3〈商品〉——goods 表无详情字段：mall_management_sql.sql + GoodsDao.java + GoodsService.java + GoodsController.java + GoodsAdd.vue（录入）+ ProductPage.vue（展示）= 6 处，**超档**，因清单点名而画出（见 README 挂账表）">商品详情长图　1200 × 400</div>
+    </div>`,
+  spec: `
+    <div class="panel">
+      <div class="spec" data-slot="预留 · 规格参数（动现有代码 6 处 · 超档）" data-future="待 C3〈商品〉"
+           title="待 C3〈商品〉——goods 表无参数列（品牌 / 材质 / 产地 / 尺寸各一列）：mall_management_sql.sql + GoodsDao.java + GoodsService.java + GoodsController.java + GoodsAdd.vue + ProductPage.vue = 6 处，**超档**，因清单点名而画出（见 README 挂账表）">
+        <div class="r"><span class="k">品牌</span><span class="v">声谷 SG</span></div>
+        <div class="r"><span class="k">型号</span><span class="v">SG-A2</span></div>
+        <div class="r"><span class="k">材质</span><span class="v">ABS + 液态硅胶</span></div>
+        <div class="r"><span class="k">产地</span><span class="v">广东东莞</span></div>
+        <div class="r"><span class="k">尺寸</span><span class="v">62 × 42 × 24 mm（充电盒）</span></div>
+        <div class="r"><span class="k">重量</span><span class="v">单耳 4.8 g / 整机 48 g</span></div>
+        <div class="r"><span class="k">蓝牙</span><span class="v">5.3，双设备连接</span></div>
+        <div class="r"><span class="k">续航</span><span class="v">单次 8 小时 / 含盒 32 小时</span></div>
+      </div>
+    </div>`,
+  rev: `
+    <div class="panel">
+      <div class="rev" data-slot="预留 · 累计评价（动现有代码 ≥4 处 · 超档）" data-future="待 C3〈商品〉"
+           title="无评价端点：endpoints.js + GoodsController.java（或新评价 Controller）+ ProductPage.vue + 订单页「去评价」入口 = ≥4 处，**超档**。⚠️ 本块按用户边界「不做评论区」**只画形态、不实现**，是清单点名与边界打架时的显式例外。">
+        <div class="score">
+          <div class="n">4.8</div>
+          <div class="of">共 12,043 条评价</div>
+          <div class="bars">
+            <div class="b"><i>5 星</i><span class="track"><span class="fill" style="width:86%"></span></span></div>
+            <div class="b"><i>4 星</i><span class="track"><span class="fill" style="width:9%"></span></span></div>
+            <div class="b"><i>3 星</i><span class="track"><span class="fill" style="width:3%"></span></span></div>
+            <div class="b"><i>2 星</i><span class="track"><span class="fill" style="width:1%"></span></span></div>
+            <div class="b"><i>1 星</i><span class="track"><span class="fill" style="width:1%"></span></span></div>
+          </div>
+          <div class="shots">
+            <span class="s"></span><span class="s"></span><span class="s"></span><span class="s"></span>
+          </div>
+        </div>
+        <div>
+          <div class="rlist">
+            <div class="rc">
+              <div class="h"><span class="who">阿***</span>
+                <span class="stars">★★★★★</span>
+                <span class="when">2026-09-28</span></div>
+              <p class="txt">降噪比想象中好，通勤地铁上基本听不到报站声，做工也扎实，充电盒盖的阻尼感对得起这个价。</p>
+              <div class="sku">型号：降噪款</div>
+            </div>
+            <div class="rc">
+              <div class="h"><span class="who">拾***</span>
+                <span class="stars">★★★★<span class="e">★</span></span>
+                <span class="when">2026-09-21</span></div>
+              <p class="txt">续航实测约 28 小时，比标称的 32 小时少一点；不过日常两天一充，够用。</p>
+              <div class="sku">型号：标准款</div>
+            </div>
+            <div class="rc">
+              <div class="h"><span class="who">沈***</span>
+                <span class="stars">★★★★★</span>
+                <span class="when">2026-09-15</span></div>
+              <p class="txt">第二次买了，第一副掉在出租车上。送的收纳盒很实用，这回直接又配了一副。</p>
+              <div class="sku">型号：旗舰款</div>
+            </div>
+          </div>
+          <div class="pager">
+            <button class="on">1</button><button>2</button><button>3</button>
+            <span class="gap">…</span><button>602</button><button>下一页</button>
+          </div>
+        </div>
+      </div>
+    </div>`,
+  as: `
+    <div class="panel">
+      <div class="pol">
+        <div class="r"><span class="k">7 天无理由</span>
+          <span class="v">签收次日起 7 天内，商品及包装保持完好、不影响二次销售的，可申请无理由退货。</span></div>
+        <div class="r"><span class="k">极速退款</span>
+          <span class="v">退货申请通过后，货款先行退回原支付账户，后续物流由平台跟进。</span></div>
+        <div class="r"><span class="k">运费险</span>
+          <span class="v">本商品默认投保运费险，退货产生的运费按保单赔付，最高 20 元。</span></div>
+        <div class="r"><span class="k">正品保障</span>
+          <span class="v">平台自营或品牌授权商家发货，假一赔十；保修按品牌官方政策执行。</span></div>
+      </div>
+    </div>`
+}
+
+const TAB_LABEL = {desc: '商品详情', spec: '规格参数', rev: '累计评价', as: '售后保障'}
+
+const TABS = `
+  <div class="tabs">
+    <button data-tab="desc">商品详情</button>
+    <button data-tab="spec">规格参数</button>
+    <button data-tab="rev">累计评价<span class="cnt">1.2 万</span></button>
+    <button data-tab="as">售后保障</button>
+  </div>`
+
+/* —— 推荐区：**真功能**（endpoints.js: goods.goodsSelectHome）—— */
+const RECO = `
+  <section class="reco">
+    <h2 title="真功能：现有端点 goods.goodsSelectHome，本区不需要新端点">猜你喜欢</h2>
+    <div class="cards">
+      <a class="card"><div class="ph"></div><div class="nm">声谷 Lite 半入耳蓝牙耳机 长续航版</div>
+        <div class="pr"><i>¥</i><b>89</b><em>.00</em></div></a>
+      <a class="card"><div class="ph"></div><div class="nm">声谷 空气传导运动耳机 骨传导二代</div>
+        <div class="pr"><i>¥</i><b>259</b><em>.00</em></div></a>
+      <a class="card"><div class="ph"></div><div class="nm">USB-C 快充数据线 编织款 1.5m</div>
+        <div class="pr"><i>¥</i><b>19</b><em>.90</em></div></a>
+      <a class="card"><div class="ph"></div><div class="nm">桌面蓝牙音箱 木质腔体 声谷音</div>
+        <div class="pr"><i>¥</i><b>168</b><em>.00</em></div></a>
+    </div>
+  </section>`
+
+/* —— 商品主区（左画廊 + 右信息区）—— */
+const MAIN = `
+  <div class="pd">
+    <div class="gal">
+      <div class="stage">
+        <div class="zoom">商品主图 800 × 800</div>
+        <span class="lens">悬停放大</span>
+        <button class="arw l" title="上一张（现有实现 scroll(-1)）">‹</button>
+        <button class="arw r" title="下一张（现有实现 scroll(+1)）">›</button>
+      </div>
+      <div class="thumbs">
+        <div class="thb on" title="现有多图集，点缩略图切换"></div>
+        <div class="thb"></div><div class="thb"></div><div class="thb"></div>
+      </div>
+    </div>
+
+    <div class="info">
+      <h1 class="pname">无线蓝牙耳机 声谷标准版 主动降噪 32 小时续航</h1>
+
+      <div class="priceline" data-slot="预留 · 原价 / 折扣（动现有代码 5 处 · 超档）" data-future="待 C3〈商品〉"
+           title="goods 表无原价列（只有 Price 一列）：mall_management_sql.sql + GoodsDao.java + GoodsService.java + GoodsController.java + ProductPage.vue = 5 处，**超档**，因清单点名而画出（见 README 挂账表）">
+        <span class="price"><span class="sym">¥</span><span class="int">129</span><span class="dec">.00</span></span>
+        <span class="was">¥199.00</span>
+        <span class="off">6.5 折</span>
+      </div>
+
+      <div class="promo" data-slot="预留 · 促销 / 优惠券（动现有代码 5 处 · 超档）" data-future="待 C3〈促销〉"
+           title="无促销与优惠券字段：本页这一块的落码成本 = endpoints.js + ProductPage.vue = 2 处，**但券无法凭空存在** —— 跨页那套（PDP 领券 / 购物车可用券 / 个人中心我的券 / 结算已用券 / 首页领券中心）合计 5 处，**超档**，因清单点名而画出（见 README 挂账表）">
+        <div class="r"><span class="tag">促销</span><span class="cut">满 200 减 30　满 500 减 80</span></div>
+        <div class="r"><span class="tag">领券</span>
+          <span class="coupons">
+            <span class="coupon"><span class="amt"><i>¥</i>20</span>
+              <span class="cond">满 199 可用</span>
+              <button class="get" title="领取优惠券（无端点）">领取</button></span>
+            <span class="coupon"><span class="amt"><i>¥</i>50</span>
+              <span class="cond">满 499 可用</span>
+              <button class="get" title="领取优惠券（无端点）">领取</button></span>
+          </span>
+        </div>
+      </div>
+
+      <div class="pick">
+        <div class="lbl">型号</div>
+        <div class="row">
+          <button class="md on">标准款</button>
+          <button class="md">降噪款</button>
+          <button class="md">旗舰款</button>
+        </div>
+      </div>
+
+      <div class="qty">
+        <span class="lbl">数量</span>
+        <span class="stepper">
+          <button title="减一（现有实现：number 输入 min=0）">−</button>
+          <input type="text" value="1" title="现有实现：number 输入，min=0 / max=100">
+          <button title="加一（现有实现：number 输入 max=100）">+</button>
+        </span>
+        <span class="stock">现货，下单后 48 小时内发出</span>
+      </div>
+
+      <div class="acts">
+        <button class="b ghost" disabled
+                data-slot="预留 · 加入购物车（动现有代码 3 处）" data-future="待 C3〈购物车〉"
+                title="待 C3〈购物车〉——需新建购物车表 + 加端点（endpoints.js 1 处）+ ProductPage.vue 按钮与数量联动（1 处）+ 购物车页渲染（1 处）= 3 处">加入购物车</button>
+        <button class="b primary" data-to="dlg1" title="现有功能：openPopup（ProductPage.vue:69 → order.orderAdd）">立即购买</button>
+      </div>
+
+      <div class="promise">
+        <span>正品保障</span><span>7 天无理由</span><span>极速退款</span><span>运费险</span>
+      </div>
+
+      <!-- ⚠️ 角标挂**整张商家卡**，不挂「进店逛逛」：那个按钮只有 90px，而 N 写上后角标要 250px，
+           挂按钮上时角标会横跨到左边的「客服」和「声谷小店」上，1440 槽位截图里糊成一片
+           （此前用 .slot-stack 只解决了上下叠，没解决**左右**叠）。这是「角标只挂区块级」的
+           第三次应验 —— 前两次是 LoginPage 的「记住我 / 忘记密码」和 GoodsUp 的库存 / 销量列。
+           ⚠️ 本段注释在 JS 模板字符串里 ⇒ **不许出现反引号**（一处反引号会把模板截断，
+           整个 renderFull 抛语法错、页面直接白屏 —— 这一步踩过一次，见页面顶注 Q3）。 -->
+      <div class="shop" data-slot="预留 · 店铺主页（动现有代码 4 处 · 超档）" data-future="待 C3〈店铺〉"
+           title="待 C3〈店铺〉——「进店逛逛」无落点：router/index.js（加路由）+ ProductPage.vue（跳转）+ 商家侧装修入口 + 商家卡数据来源 = 4 处，**超档**，因清单点名而画出（见 README 挂账表）；店铺页本身是新建文件，不计入。⚠️ 「客服」是真功能（message.send），不在此占位内。">
+        <span class="mark">声</span>
+        <span>
+          <span class="nm">声谷小店</span>
+          <span class="sub">数码配件 · 商品类型：影音耳机</span>
+        </span>
+        <span class="ops">
+          <button title="现有功能 consultProduct">客服</button>
+          <button disabled title="待 C3〈店铺〉——无落点，4 处改动（超档），见商家卡角标">进店逛逛</button>
+        </span>
+      </div>
+    </div>
+  </div>`
+
+/* 全页 = 面包屑 + 主区 + Tab 区 + 推荐区 */
+function renderFull(active) {
+  return CRUMB + MAIN
+    + TABS.replace(`data-tab="${active}"`, `data-tab="${active}" class="on"`)
+    + PANELS[active] + RECO
+}
+/* Tab 局部视图：也要能看出这是哪一页 ⇒ 保留面包屑 + 一行商品名，不重复图集与购买区 */
+function renderLocal(active) {
+  return CRUMB
+    + `<h1 class="pname" style="margin-top:var(--s4)">无线蓝牙耳机 声谷标准版 主动降噪 32 小时续航</h1>`
+    + TABS.replace(`data-tab="${active}"`, `data-tab="${active}" class="on"`)
+    + PANELS[active] + RECO
+}
+
+document.getElementById('pd-detail').innerHTML = renderFull('desc')
+document.getElementById('pd-guest').innerHTML  = renderFull('desc')
+document.getElementById('pd-t-spec').innerHTML = renderLocal('spec')
+document.getElementById('pd-t-rev').innerHTML  = renderLocal('rev')
+document.getElementById('pd-t-as').innerHTML   = renderLocal('as')
+
+/* ── 切页 + 弹窗开关（弹窗真的能开能关，不只是静态图）─────────────────────── */
+const bar = document.querySelector('.bar')
+function go(key) {
+  document.querySelectorAll('.page').forEach(p => p.classList.toggle('on', p.dataset.page === key))
+  bar.querySelectorAll('button[data-page]').forEach(b => b.classList.toggle('on', b.dataset.page === key))
+  window.scrollTo(0, 0)
+}
+bar.querySelectorAll('button[data-page]').forEach(b => b.addEventListener('click', () => go(b.dataset.page)))
+
+document.addEventListener('click', e => {
+  const to = e.target.closest('[data-to]')
+  if (to) { go(to.dataset.to); return }
+  const close = e.target.closest('[data-close]')
+  if (close) { go('detail'); return }
+  const md = e.target.closest('.md')
+  if (md) document.querySelectorAll('.md').forEach(x => x.classList.toggle('on', x === md))
+  const thb = e.target.closest('.thb')
+  if (thb) thb.parentNode.querySelectorAll('.thb').forEach(x => x.classList.toggle('on', x === thb))
+})
+
+/* ── 预留位 / 目标版 开关 —— 默认关闭 ─────────────────────────────────────── */
+const slotBtn = document.getElementById('slotBtn')
+slotBtn.addEventListener('click', () => {
+  const on = document.body.classList.toggle('slots')
+  slotBtn.classList.toggle('on', on)
+  slotBtn.textContent = on ? '隐藏预留位 / 目标版' : '显示预留位 / 目标版'
+})
+</script>
+</body>
+</html>

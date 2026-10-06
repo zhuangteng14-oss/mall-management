@@ -1,0 +1,716 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>购物车 · 客户 · B 稿 v5</title>
+<!--
+  ═══════════════════════════════════════════════════════════════════════════════
+  购物车 · 客户 —— 界面优化笔 B 稿 **v5**（2026-10-06 判据换向后重画）
+  ═══════════════════════════════════════════════════════════════════════════════
+  宿主：`/customer/cart`（router/index.js:61），meta.layout = `cart-container`，壳内、顶栏「购物车」高亮。
+  本稿是 **目标版**（正规电商平台式购物车）。当前 Vue 落地面见下列「A 列对照」。
+
+  ⚠️ 客户侧不画 📋/🛒 开关：`/customer/cart` 传 `props:{showSwitch:false}`（router/index.js:61），
+     该块在客户宿主下根本不渲染（ShoppingCart.vue:4）。
+
+  ── A 列对照（现有 ShoppingCart.vue 395 行的每一件去哪了）──────────────────
+    保留并重画  商品图 order.Images / 商品信息 order.ProductInformation / 单价
+    迁走        【付款】`order.orderPayIfUp`(endpoints.js:56) /【收货】`order.orderReceiveIfUp`(:57)
+                / 4 步进度条 / 创建·更改日期 —— 这些是**订单**的职责（见下「语义变化」）。
+    ★ v4 新删   **订单号**（v2 曾以「行内小字」保留）。
+                正规平台的购物车里**没有订单号** —— 还没下单哪来的订单号。
+                那是 v1「订单卡」血统的残留，v4 判据下必须剪掉。这是本页最直接的一处
+                「从正规平台往回看」的删减，单列出来说明它不是漏画。
+    C3 新增     店铺分组 / 店铺小计 / 编辑 / 数量加减 / 小计 / 删除 / 全选 / 猜你喜欢 / 吸底结算栏
+                —— 后端**零购物车端点**，整面按占位画（唯一例外见「猜你喜欢」）。
+
+  ── 语义变化：现有实现其实是订单列表，不是购物车 ────────────────────────────
+  `ShoppingCart.vue` 读的是 `order.*` 端点、渲染的是**已下单的订单**（含付款/收货按钮、
+  4 步进度条、创建·更改日期）。⇒ 本稿画的「购物车」与现有实现在**语义上不是同一个东西**：
+  前者是「还没下单的待买清单」，后者是「已经下单的订单列表」。
+  ⚠️ 这不是本笔要解决的事（购物车功能本身被用户划在 B 笔之外），但它决定了**A 列对照怎么读**：
+     「保留」的是**字段形状**（图 / 商品文本 / 单价），不是**语义**。
+
+  ── v4 相对 v2 的改动：**两栏 → 单栏 + 吸底结算栏；补店铺分组与猜你喜欢** ────
+  v2 是「左列表 + 右 sticky 小结」两栏。用户清单点的是**吸底结算栏**，且要求**店铺分组 / 店铺小计 /
+  编辑 / 猜你喜欢** —— v2 这四项全缺。v4 把小结从右栏搬到底部吸底条（这也正是淘宝/京东的形态），
+  于是列表吃满整宽，正好给店铺分组和猜你喜欢腾出地方。
+  v2 已经画对的部分**逐字保留**：面包屑、标题 + N 件、发丝线表行（不是卡片流）、
+  四级视觉权重（图 64 方图 / 名称 --fs-md / 小计衬线 --fs-lg / 操作 --fs-xs）、
+  金额强调色**只花一次**、零阴影、窄屏列头隐藏后各字段自带前缀标签。
+
+  ── v5 改了什么（三处，对着用户的原话去）──────────────────────────────────
+   用户原话：「搜索 / 购物车 / 个人页**色彩过于单一（只有少量按钮和文字是青瓷绿，
+   大块区域全是线条 + 留白）**」。本页改前正好是这句话的标本：商品列表、承诺条、
+   结算栏、猜你喜欢**四种分区全用线划界**，全页唯一的绿还被涂成了灰（见下 ③）。
+
+   ① **吸底结算栏：`--surface` → `--glaze-deep`，并删掉 `border-top`。**
+      这是本页唯一被补的「面」。理由：判据 C「**重要元素用色**」+「**分区用色块**」——
+      结算栏是全页的事务锚点（合计 / 去结算都在它上面），它就该是这一页的主块。
+      选 `--glaze-deep`(#dbe3de) 的据：ΔE00/白 = **8.01**、OKLCH C=0.011 H=159°
+      —— 本批 token 里**唯一**同时满足「ΔE00/白 ≥ 4」与「彩度低到还像釉」的中性面
+      （`--zone` 2.71 / `--surface-2` 2.63 / `--glaze-pale` 2.91 全在「看得见」线以下）。
+      删 `border-top` 是四层语法：这一层已经是**分区**，分区用「面」划界，
+      面之外再叠一根线＝同一种手段跨层级复用（线留给「分组」）。
+      ⚠️ 面积代价约全页 **3.2%**（1440×80），不违反「克制 > 堆砌」。
+      ⚠️ **诚实标注**：`measure-area.mjs` 把这 3.2% 计进了「**浅面（灰）**」而不是
+      「青瓷绿」—— 因为它的分桶按 OKLCH 彩度切，`--glaze-deep` 的 C=0.011 够不上「有彩」。
+      肉眼是淡青的（截图可见），但**按工具的尺子它算灰面**，不替它争这个名分。
+   ② **勾选框改画成「已勾选」态**，修一处状态自相矛盾（改前数据说全选、控件说没选）。
+      详见 `.ck.on` 那段注释。
+   ③ **推翻 `.go[disabled]{background:var(--surface-3)}`**，改回 `--brand` 实底。
+      详见 `.go[disabled]` 那段注释（依据是本文件自己的房规 + 全批只此一处例外）。
+
+  ── ⚠️ v5 的一处**自我更正**：Q5 不是这次改动的理由 ────────────────────────
+   我起初想把①写成「因为 Q5 判 ✗ 所以补面」。**做了突变对照才发现这是错的**：
+     把 `.paybar` 改回白底 + `border-top` 重测 ⇒ 它被判为「**线**」（1 根，填色 10%）
+     ⇒ 分布 = 留白×1 + 块×1 + **线×1** ⇒ **Q5 本来就是 ✓**。
+   改后 = 留白×1 + 块×1 + **面×1** ⇒ Q5 仍 ✓。
+   ⇒ 这次改动是**把该分区的划界手法从「线」换成「面」**，不是把 ✗ 翻成 ✓。
+     真理由是用户的原话（线太多）+ 判据 C，与 Q5 无关。头注不许编因果。
+   ⚠️ 同时记一个**工具的坑**（不是本页的问题）：`measure-hierarchy.mjs` 默认的取根启发式
+     （`main > *` / `.content > *` / 兜底 `body > * > * > *`）在本页抓到的是**内层
+     `.paybar-in`**（它自己没底色）⇒ 会把这一栏判成「留白」⇒ 汇总成 △。
+     用 `--sel ".paybar, .shops, .rec, .pledge"` 指到真正的分区容器才是对的。
+     ⚠️ 我**没有去改工具**让它默认通过 —— 只用它文档化的 `--sel`，并且两个数都写在这里。
+
+  ── 平台功能清单（15 条；覆盖率 15/15 = 100%）─────────────────────────────
+  ⚠️ **本页的共同基线是 4 处**：整个购物车没有表 ⇒ 任何一条要真跑起来，最少都得动
+     `mall_management_sql.sql`（建 cart 表）+ 一个 `CartController.java` + `endpoints.js`
+     （加端点）+ `ShoppingCart.vue`（取值渲染）。**下面各条的 N 都含这 4 处基线**，
+     只在需要额外加动时才往上加。基线本身已 > 3 ⇒ 本页**几乎每个块都是超档**，
+     这是「整页没有后端」的必然结果，不是判据失灵。
+
+   # 条目                                  后端证据                  档     N    本笔怎么画
+   1 面包屑（首页 / 购物车）               既有路由                  真     0    画
+   2 标题 +「N 件商品」                    前端求和                  真     0    画
+   3 编辑（转批量操作模式）                无批量端点                占位   4    ⚠️超档，画（点名）
+   4 店铺分组（按 MerchantId 归并）        `goods.MerchantId` 有     占位   4    ⚠️超档，画（点名）
+   5 店铺小计                             前端按组求和              占位   4    ⚠️超档，画（点名）
+   6 店铺名 +「进店逛逛」                  无店铺表                  占位   ≥5   ⚠️超档，画（点名）
+   7 商品行 · 图 / 名 / 规格               cart 表（新）             占位   4    ⚠️超档，画（点名）
+   8 商品行 · 单价 / 小计                  同上                      占位   4    ⚠️超档，画（点名）
+   9 数量加减                             同上                      占位   4    ⚠️超档，画（点名）
+  10 删除                                 同上                      占位   4    ⚠️超档，画（点名）
+  11 勾选 + 全选                          同上                      占位   4    ⚠️超档，画（点名）
+  12 服务承诺条（跨页共性组件）            无承诺列                  占位   ≥4   ⚠️超档，画（点名）
+  13 **猜你喜欢**                         `goodsSelectHome` **现成** 真     0    画
+  14 吸底结算栏（件数 / 合计 / 去结算）    无结算端点                占位   4    ⚠️超档，画（点名）
+  15 空态                                 既有                      真     0    画
+  真功能 4 / 占位 11 / 只登记 0 ⇒ 覆盖率 (4+11)/15 = **100%** ✔
+  ⚠️ 13 条「猜你喜欢」是真功能，理由值得单说：**它是用户自己举的 0 处独立模块的例子**，
+     而且数据源**真的现成**（`goodsSelectHome` 是既有端点、返回既有商品）⇒ 不需要新建任何东西。
+     本页 15 条里有 11 条超档、4 条真功能，而**4 条真功能里没有一条依赖购物车后端** ——
+     这个分布本身就说明「这一页目前是空壳」。
+
+  ── 跨页共性组件登记 ───────────────────────────────────────────────────────
+    · **服务承诺条**：文案必须与 `ProductPage.html` 承诺条**逐字一致**
+      （正品保障 / 7 天无理由 / 极速退款 / 运费险）。一处改了另一处必须跟着改。
+    · **商品卡**：与 `GoodsSelect.html` / `ProductPage.html` 推荐区 /
+      `UserCenter-customer.html` 收藏位**逐字同款**（`--img` 占位图 + 发丝边 + 两行名
+      `min-height:3em` + 衬线三档价）。**四处一起改，不许各自发挥。**
+    · **面包屑**：与全部内页同款（`--fs-xs`、分隔符与文字同色 `--ink-3`）。
+    · **空态**：与全部列表页同款（居中、宋体大字 + 一行说明 + 一个次要动作）。
+    · **店铺头**：与 `ProductPage.html` 的商家卡、`OrderCenter-merchant.html` 的店铺头同源。
+
+  ── 占位清单（data-slot / data-future）——角标只挂区块级：4 个 ──────────────
+    ① 「编辑」按钮 …………………………………………………………………… N=4
+    ② 店铺分组区整块（含店铺头 + 商品行 + 店铺小计）………………………… N=4
+    ③ 服务承诺条 …………………………………………………………………… N≥4
+    ④ 吸底结算栏 …………………………………………………………………… N=4
+  ⚠️ 「猜你喜欢」**不挂角标** —— 它是本页唯一的独立真功能模块（见上）。
+  ⚠️ 逐行的重复控件（勾选框 / 加减 / 删除）一律只 `disabled` + `title`（title 里写全归属与 N），
+     **不挂 data-slot** —— 逐行挂会糊成一片，反而看不出留白在哪（沿用 `子页面改造.html:779` 的既有做法）。
+  ⚠️ 「空购物车」视图里只有「猜你喜欢」是真功能（零角标）—— 空态本身也是真功能。
+     ⇒ 该视图 slots 计数为 **0**，`check-drafts.mjs` 报的 4 全部来自「有商品」视图。
+  ⚠️ 角标是 `top:-11px` 的伪元素 ⇒ 挂点**及其所有祖先**都不许有「非 visible 的 overflow」
+     （`overflow-x:auto` 也会把另一轴算成 auto，GoodsUp 踩过，README 有记录）。
+     本页所有挂点都是普通 block / sticky，无滚动容器 ⇒ `check-badges.mjs` 通过。
+
+  ── 三问自查（v4 第四条）──────────────────────────────────────────────────
+    Q1 一眼能看出这是什么页吗？ ✔ 面包屑 +「购物车 · N 件商品」+ 按店铺分组的发丝线表行 +
+       底部吸底结算栏 —— 是购物车的标准读法。**把订单号删掉**之后更像了（v2 还带着订单血统）。
+    Q2 同模块不同状态视觉一致吗？ ✔ 两个视图共用同一套 `.crumb` / `.page-h` / `.card`；
+       「空购物车」保留面包屑、标题与猜你喜欢，把列表区换成空态，**并摘掉吸底结算栏与服务承诺条**
+       —— 这两块都以「有商品」为前提（见 ⑨）。
+    Q3 有异常区吗？ ✔ 落笔时定下两条：
+       ① 从两栏改成单栏后，列表吃满 1132px ⇒ 表行的 `minmax(0,1fr)` 名称列会被拉得很宽，
+          而右侧的「单价/数量/小计/操作」四列仍是 88/104/112/48 —— 必须让名称列**吃掉全部余量**
+          （`minmax(0,1fr)` 已经是这个语义），否则余量会被平摊到各列、数字列左右乱飘。
+       ② 吸底条用 `position:sticky;bottom:0` 而**不是 `fixed`** —— fixed 要额外给正文
+          `padding-bottom` 补偿，否则最后一行商品会被条子永久盖住；sticky 在**它自然位置到达时
+          就落回文档流**，不存在遮挡。
+       **截图读回后又抓到三条：**
+       ③ 【真缺陷 / 机制坑】`.sum` 在 v2 就带 `data-slot` 且是 `position:sticky` ——
+          而 `body.slots [data-slot]{position:relative}` 会**把 sticky 顶掉**。
+          v2 看不出问题，只因为这块正好在页面顶部（滚到 0 时 sticky 与 relative 没差别）。
+          吸底条在页面**底部**，一旦被顶成 relative 就会跳回文档流尾部、
+          在 slots 态下**整个吸底效果消失** ⇒ 截图里一眼可见。
+          ⇒ 加一条同选择器、更高优先级的规则把 sticky 还回来：
+            `body.slots .paybar[data-slot]{position:sticky}`。
+          ⇒ 教训：**slots 的 `position:relative` 与任何 sticky/fixed 挂点都会打架**，
+            凡是要在 slots 态下保持定位的挂点，都得显式还原一遍。
+       ④ 【**误判，已改正 —— 保留记录**】第一版在整页图里看到「吸底条压住服务承诺条下缘」，
+          判成「吸底条角标（top:-11px）空间不够」，给承诺条加 `margin-bottom:24px` 去补。
+          **实际原因不是 margin**：那是 ⑥ 说的 sticky 截图伪影 —— 吸底条被钉在布局视口底、
+          盖在承诺条上。改成视口图 + `--eval` 后就没了。
+          ⇒ 真净空来自 `.wrap{padding-bottom:var(--s8)}`（64px），比角标高得多，一直够。
+          ⇒ 教训：**分不清「页面缺陷」和「截图伪影」时，先换一种截图方式复现一次再下结论**，
+            否则会为一个不存在的问题改样式（而且改错了还看不出来，因为伪影没了）。
+       ⑤ 【真缺陷，读回整页图才发现】承诺条**归属读反**：第一版上距 80px、下距 45px，
+          离「猜你喜欢」比离商品列表更近 ⇒ 看起来像推荐区的副标题。
+          承诺条是**购物车的尾** ⇒ 改成上紧下松（`margin-top:var(--s2)` / `.rec{margin-top:var(--s7)}`）。
+          ⇒ 教训：**间距不是审美，是归属声明** —— 谁离谁近，读者就认为谁属于谁。
+       ⑥ 窄屏（≤1120）下吸底条里的四件东西（全选 / 已选 / 合计 / 去结算）一行放不下 ⇒
+          显式折成两行（第一行全选 + 已选，第二行合计 + 去结算），**不靠 flex-wrap** ——
+          GoodsUp 踩过「wrap 折行位置随视口变」的坑。
+       ⑦ 【截图伪影，不是页面缺陷，但必须处理】`shot.mjs` 的 `--full` 走 puppeteer
+          `fullPage`，而它用 `captureBeyondViewport`：**布局视口仍是 900px**，只是往视口外多画。
+          于是 `position:sticky;bottom:0` 的吸底条被钉在 y≈900 处，
+          **后面的服务承诺条与猜你喜欢全跑到它下面去了** —— 整页图读起来像「结算栏插在中间」。
+          ⇒ 整页图用 `--eval` 把 `.paybar` 临时改成 `position:relative`
+            （保留 `::after` 的定位祖先，角标不跑），让它回到文档流末尾；
+            吸底效果另出一张**视口图**（不带 `--full`、先 `window.scrollTo` 滚动）作证据。
+          ⇒ 通用教训：**sticky/fixed 元素在整页截图里必然失真**，
+            要么临时改定位、要么用视口图，不能拿整页图去评价吸底/吸顶。
+       ⑧ 【探针盲区 —— 比本条缺陷本身重要】`.edit` 的角标溢出视口 31px、与另一枚角标互撞 6×15px，
+          而 `check-badges.mjs` **两条都报 OK**：
+            · 它沿**祖先链**找 `overflow != visible`，**从不与视口比较** ⇒ 看不见「被窗口裁」；
+            · 它的 `boxes()` **逐个算盒，从不做两盒相交** ⇒ 看不见「两枚角标互撞」。
+          查出来的办法只有一个：内联 `node -e` 把每枚角标按 `getComputedStyle(el,'::after')`
+          的 top/left/right/width/height 换算成绝对矩形，再两两求交集（不落任何文件）。
+          ⇒ 教训：**探针报 OK 只等于「它查过的那几件事 OK」，不等于「没问题」**。
+            一个探针没有覆盖到的失效模式，它不会以「没查」的形式报出来，而是以「OK」的形式报出来
+            —— 这是最危险的失败方式。用它之前先读一遍它在查什么（本页就是读了源码才发现的）。
+       ⑨ 【真缺陷 · 判据误用】第一版在「空购物车」里也画了服务承诺条，理由写在注释里：
+          「真实电商清空购物车后这些区块不会跟着消失」。
+          ⚠️ **这句话是我自己编的，不是从任何平台上看到的。** 回看真实平台：空购物车就是
+          「空态 + 去逛逛 + 猜你喜欢」三件，没有承诺条，也没有吸底结算栏。
+          承诺条的指代对象是**车里的商品**；车空了，它就没有指代对象，
+          悬在空态与推荐区之间只会被读成「空态的附属小字」。
+          ⇒ 已删。
+          ⇒ 教训：**「我觉得真实平台是这样」和「真实平台确实是这样」之间差一次核对**。
+            这条判据（第一条）的全部价值就在这里 —— 一旦允许自己凭印象补理由，
+            它就退化成 v2/v3 那种「从现有实现出发」的自洽，只是换了个说法。
+
+  ── Q4 配色比例是否参考了成熟方案（v5 新增）──────────────────────────────
+   ⚠️ **没有照抄** Linear / Stripe / Vercel，理由见《v5-配色分析.md》：
+     那三家主色 OKLCH **C = 0.235 / 0.214 / 0.159**，我们 `--brand #3b7966` 只有 **0.072**，
+     差 2~3 倍。「主色 ≤10% 面积」这条经验的前提是**主色够响**；前提不成立时照抄只会更单调。
+   ⇒ 本页参照对象是**淘宝 / 京东购物车**（按店铺分组 + 店铺小计 + 底部吸底结算栏）——
+     同样是「按页定参照」：购物车是**事务页**，密度中高，不是营销页。
+   ⇒ 本页实测（1440·整页）：**留白 69.16% / 浅面（灰）28.77% / 青瓷绿 0.50% / 朱砂 0.24%**。
+     改前是青瓷绿 **0.17%** / 灰面 **26.42%**（会话记录，非本地重测 ⇒ 按叙述记录标）。
+     ⚠️ 绿涨得不多（+0.33pt），涨的全在「结算栏按钮 + 7 枚勾选框」这些**小面积实色**上；
+     ⚠️ 而结算栏那 3.2% 的 `--glaze-deep` 面被量具算进了「浅面（灰）」，不算青瓷绿（见 v5 第①条）。
+
+  ── Q5 同页分区视觉是否交替（v5 新增）──────────────────────────────────
+   用 `--sel ".paybar, .shops, .rec, .pledge"` 指到**真正的分区容器**后实测：
+     · `shops`（645px，商品列表）→ **留白**
+     · `猜你喜欢`（1360px）        → **块**（20 张 `--img` 占位图，填色 56%，ΔE00/白 5.13）
+     · `paybar`（80px）            → **面**（填色 100%，底色 #dbe3de，ΔE00/白 8.01）
+     ⇒ 分布 = 留白×1 + 块×1 + 面×1 ⇒ **Q5 ✓ 有交替**
+   ⚠️ 两个必须写下来的保留：
+     ① **不传 `--sel` 时本页得 △** —— 默认取根启发式抓到内层 `.paybar-in`（自身无底色）
+        把它判成「留白」。这是**工具的取节点坑**，不是本页的缺陷（见上面「自我更正」那段）。
+     ② `shops` 被判「留白」也**偏宽**：商品行的分组发丝线挂在孙级 `.row` 上，
+        而工具只扫「自身 + 直接子级」（第二版修正的自觉取舍）⇒ 数不到那些线。
+        ⇒ 所以这一格的真实手法应是「线」而非「留白」。**我照工具的原样记录，不替它美化**。
+     ③ `pledge`（承诺条，51px，上下两条发丝线）高 < 70px 被工具剔出分布 —— 它本来就是
+        「分组」层用线，不该参与分区投票。
+
+  ── Q6 这份稿我为什么这样改？和上一版的根本差异是什么？（v5 新增）──────────
+   **根本差异：v4 是一张「没有重心的表格」，v5 让它有了一个重心。**
+     v4：商品列表、承诺条、结算栏、猜你喜欢**四种分区全用线划界**，唯一的实色 CTA
+     还被 `.go[disabled]` 涂成灰盒 ⇒ 整页读起来是一张平铺的表，眼睛没有落点。
+     v5：把**结算栏**这一处升格为分区级的「面」（全页唯一一次），主 CTA 回到实底主色，
+     勾选框显示真实状态。列表区的线**一条都没动** —— 那是「分组用线」，本来就对。
+   ⚠️ 一句话检验（与搜索页同一把尺）：**v4 整页调成灰度，「合计 ¥475.70」与「去结算」
+     不比周围任何一根发丝线更重；v5 的结算栏是一条明确的带。**
+     这是这一版真正买到的东西 —— 不是「加了绿色」，是「加了**一个**重心」。
+
+  ── 参考：淘宝 / 京东购物车（按店铺分组 + 店铺小计 + 底部吸底结算栏）、
+     Zalando 购物袋（无订单号、单栏、底部固定结算带）。
+  ═══════════════════════════════════════════════════════════════════════════════
+-->
+<!-- ⚠️ 本文件在 docs/美化/pages/ 下，比 docs/美化/*.html 深一层 ⇒ 资产前缀是**三级** `../../../` -->
+<link rel="stylesheet" href="../../../Mall-management-web/mall-management-system/src/assets/fonts/noto.css">
+<link rel="stylesheet" href="../../../Mall-management-web/mall-management-system/src/assets/fonts/mono.css">
+<!-- v5 收尾：'LXGW WenKai GB' 设计稿专用 link —— 理由/体积见 tokens.css 的 --font-display 段 -->
+<link rel="stylesheet" href="../../../../美化/node_modules/@free-fonts/lxgw-wenkai-gb/lxgw-wenkai-gb.css">
+<link rel="stylesheet" href="../../../Mall-management-web/mall-management-system/src/assets/tokens.css">
+<style>
+:root{ --d2: calc(var(--fs-2xl) * 1.00); }
+
+/* ── 预览条 + 预留位可视化：只是看稿工具，不进 Vue ─────────────────────────── */
+.bar{position:sticky;top:0;z-index:100;display:flex;align-items:center;gap:var(--s2);flex-wrap:wrap;
+     padding:var(--s2) var(--s4);background:var(--nav-bg);border-bottom:1px solid var(--line-2);font-size:var(--fs-xs)}
+.bar-t{font-weight:var(--fw-semi);color:var(--nav-tx-hi);margin-right:var(--s3)}
+.bar-t em{font-style:normal;color:var(--brand-ink)}
+.bar button{padding:2px var(--s3);border:1px solid var(--line);border-radius:var(--r1);background:var(--surface);color:var(--ink-2);font:inherit}
+.bar button.on{background:var(--brand);border-color:var(--brand);color:var(--bg)}
+.bar #slotBtn.on{background:var(--warning);border-color:var(--warning)}
+.bar .sep{width:1px;height:16px;background:var(--line-2);margin:0 var(--s2)}
+.bar .hint{margin-left:auto;color:var(--ink-3)}
+body.slots [data-slot],body.slots [data-future]{outline:2px dashed var(--warning);outline-offset:5px;position:relative}
+body.slots [data-future]{outline-color:var(--info)}
+body.slots [data-slot]::after,body.slots [data-future]::before{
+  position:absolute;top:-11px;font-size:10.5px;letter-spacing:.5px;padding:1px 8px;
+  border-radius:var(--r1);color:var(--bg);z-index:5;white-space:nowrap}
+body.slots [data-slot]::after{content:attr(data-slot);left:8px;background:var(--warning)}
+body.slots [data-future]::before{content:attr(data-future);right:8px;background:var(--info)}
+/* ⚠️ 吸底条在「有商品」视图里是 `position:sticky`，但上面那条 `body.slots [data-slot]` 会把它
+   顶成 `position:relative` —— 一旦顶掉，吸底条在 slots 态下会跳回文档流尾部、**吸底效果整个消失**
+   （它挂在页面**底部**，所以不像 v2 的 `.sum` 那样在页面顶部可以蒙混过去）。
+   ⇒ 用同选择器 + 更高优先级把它显式还回来。`sticky` 同样能给 `::after` 当定位祖先，不影响角标。
+   ⇒ 通用教训：**slots 的 `position:relative` 与任何 sticky/fixed 挂点都会打架**，
+     凡是要在 slots 态下保持定位的挂点，都得这么还原一遍。 */
+body.slots .paybar[data-slot]{position:sticky}
+
+/* ⚠️ 本文件三处**局部**角标修正 —— 不动全局 `top:-11px` 约定、不动 token。
+   ㈠ `.edit` 只有 42×21px（实测 x 1248–1286 / y 200–221），是十份稿里最小的挂点。默认摆法两个都坏：
+      · slot 左对齐 ⇒ 角标落 x 1256–1471，**右缘 1471 超出视口 1440 共 31px，被窗口裁掉**。
+        ⚠️ `check-badges.mjs` 报 OK —— 它只沿**祖先链**找 `overflow != visible`，而 html/body 都是
+           visible ⇒ **探针有「视口外溢出」这个盲区**（裁它的是窗口，不是任何祖先盒）。
+      · future 右对齐 ⇒ 落 x 1193–1278，与 slot 角标**互撞 6×15px**，
+        而 `::after` 画在 `::before` 之上 ⇒ 蓝角标被咬掉一块。
+        ⚠️ 这个探针同样报 OK —— 它的 `boxes()` 逐个算盒，**从不做两盒相交**。
+      ⇒ 这两条是用内联 `node -e` 量出来的（不落任何文件），探针覆盖不到，见头注 Q3 第 ⑧ 条。
+   ㈡ slot 改右对齐（向左生长，不再出页）；future 抬到 top:-28（y 172–189），
+      与 slot 的 189–206 **不重叠**，距上方面包屑下缘（165）留 7px 净空。
+   ㈢ `.shops` 的角标默认落 243–258，列头文字行盒 254–271（字号 12px，字面约 258–267）
+      ⇒ **实测字面重叠 0px**，只是「贴着」；但叠加图上读起来像压在表头上。
+      纯可读性调整（**不是缺陷修复**），抬到 -19 ⇒ 235–250。 */
+body.slots .edit[data-slot]::after{left:auto;right:8px}
+body.slots .edit[data-future]::before{top:-28px}
+body.slots .shops[data-slot]::after,body.slots .shops[data-future]::before{top:-19px}
+
+/* ── 基础 ─────────────────────────────────────────────────────────────────── */
+body{font-family:var(--font);font-size:var(--fs-sm);color:var(--ink);background:var(--bg);
+     -webkit-font-smoothing:antialiased}
+a{color:inherit;text-decoration:none}
+button,input{font:inherit;color:inherit}
+button{background:none;border:0;cursor:pointer}
+
+.nav-bar{display:flex;align-items:center;gap:var(--s5);height:60px;padding:0 var(--s7);
+         background:var(--surface);border-bottom:1px solid var(--line)}
+.brand{font-family:var(--font-display);font-size:var(--fs-lg);font-weight:var(--fw-semi);color:var(--brand-ink)}
+.nav-right{margin-left:auto;display:flex;align-items:center;gap:var(--s5);color:var(--nav-tx)}
+.nav-right a.on{color:var(--nav-now);font-weight:var(--fw-semi)}
+.dot{display:inline-block;width:6px;height:6px;margin-left:3px;border-radius:50%;
+     background:var(--accent);vertical-align:super}
+
+.wrap{max-width:1180px;margin:0 auto;padding:var(--s7) var(--s5) var(--s8)}
+.page{display:none}
+.page.on{display:block}
+
+/* 面包屑：分隔符**与文字同色**（同为 `--ink-3`）—— 用 `--line-2` 时对比度只有 1.47:1，
+   正是 check-contrast.mjs 要抓的「根本看不见」那一类。层级靠间距和字形区分。 */
+.crumb{display:flex;align-items:center;font-size:var(--fs-xs);color:var(--ink-3)}
+.crumb .sp{font-style:normal;padding:0 var(--s2)}
+.crumb .cur{color:var(--ink-2)}
+
+/* 标题行：标题在左，「编辑」在右 —— 编辑是页面级动作，不是列表级动作 */
+.h1row{margin-top:var(--s4);display:flex;align-items:baseline;gap:var(--s5)}
+.page-h{display:flex;align-items:baseline;gap:var(--s4);
+        font-family:var(--font-display);font-size:var(--d2);font-weight:var(--fw-med);
+        line-height:1.15;letter-spacing:-.02em}
+.page-h .n{font-family:var(--font);font-size:var(--fs-xs);color:var(--ink-3);letter-spacing:0}
+.edit{margin-left:auto;font-size:var(--fs-sm);color:var(--ink-2);padding:0 var(--s1)}
+.edit:hover{color:var(--brand-ink)}
+.edit[disabled]{color:var(--ink-3);cursor:not-allowed}
+
+/* ── 店铺分组 ─────────────────────────────────────────────────────────────── */
+.shops{margin-top:var(--s6)}
+.shop{border-top:1px solid var(--line-2)}
+.shop-head{display:flex;align-items:center;gap:var(--s3);padding:var(--s4) 0 var(--s3)}
+.shop-nm{font-size:var(--fs-sm);font-weight:var(--fw-med);color:var(--ink)}
+.shop-nm .badge{margin-left:var(--s2);font-size:var(--fs-xs);font-weight:var(--fw-reg);color:var(--ink-3)}
+.visit{margin-left:var(--s2);font-size:var(--fs-xs);color:var(--ink-3)}
+.visit:hover{color:var(--brand-ink)}
+.shop-foot{display:flex;align-items:center;justify-content:flex-end;gap:var(--s4);
+           padding:var(--s3) 0 var(--s5);border-top:1px solid var(--line);font-size:var(--fs-xs);color:var(--ink-3)}
+.shop-foot .v{font-family:var(--font-display);font-size:var(--fs-md);font-weight:var(--fw-med);
+              color:var(--ink);font-variant-numeric:tabular-nums}
+
+/* 列头 + 表行共用同一套列宽 ⇒ 天然对齐。名称列 `minmax(0,1fr)` 吃掉全部余量（Q3 第 ① 条）*/
+.list-head,.row{display:grid;grid-template-columns:28px 64px minmax(0,1fr) 88px 104px 112px 48px;
+                align-items:center;gap:var(--s4)}
+.list-head{padding-bottom:var(--s3);font-size:var(--fs-xs);color:var(--ink-3)}
+.list-head .c-num,.list-head .c-sub,.list-head .c-op{text-align:right}
+.row{padding:var(--s4) 0;border-bottom:1px solid var(--line)}
+
+/* 勾选框：目标版是真实控件，后端零端点 ⇒ 一律 disabled + title，不挂 data-slot */
+/* ⚠️ v5 收尾（改 2 ⑦）：补 `flex:none`，与 `OrderCenter-merchant.html` 的同名规则同形 ——
+   那边早就有（它的 `.ck` 也用在订单列表里），本稿一直缺。18px 定宽控件在 `.shop-head`
+   这种 flex 容器里默认 `flex-shrink:1`，理论上会被压扁。**实测无位移**（本页 `.ck` 的
+   包围盒改前后完全一致），所以这是「同形」不是「改版」。 */
+.ck{position:relative;width:18px;height:18px;flex:none;border:1px solid var(--line-2);border-radius:var(--r1);background:var(--surface)}
+.ck[disabled]{cursor:not-allowed}
+/* ⚠️ v5：勾选框改画成**已勾选**态 —— 修一处状态自相矛盾。
+   改前：三处勾选框（行 508 / 店铺头 530 / 结算栏 440）全是空的，而结算栏写「已选 7 件 / 共 7 件」、
+   合计 ¥475.70 —— 那个数**正好等于四行之和**，即数据按「全选」算、控件却显示「一个没选」。
+   ⇒ 取「全选态」而不是「未选态」，因为正规平台进购物车默认就全选（目标版的真实初态），
+     且改成未选态会让结算栏退化成 ¥0.00，用户点名要看的「合计 / 去结算」等于没画。
+   ⚠️ 勾**用两条边框转 45° 画**，不用 `✓` 字形：自托管子集里没有该码位，
+     实测会回落成一个小点（同 `.cat-more .car` 那条教训）。 */
+.ck.on{border-color:var(--brand);background:var(--brand)}
+.ck.on::after{content:"";position:absolute;left:5px;top:1px;width:5px;height:9px;
+              border-right:2px solid var(--bg);border-bottom:2px solid var(--bg);transform:rotate(45deg)}
+.list-head .ck{justify-self:start}
+
+/* ① 图片 64px 方图 —— 最小那一级 */
+.thumb{width:64px;aspect-ratio:1/1;border-radius:var(--r1);background:var(--img);border:1px solid var(--line)}
+
+/* ② 名称 —— 最重那一级；规格次之。⚠️ 不再有「订单号」：购物车里没有订单（见头注 A 列对照）*/
+.nm{min-width:0}
+.nm .t{font-size:var(--fs-md);font-weight:var(--fw-med);line-height:1.35;color:var(--ink);
+       overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.nm .spec{margin-top:var(--s1);font-size:var(--fs-xs);color:var(--ink-3)}
+/* 单价：最轻的数字 —— 小计才是承重的那个 */
+.unit{text-align:right;font-size:var(--fs-sm);color:var(--ink-3);font-variant-numeric:tabular-nums}
+.qty{display:flex;align-items:center;justify-content:flex-end;gap:var(--s2)}
+.qty .b{width:26px;height:26px;border:1px solid var(--line-2);border-radius:var(--r1);color:var(--ink-2);
+        font-variant-numeric:tabular-nums;line-height:1}
+.qty .b[disabled]{color:var(--ink-3);cursor:not-allowed}
+.qty .v{min-width:24px;text-align:center;font-size:var(--fs-sm);font-variant-numeric:tabular-nums}
+
+/* ③ 小计：列表里最重的数字（用衬线数字与正文分开），但**不给强调色** ——
+      那一次留给吸底条的「合计」 */
+.sub{text-align:right;font-family:var(--font-display);font-size:var(--fs-lg);
+     font-weight:var(--fw-med);font-variant-numeric:tabular-nums}
+.op{text-align:right}
+.op button{font-size:var(--fs-xs);color:var(--ink-3)}
+.op button[disabled]{cursor:not-allowed}
+
+/* ── 服务承诺条（跨页共性组件，文案与 ProductPage 逐字一致）───────────────────
+   ⚠️ 承诺条是**购物车的尾**，不是推荐区的头 —— 第一版写成 `margin-top:48px / margin-bottom:24px`，
+      结果上距 80px、下距 45px，读起来像「猜你喜欢」的副标题（Q3 第 ⑤ 条）。
+      改成上紧下松：贴住商品列表，与推荐区拉开。 */
+.pledge{margin-top:var(--s2);margin-bottom:var(--s2);padding:var(--s4) 0;
+        border-top:1px solid var(--line);border-bottom:1px solid var(--line);
+        display:flex;gap:var(--s8);flex-wrap:wrap;font-size:var(--fs-xs);color:var(--ink-2)}
+.pledge span::before{content:"·";color:var(--brand);margin-right:var(--s2);font-weight:var(--fw-semi)}
+
+/* ── 猜你喜欢（真功能：goodsSelectHome 现成）────────────────────────────── */
+.rec{margin-top:var(--s7)}
+.rec-h{display:flex;align-items:baseline;gap:var(--s4);margin-bottom:var(--s5)}
+.rec-h h2{font-family:var(--font-display);font-size:var(--fs-md);font-weight:var(--fw-reg)}
+.rec-h .note{font-size:var(--fs-xs);color:var(--ink-3);margin-left:auto}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:40px 24px}
+.card{display:block}
+.thumb2{aspect-ratio:1/1;border-radius:var(--r2);background:var(--img);border:1px solid var(--line)}
+.card:hover .thumb2{border-color:var(--line-2)}
+/* ⚠️ `min-height:3em` = 两行：否则一行名 / 两行名的卡片价格不在同一水平线上 */
+.c-name{margin-top:var(--s3);font-size:var(--fs-sm);line-height:1.5;color:var(--ink-2);min-height:3em;
+        display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.c-price{margin-top:var(--s2);display:flex;align-items:baseline;color:var(--accent);
+         font-variant-numeric:tabular-nums}
+.c-price .sym{font-size:var(--fs-xs)}
+.c-price .int{font-family:var(--font-display);font-size:var(--fs-lg);font-weight:var(--fw-med);line-height:1}
+.c-price .dec{font-size:var(--fs-xs)}
+
+/* ── 吸底结算栏 ───────────────────────────────────────────────────────────── */
+/* ⚠️ v5：`--surface` → **`--glaze-deep`**，并且**删掉 `border-top`**。
+   理由一（对着用户的原话）：用户说「购物车……大块区域全是线条 + 留白」。本页改前**一个面都没有**
+     —— 商品列表、承诺条、结算栏、猜你喜欢全在「线 / 留白 / 灰块」三种里打转，
+     唯一的绿还被下面那条 `.go[disabled]` 涂成了灰。补的这个面就补在最该有面的地方。
+   理由二（为什么是**这一块**）：判据 C「重要元素用色」。结算栏是全页的事务锚点
+     （合计 + 去结算都在它上面），它在语义上就该是这一页的主块。
+   理由三（为什么是**这一枚色**）：`--glaze-deep`(#dbe3de) ΔE00/白 = **8.01**、OKLCH C=0.011 H=159°
+     —— 是本批 token 里**唯一**同时满足「ΔE00/白 ≥ 4（看得见）」与「彩度低到还像釉」的中性面
+     （`--zone` 2.71 / `--surface-2` 2.63 / `--glaze-pale` 2.91 全在「看得见」线以下）。
+   理由四（**一致性**）：它与登录页的品牌栏、个人页的身份卡用的是**同一枚** `--glaze-deep`
+     ⇒ 全批形成一条可复述的语言：「**每页一个釉面主块，只用一次**」。
+   面积代价：约 1440×80 ≈ 全页 **3.2%** —— 换到一个真实的分区面，不违反「克制 > 堆砌」。
+   ⚠️ 删 `border-top` 是四层语法的要求：这一层已经是**分区**了，分区用「面」划界；
+     面之外再叠一根线，就是同一种手段跨层级复用（线是留给「分组」的）。 */
+.paybar{position:sticky;bottom:0;z-index:20;background:var(--glaze-deep)}
+.paybar-in{max-width:1180px;margin:0 auto;padding:var(--s4) var(--s5);
+           display:flex;align-items:center;gap:var(--s5)}
+.paybar .sel{display:flex;align-items:center;gap:var(--s3);font-size:var(--fs-sm);color:var(--ink-2)}
+.paybar .sel .cnt{color:var(--ink-3);font-size:var(--fs-xs);font-variant-numeric:tabular-nums}
+.paybar .sums{margin-left:auto;display:flex;align-items:baseline;gap:var(--s4)}
+.paybar .sums .d{font-size:var(--fs-xs);color:var(--ink-3);font-variant-numeric:tabular-nums}
+.total{display:flex;align-items:baseline;gap:var(--s2)}
+.total .k{font-size:var(--fs-sm);color:var(--ink-2)}
+.total .v{font-family:var(--font-display);font-size:var(--fs-xl);font-weight:var(--fw-med);
+          line-height:1;color:var(--accent);font-variant-numeric:tabular-nums}
+.total .v i{font-style:normal;font-size:var(--fs-sm);margin-right:2px}
+.go{height:48px;padding:0 var(--s7);border-radius:var(--r2);background:var(--brand);
+    color:var(--bg);font-size:var(--fs-md);font-weight:var(--fw-med);white-space:nowrap}
+/* ⚠️ v5：**推翻**原来那条 `.go[disabled]{background:var(--surface-3);color:var(--ink-3)}`。
+   原写法把全页最重要的行动按钮涂成一个灰盒 —— 而本页其余一切恰好都在证明它是活的：
+   7 件已选、合计 ¥475.70、旁边就写着「去结算（7 件）」。灰盒读起来像「这单出问题了」。
+   推翻的**依据是本文件自己的房规**（见头注第 88 行）：
+     「逐行的重复控件一律**只 `disabled` + `title`**」——
+   全批 `[disabled]` 也几乎都只改 cursor（`GoodsSelect` 的 `.sort`/`.pick`、`ProductPage` 的
+   `.ghost`、`UserCenter` 的 `.tiles`/`.sec-h`）。`.go[disabled]` 是**全批唯一的例外**。
+   ⇒ 改回房规：保留 `--brand` 实底（目标态长什么样就画什么样），
+      「无端点」这一事实由 `disabled` 属性 + `title`（「结算流程无端点」）+ `cursor:not-allowed` 承担。
+   ⚠️ 底色从原来的 `--surface-3` 换成 `--brand`：在 `--glaze-deep` 面上，
+      ΔE00(`--brand`, `--glaze-deep`) = **37.72**，按钮与面分得很开，不会糊在一起。 */
+.go[disabled]{background:var(--brand);color:var(--bg);cursor:not-allowed}
+
+/* ── 空态 ─────────────────────────────────────────────────────────────────── */
+.empty{padding:var(--s8) 0;text-align:center}
+.empty .big{font-family:var(--font-display);font-size:var(--fs-lg);color:var(--ink-2)}
+.empty .p{margin-top:var(--s3);font-size:var(--fs-sm);color:var(--ink-3)}
+.empty .go2{display:inline-block;margin-top:var(--s5);height:40px;line-height:40px;padding:0 var(--s6);
+            border:1px solid var(--line-2);border-radius:var(--r2);color:var(--ink-2);font-size:var(--fs-sm)}
+
+/* ── 窄屏：列头隐藏 ⇒ 每个字段自带小标签；吸底条折两行 ───────────────────────
+   ⚠️ 四列 × 三行的**显式定位**，不用 grid-template-areas：列头一没，四件元信息若还各占
+      一整行，末尾的「删除」会被推到很远、中间空出一大片（v2 首版就是这样）。
+      两两一行（单价|删除 / 数量|小计）把这一带收在名字下方。 */
+@media (max-width:1120px){
+  .list-head{display:none}
+  .row{grid-template-columns:28px 64px minmax(0,1fr) auto;
+       column-gap:var(--s5);row-gap:var(--s4);align-items:center}
+  .row .ck{grid-area:1/1/2/2;align-self:start;margin-top:2px}
+  .row .thumb{grid-area:1/2/2/3}
+  .row .nm{grid-area:1/3/2/5}
+  .row .unit{grid-area:2/3/3/4;text-align:left;font-size:var(--fs-xs)}
+  .row .op{grid-area:2/4/3/5;text-align:right}
+  .row .qty{grid-area:3/3/4/4;justify-content:flex-start}
+  .row .sub{grid-area:3/4/4/5}
+  /* 列头没了，所以这几个数各自带一个前缀标签 —— 只在窄屏出现，不是装饰 */
+  .row .unit::before{content:"单价 "}
+  .row .sub::before{content:"小计 ";font-family:var(--font);font-size:var(--fs-xs);
+                    font-weight:var(--fw-reg);color:var(--ink-3)}
+  .row .qty::before{content:"数量";color:var(--ink-3);font-size:var(--fs-xs)}
+  .pledge{gap:var(--s5)}
+  /* 吸底条折两行，**不靠 flex-wrap**（折行位置随视口变，GoodsUp 踩过） */
+  .paybar-in{flex-direction:column;align-items:stretch;gap:var(--s3)}
+  .paybar .sums{margin-left:0;justify-content:space-between}
+  .go{width:100%;padding:0}
+}
+</style>
+</head>
+<body>
+
+<div class="bar">
+  <span class="bar-t">B 稿 v5 · 购物车（客户） <em>目标版 · 后端零购物车端点</em></span>
+  <button data-page="filled" class="on">有商品</button>
+  <button data-page="empty">空购物车</button>
+  <span class="sep"></span>
+  <button id="slotBtn">显示预留位 / 目标版</button>
+  <span class="hint">预览稿 · 项目源码未动</span>
+</div>
+
+<!-- ═══════════ 一、有商品 ═══════════ -->
+<section class="page on" data-page="filled">
+  <nav class="nav-bar">
+    <a class="brand">商城主页</a>
+    <div class="nav-right"><a>消息<i class="dot"></i></a><a class="on">购物车</a><a>用户中心</a></div>
+  </nav>
+  <div class="wrap">
+    <nav class="crumb"><a>首页</a><span class="sp">/</span><span class="cur">购物车</span></nav>
+
+    <div class="h1row">
+      <h1 class="page-h">购物车 <span class="n" id="h1n"></span></h1>
+      <button class="edit" disabled
+              data-slot="预留 · 编辑（动现有代码 4 处 · 超档）" data-future="待 C3〈购物车〉"
+              title="待 C3〈购物车〉——批量删 / 移入收藏均无端点。4 处 = 购物车的共同基线（mall_management_sql.sql 建 cart 表 + CartController.java + endpoints.js + ShoppingCart.vue），**超档**，因清单点名而画出">编辑</button>
+    </div>
+
+    <!-- ── 店铺分组 + 商品行 + 店铺小计 ─────────────────────────────────── -->
+    <section class="shops" data-slot="预留 · 店铺分组 / 商品行 / 店铺小计（动现有代码 4 处 · 超档）"
+             data-future="待 C3〈购物车〉"
+             title="待 C3〈购物车〉——整块 4 处 = 共同基线（mall_management_sql.sql 建 cart 表 + CartController.java + endpoints.js + ShoppingCart.vue）。分组键用 goods.MerchantId（**已有**，不用加列）；店铺名与「进店逛逛」另有缺口：无店铺表 ⇒ ≥5 处。**超档**，因清单点名而画出">
+      <div class="list-head">
+        <span></span><span></span><span>商品</span>
+        <span class="c-num">单价</span><span class="c-num">数量</span>
+        <span class="c-sub">小计</span><span class="c-op">操作</span>
+      </div>
+      <div id="shops"></div>
+    </section>
+
+    <!-- ── 服务承诺条（跨页共性组件）───────────────────────────────────── -->
+    <div class="pledge" data-slot="预留 · 服务承诺条（动现有代码 ≥4 处 · 超档）" data-future="待 C3〈商品〉"
+         title="待 C3〈商品〉——goods 无承诺列，选了什么存不下来：mall_management_sql.sql + GoodsDao.java + GoodsController.java + 上架页 = ≥4 处，**超档**。⚠️ 文案必须与 ProductPage.html 的承诺条逐字一致（跨页共性组件）">
+      <span>正品保障</span><span>7 天无理由</span><span>极速退款</span><span>运费险</span>
+    </div>
+
+    <!-- ── 猜你喜欢（真功能：goodsSelectHome 现成，0 处改动）─────────────── -->
+    <section class="rec">
+      <div class="rec-h">
+        <h2>猜你喜欢</h2>
+        <span class="note">goodsSelectHome · 现有端点，0 处改动</span>
+      </div>
+      <div class="grid" id="rec-filled"></div>
+    </section>
+  </div>
+
+  <!-- ── 吸底结算栏 ───────────────────────────────────────────────────── -->
+  <div class="paybar" data-slot="预留 · 吸底结算栏（动现有代码 4 处 · 超档）" data-future="待 C3〈购物车〉"
+       title="待 C3〈购物车〉——结算 / 支付流程均无端点。4 处 = 共同基线（mall_management_sql.sql 建 cart 表 + CartController.java + endpoints.js + ShoppingCart.vue），**超档**，因清单点名而画出">
+    <div class="paybar-in">
+      <span class="sel">
+        <button class="ck on" disabled title="待 C3〈购物车〉——全选无端点"></button>
+        全选
+        <span class="cnt" id="barCnt"></span>
+      </span>
+      <span class="sums">
+        <span class="d" id="barGoods"></span>
+        <span class="total"><span class="k">合计</span><span class="v"><i>¥</i><span id="barTotal"></span></span></span>
+      </span>
+      <button class="go" disabled id="goBtn" title="待 C3〈购物车〉——结算流程无端点"></button>
+    </div>
+  </div>
+</section>
+
+<!-- ═══════════ 二、空购物车 ═══════════ -->
+<section class="page" data-page="empty">
+  <nav class="nav-bar">
+    <a class="brand">商城主页</a>
+    <div class="nav-right"><a>消息<i class="dot"></i></a><a class="on">购物车</a><a>用户中心</a></div>
+  </nav>
+  <div class="wrap">
+    <nav class="crumb"><a>首页</a><span class="sp">/</span><span class="cur">购物车</span></nav>
+    <div class="h1row">
+      <h1 class="page-h">购物车 <span class="n">0 件商品</span></h1>
+    </div>
+    <!-- ⚠️ 空购物车时**既不画吸底结算栏，也不画服务承诺条**：
+         没有商品可结算，也没有商品可承诺 —— 承诺条在这一态下**没有指代对象**，
+         悬在空态与推荐区之间只会被读成「空态的附属小字」。
+         真实平台的空购物车就是「空态 + 去逛逛 + 猜你喜欢」三件，见 Q3 第 ⑨ 条。 -->
+    <div class="empty">
+      <div class="big">购物车还是空的</div>
+      <div class="p">逛逛商品，把想买的先放进来。</div>
+      <a class="go2">去挑商品</a>
+    </div>
+
+    <section class="rec">
+      <div class="rec-h">
+        <h2>猜你喜欢</h2>
+        <span class="note">goodsSelectHome · 现有端点，0 处改动</span>
+      </div>
+      <div class="grid" id="rec-empty"></div>
+    </section>
+  </div>
+</section>
+
+<script>
+/* ⚠️ 本段整体是一个 **JS 模板字符串** ⇒ 里面的 HTML 注释**不许出现反引号**
+   （ProductPage 踩过：一个反引号提前截断字符串 ⇒ 整页白屏）。 */
+
+/* ── 按店铺分组的商品行 ────────────────────────────────────────────────────
+   ⚠️ 名称 / 规格 / 店铺名均为**示意** —— order 实体只有 ProductInformation 一个商品文本列，
+     更没有店铺表。分组键（MerchantId）本身是既有字段，但**店铺名没有来源**。
+   [店铺名, [[名称, 规格, 单价, 数量], …]]
+   ─────────────────────────────────────────────────────────────────────── */
+const SHOPS = [
+  ['声谷数码 · 官方店', [
+    ['无线蓝牙耳机 声谷标准版', '标准款 · 深空灰', 129.00, 1],
+    ['便携充电宝 20000mAh',   '容量 20000 · 白',  149.00, 1]
+  ]],
+  ['暖屋生活馆', [
+    ['不锈钢保温杯 500ml',   '磨砂银 · 500ml',    69.00, 2],
+    ['有机全麦面包 每日鲜',   '全麦 · 6 片装',     19.90, 3]
+  ]]
+]
+
+const yuan = n => n.toFixed(2)
+
+const rowHTML = ([name, spec, unit, qty]) => `
+  <div class="row">
+    <button class="ck on" disabled title="待 C3〈购物车〉——勾选无端点（共同基线 4 处，超档）"></button>
+    <div class="thumb"></div>
+    <div class="nm">
+      <div class="t">${name}</div>
+      <div class="spec">规格：${spec}</div>
+    </div>
+    <div class="unit">¥${yuan(unit)}</div>
+    <div class="qty">
+      <button class="b" disabled title="待 C3〈购物车〉——数量递减无端点（共同基线 4 处，超档）">−</button>
+      <span class="v">${qty}</span>
+      <button class="b" disabled title="待 C3〈购物车〉——数量递增无端点（共同基线 4 处，超档）">+</button>
+    </div>
+    <div class="sub">¥${yuan(unit * qty)}</div>
+    <div class="op"><button disabled title="待 C3〈购物车〉——删除无端点（共同基线 4 处，超档）">删除</button></div>
+  </div>`
+
+document.getElementById('shops').innerHTML = SHOPS.map(([shop, rows]) => {
+  const sub = rows.reduce((s, r) => s + r[2] * r[3], 0)
+  const cnt = rows.reduce((s, r) => s + r[3], 0)
+  return `
+  <div class="shop">
+    <div class="shop-head">
+      <button class="ck on" disabled title="待 C3〈购物车〉——全选本店无端点（共同基线 4 处，超档）"></button>
+      <span class="shop-nm">${shop}<span class="badge">${cnt} 件</span></span>
+      <a class="visit" title="待 C3〈店铺〉——无店铺表，无落点（≥5 处，超档；与 ProductPage.html 的商家卡同一缺口）">进店逛逛 ›</a>
+    </div>
+    ${rows.map(rowHTML).join('')}
+    <div class="shop-foot">
+      本店小计
+      <span class="v">¥${yuan(sub)}</span>
+    </div>
+  </div>`
+}).join('')
+
+/* ── 标题与吸底结算栏的数字**全部由 SHOPS 算出来**，不写死 ────────────────────
+   ⚠️ 第一版这里写死了「6 件 / ¥326.70」（v2 那组残留数据），而 SHOPS 实际是
+      7 件 / ¥475.70（278.00 + 197.70）——**评审一眼就能加出来对不上**。
+      教训：页面上凡是「另一个数算得出来」的数，都不许手写。 */
+{
+  const all = SHOPS.flatMap(s => s[1])
+  const cnt = all.reduce((s, r) => s + r[3], 0)
+  const total = all.reduce((s, r) => s + r[2] * r[3], 0)
+  document.getElementById('h1n').textContent = cnt + ' 件商品 · ' + SHOPS.length + ' 家店铺'
+  document.getElementById('barCnt').textContent = '已选 ' + cnt + ' 件 / 共 ' + cnt + ' 件'
+  document.getElementById('barGoods').textContent = '商品总额 ¥' + yuan(total) + ' · 运费 免运费'
+  document.getElementById('barTotal').textContent = yuan(total)
+  document.getElementById('goBtn').textContent = '去结算（' + cnt + ' 件）'
+  console.log('[cart] 店铺', SHOPS.length, '件数', cnt, '合计', yuan(total))
+}
+
+/* ── 猜你喜欢：商品卡与 GoodsSelect / ProductPage / UserCenter-customer **逐字同款** ──
+   ⚠️ 条数必须**同时整除 4 列和 5 列**，否则末行残缺：
+      第一版 6 条 ⇒ 1440 下 5 列排成 5+1，那个孤卡一眼就不对劲；
+      第二版 10 条 ⇒ 1440（5 列）好了，1080（4 列）又成 4+4+2。
+      实测列数：1440 → 内容 1132px → 5 列；1080 → 内容 1032px → 4 列。
+      **20 = 4 和 5 的公倍数** ⇒ 两种宽度下都是整行（5×4 / 4×5）。
+      ⚠️ 真实平台的猜你喜欢是**无限流**，末行残缺本身正常；这里是要给 D 笔一个
+         「栅格填满」的视觉锚点，残缺行会被误读成布局出错。 */
+const REC = [
+  ['机械键盘 静音红轴', 359.00], ['天然乳胶枕 护颈款', 199.00],
+  ['冷萃咖啡液 十二瓶装', 88.00], ['折叠雨伞 全自动款', 59.00],
+  ['陶瓷马克杯 350ml', 29.90], ['桌面收纳盒 三层抽屉', 45.00],
+  ['纯棉毛巾 三条装', 39.00], ['护眼台灯 无极调光', 129.00],
+  ['帆布托特包 大容量', 79.00], ['香薰蜡烛 雪松木质调', 68.00],
+  ['便携折叠水壶 600ml', 49.00], ['羊毛混纺围巾', 159.00],
+  ['桌面理线器 五个装', 19.90], ['蓝牙音箱 迷你款', 229.00],
+  ['陶瓷餐具四件套', 199.00], ['记忆棉坐垫', 89.00],
+  ['旅行收纳袋 六件装', 65.00], ['木质相框 六寸', 35.00],
+  ['不锈钢餐具三件套', 55.00], ['靠枕套 四十五厘米', 42.00]
+]
+const cardHTML = ([name, p]) => {
+  const [i, d] = p.toFixed(2).split('.')
+  return '<a class="card"><div class="thumb2"></div><div class="c-name">' + name + '</div>' +
+    '<div class="c-price"><span class="sym">¥</span><span class="int">' + i + '</span>' +
+    '<span class="dec">.' + d + '</span></div></a>'
+}
+document.getElementById('rec-filled').innerHTML = REC.map(cardHTML).join('')
+document.getElementById('rec-empty').innerHTML = REC.map(cardHTML).join('')
+
+/* ── 切页 ─────────────────────────────────────────────────────────────────── */
+const bar = document.querySelector('.bar')
+function go(key) {
+  document.querySelectorAll('.page').forEach(p => p.classList.toggle('on', p.dataset.page === key))
+  bar.querySelectorAll('button[data-page]').forEach(b => b.classList.toggle('on', b.dataset.page === key))
+  window.scrollTo(0, 0)
+}
+bar.querySelectorAll('button[data-page]').forEach(b => b.addEventListener('click', () => go(b.dataset.page)))
+
+/* ── 预留位 / 目标版 开关 —— 默认关闭 ─────────────────────────────────────── */
+const slotBtn = document.getElementById('slotBtn')
+slotBtn.addEventListener('click', () => {
+  const on = document.body.classList.toggle('slots')
+  slotBtn.classList.toggle('on', on)
+  slotBtn.textContent = on ? '隐藏预留位 / 目标版' : '显示预留位 / 目标版'
+})
+</script>
+</body>
+</html>

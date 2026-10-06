@@ -1,0 +1,575 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>查看商品 · 商家 · B 稿 v4</title>
+<!--
+  ═══════════════════════════════════════════════════════════════════════════════
+  查看商品 / 上下架 · 商家 —— 界面优化笔 B 稿 **v4**（2026-10-06 判据换向后重画）
+  ═══════════════════════════════════════════════════════════════════════════════
+  宿主：`/merchant/user/list`（router/index.js:117），meta.layout = `user-page`、meta.tab = `user`、
+        meta.sub = `list` ⇒ 壳内：顶栏右起第 3 项「用户中心」高亮，左菜单「查看商品」选中。
+  ⚠️ 顶栏按**仓库真在用的** `src/config/nav.js` 画（`MERCHANT_NAV` = 左「商城主页」+ 右三项），
+     **没有搜索框** —— 设计稿 `子页面改造.html:504-513` 里的壳顶栏 `.search` 是 README
+     「落地前必须先裁」第 1 条，尚未裁定；这里不替它做决定。
+
+  ── v4 相对 v3 最大的改动：**商品网格 → 商品表格** ─────────────────────────
+  v3 是 `repeat(4,1fr)` 的四列卡片墙（沿用 GoodsUp.vue 一行 4 个的形态）。v4 判据问的是
+  「正规电商平台的**商家商品管理**页长什么样」—— 那是**表格**：勾选 / 图 / 名 / 类型 / 价 /
+  库存 / 销量 / 状态 / 操作 + 分页。卡片墙适合**前台浏览**（搜索页 / 首页 / 推荐区），
+  不适合后台管理：商家要的是「一眼扫完 50 件、批量勾选、逐行改」。
+  ⚠️ 这是一处**结构改动**，与 ChatRoom 的会话栏改动同性质 —— 但这次是 v4 判据**直接要求**的
+     （用户逐页清单明写「表格（勾选 / 图 / 名 / 类型 / 价 / 库存 / 销量 / 状态 / 操作）」），
+     不是本笔自选，因此不需要另外点头。
+  ⚠️ 左菜单 / 店铺头 / 顶栏逐字未动，「查看商品」这一页的**进入方式没有变**。
+
+  ── 平台功能清单（13 条；覆盖率 13/13 = 100%）─────────────────────────────
+   # 条目                                        后端证据                                     档      N  本笔怎么画
+   1 店铺头（头像 + 店名 + 件数）                 `getUserInfo` + `goods.goodsSelect`          真      0  画
+   2 工具条 · 搜索（商品名 / ProductCode / 状态 / 分类）  分类有 `goods.goodstype`，其余无       占位    3  画（data-slot）
+   3 工具条 · 批量操作（全选 / 批量上下架 / 批量删除）     无端点                                占位    3  画（data-slot）
+   4 工具条 ·【上架商品】按钮                     跳 `/merchant/user/add`（既有路由）           真      0  画
+   5 表格 · 勾选列                                纯前端                                        真      0  画
+   6 表格 · 图 / 名 / 类型 / 价                    `goodsSelect` + `goodstype`                   真      0  画
+   7 表格 · **库存列**                            **goods 表无此列**（实测见下）                 占位    5  ⚠️ 超档，画（点名）
+   8 表格 · **销量列**                            `productsales.OrderVolume` **恒为 0 且无 SELECT** 占位 3  画（含在表头角标里）
+   9 表格 · 状态列                                无状态列（下架 = DELETE 行）⇒ 本页只列在架      真      0  画
+  10 表格 · 操作列（编辑 / 下架）                  `goods.goodsUp` / `goods.goodsDe`             真      0  画
+  11 分页                                        `SELECT * FROM goods` **无 LIMIT**（GoodsDao:187）  占位 3  画（data-slot）
+  12 按名称精确下架（现有实现，保留不删）          `goods.goodsDe`                               真      0  画
+  13 商品详情弹窗（改名 / 换图 / 改价 / 规格）     `goods.goodsUp` + `productCodePrice`          真      0  画
+  真功能 8 / 占位 5 / 只登记 0 ⇒ 覆盖率 **100%** ✔
+
+  ── ⚠️ 「库存 / 销量 / 状态」三列是**实测**出来的，不是猜的（这条要写清楚）────────
+  v3 把「库存」当占位、对「销量 / 状态」不置一词。v4 先去后端取了证据，结论**与直觉不同**：
+    · `GoodsDao.insertGoods` 的 INSERT 列序（`GoodsDao.java:76` 注释逐字）=
+      `MerchantId, GoodName, Price, GoodImg, GoodType, ProductCode, GoodTypeNew` ⇒ **没有库存列**。
+    · `GoodsDao.java:113` 逐字写着：`productsales.OrderVolume` **硬编码传 0** ——
+      「那个表的该列恒为 0」。全仓 `grep SELECT` 也**没有任何一条**把 OrderVolume 读出来
+      ⇒ 销量列即使画出来，每行也只会是 0 ⇒ **按占位处理**（不是真功能）。
+    · **没有状态列**：`goodsDe` 是 `DELETE FROM goods`（下架 = 删行）⇒ 能出现在本页的
+      一定是在架商品，状态**恒为「已上架」**。这一列因此是**真功能**（由「行存在」推得），
+      但也是**退化**的：上架 / 下架 / 待审 三态在当前后端里表达不出来。本笔照实画成常量，
+      并在列头 `title` 里写明，不让 D 笔误以为有状态机可接。
+    · 同理 `SELECT * FROM mall_management_sql.goods`（`GoodsCacheService.java:92`）
+      **无 LIMIT** ⇒ 分页确实是占位。
+
+  ── 跨页共性组件登记 ───────────────────────────────────────────────────────
+    · 本页**不再**复用「商品卡」：卡片墙是前台组件（搜索页 / 首页 / 推荐区 / 个人中心收藏位），
+      后台管理用表格。这是「同一元素在别页也出现吗」问下来**该分叉**的一处 —— 记在这里，
+      免得 C 笔看到本页没有商品卡以为是漏了。
+    · 复用「发丝线分隔 + 悬停行底色」的表格语言，与 `OrderCenter-merchant.html` 的订单表格同款。
+
+  ── 占位清单（data-slot / data-future）——角标只挂区块级：5 个 ────────────────
+    ① 工具条 · 搜索组（4 个输入/选择 +【查询】）—— 整组 data-slot + data-future …… N=3
+    ② 工具条 · 批量操作组（全选 + 批量上架 + 批量下架 + 批量删除）—— 整组 …………… N=3
+    ③ 商品表格（角标挂 `.tbl-zone`，文案**点名**是「库存 / 销量列」）—— 只有这两列是占位，
+       其余七列（勾选 / 图 / 名 / 类型 / 价 / 状态 / 操作）都是真功能 ………… N=5（库存）/ 3（销量）
+    ④ 分页 —— 整块 data-slot + data-future ………………………………………………… N=3
+    ⑤ 弹窗里的「库存」行 —— 与 ③ 的库存列同源，单独一处（弹窗内没有表格可挂）…… N=5
+    计数与 `check-drafts.mjs` 对账：slots 5 / future 5 ✔
+
+  ⚠️ N 口径在本页重算过一遍（**这是本笔的一处自我纠错**）：原先 5 个块全写的 N=2，
+     口径是「`endpoints.js` + 页面 `.vue`」—— 漏了后端那个 `*Controller.java`。
+     按用户判据反证：他把「改状态机加退款态」举为**超档**例，而它 = 3 个 `.vue` + 1 个
+     `OrderState.java`；`.java` 若不计入，它正好等于 3 ⇒ 是占位，就自相矛盾。
+     ⇒ **要新端点的功能下限是 3 处**。重算后：①②④ = 3（在档）、销量 = 3（在档）、
+     **库存 = 5（`mall_management_sql.sql` + `GoodsDao` + `GoodsService` + `GoodsController`
+     + `GoodsUp.vue`），超档**。库存之所以仍然画出来，是用户逐页清单**点名**要这一列
+     ⇒ 按 README「覆盖率优先」处理：**画 + 把真实 N 写进角标**，并在 README 的挂账表里
+     与其余 8 个超档元素并列登记，让用户看到代价后再定。
+  ⚠️ ③ 挂整块而不是挂两个 `<th>`：`<th>` 只有 88px 宽、角标要 240px，逐列挂必然与邻列角标
+     撞在一起（LoginPage 的「记住我 / 忘记密码」踩过同一个坑，README 有记录）。
+     挂区块级是「角标只挂区块级」的应验，角标文案负责说清是哪两列。
+  ⚠️ ③ 的挂载点**从 `<table>` 改到了外层的 `.tbl-zone`** —— 见下面那条教训。
+  ⚠️ **既有功能一律不标 slot、不 disabled**：左菜单 / 顶栏「消息」红点 /【上架商品】/
+     每行勾选框（纯前端）/ 每行【编辑】【下架】/ 下架栏 / 弹窗【更新商品数据】/ 规格标签。
+  ⚠️ 弹窗里「商品类型」输入框的 `disabled` 是**既有实现就锁死的**（GoodsUp.vue:78），
+     **不是占位**（故不挂 data-slot / 不挂 title）。
+  ⚠️ 角标是 `top:-11px` 的伪元素 ⇒ 挂点**及其所有祖先**都不许有「非 visible 的 overflow」。
+     ⚠️⚠️ 这里踩了一个**自己挖的坑**，记下来：`overflow-x:auto` 看着只管横向，实际按规范
+     会把另一轴的 `visible` **计算成 `auto`** ⇒ 纵向也裁。第一版角标挂在 `.tbl-wrap`
+     （有 `overflow-x:auto`）上，1440 槽位截图里角标被切掉下半截字。
+     ⇒ 外层加一个零溢出的 `.tbl-zone` 当挂载点，`.tbl-wrap` 只负责横向滚动。
+     教训比结论重要：**「祖先不许 overflow:hidden」不够，要写成「不许 overflow ≠ visible」**。
+  ⚠️ 本稿**只画事实**：不新增业务字段、不新增端点；商品名 / ProductCode / 店铺名为展示用样例。
+
+  ── 三问自查（v4 第四条）──────────────────────────────────────────────────
+    Q1 一眼能看出这是什么页吗？ ✔ 左菜单「查看商品」选中 + 标题 + 工具条 + 表格，
+       是后台管理页的完整读法；不再是一墙卡片让人猜「这是商城还是后台」。
+    Q2 同模块不同状态一致吗？ ✔ 「已上架」与「空态」共用同一个 `.head`，空态只把表格换成
+       `.empty`；表格的列宽 / 行高 / 悬停态在两条数据量下一致。
+    Q3 有异常区吗？ ✔ 第一轮：把「按名称下架」的输入栏留在表格**上方**，与工具条的搜索框
+       长得几乎一样、用途完全不同（一个查、一个删）⇒ 已挪到表格**下方**并加小标题
+       「按名称精确下架」，与工具条拉开。
+       第二轮（**1440 截图读图后**才发现的三处，说明「没截图 = 不算完成」不是空话）：
+         (a) 表格里的 ProductCode 渲染成了**一个输入框** —— 弹窗规格按钮的类名 `.code`
+             与表格里的 `.nm .code` **撞名**，`height:34px;border:1px solid` 被套上了。
+             ⇒ 表格的改名 `.pcode`、弹窗的改名 `.sku`，同文件内类名不复用。
+         (b) 工具条被 `flex-wrap` 折成两行，`.bulk` 的 `border-left` 跟着折到第二行行首，
+             成了一条悬空竖线；折行位置还随视口宽度变。⇒ 改成显式 `r1` / `r2` 两行。
+         (c) 表格角标（`top:-11px`）与工具条第二行的角标贴死。⇒ 行距 `--s4`→`--s5`、
+             `.tbl-wrap` 与 `.pager` 的上边距 `--s5`→`--s6`。
+       第三轮：表格 8 行 × 9 列在 1080 下会横向挤 ⇒ `.tbl-wrap` 横向滚动 + 列 `nowrap` +
+       `.c-name{width:100%}` 让余量归商品名列（否则浏览器把余量平摊给「勾选」列，
+       实测勾选框被挤出 128px 死空白），不靠缩字号硬塞。
+
+  ── 参考：Linear 的 issue 列表（工具栏在左、批量操作在右、表格行悬停）、
+     Stripe Dashboard 的列表页（发丝线行、状态用小字、操作列在最后）。零阴影、零圆角卡片墙。
+  ═══════════════════════════════════════════════════════════════════════════════
+-->
+<link rel="stylesheet" href="../../../Mall-management-web/mall-management-system/src/assets/fonts/noto.css">
+<link rel="stylesheet" href="../../../Mall-management-web/mall-management-system/src/assets/fonts/mono.css">
+<!-- v5 收尾：'LXGW WenKai GB' 设计稿专用 link —— 理由/体积见 tokens.css 的 --font-display 段 -->
+<link rel="stylesheet" href="../../../../美化/node_modules/@free-fonts/lxgw-wenkai-gb/lxgw-wenkai-gb.css">
+<link rel="stylesheet" href="../../../Mall-management-web/mall-management-system/src/assets/tokens.css">
+<style>
+:root{ --d2: calc(var(--fs-2xl) * 1.00); }
+
+/* ── 预览条 + 预留位可视化：只是看稿工具，不进 Vue ─────────────────────────── */
+.bar{position:sticky;top:0;z-index:100;display:flex;align-items:center;gap:var(--s2);flex-wrap:wrap;
+     padding:var(--s2) var(--s4);background:var(--nav-bg);border-bottom:1px solid var(--line-2);font-size:var(--fs-xs)}
+.bar-t{font-weight:var(--fw-semi);color:var(--nav-tx-hi);margin-right:var(--s3)}
+.bar-t em{font-style:normal;color:var(--brand-ink)}
+.bar button{padding:2px var(--s3);border:1px solid var(--line);border-radius:var(--r1);background:var(--surface);color:var(--ink-2);font:inherit}
+.bar button.on{background:var(--brand);border-color:var(--brand);color:var(--bg)}
+.bar #slotBtn.on{background:var(--warning);border-color:var(--warning)}
+.bar .sep{width:1px;height:16px;background:var(--line-2);margin:0 var(--s2)}
+.bar .hint{margin-left:auto;color:var(--ink-3)}
+body.slots [data-slot],body.slots [data-future]{outline:2px dashed var(--warning);outline-offset:5px;position:relative}
+body.slots [data-future]{outline-color:var(--info)}
+body.slots [data-slot]::after,body.slots [data-future]::before{
+  position:absolute;top:-11px;font-size:10.5px;letter-spacing:.5px;padding:1px 8px;
+  border-radius:var(--r1);color:var(--bg);z-index:5;white-space:nowrap}
+body.slots [data-slot]::after{content:attr(data-slot);left:8px;background:var(--warning)}
+body.slots [data-future]::before{content:attr(data-future);right:8px;background:var(--info)}
+
+/* ── 基础 ─────────────────────────────────────────────────────────────────── */
+body{font-family:var(--font);font-size:var(--fs-sm);color:var(--ink);background:var(--bg);
+     -webkit-font-smoothing:antialiased}
+a{color:inherit;text-decoration:none}
+button,input{font:inherit;color:inherit}
+button{background:none;border:0;cursor:pointer}
+
+.nav-bar{display:flex;align-items:center;gap:var(--s5);height:60px;padding:0 var(--s7);
+         background:var(--surface);border-bottom:1px solid var(--line)}
+.brand{font-family:var(--font-display);font-size:var(--fs-lg);font-weight:var(--fw-semi);color:var(--brand-ink)}
+.nav-right{margin-left:auto;display:flex;align-items:center;gap:var(--s5);color:var(--nav-tx)}
+.nav-right a.on{color:var(--nav-now);font-weight:var(--fw-semi)}
+.dot{display:inline-block;width:6px;height:6px;margin-left:3px;border-radius:50%;
+     background:var(--accent);vertical-align:super}
+
+.wrap{max-width:1180px;margin:0 auto;padding:var(--s7) var(--s5) var(--s8)}
+.page{display:none}
+.page.on{display:block}
+.body{display:grid;grid-template-columns:200px minmax(0,1fr);gap:var(--s8);align-items:start}
+
+/* 左菜单：发丝线列表，选中 = 字色 + 字重（不给底色）*/
+.uc-menu a{display:block;padding:var(--s3) 0;border-bottom:1px solid var(--line);
+           font-size:var(--fs-sm);color:var(--ink-2)}
+.uc-menu a:hover{color:var(--ink)}
+.uc-menu a.on{color:var(--brand-ink);font-weight:var(--fw-semi)}
+
+/* 标题块：身份并进来，不再单独占一条横带 */
+.head{display:flex;align-items:center;gap:var(--s5);padding-bottom:var(--s5);
+      border-bottom:1px solid var(--line-2)}
+.ava{width:64px;height:64px;flex:0 0 auto;border-radius:var(--r2);background:var(--img);
+     border:1px solid var(--line)}
+.head h1{font-family:var(--font-display);font-size:var(--d2);font-weight:var(--fw-med);
+         line-height:1.15;letter-spacing:-.02em}
+.head .sub{margin-top:var(--s1);font-size:var(--fs-xs);color:var(--ink-3)}
+
+/* ── 工具条：**两行**（第一行 搜索组 +【上架商品】，第二行 批量组）──────────
+   ⚠️ 第一版是 `flex-wrap` 一行排到底：1440 下搜索组 + 批量组 + 上架按钮**总宽超了**，
+   flex 把它们折成两行，但 `.bulk` 的 `border-left` 跟着折到第二行行首，成了一条
+   悬空的竖线；两组的上下顺序也变成「谁宽谁先掉下去」的偶然结果。
+   改成显式两行（`r1` / `r2`），行内各自 `flex-wrap`，折行只发生在**行内**，
+   两行结构不随视口宽度变化。
+   ⚠️ 行距用 `--s5`（24）而不是 `--s4`（16）：预留位角标挂在 `top:-11px`、高约 18px，
+   16px 行距会被上一行的 outline（offset 5px）顶到只剩 4px 净空。 */
+.tools{margin-top:var(--s6);display:flex;flex-direction:column;gap:var(--s5)}
+.tools .r1,.tools .r2{display:flex;align-items:center;gap:var(--s3);flex-wrap:wrap}
+.find{display:flex;gap:var(--s2);align-items:center}
+.find input,.find select{height:36px;padding:0 var(--s3);border:1px solid var(--line-2);
+                         border-radius:var(--r2);background:var(--surface-2);color:var(--ink-3)}
+.find input{width:160px}
+.find select{width:132px}
+.bulk{display:flex;align-items:center;gap:var(--s3)}
+.btn-quiet{height:36px;padding:0 var(--s4);border:1px solid var(--line-2);border-radius:var(--r2);
+           color:var(--ink-3);font-size:var(--fs-xs);white-space:nowrap}
+.btn-primary{margin-left:auto;height:36px;padding:0 var(--s5);border-radius:var(--r2);
+             background:var(--brand);color:var(--bg);font-weight:var(--fw-med);white-space:nowrap}
+.btn-primary:hover{background:var(--brand-hover)}
+.ck{width:16px;height:16px;border:1px solid var(--line-2);border-radius:var(--r1);
+    background:var(--surface);flex:0 0 auto;padding:0}
+.ck:not([disabled]){cursor:pointer}
+.ck[aria-checked="true"]{background:var(--brand);border-color:var(--brand)}
+.bulk .lbl{font-size:var(--fs-xs);color:var(--ink-3);white-space:nowrap}
+
+/* ── 商品表格（v4：卡片墙 → 表格）─────────────────────────────────────────
+   列序与用户清单逐字一致：勾选 / 图 / 名 / 类型 / 价 / 库存 / 销量 / 状态 / 操作 */
+/* ⚠️ 角标**不能挂 `.tbl-wrap`**：`overflow-x:auto` 会把 `overflow-y:visible` 计算成
+   `auto`（CSS 规范：一轴非 visible 时另一轴的 visible 计算为 auto），滚动容器于是
+   把自己子元素的伪元素一起裁掉 —— 实测表格角标被切掉下半截字。
+   外面再包一层**零溢出**的 `.tbl-zone` 专门当挂载点，`.tbl-wrap` 只负责横向滚动。 */
+.tbl-zone{margin-top:var(--s6)}
+.tbl-wrap{overflow-x:auto}
+.tbl{width:100%;border-collapse:collapse;font-size:var(--fs-sm)}
+.tbl th{text-align:left;font-size:var(--fs-xs);font-weight:var(--fw-reg);color:var(--ink-3);
+        padding:var(--s3) var(--s3);border-bottom:1px solid var(--line-2);white-space:nowrap}
+.tbl td{padding:var(--s3) var(--s3);border-bottom:1px solid var(--line);vertical-align:middle;
+        white-space:nowrap}
+.tbl tbody tr:hover{background:var(--surface-2)}
+.tbl .c-ck{width:36px;padding-right:0}
+.tbl .c-img{width:56px}
+/* ⚠️ `width:100%` 不是「占满」而是「**吃掉余量**」：其余列都是 nowrap 的自然宽，
+   表格又是 width:100%，多出来的空间若没人认领，浏览器会平摊给第一列 ——
+   实测「勾选」列被撑到 45px、勾选框离图片 128px，表头看着是断的。 */
+.tbl .c-name{width:100%;white-space:normal;min-width:240px}
+.tbl .c-num{text-align:right;font-variant-numeric:tabular-nums}
+.th-img{width:44px;aspect-ratio:1/1;border-radius:var(--r1);background:var(--img);
+        border:1px solid var(--line)}
+.nm{line-height:1.45;color:var(--ink)}
+/* ⚠️ 类名必须叫 `.pcode` 而不是 `.code`：弹窗里的规格按钮第一版用了 `.code`，
+   两个规则撞在一起 ⇒ 表格里的 ProductCode 被套上 `height:34px;border:1px solid`，
+   渲染成了一个**输入框**（1440 截图里一眼看出）。同文件内的类名不复用。 */
+.nm .pcode{margin-top:2px;font-family:var(--font-mono);font-size:var(--fs-xs);color:var(--ink-3)}
+.px{color:var(--accent);font-variant-numeric:tabular-nums}
+.px .u{font-size:var(--fs-xs)}
+.px .i{font-family:var(--font-display);font-size:var(--fs-md);font-weight:var(--fw-med)}
+.px .d{font-size:var(--fs-xs)}
+/* 库存列：无列可查 ⇒ 用 `—` 而不是画一个假数字（不新增业务字段） */
+.na{color:var(--ink-3)}
+.state{font-size:var(--fs-xs);color:var(--success-deep)}
+.state .d{display:inline-block;width:6px;height:6px;margin-right:var(--s2);border-radius:50%;
+          background:var(--success);vertical-align:middle}
+.op{display:flex;gap:var(--s4)}
+.op button{font-size:var(--fs-xs);color:var(--brand-ink);font-weight:var(--fw-med);padding:0}
+.op .del{color:var(--danger)}
+.empty{padding:var(--s8) 0;text-align:center;color:var(--ink-3)}
+.empty .big{font-family:var(--font-display);font-size:var(--fs-lg);color:var(--ink-2);margin-bottom:var(--s3)}
+
+/* 分页 */
+.pager{margin-top:var(--s6);display:flex;align-items:center;gap:var(--s2)}
+.pager .sum{margin-right:auto;font-size:var(--fs-xs);color:var(--ink-3)}
+.pager button{min-width:32px;height:32px;padding:0 var(--s3);border:1px solid var(--line-2);
+              border-radius:var(--r1);font-size:var(--fs-xs);color:var(--ink-3);white-space:nowrap}
+.pager .on{border-color:var(--brand);color:var(--brand-ink);font-weight:var(--fw-med)}
+
+/* ── 「按名称精确下架」：既有实现，挪到表格下方（Q3 抓到它原与搜索框混淆）────── */
+.sec{margin-top:var(--s8);padding-top:var(--s6);border-top:1px solid var(--line-2)}
+.sec-h{font-size:var(--fs-xs);color:var(--ink-3)}
+.sec-note{margin-top:var(--s1);font-size:var(--fs-xs);color:var(--ink-3)}
+.delbar{margin-top:var(--s3);display:flex;gap:var(--s3);flex-wrap:wrap}
+.delbar input{width:200px;height:36px;padding:0 var(--s3);border:1px solid var(--line-2);
+              border-radius:var(--r2);background:var(--surface)}
+.delbar input:focus{outline:none;border-color:var(--brand);box-shadow:0 0 0 3px var(--brand-tint)}
+/* 危险动作走**功能色族**的 `--danger`（tokens.css:124，与 success/warning/info 同族等重），
+   **不借 `--accent`**：tokens.css:107 写明朱砂「只给价格和促销」，本页价格已经占了它 */
+.btn-danger{height:36px;padding:0 var(--s5);border:1px solid var(--danger);border-radius:var(--r2);
+            color:var(--danger);font-weight:var(--fw-med)}
+.btn-danger:hover{background:var(--danger-ground)}
+
+/* ── 弹窗 ─────────────────────────────────────────────────────────────────── */
+.scrim{position:fixed;inset:0;z-index:200;display:flex;padding:var(--s5);overflow:auto;
+       /* ⚠️ 不用 rgba()：README 第 2 条要求「颜色只有 token，一个 #hex / rgb() 都不许有」 */
+       background:color-mix(in srgb, var(--ink) 34%, transparent)}
+/* ⚠️ 居中用子元素 `margin:auto`，**不用** `align-items:center`：1080 下弹窗高于视口时，
+   center 会让内容**上下两头同时溢出** —— 顶部「商品详情」被切掉且滚不上去。 */
+.dlg{margin:auto;width:100%;max-width:720px;background:var(--surface);border:1px solid var(--line-2);
+     border-radius:var(--r3)}
+.dlg-h{display:flex;align-items:baseline;gap:var(--s4);padding:var(--s5) var(--s7);
+      border-bottom:1px solid var(--line)}
+.dlg-h h2{font-family:var(--font-display);font-size:var(--fs-lg);font-weight:var(--fw-med);
+          letter-spacing:-.01em}
+.dlg-h .x{margin-left:auto;color:var(--ink-3);font-size:var(--fs-lg);line-height:1}
+.dlg-body{display:grid;grid-template-columns:200px minmax(0,1fr);gap:var(--s7);padding:var(--s7)}
+.pic{width:200px;height:200px;border-radius:var(--r2);background:var(--img);
+     border:1px solid var(--line);cursor:pointer}
+.pic:hover{border-color:var(--line-2)}
+.pic-hint{margin-top:var(--s2);font-size:var(--fs-xs);color:var(--ink-3);text-align:center}
+.fl{margin-bottom:var(--s5)}
+.fl:last-child{margin-bottom:0}
+.fl label{display:block;font-size:var(--fs-xs);color:var(--ink-3);margin-bottom:var(--s2)}
+.fl input{width:100%;height:38px;padding:0 var(--s3);border:1px solid var(--line-2);
+          border-radius:var(--r2);background:var(--surface)}
+.fl input:focus{outline:none;border-color:var(--brand);box-shadow:0 0 0 3px var(--brand-tint)}
+.fl input[disabled]{background:var(--surface-2);color:var(--ink-3);cursor:not-allowed}
+/* ⚠️ 下面这个 disabled 是**占位**（库存无列），上面那个是**既有实现就锁死的**（goodType） */
+.fl input.slot{background:var(--surface-2);color:var(--ink-3);cursor:not-allowed}
+.skus{display:flex;gap:var(--s3);flex-wrap:wrap}
+.sku{height:34px;padding:0 var(--s5);border:1px solid var(--line-2);border-radius:var(--r1);
+      color:var(--ink-2);font-size:var(--fs-sm)}
+.sku:hover{border-color:var(--ink-3)}
+.sku.on{border-color:var(--brand);color:var(--brand-ink);font-weight:var(--fw-med)}
+.dlg-foot{display:flex;justify-content:flex-end;gap:var(--s3);
+          padding:var(--s5) var(--s7);border-top:1px solid var(--line)}
+.dlg-foot .save{height:44px;padding:0 var(--s7);border-radius:var(--r2);background:var(--brand);
+                color:var(--bg);font-weight:var(--fw-med)}
+.dlg-foot .save:hover{background:var(--brand-hover)}
+.dlg-foot .no{height:44px;padding:0 var(--s5);border:1px solid var(--line-2);border-radius:var(--r2);
+              color:var(--ink-2)}
+
+/* ── 窄屏 ─────────────────────────────────────────────────────────────────── */
+@media (max-width:1080px){
+  .body{grid-template-columns:1fr;gap:var(--s6)}
+  .uc-menu{display:flex;flex-wrap:wrap;gap:var(--s5)}
+  .uc-menu a{border-bottom:0;padding:0}
+  .btn-primary{margin-left:0}
+  .dlg-body{grid-template-columns:1fr;gap:var(--s5);justify-items:start}
+  .fl input{max-width:380px}
+  .pic{width:160px;height:160px}
+}
+@media (max-width:720px){
+  .delbar input{width:100%}
+  .find input,.find select{width:100%}
+  .find{width:100%}
+}
+</style>
+</head>
+<body>
+
+<div class="bar">
+  <span class="bar-t">B 稿 v4 · 查看商品（商家） <em>商品表格</em></span>
+  <button data-page="list" class="on">已上架</button>
+  <button data-page="empty">空态</button>
+  <button data-page="dlg">商品详情弹窗</button>
+  <span class="sep"></span>
+  <button id="slotBtn">显示预留位 / 目标版</button>
+  <span class="hint">预览稿 · 项目源码未动</span>
+</div>
+
+<!-- ═══════════ 一、已上架（表格）═══════════ -->
+<section class="page on" data-page="list">
+  <nav class="nav-bar">
+    <a class="brand">商城主页</a>
+    <div class="nav-right"><a>消息<i class="dot"></i></a><a>订单中心</a><a class="on">用户中心</a></div>
+  </nav>
+  <div class="wrap">
+    <div class="body">
+      <aside class="uc-menu">
+        <a>个人信息</a><a>上架商品</a><a class="on">查看商品</a>
+        <a>历史购买记录</a><a>好友</a><a>消息</a>
+      </aside>
+      <main>
+        <div class="head">
+          <div class="ava"></div>
+          <div>
+            <h1>查看商品</h1>
+            <div class="sub">声谷小店 · 共 8 件上架中</div>
+          </div>
+        </div>
+
+        <!-- 工具条：**两行**（r1 = 搜索组 +【上架商品】；r2 = 批量组），见 CSS 头注 -->
+        <div class="tools">
+          <div class="r1">
+            <span class="find" data-slot="预留 · 筛选 / 搜索（动现有代码 3 处）" data-future="待 C3〈商品〉"
+                  title="待 C3〈商品〉——商品名 / ProductCode 的筛选无端点：endpoints.js + GoodsController.java + GoodsUp.vue = 3 处。⚠️ 分类下拉**有**数据源 goods.goodstype（现有端点，前端过滤则 0 处）。⚠️「状态」这一个下拉另需 goods 加状态列 ⇒ 那一条单独算 5 处，见头注">
+              <input type="text" placeholder="商品名" disabled>
+              <input type="text" placeholder="ProductCode" disabled>
+              <select disabled><option>全部状态</option></select>
+              <select disabled><option>全部分类</option></select>
+              <button class="btn-quiet" disabled>查询</button>
+            </span>
+            <button class="btn-primary" title="跳「上架商品」/merchant/user/add（既有路由 router/index.js:113）">上架商品</button>
+          </div>
+
+          <div class="r2">
+            <span class="bulk" data-slot="预留 · 批量操作（动现有代码 3 处）" data-future="待 C3〈商品〉"
+                  title="待 C3〈商品〉——批量上架 / 批量下架 / 批量删除均无端点（现有下架只能一件一件来）：endpoints.js + GoodsController.java + GoodsUp.vue = 3 处。全选框本身是纯前端">
+              <button class="ck" disabled aria-checked="false" title="全选（纯前端；批量动作无端点）"></button>
+              <span class="lbl">全选</span>
+              <button class="btn-quiet" disabled>批量上架</button>
+              <button class="btn-quiet" disabled>批量下架</button>
+              <button class="btn-quiet" disabled>批量删除</button>
+            </span>
+          </div>
+        </div>
+
+        <!-- 商品表格：除「库存 / 销量」两列外全部为真功能（角标只挂整块，见头注 ③） -->
+        <div class="tbl-zone" data-slot="预留 · 库存 / 销量列（动现有代码 5 / 3 处 · 库存超档）" data-future="待 C3〈商品〉"
+             title="只有这两列是占位，且代价不同：库存 = mall_management_sql.sql + GoodsDao.java + GoodsService.java + GoodsController.java + GoodsUp.vue = 5 处（**超档**，因用户逐页清单点名而画出，见 README 挂账表）；销量 = productsales.OrderVolume 已有列但 INSERT 恒为 0，要真跑需 写(订单侧) + 读(GoodsDao) + 显示(GoodsUp.vue) = 3 处。其余七列（勾选 / 图 / 名 / 类型 / 价 / 状态 / 操作）都是真功能。">
+        <div class="tbl-wrap">
+          <table class="tbl">
+            <thead>
+              <tr>
+                <th class="c-ck"></th>
+                <th class="c-img">图</th>
+                <th class="c-name">商品名</th>
+                <th>类型</th>
+                <th class="c-num">单价</th>
+                <th class="c-num" title="占位：goods 表无库存列">库存</th>
+                <th class="c-num" title="占位：productsales.OrderVolume 恒为 0 且无 SELECT 读出">销量</th>
+                <th title="真功能但退化：无状态列，下架 = 删行 ⇒ 本页只列在架商品">状态</th>
+                <th>操作</th>
+              </tr>
+            </thead>
+            <tbody id="rows"></tbody>
+          </table>
+        </div>
+        </div>
+
+        <!-- 分页（占位：SELECT * 无 LIMIT，GoodsDao:187） -->
+        <div class="pager" data-slot="预留 · 分页（动现有代码 3 处）" data-future="待 C3〈商品〉"
+             title="待 C3〈商品〉——goodsSelect 的 SELECT * 无 LIMIT、无分页参数（GoodsDao:187 逐字写明）：GoodsCacheService.java + GoodsController.java + GoodsUp.vue = 3 处">
+          <span class="sum">共 8 件</span>
+          <button class="on" disabled>1</button>
+          <button disabled>2</button>
+          <button disabled>下一页</button>
+        </div>
+
+        <!-- 按名称精确下架：**现有实现**，Q3 抓到它原与工具条搜索框混淆 ⇒ 挪到表格下方 -->
+        <section class="sec">
+          <div class="sec-h">按名称精确下架</div>
+          <div class="sec-note">现有实现：按商品名与 ProductCode 精确下架，两个都要填（GoodsUp.vue:204）。</div>
+          <div class="delbar">
+            <input type="text" placeholder="商品名">
+            <input type="text" placeholder="ProductCode">
+            <button class="btn-danger" title="现有端点 goods.goodsDe（GoodsUp.vue:210）">下架商品</button>
+          </div>
+        </section>
+      </main>
+    </div>
+  </div>
+</section>
+
+<!-- ═══════════ 二、空态 ═══════════ -->
+<section class="page" data-page="empty">
+  <nav class="nav-bar">
+    <a class="brand">商城主页</a>
+    <div class="nav-right"><a>消息<i class="dot"></i></a><a>订单中心</a><a class="on">用户中心</a></div>
+  </nav>
+  <div class="wrap">
+    <div class="body">
+      <aside class="uc-menu">
+        <a>个人信息</a><a>上架商品</a><a class="on">查看商品</a>
+        <a>历史购买记录</a><a>好友</a><a>消息</a>
+      </aside>
+      <main>
+        <div class="head">
+          <div class="ava"></div>
+          <div>
+            <h1>查看商品</h1>
+            <div class="sub">声谷小店 · 共 0 件上架中</div>
+          </div>
+        </div>
+        <div class="empty">
+          <div class="big">暂无任何上架内容</div>
+          <div>在「上架商品」里添加第一件商品。</div>
+        </div>
+      </main>
+    </div>
+  </div>
+</section>
+
+<!-- ═══════════ 三、商品详情弹窗 ═══════════ -->
+<section class="page" data-page="dlg">
+  <nav class="nav-bar">
+    <a class="brand">商城主页</a>
+    <div class="nav-right"><a>消息<i class="dot"></i></a><a>订单中心</a><a class="on">用户中心</a></div>
+  </nav>
+  <div class="scrim">
+    <div class="dlg">
+      <div class="dlg-h">
+        <h2>商品详情</h2>
+        <button class="x" data-close title="关闭（现有功能）">×</button>
+      </div>
+      <div class="dlg-body">
+        <div>
+          <div class="pic" title="点击更换商品图（现有功能 chooseNewPic，GoodsUp.vue:285）"></div>
+          <div class="pic-hint">点击图片更换</div>
+        </div>
+        <div>
+          <div class="fl"><label>商品名称</label><input type="text" value="无线蓝牙耳机 声谷标准版"></div>
+          <div class="fl">
+            <label>商品类型</label>
+            <!-- ⚠️ 这个 disabled 是 GoodsUp.vue:78 既有实现就锁死的，不是占位 -->
+            <input type="text" value="数码配件" disabled title="既有实现锁死：商品类型不可改（GoodsUp.vue:78）">
+          </div>
+          <div class="fl">
+            <label>商品规格（ProductCode）</label>
+            <div class="skus">
+              <button class="sku on">STD-GRAY</button>
+              <button class="sku">ANC-BLACK</button>
+              <button class="sku">PRO-WHITE</button>
+            </div>
+          </div>
+          <div class="fl"><label>商品价格</label><input type="text" value="129.00"></div>
+          <div class="fl" data-slot="预留 · 库存（动现有代码 5 处 · 超档）" data-future="待 C3〈商品〉"
+               title="待 C3〈商品〉——goods 表无库存列（INSERT 列序实测 7 列）：mall_management_sql.sql + GoodsDao.java + GoodsService.java + GoodsController.java + GoodsUp.vue = 5 处，**超档**">
+            <label>库存</label>
+            <input class="slot" type="text" value="—" disabled title="待 C3〈商品〉——goods 无库存列，5 处改动（超档）">
+          </div>
+        </div>
+      </div>
+      <div class="dlg-foot">
+        <button class="no" data-close>取消</button>
+        <button class="save" title="现有端点 goods.goodsUp（GoodsUp.vue:314）">更新商品数据</button>
+      </div>
+    </div>
+  </div>
+</section>
+
+<script>
+/* ── 8 件商品：名称 / 类型 / 价格 / ProductCode 均为示意 ───────────────────── */
+const GOODS = [
+  ['无线蓝牙耳机 声谷标准版', '数码配件', 129.00, 'STD-GRAY'],
+  ['不锈钢保温杯 500ml',     '家居日用',  69.00, 'CUP-500'],
+  ['有机全麦面包 每日鲜',     '食品生鲜',  19.90, 'BRD-WM'],
+  ['机械键盘 静音红轴',       '数码配件', 359.00, 'KBD-RD'],
+  ['天然乳胶枕 护颈款',       '家居日用', 199.00, 'PIL-NK'],
+  ['冷萃咖啡液 十二瓶装',     '食品生鲜',  88.00, 'CFE-12'],
+  ['羊绒围巾 燕麦色',         '服饰鞋包', 268.00, 'SCF-OT'],
+  ['陶瓷马克杯 手作釉',       '家居日用',  45.00, 'MUG-HM']
+]
+document.getElementById('rows').innerHTML = GOODS.map(([name, type, p, code]) => {
+  const [i, d] = p.toFixed(2).split('.')
+  return '<tr>' +
+    '<td class="c-ck"><button class="ck" aria-checked="false" title="勾选（纯前端；批量动作无端点）"></button></td>' +
+    '<td class="c-img"><div class="th-img"></div></td>' +
+    '<td class="c-name"><div class="nm">' + name + '<div class="pcode">' + code + '</div></div></td>' +
+    '<td>' + type + '</td>' +
+    '<td class="c-num"><span class="px"><span class="u">¥</span><span class="i">' + i +
+      '</span><span class="d">.' + d + '</span></span></td>' +
+    '<td class="c-num"><span class="na" title="占位：goods 表无库存列">—</span></td>' +
+    '<td class="c-num"><span class="na" title="占位：OrderVolume 恒为 0 且无 SELECT 读出">—</span></td>' +
+    '<td><span class="state"><i class="d"></i>已上架</span></td>' +
+    '<td><div class="op">' +
+      '<button data-to="dlg" title="打开商品详情（现有功能 openModal，GoodsUp.vue:236）">编辑</button>' +
+      '<button class="del" title="下架这一件（现有端点 goods.goodsDe）">下架</button>' +
+    '</div></td>' +
+  '</tr>'
+}).join('')
+
+/* ── 切页 + 弹窗开关 ─────────────────────────────────────────────────────── */
+const bar = document.querySelector('.bar')
+function go(key) {
+  document.querySelectorAll('.page').forEach(p => p.classList.toggle('on', p.dataset.page === key))
+  bar.querySelectorAll('button[data-page]').forEach(b => b.classList.toggle('on', b.dataset.page === key))
+  window.scrollTo(0, 0)
+}
+bar.querySelectorAll('button[data-page]').forEach(b => b.addEventListener('click', () => go(b.dataset.page)))
+
+document.addEventListener('click', e => {
+  const to = e.target.closest('[data-to]')
+  if (to) { go(to.dataset.to); return }
+  const close = e.target.closest('[data-close]')
+  if (close) { go('list'); return }
+  const code = e.target.closest('.sku')
+  if (code) code.parentNode.querySelectorAll('.sku').forEach(x => x.classList.toggle('on', x === code))
+  /* 行勾选 / 全选：纯前端可点（批量动作仍是占位） */
+  const ck = e.target.closest('.ck')
+  if (ck && !ck.disabled) ck.setAttribute('aria-checked', ck.getAttribute('aria-checked') === 'true' ? 'false' : 'true')
+})
+
+/* ── 预留位 / 目标版 开关 —— 默认关闭 ─────────────────────────────────────── */
+const slotBtn = document.getElementById('slotBtn')
+slotBtn.addEventListener('click', () => {
+  const on = document.body.classList.toggle('slots')
+  slotBtn.classList.toggle('on', on)
+  slotBtn.textContent = on ? '隐藏预留位 / 目标版' : '显示预留位 / 目标版'
+})
+</script>
+</body>
+</html>
