@@ -63,6 +63,10 @@
 
 1. **顶栏搜索框** —— 设计稿把搜索框提到了壳顶栏（四个子页顶栏因此逐字一致）。
    代价：`HomePage.vue` 的 `.search-section` 要删掉，否则主页出现两个搜索框。
+   ⚠️ **已裁（C 笔，2026-10-07）：壳顶栏**不加**搜索框** ⇒ 本条要裁的**作废**（`.search-section` 不用删）。
+   依据不是「设计稿没有」，而是**稿子自己两套口径**：基准的壳内稿（`ChatRoom` / `GoodsAdd` / `GoodsUp` /
+   `GoodsSelect` / `OrderCenter-merchant` / `ShoppingCart-customer`）顶栏**逐字相同且无搜索框**，只有
+   `UserCenter-customer.html` / `UserCenter-merchant.html` 两份画了 —— 取基准 6 份，见下方第 4 条。
 2. **账户中心的新模块没有后端** —— `UserInfoPage` 设计稿里的
    **资产总览**（积分 / 优惠券 / 收藏 / 浏览足迹）和 **账号与安全**（手机号 / 密码 / 实名认证）
    在 `src/api/endpoints.js` 里查不到对应端点。三条路：
@@ -170,9 +174,19 @@ A 笔之前，`docs/美化/` 三份稿只覆盖了「主页 + 用户中心四页
    `CUSTOMER_NAV` / `MERCHANT_NAV` 各自只有「左：商城主页 + 右：三四个链接」，
    **没有任何搜索框**（`AppShell.vue` 的模板里也没有）。两壳的差别只有左项的 `to` 和右起第二项
    （客户「购物车」⇄ 商家「订单中心」）。
-   ⇒ `pages/` 里**所有壳内稿**（除 `ProductPage.html`）的顶栏都逐字照 `nav.js` 画，
-   十份同源、无搜索框。**第 1 条一旦裁定「壳顶栏加搜索框」，改的是 `nav.js` + `AppShell.vue`，
-   不是这十份稿的顶栏** —— 这正是当初把顶栏抽成 config 的用意。
+   ⇒ `pages/` 里**8 份**壳内稿（除 `ProductPage.html`，及下面点名的两份 `UserCenter-*.html`）
+   的顶栏逐字照 `nav.js` 画、**无搜索框**。
+   ⚠️ **订正（C 笔，2026-10-07）**：原文写「**所有**壳内稿 …… **十份同源、无搜索框**」，
+   **与实测不符**。逐份 `grep -c nav-search`：**8 份命中 0**（`ChatRoom` / `GoodsAdd` /
+   `GoodsSelect` / `GoodsUp` / `LoginPage` / `OrderCenter-merchant` / `ProductPage` /
+   `ShoppingCart-customer`），只有 `UserCenter-customer.html`（`:127-130` 三条 `.nav-search*`
+   规则 + `:275` 的标记）与 `UserCenter-merchant.html`（`:123-126` + `:261`）**各有一处**
+   （`flex:1;max-width:520px;height:36px`，即第 1 条那个搜索框）。
+   「顶栏照 `nav.js` 画」这个**基线**仍无误，出格的是**这两份 `UserCenter` 稿**（其余 8 份一致）。
+   ⇒ 连带订正下面那份「头注里写了这条对照的」清单：它把 `UserCenter-merchant.html`
+   也列进「照 `nav.js` 画」的例证，**与该稿自己顶栏里的搜索框相抵**，读时按本条。
+   **第 1 条一旦裁定「壳顶栏加搜索框」，改的是 `nav.js` + `AppShell.vue`，
+   不是这些稿的顶栏** —— 这正是当初把顶栏抽成 config 的用意。
    （头注里写了这条对照的：`GoodsSelect.html` / `OrderCenter-merchant.html` /
    `UserCenter-merchant.html` / `GoodsUp.html` / `GoodsAdd.html` / `ChatRoom.html`；
    `ProductPage.html` 见上面第 3 条。）
