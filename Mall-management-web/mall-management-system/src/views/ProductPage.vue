@@ -12,7 +12,7 @@
         />
         <button class="search-btn" @click="handleSearch">搜索</button>
       </div>
-      <div class="nav-right" @click="goUserCenter">用户中心</div>
+      <div class="nav-right" @click="goUserCenter">{{ isLogin ? '用户中心' : '登录 / 注册' }}</div><!-- 只改文案：点击逻辑（goUserCenter）一字不动，见文件末按语 -->
     </div>
 
     <div class="white-box">
@@ -132,7 +132,7 @@ import { ref, onMounted, computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { http, handleApiError } from '../api/http'
 import { endpoints } from '../api/endpoints'
-import { getMerchantId, getCustomerId } from '../api/auth'
+import { getMerchantId, getCustomerId, isLoggedIn } from '../api/auth'
 
 const route = useRoute()
 const router = useRouter()
@@ -309,7 +309,7 @@ const getFirstImage = () => {
 
 const confirmPurchase = () => {
   if (!customerId) {
-    alert('请先登录再购买商品')
+    alert('请先登录再购买商品'); if (!isLogin.value) router.push({ path: '/login', query: { redirect: route.fullPath } })
     return
   }
   if (popupBuyList.value.length === 0) {
@@ -406,7 +406,7 @@ const goUserCenter = () => {
 // ========== 咨询商品功能 ==========
 const consultProduct = async () => {
   if (!customerId) {
-    alert('请先登录');
+    alert('请先登录'); if (!isLogin.value) router.push({ path: '/login', query: { redirect: route.fullPath } })
     return;
   }
   if (customerId === sellerId) {
@@ -463,6 +463,14 @@ onMounted(async () => {
   await loadGoodsWithUser();
   loadAllItems();
 });
+// ── 未登录 UX 闭环（2026-10-06 收口笔，登记见 progress.md §5-AG (15)）：本页**不是**「进壳」────────
+// R5（商品详情页进壳）仍不做；本笔只改页内三处未登录 UX —— 顶栏标签（:15，未登录显示「登录 / 注册」，
+// 与 AppShell 的 ANON_RIGHT 同形态）、购买（:312）与咨询（:409）两处拦截的出口。
+// ⚠️ 两处拦截的判据仍是 `!customerId`，**不动**：改成 `!isLogin` 会让**已登录商家**带着空 CustomerId
+//    走到 `orderAdd`（拆真检查）；`isLogin` 只决定**要不要跳登录** ⇒ 已登录商家原地不动（= 既有行为）。
+// ⚠️ redirect 取 `route.fullPath`（含本页 7 个 query），对象形式与 `main.js:49` 同款；登录后由
+//    `LoginPage.landingAfterLogin` 送回本页（T-guard-6/-10）。放文件末尾是**刻意的**：`WebAuthConfig.java:70` 引了 `:462-465`，新增行落在最大被引行之后，上面 24 个被引目标才一个都不漂。
+const isLogin = computed(() => isLoggedIn())
 </script>
 
 <style scoped>
@@ -485,7 +493,7 @@ onMounted(async () => {
   z-index: 999;
 }
 .nav-left { font-size: 20px; cursor: pointer; }
-.nav-right { cursor: pointer; }
+.nav-right { cursor: pointer; white-space: nowrap; }
 .search-wrapper {
   width: 55%;
   display: flex;

@@ -156,11 +156,11 @@ export default {
           this.loginWarnText = "未找到该用户，请查看对应账号密码有无写错，或者前往右侧进行注册";
         }else if(role === "1"){
           setUsername(this.loginAccount); setRole(role); await this.mintToken(role);   // ⚠️ 止血笔：同行追加，保持净零行数（防 `api-contract.md:172` 引的 `:216` 漂移）；P2.6 起 setCredentials → setUsername；多账户隔离笔（2026-10-06）再加铸票（见 mintToken）
-          this.$router.push("/customer");
+          this.$router.push(this.landingAfterLogin(role));   // 前端路由守卫笔（2026-10-06）：落点改由 landingAfterLogin 决定（有合法 redirect 则回原目标，否则 = 原来的 "/customer"）
         }
         else if(role === "2"){
           setUsername(this.loginAccount); setRole(role); await this.mintToken(role);   // ⚠️ 止血笔：同行追加，保持净零行数（防 `api-contract.md:172` 引的 `:216` 漂移）；P2.6 起 setCredentials → setUsername；多账户隔离笔（2026-10-06）再加铸票（见 mintToken）
-          this.$router.push("/merchant");
+          this.$router.push(this.landingAfterLogin(role));   // 前端路由守卫笔（2026-10-06）：同上，否则 = 原来的 "/merchant"
         }
       } catch (e) {
         this.loginWarnText = "未识别到账户，请检查对应输入";
@@ -249,6 +249,41 @@ export default {
           if (String(role) !== "3") publishSharedToken(data.token);
         }
       } catch (e) { /* fail-open：见上 */ }
+    },
+    // ── 前端路由守卫笔（2026-10-06）：登录后落点 —— 有**合法** `redirect` 则回原目标，否则角色首页 ──
+    // 上游：`router/index.js` 末尾的守卫把未登录访问受保护页改成 `/login?redirect=<to.fullPath>`；
+    //   `main.js:49` 的 401 出口同款（带出事那一页的 fullPath）。三处是**同一条契约**。
+    // ⚠️ **无 query / 非法 query 时返回值 = 本笔之前的字面量**（"/customer" / "/merchant"）
+    //   ⇒ 「回原目标」是**纯增量**，不改变任何既有登录路径的结果。
+    //
+    // 校验四条（缺一不可）：
+    //   ① 必须是字符串 —— ⚠️ 同名 query 出现两次时 vue-router 给的是**数组**，不判类型会把它塞进 push；
+    //   ② 必须以单斜杠开头、且不是 `//` 开头 —— 防开放重定向（`//evil.com` 是协议相对 URL）；
+    //   ③ 不能是 `/login` 自身 —— 防自成回路；
+    //   ④ `resolve()` 必须**匹配得到**记录（`matched.length`）—— 认不出的不猜（同 `LEGACY_TAB` 口径）。
+    //
+    // ⚠️ **角色校验不另抄一张表，而是复用守卫的 `meta`**：`this.$router.resolve(任意路径)` 返回的是
+    //   **沿 `matched` 链合并后**的 `meta`（实测：三级嵌套也合并）⇒「这页现在这位用户能不能去」
+    //   = `meta.public === true || 属于本角色壳`，与 `router/index.js` 的守卫**同一条规则**，
+    //   不存在第二份真相。⚠️ **不能 import `router/index.js`**：它 `:3` 已 import 本组件 ⇒ 反向加边成环。
+    //   ⚠️ 代价：角色首页表（下面的 `/customer` / `/merchant`）与 `router/index.js` 的 `ROLE_HOME`
+    //   是**同构的第二份**；改一处要回头核另一处。⚠️ **按语（角色边界，2026-10-06，§5-AG (16)）**：角色**判定**已改为与守卫**同源**的 `meta.roles`（下面新增的 `roleAllowed`）；但**这张首页表**仍与 `ROLE_HOME` 各一份（**未合并** —— R6 裁决 D10 把它挂给了待定笔，本笔不碰）。
+    landingAfterLogin(role) {
+      const base = role === "2" ? "/merchant" : "/customer";   // ⚠️ `role === "3"`（管理员）在这里会落到 "/customer" —— 归 **C3** 一并补（今天前端**没有** `role === "3"` 分支、DB 也无种子 ⇒ 管理员登录本就走不到这里；见 progress.md §5-AG (16) 的 C3 待办）
+      const target = this.$route.query.redirect;
+      if (typeof target !== "string" || !target.startsWith("/") || target.startsWith("//")) return base;
+      if (target === "/login") return base;
+      const r = this.$router.resolve(target);
+      if (r.matched.length === 0) return base;
+      if (r.meta && r.meta.public === true) return this.roleAllowed(r.meta, role) ? target : base;   // 公开面（如 `/product`）：**任何人**可去 —— 但「**壳属别家**」的公开面（两壳首页 / 搜索）**不算**（2026-10-06 角色边界，判据与守卫**同源**）
+      return (target === base || target.startsWith(base + "/")) ? target : base;   // 受保护面：只回本角色壳
+    },
+    // ── 角色边界（2026-10-06，§5-AG (16)）：判据 = 路由记录上的 `meta.roles`（与守卫**同源**）──
+    // ⚠️ **只被上面 `:278` 调用**：`:279`（受保护面）用的是 `base` 前缀判据，其结论已被 `meta.roles` 蕴含。
+    // ⚠️ 无 `roles` 标记的记录（`/login`、`/product`、以及将来没标 meta 的页）⇒ **放行**（与守卫同一口径：缺省 = 不限制）。
+    roleAllowed(meta, role) {
+      if (!meta || !Array.isArray(meta.roles)) return true;
+      return meta.roles.includes(String(role));
     },
     goToLogin() {
       this.showSuccess = false;

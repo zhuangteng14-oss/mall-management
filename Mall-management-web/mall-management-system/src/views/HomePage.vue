@@ -1,7 +1,7 @@
 /* eslint-disable */
 <template>
   <div class="home-page">
-    <div v-if="!isLogin" class="login-hint-bar" @click="router.push('/login')">未登录 · 点此登录后可搜索 / 购买</div>
+    <!-- 原未登录黄条（.login-hint-bar）已删 —— 2026-10-06 改判 2（§5-AG (13)）：入口改由顶栏「登录 / 注册」承担；理由见 <script setup> 顶部 9 行 -->
 
     <div class="search-section">
       <div class="search-wrapper">
@@ -83,30 +83,30 @@
       </div>
     </div>
 
-    <div v-if="showLoginModal" class="login-modal" @click.self="showLoginModal = false">
-      <div class="modal-content">
-        <div class="modal-text">请先登录以使用功能</div>
-        <div class="modal-buttons">
-          <button class="login-btn" @click="router.push('/login')">去登录</button>
-          <button class="close-btn" @click="showLoginModal = false">关闭</button>
-        </div>
-      </div>
-    </div>
+    <!-- 原「登录提示」弹窗（.login-modal 系）已删 —— 三条拦截拆除后它没有调用方，文案随之作废；理由见 <script setup> 顶部 -->
   </div>
 </template>
 
 <script setup>
-import { ref, onMounted, onUnmounted, computed } from 'vue'
+import { ref, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { http, handleApiError } from '../api/http'
 import { endpoints } from '../api/endpoints'
-import { isLoggedIn } from '../api/auth'
+
+// ── 未登录可逛公开面（2026-10-06 用户改判 2，登记见 progress.md §5-AG (13)）────────────
+// 本页原有三条「未登录 ⇒ 弹登录提示」拦截（goSearch / searchByType / toGoodsDetail）与一条
+// 顶部黄条 `.login-hint-bar` —— **全部拆除**。依据：搜索页 / 商品页都是**公开面**（后端
+// AUTH_WHITELIST 的 goods* 5 条本就匿名可用；路由 meta.public 也已把 `/<role>/search` 与
+// `/product` 判为公开），淘宝/京东同为「随便逛、关键操作才锁」⇒ 原「先登录再逛」是改判。
+// **被锁的面一个不变**：购买（ProductPage 两处 customerId 守卫）、消息、用户中心、购物车
+// （受保护路由 + navFor 未登录不渲染那三项）。匿名入口统一走顶栏「登录 / 注册」
+// （config/nav.js 的 ANON_RIGHT）；登录后回原目标由路由守卫 + LoginPage.landingAfterLogin 承担。
+// ⚠️ 本页因此**不再有匿名分支** ⇒ `isLoggedIn` 的 import 与 `isLogin` computed 一并删除（原 `:119` 保留为按语，供 `main.js:21` 的指向不悬空）。
 
 const router = useRouter()
 // eslint-disable-next-line no-undef
 const emit = defineEmits(['go-search'])
 
-const showLoginModal = ref(false)
 const goodTypeList = ref([])
 const homeImgList = ref([])
 const goodsList = ref([])
@@ -115,8 +115,8 @@ const searchKeyword = ref('')
 
 let timer = null
 
-// 「是否登录」的**唯一**判据已收敛到 src/api/auth.js:isLoggedIn()（鉴权笔的落点）。
-const isLogin = computed(() => isLoggedIn())
+// ⚠️ 此处原有「是否登录」的**唯一**判据 `const isLogin = computed(() => isLoggedIn())`（鉴权笔的落点），
+//   2026-10-06 随改判 2 删除（本页已无匿名分支）；保留本行占位，使 `main.js:21` 的 `HomePage.vue:119` 不悬空。
 
 const getHomeImgAndGoods = async () => {
   try {
@@ -132,19 +132,19 @@ const getHomeImgAndGoods = async () => {
 }
 
 const goSearch = () => {
-  if (!isLogin.value) {
-    showLoginModal.value = true
-    return
-  }
+  // 未登录放行（2026-10-06 改判 2，§5-AG (13)）：落地页 `/<role>/search` 是公开面（见本节顶部）。
+  // 这 4 行原是一道「弹登录提示 + return」的拦截，现已删除；匿名入口只剩顶栏「登录 / 注册」。
+  // ⚠️ 停在这里的**不是**「忘了判登录态」：搜索页本来就不需要身份，后端 goods* 5 条也在白名单里。
+  // 本函数不再读登录态 ⇒ 无分支（`isLogin` 已随之删除）。
   emit('go-search', searchKeyword.value)
 }
 
 // 根据类型搜索
 const searchByType = (typeName) => {
-  if (!isLogin.value) {
-    showLoginModal.value = true
-    return
-  }
+  // 未登录放行（2026-10-06 改判 2，§5-AG (13)）：同 goSearch —— 分类搜索也落在公开的 `/<role>/search`。
+  // 这 4 行原是一道「弹登录提示 + return」的拦截，现已删除。
+  // 触发入口是首页分类块（模板里的 `@click="searchByType(...)"`），走的是同一个 `emit('go-search')`。
+  // 本函数不再读登录态 ⇒ 无分支（`isLogin` 已随之删除）。
   emit('go-search', typeName)
 }
 
@@ -162,10 +162,10 @@ const getGoodType = async () => {
 
 // 主页进入商品页
 const toGoodsDetail = (goods) => {
-  if (!isLogin.value) {
-    showLoginModal.value = true
-    return
-  }
+  // 未登录放行（2026-10-06 改判 2，§5-AG (13)）：`/product` 已由路由 `meta.public` 判为公开面。
+  // 这 4 行原是一道「弹登录提示 + return」的拦截，现已删除；购买动作仍锁在 ProductPage 的两处守卫里。
+  // ⚠️ 匿名进详情页**不会**触发 401：挂载期只打 goodsSelectHome / GoodsProductCodeSelect / productCodePrice，三条都在白名单。
+  // ⚠️ 下面 7 个 query 参数原样保留：会话过期后 `orderAdd` 401 的回跳靠它们还原本页（T-guard-6 判据）。
   sessionStorage.setItem('FROM_PAGE', 'home')
   sessionStorage.removeItem('SEARCH_KEYWORD')
 
@@ -222,15 +222,7 @@ const getPriceDec = (price) => {
   background: #f5f5f5;
   position: relative;
 }
-.login-hint-bar {
-  width: 100%;
-  padding: 10px 16px;
-  background: #fff8e1;
-  color: #8a6d3b;
-  font-size: 13px;
-  text-align: center;
-  cursor: pointer;
-}
+/* 原 .login-hint-bar（未登录黄条，:225-233）与文末 .login-modal 系 6 个块均已删 —— 2026-10-06 改判 2，见 §5-AG (13) */
 .search-section {
   width: 100%;
   height: 20vh;
@@ -395,50 +387,4 @@ const getPriceDec = (price) => {
   justify-content: space-between;
 }
 .empty-tip { color: #999; }
-.login-modal {
-  position: fixed;
-  top: 0;
-  left: 0;
-  width: 100vw;
-  height: 100vh;
-  background: rgba(0, 0, 0, 0.5);
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  z-index: 9999;
-}
-.modal-content {
-  background: #fff;
-  padding: 30px;
-  border-radius: 10px;
-  text-align: center;
-  width: 380px;
-}
-.modal-text {
-  font-size: 18px;
-  margin-bottom: 20px;
-}
-.modal-buttons {
-  display: flex;
-  gap: 15px;
-  justify-content: center;
-}
-.login-btn {
-  padding: 10px 30px;
-  background: #00bcd4;
-  color: #fff;
-  border: none;
-  border-radius: 5px;
-  cursor: pointer;
-  font-size: 15px;
-}
-.close-btn {
-  padding: 10px 30px;
-  background: #ccc;
-  color: #333;
-  border: none;
-  border-radius: 5px;
-  cursor: pointer;
-  font-size: 15px;
-}
 </style>

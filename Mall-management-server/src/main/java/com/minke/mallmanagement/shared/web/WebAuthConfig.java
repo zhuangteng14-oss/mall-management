@@ -90,9 +90,9 @@ public class WebAuthConfig implements WebMvcConfigurer {
      * <h3>⚠️ 白名单是「公开面」，不是「未登录可达面」</h3>
      * 2026-10-04 全量核实：未登录可达的非白名单端点还有 6 个 —— {@code /goods/goodsAdd}、
      * {@code /goods/goodsDe}、{@code /message/friendAdd}、{@code /message/userSelect}、
-     * {@code /user/updateAvatar}、{@code /user/updateUserInfo}。它们可达是**前端缺守卫**，**不是**
-     * 把它们放进白名单的理由（归属「**前端路由守卫笔**」，见 {@code progress.md} §5-AD D3）。
-     * 本表**刻意不含**它们 —— 开关已于 2026-10-05 翻 true ⇒ 这些端点**现在就被闸挡下**（如所料）。
+     * {@code /user/updateAvatar}、{@code /user/updateUserInfo}。它们当年可达是**前端缺守卫**、**不是**
+     * 把它们放进白名单的理由（§5-AD D3；开关 2026-10-05 翻 true ⇒ 已被闸挡下）。⚠️ **已结清**
+     * （前端路由守卫笔 {@code feat/router-guard}，2026-10-06，§5-AG）：调用页全在守卫受保护一侧；**仍不进本表**。
      */
     public static final List<String> AUTH_WHITELIST = List.of(
             // ===== 业务：登录链 =====
