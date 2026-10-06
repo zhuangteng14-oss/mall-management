@@ -34,6 +34,13 @@
 没有 `src/assets/`，15 个 view 全用 `<style scoped>` + 硬编码颜色
 （`#007bff`×17 / `#00bcd4`×8 / `#028fa8`×7 / `#ff4d4f`×5 + 一串灰）。
 
+> ⚠️【界面优化笔 A 笔订正 2026-10-06】上面这段有 2 处过时，实测如下（原文保留不改）：
+> （1）`#00bcd4` 实测 **7** 次，不是 8（其余三色 17 / 7 / 5 复核无误）；
+> （2）「15 个 view 全用 `<style scoped>`」不成立：`views/` 下共 **16** 个 `.vue`
+> （含子目录 `views/merchant/OrderPane.vue`），带 `<style>` 的 **14** 个、其中 `<style scoped>` 的 **13** 个
+> —— `HomeTab.vue` 与 `merchant/OrderPane.vue` 无 `<style>`，`LoginPage.vue` 有 `<style>` 但不是 scoped。
+> 另：`src/assets/` 已存在（见下节按语），`App.vue` 的那条全局 reset 已收敛进 `tokens.css`。
+
 可行性关键：**`<style scoped>` 里照样能读全局 CSS 变量**（自定义属性会继承，scoped 只加属性
 选择器、不隔离变量）。所以 token 放全局、组件样式照旧 scoped，两者不冲突。
 
@@ -41,6 +48,11 @@
 
 1. **铺 token** —— 新建 `src/assets/tokens.css` + `main.js` 加一行 import。
    纯新增，没有任何组件在用它 ⇒ **零视觉回归风险**。验证 `npm run build`。
+   > ⚠️【A 笔订正 2026-10-06】**本节已完成**，两处与本节预判不同：
+   > （1）`main.js` 的 import 是**同行追加**到第 2 行（不是新增一行）—— 为保住 `main.js` 被全仓引用的
+   > `:21`/`:28`/`:49` 行号（沿用该文件 `:27` 的既有做法）；
+   > （2）另建了 `src/assets/fonts/`（`noto.css` + 202 个 woff2，黑体/宋体两族自托管，离线可用），
+   > 并把 `docs/美化/*.html` 那两条指向 `./node_modules/` 的字体 `<link>` 改指过来（原链路本机实测 404）。
 2. **逐页翻译**（一页一个 commit）——
    `AppShell.vue`（顶栏，全站共用）→ `HomePage.vue` → `UserCenter.vue`（左菜单）→
    `UserInfoPage.vue` → `HistoricalOrders.vue` → `FriendRoom.vue` → `ChatRoom.vue`。

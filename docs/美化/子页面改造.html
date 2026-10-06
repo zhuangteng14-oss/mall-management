@@ -4,8 +4,8 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>子页面 · 改造方案（用户中心 / 历史订单 / 消息 / 好友）</title>
-<link rel="stylesheet" href="./node_modules/@fontsource-variable/noto-sans-sc/wght.css" />
-<link rel="stylesheet" href="./node_modules/@fontsource-variable/noto-serif-sc/wght.css" />
+<link rel="stylesheet" href="../../Mall-management-web/mall-management-system/src/assets/fonts/noto.css" />
+<!-- ↑ 2026-10-06 界面优化笔 A 笔：原为两条 @fontsource 的 <link>（指向 ./node_modules/…，本目录下不存在 ⇒ 实测 404、预览其实一直在用系统雅黑/宋体）；改指仓库内自托管字体（黑体+宋体两族在 noto.css 内一并注册、离线可用）。本行留作按语以保住行号 —— 本文件被 `:root` `:13-50` 等行号引用。 -->
 <style>
 /* ═══════════════════════════════════════════════════════════════════════════
    :root 与 主页改造.html 同源（青瓷绿那一套）。改一处要两边一起改。
