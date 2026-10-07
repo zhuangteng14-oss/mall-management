@@ -140,6 +140,34 @@ Id=598  GoodType HEX = EFBFBD EFBFBD EFBFBD EFBFBD EFBFBD EFBFBD C6B7
 
 > 归档说明：这条**不属于** `cache-layer.md §11` 的范畴（那里是缓存机制的坑），是**开发环境/工具链**的坑，故落在本文件。
 
+## ⚠️ 主机 headless 浏览器探针的坑：滚动条宽恒为 0（2026-10-07 实测，D 笔 commit 7c 踩中）
+
+**本机 headless Edge 154 的竖向滚动条布局宽恒为 0。**
+
+```
+pageH = 2186（视口 900）⇒ innerWidth − document.documentElement.clientWidth = 0
+```
+
+**后果**：`100vw` 与 `clientWidth` 在探针里**恒等** ⇒ `.app-shell { width:100vw }` 这类
+「vw 含滚动条宽」的横向溢出**永远量不到**，`overflowX = 0` 的断言**必然全绿**。
+这正是「校验器报 OK ≠ 没问题」——未覆盖的失效模式会以 `OK` 报出来。
+
+**三条强制手段全部无效（已实跑，别再试）**：
+
+1. `--disable-features=OverlayScrollbar`
+2. `--disable-features=OverlayScrollbars`
+3. `--disable-features=OverlayScrollbar,FluentOverlayScrollbar`
+4. 注入 `html::-webkit-scrollbar{width:15px}` + `html{overflow-y:scroll}`
+
+**处置（写探针时必须照办）**：
+
+- 报 `overflowX = 0` 时**必须同时说明它只证明了「内容没有横向溢出」**（这层是真信号：
+  比较 `shellW` / `element.right` 与 `clientWidth`），**证不了**含滚动条的情形；
+- 要真验 `100vw`，只能上**非 headless 的真浏览器**（人眼），或按规范直接判定并告知用户。
+
+> 同款记录另见记忆 `headless-scrollbar-width-zero`。本条的适用范围**不限 D 笔** ——
+> 凡在本机用 headless 跑「滚动条 / 视口宽」类断言的地方都受它影响。
+
 ## ⚠️ 安全提醒：含明文密码的文件清单
 
 **两个文件含明文密码，且都已进入 git 历史：**
