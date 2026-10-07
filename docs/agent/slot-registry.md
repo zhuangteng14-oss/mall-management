@@ -115,21 +115,77 @@ Vue 与之逐字一致 —— `v-else` 那条 `.inp-area` 的 4 个控件只 `di
 
 ---
 
-## 二、待落清单（10 页 / 36 条，落各页 commit 时逐条核）
-
-> 全部**照落 UI**。「档」列写的是**归属**，不是「本笔做不做功能」。
-> **commit 3 的 4 条不在这个 36 里** —— 它们来自**老稿**（口径 6 的唯一例外），见 §一。
-
 ### commit 4 —— `ShoppingCart.vue` ↔ `pages/ShoppingCart-customer.html`（4 条）
 
-| `data-slot` | 稿行 | N | 归属 |
-|---|---|---|---|
-| 预留 · 编辑（动现有代码 4 处 · 超档） | `:514` | 4 | `C3〈购物车〉` |
-| 预留 · 店铺分组 / 商品行 / 店铺小计（动现有代码 4 处 · 超档） | `:519` | 4 | ⚠️ 稿未标 `data-future`，随邻项 ⇒ `C3〈购物车〉` |
-| 预留 · 服务承诺条（动现有代码 ≥4 处 · 超档） | `:531` | ≥4 | `C3〈商品〉` |
-| 预留 · 吸底结算栏（动现有代码 4 处 · 超档） | `:547` | 4 | `C3〈购物车〉` |
+⚠️ **本页服务两个宿主**（同一文件、同一套模板）：
+- **客户宿主** `/customer/cart`（`router/index.js:61` 传 `props:{showSwitch:false}`）—— 本 commit 的基线；
+- **商家宿主** `/merchant/order/cart`（`merchant/OrderPane.vue:3` 的 `v-else` 那支）。
 
-### commit 5 + 6 —— `OrderCenter.vue` / `OrderPane.vue` ↔ `pages/OrderCenter-merchant.html`（7 条）
+用户 2026-10-07 裁决「**选 1（共用骨架 + `showSwitch` 分叉）**」，理由：商家壳**继承**用户层购物车，
+不是「商家也能买」，是**角色超集的结构性结果**。商家稿 `OrderCenter-merchant.html:749-808`
+自注「形态与 `ShoppingCart-customer.html` 逐字对齐」「同源（同一 `ShoppingCart.vue`）」
+「换个顶栏就是同一页」⇒ 两稿本就是同一页。
+
+| # | `data-slot` | 稿行 | N | 归属 | Vue 落点 |
+|---|---|---|---|---|---|
+| 9 | 预留 · 编辑（动现有代码 4 处 · 超档） | `:514` | 4 | `C3〈购物车〉` | `ShoppingCart.vue:46`（客户宿主挂、商家宿主 `null`） |
+| 10 | 预留 · 店铺分组 / 商品行 / 店铺小计（动现有代码 4 处 · 超档） | `:519` | 4 | ⚠️ 稿未标 `data-future`，随邻项 ⇒ `C3〈购物车〉` | `ShoppingCart.vue:77`（**两宿主都挂**） |
+| 11 | 预留 · 服务承诺条（动现有代码 ≥4 处 · 超档） | `:531` | ≥4 | `C3〈商品〉` | `ShoppingCart.vue:173`（客户宿主挂、商家宿主 `null`） |
+| 12 | 预留 · 吸底结算栏（动现有代码 4 处 · 超档） | `:547` | 4 | `C3〈购物车〉` | `ShoppingCart.vue:198`（**两宿主都挂**） |
+
+**本页合计 4 条，全落；0 条只登记。**
+
+⚠️ **两条挂 `data-slot`、两条走三元 —— 不是笔误，是照稿**：客户稿给 `.edit`（`:514`）与 `.pledge`（`:531`）
+都挂了 `data-slot`，而商家稿的 `data-page="cart"` 面 **同值不挂**（`OrderCenter-merchant.html:763`/`:788`），
+页内 `:760` 与 `:783-785` 写明理由是「**同一个缺口不在两处各挂一次角标**」（缺口已在客户稿登记过）。
+⇒ Vue 用 `:data-slot="showSwitch ? null : '…'"` 实现这条**逐字照稿**的分叉。
+`.shops` / `.paybar` 两稿都挂 ⇒ 无条件落。
+
+⚠️ **两宿主实跑实测的条数（对账用）**：
+- 客户宿主 `/customer/cart` **有商品** = **4** 条，字符串与客户稿逐字同；**空车** = **0** 条 ——
+  与客户稿 `:126` 自注「空视图 slots 计数为 **0**」一致（`.edit` 故加 `v-if="orderList.length > 0"`：
+  稿 `:572-574` 的空视图 `.h1row` 里只有 `.page-h`、没有这枚按钮）；
+- 商家宿主 `/merchant/order/cart` = **2** 条（`.shops` + `.paybar`），
+  与 `OrderCenter-merchant.html:767`/`:793` 一致。
+
+⚠️ **「商家那 2 条算谁的」**：商家购物车面的 2 条**已由本 commit 落地**（同一文件）。
+`§二 commit 6` 的 7 条里包含 `:767`/`:793` 这两条 —— 落 commit 5/6 时**只核销售面**，
+这两条**不重复计数**（订单面见 `:678`–`:738` 五条）。
+
+⚠️ **本页的功能面登记（照落 UI 的前提下，别当漏做）**：
+1. **付款 / 收货按钮留页内** —— 稿的 ★ 把这两个动作「迁走」到 `/customer/orders`，
+   但**该路由本仓不存在**（`router/index.js` 无 `customer/orders`），本页是全前端**唯一**提供
+   付款/收货的入口 ⇒ 迁走 = 功能回退。用户裁定 D 笔**保持现有「购物车 + 订单列表」混合形态**，
+   两个按钮的 `:disabled` / `:class` / `@click` **逐字保留原实现**；缺失的 `/customer/orders` 路由
+   归「**完整购物车笔**」。
+2. **订单号照留** —— 稿 ★ v4 新删了行内的「订单号」，那条理由以「纯购物车」为前提；
+   本页混合形态下订单号是必要标识 ⇒ 保留，登记为**有意偏离稿**。
+3. **数量 / 小计 / 店铺小计 / 猜你喜欢 → 占位不删**（用户 2026-10-07 中途裁决
+   「目前有些内容比较缺失，是因为没做（数据库缺列，功能流程不完善），**你先占位**，
+   我 C3 后续要回过来完善流程补上」）：
+   - 数量列 `—` + `disabled` 的 −/+（`order` 表**无 `Quantity` 列**，`mall_management_sql.sql:141-155`）；
+   - 行小计 `—`；店铺分组头「商家 {{MerchantId}}」+「本店小计 `—`」（`shopGroups` 按 `MerchantId` 分组）；
+   - 猜你喜欢、店铺名、承诺条、吸底栏的「运费 免运费」**不落** —— 承诺条/吸底栏由 `data-slot` 承担，
+     猜你喜欢出 `.empty-tip` 说明（其数据源 `goodsSelectHome` **现成**，但 D 笔功能量恒为 0 ⇒ 未接线）。
+4. **吸底「合计」= Σ `order.Price`**，而**行小计是 `—`** —— 两者口径不同，吸底栏 `title` 里写明。
+5. **4 步进度带（已付款 / 等待商家发货 / 已发货 / 已收货）是本页的混合形态新增**，稿里没有对应物
+   （稿是纯购物车，没有订单进度）—— 由 `PayIf`/`DeliveryIf`/`ReceiveIf` 三态驱动。
+
+---
+
+## 二、待落清单（**新稿 44 条 − 已落 10 条 = 34 条**，落各页 commit 时逐条核）
+
+> 全部**照落 UI**。「档」列写的是**归属**，不是「本笔做不做功能」。
+> **commit 3 的 4 条不在这个数里** —— 它们来自**老稿**（口径 6 的唯一例外），见 §一。
+>
+> ⚠️ **数法以「新稿 44」为唯一基准**（`grep -rc data-slot= docs/美化/pages/*.html` 可复核）。
+> 本表之前的表头写「10 页 / 36 条」，但**逐段相加是 40** ⇒ 那个 36 本就对不上，别再用它做减法。
+> 现按实测重算：44 − 已落 10（`GoodsSelect` 3 + `ChatRoom` 1 + `ShoppingCart-customer` 4 +
+> **`OrderCenter-merchant` 的购物车面 2**）= **34**。
+> ⚠️ 最后那 2 条（`:767` / `:793`）**已随 commit 4 落进 `ShoppingCart.vue`**（同一文件、同源形态），
+> 故下表的「7 条」里**只有 5 条还待落**，见下表底注。
+
+### commit 5 + 6 —— `OrderCenter.vue` / `OrderPane.vue` ↔ `pages/OrderCenter-merchant.html`（7 条，其中 2 条已随 commit 4 落）
 
 | `data-slot` | 稿行 | N | 归属 |
 |---|---|---|---|
@@ -138,8 +194,11 @@ Vue 与之逐字一致 —— `v-else` 那条 `.inp-area` 的 4 个控件只 `di
 | 预留 · 筛选栏（动现有代码 4 处 · 超档） | `:705` | 4 | `C3〈订单〉` |
 | 预留 · 批量操作条（动现有代码 ≥4 处 · 超档） | `:718` | ≥4 | `C3〈订单〉` |
 | 预留 · 分页（动现有代码 4 处 · 超档） | `:738` | 4 | `C3〈订单〉` |
-| 预留 · 店铺分组 / 商品行 / 店铺小计（动现有代码 4 处 · 超档） | `:767` | 4 | ⚠️ 稿未标 `data-future`，随邻项 ⇒ `C3〈购物车〉`（同块 `:793` 是购物车） |
-| 预留 · 吸底结算栏（动现有代码 4 处 · 超档） | `:793` | 4 | `C3〈购物车〉` |
+| 预留 · 店铺分组 / 商品行 / 店铺小计（动现有代码 4 处 · 超档） | `:767` | 4 | ⚠️ 稿未标 `data-future`，随邻项 ⇒ `C3〈购物车〉`（同块 `:793` 是购物车）**—— 已落，见 §一 commit 4** |
+| 预留 · 吸底结算栏（动现有代码 4 处 · 超档） | `:793` | 4 | `C3〈购物车〉` **—— 已落，见 §一 commit 4** |
+
+> 本表 7 条里 **`:767` / `:793` 两条已随 commit 4 落**（商家购物车面 = `ShoppingCart.vue` 的 `:77` / `:198`）
+> ⇒ commit 5/6 实际只剩 **5 条**（`:678` `:690` `:705` `:718` `:738`，全在销售面）。
 
 ### commit 7 —— `UserInfoPage.vue` ↔ `pages/UserCenter-customer.html` + `UserCenter-merchant.html`（7 条）
 
@@ -231,6 +290,28 @@ Vue 与之逐字一致 —— `v-else` 那条 `.inp-area` 的 4 个控件只 `di
 `.dots i`（`@click="goToSlide"` → `HomePage.vue:85`，稿 `:782` 是静态装饰）、
 `.card`（`@click="toGoodsDetail"` → `HomePage.vue:153`，稿 `:913-920` 的 mock 卡）。
 
+### commit 4 —— `ShoppingCart.vue`（`pages/ShoppingCart-customer.html`）
+
+| 稿行 | 元素 | 稿里的状态 | Vue 处置 | 归属 |
+|---|---|---|---|---|
+| `:619` / `:641` / `:551` | 勾选框 `.ck.on`（行勾 / 全选本店 / 吸底全选） | `<button disabled title>` —— **稿自己就没挂 `data-slot`** | 3 枚 `<button class="ck on" disabled>` + `title` → `ShoppingCart.vue:89` / `:100` / `:202` | `C3〈购物车〉` |
+| `:627` / `:629` | `.b` − / +（数量加减） | 同上，`disabled` + `title`、无 `data-slot` | 2 枚 → `ShoppingCart.vue:113` / `:115`（每行各一组，随行数） | `C3〈购物车〉` |
+| `:643` | `.visit`「进店逛逛 ›」 | `<a>` + `title`，无 `disabled`、无 `data-slot` | `<button class="visit" disabled>` → `ShoppingCart.vue:92`（每店铺组各一枚） | `C3〈店铺〉`（与 `ProductPage.html` 商家卡同一缺口） |
+| `:559` | `.go`「去结算（N 件）」 | `<button disabled id="goBtn">`，文案由稿 JS `:665` 填 | `<button class="go" disabled>` → `ShoppingCart.vue:213`（**在外层 `.paybar` 的 `data-slot` 之内**，故不再单独挂 `data-slot`） | `C3〈购物车〉` |
+| `:582` | `.go2`「去挑商品」 | `<a>`，**稿里既无 `disabled` 也无 `title`** —— 唯一一枚裸控件 | `<button class="go2" disabled>` + 补 `title` → `ShoppingCart.vue:59` | `C3〈购物车〉`（搜索页已有，缺本页跳转路由） |
+
+⚠️ **本页与前几页不同的一点**：勾选框 / 数量 / 进店逛逛 / 去结算 **稿自己就没挂 `data-slot`**
+（不是本笔漏挂）—— 它们在稿里以 `disabled` + `title` 呈现，正是「稿外死控件」的原始形态。
+`.go2` 是**唯一一枚稿里连 `disabled` 都没有的裸控件**（稿只当它静态文案画），Vue 补 `disabled` + `title`。
+
+⚠️ **本页稿外「活」控件（照旧保留真事件，登记备查）**：
+1. `showSwitch` 两态开关 —— `ShoppingCart.vue:8-19`，`@click="handleToggle"`。
+   **稿里没有它**（客户稿 `:14-15` 明写「客户侧不画」）。它是**商家宿主的回程**：
+   `/merchant/order/cart` 走 `OrderPane.vue:3` 的 `v-else`，删掉它商家就无法切回订单面 ⇒
+   与 §一 commit 4 的「选 1（共用骨架 + `showSwitch` 分叉）」裁决配套，**不是新增功能**。
+2. `.op button` 付款 / 收货 —— `ShoppingCart.vue:127-139`，`@click="handlePay(order)"` /
+   `@click="handleReceive(order)"`，`:disabled` / `:class` **逐字保留原实现**（见 §一 commit 4 注 1）。
+
 ---
 
 ## 四、老稿 10 条（`主页改造.html` + `子页面改造.html`）
@@ -254,7 +335,7 @@ Vue 与之逐字一致 —— `v-else` 那条 `.inp-area` 的 4 个控件只 `di
 ## 五、对账方法（验收时跑）
 
 ```bash
-# Vue 里实落的条数（应 = 台账「已落」条数 = 3 + 1 + 4 = 8）
+# Vue 里实落的条数（应 = 台账「已落」条数 = 3 + 1 + 4 + 4 = 12）
 grep -rn 'data-slot=' Mall-management-web/mall-management-system/src/views/ | wc -l
 # 新稿里的总条数（应 = 44；老稿 主页改造.html 另 4 条，不在这个数里）
 grep -rc 'data-slot=' docs/美化/pages/*.html | awk -F: '{s+=$2} END{print s+0}'
@@ -264,3 +345,7 @@ grep -rn 'disabled' Mall-management-web/mall-management-system/src/views/ | wc -
 
 ⚠️ **本笔不扫「老稿 10 条」的 HTML** —— 那 10 条不在 `docs/美化/pages/` 下（`主页改造.html`
 在 `docs/美化/`、`子页面改造.html` 已弃用）。
+
+⚠️ **第一条 grep 是「源码条数」不是「渲染条数」**：`ShoppingCart.vue` 有 2 条走
+`:data-slot="showSwitch ? null : '…'"`（见 §一 commit 4），源码里数 4，运行时按宿主分别渲染
+**4（客户有商品）/ 0（客户空车）/ 2（商家）**。
