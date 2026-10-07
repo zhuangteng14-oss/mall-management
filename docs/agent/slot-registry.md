@@ -746,6 +746,90 @@ Vue 与稿**逐字全同**（4/4）；⓪ 第 3 项把这个「4」写成了断�
 
 ⚠️ **本笔未自行估算 `N`**：5 条的 `N` 全部**逐字取稿**（稿的 `data-slot` 文本里已写「动现有代码 N 处」）。
 
+### commit 12a —— 跨页全局样式收敛（`LoginPage.vue` 的**全局** `<style>`；**不是 UI 落地笔**）
+
+📌 **本节按 commit 号排在 13 之前，但落盘顺序相反**：commit 13 先落（HEAD = `cca88bb`），
+12a 后落。之所以插在 13 前面，是为了让「12a → 12b」读起来连在一起；**不要据章节位置推断落盘先后**。
+（用户裁决：12 拆成 12a 清理 + 12b 重写，各自一笔；且 12a 必须等 10/11 落完 —— `.tip` 那条的判据
+是 GoodsAdd 落完后的形态。）
+
+**为什么单独立一笔**：`LoginPage.vue` 的 `<style>`（`LoginPage.vue:307`）**原本不带 `scoped`** ——
+是**全仓 16 个 `<style>` 块里唯一一个**（其余 15 个都带）⇒ 块内 **33 条选择器全是全局的**。
+这一笔改的是**全仓渲染层**，不是这一页的视觉 ⇒ 不能混进 commit 12b（按稿重写）里，
+否则「改了什么」在对账时看不出来、也不能单独回退。
+
+**逐条处置**（三条外泄规则；判据 = 「别处有没有真的在用」，不是「看着像」）：
+
+| # | 规则（`LoginPage.vue` 改前） | 处置 | 依据（实测） |
+|---|---|---|---|
+| ① | `* { margin:0; padding:0; box-sizing:border-box }`（`:308`） | **删** | 与 `assets/tokens.css:52` **逐字重复**，而 `tokens.css` 由 `main.js:2` 全局引入 ⇒ 删掉**无渲染变化**（探针实测本页仍 `border-box`） |
+| ② | `input, button, .success-cover { user-select:text !important; pointer-events:auto !important }`（`:314`） | **删** | 全仓 `pointer-events` 只 5 处、**无一处依赖它**；它反而**顶掉**了 `GoodsAdd.vue:617` 的 `.code input { pointer-events:none }`（`:99`/`:107` 那两枚 1px/opacity:0 的**装饰性 radio**）。⚠️ 影响**很小**（隐形 1px 热区，且 `label` 包着 input），**不是用户能看出来的 bug**，只是「全局层越权」的证据 —— **不夸大** |
+| ③ | `.tip { position:absolute; right:40px; bottom:80px; … }`（`:467`） | **收进 `scoped`**（**不删**） | 它命中 `GoodsAdd.vue` 的 **5 处** `class="tip"`（`:67`/`:82`/`:113`/`:136`/`:218`），而 GoodsAdd 自己的 `.tip`（`GoodsAdd.vue:563`）只设 `margin-top`/`font-size`/`color`、**没有 `position`** ⇒ 作者本意是**就地显示**，那条绝对定位是意外泄漏。**但本页 `LoginPage.vue:81` 自己也在用 `.tip`**（「未满18周岁…」）且那条定位是**本页的设计** ⇒ **整条删会伤到本页**，故改为靠 `scoped` 收敛：本页那条仍在、GoodsAdd 那边自动脱离。**若确要连本页这条也去掉，属 12b 按稿重写时的判断** |
+
+**验收**（`shot12a.mjs`，**同一支探针跑两遍 = 突变对照**）：
+```
+node shot12a.mjs before   # HEAD 版 LoginPage.vue 在位
+node shot12a.mjs          # 改后
+```
+| 断言 | before 实测 | after 实测 | 该不该变 |
+|---|---|---|---|
+| GoodsAdd `.tip` 的 `position` | `absolute`（right=40px/bottom=80px） | **`static`**（right=auto/bottom=auto） | **该变** ✅ |
+| GoodsAdd `.code input` 的 `pointer-events` | `auto` | **`none`** | **该变** ✅ |
+| LoginPage 自己的 `.tip` 的 `position` | `absolute` | `absolute` | 不该变 ✅ |
+| LoginPage `.login-page` 的 `box-sizing` | `border-box` | `border-box` | 不该变 ✅ |
+| LoginPage `.input` 的 `background-color`/边框 | `rgb(241,243,245)`/`none` | 同左 | 不该变 ✅ |
+| HomePage `.glaze-frame` 的 `pointer-events` | `none` | `none` | 不该变 ✅ |
+两遍都 **0 条不符**：该变的确实变了、不该变的一字未动 ⇒ 探针**有分辨力**（不是「恒绿」）。
+
+**三件套（在最终提交态上复跑）**：`npx eslint src/views/LoginPage.vue` 退出码 **0**；
+`npm run build` 绿（Hash `d13bcb7c2b16f096`）；`shot12a.mjs` after 模式 **11 条断言全绿 / 0 条不符**。
+
+⚠️ **探针第一版有三条假红，原因是「先验前提」写错了**：`.tip`（`v-if="showTip && …"`）、
+`.code`（要 `/goods/goodstype` 返回非空）、LoginPage 的 `.tip`（`v-if="isUnder18"`）
+**三者都要先驱动出前提才存在**。未驱动时选择器**没命中**，若把「没命中」当成「值不对」，
+就会得出「改坏了」的错结论。已改成：**先驱动前提、再断言**，并额外断言元素**真的可见**
+（`offsetParent !== null`），把「元素不存在」和「值不对」**分开报**。
+
+⚠️ **一处方法论错误（我自己犯的，记下来）**：第一遍用 `\b` 做词边界查「同名 class 有没有被别处用」，
+报出 `.input` 与 `.bar-item.active` 两条冲突 —— **两条都是假阳性**：`search-input` / `bar-item`
+里的连字符 `-` 在正则里**也构成词边界**。**必须按 class token（空白切词）精确匹配**，
+改对之后真冲突只剩 `.tip` 一条。
+
+⚠️ **行号影响 = 零**：本笔只动 `LoginPage.vue:307` 之后。
+全仓以 `LoginPage.vue:<行>` 为**目标**的引用实测 **27 条**（19 条单值 + 8 条区间，覆盖 **15 个**不同目标），
+目标行**全部落在 86–280**（模板/脚本区），**最大值 280 < 307** ⇒ 本笔改动的区间之后没有被引用的行
+⇒ 一条都不漂。
+⚠️ **数字更正**：本条先前写的「28 条」是**未给出处的**估值 —— 按产物逐条数出来是 **27 条**。
+（口径：`grep -cE ':LoginPage\.vue:[0-9]+(-[0-9]+)?$' scripts/refs-before12a.txt`。
+注意**不要**把「引用**所在**文件路径含 `views/LoginPage.vue` 的行」混进来 —— 那是本页**引用别处**的 5 条，
+方向相反。）
+
+`refs-scan` 前后对照（**分两个口径报，因为「台账自己也在被扫范围内」** —— 与 commit 13 §五 的
+A 档是同一类现象：**证据文件本身也是被扫对象**）：
+
+| 口径 | 产物行数 | 唯一 token | 丢失 | 新增 |
+|---|---|---|---|---|
+| **(a) 代码侧**（只算 `LoginPage.vue`；台账未写） | 2907 | 1695 → **1700**（+5） | **0** ✅ | 5 |
+| **(b) 提交态**（代码 + 本段台账） | **2922** | 1695 → **1703**（+8） | **0** ✅ | 8 |
+
+- (a) 的 5 条**全是本笔新注释里写的「指向别处的地名」**（`GoodsAdd.vue:617` / `GoodsAdd.vue:99` /
+  `HomePage.vue:597` / `assets/tokens.css:52` / `main.js:2`）。
+- (b) 比 (a) 多的 3 条是**本段台账自己写的**（`GoodsAdd.vue:563` / `LoginPage.vue:81` /
+  `LoginPage.vue:307`）—— 后两条指向 `LoginPage.vue`，但**指向的是本笔没动过的行**。
+- **两条口径下 `丢失` 都是 0，且原始产物 diff 里 `<` 行都是 0 条**（比 commit 13 干净：没有任何
+  被引用的行号落在改动区间里）。产物 diff 无 `<` 行 = **没有任何一条既有引用因本笔而失效**。
+- **反向自查**（口径同 commit 13：**新增 token 的宿主文件必须 ⊆ 本笔改动过的文件集合**）：
+  实测 (b) 的 8 条新 token 宿主**只有** `LoginPage.vue` 与 `slot-registry.md` 两个文件
+  = `{本 commit 的两个受跟踪文件}` ⇒ **0 条异常**。
+- ⚠️ (a) 口径下「指向 `LoginPage.vue` 的目标 token 集合」15 条，前后**逐条相同**；
+  (b) 口径下变成 17 条 —— **多出来的 2 条正是本段台账新写的引用**，不是漂移。
+  ⇒ 报数时**必须写明口径**，否则「LoginPage 引用变了 2 条」会被误读成「本笔把引用改坏了」。
+
+⚠️ **对本笔（D 笔）已落页面截图的影响：实测为零** —— `commit 13` 的 `ProductPage` 探针
+（`shot13.mjs`，81 条断言）在 12a 之后**重跑仍是 0 失败**。
+（这是**跑出来的**，不是「应该没事」：②删掉后 ProductPage 的按钮回落默认 `pointer-events:auto`，
+①删掉后由 `tokens.css` 兜着，③与 ProductPage 无关。）⇒ **不触发重拍**。
+
 ### commit 13 —— `ProductPage.vue` ↔ `pages/ProductPage.html`（7 条 · **已落**；归属：商品 ×4 / 促销 ×1 / 购物车 ×1 / 店铺 ×1）
 
 **改动**：整个 `<template>` + `<style scoped>` 重写（**804 → 1166 行**）。

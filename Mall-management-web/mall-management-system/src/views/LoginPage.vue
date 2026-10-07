@@ -304,17 +304,37 @@ export default {
 };
 </script>
 
-<style>
-* {
-  margin: 0;
-  padding: 0;
-  box-sizing: border-box;
-  
-}
-input, button, .success-cover {
-  user-select: text !important;
-  pointer-events: auto !important;
-}
+<style scoped>
+/* ── 12a（2026-10-07）：本块**原是全仓唯一一个不带 `scoped` 的 `<style>`**（其余 15 个都带）——
+   块内 33 条选择器**全是全局的**。本笔把它收进 `scoped`，并删掉两条**外泄到别的页**的规则。
+   逐条取证（不是「看着像」）：
+
+   1) 已删 `* { margin:0; padding:0; box-sizing:border-box }`
+      与 `assets/tokens.css:52` **逐字重复**，而 `tokens.css` 由 `main.js:2` 全局引入
+      ⇒ 删掉**无渲染变化**（本页内部也由它兜着）。
+
+   2) 已删 `input, button, .success-cover { user-select:text !important; pointer-events:auto !important }`
+      全仓 `pointer-events` 只有 5 处，**没有一处依赖它**；它反而**正在压掉**
+      `GoodsAdd.vue:617` 的 `.code input { pointer-events: none }` ——
+      那是类型单选胶囊里那枚 `width:1px / opacity:0` 的**装饰性 `<input type="radio">`**
+      （`GoodsAdd.vue:99` / `:107`，可见的胶囊由原生 radio 承担语义、`<span>` 承担视觉），
+      本页明确写了「不可点」，被这条全局 `!important` **顶掉了** ⇒ 删掉它 = 让那条声明恢复生效。
+      ⚠️ 实测影响**很小**（1px 的隐形热区，且 `label` 包着 input、点胶囊本来就会转发到它），
+      所以这**不是**一个「用户能看出来的 bug」，只是**全局层越权**的证据 —— 如实标注，别夸大。
+      另 3 处 `pointer-events`（`HomePage.vue:597` 的 `.glaze-frame` 是 `div`，另有本页自己两处）
+      **都不受影响**。`user-select` 在全仓**只有本页**用过。
+      本页自己需要的那两处（`.slide-btn,.form-btn`、`.success-cover`）**各自自带** `!important`
+      ⇒ 删掉后本页行为不变。
+
+   3) **没收的一条：`.tip`**（上一条 `.tip` 的 `position/right/bottom` 命中 `GoodsAdd.vue` 的
+      5 处 `class="tip"`，而 GoodsAdd 自己的 `.tip` 只设 margin-top / font-size / color、
+      没有 position ⇒ 作者本意是**就地显示**，那条绝对定位是意外泄漏）。
+      ⚠️ 但本页 `:81` **自己也在用** `.tip`（「未满18周岁…」），那条定位是本页的设计
+      ⇒ **整条删会伤到本页**，故改为**靠 `scoped` 收敛**：本页那条仍在、GoodsAdd 那边自动脱离。
+      （若确要连本页这条也去掉，属 12b 按稿重写时的判断，不在本笔。）
+
+   ⚠️ 行号影响：本笔只动 `:307` 之后。全仓 27 条（19 条单值 + 8 条区间）指向 `LoginPage.vue`
+   的行号引用，目标行**全部落在 86–280**（模板/脚本区）⇒ 一条都不漂。 */
 
 .login-page {
   width: 100vw;
