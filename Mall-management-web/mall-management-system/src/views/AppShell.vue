@@ -192,46 +192,84 @@ display: flex;
 flex-direction: column;
 background: #f9fafb;
 }
+/* ── 顶栏（C 笔 2026-10-07）────────────────────────────────────────────────────
+   形态来源 = `docs/美化/pages/` 的**基准 6 份**，它们逐字相同：`ChatRoom:142-148` /
+   `GoodsAdd:163-169` / `GoodsUp:155-161` / `GoodsSelect:258-264` /
+   `OrderCenter-merchant:329-335` / `ShoppingCart-customer:296-302`。
+   ⚠️ **用户裁决：不加** `UserCenter-customer.html:275-278` / `UserCenter-merchant.html:261-264`
+      那个 520px 的 `.nav-search`（只有这两份稿有它 ⇒ `docs/美化/README.md` 的「十份同源、
+      无搜索框」是**事实错误**，本笔已就地订正）。`ProductPage.html` 是变体且不进壳，
+      `LoginPage.html` 无顶栏。
+   ⚠️ 高 55 → 60、内距 40px → `var(--s7)`、下边线 `#eee` → `var(--line)`、
+      底 `#fff` → `var(--surface)`（同值，只换成语义名）。
+   ⚠️ **高度必须与 `.home-container` 的 `top` / `height` 锁步**（那两条已同步改成 60）。 */
 .top-nav {
-height: 55px;
+height: 60px;
 display: flex;
 justify-content: space-between;
 align-items: center;
-padding: 0 40px;
-border-bottom: 1px solid #eee;
-background: #fff;
+padding: 0 var(--s7);
+border-bottom: 1px solid var(--line);
+background: var(--surface);
+/* ⚠️ 本仓**没有**稿子那条全局 `body{font-family:…}`：`public/index.html` 与全仓 CSS 里
+   一条字体声明都没有 ⇒ 今天走浏览器默认（本机实测解析到 `"Noto Sans SC"`）。
+   用户裁决：本笔的字体**只声明在壳三件上**（顶栏 / 左菜单），页面主体留给 D 笔
+   ⇒ 在这里声明一次，右三项与左项各自继承 / 覆盖。 */
+font-family: var(--font);
 }
-/* R1/R2：顶栏入口由 `button` 改成 `router-link`（渲染成 `a`）⇒ 选择器随之改；
-   加 `text-decoration: none`，其余属性与改前的 `.top-nav button` 逐条相同。 */
-.top-nav a {
-  display: inline-block;
-  border: none;
-  background: transparent;
-  font-size: 15px;
-  color: #333;
-  cursor: pointer;
-  padding: 6px 12px;
-  border-radius: 4px;
-  transition: 0.2s;
+/* 顶栏两族入口与稿子的一一对应：左 = 稿子的 `.brand`（文字「商城主页」，`nav.js` 的 `left`
+   恒为这 1 项）；右 = 稿子的 `.nav-right`（3 项，逐字同构）。
+   ⚠️ **不能照抄稿子那条全局 `a{color:inherit;text-decoration:none}`**：本仓没有它，而
+      `.top-nav a` 的特异性 (0,1,1) 会**压过** `.brand` 的 (0,1,0) —— 破法是拆成两条**显式**
+      规则，而不是提高 `.brand` 的特异性。
+   ⚠️ 稿子的顶栏**没有 hover 态**（三态先例 `主页改造.html:562-568` 的 `.subnav a` 属
+      **二级导航**，不属顶栏）⇒ 照稿不加；改前那条也没有 ⇒ **本项净零**。
+   ⚠️ 左项落成 `.brand` 后**在首页不再高亮**（稿子的 `.brand` 没有 `.on` 变体）—— 这是照稿的
+      必然结果。模板里那个 `:class="{ active: … }"` 原样保留，只是 `.nav-left a.active` 不再有规则。 */
+.nav-left a {
+  font-family: var(--font-display);
+  font-size: var(--fs-lg);
+  font-weight: var(--fw-semi);
+  color: var(--brand-ink);
   text-decoration: none;
 }
-.top-nav a.active {
-color: #007bff;
-font-weight: 500;
-}
-.nav-left,
 .nav-right {
+margin-left: auto;
 display: flex;
-gap: 12px;
+align-items: center;
+gap: var(--s5);
+color: var(--nav-tx);
 }
+/* R1/R2：顶栏入口由 `button` 改成 `router-link`（渲染成 `a`）⇒ 选择器随之改。
+   ⚠️ C 笔：原 `.top-nav a` 那条**整条拆掉** —— 它的 `display:inline-block` / `border:none` /
+      `background:transparent` / `font-size:15px` / `color:#333` / `cursor:pointer` /
+      `padding:6px 12px` / `border-radius:4px` / `transition:0.2s` 是**按钮**的形态；
+      稿子的顶栏入口是无内距、无圆角、无过渡的**文字链**（`router-link` 渲染成带 `href` 的
+      `a`，指针形状浏览器自带，不需要 `cursor`）。高亮 `#007bff` → `--nav-now`、500 → `--fw-semi`。 */
+.nav-right a {
+color: inherit;
+text-decoration: none;
+}
+.nav-right a.active {
+color: var(--nav-now);
+font-weight: var(--fw-semi);
+}
+.nav-left {
+display: flex;
+align-items: center;
+}
+/* 未读红点：照稿的 `.dot`（同上那 6 处顶栏逐字相同）。
+   ⚠️ 改前是 8px **纯红** + `vertical-align: middle`；现在 6px **朱砂 `--accent`** +
+      `super`（位置上移到上标位）。两条都是用户裁决项 —— 色那一项连带把 `tokens.css` 的房规
+      「朱砂只负责价格」订正为「价格、促销与未读提示」。 */
 .nav-red-dot {
   display: inline-block;
-  width: 8px;
-  height: 8px;
-  background-color: red;
+  width: 6px;
+  height: 6px;
+  background: var(--accent);
   border-radius: 50%;
-  margin-left: 6px;
-  vertical-align: middle;
+  margin-left: 3px;
+  vertical-align: super;
 }
 .content {
 flex: 1;
@@ -240,12 +278,15 @@ padding: 30px;
 .page {
 padding: 20px;
 }
+/* ⚠️ C 笔：`top` / `height` 跟着顶栏 55 → 60 **锁步**（用户裁决：容器取保守口径）。
+   只改这两个数 —— `position:absolute` / `width:100vw` / `background:#f5f5f5` / `padding:0`
+   全部留给 D 笔。⚠️ 只改顶栏不改这里 = 首页被顶栏压掉 5px（`position:absolute` 不参与 flex 流）。 */
 .home-container {
 position: absolute;
-top: 55px;
+top: 60px;
 left: 0;
 width: 100vw;
-height: calc(100vh - 55px);
+height: calc(100vh - 60px);
 background: #f5f5f5;
 padding: 0;
 margin: 0;
@@ -270,9 +311,13 @@ box-shadow: 0 2px 8px rgba(0,0,0,0.05);
 overflow: hidden;
 position: relative;
 }
+/* ⚠️ C 笔：`gap` 30 → `var(--s8)`（=64px），照稿 `UserCenter-customer.html:141` 的
+   `.uc{display:flex;align-items:flex-start;gap:var(--s8)}`。只改 `gap` —— `display:flex` /
+   `height:100%` 不动（稿子多一个 `align-items:flex-start`，改了会让右栏不再撑满，
+   归 D 笔）。左右两栏 = `UserCenter.vue` 那两个**根**（多根 fragment）⇒ 别在中间加包裹 div。 */
 .user-page {
 display: flex;
-gap: 30px;
+gap: var(--s8);
 height: 100%;
 }
 /* ⚠️ 用户中心左菜单的样式（`.user-menu*`）R1 起已随 markup 搬进 `UserCenter.vue` 自己的

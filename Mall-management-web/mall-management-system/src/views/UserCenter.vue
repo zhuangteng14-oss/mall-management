@@ -72,34 +72,80 @@ const toLogin = () => {
    4 个 tab 由 `button` 改成 `router-link`（渲染成 `a`）⇒ 选择器与少数属性相应调整
    （`text-decoration: none`；`box-sizing: border-box` 让 `a` 与 `button` 的盒模型一致）。
    R2 起本组件被**两个壳**共用 ⇒ 这份样式同时服务客户 / 商家两侧（R2 前商家侧那份
-   `.user-menu*` 在 `MerchantPage.vue` 的 `<style scoped>` 里，与这份逐条等价，已删）。 */
+   `.user-menu*` 在 `MerchantPage.vue` 的 `<style scoped>` 里，与这份逐条等价，已删）。
+
+   ── C 笔（2026-10-07）：形态改照稿 ────────────────────────────────────────────
+   来源 = `docs/美化/pages/UserCenter-customer.html:141-151` 的 `.uc-menu`（商家稿
+   `UserCenter-merchant.html:134-145` **逐字同构**）。改动就是「**圆角描边按钮列 → 发丝线列表**」
+   外加宽 220 → 200。
+   ⚠️ 用户裁决：这一档属「左菜单 200px 连带的」；`.content` 的 1180 居中不在本笔（D 笔）。
+   ⚠️ 稿子的 `.uc`（`display:flex;align-items:flex-start;gap:var(--s8)`）是**壳里的 `.user-page`**，
+      不在本块 —— 它的 `gap` 那条改在 `AppShell.vue`。
+   ⚠️ 稿子里的占位项（`.uc-menu a.future`：`我的收藏` / `浏览足迹` / `收货地址`）**本笔不引入**：
+      加一项 = 改 `router/index.js` 一处，且属「凭空造约定」（同 `LEGACY_TAB` 口径）。
+      故稿子的 `.uc-menu a.future{color:var(--ink-3);cursor:not-allowed}` 也一并**不落**。 */
 .user-menu {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  width: 220px;
+  /* ⚠️ `flex: none` 是**新增**的：改前只有 `width: 220px`，而本元素是 `.user-page`（flex 行）
+     的子项 ⇒ 实测被压到 **195.9px**（不是 220）。加上它，200px 才真是 200px。 */
+  width: 200px;
+  flex: none;
+  /* ⚠️ 去掉 `display:flex;flex-direction:column;gap:12px` —— 稿子的 `.uc-menu` 是**自然块流**
+     （`a` 本来就是 `display:block`），条目之间靠 `border-bottom` 那根发丝线连成一条；
+     留着 flex + gap 会把线断成一段一段，与稿子不符。
+     ⚠️ 字体与顶栏同理：本仓没有全局 `body{font-family}`（用户裁决：本笔只声明在壳三件上）。 */
+  font-family: var(--font);
 }
+/* ⚠️ 稿子把 `width` 写了**两遍**（`width:100%` 与 `width:calc(100% + var(--s3) * 2)`），**后者**
+   生效 ⇒ 这里只写生效值一条，不留重复声明。`margin` 的负值与 `calc` 宽度配对，让发丝线比
+   文字列左右各宽出 `var(--s3)`（=12px），照稿。
+   ⚠️ 改前的 `border:1px solid #eee` / `border-radius:6px` / `background:#fff` /
+      `transition:0.2s` 全部去掉；`box-sizing:border-box` 也去掉 —— 它由 `tokens.css:52-56`
+      的 `*` reset 兜底（`:55`），删掉**不改变盒模型**。
+   ⚠️⚠️ `border:0` + `background:none` + `font-family` 三行是**必需**的，不是冗余：本条选择器
+      同时命中 `.logout`，而它是 `<button>`（模板 `:10`）**不是** `<a>` ⇒ 稿子的 `.uc-menu a`
+      没有 UA 外观可漏，`<button>` 有。改前靠 `border:1px solid #eee`（简写，四边）+ `background:#fff`
+      顺手压住；C 笔把简写收成「只 `border-bottom`」并删掉底色 ⇒ **`2px outset` 边框与 `ButtonFace`
+      灰底会从 UA 样式表漏回来**（实测：`borderTopWidth:2px`、`backgroundColor:rgb(240,240,240)`），
+      退出项看着像颗真按钮，与其余四项的发丝线行不一致。
+      三条各自对治：`border:0` 清三边（`border-bottom` 一条在**其后**重新给菜单项接上发丝线）、
+      `background:none` 清灰底、`font-family` 治 `<button>` **不继承**父级字体（UA 给按钮自带
+      `font:...Arial`，只写 `font-size` 压不住族名）⇒ 不加它退出项与菜单项**不同字体**。 */
 .user-menu .menu-btn,
 .user-menu .logout {
-  padding: 12px 16px;
-  border: 1px solid #eee;
-  border-radius: 6px;
-  background: #fff;
+  display: block;
+  width: calc(100% + var(--s3) * 2);
+  padding: var(--s3);
+  margin: 0 calc(var(--s3) * -1);
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  background: none;
+  font-family: var(--font);
   text-align: left;
-  font-size: 15px;
+  font-size: var(--fs-sm);
+  color: var(--ink-2);
   cursor: pointer;
-  transition: 0.2s;
   text-decoration: none;
-  color: #333;
-  box-sizing: border-box;
 }
+.user-menu .menu-btn:hover {
+  color: var(--ink);
+  background: var(--surface-2);
+}
+/* 选中项给 `--brand-tint` 底 + `--brand-ink` 字 —— **底色变化，不是侧边强调条**
+   （`tokens.css:37` 房规「禁 · 侧边强调条」）。 */
 .user-menu .menu-btn.active {
-  border-color: #007bff;
-  background: #e6f7ff;
-  color: #007bff;
+  background: var(--brand-tint);
+  color: var(--brand-ink);
+  font-weight: var(--fw-semi);
 }
+/* 退出登录：与上面共用盒模型，但**不吃那根发丝线**，且与菜单拉开一段（稿子 `margin-top:var(--s6)`）。
+   ⚠️ 改前的红字红框（`border-color:#ff4d4f;color:#ff4d4f`）改成「常态置灰、hover 才红」。
+   ⚠️ hover 里**不再重复** `background:none` —— 共用规则已给（同本块对 `width` 的口径：不留重复声明）。 */
 .user-menu .logout {
-  border-color: #ff4d4f;
-  color: #ff4d4f;
+  margin-top: var(--s6);
+  border-bottom: 0;
+  color: var(--ink-3);
+}
+.user-menu .logout:hover {
+  color: var(--danger);
 }
 </style>
