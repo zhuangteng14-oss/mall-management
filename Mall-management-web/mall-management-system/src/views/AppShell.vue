@@ -190,7 +190,7 @@ width: 100vw;
 height: 100vh;
 display: flex;
 flex-direction: column;
-background: #f9fafb;
+background: var(--bg);
 }
 /* ── 顶栏（C 笔 2026-10-07）────────────────────────────────────────────────────
    形态来源 = `docs/美化/pages/` 的**基准 6 份**，它们逐字相同：`ChatRoom:142-148` /
@@ -273,21 +273,21 @@ align-items: center;
 }
 .content {
 flex: 1;
-padding: 30px;
+padding: 0;
 }
 .page {
-padding: 20px;
+padding: 0;
 }
 /* ⚠️ C 笔：`top` / `height` 跟着顶栏 55 → 60 **锁步**（用户裁决：容器取保守口径）。
-   只改这两个数 —— `position:absolute` / `width:100vw` / `background:#f5f5f5` / `padding:0`
-   全部留给 D 笔。⚠️ 只改顶栏不改这里 = 首页被顶栏压掉 5px（`position:absolute` 不参与 flex 流）。 */
+   只改这两个数。⚠️ **D 笔 commit 0（乙案）已取走 `background`**（`#f5f5f5` → `var(--bg)`），
+   余下 `position:absolute` / `width:100vw` / `padding:0` 留后续笔。⚠️ 只改顶栏不改这里 = 首页被顶栏压掉 5px。 */
 .home-container {
 position: absolute;
 top: 60px;
 left: 0;
 width: 100vw;
 height: calc(100vh - 60px);
-background: #f5f5f5;
+background: var(--bg);
 padding: 0;
 margin: 0;
 z-index: 1;
@@ -299,15 +299,15 @@ z-index: 1;
 .cart-container {
 height: 100%;
 background: #fff;
-border-radius: 12px;
+border: 1px solid var(--line);
 overflow: hidden;
-box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+/* 原 `box-shadow: 0 2px 8px rgba(0,0,0,0.05);` 删（乙案 / 房规「禁·阴影铺满，改 1px 发丝线」） */
 }
 .order-container {
 height: 100%;
 background: #fff;
-border-radius: 12px;
-box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+border: 1px solid var(--line);
+/* 原 `box-shadow: 0 2px 8px rgba(0,0,0,0.05);` 删（同上：乙案 / 房规「禁·阴影铺满」） */
 overflow: hidden;
 position: relative;
 }
