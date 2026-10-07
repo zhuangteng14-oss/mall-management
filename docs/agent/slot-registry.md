@@ -259,17 +259,91 @@ Vue 与之逐字一致 —— `v-else` 那条 `.inp-area` 的 4 个控件只 `di
 
 ---
 
-## 二、待落清单（**新稿 44 条 − 已落 15 条 = 29 条**，**另加老稿 3 条**，落各页 commit 时逐条核）
+### commit 7 —— `UserInfoPage.vue` ↔ `pages/UserCenter-customer.html` + `UserCenter-merchant.html`（7 条）
+
+⚠️ **本页是「一页两稿」**：基线是**两份**稿（`UserCenter-customer.html` / `UserCenter-merchant.html`），
+Vue 侧是**同一文件按角色分支** —— `v-if="!userInfo.customerid && userInfo.merchantid"` ⇒ 商家面、
+`v-else` ⇒ 客户面。判据与原 `getUserData()` 的分支**逐字同构**。
+
+| # | `data-slot` | 稿行 | N | 归属 | Vue 落点 |
+|---|---|---|---|---|---|
+| 18 | 预留 · 我的资产（待 C3〈个人中心〉） | 客户 `:323` | 4 | `C3〈个人中心〉` | `UserInfoPage.vue:143`（`<section class="assets">`） |
+| 19 | 预留 · 我的订单四入口（待 C3〈订单〉） | 客户 `:332` | 4 | `C3〈订单〉` | `UserInfoPage.vue:155`（`<section class="sec">`） |
+| 20 | 预留 · 收藏 / 浏览足迹（待 C3〈个人中心〉） | 客户 `:348` | 3 | `C3〈个人中心〉` | `UserInfoPage.vue:176`（`<section class="sec">`） |
+| 21 | 预留 · 服务（待 C3〈个人中心〉） | 客户 `:371` | 4 | `C3〈个人中心〉` | `UserInfoPage.vue:208`（`<section class="sec">`） |
+| 22 | 预留 · 经营数据（待 C3〈商家中心〉） | 商家 `:311` | 4 | `C3〈商家中心〉` | `UserInfoPage.vue:61`（`<section class="assets">`） |
+| 23 | 预留 · 待处理订单四入口（待 C3〈订单〉） | 商家 `:320` | 4 | `C3〈订单〉` | `UserInfoPage.vue:73`（`<section class="sec">`） |
+| 24 | 预留 · 服务（待 C3〈商家中心〉） | 商家 `:352` | 4 | `C3〈商家中心〉` | `UserInfoPage.vue:122`（`<section class="sec">`） |
+
+**合计 7 条，全落；0 条只登记。** ⚠️ **运行时按角色分别是 4 / 3**（`v-if` 两分支互斥，同款说明见 §五）。
+
+⚠️ **编号顺延说明**：commit 7 的落地**早于** commit 8/9，按本表既定的「全表升序 = 落地序」取
+**#18–#24**；§二 commit 8/9 原先预占的 #18–#20 **顺延为 #25–#27**（先例：commit 5 落地时把 v1 的
+#13–#15 顺延成 #18–#20，见 §二 commit 8/9 的「编号说明」）。⚠️ 这**只动台账编号、不涉代码**；
+若用户认为该先到先得，本条可回退。
+
+⚠️ **N 值逐字取稿的 `title`**（不是本笔估的）——客户 `:324` / `:333` / `:372` 均写 N=4、
+`:349` 写 N=3；商家 `:312` / `:321` / `:353` 均写 N=4。⚠️ **客户 `:349` 的「N=3」是七条里唯一的异值**
+（title 原文：「收藏与浏览足迹均无端点（N=3）」，第三项稿没点名）⇒ **照抄，不自裁补齐**。
+
+**⚠️ 判据分开口径的统一登记（用户 2026-10-07 钉死，本页是新加入的一处）**
+
+> **入口指向「已存在路由」⇒ 真 `<router-link>`**（不调 API、不改状态、不动 script
+> ⇒ **不是功能增量**；「本笔功能量恒为 0」管的是 API / 状态机 / 逻辑，**不管 UI 导航**）；
+> **编的数字 / 名 / 价 ⇒ 落 `—`**。
+
+⚠️ **同族条目另有两条**（commit 5 `OrderCenter.vue` 的 `.go2`、`ShoppingCart.vue:59` 的 `.go2`）
+—— 那两处**已推、不回头改**，与本条**一并在案**，**commit 14 终验时一次性扫、统一改**。
+
+⚠️ **本页唯一一条真 `<router-link>`**：商家侧 ④「查看全部」→ `/merchant/user/list`
+（`router/index.js:117`，**路由已存在**，指向 `GoodsUp`），落点 `UserInfoPage.vue:103-107`。
+- ⚠️ **稿在这里自身表里不一**：稿 `:194` 的 CSS 注释写「「查看全部」是**真链接**（指向
+  /merchant/user/list）」，可实码 `:339` 却是 `<button class="more" title="…">查看全部</button>`
+  —— **无 `href`、无 `@click`、连 `disabled` 都没有**（全页唯一的裸控件）。
+  ⇒ 用户裁决 **F2 = 甲改**：**取「真链接」那一半**，Vue 落真 `<router-link>`。
+- ⚠️ **`title` 逐字取稿，含稿写错的组件名**：原文「真路由 —— /merchant/user/list
+  （查看商品，**GoodsSelect**）」，而该路由实际到 **`GoodsUp`** ⇒ **照稿逐字落 + 在此登记**，
+  不替稿改错（同稿内其余错字一律照落）。
+
+⚠️ **`—` 的落点（F1 口径：编的数一律不落）**：② 我的资产 / 经营数据的**四格数字全 `—`**
+（稿是 `1,280` / `18件` 这类示意值）；商家 ④「最近上架」**6 张卡的卡名与价全 `—`**
+（稿编的「无线蓝牙耳机 声谷标准版 / ¥129.00」）。⚠️ 同一条理见 §一 commit 5 的 `.stats`：
+**算不出来就不写**（稿 `:881-885` 自立的规矩）。
+
+⚠️ **身份卡用真值，不用稿的 `plzTWafaGp`**：`.ident-name` ← `userInfo.username`、
+`.ident-id` ← `客户 ID {customerid}` / `商家 ID {merchantid}`，都是 `/user/me` 的真返回
+（`UserController.java:213-238` = `meInfo` 之上再叠 `profileOf` ⇒ **`user` 表整行 + image**）
+⇒ ① 用户类型 / 性别 / **年龄** 三行均为真字段（`age` 确在 `user` 表，**不是**本笔编的）。
+
+⚠️ **零功能增量的取证**：`<script setup>` **85 行、逐行未动** —— `git show HEAD:…` 与工作区
+两侧都是 85 行，三处调用点距 script 起点的行内偏移（21 / 51 / 67）**完全一致**，
+`/user/me`、`/user/updateAvatar`、`/user/updateUserInfo` 三个 `http.post` 仍在原处
+（`UserInfoPage.vue:272` / `:302` / `:318`）。⑥ 账号设置的三个 `v-model` 与
+`saveUserInfo()` 是**既有真功能**，逐字保留。
+
+⚠️ **本 commit 唯一一处壳改动**（C 笔明文交接、用户采信）：`AppShell.vue` 的 `.user-page`
+取走稿里的 `align-items:flex-start` —— 右栏子页根节点是 `<main class="uc-main">`，
+撑满高度会把「身份卡以下的区块」拉到视口底。⚠️ 该规则**三页共用**（commit 7/8/9）。
+
+---
+
+## 二、待落清单（**新稿 44 条 − 已落 22 条 = 22 条**，**另加老稿 3 条**，落各页 commit 时逐条核）
 
 > 全部**照落 UI**。「档」列写的是**归属**，不是「本笔做不做功能」。
 > **commit 3 的 4 条不在这个数里** —— 它们来自**老稿 `主页改造.html`**（口径 6 的主页例外），见 §一。
 > ⚠️ **commit 8 / 9 的 3 条也不在这个数里** —— 它们来自**老稿 `子页面改造.html`**（口径 6 v2 的两页例外）。
-> ⇒ 本 §二 共 **29（新稿）+ 3（老稿）= 32 条**，另 §一 已落 17（含老稿 4）。
+> ⇒ 本 §二 共 **22（新稿）+ 3（老稿）= 25 条**，另 §一 已落 24（含老稿 4）。
 >
-> ⚠️ **数法以「新稿 44」为唯一基准**（`grep -rc data-slot= docs/美化/pages/*.html` 可复核）。
+> ⚠️ **数法以「新稿 44」为唯一基准**（`grep -rc data-slot= docs/美化/pages/*.html` 可复核，实测 44）。
 > 本表之前的表头写「10 页 / 36 条」，但**逐段相加是 40** ⇒ 那个 36 本就对不上，别再用它做减法。
-> 现按实测重算：44 − 已落 15（`GoodsSelect` 3 + `ChatRoom` 1 + `ShoppingCart-customer` 4 +
-> `OrderCenter-merchant` 的购物车面 2 + 同页销售面 5）= **29**。
+> 现按实测重算：44 − 已落 22（`GoodsSelect` 3 + `ChatRoom` 1 + `ShoppingCart-customer` 4 +
+> `OrderCenter-merchant` 的购物车面 2 + 同页销售面 5 + **commit 7 的 7**）= **22**。
+>
+> ⚠️ **两个「已落」数字口径不同，别互相减**：本表的 **22 是「新稿里的条数」**；
+> §五 首条 grep 的 **24 是「源码里 `data-slot=` 出现的次数」**（`GoodsSelect` 3 + `ChatRoom` 1 +
+> `ShoppingCart` 4 + 老稿主页 4 + `OrderCenter` 5 + **`UserInfoPage` 7** = 24，实测）。
+> 差在 `OrderCenter-merchant` 购物车面的 2 条**与 `ShoppingCart.vue` 共用同 2 处模板** ⇒ 稿 22 条
+> 只对应源码 20 处（新稿）+ 4 处（老稿）。
 
 ### commit 6 —— `OrderPane.vue` ↔ `pages/OrderCenter-merchant.html`（**0 条**）
 
@@ -284,17 +358,13 @@ Vue 与之逐字一致 —— `v-else` 那条 `.inp-area` 的 4 个控件只 `di
 `orderTab` / `showSwitch` / `@toggle` 契约**无回归** —— **19 项断言全绿**
 （① 4 / ② 4 / ③ 2 / ④ 2 / ⑤ 3 / ⑥ 4）。逐条结果见 commit 6 的 message。
 
-### commit 7 —— `UserInfoPage.vue` ↔ `pages/UserCenter-customer.html` + `UserCenter-merchant.html`（7 条）
+### commit 7 —— `UserInfoPage.vue` ↔ `pages/UserCenter-customer.html` + `UserCenter-merchant.html`（7 条 · **已落**）
 
-| `data-slot` | 稿 | 稿行 | 归属 |
-|---|---|---|---|
-| 预留 · 我的资产（待 C3〈个人中心〉） | customer | `:323` | `C3〈个人中心〉` |
-| 预留 · 我的订单四入口（待 C3〈订单〉） | customer | `:332` | `C3〈订单〉` |
-| 预留 · 收藏 / 浏览足迹（待 C3〈个人中心〉） | customer | `:348` | `C3〈个人中心〉` |
-| 预留 · 服务（待 C3〈个人中心〉） | customer | `:371` | `C3〈个人中心〉` |
-| 预留 · 经营数据（待 C3〈商家中心〉） | merchant | `:311` | `C3〈商家中心〉` |
-| 预留 · 待处理订单四入口（待 C3〈订单〉） | merchant | `:320` | `C3〈订单〉` |
-| 预留 · 服务（待 C3〈商家中心〉） | merchant | `:352` | `C3〈商家中心〉` |
+⚠️ **7 条已全部落地，逐条台账移入 §一 commit 7**（#18–#24：稿行、N、归属、Vue 落点）。
+此处**不再复制那张表**，避免第二份真相（同 §四 的处理）。留在本节的只有两件事：
+1. 该 7 条**已不在本「待落清单」里**，上表头的 44 − 22 = 22 已扣掉；
+2. ⚠️ **编号顺延**：commit 7 落地早于 commit 8/9 ⇒ 取 #18–#24，原预占 #18–#20 的
+   commit 8/9 **顺延为 #25–#27**（见下节）。
 
 ### commit 8 / 9 —— `HistoricalOrders.vue` / `FriendRoom.vue` ↔ **老稿** `子页面改造.html`（3 条）
 
@@ -305,12 +375,14 @@ Vue 与之逐字一致 —— `v-else` 那条 `.inp-area` 的 4 个控件只 `di
 
 | # | `data-slot` | 稿行 | 稿里的形态 | N | 归属 | 落点 |
 |---|---|---|---|---|---|---|
-| 18 | 预留 · 状态枚举 | `:630` | `<th class="c-st" data-slot="…">状态</th>`（**有文字**） | 稿未标 | `C3〈订单〉` | `HistoricalOrders.vue` 表头 |
-| 19 | 预留 · 申请退货 | `:633` | `<th class="c-act" data-slot="…"></th>`（**完全空**） | 稿未标 | `C3〈订单〉` | `HistoricalOrders.vue` 表头 |
-| 20 | 预留 · 备注 / 删除好友（friendUp / friendDe 已有端点） | `:787` | 好友卡上的 `<button class="btn-text">私信</button>` | 稿未标 | `C3〈消息〉` | `FriendRoom.vue` 好友卡 |
+| 25 | 预留 · 状态枚举 | `:630` | `<th class="c-st" data-slot="…">状态</th>`（**有文字**） | 稿未标 | `C3〈订单〉` | `HistoricalOrders.vue` 表头 |
+| 26 | 预留 · 申请退货 | `:633` | `<th class="c-act" data-slot="…"></th>`（**完全空**） | 稿未标 | `C3〈订单〉` | `HistoricalOrders.vue` 表头 |
+| 27 | 预留 · 备注 / 删除好友（friendUp / friendDe 已有端点） | `:787` | 好友卡上的 `<button class="btn-text">私信</button>` | 稿未标 | `C3〈消息〉` | `FriendRoom.vue` 好友卡 |
 
-> ⚠️ **编号说明**：#18–#20 原在 v1 里编作 #13–#15（当时 §一 只到 #12）；commit 5 落地后
-> §一 占用了 #13–#17 ⇒ 本节按全表**升序重编**为 #18–#20。三条的**内容一字未改**。
+> ⚠️ **编号说明（已顺延两次）**：这三条原在 v1 里编作 **#13–#15**（当时 §一 只到 #12）；
+> commit 5 落地后 §一 占用了 #13–#17 ⇒ 按全表**升序重编**为 **#18–#20**；
+> **commit 7 落地后**（早于本节）§一 又占用了 #18–#24 ⇒ 再顺延为 **#25–#27**。
+> 三次调整**内容均一字未改**，只动序号。
 
 **合计 3 条，全落；0 条只登记。**
 
@@ -462,6 +534,49 @@ Vue 与之逐字一致 —— `v-else` 那条 `.inp-area` 的 4 个控件只 `di
 
 ---
 
+### commit 7 —— `UserInfoPage.vue`（`pages/UserCenter-customer.html` + `UserCenter-merchant.html`）
+
+⚠️ 本页的 `.tiles` / `.svc` **整块落在带 `data-slot` 的 `<section>` 之内** ⇒ 逐格**不再挂
+`data-slot`**（挂了会让 §五 的对账双计）。下表把两面的 8 类死控件并成一表。
+
+| 稿行 | 元素 | 稿里的状态 | Vue 处置 | 归属 |
+|---|---|---|---|---|
+| 客户 `:336` | `.more`「全部订单」 | `<button class="more" disabled title="待 C3〈订单〉——无「全部订单」列表端点">` —— **disabled + title 稿里都有** | 照落 → `UserInfoPage.vue:162` | `C3〈订单〉` |
+| 客户 `:350` / `:360` | `.more`「查看全部」/「清空足迹」 | `<button class="more" disabled>` —— **有 `disabled`、无 `title`** | 照落 + **本笔补 `title`**（补的是归属说明，非逐字取稿）→ `:183` / `:196` | `C3〈个人中心〉` |
+| 客户 `:339-343` | `.tiles` 四格 | `<button disabled title="待 C3〈订单〉——无按状态筛选端点">` —— 稿里都有 | 照落（4 枚）→ `:164` | `C3〈订单〉` |
+| 客户 `:374-378` | `.svc` 四项 | `<a title="无端点（N=4）">` —— **无 `href`、无 `disabled`**（裸控件） | 落 4 枚 `<button disabled>` + `title` 逐字 → `:214` | `C3〈个人中心〉` |
+| 商家 `:324` | `.more`「去订单中心」 | `<button class="more" disabled title="订单中心在顶栏（/merchant/order），此处不做重复入口">` —— 稿里都有 | 照落 → `:80` | `C3〈订单〉` |
+| 商家 `:327-331` | `.tiles` 四格 | `<button disabled title="待 C3〈订单〉——…">` —— 稿里都有 | 照落（4 枚）→ `:83` | `C3〈订单〉` |
+| 商家 `:355-359` | `.svc` 四项 | `<a title="无端点（N=4）">` —— **无 `href`、无 `disabled`**（裸控件） | 落 4 枚 `<button disabled>` + `title` 逐字 → `:128` | `C3〈商家中心〉` |
+| 商家 `:339` | `.more`「查看全部」 | `<button class="more" title="…">` —— **无 `disabled`、无 `href`** | **不走 `disabled` 路线**：判据判为「指向已存在路由」⇒ 落**真 `<router-link>`** → `:103-107` | 见 §一 commit 7 |
+
+⚠️ **8 项 `.svc` 为什么全是 `disabled` 按钮、不走「真链接」那一半**：这 8 个入口
+（收货地址 / 账号与安全 / 退款·售后 / 帮助中心 / 资质认证 / 结算账户 / 经营规则 / 商家帮助）
+**全仓没有任何一条对应路由** ⇒ 不满足「指向已存在路由」的判据。**对照组**正是同页商家 ④ 的
+「查看全部」：它指向 `router/index.js:117` **确已存在**的 `/merchant/user/list` ⇒ 落真链接。
+⚠️ 两条判据（编的数落 `—` / 已存在路由落 router-link）的**统一登记在 §一 commit 7**。
+
+⚠️ **本页两处 `<a>` → `<button>` 的结构改写**（稿画 `<a>`、Vue 落 `<button>`）：
+`.svc` 那 8 项，以及商家 ④ 那枚（改落 `<router-link>` ⇒ 仍渲染成 `<a>`，但**带 href**）。
+⇒ 连带 `<style scoped>` 里 `.svc a` → `.svc button`（稿 `:226` / `:212`）。
+
+⚠️ **两处「`hover` 会点亮禁用项」的补丁**（稿里没有，本笔补，理由同 §三 commit 5 的 `.tab`）：
+稿 `.tiles button:hover{background:var(--brand-soft)}`（客户 `:194` / 商家 `:182`）与
+`.svc a:hover b{color:var(--brand-ink)}`（客户 `:228` / 商家 `:214`）**都不带 `:not([disabled])`**
+—— 而本页这些元素**全是 `disabled`** ⇒ 照抄会让「不可点」的东西在悬停时变色（**光标撒谎的样式版**）。
+Vue 补为 `.tiles button:hover:not([disabled])`（`UserInfoPage.vue:437`）与
+`.svc button:hover:not([disabled]) b`（`:475`）。
+⚠️ **`.sec-h .more` 不用补** —— 稿**自己就有** `:209` / `:197` 那对 `:not([disabled])` 规则，
+Vue 逐字照落（`:456-457`），只多一条 `text-decoration:none`（因为 `.more` 在本页可能是
+`<router-link>` ⇒ 渲染成 `<a>`、UA 会给下划线）。
+
+⚠️ **本页稿外「活」控件（照旧保留真事件，登记备查）**：
+1. ① 身份卡「更换头像照片」`<button @click="chooseImage">` + 隐藏 `<input type="file" @change="doUpload">`
+   —— **既有真功能**（`UserInfoPage.vue:30` / `:302`），稿 `:290-299` 同样画了这两件。
+2. ⑥ 账号设置的三个 `v-model` + `<button @click="saveUserInfo">` —— 既有真功能，逐字保留。
+
+---
+
 ## 四、老稿 10 条（`主页改造.html` + `子页面改造.html`）
 
 逐条登记见 **`progress.md:1636-1649`**（表 #1–#10），此处**不复制**，避免第二份真相。
@@ -484,8 +599,9 @@ Vue 与之逐字一致 —— `v-else` 那条 `.inp-area` 的 4 个控件只 `di
 ## 五、对账方法（验收时跑）
 
 ```bash
-# Vue 里实落的条数（应 = 台账「已落」条数 = 3 + 1 + 4 + 4 + 5 = 17）
+# Vue 里实落的条数（应 = 台账「已落」条数 = 3 + 1 + 4 + 4 + 5 + 7 = 24，2026-10-07 实测 24）
 grep -rn 'data-slot=' Mall-management-web/mall-management-system/src/views/ | wc -l
+#   逐文件：GoodsSelect 3 / ChatRoom 1 / ShoppingCart 4 / HomePage 4（老稿）/ OrderCenter 5 / UserInfoPage 7
 # 新稿里的总条数（应 = 44；**老稿另计**：主页改造.html 4 条 + 子页面改造.html 3 条，都不在这个数里）
 grep -rc 'data-slot=' docs/美化/pages/*.html | awk -F: '{s+=$2} END{print s+0}'
 # 稿外死控件（§三）：不带 data-slot 的 disabled 元素 —— 逐条与 §三 表对齐
@@ -506,3 +622,6 @@ grep -c 'data-slot=' docs/美化/主页改造.html docs/美化/子页面改造.h
 **4（客户有商品）/ 0（客户空车）/ 2（商家）**。
 `OrderCenter.vue` 的 5 条是**无条件**的，但**空态下一条都不渲染**（见 §一 commit 5）
 ⇒ 运行时按视图：**5（有数据，两档宽度同）/ 0（空态）**。
+`UserInfoPage.vue` 的 7 条**源码里也是无条件挂**，但两面在**互斥的 `v-if` / `v-else` 分支**里
+（见 §一 commit 7）⇒ 运行时按角色：**4（客户）/ 3（商家）**，**永不 → 7**。
+（同理 `HomePage.vue` 的 4 条是**老稿主页**的，不在「新稿 44」里。）

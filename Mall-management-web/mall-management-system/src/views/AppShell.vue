@@ -314,9 +314,13 @@ position: relative;
 /* ⚠️ C 笔：`gap` 30 → `var(--s8)`（=64px），照稿 `UserCenter-customer.html:141` 的
    `.uc{display:flex;align-items:flex-start;gap:var(--s8)}`。只改 `gap` —— `display:flex` /
    `height:100%` 不动（稿子多一个 `align-items:flex-start`，改了会让右栏不再撑满，
-   归 D 笔）。左右两栏 = `UserCenter.vue` 那两个**根**（多根 fragment）⇒ 别在中间加包裹 div。 */
+   归 D 笔）。左右两栏 = `UserCenter.vue` 那两个**根**（多根 fragment）⇒ 别在中间加包裹 div。
+   ⚠️ **D 笔 commit 7 已取走 `align-items:flex-start`**（C 笔明文交接）——右栏子页
+   （`UserInfoPage` / `HistoricalOrders` / `FriendRoom`，commit 7/8/9 三页共用）根节点是
+   `<main class="uc-main">`，撑满高度会让「身份卡以下的区块」被拉到视口底。`height:100%` 保留。 */
 .user-page {
 display: flex;
+align-items: flex-start;
 gap: var(--s8);
 height: 100%;
 }
