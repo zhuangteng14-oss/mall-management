@@ -186,9 +186,10 @@ Vue 与之逐字一致 —— `v-else` 那条 `.inp-area` 的 4 个控件只 `di
    混合形态的**新增**，稿里没有对应物」—— **与事实不符**，已并入上面第 1 条订正：
    它是 **HEAD 原实现**（旧 `:147-157`），稿 `:20` 明确把它列进「**迁走**」清单，
    本笔**零改动保留**。commit 4 的 commit message（`6f92fc1`）里也用了「新增」二字，属**措辞错误**
-   （改动本身无错：保留是符合裁决的）。⚠️ **代码与台账均无需回改** —— 待用户在
-   「`git push --force-with-lease` 改写 `6f92fc1`」与「保留原文、只在本条订正」之间择一；
-   未择定前以**本条**为准。
+   （改动本身无错：保留是符合裁决的）。⚠️ **代码与台账均无需回改** —— 用户 2026-10-07 已择定
+   **「保留原文、只在本条订正」**（`--force-with-lease` 改写已推 commit = 有风险，不做）：
+   > commit `6f92fc1`（commit 4）body 里的「**新增**」措辞**不准确**，实际为「**重排 + 占位**」；
+   > 改动本身无错（保留是符合裁决的），**以本台账为准**。
 
 ---
 
@@ -324,6 +325,133 @@ Vue 侧是**同一文件按角色分支** —— `v-if="!userInfo.customerid && 
 ⚠️ **本 commit 唯一一处壳改动**（C 笔明文交接、用户采信）：`AppShell.vue` 的 `.user-page`
 取走稿里的 `align-items:flex-start` —— 右栏子页根节点是 `<main class="uc-main">`，
 撑满高度会把「身份卡以下的区块」拉到视口底。⚠️ 该规则**三页共用**（commit 7/8/9）。
+
+### commit 7b —— 补 `.wrap` 居中容器 + 修「顶栏被压扁」（两件，用户 2026-10-07 裁决，**同笔一起推**）
+
+**来由 ①**（`.wrap` 居中）：C 笔明文挂给 D 笔（`UserCenter.vue:81-82`「`.content` 的 1180 居中
+不在本笔（D 笔）」），→ 用户裁决**本轮补掉**，理由：**影响 commit 7/8/9 三页共用**，拖到
+commit 14 会让 8/9 落完后又重测三页。
+**来由 ②**（顶栏压扁）：本笔**复核几何时撞出来的**，不在计划内 ⇒ 先只报不改，用户裁决后并入。
+（两件**同在 `AppShell.vue`、同为主题 = 让 7/8/9 三页的壳先稳**，故并成一笔。）
+
+**改动 ①**（`AppShell.vue` 的 `.user-page`，只加三件居中属性 + 注释）：
+```css
+max-width: 1140px;
+margin: 0 auto;
+padding: var(--s7) var(--s5) var(--s8);
+```
+⚠️ `display:flex` / `align-items:flex-start` / `gap` / `height:100%` **一概未动**。
+
+⚠️ **宽度取 `1140`，不是交接话里的 `1180`** —— 实测 `docs/美化/pages/` 的 9 份稿：
+**只有这两份 UserCenter 稿用 1140**（`UserCenter-customer.html:136` / `UserCenter-merchant.html:132`，
+逐字相同），**其余 7 份 + 已落的 `GoodsSelect.vue:305` / `ShoppingCart.vue:446` 都是 1180**。
+按稿基线口径 v2「以稿为唯一基线」⇒ 照本页这两份稿落 **1140**。
+
+⚠️ **源码依据**：稿 `.wrap` 包住的 `.uc`（`UserCenter-customer.html:141`）= 本壳的 `.user-page`
+（`UserCenter.vue` 的两个根 `.uc-menu` + `main.uc-main` 直接落在这里，多根片段，勿加包裹 div）。
+
+**取证**（`geo7.mjs`，1440 视口，与稿逐值对照 —— 四组的 x/w **完全相同**）：
+
+| 选择器 | 稿 | Vue（7b 后） |
+|---|---|---|
+| `.wrap` / `.user-page` | x=150 w=1140 | x=150 w=1140 |
+| `.uc-menu` / `.user-menu` | x=174 w=200 | x=174 w=200 |
+| `main.uc-main` | x=438 w=828 | x=438 w=828 |
+
+- `shot7.mjs` 加 ⑤ `.wrap` 居中块（4 条断言）⇒ 全页断言 **35 → 39 条全绿**。
+- `npx eslint src/views/UserInfoPage.vue src/views/AppShell.vue` → exit 0；`npm run build` → 绿。
+
+⚠️ **本笔引起的互引漂移（**只报告、不逐条修** —— 归 commit 14 文档漂移清理笔）**：
+本笔在 `AppShell.vue` 里插了两处（`.top-nav` 处 **+16 行**、`.user-page` 处 **+13 行**）⇒
+**所有指向 `AppShell.vue` 且行号 ≥ 208 的引用集体 +16**。
+实测受影响 **7 条**，**全部 +16**：
+
+| 旧行 → 现行 | 被引内容 | 引用方 |
+|---|---|---|
+| `214 → 230` | `.top-nav` 的「本仓没有全局 `body{font-family}`」注释 | `UserInfoPage.vue:386` |
+| `225 → 241` | 顶栏无 hover 态 | `HomePage.vue:23`、**本文件**（§一 commit 3 那段） |
+| `254 → 270` | `.nav-right a.on` 的 `color: var(--nav-now)` | `progress.md:1111` |
+| `295 → 311` | `.cart-container` 的说明注释 | `OrderCenter.vue:293`、`ShoppingCart.vue:372` |
+| `299 → 315` | `.cart-container {` | `ShoppingCart.vue:369` |
+| `306 → 322` | `.order-container {` | `OrderCenter.vue:292` |
+| `318 → 334` | 「D 笔 commit 7 已取走 `align-items:flex-start`」 | `ChatRoom.vue:485`、`UserInfoPage.vue:8` / `:356` |
+
+⚠️ 其余指向 `AppShell.vue` 的引用（行号 ≤ 184 的 16 处）在插入点**之上**，**未受影响**。
+
+### ⚠️ 附带修复（**并入本笔一起推**）—— 壳的 `.top-nav` 被压扁（60px → 36px）
+
+**用户 2026-10-07 裁决：丁 = 甲 + sticky** —— `.top-nav` 加 4 条声明
+（`flex:none` / `position:sticky` / `top:0` / `z-index:10`），**并入 commit 7b 一起推**
+（理由：同文件、同主题、8/9 落前必须修好）。**判据（原话）**：「`flex:none` 是修 bug 必需；
+`sticky` 是壳应有的行为；不需要乙的嵌套滚动。」**否决理由**：甲 = 顶栏随页滚走 = 把壳降级回
+「没有壳」的形态（本壳的设计哲学是「壳稳定、内容切换」）；乙 = 嵌套滚动容器 + 百分比高度 +
+`absolute` 参照物，回归面大，且滚动行为与稿不一致。
+
+**发现经过**：这条**不在计划内**，是 commit 7b 复核几何时撞出来的 —— 发现时**先只报不改**，
+用户裁决后才落码。
+
+**实测**（`navmulti7.mjs`，1440×900，`getBoundingClientRect`）：
+
+| 路由（组件 / 落入的 commit） | 前置态 `00a4be3` nav | 前置态 content | 现值 nav | 现值 content |
+|---|---|---|---|---|
+| `/customer`（HomeTab / commit 3） | 60 | 840 | 60 | 840 |
+| `/customer/cart`（ShoppingCart / commit 4） | 60 | 840 | 60 | 840 |
+| `/customer/msg`（ChatRoom / commit 2） | 60 | 840 | 60 | 840 |
+| `/merchant/order`（OrderPane / commit 6） | 60 | 840 | 60 | 840 |
+| `/merchant/order/cart`（OrderPane / commit 6） | 60 | 840 | 60 | 840 |
+| `/customer/search`（**GoodsSelect / commit 1**） | 60 | 840 | **36** | **963** |
+| `/customer/user/info`（**UserInfoPage / commit 7**） | 60 | 840 | **36** | **2126** |
+| `/merchant/user/info`（**UserInfoPage / commit 7**） | 60 | 840 | **36** | **1817** |
+
+⚠️ **订正**：commit 7b 复核时我先判成「**commit 7 引入的回归**」——**不准确**。补测
+`/customer/search` 后可见，**commit 1（GoodsSelect，已推）的 content=963 就已经触发**。
+真相分两层：
+
+- **壳的缺陷是既有的**：`git diff 00a4be3 HEAD -- AppShell.vue` 里，`.top-nav` / `.content`
+  两条规则**一字未改**（D 笔对壳的唯一改动是 commit 7 的 `+align-items:flex-start`）。
+- **触发者是 D 笔的页面重写**：前置态**每一条**路由的内容高**恰好 840**（= 900 − 60，正好铺满、
+  不溢出）⇒ 缺陷**潜伏不显**。页面被重写变高后，第一次露出是 commit 1 的 963，commit 7 最重。
+
+**机制**（`navkids7.mjs`）：`.app-shell` = `height:100vh` 的 `flex column`；`.top-nav` 只写了
+`height:60px`，`flex` 仍是默认 **`0 1 auto` ⇒ `flex-shrink:1`**；`.content` 是 `flex:1` 且
+`min-height:auto` ⇒ 子页 2126px 把它顶高，总高 > 900 ⇒ flex **按可缩权重压缩 `.top-nav`**，
+压到它的 **min-content 高**为止（子元素 `.nav-left` 高 35px ⇒ 栏底 36px）：
+
+| | `.nav-left` y | `.nav-right` y | `.top-nav` boxH |
+|---|---|---|---|
+| `/`（正常） | 12（上下各留 12px） | 18 | 60 |
+| `/customer/user/info` | **0**（贴顶，零内边距） | 6 | **36** |
+
+⚠️ **没有内容被裁掉**（`scrollH == clientH`，36 == 35）—— 是**被压扁**：品牌块贴上边与底框线。
+截图对照：`美化/d7/crop7-vue-nav-ok.png`（60px）vs `crop7-vue-nav.png`（36px）。
+
+⚠️ **照稿修不了**：稿是普通文档流（`UserCenter-customer.html:124` `.nav-bar{height:60px}`，
+整页 `body` 滚动、顶栏随页滚走）；本壳是 `100vh` 定高 + 无滚动容器，两者结构不同。
+
+**落码后复测**（`sticky7.mjs`，1440×900，逐路由滚 0 / ⅓ / ⅔ / 底，读 `.top-nav` 的 viewport-y）：
+
+| 路由 | navH | scrollH | maxScroll | 吸顶表现 |
+|---|---|---|---|---|
+| `/customer/user/info` | **60** | 2186 | 1286 | 吸到 **840px**，之后滚走（857→y=−17；1286→y=−446） |
+| `/merchant/user/info` | **60** | 1877 | 977 | 吸到 **840px**，之后滚走（977→y=−137） |
+| `/customer/search` | **60** | 1023 | 123 | **全程吸顶**（maxScroll < 840） |
+| `/`（HomePage） | **60** | 1350 | 450 | **全程吸顶** |
+| `/customer/cart` · `/customer/msg` · `/merchant/order` | **60** | 900 | 0 | 不滚 |
+
+⇒ **`flex:none` 完全修好了压扁**（全部路由 navH = 60，不再有 36）。
+
+⚠️ **残留（已实测、**未自行修**）**：`sticky` 只吸到 **840px** 就释放。原因是 sticky 的约束
+矩形 = **包含块**（`.app-shell` 是 `height:100vh` = 900px 的**固定盒**），元素底边不得越过包含块
+底边 ⇒ 吸附上限 = 900 − 60 = **840px**。实测逐条吻合（857 − 840 = 17；977 − 840 = 137）。
+**长页滚到底时顶栏仍会滚走** —— 在 `user/info`（2126px）上最明显。
+
+⚠️ **一行可修，但超出「只碰 `.top-nav`」的授权范围 ⇒ 未落，等裁决**：
+`.app-shell` 的 `height:100vh` → **`min-height:100vh`**。**已实测验证**（`sticky7.mjs` 改后逐路由
+滚到底 `.top-nav` 恒 `y=0`；六条路由的 `scrollH` **逐值不变** 2186 / 1877 / 1023 / 900 / 1350 / 900
+⇒ **零布局回归**），验证完**已还原**成授权形态（`height:100vh`）。
+
+⚠️ **影响 commit 8/9**：`HistoricalOrders` / `FriendRoom` 同为壳内右栏页 —— **`flex:none` 已生效
+⇒ 不会再被压扁**；但若两页高度 > 900，**顶栏会在滚到 840px 后释放**（同上残留）。
 
 ---
 

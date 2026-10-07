@@ -205,6 +205,22 @@ background: var(--bg);
    ⚠️ **高度必须与 `.home-container` 的 `top` / `height` 锁步**（那两条已同步改成 60）。 */
 .top-nav {
 height: 60px;
+/* ⚠️ **D 笔 commit 7b 丁案**（用户 2026-10-07 裁决，三案择「丁 = 甲 + sticky」）——
+   修「顶栏被压扁」（见 `docs/agent/slot-registry.md` 同名小节）。
+   `flex: none` 是**修 bug 必需**：`.app-shell` 是 `height:100vh` 的 flex column，
+   `.top-nav` 原先只有 `height:60px`、`flex` 取默认 `0 1 auto`（`flex-shrink:1`），
+   而 `.content`（`flex:1` + `min-height:auto` + 无滚动容器）被高子页顶高后，
+   flex 会把顶栏压到 min-content（实测 60 → 36px，`.nav-left` 贴顶 y=0）。
+   `sticky` 是**壳应有的行为**：甲案（只 `flex:none`）会让顶栏随页滚走 = 壳降级回
+   「没有壳」的形态，而本壳的设计哲学是「壳稳定、内容切换」⇒ 加 `sticky` 让滚动时吸顶。
+   ⚠️ **不采乙案**（`.content { min-height:0; overflow-y:auto }`）：嵌套滚动容器 +
+   百分比高度 + `absolute` 参照物，回归面大，且滚动行为与稿不一致。
+   ⚠️ `z-index:10` 高于 `.home-container` 的 `1`（`:293`，`position:absolute; top:60px`）——
+   两者不重叠（`.home-container` 自 `top:60px` 起），改后仍不重叠，只保证滚动时顶栏在上。 */
+flex: none;
+position: sticky;
+top: 0;
+z-index: 10;
 display: flex;
 justify-content: space-between;
 align-items: center;
@@ -318,11 +334,24 @@ position: relative;
    ⚠️ **D 笔 commit 7 已取走 `align-items:flex-start`**（C 笔明文交接）——右栏子页
    （`UserInfoPage` / `HistoricalOrders` / `FriendRoom`，commit 7/8/9 三页共用）根节点是
    `<main class="uc-main">`，撑满高度会让「身份卡以下的区块」被拉到视口底。`height:100%` 保留。 */
+/* ⚠️ **D 笔 commit 7b —— 补稿的 `.wrap` 居中容器**（用户 2026-10-07 裁决「做」；
+   交接来源 `UserCenter.vue:81-82`「`.content` 的 1180 居中不在本笔（D 笔）」）。
+   稿 `UserCenter-customer.html:136` / `UserCenter-merchant.html:132` 逐字相同：
+   `.wrap{max-width:1140px;margin:0 auto;padding:var(--s7) var(--s5) var(--s8)}`，
+   它包住的 `.uc`（`:141`）= 本壳的 `.user-page`（`UserCenter.vue` 的两个根
+   `.uc-menu` + `main.uc-main` 直接落在这里）。
+   ⚠️ **宽度取 1140（照本页这两份稿），不是交接话里说的 1180** —— 实测：本笔的**两份**稿是
+   `docs/美化/pages/` 里**唯一**用 1140 的（其余 7 份 + 已落的 `GoodsSelect.vue:305` /
+   `ShoppingCart.vue:446` 都是 1180）；按「以稿为唯一基线」照落。
+   ⚠️ 只加居中三件 —— `display:flex` / `align-items:flex-start` / `gap` / `height:100%` **不动**。 */
 .user-page {
 display: flex;
 align-items: flex-start;
 gap: var(--s8);
 height: 100%;
+max-width: 1140px;
+margin: 0 auto;
+padding: var(--s7) var(--s5) var(--s8);
 }
 /* ⚠️ 用户中心左菜单的样式（`.user-menu*`）R1 起已随 markup 搬进 `UserCenter.vue` 自己的
    `<style scoped>` 里 —— 各文件的样式各归其主。`.user-page` 留在壳里：它是**布局容器**
