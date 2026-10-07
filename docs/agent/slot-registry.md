@@ -2125,3 +2125,101 @@ comm -13 /tmp/b.tok /tmp/a.tok   # 只在 after  ⇒ 新增，应为 0
 §五 表格写 `docs/美化/pages/LoginPage.html:95` ⇒ 被记成**两个不同的 token**。不影响 丢失 / 新增 的判定
 （两向都是 0），但**属于我自己的不统一**，留在这里备查。
 
+## 六、Q9 新漂移报告（commit 14；**只报告、不逐条修** —— 用户裁决 2026-10-07）
+
+**范围与出处**：本节只落 **Q9 的 #1–#4**。Q9 = D 笔方案第 9 问「是否发现新漂移」当时扫出的 **9 条**素材；用户的压缩计划把 commit 14 的范围定为
+「docs 漂移 (Q9 #1-#4)，**报告不逐条修**」⇒ **#5–#9 不在本节**，本节也**不追认它们的现状**（避免写未经复核的读数）。
+
+**性质**：这四条**都不是 D 笔造成的** —— 与 §五 那批「本笔改动 ⇒ 指向别处的引用行号漂移」**不同类**：它们是**方案阶段扫描时就已经在仓里的既存缺陷**，
+D 笔一个字都没碰过它们（14-1/2/3 在 `docs/agent/progress.md`、14-4 在 `docs/美化/主页改造.html`，都不在任一 D 笔 commit 的改动文件集里）。
+
+**处置 = 报告，不逐条修**（用户裁决 2026-10-07）。⚠️ 这与「一律不碰」清单里的「**文档漂移清理笔**」**不矛盾** —— 那支笔是**修**（逐条改字），本 commit 是**报告**；
+用户把 14 的落法明确写成「报告不逐条修」⇒ **14 ≠ 那支笔**，本 commit 一处字都不改。
+
+| # | 位置（实测） | 现象 | 真值（实测） | 性质 |
+|---|---|---|---|---|
+| 1 | `progress.md:1673` / `:1674` / `:1675` | §5-AI-B (15) 表「宿主」列写 `/merchant/goods/add`、`/merchant/goods/up`、`/product/:code` | `/merchant/user/add`（`router/index.js:116`）、`/merchant/user/list`（`:117`）、`/product`（`:125`） | **指向不存在的路由 ×3** |
+| 2 | `progress.md:1192` | 手测项 **T-new-10** 写 `#/merchant/goodsUp` | 全仓**无此路由**（真 = `/merchant/user/list`） | **指向不存在的路由** |
+| 3 | `progress.md:1446` | **T-guard-11 ④** 写 `#/merchant/order/list` | 全仓**无此路由**（真 = `/merchant/user/list`） | **指向不存在的路由** |
+| 4 | `docs/美化/主页改造.html:12` | 自述「结构照着 `HomePage.vue` + `CustomerPage.vue` 的真实信息还原」 | `CustomerPage.vue` **已随 R6 删除**（`7474a49`） | **悬空引用** |
+
+### 14-1　§5-AI-B (15) 表三行「宿主」列 = 全仓不存在的路由
+
+**现象（逐字，`docs/agent/progress.md`）**：
+
+```
+1673	| `GoodsAdd.html`    | 338 | `/merchant/goods/add` | |
+1674	| `GoodsUp.html`     | 431 | `/merchant/goods/up`  | |
+1675	| `ProductPage.html` | 406 | `/product/:code`      | **不进壳**（R5），自带顶栏、无搜索框（⑤） |
+```
+
+**真值（逐字，`Mall-management-web/mall-management-system/src/router/index.js`）**：
+
+- `:116` `{ path: 'add',  component: GoodsAdd,  meta: { sub: 'add' } }` —— 父级是 `/merchant/user`（`:104-111` 的 `subMenu` 里 `add` ⇒ `/merchant/user/add`，`:106`）⇒ 真宿 **`/merchant/user/add`**。
+- `:117` `{ path: 'list', component: GoodsUp,   meta: { sub: 'list' } }` ⇒ 真宿 **`/merchant/user/list`**（`:107`）。
+- `:125` `{ path: '/product', component: ProductPage, meta: { public: true } }` ⇒ 真宿 **`/product`**，**没有 `:code` 段**（商品码走 query，Q9 原文即指出这点）。
+
+**复核**：`grep -rn "merchant/goods/add\|merchant/goods/up\|product/:code" docs/ --include=*.md --include=*.html` ⇒ **只命中上表这 3 行**，仓里没有第二处引用这套假路由。
+
+⚠️ **别把这条和同表的另一条 ⚠️ 混起来**：`:1679` 有一条「上表是『落盘那一刻』的快照 … **不要去『订正』它的合计** —— 原表保留不改」。
+那条**只管「行数」列**（338 / 431 / 406 与现状不符，属**快照未回填**）。本条的三个值是**宿主路由**、**与真路由不符**，**不是**快照口径问题 —— 两件事，`1679` 那条不覆盖本条。
+
+### 14-2　`progress.md:1192` 写 `#/merchant/goodsUp` —— 无此路由
+
+**现象（逐字）**：`docs/agent/progress.md:1192` 的 **T-new-10**：「开新标签页直入 `#/merchant/goodsUp` 与 `#/customer/user/info` ⇒ 头像 / 店名 / 10 列渲染正常」。
+
+**真值**：路由表里**没有** `goodsUp` 这一段。`grep -rn "goodsUp" --include=*.js --include=*.vue …/src/` 在 `src/` 下**只命中** `endpoints.js:18` 的接口名 `goodsUp: '/goods/goodsUp'` 与 `GoodsUp.vue` 的三处调用 —— **都是 API 端点，不是路由**。
+商家「查看商品」页的真路由 = **`/merchant/user/list`**（`router/index.js:107` 菜单项 / `:117` 子路由）。
+
+⚠️ **同处已有一条按语、但没盖住本条**：`:1192` 现挂着 §5-AG 按语（说的是 **T-new-11 的前置不可达**），**整段没提** `#/merchant/goodsUp` 这个不存在的路径。
+
+### 14-3　`progress.md:1446` 写 `#/merchant/order/list` —— 无此路由
+
+**现象（逐字）**：`docs/agent/progress.md:1446` 的 **T-guard-11 ④**：「**本壳内**自由走：客户进 `#/customer/user/info`、商家进 `#/merchant/order/list` ⇒ **不被踢**」。
+
+**真值**：`/merchant/order` **是真的**（`router/index.js:158` 的 `order: '/merchant/order'`），但它**没有 `list` 子项**；
+`grep -rn "order/list" --include=*.js --include=*.vue …/src/` **零命中** ⇒ `/merchant/order/list` 全仓不存在。真值应为 **`/merchant/user/list`**。
+
+⚠️ **判据没坏、坏的是举例**：T-guard-11 ④ 想证的判据是「**本壳内自由走 ⇒ 守卫不踢**」，这个判据不依赖那个 `list` 字面；
+但它**按字面不可执行** —— 手敲一个不存在的路径根本走不到「不被踢」这一步（会被路由表兜住）。改法只需把例子换成 `/merchant/user/list`。
+
+### 14-4　`docs/美化/主页改造.html:12` 自述依据 `CustomerPage.vue` —— 文件已删
+
+**现象（逐字）**：`docs/美化/主页改造.html:12`：「结构照着 `HomePage.vue` + `CustomerPage.vue` 的真实信息还原，但布局重排。」
+（同段 `:13` 还写着「不引用你项目任何文件，不修改你项目任何代码」—— 所以这句是**自家出处说明**，不是真引用。）
+
+**真值**：`CustomerPage.vue` 已在 **R6** 被删除 —— `git log --diff-filter=D --all -- "*CustomerPage.vue*"` ⇒ **`7474a49` `refactor(router): 抽公共 AppShell —— 两壳合并（R6，重构收尾）`**；
+`find …/src -name "CustomerPage.vue"` ⇒ **空**。
+
+⚠️ **与 agent 文档里那批 CustomerPage 引用要分开看**：`progress.md` / `api-contract.md` 里那批**已经**逐条加了 R6 按语（§5-AB (11) 的悬空清单，例如 `api-contract.md:204` 就地写明「两文件已随 R6 删除」）；
+**唯独这份稿的 `:12` 没有** —— 因为 `docs/美化/` 下的 HTML 是**预览产物**，不在 agent 文档的按语体系内，**没人给它加过按语**。
+
+### 复现命令（本节全部读数可复跑）
+
+```
+# 14-1  三行原文 + 全仓只此三处
+grep -rn "merchant/goods/add\|merchant/goods/up\|product/:code" docs/ --include=*.md --include=*.html
+# 14-1  真路由（:116 / :117 / :125）
+grep -n "path: 'add'\|path: 'list'\|path: '/product'" Mall-management-web/mall-management-system/src/router/index.js
+# 14-2 / 14-3  「全仓无此路由」的证法：src 侧按名 grep，0 路由命中
+grep -rn "goodsUp"    --include=*.js --include=*.vue Mall-management-web/mall-management-system/src/
+grep -rn "order/list" --include=*.js --include=*.vue Mall-management-web/mall-management-system/src/
+# 14-4  悬空：删除 commit + 现存性
+git log --oneline --diff-filter=D --all -- "*CustomerPage.vue*"
+find Mall-management-web/mall-management-system/src -name "CustomerPage.vue"
+```
+
+### 本节的入向偏移 = 0（实测）
+
+本节**写在文件尾部**（append-only）⇒ 文件内既有行号**零移动**。
+另实测：全仓**没有**任何外部文件按 `slot-registry.md:<行>` 引用本台账；唯二两处 `slot-registry.md:<行>` 的自引（`:1755` / `:1794`）**都写在本节之前** ⇒ 也不受影响。
+
+### 本 commit 的 refs 前后对照（`scripts/refs-scan.sh`）
+
+- **before = HEAD（commit 12b，`75cf020`）态**（本节不在其中）：**3042 行 / 1746 token**。
+- **after = 本 commit 工作区**：**3073 行 / 1758 token**。
+- **丢失 0 条** ✅ / **新增 12 个 token 类型**（产物净增 **+31 行** = 12 个新类型 + 19 行落在**既有** token 上，如 `router/index.js:116`）。
+- 12 个新 token：`:1674`、`:1675`、`api-contract.md:204`、`docs/agent/progress.md:1192`、`docs/agent/progress.md:1446`、`docs/美化/主页改造.html:12`、`endpoints.js:18`、`progress.md:1192`、`progress.md:1446`、`progress.md:1673`、`router/index.js:107`、`router/index.js:158`。
+- **反向自查**：这 **12 条的宿主 12/12 都是 `docs/agent/slot-registry.md`** ⇒ 全部是「本节把**既有**事实写进台账」产的，**不是新增的互引**。
+- **before 取法**：本 commit **只改了 `docs/agent/slot-registry.md` 一个受跟踪文件** ⇒ `cp` 备份 → `git checkout HEAD -- docs/agent/slot-registry.md` → 扫 → 还原（`sha256sum -c` 通过）。
+- ⚠️ 这 12 个 token **全是本节的报告文本**带的 ⇒ 属 §五 已登记的那类「**A 档已知假阳性来源**」（把事实写进被扫文档本身），两向的 丢失 / 新增 判定不受影响。
