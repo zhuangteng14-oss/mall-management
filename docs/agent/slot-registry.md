@@ -192,34 +192,90 @@ Vue 与之逐字一致 —— `v-else` 那条 `.inp-area` 的 4 个控件只 `di
 
 ---
 
-## 二、待落清单（**新稿 44 条 − 已落 10 条 = 34 条**，**另加老稿 3 条**，落各页 commit 时逐条核）
+### commit 5 —— `OrderCenter.vue` ↔ `pages/OrderCenter-merchant.html`（5 条，**只核销售面**）
+
+⚠️ 本稿是**一稿两 pane**：`data-page="order"`（销售面 = 本 commit）与 `data-page="cart"`
+（商家购物车面 = **已随 commit 4 落进 `ShoppingCart.vue`**）。稿内 7 条 `data-slot` ⇒ 5 + 2。
+
+| # | `data-slot` | 稿行 | N | 归属 | Vue 落点 |
+|---|---|---|---|---|---|
+| 13 | 预留 · 数据概览（动现有代码 4 处 · 超档） | `:678` | 4 | `C3〈订单〉` | `OrderCenter.vue`（`<section class="stats">`） |
+| 14 | 预留 · 标签页（全部/待发货/已发货 = 1 处 · 在档；退款中/售后 = ≥6 · 超档） | `:690` | 1 / ≥6 | `C3〈订单〉`（**同一块里两档并存**，`data-slot` 原文已写明档次） | `OrderCenter.vue`（`<nav class="tabs">`） |
+| 15 | 预留 · 筛选栏（动现有代码 4 处 · 超档） | `:705` | 4 | `C3〈订单〉` | `OrderCenter.vue`（`<div class="filter">`） |
+| 16 | 预留 · 批量操作条（动现有代码 ≥4 处 · 超档） | `:718` | ≥4 | `C3〈订单〉` | `OrderCenter.vue`（`<div class="bulk">`） |
+| 17 | 预留 · 分页（动现有代码 4 处 · 超档） | `:738` | 4 | `C3〈订单〉` | `OrderCenter.vue`（`<nav class="pager">`） |
+
+**销售面合计 5 条，全落；0 条只登记。**（另 2 条 `:767` / `:793` = 购物车面，已记在 §一 commit 4。）
+
+⚠️ **表格（`.tbl`）不挂 `data-slot`** —— 稿 `:728` 原话：「9 列全是真功能（状态由三个状态位推出、
+金额/订单号/时间/商品/买家 id 都在响应里）⇒ **不挂角标**」。逐行重复的链接/按钮一律不加角标，
+理由同老稿 `子页面改造.html:779`「12 格全标会糊成一片」+ 稿 `:17` 那条（首版逐行挂到 42 个、
+开槽位视图后叠成一团 ⇒ 改到 6 个）。
+
+⚠️ **实跑实测（Edge 1440 视口 / hash 路由整串）**：
+- 销售面**有数据** = **5** 条，5 个 `data-slot` 字符串与稿**逐字相同**；
+- 销售面**空态** = **0** 条 —— 稿的空态 pane（`:811-825`）里概览/标签页/筛选/批量/分页**五块都不存在**；
+- 两档宽度下 `document.documentElement` 的 `overflowX` 均为 **0**。
+
+⚠️ **用户裁决 A —— `<select>` 保留（本页唯一一处「两个控件并存」）**：
+稿 `:53` 的 ★ 是「**收紧**：现有的二选一下拉 ⇒ 6 个标签页」，但 6 枚 tab 在本笔**全部 `disabled`**
+（功能量恒为 0）⇒ 真把 `<select>` 拿掉，「已完成」视图在页面上**不可达**，而 `orderDeliverySelect`
+端点仍在 ⇒ **属功能回退**。⇒ A = **6 枚 tab 照稿落（全 `disabled`，`.tabs` 整块挂 `data-slot`）
++ 现有 `<select>` 原样保留**。代价 = 两个控件短暂并存（过渡态本来就该长这样）；
+副作用 = 标题行改用稿的 `.h1row` 才装得下右侧控件 ⇒ **比稿低 `--s4`(16px)**
+（稿 `:352` 自注「本规则在订单中心区域**零消费**」，即稿里这一面的 h1 是直接挂在 `.crumb` 之后的）。
+
+⚠️ **本页有意偏离 / 必须交代的 5 条**（照落 UI 的前提下，别当漏做）：
+
+1. **4 步进度带不落，`getProgressWidth()` 随之删除** —— 稿的 9 列表格没有它的位置，而信息由
+   「状态」列的 **5 态 chip 完全承担**（含第 5 个合法态「已收货·未发货」，比进度带**还多一态**）
+   ⇒ 是**替换**、不是丢失。⚠️ 这是本 commit **唯一的脚本改动**（删一个因失去消费者而变死的
+   纯展示函数；不删则 `eslint no-unused-vars` 直接报错）。`loadOrders` / `formatDateTime` /
+   `handleDeliver` / `currentMerchantId` / `onMounted` **逐字未动**。
+2. **`.stats` 四个 KPI 全部是 `—`** —— 它们是**预留位**（无聚合端点），而现有两次请求各只取
+   一个口径（active = `ReceiveIf != 1`）⇒ 四个数**都算不出来**。稿的那四个数是从它自带的
+   6 行静态数据集推出来的，本页没有那个数据集 ⇒ 照稿自己立的规矩（`:881-885`
+   「**凡是另一个数算得出来的数，都不许手写**」）的**反面**：算不出来就不写 ⇒ 留 `—`。
+   同理 `.tabs` 前四个 tab 的计数也是 `—`；后两个照稿写 `0`（稿 `:697-699` 明写
+   「恒为 0，**不是『暂无数据』而是『这个态不存在』**」）。
+3. **`.page-h .n` 用两个真算出来的数**：「共 {当前视图行数} 单 · 待处理 {待发货行数} 单」——
+   前者是**当前视图**的行数、不是全库，`title` 已写明这一点。
+4. **时间列保留第二行「更改日期」**（`.time.upd` ← `SettlementDate`）——
+   ⚠️ 稿的 A 列对照（`:44-54`，自称「现有 `OrderCenter.vue` **411 行的每一件**去哪了」）
+   **没有登记这一条**：既不在「保留并重画」清单里，也不在「删」里。
+   本笔按用户一贯的「不删既有已显示字段」保留，**并入同一格第二行**（不新增列）。
+   ⚠️ **待用户裁**：是照稿撤掉，还是补进稿的 A 列对照。
+   因这一行，**三列列宽相对稿改动**（时间列 128→170、状态列 92→100、订单号列 132→112；
+   固定列合计 732→762 ⇒ 商品列 272→242）—— 三条都有**本机实测**出处，见 `OrderCenter.vue`
+   的 `.tbl` 注释。⚠️ 状态列那 8px 与「更改日期」无关，是**独立的**一处修正：
+   「已收货·未发货」chip 实测 100px，稿的 92px 会把它压折。
+5. **操作列按稿的 `canSend` 落** —— 只有「待发货」行渲染可点的【发货】
+   （`:disabled` / `:class` / `@click` **逐字保留原实现**），其余行画 `—`。
+   ⚠️ 副作用：未付款行今天「点了弹『用户未付款，暂不能发货』」这条路径在 UI 上消失；
+   `handleDeliver()` 的**三道守卫逐字保留**（纵深防御），且状态列已具名「未付款」。
+   ⚠️ **稿标注的既有缺陷照原样呈现**：`OrderDao.selectByMerchant` 的两条分支都不 SELECT
+   `CreateTime` ⇒「已完成」视图的下单时间格画 `.dash`「—」+ `title` 说明是**库层缺字段**
+   而不是「这一单没有时间」（既有缺陷，`db-schema.md:91` 有记；Dao 注释亦写明「本笔不趁手改」）。
+
+---
+
+## 二、待落清单（**新稿 44 条 − 已落 15 条 = 29 条**，**另加老稿 3 条**，落各页 commit 时逐条核）
 
 > 全部**照落 UI**。「档」列写的是**归属**，不是「本笔做不做功能」。
 > **commit 3 的 4 条不在这个数里** —— 它们来自**老稿 `主页改造.html`**（口径 6 的主页例外），见 §一。
 > ⚠️ **commit 8 / 9 的 3 条也不在这个数里** —— 它们来自**老稿 `子页面改造.html`**（口径 6 v2 的两页例外）。
-> ⇒ 本 §二 共 **34（新稿）+ 3（老稿）= 37 条**，另 §一 已落 12（含老稿 4）。
+> ⇒ 本 §二 共 **29（新稿）+ 3（老稿）= 32 条**，另 §一 已落 17（含老稿 4）。
 >
 > ⚠️ **数法以「新稿 44」为唯一基准**（`grep -rc data-slot= docs/美化/pages/*.html` 可复核）。
 > 本表之前的表头写「10 页 / 36 条」，但**逐段相加是 40** ⇒ 那个 36 本就对不上，别再用它做减法。
-> 现按实测重算：44 − 已落 10（`GoodsSelect` 3 + `ChatRoom` 1 + `ShoppingCart-customer` 4 +
-> **`OrderCenter-merchant` 的购物车面 2**）= **34**。
-> ⚠️ 最后那 2 条（`:767` / `:793`）**已随 commit 4 落进 `ShoppingCart.vue`**（同一文件、同源形态），
-> 故下表的「7 条」里**只有 5 条还待落**，见下表底注。
+> 现按实测重算：44 − 已落 15（`GoodsSelect` 3 + `ChatRoom` 1 + `ShoppingCart-customer` 4 +
+> `OrderCenter-merchant` 的购物车面 2 + 同页销售面 5）= **29**。
 
-### commit 5 + 6 —— `OrderCenter.vue` / `OrderPane.vue` ↔ `pages/OrderCenter-merchant.html`（7 条，其中 2 条已随 commit 4 落）
+### commit 6 —— `OrderPane.vue` ↔ `pages/OrderCenter-merchant.html`（**0 条**）
 
-| `data-slot` | 稿行 | N | 归属 |
-|---|---|---|---|
-| 预留 · 数据概览（动现有代码 4 处 · 超档） | `:678` | 4 | `C3〈订单〉` |
-| 预留 · 标签页（全部/待发货/已发货 = 1 处 · 在档；退款中/售后 = ≥6 · 超档） | `:690` | 1 / ≥6 | ⚠️ 稿未标 `data-future`，随邻项 ⇒ `C3〈订单〉`。**同一块里两档并存**，`data-slot` 原文已写明 |
-| 预留 · 筛选栏（动现有代码 4 处 · 超档） | `:705` | 4 | `C3〈订单〉` |
-| 预留 · 批量操作条（动现有代码 ≥4 处 · 超档） | `:718` | ≥4 | `C3〈订单〉` |
-| 预留 · 分页（动现有代码 4 处 · 超档） | `:738` | 4 | `C3〈订单〉` |
-| 预留 · 店铺分组 / 商品行 / 店铺小计（动现有代码 4 处 · 超档） | `:767` | 4 | ⚠️ 稿未标 `data-future`，随邻项 ⇒ `C3〈购物车〉`（同块 `:793` 是购物车）**—— 已落，见 §一 commit 4** |
-| 预留 · 吸底结算栏（动现有代码 4 处 · 超档） | `:793` | 4 | `C3〈购物车〉` **—— 已落，见 §一 commit 4** |
-
-> 本表 7 条里 **`:767` / `:793` 两条已随 commit 4 落**（商家购物车面 = `ShoppingCart.vue` 的 `:77` / `:198`）
-> ⇒ commit 5/6 实际只剩 **5 条**（`:678` `:690` `:705` `:718` `:738`，全在销售面）。
+⚠️ `OrderPane.vue` 是**薄壳包装**（按 `meta.orderTab` 在 `OrderCenter.vue` 与 `ShoppingCart.vue`
+之间二选一），本身**不承载任何 UI** ⇒ 销售面的 5 条已随 commit 5 落进 `OrderCenter.vue`、
+购物车面的 2 条已随 commit 4 落进 `ShoppingCart.vue`。commit 6 名下**没有新的 `data-slot` 落点**。
 
 ### commit 7 —— `UserInfoPage.vue` ↔ `pages/UserCenter-customer.html` + `UserCenter-merchant.html`（7 条）
 
@@ -242,9 +298,12 @@ Vue 与之逐字一致 —— `v-else` 那条 `.inp-area` 的 4 个控件只 `di
 
 | # | `data-slot` | 稿行 | 稿里的形态 | N | 归属 | 落点 |
 |---|---|---|---|---|---|---|
-| 13 | 预留 · 状态枚举 | `:630` | `<th class="c-st" data-slot="…">状态</th>`（**有文字**） | 稿未标 | `C3〈订单〉` | `HistoricalOrders.vue` 表头 |
-| 14 | 预留 · 申请退货 | `:633` | `<th class="c-act" data-slot="…"></th>`（**完全空**） | 稿未标 | `C3〈订单〉` | `HistoricalOrders.vue` 表头 |
-| 15 | 预留 · 备注 / 删除好友（friendUp / friendDe 已有端点） | `:787` | 好友卡上的 `<button class="btn-text">私信</button>` | 稿未标 | `C3〈消息〉` | `FriendRoom.vue` 好友卡 |
+| 18 | 预留 · 状态枚举 | `:630` | `<th class="c-st" data-slot="…">状态</th>`（**有文字**） | 稿未标 | `C3〈订单〉` | `HistoricalOrders.vue` 表头 |
+| 19 | 预留 · 申请退货 | `:633` | `<th class="c-act" data-slot="…"></th>`（**完全空**） | 稿未标 | `C3〈订单〉` | `HistoricalOrders.vue` 表头 |
+| 20 | 预留 · 备注 / 删除好友（friendUp / friendDe 已有端点） | `:787` | 好友卡上的 `<button class="btn-text">私信</button>` | 稿未标 | `C3〈消息〉` | `FriendRoom.vue` 好友卡 |
+
+> ⚠️ **编号说明**：#18–#20 原在 v1 里编作 #13–#15（当时 §一 只到 #12）；commit 5 落地后
+> §一 占用了 #13–#17 ⇒ 本节按全表**升序重编**为 #18–#20。三条的**内容一字未改**。
 
 **合计 3 条，全落；0 条只登记。**
 
@@ -355,6 +414,47 @@ Vue 与之逐字一致 —— `v-else` 那条 `.inp-area` 的 4 个控件只 `di
 
 ---
 
+### commit 5 —— `OrderCenter.vue`（`pages/OrderCenter-merchant.html` 销售面）
+
+⚠️ 本页与 commit 4 **相反**：稿的销售面**自己就把 `disabled` + `title` 写全了**（`:707-713`
+`:720-725` `:740-742` `:867`）—— 这些是**照稿直落**，不是本笔补的。真正属于「稿画了却没挂
+`data-slot`、也没给 `disabled`」的只有下面三类。
+
+| 稿行 | 元素 | 稿里的状态 | Vue 处置 | 归属 |
+|---|---|---|---|---|
+| `:693-701` | `.tab` ×6（全部/待发货/已发货/已完成/退款中/售后） | `<button class="tab">` —— **无 `disabled`、无逐枚 `title`**（只有整块 `data-slot` 上那句） | 6 枚 `<button class="tab" disabled>` + **补**逐枚 `title`（按稿 `:692` 的分档写）→ `OrderCenter.vue` 的 `<nav class="tabs">` | `C3〈订单〉` |
+| `:822` | `.empty .go2`「去商品管理」 | `<a class="go2">` —— **裸控件**：无 `disabled`、无 `title`、无 `data-slot` | `<button class="go2" disabled>` + 补 `title` | `C3〈订单〉`（商品管理路由已有，本笔功能量恒为 0 故不接线） |
+| `:674` | `nav.crumb` 的「首页」 | `<a>首页</a>` —— **无 `href`** | 落成 `<span>首页</span>`（**不画死控件**，与 `ShoppingCart.vue:25-33` 同款处置） | — |
+
+⚠️ **两条「描边 vs 灰字」的样式补充**（稿里没有，本笔补，否则光标撒谎）：`.tab[disabled]:not(.on)`
+与 `.fld input[disabled]` / `.btn[disabled]` / `.ck[disabled]` / `.pager .pg[disabled]` 的
+`cursor:not-allowed`。⚠️ `.tab` 那条**必须带 `:not(.on)`** —— `.tab.on` 与 `.tab[disabled]`
+特异性同为 (0,2,0)，后者在后 ⇒ 不加选择器「全部」的选中色会被禁用的灰压掉
+（`GoodsSelect.html` 的 `.chip.on` 踩过同一个坑，见 `progress.md §5-AI-B`）。
+
+⚠️ **`.pager .pg.on`「1」是唯一一枚「照稿不禁用」的按钮**（稿 `:741`：`<button class="pg on" title="当前页">1</button>`
+—— 有 `title`、**没有** `disabled`）。Vue **照稿保留 enabled**：它没有 `@click` ⇒ 点击无副作用；
+若给它补 `disabled`，`.pager .pg[disabled]`（同为 (0,3,0)、在后）会压掉 `.pg.on` 的描边色，
+把「当前页」画成「不可用」—— **禁用反而改坏了稿的语义**。
+
+⚠️ **稿外「活」控件（照旧保留真事件）**：
+1. `.status-select`（首页 / 历史订单 二选一下拉）—— 稿 `:53` 的 ★ 是把它**收紧成 6 个标签页**，
+   但 6 枚 tab 全 `disabled` ⇒ 保留（**用户裁决 A**，理由与代价见 §一 commit 5）。
+2. `.trow .send`【发货】—— 稿 `:876` 自己标了「现有端点 `order.orderDeliveryIfUp`
+   （endpoints.js:58）——本页唯一不禁用的按钮」⇒ **本页唯一真事件**，
+   `:disabled` / `:class` / `@click` 逐字保留原实现。
+3. `showSwitch` 两态开关 —— `OrderCenter.vue` 顶部，`@click="handleToggle"`，**稿的两个 pane 都没画它**
+   （同 `ShoppingCart.vue:8-19`，是 `/merchant/order/cart` 的回程）；与 commit 4 是同一条契约。
+
+⚠️ **稿自身的一处「表里不一」，照稿落、不改稿**：`@media (max-width:1120px)` 里
+`:607-609` 给 `.stat:nth-child(3)` / `(4)` 补了 `border-top:1px solid var(--line)`，
+而稿 `:371-373` 在 `.stats` 上刚写完「四条线（`border-top`/`border-bottom`/格间 `border-left`×3）
+**一并删掉**」（理由：面之外再叠线是同一种手段跨层级复用；同级用间距、线留给分组）。
+⇒ Vue **照稿落**（窄屏那两格确实会多一条线），作为稿子自身的矛盾登记在此，不擅自删。
+（同类先例：§二 commit 8/9 记的 `子页面改造.html` 两处「表头说退货、表体说复制」。）
+
+---
+
 ## 四、老稿 10 条（`主页改造.html` + `子页面改造.html`）
 
 逐条登记见 **`progress.md:1636-1649`**（表 #1–#10），此处**不复制**，避免第二份真相。
@@ -377,7 +477,7 @@ Vue 与之逐字一致 —— `v-else` 那条 `.inp-area` 的 4 个控件只 `di
 ## 五、对账方法（验收时跑）
 
 ```bash
-# Vue 里实落的条数（应 = 台账「已落」条数 = 3 + 1 + 4 + 4 = 12）
+# Vue 里实落的条数（应 = 台账「已落」条数 = 3 + 1 + 4 + 4 + 5 = 17）
 grep -rn 'data-slot=' Mall-management-web/mall-management-system/src/views/ | wc -l
 # 新稿里的总条数（应 = 44；**老稿另计**：主页改造.html 4 条 + 子页面改造.html 3 条，都不在这个数里）
 grep -rc 'data-slot=' docs/美化/pages/*.html | awk -F: '{s+=$2} END{print s+0}'
@@ -397,3 +497,5 @@ grep -c 'data-slot=' docs/美化/主页改造.html docs/美化/子页面改造.h
 ⚠️ **第一条 grep 是「源码条数」不是「渲染条数」**：`ShoppingCart.vue` 有 2 条走
 `:data-slot="showSwitch ? null : '…'"`（见 §一 commit 4），源码里数 4，运行时按宿主分别渲染
 **4（客户有商品）/ 0（客户空车）/ 2（商家）**。
+`OrderCenter.vue` 的 5 条是**无条件**的，但**空态下一条都不渲染**（见 §一 commit 5）
+⇒ 运行时按视图：**5（有数据，两档宽度同）/ 0（空态）**。
