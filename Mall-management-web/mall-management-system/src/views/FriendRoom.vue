@@ -1,27 +1,89 @@
 <template>
-  <div class="friend-room">
-    <div class="friends-grid" v-if="friendList.length > 0">
-      <div v-for="friend in friendList" :key="friend.id" class="friend-card">
-        <div class="avatar">
-          <img :src="friend.image || defaultAvatar" alt="头像" />
-        </div>
-        <div class="friend-info">
-          <div class="name-row">
-            <span class="username">{{ friend.username }}</span>
-            <span class="user-type">{{ friend.usertype === '客户' ? '用户' : '商家' }}</span>
-          </div>
-          <div class="user-id">{{ friend.id }}</div>
-          <div class="gender">{{ friend.gender || '未知' }}</div>
-        </div>
-        <button class="chat-btn" @click="goToChat(friend)">私信</button>
+  <!--
+    D 笔 commit 9 —— 本页承载老稿 `子页面改造.html` 的 `data-page="fr"`（好友）与 `"fr0"`（好友 · 空态）
+    两支（同一页的两种态，靠 `friendList.length` 切）。
+    基线：`docs/美化/子页面改造.html`
+        · 模板 `:666-677`（`fr`）+ `:679-693`（`fr0`）
+        · 样式 `:400-436`（`.frg` / `.frt` / `.fav` / `.fn` / `.role` / `.fid` / `.empty`）
+          + 全局件 `:57`（`.num`）`:159-165`（`.ph`）`:168-184`（`.btn` / `.btn-solid` / `.btn-ghost` / `.btn-text`）
+          + `:281-287`（`.inp`）
+    ⚠️ 基线口径 v2（`slot-registry.md` 口径 6）：`pages/` 里**没有**好友页的新稿 ⇒ **回到老稿**；
+       `:787`（本页那一支）**有效**。
+    ⚠️ 稿的 `.uc` / `.uc-menu` / `.stage` 三件**不进本组件** —— 落点是 `UserCenter.vue`（左菜单）
+       与 `AppShell.vue` 的 `.user-page`（那一行的 padding / max-width）。本页只承载右栏那一支。
+    ⚠️ 稿自身的「表里不一」照落、不改稿（`slot-registry.md` §二 commit 8/9 第 2 条）：
+       稿 `:787` 的按钮文字是「**私信**」，挂的 `data-slot` 说的是「**备注 / 删除好友**」。
+       本页照稿：**私信是真事件**（`goToChat`，原 Vue `:16` 就有），预留位另挂在**动作格**上。
+  -->
+  <main class="uc-main">
+
+    <div class="page-h">
+      <h1 class="page-h-t">好友</h1>
+      <!-- 稿 `:670`（`fr` 面）/ `:683`（`fr0` 面）的 `#fr-n` / 静态文本都是「共 N 位」——
+           这里落**真**条数（`friendList.length`，空态自然是「共 0 位」）。 -->
+      <span class="page-h-n">共 {{ friendList.length }} 位</span>
+      <!-- 稿 `:671-674` 的 `.ph-r`：两枚按钮从**浮空 fixed**（原 Vue `:21-24` 的 `.action-buttons`）
+           搬进页头 —— 纯布局变更，两个 `@click` 处理函数一字未动。 -->
+      <div class="page-h-r">
+        <button class="btn btn-ghost" @click="openSearchDialog">搜索好友</button>
+        <button class="btn btn-ghost" @click="openRequestDialog">
+          好友申请 <b class="num">—</b>
+        </button>
       </div>
     </div>
-    <div v-else class="empty-friends">暂无好友，快去添加吧~</div>
 
-    <div class="action-buttons">
-      <button class="search-friend-btn" @click="openSearchDialog">搜索好友</button>
-      <button class="friend-request-btn" @click="openRequestDialog">好友申请</button>
+    <div v-if="friendList.length > 0" class="frg">
+      <article v-for="friend in friendList" :key="friend.id" class="frt">
+        <!-- 稿 `:782` 的 `.fav` 是 `AVA` 那个 SVG 人形占位 ——那是它的 mock。本页保留**既有真头像**
+             （`friend.image || defaultAvatar`，与原 Vue `:6` 逐字一致）⇒ 只把尺寸从 80px 收到稿的 44px。 -->
+        <div class="fav"><img :src="friend.image || defaultAvatar" alt="头像" /></div>
+        <div class="frt-who">
+          <!-- ⚠️ 角色文案沿用**既有映射**（`客户 → 用户`，原 Vue `:11`）—— 老稿 `:784` 直接印 `role`
+               原值（`商家` / `客户`）。改文案 = 改产品词汇，不属本笔 ⇒ 差异已登记 registry，待用户裁。 -->
+          <div class="fn"><b>{{ friend.username }}</b><i class="role">{{ friend.usertype === '客户' ? '用户' : '商家' }}</i></div>
+          <!-- ⚠️ `gender` 是**既有真实字段**（原 Vue `:14` 单独一行）——老稿 `:785` 只画了 ID 一行。
+               本笔按「稿未画、但既有的真实数据不删」保留（同 commit 7 保真头像的先例），并进同一行。 -->
+          <div class="fid"><span class="num">{{ friend.id }}</span> · {{ friend.gender || '—' }}</div>
+        </div>
+        <!-- 预留位 #27（老稿 `:787`）—— 块级：动作格本身不是控件 ⇒ 只挂 `data-slot` + `title`（无 `disabled`）。
+             ⚠️ 稿里这个 `data-slot` 挂在**第一张**好友卡的「私信」按钮上（`:787` 的 `${i === 0 ? … : ''}`），
+             稿注 `:777-779` 自写「虚线只标第一格 —— 12 格全标会糊成一片」⇒ 那是**预览产物**。
+             本页按「角标不进 Vue」的同一条口径落在**每一张**卡的动作格上 ⇒ **源码 1 处、渲染 = 好友数**（稿那「12 格」是它 mock 的条数，非本页条数，见 `slot-registry.md` §一 commit 9）。
+             N 稿未标（未计）。 -->
+        <div
+          class="frt-act"
+          data-slot="预留 · 备注 / 删除好友（friendUp / friendDe 已有端点）"
+          title="预留 · 备注 / 删除好友（老稿 子页面改造.html:787）· 归属 C3〈消息〉——稿注：endpoints.js 的 message 域里已经有 friendUp / friendDe，但现在的 FriendRoom.vue 只用了列表和私信；备注、删除好友落在这里。⚠️「私信」是真事件（goToChat），不挂 disabled"
+        >
+          <button class="btn-text" @click="goToChat(friend)">私信</button>
+        </div>
+      </article>
     </div>
+
+    <!-- 空态 = 稿 `fr0` 面（`:679-693`）。⚠️ 文案照稿换字不换态（同 commit 5 对 OrderCenter 空态的处理）。
+         ⚠️ 稿的 `.row`（输入框 + 搜索钮）**没有** `data-slot`、也没有 `disabled`（裸控件）⇒ 按 §三
+         「稿外死控件」口径落 `disabled` + `title`：它指向的搜索能力**已有**（页头「搜索好友」开的是同一个
+         `.searchDialogVisible` 弹窗），但本笔功能量恒为 0 ⇒ **不接线**（同 commit 5 的 `.go2` 先例）。 -->
+    <div v-else class="empty">
+      <h2>还没有好友</h2>
+      <p>输入对方的商家 ID 或客户 ID，就能把人加进来。</p>
+      <div class="row">
+        <input
+          class="inp"
+          placeholder="例如 84sH27Lw"
+          disabled
+          title="稿外死控件（老稿 子页面改造.html:689）——搜索能力已有（页头「搜索好友」开同一个弹窗），本笔功能量恒为 0 故不接线"
+        >
+        <button
+          class="btn btn-solid"
+          disabled
+          title="稿外死控件（老稿 子页面改造.html:690）——同上，不接线"
+        >搜索</button>
+      </div>
+    </div>
+
+    <!-- ── 以下是**既有**的两只弹窗，不属于老稿的 `fr` / `fr0` 面（稿里没有弹窗）⇒ 结构、事件
+         与样式**一字未动**（`.modal-*` 那一段 CSS 原样保留）。 ─────────────────────────────── -->
 
     <!-- 搜索好友弹窗 -->
     <div v-if="searchDialogVisible" class="modal-overlay" @click.self="closeSearchDialog">
@@ -60,7 +122,7 @@
         </div>
       </div>
     </div>
-  </div>
+  </main>
 </template>
 
 <script setup>
@@ -258,118 +320,141 @@ onMounted(() => {
 
 
 <style scoped>
-.friend-room {
-position: relative;
-width: 100%;
-height: 100%;
-overflow-y: auto;
-padding: 20px;
-box-sizing: border-box;
+/* ══════════════════════════════════════════════════════════════════════════════
+   取自 `docs/美化/子页面改造.html`：
+     `:400-436`（`.frg` / `.frt` / `.fav` / `.fn` / `.role` / `.fid` / `.empty`）
+     `:57`（`.num`）`:159-165`（`.ph`）`:168-184`（`.btn` / `.btn-solid` / `.btn-ghost` / `.btn-text`）
+     `:281-287`（`.inp`）
+
+   本次「从稿到 Vue」的**适配**，逐条登记：
+     ① 稿的 `button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}`（稿 `:121`）
+        **必须搬进 scoped 且限定本页** —— 稿的「私信」是裸 `<button>`，不重设就会带上 UA 的
+        `background: rgb(240,240,240)` / `border: 2px outset` / `font-family: Arial` / `font-size: 13.33px`
+        （`UserInfoPage.vue` 的 commit 7 实踩过同一个坑，`AppShell.vue` 的顶栏也踩过）。
+        ⚠️ 但 `.btn-ghost` 自带 `background: transparent` + `border-color` ⇒ 重设**必须在它之前**。
+     ② 稿的 `body{font-family:var(--font);font-size:var(--fs-sm);color:var(--ink)}` 落到本页根 `.uc-main`；
+        `background` **不搬**（壳已铺 `var(--bg)`，再铺一次会把右栏画成与左菜单不同的底）。
+     ③ 页头类名 `.page-h` / `.page-h-t` / `.page-h-n` / `.page-h-r`（**不是**稿的 `.ph` / `.ph h1` /
+        `.ph-n` / `.ph-r`）：与 `UserInfoPage.vue`（commit 7）、`HistoricalOrders.vue`（commit 8）
+        共用一套 —— 同壳三页横向对读。⚠️ **字号逐字取稿但跨页不同值**：本页 `var(--fs-xl)` 在
+        `tokens.css` 里是 **32px**（主页档），老稿自己的 `--fs-xl` 是 **28px**（子页面档，
+        见 `tokens.css:12` 的「字号档冲突」条）；`UserInfoPage` 那页是 `--fs-2xl` = **36px**。
+        两条差异都**不擅自拉平**，已登记 registry §一 commit 8 的「⚠️ 跨页标题字号」条，待用户裁。
+     ④ 稿的 `.uc` / `.uc-menu` / `.stage` **不进本组件**（落点在 `UserCenter.vue` / `AppShell.vue`）。
+     ⑤ 稿 `.frg` 的 `gap:1px; background:var(--line)` 是**发丝线网格**（稿 `:401-403` 原注：
+        「`gap:1px` + 网格底色 = 分隔线，不用给每格加边框」）⇒ 逐字照落，未改成逐格 border。
+     ⑥ `.fav` / `.frt-who` / `.frt-act` 是**稿没有的外壳类名** —— 稿靠 `grid-template-columns:
+        44px minmax(0,1fr) auto` 直接指定三个子项，中间那格是裸 `<div>`。本页把中间那格具名，
+        并给动作格具名（预留位挂在它上面，见下）；网格列定义**逐字同稿**。
+     ⑦ `.inp` 只取稿 `:281-287` 的声明；`.empty .row .inp{flex:1;background:var(--surface)}`
+        （稿 `:436`）一并落，否则输入框在 `.row` 里不撑开。
+   ⚠️ `box-sizing` **不在此重复** —— `tokens.css` 的 `*` 重设已是全局。
+   ⚠️ `.modal-overlay` 那一段（`:375-379` 的 `width:100vw`）是**既有**代码（老稿里没有弹窗）——
+      **一字未动**，不在本笔范围。
+   ══════════════════════════════════════════════════════════════════════════════ */
+
+/* ── 稿 `:121` 的 `button{...}` 重设（必须在 `.btn-*` 之前）────────────────────── */
+button {
+  font: inherit;
+  color: inherit;
+  background: none;
+  border: 0;
+  cursor: pointer;
 }
-.friends-grid {
-display: grid;
-grid-template-columns: repeat(4, 1fr);
-gap: 20px;
+
+/* ── 本页根 ────────────────────────────────────────────────────────────────── */
+.uc-main {
+  flex: 1;
+  min-width: 0;
+  font-family: var(--font);
+  font-size: var(--fs-sm);
+  color: var(--ink);
 }
-.friend-card {
-background: #fff;
-border-radius: 16px;
-box-shadow: 0 2px 8px rgba(0,0,0,0.1);
-padding: 16px;
-display: flex;
-flex-direction: column;
-align-items: center;
-text-align: center;
-transition: transform 0.2s;
+
+/* ── 页头（稿 `.ph` `:159-165`）────────────────────────────────────────────── */
+.page-h { display: flex; align-items: baseline; gap: var(--s4); margin-bottom: var(--s5); }
+.page-h-t {
+  font-family: var(--font-display);
+  font-size: var(--fs-xl); font-weight: var(--fw-semi); letter-spacing: .5px; line-height: 1.2;
 }
-.friend-card:hover {
-transform: translateY(-4px);
+.page-h-n { font-size: var(--fs-sm); color: var(--ink-3); }
+.page-h-r { margin-left: auto; display: flex; gap: var(--s2); align-self: center; }
+
+/* ── 按钮（稿 `:168-184`）─────────────────────────────────────────────────── */
+.btn {
+  font-size: var(--fs-sm); font-weight: var(--fw-med);
+  padding: 7px 16px; border-radius: var(--r2); cursor: pointer;
+  border: 1px solid transparent; white-space: nowrap;
+  transition: background .15s, color .15s, border-color .15s;
 }
-.avatar {
-width: 80px;
-height: 80px;
-border-radius: 50%;
-overflow: hidden;
-margin-bottom: 12px;
+.btn-solid { background: var(--brand); color: #fff; }
+.btn-solid:hover:not([disabled]) { background: var(--brand-hover); }
+.btn-ghost { background: transparent; color: var(--ink-2); border-color: var(--line-2); }
+.btn-ghost:hover:not([disabled]) { color: var(--brand-ink); border-color: var(--brand); }
+/* 文字钮：只给行内动作（复制、私信）。一屏八个描边按钮是模板腔的来源之一（稿 `:178` 原注）。 */
+.btn-text {
+  font-size: var(--fs-xs); color: var(--ink-3);
+  padding: 2px 0; border-bottom: 1px solid var(--line-2);
+  transition: color .14s, border-color .14s;
 }
-.avatar img {
-width: 100%;
-height: 100%;
-object-fit: cover;
+.btn-text:hover { color: var(--brand-ink); border-color: var(--brand); }
+/* ⚠️ 稿的全局 `button{cursor:pointer}` 不带 `:not([disabled])`，照抄会把禁用项画成可点
+   （同 `UserInfoPage.vue` 的 commit 7 第 ③ 条）。本笔两处 `disabled` 在空态里。 */
+button[disabled] { cursor: not-allowed; }
+
+/* ── 发丝线网格（稿 `:405-414`）───────────────────────────────────────────── */
+.frg {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+  gap: 1px; background: var(--line);
+  border: 1px solid var(--line); border-radius: var(--r2); overflow: hidden;
 }
-.friend-info {
-width: 100%;
-margin-bottom: 12px;
+.frt {
+  display: grid; grid-template-columns: 44px minmax(0, 1fr) auto;
+  align-items: center; gap: var(--s3);
+  background: var(--surface); padding: var(--s4) var(--s5);
 }
-.name-row {
-display: flex;
-justify-content: center;
-align-items: baseline;
-gap: 8px;
-flex-wrap: wrap;
+.frt .fav {
+  width: 44px; height: 44px; border-radius: 50%; background: var(--img); color: var(--ink-3);
+  display: flex; align-items: center; justify-content: center; overflow: hidden;
 }
-.username {
-font-size: 16px;
-font-weight: 600;
+.frt .fav img { width: 100%; height: 100%; object-fit: cover; border-radius: 50%; display: block; }
+.frt-who { min-width: 0; }
+.frt .fn { display: flex; align-items: center; gap: var(--s2); min-width: 0; }
+.frt .fn b {
+  font-size: var(--fs-sm); font-weight: var(--fw-med); color: var(--ink);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
-.user-type {
-font-size: 12px;
-color: #007bff;
-background: #e6f7ff;
-padding: 2px 6px;
-border-radius: 12px;
+.role {
+  flex: none; font-style: normal; font-size: 11px; line-height: 1.6;
+  padding: 0 6px; border-radius: 2px; color: var(--ink-2); background: var(--surface-3);
 }
-.user-id {
-font-size: 12px;
-color: #888;
-margin: 4px 0;
+.frt .fid { font-size: var(--fs-xs); color: var(--ink-3); font-variant-numeric: tabular-nums; }
+.frt-act { justify-self: end; }
+
+.num { font-variant-numeric: tabular-nums; }
+/* 页头「好友申请」角标：稿 `:673` 的 `2` 是编的数字 ⇒ 落 `—`（判据）。用朱砂（`--accent`）是稿原样。 */
+.page-h-r .num { color: var(--accent); }
+
+/* ── 空态（稿 `.empty` `:430-436`）────────────────────────────────────────── */
+.empty { background: var(--zone); border-radius: var(--r2); padding: var(--s8) var(--s6); text-align: center; }
+.empty h2 { font-family: var(--font-display); font-size: var(--fs-lg); font-weight: var(--fw-semi); margin-bottom: var(--s2); }
+.empty p { font-size: var(--fs-sm); color: var(--ink-3); margin-bottom: var(--s5); }
+.empty .row { display: flex; gap: var(--s2); max-width: 460px; margin: 0 auto; }
+.empty .row .inp { flex: 1; background: var(--surface); }
+
+/* ── 输入框（稿 `:281-287`）───────────────────────────────────────────────── */
+.inp {
+  width: 100%; font-size: var(--fs-sm); color: var(--ink);
+  background: var(--surface); border: 1px solid var(--line-2); border-radius: var(--r2);
+  padding: 10px 14px; outline: none; transition: border-color .15s;
 }
-.gender {
-font-size: 12px;
-color: #666;
-}
-.chat-btn {
-background: #28a745;
-border: none;
-border-radius: 20px;
-padding: 6px 12px;
-font-size: 12px;
-cursor: pointer;
-color: white;
-}
-.chat-btn:hover {
-background: #218838;
-}
-.empty-friends {
-text-align: center;
-padding: 40px;
-color: #999;
-font-size: 16px;
-}
-.action-buttons {
-position: fixed;
-bottom: 30px;
-right: 30px;
-display: flex;
-gap: 12px;
-z-index: 10;
-}
-.search-friend-btn, .friend-request-btn {
-padding: 10px 20px;
-border: none;
-border-radius: 30px;
-font-size: 14px;
-cursor: pointer;
-box-shadow: 0 2px 6px rgba(0,0,0,0.2);
-}
-.search-friend-btn {
-background: #007bff;
-color: white;
-}
-.friend-request-btn {
-background: #28a745;
-color: white;
-}
+.inp::placeholder { color: var(--ink-3); }
+.inp:focus { border-color: var(--brand); }
+
+/* ── 窄档：稿 `:438-459` 的 `@media` 里只有 `.uc` / `.uc-menu` / `.p-*` / `.msgr` / `.convs`
+   / `.fields` 六项，**都不在本组件**（`.frg` 用的是 `auto-fill` 自适应）⇒ 本页无对应声明。 ── */
+
+/* ══ 以下 = **既有**两弹窗的样式，一字未动（老稿无弹窗面）══════════════════════ */
 .modal-overlay {
 position: fixed;
 top: 0;

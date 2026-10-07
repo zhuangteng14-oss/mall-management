@@ -187,7 +187,15 @@ const navTop = navFor(props.nav, isLoggedIn())
 <style scoped>
 .app-shell {
 width: 100vw;
-height: 100vh;
+/* ⚠️ **D 笔 commit 7c**（用户 2026-10-07 裁决，7b 的延伸）—— `height:100vh` → `min-height:100vh`。
+   7b 给 `.top-nav` 加了 `sticky`，但 sticky 的约束矩形 = **包含块**，而 `.app-shell` 原先是
+   `height:100vh` = 900px 的**固定盒** ⇒ 吸附上限 = 900 − 60 = **840px**，长页滚到底顶栏仍会释放
+   （实测 `/customer/user/info` 滚 857 时 y=−17）。改成 `min-height` 后壳随内容长高 ⇒ sticky 全程生效。
+   ⚠️ sticky 只做一半 = 行为上退回甲案（顶栏随页滚走）⇒ 这是**同一 bug 的延伸**，不是新决策。
+   ⚠️ **不动 `width:100vw`**：它与 `.home-container` 的那条 `width:100vw` 是**同一件事**
+   （该条已由 commit 0 登记为「余下 … / `width:100vw` / … 留后续笔」），单改 `.app-shell` 一半
+   修不掉症状（`.home-container` 溢出照旧）⇒ 留作整笔，见 `docs/agent/slot-registry.md` §一 commit 7c。 */
+min-height: 100vh;
 display: flex;
 flex-direction: column;
 background: var(--bg);
@@ -205,6 +213,22 @@ background: var(--bg);
    ⚠️ **高度必须与 `.home-container` 的 `top` / `height` 锁步**（那两条已同步改成 60）。 */
 .top-nav {
 height: 60px;
+/* ⚠️ **D 笔 commit 7b 丁案**（用户 2026-10-07 裁决，三案择「丁 = 甲 + sticky」）——
+   修「顶栏被压扁」（见 `docs/agent/slot-registry.md` 同名小节）。
+   `flex: none` 是**修 bug 必需**：`.app-shell` 是 `height:100vh` 的 flex column，
+   `.top-nav` 原先只有 `height:60px`、`flex` 取默认 `0 1 auto`（`flex-shrink:1`），
+   而 `.content`（`flex:1` + `min-height:auto` + 无滚动容器）被高子页顶高后，
+   flex 会把顶栏压到 min-content（实测 60 → 36px，`.nav-left` 贴顶 y=0）。
+   `sticky` 是**壳应有的行为**：甲案（只 `flex:none`）会让顶栏随页滚走 = 壳降级回
+   「没有壳」的形态，而本壳的设计哲学是「壳稳定、内容切换」⇒ 加 `sticky` 让滚动时吸顶。
+   ⚠️ **不采乙案**（`.content { min-height:0; overflow-y:auto }`）：嵌套滚动容器 +
+   百分比高度 + `absolute` 参照物，回归面大，且滚动行为与稿不一致。
+   ⚠️ `z-index:10` 高于 `.home-container` 的 `1`（`:293`，`position:absolute; top:60px`）——
+   两者不重叠（`.home-container` 自 `top:60px` 起），改后仍不重叠，只保证滚动时顶栏在上。 */
+flex: none;
+position: sticky;
+top: 0;
+z-index: 10;
 display: flex;
 justify-content: space-between;
 align-items: center;
@@ -314,11 +338,28 @@ position: relative;
 /* ⚠️ C 笔：`gap` 30 → `var(--s8)`（=64px），照稿 `UserCenter-customer.html:141` 的
    `.uc{display:flex;align-items:flex-start;gap:var(--s8)}`。只改 `gap` —— `display:flex` /
    `height:100%` 不动（稿子多一个 `align-items:flex-start`，改了会让右栏不再撑满，
-   归 D 笔）。左右两栏 = `UserCenter.vue` 那两个**根**（多根 fragment）⇒ 别在中间加包裹 div。 */
+   归 D 笔）。左右两栏 = `UserCenter.vue` 那两个**根**（多根 fragment）⇒ 别在中间加包裹 div。
+   ⚠️ **D 笔 commit 7 已取走 `align-items:flex-start`**（C 笔明文交接）——右栏子页
+   （`UserInfoPage` / `HistoricalOrders` / `FriendRoom`，commit 7/8/9 三页共用）根节点是
+   `<main class="uc-main">`，撑满高度会让「身份卡以下的区块」被拉到视口底。`height:100%` 保留。 */
+/* ⚠️ **D 笔 commit 7b —— 补稿的 `.wrap` 居中容器**（用户 2026-10-07 裁决「做」；
+   交接来源 `UserCenter.vue:81-82`「`.content` 的 1180 居中不在本笔（D 笔）」）。
+   稿 `UserCenter-customer.html:136` / `UserCenter-merchant.html:132` 逐字相同：
+   `.wrap{max-width:1140px;margin:0 auto;padding:var(--s7) var(--s5) var(--s8)}`，
+   它包住的 `.uc`（`:141`）= 本壳的 `.user-page`（`UserCenter.vue` 的两个根
+   `.uc-menu` + `main.uc-main` 直接落在这里）。
+   ⚠️ **宽度取 1140（照本页这两份稿），不是交接话里说的 1180** —— 实测：本笔的**两份**稿是
+   `docs/美化/pages/` 里**唯一**用 1140 的（其余 7 份 + 已落的 `GoodsSelect.vue:305` /
+   `ShoppingCart.vue:446` 都是 1180）；按「以稿为唯一基线」照落。
+   ⚠️ 只加居中三件 —— `display:flex` / `align-items:flex-start` / `gap` / `height:100%` **不动**。 */
 .user-page {
 display: flex;
+align-items: flex-start;
 gap: var(--s8);
 height: 100%;
+max-width: 1140px;
+margin: 0 auto;
+padding: var(--s7) var(--s5) var(--s8);
 }
 /* ⚠️ 用户中心左菜单的样式（`.user-menu*`）R1 起已随 markup 搬进 `UserCenter.vue` 自己的
    `<style scoped>` 里 —— 各文件的样式各归其主。`.user-page` 留在壳里：它是**布局容器**
