@@ -277,6 +277,13 @@ Vue 与之逐字一致 —— `v-else` 那条 `.inp-area` 的 4 个控件只 `di
 之间二选一），本身**不承载任何 UI** ⇒ 销售面的 5 条已随 commit 5 落进 `OrderCenter.vue`、
 购物车面的 2 条已随 commit 4 落进 `ShoppingCart.vue`。commit 6 名下**没有新的 `data-slot` 落点**。
 
+⚠️ **本笔的定位 = 验证笔，非代码笔。** `OrderPane.vue` **零代码 delta**（纯包装组件，
+连 `<style scoped>` 都没有 ⇒ D 笔边界「`<template>` + `<style scoped>` 重写」在本文件**无可改之处**）。
+产出的是一条**契约验证**：commit 4（`ShoppingCart.vue` +505/−180）与 commit 5
+（`OrderCenter.vue` 411 → 844）把**两个子页整个重写**之后，包装层那条
+`orderTab` / `showSwitch` / `@toggle` 契约**无回归** —— **19 项断言全绿**
+（① 4 / ② 4 / ③ 2 / ④ 2 / ⑤ 3 / ⑥ 4）。逐条结果见 commit 6 的 message。
+
 ### commit 7 —— `UserInfoPage.vue` ↔ `pages/UserCenter-customer.html` + `UserCenter-merchant.html`（7 条）
 
 | `data-slot` | 稿 | 稿行 | 归属 |
