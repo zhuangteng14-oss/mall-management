@@ -1,111 +1,332 @@
 <template>
-  <div class="goods-add-page">
-    <div class="card bottom-card">
-      <h2>商品上架</h2>
+  <!--
+    D 笔 commit 10 —— 本页承载稿 `docs/美化/pages/GoodsAdd.html`（661 行）的 `<main>` 那一支。
+    宿主：`/merchant/user/add`（`router/index.js:117`），meta.layout = `user-page` ⇒ 壳内右栏。
+    ⚠️ 稿的 `.nav-bar` / `.wrap` / `.body` / `.uc-menu` **不进本组件** —— 它们的落点是
+       `AppShell.vue`（顶栏 + `.wrap` 居中）与 `UserCenter.vue`（左菜单那一支）
+       ⇒ 本页只承载右栏（与 `UserInfoPage.vue` / `HistoricalOrders.vue` 同槽位）。
+    ⚠️ 稿是**三视图**（`data-page="form"` / `"bad"` / `"ok"`），那是它自己的预览切页工具：
+       · `form` ⇒ 落成本页模板（本笔主体）；
+       · `bad`（校验态）⇒ 由**既有** `showTip` 驱动，逐字段落 `.tip` + `.inp.err` / `.codes.err`
+         / `.picbox.err`，**不新增 script 状态**；
+       · `ok`（提交成功）⇒ 现有实现是 `alert('商品上架成功！')`，稿画的是**行内成功面**。
+         那需要新增一个 script 状态（`v-if="justSubmitted"`）才成立 ⇒ **超出 D 笔边界
+         （`<template>` + `<style scoped>`），本笔不落**，已在 `slot-registry.md` §一 commit 10 登记。
+  -->
+  <main class="uc-main">
 
-      <div class="form-group">
-        <div class="info-row">
-          <label>商品名称</label>
-          <input
-            class="info-input"
-            v-model="GoodName"
-            type="text"
-            placeholder="请输入商品名称"
-          />
-        </div>
-        <div class="tip-red" v-if="showTip && !GoodName">
-          请输入商品名称
-        </div>
-      </div>
+    <!-- 面包屑（稿 `:336-338`）。⚠️「用户中心」指向**已存在路由** `/merchant/user`
+         （`router/index.js:98` 的 `path: 'user'` 就是 `:104-110` 那组 `subMenu` 的父路径）
+         ⇒ 判据落**真 `<router-link>`**，不是死链接。 -->
+    <nav class="crumb">
+      <router-link to="/merchant/user">用户中心</router-link>
+      <i class="sp">/</i>
+      <span class="cur">上架商品</span>
+    </nav>
 
-      <div class="form-group">
-        <div class="info-row">
-          <label>商品价格</label>
-          <input
-            class="info-input"
-            v-model="Price"
-            type="number"
-            placeholder="请输入商品价格"
-          />
-        </div>
-        <div class="tip-red" v-if="showTip && !Price">
-          请输入商品价格
-        </div>
-      </div>
-
-      <div class="form-group">
-        <div class="info-row">
-          <label>商品图片</label>
-          <div class="img-upload-box" @click="chooseImage">
-            <img v-if="previewImg" :src="previewImg" class="preview-img" />
-            <span v-else>点击选择图片</span>
-            <input
-              ref="fileInput"
-              type="file"
-              accept="image/*"
-              style="display: none"
-              @change="handleImageChange"
-            />
-          </div>
-        </div>
-        <div class="tip-red" v-if="showTip && !selectedFile">
-          请选择商品图片
-        </div>
-      </div>
-
-      <div class="form-group">
-        <div class="info-row type-section">
-          <label>商品类型</label>
-          <div class="radio-group">
-            <div class="radio-list">
-              <label v-for="item in typeList" :key="item.Id">
-                <input
-                  v-model="GoodType"
-                  type="radio"
-                  :value="item.GoodType"
-                />
-                {{ item.GoodType }}
-              </label>
-              <label v-if="tempNewType">
-                <input
-                  v-model="GoodType"
-                  type="radio"
-                  :value="tempNewType"
-                />
-                {{ tempNewType }}（新类型）
-              </label>
-            </div>
-            <div class="add-type-box">
-              <input v-model="newType" placeholder="输入新类型名" />
-              <button @click="addTempType">临时添加类型</button>
-            </div>
-          </div>
-        </div>
-        <div class="tip-red" v-if="showTip && !GoodType">
-          请选择商品类型
-        </div>
-      </div>
-
-      <div class="form-group">
-        <div class="info-row">
-          <label>商品型号</label>
-          <input
-            class="info-input"
-            v-model="ProductCode"
-            type="text"
-            placeholder="请输入商品型号"
-          />
-        </div>
-        <div class="tip-red" v-if="showTip && !ProductCode">
-          请输入商品型号
-        </div>
-      </div>
-
-      <div class="save-btn-wrap">
-        <button class="save-info-btn" @click="submitGoods">上架商品</button>
-      </div>
+    <!-- 页头（稿 `.head` `:185-188`）。
+         ⚠️ 稿的 `:341` 副题是「声谷小店 · 新建一件商品，…」——「声谷小店」是它 mock 的店名
+         （编的名 ⇒ 照判据不落）⇒ 副题只留**真陈述**：那五项就是 `submitGoods` 的必填判据
+         （`GoodName` / `Price` / `selectedFile` / `GoodType` / `ProductCode`），逐字对得上。
+         ⚠️ **类名用本页稿自己的 `.head` / `.head h1` / `.head .sub`**，不去套 `UserInfoPage.vue`
+         的 `.page-h`：两份稿**自己就不同**（本页 `.head` 带一条发丝线 + `--fs-xs` 副题；
+         UserCenter 稿 `.page-h` 无发丝线 + `--fs-sm` 副题）⇒「同壳一套类名」的口径**在此不适用**。 -->
+    <div class="head">
+      <h1>上架商品</h1>
+      <div class="sub">新建一件商品，名称 / 价格 / 图片 / 类型 / 型号五项必填</div>
     </div>
-  </div>
+
+    <form class="form" @submit.prevent>
+
+      <!-- 校验汇总条（稿 `:519`，只在「校验态」出现）。稿写死「还有 5 项未完成」—— 那是它
+           一次全空的示意值 ⇒ 本页**实时算**：数的是 `submitGoods` 那 5 个必填判据里的空项。
+           ⚠️ 用模板内联表达式、**不新增 script 状态**（D 笔边界）⇒ 数组写了两遍，是有意的。
+           ⚠️ 全填满时 `some(...)` 为假 ⇒ 整条不渲染（不会出现「还有 0 项未完成」这个假陈述）。 -->
+      <div
+        v-if="showTip && [GoodName, Price, selectedFile, GoodType, ProductCode].some(v => !v)"
+        class="note-bad"
+      >
+        还有 {{ [GoodName, Price, selectedFile, GoodType, ProductCode].filter(v => !v).length }} 项未完成，请补齐后再提交。
+      </div>
+
+      <!-- ═══ 01 基本信息（稿 `:347-375`）══════════════════════════════════════ -->
+      <section class="sec">
+        <div class="sec-h"><span class="idx">01</span><h2>基本信息</h2></div>
+
+        <div class="grid2">
+          <div class="f">
+            <label for="g-name">商品名称</label>
+            <input
+              id="g-name"
+              v-model="GoodName"
+              class="inp"
+              :class="{ err: showTip && !GoodName }"
+              type="text"
+              placeholder="请输入商品名称"
+            >
+            <div v-if="showTip && !GoodName" class="tip">请输入商品名称</div>
+          </div>
+
+          <div class="f">
+            <label for="g-code">商品型号（ProductCode）</label>
+            <input
+              id="g-code"
+              v-model="ProductCode"
+              class="inp"
+              :class="{ err: showTip && !ProductCode }"
+              type="text"
+              placeholder="请输入商品型号"
+            >
+            <!-- 稿 `:532-535` 的规矩：出错时**撤掉**那条灰字解释 —— 左列只有红字，
+                 本列若红字下再挂灰字，两列高度不齐且灰字会被读成「错误的一部分」。 -->
+            <div v-if="showTip && !ProductCode" class="tip">请输入商品型号</div>
+            <div v-else class="hint">同一商品的不同规格靠它区分。</div>
+          </div>
+        </div>
+
+        <div class="f mt">
+          <span class="lb">商品类型</span>
+          <!-- ⚠️ 稿 `:362-367` 画的是 `<button class="code" aria-checked>` 单选组；
+               本页保留**既有真控件** `<input type="radio" v-model="GoodType">`（机制逐字未动），
+               只取其视觉（发丝线胶囊 + 选中态染 `--brand`）。`aria-checked` 的语义由
+               **原生 radio** 承担 ⇒ 比 `<button>` 更准，不是降级。 -->
+          <div class="codes" :class="{ err: showTip && !GoodType }">
+            <label
+              v-for="item in typeList"
+              :key="item.Id"
+              class="code"
+              :class="{ on: GoodType === item.GoodType }"
+            >
+              <input v-model="GoodType" type="radio" name="goodtype" :value="item.GoodType">
+              <span>{{ item.GoodType }}</span>
+            </label>
+            <label
+              v-if="tempNewType"
+              class="code"
+              :class="{ on: GoodType === tempNewType }"
+            >
+              <input v-model="GoodType" type="radio" name="goodtype" :value="tempNewType">
+              <span>{{ tempNewType }}（新类型）</span>
+            </label>
+          </div>
+          <!-- 稿 `:546` 的规矩：提示必须**紧贴它管的那组控件**，不掉到发丝线下面。 -->
+          <div v-if="showTip && !GoodType" class="tip">请选择商品类型</div>
+
+          <!-- 临时新增类型：**既有机制**（`addTempType`），不是占位（稿 `:368-373`）。
+               稿注要它落在**次行**、用发丝线与标签行分开（Q3 第一轮修的就是这件事）。 -->
+          <div class="addtype">
+            <input v-model="newType" type="text" placeholder="输入新类型名">
+            <button type="button" class="btn-quiet" @click="addTempType">临时添加类型</button>
+            <span class="hint">本次上架先用，提交成功后写入类型库</span>
+          </div>
+        </div>
+      </section>
+
+      <!-- ═══ 02 价格库存（稿 `:378-403`）══════════════════════════════════════ -->
+      <section class="sec">
+        <div class="sec-h"><span class="idx">02</span><h2>价格库存</h2></div>
+
+        <div class="grid2">
+          <div class="f">
+            <label for="g-price">商品价格</label>
+            <span class="money" :class="{ err: showTip && !Price }">
+              <span class="u">¥</span>
+              <input id="g-price" v-model="Price" type="number" placeholder="0.00">
+            </span>
+            <div v-if="showTip && !Price" class="tip">请输入商品价格</div>
+          </div>
+
+          <!-- 预留位 ①（稿 `:386-392`）—— 块级 `<div class="f">` ⇒ 只挂 `data-slot` + `title`。
+               ⚠️ 内部那个输入框是**稿外死控件**（无 `data-slot`）⇒ 落 `disabled` + `title`，见 §三。 -->
+          <div
+            class="f"
+            data-slot="预留 · 划线原价 / 折扣（动现有代码 5 处 · 超档）"
+            title="待 C3〈商品〉——goods 表只有 Price 一列，无原价 / 折扣列：mall_management_sql.sql + GoodsDao.java + GoodsService.java + GoodsController.java + GoodsAdd.vue = 5 处，**超档**，因清单点名而画出（见 README 挂账表）"
+          >
+            <span class="lb">划线原价 / 折扣</span>
+            <span class="money" data-off>
+              <span class="u">¥</span>
+              <input
+                type="number"
+                placeholder="0.00"
+                disabled
+                title="待 C3〈商品〉——goods 无原价列，5 处改动（超档）"
+              >
+            </span>
+            <div class="hint">填了原价才会在商品详情页显示划线价与折扣角标。</div>
+          </div>
+        </div>
+
+        <!-- 预留位 ②（稿 `:395-402`）—— 块级。输入框同款死控件。 -->
+        <div
+          class="f mt"
+          data-slot="预留 · 库存（动现有代码 5 处 · 超档）"
+          title="待 C3〈商品〉——goods 表无库存列（GoodsDao.java:76 的 INSERT 列序实测 7 列）：mall_management_sql.sql + GoodsDao.java + GoodsService.java + GoodsController.java + GoodsAdd.vue = 5 处，**超档**，因清单点名而画出（见 README 挂账表）"
+        >
+          <label for="g-stock">库存</label>
+          <input
+            id="g-stock"
+            class="inp narrow"
+            type="number"
+            placeholder="—"
+            disabled
+            title="待 C3〈商品〉——goods 无库存列，5 处改动（超档）"
+          >
+          <div class="hint">库存要能随下单扣减才算真跑起来，所以后端要一起动。</div>
+        </div>
+      </section>
+
+      <!-- ═══ 03 商品图（稿 `:406-424`）════════════════════════════════════════ -->
+      <section class="sec">
+        <div class="sec-h">
+          <span class="idx">03</span><h2>商品图</h2>
+          <span class="note">主图随上架请求一起上传（真功能）</span>
+        </div>
+
+        <div class="pics">
+          <!-- 主图 = **既有真功能**（`chooseImage` → `previewImg`，原实现逐字未动）。
+               ⚠️ 稿 `:411` 的 `.picbox.main` 里是一行文字；本页**保留既有真预览**
+               `<img v-if="previewImg">`（原实现就有），无图时才显那行文字。 -->
+          <button
+            type="button"
+            class="picbox main"
+            :class="{ err: showTip && !selectedFile }"
+            @click="chooseImage"
+            title="点击选择主图"
+          >
+            <img v-if="previewImg" :src="previewImg" class="picbox-img" alt="商品主图预览">
+            <span v-else>点击选择主图</span>
+          </button>
+
+          <!-- 预留位 ③（稿 `:413-421`）—— 块级 `<div class="pics">` ⇒ 只挂 `data-slot` + `title`。
+               内两只 `.picbox` 是**稿外死控件**（稿里是 `<span>`、无 `disabled`；
+               本笔照 §三 口径**不改成真控件**，改为 `span` + `off` 态样式 + `title`）⇒ 见 §三。 -->
+          <div
+            class="pics"
+            data-slot="预留 · 多图（图集）（动现有代码 ≥4 处 · 超档）"
+            title="待 C3〈商品〉——goods 表只有 GoodImg 一列（单图）：加一张图集子表或改列结构 + GoodsDao.java + GoodsService.java + GoodsController.java + GoodsAdd.vue = ≥4 处，**超档**，因清单点名而画出"
+          >
+            <span class="picbox off" title="待 C3〈商品〉——goods 只有 GoodImg 一列（≥4 处，超档）">
+              <span class="tagline">＋ 第 2 张<br>（待 C3）</span>
+            </span>
+            <span class="picbox off" title="待 C3〈商品〉——同上">
+              <span class="tagline">＋ 第 3 张<br>（待 C3）</span>
+            </span>
+          </div>
+        </div>
+
+        <div v-if="showTip && !selectedFile" class="tip">请选择商品图片</div>
+        <div v-else class="pic-hint">建议 1:1 方图，长边 ≥ 800px。主图为空不能提交。</div>
+
+        <input
+          ref="fileInput"
+          type="file"
+          accept="image/*"
+          class="file-hidden"
+          @change="handleImageChange"
+        >
+      </section>
+
+      <!-- ═══ 04 商品详情（稿 `:427-436`）══════════════════════════════════════ -->
+      <section class="sec">
+        <div class="sec-h"><span class="idx">04</span><h2>商品详情</h2></div>
+
+        <!-- 预留位 ④（稿 `:429-435`）—— 块级。textarea 是稿外死控件（`disabled` 已在稿里）。 -->
+        <div
+          class="f"
+          data-slot="预留 · 详情富文本（动现有代码 6 处 · 超档）"
+          title="待 C3〈商品〉——goods 表无详情列：mall_management_sql.sql + GoodsDao.java + GoodsService.java + GoodsController.java + GoodsAdd.vue + ProductPage.vue（展示）= 6 处，**超档**，因清单点名而画出（见 README 挂账表）。⚠️ 用户边界写着不画富文本编辑器，这里是**文字 + 长图**的朴素形态，不是 WYSIWYG。"
+        >
+          <label for="g-desc">详情描述</label>
+          <textarea
+            id="g-desc"
+            class="inp"
+            placeholder="—"
+            disabled
+            title="待 C3〈商品〉——goods 无详情列，6 处改动（超档）"
+          ></textarea>
+          <div class="hint">展示在商品详情页的「商品详情」Tab。</div>
+        </div>
+      </section>
+
+      <!-- ═══ 05 规格 SKU（稿 `:439-463`）══════════════════════════════════════ -->
+      <section class="sec">
+        <div class="sec-h">
+          <span class="idx">05</span><h2>规格 SKU</h2>
+          <span class="note">单规格 = 上面的「商品型号」，已经是真功能</span>
+        </div>
+
+        <div class="f">
+          <span class="lb">单规格（现有实现）</span>
+          <!-- ⚠️ 稿 `:445-447` 画的是**三枚示意码**（`STD-GRAY` / `ANC-BLACK` / `PRO-WHITE`，
+               那是它编的值）⇒ 照判据「编的名 ⇒ 落 `—`」，本页落**真值单枚**：
+               现有实现就是 `ProductCode` 一个字段承载规格（`submitGoods` 的必填项之一）。 -->
+          <div class="codes">
+            <span class="code on static">{{ ProductCode || '—' }}</span>
+          </div>
+          <div class="hint">这个码就是「商品型号」的取值 —— 现有实现用 ProductCode 一个字段承载规格。</div>
+        </div>
+
+        <!-- 预留位 ⑤（稿 `:451-462`）—— 块级。矩阵里的三行规格名是**稿的示意值**，
+             但整块在 `data-slot` 内 ⇒ 照 commit 5（`OrderCenter.vue:89-92` 的筛选栏）
+             同一口径：**预留块内的稿 mock 文本逐字保留**，不换成 `—`。 -->
+        <div
+          class="f mt"
+          data-slot="预留 · 多规格矩阵（动现有代码 ≥4 处 · 超档）"
+          title="待 C3〈商品〉——无 SKU 表、无组合价 / 库存列：新建 SKU 表 + GoodsDao.java + GoodsService.java + GoodsController.java + GoodsAdd.vue + ProductPage.vue = ≥4 处，**超档**，因清单点名而画出（见 README 挂账表）"
+        >
+          <span class="lb">多规格矩阵（颜色 × 尺码，逐行定价）</span>
+          <div class="matrix">
+            <div class="hd"><span>规格</span><span>价格</span><span>库存</span><span>编码</span></div>
+            <div class="rw"><span class="nm">深空灰 / 标准</span><span>—</span><span>—</span><span>—</span></div>
+            <div class="rw"><span class="nm">曜石黑 / 降噪</span><span>—</span><span>—</span><span>—</span></div>
+            <div class="rw"><span class="nm">珍珠白 / 旗舰</span><span>—</span><span>—</span><span>—</span></div>
+          </div>
+          <div class="hint">多规格要能各自定价、各自扣库存才算真跑起来 —— 那是新的表结构，不是加一列的事。</div>
+        </div>
+      </section>
+
+      <!-- ═══ 06 服务承诺（稿 `:466-479`）══════════════════════════════════════ -->
+      <section class="sec">
+        <div class="sec-h">
+          <span class="idx">06</span><h2>服务承诺</h2>
+          <span class="note">文案与商品详情页承诺条逐字一致</span>
+        </div>
+
+        <!-- 预留位 ⑥（稿 `:469-478`）—— 块级。四条文案与 ProductPage 的承诺条**必须逐字一致**
+             （稿的跨页共性组件登记），本笔照稿逐字取。 -->
+        <div
+          class="f"
+          data-slot="预留 · 服务承诺勾选（动现有代码 ≥4 处 · 超档）"
+          title="待 C3〈商品〉——goods 表无承诺列，选了什么存不下来：mall_management_sql.sql + GoodsDao.java + GoodsController.java + GoodsAdd.vue = ≥4 处，**超档**，因清单点名而画出（见 README 挂账表）"
+        >
+          <div class="svcs">
+            <span class="svc"><button class="ck" type="button" aria-checked="true" disabled title="待 C3〈商品〉——无承诺列（≥4 处，超档）"></button>正品保障</span>
+            <span class="svc"><button class="ck" type="button" aria-checked="true" disabled title="同上"></button>7 天无理由</span>
+            <span class="svc"><button class="ck" type="button" aria-checked="false" disabled title="同上"></button>极速退款</span>
+            <span class="svc"><button class="ck" type="button" aria-checked="false" disabled title="同上"></button>运费险</span>
+          </div>
+          <div class="hint">勾选后会显示在商品详情页的承诺条上。</div>
+        </div>
+      </section>
+
+      <!-- ── 底部动作条（稿 `:482-489`）───────────────────────────────────── -->
+      <div class="acts">
+        <!-- 预留位 ⑦（稿 `:483-485`）—— 这里**本身就是控件** ⇒ 照 §三/口径 2 落 `disabled` + `data-slot` + `title`。 -->
+        <button
+          type="button"
+          class="btn-draft"
+          disabled
+          data-slot="预留 · 保存草稿（动现有代码 ≥4 处 · 超档）"
+          title="待 C3〈商品〉——无草稿态：goods 表无状态列（下架 = 删行），草稿要先能存而不出现在「查看商品」里：mall_management_sql.sql + GoodsDao.java + GoodsController.java + GoodsUp.vue（列表要过滤掉草稿）= ≥4 处，**超档**，因清单点名而画出"
+        >保存草稿</button>
+
+        <button type="button" class="btn-main" @click="submitGoods">上架商品</button>
+        <div class="hint">提交成功后会清空表单，可继续上架下一件。</div>
+      </div>
+    </form>
+
+  </main>
 </template>
 
 <script setup>
@@ -194,7 +415,7 @@ const submitGoods = async () => {
   // 如果是本次临时新增的类型 → 1
   if (needSaveNewType) {
     realGoodTypeNew = 1
-  } 
+  }
   // 如果是数据库里已有的类型 → 用数据库里的值
   else {
     const type = typeList.value.find(t => t.GoodType === GoodType.value)
@@ -242,123 +463,229 @@ const submitGoods = async () => {
 </script>
 
 <style scoped>
-.goods-add-page {
-  width: 90vw;
-  display: flex;
-  flex-direction: column;
-  gap: 20px;
+/* ══════════════════════════════════════════════════════════════════════════════
+   取自 `docs/美化/pages/GoodsAdd.html`：
+     `:181-183`（`.crumb*`）`:185-188`（`.head*`）`:191`（`.form`）`:192-193`（`.sec`）
+     `:194-198`（`.sec-h*`）`:199`（`.grid2`）`:201-204`（`.f*`）`:205-208`（`.inp*`）
+     `:209-210`（`.inp[disabled]`）`:213`（`textarea.inp`）`:214`（`.tip`）`:215-216`（`.note-bad`）
+     `:219-227`（`.money*`）`:230-238`（`.pics` / `.picbox*` / `.pic-hint`）
+     `:241-254`（`.codes*` / `.code*` / `.addtype*`）`:257-266`（`.svcs*` / `.ck*` / `.btn-quiet*`）
+     `:269-274`（`.matrix*`）`:277-286`（`.acts*` / `.btn-main` / `.btn-draft*`）
+     `:296-308`（两条 `@media`）
+
+   本次「从稿到 Vue」的**适配**，逐条登记：
+     ① 稿的全局重设 `body{}` / `a{}` / `button,input,select{}` / `button{}`（稿 `:157-161`）里的
+        后三件**必须搬进 scoped 且限定本页** —— 稿的 `.code` / `.ck` / `.btn-quiet` / `.btn-draft`
+        都是裸 `<button>`，不重设就会带上 UA 的 `background: rgb(240,240,240)` /
+        `border: 2px outset` / `font-family: Arial`（commit 7 / 8 都实踩过）。
+        ⚠️ `body{font-family|font-size|color}` + `background` **落到本页根 `.uc-main`**，
+        `background` 不搬（壳 `.app-shell` 已铺 `var(--bg)`，再铺一次会把右栏画成另一块底）。
+     ② 稿的 `.wrap` / `.body` / `.uc-menu` / `.nav-bar` **不进本组件**（落点 `AppShell.vue` /
+        `UserCenter.vue`）⇒ 未搬。
+     ③ 稿里三处行内 `style="margin-top:var(--s5)"` ⇒ 收敛成类 `.mt`（`:199` 那个 `.grid2`
+        之后的三个块用它）；`.inp` 的行内 `style="max-width:240px"` ⇒ 收敛成 `.narrow`。
+     ④ 稿 `.picbox` 的 `cursor:not-allowed;border-style:dashed;opacity:.75`（`:415` / `:418`
+        的行内样式）⇒ 收敛成 `.picbox.off`（多图那两只）。
+     ⑤ 稿 `.code[aria-checked="true"]` ⇒ 本页是**原生 radio**（见模板注释）⇒ 改绑类 `.code.on`
+        （`:class="{ on: GoodType === … }"`）。`.code.static` 是 05 那枚**只读**展示码
+        （它不是控件 ⇒ 不显手型）。
+     ⑥ `.picbox-img` 是**原实现就有的预览图**（`previewImg`）新增的适配类（稿无此件，
+        稿的主图框里只有一行文字）—— `object-fit:cover` 撑满稿的 120×120。
+     ⑦ `.file-hidden` 取代原实现的行内 `style="display: none"`。
+     ⑧ ⚠️ **稿 `:root{--d2: calc(var(--fs-2xl) * 1.00)}`（稿 `:128`）必须跟着搬** —— 稿 `:186`
+        的 `.head h1` 写的是 `font-size:var(--d2)`；`tokens.css` 里**没有** `--d2`（它只定义
+        `--fs-*`）⇒ scoped 块若不自己定义，`var(--d2)` 在**计算值阶段**判为无效、整条声明被丢弃，
+        标题**静默回落到继承来的 `--fs-sm`（15px）**，与正文同大。落法同 `UserInfoPage.vue:393`
+        （写在本页根 `.uc-main` 上，`calc(x * 1.00)` ≡ `x` ⇒ 写 `var(--fs-2xl)`）。
+        ⚠️ 这只在**算出来的** 36px 上看得出来，肉眼扫模板扫不出 ⇒ `shot10.mjs` 已加 `h1Fs` 断言。
+   ⚠️ `box-sizing` **不在此重复** —— `tokens.css` 的 `*` 重设已是全局。
+   ══════════════════════════════════════════════════════════════════════════════ */
+
+/* ── 稿 `:160-161` 的重设，限定本页 ─────────────────────────────────────────── */
+button, input, select { font: inherit; color: inherit; }
+button { background: none; border: 0; cursor: pointer; }
+
+/* ── 本页根 ────────────────────────────────────────────────────────────────── */
+.uc-main {
+  --d2: var(--fs-2xl);          /* 稿 `:128` 的 `:root` 落点，见上面适配 ⑧ */
+  flex: 1;
+  min-width: 0;
+  font-family: var(--font);
+  font-size: var(--fs-sm);
+  color: var(--ink);
 }
 
-.card {
-  width: 100%;
-  background: #fff;
-  border-radius: 18px;
-  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.06);
-  padding: 26px;
-  box-sizing: border-box;
+/* ── 面包屑（稿 `:181-183`）—— 分隔符与文字**同色**，不用浅灰 ───────────────── */
+.crumb { display: flex; align-items: center; font-size: var(--fs-xs); color: var(--ink-3); margin-bottom: var(--s5); }
+.crumb .sp { font-style: normal; padding: 0 var(--s2); }
+.crumb .cur { color: var(--ink-2); }
+.crumb a:hover { color: var(--brand-ink); }
+
+/* ── 页头（稿 `:185-188`）──────────────────────────────────────────────────── */
+.head { padding-bottom: var(--s5); border-bottom: 1px solid var(--line-2); }
+.head h1 {
+  font-family: var(--font-display);
+  font-size: var(--d2); font-weight: var(--fw-med); line-height: 1.15; letter-spacing: -.02em;
+}
+.head .sub { margin-top: var(--s1); font-size: var(--fs-xs); color: var(--ink-3); }
+
+/* ── 分区：靠**序号 + 发丝线 + 留白**分层，不靠字号（稿 `:191-199`）────────────── */
+.form { margin-top: var(--s6); max-width: 680px; }
+.sec { padding-top: var(--s6); margin-top: var(--s6); border-top: 1px solid var(--line-2); }
+.sec:first-of-type { border-top: 0; margin-top: 0; padding-top: 0; }
+.sec-h { display: flex; align-items: baseline; gap: var(--s3); margin-bottom: var(--s5); }
+.sec-h .idx {
+  font-family: var(--font-mono); font-size: var(--fs-xs); color: var(--ink-3);
+  font-variant-numeric: tabular-nums;
+}
+.sec-h h2 { font-family: var(--font-display); font-size: var(--fs-md); font-weight: var(--fw-reg); }
+.sec-h .note { margin-left: auto; font-size: var(--fs-xs); color: var(--ink-3); }
+.grid2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--s5); }
+
+/* ── 字段（稿 `:201-216`）──────────────────────────────────────────────────── */
+.f { margin-bottom: var(--s5); }
+.f:last-child { margin-bottom: 0; }
+.f > label, .f .lb { display: block; font-size: var(--fs-xs); color: var(--ink-3); margin-bottom: var(--s2); }
+.f .hint { margin-top: var(--s2); font-size: var(--fs-xs); color: var(--ink-3); }
+.mt { margin-top: var(--s5); }
+
+.inp {
+  width: 100%; height: 40px; padding: 0 var(--s3);
+  border: 1px solid var(--line-2); border-radius: var(--r2); background: var(--surface);
+}
+.inp:focus { outline: none; border-color: var(--brand); box-shadow: 0 0 0 3px var(--brand-tint); }
+.inp.err { border-color: var(--danger); }
+/* 占位输入必须**读成惰性**：底色降一档 + 字变灰，否则跟可填的框长得一样 */
+.inp[disabled] { background: var(--surface-2); color: var(--ink-3); cursor: not-allowed; }
+.inp.narrow { max-width: 240px; }
+textarea.inp { height: 88px; padding: var(--s3); resize: none; font-family: inherit; line-height: 1.6; }
+
+.tip { margin-top: var(--s2); font-size: var(--fs-xs); color: var(--danger); }
+.note-bad {
+  margin-bottom: var(--s5); padding: var(--s3) var(--s4); border-radius: var(--r2);
+  background: var(--danger-ground); color: var(--danger-deep); font-size: var(--fs-xs);
 }
 
-/* 每组输入框独立分组，间距统一 */
-.form-group {
-  margin-bottom: 24px;
+/* ── 价格 / 原价：¥ 与数字同框（稿 `:218-227`，与 GoodsUp 弹窗同款）───────────── */
+.money {
+  display: flex; align-items: center; width: 100%; max-width: 240px; height: 40px;
+  padding: 0 var(--s3); gap: var(--s2);
+  border: 1px solid var(--line-2); border-radius: var(--r2); background: var(--surface);
 }
-
-.info-row {
-  display: flex;
-  align-items: center;
-  gap: 10px;
+.money:focus-within { border-color: var(--brand); box-shadow: 0 0 0 3px var(--brand-tint); }
+.money.err { border-color: var(--danger); }
+.money[data-off] { background: var(--surface-2); }
+.money .u { font-family: var(--font-display); color: var(--ink-3); }
+.money input {
+  flex: 1; min-width: 0; height: 100%; border: 0; outline: none; background: none;
+  font-variant-numeric: tabular-nums;
 }
+.money input[disabled] { background: none; cursor: not-allowed; }
 
-.info-row label {
-  width: 70px;
-  font-weight: 500;
-  flex-shrink: 0;
+/* ── 图片：实线内框 + 虚线外框（稿 `:229-238`）───────────────────────────────── */
+.pics { display: flex; gap: var(--s3); flex-wrap: wrap; }
+.picbox {
+  width: 120px; height: 120px; border: 1px dashed var(--line-2); border-radius: var(--r2);
+  background: var(--surface-2); display: flex; align-items: center; justify-content: center;
+  font-size: var(--fs-xs); color: var(--ink-3); cursor: pointer; text-align: center; line-height: 1.4;
 }
+.picbox:hover { border-color: var(--brand); color: var(--brand-ink); }
+.picbox.err { border-color: var(--danger); }
+.picbox.main { border-style: solid; border-color: var(--line-2); }
+/* 无图时露 `.picbox` 自己的底；有图时预览铺满（原实现的 `previewImg`） */
+.picbox-img { width: 100%; height: 100%; object-fit: cover; border-radius: inherit; display: block; }
+/* 占位多图框：稿 `:415` / `:418` 的行内态（不可点 ⇒ 不显手型、虚线、降透明） */
+.picbox.off { cursor: not-allowed; border-style: dashed; opacity: .75; }
+.picbox.off:hover { border-color: var(--line-2); color: var(--ink-3); }
+.picbox .tagline { font-size: var(--fs-xs); color: var(--ink-3); }
+.pic-hint { margin-top: var(--s2); font-size: var(--fs-xs); color: var(--ink-3); }
 
-.info-input {
-  width: 60vw;
-  padding: 10px 12px;
-  border: 1px solid #eee;
-  border-radius: 6px;
-  outline: none;
+/* ── 类型 / 规格：与 GoodsUp 弹窗里的规格标签**同一个控件**（稿 `:240-254`）──────── */
+.codes { display: flex; gap: var(--s3); flex-wrap: wrap; }
+/* 单选组出错：光靠下面那行红字，用户看不出「错在这一组标签上」——给整组描一圈红
+   （用 outline 而不是 border，是因为标签本身已经各有一条自己的边线）*/
+.codes.err { outline: 1px solid var(--danger); outline-offset: 6px; border-radius: var(--r1); }
+.code {
+  position: relative; height: 34px; padding: 0 var(--s5);
+  border: 1px solid var(--line-2); border-radius: var(--r1);
+  color: var(--ink-2); font-size: var(--fs-sm);
+  display: inline-flex; align-items: center;
 }
-
-.tip-red {
-  color: red;
-  font-size: 12px;
-  margin-left: 80px;
-  margin-top: 6px;
-  height: 16px;
+.code:hover { border-color: var(--ink-3); }
+.code.on { border-color: var(--brand); color: var(--brand-ink); font-weight: var(--fw-med); }
+/* 原生 radio 视觉隐藏但保留可聚焦 / 可键盘切换（稿的 `aria-checked` 语义由它承担） */
+.code input { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
+.code:focus-within { outline: 2px solid var(--brand); outline-offset: 2px; }
+/* 只读展示码（05 的单规格）：它不是控件 ⇒ 不显手型、不响应 hover */
+.code.static { cursor: default; }
+.code.static:hover { border-color: var(--brand); }
+.addtype {
+  margin-top: var(--s4); padding-top: var(--s4); border-top: 1px solid var(--line);
+  display: flex; gap: var(--s3); align-items: center; flex-wrap: wrap;
 }
-
-.img-upload-box {
-  width: 100px;
-  height: 100px;
-  border: 1px dashed #ccc;
-  border-radius: 8px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-  font-size: 12px;
-  color: #888;
+.addtype input {
+  width: 200px; height: 34px; padding: 0 var(--s3);
+  border: 1px solid var(--line-2); border-radius: var(--r1); background: var(--surface);
 }
+.addtype input:focus { outline: none; border-color: var(--brand); }
+.addtype .hint { margin: 0; font-size: var(--fs-xs); color: var(--ink-3); }
 
-.preview-img {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
+/* ── 服务承诺勾选：文案必须与 ProductPage 承诺条逐字一致（稿 `:256-266`）────────── */
+.svcs { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--s3) var(--s5); }
+.svc { display: flex; align-items: center; gap: var(--s3); font-size: var(--fs-sm); color: var(--ink-2); }
+.ck {
+  width: 16px; height: 16px; flex: 0 0 auto; border: 1px solid var(--line-2);
+  border-radius: var(--r1); background: var(--surface); padding: 0; cursor: pointer;
 }
-
-.type-section {
-  align-items: flex-start;
+.ck[aria-checked="true"] { background: var(--brand); border-color: var(--brand); }
+/* 占位态的勾选框：`<button disabled>` 自带不了「不可用」的光标，得手写 */
+.ck[disabled] { cursor: not-allowed; }
+.btn-quiet {
+  height: 34px; padding: 0 var(--s4); border: 1px solid var(--line-2);
+  border-radius: var(--r1); color: var(--ink-2);
 }
+.btn-quiet[disabled] { color: var(--ink-3); cursor: not-allowed; }
 
-.radio-group {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
+/* ── 多规格矩阵：表头 + 行（占位块，视觉上是一张真表；稿 `:268-274`）───────────── */
+.matrix { margin-top: var(--s4); border: 1px dashed var(--line-2); border-radius: var(--r2); overflow: hidden; }
+.matrix .hd, .matrix .rw { display: grid; grid-template-columns: 1.2fr 1fr 1fr 1fr; gap: 1px; background: var(--line); }
+.matrix .hd > * {
+  background: var(--surface-2); color: var(--ink-3); font-size: var(--fs-xs);
+  padding: var(--s3) var(--s3);
 }
+.matrix .rw > * { background: var(--surface); padding: var(--s3) var(--s3); color: var(--ink-3); font-size: var(--fs-sm); }
+.matrix .nm { color: var(--ink-2); }
 
-.radio-list {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 12px;
+/* ── 底部动作条（稿 `:276-286`）────────────────────────────────────────────── */
+.acts {
+  margin-top: var(--s8); padding-top: var(--s5); border-top: 1px solid var(--line-2);
+  display: flex; align-items: center; gap: var(--s4);
 }
-
-.add-type-box {
-  display: flex;
-  gap: 6px;
+.btn-main {
+  height: 44px; padding: 0 var(--s7); border-radius: var(--r2); background: var(--brand);
+  color: var(--bg); font-weight: var(--fw-med); white-space: nowrap;
 }
-
-.add-type-box input {
-  padding: 6px 10px;
-  border: 1px solid #ddd;
-  border-radius: 4px;
+.btn-main:hover { background: var(--brand-hover); }
+.btn-draft {
+  height: 44px; padding: 0 var(--s6); border: 1px solid var(--line-2); border-radius: var(--r2);
+  color: var(--ink-2); white-space: nowrap;
 }
+.btn-draft:not([disabled]):hover { border-color: var(--ink-3); }
+.btn-draft[disabled] { color: var(--ink-3); cursor: not-allowed; }
+.acts .hint { margin-left: auto; font-size: var(--fs-xs); color: var(--ink-3); text-align: right; }
 
-.add-type-box button {
-  padding: 6px 10px;
-  background: #007bff;
-  color: white;
-  border: none;
-  border-radius: 4px;
-  cursor: pointer;
+/* ── 原实现的行内 `style="display:none"` ⇒ 收敛成类 ────────────────────────── */
+.file-hidden { display: none; }
+
+/* ── 窄档（稿 `:296-308`）—— `.body` / `.uc-menu` 两件不在本组件 ⇒ 只搬后两条 ──── */
+@media (max-width: 1080px) {
+  .form { max-width: none; }
 }
-
-.save-btn-wrap {
-  width: 60vw;
-  margin-left: 70px;
-  margin-top: 10px;
-}
-
-.save-info-btn {
-  background-color: #e53e3e;
-  color: #fff;
-  border: none;
-  padding: 10px 22px;
-  border-radius: 6px;
-  cursor: pointer;
-  font-size: 14px;
+@media (max-width: 720px) {
+  .grid2 { grid-template-columns: 1fr; gap: var(--s5); }
+  .svcs { grid-template-columns: 1fr; }
+  .acts { flex-direction: column; align-items: stretch; }
+  .btn-main { order: -1; }
+  .acts .hint { margin-left: 0; text-align: left; }
 }
 </style>

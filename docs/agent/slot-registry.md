@@ -594,7 +594,79 @@ overflowX 断言（两档宽度 × 全部路由）」，跑了、46 组全 0，*
 
 ---
 
-## 二、待落清单（**新稿 44 条 − 已落 22 条 = 22 条**；老稿 4 条已随 commit 3 落、老稿 3 条已随 commit 8/9 落）
+### commit 10 —— `GoodsAdd.vue` ↔ `pages/GoodsAdd.html`（7 条 · **已落**，归属均 `C3〈商品〉`）
+
+**改动**：整个 `<template>` + `<style scoped>` 重写；**`<script setup>` 逐字未动**（363 → 691 行）。
+主体是「浮空白卡表单 → 六个编号分区 + 发丝线」（稿 `:190-199` 的 Q3 第二轮：靠**序号 + 发丝线 +
+留白**分层，**不靠字号**）。§二原表的 **7 条全部落 C3 登记**（N 全 > 3 ⇒ 本页一条占位档都没有）。
+
+| # | `data-slot` | 稿行 | 稿里的形态 | N | 归属 | Vue 落点 |
+|---|---|---|---|---|---|---|
+| 28 | 预留 · 划线原价 / 折扣（动现有代码 5 处 · 超档） | `:386` | 块级 `<div class="f">`，内含 1 个裸 `<input type="number">` | 5 | `C3〈商品〉` | `GoodsAdd.vue:141-157`（挂**块级 `.f`** ⇒ 无 `disabled`） |
+| 29 | 预留 · 库存（动现有代码 5 处 · 超档） | `:396` | 同上 | 5 | `C3〈商品〉` | `:161-176`（同上） |
+| 30 | 预留 · 多图（图集）（动现有代码 ≥4 处 · 超档） | `:413` | 块级 `.pics`，内含 2 只 `<span class="picbox">` | ≥4 | `C3〈商品〉` | `:204-215`（同上；两只 `span` **不是控件** ⇒ 只补 `title`） |
+| 31 | 预留 · 详情富文本（动现有代码 6 处 · 超档） | `:429` | 块级 `.f`，内含 1 个 `<textarea disabled>` | 6 | `C3〈商品〉` | `:235-249`（同上） |
+| 32 | 预留 · 多规格矩阵（动现有代码 ≥4 处 · 超档） | `:452` | 块级 `.f`，内含 4 列表格 3 行 | ≥4 | `C3〈商品〉` | `:273-286`（同上） |
+| 33 | 预留 · 服务承诺勾选（动现有代码 ≥4 处 · 超档） | `:469` | 块级 `.f`，内含 4 枚 `<button class="ck" disabled>` | ≥4 | `C3〈商品〉` | `:298-310`（同上） |
+| 34 | 预留 · 保存草稿（动现有代码 ≥4 处 · 超档） | `:484` | **`<button>` 本身**（稿里就带 `disabled`） | ≥4 | `C3〈商品〉` | `:316-322`（**是控件** ⇒ `disabled` + `data-slot` + `title` **三件齐**） |
+
+⚠️ **7 条里 6 条是「块级 `data-slot`」，只有 #34 是控件** —— 判据沿用 §三 开头那条
+（`<div>` / `<section>` / `<th>` 这类块级元素不是控件 ⇒ 不落 `disabled`）。
+⚠️ **与 commit 8/9 不同：本页稿的这 7 条自带 `title`**（如稿 `:387` 那条把 5 处改动逐项列全）
+⇒ **Vue 的 `title` 是逐字取稿、不是本笔补的**（口径 4 在此**适用**）。核对方式：稿 `:386/396/413/429/452/469/484`
+七处 `title` 与 Vue `:144/164/207/238/276/301/321` **逐字全同**（2026-10-07 实测，`data-slot` 值同样
+7/7 逐字全同）。
+⚠️ **稿另有 `data-future="待 C3〈商品〉"`（7 处）本笔不落** —— 那是稿自己的**角标**，与 Vue 无关，
+同 `ShoppingCart.vue:43`「`data-future` 两稿都不落（角标不是 Vue 的东西）」的先例。全仓 `src/views/`
+里 `data-future` **0 处落进模板**（仅在注释里被引用）。
+⚠️ **本页是全台账「块级预留位 + 内层死控件」最密的一页**：#28–#33 六条的**内层**另有 **7 件**稿外死控件
+（见 §三 commit 10）—— 这是「稿把这些预留位画成了**可交互的样子**、却没挂 `data-slot`」的必然产物。
+
+**落法三处（口径 4 之外，逐条登记）**：
+
+1. **判据分叉**（用户 2026-10-07 口径）：稿里**编的数字 / 名 / 价 → 落 `—`**；**入口指向已存在路由
+   → 真 `<router-link>`**。本页各命中：
+   - **编的值**：05「单规格」那三枚 `STD-GRAY` / `ANC-BLACK` / `PRO-WHITE` 是稿编的码 ⇒ 换成
+     **真值单枚** `{{ ProductCode || '—' }}`（现有实现就是 `ProductCode` 一个字段承载规格）。
+   - **已存在路由**：面包屑「用户中心」指向 `/merchant/user` ⇒ 真 `<router-link to="/merchant/user">`。
+   - ⚠️ 副题里的 mock 店名「声谷小店 · …」（稿 `:341`）⇒ **摘掉店名**、保留后半句真陈述。
+2. **预留块内的稿 mock 文本逐字保留**：05 多规格矩阵的三行规格名（`深空灰 / 标准` 等）**照稿留**
+   —— 同 commit 5 的 `OrderCenter.vue:89-92` 先例（`ZHJC53759811` / `用户名 / 客户号` / `2026-10-01`）：
+   **在 `data-slot` 块内**的稿 mock **不算**「编的值」，不换 `—`。
+3. **「既有真功能 / 真数据不删」四处**（同 commit 7 保真头像的先例）：
+   - **商品类型胶囊**：稿 `:352-357` 是 `<button aria-checked>` ⇒ 本页**保留既有原生
+     `<input type="radio" v-model="GoodType">`**（真语义、`<script setup>` 零改动的必要条件），
+     只把外观做成稿的 `.code` 胶囊（`.code.on` 由 `:class` 绑、`:focus-within` 补焦点环）。
+   - **主图框**：稿 `:411` 里只有一行文字 ⇒ **保留既有真预览** `<img v-if="previewImg" class="picbox-img">`
+     （原实现就有；`.picbox-img` 是为它新增的适配类，稿无此件）。
+   - **`.tip` 校验红字**：稿 `data-page="bad"` 面（`:497-586`）⇒ 用**既有的 `showTip` + 各字段空判**
+     落，**未新增任何 ref**；汇总条那句「还有 N 项未完成」由**模板内联表达式**现算
+     （稿 `:519` 写死 5 ⇒ 本页数真空项，实测「还有 5 项未完成」）。
+   - **底部「上架商品」**：`submitGoods` **一字未动**、**不 `disabled`**（真事件）。
+
+⚠️ **未落的一处（登记，**不擅自补**）**：稿的**成功态**面（`data-page="ok"`）**未落** —— 落它要新增
+一个 script 态（现实现是 `alert('商品上架成功！')` 后清空表单，见 `submitGoods`），**超出**
+「`<template>` + `<style scoped>`」的 D 笔边界。⚠️ 与稿 `data-page="bad"` 的面**待遇不同**：
+那个用既有 `showTip` 就能落，**故落了**；这个落不了，**记在这里**。
+
+⚠️ **⚠️ 本笔实踩一个「静默失效」，已修 + 已加断言**：稿 `.head h1`（`:186`）写
+`font-size:var(--d2)`，而 **`--d2` 只定义在稿自己的 `:root`**（稿 `:128`；`tokens.css` 里**只有 `--fs-*`**）
+⇒ scoped 块**不自己定义**时，`var()` 在**计算值阶段**判无效、**整条声明被丢弃**，标题**静默回落 15px**
+（= 正文的 `--fs-sm`）。**eslint 不报、build 不报、模板扫不出来**，只有**算出值**看得见。
+- **落法**：`--d2: var(--fs-2xl)` 写在**本页根 `.uc-main`** 上（同 `UserInfoPage.vue:393` 先例；
+  `ShoppingCart.vue:465` 是另一支落法 —— 那条直接写 `var(--fs-2xl)`、不设 `--d2`，**值相同**）。
+- **怎么暴露的**：先由**元素级截图**看出页头不对（那个截图的坑见 §五），再量算出值坐实。
+- **新增两支可复跑扫描**：`shot10.mjs` 断言「页标题**算出字号** = 36px」+「本页 scoped 规则消费的
+  `var(--x)` **全部解析得出**」；`美化/varscan.mjs` 把同一口径扫到**全站 21 条路由**（实测全绿），
+  另有负对照 `美化/varscan-negctl.mjs`（**运行时**删掉 CSSOM 里那条 `--d2` ⇒ 扫描报 `--d2`、
+  标题实测回落 **15px** ⇒ 证明这支扫描**有鉴别力**，不是「永远 ✅」的空校验器）。
+
+⚠️ **本笔未自行估算 `N`**：7 条的 `N` 全部**逐字取稿**（稿的 `data-slot` 文本里已写「动现有代码 N 处」），
+`title` 里的改动清单是把那 N 处**逐项摊开**（表名 / 类名），不是新算的数。
+
+---
+
+## 二、待落清单（**新稿 44 条 − 已落 29 条 = 15 条**；老稿 4 条已随 commit 3 落、老稿 3 条已随 commit 8/9 落）
 
 > 全部**照落 UI**。「档」列写的是**归属**，不是「本笔做不做功能」。
 > **commit 3 的 4 条不在这个数里** —— 它们来自**老稿 `主页改造.html`**（口径 6 的主页例外），见 §一。
@@ -602,17 +674,21 @@ overflowX 断言（两档宽度 × 全部路由）」，跑了、46 组全 0，*
 > ⇒ 本 §二 原共 **22（新稿）+ 3（老稿）= 25 条**，另 §一 已落 24（含老稿 4）。
 > ⚠️ **commit 8/9 落定后**：老稿那 3 条**已落** ⇒ 本节**只剩新稿 22 条待落**；§一 已落 **27 处**
 > （源码 `data-slot=` 计数，见 §五）。
+> ⚠️ **commit 10 落定后**：新稿那 7 条也**已落** ⇒ 本节**只剩新稿 15 条待落**；§一 已落 **34 处**
+> （源码计数，2026-10-07 实测 34，逐文件见 §五）。
 >
 > ⚠️ **数法以「新稿 44」为唯一基准**（`grep -rc data-slot= docs/美化/pages/*.html` 可复核，实测 44）。
 > 本表之前的表头写「10 页 / 36 条」，但**逐段相加是 40** ⇒ 那个 36 本就对不上，别再用它做减法。
-> 现按实测重算：44 − 已落 22（`GoodsSelect` 3 + `ChatRoom` 1 + `ShoppingCart-customer` 4 +
-> `OrderCenter-merchant` 的购物车面 2 + 同页销售面 5 + **commit 7 的 7**）= **22**。
+> 现按实测重算：44 − 已落 **29**（`GoodsSelect` 3 + `ChatRoom` 1 + `ShoppingCart-customer` 4 +
+> `OrderCenter-merchant` 的购物车面 2 + 同页销售面 5 + **commit 7 的 7** + **commit 10 的 7**）= **15**。
 >
-> ⚠️ **两个「已落」数字口径不同，别互相减**：本表的 **22 是「新稿里的条数」**；
-> §五 首条 grep 的 **24 是「源码里 `data-slot=` 出现的次数」**（`GoodsSelect` 3 + `ChatRoom` 1 +
-> `ShoppingCart` 4 + 老稿主页 4 + `OrderCenter` 5 + **`UserInfoPage` 7** = 24，实测）。
+> ⚠️ **两个「已落」数字口径不同，别互相减**：本表的 **29 是「新稿里的条数」**；
+> §五 首条 grep 的 **34 是「源码里 `data-slot=` 出现的次数」**（`GoodsSelect` 3 + `ChatRoom` 1 +
+> `ShoppingCart` 4 + 老稿主页 4 + `OrderCenter` 5 + **`UserInfoPage` 7** + 老稿子页面 3
+> （commit 8 的 2 + commit 9 的 1）+ **`GoodsAdd` 7** = 34，实测）。
 > 差在 `OrderCenter-merchant` 购物车面的 2 条**与 `ShoppingCart.vue` 共用同 2 处模板** ⇒ 稿 22 条
-> 只对应源码 20 处（新稿）+ 4 处（老稿）。
+> 只对应源码 20 处（新稿）+ 4 处（老稿）；老稿那 3 条则**不在「新稿 44」里**（它们来自
+> `子页面改造.html`）。
 
 ### commit 6 —— `OrderPane.vue` ↔ `pages/OrderCenter-merchant.html`（**0 条**）
 
@@ -654,17 +730,13 @@ overflowX 断言（两档宽度 × 全部路由）」，跑了、46 组全 0，*
 ⇒ Vue 的 `title` 是本笔补的**归属说明**，不是「逐字取稿」（口径 4 在此不适用）。
 
 
-### commit 10 —— `GoodsAdd.vue` ↔ `pages/GoodsAdd.html`（7 条 · 归属均 `C3〈商品〉`）
+### commit 10 —— `GoodsAdd.vue` ↔ `pages/GoodsAdd.html`（7 条 · **已落**）
 
-| `data-slot` | 稿行 | N |
-|---|---|---|
-| 预留 · 划线原价 / 折扣（动现有代码 5 处 · 超档） | `:386` | 5 |
-| 预留 · 库存（动现有代码 5 处 · 超档） | `:396` | 5 |
-| 预留 · 多图（图集）（动现有代码 ≥4 处 · 超档） | `:413` | ≥4 |
-| 预留 · 详情富文本（动现有代码 6 处 · 超档） | `:429` | 6 |
-| 预留 · 多规格矩阵（动现有代码 ≥4 处 · 超档） | `:452` | ≥4 |
-| 预留 · 服务承诺勾选（动现有代码 ≥4 处 · 超档） | `:469` | ≥4 |
-| 预留 · 保存草稿（动现有代码 ≥4 处 · 超档） | `:484` | ≥4 |
+⚠️ **7 条已全部落地，逐条台账移入 §一 commit 10**（#28–#34：稿行、N、归属、Vue 落点，外加
+「块级 6 + 控件 1」的判据、判据分叉三处、`--d2` 静默失效那一条）。此处**不再复制那张表**，
+避免第二份真相（同 commit 7 / commit 8·9 的处理）。留在本节的只有一件事：
+
+1. 该 7 条**已不在本「待落清单」里**，本表头随之由 44 − 22 = 22 改为 **44 − 29 = 15**。
 
 ### commit 11 —— `GoodsUp.vue` ↔ `pages/GoodsUp.html`（5 条 · 归属均 `C3〈商品〉`）
 
@@ -855,6 +927,32 @@ Vue 逐字照落（`:456-457`），只多一条 `text-decoration:none`（因为 
 
 ---
 
+### commit 10 —— `GoodsAdd.vue`（`pages/GoodsAdd.html`）
+
+**7 条**（本页是「块级预留位 + 内层死控件」最密的一页：6 个块级预留位里各嵌着可点数件）。
+判据同 §三 开头：稿画了**可交互的样子**、却**没挂 `data-slot`** ⇒ 落 `disabled` + `title`、**不接线**
+（D 笔功能实现量恒为 0）。
+⚠️ **与 commit 8/9（老稿那两页）不同：本页稿里这些死控件自己就带 `disabled` + `title`**
+⇒ **两件都是逐字取稿**（Vue 未自行发明文案；7 件的 `title` 与稿逐字全同，2026-10-07 实测）。
+
+| 稿行 | 元素 | 稿里的状态 | Vue 落点 | 归属 |
+|---|---|---|---|---|
+| `:390` | 划线原价 / 折扣那个 `<input type="number">` | 稿里就是 `<input … disabled title="…">`（**带 `disabled` + `title`，只缺 `data-slot`**） | `GoodsAdd.vue:149-154`（title 在 `:153`） | `C3〈商品〉` |
+| `:399-400` | `#g-stock` 库存 `<input class="inp">` | 同上（另带行内 `style="max-width:240px"`） | `:167-174`（title 在 `:173`；行内样式收敛成 `.narrow`） | `C3〈商品〉` |
+| `:432-433` | `#g-desc` 详情 `<textarea class="inp">` | 同上 | `:241-247`（title 在 `:246`） | `C3〈商品〉` |
+| `:472-475` | `.ck` 服务承诺勾选框 **4 枚** | 同上（`aria-checked` 逐枚为 `true`/`true`/`false`/`false`；第 2–4 枚的 `title` 是「同上」） | `:304-307` | `C3〈商品〉` |
+
+⚠️ **上表 7 件是「控件」口径的**（`Input` 3 件 + `Button` 4 枚；`shot10.mjs` 实测 `deadCtl.length === 7`）。
+⚠️ **另有 2 只 `.picbox`（稿 `:415` / `:418`，各自 `title` 在 `:416` / `:419`）不算「控件」** —— 稿里它们
+本来就是 `<span>`（**不可点**）⇒ 本笔**不把它们改成真控件**，只按稿落 `span` + `.off` 态样式
+（`cursor:not-allowed` / `border-style:dashed` / `opacity:.75`，稿是**行内样式** ⇒ 本页收敛成类 `.picbox.off`）
++ 照稿带 `title`（→ `GoodsAdd.vue:209-214`）。它们**不在**本节 7 件里，也不带 `data-slot`。
+
+⚠️ **4 枚 `.ck` 的 `aria-checked` 照稿逐枚取值**（`true` / `true` / `false` / `false`，稿 `:471-474`
+就是前两枚选中）—— 这是**只读展示**，不是开关（`disabled` ⇒ 点不动）。
+
+---
+
 ## 四、老稿 10 条（`主页改造.html` + `子页面改造.html`）
 
 逐条登记见 **`progress.md:1636-1649`**（表 #1–#10），此处**不复制**，避免第二份真相。
@@ -877,10 +975,11 @@ Vue 逐字照落（`:456-457`），只多一条 `text-decoration:none`（因为 
 ## 五、对账方法（验收时跑）
 
 ```bash
-# Vue 里实落的条数（应 = 台账「已落」条数 = 3 + 1 + 4 + 4 + 5 + 7 + 2 + 1 = 27，2026-10-07 实测 27）
+# Vue 里实落的条数（应 = 台账「已落」条数 = 3 + 1 + 4 + 4 + 5 + 7 + 2 + 1 + 7 = 34，2026-10-07 实测 34）
 grep -rn 'data-slot=' Mall-management-web/mall-management-system/src/views/ | wc -l
-#   逐文件：GoodsSelect 3 / ChatRoom 1 / ShoppingCart 4 / HomePage 4（老稿）/ OrderCenter 5 / UserInfoPage 7
-#           / HistoricalOrders 2（老稿，commit 8）/ FriendRoom 1（老稿，commit 9）
+#   逐文件（2026-10-07 实测）：GoodsSelect 3 / ChatRoom 1 / ShoppingCart 4 / HomePage 4（老稿）
+#           / OrderCenter 5 / UserInfoPage 7 / HistoricalOrders 2（老稿，commit 8）
+#           / FriendRoom 1（老稿，commit 9）/ GoodsAdd 7（commit 10）
 # 新稿里的总条数（应 = 44；**老稿另计**：主页改造.html 4 条 + 子页面改造.html 3 条，都不在这个数里）
 grep -rc 'data-slot=' docs/美化/pages/*.html | awk -F: '{s+=$2} END{print s+0}'
 # 稿外死控件（§三）：不带 data-slot 的 disabled 元素 —— 逐条与 §三 表对齐
@@ -906,6 +1005,8 @@ grep -c 'data-slot=' docs/美化/主页改造.html docs/美化/子页面改造.h
 `FriendRoom.vue`（commit 9）的 **1 条**挂在 `v-for` 里的 `.frt-act` 上 ⇒ **源码 1 处、渲染 = 好友数**
 （实测 3 位好友 ⇒ **3 处**；空态 ⇒ **0 处**）。`HistoricalOrders.vue`（commit 8）的 2 条**在 `<thead>` 里**
 （不在 `v-for` 内）⇒ 源码 2 处、渲染恒 **2**（但**空态下整张表不渲染 ⇒ 0**，与 `OrderCenter` 同款）。
+`GoodsAdd.vue`（commit 10）的 7 条**既不在 `v-for` 也不在 `v-if` 里**（六个分区与底部动作条
+都是无条件渲染）⇒ **源码 7 = 渲染 7**（这一条最简单，但与 `UserInfoPage` 的互斥分支形成对照）。
 （同理 `HomePage.vue` 的 4 条是**老稿主页**的，不在「新稿 44」里。）
 
 ---
@@ -954,3 +1055,101 @@ node "C:/Users/86159/Desktop/软件工程/美化/shot8.mjs"
 ⚠️ 本表**只报告**。⚠️ 未受影响的是**按名字**（不带行号）的引用（如 `progress.md:783` 的
 「`FriendRoom.vue`（**均未动**）」、`docs/美化/README.md:58` 的页面顺序）—— 它们说的是「这一页」，
 不是「这一行」。
+
+---
+
+### commit 10 的复现命令与实测
+
+```bash
+# 源码条数（应 34）
+grep -rn 'data-slot=' Mall-management-web/mall-management-system/src/views/ | wc -l
+# 本页的结构 / 校验态 / 真功能 / 溢出断言 + 截图（**42 项**）
+node "C:/Users/86159/Desktop/软件工程/美化/shot10.mjs"
+# 全站「scoped 规则消费的 var(--x) 都解析得出吗」扫描（21 条路由）
+node "C:/Users/86159/Desktop/软件工程/美化/varscan.mjs"
+# 上面那支的**负对照**（证明它有鉴别力，不是「永远 ✅」）
+node "C:/Users/86159/Desktop/软件工程/美化/varscan-negctl.mjs"
+```
+
+| 项 | 结果 |
+|---|---|
+| `shot10.mjs` | **全部通过**（exit 0）—— ① 表单态/结构 **25 项** / ③ 真功能 4 项 / ② 校验态 8 项 / ④ 溢出 2 项 / ⑤ 稿切面 3 项 = **42 项** |
+| `varscan.mjs` | **21 条路由全绿**（每条路由里各组件 scoped 规则消费的 `var(--x)` 全部解析得出） |
+| `varscan-negctl.mjs` | 负对照**成立**：运行时从 CSSOM 删掉那条 `--d2` ⇒ 扫描报 `--d2`、页标题算出值实测回落 **15px** |
+| `npx eslint src/views/GoodsAdd.vue` | exit **0** |
+| `npm run build` | 绿（**无 error**）· `2026-10-07T10:43:59.548Z` · Hash `d73c0f8eb58ffa99`（**全部改动落定后最后一次**）· 3 条 warning 全是 asset / entrypoint 体积建议，与本次改动无关 |
+| 截图 | **11 张**落在 `美化/d10/`（稿侧 6 + Vue 侧 5） |
+| refs 集合比（**token 集**，非原始产物） | **丢失 0**（详见下） |
+
+⚠️ 本页的 `overflowX = 0` 断言**同样受**「headless 滚动条宽恒为 0」的环境限制（见 `environment.md`）
+—— 它只证「**内容**不横向溢出」（实测 `main.uc-main` 宽 828@1440 / 768@1080）。
+
+⚠️ **本笔新增的两条断言值得单列**（都是被「`--d2` 静默失效」逼出来的，见 §一 commit 10）：
+「页标题**算出字号** = `36px`」、「本页 scoped 规则消费的 `var(--x)` **全部解析得出**」。
+
+### ⚠️ 主机 headless 探针的**第二个**坑：元素级截图对「高于视口」的元素会整体错位
+
+**2026-10-07 实踩（commit 10）**：`page.$('main.uc-main').screenshot()` 截一个 **高 2020px、视口 900px**
+的元素时，puppeteer 内部先滚动 ⇒ 截出来的图**整体上移**，**面包屑与页标题被切在画面外**
+（图里只剩下壳的 sticky 顶栏 + 副标题往下）。**看上去像「页头没渲染」，实际 DOM 完全正确**
+（几何实测：`main.uc-main.top = 108` / `.crumb = 108` / `.head = 149` / `.head h1 = 149`，全在页内）。
+- **为什么危险**：它会让人去改**没坏的**代码 —— 本笔正是先看到这张图，才去量 `--d2`，**顺带**揪出
+  真正的静默失效。若当时只看图不看几何，就会「修错的地方」。
+- **改法**（`shot10.mjs` 的 `shotEl` 已改）：先把视口撑到「元素底 + 60」，**滚回 0**
+  （此时视口坐标 ≡ 文档坐标），再用**显式 `clip`** 截，截完还原视口。
+
+### commit 10 引起的互引漂移（**只报告、不逐条修** —— 归 commit 14）
+
+`<template>` 整体重写 + `<style scoped>` 重写 ⇒ **`<script setup>` 整体后移 221 行**
+（`<script setup>` 旧 `:111` → 新 `:332`；新旧脚本段**逐字未动** ⇒ 这份 +221 是**精确**的换算基准）。
+全仓指向本文件的**带行号引用共 6 处**（2026-10-07 实测）：
+
+| 引用方 | 旧引 | **现应指** | 被引内容 |
+|---|---|---|---|
+| `api-contract.md:187` / `progress.md:1742` | `GoodsAdd.vue:135` | **`:359`** | `http.get(endpoints.goods.goodstype)`（**裸 GET**） |
+| `api-contract.md:187` / `progress.md:1742` | `GoodsAdd.vue:166` | **`:390`** | `http.post(endpoints.goods.goodstype, …)`（fire-and-forget） |
+| `api-contract.md:188` | `GoodsAdd.vue:217` | **`:438`** | `goodsAdd` 那次 POST 的 `await res.json()`（POST 本身在 `:437`） |
+| `AuthGateSmokeTest.java:267` | `GoodsAdd.vue:138` | **`:359`** | 同上裸 GET |
+| `AppShell.vue:205` | `GoodsAdd:163-169`（**裸名，无 `.vue`**） | **`:384-390`** | `selectedFile` / `previewImg` / `saveNewTypeToDB` 那一段 |
+
+⚠️ **其中两处「引用方原本就没对准」**（**不是**本笔造成的）：`api-contract.md:187` 与
+`progress.md:1742` 引的是 `:135` / `:166`，而 HEAD 版 GoodsAdd.vue 里这两个构造**分别在 `:138` / `:169`**
+（`:135` / `:166` 是**空行**）⇒ 引用方**本来就偏 3 行**（`AuthGateSmokeTest.java:267` 写的 `:138` 才是准的）。
+本笔**不改引用方**（那属 commit 14 的范围），只在此登记。
+⚠️ 本表**只报告**。⚠️ 未受影响的是**按名字**（不带行号）的引用（如 `progress.md:1457` 把
+`GoodsAdd.vue` 列进那 6 条 `REACHABLE_BUT_NOT_PUBLIC` 的调用页、`progress.md:1126` 的组件清单）
+—— 它们说的是「这一页」，不是「这一行」。
+
+### commit 10 的 refs 前后对照（`scripts/refs-scan.sh`）
+
+```bash
+# before = HEAD（commit 9）态；after = 本笔工作区
+# ⚠️ before 要在 **HEAD 态的工作区**上扫：本笔只改了 GoodsAdd.vue 与 slot-registry.md
+#    两个受跟踪文件 ⇒ 备份→`git checkout HEAD -- <这两个>`→扫→还原（还原后对拍 sha256）
+bash scripts/refs-scan.sh scripts/refs-before10.txt   # 2536 条
+bash scripts/refs-scan.sh                             # → scripts/refs-after.txt，2549 条
+# ⚠️ 比的是**token 集合**，不是原始产物
+cut -d: -f3- scripts/refs-before10.txt | sort -u > /tmp/b.tok
+cut -d: -f3- scripts/refs-after.txt    | sort -u > /tmp/a.tok
+comm -23 /tmp/b.tok /tmp/a.tok   # 只在 before ⇒ **丢失，应为 0**
+```
+
+⚠️ `scripts/refs-before10.txt` 这个**快照文件不入库** —— `.gitignore:40-42` 的原话是
+「脚本进仓（可复跑）；before/after 是每次运行的快照，不入库」（它只点名了 `refs-before.txt` /
+`refs-after.txt` 两个**规范名**，本笔这个带 `10` 后缀的同款快照同属该类）⇒ 新克隆的仓库里要
+**按上面的命令重跑**才能得到 before/after，文件本身不在版本库里。
+
+| 口径 | before | after | 差 |
+|---|---|---|---|
+| 原始产物行数 | 2536 | 2549 | **+13** |
+| **唯一 token 种类** | 1533 | 1542 | **+9** |
+| **只在 before（丢失）** | — | — | **0 条** ✅ |
+| 只在 after（新增） | — | — | 9 条，**全部是本笔自己新写的引用** |
+
+9 条新增 token（逐条可核）：`GoodsAdd.vue:141-157` / `:149-154` / `:209-214`（本页 §三 表的落点）、
+`OrderCenter.vue:89-92`（mock 文本先例）、`ShoppingCart.vue:43`（`data-future` 先例）、
+`ShoppingCart.vue:465`（`--d2` 的另一支落法）、`UserInfoPage.vue:393`（`--d2` 的先例）、
+`router/index.js:98` + 其续引 `:104-110`（面包屑那条路由）。
+⚠️ 原始产物 diff 会报 **88 条 `<`** —— **全部**来自 `docs/agent/slot-registry.md` 自己
+（本笔在它里面插了新节 ⇒ **它自己**的引用行号集体后移），**被引用的 token 一个没少**。
+这正是「**比 token 集合、不比原始产物**」这条口径的用处（同 commit 9）。
