@@ -35,3 +35,8 @@ scripts/concurrency/classpath.txt
 
 # A3 run.sh 的编译产物目录（javac -encoding UTF-8 两步编译的输出）
 .a3-out/
+
+# 「文件:行号」互引扫描器的产物
+# 脚本 scripts/refs-scan.sh 进仓（可复跑）；before/after 是每次运行的快照，不入库
+scripts/refs-before.txt
+scripts/refs-after.txt
