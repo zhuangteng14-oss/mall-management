@@ -2223,3 +2223,86 @@ find Mall-management-web/mall-management-system/src -name "CustomerPage.vue"
 - **反向自查**：这 **12 条的宿主 12/12 都是 `docs/agent/slot-registry.md`** ⇒ 全部是「本节把**既有**事实写进台账」产的，**不是新增的互引**。
 - **before 取法**：本 commit **只改了 `docs/agent/slot-registry.md` 一个受跟踪文件** ⇒ `cp` 备份 → `git checkout HEAD -- docs/agent/slot-registry.md` → 扫 → 还原（`sha256sum -c` 通过）。
 - ⚠️ 这 12 个 token **全是本节的报告文本**带的 ⇒ 属 §五 已登记的那类「**A 档已知假阳性来源**」（把事实写进被扫文档本身），两向的 丢失 / 新增 判定不受影响。
+
+---
+
+## 七、终验报告（commit 15 —— 【终】15 的收口；用户裁决 2026-10-07）
+
+**范围**：D 笔 **commit 1–13** 的收口验收（commit 14 只报告漂移、不逐条修，见 §六）。本节写在文件**尾部**（append-only）⇒ 台账内既有行号**零移动**。
+
+### 7-1　54 条占位对账 = 账平（实测）
+
+| 口径 | 值 | 出处（可复核） |
+|---|---|---|
+| 被减数 | **54** | 新稿 **44** + 老稿 **10** |
+| 新稿 44 | 44 | `grep -rc data-slot= docs/美化/pages/*.html` 实测 44 |
+| 老稿 10 | 10 | `主页改造.html` 4 + `子页面改造.html` 6（§四） |
+| 源码落点 | **49** | §五 首条 `grep -rn data-slot= src/` 实测 49（逐文件分列） |
+
+**54 − 49 = 5**，这 5 条的构成（**都不是「漏落」**）：
+
+- **2 = 跨稿重复**：`OrderCenter-merchant.html` **购物车面**的 2 条（`:767` / `:793`）与 `ShoppingCart.vue` **共用同 2 处模板** ⇒ 稿里数 2 条、源码里只落地 2 处（不是 4 处）。
+- **3 = 弃用段**：老稿 `子页面改造.html` 的 **#4 / #5 / #6**（UserInfoPage 面：会员等级积分 / 账户资产 / 账号与安全）—— 功能面**已由新稿** `pages/UserCenter-customer.html` 的「我的资产」与「服务 → 账号与安全」两段承担（逐行见 §四）⇒ 显式弃用（§四「稿基线口径 v2」）。
+
+⇒ **判据：54 − 2 − 3 = 49** ✅。两侧读数是**互为独立的两径**（稿侧 grep / 源码侧 grep），相等才算账平。
+
+### 7-2　四探针 = 全绿（2026-10-07 复跑，四支 exit 0）
+
+| 探针 | 结论 |
+|---|---|
+| `check-drafts.mjs` | `all files OK` |
+| `check-badges.mjs` | 全部角标都在裁切线内 |
+| `check-contrast.mjs` | 没有「看不见的字」 |
+| `check-render.mjs` | 每份稿的每个视图都渲染出内容、且无脚本错误 |
+
+### 7-3　refs 累计对照（base `00a4be3` → HEAD）
+
+- **唯一 token 种类：1375 → 1758**（净 +383）。
+- **丢失 0 条** ✅（`comm -23` 空）。
+- **+383 的构成**：**369** 落在 base..HEAD 的提交窗口内 + **14 条「假新增」** —— 它们**仅由未跟踪文件** `docs/agent/archive/项目整体进度汇报-2026-10-04.md` 承载，干净的 base worktree 里根本不存在 ⇒ 属**扫描基准污染**，**不是漂移**。
+- **取法**：`git worktree add --detach <tmp> 00a4be3` 扫 base（不就地 checkout 18 个 commit 的窗口）。
+
+### 7-4　build / eslint（在最终提交态 `9015beb` 上复跑）
+
+- `npx eslint src/` → **exit 0**。
+- `npm run build` → **绿**，Hash **`2154b7a18b6458b2`**。⚠️ 与 **commit 12b** 那次**逐字符相同** ⇒ 反证 **commit 14 之后前端代码一字未动**。
+
+### 7-5　「14 页 × ≥1 张对稿图」归档清单 ⚠️ 其中 3 页**本轮补拍**
+
+⚠️ **先更正一条前提**：用户 2026-10-07 定的口径建立在「**现有各 commit 的图对 HEAD 有效** ⇒ 归档即可、不重拍」上。**实测该前提只对 10 页成立**：
+
+- commit **1 / 2 / 4** 三页（`GoodsSelect` / `ChatRoom` / `ShoppingCart`）**当时是 Edge 临时截图、从未落盘**。
+- 证法：D 笔 18 笔**全部**在 2026-10-07（commit 1 @15:24 … commit 14 @20:20）；对 `C:\Users\86159\Desktop\软件工程` 全树跑 `find -name "*.png" -newermt "2026-10-07 00:00"`，**00:56 → 15:53 之间零张 png**，而坐实这三笔的提交时刻**正落在这一段**（1@15:24 / 2@15:38 / 4@16:26）。桌面二级目录（`软件工程` 之外）同扫，亦空。
+- ⚠️ `美化/shots2/final-GoodsSelect-1440.png` 等 **不能拿来顶**：那批全部是 **2026-10-06 17:20–17:21**，是**改前（a）态**，比 D 笔早一天。
+
+⇒ 按用户裁决「**选甲**」，本轮**补拍**这 3 页并落盘（不重拍那 10 页 —— 它们对 HEAD 仍有效）。
+
+| # | commit | 页（Vue） | 对稿图出处 | 张数 |
+|---|---|---|---|---|
+| 1 | 1 | `GoodsSelect.vue` | `美化/d1/`（**本轮补拍**）| 6 |
+| 2 | 2 | `ChatRoom.vue` | `美化/d2/`（**本轮补拍**）| 7 |
+| 3 | 3 | `HomePage.vue` | `美化/_hp-vue-{data,empty}.png` + `_hp-draft-{data,empty}.png` | 4 |
+| 3 | 3 | `HomeTab.vue` | **不适用** —— 薄壳（零 `template` / `style`，只渲染 `<HomePage>` + `defineOptions`）⇒ 无物可拍 | — |
+| 4 | 4 | `ShoppingCart.vue` | `美化/d4/`（**本轮补拍**）| 5 |
+| 5 | 5 | `OrderCenter.vue` | `美化/d5/`（含 `draft-order-1440`）| 5 |
+| 6 | 6 | `OrderPane.vue` | `美化/d6/` | 3 |
+| 7 | 7 | `UserInfoPage.vue` | `美化/d7/`（含 `draft-customer/merchant-1440`）| 12 |
+| 8 | 8 | `HistoricalOrders.vue` | `美化/d8/` 的 `vue-ho-*` + `draft-ho-*` | 5 |
+| 9 | 9 | `FriendRoom.vue` | `美化/d8/` 的 `vue-fr-*` + `draft-fr-*`（d8 一并覆盖 8/9）| 9 |
+| 10 | 10 | `GoodsAdd.vue` | `美化/d10/` | 11 |
+| 11 | 11 | `GoodsUp.vue` | `美化/d11/` | 12 |
+| 12 | 12 | `LoginPage.vue` | `美化/d12b/` | 6 |
+| 13 | 13 | `ProductPage.vue` | `美化/d13/` | 12 |
+
+⇒ **可拍 13 页 × ≥1 张对稿图 = 13/13 ✅**（另 `HomeTab` 1 页结构性不适用）。
+
+**补拍探针** = `美化/shot1-4.mjs`（**30 条断言全绿 / exit 0**），与既有 `shot8`/`shot10`/`shot11`/`shot13` **同口径**：后端**全部请求拦截 mock**（不连真 8088）、hash 路由整串、每步 `bringToFront()`、稿面截图前先 `window.go('<面>')`。
+⚠️ 它连的 dev server 是**本轮新起的 `:8777`** —— 既有 8080–8084 **全部起于 15:22–18:50**，早于 commit 12a(19:54) / 12b(20:15) / 13(19:40) ⇒ 可能是**陈旧编译**，不采作证据。
+⚠️ 三条补拍读数（实测，非推断）：`GoodsSelect` 16 卡 + 工具栏「共 16 件」+ 3 条 `data-slot`；`ChatRoom` 3 会话 + 4 消息（含 1 张商品卡 `[PROD]`）+ 1 条 `data-slot`；`ShoppingCart` 客户宿主 2 店 / 4 行 / 4 条 `data-slot`、**空车 0 店 0 条**（与客户稿 `:126`「空视图 slots = 0」一致）。
+
+### 7-6　本节的 refs 前后对照（`scripts/refs-scan.sh`）
+
+- **before = HEAD（commit 14，`9015beb`）态**（本节不在其中）：**3073 行 / 1758 token**（`scripts/refs-before15.txt`）。
+- **after = 本 commit 工作区**：**3073 行 / 1758 token**（`scripts/refs-after15.txt`）。
+- **丢失 0 条 ✅ / 新增 0 个 token 类型 ✅** —— 本节**一个 `文件:行号` token 都没新增**，产物行数**也一字未变**（纯叙述、不含引用）。
+- ⚠️ **起草时踩过一次**：7-1 那条初稿用的是**裸续引**写法（只有冒号 + 行号、没有文件名），扫描实测**凭空多出 1 个 token 类型**、宿主就是本台账自己 ⇒ 已改写成「指向 §四」的表述 ⇒ **归零**。这是「**散文里的裸 `:行号` 会自己变成被扫产物**」的又一实例（同 §五 已登记的那类 A 档假阳性）。
