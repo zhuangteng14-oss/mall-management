@@ -187,7 +187,15 @@ const navTop = navFor(props.nav, isLoggedIn())
 <style scoped>
 .app-shell {
 width: 100vw;
-height: 100vh;
+/* ⚠️ **D 笔 commit 7c**（用户 2026-10-07 裁决，7b 的延伸）—— `height:100vh` → `min-height:100vh`。
+   7b 给 `.top-nav` 加了 `sticky`，但 sticky 的约束矩形 = **包含块**，而 `.app-shell` 原先是
+   `height:100vh` = 900px 的**固定盒** ⇒ 吸附上限 = 900 − 60 = **840px**，长页滚到底顶栏仍会释放
+   （实测 `/customer/user/info` 滚 857 时 y=−17）。改成 `min-height` 后壳随内容长高 ⇒ sticky 全程生效。
+   ⚠️ sticky 只做一半 = 行为上退回甲案（顶栏随页滚走）⇒ 这是**同一 bug 的延伸**，不是新决策。
+   ⚠️ **不动 `width:100vw`**：它与 `.home-container` 的那条 `width:100vw` 是**同一件事**
+   （该条已由 commit 0 登记为「余下 … / `width:100vw` / … 留后续笔」），单改 `.app-shell` 一半
+   修不掉症状（`.home-container` 溢出照旧）⇒ 留作整笔，见 `docs/agent/slot-registry.md` §一 commit 7c。 */
+min-height: 100vh;
 display: flex;
 flex-direction: column;
 background: var(--bg);

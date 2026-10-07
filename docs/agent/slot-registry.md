@@ -363,20 +363,20 @@ padding: var(--s7) var(--s5) var(--s8);
 
 ⚠️ **本笔引起的互引漂移（**只报告、不逐条修** —— 归 commit 14 文档漂移清理笔）**：
 本笔在 `AppShell.vue` 里插了两处（`.top-nav` 处 **+16 行**、`.user-page` 处 **+13 行**）⇒
-**所有指向 `AppShell.vue` 且行号 ≥ 208 的引用集体 +16**。
-实测受影响 **7 条**，**全部 +16**：
+**所有指向 `AppShell.vue` 且行号 ≥ 208 的引用集体 +16**（commit 7c 之后**累计如下表**）。
+实测受影响 **7 条**：
 
-| 旧行 → 现行 | 被引内容 | 引用方 |
-|---|---|---|
-| `214 → 230` | `.top-nav` 的「本仓没有全局 `body{font-family}`」注释 | `UserInfoPage.vue:386` |
-| `225 → 241` | 顶栏无 hover 态 | `HomePage.vue:23`、**本文件**（§一 commit 3 那段） |
-| `254 → 270` | `.nav-right a.on` 的 `color: var(--nav-now)` | `progress.md:1111` |
-| `295 → 311` | `.cart-container` 的说明注释 | `OrderCenter.vue:293`、`ShoppingCart.vue:372` |
-| `299 → 315` | `.cart-container {` | `ShoppingCart.vue:369` |
-| `306 → 322` | `.order-container {` | `OrderCenter.vue:292` |
-| `318 → 334` | 「D 笔 commit 7 已取走 `align-items:flex-start`」 | `ChatRoom.vue:485`、`UserInfoPage.vue:8` / `:356` |
+| 旧行（`681513f`） | 7b 后 | **7c 后（当前）** | 被引内容 | 引用方 |
+|---|---|---|---|---|
+| `214` | `230` | **`238`** | `.top-nav` 的「本仓没有全局 `body{font-family}`」注释 | `UserInfoPage.vue:386` |
+| `225` | `241` | **`249`** | 顶栏无 hover 态 | `HomePage.vue:23`、**本文件**（§一 commit 3 那段） |
+| `254` | `270` | **`278`** | `.nav-right a.on` 的 `color: var(--nav-now)` | `progress.md:1111` |
+| `295` | `311` | **`319`** | `.cart-container` 的说明注释 | `OrderCenter.vue:293`、`ShoppingCart.vue:372` |
+| `299` | `315` | **`323`** | `.cart-container {` | `ShoppingCart.vue:369` |
+| `306` | `322` | **`330`** | `.order-container {` | `OrderCenter.vue:292` |
+| `318` | `334` | **`342`** | 「D 笔 commit 7 已取走 `align-items:flex-start`」 | `ChatRoom.vue:485`、`UserInfoPage.vue:8` / `:356` |
 
-⚠️ 其余指向 `AppShell.vue` 的引用（行号 ≤ 184 的 16 处）在插入点**之上**，**未受影响**。
+⚠️ 其余指向 `AppShell.vue` 的引用（行号 ≤ 184 的 16 处）在两处插入点**之上**，**未受影响**。
 
 ### ⚠️ 附带修复（**并入本笔一起推**）—— 壳的 `.top-nav` 被压扁（60px → 36px）
 
@@ -452,6 +452,49 @@ padding: var(--s7) var(--s5) var(--s8);
 
 ⚠️ **影响 commit 8/9**：`HistoricalOrders` / `FriendRoom` 同为壳内右栏页 —— **`flex:none` 已生效
 ⇒ 不会再被压扁**；但若两页高度 > 900，**顶栏会在滚到 840px 后释放**（同上残留）。
+
+### commit 7c —— 让 7b 的 `sticky` 真正生效（`.app-shell`：`height:100vh` → `min-height:100vh`）
+
+**用户 2026-10-07 裁决**：「加。另开 commit 7c（不 force-push 已推的 7b）。」
+**判据（原话）**：「既然判了 `sticky`，就要让它真的生效。840px 后释放 = `sticky` 只做了一半，
+长页滚到底 = 行为上退回甲。`height:100vh → min-height:100vh` 是修**同一个 bug 的延伸**，
+不是新决策。」
+**顺序理由**：「7c 影响所有路由滚动，8/9 落完要重测滚动 ⇒ 先在稳定布局下落 8/9，避免返工。」
+
+**改动**（1 处，`.app-shell`）：`height: 100vh` → `min-height: 100vh` + 注释。
+⚠️ **不动同规则里的 `width:100vw`** —— 理由见下面「`100vw` 那条」。
+
+**取证**：
+
+| 项 | 结果 |
+|---|---|
+| `sticky7.mjs` | 7 条路由**全程吸顶**（`user/info` 滚 1286、`merchant/user/info` 滚 977，`.top-nav` **恒 y=0**；改前分别是 −446 / −137） |
+| 零布局回归 | `ovf7.mjs` 46 组（全部壳路由 × 1440/1080）的 `pageH` 与改前**逐值相同** |
+| `ovf7.mjs` | **46 组 `overflowX` 全 0**（但见下面「这个断言在本环境是**瞎的**」） |
+| `shot7.mjs` | **39/39 绿**（含 ⑤ `.wrap` 居中 4 条） |
+| `npx eslint src/views/AppShell.vue` | exit **0** |
+| `npm run build` | 绿 · `2026-10-07T10:04:47.564Z` · Hash `757b41a6ff6780a5` |
+
+⚠️ **「这个断言在本环境是瞎的」（`校验器报 OK ≠ 没问题`）** —— 用户要求「落 7c 后必跑
+overflowX 断言（两档宽度 × 全部路由）」，跑了、46 组全 0，**但这个 0 不能当作「滚动条那条风险
+不存在」的证据**：实测本机 headless Edge 154 的 **滚动条宽恒为 0**（`innerWidth − clientWidth`
+在 `pageH=2186` 的路由上也是 0）⇒ `100vw` 与 `clientWidth` 恒等，溢出**永远看不到**。
+已试过三种强制手段，**全部无效**：`--disable-features=OverlayScrollbar` /
+`=OverlayScrollbars` / `=OverlayScrollbar,FluentOverlayScrollbar`，以及注入
+`html::-webkit-scrollbar{width:15px} + html{overflow-y:scroll}` ⇒ 条宽仍为 0。
+⇒ 该断言**只能证明「内容没有横向溢出」**（这一层是真信号：46 组的 `shellW == clientWidth`、
+`shellRight == clientWidth`），**证不了「含滚动条的 `100vw` 没有横向溢出」**。
+
+⚠️ **`100vw` 那条（已分析、**本笔未改**）**：`.app-shell` 的 `width:100vw` 按规范**包含滚动条宽**，
+所以「竖向滚动条出现 ⇒ 横向溢出 S px」。它是**既有**问题（不只 `.app-shell`：`.home-container`
+也有同款 `width:100vw`，且该条**已由 commit 0 登记为「余下 `position:absolute` / `width:100vw` /
+`padding:0` 留后续笔」**），且**本笔没有扩大暴露面** —— 现已有竖向滚动条的路由（`pageH > 900`）
+在改前就滚动，`min-height` 没有让任何新路由产生滚动条（46 组 `pageH` 逐值不变即证）。
+⇒ **单改 `.app-shell` 一半修不掉症状**（`.home-container` 溢出照旧）⇒ **留作整笔**，等裁决。
+
+⚠️ **本笔引起的互引漂移（只报告、不逐条修 —— 归 commit 14）**：`.app-shell` 规则内、`width:100vw;`
+**之后**插入 **+8 行** ⇒ 指向 `AppShell.vue` 且行号 **≥ 191** 的引用**再 +8**（实测：文件 361 → 369 行；
+同一批 7 条在 7b 的 +16 之上再 +8 = **累计 +24**，逐条见本节上面 7b 的漂移表）。
 
 ---
 
