@@ -666,7 +666,89 @@ overflowX 断言（两档宽度 × 全部路由）」，跑了、46 组全 0，*
 
 ---
 
-## 二、待落清单（**新稿 44 条 − 已落 29 条 = 15 条**；老稿 4 条已随 commit 3 落、老稿 3 条已随 commit 8/9 落）
+### commit 11 —— `GoodsUp.vue` ↔ `pages/GoodsUp.html`（5 条 · **已落**，归属均 `C3〈商品〉`）
+
+**改动**：整个 `<template>` + `<style scoped>` 重写（590 → 761 行）。主体是
+「**卡片墙 → 商品表格**」（稿 v4 的结构性改动；旧实现是 `.goods-up-container` + `.grid-item` 卡片墙）。
+⚠️ **`<script setup>` 除「用户裁决的那一处删重复注释」外逐字未动**（旧 `:110-327` → 新 `:290-504`，
+**整体后移 180 行**）。删掉的 6 行重复 banner 是旧 `:230-235`（`// ---` / `// 打开弹窗` / `// ---` **两遍**）
+⇒ 它**之后**的部分只后移 **177** 行。**这两条是互引漂移的精确换算基准**（见 §五）。
+⇒ **本笔功能实现量恒为 0**，未碰 `.java` / `endpoints.js` / `router/index.js`。
+
+| # | `data-slot` | 稿行 | 稿里的形态 | N | 归属 | Vue 落点 |
+|---|---|---|---|---|---|---|
+| 35 | 预留 · 筛选 / 搜索（动现有代码 3 处） | `:367` | 块级 `<span class="find">`，内含 2 input + 2 select + 1 button | 3 | `C3〈商品〉` | `GoodsUp.vue:44-58`（挂**块级 `.find`** ⇒ 无 `disabled`） |
+| 36 | 预留 · 批量操作（动现有代码 3 处） | `:379` | 块级 `<span class="bulk">`，内含 1 `.ck` + 3 button | 3 | `C3〈商品〉` | `:70-86`（同上） |
+| 37 | 预留 · 库存 / 销量列（动现有代码 5 / 3 处 · 库存超档） | `:391` | 块级 `<div class="tbl-zone">`，**内含整张表**（只有「库存 / 销量」两列是占位） | 5 / 3 | `C3〈商品〉` | `:105-184`（同上；**一块两档**） |
+| 38 | 预留 · 分页（动现有代码 3 处） | `:414` | 块级 `<div class="pager">`，内含 3 button | 3 | `C3〈商品〉` | `:188-197`（同上） |
+| 39 | 预留 · 库存（动现有代码 5 处 · 超档） | `:499` | 块级 `<div class="fl">`，内含 1 `<input class="slot">` | 5 | `C3〈商品〉` | `:269-276`（同上） |
+
+⚠️ **5 条全是「块级 `data-slot`」，本页一条控件档都没有** —— 判据沿用 §三 开头那条
+（`<span>` / `<div>` 这类块级元素不是控件 ⇒ 只挂 `data-slot` + `title`）。
+⚠️ **#37 的「一块两档」不是笔误**：同一个 `.tbl-zone` 里，「库存」是 5 处（超档）、
+「销量」是 3 处（在档）—— 稿的 `data-slot` 文本自己就写「5 / 3 处 · 库存超档」。
+⚠️ **#39 是唯一「随弹窗进 DOM」的一条**：列表态它不在 DOM 里 ⇒ `[data-slot]` 实测 **4**
+（列表态）/ **5**（弹窗打开）/ **2**（空态）。这一条 `shot11.mjs` 逐面量过。
+
+⚠️ **⚠️ 一处裁点：§三「title 须写归属 C3」与「title 逐字取稿」在第 37 条上撞了，本笔采后者** ——
+稿 `:392` 的 `title` 逐字是「只有这两列是占位，且代价不同：…」，**不带** `C3〈商品〉` 前缀。
+稿给这 5 条统一挂的 C3 角标是**另一个属性** `data-future="待 C3〈商品〉"`（5 条都有），
+而 `data-future` 按 `ShoppingCart.vue:43` 先例**不落**（角标不是 Vue 的东西）⇒ 第 37 条的 C3 归属
+**只落在本台账**（= 上表的「归属」列）。
+⚠️ 这一条是**量出来的、不是推的**：`shot11.mjs` ⓪ 直接开稿页实时读那 5 条 `data-slot` / `title`，
+实测稿自身 5 条里带 `C3〈商品〉` 的是 **4** 条、不带的是 **1** 条（即第 37 条），
+Vue 与稿**逐字全同**（4/4）；⓪ 第 3 项把这个「4」写成了断言。
+⚠️ **待用户复核**：若口径改为「Vue 的 title 也必须带 C3」⇒ 第 37 条随之破「逐字」，请裁示。
+
+**落法三处（口径 4 之外，逐条登记）**：
+
+1. **判据分叉**（用户 2026-10-07 口径：编的值落 `—`；指向已存在路由 ⇒ 真 `<router-link>`）：
+   - **稿编的码 → 落真值**：稿 `:531` 的 ProductCode 那行（`.pcode`）是它**编的**（8 个码，
+     `STD-GRAY` 等），而本页真值就在 `goodsList` 里 —— `showGoodsList` 的同名合并**只留最后一条、
+     没带 ProductCode** ⇒ 用**模板内联表达式**按名取回**真码**（`GoodsUp.vue:153`），
+     **不新增 script 函数**（D 笔边界）。口径同 commit 10 的「单规格」。
+     实测：耳机那行（3 条同名记录）显示 `STD-GRAY / ANC-BLACK / PRO-WHITE` 三个真码连起来。
+   - **已存在路由 → 真 `<router-link>`**：页头【上架商品】指向 `/merchant/user/add`
+     （`router/index.js:116` 的 `path: 'add'`）⇒ 真 `<router-link>`，实测渲染成
+     `<a class="btn-primary" href="#/merchant/user/add">`。稿 `:375` 那里是 `<button>`。
+     ⚠️ `.btn-primary` 随之补 `display:inline-flex; align-items:center`（它现在是 `<a>`，
+     行内元素撑不出原按钮高度）。
+   - ⚠️ **mock 店名摘掉**：副题里「声谷小店 · …」（稿 `:341`）⇒ 保留后半句**真陈述**、
+     摘掉店名。实测副题 = 「共 6 件上架中」（6 = 8 条记录按同名合并后的真行数）。
+   - ⚠️ **稿写死的条数一律换真值**：`.pager .sum` 稿 `:416` 写「共 8 件」⇒ 落
+     `showGoodsList.length`，实测「共 6 件」（与页头同一口径）。
+2. **划掉稿的 `GoodsUp.vue:NNN` 自引**：稿 `:539` 的 title 逐字带「（现有功能 openModal，
+   **`GoodsUp.vue:236`**）」—— 那是**稿引它自己那份**的行号，落进本仓就是**同一笔里立即失效**的
+   引用（本笔正是重写这个文件的那一笔）⇒ 去掉尾部自引、其余逐字取稿。
+   ⚠️ 同 commit 10 对稿里 `GoodsAdd.vue:NNN` 自引的处理。
+3. **`--d2` 先例照搬**（commit 10 揪出的那个静默失效）：稿 `.head h1` 用 `var(--d2)`，而 `--d2`
+   只定义在**稿自己的** `:root`（稿 `:128`）⇒ 本页在根 `.uc-main` 上写 `--d2: var(--fs-2xl)`
+   （同 `UserInfoPage.vue:393` / `GoodsAdd.vue:510` 两处先例；`ShoppingCart.vue:465` 是另一支落法）。
+   实测：本页 scoped 规则消费的 `var(--x)` **全部解析得出**（未解析 0 个）、页标题**算出字号 36px**。
+
+**「既有真功能 / 真数据不删」四处**（同 commit 7 保真头像的先例）：
+
+- **行级点击**：旧卡片墙是**整卡** `@click="openModal(item)"` ⇒ 照落在 `<tr>` 上；
+  「操作」列那格用 `@click.stop` 拦住冒泡 —— 否则点【编辑】会**冒泡到 `<tr>`**、
+  `openModal` **触发两次**，而它内含一次 `switchPrice` ⇒ **多发一次 `productCodePrice` 请求**。
+  实测两向都过（点 `.op` 方格不开窗、点【编辑】只开一次）。
+- **页头头像**：稿 `.ava` 是灰方块 ⇒ 保留既有真 `<img>`（`userInfo.image || assetOf('/img/default_user.png')`）。
+- **表格首列商品图**：稿 `.th-img` 是灰方块 ⇒ 保留既有**真图**（`item.goodImg`），并补 `v-if`
+  —— `goodImg` 为空时裸 `<img src="">` 画的是浏览器的**破图图标**，加 `v-if` 正好露出稿的灰底
+  （同 `HistoricalOrders.vue:66` 先例）。
+- **「按名称精确下架」整段**：既有**真功能**（`goodsDe`）⇒ 两个输入框与按钮**都不 `disabled`**；
+  实测点它真发 `goodsDe` 请求。⚠️ 稿 v4 把这一段从**表格上方**挪到了**下方**（稿 `:422-431`）⇒ 照稿挪位。
+
+⚠️ **与稿「有意不同」的一处（登记）**：**空态**。稿的 `data-page="empty"` 面把**工具条也撤掉**，
+本页**保留** `.tools`（里面有**真入口**【上架商品】）与「按名称精确下架」（既有真功能）
+—— 藏起来 = 把真功能藏了。`shot11.mjs` ② 把这条**写成断言**（空态下 `.tools` 仍在、
+`.sec-h` 仍是「按名称精确下架」、`.btn-primary` 仍是真 `<router-link>`）。
+
+⚠️ **本笔未自行估算 `N`**：5 条的 `N` 全部**逐字取稿**（稿的 `data-slot` 文本里已写「动现有代码 N 处」）。
+
+---
+
+## 二、待落清单（**新稿 44 条 − 已落 34 条 = 10 条**；老稿 4 条已随 commit 3 落、老稿 3 条已随 commit 8/9 落）
 
 > 全部**照落 UI**。「档」列写的是**归属**，不是「本笔做不做功能」。
 > **commit 3 的 4 条不在这个数里** —— 它们来自**老稿 `主页改造.html`**（口径 6 的主页例外），见 §一。
@@ -674,18 +756,20 @@ overflowX 断言（两档宽度 × 全部路由）」，跑了、46 组全 0，*
 > ⇒ 本 §二 原共 **22（新稿）+ 3（老稿）= 25 条**，另 §一 已落 24（含老稿 4）。
 > ⚠️ **commit 8/9 落定后**：老稿那 3 条**已落** ⇒ 本节**只剩新稿 22 条待落**；§一 已落 **27 处**
 > （源码 `data-slot=` 计数，见 §五）。
-> ⚠️ **commit 10 落定后**：新稿那 7 条也**已落** ⇒ 本节**只剩新稿 15 条待落**；§一 已落 **34 处**
-> （源码计数，2026-10-07 实测 34，逐文件见 §五）。
+> ⚠️ **commit 10 落定后**：新稿那 7 条也**已落** ⇒ §一 已落 **34 处**（源码计数，2026-10-07 实测）。
+> ⚠️ **commit 11 落定后**：新稿那 5 条也**已落** ⇒ 本节**只剩新稿 10 条待落**；§一 已落 **39 处**
+> （源码计数，2026-10-07 实测 39，逐文件见 §五）。
 >
 > ⚠️ **数法以「新稿 44」为唯一基准**（`grep -rc data-slot= docs/美化/pages/*.html` 可复核，实测 44）。
 > 本表之前的表头写「10 页 / 36 条」，但**逐段相加是 40** ⇒ 那个 36 本就对不上，别再用它做减法。
-> 现按实测重算：44 − 已落 **29**（`GoodsSelect` 3 + `ChatRoom` 1 + `ShoppingCart-customer` 4 +
-> `OrderCenter-merchant` 的购物车面 2 + 同页销售面 5 + **commit 7 的 7** + **commit 10 的 7**）= **15**。
+> 现按实测重算：44 − 已落 **34**（`GoodsSelect` 3 + `ChatRoom` 1 + `ShoppingCart-customer` 4 +
+> `OrderCenter-merchant` 的购物车面 2 + 同页销售面 5 + **commit 7 的 7** + **commit 10 的 7** +
+> **commit 11 的 5**）= **10**。
 >
-> ⚠️ **两个「已落」数字口径不同，别互相减**：本表的 **29 是「新稿里的条数」**；
-> §五 首条 grep 的 **34 是「源码里 `data-slot=` 出现的次数」**（`GoodsSelect` 3 + `ChatRoom` 1 +
+> ⚠️ **两个「已落」数字口径不同，别互相减**：本表的 **34 是「新稿里的条数」**；
+> §五 首条 grep 的 **39 是「源码里 `data-slot=` 出现的次数」**（`GoodsSelect` 3 + `ChatRoom` 1 +
 > `ShoppingCart` 4 + 老稿主页 4 + `OrderCenter` 5 + **`UserInfoPage` 7** + 老稿子页面 3
-> （commit 8 的 2 + commit 9 的 1）+ **`GoodsAdd` 7** = 34，实测）。
+> （commit 8 的 2 + commit 9 的 1）+ **`GoodsAdd` 7** + **`GoodsUp` 5** = 39，实测）。
 > 差在 `OrderCenter-merchant` 购物车面的 2 条**与 `ShoppingCart.vue` 共用同 2 处模板** ⇒ 稿 22 条
 > 只对应源码 20 处（新稿）+ 4 处（老稿）；老稿那 3 条则**不在「新稿 44」里**（它们来自
 > `子页面改造.html`）。
@@ -738,15 +822,15 @@ overflowX 断言（两档宽度 × 全部路由）」，跑了、46 组全 0，*
 
 1. 该 7 条**已不在本「待落清单」里**，本表头随之由 44 − 22 = 22 改为 **44 − 29 = 15**。
 
-### commit 11 —— `GoodsUp.vue` ↔ `pages/GoodsUp.html`（5 条 · 归属均 `C3〈商品〉`）
+### commit 11 —— `GoodsUp.vue` ↔ `pages/GoodsUp.html`（5 条 · **已落**）
 
-| `data-slot` | 稿行 | N | ⚠️ 含**在档**项 |
-|---|---|---|---|
-| 预留 · 筛选 / 搜索（动现有代码 3 处） | `:367` | **3** | **在档**，稿未画 `disabled` 前标「超档」 |
-| 预留 · 批量操作（动现有代码 3 处） | `:379` | **3** | **在档** |
-| 预留 · 库存 / 销量列（动现有代码 5 / 3 处 · 库存超档） | `:391` | 5 / **3** | 库存超档；**销量在档** —— 一块两档 |
-| 预留 · 分页（动现有代码 3 处） | `:414` | **3** | **在档** |
-| 预留 · 库存（动现有代码 5 处 · 超档） | `:499` | 5 | 超档 |
+⚠️ **5 条已全部落地，逐条台账移入 §一 commit 11**（#35–#39：稿行、N、归属、Vue 落点，外加
+「5 条全块级、一条控件档都没有」的判据、「一块两档」#37、判据分叉三处、「操作」列 `@click.stop`
+那一处、`--d2` 沿用、以及 **#37 那处「title 逐字取稿 vs 写 C3」的裁点**）。此处**不再复制那张表**，
+避免第二份真相（同 commit 7 / commit 8·9 / commit 10 的处理）。留在本节的只有一件事：
+
+1. 该 5 条**已不在本「待落清单」里**，本表头随之由 44 − 29 = 15 改为 **44 − 34 = 10**。
+   ⚠️ 该 5 条的「在档 / 超档」(N = 3 / 3 / 5·3 / 3 / 5) 一栏**随表移入 §一**，不再在此重复。
 
 ### commit 12 —— `LoginPage.vue` ↔ `pages/LoginPage.html`（3 条）
 
@@ -953,6 +1037,51 @@ Vue 逐字照落（`:456-457`），只多一条 `text-decoration:none`（因为 
 
 ---
 
+### commit 11 —— `GoodsUp.vue`（`pages/GoodsUp.html`）
+
+**24 件（列表态）/ 25 件（弹窗打开）/ 9 件（空态）** —— 本页的死控件**随渲染面变**，
+是本台账里第一页「条数随状态浮动」的（对照：`GoodsAdd` 恒 7）。
+判据同 §三 开头：稿画了**可交互的样子**、却**没挂 `data-slot`** ⇒ 落 `disabled` + `title`、**不接线**
+（D 笔功能实现量恒为 0）。
+
+⚠️ **与 commit 10 不同，本页的 `title` 有两个出处，逐件分开记**（**这才是本页的重点**）：
+稿里 `:369-373`（`.find` 五件）、`:383-385`（批量三钮）、`:417-419`（分页三钮）**只有 `disabled`、没有 `title`**
+⇒ 这 11 件的 `title` 是**本笔按 §三 口径补的**；而 `:381`（全选）、`:529`（行内勾选）、
+`:534`（库存 `—`）、`:535`（销量 `—`）、`:540`（下架）**稿里自带 `title`** ⇒ 这 5 类**逐字取稿**。
+（commit 10 那一页是**全部**逐字取稿 ⇒ 两页的取证方式不同，别互相套。）
+
+| 稿行 | 元素 | 稿里的状态 | Vue 落点 | `title` 出处 | 归属 |
+|---|---|---|---|---|---|
+| `:369-373` | `.find` 内 **5 件**：2 input（商品名 / ProductCode）+ 2 select（全部状态 / 全部分类）+ 1 button（查询） | 全 `disabled`，**均无 `title`** | `GoodsUp.vue:49-57` | **本笔补** | `C3〈商品〉` |
+| `:381-385` | `.bulk` 内 **4 件**：`.ck` 全选 + 3 button（批量上架 / 下架 / 删除） | 全 `disabled`；**只有全选那件带 `title`** | `:75-85`（全选 `:75-81`、三钮 `:83-85`） | **混合**：全选逐字取稿、三钮本笔补 | `C3〈商品〉` |
+| `:529` / `:540` | 表体每行 **2 件**：`.ck` 勾选 + `.del` 下架 | 勾选 **无 `disabled`**、带 `title`；下架**无 `disabled`**、带 `title` | `:132-138`（勾选）/ `:172-177`（下架） | **逐字取稿**（两件都是） | `C3〈商品〉` |
+| `:417-419` | `.pager` 内 **3 件**：1 / 2 / 下一页 | 全 `disabled`，**均无 `title`** | `:194-196` | **本笔补** | `C3〈商品〉` |
+| `:502` | 弹窗内库存 `<input class="slot" value="—">` | 稿里就 `disabled` + 带 `title` | `:275` | **逐字取稿** | `C3〈商品〉` |
+
+**合计口径**（`shot11.mjs` 逐面实测）：
+- **列表态 24** = `.find` 5 + `.bulk` 4 + 表体 12（6 行 × 2）+ `.pager` 3；
+- **弹窗打开 25** = 上面的 24 + 弹窗里那个库存框 1；
+- **空态 9** = `.find` 5 + `.bulk` 4（表格与分页条都不渲染 ⇒ 那 15 件不在）。
+⇒ ⚠️ **表体那 12 件随行数变**（本笔 mock 8 条记录合并成 6 行）—— 同 `FriendRoom` 那 1 条随好友数的性质。
+
+⚠️ **本页另有两件「不是控件」的可点元素，不在本节**（同 commit 10 对 2 只 `.picbox` 的处置）：
+稿 `:534` / `:535` 的库存 / 销量 `—` 是 `<span class="na">`，**本来就是 `<span>`（不可点）**
+⇒ 只照稿落 `title`（Vue `:160` / `:161`），**不改成真控件**、也不计入 24/25/9。
+
+⚠️ **⚠️ 本页 §三 的判据是「容器限定」，不是 `input[disabled]` 一把抓** —— 因为弹窗里
+「**商品类型**」那个 `<input disabled>` 是**既有实现就锁死的**（原实现就是
+`<input v-model="editForm.goodType" disabled>`）、**不是占位** ⇒ **不进本节**。
+实测：本页 `input[disabled]` 共 **4** 件（`.find` 2 + 弹窗类型 1 + 弹窗库存 1），而本节列表态只收 **5** 件
+里的 2 件（`.find` 那 2 件）⇒ 一把抓会把「类型」那件**误收**、同时**漏掉** `select[disabled]` 与
+`button[disabled]`。`shot11.mjs` 把这条**写成断言**（`input[disabled]` 计 4、类型那件 `data-slot === null`
+且 `title === '既有实现锁死：商品类型不可改'`、不在死控件集合里）。
+
+⚠️ **稿的 `:540` 下架钮在稿里没有 `disabled`**（它是个「看起来能点」的钮）—— 本笔按 §三 落 `disabled`，
+**`title` 用稿给的逐字值**「下架这一件（现有端点 goods.goodsDe）」，**不接线的理由不进 `title`**
+（逐字取稿优先），理由记在本表与 §一 commit 11。
+
+---
+
 ## 四、老稿 10 条（`主页改造.html` + `子页面改造.html`）
 
 逐条登记见 **`progress.md:1636-1649`**（表 #1–#10），此处**不复制**，避免第二份真相。
@@ -975,11 +1104,11 @@ Vue 逐字照落（`:456-457`），只多一条 `text-decoration:none`（因为 
 ## 五、对账方法（验收时跑）
 
 ```bash
-# Vue 里实落的条数（应 = 台账「已落」条数 = 3 + 1 + 4 + 4 + 5 + 7 + 2 + 1 + 7 = 34，2026-10-07 实测 34）
+# Vue 里实落的条数（应 = 台账「已落」条数 = 3 + 1 + 4 + 4 + 5 + 7 + 2 + 1 + 7 + 5 = 39，2026-10-07 实测 39）
 grep -rn 'data-slot=' Mall-management-web/mall-management-system/src/views/ | wc -l
 #   逐文件（2026-10-07 实测）：GoodsSelect 3 / ChatRoom 1 / ShoppingCart 4 / HomePage 4（老稿）
 #           / OrderCenter 5 / UserInfoPage 7 / HistoricalOrders 2（老稿，commit 8）
-#           / FriendRoom 1（老稿，commit 9）/ GoodsAdd 7（commit 10）
+#           / FriendRoom 1（老稿，commit 9）/ GoodsAdd 7（commit 10）/ GoodsUp 5（commit 11）
 # 新稿里的总条数（应 = 44；**老稿另计**：主页改造.html 4 条 + 子页面改造.html 3 条，都不在这个数里）
 grep -rc 'data-slot=' docs/美化/pages/*.html | awk -F: '{s+=$2} END{print s+0}'
 # 稿外死控件（§三）：不带 data-slot 的 disabled 元素 —— 逐条与 §三 表对齐
@@ -1007,6 +1136,13 @@ grep -c 'data-slot=' docs/美化/主页改造.html docs/美化/子页面改造.h
 （不在 `v-for` 内）⇒ 源码 2 处、渲染恒 **2**（但**空态下整张表不渲染 ⇒ 0**，与 `OrderCenter` 同款）。
 `GoodsAdd.vue`（commit 10）的 7 条**既不在 `v-for` 也不在 `v-if` 里**（六个分区与底部动作条
 都是无条件渲染）⇒ **源码 7 = 渲染 7**（这一条最简单，但与 `UserInfoPage` 的互斥分支形成对照）。
+`GoodsUp.vue`（commit 11）的 5 条**源码里都是无条件的**（既不在 `v-for` 也不在 `v-if` 里），
+但**渲染数随三个面变** —— 这是本台账**第一页「同一批源码、渲染数按状态浮动」**的：
+源码 **5** ⇒ 渲染 **4（列表态）/ 5（弹窗打开）/ 2（空态）**
+（「库存 / 销量列」那条第 37 条挂在整个 `.tbl-zone` 上 ⇒ 空态随表格一起走；
+「分页」第 38 条随 `.pager` 走；「库存」第 39 条在**弹窗**里 ⇒ 列表态本就不在 DOM）。
+⚠️ 与 `FriendRoom`（源码 1、渲染随好友数）不同：那一条是 `v-for` 的**倍数**关系；
+本页是 `v-if` / 弹窗挂载的**分支**关系。`shot11.mjs` 三个面各量一次。
 （同理 `HomePage.vue` 的 4 条是**老稿主页**的，不在「新稿 44」里。）
 
 ---
@@ -1153,3 +1289,136 @@ comm -23 /tmp/b.tok /tmp/a.tok   # 只在 before ⇒ **丢失，应为 0**
 ⚠️ 原始产物 diff 会报 **88 条 `<`** —— **全部**来自 `docs/agent/slot-registry.md` 自己
 （本笔在它里面插了新节 ⇒ **它自己**的引用行号集体后移），**被引用的 token 一个没少**。
 这正是「**比 token 集合、不比原始产物**」这条口径的用处（同 commit 9）。
+
+---
+
+### commit 11 的复现命令与实测
+
+```bash
+# 源码条数（应 39）
+grep -rn 'data-slot=' Mall-management-web/mall-management-system/src/views/ | wc -l
+# 本页的结构/视觉/真功能断言 + 截图（**60 项**）
+node "C:/Users/86159/Desktop/软件工程/美化/shot11.mjs"
+```
+
+**2026-10-07 实测（`shot11.mjs`，60 项全绿、exit 0）**：
+① 列表态结构与占位对账 **30** / ③ 真功能抽查 **16** / ② 空态 **6** / ④ 溢出 **2** / ⑤ 稿切面 **3** /
+⓪ 读稿 **3**。关键判据（择要）：
+
+- 页标题「查看商品」且**算出字号 36px**、走 display 族；本页 scoped 规则消费的 `var(--x)` **全部解析得出**；
+- `data-slot` 列表态 **4** / 弹窗开 **5** / 空态 **2**，且**逐字 = 稿实时读到的对应条**（4/4、1/1、2/2）；
+- 稿自身 5 条 `title` 里带 `C3〈商品〉` 的是 **4** 条（第 37 条不带）—— **量出来的**，见 §一 commit 11 的裁点；
+- 表头 **9** 列逐字；表体 **6** 行（8 条记录按同名合并）；耳机那行 `.pcode` = 3 个**真码**连起来；
+- 库存 / 销量两列落 `—`；状态恒「已上架」；`.pager .sum` = 「共 6 件」（稿写死 8）；
+- 【上架商品】是真 `<router-link>` ⇒ `href="#/merchant/user/add"`；
+- 稿外死控件 **24 / 25 / 9**（三面），且逐件 `disabled` + 带 `title`；
+- **`input[disabled]` 一把抓会误收**弹窗「商品类型」那件（本页共 4 件）⇒ §三 用容器限定；
+- 真功能：点 `.op` 方格**不开窗**、点【编辑】只开一次窗；点第 2 枚规格**真发** `productCodePrice`
+  且价格 / 图片跟着变；【取消】/【×】都关窗；「下架商品」**真发** `goodsDe`；
+- 空态：`.empty` 换掉表格，但 `.tools` 与「按名称精确下架」**仍在**（与稿有意不同，见 §一 commit 11）；
+- 两档宽度（1440 / 1080）`overflowX = 0`。
+
+截图 **12 张**落 `美化/d11/`（Vue 侧 6：1440 全页 / 1440 主区 / 弹窗 / 操作后 / 空态 / 1080；
+稿侧 6：list / empty / dlg 三面各一张全页 + 一张局部）。`npx eslint src/views/GoodsUp.vue` → exit **0**；
+`npm run build` → 绿（`2026-10-07T10:58:22.370Z`，Hash `80b9d86a42c480cd`）。
+
+### commit 11 引起的互引漂移（**只报告、不逐条修** —— 归 commit 14）
+
+`<template>` + `<style scoped>` 重写 ⇒ **`<script setup>` 整体后移 180 行**（旧 `:110-327` →
+新 `:290-504`）；本笔另按用户裁决删掉旧 `:230-235` 的 **6 行重复 banner**（`// ---` / `// 打开弹窗` /
+`// ---` **两遍**）⇒ 该 banner **之后**的部分只后移 **177** 行。**两条换算基准**：
+`旧行号 + 180`（banner 之前）/ `旧行号 + 177`（banner 之后）。
+全仓指向本文件的**带行号引用共 17 处**（2026-10-07 实测，分布在 4 个文件）：
+
+| 引用方 | 旧引 | **现应指** | 被引内容 |
+|---|---|---|---|
+| `api-contract.md:183` | `GoodsUp.vue:153` | **`GoodsUp.vue:333`** | `http.post(endpoints.user.me, …)`（P2.6 起走 `/user/me`） |
+| `api-contract.md:189` | `GoodsUp.vue:170` | **`GoodsUp.vue:350`** | `goodsSelect` 那次 POST 的 `await res.json()`（POST 在 `GoodsUp.vue:349`） |
+| `api-contract.md:191` | `GoodsUp.vue:215` | **`GoodsUp.vue:395`** | `goodsDe` 的 `await res.json()` |
+| `api-contract.md:192` | `GoodsUp.vue:327` | **`GoodsUp.vue:491`** | `goodsUp` 那次 POST（⚠️ **引用方原本就没对准**，见下） |
+| `api-contract.md:193` | `GoodsUp.vue:275` | **`GoodsUp.vue:452`** | `productCodePrice` 回填 `editForm.productCode` |
+| `cache-layer.md:455` | `GoodsUp.vue:272` | **`GoodsUp.vue:449`** | `switchPrice` 里的 `if (data.success)` |
+| `progress.md:414` / `progress.md:576` / `progress.md:632` | `GoodsUp.vue:148-149` | **`GoodsUp.vue:328-329`** | P2.6 后的登录态判据 +「不再读密码」注释 |
+| `progress.md:573` / `progress.md:1169` / `progress.md:1270` | `GoodsUp.vue:153` | **`GoodsUp.vue:333`** | 同上 `/user/me` |
+| `progress.md:574` / `progress.md:1740` | `GoodsUp.vue:155` | **`GoodsUp.vue:335`** | `userInfo.value = data` |
+| `progress.md:575` | `GoodsUp.vue:150` | **`GoodsUp.vue:330`** | ⚠️ 该处是**空行**（引用方原本就偏） |
+| `progress.md:1757` | `GoodsUp.vue:146` | **`GoodsUp.vue:326`** | ⚠️ 该处是**注释 banner**（引用方停在 2026-10-03 基线） |
+| `PriceTripleFailSmokeTest.java:24` | `GoodsUp.vue:275` | **`GoodsUp.vue:452`** | 同上 `productCodePrice` |
+
+⚠️ **本表刻意把「现应指」写成带文件名的全形 `GoodsUp.vue:NNN`，不写裸 `:NNN` 续引** ——
+裸续引在 `refs-scan.sh` 里会落成**无主 token**（`：333` 这类，谁都不挂），既没法机器核、
+读者也看不出指向谁。本笔第一版草稿就是裸形式，实测产出了 **17 条无主 token**，已改成全形。
+
+⚠️ **其中三处「引用方原本就没对准」（不是本笔造成的）**：
+- `api-contract.md:192` 引 `GoodsUp.vue:327` 称其是 `goodsUp` —— 而 HEAD 版 `GoodsUp.vue:327`
+  是 **`</script>`**，`goodsUp` 的真位置在 HEAD **`GoodsUp.vue:314`** ⇒ 引用方**偏 13 行**
+  （本笔后应为 `GoodsUp.vue:491`）。
+- `progress.md:575` 引 `GoodsUp.vue:150` —— HEAD 版 `GoodsUp.vue:150` 是**空行**（真内容是
+  `GoodsUp.vue:153` 的 `/user/me`）。
+- `progress.md:1757` 引 `GoodsUp.vue:146` —— HEAD 版 `GoodsUp.vue:146` 是**注释 banner**
+  （它记的是 2026-10-03 的 `loginPassword` 读点，而那一读点已随 P2.6 **退场**）
+  ⇒ 此行是**历史快照**，本就非现值。
+本笔**不改引用方**（那属 commit 14 的范围），只在此登记。⚠️ 本表**只报告**；
+**按名字**（不带行号）的引用不受影响。
+
+⚠️ **一处「扫描器会误报、但不是引用」**：本笔在 §一 commit 11 的「落法 2」里**引用（转述）了稿的
+自引**「`GoodsUp.vue:236`」⇒ `refs-scan` 会把它记成 `slot-registry.md:721:GoodsUp.vue:236`，
+看上去像一条指向本仓的活引用，**实际是稿里那句 title 的转述**（该 token 在 before 里就存在
+—— 稿 `docs/美化/pages/GoodsUp.html:539` 自己带着它）。**别按它去改 `GoodsUp.vue:236`。**
+
+### commit 11 的 refs 前后对照（`scripts/refs-scan.sh`）
+
+```bash
+# before = HEAD（commit 10）态；after = 本笔工作区
+# ⚠️ 与 commit 10 不同：本笔**先**把 GoodsUp.vue 备份→`git checkout HEAD -- GoodsUp.vue`→扫 before
+#    →还原（还原后 sha256 对拍通过），**不涉及** slot-registry.md（它当时还是 HEAD 态）
+bash scripts/refs-scan.sh scripts/refs-before11.txt   # 2586 条
+bash scripts/refs-scan.sh scripts/refs-after11.txt    # 2604 条
+cut -d: -f3- scripts/refs-before11.txt | sort -u > /tmp/b.tok
+cut -d: -f3- scripts/refs-after11.txt  | sort -u > /tmp/a.tok
+comm -23 /tmp/b.tok /tmp/a.tok   # 只在 before ⇒ **丢失，应为 0**
+```
+
+| 口径 | before | after | 差 |
+|---|---|---|---|
+| 原始产物行数 | 2586 | 2704 | **+118** |
+| **唯一 token 种类** | 1558 | 1594 | **+36** |
+| **只在 before（丢失）** | — | — | **0 条** ✅ |
+| 只在 after（新增） | — | — | 36 条，**全部是本笔自己新写的引用** |
+
+⚠️ **这 36 条里只有 6 条来自「代码改动」，另 30 条来自「台账正文」** —— 分开列，别混：
+- **代码改动引起（6 条）**：`HistoricalOrders.vue:66`（`.thumb` + `v-if` 的先例）、
+  `GoodsAdd.vue:510`（`--d2` 先例）、`tokens.css:140` / `tokens.css:123`（危险动作走 `--danger`、
+  不借 `--accent` 的两条依据）、`GoodsUp.vue:44-58` / `GoodsUp.vue:49-57`（§一 / §三 表的落点）。
+  ⚠️ 本页 `<script setup>` 里新写的 8 条引用（`router/index.js:116-117` / `GoodsDao:187` /
+  `HistoricalOrders.vue:66` / `tokens.css:123` / `tokens.css:140` / `UserInfoPage.vue:393` /
+  `GoodsAdd.vue:510`）**并非全部是「新 token」** —— 其中 5 条在 before 里已由别处引用过，
+  所以只多出 6 种。
+- **台账正文引起（30 条）**：本笔在上表里**指向别处**（`api-contract.md:183`、`api-contract.md:189`、
+  `api-contract.md:191`、`api-contract.md:193`、`cache-layer.md:455`、`progress.md:574`、
+  `progress.md:575`、`progress.md:576`、`progress.md:632`、`progress.md:1169`、`progress.md:1270`、
+  `progress.md:1740`、`progress.md:1757`、`PriceTripleFailSmokeTest.java:24`）、
+  上表「现应指」列新写的 11 条 `GoodsUp.vue:NNN`（`GoodsUp.vue:326` / `GoodsUp.vue:328-329` /
+  `GoodsUp.vue:330` / `GoodsUp.vue:333` / `GoodsUp.vue:335` / `GoodsUp.vue:349` / `GoodsUp.vue:350` /
+  `GoodsUp.vue:395` / `GoodsUp.vue:449` / `GoodsUp.vue:452` / `GoodsUp.vue:491`）、
+  以及 §一 commit 11 的 `docs/美化/pages/GoodsUp.html:539`、§五 的 `slot-registry.md:721`、
+  `GoodsUp.vue:314`、`.gitignore:39-42` / `.gitignore:41-42`。
+  ⚠️ **这一类是「台账引别人」，不是「别人引台账」** —— 对漂移判定无影响，但会让 after 的 token 数上涨。
+- **本笔第一版草稿的瑕疵（已修）**：漂移表原先的「现应指」写成**裸 `:NNN` 续引**
+  ⇒ `refs-scan.sh` 产出了 **17 条无主 token**（`:333` / `:350` / `:395` … 谁都不挂）——
+  既无法机器核、读者也看不出指向谁。已全部改成全形 `GoodsUp.vue:NNN`。**上面那组数字是改写后的。**
+
+⚠️ 原始产物 diff 会报 **127 条 `<`** —— **全部**来自 `docs/agent/slot-registry.md` 自己
+（本笔在它里面插了 §一 / §二 / §三 / §五 的新节 ⇒ **它自己**的引用行号集体后移），
+**被引用的 token 一个没少**（`comm -23` = 0 已证）。
+⚠️ 为什么 `<` 从 commit 10 的 88 条涨到 127 条：本笔往台账里插的字数比 commit 10 更多，
+**它自己**的引用行被推得更远 —— 这**不**代表「丢了更多引用」，两者的 token 丢失数都是 **0**。
+
+⚠️ **`scripts/refs-before11.txt` / `refs-after11.txt` 是「没 `git add`」，不是「被 gitignore 忽略」** ——
+实测 `git check-ignore -v` 对这两个文件**无输出**（= 没被忽略）。`.gitignore:39-42` 逐字只列了
+**两个规范名** `scripts/refs-before.txt` / `scripts/refs-after.txt`，**带后缀的同款快照不在其中**。
+⇒ commit 10 那节写的「本笔这个带 `10` 后缀的同款快照同属该类」是**推论、与实测不符**，本笔在此更正：
+它们靠**提交卫生**（`git add <具体文件>`、从不用 `-A`）保证不入库，**不是**靠 gitignore。
+⚠️ **可以更彻底的一处（本笔不做，登记）**：把 `.gitignore:41-42` 那两行改成
+`scripts/refs-*.txt` 就能真正覆盖所有后缀 —— 但那属 `.gitignore` 的改动，**不在 D 笔范围内**，
+留给后续（或用户裁示）。
