@@ -203,20 +203,60 @@ input::placeholder{color:var(--ink-3)}
              font-family:var(--font-display);font-size:var(--d1);font-weight:var(--fw-med);
              line-height:1.12;letter-spacing:-.03em;color:var(--ink)}
 .brand-sub{margin-top:var(--s4);max-width:24em;font-size:var(--fs-sm);line-height:1.85;color:var(--ink-2)}
-/* 品牌大图（用户最低清单点名）；占位用 --img，落地时换成实拍图。
+/* 品牌大图（用户最低清单点名）。
    ⚠️ 封 `max-width:440px`：16:9 铺满 46% 栏（566px）时有 318px 高，加上下方事实表
-   在 1440×900 下会把整栏顶出首屏（截图抓到末行被切）。 */
+   在 1440×900 下会把整栏顶出首屏（截图抓到末行被切）。
+   ── v6（2026-10-07，用户点名）─────────────────────────────────────────────
+   这一格从 `--img` 灰底占位换成**真图**：两张 `Mall-Section-*.jpg`（商城等距插画，
+   源文件在 `Mall-management-server/src/main/resources/static/img/`，这里用与上面三张
+   样式表**同源**的相对路径，稿子仍是自足的 —— 不需要起后端）。
+   **登录态一张、注册态一张**：切换靠 `go()` 写在 `body[data-state]` 上（见脚本段），
+   不是给这一格单独加类 —— 两态的判据与 `.ctabs` 高亮**同一个** `tabKey`（login/phone
+   归登录、register/success 归注册），只写一处。
+   ⚠️ **格子长宽一个数都没改**（这条是测出来的，不是保守）：实测 `.brand` 自然高
+   **781.6px**、而 1440×900 下可用高 854 ⇒ 只剩 **72.4px** 余量；两张原图是**竖构图**
+   （约 3:4）、本格是 16:9 ⇒ 只能 `cover` 裁成横带。想把整张竖图放进来就得把格子改为
+   3:4，那要多 **335px** —— 直接把左栏顶出首屏（正是上面那条注释警告的事）。
+   ⚠️ 底仍留 `--img`：图没加载出来时是一块正常的灰底，不会露出白洞。
+   ── v6.1（2026-10-07）：去水印 + 取景改「靠顶」────────────────────────────
+   ⚠️ **两张源图本就是「我图网」的付费素材预览图、带站方水印**（这是既有事实：
+   它们早就用在跑着的 `LoginPage.vue` 的 `.img-section` 上，不是本笔放进来的）。
+   处理分两步，都落在**图片文件**那一侧，这里的格子尺寸**一个数没改**：
+     ① **细笔画**：用「平坦区中值」扫了一遍（局部亮度极差 ≤110、且修正幅度 ≤90 才动手）。
+        判据是「画里真边线的局部极差 = 它自己的对比度（几十上百）」，而水印细笔画压在
+        纯色上只有 ~70 ⇒ 可分离；大块软阴影是「大块」、中值等于局部值本身 ⇒ 原样保留。
+        两张各回填约 **22%** 像素。原图备份在工具链 `美化/wm-backup/`。
+     ② **大块遮挡**：`Mall-Section-1.jpg` 上另有一枚**半透明灰盘 logo**（与左上角那枚
+        橙色徽标同形，约 52×44px，位于 y257-301）—— 它压在鞋架与木桌**上面**，属
+        「大块遮挡」而非细笔画，中值法**去不掉**（要抹它得凭空重建底下的木桌纹理）。
+        ⇒ 取景由 `center` 改 `top`：`cover` 下 `center` 露原图 y170-403、**正好含这枚盘**；
+        `top` 只露 y0-233（另一张 y0-240）⇒ 盘与下半部字形**一并落在画框外**。
+   ⚠️ 代价（照实记）：`top` 比 `center` 少露原图下半部，构图比居中**偏空**一点。
+      若不接受这个取景，就得**换图** —— 那枚水印盘无法就地抹掉。 */
 .brand-fig{margin-top:var(--s6);width:100%;max-width:440px;aspect-ratio:16/9;
-           border:1px solid var(--line);border-radius:var(--r2);background:var(--img);
-           display:flex;align-items:center;justify-content:center;
-           color:var(--ink-3);font-size:var(--fs-xs);letter-spacing:.08em}
+           border:1px solid var(--line);border-radius:var(--r2);
+           background-color:var(--img);background-size:cover;background-position:top;
+           background-image:url("../../../Mall-management-server/src/main/resources/static/img/Mall-Section-2.jpg")}
+/* 注册态换另一张。⚠️ `body` 上没有 `data-state` 时 = 登录态（默认视图就是登录，见 markup）。 */
+body[data-state="register"] .brand-fig{
+  background-image:url("../../../Mall-management-server/src/main/resources/static/img/Mall-Section-1.jpg")}
 .facts{margin-top:var(--s6);border-top:1px solid var(--line)}
 .facts>div{display:flex;gap:var(--s5);align-items:baseline;padding:var(--s3) 0;border-bottom:1px solid var(--line)}
 .facts dt{flex:none;width:3.5em;font-size:var(--fs-xs);color:var(--ink-3)}
 .facts dd{font-size:var(--fs-sm);color:var(--ink-2)}
 
 /* ── 右栏：表单面 ─────────────────────────────────────────────────────────── */
-.pane{padding:var(--s6) var(--s7) var(--s8)}
+/* ⚠️ v6（2026-10-07，用户点名）：「注册态整页可滑动」的**总收紧**从这里开始。
+   实测（`美化/measure-login-draft.mjs`，1440×900、`--hide-scrollbars`）：
+     登录态 docH **916**（溢 16px）、注册态 docH **1131**（溢 **231px**）—— 用户看到的是后者。
+   根因：`.auth` 是 `min-height:calc(100vh - 46px)`（46 = 顶部预览条）⇒ **右栏内容比它高多少就滚多少**；
+   而注册面 5 个字段比登录面 2 个字段**高 215px**（`.stage .page.on` 841.4 vs 626.4）。
+   目标 = `.auth ≤ 854`（⇒ docH ≤ 900，**两态都不滚**）。分两档收：
+     · **全局档**（本段 `.pane` 下内距 + `.form-shell` 上内距 + `.stage` 上外边距，**两态同值**）；
+     · **注册面专属档**（只动 `.page[data-page="register"]` 内部的东西，见下面「注册面专属」段）。
+   ⚠️ `.form-shell` / `.ctabs` / `.stage` **绝不允许按态分叉** —— 「两态 Tab 位置逐像素相同」
+   是 v4 的主修项，按态改这三个 = 把它拆回去。 */
+.pane{padding:var(--s6) var(--s7) var(--s6)}
 .pane-top{display:flex;justify-content:space-between;font-size:var(--fs-xs);color:var(--ink-3)}
 .pane-top a{padding:var(--s1) 0}
 .pane-top a:hover{color:var(--brand-ink)}
@@ -224,8 +264,9 @@ input::placeholder{color:var(--ink-3)}
 /* ⚠️ **外壳固定**（v4 主修项）：`margin:0 auto` —— 不是 `margin:auto`。
    双向 `auto` 会让每一态各自垂直居中，短态（登录）浮中间、长态（注册）顶到上边，
    容器的上边缘在两态之间跳 —— 那正是用户看到的「像两个不同的页」。
-   `.stage` 只负责换内容，容器的上/左/宽与 Tab 位置逐像素不动。 */
-.form-shell{margin:0 auto;width:100%;max-width:392px;padding-top:var(--s7)}
+   `.stage` 只负责换内容，容器的上/左/宽与 Tab 位置逐像素不动。
+   ⚠️ v6：`padding-top` `--s7`(48) → `--s5`(24) —— 只收高度；两态同值 ⇒ 上面那条不变量不动。 */
+.form-shell{margin:0 auto;width:100%;max-width:392px;padding-top:var(--s5)}
 
 /* 页面级 Tab：登录 / 注册 */
 .ctabs{display:flex;gap:var(--s5);border-bottom:1px solid var(--line-2)}
@@ -234,7 +275,8 @@ input::placeholder{color:var(--ink-3)}
 .ctabs button:hover{color:var(--ink-2)}
 .ctabs button.on{color:var(--ink);font-weight:var(--fw-med);border-bottom-color:var(--brand)}
 
-.stage{margin-top:var(--s6)}
+/* ⚠️ v6：`--s6`(32) → `--s5`(24)，同 `.form-shell`（两态同值）。 */
+.stage{margin-top:var(--s5)}
 @keyframes fadein{from{opacity:0}to{opacity:1}}
 .page{display:none}
 .page.on{display:block;animation:fadein .18s ease}
@@ -306,6 +348,25 @@ h1.t{font-family:var(--font-display);font-size:var(--d2);font-weight:var(--fw-me
 .strength i.on{background:var(--brand)}
 .tip{margin-top:var(--s4);font-size:var(--fs-xs);color:var(--warning)}
 
+/* ⚠️ v6（2026-10-07，用户点名）：「注册面专属档」的总收紧。
+   注册面比登录面高 215px，单靠上面那三处全局档收不到 854 —— 登录面只有 2 个字段、注册面有 5 个。
+   **只动注册面**：选择器全部冠 `.page[data-page="register"]`（特异性 0,2,0 稳压 0,1,0）
+   ⇒ 登录面逐像素不变，用户那句「登录那边页面固定」被原样保住。
+   收的六处**全是间距**，字号与控件尺寸（46px 输入框 / 19px Tab / 12px 标签）**一个没动** ——
+   收的是字段之间的空气，不是可读性：
+     .f          margin-top        --s5(24) → --s2(8)
+     .f>label    margin-bottom     --s2(8)  → --s1(4)
+     .err        min-height+margin 16+4     → 8+0    （错误行**仍预留**高度 ⇒ 报错不跳版）
+     .btn-block  margin-top        --s6(32) → --s5(24)
+     .tip        margin-top        --s4(16) → --s2(8)
+     .swap       margin+padding    32+24    → 16+16  （注册面最后一块，收它不扰上面节奏） */
+.page[data-page="register"] .f{margin-top:var(--s2)}
+.page[data-page="register"] .f>label{margin-bottom:var(--s1)}
+.page[data-page="register"] .err{min-height:8px;margin-top:0}
+.page[data-page="register"] .btn-block{margin-top:var(--s5)}
+.page[data-page="register"] .tip{margin-top:var(--s2)}
+.page[data-page="register"] .swap{margin-top:var(--s4);padding-top:var(--s4)}
+
 /* 注册成功面 */
 .done h1{font-family:var(--font-display);font-size:var(--d2);font-weight:var(--fw-med);line-height:1.25}
 .done p{margin-top:var(--s4);font-size:var(--fs-sm);line-height:1.85;color:var(--ink-2)}
@@ -346,7 +407,10 @@ h1.t{font-family:var(--font-display);font-size:var(--d2);font-weight:var(--fw-me
     <h2 class="brand-claim">让挑选与交付，<br>各归其位。</h2>
     <p class="brand-sub">一个账户同时管着买家与卖家两侧：浏览、下单、发货、对账，都在同一处。</p>
 
-    <div class="brand-fig">品牌大图　16 : 9</div>
+    <!-- v6：品牌大图由 `--img` 灰底占位换成**真图**（两张 Mall-Section 商城插画，
+         登录态 / 注册态各一张，见样式块 `.brand-fig` 段）。原来是居中一行文字，
+         现在换成图 ⇒ 补 `role="img"` + `aria-label`，读屏仍有名字。 -->
+    <div class="brand-fig" role="img" aria-label="商城场景插画"></div>
 
     <dl class="facts">
       <div><dt>商品</dt><dd>目录、库存、上下架</dd></div>
@@ -543,6 +607,10 @@ function go(key) {
   /* 顶部 Tab 与当前态联动：登录态（含手机号）高亮「登录」，注册态（含成功面）高亮「注册」 */
   const tabKey = (key === 'login' || key === 'phone') ? 'login' : 'register'
   document.querySelectorAll('.ctabs button').forEach(b => b.classList.toggle('on', b.dataset.tab === tabKey))
+  /* v6：左栏品牌大图跟着两态换图 —— `.brand-fig` 的 `background-image` 由 `body[data-state]` 选中。
+     复用上面**同一个** `tabKey`（login/phone 归登录、register/success 归注册），不另立判据。
+     首屏不调 `go()` ⇒ `body` 上没有 `data-state`，落在 `.brand-fig` 的基线上 = 登录态那张（对）。 */
+  document.body.dataset.state = tabKey
   window.scrollTo(0, 0)
 }
 bar.querySelectorAll('button[data-page]').forEach(b => b.addEventListener('click', () => go(b.dataset.page)))
