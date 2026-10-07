@@ -1,96 +1,240 @@
 <template>
-  <div class="login-page">
-    <div class="login-box">
-      <div 
-        class="img-section" 
-        :class="{ slide: isSlide }"
-        :style="{
-          backgroundImage: isSlide
-            ? 'url(http://localhost:8088/img/Mall-Section-2.jpg)'
-            : 'url(http://localhost:8088/img/Mall-Section-1.jpg)'
-        }"
-      >
-        <div class="img-text">
-          {{ isSlide ?  "已有账号？快来登录吧！" : "未有账号？快来注册体验吧！"}}
+  <!-- D 笔 commit 12b（2026-10-07）：按 `docs/美化/pages/LoginPage.html`（B 稿 v5/v6.1）重排层级。
+       结构 =「外壳固定 + 只换 .stage」：左 = 品牌面（釉面整块），右 = 表单面（白底 + 线）。
+       两态的**上/左边缘、宽度、Tab 位置逐像素相同**，只有 Tab 以下的块在换
+       —— 这是稿 v4 的主修项，治的是用户原话「登录 = 整页平铺，注册 = 水平滑动切换，
+       同一路由两态，容器形态不一致，看起来像两个不同的页」。
+
+       ⚠️ 与原实现相比**被替换掉的**界面手法：`.login-box` 的左右滑动 + `.img-section`
+          `.slide-btn` 那套「sign in / sign up」翻转件，以及 `v-show` 覆盖式 `.success-cover`。
+          宿主选择由 `.ctabs`（登录 / 注册）承担，成功面改成一个正常的 `.page`。
+       ⚠️ 脚本段未做功能性改动：只按「§口径 7」新增 **3 个 UI 展示状态**（`loginView` /
+          `pwdShown` / `regPwdShown`），不碰 API / 状态机 / watch / 轮询 / 业务逻辑。 -->
+  <main class="auth">
+
+    <!-- ═══════════ 左：品牌面（logo + 品牌语 + 大图）═══════════ -->
+    <aside class="brand">
+      <div class="brand-mark">商城</div>
+
+      <h2 class="brand-claim">让挑选与交付，<br>各归其位。</h2>
+      <p class="brand-sub">一个账户同时管着买家与卖家两侧：浏览、下单、发货、对账，都在同一处。</p>
+
+      <!-- 稿用 `body[data-state="register"]` 换图；scoped 样式**够不到 `body`** ⇒ 改挂在本元素上。
+           判据与 `.ctabs` 高亮**同一个**：登录态（含手机号）用 Mall-Section-2、
+           注册态（含成功面）用 Mall-Section-1 —— 而这两档恰好就是 `isSlide` 的两值。 -->
+      <div class="brand-fig" role="img" aria-label="商城场景插画" :class="{ reg: isSlide }"></div>
+
+      <dl class="facts">
+        <div><dt>商品</dt><dd>目录、库存、上下架</dd></div>
+        <div><dt>订单</dt><dd>从下单到收货，一条链</dd></div>
+        <div><dt>消息</dt><dd>买家与卖家直接联系</dd></div>
+      </dl>
+    </aside>
+
+    <!-- ═══════════ 右：表单面（**外壳固定**，只换 .stage 里的内容）═══════════ -->
+    <section class="pane">
+      <nav class="pane-top">
+        <router-link to="/product">返回商城</router-link>
+        <router-link to="/customer">用户中心</router-link>
+      </nav>
+
+      <div class="form-shell">
+        <!-- Tab：登录 / 注册 —— 与外壳一起固定，切态时不动。
+             ⚠️ 两枚按钮都**不 disabled**：它们恰好对上既有的 `isSlide`
+             （稿的 `data-tab` 切换是稿自己的演示脚本，本页用既有状态实现，**没有**新增状态）。
+             `isSlide && toggle()` 的写法 = 「已经在这一态就不要再翻」——`toggle()` 是**翻转**语义，
+             直接绑会给「点当前 Tab 反而跳走」的反效果。 -->
+        <div class="ctabs">
+          <button type="button" :class="{ on: !isSlide }" @click="isSlide && toggle()">登录</button>
+          <button type="button" :class="{ on: isSlide }" @click="!isSlide && toggle()">注册</button>
         </div>
-        <button class="slide-btn" @click="toggle">
-          {{ isSlide ? 'sign in' : 'sign up' }}
-        </button>
-      </div>
 
-      <div class="form-section" :class="{ slide: isSlide }">
-        <div class="login-form" v-show="!isSlide">
-          <h2>登录账号</h2>
-          <div class="login-inputs">
-            <div class="input-item">
-              <input class="input login-input" placeholder="账号" v-model="loginAccount" />
-            </div>
-            <div class="input-item">
-              <input class="input login-input" type="password" placeholder="密码" v-model="loginPwd" />
-            </div>
-          </div>
+        <div class="stage">
 
-          <div class="login-warn">
-            {{ loginWarnText }}
-          </div>
+          <!-- ── 一、登录 · 账号 ─────────────────────────────────────── -->
+          <section class="page" data-page="login" :class="{ on: !isSlide && loginView === 'account' }">
+            <h1 class="t">欢迎回来</h1>
+            <p class="t-sub">用你在本站注册的账号登录，客户与商家共用这一个入口。</p>
 
-          <button class="form-btn" @click="login">sign in</button>
-        </div>
-
-        <div class="register-form" v-show="isSlide && !showSuccess">
-          <h2>注册账号</h2>
-          <div class="register-inputs">
-            <div class="input-item">
-              <input class="input register-input" placeholder="用户名" v-model="username" />
-              <div class="err-text">{{ err.username }}</div>
+            <!-- 账号 / 手机号 分段控件。⚠️ 手机号那一面是**整块预留位**（见下面第二个 `.page`），
+                 本枚按钮**真切**（§口径 7：seg 属视图状态，不新增功能）。 -->
+            <div class="seg">
+              <button type="button" :class="{ on: loginView === 'account' }" @click="loginView = 'account'">账号登录</button>
+              <button type="button" :class="{ on: loginView === 'phone' }" @click="loginView = 'phone'">手机号登录</button>
             </div>
 
-            <div class="input-item">
-              <div class="radio-row">
-                <label><input type="radio" name="userType" value="客户" v-model="userType"> 客户用户</label>
-                <label><input type="radio" name="userType" value="商家" v-model="userType" :disabled="isUnder18"> 商家用户</label>
-              </div>
-              <div class="err-text">{{ err.userType }}</div>
+            <div class="f">
+              <label for="acc">账号</label>
+              <div class="ipt"><input id="acc" type="text" placeholder="用户名" v-model="loginAccount"></div>
             </div>
 
-            <div class="input-item">
-              <input class="input register-input" type="date" v-model="birthDate" @change="calcAge" />
-              <div class="err-text">{{ err.birthDate }}</div>
-            </div>
-
-            <div class="input-item">
-              <input class="input register-input" placeholder="密码" type="password" v-model="pwd" @input="checkPwdStrong" />
-              <div class="err-text">{{ err.pwd }}</div>
-              <div class="pwd-bar" v-if="pwd">
-                <div class="bar-item" :class="{active: strongLevel>=1}"></div>
-                <div class="bar-item" :class="{active: strongLevel>=2}"></div>
-                <div class="bar-item" :class="{active: strongLevel>=3}"></div>
+            <div class="f">
+              <label for="pwd">密码</label>
+              <div class="ipt has-btn">
+                <input id="pwd" :type="pwdShown ? 'text' : 'password'" placeholder="密码" v-model="loginPwd">
+                <!-- 密码可见切换（稿的平台清单第 5 条）。
+                     ⚠️ **稿把那一条记为「既有真功能」是误记**：实测全仓（`src/` 全量 grep
+                     `reveal` / `showPwd` / `type === 'password'`）**没有任何密码可见实现**，
+                     改前这一页的两枚密码框都是裸 `<input type="password">`。
+                     ⇒ 本笔按「§口径 7」把它落成**视图状态**（`pwdShown` / `regPwdShown`），
+                     仅切换 `type` 属性，不涉 API 与逻辑。详见提交信息与台账。 -->
+                <button class="reveal" type="button" @click="pwdShown = !pwdShown">{{ pwdShown ? '隐藏' : '显示' }}</button>
               </div>
             </div>
 
-            <div class="input-item">
-              <div class="radio-row">
+            <!-- ① 图形验证码（占位 · N=3）。整块是 `<div class="f">` ⇒ **块级**，
+                 按口径只挂 `data-slot` + `title`，**不挂 `disabled`**；块内两枚真控件照稿 `disabled`。 -->
+            <div class="f" data-slot="预留 · 图形验证码（动现有代码 3 处）"
+                 title="待 C3〈鉴权〉——无验证码端点、无图形生成服务：endpoints.js + AuthController.java + LoginPage.vue = 3 处">
+              <label for="cap">验证码</label>
+              <div class="caprow">
+                <div class="ipt"><input id="cap" type="text" placeholder="填入右侧字符" disabled></div>
+                <span class="capfig" aria-hidden="true">7K39</span>
+                <button class="again" type="button" disabled>换一张</button>
+              </div>
+            </div>
+
+            <!-- ② 记住我 / 忘记密码（各 N=3）。⚠️ 角标挂**整个 `.row`**、不分别挂两枚控件：
+                 它们各自只有 90 / 72px 宽而角标要 230px，分挂会在中间叠成一团（稿的 1440 截图抓到）。
+                 这正是 README「角标只挂区块级」那条纪律。 -->
+            <div class="row" data-slot="预留 · 记住我 / 忘记密码（各动现有代码 3 处）"
+                 title="待 C3〈鉴权〉——「记住我」要一张长效凭据存 localStorage（当前只有 sessionStorage 会话票，api/auth.js）：AuthController.java + 签发逻辑 + LoginPage.vue；「忘记密码」另需端点 + 邮件/短信通道。各 3 处">
+              <label class="chk">
+                <input type="checkbox" disabled
+                       title="待 C3〈鉴权〉——需要 localStorage 长效凭据（3 处）">记住我
+              </label>
+              <button class="dim" type="button" disabled
+                      title="待 C3〈鉴权〉——无「找回密码」端点，也没有邮件/短信通道（3 处）">忘记密码？</button>
+            </div>
+
+            <div class="warn">{{ loginWarnText }}</div>
+            <button class="btn btn-primary btn-block" type="button" @click="login">登录</button>
+
+            <div class="swap">
+              <span>还没有账号？</span>
+              <button type="button" @click="!isSlide && toggle()">注册一个</button>
+            </div>
+          </section>
+
+          <!-- ── 二、登录 · 手机号（**整块预留位** · N=4 **超档**）────────────────
+               ⚠️ 这一面在实现里**真的能切进来**（`.seg` 那枚按钮真切）—— 按「§口径 7」，
+               新增 `loginView` 属视图状态。**不叠放**：它是另一套完整登录表单，
+               叠在账号面下面 = 两个登录表单并排 = 语义错误（这正是 commit 13 那条先例
+               「四个可叠放内容段落」**不适用**于本页的理由）。 -->
+          <section class="page" data-page="phone" :class="{ on: !isSlide && loginView === 'phone' }">
+            <h1 class="t">欢迎回来</h1>
+            <p class="t-sub">用你在本站注册的账号登录，客户与商家共用这一个入口。</p>
+
+            <div class="seg">
+              <button type="button" :class="{ on: loginView === 'account' }" @click="loginView = 'account'">账号登录</button>
+              <button type="button" :class="{ on: loginView === 'phone' }" @click="loginView = 'phone'">手机号登录</button>
+            </div>
+
+            <div data-slot="预留 · 手机号登录（动现有代码 4 处 · 超档）"
+                 title="待 C3〈鉴权〉——无「手机号 + 短信验证码」端点，也没有短信通道：endpoints.js + AuthController.java + mall_management_sql.sql + LoginPage.vue = 4 处。⚠️ `login` 表实测只有 (UserName, Password, Role, Id)，**没有手机号列** ⇒ 超档，因清单点名而画出（见 README 挂账表）。">
+              <div class="f">
+                <label for="ph">手机号</label>
+                <div class="ipt"><input id="ph" type="tel" placeholder="中国大陆 11 位手机号" disabled></div>
+              </div>
+
+              <div class="f">
+                <label for="sms">短信验证码</label>
+                <div class="caprow">
+                  <div class="ipt"><input id="sms" type="text" placeholder="6 位数字" disabled></div>
+                  <button class="btn btn-ghost btn-sm" type="button" disabled>获取验证码</button>
+                </div>
+              </div>
+
+              <div class="row">
+                <label class="chk"><input type="checkbox" disabled> 记住我</label>
+              </div>
+
+              <button class="btn btn-primary btn-block" type="button" disabled>登录</button>
+            </div>
+
+            <div class="swap">
+              <span>还没有账号？</span>
+              <button type="button" @click="!isSlide && toggle()">注册一个</button>
+            </div>
+          </section>
+
+          <!-- ── 三、注册（**五项全部既有真功能**，一件都不标 slot）──────────────── -->
+          <section class="page" data-page="register" :class="{ on: isSlide && !showSuccess }">
+            <h1 class="t">创建账号</h1>
+            <p class="t-sub">填写下面五项即可开通。用户类型决定登录后进哪一侧。</p>
+
+            <div class="f">
+              <label for="uname">用户名</label>
+              <div class="ipt"><input id="uname" type="text" placeholder="登录时使用，注册后不可改" v-model="username"></div>
+              <div class="err">{{ err.username }}</div>
+            </div>
+
+            <div class="f">
+              <label>用户类型</label>
+              <div class="radios">
+                <label><input type="radio" name="userType" value="客户" v-model="userType"> 客户</label>
+                <label><input type="radio" name="userType" value="商家" v-model="userType" :disabled="isUnder18"> 商家</label>
+              </div>
+              <div class="err">{{ err.userType }}</div>
+            </div>
+
+            <div class="f">
+              <label for="bday">出生日期</label>
+              <div class="ipt"><input id="bday" type="date" v-model="birthDate" @change="calcAge"></div>
+              <div class="err">{{ err.birthDate }}</div>
+            </div>
+
+            <div class="f">
+              <label for="npwd">密码</label>
+              <div class="ipt has-btn">
+                <input id="npwd" :type="regPwdShown ? 'text' : 'password'" placeholder="至少 8 位，含字母与数字"
+                       v-model="pwd" @input="checkPwdStrong">
+                <button class="reveal" type="button" @click="regPwdShown = !regPwdShown">{{ regPwdShown ? '隐藏' : '显示' }}</button>
+              </div>
+              <!-- ⚠️ 与稿**有意不同**：稿的三段强度条是常显（其中两段 `class="on"` 是稿的演示值），
+                   本页保留原实现「没输密码就不显示强度条」的行为（`v-if="pwd"`）——
+                   「功能量恒为 0」⇒ 不把「什么时候出现」也改掉。长度值照旧由 `strongLevel` 驱动。 -->
+              <div class="strength" v-if="pwd">
+                <i :class="{ on: strongLevel >= 1 }"></i><i :class="{ on: strongLevel >= 2 }"></i><i :class="{ on: strongLevel >= 3 }"></i>
+              </div>
+              <div class="err">{{ err.pwd }}</div>
+            </div>
+
+            <div class="f">
+              <label>性别</label>
+              <div class="radios">
                 <label><input type="radio" name="gender" value="男" v-model="gender"> 男</label>
                 <label><input type="radio" name="gender" value="女" v-model="gender"> 女</label>
               </div>
-              <div class="err-text">{{ err.gender }}</div>
+              <div class="err">{{ err.gender }}</div>
             </div>
-          </div>
 
-          <button class="form-btn register-btn" @click="register">sign up</button>
-          <div v-if="isUnder18" class="tip">未满18周岁，不可选择商家用户</div>
+            <!-- ⚠️ 与稿**有意不同**（第 2 处）：稿给这枚按钮挂了 `title="本稿只演示跳转；真实注册走
+                 endpoints.user.loginAdd（LoginPage.vue:209）"`。按「口径 4」自引行号那半已剥，
+                 但剩下那半（「本稿只演示跳转」）说的是**稿自己**的演示行为 ——
+                 本页这枚按钮**真的调 `register()`**，照挂就是在页面上写一句假话 ⇒ **整条不落**。 -->
+            <button class="btn btn-primary btn-block" type="button" @click="register">注册</button>
+            <p class="tip" v-if="isUnder18">未满 18 周岁不可选择「商家」。</p>
+
+            <div class="swap">
+              <span>已经有账号？</span>
+              <button type="button" @click="isSlide && toggle()">去登录</button>
+            </div>
+          </section>
+
+          <!-- ── 四、注册成功 ─────────────────────────────────────────── -->
+          <section class="page" data-page="success" :class="{ on: showSuccess }">
+            <div class="done">
+              <h1>账号已开通</h1>
+              <p>商城平台【{{ userType }}】账号注册成功。现在可以回到登录页，用刚才的用户名与密码进入。</p>
+              <button class="btn btn-primary btn-block" type="button" @click="goToLogin">返回登录</button>
+            </div>
+          </section>
+
         </div>
-
-        <div class="success-cover" v-show="showSuccess" @click="goToLogin">
-          <div class="success-text">
-            商城平台【{{ userType }}】账号注册成功，<br>
-            点此返回登录界面
-          </div>
-        </div>
-
       </div>
-    </div>
-  </div>
+    </section>
+  </main>
 </template>
 
 <script>
@@ -102,6 +246,24 @@ export default {
   data() {
     return {
       isSlide: false,
+      // ── commit 12b（2026-10-07）：本笔新增 **3 个 UI 展示状态**，按 §口径 7 登记 ────────────
+      // 该条口径（用户裁决）：D 笔边界「`script` 一字不动」的**目的 = 功能量恒为 0**
+      //   —— 不动 API 调用 / 状态机 / `watch` / 轮询 / 业务逻辑。
+      //   **UI 展示状态（tab / seg / 折叠 / 展开）不计入**，故不破「功能量恒为 0」。
+      // ⚠️ 用户要求「破先例必须留痕」⇒ 三个字段逐个交代：
+      //   · loginView   —— 登录面里「账号 / 手机号」两枚分段按钮的选中项。它**只是换视图**：
+      //      手机号那一面整块是预留位（`data-slot`），切过去**不发任何请求**。
+      //      （这也是它**不**采用 commit 13 那条「四枚按钮全 disabled + 面板依次全部渲染」先例的理由：
+      //        手机号面是**另一套完整登录表单**，叠在账号面下面 = 两个登录表单并排 = **语义错误**；
+      //        那条先例成立的前提是「四块都是可叠放的内容段落」。）
+      //   · pwdShown    —— 登录密码框的「显示 / 隐藏」。只切 `type` 属性。
+      //   · regPwdShown —— 注册密码框的同款。
+      // ⚠️ 后两个是本笔**新画**的控件：稿把它记成「既有真功能」，实测**全仓没有**该实现
+      //    （模板里有对应注释）。它们同样只切 `type`，不写回任何业务字段。
+      // ⚠️ 三个字段**不被任何方法读取**，只被模板读写 ⇒ 把它们删掉，脚本行为一字不变。
+      loginView: "account",
+      pwdShown: false,
+      regPwdShown: false,
       showSuccess: false,
       loginAccount: "",
       loginPwd: "",
@@ -305,246 +467,195 @@ export default {
 </script>
 
 <style scoped>
-/* ── 12a（2026-10-07）：本块**原是全仓唯一一个不带 `scoped` 的 `<style>`**（其余 15 个都带）——
-   块内 33 条选择器**全是全局的**。本笔把它收进 `scoped`，并删掉两条**外泄到别的页**的规则。
-   逐条取证（不是「看着像」）：
+/* ══ D 笔 commit 12b（2026-10-07）：整块按 `docs/美化/pages/LoginPage.html`（B 稿 v5 / v6.1）重写 ══
+   本块**替代**了原来的 33 条全局选择器（那批的逐条处置见 `slot-registry.md` §一 `commit 12a`；
+   本笔整块重写后，`12a` 提到的那三条规则与 `.login-page` / `.success-cover` 等类名**都已不存在**）。
 
-   1) 已删 `* { margin:0; padding:0; box-sizing:border-box }`
-      与 `assets/tokens.css:52` **逐字重复**，而 `tokens.css` 由 `main.js:2` 全局引入
-      ⇒ 删掉**无渲染变化**（本页内部也由它兜着）。
+   与稿的三处**必要差异**（不照抄稿的地方，逐条写在这里）：
+   1) 稿的 `body{...}` / `:root{--d1,--d2}` 两条在本块里**上移到 `.auth`**：
+      scoped 样式会给选择器补 `[data-v-…]`，而 `body` / `:root` 上**没有**这个属性
+      ⇒ 照抄就是**两条静默失效**的规则（`--d1` / `--d2` 失效的后果是字号回落，
+      eslint / build / 模板扫**都报不出来** —— 这条坑 `ProductPage.vue` 已应验过一次）。
+   2) 稿的 `body[data-state="register"]` 换图 ⇒ 改成挂在本组件的 `.brand-fig.reg` 上
+      （scoped 够不到 `body`）；判据不变，仍是 `isSlide` 那两档。
+   3) 稿里 `.brand-fig` 的图用**稿相对路径**指向后端 `static/img`，本页沿用改前既有的写法
+      `http://localhost:8088/img/...`（改前 `.img-section` 就是这么引的，本笔不改这个约定）。
+   ⚠️ 行号影响：模板与样式**整体重写** ⇒ 指向本文件的「文件:行号」互引大面积漂移。
+      按「锚点漂移只报告」口径，本笔出报告不改别人；逐条修归 commit 14。 */
 
-   2) 已删 `input, button, .success-cover { user-select:text !important; pointer-events:auto !important }`
-      全仓 `pointer-events` 只有 5 处，**没有一处依赖它**；它反而**正在压掉**
-      `GoodsAdd.vue:617` 的 `.code input { pointer-events: none }` ——
-      那是类型单选胶囊里那枚 `width:1px / opacity:0` 的**装饰性 `<input type="radio">`**
-      （`GoodsAdd.vue:99` / `:107`，可见的胶囊由原生 radio 承担语义、`<span>` 承担视觉），
-      本页明确写了「不可点」，被这条全局 `!important` **顶掉了** ⇒ 删掉它 = 让那条声明恢复生效。
-      ⚠️ 实测影响**很小**（1px 的隐形热区，且 `label` 包着 input、点胶囊本来就会转发到它），
-      所以这**不是**一个「用户能看出来的 bug」，只是**全局层越权**的证据 —— 如实标注，别夸大。
-      另 3 处 `pointer-events`（`HomePage.vue:597` 的 `.glaze-frame` 是 `div`，另有本页自己两处）
-      **都不受影响**。`user-select` 在全仓**只有本页**用过。
-      本页自己需要的那两处（`.slide-btn,.form-btn`、`.success-cover`）**各自自带** `!important`
-      ⇒ 删掉后本页行为不变。
+/* 页面级排版档（稿的 `:root{--d1,--d2}` 搬到这里，理由见上） */
+.auth {
+  --d1: calc(var(--fs-2xl) * 1.31);   /* 页主视觉 ≈47px */
+  --d2: calc(var(--fs-2xl) * 1.00);   /* 次级标题 ≈36px */
 
-   3) **没收的一条：`.tip`**（上一条 `.tip` 的 `position/right/bottom` 命中 `GoodsAdd.vue` 的
-      5 处 `class="tip"`，而 GoodsAdd 自己的 `.tip` 只设 margin-top / font-size / color、
-      没有 position ⇒ 作者本意是**就地显示**，那条绝对定位是意外泄漏）。
-      ⚠️ 但本页 `:81` **自己也在用** `.tip`（「未满18周岁…」），那条定位是本页的设计
-      ⇒ **整条删会伤到本页**，故改为**靠 `scoped` 收敛**：本页那条仍在、GoodsAdd 那边自动脱离。
-      （若确要连本页这条也去掉，属 12b 按稿重写时的判断，不在本笔。）
+  /* 稿的 `body{...}` 搬到这里：`tokens.css` **刻意不设** `body` 的 font/color/background
+     （见该文件头注），所以本页自报。 */
+  font-family: var(--font);
+  font-size: var(--fs-sm);
+  color: var(--ink);
+  background: var(--bg);
+  -webkit-font-smoothing: antialiased;
+  /* 稿是 `calc(100vh - 46px)`，减的 46px 是**稿自己的预览条**；本页没有那一条 ⇒ 100vh。 */
+  min-height: 100vh;
+}
+/* 控件一律继承页面字体 —— 浏览器 UA 样式表会给 `button` / `input` 打上自己的 `font`。
+   落法同 `ProductPage.vue` / `GoodsAdd.vue` / `GoodsUp.vue` 三处先例。 */
+button, input { font: inherit; color: inherit; }
+button { background: none; border: 0; cursor: pointer; }
+input::placeholder { color: var(--ink-3); }
+/* 全仓**没有**全局 `a` 规则 ⇒ `<router-link>` 渲染出的 `<a>` 默认带下划线，必须自报 */
+a { color: inherit; text-decoration: none; }
 
-   ⚠️ 行号影响：本笔只动 `:307` 之后。全仓 27 条（19 条单值 + 8 条区间）指向 `LoginPage.vue`
-   的行号引用，目标行**全部落在 86–280**（模板/脚本区）⇒ 一条都不漂。 */
+/* ── 分栏：左品牌 46 / 右表单 54 ──────────────────────────────────────────── */
+.auth { display: grid; grid-template-columns: minmax(0, 46fr) minmax(0, 54fr); }
 
-.login-page {
-  width: 100vw;
-  height: 100vh;
-  background-image: url("http://localhost:8088/img/Mall-Homepage.jpg");
-  background-size: cover;
-  background-position: center;
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  opacity: 0.9;
-  position: relative;
-}
-.login-box {
-  width: calc(70% * 0.8);
-  height: calc(70%);
-  border-radius: 22px;
-  position: relative;
-  overflow: hidden;
-  box-shadow: 0 0 20px rgba(0,0,0,0.15);
-}
-.img-section {
-  position: absolute;
-  width: 35%;
-  height: 100%;
-  right: 0;
-  top: 0;
-  background-size: cover;
-  background-position: center;
-  transition: transform 0.7s ease;
-  z-index: 2;
-}
-.img-section.slide {
-  transform: translateX(-185.7%);
-}
-.form-section {
-  position: absolute;
-  width: 65%;
-  height: 100%;
-  left: 0;
-  top: 0;
-  background: rgba(255,255,255,0.6);
-  backdrop-filter: blur(10px);
-  transition: transform 0.7s ease;
-  z-index: 1;
-}
-.form-section.slide {
-  transform: translateX(53.85%);
-}
-.img-text {
-  position: absolute;
-  top: 15%;
-  width: 100%;
-  text-align: center;
-  font-size: 15px;
-  font-weight: bold;
-  color: #000;
-  user-select: none;
-}
-.slide-btn,.form-btn {
-  border: none;
-  border-radius: 30px;
-  background: #00bcd4;
-  color: #fff;
-  font-size: 14px;
-  padding: 11px 28px;
-  cursor: pointer !important;
-  pointer-events: auto !important;
-  user-select: none !important;
-  outline: none !important;
-  -webkit-tap-highlight-color: transparent;
-}
-.slide-btn {
-  position: absolute;
-  bottom: 35%;
-  left: 50%;
-  transform: translateX(-50%);
-}
-.form-btn {
-  position: absolute;
-  bottom: 20%;
-  left: 50%;
-  transform: translateX(-50%);
-}
-.register-btn {
-  bottom: 10% !important;
-}
-.login-form,.register-form {
-  width: 100%;
-  height: 100%;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  padding-top: 5%;
-  position: relative;
-}
-.login-form h2,.register-form h2 {
-  height: 20%;
-  display: flex;
-  align-items: center;
-  font-size: 26px;
-  color: #333;
-}
-.input-item {
-  display: flex;
-  flex-direction: column;
-  height: 60px;
-  justify-content: center;
-}
-.login-inputs {
-  display: flex;
-  flex-direction: column;
-  gap: 30px;
-  position: relative;
-  top: 40px;
-  width: 75%;
-}
-.login-input {
-  width: 100%;
-  padding: 16px;
-  border-radius: 12px;
-}
-.register-inputs {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  position: relative;
-  top: 10px;
-  width: 75%;
-}
-.register-input {
-  width: 100%;
-  padding: 12px;
-  border-radius: 8px;
-}
-.radio-row {
-  display: flex;
-  justify-content: space-around;
-  font-size: 14px;
-}
-.radio-row label {
-  cursor: pointer;
-}
-.err-text {
-  font-size: 12px;
-  color: red;
-  height: 16px;
-  text-align: left;
-}
-.tip {
-  position: absolute;
-  right: 40px;
-  bottom: 80px;
-  color: red;
-  font-size: 12px;
-}
-.input {
-  border: none;
-  background: #f1f3f5;
-  box-shadow: inset 2px 2px 5px rgba(0,0,0,0.08);
-  outline: none;
-}
-.pwd-bar {
-  display: flex;
-  gap: 6px;
-  margin-top: 4px;
-}
-.bar-item {
-  flex: 1;
-  height: 6px;
-  border-radius: 10px;
-  background: #ddd;
-}
-.bar-item.active {
-  background: #00bcd4;
-}
-.login-warn {
-  position: absolute;
-  left: 40px;
-  bottom: 90px;
-  color: red;
-  font-size: 13px;
-  max-width: 80%;
-}
-.success-cover {
-  position: absolute;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 100%;
-  background: #ffffff;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-  z-index: 99;
-  pointer-events: auto !important;
-}
-.success-text {
-  font-size: 30px;
-  color: #00bcd4;
-  text-align: center;
-  line-height: 1.8;
-  padding: 0 20px;
-  text-shadow: 
-    1px 1px 0 #029fb9,
-    2px 2px 0 #028fa8,
-    3px 3px 0 #028096,
-    4px 4px 4px rgba(0,0,0,0.25);
-  font-weight: 600;
-  letter-spacing: 2px;
+/* ⚠️ 底用 `--glaze-deep` 不是 `--glaze-pale`：后者对纯白的 ΔE00 只有 2.91，
+   占满左侧 46% 宽的一整栏时眼睛读成白（「加了底色」与「看得出是块底色」是两件事）。 */
+.brand { display: flex; flex-direction: column;
+         padding: var(--s7) var(--s7) var(--s6);
+         background: var(--glaze-deep); border-right: 1px solid var(--line); }
+.brand-mark { font-family: var(--font-display); font-size: var(--fs-lg); font-weight: var(--fw-semi);
+              letter-spacing: .06em; color: var(--brand-ink); }
+/* 大字的两个「收紧」（负字距 + 紧行高）照稿：参考站点的 display 字号实测如此，
+   而模板默认的 tracking-normal + 1.5 行高正是「一眼像模板」的来源之一。 */
+/* ⚠️ 用**固定间距** `--s7`，不用 `margin-top:auto`：`.auth` 两列同行拉伸，
+   注册态比登录态高，`auto` 会把标语在两态之间推上推下 —— 那正是本页要消灭的「切态时整块在动」。 */
+.brand-claim { margin-top: var(--s7); max-width: 9.5em;
+               font-family: var(--font-display); font-size: var(--d1); font-weight: var(--fw-med);
+               line-height: 1.12; letter-spacing: -.03em; color: var(--ink); }
+.brand-sub { margin-top: var(--s4); max-width: 24em; font-size: var(--fs-sm); line-height: 1.85;
+             color: var(--ink-2); }
+/* 品牌大图（用户最低清单点名）。封 `max-width:440px`：16:9 铺满 46% 栏（566px）时有 318px 高，
+   加下方事实表在 1440×900 下会把整栏顶出首屏。
+   底留 `--img`：图没加载出来时是一块正常的灰底，不会露出白洞。 */
+.brand-fig { margin-top: var(--s6); width: 100%; max-width: 440px; aspect-ratio: 16/9;
+             border: 1px solid var(--line); border-radius: var(--r2);
+             background-color: var(--img); background-size: cover; background-position: top;
+             background-image: url("http://localhost:8088/img/Mall-Section-2.jpg"); }
+/* 注册态换另一张（稿 = `body[data-state="register"]`，见块首差异 2） */
+.brand-fig.reg { background-image: url("http://localhost:8088/img/Mall-Section-1.jpg"); }
+.facts { margin-top: var(--s6); border-top: 1px solid var(--line); }
+.facts > div { display: flex; gap: var(--s5); align-items: baseline;
+               padding: var(--s3) 0; border-bottom: 1px solid var(--line); }
+.facts dt { flex: none; width: 3.5em; font-size: var(--fs-xs); color: var(--ink-3); }
+.facts dd { font-size: var(--fs-sm); color: var(--ink-2); }
+
+/* ── 右栏：表单面 ─────────────────────────────────────────────────────────── */
+.pane { padding: var(--s6) var(--s7) var(--s6); }
+.pane-top { display: flex; justify-content: space-between; font-size: var(--fs-xs); color: var(--ink-3); }
+.pane-top a { padding: var(--s1) 0; }
+.pane-top a:hover { color: var(--brand-ink); }
+
+/* ⚠️ **外壳固定**：`margin:0 auto` —— 不是 `margin:auto`。
+   双向 `auto` 会让每一态各自垂直居中（短态浮中间、长态顶到上边），容器的上边缘在两态之间跳。
+   `.stage` 只负责换内容，容器的上/左/宽与 Tab 位置逐像素不动。 */
+.form-shell { margin: 0 auto; width: 100%; max-width: 392px; padding-top: var(--s5); }
+
+/* 页面级 Tab：登录 / 注册 */
+.ctabs { display: flex; gap: var(--s5); border-bottom: 1px solid var(--line-2); }
+.ctabs button { padding: var(--s2) 0 var(--s3); font-size: var(--fs-md); color: var(--ink-3);
+                border-bottom: 2px solid transparent; margin-bottom: -1px; }
+.ctabs button:hover { color: var(--ink-2); }
+.ctabs button.on { color: var(--ink); font-weight: var(--fw-med); border-bottom-color: var(--brand); }
+
+.stage { margin-top: var(--s5); }
+@keyframes fadein { from { opacity: 0 } to { opacity: 1 } }
+.page { display: none; }
+.page.on { display: block; animation: fadein .18s ease; }
+
+h1.t { font-family: var(--font-display); font-size: var(--d2); font-weight: var(--fw-med);
+       line-height: 1.15; letter-spacing: -.02em; color: var(--ink); }
+.t-sub { margin-top: var(--s2); font-size: var(--fs-sm); color: var(--ink-3); }
+
+/* 登录方式切换：账号 / 手机号（分段控件）—— 不用 overflow:hidden 裁圆角，
+   改用首/末子元素自带圆角（README：宿主与祖先不许 overflow:hidden） */
+.seg { display: inline-flex; margin-top: var(--s4); }
+.seg button { height: 30px; padding: 0 var(--s4); border: 1px solid var(--line-2);
+              font-size: var(--fs-xs); color: var(--ink-3); }
+.seg button + button { border-left: 0; }
+.seg button:first-child { border-radius: var(--r1) 0 0 var(--r1); }
+.seg button:last-child { border-radius: 0 var(--r1) var(--r1) 0; }
+/* ⚠️ 选中态用 `--brand-tint` 不是 `--surface-2`（后者对白 ΔE00 只有 2.63）：
+   「哪个被选中」是**功能信息**，不是装饰。这一处改色是修一个看不出来的选中态。 */
+.seg button.on { background: var(--brand-tint); color: var(--brand-ink); font-weight: var(--fw-med); }
+
+.f { margin-top: var(--s5); }
+.f > label { display: block; margin-bottom: var(--s2); font-size: var(--fs-xs); color: var(--ink-2); }
+.ipt { position: relative; display: flex; align-items: center; }
+.ipt > input { width: 100%; height: 46px; padding: 0 var(--s3); border: 1px solid var(--line-2);
+               border-radius: var(--r2); background: var(--surface);
+               transition: border-color .15s, box-shadow .15s; }
+.ipt > input:focus { outline: none; border-color: var(--brand); box-shadow: 0 0 0 3px var(--brand-tint); }
+.ipt.has-btn > input { padding-right: 64px; }
+.reveal { position: absolute; right: 6px; height: 34px; padding: 0 var(--s2); border-radius: var(--r1);
+          font-size: var(--fs-xs); color: var(--ink-3); }
+.reveal:hover { color: var(--ink-2); background: var(--surface-2); }
+/* 验证码行：输入框 + 图形 + 换一张 */
+.caprow { display: flex; gap: var(--s3); }
+.caprow .ipt { flex: 1 1 auto; }
+.capfig { flex: 0 0 96px; height: 46px; border: 1px solid var(--line-2); border-radius: var(--r2);
+          background: var(--surface-2); display: flex; align-items: center; justify-content: center;
+          font-family: var(--font-mono); font-size: var(--fs-md); letter-spacing: .22em;
+          color: var(--ink-3); user-select: none; }
+.caprow .again { flex: 0 0 auto; height: 46px; padding: 0 var(--s3); font-size: var(--fs-xs); color: var(--ink-3); }
+.err { min-height: 16px; margin-top: var(--s1); font-size: var(--fs-xs); color: var(--danger); }
+
+.row { display: flex; align-items: center; justify-content: space-between;
+       margin: var(--s4) 0 0; font-size: var(--fs-xs); }
+.chk { display: flex; align-items: center; gap: var(--s2); color: var(--ink-2); }
+.chk input[disabled] { cursor: not-allowed; }
+.row .dim { color: var(--ink-3); padding: var(--s1) 0; }
+.row .dim:hover { color: var(--brand-ink); }
+
+.btn { display: inline-flex; align-items: center; justify-content: center; gap: var(--s2);
+       height: 46px; border-radius: var(--r2); font-weight: var(--fw-med); }
+.btn-block { width: 100%; margin-top: var(--s6); }
+.btn-primary { background: var(--brand); color: var(--bg); }
+.btn-primary:hover { background: var(--brand-hover); }
+.btn-ghost { border: 1px solid var(--line-2); color: var(--ink-2); }
+.btn[disabled] { background: var(--surface-3); color: var(--ink-3); border-color: transparent;
+                 cursor: not-allowed; }
+.btn-ghost[disabled] { background: none; border: 1px dashed var(--line-2); }
+.btn-sm { height: 46px; flex: 0 0 auto; padding: 0 var(--s5); font-size: var(--fs-sm); }
+
+.warn { min-height: 20px; margin-top: var(--s3); font-size: var(--fs-xs); color: var(--danger); }
+.swap { margin-top: var(--s6); padding-top: var(--s5); border-top: 1px solid var(--line);
+        display: flex; justify-content: space-between; font-size: var(--fs-xs); color: var(--ink-3); }
+.swap button { color: var(--brand-ink); font-weight: var(--fw-med); }
+
+/* 注册面专属 */
+.radios { display: flex; gap: var(--s5); align-items: center; height: 46px; }
+.radios label { display: flex; align-items: center; gap: var(--s2); font-size: var(--fs-sm); color: var(--ink-2); }
+.radios label.off { color: var(--ink-3); cursor: not-allowed; }
+.strength { display: flex; gap: var(--s1); margin-top: var(--s2); }
+.strength i { flex: 1; height: 3px; border-radius: 2px; background: var(--line-2); }
+.strength i.on { background: var(--brand); }
+.tip { margin-top: var(--s4); font-size: var(--fs-xs); color: var(--warning); }
+
+/* ⚠️ 「注册面专属档」的总收紧：注册面比登录面高 215px，单靠上面几处全局档收不到 854。
+   **只动注册面**：选择器全部冠 `.page[data-page="register"]`（特异性 0,2,0 稳压 0,1,0）
+   ⇒ 登录面逐像素不变。收的六处**全是间距**，字号与控件尺寸一个没动。 */
+.page[data-page="register"] .f { margin-top: var(--s2); }
+.page[data-page="register"] .f > label { margin-bottom: var(--s1); }
+.page[data-page="register"] .err { min-height: 8px; margin-top: 0; }
+.page[data-page="register"] .btn-block { margin-top: var(--s5); }
+.page[data-page="register"] .tip { margin-top: var(--s2); }
+.page[data-page="register"] .swap { margin-top: var(--s4); padding-top: var(--s4); }
+
+/* 注册成功面 */
+.done h1 { font-family: var(--font-display); font-size: var(--d2); font-weight: var(--fw-med); line-height: 1.25; }
+.done p { margin-top: var(--s4); font-size: var(--fs-sm); line-height: 1.85; color: var(--ink-2); }
+
+/* ── 窄屏（≤1080）：品牌面压成顶部一条 ───────────────────────────────────────
+   ⚠️ 这段**必须写在所有组件规则之后**：稿的 v2 首版把它放在 `.auth` 下面，而 `.brand{display:flex}`
+   在其后 —— 特异性相同、后者在后 ⇒ 媒体查询里的规则被顶掉，1080 下品牌面仍整块渲染（稿的截图抓到）。
+   响应式覆盖一律沉到样式表末尾，是这份稿子的一条硬规矩。 */
+@media (max-width: 1080px) {
+  .auth { grid-template-columns: 1fr; }
+  .brand { padding: var(--s6) var(--s5) var(--s6); border-right: 0; border-bottom: 1px solid var(--line); }
+  .brand-claim { margin-top: var(--s5); font-size: var(--d2); }
+  .brand-sub, .facts, .brand-fig { display: none; }
+  .pane { padding: var(--s6) var(--s5) var(--s8); }
+  .form-shell { padding-top: var(--s6); }
 }
 </style>
