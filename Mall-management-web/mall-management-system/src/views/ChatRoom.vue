@@ -1,71 +1,115 @@
 <template>
   <div class="chat-room">
-    <div class="chat-header">
-      <div class="current-conversation">
-        <span v-if="currentOther">与 {{ currentOther.username }} 的会话</span>
-        <span v-else>请选择一个会话</span>
+    <!-- ⚠️ D 笔（2026-10-07）：本块按 `docs/美化/pages/ChatRoom.html` 重写。稿的 5 个
+         「面」（客户·消息 / 商家·消息 / 客户·用户中心·消息 / 商家·用户中心·消息 / 空态）
+         在 Vue 里**只是两条路由 + 有无会话**，共用本组件 ⇒ 只落 `panel()` 那层
+         （`.chat`），稿的 `.nav-bar` / `.wrap` / `.split` / `.uc-menu` 分别归
+         `AppShell.vue` 与 `UserCenter.vue`，**不进本文件**。
+         ⚠️ 稿把原来的 **220px 下拉**换成**常驻左栏**（`.rail`，数据同一份
+         `message.conversations`）⇒ 下拉那套脚本随之变死，见 `<script>` 里的按语。 -->
+    <div class="chat">
+      <div class="rail">
+        <div class="rail-h">会话 · {{ conversations.length }}</div>
+        <div class="rail-list">
+          <button
+            v-for="conv in conversations"
+            :key="conv.other_id"
+            class="conv"
+            type="button"
+            :aria-current="selectedConversation === conv.other_id ? 'true' : null"
+            title="切换会话"
+            @click="selectConversation(conv)"
+          >
+            <span class="ty">{{ conv.other_type === 'customer' ? '用户' : '商家' }}</span>
+            <span class="id">{{ conv.other_id }}</span>
+            <span v-if="conv.unread" class="udot" title="未读"></span>
+          </button>
+          <div v-if="conversations.length === 0" class="rail-empty">暂无会话</div>
+        </div>
       </div>
-      <div class="conversation-selector">
-        <div class="custom-select" @click="toggleDropdown">
-          <div class="selected-display">
-            {{ selectedConversationName || '-- 选择会话 --' }}
-            <span class="arrow">▼</span>
-          </div>
-          <div class="dropdown-list" v-if="dropdownOpen">
+
+      <div class="main">
+        <div class="chead">
+          <template v-if="currentOther">
+            <h2>与 {{ currentOther.username }} 的会话</h2>
+            <span class="meta">{{ currentOther.id }}</span>
+          </template>
+          <span v-else class="none">请选择一个会话</span>
+        </div>
+
+        <div ref="messageListRef" class="msgs">
+          <template v-if="messages.length > 0">
+            <div class="day">{{ dayLabel }}</div>
             <div
-              v-for="conv in conversations"
-              :key="conv.other_id"
-              class="dropdown-item"
-              :class="{ active: selectedConversation === conv.other_id }"
-              @click="selectConversation(conv)"
+              v-for="msg in messages"
+              :key="msg.id"
+              class="mi"
+              :class="isSelfMessage(msg) ? 'self' : 'other'"
             >
-              <span class="conv-label">
-                {{ conv.other_type === 'customer' ? '用户' : '商家' }}：{{ conv.other_id }}
-              </span>
-              <span v-if="conv.unread" class="red-dot"></span>
-            </div>
-            <div v-if="conversations.length === 0" class="dropdown-empty">暂无会话</div>
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <div class="message-list" ref="messageListRef">
-      <div v-for="msg in messages" :key="msg.id" class="message-item"
-           :class="{ 'self': isSelfMessage(msg), 'other': !isSelfMessage(msg) }">
-        <div class="message-bubble">
-          <div class="message-content">
-            <template v-if="isProductMessage(msg)">
-              <div class="product-card" @click="goToProduct(parseProductInfo(msg.content))">
-                <div class="product-card-left">
-                  <img :src="parseProductInfo(msg.content).goodImg" alt="商品图片" />
+              <div class="bwrap">
+                <div class="bub" :class="{ bare: isProductMessage(msg) }">
+                  <template v-if="isProductMessage(msg)">
+                    <div class="pc" title="现有功能 goToProduct" @click="goToProduct(parseProductInfo(msg.content))">
+                      <div class="th">
+                        <img :src="parseProductInfo(msg.content).goodImg" alt="商品图片" />
+                      </div>
+                      <div>
+                        <div class="nm">{{ parseProductInfo(msg.content).goodName }}</div>
+                        <div class="dt">型号：{{ parseProductInfo(msg.content).productCode }}</div>
+                        <div class="pr">
+                          <span class="u">¥</span>
+                          <span class="i">{{ getPriceInt(parseProductInfo(msg.content).price) }}</span>
+                          <span class="d">.{{ getPriceDec(parseProductInfo(msg.content).price) }}</span>
+                        </div>
+                        <span class="lk">查看商品详情</span>
+                      </div>
+                    </div>
+                  </template>
+                  <template v-else>{{ msg.content }}</template>
                 </div>
-                <div class="product-card-right">
-                  <div class="product-name">{{ parseProductInfo(msg.content).goodName }}</div>
-                  <div class="product-detail">型号：{{ parseProductInfo(msg.content).productCode }}</div>
-                  <div class="product-detail">价格：¥{{ parseProductInfo(msg.content).price }}</div>
-                  <div class="product-link">点击查看商品详情 →</div>
-                </div>
+                <div class="tm">{{ formatTimeHM(msg.create_time) }}</div>
               </div>
-            </template>
-            <template v-else>
-              {{ msg.content }}
-            </template>
-          </div>
-          <div class="message-time">{{ formatDateTime(msg.create_time) }}</div>
+            </div>
+          </template>
+        </div>
+
+        <div v-if="currentOther" class="inp-area">
+          <button class="icon" type="button" title="表情 —— 纯前端：插入字符进输入框，走现有 message.send，不需要新端点" @click="insertEmoji">表情</button>
+          <button
+            class="icon"
+            type="button"
+            disabled
+            data-slot="预留 · 图片消息（动现有代码 4 处）"
+            title="待 C3〈消息〉——发图要先有上传端点：endpoints.js + MessageController.java + mall_management_sql.sql（消息表要加一列存图 URL）+ ChatRoom.vue = 4 处。**超档**（因清单点名而画出，见 README 挂账表）"
+          >图片</button>
+          <input
+            v-model="newMessage"
+            type="text"
+            placeholder="输入消息..."
+            title="回车发送"
+            @keyup.enter="sendMessage"
+          />
+          <button class="send" type="button" title="现有端点 message.send" @click="sendMessage">发送</button>
+        </div>
+
+        <div v-else class="inp-area">
+          <button class="icon" type="button" disabled title="未选择会话">表情</button>
+          <button class="icon" type="button" disabled title="未选择会话">图片</button>
+          <input
+            type="text"
+            placeholder="请先选择一个会话"
+            disabled
+            title="没选会话就发不出去（原为 alert），改成看得见的状态"
+          />
+          <button class="send" type="button" disabled title="未选择会话">发送</button>
         </div>
       </div>
-    </div>
-
-    <div class="message-input-area">
-      <input type="text" v-model="newMessage" placeholder="输入消息..." @keyup.enter="sendMessage" />
-      <button @click="sendMessage">发送</button>
     </div>
   </div>
 </template>
 
 <script setup>
-import { ref, onMounted, onUnmounted, nextTick, watch, computed } from 'vue'
+import { ref, computed, onMounted, onUnmounted, nextTick, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { http, handleApiError } from '../api/http'
 import { endpoints } from '../api/endpoints'
@@ -83,17 +127,6 @@ const messages = ref([])
 const newMessage = ref('')
 const messageListRef = ref(null)
 
-// 自定义下拉框状态
-const dropdownOpen = ref(false)
-
-const selectedConversationName = computed(() => {
-  if (!selectedConversation.value) return ''
-  const conv = conversations.value.find(c => c.other_id === selectedConversation.value)
-  if (!conv) return ''
-  const typeLabel = conv.other_type === 'customer' ? '用户' : '商家'
-  return `${typeLabel}：${conv.other_id}`
-})
-
 let pollingTimer = null
 
 // 判断是否为商品消息
@@ -109,6 +142,22 @@ const parseProductInfo = (content) => {
   } catch (e) {
     return null
   }
+}
+
+// ── D 笔（2026-10-07）：价格拆两档，承接稿 `.pc .pr` 的三段式（`¥` 12 / 整数 19 / 小数 12）──
+// 改动理由：稿的商品卡把原先生成的一行 `价格：¥{{ price }}` 换成三段排版（稿 `:374` 按语
+// 「三段同号时卡里没有对比」）⇒ 需要整数/小数两个取值点。
+// ⚠️ 这两个函数**不是为 D 笔新造的抽象**：`GoodsSelect.vue:249-258` 与 `HomePage.vue:203-213`
+//    里逐字同款，早就在仓里（同一套写法、同一套空值兜底）。
+const getPriceInt = (price) => {
+  if (!price) return '0'
+  return parseInt(price) || '0'
+}
+const getPriceDec = (price) => {
+  if (!price) return '00'
+  const s = String(price)
+  const arr = s.split('.')
+  return arr[1] ? arr[1].padEnd(2, '0').slice(0, 2) : '00'
 }
 
 // 跳转到商品详情页
@@ -236,24 +285,20 @@ const openConversation = async (otherId, otherType) => {
   return true
 }
 
-// 选择会话（自定义下拉框）
+// ── D 笔（2026-10-07）按语：**下拉那套已随稿退役** ───────────────────────────────
+// 稿把「220px 自定义下拉」换成**常驻左栏**（`.rail`）⇒ 原 `dropdownOpen` /
+// `selectedConversationName` / `toggleDropdown` / `handleClickOutside` 四件**全部失去引用面**。
+// ⚠️ 它们**必须删**、不是「顺手清」：`eslint:recommended` 带 `no-unused-vars`（`package.json`
+//    的 `eslintConfig`）⇒ 留着 `npm run lint` 直接红；而 `handleClickOutside` 与
+//    `selectConversation` 又都写 `dropdownOpen.value = …` ⇒ 只删声明会变成**引用未定义**、`build` 红。
+// ⚠️ 会话列表**选中态**改由 `:aria-current="selectedConversation === conv.other_id"` 承担
+//    （稿 `.conv[aria-current="true"]`），`selectedConversation` 这个 ref 本身**照旧**。
+
+// 选择会话（左栏点击）
 const selectConversation = async (conv) => {
-  dropdownOpen.value = false
   if (selectedConversation.value === conv.other_id) return
   selectedConversation.value = conv.other_id
   await openConversation(conv.other_id, conv.other_type)
-}
-
-// 切换下拉框
-const toggleDropdown = () => {
-  dropdownOpen.value = !dropdownOpen.value
-}
-
-// 点击外部关闭下拉框
-const handleClickOutside = (event) => {
-  if (!event.target.closest('.conversation-selector')) {
-    dropdownOpen.value = false
-  }
 }
 
 // 轮询更新
@@ -294,8 +339,41 @@ const formatDateTime = (timeStr) => {
   return `${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,'0')}-${String(date.getDate()).padStart(2,'0')} ${String(date.getHours()).padStart(2,'0')}:${String(date.getMinutes()).padStart(2,'0')}:${String(date.getSeconds()).padStart(2,'0')}`
 }
 
+// ── D 笔（2026-10-07）按语：**时间降噪**（稿 `ChatRoom.html:48` 反模板清单 ⑤ / `:62` 给改法）──
+// 稿点名要改的原状正是本页原来的样子：「每个气泡下面都压一行 10px 的 `YYYY-MM-DD HH:MM:SS`」。
+// 改法：日期收进 `.day` 分隔线，气泡下只留 `HH:MM`。
+// `formatDateTime` 本体**不动**（它是仓里既有的格式化器），只在它上面切两刀取所需半截。
+const formatTimeHM = (timeStr) => {
+  const full = formatDateTime(timeStr)
+  return full ? full.slice(11, 16) : ''
+}
+
+// `.day` 的文案：稿的 `msgs()`（`ChatRoom.html:390`）把「今天」**写死成字面量** ——
+// 那稿的 mock 里压根没有日期字段（只有 `t: '10:21'`），它没法不写死。本页拿的是真
+// `create_time` ⇒ 照稿落这个元素、但标签按**首条消息的真实日期**出：是今天就「今天」，
+// 否则照 `YYYY-MM-DD`。写死会让一条三天前的历史硬说「今天」。
+// ⚠️ 这里**只做标签、不做分组**：按天分段要改消息列表的结构（每段一个 `.day`），那是
+//    **功能**不是版式，不在 D 笔边界内；稿自己也没有那个模型（它只有一个静态常量）。
+const dayLabel = computed(() => {
+  const first = messages.value[0]
+  if (!first) return ''
+  const full = formatDateTime(first.create_time)
+  if (!full) return ''
+  return full.slice(0, 10) === formatDateTime(new Date()).slice(0, 10) ? '今天' : full.slice(0, 10)
+})
+
 const scrollToBottom = () => {
   if (messageListRef.value) messageListRef.value.scrollTop = messageListRef.value.scrollHeight
+}
+
+// ── D 笔（2026-10-07）：「表情」是本稿**唯一**被画成「可点、且不需要新端点」的按钮 ──────────
+// 稿的判据：`title="表情 —— 纯前端：插入字符进输入框，走现有 message.send，不需要新端点"`。
+// 若落成 `disabled` 占位就与稿相反；若落成可点却无处理函数，就是**死控件**
+// （`progress.md:1652` 验收判据①）⇒ 照稿实现：按下即把下一枚字符追加进输入框。
+const EMOJI = ['😊', '👍', '🙏', '❤️', '😄', '🎉']
+let emojiAt = 0
+const insertEmoji = () => {
+  newMessage.value += EMOJI[emojiAt++ % EMOJI.length]
 }
 
 const sendMessage = async () => {
@@ -367,213 +445,392 @@ onMounted(async () => {
     router.replace({ query: rest })   // R4：同上（`onMounted` 支路）
   }
   pollingTimer = setInterval(() => pollUpdates(), 2000)
-  document.addEventListener('click', handleClickOutside)
 })
 
 onUnmounted(() => {
   if (pollingTimer) clearInterval(pollingTimer)
-  document.removeEventListener('click', handleClickOutside)
 })
 </script>
 
 <style scoped>
+/* ⚠️ D 笔（2026-10-07）：全块按 `docs/美化/pages/ChatRoom.html` 的 `<style>` 重写。
+   类名一律取稿名（`chat` / `rail` / `conv` / `chead` / `msgs` / `mi` / `bwrap` / `bub` /
+   `pc` / `inp-area` / …），旧名（`chat-header` / `message-list` / `product-card` / …）全部退役。
+   ⚠️ 稿的 `.bar` / `.page` / `.nav-bar` / `.wrap` / `.split` / `.uc-menu` 是预览与**壳**的东西，
+   不进本文件：稿 `:142-148` 的顶栏已由 C 笔落进 `AppShell.vue`，`.uc-menu` 归 `UserCenter.vue`。
+   ⚠️ 稿的 `body.slots` 角标规则**不进 Vue** —— 角标是稿预览开关的产物（`::after{content:attr(data-slot)}`）。
+   ⚠️ 同理**不搬 `.slot-stack`**（稿 `:247-248`）：它只干一件事 —— 把 `data-future` 那枚角标从
+   上边改挂下边（`top:auto;bottom:-11px`），好让 52px 宽的「图片」按钮不至于两枚角标叠成一团。
+   两枚角标既然都不进 Vue，这个类在 Vue 里**没有任何规则可匹配**，落下去就是个悬空类名。
+   ⚠️ 又：稿 `:88` 的占位清单写「动现有代码 **2 处**」，而稿 `:76` 的功能清单表与 `:418` 的实码
+   都写 **4 处** —— 以 **4** 为准（表 + 实码二对一，且 `:419` 的 `title` 逐字列了那 4 处是哪 4 处）。
+   ⚠️ 稿 `:160-162` 的 `height` 写 `calc(100vh - 180px)`，那 180 里有 **40px 是稿自己的预览条**；
+   本仓没有预览条 ⇒ 缺口只剩「壳顶栏 60 + 本页上下内距 80」= **140**。`min(680px, …)` 在 820px
+   以上的视口都取 680 ⇒ 平时看不出差别，小视口才见真章，故按 140 写（1080 断点同理递改）。 */
+
+/* 基础重置：稿的**全局** `a` / `button` / `input` 规则搬进 scoped（只作用本组件的元素）。 */
+button,
+input {
+  font: inherit;
+  color: inherit;
+}
+button {
+  background: none;
+  border: 0;
+  cursor: pointer;
+}
+
+/* 本页根：稿 `.wrap` 的角色由它承接（壳 `.content` / `.page` 已归零内距 —— commit 0 / 乙案）。
+   ⚠️ `flex:1` + `min-width:0` **必须在**：在 `/…/user/chat` 下本组件是壳 `.user-page`
+   （`display:flex`，`AppShell.vue:318-322`）的**直接** flex 子项 —— 不 `flex:1` 只能拿内容宽、
+   不 `min-width:0` 内部栅格会把父容器撑破。在 `/…/msg` 下父级不是 flex，两行属性零副作用。 */
 .chat-room {
+  max-width: 1180px;
+  margin: 0 auto;
+  padding: var(--s6) var(--s5) var(--s7);
+  flex: 1;
+  min-width: 0;
+  font-family: var(--font);
+  font-size: var(--fs-sm);
+  color: var(--ink);
+}
+
+/* ── 聊天面板 ─────────────────────────────────────────────────────────────── */
+.chat {
+  display: grid;
+  grid-template-columns: 248px minmax(0, 1fr);
+  height: min(680px, calc(100vh - 140px));
+  border: 1px solid var(--line-2);
+  border-radius: var(--r2);
+  overflow: hidden;
+  background: var(--surface);
+}
+
+/* 左栏：会话列表（原为 220px 下拉，数据同一份 `message.conversations`）*/
+.rail {
+  border-right: 1px solid var(--line);
   display: flex;
   flex-direction: column;
-  height: 80vh;
-  background: #f5f5f5;
+  min-height: 0;
+  background: var(--surface-2);
 }
-.chat-header {
-  height: 80px;
-  background: #fff;
-  border-bottom: 1px solid #e0e0e0;
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 0 20px;
+.rail-h {
+  padding: var(--s4) var(--s5);
+  border-bottom: 1px solid var(--line);
+  font-size: var(--fs-xs);
+  color: var(--ink-3);
 }
-.current-conversation {
-  font-size: 18px;
-  font-weight: 500;
-}
-.conversation-selector {
-  position: relative;
-  width: 220px;
-}
-.custom-select {
-  position: relative;
-  cursor: pointer;
-  user-select: none;
-}
-.selected-display {
-  padding: 8px 12px;
-  border: 1px solid #ccc;
-  border-radius: 6px;
-  background: #fff;
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
-.arrow {
-  font-size: 12px;
-  color: #666;
-}
-.dropdown-list {
-  position: absolute;
-  top: 100%;
-  left: 0;
-  right: 0;
-  background: #fff;
-  border: 1px solid #ccc;
-  border-top: none;
-  border-radius: 0 0 6px 6px;
-  max-height: 200px;
-  overflow-y: auto;
-  z-index: 100;
-}
-.dropdown-item {
-  padding: 8px 12px;
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  cursor: pointer;
-}
-.dropdown-item:hover {
-  background: #f0f0f0;
-}
-.dropdown-item.active {
-  background: #e6f7ff;
-}
-.conv-label {
+.rail-list {
   flex: 1;
+  min-height: 0;
+  overflow-y: auto;
 }
-.dropdown-empty {
-  padding: 8px 12px;
-  color: #999;
+.conv {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: baseline;
+  gap: var(--s2);
+  width: 100%;
+  text-align: left;
+  padding: var(--s4) var(--s5);
+  border-bottom: 1px solid var(--line);
+}
+/* ⚠️ 会话 id 是 15px、类型标签是 12px：两截都做 12px 时整列没有主次 —— 一列导航**得能扫**；
+   id 用等宽是因为它是个标识符，不是句子。 */
+.conv .ty {
+  font-size: var(--fs-xs);
+  color: var(--ink-3);
+}
+.conv .id {
+  font-family: var(--font-mono);
+  font-size: var(--fs-sm);
+  color: var(--ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.conv .udot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+  align-self: center;
+}
+.conv:hover {
+  background: var(--surface);
+}
+.conv[aria-current='true'] {
+  background: var(--brand-tint);
+}
+.conv[aria-current='true'] .id {
+  color: var(--brand-ink);
+  font-weight: var(--fw-med);
+}
+.rail-empty {
+  padding: var(--s7) var(--s5);
+  font-size: var(--fs-sm);
+  color: var(--ink-3);
   text-align: center;
 }
-.red-dot {
-  display: inline-block;
-  width: 10px;
-  height: 10px;
-  background-color: red;
-  border-radius: 50%;
-  margin-left: 8px;
-  flex-shrink: 0;
-}
-.message-list {
-  flex: 1;
-  overflow-y: auto;
-  padding: 20px;
+
+/* 主列 */
+.main {
   display: flex;
   flex-direction: column;
+  min-width: 0;
+  min-height: 0;
 }
-.message-item {
+.chead {
+  padding: var(--s4) var(--s5);
+  border-bottom: 1px solid var(--line);
   display: flex;
-  margin-bottom: 15px;
+  align-items: baseline;
+  gap: var(--s4);
+  flex-wrap: wrap;
 }
-.message-item.self {
+.chead h2 {
+  font-family: var(--font-display);
+  font-size: var(--fs-lg);
+  font-weight: var(--fw-med);
+  letter-spacing: -0.01em;
+}
+.chead .meta {
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+  color: var(--ink-3);
+}
+.chead .none {
+  font-size: var(--fs-lg);
+  color: var(--ink-3);
+}
+
+.msgs {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: var(--s5);
+  display: flex;
+  flex-direction: column;
+  gap: var(--s4);
+}
+/* ⚠️ 消息**贴底**（旧 `scrollToBottom` 的静态等价物）：不用 `justify-content:flex-end` ——
+   它在 `overflow-y:auto` 下会把溢出内容顶出可视区且滚不上去；用首元素 `margin-top:auto`：
+   内容不足时贴底，内容超出时正常从顶滚。 */
+.msgs > *:first-child {
+  margin-top: auto;
+}
+.day {
+  align-self: center;
+  font-size: var(--fs-xs);
+  color: var(--ink-3);
+}
+.mi {
+  display: flex;
+}
+.mi.self {
   justify-content: flex-end;
 }
-.message-item.other {
-  justify-content: flex-start;
-}
-.message-bubble {
-  max-width: 70%;
-  padding: 10px 14px;
-  border-radius: 18px;
-  background: #fff;
-  box-shadow: 0 1px 2px rgba(0,0,0,0.1);
-}
-.message-item.self .message-bubble {
-  background: #dcf8c5;
-}
-.message-item.other .message-bubble {
-  background: #fff;
-}
-.message-content {
-  word-wrap: break-word;
-  font-size: 14px;
-}
-.message-time {
-  font-size: 10px;
-  color: #999;
-  text-align: right;
-  margin-top: 4px;
-}
-/* 商品卡片样式 */
-.product-card {
-  display: flex;
-  background: #fff3e0;
-  border-radius: 12px;
-  padding: 8px;
-  cursor: pointer;
-  border: 1px solid #ffcc80;
-  transition: 0.2s;
-  max-width: 280px;
-}
-.product-card:hover {
-  background: #ffe0b2;
-  transform: translateY(-2px);
-}
-.product-card-left {
-  width: 40%;
-  flex-shrink: 0;
-}
-.product-card-left img {
-  width: 100%;
-  height: auto;
-  border-radius: 8px;
-  object-fit: cover;
-}
-.product-card-right {
-  width: 60%;
-  padding-left: 10px;
+.bwrap {
+  max-width: min(74%, 460px);
   display: flex;
   flex-direction: column;
-  justify-content: space-between;
 }
-.product-name {
-  font-size: 15px;
-  font-weight: bold;
-  margin-bottom: 4px;
+.mi.self .bwrap {
+  align-items: flex-end;
 }
-.product-detail {
-  font-size: 12px;
-  color: #666;
-  margin-bottom: 2px;
+.bub {
+  padding: var(--s3) var(--s4);
+  border-radius: var(--r2);
+  font-size: var(--fs-sm);
+  line-height: 1.6;
 }
-.product-link {
-  font-size: 12px;
-  color: #ff9800;
-  margin-top: 6px;
-  text-align: right;
+.mi.other .bub {
+  background: var(--surface-2);
 }
-.message-input-area {
-  height: 60px;
-  background: #fff;
-  border-top: 1px solid #e0e0e0;
-  display: flex;
+/* 自己的气泡 = 青瓷绿最浅一档（原 `#dcf8c5` 是 WhatsApp 绿，跟色板无关）。 */
+.mi.self .bub {
+  background: var(--brand-tint);
+}
+.bub.bare {
+  padding: 0;
+  background: none;
+}
+.tm {
+  margin-top: var(--s1);
+  font-size: var(--fs-xs);
+  color: var(--ink-3);
+}
+
+/* 商品消息卡：发丝边 + 白底，朱砂只留给价格 */
+.pc {
+  display: grid;
+  grid-template-columns: 64px minmax(0, 1fr);
+  gap: var(--s4);
   align-items: center;
-  padding: 0 20px;
-  gap: 10px;
-}
-.message-input-area input {
-  flex: 1;
-  padding: 10px 15px;
-  border: 1px solid #ddd;
-  border-radius: 24px;
-  outline: none;
-}
-.message-input-area button {
-  padding: 8px 20px;
-  background: #007bff;
-  color: white;
-  border: none;
-  border-radius: 24px;
+  width: 320px;
+  padding: var(--s3);
+  text-align: left;
+  background: var(--surface);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r2);
+  /* ⚠️ 稿的 `.pc` 是 `<div>` + 稿自身的 `.pc:hover`；本仓它是可点元素 ⇒ 补 `cursor`。 */
   cursor: pointer;
 }
-.message-input-area button:hover {
-  background: #0056b3;
+.pc:hover {
+  border-color: var(--brand);
+}
+/* ⚠️ 稿的 `.th` 是**空图框**（稿里没有图数据）；本仓有 `goodImg` ⇒ 保留 `<img>`，
+   与 `GoodsSelect.vue` 的 `.thumb` 同一处理（不为了照稿丢真功能）。 */
+.pc .th {
+  width: 64px;
+  height: 64px;
+  border-radius: var(--r1);
+  background: var(--img);
+  border: 1px solid var(--line);
+  overflow: hidden;
+}
+.pc .th img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.pc .nm {
+  font-size: var(--fs-sm);
+  line-height: 1.4;
+}
+.pc .dt {
+  margin-top: 2px;
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+  color: var(--ink-3);
+}
+.pc .pr {
+  margin-top: var(--s2);
+  font-family: var(--font-display);
+  color: var(--accent);
+  font-variant-numeric: tabular-nums;
+}
+.pc .pr .u {
+  font-size: var(--fs-xs);
+}
+.pc .pr .i {
+  font-size: var(--fs-md);
+}
+.pc .pr .d {
+  font-size: var(--fs-xs);
+}
+.pc .lk {
+  display: block;
+  margin-top: var(--s2);
+  font-size: var(--fs-xs);
+  color: var(--brand-ink);
+  font-weight: var(--fw-med);
+}
+
+/* 输入区：没选会话时整条是「关」的 */
+.inp-area {
+  padding: var(--s4) var(--s5);
+  border-top: 1px solid var(--line);
+  display: flex;
+  gap: var(--s3);
+  align-items: center;
+}
+.inp-area input {
+  flex: 1;
+  min-width: 0;
+  height: 40px;
+  padding: 0 var(--s4);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r2);
+  background: var(--surface);
+}
+.inp-area input:focus {
+  outline: none;
+  border-color: var(--brand);
+  box-shadow: 0 0 0 3px var(--brand-tint);
+}
+.inp-area input[disabled] {
+  background: var(--surface-2);
+  color: var(--ink-3);
+  cursor: not-allowed;
+}
+/* 表情 / 图片：用**文字小按钮**而不是 ☺ / 🖼 图标字 —— 自托管 Noto 子集不保证有这些字形
+   （▾ / ▼ 就缺过，见 README），缺字会渲染成豆腐块；文字按钮零风险且更克制。 */
+.icon {
+  height: 40px;
+  padding: 0 var(--s3);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r2);
+  font-size: var(--fs-xs);
+  color: var(--ink-2);
+  flex: 0 0 auto;
+}
+.icon:hover {
+  border-color: var(--ink-3);
+  color: var(--ink);
+}
+.icon[disabled] {
+  color: var(--ink-3);
+  cursor: not-allowed;
+}
+.send {
+  height: 40px;
+  padding: 0 var(--s6);
+  border-radius: var(--r2);
+  background: var(--brand);
+  color: var(--bg);
+  font-weight: var(--fw-med);
+  flex: 0 0 auto;
+}
+.send:hover {
+  background: var(--brand-hover);
+}
+.send[disabled] {
+  background: var(--surface-3);
+  color: var(--ink-3);
+  cursor: not-allowed;
+}
+
+@media (max-width: 1080px) {
+  /* ⚠️ 1080 下**只把会话栏收窄**（248 → 200），**不**改成顶部横排：横排要占掉
+     `rail-h` + 一行 ≈ 150px 高度，而聊天区总高是死的 ⇒ 消息区被压到 330px，
+     最后一屏气泡直接被裁掉。竖栏只吃宽度不吃高度。 */
+  .chat {
+    grid-template-columns: 200px minmax(0, 1fr);
+    height: min(660px, calc(100vh - 140px));
+  }
+  .bwrap {
+    max-width: 88%;
+  }
+  .pc {
+    width: 100%;
+    max-width: 340px;
+  }
+}
+/* 真正的窄屏（手机）才把会话栏横过来 —— 此时宽度本来就装不下两列 */
+@media (max-width: 760px) {
+  .chat {
+    grid-template-columns: 1fr;
+    grid-template-rows: auto minmax(0, 1fr);
+  }
+  .rail {
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
+  }
+  .rail-h {
+    padding-top: var(--s3);
+    padding-bottom: var(--s3);
+  }
+  .rail-list {
+    display: flex;
+    overflow-x: auto;
+    overflow-y: hidden;
+  }
+  .conv {
+    width: auto;
+    flex: 0 0 auto;
+    border-bottom: 0;
+    border-right: 1px solid var(--line);
+  }
 }
 </style>
