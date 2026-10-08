@@ -169,6 +169,18 @@ export function clearMerchantId() {
   dropRestored()
 }
 
+/** 清 `customerid` —— 与 `clearMerchantId` **对称**的出口（**多账户切换笔**，2026-10-08，用户第 3 条）。
+ *  ⚠️ 为什么到今天才补：下面 `clear()` 的注释写着「补对称出口是另一笔的事」 —— **这笔就是它**。
+ *     病的形状：商家登录写 `merchantid`、客户登录写 `customerid`，`LoginPage.vue` 旧代码**只写不清**
+ *     （`/user/me` 答不出对面的号就整段 `if` 跳过）⇒ 换账户后**上一家的业务号留在存储里**。
+ *     而 `resolveBuyerId()` **优先取 `customerid`** ⇒ 商家账号查历史订单会带上上一位**客户**的 id，
+ *     票却是商家的 ⇒ `IdentityGuard.requireSelfOrAdmin` 判 403（实测：`docs/美化/dtop4/acct.log`）。
+ *  ⚠️ 与 `clearMerchantId` **逐字同形**（removeItem + dropRestored）：两个出口不许有行为差。 */
+export function clearCustomerId() {
+  sessionStorage.removeItem(K.customerId)
+  dropRestored()
+}
+
 /** 清**全部**本地登录态（凭据 + 两个业务号）—— 供 **401 出口**用（`api/http.js`）。
  *
  *  ⚠️ **与「点退出」的现行清法故意不同**：`UserCenter.vue:52-55`（**R2 起两壳共用同一个 `toLogin`**；
@@ -179,7 +191,7 @@ export function clearMerchantId() {
  *     `toLogin()` 换成本函数：那是**改退出行为**，不属于本笔。（R2 前这条还点了 `MerchantPage`，
  *     它现在没有自己的退出点了 —— 商家退出也走 `UserCenter.vue`。）
  *  ⚠️ 这里对 `customerid` 直接 `removeItem` 而**不先补一个 `clearCustomerId()`**：本模块刻意按
- *     「哪个页面清哪个键」组织（见 `clearMerchantId` 的注释），补对称出口是另一笔的事。
+ *     「哪个页面清哪个键」组织（见 `clearMerchantId` 的注释），补对称出口是另一笔的事。（⚠️ 2026-10-08：那个出口已补出来 = 下方 `clearCustomerId`（用户第 3 条修）；**本处仍不改**，行为一字未动。）
  *  ⚠️ **会话恢复笔**：本函数是「会话没了」⇒ 恢复态也必须一起丢（`clearCredentials` /
  *     `clearMerchantId` 各自已丢一次，这里再丢一次是幂等兜底）—— 不丢就会在 401 出口
  *     清空存储后，读口仍从 `restored` 读出身份 ⇒「已登录」判断残留、跳登录后又弹回来。

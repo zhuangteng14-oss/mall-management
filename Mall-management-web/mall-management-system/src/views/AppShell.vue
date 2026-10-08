@@ -2,17 +2,17 @@
   <div class="app-shell">
     <div class="top-nav">
       <div class="nav-left">
-        <router-link
-          v-for="item in navTop.left"
-          :key="item.tab"
-          :to="item.to"
-          class="nav-btn"
-          :class="{ active: route.meta.tab === item.tab }"
-        >
-          {{ item.label }}
-          <span v-if="item.badge === 'unread' && unreadCount > 0" class="nav-red-dot"></span>
-        </router-link>
+        <router-link v-for="item in navTop.left" :key="item.tab" :to="item.to" class="nav-btn"
+                     :class="{ active: route.meta.tab === item.tab }">{{ item.label }}
+          <span v-if="item.badge === 'unread' && unreadCount > 0" class="nav-red-dot"></span></router-link>
       </div>
+      <!-- ── 顶栏搜索框（用户 2026-10-08 第 1 条）：顶栏只留一行 = 商城主页 | 搜索框 | 账号。
+           形态照 `ProductPage.vue` 的顶栏搜索（用户：「参考商品详情页的顶栏结构，那个是对的」）；落点 = `${base}/search?kw=`,
+           与 `handlePendingSearch`（本文件 `:165`）同路径、同 query 键。⚠️ 匿名也渲染（搜索页 `meta.public`）；空串由 `required` 挡。 -->
+      <form class="nav-search" @submit.prevent="router.push({ path: `${base}/search`, query: { kw: $event.target.kw.value.trim() } })">
+        <input name="kw" type="text" class="search-input" placeholder="搜索商品、品牌、分类" required />
+        <button type="submit" class="search-btn">搜索</button>
+      </form>
       <div class="nav-right">
         <router-link
           v-for="item in navTop.right"
@@ -133,7 +133,7 @@ const getCurrentUser = () => {
 
 // 获取未读消息数量
 const fetchUnreadCount = async () => {
-  const user = getCurrentUser()
+  const user = isLoggedIn() ? getCurrentUser() : null   // ⚠️ 门用 `isLoggedIn()`（= `username || merchantid`），不是「拿得到一个 id」——「点退出」只清 `username` / `role`、**不清 `customerid`**（`api/auth.js:156-161`，且 `:174-177` 明写这是**有意**的）⇒ 残留的 `customerid` 会让本函数照打 `/message/conversations` ⇒ 401 ⇒ `api/http.js` 的 401 出口把**公开面**（首页 / 搜索）也踢到 `/login`。实测：点退出后回首页被送到 `#/login?redirect=/customer`，商品全空；手工抹掉那个残留 id 即恢复 7 卡。登记见 `docs/agent/slot-registry.md` §九
   if (!user) return
   const params = new URLSearchParams()
   params.append('currentId', user.id)
@@ -151,8 +151,8 @@ const fetchUnreadCount = async () => {
 }
 
 // 进入消息页则立即清红点（路由化后改看路由 —— 壳里已无 `curPage`）。
-// ⚠️ 判据与路由化前 `curPage === 'msg'` **完全一致**：只认**壳的**消息页（`/customer/msg` / `/merchant/msg`），
-//    用户中心里的「消息」子页（`/…/user/chat`）**不清**。
+// ⚠️ 判据与路由化前 `curPage === 'msg'` **完全一致**：只认**壳的**消息页（`/customer/msg` / `/merchant/msg`）。
+//    ⚠️ A5（2026-10-07）后本条**只剩一种地址**：用户中心那条「消息」子页（`/…/user/chat`）已改 `redirect` → `/…/msg`（`router/index.js`）⇒ 旧深层链接也会落到本判据上、红点照样清。
 const MSG_PATH = `${props.base}/msg`
 watch(() => route.path, (p) => {
   if (p === MSG_PATH) unreadCount.value = 0
@@ -186,15 +186,15 @@ const navTop = navFor(props.nav, isLoggedIn())
 
 <style scoped>
 .app-shell {
-width: 100vw;
+width: 100%;
 /* ⚠️ **D 笔 commit 7c**（用户 2026-10-07 裁决，7b 的延伸）—— `height:100vh` → `min-height:100vh`。
    7b 给 `.top-nav` 加了 `sticky`，但 sticky 的约束矩形 = **包含块**，而 `.app-shell` 原先是
    `height:100vh` = 900px 的**固定盒** ⇒ 吸附上限 = 900 − 60 = **840px**，长页滚到底顶栏仍会释放
-   （实测 `/customer/user/info` 滚 857 时 y=−17）。改成 `min-height` 后壳随内容长高 ⇒ sticky 全程生效。
+   （实测 `/customer/user/info` 滚 857 时 y=−17）。改成 `min-height` 后壳随内容长高 ⇒ sticky 全程生效（⚠️ **A 笔 A2（2026-10-07）实测限定**：只对「内容在流」的页成立，**首页不成立** —— `.home-container` 是 `position:absolute`（见本文件下方那条）⇒ 不贡献高度，`.content` 停在 840、`.app-shell` 仍是 **900**〈量测 shell 900 / content 840 / homePage 1881〉⇒ 吸附上限仍 **840px**（实测滚 841 时 `navY = −1`）；正文见 `HomePage.vue` 吸顶带块，那是**结构问题**、本笔不顺手改）。
    ⚠️ sticky 只做一半 = 行为上退回甲案（顶栏随页滚走）⇒ 这是**同一 bug 的延伸**，不是新决策。
-   ⚠️ **不动 `width:100vw`**：它与 `.home-container` 的那条 `width:100vw` 是**同一件事**
-   （该条已由 commit 0 登记为「余下 … / `width:100vw` / … 留后续笔」），单改 `.app-shell` 一半
-   修不掉症状（`.home-container` 溢出照旧）⇒ 留作整笔，见 `docs/agent/slot-registry.md` §一 commit 7c。 */
+   ⚠️ **`width:100vw` → `100%`（结构二次调整，2026-10-07）**：`100vw` 按规范**含竖向滚动条宽**
+   ⇒ 本壳一出现竖向滚动条就横向溢出「一条滚动条宽」。`.home-container` 是同款、同笔同改（见下）；
+   原文「留后续笔」已兑现，正文见 `docs/agent/slot-registry.md` §八（§一 commit 7c 是它的由来）。 */
 min-height: 100vh;
 display: flex;
 flex-direction: column;
@@ -223,8 +223,8 @@ height: 60px;
    「没有壳」的形态，而本壳的设计哲学是「壳稳定、内容切换」⇒ 加 `sticky` 让滚动时吸顶。
    ⚠️ **不采乙案**（`.content { min-height:0; overflow-y:auto }`）：嵌套滚动容器 +
    百分比高度 + `absolute` 参照物，回归面大，且滚动行为与稿不一致。
-   ⚠️ `z-index:10` 高于 `.home-container` 的 `1`（`:293`，`position:absolute; top:60px`）——
-   两者不重叠（`.home-container` 自 `top:60px` 起），改后仍不重叠，只保证滚动时顶栏在上。 */
+   ⚠️ `z-index:10` 高于 `.home-container` 的 `1`（**`:317`**，`position:relative; top:0` —— ⚠️ **裁决 ③（用户 2026-10-08，「一指错就是错」）：已改号** —— 本节原文是裸 `:293`，而 293 行现行内容是 `.nav-red-dot` 的 `background`（不是 `.home-container`）⇒ 改指到 `z-index:1` 的现行行 `:317`（块 `AppShell.vue:308-318`）；「`position:absolute; top:60px`」那半句同批被第 1 条改掉，值见同块）——
+   两者不重叠（`.home-container` 自 `top:60px` 起），改后仍不重叠（它现在从 `.content` 的 y=60 起算，仍不与顶栏的 0–60 带重叠），只保证滚动时顶栏在上。 */
 flex: none;
 position: sticky;
 top: 0;
@@ -262,7 +262,7 @@ margin-left: auto;
 display: flex;
 align-items: center;
 gap: var(--s5);
-color: var(--nav-tx);
+color: var(--nav-tx); flex: none; white-space: nowrap;   /* ⚠️ 同上（用户 2026-10-08 第 2 条）：右三项（商家 = 消息/订单中心/用户中心）**不许缩、不许换行** */
 }
 /* R1/R2：顶栏入口由 `button` 改成 `router-link`（渲染成 `a`）⇒ 选择器随之改。
    ⚠️ C 笔：原 `.top-nav a` 那条**整条拆掉** —— 它的 `display:inline-block` / `border:none` /
@@ -280,7 +280,7 @@ font-weight: var(--fw-semi);
 }
 .nav-left {
 display: flex;
-align-items: center;
+align-items: center; flex: none; white-space: nowrap;   /* ⚠️ **用户 2026-10-08 第 2 条（顶栏被盖）**：挤不下时 flex 默认**先压品牌与右三项** —— 中文可逐字换行 ⇒ 品牌被压成 2 行、右三项 2–4 行（`_dbg9` 实测：700 宽时品牌 y=−5..65、右三项高 48px；600 宽时 96px）⇒ 60px 顶栏的**内容溢到带外、压住页面**。修法 = 两头**不许缩、不许换行**，让位交给中间那个 `flex:1 1 auto` 的搜索框（本行里唯一该缩的东西）。 */
 }
 /* 未读红点：照稿的 `.dot`（同上那 6 处顶栏逐字相同）。
    ⚠️ 改前是 8px **纯红** + `vertical-align: middle`；现在 6px **朱砂 `--accent`** +
@@ -304,13 +304,13 @@ padding: 0;
 }
 /* ⚠️ C 笔：`top` / `height` 跟着顶栏 55 → 60 **锁步**（用户裁决：容器取保守口径）。
    只改这两个数。⚠️ **D 笔 commit 0（乙案）已取走 `background`**（`#f5f5f5` → `var(--bg)`），
-   余下 `position:absolute` / `width:100vw` / `padding:0` 留后续笔。⚠️ 只改顶栏不改这里 = 首页被顶栏压掉 5px。 */
+   其中 `width:100vw` **已由结构二次调整（2026-10-07）改成 `100%`**（消横向溢出）；余两条**已由用户 2026-10-08 第 1 条兑现**（见下方 `position` / `min-height` 两条，`top:60px` → `0` 是随之必改的第三条）。⚠️ 只改顶栏不改这里 = 首页被顶栏压掉 5px。 */
 .home-container {
-position: absolute;
-top: 60px;
+position: relative;   /* ⚠️ **用户 2026-10-08 第 1 条（顶栏 sticky）**：原 `absolute` ⇒ 本块**不参与流**、不撑高 `.app-shell` */
+top: 0;               /*    ⇒ 壳恒 900px、`.top-nav` 的 sticky 约束盒只有 900 ⇒ 首页滚过 840px 顶栏就释放（实测滚 1041 时 `navY = −201`，用户所见「滚到底顶栏没了」）。改回流内；`top` 随之归零（流内它已在 `.content` 的 y=60 上，再留 60 会再压 60px）。 */
 left: 0;
-width: 100vw;
-height: calc(100vh - 60px);
+width: 100%;
+min-height: calc(100vh - 60px);   /* ⚠️ 同行 `height` → `min-height`（同上）：定高只让内容**溢出**（`.home-page` 实高 1881）而壳不动；`min-height` 既保住「内容短时页脚贴底」，又让壳随内容长高（改后量测 shell 1941）⇒ sticky 全程有效。数值一个没动。 */
 background: var(--bg);
 padding: 0;
 margin: 0;
@@ -366,4 +366,56 @@ padding: var(--s7) var(--s5) var(--s8);
    （`meta.layout`），不是菜单自己的样式。
    ⚠️ R6 裁决 D8：原两壳里那条 `.empty-page`（`display:flex` 居中提示）**已随两壳删除一并终结** ——
    全仓 0 使用（R1 前是 `curPage` 认不出时的兜底，路由化后没有「认不出」这回事），属死规则。 */
+
+/* ── 顶栏搜索框（用户 2026-10-08 第 1 条；**尺寸/颜色** = 同日第 2 条的回退）──────────
+   ▸ **摆法**（容器怎么放在顶栏里）来源 = `ProductPage.vue:797-805` 已有顶栏那一组
+     （用户：「参考商品详情页的顶栏结构，那个是对的」）—— 只把最外层容器名改成
+     `.nav-search`（`.search-wrapper` 在本仓已有两处**页内**同名，壳里另起一名免得混）。
+   ▸ **尺寸与颜色**来源 = 本批搬走的那条**页内搜索条**的原值（`HomePage.vue` 原
+     `:391-439` 的 4 条规则，删后原文存档在该文件的按语块里）⇒ 40px 白底整条容器 +
+     `--line` 发丝线 + `--r2` 圆角，内嵌 32px `--brand` 实底、白字按钮。
+     ⚠️ 取**页内**那条而**不是** `ProductPage` 那条：用户口径是「回到**改动前**的尺寸和
+     颜色」—— 改动前用户在首页看到的就是页内那条（`ProductPage` 那条只做**结构**参照）。
+   ⚠️ `flex: 1 1 auto` + `max-width: 420px` + `margin: 0 var(--s5)` 是**与 `.nav-right` 的
+      `margin-left: auto` 配对**的：搜索框先吃满 free space（上限 420），余下的被那条 auto
+      margin 全吃走 ⇒ 右三项仍贴右（`.top-nav` 的 `justify-content: space-between` 此时
+      不起作用：自动外边距优先于它）。
+   ⚠️ 落点是 `<form>` 的 `@submit.prevent`（写在模板那行上）：`Enter` 走表单隐式提交、
+      `搜索` 是 `type="submit"` ⇒ 两条入口**同一个处理**，不新造键盘判据。
+   ⚠️ 匿名态同样渲染（`ANON_RIGHT` 只换右三项）：搜索页是公开面，见模板那块注释。
+   ⚠️ 左内距 14px 是页内那条**给放大镜图标让位**留下的（壳里没搬图标 ⇒ 现只当左侧留白）。
+   ⚠️ `.search-input` / `.search-btn` 两条**一格不写字体**：改动前那两条也没写（本仓没有全局
+      `input` / `button{font:…}`）⇒ 输入框走浏览器默认、按钮由下面那条 `font-size:13px` 定。
+      这是「逐字回退」的必然结果，**不是**漏了 token；要不要并进 `var(--font)` / `--fs-*` 属
+      另议（登记于台账本批条）。 */
+.nav-search {
+  flex: 1 1 auto;
+  min-width: 88px;   /* ⚠️ 同上（用户 2026-10-08 第 2 条）：`min-width:auto` = 输入框的默认固有宽（≈170px，`size` 默认 20 字符）⇒ 顶栏挤到 640 以下时**本框不肯再缩**、改由整条顶栏溢出视口（`_dbg9` 实测 640 溢 25 → 400 溢 265）。但**不能补 `0`**：`0` 允许盒子缩到**比自身内容还窄**，盒内那枚「搜索」按钮就会**溢出到盒外压住右侧「消息」**（`_dbg9` 实测 520 宽时按钮右沿越出表单 32px、与「消息」交叠 8px；480/400 时交叠 32px —— 那正是用户说的「盖过」的极端形态）。88px = 表单内边距 18 + 按钮 66 + 一点输入框宽；代价是视口 <约 535px 时改为整条顶栏横向溢出（见本文件 :226 那条不可缩/不换行的口径，此宽度超出页面设计范围）。 */
+  max-width: 420px;
+  margin: 0 var(--s5);
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  height: 40px;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: var(--r2);
+  padding: 0 4px 0 14px;
+  transition: border-color 0.15s, background 0.15s;
+}
+.nav-search:focus-within { border-color: var(--brand); background: var(--surface); }
+.search-input { flex: 1; min-width: 0; border: none; outline: none; background: transparent; }
+.search-input::placeholder { color: var(--ink-3); }
+.search-btn {
+  flex: none;
+  height: 32px;
+  padding: 0 18px;
+  border-radius: var(--r1);
+  background: var(--brand);
+  color: #fff;
+  font-size: 13px;
+  font-weight: var(--fw-med);
+  transition: background 0.15s;
+}
+.search-btn:hover { background: var(--brand-hover); }
 </style>

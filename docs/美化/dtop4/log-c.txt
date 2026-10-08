@@ -1,0 +1,47 @@
+
+/merchant
+  顶部 docH=1262 scY=0 带外命中=0 候选=1 → [{"el":"div.top-nav","z":"10","pos":"sticky","r":{"x":0,"y":0,"w":1425,"h":60}}]
+  滚底 docH=1262 scY=362 带外命中=0 候选=2 → [{"el":"div.top-nav","z":"10","pos":"sticky","r":{"x":0,"y":0,"w":1425,"h":60}},{"el":"div.home-container","z":"1","pos":"relative","r":{"x":0,"y":-302,"w":1425,"h":1202}}]
+
+/merchant/search
+  顶部 docH=1023 scY=0 带外命中=0 候选=1 → [{"el":"div.top-nav","z":"10","pos":"sticky","r":{"x":0,"y":0,"w":1425,"h":60}}]
+  滚底 docH=1023 scY=123 带外命中=0 候选=1 → [{"el":"div.top-nav","z":"10","pos":"sticky","r":{"x":0,"y":0,"w":1425,"h":60}}]
+
+/merchant/msg
+  顶部 docH=900 scY=0 带外命中=0 候选=1 → [{"el":"div.top-nav","z":"10","pos":"sticky","r":{"x":0,"y":0,"w":1440,"h":60}}]
+  滚底 docH=900 scY=0 带外命中=0 候选=1 → [{"el":"div.top-nav","z":"10","pos":"sticky","r":{"x":0,"y":0,"w":1440,"h":60}}]
+
+/merchant/order
+  顶部 docH=900 scY=0 带外命中=0 候选=1 → [{"el":"div.top-nav","z":"10","pos":"sticky","r":{"x":0,"y":0,"w":1440,"h":60}}]
+  滚底 docH=900 scY=0 带外命中=0 候选=1 → [{"el":"div.top-nav","z":"10","pos":"sticky","r":{"x":0,"y":0,"w":1440,"h":60}}]
+
+/merchant/order/cart
+  顶部 docH=900 scY=0 带外命中=0 候选=1 → [{"el":"div.top-nav","z":"10","pos":"sticky","r":{"x":0,"y":0,"w":1440,"h":60}}]
+  滚底 docH=900 scY=0 带外命中=0 候选=1 → [{"el":"div.top-nav","z":"10","pos":"sticky","r":{"x":0,"y":0,"w":1440,"h":60}}]
+
+/merchant/user
+  顶部 docH=2201 scY=0 带外命中=0 候选=1 → [{"el":"div.top-nav","z":"10","pos":"sticky","r":{"x":0,"y":0,"w":1425,"h":60}}]
+  滚底 docH=2201 scY=1301 带外命中=0 候选=1 → [{"el":"div.top-nav","z":"10","pos":"sticky","r":{"x":0,"y":0,"w":1425,"h":60}}]
+
+/merchant/user/info
+  顶部 docH=2201 scY=0 带外命中=0 候选=1 → [{"el":"div.top-nav","z":"10","pos":"sticky","r":{"x":0,"y":0,"w":1425,"h":60}}]
+  滚底 docH=2201 scY=1301 带外命中=0 候选=1 → [{"el":"div.top-nav","z":"10","pos":"sticky","r":{"x":0,"y":0,"w":1425,"h":60}}]
+
+/merchant/user/add
+  顶部 docH=2216 scY=0 带外命中=0 候选=1 → [{"el":"div.top-nav","z":"10","pos":"sticky","r":{"x":0,"y":0,"w":1425,"h":60}}]
+  滚底 docH=2216 scY=1316 带外命中=0 候选=1 → [{"el":"div.top-nav","z":"10","pos":"sticky","r":{"x":0,"y":0,"w":1425,"h":60}}]
+
+/merchant/user/list
+  顶部 docH=900 scY=0 带外命中=0 候选=1 → [{"el":"div.top-nav","z":"10","pos":"sticky","r":{"x":0,"y":0,"w":1440,"h":60}}]
+  滚底 docH=900 scY=0 带外命中=0 候选=1 → [{"el":"div.top-nav","z":"10","pos":"sticky","r":{"x":0,"y":0,"w":1440,"h":60}}]
+
+/merchant/user/history
+  顶部 docH=900 scY=0 带外命中=0 候选=1 → [{"el":"div.top-nav","z":"10","pos":"sticky","r":{"x":0,"y":0,"w":1440,"h":60}}]
+  滚底 docH=900 scY=0 带外命中=0 候选=1 → [{"el":"div.top-nav","z":"10","pos":"sticky","r":{"x":0,"y":0,"w":1440,"h":60}}]
+
+/merchant/user/friend
+  顶部 docH=900 scY=0 带外命中=0 候选=1 → [{"el":"div.top-nav","z":"10","pos":"sticky","r":{"x":0,"y":0,"w":1440,"h":60}}]
+  滚底 docH=900 scY=0 带外命中=0 候选=1 → [{"el":"div.top-nav","z":"10","pos":"sticky","r":{"x":0,"y":0,"w":1440,"h":60}}]
+OK   全商家路由 × 顶栏带：无外部元素在最顶层  → {"命中路由数":0}
+
+probe-top4c: 1 项 / 0 失败

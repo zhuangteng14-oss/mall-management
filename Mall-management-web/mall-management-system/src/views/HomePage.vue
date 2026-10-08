@@ -3,21 +3,21 @@
   <div class="home-page">
     <!-- 原未登录黄条（.login-hint-bar）已删 —— 2026-10-06 改判 2（§5-AG (13)）：入口改由顶栏「登录 / 注册」承担；理由见 <script setup> 顶部 9 行 -->
 
-    <!-- ── 搜索条 ──
-         稿 `主页改造.html:728-734` 把搜索并进了顶栏 `.hdr`（稿 `:189-190` 自注「原来搜索独占 20vh
-         垂直空间悬在中部，现在并进顶栏，省下整屏高度」）。但 `.hdr` 是**壳**的（`AppShell.vue`），
-         而「壳内搜索笔」本笔 **不开** ⇒ 本笔保留页内搜索条，只把**样式**按稿的 `.search`
-         （`主页改造.html:212-240`：带边框的整条容器 + 内嵌小胶囊按钮）落，不再用旧的
-         「输入框拼按钮 + 20vh」。⚠️ 壳内搜索笔落地时，本块连同 .search-* 四条规则一并删除。 -->
-    <div class="search-section">
-      <div class="search-wrapper">
-        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6">
-          <circle cx="7" cy="7" r="4.6" /><path d="M10.5 10.5 14 14" stroke-linecap="round" />
-        </svg>
-        <input v-model="searchKeyword" type="text" class="search-input" placeholder="搜索商品、品牌、分类" />
-        <button class="search-btn" @click="goSearch">搜索</button>
-      </div>
-    </div>
+    <!-- ── 搜索条：**已随用户 2026-10-08 第 1 条移进顶栏** ──────────────────────────
+         用户口径：顶栏只留**一行** = 商城主页 | 搜索框 | 登录/注册（或登录后的三项）。
+         搜索框新的家在 `AppShell.vue` 的 `.nav-search`（`<form>` + `@submit.prevent`
+         → `${base}/search?kw=`，与壳里既有的 `handlePendingSearch` 同路径、同 query 键）。
+         本页从此**没有**搜索输入框：`searchKeyword`（`:242`）与 `goSearch`（`:262`）
+         两个符号随之作废，各自原处留了按语。原块 `:6-20` 引的两处基线（`主页改造.html:189-190` / `主页改造.html:212-240`）随块删除，**留档于此以免丢引**（第 5 条的「可回退」口径）。 -->
+    <div class="head-sticky">
+      <!-- ⚠️ 本 div **留着** —— 它现在只包下面那行分类导航（`nav.subnav`）；原 `.search-section`
+           那一层已随搜索条一起删除。
+           ⚠️ 用户给的口径是「分类导航是另一行，可跟顶栏一起 sticky，也可独立，你判」⇒ 判
+           **独立**：顶栏（`top:0` / `z-index:10`）与它（`top:60px` / `z-index:9`）本来就是
+           两层，合并不改代码、也改不了这层关系；且它吸附的包含块是 `.home-page`（内容高
+           1881），与壳同效。
+           ⚠️ 原搜索条占的高度**不补**：用户要的是「顶栏那一行多一个搜索框」，不是挪位置。
+           ⚠️ 收口：本 div 现在只有一个子元素（`nav.subnav`），闭合于 `:37` 的 `</nav></div>`。 -->
 
     <!-- ── 二级导航（稿 `:744-753`）──
          ⚠️ 壳里**没有** `.subnav`：`AppShell.vue:225-226` 自注「稿的 `.subnav a` 属**二级导航**、
@@ -34,7 +34,7 @@
         <button type="button" disabled title="预留 · 会员中心（无落点：会员体系未落）">会员中心</button>
         <button type="button" disabled title="预留 · 客户服务（无落点：在线客服是预留位）">客户服务</button>
       </div>
-    </nav>
+    </nav></div>
 
     <div class="wrap">
       <!-- ── 英雄区：分类栏 + 主视觉（稿 `:758-784`）── -->
@@ -57,7 +57,7 @@
                性质的占位文案不落，空态改出「暂无商品」。
                ⚠️ `.glaze` 本体**不裁剪**（稿 `:340-341` 明令不写 `overflow:hidden`）⇒ 裁图另开一层
                `.glaze-media`；`.glaze-frame` / `.glaze-mark` 在 DOM 里排在它**后面** —— 同为绝对
-               定位、`z-index:auto`，靠后即压在上层 ⇒ 换成真图后「框和竖排标记还留着」（稿 `:337`）。 -->
+               定位、`z-index:auto`，靠后即压在上层 ⇒ 换成真图后「框和竖排标记还留着」（稿 `:337`）。 ⚠️ **2026-10-08 用户报 bug 后重判**：上面这条判据在**本仓不成立** —— 稿的 `.glaze` 是**空占位**（釉印压自己的底），本仓 `.glaze-media` 有真图 ⇒ 釉印恒压**图面**。故 `.glaze-mark`（竖排「天青」）**已删**（模板那行现为墓碑注释，`.glaze-mark` 的 CSS 规则一并删除），只留 `.glaze-frame`。 -->
           <div class="glaze">
             <div v-if="homeImgList.length > 0" class="glaze-media">
               <img
@@ -69,7 +69,7 @@
               />
             </div>
             <span class="glaze-frame"></span>
-            <span class="glaze-mark">天青</span>
+            <!-- ⚠️ **稿 `:775` 的竖排「天青」釉印本行原样落过，2026-10-08 用户报 bug 后删除**：稿那块是**空占位**（没有 `<img>`），釉印压在自己的底上没问题；本仓 `.glaze-media` 有**真图**且 `.glaze-mark` 排在其后（绝对定位、`z-index:auto`）⇒ 恒压在**图面**上。取证：`美化/probe-glaze.mjs before` 实测 `.glaze-mark` 文本 =「天青」、色 `rgb(39,94,78)`、盒 `[327,294,24,40]` 落在 `.glaze` `[297,154,1060,320]` 之内，而同行 `.glaze-media img` 已 `opacity:1`。⇒ 保留 `.glaze-frame`（细框，稿 `:337` 明示「框和指示点会留着」），只删这一枚印。 -->
             <div v-if="homeImgList.length === 0" class="glaze-ct">
               <p class="glaze-b">暂无商品</p>
             </div>
@@ -239,7 +239,7 @@ const goodTypeList = ref([])
 const homeImgList = ref([])
 const goodsList = ref([])
 const currentIndex = ref(0)
-const searchKeyword = ref('')
+// ⚠️ 原 `const searchKeyword = ref('')` 已删（用户 2026-10-08 第 1 条）：页内搜索条搬进壳顶栏（`AppShell.vue` 的 `.nav-search`）。本行留作按语**占住 `:242`** —— 模板块 `:10` 等多处互引指这一行，删行会让其后引用整体上移。
 
 let timer = null
 
@@ -259,13 +259,13 @@ const getHomeImgAndGoods = async () => {
   }
 }
 
-const goSearch = () => {
-  // 未登录放行（2026-10-06 改判 2，§5-AG (13)）：落地页 `/<role>/search` 是公开面（见本节顶部）。
-  // 这 4 行原是一道「弹登录提示 + return」的拦截，现已删除；匿名入口只剩顶栏「登录 / 注册」。
-  // ⚠️ 停在这里的**不是**「忘了判登录态」：搜索页本来就不需要身份，后端 goods* 5 条也在白名单里。
-  // 本函数不再读登录态 ⇒ 无分支（`isLogin` 已随之删除）。
-  emit('go-search', searchKeyword.value)
-}
+// ⚠️ 原 `const goSearch = () => { … emit('go-search', searchKeyword.value) }`（7 行）已删 ——
+//   用户 2026-10-08 第 1 条：页内搜索条搬进壳顶栏（`AppShell.vue` 的 `.nav-search`，
+//   落点 `${base}/search?kw=`）。本页从此没有搜索输入框 ⇒ 本函数没有调用方。
+//   ⚠️ **`emit('go-search')` 这条通路本身没死**：下面的 `searchByType` 仍在用（首页分类块
+//      点一下就它）⇒ `HomeTab.vue` 的 `@go-search` 适配器、`defineEmits(['go-search'])` 都保留。
+//      删掉的只是「输入框 → 这个函数」那一头。
+//   本段留作按语、占住原来的 7 行 —— 理由同 `:242`（全仓 `文件:行号` 互引，删行会让其后整体上移）。
 
 // 根据类型搜索
 const searchByType = (typeName) => {
@@ -388,55 +388,55 @@ button {
   line-height: 1.6;
 }
 
-/* ── 搜索条：稿的 `.search`（`:213-240`），位置仍在**页内**（壳内搜索笔未开）────── */
-.search-section {
-  padding: var(--s5) var(--s6);
-}
-.search-wrapper {
-  max-width: 760px;
-  margin: 0 auto;
-  height: 40px;
-  display: flex;
-  align-items: center;
-  gap: var(--s2);
-  background: var(--bg);
-  border: 1px solid var(--line);
-  border-radius: var(--r2);
-  padding: 0 4px 0 14px;
-  transition: border-color 0.15s, background 0.15s;
-}
-.search-wrapper:focus-within {
-  border-color: var(--brand);
-  background: var(--surface);
-}
-.search-wrapper svg {
-  flex: none;
-  color: var(--ink-3);
-}
-.search-input {
-  flex: 1;
-  min-width: 0;
-  border: none;
-  outline: none;
-  background: transparent;
-}
-.search-input::placeholder {
-  color: var(--ink-3);
-}
-.search-btn {
-  flex: none;
-  height: 32px;
-  padding: 0 18px;
-  border-radius: var(--r1);
-  background: var(--brand);
-  color: #fff;
-  font-size: 13px;
-  font-weight: var(--fw-med);
-  transition: background 0.15s;
-}
-.search-btn:hover {
-  background: var(--brand-hover);
-}
+/* ── 搜索条（**已删**，用户 2026-10-08 第 1 条）─────────────────────────────────────
+   本处原有 4 条规则 —— `.search-section` / `.search-wrapper` / `.search-input` / `.search-btn`
+   （含 `:focus-within` 与 `::placeholder` 两个变体，合计 49 行，即原 `:391-439`）。
+   它们随**页内搜索条**一起删除：用户裁决「顶栏只留**一行**」，搜索框搬进壳顶栏。
+
+   ▸ **搜索框的新家**：`AppShell.vue` 样式块末尾的 `.nav-search` / `.search-input` / `.search-btn`。
+     数值来源 = `ProductPage.vue` 顶栏**已有的那一组**（用户指定「参考商品详情页的顶栏结构，
+     那个是对的」）⇒ 壳里那个不是新画的形制。
+   ▸ **落点**：`<form class="nav-search" @submit.prevent>` → `${base}/search?kw=` —— 与壳里
+     既有的 `handlePendingSearch`（`AppShell.vue` 消费 `PENDING_SEARCH_KEYWORD` 那一段）
+     **同一条路径、同一个 query 键** ⇒ 两条入口不会分歧。
+   ▸ **本页随之作废的两个符号**：`searchKeyword`（原 `:242`）与 `goSearch`（原 `:262`），
+     各自原处已换成按语 —— 那两处**不是**「忘了删」，理由见末段。
+
+   ⚠️ **为什么整块删，不用 `display:none` 藏起来**：留一个隐藏输入框 = 留一个绑着 `v-model`、
+     却永远读不到的 `ref`；再加上壳顶栏里那个真框，下一个人的第一个问题必然是「两个搜索框
+     哪个生效」。删除是唯一自洽的收口。
+
+   ⚠️ **原 4 条规则的形状**（存档，供回退时逐条还原）：
+     · `.search-section` —— 外层容器，`padding: var(--s5) var(--s6)`。
+     · `.search-wrapper` —— 760px 居中、`height:40px`、`display:flex`、`gap:var(--s2)`、
+       `border:1px solid var(--line)`、`border-radius:var(--r2)`、左内距 14px 给图标让位，
+       另加一条 `transition: border-color/background .15s` 与一个 `:focus-within` 变体。
+     · `.search-wrapper svg` —— 图标，`flex:none` + `color:var(--ink-3)`。
+     · `.search-input` —— `flex:1` / `min-width:0` / 无边框 / 透明底，`::placeholder` 用 `--ink-3`。
+     · `.search-btn` —— `height:32px`、右内距 18px、`--brand` 实底、`--r1` 圆角、13px 字，
+       外加一个 `:hover` 换 `--brand-hover`。
+     全仓 grep 过：这 4 个类名**只被本页这一块**用到（`ProductPage.vue` / `LoginPage.vue` 里的
+     同名字符串在各自 `scoped` 样式内，互不相干）⇒ 随块删除**不留孤儿规则**。
+
+   ⚠️ **`.head-sticky` 不受影响**：它是包裹层，去掉 `.search-section` 后只包 `nav.subnav`
+     那一行；`top:60px` / `z-index:9` / `background:var(--bg)` 三条**一字未动**，它自己那条
+     注释也照旧成立（吸附的包含块是 `.home-page` 的内容高，不是 `.home-container` 的定高盒）。
+
+   ⚠️ **高度不补**：原搜索条让本页顶部多出约 88px 垂直空间。用户要的是「顶栏那一行多一个
+     搜索框」，不是把搜索挪个位置 ⇒ 不补占位、hero 随笔上移。页面比改前短一截，这是**预期**。
+
+   ⚠️ **回退方法**（用户口径：收口目标「可复用、可回退」）：① 删掉 `AppShell.vue` 模板里那行
+     `<form class="nav-search">` 与样式块末尾的三条规则；② 把本文件 `:6-20` 的按语换回
+     `<div class="head-sticky"><div class="search-section">` + `.search-wrapper` 结构；
+     ③ 本块按上面那段的描述写回 4 条规则。三处都在本笔 diff 里，逐块可认。
+
+   ⚠️ **为什么用注释占掉这几十行，而不是让文件短一截**：本仓全篇用「`文件:行号`」互引，
+     本文件的入站引用最远到 `:986`（`scripts/refs-scan.sh` 扫得到）。删行会让其后**每一条**
+     引用整体上移 ⇒ 本块按**等行数**换成注释，是本仓既有的做法（同笔的 `searchKeyword` /
+     `goSearch` 两处按语同理）。
+
+   ⚠️ 原文（存档）：「稿 `主页改造.html:728-734` 把搜索并进了顶栏 `.hdr` ……而『壳内搜索笔』
+     本笔 **不开** ⇒ 本笔保留页内搜索条」—— 那句「不开」指的就是**现在这一笔**。 */
 
 /* ── 二级导航：稿 `.subnav`（`:558-569`），三态（`now` / `hot`）照落 ── */
 .subnav {
@@ -596,18 +596,10 @@ button {
   border: 1px solid rgba(0, 0, 0, 0.07);
   pointer-events: none;
 }
-/* 竖排小字。`--brand-hover` 而非 `--brand`：它在左侧釉色最浓处只有 4.4:1（稿 `:366` 原注）。 */
-.glaze-mark {
-  position: absolute;
-  left: 30px;
-  top: 50%;
-  transform: translateY(-50%);
-  writing-mode: vertical-rl;
-  font-family: var(--font-display);
-  font-size: 15px;
-  letter-spacing: 0.34em;
-  color: var(--brand-hover);
-}
+/* ⚠️ `.glaze-mark`（竖排「天青」釉印）**2026-10-08 删除** —— 见模板里那行墓碑注释：稿的印是给空占位用的，
+   本仓有真图 ⇒ 它恒压图面（用户报的就是这一枚）。原规则 11 行（`position:absolute; left:30px; top:50%;
+   translateY(-50%); writing-mode:vertical-rl; --font-display; 15px; letter-spacing .34em; --brand-hover`）随之作废，
+   不是漏删。回退 = 复原该规则 + 模板里那把 `<span>`。 */
 .glaze-ct {
   text-align: center;
 }
@@ -968,5 +960,29 @@ button {
 
 .empty-tip {
   color: var(--ink-3);
+}
+
+/* ── 吸顶带（A2 2026-10-07；用户 2026-10-08 第 1 条后只剩一行）──────────────────────
+   治的病（用户实测 图4）：搜索栏随页面滚走。诉求 = **滚到底也一直贴在顶栏下面**。
+   A2 的形态 = 用户给定的「搜索栏 + 分类导航包一层 sticky 容器（`top` = 顶栏高 60px）」。
+   ⚠️ 本笔改动（用户 2026-10-08 第 1 条）：搜索框整个搬进**壳顶栏**（`AppShell.vue` 的
+   `.nav-search`）⇒ 本容器现在只包 `.subnav`（`:28`）**一行**，原 `:12` 的 `.search-section`
+   已删（连同它的 4 条样式，见样式块那段按语）。本容器自己的三条数值**一字未动**。
+   ⚠️ 新增行只能落在最大被引行之后：全仓引用本页的最大行号是 `HomePage.vue:597`（`slot-registry.md:829` / `:2096`）⇒ 本规则落在
+   `<style>` 尾部。`top: 60px` **必须**与壳顶栏高锁步：
+   `AppShell.vue:214-215` 的 `height: 60px`（同处 `:211-213` 记着「高度必须与 `.home-container`
+   的 `top`/`height` 锁步」的既有口径）。`z-index: 9` **故意**低于顶栏的 `10`（`AppShell.vue`
+   的 `.top-nav`，同处 `:225-226`）：吸顶带从顶栏**下面**穿过去，写 ≥10 就把「页」压在「壳」上。
+   ⚠️ **顶栏自己是另一条 sticky**，它靠**壳能长高**才全程有效 —— 本笔之前 `.home-container`
+   是 `absolute` ⇒ 壳恒 900px ⇒ 首页滚过 840px 顶栏就释放；本笔已把它改回流内（见
+   `AppShell.vue` 那条 `.home-container` 按语）。⚠️ `background: var(--bg)` **不能省**：吸附时
+   本带是**盖**在商品区上的，透明会让商品从字缝里透出来（`--bg` 与 `--surface` 同值 `#ffffff`，
+   见 `assets/tokens.css:83-84`）。⚠️ 吸附的上下限 = **包含块**（`.home-page`，内容高且无
+   `overflow` ⇒ 全页有效；哪天给它加上 `overflow:hidden`，本带会在 840px **提前释放**），不是 `.home-container` 的盒（`AppShell.vue:308-318`）。 */
+.head-sticky {
+  position: sticky;
+  top: 60px;
+  z-index: 9;
+  background: var(--bg);
 }
 </style>
