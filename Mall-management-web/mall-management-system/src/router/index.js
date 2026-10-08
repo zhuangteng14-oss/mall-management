@@ -39,7 +39,7 @@ import GoodsUp from '../views/GoodsUp.vue'
 //   `layout`   —— 内容区外壳类名（壳里的 `layoutClass`），与路由化前那些兄弟 div
 //                 的类名一一对应 ⇒ 布局逐字不变。子记录不写则**继承**父记录的（meta 合并）。
 //   `sub`      —— 「用户中心」左菜单高亮（`UserCenter.vue`）。
-//   `subMenu`  —— 「用户中心」左菜单**表**（R2 起；客户 4 项 / 商家 6 项）——
+//   `subMenu`  —— 「用户中心」左菜单**表**（R2 起；A5 起客户 3 项 / 商家 5 项 —— 两侧各去掉「消息」，见下表内的 A5 行）——
 //                 `UserCenter.vue` 由它 `v-for` 渲染 ⇒ 两壳共用同一组件（用户裁决 3）。
 //   `logout`   —— 退出登录的**分支键**（R2 起）：`'merchant'` ⇒ 另加 `clearMerchantId()`；
 //                 缺省（客户侧）⇒ 只 `clearCredentials()`。见 `UserCenter.vue` 的 `toLogin`。
@@ -69,7 +69,7 @@ const routes = [
             { label: '个人信息', sub: 'info', to: '/customer/user/info' },
             { label: '历史购买记录', sub: 'history', to: '/customer/user/history' },
             { label: '好友', sub: 'friend', to: '/customer/user/friend' },
-            { label: '消息', sub: 'chat', to: '/customer/user/chat' }
+            // ⚠️ A5（2026-10-07 用户裁定）：原第 4 项「消息」（`sub: 'chat'` → `/customer/user/chat`）**已删** —— 与顶栏「消息」重复；子路由改 `redirect`（见 `children` 末尾）
           ]
         },
         children: [
@@ -77,7 +77,7 @@ const routes = [
           { path: 'info', component: UserInfoPage, meta: { sub: 'info' } },
           { path: 'history', component: HistoricalOrders, meta: { sub: 'history' } },
           { path: 'friend', component: FriendRoom, meta: { sub: 'friend' } },
-          { path: 'chat', component: ChatRoom, meta: { sub: 'chat' } }
+          { path: 'chat', redirect: '/customer/msg' }   // ⚠️ A5：原挂 `ChatRoom`（与 `/customer/msg` **同一个组件**）⇒ 侧边栏去项后本路径**不留死链**；⚠️ 不删记录（手敲/旧书签会白屏 —— 全仓无 catch-all，R4 口径见 `:208-210`），改 redirect 与旧地址兼容
         ]
       }
     ]
@@ -107,7 +107,7 @@ const routes = [
             { label: '查看商品', sub: 'list', to: '/merchant/user/list' },
             { label: '历史购买记录', sub: 'history', to: '/merchant/user/history' },
             { label: '好友', sub: 'friend', to: '/merchant/user/friend' },
-            { label: '消息', sub: 'chat', to: '/merchant/user/chat' }
+            // ⚠️ A5（2026-10-07 用户裁定）：原第 6 项「消息」（`sub: 'chat'` → `/merchant/user/chat`）**已删** —— 同上（客户侧）
           ]
         },
         children: [
@@ -117,7 +117,7 @@ const routes = [
           { path: 'list', component: GoodsUp, meta: { sub: 'list' } },
           { path: 'history', component: HistoricalOrders, meta: { sub: 'history' } },
           { path: 'friend', component: FriendRoom, meta: { sub: 'friend' } },
-          { path: 'chat', component: ChatRoom, meta: { sub: 'chat' } }
+          { path: 'chat', redirect: '/merchant/msg' }   // ⚠️ A5：同上（客户侧 `children` 末尾那条的理由逐字适用）
         ]
       }
     ]
@@ -130,7 +130,7 @@ const routes = [
 
 const router = createRouter({
   history: createWebHashHistory(),
-  routes
+  routes, scrollBehavior   // ← A1（2026-10-07）：**同行追加**调用名 —— 定义在文件尾部（函数声明提升，同 `landingFor`/`cartLanding`），理由见尾部「滚动行为」块（净零漂移）。治的病：列表页滚到中间点商品 ⇒ 详情页不置顶
 })
 
 // ── 兼容重定向（R1 起；R2 合表，2026-10-05）：旧 `?page=` / `?back=search` 深层链接 ⇒ 新子路由 ──
@@ -333,4 +333,61 @@ router.beforeEach((to) => {
   return { path: ROLE_HOME[roleKey()] || '/customer' }                  // 跨壳 ⇒ 送回**本角色**首页
 })
 
+// ── 滚动行为（A1，2026-10-07）：路由切换置顶 / 后退还原 ──────────────────────────────
+// 治的病（用户实测）：列表页（`GoodsSelect`）滚到中间 → 点商品进详情 ⇒ 详情页**停在差不多的
+//   滚动位置**，不回到顶部。根因**不在**详情页自身，而是「整页滚动」这件事 **7c 之后才成立**：
+//   7c 把 `.app-shell` 由 `height:100vh` 改成 `min-height:100vh`（`AppShell.vue:188-202`）⇒
+//   滚动由「壳内容器滚动」变成「整页（document）滚动」。而 `scrollBehavior` **全仓本来就没配**
+//   ⇒ 既不置顶、也不还原，于是窗口的原滚动位置被原样带进新页。
+//   ⚠️ 反过来说：7c 之前补它也**没用** —— 那时滚的是 `.app-shell` 这个容器，不是 `window`
+//   （`scrollBehavior` 默认只对 window 生效）。本笔与 7c 是配套的两半，别只留一半。
+//
+// 口径（用户给定）：有 `savedPosition`（后退 / 前进）⇒ 还原；其余（跳转）⇒ 置顶。
+// ⚠️ **若**将来出现「同路径的筛选 / 翻页也被置顶」（本笔实测未出现：`GoodsSelect` 的筛选与
+//   翻页各自改的是 query / 页内数据，见探针记录）⇒ 加 `if (to.path === from.path) return false`。
+//   本笔**不加**：`不猜、不自裁`，没复现的分支不进代码。
+//
+// ⚠️ **为什么定义在文件尾部、而调用点在第 133 行**：全仓对 `router/index.js` 有 27+ 处行号引用，
+//   **最大 `:298`**（`progress.md:1405` / `:1525`，另有 `:241-299` 整段引用）⇒ 新增行必须落在
+//   被引行**之后**（R3 §5-Z (10) 与 §5-AG (16) 的既有手法）；`createRouter` 那行**同行追加**
+//   调用名 ⇒ 两处合计**零行号漂移**。函数声明提升，同 `landingFor` / `roleKey` / `cartLanding`。
+function scrollBehavior(to, from, savedPosition) {
+  if (savedPosition) return restoreScrollWhenSettled(savedPosition)   // 后退 → 恢复原位（⚠️ 用户 2026-10-08 裁决 ⑤：**不能直接 `return savedPosition`** —— 目标页的高度是**异步**长出来的，当场滚会被截断；实测与修法见文件尾部 `restoreScrollWhenSettled` 的注释。函数声明提升，同 `landingFor`）
+  return { top: 0 }                         // 跳转 → 置顶
+}
+
 export default router
+
+// ── 滚动还原：等目标页「长得够高」再滚（⚠️ **用户 2026-10-08 裁决 ⑤**，修 A1 的残留缺陷）────────────
+// 病（A1 落地时已抓到根因，`美化/dbg-a1d.mjs` 逐帧采样）：`scrollBehavior` 原样 `return savedPosition`
+//   时，目标页的高度还没长齐 —— 从首页回退的那一帧 `docH` 只有 **1350**（最大滚动量 = 1350 − 900 = **450**），
+//   浏览器的 `scrollTo` 当场被**截断**成 450；两帧后 `docH` 长到 **1941**（最大 1041），而 `y` **停在 450**
+//   —— 没有第二次补滚。⇒ 实测：设定 **300 还原 300 ✅**；设定 **600 / 900 / 1041 一律还原 450 ❌**。
+// 修法：返回 Promise。`scrollBehavior` 的返回值允许是 `Promise<ScrollPosition>`，**Vue Router 在它
+//   resolve 之后才执行 `scrollTo`** ⇒ 把「什么时候滚」从「立刻」改成「够得着再滚」。三个出口：
+//     ① `maxScroll() >= want - 1` ⇒ 还原（快路径；本机后端实测几帧内就满足）
+//     ② 1500ms 兜底 ⇒ 仍按**当时**的最大量尽力还原（目标页始终长不到原高时，行为 = 修之前的那一档）
+//     ③ `location.hash` 变了 ⇒ `resolve(false)` = **本次不滚**
+//
+// ⚠️ **为什么要有第 ③ 条**：rAF 轮询最长跑 1500ms，这期间用户完全可能又导航走了（连点两次后退就是）
+//   —— 那时再滚，滚的是**新页**。判据取调用时刻的 `location.hash` 快照（hash 是本 app 唯一的路由
+//   载体，`createWebHashHistory`）。⚠️ 哨兵值是 `false` 而**不是** `{ top: 0 }`：后者会把新页**置顶**，
+//   同样不是用户点「后退」想要的结果（`false` 在 Vue Router 里就是「这一发不滚」）。
+//
+// ⚠️ **为什么这段不写进 `scrollBehavior` 本体**：那 4 行（`:354-357`）**被文档按行号引**
+//   （`slot-registry.md:2332`），新增行必须落在被引行**之后** ⇒ 挪到 `export default router` 之后，
+//   靠**函数声明提升**调用（同 `scrollBehavior` / `landingFor` / `cartLanding` 的既有手法）。
+function restoreScrollWhenSettled(savedPosition) {
+  const want = savedPosition.top
+  const h = location.hash
+  const maxScroll = () => document.documentElement.scrollHeight - window.innerHeight
+  return new Promise((resolve) => {
+    const tick = () => {
+      if (location.hash !== h) return resolve(false)               // ③ 这一发已作废（用户又走了）⇒ 不滚
+      if (maxScroll() >= want - 1) return resolve(savedPosition)   // ① 够得着了 ⇒ 按原样还原（连 `left` 一起）
+      requestAnimationFrame(tick)
+    }
+    tick()
+    setTimeout(() => resolve(location.hash !== h ? false : savedPosition), 1500)   // ② 兜底（rAF 在后台标签页会被节流 ⇒ 不靠它兜底；第 ③ 条在这里也复查一次）
+  })
+}

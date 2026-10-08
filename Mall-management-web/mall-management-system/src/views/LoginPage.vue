@@ -34,8 +34,8 @@
     <!-- ═══════════ 右：表单面（**外壳固定**，只换 .stage 里的内容）═══════════ -->
     <section class="pane">
       <nav class="pane-top">
-        <router-link to="/product">返回商城</router-link>
-        <router-link to="/customer">用户中心</router-link>
+        <router-link to="/customer">返回商城</router-link>
+        <!-- ⚠️ 结构二次调整（2026-10-07）：原「用户中心」(`/customer`) 已删 —— 未登录用户不需要它，且落点与左项重复 -->
       </nav>
 
       <div class="form-shell">
@@ -240,7 +240,7 @@
 <script>
 import { http } from '../api/http'
 import { endpoints } from '../api/endpoints'
-import { setMerchantId, setCustomerId, setUsername, setRole, setToken, publishSharedToken } from '../api/auth'
+import { setMerchantId, setCustomerId, clearMerchantId, clearCustomerId, setUsername, setRole, setToken, publishSharedToken } from '../api/auth'
 export default {
   name: "LoginPage",
   data() {
@@ -306,13 +306,13 @@ export default {
         const userRes = await http.post(endpoints.user.me, null, { allowUnauthorized: true });
         const userData = await userRes.json();
 
-        // 自动保存ID，上架商品可用
-        if (userData.merchantid) {
-          setMerchantId(userData.merchantid);
-        }
-        if (userData.customerid) {
-          setCustomerId(userData.customerid);
-        }
+        // 自动保存ID，上架商品可用。⚠️ 2026-10-08 用户第 3 条（多账户切换 403）：**每答一个业务号就清另一个**
+        //   —— `user` 表两行的 id 互斥（商家行 `customerid` 为 NULL、客户行 `merchantid` 为 NULL）⇒ 旧代码
+        //   「只写不清」会让上一位的号残留；买家 id 链优先 `customerid`（api/auth.js:123-125）⇒ 换回商家后，
+        //   历史订单带着客户的 id + 商家的票 ⇒ IdentityGuard.requireSelfOrAdmin 判 403（实测 docs/美化/dtop4/acct.log）
+        if (userData.merchantid) { setMerchantId(userData.merchantid); clearCustomerId(); }   // 商家：清上一位客户的 customerid
+        if (userData.customerid) { setCustomerId(userData.customerid); clearMerchantId(); }   // 客户：清上一位商家的 merchantid
+        // ⚠️ 清**写在这两个「有值」分支内**：role=0 / `me` 401 那一发 body 里没有 id ⇒ 两个分支都不跑 ⇒ 不会误伤「已登录又登一次、密码打错」的旧身份。
 
         if(role === "0"){
           this.loginWarnText = "未找到该用户，请查看对应账号密码有无写错，或者前往右侧进行注册";
@@ -325,7 +325,7 @@ export default {
           this.$router.push(this.landingAfterLogin(role));   // 前端路由守卫笔（2026-10-06）：同上，否则 = 原来的 "/merchant"
         }
       } catch (e) {
-        this.loginWarnText = "未识别到账户，请检查对应输入";
+        this.loginWarnText = (e instanceof TypeError || e.name === 'TimeoutError') ? "连不上服务器：请确认后端已在 8088 运行、且本页源在 CORS 白名单内" : "未识别到账户，请检查对应输入";   // ⚠️ 结构调整（2026-10-07）：连不上（fetch 抛 `TypeError`，含 CORS 被拦 / 超时）**不再**与「账号对不上」同报 —— 原句把环境问题说成用户输错（用户实测「登不上」所见即此句）。判据只放这两类：`UnauthorizedError`（role=0 ⇒ `/user/me` 401，见 :304）**必须仍走原句**，它是「账号对不上」的正规路径。同行追加，保持净零行数。
       }
     },
 
@@ -495,8 +495,8 @@ export default {
   color: var(--ink);
   background: var(--bg);
   -webkit-font-smoothing: antialiased;
-  /* 稿是 `calc(100vh - 46px)`，减的 46px 是**稿自己的预览条**；本页没有那一条 ⇒ 100vh。 */
-  min-height: 100vh;
+  /* 稿是 `calc(100vh - 46px)`，减的 46px 是**稿自己的预览条**；本页没有那一条 ⇒ 100vh。⚠️ **`min-height` → `height`（第 3 条修复，2026-10-08）**：`min-height` 只是下限，grid 那唯一的 auto 行仍按**内容**定高（= max(左栏 791, 右栏 752)）⇒ 视口比它矮时行高不缩、整页可滑（实测 1366×768 滑 21px / 1280×720 滑 69px）。改成定高 + 下面的 `grid-template-rows: minmax(0,1fr)` 才让行 = 视口，左栏那张图才有可压的余量。 */
+  height: 100vh;
 }
 /* 控件一律继承页面字体 —— 浏览器 UA 样式表会给 `button` / `input` 打上自己的 `font`。
    落法同 `ProductPage.vue` / `GoodsAdd.vue` / `GoodsUp.vue` 三处先例。 */
@@ -507,13 +507,13 @@ input::placeholder { color: var(--ink-3); }
 a { color: inherit; text-decoration: none; }
 
 /* ── 分栏：左品牌 46 / 右表单 54 ──────────────────────────────────────────── */
-.auth { display: grid; grid-template-columns: minmax(0, 46fr) minmax(0, 54fr); }
+.auth { display: grid; grid-template-columns: minmax(0, 46fr) minmax(0, 54fr); grid-template-rows: minmax(0, 1fr); }   /* ⚠️ 第 3 条修复：行取 `minmax(0,1fr)` ⇒ 配上面的 `height:100vh`，行高 = 视口高（不是内容高）；`minmax(0,…)` 的下界 0 是必须的 —— 默认 `min-content` 下界会把行顶回内容高。 */
 
 /* ⚠️ 底用 `--glaze-deep` 不是 `--glaze-pale`：后者对纯白的 ΔE00 只有 2.91，
    占满左侧 46% 宽的一整栏时眼睛读成白（「加了底色」与「看得出是块底色」是两件事）。 */
 .brand { display: flex; flex-direction: column;
          padding: var(--s7) var(--s7) var(--s6);
-         background: var(--glaze-deep); border-right: 1px solid var(--line); }
+         background: var(--glaze-deep); border-right: 1px solid var(--line); min-height: 0; }   /* ⚠️ min-height:0 = 解开 grid 项的 `min-height:auto`（默认 = 内容高 791）⇒ 本列才能被压到行高。第 3 条修复。 */
 .brand-mark { font-family: var(--font-display); font-size: var(--fs-lg); font-weight: var(--fw-semi);
               letter-spacing: .06em; color: var(--brand-ink); }
 /* 大字的两个「收紧」（负字距 + 紧行高）照稿：参考站点的 display 字号实测如此，
@@ -531,7 +531,7 @@ a { color: inherit; text-decoration: none; }
 .brand-fig { margin-top: var(--s6); width: 100%; max-width: 440px; aspect-ratio: 16/9;
              border: 1px solid var(--line); border-radius: var(--r2);
              background-color: var(--img); background-size: cover; background-position: top;
-             background-image: url("http://localhost:8088/img/Mall-Section-2.jpg"); }
+             background-image: url("http://localhost:8088/img/Mall-Section-2.jpg"); flex: 0 1 auto; min-height: 0; }   /* ⚠️ 短视口自缩（第 3 条修复）：本图是左栏里唯一「没有内容语义、压了也不丢信息」的一块 ⇒ 让它在短视口先让位。`min-height:0` 解开 flex 项的自动最小尺寸（默认 = 内容高 248），`flex-shrink:1` 才真能压下去。登记见台账 §九。同行追加，保持净零行数。 */
 /* 注册态换另一张（稿 = `body[data-state="register"]`，见块首差异 2） */
 .brand-fig.reg { background-image: url("http://localhost:8088/img/Mall-Section-1.jpg"); }
 .facts { margin-top: var(--s6); border-top: 1px solid var(--line); }
@@ -541,7 +541,7 @@ a { color: inherit; text-decoration: none; }
 .facts dd { font-size: var(--fs-sm); color: var(--ink-2); }
 
 /* ── 右栏：表单面 ─────────────────────────────────────────────────────────── */
-.pane { padding: var(--s6) var(--s7) var(--s6); }
+.pane { padding: var(--s6) var(--s7) var(--s6); min-height: 0; }   /* ⚠️ 同 `.brand`：`min-height:0` 才让本列（内容高 752）不把行顶回去。第 3 条修复。 */
 .pane-top { display: flex; justify-content: space-between; font-size: var(--fs-xs); color: var(--ink-3); }
 .pane-top a { padding: var(--s1) 0; }
 .pane-top a:hover { color: var(--brand-ink); }
@@ -632,11 +632,11 @@ h1.t { font-family: var(--font-display); font-size: var(--d2); font-weight: var(
 .strength i.on { background: var(--brand); }
 .tip { margin-top: var(--s4); font-size: var(--fs-xs); color: var(--warning); }
 
-/* ⚠️ 「注册面专属档」的总收紧：注册面比登录面高 215px，单靠上面几处全局档收不到 854。
-   **只动注册面**：选择器全部冠 `.page[data-page="register"]`（特异性 0,2,0 稳压 0,1,0）
-   ⇒ 登录面逐像素不变。收的六处**全是间距**，字号与控件尺寸一个没动。 */
-.page[data-page="register"] .f { margin-top: var(--s2); }
-.page[data-page="register"] .f > label { margin-bottom: var(--s1); }
+/* ⚠️ 「收紧档」：实测登录面 626px / 注册面 605px，而左栏固定 792px ⇒ 两态页高随态在 812/800
+   之间跳（1440×800 实测）= 切 Tab 时整页在动 =「登录滑动」。结构调整（2026-10-07）把原
+   「注册面专属」的两处**字段间距**（0,2,0 稳压 0,1,0）放开到全部 `.page`；下面四条仍只归注册面。 */
+.page .f { margin-top: var(--s2); }
+.page .f > label { margin-bottom: var(--s1); }
 .page[data-page="register"] .err { min-height: 8px; margin-top: 0; }
 .page[data-page="register"] .btn-block { margin-top: var(--s5); }
 .page[data-page="register"] .tip { margin-top: var(--s2); }
@@ -657,5 +657,42 @@ h1.t { font-family: var(--font-display); font-size: var(--d2); font-weight: var(
   .brand-sub, .facts, .brand-fig { display: none; }
   .pane { padding: var(--s6) var(--s5) var(--s8); }
   .form-shell { padding-top: var(--s6); }
+}
+
+/* ── 矮屏（≤780）：右栏「表单纵排」再收紧一档 ─────────────────────────────────
+   ⚠️ 第 3 条修复的收尾。上面把 `.auth` 改成 `height:100vh` + `grid-template-rows:minmax(0,1fr)`
+   之后，**左栏已经可压**（`.brand-fig` 从固有 248 跟着视口缩到 97），所以**剩余的地板全在右栏**：
+   登录面 720px / 注册面 762px 是 `.pane` 的固有高（`pane-top` 25 + `.form-shell` 663 + 上下
+   `--s6`）—— 视口一旦矮于它，整页仍然可滑（实测 1280×640：登录滑 80px / 注册滑 122px）。
+   这一段只收**间距**：字号、输入框/按钮的 46px 高度、`--s5` 之类的横向节奏**一个不动**
+   （控件的可点区域是功能，不是装饰）。只在 ≤780 生效 ⇒ 781 以上逐像素不变。
+   放在样式表**最末**：原因同上面那条窄屏块。 */
+@media (max-height: 780px) {
+  .form-shell { padding-top: var(--s3); }
+  .stage { margin-top: var(--s3); }
+  .page .f { margin-top: var(--s3); }
+  .btn-block { margin-top: var(--s4); }
+  .swap { margin-top: var(--s4); padding-top: var(--s3); }
+  .page[data-page="register"] .btn-block { margin-top: var(--s3); }
+  .page[data-page="register"] .swap { margin-top: var(--s3); padding-top: var(--s3); }
+}
+
+/* ── 矮屏（≤760）：右栏再让一档（**用户 2026-10-08 裁决 ①**，兑现 9-6 ① 的那条高度档）──────
+   ⚠️ **用户给的落点是「压左栏 `.brand`」，实测证明地板不在左栏**（`美化/probe-login-h.mjs`，1440×720）：
+   720 高时左栏**已经让到位**（`.brand-fig` 248 → 177；640 时 → 97），而 `docH` **钉死在 735**
+   —— 那是**右栏内容**的高（`.pane` 上下 32 + `pane-top` 25 + `.form-shell` 678）；压左栏一格都不降。
+   ⇒ 本档收的是**右栏**的纵向间距（口径同上面那条：字号 / 控件的 46px 高 / 横向 `--s5` 节奏**一个不动**）。
+   左栏那两条 padding 照用户原文一并加上，但**对 docH 0 影响**，只为极短视口留余量。
+   实测（同一支探针）：修前 1440×720 **注册面可滑 15px**（登录面已 0）；修后两态数字见台账 §十。 */
+@media (max-height: 760px) {
+  .pane { padding-top: var(--s4); padding-bottom: var(--s4); }   /* 32 → 16：地板在右栏，这一条最有效（省 32px） */
+  .form-shell { padding-top: 0; }                                 /* 12 → 0 */
+  .stage { margin-top: var(--s2); }                               /* 12 → 8 */
+  .page .f { margin-top: var(--s2); }                             /* 12 → 8（注册面 5 个字段块） */
+  .btn-block { margin-top: var(--s2); }                           /* 16 → 8 */
+  .swap { margin-top: var(--s2); padding-top: var(--s2); }        /* 16/12 → 8/8（上面那条给的是 s4/s3） */
+  .page[data-page="register"] .btn-block { margin-top: var(--s2); }
+  .page[data-page="register"] .swap { margin-top: var(--s2); padding-top: var(--s2); }
+  .brand { padding-top: var(--s5); padding-bottom: var(--s4); }   /* 用户原文「压左栏」：照加（32/32 → 24/16；对 docH 0 影响） */
 }
 </style>

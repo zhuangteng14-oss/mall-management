@@ -1,0 +1,353 @@
+
+[匿名 /customer] {
+ ".nav-left": {
+  "x": 48,
+  "y": 12,
+  "w": 96,
+  "h": 35
+ },
+ ".nav-search": {
+  "x": 168,
+  "y": 10,
+  "w": 420,
+  "h": 40
+ },
+ ".nav-right": {
+  "x": 1300,
+  "y": 18,
+  "w": 77,
+  "h": 24
+ },
+ ".search-input": {
+  "x": 183,
+  "y": 22,
+  "w": 326,
+  "h": 15
+ },
+ ".search-btn": {
+  "x": 517,
+  "y": 14,
+  "w": 66,
+  "h": 32
+ },
+ "navRightItems": [
+  {
+   "t": "登录 / 注册",
+   "r": {
+    "x": 1300,
+    "y": 18,
+    "w": 77,
+    "h": 24
+   }
+  }
+ ]
+}
+searchCSS: {
+ "input": {
+  "h": "15px",
+  "bg": "rgba(0, 0, 0, 0)",
+  "border": "rgb(0, 0, 0)",
+  "fs": "13.3333px",
+  "br": "0px"
+ },
+ "btn": {
+  "h": "32px",
+  "bg": "rgb(59, 121, 102)",
+  "color": "rgb(255, 255, 255)",
+  "border": "rgb(0, 0, 0)",
+  "fs": "13px",
+  "pad": "0px 18px"
+ }
+}
+覆盖扫描: {
+ "strip": [
+  {
+   "key": "top-nav/DIV",
+   "from": 5,
+   "to": 45
+  },
+  {
+   "key": "top-nav/nav-left",
+   "from": 53,
+   "to": 141
+  },
+  {
+   "key": "top-nav/DIV",
+   "from": 149,
+   "to": 165
+  },
+  {
+   "key": "top-nav/FORM",
+   "from": 173,
+   "to": 181
+  },
+  {
+   "key": "top-nav/INPUT",
+   "from": 189,
+   "to": 501
+  },
+  {
+   "key": "top-nav/FORM",
+   "from": 509
+  },
+  {
+   "key": "top-nav/BUTTON",
+   "from": 517,
+   "to": 581
+  },
+  {
+   "key": "top-nav/DIV",
+   "from": 589,
+   "to": 1293
+  },
+  {
+   "key": "top-nav/nav-right",
+   "from": 1301,
+   "to": 1373
+  },
+  {
+   "key": "top-nav/DIV",
+   "from": 1381,
+   "to": 1421
+  }
+ ],
+ "outside": []
+}
+
+[伪造登录 /merchant] {
+ ".nav-left": {
+  "x": 48,
+  "y": 12,
+  "w": 96,
+  "h": 35
+ },
+ ".nav-search": {
+  "x": 168,
+  "y": 10,
+  "w": 420,
+  "h": 40
+ },
+ ".nav-right": {
+  "x": 1169,
+  "y": 18,
+  "w": 208,
+  "h": 24
+ },
+ ".search-input": {
+  "x": 183,
+  "y": 22,
+  "w": 326,
+  "h": 15
+ },
+ ".search-btn": {
+  "x": 517,
+  "y": 14,
+  "w": 66,
+  "h": 32
+ },
+ "navRightItems": [
+  {
+   "t": "消息",
+   "r": {
+    "x": 1169,
+    "y": 18,
+    "w": 32,
+    "h": 24
+   }
+  },
+  {
+   "t": "订单中心",
+   "r": {
+    "x": 1225,
+    "y": 18,
+    "w": 64,
+    "h": 24
+   }
+  },
+  {
+   "t": "用户中心",
+   "r": {
+    "x": 1313,
+    "y": 18,
+    "w": 64,
+    "h": 24
+   }
+  }
+ ]
+}
+覆盖扫描: {
+ "strip": [
+  {
+   "key": "top-nav/DIV",
+   "from": 5,
+   "to": 45
+  },
+  {
+   "key": "top-nav/nav-left",
+   "from": 53,
+   "to": 141
+  },
+  {
+   "key": "top-nav/DIV",
+   "from": 149,
+   "to": 165
+  },
+  {
+   "key": "top-nav/FORM",
+   "from": 173,
+   "to": 181
+  },
+  {
+   "key": "top-nav/INPUT",
+   "from": 189,
+   "to": 501
+  },
+  {
+   "key": "top-nav/FORM",
+   "from": 509
+  },
+  {
+   "key": "top-nav/BUTTON",
+   "from": 517,
+   "to": 581
+  },
+  {
+   "key": "top-nav/DIV",
+   "from": 589,
+   "to": 1165
+  },
+  {
+   "key": "top-nav/nav-right",
+   "from": 1173,
+   "to": 1373
+  },
+  {
+   "key": "top-nav/DIV",
+   "from": 1381,
+   "to": 1421
+  }
+ ],
+ "outside": []
+}
+
+[商家 订单中心] {
+ ".nav-left": {
+  "x": 48,
+  "y": 12,
+  "w": 96,
+  "h": 35
+ },
+ ".nav-search": {
+  "x": 168,
+  "y": 10,
+  "w": 420,
+  "h": 40
+ },
+ ".nav-right": {
+  "x": 1184,
+  "y": 18,
+  "w": 208,
+  "h": 24
+ },
+ ".search-input": {
+  "x": 183,
+  "y": 22,
+  "w": 326,
+  "h": 15
+ },
+ ".search-btn": {
+  "x": 517,
+  "y": 14,
+  "w": 66,
+  "h": 32
+ },
+ "navRightItems": [
+  {
+   "t": "消息",
+   "r": {
+    "x": 1184,
+    "y": 18,
+    "w": 32,
+    "h": 24
+   }
+  },
+  {
+   "t": "订单中心",
+   "r": {
+    "x": 1240,
+    "y": 18,
+    "w": 64,
+    "h": 24
+   }
+  },
+  {
+   "t": "用户中心",
+   "r": {
+    "x": 1328,
+    "y": 18,
+    "w": 64,
+    "h": 24
+   }
+  }
+ ]
+}
+覆盖扫描: {
+ "strip": [
+  {
+   "key": "top-nav/DIV",
+   "from": 5,
+   "to": 45
+  },
+  {
+   "key": "top-nav/nav-left",
+   "from": 53,
+   "to": 141
+  },
+  {
+   "key": "top-nav/DIV",
+   "from": 149,
+   "to": 165
+  },
+  {
+   "key": "top-nav/FORM",
+   "from": 173,
+   "to": 181
+  },
+  {
+   "key": "top-nav/INPUT",
+   "from": 189,
+   "to": 501
+  },
+  {
+   "key": "top-nav/FORM",
+   "from": 509
+  },
+  {
+   "key": "top-nav/BUTTON",
+   "from": 517,
+   "to": 581
+  },
+  {
+   "key": "top-nav/DIV",
+   "from": 589,
+   "to": 1181
+  },
+  {
+   "key": "top-nav/nav-right",
+   "from": 1189,
+   "to": 1389
+  },
+  {
+   "key": "top-nav/DIV",
+   "from": 1397,
+   "to": 1437
+  }
+ ],
+ "outside": []
+}
+OK   顶栏高 = 60  → {"x":0,"y":0,"w":1425,"h":60}
+OK   顶栏内无外部元素覆盖（商家首页）  → []
+OK   顶栏内无外部元素覆盖（订单中心）  → []
+OK   搜索框与 nav-right 不重叠  → {"search":{"x":168,"y":10,"w":420,"h":40},"right":{"x":1169,"y":18,"w":208,"h":24}}
+
+probe-top4: 4 项 / 0 失败

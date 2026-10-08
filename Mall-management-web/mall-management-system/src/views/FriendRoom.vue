@@ -349,8 +349,8 @@ onMounted(() => {
      ⑦ `.inp` 只取稿 `:281-287` 的声明；`.empty .row .inp{flex:1;background:var(--surface)}`
         （稿 `:436`）一并落，否则输入框在 `.row` 里不撑开。
    ⚠️ `box-sizing` **不在此重复** —— `tokens.css` 的 `*` 重设已是全局。
-   ⚠️ `.modal-overlay` 那一段（`:375-379` 的 `width:100vw`）是**既有**代码（老稿里没有弹窗）——
-      **一字未动**，不在本笔范围。
+   ⚠️ `.modal-overlay` 那一段（`:462-463` 的 `width/height`；原引 `:375-379` 是**错引** —— 那里是页头 `.page-h`，本笔订正）是**既有**代码（老稿里没有弹窗）——
+      原文「一字未动」已由**结构二次调整（2026-10-07）**改口：只把 `100vw/100vh` 改成 `100%`，其余不动。
    ══════════════════════════════════════════════════════════════════════════════ */
 
 /* ── 稿 `:121` 的 `button{...}` 重设（必须在 `.btn-*` 之前）────────────────────── */
@@ -402,16 +402,33 @@ button {
    （同 `UserInfoPage.vue` 的 commit 7 第 ③ 条）。本笔两处 `disabled` 在空态里。 */
 button[disabled] { cursor: not-allowed; }
 
-/* ── 发丝线网格（稿 `:405-414`）───────────────────────────────────────────── */
+/* ── 发丝线网格（稿 `:405-414`）─────────────────────────────────────────────
+   ⚠️ **A4（2026-10-07，用户实测 图8「好友卡的灰色底比卡片本体宽，溢出到白底外」）**：
+      稿的手法（`:408` 的 `gap:1px` + `:408` 的**容器底色**当分隔线）在**不满一行**时会露馅 ——
+      容器底色铺满整个网格盒，空轨道没人去盖 ⇒ 那一整格是灰的。**实测**（`123` 账号，2 位好友 /
+      3 列）：`.frg` 盒宽 828px、`background: rgb(221,226,229)`（= `--line`），两张卡各 275px
+      ⇒ 右边**多出 275px 一整格灰底**，正是用户看到的那块。
+   ⇒ 本笔把「灰底」从**容器**搬到**卡片自己的 `box-shadow`**（见下 `.frt`）：`gap:1px` 一个不动、
+      每格的白底一个不动 ⇒ 发丝线一根不少（每条仍 1px，右/下两条阴影正好落在 `gap` 里），
+      而**空轨道没有卡就没有阴影** ⇒ 露出来的是容器底色（已改 `--surface` 白）。
+      ⚠️ 末列的右阴影、末行的下阴影落在容器 `overflow:hidden` 之外 ⇒ **被裁掉**，那两条边正好由
+      容器自己的 `border: 1px solid var(--line)` 顶替 ⇒ 四边仍闭合成框（实测无缺口、无 2px 重线）。
+      ⚠️ 这是**对老稿的有意偏离**（稿注 `:406-407` 写着「不用给每格加边框」）—— 老稿那 12 格是 mock、
+      恰好满行 ⇒ 它没撞上这个边界；本页按用户 图8 的诉求改。登记：`slot-registry.md`「A4」条。
+      ⚠️ 备选（**未采**）：`auto-fill` → `auto-fit`。它只治「好友数 < 列数」，**不满行的最后一行照样
+      露灰**（例：5 位好友 / 3 列 ⇒ 第 2 行第 3 格仍灰）⇒ 只治一半，故不采。
+      ⚠️ 行数：本块在被全仓引用的最大行（`FriendRoom.vue:246`）之后 ⇒ 增行零漂移。 */
 .frg {
   display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
-  gap: 1px; background: var(--line);
+  gap: 1px; background: var(--surface);
   border: 1px solid var(--line); border-radius: var(--r2); overflow: hidden;
 }
 .frt {
   display: grid; grid-template-columns: 44px minmax(0, 1fr) auto;
   align-items: center; gap: var(--s3);
   background: var(--surface); padding: var(--s4) var(--s5);
+  /* ← A4：分隔线改由卡片自己画（右 + 下各 1px，正落在 `gap:1px` 里）—— 理由见上块注释。 */
+  box-shadow: 1px 0 0 var(--line), 0 1px 0 var(--line);
 }
 .frt .fav {
   width: 44px; height: 44px; border-radius: 50%; background: var(--img); color: var(--ink-3);
@@ -454,13 +471,13 @@ button[disabled] { cursor: not-allowed; }
 /* ── 窄档：稿 `:438-459` 的 `@media` 里只有 `.uc` / `.uc-menu` / `.p-*` / `.msgr` / `.convs`
    / `.fields` 六项，**都不在本组件**（`.frg` 用的是 `auto-fill` 自适应）⇒ 本页无对应声明。 ── */
 
-/* ══ 以下 = **既有**两弹窗的样式，一字未动（老稿无弹窗面）══════════════════════ */
+/* ══ 两弹窗的样式：**既有**代码（老稿无弹窗面）。结构二次调整只动 `.modal-overlay` 的宽高 ══ */
 .modal-overlay {
 position: fixed;
 top: 0;
 left: 0;
-width: 100vw;
-height: 100vh;
+width: 100%;
+height: 100%;
 background: rgba(0,0,0,0.5);
 display: flex;
 align-items: center;

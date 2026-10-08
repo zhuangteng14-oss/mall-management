@@ -384,7 +384,7 @@ onMounted(() => {
   position: absolute;
   top: 20px;
   right: 30px;
-  z-index: 10;
+  z-index: 5;   /* ⚠️ **用户 2026-10-08 第 2 条**（原 `10`）—— 与 `OrderCenter.vue` 的 `.switch-wrapper` **同一个 bug 的同一处**：`10` = 顶栏 `.top-nav` 的 `z-index`，且本元素在 DOM 里靠后、与顶栏同处一个层叠上下文 ⇒ 页面一滚就盖到顶栏上（商家壳的 `/merchant/order/cart` 面同样中招）。理由与实测逐字见 `OrderCenter.vue` 那条的按语。 */
 }
 .switch-container {
   width: 120px;

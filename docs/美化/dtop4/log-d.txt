@@ -1,0 +1,47 @@
+
+===== /merchant/order =====
+行数 = 25
+docH = 2946  innerH = 900
+scY=0 sw={"y":81,"right":1394,"z":"5","pos":"absolute"} navZ=10 带外命中=[]
+scY=60 sw={"y":21,"right":1394,"z":"5","pos":"absolute"} navZ=10 带外命中=[]
+scY=120 sw={"y":-39,"right":1394,"z":"5","pos":"absolute"} navZ=10 带外命中=[]
+scY=180 sw={"y":-99,"right":1394,"z":"5","pos":"absolute"} navZ=10 带外命中=[]
+scY=240 sw={"y":-159,"right":1394,"z":"5","pos":"absolute"} navZ=10 带外命中=[]
+scY=300 sw={"y":-219,"right":1394,"z":"5","pos":"absolute"} navZ=10 带外命中=[]
+scY=360 sw={"y":-279,"right":1394,"z":"5","pos":"absolute"} navZ=10 带外命中=[]
+scY=420 sw={"y":-339,"right":1394,"z":"5","pos":"absolute"} navZ=10 带外命中=[]
+scY=480 sw={"y":-399,"right":1394,"z":"5","pos":"absolute"} navZ=10 带外命中=[]
+scY=540 sw={"y":-459,"right":1394,"z":"5","pos":"absolute"} navZ=10 带外命中=[]
+scY=600 sw={"y":-519,"right":1394,"z":"5","pos":"absolute"} navZ=10 带外命中=[]
+scY=660 sw={"y":-579,"right":1394,"z":"5","pos":"absolute"} navZ=10 带外命中=[]
+scY=720 sw={"y":-639,"right":1394,"z":"5","pos":"absolute"} navZ=10 带外命中=[]
+scY=780 sw={"y":-699,"right":1394,"z":"5","pos":"absolute"} navZ=10 带外命中=[]
+scY=840 sw={"y":-759,"right":1394,"z":"5","pos":"absolute"} navZ=10 带外命中=[]
+scY=900 sw={"y":-819,"right":1394,"z":"5","pos":"absolute"} navZ=10 带外命中=[]
+scY=960 sw={"y":-879,"right":1394,"z":"5","pos":"absolute"} navZ=10 带外命中=[]
+scY=1020 sw={"y":-939,"right":1394,"z":"5","pos":"absolute"} navZ=10 带外命中=[]
+scY=1080 sw={"y":-999,"right":1394,"z":"5","pos":"absolute"} navZ=10 带外命中=[]
+scY=1140 sw={"y":-1059,"right":1394,"z":"5","pos":"absolute"} navZ=10 带外命中=[]
+scY=1200 sw={"y":-1119,"right":1394,"z":"5","pos":"absolute"} navZ=10 带外命中=[]
+scY=1260 sw={"y":-1179,"right":1394,"z":"5","pos":"absolute"} navZ=10 带外命中=[]
+scY=1320 sw={"y":-1239,"right":1394,"z":"5","pos":"absolute"} navZ=10 带外命中=[]
+scY=1380 sw={"y":-1299,"right":1394,"z":"5","pos":"absolute"} navZ=10 带外命中=[]
+scY=1440 sw={"y":-1359,"right":1394,"z":"5","pos":"absolute"} navZ=10 带外命中=[]
+scY=1500 sw={"y":-1419,"right":1394,"z":"5","pos":"absolute"} navZ=10 带外命中=[]
+scY=1560 sw={"y":-1479,"right":1394,"z":"5","pos":"absolute"} navZ=10 带外命中=[]
+scY=1620 sw={"y":-1539,"right":1394,"z":"5","pos":"absolute"} navZ=10 带外命中=[]
+scY=1680 sw={"y":-1599,"right":1394,"z":"5","pos":"absolute"} navZ=10 带外命中=[]
+scY=1740 sw={"y":-1659,"right":1394,"z":"5","pos":"absolute"} navZ=10 带外命中=[]
+scY=1800 sw={"y":-1719,"right":1394,"z":"5","pos":"absolute"} navZ=10 带外命中=[]
+scY=1860 sw={"y":-1779,"right":1394,"z":"5","pos":"absolute"} navZ=10 带外命中=[]
+scY=1920 sw={"y":-1839,"right":1394,"z":"5","pos":"absolute"} navZ=10 带外命中=[]
+scY=1980 sw={"y":-1899,"right":1394,"z":"5","pos":"absolute"} navZ=10 带外命中=[]
+scY=2040 sw={"y":-1959,"right":1394,"z":"5","pos":"absolute"} navZ=10 带外命中=[]
+
+===== /merchant/order/cart =====
+行数 = 0
+docH = 900  innerH = 900
+scY=0 sw={"y":81,"right":1409,"z":"5","pos":"absolute"} navZ=10 带外命中=[]
+OK   滚动途中顶栏带无外部元素  → "见上表"
+
+probe-top4d: 1 项 / 0 失败

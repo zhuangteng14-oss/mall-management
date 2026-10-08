@@ -229,24 +229,24 @@ button {
   padding: 0 var(--s4) 10px 0; border-bottom: 1px solid var(--line-2); white-space: nowrap;
 }
 .ords td {
-  padding: 12px var(--s4) 12px 0; border-bottom: 1px solid var(--line);
+  padding: 16px var(--s4) 16px 0; border-bottom: 1px solid var(--line);   /* ⚠️ 第 4 条修复（用户 2026-10-08）：12px → 16px。48×48 的缩略图夹在 12px 的行内距里，**上下留白只有 12.5px**，hover 时行底色（`--zone`）的上下边看起来正压在图片边上 = 用户报的「边界与背景行重叠」。加到 16px ⇒ 留白 16.5px，图与底色边不再贴着。 */
   vertical-align: middle; font-size: var(--fs-sm); color: var(--ink-2);
 }
-.ords th:last-child, .ords td:last-child { padding-right: 0; }
+.ords th:last-child, .ords td:last-child { padding-right: var(--s4); }   /* ⚠️ 第 4 条修复：原是 `0` ⇒ 末列（`.c-act`，右对齐的「复制商家 ID」）的右边缘**与表格右边缘重合**（实测 btn 右沿 1266 = 表格右沿 1266），看起来像被裁掉一截。给回一个 `--s4`，按钮离表格右边 16px；行底色仍然铺满整格 ⇒ hover 条不会被切。 */
 /* 行高亮是**扫读**需要，跟「每张卡片都加 hover 位移」不是一回事：只换底色，
    不做过渡、不做位移、不加投影（稿 `:308-309` 原注）。 */
 .ords tbody tr:hover td { background: var(--zone); }
 
 .c-prod { width: 30%; } .c-num { width: 15%; } .c-nd { width: 14%; }
-.c-date { width: 19%; } .c-st { width: 11%; } .c-act { width: 11%; text-align: right; }
+.c-date { width: 19%; } .c-st { width: 11%; } .c-act { width: 11%; text-align: right; white-space: nowrap; }   /* ⚠️ 第 4 条修复：补 `white-space:nowrap` —— 「复制商家 ID」是一枚**不可断**的按钮文字，列宽是百分比（11%），窄档下会折成两行、把行顶高，与本列「一个动作一行」的语义不符。nowrap 让它只可能横向顶，绝不折行。 */
 
-.c-prod .in { display: flex; align-items: center; gap: var(--s3); }
+.c-prod .in { display: flex; align-items: center; gap: var(--s3); min-width: 0; }   /* ⚠️ 第 4 条修复：`min-width:0` 解开 flex 项的自动最小尺寸 —— 没有它，商品名一长，「缩略图 + 文字」这一组就**顶不出** td 的百分比宽，横向溢出到相邻列。 */
 .thumb {
   width: 48px; height: 48px; flex: none; border-radius: var(--r1);
   background: var(--img); overflow: hidden;
 }
 .thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
-.c-prod .nm { font-size: var(--fs-md); color: var(--ink); font-weight: var(--fw-med); line-height: 1.35; }
+.c-prod .nm { font-size: var(--fs-md); color: var(--ink); font-weight: var(--fw-med); line-height: 1.35; min-width: 0; overflow-wrap: anywhere; }   /* ⚠️ 第 4 条修复（overflow 约束）：`min-width:0` 允许本项被压到列宽以下，`overflow-wrap:anywhere` 让**超长且不可断**的商品名（如测试数据里的 `叠法双方:dfffff`）在列内就地折行，而不是横向顶出去。正常长度的名字**外观零变化**。 */
 
 .num { font-variant-numeric: tabular-nums; }
 

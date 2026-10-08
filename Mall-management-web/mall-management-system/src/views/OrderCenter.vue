@@ -301,7 +301,7 @@ onMounted(() => {
   position: absolute;
   top: 20px;
   right: 30px;
-  z-index: 10;
+  z-index: 5;   /* ⚠️ **用户 2026-10-08 第 2 条**（原 `10`）：`10` 正是顶栏 `.top-nav` 的 `z-index`，而两者**同处一个层叠上下文**（`.order-container` 没写 `z-index` ⇒ 不建上下文，见 AppShell.vue 里那两个容器的规则）、本元素在 DOM 里**靠后** ⇒ 页面一滚它就**盖在顶栏之上**（实测：滚到 `scY=60` 时它 `y=21`，在顶栏带 y=0–60 内 `elementFromPoint` 命中的正是它，落点与顶栏右三项同行）。降到 `5` ⇒ 顶栏（`10`）压得住它，与 `.home-container`（`1`）、`HomePage` 吸顶带（`9`）同档之下。 */
 }
 .switch-container {
   width: 120px;

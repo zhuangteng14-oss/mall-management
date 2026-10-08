@@ -1,0 +1,30 @@
+
+[vw=1440] overlap=[] navOverflow={"sw":1425,"cw":1425,"over":false} outside=[]
+  left={"x":48,"y":12,"w":96,"h":35,"right":144} search={"x":168,"y":12,"w":420,"h":36,"right":588} btn={"x":524,"y":12,"w":64,"h":36,"right":588} right={"x":1169,"y":18,"w":208,"h":24,"right":1377}
+
+[vw=1366] overlap=[] navOverflow={"sw":1351,"cw":1351,"over":false} outside=[]
+  left={"x":48,"y":12,"w":96,"h":35,"right":144} search={"x":168,"y":12,"w":420,"h":36,"right":588} btn={"x":524,"y":12,"w":64,"h":36,"right":588} right={"x":1095,"y":18,"w":208,"h":24,"right":1303}
+
+[vw=1280] overlap=[] navOverflow={"sw":1265,"cw":1265,"over":false} outside=[]
+  left={"x":48,"y":12,"w":96,"h":35,"right":144} search={"x":168,"y":12,"w":420,"h":36,"right":588} btn={"x":524,"y":12,"w":64,"h":36,"right":588} right={"x":1009,"y":18,"w":208,"h":24,"right":1217}
+
+[vw=1152] overlap=[] navOverflow={"sw":1137,"cw":1137,"over":false} outside=[]
+  left={"x":48,"y":12,"w":96,"h":35,"right":144} search={"x":168,"y":12,"w":420,"h":36,"right":588} btn={"x":524,"y":12,"w":64,"h":36,"right":588} right={"x":881,"y":18,"w":208,"h":24,"right":1089}
+
+[vw=1024] overlap=[] navOverflow={"sw":1009,"cw":1009,"over":false} outside=[]
+  left={"x":48,"y":12,"w":96,"h":35,"right":144} search={"x":168,"y":12,"w":420,"h":36,"right":588} btn={"x":524,"y":12,"w":64,"h":36,"right":588} right={"x":753,"y":18,"w":208,"h":24,"right":961}
+
+[vw=900] overlap=[] navOverflow={"sw":885,"cw":885,"over":false} outside=[]
+  left={"x":48,"y":12,"w":96,"h":35,"right":144} search={"x":168,"y":12,"w":420,"h":36,"right":588} btn={"x":524,"y":12,"w":64,"h":36,"right":588} right={"x":629,"y":18,"w":208,"h":24,"right":837}
+
+[vw=800] overlap=[] navOverflow={"sw":785,"cw":785,"over":false} outside=[]
+  left={"x":48,"y":12,"w":96,"h":35,"right":144} search={"x":168,"y":12,"w":337,"h":36,"right":505} btn={"x":441,"y":12,"w":64,"h":36,"right":505} right={"x":529,"y":18,"w":208,"h":24,"right":737}
+
+[vw=700] overlap=[] navOverflow={"sw":685,"cw":685,"over":false} outside=[]
+  left={"x":48,"y":-5,"w":77,"h":70,"right":125} search={"x":149,"y":12,"w":298,"h":36,"right":447} btn={"x":383,"y":12,"w":64,"h":36,"right":447} right={"x":471,"y":6,"w":166,"h":48,"right":637}
+
+[vw=640] overlap=[] navOverflow={"sw":625,"cw":625,"over":false} outside=[]
+  left={"x":48,"y":-5,"w":58,"h":70,"right":106} search={"x":130,"y":12,"w":298,"h":36,"right":428} btn={"x":364,"y":12,"w":64,"h":36,"right":428} right={"x":452,"y":-18,"w":125,"h":96,"right":577}
+OK   无任何宽度下 nav-right 压住搜索框/左项  → "见上表"
+
+probe-top4b: 1 项 / 0 失败
