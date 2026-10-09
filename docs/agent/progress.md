@@ -1867,6 +1867,19 @@
 - ⚠️ **真后端 E2E 未重跑（挂账）**：本笔用 mock 探针验收；真后端上的「发送 → 顶栏红点 → 进页清点」链路
   此前由 I2 的 `probe-i2-e2e.mjs`（**两个入口**时代）13/13 覆盖过，**合并后尚未在真后端上重跑**
   （8088 是用户 IDEA 起的旧 class ⇒ 要验得先重启 8088）。谁复验谁补这一条。
+- 🔧 **CI 首跑红了一次 → 已定位并改门禁（2026-10-09 晚）**：PR 上三个 job 里**只有**
+  `A3 concurrency (120 QPS)` 红，且红在**负载段之前** —— 前置校验 `P3 表数` 报 `表数=15（期望 11 + 1）`，
+  随后「前置校验失败，未产生任何业务流量。退出码 2」。`Backend tests` / `Frontend build` 全绿；
+  后端 `app.log` 启动干净（唯一命中 `ERROR|Exception` 的行是 Hikari 的
+  `exceptionOverrideClassName......none`，一条 DEBUG）。
+  **真因不是库坏了**：`mall_management_sql.sql` 本笔新增 **3 张表**（`admin_audit` / `notification` /
+  `notification_template`）⇒ 12 → **15**，而 P3 的期望还停在「11 + `order_state_transition`」= 12。
+  ⇒ 改 `scripts/concurrency/ConcurrencyRunner.java` 的 P3：期望从「11 + 单张点名」改成「11 + **IN 清单**计数」，
+  并加一条「清单里那 4 张必须**真在**」（`known == KNOWN_TABLES`）—— 保住 TD-01 的原意
+  「**多出来的每一张都必须点过名**」，而不是把 12 硬改成 15。
+  `javac -encoding UTF-8` 本地编译**退出码 0**；算式对红那次的实测 `表数=15` = `15 == 11 + 4 && 4 == 4` ⇒ **PASS**
+  （「4 张全在」由红的那次**自己证过**：15 = 11 基线 + 1 时间线 + 本笔 3 张）。
+  红的证据落 `docs/agent/evidence/c3-ci-p3/a3-run-20261009-120224.txt`；登记见 `slot-registry.md §十七`。
 
 **路线**：C3 现行 = **8 块**，唯一权威 **`c3-blocks-index.md`**；§七 那份「10 批 + 按端切」**已作废**
 （见 `c3-modules.md` §十）。⚠️ 购物车的归属**已统一**为「**属批 4 订单块，随该块一起做**」

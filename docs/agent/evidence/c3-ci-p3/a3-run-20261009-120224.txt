@@ -1,0 +1,32 @@
+=== A3 并发测试 ===
+baseUrl        : http://127.0.0.1:8088
+jdbcUrl        : jdbc:mysql://127.0.0.1:3306/mall_management_sql?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai&characterEncoding=utf-8
+jdbcUser       : test
+jdbcPassword   : *******
+expectDbHost   : 127.0.0.1
+runId          : ci131
+namespace      : A3TEST-ci131…
+qps / duration : 120 / 30s
+rounds         : 5
+bGroupGate     : false  (仅影响 B-2)
+keepData       : false
+cleanupOnly    : false
+resetDb        : false
+negControl     : (已关闭)
+readyTimeout   : 180s  (P5)
+scenarios      : S1,S2a,S2b,S3,S4a,S4b,B2,C  (S4b 60s)
+reportDir      : scripts/concurrency/reports
+
+charset        : file.encoding=UTF-8  native.encoding=UTF-8  stdout/stderr=强制 UTF-8（见 forceUtf8Output）
+                 启动方式=两步编译（javac -encoding UTF-8 + java -cp <out>…）  源码字面量自检=PASS（中文串未被字符集损坏）
+--- 前置校验 ---
+  P0  PASS 13 列逐列比对通过；余量最小 goodstype.GoodType 16/20（余 4）
+  P2  PASS 实际主机=127.0.0.1 期望主机=127.0.0.1
+  P1  PASS DATABASE()=mall_management_sql（TD-13 要求 mall_management_sql ✓）；VERSION()=8.4.11（S0-5 要求 8.4.x ✓）
+  P3  FAIL 表数=15（期望 11 + 1；order_state_transition 在）
+  P4  PASS order=6 goods=5 login=5 user=5 friend=4
+  P5  SKIP JDBC 侧前置未过，未做 HTTP 侧校验
+  P6  SKIP 同上
+  P7  SKIP 同上
+
+前置校验失败，未产生任何业务流量。退出码 2。

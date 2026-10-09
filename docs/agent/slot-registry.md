@@ -3697,3 +3697,56 @@ URL 是**同文档导航** —— 浏览器不重建文档 ⇒ 应用**不重跑
   该文件是**只读查询证据**、不被任何构建/测试引用 ⇒ 脱敏零功能损失；除这一处，文件逐字保持当时所跑的样子
   （类注释里已写明「填回环境值即可跑」）。⚠️ 其余证据文件**未**脱敏 —— 它们不含有口令类字符串
   （已按 `test123|123@admin|123456|password|pwd[=:]` 全量扫过）。
+
+---
+
+## §十七　C3 块 1 的 CI 收口 —— P3 表数门禁认识新表（2026-10-09 晚）
+
+### 17-1　红在哪
+
+PR 上三个 job，红的**只有一个**：`A3 concurrency (120 QPS)`，且红在**负载段之前** —— 前置校验 P3 报
+`表数=15（期望 11 + 1）`，随后「前置校验失败，未产生任何业务流量。退出码 2」。
+`Backend tests` / `Frontend build` 两个 job 全绿；后端 `app.log` 启动干净（唯一命中 `ERROR|Exception`
+的行是 Hikari 的 `exceptionOverrideClassName......none`，一条 DEBUG，不是故障）。
+
+**证据（已落本地）**：`docs/agent/evidence/c3-ci-p3/a3-run-20261009-120224.txt` —— A3 自己那份报告的完整副本
+（取证手法：`gh run download <run> -D _work/…` 拉 artifact，再拷进证据目录；**不引 run number**）。
+
+### 17-2　真因
+
+不是库坏了，是**门禁的期望值没跟上**：`mall_management_sql.sql` 本笔新增 **3 张表**
+（`admin_audit` ＋ `notification` ＋ `notification_template`）⇒ 12 → **15**，而 P3 的期望一直是
+「11 基线 ＋ `order_state_transition`」＝ 12。
+
+⚠️ **这条只有 CI 会先撞上**：判据是「表数 == 11 + 时间线表」，本地 / VM 上单张表加进去也能跑，
+但 CI 是**整份导入 `.sql`** ⇒ 本笔那 3 张必然出现在 CI 的库里。换句话说，**新增表一定会撞这个门禁**，
+而它撞得**正是时候** —— 在负载段之前拦下，没白烧那 5 分钟并发。
+
+### 17-3　怎么改（`scripts/concurrency/ConcurrencyRunner.java`）
+
+判据由「11 + 单张点名」改成「11 + **IN 清单**计数」，并**加一条**「清单里那几张必须真在」：
+
+| | 改前 | 改后 |
+|---|---|---|
+| 计数 | `LOWER(table_name) = 'order_state_transition'` | `LOWER(table_name) IN ('order_state_transition','admin_audit','notification','notification_template')` |
+| 判据 | `tables == 11 + timelineTable` | `tables == 11 + known && known == KNOWN_TABLES`（`KNOWN_TABLES = 4`） |
+
+**为什么不简单把 12 改成 15**：原注释自己写着「刻意不写死总数…但**多出来的那一张必须是它**」——
+TD-01 的防线语义是「**多出来的每一张都必须点过名**」，不是「总数凑上」。故清单必须**具名**；
+`known == KNOWN_TABLES` 那一半再补「点过名的必须真在」（否则「缺一张已知表 ＋ 多一张野表」会让总数凑巧相等）。
+
+⛔ **没做**：没动 `--reset-db` 用法串里那句陈旧文案（「DROP 11 张 —— 12 张中除…」）—— 它已在
+`defect-survey.md:34` 在册，改它属另一笔。
+
+### 17-4　顺带更正同文件内两处文案（**只改字、不动行号**）
+
+`:1376` 与 `:1876` 原写「表数 ≠ 11 + 1」「表数 = 11 + timelineTable」，随判据改成「已知追加表」表述 ——
+这两处是在**同一文件内**被其他注释按语义引的，不改就是错的。
+
+### 17-5　验证与漂移
+
+- `javac -encoding UTF-8 -d _work/a3out scripts/concurrency/ConcurrencyRunner.java` ⇒ **退出码 0**（本地）。
+- 门禁算式对红那次实测的 `表数=15`：`15 == 11 + 4 && 4 == 4` ⇒ **PASS**。「4 张全在」**不必另证** ——
+  红的那次自己给了：15 ＝ 11 基线 ＋ `order_state_transition` ＋ 本笔 3 张。
+- **零漂移**：本文件被文档按行号引**最多到 `:2521`**，而本次改动**全部落在 `:2637` 之后**（净增 5 行）；
+  `:1376` / `:1876` 两处是**同行替换**（行号不动）⇒ **文档里的行号引用一个都不用改**。

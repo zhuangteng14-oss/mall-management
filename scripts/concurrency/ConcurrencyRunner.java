@@ -1373,7 +1373,7 @@ public class ConcurrencyRunner {
      *
      * <p>保留 gate=false 的**原有理由已随升门禁失效**：曾担心「DDL 未落盘时 C 组必然报错，
      * 那是『没跑成』不是『跑出来有问题』，若用 {@link #guard} 的 gate=true 就会让一个非门禁
-     * 场景把 CI 弄红」。该情形现由 P3 在负载段之前拦下（表数 ≠ 11 + 1 ⇒ 退出码 2）。
+     * 场景把 CI 弄红」。该情形现由 P3 在负载段之前拦下（表数 ≠ 11 + 已知追加表 ⇒ 退出码 2）。
      */
     static void guardSoft(String name, Body b) {
         try {
@@ -1873,7 +1873,7 @@ public class ConcurrencyRunner {
      * 追加，DDL 未落盘时本组必然 FAIL —— 那是『没跑成』，不是『跑出来有问题』」。2026-09-30 升为
      * 门禁，因为该理由的两半都已不成立：
      * <ul>
-     *   <li>P3 已断言「表数 = 11 + timelineTable」，表缺失在<b>负载段之前</b>就以退出码 2 拦下
+     *   <li>P3 已断言「表数 = 11 + 已知追加表数」，表缺失在<b>负载段之前</b>就以退出码 2 拦下
      *       ⇒ 「DDL 未落盘」不可能再伪装成 C 组 FAIL；</li>
      *   <li>本组已在 VM 上首次真跑并全绿（run-id pre3l-b），不再有「从未验证过」的未知。</li>
      * </ul>
@@ -2637,22 +2637,26 @@ public class ConcurrencyRunner {
             // P3 表数（兼 TD-01 校验：启动后未反向改表）
             // ⚠️ 2026-10-04 起 ddl-auto 已由 update 改为 validate（TD-01 B 方案），
             // 本校验的判据不变 —— 从「查 update 没乱改表」变成「查 validate 没乱改表」。
-            // 期望 11 张基线表；若 order_state_transition 已在（B3 新增，追加在
-            // mall_management_sql.sql 末尾、人工落盘），则期望 12。
-            // 刻意不写死 12：运行器与那份 SQL 是两笔改动，谁先落都要能跑。
-            // 但**多出来的那一张必须是它** —— 否则「12」只是「多了一张表」，
-            // 正是 TD-01 要抓的反向改表（update 模式下按实体反向建出来的表；
-            // 现已是 validate，此判据保留为回归防线 —— 将来谁再改回 update 就会命中）。
+            // 期望 = 11 张基线表 + **已知追加表**；已知追加表在涨：B3 的 order_state_transition（1 张）、
+            // C3 块 1（2026-10-09）的 admin_audit / notification / notification_template（3 张）—— 四张同在
+            // mall_management_sql.sql 末尾的 Migration 块、人工落盘（见 db-schema.md「表数量：15」）。
+            // 刻意不写死总数：运行器与那份 SQL 是两笔改动，谁先落都要能跑。但**多出来的每一张都必须点过名**
+            // （下面的 IN 清单），且清单里那几张必须**真在**（`known == KNOWN_TABLES` 那一半）—— 否则
+            // 「表数对上」只是「多了几张没登记的表」，正是 TD-01 要抓的反向改表（update 模式下按实体
+            // 反向建出来的表；现已是 validate，此判据保留为回归防线 —— 将来谁再改回 update 就会命中）。
             // 名字比较套 LOWER()：Linux 上表名区分大小写（lower_case_table_names=0），
             // 而 information_schema 的排序规则各版本不一致，归一化后两端都成立。
             int tables = scalarInt(c,
                     "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = DATABASE()");
-            int timelineTable = scalarInt(c,
+            int known = scalarInt(c,
                     "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = DATABASE() "
-                  + "AND LOWER(table_name) = 'order_state_transition'");
-            boolean p3 = tables == 11 + timelineTable;
-            pre.put("P3", (p3 ? "PASS" : "FAIL") + " 表数=" + tables + "（期望 11 + " + timelineTable
-                    + "；order_state_transition " + (timelineTable == 1 ? "在" : "不在") + "）");
+                  + "AND LOWER(table_name) IN ('order_state_transition','admin_audit','notification',"
+                  + "'notification_template')");
+            final int KNOWN_TABLES = 4;   // = 上面 IN 清单的长度（加表时**两处同改**）
+            boolean p3 = tables == 11 + known && known == KNOWN_TABLES;
+            pre.put("P3", (p3 ? "PASS" : "FAIL") + " 表数=" + tables + "；已知追加表 order_state_transition /"
+                    + " admin_audit / notification / notification_template 在 " + known + "/" + KNOWN_TABLES
+                    + " 张（期望表数 = 11 + " + KNOWN_TABLES + " = " + (11 + KNOWN_TABLES) + "）");
 
             // P4 种子计数：确认是刚导入过的干净实例，而非被上一轮污染过的库
             String seedSql = "SELECT "
