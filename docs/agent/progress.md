@@ -1952,6 +1952,10 @@
   并纠正 `UserService` javadoc 一处错述 + 标注 `:317` 那支**本就不可达**（既有）。**四个改动文件全部零行号漂移。**
   🧪 `npm run build` **DONE**（Hash `557c5bf852801885`）；`git diff --numstat` = `auth.js 20/0 · main-admin.js 14/1 ·
   LoginPage.vue 2/2 · UserService.java 2/2`。**待用户重启 8088 手验。**
+- 📦 **块 2 收口（2026-10-10）**：上述 §18-9 + §18-10 全部改动 **commit `a224840`** 并 **push 到 PR #83**
+  （`feat/c3-admin` → `main`；PR 上共 **2 个提交** = `f8f67d6` + `a224840`；35 文件 / +930 −159）。
+  7 个 `docs/美化/_dbg*.mjs` 按仓规**不入库**。**混合 PR ⇒ 由用户 merge**；CI 两个 job 已起，待用户看 CI + A3 产物后点 merge。
+  ⇒ merge 后切 `feat/c3-admin-block3`，**块 3 明天开**。
 
 **路线**：C3 现行 = **8 块**，唯一权威 **`c3-blocks-index.md`**；§七 那份「10 批 + 按端切」**已作废**
 （见 `c3-modules.md` §十）。⚠️ 购物车的归属**已统一**为「**属批 4 订单块，随该块一起做**」
