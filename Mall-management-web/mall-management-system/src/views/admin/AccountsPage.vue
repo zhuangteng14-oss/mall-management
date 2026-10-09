@@ -25,7 +25,28 @@
 
     <p v-if="flash.text" class="a-flash" :class="flash.kind">{{ flash.text }}</p>
 
-    <!-- ══ ② 商家入驻审核 ═══════════════════════════════════════════════════ -->
+    <!-- ── 页内 tab（补丁 B1，2026-10-09 手验后）────────────────────────────────
+         用户裁决「甲案」：本页三块用**页内 tab** 切分，**不**拆成三个地址 —— 拆了会让管理员
+         在三个地址之间来回跳，而这三块同属「这个账号现在是什么身份、能不能继续当」一个域。
+         ⚠️ 原先的第 ⑤ 块（管理员收件箱）**已提到侧边栏顶层独立项**（`/admin/inbox`）：
+         它跟前三块**不同域**（是「发给管理员的待办」，不是「治理某个账号」），
+         见 `config/admin-nav.js` 与 `router/index.js` 各一条按语。
+         📌 **规范**：`docs/agent/c3-modules.md` §五「子项页含多块 ⇒ 页内 tab，tab 数 2–4 个」。 -->
+    <nav class="a-tabs">
+      <button
+        v-for="t in TABS"
+        :key="t.key"
+        type="button"
+        class="a-tab"
+        :class="{ on: tab === t.key }"
+        @click="tab = t.key"
+      >
+        {{ t.label }}<span class="a-tabn">{{ t.note() }}</span>
+      </button>
+    </nav>
+
+    <!-- ══ ② 商家入驻审核（tab 一）═════════════════════════════════════════════ -->
+    <template v-if="tab === 'apps'">
     <h2 class="a-h2">商家入驻审核 <span class="a-h2n">通过 = 客户升级为商家（`user.usertype` + `login.Role` 同事务改）</span></h2>
 
     <form class="a-filters" @submit.prevent="loadApps">
@@ -97,7 +118,10 @@
       已截断：按上限 <b>{{ appsLimit }}</b> 条显示，共命中 <b>{{ appsTotal }}</b> 条。
     </p>
 
-    <!-- ══ ③ 用户治理 ═══════════════════════════════════════════════════════ -->
+    </template>
+
+    <!-- ══ ③ 用户治理（tab 二）═════════════════════════════════════════════ -->
+    <template v-else-if="tab === 'users'">
     <h2 class="a-h2">用户治理 <span class="a-h2n">封禁只标 `user` 行、不动 `login`（封禁是状态，不是删除）</span></h2>
 
     <form class="a-filters" @submit.prevent="loadUsers">
@@ -176,7 +200,10 @@
       已截断：按上限 <b>{{ usersLimit }}</b> 条显示，共命中 <b>{{ usersTotal }}</b> 条 —— 收窄关键字，或把上限调大。
     </p>
 
-    <!-- ══ ④ 商家降级控制 ═══════════════════════════════════════════════════ -->
+    </template>
+
+    <!-- ══ ④ 商家降级控制（tab 三）═════════════════════════════════════════ -->
+    <template v-else>
     <h2 class="a-h2">商家降级控制 <span class="a-h2n">排定 → 通知期（1 天）→ 冻结 → 解冻恢复 / 重新申请</span></h2>
 
     <form class="a-filters" @submit.prevent="scheduleDowngrade">
@@ -189,26 +216,77 @@
         <input v-model.trim="df.reason" type="text" placeholder="会写进 user.DowngradeReason，商家看得到" />
       </label>
       <div class="a-f-actions">
-        <button type="submit" class="a-btn a-btn-danger" :disabled="busy">排定降级</button>
+        <button
+          type="submit"
+          class="a-btn a-btn-danger"
+          :disabled="busy || !!dfBlocked"
+          :title="dfBlocked ? '已发送过降级请求，请于用户治理模块查看' : ''"
+        >
+          排定降级
+        </button>
         <button type="button" class="a-btn" :disabled="busy" @click="cancelDowngrade">撤销排定</button>
         <button type="button" class="a-btn" :disabled="busy" @click="relistMerchant">人工恢复</button>
       </div>
     </form>
+    <!-- 补丁 A3 前端：这个账号**目前**已有降级标记 ⇒ 排定降级按钮 disabled 并就地说明原因。
+         判据来自「用户治理」页已拉到的 users 行（本页 tab 二），不是新请求 —— 见 `dfBlocked`。 -->
+    <p v-if="dfBlocked" class="a-blocked">{{ dfBlockMsg }}</p>
     <p class="a-hint">
       ⚠️ <b>排定 ≠ 立刻降级</b>：通知期内商家照常经营，只在 <code>/user/me</code> 上多一个 `scheduled` 态；
       到点由后端 <code>@Scheduled</code> 冻结（<b>本页不轮询那一步</b>）。<br />
-      ⚠️ <b>撤销排定</b>与<b>人工恢复</b>是两条不同的路：前者治「通知期内反悔」，后者治「已经冻结了、窗口内想回来」。
+      ⚠️ <b>撤销排定</b>与<b>人工恢复</b>是两条不同的路：前者治「通知期内反悔」，后者治「已经冻结了、窗口内想回来」。<br />
+      ⚠️ <b>同一个降级只能排定一次</b>（补丁 A3，后端 CAS）：重复点击会在下方红字里被拦下，<b>不会</b>再排一次、也不会再发一条通知。
     </p>
 
-    <!-- ══ ⑤ 管理员收件箱（共享） ═══════════════════════════════════════════
-         `NotifyInbox.vue` 的**第三个实例**（另两个在客户 / 商家壳里）—— 它按 `route.path`
-         派生收件人，落在 `/admin/**` 下即自动取 `ToType='admin'` / `ToId='*'`
-         （`MerchantApplicationController.ADMIN_INBOX_ID`），见该文件 `:99-103`。
-         ⚠️ 不新增 props：那会插行、撞 `MessageCenter.vue:35` 对 `:99-103` 的引用。 -->
-    <h2 class="a-h2">管理员收件箱 <span class="a-h2n">ToType=admin · ToId=* · 全仓管理员共用一个</span></h2>
-    <div class="a-inbox">
-      <NotifyInbox />
-    </div>
+    <!-- ══ 降级态清单（补丁 A3 的前端落点）══════════════════════════════════
+         为什么非要有这一段：上面的表单是**盲填用户名**的 —— 管理员看不见「这个账号现在到底排定没
+         排定」。而那份信息只有「用户治理」页（tab 二）拉到的行里才有（`user.DowngradeState` 等四列）
+         ⇒ 把带标记的行在这里列出来，且每行的「排定降级」**恒为 disabled**：
+         同一次降级不能排第二遍（这正是补丁 A3 要防的、也是 A4 那 14 条刷屏的根因）。 -->
+    <h3 class="a-h3">
+      当前有降级标记的账号
+      <span class="a-h3n">来自「用户治理」页已拉到的 {{ users.length }} 行 ⇒ 共 {{ dgUsers.length }} 个</span>
+    </h3>
+    <ol v-if="dgUsers.length" class="a-stream">
+      <li v-for="u in dgUsers" :key="u.username" class="a-card">
+        <div class="a-card-l1">
+          <b class="a-strong">{{ u.username }}</b>
+          <span class="a-badge warn">{{ dgOf(u) }}</span>
+          <span class="a-grow"></span>
+          <span class="a-dim">{{ idsOf(u) }}</span>
+        </div>
+        <p v-if="u.DowngradeReason" class="a-why">降级原因：{{ u.DowngradeReason }}</p>
+        <p v-if="dgTimeOf(u)" class="a-why">{{ dgTimeOf(u) }}</p>
+        <div class="a-acts">
+          <button
+            type="button"
+            class="a-btn a-btn-danger"
+            disabled
+            title="已发送过降级请求，请于用户治理模块查看"
+          >
+            排定降级
+          </button>
+          <button
+            v-if="u.DowngradeState === 'scheduled'"
+            type="button"
+            class="a-btn"
+            :disabled="busy"
+            @click="cancelFor(u)"
+          >
+            撤销排定
+          </button>
+          <button v-else type="button" class="a-btn" :disabled="busy" @click="relistFor(u)">人工恢复</button>
+        </div>
+      </li>
+    </ol>
+    <p v-else-if="!loadingUsers" class="a-empty">
+      当前没有处于「已排定」或「已冻结」的账号 —— 先去「用户治理」tab 拉一次用户列表。
+    </p>
+    <p v-if="dgTruncated" class="a-note">
+      上面的清单只覆盖<b>已拉到</b>的 {{ users.length }} 行（共命中 {{ usersTotal }} 行）——
+      还有账号没列出来，去「用户治理」tab 收窄关键字再查。
+    </p>
+    </template>
   </section>
 </template>
 
@@ -222,12 +300,24 @@
     · `/admin/accounts/users` · `user/ban` · `user/unban`                  —— 用户治理（`UserGovernanceService`）
     · `/admin/accounts/applications` · `application/audit`                —— 入驻审核（`MerchantApplicationService`）
     · `/admin/accounts/downgrade/schedule` · `cancel` · `relist`          —— 降级控制（`MerchantDowngradeService`）
-    外加 `NotifyInbox` 自己调的 `/notification/*`（管理员共享收件箱）。
   全部经 `api/accounts.js` 包一层 —— 本页**不直接**碰 `http`。
 
-  【为什么这四段挤在一页】用户 2026-10-09 裁决：三端一起设计、一起落；「用户治理 / 商家审核 /
-  降级」在**同一个域**（都是「这个账号现在是什么身份、能不能继续当」），拆成三页会让管理员
-  在三个地址之间来回跳。页内用 `<h2>` 分段，不引入二级路由。
+  【⚠️ 补丁 B1（2026-10-09 手验后）：结构变了，注释随之改】
+  原先这页是**四块靠滚动区分**（入驻审核 / 用户治理 / 降级控制 / 管理员收件箱），用户裁决「甲案」：
+    · 前三块 ⇒ **页内 tab**（`[入驻审核] [用户治理] [降级控制]`）。它们同属一个域（「这个账号
+      现在是什么身份、能不能继续当」），**不**拆成三个地址 —— 拆了管理员要在三个地址之间来回跳。
+    · 第 ④ 块（管理员收件箱）⇒ **移出本页**，成侧边栏**顶层独立项** `/admin/inbox`：它是「发给管理员的
+      待办」，与治理某个账号**不同域**。`NotifyInbox.vue` 按 `route.path` 派生收件人，挂在 `/admin/**`
+      下自动取 `ToType='admin'` / `ToId='*'` ⇒ **组件一行未改**。
+    · ⇒ 本页**不再** import `NotifyInbox`、不再有 `.a-inbox` 样式。
+  规范成文于 `docs/agent/c3-modules.md` §五：「子项页含多块 ⇒ 页内 tab，tab 数 2–4 个」。
+
+  【补丁 A3（同一降级只能排定一次）在本页的落点】「降级控制」tab 里，
+    （a）表单的「排定降级」按钮在该账号已有降级标记时 disabled + 红字（`dfBlocked` / `dfBlockMsg`）；
+    （b）新增「当前有降级标记的账号」清单，每行的「排定降级」**恒 disabled** 并写明去向，
+        可按状态就地「撤销排定」（scheduled）或「人工恢复」（frozen）。
+  判据**不新请求**：取自「用户治理」tab 已拉到的 `users` 行（`DowngradeState` / `DowngradeReason` /
+  `ScheduledDowngradeAt` / `FrozenAt`）。后端的 CAS 才是真闸，前端这层只是**别让人白点**。
 
   【视觉】照 `c3-modules.md` §五 与 `AuditPage.vue`：数字→状态（顶部三个大数）、列表→卡片式叙事
   （不是宽表）、危险动作用 `--danger` 系、状态用 `--warning` / `--danger` / `--success` 三族。
@@ -239,7 +329,6 @@
 -->
 <script setup>
 import { computed, onMounted, reactive, ref } from 'vue'
-import NotifyInbox from '../NotifyInbox.vue'
 import {
   accountsApplications,
   accountsAudit,
@@ -274,6 +363,17 @@ function toLocal(sqlTime) {
 }
 
 const dash = (v) => (v === null || v === undefined || String(v).trim() === '' ? '—' : String(v))
+
+// ── 页内 tab（补丁 B1）───────────────────────────────────────────────────────
+// ⚠️ `note()` 是**函数**不是字符串：`pendingCount` / `users` / `dgUsers` 都在下面才声明
+//    （`const` 有 TDZ），写成字符串会在模块求值期就炸；写成函数则只在**渲染时**求值，安全。
+// ⚠️ 三个 tab 的**顺序**就是「事情的自然顺序」：先审入驻 → 再管账号 → 最后才是降级。
+const tab = ref('apps')
+const TABS = [
+  { key: 'apps', label: '入驻审核', note: () => `${pendingCount.value} 待审` },
+  { key: 'users', label: '用户治理', note: () => `${users.value.length} 行` },
+  { key: 'dg', label: '降级控制', note: () => `${dgUsers.value.length} 个带标记` },
+]
 
 // ── 反馈 ─────────────────────────────────────────────────────────────────────
 /** 一次性提示条。`kind` 只有 `'ok'` / `'bad'` 两种（CSS 也只需这两支）。 */
@@ -410,7 +510,7 @@ const bannedCount = computed(() => users.value.filter(isBanned).length)
  */
 function isBanned(u) {
   const v = u && u.banned
-  return v === true || v === 1 || v === '1'
+  return v === true || v === 1 || v === '1' || v === 'true'
 }
 
 /** 降级态的中文标签；`none` / 空 ⇒ 不画那枚徽章。 */
@@ -504,10 +604,64 @@ async function unban(u) {
 const df = reactive({ username: '', reason: '' })
 const busy = ref(false)
 
+/**
+ * 已排定 / 已冻结的账号清单（补丁 A3 前端）。
+ * ⚠️ 判据**不新发请求** —— 复用「用户治理」tab 已拉到的 `users`。理由：那份列表本来就带着
+ *    `DowngradeState` 四列，再打一次接口只会让两个 tab 的数字**互相打架**（同一个时刻两个真值）。
+ * ⚠️ 代价写明：`users` 只有 100 行（上限）⇒ 清单也是「这 100 行里有降级标记的」。
+ *    完整清单要以「用户治理」页的查询为准，页头上那行小字已如实标出这一点。
+ */
+const dgUsers = computed(() => users.value.filter((u) => dgOf(u) !== ''))
+const dgTruncated = computed(() => usersTruncated.value)
+
+/** 降级态里那两个时间列的中文说法（`scheduled` 看「何时生效」，`frozen` 看「何时冻的」）。 */
+function dgTimeOf(u) {
+  if (u.DowngradeState === 'scheduled') {
+    return u.ScheduledDowngradeAt ? `生效时刻 ${toLocal(u.ScheduledDowngradeAt)}` : ''
+  }
+  if (u.DowngradeState === 'frozen') {
+    return u.FrozenAt ? `冻结于 ${toLocal(u.FrozenAt)}` : ''
+  }
+  return ''
+}
+
+/**
+ * 表单里那个用户名**当前**的降级态。⚠️ 只会从**已拉到**的行里找：找不到（还没点过「查询」、
+ * 或该用户不在这一页）就当作「不知道」⇒ **不拦** —— 前端拦不住的事后端 CAS 一定拦得住，
+ * 反过来「因为不知道就禁用按钮」会让人根本没法排定降级。**宁可放行让人撞一次红字。**
+ */
+const dfUser = computed(() => {
+  if (!df.username) return null
+  return users.value.find((u) => u.username === df.username) || null
+})
+const dfState = computed(() => (dfUser.value && dfUser.value.DowngradeState) || '')
+const dfBlocked = computed(() => dfState.value === 'scheduled' || dfState.value === 'frozen')
+/** 文案按 `outcome` 挑，**不按 `msg` 做字符串匹配**（后端 `MerchantDowngradeService` 的成文口径）。 */
+const dfBlockMsg = computed(() => {
+  if (dfState.value === 'frozen') {
+    return `${df.username} 已处于降级冻结状态 —— 无需再次排定；要恢复请用「人工恢复」。`
+  }
+  if (dfState.value === 'scheduled') {
+    return `${df.username} 已发送过降级请求，请于用户治理模块查看。`
+  }
+  return ''
+})
+
 /** 从用户行「带过去」到降级表单 —— 少一次手打用户名的机会（也就少一次打错人的机会）。 */
 function pickDowngrade(username) {
   df.username = username
-  say('ok', `已把 ${username} 填进下方的降级表单。`)
+  tab.value = 'dg'   // 补丁 B1：表单在**另一个 tab** 里，不过去就等于「点了没反应」
+  say('ok', `已把 ${username} 填进「降级控制」页的降级表单。`)
+}
+
+/** 清单里就地「撤销排定」/「人工恢复」—— 先把它填进表单，再走**同一条**函数（不复制逻辑）。 */
+async function cancelFor(u) {
+  df.username = u.username
+  await cancelDowngrade()
+}
+async function relistFor(u) {
+  df.username = u.username
+  await relistMerchant()
 }
 
 async function scheduleDowngrade() {
@@ -519,6 +673,17 @@ async function scheduleDowngrade() {
   try {
     const data = await downgradeSchedule({ username: df.username, reason: df.reason })
     if (!data || !data.success) {
+      // ⚠️ 补丁 A3：这两种 **不是**「失败」，是「拦下了」—— 后端 CAS 命中 0 行。
+      //    按 `outcome` 分别说（成文口径：前端挑文案看 `outcome`，不匹配 `msg` 字符串）。
+      //    走这两支时后端**没有**发通知（`success:false` ⇒ Controller 的发送块进不去）⇒ A4 的刷屏根治。
+      if (data && data.outcome === 'already-scheduled') {
+        say('bad', '已发送过降级请求，请于用户治理模块查看。')
+        return
+      }
+      if (data && data.outcome === 'already-frozen') {
+        say('bad', '该账号已处于降级冻结状态，无需再次排定 —— 要恢复请用「人工恢复」。')
+        return
+      }
       say('bad', (data && data.msg) || '排定失败')
       return
     }
@@ -541,6 +706,12 @@ async function cancelDowngrade() {
   try {
     const data = await downgradeCancel({ username: df.username })
     if (!data || !data.success) {
+      // ⚠️ 补丁 A3 附带：对**已冻结**的账号「撤销排定」被后端拒（那条路叫「人工恢复」）。
+      //    这里只是把后端的话说成同一句 —— 拦住的是状态机，不是这个按钮。
+      if (data && data.outcome === 'already-frozen') {
+        say('bad', '该账号已处于降级冻结状态，不能用「撤销排定」—— 请走「人工恢复」。')
+        return
+      }
       say('bad', (data && data.msg) || '撤销失败')
       return
     }
@@ -911,18 +1082,63 @@ onMounted(() => {
   padding: var(--s2) var(--s3);
 }
 
-/* ── ⑤ 管理员收件箱：把 `NotifyInbox` 自己的页壳（1180 居中 + 大内距）中和掉 ──
-   ⚠️ 用 `:deep()` 而不是改那个组件：它的 `.notify-room` 是**页面级**根（客户 / 商家壳里
-   它是独立一页），拆掉会把那两处一起改坏。嵌在这里只需要「不再是一页」。 */
-.a-inbox {
-  margin-top: var(--s3);
+/* ── 页内 tab（补丁 B1）────────────────────────────────────────────────────
+   ⚠️ 用的是**下划线**（`border-bottom` 当前项变色），不是 `tokens.css` 房规里禁的
+   「选中态用左侧强调条」。四个域页面各有一套 tab 时也不许各造各的 —— 本套是第一个，
+   后续页照抄（`c3-modules.md` §五）。 */
+.a-tabs {
+  display: flex;
+  gap: var(--s2);
+  border-bottom: 1px solid var(--line);
+  margin-bottom: var(--s5);
 }
-.a-inbox :deep(.notify-room) {
-  max-width: none;
-  margin: 0;
-  padding: 0;
+.a-tab {
+  appearance: none;
+  border: 0;
+  background: none;
+  cursor: pointer;
+  padding: var(--s3) var(--s4);
+  font: inherit;
+  font-size: var(--fs-sm);
+  color: var(--ink-3);
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
 }
-.a-inbox :deep(.nhead h1) {
-  font-size: var(--fs-lg);
+.a-tab:hover {
+  color: var(--ink);
+}
+.a-tab.on {
+  color: var(--ink);
+  font-weight: var(--fw-semi);
+  border-bottom-color: var(--brand-ink);
+}
+.a-tabn {
+  margin-left: var(--s2);
+  font-size: var(--fs-xs);
+  color: var(--ink-3);
+}
+.a-tab.on .a-tabn {
+  color: var(--brand-ink);
+}
+
+/* ── 三级标题（降级态清单）—— 它是 tab 内的**小节**，比 `.a-h2` 低一级 ───── */
+.a-h3 {
+  font-size: var(--fs-md);
+  font-weight: var(--fw-semi);
+  color: var(--ink);
+  margin: var(--s5) 0 var(--s3);
+}
+.a-h3n {
+  margin-left: var(--s2);
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-reg);
+  color: var(--ink-3);
+}
+
+/* ── 被拦下的排定（补丁 A3）：**红字**，且比 flash 更轻 —— 它不随时间消失 ── */
+.a-blocked {
+  font-size: var(--fs-sm);
+  color: var(--danger);
+  margin: var(--s3) 0 0;
 }
 </style>

@@ -1,6 +1,7 @@
 package com.minke.mallmanagement.merchant.service;
 
 import com.minke.mallmanagement.goods.dao.GoodsShelfDao;
+import com.minke.mallmanagement.merchant.DowngradeStates;
 import com.minke.mallmanagement.user.dao.UserGovernanceDao;
 import com.minke.mallmanagement.user.service.UserCacheService;
 import org.slf4j.Logger;
@@ -75,6 +76,16 @@ public class MerchantDowngradeService {
      * 发起降级（{@code scheduled}）。{@code reason} **必填** —— 它会写进
      * {@code DowngradeReason}，而那一列是**给商家看的**（降级通知正文里就带着它，
      * 见用户裁决「DowngradeReason：保留，不剥」）。故不许留空。
+     *
+     * <h2>【⚠️ 补丁 A3：同一账号同一次降级**只排定一次**（CAS）】</h2>
+     * CAS 落在 {@code UserGovernanceDao.markScheduled} 的 {@code AND DowngradeState = 'none'} 上
+     * —— 判据必须**在数据库里**（先 SELECT 再 UPDATE 会让两个并发的管理员都看到 {@code none}，
+     * 同 {@code MerchantApplicationDao} 的 CAS 论证）。{@code 0} 行**不等于失败**，也不等于
+     * 「用户不存在」：要再读一次状态才说得清（账号不存在 / 已排定 / 已冻结）。
+     *
+     * <p>⚠️ 这一条同时是**补丁 A4 的根因修法**：重复点击旧写法会 N 次写库 + N 条通知
+     * （实测一次降级刷了 14 条）。CAS 之后，重复点击**根本走不到 Controller 的通知那一步**
+     * （见 {@link #scheduleMiss} 为什么一律回 {@code success:false}）。
      */
     public Map<String, Object> schedule(String targetUsername, String reason) {
         Map<String, Object> result = new HashMap<>();
@@ -92,9 +103,7 @@ public class MerchantDowngradeService {
         LocalDateTime dueAt = now.plusDays(NOTICE_DAYS);
         int affected = userGovernanceDao.markScheduled(targetUsername, reason, dueAt);
         if (affected == 0) {
-            result.put("success", false);
-            result.put("msg", "用户不存在");
-            return result;
+            return scheduleMiss(targetUsername);   // 见方法注释：0 行有三种原因
         }
         result.put("success", true);
         result.put("username", targetUsername);
@@ -102,12 +111,62 @@ public class MerchantDowngradeService {
         return result;
     }
 
-    /** 取消已排定的降级（仅 {@code scheduled} 有意义；对 {@code none} 是幂等空操作）。 */
+    /**
+     * CAS 未命中（{@code markScheduled} 影响 0 行）时的**分诊** —— 补丁 A3。
+     * 三种原因必须**读一次状态**才分得开，靠猜会把「已排定」错报成「用户不存在」。
+     *
+     * <p>⚠️ <b>三个分支一律 {@code success:false}，与 {@code MerchantApplicationService.audit}
+     * 的 {@code already-handled}（那里答 {@code success:true}）有意不同</b>：
+     * {@code AdminAccountsController.scheduleDowngrade} 在成功分支里**发通知 + 写审计**，
+     * 而它只认 {@code success:true} —— 用 {@code false} 就**结构性地**不可能重复发通知
+     * （那正是补丁 A4 要的），不必再在 Controller 里加一条 {@code outcome} 白名单
+     * （白名单是将来最容易漏的地方）。代价：与 audit 那处不一致，故**写在这里**。
+     *
+     * <p>{@code outcome} 仍然给，供前端把「已排定」与「已冻结」分开说（前端按它挑文案，
+     * 不按 {@code msg} 做字符串匹配）。
+     */
+    private Map<String, Object> scheduleMiss(String targetUsername) {
+        Map<String, Object> result = new HashMap<>();
+        Map<String, Object> row = userGovernanceDao.selectDowngradeRow(targetUsername);
+        if (row == null) {
+            result.put("success", false);
+            result.put("msg", "用户不存在");
+            return result;
+        }
+        String state = str(row.get("DowngradeState"));
+        result.put("username", targetUsername);
+        result.put("state", state);
+        if (DowngradeStates.FROZEN.equals(state)) {
+            result.put("success", false);
+            result.put("outcome", "already-frozen");
+            result.put("msg", "该账号已处于降级冻结状态，无需再次排定");
+            return result;
+        }
+        // 余下：scheduled（同一账号重复点击，A3 的主场景）/ 状态落在两者之外（不猜，按已排定说）
+        result.put("success", false);
+        result.put("outcome", "already-scheduled");
+        result.put("msg", "已发送过降级请求，请于用户治理模块查看");
+        return result;
+    }
+
+    /** 取消已排定的降级（仅 {@code scheduled} 有意义；对 {@code none} 是幂等空操作）。
+     *  ⚠️ <b>补丁 A3 附带（新加的守卫）</b>：对 {@code frozen} 的账号**拒绝** —— 那条路叫
+     * 恢复（{@link #relist}），不是撤销。若在这里放行，会把「冻结」这个状态清掉而**商品仍在下架、
+     * 角色仍是客户**，留下一个既不冻结也不算正常的半成品态（且没有任何界面能把它捞回来）。
+     * ⚠️ 判定用「先读状态再写」而不是 CAS：本操作**不产生通知 / 审计副作用**，
+     * 并发下的最坏结果是两个管理员同时点、两次都是空操作，与 CAS 的收益不成比例。 */
     public Map<String, Object> cancel(String targetUsername) {
         Map<String, Object> result = new HashMap<>();
         if (isBlank(targetUsername)) {
             result.put("success", false);
             result.put("msg", "缺少参数：username");
+            return result;
+        }
+        Map<String, Object> row = userGovernanceDao.selectDowngradeRow(targetUsername);
+        if (row != null && DowngradeStates.FROZEN.equals(str(row.get("DowngradeState")))) {
+            result.put("success", false);
+            result.put("outcome", "already-frozen");
+            result.put("msg", "该账号已处于降级冻结状态，不能用「撤销排定」—— 请走「人工恢复」");
             return result;
         }
         int affected = userGovernanceDao.clearDowngrade(targetUsername);

@@ -145,9 +145,23 @@ export function accountsAudit(params) {
  * @param {{username:string, reason:string}} params
  *        ⚠️ `reason` **必填**（后端答 `'降级必须填写原因（该原因会展示给商家）'`）
  *        —— 它写进 `user.DowngradeReason`，**商家看得到**（`/user/me` 会答这 5 列）。
- * @returns {Promise<{success:boolean, username?:string, scheduledAt?:string, msg?:string}>}
+ * @returns {Promise<{success:boolean, username?:string, scheduledAt?:string, state?:string,
+ *                    outcome?:string, msg?:string}>}
  *          `scheduledAt` = 生效时刻（后端 `LocalDateTime.toString()`，无时区，库内 UTC）。
  *          ⚠️ 排定**不改 `Role`**：通知期内商家**照常经营**，只在 `/user/me` 上多一个 `scheduled` 态。
+ *
+ *          【⚠️ 补丁 A3（2026-10-09 手验后）：同一个降级**只能排定一次**】
+ *          后端加了 CAS（`UPDATE … WHERE Username=? AND DowngradeState='none'`）。命中 0 行时
+ *          **不是「失败」、也不是「排定成功」**，而是**被拦下**，且**一律 `success:false`**：
+ *            · `outcome === 'already-scheduled'` —— 已经排过了（同一账号重复点击）。`msg` =
+ *              「已发送过降级请求，请于用户治理模块查看」。
+ *            · `outcome === 'already-frozen'`    —— 已经**冻结**了 ⇒ 该走「人工恢复」那条路。
+ *            · 两者都**没有** `outcome`（只有 `msg:'用户不存在'`） —— 用户名打错了。
+ *          ⇒ **前端按 `outcome` 挑文案，不要拿 `msg` 做字符串匹配**（后端成文口径，见
+ *             `MerchantDowngradeService.scheduleMiss`）。
+ *          ⚠️ `success:false` 这一点是**有意**的、也是**补丁 A4 的根因修法**：Controller 只在
+ *             `success:true` 时才发通知 + 写审计 ⇒ 重复点击**结构性地**不可能再刷通知
+ *             （手验时一次降级刷了 14 条通知，就是这个洞）。
  */
 export function downgradeSchedule(params) {
   return post(endpoints.accounts.downgradeSchedule, q(params))
@@ -157,7 +171,11 @@ export function downgradeSchedule(params) {
  * 撤销排定（通知期内反悔）。**不改 `Role`、不碰商品**，只把 `DowngradeState` 清回 `none`。
  *
  * @param {{username:string}} params
- * @returns {Promise<{success:boolean, username?:string, msg?:string}>}
+ * @returns {Promise<{success:boolean, username?:string, outcome?:string, msg?:string}>}
+ *          ⚠️ **补丁 A3 附带**：对**已冻结**（`DowngradeState='frozen'`）的账号**拒绝**，
+ *             `{success:false, outcome:'already-frozen'}`。理由：在冻结态下把状态清回 `none`
+ *             会留下「商品仍下架、`Role` 仍是客户，但没有冻结标记」的**半成品态**，界面再没有入口
+ *             能把它捞回来 —— 那条路叫「人工恢复」（`downgradeRelist`），不叫「撤销」。
  */
 export function downgradeCancel(params) {
   return post(endpoints.accounts.downgradeCancel, q(params))

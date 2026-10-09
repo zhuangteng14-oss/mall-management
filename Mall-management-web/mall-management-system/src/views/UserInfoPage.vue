@@ -5,7 +5,7 @@
         + `docs/美化/pages/UserCenter-merchant.html`（434 行，① – ⑥ 在 `:290-374`）。
     ⚠️ 稿是**两份**（客户 / 商家），但左菜单那一支（`.uc-menu`，稿 `:291` / `:277`）**已由 C 笔
        落进 `UserCenter.vue`**（该文件 `:77-86` 引稿 `:141-151` / `:134-145`）⇒ 本页**只承载右栏**。
-       `UserCenter.vue` 是多根 fragment（`.user-menu` + `<router-view>`），`AppShell.vue:361-365`
+       `UserCenter.vue` 是多根 fragment（`.user-menu` + `<router-view>`），`AppShell.vue:440-444`
        的 `.user-page` 是 flex 行 ⇒ `<main class="uc-main">` 就是那一行的第二个 flex 子项。
     角色分支**只写在模板里**（判据的**唯一真源** = `/user/me` 的 `role`，落成 `<script setup>` 里一个叫 `isMerchantShell` 的 computed；D 笔当年那句「与 `getUserData()` 的分支逐字同构」**已被 C3 块 2〈用户块〉作废**，三条理由见该 computed。C3 块 2 另给本页加「降级状态条」与 ⑦「资料完善」，两处都不改本页原有四个函数的语义）。
   -->
@@ -470,7 +470,7 @@ const saveProfile = async () => {
         `.svc button[disabled]{cursor:not-allowed}`（稿的全局 `button{cursor:pointer}` 不带
         `:not([disabled])`，照抄会把禁用项画成可点）。
      ④ 稿里 `.rail` 的两个容器 `.uc` / `.uc-menu` **不进本组件**（它们的落点是 `UserCenter.vue`
-        与 `AppShell.vue:361-365`）⇒ 未搬。
+        与 `AppShell.vue:440-444`）⇒ 未搬。
    ⚠️ `box-sizing` **不在此重复** —— `tokens.css:52-56` 的 `*` 重设已是全局（`:55`）。
    ══════════════════════════════════════════════════════════════════════════════ */
 
@@ -500,7 +500,7 @@ button {
    落到根上（`background` 不搬 —— 壳 `.app-shell:188-194` 已经铺了 `var(--bg)`，
    在 `main.uc-main` 上再铺一次会把右栏画成一块与左菜单不同的底）。
    `flex:1` + `min-width:0` —— 本组件是 `AppShell.vue` 的 `.user-page` 那个 flex 行的直接子项。
-   ⚠️ **本仓没有稿那条全局 `body{}`**（`AppShell.vue:257-260` 明写：全仓一条字体声明都没有、
+   ⚠️ **本仓没有稿那条全局 `body{}`**（`AppShell.vue:287-290` 明写：全仓一条字体声明都没有、
      壳只声明在「顶栏 / 左菜单」三件上，**页面主体留给 D 笔**；`HomePage.vue:40-49` 是同一套
      落法的先例）⇒ 这三条必须在每个页面根上各自声明，否则正文走**浏览器默认 16px + 本机
      解析到的 `"Noto Sans SC"`**（本机实测），而稿是 `--fs-sm`（15px）+ `var(--font)`。

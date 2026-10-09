@@ -20,7 +20,7 @@
            ⚠️ 收口：本 div 现在只有一个子元素（`nav.subnav`），闭合于 `:37` 的 `</nav></div>`。 -->
 
     <!-- ── 二级导航（稿 `:744-753`）──
-         ⚠️ 壳里**没有** `.subnav`：`AppShell.vue:268-269` 自注「稿的 `.subnav a` 属**二级导航**、
+         ⚠️ 壳里**没有** `.subnav`：`AppShell.vue:298-299` 自注「稿的 `.subnav a` 属**二级导航**、
          不属顶栏」⇒ C 笔既然把它从顶栏里摘出去了，就没人落过它 ⇒ 它是**页级**的，本笔落在首页顶部。
          ⚠️ 6 项在本仓**都没有落点**（无路由、无对应页面）⇒ 一律 `disabled` + `title`
          （`progress.md:1652` 判据①）。开放它们属**功能**笔，不在 D 笔边界内。
@@ -970,7 +970,7 @@ button {
    已删（连同它的 4 条样式，见样式块那段按语）。本容器自己的三条数值**一字未动**。
    ⚠️ 新增行只能落在最大被引行之后：全仓引用本页的最大行号是 `HomePage.vue:597`（`slot-registry.md:829` / `:2096`）⇒ 本规则落在
    `<style>` 尾部。`top: 60px` **必须**与壳顶栏高锁步：
-   `AppShell.vue:257-258` 的 `height: 60px`（同处 `:211-213` 记着「高度必须与 `.home-container`
+   `AppShell.vue:287-288` 的 `height: 60px`（同处 `:241-243` 记着「高度必须与 `.home-container`
    的 `top`/`height` 锁步」的既有口径）。`z-index: 9` **故意**低于顶栏的 `10`（`AppShell.vue`
    的 `.top-nav`，同处 `:225-226`）：吸顶带从顶栏**下面**穿过去，写 ≥10 就把「页」压在「壳」上。
    ⚠️ **顶栏自己是另一条 sticky**，它靠**壳能长高**才全程有效 —— 本笔之前 `.home-container`
@@ -978,7 +978,7 @@ button {
    `AppShell.vue` 那条 `.home-container` 按语）。⚠️ `background: var(--bg)` **不能省**：吸附时
    本带是**盖**在商品区上的，透明会让商品从字缝里透出来（`--bg` 与 `--surface` 同值 `#ffffff`，
    见 `assets/tokens.css:83-84`）。⚠️ 吸附的上下限 = **包含块**（`.home-page`，内容高且无
-   `overflow` ⇒ 全页有效；哪天给它加上 `overflow:hidden`，本带会在 840px **提前释放**），不是 `.home-container` 的盒（`AppShell.vue:351-361`）。 */
+   `overflow` ⇒ 全页有效；哪天给它加上 `overflow:hidden`，本带会在 840px **提前释放**），不是 `.home-container` 的盒（`AppShell.vue:430-440`）。 */
 .head-sticky {
   position: sticky;
   top: 60px;

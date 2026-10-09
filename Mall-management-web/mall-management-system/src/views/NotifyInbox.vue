@@ -55,7 +55,7 @@
 <script setup>
 // src/views/NotifyInbox.vue —— 系统通知**收件箱**（客户 / 商家两端共用。C3 块 1 · I2，2026-10-09）。
 //
-// ⚠️ **为什么一个组件服务两端**：两端的差异**只有数据**（收件人 id 与 `ToType`），结构逐字相同（C3 块 2 起是**三端** —— 多了管理端的**共享收件箱**，`ToType='admin'` / `ToId='*'`，落在 `views/admin/AccountsPage.vue` 里嵌的一个实例；派生见 `:99-103`）
+// ⚠️ **为什么一个组件服务两端**：两端的差异**只有数据**（收件人 id 与 `ToType`），结构逐字相同（C3 块 2 起是**三端** —— 多了管理端的**共享收件箱**，`ToType='admin'` / `ToId='*'`，落在 `/admin/inbox`（**侧边栏顶层独立项**；块 2 手验后从 `AccountsPage.vue` 的页内第 ⑤ 块提出来）；派生见 `:99-103`）
 // —— 判断依据与 `views/admin/StubPage.vue` 块首那条一致（差异只在数据、不在结构 ⇒ 不拆文件）。
 // 这与「消息」那边不同：`ChatRoom.vue` 要同时服务 `/customer/msg` 与 `/merchant/msg`，
 // 它也是**一个组件**；本页只是把同一手法再走一遍。
@@ -93,10 +93,10 @@ const error = ref('')
 const onlyUnread = ref(false)
 
 // ── 两端怎么分：只看路径前缀 ─────────────────────────────────────────────────
-// `/customer/notify` ⇄ `/merchant/notify` 是本页仅有的两个挂载点（`router/index.js` 尾部
-// 两条 `addRoute`）。⚠️ 别写成 `route.path.includes('merchant')` —— `includes` 对将来任何
+// 本页有**三个**挂载点：`/customer/notify` ⇄ `/merchant/notify`（`router/index.js` 尾部两条
+// `addRoute`）+ `/admin/inbox`（`/admin` children 末条，**静态子路由**）。⚠️ 别写成 `route.path.includes('merchant')` —— `includes` 对将来任何
 // 含该子串的路径都为真（`startsWith('/merchant')` 才是「在这个壳下」的判据，同 `nav.js:6` 那条）。
-const base = computed(() => (route.path.startsWith('/merchant') ? '/merchant' : route.path.startsWith('/admin') ? '/admin' : '/customer'))   // ⚠️ C3 块 2〈用户块〉：**同行**加 `admin` 那一支（第三个挂载点 = `views/admin/AccountsPage.vue` 里嵌的实例；`api/endpoints.js:84` 与后端 `MerchantApplicationController.ADMIN_INBOX_ID` 都点名了这一处，它不是「顺手加的壳」）。⚠️ 本行连同 `:100` / `:103` 被 `MessageCenter.vue:35` 按 **`:99-103`** 整段引 ⇒ 只许**同行**改、一行都不许插。
+const base = computed(() => (route.path.startsWith('/merchant') ? '/merchant' : route.path.startsWith('/admin') ? '/admin' : '/customer'))   // ⚠️ C3 块 2〈用户块〉：**同行**加 `admin` 那一支（第三个挂载点 = `/admin/inbox`，块 2 手验后从 `AccountsPage.vue` 第 ⑤ 块提出来、成侧边栏顶层独立项；`api/endpoints.js:84` 与后端 `MerchantApplicationController.ADMIN_INBOX_ID` 都点名了这一处，它不是「顺手加的壳」）。⚠️ 本行连同 `:100` / `:103` 被 `MessageCenter.vue:35` 按 **`:99-103`** 整段引 ⇒ 只许**同行**改、一行都不许插。
 const toType = computed(() => (base.value === '/merchant' ? 'merchant' : base.value === '/admin' ? 'admin' : 'customer'))
 /** 当前收件人业务号。⚠️ 与 `AppShell.vue` 的 `getCurrentUser()` **同一条降级链**：
  *  先按壳取自己的号；取不到就是「没登录」—— 别退回另一种身份（那样商家的会话会用客户的号查）。⚠️ **管理端是这条链的唯一例外**（C3 块 2）：它的 `ToId` 是**共享收件箱的哨兵值** `'*'`，不是「自己的号」—— 全仓管理员共用一个收件箱（入驻申请就发到这里）。见 `:103`。 */
@@ -291,7 +291,7 @@ onMounted(load)
 </script>
 
 <style scoped>
-/* 根：承接壳里 `.page`（`AppShell.vue:345`，内距已归零）的交还 —— 与 `ChatRoom.vue` 的
+/* 根：承接壳里 `.page`（`AppShell.vue:424`，内距已归零）的交还 —— 与 `ChatRoom.vue` 的
    `.chat-room` 同款（同栏宽、同内距），两个页面在同一个壳里来回切时不该有不同的左右边距。 */
 .notify-room {
   max-width: 1180px;

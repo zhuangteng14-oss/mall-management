@@ -201,7 +201,7 @@
 | `/order/orderPayIfUp` | `ShoppingCart.vue:156` |
 | `/order/orderReceiveIfUp` | `ShoppingCart.vue:190` |
 | `/order/orderDeliveryIfUp` | `OrderCenter.vue:171` |
-| `/message/conversations` | `ChatRoom.vue:184`、`AppShell.vue:146`（**R6 合一重指**：两个壳的 `fetchUnreadCount()` —— `CustomerPage.vue:108` / `MerchantPage.vue:107` —— **已合并到本处**，两文件已随 R6 删除；其沿革：原记 `:97`（R1 时在 `HEAD` 已漂 3、实为 `:100`）⇒ R1/R2 各重指过一次） |
+| `/message/conversations` | `ChatRoom.vue:184`、`AppShell.vue:161`（**R6 合一重指**：两个壳的 `fetchUnreadCount()` —— `CustomerPage.vue:108` / `MerchantPage.vue:107` —— **已合并到本处**，两文件已随 R6 删除；其沿革：原记 `:97`（R1 时在 `HEAD` 已漂 3、实为 `:100`）⇒ R1/R2 各重指过一次） |
 | `/message/history` | `ChatRoom.vue:213`、`ChatRoom.vue:279` |
 | `/message/send` | `ChatRoom.vue:327`、`ProductPage.vue:459` |
 | `/message/userSelect` | `ChatRoom.vue:164`、`FriendRoom.vue:132` |

@@ -27,6 +27,21 @@
       </div>
     </div>
 
+    <!-- ── 黄条（补丁 B2，2026-10-09 手验后，用户裁决**甲案**）──────────────────────
+         「通知要在主页显眼提示」。甲案 = 保留 2026-10-09 已合的**单一入口 + 红点**（那笔**不回退**、
+         `nav.js` 的墓碑也留着），**只加这条黄条** ⇒ 红点负责「有东西没看」，黄条负责「说人话、给个去路」。
+         · 触发 = **未读通知数 > 0**（`bannerText`），与红点**同源同一支 5s 轮询**（不新起请求）。
+           ⚠️ 只认通知、**不认未读消息**（`unreadCount` 不进这里）：消息是两人会话，「对方回了一句」
+           本来就天天发生，弹黄条会变成噪音；管理员发来的通知是**平台单方面找你**，才值得打断。这是两者唯一的区别。
+         · 落点 = `${base}/msg?tab=notify`：进那个 tab 后上面的 `watch` 会把 `notifyUnreadCount` 清 0，黄条自然消失
+           —— **不需要**在这里再写一条「已读」逻辑。
+         · 模板里那两处 `dotCount(item.badge)` **一个都没动**（合并入口那笔的成文口径见 `<script>` 里 `dotCount` 上方注释）。 -->
+    <div v-if="bannerText" class="nav-notice">
+      <span class="nav-notice-text">{{ bannerText }}</span>
+      <router-link class="nav-notice-go" :to="{ path: MSG_PATH, query: { tab: 'notify' } }">去查看 →</router-link>
+      <button type="button" class="nav-notice-x" aria-label="关闭提示" @click="dismissBanner">×</button>
+    </div>
+
     <div class="content">
       <div :class="layoutClass">
         <router-view v-slot="{ Component }">
@@ -194,6 +209,21 @@ watch(() => [route.path, route.query.tab], ([p, t]) => {
   isNotifyTab(t) ? (notifyUnreadCount.value = 0) : (unreadCount.value = 0)
 })
 
+// ── 补丁 B2：主页黄条 ─────────────────────────────────────────────────────────
+/** 关掉黄条那一刻的未读数；`-1` = 本次进出壳还没关过。
+ *  ⚠️ 它**不是**「已读水位」——只是「关掉时是多少」⇒ 在它**之上**再来一条新通知，黄条会重新出现
+ *     （关掉不该等于对后来的通知永久静音；这一点是**有意**的，不是 bug）。 */
+const bannerSeenAt = ref(-1)
+/** 黄条文案；空串 = 不渲染（`v-if="bannerText"`）。⚠️ 匿名态 `notifyUnreadCount` 恒 0 ⇒ 天然不出现，不必另判登录。 */
+const bannerText = computed(() => {
+  const n = notifyUnreadCount.value
+  if (n <= 0 || n <= bannerSeenAt.value) return ''
+  return `您有 ${n} 条来自管理员的通知`
+})
+function dismissBanner() {
+  bannerSeenAt.value = notifyUnreadCount.value
+}
+
 // 跨页待搜索关键词（由商品详情页的搜索框写入：`ProductPage.vue:380` 写、`:382` 推回壳）
 // 路由化（R1/R2）起改为**推路由** `…/search?kw=`（关键词由 URL 承载）；路由化前是
 //     置 `curPage='search'` + `nextTick` 后调子组件 ref，`<router-view>` 下没有 ref 可用。
@@ -266,7 +296,7 @@ height: 60px;
    「没有壳」的形态，而本壳的设计哲学是「壳稳定、内容切换」⇒ 加 `sticky` 让滚动时吸顶。
    ⚠️ **不采乙案**（`.content { min-height:0; overflow-y:auto }`）：嵌套滚动容器 +
    百分比高度 + `absolute` 参照物，回归面大，且滚动行为与稿不一致。
-   ⚠️ `z-index:10` 高于 `.home-container` 的 `1`（**`:360`**，`position:relative; top:0` —— ⚠️ **裁决 ③（用户 2026-10-08，「一指错就是错」）：已改号** —— 本节原文是裸 `:293`，而 293 行现行内容是 `.nav-red-dot` 的 `background`（不是 `.home-container`）⇒ 改指到 `z-index:1` 的现行行 `:360`（块 `AppShell.vue:351-361`）；「`position:absolute; top:60px`」那半句同批被第 1 条改掉，值见同块）—— ⚠️ **I2 重定基（2026-10-09）**：本文件因 I2 三端前端插了 43 行，上面两个号随之后移（行号 `317`→`360`、块 `308-318`→`351-361`）——
+   ⚠️ `z-index:10` 高于 `.home-container` 的 `1`（**`:360`**，`position:relative; top:0` —— ⚠️ **裁决 ③（用户 2026-10-08，「一指错就是错」）：已改号** —— 本节原文是裸 `:293`，而 293 行现行内容是 `.nav-red-dot` 的 `background`（不是 `.home-container`）⇒ 改指到 `z-index:1` 的现行行 `:360`（块 `AppShell.vue:430-440`）；「`position:absolute; top:60px`」那半句同批被第 1 条改掉，值见同块）—— ⚠️ **I2 重定基（2026-10-09）**：本文件因 I2 三端前端插了 43 行，上面两个号随之后移（行号 `317`→`360`、块 `308-318`→`351-361`）——
    两者不重叠（`.home-container` 自 `top:60px` 起），改后仍不重叠（它现在从 `.content` 的 y=60 起算，仍不与顶栏的 0–60 带重叠），只保证滚动时顶栏在上。 */
 flex: none;
 position: sticky;
@@ -283,6 +313,55 @@ background: var(--surface);
    用户裁决：本笔的字体**只声明在壳三件上**（顶栏 / 左菜单），页面主体留给 D 笔
    ⇒ 在这里声明一次，右三项与左项各自继承 / 覆盖。 */
 font-family: var(--font);
+}
+/* ── 黄条（补丁 B2）────────────────────────────────────────────────────────────
+   ⚠️ `sticky; top:60px` 与顶栏 `top:0` 是**配对**的：顶栏高 60px 上述那条「高度必须与
+      `.home-container` 锁步」已把它钉死 ⇒ 黄条吸在它正下方，两层不重叠。
+   ⚠️ `z-index:9` **必须小于顶栏的 10** —— 滚动时顶栏压住黄条（壳的层次：顶栏 > 提示 > 内容）。
+   ⚠️ 配色走 `--warning-ground` / `--warning-deep`（本仓的「提醒」就是这对，别另起一个黄）。
+      ⚠️ **用 `-deep` 而不是 `--warning`**：本壳是**商城**入口，只吃 `:root`（浅色）那套 —— 浅色下
+      `--warning-deep` #604100 对 `--warning-ground` #f9efdf 是 **8.2:1**，而 `--warning` #966800 只有 **4.3:1**
+      （15px 正文，不够）。⚠️ 暗色那套（`html[data-theme="admin"]`）下 `--warning-deep` 反而只有 1.4:1 ——
+      但**本壳不在暗色作用域里**（暗色只有管理端 `AdminShell.vue` 会套，见 `tokens.css` 那条
+      「作用域 = `html[data-theme=\"admin\"]`」）⇒ 不构成问题。**若哪天把本壳搬进暗色，这里要改回 `--warning`。** */
+.nav-notice {
+  flex: none;
+  position: sticky;
+  top: 60px;
+  z-index: 9;
+  display: flex;
+  align-items: center;
+  gap: var(--s3);
+  padding: var(--s3) var(--s7);
+  background: var(--warning-ground);
+  border-bottom: 1px solid var(--line);
+  font-family: var(--font);
+  font-size: var(--fs-sm);
+  color: var(--warning-deep);
+}
+.nav-notice-text {
+  font-weight: var(--fw-med);
+}
+.nav-notice-go {
+  color: inherit;
+  text-decoration: underline;
+  font-weight: var(--fw-semi);
+}
+.nav-notice-x {
+  margin-left: auto;
+  appearance: none;
+  border: 0;
+  background: none;
+  cursor: pointer;
+  padding: 0 var(--s2);
+  font: inherit;
+  font-size: var(--fs-lg);
+  line-height: 1;
+  color: inherit;
+  opacity: 0.7;
+}
+.nav-notice-x:hover {
+  opacity: 1;
 }
 /* 顶栏两族入口与稿子的一一对应：左 = 稿子的 `.brand`（文字「商城主页」，`nav.js` 的 `left`
    恒为这 1 项）；右 = 稿子的 `.nav-right`（3 项，逐字同构）。

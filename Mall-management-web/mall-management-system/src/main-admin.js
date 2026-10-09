@@ -3,7 +3,7 @@ import AdminApp from './AdminApp.vue'; import './assets/fonts/noto.css'; import 
 import router from './router/index.js'
 import { http, setUnauthorizedHandler, resetUnauthorizedLatch } from './api/http'
 import { endpoints } from './api/endpoints'
-import { isLoggedIn, restoreFromSession } from './api/auth'
+import { isLoggedIn, restoreFromSession, dropPageToken } from './api/auth'
 
 // ── 管理端入口（C3 骨架第一笔，2026-10-08）──────────────────────────────────────
 // 与 `main.js` **同构但有意更薄**。骨架这笔只做四件事：恢复身份 → 挂路由 → 注册 401 出口
@@ -17,6 +17,8 @@ import { isLoggedIn, restoreFromSession } from './api/auth'
 //      未登录 ⇒ `/login?redirect=/admin`，登录后 `landingAfterLogin` 回原目标。
 //      ⇒ 待铸造路径定案后，本文件应与 `main.js` 合并这段（登记在 §十三 13-5）。
 //   ② **不注册 `publishSharedToken` 那套多账户隔离**：骨架无业务请求，票无从谈起。
+//      ⚠️ **补丁「丁」（2026-10-10）在此之上再加半条：不但不发布、不认领，还要**弃掉本页已有的票****
+//      （`dropPageToken()`，见 `bootstrap()` 第一行）—— 理由见 `api/auth.js` 那个函数的块注释。
 //   ③ **不 await 恢复后再 `settleRecoveredIdentity`**：同上。
 //
 // ⚠️ 恢复身份这段是 `main.js:25-36` 的**精简复制**（少了 `adoptSharedToken()` 与
@@ -34,6 +36,17 @@ async function restoreIdentity() {
 }
 
 async function bootstrap() {
+  // ── C3 块 2 手验后补丁「丁」（2026-10-10，用户裁决）：**管理端启动第一件事 = 弃掉本页的票** ──────
+  // 由来与依据写在 `api/auth.js` 的 `dropPageToken()` 块注释里，一句话：**管理端的票只可能是别人的**
+  // （管理员铸不出票 TD-18、也不发布指针 D6，认领本入口早已不做）⇒ 带着它，后端 `AuthSession.identify`
+  // **票优先** ⇒ 认出的是上一次登录的客户/商家：收件箱 403（`'*'` 比不过他的业务号）+ `admin_audit`
+  // 记错人（**实测** a3 库 Id=22 把管理端的 `user.ban` 记成客户 1111 的 `uDopHnCeLS`/role=1）。
+  // ⚠️ **必须在 `restoreIdentity()` 之前**：那一发 `/user/me` 也会带票。
+  // ⚠️ 弃票后管理端靠 **cookie 会话**认身份 ⇒ 闸关档（a3）下 `identify` 认得出 `role=3`、
+  //    `IdentityGuard` 的管理员档放行、审计记 role=3。🔴 **闸开的档（默认 profile）本入口仍无凭据**
+  //    ⇒ 全部 401 —— 那是 TD-18 的缺口、本补丁**不假装治它**（见 slot-registry §十三 13-5 与新 TD）。
+  dropPageToken()
+
   await restoreIdentity()
 
   const app = createApp(AdminApp)

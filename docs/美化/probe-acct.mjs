@@ -1,5 +1,5 @@
 // probe-acct.mjs —— 2026-10-08 第 3 条：多账户切换「历史订单 403」复现。
-// 口径：mock **按后端真规则答**——`IdentityGuard.requireSelfOrAdmin`（IdentityGuard.java:65-74）：
+// 口径：mock **按后端真规则答**——`IdentityGuard.requireSelfOrAdmin`（IdentityGuard.java:71-80）：
 //   票里的 userId ≠ 入参 id 且调用者不是管理员(role=3) ⇒ 403 + `{success:false,msg:'无权操作该账户'}`。
 //   票的 userId 来源见 UserController.loginSelect:113（会话里存的是**业务号**：商家=merchantid、客户=customerid）。
 // 走法 = 用户报的那串：商家登录 → 换用户 → 换回商家 → 打开「历史购买记录」。

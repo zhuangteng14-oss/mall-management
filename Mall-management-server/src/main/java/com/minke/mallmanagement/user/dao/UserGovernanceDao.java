@@ -92,6 +92,31 @@ public class UserGovernanceDao {
     }
 
     /**
+     * 由**业务号**反查**登录名**（{@code user} 表主键）—— 与上面两条判据**同一节的第三读**，
+     * 方向与 {@link #selectMerchantId} / {@link #selectCustomerId} **相反**。
+     *
+     * <h2>【它治的是哪一半病（C3 块 2 补丁 A1）】</h2>
+     * 会话里存的是**业务号**（{@code AuthSession}），而 {@code /merchant/apply} ·
+     * {@code /merchant/myApplications} · {@code /user/updateProfile} 三个端点的入参是**登录名**
+     * ⇒ 拿登录名去比业务号**永不相等**、客户（role=1）恒拿 403（这三个端点此前就是这么坏的）。
+     * 修法：把会话里的业务号翻成登录名再比（见 {@code IdentityGuard.requireSelfOrAdminByUsername}）。
+     *
+     * @param useMerchantColumn {@code true} ⇒ 查 {@code merchantid} 列；否则查 {@code customerid}。
+     *                          ⚠️ 与 {@link #isBannedByBusinessId} / {@code UserService.businessId}
+     *                          的选列判据**同源**（都在「角色是不是商家」上分叉），别另立一套
+     * @return 登录名；账号不存在 / 该列 NULL ⇒ {@code null}（调用方把 null 当「判不出来」，不放行也不拒绝）
+     */
+    public String selectUsernameByBusinessId(String businessId, boolean useMerchantColumn) {
+        String column = useMerchantColumn ? "merchantid" : "customerid";
+        String sql = "SELECT username FROM `user` WHERE " + column + " = ?";
+        List<Map<String, Object>> rows = jdbcClient.sql(sql).param(businessId).query().listOfRows();
+        if (rows.isEmpty() || rows.get(0).get("username") == null) {
+            return null;
+        }
+        return rows.get(0).get("username").toString();
+    }
+
+    /**
      * 这个商家是否处于**降级冻结态**（{@code DowngradeState='frozen'}）—— 下单链路的拒单判据。
      *
      * <p>{@code COUNT(*)} 恒有行 ⇒ 这里用 {@code .single()} 是安全的（与上面两条判据不同）。
@@ -181,12 +206,19 @@ public class UserGovernanceDao {
 
     // ==================== 写 / 读：降级五阶段 ====================
 
-    /** ① 管理员发起降级：置 {@code scheduled} + 通知期截止时刻（= 发起时刻 + 1 天）。 */
+    /** ① 管理员发起降级：置 {@code scheduled} + 通知期截止时刻（= 发起时刻 + 1 天）。
+     *  ⚠️ <b>这是一条 CAS（补丁 A3）</b>：{@code AND DowngradeState = 'none'} 是「同一账号的
+     *  同一次降级只排定一次」的判据 —— 旧写法无此条件，管理员点 N 次就写 N 次、发 N 条通知
+     *  （实测一次降级刷了 14 条）。
+     *  ⚠️ {@code 'none'} 是列的 DEFAULT（建表块 {@code ALTER TABLE user}），既有行**全部**是它 ⇒
+     *  老商家不会被这条新条件误挡。
+     *  {@code 0} = 账号不存在 / 已 {@code scheduled} / 已 {@code frozen} —— Service 再读一次状态
+     *  决定答什么（见 {@code MerchantDowngradeService.schedule}），**不是**「一定失败」。 */
     public int markScheduled(String username, String reason, LocalDateTime scheduledAt) {
         String sql = "UPDATE `user` "
                 + "SET DowngradeState = 'scheduled', DowngradeReason = ?, ScheduledDowngradeAt = ?, "
                 + "    FrozenAt = NULL, FreezeUntil = NULL "
-                + "WHERE username = ?";
+                + "WHERE username = ? AND DowngradeState = 'none'";
         return jdbcClient.sql(sql).params(reason, scheduledAt, username).update();
     }
 

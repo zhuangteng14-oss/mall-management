@@ -8,13 +8,13 @@ import org.springframework.stereotype.Service;
 
 /**
  * {@link UserStateLookup} 的唯一实现（C3 块 2 用户块）—— 把 {@link UserGovernanceDao}
- * 的三条读包上**fail-open** 与**一条 ASCII 标记的 WARN**，供封禁第二道闸与下单冻结闸共用。
+ * 的四条读包上**fail-open** 与**一条 ASCII 标记的 WARN**，供封禁第二道闸、下单冻结闸与 self 判据共用。
  *
  * <h2>【⚠️ 为什么整个类只有 try/catch + 一个 log，没有别的】</h2>
  * 见 {@link UserStateLookup} 类注释：「封禁 / 冻结不是安全边界」⇒ 读失败时**放行**而不是拒绝。
  * 若这里把异常放出去，一个暂时连不上的库会同时打翻**所有登录**（闸链上游）与**所有下单**
- * （订单域）—— 把可观测的小降级放大成全局不可用。所以三个方法一律 catch 一切、返回
- * {@code false}、记 WARN。
+ * （订单域）—— 把可观测的小降级放大成全局不可用。所以四个方法一律 catch 一切、返回
+ * {@code false} / {@code null}、记 WARN。
  *
  * <p>⚠️ <b>日志标记用 ASCII {@code USERSTATE}</b>：本仓日志是 GBK 字节，中文 pattern 检索不到
  * （同 {@code AuditService} 的 {@code AUDIT}、{@code NotificationService} 的 {@code NOTIFY}）。
@@ -62,6 +62,22 @@ public class UserStateLookupService implements UserStateLookup {
         } catch (Exception e) {
             log.warn("封禁判据读取失败（USERSTATE）：username={} —— 本次按未封禁放行", username, e);
             return false;
+        }
+    }
+
+    @Override
+    public String usernameOf(String userId, Integer role) {
+        if (userId == null) {
+            return null;   // 没有业务号 = 反查不出登录名（闸侧此时通常已经是未登录）
+        }
+        try {
+            return dao.selectUsernameByBusinessId(userId, role != null && role == ROLE_MERCHANT);
+        } catch (Exception e) {
+            // ⚠️ 与上面三条同一条纪律：读失败**回 null**（= 判不出来），不抛 —— 但这一处的
+            //    代价要写下来：`IdentityGuard.requireSelfOrAdminByUsername` 对 null 是**放行**，
+            //    故库不可达时这三个端点退化成「不校验入参身份」（与封禁闸失效同一类降级）。
+            log.warn("业务号反查登录名失败（USERSTATE）：userId={} role={} —— 本次按判不出来放行", userId, role, e);
+            return null;
         }
     }
 

@@ -366,10 +366,10 @@ onMounted(() => {
    ⚠️ 未复画的稿规则：`.grid` `.card*` `.thumb2`（猜你喜欢卡 —— 本笔占位未接线）。
    ⚠️ 稿的 `.glaze*` / `.dots` 之类不属本页；`.cs` 亦无。 */
 
-/* ── 页根：壳的 `.cart-container`（AppShell.vue:342-348）是 `height:100%;overflow:hidden`
+/* ── 页根：壳的 `.cart-container`（AppShell.vue:421-427）是 `height:100%;overflow:hidden`
       ⇒ 滚动盒必须由本页提供（改前 `.shopping-cart-page` 就是干这个的）。
       ⚠️ `position:relative` **不能删**：`.switch-wrapper` 是它的 absolute 子元素，而
-      AppShell.vue:338-341 记着「`.cart-container` 与 `.order-container` 两类名不合并」的
+      AppShell.vue:417-420 记着「`.cart-container` 与 `.order-container` 两类名不合并」的
       依据正是「两页都有 absolute 子元素」（OrderCenter.vue:200/:235 与 ShoppingCart.vue 侧）——
       把这里改成常规流 = 那条依据失效。 */
 .cart-page {

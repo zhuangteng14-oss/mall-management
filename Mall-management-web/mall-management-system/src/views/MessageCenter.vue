@@ -16,7 +16,7 @@
     </div>
 
     <!-- ⚠️ **必须是 `v-if` 不是 `v-show`**：`ChatRoom` 带一支 **2s 轮询**（`:447`），`v-show` 只藏不卸
-         ⇒ 停在「通知」tab 时后台仍每 2s 打一次 `/message/*`（`AppShell.vue:84-85` 早就为 KeepAlive
+         ⇒ 停在「通知」tab 时后台仍每 2s 打一次 `/message/*`（`AppShell.vue:99-100` 早就为 KeepAlive
          记过同一条：「别把 ChatRoom 加进来」）。卸载则 `onUnmounted` 里的 `clearInterval` 照常回收。 -->
     <ChatRoom v-if="tab === 'chat'" />
     <NotifyInbox v-else />

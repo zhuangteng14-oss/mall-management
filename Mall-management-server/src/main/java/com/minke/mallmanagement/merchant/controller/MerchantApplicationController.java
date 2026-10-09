@@ -8,7 +8,9 @@ import com.minke.mallmanagement.notification.service.NotificationService;
 import com.minke.mallmanagement.shared.web.AuthSession;
 import com.minke.mallmanagement.shared.web.IdentityGuard;
 import com.minke.mallmanagement.shared.web.Result;
+import com.minke.mallmanagement.shared.web.UserStateLookup;
 import jakarta.servlet.http.HttpServletRequest;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -28,8 +30,10 @@ import java.util.UUID;
  * 但那与后端资源前缀无关（同 {@code AdminAuditController} 的两层说明）。
  *
  * <h2>【⚠️ 两个端点都挂 {@link IdentityGuard}，且必须在方法体第一行】</h2>
- * {@code username} 是「代表调用者自己」的入参 ⇒ 走 {@code requireSelfOrAdmin}。
- * 闸关（smoke / a3）时 {@code identify == null ⇒ 放行} —— 与其余 13 个入参校验端点同一纪律。
+ * {@code username} 是「代表调用者自己」的入参，但它是**登录名**（{@code user} 表主键）、不是业务号
+ * ⇒ 走 {@code IdentityGuard.requireSelfOrAdminByUsername}（补丁 A1：原写法直接套业务号版判据 ⇒
+ * 登录名永不等于会话里的业务号 ⇒ 对任何正常客户恒 403，实测就是这个）。
+ * 闸关（smoke / a3）时 {@code identify == null ⇒ 放行} —— 与其余入参校验端点同一纪律。
  *
  * <h2>【⚠️ 通知与审计在本层（Controller），不在 Service —— 这是刻意的】</h2>
  * 提交申请会**同时**产生两件事：给管理端共享收件箱推一条（{@code ToType='admin', ToId='*'}），
@@ -51,13 +55,24 @@ public class MerchantApplicationController {
     private final MerchantApplicationService applicationService;
     private final NotificationService notificationService;
     private final AuditService auditService;
+    /**
+     * 业务号 → 登录名 的反查（补丁 A1）。
+     * ⚠️ <b>刻意是 {@link ObjectProvider}、不是裸的 {@code UserStateLookup}</b>：本类是
+     * {@code @Controller} ⇒ {@code @WebMvcTest} 切片**一定会构造它**，而 impl
+     * （{@code UserStateLookupService}）**刻意不被 {@code AbstractSmokeTest} @Import**
+     * （见该文件那条 ⚠️）—— 裸依赖 = 找不到 bean ⇒ 整个切片启动失败（块 1 那次 237 / 77 errors 同型）。
+     * 取不到 ⇒ {@code getIfAvailable() == null} ⇒ 闸侧 fail-open（见 {@code IdentityGuard}）。
+     */
+    private final ObjectProvider<UserStateLookup> userStateLookupProvider;
 
     public MerchantApplicationController(MerchantApplicationService applicationService,
                                          NotificationService notificationService,
-                                         AuditService auditService) {
+                                         AuditService auditService,
+                                         ObjectProvider<UserStateLookup> userStateLookupProvider) {
         this.applicationService = applicationService;
         this.notificationService = notificationService;
         this.auditService = auditService;
+        this.userStateLookupProvider = userStateLookupProvider;
     }
 
     /**
@@ -78,7 +93,7 @@ public class MerchantApplicationController {
             @RequestParam(value = "licenseImage", required = false) String licenseImage,
             HttpServletRequest request
     ) {
-        if (!IdentityGuard.requireSelfOrAdmin(request, username)) {
+        if (!IdentityGuard.requireSelfOrAdminByUsername(request, username, userStateLookupProvider.getIfAvailable())) {
             return IdentityGuard.forbidden();
         }
 
@@ -108,7 +123,7 @@ public class MerchantApplicationController {
             @RequestParam(value = "limit", required = false) Integer limit,
             HttpServletRequest request
     ) {
-        if (!IdentityGuard.requireSelfOrAdmin(request, username)) {
+        if (!IdentityGuard.requireSelfOrAdminByUsername(request, username, userStateLookupProvider.getIfAvailable())) {
             return IdentityGuard.forbidden();
         }
         return ResponseEntity.ok(Result.of(applicationService.myApplications(username, limit)));

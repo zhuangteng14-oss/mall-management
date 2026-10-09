@@ -27,8 +27,8 @@
 ### 设计意图（读区间）
 
 - `docs/agent/c3-modules.md:47-54` —— §1 的四视图 + 四个管理员动作。⚠️ 本块只做**前两行**（用户列表/详情 → 封禁/解封；商家列表/资质 → 入驻审核）；「举报工单」归块 6，「标签」**本块不做**。
-- `docs/agent/c3-modules.md:241` —— §八「**不做多商家入驻（新功能，先占位）**」。⚠️ **与本节任务冲突，已由用户裁决**（2026-10-09「按用户要求做，不按稿做」）：本块**做**「一个账号从客户升为商家」的入驻审核；**不做**的是「同一账号开多家店」。
-- `docs/agent/c3-modules.md:238` / `:242` —— 另两条边界：不做购物车拆分（块 4）、**不做细粒度权限（单一管理员角色）** —— 后者是本块「admin 端点不加角色闸」的依据（同 TD-18）。
+- `docs/agent/c3-modules.md:266` —— §八「**不做多商家入驻（新功能，先占位）**」。⚠️ **与本节任务冲突，已由用户裁决**（2026-10-09「按用户要求做，不按稿做」）：本块**做**「一个账号从客户升为商家」的入驻审核；**不做**的是「同一账号开多家店」。
+- `docs/agent/c3-modules.md:263` / `:267` —— 另两条边界：不做购物车拆分（块 4）、**不做细粒度权限（单一管理员角色）** —— 后者是本块「admin 端点不加角色闸」的依据（同 TD-18）。
 - `docs/agent/c3-blocks-index.md:14` —— 块 2 在 8 块路线里的位置与依赖。
 - `docs/agent/progress.md:940` / `:1474` —— 「**为什么当年不做 `#/register`**」与「**`ANON_RIGHT` 为什么不拆两条**」的原始裁决。⚠️ 本块要做前者 ⇒ **必须先读那两条理由**（一条是「凭空造路由 = 凭空造约定」，一条是「两个链接指同一处 = 假承诺」）。
 
@@ -41,7 +41,7 @@
   ⚠️ 已核实：`send` **不校验白名单**（类注释 `:19-24`）⇒ 要新 code 时**只加常量**，不动表、不动 `send`。
 - `.../admin/service/AuditService.java:73-86` —— `record(AuthSession.Identity actor, String action, String targetType, String targetId, Object before, Object after)：void`，**fail-open**（catch 一切、只打 `ERROR ... AUDIT`）。`actor` 用 `AuthSession.identify(request)` 取 —— **认不出身份 = `ActorId` / `ActorRole` 双 NULL**。
 - `.../admin/AuditActions.java:27-79` —— 动作 tag 常量，**块 1 时只有 2 条**（`:35` / `:51`），**块 2 加到 9 条**（新增 `:56-77`）。⚠️ 类注释 `:19-26` 明写「其余写端点**随各自那一笔挂**」⇒ **本块每个写端点都在这里加一条**（见「要新建」）。
-- `.../shared/web/IdentityGuard.java:67-76` —— `requireSelfOrAdmin(request, paramId)`：自己 / 管理员 / **解析不出身份** → 放行，否则 403。⚠️ 必须在方法体**第一行**调（`:60`）。
+- `.../shared/web/IdentityGuard.java:73-82` —— `requireSelfOrAdmin(request, paramId)`：自己 / 管理员 / **解析不出身份** → 放行，否则 403。⚠️ 必须在方法体**第一行**调（`:66`）。
 - `.../shared/web/Result.java:64-133` —— `of(...)` / `ok(...)` / `fail(...)`；**禁 `putAll`**（`ResultByteEquivalenceTest` 钉着）。
 - `.../shared/web/GlobalExceptionHandler.java:83` —— ⚠️ `@RestControllerAdvice(assignableTypes = {MessageController, GoodsController})` —— **新 Controller 不在白名单里** ⇒ 新端点**一个参数约束都不要加**（`@NotBlank` 等会逃逸成 400 空体；类级 `@Validated` 会撞 CGLIB 断言族）。
 
@@ -50,8 +50,8 @@
 - `mall_management_sql.sql:89-95` —— `login`（`UserName` PK / `Password` / `Role` int / `Id` 业务号）。**无任何状态列**；种子 `:99`。
 - `mall_management_sql.sql:182-193` —— `user` 9 列（`username` PK / `usertype` **中文** 客户·商家·管理员 / `customerid` / `merchantid` / `gender` / `age` / `email` / `selfintroduction` / `address`）。**无审核态、无封禁态**；种子 `:197`。
 - `mall_management_sql.sql:105-110` —— `merchantimage`（`UserName` PK / `MerchantId` / `image`）；客户侧孪生表 `customerimage`。
-- `.../user/controller/UserController.java:102-143` —— `loginSelect`（`:102`，返回**裸 `int`** 1/2/3/**0 = 失败**；成功且取到业务号时建会话）、`loginAdd`（`:127`，返回**裸 `String`** `"0"` / `"添加成功！"`）。⚠️ **`loginSelect` 是封禁唯一的必经闸**（待裁 3）。
-- `.../user/controller/UserController.java:149-175` —— `getUserInfo`（`:149`，失败 = 200 空体）、`updateAvatar`（`:158`）、`updateUserInfo`（`:167`，**只认 email / address / selfintroduction 三参数**）；`:219` = `/user/me`（会话身份的读路径）。
+- `.../user/controller/UserController.java:111-152` —— `loginSelect`（`:111`，返回**裸 `int`** 1/2/3/**0 = 失败**；成功且取到业务号时建会话）、`loginAdd`（`:136`，返回**裸 `String`** `"0"` / `"添加成功！"`）。⚠️ **`loginSelect` 是封禁唯一的必经闸**（待裁 3）。
+- `.../user/controller/UserController.java:158-184` —— `getUserInfo`（`:158`，失败 = 200 空体）、`updateAvatar`（`:167`）、`updateUserInfo`（`:176`，**只认 email / address / selfintroduction 三参数**）；`:228` = `/user/me`（会话身份的读路径）。
 - `.../user/service/UserService.java:136-152` —— `loginSelect(username, password)`：`selectRoleByCredentials` → int，**catch 后一律 0**。
 - `.../user/service/UserService.java:188-203` —— `businessId(username, role)`：**role 1/3 → `customerid`；2 → `merchantid`**（⇒ **管理员也有 `customerid`**，这条决定了「通知管理员」的收件号怎么取）。
 - `.../user/service/UserService.java:240-276` —— `@Transactional loginAdd(...)`：查重 → 按 `usertype` 写三表 → `evictPublic`。⚠️ **TD-15**：`usertype` 非法值时**仍返回「添加成功！」但不插任何行**（`docs/agent/tech-debt.md:190-201`）—— 本块若碰它，先读那条。
@@ -67,7 +67,7 @@
 
 - `.../src/router/index.js:451` —— `/admin/business/accounts`（「用户与商家治理」）今天 `component: AdminStub` —— **本块的替换点**（照 `:456` notify / `:463` audit 的**同行替换**做法 ⇒ 零漂移）。
 - `.../src/router/index.js:434` —— `AdminStub` 定义；`:448-463` —— admin 壳的 children（11 条占位 + 2 条真页）。
-- `.../src/config/admin-nav.js:37` —— 侧边栏项 `accounts`（`to: '/admin/business/accounts'`）。**入口已在** ⇒ ⚠️ `admin-nav.js` **本块不动**（改 key/to 要三处同改）。
+- `.../src/config/admin-nav.js:43` —— 侧边栏项 `accounts`（`to: '/admin/business/accounts'`）。**入口已在** ⇒ ⚠️ `admin-nav.js` **本块不动**（改 key/to 要三处同改）。
 - `.../src/views/admin/StubPage.vue:1-46` —— 占位组件（`:5` 自述「不写库，也不建业务端点」；`:44` 说明为何**故意零请求**）。
 
 ### 样板（照抄这两个真页，别自创风格）

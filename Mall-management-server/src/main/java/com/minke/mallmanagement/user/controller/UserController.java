@@ -7,9 +7,11 @@ import com.minke.mallmanagement.shared.web.AuthSession;
 import com.minke.mallmanagement.shared.web.AuthTokenStore;
 import com.minke.mallmanagement.shared.web.IdentityGuard;
 import com.minke.mallmanagement.shared.web.Result;
+import com.minke.mallmanagement.shared.web.UserStateLookup;
 import com.minke.mallmanagement.user.service.UserService;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -90,10 +92,17 @@ public class UserController {
 
     private final UserService userService;
     private final AuditService auditService;
+    /** 业务号 → 登录名 的反查，只给 {@code updateProfile} 那一行判据用（补丁 A1）。
+     *  ⚠️ 同 {@code MerchantApplicationController} 那条：刻意 {@link ObjectProvider}（不是裸依赖）
+     *  —— impl 不被 smoke 切片 @Import，裸依赖会让整个切片起不来；取不到即 fail-open。
+     *  ⚠️ 它**不**让本类变成 AOP 代理（{@code userControllerIsNotAopProxied} 那条断言不受影响）。 */
+    private final ObjectProvider<UserStateLookup> userStateLookupProvider;
 
-    public UserController(UserService userService, AuditService auditService) {
+    public UserController(UserService userService, AuditService auditService,
+                          ObjectProvider<UserStateLookup> userStateLookupProvider) {
         this.userService = userService;
         this.auditService = auditService;
+        this.userStateLookupProvider = userStateLookupProvider;
     }
 
     //这是一个接口（用于返回登录界面对应的数据，决定了此次登录去往哪个端【客户端or商家端】）
@@ -314,7 +323,8 @@ public class UserController {
      * <h3>【与同族 {@link #updateUserInfo} 的两处**刻意不同**，别照抄对方】</h3>
      * <ol>
      *   <li><b>挂 {@link IdentityGuard}</b>：{@code username} 是「代表调用者自己」的入参 ⇒
-     *       必须是方法体**第一行**。⚠️ 同族的 {@code updateUserInfo} / {@code updateAvatar}
+     *       必须是方法体**第一行**。⚠️ 补丁 A1：走的是**登录名版**
+     *       {@code requireSelfOrAdminByUsername}（业务号版会把登录名与会话里的业务号直接比 ⇒ 恒 403）。⚠️ 同族的 {@code updateUserInfo} / {@code updateAvatar}
      *       **没有**这一行（它们是既有端点，挂上去会改既有契约面）；本端点是新增面，
      *       按多账户隔离笔的纪律一次做对，不为「跟邻居长得一样」留一个能改别人资料的洞。</li>
      *   <li><b>成功后记审计</b>（{@link AuditActions#USER_UPDATE}）：走 {@code GoodsController.goodsUp}
@@ -338,7 +348,7 @@ public class UserController {
             @RequestParam(value = "age", required = false) Integer age,
             HttpServletRequest request
     ) {
-        if (!IdentityGuard.requireSelfOrAdmin(request, username)) {
+        if (!IdentityGuard.requireSelfOrAdminByUsername(request, username, userStateLookupProvider.getIfAvailable())) {
             return IdentityGuard.forbidden();
         }
 

@@ -336,7 +336,7 @@ router.beforeEach((to) => {
 // ── 滚动行为（A1，2026-10-07）：路由切换置顶 / 后退还原 ──────────────────────────────
 // 治的病（用户实测）：列表页（`GoodsSelect`）滚到中间 → 点商品进详情 ⇒ 详情页**停在差不多的
 //   滚动位置**，不回到顶部。根因**不在**详情页自身，而是「整页滚动」这件事 **7c 之后才成立**：
-//   7c 把 `.app-shell` 由 `height:100vh` 改成 `min-height:100vh`（`AppShell.vue:231-245`）⇒
+//   7c 把 `.app-shell` 由 `height:100vh` 改成 `min-height:100vh`（`AppShell.vue:261-275`）⇒
 //   滚动由「壳内容器滚动」变成「整页（document）滚动」。而 `scrollBehavior` **全仓本来就没配**
 //   ⇒ 既不置顶、也不还原，于是窗口的原滚动位置被原样带进新页。
 //   ⚠️ 反过来说：7c 之前补它也**没用** —— 那时滚的是 `.app-shell` 这个容器，不是 `window`
@@ -461,6 +461,13 @@ router.addRoute({
     { path: 'observe/timeline',   meta: { key: 'observe', sub: 'timeline',   title: '状态流转' },   component: AdminStub },
     { path: 'observe/logs',       meta: { key: 'observe', sub: 'logs',       title: '实时日志' },   component: AdminStub },
     { path: 'observe/audit',      meta: { key: 'observe', sub: 'audit',      title: '权限与审计' }, component: () => import('../views/admin/AuditPage.vue') },
+
+    // C3 块 2〈用户块〉补丁 B1（2026-10-09 手验后）：管理员**共享收件箱**从 `AccountsPage.vue`
+    //   里提出来、成侧边栏**顶层独立项**（原来它嵌在那页当第 ⑤ 块，页内挤了 4 块）。
+    //   ⚠️ `NotifyInbox` 按 `route.path.startsWith('/admin')` 派生收件人 ⇒ 挂在 `/admin/**` 下
+    //   自动取 `ToType='admin'` / `ToId='*'`（哨兵见该文件 `:99-103`）—— **组件一行不改**。
+    //   ⚠️ 本行**追加在 children 末尾**（`:462` 是全仓对该文件的最大被引行，插在它之前会集体漂移）。
+    { path: 'inbox', meta: { key: 'inbox', title: '通知收件箱' }, component: () => import('../views/NotifyInbox.vue') },
   ],
 })
 

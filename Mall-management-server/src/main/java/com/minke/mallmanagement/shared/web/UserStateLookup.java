@@ -2,7 +2,12 @@ package com.minke.mallmanagement.shared.web;
 
 /**
  * 用户**状态**只读探针（C3 块 2 用户块新增）—— 把「这个人被封禁了吗 / 这个商家被冻结了吗」
- * 从 {@code user} 域借给**两个不属该域**的调用方，且**不带任何写能力**。
+ * 从 {@code user} 域借给**不属该域**的调用方，且**不带任何写能力**。
+ *
+ * <p>⚠️ 补丁 A1 起加第三读 {@link #usernameOf}（业务号 → 登录名）：它不是「状态」，但**同属
+ * 「user 域的只读事实、借给外域用」**这一条判据 ⇒ 仍住本接口（另开一个接口只为放一个方法，
+ * 会多一份装配与一个 {@code ObjectProvider} 空转点）。三个调用方现在是：封禁第二道闸
+ * （{@code AuthInterceptor}）、下单冻结闸（{@code OrderService}）、self 判据（{@code IdentityGuard}）。
  *
  * <h2>【为什么是一个接口，而不是让调用方直接吃 {@code UserDao}】</h2>
  * 两个调用方分居两处、各自有各自的切片约束：
@@ -41,6 +46,25 @@ public interface UserStateLookup {
 
     /** 按**登录名**（{@code user} 表主键）判是否被封禁 —— {@code loginSelect} 那一跳的入参就是它。 */
     boolean isBannedByUsername(String username);
+
+    /**
+     * 由**业务号**反查**登录名**（{@code user} 表主键）—— 给「入参是登录名、而会话里存的是业务号」
+     * 的那一类端点做 self 判据用（补丁 A1）。
+     *
+     * <p>{@code identity.userId()} 是业务号（{@code user.customerid} / {@code user.merchantid}，
+     * 见 {@link AuthSession}），而 {@code /merchant/apply} · {@code /merchant/myApplications} ·
+     * {@code /user/updateProfile} 的入参是**登录名** ⇒ {@code IdentityGuard.requireSelfOrAdmin}
+     * 直接比会**永不相等**（客户恒 403，实测就是这个）。故那三处改走
+     * {@code IdentityGuard.requireSelfOrAdminByUsername}，由本方法把业务号翻成登录名再比。
+     *
+     * @param userId 业务号，与会话里存的那个值是同一个
+     * @param role   用来选列：{@code 2}（商家）⇒ 查 {@code merchantid}；其余（含 {@code null}）
+     *               ⇒ 查 {@code customerid}。⚠️ 与 {@link #isBanned} 的选列判据同源
+     * @return 登录名；查不到（账号不存在 / 该列 NULL / **读失败**）一律 {@code null} ——
+     *         ⚠️ 与前三条一样守 fail-open：调用方把 {@code null} 当「判不出来」，**不据此拒绝**
+     *         （本接口存在的理由见类注释：封禁 / 冻结不是安全边界，读不通不该把小病治成大病）
+     */
+    String usernameOf(String userId, Integer role);
 
     /**
      * 这个商家的降级是不是已进入**冻结态**（{@code DowngradeState='frozen'}）——

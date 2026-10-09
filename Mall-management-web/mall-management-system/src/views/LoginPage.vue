@@ -297,7 +297,7 @@ export default {
             username: this.loginAccount,
             password: this.loginPwd
           }));
-        const role = await res.text();
+        const role = await res.text(); if (role.trim() === "4") { this.loginWarnText = "账号已被封禁，请联系管理员解封"; return; }   // ⚠️ C3 块 2 用户块**手验后补丁**（2026-10-09，用户第 2 条）：封禁用户登录必须说「已封禁」，而不是落成「未识别到账户」。⚠️ **必须写在 `:306` 的 `/user/me` 之前**：封禁用户后端**不写会话** ⇒ 那一发必 401、先抛，异常被 `:328` 的通用文案接走；写在下面那条 `if/else` 链（`:317` 起）里是**死代码** —— `role === "0"` 那支今天就是这么死的（它同样在 `:306` 之后）。⚠️ 用 `role.trim()` 比对：`res.text()` 是**原始**响应体（A3 的断言也是 `body.trim()`）。同行追加，保净零行数（本文件被 `c3-block-2-user.md` 按 `:283-287` / `:289-330` 引）。
 
         // 登录成功后立即获取用户信息，保存商家ID / 客户ID
         // P2.6（2026-10-05）：改走**会话驱动**的 /user/me —— 凭据只在上一发 loginSelect 里出现，
@@ -314,7 +314,7 @@ export default {
         if (userData.customerid) { setCustomerId(userData.customerid); clearMerchantId(); }   // 客户：清上一位商家的 merchantid
         // ⚠️ 清**写在这两个「有值」分支内**：role=0 / `me` 401 那一发 body 里没有 id ⇒ 两个分支都不跑 ⇒ 不会误伤「已登录又登一次、密码打错」的旧身份。
 
-        if(role === "0"){
+        if(role === "0"){   // ⚠️ **本支不可达**（2026-10-09 核实，非本笔引入）：它排在 `:306` 的 `/user/me` **之后**，而 `role === "0"` 时后端不写会话 ⇒ 那一发必 401、先抛 ⇒ 异常被 `:328` 的通用文案接走，永远轮不到这里。留着只为**不动行号**（本文件最大被引行是 `:687`）。封禁（`"4"`）那支已按同一理由提到 `:300` 去早退。
           this.loginWarnText = "未找到该用户，请查看对应账号密码有无写错，或者前往右侧进行注册";
         }else if(role === "1"){
           setUsername(this.loginAccount); setRole(role); await this.mintToken(role);   // ⚠️ 止血笔：同行追加，保持净零行数（防 `api-contract.md:172` 引的 `:216` 漂移）；P2.6 起 setCredentials → setUsername；多账户隔离笔（2026-10-06）再加铸票（见 mintToken）

@@ -26,9 +26,9 @@ C3 全部写操作的**横切底座**，两块各管一半：
 ### 设计意图（读区间）
 - `docs/agent/c3-modules.md:133-139` —— §11「权限与审计」的原始定义（**横切所有写操作**：记录 + 查看 / 筛选 / 导出）。
 - `docs/agent/c3-modules.md:96-104` —— §6「系统通知」的功能面（公告 / 群发 / 定向 / 模板）。
-- `docs/agent/c3-modules.md:247-296` —— §9.1 秒杀双向制 + §9.2 评论区多对象。
+- `docs/agent/c3-modules.md:272-321` —— §9.1 秒杀双向制 + §9.2 评论区多对象。
   ⚠️ **§9.2 末段是本块 I2 的硬约束**（通知要支持「被评论 / 被回复 / 被 @」）。
-- `docs/agent/c3-modules.md:300-311` —— §10 路线修订（本块 = 8 块路线里的第 1 块；§七 旧批次表已作废）。
+- `docs/agent/c3-modules.md:325-336` —— §10 路线修订（本块 = 8 块路线里的第 1 块；§七 旧批次表已作废）。
 
 ### 已落的代码 —— 审计半边（读它就是读**现成的形状**）
 - `Mall-management-server/src/main/java/com/minke/mallmanagement/admin/service/AuditService.java:42-154`
@@ -58,7 +58,7 @@ C3 全部写操作的**横切底座**，两块各管一半：
   （正文留在域表 `notification` 上，靠 `batchId` 一 join 就到 —— 审计做**索引**，正文留域表）。
 
 ### 权限面（块 1 的另一半地基）
-- `.../shared/web/IdentityGuard.java:65-74` —— `requireSelfOrAdmin` 的三档判据。
+- `.../shared/web/IdentityGuard.java:71-80` —— `requireSelfOrAdmin` 的三档判据。
   ⚠️ `:36-49` 是「**解析不出身份 = 放行**」的理由 —— 最容易被误读成漏洞的一条。
 - `.../shared/web/AuthSession.java:77-134` —— `ROLE_ADMIN=3`（`:77`）/ `Identity`（`:84`）/
   `identify`（`:105`）/ `authorize`（`:128`）。**识别口径 vs 授权口径**是本块的关键区分（cookie 来的 `role=3` 只被识别、不被授权）。
@@ -93,7 +93,7 @@ C3 全部写操作的**横切底座**，两块各管一半：
   ⚠️ 全仓引本文件的**最大被引行是 `:378`**：**任何新增行必须落在它之后** —— 该理由的原文在 `:397-404`。
   两个**端壳**的 `notify` 子路由也照此用 `router.addRoute('customer'|'merchant', …)`
   **追加在文件尾**（不往 `:57-83` / `:88-122` 里插行）。
-- `.../src/config/admin-nav.js:32-53` —— `ADMIN_SIDEBAR`。本块两条：
+- `.../src/config/admin-nav.js:32-59` —— `ADMIN_SIDEBAR`。本块两条：
   `observe/audit`（`:52`「权限与审计」）与 `business/notify`（`:42`「系统通知」）。
   ⚠️ 改 `key` / `to` 要**三处同改**（前因见 `:17`）。
   ⚠️ **三端**的通知入口在 `config/nav.js`（**不在** `admin-nav.js`）：`CUSTOMER_NAV.right` / `MERCHANT_NAV.right`

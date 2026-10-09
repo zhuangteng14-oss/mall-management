@@ -261,3 +261,23 @@ export function adoptSharedToken() {
   setToken(shared)
   return true
 }
+
+/** 只弃**本页**的票，**不碰**「最近登录」指针（`localStorage`）—— 与 {@link clearToken} 的 D6 规则**相反**。
+ *
+ *  <h3>【C3 块 2 手验后补丁「丁」（2026-10-10，用户裁决）：管理端入口不能持票】</h3>
+ *  **管理端的票按构造只可能是别人的**：管理员**铸不出票**（`/user/token` 对 cookie 管理员答 401，
+ *  TD-18），也**不发布**指针（D6 裁决）；指针的**认领**管理端入口早已不做（`main-admin.js` 不调
+ *  {@link adoptSharedToken}）—— 唯一漏的是**同一个标签页**里从商城入口登录留下的这张
+ *  `sessionStorage` 票（两个 store 同一键名，见本文件尾部那节）。而 `AuthSession.identify`
+ *  **票优先**（且票不认识也**不回落** cookie）⇒ 管理端的每个请求都被后端认成**那个人**：
+ *  · `/notification/list` 拿 `'*'` 比他的业务号 ⇒ **403**（收件箱打不开）；
+ *  · `admin_audit` 的 `ActorId/ActorRole` 记成他 —— **实测**（a3 库，2026-10-09）Id=22 的
+ *    `user.ban` 记 `ActorId=uDopHnCeLS / ActorRole=1`，而那是**客户 1111** 的业务号。
+ *
+ *  ⚠️ **别拿 {@link clearToken} 顶替**：它按 D6 在「本页票 == 指针」时把 `localStorage` 指针
+ *  **一起删掉** —— 管理端不该替别的标签页清指针（那会让新标签页认领不到票）。本函数刻意**只动
+ *  sessionStorage**。⚠️ 弃票之后管理端靠 **cookie 会话**认身份（闸关档下 `identify` 看得见
+ *  `role=3` ⇒ `IdentityGuard` 的管理员档放行）；🔴 **闸开的档（默认 profile）本入口仍无凭据，
+ *  是已知缺口**（§十三 13-5 / 新增 TD）。 */
+export function dropPageToken() { sessionStorage.removeItem(K.token) }
+
