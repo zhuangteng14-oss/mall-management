@@ -1,0 +1,23 @@
+Id = 5
+ActorId = null
+ActorRole = null
+Action = notification.send
+TargetType = notification
+TargetId = 2f1c7fc1-15da-4fd4-9802-9ac8a2e11c20
+BeforeJson = null
+AfterJson = {"sent": 1, "toId": "M0", "title": "HookProbe-B", "toType": "merchant", "batchId": "2f1c7fc1-15da-4fd4-9802-9ac8a2e11c20", "audience": null, "eventType": "system.notice"}
+OccurredAt = 2026-10-09 11:15:33.017
+----------------
+Id = 4
+ActorId = null
+ActorRole = null
+Action = notification.send
+TargetType = notification
+TargetId = 780bfcbb-6732-4fc8-aeea-a8618f8596cd
+BeforeJson = null
+AfterJson = {"sent": 3, "toId": null, "title": "HookProbe-A", "toType": null, "batchId": "780bfcbb-6732-4fc8-aeea-a8618f8596cd", "audience": "merchant", "eventType": "system.notice"}
+OccurredAt = 2026-10-09 11:15:32.860
+----------------
+RETURNED_ROWS = 2
+TOTAL_ROWS = 2  BEFORE_NULL = 2  ACTORID_NULL = 2
+notification_TOTAL_ROWS = 7

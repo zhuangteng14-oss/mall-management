@@ -482,7 +482,7 @@ button {
 
 /* 本页根：稿 `.wrap` 的角色由它承接（壳 `.content` / `.page` 已归零内距 —— commit 0 / 乙案）。
    ⚠️ `flex:1` + `min-width:0` **必须在**：原 `/…/user/chat` 挂载点下本组件是壳 `.user-page`
-   （`display:flex`，`AppShell.vue:318-322`）的**直接** flex 子项 —— 不 `flex:1` 只能拿内容宽、
+   （`display:flex`，`AppShell.vue:361-365`）的**直接** flex 子项 —— 不 `flex:1` 只能拿内容宽、
    不 `min-width:0` 内部栅格会把父容器撑破。在 `/…/msg` 下父级不是 flex，两行属性零副作用。
    ⚠️ A5（2026-10-07）起 `/…/user/chat` 改 `redirect` → `/…/msg`（`router/index.js`）⇒ 现存挂载点
    只剩 `/…/msg`（父级不是 flex）—— 这两行**暂时**无活干，但**不删**：路由若回退，它们立刻又是必需的。 */

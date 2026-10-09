@@ -5,11 +5,12 @@
 > **Java 坐标约定（2026-09-30 补）**：`G:` = `GoodsController.java`（前 `MallManagementGoodsController.java`）、`M:` = `MessageController.java`（前 `MallManagementMessage.java`）、`U:` = `UserController.java`（前 `MallManagementUserController.java`）的**语句行**（**不是** route 注解行，与 `api-contract.md` 的口径**相反**，两文件不要互抄）。B1 / B2 / B3 之后若干读写路径已搬到 `mallmanagement_service` 下的 Service ⇒ 本文件出现 `GoodsCacheService:` / `UserCacheService:` / `OrderStateMachine:` 等前缀，那是**跨文件搬迁**、不是行号漂移。**全文件 Java 坐标已于 2026-09-30 对 HEAD 逐条复核并替换** —— 原一版系统性偏旧（成因同 `api-contract.md:4`：各笔新代码插入后未同步）。⚠️ **三层四笔（order PR #25 `28194b4` / goods 2026-10-02 / user PR #32 `0c07e96` / message `8ed5fc1`）后**：`G:` / `M:` / `U:` 三个 Controller 已只剩路由 —— SQL 与业务体分别下沉 `<域>/dao/<域>Dao.java` 与 `<域>/service/`。**本文件下表凡涉这三个域的 `G:` / `M:` / `U:` 坐标，若未随该域的笔改写，一律已陈旧**；下表 `:41-48` 的用户域行已于第三笔、消息域行（`M:378`）已于第四笔改写，其余（`U:` 一族、`G:` 的未重测行）引用前请以源码为准。
 > ⚠️ **2026-10-02 笔 2 后**：订单端点的 SQL 已随 `OrderController` 拆出，迁至 `order/dao/OrderDao.java`；`GoodsController` 的商品行整体 **−9**（⚠️ 该「−9」只是**首两行**的口径：以 2026-09-30 基线 `148e77b` 逐条实测，`goodstype`/`goodsAdd` 为 −9、`goodsSelect` 一族 −8、`productCodePrice` −4、`goodsUp` 之后 +16/+23/+23，**不要拿 −9 换算全表**；详见 `api-contract.md:6`）。下表**订单相关行的 `G:` 已改指 `OrderDao`**，其余 `G:` 值**尚未重测** —— 引用前请以源码为准。
 > ⚠️ **2026-10-02 三层重构第二笔（商品域）后**：商品 **8 条内联 SQL** 从 `GoodsController` 下沉到 `goods/dao/GoodsDao.java`，写/读方法体进 `goods/service/GoodsService.java` —— 本表原 `G:` 的**商品行**据此改指 `GoodsDao.searchByKeyword`。这四个走缓存的读路径（`GoodsCacheService:81` / `:146` / `priceByTriple`）**未受影响**（它们的 SQL 本就在 Service，2026-09-30 已复核）。新增前缀：`S:` = `GoodsService.java`、`D:` = `GoodsDao.java`。
-> 表数量：**12** —— 11 张原始表 + `order_state_transition`（B3 于 2026-09-29 追加在 `.sql` 末尾的 Migration 块，`:221-235`）。
-> `.sql` 末尾另有一段 S1a 追加的 Migration 块（`:236-245`，2026-09-30），**只含一条 `CREATE UNIQUE INDEX`，不建表** —— 故表数仍为 12。
+> 表数量：**15** —— 11 张原始表 + `order_state_transition`（B3，2026-09-29，追加在 `.sql` 末尾的 Migration 块，`:221-235`）+ `admin_audit`（C3 批 A，2026-10-08，`:264-292`）+ `notification`（C3 块1-I2，2026-10-09，`:294-327`）+ `notification_template`（同笔，`:329-345`）。
+> ⚠️ **2026-10-09 更正 —— 原写 12 是漏登**：先后漏了批 A 的 `admin_audit`；I2 登记时一并补齐（同一缺口见 `db-migration.md` 注意 8）。本文件此前所有「12 张表」的字面与据此推导的计数（索引张数、UNIQUE 个数）也随之更新。
+> `.sql` 末尾另有一段 S1a 追加的 Migration 块（`:236-245`，2026-09-30），**只含一条 `CREATE UNIQUE INDEX`，不建表**。
 > 全部为 `ENGINE=InnoDB`、`utf8mb4_0900_ai_ci`。
 >
-> ⚠️ 该 `.sql` 行尾是 CRLF（245 个 `\n` / 246 个 `\r`，含 1 个裸 CR —— 2026-09-30 S1a 追加后**重新实测**，原为 235 / 236）。用会把行尾归一化的编辑器改它，diff 会变成整份文件重写 —— 改前先确认 diff 只有预期行。
+> ⚠️ 该 `.sql` 行尾是 CRLF（**345 个 `\n` / 345 个 `\r`，0 个裸 CR** —— 2026-10-09 I2 追加两个块后**重新实测**；上一版为 245 / 246，S1a 前原为 235 / 236）。用会把行尾归一化的编辑器改它，diff 会变成整份文件重写 —— 改前先确认 diff 只有预期行。
 >
 > **完整字段清单 / 索引基线 / 外键关系见 §6–§9**（2026-09-30 补齐，逐列逐索引以 `.sql` 为准）。
 
@@ -29,12 +30,15 @@
 | `user` | 用户档案 | `username` | usertype, customerid, merchantid, gender, age, email, selfintroduction, address | — | 仅主键 | `:182-193` |
 | `user_conversation_read` | 会话最后已读时间 | **复合** `(user_id, user_type, other_id, other_type)` | last_read_time | 复合主键天然支撑 `ON DUPLICATE KEY UPDATE` upsert | 主键即索引 | `:203-210` |
 | `order_state_transition` | 订单状态流转时间线（B3 新增；C3 时间线视图的数据源） | `Id`（自增，**bigint**） | OrderId, Action, FromState, ToState, OccurredAt, created_at, updated_at | **append-only**；同单内排序用 `OccurredAt`，**不是 `Id`**（落库是 4 线程并发 INSERT，`Id` 在 INSERT 时才分配）；`updated_at` 恒等于 `created_at` | 主键 + **`idx_order_state_transition_order(OrderId, OccurredAt)`** | `:224-235` |
+| `admin_audit` | 管理端审计日志（C3 批 A 新增；「权限与审计」页数据源，横切所有写操作） | `Id`（自增，**bigint**） | ActorId, ActorRole, Action, TargetType, TargetId, BeforeJson, AfterJson, OccurredAt | **append-only**（只 INSERT，永不 UPDATE / DELETE）；`ActorId` 是**业务号**不是登录名；快照列是 MySQL `json` | 主键 + **`idx_admin_audit_occurred(OccurredAt)`** + **`idx_admin_audit_actor(ActorId, OccurredAt)`** + **`idx_admin_audit_target(TargetType, TargetId, OccurredAt)`** | `:264-292` |
+| `notification` | 系统通知（C3 块1-I2 新增；平台 → 个人单向投递，**每收件人一行**） | `Id`（自增，**bigint**） | BatchId, ToId, ToType, EventType, Title, Content, TargetType, TargetId, ReadAt, CreatedAt | `ReadAt NULL` = 未读（唯一判据）⇒ 标记已读会 UPDATE，**非** append-only；`TargetId` 是**软引用**（**无 FK**，见 §8） | 主键 + **`idx_notification_inbox(ToId, ToType, CreatedAt)`** + **`idx_notification_unread(ToId, ToType, ReadAt)`** + **`idx_notification_batch(BatchId)`** | `:294-327` |
+| `notification_template` | 系统通知模板（C3 块1-I2 新增；`c3-modules.md §6` 的「消息模板管理」） | `Id`（自增，**bigint**） | TemplateKey, TitleTemplate, BodyTemplate, Enabled | `Enabled` 1 启用 / 0 停用（停用 = 逻辑废弃，不物理删） | 主键 + **`uk_notification_template_key(TemplateKey)`**（UNIQUE） | `:329-345` |
 
 种子数据交叉证据：`:176` 中 5 条 `productsales` 的 `OrderVolume` 全为 `0`，而 `:159` 的 `order` 表已有 6 条历史订单。
 
 ## 2. 索引现状
 
-**12 张表中 4 张有二级索引（共 5 个）**：`message` 2 个（`idx_from_to`、`idx_create_time`）、`order_state_transition` 1 个（`idx_order_state_transition_order`）、**`order` 1 个（`uk_order_orderId`，UNIQUE）**、**`goodstype` 1 个（`uk_goodstype_GoodType`，UNIQUE，2026-10-04 #11 新增）**。其余 **8 张表除主键外无任何索引**；全库**除主键外 2 个 UNIQUE**（`uk_order_orderId`，2026-09-30 S1a `:236-245`；`uk_goodstype_GoodType`，2026-10-04 `:246-262`；完整基线见 §7）。已知高频查询列缺索引：
+**15 张表中 7 张有二级索引（共 12 个）**：`message` 2 个（`idx_from_to`、`idx_create_time`）、`order_state_transition` 1 个（`idx_order_state_transition_order`）、**`order` 1 个（`uk_order_orderId`，UNIQUE）**、**`goodstype` 1 个（`uk_goodstype_GoodType`，UNIQUE，2026-10-04 #11 新增）**、**`admin_audit` 3 个**（批 A，非唯一）、**`notification` 3 个**（I2，非唯一）、**`notification_template` 1 个（`uk_notification_template_key`，UNIQUE，I2 新增）**。其余 **8 张表除主键外无任何索引**；全库**除主键外 3 个 UNIQUE**（`uk_order_orderId`，2026-09-30 S1a `:236-245`；`uk_goodstype_GoodType`，2026-10-04 `:246-262`；`uk_notification_template_key`，2026-10-09 I2 `:344`；完整基线见 §7）。已知高频查询列缺索引：
 
 | 查询位置 | SQL 条件 | 涉及表 | 现况 |
 |---|---|---|---|
@@ -43,7 +47,7 @@
 | `OrderDao:117` | `order WHERE CustomerId = ?` | `order` | `CustomerId` 无索引（原记 `G:507`，再前 `G:434`；2026-10-02 随订单端点迁至 `OrderDao`） |
 | `OrderDao:124` | `order WHERE MerchantId = ?` | `order` | `MerchantId` 无索引（原记 `G:525`，再前 `G:452`；同上） |
 | `UserCacheService:81` | `user WHERE customerid = ? OR merchantid = ?` | `user` | 两列均无索引；且 `OR` 无法走单列索引（`userSelect` 读路径已搬到该 Service；原记 `M:331`）。⚠️ HEAD 中**同形 SQL 共 3 处**：另有 `FriendCacheService:151`（`friendList` 的逐行 enrich）与 `MessageDao.selectUserPublicInfo:174`（SQL 定义行；调用者 `MessageService.getUserInfoById:497`，私有辅助 —— 原记 `M:378`，三层第四笔 `8ed5fc1` 后已下沉，`MessageController` 内**已无 SQL**） |
-| `orderPayIfUp` / `orderDeliveryIfUp` / `orderReceiveIfUp` + `OrderStateMachine.selectBitsSql()` | `order WHERE OrderId = ?` | `order` | ✅ **已消除（2026-09-30 S1a，`1e2fcfa`）** —— `uk_order_orderId` 一次解决索引与唯一性两面。**原状**：`OrderId` 无索引，且无 UNIQUE → 三个 CAS 端点与转移后读回每次都全表扫描。已登记 **TD-14**（`tech-debt.md:172`，含 2026-09-21 定性修正：本地 120 QPS 不可达属环境属性，索引代价须**同环境**对照举证）。**曾是** B2 fail-open + B3 并发热点的根：唯一性无约束、索引无兜底，一旦锁回落直行（`tech-debt.md:280` 三路 fail-open），就只剩应用层「先查后写」在守。⚠️ 唯一性现已由 DB 兜底，但**失败响应仍被 `orderAddLocked` 的 catch 吞成 200 + msg**（故 `A-S2a-1c` 数的是 msg 而非 5xx） |
+| `orderPayIfUp` / `orderDeliveryIfUp` / `orderReceiveIfUp` + `OrderStateMachine.selectBitsSql()` | `order WHERE OrderId = ?` | `order` | ✅ **已消除（2026-09-30 S1a，`1e2fcfa`）** —— `uk_order_orderId` 一次解决索引与唯一性两面。**原状**：`OrderId` 无索引，且无 UNIQUE → 三个 CAS 端点与转移后读回每次都全表扫描。已登记 **TD-14**（`tech-debt.md:172`，含 2026-09-21 定性修正：本地 120 QPS 不可达属环境属性，索引代价须**同环境**对照举证）。**曾是** B2 fail-open + B3 并发热点的根：唯一性无约束、索引无兜底，一旦锁回落直行（`tech-debt.md:291` 三路 fail-open），就只剩应用层「先查后写」在守。⚠️ 唯一性现已由 DB 兜底，但**失败响应仍被 `orderAddLocked` 的 catch 吞成 200 + msg**（故 `A-S2a-1c` 数的是 msg 而非 5xx） |
 | `GoodsCacheService.priceByTriple` 回源 | `goods WHERE MerchantId = ? AND GoodName = ? AND ProductCode = ?` | `goods` | 三元组无索引（B1 缓存回源路径，命中缺失即全表扫） |
 | `GoodsDao.searchByKeyword`（`:193-207`；2026-10-02 由 `GoodsController.productSearch` 搬入） | `goods WHERE GoodType = ? AND (… OR GoodName LIKE '%x%')` | `goods` | `GoodType` 无索引；且 `LIKE '%x%'` 本身也无法走索引。⚠️ 该 SQL 还**无 schema 前缀**（`GoodsDao` 8 条里唯一一条），但这只影响可移植性，不改变「走不了索引」的结论 |
 | 销量维护 | `productsales WHERE ProductCode = ? AND MerchantId = ?` | `productsales` | 无索引；亦无 `(ProductCode, MerchantId)` UNIQUE → 可写重复行 |
@@ -58,7 +62,7 @@
 |---|---|---|
 | 配置 | `spring.jpa.hibernate.ddl-auto=validate`（2026-10-04 起；原 `update`） | `application.properties:29` |
 | 依赖 | `spring-boot-starter-data-jpa` 已引入 | `pom.xml:51` |
-| 手写 DDL | `mall_management_sql.sql`，**12** 张表完整 CREATE TABLE（11 原始 + B3 追加 1） | 全文件 |
+| 手写 DDL | `mall_management_sql.sql`，**15** 张表完整 CREATE TABLE（11 原始 + B3/S1a 后追加 4） | 全文件 |
 
 **当前实际生效的是手写 `mall_management_sql.sql`。**
 原因：全项目**不存在任何 `@Entity`**——既有的唯一一个 POJO 曾是 `mallmanagement_class/info.java`（仅 `@Data`/`@AllArgsConstructor`/`@NoArgsConstructor` 三个 lombok 注解、无 JPA 注解、0 引用），**该类已于 2026-10-02 笔 1 挪包时删除**（`01df702`）。Hibernate 无实体可映射，`ddl-auto` 当前是**空转**，不会修改任何表结构。⚠️ **结论不变但依据换了**：从「有一个无注解的实体类」变成「**一个实体类都没有**」——条文原写「info.java 是唯一实体类」，笔 1 之后该句本身已不成立（详见 `project-map.md` 与 `tech-debt.md` TD-01）。
@@ -111,7 +115,7 @@
 
 ---
 
-## 6. 完整字段清单（12 张表，逐列以 `.sql` 为准）
+## 6. 完整字段清单（15 张表，逐列以 `.sql` 为准）
 
 > 行号 = `mall_management_sql.sql` 真实行号。`约束` 列照抄 DDL；`备注` 列出 COMMENT（本库仅 `order_state_transition` 有列注释）与已核实的语义。
 > 列级 `CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci` 在部分列上显式声明（下表标「显式」）、部分列省略 —— 因表默认值相同，**功能等价**，属声明噪音。
@@ -132,9 +136,13 @@
 | `user` | InnoDB | utf8mb4 | utf8mb4_0900_ai_ci | — | 5 | ✅ 期望 5 |
 | `user_conversation_read` | InnoDB | utf8mb4 | utf8mb4_0900_ai_ci | — | 4 | — |
 | `order_state_transition` | InnoDB | utf8mb4 | utf8mb4_0900_ai_ci | — | 0 | — |
+| `admin_audit` | InnoDB | utf8mb4 | utf8mb4_0900_ai_ci | — | 2 ⚠️ | — |
+| `notification` | InnoDB | utf8mb4 | utf8mb4_0900_ai_ci | — | 0 | — |
+| `notification_template` | InnoDB | utf8mb4 | utf8mb4_0900_ai_ci | — | 0 | — |
 
-> **12 张表的 ENGINE / CHARSET / COLLATE 完全一致**，且逐字等于库级默认值（`:15` `CREATE DATABASE ... DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci`）⇒ **没有任何表声明自己的字符集**，全套吃库级默认。
+> **15 张表的 ENGINE / CHARSET / COLLATE 完全一致**，且逐字等于库级默认值（`:15` `CREATE DATABASE ... DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci`）⇒ **没有任何表声明自己的字符集**，全套吃库级默认。
 > `AUTO_INCREMENT` = DDL 中的现值（导入基线）。
+> ⚠️ **后三张表（`admin_audit` / `notification` / `notification_template`）不属于「导入基线」** —— 它们是 `.sql` 末尾的 Migration 块，用 `IF NOT EXISTS` 追加、**块内不 DROP** ⇒ 全量重导**不清**它们（`admin_audit` 刻意保审计历史、`notification*` 刻意保通知历史）。其行数（2026-10-09 实测）**不是种子数据**：`admin_audit` 那 2 行是批 A 验收探针留下的 `goods.update`；`notification` 与 `notification_template` 均为 **0**（I2 验收后已清空，见 `slot-registry.md §十五`）。**P4 判据不覆盖这三张**（只查 `order/goods/login/user/friend`）。
 > **种子行数即 A3 的 P4 判据基线**：`ConcurrencyRunner.java:2521-2547`（**2026-10-02 实测**；原写 `:2404-2427`，2026-09-30 因 C 组升门禁的注释重写下移 17 行改为 `:2421-2444`，其后 B2 与 C 两段先后增补使本段**再下移 100 行**）只查 `order/goods/login/user/friend` 五张，期望 `6/5/5/5/4`，与本表**逐字一致**（其注释即写「`mall_management_sql.sql` 逐行计数」）。P4 的用途是「确认是刚导入过的干净实例，而非被上一轮污染过的库」⇒ 种子行数是**门禁输入而非装饰**，改种子数据会先让 P4 变红。
 
 ### 6.1 `customerimage`（`:23-28`）
@@ -262,7 +270,57 @@
 | `created_at` | datetime | NOT NULL DEFAULT CURRENT_TIMESTAMP | COMMENT：行落库时刻 |
 | `updated_at` | datetime | NOT NULL DEFAULT CURRENT_TIMESTAMP **ON UPDATE CURRENT_TIMESTAMP** | 本表 append-only，恒等于 `created_at`；为规则 8 保留 |
 
-> 全库**唯一**带列 COMMENT 的表；也是唯一用 `datetime(3)`（毫秒精度）的列。
+> ⚠️ **2026-10-09 更正**：本句原文「全库**唯一**带列 COMMENT 的表；也是唯一用 `datetime(3)` 的列」**已不成立** —— 批 A 的 `admin_audit` 与 I2 的 `notification` / `notification_template` **三张表每一列都带 COMMENT**，且 `admin_audit.OccurredAt`、`notification.ReadAt`、`notification.CreatedAt` 同用 `datetime(3)`。`order_state_transition` 是**最早**这样做的表，**不是唯一**。
+
+### 6.13 `admin_audit`（`:264-292`，C3 批 A 新增）
+| 字段 | 类型 | 约束 | 备注 |
+|---|---|---|---|
+| `Id` | **bigint** | **PK**, NOT NULL AUTO_INCREMENT | 自增主键 |
+| `ActorId` | varchar(50) | DEFAULT NULL | 操作者业务号（会话里的 `customerid`/`merchantid`，**不是**登录名）；认不出身份为 NULL |
+| `ActorRole` | int | DEFAULT NULL | 取自 `login.Role`：1 客户 / 2 商家 / 3 管理员；认不出为 NULL |
+| `Action` | varchar(64) | NOT NULL | 动作 tag，形如 `goods.update`（与 admin 域 `AuditActions` 常量一一对应） |
+| `TargetType` | varchar(32) | NOT NULL | 被改对象类型，形如 `goods` |
+| `TargetId` | varchar(128) | NOT NULL | 被改对象标识，形如 `MerchantId:ProductCode`（⚠️ 与 `notification.TargetId` 不同：这里是**拼接串**、且 NOT NULL） |
+| `BeforeJson` | **json** | DEFAULT NULL | **改前**快照；新增类动作（无改前态）为 NULL |
+| `AfterJson` | **json** | DEFAULT NULL | **改后**快照 |
+| `OccurredAt` | **datetime(3)** | NOT NULL DEFAULT CURRENT_TIMESTAMP(3) | 动作发生时刻（毫秒精度，同秒内可排序） |
+| `created_at` | datetime | NOT NULL DEFAULT CURRENT_TIMESTAMP | 行落库时刻 |
+| `updated_at` | datetime | NOT NULL DEFAULT CURRENT_TIMESTAMP **ON UPDATE CURRENT_TIMESTAMP** | append-only，恒等于 `created_at`；为规则 8 保留 |
+
+> 索引：主键 + `idx_admin_audit_occurred(OccurredAt)` + `idx_admin_audit_actor(ActorId, OccurredAt)` + `idx_admin_audit_target(TargetType, TargetId, OccurredAt)`。
+> ⚠️ 两条读法坑（`slot-registry.md §十四 14-4` 实测）：① `json` 列**原生读法会带回外层引号**，读出须 `CAST(... AS CHAR)`；② 存的是**数组**（单行 = 单元素数组 `[{"Id":20,"Price":5556.0,…}]`），前端 diff 要**先拆单元素数组**（多元素不拆 —— 那是批量写、无「同一实体的改前改后」语义）。
+
+### 6.14 `notification`（`:294-327`，C3 块1-I2 新增）
+| 字段 | 类型 | 约束 | 备注 |
+|---|---|---|---|
+| `Id` | **bigint** | **PK**, NOT NULL AUTO_INCREMENT | 自增主键 |
+| `BatchId` | varchar(36) | NOT NULL | 本次投递批次（UUID）；一次群发/公告的扇出各行**共享同一值**，供管理端「通知历史」按次归组；**单发也生成一个** |
+| `ToId` | varchar(50) | NOT NULL | 收件人业务号（`user.customerid` / `user.merchantid`），与会话存号口径一致 |
+| `ToType` | varchar(16) | NOT NULL | `customer` / `merchant`（英文，对齐 `message.from_type`） |
+| `EventType` | varchar(64) | NOT NULL | 事件类型 code，形如 `comment.reply` / `goods.audit.rejected`；⚠️ **后端不校验白名单，未知 code 也照落**（21 条登记簿见 `notification/NotificationEvents.java`） |
+| `Title` | varchar(128) | NOT NULL | 通知标题 |
+| `Content` | varchar(1024) | NOT NULL | 通知正文（列名对齐既有 `message.content`） |
+| `TargetType` | varchar(32) | DEFAULT NULL | 关联对象类型（`goods` / `user` / `comment`…）；无关联为 NULL。⚠️ **软引用，无 FK** |
+| `TargetId` | varchar(128) | DEFAULT NULL | 关联对象标识；无关联为 NULL。⚠️ **软引用，无 FK**；前端容错：对象不存在 → 显示「（相关对象已删除）」，**不崩、不空白** |
+| `ReadAt` | **datetime(3)** | DEFAULT NULL | 已读时刻；**NULL = 未读（唯一判据）** |
+| `CreatedAt` | **datetime(3)** | NOT NULL DEFAULT CURRENT_TIMESTAMP(3) | 通知产生时刻（毫秒精度，收件箱排序用；**DB 存 UTC**） |
+| `created_at` | datetime | NOT NULL DEFAULT CURRENT_TIMESTAMP | 行落库时刻 |
+| `updated_at` | datetime | NOT NULL DEFAULT CURRENT_TIMESTAMP **ON UPDATE CURRENT_TIMESTAMP** | ⚠️ 本表**非** append-only —— 标记已读会 UPDATE，故它**随 `ReadAt` 变化**（与 `admin_audit` 相反） |
+
+> 索引：主键 + `idx_notification_inbox(ToId, ToType, CreatedAt)`（收件箱分页，前两列等值 ⇒ 第三列有序，反向扫满足 `ORDER BY CreatedAt DESC` 不 filesort）+ `idx_notification_unread(ToId, ToType, ReadAt)`（未读计数，三端 5s 轮询的**最热查询**，可 covering count 不回表）+ `idx_notification_batch(BatchId)`（管理端历史按批归组）。
+
+### 6.15 `notification_template`（`:329-345`，C3 块1-I2 新增）
+| 字段 | 类型 | 约束 | 备注 |
+|---|---|---|---|
+| `Id` | **bigint** | **PK**, NOT NULL AUTO_INCREMENT | 自增主键 |
+| `TemplateKey` | varchar(64) | NOT NULL, **UNIQUE**（`uk_notification_template_key`） | 模板键（业务唯一），形如 `goods.audit.rejected` |
+| `TitleTemplate` | varchar(255) | NOT NULL | 标题模板（可含 `{占位符}`） |
+| `BodyTemplate` | varchar(1024) | NOT NULL | 正文模板 |
+| `Enabled` | tinyint(1) | NOT NULL DEFAULT 1 | 是否启用：1 启用 / 0 停用（停用 = 逻辑废弃，不物理删） |
+| `created_at` | datetime | NOT NULL DEFAULT CURRENT_TIMESTAMP | 行落库时刻 |
+| `updated_at` | datetime | NOT NULL DEFAULT CURRENT_TIMESTAMP **ON UPDATE CURRENT_TIMESTAMP** | 行更新时刻 |
+
+> ⚠️ **块 1 只做模板的存取 CRUD，`send` 收的是字面 title/body，不套模板**（占位符渲染留后 —— 要定渲染语法与转义口径，返工风险大；见 I2 方案 §七·未决 3）。
 
 ---
 
@@ -282,9 +340,13 @@
 | `user` | `username` | 无 | **无**（`customerid`/`merchantid` 非唯一） |
 | `user_conversation_read` | 复合 4 列 | 无 | **无** |
 | `order_state_transition` | `Id` | `idx_order_state_transition_order(OrderId, OccurredAt)` | **无** |
+| `admin_audit`（`:264-292`，批 A） | `Id` | `idx_admin_audit_occurred(OccurredAt)`、`idx_admin_audit_actor(ActorId, OccurredAt)`、`idx_admin_audit_target(TargetType, TargetId, OccurredAt)` | **无** |
+| `notification`（`:294-327`，I2） | `Id` | `idx_notification_inbox(ToId, ToType, CreatedAt)`、`idx_notification_unread(ToId, ToType, ReadAt)`、`idx_notification_batch(BatchId)` | **无** |
+| `notification_template`（`:329-345`，I2） | `Id` | **`uk_notification_template_key(TemplateKey)`**（UNIQUE） | **有 1 个**（`TemplateKey`，UNIQUE，I2 `:344`） |
 
-**汇总**：12 张表；主键 12 个（1 个复合）；二级索引 **5 个**（分布 4 张表）；**全库除主键外 2 个 UNIQUE 约束**（`order.uk_order_orderId`，2026-09-30 S1a；`goodstype.uk_goodstype_GoodType`，2026-10-04 #11）。
-唯一约束只此 2 个，也不是遗漏 —— 它们是 `defect-survey.md §二 前提清单`里 A/B/C 三条的出处，到 2026-10-04 为止只有**前提 A 的 DB 面**（S1a）与 **`goodstype` 这条新前提**（#11）被认领，B / B′ / C 仍全靠应用层保证。（原文此处引「§4「前提清单」」，但本文件 §4 是 `SettlementDate` 语义，前提清单实际在 `defect-survey.md` —— 一并更正。）
+**汇总**：15 张表；主键 15 个（1 个复合）；二级索引 **12 个**（分布 7 张表）；**全库除主键外 3 个 UNIQUE 约束**（`order.uk_order_orderId`，2026-09-30 S1a；`goodstype.uk_goodstype_GoodType`，2026-10-04 #11；`notification_template.uk_notification_template_key`，2026-10-09 I2）。
+唯一约束只此 3 个，也不是遗漏 —— 其中 2 个（`order` / `goodstype`）是 `defect-survey.md §二 前提清单`里 A/B/C 三条的出处，到 2026-10-04 为止只有**前提 A 的 DB 面**（S1a）与 **`goodstype` 这条新前提**（#11）被认领，B / B′ / C 仍全靠应用层保证。
+⚠️ **第三个 UNIQUE（`notification_template.TemplateKey`，I2）不在前提清单里**，性质不同：它不是一个「本该约束、长期缺失」的业务键，而是**新建表时顺手就给了**的模板键唯一性 —— 故它既不算「认领了一条旧前提」，也不代表 B / B′ / C 有进展。（`notification` 表**没有** UNIQUE：`BatchId` 天然重复，`(ToId,ToType)` 也不是键。）（原文此处引「§4「前提清单」」，但本文件 §4 是 `SettlementDate` 语义，前提清单实际在 `defect-survey.md` —— 一并更正。）
 
 ---
 
@@ -306,6 +368,9 @@
 | `friend.(customerid,friendid)` | 用户业务号 | 同上 |
 | `customerimage.CustomerId` | `user.customerid` | |
 | `merchantimage.MerchantId` | `user.merchantid` | |
+| `notification.ToId` | `user.customerid` **或** `user.merchantid` | **按 `ToType` 择一**（与 `login.Id` 同一种形态：一个 varchar(50) 列指向两个不同列，无法用单个 FK 表达） |
+| `notification.TargetId` | 任意业务对象（`goods` / `user` / `comment`…） | ⚠️ **软引用，刻意不建 FK** —— 用户裁决：目标可能已被删除 / 全量重导后失效，有 FK 会让插入报错或触发级联删；无 FK 由前端渲染时容错（对象不存在 → 显示「（相关对象已删除）」，不崩、不空白）。逐字见 `mall_management_sql.sql:305-307` 块注释与 `context-packs/c3-block-1-infra.md` |
+| `admin_audit.TargetId` | 任意业务对象 | 同上（软引用）；且它是**拼接串**（`MerchantId:ProductCode`），更不可能有 FK |
 
 > ⚠️ **（S1a 之前）`order_state_transition.OrderId → order.OrderId` 这个 FK 建不起来 —— 不是「没建」，是「建不了」**（**现况见本块末尾 🔄**）：MySQL/InnoDB 要求**被引用列上有索引**（该列须为该索引的最左前缀列），而 `order.OrderId` **当时无任何索引**。故要建 FK 必须先给 `order.OrderId` 建索引。
 >
@@ -346,12 +411,12 @@
 
 ---
 
-## 10. ⚠️ 全库除主键外只有 **2 个 UNIQUE** —— 唯一性仍基本靠应用层
+## 10. ⚠️ 全库除主键外只有 **3 个 UNIQUE** —— 唯一性仍基本靠应用层
 
 > 本节单独成节，因为它是整份 schema 最重的一条：**业务主键几乎全是约定，不是约束。**（2026-09-30 S1a 之前是「全是」；`order.OrderId` 是第一个例外，`goodstype.GoodType` 于 **2026-10-04 #11** 成为第二个。）
 
 ### 10.1 事实
-12 张表 → 12 个主键（其中 1 个复合）→ 5 个二级索引 → **非主键 UNIQUE：2 个**（`order.uk_order_orderId`，2026-09-30 S1a 新增；`goodstype.uk_goodstype_GoodType`，2026-10-04 #11 新增）。
+15 张表 → 15 个主键（其中 1 个复合）→ 12 个二级索引 → **非主键 UNIQUE：3 个**（`order.uk_order_orderId`，2026-09-30 S1a 新增；`goodstype.uk_goodstype_GoodType`，2026-10-04 #11 新增；`notification_template.uk_notification_template_key`，2026-10-09 I2 新增 —— **最后这个不属前提清单，只是新表自带**，见 §7 附注）。
 
 ### 10.2 本应是业务键、实际只是「约定」的列
 
@@ -376,7 +441,7 @@
 | 笔 | 对策 | 覆盖到的 | 覆盖不到的 |
 |---|---|---|---|
 | B1 | **查重 + 缓存**（`priceByTriple` 先查后缓存） | 命中唯一时 | 唯一性未约束 ⇒ 查重会命中多行并抛，而**失败又被当值缓存**（前提 B 的传导链） |
-| B2 | **分布式锁**（`order-add`/`order-pay`/`order-receive`/`order-delivery`/`friend-add` 五落点） | 锁可用时 | 锁是**三路 fail-open**（`tech-debt.md:280`）⇒ 锁不可用即回落到无锁原路径 |
+| B2 | **分布式锁**（`order-add`/`order-pay`/`order-receive`/`order-delivery`/`friend-add` 五落点） | 锁可用时 | 锁是**三路 fail-open**（`tech-debt.md:291`）⇒ 锁不可用即回落到无锁原路径 |
 | B3 | **谓词守卫（CAS）** | 同一动作只成功一次（守卫互斥 + InnoDB 行锁） | 保证不了 `OrderId` 唯一（**该点 2026-09-30 由 S1a 的 UNIQUE 认领**）；也保证不了时间线的 `from`（要读回，且读回必须在锁内） |
 
 ⇒ **三笔都在替数据库补唯一性，而三笔的补法没有一笔覆盖「锁不可用」这一档。** 这是「局部推理极强、组合推理缺席」的结构性后果：

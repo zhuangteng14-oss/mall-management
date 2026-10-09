@@ -24,7 +24,7 @@
   ⚠️ v2 已经画对的部分**逐字保留**：分区只是把既有字段**归位**，没有一个真功能字段被删掉。
 
   ── 实测到的后端事实（写稿前先查的，不是猜的）──────────────────────────────
-    · `GoodsController.goodsAdd` 的入参（`GoodsController.java:100-115` 逐字）：
+    · `GoodsController.goodsAdd` 的入参（`GoodsController.java:108-123` 逐字）：
       `@RequestParam MerchantId / GoodName / Price(Double) / **file(MultipartFile)** /
        GoodType / ProductCode / GoodTypeNew(int)` —— 七字段，**含一个文件**。
       ⇒ 「商品图」是**真功能**（图随 `goodsAdd` 走 multipart 上传），不是占位。

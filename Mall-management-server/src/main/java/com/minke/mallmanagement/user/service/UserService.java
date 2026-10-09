@@ -126,10 +126,10 @@ public class UserService {
      * 凭据有效、库是通的；此处查不到只可能是数据本身缺失（{@code user} 行没建全）。
      *
      * @param role {@link #loginSelect} 的返回值（1 = 客户 → {@code customerid}；
-     *             2 = 商家 → {@code merchantid}）；其它值返回 {@code null}
+     *             2 = 商家 → {@code merchantid}；3 = 管理员 → {@code customerid}）；其它值返回 {@code null}
      */
     public String businessId(String username, int role) {
-        if (role != 1 && role != 2) {
+        if (role != 1 && role != 2 && role != 3) {   // C3（2026-10-08）：管理员并入。⚠️ 同一行改（本文件最大被引行 `:196`，插行必漂移）
             return null;
         }
         try {
@@ -137,7 +137,7 @@ public class UserService {
             if (row == null) {
                 return null;
             }
-            Object businessId = (role == 1) ? row.get("customerid") : row.get("merchantid");
+            Object businessId = (role == 2) ? row.get("merchantid") : row.get("customerid");   // C3（2026-10-08）：判据由 `(role == 1)` 改为 `(role == 2)` —— 客户(1)与管理员(3)同取 `customerid`。⚠️ role=1/2 的取值与改前**逐字相同**（1→customerid、2→merchantid），只是把「非商家即客户」写成正面判据。管理员行借 `customerid` 存 `login.Id`，理由见 slot-registry §十三 13-3
             return (businessId == null) ? null : businessId.toString();
         } catch (Exception e) {
             // 用户行不存在 / 数据缺失 → 本次登录不写会话（调用方据此跳过）

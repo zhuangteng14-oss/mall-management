@@ -40,3 +40,8 @@ scripts/concurrency/classpath.txt
 # 脚本 scripts/refs-scan.sh 进仓（可复跑）；before/after 是每次运行的快照，不入库
 scripts/refs-before.txt
 scripts/refs-after.txt
+
+# agent 临时工作目录（用户 2026-10-09 口径，见 agent.md 开发要求 9）
+# 临时脚本/日志/中间产物一律写这里，别落桌面；_a3work 是同一用途的旧名，一并挡掉防复现
+_work/
+_a3work/

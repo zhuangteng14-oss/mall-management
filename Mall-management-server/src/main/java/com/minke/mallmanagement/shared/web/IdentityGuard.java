@@ -11,7 +11,7 @@ import org.springframework.http.ResponseEntity;
  * <h2>【它治的是哪一半病】</h2>
  * token 机制治的是「<b>显示</b>串号」（页面按本标签页的身份取数）；本类治的是
  * 「<b>干活</b>串号」—— 服务端此前**一律信入参**：{@code /goods/goodsUp} 的 {@code MerchantId}
- * 填谁就改谁的商品（{@code GoodsController.java:159-168}），与调用者是谁毫无关系。
+ * 填谁就改谁的商品（{@code GoodsController.java:207}；C3 批 A 重指 —— 原记的那个区间实测偏到 goodsDe / productCodePrice，不是 goodsUp），与调用者是谁毫无关系。
  * ⇒ 拿着自己的合法 token，改别人的商品是**一行 curl** 的事。缺了这一半，
  * 「多账户隔离」只是前端的观感，不是服务端的边界。
  *

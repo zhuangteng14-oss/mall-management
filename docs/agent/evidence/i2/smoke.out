@@ -1,0 +1,57 @@
+
+>>> 3. send audience=merchant
+{"success":true,"batchId":"6276431b-c71a-45bf-978c-408663f6e5b5","sent":3}
+
+>>> 3b. send 中文载荷（UTF-8 文件 → --data-urlencode name@file，路径必须全 ASCII）
+{"success":true,"batchId":"8dadc8c5-3fec-4b2c-b393-79cbb64eb478","sent":3}
+
+>>> 9. send eventType=weird.unknown.code（不校验白名单）
+{"success":true,"batchId":"d53a4b96-19c8-4535-8c5e-f254b885bc4a","sent":3}
+
+>>> 9b. 负例：既不给 audience 也不给 toId
+{"msg":"缺少投递受众：请给 audience（all / customer / merchant）或 toId","success":false}
+
+>>> 9c. 负例：定向但 toType 非法
+{"msg":"未知收件人类型：toType 只能是 customer / merchant","success":false}
+
+>>> 9d. 负例：标题为空
+{"msg":"缺少参数：title","success":false}
+
+>>> 9e. 定向单发（toId=M0 + toType=merchant）
+{"success":true,"batchId":"ed8e703e-d25e-4ab8-974f-7a35fac69e51","sent":1}
+
+>>> 5. list toId=M0 toType=merchant
+{"total":1,"unread":1,"success":true,"limit":100,"list":[{"Id":22,"BatchId":"ed8e703e-d25e-4ab8-974f-7a35fac69e51","ToId":"M0","ToType":"merchant","EventType":"system.notice","Title":"Direct","Content":"b","TargetType":null,"TargetId":null,"ReadAt":null,"CreatedAt":"2026-10-09 09:16:16","unread":true}]}
+FIRST_ID=22
+
+>>> 6. unreadCount M0/merchant
+{"unread":1,"success":true}
+
+>>> 7. read id=22（第一次该 updated=1）
+{"success":true,"updated":1}
+
+>>> 7b. read 同一 id 再来一次（幂等：updated=0 且 success=true）
+{"success":true,"updated":0}
+
+>>> 7c. read 用别人的 toId（该行不属于它 → updated=0，不该报错）
+{"success":true,"updated":0}
+
+>>> 8. readAll M0/merchant
+{"success":true,"updated":0}
+
+>>> 8c. readAll 之后 unread 应为 0
+{"unread":0,"success":true}
+
+>>> 8d. history（按批归组）
+{"total":4,"success":true,"limit":20,"list":[{"BatchId":"ed8e703e-d25e-4ab8-974f-7a35fac69e51","EventType":"system.notice","Title":"Direct","Content":"b","CreatedAt":"2026-10-09 09:16:16","RecipientCount":1,"UnreadCount":0},{"BatchId":"d53a4b96-19c8-4535-8c5e-f254b885bc4a","EventType":"weird.unknown.code","Title":"Unknown event","Content":"x","CreatedAt":"2026-10-09 09:16:16","RecipientCount":3,"UnreadCount":3},{"BatchId":"8dadc8c5-3fec-4b2c-b393-79cbb64eb478","EventType":"system.notice","Title":"系统通知中文标题测试","Content":"body-ascii","CreatedAt":"2026-10-09 09:16:16","RecipientCount":3,"UnreadCount":3},{"BatchId":"6276431b-c71a-45bf-978c-408663f6e5b5","EventType":"system.notice","Title":"Smoke notice","Content":"hello merchants","CreatedAt":"2026-10-09 09:16:15","RecipientCount":3,"UnreadCount":3}]}
+
+>>> 8e. 缺参负例：list 不给 toId
+{"msg":"缺少参数：toId / toType","success":false}
+
+>>> 10b. 模板 upsert（插）+ upsert（改）+ 列表
+{"saved":true,"success":true,"affected":1}
+{"saved":true,"success":true,"affected":2}
+{"success":true,"list":[{"Id":5,"TemplateKey":"smoke.tpl","TitleTemplate":"T2","BodyTemplate":"B2","Enabled":false,"UpdatedAt":"2026-10-09 09:16:18"}]}
+
+BATCH=6276431b-c71a-45bf-978c-408663f6e5b5
+FIRST_ID=22

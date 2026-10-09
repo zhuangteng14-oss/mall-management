@@ -228,6 +228,28 @@
 | 状态 | ✅ **已修（C#6，2026-10-04 `fix/order-state-guard`）** —— 出生闸 `OrderState.isInitial` 落在 `OrderService.orderAdd` 的 `runLocked` **之前**、且**排在 B#1 价格闸之后**：接受 ⟺ `(PayIf,DeliveryIf,ReceiveIf) ∈ {(0,0,0),(1,0,0)}`；不通过 ⇒ **HTTP 200 + `{success:false,msg:"订单状态不合法"}`** 且**不取锁、不触库**，同时记 `mall.order.state.birth.rejected{shape}` + 一行 WARN。⚠️ **判据是白名单、不是「合法态」** —— 若照「不变式前移」做，`(1,1,1)`（**正是本 TD 正文举的那个例**）会**原样放行**，等于假修；`(1,1,0)`/`(1,0,1)`/`(1,1,1)` 三条「合法但非初始」被拒是**刻意的**。⚠️ **白名单必含 `(1,0,0)`**：生产前端 `ProductPage.vue:354` 直传 `PayIf=1`（同页 `:342-343` 固定 `DeliveryIf:0`/`ReceiveIf:0`）⇒ 拒它 = 弄坏下单。理由写在**两处**：`OrderState.isInitial` 的 javadoc + `api-contract.md`（防后人误改）。⚠️ **本笔只关入口**：**存量脏行**（已落库的 `(1,1,1)` 等）**不在范围**，`mall.order.state.illegal` **保留不删**、改作兜底观测。⚠️ **D5 裁决「登记不门禁」未被破**：A 组断言仍不覆盖本入口 —— 本笔的报警来自**单测**（`OrderAddStateGuardSmokeTest`，10 用例、`@WebMvcTest` 切片、**无 `A3_ENABLED` 门控** ⇒ 在 `backend` **阻塞** job 真跑）+ **A3 的 C 组**（新增 `A-C6-1`/`A-C6-2`；⚠️ `concurrency` job 是 `continue-on-error: true` ⇒ 只算旁证）。判据细节与 A3 适配见 `progress.md §5-G`。原文（已过期）：「待确认（A3 登记，不在 A3 修 ——「不改业务代码」是 A3 的硬约束）。D5 裁决：**登记不门禁** ……」 |
 | 锚点更正（2026-09-30） | 本条原用 `G:` + 行号锚定（`G:390` / `G:398-400` / `G:403-417` / `G:527` / `G:549` / `G:571`），**六处全部漂移**（B2 / B3 往该 controller 加行所致）。已改为**符号名**锚定（`MallManagementGoodsController.orderAdd` / `.orderPayIfUp` / `.orderReceiveIfUp` / `.orderDeliveryIfUp`）；⚠️ **2026-10-02 笔 2 后这四个符号已在 `OrderController`（入参绑定）/ `OrderService`（业务逻辑），行号锚点已全部失效** —— 符号名随之改指 `OrderController.orderAdd` 等，行号锚点一律撤除；2026-09-30 核一次导航用行号：方法 `:386`、三状态位入参 `:393-395`、`INSERT` 绑定 `:435-449`、三 CAS `@PostMapping` `:567` / `:579` / `:591`。⚠️ 其中 `G:390` 是最阴的一种漂：它仍落在 `orderAdd` 方法体内（现为 `Price` 参数行），**看着是对的**。这是 `defect-survey.md §五`「锚点漂移」的**新证人**，也加固了 Class A #8（锚点改符号名）的理由 |
 
+## TD-18 管理员 `/user/token` 铸票路径缺失：cookie 会话能走通，但没有 token 通道
+
+| 项 | 内容 |
+|---|---|
+| 现状 | 管理员的身份**只由 cookie 会话承载**。C3 骨架第一笔把 `role == 3` 并入了 `UserController.loginSelect` 的建会话分支（见 `slot-registry.md` §十三 13-5 表 ②），此后 `/user/me` 走**识别**口径（`identify`）认得出他。**能走通**：该笔的 10 项页面级验收全绿（同 §十三 13-8），「登录 → 落 `#/admin`」全程**不依赖票**。 |
+| 缺口 | 管理员**没有铸票路径**。`/user/token` 走**授权**口径（`AuthSession.currentUserId`），而它对 cookie 里的 `role = 3` **一律折叠成 `null`** ⇒ cookie 管理员打它恒 401 ⇒ **铸不出票**。⇒ 管理端目前**只有会话、没有票**：多设备登录、长会话续期，以及任何靠 `Authorization: Bearer` 的无状态调用，在管理端都做不到。骨架阶段**无业务请求**，故缺口尚不可达；一旦管理端接上第一个要票的接口，它立刻变成硬阻塞。 |
+| 保留原因 | `/user/token` 的 javadoc **明写**：若允许 cookie 管理员换票，「绕一圈就得到『**管理员票可无限续期**』的口子」。那是一个**刻意**的 401，不是遗漏 —— 照字面「让 `/user/token` 认 cookie 管理员」＝当场破掉这条成文的安全属性，代价远大于收益。且验收③（「登录 role=3 → 落 /admin」）**不依赖**它 ⇒ 不做它不挡任何既定目标。 |
+| 登记不修 | **C3 若需多设备 / 长会话再处理**（或管理端出现第一个要票的接口时）。届时的出路有三，**留待那时裁**：ⓐ 照字面实现、接受该口子；ⓑ 另开一个**凭据驱动**（不走 cookie）的管理员铸票端点，保住现有口径；ⓒ 继续不做。本 TD **只登记、不含任何实现**。 |
+| 优先级 | 低 —— 骨架阶段零业务请求，缺口不可达。但它**不是**「不会发生」，是「还没到期」。 |
+| 状态 | ⏸ **登记不修（2026-10-08，C3 骨架第一笔）** —— 用户裁决：**判不做，但立 TD**。「静默不做」会掩盖一处已定案的取舍，故留档。 |
+
+## TD-19 通知接收侧不校验 `toId` × `toType` 是否吻合
+
+| 项 | 内容 |
+|---|---|
+| 现状 | `/notification/*` 四个接收端点用 `IdentityGuard.requireSelfOrAdmin(request, toId)` 授权 —— 它**只看 `toId`**，`toType` 仅作查询条件。⇒ 传 `toId=<某商家号> + toType=customer` **不报错**，只是查不到行（`toType` 是**封闭**取值域，取值域校验在**发送**侧有，接收侧没有）。 |
+| 为什么是「接缝」而不是「漏洞」 | 核心安全面**已经在**：非管理员传**别人的** `toId` ⇒ **403**（已实测，见 `slot-registry.md §十五` §五·10 与 `scripts/probes/i2-guard.mjs`）。剩下的错配路径要求调用方**传自己的号**再配一个错的 `toType` —— 结果是**空集**：读不到任何不属于自己的数据，也写不坏任何行。 |
+| 保留原因 | 修它要动 `requireSelfOrAdmin` 的**契约**：从「只认 `toId`」变成「`toId` × `toType` 双键校验」，且得为每个 `toType` 去 `user` 表反查归属。那是**公共授权原语**，批 A 起所有端点都在用 ⇒ 回归面远大于收益（把一个无害空集换成一句更明确的报错）。 |
+| 登记不修 | 用户 **2026-10-09** 裁决：**登记，不修**。⚠️ 若将来接收端出现「按 `toType` 分流副作用」的写法（现在没有），此条要**重估**。 |
+| 优先级 | 低 —— 无害空集。 |
+| 状态 | ⏸ **登记不修（2026-10-09，C3 块 1 · I2 收官）**。 |
+
 ## 已完成里程碑
 
 > 本节记录已交付的阶段性成果，与上方「活跃技术债」区分。新里程碑追加在最下方。
@@ -354,3 +376,29 @@
 **收尾状态**：四域 + 公共层全部合入 `main`（收尾 PR #46 `fa2a8e2`，纯文档 ⇒ `paths-ignore` 生效）；**CI 判据已逐条核过的是 PR #45 那一轮** —— run `37192169578` 的 `a3-concurrency-report`：`gates.count == 30`（27 → 30 对上）、`gates.failed == 0`、`exitCode == 0`，S4a 8 条 + `C-1`/`C-2` 全 PASS；`surefire-reports` `Tests run: 186, Failures: 0, Errors: 0, Skipped: 19`。合并后 `main` 上的 run `37192450667`（`headSha` = `2e9d3f8`）为 `success` —— ⚠️ **run 级 `success` ≠ 三 job 全绿**：`concurrency` job **仍是观测跑**（`continue-on-error: true`），job 颜色**系统性无信息量**，只有拉 artifact 看得见（门禁地位**自 M2 起挂到本条，仍未裁** —— 连续第 4 条）。全项目 **`@Test` 186 处**（26 个含测试的类；默认 SKIP **19** = `MallManagementApplicationTests` 6 + `GoodsWriteTxAtomicityTest` 6 + `LockSceneRedisTest` 4 + `GoodsTypeUniqueIndexTest` 3，均需 `A3_ENABLED` / 真库 / 真 Redis）；2026-10-04 17:47 本地 `./mvnw -B test` 实测 `Tests run: 186, Failures: 0, Errors: 0, Skipped: 19`（BUILD SUCCESS）。主源 **39** 个 `.java`（`shared` 15 / `order` 10 / `goods` 5 / `user` 4 / `message` 4 / 顶层 1）、测试源 **27** 个 `.java`。观测出口累计 **22 个 `mall.*` 指标**（11 cache + 4 lock + **7** order.state —— 较 M4 的 21 多出 `mall.order.state.birth.rejected`，由 C#6 新增）。
 
 **TD 变更**：**关闭 TD-17**（`orderAdd` 不校验三个状态位，2026-10-04 C#6）—— 本期间**唯一**的状态翻转。`tech-debt.md` 在 M5 范围共被改动 **6 次** = 上述 1 次状态翻转（`473b6c1`）+ **5 次坐标 / 计数回归**（`81629b5` / `50bfe65` / `d3af49a` / `72a2e2e` / `481e72b`），逐笔可复核：`git log --no-merges --oneline 5db3c18..fa2a8e2 -- docs/agent/tech-debt.md`。**TD-16 仍挂** —— `--reset-db` **仍是死参数**，本期间只做了「标注未实现」，主体未动。
+
+### M6 — 界面优化段 🟡（2026-10-08）
+
+> 标题日期 = 收尾笔 PR #80（`7865952`）的**提交日（+0800 本地）** `2026-10-08 20:26`，**不取** GitHub / CI 显示的 `2026-10-08T12:26Z`（同 M4 / M5 口径）。
+> ⚠️ 与 M1–M4「单笔合并日」不同：本条覆盖 **2026-10-06 ~ 10-08 三天、PR #74–#80（7 个 PR / 26 笔非 merge commit / 386 个文件）** —— 界面优化本身就是跨多笔的批次（A / B / C / D 四笔 + D 笔后调整批次），同 M3 / M5 口径。首笔 `ec5d8d1`（2026-10-06 15:49），末笔 `e2ff7f4`（2026-10-08 20:15）。
+> ⚠️ **本条是纯前端段**：`git diff --name-only a4e274d..7865952 -- '*.java'` **为空** —— 后端只被换掉 2 个 `.jpg`（`Mall-Section-1.jpg` / `Mall-Section-2.jpg`，来自 `bad1251`）。下表**无一行是后端代码**，故「硬性前置」里没有依赖 / schema 项。
+> ⚠️ **边界 ①**：本条**不含 R1–R6**（路由化那一段）。`git log --merges a4e274d..7865952 | grep -ci router` = **0**；R1–R6 已逐条 `git merge-base --is-ancestor` 证在其**之前**。
+> ⚠️ **边界 ②（夹层挂账，同 M5 边界注的情形）**：M5 收尾（PR #46 `fa2a8e2`）到本条起笔（PR #73 `a4e274d`）之间还压着 **PR #47–#73**（**27 个 merge / 39 笔非 merge / 76 个文件 / +8820 −1186**）—— 鉴权批 + CORS origin 收窄 + 路由化 R1–R6 等。**该批至今无任何里程碑收录**（已与 2026-09-30 那批并列挂账于 `progress.md §5-H (1)`）。
+> ⚠️ **口径漂移（本条自曝，未立 TD）**：`0db9cb6` 的提交信息自称「脚本进仓 / **产物不入库**」，但 **27 个扫描产物 `scripts/refs-*.txt` 在收尾调整批次 `e2ff7f4` 里被一并提交进仓** —— `git show --diff-filter=A --name-only e2ff7f4 -- 'scripts/refs-*.txt'` = 27 个。是否立条待裁。
+> ⚠️ **「界面优化段」不是干净 ✅（故标题带 🟡）**：7 个 PR 全部合入，但**段内挂账三项未清** —— ① Q9 漂移**只报告、未逐条修**（台账 §六，`9015beb`）；② 稿里 49 条 `disabled` 占位**待裁决**（启用会丢数据，非误伤）；③ LXGW 楷体**故意未注册** `@font-face`（稿引了、仓里不落，标题差 3px 属预期）。口径同 M5 的挂账注。
+
+| 项 | 交付物 | 证据 |
+|---|---|---|
+| A 笔 —— 设计 token 地基 | `src/assets/tokens.css`（186 行；`:root` 自 **58** 行起，**70** 个变量）+ **三族自托管字体 208 个 `.woff2`**（Noto Sans SC 97 / Noto Serif SC 97 / JetBrains Mono 6 + 各语种子集）；**零消费点、零布局变化** | PR #74 `ec5d8d1` |
+| B 笔 —— 设计稿定稿 | `docs/美化/` **10 份 HTML 稿**（`pages/`：ChatRoom / GoodsAdd / GoodsSelect / GoodsUp / LoginPage / OrderCenter-merchant / ProductPage / ShoppingCart-customer / UserCenter-customer / UserCenter-merchant）+ **3 份分析**（`v5-字体探索报告` / `v5-视觉层级分析` / `v5-配色分析`） | PR #75 `9dab70a` |
+| C 笔 —— 壳落 Vue | `views/AppShell.vue`（现 421 行）+ `views/UserCenter.vue` + `config/nav.js`（69 行：`CUSTOMER_NAV` / `MERCHANT_NAV` / `navFor`）+ `tokens.css` 接线 + 对稿截图 `shots3/` | PR #76 `60020f9` |
+| B 线补丁 | 首页两张 jpg 去水印（`Mall-Section-1.jpg` / `Mall-Section-2.jpg`）+ 登录稿取景调整 | PR #77 `bad1251` |
+| D 笔前置 + commit 0 | ① 全仓「文件:行号」互引扫描器 `scripts/refs-scan.sh` 落仓；② 壳容器取「中性形态」（1 文件 / 5 条规则 / **行数净零**） | PR #78 `0db9cb6`、`de85b93` |
+| D 笔 commit 1–15 | **12 个页面按稿重写**（GoodsSelect / ChatRoom / HomePage / ShoppingCart / OrderCenter / UserInfoPage / HistoricalOrders / FriendRoom / GoodsAdd / GoodsUp / ProductPage / LoginPage；`views/*.vue` 总数不变 **16 → 16**）+ 包装层契约验证笔（**零代码 delta**，19 项断言全绿）+ 壳修补 3 笔（`.wrap` 居中 / 顶栏被压扁 / `sticky` 真生效）+ 台账 §一~§七 | PR #79（**19 笔**，收尾 `1e436a8`） |
+| D 笔后调整批次 | 按**用户要求（不按稿）**的调整 —— 台账 §八~§十二 | PR #80 `e2ff7f4` |
+
+**硬性前置**：**零新增依赖** —— `Mall-management-server/pom.xml` 与 `mall-management-system/package.json` 全段零改动（`git diff --stat a4e274d..7865952 -- <这两份>` **为空**）。**零 schema 变更**。**零 `.java` 改动**（仅上表 `bad1251` 那两个二进制）。**CI 配置未动** —— `.github/` 全段零改动 ⇒ **门禁数仍 30，未随本条变化**。新增的唯一「依赖」是 **vendored 前端静态资源**（三族字体 208 个 `.woff2`），不入 `package.json`。
+
+**收尾状态**：7 个 PR 全部合入 `main`（收尾 PR #80 `7865952`）。**本机在 M6 窗口内落了 2 份 CI 产物** —— `scripts/concurrency/reports/a3-report-ci115-20261007-070640.json`（`generatedAt` `2026-10-07T07:06:39Z`）与 `a3-report-ci129-20261008-122420.json`（`2026-10-08T12:24:20Z`）；两份在 `exitCode` / `gates` / `assertions` / `scenarios` 四项上**一致**：`exitCode == 0`、`gates.count == 30`、`gates.failed == 0`、`assertions` **31 条**（`ci129` 逐条查过，无一条 `ok:false`）、`scenarios` **9 个**（S1 / S2a / S2b / S3 / S4a / S4b / B2 / C / cleanup）。⚠️ `concurrency` job **仍是观测跑**（`continue-on-error: true`）⇒ job 颜色**系统性无信息量**，只有拉 artifact 看得见 —— 门禁地位**自 M2 起连续第 5 条未裁**。全项目 **`@Test` 255 处**（较 M5 的 186 增 **69**，**全部落在上边界②那段夹层批里** —— 本条自身 **255 → 255，零 delta**，与「本条零 `.java` 改动」自洽）；主源 **44** 个 `.java` / 测试源 **32** 个（较 M5 的 39 / 27 各增 **5**，同样属夹层批）。前端 `src` 文本行 **6876 → 13006**（+6130，**已排除 208 个二进制字体**；不排除会误算成 53150）；`views/*.vue` **16 → 16**（14 个被重写 + `App.vue`，无新增页面）；`docs/美化` tracked 文件 **19 → 136**（+117）。386 个文件按区域：前端工程 **230**（含 208 个 `.woff2`）/ `docs/美化` **121** / `scripts` **28**（`refs-scan.sh` + 27 份 `refs-*.txt` 产物）/ `docs/agent` **4** / 后端 **2** / `.gitignore` **1**。
+
+**TD 变更**：**无** —— `git log --no-merges --oneline a4e274d..7865952 -- docs/agent/tech-debt.md` **为空**（本条全期间未动本文件，即上面那条自曝的口径漂移**未顺手登记**）。另：`--reset-db`（TD-16）与「`concurrency` job 门禁地位」两项**沿用 M5 的挂账状态，本条未动**。 ⚠️ **窗口外补充（2026-10-08）**：C3 骨架期的工作区**登记了 TD-18**（管理员 `/user/token` 铸票路径缺失，见上「活跃技术债」末条）—— 它落在本条窗口 `a4e274d..7865952` **之后**、尚未提交，故上面那句「本期间未动本文件」**仍然成立**，但「TD 变更：无」已不是本文件当下的全部事实。

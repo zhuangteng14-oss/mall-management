@@ -1,0 +1,40 @@
+
+== ENGINE/COLLATION ==
+notification	InnoDB	utf8mb4_0900_ai_ci
+notification_template	InnoDB	utf8mb4_0900_ai_ci
+== COLUMNS ==
+notification	1	Id	bigint	NO	NULL	自增主键
+notification	2	BatchId	varchar(36)	NO	NULL	本次投递批次（UUID）；一次群发/公告的扇出各行共享同一值，供管理端「通知历史」按次归组；单发也生成一个
+notification	3	ToId	varchar(50)	NO	NULL	收件人业务号（user.customerid / user.merchantid），与会话存号口径一致
+notification	4	ToType	varchar(16)	NO	NULL	收件人类型：customer / merchant（英文，对齐 message.from_type）
+notification	5	EventType	varchar(64)	NO	NULL	事件类型 code，形如 comment.reply / goods.audit.rejected（对应 notification 域 NotificationEvents 常量；⚠️ 后端不校验白名单，未知 code 也照落）
+notification	6	Title	varchar(128)	NO	NULL	通知标题
+notification	7	Content	varchar(1024)	NO	NULL	通知正文
+notification	8	TargetType	varchar(32)	YES	NULL	关联对象类型（goods / user / comment…）；无关联为 NULL。⚠️ 软引用，无 FK
+notification	9	TargetId	varchar(128)	YES	NULL	关联对象标识（如 MerchantId:ProductCode）；无关联为 NULL。⚠️ 软引用，无 FK，前端容错
+notification	10	ReadAt	datetime(3)	YES	NULL	已读时刻；NULL = 未读（唯一判据）
+notification	11	CreatedAt	datetime(3)	NO	CURRENT_TIMESTAMP(3)	通知产生时刻（毫秒精度，收件箱排序用；DB 存 UTC）
+notification	12	created_at	datetime	NO	CURRENT_TIMESTAMP	行落库时刻（agent.md 数据库管理规则 8）
+notification	13	updated_at	datetime	NO	CURRENT_TIMESTAMP	行更新时刻；本表**非** append-only —— 标记已读会 UPDATE，故它随 ReadAt 变化
+notification_template	1	Id	bigint	NO	NULL	自增主键
+notification_template	2	TemplateKey	varchar(64)	NO	NULL	模板键（业务唯一），形如 goods.audit.rejected
+notification_template	3	TitleTemplate	varchar(255)	NO	NULL	标题模板（可含 {占位符}）
+notification_template	4	BodyTemplate	varchar(1024)	NO	NULL	正文模板
+notification_template	5	Enabled	tinyint(1)	NO	1	是否启用：1 启用 / 0 停用（停用 = 逻辑废弃，不物理删）
+notification_template	6	created_at	datetime	NO	CURRENT_TIMESTAMP	行落库时刻（agent.md 数据库管理规则 8）
+notification_template	7	updated_at	datetime	NO	CURRENT_TIMESTAMP	行更新时刻
+== INDEXES ==
+notification	idx_notification_batch	1	BatchId	1
+notification	idx_notification_inbox	1	ToId	1
+notification	idx_notification_inbox	2	ToType	1
+notification	idx_notification_inbox	3	CreatedAt	1
+notification	idx_notification_unread	1	ToId	1
+notification	idx_notification_unread	2	ToType	1
+notification	idx_notification_unread	3	ReadAt	1
+notification	PRIMARY	1	Id	0
+notification_template	PRIMARY	1	Id	0
+notification_template	uk_notification_template_key	1	TemplateKey	0
+== REGRESSION ==
+15
+29	2	6	5
+0	0

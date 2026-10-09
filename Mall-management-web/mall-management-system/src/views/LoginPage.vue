@@ -323,7 +323,7 @@ export default {
         else if(role === "2"){
           setUsername(this.loginAccount); setRole(role); await this.mintToken(role);   // ⚠️ 止血笔：同行追加，保持净零行数（防 `api-contract.md:172` 引的 `:216` 漂移）；P2.6 起 setCredentials → setUsername；多账户隔离笔（2026-10-06）再加铸票（见 mintToken）
           this.$router.push(this.landingAfterLogin(role));   // 前端路由守卫笔（2026-10-06）：同上，否则 = 原来的 "/merchant"
-        }
+        }  else if(role === "3"){ setUsername(this.loginAccount); setRole(role); await this.mintToken(role); this.$router.push(this.landingAfterLogin(role)); }   // ✅ C3（2026-10-08，管理员）：⚠️ **整个分支贴在 `}` 尾巴上写完** —— 本文件最大被引行是 `:687`（全仓 15 条引用里最高的一条），`if/else` 链里在 `:326` 之后**插一行**就会让其后 360 行集体 +1、那条引用当场失效 ⇒ 沿用本链上方 `:320`/`:324` 既有的「同行追加保净零」手法。⚠️ `mintToken` 那一发今天**注定 401**（`/user/token` 明文禁止 cookie 管理员换票，是刻意的安全属性，见 slot-registry §十三 13-5）⇒ 被 `mintToken` 内部的 fail-open catch 吞掉，**不影响落点**；管理员身份今天只由 cookie 会话承载，骨架够用
       } catch (e) {
         this.loginWarnText = (e instanceof TypeError || e.name === 'TimeoutError') ? "连不上服务器：请确认后端已在 8088 运行、且本页源在 CORS 白名单内" : "未识别到账户，请检查对应输入";   // ⚠️ 结构调整（2026-10-07）：连不上（fetch 抛 `TypeError`，含 CORS 被拦 / 超时）**不再**与「账号对不上」同报 —— 原句把环境问题说成用户输错（用户实测「登不上」所见即此句）。判据只放这两类：`UnauthorizedError`（role=0 ⇒ `/user/me` 401，见 :304）**必须仍走原句**，它是「账号对不上」的正规路径。同行追加，保持净零行数。
       }
@@ -431,7 +431,7 @@ export default {
     //   ⚠️ 代价：角色首页表（下面的 `/customer` / `/merchant`）与 `router/index.js` 的 `ROLE_HOME`
     //   是**同构的第二份**；改一处要回头核另一处。⚠️ **按语（角色边界，2026-10-06，§5-AG (16)）**：角色**判定**已改为与守卫**同源**的 `meta.roles`（下面新增的 `roleAllowed`）；但**这张首页表**仍与 `ROLE_HOME` 各一份（**未合并** —— R6 裁决 D10 把它挂给了待定笔，本笔不碰）。
     landingAfterLogin(role) {
-      const base = role === "2" ? "/merchant" : "/customer";   // ⚠️ `role === "3"`（管理员）在这里会落到 "/customer" —— 归 **C3** 一并补（今天前端**没有** `role === "3"` 分支、DB 也无种子 ⇒ 管理员登录本就走不到这里；见 progress.md §5-AG (16) 的 C3 待办）
+      const base = role === "3" ? "/admin" : role === "2" ? "/merchant" : "/customer";   // ✅ C3（2026-10-08）**已补**：原注「`role === "3"` 会落到 /customer —— 归 C3 一并补」当场兑现。⚠️ 本行是**同行改写**（不是插行）⇒ `:687` 及之前的所有被引行零漂移；`role === "1"` / `"2"` 的取值逐字未变
       const target = this.$route.query.redirect;
       if (typeof target !== "string" || !target.startsWith("/") || target.startsWith("//")) return base;
       if (target === "/login") return base;

@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="admin">
+  <head>
+    <meta charset="utf-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width,initial-scale=1.0">
+    <link rel="icon" href="<%= BASE_URL %>favicon.ico">
+    <title><%= htmlWebpackPlugin.options.title %></title>
+    <!--
+      ⚠️ 「无 hash 直开 admin.html ⇒ 定到 #/admin」**必须写在 bundle 之前**，所以放在这里，
+         不能放 `main-admin.js` 的 `bootstrap()` 里。
+      实测（2026-10-08，探针 probe-c3-admin-accept.mjs 第 3 轮）：写在 bootstrap 里会**来不及** ——
+      `vue-router` 的 `createWebHashHistory()` 在**模块求值那一刻**就把 `location` 抓成了字符串，
+      而 `main-admin.js` 顶部的 `import router from './router/index.js'` 早于 `bootstrap()` 执行
+      ⇒ 首航读到的 hash 是空的 ⇒ 走 `{ path:'/', redirect: landingFor }` ⇒ 未登录 ⇒ 落到
+      `#/customer`（**商城客户页被渲进管理端入口**，`#app` 里是「全部商品分类 / 今日秒杀」）。
+      本内联脚本是**解析期**执行（deferred bundle 之后才跑）⇒ 赶在一切之前。
+      ⚠️ 用 `replaceState` 而非 `location.replace`：不触发一次多余的导航/重载。
+    -->
+    <script>
+      if (!location.hash || location.hash === '#') {
+        history.replaceState(null, '', location.pathname + location.search + '#/admin')
+      }
+    </script>
+  </head>
+  <body>
+    <noscript>
+      <strong>We're sorry but <%= htmlWebpackPlugin.options.title %> doesn't work properly without JavaScript enabled. Please enable it to continue.</strong>
+    </noscript>
+    <div id="app"></div>
+    <!-- built files will be auto injected -->
+  </body>
+</html>

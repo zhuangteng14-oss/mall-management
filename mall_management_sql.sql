@@ -2,7 +2,7 @@
 SQLyog Ultimate v12.09 (64 bit)
 MySQL - 8.0.32 : Database - mall_management_sql
 *********************************************************************
-*/
+*/
 
 /*!40101 SET NAMES utf8 */;
 
@@ -260,3 +260,86 @@ CREATE UNIQUE INDEX `uk_order_orderId` ON `order` (`OrderId`);
 -- 应用层：SELECT COUNT(*) 查重【保留】；catch 已区分 DuplicateKeyException（返回「类型已存在」）。
 -- ============================================================
 CREATE UNIQUE INDEX `uk_goodstype_GoodType` ON `goodstype` (`GoodType`);
+
+-- ============================================================
+-- Migration: C3 批 A 管理端审计日志  Date: 2026-10-08
+-- 依据：docs/agent/c3-modules.md §11「权限与审计」（C3 批 A）· 用户裁决「批 A 先做」
+-- 用途：横切所有写操作，记录「谁 / 何时 / 对象 / 改前 / 改后」—— C3「权限与审计」页的数据源。
+--       第一批只挂 **1 个样板钩子**（goods/goodsUp），其余端点随各自那笔挂。
+-- 为何 append-only：审计行若能改，「谁改了什么」就不再可信 ⇒ 本表只 INSERT，永不 UPDATE / DELETE。
+-- 回滚：DROP TABLE `admin_audit`;（规则 v2：回滚 = 逻辑废弃；该语句执行前须人工确认）
+-- 幂等：「导入 = 先 DROP 后 CREATE」。⚠️ 与 order_state_transition 块同款 —— 本块用
+--       IF NOT EXISTS 且**不**在头部加 DROP ⇒ 全量重导**不清**历史审计行（刻意：审计跨重导保留）。
+--       代价：重导后本表非空，与其余 11 张「重导即清空」的表不同。
+-- ⚠️ 只应用于 VM / CI 的专用实例（本文件头部含全量 DROP，绝不可指向有真实数据的库）。
+-- ============================================================
+CREATE TABLE IF NOT EXISTS `admin_audit` (
+  `Id` bigint NOT NULL AUTO_INCREMENT COMMENT '自增主键',
+  `ActorId` varchar(50) DEFAULT NULL COMMENT '操作者业务号（会话里的 customerid/merchantid，**不是**登录名）；认不出身份为 NULL。⚠️ 会话存的就是业务号，见 AuthSession',
+  `ActorRole` int DEFAULT NULL COMMENT '操作者角色，取自 login.Role：1 客户 / 2 商家 / 3 管理员；认不出为 NULL',
+  `Action` varchar(64) NOT NULL COMMENT '动作 tag，形如 goods.update（与 admin 域 AuditActions 常量一一对应）',
+  `TargetType` varchar(32) NOT NULL COMMENT '被改对象的类型，形如 goods',
+  `TargetId` varchar(128) NOT NULL COMMENT '被改对象的标识，形如 MerchantId:ProductCode',
+  `BeforeJson` json DEFAULT NULL COMMENT '**改前**快照（JSON）；新增类动作（无改前态）为 NULL',
+  `AfterJson` json DEFAULT NULL COMMENT '**改后**快照（JSON）',
+  `OccurredAt` datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) COMMENT '动作发生时刻（毫秒精度，同秒内可排序）',
+  `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '行落库时刻（agent.md 数据库管理规则 8）',
+  `updated_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '本表 append-only，恒等于 created_at；为规则 8 保留',
+  PRIMARY KEY (`Id`),
+  KEY `idx_admin_audit_occurred` (`OccurredAt`),
+  KEY `idx_admin_audit_actor` (`ActorId`,`OccurredAt`),
+  KEY `idx_admin_audit_target` (`TargetType`,`TargetId`,`OccurredAt`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='管理端审计日志（C3 批 A 新增；append-only，横切所有写操作）';
+
+-- ============================================================
+-- Migration: C3 块1-I2 系统通知  Date: 2026-10-09
+-- 依据：docs/agent/c3-modules.md §6「系统通知」+ §9.2（被评论 / 被回复 / 被 @）
+--       · docs/agent/context-packs/c3-block-1-infra.md「要新建」
+-- 用途：平台 → 个人的单向投递（公告 / 群发 / 定向）。**每收件人一行**
+--       （已读时刻 ReadAt 落在行上 ⇒ 广播 / 公告必须扇出，不能一行多人共享读态）。
+--       与 message 分表：message 是「两人会话」（from / to 都有意义），通知无 from。
+-- 回滚：DROP TABLE `notification`;（规则 v2：回滚 = 逻辑废弃；该语句执行前须人工确认）
+-- 幂等：「导入 = 先 DROP 后 CREATE」；本块用 IF NOT EXISTS 且**块内不 DROP**
+--       ⇒ 全量重导**不清**通知历史（刻意，同 admin_audit：通知不是会被重新播种的种子数据，
+--         清空即永久消失，没有任何脚本会补回来）。
+-- ⚠️ TargetId 是**软引用**：**不设 FK**。目标对象可能已被删除 / 全量重导后失效；
+--    有 FK 会让插入报错或触发级联删；无 FK 由前端渲染时容错
+--    （对象不存在 → 显示「（相关对象已删除）」，不崩、不空白）。
+-- ============================================================
+CREATE TABLE IF NOT EXISTS `notification` (
+  `Id` bigint NOT NULL AUTO_INCREMENT COMMENT '自增主键',
+  `BatchId` varchar(36) NOT NULL COMMENT '本次投递批次（UUID）；一次群发/公告的扇出各行共享同一值，供管理端「通知历史」按次归组；单发也生成一个',
+  `ToId` varchar(50) NOT NULL COMMENT '收件人业务号（user.customerid / user.merchantid），与会话存号口径一致',
+  `ToType` varchar(16) NOT NULL COMMENT '收件人类型：customer / merchant（英文，对齐 message.from_type）',
+  `EventType` varchar(64) NOT NULL COMMENT '事件类型 code，形如 comment.reply / goods.audit.rejected（对应 notification 域 NotificationEvents 常量；⚠️ 后端不校验白名单，未知 code 也照落）',
+  `Title` varchar(128) NOT NULL COMMENT '通知标题',
+  `Content` varchar(1024) NOT NULL COMMENT '通知正文',
+  `TargetType` varchar(32) DEFAULT NULL COMMENT '关联对象类型（goods / user / comment…）；无关联为 NULL。⚠️ 软引用，无 FK',
+  `TargetId` varchar(128) DEFAULT NULL COMMENT '关联对象标识（如 MerchantId:ProductCode）；无关联为 NULL。⚠️ 软引用，无 FK，前端容错',
+  `ReadAt` datetime(3) DEFAULT NULL COMMENT '已读时刻；NULL = 未读（唯一判据）',
+  `CreatedAt` datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) COMMENT '通知产生时刻（毫秒精度，收件箱排序用；DB 存 UTC）',
+  `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '行落库时刻（agent.md 数据库管理规则 8）',
+  `updated_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '行更新时刻；本表**非** append-only —— 标记已读会 UPDATE，故它随 ReadAt 变化',
+  PRIMARY KEY (`Id`),
+  KEY `idx_notification_inbox`  (`ToId`,`ToType`,`CreatedAt`),
+  KEY `idx_notification_unread` (`ToId`,`ToType`,`ReadAt`),
+  KEY `idx_notification_batch`  (`BatchId`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='系统通知（C3 块1-I2 新增；平台→个人单向投递，每收件人一行）';
+
+-- ============================================================
+-- Migration: C3 块1-I2 通知模板  Date: 2026-10-09
+-- 依据：docs/agent/c3-modules.md §6「消息模板管理」
+-- 回滚：DROP TABLE `notification_template`;（规则 v2：回滚 = 逻辑废弃；该语句执行前须人工确认）
+-- 幂等：同上（IF NOT EXISTS，块内不 DROP）。
+-- ============================================================
+CREATE TABLE IF NOT EXISTS `notification_template` (
+  `Id` bigint NOT NULL AUTO_INCREMENT COMMENT '自增主键',
+  `TemplateKey` varchar(64) NOT NULL COMMENT '模板键（业务唯一），形如 goods.audit.rejected',
+  `TitleTemplate` varchar(255) NOT NULL COMMENT '标题模板（可含 {占位符}）',
+  `BodyTemplate` varchar(1024) NOT NULL COMMENT '正文模板',
+  `Enabled` tinyint(1) NOT NULL DEFAULT 1 COMMENT '是否启用：1 启用 / 0 停用（停用 = 逻辑废弃，不物理删）',
+  `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '行落库时刻（agent.md 数据库管理规则 8）',
+  `updated_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '行更新时刻',
+  PRIMARY KEY (`Id`),
+  UNIQUE KEY `uk_notification_template_key` (`TemplateKey`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='系统通知模板（C3 块1-I2 新增；含模板键/标题模板/正文模板/启用）';

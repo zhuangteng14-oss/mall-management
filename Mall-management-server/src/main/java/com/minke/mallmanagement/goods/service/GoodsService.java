@@ -456,4 +456,23 @@ public class GoodsService {
             TransactionAspectSupport.currentTransactionStatus().setRollbackOnly();
         }
     }
+
+    // ==================== 读：审计快照（C3 批 A 新增） ====================
+
+    /**
+     * 审计用的商品快照（纯委托 {@link GoodsDao#selectGoodsForAudit}）—— C3 批 A「权限与审计」
+     * 样板挂钩的**读**的一半，调用方是 {@code GoodsController.goodsUp}。
+     *
+     * <p>⚠️ <b>为什么是「读」被提到公共服务上，而不是让 Service 自己写审计</b>：审计写入
+     * （{@code AuditService.record}）刻意留在 Controller —— 因为 {@code goodsUp} 带
+     * {@code @Transactional}，若在里面写审计，审计行会**加入业务事务**：业务回滚时被一起抹掉，
+     * 且「审计失败」会与「业务失败」共用同一条连接状态。放在 Controller 则天然是
+     * **业务提交之后**的另一条自动提交语句。详见 {@code AuditService} 类注释。
+     *
+     * <p>⚠️ 本方法**不加** {@code @Transactional}：它是一次纯读，且被调用两次（改前 / 改后）
+     * —— 两次各取一条连接正是想要的（「改后」必须看到**已提交**的新值）。
+     */
+    public List<Map<String, Object>> snapshotGoodsForAudit(String MerchantId, String ProductCode) {
+        return goodsDao.selectGoodsForAudit(MerchantId, ProductCode);
+    }
 }

@@ -1,7 +1,12 @@
 package com.minke.mallmanagement.smoke;
 
 import com.minke.mallmanagement.shared.lock.DistributedLockService;
+import com.minke.mallmanagement.admin.dao.AdminAuditDao;
+import com.minke.mallmanagement.admin.service.AuditService;
+import com.minke.mallmanagement.admin.service.NotificationBroadcastService;
 import com.minke.mallmanagement.message.dao.MessageDao;
+import com.minke.mallmanagement.notification.dao.NotificationDao;
+import com.minke.mallmanagement.notification.service.NotificationService;
 import com.minke.mallmanagement.message.service.FriendCacheService;
 import com.minke.mallmanagement.message.service.MessageService;
 import com.minke.mallmanagement.goods.dao.GoodsDao;
@@ -98,10 +103,25 @@ import static org.mockito.Mockito.when;
 //    （它们只打 orders / goods / user / 静态资源），故上面三个替身的默认行为足够。
 //    ⇒ **代价**：本域的 10 个端点在 smoke 里**零覆盖**，与 A3 只打 friendAdd 一处叠加后，
 //    见 MessageService 类注释「谁保护本笔」一节。
+// C3 块 1（批 A 一 + I2 二，2026-10-09）补三个新 Controller 的依赖。
+// ⚠️ 这个配套**是必须的、不是可选**：@WebMvcTest 无参会加载**全部** @Controller，新控制器一进来，
+//    切片上下文就会因为「找不到它要的 @Service」而**启动失败**（2026-10-09 实测：237 测试 / **77 errors**，
+//    全部落在本包 —— 首个报错是 `AdminAuditController required a bean of type 'AuditService'`）。
+//    三处依赖：`AdminAuditController` → `AuditService`（+ `AdminAuditDao`）；
+//    `NotificationController` → `NotificationService`（+ `NotificationDao`）；
+//    `AdminNotificationController` → `NotificationBroadcastService`。
+//    ⇒ 照本文件既有范式一并 @Import 真 bean（不用 @MockitoBean：它们无状态、不参与任何断言，
+//    真 bean 与替身等价，且真 bean 顺带证明「能构造起来」）。两个新 DAO 只吃 JdbcTemplate ⇒
+//    落回下面那个 @MockitoBean，**SQL 仍不出切片**。
+// ⚠️ 上文「全部 4 个 Controller」是三层四笔时的值，**现已不准确**（批 A 起 5 个、I2 起 7 个）——
+//    本次只补 @Import 与这一节，未逐句回改旧注释。
 @Import({OrderStateMachine.class, OrderService.class, OrderDao.class,
         GoodsService.class, GoodsDao.class,
         UserService.class, UserDao.class,
-        MessageService.class, MessageDao.class})
+        MessageService.class, MessageDao.class,
+        AuditService.class, AdminAuditDao.class,
+        NotificationService.class, NotificationDao.class,
+        NotificationBroadcastService.class})
 public abstract class AbstractSmokeTest {
 
     @Autowired

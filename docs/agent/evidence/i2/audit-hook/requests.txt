@@ -1,0 +1,36 @@
+C3 块 1 · I2 —— /admin/notify/send 审计挂钩 实测原文
+时间：2026-10-09 19:15（+08:00）
+实例：临时起的 a3 profile（spring.profiles.active=a3，闸关 app.auth.enabled=false，
+      连 VM 库 192.168.229.129:3306/mall_management_sql + Redis），端口 8099，
+      用**本次新编译**的 class 启动（用户那个 8088 跑的是加钩子之前的 class，
+      它回体里没有 eventType —— 本钩子必须重启才生效）。
+      验完即停（PID 127328），未动用户的 8088（PID 136460）。
+
+────────── ① 正例：群发 ──────────
+curl -s -X POST http://127.0.0.1:8099/admin/notify/send \
+     -d title=HookProbe-A -d body=audit hook positive case -d audience=merchant
+{"success":true,"eventType":"system.notice","batchId":"780bfcbb-6732-4fc8-aeea-a8618f8596cd","sent":3}
+
+────────── ② 正例：定向单发（不传 eventType） ──────────
+curl -s -X POST http://127.0.0.1:8099/admin/notify/send \
+     -d title=HookProbe-B -d body=direct -d toId=M0 -d toType=merchant
+{"success":true,"eventType":"system.notice","batchId":"2f1c7fc1-15da-4fd4-9802-9ac8a2e11c20","sent":1}
+（回带的 eventType 是 Service 折过的**生效值** system.notice，不是调用方传的空值）
+
+────────── ③ 负例：既不给 audience 也不给 toId ──────────
+curl -s -X POST http://127.0.0.1:8099/admin/notify/send \
+     -d title=HookProbe-C -d body=no audience
+{"msg":"缺少投递受众：请给 audience（all / customer / merchant）或 toId","success":false}
+
+────────── DB 核对（admin_audit） ──────────
+见同目录 admin_audit-notification.send.txt（来源：AuditQ.java 走 JDBC 只读查询）。
+判据：
+  · Action='notification.send' 共 **2** 行 —— ① ② 各一行，**负例 ③ 没有产生行**
+    （「只有 success=true 才记」成立）
+  · BeforeJson 两行**全 NULL**（新增类动作，无改前态）
+  · TargetType='notification'，TargetId = 该批的 batchId（UUID，非 notification.Id）
+  · AfterJson 只含索引字段（batchId/eventType/title/audience/toId/toType/sent），
+    **不含正文** —— 正文在 notification 行上，用 batchId 一 join 就到
+  · ActorId / ActorRole = **NULL**：这两次请求**没带 cookie**（闸关实例上匿名打），
+    钩子如实记「没识别出 actor」，**没有编造**。闸开服务器上管理员能否被 identify
+    是 TD-18 那条既有接缝（`AuthSession.authorize` 把 cookie 来的 role=3 折成 null）。
