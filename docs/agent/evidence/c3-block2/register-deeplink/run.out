@@ -1,0 +1,81 @@
+
+── ① #/login ──
+{
+  "hash": "#/login",
+  "tabOn": [
+    true,
+    false
+  ],
+  "tabText": [
+    "登录",
+    "注册"
+  ],
+  "figReg": false,
+  "figW": 440,
+  "figH": 248,
+  "registerPageOn": false,
+  "loginPageOn": true
+}
+
+── ② #/register ──
+{
+  "hash": "#/register",
+  "tabOn": [
+    false,
+    true
+  ],
+  "tabText": [
+    "登录",
+    "注册"
+  ],
+  "figReg": true,
+  "figW": 440,
+  "figH": 248,
+  "registerPageOn": true,
+  "loginPageOn": false
+}
+
+── ③a #/login 点「注册」后 ──
+{
+  "hash": "#/register",
+  "tabOn": [
+    false,
+    true
+  ],
+  "tabText": [
+    "登录",
+    "注册"
+  ],
+  "figReg": true,
+  "figW": 440,
+  "figH": 248,
+  "registerPageOn": true,
+  "loginPageOn": false
+}
+
+── ③b 再点「登录」后 ──
+{
+  "hash": "#/login",
+  "tabOn": [
+    true,
+    false
+  ],
+  "tabText": [
+    "登录",
+    "注册"
+  ],
+  "figReg": false,
+  "figW": 440,
+  "figH": 248,
+  "registerPageOn": false,
+  "loginPageOn": true
+}
+
+══ 判定 ══
+✅ ① #/login 是登录面
+✅ ② #/register 直达注册面
+✅ ③a 点注册 → URL 变 #/register
+✅ ③b 点登录 → URL 回 #/login
+
+全部通过。
+截图：docs/agent/evidence/c3-block2/register-deeplink

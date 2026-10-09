@@ -103,6 +103,20 @@ public final class NotificationEvents {
     /** 商家秒杀申请经管理端审核**驳回**（§9.1 路径 B）。 */
     public static final String SECKILL_APPLICATION_REJECTED = "seckill.application.rejected";
 
+    // ==================== 块 2（用户块）：本块新增 3 条（块 1 已预设的 audit/banned 6 条见上） ====================
+
+    /**
+     * 商家提交入驻申请 → **触达管理端**（共享收件箱 {@code ToType='admin', ToId='*'}，
+     * A 档裁决 4「扩通道」）。
+     */
+    public static final String MERCHANT_APPLY_SUBMITTED = "merchant.apply.submitted";
+
+    /** 管理员排定降级 → 触达**商家**（通知期开始，1 天）。 */
+    public static final String MERCHANT_DOWNGRADE_SCHEDULED = "merchant.downgrade.scheduled";
+
+    /** 降级**已执行**（冻结生效）→ 触达商家；正文带 {@code DowngradeReason}。 */
+    public static final String MERCHANT_DOWNGRADE_APPLIED = "merchant.downgrade.applied";
+
     private NotificationEvents() {
     }
 }

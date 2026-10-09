@@ -55,7 +55,7 @@
 <script setup>
 // src/views/NotifyInbox.vue —— 系统通知**收件箱**（客户 / 商家两端共用。C3 块 1 · I2，2026-10-09）。
 //
-// ⚠️ **为什么一个组件服务两端**：两端的差异**只有数据**（收件人 id 与 `ToType`），结构逐字相同
+// ⚠️ **为什么一个组件服务两端**：两端的差异**只有数据**（收件人 id 与 `ToType`），结构逐字相同（C3 块 2 起是**三端** —— 多了管理端的**共享收件箱**，`ToType='admin'` / `ToId='*'`，落在 `views/admin/AccountsPage.vue` 里嵌的一个实例；派生见 `:99-103`）
 // —— 判断依据与 `views/admin/StubPage.vue` 块首那条一致（差异只在数据、不在结构 ⇒ 不拆文件）。
 // 这与「消息」那边不同：`ChatRoom.vue` 要同时服务 `/customer/msg` 与 `/merchant/msg`，
 // 它也是**一个组件**；本页只是把同一手法再走一遍。
@@ -96,11 +96,11 @@ const onlyUnread = ref(false)
 // `/customer/notify` ⇄ `/merchant/notify` 是本页仅有的两个挂载点（`router/index.js` 尾部
 // 两条 `addRoute`）。⚠️ 别写成 `route.path.includes('merchant')` —— `includes` 对将来任何
 // 含该子串的路径都为真（`startsWith('/merchant')` 才是「在这个壳下」的判据，同 `nav.js:6` 那条）。
-const base = computed(() => (route.path.startsWith('/merchant') ? '/merchant' : '/customer'))
-const toType = computed(() => (base.value === '/merchant' ? 'merchant' : 'customer'))
+const base = computed(() => (route.path.startsWith('/merchant') ? '/merchant' : route.path.startsWith('/admin') ? '/admin' : '/customer'))   // ⚠️ C3 块 2〈用户块〉：**同行**加 `admin` 那一支（第三个挂载点 = `views/admin/AccountsPage.vue` 里嵌的实例；`api/endpoints.js:84` 与后端 `MerchantApplicationController.ADMIN_INBOX_ID` 都点名了这一处，它不是「顺手加的壳」）。⚠️ 本行连同 `:100` / `:103` 被 `MessageCenter.vue:35` 按 **`:99-103`** 整段引 ⇒ 只许**同行**改、一行都不许插。
+const toType = computed(() => (base.value === '/merchant' ? 'merchant' : base.value === '/admin' ? 'admin' : 'customer'))
 /** 当前收件人业务号。⚠️ 与 `AppShell.vue` 的 `getCurrentUser()` **同一条降级链**：
- *  先按壳取自己的号；取不到就是「没登录」—— 别退回另一种身份（那样商家的会话会用客户的号查）。 */
-const toId = computed(() => (base.value === '/merchant' ? getMerchantId() : getCustomerId()))
+ *  先按壳取自己的号；取不到就是「没登录」—— 别退回另一种身份（那样商家的会话会用客户的号查）。⚠️ **管理端是这条链的唯一例外**（C3 块 2）：它的 `ToId` 是**共享收件箱的哨兵值** `'*'`，不是「自己的号」—— 全仓管理员共用一个收件箱（入驻申请就发到这里）。见 `:103`。 */
+const toId = computed(() => (base.value === '/merchant' ? getMerchantId() : base.value === '/admin' ? '*' : getCustomerId()))   // ⚠️ 哨兵 `'*'` 与后端 `MerchantApplicationController.ADMIN_INBOX_ID` **逐字一致**（改一处要同改另一处）。后端放行**不是**靠「自己等于自己」（`'*'` 当然不等于调用者的号），而是 `IdentityGuard.requireSelfOrAdmin` 的**管理员那一档**（`identity.role() == ROLE_ADMIN`）—— 即只有管理员读得到这个收件箱。
 
 /** 拿到一个可用的收件人号吗。`getMerchantId()` 在未登录时可回 `'null'` / `'undefined'` 字面串
  *  （它读 `sessionStorage`，而 `sessionStorage.setItem(k, null)` 存的是字符串 `"null"`）——

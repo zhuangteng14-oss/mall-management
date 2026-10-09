@@ -2638,8 +2638,9 @@ public class ConcurrencyRunner {
             // ⚠️ 2026-10-04 起 ddl-auto 已由 update 改为 validate（TD-01 B 方案），
             // 本校验的判据不变 —— 从「查 update 没乱改表」变成「查 validate 没乱改表」。
             // 期望 = 11 张基线表 + **已知追加表**；已知追加表在涨：B3 的 order_state_transition（1 张）、
-            // C3 块 1（2026-10-09）的 admin_audit / notification / notification_template（3 张）—— 四张同在
-            // mall_management_sql.sql 末尾的 Migration 块、人工落盘（见 db-schema.md「表数量：15」）。
+            // C3 块 1（2026-10-09）的 admin_audit / notification / notification_template（3 张）、
+            // C3 块 2（2026-10-09）的 merchant_application（1 张）—— 五张同在
+            // mall_management_sql.sql 末尾的 Migration 块、人工落盘（见 db-schema.md「表数量：16」）。
             // 刻意不写死总数：运行器与那份 SQL 是两笔改动，谁先落都要能跑。但**多出来的每一张都必须点过名**
             // （下面的 IN 清单），且清单里那几张必须**真在**（`known == KNOWN_TABLES` 那一半）—— 否则
             // 「表数对上」只是「多了几张没登记的表」，正是 TD-01 要抓的反向改表（update 模式下按实体
@@ -2651,11 +2652,12 @@ public class ConcurrencyRunner {
             int known = scalarInt(c,
                     "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = DATABASE() "
                   + "AND LOWER(table_name) IN ('order_state_transition','admin_audit','notification',"
-                  + "'notification_template')");
-            final int KNOWN_TABLES = 4;   // = 上面 IN 清单的长度（加表时**两处同改**）
+                  + "'notification_template','merchant_application')");
+            final int KNOWN_TABLES = 5;   // = 上面 IN 清单的长度（加表时**两处同改**）
             boolean p3 = tables == 11 + known && known == KNOWN_TABLES;
             pre.put("P3", (p3 ? "PASS" : "FAIL") + " 表数=" + tables + "；已知追加表 order_state_transition /"
-                    + " admin_audit / notification / notification_template 在 " + known + "/" + KNOWN_TABLES
+                    + " admin_audit / notification / notification_template / merchant_application 在 "
+                    + known + "/" + KNOWN_TABLES
                     + " 张（期望表数 = 11 + " + KNOWN_TABLES + " = " + (11 + KNOWN_TABLES) + "）");
 
             // P4 种子计数：确认是刚导入过的干净实例，而非被上一轮污染过的库

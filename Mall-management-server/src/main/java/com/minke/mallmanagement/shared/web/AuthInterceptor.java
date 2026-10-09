@@ -11,7 +11,7 @@ import java.util.List;
 /**
  * 登录闸（鉴权笔 **1**）—— <b>只判「放不放行」，不做认证本身</b>。
  *
- * <h2>【它判四件事，顺序固定】</h2>
+ * <h2>【它判五件事，顺序固定】</h2>
  * <ol>
  *   <li><b>总开关</b>（{@code app.auth.enabled}）—— 关着就 {@code return true}，全部放行。
  *       默认**关**，故本笔对现有行为**零影响**。</li>
@@ -20,15 +20,27 @@ import java.util.List;
  *   <li><b>凭据</b>（**授权**口径，{@link AuthSession#authorize}）—— token（{@code Authorization:
  *       Bearer}）优先；无 token 时看服务端会话，且会话里要带 {@link #SESSION_USER_ID}。
  *       ⚠️ {@code role=3}（管理员）的 cookie 在**这一档就被折成未登录** —— 管理员身份只能由
- *       token 承载，理由见 {@link AuthSession#authorize}。</li>
+ *       token 承载，理由见 {@link AuthSession#authorize}。
+ *       <p>⚠️ <b>C3 块 2（用户块）在 ③ 之内插了第 ⑤ 档：封禁闸</b>（见 {@link #isBanned}）
+ *       —— 凭据有效但账号被封 ⇒ 同样 401。它必须**在 ③ 之后**（要先认出是谁）且**在 ④ 之前**
+ *       （被封的账号连「说出你是谁」也不给）。</li>
  *   <li><b>身份识别例外</b>（{@link WebAuthConfig#AUTH_IDENTITY_PATHS}，今日只有 {@code /user/me}）
  *       —— 第 ③ 档不通过、但**识别**口径（{@link AuthSession#identify}）拿得到身份时放行。
  *       目的是让前端能问出「你是管理员，但需要显式登录」并据此**退回登录页**，而不是静默当匿名。
  *       ⚠️ 这条例外**只放宽「说出你是谁」**：端点必须自行降级作答（{@code /user/me} 对
  *       cookie 来的 {@code role=3} 只回 {@code role}、不回资料），业务端点仍走 ③ 的 401。</li>
+ *   <li><b>封禁闸</b>（C3 块 2 新增；挂在 ③ 之内判定，编号放末是为了不打乱上面四档的既有叙述）
+ *       —— 身份有效但账号 {@code banned} ⇒ 401。⚠️ **只判 role 1/2，管理员豁免**，
+ *       理由见 {@link #isBanned}。</li>
  * </ol>
- * 四档都不通过 ⇒ 写 401 + {@code {"success":false,"msg":"未登录"}} 并 {@code return false}，
+ * 五档都不通过 ⇒ 写 401 + {@code {"success":false,"msg":"未登录"}} 并 {@code return false}，
  * **请求不进 Controller**。
+ *
+ * <p>⚠️ <b>封禁档为什么答「未登录」而不是另造一个 body</b>：401 的形状（状态码 + 逐字节固定的
+ * {@link #BODY_NOT_LOGGED_IN}）是一份**既有对外契约**，前端 {@code api/http.js} 的 401 出口
+ * 据此清态跳登录页。再造一个 403 / 新 body 等于要求前端多认一种失败，而收益只是「更早说出被封」
+ * —— 那句话由**登录那一步**说得更好：{@code loginSelect} 答 {@code 4}，前端有专门的文案与出口
+ * （见 {@code UserService.loginSelect}）。故本档**复用** 401 与那条字面量，不加新契约。
  *
  * <h2>【为什么「有会话」不等于「已登录」—— 这是本类最容易被放宽的一处】</h2>
  * 判据刻意是「会话**且**带 {@code userId} 属性」，不是「有会话即可」。会话在 Servlet 语义里只是
@@ -117,10 +129,29 @@ public class AuthInterceptor implements HandlerInterceptor {
     /** 身份识别例外表（第 ④ 档）。同样取副本，理由同上。 */
     private final List<String> identityPaths;
 
+    /**
+     * 跨域「封禁态」探针（C3 块 2 用户块新增，第 ⑤ 档）。⚠️ <b>可为 {@code null}</b>。
+     *
+     * <p>为 {@code null} 的两种情形都不是缺陷：① 测试直接 {@code new} 的 3 参构造
+     * （{@code AuthGateSmokeTest} 的白名单全表扫描就是这么造的）；② 切片里没有该 bean
+     * （{@code UserStateLookupService} 是 {@code @Service}，{@code @WebMvcTest} 不扫）——
+     * 故 {@link WebAuthConfig} 用 {@code ObjectProvider} 取它，取不到就给 {@code null}。
+     * 这两种情形下第 ⑤ 档**整体不生效**（等价于封禁闸关着），这正是想要的：切片不该因为
+     * 「多了一张表要查」而全红。
+     */
+    private final UserStateLookup userStateLookup;
+
+    /** 3 参构造 —— **保留**，供测试直接 {@code new}（{@code AuthGateSmokeTest:185}）。等价于「无封禁闸」。 */
     public AuthInterceptor(boolean enabled, List<String> whitelist, List<String> identityPaths) {
+        this(enabled, whitelist, identityPaths, null);
+    }
+
+    public AuthInterceptor(boolean enabled, List<String> whitelist, List<String> identityPaths,
+                           UserStateLookup userStateLookup) {
         this.enabled = enabled;
         this.whitelist = List.copyOf(whitelist);
         this.identityPaths = List.copyOf(identityPaths);
+        this.userStateLookup = userStateLookup;
     }
 
     /** 总开关当前取值。仅供测试与启动期自检读取，不参与判定。 */
@@ -148,7 +179,15 @@ public class AuthInterceptor implements HandlerInterceptor {
         //    在这一档就被折成未登录 —— 管理员身份只能由 token 承载（理由见 AuthSession.authorize）。
         //    ⚠️ 判据只有 AuthSession 一处：本闸不再自己 getSession()/读属性（那是本笔之前的写法），
         //    否则「闸认的会话」与「端点认的会话」会成为两处可能分歧的判据。
-        if (AuthSession.authorize(request) != null) {
+        AuthSession.Identity identity = AuthSession.authorize(request);
+        if (identity != null) {
+            // ⑤ 封禁闸（C3 块 2 用户块新增）：身份有效，但**这个账号已被封** ⇒ 拒。
+            //    位置刻意在 ③ 之内、④ 之前：封禁的账号连「说出你是谁」（/user/me）也不该拿到
+            //    ⇒ 前端 401 出口把他踢回登录页，登录那一步再由 loginSelect 答 4 告诉他为什么。
+            if (isBanned(identity)) {
+                writeNotLoggedIn(response);
+                return false;
+            }
             return true;
         }
 
@@ -160,6 +199,33 @@ public class AuthInterceptor implements HandlerInterceptor {
 
         writeNotLoggedIn(response);
         return false;
+    }
+
+    /**
+     * 第 ⑤ 档判据：这个身份对应的账号是否被封。
+     *
+     * <p>⚠️ <b>只判 1（客户）/ 2（商家）两档，{@code role=3}（管理员）豁免</b> —— 与
+     * {@link IdentityGuard} 对管理员的豁免同一姿态。理由是一条具体的失效模式：本闸一旦把
+     * 管理员也纳进来，而 {@code /admin/accounts/user/ban} 的管理端用户列表里**管理员行也在**
+     * （{@code UserGovernanceDao.selectUsers} 不筛 {@code usertype}），一次误点就会把
+     * **整个管理面**锁死，而默认 profile 下 {@code /admin/**} 无角色闸（TD-18）、
+     * 也没有第二条能解封的路 —— 只能手改 SQL。封禁的语义是「治理平台上的使用者」，
+     * 不是「管理员互相封」。
+     *
+     * <p>⚠️ 取号口径与 {@code UserService.businessId} 同源（商家取 {@code merchantid}，
+     * 其余取 {@code customerid}）—— ⚠️ **选列这件事不在本类做**，{@link UserStateLookup#isBanned}
+     * 的第二个参数就是那条判据的唯一落点（role 2 ⇒ {@code merchantid}，其余 ⇒ {@code customerid}）。
+     * {@code userStateLookup == null}（切片 / 测试直构）⇒ 一律放行。
+     */
+    private boolean isBanned(AuthSession.Identity identity) {
+        if (userStateLookup == null) {
+            return false;
+        }
+        Integer role = identity.role();
+        if (role == null || role == AuthSession.ROLE_ADMIN) {
+            return false;
+        }
+        return userStateLookup.isBanned(identity.userId(), role);
     }
 
     /**

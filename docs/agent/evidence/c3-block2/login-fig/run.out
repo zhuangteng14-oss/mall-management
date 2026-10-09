@@ -1,0 +1,78 @@
+① fetch 状态： {"sec1":{"status":200,"type":"image/jpeg"},"sec2":{"status":200,"type":"image/jpeg"}}
+② resource 条目： [{"name":"http://localhost:8088/img/Mall-Section-2.jpg","size":0,"dur":5,"initiator":"css"}]
+
+── login-1440x900 ──
+{
+  "cls": "brand-fig",
+  "w": 440,
+  "h": 248,
+  "top": 340,
+  "left": 48,
+  "bgImage": "url(\"http://localhost:8088/img/Mall-Section-2.jpg\")",
+  "bgColor": "rgb(229, 233, 236)",
+  "aspectRatio": "16 / 9",
+  "flex": "0 1 auto",
+  "minHeight": "0px",
+  "brandH": 900,
+  "paneH": 900,
+  "docH": 900
+}
+
+── register-1440x900 ──
+{
+  "cls": "brand-fig reg",
+  "w": 440,
+  "h": 248,
+  "top": 340,
+  "left": 48,
+  "bgImage": "url(\"http://localhost:8088/img/Mall-Section-1.jpg\")",
+  "bgColor": "rgb(229, 233, 236)",
+  "aspectRatio": "16 / 9",
+  "flex": "0 1 auto",
+  "minHeight": "0px",
+  "brandH": 900,
+  "paneH": 900,
+  "docH": 900
+}
+
+── login-1280x640 ──
+{
+  "cls": "brand-fig",
+  "w": 440,
+  "h": 137,
+  "top": 316,
+  "left": 48,
+  "bgImage": "url(\"http://localhost:8088/img/Mall-Section-2.jpg\")",
+  "bgColor": "rgb(229, 233, 236)",
+  "aspectRatio": "16 / 9",
+  "flex": "0 1 auto",
+  "minHeight": "0px",
+  "brandH": 640,
+  "paneH": 640,
+  "docH": 640
+}
+
+── register-1280x640 ──
+{
+  "cls": "brand-fig reg",
+  "w": 440,
+  "h": 137,
+  "top": 316,
+  "left": 48,
+  "bgImage": "url(\"http://localhost:8088/img/Mall-Section-1.jpg\")",
+  "bgColor": "rgb(229, 233, 236)",
+  "aspectRatio": "16 / 9",
+  "flex": "0 1 auto",
+  "minHeight": "0px",
+  "brandH": 640,
+  "paneH": 640,
+  "docH": 671
+}
+
+══ 判定用摘要 ══
+login          fig=440x248  brand=900  pane=900  docH=900  cls="brand-fig"
+reg            fig=440x248  brand=900  pane=900  docH=900  cls="brand-fig reg"
+loginShort     fig=440x137  brand=640  pane=640  docH=640  cls="brand-fig"
+regShort       fig=440x137  brand=640  pane=640  docH=671  cls="brand-fig reg"
+
+截图：docs/agent/evidence/c3-block2/login-fig

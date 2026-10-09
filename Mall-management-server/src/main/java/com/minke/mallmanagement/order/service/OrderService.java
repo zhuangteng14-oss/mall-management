@@ -1,6 +1,8 @@
 package com.minke.mallmanagement.order.service;
 
 import com.minke.mallmanagement.shared.lock.DistributedLockService.LockName;
+import com.minke.mallmanagement.shared.web.UserStateLookup;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Service;
 
 import java.util.HashMap;
@@ -128,14 +130,26 @@ public class OrderService {
     private final OrderStateMachine orderStateMachine;
     private final OrderTransitionRecorder orderTransitionRecorder;
 
+    /**
+     * 跨域「商家是否处于降级冻结态」探针（C3 块 2 用户块新增）。<b>可为 {@code null}</b>。
+     *
+     * <p>⚠️ 与 {@code WebAuthConfig} / {@code UserService} 同一条切片论证：{@code @Service}
+     * 不进 {@code @WebMvcTest}，而 {@code AbstractSmokeTest} 用 {@code @Import(OrderService.class)}
+     * 拉了**真 bean** ⇒ 裸注入会让全部 smoke 类在上下文加载期就红。取不到 ⇒ 冻结闸不生效
+     * （见 {@link #freezeRejection}），默认 profile 里它照常生效。
+     */
+    private final UserStateLookup userStateLookup;
+
     public OrderService(OrderDao orderDao,
                         DistributedLockService lockService,
                         OrderStateMachine orderStateMachine,
-                        OrderTransitionRecorder orderTransitionRecorder) {
+                        OrderTransitionRecorder orderTransitionRecorder,
+                        ObjectProvider<UserStateLookup> userStateLookupProvider) {
         this.orderDao = orderDao;
         this.lockService = lockService;
         this.orderStateMachine = orderStateMachine;
         this.orderTransitionRecorder = orderTransitionRecorder;
+        this.userStateLookup = userStateLookupProvider.getIfAvailable();
     }
 
     // ==================== 下单 ====================
@@ -184,6 +198,13 @@ public class OrderService {
             // ⚠️ 本方法在锁外调用 —— 是全类唯一不落在临界区里的观测调用点（见 OrderTransitionRecorder）。
             orderTransitionRecorder.rejectedAtBirth(PayIf, DeliveryIf, ReceiveIf, OrderId);
             return stateRejection();
+        }
+        // C3 块 2：商家降级冻结闸（阶段 ③ 之后的「冻结新单」）。**排在前两闸之后** ——
+        // 它不参与 B#1/C#6 那两条已发布契约的措辞，故放在最后，避免扰动「价格 vs 状态」的顺序。
+        // 同样在锁外：不可服务的请求不取锁、不触库，addLocked 依旧逐字不动。
+        Map<String, Object> frozen = freezeRejection(MerchantId);
+        if (frozen != null) {
+            return frozen;
         }
         return lockService.runLocked(LockName.ORDER_ADD, OrderId, () -> addLocked(
                 CustomerId, MerchantId, OrderId, Price, ProductInformation, Images, PayIf, DeliveryIf, ReceiveIf));
@@ -290,6 +311,47 @@ public class OrderService {
         Map<String, Object> result = new HashMap<>();
         result.put("success", false);
         result.put("msg", "订单状态不合法");
+        return result;
+    }
+
+    /**
+     * 商家降级冻结闸（C3 块 2 用户块）—— 可服务 ⇒ {@code null}；冻结 ⇒ 既有形状的失败响应。
+     *
+     * <h2>【「冻结新单、允许收尾旧单」的另一半在哪】</h2>
+     * 本闸只拦 {@code orderAdd}（**新单**）。旧单的支付 / 发货 / 收货走的是
+     * {@code OrderStateMachine} 那几条状态迁移，**不经过本方法** ⇒ 自然照常可用，
+     * 且 {@code MerchantDowngradeService} 刻意不碰 {@code order} 表的任何行。
+     * ⚠️ 所以「降级期间商家还能把在手订单做完」这条，靠的不是某个开关，而是
+     * <b>本闸只长在下单这一个入口上</b> —— 别把它顺手复制到状态迁移上去。
+     *
+     * <h2>【为什么返回 200 + 文案，而不是 4xx】</h2>
+     * 同 {@link #priceRejection}：全仓业务失败一律 200 + {@code {success:false,msg}}。
+     * 文案 {@code "该商家已暂停接单"} 不含 A3 的两条逐字红线（{@code 数据库错误} /
+     * {@code "success":true}）。
+     *
+     * <h2>【fail-open，且这是刻意的】</h2>
+     * {@code userStateLookup == null}（切片 / 未装配）或探针内部读库失败 ⇒ 一律**放行**。
+     * 理由见 {@code UserStateLookup} 类注释：冻结是**治理状态**，不是安全边界；
+     * 「查不到冻结态」时把整条下单链路挡死，代价远大于「少拦一个已被冻结的商家」。
+     *
+     * <p>⚠️ <b>代价（登记）</b>：每次成功下单多一次按 {@code merchantid} 的
+     * {@code SELECT COUNT(*)}，且它与其余两闸一样**在锁外**（故 20 并发下单 = 20 次探针查询）。
+     * 这是裁决 A 档 5「乙 = 冻结新单」的直接成本，不是疏漏。
+     *
+     * <p>⚠️ <b>与其余两闸的一处不对称，别当漏了</b>：本闸**不记观测**
+     * （{@code OrderTransitionRecorder} 只管订单状态迁移，冻结拒单不是状态迁移）。
+     * 「被冻结的商家还在被下单」这件事目前只在 {@code msg} 里可见，没有指标 —— 已挂账。
+     */
+    private Map<String, Object> freezeRejection(String merchantId) {
+        if (userStateLookup == null || merchantId == null || merchantId.trim().isEmpty()) {
+            return null;
+        }
+        if (!userStateLookup.isMerchantFrozen(merchantId)) {
+            return null;
+        }
+        Map<String, Object> result = new HashMap<>();
+        result.put("success", false);
+        result.put("msg", "该商家已暂停接单");
         return result;
     }
 

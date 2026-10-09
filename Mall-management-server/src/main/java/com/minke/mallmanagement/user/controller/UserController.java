@@ -1,8 +1,11 @@
 package com.minke.mallmanagement.user.controller;
 
+import com.minke.mallmanagement.admin.AuditActions;
+import com.minke.mallmanagement.admin.service.AuditService;
 import com.minke.mallmanagement.shared.web.AuthInterceptor;
 import com.minke.mallmanagement.shared.web.AuthSession;
 import com.minke.mallmanagement.shared.web.AuthTokenStore;
+import com.minke.mallmanagement.shared.web.IdentityGuard;
 import com.minke.mallmanagement.shared.web.Result;
 import com.minke.mallmanagement.user.service.UserService;
 import jakarta.servlet.http.HttpServletRequest;
@@ -21,10 +24,11 @@ import java.util.Map;
  * 业务规则、上传编排、响应组装全在 {@link UserService}，SQL 全在
  * {@code com.minke.mallmanagement.user.dao.UserDao}。
  *
- * <h2>【本类收 8 个端点 —— 不含 {@code userSelect}】</h2>
+ * <h2>【本类收 9 个端点 —— 不含 {@code userSelect}】</h2>
  * {@code loginSelect} / {@code loginAdd} / {@code getUserInfo} / {@code updateAvatar} /
  * {@code updateUserInfo}，加鉴权笔 2 的 {@code me} / {@code logout}，加多账户隔离笔的
- * {@code token}（2026-10-06）。⚠️ {@code /message/userSelect}
+ * {@code token}（2026-10-06），加 C3 块 2（用户块，2026-10-09）的 {@code updateProfile}
+ * —— <b>共 9 个</b>。⚠️ {@code /message/userSelect}
  * <b>不归本笔</b>：它的路由在 {@code MessageController}、服务在 {@code UserCacheService}，
  * 只是碰巧读 {@code user} 域的表 —— 归 message 域那一笔。
  *
@@ -85,9 +89,11 @@ import java.util.Map;
 public class UserController {
 
     private final UserService userService;
+    private final AuditService auditService;
 
-    public UserController(UserService userService) {
+    public UserController(UserService userService, AuditService auditService) {
         this.userService = userService;
+        this.auditService = auditService;
     }
 
     //这是一个接口（用于返回登录界面对应的数据，决定了此次登录去往哪个端【客户端or商家端】）
@@ -298,6 +304,53 @@ public class UserController {
         Map<String, Object> payload = new HashMap<>();
         payload.put("msg", "已退出");
         return Result.ok(payload);
+    }
+
+    // ============ C3 块 2（用户块）：资料完善 ============
+
+    /**
+     * 更新可编辑资料（{@code gender} / {@code age}）—— 块 2「资料完善」的写口。
+     *
+     * <h3>【与同族 {@link #updateUserInfo} 的两处**刻意不同**，别照抄对方】</h3>
+     * <ol>
+     *   <li><b>挂 {@link IdentityGuard}</b>：{@code username} 是「代表调用者自己」的入参 ⇒
+     *       必须是方法体**第一行**。⚠️ 同族的 {@code updateUserInfo} / {@code updateAvatar}
+     *       **没有**这一行（它们是既有端点，挂上去会改既有契约面）；本端点是新增面，
+     *       按多账户隔离笔的纪律一次做对，不为「跟邻居长得一样」留一个能改别人资料的洞。</li>
+     *   <li><b>成功后记审计</b>（{@link AuditActions#USER_UPDATE}）：走 {@code GoodsController.goodsUp}
+     *       的四步 —— {@code before} / {@code after} 快照由 Service 在**业务事务之外**回传，
+     *       本层调 {@code AuditService.record}（fail-soft、无事务 ⇒ 必须在提交之后，
+     *       见该类注释）。取身份的仍是**识别**口径（{@code identify}）而不是授权口径，
+     *       否则 cookie 登录的管理员会被记成匿名。</li>
+     * </ol>
+     *
+     * <p>⚠️ 审计用的 {@code before} / {@code after} 两个键在发给前端**之前被摘掉**
+     * （{@code remove}）：它们是给审计表的，不是 HTTP 契约的一部分。别改成「反正多两个键
+     * 前端也不看」—— 那会让响应形状随实现细节漂移。
+     *
+     * <p>返回 {@code {success, msg}}；缺 {@code username} / 用户不存在 ⇒ {@code success:false}。
+     * {@code gender} / {@code age} 都不传是合法的（= 清空这两列，见 {@code UserService.updateProfile}）。
+     */
+    @PostMapping("/updateProfile")
+    public ResponseEntity<Object> updateProfile(
+            @RequestParam("username") String username,
+            @RequestParam(value = "gender", required = false) String gender,
+            @RequestParam(value = "age", required = false) Integer age,
+            HttpServletRequest request
+    ) {
+        if (!IdentityGuard.requireSelfOrAdmin(request, username)) {
+            return IdentityGuard.forbidden();
+        }
+
+        Map<String, Object> result = userService.updateProfile(username, gender, age);
+
+        if (Boolean.TRUE.equals(result.get("success"))) {
+            Object before = result.remove("before");
+            Object after = result.remove("after");
+            auditService.record(AuthSession.identify(request), AuditActions.USER_UPDATE,
+                    "user", username, before, after);
+        }
+        return ResponseEntity.ok(Result.of(result));
     }
 
     /**

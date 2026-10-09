@@ -410,7 +410,7 @@
 
 - **（1）`AbstractSmokeTest.java:45` 计数过时。** javadoc 写「**5 个** smoke test 无需改动」，实测 **8 个**类 `extends AbstractSmokeTest`。纯文档漂移，无行为影响。
 - **（2）`UserService.java:98` 明文账号密码进 stdout。** 登录成功后 `System.out.println(username + "," + password)` ⇒ **明文凭据落进程日志**。⚠️ 但 `:94` 的 javadoc 明写这是「三层前就有的副作用，**照搬** —— 它不是调试残留」⇒ **刻意的**，故不是笔误、是**既存安全面**。**待裁**：并进鉴权笔（登录改造本就动这一处）还是单列。
-- **（3）`login.Password` 宽 `char(20)`，装不下 bcrypt。** 见 `db-schema.md:186`（`char(20)` 显式 / **明文**）。bcrypt 输出 **60** 字符 ⇒ hash 化**不能原地改列**（数据库规则禁 `MODIFY COLUMN`），只能走**影子列**（新增列 + 回填）。**待裁**：建议**单列一笔**（文件数 4–5），排在鉴权笔**之后**。
+- **（3）`login.Password` 宽 `char(20)`，装不下 bcrypt。** 见 `db-schema.md:192`（`char(20)` 显式 / **明文**）。bcrypt 输出 **60** 字符 ⇒ hash 化**不能原地改列**（数据库规则禁 `MODIFY COLUMN`），只能走**影子列**（新增列 + 回填）。**待裁**：建议**单列一笔**（文件数 4–5），排在鉴权笔**之后**。
 - **（4）【裁定 · `P2.6` 独立一笔】** ⚠️ **前 3 条是「发现」（调研看到的事实），本条是「裁定」（用户做的决定）—— 性质不同，勿混。** 内容 = 删前端 **4 个读写口**（`LoginPage.vue:163-169` 写 / `GoodsUp.vue:145-146` 读 / `UserInfoPage.vue:91-92` 读）+ 拆 `UserService.java:185` 的 `selectRoleForProfile(username, password)` 重验。**前提** = 鉴权笔落地（凭据进 **httpOnly Cookie**）；**时序** = 鉴权笔 → `P2.6` 笔。 ⚠️ **已落地（P2.6，2026-10-05，§5-AC）**：本条 4 个行号**全部重指** —— 写口 `LoginPage.vue:163-169` → **`:158` / `:162`**（`setCredentials` 改名 `setUsername`、不再传密码）；读口 `GoodsUp.vue:145-146` → **`:148-149`**、`UserInfoPage.vue:91-92` → **`:94-95`**（均改走 `/user/me`，不再读密码）；`UserService.java:185` 的 `selectRoleForProfile(username, password)` 重验 —— ⚠️ **该地址在 HEAD 即已偏**（HEAD `:185` 是 `loginAdd` 形参行；`selectRoleForProfile` 的真实调用点 HEAD 在 **`:242`**）⇒ 本笔后为 **`:239`**（本笔把该方法的 javadoc 压掉 3 行，调用点上移）。
   - ⚠️ **口径（已订正，勿沿用旧说法）**：`P2.6` 的解**不是「选 A」**，而是「**凭据进 httpOnly Cookie**」；A 只是**默认就走这条路**、且不引入密钥管理 / 刷新 / CSRF 复杂度的那个（**最省事 ≠ 唯一**）。B 把 token 放 httpOnly Cookie **同样解**；放 `localStorage` 则**只减轻不消除**（token 有时限、可撤销、不可复用，价值低于密码 —— 故「明文换明文」这个说法**不成立**）。C 与 `P2.6` **无关**（其默认形状即 A）。
 
@@ -1767,7 +1767,7 @@
 
 ---
 
-## 7. C3（Vue3 管理端）—— 骨架三笔 + 批 A「权限与审计」+ 块1·I2「系统通知」（2026-10-09；**未提交**）
+## 7. C3（Vue3 管理端）—— 骨架三笔 + 批 A「权限与审计」+ 块1·I2「系统通知」+ 块2〈用户块〉（2026-10-09；**未提交**）
 
 ⚠️ **细节一律以 `slot-registry.md` §十三 / §十四 为准**；本节只记**进度与判据**，不复制细节（避免两处各写各的）。
 
@@ -1880,6 +1880,48 @@
   `javac -encoding UTF-8` 本地编译**退出码 0**；算式对红那次的实测 `表数=15` = `15 == 11 + 4 && 4 == 4` ⇒ **PASS**
   （「4 张全在」由红的那次**自己证过**：15 = 11 基线 + 1 时间线 + 本笔 3 张）。
   红的证据落 `docs/agent/evidence/c3-ci-p3/a3-run-20261009-120224.txt`；登记见 `slot-registry.md §十七`。
+
+- ✅ **C3 块 2〈用户块〉落码 + 验收完成（2026-10-09 晚，未提交）**：块 1 已 merge、正式收口；本块起**启用提速规则**。
+  三端一起落 —— 用户端**注册直达 `#/register`** + 资料完善、商家端**入驻申请**、管理端**用户治理 + 商家审核 + 降级控制**。
+  **A 档 5 项已裁决**：A1 新表 `merchant_application`；A2 入驻 = **客户升级**（CAS 幂等 + 批准与改 role 同事务）；
+  A3 **封禁只标 `user`** + `loginSelect` 双查返 **4**；A4 收件箱扩 **`ToType=admin` / `ToId='*'`**；
+  A5 降级商家（`@Scheduled`、**冻结新单允许收尾旧单**、30 天不删只冻结、只手动触发、五阶段）。逐条登记见 `slot-registry.md §十八`。
+- 🏗 **建表（VM 库，不可逆）**：`mall_management_sql.sql:348-409` —— 新表 `merchant_application`（16 列，`:369-390`）
+  ＋ `user` 加 **8 列**（`:396-404`）＋ `goods` 加 **2 列**（`:407-409`，`ShelfState` **1=在架 / 0=已下架**）。
+  ⚠️ **本仓首次「改基线表」**（此前只加表、不动基线列）；加列**不幂等**（MySQL **不支持** `ADD COLUMN IF NOT EXISTS`，
+  重复执行报 Duplicate column 属预期）。实测 `apply.out` `rc=0`、库内表数 **16**、列/索引与正向 SQL 一致，
+  证据 `docs/agent/evidence/c3-block2/db/`（`migration.sql` / `state-before|after.txt`）。
+- 🧩 **后端**：新 `merchant/` 域（申请读写 + 降级 job）+ `admin/AdminAccountsController`（8 端点）/`UserGovernanceService`
+  + `user/UserGovernanceDao` / `UserStateLookupService` + `goods/GoodsShelfDao` + `shared/web/UserStateLookup`。
+  改既有：`AuditActions` **+7**（2→9 条）、`NotificationEvents` **+3**（21→24）、`UserController` 加 `/user/updateProfile`、
+  `UserService.loginSelect` 封禁双查、`IdentityGuard` **13→16 端点**、**`AuthInterceptor` 第 ⑤ 档封禁闸**
+  （复用 401、**管理员豁免** —— 否则一次误封锁死整个管理面）、**`WebAuthConfig` 用 `ObjectProvider<UserStateLookup>`**
+  （否则**每个 `@WebMvcTest` 切片启动即集体失败** —— block 1 同型事故 77 errors）、`OrderService` 冻结新单允许收尾旧单。
+- 🎨 **前端**：新 `api/accounts.js` / `api/merchant.js` / `MerchantApplyPage.vue`（⚠️ **挂用户端** —— 商家壳被
+  `meta.roles:['2','3']` 锁住，未审核客户进不去）/ `admin/AccountsPage.vue`（四段）；**注册直达 `#/register`**
+  （文件尾 `addRoute` + `isSlide` 读 `meta.register` + `$route` watch 补外部导航 + `toggle()` 同行写 URL）；
+  修掉全站 **3 条** vue-router `checkChildMissingNameWithEmptyPath` 噪音（三处子记录 `:58`/`:76`/`:89` **同行**加 `name`）。
+  ⚠️ 全部**净零行数**改法（`router/index.js` / `LoginPage.vue` / `UserInfoPage.vue` 都被文档按行号引）。
+- 🐞 **顺带修一个既有 bug —— `/img/**` 整片 404**（**与块 2 无关**，用户报「登录页大图空白」牵出）：
+  真因 = a3 profile 把上传目录外置到**空目录**（`application-a3.properties:50`，TD-08），而 `ImgPath` 修前**只**注册它
+  ⇒ **应用自带**的图（`Mall-Section-*.jpg` / `default_user.png`）一起 404。修法 = 注册**两个有序位置**
+  `{ 上传目录, classpath:/static/img/ }`（首个命中优先）。⚠️ 它修的是**一类** bug：a3 profile 下**任何**自带图都 404；
+  且**不是**布局/渲染回归（实测 `.brand-fig` 盒子没塌，1440×900 下 440×248）。证据 `docs/agent/evidence/c3-block2/login-fig/`。
+- 🧪 **验收**：`./mvnw -B test` **239 / 0 / 0 / 19 skipped / BUILD SUCCESS**（块 1 时 237）。UI 探针（证据
+  `docs/agent/evidence/c3-block2/`，README 每条标【实测】/【推断】两档）：`probe-accounts-apply` **17 / 0**、
+  `probe-register-deeplink` **4 / 4**、`probe-router-warns` **3 壳零 warn**（⚠️ **基线差分**不是「零绝对量」）、
+  `probe-login-fig`（定性）。⚠️ 探针**只证前端一侧**，后端由 `mvn test` 覆盖（脚本走 mock 是因 8088 真进程不得杀）。
+- 🔎 **登记**：`db-migration.md` **#6**（+ 注意 9）、`db-schema.md` **15→16 表**（453→**493**，+40）、
+  `slot-registry.md §十八`、`c3-blocks-index.md:14` 状态。因 `db-schema.md` 增行**重指 7 处**外部引用
+  （`selection-status.md` ×5 / `defect-survey.md` ×1 / `progress.md` ×1，按 `@@` hunk **确定性映射**，非手估）；
+  pack `c3-block-2-user.md` **行号同步 20 处**（后端 8 + 前端 9 + 裸简写 3，逐条 grep 对实际内容核过），
+  `bash scripts/check-context-packs.sh` 报 **170 引用 / 0 WARN / 0 FAIL**。
+- 🔬 **refs-scan 重扫**（`_work/refs-b2doc-after.txt` vs `before`）：**丢失 20 个 token，逐一核对 = 全部是本次有意的重指**
+  （无一处非预期丢失）；after token 集 **2055**（before 2032）。
+- ⚠️ **未做 / 待办**：① `ShelfState=0` 的**买家侧过滤**随**块 3**；② 注册页「商家」选项**绕开审核**
+  （`LoginPage.vue:175-176`）**登记不修**（改它＝动既有注册契约）；③ 既有陈旧 **6 处**引用（I2 笔遗留，
+  见 §十八 18-6 尾）派「文档漂移清理笔」；④ **真后端 E2E 未重跑**（8088 是用户 IDEA 起的**旧 class**，
+  须**重启**才认新 Controller —— 那条进程**不得杀**）。
 
 **路线**：C3 现行 = **8 块**，唯一权威 **`c3-blocks-index.md`**；§七 那份「10 批 + 按端切」**已作废**
 （见 `c3-modules.md` §十）。⚠️ 购物车的归属**已统一**为「**属批 4 订单块，随该块一起做**」

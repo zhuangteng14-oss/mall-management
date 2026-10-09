@@ -6,7 +6,9 @@ import org.springframework.http.ResponseEntity;
 
 /**
  * 入参身份校验（多账户隔离笔，2026-10-06）—— <b>「请求里带的业务号必须是调用者自己的」</b>
- * 这条判据的唯一落点，13 个端点共用（照见 {@code progress.md §5-AF} 的清单）。
+ * 这条判据的唯一落点，**16 个端点共用**（多账户隔离笔时是 13 个，清单见 {@code progress.md §5-AF}；
+ * C3 块 2 用户块新增 3 个：{@code /merchant/apply}、{@code /merchant/myApplications}、
+ * {@code /user/updateProfile} —— 新端点一次做对，不对既有端点回补）。
  *
  * <h2>【它治的是哪一半病】</h2>
  * token 机制治的是「<b>显示</b>串号」（页面按本标签页的身份取数）；本类治的是
@@ -40,7 +42,7 @@ import org.springframework.http.ResponseEntity;
  *       （{@code application-a3.properties} 钉 false）都在这一档。它们打这些端点时**没有会话**，
  *       若这里判 403，本笔会当场弄红 27+ 条既有用例与整个 A3。本类对既有行为**零影响**
  *       这条属性，正是靠这一行守住的（与闸「关着就全放行」同一条纪律）。</li>
- *   <li><b>闸开着时的白名单面</b> —— 本类服务的 13 个端点**都不在白名单里**
+ *   <li><b>闸开着时的白名单面</b> —— 本类服务的 16 个端点**都不在白名单里**
  *       （{@code WebAuthConfig.AUTH_WHITELIST}），故这一支在闸开着时不可达。</li>
  * </ol>
  * ⚠️ 反过来说：本类**不是**认证。它是「认证通过之后，入参不许指向别人」。
@@ -81,8 +83,8 @@ public final class IdentityGuard {
      * 处境（那里是既有契约，故写了字面量常量）。
      *
      * <p>为什么不用异常通道（{@code GlobalExceptionHandler}）：它的 {@code assignableTypes} 只覆盖
-     * {@code MessageController} / {@code GoodsController} 两个类，而本类服务的 13 个端点横跨
-     * goods / order / message 三域 ⇒ 抛异常会在 order 域退化成默认错误页（形状不一致）。
+     * {@code MessageController} / {@code GoodsController} 两个类，而本类服务的 16 个端点横跨
+     * goods / order / message / merchant / user 五域 ⇒ 抛异常会在 order 域退化成默认错误页（形状不一致）。
      * 故走 ResponseEntity 显式构造 —— 与 {@code /user/me} 的 401 同一手法。
      */
     public static ResponseEntity<Object> forbidden() {

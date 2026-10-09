@@ -1,0 +1,42 @@
+URL        : jdbc:mysql://192.168.229.129:3306/mall_management_sql?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai&characterEncoding=utf-8
+serverUuid : 7f5a9290-b437-11f1-811d-000c299341f0
+hostname   : ubuntu-server
+VERSION()  : 8.4.11-0ubuntu0.26.04.1
+DATABASE() : mall_management_sql
+CURRENT_USER: test@%
+-- tables --
+  admin_audit
+  customerimage
+  friend
+  goods
+  goodstype
+  login
+  merchantimage
+  message
+  notification
+  notification_template
+  order
+  order_state_transition
+  productsales
+  user
+  user_conversation_read
+count      : 15
+-- columns of user --
+  username | char(20) | null=NO | def=null
+  usertype | char(20) | null=YES | def=null
+  customerid | char(20) | null=YES | def=null
+  merchantid | char(20) | null=YES | def=null
+  gender | char(20) | null=NO | def=null
+  age | int | null=NO | def=null
+  email | char(40) | null=YES | def=null
+  selfintroduction | varchar(100) | null=YES | def=null
+  address | varchar(20) | null=YES | def=null
+-- columns of goods --
+  Id | int | null=NO | def=null
+  MerchantId | char(20) | null=NO | def=null
+  GoodName | char(40) | null=NO | def=null
+  Price | double | null=NO | def=null
+  GoodImg | char(100) | null=NO | def=null
+  GoodType | char(20) | null=YES | def=null
+  ProductCode | char(40) | null=YES | def=null
+  GoodTypeNew | int | null=YES | def=null

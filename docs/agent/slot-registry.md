@@ -3757,3 +3757,186 @@ TD-01 的防线语义是「**多出来的每一张都必须点过名**」，不�
   ⇒ 与红那次**唯一不同的一行就是 P3**，且这次负载段跑满 —— 这就是「C3 块 1 对既有 A3 零影响」的证据。
   两份报告（红 / 绿）＋绿那次的 JSON 产物（`gates={"count":30,"failed":0}`）都搬进了
   `docs/agent/evidence/c3-ci-p3/`（判据与红绿对照见该目录 README）。
+
+---
+
+## 十八、C3 块 2〈用户块〉（2026-10-09 晚；**落码 + 验收完成，未提交**）
+
+用户口径（要点）：块 1 已 merge、正式收口，本块起**启用提速规则**（A 档＝必问、B 档＝自裁+报备、
+C 档＝完全自裁）；**按用户要求做，不按稿做**（与 `c3-modules.md:241`「不做多商家入驻」冲突处已裁决）；
+**每块三端一起设计一起落**、**表结构一次定**；**继续攒、不提交**。**不松的三条**：建表 / 改契约 / 删文件 ⇒ 必问。
+范围＝`c3-modules.md §1` 的四视图（本块只做**前两行**：用户列表/详情 → 封禁解封；商家列表/资质 → 入驻审核）。
+块级权威 = `context-packs/c3-block-2-user.md`（本笔已同步行号引用，见 18-7）。
+
+### 18-1　A 档 5 项裁决（用户 2026-10-09 批）
+
+| # | 裁决 |
+|---|---|
+| A1 | **新表 `merchant_application`**（商家入驻申请；一次申请一行、可多次）。⚠️ 不往 `user` 塞资质列 —— 资质是**申请材料**不是用户属性，且同账号可多次申请（驳回后重申）会把「申请历史」压成「当前态」。 |
+| A2 | **入驻 = 客户升级**：批准时 `login.Role` **1→2** ＋ `user.merchantid` 落号；**CAS 幂等**（`UPDATE … WHERE Role=1`，rows=0 ⇒ 已升过，不重复发号）；**批准与改 role 同事务**。⚠️ 刻意**保留 `customerid`**（老客户号不回收）⇒ 「有 `merchantid`」**不再等价于**「是商家」。 |
+| A3 | **封禁只标 `user`**（不动 `login`）；登录时在 `loginSelect` **双查** `banned`，返回 **`4` = 已封禁**（不与既有 1/2/3/0 冲突，前端有专门文案）。 |
+| A4 | **扩通道共享收件箱**：`notification.ToType` 取值域加 **`admin`**、`ToId='*'`（管理员共享收件箱，逐条读态落在各自账号行上）。⚠️ 这是**契约级扩面**（`db-schema.md:314` 的取值域由封闭的 `customer`/`merchant` 扩为三类）。 |
+| A5 | **降级商家**：`@Scheduled` 扫描、**冻结新单但允许收尾旧单**、**30 天只冻结不删行**、**只手动触发**（不自动恢复）、五阶段状态机。 |
+
+### 18-2　建表（**VM 库**，不可逆动作）
+
+一个 Migration 块追加到 `mall_management_sql.sql` **文件末尾**（`:348-409`）：
+
+| 对象 | 位置 | 结构 |
+|---|---|---|
+| 新表 `merchant_application` | `:369-390` | **16 列** + 主键 + 3 个 KEY（`status` / `user` / `batch`） |
+| `user` **加 8 列** | `:396-404` | 封禁 3（`banned` / `banReason` / `bannedAt`）+ 降级 5（`DowngradeState` / `ScheduledDowngradeAt` / `DowngradeReason` / `FrozenAt` / `FreezeUntil`） |
+| `goods` **加 2 列** | `:407-409` | `ShelfState`（**1=在架 / 0=已下架**）＋ `DelistedAt` |
+
+- ⚠️ **这是本仓「首次改基线表」**：此前所有新表都以「末尾 Migration 块」表达、基线 `CREATE TABLE` 一字不动；
+  本笔第一次给**基线表加列**（`user` / `goods`），**仍不写进文件上半部的基线区**（同上口径）——
+  基线区保持历史原样，新列一律以末尾块表达。
+- ⚠️ **加列不幂等**：MySQL **不支持** `ALTER TABLE … ADD COLUMN IF NOT EXISTS`（那是 MariaDB 扩展）。
+  CI 是**整份重导**（先 DROP 后 CREATE）⇒ 每轮只执行一次、安全；VM 库手动跑一次即可，
+  **重复执行会报 Duplicate column（预期，非故障）**。
+- ⚠️ **`Username` 软引用、不设 FK**（同 `notification.TargetId` 口径）。
+- **实测**（`docs/agent/evidence/c3-block2/db/`）：`apply.out` `rc=0`、3 条语句全 `OK`；
+  `state-after.txt` 表数 **16**、`merchant_application` 16 列与索引齐、`user` 含 8 新列、
+  `goods` 含 `ShelfState`（`def=1`）/`DelistedAt`；`state-before.txt` 里它们不存在。
+  执行起点由 `md5(mall_management_sql.sql)` ＋ marker `348 / 409` 锚定。⚠️ 只把**这一个块**应用到 VM 库，**不整份重导**。
+
+### 18-3　后端
+
+**新建**：
+
+| 域 | 文件 | 说明 |
+|---|---|---|
+| `merchant/` | `controller/MerchantApplicationController` | `@RequestMapping("/merchant")` —— `/apply` `/myApplications`（后者方法体首行 `requireSelfOrAdmin`） |
+| `merchant/` | `dao/MerchantApplicationDao` | 新表的唯一 SQL 出口 |
+| `merchant/` | `service/MerchantApplicationService` · `DowngradeStates` | 入驻申请读写 + 降级状态常量 |
+| `merchant/` | `service/MerchantDowngradeService` | 降级工作流（A5 五阶段） |
+| `merchant/job/` | `MerchantDowngradeJob` · `MerchantDowngradeSchedulingConfig` | `@Scheduled` 扫描（**只手动触发**） |
+| `admin/` | `controller/AdminAccountsController` | `@RequestMapping("/admin/accounts")` —— `/users` `/user/ban` `/user/unban` `/applications` `/application/audit` `/downgrade/schedule` `/downgrade/cancel` `/downgrade/relist`（8 个） |
+| `admin/` | `service/UserGovernanceService` | 用户治理 + 入驻审核（含 `promoteToMerchant`：CAS 幂等 + 同事务改 role） |
+| `user/` | `dao/UserGovernanceDao` | `user` 新列的读写（`selectUsers` / `promoteToMerchant` / 封禁列） |
+| `user/` | `service/UserStateLookupService` | 封禁态查询（`@Service`；切片里没有它 ⇒ 封禁闸静默不生效） |
+| `goods/` | `dao/GoodsShelfDao` | `goods.ShelfState` 读写（降级冻结只置 0，不删行） |
+| `shared/web/` | `UserStateLookup` | 封禁态查询接口（公共层，供拦截器依赖而不反向依赖 `user/`） |
+| `test/…/smoke/` | `ImgMappingClasspathFallbackTest` | 见 18-5 |
+
+**改既有**（**零漂移：全为同行替换 / 尾部追加**）：
+
+| 文件 | 净变 | 说明 |
+|---|---|---|
+| `admin/AuditActions.java` | +26/-0 | 动作 tag **2 → 9 条**（新增 `:56-77`：`user.ban` / `unban` / `update` / `merchant.apply.create` / `apply.audit` / `downgrade.schedule` / `downgrade.apply`）；`private AuditActions()` 落到 `:79` |
+| `notification/NotificationEvents.java` | +14/-0 | code **21 → 24**（新增 `:106-119`：`merchant.apply.submitted` / `merchant.downgrade.scheduled` / `merchant.downgrade.applied`） |
+| `user/controller/UserController.java` | +56/-3 | 新增 `/user/updateProfile`（只收 `gender` / `age`，**旧 `updateUserInfo` 一字不动**） |
+| `user/service/UserService.java` | +129/-1 | `loginSelect` 加**封禁双查**（返回 4）；`updateProfile` |
+| `shared/web/IdentityGuard.java` | +6/-4 | 服务的端点 **13 → 16**（新增 `/merchant/apply`、`/merchant/myApplications`、`/user/updateProfile`；**新端点一次做对，不对既有端点回补**） |
+| `shared/web/AuthInterceptor.java` | +70/-4 | **第 ⑤ 档「封禁闸」**（身份有效但 `banned` ⇒ **复用 401**，不另造 body；**只判 role 1/2、管理员豁免** —— 否则一次误封会把整个管理面锁死，TD-18 下无第二解封路）。**保留 3 参构造**供测试 `new`（等价于无封禁闸） |
+| `shared/web/WebAuthConfig.java` | +18/-2 | 第 4 个构造参数**刻意是 `ObjectProvider<UserStateLookup>`**，不是裸依赖 —— 否则**每个 `@WebMvcTest` 切片启动即集体失败**（block 1 同型事故：77 errors）。`getIfAvailable()` 在切片里返 `null` ⇒ 封禁闸整体静默不生效，默认 profile 照常生效 |
+| `order/service/OrderService.java` | +63/-1 | 降级**冻结新单但允许收尾旧单**（A5） |
+| `resources/application-a3.properties` | +12/-0 | |
+| `test/…/smoke/AbstractSmokeTest.java` | +24/-1 | `@Import` 补进 block-2 新 bean（`:137-146`） |
+| `test/resources/application-smoke.properties` | +10/-0 | |
+
+- ⚠️ **admin 端点坚决不加角色闸**（TD-18）—— 接缝与 `AdminAuditController` 绑定，等裁决。
+- ⚠️ **不给 block-2 新 Controller 加参数约束 / 类级 `@Validated`** —— 同 §15-2 的两条坑，口径逐条复用。
+
+### 18-4　前端（三端）
+
+**新建**：
+
+| 件 | 说明 |
+|---|---|
+| `src/api/accounts.js` | 管理端治理 API（`/admin/accounts/*`） |
+| `src/api/merchant.js` | 商家入驻 API（`/merchant/*`） |
+| `src/views/MerchantApplyPage.vue` | **用户端**入驻表单 + 「我的申请」（⚠️ 见下「落点」） |
+| `src/views/admin/AccountsPage.vue` | 管理端「用户治理 + 商家审核 + 降级控制 + 管理员收件箱」四段 |
+
+**改既有**：`api/endpoints.js`（+32/-4，追加 `accounts`/`merchant` 组与新 `updateProfile`）、
+`config/notify-events.js`（+13/-2，补 block-2 的 code 中文标签与下拉项）、
+`router/index.js`（+39/-11，见下）、`views/LoginPage.vue`（+3/-3）、`views/NotifyInbox.vue`（+5/-5）、
+`views/UserInfoPage.vue`（+149/-11，加**降级状态条**与 ⑦「资料完善」，**原有四函数语义不动**）。
+
+- ⚠️ **入驻表单的落点是用户端**（必须点明的一处偏离）：商家壳被 `meta.roles:['2','3']` 锁住
+  （`router/index.js:86`，判定在 `:329-334`），**未审核的客户进不去商家壳** ⇒ 表单只能挂用户端
+  （`/customer/user/apply`），语义仍是「商家入驻」。
+- ⚠️ **注册直达 `#/register`**：`router/index.js` 文件尾加 `addRoute({ path:'/register', …, meta:{ public:true, register:true } })`
+  （`:533`）；`LoginPage.vue` 的 `data().isSlide` **同行**由常量 `false` 改成读 `$route.meta.register`（`:248`），
+  并加一条 `watch: { '$route' … }`（`:465`）补「地址栏改 `#/register`」这类**外部导航**（vue-router 4 复用组件实例、`data()` 不再跑）。
+  `toggle()` 里**同行追加**一次 `replace`（`:286`）把 tab 与 URL 绑回同一处真源 ⇒ 刷新 / 分享 / 后退都停在注册面。
+- ⚠️ **零漂移手法**（`router/index.js` 被 pack 按行号引）：父记录 `/customer`（`:55`）/`/merchant`（`:86`）
+  **同行**加 `name`；用户中心父记录（`:63`）**同行**加 `name`；`subMenu` 项（`:71`）**同行**追加「商家入驻」；
+  `business/accounts`（`:451`）的 `component` **同行替换**为真页。子路由一律用**文件尾** `addRoute` 挂
+  （`:504-505` 通知、`:532` 入驻、`:533` 注册）—— **不往 `routes` 数组 / 两壳 `children` 里插行**。
+- ⚠️ **vue-router warn 修**（用户裁定「做」）：`createRouter` 建匹配表时对**每个**「有名父记录 + 无名空路径子记录」发
+  `checkChildMissingNameWithEmptyPath` ⇒ 全站三条真噪音。修法＝在三处子记录 `:58`/`:76`/`:89` **同行**加 `name`（净零行数）。
+
+### 18-5　⚠️ 顺带修掉一个既有 bug —— `/img/**` 整片 404（**与块 2 无关**，用户报「登录页大图空白」牵出）
+
+- **真因（实测）**：`application-a3.properties:50` 把上传目录外置到 `${java.io.tmpdir}/a3-uploads/`（TD-08，
+  刻意不写仓库目录），而 `%TEMP%\a3-uploads\` **是空的**；修前 `ImgPath.addResourceHandlers` 在 `uploadPath != null` 时
+  **只**注册这一个位置 ⇒ `/img/**` **整片 404**，**应用自带**的图（`Mall-Section-*.jpg`、`default_user.png`）一起被赔进去。
+  登录页那张 `.brand-fig` 于是只剩 `background-color:var(--img)` 兜底 ⇒ 看着像「图没画出来」，实为图**没被供给**。
+  ⚠️ **它修的不是「登录页图片」，是一类 bug**：a3 profile 下**任何**自带图都 404。
+- **修法**：`ImgPath` 注册**两个有序位置** `{ 上传目录, classpath:/static/img/ }`
+  （`ResourceHttpRequestHandler` 按 `locations` 顺序取首个命中 ⇒ **同名时上传目录优先**）。
+  `classpath:/static/img/` 是自带图的**真实出处**，不是「凑一个假目录」（后者会把配置错误伪装成数据缺失，更坏）。
+- **并非布局 / 渲染条件回归**（实测裁定）：`.brand-fig` 盒子没塌 —— 1440×900 下两态 **440×248**、
+  1280×640 下 **440×137**，`flex:0 1 auto` / `min-height:0px` / `aspect-ratio:16/9`。
+  故**不是** B1 那条 `min-height:0` 把它压没了。
+- **佐证**：8088 实际吐出的 `Mall-Section-1.jpg` 与 `src/main/resources/static/img/Mall-Section-1.jpg`
+  **md5 同为 `ee9f2c351e51451ca7f3c774bc834d51`**，而上传目录为空 ⇒ 跑着的那个（IDEA 启动、profile=a3）
+  **已带上这个修**。⚠️ **待用户确认的一处**：复现不出「修前全 404」那一刻的进程状态（现量的 8088 已是修后）。
+  另「注册 tab 图片正常」**推断**为浏览器缓存里那份旧响应，**未**取到直接证据（标【推断】）。
+- 证据与复跑：`docs/agent/evidence/c3-block2/login-fig/`（`node scripts/probes/probe-login-fig.mjs`，只需 dev server 8080，**不 mock** 8088）。
+
+### 18-6　`db-schema.md` 15→16 表 与 引用重指（**零漂移**）
+
+`db-schema.md` **453 → 493 行（+40）**：表数 15→16、新增 §6.16 `merchant_application`、`user` +8 列（§6.10）、
+`goods` +2 列（§6.3）、索引计数 15张/7张/12个 → **16张/8张/15个**、行数快照 CRLF **345/345 → 409/409**
+（LF 409 / CR 409 / bare CR 0）、§7/§9/§10.1 汇总同步。
+`db-migration.md` 追加 **#6** 行（+5），并加**注意 9**（表数 15→16、「首次改基线表」、加列不幂等、`SELECT *` 泄漏不剥）。
+
+**因 `db-schema.md` 增行而重指的**外部引用（**逐条按 diff hunk 的 `@@ -old +new @@` 确定性映射**，非手估）：
+
+| 文件:行 | 旧 token | 新 token |
+|---|---|---|
+| `selection-status.md:140` | `db-schema.md:188` | `:194` |
+| `selection-status.md:140` | `db-schema.md:428` | `:468` |
+| `selection-status.md:141` | `db-schema.md:180` | `:186` |
+| `selection-status.md:142` | `db-schema.md:430` | `:470` |
+| `selection-status.md:175` | `db-schema.md:53` | `:55` |
+| `defect-survey.md:187` | `db-schema.md:180` | `:186` |
+| `progress.md:413` | `db-schema.md:186` | `:192` |
+
+外加 **pack `c3-block-2-user.md`** 内 3 处（表结构现状、ORM 接口基线、唯一性靠应用层基线）。
+
+⚠️ **既有陈旧引用（本笔发现、按 2026-10-06 裁决「登记但不修」）**——**指向已陈旧**、不属本笔不属本块：
+4× `db-schema.md:91`、`selection-status.md:100` 的 `:29`/`:282`、`progress.md:1341` 的 `:96`。
+它们**在 I2 笔（§15-5）就已陈旧** ⇒ **不改**，归「文档漂移清理笔」统一处理。⚠️ **不改历史登记段**（如 §15-5 原文）。
+
+### 18-7　验收（**真后端 + VM 库；UI 探针只证前端一侧**）
+
+- **后端**：`./mvnw -B test` **239 / 0 / 0 / 19 skipped / BUILD SUCCESS**（块 2 新增 2 条；块 1 时是 237）。
+  ⇒ 兑现「新域对既有 A3 零影响」硬门槛。
+- **UI 探针**（脚本 → `scripts/probes/`，证据 → `docs/agent/evidence/c3-block2/`；**每条结论在 README 里标了【实测】/【推断】两档**）：
+
+| 探针 | 结果 | 证什么 / 边界 |
+|---|---|---|
+| `probe-accounts-apply.mjs` | **17 / 0** | 两个新鉴权页渲染 + **真的**打了预期端点（`/admin/accounts/*`、`/merchant/myApplications`、收件箱 `ToId=*` 的 `/notification/list`）。**只证前端一侧**，不证后端（那半边由 `mvn test` 覆盖）；mock 8088 因为有真进程（IDEA）**不得杀** |
+| `probe-register-deeplink.mjs` | **4 / 4** | `#/login`＝登录面、`#/register` **直达**注册面、两态互切 URL 跟着走 |
+| `probe-router-warns.mjs` | **3 壳零 warn** | ⚠️ **基线差分**不是「零 warn 绝对量」：先取基线集合再断言相等（否则会把既有噪音算成自己的账） |
+| `probe-login-fig.mjs` | 见 18-5 | 4 态 rect + 计算样式 + 两态截图 |
+
+- **一处已确认的既有事实**（同 §15-4，非本笔引入）：**闸开**实例上带 `role=3` cookie ⇒ 非白名单端点一律 401（TD-18）。
+- **一致性**：`bash scripts/check-context-packs.sh` 对 `c3-block-2-user.md` 报 **170 引用 / 0 WARN / 0 FAIL**（本笔同步行号后实测）。
+  ⚠️ 该脚本只验「文件找得到 + 起始行非空」——**行号指对了没有它查不到**，故本笔的 pack 同步靠**逐条 grep 对实际内容**（后端 8 处 +
+  前端 9 处 + 3 处裸简写）＋ 用 `git status` 确认被引文件里**只有 `endpoints.js` / `c3-blocks-index.md` 被本块改动**
+  （其余被引文件未动 ⇒ 引用天然成立）。
+
+### 18-8　未做 / 待办（**已登记，不属本块**）
+
+1. **`ShelfState=0` 的买家侧过滤**：降级只置 0 冻结、**买家侧仍能查到** —— **随块 3**（商品治理）做。
+2. **注册页「商家」选项绕开审核**：`LoginPage.vue:175-176` 让注册直接建 `Role=2` 账号 ⇒ 与「入驻审核」口径打架。
+   **登记不修**（改它＝动既有注册契约、撞「禁止删除旧接口」）。
+3. **既有陈旧 6 处引用**（见 18-6 尾）→ 派「文档漂移清理笔」。
+4. **真后端 E2E 未重跑**：用户 IDEA 里跑着的 8088 **早于**本笔（无新 Controller ⇒ 真打过去 404），
+   而那条进程**不得杀**、重启才能验 ⇒ 留待用户。
+5. **`ShelfState` 语义** 中途曾写反（先「0=在售/1=已下架」），读 `mall_management_sql.sql:408` 纠正为 **1=在架 / 0=已下架**（落文档前已抓）。

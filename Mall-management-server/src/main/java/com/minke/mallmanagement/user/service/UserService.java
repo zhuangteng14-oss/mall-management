@@ -1,7 +1,10 @@
 package com.minke.mallmanagement.user.service;
 
 import com.minke.mallmanagement.shared.upload.UploadStorage;
+import com.minke.mallmanagement.shared.web.UserStateLookup;
 import com.minke.mallmanagement.user.dao.UserDao;
+import com.minke.mallmanagement.user.dao.UserGovernanceDao;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -71,15 +74,36 @@ import java.util.Map;
 @Service
 public class UserService {
 
+    /**
+     * 登录时「账号已被封禁」的返回值（C3 块 2 用户块）。
+     *
+     * <p>⚠️ 为什么是 {@code 4} 而不是一个负数 / 特殊字符串：本方法的返回类型是裸 {@code int}，
+     * 取值域原本是 {@code login.Role} 的 {@code 0/1/2/3}（0 = 查不到），而后端把它
+     * **原样当字符串写进响应体**（前端 {@code res.text()} 后比对）。扩一个**正整数**是与既有
+     * 形状最接近的加法；负数会在前端那些 {@code === "1"} 的比对里变成又一种「没见过的字符串」，
+     * 且容易与人的直觉（「负数=错误」）混。⚠️ 它**不是**角色号 ⇒ 任何 `role >= 1` 之类的
+     * 范围判断都不能拿本方法的结果直接套。
+     */
+    public static final int LOGIN_BANNED = 4;
+
     private final UserDao userDao;
     private final UserCacheService userCacheService;
+    private final UserGovernanceDao userGovernanceDao;
+    private final UserStateLookup userStateLookup;
     private final String uploadDir;
 
     public UserService(UserDao userDao,
                        UserCacheService userCacheService,
+                       UserGovernanceDao userGovernanceDao,
+                       ObjectProvider<UserStateLookup> userStateLookupProvider,
                        @Value("${app.upload-dir:${user.dir}/src/main/resources/static/img/}") String uploadDir) {
         this.userDao = userDao;
         this.userCacheService = userCacheService;
+        this.userGovernanceDao = userGovernanceDao;
+        // ⚠️ ObjectProvider 而非裸依赖 —— 与 WebAuthConfig 同一条切片论证：@WebMvcTest
+        // 不扫 @Service，若裸注入，AbstractSmokeTest 那条 @Import(UserService.class) 会在
+        // 上下文加载期就因「找不到 UserStateLookup」而失败（237 测试 / 77 errors 的同型事故）。
+        this.userStateLookup = userStateLookupProvider.getIfAvailable();
         this.uploadDir = uploadDir;
     }
 
@@ -93,17 +117,50 @@ public class UserService {
      *
      * <p>⚠️ {@code System.out.println} 是三层前就有的副作用，照搬 —— 它不是调试残留，
      * 而是 A3 排障时读 {@code backend} job 日志的线索之一。
+     *
+     * <h2>【C3 块 2（用户块）新增第 4 个返回值：{@link #LOGIN_BANNED}】</h2>
+     * 账号被封时答 {@code 4}（既不是角色号，也不是「查不到」的 0）。取值域从
+     * {@code {0,1,2,3}} 扩成 {@code {0,1,2,3,4}}。前端 {@code LoginPage.vue} 比对的是
+     * **文本**（{@code res.text()} 后比 {@code "0"/"1"/"2"}），故新值对既有分支**不构成误命中**：
+     * 未识别 {@code "4"} 的旧前端会走「其它 ⇒ 登录异常」的兜底，而不是静默当成功。
+     *
+     * <p>⚠️ <b>封禁判据必须放在「凭据已验证」之后</b>（本方法就是这么写的）：{@code selectRoleByCredentials}
+     * 返回非空才去查 {@code banned}。放到凭据校验之前，等于给出一条**不需要密码**的探测通道
+     * —— 谁都能拿一个用户名问出「这个号被封了吗」。
+     *
+     * <p>⚠️ 封禁闸与「未登录请求闸」是**双查**（裁决 3）：这里管**登录那一刻**，
+     * {@code AuthInterceptor} 管**已经握着会话/token 的后续请求**。两处都查、各管一段，
+     * 缺任何一处都有明确缺口（只查前者 ⇒ 封禁前已登录的会话能一直用到自然失效；
+     * 只查后者 ⇒ 被封的人仍能靠重新登录拿到新鲜会话）。
      */
     public int loginSelect(String username, String password) {
         System.out.println(username + "," + password);
 
         try {
             Integer role = userDao.selectRoleByCredentials(username, password);
-            return role != null ? role : 0;
+            if (role == null) {
+                return 0;
+            }
+            if (isBanned(username)) {
+                return LOGIN_BANNED;
+            }
+            return role;
         } catch (Exception e) {
             // 用户不存在或查询异常 → 返回 0
             return 0;
         }
+    }
+
+    /**
+     * 该账号是否被封。{@code userStateLookup == null}（未装配的切片）⇒ 未封。
+     *
+     * <p>⚠️ 它在 {@link #loginSelect} 的 {@code try} **之内**是刻意的：查封禁列会碰库，
+     * 而「库这时不可用」应该与「查凭据时库不可用」走同一条出口（{@code → 0}），
+     * 而不是把登录掀成 500。代价是「库挂了 ⇒ 封禁闸也失效」—— 可接受：那本来就是降级态，
+     * 且库挂时凭据校验同样过不去，登录根本走不到这一步。
+     */
+    private boolean isBanned(String username) {
+        return userStateLookup != null && userStateLookup.isBannedByUsername(username);
     }
 
     /**
@@ -431,5 +488,76 @@ public class UserService {
         }
 
         return result;
+    }
+
+    /**
+     * 更新可编辑资料（{@code gender} / {@code age}）—— C3 块 2（用户块）「资料完善」的写口。
+     *
+     * <h2>【⚠️ 与 {@link #updateUserInfo} 的关键差别：这个**必须**清 {@code userPublic} 缓存】</h2>
+     * {@code updateUserInfo} 写的是 {@code email} / {@code address} / {@code selfintroduction}，
+     * 与本类类注释里那条不变量（缓存负载 = {@code customerid} / {@code merchantid} / {@code username}
+     * / {@code usertype} / {@code gender} 五列）**无交集** ⇒ 免清。
+     * 本方法写的 {@code gender} <b>正在那五列里</b> ⇒ 不清就会「资料页刚改完、回首页看还是旧的」，
+     * 一直到 TTL 到期。⚠️ <b>两条写路径的失效面结论相反，别照抄对方那句注释。</b>
+     *
+     * <p>⚠️ 清**两个**键（{@code customerid} 与 {@code merchantid}，各自非空才清）：
+     * 块 2 之后一个升级过的商家**两列都有值**（{@code promoteToMerchant} 刻意保留
+     * {@code customerid}），而会话键随 {@code login.Role} 在两者之间切换 ⇒ 只清一个必然漏一个。
+     * ⚠️ {@code evictPublic(null)} 会以 {@code null} 为键去 {@code RedisCache.evict} ⇒ NPE，
+     * 故这里逐个判空。
+     *
+     * <p>⚠️ {@code gender} 不传（{@code null}）时的语义是「**把它置空**」，不是「保持不变」——
+     * 这是 DAO 那条 {@code SET gender = ?, age = ?} 的直接结果，前端要么把当前值带上，
+     * 要么接受清空。块 2 不做「部分更新」那种花活（那要求 DAO 侧拼动态 SET）。
+     *
+     * <p>⚠️ <b>返回值里的 {@code before} / {@code after} 是给 Controller 记审计用的</b>
+     * （同 {@code MerchantApplicationService.audit} 把 {@code outcome} 交给 Controller 的手法）：
+     * 「该通知谁 / 该记什么」由 Service 决定，而 {@code AuditService.record} 是 fail-soft、无事务的，
+     * 必须在业务事务**提交之后**调 ⇒ 只能在 Controller 层发。两张小 Map 只装
+     * {@code gender} / {@code age} 两列，**不是整行** —— 整行会把 {@code banned} / {@code banReason}
+     * 这些与本次动作无关的列带进 HTTP 响应。
+     */
+    public Map<String, Object> updateProfile(String username, String gender, Integer age) {
+        Map<String, Object> result = new HashMap<>();
+        try {
+            Map<String, Object> beforeRow = userGovernanceDao.selectUserRow(username);
+            if (beforeRow == null) {
+                result.put("success", false);
+                result.put("msg", "用户不存在");
+                return result;
+            }
+            userGovernanceDao.updateProfile(username, gender, age);
+            evictProfileCache(username);
+
+            result.put("success", true);
+            result.put("msg", "资料保存成功");
+            result.put("before", profileSnapshot(beforeRow.get("gender"), beforeRow.get("age")));
+            result.put("after", profileSnapshot(gender, age));
+        } catch (Exception e) {
+            e.printStackTrace();
+            result.put("success", false);
+            result.put("msg", "保存失败，请检查数据");
+        }
+        return result;
+    }
+
+    /** 审计快照 —— 只装 {@code gender} / {@code age}（见 {@link #updateProfile} 的论证）。 */
+    private static Map<String, Object> profileSnapshot(Object gender, Object age) {
+        Map<String, Object> m = new HashMap<>();
+        m.put("gender", gender);
+        m.put("age", age);
+        return m;
+    }
+
+    /** 清该账号名下**两个**可能的 {@code userPublic} 键 —— 见 {@link #updateProfile} 的论证。 */
+    private void evictProfileCache(String username) {
+        String customerId = userGovernanceDao.selectCustomerId(username);
+        String merchantId = userGovernanceDao.selectMerchantId(username);
+        if (customerId != null) {
+            userCacheService.evictPublic(customerId);
+        }
+        if (merchantId != null) {
+            userCacheService.evictPublic(merchantId);
+        }
     }
 }

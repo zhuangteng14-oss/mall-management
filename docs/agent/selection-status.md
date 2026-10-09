@@ -137,9 +137,9 @@
 
 | # | 项 | 分类 | 触发 / 时机 | 现状 | 归属 |
 |---|---|---|---|---|---|
-| 11 | `login.Id` 唯一索引 | 类 2 | 【新拟】实测同一 `Id` 多条 `login` 行（`GROUP BY Id HAVING COUNT(*)>1` 非空）；**或鉴权笔落地** | 已登记 —— `db-schema.md:188` / `:428`（前提 C）、`defect-survey.md:81`（病 C）、`three-layers.md:95` | 鉴权笔（服务侧）/ 独立（DB 侧） |
-| 12 | goodstype 唯一约束 ⚠️ **已升类 1 ⇒ 本行占位，不重复计数** | 类 2 → **已升类 1 `#10`** | 触发**已满足** | ✅ **已完成（2026-10-04 #11，`fix/goodstype-unique`）** —— 见 `#10` 行。升类依据（本节原值）：CI `ci49`（2026-10-03）**4/5 轮** `goodstypeDupRows ≥ 2`（逐轮 4 / 1 / 4 / 3 / 3）；代码级根因：`GoodsTypeCacheService:71-72` **裸 `INSERT`**、且**不在 B2 的 5 落点内**。原登记 —— `concurrency-map.md:77` + `:91`、`db-schema.md:180` | #11 `fix/goodstype-unique` |
-| 13 | `friend` 唯一约束 | 类 2 | 触发**未满足**：`ci49` `friendDupRows` 恒 = **1**、`friendDupRounds = 0/5`（B2 的 `runLocked` 已覆盖 `MessageService.friendAdd`）。⚠️ `cache-layer.md:462` 的「12–19 条」是 **B1 时代**值，**已被 B2 证伪** | 已登记 —— `concurrency-map.md:75` / `:91`、`db-schema.md:430`、`defect-survey.md:85`（病 G） | 独立（schema 变更） |
+| 11 | `login.Id` 唯一索引 | 类 2 | 【新拟】实测同一 `Id` 多条 `login` 行（`GROUP BY Id HAVING COUNT(*)>1` 非空）；**或鉴权笔落地** | 已登记 —— `db-schema.md:194` / `:468`（前提 C）、`defect-survey.md:81`（病 C）、`three-layers.md:95` | 鉴权笔（服务侧）/ 独立（DB 侧） |
+| 12 | goodstype 唯一约束 ⚠️ **已升类 1 ⇒ 本行占位，不重复计数** | 类 2 → **已升类 1 `#10`** | 触发**已满足** | ✅ **已完成（2026-10-04 #11，`fix/goodstype-unique`）** —— 见 `#10` 行。升类依据（本节原值）：CI `ci49`（2026-10-03）**4/5 轮** `goodstypeDupRows ≥ 2`（逐轮 4 / 1 / 4 / 3 / 3）；代码级根因：`GoodsTypeCacheService:71-72` **裸 `INSERT`**、且**不在 B2 的 5 落点内**。原登记 —— `concurrency-map.md:77` + `:91`、`db-schema.md:186` | #11 `fix/goodstype-unique` |
+| 13 | `friend` 唯一约束 | 类 2 | 触发**未满足**：`ci49` `friendDupRows` 恒 = **1**、`friendDupRounds = 0/5`（B2 的 `runLocked` 已覆盖 `MessageService.friendAdd`）。⚠️ `cache-layer.md:462` 的「12–19 条」是 **B1 时代**值，**已被 B2 证伪** | 已登记 —— `concurrency-map.md:75` / `:91`、`db-schema.md:470`、`defect-survey.md:85`（病 G） | 独立（schema 变更） |
 | 14 | query-timeout（`spring.jdbc.template`） | 类 2 | 实测单条 SQL P99 > 1s；或 `hikaricp.connections.pending` > 0 | 已登记 —— `cache-layer.md:434`（② 笔） | ② 笔（登记）；**未修** |
 | 15 | N+1 改 JOIN（`goodsHome` / `friendList` / `friendRequests`） | 类 2 | 【新拟】任一 N+1 接口实测 P99 > 1s —— 门限取「**摊薄失效点**」：缓存只把 1+2N 摊薄为「每 TTL 一次」、是**掩盖非修复**（`cache-layer.md:161`） | 已登记 —— `project-map.md:111-126`、`cache-map.md:60-97`、`context-packs/fix-n-plus-one.md`、`cache-layer.md:142-181` | 独立笔 `fix-n-plus-one` |
 | 16 | TTL 抖动（防同时过期） | 类 2 | 某缓存族 key 数 > ~10（**实测未满足**：5 三元组 + 4 型号组） | 已登记 —— `cache-layer.md:472`（§11 附 行 E）+ `:328`（§9.1 雪崩行）、`§2:35`、`tech-debt.md:288` | 独立（B1 明确不做） |
@@ -172,7 +172,7 @@
 | 30 | `getUserInfoById` 副本（记为「第三份」） | 类 4 | — | ⚠️ **文档立场相反**：`api-contract.md:79`（2026-10-04 鉴权笔 2 +19 重指） / `cache-map.md:77` 明写「两份并存是**有意的**，不是漏删」 | ⚠️ **需先与文档立场对齐**再定 |
 | 31 | 单飞等待无界 | 类 4 | 沿用 `cache-layer.md:434` 的 **4 条**触发条件 | `cache-layer.md:434`（② 笔登记，含失败路径退化） | ② 笔（登记） |
 | 32 | 雪崩形态 3（写后集中回填） | 类 4 | 同上 4 条（与 `#31` 是**同一实例的两个面**） | `cache-layer.md:434`：「与 §9.1『雪崩（同时过期）』行的**写后集中回填**是同一实例」 | 登记 |
-| 33 | `productsales` 二元组无 UNIQUE | 类 4 | 【新拟】实测出现重复 `(ProductCode, MerchantId)` 行。⚠️ 原第二触发「**或 `#2` 落地时一并加**」**已过期**：`#2` 于 2026-10-04 落地（`fix/goods-write-tx`）**未**一并加该索引（本笔是行为变更、不含 schema 变更） | `db-schema.md:53`：「`productsales` 无索引，亦无 `(ProductCode, MerchantId)` UNIQUE → **可写重复行**」 | 独立（schema 变更） |
+| 33 | `productsales` 二元组无 UNIQUE | 类 4 | 【新拟】实测出现重复 `(ProductCode, MerchantId)` 行。⚠️ 原第二触发「**或 `#2` 落地时一并加**」**已过期**：`#2` 于 2026-10-04 落地（`fix/goods-write-tx`）**未**一并加该索引（本笔是行为变更、不含 schema 变更） | `db-schema.md:55`：「`productsales` 无索引，亦无 `(ProductCode, MerchantId)` UNIQUE → **可写重复行**」 | 独立（schema 变更） |
 
 ---
 

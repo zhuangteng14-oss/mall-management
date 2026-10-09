@@ -1,0 +1,111 @@
+
+── ⓪ 基线（#/login）──
+{
+  "warns": [],
+  "errs": [],
+  "logs": []
+}
+
+── ① 管理端 #/admin/business/accounts ──
+{
+  "dom": {
+    "root": true,
+    "h2": [
+      "商家入驻审核",
+      "用户治理",
+      "商家降级控制",
+      "管理员收件箱"
+    ],
+    "stats": [
+      "1条待审入驻",
+      "2本次显示用户",
+      "1其中已封禁"
+    ],
+    "appCards": 2,
+    "userCards": 2,
+    "appBadges": [
+      "待审",
+      "已驳回",
+      "客户",
+      "已封禁",
+      "商家",
+      "降级已排定"
+    ],
+    "firstApp": "#7米可数码专营店待审申请人 zhangsan2026-10-09 11:12营业执照号91310000MA1K3XYZ8Q联系人张三联系电话13800001111店铺地址上海市浦",
+    "inbox": true,
+    "inboxText": "系统通知 共 1 条 · 未读 1 仅看未读 全部已读 新的商家入驻申请 商家入驻申请已提交 zhangsan 提交了「米可数码专营店」的入驻申请（批次 b2-1111-2222-3333） 关联：merchant_application ",
+    "tz": "UTC库内时钟 → 浏览器时区UTC+08:00"
+  },
+  "calls": [
+    "OPTIONS /notification/list",
+    "OPTIONS /admin/accounts/applications",
+    "OPTIONS /admin/accounts/users",
+    "POST /notification/list",
+    "POST /admin/accounts/applications",
+    "POST /admin/accounts/users"
+  ],
+  "errs": [],
+  "logs": [],
+  "warns": [],
+  "hash": "#/admin/business/accounts"
+}
+
+── ③ 用户端 #/customer/user/apply ──
+{
+  "dom": {
+    "root": true,
+    "title": "商家入驻",
+    "headNote": "共 2 条申请 · 待审 1",
+    "form": true,
+    "fields": [
+      "店铺名称 必填",
+      "营业执照号 必填",
+      "联系人",
+      "联系电话",
+      "店铺地址",
+      "资质图地址"
+    ],
+    "submit": "提交申请",
+    "apps": 2,
+    "appStatus": [
+      "待审",
+      "已驳回"
+    ],
+    "rejectWhy": "驳回理由：店铺名称与执照不符",
+    "whoMissing": false
+  },
+  "calls": [
+    "OPTIONS /merchant/myApplications",
+    "OPTIONS /message/conversations",
+    "POST /merchant/myApplications",
+    "POST /message/conversations",
+    "OPTIONS /notification/unreadCount",
+    "POST /notification/unreadCount"
+  ],
+  "errs": [],
+  "logs": [],
+  "warns": [],
+  "hash": "#/customer/user/apply"
+}
+
+══ 判定 ══
+OK   ① 页面根 .a-acc 渲染
+OK   ① 四段 <h2> 齐全  → ["商家入驻审核","用户治理","商家降级控制","管理员收件箱"]
+OK   ① 状态条三个大数来自 mock（待审 1 / 用户 2 / 封禁 1）  → ["1条待审入驻","2本次显示用户","1其中已封禁"]
+OK   ① 入驻申请渲染 2 条（含 pending / rejected 徽章）  → ["待审","已驳回","客户","已封禁","商家","降级已排定"]
+OK   ① 用户卡片渲染 2 条（含「已封禁」与「降级已排定」徽章）  → ["待审","已驳回","客户","已封禁","商家","降级已排定"]
+OK   ① 收件箱挂上了（.a-inbox > .notify-room）  → "系统通知 共 1 条 · 未读 1 仅看未读 全部已读 新的商家入驻申请 商家入驻申请已提交 zhangsan 提交了「米可数码专营店」的入驻申请（批次 b2-1111-2222-3333） 关联：merchant_application "
+OK   ② 打了 /admin/accounts/applications
+OK   ② 打了 /admin/accounts/users
+OK   ② 收件箱用 ToId=* 打了 /notification/list
+OK   ⑤ 管理端未多出 console 噪音（warn 集合 = 基线，无 error、无未捕获异常）  → {"errs":[],"logs":[],"warns":[],"baseWarns":0}
+OK   ③ 页面根 .uc-main 渲染 + 标题「商家入驻」  → "商家入驻"
+OK   ③ 提交表单在位（6 个字段 + 提交按钮）  → ["店铺名称 必填","营业执照号 必填","联系人","联系电话","店铺地址","资质图地址"]
+OK   ③ 页头计数来自 mock（共 2 条 · 待审 1）  → "共 2 条申请 · 待审 1"
+OK   ③ 我的申请渲染 2 条（待审 / 已驳回）  → ["待审","已驳回"]
+OK   ③ 驳回理由显示给申请人  → "驳回理由：店铺名称与执照不符"
+OK   ④ 打了 /merchant/myApplications
+OK   ⑤ 用户端未多出 console 噪音（warn 集合 = 基线，无 error、无未捕获异常）  → {"errs":[],"logs":[],"warns":[],"baseWarns":0}
+
+probe-accounts-apply: 17 项 / 0 失败
+截图：docs/agent/evidence/c3-block2/accounts-apply

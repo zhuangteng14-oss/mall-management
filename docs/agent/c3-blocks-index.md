@@ -10,8 +10,8 @@
 
 | # | 块 | pack | 依赖 | 状态 |
 |---|---|---|---|---|
-| **1** | **基础设施**（权限与审计 + 系统通知） | [`context-packs/c3-block-1-infra.md`](context-packs/c3-block-1-infra.md) | —— | **进行中**（批 A：审计样板挂钩 + 读 API 已落；前端见其 pack 的「要新建」） |
-| 2 | 用户块（三端） | `context-packs/c3-block-2-user.md`（待建） | 1 | 未开工 |
+| **1** | **基础设施**（权限与审计 + 系统通知） | [`context-packs/c3-block-1-infra.md`](context-packs/c3-block-1-infra.md) | —— | **已落**（批 A 审计 + I2 系统通知，PR #81 / #82 已 merge 进 main） |
+| **2** | **用户块（三端）** | [`context-packs/c3-block-2-user.md`](context-packs/c3-block-2-user.md) | 1 | **已落码（未提交）**（A 档 5 项已裁决；建表已落 VM 库；`mvn test` 239/0/0/19 全绿；登记见 `slot-registry.md §十八`） |
 | 3 | 商品块（三端） | `context-packs/c3-block-3-goods.md`（待建） | 2 | 未开工 |
 | 4 | 订单块（三端，**含购物车拆分**） | `context-packs/c3-block-4-order.md`（待建） | 3 | 未开工 |
 | 5 | 营销块（三端） | `context-packs/c3-block-5-marketing.md`（待建） | 3 | 未开工 |
@@ -20,7 +20,7 @@
 | 8 | 部署 | `context-packs/c3-block-8-deploy.md`（待建） | 全部（**收尾**） | 未开工 |
 
 - 「**三端**」= 用户端 / 商家端 / 管理端；写「管理端」= 只有管理端有面。
-- pack 路径命名 `c3-block-<N>-<slug>.md`，slug 见表。只有块 1 的 pack 已落地，其余**待建**
+- pack 路径命名 `c3-block-<N>-<slug>.md`，slug 见表。只有块 1、块 2 的 pack 已落地，其余**待建**
   （未建时上表路径是**约定**，不是可点链接 —— 这样 `check-context-packs.sh` 不会去追一个还不该存在的文件）。
 
 ## 二、依赖图
