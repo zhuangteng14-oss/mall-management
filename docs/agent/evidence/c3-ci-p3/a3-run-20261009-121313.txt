@@ -1,0 +1,99 @@
+=== A3 并发测试 ===
+baseUrl        : http://127.0.0.1:8088
+jdbcUrl        : jdbc:mysql://127.0.0.1:3306/mall_management_sql?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai&characterEncoding=utf-8
+jdbcUser       : test
+jdbcPassword   : *******
+expectDbHost   : 127.0.0.1
+runId          : ci132
+namespace      : A3TEST-ci132…
+qps / duration : 120 / 30s
+rounds         : 5
+bGroupGate     : false  (仅影响 B-2)
+keepData       : false
+cleanupOnly    : false
+resetDb        : false
+negControl     : (已关闭)
+readyTimeout   : 180s  (P5)
+scenarios      : S1,S2a,S2b,S3,S4a,S4b,B2,C  (S4b 60s)
+reportDir      : scripts/concurrency/reports
+
+charset        : file.encoding=UTF-8  native.encoding=UTF-8  stdout/stderr=强制 UTF-8（见 forceUtf8Output）
+                 启动方式=两步编译（javac -encoding UTF-8 + java -cp <out>…）  源码字面量自检=PASS（中文串未被字符集损坏）
+--- 前置校验 ---
+  P0  PASS 13 列逐列比对通过；余量最小 goodstype.GoodType 16/20（余 4）
+  P2  PASS 实际主机=127.0.0.1 期望主机=127.0.0.1
+  P1  PASS DATABASE()=mall_management_sql（TD-13 要求 mall_management_sql ✓）；VERSION()=8.4.11（S0-5 要求 8.4.x ✓）
+  P3  PASS 表数=15；已知追加表 order_state_transition / admin_audit / notification / notification_template 在 4/4 张（期望表数 = 11 + 4 = 15）
+  P4  PASS order=6 goods=5 login=5 user=5 friend=4
+  P5  PASS GET http://127.0.0.1:8088/health/db → HTTP 200，等待 0s，含 "success":true（Web+DB 联合就绪；该端点不被缓存）
+  P6  PASS 库身份对比（GET /health/db vs 脚本 JDBC） server_uuid=9b633439-c3da-11f1-a378-fe98ec2eb3e5→一致；hostname=8b606122f307→一致；参考项 database=一致 port=一致 version=一致
+  P7  SKIP 已用 --skip-negative-control 显式关闭
+
+[阶段 D] preflight P0–P7 通过，开始跑负载段：S1,S2a,S2b,S3,S4a,S4b,B2,C
+[S1] 只读 50% goodstype + 50% loginSelect  offered=120 achieved=120.0QPS ok=3600 unexpected=0 5xx=0 connErr=0 wall=30.0s n=3600 p50=2.2 p95=7.6 p99=20.9 max=118.0(ms)
+[S2a] 20 线程同栅栏同 OrderId=A3TEST-ci132-DUP success=1 行数=1 锁增量=20 数据库错误=0
+[S2b] 下单(独参) offered=120 achieved=119.9QPS ok=3600 unexpected=0 5xx=0 connErr=0 wall=30.0s n=3600 p50=3.2 p95=8.1 p99=17.9 max=142.8(ms)
+[S3] 支付 M=10 单 × 20 线程同栅栏  合计 success=10 异常单=0 5xx=0
+[S4a] 预置态 U=ok(add(000)) P=ok(add(100)) PD=ok(add(100)+Delivery) PDR=ok(add(100)+Delivery+Receive) PR=ok(add(100)+Receive) | 8 个 burst 完成 payRace=1 dlyRace=1 不变式违反=0
+[记录] S4a 锁计数 前=1213=0 1205=0 后=1213=0 1205=0（1213=ER_LOCK_DEADLOCK 1205=ER_LOCK_WAIT_TIMEOUT；record-only，非门禁）
+[S4b] 预建单池（JDBC 批量，setup 不计入负载）：pay=1440 dly=1080 rcv=1080，耗时 2234ms；负载 120 QPS × 60s = 7200 条（360 循环 × 20 槽）
+[S4b] 混合 offered=120 achieved=120.0QPS ok=7200 unexpected=0 5xx=0 connErr=0 wall=60.0s n=7200 p50=2.5 p95=5.3 p99=11.0 max=89.1(ms) 各端点=add2880/pay1440/dly1080/rcv1080/gs720 不变式违反=0
+[记录] S4b 锁计数 前=1213=0 1205=0 后=1213=0 1205=0（1213=ER_LOCK_DEADLOCK 1205=ER_LOCK_WAIT_TIMEOUT；record-only，非门禁）
+[B-2] 第 1 轮  loginAdd(5xx=9 成功=1 已存在=10 未判定=0)  goodstype(重复行=1 新增成功=1)  friendAdd(重复行=1 申请成功=1)  → EXPECTED_DEFECT_PRESENT
+[B-2] 第 2 轮  loginAdd(5xx=5 成功=1 已存在=14 未判定=0)  goodstype(重复行=1 新增成功=1)  friendAdd(重复行=1 申请成功=1)  → EXPECTED_DEFECT_PRESENT
+[B-2] 第 3 轮  loginAdd(5xx=9 成功=1 已存在=10 未判定=0)  goodstype(重复行=1 新增成功=1)  friendAdd(重复行=1 申请成功=1)  → EXPECTED_DEFECT_PRESENT
+[B-2] 第 4 轮  loginAdd(5xx=5 成功=1 已存在=14 未判定=0)  goodstype(重复行=1 新增成功=1)  friendAdd(重复行=1 申请成功=1)  → EXPECTED_DEFECT_PRESENT
+[B-2] 第 5 轮  loginAdd(5xx=8 成功=1 已存在=11 未判定=0)  goodstype(重复行=1 新增成功=1)  friendAdd(重复行=1 申请成功=1)  → EXPECTED_DEFECT_PRESENT
+[C] 时间线增量 8 行（期望 8） 重放 3 单：无时间线=0 链断=0 末态不符=0 Id 序异常单=0
+[记录] C 锁计数 前=1213=0 1205=0 后=1213=0 1205=0（1213=ER_LOCK_DEADLOCK 1205=ER_LOCK_WAIT_TIMEOUT；record-only，非门禁）
+[cleanup] 命名空间 A3TEST-ci132%
+  order           首列命中行数=10100 删除=10100
+  order_state_transition首列命中行数=10123 删除=10123
+  goodstype       首列命中行数=5 删除=5
+  login           首列命中行数=5 删除=5
+  user            首列命中行数=5 删除=5
+  customerimage   首列命中行数=5 删除=5
+  friend          首列命中行数=5 删除=5
+  goodstype(旧哨兵残余)删除=0（A3P-% 残留清扫，无残留）
+[cleanup] 删除语句命中合计 20248 行（同一行可能被多列命中，故非去重行数）
+
+--- 断言 ---
+  A-S1-1     gate PASS                      HTTP 5xx == 0 且连接错误 == 0  | 5xx=0 connErr=0
+  A-S1-2     gate PASS                      goodstype 响应全部 success:true  | goodstype 非预期=0
+  A-S1-3     gate PASS                      loginSelect('123','123456') 每次返回 1（0 即读侧错库或数据缺失）  | loginSelect 返回非 1 的次数=0，返回 1 的次数=1800
+  A-S2a-1a   gate PASS                      锁指标增量 mall.lock.acquires{lock=order-add,result=acquired} == 20  | 增量=20（20 线程同锁 key ⇒ 预期 20）before=0 after=20
+  A-S2a-1b   gate PASS                      JDBC count(order WHERE OrderId=?) == 1  | 行数=1（== 1 才是修复生效；>= 2 说明查重窗口仍在） 5xx=0（⚠️ 本场景 5xx 恒为 0，理由见 1c）
+  A-S2a-1c   gate PASS                      20 个响应里含「数据库错误」的 == 0  | 含「数据库错误」的响应=0 条（>0 = 撞 uk_order_orderId ⇒ 锁/查重未生效）
+  A-S2a-2    gate PASS                      该 OrderId 行数 == 本轮 success:true 响应数  | 行数=1 == success 数=1
+  A-S2b-1    gate PASS                      success:true 比率 == 100%，无 5xx  | ok=3600/3600 unexpected=0 5xx=0 connErr=0
+  A-S2b-2    gate PASS                      JDBC count(OrderId LIKE '<ns>-N%') == 成功响应数  | 行数=3600 == success 数=3600
+  A-S3-1     gate PASS                      每单恰好 1 个 success:true；全场景合计 == M  | 预建成功=10/10；合计 success=10/10；异常单=0
+  A-S3-2     gate PASS                      每单恰好 19 个 success:false 且 msg == 「订单不存在或已付款」  | 不符合「1 成功 + 19 失败且 msg 正确」的单数=0
+  A-S3-3     gate PASS                      无任何响应 msg 以「数据库错误」开头  | 含「数据库错误」的响应数=0
+  A-S3-4     gate PASS                      JDBC：每单 PayIf=1；SettlementDate IS NOT NULL  | PayIf/SettlementDate 不符的单数=0
+  A-S4a-0    gate PASS                      五个前置态全部建成且**末态正确**（C#6 后 3 个改由合法流转推进）  | 前置态 U=ok(add(000)) P=ok(add(100)) PD=ok(add(100)+Delivery) PDR=ok(add(100)+Delivery+Receive) PR=ok(add(100)+Receive) 
+  A-S4a-1    gate PASS                      orderDeliveryIfUp on U ×20 → success == 0，msg 正确  | succ=0 msg 命中=20
+  A-S4a-2    gate PASS                      orderDeliveryIfUp on P ×20 → success == 1（重复发货被拒）  | succ=1
+  A-S4a-3    gate PASS                      orderDeliveryIfUp on PDR ×20 → success == 0  | succ=0
+  A-S4a-4    gate PASS                      orderReceiveIfUp on U ×20 → success == 0（未付款收货被拒）  | succ=0 msg 命中=20
+  A-S4a-5    gate PASS                      orderReceiveIfUp on PR ×20 → success == 0（重复收货被拒）  | succ=0
+  A-S4a-6    gate PASS                      orderReceiveIfUp on PD ×20 → success == 1  | succ=1
+  A-S4a-7    gate PASS                      同单 20 pay + 20 delivery 同栅栏：paySucc==1 且 deliverySucc<=1  | 预建=ok paySucc=1 deliverySucc=1 终态=1/1/0 不变式=成立
+  A-S4a-8    gate PASS                      全命名空间不变式 NOT(PayIf=0 AND (DeliveryIf=1 OR ReceiveIf=1))  | 违反行数=0（H3 原写「PR 型预置单排除在外」；此处未排除 —— PR 的 PayIf=1，本就不满足谓词，排除与否等价）
+  A-S4b-1    gate PASS                      5xx == 0，连接错误 == 0  | 5xx=0 connErr=0 unexpected=0
+  A-S4b-2    gate PASS                      各端点 success 数 == 分区计算出的期望值  | add=2880/2880 pay=1440/1440 dly=1080/1080 rcv=1080/1080 goodstype=720/720（任何多出来的成功都是真实的状态机重复流转）
+  A-S4b-3    gate PASS                      结束后全命名空间不变式检查（同 A-S4a-8）  | 违反行数=0
+  A-S4b-4    gate PASS                      JDBC count(OrderId LIKE '<ns>-S4bN%') == orderAdd 成功数  | 行数=2880 == orderAdd 成功数=2880（H3 原文为「count LIKE 命名空间」；此处收窄到 -S4bN% 子集，否则会把 3 个预建单池也算进去而必然不等 —— 收窄是加强，不是放宽）
+  A-B2-1          RECORD_ONLY               B-2 三处 TOCTOU（loginAdd / goodstype / friendAdd）逐轮复现：rounds=5 reproRounds=5；复现轮 < 全部轮 即为弱证据（可能只是竞态未重叠，不等于缺陷已修）  | reproRounds=5/5（--b-group-gate=false，不计入退出码）；分类计数 login5xx轮=5 goodstype重复行轮=0 friend重复行轮=0
+  C-1        gate PASS                      时间线行数 == 四端点 success 之和（各端点 success 另与状态机预测值比对）  | add=3/3 pay=2(预测 2) dly=1(1) rcv=2(2) PR 预置 pay/rcv=1/1(1/1) 被拒三次=0/0/0(0/0/0) 时间线增量=8/8 被拒单行数=1/3(1/3 —— PR 的 3 行 = 出生+付款+收货) 收敛读数=8
+  C-2        gate PASS                      时间线可重放：首行 from=NONE、逐行首尾相接、末行 to == order 表现值  | 重放单数=3 无时间线的单=0 首行非 NONE=0 链断=0 末态不符=0；Id 序与 OccurredAt 序不一致的单=0（此数是为让上面那条排序判断有实测依据，不靠推断）
+  A-C6-1     gate PASS                      出生闸：6 个非白名单组合全部被拒（success=false + 文案 + 查无此行）  | 放行 3/3（白名单）  被拒 6/6（3 个合法但非初始 + 3 个非法，均须查无此行）
+  A-C6-2     gate PASS                      出生闸的观测在场：birth.rejected 的 shape 覆盖 4 值（含 non_initial）  | HTTP 200 shape 覆盖 4 值=true；non_initial 序列存在（HTTP 200）=true
+  门禁断言 30 项，失败 0 项
+
+runId      : ci132
+target     : http://127.0.0.1:8088  →  jdbc:mysql://127.0.0.1:3306/mall_management_sql?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai&characterEncoding=utf-8
+preflight  : 8 项，全部通过
+gates      : 全部通过
+report     : scripts/concurrency/reports/a3-report-ci132-20261009-121521.json
+exitCode   : 0

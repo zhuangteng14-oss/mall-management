@@ -3750,3 +3750,10 @@ TD-01 的防线语义是「**多出来的每一张都必须点过名**」，不�
   红的那次自己给了：15 ＝ 11 基线 ＋ `order_state_transition` ＋ 本笔 3 张。
 - **零漂移**：本文件被文档按行号引**最多到 `:2521`**，而本次改动**全部落在 `:2637` 之后**（净增 5 行）；
   `:1376` / `:1876` 两处是**同行替换**（行号不动）⇒ **文档里的行号引用一个都不用改**。
+- **修后复跑（同 PR 的第二次运行）**：A3 **全绿**，`4m5s`（红那次只有 `2m0s` —— 它在前置就退了）。
+  `P3 PASS 表数=15；已知追加表 order_state_transition / admin_audit / notification / notification_template
+  在 4/4 张`；P5 / P6 也由 SKIP 变 PASS，**负载段真跑了**（S1–C 全绿，`5xx=0 connErr=0`，`不变式违反=0`），
+  末行 `门禁断言 30 项，失败 0 项` / `exitCode 0`。`Backend tests` / `Frontend build` 亦全绿。
+  ⇒ 与红那次**唯一不同的一行就是 P3**，且这次负载段跑满 —— 这就是「C3 块 1 对既有 A3 零影响」的证据。
+  两份报告（红 / 绿）＋绿那次的 JSON 产物（`gates={"count":30,"failed":0}`）都搬进了
+  `docs/agent/evidence/c3-ci-p3/`（判据与红绿对照见该目录 README）。
