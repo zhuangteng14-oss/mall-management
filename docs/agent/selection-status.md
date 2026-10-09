@@ -35,7 +35,7 @@
 | **击穿**：逻辑过期 + Redisson 互斥重建 + Caffeine 本地兜底 | 部分 | Caffeine 本地兜底 ✅；互斥重建 ✅ **但用 Spring `sync=true` 的进程内 single-flight（`mall.cache.singleflight`），不是 Redisson 分布式互斥** ⇒ 多实例下每个实例各回源一次；**逻辑过期 ❌** |
 | **雪崩**：随机 TTL + 多级缓存 + Resilience4j 限流 | 部分 | 多级缓存 ✅；**随机 TTL ❌**（B1 明确不做，触发条件 = 某缓存族 key 数 > ~10）；**Resilience4j ❌** |
 | **穿透**：空值缓存 + 布隆过滤器 + 参数校验 | 部分 | 空值缓存 ✅（`549f74f` 首个负缓存，`userSelect`）；**布隆过滤器 ❌**；**参数校验 ❌**（无 validation 依赖，全仓 `@Valid` = 0） |
-| **分布式锁**：Redisson `tryLock(wait,lease)` + finally `isHeldByCurrentThread` | ✅ | B2；`tryLock` **真实调用 1 处**（`DistributedLockService:249` 的 `lock.tryLock(wait, lease, MILLISECONDS)`）。⚠️ **2026-10-02 实测订正**：原记「4 处实命中」是把 `LockSceneService` 里**注释提到 `tryLock`** 的 3 行（`:57` / `:268` / `:269`）一并数了进去。⚠️ 但取锁超时 / Redis 不可达 / 冷却窗口**三路 fail-open 回落原路径**（`tech-debt.md:280`）。⚠️ 此处原引 `:275` —— 该行号**在 S1a-2 之前就已偏 1**（实测该版本里目标表行在 **276**），S1a-2 的 +4 行把它推到 **280**，本笔一并更正 |
+| **分布式锁**：Redisson `tryLock(wait,lease)` + finally `isHeldByCurrentThread` | ✅ | B2；`tryLock` **真实调用 1 处**（`DistributedLockService:249` 的 `lock.tryLock(wait, lease, MILLISECONDS)`）。⚠️ **2026-10-02 实测订正**：原记「4 处实命中」是把 `LockSceneService` 里**注释提到 `tryLock`** 的 3 行（`:57` / `:268` / `:269`）一并数了进去。⚠️ 但取锁超时 / Redis 不可达 / 冷却窗口**三路 fail-open 回落原路径**（`tech-debt.md:291`）。⚠️ 此处原引 `:275` —— 该行号**在 S1a-2 之前就已偏 1**（实测该版本里目标表行在 **276**），S1a-2 的 +4 行把它推到 **280**，本笔一并更正；⚠️ **2026-10-08（立 TD-18）** 该文件的 TD 段再 **+11 行** ⇒ 此指针**再推至 291**（本处已同步）。 |
 | **MySQL 死锁**：固定加锁顺序 + 小事务 + `@Version` 乐观锁 + `@Retryable` | 部分 | `@Transactional` **注解 4 处**（2026-10-04 起）：`UserService.loginAdd:124`（2026-10-02 三层第三笔前在 `UserController:57`）+ **C#2 的商品域三处**（`GoodsService.goodsAdd` / `goodsUp` / `goodsDe`）。⚠️ **2026-10-02 实测订正**：原记「10 处」是**把 javadoc / 注释里写到 `@Transactional` 的地方也数了进去** —— `grep -rn "@Transactional"` 在 `src/main/java` 于 2026-10-02 得 18 行、**2026-10-04 复测得 45 行**（本笔自己添了 3 处真注解与若干说明文字），其中 **4 行是真注解、41 行是说明文字**（含 `OrderService:26` 那条**禁令**、`OrderDao:39`、`GoodsDao:52-56` 等）—— **该「1 处」已被 C#2 改为 4 处**。**`@Version` ❌（0 命中）**；**`@Retryable` ❌（0 命中，且无 spring-retry）** |
 | **状态机**：显式 transition + 乐观锁 + 流转日志 + 频次告警 | 部分 | 显式 transition ✅（B3 转移表）；流转日志 ✅（B3 `order_state_transition` 时间线）；**乐观锁 ❌**（改用谓词守卫 CAS —— 需判断是否算等效，见 §5）；**频次告警 ❌** |
 | **线程池**：分池 + 有界队列 + `orTimeout` + 明确拒绝策略 | 部分 | 有界队列 ✅（`ArrayBlockingQueue(1024)`）；明确拒绝策略 ✅（discard-oldest-with-callback）；**分池 ❌（B3 只有单池）**；**`orTimeout` ❌（0 命中）** |
@@ -137,12 +137,12 @@
 
 | # | 项 | 分类 | 触发 / 时机 | 现状 | 归属 |
 |---|---|---|---|---|---|
-| 11 | `login.Id` 唯一索引 | 类 2 | 【新拟】实测同一 `Id` 多条 `login` 行（`GROUP BY Id HAVING COUNT(*)>1` 非空）；**或鉴权笔落地** | 已登记 —— `db-schema.md:180` / `:363`（前提 C）、`defect-survey.md:81`（病 C）、`three-layers.md:95` | 鉴权笔（服务侧）/ 独立（DB 侧） |
-| 12 | goodstype 唯一约束 ⚠️ **已升类 1 ⇒ 本行占位，不重复计数** | 类 2 → **已升类 1 `#10`** | 触发**已满足** | ✅ **已完成（2026-10-04 #11，`fix/goodstype-unique`）** —— 见 `#10` 行。升类依据（本节原值）：CI `ci49`（2026-10-03）**4/5 轮** `goodstypeDupRows ≥ 2`（逐轮 4 / 1 / 4 / 3 / 3）；代码级根因：`GoodsTypeCacheService:71-72` **裸 `INSERT`**、且**不在 B2 的 5 落点内**。原登记 —— `concurrency-map.md:77` + `:91`、`db-schema.md:172` | #11 `fix/goodstype-unique` |
-| 13 | `friend` 唯一约束 | 类 2 | 触发**未满足**：`ci49` `friendDupRows` 恒 = **1**、`friendDupRounds = 0/5`（B2 的 `runLocked` 已覆盖 `MessageService.friendAdd`）。⚠️ `cache-layer.md:462` 的「12–19 条」是 **B1 时代**值，**已被 B2 证伪** | 已登记 —— `concurrency-map.md:75` / `:91`、`db-schema.md:365`、`defect-survey.md:85`（病 G） | 独立（schema 变更） |
+| 11 | `login.Id` 唯一索引 | 类 2 | 【新拟】实测同一 `Id` 多条 `login` 行（`GROUP BY Id HAVING COUNT(*)>1` 非空）；**或鉴权笔落地** | 已登记 —— `db-schema.md:188` / `:428`（前提 C）、`defect-survey.md:81`（病 C）、`three-layers.md:95` | 鉴权笔（服务侧）/ 独立（DB 侧） |
+| 12 | goodstype 唯一约束 ⚠️ **已升类 1 ⇒ 本行占位，不重复计数** | 类 2 → **已升类 1 `#10`** | 触发**已满足** | ✅ **已完成（2026-10-04 #11，`fix/goodstype-unique`）** —— 见 `#10` 行。升类依据（本节原值）：CI `ci49`（2026-10-03）**4/5 轮** `goodstypeDupRows ≥ 2`（逐轮 4 / 1 / 4 / 3 / 3）；代码级根因：`GoodsTypeCacheService:71-72` **裸 `INSERT`**、且**不在 B2 的 5 落点内**。原登记 —— `concurrency-map.md:77` + `:91`、`db-schema.md:180` | #11 `fix/goodstype-unique` |
+| 13 | `friend` 唯一约束 | 类 2 | 触发**未满足**：`ci49` `friendDupRows` 恒 = **1**、`friendDupRounds = 0/5`（B2 的 `runLocked` 已覆盖 `MessageService.friendAdd`）。⚠️ `cache-layer.md:462` 的「12–19 条」是 **B1 时代**值，**已被 B2 证伪** | 已登记 —— `concurrency-map.md:75` / `:91`、`db-schema.md:430`、`defect-survey.md:85`（病 G） | 独立（schema 变更） |
 | 14 | query-timeout（`spring.jdbc.template`） | 类 2 | 实测单条 SQL P99 > 1s；或 `hikaricp.connections.pending` > 0 | 已登记 —— `cache-layer.md:434`（② 笔） | ② 笔（登记）；**未修** |
 | 15 | N+1 改 JOIN（`goodsHome` / `friendList` / `friendRequests`） | 类 2 | 【新拟】任一 N+1 接口实测 P99 > 1s —— 门限取「**摊薄失效点**」：缓存只把 1+2N 摊薄为「每 TTL 一次」、是**掩盖非修复**（`cache-layer.md:161`） | 已登记 —— `project-map.md:111-126`、`cache-map.md:60-97`、`context-packs/fix-n-plus-one.md`、`cache-layer.md:142-181` | 独立笔 `fix-n-plus-one` |
-| 16 | TTL 抖动（防同时过期） | 类 2 | 某缓存族 key 数 > ~10（**实测未满足**：5 三元组 + 4 型号组） | 已登记 —— `cache-layer.md:472`（§11 附 行 E）+ `:328`（§9.1 雪崩行）、`§2:35`、`tech-debt.md:277` | 独立（B1 明确不做） |
+| 16 | TTL 抖动（防同时过期） | 类 2 | 某缓存族 key 数 > ~10（**实测未满足**：5 三元组 + 4 型号组） | 已登记 —— `cache-layer.md:472`（§11 附 行 E）+ `:328`（§9.1 雪崩行）、`§2:35`、`tech-debt.md:288` | 独立（B1 明确不做） |
 | 17 | 多实例 / 分布式场景 | 类 2 | **部署第 2 个实例**（原为「单飞等待无界」的触发条件 ③，本笔提为独立条目） | 已登记（散落）—— `cache-layer.md:433` / `:434`、§6:96 | 独立（部署笔 → `#9`） |
 | 18 | Resilience4j 限流熔断 | 类 2 | 出现第 2 个外部服务调用；或需按接口限流 | 已登记 —— **`§4:72`** | 无（未归属） |
 | 19 | Logback JSON 编码器 | 类 2 | 接入日志聚合（ELK / Loki）；或需从日志告警 | 已登记 —— **`§4:74`** | 无（未归属） |
@@ -172,7 +172,7 @@
 | 30 | `getUserInfoById` 副本（记为「第三份」） | 类 4 | — | ⚠️ **文档立场相反**：`api-contract.md:79`（2026-10-04 鉴权笔 2 +19 重指） / `cache-map.md:77` 明写「两份并存是**有意的**，不是漏删」 | ⚠️ **需先与文档立场对齐**再定 |
 | 31 | 单飞等待无界 | 类 4 | 沿用 `cache-layer.md:434` 的 **4 条**触发条件 | `cache-layer.md:434`（② 笔登记，含失败路径退化） | ② 笔（登记） |
 | 32 | 雪崩形态 3（写后集中回填） | 类 4 | 同上 4 条（与 `#31` 是**同一实例的两个面**） | `cache-layer.md:434`：「与 §9.1『雪崩（同时过期）』行的**写后集中回填**是同一实例」 | 登记 |
-| 33 | `productsales` 二元组无 UNIQUE | 类 4 | 【新拟】实测出现重复 `(ProductCode, MerchantId)` 行。⚠️ 原第二触发「**或 `#2` 落地时一并加**」**已过期**：`#2` 于 2026-10-04 落地（`fix/goods-write-tx`）**未**一并加该索引（本笔是行为变更、不含 schema 变更） | `db-schema.md:49`：「`productsales` 无索引，亦无 `(ProductCode, MerchantId)` UNIQUE → **可写重复行**」 | 独立（schema 变更） |
+| 33 | `productsales` 二元组无 UNIQUE | 类 4 | 【新拟】实测出现重复 `(ProductCode, MerchantId)` 行。⚠️ 原第二触发「**或 `#2` 落地时一并加**」**已过期**：`#2` 于 2026-10-04 落地（`fix/goods-write-tx`）**未**一并加该索引（本笔是行为变更、不含 schema 变更） | `db-schema.md:53`：「`productsales` 无索引，亦无 `(ProductCode, MerchantId)` UNIQUE → **可写重复行**」 | 独立（schema 变更） |
 
 ---
 

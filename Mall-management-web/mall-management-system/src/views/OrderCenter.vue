@@ -289,8 +289,8 @@ onMounted(() => {
    ⚠️ `@media` 里那两条 `.list-head`/`.crow` 的 1080 规则同理不搬。 */
 
 /* ⚠️ 滚动盒必须由本页提供（壳的 `.order-container` 是 height:100%;overflow:hidden，
-   AppShell.vue:306-313），且 **position:relative 不能删** —— `.switch-wrapper` 是它的 absolute
-   子元素，正是 AppShell.vue:295-298「.cart-container / .order-container 两类名不合并」那条依据。 */
+   AppShell.vue:349-356），且 **position:relative 不能删** —— `.switch-wrapper` 是它的 absolute
+   子元素，正是 AppShell.vue:338-341「.cart-container / .order-container 两类名不合并」那条依据。 */
 .order-center-page {
   height: 100%;
   position: relative;

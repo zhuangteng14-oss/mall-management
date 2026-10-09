@@ -1,0 +1,16 @@
+
+8.4.11-0ubuntu0.26.04.1
+13
+admin_audit
+customerimage
+friend
+goods
+goodstype
+login
+merchantimage
+message
+order
+order_state_transition
+productsales
+user
+user_conversation_read

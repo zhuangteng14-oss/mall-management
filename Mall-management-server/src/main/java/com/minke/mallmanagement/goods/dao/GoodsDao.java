@@ -208,4 +208,32 @@ public class GoodsDao {
 
         return jdbcClient.sql(sql).param(keyword.trim()).query().listOfRows();
     }
+
+    // ==================== 读：审计快照（C3 批 A 新增，追加在类尾） ====================
+
+    /**
+     * 审计用：按 {@code (MerchantId, ProductCode)} 取 {@code goods} 行 —— 商品更新的
+     * **改前 / 改后快照**（C3 批 A「权限与审计」的样板挂钩，见 {@code GoodsController.goodsUp}）。
+     *
+     * <p>⚠️ <b>本方法是本类第一条不是从三层前的 Controller 搬来的语句</b> —— 类注释里那句
+     * 「N 条语句全部整段搬来」说的是三层重构那一笔的**历史**，不是「本类只能有 N 条」的禁令。
+     * 本条的来源是 C3 批 A 的审计需求。
+     *
+     * <p>⚠️ <b>谓词必须与 {@link #updateGoods} 的 {@code WHERE} 逐字相同</b>
+     * （{@code MerchantId=? AND ProductCode=?}）：它就是「将被改动的那几行」的定义。
+     * 谓词一宽一窄，快照与实际改写集就对不上，审计里的「改前」就成了假的。**改一处必须改两处。**
+     *
+     * <p>⚠️ <b>可返回多行</b>（同一商家同一型号可以挂多个商品名 —— {@code updateGoods} 也会
+     * 一次改多行）⇒ 返回 {@code List}、**不取单行**。取单行会在多行时抛
+     * {@code IncorrectResultSizeDataAccessException}，把一次成功的商品更新变成 500。
+     *
+     * <p>⚠️ 用 {@code SELECT *} 而非列清单：改前 / 改后是**同一张表同一批列**，列清单写死两遍
+     * 反而给了「两处不一致」的机会。这条与 {@code searchByKeyword} 的 {@code SELECT *} 同形，
+     * 但理由不同（那里是照搬既有形状，这里是刻意求「两次读同构」）。
+     */
+    public List<Map<String, Object>> selectGoodsForAudit(String MerchantId, String ProductCode) {
+        String sql = "SELECT * FROM mall_management_sql.goods "
+                + "WHERE MerchantId = ? AND ProductCode = ?";
+        return jdbcClient.sql(sql).params(MerchantId, ProductCode).query().listOfRows();
+    }
 }

@@ -150,7 +150,7 @@ git rebase origin/main
    - docs/agent/README.md
    - docs/agent/context-packs/<当前任务>.md
    - docs/agent/selection-status.md（项目待办与优化总表 §8 + 新功能引出表 §9）
-3. 不要整目录加载 docs/agent/。
+3. 不要整目录加载 docs/agent/。**做 C3 各块**时改成两步：先读 `docs/agent/c3-blocks-index.md`，再读该块的块级 pack（`docs/agent/context-packs/`）—— **不要全读 `docs/`**。
 4. 上下文接近满时（Claude 提示或响应变慢）主动建议 /clear。
 5. 已完成的工作必须写入文件（文档或 commit），不能只存在于对话。
 6. 每次新会话开场，先执行 git log --oneline -5 了解当前位置。
@@ -211,6 +211,9 @@ git rebase origin/main
 6. 一个功能如果同时改前后端，就在同一个 feature 分支里完成。
 7. 新增监控、日志、管理端功能时，不得阻塞主业务线程。
 8. 实时日志、指标推送优先使用 SSE 或 WebSocket，并设置超时与断线重连。
+9. **临时产物不许落在仓库外**：脚本、日志、中间文件一律写项目根 `_work/`（已进 `.gitignore`），
+   且路径写**绝对路径** —— 相对路径会跟着 shell 的 cwd 跑到桌面去（2026-10-09 就这么丢过两份 `_a3work/`）。
+   可复跑的探针归 `scripts/probes/`；验收证据（截图、逐条输出原文）归 `docs/agent/evidence/<笔名>/`。
 
 ## 测试与构建
 

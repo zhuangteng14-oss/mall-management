@@ -12,7 +12,7 @@ import GoodsSelect from '../views/GoodsSelect.vue'
 //    `HomePage` 本来就是**两壳共用**的，R2 起它自己也被两个壳共用（用户裁决 4）。
 import HomeTab from '../views/HomeTab.vue'
 import UserCenter from '../views/UserCenter.vue'
-import ChatRoom from '../views/ChatRoom.vue'
+import MessageCenter from '../views/MessageCenter.vue'   // ⚠️ 2026-10-09 合并「消息 / 通知」入口：本行原为 `import ChatRoom from '../views/ChatRoom.vue'`（**同行替换、净零行数**）—— `ChatRoom` 改由 `MessageCenter.vue` 内嵌引入；`ChatRoom.vue` 自身未改一字
 import UserInfoPage from '../views/UserInfoPage.vue'
 import HistoricalOrders from '../views/HistoricalOrders.vue'
 import FriendRoom from '../views/FriendRoom.vue'
@@ -52,12 +52,12 @@ const routes = [
   { path: '/', redirect: landingFor },   // R3：不再是页面，只是落点（`landingFor` 在文件尾部 —— 函数声明提升，可先用后定义）
   { path: '/login', component: LoginPage, meta: { public: true } },
   {
-    path: '/customer', meta: { roles: ['1', '3'] },   // ← 角色边界（2026-10-06，§5-AG (16)）：只有**客户**与**管理员**可进这个壳；`meta` 沿 `matched` 链合并 ⇒ 5 个子路由**自动继承**，无需逐条标。⚠️ 别挂到下一行的 `props.role` 上 —— 那是「**壳的种类**」，与本键同形异义
+    path: '/customer', name: 'customer', meta: { roles: ['1', '3'] },   // ← 角色边界（2026-10-06，§5-AG (16)）：只有**客户**与**管理员**可进这个壳；`meta` 沿 `matched` 链合并 ⇒ 5 个子路由**自动继承**，无需逐条标。⚠️ 别挂到下一行的 `props.role` 上 —— 那是「**壳的种类**」，与本键同形异义。⚠️ `name`（C3 块1·I2 加，2026-10-09）：本路由表里**唯一**被用到的 name，只为文件尾 `addRoute('customer', …)` 挂「系统通知」子路由 —— 理由见文件尾那块（同行追加、净零行数）
     component: AppShell, props: { nav: CUSTOMER_NAV, base: '/customer', role: 'customer' },
     children: [
       { path: '', component: HomeTab, props: { base: '/customer' }, meta: { tab: 'home', layout: 'home-container', public: true } },
       { path: 'search', component: GoodsSelect, meta: { layout: 'page', public: true } },
-      { path: 'msg', component: ChatRoom, meta: { tab: 'msg', layout: 'page' } },
+      { path: 'msg', component: MessageCenter, meta: { tab: 'msg', layout: 'page' } },   // ⚠️ 2026-10-09：`component` 由 `ChatRoom` 换成 `MessageCenter`（**同行替换**，两壳各一处）—— 本记录现在还承载「通知」tab（`?tab=notify`）；`meta.tab` 仍是 `'msg'` ⇒ 顶栏「消息」在两个 tab 下都亮
       { path: 'cart', component: ShoppingCart, props: { showSwitch: false }, meta: { tab: 'cart', layout: 'cart-container' } },   // ← ⚠️ **必须**传 false：R1 前客户壳是 `<ShoppingCart :showSwitch="false" />`，R1 落码时丢了 ⇒ 该页凭空多出 📋/🛒 开关（且无人监听 = 死控件）。`fix/legacy-chat-tab` 修（见 progress.md §5-X (16)2）
       {
         path: 'user',
@@ -83,12 +83,12 @@ const routes = [
     ]
   },
   {
-    path: '/merchant', meta: { roles: ['2', '3'] },   // ← 角色边界（同上）：只有**商家**与**管理员**可进（`'3'` = 管理员**两边都能进**，用户 2026-10-06 裁定；细粒度归 C3）
+    path: '/merchant', name: 'merchant', meta: { roles: ['2', '3'] },   // ← 角色边界（同上）：只有**商家**与**管理员**可进（`'3'` = 管理员**两边都能进**，用户 2026-10-06 裁定；细粒度归 C3）。⚠️ `name` 的来历同上一行（`/customer`）
     component: AppShell, props: { nav: MERCHANT_NAV, base: '/merchant', role: 'merchant' },
     children: [
       { path: '', component: HomeTab, props: { base: '/merchant' }, meta: { tab: 'home', layout: 'home-container', public: true } },
       { path: 'search', component: GoodsSelect, meta: { layout: 'page', public: true } },
-      { path: 'msg', component: ChatRoom, meta: { tab: 'msg', layout: 'page' } },
+      { path: 'msg', component: MessageCenter, meta: { tab: 'msg', layout: 'page' } },   // ⚠️ 2026-10-09：`component` 由 `ChatRoom` 换成 `MessageCenter`（**同行替换**，两壳各一处）—— 本记录现在还承载「通知」tab（`?tab=notify`）；`meta.tab` 仍是 `'msg'` ⇒ 顶栏「消息」在两个 tab 下都亮
       // ⚠️ 两条 order 记录都设 `meta.tab = 'order'` ⇒ 顶栏「订单中心」**两面都亮**（与路由化前
       //    `curPage === 'order'` 的判据一致）；`meta.orderTab` 才是 `OrderPane` 的分面依据。
       // ⚠️ `order/cart` 是**单条多段子路径**，不嵌第二层 `children`（`OrderPane` 自己渲染两面）。
@@ -187,9 +187,9 @@ router.beforeEach((to) => {
 //    实际只在「应用入口」那一次 + 「手敲 `#/`」时触发（手敲也被送出 = 有意的）。
 //    ⚠️ 代价：`#/?a=b` 的 query 会被丢（redirect 不带 query）—— 实测无生产者，只有手敲会产生。
 //
-// ⚠️ `ROLE_HOME` 是**唯一**的角色→落地页映射表。C3 加管理员：**只在本表加一行**
-//    `'3': '/admin'`（另需后端把 `role` 加进 `/user/me` 投影 + 前端加 `#/admin` 路由，见 §5-V）。
-const ROLE_HOME = { '1': '/customer', '2': '/merchant' }
+// ⚠️ `ROLE_HOME` 是**唯一**的角色→落地页映射表。C3 加管理员：**只在本表加一行** —— ✅ **2026-10-08 已落**（C3 骨架第一笔）
+//    `'3': '/admin'`（另需后端把 `role` 加进 `/user/me` 投影 + 前端加 `#/admin` 路由，见 §5-V）。⚠️ **本行是同行追加、不是插行**：本文件最大被引行是 `:378`，在 `:192` 之后插任何一行都会让 `landingFor` / 两条守卫 / `scrollBehavior` 集体漂移（第一版我就在这儿加了 3 行注释，已压回）。⚠️ 顺带一条**不用改**的：`landingFor`（下面那个函数）本来就是 `ROLE_HOME[getRole()] || …` ⇒ 本表加一行它自动认得 `'3'`，**不需要**给它加分支（原任务清单里那一步是多余的）。
+const ROLE_HOME = { '1': '/customer', '2': '/merchant', '3': '/admin' }
 
 /** `/` 的落点：未登录 ⇒ 客户壳；已登录 ⇒ 角色首页（role 优先、`getMerchantId()` 兜底 ——
  *  兜底**不是**边角：`getRole()` 的主来源是 `sessionStorage`，新标签页里那份**是空的**（多账户隔离笔
@@ -279,7 +279,7 @@ function searchLanding(to) {
 // ⚠️ **未匹配路径放行**（`to.matched.length === 0`）：全仓**没有 catch-all**，那种 URL 无组件
 //    可挂 ⇒ **零请求**，不在「受保护页」语义内。改它是 scope creep，本笔保持现状（白屏 + warning）。
 //
-// ⚠️ **为什么这段在文件末尾**：全仓对 `router/index.js` 有 **27 个**行号引用（`docs/` 26 + `config/nav.js:30`），
+// ⚠️ **为什么这段在文件末尾**：全仓对 `router/index.js` 有 **27 个**行号引用（`docs/` 26 + `config/nav.js:20` ⚠️ 原文写 `config/nav.js` 的 `30` 行 —— C3 块1·I2（2026-10-09）查明那是个**陈旧错址**：nav.js 里对 router 的引用只在那一行，本笔顺带订正，行号按本笔编辑后的实况写 ⚠️ **I2 按语（2026-10-09）**：「27 个」为当时实测；本笔实测 **91 处 / 62 个不同行号**，随文档增长而变、**不作契约**），
 //    **最大 `:227`** ⇒ 插在 `:239`(`searchLanding` 尾) 与 `:241`(`export default`) 之间**零漂移**
 //    （与 R3 §5-Z (10) 的「新增行落在被引用行最大行号之后」同一手法）。
 //    ⚠️ 放这儿**不影响语义**：注册序 = 执行序，但 `LEGACY_TAB` 归一化返回的是**新导航**
@@ -336,7 +336,7 @@ router.beforeEach((to) => {
 // ── 滚动行为（A1，2026-10-07）：路由切换置顶 / 后退还原 ──────────────────────────────
 // 治的病（用户实测）：列表页（`GoodsSelect`）滚到中间 → 点商品进详情 ⇒ 详情页**停在差不多的
 //   滚动位置**，不回到顶部。根因**不在**详情页自身，而是「整页滚动」这件事 **7c 之后才成立**：
-//   7c 把 `.app-shell` 由 `height:100vh` 改成 `min-height:100vh`（`AppShell.vue:188-202`）⇒
+//   7c 把 `.app-shell` 由 `height:100vh` 改成 `min-height:100vh`（`AppShell.vue:231-245`）⇒
 //   滚动由「壳内容器滚动」变成「整页（document）滚动」。而 `scrollBehavior` **全仓本来就没配**
 //   ⇒ 既不置顶、也不还原，于是窗口的原滚动位置被原样带进新页。
 //   ⚠️ 反过来说：7c 之前补它也**没用** —— 那时滚的是 `.app-shell` 这个容器，不是 `window`
@@ -391,3 +391,115 @@ function restoreScrollWhenSettled(savedPosition) {
     setTimeout(() => resolve(location.hash !== h ? false : savedPosition), 1500)   // ② 兜底（rAF 在后台标签页会被节流 ⇒ 不靠它兜底；第 ③ 条在这里也复查一次）
   })
 }
+
+
+// ── C3 骨架第一笔（2026-10-08）：管理员壳 `/admin` ────────────────────────────────────────
+// ⚠️ **为什么用 `router.addRoute` 而不是往上面的 `routes` 数组里插一条**：
+//   数组在 `:51`-`:129`，而全仓对 `router/index.js` 的最大被引行是 **`:378`**
+//   （`slot-registry.md` 引 `:354-357`）⇒ 在数组里插**任何**一行，都会让 `:192`（`ROLE_HOME`）、
+//   `:197`（`landingFor`）、`:329-334`（角色边界守卫）、`:354-357`、`:359` 集体漂移。
+//   本仓的既有手法是「新增行必须落在最大被引行**之后**」⇒ 挪到文件末尾。
+//   ⚠️ 与 `scrollBehavior` / `landingFor` 那几处**不同**：那些靠**函数声明提升**（定义在尾部、
+//      调用在中间）；这里靠的是**语句按序执行** —— 它在 `createRouter` 之后，改不到 `routes`
+//      数组，所以只能 `addRoute`。两条路都满足「零漂移」，但机制别混。
+//
+// ⚠️ `meta.roles: ['3']` 与另两壳**不同**：`/customer` 是 `['1','3']`、`/merchant` 是 `['2','3']`
+//   （管理员两边都能进）；管理员的**专属**壳只有这一个 ⇒ 只放行 `'3'`。`roles` 沿 `matched`
+//   链合并 ⇒ 子路由自动继承（与另两壳同一机制），不需要逐条标。
+// ⚠️ 守卫**不用改**：第一条（默认拒绝 + `meta.public` 白名单）本就把 `/admin` 自动归到
+//   「受保护」一侧（`:253-254` 的注释早写了这条）；第二条（角色边界）在 `ROLE_HOME` 补了 `'3'`
+//   之后，管理员跨壳会被送回 `/admin` —— 也是自动的。
+// ⚠️ `AdminShell` 走**懒加载**（`() => import(...)`）而非顶部静态 import：在顶部加一行 import
+//   同样会让 `:378` 之前的所有行号漂移 —— 懒加载把这条边收进了 `addRoute` 这一句里。
+// ⚠️ `children` 里那条**空路径**记录是必需的：没有它，`#/admin` 会渲染出一个「只有侧边栏、
+//   内容区空白」的外壳（父记录命中但 `<router-view>` 没有子记录可渲染）。
+//
+// ⚠️ **C3 骨架第二笔（2026-10-08）**在这条 `children` 里加了两条域入口；
+//   **第三笔（同日）**再把它们改名并补 11 条子项 —— 现共 **14** 条记录（1 概览 + 2 域 + 11 子项）：
+//     · `key`   —— **所属域**的点亮键，与 `config/admin-nav.js` 的 `ADMIN_SIDEBAR[].key` **逐字相同**；
+//     · `sub`   —— **子项**的点亮键（域入口记录没有这个键），与 `subs[].key` **逐字相同**；
+//     · `title` —— 顶栏面包屑（`AdminShell.vue` 读 `route.meta.title`）。
+//   ⚠️ **不加 `meta.roles`**：父记录的 `['3']` 沿 `matched` 链**合并**下来（与另两壳同一机制）。
+//   ⚠️ **11 条占位记录共用 `StubPage.vue`**（2026-10-08 少一条：`observe/audit` → 真页 `AuditPage.vue`；
+//      2026-10-09 再少一条：`business/notify` → 真页 `NotifyPage.vue`，C3 块 1 · I2）—— 余下 11 条**只差数据**，没有一处结构差异；
+//      而那正是「不该各写一个文件」的判据（见该组件块首注）。
+//   ⚠️ **第三笔的两处命名更正**（用户裁决）：域名「风控域」→「**可观测域**」；
+//      URL `/admin/biz` → `/admin/business`、`/admin/risk` → `/admin/observe`。旧名**已废**。
+//   ⚠️ **URL 裁决（2026-10-08，第三笔过审后）**：两条子项 URL 改名 —— `content` → **`moderation`**、
+//      `flows` → **`timeline`**（其余 9 条保留；理由见 `config/admin-nav.js` 块首）。`meta.sub` 同步改。
+//   ⚠️ 以上所有条**都在本文件最大被引行 `:378` 之后**（那份说明在本块上方），故加行**零漂移**。
+// ⚠️ **11 条占位记录共用同一个组件**（2 个域入口 + 9 个子项；`observe/audit`、`business/notify` 已换真页）⇒ 抽成局部常量，
+//   免得同一句 `import()` 抄 11 遍。改名的前因见 `StubPage.vue` 块首（它第二笔叫 `DomainStub`）。
+//   ⚠️ 这是**局部**常量（`addRoute` 之前、`:378` 之后），不是顶部 import —— 顶部加行会漂移。
+const AdminStub = () => import('../views/admin/StubPage.vue')
+
+router.addRoute({
+  path: '/admin',
+  meta: { roles: ['3'] },
+  component: () => import('../views/AdminShell.vue'),
+  // ⚠️ 子项记录写**三个键**，与 `config/admin-nav.js` 的 `ADMIN_SIDEBAR[]` / `subs[]` 逐字对应
+  //    （改一处必须改两处）：
+  //      · `key`   = **所属域** —— 子项页上也写域的键 ⇒ 侧边栏的**域行保持点亮**，进子项不熄父灯；
+  //      · `sub`   = 子项自己 —— 侧边栏据此点亮**子项行**；
+  //      · `title` = 顶栏面包屑。
+  // ⚠️ 子项路径用**扁平写法**（`'business/accounts'`），**不**嵌进 `business` 记录当 children ——
+  //    嵌套要求域入口页自己再放一个 `<router-view>`，而它是**叶子**占位页，没有第二个出口。
+  children: [
+    { path: '', meta: { key: 'ov', title: '概览' }, component: () => import('../views/admin/AdminHome.vue') },
+
+    { path: 'business', meta: { key: 'business', title: '业务域' }, component: AdminStub },
+    { path: 'business/accounts',   meta: { key: 'business', sub: 'accounts',   title: '用户与商家治理' }, component: AdminStub },
+    { path: 'business/catalog',    meta: { key: 'business', sub: 'catalog',    title: '商品与类目治理' }, component: AdminStub },
+    { path: 'business/orders',     meta: { key: 'business', sub: 'orders',     title: '订单治理' },       component: AdminStub },
+    { path: 'business/marketing',  meta: { key: 'business', sub: 'marketing',  title: '营销运营' },       component: AdminStub },
+    { path: 'business/moderation', meta: { key: 'business', sub: 'moderation', title: '消息与内容治理' }, component: AdminStub },
+    { path: 'business/notify',     meta: { key: 'business', sub: 'notify',     title: '系统通知' },       component: () => import('../views/admin/NotifyPage.vue') },   // C3 块1·I2：占位 → 真页（同行替换）
+
+    { path: 'observe', meta: { key: 'observe', title: '可观测域' }, component: AdminStub },
+    { path: 'observe/attack-sim', meta: { key: 'observe', sub: 'attack-sim', title: '攻击模拟器' }, component: AdminStub },
+    { path: 'observe/metrics',    meta: { key: 'observe', sub: 'metrics',    title: '指标面板' },   component: AdminStub },
+    { path: 'observe/timeline',   meta: { key: 'observe', sub: 'timeline',   title: '状态流转' },   component: AdminStub },
+    { path: 'observe/logs',       meta: { key: 'observe', sub: 'logs',       title: '实时日志' },   component: AdminStub },
+    { path: 'observe/audit',      meta: { key: 'observe', sub: 'audit',      title: '权限与审计' }, component: () => import('../views/admin/AuditPage.vue') },
+  ],
+})
+
+// ── C3 块 1 · I2（2026-10-09）：两壳「系统通知」子路由 —— ⚠️ 同日**已改判为 redirect** ──────────
+// ⚠️ **本块的口径当天变过一次，两次都照落**（不是同一句话的两种说法，别只读一半）：
+//   ① 建块时（用户口径 A）：**通知与消息的入口必须分开**（后端也是两张表、两套端点、两个 Controller）
+//      ⇒ 两壳顶栏各多一项「通知」（`config/nav.js`，`badge:'notify'`），落点由本块两条 `addRoute` 补。
+//   ② 同日稍后（用户口径 B，**现行**）：**两个入口合并成一个** —— 顶栏那两项**已从 `nav.js` 删除**
+//      （留下墓碑、**净零行数**），落点收成 `views/MessageCenter.vue` 的**页内 tab**。
+//   ⇒ 本块今天**只剩两条 redirect**（旧地址没死、只是改道）；`component: NotifyInbox` 那两行**已撤**
+//      —— `NotifyInbox.vue` 改由 `MessageCenter.vue` 内嵌，顶部 `:15` 的静态 import 也随之一并撤掉。
+//
+// ⚠️ **为什么又用 `addRoute`、而不是往上面的 `routes` 数组 / 两壳的 `children` 里插一条**：
+//   全仓对 `router/index.js` 的**最大被引行**是 `:462` —— 即 C3 骨架 `/admin` 块的末行
+//   （`context-packs/c3-block-1-infra.md:74` 引 `:396-462`；另 `slot-registry.md:2332` 按行号钉着
+//   scrollBehavior 那 4 行 `:354-357`，`progress.md` 亦引 `:378`）——
+//   而两壳的 `children`（`:57-83` / `:88-122`）、`ROLE_HOME`（`:192`）、`landingFor`（`:197`）、
+//   两条守卫（`:241-299` / `:329-334`）**全都在这条线之前** ⇒ 往里插**任何**一行，它们集体漂移。
+//   本仓的既有手法就是「新增行落在最大被引行**之后**」（R3 §5-Z (10) 起，本文件已用过三次）。
+//
+// ⚠️ **父子挂接靠 `name`** ⇒ 上面两个父记录各**同行**加了一个 `name`（`:55` / `:86`，净零行数）。
+//   为什么非得这样：`addRoute` 的第一个参数**只认 name**（不认 path）。
+//   为什么不用「顶栏入口指去别处」绕开：那样「通知」就不在两个壳里 —— 顶栏与页面分家，正是最坏的结果。
+//
+// ⚠️ **改成 redirect 而不是删记录**：全仓**没有 catch-all**（见 `:208-210` 那条 R4 口径）⇒
+//   删记录 = 手敲 `/customer/notify`、旧书签、浏览器历史一律**白屏**
+//   （就是 R4 对 `/shoppingCart` / `/goodsSelect` 的同一条理由，此处第四次适用）。
+//
+// ⚠️ `redirect` 写成**带 query 的字符串**（`'/customer/msg?tab=notify'`）：vue-router 会解析它
+//   ⇒ 落点是「消息中心的**通知 tab**」，不是「消息中心的默认 tab」—— 那正是本笔要治的错。
+//   ⚠️ 两条记录**不再写 `meta`**：`tab` / `layout` 由落点记录（`:60` / `:91`）的 `meta` 决定。
+//   合并后「通知」**不再是一个独立的高亮键**（`nav.js` 里那项已删）⇒ 写一个没有消费者的
+//   `meta.tab: 'notify'` 就是**死配置**（判据同 R6 删 `.empty-page` 那条：全仓 0 使用）。
+//   ⚠️ 顺带作废的一条：旧文里「`meta.tab: 'notify'` 与 `nav.js` 那一项逐字相同」**已不成立**
+//   —— 那是口径 A 下的契约，口径 B 下那个键连同它那一项一起没了。**别照旧文恢复**。
+//
+// ⚠️ `views/NotifyInbox.vue` 的**懒加载已撤**（原为 `const NotifyInbox = () => import(...)`）：
+//   它现在由 `MessageCenter.vue` **静态**引入（`ChatRoom` 亦然），而 `MessageCenter` 由本文件
+//   顶部 `:15` 静态引入 ⇒ 这一页今天随主包一起下。**没有**在顶部新加 import 行 ⇒ 行号零漂移。
+
+router.addRoute('customer', { path: 'notify', redirect: '/customer/msg?tab=notify' })
+router.addRoute('merchant', { path: 'notify', redirect: '/merchant/msg?tab=notify' })

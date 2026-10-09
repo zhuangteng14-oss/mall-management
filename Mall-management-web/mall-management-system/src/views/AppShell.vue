@@ -4,11 +4,11 @@
       <div class="nav-left">
         <router-link v-for="item in navTop.left" :key="item.tab" :to="item.to" class="nav-btn"
                      :class="{ active: route.meta.tab === item.tab }">{{ item.label }}
-          <span v-if="item.badge === 'unread' && unreadCount > 0" class="nav-red-dot"></span></router-link>
+          <span v-if="dotCount(item.badge) > 0" class="nav-red-dot"></span></router-link>
       </div>
       <!-- ── 顶栏搜索框（用户 2026-10-08 第 1 条）：顶栏只留一行 = 商城主页 | 搜索框 | 账号。
            形态照 `ProductPage.vue` 的顶栏搜索（用户：「参考商品详情页的顶栏结构，那个是对的」）；落点 = `${base}/search?kw=`,
-           与 `handlePendingSearch`（本文件 `:165`）同路径、同 query 键。⚠️ 匿名也渲染（搜索页 `meta.public`）；空串由 `required` 挡。 -->
+           与 `handlePendingSearch`（本文件 `:201`）同路径、同 query 键。⚠️ 匿名也渲染（搜索页 `meta.public`）；空串由 `required` 挡。 -->
       <form class="nav-search" @submit.prevent="router.push({ path: `${base}/search`, query: { kw: $event.target.kw.value.trim() } })">
         <input name="kw" type="text" class="search-input" placeholder="搜索商品、品牌、分类" required />
         <button type="submit" class="search-btn">搜索</button>
@@ -22,7 +22,7 @@
           :class="{ active: route.meta.tab === item.tab }"
         >
           {{ item.label }}
-          <span v-if="item.badge === 'unread' && unreadCount > 0" class="nav-red-dot"></span>
+          <span v-if="dotCount(item.badge) > 0" class="nav-red-dot"></span>
         </router-link>
       </div>
     </div>
@@ -113,6 +113,10 @@ const layoutClass = computed(() => route.meta.layout || 'page')
 
 // 未读消息数量（用于顶部红点）
 const unreadCount = ref(0)
+// 未读**系统通知**数量（I2，2026-10-09）—— 与消息那条是**两条独立的链**：不同的表、不同的端点、不同的清点时机；
+//    ⚠️ **两条链各算各的**（合并成一个**源**得先有后端的「未读合计」端点，方案 §七 未决 5 的裁定），但 ⚠️ **顶栏那一个点
+//    是两笔之和**（2026-10-09 入口合并）—— 相加在 `dotCount` 里、不在本变量，清点也仍分两笔（见下方 `watch`）。
+const notifyUnreadCount = ref(0)
 let unreadPollingTimer = null
 
 /** 当前用户 —— ⚠️ **`role` prop 唯一的用武之地，且两壳原本的降级链顺序是「有意相反」的**：
@@ -150,12 +154,44 @@ const fetchUnreadCount = async () => {
   }
 }
 
-// 进入消息页则立即清红点（路由化后改看路由 —— 壳里已无 `curPage`）。
-// ⚠️ 判据与路由化前 `curPage === 'msg'` **完全一致**：只认**壳的**消息页（`/customer/msg` / `/merchant/msg`）。
-//    ⚠️ A5（2026-10-07）后本条**只剩一种地址**：用户中心那条「消息」子页（`/…/user/chat`）已改 `redirect` → `/…/msg`（`router/index.js`）⇒ 旧深层链接也会落到本判据上、红点照样清。
+// 获取未读系统通知数量（I2）—— 与上面 `fetchUnreadCount` **逐条对应**，只差端点与两个参数名。
+// ⚠️ 同样**第一句就判 `isLoggedIn()`**（理由见上一条的 ⚠️：点退出只清 `username` / `role`、
+//    **不清** `customerid` ⇒ 残留 id 会让匿名请求打到受保护端点 ⇒ 401 ⇒ 401 出口把公开页也踢走）。
+// ⚠️ 参数名是 `toId` / `toType`（**不是**消息域的 `currentId` / `currentType`）—— 两个域各叫各的，
+//    别顺手「统一」：那是后端两个 Controller 的既定入参名（`NotificationController` ⇄ `MessageController`）。
+const fetchNotifyUnread = async () => {
+  const user = isLoggedIn() ? getCurrentUser() : null
+  if (!user) return
+  const params = new URLSearchParams()
+  params.append('toId', user.id)
+  // ⚠️ `getCurrentUser().type` 的取值域（`'customer'` / `'merchant'`）**恰好**与后端 `ToType` 一致
+  //    —— 两者同源于 `message.from_type` 那套英文（后端 `NotificationService.TO_TYPE_*`）⇒ 可直接透传，
+  //    不需要任何映射。这条巧合**写下来**：哪天 `message` 的英文改了口径，这里是第二处要跟着改的地方。
+  params.append('toType', user.type)
+  try {
+    const res = await http.post(endpoints.notification.unreadCount, params.toString())
+    const data = await res.json()
+    if (data.success) notifyUnreadCount.value = data.unread || 0
+  } catch (err) {
+    handleApiError(err, '获取未读通知数失败')
+  }
+}
+
+/** 顶栏项的未读数 —— `item.badge` 的**唯一**解释处（模板里两处红点条件都走它）；认不出的 `badge`（含 `undefined`）一律 `0`。
+ *  ⚠️ **2026-10-09 入口合并后 `'unread'` 是两笔的合计**（未读消息 + 未读通知）、`'notify'` 那支**已删** —— 顶栏只剩一个「消息」项（`nav.js` 有墓碑），红点必须两笔都带（详见 `slot-registry.md §十六`）。
+ *  ⚠️ 合并的**只是这一个点**：两笔计数与两支 5s 轮询（`fetchUnreadCount` / `fetchNotifyUnread`）**仍各走各的**；匿名态 `ANON_RIGHT` 不带 `badge` ⇒ 天然无红点、不必为「未登录」另写分支（`navFor` 只换表、不换壳）。 */
+const dotCount = (badge) => (badge === 'unread' ? unreadCount.value + notifyUnreadCount.value : 0)
+
+// 进入消息中心则立即清红点（路由化后改看路由 —— 壳里已无 `curPage`）。判据与路由化前 `curPage === 'msg'` 一致：只认**壳的** `/customer/msg`
+//    （⚠️ **2026-10-09 合并入口**后同一地址下**多了两个 tab**（`?tab=notify`）⇒ 清哪一笔要跟 tab 走、`route.path` 在此**不足**。）
+//    ⚠️ A5（2026-10-07）后本条**只剩一种地址**：`/…/user/chat` 已改 `redirect` → `/…/msg`（`router/index.js`）⇒ 旧深层链接也会落到本判据上、红点照样清。
 const MSG_PATH = `${props.base}/msg`
-watch(() => route.path, (p) => {
-  if (p === MSG_PATH) unreadCount.value = 0
+// ⚠️ 两个 tab **各清自己那一笔**（顶栏红点是**合计**，但「读没读」是两件事）：会话 tab 清 `unreadCount`、通知 tab 清 `notifyUnreadCount`
+//    ⇒ 合计红点随两个 tab 被逐个访问而递减（有意）。⚠️ 原 `NOTIFY_PATH` 常量**已删**（那页已 redirect 到 `…/msg?tab=notify` ⇒ `route.path` 永远不是它、留着即死分支）。
+const isNotifyTab = (t) => t === 'notify' || (Array.isArray(t) && t[0] === 'notify')   // ⚠️ `?tab=a&tab=b` 是**数组**（非 `'notify'` 一律当会话，与 `MessageCenter` 同口径）
+watch(() => [route.path, route.query.tab], ([p, t]) => {
+  if (p !== MSG_PATH) return
+  isNotifyTab(t) ? (notifyUnreadCount.value = 0) : (unreadCount.value = 0)
 })
 
 // 跨页待搜索关键词（由商品详情页的搜索框写入：`ProductPage.vue:380` 写、`:382` 推回壳）
@@ -170,9 +206,16 @@ const handlePendingSearch = () => {
 
 onMounted(async () => {
   handlePendingSearch()
-  // 启动轮询获取未读消息数
+  // 启动轮询获取未读消息数 / 未读通知数
   await fetchUnreadCount()
-  unreadPollingTimer = setInterval(fetchUnreadCount, 5000)
+  await fetchNotifyUnread()
+  // ⚠️ 两支轮询**共用同一个定时器句柄**（本壳一次进出只挂一次，见上方那条「不重挂」的说明）
+  //    ⇒ 卸载时一次 `clearInterval` 两件都停。⚠️ 别图省事再起第二支 5s 轮询：那要多一个句柄变量，
+  //    而 `unreadPollingTimer` 这个名字会变成半真半假（它只停得住其中一支）。
+  unreadPollingTimer = setInterval(() => {
+    fetchUnreadCount()
+    fetchNotifyUnread()
+  }, 5000)
 })
 
 onUnmounted(() => {
@@ -223,7 +266,7 @@ height: 60px;
    「没有壳」的形态，而本壳的设计哲学是「壳稳定、内容切换」⇒ 加 `sticky` 让滚动时吸顶。
    ⚠️ **不采乙案**（`.content { min-height:0; overflow-y:auto }`）：嵌套滚动容器 +
    百分比高度 + `absolute` 参照物，回归面大，且滚动行为与稿不一致。
-   ⚠️ `z-index:10` 高于 `.home-container` 的 `1`（**`:317`**，`position:relative; top:0` —— ⚠️ **裁决 ③（用户 2026-10-08，「一指错就是错」）：已改号** —— 本节原文是裸 `:293`，而 293 行现行内容是 `.nav-red-dot` 的 `background`（不是 `.home-container`）⇒ 改指到 `z-index:1` 的现行行 `:317`（块 `AppShell.vue:308-318`）；「`position:absolute; top:60px`」那半句同批被第 1 条改掉，值见同块）——
+   ⚠️ `z-index:10` 高于 `.home-container` 的 `1`（**`:360`**，`position:relative; top:0` —— ⚠️ **裁决 ③（用户 2026-10-08，「一指错就是错」）：已改号** —— 本节原文是裸 `:293`，而 293 行现行内容是 `.nav-red-dot` 的 `background`（不是 `.home-container`）⇒ 改指到 `z-index:1` 的现行行 `:360`（块 `AppShell.vue:351-361`）；「`position:absolute; top:60px`」那半句同批被第 1 条改掉，值见同块）—— ⚠️ **I2 重定基（2026-10-09）**：本文件因 I2 三端前端插了 43 行，上面两个号随之后移（行号 `317`→`360`、块 `308-318`→`351-361`）——
    两者不重叠（`.home-container` 自 `top:60px` 起），改后仍不重叠（它现在从 `.content` 的 y=60 起算，仍不与顶栏的 0–60 带重叠），只保证滚动时顶栏在上。 */
 flex: none;
 position: sticky;
@@ -390,7 +433,7 @@ padding: var(--s7) var(--s5) var(--s8);
       另议（登记于台账本批条）。 */
 .nav-search {
   flex: 1 1 auto;
-  min-width: 88px;   /* ⚠️ 同上（用户 2026-10-08 第 2 条）：`min-width:auto` = 输入框的默认固有宽（≈170px，`size` 默认 20 字符）⇒ 顶栏挤到 640 以下时**本框不肯再缩**、改由整条顶栏溢出视口（`_dbg9` 实测 640 溢 25 → 400 溢 265）。但**不能补 `0`**：`0` 允许盒子缩到**比自身内容还窄**，盒内那枚「搜索」按钮就会**溢出到盒外压住右侧「消息」**（`_dbg9` 实测 520 宽时按钮右沿越出表单 32px、与「消息」交叠 8px；480/400 时交叠 32px —— 那正是用户说的「盖过」的极端形态）。88px = 表单内边距 18 + 按钮 66 + 一点输入框宽；代价是视口 <约 535px 时改为整条顶栏横向溢出（见本文件 :226 那条不可缩/不换行的口径，此宽度超出页面设计范围）。 */
+  min-width: 88px;   /* ⚠️ 同上（用户 2026-10-08 第 2 条）：`min-width:auto` = 输入框的默认固有宽（≈170px，`size` 默认 20 字符）⇒ 顶栏挤到 640 以下时**本框不肯再缩**、改由整条顶栏溢出视口（`_dbg9` 实测 640 溢 25 → 400 溢 265）。但**不能补 `0`**：`0` 允许盒子缩到**比自身内容还窄**，盒内那枚「搜索」按钮就会**溢出到盒外压住右侧「消息」**（`_dbg9` 实测 520 宽时按钮右沿越出表单 32px、与「消息」交叠 8px；480/400 时交叠 32px —— 那正是用户说的「盖过」的极端形态）。88px = 表单内边距 18 + 按钮 66 + 一点输入框宽；代价是视口 <约 535px 时改为整条顶栏横向溢出（见本文件 :326 那条「不许缩、不许换行」的口径，此宽度超出页面设计范围）。⚠️ **I2（2026-10-09）订正**：原文写 :226 —— 那是个**陈旧错址**（按 I2 的 +43 重定基也只是挪到 :269，那儿是 `.home-container` 的 `z-index` 注释，与不可缩无关）；口径正文实测在 :326（`AppShell.vue` 的 `.nav-right` 那条「修法 = 两头不许缩、不许换行」），同款另有一句在 :308。 */
   max-width: 420px;
   margin: 0 var(--s5);
   display: flex;

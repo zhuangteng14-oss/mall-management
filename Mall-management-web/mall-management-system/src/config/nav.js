@@ -7,7 +7,10 @@
 //              在**所有**子路由上都高亮（R1 已在 `router/index.js` 的注释里记过同一条）。
 //              搜索页**故意不设** `meta.tab` ⇒ 停在搜索时所有项都不高亮（与两壳路由化前一致）。
 //   `to`    —— `<router-link>` 的目标。
-//   `badge` —— 可选；`'unread'` = 该项右侧显示未读红点（两壳都挂在「消息」项）。
+//   `badge` —— 可选；**未读红点的数据源选择器**（I2 起**曾**有两个取值，2026-10-09）：
+//              `'unread'` = 未读**消息 + 系统通知**的合计（⚠️ 2026-10-09 两入口合并后只剩它 —— 见下条）；
+//              `'notify'` **随「通知」项一并退役**（本文件已无用户，`AppShell.vue` 的 `dotCount` 也删了那支）。
+//              它是键，不是显示开关 —— 真正判「要不要画点」的是 `AppShell.vue` 的 `dotCount(badge)`；两壳各 **1 项**。
 //
 // ⚠️ 两套顶栏表（`CUSTOMER_NAV` / `MERCHANT_NAV`）的差异**只有两处**：左项「商城主页」的 `to`（各指自己的壳 —— 客户 `/customer`、
 //    商家 `/merchant`），以及右起第 2 项（客户「购物车」⇄ 商家「订单中心」）——
@@ -21,6 +24,10 @@ export const CUSTOMER_NAV = {
   ],
   right: [
     { label: '消息', tab: 'msg', to: '/customer/msg', badge: 'unread' },
+    // ⚠️ I2（2026-10-09）：**系统通知**在顶栏**曾是**独立一项 —— `{ label:'通知', tab:'notify',
+    //    to:'/customer/notify', badge:'notify' }`，当笔的口径是「通知 vs 消息入口必须分开」。
+    //    ⚠️ **同日晚些时候该口径更新：两个入口合并**（用户裁决）⇒ 上面那项**已删**，本 4 行是**墓碑**、不是空白
+    //    （刻意**净零行数**：本文件被按行号引 **17 处**，本行**之后**的 **7 处**（`:30` / `:31` / `:32-53` / `:61` / `:63`×2）删一行即集体漂移）。
     { label: '购物车', tab: 'cart', to: '/customer/cart' },
     { label: '用户中心', tab: 'user', to: '/customer/user' }
   ]
@@ -32,6 +39,9 @@ export const MERCHANT_NAV = {
   ],
   right: [
     { label: '消息', tab: 'msg', to: '/merchant/msg', badge: 'unread' },
+    // ⚠️ I2（2026-10-09）：同上（客户侧那条墓碑说明的理由逐字适用）—— 商家端的「通知」项**已删**
+    //    （入口合并进「消息」的内页 tab）；⚠️ 同款**净零行数**（本行**之后**仍有行号引用 `:32-53` / `:61` / `:63`×2 ⇒ 删行即漂移）。
+    //    ⚠️ 两条旧 URL（`/customer/notify` / `/merchant/notify`）**没死**：`router/index.js` 改成 redirect 落到 `…/msg?tab=notify`。
     { label: '订单中心', tab: 'order', to: '/merchant/order' },
     { label: '用户中心', tab: 'user', to: '/merchant/user' }
   ]

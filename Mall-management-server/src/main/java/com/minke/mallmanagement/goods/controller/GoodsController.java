@@ -1,7 +1,10 @@
 package com.minke.mallmanagement.goods.controller;
 
+import com.minke.mallmanagement.admin.AuditActions;
+import com.minke.mallmanagement.admin.service.AuditService;
 import com.minke.mallmanagement.goods.service.GoodsService;
 import com.minke.mallmanagement.goods.service.GoodsTypeCacheService;
+import com.minke.mallmanagement.shared.web.AuthSession;
 import com.minke.mallmanagement.shared.web.IdentityGuard;
 import com.minke.mallmanagement.shared.web.Result;
 import jakarta.servlet.http.HttpServletRequest;
@@ -12,6 +15,7 @@ import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
+import java.util.List;
 import java.util.Map;
 
 
@@ -31,11 +35,12 @@ import java.util.Map;
  *
  * <p>⚠️ <b>本类不再持有 {@code JdbcTemplate} / {@code GoodsCacheService} / {@code app.upload-dir}</b>：
  * 8 条内联 SQL 进了 {@code GoodsDao}，缓存失效进 {@code GoodsService}，上传目录与落盘也在那里。
- * 剩下的两个协作者各司其职：
+ * 剩下的三个协作者各司其职：
  * <ul>
  *   <li>{@link GoodsService} —— 8 个端点的业务入口；</li>
  *   <li>{@link GoodsTypeCacheService} —— **只服务 {@code goodstype} 一个端点**，
  *       因为它的 GET/POST 分支判定按裁决留在本类（见 {@link #goodstype}）。</li>
+ *   <li>{@link AuditService} —— **C3 批 A 增**：审计写入，只服务 {@code goodsUp} 一个端点（「横切所有写操作」的样板挂钩，其余 15 个写端点随各自那笔挂，见 {@code docs/agent/c3-modules.md} §11）。</li>
  * </ul>
  *
  * <h2>【响应体：8 个商品端点已换成 {@link Result}；{@code goodstype} 例外】</h2>
@@ -64,6 +69,9 @@ public class GoodsController {
 
     @Autowired
     private GoodsTypeCacheService goodsTypeCacheService;
+
+    @Autowired
+    private AuditService auditService;
 
     //这是一个接口（用于提供和更新上架商品的可选类型）
     // ⚠️ 本方法是全类**唯一**没有随三层重构下沉的方法 —— 裁决③：GET/POST 的分支判定权
@@ -199,7 +207,25 @@ public class GoodsController {
         if (!IdentityGuard.requireSelfOrAdmin(request, MerchantId)) {
             return IdentityGuard.forbidden();
         }
-        return ResponseEntity.ok(Result.of(goodsService.goodsUp(MerchantId, GoodName, Price, GoodType, ProductCode, file)));
+        // ═══ C3 批 A：审计的**样板挂钩**（其余 15 个写端点照这个形状挂）═══
+        // 四步：改前快照 → 业务 → 判成功 → 改后快照 + 记账。
+        // （1）改前快照：必须在 UPDATE **之前**取；谓词与 goodsDao.updateGoods 的 WHERE 逐字相同。
+        List<Map<String, Object>> before = goodsService.snapshotGoodsForAudit(MerchantId, ProductCode);
+        // （2）业务。goodsUp 自带 @Transactional —— 它返回时事务已提交，「改后」读得到新值。
+        Map<String, Object> result = goodsService.goodsUp(MerchantId, GoodName, Price, GoodType, ProductCode, file);
+        // （3）**只有 success=true 才记**：图片为空/落盘失败两条早退路径一行未改库，无「改」可记。
+        if (Boolean.TRUE.equals(result.get("success"))) {
+            // （4）改后快照 + 记账。⚠️ 本类**无事务** ⇒ 记账是一条独立的自动提交 INSERT：
+            //     业务若是回滚的（不走到这里），审计不会留下一条「其实没发生」的行；
+            //     审计自身失败也只记 ERROR 日志（AUDIT），**不会**把成功翻成 500。见 AuditService。
+            // ⚠️ targetType 字面量 "goods" 必须与 AuditActions.GOODS_UPDATE 的点号**前段**一致
+            //    （tag 口径 = `<TargetType>.<动作>`）；TargetId 用 `MerchantId:ProductCode`
+            //    而不是自增 Id —— 审计表跨重导保留，而 goods.Id 会随全量重导变。
+            List<Map<String, Object>> after = goodsService.snapshotGoodsForAudit(MerchantId, ProductCode);
+            auditService.record(AuthSession.identify(request), AuditActions.GOODS_UPDATE, "goods",
+                    MerchantId + ":" + ProductCode, before, after);
+        }
+        return ResponseEntity.ok(Result.of(result));
     }
 
     // 这是一个接口（根据商家ID和商品名称，获取所有不同的 ProductCode 型号列表）

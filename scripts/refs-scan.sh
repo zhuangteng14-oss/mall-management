@@ -27,6 +27,9 @@
 # 用法：
 #   bash scripts/refs-scan.sh                       # → scripts/refs-after.txt
 #   bash scripts/refs-scan.sh scripts/refs-before.txt
+#   ⚠️ Windows / Git Bash：产物路径**优先传相对路径**（上面两例即是）。若非要传绝对
+#      路径，用 POSIX 形式 `/c/...`；**别传 `C:/...`** —— MSYS 会在脚本拿到它之前就把它
+#      当「路径列表」拆坏（实测变成 `C;C:\Program Files\Git\Users\...`），脚本无力回天。
 #
 # 已知边界（**这是漂移探测器，不是语义校验器**）：
 #   · 它只看「token 文本有没有变、引用所在行有没有变」；
@@ -40,14 +43,32 @@ set -euo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$(cd "$HERE/.." && pwd)"
 OUT="${1:-$HERE/refs-after.txt}"
-case "$OUT" in /*) ;; *) OUT="$PWD/$OUT" ;; esac
+case "$OUT" in
+  /*)              ;;   # POSIX 绝对：Git Bash 的 `/c/...`、Linux 的 `/home/...`
+  [A-Za-z]:[\\/]*) ;;   # 已是 Windows 盘符路径（`C:/...` 或 `C:\...`）
+  *)               OUT="$PWD/$OUT" ;;   # 相对 ⇒ 基于当前目录
+esac
 
-ROOT="$ROOT" OUT="$OUT" node --input-type=module - <<'NODEEOF'
+# ⚠️ **产物路径不交给 node**（2026-10-08 修的缺陷）：本仓常在 **Git Bash + 原生 Windows
+#    node** 下跑，而 node 收到 POSIX 绝对路径（`/c/Users/...`）会把它解析成**当前盘根**下
+#    的 `\c\Users\...` ⇒ `writeFileSync` ENOENT（实测报错路径形如
+#    `C:\...\期末项目\C;C:\Program Files\Git\Users\...`）。
+#    ⇒ 修法：**cd 进产物目录，只把裸文件名交给 node**，由它自己用 cwd 解析（node 侧那行
+#      是 `path.resolve(process.env.OUT)`）。这样 Git Bash 与 Linux/CI 行为一致，
+#      也不需要 `cygpath` 这个只存在于 MSYS 的外部命令。
+OUTDIR="$(dirname "$OUT")"
+OUTNAME="$(basename "$OUT")"
+mkdir -p "$OUTDIR"
+cd "$OUTDIR"
+
+ROOT="$ROOT" OUT="$OUTNAME" node --input-type=module - <<'NODEEOF'
 import fs from 'node:fs'
 import path from 'node:path'
 
 const ROOT = process.env.ROOT
-const OUT  = process.env.OUT
+// 壳层只给**裸文件名**（并已 cd 到产物目录）⇒ 这里补回绝对路径。见脚本头部那条说明：
+// Git Bash 下把 `/c/...` 直接交给原生 node 会落到「当前盘根」下写不进去（ENOENT）。
+const OUT  = path.resolve(process.env.OUT)
 
 // ── 扫描根（相对 ROOT；目录不存在就跳过）────────────────────────────────────
 const ROOTS = [

@@ -1,0 +1,597 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>C3 admin 配色预览 · 丁</title>
+<link rel="stylesheet" href="../../../Mall-management-web/mall-management-system/src/assets/fonts/noto.css" />
+<link rel="stylesheet" href="../../../Mall-management-web/mall-management-system/src/assets/fonts/mono.css" />
+<style>
+/* ══════════════════════════════════════════════════════════════════════════
+   C3 管理端 · 暗色主题预览（丁）
+   ⚠️ 本文件是**配色评审用的样式样张**，不是 C3 的实现，也**不是**任何一页设计稿。
+      · 页面里的数字 / 商品名 / 日志行**全是假数据**，只为了让色块有真实密度可看。
+      · 四份预览（甲/乙/丙/丁）的版式**逐字相同**，只有下面这个 `:root` 主题块不同
+        ⇒ 任何观感差异都只来自配色，不来自布局。
+      · 色值来源**逐条注明在页尾「取值出处」**：甲 / 乙 / 丙 三版的底 / 面 / 线 / 主色
+        取自公开设计系统（联网核对过原文），warning / danger / info 与图表色板多为自拟；
+        丁版**整套自拟**（无设计系统可对）。ground / line / hover / zebra 一律由
+        `blend(color, --bg, t)` 自动派生，比例在四版之间一致。
+      · ground 的混合比例是**自适应**的：从 0.15 往下试，取「文字对底仍 ≥4.5」的最大值
+        ⇒ 四版的标签文字对比度都过线，且底色仍看得见。
+      · ECharts 是**就地 vendored** 的 `./echarts.min.js`（5.5.1，1.0 MiB），
+        与本目录其余美化 HTML 一样**零外部引用**，离线可开。
+   ══════════════════════════════════════════════════════════════════════════ */
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+:root {
+  /* ── 主题：运营蓝 · 电商运营风 ── */
+  --theme-name: '丁　运营蓝 · 电商运营风';
+  --theme-note: '深蓝炭底 + 运营橙。唯一带彩度的一版；也是四版里商城青瓷绿唯一还立得住的底 —— 若要让 admin 与商城读起来「同一个产品」，选它。';
+  --bg:#101828; --surface:#172032; --surface-2:#1f2a3f; --surface-3:#27354d;
+  --line:#2b394f; --line-2:#3a4a63;
+  --ink:#e8ecf3; --ink-2:#a3aec2; --ink-3:#7b8aa3;
+  --brand:#2f6fed; --brand-hover:#4a85f5; --brand-active:#2360d6;
+  --brand-soft:#15264a; --brand-ink:#5b90ff;
+  --accent:#ff6a00; --accent-ground:#362522; --accent-line:#6b3719;
+  --success:#22c55e; --success-ground:#133230; --success-line:#154c38;
+  --warning:#f59e0b; --warning-ground:#322c24; --warning-line:#55401f;
+  --danger:#f87171; --danger-ground:#332533; --danger-line:#56333e;
+  --info:#38bdf8; --info-ground:#163147; --info-line:#1c4a66;
+  --icon:#a3aec2; --icon-muted:#6c7a94; --icon-active:#ffffff;
+  --grid-line:#273449; --axis-line:#3a4a63; --axis-label:#7b8aa3;
+  --tip-bg:#1f2a3f; --tip-border:#3a4a63; --tip-ink:#e8ecf3;
+  --sel-bg:#16284b; --zebra:#141c2e; --hover:#13213c;
+  /* 图表色板（10 色） */
+  --c1:#2f6fed; --c2:#ff6a00; --c3:#22c55e; --c4:#f59e0b; --c5:#a855f7; --c6:#06b6d4; --c7:#ef4444; --c8:#84cc16; --c9:#ec4899; --c10:#38bdf8;
+  --cin:#3b7966; --cin-ground:#192d36;
+  --r1:5px; --r2:8px; --r3:10px; --shadow:0 6px 24px rgba(3,8,20,.55);
+  --font: 'Noto Sans SC Variable', 'Microsoft YaHei', system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono Variable', ui-monospace, Consolas, monospace;
+}
+
+html, body { height: 100%; }
+body {
+  background: var(--bg); color: var(--ink);
+  font-family: var(--font); font-size: 13px; line-height: 1.55;
+  -webkit-font-smoothing: antialiased;
+}
+.mono { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+button { font: inherit; cursor: pointer; border: 0; background: none; color: inherit; }
+input, select { font: inherit; color: inherit; }
+
+/* ── 骨架 ─────────────────────────────────────────────────────────────── */
+.app { display: flex; min-height: 100vh; }
+
+/* 侧边栏 */
+.side {
+  width: 216px; flex: none; background: var(--surface);
+  border-right: 1px solid var(--line); display: flex; flex-direction: column;
+  position: sticky; top: 0; height: 100vh;
+}
+.brand {
+  height: 56px; display: flex; align-items: center; gap: 10px;
+  padding: 0 16px; border-bottom: 1px solid var(--line);
+}
+.brand .mk {
+  width: 26px; height: 26px; border-radius: var(--r1); flex: none;
+  background: var(--brand); color: #fff; display: grid; place-items: center;
+  font-size: 12px; font-weight: 600;
+}
+.brand b { font-size: 13px; font-weight: 600; letter-spacing: .01em; }
+.brand span { display: block; font-size: 10px; color: var(--ink-3); letter-spacing: .08em; }
+.nav { flex: 1; overflow: auto; padding: 10px 8px 16px; }
+.grp {
+  font-size: 10px; color: var(--ink-3); letter-spacing: .1em;
+  padding: 14px 8px 6px; text-transform: uppercase;
+}
+.it {
+  display: flex; align-items: center; gap: 9px; height: 32px; padding: 0 9px;
+  border-radius: var(--r1); color: var(--ink-2); cursor: pointer;
+  border: 1px solid transparent; user-select: none;
+}
+.it:hover { background: var(--hover); color: var(--ink); }
+.it .ic { width: 14px; text-align: center; color: var(--icon); flex: none; }
+.it.on {
+  background: var(--sel-bg); color: var(--ink);
+  border-color: var(--brand); font-weight: 500;
+}
+.it.on .ic { color: var(--brand-ink); }
+.it.on::before {
+  content: ''; position: absolute; margin-left: -9px;
+  width: 2px; height: 16px; border-radius: 1px; background: var(--brand);
+}
+.it .cnt {
+  margin-left: auto; font-size: 10px; padding: 0 6px; height: 16px;
+  border-radius: 8px; background: var(--surface-3); color: var(--ink-3);
+  display: grid; place-items: center; font-family: var(--font-mono);
+}
+.side-foot {
+  border-top: 1px solid var(--line); padding: 10px 16px;
+  font-size: 10px; color: var(--ink-3); font-family: var(--font-mono);
+}
+
+/* 主区 */
+.main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.top {
+  height: 56px; flex: none; display: flex; align-items: center; gap: 16px;
+  padding: 0 22px; background: var(--surface); border-bottom: 1px solid var(--line);
+  position: sticky; top: 0; z-index: 5;
+}
+.crumb { color: var(--ink-3); font-size: 12px; }
+.crumb b { color: var(--ink); font-weight: 500; }
+.crumb i { font-style: normal; padding: 0 6px; opacity: .6; }
+.search {
+  margin-left: auto; width: 240px; height: 30px; padding: 0 10px;
+  background: var(--surface-2); border: 1px solid var(--line); border-radius: var(--r1);
+  color: var(--ink); outline: none;
+}
+.search:focus { border-color: var(--brand); background: var(--bg); }
+.ic-btn {
+  width: 30px; height: 30px; border-radius: var(--r1); display: grid; place-items: center;
+  color: var(--icon); border: 1px solid transparent; position: relative;
+}
+.ic-btn:hover { background: var(--hover); color: var(--icon-active); }
+.ic-btn .dot {
+  position: absolute; top: 5px; right: 6px; width: 6px; height: 6px;
+  border-radius: 50%; background: var(--danger);
+}
+.me { display: flex; align-items: center; gap: 8px; padding-left: 14px; border-left: 1px solid var(--line); }
+.me .av {
+  width: 28px; height: 28px; border-radius: 50%; flex: none;
+  background: var(--brand-soft); color: var(--brand-ink);
+  display: grid; place-items: center; font-size: 11px; font-weight: 600;
+}
+.me b { font-size: 12px; font-weight: 500; display: block; }
+.me span { font-size: 10px; color: var(--ink-3); }
+
+.body { padding: 22px; display: flex; flex-direction: column; gap: 16px; }
+.h1 { display: flex; align-items: flex-end; gap: 12px; }
+.h1 h1 { font-size: 19px; font-weight: 600; letter-spacing: -.01em; }
+.h1 p { color: var(--ink-3); font-size: 12px; }
+.h1 .sp { margin-left: auto; display: flex; gap: 8px; }
+
+/* 提示条 */
+.banner {
+  display: flex; align-items: center; gap: 9px; padding: 9px 12px;
+  background: var(--warning-ground); border: 1px solid var(--warning-line);
+  color: var(--warning); border-radius: var(--r2); font-size: 12px;
+}
+.banner b { color: var(--ink); font-weight: 500; }
+
+/* 卡 */
+.card {
+  background: var(--surface); border: 1px solid var(--line);
+  border-radius: var(--r3); overflow: hidden;
+}
+.card > h2 {
+  font-size: 13px; font-weight: 600; padding: 13px 16px;
+  border-bottom: 1px solid var(--line); display: flex; align-items: center; gap: 10px;
+}
+.card > h2 .sub { font-weight: 400; color: var(--ink-3); font-size: 11px; }
+.card > h2 .sp { margin-left: auto; display: flex; gap: 8px; align-items: center; }
+.pad { padding: 16px; }
+
+/* KPI */
+.kpis { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
+.kpi {
+  background: var(--surface); border: 1px solid var(--line);
+  border-radius: var(--r3); padding: 13px 14px;
+}
+.kpi .k { font-size: 11px; color: var(--ink-3); display: flex; align-items: center; gap: 6px; }
+.kpi .v { font-size: 24px; font-weight: 600; letter-spacing: -.02em; margin-top: 4px; }
+.kpi .d { font-size: 11px; color: var(--ink-3); margin-top: 2px; }
+.up { color: var(--success); } .down { color: var(--danger); }
+
+/* 表格 */
+.tw { overflow: auto; }
+table { width: 100%; border-collapse: collapse; font-size: 12px; }
+thead th {
+  text-align: left; font-weight: 500; color: var(--ink-3); font-size: 11px;
+  letter-spacing: .04em; padding: 9px 14px; background: var(--surface-2);
+  border-bottom: 1px solid var(--line); white-space: nowrap;
+}
+tbody td { padding: 10px 14px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+tbody tr:nth-child(even) { background: var(--zebra); }
+tbody tr:hover { background: var(--hover); }
+tbody tr:last-child td { border-bottom: 0; }
+td.n { text-align: right; font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+td.id { font-family: var(--font-mono); color: var(--ink-2); }
+.lk { color: var(--brand-ink); cursor: pointer; }
+.lk:hover { text-decoration: underline; }
+
+/* 状态标签 */
+.tag {
+  display: inline-flex; align-items: center; gap: 5px; height: 20px; padding: 0 8px;
+  border-radius: 10px; font-size: 11px; border: 1px solid;
+}
+.tag::before { content: ''; width: 5px; height: 5px; border-radius: 50%; background: currentColor; }
+.tag.ok  { color: var(--success); background: var(--success-ground); border-color: var(--success-line); }
+.tag.wn  { color: var(--warning); background: var(--warning-ground); border-color: var(--warning-line); }
+.tag.er  { color: var(--danger);  background: var(--danger-ground);  border-color: var(--danger-line); }
+.tag.inf { color: var(--info);    background: var(--info-ground);    border-color: var(--info-line); }
+.tag.mut { color: var(--ink-3);   background: var(--surface-2);     border-color: var(--line); }
+.tag.mut::before { background: var(--ink-3); }
+
+/* 按钮 */
+.btn {
+  height: 30px; padding: 0 13px; border-radius: var(--r1); font-size: 12px;
+  display: inline-flex; align-items: center; gap: 6px; border: 1px solid transparent;
+  transition: background .12s, border-color .12s;
+}
+.btn.pri { background: var(--brand); color: #fff; border-color: var(--brand); }
+.btn.pri:hover { background: var(--brand-hover); border-color: var(--brand-hover); }
+.btn.pri:active { background: var(--brand-active); }
+.btn.sec { background: var(--surface-2); color: var(--ink); border-color: var(--line-2); }
+.btn.sec:hover { background: var(--surface-3); border-color: var(--ink-3); }
+.btn.gst { color: var(--ink-2); }
+.btn.gst:hover { background: var(--hover); color: var(--ink); }
+.btn.dan { background: var(--danger); color: #fff; border-color: var(--danger); }
+.btn.dan:hover { filter: brightness(1.12); }
+.btn.out { color: var(--danger); border-color: var(--danger-line); background: var(--danger-ground); }
+.btn[disabled] { opacity: .45; cursor: not-allowed; }
+.btn.sm { height: 24px; padding: 0 9px; font-size: 11px; }
+
+/* 表单 */
+.form { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px 18px; }
+.fld { display: flex; flex-direction: column; gap: 6px; }
+.fld label { font-size: 11px; color: var(--ink-2); }
+.fld label .req { color: var(--danger); }
+.inp, .sel {
+  height: 30px; padding: 0 10px; background: var(--surface-2);
+  border: 1px solid var(--line); border-radius: var(--r1); color: var(--ink); outline: none;
+}
+.inp:focus, .sel:focus { border-color: var(--brand); background: var(--bg); }
+.inp::placeholder { color: var(--ink-3); }
+.hint { font-size: 10px; color: var(--ink-3); }
+.sw { display: flex; align-items: center; gap: 9px; height: 30px; }
+.sw input { appearance: none; width: 34px; height: 18px; border-radius: 9px; flex: none;
+  background: var(--surface-3); border: 1px solid var(--line-2); position: relative; cursor: pointer; }
+.sw input::after { content: ''; position: absolute; top: 1px; left: 1px; width: 14px; height: 14px;
+  border-radius: 50%; background: var(--ink-3); transition: left .14s, background .14s; }
+.sw input:checked { background: var(--brand); border-color: var(--brand); }
+.sw input:checked::after { left: 17px; background: #fff; }
+.sw span { font-size: 12px; color: var(--ink-2); }
+
+/* 色板 */
+.swatches { display: flex; flex-wrap: wrap; gap: 8px; }
+.chip { border: 1px solid var(--line); border-radius: var(--r2); overflow: hidden; width: 92px; }
+.chip .c { height: 40px; }
+.chip .l { padding: 4px 7px; font-size: 9px; color: var(--ink-3); font-family: var(--font-mono);
+  background: var(--surface-2); border-top: 1px solid var(--line); }
+.chip .l b { display: block; color: var(--ink-2); font-weight: 500; font-size: 10px;
+  font-family: var(--font); letter-spacing: .02em; }
+.swrow { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.swc { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--ink-2);
+  padding: 4px 9px; border: 1px solid var(--line); border-radius: 14px; background: var(--surface-2); }
+.swc i { width: 10px; height: 10px; border-radius: 3px; display: block; border: 1px solid var(--line-2); }
+.sect-t { font-size: 11px; color: var(--ink-3); letter-spacing: .06em; margin: 14px 0 8px; }
+.sect-t:first-child { margin-top: 0; }
+.prov { margin: 0; padding-left: 17px; }
+.prov li { font-size: 11px; color: var(--ink-2); margin-bottom: 5px; line-height: 1.6; }
+.prov b { color: var(--ink); font-weight: 500; }
+.prov code { font-family: var(--font-mono); color: var(--ink-3); font-size: 10px;
+  background: var(--surface-2); padding: 1px 4px; border-radius: var(--r1); white-space: nowrap; }
+
+/* 弹窗 */
+.mask {
+  position: fixed; inset: 0; background: rgba(0,0,0,.58); z-index: 50;
+  display: flex; align-items: center; justify-content: center; padding: 24px;
+}
+.mask[hidden] { display: none; }
+.modal {
+  width: 480px; max-width: 100%; background: var(--surface);
+  border: 1px solid var(--line-2); border-radius: var(--r3); box-shadow: var(--shadow);
+}
+.modal h3 { font-size: 14px; font-weight: 600; padding: 15px 18px 0; }
+.modal .mc { padding: 12px 18px 4px; color: var(--ink-2); }
+.modal .mf {
+  display: flex; justify-content: flex-end; gap: 9px;
+  padding: 14px 18px; border-top: 1px solid var(--line); margin-top: 14px;
+}
+.dl { display: grid; grid-template-columns: 90px 1fr; gap: 7px 12px; font-size: 12px; margin-top: 10px; }
+.dl dt { color: var(--ink-3); }
+.dl dd { color: var(--ink); font-family: var(--font-mono); }
+
+/* ── 窄屏兜底 ──────────────────────────────────────────────────────────────
+   index.html 把每份预览塞进 ~686px 的 iframe 里对照看。不兜底的话面包屑 /
+   KPI 标题 / 按钮会竖排断字（686px 实测就是这样，而断言全绿也查不出来）。 */
+.crumb, .me b, .me span, .it, .btn, .tag, .side-foot, .brand b { white-space: nowrap; }
+@media (max-width: 1100px) {
+  .side { width: 172px; }
+  .body { padding: 15px; }
+  .kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .form { grid-template-columns: 1fr; }
+  .search { width: 140px; }
+  .h1 { flex-wrap: wrap; }
+  .h1 p { display: none; }
+}
+#chart { width: 100%; height: 300px; }
+.foot { color: var(--ink-3); font-size: 11px; padding: 4px 0 20px; text-align: center; }
+</style>
+</head>
+<body>
+<div class="app">
+  <aside class="side">
+    <div class="brand">
+      <div class="mk">C3</div>
+      <div><b>商城管理台</b><span>ADMIN CONSOLE</span></div>
+    </div>
+    <nav class="nav">
+      <div class="grp">业务域</div>
+      <div class="it"><span class="ic">◧</span>总览</div>
+      <div class="it"><span class="ic">▤</span>商品管理<span class="cnt">128</span></div>
+      <div class="it"><span class="ic">▦</span>订单管理<span class="cnt">36</span></div>
+      <div class="it"><span class="ic">◍</span>商家管理</div>
+      <div class="it"><span class="ic">◎</span>用户管理</div>
+      <div class="grp">风控域</div>
+      <div class="it"><span class="ic">⚡</span>攻击模拟器</div>
+      <div class="it on"><span class="ic">◔</span>指标监控</div>
+      <div class="it"><span class="ic">↻</span>状态流转</div>
+      <div class="it"><span class="ic">≣</span>实时日志<span class="cnt">LIVE</span></div>
+      <div class="it"><span class="ic">⚿</span>权限管理（审计）</div>
+    </nav>
+    <div class="side-foot">v0.1.0-preview · 丁 案</div>
+  </aside>
+
+  <div class="main">
+    <header class="top">
+      <div class="crumb">风控域<i>/</i><b>指标监控</b></div>
+      <input class="search" placeholder="搜索订单号 / 商品 / 用户…" />
+      <button class="ic-btn">◔<span class="dot"></span></button>
+      <button class="ic-btn">⚙</button>
+      <div class="me">
+        <div class="av">管</div>
+        <div><b>admin</b><span>超级管理员</span></div>
+      </div>
+    </header>
+
+    <div class="body">
+      <!-- ⚠️ 文字必须包在一个 <span> 里：`.banner` 是 flex，裸文本节点与行内 <b>
+           会各自变成 flex item、被 `gap` 摊开 ⇒ 正文被断成一段段（上一版就这样）。 -->
+      <div class="banner">⚠️<span><b>样式样张</b>　本页所有数字 / 商品名 / 日志行<b>均为假数据</b>，只为让色块有真实密度可看；点下方「启动模拟」可看弹窗。</span></div>
+
+      <div class="h1">
+        <h1>指标监控</h1>
+        <p>最近 24 小时 · 进程内存环（30 分钟窗口 + 24h 聚合）</p>
+        <div class="sp">
+          <button class="btn sec">近 1 小时</button>
+          <button class="btn sec">近 24 小时</button>
+          <button class="btn gst">导出 CSV</button>
+        </div>
+      </div>
+
+      <div class="kpis">
+        <div class="kpi"><div class="k">◔ QPS 峰值</div><div class="v mono">1,284</div><div class="d"><span class="up">▲ 8.2%</span> 较昨日</div></div>
+        <div class="kpi"><div class="k">◍ 缓存命中率</div><div class="v mono">96.4<span style="font-size:14px">%</span></div><div class="d"><span class="down">▼ 0.6%</span> 较昨日</div></div>
+        <div class="kpi"><div class="k">⚿ 锁等待 P99</div><div class="v mono">42<span style="font-size:14px">ms</span></div><div class="d"><span class="up">▲ 3ms</span> 较昨日</div></div>
+        <div class="kpi"><div class="k">≣ 异常事件</div><div class="v mono">7</div><div class="d">其中 <span class="down">2</span> 条待处置</div></div>
+      </div>
+
+      <div class="card">
+        <h2>吞吐与锁等待 <span class="sub">QPS / 锁等待 ms / 缓存命中率</span>
+          <span class="sp"><span class="tag ok">采集中</span><button class="btn gst sm">刷新</button></span>
+        </h2>
+        <div class="pad"><div id="chart"></div></div>
+      </div>
+
+      <div class="card">
+        <h2>状态流转记录 <span class="sub">order_state_transition · 最近 6 条</span>
+          <span class="sp"><button class="btn sec sm">筛选</button><button class="btn pri sm">＋ 新建规则</button></span>
+        </h2>
+        <div class="tw">
+          <table>
+            <thead><tr>
+              <th>订单号</th><th>动作</th><th>前态</th><th>后态</th><th>操作人</th><th>状态</th><th>耗时</th><th>发生时间</th>
+            </tr></thead>
+            <tbody>
+              <tr><td class="id">SO20261008-0417</td><td>PAY</td><td class="mono">(0,0,0)</td><td class="mono">(1,0,0)</td><td>admin</td><td><span class="tag ok">成功</span></td><td class="n">18ms</td><td class="mono">10-08 12:41:07</td></tr>
+              <tr><td class="id">SO20261008-0416</td><td>SHIP</td><td class="mono">(1,0,0)</td><td class="mono">(1,1,0)</td><td>M9001</td><td><span class="tag ok">成功</span></td><td class="n">23ms</td><td class="mono">10-08 12:38:52</td></tr>
+              <tr><td class="id">SO20261008-0415</td><td>PAY</td><td class="mono">(0,1,0)</td><td class="mono">(0,1,0)</td><td>system</td><td><span class="tag er">被拒</span></td><td class="n">4ms</td><td class="mono">10-08 12:31:19</td></tr>
+              <tr><td class="id">SO20261008-0414</td><td>CANCEL</td><td class="mono">(1,1,0)</td><td class="mono">(1,1,1)</td><td>C5001</td><td><span class="tag wn">待确认</span></td><td class="n">—</td><td class="mono">10-08 12:22:03</td></tr>
+              <tr><td class="id">SO20261008-0413</td><td>SHIP</td><td class="mono">(1,0,0)</td><td class="mono">(1,0,0)</td><td>M9001</td><td><span class="tag inf">重试中</span></td><td class="n">1.2s</td><td class="mono">10-08 12:14:47</td></tr>
+              <tr><td class="id">SO20261008-0412</td><td>PAY</td><td class="mono">(0,0,0)</td><td class="mono">(1,0,0)</td><td>C5002</td><td><span class="tag ok">成功</span></td><td class="n">21ms</td><td class="mono">10-08 12:09:31</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>攻击模拟器参数 <span class="sub">scenario 触发 · REST / SSE</span></h2>
+        <div class="pad">
+          <div class="form">
+            <div class="fld"><label>并发线程数 <span class="req">*</span></label><input class="inp" value="120" /></div>
+            <div class="fld"><label>持续时长</label><input class="inp" placeholder="秒，默认 60" /></div>
+            <div class="fld"><label>场景</label>
+              <select class="sel">
+                <option>B-2　同键并发写（goodstype）</option>
+                <option>B-1　缓存击穿</option>
+                <option>S4a　非法状态流转</option>
+              </select>
+            </div>
+            <div class="fld"><label>目标端点</label>
+              <select class="sel"><option>/goods/add</option><option>/order/pay</option><option>/order/ship</option></select>
+            </div>
+            <div class="fld"><label>实时输出（SSE）</label>
+              <div class="sw"><input type="checkbox" checked /><span>开启逐条推送</span></div>
+            </div>
+            <div class="fld"><label>失败即中止</label>
+              <div class="sw"><input type="checkbox" /><span>任一门禁翻红就停</span></div>
+            </div>
+          </div>
+          <div style="display:flex; gap:9px; margin-top:18px; align-items:center">
+            <button class="btn pri" onclick="open_()">▶ 启动模拟</button>
+            <button class="btn sec">预演（不落库）</button>
+            <button class="btn out">■ 中止全部</button>
+            <button class="btn gst" disabled>清除历史（无权限）</button>
+            <span class="hint" style="margin-left:auto">上一次运行：10-08 12:22 · exit 0 · 门禁 30/0</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>配色定义 <span class="sub">四版只有这一块不同</span></h2>
+        <div class="pad">
+          <div class="sect-t">图表色板（ECharts color 数组，10 色）</div>
+          <div class="swatches" id="sw-chart"></div>
+          <div class="sect-t">图表辅助色（网格线 / 坐标轴 / 轴标签 / tooltip）</div>
+          <div class="swrow" id="sw-aux"></div>
+          <div class="sect-t">语义色与状态标签</div>
+          <div class="swrow" id="sw-sem"></div>
+          <div class="sect-t">图标色</div>
+          <div class="swrow" id="sw-icon"></div>
+          <div class="sect-t">对照：商城青瓷绿（业务主色）</div>
+          <div class="swrow" id="sw-cin"></div>
+          <div class="sect-t">取值出处（联网核对结果，逐条注明「有据 / 自拟」）</div>
+          <ul class="prov">
+            <li>⚠️ <b>这一版没有设计系统可对</b> —— 不是任何公开主题的复刻，整套（底 / 面 / 线 / 主色 / 橙）<b>全部自拟</b>。</li>
+            <li>自拟的依据是三条：① 底要带彩度，否则商城青瓷绿在暗底上显脏（实测青瓷绿对四版暗底 3.26 / 3.88 / 3.71 / 3.48，<b>丙、丁是同批里较高的</b>）；② 强调色用运营橙 <code>#ff6a00</code>，与商城 <code>--accent</code> 朱砂同属暖色相，语义延续；③ 语义四色明度锁齐（同亮色 token 的既有规矩）。</li>
+            <li>图表 10 色：自拟，按 <code>#101828</code> 逐色验证 ≥3:1。</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="foot">丁　·　页面仅为配色评审样张，非实现、非设计稿</div>
+    </div>
+  </div>
+</div>
+
+<div class="mask" id="mask" hidden>
+  <div class="modal">
+    <h3>确认中止全部运行中的模拟？</h3>
+    <div class="mc">
+      将向 3 个进行中的 scenario 发出中止信号，未落库的样本会被丢弃。此操作会记入审计日志。
+      <dl class="dl">
+        <dt>运行中</dt><dd>B-2 / S4a / B-1</dd>
+        <dt>已产生样本</dt><dd>18,432</dd>
+        <dt>操作人</dt><dd>admin</dd>
+      </dl>
+    </div>
+    <div class="mf">
+      <button class="btn sec" onclick="close_()">取消</button>
+      <button class="btn dan" onclick="close_()">确认中止</button>
+    </div>
+  </div>
+</div>
+
+<script src="./echarts.min.js"></script>
+<script>
+const $ = (s) => document.querySelector(s)
+const cs = getComputedStyle(document.documentElement)
+const V = (n) => cs.getPropertyValue(n).trim()
+function open_() { $('#mask').hidden = false }
+function close_() { $('#mask').hidden = true }
+$('#mask').addEventListener('click', (e) => { if (e.target.id === 'mask') close_() })
+addEventListener('keydown', (e) => { if (e.key === 'Escape') close_() })
+
+// ── 色板渲染（直接把 --c1..--c10 摆出来，避免与 CSS 脱钩）──────────────────
+const NAMES = ['系列 1','系列 2','系列 3','系列 4','系列 5','系列 6','系列 7','系列 8','系列 9','系列 10']
+$('#sw-chart').innerHTML = NAMES.map((n, i) => {
+  const c = V('--c' + (i + 1))
+  return '<div class="chip"><div class="c" style="background:' + c + '"></div>' +
+         '<div class="l"><b>' + n + '</b>' + c + '</div></div>'
+}).join('')
+
+function pills(sel, pairs) {
+  $(sel).innerHTML = pairs.map(([label, v]) =>
+    '<span class="swc"><i style="background:' + v + '"></i>' + label +
+    ' <code class="mono" style="opacity:.65">' + v + '</code></span>').join('')
+}
+pills('#sw-aux', [
+  ['网格线', V('--grid-line')], ['坐标轴', V('--axis-line')], ['轴标签', V('--axis-label')],
+  ['tooltip 底', V('--tip-bg')], ['tooltip 边', V('--tip-border')], ['tooltip 字', V('--tip-ink')],
+])
+pills('#sw-sem', [
+  ['成功', V('--success')], ['警告', V('--warning')], ['危险', V('--danger')],
+  ['信息', V('--info')], ['强调/价格', V('--accent')], ['主色', V('--brand')],
+])
+pills('#sw-icon', [
+  ['默认', V('--icon')], ['弱化', V('--icon-muted')], ['激活', V('--icon-active')],
+  ['主色态', V('--brand-ink')],
+])
+pills('#sw-cin', [['青瓷绿 #3b7966', V('--cin')]])
+
+// ── ECharts ───────────────────────────────────────────────────────────────
+const SERIES = [1,2,3,4,5,6,7,8,9,10].map(i => V('--c' + i))
+const HOURS = Array.from({ length: 24 }, (_, i) => String(i).padStart(2, '0') + ':00')
+const qps  = [212,168,141,120,133,188,312,520,704,842,916,988,1042,1024,1118,1180,1240,1284,1196,1022,864,712,544,388]
+const wait = [8,6,5,4,5,7,12,19,26,31,34,36,38,37,40,41,43,42,39,33,27,21,16,11]
+const hit  = [91,92,92,93,94,94,95,95,96,96,96,97,97,96,96,96,95,96,96,97,97,96,95,94]
+
+const opt = {
+  backgroundColor: 'transparent',
+  // ⚠️ 右轴有两条（命中率 % / 锁等待 ms）⇒ right 留 96px 给 offset 轴；
+  //    legend 挪到**底部**，避免与右上两条轴名打架（上一版就是这么压住的）。
+  grid: { left: 56, right: 96, top: 18, bottom: 52 },
+  textStyle: { fontFamily: "'Noto Sans SC Variable', 'Microsoft YaHei', sans-serif", fontSize: 11 },
+  color: SERIES,
+  tooltip: {
+    trigger: 'axis',
+    backgroundColor: V('--tip-bg'),
+    borderColor: V('--tip-border'),
+    borderWidth: 1,
+    padding: [8, 11],
+    textStyle: { color: V('--tip-ink'), fontSize: 11 },
+    axisPointer: { type: 'line', lineStyle: { color: V('--axis-line'), width: 1, type: 'dashed' } },
+  },
+  legend: {
+    bottom: 0, left: 'center', itemWidth: 10, itemHeight: 10, itemGap: 18,
+    icon: 'roundRect', textStyle: { color: V('--ink-2'), fontSize: 11 },
+  },
+  xAxis: {
+    type: 'category', data: HOURS, boundaryGap: false,
+    axisLine: { lineStyle: { color: V('--axis-line') } },
+    axisTick: { show: false },
+    axisLabel: { color: V('--axis-label'), interval: 3 },
+  },
+  yAxis: [
+    {
+      // ⚠️ 三条轴**一律不写 `name`**：ECharts 把 y 轴名摆在各轴顶端，三条挤在一起会互相
+      //    压成乱码块（上一版就这样，1440 下肉眼可见）。卡头那行已经写了
+      //    「QPS / 锁等待 ms / 缓存命中率」，轴名冗余 ⇒ 去掉，单位并进轴标签。
+      type: 'value',
+      splitLine: { lineStyle: { color: V('--grid-line'), type: 'solid' } },
+      axisLine: { show: false }, axisTick: { show: false },
+      axisLabel: { color: V('--axis-label') },
+    },
+    {
+      type: 'value', min: 80, max: 100,
+      splitLine: { show: false },
+      axisLine: { show: false }, axisTick: { show: false },
+      axisLabel: { color: V('--axis-label'), formatter: '{value}%' },
+    },
+    {
+      // ⚠️ 第三条轴是**必需**的：锁等待只有 4–43ms，挂在 QPS 的 0–1500 轴上等于贴地不可见
+      //    （上一版就那样，一列颜色白给）。给它自己的 0–60 量程，offset 让开 命中率 那条。
+      type: 'value', min: 0, max: 60, position: 'right', offset: 54,
+      splitLine: { show: false },
+      axisLine: { show: false }, axisTick: { show: false },
+      axisLabel: { color: V('--axis-label'), formatter: '{value}ms' },
+    },
+  ],
+  series: [
+    {
+      name: '缓存命中率', type: 'line', yAxisIndex: 1, data: hit, smooth: true, symbol: 'none',
+      lineStyle: { width: 1.5, color: SERIES[8], type: [4, 3] },
+    },
+    {
+      name: '锁等待 P99', type: 'bar', yAxisIndex: 2, data: wait, barMaxWidth: 12,
+      itemStyle: { color: SERIES[5], borderRadius: [2, 2, 0, 0] },
+    },
+    {
+      name: 'QPS', type: 'line', data: qps, smooth: true, symbol: 'none',
+      lineStyle: { width: 2, color: SERIES[0] },
+      areaStyle: {
+        color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
+          { offset: 0, color: SERIES[0] + '55' }, { offset: 1, color: SERIES[0] + '00' },
+        ]),
+      },
+    },
+  ],
+}
+const chart = echarts.init($('#chart'), null, { renderer: 'canvas' })
+chart.setOption(opt)
+addEventListener('resize', () => chart.resize())
+</script>
+</body>
+</html>

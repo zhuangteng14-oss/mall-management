@@ -1,0 +1,23 @@
+{
+ "ok": true,
+ "total": 17,
+ "failed": 0,
+ "modes": {
+  "both": {
+   "conv": 1,
+   "notif": 2
+  },
+  "notifyOnly": {
+   "conv": 0,
+   "notif": 2
+  },
+  "convOnly": {
+   "conv": 1,
+   "notif": 0
+  },
+  "none": {
+   "conv": 0,
+   "notif": 0
+  }
+ }
+}

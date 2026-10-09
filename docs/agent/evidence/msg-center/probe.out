@@ -1,0 +1,19 @@
+OK   ① 顶栏右侧只剩「消息 / 购物车 / 用户中心」（无「通知」项）  → ["消息","购物车","用户中心"]
+OK   ② 页内两个 tab（会话 / 通知），默认停在「会话」  → [{"t":"会话","on":true},{"t":"通知","on":false}]
+OK   ③ 会话 tab = ChatRoom 原样渲染（`.chat-room` 的面板 + 会话条数）  → {"chat":true,"convs":["peer0"]}
+OK   ⑤a 红点：未读会话 1 + 未读通知 2 ⇒ 亮  → true
+OK   ④ 切「通知」后：地址带 tab=notify、通知页渲染、会话页卸下  → {"hash":"#/customer/msg?tab=notify","navs":["消息","购物车","用户中心"],"dot":true,"tabs":[{"t":"会话","on":false},{"t":"通知","on":true}],"chat":false,"notify":true,"nlist":2,"convs":[]}
+OK   ④b 通知列表有行（原有功能不破：mock 的 2 条都在）  → 2
+OK   ⑤b 红点：会话 0 + 通知 2 ⇒ 亮  → true
+OK   ⑤b 红点：会话 1 + 通知 0 ⇒ 亮  → true
+OK   ⑤b 红点：会话 0 + 通知 0 ⇒ 灭  → false
+OK   ⑥ 深链 #/customer/notify ⇒ 改道到 …/msg?tab=notify 且落在通知 tab  → {"hash":"#/customer/msg?tab=notify","tabs":[{"t":"会话","on":false},{"t":"通知","on":true}]}
+OK   ⑥b 深链落地的通知 tab 仍能看到通知行  → 2
+OK   ⑦ 用户中心子路由 /customer/user/chat ⇒ 仍改道 …/msg（会话 tab），不受本轮影响  → {"hash":"#/customer/msg","tabs":[{"t":"会话","on":true},{"t":"通知","on":false}]}
+OK   ⑧ 客户侧无 JS 异常  → []
+OK   ⑨ 商家壳顶栏 = 「消息 / 订单中心 / 用户中心」（「通知」项同样已删）  → ["消息","订单中心","用户中心"]
+OK   ⑩ 商家侧两个 tab 在，默认「会话」  → [{"t":"会话","on":true},{"t":"通知","on":false}]
+OK   ⑪ 商家深链 #/merchant/notify ⇒ …/msg?tab=notify 且落通知 tab  → {"hash":"#/merchant/msg?tab=notify","tabs":[{"t":"会话","on":false},{"t":"通知","on":true}]}
+OK   ⑫ 商家侧无 JS 异常  → []
+
+消息中心（消息+通知 入口合并）: 17 项 / 0 失败

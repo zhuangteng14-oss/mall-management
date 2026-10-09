@@ -101,9 +101,9 @@ public class UserController {
     ) {
         int role = userService.loginSelect(username, password);
 
-        // ⚠️ 只有认证成功（1 = 客户 / 2 = 商家）才继续；role = 0 时下面两步都不执行，
+        // ⚠️ 只有认证成功（1 = 客户 / 2 = 商家 / 3 = 管理员）才继续；role = 0 时下面两步都不执行，
         //    也就**不会**有会话被建出来（这正是形参取 HttpServletRequest 而非 HttpSession 的理由）。
-        if (role == 1 || role == 2) {
+        if (role == 1 || role == 2 || role == 3) {   // C3（2026-10-08）：管理员也建会话 —— 否则登录流程里那一发 `POST /user/me`（识别口径）会 401，前端的 `role === "3"` 分支根本走不到。⚠️ 这**不给**管理员任何授权：`AuthSession.authorize` 对 cookie 里的 role=3 一律折叠成 null（授权仍只认 token）；本行只让「识别」认得出他
             String businessId = userService.businessId(username, role);
             if (businessId != null) {
                 // 会话里存的是**业务号**（customerid / merchantid），不是登录名 —— 见 AuthSession。
