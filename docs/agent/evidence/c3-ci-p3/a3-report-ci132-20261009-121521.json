@@ -1,0 +1,515 @@
+{
+  "schema": 1,
+  "tool": "a3-concurrency",
+  "runId": "ci132",
+  "generatedAt": "2026-10-09T12:15:21.134815990Z",
+  "exitCode": 0,
+  "launch": {
+    "mode": "two-step-compile（javac -encoding UTF-8 + java -cp <out>）",
+    "fileEncoding": "UTF-8",
+    "nativeEncoding": "UTF-8",
+    "stdoutEncoding": "UTF-8（forceUtf8Output 强制）",
+    "charsetSelfCheck": "PASS"
+  },
+  "target": {
+    "baseUrl": "http://127.0.0.1:8088",
+    "jdbcUrl": "jdbc:mysql://127.0.0.1:3306/mall_management_sql?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai&characterEncoding=utf-8",
+    "jdbcUser": "test",
+    "jdbcPassword": "*******",
+    "expectDbHost": "127.0.0.1"
+  },
+  "options": {
+    "qps": 120,
+    "durationSec": 30,
+    "rounds": 5,
+    "bGroupGate": false,
+    "keepData": false,
+    "resetDb": false,
+    "s4bDurationSec": 60,
+    "scenarios": "S1,S2a,S2b,S3,S4a,S4b,B2,C"
+  },
+  "preflight": {
+    "P0": "PASS 13 列逐列比对通过；余量最小 goodstype.GoodType 16/20（余 4）",
+    "P2": "PASS 实际主机=127.0.0.1 期望主机=127.0.0.1",
+    "P1": "PASS DATABASE()=mall_management_sql（TD-13 要求 mall_management_sql ✓）；VERSION()=8.4.11（S0-5 要求 8.4.x ✓）",
+    "P3": "PASS 表数=15；已知追加表 order_state_transition / admin_audit / notification / notification_template 在 4/4 张（期望表数 = 11 + 4 = 15）",
+    "P4": "PASS order=6 goods=5 login=5 user=5 friend=4",
+    "P5": "PASS GET http://127.0.0.1:8088/health/db → HTTP 200，等待 0s，含 \"success\":true（Web+DB 联合就绪；该端点不被缓存）",
+    "P6": "PASS 库身份对比（GET /health/db vs 脚本 JDBC） server_uuid=9b633439-c3da-11f1-a378-fe98ec2eb3e5→一致；hostname=8b606122f307→一致；参考项 database=一致 port=一致 version=一致",
+    "P7": "SKIP 已用 --skip-negative-control 显式关闭"
+  },
+  "assertions": [
+    {
+      "id": "A-S1-1",
+      "desc": "HTTP 5xx == 0 且连接错误 == 0",
+      "gate": true,
+      "verdict": "PASS",
+      "detail": "5xx=0 connErr=0",
+      "rounds": null,
+      "reproRounds": null
+    },
+    {
+      "id": "A-S1-2",
+      "desc": "goodstype 响应全部 success:true",
+      "gate": true,
+      "verdict": "PASS",
+      "detail": "goodstype 非预期=0",
+      "rounds": null,
+      "reproRounds": null
+    },
+    {
+      "id": "A-S1-3",
+      "desc": "loginSelect('123','123456') 每次返回 1（0 即读侧错库或数据缺失）",
+      "gate": true,
+      "verdict": "PASS",
+      "detail": "loginSelect 返回非 1 的次数=0，返回 1 的次数=1800",
+      "rounds": null,
+      "reproRounds": null
+    },
+    {
+      "id": "A-S2a-1a",
+      "desc": "锁指标增量 mall.lock.acquires{lock=order-add,result=acquired} == 20",
+      "gate": true,
+      "verdict": "PASS",
+      "detail": "增量=20（20 线程同锁 key ⇒ 预期 20）before=0 after=20",
+      "rounds": null,
+      "reproRounds": null
+    },
+    {
+      "id": "A-S2a-1b",
+      "desc": "JDBC count(order WHERE OrderId=?) == 1",
+      "gate": true,
+      "verdict": "PASS",
+      "detail": "行数=1（== 1 才是修复生效；>= 2 说明查重窗口仍在） 5xx=0（⚠️ 本场景 5xx 恒为 0，理由见 1c）",
+      "rounds": null,
+      "reproRounds": null
+    },
+    {
+      "id": "A-S2a-1c",
+      "desc": "20 个响应里含「数据库错误」的 == 0",
+      "gate": true,
+      "verdict": "PASS",
+      "detail": "含「数据库错误」的响应=0 条（>0 = 撞 uk_order_orderId ⇒ 锁/查重未生效）",
+      "rounds": null,
+      "reproRounds": null
+    },
+    {
+      "id": "A-S2a-2",
+      "desc": "该 OrderId 行数 == 本轮 success:true 响应数",
+      "gate": true,
+      "verdict": "PASS",
+      "detail": "行数=1 == success 数=1",
+      "rounds": null,
+      "reproRounds": null
+    },
+    {
+      "id": "A-S2b-1",
+      "desc": "success:true 比率 == 100%，无 5xx",
+      "gate": true,
+      "verdict": "PASS",
+      "detail": "ok=3600/3600 unexpected=0 5xx=0 connErr=0",
+      "rounds": null,
+      "reproRounds": null
+    },
+    {
+      "id": "A-S2b-2",
+      "desc": "JDBC count(OrderId LIKE '<ns>-N%') == 成功响应数",
+      "gate": true,
+      "verdict": "PASS",
+      "detail": "行数=3600 == success 数=3600",
+      "rounds": null,
+      "reproRounds": null
+    },
+    {
+      "id": "A-S3-1",
+      "desc": "每单恰好 1 个 success:true；全场景合计 == M",
+      "gate": true,
+      "verdict": "PASS",
+      "detail": "预建成功=10/10；合计 success=10/10；异常单=0",
+      "rounds": null,
+      "reproRounds": null
+    },
+    {
+      "id": "A-S3-2",
+      "desc": "每单恰好 19 个 success:false 且 msg == 「订单不存在或已付款」",
+      "gate": true,
+      "verdict": "PASS",
+      "detail": "不符合「1 成功 + 19 失败且 msg 正确」的单数=0",
+      "rounds": null,
+      "reproRounds": null
+    },
+    {
+      "id": "A-S3-3",
+      "desc": "无任何响应 msg 以「数据库错误」开头",
+      "gate": true,
+      "verdict": "PASS",
+      "detail": "含「数据库错误」的响应数=0",
+      "rounds": null,
+      "reproRounds": null
+    },
+    {
+      "id": "A-S3-4",
+      "desc": "JDBC：每单 PayIf=1；SettlementDate IS NOT NULL",
+      "gate": true,
+      "verdict": "PASS",
+      "detail": "PayIf/SettlementDate 不符的单数=0",
+      "rounds": null,
+      "reproRounds": null
+    },
+    {
+      "id": "A-S4a-0",
+      "desc": "五个前置态全部建成且**末态正确**（C#6 后 3 个改由合法流转推进）",
+      "gate": true,
+      "verdict": "PASS",
+      "detail": "前置态 U=ok(add(000)) P=ok(add(100)) PD=ok(add(100)+Delivery) PDR=ok(add(100)+Delivery+Receive) PR=ok(add(100)+Receive) ",
+      "rounds": null,
+      "reproRounds": null
+    },
+    {
+      "id": "A-S4a-1",
+      "desc": "orderDeliveryIfUp on U ×20 → success == 0，msg 正确",
+      "gate": true,
+      "verdict": "PASS",
+      "detail": "succ=0 msg 命中=20",
+      "rounds": null,
+      "reproRounds": null
+    },
+    {
+      "id": "A-S4a-2",
+      "desc": "orderDeliveryIfUp on P ×20 → success == 1（重复发货被拒）",
+      "gate": true,
+      "verdict": "PASS",
+      "detail": "succ=1",
+      "rounds": null,
+      "reproRounds": null
+    },
+    {
+      "id": "A-S4a-3",
+      "desc": "orderDeliveryIfUp on PDR ×20 → success == 0",
+      "gate": true,
+      "verdict": "PASS",
+      "detail": "succ=0",
+      "rounds": null,
+      "reproRounds": null
+    },
+    {
+      "id": "A-S4a-4",
+      "desc": "orderReceiveIfUp on U ×20 → success == 0（未付款收货被拒）",
+      "gate": true,
+      "verdict": "PASS",
+      "detail": "succ=0 msg 命中=20",
+      "rounds": null,
+      "reproRounds": null
+    },
+    {
+      "id": "A-S4a-5",
+      "desc": "orderReceiveIfUp on PR ×20 → success == 0（重复收货被拒）",
+      "gate": true,
+      "verdict": "PASS",
+      "detail": "succ=0",
+      "rounds": null,
+      "reproRounds": null
+    },
+    {
+      "id": "A-S4a-6",
+      "desc": "orderReceiveIfUp on PD ×20 → success == 1",
+      "gate": true,
+      "verdict": "PASS",
+      "detail": "succ=1",
+      "rounds": null,
+      "reproRounds": null
+    },
+    {
+      "id": "A-S4a-7",
+      "desc": "同单 20 pay + 20 delivery 同栅栏：paySucc==1 且 deliverySucc<=1",
+      "gate": true,
+      "verdict": "PASS",
+      "detail": "预建=ok paySucc=1 deliverySucc=1 终态=1/1/0 不变式=成立",
+      "rounds": null,
+      "reproRounds": null
+    },
+    {
+      "id": "A-S4a-8",
+      "desc": "全命名空间不变式 NOT(PayIf=0 AND (DeliveryIf=1 OR ReceiveIf=1))",
+      "gate": true,
+      "verdict": "PASS",
+      "detail": "违反行数=0（H3 原写「PR 型预置单排除在外」；此处未排除 —— PR 的 PayIf=1，本就不满足谓词，排除与否等价）",
+      "rounds": null,
+      "reproRounds": null
+    },
+    {
+      "id": "A-S4b-1",
+      "desc": "5xx == 0，连接错误 == 0",
+      "gate": true,
+      "verdict": "PASS",
+      "detail": "5xx=0 connErr=0 unexpected=0",
+      "rounds": null,
+      "reproRounds": null
+    },
+    {
+      "id": "A-S4b-2",
+      "desc": "各端点 success 数 == 分区计算出的期望值",
+      "gate": true,
+      "verdict": "PASS",
+      "detail": "add=2880/2880 pay=1440/1440 dly=1080/1080 rcv=1080/1080 goodstype=720/720（任何多出来的成功都是真实的状态机重复流转）",
+      "rounds": null,
+      "reproRounds": null
+    },
+    {
+      "id": "A-S4b-3",
+      "desc": "结束后全命名空间不变式检查（同 A-S4a-8）",
+      "gate": true,
+      "verdict": "PASS",
+      "detail": "违反行数=0",
+      "rounds": null,
+      "reproRounds": null
+    },
+    {
+      "id": "A-S4b-4",
+      "desc": "JDBC count(OrderId LIKE '<ns>-S4bN%') == orderAdd 成功数",
+      "gate": true,
+      "verdict": "PASS",
+      "detail": "行数=2880 == orderAdd 成功数=2880（H3 原文为「count LIKE 命名空间」；此处收窄到 -S4bN% 子集，否则会把 3 个预建单池也算进去而必然不等 —— 收窄是加强，不是放宽）",
+      "rounds": null,
+      "reproRounds": null
+    },
+    {
+      "id": "A-B2-1",
+      "desc": "B-2 三处 TOCTOU（loginAdd / goodstype / friendAdd）逐轮复现：rounds=5 reproRounds=5；复现轮 < 全部轮 即为弱证据（可能只是竞态未重叠，不等于缺陷已修）",
+      "gate": false,
+      "verdict": "RECORD_ONLY",
+      "detail": "reproRounds=5/5（--b-group-gate=false，不计入退出码）；分类计数 login5xx轮=5 goodstype重复行轮=0 friend重复行轮=0",
+      "rounds": 5,
+      "reproRounds": 5
+    },
+    {
+      "id": "C-1",
+      "desc": "时间线行数 == 四端点 success 之和（各端点 success 另与状态机预测值比对）",
+      "gate": true,
+      "verdict": "PASS",
+      "detail": "add=3/3 pay=2(预测 2) dly=1(1) rcv=2(2) PR 预置 pay/rcv=1/1(1/1) 被拒三次=0/0/0(0/0/0) 时间线增量=8/8 被拒单行数=1/3(1/3 —— PR 的 3 行 = 出生+付款+收货) 收敛读数=8",
+      "rounds": null,
+      "reproRounds": null
+    },
+    {
+      "id": "C-2",
+      "desc": "时间线可重放：首行 from=NONE、逐行首尾相接、末行 to == order 表现值",
+      "gate": true,
+      "verdict": "PASS",
+      "detail": "重放单数=3 无时间线的单=0 首行非 NONE=0 链断=0 末态不符=0；Id 序与 OccurredAt 序不一致的单=0（此数是为让上面那条排序判断有实测依据，不靠推断）",
+      "rounds": null,
+      "reproRounds": null
+    },
+    {
+      "id": "A-C6-1",
+      "desc": "出生闸：6 个非白名单组合全部被拒（success=false + 文案 + 查无此行）",
+      "gate": true,
+      "verdict": "PASS",
+      "detail": "放行 3/3（白名单）  被拒 6/6（3 个合法但非初始 + 3 个非法，均须查无此行）",
+      "rounds": null,
+      "reproRounds": null
+    },
+    {
+      "id": "A-C6-2",
+      "desc": "出生闸的观测在场：birth.rejected 的 shape 覆盖 4 值（含 non_initial）",
+      "gate": true,
+      "verdict": "PASS",
+      "detail": "HTTP 200 shape 覆盖 4 值=true；non_initial 序列存在（HTTP 200）=true",
+      "rounds": null,
+      "reproRounds": null
+    }
+  ],
+  "gates": {
+    "count": 30,
+    "failed": 0
+  },
+  "scenarios": {
+    "S1": {
+      "offeredQps": 120,
+      "achievedQps": 119.9,
+      "wallSec": 30.0,
+      "n": 3600,
+      "ok": 3600,
+      "unexpected": 0,
+      "http5xx": 0,
+      "connErr": 0,
+      "p50ms": 2.2,
+      "p95ms": 7.6,
+      "p99ms": 20.9,
+      "maxMs": 118.0
+    },
+    "S2a": {
+      "burstCalls": 20,
+      "successCount": 1,
+      "rowsForSameOrderId": 1,
+      "lockAcquiresDelta": 20,
+      "dbErrorResponses": 0
+    },
+    "S2b": {
+      "offeredQps": 120,
+      "achievedQps": 119.9,
+      "wallSec": 30.0,
+      "n": 3600,
+      "ok": 3600,
+      "unexpected": 0,
+      "http5xx": 0,
+      "connErr": 0,
+      "p50ms": 3.2,
+      "p95ms": 8.1,
+      "p99ms": 17.9,
+      "maxMs": 142.8,
+      "orderRows": 3600
+    },
+    "S3": {
+      "orders": 10,
+      "threadsPerOrder": 20,
+      "prebuiltOk": 10,
+      "totalSuccess": 10,
+      "inconsistentOrders": 0,
+      "dbErrorResponses": 0,
+      "stateBadOrders": 0
+    },
+    "S4a": {
+      "burstCount": 8,
+      "payRaceSuccess": 1,
+      "deliveryRaceSuccess": 1,
+      "invariantViolations": 0,
+      "lockCountersBefore": "1213=0 1205=0",
+      "lockCountersAfter": "1213=0 1205=0"
+    },
+    "S4b": {
+      "offeredQps": 120,
+      "achievedQps": 119.9,
+      "wallSec": 60.0,
+      "n": 7200,
+      "ok": 7200,
+      "unexpected": 0,
+      "http5xx": 0,
+      "connErr": 0,
+      "p50ms": 2.5,
+      "p95ms": 5.3,
+      "p99ms": 11.0,
+      "maxMs": 89.1,
+      "okAdd": 2880,
+      "okPay": 1440,
+      "okDelivery": 1080,
+      "okReceive": 1080,
+      "okGoodstype": 720,
+      "orderRowsFromLoad": 2880,
+      "invariantViolations": 0,
+      "s4bDurationSec": 60,
+      "lockCountersBefore": "1213=0 1205=0",
+      "lockCountersAfter": "1213=0 1205=0"
+    },
+    "B2": {
+      "rounds": 5,
+      "reproRounds": 5,
+      "login5xxRounds": 5,
+      "goodstypeDupRounds": 0,
+      "friendDupRounds": 0,
+      "recordOnly": true
+    },
+    "C": {
+      "tableReadable": true,
+      "drainPolls": 1,
+      "drainElapsedMs": 3,
+      "drainTimeoutMs": 10000,
+      "addOk": 3,
+      "addRefusedExpect6": 6,
+      "payOk": 2,
+      "deliveryOk": 1,
+      "receiveOk": 2,
+      "rejectedTransitions": 0,
+      "timelineRowsDelta": 8,
+      "timelineRowsExpected": 8,
+      "convergedRows": 8,
+      "ordersReplayed": 3,
+      "ordersWithoutTimeline": 0,
+      "chainBreaks": 0,
+      "lastStateMismatches": 0,
+      "idOrderDiffersFromOccurredAt": 0,
+      "recordOnly": true,
+      "lockCountersBefore": "1213=0 1205=0",
+      "lockCountersAfter": "1213=0 1205=0"
+    },
+    "cleanup": {
+      "namespace": "A3TEST-ci132%",
+      "table.order": 10100,
+      "table.order_state_transition": 10123,
+      "table.goods": 0,
+      "table.goodstype": 5,
+      "table.login": 5,
+      "table.user": 5,
+      "table.customerimage": 5,
+      "table.merchantimage": 0,
+      "table.friend": 5,
+      "table.productsales": 0,
+      "probeRowsDeleted": 0,
+      "rowsDeletedTotal": 20248,
+      "status": "OK"
+    }
+  },
+  "b2PerRound": [
+    {
+      "round": 1,
+      "login5xx": 9,
+      "loginOk": 1,
+      "loginExisted": 10,
+      "loginUnclear": 0,
+      "goodstypeDupRows": 1,
+      "goodstypeOk": 1,
+      "friendDupRows": 1,
+      "friendOk": 1,
+      "verdict": "EXPECTED_DEFECT_PRESENT"
+    },
+    {
+      "round": 2,
+      "login5xx": 5,
+      "loginOk": 1,
+      "loginExisted": 14,
+      "loginUnclear": 0,
+      "goodstypeDupRows": 1,
+      "goodstypeOk": 1,
+      "friendDupRows": 1,
+      "friendOk": 1,
+      "verdict": "EXPECTED_DEFECT_PRESENT"
+    },
+    {
+      "round": 3,
+      "login5xx": 9,
+      "loginOk": 1,
+      "loginExisted": 10,
+      "loginUnclear": 0,
+      "goodstypeDupRows": 1,
+      "goodstypeOk": 1,
+      "friendDupRows": 1,
+      "friendOk": 1,
+      "verdict": "EXPECTED_DEFECT_PRESENT"
+    },
+    {
+      "round": 4,
+      "login5xx": 5,
+      "loginOk": 1,
+      "loginExisted": 14,
+      "loginUnclear": 0,
+      "goodstypeDupRows": 1,
+      "goodstypeOk": 1,
+      "friendDupRows": 1,
+      "friendOk": 1,
+      "verdict": "EXPECTED_DEFECT_PRESENT"
+    },
+    {
+      "round": 5,
+      "login5xx": 8,
+      "loginOk": 1,
+      "loginExisted": 11,
+      "loginUnclear": 0,
+      "goodstypeDupRows": 1,
+      "goodstypeOk": 1,
+      "friendDupRows": 1,
+      "friendOk": 1,
+      "verdict": "EXPECTED_DEFECT_PRESENT"
+    }
+  ],
+  "logFile": "/home/runner/work/mall-management/mall-management/scripts/concurrency/reports/a3-run-20261009-121313.log"
+}

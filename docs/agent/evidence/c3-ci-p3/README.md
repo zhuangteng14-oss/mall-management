@@ -6,13 +6,15 @@
 
 | 文件 | 是什么 |
 |---|---|
-| `a3-run-20261009-120224.txt` | **A3 并发测试自己那份报告**的完整副本（`scripts/concurrency/reports/` 的产物）。原始来源 = CI 那次运行的 artifact（`gh run download`），此处**只做搬运、不改一字** |
+| `a3-run-20261009-120224.txt` | **红**那次：A3 并发测试自己那份报告（`scripts/concurrency/reports/` 的产物）。原始来源 = CI 运行的 artifact（`gh run download`），此处**只做搬运、不改一字** |
+| `a3-run-20261009-121313.txt` | **绿**那次（修好 P3 之后）的同款报告 |
+| `a3-report-ci132-20261009-121521.json` | 绿那次的**机器可读产物**（同上目录的 `.json`）—— 门禁数按它的 `gates` 读：`{"count": 30, "failed": 0}` |
 
 ⚠️ **入库时由 `.log` 改名 `.txt`** —— `.gitignore:11` 有 `**/*.log`，`.log` 会被**静默**挡在门外
 （第一次提交就踩了：README 进来了、证据没进来）。**内容一字未改**；证据目录用 `.txt` / `.out`
 也是本仓既有惯例（对照 `evidence/i2/db/apply.out` / `state.txt`）。
 
-## 这份证据证明了什么（判据就在文件里）
+## 红的那次证明了什么（判据就在文件里）
 
 ```
 --- 前置校验 ---
@@ -37,7 +39,30 @@
    （`admin_audit` / `notification` / `notification_template`）—— 这正是修门禁后 `known == KNOWN_TABLES`
    那一半「4 张必须真在」的**直接证据**（表数能凑到 15，就是这 4 张都在）。
 
-## ⚠️ 本目录**不**包含
+## 绿的那次证明了什么（同一套判据，修后复跑）
 
-- **修好之后那次（绿）的报告** —— 复跑绿了会另补一份同款副本进本目录（届时本 README 一并补行）。
-- **不写 run number / job id**：CI 的运行号会失效、本地不可复核；要复核的是**这份文件的内容**。
+```
+  P3  PASS 表数=15；已知追加表 order_state_transition / admin_audit / notification / notification_template 在 4/4 张（期望表数 = 11 + 4 = 15）
+  P5  PASS GET http://127.0.0.1:8088/health/db → HTTP 200 …（Web+DB 联合就绪）
+  P6  PASS 库身份对比（GET /health/db vs 脚本 JDBC） server_uuid/hostname/database/port/version 全部一致
+  P7  SKIP 已用 --skip-negative-control 显式关闭
+
+[阶段 D] preflight P0–P7 通过，开始跑负载段：S1,S2a,S2b,S3,S4a,S4b,B2,C
+…
+  门禁断言 30 项，失败 0 项
+
+preflight  : 8 项，全部通过
+gates      : 全部通过
+exitCode   : 0
+```
+
+⇒ 与红那次**唯一不同的一行就是 P3**（`FAIL 期望 11 + 1` → `PASS … 在 4/4 张`），
+且**负载段真跑了**（红那次 P5–P7 全 SKIP、2m0s；绿这次跑满 S1–C、4m5s，`5xx=0 connErr=0`）
+—— 这正是「C3 块 1 对既有 A3 行为零影响」的直接证据。
+
+## ⚠️ 本目录**不**包含 / 不写什么
+
+- **不写 run number / job id**：CI 的运行号会失效、本地不可复核；要复核的是**这里文件的内容**
+  （`runId` 在文件里自己写着，但那只是报告的一个字段，不是这里的索引键）。
+- 不含 `app.log`（红那次 500KB+ 的启动日志）：判据不依赖它 —— 启动干净这件事在 §十七 17-1 有记，
+  且两份报告里的 P1/P5/P6 已证明「后端起来了、Web+DB 都就绪」。
