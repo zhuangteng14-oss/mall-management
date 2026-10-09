@@ -2,6 +2,7 @@ package com.minke.mallmanagement.shared.web;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.web.servlet.config.annotation.InterceptorRegistry;
@@ -134,8 +135,23 @@ public class WebAuthConfig implements WebMvcConfigurer {
     /** 全局唯一的拦截器实例。开关在**构造期**读入（改开关需重启，与其它 @Value 一致）。 */
     private final AuthInterceptor authInterceptor;
 
-    public WebAuthConfig(@Value("${app.auth.enabled:false}") boolean authEnabled) {
-        this.authInterceptor = new AuthInterceptor(authEnabled, AUTH_WHITELIST, AUTH_IDENTITY_PATHS);
+    /**
+     * ⚠️ <b>第 4 个构造参数刻意是 {@link ObjectProvider}，不是裸的 {@code UserStateLookup}</b>
+     * （C3 块 2 用户块）。
+     *
+     * <p>理由是一条**block-1 实测过的切片地雷**：{@code @WebMvcTest} 会扫到本类
+     * （{@code WebMvcConfigurer} 在切片名单内，见类注释），但**不扫** {@code @Service}
+     * ——裸依赖会让每一个 {@code @WebMvcTest} 切片在启动期就因「找不到 bean」集体失败
+     * （block 1 的同型事故：237 条测试 / 77 条错误）。{@code ObjectProvider.getIfAvailable()}
+     * 在「没有该 bean」时返回 {@code null}（不抛），于是切片里封禁闸整体静默不生效，
+     * 而**默认 profile 里它照常生效**。
+     *
+     * <p>❗ 这是本类唯一一处「按上下文静默降级」的依赖，别照着把它改成构造器直注入。
+     */
+    public WebAuthConfig(@Value("${app.auth.enabled:false}") boolean authEnabled,
+                         ObjectProvider<UserStateLookup> userStateLookupProvider) {
+        this.authInterceptor = new AuthInterceptor(authEnabled, AUTH_WHITELIST, AUTH_IDENTITY_PATHS,
+                userStateLookupProvider.getIfAvailable());
         // 把生效值打进启动日志（惯例同 app.lock.* / app.cache.* / app.order.state.*）：此前本开关没有
         // 任何启动期取证口，闸开没开只能从行为反推（progress.md §5-R）。ASCII 片段 "AUTH" 供 GBK 检索。
         log.info("登录闸已装配（AUTH）：app.auth.enabled={} 白名单 {} 条 —— 关闭时全部放行", authEnabled, AUTH_WHITELIST.size());

@@ -13,6 +13,7 @@
 | 3 | 2026-10-04 | goodstype 类型名唯一索引 | 新增索引（UNIQUE） | `goodstype` | `mall_management_sql.sql:246-262`（Migration 块，`CREATE UNIQUE INDEX uk_goodstype_GoodType`） | `DROP INDEX uk_goodstype_GoodType ON \`goodstype\`;`（规则 v2：回滚 = 逻辑废弃，执行前须人工确认） | #11 `fix/goodstype-unique` | ⏳ 待 A3 复跑验证（判据见注意 7；⚠️ 前置与 #2 相反） |
 | 4 | 2026-10-08 | C3 批 A 管理端审计日志 | 新增表 | `admin_audit` | `mall_management_sql.sql:264-292`（Migration 块，`CREATE TABLE IF NOT EXISTS`，11 列 + 主键 + 3 个 KEY） | `DROP TABLE IF EXISTS admin_audit;`（见注意 6） | C3 批 A（`slot-registry.md §十四`） | ✅ 已落 **VM 库**（**未提交**）；⚠️ **补登**，见注意 8 |
 | 5 | 2026-10-09 | C3 块1-I2 系统通知（含模板） | 新增表 | `notification` · `notification_template` | `mall_management_sql.sql:294-327`（通知，13 列 + 主键 + 3 个 KEY）· `:329-345`（模板，7 列 + 主键 + 1 个 UNIQUE） | `DROP TABLE IF EXISTS notification;` · `DROP TABLE IF EXISTS notification_template;`（见注意 6） | C3 块1-I2 | ✅ 已落 **VM 库**（**未提交**；两表均 0 行，2026-10-09 实测） |
+| 6 | 2026-10-09 | C3 块2 用户块（用户治理 + 商家入驻审核） | 新增表 + 新增字段 | `merchant_application` · `user` · `goods` | `mall_management_sql.sql:348-409` —— ① 新表 `merchant_application`（`:369-390`，16 列 + 主键 + 3 个 KEY）② `user` 加 8 列（`:396-404`，封禁 3 + 降级 5）③ `goods` 加 2 列（`:407-409`，`ShelfState` / `DelistedAt`） | `DROP TABLE IF EXISTS merchant_application;` · `ALTER TABLE \`user\` DROP COLUMN \`banned\`,\`banReason\`,\`bannedAt\`,\`DowngradeState\`,\`ScheduledDowngradeAt\`,\`DowngradeReason\`,\`FrozenAt\`,\`FreezeUntil\`;` · `ALTER TABLE \`goods\` DROP COLUMN \`ShelfState\`,\`DelistedAt\`;`（见注意 6 + 注意 9；**规则 v2：回滚 = 逻辑废弃，执行前须人工确认**） | C3 块2（`slot-registry.md §十六`） | ✅ 已落 **VM 库**（**未提交**；`merchant_application` 0 行，2026-10-09 实测） |
 
 ## 登记格式
 
@@ -41,3 +42,7 @@ CREATE INDEX idx_xxx ON xxx(col);
    **同一缺口还有第二处**：`db-schema.md` 也漏了 `admin_audit`（其表数长期停在 **12**）。本次一并补齐到 **15**。
    **证据（2026-10-09 实测）**：`SELECT TABLE_NAME FROM information_schema.TABLES WHERE TABLE_SCHEMA='mall_management_sql'` ⇒ 共 **15 张表**，其中 `admin_audit` / `notification` / `notification_template` 三张正是上述 12 之外的部分。⚠️ `TABLE_ROWS` 对 InnoDB 是**估算值**（同一次查询里 `login` 报 7 而 `progress.md` 的种子基线是 5），故本文件**只用它判「表是否存在」**，不用它当行数。
    ⚠️ **两处口径必须一致**：本条的编号（#4 = 批 A、#5 = I2）与 `db-schema.md` 的表数（15）、`slot-registry.md §十四/§十五` 的登记同源；若日后回填批 A 的独立登记，须三处同改。
+9. **⚠️ 块 2（#6）—— 表数 15 → 16，且**首次**出现「改**基线表**」的变更 —— 2026-10-09 记**：C3 块 2〈用户块〉在 VM 库 ① 新建 `merchant_application`（`mall_management_sql.sql:369-390`）② 给**导入基线表** `user` 加 8 列（`:396-404`）③ 给 `goods` 加 2 列（`:407-409`）⇒ 表数 **15 → 16**（`db-schema.md` 随之更新：索引 12 → 15 个、分布 7 → 8 张表；**非主键 UNIQUE 仍 3 个**，新表无 UNIQUE）。
+   ⚠️ **注意 8 那句「共 15 张表」测于块 2 之前**，本笔之后同口径应为 **16**（`SELECT TABLE_NAME FROM information_schema.TABLES WHERE TABLE_SCHEMA='mall_management_sql'`）。
+   ⚠️ **「加列」与「新增表」性质不同**：`user` / `goods` **属于导入基线、会被全量重导 `DROP`+`CREATE`**，但加列语句写在 Migration 块（各表的 `CREATE TABLE` 之后）⇒ 重导后仍由该块补上，**且不会出现「基线已含新列 + 末尾又 ADD」的重复列**（该处置逐字见 `.sql:365-367`）。代价：加列**不幂等** —— MySQL **不支持** `ADD COLUMN IF NOT EXISTS`（那是 MariaDB 扩展），VM 重复执行会报 **Duplicate column（预期，非故障）**（`.sql:359-364`）。
+   **已裁决不剥**：`user` 的 8 个新列会随全仓唯一一条 `SELECT *`（`UserDao.selectUserByUsername`）出现在 `/user/me` 与 `getUserInfo` 返回里 —— 用户该知道自己被封/被降级，`DowngradeReason` 本就是给商家看的（`.sql:392-395`）。

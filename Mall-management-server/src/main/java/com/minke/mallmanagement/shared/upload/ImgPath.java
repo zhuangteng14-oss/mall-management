@@ -18,10 +18,18 @@ public class ImgPath implements WebMvcConfigurer {
     private String uploadDir;
 
     /**
+     * 应用**自带图**的出处：随 jar 一起打包，与运行目录 / profile **无关**。
+     *
+     * <p>与 {@link #uploadPath}（可写的上传目录）**并列**注册，见 {@link #addResourceHandlers}。
+     */
+    private static final String CLASSPATH_IMG = "classpath:/static/img/";
+
+    /**
      * 上传根目录。
      *
-     * <p>⚠️ 目录不可用时保持 {@code null} —— {@link #addResourceHandlers} 据此跳过注册，
-     * 而不是让 NPE 把启动拖死在上下文刷新期（见 {@link #initUploadDir}）。
+     * <p>⚠️ 目录不可用时保持 {@code null} —— {@link #addResourceHandlers} 据此**只**注册
+     * classpath 那一支（2026-10-09 改；此前是整条映射都不注册），而不是让 NPE 把启动拖死在
+     * 上下文刷新期（见 {@link #initUploadDir}）。
      */
     private Path uploadPath;
 
@@ -57,7 +65,8 @@ public class ImgPath implements WebMvcConfigurer {
             }
             this.uploadPath = candidate;
         } catch (Exception e) {
-            // uploadPath 停在 null ⇒ addResourceHandlers 不注册映射 ⇒ /img/** 一律 404。
+            // uploadPath 停在 null ⇒ addResourceHandlers 只注册 classpath 那一支
+            // （自带图还能服务，上传会失败）。
             System.out.println("[WARN] 上传目录初始化失败：" + uploadDir + " —— " + e
                     + " —— 图片上传会失败，但应用继续启动");
         }
@@ -66,17 +75,38 @@ public class ImgPath implements WebMvcConfigurer {
     @Override
     public void addResourceHandlers(ResourceHandlerRegistry registry) {
         System.out.println("图片配置生效！！！");
+        // ⚠️ **两个位置，有序**（2026-10-09 修，起因是一次「登录页大图空白」）：
+        //   ① 上传目录（`app.upload-dir`）—— 上传的图落在这里；**同名时它优先**
+        //      （`ResourceHttpRequestHandler` 按 `locations` 顺序取第一个命中的资源）；
+        //   ② {@link #CLASSPATH_IMG} —— **随应用打包的自带图**（default_user.png、
+        //      Mall-Section-*.jpg、Mall-Homepage.jpg…）。
+        //
+        // 【为什么必须补 ②】① 是「可写目录」，而 a3 profile **刻意**把它外置到
+        //   `${java.io.tmpdir}/a3-uploads/`（理由见 application-a3.properties：确保 a3
+        //   在任何情况下都不写仓库目录，TD-08）—— 那个目录**是空的**。只注册 ① 时，
+        //   `/img/**` **整片 404**，连应用自带的图也一起没了。
+        //   ⇒ 实测（2026-10-09，a3 profile 的 8088）：`/img/Mall-Section-2.jpg`、
+        //   `/img/Mall-Section-1.jpg`、连 `/img/default_user.png` 全是 404 + JSON 错误体。
+        //   登录页那张品牌大图（CSS 硬引 `http://localhost:8088/img/Mall-Section-2.jpg`）
+        //   于是只剩 `.brand-fig{background-color:var(--img)}` 兜底 ⇒ 看着像「图没画出来」，
+        //   实际是图**没被供给**。同一处的 `Mall-Section-1.jpg`（注册态）在浏览器里之所以
+        //   还看得见，只可能是**本地缓存**里那份旧响应。
+        //
+        // 【② 不是「假目录」】下面那段被判为更坏的兜法（拿 `user.dir` 之流硬凑）之所以坏，
+        //   是因为它把**配置错误**伪装成**数据缺失**；`classpath:/static/img/` 是自带图的
+        //   **真实出处**，不是凑数。而「上传目录不可用」这件事照样在下面 WARN —— 配置问题
+        //   仍然看得见，只是不再顺手把应用自己的图一起赔进去（three-layers.md A#4 的同一条口径：
+        //   非核心功能故障不该升级成整片功能故障）。
+        String[] locations;
         if (uploadPath == null) {
-            // 目录不可用 ⇒ 不注册 /img/**，请求落到 404。
-            // 刻意**不**兜一个假目录（如 user.dir）：那会让「配置错了」看起来像
-            // 「图丢了」，把配置问题伪装成数据问题，更难查。
-            System.out.println("[WARN] 上传目录不可用，/img/** 静态映射未注册（图片请求将 404）");
-            return;
+            System.out.println("[WARN] 上传目录不可用，/img/** 只服务自带图（上传的图会 404）");
+            locations = new String[] { CLASSPATH_IMG };
+        } else {
+            String location = uploadPath.toUri().toString();
+            System.out.println("目前图片所在本地位置为：" + location);
+            locations = new String[] { location, CLASSPATH_IMG };
         }
-        String location = uploadPath.toUri().toString();
-        System.out.println("目前图片所在本地位置为：" + location);
-        registry.addResourceHandler("/img/**").addResourceLocations(location);
-
+        registry.addResourceHandler("/img/**").addResourceLocations(locations);
     }
 
 

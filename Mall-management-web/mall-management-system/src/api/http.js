@@ -47,7 +47,7 @@ export class HttpError extends Error {
  *  ⚠️ **判 `status` 而不是 `body`**：闸的 401 与 `/user/me` 的 401 **响应体逐字节相同**
  *     （共享常量 `AuthInterceptor.BODY_NOT_LOGGED_IN`；真容器里 `cmp` 实测 IDENTICAL，
  *     见 `progress.md §5-R (2)` 第 10 条）⇒ 判 body 等于判「字符串相等」，不增加信息；
- *     且后端明写 `Result` 的键序**不承诺**（`UserController.java:219`）⇒ body 判据不可靠。
+ *     且后端明写 `Result` 的键序**不承诺**（`UserController.java:228`）⇒ body 判据不可靠。
  *
  *  它**继承 `HttpError`** ⇒ 所有 `instanceof HttpError` 的既有调用方行为不变。
  */

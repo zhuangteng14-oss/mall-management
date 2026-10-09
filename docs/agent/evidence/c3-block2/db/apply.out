@@ -1,0 +1,14 @@
+rc_begin
+md5(mall_management_sql.sql) : cfdfa86674baa5840f8218d915edeb47
+marker 鎴彇璧风偣 : 348 / 409
+---
+鎴彇璧风偣琛?(1-based) : 348 / 鍏? 409 琛?
+寰呮墽琛岃鍙ユ暟       : 3
+  [1] CREATE TABLE IF NOT EXISTS `merchant_application` ( `Id` bigint NOT NULL AUTO_INCREMENT COMMENT '自增主键', `Usern 鈥?
+  [2] ALTER TABLE `user` ADD COLUMN `banned` tinyint(1) NOT NULL DEFAULT 0 COMMENT '是否封禁：1 封 / 0 正常。登录闸与已登录会话校验都查这列' 鈥?
+  [3] ALTER TABLE `goods` ADD COLUMN `ShelfState` tinyint(1) NOT NULL DEFAULT 1 COMMENT '上架状态：1 在架 / 0 已下架（降级冻结只置 0， 鈥?
+OK  [1] 0
+OK  [2] 0
+OK  [3] 0
+done
+apply_rc=0

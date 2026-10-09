@@ -4,7 +4,7 @@
 // 「路径字面量只允许出现在本文件」—— 后者强得多，且同样可 grep 自动化（方案 Q8）。
 //
 // 端点来源：14 个 view 里 **42 处 fetch + 6 处 URL 赋值**，逐条抽取
-// （2026-10-04，切换自 `9add994`）共 **31 个唯一端点**，按 M5 的四域分组（+2 条 `user.me` / `user.logout`：会话恢复笔与翻开关笔 2026-10-05 加，+1 条 `user.token`：多账户隔离笔 2026-10-06 加 —— 三条均**非** view 抽取 ⇒ 加上 C3 批 A 的 3 条 `admin.audit*`（2026-10-08）与 C3 块 1·I2 的 8 条（`admin.notify*` 4 + `notification.*` 4，2026-10-09，同样**非** view 抽取），本表实为 **45** 条）。
+// （2026-10-04，切换自 `9add994`）共 **31 个唯一端点**，按 M5 的四域分组（+2 条 `user.me` / `user.logout`：会话恢复笔与翻开关笔 2026-10-05 加，+1 条 `user.token`：多账户隔离笔 2026-10-06 加 —— 三条均**非** view 抽取 ⇒ 加上 C3 批 A 的 3 条 `admin.audit*`（2026-10-08）与 C3 块 1·I2 的 8 条（`admin.notify*` 4 + `notification.*` 4，2026-10-09，同样**非** view 抽取），再加 C3 块 2〈用户块〉的 11 条（`user.updateProfile` 1 + `merchant.*` 2 + `admin.accounts*` 8，2026-10-09，同样**非** view 抽取），本表实为 **56** 条）。
 //
 // ⚠️ 路径里的 `GoodsProductCodeSelect` 是**大写开头**，与后端 `@PostMapping` 逐字一致，
 //    不是笔误 —— 改名会 404。
@@ -25,7 +25,7 @@ export const endpoints = {
     loginAdd: '/user/loginAdd',
     getUserInfo: '/user/getUserInfo',
     updateAvatar: '/user/updateAvatar',
-    updateUserInfo: '/user/updateUserInfo',
+    updateUserInfo: '/user/updateUserInfo', updateProfile: '/user/updateProfile',   // ⚠️ 2026-10-09（C3 块 2〈用户块〉）：**同行**追加，不新插一行 —— 本组下面那两条 `order.*`（`:56` / `:58`）被 `views/OrderCenter.vue` 与 `docs/agent/slot-registry.md` 按行号引，在本组内插行会让它们整体下移（文件头 `:68` 那条「上半部一行都不能动」是同一件事）。⚠️ `updateProfile` 与 `updateUserInfo` 是**两个端点**（前者改 `gender`/`age`，后者改 `email`/`address`/`selfintroduction`），**别合并**
     // ⚠️ 2026-10-05（会话恢复笔）：启动探针读 Cookie 会话用。**非** view 抽取 ⇒
     //    不影响上面那句「31 个唯一端点」的抽取口径（那句指的是 view 里抽出来的那些）。
     me: '/user/me',
@@ -80,8 +80,8 @@ export const endpoints = {
     notifyTemplateList: '/admin/notify/template/list',
     notifyTemplateSave: '/admin/notify/template/save',
   },
-  // ⚠️ 2026-10-09（C3 块 1 · I2 · 系统通知）：**接收**侧 4 条 —— **三端共用**（管理端没有收件箱，
-  //    但客户 / 商家两壳走同一套端点），故与 `admin` 组**分开**：前缀是 `/notification`（**公共层**，
+  // ⚠️ 2026-10-09（C3 块 1 · I2 · 系统通知）：**接收**侧 4 条 —— **三端共用**（⚠️ 原文写「管理端没有收件箱」—— **已被 C3 块 2〈用户块〉改判**：管理端也有一个共享收件箱，
+  //    收 `ToId='*'` / `ToType='admin'` 的入驻申请通知，调用点是 `views/admin/AccountsPage.vue`），故与 `admin` 组**分开**：前缀是 `/notification`（**公共层**，
   //    无 `/admin`），分组名也就不能叫 `admin`。调用方 = `api/notify.js`（两端壳 + `NotifyInbox.vue`）。
   // ⚠️ 后端这 4 条**带 `IdentityGuard`**（`requireSelfOrAdmin`）⇒ 传别人的 `toId` 是 403，
   //    而**不是**「查不到」—— 与 `message` 域那几条同形态。
@@ -90,5 +90,33 @@ export const endpoints = {
     unreadCount: '/notification/unreadCount',
     read: '/notification/read',
     readAll: '/notification/readAll',
+  },
+  // ⚠️ 2026-10-09（C3 块 2 · 用户块）：**商家自服务** 2 条。调用方 = `api/merchant.js`，
+  //    唯一页面 `views/MerchantApplyPage.vue`（`/customer/user/apply`）。
+  //    ⚠️ 它挂在**用户端**壳下、**不在**商家端：提交入驻申请的人**还没有** `merchantid`
+  //    （`MerchantApplicationController` 块首那条）⇒ 放进商家壳等于要求「先有商家身份才能申请当商家」。
+  //    ⚠️ 后端两条都跑 `IdentityGuard.requireSelfOrAdmin(request, username)`（方法体第一行）
+  //    ⇒ 传**别人的** `username` 是 **403**（不是「查不到」）。
+  merchant: {
+    apply: '/merchant/apply',
+    myApplications: '/merchant/myApplications',
+  },
+  // ⚠️ 2026-10-09（C3 块 2 · 用户块）：管理端**用户治理 / 商家审核 / 降级控制** 8 条。
+  //    ⚠️ 与上面 `admin` 组**同前缀**（`/admin/accounts/*`）、同款（**非** view 抽取；唯一调用方
+  //    `views/admin/AccountsPage.vue`，经 `api/accounts.js` 包一层）。
+  //    ⚠️ **单列一组而不是塞进 `admin` 组**：往 `admin` 组里插行会把本文件下面的条目整体下移，
+  //    而「新增行落在被引行之后」是本仓唯一的零漂移手法（`admin` / `notification` 两组当年
+  //    也是这么追加的）。⇒ 追加在**文件尾**。
+  //    ⚠️ 同样**不给角色闸留位置** —— 后端这 8 条也没有角色判据（TD-18：管理员 cookie 铸不出票，
+  //    见 `AdminAccountsController` 块首与 `slot-registry.md` §十三 13-5）。
+  accounts: {
+    users: '/admin/accounts/users',
+    ban: '/admin/accounts/user/ban',
+    unban: '/admin/accounts/user/unban',
+    applications: '/admin/accounts/applications',
+    audit: '/admin/accounts/application/audit',
+    downgradeSchedule: '/admin/accounts/downgrade/schedule',
+    downgradeCancel: '/admin/accounts/downgrade/cancel',
+    downgradeRelist: '/admin/accounts/downgrade/relist',
   },
 }

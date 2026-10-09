@@ -55,12 +55,12 @@ const routes = [
     path: '/customer', name: 'customer', meta: { roles: ['1', '3'] },   // ← 角色边界（2026-10-06，§5-AG (16)）：只有**客户**与**管理员**可进这个壳；`meta` 沿 `matched` 链合并 ⇒ 5 个子路由**自动继承**，无需逐条标。⚠️ 别挂到下一行的 `props.role` 上 —— 那是「**壳的种类**」，与本键同形异义。⚠️ `name`（C3 块1·I2 加，2026-10-09）：本路由表里**唯一**被用到的 name，只为文件尾 `addRoute('customer', …)` 挂「系统通知」子路由 —— 理由见文件尾那块（同行追加、净零行数）
     component: AppShell, props: { nav: CUSTOMER_NAV, base: '/customer', role: 'customer' },
     children: [
-      { path: '', component: HomeTab, props: { base: '/customer' }, meta: { tab: 'home', layout: 'home-container', public: true } },
+      { path: '', name: 'customerHome', component: HomeTab, props: { base: '/customer' }, meta: { tab: 'home', layout: 'home-container', public: true } },   // ⚠️ C3 块 2（2026-10-09）：**同行**加 `name` —— 只为消一条 vue-router warn。父记录 `:55` 有 `name` 而本子记录**空路径**又**无名**时，`createRouter` 建匹配表就发 `checkChildMissingNameWithEmptyPath`（`vue-router.mjs:848`）（三壳三条，`#/login` 上一样刷）。本 name **没有别的用处**，全仓无 `push({name:'customerHome'})` —— 那正是警告说的「用父名不会渲染空路径子记录」那件事，这里靠**给子记录起名**消掉（警告原话：`add a name to the child route to remove the warning`）。
       { path: 'search', component: GoodsSelect, meta: { layout: 'page', public: true } },
       { path: 'msg', component: MessageCenter, meta: { tab: 'msg', layout: 'page' } },   // ⚠️ 2026-10-09：`component` 由 `ChatRoom` 换成 `MessageCenter`（**同行替换**，两壳各一处）—— 本记录现在还承载「通知」tab（`?tab=notify`）；`meta.tab` 仍是 `'msg'` ⇒ 顶栏「消息」在两个 tab 下都亮
       { path: 'cart', component: ShoppingCart, props: { showSwitch: false }, meta: { tab: 'cart', layout: 'cart-container' } },   // ← ⚠️ **必须**传 false：R1 前客户壳是 `<ShoppingCart :showSwitch="false" />`，R1 落码时丢了 ⇒ 该页凭空多出 📋/🛒 开关（且无人监听 = 死控件）。`fix/legacy-chat-tab` 修（见 progress.md §5-X (16)2）
       {
-        path: 'user',
+        path: 'user', name: 'customerUser',   // ⚠️ C3 块 2〈用户块〉：**同行**加 `name`（不新插一行）—— 文件尾那条 `router.addRoute('customerUser', …)` 靠它把「商家入驻」挂成本壳的子页（`addRoute` 的第一个参数**只认 name**）。⚠️ 一旦插行，本组 `:61`-`:122` 的既有行号引用会整体下移。
         component: UserCenter,
         meta: {
           tab: 'user',
@@ -68,12 +68,12 @@ const routes = [
           subMenu: [
             { label: '个人信息', sub: 'info', to: '/customer/user/info' },
             { label: '历史购买记录', sub: 'history', to: '/customer/user/history' },
-            { label: '好友', sub: 'friend', to: '/customer/user/friend' },
+            { label: '好友', sub: 'friend', to: '/customer/user/friend' },{ label: '商家入驻', sub: 'apply', to: '/customer/user/apply' },   // ⚠️ C3 块 2〈用户块〉：**同行**追加（净零行数，理由同本行上方 A5 那条）。落点在文件尾 `addRoute('customerUser', { path: 'apply', … })`，**别**在 `children` 里找它 —— 那条记录是挂上去的，不在字面数组里
             // ⚠️ A5（2026-10-07 用户裁定）：原第 4 项「消息」（`sub: 'chat'` → `/customer/user/chat`）**已删** —— 与顶栏「消息」重复；子路由改 `redirect`（见 `children` 末尾）
           ]
         },
         children: [
-          { path: '', component: UserInfoPage, meta: { sub: 'info' } },
+          { path: '', name: 'customerUserHome', component: UserInfoPage, meta: { sub: 'info' } },   // ⚠️ C3 块 2（2026-10-09）：**同行**加 `name`，理由同 `:58` —— 父 `:63` 那个 `name` 正是**本笔**加的，所以这三条 warn 里有本笔一条。无 `push({name:'customerUserHome'})`；**父名**照旧给文件尾的 `addRoute('customerUser', …)` 用（`checkSameNameAsAncestor` 只禁同名，本 name 与父名不同）。⚠️ `/merchant` 壳下那条**同名**子记录**没有**加 —— 它的父记录本身无 `name`，不发这条 warn，别顺手对称过去。
           { path: 'info', component: UserInfoPage, meta: { sub: 'info' } },
           { path: 'history', component: HistoricalOrders, meta: { sub: 'history' } },
           { path: 'friend', component: FriendRoom, meta: { sub: 'friend' } },
@@ -86,7 +86,7 @@ const routes = [
     path: '/merchant', name: 'merchant', meta: { roles: ['2', '3'] },   // ← 角色边界（同上）：只有**商家**与**管理员**可进（`'3'` = 管理员**两边都能进**，用户 2026-10-06 裁定；细粒度归 C3）。⚠️ `name` 的来历同上一行（`/customer`）
     component: AppShell, props: { nav: MERCHANT_NAV, base: '/merchant', role: 'merchant' },
     children: [
-      { path: '', component: HomeTab, props: { base: '/merchant' }, meta: { tab: 'home', layout: 'home-container', public: true } },
+      { path: '', name: 'merchantHome', component: HomeTab, props: { base: '/merchant' }, meta: { tab: 'home', layout: 'home-container', public: true } },   // ⚠️ C3 块 2：**同行**加 `name`，理由与 `/customer` 那条逐字相同（父 `:86` 有 name）；无任何 `push({name:'merchantHome'})`。
       { path: 'search', component: GoodsSelect, meta: { layout: 'page', public: true } },
       { path: 'msg', component: MessageCenter, meta: { tab: 'msg', layout: 'page' } },   // ⚠️ 2026-10-09：`component` 由 `ChatRoom` 换成 `MessageCenter`（**同行替换**，两壳各一处）—— 本记录现在还承载「通知」tab（`?tab=notify`）；`meta.tab` 仍是 `'msg'` ⇒ 顶栏「消息」在两个 tab 下都亮
       // ⚠️ 两条 order 记录都设 `meta.tab = 'order'` ⇒ 顶栏「订单中心」**两面都亮**（与路由化前
@@ -257,8 +257,8 @@ function searchLanding(to) {
 //    401 出口的落点（`main.js:49`）⇒ 一旦被标成「要登录」，就是**无限重定向**
 //    （未登录 → /login → 守卫又要登录 → /login …）。全站只有这一条会成环。
 //
-// ⚠️ **公开面 = 6 条**（`meta.public: true`）：`/login`、两壳的**首页**子路由、两壳的**搜索**子路由、
-//    `/product`。判据不是感觉，是**后端白名单**：这 6 条下的端点在 `AUTH_WHITELIST` 内，匿名
+// ⚠️ **公开面 = 7 条**（`meta.public: true`）：`/login`、`/register`（C3 块 2〈用户块〉加：与 `/login` **同一个组件、另一个 tab**，记录落在文件尾那块，理由与判据都在那里）、两壳的**首页**子路由、两壳的**搜索**子路由、
+//    `/product`。判据不是感觉，是**后端白名单**：这 7 条下的端点在 `AUTH_WHITELIST` 内（`/register` 靠注册 tab 的 `/user/loginAdd`，`WebAuthConfig.java:101` 已有），匿名
 //    拿得到数据（`HomePage` 的 `goodsSelectHome`/`goodstype`、`GoodsSelect` 的 `productSearch`、
 //    `ProductPage` 的三个商品端点）。反过来，**保护集 = 「该页全部端点都在白名单外」**——
 //    即 R3 的 `navFor()` 在匿名时已经藏起来的那三项（消息 / 购物车|订单中心 / 用户中心）。
@@ -266,7 +266,7 @@ function searchLanding(to) {
 //    不会报错 —— 这是本笔唯一「静默分歧」型的风险。
 //    ⚠️ `/…/search` 判**公开**：它有数据（白名单）、`R4` 的 T-new-4 也期望匿名深链生效。
 //    原本与「首页点搜索仍弹登录提示」（R3 用户裁决 1，三条守卫在 `HomePage.vue`）**并存**；
-//    ⚠️ 该不一致已于 2026-10-06 **结清** —— 三条守卫拆除（改判 2，§5-AG (13)），两处判据现在一致。 ⚠️ **再按语（角色边界，2026-10-06，§5-AG (16)）**：本块的「公开面」在**已登录**一侧**收窄**了 —— 4 条**属某个壳**的公开面（两壳首页 / 搜索）从此只对**匿名**「任何人可进」，**已登录的跨壳用户会被踢回本角色首页**（判据在文件末尾第二条守卫）⇒ 读本块时**别把 `public` 当「谁都能进」**；`/login` 与 `/product` 这两条**壳外**公开面**不受影响**（仍是任何人）。
+//    ⚠️ 该不一致已于 2026-10-06 **结清** —— 三条守卫拆除（改判 2，§5-AG (13)），两处判据现在一致。 ⚠️ **再按语（角色边界，2026-10-06，§5-AG (16)）**：本块的「公开面」在**已登录**一侧**收窄**了 —— 4 条**属某个壳**的公开面（两壳首页 / 搜索）从此只对**匿名**「任何人可进」，**已登录的跨壳用户会被踢回本角色首页**（判据在文件末尾第二条守卫）⇒ 读本块时**别把 `public` 当「谁都能进」**；`/login`、`/register` 与 `/product` 这三条**壳外**公开面**不受影响**（仍是任何人）。
 //
 // ⚠️ **本条的判据只能是 `isLoggedIn()`**（不能是 `getRole()`）：这条划的是**登录**边界。
 //    ⚠️ 原文写「**角色**边界（客户能不能进商家壳）是 RBAC = C3 的事，本笔不做」**已于 2026-10-06 由用户改判**（C3 前必须先做）⇒ 落在**文件末尾的第二条守卫**（§5-AG (16)）；分工 = 本条管**匿名**、末尾那条管**壳归属**。⚠️ **两条的先后有意**：`public` 只豁免匿名 —— 若反过来先看 `public`，两壳首页/搜索这 4 条会漏检（正是用户实测到的现象）。
@@ -336,7 +336,7 @@ router.beforeEach((to) => {
 // ── 滚动行为（A1，2026-10-07）：路由切换置顶 / 后退还原 ──────────────────────────────
 // 治的病（用户实测）：列表页（`GoodsSelect`）滚到中间 → 点商品进详情 ⇒ 详情页**停在差不多的
 //   滚动位置**，不回到顶部。根因**不在**详情页自身，而是「整页滚动」这件事 **7c 之后才成立**：
-//   7c 把 `.app-shell` 由 `height:100vh` 改成 `min-height:100vh`（`AppShell.vue:231-245`）⇒
+//   7c 把 `.app-shell` 由 `height:100vh` 改成 `min-height:100vh`（`AppShell.vue:261-275`）⇒
 //   滚动由「壳内容器滚动」变成「整页（document）滚动」。而 `scrollBehavior` **全仓本来就没配**
 //   ⇒ 既不置顶、也不还原，于是窗口的原滚动位置被原样带进新页。
 //   ⚠️ 反过来说：7c 之前补它也**没用** —— 那时滚的是 `.app-shell` 这个容器，不是 `window`
@@ -421,14 +421,14 @@ function restoreScrollWhenSettled(savedPosition) {
 //     · `title` —— 顶栏面包屑（`AdminShell.vue` 读 `route.meta.title`）。
 //   ⚠️ **不加 `meta.roles`**：父记录的 `['3']` 沿 `matched` 链**合并**下来（与另两壳同一机制）。
 //   ⚠️ **11 条占位记录共用 `StubPage.vue`**（2026-10-08 少一条：`observe/audit` → 真页 `AuditPage.vue`；
-//      2026-10-09 再少一条：`business/notify` → 真页 `NotifyPage.vue`，C3 块 1 · I2）—— 余下 11 条**只差数据**，没有一处结构差异；
+//      2026-10-09 再少一条：`business/notify` → 真页 `NotifyPage.vue`，C3 块 1 · I2；2026-10-09 同日 C3 块 2〈用户块〉再少一条：`business/accounts` → 真页 `AccountsPage.vue`）—— 余下 **10** 条**只差数据**，没有一处结构差异；
 //      而那正是「不该各写一个文件」的判据（见该组件块首注）。
 //   ⚠️ **第三笔的两处命名更正**（用户裁决）：域名「风控域」→「**可观测域**」；
 //      URL `/admin/biz` → `/admin/business`、`/admin/risk` → `/admin/observe`。旧名**已废**。
 //   ⚠️ **URL 裁决（2026-10-08，第三笔过审后）**：两条子项 URL 改名 —— `content` → **`moderation`**、
 //      `flows` → **`timeline`**（其余 9 条保留；理由见 `config/admin-nav.js` 块首）。`meta.sub` 同步改。
 //   ⚠️ 以上所有条**都在本文件最大被引行 `:378` 之后**（那份说明在本块上方），故加行**零漂移**。
-// ⚠️ **11 条占位记录共用同一个组件**（2 个域入口 + 9 个子项；`observe/audit`、`business/notify` 已换真页）⇒ 抽成局部常量，
+// ⚠️ **10 条占位记录共用同一个组件**（2 个域入口 + 8 个子项；`observe/audit`、`business/notify`、`business/accounts` 已换真页）⇒ 抽成局部常量，
 //   免得同一句 `import()` 抄 11 遍。改名的前因见 `StubPage.vue` 块首（它第二笔叫 `DomainStub`）。
 //   ⚠️ 这是**局部**常量（`addRoute` 之前、`:378` 之后），不是顶部 import —— 顶部加行会漂移。
 const AdminStub = () => import('../views/admin/StubPage.vue')
@@ -448,7 +448,7 @@ router.addRoute({
     { path: '', meta: { key: 'ov', title: '概览' }, component: () => import('../views/admin/AdminHome.vue') },
 
     { path: 'business', meta: { key: 'business', title: '业务域' }, component: AdminStub },
-    { path: 'business/accounts',   meta: { key: 'business', sub: 'accounts',   title: '用户与商家治理' }, component: AdminStub },
+    { path: 'business/accounts',   meta: { key: 'business', sub: 'accounts',   title: '用户与商家治理' }, component: () => import('../views/admin/AccountsPage.vue') },   // C3 块 2〈用户块〉：占位 → 真页（**同行替换**，照 `:456` notify 那条的做法）
     { path: 'business/catalog',    meta: { key: 'business', sub: 'catalog',    title: '商品与类目治理' }, component: AdminStub },
     { path: 'business/orders',     meta: { key: 'business', sub: 'orders',     title: '订单治理' },       component: AdminStub },
     { path: 'business/marketing',  meta: { key: 'business', sub: 'marketing',  title: '营销运营' },       component: AdminStub },
@@ -461,6 +461,13 @@ router.addRoute({
     { path: 'observe/timeline',   meta: { key: 'observe', sub: 'timeline',   title: '状态流转' },   component: AdminStub },
     { path: 'observe/logs',       meta: { key: 'observe', sub: 'logs',       title: '实时日志' },   component: AdminStub },
     { path: 'observe/audit',      meta: { key: 'observe', sub: 'audit',      title: '权限与审计' }, component: () => import('../views/admin/AuditPage.vue') },
+
+    // C3 块 2〈用户块〉补丁 B1（2026-10-09 手验后）：管理员**共享收件箱**从 `AccountsPage.vue`
+    //   里提出来、成侧边栏**顶层独立项**（原来它嵌在那页当第 ⑤ 块，页内挤了 4 块）。
+    //   ⚠️ `NotifyInbox` 按 `route.path.startsWith('/admin')` 派生收件人 ⇒ 挂在 `/admin/**` 下
+    //   自动取 `ToType='admin'` / `ToId='*'`（哨兵见该文件 `:99-103`）—— **组件一行不改**。
+    //   ⚠️ 本行**追加在 children 末尾**（`:462` 是全仓对该文件的最大被引行，插在它之前会集体漂移）。
+    { path: 'inbox', meta: { key: 'inbox', title: '通知收件箱' }, component: () => import('../views/NotifyInbox.vue') },
   ],
 })
 
@@ -503,3 +510,31 @@ router.addRoute({
 
 router.addRoute('customer', { path: 'notify', redirect: '/customer/msg?tab=notify' })
 router.addRoute('merchant', { path: 'notify', redirect: '/merchant/msg?tab=notify' })
+
+// ══════════════════════════════════════════════════════════════════════════════════════════
+// ── C3 块 2〈用户块〉（2026-10-09）：注册直达 + 商家入驻 ─────────────────────────────────────
+//
+// ⚠️ **为什么两条都走 `addRoute`、而不是往 `routes` 数组 / 两壳的 `children` 里插一条**：同上（`:478-484`）——
+//   全仓对 `router/index.js` 的**最大被引行**在 `:462`（C3 骨架 `/admin` 块的末行），
+//   而 `routes` 数组（`:51-124`）、两壳的 `children`（`:57-83` / `:88-122`）、`ROLE_HOME`（`:192`）、
+//   `landingFor`（`:197`）、两条守卫（`:241-299` / `:329-334`）**全在那条线之前**
+//   ⇒ 往里插**任何**一行，它们集体漂移。本仓既有手法 = 「新增行落在最大被引行**之后**」（第五次适用）。
+//
+// ⚠️ **`/register` 不做成独立页**：注册面就是 `LoginPage` 的**另一个 tab**（`isSlide`）——
+//   组件同一个、样式同一套；另起一页 ⇒ 两处注册表单立刻分叉（改一处忘一处）。
+//   本记录只多带一个 `meta.register`，它**只当「初始 tab」**用（`LoginPage.vue` 的 `data()` 读它），
+//   **不参与**任何守卫判据。
+// ⚠️ **`meta.public: true` 的判据仍是后端白名单**：注册 tab 的 POST 打 `/user/loginAdd`，
+//   它**本来就在** `AUTH_WHITELIST` 内（`WebAuthConfig.java:101`）⇒ 这一条**不是**「把受保护端点放行」，
+//   只是给同一个组件补一个能直达注册 tab 的地址。⇒ 公开面 **6 → 7 条**：
+//   `:262` / `:263` 那两处的数目与 `:271` 的壳外列举**已同步改**（三处一处不改就是静默分歧）。
+//
+// ⚠️ **「商家入驻」挂成 `customerUser` 的*子页***（不新开壳、不进 `/merchant/*`）：
+//   入口在用户中心左菜单（`:72` 同行追加的那项，`sub: 'apply'`）。`addRoute` 的第一个参数**只认 name**
+//   ⇒ 靠 `:63` 同行加的那个 `name: 'customerUser'`。落在此处的 `meta.sub` 让左菜单高亮在「商家入驻」。
+//   ⚠️ **为什么不挂 `/merchant/*`**：此刻用户**还不是**商家（`login.Role` 仍是 `'1'`），
+//   进商家壳会被**壳归属守卫**（`:329-334`）踢回本角色首页 —— 页面对用户来说等于不存在。
+// ══════════════════════════════════════════════════════════════════════════════════════════
+
+router.addRoute('customerUser', { path: 'apply', component: () => import('../views/MerchantApplyPage.vue'), meta: { sub: 'apply' } })
+router.addRoute({ path: '/register', component: LoginPage, meta: { public: true, register: true } })

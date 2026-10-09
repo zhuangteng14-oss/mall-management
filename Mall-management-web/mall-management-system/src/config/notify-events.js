@@ -1,6 +1,6 @@
 // src/config/notify-events.js —— 系统通知**事件类型 code → 中文标签**（C3 块 1 · I2，2026-10-09）。
 //
-// 它对应后端的 `notification/NotificationEvents.java`（21 条常量）。**两张表必须逐字对齐** ——
+// 它对应后端的 `notification/NotificationEvents.java`（24 条常量）。**两张表必须逐字对齐** ——
 // 后端那个类的类注释写明了「写入方与读出方各写一遍，第二处抄错双方都不报错」，本文件就是那个「读出方」。
 //
 // ⚠️ 【本文件最容易做错、也最不该做错的一条】**必须有兜底**。
@@ -16,7 +16,7 @@
 //    所以「一个恰好叫 `constructor` 的未知 code」是**可达**的。故判据必须是「**自有**属性」。
 
 /**
- * code → 中文标签。**21 条**，顺序与后端 `NotificationEvents.java` 的「归属块」分组一致。
+ * code → 中文标签。**24 条**，顺序与后端 `NotificationEvents.java` 的「归属块」分组一致。
  *
  * ⚠️ 加一条 = 后端 `NotificationEvents` 加常量 + 本表加一行 + `EVENT_OPTIONS` 加一项（**三处**）。
  *    漏掉本文件只会让**新类型**显示成 code 原文（兜底在，不崩），漏掉后端常量则写入方没得引 —— 不会静默。
@@ -34,12 +34,20 @@ export const EVENT_LABELS = {
   'report.handled': '举报已处理',
 
   // ── 块 2：用户与商家治理 ────────────────────────────────────────────────
+  // ⚠️ 上面 6 条**建块 1 时就登记了**（那张表是「清单要覆盖到后续所有块」，不是「本块会发」）；
+  //    下面 3 条是块 2 真正**开始发**的（2026-10-09）—— 判据记在此处，免得日后误以为前 6 条没实现。
   'user.audit.passed': '用户审核通过',
   'user.audit.rejected': '用户审核驳回',
   'user.banned': '账号被封禁',
   'user.unbanned': '账号已解封',
   'merchant.audit.passed': '商家入驻通过',
   'merchant.audit.rejected': '商家入驻驳回',
+  // ⚠️ 收件人不是申请人本人：`merchant.apply.submitted` 走的是**管理端的共享收件箱**
+  //    （`ToType='admin'`、`ToId='*'`，见 `MerchantApplicationController.ADMIN_INBOX_ID`）
+  //    —— 它是三条里唯一**发往管理端**的；另两条发给商家本人。
+  'merchant.apply.submitted': '商家入驻申请已提交',
+  'merchant.downgrade.scheduled': '商家降级已排定',
+  'merchant.downgrade.applied': '商家降级已生效',
 
   // ── 块 3：商品与类目治理 ────────────────────────────────────────────────
   'goods.audit.passed': '商品审核通过',
@@ -70,6 +78,9 @@ export const EVENT_OPTIONS = [
   { code: 'user.unbanned', label: '账号已解封' },
   { code: 'merchant.audit.passed', label: '商家入驻通过' },
   { code: 'merchant.audit.rejected', label: '商家入驻驳回' },
+  { code: 'merchant.apply.submitted', label: '商家入驻申请已提交（发往管理端）' },
+  { code: 'merchant.downgrade.scheduled', label: '商家降级已排定' },
+  { code: 'merchant.downgrade.applied', label: '商家降级已生效' },
   { code: 'goods.audit.passed', label: '商品审核通过' },
   { code: 'goods.audit.rejected', label: '商品审核驳回' },
   { code: 'goods.violation.removed', label: '违规商品下架' },

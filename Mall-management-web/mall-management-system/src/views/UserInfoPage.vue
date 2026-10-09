@@ -5,9 +5,9 @@
         + `docs/美化/pages/UserCenter-merchant.html`（434 行，① – ⑥ 在 `:290-374`）。
     ⚠️ 稿是**两份**（客户 / 商家），但左菜单那一支（`.uc-menu`，稿 `:291` / `:277`）**已由 C 笔
        落进 `UserCenter.vue`**（该文件 `:77-86` 引稿 `:141-151` / `:134-145`）⇒ 本页**只承载右栏**。
-       `UserCenter.vue` 是多根 fragment（`.user-menu` + `<router-view>`），`AppShell.vue:361-365`
+       `UserCenter.vue` 是多根 fragment（`.user-menu` + `<router-view>`），`AppShell.vue:440-444`
        的 `.user-page` 是 flex 行 ⇒ `<main class="uc-main">` 就是那一行的第二个 flex 子项。
-    角色分支**只写在模板里**（判据与 `getUserData()` 的分支逐字同构）⇒ `<script setup>` 零改动。
+    角色分支**只写在模板里**（判据的**唯一真源** = `/user/me` 的 `role`，落成 `<script setup>` 里一个叫 `isMerchantShell` 的 computed；D 笔当年那句「与 `getUserData()` 的分支逐字同构」**已被 C3 块 2〈用户块〉作废**，三条理由见该 computed。C3 块 2 另给本页加「降级状态条」与 ⑦「资料完善」，两处都不改本页原有四个函数的语义）。
   -->
   <main class="uc-main">
 
@@ -47,12 +47,12 @@
         class="file-hidden"
         @change="doUpload"
       >
-    </section>
+    </section><!-- ⚠️ C3 块 2〈用户块〉**降级状态条**：同行追加、不新插一行 —— 本文件第 55 行（分支判据那行）被 `context-packs/c3-block-2-user.md` 按行号引，而它在本行之后 ⇒ 插行会让那条引用当场失效。位置选在 ① 身份卡之后、两支模板之前：`scheduled`（还没降级，人在商家壳）与 `frozen`（已降级，`login.Role` 已被改回 1 ⇒ 人在客户壳）画的正是两支不同模板，状态条必须在两边都看得见。文案里**不给**「申诉 / 恢复」控件：恢复走管理端 `downgrade/relist`，商家侧本块没有自助端点；`DowngradeReason` 本身就是要给商家看的原因（`/user/me` 那 5 列）。 --><p v-if="dg" class="dg-note" :class="dg.state"><b class="dg-tag">{{ dg.tag }}</b>{{ dg.text }}<span class="dg-why">原因：{{ dg.reason }}</span></p>
 
-    <!-- ── ②–⑤ 客户 / 商家两版（稿分两份）──────────────────────────────────────────
-         分支判据 `!customerid && merchantid` 与 `getUserData()` 里 `if (data.customerid) … else if
-         (data.merchantid) …` **同一套**；未取到资料时（两个都空）落客户版（占比更高的一侧）。 -->
-    <template v-if="!userInfo.customerid && userInfo.merchantid">
+    <!-- ── ②–⑤ 客户 / 商家两版（稿分两份）—— ⚠️ 分支判据 C3 块 2〈用户块〉**已换**：旧 `!customerid && merchantid`
+         （与 `getUserData()` 里 `if (data.customerid) … else if (data.merchantid)` 同构）**已废** ⇒ 现为 `isMerchantShell`。
+         旧的为什么必须废、新的为什么只能是它：三条理由逐条写在 `<script setup>` 里那个同名 `computed` 上。 -->
+    <template v-if="isMerchantShell">
 
       <!-- ── ② 经营数据（商家版）—— 间距分隔（无线）+ 数字用色。稿 `:311-317` ─────────
            ⚠️ 稿的四个数（18 件 / 3 单 / 26 单 / 5 条）是它的示意值，无聚合端点 ⇒ **落 `—`**
@@ -245,11 +245,40 @@
       </div>
     </section>
 
+    <!-- ── ⑦ 资料完善（C3 块 2〈用户块〉**新增**）─────────────────────────────────────
+         ⚠️ 与 ① 身份卡的分工：卡是**只读展示**（`usertype` / `gender` / `age`），本块才是**编辑**入口；
+            `gender` / `age` 在本笔**之前没有任何前端入口**（`/user/updateProfile` 是新端点）。
+         ⚠️ 它走 `POST /user/updateProfile`（**不是**上面那个 `/user/updateUserInfo`）—— 两个端点收的
+            字段集**不相交**，**别合并成一个「保存」**：合并会要求一次请求改两处，而任一处失败时
+            「另一处算不算存下」没有答案（后端也是两个 `@PostMapping`）。
+         ⚠️ 空值语义：留空并保存 = **清空该列**（后端把「没填」当「没有」，不当「保持原值」）。 -->
+    <section class="sec">
+      <div class="sec-h"><h2>资料完善</h2></div>
+      <div class="form2">
+        <div class="f">
+          <label for="gender">性别</label>
+          <select id="gender" v-model="userInfo.gender">
+            <option value="">未填写</option>
+            <option value="男">男</option>
+            <option value="女">女</option>
+          </select>
+        </div>
+        <div class="f">
+          <label for="age">年龄</label>
+          <input id="age" type="number" min="0" max="150" v-model.number="userInfo.age" placeholder="暂未填写年龄">
+        </div>
+      </div>
+      <div class="actions">
+        <button class="btn btn-primary" @click="saveProfile">保存资料完善</button>
+        <span class="dp-hint">留空 = 清空该列（后端把「没填」当「没有」）</span>
+      </div>
+    </section>
+
   </main>
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, computed } from 'vue'
 import { http, handleApiError, assetOf } from '../api/http'
 import { endpoints } from '../api/endpoints'
 import { getUsername, isLoggedIn } from '../api/auth'
@@ -258,6 +287,53 @@ const userInfo = ref({})
 const idType = ref('')
 const idValue = ref('')
 const fileInput = ref(null)
+
+// ══════════════════════════════════════════════════════════════════════════════
+// C3 块 2〈用户块〉新增三处：① 壳判据 `isMerchantShell` ② 降级状态条 `dg`
+//                            ③ 资料完善的保存 `saveProfile`（在文件下方）
+// ══════════════════════════════════════════════════════════════════════════════
+
+/**
+ * 「此刻该画商家版还是客户版」—— **判据只有 `role` 一个**。`role` 来自 `/user/me`
+ * （后端把 `identity.role()` 直接塞进 payload），**就是路由守卫 `router/index.js` 匹配路由用的那个数**。
+ *
+ * 三条理由，都是实测出来的、不是口味：
+ *  ① 旧判据 `!customerid && merchantid` **已废** —— `UserGovernanceDao.promoteToMerchant` 在入驻
+ *     通过时**刻意保留 `customerid`**（老客户号不回收）⇒ 「有 `merchantid`」不再等价于「是商家」，
+ *     旧判据会把**商家**判成客户版（左菜单长出客户项的错版）。
+ *  ② 改判 `usertype === '商家'` 同样错、而且更坏 —— `MerchantDowngradeService.applyFreeze` 降级冻结时
+ *     **刻意不改 `usertype`**（仍是「商家」），只把 `login.Role` 改回 1 ⇒ 会画出**商家版**、连带一条
+ *     `/merchant/user/list` 链接，而角色守卫当场把它弹回客户壳首页（**死链**）。`usertype` 还是中文
+ *     魔法串，判它会把「降级中的商家」和「真商家」混成一类。
+ *  ③ ⇒ 唯一与「用户此刻站在哪个壳里」**同源**的判据就是 `role`。`String(...)` 是必需的：库里
+ *     `login.Role` 是 `varchar`、`/user/me` 答的是字符串 `"2"`，而 `Map<String,Object>` 反序列化在
+ *     别的路径上给过数字 ⇒ 两侧都规约成字符串再比，**不比类型**。
+ *
+ * ⚠️ 取不到资料时（`userInfo` 还是空 `{}`）⇒ `role` 为 `undefined` ⇒ 落**客户版**（占比更高的一侧，
+ *    与本页 `getUserData()` 两个号都为空时的兜底同向）。
+ */
+const isMerchantShell = computed(() => String(userInfo.value.role) === '2')
+
+/**
+ * 降级状态条（`null` = 不渲染）。读数全部来自 `/user/me` 那 5 列 —— 它们是 `user` 表的整行。
+ *
+ * `DowngradeState` 三态：`none`（默认）/ `scheduled`（已排定、通知期内**照常经营**）/
+ * `frozen`（已降级冻结）。⚠️ 后端 `MerchantDowngradeService` 是**五阶段**：排定 → 通知期 → 冻结 →
+ * （30 天窗口内重新申请并再次通过 = `approved-restored` 自动恢复）/ 管理端人工 `relist`。
+ * 本页**只显示状态、不给控件** —— 商家侧本块**没有**自助恢复端点，恢复在管理端。
+ */
+const dg = computed(() => {
+  const s = userInfo.value.DowngradeState
+  if (s !== 'scheduled' && s !== 'frozen') return null
+  return {
+    state: s,
+    tag: s === 'scheduled' ? '降级已排定' : '账号已降级冻结',
+    text: s === 'scheduled'
+      ? `生效时刻 ${userInfo.value.ScheduledDowngradeAt || '—'}（通知期内仍可正常经营）`
+      : `冻结于 ${userInfo.value.FrozenAt || '—'}，保留至 ${userInfo.value.FreezeUntil || '—'} —— 冻结期内重新提交入驻申请并通过，即自动恢复`,
+    reason: userInfo.value.DowngradeReason || '—',
+  }
+})
 
 onMounted(() => {
   getUserData()
@@ -273,7 +349,14 @@ const getUserData = async () => {
     const data = await res.json()
     userInfo.value = data
 
-    if (data.customerid) {
+    // ⚠️ C3 块 2〈用户块〉：判据必须与 `isMerchantShell` **同一个** —— 原来只看号且 `customerid` 优先，
+    //    而 `promoteToMerchant` 刻意保留 `customerid` ⇒ 入驻通过的**商家**会被标成「客户 ID XXXX」，
+    //    跟他眼前正画着的**商家版**自相矛盾。改判 `role`（= 他在哪个壳）；降级冻结后 `role` 回 1
+    //    ⇒ 又变回「客户 ID」，与「商品已冻结、人在客户壳」一致。
+    if (String(data.role) === '2') {
+      idType.value = '商家 ID'
+      idValue.value = data.merchantid || '—'
+    } else if (data.customerid) {
       idType.value = '客户 ID'
       idValue.value = data.customerid
     } else if (data.merchantid) {
@@ -332,6 +415,40 @@ const saveUserInfo = async () => {
     alert('保存请求异常')
   }
 }
+
+/**
+ * 保存「资料完善」（`gender` / `age`）—— ⑦ 那一块。
+ *
+ * ⚠️ 与上面 `saveUserInfo` 是**两个端点、两次请求**，**不合并**：`/user/updateProfile` 收
+ *    `gender` / `age`，`/user/updateUserInfo` 收 `email` / `address` / `selfintroduction`，
+ *    字段集不相交；合并了就没法回答「一半失败算不算存下」。
+ * ⚠️ 两个空值都**照发**（`''`）—— 后端把「没填」当「没有」⇒ 留空并保存 = **清空该列**。
+ *    这里刻意**不走** `api/*.js` 里那个「空值不发」的 `q()`（那是管理端几份副本的口径）：
+ *    本页原生的 `saveUserInfo` 也照发空串，两处**同款**，别只为这一处改口径。
+ */
+const saveProfile = async () => {
+  const username = getUsername()
+  if (!username) {
+    alert('未登录')
+    return
+  }
+  try {
+    const res = await http.post(endpoints.user.updateProfile, new URLSearchParams({
+      username: username,
+      gender: userInfo.value.gender || '',
+      age: userInfo.value.age === null || userInfo.value.age === undefined ? '' : String(userInfo.value.age),
+    }))
+    const data = await res.json()
+    if (data.success) {
+      alert('资料完善已保存')
+      getUserData()
+    } else {
+      alert('保存失败：' + data.msg)
+    }
+  } catch (err) {
+    alert('保存请求异常')
+  }
+}
 </script>
 
 <style scoped>
@@ -353,7 +470,7 @@ const saveUserInfo = async () => {
         `.svc button[disabled]{cursor:not-allowed}`（稿的全局 `button{cursor:pointer}` 不带
         `:not([disabled])`，照抄会把禁用项画成可点）。
      ④ 稿里 `.rail` 的两个容器 `.uc` / `.uc-menu` **不进本组件**（它们的落点是 `UserCenter.vue`
-        与 `AppShell.vue:361-365`）⇒ 未搬。
+        与 `AppShell.vue:440-444`）⇒ 未搬。
    ⚠️ `box-sizing` **不在此重复** —— `tokens.css:52-56` 的 `*` 重设已是全局（`:55`）。
    ══════════════════════════════════════════════════════════════════════════════ */
 
@@ -383,7 +500,7 @@ button {
    落到根上（`background` 不搬 —— 壳 `.app-shell:188-194` 已经铺了 `var(--bg)`，
    在 `main.uc-main` 上再铺一次会把右栏画成一块与左菜单不同的底）。
    `flex:1` + `min-width:0` —— 本组件是 `AppShell.vue` 的 `.user-page` 那个 flex 行的直接子项。
-   ⚠️ **本仓没有稿那条全局 `body{}`**（`AppShell.vue:257-260` 明写：全仓一条字体声明都没有、
+   ⚠️ **本仓没有稿那条全局 `body{}`**（`AppShell.vue:287-290` 明写：全仓一条字体声明都没有、
      壳只声明在「顶栏 / 左菜单」三件上，**页面主体留给 D 笔**；`HomePage.vue:40-49` 是同一套
      落法的先例）⇒ 这三条必须在每个页面根上各自声明，否则正文走**浏览器默认 16px + 本机
      解析到的 `"Noto Sans SC"`**（本机实测），而稿是 `--fs-sm`（15px）+ `var(--font)`。
@@ -480,11 +597,11 @@ button {
 .form2 { display: grid; grid-template-columns: 1fr 1fr; gap: var(--s5); }
 .f { margin-top: var(--s5); }
 .f > label { display: block; margin-bottom: var(--s2); font-size: var(--fs-xs); color: var(--ink-2); }
-.f input, .f textarea { width: 100%; padding: 0 var(--s3); border: 1px solid var(--line-2); border-radius: var(--r2);
+.f input, .f textarea, .f select { width: 100%; padding: 0 var(--s3); border: 1px solid var(--line-2); border-radius: var(--r2);
                         background: var(--surface); transition: border-color .15s, box-shadow .15s; }
-.f input { height: 46px; }
+.f input { height: 46px; } .f select { height: 46px; padding: 0 var(--s2); cursor: pointer; }
 .f textarea { min-height: 96px; padding: var(--s3); resize: vertical; line-height: 1.7; }
-.f input:focus, .f textarea:focus { outline: none; border-color: var(--brand); box-shadow: 0 0 0 3px var(--brand-tint); }
+.f input:focus, .f textarea:focus, .f select:focus { outline: none; border-color: var(--brand); box-shadow: 0 0 0 3px var(--brand-tint); }
 .actions { margin-top: var(--s6); }
 
 /* ── 按钮（稿的全局 `button{font:inherit;color:inherit;background:none;border:0}` 的收窄版）──
@@ -499,6 +616,27 @@ button {
 .btn-plain:hover { border-color: var(--brand); color: var(--brand-ink); }
 .btn-primary { background: var(--brand); color: var(--bg); }
 .btn-primary:hover { background: var(--brand-hover); }
+
+/* ── ⑦ 资料完善 + 降级状态条（C3 块 2〈用户块〉新增）───────────────────────────
+   ⚠️ ⑦ **复用 ⑥ 那一套**（`.form2` / `.f` / `.actions`）—— 这不是「省事」：两块都是
+      「栅格 + 标签 + 控件 + 保存」的同一形态，另起一套只会让窄屏那条 `@media` 里
+      `.form2{grid-template-columns:1fr}` 少覆盖一块。`.f select` 的样式已折进上面 ⑥ 的三条规则
+      （规则选择器里加一个 `.f select`），**不另起**。
+   ⚠️ 色一律走**语义族**（`--info-*` / `--warning-*`，tokens.css `:141` / `:139`，两套主题各有一份）
+      —— 不碰 `--c1`-`--c10`：那是图表色板，且 `probe-c3-admin-preview.mjs` 按像素量过 `--c6`。 */
+.dp-hint { margin-left: var(--s4); font-size: var(--fs-xs); color: var(--ink-3); }
+
+/* 降级状态条 —— 挂在 ① 身份卡与两支模板之间（模板里那条「同行追加」的 `<p>`）。
+   ⚠️ `scheduled` 用 `--info-*`（通知期内**照常经营**，是提示不是警告）、`frozen` 用 `--warning-*`
+      （商品已冻结，是既成事实）—— 两态**只用底色区分**，文字在 `.dg-tag` 里另有明说
+      （色不能是唯一判据，色盲用户拿不到「已排定 / 已冻结」的区别）。 */
+.dg-note { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--s2) var(--s3);
+           margin-top: var(--s5); padding: var(--s4) var(--s5); border-left: 3px solid var(--info);
+           border-radius: var(--r2); background: var(--info-ground); color: var(--info-deep);
+           font-size: var(--fs-sm); line-height: 1.7; }
+.dg-note.frozen { border-left-color: var(--warning); background: var(--warning-ground); color: var(--warning-deep); }
+.dg-note .dg-tag { flex: none; font-weight: var(--fw-med); }
+.dg-note .dg-why { color: inherit; opacity: .75; }
 
 @media (max-width: 1120px) {
   /* ⚠️ 窄屏顺序：DOM 是 头像 → 名字 → 三项 → 按钮。直接 flex-wrap 会让按钮独占第三行、靠左，

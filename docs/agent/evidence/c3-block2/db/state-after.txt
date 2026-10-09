@@ -1,0 +1,70 @@
+URL        : jdbc:mysql://192.168.229.129:3306/mall_management_sql?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai&characterEncoding=utf-8
+serverUuid : 7f5a9290-b437-11f1-811d-000c299341f0
+hostname   : ubuntu-server
+VERSION()  : 8.4.11-0ubuntu0.26.04.1
+DATABASE() : mall_management_sql
+CURRENT_USER: test@%
+-- tables --
+  admin_audit
+  customerimage
+  friend
+  goods
+  goodstype
+  login
+  merchant_application
+  merchantimage
+  message
+  notification
+  notification_template
+  order
+  order_state_transition
+  productsales
+  user
+  user_conversation_read
+count      : 16
+-- columns of user --
+  username | char(20) | null=NO | def=null | comment=
+  usertype | char(20) | null=YES | def=null | comment=
+  customerid | char(20) | null=YES | def=null | comment=
+  merchantid | char(20) | null=YES | def=null | comment=
+  gender | char(20) | null=NO | def=null | comment=
+  age | int | null=NO | def=null | comment=
+  email | char(40) | null=YES | def=null | comment=
+  selfintroduction | varchar(100) | null=YES | def=null | comment=
+  address | varchar(20) | null=YES | def=null | comment=
+  banned | tinyint(1) | null=NO | def=0 | comment=是否封禁：1 封 / 0 正常。登录闸与已登录会话校验都查这列
+  banReason | varchar(255) | null=YES | def=null | comment=封禁理由（banned=1 时有值）
+  bannedAt | datetime(3) | null=YES | def=null | comment=封禁时刻；未封为 NULL
+  DowngradeState | varchar(16) | null=NO | def=none | comment=商家降级状态：none / scheduled（通知期）/ frozen（已降级冻结）
+  ScheduledDowngradeAt | datetime(3) | null=YES | def=null | comment=计划降级生效时刻（= 发起时刻 + 1 天通知期）
+  DowngradeReason | varchar(255) | null=YES | def=null | comment=降级原因 ⚠️ 这是**给商家看的**（会出现在降级通知与 /user/me），填写时当「会公开」写
+  FrozenAt | datetime(3) | null=YES | def=null | comment=实际冻结（降级生效）时刻
+  FreezeUntil | datetime(3) | null=YES | def=null | comment=冻结保留截止（= FrozenAt + 30 天）；此后重新申请通过需人工确认才恢复
+-- columns of goods --
+  Id | int | null=NO | def=null | comment=
+  MerchantId | char(20) | null=NO | def=null | comment=
+  GoodName | char(40) | null=NO | def=null | comment=
+  Price | double | null=NO | def=null | comment=
+  GoodImg | char(100) | null=NO | def=null | comment=
+  GoodType | char(20) | null=YES | def=null | comment=
+  ProductCode | char(40) | null=YES | def=null | comment=
+  GoodTypeNew | int | null=YES | def=null | comment=
+  ShelfState | tinyint(1) | null=NO | def=1 | comment=上架状态：1 在架 / 0 已下架（降级冻结只置 0，不删行）
+  DelistedAt | datetime(3) | null=YES | def=null | comment=下架时刻；在架为 NULL
+-- columns of merchant_application --
+  Id | bigint | null=NO | def=null | comment=自增主键
+  Username | varchar(20) | null=NO | def=null | comment=申请人账号（user.username）。⚠️ 软引用，不设 FK（同 notification.TargetId 口径）
+  ShopName | varchar(64) | null=NO | def=null | comment=店铺名
+  LicenseNo | varchar(64) | null=NO | def=null | comment=营业执照号
+  ContactName | varchar(20) | null=YES | def=null | comment=联系人姓名
+  ContactPhone | varchar(20) | null=YES | def=null | comment=联系电话
+  ShopAddress | varchar(128) | null=YES | def=null | comment=店铺地址
+  LicenseImage | varchar(500) | null=YES | def=null | comment=证件图 URL；无图 NULL
+  Status | varchar(16) | null=NO | def=pending | comment=审核状态：pending / approved / rejected（小写，与 CAS 的 WHERE Status=? 字面一致；字符串码，不建 DB ENUM）
+  RejectReason | varchar(255) | null=YES | def=null | comment=驳回理由（Status=rejected 时有值）
+  BatchId | varchar(36) | null=NO | def=null | comment=提交时生成的 UUID；给通知与审计一个跨重导稳定的 TargetId（同 I2 的 BatchId 理由）
+  SubmittedAt | datetime(3) | null=NO | def=CURRENT_TIMESTAMP(3) | comment=提交时刻（DB 存 UTC）
+  ReviewedBy | varchar(20) | null=YES | def=null | comment=审核的管理员账号名（管理员无独立业务号）
+  ReviewedAt | datetime(3) | null=YES | def=null | comment=审核时刻；未审为 NULL
+  created_at | datetime | null=NO | def=CURRENT_TIMESTAMP | comment=行落库时刻（agent.md 数据库管理规则 8）
+  updated_at | datetime | null=NO | def=CURRENT_TIMESTAMP | comment=行更新时刻（审核会 UPDATE，故本表非 append-only）

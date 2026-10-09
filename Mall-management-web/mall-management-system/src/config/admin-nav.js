@@ -31,6 +31,12 @@
 // ⚠️ 子项的 `key` 在**本域内**唯一即可（点亮只比本域的子项），全表不要求唯一。
 export const ADMIN_SIDEBAR = [
   { key: 'ov', label: '概览', to: '/admin', subs: [] },
+  // ⚠️ 补丁 B1（2026-10-09 手验后）：**通知收件箱**从 `AccountsPage.vue` 第 ⑤ 块提出来，
+  //   成**顶层独立项**（`subs: []` ⇒ 与「概览」同形，侧边栏仍是**两级**、没增深）。
+  //   理由：那页页内有 4 块（入驻审核 / 用户治理 / 降级控制 / 收件箱），靠滚动区分；
+  //   收件箱与前三块**不同域**（它是「发给管理员的待办」，不属用户与商家治理）⇒ 拆出去。
+  //   URL `/admin/inbox`（`router/index.js` 的 `children` 末条，`meta.key` = `inbox` **逐字**）。
+  { key: 'inbox', label: '通知收件箱', to: '/admin/inbox', subs: [] },
   {
     key: 'business', label: '业务域', to: '/admin/business',
     subs: [

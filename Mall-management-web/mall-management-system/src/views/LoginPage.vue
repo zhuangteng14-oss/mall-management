@@ -245,7 +245,7 @@ export default {
   name: "LoginPage",
   data() {
     return {
-      isSlide: false,
+      isSlide: !!(this.$route && this.$route.meta && this.$route.meta.register),   // ⚠️ C3 块 2〈用户块〉：**同行**把常量 `false` 换成「由路由 `meta` 定初值」（净零行数；本文件被 `c3-block-2-user.md` 按 `:161-223` / `:283-287` / `:289-330` / `:359-390` 引 ⇒ 一行都不能插）。真源 = `router/index.js` 文件尾那条 `addRoute({ path: '/register', …, meta: { public: true, register: true } })`：`#/register` 就是「落在这页的注册面」，刷新 / 分享 / 后退都停得住（两态回写 URL 那半在 `toggle()` 的**同行追加**里，别只做一半）。⚠️ 只在 `data()` 里读一次 ⇒ 仅供**初次挂载**（Vue 复用了组件实例，tab 内互切不再重跑 `data()`，正是所要）；`/login` 不写 `meta.register` ⇒ 得 `false`，与改动前逐字一致。
       // ── commit 12b（2026-10-07）：本笔新增 **3 个 UI 展示状态**，按 §口径 7 登记 ────────────
       // 该条口径（用户裁决）：D 笔边界「`script` 一字不动」的**目的 = 功能量恒为 0**
       //   —— 不动 API 调用 / 状态机 / `watch` / 轮询 / 业务逻辑。
@@ -283,7 +283,7 @@ export default {
     toggle() {
       this.isSlide = !this.isSlide;
       this.loginWarnText = "";
-      this.clearAllErr();
+      this.clearAllErr();   /* ⚠️ C3 块 2〈用户块〉**同行追加**（本文件被 `c3-block-2-user.md` 按 `:283-287` / `:289-330` 引 ⇒ 一行都不能插，故用块注释、语句也压在同一物理行）：把 tab 与 URL 绑回**同一处真源** —— `#/register` 要能刷新 / 分享 / 后退都停在注册面。⚠️ 只在本页那**两条**路由间 `replace`（`/login` / `/register`，两条都 `meta.public` 且无 `meta.roles` ⇒ 两条守卫都放行：`router/index.js:296` / `:332`）；用 `replace` 不用 `push` ⇒ 翻 tab 不往历史里灌垃圾。⚠️ 五个调用点（`:48`/`:49`/`:115`/`:157`/`:221`）都带 `!isSlide &&` / `isSlide &&` 守卫 ⇒ 每次调用后路径必变，**不会**撞 `NavigationDuplicated`。⚠️ 注册成功那处（`:452` **直赋** `this.isSlide = false`）不走本行 ⇒ URL 会停在 `/register` —— 已知、可接受（那一屏是「注册成功」提示面，刷新回到注册面反而更合理）。 */ if (this.$route && (this.$route.path === '/login' || this.$route.path === '/register')) this.$router.replace(this.isSlide ? '/register' : '/login')
     },
 
     async login() {
@@ -297,7 +297,7 @@ export default {
             username: this.loginAccount,
             password: this.loginPwd
           }));
-        const role = await res.text();
+        const role = await res.text(); if (role.trim() === "4") { this.loginWarnText = "账号已被封禁，请联系管理员解封"; return; }   // ⚠️ C3 块 2 用户块**手验后补丁**（2026-10-09，用户第 2 条）：封禁用户登录必须说「已封禁」，而不是落成「未识别到账户」。⚠️ **必须写在 `:306` 的 `/user/me` 之前**：封禁用户后端**不写会话** ⇒ 那一发必 401、先抛，异常被 `:328` 的通用文案接走；写在下面那条 `if/else` 链（`:317` 起）里是**死代码** —— `role === "0"` 那支今天就是这么死的（它同样在 `:306` 之后）。⚠️ 用 `role.trim()` 比对：`res.text()` 是**原始**响应体（A3 的断言也是 `body.trim()`）。同行追加，保净零行数（本文件被 `c3-block-2-user.md` 按 `:283-287` / `:289-330` 引）。
 
         // 登录成功后立即获取用户信息，保存商家ID / 客户ID
         // P2.6（2026-10-05）：改走**会话驱动**的 /user/me —— 凭据只在上一发 loginSelect 里出现，
@@ -314,7 +314,7 @@ export default {
         if (userData.customerid) { setCustomerId(userData.customerid); clearMerchantId(); }   // 客户：清上一位商家的 merchantid
         // ⚠️ 清**写在这两个「有值」分支内**：role=0 / `me` 401 那一发 body 里没有 id ⇒ 两个分支都不跑 ⇒ 不会误伤「已登录又登一次、密码打错」的旧身份。
 
-        if(role === "0"){
+        if(role === "0"){   // ⚠️ **本支不可达**（2026-10-09 核实，非本笔引入）：它排在 `:306` 的 `/user/me` **之后**，而 `role === "0"` 时后端不写会话 ⇒ 那一发必 401、先抛 ⇒ 异常被 `:328` 的通用文案接走，永远轮不到这里。留着只为**不动行号**（本文件最大被引行是 `:687`）。封禁（`"4"`）那支已按同一理由提到 `:300` 去早退。
           this.loginWarnText = "未找到该用户，请查看对应账号密码有无写错，或者前往右侧进行注册";
         }else if(role === "1"){
           setUsername(this.loginAccount); setRole(role); await this.mintToken(role);   // ⚠️ 止血笔：同行追加，保持净零行数（防 `api-contract.md:172` 引的 `:216` 漂移）；P2.6 起 setCredentials → setUsername；多账户隔离笔（2026-10-06）再加铸票（见 mintToken）
@@ -462,7 +462,7 @@ export default {
     clearAllErr() {
       this.clearErr();
     }
-  }
+  }, watch: { '$route'(to) { this.isSlide = !!(to.meta && to.meta.register) } }   /* ⚠️ C3 块 2〈用户块〉：**同行追加**在 `methods` 的收尾 `}` 之后（本文件被 `c3-block-2-user.md` 按 `:283-287` / `:289-330` / `:359-390` 引 ⇒ 一行都不能插）。【为什么 `data()` 里那次初值**不够**】vue-router 4 的 `<router-view>` **不给组件加 `key`** ⇒ `/login` ⇄ `/register` 是**两条记录、同一个 `LoginPage`**，Vue 会**复用实例**、`data()` **不再跑**。于是「页内点 tab」靠 `toggle()` 那条 `replace`（`:286`）就够，但「**地址栏把 `#/login` 改成 `#/register`**、或别处 `router.push('/register')`」这类**外部导航**不会重跑 `data()` ⇒ 停在登录面（2026-10-09 实测：`Page.navigate` 到 `#/register` 得 `loginPageOn:true`）。本 watch 补的就是这一支。【为什么是 `$route` 而不是 `isSlide`】只认路由这一件事 —— 反着监听 `isSlide` 会在 `toggle()` 里自己触发自己，绕圈。⚠️ 无 `immediate` ⇒ 首次挂载不触发，初值仍由 `data()` 定，两处**同一个判据**（`meta.register`）。⚠️ 它**不导航**（只赋标量）⇒ 不会与 `:286` 的 `replace` 相互触发。 */
 };
 </script>
 

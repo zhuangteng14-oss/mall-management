@@ -6,7 +6,15 @@ import org.springframework.http.ResponseEntity;
 
 /**
  * 入参身份校验（多账户隔离笔，2026-10-06）—— <b>「请求里带的业务号必须是调用者自己的」</b>
- * 这条判据的唯一落点，13 个端点共用（照见 {@code progress.md §5-AF} 的清单）。
+ * 这条判据的唯一落点，**16 个端点共用**（多账户隔离笔时是 13 个，清单见 {@code progress.md §5-AF}；
+ * C3 块 2 用户块新增 3 个：{@code /merchant/apply}、{@code /merchant/myApplications}、
+ * {@code /user/updateProfile} —— 新端点一次做对，不对既有端点回补）。
+ *
+ * <h2>【补丁 A1（2026-10-09）：这 16 个端点里，有 3 个比的**不是**业务号】</h2>
+ * {@link #requireSelfOrAdmin} 量的是业务号；而块 2 新增的那 3 个端点的入参是**登录名**
+ * ⇒ 那一版直接套用 = 对任何正常客户恒 403（三端手验实测：商家入驻页双 403）。
+ * ⇒ 这 3 个端点改走 {@link #requireSelfOrAdminByUsername}（先翻成登录名再比），
+ * 其余 13 个**一个不动**。两条判据共用同一套三档语义与同一套 fail-open 纪律。
  *
  * <h2>【它治的是哪一半病】</h2>
  * token 机制治的是「<b>显示</b>串号」（页面按本标签页的身份取数）；本类治的是
@@ -40,7 +48,7 @@ import org.springframework.http.ResponseEntity;
  *       （{@code application-a3.properties} 钉 false）都在这一档。它们打这些端点时**没有会话**，
  *       若这里判 403，本笔会当场弄红 27+ 条既有用例与整个 A3。本类对既有行为**零影响**
  *       这条属性，正是靠这一行守住的（与闸「关着就全放行」同一条纪律）。</li>
- *   <li><b>闸开着时的白名单面</b> —— 本类服务的 13 个端点**都不在白名单里**
+ *   <li><b>闸开着时的白名单面</b> —— 本类服务的 16 个端点**都不在白名单里**
  *       （{@code WebAuthConfig.AUTH_WHITELIST}），故这一支在闸开着时不可达。</li>
  * </ol>
  * ⚠️ 反过来说：本类**不是**认证。它是「认证通过之后，入参不许指向别人」。
@@ -74,6 +82,46 @@ public final class IdentityGuard {
     }
 
     /**
+     * 「代表调用者自己」判据的**登录名版**（补丁 A1）—— 入参是 {@code user} 表**主键（登录名）**
+     * 而不是业务号时用它。三档判据与 fail-open 口径与 {@link #requireSelfOrAdmin} **逐条同源**，
+     * 只多一步：把会话里的**业务号**翻成**登录名**再比。
+     *
+     * <h2>【它为什么必须存在 —— 三个端点的真 403】</h2>
+     * {@link #requireSelfOrAdmin} 比的是 {@code identity.userId()}，而会话里存的是**业务号**
+     * （{@code user.customerid} / {@code user.merchantid}，见 {@link AuthSession}）。
+     * {@code /merchant/apply} · {@code /merchant/myApplications} · {@code /user/updateProfile}
+     * 的入参却是**登录名** ⇒ 形态不同、**永不相等**；客户（role=1）又不是管理员 ⇒
+     * 这三个端点对**任何**正常客户恒答 **403**（实测：商家入驻页「提交 + 加载」双 403，资料完善同款）。
+     * 前端传的没错、路径也没打错 —— 错的是判据两侧量的不是同一种东西。
+     *
+     * <p>修法**不在入参侧改口径**（那会动前端契约与 DAO 的键），而是把业务号翻成登录名再比
+     * （{@link UserStateLookup#usernameOf}，一条 {@code WHERE customerid/merchantid = ?} 的读）。
+     *
+     * <p>⚠️ <b>三处 fail-open，缺一不可</b>：① 解析不出身份（闸关的 smoke / A3、白名单面）⇒ 放行；
+     * ② {@code username == null}（没传参）⇒ 放行，交给 Service 报缺参 —— 本类不替它做参数校验；
+     * ③ {@code lookup == null} ⇒ 放行 —— {@code UserStateLookupService} **刻意不被
+     * {@code AbstractSmokeTest} @Import**（见该文件那条 ⚠️），切片里 {@code ObjectProvider} 取不到它，
+     * 若这里判 403，块 2 的两条端点会当场弄红整个 smoke 包。
+     */
+    public static boolean requireSelfOrAdminByUsername(HttpServletRequest request, String username,
+                                                       UserStateLookup lookup) {
+        AuthSession.Identity identity = AuthSession.identify(request);
+        if (identity == null) {
+            return true;   // 见类注释「为什么解析不出身份 = 放行」
+        }
+        if (username == null) {
+            return true;   // 没传参：不是本类该拦的（缺参由 Service 报）
+        }
+        if (identity.role() != null && identity.role() == AuthSession.ROLE_ADMIN) {
+            return true;   // 第 2 档
+        }
+        if (lookup == null) {
+            return true;   // 切片里取不到探针 ⇒ 判不出来 ⇒ 放行（同上 ③）
+        }
+        return username.equals(lookup.usernameOf(identity.userId(), identity.role()));   // 第 1 档
+    }
+
+    /**
      * 403 响应（被上面的判据拒掉时返回它）。
      *
      * <p>⚠️ 响应体走 {@link Result#fail(String)}（**不承诺字节序**，前端按 {@code data.msg} 取）：
@@ -81,8 +129,8 @@ public final class IdentityGuard {
      * 处境（那里是既有契约，故写了字面量常量）。
      *
      * <p>为什么不用异常通道（{@code GlobalExceptionHandler}）：它的 {@code assignableTypes} 只覆盖
-     * {@code MessageController} / {@code GoodsController} 两个类，而本类服务的 13 个端点横跨
-     * goods / order / message 三域 ⇒ 抛异常会在 order 域退化成默认错误页（形状不一致）。
+     * {@code MessageController} / {@code GoodsController} 两个类，而本类服务的 16 个端点横跨
+     * goods / order / message / merchant / user 五域 ⇒ 抛异常会在 order 域退化成默认错误页（形状不一致）。
      * 故走 ResponseEntity 显式构造 —— 与 {@code /user/me} 的 401 同一手法。
      */
     public static ResponseEntity<Object> forbidden() {

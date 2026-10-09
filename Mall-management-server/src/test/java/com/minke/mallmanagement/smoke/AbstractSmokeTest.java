@@ -18,8 +18,14 @@ import com.minke.mallmanagement.order.service.OrderService;
 import com.minke.mallmanagement.order.model.OrderStateMachine;
 import com.minke.mallmanagement.order.model.OrderTransitionRecorder;
 import com.minke.mallmanagement.user.dao.UserDao;
+import com.minke.mallmanagement.user.dao.UserGovernanceDao;
 import com.minke.mallmanagement.user.service.UserCacheService;
 import com.minke.mallmanagement.user.service.UserService;
+import com.minke.mallmanagement.admin.service.UserGovernanceService;
+import com.minke.mallmanagement.merchant.dao.MerchantApplicationDao;
+import com.minke.mallmanagement.merchant.service.MerchantApplicationService;
+import com.minke.mallmanagement.merchant.service.MerchantDowngradeService;
+import com.minke.mallmanagement.goods.dao.GoodsShelfDao;
 import org.junit.jupiter.api.BeforeEach;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
@@ -115,13 +121,30 @@ import static org.mockito.Mockito.when;
 //    落回下面那个 @MockitoBean，**SQL 仍不出切片**。
 // ⚠️ 上文「全部 4 个 Controller」是三层四笔时的值，**现已不准确**（批 A 起 5 个、I2 起 7 个）——
 //    本次只补 @Import 与这一节，未逐句回改旧注释。
+// C3 块 2（用户块，2026-10-09）：新增两个 Controller（`MerchantApplicationController`、
+// `AdminAccountsController`）与一条 `/user/updateProfile`，⇒ 第 8、9 个 Controller。
+//    又一次「同一处地雷」：不 @Import 就是**整个切片上下文起不来**（同块 1 那次 237/77）。
+//    六处依赖：两个 Controller → `UserGovernanceService` / `MerchantApplicationService` /
+//    `MerchantDowngradeService`（`NotificationService` / `AuditService` 块 1 已在）；
+//    两个新 Service → 三个新 DAO（`UserGovernanceDao` / `MerchantApplicationDao` / `GoodsShelfDao`）。
+//    ⇒ 三个 DAO 只吃 JdbcTemplate ⇒ 落回下面那个 @MockitoBean，**SQL 仍不出切片**。
+// ⚠️ **刻意不 @Import `UserStateLookupService`**：三处跨域探针（封禁闸 ×2、冻结闸 ×1）都用
+//    `ObjectProvider<UserStateLookup>` 取它，切片里取不到 ⇒ 那三道闸在 smoke 里**静默不生效**。
+//    这是设计（切片不该因为「多了一张表要查」而全红），**不是**漏配 —— 所以别为了「补齐」把它加进来。
+// ⚠️ 另记一条同类的切片性质：`MerchantApplicationService` 上的 `@Transactional` 在本切片里
+//    同样**是 no-op**（@WebMvcTest 无 DataSource ⇒ 无 TransactionManager），
+//    「批准与改身份是否真的同事务」本切片测不了 —— 那是块 2 主链路验收与 A3 的职责。
 @Import({OrderStateMachine.class, OrderService.class, OrderDao.class,
         GoodsService.class, GoodsDao.class,
         UserService.class, UserDao.class,
         MessageService.class, MessageDao.class,
         AuditService.class, AdminAuditDao.class,
         NotificationService.class, NotificationDao.class,
-        NotificationBroadcastService.class})
+        NotificationBroadcastService.class,
+        // C3 块 2（用户块，2026-10-09）：
+        UserGovernanceDao.class, UserGovernanceService.class,
+        MerchantApplicationDao.class, MerchantApplicationService.class,
+        GoodsShelfDao.class, MerchantDowngradeService.class})
 public abstract class AbstractSmokeTest {
 
     @Autowired

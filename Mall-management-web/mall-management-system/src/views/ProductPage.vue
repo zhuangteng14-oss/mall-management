@@ -9,7 +9,7 @@
            「‹ 返回 + 品牌名 + 右侧一项（**无搜索框**——用户裁决）」，本笔**保留**了搜索框。
            三条理由都是量出来的，不是偏好：
              ① 本页 `handleSearch`（见 `script` 段）写的 `PENDING_SEARCH_KEYWORD` 由
-                **`AppShell.vue:201`** 消费 ⇒ 这个框是「壳内搜索流」在**本页的唯一入口**；
+                **`AppShell.vue:231`** 消费 ⇒ 这个框是「壳内搜索流」在**本页的唯一入口**；
                 删它 = 砍掉一条跨页真功能的入口，而「壳内搜索笔」正在本笔的**不碰**名单里。
              ② `handleSearch` 的引用**只在模板里**（重写前那两处 `@keyup.enter` / `@click`）⇒
                 删掉框之后它立刻成为 `no-unused-vars`（`eslint:recommended`，本地探针实测报

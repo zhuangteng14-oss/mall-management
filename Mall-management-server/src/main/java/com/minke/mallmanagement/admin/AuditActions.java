@@ -50,6 +50,32 @@ public final class AuditActions {
      */
     public static final String NOTIFICATION_SEND = "notification.send";
 
+    // ==================== C3 块 2（用户块）逐笔挂上来的 7 个挂钩点 ====================
+
+    /** 封禁用户 —— {@code POST /admin/accounts/user/ban}。 */
+    public static final String USER_BAN = "user.ban";
+
+    /** 解封用户 —— {@code POST /admin/accounts/user/unban}。 */
+    public static final String USER_UNBAN = "user.unban";
+
+    /** 用户改自己的可编辑资料（{@code gender} / {@code age}）—— {@code POST /user/updateProfile}。 */
+    public static final String USER_UPDATE = "user.update";
+
+    /**
+     * 提交入驻申请 —— {@code POST /merchant/apply}。
+     * ⚠️ 它是**新增类**动作 ⇒ {@code BeforeJson} 恒 {@code NULL}，{@code TargetId} 用 {@code BatchId}。
+     */
+    public static final String MERCHANT_APPLY_CREATE = "merchant.apply.create";
+
+    /** 审核入驻申请（通过 / 驳回）—— {@code POST /admin/accounts/application/audit}。 */
+    public static final String MERCHANT_APPLY_AUDIT = "merchant.apply.audit";
+
+    /** 排定商家降级 —— {@code POST /admin/accounts/downgrade/schedule}（含取消）。 */
+    public static final String MERCHANT_DOWNGRADE_SCHEDULE = "merchant.downgrade.schedule";
+
+    /** 降级**执行**（定时任务触发，非 HTTP）—— 由 {@code MerchantDowngradeJob} 记。 */
+    public static final String MERCHANT_DOWNGRADE_APPLY = "merchant.downgrade.apply";
+
     private AuditActions() {
     }
 }

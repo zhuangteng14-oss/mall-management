@@ -246,7 +246,7 @@
 | 处 | 原文要点 | 为何失真 | 最小改法 |
 |---|---|---|---|
 | `OrderService.java:61` | 「它的反面是 C#2 —— `goodsAdd` … **应当**加 `@Transactional`」 | 「**应当**」已兑现（2026-10-04 落地） | 句尾加「（**2026-10-04 已落地**）」。⚠️ 与 `three-layers.md §D.1` 的「不可外推」行是**同一句话的两个镜像**，那处已标 ✅ ⇒ 只改文档不改代码注释，正是本条禁令自己警告的「只记住半边」 |
-| `UserController.java:23` | 「**三层前** `loginAdd` 上挂着全仓**唯一一处真** `@Transactional`」 | 句首「三层前」把它**限定为史料**，作为史料仍真 | 可不动；若要防误读，在「唯一一处真」后加「（**当时**；2026-10-04 起为 4 处）」 |
+| `UserController.java:25` | 「**三层前** `loginAdd` 上挂着全仓**唯一一处真** `@Transactional`」 | 句首「三层前」把它**限定为史料**，作为史料仍真 | 可不动；若要防误读，在「唯一一处真」后加「（**当时**；2026-10-04 起为 4 处）」 |
 | `defect-survey.md:259` | **Class B** 第 2 条「`goodsAdd` / `goods` / `productsales` 的事务边界 —— … 修法是给 `goodsAdd` 加 `@Transactional`」 | 该条**已被 2026-10-04 裁决并落地**，不再属于「Class B —— 语义未定，**须先裁决**」 | 标 ✅ 已落地（或移出 Class B）。⚠️ **该行的坐标已在「`defect-survey` 收口笔」的清单里**（§3 的 TODO 列了 `:104/113/115/119/259/270`）⇒ 归那一笔；**但该笔的范围只写「表内旧坐标」，覆盖不到「Class B 归属」** ⇒ 那笔动手时须**一并**把它移出 Class B，别只改行号 |
 
 **（3）本笔还改了两个文件的行数（等于喂给已有的「行数快照」欠账）**：`GoodsService` **332 → 459 行**、`GoodsDao` **208 → 211 行** ⇒ §3 域表里商品域行的行数快照**再旧一档**。该行属 §3 的「行数快照」欠账（见 §3 的 TODO 登记块），本笔**不另开一笔**订正它；那笔动手时**以本笔后的值为准**。
@@ -410,7 +410,7 @@
 
 - **（1）`AbstractSmokeTest.java:45` 计数过时。** javadoc 写「**5 个** smoke test 无需改动」，实测 **8 个**类 `extends AbstractSmokeTest`。纯文档漂移，无行为影响。
 - **（2）`UserService.java:98` 明文账号密码进 stdout。** 登录成功后 `System.out.println(username + "," + password)` ⇒ **明文凭据落进程日志**。⚠️ 但 `:94` 的 javadoc 明写这是「三层前就有的副作用，**照搬** —— 它不是调试残留」⇒ **刻意的**，故不是笔误、是**既存安全面**。**待裁**：并进鉴权笔（登录改造本就动这一处）还是单列。
-- **（3）`login.Password` 宽 `char(20)`，装不下 bcrypt。** 见 `db-schema.md:186`（`char(20)` 显式 / **明文**）。bcrypt 输出 **60** 字符 ⇒ hash 化**不能原地改列**（数据库规则禁 `MODIFY COLUMN`），只能走**影子列**（新增列 + 回填）。**待裁**：建议**单列一笔**（文件数 4–5），排在鉴权笔**之后**。
+- **（3）`login.Password` 宽 `char(20)`，装不下 bcrypt。** 见 `db-schema.md:192`（`char(20)` 显式 / **明文**）。bcrypt 输出 **60** 字符 ⇒ hash 化**不能原地改列**（数据库规则禁 `MODIFY COLUMN`），只能走**影子列**（新增列 + 回填）。**待裁**：建议**单列一笔**（文件数 4–5），排在鉴权笔**之后**。
 - **（4）【裁定 · `P2.6` 独立一笔】** ⚠️ **前 3 条是「发现」（调研看到的事实），本条是「裁定」（用户做的决定）—— 性质不同，勿混。** 内容 = 删前端 **4 个读写口**（`LoginPage.vue:163-169` 写 / `GoodsUp.vue:145-146` 读 / `UserInfoPage.vue:91-92` 读）+ 拆 `UserService.java:185` 的 `selectRoleForProfile(username, password)` 重验。**前提** = 鉴权笔落地（凭据进 **httpOnly Cookie**）；**时序** = 鉴权笔 → `P2.6` 笔。 ⚠️ **已落地（P2.6，2026-10-05，§5-AC）**：本条 4 个行号**全部重指** —— 写口 `LoginPage.vue:163-169` → **`:158` / `:162`**（`setCredentials` 改名 `setUsername`、不再传密码）；读口 `GoodsUp.vue:145-146` → **`:148-149`**、`UserInfoPage.vue:91-92` → **`:94-95`**（均改走 `/user/me`，不再读密码）；`UserService.java:185` 的 `selectRoleForProfile(username, password)` 重验 —— ⚠️ **该地址在 HEAD 即已偏**（HEAD `:185` 是 `loginAdd` 形参行；`selectRoleForProfile` 的真实调用点 HEAD 在 **`:242`**）⇒ 本笔后为 **`:239`**（本笔把该方法的 javadoc 压掉 3 行，调用点上移）。
   - ⚠️ **口径（已订正，勿沿用旧说法）**：`P2.6` 的解**不是「选 A」**，而是「**凭据进 httpOnly Cookie**」；A 只是**默认就走这条路**、且不引入密钥管理 / 刷新 / CSRF 复杂度的那个（**最省事 ≠ 唯一**）。B 把 token 放 httpOnly Cookie **同样解**；放 `localStorage` 则**只减轻不消除**（token 有时限、可撤销、不可复用，价值低于密码 —— 故「明文换明文」这个说法**不成立**）。C 与 `P2.6` **无关**（其默认形状即 A）。
 
@@ -556,7 +556,7 @@
   - `api-contract.md:166`：**同行替换（净零）** ——「`main.js` 无拦截器、无全局配置」订正为「已注册 401 出口、仍无 HTTP 拦截器」。
   - `progress.md`：本节。
   ⚠️ **三条「为什么不那样做」的理由，一并记账：**
-  - **401 判 `status` 不判 `body`** —— 闸 401 与 `/user/me` 401 的响应体**逐字节相同**（§5-R (2) 第 10 条 `cmp` IDENTICAL）⇒ 判 body 等于判「字符串相等」；且后端明写 `Result` 键序**不承诺**（`UserController.java:291`）。
+  - **401 判 `status` 不判 `body`** —— 闸 401 与 `/user/me` 401 的响应体**逐字节相同**（§5-R (2) 第 10 条 `cmp` IDENTICAL）⇒ 判 body 等于判「字符串相等」；且后端明写 `Result` 键序**不承诺**（`UserController.java:300`）。
   - **跳转走回调注册，不 `import router`** —— `router/index.js → views/* → api/http.js` 会成环；回调也让「跳哪」只写在 `main.js` **一处**（http.js 不硬编码 `#/login`，路由路径改了不会坏）。
   - **闩锁复位挂「路由变化」而非「任一 2xx」** —— 闸开时白名单端点（如 `goodsSelectHome`）照常 2xx，挂 2xx 会让闩锁被反复**误复位**、等于没有。
 
@@ -570,7 +570,7 @@
   ⚠️ **闸一开这就成为真的没登出**：cookie 仍在，直开 `#/customer` 照样取到数据。⇒ **「退出调 `/user/logout`」列为翻笔前置**（翻笔本来就要动测试与 a3，那是它的时点）；并进笔 4 要改 `CustomerPage` + `MerchantPage` ⇒ **+2 文件、破 5**，故本笔不做。⚠️ **按语（§5-Y，R2，2026-10-05）**：本条的**前提**已变 —— R1/R2 之后两个壳**都没有**自己的退出了（客户 R1、商家 R2 都迁到共用的 `UserCenter.vue`）⇒ 若「退出调 `/user/logout`」要落，落点是 **`UserCenter.vue:52-55` 那**一处**（不是两个壳）⇒ 文件数估计从「+2」降到 **+1**。本条描述的「退出只清 sessionStorage」在 **R2 后仍然成立**（行为未变，只是落点集中了）。⚠️ **再按语（§5-AB，R6，2026-10-05）**：R6 直接**删除**两个壳（非改写）⇒「并进笔 4 要改 `CustomerPage` + `MerchantPage` ⇒ **+2 文件、破 5**」的**前提整体消失**（笔 4 落的是前端传输层、未动壳，且两壳此后已删）；保留原句作历史记录。
 
 - **（5）【漂移登记 · 本笔不修】** 除 (1) 外另 **5** 条：
-  1. **`getUserInfo` 的消费点是 3，不是 5。** 实测 `grep -rn "getUserInfo" src/` = `LoginPage.vue:141` / `UserInfoPage.vue:99` / `GoodsUp.vue:153`（另 2 处是 `GoodsUp` 的本地函数名、1 处是 `endpoints.js:26`）。**三份独立旁证同为 3**：`UserController.java:140` javadoc「前端**三个**调用点」、§6-A P1.2「消费点 **3**」、`api-contract.md:171` 只列 3 个文件。⚠️ 「5」**最可能**来自 `endpoints.js` 的 `user:` 块恰好 5 条（**推断档，未证**）。⚠️ **按语（P2.6，2026-10-05，§5-AC）**：本条是**当时口径**；P2.6 起 `getUserInfo` 的消费点 = **0**（三处**全改走 `/user/me`**）⇒ `grep -rn "getUserInfo" src/` 今日只余 `GoodsUp.vue` 本地函数名等非调用命中，不再是 3。
+  1. **`getUserInfo` 的消费点是 3，不是 5。** 实测 `grep -rn "getUserInfo" src/` = `LoginPage.vue:141` / `UserInfoPage.vue:99` / `GoodsUp.vue:153`（另 2 处是 `GoodsUp` 的本地函数名、1 处是 `endpoints.js:26`）。**三份独立旁证同为 3**：`UserController.java:149` javadoc「前端**三个**调用点」、§6-A P1.2「消费点 **3**」、`api-contract.md:171` 只列 3 个文件。⚠️ 「5」**最可能**来自 `endpoints.js` 的 `user:` 块恰好 5 条（**推断档，未证**）。⚠️ **按语（P2.6，2026-10-05，§5-AC）**：本条是**当时口径**；P2.6 起 `getUserInfo` 的消费点 = **0**（三处**全改走 `/user/me`**）⇒ `grep -rn "getUserInfo" src/` 今日只余 `GoodsUp.vue` 本地函数名等非调用命中，不再是 3。
   2. **§6-A P1.2 的行号过时**：写 `LoginPage.vue:150` / `UserInfoPage.vue:101` / `GoodsUp.vue:155` → 实测 **`:141` / `:99` / `:153`**（成因 = `#48` 前端笔挪行）。
   3. **`api-contract.md:171` 同病 + §5 全表停摆**：写 `LoginPage.vue:142` / `GoodsUp.vue:150` / `UserInfoPage.vue:96` → 实测 **`:141` / `:153` / `:99`**；且 §5 矩阵全表行号停在 **2026-09-30**（`#48` 之前），此后**未重测**。
   4. **§5-J (4) 与 §6-B P2.6 的行号过时**：写 `LoginPage.vue:163-169`（写）/ `GoodsUp.vue:145-146`（读）/ `UserInfoPage.vue:91-92`（读）→ 实测写 **`LoginPage.vue:148-153` + `:158` / `:162`**、读 **`GoodsUp.vue:148-149`** / **`UserInfoPage.vue:94-95`**。
@@ -864,7 +864,7 @@
   3. ⚠️ **这是语义变更，不只是行号重指**（用户已知情并认可）：`api/auth.js` 里四条按「**两个退出点**」写的注释已按新语义重写成「**同一组件两分支**」（`:146-157` 的 `clearCredentials` 文档块、`:165-168` 的 `clearMerchantId`、`:174-189` 的 `clear()` 文档块）。**「哪个页面清哪个键」的组织方式没变**（客户不清 customerid、商家多清 merchantid），变的是**位置**。
   4. **回归面照实说**：动的是 R1 刚 merge 的 `UserCenter.vue`（客户侧菜单的渲染方式从写死改为表驱动）⇒ 客户侧用户中心的**左菜单**是本笔的风险点；`subMenu` 表与 R1 的四个 `router-link` **逐项对照**：顺序、`to`、`sub`、文案全同。
 
-- **（6）顶栏配置抽到 `src/config/nav.js`（用户裁决 5，R6 预备）**：两壳顶栏实测**同构**（左 1 + 右 3），**唯一差异 = 右起第 2 项**（客户「购物车」⇄ 商家「订单中心」）；红点都在「消息」项。⇒ 抽成 `CUSTOMER_NAV` / `MERCHANT_NAV`，壳里 `v-for` 渲染。⚠️ **按语（§5-Z，R3，2026-10-05）**：本条的「**唯一差异 = 右起第 2 项**」**不准确** —— `MERCHANT_NAV.left.to` 是 `/merchant`、`CUSTOMER_NAV.left.to` 是 `/customer` ⇒ **左项也差**（同一句话在 `src/` 内有 3 处：`config/nav.js:15`、`router/index.js:30`、`CustomerPage.vue:70`）。R3 已把 **3 处全部同行订正**为「差异只有两处：左项 `to` + 右起第 2 项」（**只改注释、零行号漂移**），本条作为 R2 的如实记录**保留原样**。⚠️ **按语（§5-AA，R4，2026-10-05）**：本条按语里写的 `router/index.js:31` **是 R3 自己写错的地址** —— 实测那句「两壳顶栏差异**只有两处**」在 **`:30`**（`:31` 是 R3 的标题行）。**R4 已把 3 处（`config/nav.js:20`、本条、`progress.md:968`）同行订正为 `:30`**（纯地址订正、净零）。见 §5-AA (11)D8。⚠️ **再按语（§5-AB，R6，2026-10-05）**：本条列的 3 处地址里 **`CustomerPage.vue:70` 已悬空**（该文件已随两壳合一**删除**）；那句「两壳顶栏差异**只有两处**」**随 R6 搬进 `AppShell.vue:61-63`**（`CustomerPage.vue:70` 的原地址自此失效），并在 R6 里升格为「两条父记录的**全部配置差异**」的验收口径。另两处（`config/nav.js:15`、`router/index.js:30`）**地址未漂**（`nav.js:15` 的措辞 R6 同笔澄清为「两套顶栏表」）。
+- **（6）顶栏配置抽到 `src/config/nav.js`（用户裁决 5，R6 预备）**：两壳顶栏实测**同构**（左 1 + 右 3），**唯一差异 = 右起第 2 项**（客户「购物车」⇄ 商家「订单中心」）；红点都在「消息」项。⇒ 抽成 `CUSTOMER_NAV` / `MERCHANT_NAV`，壳里 `v-for` 渲染。⚠️ **按语（§5-Z，R3，2026-10-05）**：本条的「**唯一差异 = 右起第 2 项**」**不准确** —— `MERCHANT_NAV.left.to` 是 `/merchant`、`CUSTOMER_NAV.left.to` 是 `/customer` ⇒ **左项也差**（同一句话在 `src/` 内有 3 处：`config/nav.js:15`、`router/index.js:30`、`CustomerPage.vue:70`）。R3 已把 **3 处全部同行订正**为「差异只有两处：左项 `to` + 右起第 2 项」（**只改注释、零行号漂移**），本条作为 R2 的如实记录**保留原样**。⚠️ **按语（§5-AA，R4，2026-10-05）**：本条按语里写的 `router/index.js:31` **是 R3 自己写错的地址** —— 实测那句「两壳顶栏差异**只有两处**」在 **`:30`**（`:31` 是 R3 的标题行）。**R4 已把 3 处（`config/nav.js:20`、本条、`progress.md:968`）同行订正为 `:30`**（纯地址订正、净零）。见 §5-AA (11)D8。⚠️ **再按语（§5-AB，R6，2026-10-05）**：本条列的 3 处地址里 **`CustomerPage.vue:70` 已悬空**（该文件已随两壳合一**删除**）；那句「两壳顶栏差异**只有两处**」**随 R6 搬进 `AppShell.vue:76-78`**（`CustomerPage.vue:70` 的原地址自此失效），并在 R6 里升格为「两条父记录的**全部配置差异**」的验收口径。另两处（`config/nav.js:15`、`router/index.js:30`）**地址未漂**（`nav.js:15` 的措辞 R6 同笔澄清为「两套顶栏表」）。
   - 形态：`{ left: […], right: […] }`，项 `{ label, tab, to, badge? }`；`badge: 'unread'` = 该项显示未读红点（判据 `item.badge === 'unread' && unreadCount > 0`）。
   - ⚠️ **`active` 判据仍是 `route.meta.tab`**，**不是** `route.path.startsWith(item.to)` —— 父路径前缀会让「商城主页」在**所有**子路由上高亮（§5-X 已记过同一条）。
   - ⚠️ **R6 的剩余活**：把两个壳（`CustomerPage` / `MerchantPage`，现在**逐字同构**）包进一个渲染 nav 的 `AppShell`。**布局类名的所有权**仍在两个壳里（`layoutClass` + `meta.layout`，两处实测都在各自文件的 `:80` / `:79`）—— R6 应把「内容区外壳 div」连同类名下移到页组件（§5-X (13)1 的按语）。⚠️ **再按语（§5-AB，R6，2026-10-05）**：本条的活**已落**（两个壳已包进 `AppShell.vue`、顶栏表走 `props.nav`、两壳删除）；但「把内容区外壳 div 连同类名下移」这半句**被 R6 裁决 D4 推翻、不做**（见 §5-X (13)1 的再按语）⇒ `layoutClass` + `meta.layout` **保留**在壳里。本条引的 `:80` / `:79` 两处**已悬空**。
@@ -961,11 +961,11 @@
 | `router/index.js` `export default` | `:201` | **`:202`** | +1（文件 201 → 202，在 ≤±2 内） |
 | `CustomerPage.vue` 12 个被引锚点 | `:6 :18 :31 :32 :47 :48 :67 :80 :108 :120 :127 :134` | **逐一命中、零漂移** | 改动全部落在**被引行上或其之后**（末尾 143 行之后） |
 | `MerchantPage.vue` 被引锚点 | `:6 :18 :31 :32 :47 :48 :71 :79 :107 :119 :126 :133` | **逐一命中、零漂移** | 同上（末尾 142 行之后） |
-| `docs/agent/api-contract.md` | 220 | **220（零改动）** | `:192` 的 `CustomerPage.vue:108` / `MerchantPage.vue:107` **未漂** ⇒ 本笔**不动它**。⚠️ **按语（§5-AB，R6，2026-10-05）**：本行「未漂」的结论**只到 R3** —— R6 已把那两处**合一重指**为 `api-contract.md:192` 的 `AppShell.vue:146`（两壳的 `fetchUnreadCount()` 合并到一处、两文件已删）。本行作为 **R3 的核验快照**保留原样；本表**上方两行**（两壳各 12 个「被引锚点」）的现状见 §5-AB (11) |
+| `docs/agent/api-contract.md` | 220 | **220（零改动）** | `:192` 的 `CustomerPage.vue:108` / `MerchantPage.vue:107` **未漂** ⇒ 本笔**不动它**。⚠️ **按语（§5-AB，R6，2026-10-05）**：本行「未漂」的结论**只到 R3** —— R6 已把那两处**合一重指**为 `api-contract.md:192` 的 `AppShell.vue:161`（两壳的 `fetchUnreadCount()` 合并到一处、两文件已删）。本行作为 **R3 的核验快照**保留原样；本表**上方两行**（两壳各 12 个「被引锚点」）的现状见 §5-AB (11) |
 | `HomePage.vue` 7 处 inbound / 10 个行号 | — | **零漂移** | 该文件**整文件零改动**（443 → 443） |
 | `progress.md` 自指（13 处 `progress.md:NN`） | 最大 `:747` | **零漂移** | 本节插在 `:904` 之后，**全部自指都在其前** |
 
-  - ⚠️ **第 4 条漂移（落码中才发现，超出方案里那 3 条）**：「两壳顶栏**唯一**差异 = 右起第 2 项」这句**在 `src/` 内有 3 处**（不只是方案里写的 `nav.js:15`）—— `config/nav.js:15`、`router/index.js:30`、`CustomerPage.vue:70`。⚠️ **按语（§5-AA，R4，2026-10-05）**：本条的 `router/index.js:31` **是 R3 自己写错的地址**（实测那句在 **`:30`**；`:31` 是 R3 的标题行）—— **R4 已把 3 处同行订正为 `:30`**。见 §5-AA (11)D8。实测 `MERCHANT_NAV.left.to` 是 `/merchant`、`CUSTOMER_NAV.left.to` 是 `/customer` ⇒ **左项也差**。**3 处已全部同行订正**（只改注释、零行号漂移）；§5-Y (6) 那句作为 R2 的**如实记录保留原样 + 按语**。⚠️ **再按语（§5-AB，R6，2026-10-05）**：本条说的「3 处」中含 **`CustomerPage.vue:70`（已随两壳合一悬空）** —— 那句已搬进 `AppShell.vue:61-63`；另 2 处（`config/nav.js:15`、`router/index.js:30`）**地址未漂**。
+  - ⚠️ **第 4 条漂移（落码中才发现，超出方案里那 3 条）**：「两壳顶栏**唯一**差异 = 右起第 2 项」这句**在 `src/` 内有 3 处**（不只是方案里写的 `nav.js:15`）—— `config/nav.js:15`、`router/index.js:30`、`CustomerPage.vue:70`。⚠️ **按语（§5-AA，R4，2026-10-05）**：本条的 `router/index.js:31` **是 R3 自己写错的地址**（实测那句在 **`:30`**；`:31` 是 R3 的标题行）—— **R4 已把 3 处同行订正为 `:30`**。见 §5-AA (11)D8。实测 `MERCHANT_NAV.left.to` 是 `/merchant`、`CUSTOMER_NAV.left.to` 是 `/customer` ⇒ **左项也差**。**3 处已全部同行订正**（只改注释、零行号漂移）；§5-Y (6) 那句作为 R2 的**如实记录保留原样 + 按语**。⚠️ **再按语（§5-AB，R6，2026-10-05）**：本条说的「3 处」中含 **`CustomerPage.vue:70`（已随两壳合一悬空）** —— 那句已搬进 `AppShell.vue:76-78`；另 2 处（`config/nav.js:15`、`router/index.js:30`）**地址未漂**。
   - ⚠️ **第 5 条：一处「预存在的假话」，R3 查证但**不修**（登记）** —— `progress.md:401` 的「（差在 **`HomePage.vue:116`** 同行两键、`ProductPage.vue:415`/`:416` 同行两次出现）」**已失效**：实测 `HomePage.vue` **全文 0 处** `loginUsername` / `merchantid`（`grep` 零命中）。**追历史确认了成因**：`loginUsername` 曾在 `9b87ab9` / `2ced01c` 的 `:116`（当时确有 `!!loginUsername || !!merchantid` 两键同行）⇒ 该地址**写的时候是对的**；**笔 3/8（`6639c1f`「用户与登录域 3 个 view 迁到 API 层」）**把这段换成 `:118` 的注释 + `:119` 的 `isLogin = computed(() => isLoggedIn())` ⇒ 两键**从该文件整体消失**，地址自此悬空。⚠️ 即：它**不是「漂移」而是「悬空」** —— §5-W (5) 把 `progress.md:401` 列进「零漂移」清单时，它**当时就已经不对**了（当时的核法只回放行内容、没回放「这行还该不该有这个键」）。⚠️ `auth.js:108` 的同一地址**不算假话** —— 它写的是「**原**唯一**定义在 `HomePage.vue:116`」，`9b87ab9` 可证 ✓。⇒ **本笔不修**。⚠️ **挂账落点与归属（用户 2026-10-05 裁定 —— 必须是有笔名的挂账，不是孤儿待办）**： ⚠️ **本条第 5/6 点已结清（P2.6，2026-10-05，§5-AC）** —— 第 5 点的 `HomePage.vue:116`（`progress.md:402` 引用）与第 6 点的 `auth.js:118`（`ShoppingCart` / `HistoricalOrders`）均已在**原处**加按语、标为历史地址。
     1. **悬空事实**：`progress.md:401` 引的 `HomePage.vue:116`（原文「同行两键」）**已不存在** —— 该文件现在**零处** `loginUsername` / `merchantid`（`grep` 零命中）。
     2. **成因（已追历史）**：`9b87ab9` / `2ced01c` 时 `:116` **确有**那两键（`!!loginUsername || !!merchantid`，地址写得对）；**笔 3/8（`6639c1f`「用户与登录域 3 个 view 迁到 API 层」）**把它换成 `:118` 的注释 + `:119` 的 `isLogin = computed(() => isLoggedIn())` ⇒ 两键**整体消失**、地址自此悬空。⇒ 性质是**「悬空」不是「漂移」**。
@@ -1027,13 +1027,13 @@
 
 - **（8）死控件第三例（附带发现，从基线就在）**：裸 `/shoppingCart` 渲染的 `ShoppingCart` 取 `showSwitch` 的**默认 `true`**（`ShoppingCart.vue:81`），而该记录**不传 `@toggle`** ⇒ 那个 📋/🛒 开关**点了没反应** —— 与 §5-X (16)2（R1 漏传 `:showSwitch="false"` 凭空造死开关）是**同一类病症的第三例**。收编后该裸挂形态消失 ⇒ 一并终结。
 
-- **（9）`ChatRoom.vue:348/367` 的 `page: 'chat'` 残留 —— 清法：同行改写（用户裁决 D4）**：`router.replace({ query: { ...rest, page: 'chat' } })` → `router.replace({ query: rest })`。**不删行** ⇒ `ChatRoom.vue` **578 → 578 行（净零）**，`api-contract.md:192-195` 的 5 个 ChatRoom 地址、`progress.md:752` / `:787`、`CustomerPage.vue:65` / `MerchantPage.vue:69` 引的 `ChatRoom.vue:369` **全部零漂移**（这就是不删行的**决定性理由**）。⚠️ **语义零变更**：`rest` 仍照旧剥掉 `otherId` / `otherType` / `_t`；两个 `eslint-disable-next-line no-unused-vars` 仍需要（三个键还是解构未用）。⚠️ **不成环**（推理核过，非手测）：`replace` 后 `route.query.otherId` / `otherType` 都变 `undefined` ⇒ `watch` 的 `if (newOtherId && newOtherType)` 守卫不成立 ⇒ **不再 replace**。**删后 URL** = 当前路径 + **无 query**：`/customer/msg`、`/customer/user/chat`、`/merchant/msg`、`/merchant/user/chat` 四种（四条 ChatRoom 挂载点）。⚠️ **判据**：全仓 `grep "route.query.page"` **零命中** ⇒ 纯残留；`LEGACY_TAB` 只认**精确** `/customer` `/merchant` 而 `replace` 不动路径 ⇒ 两边互不触发（与 §5-X (12)1 / §5-Y 的登记一致）。⚠️ **按语（§5-AB，R6，2026-10-05）**：本条引的 `CustomerPage.vue:65` / `MerchantPage.vue:69` —— 那两条「**别把 ChatRoom 加进 `CACHE_TABS`**」的注释**已随两壳合一搬进 `AppShell.vue:84`**（两文件已删 ⇒ 原地址**悬空**）；本条另引的 `ChatRoom.vue:369` **指向别文件、地址未漂**。
+- **（9）`ChatRoom.vue:348/367` 的 `page: 'chat'` 残留 —— 清法：同行改写（用户裁决 D4）**：`router.replace({ query: { ...rest, page: 'chat' } })` → `router.replace({ query: rest })`。**不删行** ⇒ `ChatRoom.vue` **578 → 578 行（净零）**，`api-contract.md:192-195` 的 5 个 ChatRoom 地址、`progress.md:752` / `:787`、`CustomerPage.vue:65` / `MerchantPage.vue:69` 引的 `ChatRoom.vue:369` **全部零漂移**（这就是不删行的**决定性理由**）。⚠️ **语义零变更**：`rest` 仍照旧剥掉 `otherId` / `otherType` / `_t`；两个 `eslint-disable-next-line no-unused-vars` 仍需要（三个键还是解构未用）。⚠️ **不成环**（推理核过，非手测）：`replace` 后 `route.query.otherId` / `otherType` 都变 `undefined` ⇒ `watch` 的 `if (newOtherId && newOtherType)` 守卫不成立 ⇒ **不再 replace**。**删后 URL** = 当前路径 + **无 query**：`/customer/msg`、`/customer/user/chat`、`/merchant/msg`、`/merchant/user/chat` 四种（四条 ChatRoom 挂载点）。⚠️ **判据**：全仓 `grep "route.query.page"` **零命中** ⇒ 纯残留；`LEGACY_TAB` 只认**精确** `/customer` `/merchant` 而 `replace` 不动路径 ⇒ 两边互不触发（与 §5-X (12)1 / §5-Y 的登记一致）。⚠️ **按语（§5-AB，R6，2026-10-05）**：本条引的 `CustomerPage.vue:65` / `MerchantPage.vue:69` —— 那两条「**别把 ChatRoom 加进 `CACHE_TABS`**」的注释**已随两壳合一搬进 `AppShell.vue:99`**（两文件已删 ⇒ 原地址**悬空**）；本条另引的 `ChatRoom.vue:369` **指向别文件、地址未漂**。
 
 - **（10）落码后实测数值（供复核）**：`router/index.js` **202 → 241 行**（两条记录**同行替换** + 尾部插入 39 行）；`ChatRoom.vue` **578 → 578 行**；`config/nav.js` **同行替换（净零）**。R3 登记的锚点 **`:51` / `:52` / `:125` / `:126` / `:128` / `:156` / `:157` / `:161` / `:185` / `:192` / `:197` 逐个回放，全部未漂**；只有 `export default router` 由 `:202` → **`:241`**（全仓**无**以 `:202` 为地址的引用，仅 §5-Z (10) 与 `progress.md:654` 以叙述句提过）。
 
 - **（11）新发现（本笔核实中翻出，都不是本笔造的）**：
   - **D5 —— `§6-A` 的 **P1.3** 行引 `ChatRoom.vue:170`，实测 `:169` ⇒ 漂移 1（已就地订正）**：写这句的 `6afaac2`（2026-10-03）**当时是对的**（基线 `9b87ab9` 的 `return data.user` 在 `:170`），**笔 4/8（`5990d07`，2026-10-04「消息与好友域 4 个 view 迁到 API 层」）把它搬到 `:169`**、文档未跟。⚠️ 与 §5-Z (9) 第 5 条那处**同类不同因**：那处是**悬空**（写的时候就已经不在），这处是**漂移**（写的时候在、后被搬走）。
-  - **D8 —— `router/index.js:31` 应为 `:30`（R3 自己写进去的，已就地订正）**：R3 记「同一句话在 `src/` 内有 3 处：`config/nav.js:15`、`router/index.js:**31**`、`CustomerPage.vue:70`」—— 实测那句「两壳的顶栏差异**只有两处**」在 **`:30`**（`:31` 是 R3 的标题行「`/` 由『裸挂 `HomePage` 的页面』改为『一条落点 redirect』」）。**3 处**（`config/nav.js:20`、`progress.md:867`、`progress.md:968`）**全部同行订正为 `:30`**。⚠️ **按语（§5-AB，R6，2026-10-05）**：本条 3 处中 **`CustomerPage.vue:70` 已随两壳合一悬空**（那句现居 `AppShell.vue:61-63`）；另 2 处（`config/nav.js:20`、`progress.md:867`）**地址未漂**。
+  - **D8 —— `router/index.js:31` 应为 `:30`（R3 自己写进去的，已就地订正）**：R3 记「同一句话在 `src/` 内有 3 处：`config/nav.js:15`、`router/index.js:**31**`、`CustomerPage.vue:70`」—— 实测那句「两壳的顶栏差异**只有两处**」在 **`:30`**（`:31` 是 R3 的标题行「`/` 由『裸挂 `HomePage` 的页面』改为『一条落点 redirect』」）。**3 处**（`config/nav.js:20`、`progress.md:867`、`progress.md:968`）**全部同行订正为 `:30`**。⚠️ **按语（§5-AB，R6，2026-10-05）**：本条 3 处中 **`CustomerPage.vue:70` 已随两壳合一悬空**（那句现居 `AppShell.vue:76-78`）；另 2 处（`config/nav.js:20`、`progress.md:867`）**地址未漂**。
   - **D9 —— `api-contract.md:192-195` 的 ChatRoom 四个地址陈旧（登记，不修）**：实测调用点 `:167`（userSelect）/ `:183`（conversations）/ `:208` + `:270`（history ×2）/ `:314`（send），而该表记 `:164` / `:184` / `:213` + `:279` / `:327`。⚠️ 其中 `:184` → `:183` **已登记**于 §5-V (5)3 / R1 的 §5-X (10)3（「R1 之外的前置漂移…… 不重开那笔账」）；**其余 3 个（`:164` 指注释、`:213`/`:279`、`:327`）本笔新发现、同样不修** —— 承 R1 已立的口径（改 `api-contract.md` 全表属**契约表重测笔**，不属路由笔）。⇒ **登记**，归属笔名待定（与 (11)D5 的 `6afaac2` 同族：都是「笔 4/8 之后契约表未重测」）。
   - **非漂移但记录在案（「注释锚点」一类）**：`GoodsSelect.vue:158`（`router/index.js:152` 引）与 `ChatRoom.vue:164`（`api-contract.md:195` 引）指的是**描述该行为的注释行**（代码分别在 `:160` / `:167`）—— 不是假话，**建议保留**（同 §5-W 那处注释锚点的先例）。
 
@@ -1070,16 +1070,16 @@
   ① 根类名（`.customer-page` ⇄ `.merchant-page`；两份 CSS 的**体**逐条相同）→ 合一为 `.app-shell`；
   ② 顶栏表（`CUSTOMER_NAV` ⇄ `MERCHANT_NAV`）→ 走 prop `nav`；
   ③ **`getCurrentUser()` 的降级链顺序相反**（客户 `customerid` → `merchantid`；商家 `merchantid` → `customerid`）→ 走 prop `role`；
-  ④ 消息页路径（`/customer/msg` ⇄ `/merchant/msg`）与 ⑤ 待搜索关键词的落点（`/customer/search` ⇄ `/merchant/search`）→ 由 prop `base` 拼（`AppShell.vue:57` 一行点名 ④⑤）；
+  ④ 消息页路径（`/customer/msg` ⇄ `/merchant/msg`）与 ⑤ 待搜索关键词的落点（`/customer/search` ⇄ `/merchant/search`）→ 由 prop `base` 拼（`AppShell.vue:72` 一行点名 ④⑤）；
   ⑥ 布局容器类名（`.cart-container` ⇄ `.order-container`）→ **两个类名都保留**（裁决 D7，见 (10)）。
-  ⚠️ 第 ③ 条是 R1 / R2 / R4 三份 R6 草稿**都漏掉**的一条 —— 它**不是**「碰巧写成不同顺序」（两端 id 可以同时在：新标签页恢复成商家 Y 之后再登录成客户 B、而 `B.merchantId` 为空时 `restored.merchantId` 会**留着 Y**，见 `src/api/auth.js` 的 `restore` 段）⇒ **不能统一**，必须第三 prop（理由留在 `AppShell.vue:122-129`）。
-  ⚠️ 因此「两个壳只差一个 nav 表」这句**不成立** —— 本笔后那句「顶栏只差两处」的**验收口径**改述并留在 `AppShell.vue:61-63`（它说的是**顶栏**，不是两个壳；R6 前在 `CustomerPage.vue:70`）。
+  ⚠️ 第 ③ 条是 R1 / R2 / R4 三份 R6 草稿**都漏掉**的一条 —— 它**不是**「碰巧写成不同顺序」（两端 id 可以同时在：新标签页恢复成商家 Y 之后再登录成客户 B、而 `B.merchantId` 为空时 `restored.merchantId` 会**留着 Y**，见 `src/api/auth.js` 的 `restore` 段）⇒ **不能统一**，必须第三 prop（理由留在 `AppShell.vue:137-144`）。
+  ⚠️ 因此「两个壳只差一个 nav 表」这句**不成立** —— 本笔后那句「顶栏只差两处」的**验收口径**改述并留在 `AppShell.vue:76-78`（它说的是**顶栏**，不是两个壳；R6 前在 `CustomerPage.vue:70`）。
 
 - **（3）`AppShell` 的形态（用户裁决 D1：3 props + 零 slot）**：
-  - props = `nav`（顶栏表）/ `base`（URL 前缀）/ `role`（降级链顺序），**全部 `required: true`**（`AppShell.vue:92-99`）；**零 slot** —— 内容区仍是 `<router-view>`，页面选择权在路由（两轴口径不动，见 (13)）。
-  - `CACHE_TABS = ['HomeTab','GoodsSelect']`（`AppShell.vue:86`）**写死**、**不进 props**：两壳原本的值**逐字相同** ⇒ 传两遍是同一个常量、同一个理由。
+  - props = `nav`（顶栏表）/ `base`（URL 前缀）/ `role`（降级链顺序），**全部 `required: true`**（`AppShell.vue:107-114`）；**零 slot** —— 内容区仍是 `<router-view>`，页面选择权在路由（两轴口径不动，见 (13)）。
+  - `CACHE_TABS = ['HomeTab','GoodsSelect']`（`AppShell.vue:101`）**写死**、**不进 props**：两壳原本的值**逐字相同** ⇒ 传两遍是同一个常量、同一个理由。
   - `role` **不从 `base` 反推**：`base` 是 URL 前缀、`role` 是身份优先级，二者**恰好**同向但互不定义（改 URL 前缀不该顺带改身份判定）。
-  - `defineProps` 上**必须有** `// eslint-disable-next-line no-undef`（`AppShell.vue:91`）：本仓 `eslint-plugin-vue` = **8.7.1**，`vue3-essential` 不带宏环境、它导出的 `setup-compiler-macros` 也**不含** `defineOptions` ⇒ 缺 disable 直接构建红（先例 `src/views/HomeTab.vue`）。
+  - `defineProps` 上**必须有** `// eslint-disable-next-line no-undef`（`AppShell.vue:106`）：本仓 `eslint-plugin-vue` = **8.7.1**，`vue3-essential` 不带宏环境、它导出的 `setup-compiler-macros` 也**不含** `defineOptions` ⇒ 缺 disable 直接构建红（先例 `src/views/HomeTab.vue`）。
   - ⚠️ **更正 §5-AA (15) 的两处估计**：① 那里写「router 改动量 = 换 `component` + 补 `props`（nav 表 / `base` / **`CACHE_TABS`**）」—— `CACHE_TABS` **不传**（同值常量，见上）；② 「一处 import」实为**两行互换**（`:4` 客户壳 import → `AppShell`；`:5` 商家壳 import → `nav.js` 的 `CUSTOMER_NAV` / `MERCHANT_NAV`）⇒ router 的改动是 **7 行同行替换**（4 个 hunk）、不是一行。
 
 - **（4）两条父路由记录保留、不合并**：`/customer` 与 `/merchant` 仍是**两条**记录，**不做**「一条记录 + 参数」——
@@ -1090,9 +1090,9 @@
 - **（5）机制依据（为什么「同一个组件挂两条记录」是安全的）**：
   - vue-router **4.6.4** 在 `RouterView` 里把**路由记录的 `props`** 预绑到 slot 拿到的 `Component` 上（`node_modules/vue-router/dist/vue-router.mjs:1101-1106`）⇒ 两条记录各有自己的 `props`，**同一个组件被挂两次**、各自的 `props.nav` / `props.base` / `props.role` 互不串。
   - `RouterView` 的**深度**按「有 `components` 的 matched 记录」数（`inject(viewDepthKey, 0)`）⇒ `AppShell` 在深度 0、其内部 `<router-view>` 在深度 1，**与两壳时逐位相同**，无行为变化。
-  - 每条记录**各挂一个** `<KeepAlive>` 实例 ⇒ 两个壳的缓存**互不影响**（`AppShell.vue:83`）。
-  - ⚠️ **`isLoggedIn()` 不是响应式**（读 `src/api/auth.js` 的模块态 + `sessionStorage`）⇒ `navTop = navFor(props.nav, isLoggedIn())`（`AppShell.vue:227`）在 `setup` 里**只算一次**；**不能**改 `computed`（看起来更对、实际永不更新）。两壳原本如此，本笔照搬。
-  - ⚠️ **壳不会因切 tab 重挂**（`AppShell.vue:72-75`）：`/customer` / `/merchant` 是**父记录**，`children` 之间切换**不重建父实例** ⇒ 5s 未读轮询「只跑一次」这个性质**仍成立**（后人若把子路由提成平级记录、或给壳加 `:key`，它会立刻消失）。
+  - 每条记录**各挂一个** `<KeepAlive>` 实例 ⇒ 两个壳的缓存**互不影响**（`AppShell.vue:98`）。
+  - ⚠️ **`isLoggedIn()` 不是响应式**（读 `src/api/auth.js` 的模块态 + `sessionStorage`）⇒ `navTop = navFor(props.nav, isLoggedIn())`（`AppShell.vue:257`）在 `setup` 里**只算一次**；**不能**改 `computed`（看起来更对、实际永不更新）。两壳原本如此，本笔照搬。
+  - ⚠️ **壳不会因切 tab 重挂**（`AppShell.vue:87-90`）：`/customer` / `/merchant` 是**父记录**，`children` 之间切换**不重建父实例** ⇒ 5s 未读轮询「只跑一次」这个性质**仍成立**（后人若把子路由提成平级记录、或给壳加 `:key`，它会立刻消失）。
 
 - **（6）净零手法（为什么全仓 `router/index.js:N` 地址一个没漂）**：`router/index.js` 的 **7 行**改动**全部同行替换**（import 2 行、注释 3 行、`component:` 2 行，共 4 个 hunk）⇒ **241 → 241**。同理 `config/nav.js` 69 → 69、`views/HomeTab.vue` 44 → 44、`api/http.js` 221 → 221、`api-contract.md` 220 → 220。`progress.md` 的 20 处按语**一律行内追加**（不加行）⇒ 追加本节之前仍是 **1095** 行、全仓 `progress.md:N` 自引用（最大只到 `:968`）**零漂移**；本节追加在文件末尾（`## 6.` 之前），其后**再无**被行号引用的内容。
   ⚠️ 落码中**自己撞到过一次**：`router/index.js:29` 的注释起初被写成 5 行（+4 行），当场改回 2 行同行替换 —— 净零是**约定**，破了要当笔报告（同 §5-X (10) 的手法）。
@@ -1100,20 +1100,20 @@
 - **（7）为什么「删两个壳」而不是「让它们各薄包一层 `AppShell`」（裁决 D2）**：薄包一层能保住「文件仍在」⇒ 全仓对两壳的行号引用**一字不动**；代价是**两个 240 行的死壳永久留在仓里**（名字在、逻辑不在，`CACHE_TABS` 与注释三份，且后人会继续往里加东西）。用户选**删**（同 R1/R2「换文件不是换行号」的口径）⇒ 本笔把悬空**一次性清算**（见 (11)）。**收益**：`views/` 少两个文件、包内少一份重复代码、`AppShell` 成为**唯一**壳。
 
 - **（8）4 处「现在时假话」订正 + 1 处澄清（同行改字，全部净零）**：
-  ① `src/config/nav.js:15-20`：原文「两壳顶栏的差异**只有两处**」→ 改述为「**两套顶栏表**（`CUSTOMER_NAV` / `MERCHANT_NAV`）的差异只有两处」，并补 R6 记录 + 把句子出处从 `CustomerPage.vue:70` 改指 **`AppShell.vue:61-63`**。
+  ① `src/config/nav.js:15-20`：原文「两壳顶栏的差异**只有两处**」→ 改述为「**两套顶栏表**（`CUSTOMER_NAV` / `MERCHANT_NAV`）的差异只有两处」，并补 R6 记录 + 把句子出处从 `CustomerPage.vue:70` 改指 **`AppShell.vue:76-78`**。
   ② `src/config/nav.js:61`：「`CustomerPage.vue` 的 `getCurrentUser()`」→ **`AppShell.vue` 的 `getCurrentUser()`**（R6 前该函数在两壳里）。
   ③ `src/views/HomeTab.vue:9`：「这个 name 是**两壳里** `<KeepAlive :include>` 的匹配依据」→ **`AppShell.vue` 里**。
   ④ `src/api/http.js:72`：「轮询 …… `CustomerPage.fetchUnreadCount` / `MerchantPage.fetchUnreadCount`」→ **`AppShell.fetchUnreadCount`**（R6 前在两个壳里）。
-  **澄清（不是订正）**：`docs/agent/api-contract.md:192` 不是假话 —— 它记的两个**指针**（`CustomerPage.vue:108` / `MerchantPage.vue:107`）在 R4 时**准确**；R6 后文件没了 ⇒ 属**悬空**。按裁决 D9 把该行**合并重指**为 `ChatRoom.vue:184`、`AppShell.vue:146` 并留沿革。
+  **澄清（不是订正）**：`docs/agent/api-contract.md:192` 不是假话 —— 它记的两个**指针**（`CustomerPage.vue:108` / `MerchantPage.vue:107`）在 R4 时**准确**；R6 后文件没了 ⇒ 属**悬空**。按裁决 D9 把该行**合并重指**为 `ChatRoom.vue:184`、`AppShell.vue:161` 并留沿革。
 
 - **（9）`.empty-page` 终结（用户裁决 D8）**：两壳 `<style scoped>` 各有一条 `.empty-page`（`display:flex` 居中提示），R1 前是 `curPage` 认不出时的兜底；路由化后**没有「认不出」这回事** ⇒ 全仓 **0 使用**的死规则。两壳删除时**不搬进** `AppShell.vue`（其 `:281-282` 留说明，防后人以为漏搬）。⚠️ **按语（§5-AI-C，C 笔，2026-10-07）**：该说明随 C 笔样式块注释增行，现为 **`:326-327`**。
 
-- **（10）两个容器类名都保留（用户裁决 D7）**：`.cart-container`（客户购物车）与 `.order-container`（商家订单中心）**不合并** —— 后者多一行 `position: relative`，而 `OrderCenter.vue:200/:235` 与 `ShoppingCart.vue:205/:240` 都有 `absolute` 子元素 ⇒ 合并 = **改行为**，归界面优化笔（理由留在 `AppShell.vue:297-300` —— ⚠️ **C 笔样式块增行后为 `:295-298`**）。两类名仍由路由记录的 `meta.layout` 选中。
+- **（10）两个容器类名都保留（用户裁决 D7）**：`.cart-container`（客户购物车）与 `.order-container`（商家订单中心）**不合并** —— 后者多一行 `position: relative`，而 `OrderCenter.vue:200/:235` 与 `ShoppingCart.vue:205/:240` 都有 `absolute` 子元素 ⇒ 合并 = **改行为**，归界面优化笔（理由留在 `AppShell.vue:376-379` —— ⚠️ **C 笔样式块增行后为 `:374-377`**）。两类名仍由路由记录的 `meta.layout` 选中。
 
 - **（11）悬空清单 —— 本笔后，全仓对两个**已删壳文件**的引用处置**（口径：**过去时 / 历史快照保留原样**；**现在时一律按语**，或并入本节清单）：
   - `docs/agent/progress.md`：命中 **59 行**。加 R6 按语的 **19 处**：`:224`（挂账「文档悬空引用」条）、`:569`、`:570`、`:629`、`:664`、`:691`（**§5-W 整节**）、`:730`（**§5-X 整节**）、`:801`、`:831`（**§5-Y 整节**）、`:867`、`:870`、`:912`（**§5-Z 整节**）、`:964`、`:968`、`:1030`、`:1036`、`:1076`、`:1082`、`:1086`。**其余一律是过去时**（「R1 前…」「`9eb0729` 实测…」「本笔前…」）⇒ 按 §5-X 节首那条整节按语立的口径**保留原样**（历史句保留 + 按语，同 §5-T (5) / §5-W (5)）。
   - `docs/agent/api-contract.md`：`:192`（**已合并重指**，见 (8)）—— 全文件仅此 1 处。
-  - `src/`：`api/auth.js` 6 处（`:146/:151/:156/:166/:181` 全是历史句；**`:44` 是现在时、已登记 → P2.6**，见 (12)）；`router/index.js` 5 处（`:25` / `:29` 已就地改述；`:137/:138/:144` 是历史句）；`views/UserCenter.vue` 3 处（`:21/:60/:66` 历史句）；`views/GoodsSelect.vue` 2 处（`:118/:166` 历史句）；`views/merchant/OrderPane.vue` 1 处（`:24` 历史句）；`views/AppShell.vue` 2 处（`:51/:63` **自述 R6 来历**）；`config/nav.js` 1 处（`:17` 已就地订正）。
+  - `src/`：`api/auth.js` 6 处（`:146/:151/:156/:166/:181` 全是历史句；**`:44` 是现在时、已登记 → P2.6**，见 (12)）；`router/index.js` 5 处（`:25` / `:29` 已就地改述；`:137/:138/:144` 是历史句）；`views/UserCenter.vue` 3 处（`:21/:60/:66` 历史句）；`views/GoodsSelect.vue` 2 处（`:118/:166` 历史句）；`views/merchant/OrderPane.vue` 1 处（`:24` 历史句）；`views/AppShell.vue` 2 处（`:66/:78` **自述 R6 来历**）；`config/nav.js` 1 处（`:17` 已就地订正）。
   ⇒ **一句话口径**：本笔后全仓**没有**任何「现在时」把两个壳当作**存在**的说法（唯一例外 `api/auth.js:44`，它已挂 P2.6）。
   ⚠️ **索引的用法（§5-P 口径）**：上列行号只是**按语落点**在写入时的坐标 —— 本文件在**这些行之前**一旦增删即会漂。**权威 = 各节自己的按语本身**：以 `§5-AB` 为关键字 grep 本文件 = **20 行**（**19 处按语** + 本索引行本身），本条只做索引、**不承担坐标承诺**。
 
@@ -1123,16 +1123,16 @@
   - **D-new-3 `src/components/HelloWorld.vue`**：**孤儿文件**（Vue CLI 脚手架残留），全仓 **0 引用**（`grep -rn "HelloWorld" src/` 只命中自身）⇒ 归**界面优化笔**。
 
 - **（13）对 §5-X (13)「R6 该接的活」的逐条答复**：
-  1. **布局类名下移**（原承诺：把「内容区外壳 div」连同类名下移到各页组件、`meta.layout` 随之退役）—— **推翻**（**裁决 D4**）：① 下移要动**两壳子树里的全部页组件**（本笔实测：路由表里挂的**不同组件 = 11 个** —— `HomeTab` / `GoodsSelect` / `ChatRoom` / `ShoppingCart` / `UserCenter` / `UserInfoPage` / `HistoricalOrders` / `FriendRoom` / `OrderPane` / `GoodsAdd` / `GoodsUp`；`OrderCenter` 由 `OrderPane` 内部挂、不在路由表里。§5-X 写承诺时的口径估「**12 个**」，量级一致），远超任何预算；② `meta.layout` 是「路由决定布局」的**自洽**机制（一条 computed + 路由表里的字符串），那条承诺写下时（R1）还没看到它跑起来的效果；③ R6 的章程是**纯消重**。⇒ 所有权仍在壳（`AppShell.vue:112` 的 `layoutClass`），就地说明留在 `AppShell.vue:108-111`。
+  1. **布局类名下移**（原承诺：把「内容区外壳 div」连同类名下移到各页组件、`meta.layout` 随之退役）—— **推翻**（**裁决 D4**）：① 下移要动**两壳子树里的全部页组件**（本笔实测：路由表里挂的**不同组件 = 11 个** —— `HomeTab` / `GoodsSelect` / `ChatRoom` / `ShoppingCart` / `UserCenter` / `UserInfoPage` / `HistoricalOrders` / `FriendRoom` / `OrderPane` / `GoodsAdd` / `GoodsUp`；`OrderCenter` 由 `OrderPane` 内部挂、不在路由表里。§5-X 写承诺时的口径估「**12 个**」，量级一致），远超任何预算；② `meta.layout` 是「路由决定布局」的**自洽**机制（一条 computed + 路由表里的字符串），那条承诺写下时（R1）还没看到它跑起来的效果；③ R6 的章程是**纯消重**。⇒ 所有权仍在壳（`AppShell.vue:127` 的 `layoutClass`），就地说明留在 `AppShell.vue:123-126`。
   2. **路径风格统一**（`views/customer/` 的存废）—— **定案、结案**（**裁决 D5**）：现行口径即**最终状态** —— **跨壳共享的页面组件平铺 `views/`**（`HomeTab` / `UserCenter` / `GoodsSelect` / `ChatRoom` / `ProductPage` …）、**单壳专属的进该壳子目录**（`views/merchant/OrderPane.vue`）；**不建 `views/customer/`**（客户壳没有专属子页面组件，为对称而建 = 凭空造约定）。
   3. **`.empty-page`（§5-X (7) 按语点名）**—— **终结**（**裁决 D8**，见 (9)）。
-  4. **`vue/setup-compiler-macros` 的评估窗口**（§5-X (15) / §5-Y (9) 登记「R6 之后、C3 之前」）—— 窗口**已到**，但本笔**不开**：开它 = 动 `.eslintrc` / 构建配置，超出「纯消重」；且 §5-Y (9) 已实测「开了也只解决一半」（8.7.1 的环境**不含** `defineOptions`）⇒ 逐条 disable **仍是长期要求**（`AppShell.vue:88-91` 照办）。**重申**：该笔仍在「R6 之后、C3 之前」。
+  4. **`vue/setup-compiler-macros` 的评估窗口**（§5-X (15) / §5-Y (9) 登记「R6 之后、C3 之前」）—— 窗口**已到**，但本笔**不开**：开它 = 动 `.eslintrc` / 构建配置，超出「纯消重」；且 §5-Y (9) 已实测「开了也只解决一半」（8.7.1 的环境**不含** `defineOptions`）⇒ 逐条 disable **仍是长期要求**（`AppShell.vue:103-106` 照办）。**重申**：该笔仍在「R6 之后、C3 之前」。
 
 - **（14）验证（落码后、commit 前，全部实测）**：
   - **`npm run build` 绿** —— `DONE Compiled successfully`，产物 `dist/js/app.84f15326.js` 75.42 KiB / `dist/js/chunk-vendors.55f81f68.js` 130.64 KiB / `dist/css/app.74b6d88f.css` 37.91 KiB（`rm -rf dist` 后**干净重建**）。
     ⚠️ **警告从 2 条变 0 条** —— R2/R3/R4 记的都是 **`Compiled with 2 warnings`**（`entrypoint size limit` + `webpack performance recommendations`），本笔实测 **0 条**。**解释（推断档，依据可复核）**：webpack **5.106.2** 的默认阈值 `maxEntrypointSize = 250000`（`node_modules/webpack/lib/config/defaults.js:1860-1861`），而 `SizeLimitsPlugin.getEntrypointSize()` 把 **entrypoint 的全部 file**（含 MiniCssExtract 出来的 CSS）**按字节相加**、`> 250000` 才发（`node_modules/webpack/lib/performance/SizeLimitsPlugin.js:91-100`）⇒ 本笔现值 = 77,225 + 133,778 + 38,824 = **249,827 B**，**距线只有 173 B**；R2–R4 时同一份包里含**两份**壳代码（另一份 240 行组件 + 重复 CSS）⇒ entrypoint 只会更大 ⇒ 越线（未重测当年的字节数，故标**推断**：警告文案逐字相同、且判据只有 `size > 250000`）。**这不是「本笔消除了警告」** —— 是**同一个既有项越线与否**；且**余量只剩 173 B**：日后任何 +200 B 级改动都会让这 2 条回来（**不是回归**，是正常的体积建议）。⚠️ **必须说清（用户 2026-10-05 点名，落码时补）**：**R6 后警告 2 → 0，是删两壳让 entrypoint 刚好掉到 `250000 B` 线下（余量 173 B），不是本笔消除了警告。界面优化笔动 CSS 后大概率回来 —— 这是既有项，不是新债。** ⇒ 后人读 §5-Y / §5-Z / §5-AA 的「2 warnings」与本节「0 warnings」**不是矛盾**，是同一条体积建议在阈值两侧。
   - **`npx eslint src --ext .vue,.js` → exit 0、零输出**。⚠️ **首次是红的**：`AppShell.vue 57:58 error Irregular whitespace not allowed`（`no-irregular-whitespace`）—— 起因是我在 `）` 与 `⇒` 之间写了一个 **U+3000 全角空格**；换成普通空格后转绿。**记一笔**：中文注释里的全角空格会**直接红**。
-  - **行号回放（手工；`refcheck.sh` 全仓不存在，同 R4 登记）**：全仓 `router/index.js:N` = **22 个去重地址 / 31 处引用**，逐个回放**全部命中**（净零 ⇒ 预期零漂移，实测一致）；新增的 `AppShell.vue:N` 引用（`:61-63` / `:84` / `:86` / `:142`）逐个实测命中。
+  - **行号回放（手工；`refcheck.sh` 全仓不存在，同 R4 登记）**：全仓 `router/index.js:N` = **22 个去重地址 / 31 处引用**，逐个回放**全部命中**（净零 ⇒ 预期零漂移，实测一致）；新增的 `AppShell.vue:N` 引用（`:76-78` / `:99` / `:101` / `:157`）逐个实测命中。
   - **`dist` 结构性取证**（只 grep 产物 `js/app.*.js`，**排除 `*.map`**）：
     - `path:"/customer"` **1** / `path:"/merchant"` **1**，两者 `component:` **同为压缩标识符 `Ve`**，而 `Ve = withScopeId(qe, [["__scopeId","data-v-e56957b4"]])`、`qe.__name === "AppShell"` ⇒ **两条记录挂的是同一个组件**（本笔的核心判据）。
     - `customer-page"` / `merchant-page"` → **0**（旧类名未残留）；`page:"chat"` → **2**（R4 基线，无回归）；`orderTab` **11** / `showSwitch` **5**（R2 基线，无回归）。
@@ -1140,7 +1140,7 @@
   - **`git diff --stat` + 净零核查**：`router/index.js` **241 → 241**、`config/nav.js` **69 → 69**、`views/HomeTab.vue` **44 → 44**、`api/http.js` **221 → 221**、`api-contract.md` **220 → 220**、`progress.md` **1095 → 1095**（本节之前；本节追加在其后）；新增 `views/AppShell.vue` **283**；删除两壳各 **240**。
   - **手测：不跑**（用户裁定 T 批攒到 R1–R6 全 merge 后一次跑）。
 
-- **（15）手测项（留 T 批，本笔不单跑）**：**T-new-5** 已登录客户手敲 `#/customer` ⇒ 顶栏 4 项、切 tab **不重建壳**（轮询不叠加）；**T-new-6** 已登录商家同法在 `#/merchant`；**T-new-7** 商家登录且客户 id 同时存在时，`fetchUnreadCount` 取的是**商家** id（降级链顺序，`AppShell.vue:122-129`）；**T-new-8** 红点清零：进 `#/…/msg` 立刻清、进 `#/…/user/chat` **不清**（`AppShell.vue:185-195`）。
+- **（15）手测项（留 T 批，本笔不单跑）**：**T-new-5** 已登录客户手敲 `#/customer` ⇒ 顶栏 4 项、切 tab **不重建壳**（轮询不叠加）；**T-new-6** 已登录商家同法在 `#/merchant`；**T-new-7** 商家登录且客户 id 同时存在时，`fetchUnreadCount` 取的是**商家** id（降级链顺序，`AppShell.vue:137-144`）；**T-new-8** 红点清零：进 `#/…/msg` 立刻清、进 `#/…/user/chat` **不清**（`AppShell.vue:200-210`）。
 
 - **（16）本笔不做**（按十条裁决，不变）：不动 `ProductPage.vue`（**R5 永久不做**）、后端、`ci.yml`、A3 脚本、`src/test/**`；不动界面样式（界面优化笔）；**不合并** `landingFor` 与 `roleKey`（**裁决 D10** ⇒ 已移出 R6、改挂 §5-C 待定笔）；**不合并** `.cart-container` / `.order-container`（D7）；**不建** `views/customer/`（D5）；**不动** `src/api/auth.js`（D6 ⇒ P2.6）。
 
@@ -1329,8 +1329,8 @@
 | 处 | 原引 | 现引 | 成因 |
 |---|---|---|---|
 | `progress.md:534` | `GoodsController.java:61` | **`:74`** | `GoodsController` 头部 javadoc 与入参注释增行 |
-| `progress.md:559` | `UserController.java:219` | **`:291`** | `UserController` 增 `/token`、重写两支 javadoc |
-| `progress.md:573` | `UserController.java:133` | **`:140`** | 同上 |
+| `progress.md:559` | `UserController.java:228` | **`:300`** | `UserController` 增 `/token`、重写两支 javadoc |
+| `progress.md:573` | `UserController.java:142` | **`:149`** | 同上 |
 | `progress.md:1170` | `auth.js:99-106` | **`:98-103`** | 见下「位移第二类」 |
 | `progress.md:1217` | `WebAuthConfig:118` | **`:137`** | 构造函数前新增两段 javadoc |
 | `progress.md:1228` | `UserController:222` | **`:294`** | 同 `:559` |
@@ -1744,7 +1744,7 @@
 | **P1.1 无 `res.ok` 检查** | `res.ok`/`res.status`/`.statusText` 全 src **0 命中** | **B** | 前端**从不看状态码**，只读 body 的 `success` ⇒ 笔 3 若引入 4xx/5xx，前端**静默无感**（不报错、也不提示） | 独立笔 |
 | **P1.5 OPTIONS 预检** | `ImgConfig.CorsFilter`：`addAllowedMethod("*")`（Spring `checkHttpMethod` 对 `"*"` 直放行 ⇒ **含 OPTIONS**）、`addAllowedHeader("*")`（⇒放行 `Access-Control-Request-Headers`）、~~`addAllowedOriginPattern("*")`~~ ⚠️ **2026-10-06 按语（CORS 收窄笔，§5-AH）：该通配已收窄为字面量白名单** `config.addAllowedOrigin(app.cors.allowed-origins 逐项)`（**其余四项逐字未动**；本行的 `addAllowedMethod("*")` / `addAllowedHeader("*")` / `maxAge=3600` 因此仍为现值）+ `allowCredentials(true)`、`maxAge=3600` | **C** | **已覆盖，无需改**（收窄后**依然成立**：预检判据只看 method/header/maxAge 三项 + origin 是否白名单，dev 的 `localhost:8080` 在白名单内 ⇒ 行为不变）；且前端多为 `application/x-www-form-urlencoded`（simple request）⇒ 预检基本不触发。⚠️ 收窄后新增一条口径：**非白名单 origin 的预检不再"被覆盖"，而是 403**（§5-AH (7) B 档实测） | — |
 
-> **P1.3 逐条**（10 端点 → 前端读的字段）：`conversations`→`success`+`list`（`ChatRoom:184`/`CustomerPage:89`（R1 重指；原记 `:97`）/`MerchantPage:113`；⚠️ **按语（§5-Y，R2，2026-10-05）：这两个壳的调用点 R2 后为 `CustomerPage:108` / `MerchantPage:107`**）；`history`→`success`(+`list`)（`ChatRoom:213`/`:279`）；`send`→`success`+`msg`（`ChatRoom:327`/`ProductPage:459`）；`userSelect`→`success`+`user`（`ChatRoom:164`/`FriendRoom:132`）；`friendAdd`→`success`+`msg`（`FriendRoom:159`）；`selectFriend`→`success`(+`list`)（`FriendRoom:194`）；`friendUp`/`friendDe`→`success`+`msg`（`FriendRoom:231` 变量 URL）；`friendSelect`→`success`(+`list`)（`FriendRoom:107`）；`getOrCreateConversation`→**无调用方**。⚠️ **再按语（§5-AB，R6，2026-10-05）**：本行里 `CustomerPage:108` / `MerchantPage:107` 两个指针**已随两壳删除悬空**（合一后为 `AppShell.vue:146`；`api-contract.md:192` 已同步重指）。
+> **P1.3 逐条**（10 端点 → 前端读的字段）：`conversations`→`success`+`list`（`ChatRoom:184`/`CustomerPage:89`（R1 重指；原记 `:97`）/`MerchantPage:113`；⚠️ **按语（§5-Y，R2，2026-10-05）：这两个壳的调用点 R2 后为 `CustomerPage:108` / `MerchantPage:107`**）；`history`→`success`(+`list`)（`ChatRoom:213`/`:279`）；`send`→`success`+`msg`（`ChatRoom:327`/`ProductPage:459`）；`userSelect`→`success`+`user`（`ChatRoom:164`/`FriendRoom:132`）；`friendAdd`→`success`+`msg`（`FriendRoom:159`）；`selectFriend`→`success`(+`list`)（`FriendRoom:194`）；`friendUp`/`friendDe`→`success`+`msg`（`FriendRoom:231` 变量 URL）；`friendSelect`→`success`(+`list`)（`FriendRoom:107`）；`getOrCreateConversation`→**无调用方**。⚠️ **再按语（§5-AB，R6，2026-10-05）**：本行里 `CustomerPage:108` / `MerchantPage:107` 两个指针**已随两壳删除悬空**（合一后为 `AppShell.vue:161`；`api-contract.md:192` 已同步重指）。
 
 ### 6-B. 前端债（归一笔独立的「前端 API 层规范化」）
 
@@ -1767,7 +1767,7 @@
 
 ---
 
-## 7. C3（Vue3 管理端）—— 骨架三笔 + 批 A「权限与审计」+ 块1·I2「系统通知」（2026-10-09；**未提交**）
+## 7. C3（Vue3 管理端）—— 骨架三笔 + 批 A「权限与审计」+ 块1·I2「系统通知」+ 块2〈用户块〉（2026-10-09；**未提交**）
 
 ⚠️ **细节一律以 `slot-registry.md` §十三 / §十四 为准**；本节只记**进度与判据**，不复制细节（避免两处各写各的）。
 
@@ -1880,6 +1880,82 @@
   `javac -encoding UTF-8` 本地编译**退出码 0**；算式对红那次的实测 `表数=15` = `15 == 11 + 4 && 4 == 4` ⇒ **PASS**
   （「4 张全在」由红的那次**自己证过**：15 = 11 基线 + 1 时间线 + 本笔 3 张）。
   红的证据落 `docs/agent/evidence/c3-ci-p3/a3-run-20261009-120224.txt`；登记见 `slot-registry.md §十七`。
+
+- ✅ **C3 块 2〈用户块〉落码 + 验收完成（2026-10-09 晚，未提交）**：块 1 已 merge、正式收口；本块起**启用提速规则**。
+  三端一起落 —— 用户端**注册直达 `#/register`** + 资料完善、商家端**入驻申请**、管理端**用户治理 + 商家审核 + 降级控制**。
+  **A 档 5 项已裁决**：A1 新表 `merchant_application`；A2 入驻 = **客户升级**（CAS 幂等 + 批准与改 role 同事务）；
+  A3 **封禁只标 `user`** + `loginSelect` 双查返 **4**；A4 收件箱扩 **`ToType=admin` / `ToId='*'`**；
+  A5 降级商家（`@Scheduled`、**冻结新单允许收尾旧单**、30 天不删只冻结、只手动触发、五阶段）。逐条登记见 `slot-registry.md §十八`。
+- 🏗 **建表（VM 库，不可逆）**：`mall_management_sql.sql:348-409` —— 新表 `merchant_application`（16 列，`:369-390`）
+  ＋ `user` 加 **8 列**（`:396-404`）＋ `goods` 加 **2 列**（`:407-409`，`ShelfState` **1=在架 / 0=已下架**）。
+  ⚠️ **本仓首次「改基线表」**（此前只加表、不动基线列）；加列**不幂等**（MySQL **不支持** `ADD COLUMN IF NOT EXISTS`，
+  重复执行报 Duplicate column 属预期）。实测 `apply.out` `rc=0`、库内表数 **16**、列/索引与正向 SQL 一致，
+  证据 `docs/agent/evidence/c3-block2/db/`（`migration.sql` / `state-before|after.txt`）。
+- 🧩 **后端**：新 `merchant/` 域（申请读写 + 降级 job）+ `admin/AdminAccountsController`（8 端点）/`UserGovernanceService`
+  + `user/UserGovernanceDao` / `UserStateLookupService` + `goods/GoodsShelfDao` + `shared/web/UserStateLookup`。
+  改既有：`AuditActions` **+7**（2→9 条）、`NotificationEvents` **+3**（21→24）、`UserController` 加 `/user/updateProfile`、
+  `UserService.loginSelect` 封禁双查、`IdentityGuard` **13→16 端点**、**`AuthInterceptor` 第 ⑤ 档封禁闸**
+  （复用 401、**管理员豁免** —— 否则一次误封锁死整个管理面）、**`WebAuthConfig` 用 `ObjectProvider<UserStateLookup>`**
+  （否则**每个 `@WebMvcTest` 切片启动即集体失败** —— block 1 同型事故 77 errors）、`OrderService` 冻结新单允许收尾旧单。
+- 🎨 **前端**：新 `api/accounts.js` / `api/merchant.js` / `MerchantApplyPage.vue`（⚠️ **挂用户端** —— 商家壳被
+  `meta.roles:['2','3']` 锁住，未审核客户进不去）/ `admin/AccountsPage.vue`（四段）；**注册直达 `#/register`**
+  （文件尾 `addRoute` + `isSlide` 读 `meta.register` + `$route` watch 补外部导航 + `toggle()` 同行写 URL）；
+  修掉全站 **3 条** vue-router `checkChildMissingNameWithEmptyPath` 噪音（三处子记录 `:58`/`:76`/`:89` **同行**加 `name`）。
+  ⚠️ 全部**净零行数**改法（`router/index.js` / `LoginPage.vue` / `UserInfoPage.vue` 都被文档按行号引）。
+- 🐞 **顺带修一个既有 bug —— `/img/**` 整片 404**（**与块 2 无关**，用户报「登录页大图空白」牵出）：
+  真因 = a3 profile 把上传目录外置到**空目录**（`application-a3.properties:50`，TD-08），而 `ImgPath` 修前**只**注册它
+  ⇒ **应用自带**的图（`Mall-Section-*.jpg` / `default_user.png`）一起 404。修法 = 注册**两个有序位置**
+  `{ 上传目录, classpath:/static/img/ }`（首个命中优先）。⚠️ 它修的是**一类** bug：a3 profile 下**任何**自带图都 404；
+  且**不是**布局/渲染回归（实测 `.brand-fig` 盒子没塌，1440×900 下 440×248）。证据 `docs/agent/evidence/c3-block2/login-fig/`。
+- 🧪 **验收**：`./mvnw -B test` **239 / 0 / 0 / 19 skipped / BUILD SUCCESS**（块 1 时 237）。UI 探针（证据
+  `docs/agent/evidence/c3-block2/`，README 每条标【实测】/【推断】两档）：`probe-accounts-apply` **17 / 0**、
+  `probe-register-deeplink` **4 / 4**、`probe-router-warns` **3 壳零 warn**（⚠️ **基线差分**不是「零绝对量」）、
+  `probe-login-fig`（定性）。⚠️ 探针**只证前端一侧**，后端由 `mvn test` 覆盖（脚本走 mock 是因 8088 真进程不得杀）。
+- 🔎 **登记**：`db-migration.md` **#6**（+ 注意 9）、`db-schema.md` **15→16 表**（453→**493**，+40）、
+  `slot-registry.md §十八`、`c3-blocks-index.md:14` 状态。因 `db-schema.md` 增行**重指 7 处**外部引用
+  （`selection-status.md` ×5 / `defect-survey.md` ×1 / `progress.md` ×1，按 `@@` hunk **确定性映射**，非手估）；
+  pack `c3-block-2-user.md` **行号同步 20 处**（后端 8 + 前端 9 + 裸简写 3，逐条 grep 对实际内容核过），
+  `bash scripts/check-context-packs.sh` 报 **170 引用 / 0 WARN / 0 FAIL**。
+- 🔬 **refs-scan 重扫**（`_work/refs-b2doc-after.txt` vs `before`）：**丢失 20 个 token，逐一核对 = 全部是本次有意的重指**
+  （无一处非预期丢失）；after token 集 **2055**（before 2032）。
+- ⚠️ **未做 / 待办**：① `ShelfState=0` 的**买家侧过滤**随**块 3**；② 注册页「商家」选项**绕开审核**
+  （`LoginPage.vue:175-176`）**登记不修**（改它＝动既有注册契约）；③ 既有陈旧 **6 处**引用（I2 笔遗留，
+  见 §十八 18-6 尾）派「文档漂移清理笔」；④ **真后端 E2E 未重跑**（8088 是用户 IDEA 起的**旧 class**，
+  须**重启**才认新 Controller —— 那条进程**不得杀**）。
+
+- 🔧 **手验后补丁（2026-10-09，用户手验 6 条）**：A 组必修 4 条 + B 组 2 条**全落** —— 详见 `slot-registry.md` §18-9。
+  要点：**A1 真因 = 把登录名当业务号用**（`MerchantApplicationController` 把登录名交给按业务号比较的
+  `IdentityGuard.requireSelfOrAdmin` ⇒ 非管理员必 403；`/user/updateProfile` 同病，一并修，**wire 契约不动**）；
+  **A2「解封入口缺失」未复现**（入口早在块 2 落码时就有 ⇒ 判旧构建 / 缓存，只加固 `isBanned` 认 `'true'`）；
+  **A3 用 SQL 级 CAS**（`WHERE … AND DowngradeState='none'`）+ 返回 `success:false` ⇒ **A4（14 条重复通知）结构上消失**；
+  **B1 甲案**（`AccountsPage` 页内三 tab + 收件箱提成 `/admin/inbox` 顶层项；规范落 `c3-modules.md` §5.1）；
+  **B2 按甲落黄条**（`AppShell.vue` 的 `.nav-notice`，与红点**同一支** 5s 轮询）。
+- 🧹 **行号互引整笔重定基**（`_work/renumber-b2.mjs`，机械 + 逐条打印）：**具名 105 + 裸 21 = 126 处 / 20 文件**；
+  `check-context-packs.sh` → **290 引用 / 0 WARN / 0 FAIL**；`refs-scan` before/after **3597 → 3595**，
+  **零非预期丢失**（少的 2 条同出被有意删掉的 `AccountsPage.vue:207` 那个 ⑤ 块注释）。
+
+- 🔧 **手验后补丁（第二轮，2026-10-09/10 用户手验，两条 A 组必修）**：详见 `slot-registry.md` §18-10。
+  **Bug 1（`/admin/inbox` 403）真因 = 管理端带着「别人的票」** —— 403 只出 `IdentityGuard.forbidden()`
+  ⇒ 反推 `identity!=null ∧ role≠3 ∧ userId≠'*'`；用户两个猜测都不成立（解不出身份走 **fail-open 放行**、永不会 403；
+  cookie 管理员折 null 走的是**拦截器**、产物是 **401** 且没走到）。链条 = `main.js` 认领的共享指针
+  → `http.js:149-150` 挂票 → `identify` **票优先** → 管理员又**铸不出票**（TD-18）。
+  **实测**：8088 **不带凭据**打 `/notification/list` = **200**（证明用户那发**确实带了**非管理员凭据）；
+  **DB 旁证**（a3 库）`admin_audit` Id=22 的 `user.ban` 记 `ActorId=uDopHnCeLS / ActorRole=1`，而那是**客户 1111** 的业务号。
+  ⚠️ 用户 8088 跑 **a3 profile**，`application-a3.properties:98` **闸是关的** ⇒ **手验绿 ≠ 默认 profile 绿**。
+  **修法 = 丁（用户裁决，甲/乙/丙被否）**：`api/auth.js` 尾追加 `dropPageToken()`（**只动 sessionStorage**，
+  与 `clearToken` 的 D6「连指针一起删」相反）+ `main-admin.js` `bootstrap()` **第一行**调用它
+  （**早于 `restoreIdentity`**，否则那发 `/user/me` 也带票）⇒ 闸关档两病同治（收件箱 200 + 审计记 role=3）。
+  🔴 **闸开档治不了** ⇒ 新挂账 **TD「管理端身份根治」**（管理端结构性无凭据 ⇒ `/admin/**` 全 401；
+  连带闸关档零凭据也能写审计 `ActorId=null`）。
+  **Bug 2（封禁用户登录提示错）**：后端**返对了 4**（`UserService.LOGIN_BANNED`），前端**无 `"4"` 支**、
+  且 `:306` 的 `/user/me` 对封禁用户**必 401 先抛** ⇒ 落 `:328` 通用文案；修法 = `:300` 早退（**同行追加、净零**），
+  并纠正 `UserService` javadoc 一处错述 + 标注 `:317` 那支**本就不可达**（既有）。**四个改动文件全部零行号漂移。**
+  🧪 `npm run build` **DONE**（Hash `557c5bf852801885`）；`git diff --numstat` = `auth.js 20/0 · main-admin.js 14/1 ·
+  LoginPage.vue 2/2 · UserService.java 2/2`。**待用户重启 8088 手验。**
+- 📦 **块 2 收口（2026-10-10）**：上述 §18-9 + §18-10 全部改动 **commit `a224840`** 并 **push 到 PR #83**
+  （`feat/c3-admin` → `main`；PR 上共 **2 个提交** = `f8f67d6` + `a224840`；35 文件 / +930 −159）。
+  7 个 `docs/美化/_dbg*.mjs` 按仓规**不入库**。**混合 PR ⇒ 由用户 merge**；CI 两个 job 已起，待用户看 CI + A3 产物后点 merge。
+  ⇒ merge 后切 `feat/c3-admin-block3`，**块 3 明天开**。
 
 **路线**：C3 现行 = **8 块**，唯一权威 **`c3-blocks-index.md`**；§七 那份「10 批 + 按端切」**已作废**
 （见 `c3-modules.md` §十）。⚠️ 购物车的归属**已统一**为「**属批 4 订单块，随该块一起做**」

@@ -1,0 +1,12 @@
+
+── #/login ──
+（无 Vue Router warn）
+
+── #/customer ──
+（无 Vue Router warn）
+
+── #/merchant ──
+（无 Vue Router warn）
+
+══ 判定 ══
+✅ 三个壳都零 vue-router warn

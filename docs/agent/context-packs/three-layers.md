@@ -83,7 +83,7 @@ TD-01（ddl-auto）、TD-03（回滚规则矛盾）、TD-04/06/07/08（锚点与
 
 | # | 项 | 位置 | 说明 | 归属 | 工作量 |
 |---|---|---|---|---|---|
-| 6 | 口令明文进 stdout + 随 CI artifact 扩散 | `UserController.java:39`、`ci.yml:315` | 泄露成立，但不改变运行结果 | 并行（环境层）；**git 历史清理另计** | 小 / 中～大 |
+| 6 | 口令明文进 stdout + 随 CI artifact 扩散 | `UserController.java:41`、`ci.yml:315` | 泄露成立，但不改变运行结果 | 并行（环境层）；**git 历史清理另计** | 小 / 中～大 |
 | 7 | 生产 = 默认 profile | 只有 `default` 与 `a3` | 它把 #1、#8 串起来；修它本身就是环境层 | 并行（环境层） | 中 |
 | 8 | root:123456 与 Redis 口令明文 | `application.properties:6-7`、`application-a3.properties:31` | 同 #7 | 并行（环境层） | 小～中 |
 
