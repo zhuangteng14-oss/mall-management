@@ -89,7 +89,10 @@ public class GoodsCacheService {
         Map<String, Object> result = new HashMap<>();
 
         // 1. 先查所有商品
-        String sql = "SELECT * FROM mall_management_sql.goods";
+        // ⚠️ C3 块 3 加可见性过滤：下架（ShelfState=0）/ 违规删除（DeletedAt 非空）不对买家露出。
+        //    这是块 2 挂账的结清（块 2 只加了 ShelfState 列，买家侧过滤留到本块）。
+        String sql = "SELECT * FROM mall_management_sql.goods "
+                + "WHERE ShelfState = 1 AND DeletedAt IS NULL";
         List<Map<String, Object>> goodsList = jdbcTemplate.queryForList(sql);
 
         // 2. 循环根据商品里的 MerchantId 查 login 表的 UserName
@@ -164,7 +167,8 @@ public class GoodsCacheService {
     @Cacheable(cacheNames = "goodsByMerchant", key = "#MerchantId", sync = true)
     public Map<String, Object> listByMerchant(String MerchantId) {
         Map<String, Object> result = new HashMap<>();
-        String sql = "SELECT * FROM mall_management_sql.goods WHERE MerchantId = ?";
+        String sql = "SELECT * FROM mall_management_sql.goods "
+                + "WHERE MerchantId = ? AND ShelfState = 1 AND DeletedAt IS NULL";
         List<Map<String, Object>> list = jdbcTemplate.queryForList(sql, MerchantId);
         result.put("success", true);
         result.put("list", list);

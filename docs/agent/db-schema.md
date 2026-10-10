@@ -5,13 +5,14 @@
 > **Java 坐标约定（2026-09-30 补）**：`G:` = `GoodsController.java`（前 `MallManagementGoodsController.java`）、`M:` = `MessageController.java`（前 `MallManagementMessage.java`）、`U:` = `UserController.java`（前 `MallManagementUserController.java`）的**语句行**（**不是** route 注解行，与 `api-contract.md` 的口径**相反**，两文件不要互抄）。B1 / B2 / B3 之后若干读写路径已搬到 `mallmanagement_service` 下的 Service ⇒ 本文件出现 `GoodsCacheService:` / `UserCacheService:` / `OrderStateMachine:` 等前缀，那是**跨文件搬迁**、不是行号漂移。**全文件 Java 坐标已于 2026-09-30 对 HEAD 逐条复核并替换** —— 原一版系统性偏旧（成因同 `api-contract.md:4`：各笔新代码插入后未同步）。⚠️ **三层四笔（order PR #25 `28194b4` / goods 2026-10-02 / user PR #32 `0c07e96` / message `8ed5fc1`）后**：`G:` / `M:` / `U:` 三个 Controller 已只剩路由 —— SQL 与业务体分别下沉 `<域>/dao/<域>Dao.java` 与 `<域>/service/`。**本文件下表凡涉这三个域的 `G:` / `M:` / `U:` 坐标，若未随该域的笔改写，一律已陈旧**；下表 `:41-48` 的用户域行已于第三笔、消息域行（`M:378`）已于第四笔改写，其余（`U:` 一族、`G:` 的未重测行）引用前请以源码为准。
 > ⚠️ **2026-10-02 笔 2 后**：订单端点的 SQL 已随 `OrderController` 拆出，迁至 `order/dao/OrderDao.java`；`GoodsController` 的商品行整体 **−9**（⚠️ 该「−9」只是**首两行**的口径：以 2026-09-30 基线 `148e77b` 逐条实测，`goodstype`/`goodsAdd` 为 −9、`goodsSelect` 一族 −8、`productCodePrice` −4、`goodsUp` 之后 +16/+23/+23，**不要拿 −9 换算全表**；详见 `api-contract.md:6`）。下表**订单相关行的 `G:` 已改指 `OrderDao`**，其余 `G:` 值**尚未重测** —— 引用前请以源码为准。
 > ⚠️ **2026-10-02 三层重构第二笔（商品域）后**：商品 **8 条内联 SQL** 从 `GoodsController` 下沉到 `goods/dao/GoodsDao.java`，写/读方法体进 `goods/service/GoodsService.java` —— 本表原 `G:` 的**商品行**据此改指 `GoodsDao.searchByKeyword`。这四个走缓存的读路径（`GoodsCacheService:81` / `:146` / `priceByTriple`）**未受影响**（它们的 SQL 本就在 Service，2026-09-30 已复核）。新增前缀：`S:` = `GoodsService.java`、`D:` = `GoodsDao.java`。
-> 表数量：**16** —— 11 张原始表 + `order_state_transition`（B3，2026-09-29，追加在 `.sql` 末尾的 Migration 块，`:221-235`）+ `admin_audit`（C3 批 A，2026-10-08，`:264-292`）+ `notification`（C3 块1-I2，2026-10-09，`:294-327`）+ `notification_template`（同笔，`:329-345`）+ `merchant_application`（C3 块 2〈用户块〉，2026-10-09，`:369-390`）。
-> ⚠️ **本笔（块 2）还改了「两张既有表」，但加列不增表**：`user` +8 列（`:396-404`，封禁 3 + 降级 5）、`goods` +2 列（`:407-409`，`ShelfState` / `DelistedAt`）—— 故表数**只 +1**；那 10 列落在 §6.3 与 §6.10 的既有小节里（**不另开节**）。
+> 表数量：**17** —— 11 张原始表 + 6 张由 `.sql` 末尾 Migration 块建的：`order_state_transition`（B3，2026-09-29，`:221-235`）· `admin_audit`（C3 批 A，2026-10-08，`:264-292`）· `notification`（C3 块1-I2，2026-10-09，`:294-327`）· `merchant_application`（C3 块 2〈用户块〉，2026-10-09，`:369-390`）· `template`（C3 块3 **就地改造**，2026-10-10 #8，`:556-569`）· `goods_audit`（C3 块 3〈商品块〉，2026-10-10，`:492-515`）。⚠️ **`notification_template`（`:329-345`）与 `goods_template`（`:474-484`）已由 #8 物理删** —— 两者在 `.sql` 里的 `CREATE TABLE` 语句**仍在原地**（零漂移手法），由块尾的 `DROP TABLE IF EXISTS` 中和 ⇒ 该文件里共 **19** 个 `CREATE TABLE`、**净 17 张表**（判据：导入后这两张表不存在）。
+> ⚠️ **块 2 还改了「两张既有表」，但加列不增表**：`user` +8 列（`:396-404`，封禁 3 + 降级 5）、`goods` +2 列（`:407-409`，`ShelfState` / `DelistedAt`）—— 故表数**只 +1**；那 10 列落在 §6.3 与 §6.10 的既有小节里（**不另开节**）。
+> ⚠️ **块 3 再改「两张既有表」+ 净增 2 张**：`goodstype` +3 列（`:449-451`，`ParentId` / `Sort` / `State`）**并换唯一键**（`:454-455`，`uk_goodstype_GoodType` → `uk_goodstype_parent_name (ParentId, GoodType)`）、`goods` +5 列（`:461-467`，`TypeId` / `DetailTemplateId` / `SpecTemplateId` / `AfterSaleTemplateId` / `DeletedAt`）；两张新表 `goods_template` / `goods_audit`。⇒ 表数 **16 → 18**，索引 **15 → 16**（换代一换一 + 净增 `idx_goodstype_parent_sort`），**非主键 UNIQUE 仍 3 个**。既有两表的加列落在 §6.4（`goodstype`）/ §6.3（`goods`）。 ⚠️ **块 3 就地改造（#8，2026-10-10）—— 本文件首次出现「删表 + 删列」**：新建**通用表** `template`（`:556-569`，`Type` 区分用途）；**物理删** `goods_template` + `notification_template`（用户明确批准，见 `db-migration.md` 注意 11）；`goods` **加** 3 段快照文本（`:588-607`，`Detail` / `Spec` / `AfterSale`）**删** 3 个模板引用 Id（`:611-630`，`DetailTemplateId` / `SpecTemplateId` / `AfterSaleTemplateId` —— 那三列**恒 NULL、全仓零写入**，见注意 10 末句）；`goods_audit` 加同 3 列（`:636-655`）。⇒ 表数 **18 → 17**、索引 **16 → 16**（净 0）、**非主键 UNIQUE 仍 3 个**（第三个从 `uk_notification_template_key` 换成 `uk_template_type_name`）。语义变化：商品侧由「**引用**模板 Id」（改模板 ⇒ 商品联动变）改为「**快照**」（选模板 → 填入 → **可改** → 存**最终文本** ⇒ 改模板**不影响**已上架商品）。
 > ⚠️ **2026-10-09 更正 —— 原写 12 是漏登**：先后漏了批 A 的 `admin_audit`；I2 登记时一并补齐（同一缺口见 `db-migration.md` 注意 8）。本文件此前所有「12 张表」的字面与据此推导的计数（索引张数、UNIQUE 个数）也随之更新。
 > `.sql` 末尾另有一段 S1a 追加的 Migration 块（`:236-245`，2026-09-30），**只含一条 `CREATE UNIQUE INDEX`，不建表**。
 > 全部为 `ENGINE=InnoDB`、`utf8mb4_0900_ai_ci`。
 >
-> ⚠️ 该 `.sql` 行尾是 CRLF（**409 个 `\n` / 409 个 `\r`，0 个裸 CR** —— 2026-10-09 块 2 追加一个块后**重新实测**〔LF 409 / CR 409 / 裸 CR 0〕；上一版为 345 / 345〔I2 追加两块后〕，再上为 245 / 246，S1a 前原为 235 / 236）。用会把行尾归一化的编辑器改它，diff 会变成整份文件重写 —— 改前先确认 diff 只有预期行。
+> ⚠️ 该 `.sql` 行尾是 CRLF（**680 个 `\n` / 680 个 `\r`，0 个裸 CR** —— 2026-10-10 块 3 就地改造（#8）追加一块后**重新实测**〔LF 680 / CR 680 / 裸 CR 0；同次实测 `CREATE TABLE` 共 19 条〕；上一版为 409 / 409〔块 2 追加一块后〕，再上为 345 / 345〔I2 追加两块后〕、245 / 246，S1a 前原为 235 / 236）。用会把行尾归一化的编辑器改它，diff 会变成整份文件重写 —— 改前先确认 diff 只有预期行。
 >
 > **完整字段清单 / 索引基线 / 外键关系见 §6–§9**（2026-09-30 补齐，逐列逐索引以 `.sql` 为准）。
 
@@ -21,8 +22,8 @@
 |---|---|---|---|---|---|---|
 | `customerimage` | 客户头像 | `UserName` | CustomerId, image | — | 仅主键 | `:23-28` |
 | `friend` | 好友关系（含待处理申请） | `id` (自增) | customerid, friendid, if_friend | **`if_friend` 状态位**：0=待处理 1=已通过 | 仅主键 | `:38-44` |
-| `goods` | 商品（按型号一行） | `Id` (自增) | MerchantId, GoodName, Price, GoodImg, GoodType, ProductCode, GoodTypeNew, **ShelfState, DelistedAt**（C3 块 2 加列，`:407-409`） | **`ShelfState`**：1=在架 / 0=已下架（块 2 新增；降级冻结只置 0、不删行；买方过滤随块 3） | 仅主键 | `:54-64` |
-| `goodstype` | 商品类型字典 | `Id` (自增) | GoodTypeNew, GoodType | — | **主键 + `uk_goodstype_GoodType(GoodType)`**（2026-10-04 #11） | `:74-79` |
+| `goods` | 商品（按型号一行） | `Id` (自增) | MerchantId, GoodName, Price, GoodImg, GoodType, ProductCode, GoodTypeNew, **ShelfState, DelistedAt**（C3 块 2 加列，`:407-409`）, **TypeId, DeletedAt**（C3 块 3 加列，`:461-467`）, **Detail, Spec, AfterSale**（C3 块 3 **就地改造**加列，`:588-607`） | **`ShelfState`**：1=在架 / 0=已下架（块 2 新增；降级冻结只置 0、不删行；买方过滤随块 3）；**`DeletedAt`**：非 NULL = 违规删除（块 3 逻辑删除）；**`Detail` / `Spec` / `AfterSale`**：3 段**快照文本**（`mediumtext`），块 3 就地改造取代原 `DetailTemplateId` / `SpecTemplateId` / `AfterSaleTemplateId` —— **那 3 列已删**（`.sql:611-630`）；商品存**最终文本**而**非**模板 Id ⇒ **改模板不影响**已上架商品 | 仅主键 | `:54-64` |
+| `goodstype` | 商品类型字典 | `Id` (自增) | GoodTypeNew, GoodType, **ParentId, Sort, State**（C3 块 3 加列，`:449-451`） | **`ParentId`**：0 = 一级类目（自引用 `Id`）；**`State`**：1 启用 / 0 停用（逻辑废弃） | **主键 + `idx_goodstype_parent_sort(ParentId, Sort)`（普通）+ `uk_goodstype_parent_name(ParentId, GoodType)`（UNIQUE，块 3 换代）** —— ⚠️ 原 `uk_goodstype_GoodType(GoodType)` **已被删**（2026-10-04 #11 → 2026-10-10 #7 换代） | `:74-79` |
 | `login` | 登录凭证与角色 | `UserName` | Password, **Role**(1=客户 2=商家), Id | — | 仅主键 | `:89-95` |
 | `merchantimage` | 商家头像 | `UserName` | MerchantId, image | — | 仅主键 | `:105-110` |
 | `message` | 聊天消息 | `id` (自增) | from_id, from_type, to_id, to_type, content, create_time | — | 主键 + **`idx_from_to(from_id,to_id)`** + **`idx_create_time(create_time)`** | `:120-131` |
@@ -33,14 +34,16 @@
 | `order_state_transition` | 订单状态流转时间线（B3 新增；C3 时间线视图的数据源） | `Id`（自增，**bigint**） | OrderId, Action, FromState, ToState, OccurredAt, created_at, updated_at | **append-only**；同单内排序用 `OccurredAt`，**不是 `Id`**（落库是 4 线程并发 INSERT，`Id` 在 INSERT 时才分配）；`updated_at` 恒等于 `created_at` | 主键 + **`idx_order_state_transition_order(OrderId, OccurredAt)`** | `:224-235` |
 | `admin_audit` | 管理端审计日志（C3 批 A 新增；「权限与审计」页数据源，横切所有写操作） | `Id`（自增，**bigint**） | ActorId, ActorRole, Action, TargetType, TargetId, BeforeJson, AfterJson, OccurredAt | **append-only**（只 INSERT，永不 UPDATE / DELETE）；`ActorId` 是**业务号**不是登录名；快照列是 MySQL `json` | 主键 + **`idx_admin_audit_occurred(OccurredAt)`** + **`idx_admin_audit_actor(ActorId, OccurredAt)`** + **`idx_admin_audit_target(TargetType, TargetId, OccurredAt)`** | `:264-292` |
 | `notification` | 系统通知（C3 块1-I2 新增；平台 → 个人单向投递，**每收件人一行**） | `Id`（自增，**bigint**） | BatchId, ToId, ToType, EventType, Title, Content, TargetType, TargetId, ReadAt, CreatedAt | `ReadAt NULL` = 未读（唯一判据）⇒ 标记已读会 UPDATE，**非** append-only；`TargetId` 是**软引用**（**无 FK**，见 §8） | 主键 + **`idx_notification_inbox(ToId, ToType, CreatedAt)`** + **`idx_notification_unread(ToId, ToType, ReadAt)`** + **`idx_notification_batch(BatchId)`** | `:294-327` |
-| `notification_template` | 系统通知模板（C3 块1-I2 新增；`c3-modules.md §6` 的「消息模板管理」） | `Id`（自增，**bigint**） | TemplateKey, TitleTemplate, BodyTemplate, Enabled | `Enabled` 1 启用 / 0 停用（停用 = 逻辑废弃，不物理删） | 主键 + **`uk_notification_template_key(TemplateKey)`**（UNIQUE） | `:329-345` |
+| ~~`notification_template`~~ | 系统通知模板（C3 块1-I2 新增；`c3-modules.md §6` 的「消息模板管理」）—— ⚠️ **已于 2026-10-10 #8 物理删**，行搬进 `template`（详见 §6.15） | ~~`Id`（自增，**bigint**）~~ | ~~TemplateKey, TitleTemplate, BodyTemplate, Enabled~~ | 现无此表；`Enabled` 停用语义由 `template.Enabled` 承接 | ~~主键 + `uk_notification_template_key(TemplateKey)`（UNIQUE）~~ | `:329-345`（建表语句仍在 .sql 原地；由 `.sql:680` 的 DROP 中和） |
 | `merchant_application` | 商家入驻申请（C3 块 2〈用户块〉新增；入驻审核数据源；一次申请一行，同一账号可多次） | `Id`（自增，**bigint**） | Username, ShopName, LicenseNo, ContactName, ContactPhone, ShopAddress, LicenseImage, Status, RejectReason, BatchId, SubmittedAt, ReviewedBy, ReviewedAt | **`Status`**：pending / approved / rejected（小写字符串码，与 CAS 的 `WHERE Status=?` 字面一致）；`BatchId` 给通知/审计一个跨重导稳定的 TargetId；审核会 UPDATE ⇒ 非 append-only；`Username` 软引用无 FK | 主键 + **`idx_merchant_application_status(Status, SubmittedAt)`** + **`idx_merchant_application_user(Username, SubmittedAt)`** + **`idx_merchant_application_batch(BatchId)`** | `:369-390` |
+| `template` | **通用模板库**（C3 块 3 **就地改造** #8 新增；`Type` 区分用途 —— 覆盖 `goods.detail` / `goods.spec` / `goods.afterSale` / `goods.reject` / `merchant.reject` / `merchant.approve` / `user.ban` / `notification.<原 TemplateKey>` / `comment.reply`〔块 6 预留〕。**取代** `goods_template` + `notification_template` 两张老表，两者已物理删） | `Id`（自增） | Type, Name, Title, Body, Enabled, Sort | **`Type`**：点分字符串码（**不建 DB ENUM**），`varchar(96)`；`Enabled` 1 启用 / 0 停用（逻辑废弃，不物理删）；`Body` 是 `mediumtext`（商品类 = **快照源**：选模板填入后可改，商品存最终文本；通知类 = 正文模板）；`(Type, Name)` 撞键即「该类型下已有同名模板」 | 主键 + **`uk_template_type_name(Type, Name)`**（UNIQUE）+ **`idx_template_type_enabled_sort(Type, Enabled, Sort)`** | `:556-569` |
+| `goods_audit` | 商品提审历史（C3 块 3〈商品块〉新增；**提审只写本表**，管理员通过才写 `goods` 行；一次提审一行，可多次） | `Id`（自增，**bigint**） | MerchantId, BatchId, GoodName, Price, GoodType, GoodTypeNew, TypeId, ProductCode, GoodImg, **Detail, Spec, AfterSale**（块 3 就地改造加列，`:636-655`）, Status, RejectReason, GoodsId, ReviewedBy, SubmittedAt, ReviewedAt | **`Status`**：pending / approved / rejected（与 CAS 的 `WHERE Status=?` 字面一致）；审核会 UPDATE ⇒ 非 append-only；`GoodsId` 通过后回填（软引用无 FK）；`MerchantId` 软引用无 FK；**3 段快照必须随提审走** —— 通过时 `writeGoodsFromAudit` 用**本表行重建** `goods` 行，本表不带就会丢（`.sql:524` 块注释） | 主键 + **`idx_goods_audit_status(Status, SubmittedAt)`** + **`idx_goods_audit_merchant(MerchantId, SubmittedAt)`** + **`idx_goods_audit_batch(BatchId)`** | `:492-515`（建表块）+ `:636-655`（#8 加 3 列） |
 
 种子数据交叉证据：`:176` 中 5 条 `productsales` 的 `OrderVolume` 全为 `0`，而 `:159` 的 `order` 表已有 6 条历史订单。
 
 ## 2. 索引现状
 
-**16 张表中 8 张有二级索引（共 15 个）**：`message` 2 个（`idx_from_to`、`idx_create_time`）、`order_state_transition` 1 个（`idx_order_state_transition_order`）、**`order` 1 个（`uk_order_orderId`，UNIQUE）**、**`goodstype` 1 个（`uk_goodstype_GoodType`，UNIQUE，2026-10-04 #11 新增）**、**`admin_audit` 3 个**（批 A，非唯一）、**`notification` 3 个**（I2，非唯一）、**`notification_template` 1 个（`uk_notification_template_key`，UNIQUE，I2 新增）**、**`merchant_application` 3 个**（块 2，非唯一）。其余 **8 张表除主键外无任何索引**；全库**除主键外 3 个 UNIQUE**（`uk_order_orderId`，2026-09-30 S1a `:236-245`；`uk_goodstype_GoodType`，2026-10-04 `:246-262`；`uk_notification_template_key`，2026-10-09 I2 `:344`；完整基线见 §7）。已知高频查询列缺索引：
+**17 张表中 9 张有二级索引（共 20 个）**：`message` 2 个（`idx_from_to`、`idx_create_time`）、`order_state_transition` 1 个（`idx_order_state_transition_order`）、**`order` 1 个（`uk_order_orderId`，UNIQUE）**、**`goodstype` 2 个（`idx_goodstype_parent_sort` 普通 + `uk_goodstype_parent_name` UNIQUE，2026-10-10 #7 换代：原 `uk_goodstype_GoodType` 已删）**、**`admin_audit` 3 个**（批 A，非唯一）、**`notification` 3 个**（I2，非唯一）、**`merchant_application` 3 个**（块 2，非唯一）、**`goods_audit` 3 个**（块 3，非唯一）、**`template` 2 个（`uk_template_type_name` UNIQUE + `idx_template_type_enabled_sort` 普通，#8 新增）**。其余 **8 张表除主键外无任何索引**；全库**除主键外 3 个 UNIQUE**（`uk_order_orderId`，2026-09-30 S1a `:236-245`；**`uk_goodstype_parent_name`，2026-10-10 #7 `:455`〔换代自 `uk_goodstype_GoodType`〕**；**`uk_template_type_name`，2026-10-10 #8 `:567`**〔#8 前是 `uk_notification_template_key`，2026-10-09 I2 `:344`，**该表已删**〕；完整基线见 §7）。⚠️ **本行原写「共 16 个」是既有少算**（枚举里列了 `goods_template` / `goods_audit` 却漏进总数：2+1+1+2+3+3+1+3 = 16 少了块 3 两张表的 4 个）—— 本次按 **2026-10-10 实测**（VM 库 `information_schema.STATISTICS`，`INDEX_NAME <> 'PRIMARY'`）改为 **20**；⚠️ 与 #8 **无关**（#8 索引净增 0：−`goods_template` 1 − `notification_template` 1 + `template` 2）。已知高频查询列缺索引：
 
 | 查询位置 | SQL 条件 | 涉及表 | 现况 |
 |---|---|---|---|
@@ -64,7 +67,7 @@
 |---|---|---|
 | 配置 | `spring.jpa.hibernate.ddl-auto=validate`（2026-10-04 起；原 `update`） | `application.properties:29` |
 | 依赖 | `spring-boot-starter-data-jpa` 已引入 | `pom.xml:51` |
-| 手写 DDL | `mall_management_sql.sql`，**16** 张表完整 CREATE TABLE（11 原始 + B3/S1a 后追加 5） | 全文件 |
+| 手写 DDL | `mall_management_sql.sql`，**19** 个 `CREATE TABLE`（11 原始 + 迁移块 8：B3 / S1a 后 5 + 块 3 追加 2 + #8 新增 `template` 1），其中 `notification_template` / `goods_template` 两块由 #8 尾部 `DROP TABLE IF EXISTS` 中和 ⇒ **净 17 张表**（2026-10-10 实测） | 全文件 |
 
 **当前实际生效的是手写 `mall_management_sql.sql`。**
 原因：全项目**不存在任何 `@Entity`**——既有的唯一一个 POJO 曾是 `mallmanagement_class/info.java`（仅 `@Data`/`@AllArgsConstructor`/`@NoArgsConstructor` 三个 lombok 注解、无 JPA 注解、0 引用），**该类已于 2026-10-02 笔 1 挪包时删除**（`01df702`）。Hibernate 无实体可映射，`ddl-auto` 当前是**空转**，不会修改任何表结构。⚠️ **结论不变但依据换了**：从「有一个无注解的实体类」变成「**一个实体类都没有**」——条文原写「info.java 是唯一实体类」，笔 1 之后该句本身已不成立（详见 `project-map.md` 与 `tech-debt.md` TD-01）。
@@ -117,7 +120,7 @@
 
 ---
 
-## 6. 完整字段清单（16 张表，逐列以 `.sql` 为准）
+## 6. 完整字段清单（17 张表，逐列以 `.sql` 为准）
 
 > 行号 = `mall_management_sql.sql` 真实行号。`约束` 列照抄 DDL；`备注` 列出 COMMENT（本库仅 `order_state_transition` 有列注释）与已核实的语义。
 > 列级 `CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci` 在部分列上显式声明（下表标「显式」）、部分列省略 —— 因表默认值相同，**功能等价**，属声明噪音。
@@ -140,13 +143,15 @@
 | `order_state_transition` | InnoDB | utf8mb4 | utf8mb4_0900_ai_ci | — | 0 | — |
 | `admin_audit` | InnoDB | utf8mb4 | utf8mb4_0900_ai_ci | — | 2 ⚠️ | — |
 | `notification` | InnoDB | utf8mb4 | utf8mb4_0900_ai_ci | — | 0 | — |
-| `notification_template` | InnoDB | utf8mb4 | utf8mb4_0900_ai_ci | — | 0 | — |
+| ~~`notification_template`~~ **已删**（#8） | — | — | — | — | — | — |
 | `merchant_application` | InnoDB | utf8mb4 | utf8mb4_0900_ai_ci | — | 0 | — |
+| `template`（#8 新增，取代 `goods_template`） | InnoDB | utf8mb4 | utf8mb4_0900_ai_ci | — | 0 ⚠️ | — |
+| `goods_audit` | InnoDB | utf8mb4 | utf8mb4_0900_ai_ci | — | 0 ⚠️ | — |
 
-> **16 张表的 ENGINE / CHARSET / COLLATE 完全一致**，且逐字等于库级默认值（`:15` `CREATE DATABASE ... DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci`）⇒ **没有任何表声明自己的字符集**，全套吃库级默认。
+> **17 张表的 ENGINE / CHARSET / COLLATE 完全一致**，且逐字等于库级默认值（`:15` `CREATE DATABASE ... DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci`）⇒ **没有任何表声明自己的字符集**，全套吃库级默认。
 > `AUTO_INCREMENT` = DDL 中的现值（导入基线）。
-> ⚠️ **后四张表（`admin_audit` / `notification` / `notification_template` / `merchant_application`）不属于「导入基线」** —— 它们是 `.sql` 末尾的 Migration 块，用 `IF NOT EXISTS` 追加、**块内不 DROP** ⇒ 全量重导**不清**它们（`admin_audit` 刻意保审计历史、`notification*` 刻意保通知历史、`merchant_application` 刻意保入驻申请历史）。其行数（2026-10-09 实测）**不是种子数据**：`admin_audit` 那 2 行是批 A 验收探针留下的 `goods.update`；`notification` / `notification_template` / `merchant_application` 均为 **0**（I2 与块 2 验收后已清空，见 `slot-registry.md §十五` / `§十六`）。**P4 判据不覆盖这四张**（只查 `order/goods/login/user/friend`）。
-> ⚠️ **另有「两张基线表被加列」**（C3 块 2）：`user` +8 列、`goods` +2 列 —— 这两张**属于导入基线**且**会被重导清空重建**，但加列语句在 Migration 块里（`CREATE TABLE` 之后）⇒ 重导后仍由该块补上（见 §6.3 / §6.10 的末两行）。⚠️ 加列**不幂等**（MySQL 无 `ADD COLUMN IF NOT EXISTS`），重复执行会报 Duplicate column（预期，见 `.sql:359-364`）。
+> ⚠️ **后五张表（`admin_audit` / `notification` / `merchant_application` / `template` / `goods_audit`）不属于「导入基线」** —— 它们是 `.sql` 末尾的 Migration 块，用 `IF NOT EXISTS` 追加、**块内不 DROP** ⇒ 全量重导**不清**它们（`admin_audit` 刻意保审计历史、`notification` 刻意保通知历史、`merchant_application` 刻意保入驻申请历史、`template` 刻意保模板、`goods_audit` 刻意保提审历史）。其行数**不是种子数据**：`admin_audit` 那 2 行是批 A 验收探针留下的 `goods.update`；其余均 **0**（⚠️ `admin_audit` = 2 与 `merchant_application` = 0 测于 **VM 库**；`template` = 0 / `goods_audit` = 0 为 **2026-10-10 实测**，见 `db-migration.md` 注意 11）。⚠️ 五张新表本身都用 `CREATE TABLE IF NOT EXISTS`（**幂等**）⇒ 全量重导路径上它们的行数**不清零**（`admin_audit` 的 2 行会留到重导之后）。**P4 判据不覆盖这五张**（只查 `order/goods/login/user/friend`）。
+> ⚠️ **另有「两张基线表被改列」**：C3 块 2 —— `user` +8 列、`goods` +2 列；C3 块 3 —— `goodstype` +3 列、`goods` 再 +5 列；C3 块 3 就地改造（#8）—— `goods` **+3 段快照文本并 −3 个 `*TemplateId`**（净 0）、`goods_audit` +3 列。合计 `goods` 净 **+7 列**（+2 +5 +3 −3）。这两张**属于导入基线**且**会被重导清空重建**，但加列语句在 Migration 块里（`CREATE TABLE` 之后）⇒ 重导后仍由该块补上（见 §6.3 goods / §6.4 goodstype / §6.10 user）。⚠️ **#8 是本文件首次出现「删**基线表**的列」**（`goods` 的 3 个 `*TemplateId`，用户明确批准，见 `db-migration.md` 注意 11）。⚠️ **两条幂等口径不同**：块 2 / 块 3 的加列**不幂等**（MySQL 无 `ADD COLUMN IF NOT EXISTS`），重复执行报 Duplicate column（预期，见 `.sql:359-364`、`.sql:437-446`）；**#8 的加列 / 删列全部走 `information_schema` 守卫 + `PREPARE`**，**重复执行是空操作、不报错**（`.sql:536-538`）。
 > **种子行数即 A3 的 P4 判据基线**：`ConcurrencyRunner.java:2521-2547`（**2026-10-02 实测**；原写 `:2404-2427`，2026-09-30 因 C 组升门禁的注释重写下移 17 行改为 `:2421-2444`，其后 B2 与 C 两段先后增补使本段**再下移 100 行**）只查 `order/goods/login/user/friend` 五张，期望 `6/5/5/5/4`，与本表**逐字一致**（其注释即写「`mall_management_sql.sql` 逐行计数」）。P4 的用途是「确认是刚导入过的干净实例，而非被上一轮污染过的库」⇒ 种子行数是**门禁输入而非装饰**，改种子数据会先让 P4 变红。
 
 ### 6.1 `customerimage`（`:23-28`）
@@ -177,13 +182,21 @@
 | `GoodTypeNew` | int | NULL, DEFAULT NULL | 类型 ID；**与 `goodstype.GoodTypeNew` 的 `NOT NULL DEFAULT '0'` 不一致** |
 | `ShelfState` | tinyint(1) | NOT NULL DEFAULT 1 | **C3 块 2 加列**（`:408`）。1=在架 / 0=已下架。⚠️ 既有「下架」端点 `/goods/goodsDe` 是**真 DELETE**；本列让下架**可逆**（降级冻结只置 0、不删行）。买方过滤随块 3 |
 | `DelistedAt` | datetime(3) | NULL, DEFAULT NULL | **C3 块 2 加列**（`:409`）。下架时刻；在架为 NULL |
+| `TypeId` | int | NULL, DEFAULT NULL | **C3 块 3 加列**（`:462`）。类目 Id（软引用 `goodstype.Id`）；唯一键换代连带 —— 二级筛选改按 Id 走。迁移块内按名字回填既有行（`:471`） |
+| `Detail` | **mediumtext** | NULL, DEFAULT NULL | **C3 块 3 就地改造（#8）加列**（`:588-593`）。详情**快照文本**（提审通过时由 `goods_audit.Detail` 原样写回）；**取代**原 `DetailTemplateId` —— 该列**已删**（`:611-616`） |
+| `Spec` | **mediumtext** | NULL, DEFAULT NULL | **C3 块 3 就地改造（#8）加列**（`:595-600`）。规格**快照文本**，约定**行内 `键=值`**（下游若要解析须按此约定）；原 `SpecTemplateId` **已删**（`:618-623`） |
+| `AfterSale` | **mediumtext** | NULL, DEFAULT NULL | **C3 块 3 就地改造（#8）加列**（`:602-607`）。售后**快照文本**；原 `AfterSaleTemplateId` **已删**（`:625-630`） |
+| `DeletedAt` | datetime(3) | NULL, DEFAULT NULL | **C3 块 3 加列**（`:466`）。违规删除时刻；正常为 NULL（**逻辑删除，不物理删**，规则 v2） |
 
 ### 6.4 `goodstype`（`:74-79`）
 | 字段 | 类型 | 约束 | 备注 |
 |---|---|---|---|
 | `Id` | int | **PK**, NOT NULL AUTO_INCREMENT | `AUTO_INCREMENT=12` |
 | `GoodTypeNew` | int | **NOT NULL DEFAULT '0'** | 与 `goods.GoodTypeNew` 可空不同 |
-| `GoodType` | char(20) | NOT NULL, **UNIQUE `uk_goodstype_GoodType`**（2026-10-04 #11，`mall_management_sql.sql:246-262`） | ~~无唯一约束 → 类型名可重复~~ ⇒ **已加唯一约束**，重复类型名写不进去。⚠️ 与 `goods.GoodType` **无 FK**（本库除两个 `uk_*` 外没有任何约束，见 §8） |
+| `GoodType` | char(20) | NOT NULL，**UNIQUE `uk_goodstype_parent_name(ParentId, GoodType)`**（2026-10-10 #7 **换代**，`mall_management_sql.sql:455`） | 原全局唯一 `uk_goodstype_GoodType(GoodType)`（2026-10-04 #11）**已删**（`:454`）⇒ 键收窄为「**每父级下不重名**」（允许「电子用品>配件」与「服装>配件」并存）。⚠️ 与 `goods.GoodType` **无 FK**（本库除 3 个 `uk_*` 外没有任何约束，见 §8） |
+| `ParentId` | int | **NOT NULL DEFAULT 0** | **C3 块 3 加列**（`:449`）。父类目 Id：0 = 一级类目（自引用 `goodstype.Id`；模型不限深度，UI 只做二级） |
+| `Sort` | int | **NOT NULL DEFAULT 0** | **C3 块 3 加列**（`:450`）。同级排序（升序）；0 = 默认 |
+| `State` | tinyint(1) | **NOT NULL DEFAULT 1** | **C3 块 3 加列**（`:451`）。1 启用 / 0 停用（逻辑废弃，不物理删） |
 
 ### 6.5 `login`（`:89-95`）
 | 字段 | 类型 | 约束 | 备注 |
@@ -324,18 +337,15 @@
 
 > 索引：主键 + `idx_notification_inbox(ToId, ToType, CreatedAt)`（收件箱分页，前两列等值 ⇒ 第三列有序，反向扫满足 `ORDER BY CreatedAt DESC` 不 filesort）+ `idx_notification_unread(ToId, ToType, ReadAt)`（未读计数，三端 5s 轮询的**最热查询**，可 covering count 不回表）+ `idx_notification_batch(BatchId)`（管理端历史按批归组）。
 
-### 6.15 `notification_template`（`:329-345`，C3 块1-I2 新增）
-| 字段 | 类型 | 约束 | 备注 |
-|---|---|---|---|
-| `Id` | **bigint** | **PK**, NOT NULL AUTO_INCREMENT | 自增主键 |
-| `TemplateKey` | varchar(64) | NOT NULL, **UNIQUE**（`uk_notification_template_key`） | 模板键（业务唯一），形如 `goods.audit.rejected` |
-| `TitleTemplate` | varchar(255) | NOT NULL | 标题模板（可含 `{占位符}`） |
-| `BodyTemplate` | varchar(1024) | NOT NULL | 正文模板 |
-| `Enabled` | tinyint(1) | NOT NULL DEFAULT 1 | 是否启用：1 启用 / 0 停用（停用 = 逻辑废弃，不物理删） |
-| `created_at` | datetime | NOT NULL DEFAULT CURRENT_TIMESTAMP | 行落库时刻 |
-| `updated_at` | datetime | NOT NULL DEFAULT CURRENT_TIMESTAMP **ON UPDATE CURRENT_TIMESTAMP** | 行更新时刻 |
-
-> ⚠️ **块 1 只做模板的存取 CRUD，`send` 收的是字面 title/body，不套模板**（占位符渲染留后 —— 要定渲染语法与转义口径，返工风险大；见 I2 方案 §七·未决 3）。
+### 6.15 ~~`notification_template`~~ —— **已物理删（2026-10-10 #8）**（原 `:329-345`，C3 块1-I2 新增）
+> ⚠️ **本表已于 2026-10-10 被物理删除**（用户明确批准 —— 本库规则 v2 禁止删表；批件逐字见 `db-migration.md` 注意 11）。原列：`Id` bigint PK · `TemplateKey` varchar(64) UNIQUE(`uk_notification_template_key`) · `TitleTemplate` varchar(255) · `BodyTemplate` varchar(1024) · `Enabled` tinyint(1) · `created_at` / `updated_at`。
+> 行已**搬迁**进 §6.17 的 `template`：`Type = 'notification.' + TemplateKey` · `Name = TemplateKey` · `Title = TitleTemplate` · `Body = BodyTemplate` · `Enabled` 原样 · `Sort = 0`（`.sql:657-673`）；撞 `(Type,Name)` 唯一键时 **`ON DUPLICATE KEY UPDATE Id = template.Id` ⇒ 不覆盖已编辑过的模板**。
+> ⚠️ **建表语句仍留在 `.sql:329-345` 原地不动**（零漂移手段），净行为由 `.sql:680` 的 `DROP TABLE IF EXISTS` 兑现 ⇒ 判据是「**导入后本表不存在**」，与「物理删」等价。
+> ⚠️ 块 1 立下的口径**不变**：通知类模板**仍不接线** —— 无占位符渲染、`send` 仍收**字面** title/body（要定渲染语法与转义口径，返工风险大；I2 方案 §七·未决 3）。#8 只让它**有表、有 CRUD**（现为 `template` 表的 `notification.*` 行）。
+> ⚠️ **为什么删而不是留**：两套模板表语义重复（通知侧 `notification_template` / 商品侧 `goods_template`），留一张孤儿表 = 留一份必然漂移的 schema。合并后 `notification.*` 只是 `template` 里的一族 `Type`。
+> ⚠️ **`template.Type` 是 `varchar(96)` 而不是 32** —— 搬迁值是 `'notification.' + TemplateKey`，真实最长 key `merchant.downgrade.scheduled`(28) ⇒ **41 字符**，`varchar(32)` 会 **1406 Data too long**；`.sql:571-584` 的加宽守卫即为此，见 `db-migration.md` 注意 11。
+> ⚠️ 本表是 #8 **之前**「非主键 UNIQUE 3 个」里的第 3 个（`uk_notification_template_key`）；#8 后该位置由 `template.uk_template_type_name` 接替 —— 二者同属「**新建表顺手给的唯一性**」而非「认领一条旧前提」，见 §10.1 与 §7 附注。
+> ⚠️ **CRUD 端点一并搬走**（表没了，旧端点集就是「指向已删表的 500 / 空集」）：`POST /admin/notify/template/{list,save}` **已删**，改走通用 `POST /admin/template/*` —— 通知页只带 `TypePrefix='notification.'`。⚠️ 口径变化：通知模板 CRUD 旧路径**从未挂审计**，合并后统一挂 `AuditActions.TEMPLATE_*`（对 catalog 侧等价、对 notify 侧是**新增留痕**）。
 
 ### 6.16 `merchant_application`（`:369-390`，C3 块 2〈用户块〉新增）
 | 字段 | 类型 | 约束 | 备注 |
@@ -360,6 +370,50 @@
 > 索引：主键 + `idx_merchant_application_status(Status, SubmittedAt)`（审核队列：按状态取、按提交时刻排）+ `idx_merchant_application_user(Username, SubmittedAt)`（「我的申请」按账号取近期）+ `idx_merchant_application_batch(BatchId)`（通知/审计按批归组）。
 > ⚠️ 本表**无 UNIQUE**：同一账号**可多次申请**（`Username` 天然重复），一次申请一行。
 
+### 6.17 `template`（`:556-569`，C3 块 3 **就地改造** #8 新增；**通用**模板库 —— **取代** `goods_template` + `notification_template`，两者已物理删）
+| 字段 | 类型 | 约束 | 备注 |
+|---|---|---|---|
+| `Id` | int | **PK**, NOT NULL AUTO_INCREMENT | 自增主键 |
+| `Type` | varchar(96) | NOT NULL | 模板类型（**点分字符串码，不建 DB ENUM**）：`goods.detail` / `goods.spec` / `goods.afterSale` / `goods.reject` / `merchant.reject` / `merchant.approve` / `user.ban` / `notification.<原 TemplateKey>` / `comment.reply`（块 6 预留）。⚠️ 后端**不校验未知 Type**：查不到回**空列表 + `success:true`**（不是错误） |
+| `Name` | varchar(64) | NOT NULL | 模板名（「选模板」弹窗列表的显示名）。与 `Type` 合成唯一键 —— 撞键 ⇒ 回「该类型下已有同名模板」 |
+| `Title` | varchar(255) | NULL, DEFAULT NULL | 标题模板（**通知类用**；商品类 / 理由类为 NULL —— 正文即全部） |
+| `Body` | **mediumtext** | NULL, DEFAULT NULL | 正文：**商品类 = 纯文本内容（快照源）** —— 选模板 → 填入输入框 → **可改** → 商品存**最终文本**而**非**模板 Id ⇒ 改模板**不影响**已上架商品（与 `goods_template` 的「引用 Id」语义**相反**）；通知类 = 正文模板 |
+| `Enabled` | tinyint(1) | NOT NULL DEFAULT 1 | 1 启用 / 0 停用（**逻辑废弃，不物理删**，规则 v2）。⚠️ **写**入走后端 `Integer` ⇒ 发 `1`/`0`；**读**回经 Connector/J（`tinyInt1isBit=true`）可能变 **Boolean** ⇒ 判断要宽容 |
+| `Sort` | int | NOT NULL DEFAULT 0 | 同 `Type` 内排序（升序）；0 = 默认。排序统一 `ORDER BY Sort ASC, Id ASC` |
+| `created_at` | datetime | NOT NULL DEFAULT CURRENT_TIMESTAMP | 行落库时刻（`agent.md` 数据库管理规则 8） |
+| `updated_at` | datetime | NOT NULL DEFAULT CURRENT_TIMESTAMP **ON UPDATE CURRENT_TIMESTAMP** | 行更新时刻 |
+
+> 索引：主键 + **`uk_template_type_name(Type, Name)`**（UNIQUE —— 兼「防同类型重名」与搬迁 upsert 锚点）+ **`idx_template_type_enabled_sort(Type, Enabled, Sort)`**（公共读 / 管理端按 `Type` 取启用的）。⚠️ **本表初始 0 行、无种子数据** ⇒「选模板」弹窗显示「暂无模板」是**预期**（建库即空）。⚠️ **无 FK**。端点为公共读 `POST /template/{list,get}` + 管理端 `POST /admin/template/{list,create,update,delete}`（TD-18：**不加角色闸**）；`Type` **落库即定、不允许改**（改了等于换一个模板）。
+
+### 6.18 `goods_audit`（`:492-515`，C3 块 3〈商品块〉新增）
+| 字段 | 类型 | 约束 | 备注 |
+|---|---|---|---|
+| `Id` | bigint | **PK**, NOT NULL AUTO_INCREMENT | 自增主键 |
+| `MerchantId` | varchar(20) | NOT NULL | 提审商家号（`goods.MerchantId`）。⚠️ **软引用，不设 FK**（同 `notification.TargetId` 口径） |
+| `BatchId` | varchar(36) | NOT NULL | 提审时生成的 UUID；给通知与审计一个**跨重导稳定**的 `TargetId` |
+| `GoodName` | varchar(40) | NOT NULL | 商品名（提审快照） |
+| `Price` | **double** | NOT NULL | 价格（提审快照；与 `goods.Price` 同型） |
+| `GoodType` | varchar(20) | NULL, DEFAULT NULL | 类目名（提审快照；仅作展示/兼容，正式引用走 `TypeId`） |
+| `GoodTypeNew` | int | NULL, DEFAULT NULL | 类目新旧位（提审快照；通过时原样写进 `goods.GoodTypeNew`） |
+| `TypeId` | int | NULL, DEFAULT NULL | 类目 Id（提审快照；通过时原样写进 `goods.TypeId`）。⚠️ **必须随单走** —— 否则改名后按名字回查会歧义 |
+| `ProductCode` | varchar(40) | NULL, DEFAULT NULL | 商品货号（提审快照） |
+| `GoodImg` | varchar(255) | NULL, DEFAULT NULL | 商品图 URL（提审快照；放宽到 255 容长 URL） |
+| `Detail` | **mediumtext** | NULL, DEFAULT NULL | **C3 块 3 就地改造（#8）加列**（`:636-641`）。详情**快照**（提审携带；通过时**原样**写进 `goods.Detail`） |
+| `Spec` | **mediumtext** | NULL, DEFAULT NULL | **C3 块 3 就地改造（#8）加列**（`:643-648`）。规格**快照**（同上；行内 `键=值`） |
+| `AfterSale` | **mediumtext** | NULL, DEFAULT NULL | **C3 块 3 就地改造（#8）加列**（`:650-655`）。售后**快照**（同上） |
+| `Status` | varchar(16) | NOT NULL DEFAULT 'pending' | 审核状态：`pending` / `approved` / `rejected`（小写，与 CAS 的 `WHERE Status=?` 字面一致；字符串码，**不建 DB ENUM**） |
+| `RejectReason` | varchar(255) | NULL, DEFAULT NULL | 驳回理由（`Status=rejected` 时有值）。命名沿用 `merchant_application.RejectReason`（同名同义） |
+| `GoodsId` | bigint | NULL, DEFAULT NULL | 通过后回填的 `goods.Id`（软引用）；未通过为 NULL |
+| `SubmittedAt` | **datetime(3)** | NOT NULL DEFAULT CURRENT_TIMESTAMP(3) | 提交时刻（**DB 存 UTC**） |
+| `ReviewedBy` | varchar(20) | NULL, DEFAULT NULL | 审核的管理员账号名（管理员无独立业务号） |
+| `ReviewedAt` | **datetime(3)** | NULL, DEFAULT NULL | 审核时刻；未审为 NULL |
+| `created_at` | datetime | NOT NULL DEFAULT CURRENT_TIMESTAMP | 行落库时刻 |
+| `updated_at` | datetime | NOT NULL DEFAULT CURRENT_TIMESTAMP **ON UPDATE CURRENT_TIMESTAMP** | 行更新时刻（审核会 UPDATE，故本表**非** append-only） |
+
+> 索引：主键 + `idx_goods_audit_status(Status, SubmittedAt)`（审核队列：按状态取、按提交时刻排）+ `idx_goods_audit_merchant(MerchantId, SubmittedAt)`（「我的提审」按商家取近期）+ `idx_goods_audit_batch(BatchId)`（通知/审计按批归组）。
+> ⚠️ 本表**无 UNIQUE**：**再次提审 = 新插一行**（保留完整历史）⇒ `(MerchantId, GoodName, ProductCode)` 不是键。
+> ⚠️ **提审只写本表（不写 `goods` 行）**；管理员【通过】才在**同一事务**里写 `goods` + `productsales` + CAS 置本表 `Status='approved'` + 回填 `GoodsId`；【驳回】只改本表 `Status='rejected'` + `RejectReason`。
+
 ---
 
 ## 7. 索引完整基线
@@ -369,7 +423,7 @@
 | `customerimage` | `UserName` | 无 | **无** |
 | `friend` | `id` | 无 | **无** |
 | `goods` | `Id` | 无 | **无** |
-| `goodstype` | `Id` | **`uk_goodstype_GoodType(GoodType)`**（UNIQUE，2026-10-04 #11） | **有 1 个**（`GoodType`，UNIQUE，#11） |
+| `goodstype` | `Id` | `idx_goodstype_parent_sort(ParentId, Sort)`（普通，2026-10-10 #7）**+ `uk_goodstype_parent_name(ParentId, GoodType)`**（UNIQUE，2026-10-10 #7 **换代**：原 `uk_goodstype_GoodType(GoodType)` 已删） | **有 1 个**（`(ParentId, GoodType)`，UNIQUE，#7 换代） |
 | `login` | `UserName` | 无 | **无**（`Id` 非唯一） |
 | `merchantimage` | `UserName` | 无 | **无** |
 | `message` | `id` | `idx_from_to(from_id,to_id)`、`idx_create_time(create_time)` | **无** |
@@ -380,12 +434,14 @@
 | `order_state_transition` | `Id` | `idx_order_state_transition_order(OrderId, OccurredAt)` | **无** |
 | `admin_audit`（`:264-292`，批 A） | `Id` | `idx_admin_audit_occurred(OccurredAt)`、`idx_admin_audit_actor(ActorId, OccurredAt)`、`idx_admin_audit_target(TargetType, TargetId, OccurredAt)` | **无** |
 | `notification`（`:294-327`，I2） | `Id` | `idx_notification_inbox(ToId, ToType, CreatedAt)`、`idx_notification_unread(ToId, ToType, ReadAt)`、`idx_notification_batch(BatchId)` | **无** |
-| `notification_template`（`:329-345`，I2） | `Id` | **`uk_notification_template_key(TemplateKey)`**（UNIQUE） | **有 1 个**（`TemplateKey`，UNIQUE，I2 `:344`） |
+| ~~`notification_template`~~ **已删**（#8） | — | —（原 **`uk_notification_template_key(TemplateKey)`**，UNIQUE，I2 `:344`，**随表删**） | —（原「有 1 个」，现由下面 `template` 行接替） |
 | `merchant_application`（`:369-390`，块 2） | `Id` | `idx_merchant_application_status(Status, SubmittedAt)`、`idx_merchant_application_user(Username, SubmittedAt)`、`idx_merchant_application_batch(BatchId)` | **无**（同账号可多次申请 ⇒ `Username` 非键） |
+| `template`（`:556-569`，**#8** 取代 `goods_template`） | `Id` | **`uk_template_type_name(Type, Name)`**（UNIQUE）+ `idx_template_type_enabled_sort(Type, Enabled, Sort)` | **有 1 个**（`(Type, Name)`，UNIQUE，#8 `:567`） |
+| `goods_audit`（`:492-515`，块 3） | `Id` | `idx_goods_audit_status(Status, SubmittedAt)`、`idx_goods_audit_merchant(MerchantId, SubmittedAt)`、`idx_goods_audit_batch(BatchId)` | **无**（再次提审 = 新插一行 ⇒ `(MerchantId, GoodName, ProductCode)` 非键） |
 
-**汇总**：16 张表；主键 16 个（1 个复合）；二级索引 **15 个**（分布 8 张表）；**全库除主键外 3 个 UNIQUE 约束**（`order.uk_order_orderId`，2026-09-30 S1a；`goodstype.uk_goodstype_GoodType`，2026-10-04 #11；`notification_template.uk_notification_template_key`，2026-10-09 I2）。
-唯一约束只此 3 个，也不是遗漏 —— 其中 2 个（`order` / `goodstype`）是 `defect-survey.md §二 前提清单`里 A/B/C 三条的出处，到 2026-10-04 为止只有**前提 A 的 DB 面**（S1a）与 **`goodstype` 这条新前提**（#11）被认领，B / B′ / C 仍全靠应用层保证。
-⚠️ **第三个 UNIQUE（`notification_template.TemplateKey`，I2）不在前提清单里**，性质不同：它不是一个「本该约束、长期缺失」的业务键，而是**新建表时顺手就给了**的模板键唯一性 —— 故它既不算「认领了一条旧前提」，也不代表 B / B′ / C 有进展。（`notification` 表**没有** UNIQUE：`BatchId` 天然重复，`(ToId,ToType)` 也不是键。）（原文此处引「§4「前提清单」」，但本文件 §4 是 `SettlementDate` 语义，前提清单实际在 `defect-survey.md` —— 一并更正。）
+**汇总**：**17** 张表；主键 17 个（1 个复合）；二级索引 **20 个**（分布 9 张表；**2026-10-10 实测** —— ⚠️ 原写「16 个」是**既有少算**，枚举里列了块 3 两张表却没并进总数，见 §2）；**全库除主键外 3 个 UNIQUE 约束**（`order.uk_order_orderId`，2026-09-30 S1a；**`goodstype.uk_goodstype_parent_name`，2026-10-10 #7 换代〔原 `uk_goodstype_GoodType` 已删〕**；**`template.uk_template_type_name`，2026-10-10 #8**〔原为 `notification_template.uk_notification_template_key`，2026-10-09 I2，**随表删**〕）。
+唯一约束只此 3 个，也不是遗漏 —— 其中 2 个（`order` / `goodstype`）是 `defect-survey.md §二 前提清单`里 A/B/C 三条的出处，到 2026-10-04 为止只有**前提 A 的 DB 面**（S1a）与 **`goodstype` 这条新前提**（#11）被认领，B / B′ / C 仍全靠应用层保证。⚠️ **`goodstype` 这条已在 2026-10-10 #7 换代**：全局唯一的 `GoodType` 换成**每父级下唯一**的 `(ParentId, GoodType)` —— 约束面**收窄**（同一父级下仍禁重名），前提清单里那条对应的仍是「同父级下不重名」。
+⚠️ **第三个 UNIQUE（现为 `template.(Type, Name)`；#8 前是 `notification_template.TemplateKey`，I2）不在前提清单里**，性质不同：它不是一个「本该约束、长期缺失」的业务键，而是**新建表时顺手就给了**的唯一性（#8 只是把同一性质从「模板键全局唯一」换成「**同 Type 内模板名唯一**」）—— 故它既不算「认领了一条旧前提」，也不代表 B / B′ / C 有进展。（`notification` 表**没有** UNIQUE：`BatchId` 天然重复，`(ToId,ToType)` 也不是键。）（原文此处引「§4「前提清单」」，但本文件 §4 是 `SettlementDate` 语义，前提清单实际在 `defect-survey.md` —— 一并更正。）
 
 ---
 
@@ -456,7 +512,7 @@
 > 本节单独成节，因为它是整份 schema 最重的一条：**业务主键几乎全是约定，不是约束。**（2026-09-30 S1a 之前是「全是」；`order.OrderId` 是第一个例外，`goodstype.GoodType` 于 **2026-10-04 #11** 成为第二个。）
 
 ### 10.1 事实
-16 张表 → 16 个主键（其中 1 个复合）→ 15 个二级索引 → **非主键 UNIQUE：3 个**（`order.uk_order_orderId`，2026-09-30 S1a 新增；`goodstype.uk_goodstype_GoodType`，2026-10-04 #11 新增；`notification_template.uk_notification_template_key`，2026-10-09 I2 新增 —— **最后这个不属前提清单，只是新表自带**，见 §7 附注）。
+17 张表 → 17 个主键（其中 1 个复合）→ 20 个二级索引 → **非主键 UNIQUE：3 个**（`order.uk_order_orderId`，2026-09-30 S1a 新增；**`goodstype.uk_goodstype_parent_name`，2026-10-10 #7 换代**；**`template.uk_template_type_name`，2026-10-10 #8**〔#8 **之前**是 `notification_template.uk_notification_template_key`，2026-10-09 I2 新增，**该表已删**〕—— **最后这个不属前提清单，只是新表自带**，见 §7 附注）。
 
 ### 10.2 本应是业务键、实际只是「约定」的列
 

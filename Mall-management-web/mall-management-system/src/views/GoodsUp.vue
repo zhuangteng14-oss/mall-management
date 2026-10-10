@@ -20,7 +20,7 @@
 
     <!-- 页头（稿 `.head` `:175-181`）：身份并进来，不再单独占一条横带。
          ⚠️ 稿 `.sub` 是「声谷小店 · 共 8 件上架中」——「声谷小店」是它 mock 的店名（编的名 ⇒
-            照判据不落）⇒ 副题只留**真陈述**：`共 N 件上架中`，N 取 `showGoodsList` 的真条数。
+            照判据不落）⇒ 副题只留**真陈述**：`共 N 件上架中`，N 取 `onshelfCount`（**在架条数** —— C3 块 3 起表格并进了待审 / 驳回行，本计数扣掉它们）。
          ⚠️ 稿 `.ava` 是灰方块（`background:var(--img)`）⇒ 保留**既有真头像**
             （`userInfo.image || assetOf('/img/default_user.png')`，取值链与原实现逐字一致）。 -->
     <div class="head">
@@ -29,7 +29,7 @@
       </div>
       <div>
         <h1>查看商品</h1>
-        <div class="sub">共 {{ showGoodsList.length }} 件上架中</div>
+        <div class="sub">共 {{ onshelfCount }} 件上架中</div>
       </div>
     </div>
 
@@ -38,23 +38,23 @@
             行首成一条悬空竖线 ⇒ 本页照稿的 `r1` / `r2` 两行结构落。 -->
     <div class="tools">
       <div class="r1">
-        <!-- 预留位 ①（稿 `:367`）—— 块级 `<span>` ⇒ 只挂 `data-slot` + `title`（无 `disabled`）。
-             ⚠️ 内部 5 件（2 输入 + 2 下拉 + 【查询】）是**稿外死控件**（稿里 `disabled` 却不带
-                `title`）⇒ 本笔按 §三 口径逐件补 `title`，见 `slot-registry.md` §三 commit 11。 -->
+        <!-- 预留位 ①（稿 `:367`）—— **C3 块 3〈商品块〉已接线（2026-10-10）**：原 `data-slot`
+             与五件的 `disabled` + `title` 全退场。⚠️ 四件筛选**都是前端过滤** —— 行数据已在
+             `rows` 里（两路都按 `MerchantId` 取全量、`goodsSelect` 无分页参数）⇒ **新端点 0 条**。 -->
         <span
           class="find"
-          data-slot="预留 · 筛选 / 搜索（动现有代码 3 处）"
-          title="待 C3〈商品〉——商品名 / ProductCode 的筛选无端点：endpoints.js + GoodsController.java + GoodsUp.vue = 3 处。⚠️ 分类下拉**有**数据源 goods.goodstype（现有端点，前端过滤则 0 处）。⚠️「状态」这一个下拉另需 goods 加状态列 ⇒ 那一条单独算 5 处，见头注"
+          title="C3 块 3〈商品块〉已接线：四件均为前端过滤（行数据已在 rows 里）；「状态」取自 goodsSelect（已上架）∪ myApplications（待审 / 驳回）的并表结果"
+          aria-label="筛选 / 搜索"
         >
-          <input type="text" placeholder="商品名" disabled title="待 C3〈商品〉——商品名筛选无端点（3 处，占位档）">
-          <input type="text" placeholder="ProductCode" disabled title="同上">
-          <select disabled title="待 C3〈商品〉——「状态」筛选另需 goods 加状态列（5 处，超档）">
-            <option>全部状态</option>
+          <input type="text" placeholder="商品名" v-model.trim="flt.name">
+          <input type="text" placeholder="ProductCode" v-model.trim="flt.code">
+          <select v-model="flt.state">
+            <option value="">全部状态</option><option v-for="s in stateOptions" :key="s" :value="s">{{ STATE_TEXT[s] }}</option>
           </select>
-          <select disabled title="待 C3〈商品〉——分类下拉**有**数据源 goods.goodstype，缺的是接线（3 处，占位档）">
-            <option>全部分类</option>
+          <select v-model="flt.type">
+            <option value="">全部分类</option><option v-for="t in typeOptions" :key="t" :value="t">{{ t }}</option>
           </select>
-          <button type="button" class="btn-quiet" disabled title="同上">查询</button>
+          <button type="button" class="btn-quiet" @click="applyFlt">查询</button>
         </span>
 
         <!-- 【上架商品】= **真入口**（指向已存在路由 `/merchant/user/add`，`router/index.js:116`
@@ -91,10 +91,10 @@
          ⚠️ **空态只换表格**：稿的空态面（`:438-464`）把 `.tools` 与「按名称精确下架」也一并
             去掉了 —— 那是它的一次性预览。本笔**不照做**：`.tools` 里有**真入口**【上架商品】、
             `.sec` 是**既有真功能**（`doDeleteGoods`），藏起来 = 把真功能藏起来。（已登记） -->
-    <div v-if="showGoodsList.length === 0" class="empty">
-      <div class="big">暂无任何上架内容</div>
-      <!-- 稿 `:459` 的原文（既有实现只到上一行；这一行是稿补的指引，照落） -->
-      <div>在「上架商品」里添加第一件商品。</div>
+    <div v-if="visibleList.length === 0" class="empty">
+      <div class="big">{{ rows.length === 0 ? '暂无任何上架内容' : '没有符合条件的商品' }}</div>
+      <!-- 稿 `:459` 的原文（既有实现只到上一行；这一行是稿补的指引，照落）。⚠️ C3 块 3 起补 `v-if`：「去上架」那句只对**真的一件都没有**成立，筛出 0 行时指路就是误导。 -->
+      <div v-if="rows.length === 0">在「上架商品」里添加第一件商品。</div>
     </div>
 
     <template v-else>
@@ -118,15 +118,15 @@
                 <th class="c-num">单价</th>
                 <th class="c-num" title="占位：goods 表无库存列">库存</th>
                 <th class="c-num" title="占位：productsales.OrderVolume 恒为 0 且无 SELECT 读出">销量</th>
-                <th title="真功能但退化：无状态列，下架 = 删行 ⇒ 本页只列在架商品">状态</th>
+                <th title="C3 块 3 起是真状态：已上架（goods 表）／待审・已驳回（goods_audit 表）—— 两表并渲染">状态</th>
                 <th>操作</th>
               </tr>
             </thead>
             <tbody>
-              <!-- ⚠️ 行级点击**保留既有真事件**（原卡片墙是 `@click="openModal(item)"` 打在整卡上）
-                   ⇒ 表体照落同一事件；「操作」列那格用 `@click.stop` 拦住冒泡，免得【编辑】
-                   触发两次 `openModal`（它内含一次 `switchPrice` 请求）。 -->
-              <tr v-for="item in showGoodsList" :key="item.goodName" @click="openModal(item)">
+              <!-- ⚠️ 行级点击**保留既有真事件**（原卡片墙是 `@click="openModal(item)"` 打在整卡上）⇒ 表体照落
+                   同一事件；「操作」列那格用 `@click.stop` 拦住冒泡，免得【编辑】触发两次 `openModal`。⚠️ C3 块 3
+                   起加**前置判据**：只有 `onshelf` 行可点（待审 / 驳回行在 `goods` 表里压根不存在，取不到规格）。 -->
+              <tr v-for="item in visibleList" :key="item.state + ':' + item.goodName" @click="item.state === 'onshelf' && openModal(item)">
                 <td class="c-ck">
                   <!-- 稿外死控件（稿 `:529` 的行内模板）：稿里带 `title` ⇒ 逐字取稿 -->
                   <button
@@ -159,12 +159,12 @@
                 </td>
                 <td class="c-num"><span class="na" title="占位：goods 表无库存列">—</span></td>
                 <td class="c-num"><span class="na" title="占位：OrderVolume 恒为 0 且无 SELECT 读出">—</span></td>
-                <!-- 状态恒为「已上架」：`goodsDe` 是 DELETE 行 ⇒ 能出现在本页的一定在架。
-                     ⚠️ 稿 `:537` 就是常量 ⇒ 照落，不接状态机（后端没有）。 -->
-                <td><span class="state"><i class="d"></i>已上架</span></td>
+                <!-- C3 块 3：状态列**不再恒为常量** —— `rows[].state` 有三值（`onshelf` / `pending` /
+                     `rejected`），驳回理由挂在 `title` 上（不占列宽）。⚠️ 稿 `:537` 的常量是块 3 前口径。 -->
+                <td><span class="state" :class="item.state" :title="item.state === 'rejected' ? ('驳回理由：' + (item.rejectReason || '—')) : (item.state === 'pending' ? '已提交，等待管理员审核' : '在架')"><i class="d"></i>{{ STATE_TEXT[item.state] }}</span></td>
                 <td>
-                  <div class="op" @click.stop>
-                    <!-- 【编辑】既有真功能 `openModal`（稿 `:539` 的 title 去掉尾部自引后逐字取稿） -->
+                  <div v-if="item.state === 'onshelf'" class="op" @click.stop>
+                    <!-- 【编辑】既有真功能 `openModal`（稿 `:539` 的 title 去掉尾部自引后逐字取稿）。⚠️ 待审 / 驳回行**整格不出操作**，见上一行的 `v-if` -->
                     <button type="button" title="打开商品详情（现有功能 openModal）" @click="openModal(item)">编辑</button>
                     <!-- 【下架】稿外死控件：稿 `:540` 那儿是 `<button class="del" title="下架这一件（现有端点
                          goods.goodsDe）">`（**无 `disabled`**）⇒ 按 §三 落 `disabled` + **逐字取稿**的 title；
@@ -190,7 +190,7 @@
         data-slot="预留 · 分页（动现有代码 3 处）"
         title="待 C3〈商品〉——goodsSelect 的 SELECT * 无 LIMIT、无分页参数（GoodsDao:187 逐字写明）：GoodsCacheService.java + GoodsController.java + GoodsUp.vue = 3 处"
       >
-        <span class="sum">共 {{ showGoodsList.length }} 件</span>
+        <span class="sum">共 {{ visibleList.length }} 件</span>
         <button type="button" class="on" disabled title="待 C3〈商品〉——goodsSelect 无 LIMIT，分页要改缓存层 + 控制器（3 处，占位档）">1</button>
         <button type="button" disabled title="同上">2</button>
         <button type="button" disabled title="同上">下一页</button>
@@ -288,7 +288,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { http, handleApiError, assetOf } from '../api/http'
 import { endpoints } from '../api/endpoints'
 import { getMerchantId, isLoggedIn } from '../api/auth'
@@ -501,6 +501,94 @@ const doUpdateGoods = async () => {
     alert('更新失败')
   }
 }
+
+// ══════════════════════════════════════════════════════════════════════════════
+// C3 块 3〈商品块〉（2026-10-10）：状态列**并表** + 筛选接线
+//
+// ⚠️ **为什么必须并表**：提审制下 `goodsAdd` 只写 `goods_audit(pending)`、**不**写 `goods` 行
+//    ⇒ `goodsSelect` 永远只回已上架的，商家刚提交的东西在本页**看不见**。故并
+//    `/goods/myApplications`（商家号维度，带 `Status` / `RejectReason`）。
+// ⚠️ **为什么四个筛选全在前端**：`rows` 已是本商家商品的**全集**（两路都按 `MerchantId` 取全量，
+//    `goodsSelect` 的 `SELECT *` 无 LIMIT、无分页参数）⇒ 再发一轮请求既没必要、也没有那个端点
+//    （服务端筛选才是「动现有代码 3 处」那档）。本笔**新端点 0 条**。
+// ⚠️ 本段一律**追加在 `<script setup>` 末尾**：它上面的行被 `slot-registry.md` §十七的漂移表
+//    （`:1725-1736`，带「现应指」列）按行号引 —— 在其上方插行会让整列失效。
+// ══════════════════════════════════════════════════════════════════════════════
+
+// 提审单（待审 / 驳回）—— 与 `showGoodsList`（已上架）并成 `rows`
+const appsList = ref([])
+
+// 筛选：`flt` 是**编辑中**的值，`applied` 是**已生效**的快照 —— 【查询】那一下才提交
+// （不点【查询】就按上一次的快照筛；两个对象同时换，避免「改一个字段即时生效」的不一致观感）
+const flt = ref({ name: '', code: '', state: '', type: '' })
+const applied = ref({ name: '', code: '', state: '', type: '' })
+const applyFlt = () => { applied.value = { ...flt.value } }
+
+// 状态三态的唯一文案表（`rows[].state` 的取值）= 值；下拉与状态列**共用**它，避免两处写法飘
+const STATE_TEXT = { onshelf: '已上架', pending: '待审', rejected: '已驳回' }
+const stateOptions = Object.keys(STATE_TEXT)
+
+// 分类下拉：**从已加载的行里取**（本商家自己的商品类型）—— 不发 `goodstype`，0 端点
+const typeOptions = computed(() => [...new Set(rows.value.map((r) => r.goodType).filter(Boolean))])
+
+// 两路并表：已上架（`showGoodsList`，同名合并后）∪ 待审 / 驳回（`appsList`）
+// ⚠️ `approved` 的单**不进**本表 —— 通过后商品已落在 `goods` 里（`goodsSelect` 会回），
+//    再并一次就是同一件商品出现两行。
+// ⚠️ 判重口径 `(GoodName, ProductCode)`：与后端 CAS 谓词同粒度（`GoodsAuditService`）。
+const rows = computed(() => {
+  const out = showGoodsList.value.map((g) => ({ ...g, state: 'onshelf' }))
+  const seen = new Set()
+  appsList.value.forEach((a) => {
+    if (a.Status !== 'pending' && a.Status !== 'rejected') return
+    const key = `${a.GoodName}\u0000${a.ProductCode}`
+    if (seen.has(key)) return
+    seen.add(key)
+    out.push({
+      goodName: a.GoodName,
+      price: a.Price,
+      goodImg: a.GoodImg,
+      goodType: a.GoodType,
+      state: a.Status,
+      rejectReason: a.RejectReason,
+    })
+  })
+  return out
+})
+
+// 生效筛选后的可见行（表格 `v-for` / 分页计数 / 空态都读它）
+const visibleList = computed(() => {
+  const f = applied.value
+  return rows.value.filter((r) => {
+    if (f.state && r.state !== f.state) return false
+    if (f.type && r.goodType !== f.type) return false
+    if (f.name && !String(r.goodName || '').includes(f.name)) return false
+    if (f.code) {
+      // ProductCode 不在 `rows` 里（同名合并只留了最后一条）—— 按名回查 `goodsList`，同 `:153` 的口径
+      const codes = goodsList.value.filter((g) => g.GoodName === r.goodName).map((g) => g.ProductCode)
+      if (!codes.some((c) => String(c || '').includes(f.code))) return false
+    }
+    return true
+  })
+})
+
+// 在架条数：页头「共 N 件上架中」只说**在架**（待审 / 驳回不是「上架中」）
+const onshelfCount = computed(() => rows.value.filter((r) => r.state === 'onshelf').length)
+
+// 提审历史（待审 / 驳回的来源）。⚠️ `MerchantId` 是「调用者自己」⇒ 后端过 `IdentityGuard`。
+const getMyApplications = async () => {
+  const merchantId = getMerchantId()
+  if (!merchantId) return
+  try {
+    const res = await http.post(endpoints.goodsB3.myApplications, new URLSearchParams({ MerchantId: merchantId }))
+    const data = await res.json()
+    if (data.success) appsList.value = data.list || []
+  } catch (e) {
+    handleApiError(e, '获取提审状态失败')
+  }
+}
+
+// ⚠️ **另起一个** `onMounted` 而不是并进 `:319` 那个：并进去要往上插行（见本段块首第 3 条）。
+onMounted(() => { getMyApplications() })
 </script>
 
 <style scoped>
@@ -530,7 +618,7 @@ const doUpdateGoods = async () => {
         的 `.head h1` 写的是 `font-size:var(--d2)`；`tokens.css` 里**没有** `--d2`（它只定义
         `--fs-*`）⇒ scoped 块若不自己定义，`var(--d2)` 在**计算值阶段**判为无效、整条声明被丢弃，
         标题**静默回落到继承来的 `--fs-sm`（15px）**，与正文同大。落法同 `UserInfoPage.vue:393` /
-        `GoodsAdd.vue:510`（写在本页根 `.uc-main` 上，`calc(x * 1.00)` ≡ `x` ⇒ 写 `var(--fs-2xl)`）。
+        `GoodsAdd.vue:617`（写在本页根 `.uc-main` 上，`calc(x * 1.00)` ≡ `x` ⇒ 写 `var(--fs-2xl)`；⚠️ 2026-10-10〈模板表通用化〉重指：原 513 行 ⇒ 该文件插模板段后 +104）。
         ⚠️ 这只在**算出来的** 36px 上看得出来，肉眼扫模板扫不出 ⇒ `shot11.mjs` 已加 `h1Fs` 断言。
      ④ `.btn-primary` 由稿的 `<button>` 改成 `<router-link>`（判据：入口指向已存在路由）⇒
         **补 `display:inline-flex;align-items:center`**：`<a>` 是行内元素，不补则稿的
@@ -576,12 +664,12 @@ a { color: inherit; text-decoration: none; }
 .find { display: flex; gap: var(--s2); align-items: center; }
 .find input, .find select {
   height: 36px; padding: 0 var(--s3); border: 1px solid var(--line-2);
-  border-radius: var(--r2); background: var(--surface-2); color: var(--ink-3);
+  border-radius: var(--r2); background: var(--surface); color: var(--ink);
 }
 .find input { width: 160px; }
 .find select { width: 132px; }
-/* 占位里那 5 件的「不可用」光标：`<button disabled>` 与 `<select disabled>` 不会自己给 */
-.find input[disabled], .find select[disabled] { cursor: not-allowed; }
+/* ⚠️ C3 块 3：这四件已**启用** ⇒ 稿那条 `.find input[disabled] / select[disabled]` 的「不可用」光标规则
+   **退场**（不再有 `disabled` 可命中）；底色 / 字色也由 `--surface-2` / `--ink-3` 提回 `--surface` / `--ink`。 */
 .bulk { display: flex; align-items: center; gap: var(--s3); }
 .btn-quiet {
   height: 36px; padding: 0 var(--s4); border: 1px solid var(--line-2); border-radius: var(--r2);
@@ -650,6 +738,12 @@ a { color: inherit; text-decoration: none; }
   display: inline-block; width: 6px; height: 6px; margin-right: var(--s2);
   border-radius: 50%; background: var(--success); vertical-align: middle;
 }
+/* C3 块 3：状态三态 —— 上面那组 `--success*` 是「在架」的默认值，另两态在这两行各改一次
+   （`--warning` = 待审、`--danger` = 驳回；都是 `tokens.css:138-140` 那族里已有的 token）。 */
+.state.pending { color: var(--warning-deep); }
+.state.pending .d { background: var(--warning); }
+.state.rejected { color: var(--danger); }
+.state.rejected .d { background: var(--danger); }
 .op { display: flex; gap: var(--s4); }
 .op button { font-size: var(--fs-xs); color: var(--brand-ink); font-weight: var(--fw-med); padding: 0; }
 .op .del { color: var(--danger); }

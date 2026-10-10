@@ -9,10 +9,17 @@ import com.minke.mallmanagement.notification.dao.NotificationDao;
 import com.minke.mallmanagement.notification.service.NotificationService;
 import com.minke.mallmanagement.message.service.FriendCacheService;
 import com.minke.mallmanagement.message.service.MessageService;
+import com.minke.mallmanagement.catalog.dao.CategoryDao;
+import com.minke.mallmanagement.catalog.service.CategoryService;
+import com.minke.mallmanagement.catalog.service.GoodsViolationService;
+import com.minke.mallmanagement.goods.dao.GoodsAuditDao;
 import com.minke.mallmanagement.goods.dao.GoodsDao;
+import com.minke.mallmanagement.goods.service.GoodsAuditService;
 import com.minke.mallmanagement.goods.service.GoodsCacheService;
 import com.minke.mallmanagement.goods.service.GoodsService;
 import com.minke.mallmanagement.goods.service.GoodsTypeCacheService;
+import com.minke.mallmanagement.template.dao.TemplateDao;
+import com.minke.mallmanagement.template.service.TemplateService;
 import com.minke.mallmanagement.order.dao.OrderDao;
 import com.minke.mallmanagement.order.service.OrderService;
 import com.minke.mallmanagement.order.model.OrderStateMachine;
@@ -134,6 +141,18 @@ import static org.mockito.Mockito.when;
 // ⚠️ 另记一条同类的切片性质：`MerchantApplicationService` 上的 `@Transactional` 在本切片里
 //    同样**是 no-op**（@WebMvcTest 无 DataSource ⇒ 无 TransactionManager），
 //    「批准与改身份是否真的同事务」本切片测不了 —— 那是块 2 主链路验收与 A3 的职责。
+// C3 块 3（商品块，2026-10-10）：新增两个 Controller（`CatalogController`、`AdminCatalogController`）
+//    + `GoodsController` 新增依赖，⇒ 第 10、11 个 Controller。**第四次同一处地雷**。
+//    六处依赖：`CatalogController` → `GoodsTemplateService`；`AdminCatalogController` →
+//    `GoodsAuditService` / `CategoryService` / `GoodsTemplateService` / `GoodsViolationService`
+//    （`NotificationService` / `AuditService` 块 1 已在）；`GoodsController` / `GoodsService`
+//    （块 3 起 `goodsAdd` 改提审制）→ `GoodsAuditService`。
+//    Service 再各吃一个 DAO：`GoodsAuditDao` / `CategoryDao` / `GoodsTemplateDao`；
+//    `GoodsViolationService` 只吃 `GoodsDao`（块 1 已在）+ `GoodsCacheService`（下面替身）。
+//    ⇒ 三个新 DAO 只吃 JdbcTemplate ⇒ 落回下面那个 @MockitoBean，**SQL 仍不出切片**。
+// ⚠️ 与块 2 同接口同性质的一条：`GoodsAuditService.audit` 上的 `@Transactional` 在本切片里
+//    也是 no-op ⇒「审核通过与写 goods 行是否真的同事务」本切片测不了 —— 归
+//    `GoodsAuditTxAtomicityTest`（真库）与 A3 的职责。
 @Import({OrderStateMachine.class, OrderService.class, OrderDao.class,
         GoodsService.class, GoodsDao.class,
         UserService.class, UserDao.class,
@@ -144,7 +163,16 @@ import static org.mockito.Mockito.when;
         // C3 块 2（用户块，2026-10-09）：
         UserGovernanceDao.class, UserGovernanceService.class,
         MerchantApplicationDao.class, MerchantApplicationService.class,
-        GoodsShelfDao.class, MerchantDowngradeService.class})
+        GoodsShelfDao.class, MerchantDowngradeService.class,
+        // C3 块 3（商品块，2026-10-10）：
+        GoodsAuditDao.class, GoodsAuditService.class,
+        CategoryDao.class, CategoryService.class,
+        GoodsViolationService.class,
+        // C3 块 3 就地改造（模板通用化，2026-10-10）：新增 template 域的两个 bean；
+        // 同批删掉了 GoodsTemplateDao / GoodsTemplateService（那两个类已不存在，留着会编译不过）。
+        // ⚠️ 又是一个新 Controller（TemplateController / AdminTemplateController）——
+        //    「新 @Service 不进 @Import ⇒ 整个切片上下文起不来」，同前几笔。
+        TemplateDao.class, TemplateService.class})
 public abstract class AbstractSmokeTest {
 
     @Autowired

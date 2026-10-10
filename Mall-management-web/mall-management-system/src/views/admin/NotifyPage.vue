@@ -175,17 +175,24 @@
       占位符渲染（`{orderId}` 之类）要先把语法与转义口径定死，留到有第一个真消费者的那一块。
       在那之前，本表就是一张**存着不用的登记簿** —— 这是刻意的。
     </p>
+    <p class="n-hint">
+      【2026-10-10〈模板表通用化〉】原 `notification_template` 表已并进**通用** <code>template</code> 表：
+      本页列的是 <code>Type</code> 以 <code>notification.</code> 打头的那一支，
+      <b>「模板键」列 = 通用的 <code>Name</code></b>（表里真实的 <code>Type</code> 是 <code>notification.&lt;模板键&gt;</code>）。
+      ⚠️ <code>Type</code> <b>落库即定、不可改</b> ⇒ 编辑态里「模板键」是<b>只读</b>的；
+      要换键就新建一条、把旧的停用。
+    </p>
 
     <table class="n-tpl">
       <thead>
         <tr><th>模板键</th><th>标题模板</th><th>正文模板</th><th>启用</th><th></th></tr>
       </thead>
       <tbody>
-        <tr v-for="t in templates" :key="t.TemplateKey" :class="{ off: !t.Enabled }">
-          <td class="n-k"><code>{{ t.TemplateKey }}</code></td>
-          <td>{{ t.TitleTemplate }}</td>
-          <td>{{ t.BodyTemplate }}</td>
-          <td>{{ t.Enabled ? '是' : '否' }}</td>
+        <tr v-for="t in templates" :key="t.Id" :class="{ off: !isEnabled(t) }">
+          <td class="n-k"><code>{{ t.Name }}</code></td>
+          <td>{{ t.Title }}</td>
+          <td>{{ t.Body }}</td>
+          <td>{{ isEnabled(t) ? '是' : '否' }}</td>
           <td>
             <button type="button" class="n-link" @click="editTemplate(t)">编辑</button>
           </td>
@@ -200,19 +207,26 @@
       <h3 class="n-h3">{{ tplForm.editing ? '编辑模板' : '新增模板' }}</h3>
       <div class="n-row">
         <span class="n-lab">模板键</span>
-        <input v-model.trim="tplForm.templateKey" type="text" maxlength="64" placeholder="如 goods.audit.rejected" />
+        <input
+          v-model.trim="tplForm.templateKey"
+          type="text"
+          maxlength="64"
+          placeholder="如 goods.audit.rejected"
+          :readonly="tplForm.editing"
+        />
       </div>
       <div class="n-row">
         <span class="n-lab">标题模板</span>
-        <input v-model="tplForm.titleTemplate" type="text" maxlength="255" />
+        <input v-model="tplForm.title" type="text" maxlength="255" />
       </div>
       <div class="n-row n-row-top">
         <span class="n-lab">正文模板</span>
-        <textarea v-model="tplForm.bodyTemplate" rows="3" maxlength="1024"></textarea>
+        <textarea v-model="tplForm.body" rows="3" maxlength="1024"></textarea>
       </div>
       <div class="n-row">
         <span class="n-lab">启用</span>
-        <label class="n-inline"><input v-model="tplForm.enabled" type="checkbox" /> 启用</label>
+        <label v-if="tplForm.editing" class="n-inline"><input v-model="tplForm.enabled" type="checkbox" /> 启用</label>
+        <span v-else class="n-dim">新增一律「启用」（后端 create 不收 Enabled）；要停用，建完再编辑。</span>
       </div>
       <div class="n-row n-actions">
         <button type="submit" class="n-btn n-btn-on" :disabled="tplSaving">
@@ -231,8 +245,14 @@
   它是 **占位里第二个换成真页的**（原走 `StubPage.vue`，路由记录 `router/index.js` 里
   `component: AdminStub` → 懒加载本组件）。第一个是 `AuditPage.vue`（批 A）。
 
-  【它消费后端 4 个端点】`/admin/notify/send` · `/history` · `/template/list` · `/template/save`
-  （`AdminNotificationController`）。**收件箱不在这里** —— 那是公共层的 `/notification/*`
+  【它消费后端 4 个端点】`/admin/notify/send` · `/admin/notify/history`
+  （`AdminNotificationController`，本页的「发送 / 历史」两块）+
+  `/admin/template/list` · `/admin/template/{create,update}`（`AdminTemplateController`，
+  通用模板表的「通知」那一支，`TypePrefix = 'notification.'`）。
+  ⚠️ **2026-10-10〈模板表通用化〉**：模板那两条原先是 `/admin/notify/template/{list,save}`
+  （`notification_template` 表）—— 表并进通用 `template`、端点换成 `/admin/template/*`、
+  前端封装从 `api/admin.js` 挪到 `api/template.js`。`create` + `update` 取代了旧的单条 upsert。
+  **收件箱不在这里** —— 那是公共层的 `/notification/*`
   （`NotificationController`），由客户 / 商家两端的 `views/NotifyInbox.vue` 消费。
   「发」与「收」在后端就是两个 Controller，前端不合并（用户口径：通知 vs 消息入口分开；
   同一条口径的另一半是「发」与「收」也不该糅在一页）。
@@ -254,7 +274,11 @@
 -->
 <script setup>
 import { computed, onMounted, reactive, ref } from 'vue'
-import { notifyHistory, notifySend, notifyTemplateList, notifyTemplateSave } from '../../api/admin'
+import { notifyHistory, notifySend } from '../../api/admin'
+// ⚠️ 模板存取**已迁出** `api/admin.js`（2026-10-10〈模板表通用化〉）：旧的两条
+//    `notifyTemplateList` / `notifyTemplateSave` 与端点 `/admin/notify/template/*` 一起下线，
+//    改走通用表 `/admin/template/*`（`TemplatePicker` 也用这一支）。
+import { templateAdminCreate, templateAdminList, templateAdminUpdate } from '../../api/template'
 import { EVENT_OPTIONS, eventLabel, isKnownEvent } from '../../config/notify-events'
 
 /** 下拉里那一项「自定义 code」的哨兵值 —— 它**不是**一个 code，别让它漏进请求。 */
@@ -425,15 +449,33 @@ const tplSaving = ref(false)
 const tplMsg = ref(null)
 const tplForm = reactive({
   editing: false,
+  /** 编辑态的目标主键（通用表 `template.Id`）。新增态为 `null` —— 后端 `create` **不回 Id**。 */
+  id: null,
+  /** 「模板键」= 通用表的 `Name`；真实 `Type` 是 `'notification.' + templateKey`（见 `saveTemplate`）。 */
   templateKey: '',
-  titleTemplate: '',
-  bodyTemplate: '',
+  title: '',
+  body: '',
   enabled: true,
 })
 
+/**
+ * `Enabled` 是 `tinyint(1)`，Connector/J 默认（`tinyInt1isBit=true`）把它映射成 **Boolean**
+ * ⇒ JSON 里可能是 `true` / `false`，也可能是 `1` / `0`。判据写**宽容**一点，别赌某一种形态
+ * （`AccountsPage.isBanned` 是同一个理由、同一种写法）。
+ */
+function isEnabled(t) {
+  const v = t && t.Enabled
+  return v === true || v === 1 || v === '1' || v === 'true'
+}
+
 async function loadTemplates() {
   try {
-    const data = await notifyTemplateList()
+    // ⚠️ 通用表 `/admin/template/list`（旧 `/admin/notify/template/list` 已下线）。
+    //    `TypePrefix: 'notification.'` —— 通知类的 type 是**动态的**（`notification.<事件码>`，
+    //    21 个事件码还在长），逐个精确查不现实，用前缀一次捞完。
+    //    ⚠️ 前缀**带那个点**：不带会把别的族里同前缀的 type 也捞进来。
+    //    `includeDisabled: true` —— 管理端要看见停用的（`send` 侧只认启用中的）。
+    const data = await templateAdminList({ TypePrefix: 'notification.', includeDisabled: true })
     if (data && data.success) templates.value = Array.isArray(data.list) ? data.list : []
   } catch (e) {
     // 模板区是**次要内容**：拉不到就空着，别把整页变成错误页（发送与历史照常）。
@@ -443,44 +485,58 @@ async function loadTemplates() {
 
 function editTemplate(t) {
   tplForm.editing = true
-  tplForm.templateKey = t.TemplateKey
-  tplForm.titleTemplate = t.TitleTemplate
-  tplForm.bodyTemplate = t.BodyTemplate
-  tplForm.enabled = !!t.Enabled
+  tplForm.id = t.Id
+  tplForm.templateKey = t.Name || ''
+  tplForm.title = t.Title || ''
+  tplForm.body = t.Body || ''
+  tplForm.enabled = isEnabled(t)
   tplMsg.value = null
 }
 
 function resetTemplateForm() {
   tplForm.editing = false
+  tplForm.id = null
   tplForm.templateKey = ''
-  tplForm.titleTemplate = ''
-  tplForm.bodyTemplate = ''
+  tplForm.title = ''
+  tplForm.body = ''
   tplForm.enabled = true
   tplMsg.value = null
 }
 
 async function saveTemplate() {
   if (tplSaving.value) return
-  if (!tplForm.templateKey.trim()) { tplMsg.value = { ok: false, text: '模板键不能为空' }; return }
-  if (!tplForm.titleTemplate.trim() || !tplForm.bodyTemplate.trim()) {
+  const key = tplForm.templateKey.trim()
+  if (!key) { tplMsg.value = { ok: false, text: '模板键不能为空' }; return }
+  if (!tplForm.title.trim() || !tplForm.body.trim()) {
     tplMsg.value = { ok: false, text: '标题模板与正文模板都不能为空' }
     return
   }
   tplSaving.value = true
   tplMsg.value = null
   try {
-    const data = await notifyTemplateSave({
-      templateKey: tplForm.templateKey.trim(),
-      titleTemplate: tplForm.titleTemplate,
-      bodyTemplate: tplForm.bodyTemplate,
-      enabled: tplForm.enabled,
-    })
+    // ⚠️ **分两态**（旧端点是一条 upsert 顶两态，新面没有 upsert）：
+    //    · 新增 → `create`：要 `Type`（= `'notification.' + 键`），`Enabled` 由后端定（1）；
+    //    · 编辑 → `update`：要 `id`、**没有** `Type`（type 落库即定、不许改）。
+    //      传了 `Type` 也只是被忽略，但别传 —— 免得读者以为能改。
+    // ⚠️ `Enabled` 是 `Integer`：传 `1` / `0`，**别传布尔**（`"true"` 绑不进 `Integer` ⇒ 400）。
+    const data = tplForm.editing
+      ? await templateAdminUpdate({
+          id: tplForm.id,
+          Name: key,
+          Title: tplForm.title,
+          Body: tplForm.body,
+          Enabled: tplForm.enabled ? 1 : 0,
+        })
+      : await templateAdminCreate({
+          Type: 'notification.' + key,
+          Name: key,
+          Title: tplForm.title,
+          Body: tplForm.body,
+        })
     if (!data || !data.success) {
       tplMsg.value = { ok: false, text: (data && data.msg) || '保存失败' }
       return
     }
-    // ⚠️ `affected` 1 = 新插、2 = 更新（MySQL 的 `INSERT … ON DUPLICATE KEY UPDATE` 口径：
-    //    更新一行若值没变也算 0 行受影响）—— **两个都是成功**，别拿它判成败。
     tplMsg.value = { ok: true, text: '已保存' }
     await loadTemplates()
   } catch (e) {

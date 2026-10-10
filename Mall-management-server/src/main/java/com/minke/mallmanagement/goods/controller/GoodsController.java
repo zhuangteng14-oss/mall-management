@@ -4,6 +4,8 @@ import com.minke.mallmanagement.admin.AuditActions;
 import com.minke.mallmanagement.admin.service.AuditService;
 import com.minke.mallmanagement.goods.service.GoodsService;
 import com.minke.mallmanagement.goods.service.GoodsTypeCacheService;
+import com.minke.mallmanagement.notification.NotificationEvents;
+import com.minke.mallmanagement.notification.service.NotificationService;
 import com.minke.mallmanagement.shared.web.AuthSession;
 import com.minke.mallmanagement.shared.web.IdentityGuard;
 import com.minke.mallmanagement.shared.web.Result;
@@ -15,8 +17,10 @@ import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 
 
 /**
@@ -73,16 +77,26 @@ public class GoodsController {
     @Autowired
     private AuditService auditService;
 
+    @Autowired
+    private NotificationService notificationService;
+
+    /** 管理端共享收件箱的收件人标识（与块 2 的 `MerchantApplicationController` 同口径）。 */
+    private static final String ADMIN_INBOX_ID = "*";
+    private static final String TO_TYPE_ADMIN = "admin";
+
     //这是一个接口（用于提供和更新上架商品的可选类型）
     // ⚠️ 本方法是全类**唯一**没有随三层重构下沉的方法 —— 裁决③：GET/POST 的分支判定权
     //    留在 Controller（路由与「GET 带 GoodType 参数走写分支」等边角行为均不变）。
     //    缓存注解在 Service 上（@Cacheable 只覆盖 listTypes()，写分支不在其方法体内）。
     // ⚠️ 例外 4/5：返回 Object 而非 Map —— GET/POST **双形态**（GoodType == null → {success,list}；
     //    否则 → {success,msg}），无法用单一 Result<Map> 表达。别「顺手统一」。见 Result 类注释。
+    // ⚠️ C3 块 3：GET 读分支的返回列已 + ParentId/Sort/State（缓存 Service 侧改）；POST 写分支
+    //    多接一个可选 `ParentId`（空 ⇒ 0=一级），供建二级类目 —— 老调用方不传照旧。
     @RequestMapping(value = "/goodstype", method = {RequestMethod.GET, RequestMethod.POST})
     public Object goodstype(
             @RequestParam(required = false) String GoodType,
-            @RequestParam(required = false) Integer GoodTypeNew
+            @RequestParam(required = false) Integer GoodTypeNew,
+            @RequestParam(required = false) Integer ParentId
     ) {
         // GET 请求：查询所有类型
         // 分支判定权保留在此处 —— 路由与「GET 带 GoodType 参数走写分支」等边角行为均不变。
@@ -92,7 +106,7 @@ public class GoodsController {
         }
 
         // POST 请求：新增类型
-        return goodsTypeCacheService.addType(GoodType, GoodTypeNew);
+        return goodsTypeCacheService.addType(GoodType, GoodTypeNew, ParentId);
     }
 
     //这是一个接口用于上架商品
@@ -114,13 +128,37 @@ public class GoodsController {
             @NotBlank(message = "不能为空") @RequestParam("GoodType") String GoodType,
             @NotBlank(message = "不能为空") @RequestParam("ProductCode") String ProductCode,
             @RequestParam("GoodTypeNew") int GoodTypeNew,
+            @RequestParam(value = "TypeId", required = false) Integer TypeId, @RequestParam(value = "Detail", required = false) String Detail, @RequestParam(value = "Spec", required = false) String Spec, @RequestParam(value = "AfterSale", required = false) String AfterSale,
             HttpServletRequest request
     ) throws IOException {
         // ⚠️ 第一行：上架只能挂到**自己**名下（管理员豁免）—— 必须在落盘/写库之前。
         if (!IdentityGuard.requireSelfOrAdmin(request, MerchantId)) {
             return IdentityGuard.forbidden();
         }
-        return ResponseEntity.ok(Result.of(goodsService.goodsAdd(MerchantId, GoodName, Price, file, GoodType, ProductCode, GoodTypeNew)));
+        // ═══ C3 块 3：提审制的四步钩子（照 GoodsController.goodsUp 的形状）═══
+        // 业务（本方法）改为「落一条 goods_audit(pending)，不写 goods 行」；
+        // 只有提交成功才**触达管理端**（共享收件箱）+ 记账。
+        Map<String, Object> result = goodsService.goodsAdd(MerchantId, GoodName, Price, file,
+                GoodType, ProductCode, GoodTypeNew, TypeId, Detail, Spec, AfterSale);
+        if (Boolean.TRUE.equals(result.get("success"))) {
+            String batchId = str(result.get("batchId"));
+            notificationService.send(UUID.randomUUID().toString(),
+                    ADMIN_INBOX_ID, TO_TYPE_ADMIN,
+                    NotificationEvents.GOODS_APPLY_SUBMITTED,
+                    "新的商品上架申请",
+                    "商家「" + MerchantId + "」提交了商品「" + GoodName + "」的上架申请，待审核。",
+                    "goods_audit", batchId);
+            // 新增类动作：BeforeJson 恒 NULL；TargetId 用 BatchId（跨重导稳定，同块 2 口径）。
+            Map<String, Object> after = new HashMap<>();
+            after.put("MerchantId", MerchantId);
+            after.put("GoodName", GoodName);
+            after.put("Price", Price);
+            after.put("GoodType", GoodType);
+            after.put("ProductCode", ProductCode);
+            auditService.record(AuthSession.identify(request), AuditActions.GOODS_APPLY_CREATE,
+                    "goods_audit", batchId, null, after);
+        }
+        return ResponseEntity.ok(Result.of(result));
     }
 
     //这是一个接口（用于显示商家端查看商品页面外部内容）
@@ -248,6 +286,40 @@ public class GoodsController {
     @PostMapping("/productSearch")
     public Result<Map<String, Object>> productSearch(String keyword) {
         return Result.of(goodsService.productSearch(keyword));
+    }
+
+    // ═══ C3 块 3 新增：二级类目筛选 ═══
+    // 按 **TypeId**（不是类目名）筛 —— 唯一键换代后「电子用品>配件」与「服装>配件」同名，名字不再唯一。
+    // 只回买家可见的（ShelfState=1 且 DeletedAt 为空），故**不加** IdentityGuard（它就是公开浏览面，
+    // 与 goodsSelectHome / productSearch 同类；判「自己的」会误伤正常浏览）。
+    // ⚠️ 承载类目树的那个前端（GoodsSelect.vue 二级树）今天**还没接线** ⇒ 接的是新端点，
+    //    不算改契约（既有的名字路径 HomePage chips / 搜索框一行不动）。
+    @PostMapping("/categoryGoods")
+    public Result<Map<String, Object>> categoryGoods(
+            @RequestParam("TypeId") Integer TypeId,
+            @RequestParam(value = "keyword", required = false) String keyword
+    ) {
+        return Result.of(goodsService.categoryGoods(TypeId, keyword));
+    }
+
+    // ═══ C3 块 3 新增：商家查自己的提审历史 / 状态 ═══
+    // ⚠️ MerchantId 是「调用者自己」⇒ 第一行过 IdentityGuard（同 goodsSelect）。
+    // 商家端「我的商品」状态列需并表：/goods/goodsSelect（已上架）∪ 本端点（待审 / 驳回）。
+    @PostMapping("/myApplications")
+    public ResponseEntity<Object> myApplications(
+            @RequestParam("MerchantId") String MerchantId,
+            @RequestParam(value = "limit", required = false) Integer limit,
+            HttpServletRequest request
+    ) {
+        if (!IdentityGuard.requireSelfOrAdmin(request, MerchantId)) {
+            return IdentityGuard.forbidden();
+        }
+        return ResponseEntity.ok(Result.of(goodsService.myApplications(MerchantId, limit)));
+    }
+
+    /** {@code Object → String}（审计快照用；{@code null} 原样返回）。 */
+    private static String str(Object v) {
+        return v == null ? null : v.toString();
     }
 
 }

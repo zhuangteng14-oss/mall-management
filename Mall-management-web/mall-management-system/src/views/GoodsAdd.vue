@@ -9,7 +9,7 @@
        · `form` ⇒ 落成本页模板（本笔主体）；
        · `bad`（校验态）⇒ 由**既有** `showTip` 驱动，逐字段落 `.tip` + `.inp.err` / `.codes.err`
          / `.picbox.err`，**不新增 script 状态**；
-       · `ok`（提交成功）⇒ 现有实现是 `alert('商品上架成功！')`，稿画的是**行内成功面**。
+       · `ok`（提交成功）⇒ 那时实现是 `alert('商品上架成功！')`（C3 块 3 提审制后改为 `alert('已提交审核')`），稿画的是**行内成功面**。
          那需要新增一个 script 状态（`v-if="justSubmitted"`）才成立 ⇒ **超出 D 笔边界
          （`<template>` + `<style scoped>`），本笔不落**，已在 `slot-registry.md` §一 commit 10 登记。
   -->
@@ -231,19 +231,24 @@
       <section class="sec">
         <div class="sec-h"><span class="idx">04</span><h2>商品详情</h2></div>
 
-        <!-- 预留位 ④（稿 `:429-435`）—— 块级。textarea 是稿外死控件（`disabled` 已在稿里）。 -->
-        <div
-          class="f"
-          data-slot="预留 · 详情富文本（动现有代码 6 处 · 超档）"
-          title="待 C3〈商品〉——goods 表无详情列：mall_management_sql.sql + GoodsDao.java + GoodsService.java + GoodsController.java + GoodsAdd.vue + ProductPage.vue（展示）= 6 处，**超档**，因清单点名而画出（见 README 挂账表）。⚠️ 用户边界写着不画富文本编辑器，这里是**文字 + 长图**的朴素形态，不是 WYSIWYG。"
-        >
-          <label for="g-desc">详情描述</label>
+        <!-- ⚠️ **2026-10-10〈模板表通用化〉：预留位 ④ 就地转真功能** ——
+             这一格此前是 `disabled` 的**占位** textarea（原 `data-slot="预留 · 详情富文本…"`），
+             依据是「goods 表无详情列」。本笔给 goods 加了 `Detail` / `Spec` / `AfterSale` 三列
+             （快照文本）⇒ **那个前提已不成立**，占位若留着就是一句假陈述 ⇒ 原地改成真输入框
+             （不是「另开一处真控件、把假控件也留着」——那会变成两个详情框）。
+             ⚠️ 语义是**快照不是引用**：「选模板」把模板正文**填进这个框**，商家**可改**，
+             提交时落库的是**改完的最终文本**，**不是模板 Id** ⇒ 事后改模板**不影响**已上架商品。
+             ⚠️ 非必填（后端 `Detail` 是 `required = false`）—— `submitGoods` 的 5 项必填判据不动。 -->
+        <div class="f">
+          <div class="f-head">
+            <label for="g-desc">详情描述</label>
+            <button type="button" class="btn-quiet" @click="showDetailTpl = true">选模板</button>
+          </div>
           <textarea
             id="g-desc"
+            v-model="Detail"
             class="inp"
-            placeholder="—"
-            disabled
-            title="待 C3〈商品〉——goods 无详情列，6 处改动（超档）"
+            placeholder="可直接填写，或点右上「选模板」从模板库取一段再改"
           ></textarea>
           <div class="hint">展示在商品详情页的「商品详情」Tab。</div>
         </div>
@@ -265,6 +270,24 @@
             <span class="code on static">{{ ProductCode || '—' }}</span>
           </div>
           <div class="hint">这个码就是「商品型号」的取值 —— 现有实现用 ProductCode 一个字段承载规格。</div>
+        </div>
+
+        <!-- 规格说明（**2026-10-10〈模板表通用化〉新列 `goods.Spec`**）—— 落 ProductPage「规格参数」Tab。
+             ⚠️ 约定是**行内 `键=值`、一行一条**（列类型 `mediumtext` 纯文本，不建子表）——
+             与上面「单规格 / 多规格矩阵」是两件事：那条说的是**型号 / 组合**，这条是**参数清单**。
+             ⚠️ 非必填。 -->
+        <div class="f mt">
+          <div class="f-head">
+            <span class="lb">规格说明</span>
+            <button type="button" class="btn-quiet" @click="showSpecTpl = true">选模板</button>
+          </div>
+          <textarea
+            id="g-spec"
+            v-model="Spec"
+            class="inp"
+            placeholder="一行一条，写法：键=值（例：品牌=声谷 SG）"
+          ></textarea>
+          <div class="hint">展示在商品详情页的「规格参数」Tab，按 `键=值` 逐行拆成左右两列。</div>
         </div>
 
         <!-- 预留位 ⑤（稿 `:451-462`）—— 块级。矩阵里的三行规格名是**稿的示意值**，
@@ -291,6 +314,26 @@
         <div class="sec-h">
           <span class="idx">06</span><h2>服务承诺</h2>
           <span class="note">文案与商品详情页承诺条逐字一致</span>
+        </div>
+
+        <!-- 售后说明（**2026-10-10〈模板表通用化〉新列 `goods.AfterSale`**）—— 落 ProductPage
+             「售后保障」Tab。⚠️ 与下面「预留位 ⑥ 服务承诺勾选」**不是一回事、两条都留**：
+             这条是**自由文本**（`goods.AfterSale` 一列 `mediumtext`），那条是**四项布尔勾选**
+             （正品保障 / 7 天无理由 / 极速退款 / 运费险）—— goods 表**仍然没有**承载后者的列，
+             所以那个占位它的依据（「goods 表无承诺列，选了什么存不下来」）**依旧成立、不是假陈述**
+             ⇒ 不删。填了这条之后，详情页那一 Tab 显示这段文字（留空则显示平台默认政策）。 -->
+        <div class="f">
+          <div class="f-head">
+            <label for="g-after">售后说明</label>
+            <button type="button" class="btn-quiet" @click="showAfterSaleTpl = true">选模板</button>
+          </div>
+          <textarea
+            id="g-after"
+            v-model="AfterSale"
+            class="inp"
+            placeholder="可直接填写，或点右上「选模板」从模板库取一段再改"
+          ></textarea>
+          <div class="hint">展示在商品详情页的「售后保障」Tab。</div>
         </div>
 
         <!-- 预留位 ⑥（稿 `:469-478`）—— 块级。四条文案与 ProductPage 的承诺条**必须逐字一致**
@@ -326,6 +369,35 @@
       </div>
     </form>
 
+    <!-- ═══ 「选模板」弹窗 ×3（2026-10-10〈模板表通用化〉）═════════════════════════
+         ⚠️ 触发按钮**留在各自字段里**（`.btn-quiet`，本页既有类），组件只出弹窗 —— 见
+         `components/TemplatePicker.vue` 块首「为什么组件不含按钮」。
+         ⚠️ 三个 `v-if` 各自独立 ⇒ 同时只可能开一个（不会叠两个遮罩）。 -->
+    <TemplatePicker
+      v-if="showDetailTpl"
+      type="goods.detail"
+      title="选择详情模板"
+      empty-text="暂无详情模板（管理端建一条即可）"
+      @pick="onPickDetailTpl"
+      @close="showDetailTpl = false"
+    />
+    <TemplatePicker
+      v-if="showSpecTpl"
+      type="goods.spec"
+      title="选择规格模板"
+      empty-text="暂无规格模板（管理端建一条即可）"
+      @pick="onPickSpecTpl"
+      @close="showSpecTpl = false"
+    />
+    <TemplatePicker
+      v-if="showAfterSaleTpl"
+      type="goods.afterSale"
+      title="选择售后模板"
+      empty-text="暂无售后模板（管理端建一条即可）"
+      @pick="onPickAfterSaleTpl"
+      @close="showAfterSaleTpl = false"
+    />
+
   </main>
 </template>
 
@@ -334,6 +406,7 @@ import { ref, onMounted } from 'vue'
 import { http, handleApiError } from '../api/http'
 import { endpoints } from '../api/endpoints'
 import { getMerchantId } from '../api/auth'
+import TemplatePicker from '../components/TemplatePicker.vue'
 
 const fileInput = ref(null)
 const previewImg = ref('')
@@ -344,6 +417,18 @@ const Price = ref('')
 const GoodType = ref('')
 const ProductCode = ref('')
 const GoodTypeNew = ref(0)
+
+// ── 2026-10-10〈模板表通用化〉：goods 的三段**快照文本**（`Detail` / `Spec` / `AfterSale`）──
+// ⚠️ 语义是**快照不是引用**：模板只「提供思路」，选完填进框里、商家可改，提交落库的是**最终文本**。
+// ⇒ 事后改模板，**已上架的商品不变**（这与块 3 首版「商品存模板 Id」是**相反**的语义）。
+const Detail = ref('')
+const Spec = ref('')
+const AfterSale = ref('')
+
+// 三个「选模板」弹窗的开关（各自独立 ⇒ 同时只可能开一个）
+const showDetailTpl = ref(false)
+const showSpecTpl = ref(false)
+const showAfterSaleTpl = ref(false)
 
 const typeList = ref([])
 const newType = ref('')
@@ -377,6 +462,15 @@ const addTempType = () => {
 const chooseImage = () => {
   fileInput.value.click()
 }
+
+// ── 「选模板」三处回填（2026-10-10）────────────────────────────────────────────
+// ⚠️ 三个都只取 `row.Body`：`goods.*` 类模板的 `Title` 留空（正文就是全部）——
+//    通知类模板才两段都有意义，那是 `NotifyPage` 的面，不是这里。
+// ⚠️ **直接覆写**输入框内容（不做「追加」也不做「先问」）：模板是「提供思路」，
+//    商家选完自己再改 —— 追加会让「连选两次」变成把两条模板粘在一起。
+const onPickDetailTpl = (row) => { Detail.value = row.Body || ''; showDetailTpl.value = false }
+const onPickSpecTpl = (row) => { Spec.value = row.Body || ''; showSpecTpl.value = false }
+const onPickAfterSaleTpl = (row) => { AfterSale.value = row.Body || ''; showAfterSaleTpl.value = false }
 
 const handleImageChange = (e) => {
   const file = e.target.files[0]
@@ -432,6 +526,15 @@ const submitGoods = async () => {
   formData.append('GoodType', GoodType.value)
   formData.append('ProductCode', ProductCode.value)
   formData.append('GoodTypeNew', realGoodTypeNew) // 用真实值！
+  // C3 块 3：附类目 Id（换代后类目名不全库唯一，按名回查会歧义；同名时与后端 selectTypeIdByName 同取首条）
+  const pickedType = typeList.value.find(t => t.GoodType === GoodType.value)
+  if (pickedType && pickedType.Id != null) formData.append('TypeId', String(pickedType.Id))
+  // 2026-10-10〈模板表通用化〉：三段快照文本随提审一起走（后端三参 `required = false`）。
+  // ⚠️ **必须随提审携带**：提审只写 `goods_audit`，审核通过时后端用提审行**重建** `goods` 行
+  //    （`writeGoodsFromAudit`）—— 不带这三段，通过后新行里它们会是空的。
+  formData.append('Detail', Detail.value)
+  formData.append('Spec', Spec.value)
+  formData.append('AfterSale', AfterSale.value)
 
   try {
     const res = await http.post(endpoints.goods.goodsAdd, formData)
@@ -442,7 +545,7 @@ const submitGoods = async () => {
         await saveNewTypeToDB(tempNewType.value)
       }
 
-      alert('商品上架成功！')
+      alert('已提交审核') // C3 块 3 提审制：goodsAdd 只落待审单、不写 goods 行 ⇒ 原文案「商品上架成功！」失真；本句与后端 msg 逐字同
       GoodName.value = ''
       Price.value = ''
       GoodType.value = ''
@@ -451,6 +554,10 @@ const submitGoods = async () => {
       selectedFile.value = null
       tempNewType.value = ''
       showTip.value = false
+      // 三段快照文本也清空（同其余字段：提交成功即开下一件）
+      Detail.value = ''
+      Spec.value = ''
+      AfterSale.value = ''
 
       loadGoodsType()
     } else {
@@ -546,6 +653,12 @@ button { background: none; border: 0; cursor: pointer; }
 .f { margin-bottom: var(--s5); }
 .f:last-child { margin-bottom: 0; }
 .f > label, .f .lb { display: block; font-size: var(--fs-xs); color: var(--ink-3); margin-bottom: var(--s2); }
+/* 2026-10-10：标签行右侧挂「选模板」（详情 / 规格 / 售后三处）—— 标签与按钮**同一行**，
+   按钮不占下方正文的宽度。⚠️ 按钮自带 `height:34px`（`.btn-quiet`），比标签行高 ⇒
+   `align-items:center` 而不是 `baseline`，否则按钮会被顶得比文字基线低一截。 */
+.f-head { display: flex; align-items: center; gap: var(--s3); margin-bottom: var(--s2); }
+.f-head > label, .f-head > .lb { margin-bottom: 0; }
+.f-head .btn-quiet { margin-left: auto; height: 28px; padding: 0 var(--s3); }
 .f .hint { margin-top: var(--s2); font-size: var(--fs-xs); color: var(--ink-3); }
 .mt { margin-top: var(--s5); }
 

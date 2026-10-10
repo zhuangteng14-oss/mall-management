@@ -407,3 +407,274 @@ ALTER TABLE `user`
 ALTER TABLE `goods`
   ADD COLUMN `ShelfState` tinyint(1) NOT NULL DEFAULT 1 COMMENT '上架状态：1 在架 / 0 已下架（降级冻结只置 0，不删行）',
   ADD COLUMN `DelistedAt` datetime(3) DEFAULT NULL COMMENT '下架时刻；在架为 NULL';
+
+-- ============================================================
+-- Migration: C3 块3 商品块  Date: 2026-10-10
+-- 依据：docs/agent/c3-modules.md §2「商品与类目治理」
+--       · docs/agent/context-packs/c3-block-3-goods.md
+--       · _work/c3-block3-landing-plan.md §三（A 档 4 项已裁，2026-10-10）
+-- 内容：① `goodstype` 加 3 列（ParentId/Sort/State）+ 唯一键换代（全局 GoodType → (ParentId, GoodType)）
+--       ② `goods` 加 5 列（TypeId / 3 个模板 Id / DeletedAt）+ 按名字回填 TypeId
+--       ③ 新表 `goods_template`（详情/规格/售后 基础模板库）
+--       ④ 新表 `goods_audit`（商品提审历史；提审只写本表，通过才写 goods 行）
+-- 回滚（规则 v2：回滚 = 逻辑废弃，执行前须人工确认）：
+--       DROP TABLE `goods_audit`;
+--       DROP TABLE `goods_template`;
+--       ALTER TABLE `goods` DROP COLUMN `TypeId`,`DetailTemplateId`,`SpecTemplateId`,`AfterSaleTemplateId`,`DeletedAt`;
+--       DROP INDEX `uk_goodstype_parent_name` ON `goodstype`;
+--       CREATE UNIQUE INDEX `uk_goodstype_GoodType` ON `goodstype` (`GoodType`);
+--       DROP INDEX `idx_goodstype_parent_sort` ON `goodstype`;
+--       ALTER TABLE `goodstype` DROP COLUMN `ParentId`,`Sort`,`State`;
+-- 幂等：新表用 `CREATE TABLE IF NOT EXISTS`；⚠️ 加列 / 建索引**不幂等** —— MySQL **不支持**
+--       `ALTER TABLE ... ADD COLUMN IF NOT EXISTS`（同块2 口径，见
+--       https://dev.mysql.com/doc/refman/8.4/en/alter-table.html ，无此子句），
+--       `CREATE [UNIQUE] INDEX` 亦无 `IF NOT EXISTS`。CI 是**整份重导**（先 DROP 后 CREATE）
+--       ⇒ 每轮只执行一次，安全；VM 库手动执行一次，**重复执行会报
+--       Duplicate column (1060) / Duplicate key name (1061)（预期，非故障）**。
+-- ⚠️ 本块改动**不写进文件上半部的基线 CREATE TABLE**（同块1-I2 / 块2 处置）：
+--    基线区保持历史原样，新列 / 新表 / 索引换代一律以「末尾 Migration 块」表达。
+-- 前置：⚠️ 唯一键换代**依赖既有类目 ParentId 全为 0 且名字互异** —— 种子见本文件 `goodstype`
+--       的 INSERT（Id 1-5：电子用品 / 生活用品 / 服装 / 美食 / 运动用品），5 条全为一级（ParentId=0）、名互异
+--       ⇒ 新键 `(ParentId, GoodType)` 在全量重导路径上**当场成立**，不需先去重。
+--       若在【已有重复 (ParentId=0, GoodType) 的既有库】执行，须先人工去重（同块2 uk 块口径）。
+-- ============================================================
+
+-- ---- ① goodstype：加 3 列（规则 7）+ 唯一键换代（全局 → 每父级下唯一）----
+-- 换代理由：全局唯一会让「电子用品>配件」与「服装>配件」撞键 ⇒ 管理员录不进第二个「配件」。
+--           电商类目本就允许不同父级下同名子类目 ⇒ 键改 (ParentId, GoodType)。
+--           ⚠️ 连带三件：goods 只按【名字】软引用类目 ⇒ 必须给 goods 加 `TypeId` + 回填 +
+--           买家二级筛选改走 Id（见 ② 与前端契约口径）。
+-- 顺序：先加列（ParentId 有默认值 ⇒ 既有 5 行自动补 0）→ 建普通索引 → 换唯一键。
+ALTER TABLE `goodstype`
+  ADD COLUMN `ParentId` int NOT NULL DEFAULT 0 COMMENT '父类目 Id：0 = 一级类目（自引用 goodstype.Id；模型不限深度，UI 只做二级）',
+  ADD COLUMN `Sort` int NOT NULL DEFAULT 0 COMMENT '同级排序（升序）；0 = 默认',
+  ADD COLUMN `State` tinyint(1) NOT NULL DEFAULT 1 COMMENT '是否启用：1 启用 / 0 停用（逻辑废弃，不物理删）';
+CREATE INDEX `idx_goodstype_parent_sort` ON `goodstype` (`ParentId`,`Sort`);
+-- ⚠️ 换代：先 DROP 全局唯一键，再建 (ParentId, GoodType) 唯一键（两句须成对，中间无写窗口）。
+DROP INDEX `uk_goodstype_GoodType` ON `goodstype`;
+CREATE UNIQUE INDEX `uk_goodstype_parent_name` ON `goodstype` (`ParentId`,`GoodType`);
+
+-- ---- ② goods：加 5 列（规则 7）----
+-- ⚠️ **不加 `AuditState` / `RejectReason`** —— 自查（2026-10-10）：goods.AuditState 的第二值
+--    一种都不存在（违规下架 = ShelfState、违规删除 = DeletedAt、驳回/待审 = goods_audit.Status）
+--    ⇒ 恒 'approved' 的死列；goods.RejectReason 亦被 goods_audit 完全覆盖 ⇒ 一并去掉。
+ALTER TABLE `goods`
+  ADD COLUMN `TypeId` int DEFAULT NULL COMMENT '类目 Id（软引用 goodstype.Id；唯一键换代连带，供二级筛选按 Id 走）',
+  ADD COLUMN `DetailTemplateId` int DEFAULT NULL COMMENT '详情模板 Id（软引用 goods_template.Id）；未选为 NULL',
+  ADD COLUMN `SpecTemplateId` int DEFAULT NULL COMMENT '规格模板 Id（软引用 goods_template.Id）；未选为 NULL',
+  ADD COLUMN `AfterSaleTemplateId` int DEFAULT NULL COMMENT '售后模板 Id（软引用 goods_template.Id）；未选为 NULL',
+  ADD COLUMN `DeletedAt` datetime(3) DEFAULT NULL COMMENT '违规删除时刻；正常为 NULL（逻辑删除，不物理删）';
+
+-- ---- ② 续：按名字回填 TypeId（现有 5 条类目名全库唯一 ⇒ 无歧义）----
+-- ⚠️ 必须紧跟在上面的 ADD COLUMN 之后、且在【还没有】同名二级子类目插入之前执行
+--    —— 此刻 goodstype 里每个名字只可能匹配一行，UPDATE ... JOIN 不会多对一放大。
+UPDATE `goods` g JOIN `goodstype` t ON g.`GoodType` = t.`GoodType` SET g.`TypeId` = t.`Id` WHERE g.`TypeId` IS NULL;
+
+-- ---- ③ 新表 goods_template：基础模板库（详情 / 规格 / 售后三类）----
+CREATE TABLE IF NOT EXISTS `goods_template` (
+  `Id` int NOT NULL AUTO_INCREMENT COMMENT '自增主键',
+  `TemplateType` varchar(16) NOT NULL COMMENT '模板类型：detail 详情 / spec 规格 / after_sale 售后（字符串码，不建 DB ENUM）',
+  `Name` varchar(64) NOT NULL COMMENT '模板名',
+  `Content` mediumtext COMMENT '模板内容：详情=富文本 / 规格=规格表 / 售后=保障文案；空为 NULL',
+  `Enabled` tinyint(1) NOT NULL DEFAULT 1 COMMENT '是否启用：1 启用 / 0 停用（逻辑废弃，不物理删）',
+  `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '行落库时刻（agent.md 数据库管理规则 8）',
+  `updated_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '行更新时刻',
+  PRIMARY KEY (`Id`),
+  KEY `idx_goods_template_type_enabled` (`TemplateType`,`Enabled`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='商品基础模板库（C3 块3 新增；详情/规格/售后三类，商家上架时选用）';
+
+-- ---- ④ 新表 goods_audit：商品提审历史（镜像块2 的 merchant_application）----
+-- 口径：**提审只写本表（不写 goods 行）**；管理员【通过】才写 goods 行 + CAS 置本表
+--       Status='approved' + 回填 GoodsId；【驳回】只改本表 Status='rejected' + RejectReason。
+--       **再次提审 = 新插一行**（保留完整历史）。故本表可多次 INSERT、可 UPDATE（非 append-only）。
+-- 命名：RejectReason 沿用块2 `merchant_application.RejectReason`（同名同义，不用 Reason/AuditRejectReason）；
+--       BatchId 照块2（给通知/审计一个**跨重导稳定**的 TargetId）。
+CREATE TABLE IF NOT EXISTS `goods_audit` (
+  `Id` bigint NOT NULL AUTO_INCREMENT COMMENT '自增主键',
+  `MerchantId` varchar(20) NOT NULL COMMENT '提审商家号（goods.MerchantId）。⚠️ 软引用，不设 FK（同 notification.TargetId 口径）',
+  `BatchId` varchar(36) NOT NULL COMMENT '提审时生成的 UUID；给通知与审计一个跨重导稳定的 TargetId（同 I2/块2 理由）',
+  `GoodName` varchar(40) NOT NULL COMMENT '商品名（提审快照）',
+  `Price` double NOT NULL COMMENT '价格（提审快照）',
+  `GoodType` varchar(20) DEFAULT NULL COMMENT '类目名（提审快照；仅作展示/兼容，正式引用走 TypeId）',
+  `GoodTypeNew` int DEFAULT NULL COMMENT '类目新旧位（提审快照；通过时原样写进 goods.GoodTypeNew）',
+  `TypeId` int DEFAULT NULL COMMENT '类目 Id（提审快照；通过时原样写进 goods.TypeId。⚠️ 必须随单走 —— 否则改名后按名字回查会歧义）',
+  `ProductCode` varchar(40) DEFAULT NULL COMMENT '商品货号（提审快照）',
+  `GoodImg` varchar(255) DEFAULT NULL COMMENT '商品图 URL（提审快照；放宽到 255 容长 URL）',
+  `Status` varchar(16) NOT NULL DEFAULT 'pending' COMMENT '审核状态：pending / approved / rejected（小写，与 CAS 的 WHERE Status=? 字面一致；字符串码，不建 DB ENUM）',
+  `RejectReason` varchar(255) DEFAULT NULL COMMENT '驳回理由（Status=rejected 时有值）',
+  `GoodsId` bigint DEFAULT NULL COMMENT '通过后回填的 goods.Id（软引用）；未通过为 NULL',
+  `SubmittedAt` datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) COMMENT '提交时刻（DB 存 UTC）',
+  `ReviewedBy` varchar(20) DEFAULT NULL COMMENT '审核的管理员账号名（管理员无独立业务号）',
+  `ReviewedAt` datetime(3) DEFAULT NULL COMMENT '审核时刻；未审为 NULL',
+  `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '行落库时刻（agent.md 数据库管理规则 8）',
+  `updated_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '行更新时刻（审核会 UPDATE，故本表非 append-only）',
+  PRIMARY KEY (`Id`),
+  KEY `idx_goods_audit_status` (`Status`,`SubmittedAt`),
+  KEY `idx_goods_audit_merchant` (`MerchantId`,`SubmittedAt`),
+  KEY `idx_goods_audit_batch` (`BatchId`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='商品提审历史（C3 块3 新增；提审只写本表，通过才写 goods 行、再次提审插新行）';
+
+-- ============================================================
+-- Migration: C3 块3 就地改造 —— 模板表通用化 + 商品侧改「快照」  Date: 2026-10-10
+-- 依据：用户 2026-10-10 决策（两套模板表 → 一张通用 `template`；goods 的模板「引用 Id」→「快照文本」）
+--       · docs/agent/context-packs/c3-block-3-goods.md
+--       · _work/c3-block3-landing-plan.md §十一（三条待裁已被本决策作废）
+-- 内容：① 新表 `template`（通用模板库，`Type` 区分用途）
+--       ② `goods` 加 3 段快照文本（Detail / Spec / AfterSale）、删 3 个模板引用 Id
+--       ③ `goods_audit` 加 3 段快照文本（提审携带；审核通过时原样写进 goods 行）
+--       ④ 搬迁 `notification_template` 的行（新 Type = 'notification.' + 原 TemplateKey）
+--       ⑤ 物理删两张老表 `goods_template` / `notification_template`
+-- 回滚（规则 v2：回滚 = 逻辑废弃，执行前须人工确认）：
+--       DROP TABLE `template`;
+--       ALTER TABLE `goods` DROP COLUMN `Detail`,`Spec`,`AfterSale`;
+--       ALTER TABLE `goods_audit` DROP COLUMN `Detail`,`Spec`,`AfterSale`;
+--       （3 个 `*TemplateId` 不回填 —— 逻辑废弃，不恢复）
+-- 位置：追加在文件尾（原 515 行之后）。原 1-515 的 `文件:行号` 互引**零漂移**：
+--       两张老表的建表块（`notification_template` at 原 335-345 / `goods_template` at 原 474-484）
+--       **留在原地不动**，由本块尾部的 `DROP TABLE IF EXISTS` 中和 ——
+--       净判据「导入后这两张表不存在」与「物理删」等价。
+-- 幂等：MySQL 不支持 `ADD / DROP COLUMN IF NOT EXISTS`（同块2 / 块3 口径，见 8.4 手册
+--       alter-table 无此子句）⇒ 本块每个 ALTER 都走 `information_schema` 守卫 + PREPARE。
+--       **重复执行是空操作，不报错**（守卫命中后走 `DO 0`）。
+-- 前置：⚠️ ③ 要求 `goods_audit` 已存在（即块 3 已跑）。整份重导路径上块 3 在本块之前 ⇒ 成立；
+--       若在【没有块 3 的既有库】上**单跑本块**，须先跑块 3（本机库已落块 3，故只需跑本块）。
+-- ⚠️ 本块改动**不写进文件上半部的基线 CREATE TABLE**（同块1-I2 / 块2 / 块3 处置）：
+--    基线区保持历史原样，新表 / 新列一律以「末尾 Migration 块」表达。
+-- ============================================================
+
+-- ---- ① 新表 template：通用模板库 ----
+-- 口径：一张表承载**所有**「提供思路」的模板，靠 `Type` 区分用途。Type 是**字符串码**
+--       （点分，不建 DB ENUM —— 同 goods_audit.Status / goods_template.TemplateType 口径）：
+--         goods.detail / goods.spec / goods.afterSale / goods.reject /
+--         merchant.reject / merchant.approve / user.ban / comment.reply /
+--         notification.<原 notification_template.TemplateKey>
+-- ⚠️ 商品侧是**快照**语义：`Body` 只是「起点内容」，商家选中后填进自己的输入框、可改，
+--    落库的是**商品自己那一行文本**（goods.Detail / Spec / AfterSale）——
+--    **改模板不影响已上架商品**，与 goods_template 的「引用 Id」语义相反。
+-- ⚠️ 通知侧只是**搬家**：`notification.*` 一 type 一条（Name = 原 TemplateKey，Title/Body = 原两列）。
+--    块 1 立下的「占位符渲染留后」口径**不变** —— 本块不做渲染接线。
+CREATE TABLE IF NOT EXISTS `template` (
+  `Id` int NOT NULL AUTO_INCREMENT COMMENT '自增主键',
+  `Type` varchar(96) NOT NULL COMMENT '模板类型（点分字符串码，不建 DB ENUM）：goods.detail / goods.spec / goods.afterSale / goods.reject / merchant.reject / merchant.approve / user.ban / comment.reply / notification.<原 TemplateKey>。⚠️ 96 = notification.(13) + TemplateKey 上界(64) + 余量；原定 32 装不下（见下方加宽守卫）',
+  `Name` varchar(64) NOT NULL COMMENT '模板名（弹窗列表的显示名；同 Type 内唯一）',
+  `Title` varchar(255) DEFAULT NULL COMMENT '标题模板（通知类用，可含 {占位符}）；商品类为 NULL',
+  `Body` mediumtext COMMENT '正文：商品类 = 纯文本内容（快照的起点，商家可改）；通知类 = 正文模板',
+  `Enabled` tinyint(1) NOT NULL DEFAULT 1 COMMENT '是否启用：1 启用 / 0 停用（逻辑废弃，不物理删）',
+  `Sort` int NOT NULL DEFAULT 0 COMMENT '同 Type 内排序（升序）；0 = 默认',
+  `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '行落库时刻（agent.md 数据库管理规则 8）',
+  `updated_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '行更新时刻',
+  PRIMARY KEY (`Id`),
+  UNIQUE KEY `uk_template_type_name` (`Type`,`Name`),
+  KEY `idx_template_type_enabled_sort` (`Type`,`Enabled`,`Sort`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='通用模板表（C3 块3 就地改造；合并原 goods_template + notification_template）';
+
+-- ---- ① 续 template.Type 加宽守卫（幂等）----
+-- ⚠️ 2026-10-10 实测缺陷（scratch 库演练 → ERROR 1406 Data too long for column 'Type'）：
+--    Type 原定 varchar(32) **装不下**通知侧搬迁值 —— 第 ④ 步写的是 CONCAT('notification.', TemplateKey)，
+--    源列 `notification_template`.`TemplateKey` 是 varchar(64)，真实最长见 NotificationEvents
+--    `merchant.downgrade.scheduled`（28）⇒ 41 字符 > 32。⇒ **任何有模板行的库跑第 ④ 步必然 1406**。
+--    已批决策 4（保留 `notification.` 前缀）不变 ⇒ 只能加宽本列：上界 = 13 + 64 = 77，取 96 留余量。
+--    守卫让【已按窄列建过 template 的库】就地补宽（本机库 / VM 库都是先按 32 建出来的）。
+--    MAX(...) 在表不存在时为 NULL ⇒ IF 走 else 分支，安全。
+SET @s := (SELECT IF(MAX(CHARACTER_MAXIMUM_LENGTH) < 96,
+  'ALTER TABLE `template` MODIFY COLUMN `Type` varchar(96) NOT NULL COMMENT ''模板类型（点分字符串码，不建 DB ENUM）：goods.detail / goods.spec / goods.afterSale / goods.reject / merchant.reject / merchant.approve / user.ban / comment.reply / notification.<原 TemplateKey>''',
+  'DO 0')
+  FROM information_schema.COLUMNS
+  WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'template' AND COLUMN_NAME = 'Type');
+PREPARE _p FROM @s; EXECUTE _p; DEALLOCATE PREPARE _p;
+
+-- ---- ② goods：加 3 段快照文本 ----
+-- 加列守卫：`information_schema` 判「不存在才加」。3 列各一段（Detail / Spec / AfterSale）。
+SET @s := (SELECT IF(COUNT(*) = 0,
+  'ALTER TABLE `goods` ADD COLUMN `Detail` mediumtext COMMENT ''详情（快照文本；选模板后可由商家改，落库即定稿）''',
+  'DO 0')
+  FROM information_schema.COLUMNS
+  WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'goods' AND COLUMN_NAME = 'Detail');
+PREPARE _p FROM @s; EXECUTE _p; DEALLOCATE PREPARE _p;
+
+SET @s := (SELECT IF(COUNT(*) = 0,
+  'ALTER TABLE `goods` ADD COLUMN `Spec` mediumtext COMMENT ''规格（快照文本；约定行内「键=值」，一行一条）''',
+  'DO 0')
+  FROM information_schema.COLUMNS
+  WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'goods' AND COLUMN_NAME = 'Spec');
+PREPARE _p FROM @s; EXECUTE _p; DEALLOCATE PREPARE _p;
+
+SET @s := (SELECT IF(COUNT(*) = 0,
+  'ALTER TABLE `goods` ADD COLUMN `AfterSale` mediumtext COMMENT ''售后（快照文本）''',
+  'DO 0')
+  FROM information_schema.COLUMNS
+  WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'goods' AND COLUMN_NAME = 'AfterSale');
+PREPARE _p FROM @s; EXECUTE _p; DEALLOCATE PREPARE _p;
+
+-- ---- ② 续 goods：删 3 个模板引用 Id（改快照后不再引用模板行）----
+-- 删列守卫：判「存在才删」。⚠️ 三个 `*TemplateId` 今天全仓零写入（恒 NULL）⇒ 删列无数据损失。
+SET @s := (SELECT IF(COUNT(*) = 1,
+  'ALTER TABLE `goods` DROP COLUMN `DetailTemplateId`',
+  'DO 0')
+  FROM information_schema.COLUMNS
+  WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'goods' AND COLUMN_NAME = 'DetailTemplateId');
+PREPARE _p FROM @s; EXECUTE _p; DEALLOCATE PREPARE _p;
+
+SET @s := (SELECT IF(COUNT(*) = 1,
+  'ALTER TABLE `goods` DROP COLUMN `SpecTemplateId`',
+  'DO 0')
+  FROM information_schema.COLUMNS
+  WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'goods' AND COLUMN_NAME = 'SpecTemplateId');
+PREPARE _p FROM @s; EXECUTE _p; DEALLOCATE PREPARE _p;
+
+SET @s := (SELECT IF(COUNT(*) = 1,
+  'ALTER TABLE `goods` DROP COLUMN `AfterSaleTemplateId`',
+  'DO 0')
+  FROM information_schema.COLUMNS
+  WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'goods' AND COLUMN_NAME = 'AfterSaleTemplateId');
+PREPARE _p FROM @s; EXECUTE _p; DEALLOCATE PREPARE _p;
+
+-- ---- ③ goods_audit：加 3 段快照文本 ----
+-- 为什么必须加：提审**只写 goods_audit**（不写 goods 行），审核【通过】时由
+--   GoodsAuditService.writeGoodsFromAudit 用**提审行**重建 goods 行 ⇒ 提审若不携带这 3 段，
+--   审核通过后 goods.Detail / Spec / AfterSale 会丢。
+SET @s := (SELECT IF(COUNT(*) = 0,
+  'ALTER TABLE `goods_audit` ADD COLUMN `Detail` mediumtext COMMENT ''详情快照（提审时携带；通过时原样写进 goods.Detail）''',
+  'DO 0')
+  FROM information_schema.COLUMNS
+  WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'goods_audit' AND COLUMN_NAME = 'Detail');
+PREPARE _p FROM @s; EXECUTE _p; DEALLOCATE PREPARE _p;
+
+SET @s := (SELECT IF(COUNT(*) = 0,
+  'ALTER TABLE `goods_audit` ADD COLUMN `Spec` mediumtext COMMENT ''规格快照（同上）''',
+  'DO 0')
+  FROM information_schema.COLUMNS
+  WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'goods_audit' AND COLUMN_NAME = 'Spec');
+PREPARE _p FROM @s; EXECUTE _p; DEALLOCATE PREPARE _p;
+
+SET @s := (SELECT IF(COUNT(*) = 0,
+  'ALTER TABLE `goods_audit` ADD COLUMN `AfterSale` mediumtext COMMENT ''售后快照（同上）''',
+  'DO 0')
+  FROM information_schema.COLUMNS
+  WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'goods_audit' AND COLUMN_NAME = 'AfterSale');
+PREPARE _p FROM @s; EXECUTE _p; DEALLOCATE PREPARE _p;
+
+-- ---- ④ 搬迁 notification_template 的行（必须早于 ⑤ 的 DROP）----
+-- Type = 'notification.' + 原 TemplateKey（一 type 一条）；Name 取原 TemplateKey（弹窗/列表的显示名）。
+-- 幂等：`ON DUPLICATE KEY UPDATE Id = template.Id` = 撞唯一键时**啥也不改**（不覆盖已编辑过的模板）；
+--       ⚠️ RHS 必须限定到 `template`（2026-10-10 实测）：源表 `notification_template` 也有 `Id`
+--       ⇒ 写成裸 `Id = Id` 会在【源表存在】的库上报 1052「Column 'Id' in field list is ambiguous」。
+--       本机库源表不存在（走 `DO 0`）故测不出，仅 VM / 全量重导路径暴露。
+--       不用 `INSERT IGNORE`（会吞掉无关错误），也不用 `VALUES()`（8.0.20 起废弃且刷告警）。
+-- 守卫：源表可能不存在（本机库就没有）。
+SET @has_nt := (SELECT COUNT(*) FROM information_schema.TABLES
+                WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'notification_template');
+SET @m := IF(@has_nt > 0,
+  'INSERT INTO `template` (`Type`,`Name`,`Title`,`Body`,`Enabled`,`Sort`)
+     SELECT CONCAT(''notification.'', `TemplateKey`), `TemplateKey`, `TitleTemplate`, `BodyTemplate`, `Enabled`, 0
+     FROM `notification_template`
+   ON DUPLICATE KEY UPDATE `Id` = `template`.`Id`',
+  'DO 0');
+PREPARE _p FROM @m; EXECUTE _p; DEALLOCATE PREPARE _p;
+
+-- ---- ⑤ 物理删两张老表 ----
+-- 用户 2026-10-10 决策：goods_template 与 notification_template 一并物理删
+--   （前者未提交、仅本机库有、0 行；后者已提交、VM 已建、0 行且从未接线 —— 行已在上一步搬入 template）。
+-- ⚠️ 这两张表的**基线建表块留在文件原处不动**（零漂移），净行为由本处 DROP 兑现。
+DROP TABLE IF EXISTS `goods_template`;
+DROP TABLE IF EXISTS `notification_template`;

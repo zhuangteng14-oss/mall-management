@@ -14,7 +14,13 @@ import java.util.Map;
  * 系统通知服务（C3 块 1 · I2）—— 通知域的**全部业务动作**：
  * 一行投递（{@link #send}）+ 收件箱读写（{@link #list} / {@link #unreadCount} /
  * {@link #markRead} / {@link #markAllRead}）+ 投递历史（{@link #history}）+
- * 模板存取（{@link #listTemplates} / {@link #saveTemplate}）+ 受众解析（{@link #resolveAudience}）。
+ * 受众解析（{@link #resolveAudience}）。
+ *
+ * <p>⚠️ <b>块 1 时这里还有「模板存取」（{@code listTemplates} / {@code saveTemplate}）—— 2026-10-10
+ * 就地改造后已删</b>：{@code notification_template} 的行搬进通用 {@code template} 表
+ * （{@code Type = 'notification.' + 原 TemplateKey}）、原表物理删除，模板 CRUD 归
+ * {@code template.service.TemplateService}（管理端点 {@code /admin/template/*}）。
+ * ⚠️ 「占位符渲染与 send 时按 key 取模板」的口径**不变，仍不做**。
  *
  * <h2>【为什么收件箱读写与「管理端发信」的受众解析同处一个类】</h2>
  * 它们读写的是**同两张表、同一套列语义**，拆开会让「{@code ToType} 的取值域」「未读的唯一判据是
@@ -209,45 +215,6 @@ public class NotificationService {
         result.put("list", rows);
         result.put("total", notificationDao.countHistory(eventType, from, to));
         result.put("limit", effective);
-        return result;
-    }
-
-    // ==================== 模板：块 1 只存取，不渲染 ====================
-
-    /** 全部模板（按模板键升序）。 */
-    public Map<String, Object> listTemplates() {
-        Map<String, Object> result = new HashMap<>();
-        result.put("success", true);
-        result.put("list", notificationDao.selectTemplates());
-        return result;
-    }
-
-    /**
-     * 模板 upsert。
-     *
-     * <p>⚠️ <b>块 1 只做「存取 CRUD」，{@link #send} 收的是字面 title / body</b> ——
-     * 占位符渲染（{@code {orderId}} 之类）**明确留后**：它要一并定下渲染语法、未命中占位符怎么办、
-     * 用户输入里的花括号要不要转义，三件都是返工风险，不该塞进本块。
-     */
-    public Map<String, Object> saveTemplate(String templateKey, String titleTemplate,
-                                            String bodyTemplate, Boolean enabled) {
-        if (isBlank(templateKey)) {
-            return fail("缺少参数：templateKey");
-        }
-        if (isBlank(titleTemplate)) {
-            return fail("缺少参数：titleTemplate");
-        }
-        if (isBlank(bodyTemplate)) {
-            return fail("缺少参数：bodyTemplate");
-        }
-        // 不传 enabled ⇒ 启用（新建模板的默认态；改模板时前端显式传）。
-        boolean on = !Boolean.FALSE.equals(enabled);
-        int affected = notificationDao.upsertTemplate(templateKey.trim(), titleTemplate, bodyTemplate, on);
-
-        Map<String, Object> result = new HashMap<>();
-        result.put("success", true);
-        result.put("saved", true);
-        result.put("affected", affected);
         return result;
     }
 

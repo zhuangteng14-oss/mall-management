@@ -218,23 +218,23 @@
       </nav>
 
       <!-- Tab ① 商品详情。⚠️ 两段介绍文是**稿的演示文案**（本仓 goods 表没有详情字段），
-           按「`data-slot` 块内的稿 mock 逐字保留」处理 ⇒ 照留；`data-slot` 按稿只挂 `.longimg`。 -->
+           按「`data-slot` 块内的稿 mock 逐字保留」处理 ⇒ 照留；`data-slot` 按稿只挂 `.longimg`。⚠️ **2026-10-10〈模板表通用化〉**：goods 新增 `Detail` 快照列 ⇒ 三件都加 `v-if="!detailText"`（有真内容时不再并排显示稿的演示文案——那是给「没有详情字段」这个前提配的图）。⚠️ 本页 `data-slot` 渲染数从此**随数据浮动**，见 §十九。 -->
       <div class="panel" v-if="activeTab === 'desc'">
-        <p class="para">声谷标准版是这一代的主力款：单耳 4.8g，入耳处用液态硅胶做了弧度，
+        <p v-if="detailText" class="para pre">{{ detailText }}</p>
+        <p v-if="!detailText" class="para">声谷标准版是这一代的主力款：单耳 4.8g，入耳处用液态硅胶做了弧度，
           长时间佩戴不压耳廓。蓝牙 5.3 双连，手机与笔记本之间切换不用重新配对。</p>
-        <p class="para">充电盒支持 10 分钟快充补 3 小时，通勤路上临时补电够用到下班。</p>
-        <div
-          class="longimg"
+        <p v-if="!detailText" class="para">充电盒支持 10 分钟快充补 3 小时，通勤路上临时补电够用到下班。</p>
+        <div v-if="!detailText" class="longimg"
           data-slot="预留 · 详情富文本（动现有代码 6 处 · 超档）"
           title="待 C3〈商品〉——goods 表无详情字段：mall_management_sql.sql + GoodsDao.java + GoodsService.java + GoodsController.java + GoodsAdd.vue（录入）+ ProductPage.vue（展示）= 6 处，**超档**，因清单点名而画出（见 README 挂账表）"
         >商品详情长图&emsp;1200 × 400</div>
       </div>
 
       <!-- Tab ② 规格参数。整块级占位（`<div>`）⇒ 只挂 `data-slot` + `title`；表内 8 行是**块内
-           mock** ⇒ 逐字保留。 -->
+           mock** ⇒ 逐字保留。⚠️ **2026-10-10〈模板表通用化〉**：goods 新增 `Spec` 快照列（行内 `键=值`、一行一条）⇒ 有真内容时渲染真表（**复用**同一套 `.spec`/`.r`/`.k`/`.v` 样式，不是新样式），占位块整体 `v-if="!specText"`（理由同 Tab ①）。 -->
       <div class="panel" v-if="activeTab === 'spec'">
-        <div
-          class="spec"
+        <div v-if="specText" class="spec"><div class="r" v-for="(r, i) in specRows" :key="i"><span class="k">{{ r.k }}</span><span class="v">{{ r.v }}</span></div></div>
+        <div v-if="!specText" class="spec"
           data-slot="预留 · 规格参数（动现有代码 6 处 · 超档）"
           title="待 C3〈商品〉——goods 表无参数列（品牌 / 材质 / 产地 / 尺寸各一列）：mall_management_sql.sql + GoodsDao.java + GoodsService.java + GoodsController.java + GoodsAdd.vue + ProductPage.vue = 6 处，**超档**，因清单点名而画出（见 README 挂账表）"
         >
@@ -308,9 +308,9 @@
         </div>
       </div>
 
-      <!-- Tab ④ 售后保障：稿判「真功能 N=0」（纯静态政策文案）⇒ 不标 slot、不 `disabled` -->
+      <!-- Tab ④ 售后保障：稿判「真功能 N=0」（纯静态政策文案）⇒ 不标 slot、不 `disabled`。⚠️ **2026-10-10〈模板表通用化〉**：goods 新增 `AfterSale` 快照列 ⇒ 商家填了这段文字，本 Tab 就显示**它**（那四条平台默认政策 `v-if="!afterSaleText"` 让位）——即「商家自己的售后说明」优先于「平台通用政策」。 -->
       <div class="panel" v-if="activeTab === 'pol'">
-        <div class="pol">
+        <p v-if="afterSaleText" class="para pre">{{ afterSaleText }}</p><div v-if="!afterSaleText" class="pol">
           <div class="r"><span class="k">7 天无理由</span>
             <span class="v">签收次日起 7 天内，商品及包装保持完好、不影响二次销售的，可申请无理由退货。</span></div>
           <div class="r"><span class="k">极速退款</span>
@@ -755,7 +755,7 @@ onMounted(async () => {
 //    走到 `orderAdd`（拆真检查）；`isLogin` 只决定**要不要跳登录** ⇒ 已登录商家原地不动（= 既有行为）。
 // ⚠️ redirect 取 `route.fullPath`（含本页 7 个 query），对象形式与 `main.js:49` 同款；登录后由
 //    `LoginPage.landingAfterLogin` 送回本页（T-guard-6/-10）。放文件末尾是**刻意的**：`WebAuthConfig.java:70` 引了 `:462-465`，新增行落在最大被引行之后，上面 24 个被引目标才一个都不漂。
-const isLogin = computed(() => isLoggedIn()); const activeTab = ref('desc')   // 结构二次调整（2026-10-07）：Tab 条当前面，UI 展示状态（不计功能量）；⚠️ **同行追加、不新增行** —— 上面那条「新增行落在最大被引行之后」的约束在本笔**不成立**（`slot-registry.md:1987-1988` 引的 `:775`/`:784` 都在下面），新增行会顶漂它们。
+/* 2026-10-10〈模板表通用化〉三段快照文本（`goods.Detail` / `Spec` / `AfterSale`）—— 全部写在**同一物理行**（新增行会顶漂下面 `slot-registry.md:1987-1988` 引的 `:775`/`:784`）。⚠️ 取值**从 `route.query` 现取**、不用 setup 期解构的 `sellerId`/`goodName`（`:427-428` 是普通 `const`，同路径只换 query 时组件被复用、它们**不更新**，理由同 `openPopup` 那条）。 */ const detailText = computed(() => { const q = route.query; const g = goodsWithUser.value.find((x) => x.MerchantId === q.MerchantId && x.GoodName === q.GoodName); return (g && g.Detail) || '' }); const specText = computed(() => { const q = route.query; const g = goodsWithUser.value.find((x) => x.MerchantId === q.MerchantId && x.GoodName === q.GoodName); return (g && g.Spec) || '' }); const afterSaleText = computed(() => { const q = route.query; const g = goodsWithUser.value.find((x) => x.MerchantId === q.MerchantId && x.GoodName === q.GoodName); return (g && g.AfterSale) || '' }); /* `Spec` 的行内 `键=值` 约定：一行一条，`=` 只切**第一处**（值里允许再有 `=`）；没有 `=` 的行**整行进 `.v`、`.k` 留空**，而不是丢掉它。 */ const specRows = computed(() => specText.value.split('\n').map((s) => s.trim()).filter((s) => s !== '').map((s) => { const i = s.indexOf('='); return i < 0 ? { k: '', v: s } : { k: s.slice(0, i).trim(), v: s.slice(i + 1).trim() } })); const isLogin = computed(() => isLoggedIn()); const activeTab = ref('desc')   // 结构二次调整（2026-10-07）：Tab 条当前面，UI 展示状态（不计功能量）；⚠️ **同行追加、不新增行** —— 上面那条「新增行落在最大被引行之后」的约束在本笔**不成立**（`slot-registry.md:1987-1988` 引的 `:775`/`:784` 都在下面），新增行会顶漂它们。
 </script>
 
 <style scoped>
@@ -775,13 +775,13 @@ const isLogin = computed(() => isLoggedIn()); const activeTab = ref('desc')   //
      `:root`（`ProductPage.html:225-226`），而 `tokens.css` 里只有 `--fs-*`。
      不在这里补定义，`var()` 会在**计算值阶段**判无效 ⇒ **整条 `font-size` 声明被丢弃** ⇒
      标题静默回落 `--fs-sm`(15px)。eslint / build / 模板扫**都报不出来**，只有**算出值**看得见。
-     落法同 `UserInfoPage.vue:393` / `GoodsAdd.vue:510` 两处先例。 */
+     落法同 `UserInfoPage.vue:393` / `GoodsAdd.vue:617` 两处先例。 */
   --d-title: var(--fs-lg);
   --d-price: var(--fs-2xl);
 }
 /* 控件一律继承页面字体 —— `tokens.css` **刻意不设** `body` 的 `font-family`，
    而浏览器 UA 样式表会给 `button` / `input` 打上自己的 `font` ⇒ 不写这两行，
-   全页按钮会掉出 `--font`。落法同 `GoodsUp.vue:549` / `GoodsAdd.vue:505`。 */
+   全页按钮会掉出 `--font`。落法同 `GoodsUp.vue:637` / `GoodsAdd.vue:612`。 */
 button, input, select { font: inherit; color: inherit; }
 button { background: none; border: 0; cursor: pointer; }
 
@@ -1245,4 +1245,9 @@ button { background: none; border: 0; cursor: pointer; }
   .p-head, .p-sum-h, .p-row .del { font-size: var(--fs-xs); }
   .p-row .num .pm { width: 24px; height: 24px; }
 }
+/* ── 2026-10-10〈模板表通用化〉：快照文本按**原文换行**渲染 ─────────────────────
+   商家在 `GoodsAdd` 的多行 textarea 里写的段落（`Detail` / `AfterSale`）落到库里是带 `\n`
+   的纯文本 ⇒ 不写 `pre-wrap` 会被 HTML 压成一行。⚠️ 还要 `break-word`：一段没有空格的
+   模板正文会把 `.para` 的 `max-width:68ch` 撑破、横向溢出整页。 */
+.para.pre { white-space: pre-wrap; word-break: break-word; }
 </style>

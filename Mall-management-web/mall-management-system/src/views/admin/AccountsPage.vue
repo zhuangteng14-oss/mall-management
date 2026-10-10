@@ -104,6 +104,8 @@
             placeholder="驳回理由（驳回时必填，会展示给申请人）"
             @keyup.enter="reject(r)"
           />
+          <!-- 「选模板」= 从 `merchant.reject` 取一段理由填进上面的输入框（填完**还能改**）。 -->
+          <button type="button" class="a-btn" @click="openRejectTpl(r)">选模板</button>
           <button type="button" class="a-btn a-btn-on" :disabled="busyId !== null" @click="approve(r)">
             通过
           </button>
@@ -177,6 +179,8 @@
               placeholder="封禁理由（必填，会展示给用户）"
               @keyup.enter="ban(u)"
             />
+            <!-- 「选模板」= 从 `user.ban` 取一段理由填进上面的输入框（填完**还能改**）。 -->
+            <button type="button" class="a-btn" @click="openBanTpl(u)">选模板</button>
             <button type="button" class="a-btn a-btn-danger" :disabled="busyName !== null" @click="ban(u)">
               封禁
             </button>
@@ -287,6 +291,27 @@
       还有账号没列出来，去「用户治理」tab 收窄关键字再查。
     </p>
     </template>
+
+    <!-- ⚠️ 两个弹窗实例（不是一个）：`merchant.reject` 与 `user.ban` 是**不同的 type**，
+         而 `<TemplatePicker>` 的 `type` 是 `onMounted` 取数用的、不可变 ⇒ 换 type 得换实例。
+         两个各自 `v-if` 拴在「这次为谁开」上，同时最多只有一个存在。
+         ⚠️ 组件 `pick` **不自动关窗**（见其注释）⇒ 这里自己清。 -->
+    <TemplatePicker
+      v-if="rejectTplFor"
+      type="merchant.reject"
+      title="选择驳回理由模板"
+      empty-text="暂无 merchant.reject 模板 —— 该 type 尚无管理页，需先经 /admin/template/create 建一条"
+      @pick="onPickRejectTpl"
+      @close="rejectTplFor = null"
+    />
+    <TemplatePicker
+      v-if="banTplFor"
+      type="user.ban"
+      title="选择封禁理由模板"
+      empty-text="暂无 user.ban 模板 —— 该 type 尚无管理页，需先经 /admin/template/create 建一条"
+      @pick="onPickBanTpl"
+      @close="banTplFor = null"
+    />
   </section>
 </template>
 
@@ -339,6 +364,10 @@ import {
   downgradeRelist,
   downgradeSchedule,
 } from '../../api/accounts'
+// 「选模板」弹窗 —— 两处（商家入驻驳回 `merchant.reject` / 用户封禁 `user.ban`）。
+// ⚠️ 这两条读的是**公共读** `/template/list`（`TemplatePicker` 内部走 `api/template.js`），
+//    与 `api/accounts.js` 无关 —— 模板不是「账号域」的东西，它是全站共用的资源。
+import TemplatePicker from '../../components/TemplatePicker.vue'
 
 // ── 时区（照 `AuditPage.vue` 的 `toLocal` / `tzLabel`，逐字同款）────────────────
 // ⚠️ 后端所有时间列都是 `DATE_FORMAT(…, '%Y-%m-%d %H:%i:%s')` 的**无时区文本**，
@@ -398,6 +427,15 @@ const loadingApps = ref(false)
 const rejectReasons = reactive({})
 /** 正在被处理的那一条（防重复点）。`null` = 空闲。 */
 const busyId = ref(null)
+
+/** 「选模板」弹窗当前为**哪条入驻申请**而开（`null` = 没开）。存整行，见 `CatalogPage.vue` 同名变量的注释。 */
+const rejectTplFor = ref(null)
+const openRejectTpl = (r) => { rejectTplFor.value = r }
+/** 选中的模板正文 → 该行的驳回理由框。**填完仍可手改**（快照语义）。 */
+function onPickRejectTpl(row) {
+  if (rejectTplFor.value) rejectReasons[rejectTplFor.value.Id] = row.Body || ''
+  rejectTplFor.value = null
+}
 
 const appsFiltered = computed(() => af.status !== '')
 const appsTruncated = computed(() => appsTotal.value > apps.value.length)
@@ -499,6 +537,20 @@ const loadingUsers = ref(false)
 const banReasons = reactive({})
 /** 正在被处理的那个账号（防重复点）。`null` = 空闲。 */
 const busyName = ref(null)
+
+/**
+ * 「选模板」弹窗当前为**哪个用户**而开（`null` = 没开）。
+ *
+ * ⚠️ 这里存 `username` **字符串**、不是整行 —— 因为封禁理由的收件键就是 `banReasons[u.username]`
+ *    （账号主键是 `username`；见本页 `ban()`），与上面 `rejectTplFor` 存整行（键是数字 `Id`）不同。
+ */
+const banTplFor = ref(null)
+const openBanTpl = (u) => { banTplFor.value = u.username }
+/** 选中的模板正文 → 该用户的封禁理由框。**填完仍可手改**（快照语义）。 */
+function onPickBanTpl(row) {
+  if (banTplFor.value !== null) banReasons[banTplFor.value] = row.Body || ''
+  banTplFor.value = null
+}
 
 const usersTruncated = computed(() => usersTotal.value > users.value.length)
 const bannedCount = computed(() => users.value.filter(isBanned).length)

@@ -23,13 +23,18 @@ import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 
 /**
- * {@code goodstype.GoodType} 唯一索引（#11，{@code uk_goodstype_GoodType}）与
- * {@code GoodsTypeCacheService.addType} 的 catch 拆分的<b>确定性</b>用例。
+ * {@code goodstype} 唯一索引与 {@code GoodsTypeCacheService.addType} 的 catch 拆分的<b>确定性</b>用例。
+ *
+ * <p>⚠️ <b>C3 块 3（2026-10-10）唯一键换代</b>：本类原钉的是 #11 的 {@code uk_goodstype_GoodType}
+ * （{@code (GoodType)} 单列）。商品块要支持「不同父级下同名子类目」，单列唯一键会误拦 ⇒
+ * 已由 Migration 块换成 {@code uk_goodstype_parent_name}（{@code (ParentId, GoodType)}）。
+ * <b>本类随之改的是索引名与 {@code addType} 的三参签名，判据的形状不变。</b>
+ * ⚠️ 换代带来一条新语义必须一并钉住：<b>同父级</b>重名才拦，<b>不同父级</b>同名放行（用例 4）。
  *
  * <h2>本类钉的是什么</h2>
  * #11 这个笔改了两件事，两者都得有可复核的证据，而不是「代码看起来对」：
  * <ol>
- *   <li><b>DB 对象真的在</b>：{@code uk_goodstype_GoodType} 确实建在库里、且真的会拦重复 ——
+ *   <li><b>DB 对象真的在</b>：{@code uk_goodstype_parent_name} 确实建在库里、且真的会拦重复 ——
  *       用例 2 绕过应用层查重裸插两次，撞的就是它（并断到索引名本身）；</li>
  *   <li><b>catch 拆分真的生效</b>：加了索引之后，并发输的那一方会拿到
  *       {@link DuplicateKeyException}，它必须被渲染成「类型已存在」<b>而不是</b>「新增失败」——
@@ -103,13 +108,13 @@ class GoodsTypeUniqueIndexTest {
      * 「重复插入不会真的写进第二行」。
      */
     @Test
-    @DisplayName("用例 1：同 GoodType 顺序连插两次 ⇒ 第二次 success:false /「类型已存在」，且只留 1 行")
+    @DisplayName("用例 1：同 ParentId 下同 GoodType 顺序连插两次 ⇒ 第二次 success:false /「类型已存在」，且只留 1 行")
     void sequentialDoubleInsertReturnsAlreadyExists() {
-        Map<String, Object> first = service.addType(gt, 1);
+        Map<String, Object> first = service.addType(gt, 1, null);
         assertThat(first).containsEntry("success", true).containsEntry("msg", "新增成功");
         assertThat(countRows()).isEqualTo(1);
 
-        Map<String, Object> second = service.addType(gt, 1);
+        Map<String, Object> second = service.addType(gt, 1, null);
         assertThat(second).containsEntry("success", false).containsEntry("msg", "类型已存在");
         assertThat(countRows()).isEqualTo(1);
     }
@@ -125,14 +130,43 @@ class GoodsTypeUniqueIndexTest {
      * 否则抛出的也可能是别的约束，证据链就断了。
      */
     @Test
-    @DisplayName("用例 2：绕过应用层查重裸插两次 ⇒ 第二次撞 uk_goodstype_GoodType 抛 DuplicateKeyException")
+    @DisplayName("用例 2：绕过应用层查重裸插两次 ⇒ 第二次撞 uk_goodstype_parent_name 抛 DuplicateKeyException")
     void rawSecondInsertHitsUniqueIndex() {
         insertRaw();
 
         assertThatThrownBy(this::insertRaw)
                 .isInstanceOf(DuplicateKeyException.class)
-                .hasMessageContaining("uk_goodstype_GoodType");
+                .hasMessageContaining("uk_goodstype_parent_name");
         assertThat(countRows()).isEqualTo(1);
+    }
+
+    /**
+     * 用例 4：**换代的核心语义** —— 不同父级下可以同名，同父级下同名才拦。
+     *
+     * <p>这正是块 3 换代要买到的东西：旧单列键 {@code (GoodType)} 会把「一级类目『手机』下挂
+     * 子类目『旗舰』」与「一级类目『电视』下挂子类目『旗舰』」误判为重复。换代后两者都能建。
+     *
+     * <p>做法：先用一个确定的一级父 Id（0 = 一级）建一行，再用**另一个父 Id** 建同名行 ⇒
+     * 必须 success:true；最后回到父 Id=0 再建一次同名 ⇒ 必须被拦。
+     * ⚠️ 父 Id 用「本类自己刚建的那行的 Id」而不是写死常量，避免与库里的既有类目撞名/撞键。
+     */
+    @Test
+    @DisplayName("用例 4：不同 ParentId 下同名可建；同 ParentId 下同名被拦（换代的核心语义）")
+    void sameNameUnderDifferentParentsIsAllowed() {
+        Map<String, Object> root = service.addType(gt, 1, null);
+        assertThat(root).containsEntry("success", true);
+        int rootId = jdbcTemplate.queryForObject(
+                "SELECT Id FROM " + TABLE + " WHERE GoodType = ? AND ParentId = 0", Integer.class, gt);
+
+        // 另一个父级下挂同名子类目 ⇒ 放行（旧单列键会在这里误拦）
+        Map<String, Object> child = service.addType(gt, 1, rootId);
+        assertThat(child).containsEntry("success", true).containsEntry("msg", "新增成功");
+
+        // 回到 rootId 父级下再建同名 ⇒ 拦
+        Map<String, Object> dup = service.addType(gt, 1, rootId);
+        assertThat(dup).containsEntry("success", false).containsEntry("msg", "类型已存在");
+
+        assertThat(countRows()).isEqualTo(2);   // 根 1 行 + 子 1 行
     }
 
     /**
@@ -155,22 +189,31 @@ class GoodsTypeUniqueIndexTest {
     @DisplayName("用例 3：让查重谎报 0（复现并发穿过查重的时刻）⇒ 落 catch 分支，文案仍「类型已存在」")
     void concurrencyLoserFallsIntoCatchBranchNotGenericFailure() {
         insertRaw();
+        // ⚠️ 换代后查重 SQL 是 (GoodType = ? AND ParentId = ?) ⇒ stub 必须补上第二个实参，
+        //    否则 varargs 长度不等、匹配不上，用例会悄悄退回 SELECT 分支而「假绿」。
         doReturn(0).when(jdbcTemplate)
-                .queryForObject(contains("SELECT COUNT(*)"), eq(Integer.class), eq(gt));
+                .queryForObject(contains("SELECT COUNT(*)"), eq(Integer.class), eq(gt), eq(0));
 
-        Map<String, Object> r = service.addType(gt, 1);
+        Map<String, Object> r = service.addType(gt, 1, null);
 
         assertThat(r).containsEntry("success", false)
                 .containsEntry("msg", "类型已存在");   // ⚠️ 不是「新增失败」——那正是本笔修掉的旧行为
         assertThat(countRows()).isEqualTo(1);
 
+        // 同理：INSERT 现在是 (GoodType, GoodTypeNew, ParentId) 三参。
         verify(jdbcTemplate, times(2))
-                .update(startsWith("INSERT INTO"), eq(gt), eq(1));
+                .update(startsWith("INSERT INTO"), eq(gt), eq(1), eq(0));
     }
 
-    /** 绕过应用层的裸插入 —— 用例 2 / 用例 3 用它来造「库里已经有这一行」的状态。 */
+    /**
+     * 绕过应用层的裸插入 —— 用例 2 / 用例 3 用它来造「库里已经有这一行」的状态。
+     *
+     * <p>⚠️ 显式带 {@code ParentId = 0}（与 {@code addType} 的默认口径一致）：这样本方法与被测
+     * 代码的 INSERT 是<b>同一形状</b>，用例 3 的 {@code verify(times(2))} 才能把它们数到一起。
+     */
     private void insertRaw() {
-        jdbcTemplate.update("INSERT INTO " + TABLE + " (GoodType, GoodTypeNew) VALUES (?, ?)", gt, 1);
+        jdbcTemplate.update("INSERT INTO " + TABLE
+                + " (GoodType, GoodTypeNew, ParentId) VALUES (?, ?, ?)", gt, 1, 0);
     }
 
     /**

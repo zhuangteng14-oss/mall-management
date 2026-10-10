@@ -410,7 +410,7 @@
 
 - **（1）`AbstractSmokeTest.java:45` 计数过时。** javadoc 写「**5 个** smoke test 无需改动」，实测 **8 个**类 `extends AbstractSmokeTest`。纯文档漂移，无行为影响。
 - **（2）`UserService.java:98` 明文账号密码进 stdout。** 登录成功后 `System.out.println(username + "," + password)` ⇒ **明文凭据落进程日志**。⚠️ 但 `:94` 的 javadoc 明写这是「三层前就有的副作用，**照搬** —— 它不是调试残留」⇒ **刻意的**，故不是笔误、是**既存安全面**。**待裁**：并进鉴权笔（登录改造本就动这一处）还是单列。
-- **（3）`login.Password` 宽 `char(20)`，装不下 bcrypt。** 见 `db-schema.md:192`（`char(20)` 显式 / **明文**）。bcrypt 输出 **60** 字符 ⇒ hash 化**不能原地改列**（数据库规则禁 `MODIFY COLUMN`），只能走**影子列**（新增列 + 回填）。**待裁**：建议**单列一笔**（文件数 4–5），排在鉴权笔**之后**。
+- **（3）`login.Password` 宽 `char(20)`，装不下 bcrypt。** 见 `db-schema.md:205`（`char(20)` 显式 / **明文**；原 `:192`，2026-10-10 块 3 增量后重指）。bcrypt 输出 **60** 字符 ⇒ hash 化**不能原地改列**（数据库规则禁 `MODIFY COLUMN`），只能走**影子列**（新增列 + 回填）。**待裁**：建议**单列一笔**（文件数 4–5），排在鉴权笔**之后**。
 - **（4）【裁定 · `P2.6` 独立一笔】** ⚠️ **前 3 条是「发现」（调研看到的事实），本条是「裁定」（用户做的决定）—— 性质不同，勿混。** 内容 = 删前端 **4 个读写口**（`LoginPage.vue:163-169` 写 / `GoodsUp.vue:145-146` 读 / `UserInfoPage.vue:91-92` 读）+ 拆 `UserService.java:185` 的 `selectRoleForProfile(username, password)` 重验。**前提** = 鉴权笔落地（凭据进 **httpOnly Cookie**）；**时序** = 鉴权笔 → `P2.6` 笔。 ⚠️ **已落地（P2.6，2026-10-05，§5-AC）**：本条 4 个行号**全部重指** —— 写口 `LoginPage.vue:163-169` → **`:158` / `:162`**（`setCredentials` 改名 `setUsername`、不再传密码）；读口 `GoodsUp.vue:145-146` → **`:148-149`**、`UserInfoPage.vue:91-92` → **`:94-95`**（均改走 `/user/me`，不再读密码）；`UserService.java:185` 的 `selectRoleForProfile(username, password)` 重验 —— ⚠️ **该地址在 HEAD 即已偏**（HEAD `:185` 是 `loginAdd` 形参行；`selectRoleForProfile` 的真实调用点 HEAD 在 **`:242`**）⇒ 本笔后为 **`:239`**（本笔把该方法的 javadoc 压掉 3 行，调用点上移）。
   - ⚠️ **口径（已订正，勿沿用旧说法）**：`P2.6` 的解**不是「选 A」**，而是「**凭据进 httpOnly Cookie**」；A 只是**默认就走这条路**、且不引入密钥管理 / 刷新 / CSRF 复杂度的那个（**最省事 ≠ 唯一**）。B 把 token 放 httpOnly Cookie **同样解**；放 `localStorage` 则**只减轻不消除**（token 有时限、可撤销、不可复用，价值低于密码 —— 故「明文换明文」这个说法**不成立**）。C 与 `P2.6` **无关**（其默认形状即 A）。
 
@@ -1956,6 +1956,34 @@
   （`feat/c3-admin` → `main`；PR 上共 **2 个提交** = `f8f67d6` + `a224840`；35 文件 / +930 −159）。
   7 个 `docs/美化/_dbg*.mjs` 按仓规**不入库**。**混合 PR ⇒ 由用户 merge**；CI 两个 job 已起，待用户看 CI + A3 产物后点 merge。
   ⇒ merge 后切 `feat/c3-admin-block3`，**块 3 明天开**。
+
+- 🧩 **块 3〈商品块〉落码（2026-10-10）**：见 `slot-registry.md §十九`。**表** ⇒ `mall_management_sql.sql:411-515`（表数 **16 → 18**）。
+  **后端** ⇒ 新域 `catalog/`（6 文件）+ `admin/AdminCatalogController` + `goods/GoodsAuditDao|Service`；`GoodsService.goodsAdd` **改提审制**；
+  `GoodsCacheService` 三条读路径加 `ShelfState=1 AND DeletedAt IS NULL`。**前端 4 项落 3** ⇒ 管理端 `CatalogPage.vue`（新建 + `router/index.js:452` 替换）、
+  商家端 `GoodsAdd/GoodsUp`、用户端 `HomePage` chips + `GoodsSelect` 树、`endpoints/admin/notify-events` 均接。
+  ⏸️ **`ProductPage.vue:226-230`/`:236-249` 未落** —— 卡「无商品→模板绑定 / `spec` 的 `Content` 格式未定义 / `after_sale` 面板」三点，**待用户裁**（`_work/c3-block3-landing-plan.md §十一`）。⇒ **该 ⏸️ 已由下方〈块 3 就地改造〉结清（2026-10-10 二次裁决）**。
+  前端 `vue-cli-service build` **Build complete**（Hash `f80464f503bf002a`）。**文档** ⇒ `db-migration.md` #7（+注意 10）· `db-schema.md` 16→18（+§6.17/§6.18）· `c3-blocks-index.md:15` · 本 pack。
+  ⏳ **待办**：VM 库迁移（VM `192.168.229.129` 不可达，**不静默跳过**）· 用户手验（⚠️ a3 `app.auth.enabled=false`，**手验绿 ≠ 默认 profile 绿**）· A3 复跑核实 B-2 是否仍复现。**未提交**。
+
+- 🧩 **块 3〈商品块〉就地改造：模板表通用化 + 商品侧改「快照」（2026-10-10，未提交）**：见 `slot-registry.md §19-9`、`db-migration.md` **#8**。
+  **起因** = 用户 2026-10-10 当面口径：模板从「**引用**」（商品存模板 Id ⇒ 改模板联动改商品）改「**快照**」（选模板 → 填入 → **可改** → 商品存**最终文本**）；
+  并令**两张模板表合一**为通用表。**就地改、不另开笔、不提交。**
+  **表（`.sql:517-680`；表数 18 → 17）** ⇒ 新建通用表 **`template`**（`.sql:556-569`，`Type` varchar(96) / `Name` / `Title` / `Body` / `Enabled` / `Sort`）；
+  **物理删** `goods_template` + `notification_template`（`.sql:679-680`，**规则 v2 首次破例，用户批准**，`CREATE TABLE` 行留原地由尾部 `DROP TABLE IF EXISTS` 中和以保零漂移）；
+  `goods` **删** 3 个模板 Id 列（`.sql:611-630`）**加** 3 段快照文本 `Detail`/`Spec`/`AfterSale`（`mediumtext`，`.sql:588-607`）；`goods_audit` 加同 3 列（`.sql:636-655`）；
+  旧 `notification_template` 行按 `Type = notification.<原 TemplateKey>` 搬迁（`.sql:657-673`）。**本机库 13 表 / VM 库 17 表**（VM 走「补块 3 + 补本块」，**非整份重导 ⇒ 业务数据零损失**）。
+  **后端** ⇒ 新包 **`template/`**（5 文件：`TemplateTypes` / `TemplateDao` / `TemplateService` / `TemplateController` `/template/*` / `AdminTemplateController` `/admin/template/*`）；
+  **删** 3 个 Java 文件（`CatalogController` / `GoodsTemplateDao` / `GoodsTemplateService`）+ 旧端点（`/catalog/templates`、`/admin/catalog/template/*`、`/admin/notify/template/*`）；
+  `insertGoods` **8 → 11 列**、`GoodsAuditDao`/`Service`、`GoodsService`/`GoodsController.goodsAdd` 各 +3 参透传。
+  **前端** ⇒ 新组件 **`TemplatePicker.vue`**（只做弹窗，触发按钮留各页）+ **6 处入口**（`GoodsAdd` ×3 + `CatalogPage` / `AccountsPage` ×2 理由）；
+  **`ProductPage.vue` 三处真渲染**（Tab① 详情 / Tab② 规格 / Tab④ 售后；**净 +5 行，1248 → 1253**）；`CatalogPage` / `NotifyPage` 模板区改走新 API；`api/template.js` 新增。
+  ✅ **结清上一笔的 ⏸️**：`ProductPage.vue:226-230`/`:236-249` 三点待裁**全部作废**（无绑定⇒改快照、`spec`⇒行内 `键=值`、`after_sale`⇒接真渲染并**推翻** pack `c3-block-3-goods.md:117` 的「静态真功能 N=0」裁决）；留档见 `_work/c3-block3-landing-plan.md §十一`，覆盖口径见 §十二。
+  🧪 `./mvnw -B test` **246 / 0 / 0**；`vue-cli-service build` **Build complete**；`eslint` exit 0。
+  **文档** ⇒ `db-migration.md` #8（+ 注意 11；#7 状态由「VM 不可达」更正为「已落两库」）· `db-schema.md` **18 → 17**（**净 0 行**=549；§6.15 标已删 / §6.17 `goods_template` 改写成 `template` / §6.18 +3 列）· `slot-registry.md §19-9` · `_work/c3-block3-landing-plan.md §十一 结清 + §十二` · `c3-blocks-index.md:15` · pack 回执。**未提交。**
+  ⚠️ **三件必须点明（已登记 §19-9-5，未修）**：① `CatalogPage.vue:114`/`:117` 用 `:disabled="busyId !== null"` 但文件定义的是 **`busyKey`** ⇒ 按钮**永不置灰**（**既有 bug**，只报告；行号 2026-10-10〈模板表通用化〉重指：原 112/115 行）；② `merchant.reject` / `user.ban` 两个 type **无录入面**；③ `template` 初始为空 ⇒ 6 处弹窗首开显示「暂无模板」**是预期**。
+  ✅ **手验已跑并通过**（真后端 + **VM 库** + a3 profile；证据 `docs/agent/evidence/c3-block3-snapshot/hand-verify.txt`，探针 `scripts/probes/c3b3-snapshot-verify.sh`）：建模板 `goods.detail` Body=`AAA` → 商家 `/goods/goodsAdd` 提审（`Detail` **手改**成 `AAA-SHOP-EDITED`）⇒ **`goods` 零新行** + `goods_audit(pending)` 1 行 → 管理员通过 ⇒ **`goods` +1 行** + `Status=approved` + `GoodsId` 回填 → **把模板改成 `BBB`** → 重查该商品 `Detail` **仍是 `AAA-SHOP-EDITED`** ⇒ **快照语义成立**；结构断言同过（`%TemplateId%` 0 行 / 只剩 `template`）；跑完**已删回**探针造的行（VM `goods` 回到基线 5 行）。
+  🐞 **手验当场抓出并修掉 1 个真缺陷**（见 `slot-registry.md §19-9-7`）：`GoodsAuditDao.insert`（`.../goods/dao/GoodsAuditDao.java:67`）的 `VALUES(…)` 值槽**多一个** —— 列 **14** + 字面量 `'pending'`，却写了 **14 个 `?`** 而只传 **13 个值** ⇒ 提审恒 `{"success":false,"msg":"商品提交失败"}`（后端 `SQLException: No value specified for parameter 14`）。**本笔引入**（加 `Detail`/`Spec`/`AfterSale` 三列时多打一个 `?`）；删掉 `'pending'` 前多余那个 `?` ⇒ 13 对 13。**单行、净 0 行。** ⚠️ **`mvn test` 246 绿 + `build` 通过 + `eslint` 0 三绿全过仍漏了它** —— Mockito 切片 `GoodsWriteTxAtomicityTest` 与 `@WebMvcTest` 的 `AbstractSmokeTest` **都不打真库**，覆盖不到「`?` 数 ≠ 传参数」。⇒ 已登记待办：DAO 层要一条**打真库**的冒烟（或「`?` 计数 == `.params()` 计数」的静态检查）。🐞 **第 2 个真缺陷：事后从后端进程日志抓到**（`/tmp/boot-a3b.log` 4 条 `action=template.create … targetId=null`；`admin_audit.TargetId` 是 **NOT NULL**，`mall_management_sql.sql:282`）—— `template.create` / `category.create` 两处「新增类」动作把 `TargetId` 也传了 `null` ⇒ **创建类留痕 100% 丢失**（fail-open 吞异常、只记 ERROR；三绿与 A3 都拦不住）；全仓 18 个 `auditService.record` 调用点逐个核过，只有这 2 处传 `null`。**已修**（2026-10-10 用户批「就地补业务标识串」：`Type:Name` / `ParentId:GoodType`，两处单行、净 0 行）；**未重新手验**（需重启后端），见 `slot-registry.md §19-9-8`。
+  ⏳ **待办**：A3 复跑（P3 表数门禁 `KNOWN_TABLES` 7 → **6**、总表数 18 → **17**）· `goodsUp` 改不了已上架商品的详情/规格/售后（**本次范围外已知缺口**）。⚠️ 提醒：`application-a3.properties:98` 的 `app.auth.enabled=false` —— **手验绿 ≠ 默认 profile 绿**（本笔手验即在闸关下跑的）。
 
 **路线**：C3 现行 = **8 块**，唯一权威 **`c3-blocks-index.md`**；§七 那份「10 批 + 按端切」**已作废**
 （见 `c3-modules.md` §十）。⚠️ 购物车的归属**已统一**为「**属批 4 订单块，随该块一起做**」

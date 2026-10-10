@@ -10,7 +10,9 @@ import java.util.Map;
 
 /**
  * notification 域的**内联 SQL 唯一出口**（C3 块 1 · I2）—— 只碰本域的两张表
- * {@code notification} / {@code notification_template}，外加一处**只读**的 {@code user} 投影
+ * {@code notification}，外加一处**只读**的 {@code user} 投影
+ * （⚠️ 块 1 时还有 {@code notification_template} 的两个方法 —— 2026-10-10 就地改造后表已物理删、
+ * 方法已删，模板读写归 {@code template.dao.TemplateDao}）
  * （见 {@link #selectCustomerIds} / {@link #selectMerchantIds}）。
  *
  * <p>范式照 {@link com.minke.mallmanagement.admin.dao.AdminAuditDao}：{@code @Repository} +
@@ -212,35 +214,6 @@ public class NotificationDao {
             sql.append(" AND CreatedAt <= ?");
             params.add(to);
         }
-    }
-
-    // ==================== 读：模板 ====================
-
-    /** 全部模板（按模板键升序）。块 1 只做**存取**，不做占位符渲染（见方案 §七 未决 3）。 */
-    public List<Map<String, Object>> selectTemplates() {
-        String sql = "SELECT Id, TemplateKey, TitleTemplate, BodyTemplate, Enabled, "
-                + "DATE_FORMAT(updated_at, '%Y-%m-%d %H:%i:%s') AS UpdatedAt "
-                + "FROM mall_management_sql.notification_template ORDER BY TemplateKey";
-        return jdbcClient.sql(sql).query().listOfRows();
-    }
-
-    /**
-     * 按 {@code TemplateKey} upsert（有则改、无则插）—— 靠 {@code uk_notification_template_key} 唯一键。
-     *
-     * <p>⚠️ 用 {@code VALUES (…) AS new} **行别名**语法（MySQL 8.0.19+），而**不是**旧的
-     * {@code VALUES(col)} 函数 —— 后者在 8.0.20 起被标记废弃，在本仓 8.4 的实例上会**每条语句打一次
-     * 废弃告警**到错误日志。两者语义相同，故取不告警的那个。
-     *
-     * @return 受影响行数（插入 1；更新 2 —— MySQL 对「改了值」的 upsert 报 2，这是**规格**不是 bug）
-     */
-    public int upsertTemplate(String templateKey, String titleTemplate, String bodyTemplate, boolean enabled) {
-        String sql = "INSERT INTO mall_management_sql.notification_template "
-                + "(TemplateKey, TitleTemplate, BodyTemplate, Enabled) VALUES (?, ?, ?, ?) AS new "
-                + "ON DUPLICATE KEY UPDATE TitleTemplate = new.TitleTemplate, "
-                + "BodyTemplate = new.BodyTemplate, Enabled = new.Enabled";
-        return jdbcClient.sql(sql)
-                .params(templateKey, titleTemplate, bodyTemplate, enabled)
-                .update();
     }
 
     // ==================== 读：受众（跨表只读投影） ====================

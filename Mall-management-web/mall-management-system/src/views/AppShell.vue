@@ -471,7 +471,7 @@ position: relative;
    它包住的 `.uc`（`:141`）= 本壳的 `.user-page`（`UserCenter.vue` 的两个根
    `.uc-menu` + `main.uc-main` 直接落在这里）。
    ⚠️ **宽度取 1140（照本页这两份稿），不是交接话里说的 1180** —— 实测：本笔的**两份**稿是
-   `docs/美化/pages/` 里**唯一**用 1140 的（其余 7 份 + 已落的 `GoodsSelect.vue:305` /
+   `docs/美化/pages/` 里**唯一**用 1140 的（其余 7 份 + 已落的 `GoodsSelect.vue:375`（C3 块 3 重指，原 `:305`）/
    `ShoppingCart.vue:446` 都是 1180）；按「以稿为唯一基线」照落。
    ⚠️ 只加居中三件 —— `display:flex` / `align-items:flex-start` / `gap` / `height:100%` **不动**。 */
 .user-page {

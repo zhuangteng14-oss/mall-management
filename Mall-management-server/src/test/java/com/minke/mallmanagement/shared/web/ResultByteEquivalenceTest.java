@@ -78,8 +78,15 @@ class ResultByteEquivalenceTest {
         assertSameBytes("⑥ success + otherUser + messages（getMessageHistory 成功分支）",
                 map("success", true, "otherUser", nestedUserWithNullImage(), "messages", rows()));
 
-        assertSameBytes("⑦ success + msg + GoodImg（goodsAdd 成功分支，首字母大写的 GoodImg）",
-                map("success", true, "msg", "商品上架成功！", "GoodImg", "http://localhost:8088/img/g1.png"));
+        // ⚠️ C3 块 3：goodsAdd 改提审制后文案随之为「已提交审核」，且成功分支**多了一个 batchId 键**。
+        //    本条钉的是 Result.of 的**字节等价性**（键形状 success+msg+GoodImg 不变），
+        //    不是 goodsAdd 的完整键集 —— batchId 是第四个键，另有形状可加，但不影响本断言。
+        assertSameBytes("⑦ success + msg + GoodImg（goodsAdd 提审成功分支，首字母大写的 GoodImg）",
+                map("success", true, "msg", "已提交审核", "GoodImg", "http://localhost:8088/img/g1.png"));
+
+        assertSameBytes("⑦b success + msg + GoodImg + batchId（goodsAdd 提审成功分支的完整键集）",
+                map("success", true, "msg", "已提交审核", "GoodImg", "http://localhost:8088/img/g1.png",
+                        "batchId", "0b1e7b1a-0000-4000-8000-000000000000"));
 
         assertSameBytes("⑧ 空 Map（无任何键）", new HashMap<String, Object>());
 
@@ -212,8 +219,12 @@ class ResultByteEquivalenceTest {
                 kvs(kv("success", true), kv("otherUser", nestedUserWithNullImage()),
                         kv("messages", rows()))));
         shapes.add(new Shape("success+msg+GoodImg",
-                kvs(kv("success", true), kv("msg", "商品上架成功！"),
+                kvs(kv("success", true), kv("msg", "已提交审核"),
                         kv("GoodImg", "http://localhost:8088/img/g1.png"))));
+        shapes.add(new Shape("success+msg+GoodImg+batchId",
+                kvs(kv("success", true), kv("msg", "已提交审核"),
+                        kv("GoodImg", "http://localhost:8088/img/g1.png"),
+                        kv("batchId", "0b1e7b1a-0000-4000-8000-000000000000"))));
         shapes.add(new Shape("success+imageUrl",
                 kvs(kv("success", true), kv("imageUrl", null))));
         return shapes;

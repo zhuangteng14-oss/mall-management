@@ -4,7 +4,7 @@
 // 「路径字面量只允许出现在本文件」—— 后者强得多，且同样可 grep 自动化（方案 Q8）。
 //
 // 端点来源：14 个 view 里 **42 处 fetch + 6 处 URL 赋值**，逐条抽取
-// （2026-10-04，切换自 `9add994`）共 **31 个唯一端点**，按 M5 的四域分组（+2 条 `user.me` / `user.logout`：会话恢复笔与翻开关笔 2026-10-05 加，+1 条 `user.token`：多账户隔离笔 2026-10-06 加 —— 三条均**非** view 抽取 ⇒ 加上 C3 批 A 的 3 条 `admin.audit*`（2026-10-08）与 C3 块 1·I2 的 8 条（`admin.notify*` 4 + `notification.*` 4，2026-10-09，同样**非** view 抽取），再加 C3 块 2〈用户块〉的 11 条（`user.updateProfile` 1 + `merchant.*` 2 + `admin.accounts*` 8，2026-10-09，同样**非** view 抽取），本表实为 **56** 条）。
+// （2026-10-04，切换自 `9add994`）共 **31 个唯一端点**，按 M5 的四域分组（+2 条 `user.me` / `user.logout`：会话恢复笔与翻开关笔 2026-10-05 加，+1 条 `user.token`：多账户隔离笔 2026-10-06 加 —— 三条均**非** view 抽取 ⇒ 加上 C3 批 A 的 3 条 `admin.audit*`（2026-10-08）与 C3 块 1·I2 的 8 条（`admin.notify*` 4 + `notification.*` 4，2026-10-09，同样**非** view 抽取），再加 C3 块 2〈用户块〉的 11 条（`user.updateProfile` 1 + `merchant.*` 2 + `admin.accounts*` 8，2026-10-09，同样**非** view 抽取），本表实为 **56** 条；再加 C3 块 3〈商品块〉的 14 条（`goodsB3` 2 + `catalog` 1 + `catalogAdmin` 11，2026-10-10，同样**非** view 抽取）；再经同日〈模板表通用化〉就地改造（**删** `catalog` 1 + `catalogAdmin` 4 + `admin.notifyTemplate*` 2 = 7 条，**加** `template` 2 + `templateAdmin` 4 = 6 条），现为 **69** 条）。
 //
 // ⚠️ 路径里的 `GoodsProductCodeSelect` 是**大写开头**，与后端 `@PostMapping` 逐字一致，
 //    不是笔误 —— 改名会 404。
@@ -71,14 +71,15 @@ export const endpoints = {
     auditList: '/admin/audit/list',
     auditDetail: '/admin/audit/detail',
     auditFacets: '/admin/audit/facets',
-    // ⚠️ 2026-10-09（C3 块 1 · I2 · 系统通知）：管理端**发送 / 历史 / 模板** 4 条。
+    // ⚠️ 2026-10-09（C3 块 1 · I2 · 系统通知）：管理端**发送 / 历史** 2 条。
     //    与上面 `admin.audit*` 同款（**非** view 抽取；唯一调用方是 `views/admin/NotifyPage.vue`，
-    //    经 `api/admin.js` 包一层）。⚠️ 同样**不给角色闸留位置** —— 后端这 4 条也没有角色判据
+    //    经 `api/admin.js` 包一层）。⚠️ 同样**不给角色闸留位置** —— 后端这 2 条也没有角色判据
     //    （TD-18，见 `AdminNotificationController` 块首）。
+    // ⚠️ 原有第三条「模板」`notifyTemplateList` / `notifyTemplateSave`（原 80-81 行）**已删** ——
+    //    2026-10-10 模板表通用化：通知模板并进 `template` 表（`Type = notification.<原 TemplateKey>`），
+    //    存取改走本文件尾的 `template` / `templateAdmin` 两组；后端 `/admin/notify/template/*` 同时下线。
     notifySend: '/admin/notify/send',
     notifyHistory: '/admin/notify/history',
-    notifyTemplateList: '/admin/notify/template/list',
-    notifyTemplateSave: '/admin/notify/template/save',
   },
   // ⚠️ 2026-10-09（C3 块 1 · I2 · 系统通知）：**接收**侧 4 条 —— **三端共用**（⚠️ 原文写「管理端没有收件箱」—— **已被 C3 块 2〈用户块〉改判**：管理端也有一个共享收件箱，
   //    收 `ToId='*'` / `ToType='admin'` 的入驻申请通知，调用点是 `views/admin/AccountsPage.vue`），故与 `admin` 组**分开**：前缀是 `/notification`（**公共层**，
@@ -118,5 +119,54 @@ export const endpoints = {
     downgradeSchedule: '/admin/accounts/downgrade/schedule',
     downgradeCancel: '/admin/accounts/downgrade/cancel',
     downgradeRelist: '/admin/accounts/downgrade/relist',
+  },
+  // ⚠️ 2026-10-10（C3 块 3 · 商品块）：**商品**域补 2 条。⚠️ **不塞进上面的 `goods` 组** ——
+  //    那组被 `docs/agent/slot-registry.md` 按行号引，在组内插行会整体下移。⇒ 追加在**文件尾**。
+  //    ⚠️ 两条都不是「改既有端点的参数面」：`categoryGoods` 是**新端点**（二级筛选按 `TypeId`），
+  //    `myApplications` 也是新的（商家查自己的提审历史）⇒ 既有调用方一个都不受影响。
+  goodsB3: {
+    categoryGoods: '/goods/categoryGoods',
+    myApplications: '/goods/myApplications',
+  },
+  // ⚠️ 2026-10-10（C3 块 3 · 商品块）：**模板库公共读** 1 条 —— 挂 `/catalog`（新域）。
+  //    调用方横跨三端：`GoodsAdd.vue`（上架选模板）、`ProductPage.vue`（详情页渲染）。
+  //    ⚠️ **类目树不在这里** —— 类目树的读沿用既有 `/goods/goodstype`（见 `goods.goodstype`）。
+  // ⚠️ 2026-10-10 模板表通用化：上面那组 `catalog: { templates: '/catalog/templates' }` **已整组删**
+  //    （后端 `CatalogController` 一并下线）—— 公共读改走本文件尾的 `template` 组。
+  // ⚠️ 2026-10-10（C3 块 3 · 商品块）：管理端**商品审核 / 类目 / 违规** 7 条
+  //    （`@RequestMapping("/admin/catalog")`）。同 `admin` / `accounts` 两款（**非** view 抽取；
+  //    唯一调用方 `views/admin/CatalogPage.vue`，经 `api/admin.js` 包一层）。
+  //    ⚠️ 同样**不给角色闸留位置** —— 后端这 7 条也没有角色判据（TD-18）。
+  //    ⚠️ 原有第 4 项「模板」`templateList/Create/Update/Delete`（原 146-149 行）**已删** ——
+  //       通用化后改走本文件尾的 `templateAdmin` 组；后端 `/admin/catalog/template/*` 同时下线。
+  catalogAdmin: {
+    applications: '/admin/catalog/applications',
+    audit: '/admin/catalog/application/audit',
+    categoryCreate: '/admin/catalog/category/create',
+    categoryUpdate: '/admin/catalog/category/update',
+    categoryDelete: '/admin/catalog/category/delete',
+    violationDelist: '/admin/catalog/violation/delist',
+    violationDelete: '/admin/catalog/violation/delete',
+  },
+  // ⚠️ 2026-10-10（模板表通用化）：**通用模板**公共读 2 条 —— `Type` 区分用途
+  //    （`goods.detail` / `goods.spec` / `goods.afterSale` / `goods.reject` / `merchant.reject` /
+  //    `merchant.approve` / `user.ban` / `notification.*` / `comment.reply`）。**非** view 抽取。
+  //    调用方横跨三端：`TemplatePicker.vue`（各输入框旁「选模板」弹窗）、
+  //    `ProductPage.vue`（详情页渲染快照文本）、`GoodsAdd.vue`（上架选模板）。
+  //    ⚠️ **类目树不在这里** —— 类目树的读沿用既有 `/goods/goodstype`（见 `goods.goodstype`）。
+  //    ⚠️ 后端这两条**不校验未知 `Type`**：未知 type 回空列表（`success:true`），不是错误。
+  template: {
+    list: '/template/list',
+    get: '/template/get',
+  },
+  // ⚠️ 2026-10-10（模板表通用化）：管理端**模板 CRUD** 4 条（`@RequestMapping("/admin/template")`）。
+  //    同 `admin` / `catalogAdmin` 两款（**非** view 抽取；调用方 `views/admin/CatalogPage.vue` 与
+  //    `views/admin/NotifyPage.vue`，经 `api/template.js` 包一层）。⚠️ 同样**不给角色闸留位置**
+  //    （TD-18）。⚠️ `update` **不收 `Type`** —— 模板的 type 落库即定，不允许改（改了等于换了一个模板）。
+  templateAdmin: {
+    list: '/admin/template/list',
+    create: '/admin/template/create',
+    update: '/admin/template/update',
+    delete: '/admin/template/delete',
   },
 }
