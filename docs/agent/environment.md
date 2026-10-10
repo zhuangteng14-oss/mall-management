@@ -76,20 +76,23 @@ powershell.exe -NoProfile -Command "(Test-NetConnection -ComputerName 192.168.22
 
 **主机的完整探针手段（2026-09-28 B1 验证用，方法留存）**：主机上**没有 redis-cli**，但用 **Python 标准库裸 RESP**（`socket` 手写 `AUTH` / `GET` / `SET` / `TTL` / `EXISTS` / `INFO commandstats`）就能完整探针 —— B1 验证「L2 键是否存在、TTL 剩多少、本轮实际发了几条命令」全靠它（**`commandstats` 的增量是「L1 真的挡住了网络」的判据**）。验证「L2 恢复」分支同理：**主机侧起一个 TCP 转发**指向 VM 的 `6379`，应用指向转发器，转发器的停/起就造出「端点不可达 → 可达」的翻转 —— 不必重启应用，也不必碰 VM 上的 Redis 进程。**方法记在本文件，脚本用完即删、不进仓库**（同下文字符集坑末尾的约定）。
 
-## 用 `a3` profile 让后端连这台实例
+## 用 `dev` / `a3` profile 让后端连这台实例
 
-后端默认连**本机开发库**（`application.properties`）。要连 VM 上的 A3 实例，起服务时挂 `a3` profile：
+后端默认连**本机开发库**（`application.properties`）。要连 VM 上的实例，起服务时挂 profile ——
+**日常用 `dev`，CI 用 `a3`**（2026-10-11 职责分离，见 `tech-debt.md` TD-35）：
 
 ```bash
-SPRING_PROFILES_ACTIVE=a3 ./mvnw spring-boot:run    # IDE 里则设同名环境变量
+SPRING_PROFILES_ACTIVE=dev ./mvnw spring-boot:run    # 日常开发 / 手验 / 攻击模拟器（job 全开）
+SPRING_PROFILES_ACTIVE=a3  ./mvnw spring-boot:run    # 仅 CI 的 A3 并发门禁（job 全关）
 ```
 
-- profile 文件：`Mall-management-server/src/main/resources/application-a3.properties`（**含明文默认口令**，见文末安全提醒）
-- 改动该文件前先读它：里面写明了「为什么必须独立实例 + 同名库」与**三条禁止项**（不许 `ddl-auto=create`、不许调 Hikari 池大小、不许把默认 URL 指向开发机）
+- profile 文件：`Mall-management-server/src/main/resources/application-dev.properties` 与 `application-a3.properties`（**含明文默认口令**，见文末安全提醒）
+- ⚠️ **`a3` 是 CI 专用，别拿它做日常 / 手验** —— 它的三个「会自己醒来的东西」开关全关（压测确定性），日常跑它会**看不到**物流轨迹 / 超时取消等功能。`dev` 是它的孪生，只把这三个开关打开。
+- 改动 `application-a3.properties` 前先读它：里面写明了「为什么必须独立实例 + 同名库」与**三条禁止项**（不许 `ddl-auto=create`、不许调 Hikari 池大小、不许把默认 URL 指向开发机）；`application-dev.properties` 是它的复制，**改 a3 的「连库 / Redis / TTL」要同步改 dev**。
 - 库名与开发库**同名**（TD-13：39 处 schema 前缀硬编码在 SQL 里，切库名切不走）。故日志里看到 `mall_management_sql` **不能**说明连的是哪台 —— 要么看 `jdbcUrl` 的主机串，要么 `SELECT VERSION()`（开发库 8.0.32 / VM 8.4.11）
 - 驱动：`pom.xml` 声明 8.0.33，实测直连 8.4.11 成功，**无需改 `pom.xml`**
-- 上传目录已外置到 `${java.io.tmpdir}/a3-uploads/`，A3 期间不写仓库目录（TD-08）
-- **两级缓存参数在 `application.properties`（不在 a3 profile）**：`app.cache.caffeine.time-to-live=60s` / `app.cache.caffeine.max-size=1000`，装配见 `CacheConfig`（`@Primary CacheManager` = Caffeine L1 + Redis L2，设计见 `cache-layer.md §8`）。**不变量：L1 TTL ≤ `spring.cache.redis.time-to-live`**（a3 profile 为 `5m`）—— L1 没有跨节点失效通道，违反时陈旧窗口被放大到 L1 TTL，故启动期 WARN（`CacheConfig.warnIfL1OutlivesL2`）。自检：启动日志有一行 `两级缓存已装配：L1 Caffeine(maxSize=1000, ttl=PT1M) -> L2 Redis(ttl=PT5M)`，**用 ASCII 片段 `Caffeine(maxSize=` 检索**（日志为 GBK 字节，中文 pattern 匹配不到）—— 属性有没有被真正读到，看这一行，不靠推断
+- 上传目录已外置到 `${java.io.tmpdir}/a3-uploads/`（dev 为 `dev-uploads/`），不写仓库目录（TD-08）
+- **两级缓存参数在 `application.properties`（不在 a3 profile）**：`app.cache.caffeine.time-to-live=60s` / `app.cache.caffeine.max-size=1000`，装配见 `CacheConfig`（`@Primary CacheManager` = Caffeine L1 + Redis L2，设计见 `cache-layer.md §8`）。**不变量：L1 TTL ≤ `spring.cache.redis.time-to-live`**（dev 与 a3 两个 profile 均为 `5m`）—— L1 没有跨节点失效通道，违反时陈旧窗口被放大到 L1 TTL，故启动期 WARN（`CacheConfig.warnIfL1OutlivesL2`）。自检：启动日志有一行 `两级缓存已装配：L1 Caffeine(maxSize=1000, ttl=PT1M) -> L2 Redis(ttl=PT5M)`，**用 ASCII 片段 `Caffeine(maxSize=` 检索**（日志为 GBK 字节，中文 pattern 匹配不到）—— 属性有没有被真正读到，看这一行，不靠推断
 
 ### 导入数据（在 guest 上执行）
 
@@ -134,7 +137,13 @@ Id=598  GoodType HEX = EFBFBD EFBFBD EFBFBD EFBFBD EFBFBD EFBFBD C6B7
 
 **处置**：
 
-- curl 提交中文一律用 `--data-urlencode`（curl 负责 URL 编码，不经 shell 的字节直传），或显式 `Content-Type: application/x-www-form-urlencoded; charset=UTF-8` + 已 UTF-8 编码的 body
+- ⚠️ **`--data-urlencode` 救不了这一条 —— 2026-10-11 实测**（本条推翻了此前写在这里的旧建议；触发事例见下）。本机 `curl` 是 `/mingw64/bin/curl`（`x86_64-w64-mingw32`，**原生 Windows 程序**，非 msys-linked）⇒ Git Bash spawn 它时，**中文 argv 被折成 ANSI 代码页（本机 CP936/GBK）**，**与脚本文件自身的编码无关**（实测：脚本是 UTF-8、`printf` 吐出来也是 UTF-8，发出去的却是 GBK）。三种写法打本地 echo 服务的**服务端实收字节**：
+  - 字面 `-d 'ProductInformation=取消核验:1'` → `…3D C8A1CFFBBACBD1E9 3A31` = **GBK**（乱码根因）
+  - `--data-urlencode` 同串 → `…3D %C8%A1%CF%FB%BA%CB%D1%E9 3A31` = **仍是 GBK**，只是百分号转义；服务端 URL 解码后**与上一条逐字节相同** ⇒ **旧建议无效**
+  - `--data-binary @utf8文件` → `…3D E58F96E6B688E6A0B8E9AA8C 3A31` = **UTF-8**，正确
+  - 探针：`scripts/probes/c3b4p-curl-encoding.sh`；原始产物：`docs/agent/evidence/c3-block4-patch/curl-encoding-capture.txt`
+- **处置（按可靠性排序）**：① **探针 / 脚本里的造数一律用纯 ASCII** —— 探针验的是状态位 / CAS / 时序，**不需要中文**；② 非要中文则 `--data-binary @utf8文件`，或显式 `Content-Type: application/x-www-form-urlencoded; charset=UTF-8` + 已是 UTF-8 的 body；③ **绝不**在 Git Bash 里用字面中文 `-d`
+- **真踩了也别慌：乱码是确定性的、可原位修**。库里那两行（`order.ProductInformation`，2026-10-10 探针所造）HEX = `C8A1 EFBFBD×6 3A31` —— 正是「GBK 字节被按 UTF-8 解码」（`C8A1`→U+0221，`CF FB`/`BA DB`/`D1 E9` 各→ 2 个 U+FFFD）再编码的结果。修法用**纯 ASCII** 的 `UPDATE … SET c = CONVERT(UNHEX('<目标 UTF-8 的 HEX>') USING utf8mb4) WHERE …`（**别**在 SQL 里写中文字面量，同一个坑）；2026-10-11 已如此修，改后 `CHAR_LENGTH` = 6 与预期相符、全表残留 U+FFFD 归零
 - **更稳的做法**：手测走浏览器 / Postman，或写成 `.jsh`（`jshell`）脚本走 JDBC —— 本项目排查库内容时就是这么干的（临时脚本用完即弃，不进仓库）
 - 判据若依赖「查重拦住了」这类**阴性结果**，先怀疑编码，再怀疑逻辑
 

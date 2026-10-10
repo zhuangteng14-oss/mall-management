@@ -68,7 +68,7 @@ public class WebAuthConfig implements WebMvcConfigurer {
      *   <li><b>登录前后台页面 5 条</b>（{@code /goods/goodstype}、{@code /goods/goodsSelectHome}、
      *       {@code /goods/GoodsProductCodeSelect}、{@code /goods/productCodePrice}、
      *       {@code /goods/productSearch}）—— 首页 {@code HomePage.vue:186-193} 与商品页
-     *       {@code ProductPage.vue:462-465} 的 {@code onMounted} **没有任何登录态判断**
+     *       {@code ProductPage.vue:766} 的 {@code onMounted} **没有任何登录态判断**
      *       （2026-10-04 逐行核实），且全仓无路由守卫 ⇒ 这两页在未登录时照常发这些请求。
      *       ⚠️ 其中 {@code productSearch} / {@code GoodsProductCodeSelect} / {@code productCodePrice}
      *       属**「同类公开」**（与首页同为商品浏览面），不是「未登录必经」—— 这条区分见下。</li>

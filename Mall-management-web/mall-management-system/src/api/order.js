@@ -116,8 +116,8 @@ export function orderReceive(orderId) {
  *        两个都不传 = 改前那条单参调用（管理员代发走的就是它）；都传 = 商家在发货弹窗里填的。
  * @param {string} [trackingNo] 运单号。
  * @returns {Promise<{success:boolean, msg?:string}>}
- *        ⚠️ 成功时后端**另写首条物流轨迹**（`order_shipping_track` 的 `picked_up`，偏移 0），
- *           其余节点由 `ShippingTrackAdvanceJob` 按 `ShippedAt` + 阈值补。
+ *        ⚠️ 成功时后端**只改状态位 + 写 3 个物流列，不写轨迹**（2026-10-10 起）：四节点（`in_transit` 运输中 →
+ *           `picked_up` 驿站已揽收 → `out_for_delivery` → `delivered`）全由 `ShippingTrackAdvanceJob` 按 `ShippedAt` + 阈值补（⚠️ 2026-10-11 起前两步对调）。
  */
 export function orderDeliver(orderId, expressCompany, trackingNo) {
   const pairs = { orderId }

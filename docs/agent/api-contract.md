@@ -350,7 +350,7 @@
 |---|---|---|---|
 | `/order/orderPayIfUp` | `paymentMethod?`（`@RequestParam(value="paymentMethod", required=false)`） | **兼容**：不传 ⇒ 落 `NULL`（**不是**空串） | 成功后 Service **生成 `TradeNo`**（`PAY+yyyyMMdd+6位随机`）并在**响应体**回传 `tradeNo`；同笔写 `order` 的 3 个支付列 |
 | `/order/orderReceiveIfUp` | 无 | 不变 | 成功后写 `order.ReceivedAt` **且**保证 `delivered` 轨迹行存在（`NOT EXISTS` 幂等） |
-| `/order/orderDeliveryIfUp` | `expressCompany?` / `trackingNo?` | **兼容**：都不传 ⇒ 两列 `NULL`（管理员代发走的 1 参重载即是此路） | 成功后写 `order` 的 3 个物流列 **且**追加首条轨迹 `picked_up`（偏移 0） |
+| `/order/orderDeliveryIfUp` | `expressCompany?` / `trackingNo?` | **兼容**：都不传 ⇒ 两列 `NULL`（管理员代发走的 1 参重载即是此路） | 成功后写 `order` 的 3 个物流列；**不写轨迹**（2026-10-10 起四节点全移交调度器，见 §D.4） |
 
 ⚠️ **`intervene` 零改**：`AdminOrderService.intervene` 调的是 **1 参重载** `payIfUp(orderId)` / `deliveryIfUp(orderId)` / `receiveIfUp(orderId)` —— 三个重载**逐字保留** ⇒ 管理端介入的行为与契约**一个字符没变**（只是它落库时也会写明细列 / 轨迹，那对调用方不可见）。
 
@@ -358,12 +358,12 @@
 
 | 写入方 | 节点 | 时刻 | 幂等 |
 |---|---|---|---|
-| `OrderService.deliveryIfUp` | `picked_up`（「商家已揽收」） | `now`（偏移 0） | 无（发货是 CAS，只会成功一次） |
+| `OrderService.deliveryIfUp` | **不再写轨迹**（2026-10-10 首条 `picked_up` 移交调度器） | — | — |
 | `OrderService.receiveIfUp` | `delivered`（「已签收」）**兜底补写** | `now` | `ShippingTrackDao.exists(orderId, 'delivered')` |
-| `ShippingTrackAdvanceJob`（@Scheduled） | `in_transit` / `out_for_delivery` / `delivered` | `ShippedAt + 阈值` | 同上（每节点各判一次） |
+| `ShippingTrackAdvanceJob`（@Scheduled） | `in_transit`（运输中）/ `picked_up`（驿站已揽收）/ `out_for_delivery`（驿站派送中）/ `delivered`（已签收） | `ShippedAt + 阈值` | 同上（每节点各判一次） |
 
 - ⚠️ **调度器只 INSERT 轨迹，绝不 UPDATE `order` 的状态位**（用户 2026-10-10 批准的红线）⇒ **物流「已签收」≠ 订单「已收货」**（后者仍由买家点【收货】触发 CAS），前端分两词表述。
-- ⚠️ **阈值走 properties**（`mall.order.shipping.track.{transit,delivery,signed}-ms`），**演示默认 1 / 2 / 4 分钟**；生产口径改配置即可。
+- ⚠️ **阈值走 properties**（`mall.order.shipping.track.{transit,picked-up,delivery,signed}-ms`），**演示默认 15 / 30 / 45 / 60 秒**（2026-10-10 由 30/60/120/240 秒收紧）；生产口径改配置即可。⚠️ **2026-10-11 起时序是「运输中 → 驿站已揽收 → 驿站派送中 → 已签收」**（前两步对调 ⇒ `in_transit` 拿 15s、`picked_up` 拿 30s）。
 - ⚠️ **a3 / smoke 两个 profile 显式 `mall.order.shipping.track.enabled=false`**（同 `MerchantDowngradeJob` 款）⇒ 手验调度推进要在**默认 profile** 下做。
 
 ### D.5 前端封装增补

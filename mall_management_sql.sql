@@ -800,16 +800,31 @@ PREPARE _p FROM @s; EXECUTE _p; DEALLOCATE PREPARE _p;
 -- ⚠️ `order` 表**自身** `OrderId` 上无索引（既有 Schema），本表自带 `(OrderId, TrackedAt)` —— 查一单的轨迹正是这个形状。
 -- ⚠️ `TrackedAt`（节点**发生**时刻，= ShippedAt + 阈值偏移）与 `created_at`（**落库**时刻）**刻意分开**：
 --    调度器在阈值被越过后的某一 tick 才补写，两者之差 = 调度延迟（同 order_state_transition.OccurredAt 的理由）。
--- ⚠️ `Status` 取值（有界，4 个）：picked_up（揽收，发货时写）/ in_transit（运输中）/ out_for_delivery（派送中）/ delivered（已签收，调度器写）。
+-- ⚠️ `Status` 取值（有界，4 个，**按时序**）：in_transit（运输中，+15s）/ picked_up（驿站已揽收，+30s）/ out_for_delivery（驿站派送中，+45s）/ delivered（已签收，+60s）—— 四节点**全由调度器**按 `ShippedAt` 偏移补（2026-10-10 前首条 picked_up 在发货时写，已废）。
 --    ⚠️ delivered **不**翻 order.ReceiveIf —— 「物流签收 ≠ 订单收货」，前端分两词表述（见 tech-debt）。
 CREATE TABLE IF NOT EXISTS `order_shipping_track` (
   `Id`          int NOT NULL AUTO_INCREMENT COMMENT '自增主键',
   `OrderId`     varchar(40) NOT NULL COMMENT '订单号（对齐 order.OrderId；不设外键）',
   `Status`      varchar(24) NOT NULL COMMENT '轨迹节点码：picked_up / in_transit / out_for_delivery / delivered',
-  `Description` varchar(255) DEFAULT NULL COMMENT '节点文案（揽收 / 运输中 / 派送中 / 已签收）',
+  `Description` varchar(255) DEFAULT NULL COMMENT '节点文案（运输中 / 驿站已揽收 / 驿站派送中 / 已签收，2026-10-11 前两步对调）',
   `TrackedAt`   datetime(3) NOT NULL COMMENT '节点发生时刻（按 ShippedAt 偏移算，非落库时刻）',
   `created_at`  datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) COMMENT '行落库时刻（agent.md 数据库管理规则 8）',
   `updated_at`  datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3) COMMENT '行更新时刻',
   PRIMARY KEY (`Id`),
   KEY `idx_order_shipping_track_order` (`OrderId`,`TrackedAt`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='订单物流轨迹（C3 块4 补丁 A2；模拟物流，调度器只追加行）';
+
+-- ============================================================================
+-- 【C3 块4 补丁 · 第 2 笔（2026-10-10）】订单超时未付款自动取消（A 档，用户裁「批全档」）
+-- ============================================================================
+-- ⚠️ 为什么必须**加列**，不能复用三位状态位：取消的单是 `PayIf=0, DeliveryIf=0, ReceiveIf=0`
+--    —— 与「未付款」**三位完全相同** ⇒ 三位表达不出第 4 态，前端也分不出「未付款」与「已取消」。
+-- ⚠️ **只加列、不加表** ⇒ 不动 P3 表数门禁（`ConcurrencyRunner` 的 11+6=17）、不动 P4 种子门禁。
+-- ⚠️ 阈值（默认 60 秒）与扫描间隔（默认 15 秒）走 properties（`mall.order.cancel.timeout-ms` /
+--    `.fixed-delay-ms`），**不入库** —— 演示口径与生产口径只差配置（同物流轨迹四节点的做法）。
+-- ⚠️ 时刻由**库时钟**产生（`NOW(3)` / `DATE_SUB(NOW(), …)`），Java 侧不构造任何时间点
+--    （2026-10-10 时区统一口径，见 tech-debt.md 的 TD-32）。
+-- ⚠️ 幂等：守卫式 `ALTER`（MySQL 不支持 `ADD COLUMN IF NOT EXISTS`，同本文件既有做法）；重跑为 `DO 0`。
+SET @s := (SELECT IF(COUNT(*) = 0, 'ALTER TABLE `order` ADD COLUMN `CancelledAt` datetime(3) DEFAULT NULL COMMENT ''订单取消时刻（超时未付款，调度器 CAS 写；NULL = 未取消）''', 'DO 0')
+  FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'order' AND COLUMN_NAME = 'CancelledAt');
+PREPARE _p FROM @s; EXECUTE _p; DEALLOCATE PREPARE _p;

@@ -606,8 +606,8 @@
 |---|---|---|---|
 | `Id` | int | **PK**, NOT NULL AUTO_INCREMENT | 内部主键，业务不使用 |
 | `OrderId` | varchar(40) | NOT NULL | 业务单号，**对齐 `order.OrderId`**（`:143`）。⚠️ **不建外键**（理由见下） |
-| `Status` | varchar(24) | NOT NULL | 节点码：`picked_up` / `in_transit` / `out_for_delivery` / `delivered` |
-| `Description` | varchar(255) | NULL, DEFAULT NULL | 节点中文描述（「商家已揽收」等），供前端直接显示 |
+| `Status` | varchar(24) | NOT NULL | 节点码（**按时序**）：`in_transit` / `picked_up` / `out_for_delivery` / `delivered` |
+| `Description` | varchar(255) | NULL, DEFAULT NULL | 节点中文描述（「运输中」「驿站已揽收」等；2026-10-11 前两步对调），供前端直接显示 |
 | `TrackedAt` | datetime(3) | NOT NULL | 该节点的**发生时刻**（毫秒精度）。⚠️ 排序键是它，**不是 `Id`**——同单几条可能同批 INSERT，`Id` 不保证与发生顺序一致（同 `order_state_transition.OccurredAt` 的口径） |
 | `created_at` | datetime(3) | NOT NULL DEFAULT CURRENT_TIMESTAMP(3) | 行落库时刻 |
 | `updated_at` | datetime(3) | NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3) | 行更新时刻 |
@@ -649,3 +649,17 @@
 
 > ⚠️ 索引 / UNIQUE 两处计数为**按 DDL 推导**，不是 `information_schema.STATISTICS` 的实测结果 —— 引用时按此档位标注。
 > ⚠️ **`order` 的存量行数**：本机库 **12 行** / VM 库 **10 行**（2026-10-10 实测）—— **都不是** P4 判据的 6。P4 读的是 CI 里**刚从 `.sql` 导入**的那份（种子 6 行），与两库的既有累积无关（见 `db-migration.md` 注意 13 末段）。
+
+### 12.4 `order` 的第 8 个明细列 `CancelledAt`（补丁 · 第 2 笔，2026-10-10）
+
+`.sql:817-830`（**尾部追加块**）：1 条 `ADD COLUMN`（带 `information_schema` 守卫 + `PREPARE` ⇒ 重复执行是空操作），`datetime(3) DEFAULT NULL`，加在**表末**。
+
+| 列 | 类型 | 何时写 |
+|---|---|---|
+| `CancelledAt` | datetime(3) | `OrderTimeoutCancelJob` 扫到「`PayIf=0 AND CancelledAt IS NULL` 且 `CreateTime` 已超阈值」时，`OrderDao.cancelIfUnpaid` 的 **CAS** 写 `NOW(3)`；`NULL` = 未取消 |
+
+- ⚠️ **这是「第 4 态」的唯一载体**：取消的单三位仍是 `(0,0,0)`，与「未付款」**完全相同** ⇒ 三位状态位表达不出来，前端必须**先判 `CancelledAt != null`**（`OrderMine.vue` / `OrderCenter.vue` 的 `stateOf`）。
+- ⚠️ **本笔让 `CancelledAt` 进了 CAS 的 WHERE（**不进 SET**）**：`CancelledAt` **不进 SET 子句**（取消不改任何状态位），却**进了 PAY 的 WHERE** —— `OrderStateMachine.updateSql(PAY)` 尾部追加 `AND CancelledAt IS NULL`（§12.2 那条「被 golden copy 逐字钉死」的例外）。**不违「不碰 `OrderStateMachine`」约束**：该约束管**「介入动作」**，不管**「付款业务规则」**（用户 2026-10-11 澄清）。理由：取消不动 `PayIf`，光靠 `PayIf = 0` 的守卫**拦不住**「已取消的单被付款」；放进同一条 UPDATE 才是**单语句原子**，「先查再 CAS」会留 TOCTOU 窗口（锁是 fail-open）。
+- ⚠️ **取消不写 `order_state_transition`**：`OrderAction` 仍是 4 个（A3 的 `A-S3-2` 按 tag 基数断言），取消是**系统按时间**的动作、不是一条 CAS 边。后果登记 `tech-debt.md` **TD-34**。
+- ⚠️ **阈值不入库**：`mall.order.cancel.timeout-ms`（默认 60000）/ `.fixed-delay-ms`（默认 15000）走 properties；a3 profile 显式 `mall.order.cancel.enabled=false`（同族三道闸）。
+- ⚠️ **不动表数门禁**：只加列、不加表 ⇒ `ConcurrencyRunner` 的 P3 表数（11+6=17）与 P4 种子行数**全不变**（VM 库 `CancelledAt` 列**已实测存在**，2026-10-10）。

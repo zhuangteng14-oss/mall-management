@@ -121,14 +121,14 @@ public class OrderDao {
 
     /** 购物车：某客户的未收货订单（{@code ReceiveIf != 1}），按创建时间倒序。 */
     public List<Map<String, Object>> selectActiveByCustomer(String customerId) {
-        String sql = "SELECT OrderId, CustomerId, MerchantId, Price, ProductInformation, Images, PayIf, DeliveryIf, ReceiveIf,CreateTime,SettlementDate, Quantity " +
+        String sql = "SELECT OrderId, CustomerId, MerchantId, Price, ProductInformation, Images, PayIf, DeliveryIf, ReceiveIf,CreateTime,SettlementDate, Quantity, CancelledAt " +
                 "FROM mall_management_sql.`order` WHERE CustomerId = ? AND ReceiveIf != 1 ORDER BY CreateTime DESC";
         return jdbcClient.sql(sql).param(customerId).query().listOfRows();
     }
 
     /** 订单中心：某商家的未收货订单。与 {@link #selectByMerchant} 的 {@code active} 分支**逐字相同** —— 两条语句各有调用方，本笔不合并（合并会改变调用面）。 */
     public List<Map<String, Object>> selectActiveByMerchant(String merchantId) {
-        String sql = "SELECT OrderId, CustomerId, MerchantId, Price, ProductInformation, Images, PayIf, DeliveryIf, ReceiveIf,CreateTime,SettlementDate, Quantity " +
+        String sql = "SELECT OrderId, CustomerId, MerchantId, Price, ProductInformation, Images, PayIf, DeliveryIf, ReceiveIf,CreateTime,SettlementDate, Quantity, CancelledAt " +
                 "FROM mall_management_sql.`order` WHERE MerchantId = ? AND ReceiveIf != 1 ORDER BY CreateTime DESC";
         return jdbcClient.sql(sql).param(merchantId).query().listOfRows();
     }
@@ -146,7 +146,7 @@ public class OrderDao {
             sql = "SELECT OrderId, CustomerId, MerchantId, Price, ProductInformation, Images, PayIf, DeliveryIf, ReceiveIf,SettlementDate, Quantity " +
                     "FROM mall_management_sql.`order` WHERE MerchantId = ? AND ReceiveIf = 1 ORDER BY CreateTime DESC";
         } else {
-            sql = "SELECT OrderId, CustomerId, MerchantId, Price, ProductInformation, Images, PayIf, DeliveryIf, ReceiveIf,SettlementDate, Quantity " +
+            sql = "SELECT OrderId, CustomerId, MerchantId, Price, ProductInformation, Images, PayIf, DeliveryIf, ReceiveIf,SettlementDate, Quantity, CancelledAt " +
                     "FROM mall_management_sql.`order` WHERE MerchantId = ? AND ReceiveIf != 1 ORDER BY CreateTime DESC";
         }
         return jdbcClient.sql(sql).param(merchantId).query().listOfRows();
@@ -236,12 +236,70 @@ public class OrderDao {
      * </ul>
      *
      * <p>⚠️ <b>只读</b>，且**不加时间谓词** —— 「这一轮该补哪些节点」是**应用层判**的
-     * （拿 {@code ShippedAt} 比阈值，各节点各判一次），不是 SQL 判的。把阈值写进 SQL 会让
+     * （拿已过秒数比阈值，各节点各判一次），不是 SQL 判的。把阈值写进 SQL 会让
      * 「改阈值要改两条语句」，且无法表达「同一单这一轮补 2 个节点、下轮补第 3 个」。
+     *
+     * <p>⚠️ <b>2026-10-10（用户报时区差 8 小时）改判：两列都改成「不带时区」的形态，Java 侧不再接时间值</b>
+     * —— 原先是 {@code ShippedAt} 原列（驱动回 {@code LocalDateTime}）+ 应用层 {@code System.currentTimeMillis()}
+     * 相减，那条路上 {@code serverTimezone=Asia/Shanghai} 会掺进一次折算。现在是：
+     * <ul>
+     *   <li>{@code ShippedAtText} = {@code DATE_FORMAT(...)} 的**文本**，库时钟（UTC），原样透传给
+     *       {@code ShippingTrackDao.writeAtShippedOffset} 当 {@code DATE_ADD} 的基准；</li>
+     *   <li>{@code ElapsedSec} = {@code TIMESTAMPDIFF(SECOND, ShippedAt, NOW())}，**整数秒**，
+     *       两列都是库时钟 ⇒ 差值天然正确，与 JVM 时区无关（{@code NOW()} 与 {@code ShippedAt} 同为 UTC，
+     *       相减把两端一起消掉）。</li>
+     * </ul>
      */
     public List<Map<String, Object>> selectShippableForTrack() {
-        String sql = "SELECT OrderId, ShippedAt FROM mall_management_sql.`order` "
+        String sql = "SELECT OrderId, DATE_FORMAT(ShippedAt, '%Y-%m-%d %H:%i:%s') AS ShippedAtText, "
+                + "TIMESTAMPDIFF(SECOND, ShippedAt, NOW()) AS ElapsedSec FROM mall_management_sql.`order` "
                 + "WHERE DeliveryIf = 1 AND ReceiveIf = 0 AND ShippedAt IS NOT NULL";
         return jdbcClient.sql(sql).query().listOfRows();
+    }
+
+    // ==================== 超时未付款取消（C3 块4 补丁 · 第 2 笔） ====================
+
+    /**
+     * 扫「**未付款且未取消**、且创建时刻已超阈值」的单 —— {@code OrderTimeoutCancelJob} 每轮唯一的读。
+     *
+     * <p>⚠️ <b>{@code CreateTime} 是 {@code varchar(50)}（{@code mall_management_sql.sql:152}），
+     * 不是 datetime</b> ⇒ 比对必须走「字符串 &lt; {@code DATE_FORMAT(…)}」这个形状，
+     * 与 {@code AdminOrderDao} 的 {@code unpaidTimeout} 指标**同一写法**（那边是 24 小时、只数不动，
+     * 这里是可配阈值、真的动手）。{@code CreateTime} 由 SQL {@code NOW()} 填
+     * （{@link #insertOrder}）⇒ 与 {@code NOW()} **同一条库时钟轴**，字符串比较不会错位。
+     *
+     * <p>⚠️ <b>阈值以字符串拼接进 SQL，不走 {@code ?} 占位</b>：这是本仓既有做法
+     * （{@code AdminOrderDao:164} 拼 {@code UNPAID_HOURS}）。值来自 properties（{@code long}），
+     * 不是用户输入。调用方须保证 {@code timeoutSeconds > 0}（见 job 的前置判）。
+     *
+     * <p>{@code CancelledAt IS NULL} 这条不只是「跳过已取消的」—— 它同时是**幂等**的来源：
+     * 取消过的单不会再进候选集。
+     */
+    public List<Map<String, Object>> selectUnpaidExpired(long timeoutSeconds) {
+        String sql = "SELECT OrderId FROM mall_management_sql.`order` "
+                + "WHERE PayIf = 0 AND CancelledAt IS NULL "
+                + "AND CreateTime < DATE_FORMAT(DATE_SUB(NOW(), INTERVAL " + timeoutSeconds + " SECOND), '%Y-%m-%d %H:%i:%s')";
+        return jdbcClient.sql(sql).query().listOfRows();
+    }
+
+    /**
+     * 取消一张「仍未付款」的单 —— **CAS**，返回影响行数（调用方判 {@code rows == 1}）。
+     *
+     * <p>⚠️ <b>为什么必须是 CAS 而不是「先查再写」</b>：本方法要在**没有任何锁**的前提下
+     * 与付款路径竞争（付款走 {@code ORDER_PAY} 锁，取消任务不取锁 —— 取锁反而会让每单多一次
+     * Redis 往返，而正确的保证本来就不该押在 fail-open 的锁上）。
+     * 单条 UPDATE 把「仍是未付款」「仍未取消」两个前提与写入绑成一步 ⇒ 原子，无 TOCTOU 窗口。
+     *
+     * <p>⚠️ <b>与付款的互斥靠 {@code PayIf = 0}</b>：取消不改 {@code PayIf}，故**反向**不成立
+     * （付款的守卫拦不住取消）—— 那半边由 {@code OrderStateMachine.updateSql(PAY)} 尾部的
+     * {@code AND CancelledAt IS NULL} 补上。两条 UPDATE 各管一个方向，合起来才闭合。
+     *
+     * <p>{@code NOW(3)} 而非 {@code NOW()}：与 {@code CancelledAt datetime(3)} 的精度对齐
+     * （同 {@code order_shipping_track.TrackedAt} 的口径）。
+     */
+    public int cancelIfUnpaid(String orderId) {
+        String sql = "UPDATE mall_management_sql.`order` SET CancelledAt = NOW(3) "
+                + "WHERE OrderId = ? AND PayIf = 0 AND CancelledAt IS NULL";
+        return jdbcClient.sql(sql).param(orderId).update();
     }
 }

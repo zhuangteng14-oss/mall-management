@@ -57,7 +57,7 @@
             <div class="cen"><span class="st" :class="stateOf(order)[0]">{{ stateOf(order)[1] }}</span></div>
             <div class="op">
               <button
-                v-if="order.PayIf !== 1"
+                v-if="order.PayIf !== 1 && !order.CancelledAt"
                 class="act"
                 @click="openPay(order)"
               >付款</button>
@@ -101,31 +101,9 @@
     </div>
 
     <!-- ══ 收银台弹窗（C3 块4 补丁）══════════════════════════════════════════════
-         ⚠️ 这是**模拟支付**：本仓没有网关，`orderPay` 只把「选了哪种方式」记进
-         `order.PaymentMethod` 并回一个生成的 `TradeNo`。文案必须说清楚，别让用户以为真扣了钱。 -->
-    <div v-if="payFor" class="scrim" @click="payFor = null">
-      <div class="dlg" @click.stop>
-        <div class="dlg-h">
-          <span>收银台</span>
-          <button class="x" @click="payFor = null" aria-label="关闭">×</button>
-        </div>
-        <div class="dlg-b">
-          <p class="pay-amt">应付金额 <b>¥{{ formatPrice(payFor.Price) }}</b></p>
-          <p class="pay-oid">订单号 <span class="mono">{{ payFor.OrderId }}</span></p>
-          <div class="pay-methods">
-            <label v-for="m in PAY_METHODS" :key="m" class="pm" :class="{ on: payMethod === m }">
-              <input type="radio" name="paymethod" :value="m" v-model="payMethod" />
-              <span>{{ m }}</span>
-            </label>
-          </div>
-          <p class="pay-note">⚠️ 演示环境的**模拟收银台**：本仓没有支付网关，点「确认支付」只会把所选方式与一个演示流水号记进订单，不会真的扣款。</p>
-        </div>
-        <div class="dlg-f">
-          <button class="act" @click="payFor = null">取消</button>
-          <button class="act primary" :disabled="paying" @click="confirmPay">{{ paying ? '支付中…' : '确认支付' }}</button>
-        </div>
-      </div>
-    </div>
+         ⚠️ 2026-10-10 抽出共享组件 `components/CashierDialog.vue`：商品详情页的【立即购买】也要走**同一个**
+         收银台（Bug 1）。本页只负责「哪一单」(`payFor`) 与「付完做什么」(`onPaid`)，弹窗与支付逻辑在组件里。 -->
+    <CashierDialog :order="payFor" @close="payFor = null" @paid="onPaid" />
 
     <!-- ══ 物流详情弹窗（C3 块4 补丁）═══════════════════════════════════════════
          ⚠️ 标题写「物流轨迹」而**不是**「订单状态」：`shippingTrack` 是**模拟物流**，
@@ -138,12 +116,23 @@
         </div>
         <div class="dlg-b">
           <p class="pay-oid">订单号 <span class="mono">{{ detailFor.OrderId }}</span></p>
-          <p class="pay-oid">
+          <!-- ⚠️ 这两列**只在数据回来之后**才画：请求失败时画「— / —」等于**谎报「这单没有快递信息」**
+               （用户 2026-10-10 就是这么读的：「可能是数据没拿到，或字段名取错」）⇒ 失败时整行不出现，
+               由下面的错误态说话。 -->
+          <p v-if="detailRow.OrderId" class="pay-oid">
             承运 / 单号
             <span class="mono">{{ detailRow.ExpressCompany || '—' }} / {{ detailRow.TrackingNo || '—' }}</span>
-            <span class="dash">（管理员代发的单这两列为空）</span>
+            <span class="dash">（未填快递信息的单为空 —— 如管理员强制发货，见 tech-debt TD-31）</span>
           </p>
           <div v-if="detailLoading" class="tl-empty">加载中…</div>
+          <!-- ⚠️ 失败**必须有自己的态**（用户 2026-10-10 报的 Bug 2）：改前只有 `alert` + 回落成
+               「暂无物流轨迹。」⇒ 「请求失败」与「确实没有轨迹」在界面上**不可区分**，而 alert 弹着时
+               它身后的弹窗还停在「加载中…」（alert 阻塞渲染，`finally` 里的 `detailLoading = false` 要等用户点掉
+               才生效）—— 看起来就是「一直转」。 ⇒ 改成**就地报错 + 重试**，一个阻塞式弹框都不发。 -->
+          <div v-else-if="detailError" class="tl-empty tl-err">
+            物流加载失败：{{ detailError }}
+            <button class="act" @click="openDetail(detailFor)">重试</button>
+          </div>
           <ol v-else-if="detailTrack.length" class="tl">
             <li v-for="(t, i) in detailTrack" :key="i" :class="{ last: i === detailTrack.length - 1 }">
               <span class="tl-dot"></span>
@@ -154,7 +143,7 @@
             </li>
           </ol>
           <div v-else class="tl-empty">暂无物流轨迹。</div>
-          <p class="pay-note">⚠️ 轨迹由后台任务按发货时间**模拟推进**（分钟级演示阈值），末条「已签收」表示快递送达，与「订单收货」是两件事。</p>
+          <p class="pay-note">⚠️ 轨迹由后台任务按发货时间**模拟推进**（秒级演示阈值 15/30/45/60 秒），末条「已签收」表示快递送达，与「订单收货」是两件事。</p>
         </div>
       </div>
     </div>
@@ -171,8 +160,9 @@
 import { ref, computed, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
 import { handleApiError } from '../api/http'
-import { orderSelect, orderHistory, orderPay, orderReceive, orderDetail } from '../api/order'
+import { orderSelect, orderHistory, orderReceive, orderDetail } from '../api/order'
 import { resolveBuyerId } from '../api/auth'
+import CashierDialog from '../components/CashierDialog.vue'   // ⚠️ 2026-10-10：收银台抽成共享组件（商品详情页【立即购买】也要走同一个）`orderPay` 随之**从本页的 import 里退场**
 
 // 购物车 tab 的地址 —— 两壳路径不同（`/customer/cart` vs `/merchant/order/cart`），不写死。
 // ⚠️ 判据取 `route.path` 前缀而**不是** `route.name` / `route.meta`：本页由容器（`OrderPane.vue`）
@@ -192,9 +182,9 @@ const getBuyerId = () => resolveBuyerId()
 
 const formatPrice = (price) => Number(price || 0).toFixed(2)
 
-const formatDateTime = (dateStr) => {
+const formatDateTime = (dateStr) => {   // ⚠️ **2026-10-10（用户报：同一条单「轨迹 22:27:51 vs 订单列表 14:29:16」，差约 8 小时）**：后端**全部**时间列（`SettlementDate` 由 SQL `NOW()`、`TrackedAt` 由库时钟 `NOW(3)`/`DATE_ADD`）都是**库时钟**，而库时钟是 **UTC**（VM / a3 实测 `@@system_time_zone=UTC`，记录见 `context-packs/c3-block-1-infra.md:109`）⇒ 交回的是 `'YYYY-MM-DD HH:mm:ss'` 这种**无时区文本**。少补末尾那个 `Z`，`new Date()` 就按**浏览器本地时区**解释它 —— 等于把 UTC 值当成本地值，整整差一个偏移，而且**错得很安静**（格式完全正常，肉眼看不出来）。手法逐字照管理端的 `views/admin/AuditPage.vue:190` 的 `toLocal`（那 5 个管理页都有，**本页此前漏了这一步**）。
   if (!dateStr) return ''
-  const date = new Date(dateStr)
+  const date = new Date(`${String(dateStr).replace(' ', 'T')}Z`)
   if (Number.isNaN(date.getTime())) return String(dateStr)
   const p = (n) => String(n).padStart(2, '0')
   return `${date.getFullYear()}-${p(date.getMonth() + 1)}-${p(date.getDate())} `
@@ -209,6 +199,8 @@ const quantityOf = (order) => {
 }
 
 // 三位 → 状态（与 `OrderState.java` 的 5 个具名常量一一对应；同 `OrderCenter.vue` 那份表）。
+// ⚠️ C3 块4 补丁·第 2 笔：**先判 `CancelledAt`** —— 取消的单三位仍是 `(0,0,0)`，
+//    与「未付款」**一模一样**，光看三位分不出来。这是「第 4 态」在前端的唯一入口。
 const STATE_OF = {
   '0,0,0': ['draft', '未付款'],
   '1,0,0': ['warn', '待发货'],
@@ -216,8 +208,11 @@ const STATE_OF = {
   '1,0,1': ['err', '已收货·未发货'],
   '1,1,1': ['ok', '已完成']
 }
-const stateOf = (order) => STATE_OF[[order.PayIf, order.DeliveryIf, order.ReceiveIf].join(',')]
-  || ['draft', '未知状态']
+const stateOf = (order) => {
+  if (order.CancelledAt) return ['err', '已取消']
+  return STATE_OF[[order.PayIf, order.DeliveryIf, order.ReceiveIf].join(',')]
+    || ['draft', '未知状态']
+}
 
 const canReceive = (order) => order.PayIf === 1 && order.DeliveryIf === 1 && order.ReceiveIf !== 1
 
@@ -243,38 +238,18 @@ const load = async () => {
   }
 }
 
-/* ── 收银台（C3 块4 补丁）─────────────────────────────────────────────────────
-   ⚠️ `handlePay` 一分为二：`openPay` 只开弹窗，`confirmPay` 才真调 `orderPay`。
-   「选了方式」与「付了款」是两步 —— 并成一步（点【付款】即支付）就没法传 `paymentMethod` 了。 */
-const PAY_METHODS = ['支付宝', '微信支付', '银行卡']
+/* ── 收银台（C3 块4 补丁；2026-10-10 抽成共享组件）─────────────────────────────
+   ⚠️ 弹窗本体（支付方式三选一 + `orderPay` + 成功回显 `TradeNo`）已搬进
+   `components/CashierDialog.vue` —— 商品详情页的【立即购买】也要用它（Bug 1）。
+   本页只剩两件事：**哪一单**（`payFor`）与**付完做什么**（`onPaid` 刷新列表）。 */
 const payFor = ref(null)          // 非 null ⇒ 收银台开着，值 = 那一单
-const payMethod = ref(PAY_METHODS[0])
-const paying = ref(false)
 
-const openPay = (order) => {
-  payMethod.value = PAY_METHODS[0]
-  payFor.value = order
-}
+const openPay = (order) => { payFor.value = order }
 
-const confirmPay = async () => {
-  if (!payFor.value || paying.value) return
-  paying.value = true
-  try {
-    const result = await orderPay(payFor.value.OrderId, payMethod.value)
-    if (result.success) {
-      // ⚠️ `TradeNo` 是后端生成的**演示流水号**，成功时才回 —— 拿不到就退回一句无号的文案。
-      alert(result.tradeNo ? `支付成功！演示流水号 ${result.tradeNo}` : '支付成功！')
-      payFor.value = null
-      await load()
-    } else {
-      alert('付款失败：' + (result.msg || '未知错误'))
-    }
-  } catch (err) {
-    console.error('付款请求出错', err)
-    alert('网络错误，请稍后重试')
-  } finally {
-    paying.value = false
-  }
+/** 支付成功回调：关窗 + 重载列表（这单从「待付款」挪进「已完成」或换状态位）。 */
+const onPaid = async () => {
+  payFor.value = null
+  await load()
 }
 
 const handleReceive = async (order) => {
@@ -299,11 +274,13 @@ const detailFor = ref(null)
 const detailRow = ref({})
 const detailTrack = ref([])
 const detailLoading = ref(false)
+const detailError = ref('')       // 非空 ⇒ 显示错误态（**不再**用 alert：alert 会阻塞渲染，让弹窗卡在「加载中…」）
 
 const openDetail = async (order) => {
   detailFor.value = order
   detailRow.value = {}
   detailTrack.value = []
+  detailError.value = ''
   detailLoading.value = true
   try {
     const result = await orderDetail(order.OrderId)
@@ -311,11 +288,13 @@ const openDetail = async (order) => {
       detailRow.value = result.row || {}
       detailTrack.value = result.shippingTrack || []
     } else {
-      alert('获取物流失败：' + (result.msg || '未知错误'))
+      detailError.value = result.msg || '未知错误'
     }
   } catch (err) {
     console.error('物流详情请求出错', err)
-    alert('网络错误，请稍后重试')
+    // ⚠️ 传输层错误（超时 / 404 / 网断）到这里：把**类型**也写进界面，别一律说「网络错误」
+    //    —— `HttpError` 带 `status`，404 = 后端没有这个端点（补丁未部署），与「网断了」不是一回事。
+    detailError.value = err && err.status ? `请求失败（HTTP ${err.status}）` : '网络错误'
   } finally {
     detailLoading.value = false
   }
@@ -515,21 +494,11 @@ onMounted(load)
   cursor: pointer;
 }
 .dlg-b { padding: var(--s5); }
-.dlg-f {
-  display: flex;
-  justify-content: flex-end;
-  gap: var(--s3);
-  padding: var(--s4) var(--s5);
-  border-top: 1px solid var(--line);
-}
 
-.pay-amt { margin: 0; font-size: var(--fs-sm); color: var(--ink-2); }
-.pay-amt b {
-  font-family: var(--font-display);
-  font-size: var(--fs-lg);
-  font-weight: var(--fw-med);
-  color: var(--ink);
-}
+/* ⚠️ 收银台专用的那几条样式（`.pay-amt` / `.pay-methods` / `.pm` / `.dlg-f` / `.act.primary`）
+   已随弹窗一起搬进 `components/CashierDialog.vue`（2026-10-10），本页**不再保留** ——
+   留着就是**永远不命中的死规则**，而 `.dlg-f` 之类还容易让人以为本页有第二个带页脚的弹窗。
+   下面这套是**本页仍要用的**：物流弹窗（`.pay-oid` / `.pay-note` / `.mono`）与全页公用件。 */
 .pay-oid { margin: var(--s2) 0 0; font-size: var(--fs-xs); color: var(--ink-3); }
 .mono { font-family: var(--font-mono); color: var(--ink-2); }
 .pay-note {
@@ -538,22 +507,6 @@ onMounted(load)
   line-height: 1.6;
   color: var(--ink-3);
 }
-
-.pay-methods { display: flex; flex-wrap: wrap; gap: var(--s3); margin-top: var(--s4); }
-.pm {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--s2);
-  height: 34px;
-  padding: 0 var(--s4);
-  border: 1px solid var(--line-2);
-  border-radius: var(--r1);
-  font-size: var(--fs-sm);
-  color: var(--ink-2);
-  cursor: pointer;
-}
-.pm.on { border-color: var(--brand); color: var(--brand-ink); background: var(--surface-3); }
-.pm input { accent-color: var(--brand); }
 
 /* 物流时间线：竖线 + 圆点，纯 CSS（不引图标库 —— 本仓无组件库，惯例是逐页 scoped）。 */
 .tl { list-style: none; margin: var(--s4) 0 0; padding: 0; }
@@ -580,11 +533,7 @@ onMounted(load)
 .tl-desc { font-size: var(--fs-sm); color: var(--ink); }
 .tl-time { font-size: var(--fs-xs); color: var(--ink-3); }
 .tl-empty { padding: var(--s4) 0; font-size: var(--fs-sm); color: var(--ink-3); }
-
-.dlg-f .act.primary {
-  border-color: var(--brand);
-  background: var(--brand);
-  color: #fff;
-}
-.dlg-f .act.primary[disabled] { opacity: 0.6; cursor: default; }
+/* 物流失败态（Bug 2）：失败**要说出来**，不能与「确实没有轨迹」同脸。 */
+.tl-err { display: flex; align-items: center; gap: var(--s3); color: var(--danger-deep); }
+.tl-err .act { flex: 0 0 auto; }
 </style>

@@ -23,16 +23,16 @@ import java.util.Map;
  * 故改为「让后端自己报它连的是哪个库实例」，与脚本 JDBC 侧看到的身份对比。
  * 本接口不返回任何可能被缓存的数据，是「防缓存污染接口」。
  *
- * 【仅 a3 profile 生效】
- * 它会暴露 @@hostname / VERSION() 等基础设施信息，不应在生产可达；A3 本就以 a3
- * profile 启动，故不影响。若 profile 未生效，A3 侧拿到 404 → Spring 默认错误体
- * （{timestamp,status,error,path}）不含 "success":true → P5 明确 FAIL，不会假绿。
+ * 【仅在 a3 / dev profile 生效】
+ * 它会暴露 @@hostname / VERSION() 等基础设施信息，不应在生产可达；a3（CI）与 dev（日常，
+ * 2026-10-11 起）都启用本 profile，故不影响。若 profile 未生效（生产 / smoke），调用侧拿到 404
+ * → Spring 默认错误体（{timestamp,status,error,path}）不含 "success":true → P5 明确 FAIL，不会假绿。
  *
  * ⚠️ 绝不要给本方法加 @Cacheable —— 它自身就是防缓存污染的设施。
  */
 @RestController
 @RequestMapping("/health")
-@Profile("a3")
+@Profile({"a3", "dev"})
 public class HealthController {
 
     @Autowired

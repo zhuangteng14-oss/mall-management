@@ -7,7 +7,6 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.jdbc.core.JdbcTemplate;
 
-import java.sql.Timestamp;
 import java.util.List;
 import java.util.concurrent.CopyOnWriteArrayList;
 
@@ -76,10 +75,10 @@ class OrderTimelineWriterTest {
                 .isEqualTo("pay");
         assertThat(args[2]).isEqualTo("CREATED");
         assertThat(args[3]).isEqualTo("PAID");
-        assertThat(args[4]).isInstanceOf(Timestamp.class);
-        assertThat(((Timestamp) args[4]).getTime())
-                .as("记的是**转移发生**的时刻，不是落库时刻 —— 两者之差就是异步延迟，本列存在的全部理由")
-                .isEqualTo(OCCURRED_AT);
+        assertThat(args[4])
+                .as("落的是**库时钟（UTC）文本**，不是 Timestamp —— 后者是瞬时点，会被 driver 按 "
+                        + "serverTimezone=Asia/Shanghai 折成墙钟，落库整整 +8 小时（2026-10-10 实测）")
+                .isEqualTo("2025-08-24 01:46:40");   // = OCCURRED_AT 的 UTC 墙钟写法（date -u -d @1756000000）
     }
 
     @Test

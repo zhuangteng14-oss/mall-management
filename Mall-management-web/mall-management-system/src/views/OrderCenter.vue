@@ -158,7 +158,7 @@
 
     <!-- ══ 发货弹窗（C3 块4 补丁）════════════════════════════════════════════════
          ⚠️ 快递公司 / 运单号**可留空**：后端两个参数都是 `required=false` ⇒ 空着发，
-         轨迹首条仍会写（`picked_up` 的文案不带快递信息）。本条是「让能填的填上」，不是「必填」。 -->
+         轨迹仍会照常推进（四节点由后台任务按发货时间补，文案不含快递信息）。本条是「让能填的填上」，不是「必填」。 -->
     <div v-if="deliverFor" class="scrim" @click="deliverFor = null">
       <div class="dlg" @click.stop>
         <div class="dlg-h">
@@ -215,9 +215,9 @@ const currentMerchantId = () => {
   return merchantId || null
 }
 
-const formatDateTime = (dateStr) => {
+const formatDateTime = (dateStr) => {   // ⚠️ **2026-10-10（问题 2，即时区：用户报「轨迹 22:27:51 vs 订单列表 14:29:16」差 8 小时）**：本页两个字段（`CreateTime` 由 SQL `NOW()`、`SettlementDate` 由 `OrderStateMachine` 的 `NOW()`）都是**库时钟**、库时钟是 **UTC**（VM / a3 实测 `@@system_time_zone=UTC`，见 `context-packs/c3-block-1-infra.md:109`）⇒ 交回 `'YYYY-MM-DD HH:mm:ss'` **无时区文本**；少补末尾那个 `Z`，`new Date()` 按**浏览器本地时区**解释它 ⇒ 整整差一个偏移且**错得很安静**。手法照 `views/admin/AuditPage.vue:190` 的 `toLocal`（本页此前漏了）。
   if (!dateStr) return ''
-  const date = new Date(dateStr)
+  const date = new Date(`${String(dateStr).replace(' ', 'T')}Z`)
   const year = date.getFullYear()
   const month = String(date.getMonth() + 1).padStart(2, '0')
   const day = String(date.getDate()).padStart(2, '0')
@@ -257,8 +257,7 @@ const loadOrders = async () => {
 }
 
 // ⚠️ 三位 → 状态：与 `OrderState.java` 的 5 个具名常量一一对应，一步不多（稿 :846-853 逐字取）。
-//    状态是三个 int 位**推出来**的，`selectByMerchant` 已把三位全 SELECT 出来 ⇒ 状态列是
-//    零改动的真功能（稿 :832-833）。
+//    状态由三个 int 位**推出来**；⚠️ C3 块4 补丁·第 2 笔起**先判 `CancelledAt`**（取消的单三位仍是 (0,0,0)，与「未付款」同构）。
 const STATE_OF = {
   '0,0,0': ['draft', '未付款'],
   '1,0,0': ['warn', '待发货'],
@@ -267,6 +266,7 @@ const STATE_OF = {
   '1,1,1': ['ok', '已完成']
 }
 const stateOf = (order) => {
+  if (order.CancelledAt) return ['err', '已取消']
   const key = [order.PayIf, order.DeliveryIf, order.ReceiveIf].join(',')
   return STATE_OF[key] || ['draft', '未知状态']
 }

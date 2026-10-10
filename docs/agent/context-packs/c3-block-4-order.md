@@ -64,7 +64,7 @@
 - ⚠️ **身份门控两档**：5 个读/建端点在方法体第一行 `IdentityGuard.requireSelfOrAdmin`（以 `OrderController.java:85` 为例）；
   **3 个 CAS 端点 `:158`/`:165`/`:172` 只收 `orderId`、不判归属** —— **缺口**（登记 `progress.md §5-AF`，本块是否补属 A 档 3 的连带）。
 - `.../order/model/OrderState.java:44` —— 8 种三位组合：合法 5（`CREATED(0,0,0)` / `PAID(1,0,0)` / `SHIPPED(1,1,0)` / `RECEIVED_NODELIVERY(1,0,1)` / `COMPLETED(1,1,1)`）+ 非法 3；`:100` `legal()`；**`:137` `isInitial()` = 出生闸白名单恰为 `{(0,0,0),(1,0,0)}`**（全仓唯一判据处）。
-- ⚠️ **状态机唯一真值源 = `.../order/model/OrderStateMachine.java`**（守卫表静态块 `:98` / `updateSql()` `:136`）—— **用户明令本块不碰**（见「约束 4」）。
+- ⚠️ **状态机唯一真值源 = `.../order/model/OrderStateMachine.java`**（守卫表静态块 `:98` / `updateSql()` `:136`）—— **用户明令本块不碰**（见「约束 4」）。⚠️ **2026-10-10 超时取消**在 `updateSql(PAY)` 尾部追加 `AND CancelledAt IS NULL` —— 属**付款业务规则**、**不违「约束 4」**（该约束只管「介入动作」），仍**不新增状态位**，见「约束 4」。
 - `.../order/service/OrderService.java:177` —— `orderAdd`；**三道锁外闸**（全部在锁**之外**）：价格闸 `:190`（上界 `10_000_000f`）/ **出生闸 `:196`**（`OrderState.isInitial`）/ 商家冻结闸 `:205`（块 2 的降级冻结）⇒ 然后 `:209` `runLocked(ORDER_ADD, OrderId)` → `:368` `addLocked`（`OrderDao.countByOrderId` 查重 + `insertOrder` 落库）。
 - 写路径 CAS：`OrderService.java:456` `casTransition(action, orderId)`（`orderStateMachine.updateSql(action)` → `orderDao.casUpdate` → `rows>0` 调 `applied` / `else` 调 `rejected`）；三入口 `:423` `payIfUp` / `receiveIfUp` / `deliveryIfUp`。
 - `.../order/dao/OrderDao.java` —— `:67` `countByOrderId` · `:86` `insertOrder` · `:102` `record OrderRow`（**record 加分量 ⇒ 唯一构造点漏改会编译失败，是好信号**）· `:116` `casUpdate` · **`:125` 的 `ReceiveIf != 1`**（「购物车」谓词的物理出处）。⚠️ 这四个已按 **C3 块 4 落码后**就地重指（原 82 / 94 / 108 / 117 行；`:67` 未动，本文件其余「现状」坐标仍是落码前的，见文件头横幅）。
@@ -191,13 +191,13 @@
 1. **fail-open / fail-soft**：审计与通知**永不抛** —— 失败**不许**把业务成功翻成 500（同块 1/2/3）。
 2. **逻辑废弃，不物理删**（规则 v2）：购物车删行 = 物理删**有争议** ⇒ 落码前按块 4 方案定（购物车行是**临时数据**，与「订单留痕」不同 —— 见 `_work/c3-block4-landing-plan.md §六`）。**订单/审计/时间线一律禁止 `DROP`/`DELETE`**。
 3. **admin 端点不加角色闸**（TD-18）。
-4. ⚠️ **不碰既有 `OrderStateMachine`**（**用户明令**）—— 介入只走既有三条 CAS 边；**不得**新增状态位或改守卫表。
+4. ⚠️ **不碰既有 `OrderStateMachine`**（**用户明令**）—— 介入只走既有三条 CAS 边；**不得**新增状态位或改守卫表。⚠️ **范围澄清（用户 2026-10-11）**：本约束管的是**「介入动作」**（状态位 / 守卫表 / CAS 边），**不管「付款业务规则」** ⇒ 2026-10-10「超时未付款自动取消」在 `updateSql(PAY)` 尾部追加 `AND CancelledAt IS NULL`（**改的是 WHERE，不是 SET；未新增任何状态位**）属付款业务规则，**不违本约束**（是「旧令本就不适用本次」，不是破例）。判据：取消**不动** `PayIf`，光靠 `PayIf = 0` 的守卫拦不住「已取消的单被付款」，而「先查再 CAS」会留 TOCTOU 窗口（`runLocked` 取锁失败是 fail-open）⇒ 放进同一条 UPDATE 才是单语句原子。其余（三条 CAS 边 / 守卫表 / 状态位）仍受本约束。后果登记 `tech-debt.md` **TD-34**。
 5. ⚠️ **订单链禁 `@Transactional`**（全项目唯一禁令）—— 结构断言 `DistributedLockServiceTest.java:419` 兜底，新增订单写路径**同样禁止**。
 6. **既有端点原则不动**：本块**动既有契约的处数**在 A 档裁后**逐条列全**（预期 ≤ 3：`order` 加列 / `orderAdd` 入参 / `/customer/cart` 前端语义）；**其余一律「新增」**。
 7. **净零行数**：`router/index.js`（最大被引 **453**）/ `endpoints.js`（**84**）/ `nav.js`（**61**）/ `admin-nav.js`（**43**）⇒ 新增**追加文件尾**或**同行替换**；动到被引行前后必须重跑 `refs-scan.sh`。
 8. **无缓存**：订单域今天零缓存（`GoodsCacheService` 只管商品）；购物车若加缓存必须登记失效面。
 9. **时区**：新表时刻列一律 `CURRENT_TIMESTAMP(3)`（DB 存 UTC），**前端渲染再转**浏览器时区。
-10. ⚠️ **手验提醒（每次）**：`application-a3.properties:98` 的 `app.auth.enabled=false` —— **a3 profile 闸关，手验绿 ≠ 默认 profile 绿**。本块端点**全是身份敏感**（订单归属）⇒ **必须在默认 profile 再验一遍**。
+10. ⚠️ **手验提醒（每次）**：日常手验挂 **`dev`** profile（2026-10-11 起 `a3` 收窄为 CI 专用，见 `tech-debt.md` TD-35）；`dev` 的鉴权闸与 a3 孪生、**也是关的**（`application-a3.properties:98`）—— **闸关，手验绿 ≠ 默认 profile 绿**。本块端点**全是身份敏感**（订单归属）⇒ **必须在默认 profile 再验一遍**。
 
 ## 验收
 
@@ -251,7 +251,7 @@
 
 1. **模拟收银台**：`OrderMine` → 【付款】弹窗选 `支付宝 / 微信支付 / 银行卡` → 回库 `order.TradeNo` 非空（形如 `PAYyyyyMMdd######`）、`PaymentMethod` = 所选项、`PaidAt` 非空；响应体带 `tradeNo`。
 2. **发货带单**：`OrderCenter` → 【发货】填快递公司 + 运单号 → 回库 `ExpressCompany` / `TrackingNo` / `ShippedAt` 三项落值；**三道守卫仍成立**（已发货 / 已收货 / 未付款 ⇒ 拒绝）。
-3. **物流轨迹**：等 `transit-ms=60000` / `delivery-ms=120000` / `signed-ms=240000`（或手改 `ShippedAt` 回拨）⇒ `order_shipping_track` 依次出现 `in_transit` / `out_for_delivery` / `delivered`；**重跑不重复插**（`NOT EXISTS` 幂等）；**`order.ReceiveIf` 仍为 0**（这就是 TD-28，**是预期不是 bug**）。
+3. **物流轨迹**：等 `transit-ms=15000` / `picked-up-ms=30000` / `delivery-ms=45000` / `signed-ms=60000`（⚠️ 2026-10-11 起**四节点全由调度器补**，时序「运输中 → 驿站已揽收 → 驿站派送中 → 已签收」；或手改 `ShippedAt` 回拨）⇒ `order_shipping_track` 依次出现 `in_transit` / `picked_up` / `out_for_delivery` / `delivered`；**重跑不重复插**（`NOT EXISTS` 幂等）；**`order.ReceiveIf` 仍为 0**（这就是 TD-28，**是预期不是 bug**）。
 4. **买家侧详情**：`OrderMine` 的【物流】按钮（`DeliveryIf===1` 才出现）→ `POST /order/orderDetail` → 弹窗出现轨迹时间线；**归属校验**（非本人 `orderId` ⇒ 403）—— ⚠️ **a3 闸关下测不出**。
 5. **管理端**：`admin/OrderPage` 详情区出现**第二组 `.a-kv`**（支付方式 / 交易号 / 付款时间 / 快递公司 / 运单号 / 发货时间 / 收货时间；空值 `—`）+ **物流轨迹 `<ol class="a-tl">`**；与「状态流转」时间线**故意分列不合**。
 6. **不回归**：`./mvnw test` **258 / 0 fail / 26 skipped**（`OrderStateMachineTest` 21 → **23**）；**golden copy** `OrderStateMachineTest.updateSqlIsByteForByteTheLegacyLiteral` **必须仍绿且字节未变**；`npm run build` DONE。

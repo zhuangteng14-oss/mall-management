@@ -1,0 +1,56 @@
+== 0. 起核验实例（默认 profile + VM 库 + 关鉴权 + 8089） ==
+  启动中（pid 33851，日志 C:/Users/86159/Desktop/软件工程/期末项目/_work/verify-8089.log）…
+  ✅ 8089 就绪（第 10 秒）
+
+== 1. 发货前状态 ==
+RNLX55941639	1	0	0	NULL
+
+== 2. 打发货端点 ==
+{"msg":"发货成功","success":true}
+  ShippedAt（库时钟）= 2026-10-10 14:49:28
+
+== 3. 判据 ①（当即，应 0 条） ==
+  ── 发货 +0s（当即）
+(�޹켣)
+     条数 = 0
+
+== 4. 判据 ②（+20s < 阈值 30s，应仍 0 条） ==
+  ── 发货 +21s（+20s）
+(�޹켣)
+     条数 = 0
+
+== 5. 判据 ③④（+40s，应恰好 1 条 picked_up / 驿站已揽收 / TrackedAt=ShippedAt+30s / diff≈0） ==
+  ── 发货 +41s（+40s）
+picked_up/��վ������@14:49:58/-2s
+     条数 = 1
+
+== 6. 判据 ⑤（+70s，应多出 in_transit / 运输中 / TrackedAt=ShippedAt+60s） ==
+  ── 发货 +72s（+70s）
+picked_up/��վ������@14:49:58/-2s | in_transit/������@14:50:28/-2s
+     条数 = 2
+
+== 7. 判据 ⑥（等齐 +250s，四节点同一套偏移） ==
+  ── 发货 +264s（+250s）
+picked_up/��վ������@14:49:58/-2s | in_transit/������@14:50:28/-2s | out_for_delivery/������@14:51:28/-3s | delivered/��ǩ��@14:53:28/0s
+     条数 = 4
+
+== 8. 判据 ⑦ order_state_transition 与 created_at 同轴（改前 OccurredAt 会 +8h） ==
+create	22:20:20	14:20:20	28800
+pay	22:25:48	14:25:48	28800
+deliver	14:49:28	14:49:28	0
+
+== 9. 轨迹文案字节（确认落库就是 UTF-8 的「驿站已揽收」，不是 GBK 乱码） ==
+picked_up	E9A9BFE7AB99E5B7B2E68FBDE694B6	5
+in_transit	E8BF90E8BE93E4B8AD	3
+out_for_delivery	E6B4BEE98081E4B8AD	3
+delivered	E5B7B2E7ADBEE694B6	3
+
+== 10. 关掉核验实例（日志尾部） ==
+2026-10-10T22:49:27.590+08:00  INFO 127844 --- [Mall-management-server] [nio-8089-exec-2] o.s.web.servlet.DispatcherServlet        : Initializing Servlet 'dispatcherServlet'
+2026-10-10T22:49:27.591+08:00  INFO 127844 --- [Mall-management-server] [nio-8089-exec-2] o.s.web.servlet.DispatcherServlet        : Completed initialization in 1 ms
+2026-10-10T22:49:28.041+08:00  INFO 127844 --- [Mall-management-server] [nio-8089-exec-1] org.redisson.Version                     : Redisson 3.46.0
+2026-10-10T22:49:28.135+08:00  INFO 127844 --- [Mall-management-server] [isson-netty-7-2] o.redisson.connection.ConnectionsHolder  : 1 connections initialized for 192.168.229.129/192.168.229.129:6379
+2026-10-10T22:49:28.210+08:00  INFO 127844 --- [Mall-management-server] [isson-netty-7-3] o.redisson.connection.ConnectionsHolder  : 24 connections initialized for 192.168.229.129/192.168.229.129:6379
+DONE
+
+[exited with code 0]

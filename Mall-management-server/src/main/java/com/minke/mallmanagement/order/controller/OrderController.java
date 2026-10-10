@@ -224,7 +224,7 @@ public class OrderController {
         if (!isOwner(request, orderId, true)) {
             return IdentityGuard.forbidden();
         }
-        // ⚠️ C3 块4 补丁：快递公司 / 运单号可空（管理员代发走 1 参重载）；成功后 Service 写首条轨迹 picked_up。
+        // ⚠️ C3 块4 补丁：快递公司 / 运单号可空（管理员代发走 1 参重载）。⚠️ **本端点不再写轨迹行**（2026-10-10 用户判）：四节点（`in_transit` 运输中 / `picked_up` 驿站已揽收 / `out_for_delivery` 驿站派送中 / `delivered` 已签收）已搬进 `ShippingTrackAdvanceJob`、按「ShippedAt + 阈值」由调度补（⚠️ 2026-10-11 起首条是 `in_transit`，`picked_up` 退为**第 2** 个）；这里只改状态位。
         Map<String, Object> result = orderService.deliveryIfUp(orderId, expressCompany, trackingNo);
         if (Boolean.TRUE.equals(result.get("success"))) {
             auditService.record(AuthSession.identify(request), AuditActions.ORDER_DELIVER,

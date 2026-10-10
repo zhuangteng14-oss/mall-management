@@ -51,9 +51,9 @@ class OrderStateMachineTest {
         // 下面三个字面量抄自改动前的 MallManagementGoodsController（B2 之后的行号），
         // 抄的时候一个空格都没动。改它们之前先想清楚：这不是测试，这是外部契约的副本。
         assertThat(machine.updateSql(PAY))
-                .as("原 G:556 —— orderPayIfUp")
+                .as("原 G:556 —— orderPayIfUp；⚠️ 尾部 AND CancelledAt IS NULL 是 2026-10-10 追加的（超时取消）")
                 .isEqualTo("UPDATE mall_management_sql.`order` SET PayIf = 1, "
-                        + "SettlementDate = NOW() WHERE OrderId = ? AND PayIf = 0");
+                        + "SettlementDate = NOW() WHERE OrderId = ? AND PayIf = 0 AND CancelledAt IS NULL");
 
         assertThat(machine.updateSql(RECEIVE))
                 .as("原 G:584 —— orderReceiveIfUp")

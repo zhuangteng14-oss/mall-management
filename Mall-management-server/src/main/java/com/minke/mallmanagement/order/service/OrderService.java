@@ -528,19 +528,15 @@ public class OrderService {
      * 发货（带快递公司 + 运单号）。两者可空（管理员代发走 1 参重载 → 此路）。
      *
      * <p>⚠️ <b>C3 块4 补丁新增</b>：明细列写 {@code ExpressCompany / TrackingNo / ShippedAt}
-     * （{@code casTransition} 内、同锁内），成功后写**首条物流轨迹** {@code picked_up}
-     * （{@code order_shipping_track}，fail-soft）。
+     * （{@code casTransition} 内、同锁内）。
+     * ⚠️ <b>2026-10-10 改判（用户手验「揽收不该在发货时立即生成」）：本方法<em>不再</em>写轨迹</b>
+     * —— 揽收节点 {@code picked_up} 移交 {@code ShippingTrackAdvanceJob}（⚠️ 2026-10-11 起它是**第 2** 个节点，
+     * 首条是「运输中」{@code in_transit}）。理由与后果（a3 里新发的单一条轨迹都没有）见那个类注释；**别在这里加回来**。
      */
     public Map<String, Object> deliveryIfUp(String orderId, String expressCompany, String trackingNo) {
-        Map<String, Object> result = lockService.runLocked(LockName.ORDER_DELIVERY, orderId, () -> {
-            Map<String, Object> r = casTransition(OrderAction.DELIVER, orderId,
-                    "发货成功", "订单不存在或未付款或已发货/已收货",
-                    Arrays.asList(expressCompany, trackingNo));
-            if (Boolean.TRUE.equals(r.get("success"))) {
-                writeTrackRow(orderId, ShippingTrackDao.PICKED_UP, "商家已揽收", System.currentTimeMillis());
-            }
-            return r;
-        });
+        Map<String, Object> result = lockService.runLocked(LockName.ORDER_DELIVERY, orderId, () -> casTransition(OrderAction.DELIVER, orderId,
+                "发货成功", "订单不存在或未付款或已发货/已收货",
+                Arrays.asList(expressCompany, trackingNo)));
         if (Boolean.TRUE.equals(result.get("success"))) {
             notifyCounterparty(orderId, false, "商家已发货",
                     "订单 " + orderId + " 已由商家发货，请注意查收。");
@@ -679,10 +675,17 @@ public class OrderService {
         }
     }
 
-    /** 写一条物流轨迹（fail-soft）。发货首行 {@code picked_up}、收货兜末行 {@code delivered} 走它。 */
-    private void writeTrackRow(String orderId, String status, String description, long trackedAtMillis) {
+    /**
+     * 写一条物流轨迹（fail-soft）。今日**只剩收货兜末行 {@code delivered}** 走它
+     * —— 揽收节点 {@code picked_up} 已移交调度器（2026-10-10，见 {@link #deliveryIfUp(String, String, String)}）。
+     *
+     * <p>⚠️ 时刻口径：{@code TrackedAt} 由库时钟出（{@code NOW(3)}），本方法**不接收**时间参数
+     * —— 改前那个 {@code long trackedAtMillis} 走 {@code new Timestamp} 会被驱动按
+     * {@code serverTimezone=Asia/Shanghai} 折算，落库 +8 小时（详见 {@code ShippingTrackDao} 类注释）。
+     */
+    private void writeTrackRow(String orderId, String status, String description) {
         try {
-            shippingTrackDao.write(orderId, status, description, trackedAtMillis);
+            shippingTrackDao.write(orderId, status, description);
         } catch (Exception e) {
             log.warn("订单 {} 的物流轨迹 {} 写失败：{}", orderId, status, e.toString());
         }
@@ -698,7 +701,7 @@ public class OrderService {
     private void ensureDeliveredTrack(String orderId) {
         try {
             if (!shippingTrackDao.exists(orderId, ShippingTrackDao.DELIVERED)) {
-                shippingTrackDao.write(orderId, ShippingTrackDao.DELIVERED, "已签收", System.currentTimeMillis());
+                writeTrackRow(orderId, ShippingTrackDao.DELIVERED, "已签收");
             }
         } catch (Exception e) {
             log.warn("订单 {} 的兜末条轨迹写失败：{}", orderId, e.toString());
