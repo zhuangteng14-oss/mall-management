@@ -44,7 +44,11 @@ public class GoodsTypeCacheService {
      */
     @Cacheable(cacheNames = "goodstype", key = "'all'", sync = true)
     public Map<String, Object> listTypes() {
-        String sql = "SELECT Id, GoodType, GoodTypeNew FROM mall_management_sql.goodstype";
+        // ⚠️ C3 块 3：返回列 + ParentId / Sort / State（唯一键换代与二级树的连带，用户已批「改契约」）。
+        //    **不过滤 State=0**：管理端复用同一端点管树（要看见被停用的类目），
+        //    买家侧的一级 chips 前端按 `ParentId===0`（+ 可选 State）过滤（见 HomePage.vue）。
+        String sql = "SELECT Id, GoodType, GoodTypeNew, ParentId, Sort, State "
+                + "FROM mall_management_sql.goodstype";
         List<Map<String, Object>> list = jdbcTemplate.queryForList(sql);
         Map<String, Object> result = new HashMap<>();
         result.put("success", true);
@@ -60,8 +64,9 @@ public class GoodsTypeCacheService {
      * <p>【2026-10-04 补：唯一约束 + catch 语义】上方那条 SELECT COUNT(*) 是「先查后插」，
      * 并发下两个请求可同时穿过它 —— 而本方法【不在】 B2 的 5 个分布式锁落点内，
      * 所以它是 B2 之后【唯一仍会造重复行】的 TOCTOU 站点（A3 的 B-2 场景实测 4/5 轮复现）。
-     * 现在由 DB 兜最后一道：{@code goodstype.GoodType} 加了唯一索引 {@code uk_goodstype_GoodType}
-     * （见 {@code mall_management_sql.sql} 末尾 Migration 块）。
+     * 现在由 DB 兜最后一道：{@code goodstype} 加了唯一索引
+     * {@code uk_goodstype_parent_name}（{@code (ParentId, GoodType)}；C3 块 3 由
+     * {@code uk_goodstype_GoodType} **换代**而来，见 {@code mall_management_sql.sql} 末尾 Migration 块）。
      *
      * <p>⚠️ 这条索引与上方 SELECT 用的是【同一列、同一 collation】（{@code utf8mb4_0900_ai_ci}），
      * 故两边对「重复」的定义逐字一致（含大小写 / 重音不敏感），不会出现
@@ -72,10 +77,16 @@ public class GoodsTypeCacheService {
      * 应用层查重【保留】—— 索引是最后防线，不是替代品（它省不掉一次正常路径的回查）。
      */
     @CacheEvict(cacheNames = "goodstype", allEntries = true)
-    public Map<String, Object> addType(String GoodType, Integer GoodTypeNew) {
+    public Map<String, Object> addType(String GoodType, Integer GoodTypeNew, Integer ParentId) {
         try {
-            String checkSql = "SELECT COUNT(*) FROM mall_management_sql.goodstype WHERE GoodType = ?";
-            Integer count = jdbcTemplate.queryForObject(checkSql, Integer.class, GoodType);
+            // ⚠️ C3 块 3：查重必须与换代后的唯一键**同口径** —— 唯一键是
+            //    `(ParentId, GoodType)` ⇒ 这里也按 (ParentId, GoodType) 查。
+            //    否则「两个不同父级下同名子类目」会在这里被误拦（应用层放行、库也该放行），
+            //    或反之「同父级下同名」被应用层放行、库再拦 —— 两个分支的文案会打架。
+            int effectiveParent = ParentId == null ? 0 : ParentId;
+            String checkSql = "SELECT COUNT(*) FROM mall_management_sql.goodstype "
+                    + "WHERE GoodType = ? AND ParentId = ?";
+            Integer count = jdbcTemplate.queryForObject(checkSql, Integer.class, GoodType, effectiveParent);
             if (count > 0) {
                 Map<String, Object> result = new HashMap<>();
                 result.put("success", false);
@@ -83,8 +94,9 @@ public class GoodsTypeCacheService {
                 return result;
             }
 
-            String insertSql = "INSERT INTO mall_management_sql.goodstype (GoodType, GoodTypeNew) VALUES (?, ?)";
-            jdbcTemplate.update(insertSql, GoodType, GoodTypeNew);
+            String insertSql = "INSERT INTO mall_management_sql.goodstype "
+                    + "(GoodType, GoodTypeNew, ParentId) VALUES (?, ?, ?)";
+            jdbcTemplate.update(insertSql, GoodType, GoodTypeNew, effectiveParent);
 
             Map<String, Object> result = new HashMap<>();
             result.put("success", true);
@@ -92,7 +104,7 @@ public class GoodsTypeCacheService {
             return result;
         } catch (DuplicateKeyException e) {
             // ⚠️ 并发下「另一请求刚好先插成功」是【预期路径】，不是故障。
-            // 加了 uk_goodstype_GoodType 后本分支必然会被走到：B-2 每轮 20 并发（TH=20）打同一个
+            // 加了 uk_goodstype_parent_name 后本分支必然会被走到：B-2 每轮 20 并发（TH=20）打同一个
             // GoodType，1 条成功、其余 19 条的响应文案都是「类型已存在」。
             // ⚠️ 但【落进本分支的只是穿过上方 SELECT 查重的那几条】，不是全部 19 条 ——
             //    ci49（2026-10-03，加索引前）实测每轮「新增成功」= 4/1/4/3/3 条 ⇒ 能穿过 SELECT 的

@@ -1,6 +1,6 @@
 // src/config/notify-events.js —— 系统通知**事件类型 code → 中文标签**（C3 块 1 · I2，2026-10-09）。
 //
-// 它对应后端的 `notification/NotificationEvents.java`（24 条常量）。**两张表必须逐字对齐** ——
+// 它对应后端的 `notification/NotificationEvents.java`（25 条常量）。**两张表必须逐字对齐** ——
 // 后端那个类的类注释写明了「写入方与读出方各写一遍，第二处抄错双方都不报错」，本文件就是那个「读出方」。
 //
 // ⚠️ 【本文件最容易做错、也最不该做错的一条】**必须有兜底**。
@@ -16,7 +16,7 @@
 //    所以「一个恰好叫 `constructor` 的未知 code」是**可达**的。故判据必须是「**自有**属性」。
 
 /**
- * code → 中文标签。**24 条**，顺序与后端 `NotificationEvents.java` 的「归属块」分组一致。
+ * code → 中文标签。**25 条**，顺序与后端 `NotificationEvents.java` 的「归属块」分组一致。
  *
  * ⚠️ 加一条 = 后端 `NotificationEvents` 加常量 + 本表加一行 + `EVENT_OPTIONS` 加一项（**三处**）。
  *    漏掉本文件只会让**新类型**显示成 code 原文（兜底在，不崩），漏掉后端常量则写入方没得引 —— 不会静默。
@@ -53,6 +53,10 @@ export const EVENT_LABELS = {
   'goods.audit.passed': '商品审核通过',
   'goods.audit.rejected': '商品审核驳回',
   'goods.violation.removed': '违规商品下架',
+  // ⚠️ 2026-10-10（C3 块 3 落地）：商家**提审**时发的一条。与块 2 的 `merchant.apply.submitted`
+  //    同款 —— 收件人**不是商家本人**，而是**管理端的共享收件箱**（`ToType='admin'` / `ToId='*'`，
+  //    见 `GoodsController.ADMIN_INBOX_ID`）⇒ 「待办来了」这一侧也归它。
+  'goods.apply.submitted': '商品提审已提交',
 
   // ── 块 4：订单治理 ──────────────────────────────────────────────────────
   'order.intervened': '订单被介入',
@@ -84,6 +88,7 @@ export const EVENT_OPTIONS = [
   { code: 'goods.audit.passed', label: '商品审核通过' },
   { code: 'goods.audit.rejected', label: '商品审核驳回' },
   { code: 'goods.violation.removed', label: '违规商品下架' },
+  { code: 'goods.apply.submitted', label: '商品提审已提交（发往管理端）' },
   { code: 'order.intervened', label: '订单被介入' },
   { code: 'order.notice', label: '订单通知' },
   { code: 'seckill.invited', label: '秒杀邀请' },

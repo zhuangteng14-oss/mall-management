@@ -1,0 +1,33 @@
+手验第 3 步的证据：重启后端（a3 + VM，PID 144048）后，admin_audit 里新出现的两行。
+修复前这两处 TargetId 传 null ⇒ 行 100% 丢失（见 slot-registry.md §19-9-8）。
+采集时刻：2026-10-10（本地）；库：192.168.229.129/mall_management_sql。
+
+── 查询 1：所有 %create% 动作，倒序 8 条 ─────────────────────────────────
+SQL> SELECT Id,Action,TargetType,TargetId,OccurredAt FROM admin_audit WHERE Action LIKE '%create%' ORDER BY Id DESC LIMIT 8;
+38	goodstype.create	goodstype	0:snap-probe-cat	2026-10-10 08:40:59.178
+35	goods.apply.create	goods_audit	c345301b-059c-47a8-9dc9-2982616e9f11	2026-10-10 08:40:37.824
+34	template.create	template	goods.detail:snap-probe-AAA	2026-10-10 08:40:37.287
+31	goods.apply.create	goods_audit	abd9fe52-3514-4bf2-8813-2f365d00192a	2026-10-10 07:55:32.476
+28	goods.apply.create	goods_audit	268b045f-2f74-44bf-9691-6b08befba4e9	2026-10-10 07:55:15.697
+18	merchant.apply.create	merchant_application	a8049498-714a-4d87-94fe-fc242b314d1e	2026-10-09 15:43:55.463
+
+── 查询 2：本次 template.* 全部（含 update/re-enable 等）─────────────────
+SQL> SELECT Id,Action,TargetType,TargetId,OccurredAt FROM admin_audit WHERE Action LIKE 'template.%' OR Action LIKE 'goodstype.%' ORDER BY Id;
+27	template.update	template	1	2026-10-10 07:52:27.383
+30	template.update	template	2	2026-10-10 07:55:16.742
+33	template.update	template	3	2026-10-10 07:55:33.445
+34	template.create	template	goods.detail:snap-probe-AAA	2026-10-10 08:40:37.287
+37	template.update	template	4	2026-10-10 08:40:38.919
+38	goodstype.create	goodstype	0:snap-probe-cat	2026-10-10 08:40:59.178
+
+── 判定 ─────────────────────────────────────────────────────────────────
+Id=34 template.create  TargetId=goods.detail:snap-probe-AAA  ⇒ Type:Name 口径 ✓
+Id=38 goodstype.create TargetId=0:snap-probe-cat             ⇒ ParentId:GoodType 口径 ✓
+两行 TargetId 均非空且为业务标识串 —— 与 AdminTemplateController 的 create（第 90 行）/ AdminCatalogController 的 categoryCreate（第 145 行） 的实参逐字吻合。
+
+── 旁证：丢失是「实打实丢了几行」，不是「查不到」────────────────────────
+模板 Id=1 / 2 / 3 各自都有 template.update 行（27 / 30 / 33），却**没有**各自的
+template.create 行 —— 因为那三次 create 发生在修复前的旧进程里（TargetId=null ⇒ 插入
+因 TargetId NOT NULL 失败，被 AuditService 的 fail-open 吞掉，只留下 log.error）。
+修复后重建的模板 Id=4 则 create（34）与 update（37）俱在。
+⇒ 「丢失」在库里表现为**update 有、create 无**的缺口，可直接指认。

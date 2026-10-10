@@ -85,7 +85,7 @@
 - `.../src/views/LoginPage.vue:161-223`（注册表单，`:216` 提交按钮）/ `:283-287`（`toggle()` 翻 `isSlide` = 登录↔注册态）/ `:289-330`（`login()`：`loginSelect` → `/user/me` → 按 role 分支）。
 - `.../src/views/UserInfoPage.vue:232` / `:236` / `:241` —— **仅有的三个可改字段**；`:348`（读 `/user/me`）/ `:401`（`updateUserInfo`）；`:55` / `:138` —— 商家 / 客户两版模板，**分支判据是 `customerid` / `merchantid`**（⚠️ 见「约束」5）。
 - `.../src/api/endpoints.js:23-41`（`user` 组）/ `:70-82`（`admin` 组）/ `:88-93`（`notification` 组）—— ⚠️ **上半部一行不能动**（`:26` 被 `progress.md` 按行号引）⇒ 新增一律**追加在文件尾**。
-- `.../src/config/notify-events.js:39-44`（块 1 的 6 条用户/商家标签**已在**）/ `:75-80`（发送页下拉项）。
+- `.../src/config/notify-events.js:39-44`（块 1 的 6 条用户/商家标签**已在**）/ `:76-81`（发送页下拉项；⚠️ 2026-10-10 C3 块 3 在 `:56-59` 插了 `goods.apply.submitted` ⇒ 本行原引的 `:75-80` 顺移 +1，已同笔更正）。
 
 ## 要新建
 
@@ -98,7 +98,7 @@
 3. **封禁落在哪**：只标 `user`（**建议**）vs 只标 `login` vs 两者同标。
    **理由**：治理视图（用户列表）在 `user` 上；`login` 是**凭据表**（只有 `UserName`/`Password`/`Role`/`Id`），往里塞业务态会让「账号」与「状态」两义混在一处。登录闸在 `UserService.loginSelect`（`UserService.java:136-152`）加一步查 `user` 的封禁列即可。
 4. **「提交入驻 → 通知管理员」怎么落地**：扩 `ToType` 取值域加 `admin` + 管理端壳加通知面（**建议**）vs 不动通道（管理端拿「待审数」当待办）。
-   ⚠️ 这是**契约级缺口**，不是实现细节：`ToType` 现行取值域是**封闭的** `customer` / `merchant`（`docs/agent/db-schema.md:314`），而管理端**今天没有收件箱**（块 1 的接收面只挂了两壳）。且**必须新增**一条事件 code（如 `merchant.apply.submitted`）—— 块 1 的 21 条清单里**没有**「提交通知管理员」这一条。
+   ⚠️ 这是**契约级缺口**，不是实现细节：`ToType` 现行取值域是**封闭的** `customer` / `merchant`（`docs/agent/db-schema.md:327`；原 `:314`，块 3 增量后重指），而管理端**今天没有收件箱**（块 1 的接收面只挂了两壳）。且**必须新增**一条事件 code（如 `merchant.apply.submitted`）—— 块 1 的 21 条清单里**没有**「提交通知管理员」这一条。
    ⚠️ 附带事实：管理员在 `user` 表有一行（`usertype='管理员'`）且 `businessId` 把 role 3 映射到 `customerid` ⇒ 收件号取得到；「用 `customer` 通道冒充」是**语义撒谎**，不建议。
 
 ### 表（待批后定稿 ⇒ 追加到 `mall_management_sql.sql` **末尾**）
@@ -121,14 +121,14 @@
 | `created_at` / `updated_at` | datetime | 规则 8 |
 
   ⚠️ 索引：`(Status, SubmittedAt)`（管理端待审列表 = 最热查询）+ `(Username, SubmittedAt)`（我的申请）。
-  ⚠️ **不加 `UNIQUE(Username)`** —— 同一账号可多次申请；「同一时刻只有一条 `PENDING`」**由应用层保证**（全库除主键只有 3 个 UNIQUE，唯一性基本靠应用层，`docs/agent/db-schema.md:454-476`）。
+  ⚠️ **不加 `UNIQUE(Username)`** —— 同一账号可多次申请；「同一时刻只有一条 `PENDING`」**由应用层保证**（全库除主键只有 3 个 UNIQUE，唯一性基本靠应用层，`docs/agent/db-schema.md:510-532`（原 `:454-476`，块 3 增量后重指））。
 - 封禁列（**若**裁「标 user」，用 `ALTER TABLE ... ADD COLUMN` 追加，规则 7 三条件）：`BanState` tinyint(1) NOT NULL DEFAULT 0 / `BanReason` varchar(255) NULL / `BannedAt` datetime(3) NULL —— **都带 `COMMENT`、都加在表末尾**。
   ⚠️ **连带后果（必然发生，不是 bug）**：`user` 被 `SELECT *` 读 ⇒ 这三列会**自动出现在** `/user/me` 与 `/user/getUserInfo` 的返回 Map 里（前端多三个键）。**建议不剥**（少一处特判），但要知道它发生了。
 
 ### 后端（**建议**分层 —— B 档，报备）
 
 - **新域 `merchant/`**（**新建**，与 `user/` 平级；全仓今天**没有** merchant 包）：
-  · `.../merchant/dao/MerchantApplicationDao.java` —— **新建**：新表的唯一 SQL 出口（`@Repository` + `JdbcClient`，照 `NotificationDao.java:48-290`）。
+  · `.../merchant/dao/MerchantApplicationDao.java` —— **新建**：新表的唯一 SQL 出口（`@Repository` + `JdbcClient`，照 `NotificationDao.java:48-263` —— ⚠️ 原 48-290 行：2026-10-10〈模板表通用化〉删掉该类的模板两方法后文件只剩 263 行，此处已重指）。
   · `.../merchant/service/MerchantApplicationService.java` —— **新建**：提交（写申请 + 发通知 + 记审计）/ 我的申请 / **审核工作流**（通过 = 提升账号；驳回 = 写理由；两态都发通知 + 记审计）。
   · `.../merchant/controller/MerchantApplicationController.java` —— **新建**，`@RequestMapping("/merchant")`，公共层端点（提交 / 我的申请）。
 - **`user/` 域追加**（**改既有文件**）：`loginSelect`（`UserService.java:136-152`）加**封禁判定**（建议返回 `4` = 已封禁，**不与既有 1/2/3/0 冲突**，前端可分开提示）；`UserService` / `UserDao` 追加 `updateProfile` 与封禁列的读写。

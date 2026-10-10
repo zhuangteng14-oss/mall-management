@@ -16,7 +16,7 @@ import java.util.HashMap;
 import java.util.Map;
 
 /**
- * admin 域的**通知发送面**（C3 块 1 · I2）—— 4 个端点：发送 / 通知历史 / 模板列表 / 模板保存。
+ * admin 域的**通知发送面**（C3 块 1 · I2）—— 2 个端点：发送 / 通知历史。
  *
  * <p>对应前端侧边栏「业务域 → 系统通知」（前端路由 {@code /admin/business/notify}；本类是后端前缀
  * {@code /admin/notify}，两者不同名也不该强求同名 —— 同 {@code AdminAuditController} 的理由）。
@@ -25,12 +25,15 @@ import java.util.Map;
  * <h2>【依赖两个 Service（+ 审计），各自管一半】</h2>
  * <ul>
  *   <li>{@link NotificationBroadcastService} —— **发送工作流**（受众解析 + 扇出 + 批次），admin 专属；</li>
- *   <li>{@link NotificationService} —— **通知域的业务动作**（历史 / 模板），与三端收件箱同一个类
- *       —— 因为它们读写同两张表；「管理端读历史」不过是同一条时间线的另一种归组方式。</li>
+ *   <li>{@link NotificationService} —— **通知域的业务动作**（历史），与三端收件箱同一个类
+ *       —— 因为它们读写同一张表；「管理端读历史」不过是同一条时间线的另一种归组方式。
+ *       ⚠️ 块 1 时它还管「模板」，2026-10-10 起模板迁到通用表 ⇒ 那两个方法与其 DAO 已删，
+ *       模板端点归 {@code AdminTemplateController}。</li>
  *   <li>{@link AuditService} —— **只服务 {@code /send} 一个端点**（块 1 · I2 的审计挂钩，
  *       用户 2026-10-09 裁决「发送公告是典型平台动作，必须留痕」）。⚠️ 只在**发送**上挂，
- *       历史 / 模板两个端点不挂：读不产生可审的动作，模板 CRUD 是配置而非平台动作
- *       （⚠️ 这一条是**推断**，若你要模板也留痕，说一声，加一条常量即可）。</li>
+ *       历史端点不挂（读不产生可审的动作）。
+ *       ⚠️ 块 1 时这里还有一句「模板 CRUD 是配置而非平台动作（推断）」—— 2026-10-10 就地改造
+ *       **推翻了它**：模板合并后统一挂 {@code template.*}，通知模板从无痕变成有痕。</li>
  * </ul>
  *
  * <h2>⚠️【本批**不**给 {@code /admin/**} 设服务端门禁 —— 已知接缝，登记不修】</h2>
@@ -129,19 +132,11 @@ public class AdminNotificationController {
         return Result.of(notificationService.history(eventType, from, to, limit));
     }
 
-    /** 模板列表。块 1 只做**存取** CRUD，不做占位符渲染（见 {@code NotificationService#saveTemplate}）。 */
-    @PostMapping("/template/list")
-    public Result<Map<String, Object>> templateList() {
-        return Result.of(notificationService.listTemplates());
-    }
-
-    /** 模板 upsert（按 {@code templateKey} 唯一键，有则改、无则插）。 */
-    @PostMapping("/template/save")
-    public Result<Map<String, Object>> templateSave(
-            @RequestParam(value = "templateKey", required = false) String templateKey,
-            @RequestParam(value = "titleTemplate", required = false) String titleTemplate,
-            @RequestParam(value = "bodyTemplate", required = false) String bodyTemplate,
-            @RequestParam(value = "enabled", required = false) Boolean enabled) {
-        return Result.of(notificationService.saveTemplate(templateKey, titleTemplate, bodyTemplate, enabled));
-    }
+    // ==================== ⚠️ 原先的「模板列表 / 模板保存」两个端点已**迁出**（2026-10-10）====================
+    // 块 1 的 `/admin/notify/template/list` 与 `/admin/notify/template/save`（读写
+    // `notification_template` 表）**已删**。该表的行已在迁移块里搬进通用 `template` 表
+    // （`Type = 'notification.' + 原 TemplateKey`），原表**物理删除** ⇒ 旧端点已无表可读。
+    // 新位置：`POST /admin/template/*`（`AdminTemplateController`），NotifyPage 改调它。
+    // ⚠️ 随之而来的一处口径变化：通知模板 CRUD 原先**不挂审计**，合并后统一挂 `template.*`
+    //    （新增留痕，见 `AuditActions.TEMPLATE_CREATE` 的类注）。占位符渲染依旧**不做**（块 1 口径不变）。
 }

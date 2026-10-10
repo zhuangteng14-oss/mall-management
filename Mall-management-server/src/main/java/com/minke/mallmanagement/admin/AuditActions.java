@@ -76,6 +76,75 @@ public final class AuditActions {
     /** 降级**执行**（定时任务触发，非 HTTP）—— 由 {@code MerchantDowngradeJob} 记。 */
     public static final String MERCHANT_DOWNGRADE_APPLY = "merchant.downgrade.apply";
 
+    // ==================== C3 块 3（商品块）逐笔挂上来的 10 个挂钩点 ====================
+    // 口径同块 2：域 = TargetType（表名），tag = `<TargetType>.<动作>`，点号前段必须与
+    // 调用点传的 TargetType 字面量一致。
+    // ⚠️ 三个「新增类」动作（apply.create / category.create / template.create）没有「改前态」
+    //    ⇒ BeforeJson 恒 NULL；其中提审的 TargetId 用 BatchId（同块 2 的 merchant.apply.create）。
+
+    /** 商家提交商品上架申请（提审）—— {@code POST /goods/goodsAdd}。**新增类**动作。 */
+    public static final String GOODS_APPLY_CREATE = "goods.apply.create";
+
+    /** 管理员审核商品提审单（通过 / 驳回）—— {@code POST /admin/catalog/application/audit}。 */
+    public static final String GOODS_APPLY_AUDIT = "goods.apply.audit";
+
+    /** 管理员新增类目 —— {@code POST /admin/catalog/category/create}。**新增类**动作。 */
+    public static final String GOODS_CATEGORY_CREATE = "goodstype.create";
+
+    /** 管理员改类目（改名 / 排序 / 启用停用 / 换父级）—— {@code POST /admin/catalog/category/update}。 */
+    public static final String GOODS_CATEGORY_UPDATE = "goodstype.update";
+
+    /** 管理员删类目（逻辑废弃：{@code State=0}）—— {@code POST /admin/catalog/category/delete}。 */
+    public static final String GOODS_CATEGORY_DELETE = "goodstype.delete";
+
+    /**
+     * 管理员新增模板 —— {@code POST /admin/catalog/template/create}。**新增类**动作。
+     *
+     * @deprecated C3 块 3 就地改造（2026-10-10）后由 {@link #TEMPLATE_CREATE} 取代。
+     *     ⚠️ **保留不删**：与 {@link #GOODS_UPDATE} 同因 —— 存量 {@code admin_audit} 行里仍有这个字面量，
+     *     删掉常量不会删掉那些行，只会让「这条值还能是哪些」在代码里失去枚举依据。
+     */
+    @Deprecated
+    public static final String GOODS_TEMPLATE_CREATE = "goods_template.create";
+
+    /**
+     * 管理员改模板 —— {@code POST /admin/catalog/template/update}。
+     *
+     * @deprecated 同 {@link #GOODS_TEMPLATE_CREATE}（由 {@link #TEMPLATE_UPDATE} 取代）。
+     */
+    @Deprecated
+    public static final String GOODS_TEMPLATE_UPDATE = "goods_template.update";
+
+    /**
+     * 管理员删模板（逻辑废弃：{@code Enabled=0}）—— {@code POST /admin/catalog/template/delete}。
+     *
+     * @deprecated 同 {@link #GOODS_TEMPLATE_CREATE}（由 {@link #TEMPLATE_DELETE} 取代）。
+     */
+    @Deprecated
+    public static final String GOODS_TEMPLATE_DELETE = "goods_template.delete";
+
+    /** 管理员违规下架商品（{@code ShelfState=0}）—— {@code POST /admin/catalog/violation/delist}。 */
+    public static final String GOODS_VIOLATION_DELIST = "goods.violation.delist";
+
+    /** 管理员违规删除商品（{@code DeletedAt=now}，逻辑删除）—— {@code POST /admin/catalog/violation/delete}。 */
+    public static final String GOODS_VIOLATION_DELETE = "goods.violation.delete";
+
+    // ==================== C3 块 3 就地改造（模板表通用化，2026-10-10）====================
+    // 三个模板 CRUD 钩子，`@RequestMapping("/admin/template")` 的三个写端点。
+    // ⚠️ 域段是 `template`（**表名**，也是调用点传的 TargetType 字面量）—— 不再是 `goods_template`。
+    // ⚠️ 对**通知模板**是**新增留痕**：块 1 的 `/admin/notify/template/save` 从未挂审计
+    //    （块 1 类注释里「模板 CRUD 是配置而非平台动作」那条是**推断**）；合并成一张表后统一挂，
+    //    通知侧从「无痕」变成「有痕」。这不是回归，是覆盖面扩大。
+
+    /** 管理员新增模板 —— {@code POST /admin/template/create}。**新增类**动作 ⇒ {@code BeforeJson} 恒 NULL。 */
+    public static final String TEMPLATE_CREATE = "template.create";
+
+    /** 管理员改模板（改名 / 改标题 / 改正文 / 启停 / 改排序）—— {@code POST /admin/template/update}。 */
+    public static final String TEMPLATE_UPDATE = "template.update";
+
+    /** 管理员删模板（逻辑废弃：{@code Enabled=0}）—— {@code POST /admin/template/delete}。 */
+    public static final String TEMPLATE_DELETE = "template.delete";
+
     private AuditActions() {
     }
 }

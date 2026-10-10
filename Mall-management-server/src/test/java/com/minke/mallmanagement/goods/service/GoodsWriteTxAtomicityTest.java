@@ -19,6 +19,7 @@ import org.springframework.web.multipart.MultipartFile;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.doThrow;
@@ -33,6 +34,14 @@ import static org.mockito.Mockito.verify;
  * {@code goods} + {@code productsales} <b>两张表</b>，改前无事务 ⇒ 第二条语句失败时
  * 第一条已提交，留下「半成品」。本类要证的是一条：<b>第二步失败 ⇒ 第一步真的回滚了</b>。
  *
+ * <p>⚠️ <b>C3 块 3（2026-10-10）提审制把这条判据挪了位置</b>：{@code goodsAdd} 不再写
+ * {@code goods} / {@code productsales}，只写一条 {@code goods_audit(pending)} ⇒ 「两张表同一事务」
+ * 的那对写口<b>整体搬到了 {@code GoodsAuditService.audit} 的通过路径</b>（CAS 改状态 + 写 goods
+ * + 写 productsales + 回填 GoodsId，同一个 {@code @Transactional}）。
+ * <b>本类用例 1/2/3 因此按新语义重写、判据原样平移</b>：阳性对照改成「审核通过 ⇒ 两表各 1 行」，
+ * 回滚断言改成「通过路径第二步失败 ⇒ goods 行回滚、提审单退回 pending」。
+ * {@code goodsDe} / {@code goodsUp} 未受提审制影响，用例 4/5 不动。
+ *
  * <p>⚠️ <b>本类必须能区分「回滚了」与「压根没写」</b> —— 两者都表现为「表里 0 行」。
  * 故每一组都配一条<b>阳性对照</b>（同一个调用不打桩 ⇒ 行数 = 1），先证明在这套环境里
  * 真 DAO 真的把行写进了真库；再让第二步失败，断言那行<b>消失</b>。
@@ -42,11 +51,13 @@ import static org.mockito.Mockito.verify;
  * 要复现的「第二步失败」在真实系统里确实可达（{@code productsales.GoodName char(20)} vs
  * {@code goods.GoodName char(40)}，21–40 字符名会报 Error 1406），但那依赖 MySQL 严格模式，
  * 在不同环境里可能退化成静默截断 ⇒ 用例<b>假绿</b>。故主判据用 Spy 把失败<b>确定性</b>地摆出来，
- * 真实失败向量另立一条用例（见 {@link #goodsAddRollsBackOnRealColumnTooLong()})，并标注其前提。
+ * 真实失败向量另立一条用例（见 {@link #auditRollsBackOnRealColumnTooLong()})，并标注其前提。
  *
  * <p>⚠️ <b>Spy 的桩只打一处</b>：只令 {@code insertProductsales} 抛，
  * <b>其余 DAO 调用（尤其 {@code goods} 的 INSERT）一律走真实现、真落库</b>。
  * 若连 {@code insertGoods} 也被桩掉，回滚断言就成了一句空话。
+ * ⚠️ 提审制让这条桩的作用域更干净：{@code goodsAdd} 现在<b>压根不调</b> {@code insertProductsales}，
+ * 故「造待审单」那一步不会被打桩误伤，只有审核通过路径会撞上它。
  *
  * <h2>为什么必须挂 {@code A3_ENABLED}</h2>
  * 原子性要真 MySQL 才验得了（要的正是「提交/回滚真的发生」）。CI 的 {@code backend} job
@@ -72,9 +83,14 @@ class GoodsWriteTxAtomicityTest {
     /** schema 限定名照抄被测代码（TD-13：项目 SQL 硬编码 {@code mall_management_sql.}，不能省）。 */
     private static final String GOODS = "mall_management_sql.goods";
     private static final String PRODUCTSALES = "mall_management_sql.productsales";
+    private static final String GOODS_AUDIT = "mall_management_sql.goods_audit";
 
     @Autowired
     private GoodsService goodsService;
+
+    /** 提审制的审核侧 —— 用例 1b/2/3 的写口（提审制把两表写口搬到了这里）。 */
+    @Autowired
+    private GoodsAuditService goodsAuditService;
 
     /** 真 JdbcTemplate：用来造前置行、也用来数行数 —— 两条路径都绕开被测代码。 */
     @Autowired
@@ -107,6 +123,7 @@ class GoodsWriteTxAtomicityTest {
     void cleanup() {
         jdbcTemplate.update("DELETE FROM " + GOODS + " WHERE MerchantId = ?", merchantId);
         jdbcTemplate.update("DELETE FROM " + PRODUCTSALES + " WHERE MerchantId = ?", merchantId);
+        jdbcTemplate.update("DELETE FROM " + GOODS_AUDIT + " WHERE MerchantId = ?", merchantId);
     }
 
     // ==================== 用例 0：代理生效性（回答「注解是不是死注解」）====================
@@ -127,72 +144,101 @@ class GoodsWriteTxAtomicityTest {
                 .isTrue();
     }
 
-    // ==================== 用例 1 / 2：goodsAdd ====================
+    // ==================== 用例 1 / 1b / 2 / 3：goodsAdd（提审）+ 审核通过路径 ====================
 
     /**
-     * <b>阳性对照</b>：不打桩 ⇒ 两张表各留 1 行。
-     * 它证明的是「在这套环境里，Spy 之下的真 DAO 真的把行写进了真库」。
+     * <b>阳性对照（提审侧）</b>：{@code goodsAdd} 不打桩 ⇒ {@code goods_audit} 恰 1 行、且是 pending；
+     * <b>{@code goods} / {@code productsales} 各 0 行</b>。
+     *
+     * <p>后两条断言正是<b>提审制本身的正面证据</b>：「买家看不到待审商品」不是因为读路径把脏行
+     * 过滤掉了，而是因为<b>压根没写进 goods 表</b>（验收项 3）。
      */
     @Test
-    @DisplayName("用例 1：goodsAdd 不打桩 ⇒ goods 与 productsales 各 1 行（阳性对照，防下面的 0 行是空转）")
-    void goodsAddWritesBothRowsWhenNothingFails() {
+    @DisplayName("用例 1：goodsAdd 不打桩 ⇒ goods_audit 1 行(pending)、goods/productsales 均 0 行（提审制）")
+    void goodsAddWritesOnlyPendingAuditRow() {
         Map<String, Object> r = goodsService.goodsAdd(
-                merchantId, goodName, 1.0, jpeg(), "电子用品", productCode, 0);
+                merchantId, goodName, 1.0, jpeg(), "电子用品", productCode, 0, null, null, null, null);
 
-        assertThat(r).containsEntry("success", true).containsEntry("msg", "商品上架成功！");
-        assertThat(goodsRows()).isEqualTo(1);
-        assertThat(productsalesRows()).isEqualTo(1);
+        assertThat(r).containsEntry("success", true).containsEntry("msg", "已提交审核");
+        assertThat(auditRows()).isEqualTo(1);
+        assertThat(auditStatuses()).containsExactly("pending");
+        assertThat(goodsRows()).isZero();
+        assertThat(productsalesRows()).isZero();
     }
 
     /**
-     * <b>本笔的主判据</b>：第二步（{@code insertProductsales}）失败 ⇒ 第一步的 {@code goods} 行必须回滚。
+     * <b>阳性对照（审核侧）</b>：提审一条 → 审核通过不打桩 ⇒ 两表各 1 行、提审单转 approved、回填 GoodsId。
+     *
+     * <p>它证明的是「在这套环境里，Spy 之下的真 DAO 真的把行写进了真库」—— 用例 2/3 里那个
+     * {@code == 0} 才有意义（否则可以因为「写根本没生效」而假绿）。
+     */
+    @Test
+    @DisplayName("用例 1b：审核通过不打桩 ⇒ goods 与 productsales 各 1 行、提审单 approved（阳性对照）")
+    void auditApprovedWritesBothRowsWhenNothingFails() {
+        long id = submitPending(goodName);
+
+        Map<String, Object> r = goodsAuditService.audit("adminUT", id, true, null);
+
+        assertThat(r).containsEntry("success", true).containsEntry("outcome", "approved");
+        assertThat(goodsRows()).isEqualTo(1);
+        assertThat(productsalesRows()).isEqualTo(1);
+        assertThat(auditStatuses()).containsExactly("approved");
+    }
+
+    /**
+     * <b>主判据（提审制下平移过来）</b>：审核通过路径第二步（{@code insertProductsales}）失败
+     * ⇒ 第一步的 {@code goods} 行必须回滚，<b>且 CAS 改的状态一起退回 pending</b>。
      *
      * <p>三条断言各有分工，缺一不可：
      * <ol>
-     *   <li>{@code success:false} + 文案不变 —— 对外契约不动（不是 500）；</li>
+     *   <li>异常真的抛出（{@code audit} 不吞——它是事务边界，吞了就失去回滚信号）；</li>
      *   <li>{@code verify(times(1)).insertGoods(...)} —— <b>第一步真的执行过</b>。
      *       没有它，{@code goodsRows()==0} 也能被「第一步压根没跑」解释；</li>
-     *   <li>{@code goodsRows()==0} —— 执行过、且被回滚。配上用例 1 的阳性对照，
-     *       「写不进去」这一解释也被排除 ⇒ 只剩「写进去又回滚了」。</li>
+     *   <li>{@code goodsRows()==0} + 提审单仍 {@code pending} —— 执行过、且整笔事务被回滚
+     *       （不留「approved 但没商品」的半完成态，这是块 3 把三件事放进同一事务的理由）。</li>
      * </ol>
-     *
-     * <p><b>突变对照</b>：去掉 catch 里的 {@code markRollbackOnlyIfActive()}，本条在 (3) 处
-     * 得 <b>1</b>（半成品）—— 这正是本笔要消掉的那件事，也是「只加 {@code @Transactional}」
-     * 不够的证据。
+     * 配上用例 1b 的阳性对照，「写不进去」这一解释也被排除 ⇒ 只剩「写进去又回滚了」。
      */
     @Test
-    @DisplayName("用例 2：goodsAdd 第二步 INSERT 失败 ⇒ 第一步的 goods 行回滚，且响应契约不变")
-    void goodsAddRollsBackGoodsWhenProductsalesFails() {
+    @DisplayName("用例 2：审核通过第二步 INSERT 失败 ⇒ goods 行回滚、提审单退回 pending")
+    void auditRollsBackGoodsWhenProductsalesFails() {
+        long id = submitPending(goodName);
+
         doThrow(new DataIntegrityViolationException("用例注入：强制第二步失败"))
                 .when(goodsDao).insertProductsales(anyString(), anyString(), anyString());
 
-        Map<String, Object> r = goodsService.goodsAdd(
-                merchantId, goodName, 1.0, jpeg(), "电子用品", productCode, 0);
+        assertThatThrownBy(() -> goodsAuditService.audit("adminUT", id, true, null))
+                .isInstanceOf(DataIntegrityViolationException.class);
 
-        assertThat(r).containsEntry("success", false).containsEntry("msg", "商品上架失败");
         verify(goodsDao, times(1)).insertGoods(any());   // 第一步确实跑过
         assertThat(goodsRows()).isZero();                // 且其效果已回滚
         assertThat(productsalesRows()).isZero();
+        assertThat(auditStatuses()).containsExactly("pending");   // CAS 也一起退回
     }
 
     /**
      * <b>真实失败向量</b>（无桩）：{@code goods.GoodName char(40)} 能装下、{@code productsales.GoodName
      * char(20)} 装不下 ⇒ 第二步报 <b>Error 1406</b>（{@code three-layers.md §G} 记「实测，用户可见失败」）。
      *
+     * <p>提审制下的路径：27 字符名在 {@code goods_audit.GoodName varchar(40)} 里存得下 ⇒ 提审成功；
+     * 审核通过重建 goods 行时，{@code goods.GoodName char(40)} 过、{@code productsales.GoodName char(20)}
+     * 不过 ⇒ 第二步失败 ⇒ 整笔回滚。
+     *
      * <p>⚠️ <b>前提</b>：依赖 MySQL 严格模式。非严格模式下超长会被静默截断、第二步反而成功 ⇒
      * 本用例<b>假绿</b>。故它是<b>加分项</b>，主判据是用例 2（确定性）。
      */
     @Test
     @DisplayName("用例 3：真实超长名（>20 字符）触发 productsales 1406 ⇒ 同样回滚")
-    void goodsAddRollsBackOnRealColumnTooLong() {
+    void auditRollsBackOnRealColumnTooLong() {
         String tooLong = "GN" + "x".repeat(25);   // 27 字符：goods char(40) 过、productsales char(20) 不过
+        long id = submitPending(tooLong);
 
-        Map<String, Object> r = goodsService.goodsAdd(
-                merchantId, tooLong, 1.0, jpeg(), "电子用品", productCode, 0);
+        assertThatThrownBy(() -> goodsAuditService.audit("adminUT", id, true, null))
+                .isInstanceOf(Exception.class);
 
-        assertThat(r).containsEntry("success", false);
         assertThat(goodsRows()).isZero();
         assertThat(productsalesRows()).isZero();
+        assertThat(auditStatuses()).containsExactly("pending");
     }
 
     // ==================== 用例 4 / 5：goodsDe、goodsUp ====================
@@ -244,6 +290,35 @@ class GoodsWriteTxAtomicityTest {
 
     private static MultipartFile jpeg() {
         return new MockMultipartFile("file", "tx-1.jpg", "image/jpeg", "IMG".getBytes());
+    }
+
+    /**
+     * 走 {@code goodsAdd} 造一条待审单，返回它在 {@code goods_audit} 里的 {@code Id}。
+     * 用例 1b/2/3 的前置都走这里 —— 让「待审单从哪来」与生产路径同源，而不是裸 INSERT。
+     */
+    private long submitPending(String name) {
+        Map<String, Object> r = goodsService.goodsAdd(
+                merchantId, name, 1.0, jpeg(), "电子用品", productCode, 0, null, null, null, null);
+        assertThat(r).containsEntry("success", true);
+        Long id = jdbcTemplate.queryForObject(
+                "SELECT Id FROM " + GOODS_AUDIT + " WHERE MerchantId = ? AND ProductCode = ? "
+                        + "ORDER BY Id DESC LIMIT 1",
+                Long.class, merchantId, productCode);
+        assertThat(id).as("提审后必须能在 goods_audit 里查到那一行").isNotNull();
+        return id;
+    }
+
+    /** 本商家在 {@code goods_audit} 里的行数（用例 1 的提审侧阳性对照）。 */
+    private int auditRows() {
+        return jdbcTemplate.queryForList(
+                "SELECT Id FROM " + GOODS_AUDIT + " WHERE MerchantId = ?", merchantId).size();
+    }
+
+    /** 本商家最近若干条提审单的状态（用例 1/2/3 判 CAS 是否真的回滚 / 生效）。 */
+    private java.util.List<String> auditStatuses() {
+        return jdbcTemplate.queryForList(
+                "SELECT Status FROM " + GOODS_AUDIT + " WHERE MerchantId = ? ORDER BY Id",
+                String.class, merchantId);
     }
 
     private void insertGoodsRow() {

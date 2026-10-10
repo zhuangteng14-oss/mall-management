@@ -281,7 +281,13 @@ const getGoodType = async () => {
     const res = await http.post(endpoints.goods.goodstype)
     const data = await res.json()
     if (data.success) {
-      goodTypeList.value = data.list
+      // ⚠️ C3 块 3（2026-10-10）：`/goods/goodstype` 的返回列多了 `ParentId`，类目**不再是平表**
+      //    （二级子类目也在同一份 `list` 里）⇒ 首页这一排只取**一级**（`ParentId` 缺省 / 0）。
+      //    ⚠️ 过滤收在**数据源**这一行（不是模板 `:46` 的 `v-for`）：上面 `:44` 的空态判据
+      //    `goodTypeList.length === 0` 因此同样只数一级 —— 否则「只有二级类目」时会显示一个
+      //    空 `<ul>`。⚠️ 传的仍是**类目名** `item.GoodType`（一级名在 `(0, GoodType)` 下唯一
+      //    ⇒ 名字无歧义），**契约不变**。
+      goodTypeList.value = data.list.filter(t => (t.ParentId || 0) === 0)
     }
   } catch (e) {
     handleApiError(e, '请求失败')

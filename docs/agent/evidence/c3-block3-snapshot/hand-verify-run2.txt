@@ -1,0 +1,51 @@
+
+── 0. 前置：后端版本 + profile + 库 ─────────────────────────────────────────
+old /catalog/templates 应 404 -> 404
+/template/list 应 200 -> {"success":true,"list":[]}
+VM goods 行数（基线）-> 5
+
+── 1. 管理端建模板 goods.detail（Body=AAA） ─────────────────────────────────────────
+{"msg":"新增成功","success":true}
+模板行:
+4	goods.detail	snap-probe-AAA	AAA	1	0
+模板 Id = 4
+
+── 2. 商家提审（Detail 手改成 AAA-SHOP-EDITED；Spec/AfterSale 各给一段） ─────────────────────────────────────────
+{"msg":"已提交审核","success":true,"GoodImg":"http://localhost:8088/img/snap-probe.png","batchId":"c345301b-059c-47a8-9dc9-2982616e9f11"}
+① goods 表应**零新行**（提审不写 goods）:
+0
+② goods_audit 行（Detail 应 = AAA-SHOP-EDITED）:
+3	c345301b-059c-47a8-9dc9-2982616e9f11	pending	AAA-SHOP-EDITED	k1=v1	aftersale-probe
+goods_audit.Id = 3
+
+── 3. 管理员通过 ─────────────────────────────────────────
+{"merchantId":"5N1k5K2guh","success":true,"goodsId":28,"outcome":"approved"}
+③ goods 表应新增 1 行，Detail 应 = AAA-SHOP-EDITED（不是模板的 AAA）:
+28	5N1k5K2guh	SNAP-1	AAA-SHOP-EDITED	k1=v1	aftersale-probe
+④ goods_audit 应 Status=approved 且 GoodsId 回填:
+3	approved	28	AAA-SHOP-EDITED
+
+── 4. 改模板 Body ⇒ BBB（快照语义的关键一步） ─────────────────────────────────────────
+{"msg":"更新成功","before":{"Id":4,"Type":"goods.detail","Name":"snap-probe-AAA","Title":null,"Body":"AAA","Enabled":true,"Sort":0},"success":true}
+模板现在是:
+4	goods.detail	snap-probe-AAA	BBB
+
+── 5. 重查商品 —— Detail **必须仍是 AAA-SHOP-EDITED**（不是 BBB）⇒ 快照而非引用 ─────────────────────────────────────────
+28	SNAP-1	AAA-SHOP-EDITED
+
+── 6. 结构断言 ─────────────────────────────────────────
+goods 里 %TemplateId% 列（应为 0 行）:
+名字含 template 的表（应只有 template；⚠️ 别写 LIKE 百分号+下划线+template —— 下划线是通配符）:
+template
+goods_audit 快照三列（应 3 行）:
+AfterSale
+Detail
+Spec
+
+── 7. 清理（删回本脚本造的行；删完读回确认 0） ─────────────────────────────────────────
+goods 残留 -> 0
+goods_audit 残留 -> 0
+template 残留 -> 0
+VM goods 总行数（应回到基线 5）-> 5
+
+完成。

@@ -16,53 +16,53 @@
     </div>
 
     <div class="grid-wrap">
-      <!-- ⚠️ D 笔（2026-10-07 裁决）：左栏三块「超档」预留位**照落 UI** ——
-           `disabled` + `data-slot` + `title` 三件套，功能不本笔做，登记 `C3〈搜索〉`
-           （台账 `docs/agent/slot-registry.md`）。判据见 `docs/美化/README.md:212-218`：
-           它管的是「**功能实现**成本」，不是「UI 落不落」。 -->
+      <!-- ⚠️ 左栏**三块**「超档」预留位里，本笔（C3 块 3，2026-10-10）**接的是分类树** ——
+           排序 / 筛选条与分页**仍是占位**（`disabled` + `data-slot` + `title` 三件套）。判据见
+           `docs/美化/README.md:212-218`：它管的是「**功能实现**成本」，不是「UI 落不落」；台账见
+           `docs/agent/slot-registry.md`。⚠️ 分类树能接的**唯一**原因：数据源本就好 + 本笔加了新端点。 -->
       <aside
         class="cat"
-        data-slot="预留 · 左分类树（动现有代码 6 处 · 超档）"
-        title="待 C3〈搜索〉——★数据源是好的：goodstype 端点现成、表里 5 条真分类（电子用品/生活用品/服装/美食/运动用品）。缺的是**筛选参数**，不是数据。要能动：GoodsDao.java（SQL 加类目 where）+ GoodsService.java + GoodsController.java + GoodsSelect.vue（取值 + 传参）= 4 处；再加二级层级（GoodTypeNew 列存在但**数据全 0**）还要 GoodsTypeCacheService.java 改 SQL + 造数据 = 6 处。**超档**，因清单点名而画出（见 README 挂账表）"
+        title="C3 块 3〈商品块〉已接线（2026-10-10）：一级取 ParentId===0、二级取该父级下，数据源是**既有**端点 /goods/goodstype；点击调**新端点** /goods/categoryGoods（传 TypeId）。故原 data-slot「动现有代码 6 处」**退场** —— 本笔**没改**既有 SQL（GoodsDao 只新增了 selectByTypeId 一个查询，goodsSelect 那条链一字未动）"
+        aria-label="商品分类树"
       >
         <div class="cat-h">全部分类</div>
         <ul class="cat-l">
-          <li><a class="lv1">全部商品</a></li>
-          <li class="open">
-            <a class="lv1">电子用品</a>
-            <ul>
-              <li><a class="on" title="二级分类名为示意 —— goodstype.GoodTypeNew 全为 0，库里无任何二级分类名">耳机 / 音箱</a></li>
-              <li><a>充电配件</a></li>
-            </ul>
-            <div class="cat-more"><button disabled title="暂无更多二级分类">更多<span class="car"></span></button></div>
-          </li>
+          <!-- C3 块 3（2026-10-10）接线：**一级 = `ParentId === 0` 的真类目**，二级 = 该父级下的真类目。
+               ⚠️ 块 3 之前 `ParentId` 列不存在、`GoodTypeNew` 全为 0 ⇒ 稿只能画 5 条一级 + 二级「示意名」，
+               现在两层都是真数据（读**既有** `GET /goods/goodstype` —— 本笔**不新开读端点**）。
+               ⚠️ 点**一级**也发 `categoryGoods`：一级自己就是合法的 `TypeId`（它不是「纯容器」）。
+               ⚠️ 二级选中沿用稿的 `.on`，一级选中用新加的 `.cat-l > li > .lv1.on`（同一条青瓷绿 50 底）。 -->
           <li>
-            <a class="lv1">生活用品</a>
-            <ul>
-              <li><a title="二级分类名为示意">保温杯 / 杯具</a></li>
-              <li><a>收纳整理</a></li>
-            </ul>
+            <a
+              class="lv1"
+              :class="{ on: activeType === null }"
+              @click="pickCat(null)"
+            >全部商品</a>
           </li>
-          <li>
-            <a class="lv1">服装</a>
-            <ul>
-              <li><a title="二级分类名为示意">外套</a></li>
-              <li><a>配饰</a></li>
+          <li
+            v-for="t in roots"
+            :key="t.Id"
+            :class="{ open: isOpen(t.Id) }"
+          >
+            <a
+              class="lv1"
+              :class="{ on: activeType === t.Id }"
+              @click="pickCat(t.Id)"
+            >{{ t.GoodType }}</a>
+            <ul v-if="kidsOf(t.Id).length">
+              <li
+                v-for="c in kidsOf(t.Id)"
+                :key="c.Id"
+              >
+                <a
+                  :class="{ on: activeType === c.Id }"
+                  @click="pickCat(c.Id)"
+                >{{ c.GoodType }}</a>
+              </li>
             </ul>
-          </li>
-          <li>
-            <a class="lv1">美食</a>
-            <ul>
-              <li><a title="二级分类名为示意">烘焙轻食</a></li>
-              <li><a>咖啡 / 茶饮</a></li>
-            </ul>
-          </li>
-          <li>
-            <a class="lv1">运动用品</a>
-            <ul>
-              <li><a title="二级分类名为示意">健身器材</a></li>
-              <li><a>户外装备</a></li>
-            </ul>
+            <div v-else class="cat-more">
+              <button type="button" disabled title="该一级下暂无二级类目">更多<span class="car"></span></button>
+            </div>
           </li>
         </ul>
       </aside>
@@ -144,7 +144,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted, watch } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { http, handleApiError, urlOf } from '../api/http'
 import { endpoints } from '../api/endpoints'
@@ -270,6 +270,77 @@ onMounted(() => {
 // `<router-view>` 里拿不到子组件 ref，那条通道整条消失（关键词改由 `?kw=` 承载，见上一条 watch）。
 // ⇒ 删掉「暴露」这件事本身；`searchByKeyword` 函数**保留**（上面的 watch 在调用它）。
 // ⚠️ 与 R1 的差别只在**暴露**：R1 时它是「纯增量的第二条通道」，R2 起它是**唯一**通道。
+
+// ══════════════════════════════════════════════════════════════════════════════
+// C3 块 3〈商品块〉（2026-10-10）：左侧类目树**接线**（原为静态硬编码占位）
+//
+// ⚠️ **一读一筛两个端点**：
+//   ① 读 —— 沿用**既有** `GET /goods/goodstype`（块 3 裁决：类目树**不新开读端点**）。
+//   ② 筛 —— **新端点** `POST /goods/categoryGoods`，传 `TypeId`（**不是**类目名：唯一键换代后
+//      「电子用品>配件」与「服装>配件」同名，按名回查会歧义 —— 这正是块 3 加 `TypeId` 列的原因）。
+// ⚠️ `doSearch`（`:181-203`）**一行没动**：它管**搜索框**那条链（关键词 → `productSearch`）。
+//    点类目走的是另一条链（`TypeId` → `categoryGoods`），两条**互不干扰** —— 点树不清搜索框、
+//    点搜索不重置树（`activeType` 与 `searchKeyword` 各活各的）。
+// ⚠️ 本段**追加在 `<script setup>` 末尾**：它上面的行被 `ChatRoom.vue:150` / `router/index.js:152`
+//    / `router/index.js:215` 等处按行号引，在其上方插行会让它们集体失效。
+// ══════════════════════════════════════════════════════════════════════════════
+
+// 类目全表（一级 + 二级都在里面，靠 `ParentId` 分；`ParentId === 0` 即一级）
+const cats = ref([])
+// 当前选中的类目 `Id`；`null` = 「全部商品」
+const activeType = ref(null)
+// 展开的一级（同一时刻至多展一条 —— 与稿的 `.open` 单开观感一致）
+const openRoot = ref(null)
+
+const roots = computed(() => cats.value.filter((t) => (Number(t.ParentId) || 0) === 0))
+const kidsOf = (id) => cats.value.filter((t) => Number(t.ParentId) === Number(id))
+const isOpen = (id) => openRoot.value === id
+
+// ⚠️ 一级**自己也能筛**（它不是「纯容器」）⇒「选中」与「展开」是**两件事**：
+//    点一级 = 选中 + 展开；再点同一个一级 = 只收起（不改选中）。
+const pickCat = async (id) => {
+  activeType.value = id
+  if (id === null) {
+    openRoot.value = null
+  } else {
+    openRoot.value = openRoot.value === id ? null : id
+  }
+  await loadByType()
+}
+
+const loadCats = async () => {
+  try {
+    const res = await http.post(endpoints.goods.goodstype, null)
+    const data = await res.json()
+    if (data.success) cats.value = data.list || []
+  } catch (e) {
+    handleApiError(e, '获取分类失败')
+  }
+}
+
+// 按当前 `activeType` 取商品：`null` ⇒ 走**既有**全量面（`goodsSelectHome`，与 `doSearch` 空关键词
+// 同一条 URL）；非空 ⇒ 走**新**端点 `categoryGoods`。
+// ⚠️ 两条都**不**碰 `searchKeyword`、也**不**调 `saveState()` —— 搜索缓存（`SEARCH_KEYWORD` /
+//    `SEARCH_RESULTS`）的语义是「**搜索框**那一次搜索」，类目浏览不该往里塞（否则返回时会串味）。
+const loadByType = async () => {
+  try {
+    let url, body
+    if (activeType.value === null) {
+      url = urlOf(endpoints.goods.goodsSelectHome)
+      body = ''
+    } else {
+      url = urlOf(endpoints.goodsB3.categoryGoods)
+      body = `TypeId=${encodeURIComponent(activeType.value)}`
+    }
+    const res = await http.post(url, body)
+    const data = await res.json()
+    if (data.success) goodsList.value = data.list || []
+  } catch (e) {
+    handleApiError(e, '请求失败')
+  }
+}
+
+onMounted(loadCats)
 </script>
 
 
@@ -423,6 +494,21 @@ button {
    读起来像两个都选中了 ⇒ 绿 + 加粗**只留给选中**（`.on`）；「已展开」的一级只深一档灰。 */
 li.open > .lv1 {
   color: var(--ink);
+}
+/* ⚠️ C3 块 3：树里的 `<a>` 从「死链」变成**可点**了 —— 无 `href` 的 `<a>` 不会自己给手型。 */
+.cat-l a {
+  cursor: pointer;
+}
+/* C3 块 3 新增：**一级**的选中态。稿只有二级的 `.on`（`.cat-l ul a.on`），一级从来没有选中概念
+   （它当时只是个静态标题）⇒ 新加一条，且刻意与二级 `.on` 同款（青瓷绿 50 底 + 负外边距抵消
+   新增内距，行宽不跳）—— 「选中」在全页只有这一种视觉语言（见上面 `.cat` 块首那条用色规则）。 */
+.cat-l > li > .lv1.on {
+  color: var(--brand-ink);
+  font-weight: var(--fw-med);
+  background: var(--brand-tint);
+  border-radius: var(--r1);
+  padding: var(--s1) var(--s2);
+  margin-left: calc(var(--s2) * -1);
 }
 .cat-l ul {
   margin-top: var(--s2);

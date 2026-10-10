@@ -184,7 +184,7 @@
 | `order.MerchantId`/`CustomerId` varchar(40) vs 其余表 char(20)/varchar(50) | `SQL:286-288` | 同一业务号三种宽度、两种定长性，无 FK 兜底（`db-schema.md §9`） | 亲读 |
 | `login.UserName char(20)` PK + 五个明文种子账号 | `SQL:94`、`:99` | 明文口令。**唯一性本身没问题**（曾疑为缺陷，已自证否） | 亲读 |
 | `BD-01`：付款/发货/收货三处覆写同一 `SettlementDate` | `OrderStateMachine.java:42-47` 自述 | 该列无法稳定表示任何业务时间点；B3 的时间线表在事实上取代其数据源，**但那是 C3 的事** | 亲读 |
-| **`goodstype.GoodType` 无唯一约束**（**2026-10-04 补登**，drift-fix 笔） | `db-schema.md:186`、`concurrency-map.md:77` | 类型名可重复，且**无应用层兜底**：写入路径 `GoodsTypeCacheService:71-72` 是**裸 `INSERT`**、**不在 B2 的 5 落点内** ⇒ 无锁 check-then-insert。A3 的 B-2 场景实测**会复现**：CI `ci49`（2026-10-03）`goodstypeDupRounds` = **4/5**（逐轮 `goodstypeDupRows` 4 / 1 / 4 / 3 / 3，判据 `>= 2`）。⚠️ 与 `friend` 侧**不同**：后者已被 B2 的 `runLocked` 覆盖（同一份 `ci49`：`friendDupRows` 恒 = 1、`friendDupRounds = 0/5`）⇒ 本行是 **B2 之后唯一仍会造重复行的 TOCTOU 站点**（`concurrency-map.md:91` 的「立即」据此**仍成立**）。归属见 §七 Class A 第 9 条 | 亲读 + 实测(CI) |
+| **`goodstype.GoodType` 无唯一约束**（**2026-10-04 补登**，drift-fix 笔） | `db-schema.md:196`（原 `:186`，2026-10-10 块 3 增量后重指）、`concurrency-map.md:77` | 类型名可重复，且**无应用层兜底**：写入路径 `GoodsTypeCacheService:71-72` 是**裸 `INSERT`**、**不在 B2 的 5 落点内** ⇒ 无锁 check-then-insert。A3 的 B-2 场景实测**会复现**：CI `ci49`（2026-10-03）`goodstypeDupRounds` = **4/5**（逐轮 `goodstypeDupRows` 4 / 1 / 4 / 3 / 3，判据 `>= 2`）。⚠️ 与 `friend` 侧**不同**：后者已被 B2 的 `runLocked` 覆盖（同一份 `ci49`：`friendDupRows` 恒 = 1、`friendDupRounds = 0/5`）⇒ 本行是 **B2 之后唯一仍会造重复行的 TOCTOU 站点**（`concurrency-map.md:91` 的「立即」据此**仍成立**）。归属见 §七 Class A 第 9 条 | 亲读 + 实测(CI) |
 
 **附带**：唯一库脚本是全库重建（11 条 `DROP TABLE`），而 B3 新表是 `CREATE TABLE IF NOT EXISTS` 且**无对应 DROP** ⇒ 本机重复导入会让旧 schema 留存、漂移不可见（CI 每次新容器，故只在开发机上）。
 

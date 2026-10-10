@@ -449,7 +449,7 @@ router.addRoute({
 
     { path: 'business', meta: { key: 'business', title: '业务域' }, component: AdminStub },
     { path: 'business/accounts',   meta: { key: 'business', sub: 'accounts',   title: '用户与商家治理' }, component: () => import('../views/admin/AccountsPage.vue') },   // C3 块 2〈用户块〉：占位 → 真页（**同行替换**，照 `:456` notify 那条的做法）
-    { path: 'business/catalog',    meta: { key: 'business', sub: 'catalog',    title: '商品与类目治理' }, component: AdminStub },
+    { path: 'business/catalog',    meta: { key: 'business', sub: 'catalog',    title: '商品与类目治理' }, component: () => import('../views/admin/CatalogPage.vue') },   // C3 块 3〈商品块〉：占位 → 真页（**同行替换**，照 `:451` accounts / `:456` notify 那两条的做法）
     { path: 'business/orders',     meta: { key: 'business', sub: 'orders',     title: '订单治理' },       component: AdminStub },
     { path: 'business/marketing',  meta: { key: 'business', sub: 'marketing',  title: '营销运营' },       component: AdminStub },
     { path: 'business/moderation', meta: { key: 'business', sub: 'moderation', title: '消息与内容治理' }, component: AdminStub },

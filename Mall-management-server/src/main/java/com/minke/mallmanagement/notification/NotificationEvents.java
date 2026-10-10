@@ -117,6 +117,17 @@ public final class NotificationEvents {
     /** 降级**已执行**（冻结生效）→ 触达商家；正文带 {@code DowngradeReason}。 */
     public static final String MERCHANT_DOWNGRADE_APPLIED = "merchant.downgrade.applied";
 
+    // ==================== 块 3（商品块）：本块新增 1 条（预留的 3 条见上 §块 3）====================
+
+    /**
+     * 商家提交商品上架申请（提审）→ **触达管理端**（共享收件箱 {@code ToType='admin', ToId='*'}，
+     * 同 {@link #MERCHANT_APPLY_SUBMITTED} 的「扩通道」口径）。
+     *
+     * <p>⚠️ 与预留的 {@link #GOODS_AUDIT_PASSED} / {@link #GOODS_AUDIT_REJECTED} 是**一对**：
+     * 本条是「商家 → 管理员」的去向，那两条是「管理员 → 商家」的回执。
+     */
+    public static final String GOODS_APPLY_SUBMITTED = "goods.apply.submitted";
+
     private NotificationEvents() {
     }
 }

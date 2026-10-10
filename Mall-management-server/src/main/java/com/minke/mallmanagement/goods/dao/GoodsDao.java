@@ -4,6 +4,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
 
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
 
@@ -74,22 +75,29 @@ public class GoodsDao {
      * 上架落库：{@code goods} 表插一行。
      *
      * <p>⚠️ 参数顺序与 INSERT 的列顺序**逐字对应**
-     * （{@code MerchantId, GoodName, Price, GoodImg, GoodType, ProductCode, GoodTypeNew}）
+     * （{@code MerchantId, GoodName, Price, GoodImg, GoodType, ProductCode, GoodTypeNew, TypeId, Detail, Spec, AfterSale}）
      * —— 两处顺序一旦错位，没有任何断言会报错，只会有行数据静默错位。
      */
     public int insertGoods(GoodsRow r) {
         String sql = "INSERT INTO mall_management_sql.goods "
-                + "(MerchantId, GoodName, Price, GoodImg, GoodType, ProductCode, GoodTypeNew) "
-                + "VALUES (?, ?, ?, ?, ?, ?, ?)";
+                + "(MerchantId, GoodName, Price, GoodImg, GoodType, ProductCode, GoodTypeNew, TypeId, Detail, Spec, AfterSale) "
+                + "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
         return jdbcClient.sql(sql)
-                .params(r.merchantId(), r.goodName(), r.price(), r.goodImg(),
-                        r.goodType(), r.productCode(), r.goodTypeNew())
+                .params(r.merchantId(), r.goodName(), r.price(), r.goodImg(), r.goodType(),
+                        r.productCode(), r.goodTypeNew(), r.typeId(), r.detail(), r.spec(), r.afterSale())
                 .update();
     }
 
-    /** 上架入参的载体（7 个位置参数，用 record 免掉一个 7 参方法签名）。嵌套在此，不另立文件。 */
+    /**
+     * 上架入参的载体（11 个位置参数，用 record 免掉一个 11 参方法签名）。嵌套在此，不另立文件。
+     *
+     * <p>⚠️ {@code typeId} 是 C3 块 3 新增的第 8 个分量（{@code goods.TypeId}，块 3 迁移加的列）
+     * —— 供买家二级筛选按 Id 走（唯一键换代连带）。提审制下它来自 {@code goods_audit.TypeId}
+     * （提审时快照，通过时原样写进这里）。**可能为 {@code null}**（老调用方不传 / 名字解析不出），
+     * 故用包装类型 {@code Integer} 而非 {@code int}。⚠️ 后 3 个分量 {@code detail / spec / afterSale}（C3 块 3 就地改造 2026-10-10 加的第 9-11 个）是详情 / 规格 / 售后的**快照文本**（{@code goods.Detail / Spec / AfterSale}，mediumtext，可空）—— 选模板 → 填内容 → **可改** ⇒ 落库的是商品自己那段文本、**不是**模板 Id（改模板不影响已上架商品）；提审制下来自 {@code goods_audit} 同名列。
+     */
     public record GoodsRow(String merchantId, String goodName, Double price, String goodImg,
-                           String goodType, String productCode, int goodTypeNew) {
+                           String goodType, String productCode, int goodTypeNew, Integer typeId, String detail, String spec, String afterSale) {
     }
 
     /**
@@ -203,6 +211,7 @@ public class GoodsDao {
         }
 
         String sql = "SELECT * FROM goods WHERE 1=1 " +
+                "AND ShelfState = 1 AND DeletedAt IS NULL " +
                 "AND (GoodType = ? " +
                 nameSql + ")";
 
@@ -235,5 +244,83 @@ public class GoodsDao {
         String sql = "SELECT * FROM mall_management_sql.goods "
                 + "WHERE MerchantId = ? AND ProductCode = ?";
         return jdbcClient.sql(sql).params(MerchantId, ProductCode).query().listOfRows();
+    }
+
+    // ==================== 读：二级类目筛选（C3 块 3 新增，追加在类尾） ====================
+
+    /**
+     * 按类目 Id（+ 可选关键词）列出**买家可见**的商品 —— 新端点 {@code /goods/categoryGoods}
+     * 的唯一数据出口（C3 块 3「浏览/搜索增强」）。
+     *
+     * <p>⚠️ <b>不复用 {@link #searchByKeyword}</b>：那条是按**类目名**筛的（{@code GoodType = ?}），
+     * 而唯一键换代后「电子用品&gt;配件」与「服装&gt;配件」同名 ⇒ 名字不再唯一。本方法按
+     * {@code TypeId}（{@code goods.TypeId}，块 3 迁移回填）筛，**无歧义**。
+     *
+     * <p>⚠️ 可见性过滤 {@code ShelfState = 1 AND DeletedAt IS NULL} 与另两条读路径同口径
+     * （C3 块 2 挂账 + 块 3 违规处置的落点）：下架 / 违规删除的商品不出现在这里。
+     *
+     * <p>⚠️ 关键词用**参数化** {@code LIKE CONCAT('%', ?, '%')}，**不是** {@code searchByKeyword}
+     * 那种「逐字符拼 {@code OR GoodName LIKE}」的既有形态 —— 新语句不继承那个已知缺陷
+     * （单引号注入 / {@code %} 未转义，见 {@link #searchByKeyword} 的 ⚠️）。{@code keyword}
+     * 空 ⇒ 不加这一条谓词。
+     */
+    public List<Map<String, Object>> selectByTypeId(Integer TypeId, String keyword) {
+        boolean filtered = keyword != null && !keyword.trim().isEmpty();
+        String sql = "SELECT * FROM mall_management_sql.goods "
+                + "WHERE TypeId = ? AND ShelfState = 1 AND DeletedAt IS NULL "
+                + (filtered ? "AND GoodName LIKE CONCAT('%', ?, '%') " : "")
+                + "ORDER BY Id DESC";
+        JdbcClient.StatementSpec spec = jdbcClient.sql(sql).param(TypeId);
+        if (filtered) {
+            spec = spec.param(keyword.trim());
+        }
+        return spec.query().listOfRows();
+    }
+
+    /**
+     * 按类目**名**反查 {@code goodstype.Id} —— 提审制下 {@code goodsAdd} 走老前端（只传类目名）
+     * 时的**回退解析**（新前端传 {@code TypeId} 时不查）。
+     *
+     * <p>⚠️ 名字可能不唯一（唯一键换代后允许不同父级下同名）⇒ 本方法**可能多行**，
+     * 调用方取第一行（{@code ORDER BY Id} 保证确定性）并**接受歧义**：这是「老前端只给名字」
+     * 这一既有缺口的下界，不是本块要修的东西（正确通路是前端传 {@code TypeId}）。
+     * 查不到 ⇒ {@code null}（不是 0 —— {@code Id} 从 1 起）。
+     */
+    public Integer selectTypeIdByName(String GoodType) {
+        if (GoodType == null || GoodType.trim().isEmpty()) {
+            return null;
+        }
+        String sql = "SELECT Id FROM mall_management_sql.goodstype "
+                + "WHERE GoodType = ? ORDER BY Id LIMIT 1";
+        List<Integer> ids = jdbcClient.sql(sql).param(GoodType).query(Integer.class).list();
+        return ids.isEmpty() ? null : ids.get(0);
+    }
+
+    // ==================== 写：违规处置（C3 块 3 新增，逻辑废弃，不物理删） ====================
+
+    /**
+     * 违规**下架**（{@code ShelfState = 0}）—— 谓词与 {@link #deleteGoods} / {@link #updateGoods}
+     * **逐字相同**（{@code MerchantId/GoodName/ProductCode}，里氏代换上就是那一组行），
+     * 但**不删行**（规则 v2：逻辑废弃）。返回影响行数。
+     *
+     * <p>⚠️ 与「降级冻结下架」（块 2 的 {@code GoodsShelfDao}）共用同一列 {@code ShelfState}
+     * ⇒ 「违规下架 vs 降级下架」的**区分**留 {@code slot-registry.md §十九} 待办（OffShelfReason），
+     * 本块不做（同 §一.1 的边界）。
+     */
+    public int delistByTriple(String MerchantId, String GoodName, String ProductCode) {
+        String sql = "UPDATE mall_management_sql.goods SET ShelfState = 0 "
+                + "WHERE MerchantId=? AND GoodName=? AND ProductCode=? AND DeletedAt IS NULL";
+        return jdbcClient.sql(sql).params(MerchantId, GoodName, ProductCode).update();
+    }
+
+    /**
+     * 违规**删除**（{@code DeletedAt = now}）—— 逻辑删除（规则 v2），行仍在表里、买家侧查不到。
+     * 谓词同 {@link #delistByTriple}，多一个 {@code AND DeletedAt IS NULL} 防重复打点覆盖首次时刻。
+     */
+    public int softDeleteByTriple(String MerchantId, String GoodName, String ProductCode,
+                                  LocalDateTime deletedAt) {
+        String sql = "UPDATE mall_management_sql.goods SET DeletedAt = ? "
+                + "WHERE MerchantId=? AND GoodName=? AND ProductCode=? AND DeletedAt IS NULL";
+        return jdbcClient.sql(sql).params(deletedAt, MerchantId, GoodName, ProductCode).update();
     }
 }

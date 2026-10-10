@@ -55,10 +55,14 @@ import java.util.Map;
  * （哪怕是另一个方法再自调用），缓存就会静默失效。**
  *
  * <h2>【缓存失效面为什么在本类】</h2>
- * 三个写方法（{@link #goodsAdd} / {@link #goodsDe} / {@link #goodsUp}）各自在**唯一出口前**
- * 调用 {@link GoodsCacheService#evictByMerchant}。该调用随方法体一起从 Controller 搬来 ——
+ * 两个写方法（{@link #goodsDe} / {@link #goodsUp}）各自在**唯一出口前**调用
+ * {@link GoodsCacheService#evictByMerchant}。该调用随方法体一起从 Controller 搬来 ——
  * 逻辑在哪，它保护的失效就在哪。「早退分支不清缓存」（{@code goodsAdd} 的两条早退）也一并保留：
  * 那些路径一行未改库，清它是纯浪费。
+ *
+ * <p>⚠️ <b>C3 块 3 起 {@link #goodsAdd} 退出这个清单</b>：它改为**提审制**、一行不写 {@code goods}
+ * 表 ⇒ 无缓存可失效，原「唯一出口前 evict」**搬到审核通过路径**
+ * （{@link GoodsAuditService#audit}）。这是有意的搬家，不是漏写。
  *
  * <h2>【C#2：三个写方法的事务边界（2026-10-04，{@code fix/goods-write-tx}）】</h2>
  * {@link #goodsAdd} / {@link #goodsDe} / {@link #goodsUp} 各要写 {@code goods} + {@code productsales}
@@ -92,27 +96,41 @@ public class GoodsService {
 
     private final GoodsDao goodsDao;
     private final GoodsCacheService goodsCacheService;
+    private final GoodsAuditService goodsAuditService;
     private final String uploadDir;
 
     public GoodsService(GoodsDao goodsDao,
                         GoodsCacheService goodsCacheService,
+                        GoodsAuditService goodsAuditService,
                         @Value("${app.upload-dir:${user.dir}/src/main/resources/static/img/}") String uploadDir) {
         this.goodsDao = goodsDao;
         this.goodsCacheService = goodsCacheService;
+        this.goodsAuditService = goodsAuditService;
         this.uploadDir = uploadDir;
     }
 
-    // ==================== 写：上架 ====================
+    // ==================== 写：上架（C3 块 3 起 = 提审） ====================
 
     /**
-     * 上架商品。方法体逐字搬自原 Controller（含两条早退、三条语句的顺序、唯一的 evict 出口）。
+     * 上架商品 —— <b>C3 块 3 起改为**提审制**：本方法**不再写 {@code goods} 行**</b>，
+     * 只落一条 {@code goods_audit(pending)}。买家侧「看不到待审商品」是因为**压根没上架**。
      *
-     * <p>⚠️ 两条早退（图片为空 / 落盘失败）都**不调** {@code evictByMerchant} —— 它们没有改库。
-     * 唯一出口前的那次 evict 覆盖了 100% 可能改库的路径。
+     * <p>保留的部分：图片落盘编排 + 两条早退（图片为空 / 落盘失败）+ 全部文案 —— 与改前提审制的
+     * 差别只在「写什么」：{@code insertGoods} + {@code insertProductsales} 换成
+     * {@link GoodsAuditService#submit}。
      *
-     * <p>⚠️ <b>C#2（本笔）</b>：本方法写 {@code goods} + {@code productsales} 两表，已加
-     * {@link Transactional}；DB 块的 catch 内**必须**调 {@link #markRollbackOnlyIfActive()}，
-     * 理由与代价见类注释「C#2：三个写方法的事务边界」。
+     * <p>⚠️ <b>本方法**不再**调 {@code evictByMerchant}</b> —— 提审一行未动 {@code goods} 表，
+     * 没有缓存要失效。失效**搬到审核通过路径**（{@link GoodsAuditService#audit}，那里才真正新增
+     * 一行 {@code goods}）。这与原「唯一出口前 evict」的形状相反，是本块**有意的搬家**，
+     * 不是漏写：在无改库的路径上清缓存是纯浪费（与两条早退分支不清缓存同一理由）。
+     *
+     * <p>⚠️ <b>两条早退仍是「先于任何写库」</b>：图片为空 / 落盘失败都在 {@code submit} 之前返回
+     * ⇒ 失败路径**一条 JDBC 都不执行**（{@code GoodsAddUploadFailSmokeTest} 的断言据此成立）。
+     *
+     * <p>⚠️ <b>C#2 的事务边界随之搬家</b>：原「写 {@code goods} + {@code productsales} 两表同事务」
+     * 的原子性判据**不平移到一个不存在的写口上**，而是移到审核通过路径（那里才写这两张表）。
+     * 本方法保留 {@link Transactional}（覆盖「落盘 + 写提审单」），catch 内仍须
+     * {@link #markRollbackOnlyIfActive()}。
      */
     @Transactional
     public Map<String, Object> goodsAdd(
@@ -122,10 +140,10 @@ public class GoodsService {
             MultipartFile file,
             String GoodType,
             String ProductCode,
-            int GoodTypeNew
+            int GoodTypeNew,
+            Integer TypeId, String Detail, String Spec, String AfterSale
     ) {
         Map<String, Object> result = new HashMap<>();
-        int OrderVolume = 0;   // ⚠️ 死变量，照搬（原 goodsAdd 同款）
 
         // 图片保存路径
         Path uploadPath = Paths.get(uploadDir).toAbsolutePath().normalize();
@@ -155,35 +173,27 @@ public class GoodsService {
         String GoodImg = "http://localhost:8088/img/" + originalFilename;
 
         try {
-            // 插入商品表 goods
-            goodsDao.insertGoods(new GoodsDao.GoodsRow(
-                    MerchantId, GoodName, Price, GoodImg, GoodType, ProductCode, GoodTypeNew));
-
-            // 获取刚插入的商品自增ID（⚠️ 死变量，见类注释第 1 条）
-            int goodsId = goodsDao.lastInsertId();
-
-            // 插入 productsales表
-            goodsDao.insertProductsales(MerchantId, GoodName, ProductCode);
+            // 提审：只写 goods_audit(pending)，**不写 goods 行**（提审制的定义，见类注释）。
+            String batchId = GoodsAuditService.newBatchId();
+            goodsAuditService.submit(MerchantId, batchId, GoodName, Price, GoodType, GoodTypeNew, TypeId,
+                    ProductCode, GoodImg, Detail, Spec, AfterSale);
 
             result.put("success", true);
-            result.put("msg", "商品上架成功！");
+            // ⚠️ 文案已改（C3 块 3）：原「商品上架成功！」⇒「已提交审核」。
+            //    连带更新 shared/web/ResultByteEquivalenceTest.java 的标签⑦字符串（键形状不变）。
+            result.put("msg", "已提交审核");
             result.put("GoodImg", GoodImg);
+            result.put("batchId", batchId);
         } catch (Exception e) {
             e.printStackTrace();
-            // ⚠️ 吞掉异常就必须配这一步：本方法**不 rethrow** ⇒ 不标记回滚的话，
-            //    @Transactional 看到的是正常返回、照常提交，第一步的 goods 行会留下
-            //    —— 那正是 C#2 要消掉的「半成品商品」。详见类注释「C#2」。
+            // ⚠️ 吞掉异常就必须配这一步（同改前）：本方法**不 rethrow** ⇒ 不标记回滚的话，
+            //    @Transactional 看到的是正常返回、照常提交，提审单会留下 —— 那正是不想要的。
             markRollbackOnlyIfActive();
             result.put("success", false);
-            result.put("msg", "商品上架失败");
+            result.put("msg", "商品提交失败");
         }
 
-        // ⚠️ 本方法的唯一出口 —— 三个写接口共用同一模式，若新增 return 请确认：
-        //    ① 该分支不改库，或
-        //    ② 在该分支前也调 evictByMerchant()
-        // 现有全部 DAO 调用都在 try 内、catch 吞异常**且标记回滚**（C#2 起）
-        // ⇒ 唯一出口覆盖 100% 的可能改库路径；失败分支不留半成品。
-        goodsCacheService.evictByMerchant(MerchantId);
+        // ⚠️ 本方法**不调** evictByMerchant：一行未动 goods 表（见方法 javadoc）。
         return result;
     }
 
@@ -429,6 +439,41 @@ public class GoodsService {
             e.printStackTrace();
         }
         return result;
+    }
+
+    // ==================== 读：二级类目筛选（C3 块 3 新增） ====================
+
+    /**
+     * 按类目 Id（+ 可选关键词）列买家可见商品 —— 新端点 {@code /goods/categoryGoods}。
+     *
+     * <p>⚠️ <b>不经缓存</b>（同 {@link #productSearch}）：键空间是 {@code TypeId × keyword}，
+     * keyword 无界 ⇒ 缓存键会随任意输入膨胀。SQL 在 {@link GoodsDao#selectByTypeId}。
+     */
+    public Map<String, Object> categoryGoods(Integer TypeId, String keyword) {
+        Map<String, Object> result = new HashMap<>();
+        if (TypeId == null) {
+            result.put("success", false);
+            result.put("msg", "缺少参数：TypeId");
+            return result;
+        }
+        try {
+            result.put("success", true);
+            result.put("list", goodsDao.selectByTypeId(TypeId, keyword));
+        } catch (Exception e) {
+            e.printStackTrace();
+            result.put("success", false);
+            result.put("msg", "查询失败");
+        }
+        return result;
+    }
+
+    /**
+     * 商家查自己的提审历史 / 状态 —— 新端点 {@code /goods/myApplications}。
+     *
+     * <p>纯委托 {@link GoodsAuditService#myApplications}（业务在那边：参数校验 + limit 归一）。
+     */
+    public Map<String, Object> myApplications(String MerchantId, Integer limit) {
+        return goodsAuditService.myApplications(MerchantId, limit);
     }
 
     // ==================== C#2：事务回滚标记 ====================
