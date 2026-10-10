@@ -1,0 +1,37 @@
+C3 块 4〈购物车块〉手工验收（2026-10-10，a3 profile + VM 库，逐项回库核对）
+================================================================================
+环境：后端 8088（SPRING_PROFILES_ACTIVE=a3，jdbcUrl=192.168.229.129:3306/mall_management_sql）
+      前端 8080（vue-cli-service serve）；驱动 docs/美化/_cdp.mjs（headless Edge，真后端、无 mock）。
+⚠️ a3 闸关：application-a3.properties:98 app.auth.enabled=false ⇒ IdentityGuard fail-open
+   ⇒ 归属校验在本轮测不出（手验绿 ≠ 默认 profile 绿）。
+
+清单与结果（每项回库核对，不看接口 success）
+--------------------------------------------------------------------------------
+1. 购物车 加/改量/移除/结算
+   - cart UNIQUE(CustomerId,ProductCode) 生效：重复加购**合并数量**；
+   - 结算 → order 行数 6 → 9；Price = PriceSnapshot × Quantity
+     （XWNS589693227506 = 5555 × 3 = 16665 ✓）；
+   - 移除后 cart 回 0 行。
+2. 两 tab 路由
+   - ?tab=orders → 我的订单；否则 → 购物车；顶栏高亮随 meta.tab。
+3. 三处详情页入口
+   - 加购 / 立即购买 / ?tab=orders；立即购买分支 PayIf 恒 1、**不碰 cart**。
+4. 管理端订单治理四端点
+   - list/detail/monitor/intervene 形状全对：
+     · monitor：计数在 row、阈值（24/48）在顶层；
+     · detail = row + timeline（4 条，升序）；
+     · Action=refund → 「明确拒绝」文案；Action=xyz → 「未知动作」文案。
+5. 介入后 notification 双投递（回库核对，不看接口 success）
+   - order CHKM360570571420
+     · 发货轮：买家 order.notice(65) + order.intervened(66) = 2 条；商家仅 67（1 条）；
+     · 收货轮：商家 order.notice(68) + order.intervened(70) = 2 条；买家仅 69（1 条）。
+   - 命令：mysql -h192.168.229.129 -u<VM_DB_USER> -p<VM_DB_PASSWORD> -N -e
+           "SELECT Id,ToId,ToType,EventType,TargetType,TargetId,CreatedAt
+            FROM mall_management_sql.notification ORDER BY Id DESC LIMIT 14;"
+           （凭据见 application-a3.properties 的 A3_DB_USER / A3_DB_PASSWORD，不在此抄录）
+
+排除项（非缺陷）
+--------------------------------------------------------------------------------
+首条 curl 用「Status=不存在」（大写）⇒ 端点参数是 status（@RequestParam 大小写敏感），
+大写被忽略 ⇒ 等价「不筛」，回 success:true + 全量。**是我 curl 写错，不是缺陷**；
+改小写后正确回 success:false + 「未知的状态筛选值：…」。

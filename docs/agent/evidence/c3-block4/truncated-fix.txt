@@ -1,0 +1,36 @@
+缺陷：/admin/order/list 的 truncated 谎报（2026-10-10 手验抓到，已修）
+================================================================================
+现象
+  管理端「全量视图」筛了 status 后，屏幕谎报「已被上限截断」——而 limit 根本没碰到。
+
+根因
+  AdminOrderService.list 的 truncated = total > rows.size()，
+  而 total = AdminOrderDao.countAll()（**全表** COUNT(*)，**不随筛**）
+  ⇒ 筛 paid（匹配 1 单、limit=200）时 total(9) > rows(1) ⇒ truncated=true，误报。
+  前端 OrderPage.vue 的 :15 / :282 也拿同一个全表 total 反推截断，**自相矛盾**
+  （该页 :4-6 自己的注释就写着「total 是全表量，不是本次筛选数」）。
+
+修前（curl，a3/VM，2026-10-10）
+  status=paid&limit=200  →  {total:9, truncated:true,  n:1}     ← 误报
+  （屏幕：状态条「1 本次显示（已截断）」+ 提示「…已被上限截断（库内共 9 单，本次取回 1 条）…
+    提高上限才能看全。」——「提高上限」是失效建议）
+
+修后
+  status=paid&limit=200  →  {total:9, truncated:false, n:1}     ← 假阳性消除
+  status=all&limit=200   →  {total:9, truncated:false, n:9}
+  limit=1                →  {total:9, truncated:true,  n:1}     ← 真达上限，保留
+
+改法
+  后端：truncated = rows.size() >= clampLimit(limit)（AdminOrderDao.clampLimit 提为 public，
+        与 selectOrders 用**同一个**生效上限）；total 保留为全表量（供「库内共 N 单」）。
+  前端：OrderPage.vue 截断改读后端 data.truncated，**不再**用全表 total 反推；
+        文案去掉「提高上限」失效建议（改为只陈述「已达取回上限、后面可能还有」）。
+
+屏幕复核（CDP，headless Edge）
+  筛 paid      → 状态条「1 本次显示」、无截断提示   （shots/t8-paid-after.png）
+                对比修前 t8-paid-before.png 曾写「（已截断）」+ 提示条
+  limit=1      → 状态条「1 本次显示（已达上限）」+ 提示条（shots/t9-limit1.png）
+
+为什么单测抓不到
+  AdminOrderSmokeTest 明确不覆盖真查库（类注释：真库归 A3/VM 手工验证）；
+  本缺陷只在「真库有数据 + 筛 status」时显现 ⇒ 只有手验能抓。
