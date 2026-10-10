@@ -75,23 +75,31 @@ public class OrderDao {
      * 下单落库。返回影响行数（原样透传给调用方判 {@code rows > 0} 分支）。
      *
      * <p>⚠️ 参数顺序与 INSERT 的列顺序**逐字对应**（{@code OrderId, CustomerId, MerchantId,
-     * Price, ProductInformation, Images, PayIf, DeliveryIf, ReceiveIf}，{@code CreateTime}
+     * Price, Quantity, ProductInformation, Images, PayIf, DeliveryIf, ReceiveIf}，{@code CreateTime}
      * 由 SQL 里的 {@code NOW()} 填）—— 这两处顺序一旦有一个错位，A3 的 S2b 不会报错，
      * 只会有行数据静默错位。
+     *
+     * <p>⚠️ <b>C3 块 4（A2 甲）在此加了 {@code Quantity}</b>：列位**紧跟 {@code Price}**
+     * （单价旁边就是数量），参数位同理 —— 两处都加在**同一相对位置**，这是「列序 = 参数序」
+     * 这条纪律在加列时唯一安全的做法（加在末尾也能跑，但下次谁按语义插列就错位了）。
      */
     public int insertOrder(OrderRow r) {
         String sql = "INSERT INTO mall_management_sql.order " +
-                "(OrderId, CustomerId, MerchantId, Price, ProductInformation, Images, PayIf, DeliveryIf, ReceiveIf, CreateTime) " +
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())";
+                "(OrderId, CustomerId, MerchantId, Price, Quantity, ProductInformation, Images, PayIf, DeliveryIf, ReceiveIf, CreateTime) " +
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())";
         return jdbcClient.sql(sql)
-                .params(r.orderId(), r.customerId(), r.merchantId(), r.price(),
+                .params(r.orderId(), r.customerId(), r.merchantId(), r.price(), r.quantity(),
                         r.productInformation(), r.images(),
                         r.payIf(), r.deliveryIf(), r.receiveIf())
                 .update();
     }
 
-    /** 下单入参的载体（9 个位置参数，用 record 免掉一个 9 参方法签名）。嵌套在此，不另立文件。 */
-    public record OrderRow(String orderId, String customerId, String merchantId, float price,
+    /**
+     * 下单入参的载体（10 个位置参数，用 record 免掉一个 10 参方法签名）。嵌套在此，不另立文件。
+     *
+     * <p>⚠️ 分量顺序 = {@link #insertOrder} 的列顺序（{@code Quantity} 在 {@code price} 之后）。
+     */
+    public record OrderRow(String orderId, String customerId, String merchantId, float price, int quantity,
                            String productInformation, String images,
                            int payIf, int deliveryIf, int receiveIf) {
     }
@@ -113,14 +121,14 @@ public class OrderDao {
 
     /** 购物车：某客户的未收货订单（{@code ReceiveIf != 1}），按创建时间倒序。 */
     public List<Map<String, Object>> selectActiveByCustomer(String customerId) {
-        String sql = "SELECT OrderId, CustomerId, MerchantId, Price, ProductInformation, Images, PayIf, DeliveryIf, ReceiveIf,CreateTime,SettlementDate " +
+        String sql = "SELECT OrderId, CustomerId, MerchantId, Price, ProductInformation, Images, PayIf, DeliveryIf, ReceiveIf,CreateTime,SettlementDate, Quantity " +
                 "FROM mall_management_sql.`order` WHERE CustomerId = ? AND ReceiveIf != 1 ORDER BY CreateTime DESC";
         return jdbcClient.sql(sql).param(customerId).query().listOfRows();
     }
 
     /** 订单中心：某商家的未收货订单。与 {@link #selectByMerchant} 的 {@code active} 分支**逐字相同** —— 两条语句各有调用方，本笔不合并（合并会改变调用面）。 */
     public List<Map<String, Object>> selectActiveByMerchant(String merchantId) {
-        String sql = "SELECT OrderId, CustomerId, MerchantId, Price, ProductInformation, Images, PayIf, DeliveryIf, ReceiveIf,CreateTime,SettlementDate " +
+        String sql = "SELECT OrderId, CustomerId, MerchantId, Price, ProductInformation, Images, PayIf, DeliveryIf, ReceiveIf,CreateTime,SettlementDate, Quantity " +
                 "FROM mall_management_sql.`order` WHERE MerchantId = ? AND ReceiveIf != 1 ORDER BY CreateTime DESC";
         return jdbcClient.sql(sql).param(merchantId).query().listOfRows();
     }
@@ -135,10 +143,10 @@ public class OrderDao {
     public List<Map<String, Object>> selectByMerchant(String merchantId, boolean completed) {
         String sql;
         if (completed) {
-            sql = "SELECT OrderId, CustomerId, MerchantId, Price, ProductInformation, Images, PayIf, DeliveryIf, ReceiveIf,SettlementDate " +
+            sql = "SELECT OrderId, CustomerId, MerchantId, Price, ProductInformation, Images, PayIf, DeliveryIf, ReceiveIf,SettlementDate, Quantity " +
                     "FROM mall_management_sql.`order` WHERE MerchantId = ? AND ReceiveIf = 1 ORDER BY CreateTime DESC";
         } else {
-            sql = "SELECT OrderId, CustomerId, MerchantId, Price, ProductInformation, Images, PayIf, DeliveryIf, ReceiveIf,SettlementDate " +
+            sql = "SELECT OrderId, CustomerId, MerchantId, Price, ProductInformation, Images, PayIf, DeliveryIf, ReceiveIf,SettlementDate, Quantity " +
                     "FROM mall_management_sql.`order` WHERE MerchantId = ? AND ReceiveIf != 1 ORDER BY CreateTime DESC";
         }
         return jdbcClient.sql(sql).param(merchantId).query().listOfRows();
@@ -146,10 +154,39 @@ public class OrderDao {
 
     /** 历史订单：某客户的已收货订单，按 {@code SettlementDate}（字符串列）倒序。 */
     public List<Map<String, Object>> selectHistoryByCustomer(String customerId) {
-        String sql = "SELECT OrderId, MerchantId, ProductInformation, Images, SettlementDate " +
+        String sql = "SELECT OrderId, MerchantId, ProductInformation, Images, SettlementDate, Quantity " +
                 "FROM mall_management_sql.`order` " +
                 "WHERE CustomerId = ? AND ReceiveIf = 1 " +
                 "ORDER BY SettlementDate DESC";
         return jdbcClient.sql(sql).param(customerId).query().listOfRows();
+    }
+
+    // ==================== 读：归属（C3 块 4 · A3 连带） ====================
+
+    /**
+     * 按 {@code OrderId} 取该单的**归属双方**；单不存在 ⇒ {@code null}。
+     *
+     * <p>块 4 加它只有一个用途：三个 CAS 端点（{@code orderPayIfUp} / {@code orderReceiveIfUp} /
+     * {@code orderDeliveryIfUp}）在此之前**只收 {@code orderId}、谁都能改别人的单**
+     * （缺口登记 {@code progress.md §5-AF}）—— 判「这张单是不是你的」必须**回查资源归属**，
+     * 故 A3 连带在此补一条**只读**回查。
+     *
+     * <p>⚠️ <b>用 {@code optional()} 而不是 {@code single()}</b>：单不存在是**正常输入**
+     * （乱传 / 已被清理的 orderId），不是异常。
+     * <p>⚠️ <b>返回 {@code null} 时调用方必须「放行到 CAS」，不许改判成 403</b>：
+     * 让 CAS 的 {@code rows == 0} 去出既有的那条文案 —— 否则 A3 的 {@code A-S3-2}
+     * （20 并发支付里恰好 19 个返回逐字「订单不存在或已付款」）会当场变红。
+     * 归属校验**只管「别人的单」**，不管「不存在的单」。
+     */
+    public OrderOwner selectOwner(String orderId) {
+        String sql = "SELECT CustomerId, MerchantId FROM mall_management_sql.`order` WHERE OrderId = ?";
+        return jdbcClient.sql(sql).param(orderId)
+                .query((rs, rowNum) -> new OrderOwner(rs.getString("CustomerId"), rs.getString("MerchantId")))
+                .optional()
+                .orElse(null);
+    }
+
+    /** 订单归属：{@code customerId} = 买家，{@code merchantId} = 卖家。 */
+    public record OrderOwner(String customerId, String merchantId) {
     }
 }

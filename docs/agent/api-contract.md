@@ -230,3 +230,82 @@
 - **15 个写接口全部未验**：`loginAdd`、`updateAvatar`、`updateUserInfo`、`goodsAdd`、`goodsDe`、`goodsUp`、`orderAdd`、`orderPayIfUp`、`orderReceiveIfUp`、`orderDeliveryIfUp`、`/message/send`、`friendAdd`、`friendUp`、`friendDe`、**`/message/history`（名为读、实为写，见 §1）**。
 - **已验的 17 个读端点**：全部 **HTTP 200**，**0 次 5xx、0 次超时**（2026-09-30，最小构造入参）。
 - **参数名级不匹配：0 条**。字段/语义级问题见 `defect-survey.md`。
+---
+
+## 附录 C：C3 块 4〈订单块〉契约增补（2026-10-10）
+
+> **本附录与正文的关系**：正文 §1 的 `O:` 一栏是 **2026-10-03 / 10-04 的旧坐标**；块 4 让 `OrderController` 由 65 行长到 **156 行**（+91，逐处见 `slot-registry.md §二十`）⇒ **全部 `O:` 值已陈旧**。按 §十五 15-5「已陈旧者只登记、不修」，本笔**就地不动正文**，把新坐标与新端点登记在此；重填 `O:` 归「文档飘移清理笔」。
+> **判据档位**：本附录所有行号均为 **2026-10-10 实测**（`grep -n '@PostMapping'`，口径 = **`@PostMapping` 行**，与正文一致、与 `db-schema.md:5` 相反）。
+
+### C.1 正文 `O:` 一栏的新坐标（2026-10-10 实测）
+
+| 端点 | 正文旧值 | **新行号** | 证据 |
+|---|---|---|---|
+| `/order/orderAdd` | `O:42`（正文 `:125`） | **`:95`** | `OrderController.java:95` |
+| `/order/orderSelect` | — | **`:121`** | `:121` |
+| `/order/orderDeliveryIfSelect` | — | **`:134`** | `:134` |
+| `/order/orderDeliverySelect` | — | **`:149`** | `:149` |
+| `/order/historicalOrdersSelect` | — | **`:165`** | `:165` |
+| `/order/orderPayIfUp` | — | **`:184`** | `:184` |
+| `/order/orderReceiveIfUp` | — | **`:197`** | `:197` |
+| `/order/orderDeliveryIfUp` | — | **`:215`** | `:215` |
+
+⚠️ 「正文旧值」只填了能逐字读到的 `:125` 那一条；其余 7 行我**没有逐条回读正文原值**，故留 `—` —— 不猜（错一个值比留空更坏）。
+⚠️ 同类陈旧的还有正文 `:196` 的**前端调用点**：`/order/orderAdd` 现由 `ProductPage.vue:638` 发起（`handlePay` 的 'buy' 支，实测），正文写的 `ProductPage.vue:369` 自 **2026-10-08 六条改动**起即已陈旧（**不是块 4 打破的**）⇒ 同按「只登记、不修」处理。
+
+### C.2 `/order/orderAdd` 改动（入参 9 → 10）
+
+| 项 | 内容 |
+|---|---|
+| 新增入参 | `Quantity` —— `@RequestParam(value="Quantity", required=false, defaultValue="1") int`（`OrderController.java:105`） |
+| 兼容性 | **向后兼容**：老调用方不传 ⇒ 落 `1`，与块 4 前语义逐字一致 |
+| 新增守卫 | 方法第一行 `IdentityGuard.requireSelfOrAdmin(request, CustomerId)`（`:110-113`）⇒ 越权访问 **403**（**不是** 200+`success:false`，本仓唯一例外） |
+| ⚠️ 判的是谁 | **`CustomerId`（买家自己）**，不是 `MerchantId`（对端方，当然要填别人的）。改这行前先读该处注释 |
+| 三道既有闸 | 价格闸 / 出生状态闸 / `runLocked` **顺序与语义零变化**（正文 `:150`/`:151` 仍有效） |
+
+### C.3 新端点组：`/cart/*`（`CartController.java` @ `:40`，121 行）
+
+> 契约要点：**5 个端点全部 `POST`**、入参全为 `@RequestParam`、**每个都先过 `IdentityGuard.requireSelfOrAdmin(request, CustomerId)`**（越权 403）；`CustomerId` 一律**必填**，缺失 ⇒ `{success:false,msg:"缺少参数：CustomerId"}`。
+> ⚠️ 与正文口径一致：失败 = **HTTP 200 + `success:false`**（唯一例外是上面那个 403）。**无 `@Transactional`**（本仓订单链路的结构性约束）。
+
+| 方法 | 路径 | 入参 | 返回 | 幂等 | 证据 |
+|---|---|---|---|---|---|
+| POST | `/cart/add` | CustomerId, MerchantId, ProductCode, `Quantity?`（缺省 1） | `{success, msg}` | **否** —— 同 `(CustomerId, ProductCode)` 已在车里 ⇒ **合并数量、不新开行**（靠 `uk_cart_customer_product`） | `:50` |
+| POST | `/cart/update` | CustomerId, ProductCode, `Quantity?` | `{success, msg}` | **是**（绝对赋值，置值语义） | `:67` |
+| POST | `/cart/remove` | CustomerId, ProductCode | `{success, msg}` | **是** | `:81` |
+| POST | `/cart/list` | CustomerId | `{success, list}` | **是**（纯读） | `:94` |
+| POST | `/cart/checkout` | CustomerId, `ProductCode?`（不传 ⇒ **整车**） | `{success, msg, list}` | **否** | `:110` |
+
+**`/cart/checkout` 逐字口径**（`CartService.java:160-198`）：
+
+- 逐行建订单 ⇒ 每行走 **既有** `OrderService.orderAdd(...)`（锁 + 三道闸一个不绕），出生状态**恒 `(PayIf,DeliveryIf,ReceiveIf) = (0,0,0)`** ⇒ 结算完的单在「我的订单」tab 里是**未付款**。
+- 行金额 = `(float)(unit × qty)`，`unit` 取 **`PriceSnapshot`**，为空时回 **`goods.Price`（`PriceNow`）** ⇒ 这就是 A1「存快照」的落点（车里的价 = 落库的价）。
+- `list` 元素 = `{OrderId, ProductCode, Quantity, Price}`（`:189-192`）；`OrderId` 由后端 `newOrderId()` 现生成，**不由前端提供**。
+- ⚠️ **清行顺序**：先 `orderAdd` 成功、**再** `cartDao.remove` —— 「订单真的落库了才清行」，顺序反了就是「钱没了、车空了」（`:185-187` 注释）。
+- ⚠️ **部分失败不滚**：中途某行失败 ⇒ 返回 `{success:false, msg, list:[已成功行]}`，**已建订单不回滚**（无事务），**失败行留在车里**（`:170-174` 注释：商品已被删 / 下架时「不动这一行」并中止）。
+- ⚠️ `/cart/remove` 是**物理 DELETE** —— 全仓对「规则 v2：逻辑废弃、不物理删」的**唯一破例**（用户明确批准）。理由与代价见 `CartDao` 类注释 + `tech-debt.md`。
+
+### C.4 新端点组：`/admin/order/*`（`AdminOrderController.java` @ `:37`，95 行）
+
+> ⚠️ **TD-18 硬线**：本组**不得加角色闸**（不加 `requireAdmin`、前端也不得加角色判断）—— 与其余 `/admin/*` 同款。**只 `/intervene` 挂审计**，其余 3 个是读。
+> 参数一律 `required=false` + Service 手判（本仓约束异常会逃逸成 400 空体）。
+> 返回体是 `Result<Map<String,Object>>`，而 **`Result` 是 `HashMap` 子类、`Result.of(src)` 逐键平铺**（`shared/web/Result.java:95`）——**没有 `data` 包裹层**。与 `/cart/*`、`/order/*` 的 `ResponseEntity<Object>` 形状不同，前端封装已按此分家（见 §C.5）。
+
+| 方法 | 路径 | 入参 | 返回（**平铺**） | 副作用 | 证据 |
+|---|---|---|---|---|---|
+| POST | `/admin/order/list` | CustomerId?, MerchantId?, status?, from?, to?, limit?（Service 侧 clamp 上限 **500**，`limit<=0` ⇒ 200） | `{success, list, total, truncated}` ⚠️ **两字段刻意分流**：`truncated = rows.size() >= 生效上限`（**只表「本次已达上限、后面可能还有」**，与筛选无关）；`total` = **全表** `COUNT(*)`（供「库内共 N 单」），**不随筛**、**不是**截断判据 | 无 | `:49` |
+| POST | `/admin/order/detail` | OrderId? | `{success, row, timeline}` | 无 | `:62` |
+| POST | `/admin/order/monitor` | — | `{success, row:{unpaidTimeout, undeliveredTimeout, abnormalState, unfinished, total}, unpaidHours, undeliveredHours}` ⚠️ **五个计数在 `row` 里，两个阈值在顶层** | 无 | `:68` |
+| POST | `/admin/order/intervene` | OrderId?, Action? | 委托 `OrderService.{payIfUp\|deliveryIfUp\|receiveIfUp}` 的返回体（`{success, msg}` 家族） | **写 `order`（沿既有 CAS 边强制推进）+ 记 1 行 `admin_audit` + 双向通知** | `:79` |
+
+- `Action` 白名单 = **`pay` / `deliver` / `receive`**（= 既有三条 CAS 边，**不新增状态机边**）；`Action = refund` 被 **Service 层明确拒绝**（不是「未知动作」）—— `order` 表**没有资金态**，强行回滚会破坏三位单调性 ⇒ 记为「已知但未实现」。
+- 阈值 `unpaidHours` / `undeliveredHours` **随响应回传**（24 / 48，`AdminOrderDao` 常量），前端**不得写死**。⚠️ 本仓**无任何 SLA 配置** ⇒ 这两个数是「拍的」，已登记待裁。
+- 归属校验（A3 连带）落在这三条 CAS 端点：`orderDeliverySelect` 的守卫在 `OrderController.java:156`（其余两条同款）。
+- ⚠️ **通知是 fail-soft**：`notifyBoth` 任何异常静默返回 ⇒ 「通知丢了」与「通知成功」**在响应体上同形**。验收必须**回库读 `notification` 表**，不能看接口的 `success`（`AdminOrderService.java:183-187` 注释）。
+- ⚠️ **强制发货 / 强制完成各让「该轮被推进的对端」收两条通知**：一条「对端通知」（`OrderService` 里用户自己操作也走的那条）+ 一条「管理员介入订单」——**发货轮买家 2 条、收货轮商家 2 条**，另一端各 1 条。**这是有意的**，已登记 `tech-debt.md` TD-24。
+- ⚠️ 三条 CAS 端点各自的**业务闸**（如 `payIfUp` 的前置态检查）**不由本组复制**，全部复用 `OrderService` 原路径 ⇒ 契约与用户端点击同一条边。
+
+### C.5 前端封装（供对账）
+
+新增 `src/api/order.js`（**233 行**）：`q()`（丢空值）/ `build()`（全传）/ `post()`（剥 `Response`）三个内部件 + **8 个 `/order/*`** + **5 个 `/cart/*`** + **4 个 `/admin/order/*`** 导出。
+`src/api/endpoints.js` 的 `orderAdmin: {list, detail, monitor, intervene}` 见 `:194-198`；`endpoints.js` 头部「现为 N 条」计数已**同行改**（**未新增行**）。

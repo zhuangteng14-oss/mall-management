@@ -4357,3 +4357,120 @@ C 档＝完全自裁）；**按用户要求做，不按稿做**（与 `c3-module
 ⚠️ **旁证**：「丢失」在库里表现为**该对象 update 行有、create 行无**（模板 Id 1 / 2 / 3 皆如此）—— 可直接指认，不是「查不到」。
 📌 同根教训已立 **TD-20**（`docs/agent/tech-debt.md` 文件尾「活跃技术债（尾部续）」）：**静默失败路径需专门测试**（DAO SQL 参数计数静态检查 / 审计·通知留痕真库冒烟 / fail-open 路径显式验证），归块 3 收口时挂、块 8 部署前一并处理。
 
+---
+
+## 二十、C3 块 4〈订单块〉（2026-10-10；**落码完成 + 构建/测试绿 + 两库已落 + 手验未做**；未提交）
+
+用户口径（逐字要点）：块 3 已 merge（PR #84，`fbf5c00`）⇒ 正式收口；进块 4「订单块」，**三端一起设计一起落**；
+**继续攒、不提交**；三条不松的线照旧（**建表 / 改契约 / 删文件 ⇒ 必问**）；提速规则照旧（A 档必问 / B 档自裁报备 / C 档自决）。
+
+**块 4 的方案（用户 2026-10-10 确认，并撤回自己上一条）**：
+
+- 商家端两块：**订单中心（我卖的）** + **购物车块（我买的）**；用户端一块：**购物车块**。
+- **购物车块 = 容器**，内含 `[购物车]` `[我的订单]` 两个 tab。
+- **职责**：订单中心 = 别人在我这买的单（发货 / 物流）；购物车块 = 我自己买的单（未成交 + 已成交）。
+- 落地细节：① tab 路由 = **一个路由 + `?tab=`**（`/cart?tab=cart` / `/cart?tab=orders`），顶栏**一个入口**；
+  ② 商品详情两个按钮：**加入购物车 → 写 `cart` → 进「购物车」tab**；**立即购买 → 写 `order` → 进「我的订单」tab**；
+  ③ 顶栏：商家端「订单中心 | 购物车」；用户端「购物车」。
+- **撤回**：「我买的放用户中心」作废 —— **购物车块内 tab** 更简单直接。
+- **A 档回归到 3 个**（见 20-1）。前序裁决：**付款 / 收货全归「我的订单」tab** ⇒ cart tab = **真购物车**。
+
+块级权威 = `context-packs/c3-block-4-order.md`（⚠️ 该 pack 的「现状」坐标为**块 4 前**，见 20-5）；
+落地方案 = `_work/c3-block4-landing-plan.md`。
+
+### 20-1　A 档 3 项裁决（用户 2026-10-10 逐项批）
+
+| # | 裁决 | 落地要点 |
+|---|---|---|
+| A1 | 购物车载体 = **新表 `cart`**（甲） | 8 列 + 主键 + `uk_cart_customer_product (CustomerId, ProductCode)` + `idx_cart_customer`；**唯一键 ⇒ 同商品重复加购合并数量、不新开行**；`PriceSnapshot` = **结算成交价**（不是「仅供参考」） |
+| A2 | 订单数量 = **`order` 加 `Quantity` 列**（甲） | `int NOT NULL DEFAULT 1`（表末 + 默认值 + COMMENT，规则 7）⇒ 存量 6 行回填 1，**不改行数** ⇒ P4 种子计数不受影响 |
+| A3 | 介入动作边界 = **只沿既有三条 CAS 边** | 白名单 `pay` / `deliver` / `receive`；**不新增状态机边**、**不碰 `OrderStateMachine`**；`refund` / `dispute` 在 Service 层**明确拒绝**（不是「未知动作」） |
+| A3 连带 | 三条 CAS 端点加**归属校验** | `IdentityGuard.requireSelfOrAdmin(request, …)` 落在 `orderDeliverySelect`（`OrderController.java:156`）/ `orderReceiveIfUp` / `orderDeliveryIfUp` |
+
+### 20-2　建表（Migration 块 6 —— `mall_management_sql.sql:681-738`，**追加在文件尾**）
+
+| 变更 | 位置 | 内容 |
+|---|---|---|
+| 新表 `cart` | `:708-720` | 8 列（`Id` PK · `CustomerId` varchar(40) · `MerchantId` varchar(40) · `ProductCode` **char(40)** · `Quantity` int DEFAULT 1 · `PriceSnapshot` **double** NULL · `created_at` / `updated_at` datetime(3)） |
+| `cart` 索引 | `:717-719` | `PRIMARY (Id)` · `UNIQUE uk_cart_customer_product (CustomerId, ProductCode)` · `KEY idx_cart_customer (CustomerId)` |
+| `cart` 列注订正 | `:722-728` | `ALTER TABLE cart MODIFY COLUMN PriceSnapshot …` —— **只改注释、不改列**（初稿把它注成「仅陈列」，与 A1「存快照就是为避免改价争议」相反）。⚠️ 必须**单独一条**：`CREATE TABLE IF NOT EXISTS` 对已存在的表是空操作 |
+| `order` 加 `Quantity` | `:730-738` | `int NOT NULL DEFAULT 1`，走 `information_schema` 守卫 + `PREPARE` ⇒ **重跑是空操作** |
+
+**两条列宽口径（新列一律向源列对齐，不复制旧缺陷）**：`CustomerId` / `MerchantId` ← `order` 的 varchar(40)；
+`ProductCode` ← `goods` 的 **char(40)**；`PriceSnapshot` ← `goods.Price` 的 **double**，**刻意不照** `order.Price` 的 **float**（`defect-survey.md` 记过的不一致）。
+
+- ⚠️ **表数 17 → 18** ⇒ 同笔改 `ConcurrencyRunner.java` 的 P3 门禁：IN 清单加 `'cart'`、`KNOWN_TABLES` **6 → 7**、期望 `11 + 7 = 18`。**已落**（`KNOWN_TABLES` 现于 **`:2662`**）。
+- ⚠️ **`cart` 刻意不在 `.sql:21` 起的 `DROP TABLE IF EXISTS` 基线清单里** —— 它是**用户数据不是种子**，整份重导**不清空购物车**（`.sql:689-690` 块注释）。
+- ⚠️ **本块只增不改**：不删表、不改既有列、不动既有数据（规则 v2：逻辑废弃不物理删）。
+- **两库已落 + 实测**：本机库 **14 表**（含 `cart` / `template`）· VM 库 **18 表**（含 `cart`）· `order` 仍 **6 行** · `cart` **0 行**。证据与逐条口径见 `db-migration.md` **#9 + 注意 12**。
+
+### 20-3　后端
+
+| 对象 | 内容 |
+|---|---|
+| **新包 `cart/`** | `CartController`（121 行，类级 `@RequestMapping("/cart")` @ `:40`，5 个端点全 `POST` + 全过 `IdentityGuard`）· `CartService`（299 行）· `CartDao`（153 行） |
+| **新包 `admin/` 订单治理三件** | `AdminOrderController`（95 行，`:37` 类级前缀 `/admin/order`，4 端点）· `AdminOrderService`（230 行）· `AdminOrderDao`（192 行） |
+| `order/controller/OrderController.java` | **+91 行**（65 → **156**）：`orderAdd` 加 `Quantity` 入参 + **归属校验**（`:110-113`）；`orderDeliverySelect` / `orderReceiveIfUp` / `orderDeliveryIfUp` 加归属校验 |
+| `order/service/OrderService.java` | +106 行（`orderAdd` 透传 `Quantity`；`ownerIdOf` 供介入通知取双方；**未加 `@Transactional`**，也未碰 `OrderStateMachine`） |
+| `order/dao/OrderDao.java` | +37 行（两条 `selectByMerchant` 的 SELECT 各补 `Quantity` ⇒ 现落 `:146` / `:149`） |
+| `AuditActions.java` | +`ORDER_INTERVENE`（其余新增动作串**未加**） |
+| 测试 | 新增 `CartSmokeTest` / `AdminOrderSmokeTest`；`AbstractSmokeTest` 的 `@Import` 补新 `@Service`（**不补则整个切片上下文起不来**） |
+
+**契约细节（逐字）**：
+
+- `/admin/order/*` **TD-18 硬线：不得加角色闸**（不加 `requireAdmin`，前端也不得加角色判断）—— 与其余 `/admin/*` 同款；**只有 `/intervene` 挂审计**（`TargetId = OrderId`，`BeforeJson` 恒 NULL）。
+- `Result` 是 `HashMap` 子类、`Result.of(src)` **逐键平铺**（`shared/web/Result.java:95`）⇒ `/admin/order/*` 的返回**没有 `data` 包裹层**，形状与 `/cart/*`、`/order/*` 的 `ResponseEntity<Object>` 不同。
+- `/cart/checkout` **逐行走既有 `OrderService.orderAdd`**（锁 + 三道闸一个不绕），出生状态**恒 `(0,0,0)`** ⇒ 结算完的单在「我的订单」里是**未付款**；`Price = (float)(PriceSnapshot ?? goods.Price) × Quantity`；**先落订单、后清行**（`:185-187` 注释：顺序反了就是「钱没了、车空了」）；**部分失败不回滚**（无事务），失败行**留在车里**。
+- `notifyBoth` 是 **fail-soft** ⇒ 「通知丢了」与「通知成功」在响应体上**同形**，验收必须**回库读 `notification` 表**。
+- `/cart/remove` 是**物理 DELETE** —— 全仓对规则 v2 的**唯一破例**（用户明确批准）。
+
+### 20-4　前端（三端）
+
+| 文件 | 内容 |
+|---|---|
+| **新** `views/OrderMine.vue`（361 行） | 「我的订单」tab：付款 / 收货**只在这**（依前序裁决） |
+| **新** `views/admin/OrderPage.vue`（873 行） | 管理端订单治理：2 个页级 tab（订单全量 / 异常监控）+ 行级介入（`pay`/`deliver`/`receive`）；`.a-*` 家族；`flash` 横幅代替 `alert`/`confirm`（eslintConfig **无 browser env**）；介入走**两击确认**（无 `confirm`）；`from`/`to` 用 **text** 而非 `datetime-local`（后者会发 `T` 分隔符，静默破坏后端的字典序比较）；截断由后端 `truncated`（`rows.size() >= 生效上限`）判，前端**不拿全表 `total` 反推**（2026-10-10 修：曾据此谎报「已截断」） |
+| **新** `api/order.js`（233 行） | `q()` / `build()` / `post()` + **8 `/order/*`** + **5 `/cart/*`** + **4 `/admin/order/*`** |
+| `views/ShoppingCart.vue` | **大改**（-542/+ 净重写为 548 行）—— 改成真购物车（加/改量/移除/结算），付款收货迁走 |
+| `views/merchant/OrderPane.vue`（102 行） | 升格为**购物车块容器**（两 tab，由 `?tab=` 选面），商家 + 客户两壳共用 |
+| `router/index.js` | `cart` 子路由的 `component` 由 `ShoppingCart` 换成 `OrderPane`，**并删掉 `props:{showSwitch:false}`**（容器不认 ⇒ 留着会变根元素上的野属性）；`/merchant/order/cart` 的 `meta.tab` 由 `'order'` 改成 `'cart'`（否则顶栏高亮不成立） |
+| `config/nav.js` | 商家顶栏**新增**「购物车」项（`{label:'购物车', tab:'cart', to:'/merchant/order/cart'}`）—— **同行追加**（净零行数）；块 4 前购物车块**没有顶栏入口**，只能靠订单中心页里那枚开关进 |
+| `views/ProductPage.vue` | 两入口**彻底分家**：`'cart'` 支逐型号写 `/cart/add`、**根本不碰 `order` 表**，`'buy'` 支写 `orderAdd` 且 `PayIf` **恒 1**（块 4 前两支都掉 `orderAdd`，那正是用户点名的 bug）；两处同行改写（`slot-registry.md:1987-1988` 引的 `:775`/`:784` **未被顶漂**） |
+| `api/endpoints.js` | `orderAdmin` 四键（`:194-198`）；头部「现为 N 条」计数**同行改**（不新增行） |
+
+**构建 / 测试**：`npm run build` **绿**（`Build complete`）；`./mvnw -q test` **exit 0**；`npx eslint --ext .js,.vue src/` **零报错**（修掉 `ProductPage.vue` 两处 `no-extra-boolean-cast`）。
+
+### 20-5　零漂移手法与重指
+
+- **本笔打破的引用 = 1 处**：`OrderCenter.vue:131` 引 `OrderDao.java:138 / :141`（**在 HEAD 是准的**）—— 因 `OrderDao` 两条 SELECT 各下移 8 行，**同行改**为 `:146 / :149` 并附原值说明。文件 7/7 净零。
+- **刻意「只登记、不修」的**（依 §十五 15-5）：
+  - `ConcurrencyRunner.java:2658` → 现 **`:2662`** —— 但**全部引用方在 HEAD 就已陈旧**（它们写 `KNOWN_TABLES 5 → 7`，而 HEAD 是 6），故**不修**。
+  - `OrderDao.java:133` —— `slot-registry.md:3450` **早已把它列进 6 处「预先陈旧」**，归「文档漂移清理笔」，故**不修**。
+  - `OrderService.java:61/:78/:102/:235`、`AbstractSmokeTest.java:45/:137` —— HEAD 即已近似/史料，**不修**。
+  - `api-contract.md:196` 的 `ProductPage.vue:369` —— 自 **2026-10-08 六条改动**起即陈旧（**不是块 4 打破的**），实际在 **`:638`**，已登记在 `api-contract.md 附录 C.1`。
+- **`db-schema.md` 本笔不中段插行**：该文件有 **44 处外部 `文件:行号` 引用**（10 个文件 / 26 个不同行号），中段插一行会让其后集体 +1 ⇒ `cart` 的逐列定义 / `order.Quantity` / 第 4 个 UNIQUE 一律登记在**文件末新建的 §11**，`§1` / `§6` / `§7` / `§10` 只做**同行改 + 指向 §11**（净零行）。理由与影响已写在 `db-schema.md` 文件头。
+- **refs-scan 回归**：`scripts/refs-after.txt`（4044 命中）按**去 referrer 行号后比 token 集合** ⇒ before 3065 / after 3139 token，**丢失对 21 对，其 referrer 全部是本笔重写/手改的那三个文件**（`ShoppingCart.vue` / `OrderPane.vue` / `AppShell.vue`·`OrderCenter.vue` 的注释）⇒ **没有别的文件丢引用**。
+- **pack 回指旧行号一律写「原 N 行」（不带冒号）**，否则 `check-context-packs.sh` 会把 `` `:数字` `` 当同行简写误归属。
+
+### 20-6　验收
+
+- **已做**：`npm run build` 绿 · `./mvnw -q test` **exit 0** · `npx eslint` 零错 · 两库迁移实测（本机 14 表 / VM 18 表、`order` 6 行、`cart` 0 行）· refs-scan token 集合比对。
+- ⚠️ **未做（明确挂账，不静默跳过）**：**块 4 的手工验收一轮都没跑**（购物车加/改量/移除/结算、两 tab 路由、三处商品详情入口、管理端订单治理四端点、介入后的 `notification` 双投递回库核对）。
+  ⚠️ **手验前必提醒**：`application-a3.properties:98` 的 **`app.auth.enabled=false`** —— a3 闸关，**手验绿 ≠ 默认 profile 绿**。
+- ⚠️ **P3 门禁读法**：`concurrency` CI job 是 `continue-on-error` ⇒ **job 颜色系统性无信息量**，必须读产物里的 `gates.count`（2026-10-07 实测 30/0）。
+
+### 20-7　未做 / 待办（**已登记，不属本块**）
+
+1. **强制退款**：`order` 表**没有资金态**，`PayIf` 回退会破三位单调性 ⇒ Service 明确回「知道但不做」，已登记 `tech-debt.md`。
+2. **CAS 归属校验是 fail-open**（`IdentityGuard` 不可用即放行）—— 与既有守卫同款，登记。
+3. **强制发货 / 强制完成各让「该轮被推进的对端」收两条通知**（发货轮买家 2 / 收货轮商家 2，另一端各 1；对端通知 + 管理员介入）—— **有意**，登记（`tech-debt.md` TD-24）。
+4. **`cart` 物理 DELETE** 的规则-v2 破例，登记。
+5. **`OrderCenter` 的 `showSwitch` / `orderTab` / `@toggle` 三个 prop 全线退役**（块 4 起无消费者），登记。
+6. **`OrderCenter` 的表格仍没有「数量」列**（`Quantity` 已落库、未上屏），登记。
+7. **购物车块 tab 路由**：本轮用一个路由 + `?tab=`；深链 / 浏览器前进后退的行为未验。
+
+### 20-8　报备偏差（落码 ≠ 方案原文处）
+
+1. **`db-schema.md` 不中段插行**（方案 §六原文是「表总览 +1、新增 `cart` 小节」）—— 改为**文件末 §11**，理由 = 44 处外部引用（10 个文件 / 26 个不同行号）会被集体顶漂（零漂移优先）。**这是本笔对方案的一次自觉偏离，已在此登记。**
+2. **`api-contract.md` 正文 `O:` 一栏不就地重填** —— 同上按「只登记、不修」，新坐标放**附录 C**。
+3. **管理端订单页的「介入」不做成第三个 tab** —— 它是**行级动作**，页级 tab 只有 2 个（`c3-modules.md §五` 要求页级 tab 2–4 个，2 个合规）。

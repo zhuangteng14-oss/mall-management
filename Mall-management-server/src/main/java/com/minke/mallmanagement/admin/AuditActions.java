@@ -145,6 +145,22 @@ public final class AuditActions {
     /** 管理员删模板（逻辑废弃：{@code Enabled=0}）—— {@code POST /admin/template/delete}。 */
     public static final String TEMPLATE_DELETE = "template.delete";
 
+    // ==================== C3 块 4（订单块，2026-10-10）====================
+    // 三个订单治理动作。域段是 `order`（**表名**，也是调用点传的 TargetType 字面量）。
+    // ⚠️ **TargetId 一律传 `OrderId`**（业务号，不是自增 `Id`）—— `admin_audit.TargetId` 是 NOT NULL，
+    //    传 null 会在留痕处炸掉整条链路（块 3 在这里丢光过留痕，见 TD-20 的教训）。
+    // ⚠️ 三条**互不覆盖**：介入 / 发货 / 收货的 **actor 不同**（管理员 / 商家 / 买家），
+    //    合成一条就分不出「是谁把这张单推了一步」—— 那正是审计要回答的问题。
+
+    /** 管理员介入订单（沿既有 CAS 边强制推进）—— {@code POST /admin/order/intervene}。 */
+    public static final String ORDER_INTERVENE = "order.intervene";
+
+    /** 商家发货 —— {@code POST /order/orderDeliveryIfUp}。 */
+    public static final String ORDER_DELIVER = "order.deliver";
+
+    /** 买家收货 —— {@code POST /order/orderReceiveIfUp}。 */
+    public static final String ORDER_RECEIVE = "order.receive";
+
     private AuditActions() {
     }
 }

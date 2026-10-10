@@ -678,3 +678,61 @@ PREPARE _p FROM @m; EXECUTE _p; DEALLOCATE PREPARE _p;
 -- ⚠️ 这两张表的**基线建表块留在文件原处不动**（零漂移），净行为由本处 DROP 兑现。
 DROP TABLE IF EXISTS `goods_template`;
 DROP TABLE IF EXISTS `notification_template`;
+
+/* =====================================================================
+   Migration 块 6：C3 块 4〈订单块〉（2026-10-10，分支 feat/c3-admin-block4）
+   ---------------------------------------------------------------------
+   ① 建 `cart` —— 真购物车载体（A1 甲，用户 2026-10-10 逐项裁决）
+   ② `order` 加 `Quantity`（A2 甲）
+   ⚠️ 幂等：每个 DDL 先查 information_schema 再决定执行 / `DO 0` ⇒ 两库都能跑、重跑是空操作。
+   ⚠️ 本块**只增不改**：不删表、不改既有列、不动既有数据（规则 v2：逻辑废弃不物理删）。
+   ⚠️ `cart` **不在**文件头（:21 起）的 `DROP TABLE IF EXISTS` 基线清单里
+      ⇒ 整份重导**不会清空购物车**（它是用户数据不是种子）。列数变化由 CREATE IF NOT EXISTS 兜住。
+   ===================================================================== */
+
+-- ---- ① 新表 `cart`（真购物车）----
+-- 列宽一律向**源列**对齐，不照抄既有表的旧偏差：
+--   CustomerId / MerchantId ← `order` 的 varchar(40)（:143-144）
+--   ProductCode            ← `goods` 的 char(40)（:61）
+--   PriceSnapshot          ← `goods`.`Price` 的 double（:58）
+--   ⚠️ 刻意**不**照 `order`.`Price` 的 float（:146）—— 那是 `defect-survey.md` 记过的不一致，
+--      新列向源列对齐，不复制旧缺陷（谁要对齐 float，先用实测说明为什么）。
+-- 唯一键 `UNIQUE(CustomerId, ProductCode)` ⇒ 同商品重复加购**合并数量**，不新开行。
+--   ⚠️ 代价：`ProductCode` 跨商家不保证唯一（本仓无店铺表），故**归属以 `MerchantId` 为准**：
+--      回读商品名/图一律按 `(MerchantId, ProductCode)` 联 `goods`（与 `GoodsDao.updateGoods` 的
+--      既有口径一致），不按单独的 ProductCode 联。
+-- ⚠️ `PriceSnapshot` **就是成交价的来源**（不是「仅供参考」）：结算时以它为准 ——
+--   用户看到的价与下单落库的价必须是同一个数，否则「购物车里 ¥10、订单里 ¥12」就是改价争议
+--   （这正是 A1 选「存快照」的理由，见 `_work/c3-block4-landing-plan.md §一 A1`）。
+--   兜底：快照为 NULL 的行（非本链路写入）结算时回 `goods.Price`。
+CREATE TABLE IF NOT EXISTS `cart` (
+  `Id` int NOT NULL AUTO_INCREMENT COMMENT '自增主键',
+  `CustomerId` varchar(40) NOT NULL COMMENT '买家业务号（对齐 order.CustomerId）',
+  `MerchantId` varchar(40) NOT NULL COMMENT '卖家业务号（加购时从 goods 带入，对齐 order.MerchantId）',
+  `ProductCode` char(40) NOT NULL COMMENT '商品编码（对齐 goods.ProductCode）',
+  `Quantity` int NOT NULL DEFAULT 1 COMMENT '数量（≥1；改量走 UPDATE，不加行）',
+  `PriceSnapshot` double DEFAULT NULL COMMENT '加购时的单价快照 = **结算成交价**（对齐 goods.Price；NULL 时结算回 goods 取现价）',
+  `created_at` datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) COMMENT '行落库时刻（agent.md 数据库管理规则 8）',
+  `updated_at` datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3) COMMENT '行更新时刻',
+  PRIMARY KEY (`Id`),
+  UNIQUE KEY `uk_cart_customer_product` (`CustomerId`,`ProductCode`),
+  KEY `idx_cart_customer` (`CustomerId`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='真购物车（C3 块4 A1 甲；用户 2026-10-10 裁决）';
+
+-- ---- ①b 列注释订正（同笔）----
+-- 起因：初稿把 `PriceSnapshot` 注释成「仅陈列/对账，非成交价」，与 A1 的选型理由（存快照
+-- 就是为了**避免改价争议** ⇒ 结算以快照为准）**相反**。语义错的是注释，改注不改列。
+-- ⚠️ 为什么必须单独一条：`CREATE TABLE IF NOT EXISTS` 对**已存在**的表是**空操作**
+-- ⇒ 已按旧注建过表的库（本机库 / VM，都是本笔几分钟前建的）不会自己更正。
+-- 幂等性：`MODIFY COLUMN` 把列定义重写成**同一份**定义 ⇒ 重复执行是空操作（不报错、不改数据）。
+ALTER TABLE `cart` MODIFY COLUMN `PriceSnapshot` double DEFAULT NULL COMMENT '加购时的单价快照 = **结算成交价**（对齐 goods.Price；NULL 时结算回 goods 取现价）';
+
+-- ---- ② `order` 加 `Quantity`（A2 甲）----
+-- 规则 7：加列一律**表末** + 默认值 + COMMENT。`DEFAULT 1` ⇒ 存量 6 行（:159）全部落到「1 件」，
+-- 语义正确（那些单本就只买了 1 件），且**不改行数** ⇒ A3 的 P4 种子计数（order=6）不受影响。
+SET @s := (SELECT IF(COUNT(*) = 0,
+  'ALTER TABLE `order` ADD COLUMN `Quantity` int NOT NULL DEFAULT 1 COMMENT ''数量（C3 块4 A2 甲；存量行回填 1）''',
+  'DO 0')
+  FROM information_schema.COLUMNS
+  WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'order' AND COLUMN_NAME = 'Quantity');
+PREPARE _p FROM @s; EXECUTE _p; DEALLOCATE PREPARE _p;

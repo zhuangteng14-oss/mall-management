@@ -1,10 +1,10 @@
 <template>
   <div class="order-center-page">
-    <!-- ⚠️ 稿外**活**控件（全页唯一一枚）：商家壳「订单中心 ⇄ 购物车」两态开关。
-          稿 OrderCenter-merchant.html 的两个 pane（:668 / :749）都没画它 —— 它是
-          `/merchant/order/cart` 的回程（OrderPane.vue:3 的 v-else 那支），删掉商家就切不回订单面。
-          与 ShoppingCart.vue:8-19 是**同款同源**的一条契约（orderTab / showSwitch / @toggle），
-          本笔一字未动。登记见 slot-registry.md §三「稿外活控件」。 -->
+    <!-- ⚠️ C3 块 4：本开关**已停用**（下面 `showSwitch` 默认 true → false）—— 它当年是
+          「订单中心 ⇄ 购物车」的**回程**：块 4 之前商家只能从这里进购物车面。块 4 起两件事变了：
+          ① 购物车成了**顶栏**的一个入口（config/nav.js 的 MERCHANT_NAV）；② 购物车块自带 tab 栏，
+          容器 merchant/OrderPane.vue 已不再包订单中心 ⇒ 全仓无人再传 `showSwitch:true`，`v-if` 恒假。
+          代码与下面整段 `.switch-*` 样式**按原样保留**（回退用），登记 docs/agent/tech-debt.md。 -->
     <div v-if="showSwitch" class="switch-wrapper">
       <div
         class="switch-container"
@@ -128,7 +128,7 @@
                  详见下面那枚 `.dash` 的 title。第二行 = 更改日期，见 `.tcell` 上的说明。 -->
             <div class="tcell">
               <span v-if="order.CreateTime" class="time" title="下单时间（CreateTime）">{{ formatDateTime(order.CreateTime) }}</span>
-              <span v-else class="dash" title="既有缺陷：OrderDao.selectByMerchant 的两条分支都不 SELECT CreateTime（OrderDao.java:138 / :141）⇒「已完成」视图这一列在库里就没取出来 —— 不是「这一单没有时间」。修它 = 改响应字段集，属另一笔">—</span>
+              <span v-else class="dash" title="既有缺陷：OrderDao.selectByMerchant 的两条分支都不 SELECT CreateTime（OrderDao.java:146 / :149 —— C3 块 4 给 order 加 Quantity 列后，两条 SELECT 各下移 8 行；原 :138 / :141）⇒「已完成」视图这一列在库里就没取出来 —— 不是「这一单没有时间」。修它 = 改响应字段集，属另一笔">—</span>
               <span v-if="order.SettlementDate" class="time upd" title="订单更改日期（SettlementDate）—— ⚠️ 稿的 A 列对照（OrderCenter-merchant.html:44-54）逐条登记了现有 411 行的去留，却**没有**这一条（既不在「保留并重画」也不在「删」）。本笔按「不删既有已显示字段」保留，并入同一格第二行；是否照稿撤掉待用户裁。">{{ formatDateTime(order.SettlementDate) }}</span>
             </div>
             <!-- 操作列（稿 :875-877）。⚠️ 真功能：`order.orderDeliveryIfUp`（endpoints.js:58）——
@@ -167,7 +167,7 @@ import { getMerchantId, getUsername } from '../api/auth'
 
 defineProps({
   orderTab: { type: String, default: 'order' },
-  showSwitch: { type: Boolean, default: true }
+  showSwitch: { type: Boolean, default: false }   // ⚠️ C3 块 4：**同行**由 `true` 改成 `false`（停用那枚稿外开关，见模板顶部那条）。改它而不删它，是为了不动本文件 170 行以下所有行号
 })
 const emit = defineEmits(['toggle'])
 

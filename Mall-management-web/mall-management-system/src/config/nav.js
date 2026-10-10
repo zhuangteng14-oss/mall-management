@@ -12,9 +12,9 @@
 //              `'notify'` **随「通知」项一并退役**（本文件已无用户，`AppShell.vue` 的 `dotCount` 也删了那支）。
 //              它是键，不是显示开关 —— 真正判「要不要画点」的是 `AppShell.vue` 的 `dotCount(badge)`；两壳各 **1 项**。
 //
-// ⚠️ 两套顶栏表（`CUSTOMER_NAV` / `MERCHANT_NAV`）的差异**只有两处**：左项「商城主页」的 `to`（各指自己的壳 —— 客户 `/customer`、
-//    商家 `/merchant`），以及右起第 2 项（客户「购物车」⇄ 商家「订单中心」）——
-//    其余（项数 / 文案 / `tab` / 红点）逐字同构
+// ⚠️ 两套顶栏表（`CUSTOMER_NAV` / `MERCHANT_NAV`）的差异**只有两处 + 商家的多一项**（第三处为 C3 块 4 新增）：左项「商城主页」的 `to`（各指自己的壳 —— 客户 `/customer`、
+//    商家 `/merchant`），以及**商家侧多一项「订单中心」**（插在「消息」与「购物车」之间 ⇒ 商家右 4 项 / 客户右 3 项）——
+//    其余（文案 / `tab` / 红点）逐字同构 —— ⚠️ 所以「右起第 2 项」两侧**都是**「购物车」（本条块 4 前的写法把它当成了差异项之一）
 //    ⇒ **R6（2026-10-05）已落地**：`AppShell.vue` 靠这份配置把两个壳合并成一个渲染 nav 的壳 —— 本文件经路由记录的 `props.nav` 传入（见 progress.md §5-AB；R2 当初的预案见 §5-Y）。
 //    ⚠️ 本条 R3 订正：原文写「**唯一**差异 = 右起第 2 项」，漏了左项的 `to` 也差（同句在
 //    `router/index.js:30` 与 `AppShell.vue:76-78`（R6 前在 `CustomerPage.vue:70`，该文件已随两壳合一删除）各有一处，已一并订正（⚠️ 地址 R4 订正：原写 `:31`，实测在 `:30` —— `:31` 是 R3 的标题行，见 §5-AA (11)D8）。
@@ -42,7 +42,7 @@ export const MERCHANT_NAV = {
     // ⚠️ I2（2026-10-09）：同上（客户侧那条墓碑说明的理由逐字适用）—— 商家端的「通知」项**已删**
     //    （入口合并进「消息」的内页 tab）；⚠️ 同款**净零行数**（本行**之后**仍有行号引用 `:32-53` / `:61` / `:63`×2 ⇒ 删行即漂移）。
     //    ⚠️ 两条旧 URL（`/customer/notify` / `/merchant/notify`）**没死**：`router/index.js` 改成 redirect 落到 `…/msg?tab=notify`。
-    { label: '订单中心', tab: 'order', to: '/merchant/order' },
+    { label: '订单中心', tab: 'order', to: '/merchant/order' },{ label: '购物车', tab: 'cart', to: '/merchant/order/cart' },   // ⚠️ C3 块 4〈订单块〉：**同行**追加（净零行数，理由同 `:29` 那条墓碑）—— 「购物车块」（`/merchant/order/cart`）在块 4 之前**没有顶栏入口**，只能靠订单中心页里那枚开关进；开关停用后这是唯一的门。`tab: 'cart'` 与 `/customer/cart` 那条**同键**（两侧都是购物车块），而路由记录 `/merchant/order/cart` 的 `meta.tab` 在块 4 一并改成 `'cart'`（改前是 `'order'`）⇒ 高亮成立
     { label: '用户中心', tab: 'user', to: '/merchant/user' }
   ]
 }
