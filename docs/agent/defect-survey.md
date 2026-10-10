@@ -168,7 +168,7 @@
 | `L2HealthProbe.down` 是 check-then-act | `L2HealthProbe.java:154-177` | 普通 `volatile boolean`，并发失败会**都记一次**，与注释「计数天然只在翻转时 +1」矛盾。`L2HealthProbeConcurrencyTest` **只断言 `pingCount`，不覆盖此项** | 亲读 |
 | `l2Put` 冷却路径**不记任何指标** | `TwoLevelCache.java:220-233` | `l2Get`(DEGRADED)/`l2Evict`/`l2Clear` 都记，唯 `l2Put` 静默返回 ⇒ 指标口径有缺口 | 亲读 |
 | `get()` 命中 L2 后**无条件**回填 L1；`evict()` 是 L1 先 L2 后 | `TwoLevelCache.java:89-94,173-176` | 拓宽了已知的 L2→L1 回填竞态窗口（原登记见 `cache-layer.md:371`、`:448③`） | 亲读 |
-| `OrderTimelineWriter.java:47-48` 点名的索引与 DDL 不一致 | 同左 | 注释指向的索引名与建表语句不符 | 亲读 |
+| `OrderTimelineWriter.java:50-51` 点名的索引与 DDL 不一致 | 同左 | 注释指向的索引名与建表语句不符 | 亲读 |
 | 启动日志打 `queue.size()` 而非 `queueCapacity` | `OrderStateExecutor` | 启动期读数无意义 | 亲读 |
 | `max-size=4` **结构性不可达** | `OrderStateExecutor`（core2/max4 + `ArrayBlockingQueue(1024)`） | 有界队列满之前不会建超过 core 的线程 ⇒ max 永远到不了 | 亲读(框架) |
 
@@ -231,10 +231,10 @@
 | TD-01 的描述 | 措辞**掩盖了两处语义变化** | `tech-debt.md` |
 | 启动日志的队列容量 | 打的是 `queue.size()` 而非 `queueCapacity` | `OrderStateExecutor` |
 | `max-size=4` 生效 | **结构性不可达** | 同上 |
-| 时间线索引 | 注释点名的索引与 DDL 不一致 | `OrderTimelineWriter.java:47-48` |
+| 时间线索引 | 注释点名的索引与 DDL 不一致 | `OrderTimelineWriter.java:50-51`（⚠️ 2026-10-10 由 47-48 重指：本笔在该类 import 段插了 3 行） |
 | `L2HealthProbe` 翻转计数 | check-then-act，并发下**会多记** | `L2HealthProbe.java:154-177` |
 | `cleanup()` 整轮清理 | **单表失败即中止整轮** —— 十余张表的 `SELECT`/`DELETE` 与外层 `for` 共用一个 `try`，任一表不存在（`SQLSyntaxErrorException`）即跳到单一 `catch`（`:2251`），其后所有表**静默漏清**。2026-09-30 的 P4 变红即此因：B3 把 `order_state_transition` 加进 `CLEANUP_COLS`（`:2178`）而 VM 未建表 ⇒ 排在它后面的 `login`/`user`/`friend` 全部漏清，残留 10 行 | `ConcurrencyRunner.java:2210-2258` |
-| 时间线的**存在性** = 「写入 fail-soft + 翻转时一行 WARN + `result=error` 指标」 | 控制确实**都在**，只是**都写在没人消费的地方**：表由**人肉**追加到 `mall_management_sql.sql` 后手工落盘（`:224` `CREATE TABLE IF NOT EXISTS`，无对应 `DROP`），而写入侧 `OrderTimelineWriter` 是刻意 **total catch**（`:108-111`：抛出去只会被线程池吞掉）+ **明确不重投**（`:24`「`result=error` 就是这一条时间线永久丢了」）—— 两者合起来 ⇒ 表不存在时应用**照常运行**、没有任何一环会喊。VM 上 `2026-09-29 ~ 2026-09-30`（B3 合并到本次建表）的**全部订单流转永久缺条、不可回补**（append-only 观测数据，无源可重放）。已闭合的一半：本次建表 + C 组首次真跑 ⇒ 「B3 从未在 VM 上验证过」不再成立；未闭合的一半就是历史缺条本身 —— **C3 若直接读这张表**，须知那段是空的，不能当成「那段时间没有流转」（类注释 `:42` 也把「一次性对齐」指给了 C3）。⚠️ 本条是**某台实例的历史数据状态**，非仓内可复核的代码事实：受影响面仅 VM，本地与 CI 各自重导 `.sql`，不受影响 | `OrderTimelineWriter.java:108-111`；`mall_management_sql.sql:224` |
+| 时间线的**存在性** = 「写入 fail-soft + 翻转时一行 WARN + `result=error` 指标」 | 控制确实**都在**，只是**都写在没人消费的地方**：表由**人肉**追加到 `mall_management_sql.sql` 后手工落盘（`:224` `CREATE TABLE IF NOT EXISTS`，无对应 `DROP`），而写入侧 `OrderTimelineWriter` 是刻意 **total catch**（`:128-131`：抛出去只会被线程池吞掉）+ **明确不重投**（`:27`「`result=error` 就是这一条时间线永久丢了」）—— 两者合起来 ⇒ 表不存在时应用**照常运行**、没有任何一环会喊。VM 上 `2026-09-29 ~ 2026-09-30`（B3 合并到本次建表）的**全部订单流转永久缺条、不可回补**（append-only 观测数据，无源可重放）。已闭合的一半：本次建表 + C 组首次真跑 ⇒ 「B3 从未在 VM 上验证过」不再成立；未闭合的一半就是历史缺条本身 —— **C3 若直接读这张表**，须知那段是空的，不能当成「那段时间没有流转」（类注释 `:45` 也把「一次性对齐」指给了 C3）。⚠️ 本条是**某台实例的历史数据状态**，非仓内可复核的代码事实：受影响面仅 VM，本地与 CI 各自重导 `.sql`，不受影响 | `OrderTimelineWriter.java:108-111`；`mall_management_sql.sql:224` |
 | 校验层有 A3 覆盖 | **A3 是 vacuous pass（空证据）** —— A3 的 9 个真实端点入参**清一色非空**：`orderForm` 的字段全是 `"<前缀>-<runId>"` 形状（`ConcurrencyRunner.java:1157-1167`），`loginSelect` / `loginAdd` / `friendAdd` 同样（`:1396` / `:2156` / `:2197`）；传输层 `encodeForm` 虽把 `null` 渲染成空串（`:824`）但**没有任何调用点传 null**。⇒ `@NotBlank` / `@NotNull` 在 A3 里**零触发** —— **A3 跑全绿不能证明校验层生效**，它只是没被踩到（与上一行 `continue-on-error` 同族：证据存在，但对它声称要证的事不敏感）。校验层的唯一验收是 `ValidationProbeTest`：在切片里**主动构造空串**，且阴性（400 + `{success:false,msg:…}`）与阳性（合法入参 200 + `success:true`）**成对** —— 只写阴性的话，一个「一律拒绝」的错误实现照样全绿 | `ValidationProbeTest.java`；`shared/web/GlobalExceptionHandler.java` |
 
 **共性**：控制**写在文档/注释/日志里**，而**不写在被执行的路径上**。审计时读文档会得出「已覆盖」的错结论。

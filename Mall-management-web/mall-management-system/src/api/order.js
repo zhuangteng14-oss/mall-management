@@ -86,9 +86,21 @@ export function orderHistory(customerId) {
   return post(endpoints.order.historicalOrdersSelect, build({ customerId }))
 }
 
-/** 付款（买家侧 CAS 边之一）。`orderId` 不存在 / 已付款 ⇒ `success:false`，不是异常。 */
-export function orderPay(orderId) {
-  return post(endpoints.order.orderPayIfUp, build({ orderId }))
+/**
+ * 付款（买家侧 CAS 边之一）。`orderId` 不存在 / 已付款 ⇒ `success:false`，不是异常。
+ *
+ * @param {string} orderId
+ * @param {string} [paymentMethod] C3 块4 补丁新增：支付方式标签（收银台选的那一个）。
+ *        ⚠️ **不传时这个键根本不发**（不是发空串）—— 后端 `paymentMethod` 是 `required=false`，
+ *        「没发」与「发了空串」在库里是 `NULL` 与 `''` 两回事；不传等价于改前的逐字行为。
+ * @returns {Promise<{success:boolean, msg?:string, tradeNo?:string}>}
+ *        ⚠️ 成功时后端**生成并回传 `TradeNo`**（`PAY` + `yyyyMMdd` + 6 位随机）—— 收银台要把
+ *           它显示给用户；这是「模拟支付」的全部凭据（没有真实网关，见 `tech-debt`）。
+ */
+export function orderPay(orderId, paymentMethod) {
+  const pairs = { orderId }
+  if (paymentMethod) pairs.paymentMethod = paymentMethod
+  return post(endpoints.order.orderPayIfUp, build(pairs))
 }
 
 /** 收货（买家侧 CAS 边）。后端守卫：未付款 / 未发货 / 已收货一律拦。 */
@@ -96,9 +108,22 @@ export function orderReceive(orderId) {
   return post(endpoints.order.orderReceiveIfUp, build({ orderId }))
 }
 
-/** 发货（商家侧 CAS 边）。 */
-export function orderDeliver(orderId) {
-  return post(endpoints.order.orderDeliveryIfUp, build({ orderId }))
+/**
+ * 发货（商家侧 CAS 边）。
+ *
+ * @param {string} orderId
+ * @param {string} [expressCompany] 快递公司（C3 块4 补丁）。⚠️ 与 `trackingNo` **同进同出**：
+ *        两个都不传 = 改前那条单参调用（管理员代发走的就是它）；都传 = 商家在发货弹窗里填的。
+ * @param {string} [trackingNo] 运单号。
+ * @returns {Promise<{success:boolean, msg?:string}>}
+ *        ⚠️ 成功时后端**只改状态位 + 写 3 个物流列，不写轨迹**（2026-10-10 起）：四节点（`in_transit` 运输中 →
+ *           `picked_up` 驿站已揽收 → `out_for_delivery` → `delivered`）全由 `ShippingTrackAdvanceJob` 按 `ShippedAt` + 阈值补（⚠️ 2026-10-11 起前两步对调）。
+ */
+export function orderDeliver(orderId, expressCompany, trackingNo) {
+  const pairs = { orderId }
+  if (expressCompany) pairs.expressCompany = expressCompany
+  if (trackingNo) pairs.trackingNo = trackingNo
+  return post(endpoints.order.orderDeliveryIfUp, build(pairs))
 }
 
 /**
@@ -194,11 +219,16 @@ export function orderAdminList(params) {
 }
 
 /**
- * 单条详情：订单行 + 状态流转时间线。
+ * 单条详情：订单行 + 状态流转时间线 + 物流轨迹。
  *
- * @returns {Promise<{success:boolean, row:Object, timeline:Array, msg?:string}>}
+ * @returns {Promise<{success:boolean, row:Object, timeline:Array, shippingTrack:Array, msg?:string}>}
  *          `timeline` 一行 = `{Action, FromState, ToState, OccurredAt}`，**已按时间升序**
  *          （排序键是 `OccurredAt` 再 `Id`，**不是 `Id`**）。
+ *          `shippingTrack`（C3 块4 补丁新增）一行 = `{Status, Description, TrackedAt}`，同样按
+ *          `TrackedAt` 升序。⚠️ **两条时间线别合并**：`timeline` 是**状态流转**（CAS 的副产品，
+ *          `order_state_transition`），`shippingTrack` 是**模拟物流**（`order_shipping_track`）。
+ *          末条 `shippingTrack.Status='delivered'`（物流「已签收」）**不等于** `row.ReceiveIf=1`
+ *          （订单「收货」仍由买家点）—— 前端分两词表述，见 `tech-debt`。
  */
 export function orderAdminDetail(orderId) {
   return post(endpoints.orderAdmin.detail, q({ OrderId: orderId }))
@@ -230,4 +260,29 @@ export function orderAdminMonitor() {
  */
 export function orderAdminIntervene(params) {
   return post(endpoints.orderAdmin.intervene, q(params))
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// ④ 买家订单详情 1 条（`/order/orderDetail`）—— **C3 块4 补丁**新增（不在块 4 原 9 条里）
+//
+// ⚠️ 为什么单列一节而不是塞进 ① 组：① 组是**搬家**（块 4 把这 8 条从 4 个 view 里收拢，
+//    逐条与改前的调用点一一对应）；本条是**新端点**，语义不同，混进去会让「搬来的」与「新加的」
+//    再也分不开。末尾追加也顺带让 ① 组及其后的行号一个都不漂。
+// ══════════════════════════════════════════════════════════════════════════════
+
+/**
+ * 买家订单详情（A5）：订单行 + 物流轨迹时间线。
+ *
+ * @param {string} orderId
+ * @returns {Promise<{success:boolean, row:Object, shippingTrack:Array, msg?:string}>}
+ *          ⚠️ **买家侧**的详情**没有 `timeline`**（那是管理端 `/admin/order/detail` 才有的
+ *             状态流转线）—— 买家看的是**物流**（`shippingTrack`），不是内部状态机轨迹。
+ *          ⚠️ 归属：后端第一行 `isOwner(request, orderId, false)`（买家）⇒ 看别人的单是 **403**；
+ *             单**不存在**放行、由后端出 `success:false` +「订单不存在」（不是 403）。
+ *          ⚠️ `row` 含块4 补丁的 7 个明细列（`TradeNo` / `PaymentMethod` / `PaidAt` /
+ *             `ExpressCompany` / `TrackingNo` / `ShippedAt` / `ReceivedAt`），老单这些列全 `null`
+ *             ⇒ 前端画 `—`，别把 `null` 当成空字符串。
+ */
+export function orderDetail(orderId) {
+  return post(endpoints.order.orderDetail, build({ orderId }))
 }

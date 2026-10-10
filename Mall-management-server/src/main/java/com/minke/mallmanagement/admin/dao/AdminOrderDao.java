@@ -46,7 +46,7 @@ public class AdminOrderDao {
     public static final int UNDELIVERED_HOURS = 48;
 
     private static final String COLUMNS = "Id, OrderId, CustomerId, MerchantId, Price, Quantity, "
-            + "ProductInformation, Images, PayIf, DeliveryIf, ReceiveIf, CreateTime, SettlementDate";
+            + "ProductInformation, Images, PayIf, DeliveryIf, ReceiveIf, CreateTime, SettlementDate, TradeNo, PaymentMethod, PaidAt, ExpressCompany, TrackingNo, ShippedAt, ReceivedAt";
 
     private final JdbcClient jdbcClient;
 
@@ -188,5 +188,19 @@ public class AdminOrderDao {
 
     private static boolean notBlank(String s) {
         return s != null && !s.isBlank();
+    }
+
+    /**
+     * 该单的物流轨迹（{@code order_shipping_track}，C3 块4 补丁）。
+     *
+     * <p>⚠️ 与 {@code ShippingTrackDao#selectByOrderId} **逐字相同**，**刻意不合并** ——
+     * 同 {@code selectActiveByMerchant} / {@code selectByMerchant(active)} 的先例：两条语句各有调用方，
+     * 管理端读（本类）与买家读（{@code ShippingTrackDao}）是两个 vantage，合并会把两个域的调用面绑死。
+     * <p>排序同 {@link #selectTimeline}：按**发生时刻** {@code TrackedAt}（**不是** {@code Id}）。
+     */
+    public List<Map<String, Object>> selectShippingTrack(String orderId) {
+        String sql = "SELECT Status, Description, TrackedAt FROM order_shipping_track "
+                + "WHERE OrderId = ? ORDER BY TrackedAt ASC, Id ASC";
+        return jdbcClient.sql(sql).param(orderId).query().listOfRows();
     }
 }

@@ -2,17 +2,25 @@ package com.minke.mallmanagement.order.service;
 
 import com.minke.mallmanagement.shared.lock.DistributedLockService.LockName;
 import com.minke.mallmanagement.shared.web.UserStateLookup;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Service;
 
+import java.time.LocalDate;
+import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.ThreadLocalRandom;
 import com.minke.mallmanagement.notification.NotificationEvents;
 import com.minke.mallmanagement.notification.service.NotificationService;
 import com.minke.mallmanagement.order.model.OrderAction;
 import com.minke.mallmanagement.order.dao.OrderDao;
+import com.minke.mallmanagement.order.dao.ShippingTrackDao;
 import com.minke.mallmanagement.order.model.OrderState;
 import com.minke.mallmanagement.order.model.OrderStateMachine;
 import com.minke.mallmanagement.order.model.OrderTransitionRecorder;
@@ -153,18 +161,28 @@ public class OrderService {
      */
     private final NotificationService notificationService;
 
+    /** 物流轨迹出口（C3 块4 补丁 A2）。发货写首行、调度器补后续行、收货兜末行 —— 三处全 fail-soft。 */
+    private final ShippingTrackDao shippingTrackDao;
+
+    private static final Logger log = LoggerFactory.getLogger(OrderService.class);
+
+    /** 支付流水号的日期段格式（{@code PAY} + {@code yyyyMMdd} + 6 位随机）。 */
+    private static final DateTimeFormatter TRADE_NO_DATE = DateTimeFormatter.ofPattern("yyyyMMdd");
+
     public OrderService(OrderDao orderDao,
                         DistributedLockService lockService,
                         OrderStateMachine orderStateMachine,
                         OrderTransitionRecorder orderTransitionRecorder,
                         ObjectProvider<UserStateLookup> userStateLookupProvider,
-                        NotificationService notificationService) {
+                        NotificationService notificationService,
+                        ShippingTrackDao shippingTrackDao) {
         this.orderDao = orderDao;
         this.lockService = lockService;
         this.orderStateMachine = orderStateMachine;
         this.orderTransitionRecorder = orderTransitionRecorder;
         this.userStateLookup = userStateLookupProvider.getIfAvailable();
         this.notificationService = notificationService;
+        this.shippingTrackDao = shippingTrackDao;
     }
 
     // ==================== 下单 ====================
@@ -444,10 +462,32 @@ public class OrderService {
      * 其余 19 个返回**原**文案 —— {@code A-S3-2} 的守门对象正是这条：锁不许新发任何拒绝文案。
      */
     public Map<String, Object> payIfUp(String orderId) {
-        // ⚠️ 付款**刻意不通知**：用户 2026-10-10 裁决只点了三条（发货→买家 / 收货→商家 /
-        //    管理员介入→双方）。付款通知是**顺手能加但没被要求**的第四条 ⇒ 不夹带，登记待办。
-        return lockService.runLocked(LockName.ORDER_PAY, orderId,
-                () -> casTransition(OrderAction.PAY, orderId, "付款成功", "订单不存在或已付款"));
+        return payIfUp(orderId, null);      // 兼容入口（管理员介入 intervene 走这条）—— 不带支付方式
+    }
+
+    /**
+     * 付款（带支付方式）。{@code paymentMethod} 可空 —— 空 ⇒ 明细列 {@code PaymentMethod = NULL}，
+     * 但仍生成并落 {@code TradeNo} / {@code PaidAt}（管理员代付即走 1 参重载 → 此路）。
+     *
+     * <p>⚠️ 付款**刻意不通知**：用户 2026-10-10 裁决只点了三条（发货→买家 / 收货→商家 /
+     *    管理员介入→双方）。付款通知是**顺手能加但没被要求**的第四条 ⇒ 不夹带，登记待办。
+     *
+     * <p>⚠️ <b>C3 块4 补丁新增 {@code paymentMethod}</b>：生成 {@code TradeNo}
+     * （{@code PAY + yyyyMMdd + 6 位随机}），明细列写（{@code TradeNo / PaymentMethod / PaidAt}）
+     * 在 {@code casTransition} 内、**同一把订单锁内**完成。成功响应**多一个 {@code tradeNo}** 字段
+     * （收银台成功页显示「单号 PAYxxx」）。
+     */
+    public Map<String, Object> payIfUp(String orderId, String paymentMethod) {
+        return lockService.runLocked(LockName.ORDER_PAY, orderId, () -> {
+            String tradeNo = newTradeNo();
+            Map<String, Object> result = casTransition(OrderAction.PAY, orderId,
+                    "付款成功", "订单不存在或已付款",
+                    Arrays.asList(tradeNo, paymentMethod));
+            if (Boolean.TRUE.equals(result.get("success"))) {
+                result.put("tradeNo", tradeNo);
+            }
+            return result;
+        });
     }
 
     /**
@@ -457,8 +497,16 @@ public class OrderService {
      * 通知的调用点在 {@code runLocked} <b>返回之后</b> —— 锁已释放，通知的 INSERT 不占订单锁。
      */
     public Map<String, Object> receiveIfUp(String orderId) {
-        Map<String, Object> result = lockService.runLocked(LockName.ORDER_RECEIVE, orderId,
-                () -> casTransition(OrderAction.RECEIVE, orderId, "收货成功", "订单未付款或已收货"));
+        Map<String, Object> result = lockService.runLocked(LockName.ORDER_RECEIVE, orderId, () -> {
+            Map<String, Object> r = casTransition(OrderAction.RECEIVE, orderId,
+                    "收货成功", "订单未付款或已收货", List.of());
+            if (Boolean.TRUE.equals(r.get("success"))) {
+                // 收货 = **订单**侧「确认收货」；顺带兜末条物流轨迹（若调度器还没越过 4min 阈值）。
+                // ⚠️ 两者语义不同（见 ShippingTrackDao 类注释）：本行**只补轨迹行**，不改状态位。
+                ensureDeliveredTrack(orderId);
+            }
+            return r;
+        });
         if (Boolean.TRUE.equals(result.get("success"))) {
             notifyCounterparty(orderId, true, "买家已确认收货",
                     "订单 " + orderId + " 的买家已确认收货。");
@@ -473,8 +521,22 @@ public class OrderService {
      * 位置与 fail-soft 口径同 {@link #receiveIfUp}。
      */
     public Map<String, Object> deliveryIfUp(String orderId) {
-        Map<String, Object> result = lockService.runLocked(LockName.ORDER_DELIVERY, orderId,
-                () -> casTransition(OrderAction.DELIVER, orderId, "发货成功", "订单不存在或未付款或已发货/已收货"));
+        return deliveryIfUp(orderId, null, null);   // 兼容入口（管理员介入 intervene 走这条）—— 不带快递信息
+    }
+
+    /**
+     * 发货（带快递公司 + 运单号）。两者可空（管理员代发走 1 参重载 → 此路）。
+     *
+     * <p>⚠️ <b>C3 块4 补丁新增</b>：明细列写 {@code ExpressCompany / TrackingNo / ShippedAt}
+     * （{@code casTransition} 内、同锁内）。
+     * ⚠️ <b>2026-10-10 改判（用户手验「揽收不该在发货时立即生成」）：本方法<em>不再</em>写轨迹</b>
+     * —— 揽收节点 {@code picked_up} 移交 {@code ShippingTrackAdvanceJob}（⚠️ 2026-10-11 起它是**第 2** 个节点，
+     * 首条是「运输中」{@code in_transit}）。理由与后果（a3 里新发的单一条轨迹都没有）见那个类注释；**别在这里加回来**。
+     */
+    public Map<String, Object> deliveryIfUp(String orderId, String expressCompany, String trackingNo) {
+        Map<String, Object> result = lockService.runLocked(LockName.ORDER_DELIVERY, orderId, () -> casTransition(OrderAction.DELIVER, orderId,
+                "发货成功", "订单不存在或未付款或已发货/已收货",
+                Arrays.asList(expressCompany, trackingNo)));
         if (Boolean.TRUE.equals(result.get("success"))) {
             notifyCounterparty(orderId, false, "商家已发货",
                     "订单 " + orderId + " 已由商家发货，请注意查收。");
@@ -560,7 +622,7 @@ public class OrderService {
      * 状态位已经在 {@code order} 表里改完了，这才是真值；时间线与指标是过程记录。
      */
     private Map<String, Object> casTransition(OrderAction action, String orderId,
-                                              String okMsg, String noRowsMsg) {
+                                              String okMsg, String noRowsMsg, List<Object> detailParams) {
         Map<String, Object> result = new HashMap<>();
         // SQL 由状态机生成，与 B2 之前硬编码的字面量逐字符相同 ——
         // 由 OrderStateMachineTest.updateSqlIsByteForByteTheLegacyLiteral 钉死。
@@ -570,6 +632,10 @@ public class OrderService {
             if (rows > 0) {
                 result.put("success", true);
                 result.put("msg", okMsg);
+                // ⚠️ C3 块4 补丁：状态位已置、**仍在同一把锁内** ⇒ 紧接着写明细列
+                //    （TradeNo / PaidAt / ExpressCompany / …，见 OrderStateMachine.detailUpdateSql）。
+                //    CAS 的 golden 串一字未动；非原子性由订单锁消除竞态。
+                writeDetails(action, orderId, detailParams);
                 orderTransitionRecorder.applied(action, orderId);
             } else {
                 result.put("success", false);
@@ -586,7 +652,95 @@ public class OrderService {
         return result;
     }
 
+    // ==================== 明细列 / 物流轨迹（C3 块4 补丁） ====================
+
+    /**
+     * CAS 命中后写明细列（{@code TradeNo / PaymentMethod / PaidAt} 等），**在同一把订单锁内**。
+     *
+     * <p><b>fail-soft</b>：明细写失败**不**把一次成功转移报成失败 —— 状态位（{@code order} 表）才是真值，
+     * 明细是过程增强。⚠️ 代价如实说：极少数情况下会出现「位已置、明细缺失」（{@code TradeNo} 为空），
+     * 前端显示 {@code —}；登记边界（见 `_work/c3-block4-patch-landing-plan.md §七`）。
+     *
+     * @param detailParams {@link OrderStateMachine#detailColumns} 顺序的非 OrderId 绑定值
+     *                     （PAY：{@code [tradeNo, paymentMethod]}；DELIVER：{@code [expressCompany, trackingNo]}；
+     *                     RECEIVE：空）；{@code null} 视同空
+     */
+    private void writeDetails(OrderAction action, String orderId, List<Object> detailParams) {
+        try {
+            List<Object> bind = new ArrayList<>(detailParams == null ? List.of() : detailParams);
+            bind.add(orderId);
+            orderDao.applyDetails(orderStateMachine.detailUpdateSql(action), bind.toArray());
+        } catch (Exception e) {
+            log.warn("订单 {} 的 {} 明细列写失败（状态位已置、明细缺失）：{}", orderId, action, e.toString());
+        }
+    }
+
+    /**
+     * 写一条物流轨迹（fail-soft）。今日**只剩收货兜末行 {@code delivered}** 走它
+     * —— 揽收节点 {@code picked_up} 已移交调度器（2026-10-10，见 {@link #deliveryIfUp(String, String, String)}）。
+     *
+     * <p>⚠️ 时刻口径：{@code TrackedAt} 由库时钟出（{@code NOW(3)}），本方法**不接收**时间参数
+     * —— 改前那个 {@code long trackedAtMillis} 走 {@code new Timestamp} 会被驱动按
+     * {@code serverTimezone=Asia/Shanghai} 折算，落库 +8 小时（详见 {@code ShippingTrackDao} 类注释）。
+     */
+    private void writeTrackRow(String orderId, String status, String description) {
+        try {
+            shippingTrackDao.write(orderId, status, description);
+        } catch (Exception e) {
+            log.warn("订单 {} 的物流轨迹 {} 写失败：{}", orderId, status, e.toString());
+        }
+    }
+
+    /**
+     * 收货时兜末条轨迹 {@code delivered}（若尚未存在）。
+     *
+     * <p>为什么收货要动轨迹：买家可能在调度器越过 4min 阈值**之前**就点收货 ⇒ 不兜的话，
+     * 时间线会停在 {@code out_for_delivery} 而没有终点。⚠️ 本方法**只补轨迹行**，
+     * **不**改任何状态位（用户红线：调度器/收货都不碰状态位；收货的 {@code ReceivedAt} 走明细列写）。
+     */
+    private void ensureDeliveredTrack(String orderId) {
+        try {
+            if (!shippingTrackDao.exists(orderId, ShippingTrackDao.DELIVERED)) {
+                writeTrackRow(orderId, ShippingTrackDao.DELIVERED, "已签收");
+            }
+        } catch (Exception e) {
+            log.warn("订单 {} 的兜末条轨迹写失败：{}", orderId, e.toString());
+        }
+    }
+
+    /** 生成支付流水号：{@code PAY + yyyyMMdd + 6 位随机}（模拟网关）。 */
+    private static String newTradeNo() {
+        return "PAY" + LocalDate.now().format(TRADE_NO_DATE)
+                + String.format("%06d", ThreadLocalRandom.current().nextInt(1_000_000));
+    }
+
     // ==================== 读 ====================
+
+    /**
+     * 买家订单详情（C3 块4 补丁 A5）：订单行 + 物流轨迹。
+     *
+     * <p>归属校验在 {@code OrderController.orderDetail} 第一行（{@code isOwner(orderId, false)}，管理员豁免）
+     * —— 本方法只做数据组装。单不存在 ⇒ {@code success:false}（与「读空」区分开）。
+     */
+    public Map<String, Object> orderDetail(String orderId) {
+        Map<String, Object> result = new HashMap<>();
+        try {
+            Map<String, Object> row = orderDao.selectByOrderId(orderId);
+            if (row == null) {
+                result.put("success", false);
+                result.put("msg", "订单不存在");
+                return result;
+            }
+            result.put("success", true);
+            result.put("row", row);
+            result.put("shippingTrack", shippingTrackDao.selectByOrderId(orderId));
+        } catch (Exception e) {
+            e.printStackTrace();
+            result.put("success", false);
+            result.put("msg", "查询失败：" + e.getMessage());
+        }
+        return result;
+    }
 
     /** 购物车搜索订单。方法体逐字搬自原 Controller（含 SQL / try-catch / 返回结构）。 */
     public Map<String, Object> orderSelect(String customerId) {

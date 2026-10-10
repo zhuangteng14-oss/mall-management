@@ -45,7 +45,7 @@
 │       │       ├── user/{controller,service,dao}/      UserController（/user 5 端点，107 行）+ UserService + UserDao + UserCacheService
 │       │       └── shared/{cache,health,lock,upload}/  两级缓存 / HealthController / 分布式锁 / 上传（原 mallmanagement_server 的 ImgConfig、ImgPath 在此）
 │       ├── main/resources/application.properties
-│       ├── main/resources/application-a3.properties    A3 profile：指向独立 MySQL 实例（同名库，TD-13）；含明文默认口令
+│       ├── main/resources/application-a3.properties    A3 profile（**CI 专用**，job 全关）：指向独立 MySQL 实例（同名库，TD-13）；孪生 `application-dev.properties`（日常，job 全开）；含明文默认口令
 │       ├── main/resources/static/img/                  8 张图片
 │       ├── test/java/com/minke/
 │       │   ├── MallManagementApplicationTests.java      全上下文冒烟 + 真查库（`A3_ENABLED=true` 才跑，见 TD-10）

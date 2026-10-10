@@ -35,6 +35,7 @@ import com.minke.mallmanagement.merchant.service.MerchantDowngradeService;
 import com.minke.mallmanagement.goods.dao.GoodsShelfDao;
 import com.minke.mallmanagement.cart.dao.CartDao;
 import com.minke.mallmanagement.cart.service.CartService;
+import com.minke.mallmanagement.order.dao.ShippingTrackDao;
 import com.minke.mallmanagement.admin.dao.AdminOrderDao;
 import com.minke.mallmanagement.admin.service.AdminOrderService;
 import org.junit.jupiter.api.BeforeEach;
@@ -183,7 +184,14 @@ import static org.mockito.Mockito.when;
         // ⚠️ CartService 还吃 OrderService（结算复用它建单）、AdminOrderService 还吃
         //    NotificationService（介入通知双方）—— 两个依赖都已在上面的清单里，无需重复登记。
         CartDao.class, CartService.class,
-        AdminOrderDao.class, AdminOrderService.class})
+        AdminOrderDao.class, AdminOrderService.class,
+        // C3 块 4 补丁（订单块，2026-10-10）：OrderService 新增依赖 ShippingTrackDao（付款/发货/收货
+        // 三条边各写轨迹）⇒ 不 @Import 它，**整个切片上下文起不来**（第五次同一处地雷）。
+        // ⚠️ **刻意不 @Import ShippingTrackAdvanceJob**：它是 @Component（切片不扫），且是
+        //    @Scheduled —— 切片里没有调度器（@EnableScheduling 挂在 MerchantDowngradeSchedulingConfig、
+        //    不属 web 组件），拉进来只会多一个永不执行的 bean。它落回下面那个 @MockitoBean 之外的
+        //    真实缺口由「默认 profile 手验」兜（见该类的类注释）。
+        ShippingTrackDao.class})
 public abstract class AbstractSmokeTest {
 
     @Autowired

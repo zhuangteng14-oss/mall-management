@@ -279,7 +279,7 @@
 |---|---|---|
 | 并发脚本 | `scripts/concurrency/ConcurrencyRunner.java` **2270 行**（单文件、不引新依赖，只用 JDK 内置 `HttpClient` + `ExecutorService` + JDBC）+ `scripts/concurrency/run.sh` **151 行**（两步编译 + 驱动解析，校验 jar major=8） | `333ae1a` … `6465655`（阶段 A–E） |
 | 负载与校验 | **6 个负载段落**（S1 / S2a / S2b / S3 / S4a / S4b —— 与「4 场景」不矛盾，见 pack §场景计数口径澄清）；负载走 HTTP、断言与清理走 JDBC（五张表都没有删除接口）；preflight P0–P7 全 PASS | pack §验收标准、§脚本内置校验 P0–P7 |
-| a3 profile | `application-a3.properties` **57 行** —— 指向独立 MySQL 实例（库名仍为 `mall_management_sql`，TD-13 所迫） | `c37cb8e` |
+| a3 profile | `application-a3.properties` **57 行** —— 指向独立 MySQL 实例（库名仍为 `mall_management_sql`，TD-13 所迫）。⚠️ **2026-10-11 起 a3 收窄为「CI 专用」**，日常改挂孪生 `application-dev.properties`（job 全开）—— 见 **TD-35** | `c37cb8e` |
 | 字符集根治 | 放弃「单文件源码启动」（由启动器就地编译、不采用编译期 `-encoding` → 宿主 `file.encoding=GBK` 使源码中文字面量失真 → 依赖中文响应体的断言**静默落空**）→ 改**两步编译** `javac -encoding UTF-8` + `java -cp <out>`；`charsetSelfCheck()` 每次运行自检，并把 `file.encoding` / 启动方式写进日志与 JSON 报告 | `6ae41d5` |
 | CI job | `.github/workflows/ci.yml` 增至 **256 行**，新增第三个 job `concurrency`（`needs: backend`、service container `mysql:8.4`、job 级 `concurrency` 覆盖 `cancel-in-progress`、`continue-on-error: true`） | `af75b97` |
 | CI 首跑 | **通过——结论见 artifact `a3-concurrency-report`**。**`concurrency` job 仍是观测跑，不是门禁** —— 门禁地位待裁决，本条在裁决前不改 | `ci.yml:252`；pack §CI 集成 |
@@ -488,3 +488,91 @@
 | 后果 | 「超 24h 未付款」这类判据**没有业务依据**；阈值改了等于换了监控口径，但**没有任何配置面**，只能改代码重发。 |
 | 边界 | 阈值是**常量并已标注待裁**（不是埋在 SQL 里当既有事实）—— 真正的时效需业务输入。 |
 | 状态 | ⏸ **登记不修（2026-10-10，C3 块 4）**。 |
+
+## TD-28 物流「已签收」≠ 订单「已收货」—— 调度器只追加轨迹、不碰状态位的**必然结果**
+
+| 项 | 内容 |
+|---|---|
+| 现状 | `ShippingTrackAdvanceJob` 按 `ShippedAt` + 阈值补**四条**轨迹（**按时序**：`in_transit`「运输中」→ `picked_up`「驿站已揽收」→ `out_for_delivery`「驿站派送中」→ **`delivered`（「已签收」）**；前两步 2026-10-11 对调，四条全于 2026-10-10 从发货路径搬进本任务，见 TD-32）；它**只 INSERT `order_shipping_track`，绝不 UPDATE `order` 的状态位**（用户 2026-10-10 批准的红线）。⇒ 轨迹走完时 `order.ReceiveIf` **可能仍是 0** —— 那要**买家自己点【收货】**才置 1。 |
+| 为何不修 | 这是设计约束的**数学后果**，不是漏写：若让任务顺手把 `ReceiveIf` 置 1，就等于绕开 `OrderStateMachine` 的 CAS 守卫去改状态位 ⇒ 破 A3 的时间线因果链、破「状态位只由三条边推进」的不变量。用户 2026-10-10 明确**接受**这个语义（真实电商亦如此：快递显示签收，用户没点「确认收货」）。 |
+| 已做的缓解 | 前端**分两词**：物流时间线说「已签收」，订单状态说「已收货」；管理端两条时间线**并列不合并**；收银台 / 物流弹窗各有明说文案。 |
+| 残留风险 | 用户看到「已签收」而订单仍停在「已发货」，可能以为页面卡了 —— 靠文案消解，**无强制对齐机制**。 |
+| 状态 | ⏸ **登记不修（2026-10-10，C3 块 4 补丁）**。 |
+
+## TD-29 「模拟支付」没有真实网关：`TradeNo` 是生成的演示流水号
+
+| 项 | 内容 |
+|---|---|
+| 现状 | `payIfUp` 成功后由后端生成 `TradeNo = "PAY" + LocalDate.now().format("yyyyMMdd") + 6 位随机`（`OrderService.newTradeNo()`），写进 `order.TradeNo` 并随响应回传；`PaymentMethod` 记的是收银台下拉选的**标签字符串**（支付宝 / 微信支付 / 银行卡，`ORDER` 表无字典表约束）。 |
+| 后果 | ① 序列号**可能重复**（随机 6 位 + 同日 ⇒ 生日碰撞，且**无唯一约束**）；② 无对账 / 退款 / 幂等支付通道；③ `PaymentMethod` 是**自由文本**，不是受控字典。 |
+| 边界 | 全部前端文案已明说「演示环境的模拟收银台…不会真的扣款」。这是**演示可取、生产不可取**的一条，须在接入真网关时整体替换（含 `order` 缺资金态，见 TD-21）。 |
+| 状态 | ⏸ **登记不修（2026-10-10，C3 块 4 补丁）**。 |
+
+## TD-30 `order` 的「状态位 + 明细列」是**两条 UPDATE**，原子性靠订单锁而非事务
+
+| 项 | 内容 |
+|---|---|
+| 现状 | CAS 改状态位走 `OrderStateMachine.updateSql(action)`（golden copy 钉死，**不得改**）；补丁新增的 7 个明细列走**第二条** UPDATE（`detailUpdateSql(action)`）。两条在同一把 `LockName.ORDER_*` 锁内先后执行。 |
+| 后果 | ① 若第二次 UPDATE 失败（库不可达等），**状态位已置、明细列未写** —— 且 Service 是 **fail-soft**（只 WARN，不抛）⇒ 调用方仍收到 `success:true`；② 明细列的**失败是不可见的**（响应体与成功同形），验收必须**回库读列**。 |
+| 为何不加事务 | `OrderService` 及其调用链**全项目唯一禁止 `@Transactional`** 处（锁外事务会让 `runLocked` 的临界区 COUNT 读不到前一未提交行，破 `orderAdd` 的查重）—— 判据逐字在该类类注释。 |
+| 已做的缓解 | 第二条 UPDATE 在**锁内**（消除「两笔付款并发各写一半」的竞态）；失败只 WARN、不翻转已被 CAS 确认的成功。 |
+| 状态 | ⏸ **登记不修（2026-10-10，C3 块 4 补丁）**。 |
+
+## TD-31 管理员代发（`intervene` 的 `deliver`）**不带快递信息**
+
+| 项 | 内容 |
+|---|---|
+| 现状 | `AdminOrderService.intervene` 调 1 参重载 `deliveryIfUp(orderId)` ⇒ `ExpressCompany` / `TrackingNo` 两项落 `NULL`（`ShippedAt` 仍写 `NOW()`）。管理端介入界面**没有**填快递信息的入口。 |
+| 后果 | 被管理员强制发货的单，买家在【物流】里看到「承运 / 单号 —」，只能看到轨迹时间线。 |
+| 为何不改 | 改成 3 参重载要动 `intervene` 的调用面（用户要求 **`intervene` 零改**）；给管理端加输入框 = 扩大本补丁范围。 |
+| 状态 | ⏸ **登记不修（2026-10-10，C3 块 4 补丁）**。 |
+
+## TD-32 JDBC URL 带 `serverTimezone=Asia/Shanghai` 而库时钟是 **UTC** ⇒ 任何 `java.sql.Timestamp` 参数都会 **+8 小时**
+
+| 项 | 内容 |
+|---|---|
+| 现状 | 三个 datasource URL（默认 / a3 / 测试）都写着 `serverTimezone=Asia/Shanghai`，而目标库的时钟是 **UTC**（VM 实测 `@@system_time_zone=UTC`、`NOW()` 比本机墙钟晚 8 小时）。`java.sql.Timestamp` 携带的是一个**时刻（instant）**，无时区文本格式可依 ⇒ 驱动按 `serverTimezone` 把它表述成**东八区墙钟**再发出去，落进 UTC 库就成了 **+8h**。 |
+| 不受影响的写法 | `LocalDateTime` / `String`（无时区的**文本**）、以及一切在 SQL 里算的时间（`NOW(3)` / `DATE_ADD(?, INTERVAL n SECOND)`）—— 它们不含时刻语义，驱动不折算。**这就是 2026-10-10 定下的统一口径「时刻只由库时钟产生，Java 侧不构造任何带时区的值」。** |
+| 已修的点 | ① `OrderTimelineWriter` 从 `new Timestamp(occurredAtMillis)` 改成 `toUtcText(...)`（`ZoneOffset.UTC` 硬编码，注释禁止 `ZoneId.systemDefault()`），`order_state_transition.OccurredAt` 不再 +8h；② `ShippingTrackDao` 去掉 `Timestamp` 参数，改由 `DATE_ADD(发货文本, INTERVAL 秒 SECOND)` 出 `TrackedAt`；③ `ShippingTrackAdvanceJob` 不再用 `System.currentTimeMillis()` 推偏移。存量脏行（2026-10-10 前落的 3 条 `order_shipping_track`，`TrackedAt` 比 `created_at` 大 **28800** 秒）**不回溯改写** —— 轨迹是过程记录（同「逻辑废弃、不 UPDATE」口径）。 |
+| 为何登记 | 这条**没有任何机制兜住**：URL 里那一句还在，谁再写一个 `new Timestamp(...)` / `setTimestamp` / 一个 `java.util.Date` 参数，就会**静默**再落一个 +8h，且**看不出来**（格式完全正常，只是差 8 小时）。连 `OrderTimelineWriterTest` 那种 golden test 都只能钉住**当前**取值，钉不住「以后别再用 Timestamp」。 |
+| 后果 · 环境耦合 | 统一口径的基准是 **VM 库的时钟 = UTC**。而**默认 profile 的 datasource 指向本机 MySQL**（`application.properties:5` `localhost:3306`，root/123456）—— 本机库的时钟若是机器本地时间（CST），则「库文本 = UTC 文本」这个前提在**默认 profile 手验时并不成立** ⇒ 前端那层「统一转本地」（`OrderMine.vue:185` 等 4 处）会把本机库的值**再推 8 小时**，屏幕上看像是新的 bug（其实是环境差异，同 `api-contract.md` 里 `AuditPage` 那条本地库注记）。**手验时间显示要么指向 VM 库，要么先核本机库的 `@@system_time_zone`。** |
+| 状态 | ⏸ **登记不修（2026-10-10，C3 块 4 补丁）** —— 彻底修法是去掉 URL 里的 `serverTimezone`（或改库时区），但那会同时动三个 profile 的连接串与全部既有测试的时间断言，超出本补丁范围。 |
+
+## TD-33 `user` 表的四个时刻列走 **JVM 时钟**，与库时钟（UTC）**不是一条轴** ⇒ 同一页面上两套轴
+
+| 项 | 内容 |
+|---|---|
+| 现状（实测） | `bannedAt` / `ScheduledDowngradeAt` / `FrozenAt` / `FreezeUntil` **四列全部由 Java 侧 `LocalDateTime.now()` 绑参写入**，不是 SQL 的 `NOW()`：`MerchantDowngradeService:102-103`（`LocalDateTime now = LocalDateTime.now(); LocalDateTime dueAt = now.plusDays(NOTICE_DAYS)` → `markScheduled`）、`:200` / `:252`（`markFrozen(username, now, now.plusDays(FREEZE_DAYS))`）、`UserGovernanceService:78`（`updateBan(username, true, reason, LocalDateTime.now())`）。而 JVM 时区实测是 **CST**（C3 块 4 补丁核验实例 8089 的启动日志逐字：`2026-10-10T22:49:27.590+08:00`）。⇒ 落进库的是 **CST 墙钟字面量**。⚠️ 读取侧 `UserGovernanceDao:54` / `:56-58` 一律 `DATE_FORMAT(…,'%Y-%m-%d %H:%i:%s')` 交回**无时区文本** ⇒ 前端**无从分辨**哪一列是哪条轴。 |
+| 后果 ①（同页两套轴） | `AccountsPage.vue` 对同一张表的两组时刻用了**同一个** `toLocal`：`:83`（`SubmittedAt`）/ `:93`（`ReviewedAt`）来自 `merchant_application`、走**库时钟**（对）；`:169`（`bannedAt`）/ `:672`（`ScheduledDowngradeAt`）/ `:675`（`FrozenAt`）/ `:742`（`data.scheduledAt`，源 `MerchantDowngradeService:110` 的 `dueAt.toString()`）全走 **JVM 轴** ⇒ 在 VM / a3 上这 4 处会被**再推 8 小时**。 |
+| 后果 ②（本机看不见） | **本地开发库**的时钟 = 机器时钟 = CST，而 JVM 也是 CST ⇒ 两条轴**恰好重合**，这四列的 `toLocal` 表现正常。这正是它至今没被发现的原因 —— ⚠️ **「在本地库上看起来是对的」不能作为判据**（同 `AuditPage.vue:161-163` 已记的那条环境边界，本条是它在 `user` 表上的具体后果）。 |
+| 后果 ③（原样显示也不对） | `UserInfoPage.vue:333` 把这三个值**原样**打了出来 ⇒ 在 **CST 客户端**上恰好对、在 **UTC 客户端**上差 8 小时。「对不对」取决于谁在看 —— 说明这不是前端括号的问题，是**写入轴**的问题。 |
+| ⚠️ 与 TD-32 的关系 | TD-32 的「统一口径」是「**时刻只由库时钟产生**」。这四列**整列违反**该口径 —— 但它们同时又是 `selectDueDowngrades(LocalDateTime now)` 的比较基准（写读同源、调度自洽），**改轴会连带改降级三阶段状态机的语义**，还要同步 `MerchantApplicationService:240` 的自动恢复判据（`LocalDateTime.now().isBefore(LocalDateTime.parse(freezeUntil…))`）与既有演示数据。 |
+| 为何本笔不修 | 「这四列到底该用哪条轴」是一次**口径裁决**（要么全改库时钟、要么明确宣告 `user` 表是 JVM 轴并在前端分列处理），不是本补丁顺手能定的。⚠️ 本笔**曾**按「统一口径」给 `UserInfoPage.vue` 加过 `toLocal`，**实测后已撤销** —— 那会让显示**多** 8 小时（拿 JVM 轴的值当 UTC 折）。 |
+| 状态 | ⏸ **登记待裁决（2026-10-10，C3 块 4 补丁）**。 |
+
+## TD-34 「超时未付款自动取消」的四个已知边界（`CancelledAt` 是第 4 态，但**不是**一条 CAS 边）
+
+| 项 | 内容 |
+|---|---|
+| ① 取消**不记** `order_state_transition` | `OrderAction` 仍**只有 4 个**（`CREATE/PAY/DELIVER/RECEIVE`），取消**不新增第 5 个**。理由：`A-S3-2` 等断言按「tag 基数有界（4 个）」读，新增动作会动到那条口径；且取消是**系统按时间**触发的、不是某个人的一次 CAS 转移（`OrderStateMachine` 的三张守卫表也表达不了「时间到了」）。**后果**：`order_state_transition` 里**看不到取消这一笔** —— 想知道「这单被谁/何时取消的」只能读 `order.CancelledAt`（没有 from/to、没有 actor）。 |
+| ② 付「已取消」的单返回**既有**文案 | 本笔追加取消谓词后，PAY 的守卫是 `PayIf = 0 AND CancelledAt IS NULL`（`OrderStateMachine.cancelGuard`）⇒ 已取消的单**CAS 命中 0 行**，复用既有的 `noRowsMsg` —— **「订单不存在或已付款」**。语义上「已取消」不等于「不存在」也不等于「已付款」，**这条文案偏窄**。⚠️ 不改它的理由：那条文案被 `A-S3-2` 逐字断言（20 并发支付里 19 个返回它），加一条「订单已取消，无法付款」虽然**只对已取消的单**生效（不动 `A-S3-2` 那条路径），但属**新增拒绝文案**，本笔按「不夹带」留给下一笔。**前端已先兜住**：`OrderMine.vue` 对已取消的单**不渲染付款按钮** ⇒ 这条路径要走到得绕过 UI。 |
+| ③ 取消**不发通知** | 用户把「通知买家『订单超时已取消』」标成**可选**，本笔**未做**。`NotificationService` 有现成的发送面，接线是一次独立的小笔。 |
+| ④ 阈值是**演示口径** | `mall.order.cancel.timeout-ms` 默认 **60000 ms**、`.fixed-delay-ms` 默认 **15000 ms**（用户 2026-10-10 定的演示节奏）。生产口径（通常是 15–30 分钟）**只需改配置**。⚠️ 与物流四节点同款：`a3` 下 `mall.order.cancel.enabled=false` ⇒ **a3 手验看不到本任务**（调度器总闸本来也不在）。 |
+| ⚠️ 与「约束 4（不碰 `OrderStateMachine`）」的**范围关系** | **本次不违约束 4** —— 这是「旧令本就不适用本次」，**不是**「破一次例」。约束 4 管的是**「介入动作」**（新增状态位 / 改守卫表 / 走非既有 CAS 边），**不管「付款业务规则」**；本笔在 `updateSql(PAY)` 尾部追加 `AND CancelledAt IS NULL`（**改的是 WHERE，不是 SET**；**未新增任何状态位**）属**付款业务规则**，落在约束 4 的范围**之外**。用户 2026-10-11 澄清的口径：旧令管介入动作、不管付款规则 ⇒ **本就不适用本次**。收益是 `docs/agent/db-schema.md` **§12.4** 说的**单语句原子**（「先查再 CAS」会留 TOCTOU 窗口，`runLocked` 取锁失败是 fail-open）。 |
+| 状态 | ⏸ **登记（2026-10-10，C3 块 4 补丁 · 第 2 笔）**；①②③ 均为**已知边界、非缺陷**。 |
+
+## TD-35 `a3` profile 一 profile 两用（CI 门禁 vs 日常开发）⇒ 拆出孪生 `dev`
+
+| 项 | 内容 |
+|---|---|
+| 现象 | 用户在 8088 上挂 `a3` 做日常开发 / 手验，**看不到 job 类功能**（物流轨迹不推进、超时未付款不取消）—— 因为 a3 的三个「会自己醒来的东西」开关全关（压测确定性）。2026-10-10 用户报「物流轨迹不更新 / 60 秒取消没实现」，真因即此。 |
+| 根因 | `a3` 被赋了两件**需求互斥**的职责：① CI 的 A3 并发门禁（要求 job 全关，同一份输入→同一份结果）；② 日常开发 / 手验（要求 job 全开）。一个 profile 表达不了两个相反的取值。 |
+| 连带 | 「攻击模拟器」改自 A3 的**并发脚本框架**（`scripts/concurrency/`），但目的是**演示效果** ⇒ 同样要 job 开；若沿用 a3 profile 会撞同一面墙。复用的是**框架**，不是 profile。 |
+| 修法 | 拆 profile（2026-10-11 用户批，A 档）：**a3 收窄为 CI 专用、一行不动**；新建孪生 `application-dev.properties`（= a3 的复制，仅三个 job 开关 false→true，另 env 前缀 `A3_`→`DEV_`、上传目录 `a3-uploads`→`dev-uploads`）。`HealthController` 的 `@Profile` 由 `"a3"` 放宽为 `{"a3","dev"}`（使攻击模拟器可复用 A3 的 P5/P6/P7 探针，它们打 `/health/db`）。 |
+| 为什么不是「直接开 a3 的 job」 | A3 门禁断言「120 QPS 下每单恰好 1 次成功」这类**确定性**结论；job 每 15 秒自己醒来扫库改状态，会让基线混进一个与压测无关的变量 ⇒ 断言可能假红 / 假绿，**门禁失去可信度**。 |
+| 为什么不是「include a3」 | Boot 的 `spring.profiles.group.dev=a3` 会把 a3 排在 dev **之后** ⇒ 后加载者赢 ⇒ a3 的 `job=false` 反而盖住 dev；反过来 `group.a3=dev` 又让 CI 的 a3 也吃到 `job=true`。分组方向在此是反的，**只能复制**。 |
+| 已知代价（登记不修） | **孪生漂移**：a3 的「连库 / Redis / TTL / 池」将来若变，`application-dev.properties` **不会自动跟** —— 必须手工同步。判据：两文件的 diff 应**恒等于**那三行 job 开关（+ 两处命名）。⚠️ **没有机制兜住它**（同 TD-32 的告诫）。 |
+| 边界 ① | `dev` 的 `app.auth.enabled` 也是 **false**（与 a3 孪生）⇒ **日常手验仍 ≠ 生产鉴权行为**，「手验绿 ≠ 默认 profile 绿」这条告诫**依然成立** —— 只是「默认 profile」现在指 `application.properties`（`app.auth.enabled=true`）。要验鉴权本身，用默认 profile。 |
+| 边界 ② | CI **不受影响**：`ci.yml` 的 concurrency job 仍显式 `SPRING_PROFILES_ACTIVE: a3`；`dev` 只在本机 / 攻击模拟器上用。 |
+| 边界 ③ | IDEA run config / 日常启动命令由 `a3` 改 `dev` 是**用户侧操作**（本次不改任何 IDE 文件）。 |
+| 状态 | ✅ **已落（2026-10-11，未提交）** —— `application-dev.properties` 新建；`HealthController` 的 `@Profile` 放宽；`application-smoke.properties` 补 `mall.order.cancel.enabled=false`（同族对称）；`environment.md` / `project-map.md` 同步。 |

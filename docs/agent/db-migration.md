@@ -83,3 +83,16 @@ CREATE INDEX idx_xxx ON xxx(col);
 - **⚠️ P3 门禁同笔 +1**：`ConcurrencyRunner.java` 的 IN 清单加 `'cart'`、`KNOWN_TABLES` **6 → 7**、期望表数 **17 → 18** —— 少改一处 A3 的 **P3 必红**，而 `concurrency` job 是 `continue-on-error` ⇒ **只能读 artifact 的 `gates.count`，不能读 job 颜色**（同块 3 的教训）。
 - **⚠️ 实测证据（2026-10-10，两库各自查 `information_schema`）**：**本机库 `mall_management_sql` = 14 表**（13 → 14）、**VM 库 = 18 表**（17 → 18）；两库都能 `SHOW TABLES LIKE 'cart'` 取到该表（各返回 1 行元数据）、`order` 有 `Quantity int`；**本机库 `order` 12 行 / `cart` 0 行**、**VM 库 `order` 仍 **6 行**（P4 种子未动）/ `cart` 0 行**（两库 `cart` **均为 0 行**，2026-10-10 由本机 `mysql` 客户端各查一次 `SELECT COUNT(*)` 实测）。⚠️ **本机库 14 ≠ VM 库 18 是预期的**（本机库从未落过 #1 / #4 / #5 / #6，理由同注意 11 末段）—— 判「#9 成功」不靠总数，而靠上面那几条逐项判据。
 - **⚠️ 回滚**：`cart` 是**新表** ⇒ 按注意 6，规则 v2 的回滚是「保留表 + 停止写入」，**不物理 `DROP`**；`order.Quantity` 按注意 1，回滚 = 逻辑废弃（保留列 + 停止写入），**不得**写 `DROP COLUMN`。
+
+13. **⚠️ 块 4 补丁（#10）—— 表数 18 → 19；`order` 加 7 列 + 新表 `order_shipping_track` —— 2026-10-10 记**：C3 块4 补丁〈付款 / 发货 模拟完整流程〉在 `mall_management_sql.sql:740-815` 追加 Migration 块 7：
+
+- **`order` 加 7 列**（`:769-796`，全部 `DEFAULT NULL`）：支付 3 —— `TradeNo varchar(64)` / `PaymentMethod varchar(32)` / `PaidAt datetime`；物流 3 —— `ExpressCompany varchar(64)` / `TrackingNo varchar(64)` / `ShippedAt datetime`；收货 1 —— `ReceivedAt datetime`。规则 7：加在**表末** + 默认值 + `COMMENT`。
+  ⚠️ **是 7 列，不是框架原文写的「8」**：其「物流」那一组 4 项里**已含** `ReceivedAt`（原文逐字：`ExpressCompany` / `TrackingNo` / `ShippedAt` / `ReceivedAt`）⇒ 3 支付 + 4 物流 = **7 个互异列名**。「8」是**那份清单自己数错了一次**（同一项被算进了两个组），不是漏了某一列 —— 本笔按 7 落地，已向用户报备。
+  ⚠️ **既有 7 列的行全是 `NULL`**（不是空串）⇒ 前端一律画 `—`；这 7 列**不进 CAS 的 SET 子句**（`OrderStateMachine.updateSql` 被 golden copy 逐字钉死，见 `OrderStateMachineTest.updateSqlIsByteForByteTheLegacyLiteral`），改由新增的 `detailUpdateSql(action)` 在**同一把订单锁内**发第二条 UPDATE。
+- **新增表 1 张 `order_shipping_track`**（`:805-815`，7 列 + 主键 + `idx_order_shipping_track_order (OrderId, TrackedAt)` 普通 KEY，**无外键**）—— 模拟物流轨迹（A2）。⚠️ **刻意不进文件头（`:21` 起）的 `DROP TABLE IF EXISTS` 基线清单**（同 `cart`：它是**业务数据**，整份重导不该清掉它）⇒ 表结构变更必须写独立 Migration（本块即是）。
+- **计数**：表数 **18 → 19**（`db-schema.md` 随之更新）；索引 **18 → 19**（+`order_shipping_track` 的 1 个普通 KEY）；**非主键 UNIQUE 仍 4 个**（本块不新增 UNIQUE）。（索引两项由 `:805-815` 的 DDL 直接可数，非实测查询。）
+- **⚠️ P3 门禁同笔 +1**：`ConcurrencyRunner.java` 的 IN 清单加 `'order_shipping_track'`、`KNOWN_TABLES` **7 → 8**、期望表数 **18 → 19** —— 少改一处 A3 的 **P3 必红**，而 `concurrency` job 是 `continue-on-error` ⇒ **只能读 artifact 的 `gates.count`，不能读 job 颜色**（同块 3 / 块 4 的教训）。
+- **⚠️ 实测证据（2026-10-10，两库各自查 `information_schema`）**：**本机库 `mall_management_sql` = 15 表**（14 → 15）、**VM 库 = 19 表**（18 → 19）；两库都能 `SHOW TABLES LIKE 'order_shipping_track'` 取到该表、`order` 有那 7 列（`SHOW COLUMNS ... LIKE 'TradeNo'` 等各 1 行）。⚠️ **本机库 15 ≠ VM 库 19 是预期的**（本机库从未落过 #1 / #4 / #5 / #6）—— 判「#10 成功」不靠总数，而靠上面那几条逐项判据。
+  ⚠️ **行数实测的意外**：VM 库 `order` **10 行**（不是 db-migration #9 记的 6 行）。**与本块无关**（`ALTER TABLE ... ADD COLUMN` 不改行数）—— 是 VM 开发库在块 4 手验（6→9）之后的**既有累积**；A3 的 P4 种子门禁用的是 CI 里**刚从 `.sql` 导入**的那份（`order = 6`），不受影响。
+- **⚠️ 幂等**：每个列一条 `information_schema` 守卫（`:769-796`，MySQL 不支持 `ADD COLUMN IF NOT EXISTS`），`CREATE TABLE IF NOT EXISTS` 自带幂等 ⇒ **连跑 2 次 `EXIT = 0`**（2026-10-10 两库实测）。
+- **⚠️ 回滚**：`order_shipping_track` 是**新表** ⇒ 按注意 6，规则 v2 的回滚是「保留表 + 停止写入」，**不物理 `DROP`**；`order` 的 7 列按注意 1，回滚 = 逻辑废弃（保留列 + 停止写入），**不得**写 `DROP COLUMN`。

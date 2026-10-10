@@ -1989,10 +1989,10 @@ comm -23 /tmp/b.tok /tmp/a.tok   # 只在 before ⇒ **丢失，应为 0**
 `ProductPage.html:262-263`（写在 `ProductPage.vue:8`，顶栏「与稿有意不同」）、
 `AppShell.vue:231`（写在 `ProductPage.vue:12`，壳内搜索入口）、
 `ProductPage.html:1011-1012`（写在 `ProductPage.vue:210`，`desc` 补 `class="on"`）、
-`ProductPage.html:706-772`（写在 `ProductPage.vue:351` 与 `ProductPage.vue:1051`，`dlg1` 面 ⚠️ **C 笔后为 `:352` / `:1051`**（前者 +1、后者**未动** —— 尾部 hunk 从 1050 起、起点不变）；见 §八 8-8。token 目标本身不变）、
+`ProductPage.html:706-772`（写在 `ProductPage.vue:351` 与 `ProductPage.vue:1070`，`dlg1` 面 ⚠️ **C 笔后为 `:352` / `:1051`**（前者 +1、后者**未动** —— 尾部 hunk 从 1050 起、起点不变）；⚠️ **2026-10-10〈Bug 1 · 立即购买补接收银台〉重指**：本笔在 `ProductPage.vue` 净 +19 行，且**全部落在 398 行之后、1051 行之前**（`git diff` 实测 4 处：模板 `:412` 起 +5、import +1、`handlePay` 段 +13（含 `-1`））⇒ 后一处由**原 1051 行** → `:1070`，前一处 `:352` **不变**（398 亦不变）；见 §八 8-8。token 目标本身不变）、
 `ProductPage.html:769-789`（写在 `ProductPage.vue:398`，`dlg2` 面）、
-`ProductPage.html:225-226`（写在 `ProductPage.vue:775`，稿的 `:root`）、
-`GoodsUp.vue:637` 与 `GoodsAdd.vue:612`（同写在 `ProductPage.vue:784`，`button` 归零先例；⚠️ 2026-10-10〈模板表通用化〉同笔重指：`GoodsAdd.vue:508` → **`GoodsAdd.vue:612`**）。⚠️ **2026-10-10（C3 块 3 · 商品块）重指**：`GoodsUp.vue` 因同笔在两处加行（`<script setup>` 末尾 +88 行「状态并表 / 筛选接线」/ `<style>` 的 `.state` 三态 +6 行）而整体下移 **88 行**（`<script>` 段的行号一个没动，见 §十七 漂移表的按语）⇒ 本处由 `:549` → **`:637`**。
+`ProductPage.html:225-226`（写在 `ProductPage.vue:794`，稿的 `:root`；⚠️ **2026-10-10〈Bug 1 · 立即购买补接收银台〉重指**：同笔在 `ProductPage.vue` 净 +19 行 ⇒ 本处由**原 775 行** → `:794`）、
+`GoodsUp.vue:637` 与 `GoodsAdd.vue:612`（同写在 `ProductPage.vue:803`，`button` 归零先例；⚠️ 2026-10-10〈模板表通用化〉同笔重指：`GoodsAdd.vue:508` → **`GoodsAdd.vue:612`**）。⚠️ **2026-10-10（C3 块 3 · 商品块）重指**：`GoodsUp.vue` 因同笔在两处加行（`<script setup>` 末尾 +88 行「状态并表 / 筛选接线」/ `<style>` 的 `.state` 三态 +6 行）而整体下移 **88 行**（`<script>` 段的行号一个没动，见 §十七 漂移表的按语）⇒ 本处由 `:549` → **`:637`**。⚠️ **2026-10-10〈Bug 1 · 立即购买补接收银台〉重指**：同笔在 `ProductPage.vue` 净 +19 行 ⇒ 本处由**原 784 行** → `:803`（token 目标 `GoodsUp.vue:637` / `GoodsAdd.vue:612` 本身不变）。
 
 **C 档——47 条台账正文里新写的、指向别处的全形引用**
 判据：剩下的全部 —— 宿主是 `slot-registry.md`、token 带文件名。它们是**引用方 / 被引方地名**，
@@ -2442,7 +2442,7 @@ find Mall-management-web/mall-management-system/src -name "CustomerPage.vue"
 | 丙 | 稿画 `<a href="#">` 且**指向已存在路由** | 落**真 `<router-link>`**（不属死控件） | 2 例：`LoginPage.vue:37` / `:38`（`to="/product"` / `to="/customer"`） |
 
 - ⚠️ **连带规则（同因）**：稿的 `a:hover` 类规则**不带 `:not([disabled])`** ⇒ 照抄会让「不可点」的东西悬停变色（**光标撒谎的样式版**）。已落补丁：`UserInfoPage.vue:437`（`.tiles button:hover:not([disabled])`）与 `:475`（`.svc button:hover:not([disabled]) b`）。
-- ⚠️ 另有一条**同族**但不同支的既有约定（不在本口径内，记此备查）：全仓**没有**全局 `a{…}` 重置（`assets/tokens.css:21` 故意不写）⇒ 凡 `<router-link>` 渲染成 `<a>` 的地方都**自报** `a { color: inherit; text-decoration: none }`（先例 `GoodsUp.vue:637-638` / `GoodsAdd.vue:612-613` / `ProductPage.vue:784`）。⚠️ **2026-10-10（C3 块 3）重指**：`GoodsUp.vue:549-550` → **`GoodsUp.vue:637-638`**（该文件本笔整体 +94 行，其中 `<style>` 起始前的 `<script setup>` 尾部 +88 ⇒ 样式段首两行顺手 +88；行号成因同上一条）；⚠️ **2026-10-10〈模板表通用化〉同笔再重指**：`GoodsAdd.vue:508-509` → **`GoodsAdd.vue:612-613`**（成因见 §19-9-4）。
+- ⚠️ 另有一条**同族**但不同支的既有约定（不在本口径内，记此备查）：全仓**没有**全局 `a{…}` 重置（`assets/tokens.css:21` 故意不写）⇒ 凡 `<router-link>` 渲染成 `<a>` 的地方都**自报** `a { color: inherit; text-decoration: none }`（先例 `GoodsUp.vue:637-638` / `GoodsAdd.vue:612-613` / `ProductPage.vue:803`）。⚠️ **2026-10-10（C3 块 3）重指**：`GoodsUp.vue:549-550` → **`GoodsUp.vue:637-638`**（该文件本笔整体 +94 行，其中 `<style>` 起始前的 `<script setup>` 尾部 +88 ⇒ 样式段首两行顺手 +88；行号成因同上一条）；⚠️ **2026-10-10〈模板表通用化〉同笔再重指**：`GoodsAdd.vue:508-509` → **`GoodsAdd.vue:612-613`**（成因见 §19-9-4）；⚠️ **2026-10-10〈Bug 1 · 立即购买补接收银台〉重指**：本处 `ProductPage.vue` 由**原 784 行** → `:803`（该文件本笔净 +19 行）。
 
 ### 8-5　新裁决点（**本笔一条都没自裁**，逐条列出待裁）
 
@@ -4359,7 +4359,7 @@ C 档＝完全自裁）；**按用户要求做，不按稿做**（与 `c3-module
 
 ---
 
-## 二十、C3 块 4〈订单块〉（2026-10-10；**落码完成 + 构建/测试绿 + 两库已落 + 手验未做**；未提交）
+## 二十、C3 块 4〈订单块〉（2026-10-10；**落码完成 + 两库已落 + 手验已过（`867bd59` 登记证据）**；⚠️ 其后**补丁〈付款 / 发货 模拟完整流程〉**又落码 —— 见 20-9；未提交）
 
 用户口径（逐字要点）：块 3 已 merge（PR #84，`fbf5c00`）⇒ 正式收口；进块 4「订单块」，**三端一起设计一起落**；
 **继续攒、不提交**；三条不松的线照旧（**建表 / 改契约 / 删文件 ⇒ 必问**）；提速规则照旧（A 档必问 / B 档自裁报备 / C 档自决）。
@@ -4474,3 +4474,83 @@ C 档＝完全自裁）；**按用户要求做，不按稿做**（与 `c3-module
 1. **`db-schema.md` 不中段插行**（方案 §六原文是「表总览 +1、新增 `cart` 小节」）—— 改为**文件末 §11**，理由 = 44 处外部引用（10 个文件 / 26 个不同行号）会被集体顶漂（零漂移优先）。**这是本笔对方案的一次自觉偏离，已在此登记。**
 2. **`api-contract.md` 正文 `O:` 一栏不就地重填** —— 同上按「只登记、不修」，新坐标放**附录 C**。
 3. **管理端订单页的「介入」不做成第三个 tab** —— 它是**行级动作**，页级 tab 只有 2 个（`c3-modules.md §五` 要求页级 tab 2–4 个，2 个合规）。
+
+### 20-9　**补丁**〈付款 / 发货 模拟完整流程〉（2026-10-10；用户批「方案可批，四点要确认」后落码）
+
+用户口径（逐字要点）：【① 列数 7 还是 8】批的是 8 列（3 支付 + 4 物流 + 1 收货）——**答：7 个互异列名**，其「物流」组 4 项里**已含** `ReceivedAt`，「8」是那份清单自己数错了一次；【② 物流签收 ≠ 订单收货 —— **用户接受**】（真实电商亦如此；前端分两词 + 登记 TD）；【③ A5 `/order/orderDetail` —— **批**】（买家看物流必须有它）；【④ 其余全采信】（不动 `OrderStateMachine`（golden 钉死）· 三端点加参用**重载**（`intervene` 零改）· 调度器**只 INSERT 轨迹**（`NOT EXISTS` 幂等）· A3 门禁 **7→8 / 18→19**）。
+
+**目标**：把「付款 / 发货」从**纯状态位**升级成**模拟的完整流程** —— 支付流水号 / 支付方式 / 支付时间、快递公司 / 运单号 / 发货时间、收货时间，加**物流轨迹时间线**。
+
+| 面 | 落地 |
+|---|---|
+| **表** | Migration 块 7（`mall_management_sql.sql:740-815`）：`order` **加 7 列**（全 `DEFAULT NULL`，`information_schema` 守卫）+ **新表 `order_shipping_track`**（7 列 + 主键 + `idx_order_shipping_track_order`，**无 UNIQUE**、**无外键**、**不进重导 DROP 清单**）。表数 **18 → 19**。见 `db-schema.md §12` / `db-migration.md` 注意 13 |
+| **golden copy 保全** | `OrderStateMachine.updateSql` **一字未动**（`OrderStateMachineTest.updateSqlIsByteForByteTheLegacyLiteral` 仍绿）。7 个明细列走**新增的** `detailUpdateSql(action)`（PAY / DELIVER / RECEIVE 三条 SET）+ `detailColumns(action)`，由 `OrderService` 在**同一把订单锁内**发**第二条 UPDATE** ⇒ 锁消除「位已置、明细未写」的竞态 |
+| **重载（`intervene` 零改）** | `payIfUp(orderId)` → 委派 `payIfUp(orderId, paymentMethod)`；`deliveryIfUp(orderId)` → `deliveryIfUp(orderId, expressCompany, trackingNo)`。**1 参重载逐字保留** ⇒ `AdminOrderService.intervene` 的调用点一个字符未动 |
+| **调度器** | 新增 `order/job/ShippingTrackAdvanceJob`（**只 INSERT `order_shipping_track`，绝不 UPDATE `order`** —— 用户 2026-10-10 批准的红线）。按 `ShippedAt` + 阈值（`transit/picked-up/delivery/signed-ms`，**演示默认 15/30/45/60 秒**）补**四节点**（**时序**：`in_transit` 运输中 / `picked_up` 驿站已揽收 / `out_for_delivery` 驿站派送中 / `delivered` 已签收；前两步 2026-10-11 对调，见 §20-12）；落库前先 `ShippingTrackDao.exists()`。**同 `MerchantDowngradeJob` 款**：整类挂 `@ConditionalOnProperty(name="mall.order.shipping.track.enabled", matchIfMissing=true)` ⇒ a3 / smoke **显式 false** |
+| **后端其它** | `OrderDao.{applyDetails, selectByOrderId, selectShippableForTrack}`（尾部追加）· 新类 `ShippingTrackDao` · `AdminOrderDao.selectShippingTrack` + `COLUMNS` 加 7 列 · `AdminOrderService.detail` 回 `shippingTrack` · `OrderController` 三端点加 `@RequestParam(required=false)` + 新端点 `POST /order/orderDetail`（A5，第一行 `isOwner(request, orderId, false)`） |
+| **前端** | `endpoints.js` 加 `orderDetail`（**同行追加**，`:56`/`:58` 不漂）· `api/order.js` 加 `orderDetail()` 并把 `orderPay` / `orderDeliver` 扩参（**空值不发**）· `OrderMine.vue` **收银台弹窗**（选支付方式 → `orderPay(orderId, method)`，成功回显 `tradeNo`）+ **物流详情弹窗**（`orderDetail` 的 `shippingTrack` 时间线）· `OrderCenter.vue` **发货弹窗**（快递公司 / 运单号，**可留空**）· `views/admin/OrderPage.vue` 详情加**支付/物流 7 列** + **第二条时间线**（`shippingTrack`，**与状态流转线并列不合并**） |
+| **A3 门禁** | `ConcurrencyRunner.java` P3 的 IN 清单加 `'order_shipping_track'`、`KNOWN_TABLES` **7 → 8**、期望表数 **18 → 19**（**净零行数**改法 ⇒ P3 段行号 `2644-2667` **不漂**） |
+| **测试** | `OrderStateMachineTest` 加 `detailUpdateSqlIsPinned` + `detailColumnsMatchPlaceholders`（→ 该类 **23 用例**）· `AbstractSmokeTest` `@Import` 加 `ShippingTrackDao.class`（**第五次同一处地雷**）· `./mvnw test` **258 用例 / 0 失败 / 26 跳过**、`npm run build` 绿 |
+
+**⚠️ 两条明写的边界（登记 `tech-debt.md`）**：① **物流「已签收」≠ 订单「已收货」** —— 这是「调度器不碰状态位」的**必然结果**，前端分两词（物流签收 / 订单收货）；② **没有真实支付网关** —— `TradeNo` 是 `PAY+yyyyMMdd+6位随机` 的**演示流水号**，收银台文案已明说「不会真的扣款」。
+
+**⚠️ 一条隐藏耦合**：`@EnableScheduling` **不在启动类**、挂在 `MerchantDowngradeSchedulingConfig`（自身 `@ConditionalOnProperty(name="mall.downgrade.job.enabled")`）⇒ a3 里调度器**根本不存在**，物流任务的 `enabled=false` 是**第二道**独立闸；**别**为了关物流任务去改降级任务的开关（会连降级一起关）。
+
+**⚠️ 一条新发现的既有事实**：VM 库 `order` 实测 **10 行**（不是 `db-migration.md` #9 记的 6）—— 与本补丁无关（`ALTER ADD COLUMN` 不改行数），是块 4 手验后的**既有累积**；A3 的 P4 用 CI 新导入的 6 行，不受影响。
+
+### 20-10　**补丁·第 2 笔**〈超时未付款自动取消 + 物流轨迹演示节奏收紧〉（2026-10-10 落码；A 档，用户批「批全档」）
+
+用户口径（逐字要点）：【批全档】= 列 + job + 前端 + 改测试；【a3 下这两个定时任务】= **保持关**，手验走**默认 profile**；【物流演示节奏】= 间隔 60s→15s、阈值 15/30/45/60s；【「已取消不接受付款」怎么落】= 用户 2026-10-10 说的是「破例改状态机」，⚠️ **2026-10-11 纠正为「范围澄清」** —— 不是「破例 / 解禁」，而是**旧令本就不适用本次**（见下）。
+
+**目标**：用户报「① 物流轨迹不更新 ② 60 秒未付款自动取消没实现」。确诊 —— ① = **a3 下调度器根本不存在**（`@EnableScheduling` 的宿主类自身挂 `mall.downgrade.job.enabled` ⇒ a3 关掉 ⇒ 整个调度器不加载；物流任务的 `enabled=false` 是第二道闸。**重启无效**）；② = **全仓零实现**（`CancelledAt` / `cancelOrder` / `timeoutCancel` / `orderTimeout` grep 全 0 命中）。遂从零实现 ② + 收紧 ① 的演示节奏。
+
+| 面 | 落地 |
+|---|---|
+| **表** | `order` 加第 8 个明细列 `CancelledAt datetime(3) NULL`（`mall_management_sql.sql:816-830`，`information_schema` 守卫幂等块）。**只加列、不加表** ⇒ P3 表数（11+6=17）/ P4 种子**全不变** |
+| **新 job** | `OrderTimeoutCancelJob`：扫 `PayIf=0 AND CancelledAt IS NULL AND CreateTime < NOW()-阈值` → 逐单 `OrderDao.cancelIfUnpaid`（CAS）写 `NOW(3)`。阈值默认 **60s** / 扫描 **15s**（`mall.order.cancel.timeout-ms` / `.fixed-delay-ms`）。整类挂 `@ConditionalOnProperty(name="mall.order.cancel.enabled", matchIfMissing=true)` |
+| **CAS 原子** | ⚠️ 取消**不动** `PayIf` ⇒ 光靠 `PayIf = 0` 守卫拦不住「已取消的单被付款」。修法：`updateSql(PAY)` 尾部追加 `AND CancelledAt IS NULL`，与 SET **同一条 UPDATE** ⇒ 单语句原子（「先查再 CAS」会留 TOCTOU 窗口，锁是 fail-open） |
+| **前端** | `OrderMine.vue` / `OrderCenter.vue` 的 `stateOf` 前置判 `CancelledAt` ⇒ 「已取消」态；`OrderMine` 付款按钮 `v-if` 排除已取消单 |
+| **节奏** | `ShippingTrackAdvanceJob`：`fixed-delay` 60s→**15s**；四节点 30/60/120/240s → **15/30/45/60s** |
+| **A3 门禁** | `application-a3.properties` 追加 `mall.order.cancel.enabled=false`（与 `downgrade.job.enabled` / `shipping.track.enabled` **同族**的独立闸，保护 A3 压测确定性） |
+| **测试** | `OrderStateMachineTest` 的 `updateSqlIsByteForByteTheLegacyLiteral` 按新字面量**重新基线**（PAY 那行尾加 `AND CancelledAt IS NULL`）；`./mvnw test` **258 / 0 / 0 / 26**、`eslint` 0、`vue-cli-service build` 0 |
+
+**⚠️ 与「约束 4（不碰 `OrderStateMachine`）」的「范围澄清」（用户 2026-10-11）**：约束 4 管的是**「介入动作」**（新增状态位 / 改守卫表 / 走非既有 CAS 边），**不管「付款业务规则」**；本笔那条 `AND CancelledAt IS NULL` 属**付款业务规则**，落在约束 4 范围**之外** ⇒ **本就不适用本次，不是破例**。⚠️ 仍**未新增任何状态位**、**未动守卫表**（取消谓词由 `cancelGuard` 只进 `updateSql`，**不进** `guardWhere`，否则 `bitIndexOf` 会炸）。后果登记 `tech-debt.md` **TD-34**。
+
+**⚠️ 验证**：默认 profile + VM 库 + 8089 端到端 **5 判据全 PASS**（① 未付款单被置 `CancelledAt` 而 `PayIf` 仍 0；② 已付款 / 已发货单不被取消；③ **已取消单再付款被拒** ⇒ 原子守卫生效；④ 幂等；⑤ 轨迹 4 条 @+15/+30/+45/+60s），证据 `docs/agent/evidence/c3-block4-patch/verify-cancel-8089.txt`。⚠️ **手验必走默认 profile**（a3 下调度器不存在）；`application-a3.properties:98` 的 `app.auth.enabled=false` ⇒ **手验绿 ≠ 默认 profile 绿**。
+
+### 20-11　**profile 职责分离**：`a3` 收窄为 CI 专用 + 新建孪生 `dev`（2026-10-11；用户批 A 档）
+
+用户口径（逐字要点）：【根因】`a3` 同时服务「CI 并发门禁（要 job 全关）」与「日常开发（要 job 全开）」，两需求冲突；【根本解】profile 职责分离：**a3 = CI（不动）** / **dev = 日常 + 攻击模拟器（新建）**；【为什么不是直接开 a3 的 job】会污染 A3 并发门禁（断言「120 QPS 每单恰好 1 次成功」，job 每 15 秒扫库改状态 ⇒ 基线变 ⇒ 假红 / 假绿）；【动作】先出方案、用户批后落码；【`verify-cancel-8089.sh` 临时方案**作废**】；【攻击模拟器】复用 A3 的**脚本框架**，profile 用 **dev**（或 sim），**不是** a3。
+
+| 面 | 落地 |
+|---|---|
+| **新 profile** | 新建 `Mall-management-server/src/main/resources/application-dev.properties` = `application-a3.properties` 的**复制**，仅三处差异：三个 job 开关 `false`→`true`；env 前缀 `A3_`→`DEV_`；上传目录 `a3-uploads/`→`dev-uploads/` |
+| **a3 不动** | `application-a3.properties` **一行未改**（CI 的 concurrency job 仍显式 `SPRING_PROFILES_ACTIVE: a3`） |
+| **探针放宽** | `HealthController` 的 `@Profile("a3")` → `@Profile({"a3","dev"})`（A3 / 模拟器的 P5/P6/P7 打 `/health/db`，dev 下也要在），javadoc 同步 |
+| **smoke 对称** | `src/test/resources/application-smoke.properties` 补 `mall.order.cancel.enabled=false`（此前漏了，与本文件另两条同族，今日空转） |
+| **文档** | `environment.md`（a3 段改「日常 dev / CI a3 二选一」）· `project-map.md`（a3 行标注 CI 专用 + 孪生 dev）· `tech-debt.md` **TD-35**（新增）· 本 §20-11 |
+| **作废** | `_work/verify-cancel-8089.sh`（临时起 8089 默认 profile 的方案**作废**）—— 起 8088 挂 `dev` 即可看到 job |
+
+**⚠️ 为什么「复制」而不是「`spring.profiles.group.dev=a3`」**：Boot 的分组会把 a3 排在 dev **之后**，后加载者赢 ⇒ a3 的 `job=false` 会盖住 dev 的 `job=true`；反过来 `group.a3=dev` 又让 CI 的 a3 也吃到 `job=true`。分组方向在此反了，**只能复制**。
+
+**⚠️ 已知代价（登记 TD-35）**：孪生漂移 —— a3 的「连库 / Redis / TTL」变了 dev 不会自动跟，须手工同步；判据 = 两文件 diff **恒等于**那三行 job 开关（+ 两处命名）。
+
+**⚠️ 边界**：`dev` 的 `app.auth.enabled` 也是 false ⇒ **日常手验仍 ≠ 生产鉴权行为**，「手验绿 ≠ 默认 profile 绿」依然成立（此处「默认 profile」= `application.properties` 的 `app.auth.enabled=true`）。IDEA run config 改 `dev` 是**用户侧操作**。
+
+### 20-12　**补丁·第 3 笔**〈物流轨迹改文案 + 前两步对调〉（2026-10-11 落码；用户口径「改字的事，别搞复杂」）
+
+用户口径（逐字要点）：【现有四步】驿站已揽收 → 运输中 → 派送中 → 已签收；【改成】运输中 → 驿站已揽收 → 驿站派送中 → 已签收；【具体】① 第 1 位「驿站已揽收」→「运输中」② 第 2 位「运输中」→「驿站已揽收」（即**前两步对调**）③ 「派送中」→「驿站派送中」④ 「已签收」保留；【实现】只改**文案字符串 + 偏移阈值的顺序**，**不涉及新状态**，`@Scheduled` 的**时间偏移映射跟着换**；【口径】改字的事，别搞复杂。
+
+**⚠️ 关键设计：改的是「节点码 ↔ 阈值 ↔ 文案」的整对调，不是只换字符串。** `order_shipping_track.Status` 是**会显示**的（管理端订单详情同时打 `Status` 与 `Description`）⇒ 只换文案会造出「`picked_up` | 运输中」这种**自相矛盾的行**。⇒ `in_transit` 拿 15s、`picked_up` 拿 30s（两者的**默认阈值对调**）；properties 的**键名一个没改**（`transit-ms` / `picked-up-ms` / `delivery-ms` / `signed-ms`）。叙事是**干线在前、到站入库在后**。
+
+| 面 | 落地 |
+|---|---|
+| **新时序** | 1 `in_transit`「运输中」+15s（`transit-ms`）· 2 `picked_up`「驿站已揽收」+30s（`picked-up-ms`）· 3 `out_for_delivery`「驿站派送中」+45s（`delivery-ms`）· 4 `delivered`「已签收」+60s（`signed-ms`） |
+| **后端** | `order/job/ShippingTrackAdvanceJob`（javadoc 表格加「时序」列 + 「2026-10-11」说明段；四个 `@Value` 字段顺序与默认值对调；`advanceOne()` 四个 `if` 块按时序重排）· `order/dao/ShippingTrackDao.java:24` · `order/service/OrderService.java` 两处 javadoc · `order/controller/OrderController.java:227` 注释 |
+| **SQL** | `mall_management_sql.sql:803`（`Status` 取值注释）/ `:809`（`Description` 列 `COMMENT`）—— ⚠️ 改的只是**脚本里的注释文本**；**既有表的列 `COMMENT` 是建表那一刻写死的**，改脚本对既有表**不生效**（要看新文案得起新表 / 手工 `ALTER`） |
+| **前端** | `views/admin/OrderPage.vue:192` · `views/OrderCenter.vue:161` · `views/OrderMine.vue:146` · `api/order.js` 的 `orderDeliver` 文档注释 —— 全**同行替换**（净 0 行，无行号漂移） |
+| **文档** | `api-contract.md` §D.3 端点行 / §D.4 两条 · `db-schema.md:609-610` · `tech-debt.md` TD-28「现状」行 · 本文件 §20-9 调度器行（**同行改**）· `context-packs/c3-block-4-order.md:254`（手验步骤 3 的过期阈值 60000/120000/240000 → 15000/30000/45000/60000）· `application-dev.properties:95`（节点次序） |
+| **刻意不动** | `progress.md:2025` 与 `docs/agent/evidence/**` —— **历史记录不回溯改写**（与「轨迹是过程记录、存量行不改写」同一口径）。⇒ 读旧条目见「首条 `picked_up`、30/60/120/240 秒」须知那是**当时**的事实 |
+| **测试** | `./mvnw -q -B compile` **EXIT 0** · `./mvnw -B test` **258 / 0 fail / 0 error / 26 skipped · BUILD SUCCESS**（与补丁前同数 —— 本笔**零测试改动**，因为没有任何测试断言这四个文案/阈值） |
+
+**⚠️ 存量行**：2026-10-11 之前落的轨迹行（含「商家已揽收」旧文案、旧顺序）**一条都不回溯 UPDATE** ⇒ 手验与新一轮证据要看**新发的单**。

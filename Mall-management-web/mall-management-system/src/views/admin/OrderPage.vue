@@ -160,6 +160,17 @@
                 <div><dt>发货</dt><dd class="a-mono">{{ detail.row.DeliveryIf }}</dd></div>
                 <div><dt>收货</dt><dd class="a-mono">{{ detail.row.ReceiveIf }}</dd></div>
               </div>
+              <!-- 支付 / 物流明细（C3 块4 补丁新增的 7 列）。⚠️ 全列 `dash()` 兜 `null` ——
+                   补丁之前落的单这些列**都是 NULL**（不是空串），画成 `—` 而不是空白。 -->
+              <div class="a-kv">
+                <div><dt>支付方式</dt><dd class="a-mono">{{ dash(detail.row.PaymentMethod) }}</dd></div>
+                <div><dt>交易号</dt><dd class="a-mono">{{ dash(detail.row.TradeNo) }}</dd></div>
+                <div><dt>付款时间</dt><dd class="a-mono">{{ toLocal(detail.row.PaidAt) }}</dd></div>
+                <div><dt>快递公司</dt><dd class="a-mono">{{ dash(detail.row.ExpressCompany) }}</dd></div>
+                <div><dt>运单号</dt><dd class="a-mono">{{ dash(detail.row.TrackingNo) }}</dd></div>
+                <div><dt>发货时间</dt><dd class="a-mono">{{ toLocal(detail.row.ShippedAt) }}</dd></div>
+                <div><dt>收货时间</dt><dd class="a-mono">{{ toLocal(detail.row.ReceivedAt) }}</dd></div>
+              </div>
               <h3 class="a-h3">
                 状态流转时间线<span class="a-h3n">
                   源：<code>order_state_transition</code> · 按 **OccurredAt** 升序（不是 Id —— 同单的
@@ -174,6 +185,26 @@
                   <span class="a-mono a-dim">{{ toLocal(e.OccurredAt) }}</span>
                   <span class="a-tag">{{ dash(e.Action) }}</span>
                   <span class="a-mono">{{ dash(e.FromState) }} → {{ dash(e.ToState) }}</span>
+                </li>
+              </ol>
+              <!-- ⚠️ 第二条线 = **模拟物流**（`order_shipping_track`），与上一条**并列不合并**：
+                   上一条记「状态怎么变」（CAS 副产品，含 `pay`/`deliver`/`receive` 事件），
+                   本一条记「快递走到哪」（四节点**全**由后台任务按 `ShippedAt` 偏移补 —— 2026-10-10 起发货时不再写首条）。
+                   两者**末条不对应**：物流「已签收」≠ 订单「已收货」（后者要买家点【收货】）。 -->
+              <h3 class="a-h3">
+                物流轨迹<span class="a-h3n">
+                  源：<code>order_shipping_track</code> · 按 **TrackedAt** 升序 ·
+                  ⚠️ 模拟推进（本仓无真实网关），末条「已签收」**不等于**订单已收货
+                </span>
+              </h3>
+              <p v-if="!detail.shippingTrack || !detail.shippingTrack.length" class="a-empty">
+                该单没有物流轨迹（尚未发货，或早于本补丁落的单 —— 那批的明细列全 NULL）。
+              </p>
+              <ol v-else class="a-tl">
+                <li v-for="(t, i) in detail.shippingTrack" :key="i">
+                  <span class="a-mono a-dim">{{ toLocal(t.TrackedAt) }}</span>
+                  <span class="a-tag">{{ dash(t.Status) }}</span>
+                  <span>{{ dash(t.Description) }}</span>
                 </li>
               </ol>
             </template>

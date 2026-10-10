@@ -120,7 +120,7 @@
 
 ---
 
-## 6. 完整字段清单（18 张表 —— ⚠️ **`cart` 不在本节**，见文件末 §11；逐列以 `.sql` 为准）
+## 6. 完整字段清单（19 张表 —— ⚠️ **`cart` 不在本节**（§11）、**`order_shipping_track` 也不在**（§12）；逐列以 `.sql` 为准）
 
 > 行号 = `mall_management_sql.sql` 真实行号。`约束` 列照抄 DDL；`备注` 列出 COMMENT（本库仅 `order_state_transition` 有列注释）与已核实的语义。
 > 列级 `CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci` 在部分列上显式声明（下表标「显式」）、部分列省略 —— 因表默认值相同，**功能等价**，属声明噪音。
@@ -226,7 +226,7 @@
 | `content` | text | NOT NULL | **无长度约束** |
 | `create_time` | datetime | NOT NULL | 与 `user_conversation_read.last_read_time` 同型，可直接比较 |
 
-### 6.8 `order`（`:141-155`；⚠️ C3 块 4 已加 `Quantity` —— `.sql:730-738`，`int NOT NULL DEFAULT 1`，存量 6 行回填 1，**不增表、不改行数**；**下表刻意未加行**，见文件末 §11）
+### 6.8 `order`（`:141-155`；⚠️ C3 块 4 已加 `Quantity` —— `.sql:730-738`，`int NOT NULL DEFAULT 1`，存量 6 行回填 1，**不增表、不改行数**；⚠️ C3 块 4 **补丁**又加 **7 列**（支付 3 / 物流 3 / 收货 1，全 `DEFAULT NULL`）—— `.sql:769-796`，理由见 §12；**下表刻意未加行**，见文件末 §11 / §12）
 | 字段 | 类型 | 约束 | 备注 |
 |---|---|---|---|
 | `Id` | int | **PK**, NOT NULL AUTO_INCREMENT | `AUTO_INCREMENT=24`（内部主键，业务不使用） |
@@ -416,7 +416,7 @@
 
 ---
 
-## 7. 索引完整基线（⚠️ **不含 C3 块 4 的 `cart`**（3 个：`PRIMARY` + `uk_cart_customer_product` + `idx_cart_customer`），见 §11）
+## 7. 索引完整基线（⚠️ **不含 C3 块 4 的 `cart`**（3 个：`PRIMARY` + `uk_cart_customer_product` + `idx_cart_customer`，见 §11）**与块 4 补丁的 `order_shipping_track`**（2 个：`PRIMARY` + `idx_order_shipping_track_order`，见 §12））
 
 | 表 | 主键 | 二级索引 | 非主键 UNIQUE |
 |---|---|---|---|
@@ -594,3 +594,72 @@
 | 种子行数（P4 判据 `order/goods/login/user/friend`） | **不变** `6/5/5/5/4` | 可复核 |
 
 > ⚠️ 索引 / UNIQUE 两处计数为**按 DDL 推导**，不是 `information_schema.STATISTICS` 的实测结果 —— 引用时按此档位标注。
+
+## 12. 附录：C3 块 4 **补丁**〈付款 / 发货 模拟完整流程〉的 `order_shipping_track` + `order` 的 7 个明细列（2026-10-10）
+
+> **本节为什么也在文件末**：理由与 §11 首段**逐字相同**（本文件有大量外部 `文件:行号` 引用，中段插行会让其后集体漂移）⇒ 同样取**零漂移**手法：外部引用一个不动，新表逐列定义放文件末。⚠️ 与 §11 的区别：§11 是**新增第 18 张表**（`cart`），本节是**新增第 19 张表**（`order_shipping_track`）**并**给基线表 `order` 加 7 列。
+> **出处** = `mall_management_sql.sql:740-815`（Migration 块 7：C3 块 4 补丁，2026-10-10，分支 `feat/c3-admin-block4`）。**判据档位 = 可复核**（DDL 字面 + 本机库 / VM 库 `information_schema` 实测，见 `db-migration.md` 注意 13）。
+
+### 12.1 `order_shipping_track` —— 模拟物流轨迹（A2）
+
+| 字段 | 类型 | 约束 | 备注 |
+|---|---|---|---|
+| `Id` | int | **PK**, NOT NULL AUTO_INCREMENT | 内部主键，业务不使用 |
+| `OrderId` | varchar(40) | NOT NULL | 业务单号，**对齐 `order.OrderId`**（`:143`）。⚠️ **不建外键**（理由见下） |
+| `Status` | varchar(24) | NOT NULL | 节点码（**按时序**）：`in_transit` / `picked_up` / `out_for_delivery` / `delivered` |
+| `Description` | varchar(255) | NULL, DEFAULT NULL | 节点中文描述（「运输中」「驿站已揽收」等；2026-10-11 前两步对调），供前端直接显示 |
+| `TrackedAt` | datetime(3) | NOT NULL | 该节点的**发生时刻**（毫秒精度）。⚠️ 排序键是它，**不是 `Id`**——同单几条可能同批 INSERT，`Id` 不保证与发生顺序一致（同 `order_state_transition.OccurredAt` 的口径） |
+| `created_at` | datetime(3) | NOT NULL DEFAULT CURRENT_TIMESTAMP(3) | 行落库时刻 |
+| `updated_at` | datetime(3) | NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3) | 行更新时刻 |
+
+- 主键 `Id`；`KEY idx_order_shipping_track_order (OrderId, TrackedAt)`。
+- **无 UNIQUE**（故 §10 的「4 个非主键 UNIQUE」**不变**）：同一单同一 `Status` 的**唯一性由应用层保证** —— 调度器落库前先 `ShippingTrackDao.exists(orderId, status)`（`NOT EXISTS` 式幂等）。⚠️ **这是有意把唯一性交给应用层**（同 §10 的整体局面），不是一个疏漏：轨迹表可能将来要支持「同一节点多次出现」（改派 / 退回），库级 UNIQUE 会把它锁死。
+- **⚠️ 不建外键**：与全库一致（§8「外键与引用完整性」—— 本仓一律靠应用层）。删除 / 清理订单**不**级联删轨迹。
+- `ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci`（`:815`）—— 与其余 18 张表逐字相同（见 §6 首段）。
+- **⚠️ 不在** `.sql:21` 起的 `DROP TABLE IF EXISTS` 基线清单里（同 `cart`）⇒ 整份重导**不清空轨迹**（它是业务数据不是种子）。
+- **⚠️ 只追加、不更新**：调度器 `ShippingTrackAdvanceJob` 与发货路径**都只 INSERT**，全仓**没有任何** `UPDATE order_shipping_track`（也没有任何「轨迹反过来改 `order` 状态位」的语句 —— 那条红线见 `tech-debt.md` 的「物流签收 ≠ 订单收货」）。
+
+### 12.2 `order` 的 7 个明细列（补丁）
+
+`.sql:769-796`：7 条 `ADD COLUMN`（各带 `information_schema` 守卫 + `PREPARE` ⇒ 重复执行是空操作），**全部 `DEFAULT NULL`**、加在**表末**（数据库管理规则 7）。
+
+| 列 | 类型 | 组 | 何时写 |
+|---|---|---|---|
+| `TradeNo` | varchar(64) | 支付 | `payIfUp` 成功（`PAY+yyyyMMdd+6位随机`，模拟网关） |
+| `PaymentMethod` | varchar(32) | 支付 | `payIfUp` 成功（收银台所选，可空） |
+| `PaidAt` | datetime | 支付 | `payIfUp` 成功（`NOW()`） |
+| `ExpressCompany` | varchar(64) | 物流 | `deliveryIfUp` 成功（可空） |
+| `TrackingNo` | varchar(64) | 物流 | `deliveryIfUp` 成功（可空） |
+| `ShippedAt` | datetime | 物流 | `deliveryIfUp` 成功（`NOW()`） |
+| `ReceivedAt` | datetime | 收货 | `receiveIfUp` 成功（`NOW()`） |
+
+- ⚠️ **这 7 列不进 CAS 的 SET 子句**：`OrderStateMachine.updateSql(action)` 被 golden copy 逐字钉死（`OrderStateMachineTest.updateSqlIsByteForByteTheLegacyLiteral`）⇒ 改由**新增的** `detailUpdateSql(action)` 在**同一把订单锁内**发第二条 UPDATE（`OrderStateMachine.java` 类尾补丁段）。
+- ⚠️ **存量行全 `NULL`**（不是空串）⇒ 前端画 `—`。§6.8 的表**未加行**（理由同本节首段）。
+
+### 12.3 本笔对基线的净变化
+
+| 基线 | 变化 | 判据档位 |
+|---|---|---|
+| 表数 | **18 → 19**（+`order_shipping_track`） | 可复核（VM 库 19 表实测） |
+| `order` 列数 | **+7** | 可复核（`information_schema.COLUMNS` 逐列实测） |
+| 行首 `CREATE TABLE` 条数 | **20 → 21** | 可复核（`grep -c '^CREATE TABLE'` 实测） |
+| 索引 | **18 → 19**（+`idx_order_shipping_track_order`） | **推断**（按 DDL 直接推导，非实测查询） |
+| 非主键 UNIQUE | **不变 4**（本块不新增 UNIQUE） | **推断**（同上） |
+| 种子行数（P4 判据 `order/goods/login/user/friend`） | **不变** `6/5/5/5/4`（`ALTER ADD COLUMN` 不改行数） | 可复核 |
+
+> ⚠️ 索引 / UNIQUE 两处计数为**按 DDL 推导**，不是 `information_schema.STATISTICS` 的实测结果 —— 引用时按此档位标注。
+> ⚠️ **`order` 的存量行数**：本机库 **12 行** / VM 库 **10 行**（2026-10-10 实测）—— **都不是** P4 判据的 6。P4 读的是 CI 里**刚从 `.sql` 导入**的那份（种子 6 行），与两库的既有累积无关（见 `db-migration.md` 注意 13 末段）。
+
+### 12.4 `order` 的第 8 个明细列 `CancelledAt`（补丁 · 第 2 笔，2026-10-10）
+
+`.sql:817-830`（**尾部追加块**）：1 条 `ADD COLUMN`（带 `information_schema` 守卫 + `PREPARE` ⇒ 重复执行是空操作），`datetime(3) DEFAULT NULL`，加在**表末**。
+
+| 列 | 类型 | 何时写 |
+|---|---|---|
+| `CancelledAt` | datetime(3) | `OrderTimeoutCancelJob` 扫到「`PayIf=0 AND CancelledAt IS NULL` 且 `CreateTime` 已超阈值」时，`OrderDao.cancelIfUnpaid` 的 **CAS** 写 `NOW(3)`；`NULL` = 未取消 |
+
+- ⚠️ **这是「第 4 态」的唯一载体**：取消的单三位仍是 `(0,0,0)`，与「未付款」**完全相同** ⇒ 三位状态位表达不出来，前端必须**先判 `CancelledAt != null`**（`OrderMine.vue` / `OrderCenter.vue` 的 `stateOf`）。
+- ⚠️ **本笔让 `CancelledAt` 进了 CAS 的 WHERE（**不进 SET**）**：`CancelledAt` **不进 SET 子句**（取消不改任何状态位），却**进了 PAY 的 WHERE** —— `OrderStateMachine.updateSql(PAY)` 尾部追加 `AND CancelledAt IS NULL`（§12.2 那条「被 golden copy 逐字钉死」的例外）。**不违「不碰 `OrderStateMachine`」约束**：该约束管**「介入动作」**，不管**「付款业务规则」**（用户 2026-10-11 澄清）。理由：取消不动 `PayIf`，光靠 `PayIf = 0` 的守卫**拦不住**「已取消的单被付款」；放进同一条 UPDATE 才是**单语句原子**，「先查再 CAS」会留 TOCTOU 窗口（锁是 fail-open）。
+- ⚠️ **取消不写 `order_state_transition`**：`OrderAction` 仍是 4 个（A3 的 `A-S3-2` 按 tag 基数断言），取消是**系统按时间**的动作、不是一条 CAS 边。后果登记 `tech-debt.md` **TD-34**。
+- ⚠️ **阈值不入库**：`mall.order.cancel.timeout-ms`（默认 60000）/ `.fixed-delay-ms`（默认 15000）走 properties；a3 profile 显式 `mall.order.cancel.enabled=false`（同族三道闸）。
+- ⚠️ **不动表数门禁**：只加列、不加表 ⇒ `ConcurrencyRunner` 的 P3 表数（11+6=17）与 P4 种子行数**全不变**（VM 库 `CancelledAt` 列**已实测存在**，2026-10-10）。

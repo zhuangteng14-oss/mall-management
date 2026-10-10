@@ -30,9 +30,9 @@ import java.util.Map;
  * {@code OrderStateMachineTest.onlyPayGuardAdmitsIllegalStates}），不会被藏起来。
  *
  * <h2>【姿态：描述性，不是强制性】</h2>
- * {@link #updateSql} 生成的语句与 B2 之前三个端点的硬编码字面量**逐字符相同** ⇒ 零行为变更
- * ⇒ 向后兼容（{@code agent.md} 规则 1）且 A3 的 A 组恒绿。
- * <p>**不**在本笔新增任何拒绝：拒绝 {@code PAID → RECEIVED_NODELIVERY}（未发货即收货）
+ * {@link #updateSql} 生成的语句与 B2 之前硬编码的字面量逐字符相同 ⇒ 零行为变更、A3 的 A 组恒绿
+ * —— ⚠️ **唯一例外是 PAY**（2026-10-10 起追加 `AND CancelledAt IS NULL`，见类尾「超时取消」段）。
+ * <p>**不**在本笔新增任何拒绝（⚠️ 2026-10-10 的「PAY 拒已取消」是**另一笔**、属**付款业务规则**、**不违**「不碰本类」，见类尾）：拒绝 {@code PAID → RECEIVED_NODELIVERY}（未发货即收货）
  * 或卡死 {@code orderAdd} 的三位入参，都会改行为、断前端「下单即付款」的流程、
  * 并使 A3 的 S4a 断言失去前置（它正是靠 {@code orderAdd} 造前置态——
  * {@code ConcurrencyRunner:1429-1430}）。强制化是单独一笔，需业务裁决。
@@ -98,7 +98,7 @@ public class OrderStateMachine {
     static {
         // ⚠️⚠️ 这三段守卫是本笔的**唯一真值源**，必须与 B2 之前三个端点的 WHERE 逐字一致 ——
         //      由 OrderStateMachineTest 的 golden copy 钉死（字面量从 MallManagementGoodsController
-        //      抄下来）。改这里 = 改线上行为，且会让那条测试先红。
+        //      抄下来）。改这里 = 改线上行为，且会让那条测试先红（PAY 的取消谓词不走本表，见 cancelGuard）。
         //      顺序也有意义：谓词按此顺序拼进 SQL。
         TRANSITIONS.put(OrderAction.PAY, new Transition(OrderAction.PAY, List.of(
                 new Predicate("PayIf", 0))));
@@ -121,10 +121,10 @@ public class OrderStateMachine {
     /**
      * 三个 CAS 端点的完整 UPDATE 语句。
      *
-     * <p>与 B2 之前硬编码在 {@code MallManagementGoodsController} 里的字面量**逐字符相同**：
+     * <p>与 B2 之前硬编码在 {@code MallManagementGoodsController} 里的字面量**逐字符相同** —— ⚠️ **除 PAY 外**（2026-10-10 追加取消谓词）：
      * <pre>
      *   PAY     → "UPDATE mall_management_sql.`order` SET PayIf = 1, SettlementDate = NOW()
-     *              WHERE OrderId = ? AND PayIf = 0"                                  (原 G:556)
+     *              WHERE OrderId = ? AND PayIf = 0 AND CancelledAt IS NULL"        (原 G:556)
      *   RECEIVE → "… SET ReceiveIf = 1, SettlementDate = NOW()
      *              WHERE OrderId = ? AND PayIf = 1 AND ReceiveIf = 0"                (原 G:584)
      *   DELIVER → "… SET DeliveryIf = 1, SettlementDate = NOW()
@@ -136,7 +136,7 @@ public class OrderStateMachine {
     public String updateSql(OrderAction action) {
         requireTransition(action);
         return "UPDATE " + TABLE + " SET " + setClause(action)
-                + ", SettlementDate = NOW() WHERE OrderId = ? AND " + guardWhere(action);
+                + ", SettlementDate = NOW() WHERE OrderId = ? AND " + guardWhere(action) + cancelGuard(action);
     }
 
     /** {@code SET} 子句里置位那一段，如 {@code PayIf = 1}。 */
@@ -360,5 +360,89 @@ public class OrderStateMachine {
         if (action == null || !action.isTransition()) {
             throw new IllegalArgumentException("不是状态转移（无前态、无守卫）：" + action);
         }
+    }
+
+    // ===================== 补丁（C3 块4 补丁）：明细列 SQL =====================
+    //
+    // ⚠️ 为什么加在**类尾**而不是 updateSql 旁边：本类的 updateSql / setClause / guardWhere /
+    //    TRANSITIONS 被 OrderStateMachineTest 的 golden copy **逐字符钉死**，整段一个字节都不许动；
+    //    把新方法插在其间会平白让其后的行号集体漂移（全仓 `文件:行号` 互引）。加在尾 = 零漂移。
+    //
+    // ⚠️ 本方法与 updateSql **分工**（两张表仍是一个真值源）：
+    //    updateSql(action)       —— CAS 置位语句（PayIf/DeliveryIf/ReceiveIf），守卫 + 置位=1；⚠️ PAY 多一个取消谓词。
+    //    detailUpdateSql(action) —— CAS 命中 1 行后、**同一把订单锁内**再写的「明细列」（TradeNo/PaidAt/…）。
+    //    两者**不合并**：合并会把明细列塞进 CAS 的 SET，改动 golden 串（= 改线上行为）。
+    //    非原子性（位已置、明细未写）由订单锁消除竞态，代价可接受。
+
+    /**
+     * 明细列 UPDATE 语句 —— 与 {@link #updateSql} 同源的第 2 条语句，写「过程明细」而非状态位。
+     *
+     * <p>调用点：{@code OrderService.casTransition} 在 {@code rows > 0} 分支、{@code runLocked} 临界区内。
+     * 语句**不带守卫**（CAS 已用守卫筛过、且仍在同锁内，该行必属于本调用者）。
+     *
+     * <pre>
+     *   PAY     → "UPDATE … SET TradeNo = ?, PaymentMethod = ?, PaidAt = NOW() WHERE OrderId = ?"
+     *   DELIVER → "UPDATE … SET ExpressCompany = ?, TrackingNo = ?, ShippedAt = NOW() WHERE OrderId = ?"
+     *   RECEIVE → "UPDATE … SET ReceivedAt = NOW() WHERE OrderId = ?"
+     * </pre>
+     *
+     * @throws IllegalArgumentException {@code action} 不是转移（{@link OrderAction#CREATE}）
+     */
+    public String detailUpdateSql(OrderAction action) {
+        requireTransition(action);
+        return "UPDATE " + TABLE + " SET " + detailSetClause(action) + " WHERE OrderId = ?";
+    }
+
+    /** {@code detailUpdateSql} 的 SET 段（含 {@code NOW()} 字面量）。 */
+    private String detailSetClause(OrderAction action) {
+        return switch (action) {
+            case PAY -> "TradeNo = ?, PaymentMethod = ?, PaidAt = NOW()";
+            case DELIVER -> "ExpressCompany = ?, TrackingNo = ?, ShippedAt = NOW()";
+            case RECEIVE -> "ReceivedAt = NOW()";
+            default -> throw new IllegalArgumentException("不是状态转移（无明细列）：" + action);
+        };
+    }
+
+    /**
+     * {@link #detailUpdateSql} 的占位符（{@code ?}）列名，**按绑定顺序** —— **不含** {@code NOW()} 列。
+     * 调用方按此顺序绑定，末尾再绑 {@code orderId}。
+     *
+     * @throws IllegalArgumentException {@code action} 不是转移（{@link OrderAction#CREATE}）
+     */
+    public List<String> detailColumns(OrderAction action) {
+        return switch (action) {
+            case PAY -> List.of("TradeNo", "PaymentMethod");
+            case DELIVER -> List.of("ExpressCompany", "TrackingNo");
+            case RECEIVE -> List.of();
+            default -> throw new IllegalArgumentException("不是状态转移（无明细列）：" + action);
+        };
+    }
+
+    // ===================== 补丁（C3 块4 补丁 · 第 2 笔）：超时取消谓词 =====================
+    //
+    // ⚠️ 加在**类尾**的理由同上一段：TRANSITIONS / updateSql / setClause / guardWhere 被 golden copy
+    //    逐字符钉死，插在其间会平白让其后的行号集体漂移（全仓 `文件:行号` 互引）。
+
+    /**
+     * 「本动作在 UPDATE 里额外要满足的取消谓词」—— 2026-10-10 新增（超时未付款自动取消，A 档）。
+     * **不违**「本块不碰本类」那条约束：它管**「介入动作」**（状态位 / 守卫表 / CAS 边），不管**「付款业务规则」**；这是本类**第一条会改变线上行为的**东西，别当装饰。
+     *
+     * <p>⚠️ <b>为什么只有 PAY 有，且绝不能进 {@link #TRANSITIONS}</b>：守卫表里的谓词全是
+     * 「状态**位**」（{@code PayIf/DeliveryIf/ReceiveIf}），{@code bitIndexOf} 只认这三个列名；
+     * {@code CancelledAt} **不是状态位**，塞进表里会让 {@link #guardAdmits} / {@link #legalFrom}
+     * 与测试 {@code everyGuardRequiresItsOwnBitToBeZero} 当场炸。故它**只拼进 UPDATE**：
+     * 语义层（「合法前提是哪几个态」）一字不变 —— 取消是**时间**带来的额外约束，不是状态机的一条边
+     * （取消不给任何位置 1，三位仍是 {@code (0,0,0)}）。
+     *
+     * <p>⚠️ <b>为什么必须是 UPDATE 里的谓词，而不是「先查一下再 CAS」</b>：取消**不动** {@code PayIf}
+     * （取消的单仍是 {@code PayIf = 0}），而 PAY 的守卫恰好就是 {@code PayIf = 0} ⇒ 光靠守卫**拦不住**
+     * 「已取消的单被付款」。若改成「先查 CancelledAt、再发 CAS」，查与写之间就是一个 TOCTOU 窗口
+     * （{@code DistributedLockService.runLocked} 取锁失败是 **fail-open**，锁只减弱、不保证）。
+     * 放进同一条 UPDATE ⇒ **单语句原子**，窗口不存在。
+     *
+     * @return {@code PAY} ⇒ {@code " AND CancelledAt IS NULL"}；其余动作 ⇒ {@code ""}（一字不加）
+     */
+    private String cancelGuard(OrderAction action) {
+        return action == OrderAction.PAY ? " AND CancelledAt IS NULL" : "";
     }
 }

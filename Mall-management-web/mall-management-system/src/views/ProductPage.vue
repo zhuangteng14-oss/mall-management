@@ -398,17 +398,22 @@
     <!-- 付款确认弹窗 —— 稿的 `dlg2` 面（`ProductPage.html:769-789`），**既有真功能**
          （`handlePay` → 'buy' 支 `order.orderAdd` / 'cart' 支 `cart.cartAdd`）⇒ 按「稿里画了一律落」照落。
          ⚠️ 稿是「否」在前、「是」在后，与既有实现相反 ⇒ 本笔照稿，属**有意改动**（登记）。
-         旧 `.pay-confirm-*` / `.dialog-*` / `.yes-btn` / `.no-btn` 一并退役。⚠️ **2026-10-08 用户六条【三】**：文案按入口分（'cart' →「是否加入购物车？」／'buy' →「是否现在付款？」）；**「否」= 关框 + 保留弹窗与已选数据、一个请求都不发**（旧实现「否」也往下走 ⇒ 两支都掉 `order.orderAdd`，用户点名的 bug）；⚠️ **C3 块 4 改判**：`PayIf` 不再由入口现算 —— 两支已彻底分家（cart 支根本不碰 `order` 表），'buy' 支的 `PayIf` **恒 1**。 -->
+         旧 `.pay-confirm-*` / `.dialog-*` / `.yes-btn` / `.no-btn` 一并退役。⚠️ **2026-10-08 用户六条【三】**：文案按入口分（'cart' →「是否加入购物车？」／'buy' →「是否现在付款？」）；**「否」= 关框 + 保留弹窗与已选数据、一个请求都不发**（旧实现「否」也往下走 ⇒ 两支都掉 `order.orderAdd`，用户点名的 bug）；⚠️ **C3 块 4 改判**：`PayIf` 不再由入口现算 —— 两支已彻底分家（cart 支根本不碰 `order` 表）；⚠️ **2026-10-10（Bug 1）**：'buy' 支的 `PayIf` 由 `1` 改回 **`0`**（先建待付款单），**接着弹共享收银台** —— 改前那枚 `1` 让这单「没付款就成了已付款，且三列支付明细永远为空」。 -->
     <div class="scrim" v-if="showPayConfirm" @click.self="showPayConfirm=false">
       <div class="dlg dlg-narrow">
         <div class="dlg-h">{{ popupEntry === 'cart' ? '是否加入购物车？' : '是否现在付款？' }}</div>
-        <div class="dlg-sub">{{ popupEntry === 'cart' ? '确认后写入购物车（端点 cart.cartAdd），可在「购物车」tab 改量 / 结算。' : '确认购入后将生成订单（端点 order.orderAdd），可在「我的订单」tab 付款。' }}</div>
+        <div class="dlg-sub">{{ popupEntry === 'cart' ? '确认后写入购物车（端点 cart.cartAdd），可在「购物车」tab 改量 / 结算。' : '确认后生成**待付款**订单（端点 order.orderAdd），并打开收银台选择支付方式。' }}</div>
         <div class="dacts">
           <button type="button" class="b no" @click="handlePay(false)">否</button>
           <button type="button" class="b ok" @click="handlePay(true)">是</button>
         </div>
       </div>
     </div>
+
+    <!-- 收银台（2026-10-10，Bug 1）—— 与「我的订单」的【付款】**同一个组件**：
+         订单建成（待付款）后立刻摆上来，不再「绕过收银台直接成已付款单」。
+         ⚠️ 付完与关掉都走 `afterCashier`（落「我的订单」），区别只在付没付。 -->
+    <CashierDialog :order="payFor" @close="afterCashier" @paid="afterCashier" />
   </div>
 </template>
 
@@ -416,7 +421,8 @@
 import { ref, onMounted, computed, watch, onBeforeUnmount } from 'vue'   // ⚠️ **2026-10-08 用户五条【1】**新增 `watch` / `onBeforeUnmount`（body 锁那一处用）—— **同行追加、不新增行**。
 import { useRoute, useRouter } from 'vue-router'
 import { http, handleApiError } from '../api/http'
-import { endpoints } from '../api/endpoints'; import { orderAdd, cartAdd } from '../api/order'   // ⚠️ C3 块 4：**同行追加**（不新增行 —— 本文件 `:775`/`:784` 被 `slot-registry.md:1987-1988` 按行号引，此处加行会顶漂它们）。两个函数就是原先那两串 `URLSearchParams` + `http.post` + `res.json()` 的收口
+import { endpoints } from '../api/endpoints'; import { orderAdd, cartAdd } from '../api/order'   // ⚠️ C3 块 4：**同行追加**（不新增行 —— 本文件 `:794`/`:803` 被 `slot-registry.md:1994-1995` 按行号引（〈Bug 1〉本笔 +19 行前为 `:775`/`:784`），此处加行会顶漂它们）。两个函数就是原先那两串 `URLSearchParams` + `http.post` + `res.json()` 的收口
+import CashierDialog from '../components/CashierDialog.vue'   // ⚠️ 2026-10-10（Bug 1）：收银台与「我的订单」**共用同一个组件** —— 本行**确实**新增了一行；本笔在 `ProductPage.vue` 净 +19 行（`git diff` 实测：模板 `:412` 起 +5、import +1、`handlePay` 段 +13）⇒ 下面两处 `:775`/`:784` 漂到 `:794`/`:803`，随本笔一并重指（见 `slot-registry.md:1994-1995`）
 import { getMerchantId, getCustomerId, isLoggedIn } from '../api/auth'
 
 const route = useRoute()
@@ -493,7 +499,7 @@ const loadAllItems = async () => {
 }
 
 // 弹窗相关状态
-const showPopup = ref(false); const popupEntry = ref('buy')   // **C 笔 C2**：购入模块的**入口标记**（'buy' = 立即购买 / 'cart' = 加入购物车）⇒ 底部弹窗那枚 CTA（`.p-confirm`）按它取文案。⚠️ **同行追加、不新增行** —— `slot-registry.md:1987-1988` 引的 `:775`/`:784` 都在下面，新增行会顶漂它们。
+const showPopup = ref(false); const popupEntry = ref('buy')   // **C 笔 C2**：购入模块的**入口标记**（'buy' = 立即购买 / 'cart' = 加入购物车）⇒ 底部弹窗那枚 CTA（`.p-confirm`）按它取文案。⚠️ **同行追加、不新增行** —— `slot-registry.md:1994-1995` 引的 `:794`/`:803`（〈Bug 1〉前为 `:775`/`:784`）都在下面，新增行会顶漂它们。
 const popupAllItems = ref([])
 const popupCurrentIndex = ref(0)
 const popupCurrentItem = computed(() => popupAllItems.value[popupCurrentIndex.value] || { productCode: '' })
@@ -614,7 +620,7 @@ const confirmPurchase = () => {
   showPayConfirm.value = true
 }
 
-const handlePay = async (ok) => {   // **C3 块 4 改判**：`PayIf` 不再按入口现算 —— 'cart' 支**根本不碰 order 表**（逐型号写 `/cart/add`），'buy' 支 `PayIf` 恒 1。⚠️ 块 4 前两支都掉 `order.orderAdd`，那正是用户点名的 bug（「结算取消时顺手把商品加进了购物车」）。
+const handlePay = async (ok) => {   // **C3 块 4 改判 + 2026-10-10 补丁改判**：'cart' 支**根本不碰 order 表**（逐型号写 `/cart/add`）；'buy' 支改发 **`PayIf: 0`** —— 先建**待付款**单，再**弹共享收银台**（Bug 1：改前 `PayIf: 1` ⇒ 商家还没发货、这单却是「已付款」，且 `TradeNo/PaymentMethod/PaidAt` 三列永远为空）。⚠️ 块 4 前两支都掉 `order.orderAdd`，那正是用户点名的 bug（「结算取消时顺手把商品加进了购物车」）。
   showPayConfirm.value = false
   if (!ok || !pendingOrderData) { pendingOrderData = null; return }   // ⚠️ **「否」在此就返回** ⇒ 一个请求都不发、弹窗与已选数据**原样保留**（用户表：「不加入购物车也不付款，回弹窗保留数据」）。
 
@@ -633,20 +639,19 @@ const handlePay = async (ok) => {   // **C3 块 4 改判**：`PayIf` 不再按�
     return
   }
 
-  // ② 立即购买 ⇒ 原链路（`order.orderAdd` ⇒ 写入 `order` 表），`PayIf` 恒 1
+  // ② 立即购买 ⇒ 原链路（`order.orderAdd` ⇒ 写入 `order` 表）+ **就地弹收银台**（与「我的订单」同一份组件）
   try {
     const result = await orderAdd({
       CustomerId: d.CustomerId, MerchantId: d.MerchantId, OrderId: d.OrderId,
       Price: d.Price, ProductInformation: d.ProductInformation, Images: d.Images,
-      PayIf: 1, DeliveryIf: d.DeliveryIf, ReceiveIf: d.ReceiveIf,
+      PayIf: 0, DeliveryIf: d.DeliveryIf, ReceiveIf: d.ReceiveIf,
       Quantity: popupCount.value   // C3 块 4：本单**总件数**（A2 甲新列；一个 OrderId 一单 ⇒ 不带型号维度）
     })
 
     if (result.success) {
-      alert('订单提交成功！')
-      showPopup.value = false
-      popupQty.value = {}
-      router.push(getMerchantId() ? '/merchant/order/cart?tab=orders' : '/customer/cart?tab=orders')
+      // ⚠️ **不**在这里 `alert('订单提交成功！')`、也**不**跳页：单已经建好（待付款），
+      //    下一步是付款 ⇒ 把收银台摆上来。跳页与关窗都由付完/关掉收银台之后决定（见 `afterCashier`）。⚠️ **2026-10-10（Bug 1 二次修；用户手验：「收银台弹出，但被白色结算弹窗挡在后面」）**：`showPopup.value = false` 管的正是**购入模块弹窗**（`.popup-mask`，`:1109` 那条 `z-index:150`）—— 改前它一直挂着、而收银台 `.cscrim` 只有 `60` ⇒ 收银台**真在它下面**；结算确认弹窗（`showPayConfirm`，`.scrim` `:1036` = `200`）在 `:624` 已关，本行补的是同一条链上的**第二层**（两层都要关，只关一层另一层照样盖住）。层级自身另在 `CashierDialog.vue:103` 提档。
+      showPopup.value = false; payFor.value = { OrderId: d.OrderId, Price: d.Price }
     } else {
       alert('订单提交失败：' + (result.msg || '未知错误'))
     }
@@ -656,6 +661,20 @@ const handlePay = async (ok) => {   // **C3 块 4 改判**：`PayIf` 不再按�
   } finally {
     pendingOrderData = null
   }
+}
+
+/* ── 收银台（2026-10-10，Bug 1）─────────────────────────────────────────────────
+   商品详情页的【立即购买】与「我的订单」的【付款】**共用** `components/CashierDialog.vue`。
+   ⚠️ 付款成功与「关掉不付」都要**落到「我的订单」**：那条单已经存在（待付款），
+      留在商品页会让它变成一个看不见的孤儿单（这一页没有任何入口能再找到它）。 */
+const payFor = ref(null)          // 非 null ⇒ 收银台开着，值 = 刚建的那一单
+
+/** 收银台付完 / 关掉之后：收摊 + 回「我的订单」（待付款的单排在那一页，带【付款】按钮）。 */
+const afterCashier = () => {
+  payFor.value = null
+  showPopup.value = false
+  popupQty.value = {}
+  router.push(getMerchantId() ? '/merchant/order/cart?tab=orders' : '/customer/cart?tab=orders')
 }
 
 // 搜索功能
@@ -754,8 +773,8 @@ onMounted(async () => {
 // ⚠️ 两处拦截的判据仍是 `!customerId`，**不动**：改成 `!isLogin` 会让**已登录商家**带着空 CustomerId
 //    走到 `orderAdd`（拆真检查）；`isLogin` 只决定**要不要跳登录** ⇒ 已登录商家原地不动（= 既有行为）。
 // ⚠️ redirect 取 `route.fullPath`（含本页 7 个 query），对象形式与 `main.js:49` 同款；登录后由
-//    `LoginPage.landingAfterLogin` 送回本页（T-guard-6/-10）。放文件末尾是**刻意的**：`WebAuthConfig.java:70` 引了 `:462-465`，新增行落在最大被引行之后，上面 24 个被引目标才一个都不漂。
-/* 2026-10-10〈模板表通用化〉三段快照文本（`goods.Detail` / `Spec` / `AfterSale`）—— 全部写在**同一物理行**（新增行会顶漂下面 `slot-registry.md:1987-1988` 引的 `:775`/`:784`）。⚠️ 取值**从 `route.query` 现取**、不用 setup 期解构的 `sellerId`/`goodName`（`:427-428` 是普通 `const`，同路径只换 query 时组件被复用、它们**不更新**，理由同 `openPopup` 那条）。 */ const detailText = computed(() => { const q = route.query; const g = goodsWithUser.value.find((x) => x.MerchantId === q.MerchantId && x.GoodName === q.GoodName); return (g && g.Detail) || '' }); const specText = computed(() => { const q = route.query; const g = goodsWithUser.value.find((x) => x.MerchantId === q.MerchantId && x.GoodName === q.GoodName); return (g && g.Spec) || '' }); const afterSaleText = computed(() => { const q = route.query; const g = goodsWithUser.value.find((x) => x.MerchantId === q.MerchantId && x.GoodName === q.GoodName); return (g && g.AfterSale) || '' }); /* `Spec` 的行内 `键=值` 约定：一行一条，`=` 只切**第一处**（值里允许再有 `=`）；没有 `=` 的行**整行进 `.v`、`.k` 留空**，而不是丢掉它。 */ const specRows = computed(() => specText.value.split('\n').map((s) => s.trim()).filter((s) => s !== '').map((s) => { const i = s.indexOf('='); return i < 0 ? { k: '', v: s } : { k: s.slice(0, i).trim(), v: s.slice(i + 1).trim() } })); const isLogin = computed(() => isLoggedIn()); const activeTab = ref('desc')   // 结构二次调整（2026-10-07）：Tab 条当前面，UI 展示状态（不计功能量）；⚠️ **同行追加、不新增行** —— 上面那条「新增行落在最大被引行之后」的约束在本笔**不成立**（`slot-registry.md:1987-1988` 引的 `:775`/`:784` 都在下面），新增行会顶漂它们。
+//    `LoginPage.landingAfterLogin` 送回本页（T-guard-6/-10）。放文件末尾是**刻意的**：`WebAuthConfig.java:71` 引了本文件的 `onMounted` 段（那里原先写的 `:462-465` 是**陈旧值**，本品已就地更正为 `:766`），新增行落在被引行之后，上面 24 个被引目标才一个都不漂。⚠️ **2026-10-10〈Bug 1 · 立即购买补接收银台〉本笔破了这条约束**：+19 行落在 `:412`/`:425`/`:666`（均在 `:766` 之前）⇒ `:794`/`:803` 两处被引行随本笔重指（见 `slot-registry.md:1994-1995`），并已回写 `slot-registry.md:1992/1994/1995/2445`。
+/* 2026-10-10〈模板表通用化〉三段快照文本（`goods.Detail` / `Spec` / `AfterSale`）—— 全部写在**同一物理行**（新增行会顶漂下面 `slot-registry.md:1994-1995` 引的 `:794`/`:803`）。⚠️ 取值**从 `route.query` 现取**、不用 setup 期解构的 `sellerId`/`goodName`（`:433-434` 是普通 `const`，同路径只换 query 时组件被复用、它们**不更新**，理由同 `openPopup` 那条）。 */ const detailText = computed(() => { const q = route.query; const g = goodsWithUser.value.find((x) => x.MerchantId === q.MerchantId && x.GoodName === q.GoodName); return (g && g.Detail) || '' }); const specText = computed(() => { const q = route.query; const g = goodsWithUser.value.find((x) => x.MerchantId === q.MerchantId && x.GoodName === q.GoodName); return (g && g.Spec) || '' }); const afterSaleText = computed(() => { const q = route.query; const g = goodsWithUser.value.find((x) => x.MerchantId === q.MerchantId && x.GoodName === q.GoodName); return (g && g.AfterSale) || '' }); /* `Spec` 的行内 `键=值` 约定：一行一条，`=` 只切**第一处**（值里允许再有 `=`）；没有 `=` 的行**整行进 `.v`、`.k` 留空**，而不是丢掉它。 */ const specRows = computed(() => specText.value.split('\n').map((s) => s.trim()).filter((s) => s !== '').map((s) => { const i = s.indexOf('='); return i < 0 ? { k: '', v: s } : { k: s.slice(0, i).trim(), v: s.slice(i + 1).trim() } })); const isLogin = computed(() => isLoggedIn()); const activeTab = ref('desc')   // 结构二次调整（2026-10-07）：Tab 条当前面，UI 展示状态（不计功能量）；⚠️ **同行追加、不新增行** —— 上面那条「新增行落在最大被引行之后」的约束在本笔**不成立**（`slot-registry.md:1994-1995` 引的 `:794`/`:803` 都在下面），新增行会顶漂它们。
 </script>
 
 <style scoped>
@@ -1085,7 +1104,7 @@ button { background: none; border: 0; cursor: pointer; }
      `max-height` + `.p-body` 的 `minmax(0,1fr)` 那一行 ⇒ 超出只在 `.p-rows` 里滚，列头不跟着滚。
    【一-3 X 关闭】`.p-close` 落在 `.popup-content` 右上角（`position: absolute`，`.popup-content` 补
      `position: relative`）。点它 = 只置 `showPopup = false` —— 与点旁边空白**同一条路**。
-   【二 关闭 ≠ 清数据】样式层无涉，逻辑全在 `openPopup` 的 `popupKey` 那一段（`:500` / `:502-509`）。
+   【二 关闭 ≠ 清数据】样式层无涉，逻辑全在 `openPopup` 的 `popupKey` 那一段（`:506` / `:508-515`）。
    【三 确认框分流】同前，见模板 `:402`。 */
 .popup-mask { position: fixed; inset: 0; z-index: 150; display: flex; align-items: flex-end;
               justify-content: center; padding: var(--s4) 0 0;   /* ⚠️ 六条【一-1】：左右 `var(--s4)` → `0`（满占的槽） */

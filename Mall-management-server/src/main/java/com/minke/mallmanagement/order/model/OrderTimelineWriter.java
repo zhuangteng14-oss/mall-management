@@ -6,7 +6,10 @@ import org.slf4j.LoggerFactory;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 
-import java.sql.Timestamp;
+import java.time.Instant;
+import java.time.LocalDateTime;
+import java.time.ZoneOffset;
+import java.time.format.DateTimeFormatter;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
@@ -64,9 +67,26 @@ public class OrderTimelineWriter {
      * <p>{@code OccurredAt} 由调用方传入而**不是** {@code NOW()}：它要记的是**转移发生**的时刻
      * （在订单锁的临界区内取的），不是**这一行落库**的时刻。两者之差就是 B3 引入的异步延迟，
      * 也是本列存在的全部理由 —— 让异步的代价可被测量，而不是只能被相信。
+     *
+     * <p>⚠️ <b>2026-10-10 补充：传入的是**毫秒瞬时点**，但落库的必须是 {@link #UTC_TEXT} 格式化后的
+     * <em>无时区文本</em></b> —— 见 {@link #toUtcText}。语句本身（占位符个数与形状）一个字没改。
      */
     static final String INSERT_SQL = "INSERT INTO " + TABLE
             + " (OrderId, Action, FromState, ToState, OccurredAt) VALUES (?, ?, ?, ?, ?)";
+
+    /**
+     * 库时钟口径的文本格式 —— {@code OccurredAt} 按它格式化后落库。
+     *
+     * <p>⚠️ <b>这一步不能省（2026-10-10，用户报「轨迹 22:27:51 vs 订单列表 14:29:16」）。</b>
+     * 库时钟是 <b>UTC</b>（VM / a3 实测 {@code @@system_time_zone=UTC}、{@code NOW()} 与机器 UTC 同步），
+     * 而 JDBC URL 带着 {@code serverTimezone=Asia/Shanghai}；{@code java.sql.Timestamp} 是**瞬时点**，
+     * 驱动必须按连接时区把它折成墙钟再写 ⇒ 同一时刻写进去的 {@code OccurredAt} 整整 <b>+8 小时</b>
+     * （实测：{@code order_state_transition.OccurredAt} 全线比 {@code order.CreateTime} 多 8 小时）。
+     * 换成**无时区的文本**后，串里根本没有时区信息，驱动**无从折算** —— 与
+     * {@code ShippingTrackDao} / {@code MessageDao}（{@code NOW()}）同一条口径：
+     * <b>时刻只以库时钟为准，Java 侧不构造带时区的值</b>。
+     */
+    static final DateTimeFormatter UTC_TEXT = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
 
     /** 参数个数。与 {@link #INSERT_SQL} 的占位符数必须相等 —— 由测试钉住（少一个会运行时才炸）。 */
     static final int PARAM_COUNT = 5;
@@ -102,7 +122,7 @@ public class OrderTimelineWriter {
                       long occurredAtMillis) {
         try {
             jdbcTemplate.update(INSERT_SQL, orderId, action.tag(), fromState, toState,
-                    new Timestamp(occurredAtMillis));
+                    toUtcText(occurredAtMillis));
             metrics.timelineWrite(true, orderId);
             markOk();
         } catch (Exception e) {
@@ -112,6 +132,18 @@ public class OrderTimelineWriter {
             metrics.timelineWrite(false, orderId);
             markFailed(e, orderId);
         }
+    }
+
+    /**
+     * 瞬时毫秒 → <b>库时钟（UTC）文本</b>。
+     *
+     * <p>⚠️ <b>别改回 {@code new Timestamp(ms)}</b> —— 那是本仓今日最长寿的一处「静默 +8 小时」，
+     * 理由与实测见 {@link #UTC_TEXT}。{@code ZoneOffset.UTC} 是**写死的**，不是
+     * {@code ZoneId.systemDefault()}：格式化的目的正是把「机器/连接时区」这一层剥掉，
+     * 用系统时区等于把刚剥掉的那层又贴回来（同一处坑，前身是 {@code ShippingTrackAdvanceJob.toMillis}）。
+     */
+    private static String toUtcText(long epochMillis) {
+        return UTC_TEXT.format(LocalDateTime.ofInstant(Instant.ofEpochMilli(epochMillis), ZoneOffset.UTC));
     }
 
     /**

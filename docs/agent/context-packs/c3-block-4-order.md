@@ -1,7 +1,7 @@
 # context-pack: C3 块 4 —— 订单治理（三端，含购物车拆分）
 
 > 索引：`docs/agent/c3-blocks-index.md`。**只精读下文列出的区间，不要整份读任何文件**（除注明「整份」的）。
-> ⚠️ **状态（2026-10-10 更新）：已落码 —— 构建/测试绿 + 两库已迁移；⚠️ 手验未做；未提交。** 块 3 已 merge（`fbf5c00`）；A 档 3 项已由用户 **2026-10-10 逐项批**（A1 建 `cart` / A2 `order` 加 `Quantity` / A3 只沿既有 CAS 边 + 3 端点归属校验）。落码结果与验收状态见 `slot-registry.md §二十`；契约以 `api-contract.md 附录 C` 为准。
+> ⚠️ **状态（2026-10-10 更新）：已落码 —— 构建/测试绿 + 两库已迁移；✅ 手验跑一轮（2026-10-10，回库核对；抓到并已修 `truncated` 谎报）；＋ 补丁〈模拟支付 / 物流全流程〉已落（2026-10-10，表数 18 → 19 —— 见文末「补丁」节）；未提交。** 块 3 已 merge（`fbf5c00`）；A 档 3 项已由用户 **2026-10-10 逐项批**（A1 建 `cart` / A2 `order` 加 `Quantity` / A3 只沿既有 CAS 边 + 3 端点归属校验）。落码结果与验收状态见 `slot-registry.md §二十`；契约以 `api-contract.md 附录 C` 为准。
 > ⚠️ **本 pack 的「现状」坐标全部是「块 4 落码前」的实测值 ⇒ 一律按「原 N 行」读，不要当现值用。**（例：文中的 `orderAdd` 在 `OrderController.java:70` 是**原 70 行**，现值 **`:95`**；`OrderDao.java` 两条 `selectByMerchant` SELECT 的原 138/141 行，现值 **`:146/:149`**。）块内**回指旧行号一律写「原 N 行」不带冒号**，否则 `check-context-packs.sh` 会把 `` `:数字` `` 当同行简写误归属。
 > ⚠️ **本 pack 所有行号字面仍保留落码前快照**（`check-context-packs.sh` 复核的就是那份快照）；**主要重指对照**（原 → 现，2026-10-10 实测）：`OrderController.java` 原 50/70/85/158/165/172 行 → 现 `:63` / `:95` / `:111` / `:184` / `:197` / `:215`；`OrderService.java` 原 177/205/456 行 → 现 `:199` / `:228` / `:562`；`OrderDao.java` 原 82/94/108/117 行 → 现 `:86` / `:102` / `:116` / `:125`；`AbstractSmokeTest.java` 原 156 行 → 现 `:160`。⚠️ **重写类锚点已不存在**：`ShoppingCart.vue` 原 266/302 行（该页已改成「真购物车」）· `OrderPane.vue` 原 2/3 行（已升格为两 tab 容器）—— 见 `slot-registry.md §二十`。**第 70 行与第 79 行的 `OrderDao` 引用已在原地重指**（第 70 行的 4 个 + 第 79 行的 1 个；其余行未动）。
 
@@ -64,7 +64,7 @@
 - ⚠️ **身份门控两档**：5 个读/建端点在方法体第一行 `IdentityGuard.requireSelfOrAdmin`（以 `OrderController.java:85` 为例）；
   **3 个 CAS 端点 `:158`/`:165`/`:172` 只收 `orderId`、不判归属** —— **缺口**（登记 `progress.md §5-AF`，本块是否补属 A 档 3 的连带）。
 - `.../order/model/OrderState.java:44` —— 8 种三位组合：合法 5（`CREATED(0,0,0)` / `PAID(1,0,0)` / `SHIPPED(1,1,0)` / `RECEIVED_NODELIVERY(1,0,1)` / `COMPLETED(1,1,1)`）+ 非法 3；`:100` `legal()`；**`:137` `isInitial()` = 出生闸白名单恰为 `{(0,0,0),(1,0,0)}`**（全仓唯一判据处）。
-- ⚠️ **状态机唯一真值源 = `.../order/model/OrderStateMachine.java`**（守卫表静态块 `:98` / `updateSql()` `:136`）—— **用户明令本块不碰**（见「约束 4」）。
+- ⚠️ **状态机唯一真值源 = `.../order/model/OrderStateMachine.java`**（守卫表静态块 `:98` / `updateSql()` `:136`）—— **用户明令本块不碰**（见「约束 4」）。⚠️ **2026-10-10 超时取消**在 `updateSql(PAY)` 尾部追加 `AND CancelledAt IS NULL` —— 属**付款业务规则**、**不违「约束 4」**（该约束只管「介入动作」），仍**不新增状态位**，见「约束 4」。
 - `.../order/service/OrderService.java:177` —— `orderAdd`；**三道锁外闸**（全部在锁**之外**）：价格闸 `:190`（上界 `10_000_000f`）/ **出生闸 `:196`**（`OrderState.isInitial`）/ 商家冻结闸 `:205`（块 2 的降级冻结）⇒ 然后 `:209` `runLocked(ORDER_ADD, OrderId)` → `:368` `addLocked`（`OrderDao.countByOrderId` 查重 + `insertOrder` 落库）。
 - 写路径 CAS：`OrderService.java:456` `casTransition(action, orderId)`（`orderStateMachine.updateSql(action)` → `orderDao.casUpdate` → `rows>0` 调 `applied` / `else` 调 `rejected`）；三入口 `:423` `payIfUp` / `receiveIfUp` / `deliveryIfUp`。
 - `.../order/dao/OrderDao.java` —— `:67` `countByOrderId` · `:86` `insertOrder` · `:102` `record OrderRow`（**record 加分量 ⇒ 唯一构造点漏改会编译失败，是好信号**）· `:116` `casUpdate` · **`:125` 的 `ReceiveIf != 1`**（「购物车」谓词的物理出处）。⚠️ 这四个已按 **C3 块 4 落码后**就地重指（原 82 / 94 / 108 / 117 行；`:67` 未动，本文件其余「现状」坐标仍是落码前的，见文件头横幅）。
@@ -191,13 +191,13 @@
 1. **fail-open / fail-soft**：审计与通知**永不抛** —— 失败**不许**把业务成功翻成 500（同块 1/2/3）。
 2. **逻辑废弃，不物理删**（规则 v2）：购物车删行 = 物理删**有争议** ⇒ 落码前按块 4 方案定（购物车行是**临时数据**，与「订单留痕」不同 —— 见 `_work/c3-block4-landing-plan.md §六`）。**订单/审计/时间线一律禁止 `DROP`/`DELETE`**。
 3. **admin 端点不加角色闸**（TD-18）。
-4. ⚠️ **不碰既有 `OrderStateMachine`**（**用户明令**）—— 介入只走既有三条 CAS 边；**不得**新增状态位或改守卫表。
+4. ⚠️ **不碰既有 `OrderStateMachine`**（**用户明令**）—— 介入只走既有三条 CAS 边；**不得**新增状态位或改守卫表。⚠️ **范围澄清（用户 2026-10-11）**：本约束管的是**「介入动作」**（状态位 / 守卫表 / CAS 边），**不管「付款业务规则」** ⇒ 2026-10-10「超时未付款自动取消」在 `updateSql(PAY)` 尾部追加 `AND CancelledAt IS NULL`（**改的是 WHERE，不是 SET；未新增任何状态位**）属付款业务规则，**不违本约束**（是「旧令本就不适用本次」，不是破例）。判据：取消**不动** `PayIf`，光靠 `PayIf = 0` 的守卫拦不住「已取消的单被付款」，而「先查再 CAS」会留 TOCTOU 窗口（`runLocked` 取锁失败是 fail-open）⇒ 放进同一条 UPDATE 才是单语句原子。其余（三条 CAS 边 / 守卫表 / 状态位）仍受本约束。后果登记 `tech-debt.md` **TD-34**。
 5. ⚠️ **订单链禁 `@Transactional`**（全项目唯一禁令）—— 结构断言 `DistributedLockServiceTest.java:419` 兜底，新增订单写路径**同样禁止**。
 6. **既有端点原则不动**：本块**动既有契约的处数**在 A 档裁后**逐条列全**（预期 ≤ 3：`order` 加列 / `orderAdd` 入参 / `/customer/cart` 前端语义）；**其余一律「新增」**。
 7. **净零行数**：`router/index.js`（最大被引 **453**）/ `endpoints.js`（**84**）/ `nav.js`（**61**）/ `admin-nav.js`（**43**）⇒ 新增**追加文件尾**或**同行替换**；动到被引行前后必须重跑 `refs-scan.sh`。
 8. **无缓存**：订单域今天零缓存（`GoodsCacheService` 只管商品）；购物车若加缓存必须登记失效面。
 9. **时区**：新表时刻列一律 `CURRENT_TIMESTAMP(3)`（DB 存 UTC），**前端渲染再转**浏览器时区。
-10. ⚠️ **手验提醒（每次）**：`application-a3.properties:98` 的 `app.auth.enabled=false` —— **a3 profile 闸关，手验绿 ≠ 默认 profile 绿**。本块端点**全是身份敏感**（订单归属）⇒ **必须在默认 profile 再验一遍**。
+10. ⚠️ **手验提醒（每次）**：日常手验挂 **`dev`** profile（2026-10-11 起 `a3` 收窄为 CI 专用，见 `tech-debt.md` TD-35）；`dev` 的鉴权闸与 a3 孪生、**也是关的**（`application-a3.properties:98`）—— **闸关，手验绿 ≠ 默认 profile 绿**。本块端点**全是身份敏感**（订单归属）⇒ **必须在默认 profile 再验一遍**。
 
 ## 验收
 
@@ -225,3 +225,40 @@
 - `docs/agent/db-schema.md`（`order` §6.8 `:229` · `order_state_transition` §6.12 `:289`）· `docs/agent/api-contract.md:121-132`（8 端点）· `docs/agent/tech-debt.md:172`（TD-14）· `:217`（TD-17）。
 - `scripts/probes/` —— 端到端验收脚本样板（本块写 `probe-c3-block4-e2e.mjs`，真后端 + VM 库、逐条断言、机器可读 JSON、失败非零退出）。
 - `docs/agent/slot-registry.md §二十`（**待开**，结构照 §十八/§十九）。
+
+## 补丁〈模拟支付 / 物流全流程〉（2026-10-10 落码；本 pack 之上的一笔）
+
+> **为什么有这一节**：块 4 把「付款 / 发货」做成了**纯状态位**（只翻 `PayIf` / `DeliveryIf`）⇒ 用户要求升格为**模拟全流程**：
+> 记交易号 / 支付方式 / 付款时刻 / 快递公司 / 运单号 / 发货时刻 / 收货时刻，并给买家一条**物流轨迹时间线**。
+> 四点确认（用户 2026-10-10）：**列数 7**（3 支付 + 4 物流；`ReceivedAt` 归在物流组 —— 「8 列」是那份列表的计数笔误）·
+> **物流签收 ≠ 订单收货**（调度器不碰状态位 ⇒ 必然结果，**接受**，前端分两词 + 登记 TD-28）· 新增 **A5 `/order/orderDetail`** ·
+> 其余全采信（**不动 `OrderStateMachine`** / 三端点加参用**重载**（`intervene` 零改）/ 调度器**只 INSERT 轨迹** / A3 门禁 **7→8 · 18→19**）。
+
+**坐标（补丁后实测；本节不引用旧行号，避免污染上面的快照表）**
+
+| 项 | 值 |
+|---|---|
+| 新表 | `order_shipping_track`（`mall_management_sql.sql:805-815`；表数 **18 → 19**） |
+| `order` 新列 | 7 列，守卫式 `ALTER` 在 `mall_management_sql.sql:769-796` |
+| A3 门禁 | `scripts/concurrency/ConcurrencyRunner.java` P3 段 **仍 `:2644-2667`**（**净零行**手法）；`KNOWN_TABLES` **8**、期望 **19** |
+| 新端点 | `POST /order/orderDetail`（A5）= `OrderController.java:245`（补丁后实测） |
+| 三条 CAS 端点 | `:184`（`orderPayIfUp`）/ `:199`（`orderReceiveIfUp`）/ `:217`（`orderDeliveryIfUp`）—— 契约详解见 `api-contract.md 附录 D` |
+| 新文件 | `.../order/job/ShippingTrackAdvanceJob.java` · `.../order/dao/ShippingTrackDao.java` |
+| 调度器红线 | **只 INSERT `order_shipping_track`，绝不 UPDATE `order` 的状态位** ⇒ 轨迹「已签收」≠ 订单「已收货」 |
+| ⚠️ 隐藏耦合 | `@EnableScheduling` **不在主类**，在 `MerchantDowngradeSchedulingConfig`（自身 `@ConditionalOnProperty(mall.downgrade.job.enabled, matchIfMissing=true)`）⇒ **a3 里调度器整个不存在**；发货任务自身的开关（`mall.order.` 前缀下的 `shipping.track.enabled`）是**第二道独立闸** ⇒ **不得**用「关降级任务」的方式关发货任务 |
+
+**验收补充（在「验收」节之外，补丁专属）**
+
+1. **模拟收银台**：`OrderMine` → 【付款】弹窗选 `支付宝 / 微信支付 / 银行卡` → 回库 `order.TradeNo` 非空（形如 `PAYyyyyMMdd######`）、`PaymentMethod` = 所选项、`PaidAt` 非空；响应体带 `tradeNo`。
+2. **发货带单**：`OrderCenter` → 【发货】填快递公司 + 运单号 → 回库 `ExpressCompany` / `TrackingNo` / `ShippedAt` 三项落值；**三道守卫仍成立**（已发货 / 已收货 / 未付款 ⇒ 拒绝）。
+3. **物流轨迹**：等 `transit-ms=15000` / `picked-up-ms=30000` / `delivery-ms=45000` / `signed-ms=60000`（⚠️ 2026-10-11 起**四节点全由调度器补**，时序「运输中 → 驿站已揽收 → 驿站派送中 → 已签收」；或手改 `ShippedAt` 回拨）⇒ `order_shipping_track` 依次出现 `in_transit` / `picked_up` / `out_for_delivery` / `delivered`；**重跑不重复插**（`NOT EXISTS` 幂等）；**`order.ReceiveIf` 仍为 0**（这就是 TD-28，**是预期不是 bug**）。
+4. **买家侧详情**：`OrderMine` 的【物流】按钮（`DeliveryIf===1` 才出现）→ `POST /order/orderDetail` → 弹窗出现轨迹时间线；**归属校验**（非本人 `orderId` ⇒ 403）—— ⚠️ **a3 闸关下测不出**。
+5. **管理端**：`admin/OrderPage` 详情区出现**第二组 `.a-kv`**（支付方式 / 交易号 / 付款时间 / 快递公司 / 运单号 / 发货时间 / 收货时间；空值 `—`）+ **物流轨迹 `<ol class="a-tl">`**；与「状态流转」时间线**故意分列不合**。
+6. **不回归**：`./mvnw test` **258 / 0 fail / 26 skipped**（`OrderStateMachineTest` 21 → **23**）；**golden copy** `OrderStateMachineTest.updateSqlIsByteForByteTheLegacyLiteral` **必须仍绿且字节未变**；`npm run build` DONE。
+7. **开关**：`application-a3.properties`（尾 11 行）/ `application-smoke.properties`（尾 8 行）均把 `mall.order.` 前缀下的 `shipping.track.enabled` 置 `false`。
+
+**零漂移口径（按用户 2026-10-10 新规降级）**：本补丁**不再**全仓逐条重指 ⇒ 只核**自己动过的引用**（本 pack 已就地核：**OK 259 · INFO 1 · WARN 0 · FAIL 0**）；
+本补丁造成的**外部**引用偏移全部记账在 **`_work/drift-ledger-block4patch.md`**，留到**块 4 收口**或**块 7 之后的锚点改造**一次性处理。
+
+**登记**：`slot-registry.md §20-9` · `api-contract.md 附录 D` · `db-migration.md #10` · `db-schema.md §12` · `tech-debt.md TD-28…TD-31` · `progress.md §7-B4P` · `c3-blocks-index.md:16`。
+**未做**：补丁的**手工验收未跑**（块 4 那一轮手验在补丁之前）。
