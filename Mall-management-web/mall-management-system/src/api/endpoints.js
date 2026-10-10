@@ -4,7 +4,7 @@
 // 「路径字面量只允许出现在本文件」—— 后者强得多，且同样可 grep 自动化（方案 Q8）。
 //
 // 端点来源：14 个 view 里 **42 处 fetch + 6 处 URL 赋值**，逐条抽取
-// （2026-10-04，切换自 `9add994`）共 **31 个唯一端点**，按 M5 的四域分组（+2 条 `user.me` / `user.logout`：会话恢复笔与翻开关笔 2026-10-05 加，+1 条 `user.token`：多账户隔离笔 2026-10-06 加 —— 三条均**非** view 抽取 ⇒ 加上 C3 批 A 的 3 条 `admin.audit*`（2026-10-08）与 C3 块 1·I2 的 8 条（`admin.notify*` 4 + `notification.*` 4，2026-10-09，同样**非** view 抽取），再加 C3 块 2〈用户块〉的 11 条（`user.updateProfile` 1 + `merchant.*` 2 + `admin.accounts*` 8，2026-10-09，同样**非** view 抽取），本表实为 **56** 条；再加 C3 块 3〈商品块〉的 14 条（`goodsB3` 2 + `catalog` 1 + `catalogAdmin` 11，2026-10-10，同样**非** view 抽取）；再经同日〈模板表通用化〉就地改造（**删** `catalog` 1 + `catalogAdmin` 4 + `admin.notifyTemplate*` 2 = 7 条，**加** `template` 2 + `templateAdmin` 4 = 6 条），现为 **69** 条）。
+// （2026-10-04，切换自 `9add994`）共 **31 个唯一端点**，按 M5 的四域分组（+2 条 `user.me` / `user.logout`：会话恢复笔与翻开关笔 2026-10-05 加，+1 条 `user.token`：多账户隔离笔 2026-10-06 加 —— 三条均**非** view 抽取 ⇒ 加上 C3 批 A 的 3 条 `admin.audit*`（2026-10-08）与 C3 块 1·I2 的 8 条（`admin.notify*` 4 + `notification.*` 4，2026-10-09，同样**非** view 抽取），再加 C3 块 2〈用户块〉的 11 条（`user.updateProfile` 1 + `merchant.*` 2 + `admin.accounts*` 8，2026-10-09，同样**非** view 抽取），本表实为 **56** 条；再加 C3 块 3〈商品块〉的 14 条（`goodsB3` 2 + `catalog` 1 + `catalogAdmin` 11，2026-10-10，同样**非** view 抽取）；再经同日〈模板表通用化〉就地改造（**删** `catalog` 1 + `catalogAdmin` 4 + `admin.notifyTemplate*` 2 = 7 条，**加** `template` 2 + `templateAdmin` 4 = 6 条），现为 **69** 条；再加 C3 块 4〈订单块〉的 9 条（`cart` 5 + `orderAdmin` 4，2026-10-10，同样**非** view 抽取 —— 唯一调用方是新建的 `api/order.js`），现为 **78** 条）。
 //
 // ⚠️ 路径里的 `GoodsProductCodeSelect` 是**大写开头**，与后端 `@PostMapping` 逐字一致，
 //    不是笔误 —— 改名会 404。
@@ -168,5 +168,33 @@ export const endpoints = {
     create: '/admin/template/create',
     update: '/admin/template/update',
     delete: '/admin/template/delete',
+  },
+  // ⚠️ 2026-10-10（C3 块 4 · 订单块）：**购物车域** 5 条（`@RequestMapping("/cart")`，A1 甲新建的
+  //    `cart` 表）。**非** view 抽取（唯一调用方是新建的 `api/order.js`，再经
+  //    `views/ShoppingCart.vue` 与 `views/ProductPage.vue`）。
+  //    ⚠️ 这**不是**「既有 8 个 `order.*` 端点的替代品」—— 「我的订单」tab 用的仍是那 8 条里的
+  //    `orderSelect` / `historicalOrdersSelect`；本组只管**真购物车**那张表。
+  //    ⚠️ 后端 5 条**每条都跑** `IdentityGuard.requireSelfOrAdmin(request, CustomerId)`
+  //    ⇒ 传**别人的** `CustomerId` 是 **403**（不是「查不到」），与 `notification` 那 4 条同形态。
+  cart: {
+    add: '/cart/add',
+    update: '/cart/update',
+    remove: '/cart/remove',
+    list: '/cart/list',
+    checkout: '/cart/checkout',
+  },
+  // ⚠️ 2026-10-10（C3 块 4 · 订单块）：管理端**订单治理** 4 条（`@RequestMapping("/admin/order")`）。
+  //    同 `admin` / `accounts` / `catalogAdmin` / `templateAdmin` 各款（**非** view 抽取；唯一调用方
+  //    `views/admin/OrderPage.vue`，经 `api/order.js` 包一层）。
+  //    ⚠️ **单列一组而不是塞进 `order` 组**：往 `order` 组里插行会把本文件下面的条目整体下移，
+  //    而「新增行落在被引行之后」是本仓唯一的零漂移手法（同 `accounts` / `goodsB3` / `template`）。
+  //    ⚠️ 同样**不给角色闸留位置** —— 后端这 4 条也没有角色判据（TD-18：管理员 cookie 铸不出票，
+  //    见 `AdminOrderController` 块首）。
+  //    ⚠️ 只有 `intervene` 是写端点 ⇒ 只有它写 `admin_audit`；另三条是读，不留痕。
+  orderAdmin: {
+    list: '/admin/order/list',
+    detail: '/admin/order/detail',
+    monitor: '/admin/order/monitor',
+    intervene: '/admin/order/intervene',
   },
 }

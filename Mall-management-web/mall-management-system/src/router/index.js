@@ -4,7 +4,7 @@ import LoginPage from '../views/LoginPage.vue'
 import AppShell from '../views/AppShell.vue'
 import { CUSTOMER_NAV, MERCHANT_NAV } from '../config/nav'
 import ProductPage from '../views/ProductPage.vue'
-import ShoppingCart from '../views/ShoppingCart.vue'
+import OrderPane from '../views/merchant/OrderPane.vue'   // ⚠️ C3 块 4：本行原为 `import ShoppingCart from '../views/ShoppingCart.vue'`（**同行替换、净零行数**）—— 购物车块容器由商家专属升格为**两壳共用**（客户 `/customer/cart` 也用它），故 import 上移到本行；`ShoppingCart.vue` 本身改由 `OrderPane.vue` 引入，路由表**不再直接**引用它（否则这里会是一条 `no-unused-vars`）。⚠️ 本行**不能删**：删掉它，`:8`-`:541` 全体上移一格，全仓对该文件的 15 处行号引用集体失效。
 // 👇 引入你新的搜索页面
 import GoodsSelect from '../views/GoodsSelect.vue'
 // ── R1（2026-10-05）新增：客户壳的子页面组件 ────────────────────────────────────
@@ -16,8 +16,8 @@ import MessageCenter from '../views/MessageCenter.vue'   // ⚠️ 2026-10-09 �
 import UserInfoPage from '../views/UserInfoPage.vue'
 import HistoricalOrders from '../views/HistoricalOrders.vue'
 import FriendRoom from '../views/FriendRoom.vue'
-// ── R2（2026-10-05）新增：商家壳专属的子页面组件 ────────────────────────────────
-import OrderPane from '../views/merchant/OrderPane.vue'
+// ⚠️ C3 块 4：`OrderPane` 的 import **已上移到 `:7`**（本节标题原写「商家壳专属」，随之不再成立 ——
+//    客户壳的 `/customer/cart` 也用同一个容器）。本行**留作墓碑**：空行或删行都会让 `:21` 以下全体上移。
 import GoodsAdd from '../views/GoodsAdd.vue'
 import GoodsUp from '../views/GoodsUp.vue'
 
@@ -27,7 +27,7 @@ import GoodsUp from '../views/GoodsUp.vue'
 //
 // ── R2（2026-10-05）：`/merchant` 照同一模板改造（用户裁决：镜像 R1）───────────────
 // 6 条子路由（home / search / msg / order / order/cart / user），壳只留顶栏 + `<router-view>`（R6 后壳 = `AppShell`，原为 `MerchantPage`）。
-// ⚠️ 两壳的顶栏差异**只有两处**：左项「商城主页」的 `to`（各指自己的壳）+ 右起第 2 项（客户「购物车」⇄ 商家「订单中心」）—— 顶栏项 R2 起已抽到 `src/config/nav.js`（用户裁决 6），R6 起由 `AppShell` 消费。⚠️ **R6（2026-10-05）**：两条父记录的 `component` 换成同一个 `AppShell`，配置走 `props: { nav, base, role }`（`role` 是实质增量：两壳的 `getCurrentUser()` 降级链**顺序有意相反**）；两壳**不合并成一条记录**（`path` / `children` / `subMenu` / `logout` 全不同）⇒ 本句成为「两条记录的全部配置差异」的验收口径。逐条见 progress.md §5-AB。
+// ⚠️ 两壳的顶栏差异**只有三处**：左项「商城主页」的 `to`（各指自己的壳）+ 右起第 2 项（客户「购物车」⇄ 商家「订单中心」）+ **C3 块 4 加的商家第 3 项**（商家多一项「购物车」，客户侧没有 —— 用户端那一项本身就是购物车块的入口）—— 顶栏项 R2 起已抽到 `src/config/nav.js`（用户裁决 6），R6 起由 `AppShell` 消费。⚠️ **R6（2026-10-05）**：两条父记录的 `component` 换成同一个 `AppShell`，配置走 `props: { nav, base, role }`（`role` 是实质增量：两壳的 `getCurrentUser()` 降级链**顺序有意相反**）；两壳**不合并成一条记录**（`path` / `children` / `subMenu` / `logout` 全不同）⇒ 本句成为「两条记录的全部配置差异」的验收口径。逐条见 progress.md §5-AB。
 // ── R3（2026-10-05）：`/` 由「**裸挂 `HomePage` 的页面**」改为「**一条落点 redirect**」（R1/R2 都没碰、留给 R3 的收口）
 //    为什么进客户壳 / 未登录怎么办 / 守卫为何搬走 ⇒ 见尾部 `landingFor` 上方的整段注释。
 //
@@ -43,8 +43,8 @@ import GoodsUp from '../views/GoodsUp.vue'
 //                 `UserCenter.vue` 由它 `v-for` 渲染 ⇒ 两壳共用同一组件（用户裁决 3）。
 //   `logout`   —— 退出登录的**分支键**（R2 起）：`'merchant'` ⇒ 另加 `clearMerchantId()`；
 //                 缺省（客户侧）⇒ 只 `clearCredentials()`。见 `UserCenter.vue` 的 `toLogin`。
-//   `orderTab` —— **仅**商家「订单中心」两条记录用：`OrderPane.vue` 靠它决定渲染哪一面
-//                 （`/merchant/order` = `'order'`、`/merchant/order/cart` = `'cart'`）。
+//   `orderTab` —— **C3 块 4 已退役**（两条 order 记录里都不再写它）：块 4 前 `OrderPane` 靠它决定
+//                 渲染哪一面；现在 `/merchant/order` 直接是 `OrderCenter`，购物车块的分面判据换成 **`route.query.tab`**。
 // ⚠️ `path: ''` 与 `path: 'info'` 两个记录指**同一个组件**（`UserInfoPage`）、同一个 `sub`：
 //    `/…/user` 是「用户中心默认页」的短地址，`/…/user/info` 是显式地址。
 //    不设 `redirect` 是为了不依赖「有 children 的记录能不能同时挂 redirect」这一细节。两壳同法。
@@ -58,7 +58,7 @@ const routes = [
       { path: '', name: 'customerHome', component: HomeTab, props: { base: '/customer' }, meta: { tab: 'home', layout: 'home-container', public: true } },   // ⚠️ C3 块 2（2026-10-09）：**同行**加 `name` —— 只为消一条 vue-router warn。父记录 `:55` 有 `name` 而本子记录**空路径**又**无名**时，`createRouter` 建匹配表就发 `checkChildMissingNameWithEmptyPath`（`vue-router.mjs:848`）（三壳三条，`#/login` 上一样刷）。本 name **没有别的用处**，全仓无 `push({name:'customerHome'})` —— 那正是警告说的「用父名不会渲染空路径子记录」那件事，这里靠**给子记录起名**消掉（警告原话：`add a name to the child route to remove the warning`）。
       { path: 'search', component: GoodsSelect, meta: { layout: 'page', public: true } },
       { path: 'msg', component: MessageCenter, meta: { tab: 'msg', layout: 'page' } },   // ⚠️ 2026-10-09：`component` 由 `ChatRoom` 换成 `MessageCenter`（**同行替换**，两壳各一处）—— 本记录现在还承载「通知」tab（`?tab=notify`）；`meta.tab` 仍是 `'msg'` ⇒ 顶栏「消息」在两个 tab 下都亮
-      { path: 'cart', component: ShoppingCart, props: { showSwitch: false }, meta: { tab: 'cart', layout: 'cart-container' } },   // ← ⚠️ **必须**传 false：R1 前客户壳是 `<ShoppingCart :showSwitch="false" />`，R1 落码时丢了 ⇒ 该页凭空多出 📋/🛒 开关（且无人监听 = 死控件）。`fix/legacy-chat-tab` 修（见 progress.md §5-X (16)2）
+      { path: 'cart', component: OrderPane, meta: { tab: 'cart', layout: 'cart-container' } },   // ⚠️ C3 块 4：`component` 由 `ShoppingCart` 换成 `OrderPane`（购物车块容器，内含「购物车 / 我的订单」两个 tab，由 `?tab=` 选面），并**删掉** `props:{showSwitch:false}` —— 那个 prop 是给 `ShoppingCart` 用的，容器不认 ⇒ 留着会变成根元素上的野属性。R1 当年那条「必须传 false，否则凭空多出 📋/🛒 开关」的告警随之作废（`showSwitch` / `orderTab` / `@toggle` 三个 prop 在块 4 全线退役，登记见 `tech-debt.md`；见 progress.md §5-X (16)2）
       {
         path: 'user', name: 'customerUser',   // ⚠️ C3 块 2〈用户块〉：**同行**加 `name`（不新插一行）—— 文件尾那条 `router.addRoute('customerUser', …)` 靠它把「商家入驻」挂成本壳的子页（`addRoute` 的第一个参数**只认 name**）。⚠️ 一旦插行，本组 `:61`-`:122` 的既有行号引用会整体下移。
         component: UserCenter,
@@ -89,11 +89,11 @@ const routes = [
       { path: '', name: 'merchantHome', component: HomeTab, props: { base: '/merchant' }, meta: { tab: 'home', layout: 'home-container', public: true } },   // ⚠️ C3 块 2：**同行**加 `name`，理由与 `/customer` 那条逐字相同（父 `:86` 有 name）；无任何 `push({name:'merchantHome'})`。
       { path: 'search', component: GoodsSelect, meta: { layout: 'page', public: true } },
       { path: 'msg', component: MessageCenter, meta: { tab: 'msg', layout: 'page' } },   // ⚠️ 2026-10-09：`component` 由 `ChatRoom` 换成 `MessageCenter`（**同行替换**，两壳各一处）—— 本记录现在还承载「通知」tab（`?tab=notify`）；`meta.tab` 仍是 `'msg'` ⇒ 顶栏「消息」在两个 tab 下都亮
-      // ⚠️ 两条 order 记录都设 `meta.tab = 'order'` ⇒ 顶栏「订单中心」**两面都亮**（与路由化前
-      //    `curPage === 'order'` 的判据一致）；`meta.orderTab` 才是 `OrderPane` 的分面依据。
-      // ⚠️ `order/cart` 是**单条多段子路径**，不嵌第二层 `children`（`OrderPane` 自己渲染两面）。
-      { path: 'order', component: OrderPane, meta: { tab: 'order', layout: 'order-container', orderTab: 'order' } },
-      { path: 'order/cart', component: OrderPane, meta: { tab: 'order', layout: 'order-container', orderTab: 'cart' } },
+      // ⚠️ C3 块 4：两条记录的 `meta.tab` **不再相同** —— `/merchant/order` = `'order'`（顶栏「订单中心」
+      //    亮），`/merchant/order/cart` = `'cart'`（顶栏**新增**的商家「购物车」项亮）。改前两条都是 `'order'`。
+      // ⚠️ `order/cart` 仍是**单条多段子路径**，不嵌第二层 `children`（容器 `OrderPane` 自己渲染它的两个 tab）。
+      { path: 'order', component: () => import('../views/OrderCenter.vue'), meta: { tab: 'order', layout: 'order-container' } },   // ⚠️ C3 块 4：块 4 前这里指 `OrderPane`（「订单中心 ⇄ 购物车」两态包装组件）—— 现在**直接指订单中心自己**。用**行内动态 import** 而不是顶部加一行 import：顶部加行会让 `:8` 以下全体下移（同一手法见本文件 `:434` 的 `AdminStub`）
+      { path: 'order/cart', component: OrderPane, meta: { tab: 'cart', layout: 'order-container' } },
       {
         path: 'user',
         component: UserCenter,
@@ -150,9 +150,9 @@ const router = createRouter({
 //   两条客户流程落回主页并丢会话参数，`fix/legacy-chat-tab` 加回（见 progress.md §5-X (16)1）。
 //   认不出的 `page` 归位该壳的首页（顺带丢掉脏参数）；
 //   `back=search` 换成搜索页**且保留 `back`**（`GoodsSelect.vue:158` 仍靠它触发 `loadState()`）。
-// ⚠️ **商家表不带 `cart` / `msg`**：商家侧 `ShoppingCart` 只由 `OrderPane` 的页内开关进入、
-//    `msg` 全仓无生产者 —— 收进来等于**凭空造一个旧约定**。客户表收到 `msg` 是因为它**历史上真有**
-//    （R1 前的 watcher 认它）。两表的差异是有意的，别「对齐」掉。
+// ⚠️ **两表的 `cart` / `msg` 处置**（C3 块 4 改判了商家那半）：客户表收 `cart` / `msg` 是因为它
+//    **历史上真有**（R1 前的 watcher 认它们）；商家表的 `msg` 全仓无生产者 ⇒ 不收；
+//    商家 `cart` 块 4 起**有了真落点**（`/merchant/order/cart`，顶栏新增入口）⇒ **收**。别把两表「对齐」掉。
 const LEGACY_TAB = {
   '/customer': { cart: '/customer/cart', user: '/customer/user', msg: '/customer/msg', chat: '/customer/msg' },   // ⚠️ `chat` 与 `msg` 同指消息页、**都要在**（R1 漏 `chat`，`fix/legacy-chat-tab` 加回）
   '/merchant': { order: '/merchant/order', user: '/merchant/user', chat: '/merchant/msg' }
@@ -203,13 +203,13 @@ function landingFor() {
 // 治的病：`/shoppingCart` 与 `/goodsSelect` 是**基线 `9b87ab9` 起就没人生产**的僵尸路由
 //   （全仓 `push` / `replace` / `<router-link>` 皆 0 命中，基线树同样 0），却一直**裸挂** ——
 //   无外壳 ⇒ 无导航栏（与 R3 前的 `/` 同病）；且裸 `/shoppingCart` 还渲染一个**死控件**：
-//   `ShoppingCart` 的 `showSwitch` 默认 `true`（`ShoppingCart.vue:81`），而该记录**不传 `@toggle`**
+//   `ShoppingCart` 当时有 `showSwitch`（默认 `true`）而该记录**不传 `@toggle`**（C3 块 4 起该 prop 已退役）
 //   ⇒ 那个 📋/🛒 开关点了没反应 —— 与 §5-X (16)2 是同一类病症的**第三例**（这一例从基线就在）。
 // ⚠️ **为什么是 redirect 而不是删记录**：全仓**没有 catch-all**（`grep pathMatch` 只命中本行注释自身）⇒ 删记录 =
 //   手敲该 URL **白屏**（不是 404 页，是空白 + 控制台 warning）。R3 对 `/` 的裁定是「手敲也被送出 =
 //   有意的」，本笔沿用。
-// ⚠️ **为什么按角色分**（而不是「一律指客户壳」）：`/shoppingCart` 的商家落点**换组件**（`OrderPane`
-//   的 `meta.orderTab === 'cart'` 面，落点是 `/merchant/order/cart`）、`/goodsSelect` 的商家落点
+// ⚠️ **为什么按角色分**（而不是「一律指客户壳」）：`/shoppingCart` 的商家落点**换壳 + 换页面**
+//   （落 `/merchant/order/cart`，C3 块 4 起那是购物车块容器的**默认面**）、`/goodsSelect` 的商家落点
 //   **换壳**。恒指客户壳会让商家手敲落错壳 —— 正是 R3 的 `landingFor` 刻意避开的错。
 // ⚠️ **`to.query` 透传**（本笔与 R3 的唯一手法差别）：R3 丢弃 `/` 的 query 是因为**无生产者**；
 //   这里 `kw` 有真实语义（`GoodsSelect.vue:124` 的 watch 读 `route.query.kw`）⇒ 手敲
@@ -450,7 +450,7 @@ router.addRoute({
     { path: 'business', meta: { key: 'business', title: '业务域' }, component: AdminStub },
     { path: 'business/accounts',   meta: { key: 'business', sub: 'accounts',   title: '用户与商家治理' }, component: () => import('../views/admin/AccountsPage.vue') },   // C3 块 2〈用户块〉：占位 → 真页（**同行替换**，照 `:456` notify 那条的做法）
     { path: 'business/catalog',    meta: { key: 'business', sub: 'catalog',    title: '商品与类目治理' }, component: () => import('../views/admin/CatalogPage.vue') },   // C3 块 3〈商品块〉：占位 → 真页（**同行替换**，照 `:451` accounts / `:456` notify 那两条的做法）
-    { path: 'business/orders',     meta: { key: 'business', sub: 'orders',     title: '订单治理' },       component: AdminStub },
+    { path: 'business/orders',     meta: { key: 'business', sub: 'orders',     title: '订单治理' },       component: () => import('../views/admin/OrderPage.vue') },   // C3 块 4〈订单块〉：占位 → 真页（**同行替换**，照 `:451` accounts / `:452` catalog / `:456` notify 那三条的做法）
     { path: 'business/marketing',  meta: { key: 'business', sub: 'marketing',  title: '营销运营' },       component: AdminStub },
     { path: 'business/moderation', meta: { key: 'business', sub: 'moderation', title: '消息与内容治理' }, component: AdminStub },
     { path: 'business/notify',     meta: { key: 'business', sub: 'notify',     title: '系统通知' },       component: () => import('../views/admin/NotifyPage.vue') },   // C3 块1·I2：占位 → 真页（同行替换）

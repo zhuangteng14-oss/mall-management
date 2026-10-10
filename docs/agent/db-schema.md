@@ -5,16 +5,16 @@
 > **Java 坐标约定（2026-09-30 补）**：`G:` = `GoodsController.java`（前 `MallManagementGoodsController.java`）、`M:` = `MessageController.java`（前 `MallManagementMessage.java`）、`U:` = `UserController.java`（前 `MallManagementUserController.java`）的**语句行**（**不是** route 注解行，与 `api-contract.md` 的口径**相反**，两文件不要互抄）。B1 / B2 / B3 之后若干读写路径已搬到 `mallmanagement_service` 下的 Service ⇒ 本文件出现 `GoodsCacheService:` / `UserCacheService:` / `OrderStateMachine:` 等前缀，那是**跨文件搬迁**、不是行号漂移。**全文件 Java 坐标已于 2026-09-30 对 HEAD 逐条复核并替换** —— 原一版系统性偏旧（成因同 `api-contract.md:4`：各笔新代码插入后未同步）。⚠️ **三层四笔（order PR #25 `28194b4` / goods 2026-10-02 / user PR #32 `0c07e96` / message `8ed5fc1`）后**：`G:` / `M:` / `U:` 三个 Controller 已只剩路由 —— SQL 与业务体分别下沉 `<域>/dao/<域>Dao.java` 与 `<域>/service/`。**本文件下表凡涉这三个域的 `G:` / `M:` / `U:` 坐标，若未随该域的笔改写，一律已陈旧**；下表 `:41-48` 的用户域行已于第三笔、消息域行（`M:378`）已于第四笔改写，其余（`U:` 一族、`G:` 的未重测行）引用前请以源码为准。
 > ⚠️ **2026-10-02 笔 2 后**：订单端点的 SQL 已随 `OrderController` 拆出，迁至 `order/dao/OrderDao.java`；`GoodsController` 的商品行整体 **−9**（⚠️ 该「−9」只是**首两行**的口径：以 2026-09-30 基线 `148e77b` 逐条实测，`goodstype`/`goodsAdd` 为 −9、`goodsSelect` 一族 −8、`productCodePrice` −4、`goodsUp` 之后 +16/+23/+23，**不要拿 −9 换算全表**；详见 `api-contract.md:6`）。下表**订单相关行的 `G:` 已改指 `OrderDao`**，其余 `G:` 值**尚未重测** —— 引用前请以源码为准。
 > ⚠️ **2026-10-02 三层重构第二笔（商品域）后**：商品 **8 条内联 SQL** 从 `GoodsController` 下沉到 `goods/dao/GoodsDao.java`，写/读方法体进 `goods/service/GoodsService.java` —— 本表原 `G:` 的**商品行**据此改指 `GoodsDao.searchByKeyword`。这四个走缓存的读路径（`GoodsCacheService:81` / `:146` / `priceByTriple`）**未受影响**（它们的 SQL 本就在 Service，2026-09-30 已复核）。新增前缀：`S:` = `GoodsService.java`、`D:` = `GoodsDao.java`。
-> 表数量：**17** —— 11 张原始表 + 6 张由 `.sql` 末尾 Migration 块建的：`order_state_transition`（B3，2026-09-29，`:221-235`）· `admin_audit`（C3 批 A，2026-10-08，`:264-292`）· `notification`（C3 块1-I2，2026-10-09，`:294-327`）· `merchant_application`（C3 块 2〈用户块〉，2026-10-09，`:369-390`）· `template`（C3 块3 **就地改造**，2026-10-10 #8，`:556-569`）· `goods_audit`（C3 块 3〈商品块〉，2026-10-10，`:492-515`）。⚠️ **`notification_template`（`:329-345`）与 `goods_template`（`:474-484`）已由 #8 物理删** —— 两者在 `.sql` 里的 `CREATE TABLE` 语句**仍在原地**（零漂移手法），由块尾的 `DROP TABLE IF EXISTS` 中和 ⇒ 该文件里共 **19** 个 `CREATE TABLE`、**净 17 张表**（判据：导入后这两张表不存在）。
+> 表数量：**18** —— 11 张原始表 + 7 张由 `.sql` 末尾 Migration 块建的：`order_state_transition`（B3，2026-09-29，`:221-235`）· `admin_audit`（C3 批 A，2026-10-08，`:264-292`）· `notification`（C3 块1-I2，2026-10-09，`:294-327`）· `merchant_application`（C3 块 2〈用户块〉，2026-10-09，`:369-390`）· `template`（C3 块3 **就地改造**，2026-10-10 #8，`:556-569`）· `goods_audit`（C3 块 3〈商品块〉，2026-10-10，`:492-515`）· `cart`（C3 块 4〈订单块〉，2026-10-10，`:708-720`）。⚠️ **C3 块 4〈订单块〉（2026-10-10，分支 `feat/c3-admin-block4`）—— 本文件第二次「加表」但 `cart` 刻意不走本文件的中段**：`cart` 是 A1 甲（用户 2026-10-10 逐项裁决）的**真购物车载体**，逐列清单 / 索引 / 与 `order` 的关系**登记在文件末 §11**，**不就地插入 §1 表清单与 §6.x** —— 理由是零漂移：本文件当前有 **44 处外部 `文件:行号` 引用**（10 个文件，指向本文件 **26 个不同行号**）（`slot-registry.md` 26 / `selection-status.md` 5 / `progress.md` 4 / `defect-survey.md` 2 / context-pack 4 / `OrderCenter-merchant.html` 1 / `api-contract.md` 1 / `OrderDao.java` 1），中段插一行就让其后**全部**集体 +1；重指回本文件的工作归「文档漂移清理笔」（同 §十五 15-5 的登记不修口径）。另 `order` **加** `Quantity`（`.sql:730-738`，`int NOT NULL DEFAULT 1`，存量 6 行回填 1，**不增表、不改行数** ⇒ A3 的 P4 种子计数 `order=6` 不受影响）。⚠️ **`cart` 不在 `.sql:21` 起的 `DROP TABLE IF EXISTS` 基线清单里** —— 它是用户数据不是种子，整份重导**不清空购物车**（`.sql:689-690` 块注释）。⇒ 表数 **17 → 18**、索引 **16 → 18**（+`uk_cart_customer_product`、+`idx_cart_customer`）、**非主键 UNIQUE 3 → 4**（新增第 4 个 `uk_cart_customer_product`；⚠️ 三处计数均为**按 DDL 直接推导**，非实测查询结果，出处 `.sql:708-720`）。⚠️ **`notification_template`（`:329-345`）与 `goods_template`（`:474-484`）已由 #8 物理删** —— 两者在 `.sql` 里的 `CREATE TABLE` 语句**仍在原地**（零漂移手法），由块尾的 `DROP TABLE IF EXISTS` 中和 ⇒ 该文件里共 **20** 个 `CREATE TABLE`、**净 18 张表**（判据：导入后那两张表不存在）。
 > ⚠️ **块 2 还改了「两张既有表」，但加列不增表**：`user` +8 列（`:396-404`，封禁 3 + 降级 5）、`goods` +2 列（`:407-409`，`ShelfState` / `DelistedAt`）—— 故表数**只 +1**；那 10 列落在 §6.3 与 §6.10 的既有小节里（**不另开节**）。
 > ⚠️ **块 3 再改「两张既有表」+ 净增 2 张**：`goodstype` +3 列（`:449-451`，`ParentId` / `Sort` / `State`）**并换唯一键**（`:454-455`，`uk_goodstype_GoodType` → `uk_goodstype_parent_name (ParentId, GoodType)`）、`goods` +5 列（`:461-467`，`TypeId` / `DetailTemplateId` / `SpecTemplateId` / `AfterSaleTemplateId` / `DeletedAt`）；两张新表 `goods_template` / `goods_audit`。⇒ 表数 **16 → 18**，索引 **15 → 16**（换代一换一 + 净增 `idx_goodstype_parent_sort`），**非主键 UNIQUE 仍 3 个**。既有两表的加列落在 §6.4（`goodstype`）/ §6.3（`goods`）。 ⚠️ **块 3 就地改造（#8，2026-10-10）—— 本文件首次出现「删表 + 删列」**：新建**通用表** `template`（`:556-569`，`Type` 区分用途）；**物理删** `goods_template` + `notification_template`（用户明确批准，见 `db-migration.md` 注意 11）；`goods` **加** 3 段快照文本（`:588-607`，`Detail` / `Spec` / `AfterSale`）**删** 3 个模板引用 Id（`:611-630`，`DetailTemplateId` / `SpecTemplateId` / `AfterSaleTemplateId` —— 那三列**恒 NULL、全仓零写入**，见注意 10 末句）；`goods_audit` 加同 3 列（`:636-655`）。⇒ 表数 **18 → 17**、索引 **16 → 16**（净 0）、**非主键 UNIQUE 仍 3 个**（第三个从 `uk_notification_template_key` 换成 `uk_template_type_name`）。语义变化：商品侧由「**引用**模板 Id」（改模板 ⇒ 商品联动变）改为「**快照**」（选模板 → 填入 → **可改** → 存**最终文本** ⇒ 改模板**不影响**已上架商品）。
 > ⚠️ **2026-10-09 更正 —— 原写 12 是漏登**：先后漏了批 A 的 `admin_audit`；I2 登记时一并补齐（同一缺口见 `db-migration.md` 注意 8）。本文件此前所有「12 张表」的字面与据此推导的计数（索引张数、UNIQUE 个数）也随之更新。
 > `.sql` 末尾另有一段 S1a 追加的 Migration 块（`:236-245`，2026-09-30），**只含一条 `CREATE UNIQUE INDEX`，不建表**。
 > 全部为 `ENGINE=InnoDB`、`utf8mb4_0900_ai_ci`。
 >
-> ⚠️ 该 `.sql` 行尾是 CRLF（**680 个 `\n` / 680 个 `\r`，0 个裸 CR** —— 2026-10-10 块 3 就地改造（#8）追加一块后**重新实测**〔LF 680 / CR 680 / 裸 CR 0；同次实测 `CREATE TABLE` 共 19 条〕；上一版为 409 / 409〔块 2 追加一块后〕，再上为 345 / 345〔I2 追加两块后〕、245 / 246，S1a 前原为 235 / 236）。用会把行尾归一化的编辑器改它，diff 会变成整份文件重写 —— 改前先确认 diff 只有预期行。
+> ⚠️ 该 `.sql` 行尾是 CRLF（**738 个 `\n` / 738 个 `\r`，0 个裸 CR** —— 2026-10-10 **C3 块 4〈订单块〉**追加一块后**重新实测**〔LF 738 / CR 738 / 裸 CR 0；同次实测行首 `CREATE TABLE` 共 20 条〕；上一版为 680 / 680〔块 3 就地改造 #8 追加一块后，`CREATE TABLE` 19 条〕，更前为 409 / 409〔块 2 追加一块后〕，再上为 345 / 345〔I2 追加两块后〕、245 / 246，S1a 前原为 235 / 236）。用会把行尾归一化的编辑器改它，diff 会变成整份文件重写 —— 改前先确认 diff 只有预期行。
 >
-> **完整字段清单 / 索引基线 / 外键关系见 §6–§9**（2026-09-30 补齐，逐列逐索引以 `.sql` 为准）。
+> **完整字段清单 / 索引基线 / 外键关系见 §6–§9**（2026-09-30 补齐，逐列逐索引以 `.sql` 为准）。⚠️ **C3 块 4 的 `cart` 与 `order.Quantity` 见文件末 §11** —— 本节群**刻意不含 `cart`**，理由（零漂移）见上。
 
 ## 1. 表清单
 
@@ -120,7 +120,7 @@
 
 ---
 
-## 6. 完整字段清单（17 张表，逐列以 `.sql` 为准）
+## 6. 完整字段清单（18 张表 —— ⚠️ **`cart` 不在本节**，见文件末 §11；逐列以 `.sql` 为准）
 
 > 行号 = `mall_management_sql.sql` 真实行号。`约束` 列照抄 DDL；`备注` 列出 COMMENT（本库仅 `order_state_transition` 有列注释）与已核实的语义。
 > 列级 `CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci` 在部分列上显式声明（下表标「显式」）、部分列省略 —— 因表默认值相同，**功能等价**，属声明噪音。
@@ -148,9 +148,9 @@
 | `template`（#8 新增，取代 `goods_template`） | InnoDB | utf8mb4 | utf8mb4_0900_ai_ci | — | 0 ⚠️ | — |
 | `goods_audit` | InnoDB | utf8mb4 | utf8mb4_0900_ai_ci | — | 0 ⚠️ | — |
 
-> **17 张表的 ENGINE / CHARSET / COLLATE 完全一致**，且逐字等于库级默认值（`:15` `CREATE DATABASE ... DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci`）⇒ **没有任何表声明自己的字符集**，全套吃库级默认。
+> **18 张表的 ENGINE / CHARSET / COLLATE 完全一致**（含分节在 §11 的 `cart`：同为 `InnoDB` / `utf8mb4` / `utf8mb4_0900_ai_ci`，`.sql:720`），且逐字等于库级默认值（`:15` `CREATE DATABASE ... DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci`）⇒ **没有任何表声明自己的字符集**，全套吃库级默认。
 > `AUTO_INCREMENT` = DDL 中的现值（导入基线）。
-> ⚠️ **后五张表（`admin_audit` / `notification` / `merchant_application` / `template` / `goods_audit`）不属于「导入基线」** —— 它们是 `.sql` 末尾的 Migration 块，用 `IF NOT EXISTS` 追加、**块内不 DROP** ⇒ 全量重导**不清**它们（`admin_audit` 刻意保审计历史、`notification` 刻意保通知历史、`merchant_application` 刻意保入驻申请历史、`template` 刻意保模板、`goods_audit` 刻意保提审历史）。其行数**不是种子数据**：`admin_audit` 那 2 行是批 A 验收探针留下的 `goods.update`；其余均 **0**（⚠️ `admin_audit` = 2 与 `merchant_application` = 0 测于 **VM 库**；`template` = 0 / `goods_audit` = 0 为 **2026-10-10 实测**，见 `db-migration.md` 注意 11）。⚠️ 五张新表本身都用 `CREATE TABLE IF NOT EXISTS`（**幂等**）⇒ 全量重导路径上它们的行数**不清零**（`admin_audit` 的 2 行会留到重导之后）。**P4 判据不覆盖这五张**（只查 `order/goods/login/user/friend`）。
+> ⚠️ **后六张表（`admin_audit` / `notification` / `merchant_application` / `template` / `goods_audit` / `cart`）不属于「导入基线」** —— 它们是 `.sql` 末尾的 Migration 块，用 `IF NOT EXISTS` 追加、**块内不 DROP** ⇒ 全量重导**不清**它们（`admin_audit` 刻意保审计历史、`notification` 刻意保通知历史、`merchant_application` 刻意保入驻申请历史、`template` 刻意保模板、`goods_audit` 刻意保提审历史、`cart` 是**用户购物车**）。其行数**不是种子数据**：`admin_audit` 那 2 行是批 A 验收探针留下的 `goods.update`；其余均 **0**（⚠️ `admin_audit` = 2 与 `merchant_application` = 0 测于 **VM 库**；`template` = 0 / `goods_audit` = 0 为 **2026-10-10 实测**，见 `db-migration.md` 注意 11；`cart` = 0 为 **2026-10-10 实测**，见 `db-migration.md` 注意 12）。⚠️ 六张新表本身都用 `CREATE TABLE IF NOT EXISTS`（**幂等**）⇒ 全量重导路径上它们的行数**不清零**（`admin_audit` 的 2 行会留到重导之后）。**P4 判据不覆盖这六张**（只查 `order/goods/login/user/friend`）。
 > ⚠️ **另有「两张基线表被改列」**：C3 块 2 —— `user` +8 列、`goods` +2 列；C3 块 3 —— `goodstype` +3 列、`goods` 再 +5 列；C3 块 3 就地改造（#8）—— `goods` **+3 段快照文本并 −3 个 `*TemplateId`**（净 0）、`goods_audit` +3 列。合计 `goods` 净 **+7 列**（+2 +5 +3 −3）。这两张**属于导入基线**且**会被重导清空重建**，但加列语句在 Migration 块里（`CREATE TABLE` 之后）⇒ 重导后仍由该块补上（见 §6.3 goods / §6.4 goodstype / §6.10 user）。⚠️ **#8 是本文件首次出现「删**基线表**的列」**（`goods` 的 3 个 `*TemplateId`，用户明确批准，见 `db-migration.md` 注意 11）。⚠️ **两条幂等口径不同**：块 2 / 块 3 的加列**不幂等**（MySQL 无 `ADD COLUMN IF NOT EXISTS`），重复执行报 Duplicate column（预期，见 `.sql:359-364`、`.sql:437-446`）；**#8 的加列 / 删列全部走 `information_schema` 守卫 + `PREPARE`**，**重复执行是空操作、不报错**（`.sql:536-538`）。
 > **种子行数即 A3 的 P4 判据基线**：`ConcurrencyRunner.java:2521-2547`（**2026-10-02 实测**；原写 `:2404-2427`，2026-09-30 因 C 组升门禁的注释重写下移 17 行改为 `:2421-2444`，其后 B2 与 C 两段先后增补使本段**再下移 100 行**）只查 `order/goods/login/user/friend` 五张，期望 `6/5/5/5/4`，与本表**逐字一致**（其注释即写「`mall_management_sql.sql` 逐行计数」）。P4 的用途是「确认是刚导入过的干净实例，而非被上一轮污染过的库」⇒ 种子行数是**门禁输入而非装饰**，改种子数据会先让 P4 变红。
 
@@ -226,7 +226,7 @@
 | `content` | text | NOT NULL | **无长度约束** |
 | `create_time` | datetime | NOT NULL | 与 `user_conversation_read.last_read_time` 同型，可直接比较 |
 
-### 6.8 `order`（`:141-155`）
+### 6.8 `order`（`:141-155`；⚠️ C3 块 4 已加 `Quantity` —— `.sql:730-738`，`int NOT NULL DEFAULT 1`，存量 6 行回填 1，**不增表、不改行数**；**下表刻意未加行**，见文件末 §11）
 | 字段 | 类型 | 约束 | 备注 |
 |---|---|---|---|
 | `Id` | int | **PK**, NOT NULL AUTO_INCREMENT | `AUTO_INCREMENT=24`（内部主键，业务不使用） |
@@ -416,7 +416,7 @@
 
 ---
 
-## 7. 索引完整基线
+## 7. 索引完整基线（⚠️ **不含 C3 块 4 的 `cart`**（3 个：`PRIMARY` + `uk_cart_customer_product` + `idx_cart_customer`），见 §11）
 
 | 表 | 主键 | 二级索引 | 非主键 UNIQUE |
 |---|---|---|---|
@@ -507,9 +507,9 @@
 
 ---
 
-## 10. ⚠️ 全库除主键外只有 **3 个 UNIQUE** —— 唯一性仍基本靠应用层
+## 10. ⚠️ 全库除主键外只有 **4 个 UNIQUE** —— 唯一性仍基本靠应用层（⚠️ 第 4 个 = C3 块 4 的 `uk_cart_customer_product (CustomerId, ProductCode)`，**本节下面未加行**，见 §11）
 
-> 本节单独成节，因为它是整份 schema 最重的一条：**业务主键几乎全是约定，不是约束。**（2026-09-30 S1a 之前是「全是」；`order.OrderId` 是第一个例外，`goodstype.GoodType` 于 **2026-10-04 #11** 成为第二个。）
+> 本节单独成节，因为它是整份 schema 最重的一条：**业务主键几乎全是约定，不是约束。**（2026-09-30 S1a 之前是「全是」；`order.OrderId` 是第一个例外，`goodstype.GoodType` 于 **2026-10-04 #11** 成为第二个、`template.(Type, Name)` 于 **2026-10-10 块 3 就地改造（#8）** 成为第三个、**`cart.(CustomerId, ProductCode)` 于 2026-10-10 C3 块 4 成为第四个**。）
 
 ### 10.1 事实
 17 张表 → 17 个主键（其中 1 个复合）→ 20 个二级索引 → **非主键 UNIQUE：3 个**（`order.uk_order_orderId`，2026-09-30 S1a 新增；**`goodstype.uk_goodstype_parent_name`，2026-10-10 #7 换代**；**`template.uk_template_type_name`，2026-10-10 #8**〔#8 **之前**是 `notification_template.uk_notification_template_key`，2026-10-09 I2 新增，**该表已删**〕—— **最后这个不属前提清单，只是新表自带**，见 §7 附注）。
@@ -547,3 +547,50 @@
 >
 > 🔄 **2026-10-04 #11 认领了第二条**：`goodstype.GoodType` 的 UNIQUE。它是**同一逻辑的第二个实例，但认领理由与 S1a 不同** —— S1a 兜的是「锁 fail-open 时的重复单号」，#11 兜的是「**根本没有锁**」：`GoodsTypeCacheService.addType` 的 check-then-insert **不在 B2 的 5 个锁落点内**，所以它连 fail-open 的锁都没有，唯一的防线从来就只有那条应用层 `SELECT COUNT(*)`。A3 的 B-2 场景实测（CI `ci49`，2026-10-03）**4/5 轮复现**，正是这条缺口的直接证据。
 > ⚠️ **本条与 S1a 的一条关键差异**：S1a 的迁移块能写「前置：每个库重复行检测为 0」（`order` 实测本机 7/7、VM 6/6 均为 0）；#11 的迁移块**不能**写 —— `goodstype` 的重复行是 A3 自己造的、**已实测存在**。故它只能走「全量重导」路径落盘，对既有库须先人工去重。逐字见 `mall_management_sql.sql:246-262` 与 `db-migration.md` 注意 7。
+---
+
+## 11. 附录：C3 块 4〈订单块〉的 `cart` + `order.Quantity`（2026-10-10）
+
+> **本节为什么在文件末**：`cart` 是第 18 张表，但**没有**插进 §1 表清单 / §6.x。本文件有 **44 处外部 `文件:行号` 引用**（10 个文件，指向本文件 **26 个不同行号**）（`slot-registry.md` 26 / `selection-status.md` 5 / `progress.md` 4 / context-pack 4 / `defect-survey.md` 2 / `OrderCenter-merchant.html` 1 / `api-contract.md` 1 / `OrderDao.java` 1），中段插一行会让其后**全部集体 +1**；而把「已陈旧」与「本笔打破」分开判别、再逐条重指的工作，本仓已有归口（§十五 15-5 的「只登记、不修」＋「文档漂移清理笔」）。故本笔取**零漂移**手法：**外部引用一个都不动**，`cart` 的逐列定义放文件末。
+> **出处** = `mall_management_sql.sql:693-738`（Migration 块 6：C3 块 4〈订单块〉，2026-10-10，分支 `feat/c3-admin-block4`）。**判据档位 = 可复核**（DDL 字面 + 本机库 / VM 库 `information_schema` 实测，见 `db-migration.md` 注意 12）。
+
+### 11.1 `cart` —— 真购物车载体（A1 甲，用户 2026-10-10 逐项裁决）
+
+| 字段 | 类型 | 约束 | 备注 |
+|---|---|---|---|
+| `Id` | int | **PK**, NOT NULL AUTO_INCREMENT | 内部主键，业务不使用 |
+| `CustomerId` | varchar(40) | NOT NULL | 买家业务号，**对齐 `order.CustomerId`**（`:143`） |
+| `MerchantId` | varchar(40) | NOT NULL | 卖家业务号，加购时从 `goods` 带入，**对齐 `order.MerchantId`**（`:142`） |
+| `ProductCode` | **char(40)** | NOT NULL | **对齐 `goods.ProductCode`**（`:61`）—— 不是 `order` 那侧的 varchar |
+| `Quantity` | int | NOT NULL DEFAULT 1 | 数量（≥1）；改量走 UPDATE，**不加行** |
+| `PriceSnapshot` | **double** | NULL, DEFAULT NULL | 加购时的单价快照 = **结算成交价**；NULL 时结算回 `goods.Price`。⚠️ 刻意对齐 `goods.Price` 的 **double**（`:58`）而**不**照 `order.Price` 的 **float**（`:146`，`defect-survey.md` 记过的不一致）—— 新列向源列对齐，不复制旧缺陷 |
+| `created_at` | datetime(3) | NOT NULL DEFAULT CURRENT_TIMESTAMP(3) | 行落库时刻 |
+| `updated_at` | datetime(3) | NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3) | 行更新时刻 |
+
+- 主键 `Id`；**UNIQUE `uk_cart_customer_product (CustomerId, ProductCode)`** ⇒ 同一商品重复加购**合并数量、不新开行**（这是全库第 4 个非主键 UNIQUE，见 §10）。
+- `KEY idx_cart_customer (CustomerId)`。
+- `ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci`（`:720`）—— 与其余 17 张表逐字相同（见 §6 首段）。
+- ⚠️ **归属以 `MerchantId` 为准，不按单独的 `ProductCode`**：`ProductCode` 跨商家不保证唯一（本仓无店铺表），回读商品名 / 图一律按 `(MerchantId, ProductCode)` 联 `goods`（`.sql:700-703` 块注释）。
+- ⚠️ 同笔另有一条 `ALTER TABLE cart MODIFY COLUMN PriceSnapshot …`（`:728`）—— **只改注释、不改列**（初稿把 `PriceSnapshot` 注释成「仅陈列 / 对账，非成交价」，与 A1「存快照就是为了避免改价争议」的选型理由相反）。它**必须单独一条**：`CREATE TABLE IF NOT EXISTS` 对**已存在**的表是空操作（`.sql:722-727`）。
+- ⚠️ **不在** `.sql:21` 起的 `DROP TABLE IF EXISTS` 基线清单里 ⇒ 整份重导**不清空购物车**（它是用户数据不是种子，`.sql:689-690`）。
+
+实测：本机库 / VM 库 `cart` 均 **0 行**（2026-10-10，见 `db-migration.md` 注意 12）。
+
+### 11.2 `order` + `Quantity`（A2 甲）
+
+`.sql:730-738`：`ADD COLUMN \`Quantity\` int NOT NULL DEFAULT 1`（**表末 + 默认值 + COMMENT**，数据库管理规则 7），走 `information_schema` 守卫 + `PREPARE` ⇒ **重复执行是空操作、不报错**。
+
+- `DEFAULT 1` ⇒ 存量 6 行全部落到「1 件」（语义正确，那些单本就只买了 1 件），且**不改行数** ⇒ A3 的 **P4 种子计数 `order=6` 不受影响**。
+- §6.8 的表**未加行**（理由同本节首段），`Quantity` 的定义**以本小节为准**。
+
+### 11.3 本笔对四个基线的净变化
+
+| 基线 | 变化 | 判据档位 |
+|---|---|---|
+| 表数 | **17 → 18**（+`cart`） | 可复核（VM 库 18 表实测） |
+| 行首 `CREATE TABLE` 条数 | **19 → 20** | 可复核（`grep -c '^CREATE TABLE'` + 文件头 `LF/CR` 实测） |
+| 索引 | **16 → 18**（+`uk_cart_customer_product`、+`idx_cart_customer`） | **推断**（按 DDL 直接推导，非实测查询） |
+| 非主键 UNIQUE | **3 → 4**（+`uk_cart_customer_product`） | **推断**（同上） |
+| 种子行数（P4 判据 `order/goods/login/user/friend`） | **不变** `6/5/5/5/4` | 可复核 |
+
+> ⚠️ 索引 / UNIQUE 两处计数为**按 DDL 推导**，不是 `information_schema.STATISTICS` 的实测结果 —— 引用时按此档位标注。

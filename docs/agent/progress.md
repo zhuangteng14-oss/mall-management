@@ -1965,7 +1965,7 @@
   前端 `vue-cli-service build` **Build complete**（Hash `f80464f503bf002a`）。**文档** ⇒ `db-migration.md` #7（+注意 10）· `db-schema.md` 16→18（+§6.17/§6.18）· `c3-blocks-index.md:15` · 本 pack。
   ⏳ **待办**：VM 库迁移（VM `192.168.229.129` 不可达，**不静默跳过**）· 用户手验（⚠️ a3 `app.auth.enabled=false`，**手验绿 ≠ 默认 profile 绿**）· A3 复跑核实 B-2 是否仍复现。**未提交**。
 
-- 🧩 **块 3〈商品块〉就地改造：模板表通用化 + 商品侧改「快照」（2026-10-10，未提交）**：见 `slot-registry.md §19-9`、`db-migration.md` **#8**。
+- 🧩 **块 3〈商品块〉就地改造：模板表通用化 + 商品侧改「快照」（2026-10-10；~~未提交~~ ⇒ 已收口，见本段末 ✅）**：见 `slot-registry.md §19-9`、`db-migration.md` **#8**。
   **起因** = 用户 2026-10-10 当面口径：模板从「**引用**」（商品存模板 Id ⇒ 改模板联动改商品）改「**快照**」（选模板 → 填入 → **可改** → 商品存**最终文本**）；
   并令**两张模板表合一**为通用表。**就地改、不另开笔、不提交。**
   **表（`.sql:517-680`；表数 18 → 17）** ⇒ 新建通用表 **`template`**（`.sql:556-569`，`Type` varchar(96) / `Name` / `Title` / `Body` / `Enabled` / `Sort`）；
@@ -1979,12 +1979,35 @@
   **`ProductPage.vue` 三处真渲染**（Tab① 详情 / Tab② 规格 / Tab④ 售后；**净 +5 行，1248 → 1253**）；`CatalogPage` / `NotifyPage` 模板区改走新 API；`api/template.js` 新增。
   ✅ **结清上一笔的 ⏸️**：`ProductPage.vue:226-230`/`:236-249` 三点待裁**全部作废**（无绑定⇒改快照、`spec`⇒行内 `键=值`、`after_sale`⇒接真渲染并**推翻** pack `c3-block-3-goods.md:117` 的「静态真功能 N=0」裁决）；留档见 `_work/c3-block3-landing-plan.md §十一`，覆盖口径见 §十二。
   🧪 `./mvnw -B test` **246 / 0 / 0**；`vue-cli-service build` **Build complete**；`eslint` exit 0。
-  **文档** ⇒ `db-migration.md` #8（+ 注意 11；#7 状态由「VM 不可达」更正为「已落两库」）· `db-schema.md` **18 → 17**（**净 0 行**=549；§6.15 标已删 / §6.17 `goods_template` 改写成 `template` / §6.18 +3 列）· `slot-registry.md §19-9` · `_work/c3-block3-landing-plan.md §十一 结清 + §十二` · `c3-blocks-index.md:15` · pack 回执。**未提交。**
+  **文档** ⇒ `db-migration.md` #8（+ 注意 11；#7 状态由「VM 不可达」更正为「已落两库」）· `db-schema.md` **18 → 17**（**净 0 行**=549；§6.15 标已删 / §6.17 `goods_template` 改写成 `template` / §6.18 +3 列）· `slot-registry.md §19-9` · `_work/c3-block3-landing-plan.md §十一 结清 + §十二` · `c3-blocks-index.md:15` · pack 回执。~~未提交~~ ⇒ **已提交 `5695755` / PR #84 / merge `fbf5c00`**（收口见下方 ✅）。
   ⚠️ **三件必须点明（已登记 §19-9-5，未修）**：① `CatalogPage.vue:114`/`:117` 用 `:disabled="busyId !== null"` 但文件定义的是 **`busyKey`** ⇒ 按钮**永不置灰**（**既有 bug**，只报告；行号 2026-10-10〈模板表通用化〉重指：原 112/115 行）；② `merchant.reject` / `user.ban` 两个 type **无录入面**；③ `template` 初始为空 ⇒ 6 处弹窗首开显示「暂无模板」**是预期**。
   ✅ **手验已跑并通过**（真后端 + **VM 库** + a3 profile；证据 `docs/agent/evidence/c3-block3-snapshot/hand-verify.txt`，探针 `scripts/probes/c3b3-snapshot-verify.sh`）：建模板 `goods.detail` Body=`AAA` → 商家 `/goods/goodsAdd` 提审（`Detail` **手改**成 `AAA-SHOP-EDITED`）⇒ **`goods` 零新行** + `goods_audit(pending)` 1 行 → 管理员通过 ⇒ **`goods` +1 行** + `Status=approved` + `GoodsId` 回填 → **把模板改成 `BBB`** → 重查该商品 `Detail` **仍是 `AAA-SHOP-EDITED`** ⇒ **快照语义成立**；结构断言同过（`%TemplateId%` 0 行 / 只剩 `template`）；跑完**已删回**探针造的行（VM `goods` 回到基线 5 行）。
   🐞 **手验当场抓出并修掉 1 个真缺陷**（见 `slot-registry.md §19-9-7`）：`GoodsAuditDao.insert`（`.../goods/dao/GoodsAuditDao.java:67`）的 `VALUES(…)` 值槽**多一个** —— 列 **14** + 字面量 `'pending'`，却写了 **14 个 `?`** 而只传 **13 个值** ⇒ 提审恒 `{"success":false,"msg":"商品提交失败"}`（后端 `SQLException: No value specified for parameter 14`）。**本笔引入**（加 `Detail`/`Spec`/`AfterSale` 三列时多打一个 `?`）；删掉 `'pending'` 前多余那个 `?` ⇒ 13 对 13。**单行、净 0 行。** ⚠️ **`mvn test` 246 绿 + `build` 通过 + `eslint` 0 三绿全过仍漏了它** —— Mockito 切片 `GoodsWriteTxAtomicityTest` 与 `@WebMvcTest` 的 `AbstractSmokeTest` **都不打真库**，覆盖不到「`?` 数 ≠ 传参数」。⇒ 已登记待办：DAO 层要一条**打真库**的冒烟（或「`?` 计数 == `.params()` 计数」的静态检查）。🐞 **第 2 个真缺陷：事后从后端进程日志抓到**（`/tmp/boot-a3b.log` 4 条 `action=template.create … targetId=null`；`admin_audit.TargetId` 是 **NOT NULL**，`mall_management_sql.sql:282`）—— `template.create` / `category.create` 两处「新增类」动作把 `TargetId` 也传了 `null` ⇒ **创建类留痕 100% 丢失**（fail-open 吞异常、只记 ERROR；三绿与 A3 都拦不住）；全仓 18 个 `auditService.record` 调用点逐个核过，只有这 2 处传 `null`。**已修**（2026-10-10 用户批「就地补业务标识串」：`Type:Name` / `ParentId:GoodType`，两处单行、净 0 行）；**未重新手验**（需重启后端），见 `slot-registry.md §19-9-8`。
-  ⏳ **待办**：A3 复跑（P3 表数门禁 `KNOWN_TABLES` 7 → **6**、总表数 18 → **17**）· `goodsUp` 改不了已上架商品的详情/规格/售后（**本次范围外已知缺口**）。⚠️ 提醒：`application-a3.properties:98` 的 `app.auth.enabled=false` —— **手验绿 ≠ 默认 profile 绿**（本笔手验即在闸关下跑的）。
+  ✅ **块 3 收口（2026-10-10）**：commit **`5695755`** → push → **PR #84** → 用户 merge，**合并提交 `fbf5c00`**（远端 `feat/c3-admin-block3` 已删）。CI 三 job 全绿；**A3 一律按产物读**（`concurrency` job 是 `continue-on-error`，颜色无信息量）：`exitCode=0` / `gates.count=30` / `gates.failed=0` / `assertions 31`（0 条 `ok:false`）；飞前校验 **P3 = PASS 表数=17**（`KNOWN_TABLES` 7→6 生效）、**P4 = PASS** 种子 `order=6 goods=5 login=5 user=5 friend=4`、P0–P6 PASS / P7 SKIP。⏳ **遗留（不静默）**：`goodsUp` 改不了已上架商品的详情/规格/售后（**本块范围外已知缺口**）· **TD-20**（静默失败路径需专门测试）挂到**块 8 部署前**一并处理。⚠️ 提醒：`application-a3.properties:98` 的 `app.auth.enabled=false` —— **手验绿 ≠ 默认 profile 绿**（本笔手验即在闸关下跑的）。
 
 **路线**：C3 现行 = **8 块**，唯一权威 **`c3-blocks-index.md`**；§七 那份「10 批 + 按端切」**已作废**
 （见 `c3-modules.md` §十）。⚠️ 购物车的归属**已统一**为「**属批 4 订单块，随该块一起做**」
 （原「C3 后第一笔」口径已废；见 §5-AG (8) 的按语）。
+### 7-B4. C3 块 4〈订单块〉（2026-10-10；⚠️ **落码 + 构建/测试绿 + 两库已落；手验未做**；**未提交**）
+
+> 本节**追加在文件尾**（不在 §7 中段插行）—— 本文件有 4 处外部 `文件:行号` 引用，中段插行会顶漂。
+> 上一条（§7 末段那个 `**路线**` 块）仍是全文的收口说明，本节接在它之后，只是**追加登记**。
+
+**用户口径（逐字要点）**：块 3 已 merge（**PR #84 / merge `fbf5c00`**）⇒ 正式收口；进**块 4「订单块」**，**三端一起设计一起落**；**继续攒、不提交**。
+**方案**：商家端两块 = **订单中心（我卖的）** + **购物车块（我买的）**；用户端一块 = 购物车块。
+**购物车块 = 容器**，内含 `[购物车]` `[我的订单]` 两个 tab；**一个路由 + `?tab=`**（`/cart?tab=cart` / `/cart?tab=orders`），顶栏一个入口。
+**职责**：订单中心 = 别人在我这买的单（发货 / 物流）；购物车块 = 我自己买的单（未成交 + 已成交）。
+**撤回**：用户自己上一条「我买的放用户中心」**作废** —— 购物车块内 tab 更简单直接。
+**A 档回归 3 个**：A1 购物车载体（新表 `cart`）· A2 订单数量（`order` 加 `Quantity`）· A3 介入动作边界（只沿既有三条 CAS 边）+ 归属校验（连带）。前序裁决：**付款 / 收货全归「我的订单」tab** ⇒ cart tab = 真购物车。
+
+**表（`.sql:681-738`；表数 17 → 18）** ⇒ 新表 **`cart`**（`:708-720`，8 列；`uk_cart_customer_product (CustomerId, ProductCode)` ⇒ 同商品重复加购**合并数量**；`PriceSnapshot` **double** 对齐 `goods.Price`、**刻意不照** `order.Price` 的 float；**不在**文件头 `DROP TABLE IF EXISTS` 基线里 ⇒ 重导**不清购物车**）；同笔 `ALTER … MODIFY COLUMN PriceSnapshot`（`:722-728`，**只改注释不改列**）；`order` 加 `Quantity`（`:730-738`，`int NOT NULL DEFAULT 1`，守卫幂等 ⇒ 存量 6 行回填 1、**不改行数** ⇒ P4 不受影响）。**本机库 14 表 / VM 库 18 表**（VM `order` 仍 6 行、`cart` 0 行）。⇒ 同笔改 `ConcurrencyRunner` P3 门禁：IN 清单加 `'cart'`、`KNOWN_TABLES` **6 → 7**、期望 `11+7=18`（现落 **`:2662`**）。
+**后端** ⇒ 新包 **`cart/`**（`CartController` 121 行 / 5 端点 · `CartService` 299 · `CartDao` 153）+ 新包 **`admin/` 订单治理三件**（`AdminOrderController` 95 / `AdminOrderService` 230 / `AdminOrderDao` 192）；`OrderController` **176 → 267**（`orderAdd` 加 `Quantity` + 归属校验；三条 CAS 端点加归属校验）、`OrderService` +106（**未加 `@Transactional`**、**未碰 `OrderStateMachine`**）、`OrderDao` +37、`AuditActions` +`ORDER_INTERVENE`；测试新增 `CartSmokeTest` / `AdminOrderSmokeTest` + `AbstractSmokeTest` 的 `@Import` 补新 `@Service`。⚠️ 2026-10-10 手验补丁：`/admin/order/list` 的 `truncated` 改判 `rows.size() >= 生效上限`（原 `total > rows.size()` 会在**筛 status 后谎报「已截断」**——`total` 是全表量、不随筛）。
+**前端** ⇒ 新 `views/OrderMine.vue`（361 行，「我的订单」tab）· 新 `views/admin/OrderPage.vue`（873 行，订单全量 + 异常监控两 tab + 行级介入；`flash` 横幅 + 两击确认代 `alert`/`confirm`）· 新 `api/order.js`（233 行）；`ShoppingCart.vue` 改成真购物车（付款收货迁走）· `merchant/OrderPane.vue` 升格为**两壳共用的容器** · `router/index.js` 的 `cart` 子路由 `component` 换 `OrderPane` 并**删掉 `props:{showSwitch:false}`** + `meta.tab` 由 `'order'` 改 `'cart'` · `config/nav.js` **同行追加**商家「购物车」入口（**块 4 前购物车块没有顶栏入口**）· `ProductPage.vue` 两入口**彻底分家**（`'cart'` 支根本不碰 `order` 表、`'buy'` 支 `PayIf` **恒 1**）。
+**契约** ⇒ `/cart/*` 5 个 + `/admin/order/*` 4 个（**TD-18：不得加角色闸**；只有 `/intervene` 挂审计）；`Result` 是 `HashMap` 子类、`Result.of` **逐键平铺** ⇒ `/admin/order/*` **没有 `data` 包裹层**；`/cart/checkout` 逐行走既有 `orderAdd`（锁 + 三道闸不绕）、出生态恒 `(0,0,0)`、**先落订单后清行**、**部分失败不回滚**。逐条见 `api-contract.md 附录 C`。
+
+🧪 `vue-cli-service build` **Build complete** · `./mvnw -q test` **exit 0** · `eslint --ext .js,.vue src/` **零报错**（修掉 `ProductPage.vue` 两处 `no-extra-boolean-cast`）。
+**文档** ⇒ `db-migration.md` **#9 + 注意 12** · `db-schema.md` **17 → 18**（⚠️ **不中段插行**：该文件 44 处外部引用会被顶漂 ⇒ `cart`/`Quantity`/第 4 个 UNIQUE 一律登记在**文件末新建 §11**，§1/§6/§7/§10 只做**同行改 + 指向 §11**，净零行）· `slot-registry.md` **§二十** · `api-contract.md` **附录 C**（正文 `O:` 一栏按 15-5「只登记、不修」）· `c3-blocks-index.md:16` 状态 · pack `c3-block-4-order.md` 加「现状坐标为块 4 前」横幅。
+⚠️ **零漂移**：**本笔打破的引用** —— ① `OrderCenter.vue:131` 引的 `OrderDao.java:138 / :141`（HEAD 时准确）因两条 SELECT 下移 8 行 ⇒ **同行改**为 `:146 / :149`；② 手验补丁改了 `AdminOrderService` / `AdminOrderDao` / `OrderPage.vue` 的行数 ⇒ 把 `slot-registry.md` / `progress.md` 里的 `223 / 184 / 869 行` 同行改为 `230 / 192 / 873`，并把 `api-contract.md` 的 `AdminOrderService.java:186-190` 重指为 `:183-187`。其余（`ConcurrencyRunner:2658`、`OrderDao:133`、`api-contract.md:196` 的 `ProductPage.vue:369`）**在 HEAD 即已陈旧** ⇒ 按 §十五 15-5 **只登记、不修**。`refs-scan` token 集合回归：丢失对 21 对，**referrer 全部是本笔重写/手改的文件**，无第三方文件丢引用。
+✅ **手工验收已跑一轮（2026-10-10，回库核对）**：购物车加/改量/移除/结算 · 两 tab 路由 · 三处详情页入口 · 管理端订单治理四端点 · 介入后 `notification` 双投递**回库核对**（不看接口 `success`，`notifyBoth` 是 fail-soft）—— 全绿；**唯一抓到并已修**的是 `/admin/order/list` 的 `truncated` **谎报**（原按全表 `total` 判 ⇒ 筛 status 后误报「已截断」）。**仍未做**：深链 / 前退后退未验；`OrderCenter` 无「数量」列、`showSwitch`/`orderTab`/`@toggle` 三 prop 全线退役、**强制退款无资金态**、`cart` 物理 DELETE 规则-v2 破例、CAS 归属校验 **fail-open**（a3 闸关下测不出）、强制发货/完成**各让被推进的对端收两条通知** —— 均已登记 `tech-debt.md`。
+⚠️ **手验前必提醒**：`application-a3.properties:98` 的 **`app.auth.enabled=false`** ⇒ a3 闸关，**手验绿 ≠ 默认 profile 绿**。
+⚠️ **A3 读法**：`concurrency` job 是 `continue-on-error` ⇒ 按产物读 `gates.count`（2026-10-07 实测 30/0），别记死。

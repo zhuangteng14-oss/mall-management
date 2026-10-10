@@ -73,9 +73,9 @@ import { navFor } from '../config/nav'
 //   ⑥ 布局容器类名（`.cart-container` ⇄ `.order-container`，后者多一行 `position: relative`）
 // ⇒ ①②③ 走 props；④⑤ 由 `base` 拼；⑥ **两类名都保留**（裁决 D7，不合并 —— 见样式块注释）。
 //
-// ⚠️ **验收口径**：两壳的全部差异 = 上面 6 条。其中**顶栏**只差两处 —— 左项「商城主页」的
-//    `to`（各指自己的壳）+ 右起第 2 项（客户「购物车」⇄ 商家「订单中心」）；其余项数 / 文案 /
-//    `tab` / 红点逐字同构。（这句话 R6 前在 `CustomerPage.vue:70`，随两壳合一搬来本文件。）
+// ⚠️ **验收口径**：两壳的全部差异 = 上面 6 条。其中**顶栏**只差三处（第三处为 C3 块 4 新增）——
+//    左项「商城主页」的 `to`（各指自己的壳）+ **商家侧多一项「订单中心」**（插在「消息」与「购物车」之间）；
+//    其余文案 / `tab` / 红点逐字同构。（这句话 R6 前在 `CustomerPage.vue:70`，随两壳合一搬来本文件。）
 //
 // 壳现在仍是三件事：顶栏、内容区外壳、未读红点轮询。**页面选择权全交给路由**（见 `router/index.js`）。
 //
@@ -439,9 +439,9 @@ margin: 0;
 z-index: 1;
 }
 /* ⚠️ `.cart-container`（客户购物车）与 `.order-container`（商家订单中心）**两个类名都保留**
-   （R6 裁决 D7，不合并成一个）：商家那份多一行 `position: relative`，而 `OrderCenter.vue:200/:235`
-   与 `ShoppingCart.vue:205/:240` 都有 `absolute` 子元素 ⇒ 合并 = **改行为**，归界面优化笔。
-   两类名由路由记录的 `meta.layout` 选中。 */
+   （R6 裁决 D7，不合并成一个）：商家那份多一行 `position: relative`，而这两条路由下渲染的页面
+   都有 `absolute` 子元素（`OrderCenter.vue` 的开关；块 4 起购物车块的 tab 栏在容器 `OrderPane.vue`）
+   ⇒ 合并 = **改行为**。⚠️ 新增理由：客户这份**没有** `position: relative` ⇒ 容器必须自带（见 `OrderPane.vue`）。两类名由 `meta.layout` 选中。 */
 .cart-container {
 height: 100%;
 background: #fff;

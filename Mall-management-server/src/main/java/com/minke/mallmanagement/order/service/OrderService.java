@@ -8,6 +8,9 @@ import org.springframework.stereotype.Service;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
+import com.minke.mallmanagement.notification.NotificationEvents;
+import com.minke.mallmanagement.notification.service.NotificationService;
 import com.minke.mallmanagement.order.model.OrderAction;
 import com.minke.mallmanagement.order.dao.OrderDao;
 import com.minke.mallmanagement.order.model.OrderState;
@@ -140,16 +143,28 @@ public class OrderService {
      */
     private final UserStateLookup userStateLookup;
 
+    /**
+     * 通知原语（C3 块 4 订单块新增）。发货 → 通知买家、收货 → 通知商家（用户 2026-10-10 裁决）。
+     *
+     * <p>⚠️ 与 {@link UserStateLookup} 不同，这里<b>直接注入</b>而不是 {@code ObjectProvider}：
+     * {@code NotificationService} 与 {@code NotificationDao} 早在 C3 块 1 就进了
+     * {@code AbstractSmokeTest} 的 {@code @Import}（是真 bean）⇒ 切片里取得到，不需要「可为 null」。
+     * 若哪天它被移出 {@code @Import}，本节会在**上下文加载期**红 —— 那时再改成 provider 形态。
+     */
+    private final NotificationService notificationService;
+
     public OrderService(OrderDao orderDao,
                         DistributedLockService lockService,
                         OrderStateMachine orderStateMachine,
                         OrderTransitionRecorder orderTransitionRecorder,
-                        ObjectProvider<UserStateLookup> userStateLookupProvider) {
+                        ObjectProvider<UserStateLookup> userStateLookupProvider,
+                        NotificationService notificationService) {
         this.orderDao = orderDao;
         this.lockService = lockService;
         this.orderStateMachine = orderStateMachine;
         this.orderTransitionRecorder = orderTransitionRecorder;
         this.userStateLookup = userStateLookupProvider.getIfAvailable();
+        this.notificationService = notificationService;
     }
 
     // ==================== 下单 ====================
@@ -163,6 +178,13 @@ public class OrderService {
      * {@code DistributedLockService.runLocked} 的 javadoc。
      *
      * <p>形参名与顺序**必须**与三层前逐字一致：{@code @RequestParam} 依赖它们解析。
+     *
+     * <p>⚠️ <b>C3 块 4（A2 甲）在<b>末尾</b>加了 {@code Quantity}</b>：加在末尾而不是插在
+     * {@code Price} 旁边，是为了让「既有 9 个形参的相对顺序」一字不动（本类的禁令是
+     * 「形参名与顺序必须逐字保留」）。{@code Quantity} 与库存/数量有关但**不参与**任何闸：
+     * 出生闸只看三个状态位，价格闸只看 {@code Price} ⇒ 它对既有请求的行为**零影响**。
+     * <p>⚠️ Controller 侧该形参是 {@code required = false, defaultValue = "1"} ——
+     * 老调用方（不传 {@code Quantity}）与 A3 压测脚本走的都是「1 件」。
      *
      * <p>⚠️ <b>B#1 起，{@code Price} 在这里先过一道 {@link #priceRejection} —— 且这道闸在
      * {@code runLocked} <b>之前</b></b>。理由见类注释的 B#1 段：非法请求不取锁、不触库。
@@ -183,7 +205,8 @@ public class OrderService {
             String Images,
             int PayIf,
             int DeliveryIf,
-            int ReceiveIf
+            int ReceiveIf,
+            int Quantity
     ) {
         // B#1：价格闸。放在锁外 —— 一是让非法请求不耗 Redis、不污染锁指标；二是让 addLocked
         // 的临界区保持逐字不动（B2 / D#1 的登记处就在那儿）。
@@ -207,7 +230,7 @@ public class OrderService {
             return frozen;
         }
         return lockService.runLocked(LockName.ORDER_ADD, OrderId, () -> addLocked(
-                CustomerId, MerchantId, OrderId, Price, ProductInformation, Images, PayIf, DeliveryIf, ReceiveIf));
+                CustomerId, MerchantId, OrderId, Price, ProductInformation, Images, PayIf, DeliveryIf, ReceiveIf, Quantity));
     }
 
     /**
@@ -367,7 +390,7 @@ public class OrderService {
      */
     private Map<String, Object> addLocked(
             String CustomerId, String MerchantId, String OrderId, float Price,
-            String ProductInformation, String Images, int PayIf, int DeliveryIf, int ReceiveIf) {
+            String ProductInformation, String Images, int PayIf, int DeliveryIf, int ReceiveIf, int Quantity) {
         Map<String, Object> result = new HashMap<>();
         // ⚠️ 临界区内先查后插 —— 这一段是 B2 对「同一 OrderId 落库 2 行」的真修复（A-S2a-1）：
         //    · 只有锁：并发变串行，但每个请求照旧裸 INSERT ⇒ 仍插 20 行；
@@ -390,7 +413,7 @@ public class OrderService {
 
         try {
             int rows = orderDao.insertOrder(new OrderDao.OrderRow(
-                    OrderId, CustomerId, MerchantId, Price, ProductInformation, Images,
+                    OrderId, CustomerId, MerchantId, Price, Quantity, ProductInformation, Images,
                     PayIf, DeliveryIf, ReceiveIf));
             if (rows > 0) {
                 result.put("success", true);
@@ -421,20 +444,103 @@ public class OrderService {
      * 其余 19 个返回**原**文案 —— {@code A-S3-2} 的守门对象正是这条：锁不许新发任何拒绝文案。
      */
     public Map<String, Object> payIfUp(String orderId) {
+        // ⚠️ 付款**刻意不通知**：用户 2026-10-10 裁决只点了三条（发货→买家 / 收货→商家 /
+        //    管理员介入→双方）。付款通知是**顺手能加但没被要求**的第四条 ⇒ 不夹带，登记待办。
         return lockService.runLocked(LockName.ORDER_PAY, orderId,
                 () -> casTransition(OrderAction.PAY, orderId, "付款成功", "订单不存在或已付款"));
     }
 
-    /** 收货按钮更新信息。理由同 {@link #payIfUp}。 */
+    /**
+     * 收货按钮更新信息。理由同 {@link #payIfUp}。
+     *
+     * <p>⚠️ <b>块 4 起，成功后<b>在锁外</b>通知卖家</b>（用户 2026-10-10 裁决的「用户收货 → 通知商家」）。
+     * 通知的调用点在 {@code runLocked} <b>返回之后</b> —— 锁已释放，通知的 INSERT 不占订单锁。
+     */
     public Map<String, Object> receiveIfUp(String orderId) {
-        return lockService.runLocked(LockName.ORDER_RECEIVE, orderId,
+        Map<String, Object> result = lockService.runLocked(LockName.ORDER_RECEIVE, orderId,
                 () -> casTransition(OrderAction.RECEIVE, orderId, "收货成功", "订单未付款或已收货"));
+        if (Boolean.TRUE.equals(result.get("success"))) {
+            notifyCounterparty(orderId, true, "买家已确认收货",
+                    "订单 " + orderId + " 的买家已确认收货。");
+        }
+        return result;
     }
 
-    /** 发货按钮更新信息。理由同 {@link #payIfUp}。 */
+    /**
+     * 发货按钮更新信息。理由同 {@link #payIfUp}。
+     *
+     * <p>⚠️ <b>块 4 起，成功后<b>在锁外</b>通知买家</b>（用户 2026-10-10 裁决的「商家发货 → 通知买家」）。
+     * 位置与 fail-soft 口径同 {@link #receiveIfUp}。
+     */
     public Map<String, Object> deliveryIfUp(String orderId) {
-        return lockService.runLocked(LockName.ORDER_DELIVERY, orderId,
+        Map<String, Object> result = lockService.runLocked(LockName.ORDER_DELIVERY, orderId,
                 () -> casTransition(OrderAction.DELIVER, orderId, "发货成功", "订单不存在或未付款或已发货/已收货"));
+        if (Boolean.TRUE.equals(result.get("success"))) {
+            notifyCounterparty(orderId, false, "商家已发货",
+                    "订单 " + orderId + " 已由商家发货，请注意查收。");
+        }
+        return result;
+    }
+
+    /**
+     * 订单流转后的**对端通知**（C3 块 4 —— 通知管道的第三次实战）。
+     *
+     * <p>三条硬口径，缺一条都会把「通知」变成会咬人的东西：
+     * <ol>
+     *   <li><b>只在 {@code success == true} 时调用</b>：守卫没命中（重复流转 / 单不存在）
+     *       并没有产生任何新事件，此时发通知就是造谣。调用点因此写在 {@code runLocked}
+     *       返回**之后**，而不是塞进 {@code casTransition}。</li>
+     *   <li><b>在锁外</b>：{@code runLocked} 已经返回（锁已释放）。通知是一次 INSERT，
+     *       放进临界区只会让订单锁的持有时长多一次外部 IO。</li>
+     *   <li><b>全程 fail-soft</b>：{@link NotificationService#send} 自己不抛；本方法再兜一层
+     *       （回查归属失败 / 收件人取不到 / 任何异常 ⇒ 静默返回）。
+     *       ⚠️ <b>代价必须说清</b>：fail-soft 让「通知丢了」与「通知成功」在**响应体上同形**。
+     *       ⇒ 验收要**回库读 {@code notification} 表**（新增行可指认），不能看接口的 {@code success}
+     *       —— 这是块 3 已经踩过一次的课。</li>
+     * </ol>
+     *
+     * @param toMerchant {@code true} = 发给卖家（{@code MerchantId}）；{@code false} = 发给买家（{@code CustomerId}）
+     */
+    private void notifyCounterparty(String orderId, boolean toMerchant, String title, String content) {
+        try {
+            OrderDao.OrderOwner owner = orderDao.selectOwner(orderId);
+            if (owner == null) {
+                return;
+            }
+            String toId = toMerchant ? owner.merchantId() : owner.customerId();
+            if (toId == null || toId.isBlank()) {
+                return;
+            }
+            notificationService.send(UUID.randomUUID().toString(), toId,
+                    toMerchant ? NotificationService.TO_TYPE_MERCHANT : NotificationService.TO_TYPE_CUSTOMER,
+                    NotificationEvents.ORDER_NOTICE, title, content, "order", orderId);
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+    }
+
+    // ==================== 读：归属（C3 块 4 · A3 连带） ====================
+
+    /**
+     * 该单的**归属者业务号**；单不存在 ⇒ {@code null}。{@code asMerchant = true} 取卖家，
+     * 否则取买家。给 {@link OrderController} 的三个 CAS 端点做归属校验用。
+     *
+     * <p>⚠️ <b>本方法自己也是 fail-open 的</b>：回查抛异常（库连不上）⇒ 返回 {@code null}
+     * ⇒ 调用方放行到 CAS。理由与 {@code addLocked} 里那条查重的 fail-open 一致 ——
+     * 归属校验是**加固**，不是流转的前置条件；让它把一次本来能成功的转账翻成 403
+     * 是拿加固当门禁。⚠️ 这个取舍的**代价**是：库不可达时归属校验整体失效（登记待办）。
+     */
+    public String ownerIdOf(String orderId, boolean asMerchant) {
+        try {
+            OrderDao.OrderOwner owner = orderDao.selectOwner(orderId);
+            if (owner == null) {
+                return null;
+            }
+            return asMerchant ? owner.merchantId() : owner.customerId();
+        } catch (Exception e) {
+            e.printStackTrace();
+            return null;
+        }
     }
 
     /**

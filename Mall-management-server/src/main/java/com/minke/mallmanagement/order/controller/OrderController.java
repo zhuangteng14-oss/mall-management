@@ -1,6 +1,9 @@
 package com.minke.mallmanagement.order.controller;
 
+import com.minke.mallmanagement.admin.AuditActions;
+import com.minke.mallmanagement.admin.service.AuditService;
 import com.minke.mallmanagement.order.service.OrderService;
+import com.minke.mallmanagement.shared.web.AuthSession;
 import com.minke.mallmanagement.shared.web.IdentityGuard;
 import com.minke.mallmanagement.shared.web.Result;
 import jakarta.servlet.http.HttpServletRequest;
@@ -8,6 +11,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.HashMap;
 import java.util.Map;
 
 /**
@@ -45,6 +49,15 @@ import java.util.Map;
  * 本笔不加</b>：它们的入参只有 {@code orderId}，判「这张单是不是你的」得**回查资源归属**
  * （拿 orderId 查订单行、比对 customer/merchant），是另一种判据形态，不在本笔的 13 条清单里
  * —— 缺口登记在 {@code progress.md §5-AF}（**不修**，避免本笔夹带新主题）。
+ *
+ * <h2>【C3 块 4（2026-10-10）：上面那条缺口<b>在此关闭</b>】</h2>
+ * 用户裁决「补」⇒ 三条 CAS 端点各自加归属校验，落地为私有件 {@link #isOwner}
+ * （回查归属走 {@code OrderService.ownerIdOf}，SQL 在 {@code OrderDao.selectOwner}）——
+ * 即上面那句「另一种判据形态」正是本笔做的事：**入参判不了就回查资源**。
+ * <p>⚠️ <b>返回类型随之从 {@code Result<Map>} 变回 {@code ResponseEntity<Object>}</b>
+ * （与另外 5 个端点一致）：403 是一个「不是 200 的响应」，包不进 {@code Result}。
+ * <p>⚠️ <b>三条 CAS 的文案、锁 tag、SQL 一行未动</b> —— 只有「进方法体之后、取锁之前」多了一道闸。
+ * 这与 A3 的 {@code A-S3-2} 不冲突的前提写死在 {@link #isOwner} 的注释里（单不存在必须放行）。
  */
 @RestController
 @RequestMapping("/order")
@@ -58,6 +71,18 @@ public class OrderController {
     // 因为 OrderPayIfUpSmokeTest 要钉的是「rows → 文案」这段映射，mock 掉就只剩一句空命题。
     @Autowired
     private OrderService orderService;
+
+    /**
+     * 审计（C3 块 4 新增）。只服务于**发货 / 收货**两条流转 —— 它们是「谁把这张单推进了一步」
+     * 的可追责点，且 A3 的时间线（{@code order_state_transition}）只记**状态怎么变**、
+     * 不记**谁点的按钮**（actor 在 {@code admin_audit} 里）。
+     * <p>⚠️ 付款**不挂审计**：它是买家自己的动作、不改「谁欠谁」，且 A3 的 {@code A-S3-2}
+     * 拿 20 并发支付压这条路径 —— 每次成功都多写一行 {@code admin_audit}，是给压测添噪声。
+     * <p>⚠️ {@code AdminAuditDao} / {@code AuditService} 早在本类的 smoke 切片里（块 1 起）
+     * ⇒ 直接 {@code @Autowired} 取得到，不需要 {@code ObjectProvider} 形态。
+     */
+    @Autowired
+    private AuditService auditService;
 
     //创建订单时要录入数据库的信息
     // 方法体（锁编排 + 临界区内查重 + INSERT + 出生观测 + 全部文案）搬到 OrderService.orderAdd()。
@@ -78,6 +103,7 @@ public class OrderController {
             @RequestParam("PayIf") int PayIf,
             @RequestParam("DeliveryIf") int DeliveryIf,
             @RequestParam("ReceiveIf") int ReceiveIf,
+            @RequestParam(value = "Quantity", required = false, defaultValue = "1") int Quantity,
             HttpServletRequest request
     ) {
         // ⚠️ 第一行：订单只能下在**自己**名下（管理员豁免）—— 必须在取锁之前（否则白取一把锁）。
@@ -86,7 +112,7 @@ public class OrderController {
             return IdentityGuard.forbidden();
         }
         return ResponseEntity.ok(Result.of(orderService.orderAdd(
-                CustomerId, MerchantId, OrderId, Price, ProductInformation, Images, PayIf, DeliveryIf, ReceiveIf)));
+                CustomerId, MerchantId, OrderId, Price, ProductInformation, Images, PayIf, DeliveryIf, ReceiveIf, Quantity)));
     }
 
     //购物车搜索订单
@@ -156,21 +182,86 @@ public class OrderController {
     // ⚠️ 两条文案「付款成功」/「订单不存在或已付款」也被 A-S3-2 逐字断言，且已随方法下沉
     //    （不在本类留参数）—— 理由是文案与它对应的分支不可分，拆开会让同一处改动要改两处。
     @PostMapping("/orderPayIfUp")
-    public Result<Map<String, Object>> orderPayIfUp(@RequestParam("orderId") String orderId) {
-        return Result.of(orderService.payIfUp(orderId));
+    public ResponseEntity<Object> orderPayIfUp(@RequestParam("orderId") String orderId,
+                                               HttpServletRequest request) {
+        // ⚠️ 第一行：只能付**自己**的单（管理员豁免）—— 必须在取锁之前。判据是**回查归属**
+        //（入参只有 orderId），见类注释的「块 4 A3 连带」段。
+        if (!isOwner(request, orderId, false)) {
+            return IdentityGuard.forbidden();
+        }
+        return ResponseEntity.ok(Result.of(orderService.payIfUp(orderId)));
     }
 
     //收货按钮更新信息
     // ⚠️ B2：锁 tag = order-receive。净正确性收益为 0（理由同付款）。
     @PostMapping("/orderReceiveIfUp")
-    public Result<Map<String, Object>> orderReceiveIfUp(@RequestParam("orderId") String orderId) {
-        return Result.of(orderService.receiveIfUp(orderId));
+    public ResponseEntity<Object> orderReceiveIfUp(@RequestParam("orderId") String orderId,
+                                                   HttpServletRequest request) {
+        // ⚠️ 第一行：只能收**自己**买的单（管理员豁免）—— 归属者是买家。
+        if (!isOwner(request, orderId, false)) {
+            return IdentityGuard.forbidden();
+        }
+        Map<String, Object> result = orderService.receiveIfUp(orderId);
+        // 块 4：收货是**商家侧能看见的事件** ⇒ 成功即留痕（actor = 当前调用者，可能是管理员代收）。
+        if (Boolean.TRUE.equals(result.get("success"))) {
+            auditService.record(AuthSession.identify(request), AuditActions.ORDER_RECEIVE,
+                    "order", orderId, null, orderActionPayload("receive"));
+        }
+        return ResponseEntity.ok(Result.of(result));
     }
 
     //发货按钮更新信息
     // ⚠️ B2：锁 tag = order-delivery。净正确性收益为 0（理由同付款）。
     @PostMapping("/orderDeliveryIfUp")
-    public Result<Map<String, Object>> orderDeliveryIfUp(@RequestParam("orderId") String orderId) {
-        return Result.of(orderService.deliveryIfUp(orderId));
+    public ResponseEntity<Object> orderDeliveryIfUp(@RequestParam("orderId") String orderId,
+                                                    HttpServletRequest request) {
+        // ⚠️ 第一行：只能发**自己卖**的单（管理员豁免）—— 这一条的归属者是**卖家**，
+        //    与付款/收货两条判的不是同一个人 ⇒ 那个 `true` 是这里唯一容易写错的地方。
+        if (!isOwner(request, orderId, true)) {
+            return IdentityGuard.forbidden();
+        }
+        Map<String, Object> result = orderService.deliveryIfUp(orderId);
+        if (Boolean.TRUE.equals(result.get("success"))) {
+            auditService.record(AuthSession.identify(request), AuditActions.ORDER_DELIVER,
+                    "order", orderId, null, orderActionPayload("deliver"));
+        }
+        return ResponseEntity.ok(Result.of(result));
+    }
+
+    // ==================== 块 4 新增的内部件 ====================
+
+    /**
+     * 「这张单是不是你的」——三个 CAS 端点的**归属校验**（C3 块 4 · A3 连带）。
+     *
+     * <p>这三条端点的入参只有 {@code orderId}，判不了入参身份 ⇒ 必须**按单回查归属**
+     * （拿 orderId 查订单行、比对 customer / merchant）。缺口原先登记在 {@code progress.md §5-AF}
+     * （「本笔不修，避免夹带新主题」），块 4 用户裁「补」⇒ 在此关闭。
+     *
+     * <p>⚠️ <b>三条回退路径全部<b>放行</b>，一条都不许改成 403</b>：
+     * <ol>
+     *   <li><b>单不存在</b>（{@code ownerIdOf} 回 {@code null}）⇒ 放行到 CAS，
+     *       由 {@code rows == 0} 出既有的那条文案。⚠️ 若在此改判 403，
+     *       A3 的 {@code A-S3-2}（20 并发支付里恰好 19 个返回逐字「订单不存在或已付款」）
+     *       会当场变红 —— 那条断言读的就是这条路径。</li>
+     *   <li><b>auth 关（{@code AuthSession.identify() == null}）</b> ⇒
+     *       {@link IdentityGuard#requireSelfOrAdmin} 自己就 fail-open（A3 与 smoke 切片都是这个态），
+     *       本方法无需另判。</li>
+     *   <li><b>回查抛异常</b> ⇒ {@code ownerIdOf} 返回 {@code null} ⇒ 走第 1 条放行。
+     *       代价：库不可达时归属校验整体失效（登记待办）——加固不许把正常流转翻成 403。</li>
+     * </ol>
+     *
+     * @param asMerchant {@code true} = 这笔的归属者应是**卖家**（发货）；{@code false} = **买家**（付款 / 收货）
+     */
+    private boolean isOwner(HttpServletRequest request, String orderId, boolean asMerchant) {
+        String owner = orderService.ownerIdOf(orderId, asMerchant);
+        return owner == null || IdentityGuard.requireSelfOrAdmin(request, owner);
+    }
+
+    /** 订单流转的审计 {@code AfterJson}：动作 + 结果。{@code BeforeJson} 恒 NULL（流转前的三位不另查一次库）。 */
+    private static Map<String, Object> orderActionPayload(String action) {
+        Map<String, Object> after = new HashMap<>();
+        after.put("action", action);
+        after.put("success", true);
+        return after;
     }
 }

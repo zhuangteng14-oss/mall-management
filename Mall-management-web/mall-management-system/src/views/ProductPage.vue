@@ -151,13 +151,13 @@
                   C 笔改用 `shotc.mjs`（新基线：§三 12 件、购入模块改底部弹窗）。 -->
 
           <div class="acts">
-            <!-- ③【加入购物车】—— **C 笔 C2 起转真入口**（原为在档占位 N=3 / 控件档）：现在只多一件事 ——
-                 打开购入模块并把入口标 'cart' ⇒ CTA 文案变「加入购物车」；落单仍走既有 `order.orderAdd`
-                 （C3 口径），不去写购物车表；台账下线项与回退点（`1e436a8` 的三个原属性）见 D 组登记。 -->
+            <!-- ③【加入购物车】—— C3 块 4 起**真的写购物车表**了（`cart.cartAdd` ⇒ `/cart/add`）。
+                 块 4 之前它落到与「立即购买」**同一条** `order.orderAdd`（只差 `PayIf`）—— 那正是用户
+                 点名的 bug；现在两支分家：本支写 `cart` 表、落「购物车」tab，右支写 `order` 表、落「我的订单」tab。 -->
             <button
               type="button"
               class="b ghost"
-              title="现有功能：openPopup('cart')（→ order.orderAdd）"
+              title="现有功能：openPopup('cart')（→ cart.cartAdd，逐型号写 cart 表）"
               @click="openPopup('cart')"
             >加入购物车</button>
             <!-- 【立即购买】既有真功能 `openPopup`（弹窗内选型号 / 数量 → `order.orderAdd`）。
@@ -396,13 +396,13 @@
     </div>
 
     <!-- 付款确认弹窗 —— 稿的 `dlg2` 面（`ProductPage.html:769-789`），**既有真功能**
-         （`handlePay` → `order.orderAdd`）⇒ 按「稿里画了一律落」照落。
+         （`handlePay` → 'buy' 支 `order.orderAdd` / 'cart' 支 `cart.cartAdd`）⇒ 按「稿里画了一律落」照落。
          ⚠️ 稿是「否」在前、「是」在后，与既有实现相反 ⇒ 本笔照稿，属**有意改动**（登记）。
-         旧 `.pay-confirm-*` / `.dialog-*` / `.yes-btn` / `.no-btn` 一并退役。⚠️ **2026-10-08 用户六条【三】**：文案按入口分（'cart' →「是否加入购物车？」／'buy' →「是否现在付款？」）；**「否」= 关框 + 保留弹窗与已选数据、一个请求都不发**（旧实现「否」也往下走 ⇒ 两支都掉 `order.orderAdd`，用户点名的 bug）；「是」的 `PayIf` 改由**入口**定（'buy' → 1 付款 / 'cart' → 0 加入购物车）—— 不是确认框按钮本身。 -->
+         旧 `.pay-confirm-*` / `.dialog-*` / `.yes-btn` / `.no-btn` 一并退役。⚠️ **2026-10-08 用户六条【三】**：文案按入口分（'cart' →「是否加入购物车？」／'buy' →「是否现在付款？」）；**「否」= 关框 + 保留弹窗与已选数据、一个请求都不发**（旧实现「否」也往下走 ⇒ 两支都掉 `order.orderAdd`，用户点名的 bug）；⚠️ **C3 块 4 改判**：`PayIf` 不再由入口现算 —— 两支已彻底分家（cart 支根本不碰 `order` 表），'buy' 支的 `PayIf` **恒 1**。 -->
     <div class="scrim" v-if="showPayConfirm" @click.self="showPayConfirm=false">
       <div class="dlg dlg-narrow">
         <div class="dlg-h">{{ popupEntry === 'cart' ? '是否加入购物车？' : '是否现在付款？' }}</div>
-        <div class="dlg-sub">{{ popupEntry === 'cart' ? '确认后将加入购物车（现有端点 order.orderAdd）。' : '确认购入后将生成订单（现有端点 order.orderAdd）。' }}</div>
+        <div class="dlg-sub">{{ popupEntry === 'cart' ? '确认后写入购物车（端点 cart.cartAdd），可在「购物车」tab 改量 / 结算。' : '确认购入后将生成订单（端点 order.orderAdd），可在「我的订单」tab 付款。' }}</div>
         <div class="dacts">
           <button type="button" class="b no" @click="handlePay(false)">否</button>
           <button type="button" class="b ok" @click="handlePay(true)">是</button>
@@ -416,7 +416,7 @@
 import { ref, onMounted, computed, watch, onBeforeUnmount } from 'vue'   // ⚠️ **2026-10-08 用户五条【1】**新增 `watch` / `onBeforeUnmount`（body 锁那一处用）—— **同行追加、不新增行**。
 import { useRoute, useRouter } from 'vue-router'
 import { http, handleApiError } from '../api/http'
-import { endpoints } from '../api/endpoints'
+import { endpoints } from '../api/endpoints'; import { orderAdd, cartAdd } from '../api/order'   // ⚠️ C3 块 4：**同行追加**（不新增行 —— 本文件 `:775`/`:784` 被 `slot-registry.md:1987-1988` 按行号引，此处加行会顶漂它们）。两个函数就是原先那两串 `URLSearchParams` + `http.post` + `res.json()` 的收口
 import { getMerchantId, getCustomerId, isLoggedIn } from '../api/auth'
 
 const route = useRoute()
@@ -614,39 +614,39 @@ const confirmPurchase = () => {
   showPayConfirm.value = true
 }
 
-const handlePay = async (ok) => {   // **2026-10-08 用户六条【三】**：入参由「要不要付款」改成「用户在确认框点了什么」（`true` = 是）；`PayIf` 另按**入口**取（'buy' → 1 付款 / 'cart' → 0 加入购物车）—— 旧实现一个 `payIf` 兼两义、且「否」也往下走 ⇒ **两支都掉 `order.orderAdd`**（用户点名的 bug：结算取消时顺手把商品加进了购物车）。分支表见模板 `:402` 那段注释。
+const handlePay = async (ok) => {   // **C3 块 4 改判**：`PayIf` 不再按入口现算 —— 'cart' 支**根本不碰 order 表**（逐型号写 `/cart/add`），'buy' 支 `PayIf` 恒 1。⚠️ 块 4 前两支都掉 `order.orderAdd`，那正是用户点名的 bug（「结算取消时顺手把商品加进了购物车」）。
   showPayConfirm.value = false
   if (!ok || !pendingOrderData) { pendingOrderData = null; return }   // ⚠️ **「否」在此就返回** ⇒ 一个请求都不发、弹窗与已选数据**原样保留**（用户表：「不加入购物车也不付款，回弹窗保留数据」）。
 
-  const orderData = {
-    ...pendingOrderData,
-    PayIf: popupEntry.value === 'buy' ? 1 : 0
+  const d = pendingOrderData   // 下面两支共用这一份快照（块 4 前它叫 `orderData` 并多带一个 `PayIf`）
+  if (popupEntry.value === 'cart') {   // ① 加入购物车 ⇒ 写 `cart` 表。⚠️ 车**按 ProductCode 计行** ⇒ 逐个型号发一次（同一件商品的多个型号在车里是多行）
+    try {
+      const fails = []
+      for (const item of popupBuyList.value) {
+        const r = await cartAdd({ CustomerId: d.CustomerId, MerchantId: d.MerchantId, ProductCode: item.productCode, Quantity: item.quantity })
+        if (!r.success) fails.push(item.productCode + '：' + (r.msg || '未知错误'))
+      }
+      if (fails.length === 0) {
+        alert('已加入购物车！'); showPopup.value = false; popupQty.value = {}; router.push(getMerchantId() ? '/merchant/order/cart?tab=cart' : '/customer/cart?tab=cart')
+      } else alert('部分型号未能加入购物车：\n' + fails.join('\n'))   // ⚠️ 部分成功要**如实报**：失败的那几件没进车、成功的那几件**已经在车里**了
+    } catch (error) { console.error('加入购物车出错：', error); alert('网络错误，请稍后重试') } finally { pendingOrderData = null }
+    return
   }
 
+  // ② 立即购买 ⇒ 原链路（`order.orderAdd` ⇒ 写入 `order` 表），`PayIf` 恒 1
   try {
-    const params = new URLSearchParams()
-    params.append('CustomerId', orderData.CustomerId)
-    params.append('MerchantId', orderData.MerchantId)
-    params.append('OrderId', orderData.OrderId)
-    params.append('Price', orderData.Price)
-    params.append('ProductInformation', orderData.ProductInformation)
-    params.append('Images', orderData.Images)
-    params.append('PayIf', orderData.PayIf)
-    params.append('DeliveryIf', orderData.DeliveryIf)
-    params.append('ReceiveIf', orderData.ReceiveIf)
+    const result = await orderAdd({
+      CustomerId: d.CustomerId, MerchantId: d.MerchantId, OrderId: d.OrderId,
+      Price: d.Price, ProductInformation: d.ProductInformation, Images: d.Images,
+      PayIf: 1, DeliveryIf: d.DeliveryIf, ReceiveIf: d.ReceiveIf,
+      Quantity: popupCount.value   // C3 块 4：本单**总件数**（A2 甲新列；一个 OrderId 一单 ⇒ 不带型号维度）
+    })
 
-    const res = await http.post(endpoints.order.orderAdd, params.toString())
-    const result = await res.json()
     if (result.success) {
-      alert(popupEntry.value === 'buy' ? '订单提交成功！' : '已加入购物车！')
+      alert('订单提交成功！')
       showPopup.value = false
       popupQty.value = {}
-      const isMerchant = !!getMerchantId()
-      if (isMerchant) {
-        router.push('/merchant?page=order')
-      } else {
-        router.push('/customer?page=cart')
-      }
+      router.push(getMerchantId() ? '/merchant/order/cart?tab=orders' : '/customer/cart?tab=orders')
     } else {
       alert('订单提交失败：' + (result.msg || '未知错误'))
     }

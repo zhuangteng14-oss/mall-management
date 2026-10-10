@@ -33,6 +33,10 @@ import com.minke.mallmanagement.merchant.dao.MerchantApplicationDao;
 import com.minke.mallmanagement.merchant.service.MerchantApplicationService;
 import com.minke.mallmanagement.merchant.service.MerchantDowngradeService;
 import com.minke.mallmanagement.goods.dao.GoodsShelfDao;
+import com.minke.mallmanagement.cart.dao.CartDao;
+import com.minke.mallmanagement.cart.service.CartService;
+import com.minke.mallmanagement.admin.dao.AdminOrderDao;
+import com.minke.mallmanagement.admin.service.AdminOrderService;
 import org.junit.jupiter.api.BeforeEach;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
@@ -172,7 +176,14 @@ import static org.mockito.Mockito.when;
         // 同批删掉了 GoodsTemplateDao / GoodsTemplateService（那两个类已不存在，留着会编译不过）。
         // ⚠️ 又是一个新 Controller（TemplateController / AdminTemplateController）——
         //    「新 @Service 不进 @Import ⇒ 整个切片上下文起不来」，同前几笔。
-        TemplateDao.class, TemplateService.class})
+        TemplateDao.class, TemplateService.class,
+        // C3 块 4（订单块，2026-10-10）：cart 新域（A1 甲）+ 管理端订单治理。
+        // ⚠️ 三处新 @Service/@Dao，两个新 Controller（CartController / AdminOrderController）——
+        //    「新 @Service 不进 @Import ⇒ 整个切片上下文起不来」，同前几笔。
+        // ⚠️ CartService 还吃 OrderService（结算复用它建单）、AdminOrderService 还吃
+        //    NotificationService（介入通知双方）—— 两个依赖都已在上面的清单里，无需重复登记。
+        CartDao.class, CartService.class,
+        AdminOrderDao.class, AdminOrderService.class})
 public abstract class AbstractSmokeTest {
 
     @Autowired

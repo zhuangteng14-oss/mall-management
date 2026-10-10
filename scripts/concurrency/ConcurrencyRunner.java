@@ -2640,9 +2640,13 @@ public class ConcurrencyRunner {
             // 期望 = 11 张基线表 + **已知追加表**；已知追加表在涨：B3 的 order_state_transition（1 张）、
             // C3 块 1（2026-10-09）admin_audit / notification（2 张）、
             // C3 块 2（2026-10-09）merchant_application（1 张）、C3 块 3（2026-10-10）goods_audit（1 张）、
-            // C3 块 3 就地改造（2026-10-10）template（1 张）
-            // —— 六张同在 mall_management_sql.sql 末尾的 Migration 块、人工落盘（见 db-schema.md「表数量：17」）。
+            // C3 块 3 就地改造（2026-10-10）template（1 张）、
+            // C3 块 4（2026-10-10）cart（1 张）
+            // —— 七张同在 mall_management_sql.sql 末尾的 Migration 块、人工落盘（见 db-schema.md「表数量：18」）。
             // ⚠️ 就地改造那笔把 notification_template 物理删了、goods_template 物理删了、新增 template ⇒ 7 → 6。
+            // ⚠️ 块 4 新增 cart ⇒ 6 → 7（**本清单与 KNOWN_TABLES 与上面那句表数说明三处同改**；
+            //    少改一处 A3 的 P3 必红 —— 而 concurrency job 是 continue-on-error，红在 job 颜色上看不出来，
+            //    只能读 artifact 的 gates.count）。
             // 刻意不写死总数：运行器与那份 SQL 是两笔改动，谁先落都要能跑。但**多出来的每一张都必须点过名**
             // （下面的 IN 清单），且清单里那几张必须**真在**（`known == KNOWN_TABLES` 那一半）—— 否则
             // 「表数对上」只是「多了几张没登记的表」，正是 TD-01 要抓的反向改表（update 模式下按实体
@@ -2654,12 +2658,12 @@ public class ConcurrencyRunner {
             int known = scalarInt(c,
                     "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = DATABASE() "
                   + "AND LOWER(table_name) IN ('order_state_transition','admin_audit','notification',"
-                  + "'merchant_application','goods_audit','template')");
-            final int KNOWN_TABLES = 6;   // = 上面 IN 清单的长度（加表时**两处同改**）
+                  + "'merchant_application','goods_audit','template','cart')");
+            final int KNOWN_TABLES = 7;   // = 上面 IN 清单的长度（加表时**两处同改**）
             boolean p3 = tables == 11 + known && known == KNOWN_TABLES;
             pre.put("P3", (p3 ? "PASS" : "FAIL") + " 表数=" + tables + "；已知追加表 order_state_transition /"
                     + " admin_audit / notification / merchant_application /"
-                    + " goods_audit / template 在 " + known + "/" + KNOWN_TABLES
+                    + " goods_audit / template / cart 在 " + known + "/" + KNOWN_TABLES
                     + " 张（期望表数 = 11 + " + KNOWN_TABLES + " = " + (11 + KNOWN_TABLES) + "）");
 
             // P4 种子计数：确认是刚导入过的干净实例，而非被上一轮污染过的库
