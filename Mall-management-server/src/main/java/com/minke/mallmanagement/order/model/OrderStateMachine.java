@@ -361,4 +361,60 @@ public class OrderStateMachine {
             throw new IllegalArgumentException("不是状态转移（无前态、无守卫）：" + action);
         }
     }
+
+    // ===================== 补丁（C3 块4 补丁）：明细列 SQL =====================
+    //
+    // ⚠️ 为什么加在**类尾**而不是 updateSql 旁边：本类的 updateSql / setClause / guardWhere /
+    //    TRANSITIONS 被 OrderStateMachineTest 的 golden copy **逐字符钉死**，整段一个字节都不许动；
+    //    把新方法插在其间会平白让其后的行号集体漂移（全仓 `文件:行号` 互引）。加在尾 = 零漂移。
+    //
+    // ⚠️ 本方法与 updateSql **分工**（两张表仍是一个真值源）：
+    //    updateSql(action)       —— CAS 置位语句（PayIf/DeliveryIf/ReceiveIf），守卫 + 置位=1；**本笔不动**。
+    //    detailUpdateSql(action) —— CAS 命中 1 行后、**同一把订单锁内**再写的「明细列」（TradeNo/PaidAt/…）。
+    //    两者**不合并**：合并会把明细列塞进 CAS 的 SET，改动 golden 串（= 改线上行为）。
+    //    非原子性（位已置、明细未写）由订单锁消除竞态，代价可接受。
+
+    /**
+     * 明细列 UPDATE 语句 —— 与 {@link #updateSql} 同源的第 2 条语句，写「过程明细」而非状态位。
+     *
+     * <p>调用点：{@code OrderService.casTransition} 在 {@code rows > 0} 分支、{@code runLocked} 临界区内。
+     * 语句**不带守卫**（CAS 已用守卫筛过、且仍在同锁内，该行必属于本调用者）。
+     *
+     * <pre>
+     *   PAY     → "UPDATE … SET TradeNo = ?, PaymentMethod = ?, PaidAt = NOW() WHERE OrderId = ?"
+     *   DELIVER → "UPDATE … SET ExpressCompany = ?, TrackingNo = ?, ShippedAt = NOW() WHERE OrderId = ?"
+     *   RECEIVE → "UPDATE … SET ReceivedAt = NOW() WHERE OrderId = ?"
+     * </pre>
+     *
+     * @throws IllegalArgumentException {@code action} 不是转移（{@link OrderAction#CREATE}）
+     */
+    public String detailUpdateSql(OrderAction action) {
+        requireTransition(action);
+        return "UPDATE " + TABLE + " SET " + detailSetClause(action) + " WHERE OrderId = ?";
+    }
+
+    /** {@code detailUpdateSql} 的 SET 段（含 {@code NOW()} 字面量）。 */
+    private String detailSetClause(OrderAction action) {
+        return switch (action) {
+            case PAY -> "TradeNo = ?, PaymentMethod = ?, PaidAt = NOW()";
+            case DELIVER -> "ExpressCompany = ?, TrackingNo = ?, ShippedAt = NOW()";
+            case RECEIVE -> "ReceivedAt = NOW()";
+            default -> throw new IllegalArgumentException("不是状态转移（无明细列）：" + action);
+        };
+    }
+
+    /**
+     * {@link #detailUpdateSql} 的占位符（{@code ?}）列名，**按绑定顺序** —— **不含** {@code NOW()} 列。
+     * 调用方按此顺序绑定，末尾再绑 {@code orderId}。
+     *
+     * @throws IllegalArgumentException {@code action} 不是转移（{@link OrderAction#CREATE}）
+     */
+    public List<String> detailColumns(OrderAction action) {
+        return switch (action) {
+            case PAY -> List.of("TradeNo", "PaymentMethod");
+            case DELIVER -> List.of("ExpressCompany", "TrackingNo");
+            case RECEIVE -> List.of();
+            default -> throw new IllegalArgumentException("不是状态转移（无明细列）：" + action);
+        };
+    }
 }

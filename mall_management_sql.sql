@@ -736,3 +736,80 @@ SET @s := (SELECT IF(COUNT(*) = 0,
   FROM information_schema.COLUMNS
   WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'order' AND COLUMN_NAME = 'Quantity');
 PREPARE _p FROM @s; EXECUTE _p; DEALLOCATE PREPARE _p;
+
+/* =====================================================================
+   Migration 块 7：C3 块 4 补丁〈付款/发货 模拟完整流程〉（2026-10-10，分支 feat/c3-admin-block4）
+   ---------------------------------------------------------------------
+   ① `order` 加 **7** 列 —— 支付 3（TradeNo / PaymentMethod / PaidAt）+ 物流 3（ExpressCompany /
+      TrackingNo / ShippedAt）+ 收货 1（ReceivedAt）。
+      ⚠️ 是 7 列，**不是**框架原文写的「8」：其「物流」那一组 4 项里**已含 ReceivedAt**
+      ⇒ 列名不重复共 **7** 个（ReceivedAt 归物流组还是收货组只是表述，列的集合不变）。
+      定性见 `_work/c3-block4-patch-landing-plan.md §1.1` + 用户 2026-10-10 批复 ①。
+   ② 新表 `order_shipping_track` —— 模拟物流轨迹（A2）。
+      **只由「发货 / 调度器 / 收货」路径写**；调度器**只追加行、绝不 UPDATE `order` 的状态位**
+      （用户 2026-10-10 批准的红线 ⇒ 状态位仍只由三条 CAS 边推进，保 A3 不变量与状态机审计）。
+   ⚠️ 幂等：加列先查 information_schema 再决定执行 / `DO 0`；`CREATE TABLE IF NOT EXISTS` 天然幂等。
+   ⚠️ 本块**只增不改**：不删表、不改既有列、不动既有数据。7 个新列全 NULL 默认
+      ⇒ 存量行零影响、**不改行数** ⇒ A3 的 P4 种子计数（order=6）不受影响。
+   ⚠️ `order_shipping_track` **不在**文件头（:21 起）的 `DROP TABLE IF EXISTS` 基线清单里
+      ⇒ 整份重导**不清空轨迹**（它是过程记录，不是种子；同 `cart` 的口径）。列结构变更走独立 Migration。
+   ⚠️ 回滚（规则 v2：逻辑废弃，**不 DROP**）：7 列 = 保留列 + 停止写入；新表 = 保留表 + 停止写入。
+      登记见 `docs/agent/db-migration.md` #10。
+   ===================================================================== */
+
+-- ---- ① `order` 加 7 列（A1 修正版）----
+-- 规则 7：加列一律**表末** + 默认值（NULL）+ COMMENT。
+--   TradeNo / PaymentMethod / PaidAt       —— 付款路径写（OrderStateMachine.detailUpdateSql(PAY)）
+--   ExpressCompany / TrackingNo / ShippedAt —— 发货路径写（detailUpdateSql(DELIVER)）
+--   ReceivedAt                              —— 收货路径写（detailUpdateSql(RECEIVE)，= NOW()）
+-- ⚠️ ReceivedAt 是**订单**收货时刻（买家点「收货」），**非**物流签收
+--    —— 调度器那条 status=delivered 的轨迹**不写本列**（语义 gap 见 tech-debt）。
+-- ⚠️ 这些列**不进 CAS 的 SET 子句**（updateSql 被 golden copy 逐字符钉死）⇒ 走「同锁内、CAS 命中后」的
+--    第二条明细 UPDATE（detailUpdateSql）。理由见 `_work/c3-block4-patch-landing-plan.md §2.1-2.2`。
+SET @s := (SELECT IF(COUNT(*) = 0, 'ALTER TABLE `order` ADD COLUMN `TradeNo` varchar(64) DEFAULT NULL COMMENT ''支付流水号（PAY+yyyyMMdd+6位随机；模拟网关）''', 'DO 0')
+  FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'order' AND COLUMN_NAME = 'TradeNo');
+PREPARE _p FROM @s; EXECUTE _p; DEALLOCATE PREPARE _p;
+
+SET @s := (SELECT IF(COUNT(*) = 0, 'ALTER TABLE `order` ADD COLUMN `PaymentMethod` varchar(32) DEFAULT NULL COMMENT ''支付方式（alipay/wechat/card；管理员代付=ADMIN）''', 'DO 0')
+  FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'order' AND COLUMN_NAME = 'PaymentMethod');
+PREPARE _p FROM @s; EXECUTE _p; DEALLOCATE PREPARE _p;
+
+SET @s := (SELECT IF(COUNT(*) = 0, 'ALTER TABLE `order` ADD COLUMN `PaidAt` datetime DEFAULT NULL COMMENT ''付款时刻（明细 UPDATE，非 SettlementDate）''', 'DO 0')
+  FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'order' AND COLUMN_NAME = 'PaidAt');
+PREPARE _p FROM @s; EXECUTE _p; DEALLOCATE PREPARE _p;
+
+SET @s := (SELECT IF(COUNT(*) = 0, 'ALTER TABLE `order` ADD COLUMN `ExpressCompany` varchar(64) DEFAULT NULL COMMENT ''快递公司（模拟）''', 'DO 0')
+  FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'order' AND COLUMN_NAME = 'ExpressCompany');
+PREPARE _p FROM @s; EXECUTE _p; DEALLOCATE PREPARE _p;
+
+SET @s := (SELECT IF(COUNT(*) = 0, 'ALTER TABLE `order` ADD COLUMN `TrackingNo` varchar(64) DEFAULT NULL COMMENT ''运单号（模拟）''', 'DO 0')
+  FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'order' AND COLUMN_NAME = 'TrackingNo');
+PREPARE _p FROM @s; EXECUTE _p; DEALLOCATE PREPARE _p;
+
+SET @s := (SELECT IF(COUNT(*) = 0, 'ALTER TABLE `order` ADD COLUMN `ShippedAt` datetime DEFAULT NULL COMMENT ''发货时刻（明细 UPDATE，非 SettlementDate）''', 'DO 0')
+  FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'order' AND COLUMN_NAME = 'ShippedAt');
+PREPARE _p FROM @s; EXECUTE _p; DEALLOCATE PREPARE _p;
+
+SET @s := (SELECT IF(COUNT(*) = 0, 'ALTER TABLE `order` ADD COLUMN `ReceivedAt` datetime DEFAULT NULL COMMENT ''订单收货时刻（买家点收货；非物流签收）''', 'DO 0')
+  FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'order' AND COLUMN_NAME = 'ReceivedAt');
+PREPARE _p FROM @s; EXECUTE _p; DEALLOCATE PREPARE _p;
+
+-- ---- ② 新表 `order_shipping_track`（模拟物流轨迹，A2）----
+-- 规则 8 满足（InnoDB / 主键 / created_at + updated_at）。
+-- ⚠️ **不设外键**：`order` 是全量重导会 `DROP` 的基线表，外键会挡重建（逐字理由见 OrderTimelineWriter 类注释）。
+-- ⚠️ `order` 表**自身** `OrderId` 上无索引（既有 Schema），本表自带 `(OrderId, TrackedAt)` —— 查一单的轨迹正是这个形状。
+-- ⚠️ `TrackedAt`（节点**发生**时刻，= ShippedAt + 阈值偏移）与 `created_at`（**落库**时刻）**刻意分开**：
+--    调度器在阈值被越过后的某一 tick 才补写，两者之差 = 调度延迟（同 order_state_transition.OccurredAt 的理由）。
+-- ⚠️ `Status` 取值（有界，4 个）：picked_up（揽收，发货时写）/ in_transit（运输中）/ out_for_delivery（派送中）/ delivered（已签收，调度器写）。
+--    ⚠️ delivered **不**翻 order.ReceiveIf —— 「物流签收 ≠ 订单收货」，前端分两词表述（见 tech-debt）。
+CREATE TABLE IF NOT EXISTS `order_shipping_track` (
+  `Id`          int NOT NULL AUTO_INCREMENT COMMENT '自增主键',
+  `OrderId`     varchar(40) NOT NULL COMMENT '订单号（对齐 order.OrderId；不设外键）',
+  `Status`      varchar(24) NOT NULL COMMENT '轨迹节点码：picked_up / in_transit / out_for_delivery / delivered',
+  `Description` varchar(255) DEFAULT NULL COMMENT '节点文案（揽收 / 运输中 / 派送中 / 已签收）',
+  `TrackedAt`   datetime(3) NOT NULL COMMENT '节点发生时刻（按 ShippedAt 偏移算，非落库时刻）',
+  `created_at`  datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) COMMENT '行落库时刻（agent.md 数据库管理规则 8）',
+  `updated_at`  datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3) COMMENT '行更新时刻',
+  PRIMARY KEY (`Id`),
+  KEY `idx_order_shipping_track_order` (`OrderId`,`TrackedAt`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='订单物流轨迹（C3 块4 补丁 A2；模拟物流，调度器只追加行）';

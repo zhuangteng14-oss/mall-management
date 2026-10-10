@@ -4359,7 +4359,7 @@ C 档＝完全自裁）；**按用户要求做，不按稿做**（与 `c3-module
 
 ---
 
-## 二十、C3 块 4〈订单块〉（2026-10-10；**落码完成 + 构建/测试绿 + 两库已落 + 手验未做**；未提交）
+## 二十、C3 块 4〈订单块〉（2026-10-10；**落码完成 + 两库已落 + 手验已过（`867bd59` 登记证据）**；⚠️ 其后**补丁〈付款 / 发货 模拟完整流程〉**又落码 —— 见 20-9；未提交）
 
 用户口径（逐字要点）：块 3 已 merge（PR #84，`fbf5c00`）⇒ 正式收口；进块 4「订单块」，**三端一起设计一起落**；
 **继续攒、不提交**；三条不松的线照旧（**建表 / 改契约 / 删文件 ⇒ 必问**）；提速规则照旧（A 档必问 / B 档自裁报备 / C 档自决）。
@@ -4474,3 +4474,26 @@ C 档＝完全自裁）；**按用户要求做，不按稿做**（与 `c3-module
 1. **`db-schema.md` 不中段插行**（方案 §六原文是「表总览 +1、新增 `cart` 小节」）—— 改为**文件末 §11**，理由 = 44 处外部引用（10 个文件 / 26 个不同行号）会被集体顶漂（零漂移优先）。**这是本笔对方案的一次自觉偏离，已在此登记。**
 2. **`api-contract.md` 正文 `O:` 一栏不就地重填** —— 同上按「只登记、不修」，新坐标放**附录 C**。
 3. **管理端订单页的「介入」不做成第三个 tab** —— 它是**行级动作**，页级 tab 只有 2 个（`c3-modules.md §五` 要求页级 tab 2–4 个，2 个合规）。
+
+### 20-9　**补丁**〈付款 / 发货 模拟完整流程〉（2026-10-10；用户批「方案可批，四点要确认」后落码）
+
+用户口径（逐字要点）：【① 列数 7 还是 8】批的是 8 列（3 支付 + 4 物流 + 1 收货）——**答：7 个互异列名**，其「物流」组 4 项里**已含** `ReceivedAt`，「8」是那份清单自己数错了一次；【② 物流签收 ≠ 订单收货 —— **用户接受**】（真实电商亦如此；前端分两词 + 登记 TD）；【③ A5 `/order/orderDetail` —— **批**】（买家看物流必须有它）；【④ 其余全采信】（不动 `OrderStateMachine`（golden 钉死）· 三端点加参用**重载**（`intervene` 零改）· 调度器**只 INSERT 轨迹**（`NOT EXISTS` 幂等）· A3 门禁 **7→8 / 18→19**）。
+
+**目标**：把「付款 / 发货」从**纯状态位**升级成**模拟的完整流程** —— 支付流水号 / 支付方式 / 支付时间、快递公司 / 运单号 / 发货时间、收货时间，加**物流轨迹时间线**。
+
+| 面 | 落地 |
+|---|---|
+| **表** | Migration 块 7（`mall_management_sql.sql:740-815`）：`order` **加 7 列**（全 `DEFAULT NULL`，`information_schema` 守卫）+ **新表 `order_shipping_track`**（7 列 + 主键 + `idx_order_shipping_track_order`，**无 UNIQUE**、**无外键**、**不进重导 DROP 清单**）。表数 **18 → 19**。见 `db-schema.md §12` / `db-migration.md` 注意 13 |
+| **golden copy 保全** | `OrderStateMachine.updateSql` **一字未动**（`OrderStateMachineTest.updateSqlIsByteForByteTheLegacyLiteral` 仍绿）。7 个明细列走**新增的** `detailUpdateSql(action)`（PAY / DELIVER / RECEIVE 三条 SET）+ `detailColumns(action)`，由 `OrderService` 在**同一把订单锁内**发**第二条 UPDATE** ⇒ 锁消除「位已置、明细未写」的竞态 |
+| **重载（`intervene` 零改）** | `payIfUp(orderId)` → 委派 `payIfUp(orderId, paymentMethod)`；`deliveryIfUp(orderId)` → `deliveryIfUp(orderId, expressCompany, trackingNo)`。**1 参重载逐字保留** ⇒ `AdminOrderService.intervene` 的调用点一个字符未动 |
+| **调度器** | 新增 `order/job/ShippingTrackAdvanceJob`（**只 INSERT `order_shipping_track`，绝不 UPDATE `order`** —— 用户 2026-10-10 批准的红线）。按 `ShippedAt` + 阈值（`transit/delivery/signed-ms`，**演示默认 1/2/4 分钟**）补 `in_transit` / `out_for_delivery` / `delivered`；落库前先 `ShippingTrackDao.exists()`。**同 `MerchantDowngradeJob` 款**：整类挂 `@ConditionalOnProperty(name="mall.order.shipping.track.enabled", matchIfMissing=true)` ⇒ a3 / smoke **显式 false** |
+| **后端其它** | `OrderDao.{applyDetails, selectByOrderId, selectShippableForTrack}`（尾部追加）· 新类 `ShippingTrackDao` · `AdminOrderDao.selectShippingTrack` + `COLUMNS` 加 7 列 · `AdminOrderService.detail` 回 `shippingTrack` · `OrderController` 三端点加 `@RequestParam(required=false)` + 新端点 `POST /order/orderDetail`（A5，第一行 `isOwner(request, orderId, false)`） |
+| **前端** | `endpoints.js` 加 `orderDetail`（**同行追加**，`:56`/`:58` 不漂）· `api/order.js` 加 `orderDetail()` 并把 `orderPay` / `orderDeliver` 扩参（**空值不发**）· `OrderMine.vue` **收银台弹窗**（选支付方式 → `orderPay(orderId, method)`，成功回显 `tradeNo`）+ **物流详情弹窗**（`orderDetail` 的 `shippingTrack` 时间线）· `OrderCenter.vue` **发货弹窗**（快递公司 / 运单号，**可留空**）· `views/admin/OrderPage.vue` 详情加**支付/物流 7 列** + **第二条时间线**（`shippingTrack`，**与状态流转线并列不合并**） |
+| **A3 门禁** | `ConcurrencyRunner.java` P3 的 IN 清单加 `'order_shipping_track'`、`KNOWN_TABLES` **7 → 8**、期望表数 **18 → 19**（**净零行数**改法 ⇒ P3 段行号 `2644-2667` **不漂**） |
+| **测试** | `OrderStateMachineTest` 加 `detailUpdateSqlIsPinned` + `detailColumnsMatchPlaceholders`（→ 该类 **23 用例**）· `AbstractSmokeTest` `@Import` 加 `ShippingTrackDao.class`（**第五次同一处地雷**）· `./mvnw test` **258 用例 / 0 失败 / 26 跳过**、`npm run build` 绿 |
+
+**⚠️ 两条明写的边界（登记 `tech-debt.md`）**：① **物流「已签收」≠ 订单「已收货」** —— 这是「调度器不碰状态位」的**必然结果**，前端分两词（物流签收 / 订单收货）；② **没有真实支付网关** —— `TradeNo` 是 `PAY+yyyyMMdd+6位随机` 的**演示流水号**，收银台文案已明说「不会真的扣款」。
+
+**⚠️ 一条隐藏耦合**：`@EnableScheduling` **不在启动类**、挂在 `MerchantDowngradeSchedulingConfig`（自身 `@ConditionalOnProperty(name="mall.downgrade.job.enabled")`）⇒ a3 里调度器**根本不存在**，物流任务的 `enabled=false` 是**第二道**独立闸；**别**为了关物流任务去改降级任务的开关（会连降级一起关）。
+
+**⚠️ 一条新发现的既有事实**：VM 库 `order` 实测 **10 行**（不是 `db-migration.md` #9 记的 6）—— 与本补丁无关（`ALTER ADD COLUMN` 不改行数），是块 4 手验后的**既有累积**；A3 的 P4 用 CI 新导入的 6 行，不受影响。

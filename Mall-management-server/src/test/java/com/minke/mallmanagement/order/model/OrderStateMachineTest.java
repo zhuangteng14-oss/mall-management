@@ -84,6 +84,29 @@ class OrderStateMachineTest {
         assertThat(machine.guard(CREATE)).as("数据访问器不抛，返回空表").isEmpty();
     }
 
+    @Test
+    @DisplayName("明细列 UPDATE（块4 补丁新增）与 updateSql 同源、逐字符钉死 —— 写过程明细，不写状态位")
+    void detailUpdateSqlIsPinned() {
+        assertThat(machine.detailUpdateSql(PAY))
+                .isEqualTo("UPDATE mall_management_sql.`order` SET TradeNo = ?, PaymentMethod = ?, "
+                        + "PaidAt = NOW() WHERE OrderId = ?");
+        assertThat(machine.detailUpdateSql(DELIVER))
+                .isEqualTo("UPDATE mall_management_sql.`order` SET ExpressCompany = ?, TrackingNo = ?, "
+                        + "ShippedAt = NOW() WHERE OrderId = ?");
+        assertThat(machine.detailUpdateSql(RECEIVE))
+                .isEqualTo("UPDATE mall_management_sql.`order` SET ReceivedAt = NOW() WHERE OrderId = ?");
+    }
+
+    @Test
+    @DisplayName("detailColumns 的列序与 detailUpdateSql 的占位符一一对应（末尾恒多一个 OrderId）；CREATE 一律拒绝")
+    void detailColumnsMatchPlaceholders() {
+        assertThat(machine.detailColumns(PAY)).containsExactly("TradeNo", "PaymentMethod");
+        assertThat(machine.detailColumns(DELIVER)).containsExactly("ExpressCompany", "TrackingNo");
+        assertThat(machine.detailColumns(RECEIVE)).isEmpty();
+        assertThatThrownBy(() -> machine.detailUpdateSql(CREATE)).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> machine.detailColumns(CREATE)).isInstanceOf(IllegalArgumentException.class);
+    }
+
     // ===================== 二、守卫层：谓词，不是精确状态 =====================
 
     @Test

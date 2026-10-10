@@ -101,7 +101,7 @@ public class AdminOrderService {
         return result;
     }
 
-    /** 单条详情：订单行 + 状态流转时间线（{@code order_state_transition}）。 */
+    /** 单条详情：订单行 + 状态流转时间线（{@code order_state_transition}）+ 物流轨迹（{@code order_shipping_track}，C3 块4 补丁）。*/
     public Map<String, Object> detail(String orderId) {
         if (isBlank(orderId)) {
             return fail("缺少参数：OrderId");
@@ -114,7 +114,9 @@ public class AdminOrderService {
             }
             result.put("success", true);
             result.put("row", row);
+            // ⚠️ 两条时间线**并存**（不合并）：timeline = 状态流转（CAS 副产品）；shippingTrack = 模拟物流轨迹。
             result.put("timeline", adminOrderDao.selectTimeline(orderId));
+            result.put("shippingTrack", adminOrderDao.selectShippingTrack(orderId));
         } catch (Exception e) {
             e.printStackTrace();
             result.put("success", false);

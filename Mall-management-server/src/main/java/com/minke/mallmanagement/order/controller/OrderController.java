@@ -183,13 +183,15 @@ public class OrderController {
     //    （不在本类留参数）—— 理由是文案与它对应的分支不可分，拆开会让同一处改动要改两处。
     @PostMapping("/orderPayIfUp")
     public ResponseEntity<Object> orderPayIfUp(@RequestParam("orderId") String orderId,
+                                               @RequestParam(value = "paymentMethod", required = false) String paymentMethod,
                                                HttpServletRequest request) {
         // ⚠️ 第一行：只能付**自己**的单（管理员豁免）—— 必须在取锁之前。判据是**回查归属**
         //（入参只有 orderId），见类注释的「块 4 A3 连带」段。
         if (!isOwner(request, orderId, false)) {
             return IdentityGuard.forbidden();
         }
-        return ResponseEntity.ok(Result.of(orderService.payIfUp(orderId)));
+        // ⚠️ C3 块4 补丁：paymentMethod 可空（老调用方 / 管理员代付）；Service 生成 TradeNo 并回传。
+        return ResponseEntity.ok(Result.of(orderService.payIfUp(orderId, paymentMethod)));
     }
 
     //收货按钮更新信息
@@ -214,18 +216,39 @@ public class OrderController {
     // ⚠️ B2：锁 tag = order-delivery。净正确性收益为 0（理由同付款）。
     @PostMapping("/orderDeliveryIfUp")
     public ResponseEntity<Object> orderDeliveryIfUp(@RequestParam("orderId") String orderId,
+                                                    @RequestParam(value = "expressCompany", required = false) String expressCompany,
+                                                    @RequestParam(value = "trackingNo", required = false) String trackingNo,
                                                     HttpServletRequest request) {
         // ⚠️ 第一行：只能发**自己卖**的单（管理员豁免）—— 这一条的归属者是**卖家**，
         //    与付款/收货两条判的不是同一个人 ⇒ 那个 `true` 是这里唯一容易写错的地方。
         if (!isOwner(request, orderId, true)) {
             return IdentityGuard.forbidden();
         }
-        Map<String, Object> result = orderService.deliveryIfUp(orderId);
+        // ⚠️ C3 块4 补丁：快递公司 / 运单号可空（管理员代发走 1 参重载）；成功后 Service 写首条轨迹 picked_up。
+        Map<String, Object> result = orderService.deliveryIfUp(orderId, expressCompany, trackingNo);
         if (Boolean.TRUE.equals(result.get("success"))) {
             auditService.record(AuthSession.identify(request), AuditActions.ORDER_DELIVER,
                     "order", orderId, null, orderActionPayload("deliver"));
         }
         return ResponseEntity.ok(Result.of(result));
+    }
+
+    // ==================== 块4 补丁新增：买家订单详情 ====================
+
+    /**
+     * 买家订单详情（C3 块4 补丁 A5）：订单行 + 物流轨迹（{@code order_shipping_track}）。
+     *
+     * <p>⚠️ 第一行归属校验（管理员豁免）：买家的单只有买家自己能看 —— 与三条 CAS 端点同一形态
+     * （{@link #isOwner} + {@code asMerchant = false}）。单不存在 ⇒ {@code isOwner} 放行、
+     * 由 Service 出 {@code success:false}{@code "订单不存在"}（**不是** 403，同 {@link #isOwner} 的三条回退口径）。
+     */
+    @PostMapping("/orderDetail")
+    public ResponseEntity<Object> orderDetail(@RequestParam("orderId") String orderId,
+                                              HttpServletRequest request) {
+        if (!isOwner(request, orderId, false)) {
+            return IdentityGuard.forbidden();
+        }
+        return ResponseEntity.ok(Result.of(orderService.orderDetail(orderId)));
     }
 
     // ==================== 块 4 新增的内部件 ====================

@@ -189,4 +189,59 @@ public class OrderDao {
     /** 订单归属：{@code customerId} = 买家，{@code merchantId} = 卖家。 */
     public record OrderOwner(String customerId, String merchantId) {
     }
+
+    // ==================== 补丁（C3 块4 补丁）：明细写 + 买家详情 ====================
+    // ⚠️ 加在**类尾**（读区之后）：本类中段被 progress.md（:133 / :138）/ slot-registry.md（:133）/
+    //    db-schema.md（:141）/ OrderCenter.vue（:146）/ context-pack（:125）按行号引用，
+    //    插在中间会让其后集体漂移；加在尾 = 这些引用一个都不漂。
+
+    /**
+     * 执行一条**明细列** UPDATE（{@code OrderStateMachine.detailUpdateSql} 生成），返回影响行数。
+     *
+     * <p>与 {@link #casUpdate} 同款「SQL 不进 DAO」：语句由状态机出。调用点在**同一把订单锁内**、
+     * CAS 命中 1 行**之后** —— 那条「位已置、明细未写」的非原子性由订单锁消除竞态
+     * （见 {@code OrderStateMachine} 类尾补丁段的理由）。
+     */
+    public int applyDetails(String sql, Object... params) {
+        return jdbcClient.sql(sql).params(params).update();
+    }
+
+    /**
+     * 单条订单（买家详情端点 {@code /order/orderDetail} 的数据源）。不存在 ⇒ {@code null}。
+     *
+     * <p>⚠️ <b>显式列清单</b>（含块4 补丁的 7 个明细列），**不是 {@code SELECT *}** ——
+     * 加列不会自动漏进响应，这里多列的列举是**有意**的（买家要看支付方式 / 快递 / 时间）。
+     * 轨迹**不在**本方法里出：另由 {@code ShippingTrackDao} 查（本方法只回订单行）。
+     */
+    public Map<String, Object> selectByOrderId(String orderId) {
+        String sql = "SELECT OrderId, CustomerId, MerchantId, Price, Quantity, ProductInformation, Images, "
+                + "PayIf, DeliveryIf, ReceiveIf, CreateTime, SettlementDate, "
+                + "TradeNo, PaymentMethod, PaidAt, ExpressCompany, TrackingNo, ShippedAt, ReceivedAt "
+                + "FROM mall_management_sql.`order` WHERE OrderId = ? LIMIT 1";
+        return jdbcClient.sql(sql).param(orderId).query().listOfRows().stream().findFirst().orElse(null);
+    }
+
+    /**
+     * 待补物流轨迹的订单（调度器 {@code ShippingTrackAdvanceJob} 的数据源）：
+     * **已发货（{@code DeliveryIf = 1}）且未收货（{@code ReceiveIf = 0}）且有发货时刻**。
+     *
+     * <p>谓词三支缺一不可，各自理由：
+     * <ul>
+     *   <li>{@code DeliveryIf = 1} —— 没发货就没有 {@code ShippedAt} 可偏移，谈不上轨迹；</li>
+     *   <li>{@code ReceiveIf = 0} —— 已收货的单不再补节点（用户已点了「确认收货」，
+     *       再往里插「派送中」是**时序倒错**）；</li>
+     *   <li>{@code ShippedAt IS NOT NULL} —— 老单（本补丁之前发的）{@code DeliveryIf = 1}
+     *       但明细列全 NULL ⇒ 没有基准时刻。**刻意排掉它们**，而不是拿 {@code CreateTime} 顶替
+     *       （那会凭空造出一条与发货无关的时间线）。</li>
+     * </ul>
+     *
+     * <p>⚠️ <b>只读</b>，且**不加时间谓词** —— 「这一轮该补哪些节点」是**应用层判**的
+     * （拿 {@code ShippedAt} 比阈值，各节点各判一次），不是 SQL 判的。把阈值写进 SQL 会让
+     * 「改阈值要改两条语句」，且无法表达「同一单这一轮补 2 个节点、下轮补第 3 个」。
+     */
+    public List<Map<String, Object>> selectShippableForTrack() {
+        String sql = "SELECT OrderId, ShippedAt FROM mall_management_sql.`order` "
+                + "WHERE DeliveryIf = 1 AND ReceiveIf = 0 AND ShippedAt IS NOT NULL";
+        return jdbcClient.sql(sql).query().listOfRows();
+    }
 }

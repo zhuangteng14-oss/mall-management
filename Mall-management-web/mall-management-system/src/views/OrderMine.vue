@@ -59,14 +59,21 @@
               <button
                 v-if="order.PayIf !== 1"
                 class="act"
-                @click="handlePay(order)"
+                @click="openPay(order)"
               >付款</button>
               <button
                 v-if="canReceive(order)"
                 class="act"
                 @click="handleReceive(order)"
               >收货</button>
-              <span v-if="order.PayIf === 1 && !canReceive(order)" class="dash">等待商家发货</span>
+              <!-- ⚠️ C3 块4 补丁：**发货之后**才有物流可看（`DeliveryIf === 1`）——
+                   在「待发货」上画它只会弹一个空时间线。收货后仍保留（`ReceiveIf === 1` 也是 `DeliveryIf === 1`）。 -->
+              <button
+                v-if="order.DeliveryIf === 1"
+                class="act"
+                @click="openDetail(order)"
+              >物流</button>
+              <span v-if="order.PayIf === 1 && !canReceive(order) && order.DeliveryIf !== 1" class="dash">等待商家发货</span>
             </div>
           </div>
           <p class="hint">⚠️ 数量列显示的是下单时记下的件数；`Quantity` 列是 C3 块 4 新加的，此前落库的行一律回填成 <b>1</b>。</p>
@@ -92,6 +99,65 @@
         </section>
       </template>
     </div>
+
+    <!-- ══ 收银台弹窗（C3 块4 补丁）══════════════════════════════════════════════
+         ⚠️ 这是**模拟支付**：本仓没有网关，`orderPay` 只把「选了哪种方式」记进
+         `order.PaymentMethod` 并回一个生成的 `TradeNo`。文案必须说清楚，别让用户以为真扣了钱。 -->
+    <div v-if="payFor" class="scrim" @click="payFor = null">
+      <div class="dlg" @click.stop>
+        <div class="dlg-h">
+          <span>收银台</span>
+          <button class="x" @click="payFor = null" aria-label="关闭">×</button>
+        </div>
+        <div class="dlg-b">
+          <p class="pay-amt">应付金额 <b>¥{{ formatPrice(payFor.Price) }}</b></p>
+          <p class="pay-oid">订单号 <span class="mono">{{ payFor.OrderId }}</span></p>
+          <div class="pay-methods">
+            <label v-for="m in PAY_METHODS" :key="m" class="pm" :class="{ on: payMethod === m }">
+              <input type="radio" name="paymethod" :value="m" v-model="payMethod" />
+              <span>{{ m }}</span>
+            </label>
+          </div>
+          <p class="pay-note">⚠️ 演示环境的**模拟收银台**：本仓没有支付网关，点「确认支付」只会把所选方式与一个演示流水号记进订单，不会真的扣款。</p>
+        </div>
+        <div class="dlg-f">
+          <button class="act" @click="payFor = null">取消</button>
+          <button class="act primary" :disabled="paying" @click="confirmPay">{{ paying ? '支付中…' : '确认支付' }}</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ══ 物流详情弹窗（C3 块4 补丁）═══════════════════════════════════════════
+         ⚠️ 标题写「物流轨迹」而**不是**「订单状态」：`shippingTrack` 是**模拟物流**，
+         末条「已签收」说的是**快递到了**，不是**订单已收货**（那要买家自己点【收货】）。 -->
+    <div v-if="detailFor" class="scrim" @click="detailFor = null">
+      <div class="dlg" @click.stop>
+        <div class="dlg-h">
+          <span>物流轨迹</span>
+          <button class="x" @click="detailFor = null" aria-label="关闭">×</button>
+        </div>
+        <div class="dlg-b">
+          <p class="pay-oid">订单号 <span class="mono">{{ detailFor.OrderId }}</span></p>
+          <p class="pay-oid">
+            承运 / 单号
+            <span class="mono">{{ detailRow.ExpressCompany || '—' }} / {{ detailRow.TrackingNo || '—' }}</span>
+            <span class="dash">（管理员代发的单这两列为空）</span>
+          </p>
+          <div v-if="detailLoading" class="tl-empty">加载中…</div>
+          <ol v-else-if="detailTrack.length" class="tl">
+            <li v-for="(t, i) in detailTrack" :key="i" :class="{ last: i === detailTrack.length - 1 }">
+              <span class="tl-dot"></span>
+              <div class="tl-main">
+                <span class="tl-desc">{{ t.Description || t.Status }}</span>
+                <span class="tl-time mono">{{ formatDateTime(t.TrackedAt) }}</span>
+              </div>
+            </li>
+          </ol>
+          <div v-else class="tl-empty">暂无物流轨迹。</div>
+          <p class="pay-note">⚠️ 轨迹由后台任务按发货时间**模拟推进**（分钟级演示阈值），末条「已签收」表示快递送达，与「订单收货」是两件事。</p>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -105,7 +171,7 @@
 import { ref, computed, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
 import { handleApiError } from '../api/http'
-import { orderSelect, orderHistory, orderPay, orderReceive } from '../api/order'
+import { orderSelect, orderHistory, orderPay, orderReceive, orderDetail } from '../api/order'
 import { resolveBuyerId } from '../api/auth'
 
 // 购物车 tab 的地址 —— 两壳路径不同（`/customer/cart` vs `/merchant/order/cart`），不写死。
@@ -177,11 +243,28 @@ const load = async () => {
   }
 }
 
-const handlePay = async (order) => {
+/* ── 收银台（C3 块4 补丁）─────────────────────────────────────────────────────
+   ⚠️ `handlePay` 一分为二：`openPay` 只开弹窗，`confirmPay` 才真调 `orderPay`。
+   「选了方式」与「付了款」是两步 —— 并成一步（点【付款】即支付）就没法传 `paymentMethod` 了。 */
+const PAY_METHODS = ['支付宝', '微信支付', '银行卡']
+const payFor = ref(null)          // 非 null ⇒ 收银台开着，值 = 那一单
+const payMethod = ref(PAY_METHODS[0])
+const paying = ref(false)
+
+const openPay = (order) => {
+  payMethod.value = PAY_METHODS[0]
+  payFor.value = order
+}
+
+const confirmPay = async () => {
+  if (!payFor.value || paying.value) return
+  paying.value = true
   try {
-    const result = await orderPay(order.OrderId)
+    const result = await orderPay(payFor.value.OrderId, payMethod.value)
     if (result.success) {
-      alert('付款成功！')
+      // ⚠️ `TradeNo` 是后端生成的**演示流水号**，成功时才回 —— 拿不到就退回一句无号的文案。
+      alert(result.tradeNo ? `支付成功！演示流水号 ${result.tradeNo}` : '支付成功！')
+      payFor.value = null
       await load()
     } else {
       alert('付款失败：' + (result.msg || '未知错误'))
@@ -189,6 +272,8 @@ const handlePay = async (order) => {
   } catch (err) {
     console.error('付款请求出错', err)
     alert('网络错误，请稍后重试')
+  } finally {
+    paying.value = false
   }
 }
 
@@ -204,6 +289,35 @@ const handleReceive = async (order) => {
   } catch (err) {
     console.error('收货请求出错', err)
     alert('网络错误，请稍后重试')
+  }
+}
+
+/* ── 物流详情（C3 块4 补丁 · A5）─────────────────────────────────────────────
+   ⚠️ 数据来自 `/order/orderDetail`（**买家侧**，只有 `row` + `shippingTrack`，**没有**
+   `timeline`）—— 买家看的是物流，不是后端的状态机轨迹。 */
+const detailFor = ref(null)
+const detailRow = ref({})
+const detailTrack = ref([])
+const detailLoading = ref(false)
+
+const openDetail = async (order) => {
+  detailFor.value = order
+  detailRow.value = {}
+  detailTrack.value = []
+  detailLoading.value = true
+  try {
+    const result = await orderDetail(order.OrderId)
+    if (result.success) {
+      detailRow.value = result.row || {}
+      detailTrack.value = result.shippingTrack || []
+    } else {
+      alert('获取物流失败：' + (result.msg || '未知错误'))
+    }
+  } catch (err) {
+    console.error('物流详情请求出错', err)
+    alert('网络错误，请稍后重试')
+  } finally {
+    detailLoading.value = false
   }
 }
 
@@ -358,4 +472,119 @@ onMounted(load)
   .thead, .trow { grid-template-columns: 48px minmax(0, 1fr) 104px 44px 80px 92px 132px; gap: var(--s3); }
   .thead.done, .trow.done { grid-template-columns: 48px minmax(0, 1fr) 104px 80px 44px 132px; }
 }
+
+/* ══ 收银台 / 物流弹窗（C3 块4 补丁）═══════════════════════════════════════════
+   ⚠️ 用 `position: fixed` 而不是 absolute：`.ordermine-page` 是滚动盒、**没有** position:relative
+   ⇒ absolute 会锚到视口外；fixed 直接锚视口，与本页既有的「无 absolute 子元素」口径不冲突。 */
+.scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  background: rgba(0, 0, 0, 0.42);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--s5);
+}
+.dlg {
+  width: min(520px, 100%);
+  max-height: 86vh;
+  overflow-y: auto;
+  background: var(--surface);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r2);
+  box-shadow: 0 12px 48px rgba(0, 0, 0, 0.22);
+}
+.dlg-h {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--s4) var(--s5);
+  border-bottom: 1px solid var(--line);
+  font-family: var(--font-display);
+  font-size: var(--fs-md);
+  font-weight: var(--fw-med);
+  color: var(--ink);
+}
+.dlg-h .x {
+  border: 0;
+  background: transparent;
+  font-size: var(--fs-lg);
+  line-height: 1;
+  color: var(--ink-3);
+  cursor: pointer;
+}
+.dlg-b { padding: var(--s5); }
+.dlg-f {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--s3);
+  padding: var(--s4) var(--s5);
+  border-top: 1px solid var(--line);
+}
+
+.pay-amt { margin: 0; font-size: var(--fs-sm); color: var(--ink-2); }
+.pay-amt b {
+  font-family: var(--font-display);
+  font-size: var(--fs-lg);
+  font-weight: var(--fw-med);
+  color: var(--ink);
+}
+.pay-oid { margin: var(--s2) 0 0; font-size: var(--fs-xs); color: var(--ink-3); }
+.mono { font-family: var(--font-mono); color: var(--ink-2); }
+.pay-note {
+  margin: var(--s4) 0 0;
+  font-size: var(--fs-xs);
+  line-height: 1.6;
+  color: var(--ink-3);
+}
+
+.pay-methods { display: flex; flex-wrap: wrap; gap: var(--s3); margin-top: var(--s4); }
+.pm {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s2);
+  height: 34px;
+  padding: 0 var(--s4);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r1);
+  font-size: var(--fs-sm);
+  color: var(--ink-2);
+  cursor: pointer;
+}
+.pm.on { border-color: var(--brand); color: var(--brand-ink); background: var(--surface-3); }
+.pm input { accent-color: var(--brand); }
+
+/* 物流时间线：竖线 + 圆点，纯 CSS（不引图标库 —— 本仓无组件库，惯例是逐页 scoped）。 */
+.tl { list-style: none; margin: var(--s4) 0 0; padding: 0; }
+.tl li { position: relative; display: flex; gap: var(--s4); padding: 0 0 var(--s4) var(--s2); }
+.tl li::before {
+  content: '';
+  position: absolute;
+  left: 6px;
+  top: 14px;
+  bottom: 0;
+  width: 1px;
+  background: var(--line-2);
+}
+.tl li.last::before { display: none; }
+.tl-dot {
+  flex: 0 0 auto;
+  width: 9px;
+  height: 9px;
+  margin-top: 6px;
+  border-radius: 50%;
+  background: var(--brand);
+}
+.tl-main { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.tl-desc { font-size: var(--fs-sm); color: var(--ink); }
+.tl-time { font-size: var(--fs-xs); color: var(--ink-3); }
+.tl-empty { padding: var(--s4) 0; font-size: var(--fs-sm); color: var(--ink-3); }
+
+.dlg-f .act.primary {
+  border-color: var(--brand);
+  background: var(--brand);
+  color: #fff;
+}
+.dlg-f .act.primary[disabled] { opacity: 0.6; cursor: default; }
 </style>

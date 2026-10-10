@@ -137,7 +137,7 @@
                  『用户未付款，暂不能发货』」这条路径在 UI 上消失；`handleDeliver()` 的三道守卫
                  **逐字保留**（纵深防御），且状态列已具名「未付款」。登记见 §一 commit 5。 -->
             <div class="op r">
-              <button v-if="canSend(order)" class="send" :disabled="order.DeliveryIf === 1 || order.ReceiveIf === 1" :class="{ disabled: order.DeliveryIf === 1 || order.ReceiveIf === 1 }" title="现有端点 order.orderDeliveryIfUp（endpoints.js:58）——本页唯一不禁用的按钮" @click="handleDeliver(order)">发货</button>
+              <button v-if="canSend(order)" class="send" :disabled="order.DeliveryIf === 1 || order.ReceiveIf === 1" :class="{ disabled: order.DeliveryIf === 1 || order.ReceiveIf === 1 }" title="现有端点 order.orderDeliveryIfUp（endpoints.js:58）——本页唯一不禁用的按钮；C3 块4 补丁起改为先开【填写快递信息】弹窗，再发货" @click="openDeliver(order)">发货</button>
               <span v-else class="dash">—</span>
             </div>
           </div>
@@ -154,6 +154,34 @@
           <span class="tot" title="⚠️ 两条商户 SQL 都没有 LIMIT ⇒ 全部行一次返回，没有「页」。「每页 20」是稿的目标版文案（稿 :743 自注：稿的数据集 6 单所以是 1 页；71 单 / 每页 20 下是 4 页）。">共 {{ orderList.length }} 单 · 每页 20</span>
         </nav>
       </template>
+    </div>
+
+    <!-- ══ 发货弹窗（C3 块4 补丁）════════════════════════════════════════════════
+         ⚠️ 快递公司 / 运单号**可留空**：后端两个参数都是 `required=false` ⇒ 空着发，
+         轨迹首条仍会写（`picked_up` 的文案不带快递信息）。本条是「让能填的填上」，不是「必填」。 -->
+    <div v-if="deliverFor" class="scrim" @click="deliverFor = null">
+      <div class="dlg" @click.stop>
+        <div class="dlg-h">
+          <span>填写快递信息</span>
+          <button class="x" @click="deliverFor = null" aria-label="关闭">×</button>
+        </div>
+        <div class="dlg-b">
+          <p class="dlg-oid">订单号 <span class="mono">{{ deliverFor.OrderId }}</span></p>
+          <label class="dlg-fld">
+            <span class="dlg-fld-l">快递公司</span>
+            <input v-model.trim="deliverCompany" type="text" maxlength="64" placeholder="如：顺丰速运（可留空）" />
+          </label>
+          <label class="dlg-fld">
+            <span class="dlg-fld-l">运单号</span>
+            <input v-model.trim="deliverTrackingNo" type="text" maxlength="64" placeholder="如：SF1234567890（可留空）" />
+          </label>
+          <p class="dlg-note">⚠️ 留空也能发货：快递信息只是记进订单，供买家在【物流】里查看。</p>
+        </div>
+        <div class="dlg-f">
+          <button class="act" @click="deliverFor = null">取消</button>
+          <button class="send" :disabled="delivering" @click="confirmDeliver">{{ delivering ? '发货中…' : '确认发货' }}</button>
+        </div>
+      </div>
     </div>
   </div>
 </template>
@@ -245,7 +273,16 @@ const stateOf = (order) => {
 // 稿 :875 的 `canSend`（= 待发货）：只有这一态渲染可点的【发货】。
 const canSend = (order) => order.PayIf === 1 && order.DeliveryIf === 0 && order.ReceiveIf === 0
 
-const handleDeliver = async (order) => {
+/* ── 发货弹窗（C3 块4 补丁）───────────────────────────────────────────────────
+   ⚠️ 原 `handleDeliver` 一分为二：`openDeliver` 先跑**三道守卫**再开弹窗，
+   `confirmDeliver` 收快递信息后发货。守卫**逐字保留**（纵深防御，理由见模板 :137 那条）——
+   它们从「点击即判」挪到「开窗前判」，判据与文案一行未改。 */
+const deliverFor = ref(null)
+const deliverCompany = ref('')
+const deliverTrackingNo = ref('')
+const delivering = ref(false)
+
+const openDeliver = (order) => {
   if (order.DeliveryIf === 1) {
     alert('订单已发货，不可重复操作')
     return
@@ -258,13 +295,25 @@ const handleDeliver = async (order) => {
     alert('用户未付款，暂不能发货')
     return
   }
+  deliverCompany.value = ''
+  deliverTrackingNo.value = ''
+  deliverFor.value = order
+}
+
+const confirmDeliver = async () => {
+  if (!deliverFor.value || delivering.value) return
+  delivering.value = true
   try {
     const params = new URLSearchParams()
-    params.append('orderId', order.OrderId)
+    params.append('orderId', deliverFor.value.OrderId)
+    // ⚠️ 与 `api/order.js:orderDeliver` 同一口径：**空的键根本不发**（发了空串 = 给了个空值）。
+    if (deliverCompany.value) params.append('expressCompany', deliverCompany.value)
+    if (deliverTrackingNo.value) params.append('trackingNo', deliverTrackingNo.value)
     const res = await http.post(endpoints.order.orderDeliveryIfUp, params.toString())
     const result = await res.json()
     if (result.success) {
       alert('发货成功！')
+      deliverFor.value = null
       await loadOrders()
     } else {
       alert('发货失败：' + (result.msg || '未知错误'))
@@ -272,6 +321,8 @@ const handleDeliver = async (order) => {
   } catch (err) {
     console.error('发货请求出错', err)
     alert('网络错误，请稍后重试')
+  } finally {
+    delivering.value = false
   }
 }
 
@@ -841,4 +892,69 @@ onMounted(() => {
     content: "";
   }
 }
+
+/* ══ 发货弹窗（C3 块4 补丁）════════════════════════════════════════════════════
+   ⚠️ 类名一律加 `dlg-` 前缀 —— 本文件的 `.fld` / `.act` / `.send` 已被筛选条与操作列占用，
+   复用它们会把弹窗与表格绑在同一套尺寸上（改一处动两处）。
+   `position: fixed`：`.order-center-page` 是 `position:relative` 的滚动盒，absolute 会随滚动跑。 */
+.scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  background: rgba(0, 0, 0, 0.42);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--s5);
+}
+.dlg {
+  width: min(480px, 100%);
+  background: var(--surface);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r2);
+  box-shadow: 0 12px 48px rgba(0, 0, 0, 0.22);
+}
+.dlg-h {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--s4) var(--s5);
+  border-bottom: 1px solid var(--line);
+  font-family: var(--font-display);
+  font-size: var(--fs-md);
+  font-weight: var(--fw-med);
+  color: var(--ink);
+}
+.dlg-h .x {
+  border: 0;
+  background: transparent;
+  font-size: var(--fs-lg);
+  line-height: 1;
+  color: var(--ink-3);
+  cursor: pointer;
+}
+.dlg-b { padding: var(--s5); }
+.dlg-f {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--s3);
+  padding: var(--s4) var(--s5);
+  border-top: 1px solid var(--line);
+}
+.dlg-oid { margin: 0 0 var(--s4); font-size: var(--fs-xs); color: var(--ink-3); }
+.mono { font-family: var(--font-mono); color: var(--ink-2); }
+.dlg-fld { display: flex; align-items: center; gap: var(--s3); margin-bottom: var(--s3); }
+.dlg-fld-l { flex: 0 0 64px; font-size: var(--fs-xs); color: var(--ink-3); }
+.dlg-fld input {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 32px;
+  padding: 0 var(--s3);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r1);
+  background: var(--surface);
+  color: var(--ink);
+  font-size: var(--fs-sm);
+}
+.dlg-note { margin: var(--s3) 0 0; font-size: var(--fs-xs); line-height: 1.6; color: var(--ink-3); }
 </style>

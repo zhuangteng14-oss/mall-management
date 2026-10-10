@@ -309,3 +309,67 @@
 
 新增 `src/api/order.js`（**233 行**）：`q()`（丢空值）/ `build()`（全传）/ `post()`（剥 `Response`）三个内部件 + **8 个 `/order/*`** + **5 个 `/cart/*`** + **4 个 `/admin/order/*`** 导出。
 `src/api/endpoints.js` 的 `orderAdmin: {list, detail, monitor, intervene}` 见 `:194-198`；`endpoints.js` 头部「现为 N 条」计数已**同行改**（**未新增行**）。
+
+## 附录 D：C3 块 4 **补丁**〈付款 / 发货 模拟完整流程〉契约增补（2026-10-10）
+
+> **与附录 C 的关系**：C 记的是块 4 本体（`OrderController` 65 → 156 行）；本补丁又让它长到 **252 行**（+96）⇒ **C.1 那张表的新坐标已再次陈旧**。按同一条口径（只登记、不修），补丁的坐标登记在此；重填 `O:` 与 C.1 一律归「文档飘移清理笔」。
+> **判据档位**：本附录行号均为 **2026-10-10 实测**（`grep -n '@PostMapping'`，口径 = **`@PostMapping` 行**，与正文 / 附录 C 一致）。
+
+### D.1 `OrderController` 端点新坐标（2026-10-10 实测，含 C.1 的再一次偏移）
+
+| 端点 | C.1 值 | **补丁后** | 变化来源 |
+|---|---|---|---|
+| `/order/orderAdd` | `:95` | **`:95`** | 不变（在其之前的只有 import / 字段） |
+| `/order/orderSelect` | `:121` | **`:121`** | 不变 |
+| `/order/orderDeliveryIfSelect` | `:134` | **`:134`** | 不变 |
+| `/order/orderDeliverySelect` | `:149` | **`:149`** | 不变 |
+| `/order/historicalOrdersSelect` | `:165` | **`:165`** | 不变 |
+| `/order/orderPayIfUp` | `:184` | **`:184`** | 不变（**只加了一行 `@RequestParam`，方法体行未前移**） |
+| `/order/orderReceiveIfUp` | `:197` | **`:199`** | +2（付款方法多了 1 行入参 + 1 行调用改写） |
+| `/order/orderDeliveryIfUp` | `:215` | **`:217`** | +2（收货方法多了 1 行审计块重排） |
+| `/order/orderDetail` | —— | **`:245`** | **补丁新增（A5）** |
+
+⚠️ **`OrderController` 的「不动」是刻意保全的**：三个 CAS 端点的**锁 tag / 文案 / 锁编排**一行未改，只有入参多了 `@RequestParam(required=false)` 与方法体里的一行调用改写（见 D.3）。
+
+### D.2 新端点：`POST /order/orderDetail`（买家订单详情，A5 —— 用户 2026-10-10 批）
+
+| 项 | 内容 |
+|---|---|
+| 路径 | `/order/orderDetail`（`@RequestMapping("/order")` 之下） |
+| 入参 | `orderId`（**必填**，`@RequestParam("orderId") String`） |
+| 返回 | `{success, row, shippingTrack}` —— ⚠️ **平铺**（`Result<Map>`），**没有 `data` 包裹层**、**没有 `timeline`**（那是管理端 `/admin/order/detail` 才有的状态流转线） |
+| `row` | 订单行，**显式列清单**含补丁的 7 个明细列（`TradeNo` / `PaymentMethod` / `PaidAt` / `ExpressCompany` / `TrackingNo` / `ShippedAt` / `ReceivedAt`）；存量行这些列全 `null` |
+| `shippingTrack` | 数组，一行 = `{Status, Description, TrackedAt}`，**按 `TrackedAt` 升序**（排序键不是 `Id`） |
+| 归属 | 第一行 `isOwner(request, orderId, false)`（**买家**）⇒ 看别人的单 **403**；**单不存在放行**、由 Service 出 `success:false` +「订单不存在」（**不是** 403，理由同 `isOwner` 三条回退口径） |
+| 副作用 | **纯读**，不写审计、不改库 |
+| 证据 | `OrderController.java:245` · `OrderService.orderDetail` · `OrderDao.selectByOrderId` + `ShippingTrackDao.selectByOrderId` |
+
+### D.3 三个 CAS 端点的入参扩展（**全部向后兼容**）
+
+| 端点 | 新增入参 | 兼容性 | 副作用 |
+|---|---|---|---|
+| `/order/orderPayIfUp` | `paymentMethod?`（`@RequestParam(value="paymentMethod", required=false)`） | **兼容**：不传 ⇒ 落 `NULL`（**不是**空串） | 成功后 Service **生成 `TradeNo`**（`PAY+yyyyMMdd+6位随机`）并在**响应体**回传 `tradeNo`；同笔写 `order` 的 3 个支付列 |
+| `/order/orderReceiveIfUp` | 无 | 不变 | 成功后写 `order.ReceivedAt` **且**保证 `delivered` 轨迹行存在（`NOT EXISTS` 幂等） |
+| `/order/orderDeliveryIfUp` | `expressCompany?` / `trackingNo?` | **兼容**：都不传 ⇒ 两列 `NULL`（管理员代发走的 1 参重载即是此路） | 成功后写 `order` 的 3 个物流列 **且**追加首条轨迹 `picked_up`（偏移 0） |
+
+⚠️ **`intervene` 零改**：`AdminOrderService.intervene` 调的是 **1 参重载** `payIfUp(orderId)` / `deliveryIfUp(orderId)` / `receiveIfUp(orderId)` —— 三个重载**逐字保留** ⇒ 管理端介入的行为与契约**一个字符没变**（只是它落库时也会写明细列 / 轨迹，那对调用方不可见）。
+
+### D.4 轨迹写入契约（`order_shipping_track`）
+
+| 写入方 | 节点 | 时刻 | 幂等 |
+|---|---|---|---|
+| `OrderService.deliveryIfUp` | `picked_up`（「商家已揽收」） | `now`（偏移 0） | 无（发货是 CAS，只会成功一次） |
+| `OrderService.receiveIfUp` | `delivered`（「已签收」）**兜底补写** | `now` | `ShippingTrackDao.exists(orderId, 'delivered')` |
+| `ShippingTrackAdvanceJob`（@Scheduled） | `in_transit` / `out_for_delivery` / `delivered` | `ShippedAt + 阈值` | 同上（每节点各判一次） |
+
+- ⚠️ **调度器只 INSERT 轨迹，绝不 UPDATE `order` 的状态位**（用户 2026-10-10 批准的红线）⇒ **物流「已签收」≠ 订单「已收货」**（后者仍由买家点【收货】触发 CAS），前端分两词表述。
+- ⚠️ **阈值走 properties**（`mall.order.shipping.track.{transit,delivery,signed}-ms`），**演示默认 1 / 2 / 4 分钟**；生产口径改配置即可。
+- ⚠️ **a3 / smoke 两个 profile 显式 `mall.order.shipping.track.enabled=false`**（同 `MerchantDowngradeJob` 款）⇒ 手验调度推进要在**默认 profile** 下做。
+
+### D.5 前端封装增补
+
+- `src/api/endpoints.js`：`order` 组加 `orderDetail`（**与 `historicalOrdersSelect` 同行追加**，`:56` / `:58` 两个被引行**不漂**）；头部「现为 N 条」计数 **78 → 79**（同行改）。
+- `src/api/order.js`：新增 `orderDetail(orderId)`（**④ 节，文件末** —— 与 ① 组的「搬家 8 条」在语义上分开）；`orderPay(orderId, paymentMethod?)` 与 `orderDeliver(orderId, expressCompany?, trackingNo?)` 扩参，**空值不发**（与 `build()` 的「全传」相反，此处刻意用 `if` 筛）。
+- `OrderMine.vue`：**收银台弹窗**（`PAY_METHODS` 三选一 → `orderPay(orderId, method)`；成功回显 `tradeNo`）+ **物流详情弹窗**（`orderDetail` 的 `shippingTrack` 画时间线）。
+- `OrderCenter.vue`：**发货弹窗**（快递公司 / 运单号，**可留空**）；原 `handleDeliver` 的三道守卫**逐字保留**、只从「点击即判」挪到「开窗前判」。
+- `views/admin/OrderPage.vue`：详情区加**支付 / 物流 7 列** + **第二条时间线**（`detail.shippingTrack`，**与 `detail.timeline` 并列不合并**）。
