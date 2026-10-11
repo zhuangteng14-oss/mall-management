@@ -38,6 +38,8 @@ import com.minke.mallmanagement.cart.service.CartService;
 import com.minke.mallmanagement.order.dao.ShippingTrackDao;
 import com.minke.mallmanagement.admin.dao.AdminOrderDao;
 import com.minke.mallmanagement.admin.service.AdminOrderService;
+import com.minke.mallmanagement.stats.dao.StatsDao;
+import com.minke.mallmanagement.stats.service.StatsService;
 import org.junit.jupiter.api.BeforeEach;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
@@ -191,7 +193,17 @@ import static org.mockito.Mockito.when;
         //    @Scheduled —— 切片里没有调度器（@EnableScheduling 挂在 MerchantDowngradeSchedulingConfig、
         //    不属 web 组件），拉进来只会多一个永不执行的 bean。它落回下面那个 @MockitoBean 之外的
         //    真实缺口由「默认 profile 手验」兜（见该类的类注释）。
-        ShippingTrackDao.class})
+        ShippingTrackDao.class,
+        // 可视化段 commit 2（经营数据看板，2026-10-11）：新增两个 Controller（`AdminStatsController` /
+        // `MerchantStatsController`）+ 一个 @Service（`StatsService`）——
+        // **第六次同一处地雷**：@WebMvcTest 无参会加载全部 @Controller，新控制器一进来，
+        // 切片上下文就会因为「找不到它要的 StatsService」而**启动失败**（同前五笔，
+        // 2026-10-09 那次是 237 测试 / 77 errors）。⇒ 照既有范式 @Import 真 bean。
+        // ⚠️ **刻意不 @Import `StatsAggregateJob`**：它是 @Component（切片不扫）且是 @Scheduled ——
+        //    理由与上一笔的 `ShippingTrackAdvanceJob` **逐字相同**（切片里没有调度器；
+        //    @EnableScheduling 挂在 MerchantDowngradeSchedulingConfig，不属 web 组件）。
+        //    ⇒ 「默认 profile 手验」兜它（job 是滚动窗口，演示数据落窗外 ⇒ 手验要看数据请用 rebuild）。
+        StatsDao.class, StatsService.class})
 public abstract class AbstractSmokeTest {
 
     @Autowired

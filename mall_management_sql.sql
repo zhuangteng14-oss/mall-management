@@ -860,3 +860,42 @@ CREATE TABLE IF NOT EXISTS `order_item` (
   KEY `idx_order_item_goods_time` (`ProductCode`,`OrderedAt`),
   KEY `idx_order_item_merchant_time` (`MerchantId`,`OrderedAt`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='订单明细（可视化段 commit 0；商品维度统计的数据源）';
+
+-- ============================================================================
+-- 【可视化段 · commit 2（2026-10-11）】经营数据日聚合 stats_daily
+-- ============================================================================
+-- ⚠️ 为什么要有它：GMV / 成单数 / 件数 / 买家数这四项**从来没被算过**（不是「算错了」），
+--    而每次都在端点里现算会随订单表增长而线性变慢，且「日切口径」会被抄散在多个查询里。
+--    ⇒ 收成一张**日聚合**表 + 一个预聚合任务；端点只做「读 + 求和」，不再扫 `order`。
+-- ⚠️ 为什么**同时**存 site 与 merchant 两个口径（而不是只存 merchant、读时 ROLLUP）：
+--    ROLLUP 会丢掉 `COUNT(DISTINCT CustomerId)` 的可加性 —— **跨商家去重买家数 ≠ 各商家买家数之和**
+--    （同一人今天在两店各下一单，全站买家数算 1）。全站口径**必须单独算**、不能由商家口径推。这是本表要
+--    分 `Scope` 两行、而不是一行的**唯一**理由，别为了「省一行」改回去。
+-- ⚠️ `Aov`（客单价）**刻意不落列**：它是 `Gmv / Orders` 的派生值。存下来就会在「订单被重导 /
+--    口径修正后」与分子分母漂开，而派生列一旦漂开**没人会发现**。读时现除。
+-- ⚠️ 日切列是 `order.CreateTime`（varchar(50)，ISO 式零填充 `'YYYY-MM-DD HH:MM:SS'`）——
+--    `DATE(CreateTime)` 依赖那个**格式**：谁把写入格式改成非零填充，本表会静默算错（同日切口径见
+--    AdminOrderDao 的时间筛注释）。另外 `PaidAt` 12 行全 NULL、`SettlementDate` 是 varchar 且部分 NULL
+--    ⇒ 都**不能**当日切列。
+-- ⚠️ `Gmv` 用 `decimal(14,2)` 承接，聚合时显式 `CAST(SUM(Price) AS DECIMAL(14,2))` ——
+--    `order.Price` 是 **float(4 字节)**：裸选显示 `10000000`、`CAST(... AS DOUBLE)` 却是 `9999999`。
+--    不显式转型，float 的显示舍入会渗进库里（实测见 _work/vis-commit2-expected.md §二）。
+-- ⚠️ 写入方：`StatsAggregateJob`（滚动窗口 upsert）与 `StatsService.rebuild()`（全量重算）。
+--    两者都走同一条 upsert 语句 ⇒ 「job 算的」与「rebuild 算的」不可能算出两个口径。
+-- ⚠️ 不设外键、不加进本文件头部的 `DROP TABLE IF EXISTS` 清单 —— 同位次表（order_item /
+--    order_shipping_track / cart …）的既有做法：它们是 Migration 追加表，不在基线重导范围内。
+CREATE TABLE IF NOT EXISTS `stats_daily` (
+  `Id`          int NOT NULL AUTO_INCREMENT COMMENT '自增主键',
+  `StatDate`    date NOT NULL COMMENT '统计日期（按 order.CreateTime 的日切）',
+  `Scope`       varchar(16) NOT NULL DEFAULT 'site' COMMENT '口径：site=全站；merchant=按商家（见上方为何两行）',
+  `MerchantId`  varchar(40) NOT NULL DEFAULT '' COMMENT '商家业务号；Scope=site 时恒为空串（占唯一键位）',
+  `Orders`      int NOT NULL DEFAULT 0 COMMENT '成单数',
+  `Gmv`         decimal(14,2) NOT NULL DEFAULT 0.00 COMMENT '成交额合计（SUM(order.Price)，显式转 decimal）',
+  `Items`       int NOT NULL DEFAULT 0 COMMENT '商品件数合计（SUM(order.Quantity)）',
+  `Buyers`      int NOT NULL DEFAULT 0 COMMENT '去重买家数（COUNT(DISTINCT order.CustomerId)）',
+  `created_at`  datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) COMMENT '行落库时刻（agent.md 数据库管理规则 8）',
+  `updated_at`  datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3) COMMENT '行更新时刻',
+  PRIMARY KEY (`Id`),
+  UNIQUE KEY `uk_stats_daily_scope_date_merchant` (`Scope`,`StatDate`,`MerchantId`),
+  KEY `idx_stats_daily_scope_date` (`Scope`,`StatDate`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='经营数据日聚合（可视化段 commit 2；Scope=site/merchant 两口径）';

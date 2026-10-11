@@ -198,4 +198,16 @@ export const endpoints = {
     monitor: '/admin/order/monitor',
     intervene: '/admin/order/intervene',
   },
+  // ⚠️ 可视化段 commit 2（2026-10-11）：**经营数据看板** 3 条
+  //    （`AdminStatsController` = `/admin/stats` ×2；`MerchantStatsController` = `/merchant/stats`）。
+  //    单列一组、**追加在文件尾**（同 `orderAdmin` 的理由：往别的组里插行会把本文件下面的条目整体下移，
+  //    而「新增行落在被引行之后」是本仓唯一的零漂移手法）。
+  //    ⚠️ 三条**全是 POST**：方案 §五 只给了路径、没给动词，落码时按「本仓管理端读端点**全是** POST」
+  //    统一（`/admin/order/list` · `/admin/audit/list` · `/admin/catalog/*` …）——
+  //    理由见 `AdminStatsController` 块首「动词选 POST」那节。**别照 REST 习惯改成 GET。**
+  stats: {
+    admin: '/admin/stats',
+    adminRebuild: '/admin/stats/rebuild',
+    merchant: '/merchant/stats',
+  },
 }

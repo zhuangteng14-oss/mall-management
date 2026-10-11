@@ -434,7 +434,7 @@ function restoreScrollWhenSettled(savedPosition) {
 const AdminStub = () => import('../views/admin/StubPage.vue')
 
 router.addRoute({
-  path: '/admin',
+  path: '/admin', name: 'admin',   // ⚠️ 可视化段 commit 2（2026-10-11）：**同行**加 `name`（不新插一行、净零行数）—— 文件尾那条 `router.addRoute('admin', …)` 靠它把「经营数据」挂成管理端壳的子页（`addRoute` 的第一个参数**只认 name**）。同 `:55` / `:86` 那两处的既有手法。⚠️ 本行在「最大被引行 `:462`」**之内**（`c3-block-1-infra.md` 引 `:396-462` 是**段落**引用）⇒ 只改了内容、没有移动任何行号
   meta: { roles: ['3'] },
   component: () => import('../views/AdminShell.vue'),
   // ⚠️ 子项记录写**三个键**，与 `config/admin-nav.js` 的 `ADMIN_SIDEBAR[]` / `subs[]` 逐字对应
@@ -538,3 +538,29 @@ router.addRoute('merchant', { path: 'notify', redirect: '/merchant/msg?tab=notif
 
 router.addRoute('customerUser', { path: 'apply', component: () => import('../views/MerchantApplyPage.vue'), meta: { sub: 'apply' } })
 router.addRoute({ path: '/register', component: LoginPage, meta: { public: true, register: true } })
+
+// ══════════════════════════════════════════════════════════════════════════════════════════
+// ── 可视化段 commit 2（2026-10-11）：两端「经营数据看板」 ─────────────────────────────────────
+//
+// ⚠️ **两条都走 `addRoute`、而不是往 `routes` 数组 / 两壳的 `children` 里插一条**：同 `:483-489`
+//   —— 全仓对 `router/index.js` 的**最大被引行**是 `:462`（C3 骨架 `/admin` 块的末行），
+//   而 `routes` 数组（`:51-129`）、两壳的 `children`、`ROLE_HOME`、`landingFor`、两条守卫
+//   **全在那条线之前** ⇒ 往里插**任何**一行，它们集体漂移。本仓既有手法 = 「新增行落在
+//   最大被引行**之后**」（第八次适用）。两条记录**都追加在文件最尾** ⇒ 连 `:511`/`:539`/`:540`
+//   那三条既有 `addRoute` 的行号也不动。
+//
+// ⚠️ **父子挂接靠 `name`** ⇒ `/admin` 的父记录本笔**同行**加了一个 `name: 'admin'`（净零行数）；
+//   `/merchant` 的父记录 `:86` **早就有** `name: 'merchant'`（C3 块 1·I2 加的）⇒ 不必再动。
+//
+// ⚠️ **`meta.key` / `meta.sub` 必须与 `config/admin-nav.js` 的 `ADMIN_SIDEBAR[].key` / `subs[].key`
+//   逐字相同**（改一处必须改两处）—— 判据同 `:440-446` 那条。本笔把「经营数据」挂在**概览域**
+//   （`key: 'ov'`）下：它不是「业务治理」也不是「可观测」，是**一眼看经营**—— 与「概览」同域最贴。
+//   ⚠️ 概览域的 `subs` 因此从 `[]` 变成 1 项 ⇒ 侧边栏里「概览」由**单项**变**两级**（同 business/observe）。
+//
+// ⚠️ **商家端那条的 `meta.tab: 'stats'`** 与 `config/nav.js` 的 `MERCHANT_NAV.right` 新增项
+//   **逐字相同**（顶栏高亮判据是 `route.meta.tab === item.tab`，见 `nav.js` 块首）。客户侧**不加**：
+//   本段只有 `/admin/stats` 与 `/merchant/stats` 两个端点，没有客户维度（经营数据不是买家视角的数据）。
+// ══════════════════════════════════════════════════════════════════════════════════════════
+
+router.addRoute('admin', { path: 'stats', component: () => import('../views/admin/StatsPage.vue'), meta: { key: 'ov', sub: 'stats', title: '经营数据' } })
+router.addRoute('merchant', { path: 'stats', component: () => import('../views/merchant/StatsPage.vue'), meta: { tab: 'stats', layout: 'page' } })
