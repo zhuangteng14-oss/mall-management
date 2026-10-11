@@ -78,8 +78,8 @@
 
 - ⚠️ **后端没有任何购物车/结算/草稿实体、表或端点**：grep `cart|Cart`（Java）= **0**；grep「购物车」= 3 处**全是注释**，指的都是 `orderSelect`（`.../order/dao/OrderDao.java:125` 的 `ReceiveIf != 1`）。`settle` 只命中 `SettlementDate` 列名，**无结算业务逻辑**。
 - 前端 `.../src/views/ShoppingCart.vue`（720 行）= **客户唯一的订单列表页**，实为混合形态：
-  · **真功能** —— 订单操作列 `:125`（付款 `:302` 调 `order.orderPayIfUp` / 收货 `:324` 调 `order.orderReceiveIfUp`）；取数 `:256` `loadOrders`（`:266` 调 `order.orderSelect`）。
-  · **占位** —— 商品行区块 `:77`（整块 `data-slot`）；「编辑」`:45` `disabled`；吸底结算栏 `:197` 的「去结算」**`:213` 是 `disabled` 死控件**（title「结算流程无端点」）；猜你喜欢 `:182`。
+  · **真功能** —— 订单操作列 `:125`（付款 `:302` 调 `order.orderPayIfUp` / 收货 **原 324 行** 调 `order.orderReceiveIfUp`）；取数 `:256` `loadOrders`（`:266` 调 `order.orderSelect`）。
+  · **占位** —— 商品行区块 `:77`（整块 `data-slot`）；「编辑」`:45` `disabled`；吸底结算栏 **原 197 行** 的「去结算」**`:213` 是 `disabled` 死控件**（title「结算流程无端点」）；猜你喜欢 `:182`。
   · 商家复用**同一组件**（`.../src/views/merchant/OrderPane.vue:3`）。
 
 ### 现状：订单域既有基建（可直接复用的现成形状） {#pack-c3-block-4-order-s9}
@@ -97,7 +97,7 @@
 
 ### 现状：前端占位清单（订单块相关 —— `docs/美化/` 的「占位四件套」= `disabled` + `data-slot` + 角标 + `title`） {#pack-c3-block-4-order-docs}
 
-- `.../src/views/OrderCenter.vue`（844 行，**商家订单面**）：**真功能** = 发货按钮 `:140`（`handleDeliver` `:248`，`canSend` `:246`：`PayIf=1 && DeliveryIf=0 && ReceiveIf=0`）/ 稳态取数 `:202`（按 `orderStatus` 选 `orderDeliveryIfSelect`/`orderDeliverySelect`）/ 状态名表 `:234`。
+- `.../src/views/OrderCenter.vue`（844 行，**商家订单面**）：**真功能** = 发货按钮 `:140`（`handleDeliver` **原 248 行**，`canSend` **原 246 行**：`PayIf=1 && DeliveryIf=0 && ReceiveIf=0`）/ 稳态取数 **原 202 行**（按 `orderStatus` 选 `orderDeliveryIfSelect`/`orderDeliverySelect`）/ 状态名表 **原 234 行**。
   **占位** = 数据概览 KPI `:63`（4 处·超档）/ 标签页 `:76`（6 枚全 `disabled`，`:81`「已完成」N=0 仍 `disabled`）/ 筛选栏 `:87` / 批量操作 `:100` / 分页 `:149`。
 - `.../src/views/ShoppingCart.vue`：见上「现状：购物车」。
 - `.../src/views/HistoricalOrders.vue`（275 行，客户/商家共用「历史订单」子页）：只读表 `:32`；**真功能** = 复制商家 Id `:122`；占位 = 状态枚举列 `:41` / 申请退货列 `:48`（`<th>` 无数 `disabled`）。
@@ -150,7 +150,7 @@
 
 ### B 档（自裁，已报备 —— 不落硬线，可落码） {#pack-c3-block-4-order-b}
 
-1. **订单中心路由拆分**（**用户已在块 4 定位里裁过**）：新增客户侧 **`/customer/orders`**（订单中心：付款 / 物流 / 收货）；`/customer/cart` 改**真购物车**。`ShoppingCart.vue` 的**订单列表部分**（`loadOrders` `:256` + 付款/收货 `:302`/`:324`）**迁到新页**。
+1. **订单中心路由拆分**（**用户已在块 4 定位里裁过**）：新增客户侧 **`/customer/orders`**（订单中心：付款 / 物流 / 收货）；`/customer/cart` 改**真购物车**。`ShoppingCart.vue` 的**订单列表部分**（`loadOrders` `:256` + 付款/收货 **原 302/324 行**）**迁到新页**。
    ⚠️ 既有 `/customer/cart` 的语义**变**（今天 = `ReceiveIf != 1` 的订单列表）—— 属「改契约」的**前端面**，但用户已裁 ⇒ 按 B 落、报备。
 2. **商家端**：改造 `OrderPane.vue` 既有**二态开关**（`:2`/`:3`/`:33`），文案改 **「我卖的 / 我买的」**；`OrderCenter.vue` = 我卖的（发货）、`ShoppingCart.vue` = 我买的（付款/收货）。**不新开门面**（复用既有 `orderTab` meta）。商家 = 用户超集 ⇒ 「我买的」直接继承客户侧。
 3. **管理端新页** `.../src/views/admin/OrderPage.vue`（**新建**），**同行替换** `router/index.js:453`；新端点 `/admin/order/{list,detail,intervene,monitor}`（**只读 + 介入**）。⚠️ 无稿 ⇒ 照 `AccountsPage.vue` 自建。
