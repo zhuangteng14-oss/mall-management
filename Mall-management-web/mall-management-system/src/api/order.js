@@ -191,11 +191,20 @@ export function cartList(customerId) {
 }
 
 /**
- * 结算 ⇒ 逐行建订单（后端走 `OrderService.orderAdd` 的锁与五道闸），成功一行清一行。
+ * 结算 ⇒ **按商家分组，一个商家一笔订单**（后端走 `OrderService.orderAdd` 的锁与五道闸），
+ * 一组落库成功才清这一组。
+ *
+ * ⚠️ 可视化段 commit 0b 改：**改前是「逐行下单」**（N 行 ⇒ N 张互相独立的订单）。
+ * 现在 N 行 ⇒ **M 张**（M = 本车的商家数）。购物车可跨商家（`cart` 唯一键是
+ * `(CustomerId, ProductCode)`），而 `order.MerchantId` 是单值 ⇒ 分组键只能是商家。
+ * **单商家车（常态）才是「整车一单多行」。**
  *
  * @param {{CustomerId:string, ProductCode?:string}} params
  *        `ProductCode` 不传 ⇒ 结算**整车**。
  * @returns {Promise<{success:boolean, list:Array, msg?:string}>}
+ *          `list` 每项：`OrderId` / `MerchantId` / `ProductCode` / `Quantity` / `Price` / `Items`。
+ *          ⚠️ **消费者只读 `OrderId`**（`ShoppingCart.vue`）⇒ 多出来的键是**超集、不算破坏**；
+ *             单行组时那四个旧键与改前**逐字同值**，多行组时才是聚合值。
  *          ⚠️ **结算不是一笔原子操作**（订单链禁 `@Transactional`）⇒ 中途失败时
  *             `success:false` **且** `list` 里有**已经生成的那几笔**。前端**必须**把它们显示出来
  *             （把部分成功报成整体失败 = 让用户重复下单）。

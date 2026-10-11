@@ -483,14 +483,17 @@ public class OrderService {
     /**
      * 一条订单明细的**规格**（还没绑订单号 / 商家 —— 那两样是整单级的，由 {@code addLocked} 现填）。
      *
-     * @param code     商品编码（对齐 {@code goods.ProductCode}）。**必填**，空 ⇒ 这条被丢
-     * @param name     商品名快照。可缺（{@code goods} **无软删列**，商品会被物理删掉 ⇒
-     *                 快照是「货没了、历史销量还在榜上」的唯一依据；缺时记 {@code null}，
-     *                 榜单回落 LEFT JOIN {@code goods}）
-     * @param price    成交**单价**
-     * @param quantity 数量（≥ 1）
+     * <p>⚠️ 组件名 {@code qty} 是**线格式的一部分**（{@link #encodeItems} 用 Jackson 直接序列化本
+     * record）⇒ 改它等于改契约，必须与 {@link #parseExplicitItems} 那边的键名同改。
+     *
+     * @param code  商品编码（对齐 {@code goods.ProductCode}）。**必填**，空 ⇒ 这条被丢
+     * @param name  商品名快照。可缺（{@code goods} **无软删列**，商品会被物理删掉 ⇒
+     *              快照是「货没了、历史销量还在榜上」的唯一依据；缺时记 {@code null}，
+     *              榜单回落 LEFT JOIN {@code goods}）
+     * @param price 成交**单价**
+     * @param qty   数量（≥ 1）
      */
-    private record ItemSpec(String code, String name, double price, int quantity) { }
+    public record ItemSpec(String code, String name, double price, int qty) { }
 
     /**
      * 解析本次下单的商品明细 —— <b>显式 {@code Items} 优先，解析不出才回落到既有格式</b>。
@@ -593,6 +596,29 @@ public class OrderService {
     }
 
     /**
+     * 把明细编成 {@code Items} 的线格式 —— <b>本类是全仓唯一知道这个格式的地方</b>
+     * （与 {@link #parseExplicitItems} 成对：编码、解码、字段名三样都只在这里。
+     * 调用方不必知道字段名，将来换格式只改这一对）。
+     *
+     * <p>⚠️ 序列化失败（理论上不会：{@code ItemSpec} 就是四个简单字段）⇒ 记 WARN、返回
+     * {@code null} ⇒ 调用方发出去的 {@code Items} 为空 ⇒ <b>服务端回落到
+     * {@code ProductInformation} 口径</b>。**不抛异常**：明细是附加物，
+     * 不该因为它的编码失败而挡住一次结算。
+     */
+    public String encodeItems(List<ItemSpec> items) {
+        if (items == null || items.isEmpty()) {
+            return null;
+        }
+        try {
+            return objectMapper.writeValueAsString(items);
+        } catch (Exception e) {
+            log.warn("明细编码失败（{} 行），本次不发 Items、由服务端回落 ProductInformation 口径：{}",
+                    items.size(), e.toString());
+            return null;
+        }
+    }
+
+    /**
      * 同码合并。**必须有**：{@code order_item} 的唯一键是 {@code (OrderId, ProductCode)}，
      * 同一个码进来两行会在库里直接撞键（然后被 {@link #writeItems} 的 fail-open 吞掉 ⇒
      * 表现为「明细整批丢失」）。数量相加，名取首个非空的。
@@ -606,7 +632,7 @@ public class OrderService {
             } else {
                 byCode.put(it.code(), new ItemSpec(it.code(),
                         prev.name() != null ? prev.name() : it.name(),
-                        prev.price(), prev.quantity() + it.quantity()));
+                        prev.price(), prev.qty() + it.qty()));
             }
         }
         return new ArrayList<>(byCode.values());
@@ -628,7 +654,7 @@ public class OrderService {
         List<OrderDao.ItemRow> rows = new ArrayList<>(specs.size());
         for (ItemSpec s : specs) {
             rows.add(new OrderDao.ItemRow(OrderId, merchantId, s.code(), s.name(),
-                    s.price(), s.quantity(), s.price() * s.quantity()));
+                    s.price(), s.qty(), s.price() * s.qty()));
         }
         try {
             orderDao.insertItems(rows);
