@@ -1,5 +1,7 @@
 package com.minke.mallmanagement.order.service;
 
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.minke.mallmanagement.shared.lock.DistributedLockService.LockName;
 import com.minke.mallmanagement.shared.web.UserStateLookup;
 import org.slf4j.Logger;
@@ -12,6 +14,7 @@ import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -164,6 +167,14 @@ public class OrderService {
     /** 物流轨迹出口（C3 块4 补丁 A2）。发货写首行、调度器补后续行、收货兜末行 —— 三处全 fail-soft。 */
     private final ShippingTrackDao shippingTrackDao;
 
+    /**
+     * 解析显式明细入参 {@code Items}（可视化段 commit 0）。**直接注入**：与 {@link #notificationService}
+     * 同一条切片论证 —— 线上用的就是 Spring Boot 自动配置的那个 {@code ObjectMapper}
+     * （{@code @WebMvcTest} 切片含 {@code JacksonAutoConfiguration}，全仓既有注入先例是
+     * {@code AuditService.java}）⇒ 「取不到 ⇒ 上下文加载期红」的风险不成立。
+     */
+    private final ObjectMapper objectMapper;
+
     private static final Logger log = LoggerFactory.getLogger(OrderService.class);
 
     /** 支付流水号的日期段格式（{@code PAY} + {@code yyyyMMdd} + 6 位随机）。 */
@@ -175,7 +186,8 @@ public class OrderService {
                         OrderTransitionRecorder orderTransitionRecorder,
                         ObjectProvider<UserStateLookup> userStateLookupProvider,
                         NotificationService notificationService,
-                        ShippingTrackDao shippingTrackDao) {
+                        ShippingTrackDao shippingTrackDao,
+                        ObjectMapper objectMapper) {
         this.orderDao = orderDao;
         this.lockService = lockService;
         this.orderStateMachine = orderStateMachine;
@@ -183,6 +195,7 @@ public class OrderService {
         this.userStateLookup = userStateLookupProvider.getIfAvailable();
         this.notificationService = notificationService;
         this.shippingTrackDao = shippingTrackDao;
+        this.objectMapper = objectMapper;
     }
 
     // ==================== 下单 ====================
@@ -213,6 +226,12 @@ public class OrderService {
      * 接受 ⟺ {@code (PayIf,DeliveryIf,ReceiveIf) ∈ {(0,0,0),(1,0,0)}}；不通过 ⇒
      * 记一次 {@code mall.order.state.birth.rejected{shape}} + 一行 WARN，返回
      * {@code {success:false,msg:"订单状态不合法"}}。理由见类注释的 C#6 段。
+     *
+     * <p>⚠️ <b>可视化段 commit 0 又在<b>末尾</b>加了 {@code Items}</b>（同 {@code Quantity} 的理由：
+     * 既有 10 个形参的相对顺序一字不动）。它是**可选的显式商品明细**，只影响
+     * {@code order_item} 写不写、写几行 —— <b>不参与任何闸</b>（价格闸只看 {@code Price}、
+     * 出生闸只看三个状态位、冻结闸只看 {@code MerchantId}）⇒ 对既有请求的**行为零影响**。
+     * 格式与回落口径见 {@link #resolveItems}。
      */
     public Map<String, Object> orderAdd(
             String CustomerId,
@@ -224,7 +243,8 @@ public class OrderService {
             int PayIf,
             int DeliveryIf,
             int ReceiveIf,
-            int Quantity
+            int Quantity,
+            String Items
     ) {
         // B#1：价格闸。放在锁外 —— 一是让非法请求不耗 Redis、不污染锁指标；二是让 addLocked
         // 的临界区保持逐字不动（B2 / D#1 的登记处就在那儿）。
@@ -248,7 +268,8 @@ public class OrderService {
             return frozen;
         }
         return lockService.runLocked(LockName.ORDER_ADD, OrderId, () -> addLocked(
-                CustomerId, MerchantId, OrderId, Price, ProductInformation, Images, PayIf, DeliveryIf, ReceiveIf, Quantity));
+                CustomerId, MerchantId, OrderId, Price, ProductInformation, Images,
+                PayIf, DeliveryIf, ReceiveIf, Quantity, Items));
     }
 
     /**
@@ -408,7 +429,8 @@ public class OrderService {
      */
     private Map<String, Object> addLocked(
             String CustomerId, String MerchantId, String OrderId, float Price,
-            String ProductInformation, String Images, int PayIf, int DeliveryIf, int ReceiveIf, int Quantity) {
+            String ProductInformation, String Images, int PayIf, int DeliveryIf, int ReceiveIf, int Quantity,
+            String Items) {
         Map<String, Object> result = new HashMap<>();
         // ⚠️ 临界区内先查后插 —— 这一段是 B2 对「同一 OrderId 落库 2 行」的真修复（A-S2a-1）：
         //    · 只有锁：并发变串行，但每个请求照旧裸 INSERT ⇒ 仍插 20 行；
@@ -439,6 +461,11 @@ public class OrderService {
                 // B3：只在**真的插进去之后**观测出生。放在这里而不是方法开头，是因为
                 // 「订单已存在」那条早退分支并没有产生一个新状态，不该记成一次出生。
                 orderTransitionRecorder.created(OrderId, PayIf, DeliveryIf, ReceiveIf);
+                // 可视化段 commit 0：订单明细（商品维度统计的数据源）。
+                // ⚠️ 排在「订单已落库」这个结论**之后**、且自己 fail-open（见 writeItems）——
+                //    明细的成败**不改变**本方法的返回值，否则调用方会把「订单其实落了」
+                //    当成失败而**重复下单**。
+                writeItems(OrderId, MerchantId, resolveItems(Items, ProductInformation, Price, Quantity));
             } else {
                 result.put("success", false);
                 result.put("msg", "订单添加失败");
@@ -449,6 +476,223 @@ public class OrderService {
             result.put("msg", "数据库错误：" + e.getMessage());
         }
         return result;
+    }
+
+    // ==================== 订单明细（可视化段 commit 0） ====================
+
+    /**
+     * 一条订单明细的**规格**（还没绑订单号 / 商家 —— 那两样是整单级的，由 {@code addLocked} 现填）。
+     *
+     * <p>⚠️ 组件名 {@code qty} 是**线格式的一部分**（{@link #encodeItems} 用 Jackson 直接序列化本
+     * record）⇒ 改它等于改契约，必须与 {@link #parseExplicitItems} 那边的键名同改。
+     *
+     * @param code  商品编码（对齐 {@code goods.ProductCode}）。**必填**，空 ⇒ 这条被丢
+     * @param name  商品名快照。可缺（{@code goods} **无软删列**，商品会被物理删掉 ⇒
+     *              快照是「货没了、历史销量还在榜上」的唯一依据；缺时记 {@code null}，
+     *              榜单回落 LEFT JOIN {@code goods}）
+     * @param price 成交**单价**
+     * @param qty   数量（≥ 1）
+     */
+    public record ItemSpec(String code, String name, double price, int qty) { }
+
+    /**
+     * 解析本次下单的商品明细 —— <b>显式 {@code Items} 优先，解析不出才回落到既有格式</b>。
+     *
+     * <p>⚠️ 顺序是刻意的，不是「先看哪个都一样」：显式入参带着**单价与名**（调用方知道），
+     * 回落口径最多只推得出一件商品的「价 ÷ 量」。
+     *
+     * <p>⚠️ 两路都失败 ⇒ **空表** ⇒ 明细不写，而**订单照常落库** —— 这是硬性约束
+     * 「不能阻碍旧功能运作」在本笔的落点。
+     */
+    private List<ItemSpec> resolveItems(String Items, String ProductInformation, float Price, int Quantity) {
+        List<ItemSpec> items = parseExplicitItems(Items);
+        if (items.isEmpty()) {
+            items = inferItemsFromProductInformation(ProductInformation, Price, Quantity);
+        }
+        return mergeByCode(items);
+    }
+
+    /**
+     * 解析显式明细 {@code Items} —— **JSON 数组**，一行一件：
+     * {@code [{"code":"IJ-555","name":"222","price":5555,"qty":2}, ...]}。
+     *
+     * <p>⚠️ 字段口径：{@code code} 必填（缺失 ⇒ **丢这一条**，不猜）；{@code name} 可缺
+     * （缺失 ⇒ {@code null}）；{@code qty} 缺失或 &lt; 1 ⇒ 记 1；{@code price} 缺失 ⇒ 记 0。
+     *
+     * <p>⚠️ <b>为什么是 JSON，而不是 {@code 码:量:价} 这种自造分隔符串</b>：商品名
+     * （{@code goods.GoodName}）**没有禁用 {@code :} 与 {@code ；}**，自造分隔符要么错位、
+     * 要么得再造一套转义规则 —— 而错位的结果是**脏数据**，比没数据更坏。JSON 的转义
+     * 是现成的，Jackson 在本仓又已是注入式 bean（{@code AuditService}）。
+     *
+     * <p>⚠️ <b>整个入参不是合法 JSON</b>（或是个 JSON 对象而非数组）⇒ 记一行 WARN、
+     * 返回**空表** ⇒ 回落口径接手 ⇒ 再解析不出就只写订单、不写明细。**不抛异常**。
+     */
+    private List<ItemSpec> parseExplicitItems(String Items) {
+        if (Items == null || Items.isBlank()) {
+            return List.of();
+        }
+        List<Map<String, Object>> raw;
+        try {
+            raw = objectMapper.readValue(Items, new TypeReference<List<Map<String, Object>>>() { });
+        } catch (Exception e) {
+            log.warn("orderAdd 的 Items 不是合法的 JSON 数组，本次不写明细（订单照常落库）：{}", e.toString());
+            return List.of();
+        }
+        List<ItemSpec> items = new ArrayList<>();
+        for (Map<String, Object> row : raw) {
+            if (row == null) {
+                continue;
+            }
+            String code = trimmed(row.get("code"));
+            if (code == null) {
+                // 没有码就没法把这一件挂到商品维度上 —— 宁可少一行，不写一行对不上货的。
+                log.warn("orderAdd 的 Items 里有一条缺 code，已丢弃：{}", row);
+                continue;
+            }
+            items.add(new ItemSpec(clip(code, 40), clip(trimmed(row.get("name")), 255),
+                    number(row.get("price")), Math.max(1, (int) number(row.get("qty")))));
+        }
+        return items;
+    }
+
+    /**
+     * 回落：按 {@code ProductInformation} 的**既有格式**（{@code 名:码}、多品以「；」分隔，
+     * 见 {@code ProductPage.vue} 的 {@code buildProductInformation}）推**一条**明细。
+     *
+     * <p>⚠️ <b>只在恰有一段时才推。</b>判据是可推导性，不是保守：
+     * {@code order.Price} 是这一单的**小计**、{@code order.Quantity} 是**总件数** ⇒
+     * 单品时 {@code 单价 = Price ÷ Quantity} 是恒等式；<b>多品时这个商只是加权均价，
+     * 不是任何一件的真实单价</b> —— 推出来的行是脏数据，宁可不写。
+     *
+     * <p>⚠️ 码取**最后一个 {@code :} 之后**（商品名里可能自带 {@code :}）；没有 {@code :}、
+     * 或 {@code :} 结尾、或码为空 ⇒ 推不出 ⇒ 不写。
+     *
+     * <p>这一段专为**老调用方**而留（A3 压测脚本、以及本笔之前的前端）：它们只发
+     * {@code ProductInformation}。购物车那条路会在 commit 0b 改成发显式 {@code Items}。
+     */
+    private List<ItemSpec> inferItemsFromProductInformation(String ProductInformation, float Price, int Quantity) {
+        if (ProductInformation == null || ProductInformation.isBlank()) {
+            return List.of();
+        }
+        String[] parts = ProductInformation.split("；");
+        if (parts.length != 1) {
+            log.info("orderAdd 未收到 Items，且 ProductInformation 含 {} 段（一单多品）⇒ 单价不可反推，本次不写明细",
+                    parts.length);
+            return List.of();
+        }
+        int colon = ProductInformation.lastIndexOf(':');
+        if (colon < 0 || colon == ProductInformation.length() - 1) {
+            return List.of();
+        }
+        String code = ProductInformation.substring(colon + 1).trim();
+        if (code.isEmpty()) {
+            return List.of();
+        }
+        int qty = Math.max(1, Quantity);
+        // ⚠️ float ÷ int 仍是 float（先窄化再赋给 double 形参）—— 与 order.Price 的列类型同域，
+        //    不引入 double 精度错觉。
+        return List.of(new ItemSpec(clip(code, 40),
+                clip(ProductInformation.substring(0, colon).trim(), 255), Price / qty, qty));
+    }
+
+    /**
+     * 把明细编成 {@code Items} 的线格式 —— <b>本类是全仓唯一知道这个格式的地方</b>
+     * （与 {@link #parseExplicitItems} 成对：编码、解码、字段名三样都只在这里。
+     * 调用方不必知道字段名，将来换格式只改这一对）。
+     *
+     * <p>⚠️ 序列化失败（理论上不会：{@code ItemSpec} 就是四个简单字段）⇒ 记 WARN、返回
+     * {@code null} ⇒ 调用方发出去的 {@code Items} 为空 ⇒ <b>服务端回落到
+     * {@code ProductInformation} 口径</b>。**不抛异常**：明细是附加物，
+     * 不该因为它的编码失败而挡住一次结算。
+     */
+    public String encodeItems(List<ItemSpec> items) {
+        if (items == null || items.isEmpty()) {
+            return null;
+        }
+        try {
+            return objectMapper.writeValueAsString(items);
+        } catch (Exception e) {
+            log.warn("明细编码失败（{} 行），本次不发 Items、由服务端回落 ProductInformation 口径：{}",
+                    items.size(), e.toString());
+            return null;
+        }
+    }
+
+    /**
+     * 同码合并。**必须有**：{@code order_item} 的唯一键是 {@code (OrderId, ProductCode)}，
+     * 同一个码进来两行会在库里直接撞键（然后被 {@link #writeItems} 的 fail-open 吞掉 ⇒
+     * 表现为「明细整批丢失」）。数量相加，名取首个非空的。
+     */
+    private static List<ItemSpec> mergeByCode(List<ItemSpec> items) {
+        Map<String, ItemSpec> byCode = new LinkedHashMap<>();
+        for (ItemSpec it : items) {
+            ItemSpec prev = byCode.get(it.code());
+            if (prev == null) {
+                byCode.put(it.code(), it);
+            } else {
+                byCode.put(it.code(), new ItemSpec(it.code(),
+                        prev.name() != null ? prev.name() : it.name(),
+                        prev.price(), prev.qty() + it.qty()));
+            }
+        }
+        return new ArrayList<>(byCode.values());
+    }
+
+    /**
+     * 落明细。**只 INSERT，不做 upsert** —— 唯一调用点在同一把 {@code order-add} 锁内，
+     * 且前面刚过完「同 OrderId 查重」，重复进来会在更早的分支被挡掉。
+     *
+     * <p>⚠️ <b>fail-open</b>：写失败只记 WARN，**不改变订单的成败结论**。这是刻意的 ——
+     * 「订单已落库」是对外已成立的契约，为明细把它改成失败会让调用方**重复下单**
+     * （同 {@code order_shipping_track} 三处出口的 fail-soft 口径）。代价是这一单不进商品榜。
+     */
+    private void writeItems(String OrderId, String MerchantId, List<ItemSpec> specs) {
+        if (specs.isEmpty()) {
+            return;
+        }
+        String merchantId = MerchantId == null ? "" : clip(MerchantId, 40);
+        List<OrderDao.ItemRow> rows = new ArrayList<>(specs.size());
+        for (ItemSpec s : specs) {
+            rows.add(new OrderDao.ItemRow(OrderId, merchantId, s.code(), s.name(),
+                    s.price(), s.qty(), s.price() * s.qty()));
+        }
+        try {
+            orderDao.insertItems(rows);
+        } catch (Exception e) {
+            log.warn("订单 {} 的 {} 行明细写失败（订单已落库、明细缺失）：{}", OrderId, rows.size(), e.toString());
+        }
+    }
+
+    /** 去空白；空串一律规整成 {@code null}（「没给」与「给了个空值」在明细里是同一件事）。 */
+    private static String trimmed(Object v) {
+        if (v == null) {
+            return null;
+        }
+        String s = String.valueOf(v).trim();
+        return s.isEmpty() ? null : s;
+    }
+
+    /** 宽松取数：JSON 里可能是数字，也可能是带引号的数字串；取不出记 0。 */
+    private static double number(Object v) {
+        if (v instanceof Number n) {
+            return n.doubleValue();
+        }
+        if (v == null) {
+            return 0d;
+        }
+        try {
+            return Double.parseDouble(String.valueOf(v).trim());
+        } catch (NumberFormatException e) {
+            return 0d;
+        }
+    }
+
+    /** 截到列宽。**必须有**：超长的名 / 码会让整批 INSERT 报错 ⇒ 被 fail-open 吞成「明细整批丢失」。 */
+    private static String clip(String s, int max) {
+        if (s == null) {
+            return null;
+        }
+        return s.length() <= max ? s : s.substring(0, max);
     }
 
     // ==================== 状态转移（三个 CAS 端点） ====================

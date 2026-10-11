@@ -1,0 +1,2 @@
+taken_at	login_n	order_n	item_n	goods_n	stats_n
+2026-10-11 11:15:18	9	24	0	6	8

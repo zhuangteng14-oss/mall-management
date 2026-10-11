@@ -65,7 +65,7 @@ async function bootstrap() {
   setUnauthorizedHandler(() => { router.push({ path: '/login', query: { redirect: router.currentRoute.value.fullPath } }) })
   router.afterEach(() => resetUnauthorizedLatch())
 
-  router.isReady().then(() => { app.mount('#app') })
+  router.isReady().then(() => { app.mount('#app') }, () => { app.mount('#app') })   // ⚠️ **第二参是 2026-10-11（问题①）新增的失败档**：`isReady()` 在首航**失败**时是 **reject** ⇒ 原来那个 `.then` 永不执行 ⇒ `app.mount` 永不发生 ⇒ `#app` 一直空着，而 `data-theme="admin"` 把底色涂成 `#101828` ⇒ **整页深色、无内容**（本日实测的正是这一档：`api/auth.js` 的 `restoreFromSession` 把 `/user/me` 的数字 `role` 原样存下，守卫 2 字符串比不中 ⇒ 重定向成环 ⇒ 首航失败）。归一那处已修掉环；这一参是**兜底**：真出了别的首航失败，也让 `AdminApp` 挂上去（它的 `matched.length === 0` 分支会给出可读的面板），而不是留一块不说话的深色。⚠️ 同行追加，零行号漂移（本文件的 `:55-60` / `:64-66` 被自身注释按行号互引）
 }
 
 bootstrap()

@@ -103,9 +103,9 @@ public class CartController {
     }
 
     /**
-     * 结算：逐行建订单（走 {@code OrderService.orderAdd} 的锁与五道闸），成功一行清一行。
-     *
-     * <p>{@code ProductCode} 不传 ⇒ 结算**整车**；传了 ⇒ 只结算那一行。
+     * 结算：**按商家分组建单**（走 {@code OrderService.orderAdd} 的锁与五道闸），一组成功清这一组。
+     * ⚠️ 可视化段 commit 0b 改：**改前逐行建单**（N 行 ⇒ N 张）；现 N 行 ⇒ **M 张**（M = 商家数）。
+     * <p>{@code ProductCode} 不传 ⇒ 结算**整车**；传了 ⇒ 只结算那一行（那一行自然只属一个商家）。
      */
     @PostMapping("/checkout")
     public ResponseEntity<Object> checkout(

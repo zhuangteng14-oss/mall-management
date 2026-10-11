@@ -6,7 +6,7 @@
       :to="item.to"
       class="menu-btn"
       :class="{ active: route.meta.sub === item.sub }"
-    >{{ item.label }}</router-link>
+    ><IconGlyph v-if="item.glyph" :name="item.glyph" />{{ item.label }}</router-link>
     <button @click="toLogin" class="logout">退出登录</button>
   </div>
 
@@ -18,7 +18,7 @@ import { computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { clearCredentials, clearMerchantId, clearToken } from '../api/auth'
 import { http } from '../api/http'
-import { endpoints } from '../api/endpoints'
+import { endpoints } from '../api/endpoints'; import IconGlyph from '../components/ui/IconGlyph.vue'   // ⚠️ 两条 import **同行**（2026-10-11 补图标那一笔）—— 为**净零行数**：本文件被 `api-contract.md:216`（引 `UserCenter.vue:64`）与 `progress.md:569/570/629/664`（引 `:52-55`）按行号钉住，顶部加一行会让它们漂移。左菜单那枚 `<IconGlyph …>` 同理是**同行**插的（`:8`）
 
 // ── R1（2026-10-05）：用户中心从 `CustomerPage.vue` 的**内联 markup** 提成**独立页面组件** ──
 // 4 个子 tab 已各自成路由（见 `router/index.js`）⇒ 本文件**不再持有 `curSubPage`** —— 子页面选择权交给路由。

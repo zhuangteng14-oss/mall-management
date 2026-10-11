@@ -1,5 +1,7 @@
 package com.minke.mallmanagement.goods.service;
 
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.minke.mallmanagement.goods.dao.GoodsAuditDao;
 import com.minke.mallmanagement.goods.dao.GoodsDao;
 import org.springframework.stereotype.Service;
@@ -56,13 +58,21 @@ public class GoodsAuditService {
     private final GoodsAuditDao auditDao;
     private final GoodsDao goodsDao;
     private final GoodsCacheService goodsCacheService;
+    /**
+     * 解析 {@code goods_audit.SkuSpec}（多规格矩阵快照，JSON 数组串）—— 与 {@code order.Items} /
+     * {@code OrderService.resolveItems} 同款：线上用的就是 Spring Boot 自动配置的那个 ObjectMapper，
+     * 不另建（那会波及既有端点的字节）。
+     */
+    private final ObjectMapper objectMapper;
 
     public GoodsAuditService(GoodsAuditDao auditDao,
                              GoodsDao goodsDao,
-                             GoodsCacheService goodsCacheService) {
+                             GoodsCacheService goodsCacheService,
+                             ObjectMapper objectMapper) {
         this.auditDao = auditDao;
         this.goodsDao = goodsDao;
         this.goodsCacheService = goodsCacheService;
+        this.objectMapper = objectMapper;
     }
 
     // ==================== 提交（提审） ====================
@@ -83,12 +93,14 @@ public class GoodsAuditService {
     @Transactional
     public Map<String, Object> submit(String merchantId, String batchId, String goodName,
                                       Double price, String goodType, Integer goodTypeNew,
-                                      Integer typeId, String productCode, String goodImg, String detail, String spec, String afterSale) {
+                                      Integer typeId, String productCode, String goodImg, String detail, String spec, String afterSale,
+                                      String skuSpec, Boolean promiseGenuine, Boolean promiseReturn7, Boolean promiseFastRefund, Boolean promiseFreightIns) {
         Map<String, Object> result = new HashMap<>();
         Integer effectiveTypeId = typeId != null ? typeId : goodsDao.selectTypeIdByName(goodType);
 
         auditDao.insert(merchantId, batchId, goodName, price, goodType, goodTypeNew, effectiveTypeId,
-                productCode, goodImg, detail, spec, afterSale, LocalDateTime.now());
+                productCode, goodImg, detail, spec, afterSale, skuSpec, LocalDateTime.now(),
+                boolOrTrue(promiseGenuine), boolOrTrue(promiseReturn7), boolOrTrue(promiseFastRefund), boolOrTrue(promiseFreightIns));
 
         result.put("success", true);
         result.put("batchId", batchId);
@@ -213,7 +225,9 @@ public class GoodsAuditService {
                 str(auditRow.get("GoodType")),
                 str(auditRow.get("ProductCode")),
                 toInt(auditRow.get("GoodTypeNew"), 0),
-                toInteger(auditRow.get("TypeId")), str(auditRow.get("Detail")), str(auditRow.get("Spec")), str(auditRow.get("AfterSale"))));
+                toInteger(auditRow.get("TypeId")), str(auditRow.get("Detail")), str(auditRow.get("Spec")), str(auditRow.get("AfterSale")),
+                boolOrTrue(auditRow.get("PromiseGenuine")), boolOrTrue(auditRow.get("PromiseReturn7")),
+                boolOrTrue(auditRow.get("PromiseFastRefund")), boolOrTrue(auditRow.get("PromiseFreightIns"))));
 
         Integer lastId = goodsDao.lastInsertId();
         long goodsId = lastId == null ? 0L : lastId.longValue();
@@ -221,7 +235,53 @@ public class GoodsAuditService {
         goodsDao.insertProductsales(str(auditRow.get("MerchantId")),
                 str(auditRow.get("GoodName")), str(auditRow.get("ProductCode")));
 
+        // 多规格矩阵：把提审单里的 SkuSpec 快照落进 goods_sku（父 Id = 刚建的 goods.Id）。
+        // ⚠️ 只能在这里写：提审制下 goods 行本就是此处才建，SKU 的父 Id 只有此刻才知道。
+        writeSkusFromAudit(goodsId, auditRow);
+
         return goodsId;
+    }
+
+    /**
+     * 把提审单的 {@code SkuSpec} 快照（JSON 数组串，元素 {@code {spec,price,stock,code}}）解析后
+     * 逐条写进 {@code goods_sku}。
+     *
+     * <p>⚠️ <b>解析失败一律「当没有多规格」处理、绝不抛</b>：审核通过是**不可回退**的关键路径
+     * （CAS 已消费），不能因为一段可选的、商家手填的矩阵文本格式不对，就把整次「通过」搞成失败。
+     * 空 / 空白 / 非数组 ⇒ 直接不写（该商品就是单规格，与今日行为一致）。
+     */
+    private void writeSkusFromAudit(long goodsId, Map<String, Object> auditRow) {
+        String skuSpec = str(auditRow.get("SkuSpec"));
+        if (isBlank(skuSpec) || goodsId <= 0) {
+            return;
+        }
+        List<Map<String, Object>> raw;
+        try {
+            raw = objectMapper.readValue(skuSpec, new TypeReference<List<Map<String, Object>>>() { });
+        } catch (Exception e) {
+            // 见方法注释：可选数据，坏了就跳过，不阻断「通过」。
+            e.printStackTrace();
+            return;
+        }
+        if (raw == null || raw.isEmpty()) {
+            return;
+        }
+        List<GoodsDao.SkuRow> rows = new java.util.ArrayList<>();
+        int i = 0;
+        for (Map<String, Object> m : raw) {
+            if (m == null) {
+                continue;
+            }
+            String axis = str(m.get("spec"));
+            if (isBlank(axis)) {
+                continue;   // 无组合名的行没有意义（唯一键也是按它）
+            }
+            rows.add(new GoodsDao.SkuRow(axis, toDouble(m.get("price")), toInteger(m.get("stock")),
+                    str(m.get("code")), i++));
+        }
+        if (!rows.isEmpty()) {
+            goodsDao.insertSkus(goodsId, str(auditRow.get("MerchantId")), str(auditRow.get("GoodName")), rows);
+        }
     }
 
     private static int normalizeLimit(Integer limit) {
@@ -262,5 +322,27 @@ public class GoodsAuditService {
 
     private static boolean isBlank(String s) {
         return s == null || s.trim().isEmpty();
+    }
+
+    /**
+     * 服务承诺位的取值归一：{@code null} ⇒ {@code true}。
+     *
+     * <p>⚠️ 为什么要「缺省为真」：这些列**默认 1**（详情页 `.promise` 改前对每件商品都显示四条），
+     * 老前端不传这 4 个参数 ⇒ Spring 绑成 {@code null} ⇒ 若按 {@code false} 处理，会把「没传」
+     * 误读成「全不勾」⇒ 老客户端上架的商品承诺条**全空**。取真才是「保持现状」。
+     * 兼容 {@code Boolean}（参数直传）与 {@code Number}/{@code Boolean}（从库读回：
+     * {@code tinyint(1)} 经 Connector/J 可能映射成 Boolean 或 Integer）。
+     */
+    private static boolean boolOrTrue(Object v) {
+        if (v == null) {
+            return true;
+        }
+        if (v instanceof Boolean b) {
+            return b;
+        }
+        if (v instanceof Number n) {
+            return n.intValue() != 0;
+        }
+        return Boolean.parseBoolean(v.toString());
     }
 }

@@ -111,7 +111,11 @@ class GoodsAuditTxAtomicityTest {
         assertThat(goodsRows()).isEqualTo(1);
 
         Map<String, Object> r = goodsService.goodsAdd(
-                merchantId, goodName, 2.0, jpeg(), "电子用品", productCode, 0, null, null, null, null);
+                merchantId, goodName, 2.0, jpeg(), "电子用品", productCode, 0, null, null, null, null,
+                // 可视化段补丁：goodsAdd 新增 5 个可选入参（多规格矩阵快照 SkuSpec + 4 个服务承诺位）。
+                // 此处按「老前端不传」的形状给 null —— 承诺位在 GoodsAuditService.boolOrTrue 里兜成「真」，
+                // 与本用例的判据（提审不碰 goods 行）无关。
+                null, null, null, null, null);
 
         assertThat(r).containsEntry("success", true).containsEntry("msg", "已提交审核");
         assertThat(auditRows()).isEqualTo(1);
@@ -207,7 +211,9 @@ class GoodsAuditTxAtomicityTest {
     /** 走生产路径造一条待审单，返回它的 {@code goods_audit.Id}。 */
     private long submitPending() {
         Map<String, Object> r = goodsService.goodsAdd(
-                merchantId, goodName, 1.0, jpeg(), "电子用品", productCode, 0, null, null, null, null);
+                merchantId, goodName, 1.0, jpeg(), "电子用品", productCode, 0, null, null, null, null,
+                // 同上一处：可视化段补丁新增的 5 个可选入参，按「老前端不传」给 null。
+                null, null, null, null, null);
         assertThat(r).containsEntry("success", true);
         Long id = jdbcTemplate.queryForObject(
                 "SELECT Id FROM " + GOODS_AUDIT + " WHERE MerchantId = ? AND ProductCode = ? "

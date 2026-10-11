@@ -73,7 +73,7 @@ export function restoreFromSession(info) {
   const next = { username: null, merchantId: null, customerId: null, role: null }
   if (info.username) next.username = info.username; if (info.merchantid) next.merchantId = info.merchantid
   if (info.customerid) next.customerId = info.customerid
-  if (info.role) next.role = info.role   // ⚠️ 与上面三个同行压缩是**故意的**：保住 `:108`/`:118`/`:146` 的行号
+  if (info.role) next.role = String(info.role)   // ⚠️ 与上面三个同行压缩是**故意的**：保住 `:108`/`:118`/`:146` 的行号。⚠️ **`String(...)` 是本行唯一的行为改动（2026-10-11，问题①的根因）**：`/user/me` 答的 `role` 是 JSON **数字**（实测 `{"role":3,"success":true}`），而全站**一律按字符串比** —— `router/index.js` 的 `meta.roles`（`['1','3']`）、`ROLE_HOME` 的键、`roleKey()` 的返回、`AdminShell.vue:99` 的角色名表。原样存 ⇒ 恢复路径上**每个角色的比较都恒 false**（`['3'].includes(3)` 是 false）⇒ 守卫 2（`router/index.js:329-334`）把人送到 `ROLE_HOME[数字]` = `undefined` ⇒ `|| '/customer'` ⇒ 在 `/customer` 上再判一次仍 false ⇒ **重定向成环** ⇒ `router.isReady()` reject ⇒ `app.mount('#app')` **永不执行** ⇒ `#app` 空 + `data-theme="admin"` 的深色底 = **整页深色、无内容**（实测：`_work/diag-me.mjs` 第 ④ 段 `textLen=0`；且 Console 只有一条 redirect warning、Network 一片干净 —— 最像「进不去」的那种）。⚠️ 与 `LoginPage` 写入的形态**本来就该一致**：那里是 `res.text()`，从一开始就是字符串
   if (!next.username && !next.merchantId && !next.customerId && !next.role) return false
   restored = next
   return true

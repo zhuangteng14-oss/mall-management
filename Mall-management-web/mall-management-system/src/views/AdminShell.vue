@@ -14,10 +14,10 @@
 
       <nav class="a-nav">
         <template v-for="d in SIDEBAR" :key="d.key">
-          <router-link :to="d.to" class="a-dom" :class="{ on: current === d.key }">{{ d.label }}</router-link>
+          <router-link :to="d.to" class="a-dom" :class="{ on: current === d.key }"><IconGlyph v-if="d.glyph" :name="d.glyph" />{{ d.label }}</router-link>
           <ul v-if="d.subs.length" class="a-subs">
             <li v-for="s in d.subs" :key="s.key">
-              <router-link :to="s.to" class="a-sub" :class="{ on: sub === s.key }">{{ s.label }}</router-link>
+              <router-link :to="s.to" class="a-sub" :class="{ on: sub === s.key }"><IconGlyph v-if="s.glyph" :name="s.glyph" />{{ s.label }}</router-link>
             </li>
           </ul>
         </template>
@@ -72,7 +72,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { ADMIN_SIDEBAR } from '../config/admin-nav'
 import { getUsername, getRole, clearCredentials, clearToken } from '../api/auth'
 import { http } from '../api/http'
-import { endpoints } from '../api/endpoints'
+import { endpoints } from '../api/endpoints'; import IconGlyph from '../components/ui/IconGlyph.vue'   // ⚠️ 两条 import **同行**（2026-10-11 补图标那一笔）—— 为**净零行数**：本文件被 `api/auth.js:76`（引 `AdminShell.vue:99` 的角色名表）与 `c3-block-1-infra.md:106`（引 `:69-90`）按行号钉住，顶部加一行会让它们漂移。下面两处侧栏 `v-for` 里的 `<IconGlyph …>` 同理是**同行**插的
 
 const SIDEBAR = ADMIN_SIDEBAR
 const route = useRoute()

@@ -94,7 +94,7 @@
 
       <div class="n-row n-actions">
         <button type="submit" class="n-btn n-btn-on" :disabled="sending">
-          {{ sending ? '发送中…' : '发送' }}
+          <IconGlyph name="ok" />{{ sending ? '发送中…' : '发送' }}
         </button>
         <span v-if="sendResult" class="n-sent" :class="{ bad: !sendResult.ok }">
           <template v-if="sendResult.ok">
@@ -230,7 +230,7 @@
       </div>
       <div class="n-row n-actions">
         <button type="submit" class="n-btn n-btn-on" :disabled="tplSaving">
-          {{ tplSaving ? '保存中…' : '保存' }}
+          <IconGlyph name="ok" />{{ tplSaving ? '保存中…' : '保存' }}
         </button>
         <button v-if="tplForm.editing" type="button" class="n-btn" @click="resetTemplateForm">取消编辑</button>
         <span v-if="tplMsg" class="n-sent" :class="{ bad: !tplMsg.ok }">{{ tplMsg.text }}</span>
@@ -274,7 +274,7 @@
 -->
 <script setup>
 import { computed, onMounted, reactive, ref } from 'vue'
-import { notifyHistory, notifySend } from '../../api/admin'
+import { notifyHistory, notifySend } from '../../api/admin'; import IconGlyph from '../../components/ui/IconGlyph.vue'   // ⚠️ 两条 import **同行**（2026-10-11 补图标那一笔）—— 合并到既有行 = 不新增行号漂移（`AuditPage.vue:219-263` 那条兄弟注释由 `NotifyPage.vue:289` 引，同一族的账；**原 173-217 行**，2026-10-11 收口按 refs-scan 重指）
 // ⚠️ 模板存取**已迁出** `api/admin.js`（2026-10-10〈模板表通用化〉）：旧的两条
 //    `notifyTemplateList` / `notifyTemplateSave` 与端点 `/admin/notify/template/*` 一起下线，
 //    改走通用表 `/admin/template/*`（`TemplatePicker` 也用这一支）。
@@ -286,7 +286,7 @@ const CUSTOM = '__custom__'
 
 const eventOptions = EVENT_OPTIONS
 
-// ── 时区（与 `AuditPage.vue:173-217` 逐字同款，理由见文件尾注释块）──────────────
+// ── 时区（与 `AuditPage.vue:219-263` 逐字同款，理由见文件尾注释块；原 173-217 行）───
 const pad = (n) => String(n).padStart(2, '0')
 
 const tzLabel = computed(() => {

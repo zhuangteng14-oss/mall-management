@@ -258,7 +258,7 @@
       <section class="sec">
         <div class="sec-h">
           <span class="idx">05</span><h2>规格 SKU</h2>
-          <span class="note">单规格 = 上面的「商品型号」，已经是真功能</span>
+          <span class="note">单规格 = 上面的「商品型号」；多规格 = 下面的矩阵，两条都是真功能</span>
         </div>
 
         <div class="f">
@@ -290,22 +290,34 @@
           <div class="hint">展示在商品详情页的「规格参数」Tab，按 `键=值` 逐行拆成左右两列。</div>
         </div>
 
-        <!-- 预留位 ⑤（稿 `:451-462`）—— 块级。矩阵里的三行规格名是**稿的示意值**，
-             但整块在 `data-slot` 内 ⇒ 照 commit 5（`OrderCenter.vue:89-92` 的筛选栏）
-             同一口径：**预留块内的稿 mock 文本逐字保留**，不换成 `—`。 -->
-        <div
-          class="f mt"
-          data-slot="预留 · 多规格矩阵（动现有代码 ≥4 处 · 超档）"
-          title="待 C3〈商品〉——无 SKU 表、无组合价 / 库存列：新建 SKU 表 + GoodsDao.java + GoodsService.java + GoodsController.java + GoodsAdd.vue + ProductPage.vue = ≥4 处，**超档**，因清单点名而画出（见 README 挂账表）"
-        >
-          <span class="lb">多规格矩阵（颜色 × 尺码，逐行定价）</span>
-          <div class="matrix">
-            <div class="hd"><span>规格</span><span>价格</span><span>库存</span><span>编码</span></div>
-            <div class="rw"><span class="nm">深空灰 / 标准</span><span>—</span><span>—</span><span>—</span></div>
-            <div class="rw"><span class="nm">曜石黑 / 降噪</span><span>—</span><span>—</span><span>—</span></div>
-            <div class="rw"><span class="nm">珍珠白 / 旗舰</span><span>—</span><span>—</span><span>—</span></div>
+        <!-- ⚠️ 2026-10-11（用户裁决）：预留位 ⑤「多规格矩阵」**就地转真功能** ——
+             依据是「无 SKU 表 / 无组合价 / 库存列」这个前提**已不成立**（本轮新建 `goods_sku` 表，
+             见 `mall_management_sql.sql` 迁移块 ④）⇒ 占位若留着就是一句假陈述。
+             矩阵结构**来自模板**：「选规格模板」按结构化模板（`template.Kind='structured'`）各轴的取值
+             做**笛卡尔积**自动生成行；每格的价格 / 库存 / 编码由商家填（正是用户「省去手动一行行加」的口径）。
+             ⚠️ 提交时矩阵以 JSON 串随提审走（`SkuSpec`），审核通过后才落 `goods_sku`（提审制）。 -->
+        <div class="f mt">
+          <div class="f-head">
+            <span class="lb">多规格矩阵（颜色 × 尺码，逐行定价）</span>
+            <button type="button" class="btn-quiet" @click="showSkuTpl = true">选规格模板</button>
           </div>
-          <div class="hint">多规格要能各自定价、各自扣库存才算真跑起来 —— 那是新的表结构，不是加一列的事。</div>
+          <div class="matrix">
+            <div class="hd"><span>规格</span><span>价格</span><span>库存</span><span>编码</span><span></span></div>
+            <div class="rw" v-for="(r, i) in skuRows" :key="i">
+              <span class="nm"><input v-model.trim="r.spec" class="minp" type="text" placeholder="如 深空灰 / M" /></span>
+              <span><input v-model="r.price" class="minp" type="text" placeholder="0.00" /></span>
+              <span><input v-model="r.stock" class="minp" type="text" placeholder="0" /></span>
+              <span><input v-model.trim="r.code" class="minp" type="text" placeholder="SKU 编码" /></span>
+              <span class="op"><button type="button" class="rm" title="删除这一行" @click="removeSkuRow(i)">×</button></span>
+            </div>
+            <div class="rw empty" v-if="skuRows.length === 0">
+              <span>还没有规格行 —— 点右上「选规格模板」自动生成，或点下面「加一行」自己填。</span>
+            </div>
+          </div>
+          <div class="f-head mt-s">
+            <button type="button" class="btn-quiet" @click="addSkuRow">加一行</button>
+          </div>
+          <div class="hint">每行有自己的编码 —— 买家在商品详情页选中的那行编码，就是加入购物车时上报的商品编码。</div>
         </div>
       </section>
 
@@ -336,18 +348,18 @@
           <div class="hint">展示在商品详情页的「售后保障」Tab。</div>
         </div>
 
-        <!-- 预留位 ⑥（稿 `:469-478`）—— 块级。四条文案与 ProductPage 的承诺条**必须逐字一致**
-             （稿的跨页共性组件登记），本笔照稿逐字取。 -->
-        <div
-          class="f"
-          data-slot="预留 · 服务承诺勾选（动现有代码 ≥4 处 · 超档）"
-          title="待 C3〈商品〉——goods 表无承诺列，选了什么存不下来：mall_management_sql.sql + GoodsDao.java + GoodsController.java + GoodsAdd.vue = ≥4 处，**超档**，因清单点名而画出（见 README 挂账表）"
-        >
+        <!-- ⚠️ 2026-10-11（用户裁决）：预留位 ⑥「服务承诺勾选」**就地转真功能** ——
+             依据是「goods 表无承诺列，选了什么存不下来」这个前提**已不成立**（本轮给 goods 加了
+             `PromiseGenuine` / `PromiseReturn7` / `PromiseFastRefund` / `PromiseFreightIns` 四列，
+             默认 1；见 `mall_management_sql.sql` 迁移块 ①②）。
+             ⚠️ 四条文案与 `ProductPage.vue` 的承诺条**必须逐字一致**（稿的跨页共性组件登记）。
+             ⚠️ 默认全勾：与改前「详情页对每件商品都显示四条」一致（保持现状、向后兼容）。 -->
+        <div class="f">
           <div class="svcs">
-            <span class="svc"><button class="ck" type="button" aria-checked="true" disabled title="待 C3〈商品〉——无承诺列（≥4 处，超档）"></button>正品保障</span>
-            <span class="svc"><button class="ck" type="button" aria-checked="true" disabled title="同上"></button>7 天无理由</span>
-            <span class="svc"><button class="ck" type="button" aria-checked="false" disabled title="同上"></button>极速退款</span>
-            <span class="svc"><button class="ck" type="button" aria-checked="false" disabled title="同上"></button>运费险</span>
+            <span class="svc"><button class="ck" type="button" :aria-checked="String(PromiseGenuine)" title="正品保障" @click="PromiseGenuine = !PromiseGenuine"></button>正品保障</span>
+            <span class="svc"><button class="ck" type="button" :aria-checked="String(PromiseReturn7)" title="7 天无理由" @click="PromiseReturn7 = !PromiseReturn7"></button>7 天无理由</span>
+            <span class="svc"><button class="ck" type="button" :aria-checked="String(PromiseFastRefund)" title="极速退款" @click="PromiseFastRefund = !PromiseFastRefund"></button>极速退款</span>
+            <span class="svc"><button class="ck" type="button" :aria-checked="String(PromiseFreightIns)" title="运费险" @click="PromiseFreightIns = !PromiseFreightIns"></button>运费险</span>
           </div>
           <div class="hint">勾选后会显示在商品详情页的承诺条上。</div>
         </div>
@@ -364,7 +376,7 @@
           title="待 C3〈商品〉——无草稿态：goods 表无状态列（下架 = 删行），草稿要先能存而不出现在「查看商品」里：mall_management_sql.sql + GoodsDao.java + GoodsController.java + GoodsUp.vue（列表要过滤掉草稿）= ≥4 处，**超档**，因清单点名而画出"
         >保存草稿</button>
 
-        <button type="button" class="btn-main" @click="submitGoods">上架商品</button>
+        <button type="button" class="btn-main" @click="submitGoods"><IconGlyph name="ok" />上架商品</button>
         <div class="hint">提交成功后会清空表单，可继续上架下一件。</div>
       </div>
     </form>
@@ -381,13 +393,26 @@
       @pick="onPickDetailTpl"
       @close="showDetailTpl = false"
     />
+    <!-- ⚠️ 2026-10-11：`goods.spec` 这一个 type 下**两种形态**并存 ⇒ 两个入口各取各的：
+         「规格说明」文本域取**文本模板**（`kind="text"`），多规格矩阵取**结构化模板**（`kind="structured"`）。 -->
     <TemplatePicker
       v-if="showSpecTpl"
       type="goods.spec"
-      title="选择规格模板"
-      empty-text="暂无规格模板（管理端建一条即可）"
+      kind="text"
+      title="选择规格模板（文本）"
+      empty-text="暂无文本规格模板（管理端建一条即可）"
       @pick="onPickSpecTpl"
       @close="showSpecTpl = false"
+    />
+    <!-- 多规格矩阵的模板：选完 → `onPickSkuTpl` 把各轴取值做笛卡尔积填成矩阵行。 -->
+    <TemplatePicker
+      v-if="showSkuTpl"
+      type="goods.spec"
+      kind="structured"
+      title="选择规格模板（生成矩阵）"
+      empty-text="暂无结构化规格模板（管理端建一条，形态选「结构化」即可）"
+      @pick="onPickSkuTpl"
+      @close="showSkuTpl = false"
     />
     <TemplatePicker
       v-if="showAfterSaleTpl"
@@ -405,7 +430,7 @@
 import { ref, onMounted } from 'vue'
 import { http, handleApiError } from '../api/http'
 import { endpoints } from '../api/endpoints'
-import { getMerchantId } from '../api/auth'
+import { getMerchantId } from '../api/auth'; import IconGlyph from '../components/ui/IconGlyph.vue'   // ⚠️ 两条 import **同行**（2026-10-11 补图标那一笔）—— 合并到既有行 = 不新增行号漂移（`api-contract.md` 按 `GoodsAdd.vue:135/166/217` 钉住本文件）
 import TemplatePicker from '../components/TemplatePicker.vue'
 
 const fileInput = ref(null)
@@ -429,6 +454,19 @@ const AfterSale = ref('')
 const showDetailTpl = ref(false)
 const showSpecTpl = ref(false)
 const showAfterSaleTpl = ref(false)
+
+// ── 2026-10-11（用户裁决）：服务承诺四勾 + 多规格矩阵 ──────────────────────────
+// 承诺位：默认**全真** —— 与改前「详情页对每件商品都无条件显示四条」一致（硬线：不动旧行为）。
+// 提交时落 `goods.Promise*` 四列（提审制下先落 `goods_audit`，通过时再写 goods）。
+const PromiseGenuine = ref(true)
+const PromiseReturn7 = ref(true)
+const PromiseFastRefund = ref(true)
+const PromiseFreightIns = ref(true)
+
+// 多规格矩阵：一行 = 一个规格组合。行列结构来自结构化模板，价格/库存/编码由商家逐格填。
+// ⚠️ 空数组 = 不用多规格 ⇒ 提交的 `SkuSpec` 为空 ⇒ 该商品就是「单规格」（与今日行为一致）。
+const skuRows = ref([])
+const showSkuTpl = ref(false)
 
 const typeList = ref([])
 const newType = ref('')
@@ -471,6 +509,56 @@ const chooseImage = () => {
 const onPickDetailTpl = (row) => { Detail.value = row.Body || ''; showDetailTpl.value = false }
 const onPickSpecTpl = (row) => { Spec.value = row.Body || ''; showSpecTpl.value = false }
 const onPickAfterSaleTpl = (row) => { AfterSale.value = row.Body || ''; showAfterSaleTpl.value = false }
+
+// ── 多规格矩阵（2026-10-11）────────────────────────────────────────────────────
+/** 加一行空规格（手填路径）。 */
+const addSkuRow = () => { skuRows.value = [...skuRows.value, { spec: '', price: '', stock: '', code: '' }] }
+/** 删第 i 行。 */
+const removeSkuRow = (i) => { skuRows.value = skuRows.value.filter((_, idx) => idx !== i) }
+
+/** 组合数上限 —— 防「5 轴 × 每轴 8 值」这种把页面撑爆的手误（3125 行）。 */
+const SKU_MAX_COMBOS = 200
+
+/**
+ * 选**结构化**规格模板 → 按各轴取值做**笛卡尔积** → 生成矩阵行。
+ *
+ * <p>模板正文约定：一行一条轴，`轴名=值1,值2,…`（全/半角逗号都认）。
+ * 例：`颜色=深空灰,曜石黑,珍珠白` + `尺码=S,M,L,XL` ⇒ 3 × 4 = 12 行，组合标签 `深空灰 / S` …
+ *
+ * <p>⚠️ 覆写 `skuRows`（不是追加）：模板是「行列结构的起点」，连选两次不该把两套结构粘起来
+ * （同三段快照文本「直接覆写」的口径）。商家填过的价格 / 库存 / 编码会随之丢掉 —— 这是**有意的**，
+ * 因为换了结构，旧格子的归属已经不明。
+ */
+const onPickSkuTpl = (row) => {
+  showSkuTpl.value = false
+  const axes = String(row.Body || '')
+    .split('\n')
+    .map((s) => s.trim())
+    .filter((s) => s !== '')
+    .map((line) => {
+      const i = line.indexOf('=')
+      if (i < 0) return null
+      const name = line.slice(0, i).trim()
+      const vals = line.slice(i + 1).split(/[,，]/).map((v) => v.trim()).filter((v) => v !== '')
+      return name && vals.length ? { name, vals } : null
+    })
+    .filter(Boolean)
+  if (!axes.length) {
+    alert('这条模板没有可解析的规格轴。\n每行应写成：轴名=值1,值2,…（例：颜色=深空灰,曜石黑）')
+    return
+  }
+  let combos = ['']
+  for (const ax of axes) {
+    const next = []
+    for (const c of combos) for (const v of ax.vals) next.push(c ? c + ' / ' + v : v)
+    combos = next
+    if (combos.length > SKU_MAX_COMBOS) {
+      alert(`规格组合太多（超过 ${SKU_MAX_COMBOS} 行），请减少轴上取值，或手填矩阵。`)
+      return
+    }
+  }
+  skuRows.value = combos.map((spec) => ({ spec, price: '', stock: '', code: '' }))
+}
 
 const handleImageChange = (e) => {
   const file = e.target.files[0]
@@ -535,6 +623,21 @@ const submitGoods = async () => {
   formData.append('Detail', Detail.value)
   formData.append('Spec', Spec.value)
   formData.append('AfterSale', AfterSale.value)
+  // 2026-10-11：多规格矩阵快照（只收「有组合名」的行 —— 用户点了「加一行」却没填的空行不算）
+  // + 四个服务承诺位。⚠️ 与三段快照文本同理：这些必须**随提审携带**，否则审核通过后 goods 新行 / SKU 为空。
+  const skuPayload = skuRows.value
+    .filter((r) => String(r.spec || '').trim() !== '')
+    .map((r) => ({
+      spec: String(r.spec).trim(),
+      price: Number(r.price) || 0,
+      stock: Number(r.stock) || 0,
+      code: String(r.code || '').trim()
+    }))
+  if (skuPayload.length) formData.append('SkuSpec', JSON.stringify(skuPayload))
+  formData.append('PromiseGenuine', String(PromiseGenuine.value))
+  formData.append('PromiseReturn7', String(PromiseReturn7.value))
+  formData.append('PromiseFastRefund', String(PromiseFastRefund.value))
+  formData.append('PromiseFreightIns', String(PromiseFreightIns.value))
 
   try {
     const res = await http.post(endpoints.goods.goodsAdd, formData)
@@ -558,6 +661,12 @@ const submitGoods = async () => {
       Detail.value = ''
       Spec.value = ''
       AfterSale.value = ''
+      // 多规格矩阵清空；承诺位回到默认「全勾」（新增商品默认全承诺，同 ② 的默认值）。
+      skuRows.value = []
+      PromiseGenuine.value = true
+      PromiseReturn7.value = true
+      PromiseFastRefund.value = true
+      PromiseFreightIns.value = true
 
       loadGoodsType()
     } else {
@@ -661,6 +770,7 @@ button { background: none; border: 0; cursor: pointer; }
 .f-head .btn-quiet { margin-left: auto; height: 28px; padding: 0 var(--s3); }
 .f .hint { margin-top: var(--s2); font-size: var(--fs-xs); color: var(--ink-3); }
 .mt { margin-top: var(--s5); }
+.mt-s { margin-top: var(--s3); }
 
 .inp {
   width: 100%; height: 40px; padding: 0 var(--s3);
@@ -751,23 +861,32 @@ textarea.inp { height: 88px; padding: var(--s3); resize: none; font-family: inhe
   border-radius: var(--r1); background: var(--surface); padding: 0; cursor: pointer;
 }
 .ck[aria-checked="true"] { background: var(--brand); border-color: var(--brand); }
-/* 占位态的勾选框：`<button disabled>` 自带不了「不可用」的光标，得手写 */
-.ck[disabled] { cursor: not-allowed; }
 .btn-quiet {
   height: 34px; padding: 0 var(--s4); border: 1px solid var(--line-2);
   border-radius: var(--r1); color: var(--ink-2);
 }
 .btn-quiet[disabled] { color: var(--ink-3); cursor: not-allowed; }
 
-/* ── 多规格矩阵：表头 + 行（占位块，视觉上是一张真表；稿 `:268-274`）───────────── */
-.matrix { margin-top: var(--s4); border: 1px dashed var(--line-2); border-radius: var(--r2); overflow: hidden; }
-.matrix .hd, .matrix .rw { display: grid; grid-template-columns: 1.2fr 1fr 1fr 1fr; gap: 1px; background: var(--line); }
+/* ── 多规格矩阵：表头 + 行（**真表格**：每格可编辑；稿 `:268-274` 的视觉）──────────
+   ⚠️ 2026-10-11：占位块转真功能 ⇒ ① 虚线框改实线（它不再是「预留」）② 末列加一枚删除键
+   ⇒ 网格从 4 列改 5 列（末列 `auto`，只放那枚 ×）③ 格子里放真 `<input>`。 */
+.matrix { margin-top: var(--s4); border: 1px solid var(--line-2); border-radius: var(--r2); overflow: hidden; }
+.matrix .hd, .matrix .rw { display: grid; grid-template-columns: 1.2fr 1fr 1fr 1.2fr auto; gap: 1px; background: var(--line); }
 .matrix .hd > * {
   background: var(--surface-2); color: var(--ink-3); font-size: var(--fs-xs);
   padding: var(--s3) var(--s3);
 }
-.matrix .rw > * { background: var(--surface); padding: var(--s3) var(--s3); color: var(--ink-3); font-size: var(--fs-sm); }
+.matrix .rw > * { background: var(--surface); padding: var(--s2) var(--s3); color: var(--ink-3); font-size: var(--fs-sm); min-width: 0; }
 .matrix .nm { color: var(--ink-2); }
+/* 格内输入：去掉盒子（格线已经画出格子了），聚焦时给一圈 brand 环 */
+.matrix .minp { width: 100%; border: 0; background: transparent; font: inherit; color: var(--ink); padding: var(--s1) 0; }
+.matrix .minp::placeholder { color: var(--ink-3); }
+.matrix .minp:focus { outline: none; box-shadow: 0 0 0 2px var(--brand-tint); border-radius: var(--r1); }
+.matrix .op { display: flex; align-items: center; justify-content: center; }
+.matrix .rm { width: 24px; height: 24px; border: 1px solid var(--line-2); border-radius: var(--r1); color: var(--ink-3); }
+.matrix .rm:hover { color: var(--danger); border-color: var(--danger); }
+/* 空态那一行：一句提示横跨全部列 */
+.matrix .empty > span { grid-column: 1 / -1; color: var(--ink-3); font-size: var(--fs-sm); }
 
 /* ── 底部动作条（稿 `:276-286`）────────────────────────────────────────────── */
 .acts {

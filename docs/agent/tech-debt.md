@@ -428,7 +428,7 @@
 |---|---|
 | 现状 | `order` 只有 `PayIf` / `DeliveryIf` / `ReceiveIf` **三个状态位**，**没有任何资金列**（金额只有 `Price`，无「已退」「退款中」）。`PayIf` 是**单调**的 0→1（CAS `WHERE PayIf=0`），**回退会破三位单调性**。 |
 | 后果 ① | 管理端 `Action = refund` / `dispute` 在 `AdminOrderService.intervene` 被**明确拒绝**（回「强制退款本块未实现：order 表没有资金态…」，**不是**「未知动作」）—— 这是**有意的**，不是漏做。 |
-| 后果 ② | `/cart/checkout` 逐行建订单，**无 `@Transactional`**（本仓订单链路的结构性约束）⇒ 中途某行失败时**已建订单不回滚**，返回 `{success:false, msg, list:[已成功行]}`，失败行**留在车里**。账实差由调用方按 `list` 自行对账。 |
+| 后果 ② | `/cart/checkout` 逐行建订单，**无 `@Transactional`**（本仓订单链路的结构性约束）⇒ 中途某行失败时**已建订单不回滚**，返回 `{success:false, msg, list:[已成功行]}`，失败行**留在车里**。账实差由调用方按 `list` 自行对账。⚠️ **2026-10-11 口径更新（可视化段 commit 0b）**：建单粒度由「**逐行**」改为「**按商家分组**」（N 行 ⇒ M 张单，M = 商家数）⇒ 本条**性质不变、颗粒度变粗**：失败时是**整组**不回滚（原先只影响一行）。`list` 的语义（已成功**行**）**未改**。 |
 | 处理时机 | **需业务输入**（要不要引入资金态 / 补偿表）⇒ 未排期。 |
 | 状态 | ⏸ **登记不修（2026-10-10，C3 块 4）**。 |
 
@@ -544,7 +544,7 @@
 |---|---|
 | 现状（实测） | `bannedAt` / `ScheduledDowngradeAt` / `FrozenAt` / `FreezeUntil` **四列全部由 Java 侧 `LocalDateTime.now()` 绑参写入**，不是 SQL 的 `NOW()`：`MerchantDowngradeService:102-103`（`LocalDateTime now = LocalDateTime.now(); LocalDateTime dueAt = now.plusDays(NOTICE_DAYS)` → `markScheduled`）、`:200` / `:252`（`markFrozen(username, now, now.plusDays(FREEZE_DAYS))`）、`UserGovernanceService:78`（`updateBan(username, true, reason, LocalDateTime.now())`）。而 JVM 时区实测是 **CST**（C3 块 4 补丁核验实例 8089 的启动日志逐字：`2026-10-10T22:49:27.590+08:00`）。⇒ 落进库的是 **CST 墙钟字面量**。⚠️ 读取侧 `UserGovernanceDao:54` / `:56-58` 一律 `DATE_FORMAT(…,'%Y-%m-%d %H:%i:%s')` 交回**无时区文本** ⇒ 前端**无从分辨**哪一列是哪条轴。 |
 | 后果 ①（同页两套轴） | `AccountsPage.vue` 对同一张表的两组时刻用了**同一个** `toLocal`：`:83`（`SubmittedAt`）/ `:93`（`ReviewedAt`）来自 `merchant_application`、走**库时钟**（对）；`:169`（`bannedAt`）/ `:672`（`ScheduledDowngradeAt`）/ `:675`（`FrozenAt`）/ `:742`（`data.scheduledAt`，源 `MerchantDowngradeService:110` 的 `dueAt.toString()`）全走 **JVM 轴** ⇒ 在 VM / a3 上这 4 处会被**再推 8 小时**。 |
-| 后果 ②（本机看不见） | **本地开发库**的时钟 = 机器时钟 = CST，而 JVM 也是 CST ⇒ 两条轴**恰好重合**，这四列的 `toLocal` 表现正常。这正是它至今没被发现的原因 —— ⚠️ **「在本地库上看起来是对的」不能作为判据**（同 `AuditPage.vue:161-163` 已记的那条环境边界，本条是它在 `user` 表上的具体后果）。 |
+| 后果 ②（本机看不见） | **本地开发库**的时钟 = 机器时钟 = CST，而 JVM 也是 CST ⇒ 两条轴**恰好重合**，这四列的 `toLocal` 表现正常。这正是它至今没被发现的原因 —— ⚠️ **「在本地库上看起来是对的」不能作为判据**（同 `AuditPage.vue:204-206` 已记的那条环境边界 —— 行号 2026-10-11 收口重指，原 161-163 行；本条是它在 `user` 表上的具体后果）。 |
 | 后果 ③（原样显示也不对） | `UserInfoPage.vue:333` 把这三个值**原样**打了出来 ⇒ 在 **CST 客户端**上恰好对、在 **UTC 客户端**上差 8 小时。「对不对」取决于谁在看 —— 说明这不是前端括号的问题，是**写入轴**的问题。 |
 | ⚠️ 与 TD-32 的关系 | TD-32 的「统一口径」是「**时刻只由库时钟产生**」。这四列**整列违反**该口径 —— 但它们同时又是 `selectDueDowngrades(LocalDateTime now)` 的比较基准（写读同源、调度自洽），**改轴会连带改降级三阶段状态机的语义**，还要同步 `MerchantApplicationService:240` 的自动恢复判据（`LocalDateTime.now().isBefore(LocalDateTime.parse(freezeUntil…))`）与既有演示数据。 |
 | 为何本笔不修 | 「这四列到底该用哪条轴」是一次**口径裁决**（要么全改库时钟、要么明确宣告 `user` 表是 JVM 轴并在前端分列处理），不是本补丁顺手能定的。⚠️ 本笔**曾**按「统一口径」给 `UserInfoPage.vue` 加过 `toLocal`，**实测后已撤销** —— 那会让显示**多** 8 小时（拿 JVM 轴的值当 UTC 折）。 |
@@ -576,3 +576,21 @@
 | 边界 ② | CI **不受影响**：`ci.yml` 的 concurrency job 仍显式 `SPRING_PROFILES_ACTIVE: a3`；`dev` 只在本机 / 攻击模拟器上用。 |
 | 边界 ③ | IDEA run config / 日常启动命令由 `a3` 改 `dev` 是**用户侧操作**（本次不改任何 IDE 文件）。 |
 | 状态 | ✅ **已落（2026-10-11，未提交）** —— `application-dev.properties` 新建；`HealthController` 的 `@Profile` 放宽；`application-smoke.properties` 补 `mall.order.cancel.enabled=false`（同族对称）；`environment.md` / `project-map.md` 同步。 |
+
+## TD-36 `goods_sku.Stock` **只存不扣**：下单不会减库存 ⇒「可售量」这个概念在本轮**不存在**
+
+| 项 | 内容 |
+|---|---|
+| 现状 | 多规格商品（`goods_sku`）的价格 / 库存 / SKU 码由商家**逐格填**，但 `Stock` **只是陈列值**：加入购物车（`/cart/add`）与下单（`/order/orderAdd`）**都不读、不减**它（`db-schema.md §13.3`）。`goods_sku.SkuCode` 在加购时**作为 `ProductCode` 上报** ⇒ 下单链路与购物车链路**一行未改**。 |
+| 后果 | ① 前端显示的库存**不随成交变化**（卖完了还显示有货）② 多规格与单型号两条路径的库存语义**一致地「没有」**（`goods` 侧本来也不扣，`productsales.OrderVolume` 恒为 0，见 `db-schema.md §1`）⇒ 本轮**没有引入新的不一致**，只是把「没有库存语义」**显式化**到多规格上 ③ 任何「超卖」判断都不存在。 |
+| 处理时机 | 用户 **2026-10-11 已知并同意**：扣减（含并发下的防超卖）进**单独一轮**。未排期。 |
+| 状态 | ⏸ **登记不修（2026-10-11，可视化段 commit 3 补丁）**。 |
+
+## TD-37 演示数据的两处**已知残留**：种子的明文口令 · 未裁的存量脏行
+
+| 项 | 内容 |
+|---|---|
+| ① 明文口令 | `seed-demo.sql` 的 `login.Password` **= 用户名**（对齐存量 `1/1`、`2222/2222` 的既有惯例，**不是**本笔新开的口径）。⚠️ 实测风险：**明文口令会被 push 侧的 `[Credential Leakage]` 拦下** ⇒ 处置是**改占位符再 `git commit --amend`**，**不硬推**。 |
+| ② 未裁两件小事 | `goods` **Id 120 的重复行**、`customerimage` / `merchantimage` **各 1 行残留**（对照表见 `docs/agent/evidence/d-seed/README.md`）—— **用户尚未裁决「清还是留」** ⇒ 本轮**一行未动**。 |
+| ③ 已裁保留（不再处理） | **6 笔旧单**（`ProductInformation` 指向已删商品）· **5 月中 → 10 月中空档**（看板用「近 30 天」绕开）⇒ 判定为**保留**，不是待办。 |
+| 状态 | ⏸ **登记不修（2026-10-11，可视化段 commit 4 / D 笔）**；② 的裁决权在用户。 |

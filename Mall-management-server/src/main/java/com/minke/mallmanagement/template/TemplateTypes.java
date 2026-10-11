@@ -68,6 +68,19 @@ public final class TemplateTypes {
      */
     public static final String NOTIFICATION_PREFIX = "notification.";
 
+    /**
+     * 模板形态（{@code template.Kind}，2026-10-11 加）—— **文本模板**：填一段话
+     * （详情 / 售后 / 各类理由），落进 {@code Body} 后原样展示。
+     */
+    public static final String KIND_TEXT = "text";
+
+    /**
+     * 模板形态 —— **结构化模板**：正文是**结构的定义**而非一段话。当前唯一用途是
+     * {@link #GOODS_SPEC} 下的多规格矩阵：正文每行一条轴、写作 {@code 轴名=值1,值2,…}，
+     * 商家选它 → 前端按各轴取值做**笛卡尔积** → 生成矩阵行（行列结构来自模板）。
+     */
+    public static final String KIND_STRUCTURED = "structured";
+
     /** 固定取值域（不含 {@code notification.*} —— 那一支是**动态**的，靠前缀判）。 */
     private static final Set<String> FIXED = Set.of(
             GOODS_DETAIL, GOODS_SPEC, GOODS_AFTER_SALE,
@@ -95,7 +108,19 @@ public final class TemplateTypes {
     }
 
     /**
-     * 该 type 是否**必须有 Title**。
+     * 把写侧传来的 {@code kind} 归一成**已知取值**之一：是 {@link #KIND_STRUCTURED} 就用它，
+     * **其余一律回落 {@link #KIND_TEXT}**（含 {@code null} / 空串 / 没见过的值）。
+     *
+     * <p>⚠️ 与 {@link #known(String)} 的「读侧放宽、写侧收紧」同口径，但**更宽**：未知 kind
+     * **不报错**，直接当文本模板 —— 因为 kind 只是「怎么用正文」的提示，认不出就当最朴素的文本，
+     * 不会让管理端建不出模板。
+     */
+    public static String normalizeKind(String kind) {
+        return KIND_STRUCTURED.equals(kind == null ? null : kind.trim()) ? KIND_STRUCTURED : KIND_TEXT;
+    }
+
+    /**
+     * 是否**必须有 Title**。
      *
      * <p>通知类是「标题 + 正文」两段模板（原 {@code notification_template} 两列都 NOT NULL）；
      * 商品类 / 理由类的 Title 无意义（{@code Body} 才是内容）⇒ 允许为空。

@@ -103,7 +103,7 @@
   · **原 301 行** —— 端点注释块（`/admin/accounts/applications` · `application/audit`）；
   · **原 324 行** —— ⚠️ 「危险动作**要求填理由**、理由**会展示给当事人**」的界面口径。
 - `.../src/views/admin/NotifyPage.vue:335-377` —— `doSend()`：`try → if(!data.success) 记 msg → catch 记网络错误 → finally`；回执模板两态 ⇒ **本块的「提交 / 通过 / 驳回」按钮照它**。
-- `.../src/views/admin/AuditPage.vue:301-329` —— `load()`：错误走 `err.value = ...HTTP ${status}` ⇒ **本块的列表取数照它**。
+- `.../src/views/admin/AuditPage.vue:441-469` —— `load()`：错误走 `err.value = ...HTTP ${status}` ⇒ **本块的列表取数照它**。〔行号 2026-10-11 可视化段收口重指：原 301-329 行〕
 - 商家端提审入口：`.../src/views/GoodsAdd.vue:440`（`submitGoods` → `endpoints.goods.goodsAdd`）；`.../src/views/GoodsUp.vue:349`（列表 → `goodsSelect`）· `:390`（下架 → `goodsDe`）。
 - 用户端筛选消费点：`.../src/views/GoodsSelect.vue:181-203`（`doSearch`：空关键词走 `goodsSelectHome`、非空走 `productSearch`）。
 

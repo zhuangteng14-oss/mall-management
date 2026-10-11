@@ -73,8 +73,8 @@
 ### 样板（照抄这两个真页，别自创风格） {#pack-c3-block-2-user-s9}
 
 - `.../src/views/admin/NotifyPage.vue:335-377` —— `doSend()`：`try → if(!data.success) 记 msg → catch 记网络错误 → finally`；回执模板 `:99-105`（`.n-sent`，`ok` / `bad` 两态）。⇒ **本块的「提交 / 通过 / 驳回」按钮照它**。
-- `.../src/views/admin/AuditPage.vue:301-329` —— `load()`：错误走 `err.value = ...HTTP ${status}`；错误条模板 `:72-75`。⇒ **本块的列表取数照它**。
-- `.../src/views/admin/AuditPage.vue:82-141` —— 事件流 + 展开详情；`NotifyPage.vue:146-168` —— 按批归组的卡片列表。⇒ **「申请列表 / 用户列表」照它**。
+- `.../src/views/admin/AuditPage.vue:441-469` —— `load()`：错误走 `err.value = ...HTTP ${status}`；错误条模板 `:72-75`。⇒ **本块的列表取数照它**。〔行号 2026-10-11 可视化段收口重指：原 301-329 行〕
+- `.../src/views/admin/AuditPage.vue:125-184` —— 事件流 + 展开详情；`NotifyPage.vue:146-168` —— 按批归组的卡片列表。⇒ **「申请列表 / 用户列表」照它**。〔行号同上重指：原 82-141 行〕
 - `.../src/views/LoginPage.vue:359-390` —— `register()`：五字段手判 → `http.post(loginAdd, URLSearchParams)` → 按**返回字符串**分支（`添加成功！` / `0`）。
 
 ### 表 / 前端入口 {#pack-c3-block-2-user-s10}

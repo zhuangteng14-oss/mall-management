@@ -141,7 +141,8 @@ public class GoodsService {
             String GoodType,
             String ProductCode,
             int GoodTypeNew,
-            Integer TypeId, String Detail, String Spec, String AfterSale
+            Integer TypeId, String Detail, String Spec, String AfterSale, String SkuSpec,
+            Boolean PromiseGenuine, Boolean PromiseReturn7, Boolean PromiseFastRefund, Boolean PromiseFreightIns
     ) {
         Map<String, Object> result = new HashMap<>();
 
@@ -176,7 +177,8 @@ public class GoodsService {
             // 提审：只写 goods_audit(pending)，**不写 goods 行**（提审制的定义，见类注释）。
             String batchId = GoodsAuditService.newBatchId();
             goodsAuditService.submit(MerchantId, batchId, GoodName, Price, GoodType, GoodTypeNew, TypeId,
-                    ProductCode, GoodImg, Detail, Spec, AfterSale);
+                    ProductCode, GoodImg, Detail, Spec, AfterSale, SkuSpec,
+                    PromiseGenuine, PromiseReturn7, PromiseFastRefund, PromiseFreightIns);
 
             result.put("success", true);
             // ⚠️ 文案已改（C3 块 3）：原「商品上架成功！」⇒「已提交审核」。
@@ -240,6 +242,30 @@ public class GoodsService {
             //    缓存侧原来的 catch 就只 put 了 success（另两个投影有 msg）—— 别「补全」它。
             return cacheFailureMarker(null);
         }
+    }
+
+    /**
+     * 某商家某商品的多规格矩阵（{@code goods_sku}）—— 详情页 / 上架页读回用（可视化段补丁）。
+     *
+     * <p>⚠️ <b>直接查库、不走缓存</b>：SKU 是低频读、且只在「商品详情」与「上架页回显」两处用，
+     * 为它加一层缓存（含失效点）不值当；查询按 {@code (MerchantId, GoodName)} 走索引，开销可忽略。
+     * 这与 {@code goods} 列表走 {@link GoodsCacheService} 是**两条不同的路**，不是漏接。
+     *
+     * <p>返回 {@code {success:true, list:[…], total:n}}；空列表 = 该商品没有多规格。
+     */
+    public Map<String, Object> skusByMerchantGoodName(String MerchantId, String GoodName) {
+        Map<String, Object> result = new HashMap<>();
+        if (MerchantId == null || MerchantId.trim().isEmpty()
+                || GoodName == null || GoodName.trim().isEmpty()) {
+            result.put("success", false);
+            result.put("msg", "缺少参数：MerchantId / GoodName");
+            return result;
+        }
+        List<Map<String, Object>> rows = goodsDao.selectSkusByMerchantGoodName(MerchantId, GoodName);
+        result.put("success", true);
+        result.put("list", rows);
+        result.put("total", rows.size());
+        return result;
     }
 
     /**

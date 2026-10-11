@@ -59,7 +59,7 @@
       </label>
       <div class="a-f-actions">
         <button type="submit" class="a-btn a-btn-on" :disabled="loading">
-          {{ loading ? '查询中…' : '查询' }}
+          <IconGlyph name="ok" />{{ loading ? '查询中…' : '查询' }}
         </button>
         <button type="button" class="a-btn" @click="reset">重置</button>
       </div>
@@ -74,7 +74,50 @@
       已截断：按上限 <b>{{ limit }}</b> 条显示，共命中 <b>{{ total }}</b> 条 —— 收窄筛选，或把上限调大。
     </p>
 
-    <!-- ── ③ 事件流 —— 「表格 → 叙事」：一条一条讲，不是一张宽表 ──────────────
+    <!-- ── ③ 审计量趋势（可视化段 commit 3）────────────────────────────────────
+         ⚠️ 数据源是**本次已取回的 `rows`**（受筛选条「上限」约束，≤ 500）—— 它不是
+         「全库审计量趋势」，是**这一屏**按本地日历日的分布；`truncated` 为真时曲线只覆盖
+         最近的那些条。⇒ 标题带「本次 N 条」，不冒充全量（同看板页对「区间」的处置）。
+         ⚠️ 分桶用 `toLocal(...)` 的**本地**日期，不是切 `OccurredAt` 的前 10 字 —— 后者是
+         UTC 日，东八区凌晨的记录会被算进前一天；本页的时区口径只有这一处，分桶沿它。 -->
+    <h2 class="a-h2">审计量趋势 <span class="a-h2n">按本地日历日 · 本次 {{ rows.length }} 条 · 缺日补 0</span></h2>
+    <div class="a-card">
+      <LineChart
+        :categories="trend.days"
+        :series="[{ name: '审计条数', data: trend.counts, area: true }]"
+        :height="'240px'"
+        y-formatter="{value} 条"
+        :loading="loading"
+        :error="err"
+        empty-text="本次没有可分桶的审计记录"
+        @retry="load"
+      />
+    </div>
+
+    <!-- ── ③b 动作类型分布（可视化段 commit 3；2026-10-11 复合图整改新增）────────────
+         上面那张管**什么时候有事**，这张管**多的是哪类事、各是谁在动** —— 两张不重叠。
+         ⚠️ x 轴是**动作域**不是日：本表只有几十条，按日铺开每根柱 0-2 条、整张图看着像坏的
+            （见 `byDomain` 的注释）；日维度的「量」已由上面那张折线承担。
+         ⚠️ 同样只覆盖**本次已取的 `rows`**（≤「上限」那档），标题照实写「本次 N 条」。 -->
+    <h2 class="a-h2">
+      动作类型分布
+      <span class="a-h2n">按动作域 · 按操作者角色分组 · 本次 {{ rows.length }} 条</span>
+    </h2>
+    <div class="a-card">
+      <BarChart
+        :categories="byDomain.categories"
+        :series="byDomain.series"
+        :height="'240px'"
+        value-formatter="{value} 条"
+        :max-bar-width="18"
+        :loading="loading"
+        :error="err"
+        empty-text="本次没有可分域的审计记录"
+        @retry="load"
+      />
+    </div>
+
+    <!-- ── ④ 事件流 —— 「表格 → 叙事」：一条一条讲，不是一张宽表 ──────────────
          ⚠️ `c3-modules.md` §五 的原型是「主视图区 + 右侧事件流栏」。本页**有意不分两栏**：
             这里**事件流本身就是主视图**（审计页没有「主视图」这回事），再切一条右边栏
             等于把唯一的内容挤到 60% 宽。§五 说的是**可观测域的联动页**（指标 / 状态流转），
@@ -169,6 +212,9 @@
 <script setup>
 import { computed, onMounted, reactive, ref } from 'vue'
 import { auditDetail, auditFacets, auditList } from '../../api/admin'
+import LineChart from '../../components/charts/LineChart.vue'
+// 2026-10-11 复合图整改新增：趋势折线管「什么时候有事」，下面那张分组柱管「多的是哪类事」。
+import BarChart from '../../components/charts/BarChart.vue'; import IconGlyph from '../../components/ui/IconGlyph.vue'   // ⚠️ 两条 import **同行**（2026-10-11 补图标那一笔）—— 合并到既有行 = 不新增行号漂移（本页 `:72-75`/`:125-184`/`:441-469` 被 `c3-block-2-user.md:76-77`、`c3-block-3-goods.md:106`、`c3-block-4-order.md:112` 引 —— **原 82-141 / 301-329 行**，C1 那几笔已推过一次、2026-10-11 收口按 refs-scan 再推一次）
 
 // ── 时区换算（两个方向必须对称，否则「筛出来的」和「显示出来的」对不上）──────────
 const pad = (n) => String(n).padStart(2, '0')
@@ -296,6 +342,100 @@ const openRow = computed(() => {
 })
 const diff = computed(() => diffRows(openRow.value.BeforeJson, openRow.value.AfterJson))
 const visibleDiff = computed(() => (onlyChanged.value ? diff.value.filter((d) => d.changed) : diff.value))
+
+// ── 审计量趋势（可视化段 commit 3）────────────────────────────────────────────
+/**
+ * 本次取回的审计行 → **按本地日历日**分桶的连续日期序列。
+ *
+ * ⚠️ 覆盖范围只有**本次已取的 `rows`**（≤「上限」那档，最多 500），不是全库 ——
+ *    `truncated` 为真时曲线只画最近的那些。这一点写在图标题里，不在图上找补。
+ * ⚠️ 分桶沿 `toLocal`（库内 UTC → 浏览器时区）再取前 10 字，**不是**直接切 `OccurredAt`：
+ *    后者是 UTC 日，东八区凌晨的记录会被算到前一天，与页面别处显示的时刻对不上。
+ * ⚠️ 首尾之间缺的日**补 0**：折线的 x 轴必须等距，否则「10-01 直接连到 10-05」会被读成
+ *    那几天一直有量。跨度 > 180 天时不补（那不是趋势，是点阵）。
+ */
+const trend = computed(() => {
+  const byDay = new Map()
+  for (const r of rows.value) {
+    const day = toLocal(r.OccurredAt).slice(0, 10)
+    if (/^\d{4}-\d{2}-\d{2}$/.test(day)) byDay.set(day, (byDay.get(day) || 0) + 1)
+  }
+  const keys = [...byDay.keys()].sort()
+  if (!keys.length) return { days: [], counts: [] }
+  const start = new Date(`${keys[0]}T00:00:00Z`)
+  const span = Math.round((new Date(`${keys[keys.length - 1]}T00:00:00Z`) - start) / 86400000)
+  if (span > 180) return { days: keys, counts: keys.map((d) => byDay.get(d)) }
+  const days = []
+  for (let i = 0; i <= span; i += 1) {
+    days.push(new Date(start.getTime() + i * 86400000).toISOString().slice(0, 10))
+  }
+  return { days, counts: days.map((d) => byDay.get(d) || 0) }
+})
+
+// ── 动作类型分布（可视化段 commit 3；2026-10-11 复合图整改新增）────────────────────
+/** 动作域中文名。键 = `Action` 的第一段（`goods.update` → `goods`）。 */
+const DOMAIN_LABEL = {
+  order: '订单',
+  goods: '商品',
+  goodstype: '类目',
+  merchant: '商家',
+  user: '用户',
+  template: '模板',
+  goods_template: '模板', // 与 `template` 同归一类：对读者是同一件事（改模板）
+  notification: '通知',
+}
+/** `ActorRole` 中文名（取自 `login.Role`：1 客户 / 2 商家 / 3 管理员）。 */
+const ROLE_LABEL = { 1: '客户', 2: '商家', 3: '管理员' }
+/** 图例的固定画序 —— 管理员在前（本页是管理端审计），「未识别」垫底。 */
+const ROLE_ORDER = ['管理员', '商家', '客户', '未识别']
+
+/**
+ * 本次取回的审计行 → **分组柱**数据：x 轴 = 动作域，每个域里按**操作者角色**并排。
+ *
+ * ⚠️ 为什么 x 轴取「动作域」而不是像订单页那样取「日」：本表是**几十条 / 30-60 天**的量级，
+ *    按日铺开每根柱平均 1 条出头、大片日子是 0，分组柱会稀成点阵、看着像画坏了；
+ *    而域只有 7-8 个，分组柱一眼读得出「哪类多」。日维度的「量」由上面那张折线承担，
+ *    两张图分工不重叠（这也是《看板规范》「一张图最多 2-3 个指标」的落地：此处 3 个角色）。
+ * ⚠️ `ActorRole` 为空 = **认不出身份**（建表注释：会话里取不到业务号）—— **不丢弃**、
+ *    单列一条「未识别」。审计页把「多少条认不出人」藏起来才是真的危险；没有这种行时
+ *    这一条**不出现**（不会留一条恒 0 的空图例）。
+ * ⚠️ 域 > 8 类时只留前 7 + 「其他」合并段：再多就回归成一片糊掉的柱林。
+ * ⚠️ 覆盖范围同样只有**本次已取的 `rows`**（≤「上限」那档，最多 500），不是全库。
+ */
+const byDomain = computed(() => {
+  const grid = new Map() // 域 → 角色 → 条数
+  for (const r of rows.value) {
+    const dom = DOMAIN_LABEL[String(r.Action || '').split('.')[0]] || '其他'
+    const role = ROLE_LABEL[r.ActorRole] || '未识别'
+    if (!grid.has(dom)) grid.set(dom, new Map())
+    const g = grid.get(dom)
+    g.set(role, (g.get(role) || 0) + 1)
+  }
+  if (!grid.size) return { categories: [], series: [] }
+  const total = (g) => [...g.values()].reduce((a, b) => a + b, 0)
+  let doms = [...grid.entries()]
+    .map(([d, g]) => [d, g, total(g)])
+    .sort((a, b) => b[2] - a[2])
+  if (doms.length > 8) {
+    const tail = doms.slice(7)
+    doms = doms.slice(0, 7)
+    // 已经有一个「其他」（未知前缀）就并进去，别出来两个同名类目。
+    let bucket = doms.find(([d]) => d === '其他')
+    if (!bucket) {
+      bucket = ['其他', new Map(), 0]
+      doms.push(bucket)
+    }
+    for (const [, g] of tail) {
+      for (const [role, n] of g) bucket[1].set(role, (bucket[1].get(role) || 0) + n)
+    }
+  }
+  return {
+    categories: doms.map(([d]) => d),
+    series: ROLE_ORDER
+      .filter((role) => doms.some(([, g]) => (g.get(role) || 0) > 0))
+      .map((role) => ({ name: role, data: doms.map(([, g]) => g.get(role) || 0) })),
+  }
+})
 
 // ── 取数 ─────────────────────────────────────────────────────────────────────
 async function load() {
@@ -723,5 +863,33 @@ onMounted(() => {
   overflow-x: auto;
   white-space: pre-wrap;
   word-break: break-all;
+}
+
+/* ── 分段标题 / 图表卡（可视化段 commit 3）─────────────────────────────────────
+   本页原无这两类。定义成与 `AccountsPage` / `OrderPage` 的 `.a-h2` / `.a-card`
+   **同款**（同前缀同值），三页的管理端小节标题才长得一样 —— 不要在这里另立一套。 */
+.a-h2 {
+  display: flex;
+  align-items: baseline;
+  gap: var(--s3);
+  flex-wrap: wrap;
+  margin: var(--s7) 0 var(--s4);
+  padding-bottom: var(--s2);
+  border-bottom: 1px solid var(--line-2);
+  font-size: var(--fs-lg);
+  font-weight: var(--fw-semi);
+  color: var(--ink);
+}
+.a-h2n {
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-reg);
+  color: var(--ink-3);
+}
+.a-card {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--r3);
+  padding: var(--s4) var(--s5);
 }
 </style>

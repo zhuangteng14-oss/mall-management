@@ -1,0 +1,66 @@
+mysql: [Warning] Using a password on the command line interface can be insecure.
+step	OrderId	Price	ProductInformation
+WILL_DELETE_order_1010	XWNS589693227506	16665	222:IJ-555
+WILL_DELETE_order_1010	PIFK37592245	11218	222:IJ-555；222:IF-55
+WILL_DELETE_order_1010	CHKM360570571420	5555	222:IJ-555
+WILL_DELETE_order_1010	OQNB15363921	5555	222:IJ-555
+WILL_DELETE_order_1010	SPZV48561853	5555	222:IJ-555
+WILL_DELETE_order_1010	RJQV62271134	5555	222:IJ-555
+WILL_DELETE_order_1010	ZYUW96404840	5555	222:IJ-555
+WILL_DELETE_order_1010	FILM16741477	5555	222:IJ-555
+WILL_DELETE_order_1010	KTLQ27366931	5555	222:IJ-555
+WILL_DELETE_order_1010	KGKT651544897092	5555	222:IJ-555
+WILL_DELETE_order_1010	NHOB029438564024	60	叠法双方:dffffff
+WILL_DELETE_order_1010	VGJB50421020	20	叠法双方:dffffff
+WILL_DELETE_order_1010	RNLX55941639	1	1:1
+WILL_DELETE_order_1010	EGPC49109165	1	1:1
+WILL_DELETE_order_1010	BUEX77899935	1	1:1
+WILL_DELETE_order_1010	CU320435A	1	取消核验:1
+WILL_DELETE_order_1010	CU320435C	1	取消核验:1
+step	deleted
+del.order_item	0
+step	deleted
+del.order_shipping_track	0
+step	deleted
+del.order_state_transition	0
+step	deleted
+del.order	0
+step	deleted
+del.goods_sku	0
+step	deleted
+del.goods_audit	0
+step	deleted
+del.goods	0
+step	deleted
+del.notification	0
+step	deleted
+del.cart	0
+step	deleted
+del.merchant_application	0
+step	deleted
+del.user	0
+step	deleted
+del.login	0
+step	deleted
+del2.order_item	0
+step	deleted
+del2.order_shipping_track	33
+step	deleted
+del2.order_state_transition	55
+step	deleted
+del2.order	17
+step	t	n
+AFTER_seed_rows	login	40
+AFTER_seed_rows	user	40
+AFTER_seed_rows	goods	44
+AFTER_seed_rows	order	178
+AFTER_seed_rows	order_item	199
+AFTER_seed_rows	notification	52
+step	n	min_price	max_price
+AFTER_legacy_orders	6	2	22328
+step	n
+AFTER_legacy_orders_oct	0
+step	Id	GoodName	Price	ProductCode
+AFTER_legacy_goods	120	无线蓝牙耳机 声谷标准版	299	GD-101-9552
+step	bad_login	bad_goods	bad_price	bad_order_price
+AFTER_leftover_scan	0	0	0	0

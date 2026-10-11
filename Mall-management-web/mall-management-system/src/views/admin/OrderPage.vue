@@ -93,7 +93,7 @@
           <input v-model.number="f.limit" type="number" min="1" max="500" />
         </label>
         <div class="a-f-actions">
-          <button type="submit" class="a-btn a-btn-on" :disabled="loading">查询</button>
+          <button type="submit" class="a-btn a-btn-on" :disabled="loading"><IconGlyph name="ok" />查询</button>
           <button type="button" class="a-btn" :disabled="loading" @click="resetFilters">清空</button>
         </div>
       </form>
@@ -107,13 +107,79 @@
         本次结果已达取回上限：仅取回 {{ rows.length }} 条（按时间倒序），后面可能还有。
       </p>
 
+      <!-- ── 状态分布 · GMV 趋势 · 发货时效（可视化段 commit 3）──────────────────
+           ⚠️ 三张图的数据源都是**本次已取回的 `rows`**（受筛选与上限 200/500 约束），
+              不是全库。`truncated` 为真时它们只覆盖按时间倒序的最近那一段 —— 标题里
+              一律带「本次 N 条」，不冒充全量口径。 -->
+      <h2 class="a-h2">
+        状态分布 × 时间
+        <span class="a-h2n">
+          每天各状态的订单数（堆叠）· 本次 {{ rows.length }} 条 · 五态互斥（异常态已从「未付款」里剥出）
+        </span>
+      </h2>
+      <div class="a-card">
+        <BarChart
+          :categories="gmv.days"
+          :series="statusByDay"
+          :stacked="true"
+          :height="'260px'"
+          value-formatter="{value} 单"
+          :max-bar-width="26"
+          :loading="loading"
+          empty-text="本次订单没有可归日的下单时刻"
+        />
+      </div>
+
+      <h2 class="a-h2">
+        GMV / 成单数趋势
+        <span class="a-h2n">
+          按本地下单日汇总 · 缺日补 0 · **左轴 ¥ = 当日 GMV、右轴 单 = 当日成单数**
+          <span v-if="truncated"> · ⚠️ 本次已截断，曲线只覆盖最近一段</span>
+        </span>
+      </h2>
+      <div class="a-card">
+        <LineChart
+          :categories="gmv.days"
+          :series="[
+            { name: '当日 GMV', data: gmv.sums, area: true },
+            { name: '当日成单数', data: gmv.counts, axis: 'right' },
+          ]"
+          :height="'260px'"
+          y-formatter="¥{value}"
+          y2-formatter="{value} 单"
+          :loading="loading"
+          empty-text="本次订单没有可归日的下单时刻"
+        />
+      </div>
+
+      <h2 class="a-h2">
+        发货时效
+        <span class="a-h2n">
+          `ShippedAt` − `CreateTime` · 本次可比 {{ shipLag.dated }} 单
+          <template v-if="shipLag.nodate"> · ⚠️ {{ shipLag.nodate }} 单已发货但无发货时刻（老单）</template>
+          <template v-if="shipLag.undeliv"> · {{ shipLag.undeliv }} 单未发货</template>
+          <template v-if="shipLag.bad"> · ⚠️ {{ shipLag.bad }} 单发货早于下单（数据异常）</template>
+        </span>
+      </h2>
+      <div class="a-card">
+        <BarChart
+          :categories="shipLag.cats"
+          :series="[{ name: '单数', data: shipLag.counts }]"
+          :height="'260px'"
+          value-formatter="{value} 单"
+          :max-bar-width="28"
+          :loading="loading"
+          empty-text="本次没有「已发货且两个时刻齐全」的订单 —— 补丁之前发的单没有 ShippedAt"
+        />
+      </div>
+
       <p v-if="!rows.length" class="a-empty">{{ loading ? '加载中…' : '没有符合条件的订单。' }}</p>
 
       <ol v-else class="a-stream">
         <li v-for="r in rows" :key="r.OrderId" class="a-card" :class="{ 'is-abnormal': isAbnormal(r) }">
           <div class="a-card-l1">
             <b class="a-strong a-mono">{{ dash(r.OrderId) }}</b>
-            <span class="a-badge" :class="statusBadge(r)">{{ statusLabel(r) }}</span>
+            <span class="a-badge" :class="statusBadge(r)"><IconGlyph :name="STATUS_GLYPH[statusBadge(r)] || 'wait'" />{{ statusLabel(r) }}</span>
             <span v-if="isAbnormal(r)" class="a-badge rejected">异常态</span>
             <span class="a-tag">¥{{ dash(r.Price) }}</span>
             <span class="a-tag">×{{ dash(r.Quantity) }}</span>
@@ -141,7 +207,11 @@
                 :disabled="busyId !== null"
                 @click="intervene(r, a)"
               >
-                {{ armed === r.OrderId + ':' + a ? '再点一次确认：' + ACT_LABEL[a] : ACT_LABEL[a] }}
+                <!-- 字形回答的是「这一下按下去是推进还是确认」（2026-10-11 补图标那一笔）：
+                     常态 = 推一条边（`ok`）；上膛态 = 再点一次就不可逆了（`no`）—— 与同一行
+                     `:class` 里那颗 `a-btn-danger` **同进同出**，不再另给「付款/发货/收货」各配一枚
+                     （本仓没有 ¥ 这类字形，硬配就是装饰）。 -->
+                <IconGlyph :name="armed === r.OrderId + ':' + a ? 'no' : 'ok'" />{{ armed === r.OrderId + ':' + a ? '再点一次确认：' + ACT_LABEL[a] : ACT_LABEL[a] }}
               </button>
             </template>
             <span v-if="!actionsFor(r).length" class="a-dim">已完成，无可推的边</span>
@@ -262,6 +332,11 @@
 <script setup>
 import { ref, reactive, computed, onMounted } from 'vue'
 import { orderAdminList, orderAdminDetail, orderAdminMonitor, orderAdminIntervene } from '../../api/order'
+// 图表（可视化段 commit 3；2026-10-11 复合图整改）—— 本页三张：状态分布×时间堆叠柱 /
+// GMV·成单数双轴折线 / 发货时效柱。⚠️ 状态分布原先是环图、GMV 原先是单系列折线，
+// 整改后 DonutChart 本页不再用 ⇒ **import 同步删掉**（留着就是 `no-unused-vars`）。
+import LineChart from '../../components/charts/LineChart.vue'
+import BarChart from '../../components/charts/BarChart.vue'; import IconGlyph from '../../components/ui/IconGlyph.vue'   // ⚠️ 两条 import **同行**（2026-10-11 补图标那一笔）—— 合并到既有行 = 不新增行号漂移（本文件被 `slot-registry.md:4551` 引 `:192`，C1 那几笔已经推过一次，别再推第二次）
 
 // ── 时区口径（照 `AccountsPage.vue`，逐字同源）──────────────────────────────
 const tzLabel = computed(() => {
@@ -403,7 +478,142 @@ function statusBadge(r) {
   if (Number(r.ReceiveIf) === 1) return 'approved'
   return 'pending'
 }
+/**
+ * 徽章左侧那枚字形（2026-10-11 补图标那一笔）。
+ * ⚠️ **键直接取 `statusBadge` 的三档**，不复刻 `statusLabel` 的五态 —— 五态里
+ *    「已发货未收货」「已付款未发货」「未付款」在**颜色**上本来就是同一档（`pending`），
+ *    图标跟着颜色走，读者才不会看到「同一片黄底上两个不同符号」。
+ * ⚠️ `|| 'wait'` 与 `AccountsPage` 的 `statusGlyph` 同口径：认不出的档按「还没处理」看。
+ */
+const STATUS_GLYPH = { approved: 'ok', rejected: 'no', pending: 'wait' }
 const PAY_LABEL = (row) => (Number(row.PayIf) === 1 ? '已付款' : '未付款')
+
+// ── 状态分布 / GMV 趋势 / 发货时效（可视化段 commit 3）──────────────────────────
+/**
+ * 库内时间 → **UTC 轴毫秒**。与 `toLocal` **同一套解析**（补 `Z`），只是这里要的是数不是字。
+ *
+ * ⚠️ 两种来路都要吃：`CreateTime` 是 `varchar(50)` 文本（`'YYYY-MM-DD HH:MM:SS'`），而
+ *    `ShippedAt` 是**真 `datetime` 列**（`AdminOrderDao:49` 原样投影，未走 `DATE_FORMAT`），
+ *    由 Jackson 序列化成 `'YYYY-MM-DDTHH:MM:SS'`。`replace(' ', 'T')` 对后者是空操作
+ *    ⇒ 一条解析吃两种形态（页面别处的 `toLocal` 靠的就是同一招）。
+ * ⚠️ 解析不了 / 空 ⇒ **`NaN`，不是 0**。调用方必须自己判 —— 把 `NaN` 当 0 用等于凭空
+ *    造一个「1970-01-01 发货」的时刻，算出来的时效会是 2 万天。
+ */
+function msOf(sqlTime) {
+  if (!sqlTime) return NaN
+  return new Date(`${String(sqlTime).replace(' ', 'T')}Z`).getTime()
+}
+
+/** 五态的**固定画序**（与 `statusLabel` 的判据链同序）—— 不按票数排，两次渲染间不许换位。 */
+const STATUS_ORDER = ['未付款', '已付款未发货', '已发货未收货', '已完成', '异常态']
+
+/**
+ * 本次 `rows` 的**状态分布 × 时间**（每天各状态的订单数，堆叠柱）。
+ *
+ * <p>2026-10-11 由「状态构成环图」改来（用户 C1 裁决）：环图只给**区间合计**，看不出
+ * 流转节奏 —— 同样的「已发货 30 单」，是集中在某两天爆发还是每天稳定几单，环图上是同一张图。
+ *
+ * <p>⚠️ 五态互斥（`statusLabel` 是一条 `if` 链，每行只落一格）⇒ 每根柱子的高度恒等于
+ * 当日的订单数、柱内各段之和也恒等于它，与 `gmv.counts` 同源可对照。
+ * <p>⚠️ x 轴**复用 `gmv.days`**（同一套「本地下单日 + 缺日补 0」口径）—— 两张图并排看时
+ * 日期必须逐格对齐，各算一套补 0 就会错位。
+ * <p>⚠️ 全 0 的状态**整条不画**（图例里挂一条永远贴着轴的状态是噪声），但**画序固定**
+ * 为 `STATUS_ORDER`，两次渲染之间不许换位。
+ */
+const statusByDay = computed(() => {
+  const days = gmv.value.days
+  const dayIdx = new Map(days.map((d, i) => [d, i]))
+  const rowsByStatus = STATUS_ORDER.map(() => days.map(() => 0))
+  const at = new Map(STATUS_ORDER.map((k, i) => [k, i]))
+  for (const r of rows.value) {
+    const i = dayIdx.get(toLocal(r.CreateTime).slice(0, 10))
+    if (i === undefined) continue
+    rowsByStatus[at.get(statusLabel(r))][i] += 1
+  }
+  return STATUS_ORDER.map((k, i) => ({ name: k, data: rowsByStatus[i] }))
+    .filter((s) => s.data.some((v) => v > 0))
+})
+
+/**
+ * 本次 `rows` 按**本地下单日**汇总 `Price`（GMV 趋势）。
+ *
+ * ⚠️ 分桶沿 `toLocal` 再取前 10 字（**本地**日历日），不是直接切 `CreateTime` 前 10 字 ——
+ *    后者是 UTC 日，东八区凌晨下的单会被算进前一天，与卡片上显示的下单时刻对不上。
+ * ⚠️ 首尾之间缺的日**补 0**：折线的 x 轴必须等距，否则「10-01 直接连到 10-05」会被读成
+ *    那几天一直有成交额。跨度 > 180 天不补（那不是趋势，是点阵）。
+ * ⚠️ `Price` 是**订单小计**（不是单价×本次数量）—— 与列表卡片上那个 `¥` 同源。
+ *    求和后按 2 位小数收一下：浮点累加会漂出 `…9999` 这种尾巴。
+ */
+const gmv = computed(() => {
+  const byDay = new Map()
+  const cntByDay = new Map()
+  for (const r of rows.value) {
+    const day = toLocal(r.CreateTime).slice(0, 10)
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) continue
+    byDay.set(day, (byDay.get(day) || 0) + (Number(r.Price) || 0))
+    cntByDay.set(day, (cntByDay.get(day) || 0) + 1)
+  }
+  const keys = [...byDay.keys()].sort()
+  if (!keys.length) return { days: [], sums: [], counts: [] }
+  const start = new Date(`${keys[0]}T00:00:00Z`)
+  const span = Math.round((new Date(`${keys[keys.length - 1]}T00:00:00Z`) - start) / 86400000)
+  const days = []
+  if (span > 180) {
+    days.push(...keys)
+  } else {
+    for (let i = 0; i <= span; i += 1) {
+      days.push(new Date(start.getTime() + i * 86400000).toISOString().slice(0, 10))
+    }
+  }
+  return {
+    days,
+    sums: days.map((d) => Math.round((byDay.get(d) || 0) * 100) / 100),
+    // 当日**成单数**（2026-10-11 双 Y 轴整改）：与 `sums` 同一批日、同一次遍历出来的，
+    // 不是另扫一遍 —— 两条序列的 x 轴因此天然逐格对齐（见 `statusByDay` 的同一条约束）。
+    counts: days.map((d) => cntByDay.get(d) || 0),
+  }
+})
+
+/** 发货时效的分桶上界（小时）。`Infinity` 兜住最后一档。 */
+const SHIP_BUCKETS = [
+  { name: '< 6 小时', max: 6 },
+  { name: '6–24 小时', max: 24 },
+  { name: '24–48 小时', max: 48 },
+  { name: '48–72 小时', max: 72 },
+  { name: '≥ 72 小时', max: Infinity },
+]
+
+/**
+ * 本次 `rows` 的发货时效分布 —— `ShippedAt − CreateTime` 落进哪个小时档。
+ *
+ * ⚠️ 四种「算不出来」的行**一律不塞进桶里**，但各自单独计数、在标题里如实报出来 ——
+ *    把它们混进「< 6 小时」会让时效看起来比实际好：
+ *    · `undeliv` —— 本次里**根本没发货**的（`DeliveryIf != 1`），谈不上时效；
+ *    · `nodate`  —— 已发货但 **`ShippedAt` 为 NULL**（C3 块4 补丁**之前**发的单，
+ *                   那一列是新补的、**不回填**）⇒ 这些单的时效**不可考**；
+ *    · `bad`     —— `ShippedAt` **早于** `CreateTime`（负数）⇒ 数据异常，不是「很快」。
+ * ⚠️ 两个时刻同为库时钟 UTC ⇒ 差值天然正确，与浏览器时区无关；这里只是把它**显示**成
+ *    本地日口径（`toLocal` 那一处），差值本身不参与本地化。
+ */
+const shipLag = computed(() => {
+  const counts = SHIP_BUCKETS.map(() => 0)
+  let dated = 0
+  let nodate = 0
+  let undeliv = 0
+  let bad = 0
+  for (const r of rows.value) {
+    if (Number(r.DeliveryIf) !== 1) { undeliv += 1; continue }
+    const s = msOf(r.ShippedAt)
+    const c = msOf(r.CreateTime)
+    if (Number.isNaN(s) || Number.isNaN(c)) { nodate += 1; continue }
+    const h = (s - c) / 3600000
+    if (h < 0) { bad += 1; continue }
+    dated += 1
+    const i = SHIP_BUCKETS.findIndex((b) => h < b.max)
+    counts[i < 0 ? counts.length - 1 : i] += 1
+  }
+  return { cats: SHIP_BUCKETS.map((b) => b.name), counts, dated, nodate, undeliv, bad }
+})
 
 // ── 介入：沿既有三条 CAS 边（`pay` / `deliver` / `receive`）────────────────────
 const ACT_LABEL = { pay: '强制付款', deliver: '强制发货', receive: '强制完成' }

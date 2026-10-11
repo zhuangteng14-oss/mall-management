@@ -11,7 +11,7 @@
         :class="{ active: tab === t.key }"
         @click="goTab(t.key)"
       >
-        {{ t.label }}
+        <IconGlyph :name="t.glyph" />{{ t.label }}
       </button>
     </div>
 
@@ -40,15 +40,17 @@
 //    ⇒ 可深链、可刷新、可后退，且 `/customer/notify` 那条旧地址能靠 redirect 直接落到通知 tab。
 //    判据是 `route.query.tab === 'notify'`（**字符串精确比**）：`?tab=chat`、缺 `tab`、`tab` 是数组
 //    （`?tab=a&tab=b`）**一律**落「会话」—— 默认值选会话，因为它是合并前 `/…/msg` 的行为。
-import { computed } from 'vue'
+import { computed } from 'vue'; import IconGlyph from '../components/ui/IconGlyph.vue'   // ⚠️ 两条 import **同行**（2026-10-11 补图标那一笔）—— 合并到既有行 = 不新增行号漂移
 import { useRoute, useRouter } from 'vue-router'
 import ChatRoom from './ChatRoom.vue'
 import NotifyInbox from './NotifyInbox.vue'
 
 /** ⚠️ 顺序 = 显示顺序，且**会话在前**：与合并前「点顶栏『消息』默认进会话」一致。 */
 const TABS = [
-  { key: 'chat', label: '会话' },
-  { key: 'notify', label: '通知' }
+  // ⚠️ `glyph`（2026-10-11 补图标那一笔）与**顶栏**同一套语义：会话 = 人与人（`msg` ✉）、
+  //    通知 = 系统发给你（`notify` ✎）—— 与 `glyphs.js` 里「`msg` 一枚两处共用」的口径同源。
+  { key: 'chat', label: '会话', glyph: 'msg' },
+  { key: 'notify', label: '通知', glyph: 'notify' }
 ]
 
 const route = useRoute()

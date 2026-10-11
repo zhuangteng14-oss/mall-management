@@ -22,6 +22,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.contains;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
@@ -250,24 +251,45 @@ class AuthTokenSmokeTest extends AbstractSmokeTest {
     }
 
     /**
-     * 但**同一个管理员 cookie** 打 {@code /user/me} ⇒ <b>200 + 降级形状 {@code {success:true, role:3}}</b>：
-     * 认出「你是管理员」，但**不给资料**。
+     * 但**同一个管理员 cookie** 打 {@code /user/me} ⇒ <b>200 + 降级形状</b>：
+     * 认出「你是管理员」**和你是哪个登录名**，但**不给资料**。
      *
-     * <p>三条断言各钉一半：① 状态 200（不是 401 —— 它是「有身份但没资格拿资料」，不是未登录）；
-     * ② {@code role=3} 答出来了（前端据此退回登录页）；③ {@code $.customerid} **不存在**
-     * 且 {@code publicInfo} 一次都没被调用 —— 后者是「没给资料」的**强判据**，只断言键缺失的话，
-     * 「查了但没查到」也能让它绿。
+     * <p>⚠️ <b>2026-10-11 用户裁决「甲」改写了本用例的判据</b>（原来只答 {@code role}）：
+     * 前端 {@code api/auth.js} 的 {@code isLoggedIn()} 判据是 {@code !!(username||merchantid)}
+     * ⇒ 只答 {@code role} 时管理端在**新标签页 / 重开浏览器**恒判「未登录」、被守卫弹回
+     * {@code /login}（实测「管理端进不去」）。故本支改为补答 {@code username}，条件与边界
+     * 见 {@code UserController#me} 第 2 种出口的 javadoc。
+     *
+     * <p>⚠️ <b>因此「没给资料」的判据不能再是「{@code publicInfo} 一次都没被调用」</b> ——
+     * 那一跳（业务号 → 登录名）现在**必须**走。判据换成三条更贴的：
+     * <ol>
+     *   <li>响应键集里 {@code customerid} / {@code merchantid} / {@code usertype} / {@code gender}
+     *       一个都不出现 —— {@code publicInfo} 那 5 列里除 {@code username} 外**一列都不许外泄**；
+     *       头像 {@code image} 也不许出现。</li>
+     *   <li>资料那一跳（{@code meInfo} 的第二跳：{@code user} 表整行 {@code queryForMap}）
+     *       <b>一次都没走</b>。</li>
+     *   <li>头像那一条查询（{@code query(contains("image"), …)}）<b>一次都没走</b>。</li>
+     * </ol>
+     * ②③ 是**强判据**：只断言键缺失的话，「查了整行但没查到」也能让它绿。
      */
     @Test
-    @DisplayName("管理员 cookie 打 /user/me ⇒ 200 降级形状（只回 role，不查资料）")
+    @DisplayName("管理员 cookie 打 /user/me ⇒ 200 降级形状（只回 role + 登录名，不查资料）")
     void adminCookie_onMe_getsDegradedAnswer() throws Exception {
         mockMvc.perform(post("/user/me").session(cookieSession(ADMIN, 3)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.success").value(true))
                 .andExpect(jsonPath("$.role").value(3))
-                .andExpect(jsonPath("$.customerid").doesNotExist());
+                .andExpect(jsonPath("$.customerid").doesNotExist())
+                .andExpect(jsonPath("$.merchantid").doesNotExist())
+                .andExpect(jsonPath("$.usertype").doesNotExist())
+                .andExpect(jsonPath("$.gender").doesNotExist())
+                .andExpect(jsonPath("$.image").doesNotExist());
 
-        verify(userCacheService, never()).publicInfo(anyString());
+        // ① 只走了「业务号 → 登录名」这一跳：恰好一次，且查的就是这个管理员
+        verify(userCacheService, times(1)).publicInfo(ADMIN);
+        // ② 资料那一跳（user 表整行）没走；③ 头像那条查询没走
+        verify(jdbcTemplate, never()).queryForMap(anyString(), any(Object[].class));
+        verify(jdbcTemplate, never()).query(contains("image"), any(RowMapper.class), any(Object[].class));
     }
 
     /**

@@ -88,7 +88,7 @@ public class TemplateService {
     // ==================== 写 ====================
 
     /** 新增模板 —— ⚠️ 与块 1 的 {@code saveTemplate} 不同，本方法**只插不改**（改走 {@link #update} 按 Id）。 */
-    public Map<String, Object> create(String type, String name, String title, String body, Integer sort) {
+    public Map<String, Object> create(String type, String kind, String name, String title, String body, Integer sort) {
         Map<String, Object> result = new HashMap<>();
         if (!notBlank(type) || !TemplateTypes.known(type)) {
             result.put("success", false);
@@ -109,7 +109,7 @@ public class TemplateService {
             return result;
         }
         try {
-            templateDao.insert(t, name.trim(), blankToNull(title), body, sort);
+            templateDao.insert(t, TemplateTypes.normalizeKind(kind), name.trim(), blankToNull(title), body, sort);
         } catch (DuplicateKeyException e) {
             // 与唯一键 uk_template_type_name 同口径的业务事实（应用层不预查，让库判定 —— 天然并发安全）。
             result.put("success", false);
@@ -127,7 +127,7 @@ public class TemplateService {
      * <p>成功时把 {@code before} 快照带回给调用方 —— 管理端 Controller 用它写审计。
      */
     public Map<String, Object> update(long id, String name, String title, String body,
-                                      Integer enabled, Integer sort) {
+                                      Integer enabled, Integer sort, String kind) {
         Map<String, Object> result = new HashMap<>();
         Map<String, Object> before = templateDao.selectById(id);
         if (before == null) {
@@ -137,7 +137,8 @@ public class TemplateService {
         }
         int affected;
         try {
-            affected = templateDao.update(id, blankToNull(name), title, body, enabled, sort);
+            affected = templateDao.update(id, blankToNull(name), title, body, enabled, sort,
+                    kind == null ? null : TemplateTypes.normalizeKind(kind));
         } catch (DuplicateKeyException e) {
             result.put("success", false);
             result.put("msg", "该类型下已有同名模板");

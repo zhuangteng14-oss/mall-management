@@ -1,0 +1,66 @@
+mysql: [Warning] Using a password on the command line interface can be insecure.
+check_item	login_legacy	user_legacy	goods_legacy	order_legacy
+baseline_rows_intact	9	9	6	24
+check_item	max_dt_col	max_create_varchar	min_create_varchar	today_midnight	span_days
+no_future_timestamps	2026-10-10 22:24:11	2026-10-10 18:20:21	2026-08-23 17:30:29	2026-10-11	1
+check_item	bad_rows
+create_time_zero_padded	0
+check_item	mismatch_orders
+order_total_matches_items	0
+check_item	orphan_items	orders_without_items
+no_orphan_or_empty_items	0	0
+state	n
+0_unpaid	11
+1_paid_not_shipped	15
+2_shipped_not_received	21
+3_done	105
+4_cancelled	14
+9_abnormal	14
+kind	orders	days	per_day
+weekday	160	35	4.57
+weekend	20	14	1.43
+check_item	window_days	days_with_orders
+no_day_gap	50	49
+check_item	max_images_len	max_pinfo_len	max_goodimg_len
+no_truncation	85	55	42
+check_item	unpaid_with_tradeno	paid_without_tradeno
+trade_only_when_paid	0	0
+usertype	n
+客户	24
+商家	12
+管理员	4
+check_item	age_ok	addr_ok	total
+user_profile_fields	40	40	40
+GoodType	n
+电子用品	10
+生活用品	10
+服装	8
+美食	8
+运动用品	8
+check_item	bad_goods	bad_login	bad_user	bad_year
+no_placeholder_tokens	0	0	0	0
+check_item	dangling
+item_codes_exist_in_goods	18
+check_item	cart_rows	dangling
+cart_rows_join_goods	8	0
+ToType	is_admin_sentinel	n
+admin	1	4
+customer	0	18
+merchant	0	30
+Action	n
+order.deliver	14
+order.receive	10
+goods.apply.audit	8
+merchant.downgrade.schedule	5
+order.intervene	4
+goods.update	4
+goods.apply.create	3
+user.ban	3
+user.unban	3
+merchant.apply.audit	3
+notification.send	2
+goodstype.create	1
+Status	n	missing_review
+approved	5	0
+pending	5	0
+rejected	4	0

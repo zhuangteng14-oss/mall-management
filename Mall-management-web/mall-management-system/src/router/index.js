@@ -66,14 +66,14 @@ const routes = [
           tab: 'user',
           layout: 'user-page',
           subMenu: [
-            { label: '个人信息', sub: 'info', to: '/customer/user/info' },
-            { label: '历史购买记录', sub: 'history', to: '/customer/user/history' },
-            { label: '好友', sub: 'friend', to: '/customer/user/friend' },{ label: '商家入驻', sub: 'apply', to: '/customer/user/apply' },   // ⚠️ C3 块 2〈用户块〉：**同行**追加（净零行数，理由同本行上方 A5 那条）。落点在文件尾 `addRoute('customerUser', { path: 'apply', … })`，**别**在 `children` 里找它 —— 那条记录是挂上去的，不在字面数组里
+            { label: '个人信息', sub: 'info', to: '/customer/user/info', glyph: 'users' },
+            { label: '历史购买记录', sub: 'history', to: '/customer/user/history', glyph: 'orders' },
+            { label: '好友', sub: 'friend', to: '/customer/user/friend', glyph: 'msg' },{ label: '商家入驻', sub: 'apply', to: '/customer/user/apply', glyph: 'merchants' },   // ⚠️ C3 块 2〈用户块〉：**同行**追加（净零行数，理由同本行上方 A5 那条）。落点在文件尾 `addRoute('customerUser', { path: 'apply', … })`，**别**在 `children` 里找它 —— 那条记录是挂上去的，不在字面数组里
             // ⚠️ A5（2026-10-07 用户裁定）：原第 4 项「消息」（`sub: 'chat'` → `/customer/user/chat`）**已删** —— 与顶栏「消息」重复；子路由改 `redirect`（见 `children` 末尾）
           ]
         },
         children: [
-          { path: '', name: 'customerUserHome', component: UserInfoPage, meta: { sub: 'info' } },   // ⚠️ C3 块 2（2026-10-09）：**同行**加 `name`，理由同 `:58` —— 父 `:63` 那个 `name` 正是**本笔**加的，所以这三条 warn 里有本笔一条。无 `push({name:'customerUserHome'})`；**父名**照旧给文件尾的 `addRoute('customerUser', …)` 用（`checkSameNameAsAncestor` 只禁同名，本 name 与父名不同）。⚠️ `/merchant` 壳下那条**同名**子记录**没有**加 —— 它的父记录本身无 `name`，不发这条 warn，别顺手对称过去。
+          { path: '', name: 'customerUserHome', component: UserInfoPage, meta: { sub: 'info' } },   // ⚠️ C3 块 2（2026-10-09）：**同行**加 `name`，理由同 `:58` —— 父 `:63` 那个 `name` 正是**本笔**加的，所以这三条 warn 里有本笔一条。无 `push({name:'customerUserHome'})`；**父名**照旧给文件尾的 `addRoute('customerUser', …)` 用（`checkSameNameAsAncestor` 只禁同名，本 name 与父名不同）。⚠️ `/merchant` 壳下那条**同名**子记录原**没有**加 —— ⚠️ **2026-10-11 已反转（现已加，见 `:114`）**：原写「它的父记录本身无 `name`」不再成立（`:98` 那条父记录本笔加了 `name: 'merchantUser'`，为 ④ 挂「经营数据」），而父记录一旦有 `name`，vue-router 立刻报 `has a child without a name and an empty path` ⇒ 给它命名成了**必需**（非「顺手对称」）。
           { path: 'info', component: UserInfoPage, meta: { sub: 'info' } },
           { path: 'history', component: HistoricalOrders, meta: { sub: 'history' } },
           { path: 'friend', component: FriendRoom, meta: { sub: 'friend' } },
@@ -95,23 +95,23 @@ const routes = [
       { path: 'order', component: () => import('../views/OrderCenter.vue'), meta: { tab: 'order', layout: 'order-container' } },   // ⚠️ C3 块 4：块 4 前这里指 `OrderPane`（「订单中心 ⇄ 购物车」两态包装组件）—— 现在**直接指订单中心自己**。用**行内动态 import** 而不是顶部加一行 import：顶部加行会让 `:8` 以下全体下移（同一手法见本文件 `:434` 的 `AdminStub`）
       { path: 'order/cart', component: OrderPane, meta: { tab: 'cart', layout: 'order-container' } },
       {
-        path: 'user',
+        path: 'user', name: 'merchantUser',   // ⚠️ 可视化段 commit 3（2026-10-11，用户裁决 ④「经营数据入口放个人中心里」）：**同行**加 `name`（不新插一行，理由同 `:63` 那条 —— 本组 `:98`-`:122` 的既有行号引用会整体下移）。文件尾那条 `router.addRoute('merchantUser', …)` 靠它把「经营数据」挂成**本记录的子页** ⇒ 个人中心左菜单在场（`UserCenter.vue` 的 `.user-menu` 只在 `matched` 含本记录时渲染）。⚠️ `checkSameNameAsAncestor` 只禁同名（本 name ≠ 祖先 `merchant`）⇒ 不多发 warn。
         component: UserCenter,
         meta: {
           tab: 'user',
           layout: 'user-page',
           logout: 'merchant',   // ⚠️ 商家侧退出多清 `merchantid`；客户侧无此键（见 UserCenter.vue 的 toLogin）
           subMenu: [
-            { label: '个人信息', sub: 'info', to: '/merchant/user/info' },
-            { label: '上架商品', sub: 'add', to: '/merchant/user/add' },
-            { label: '查看商品', sub: 'list', to: '/merchant/user/list' },
-            { label: '历史购买记录', sub: 'history', to: '/merchant/user/history' },
-            { label: '好友', sub: 'friend', to: '/merchant/user/friend' },
+            { label: '个人信息', sub: 'info', to: '/merchant/user/info', glyph: 'users' },
+            { label: '上架商品', sub: 'add', to: '/merchant/user/add', glyph: 'goods' },
+            { label: '查看商品', sub: 'list', to: '/merchant/user/list', glyph: 'logs' },
+            { label: '历史购买记录', sub: 'history', to: '/merchant/user/history', glyph: 'orders' },
+            { label: '好友', sub: 'friend', to: '/merchant/user/friend', glyph: 'msg' },{ label: '经营数据', sub: 'stats', to: '/merchant/stats', glyph: 'metrics' },   // ⚠️ 可视化段 commit 3（2026-10-11，用户裁决 ④）：**同行**追加（净零行数，理由同上方 `:71` 那条）。落点在文件尾 `addRoute('merchantUser', { path: '/merchant/stats', … })`，**别**在 `children` 字面数组里找它。⚠️ `to` 写**绝对**地址 `/merchant/stats`：该地址是**可视化段 commit 2 已交付物**（那份探针与截图按它断言）⇒ 不改；子记录同写绝对路径（见文件尾那条的注释）。`sub: 'stats'` 是左菜单高亮判据（`UserCenter.vue:8` 的 `route.meta.sub === item.sub`）。**客户侧不加**：本段只有 `/admin/stats` 与 `/merchant/stats` 两个端点，没有客户维度
             // ⚠️ A5（2026-10-07 用户裁定）：原第 6 项「消息」（`sub: 'chat'` → `/merchant/user/chat`）**已删** —— 同上（客户侧）
           ]
         },
         children: [
-          { path: '', component: UserInfoPage, meta: { sub: 'info' } },
+          { path: '', name: 'merchantUserHome', component: UserInfoPage, meta: { sub: 'info' } },   // ⚠️ 可视化段 commit 3（2026-10-11，用户裁决 ④）：**同行**加 `name`（不新插一行，理由同 `:63`/`:76` 那一组）。**不是**「顺手对称过去」—— 是那条告警的**必要条件**本笔才成立：`:98` 那条父记录刚加上 `name: 'merchantUser'` 之后，本仓实测（`_work/diag-4.mjs`）多出一条 `[Vue Router warn]: The route named "merchantUser" has a child without a name and an empty path.` ⇒ 房内既有的对治就是**给空路径子记录命名**（`:58` / `:76` / `:89` 三处先例，`/customer` 侧当年为 `addRoute('customerUser', …)` 就是这么做的）。⚠️ 这正是 `:76` 那条注释里「`/merchant` 壳下那条**没有**加」的**反转**，该句已同步订正。⚠️ 无任何 `push({name:'merchantUserHome'})`。
           { path: 'info', component: UserInfoPage, meta: { sub: 'info' } },
           { path: 'add', component: GoodsAdd, meta: { sub: 'add' } },
           { path: 'list', component: GoodsUp, meta: { sub: 'list' } },
@@ -434,7 +434,7 @@ function restoreScrollWhenSettled(savedPosition) {
 const AdminStub = () => import('../views/admin/StubPage.vue')
 
 router.addRoute({
-  path: '/admin',
+  path: '/admin', name: 'admin',   // ⚠️ 可视化段 commit 2（2026-10-11）：**同行**加 `name`（不新插一行、净零行数）—— 文件尾那条 `router.addRoute('admin', …)` 靠它把「经营数据」挂成管理端壳的子页（`addRoute` 的第一个参数**只认 name**）。同 `:55` / `:86` 那两处的既有手法。⚠️ 本行在「最大被引行 `:462`」**之内**（`c3-block-1-infra.md` 引 `:396-462` 是**段落**引用）⇒ 只改了内容、没有移动任何行号
   meta: { roles: ['3'] },
   component: () => import('../views/AdminShell.vue'),
   // ⚠️ 子项记录写**三个键**，与 `config/admin-nav.js` 的 `ADMIN_SIDEBAR[]` / `subs[]` 逐字对应
@@ -445,7 +445,7 @@ router.addRoute({
   // ⚠️ 子项路径用**扁平写法**（`'business/accounts'`），**不**嵌进 `business` 记录当 children ——
   //    嵌套要求域入口页自己再放一个 `<router-view>`，而它是**叶子**占位页，没有第二个出口。
   children: [
-    { path: '', meta: { key: 'ov', title: '概览' }, component: () => import('../views/admin/AdminHome.vue') },
+    { path: '', name: 'adminHome', meta: { key: 'ov', title: '概览' }, component: () => import('../views/admin/AdminHome.vue') },   // ⚠️ 可视化段 commit 3（2026-10-11）：**同行**加 `name`（不新插一行 —— 本行在最大被引段落 `:396-462` 之内，只改内容不动行号）。理由与 `:58` 那条**逐字同款**（`checkChildMissingNameWithEmptyPath`）：`:437` 的 `name: 'admin'` 是 commit 2 加的、`:58` 那条注释当时就写「三壳三条」而**本条一直没补** ⇒ 管理端 Console 每次首航都多刷这一条 warn（问题①手验时只看到「一条 warning」的正是这种噪声在淹没真信号）。此处补齐第三壳。⚠️ 无任何 `push({name:'adminHome'})`
 
     { path: 'business', meta: { key: 'business', title: '业务域' }, component: AdminStub },
     { path: 'business/accounts',   meta: { key: 'business', sub: 'accounts',   title: '用户与商家治理' }, component: () => import('../views/admin/AccountsPage.vue') },   // C3 块 2〈用户块〉：占位 → 真页（**同行替换**，照 `:456` notify 那条的做法）
@@ -538,3 +538,29 @@ router.addRoute('merchant', { path: 'notify', redirect: '/merchant/msg?tab=notif
 
 router.addRoute('customerUser', { path: 'apply', component: () => import('../views/MerchantApplyPage.vue'), meta: { sub: 'apply' } })
 router.addRoute({ path: '/register', component: LoginPage, meta: { public: true, register: true } })
+
+// ══════════════════════════════════════════════════════════════════════════════════════════
+// ── 可视化段 commit 2（2026-10-11）：两端「经营数据看板」 ─────────────────────────────────────
+//
+// ⚠️ **两条都走 `addRoute`、而不是往 `routes` 数组 / 两壳的 `children` 里插一条**：同 `:483-489`
+//   —— 全仓对 `router/index.js` 的**最大被引行**是 `:462`（C3 骨架 `/admin` 块的末行），
+//   而 `routes` 数组（`:51-129`）、两壳的 `children`、`ROLE_HOME`、`landingFor`、两条守卫
+//   **全在那条线之前** ⇒ 往里插**任何**一行，它们集体漂移。本仓既有手法 = 「新增行落在
+//   最大被引行**之后**」（第八次适用）。两条记录**都追加在文件最尾** ⇒ 连 `:511`/`:539`/`:540`
+//   那三条既有 `addRoute` 的行号也不动。
+//
+// ⚠️ **父子挂接靠 `name`** ⇒ `/admin` 的父记录本笔**同行**加了一个 `name: 'admin'`（净零行数）；
+//   `/merchant` 的父记录 `:86` **早就有** `name: 'merchant'`（C3 块 1·I2 加的）⇒ 不必再动。
+//
+// ⚠️ **`meta.key` / `meta.sub` 必须与 `config/admin-nav.js` 的 `ADMIN_SIDEBAR[].key` / `subs[].key`
+//   逐字相同**（改一处必须改两处）—— 判据同 `:440-446` 那条。本笔把「经营数据」挂在**概览域**
+//   （`key: 'ov'`）下：它不是「业务治理」也不是「可观测」，是**一眼看经营**—— 与「概览」同域最贴。
+//   ⚠️ 概览域的 `subs` 因此从 `[]` 变成 1 项 ⇒ 侧边栏里「概览」由**单项**变**两级**（同 business/observe）。
+//
+// ⚠️ ~~**商家端那条的 `meta.tab: 'stats'`** 与 `config/nav.js` 的 `MERCHANT_NAV.right` 新增项
+//   **逐字相同**（顶栏高亮判据是 `route.meta.tab === item.tab`，见 `nav.js` 块首）。~~ **2026-10-11（用户裁决 ④）已作废**：
+//   商家端不再有顶栏项 ⇒ 那条改挂 `merchantUser`（细节写在文件最尾）—— 客户侧**仍不加**：本段只有 `/admin/stats` 与 `/merchant/stats` 两个端点，没有客户维度（经营数据不是买家视角的数据）。
+// ══════════════════════════════════════════════════════════════════════════════════════════
+
+router.addRoute('admin', { path: 'stats', component: () => import('../views/admin/StatsPage.vue'), meta: { key: 'ov', sub: 'stats', title: '经营数据' } })
+router.addRoute('merchantUser', { path: '/merchant/stats', component: () => import('../views/merchant/StatsPage.vue'), meta: { sub: 'stats' } })   // ⚠️ 可视化段 commit 3（2026-10-11，用户裁决 ④）**改了父记录**：commit 2 时是 `addRoute('merchant', { path: 'stats', … meta: { tab: 'stats', layout: 'page' } })` —— 挂 `/merchant` 下 ⇒ **不在**个人中心壳里，只能靠顶栏那项进；用户裁定「放个人中心里」⇒ 改挂 `merchantUser` 下（`matched` 链多出 `UserCenter` ⇒ 左菜单在场、`sub: 'stats'` 点亮「经营数据」）。⚠️ **`path` 写成绝对路径**（`'/merchant/stats'`）而**不是**兄弟那条 `addRoute('customerUser', { path: 'apply', … })` 的相对写法（`'/customer/user/apply'`）：**地址一个字不改**是本笔的硬约束 —— `/merchant/stats` 是 commit 2 **已交付**的地址（`scripts/probes/probe-vis-dashboard.mjs` 与 `docs/agent/evidence/vis-dashboard/page-merchant-stats.png` 按它断言/落图），改地址 = 让那份证据当场作废。vue-router 4 允许子记录写绝对路径（按字面解析，**嵌套渲染关系仍按记录层级**）⇒ 两件事都成立。⚠️ `meta` 只剩 `sub`：`layout` / `tab` 由父记录（`user-page` / `'user'`）合并而来 —— 「经营数据」不再是顶栏项 ⇒ 若自己写 `tab: 'stats'` 会让**所有**顶栏项都不亮（`nav.js` 块首那条判据），写 `'user'` 才对（人在用户中心里）

@@ -67,7 +67,7 @@
       </label>
       <div class="a-f-actions">
         <button type="submit" class="a-btn a-btn-on" :disabled="loadingApps">
-          {{ loadingApps ? '刷新中…' : '刷新' }}
+          <IconGlyph name="ok" />{{ loadingApps ? '刷新中…' : '刷新' }}
         </button>
       </div>
     </form>
@@ -77,7 +77,7 @@
         <div class="a-card-l1">
           <code class="a-tag">#{{ r.Id }}</code>
           <b class="a-strong">{{ r.ShopName }}</b>
-          <span class="a-badge" :class="r.Status">{{ statusLabel(r.Status) }}</span>
+          <span class="a-badge" :class="r.Status"><IconGlyph :name="statusGlyph(r.Status)" />{{ statusLabel(r.Status) }}</span>
           <span class="a-dim">申请人 {{ r.Username }}</span>
           <span class="a-grow"></span>
           <span class="a-dim">{{ toLocal(r.SubmittedAt) }}</span>
@@ -107,10 +107,10 @@
           <!-- 「选模板」= 从 `merchant.reject` 取一段理由填进上面的输入框（填完**还能改**）。 -->
           <button type="button" class="a-btn" @click="openRejectTpl(r)">选模板</button>
           <button type="button" class="a-btn a-btn-on" :disabled="busyId !== null" @click="approve(r)">
-            通过
+            <IconGlyph name="ok" />通过
           </button>
           <button type="button" class="a-btn a-btn-danger" :disabled="busyId !== null" @click="reject(r)">
-            驳回
+            <IconGlyph name="no" />驳回
           </button>
         </div>
       </li>
@@ -144,7 +144,7 @@
       </label>
       <div class="a-f-actions">
         <button type="submit" class="a-btn a-btn-on" :disabled="loadingUsers">
-          {{ loadingUsers ? '查询中…' : '查询' }}
+          <IconGlyph name="ok" />{{ loadingUsers ? '查询中…' : '查询' }}
         </button>
         <button type="button" class="a-btn" @click="resetUsers">重置</button>
       </div>
@@ -154,12 +154,60 @@
       对<b>管理员无效</b>（`AuthInterceptor` 对 `role=3` 豁免）—— 列表里看得到管理员，封不动。
     </p>
 
+    <!-- ── 用户净增 · 封禁分布（可视化段 commit 3；2026-10-11 复合图整改）─────────
+         ⚠️ 数据源是**本次已取回的 `users`**（受上面筛选条「上限」约束，≤ 500），**不是全库**。
+         ⚠️ 两个时刻各有来源、各有缺口，都得读：`CreatedAt` 来自 `login.CreateTime`、`bannedAt`
+             来自 `user.bannedAt`。`login.CreateTime` 是本段新补的列 ⇒ **存量账号一律 NULL 且不回填**
+             （注册时刻没有第二个来源）；`bannedAt` 只在 `banned=1` 时有值（未封为 NULL）。
+             ⇒ 曲线上缺的那一段不是「那几天没人注册/没人被封」，是「那几天的账号没有时刻可查」。
+             故把 `dated` / `banDated`（本次真带时刻的条数）标在标题里：两者都为 0 时看到的是
+             **空态浮层**，那正是当前的真实情况，不是图坏了。
+         ⚠️ **2026-10-11 复合图整改**：原先是「当日新增 + 累计」两条线 —— 累计只回答「一共注册了
+             多少」，读不出**治理的净效果**。改成「当日新增 / 当日封禁 / 当日净增」三条同量级的线
+             （净增 = 新增 − 封禁，虚线便于与新增叠在一起时区分）：一眼看出封禁到底把增长压掉多少。
+             同量级 ⇒ **不用双 Y 轴**（双轴会把「谁高谁低」变成「看两条轴各自怎么缩放」，反而不可比，
+             见 `LineChart.vue` 的 `y2Formatter` 注释）。封禁分布环图**不动**（本页结构不改）。 -->
+    <h2 class="a-h2">
+      用户增长 / 封禁 / 净增
+      <span class="a-h2n">
+        按本地日 · 净增 = 当日新增 − 当日封禁 · 本次 {{ users.length }} 行里 {{ growth.dated }} 行带注册时刻、{{ growth.banDated }} 行带封禁时刻 · 缺日补 0
+      </span>
+    </h2>
+    <div class="a-card">
+      <LineChart
+        :categories="growth.days"
+        :series="[
+          { name: '当日新增', data: growth.daily },
+          { name: '当日封禁', data: growth.banned },
+          { name: '当日净增', data: growth.net, dashed: true },
+        ]"
+        :height="'260px'"
+        :loading="loadingUsers"
+        empty-text="本次用户里没有一行带注册时刻或封禁时刻 —— 两个时刻都不可考"
+      />
+    </div>
+
+    <h2 class="a-h2">
+      封禁分布
+      <span class="a-h2n">本次 {{ users.length }} 行 · 已封禁 / 降级中 / 正常 三态互斥 · ⚠️ 含管理员</span>
+    </h2>
+    <div class="a-card">
+      <DonutChart
+        :data="banMix"
+        :height="'260px'"
+        :center-value="String(bannedCount)"
+        center-title="已封禁"
+        :loading="loadingUsers"
+        empty-text="本次没有用户行"
+      />
+    </div>
+
     <ol v-if="users.length" class="a-stream">
       <li v-for="u in users" :key="u.username" class="a-card" :class="{ banned: isBanned(u) }">
         <div class="a-card-l1">
           <b class="a-strong">{{ u.username }}</b>
           <span class="a-badge">{{ dash(u.usertype) }}</span>
-          <span v-if="isBanned(u)" class="a-badge rejected">已封禁</span>
+          <span v-if="isBanned(u)" class="a-badge rejected"><IconGlyph name="no" />已封禁</span>
           <span v-if="dgOf(u)" class="a-badge warn">{{ dgOf(u) }}</span>
           <span class="a-grow"></span>
           <span class="a-dim">{{ idsOf(u) }}</span>
@@ -182,7 +230,7 @@
             <!-- 「选模板」= 从 `user.ban` 取一段理由填进上面的输入框（填完**还能改**）。 -->
             <button type="button" class="a-btn" @click="openBanTpl(u)">选模板</button>
             <button type="button" class="a-btn a-btn-danger" :disabled="busyName !== null" @click="ban(u)">
-              封禁
+              <IconGlyph name="no" />封禁
             </button>
           </template>
           <button
@@ -192,7 +240,7 @@
             :disabled="busyName !== null"
             @click="unban(u)"
           >
-            解封
+            <IconGlyph name="ok" />解封
           </button>
           <span class="a-grow"></span>
           <button type="button" class="a-btn" @click="pickDowngrade(u.username)">降级操作 ↓</button>
@@ -229,7 +277,7 @@
           排定降级
         </button>
         <button type="button" class="a-btn" :disabled="busy" @click="cancelDowngrade">撤销排定</button>
-        <button type="button" class="a-btn" :disabled="busy" @click="relistMerchant">人工恢复</button>
+        <button type="button" class="a-btn" :disabled="busy" @click="relistMerchant"><IconGlyph name="ok" />人工恢复</button>
       </div>
     </form>
     <!-- 补丁 A3 前端：这个账号**目前**已有降级标记 ⇒ 排定降级按钮 disabled 并就地说明原因。
@@ -268,7 +316,7 @@
             disabled
             title="已发送过降级请求，请于用户治理模块查看"
           >
-            排定降级
+            <IconGlyph name="no" />排定降级
           </button>
           <button
             v-if="u.DowngradeState === 'scheduled'"
@@ -279,7 +327,7 @@
           >
             撤销排定
           </button>
-          <button v-else type="button" class="a-btn" :disabled="busy" @click="relistFor(u)">人工恢复</button>
+          <button v-else type="button" class="a-btn" :disabled="busy" @click="relistFor(u)"><IconGlyph name="ok" />人工恢复</button>
         </div>
       </li>
     </ol>
@@ -368,6 +416,9 @@ import {
 // ⚠️ 这两条读的是**公共读** `/template/list`（`TemplatePicker` 内部走 `api/template.js`），
 //    与 `api/accounts.js` 无关 —— 模板不是「账号域」的东西，它是全站共用的资源。
 import TemplatePicker from '../../components/TemplatePicker.vue'
+// 图表（可视化段 commit 3）—— 本页只用「用户增长」折线 + 「封禁分布」环图两张。
+import LineChart from '../../components/charts/LineChart.vue'
+import DonutChart from '../../components/charts/DonutChart.vue'; import IconGlyph from '../../components/ui/IconGlyph.vue'   // ⚠️ 两条 import **同行**（2026-10-11 补图标那一笔）—— 为**净零行数**：本文件被 `progress.md:1935` / `slot-registry.md:4023` 按行号钉住（`:207`，指那条被有意删掉的 ⑤ 块注释）
 
 // ── 时区（照 `AuditPage.vue` 的 `toLocal` / `tzLabel`，逐字同款）────────────────
 // ⚠️ 后端所有时间列都是 `DATE_FORMAT(…, '%Y-%m-%d %H:%i:%s')` 的**无时区文本**，
@@ -450,6 +501,8 @@ function statusLabel(s) {
   if (s === 'rejected') return '已驳回'
   return dash(s)
 }
+// 状态徽章左侧那枚字形（2026-10-11 补图标；与 `CatalogPage.vue` 的 `statusGlyph` 同款）。未知态给 `wait`：原文已由 `statusLabel` 显示，符号只回答「是不是还没处理」，认不出就按待处理看。
+const statusGlyph = (s) => (s === 'approved' ? 'ok' : s === 'rejected' ? 'no' : 'wait')
 
 async function loadApps() {
   loadingApps.value = true
@@ -579,6 +632,88 @@ function idsOf(u) {
   if (u.merchantid) parts.push(`商家 ${u.merchantid}`)
   return parts.length ? parts.join(' · ') : '（无业务号）'
 }
+
+// ── 用户净增 / 封禁分布（可视化段 commit 3；2026-10-11 复合图整改）──────────────
+/**
+ * 本次取回的 `users` → **按本地日**的三条同量级序列：当日新增 / 当日封禁 / 当日净增。
+ *
+ * ⚠️ 三个口径必须一起读，否则这张图会骗人：
+ *   ① 范围只有**本次 `users`**（≤「上限」那档，最多 500），不是全库；
+ *   ② 两个时刻**各有各的缺口**：`CreatedAt`（`login.CreateTime`，本段新补的列）**存量行一律
+ *      NULL 且不回填**（注册时刻没有第二个来源）⇒ 老账号在「新增」那条线上**不存在**；
+ *      `bannedAt` 只在 `banned=1` 时有值。两条线的缺口**不重合** —— 被封的恰恰多半是老账号，
+ *      所以「新增全 0 而封禁有值」是正常形态，不是数据坏了；
+ *   ③ 故 `net` 是「本次这批里」的净增，**不是**全站用户净增。
+ *   `dated` / `banDated` 就是 ②③ 的量化：本次 N 行里真带各自时刻的条数，都标在标题里。
+ *
+ * ⚠️ 缺日的补法：三条序列**一律补 `0`**。（整改前「当日新增 + 累计」两条线时，累计要补**前值** ——
+ *    累计补 0 会在没注册的那几天直坠回原点、读起来像「用户被删了」。现在没有累计序列，
+ *    那条规矩随之作废，别再照搬。）日轴取的是新增日与封禁日的**并集**，否则「只封禁、没注册」
+ *    的那天会整日落在轴外被静默丢掉。
+ * ⚠️ 分桶沿 `toLocal`（库内 UTC → 浏览器时区）再取前 10 字，**不是**直接切库里那两个时刻：
+ *    后者是 UTC 日，东八区凌晨的记录会被算进前一天。`toLocal(null)` 答 `'—'` ⇒ 正则天然滤掉 NULL 行。
+ * ⚠️ 跨度 > 180 天不补日（那是点阵不是趋势）。
+ */
+const growth = computed(() => {
+  const byDay = new Map()
+  const banByDay = new Map()
+  let dated = 0
+  let banDated = 0
+  for (const u of users.value) {
+    const day = toLocal(u.CreatedAt).slice(0, 10)
+    if (/^\d{4}-\d{2}-\d{2}$/.test(day)) {
+      dated += 1
+      byDay.set(day, (byDay.get(day) || 0) + 1)
+    }
+    // ⚠️ 封禁日的来源是 `user.bannedAt`（不是 `CreatedAt`）—— 被禁的**多半是存量账号**，
+    //    它们没有注册时刻。⇒ 两个 Map 分开累计，日轴的取值范围取**两者并集**，
+    //    否则「某天只封禁、没注册」会整日落在轴外被静默丢掉。
+    const bday = toLocal(u.bannedAt).slice(0, 10)
+    if (/^\d{4}-\d{2}-\d{2}$/.test(bday)) {
+      banDated += 1
+      banByDay.set(bday, (banByDay.get(bday) || 0) + 1)
+    }
+  }
+  const keys = [...new Set([...byDay.keys(), ...banByDay.keys()])].sort()
+  if (!keys.length) return { days: [], daily: [], banned: [], net: [], dated: 0, banDated: 0 }
+  const start = new Date(`${keys[0]}T00:00:00Z`)
+  const span = Math.round((new Date(`${keys[keys.length - 1]}T00:00:00Z`) - start) / 86400000)
+  const days = []
+  if (span > 180) {
+    days.push(...keys)
+  } else {
+    for (let i = 0; i <= span; i += 1) {
+      days.push(new Date(start.getTime() + i * 86400000).toISOString().slice(0, 10))
+    }
+  }
+  const daily = days.map((d) => byDay.get(d) || 0)
+  const banned = days.map((d) => banByDay.get(d) || 0)
+  // 净增 = 当日新增 − 当日封禁（可为负 ⇒ 那天治理是净流出）。两条序列逐格对齐，
+  // 用的都是同一个 `days`，不会错位。
+  const net = days.map((d, i) => daily[i] - banned[i])
+  return { days, daily, banned, net, dated, banDated }
+})
+
+/**
+ * 本次 `users` 的治理状态构成 —— 环图的三片：已封禁 / 降级中 / 正常。
+ *
+ * ⚠️ **三片必须互斥**：一个账号可以同时带 `banned` 与 `DowngradeState`（封禁与降级是两条
+ *    独立的治理线）⇒ 先判封禁、再判降级，否则扇区之和会 > 本次行数，环图的比例就是错的。
+ * ⚠️ 「正常」= 本次行数 − 前两片，**含管理员**（`selectUsers` 不筛 `usertype`）——
+ *    别把洞里那个总数读成「客户数」。
+ * ⚠️ 值为 0 的片**不塞进数组**：图例里挂一个 0 项是噪声；三片全 0（本次没行）时数组为空，
+ *    环图自己走空态浮层。
+ */
+const banMix = computed(() => {
+  const banned = bannedCount.value
+  const dg = users.value.filter((u) => !isBanned(u) && dgOf(u)).length
+  const normal = users.value.length - banned - dg
+  const data = []
+  if (banned) data.push({ name: '已封禁', value: banned })
+  if (dg) data.push({ name: '降级中', value: dg })
+  if (normal) data.push({ name: '正常', value: normal })
+  return data
+})
 
 async function loadUsers() {
   loadingUsers.value = true

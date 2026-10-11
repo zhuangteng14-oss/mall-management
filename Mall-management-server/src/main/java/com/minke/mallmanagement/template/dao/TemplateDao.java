@@ -29,7 +29,7 @@ import java.util.Map;
 @Repository
 public class TemplateDao {
 
-    private static final String COLUMNS = "Id, Type, Name, Title, Body, Enabled, Sort";
+    private static final String COLUMNS = "Id, Type, Kind, Name, Title, Body, Enabled, Sort";
 
     /** 列表用：多一列格式化后的 {@code UpdatedAt}（照 {@code NotificationDao.selectTemplates} —— 管理端两页都显示「最后更新」）。 */
     private static final String COLUMNS_WITH_UPDATED =
@@ -49,11 +49,11 @@ public class TemplateDao {
      * <p>⚠️ 唯一键 {@code uk_template_type_name (Type, Name)}：同 type 下重名会抛
      * {@code DuplicateKeyException}，由 Service 翻译成「该类型下已有同名模板」。
      */
-    public int insert(String type, String name, String title, String body, Integer sort) {
-        String sql = "INSERT INTO template (Type, Name, Title, Body, Enabled, Sort) "
-                + "VALUES (?, ?, ?, ?, 1, ?)";
+    public int insert(String type, String kind, String name, String title, String body, Integer sort) {
+        String sql = "INSERT INTO template (Type, Kind, Name, Title, Body, Enabled, Sort) "
+                + "VALUES (?, ?, ?, ?, ?, 1, ?)";
         return jdbcClient.sql(sql)
-                .params(type, name, title, body, sort == null ? 0 : sort)
+                .params(type, kind, name, title, body, sort == null ? 0 : sort)
                 .update();
     }
 
@@ -68,9 +68,13 @@ public class TemplateDao {
      *
      * @return 受影响行数（{@code 0} = Id 不存在，或一个字段都没传）
      */
-    public int update(long id, String name, String title, String body, Integer enabled, Integer sort) {
+    public int update(long id, String name, String title, String body, Integer enabled, Integer sort, String kind) {
         StringBuilder sets = new StringBuilder();
         List<Object> params = new ArrayList<>();
+        if (kind != null) {
+            sets.append(sets.isEmpty() ? "" : ", ").append("Kind = ?");
+            params.add(kind);
+        }
         if (name != null) {
             sets.append(sets.isEmpty() ? "" : ", ").append("Name = ?");
             params.add(name);

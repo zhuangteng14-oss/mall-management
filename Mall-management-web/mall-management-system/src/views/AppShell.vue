@@ -3,7 +3,7 @@
     <div class="top-nav">
       <div class="nav-left">
         <router-link v-for="item in navTop.left" :key="item.tab" :to="item.to" class="nav-btn"
-                     :class="{ active: route.meta.tab === item.tab }">{{ item.label }}
+                     :class="{ active: route.meta.tab === item.tab }"><IconGlyph v-if="item.glyph" :name="item.glyph" />{{ item.label }}
           <span v-if="dotCount(item.badge) > 0" class="nav-red-dot"></span></router-link>
       </div>
       <!-- ── 顶栏搜索框（用户 2026-10-08 第 1 条）：顶栏只留一行 = 商城主页 | 搜索框 | 账号。
@@ -21,7 +21,7 @@
           class="nav-btn"
           :class="{ active: route.meta.tab === item.tab }"
         >
-          {{ item.label }}
+          <IconGlyph v-if="item.glyph" :name="item.glyph" />{{ item.label }}
           <span v-if="dotCount(item.badge) > 0" class="nav-red-dot"></span>
         </router-link>
       </div>
@@ -60,7 +60,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { http, handleApiError } from '../api/http'
 import { endpoints } from '../api/endpoints'
 import { getMerchantId, getCustomerId, isLoggedIn } from '../api/auth'
-import { navFor } from '../config/nav'
+import { navFor } from '../config/nav'; import IconGlyph from '../components/ui/IconGlyph.vue'   // ⚠️ 两条 import **同行**（2026-10-11 补图标那一笔）—— 不为省钱，是为**净零行数**：`progress.md` §5-AB 有 15+ 条按行号引本文件（`:76-78` / `:98` / `:101` / `:106` / `:127` / `:137-144` / `:161` / `:257` / `:374-377` …），在本文件顶部加一行会让它们**集体漂移**。同理下面两处顶栏 `v-for` 里的 `<IconGlyph …>` 也是**同行**插的
 
 // ── R6（2026-10-05）：两壳合一 ────────────────────────────────────────────────────
 // 本组件由 `CustomerPage.vue`（R1 客户壳）与 `MerchantPage.vue`（R2 商家壳）合并而来 ——

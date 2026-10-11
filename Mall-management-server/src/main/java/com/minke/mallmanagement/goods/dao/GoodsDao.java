@@ -80,11 +80,13 @@ public class GoodsDao {
      */
     public int insertGoods(GoodsRow r) {
         String sql = "INSERT INTO mall_management_sql.goods "
-                + "(MerchantId, GoodName, Price, GoodImg, GoodType, ProductCode, GoodTypeNew, TypeId, Detail, Spec, AfterSale) "
-                + "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+                + "(MerchantId, GoodName, Price, GoodImg, GoodType, ProductCode, GoodTypeNew, TypeId, Detail, Spec, AfterSale, "
+                + " PromiseGenuine, PromiseReturn7, PromiseFastRefund, PromiseFreightIns) "
+                + "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
         return jdbcClient.sql(sql)
                 .params(r.merchantId(), r.goodName(), r.price(), r.goodImg(), r.goodType(),
-                        r.productCode(), r.goodTypeNew(), r.typeId(), r.detail(), r.spec(), r.afterSale())
+                        r.productCode(), r.goodTypeNew(), r.typeId(), r.detail(), r.spec(), r.afterSale(),
+                        r.promiseGenuine(), r.promiseReturn7(), r.promiseFastRefund(), r.promiseFreightIns())
                 .update();
     }
 
@@ -97,7 +99,8 @@ public class GoodsDao {
      * 故用包装类型 {@code Integer} 而非 {@code int}。⚠️ 后 3 个分量 {@code detail / spec / afterSale}（C3 块 3 就地改造 2026-10-10 加的第 9-11 个）是详情 / 规格 / 售后的**快照文本**（{@code goods.Detail / Spec / AfterSale}，mediumtext，可空）—— 选模板 → 填内容 → **可改** ⇒ 落库的是商品自己那段文本、**不是**模板 Id（改模板不影响已上架商品）；提审制下来自 {@code goods_audit} 同名列。
      */
     public record GoodsRow(String merchantId, String goodName, Double price, String goodImg,
-                           String goodType, String productCode, int goodTypeNew, Integer typeId, String detail, String spec, String afterSale) {
+                           String goodType, String productCode, int goodTypeNew, Integer typeId, String detail, String spec, String afterSale,
+                           boolean promiseGenuine, boolean promiseReturn7, boolean promiseFastRefund, boolean promiseFreightIns) {
     }
 
     /**
@@ -126,6 +129,55 @@ public class GoodsDao {
                 + "(MerchantId, GoodName, ProductCode,OrderVolume) "
                 + "VALUES (?, ?, ?, ?)";
         return jdbcClient.sql(sql).params(MerchantId, GoodName, ProductCode, 0).update();
+    }
+
+    // ==================== 写 / 读：多规格矩阵（goods_sku，可视化段补丁）====================
+
+    /**
+     * 多规格矩阵的一行（{@code goods_sku}）。用 record 做载体，避免一个 5 参方法签名。
+     *
+     * <p>⚠️ {@code skuCode} 是商家填的**编码**，也是详情页加入购物车时上报的 {@code ProductCode}
+     * —— 故下单 / 购物车链路**不需要改**（{@code cartAdd({…, ProductCode})} 收的就是这一串）。
+     * {@code price} / {@code stock} 允许为空（商家可能只填了组合名）⇒ 用包装类型。
+     */
+    public record SkuRow(String axisName, Double price, Integer stock, String skuCode, Integer sort) {
+    }
+
+    /**
+     * 落多规格矩阵若干行（逐条 INSERT，不批量 —— 同 {@code OrderDao.insertItems}）。
+     *
+     * <p>⚠️ 挂在**商品域**（无锁）⇒ 可以放进审核通过那个 {@code @Transactional} 里，
+     * 与 {@code insertGoods} 同事务（{@code order} 域那条「禁事务」不适用这里）。
+     *
+     * @return 成功插入的行数
+     */
+    public int insertSkus(long goodsId, String MerchantId, String GoodName, java.util.List<SkuRow> skus) {
+        String sql = "INSERT INTO mall_management_sql.goods_sku "
+                + "(GoodsId, MerchantId, GoodName, AxisName, Price, Stock, SkuCode, Sort) "
+                + "VALUES (?, ?, ?, ?, ?, ?, ?, ?)";
+        int n = 0;
+        for (SkuRow s : skus) {
+            n += jdbcClient.sql(sql)
+                    .params(goodsId, MerchantId, GoodName, s.axisName(),
+                            s.price() == null ? 0d : s.price(),
+                            s.stock() == null ? 0 : s.stock(),
+                            s.skuCode() == null ? "" : s.skuCode(),
+                            s.sort() == null ? 0 : s.sort())
+                    .update();
+        }
+        return n;
+    }
+
+    /**
+     * 按「商家号 + 商品名」读多规格矩阵（详情页 / 上架页读回用）—— 与 {@code goods} 列表同维度键
+     * （商品详情本来就按 {@code MerchantId + GoodName} 定位）。
+     *
+     * <p>⚠️ 空结果 = 该商品**没有多规格** ⇒ 调用方回落到既有的「单型号 {@code ProductCode}」路径。
+     */
+    public java.util.List<Map<String, Object>> selectSkusByMerchantGoodName(String MerchantId, String GoodName) {
+        String sql = "SELECT Id, GoodsId, AxisName, Price, Stock, SkuCode, Sort FROM mall_management_sql.goods_sku "
+                + "WHERE MerchantId = ? AND GoodName = ? ORDER BY Sort ASC, Id ASC";
+        return jdbcClient.sql(sql).params(MerchantId, GoodName).query().listOfRows();
     }
 
     // ==================== 写：下架 ====================

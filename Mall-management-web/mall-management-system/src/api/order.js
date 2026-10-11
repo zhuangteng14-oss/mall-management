@@ -59,8 +59,15 @@ async function post(path, body) {
  *
  * @param {{CustomerId:string, MerchantId:string, OrderId:string, Price:number|string,
  *          ProductInformation:string, Images:string, PayIf:number, DeliveryIf:number,
- *          ReceiveIf:number, Quantity?:number}} payload
+ *          ReceiveIf:number, Quantity?:number, Items?:string}} payload
  *        ⚠️ `Quantity` 是 **C3 块 4（A2 甲）新加的入参**，不传 = 1（后端 `defaultValue="1"`）。
+ *        ⚠️ `Items` 是 **可视化段 commit 0 新加的入参**（**显式**商品明细 ⇒ 服务端写 `order_item` 表）：
+ *           一个 **JSON 数组串**，一件一项：`[{"code":"IJ-555","name":"222","price":5555,"qty":2}]`
+ *           （`code` 必填、`name` 可缺、`qty` 缺省 1、`price` 是**单价**）。⚠️ **不是**自造的分隔符串 ——
+ *           商品名未禁 `:` / `；`，分隔符一旦错位就是**脏数据**（理由见 `OrderService.resolveItems`）。
+ *           **不传 / 传空 ⇒ 后端回落到解析 `ProductInformation` 的既有格式**（`名:码` 以「；」分隔；
+ *           仅**恰有一段**时推得出单价 ⇒ 一单多品不写明细），再解析不出就不写 ⇒ **老调用方行为不变**。
+ *           ⚠️ `build()` 会把 `undefined` 转成**空串**（本文件 `:42`）⇒ 这里的「不传」到后端是 `Items=`。
  * @returns {Promise<{success:boolean, msg?:string}>}
  *          ⚠️ 失败是 **HTTP 200 + `success:false`**（本仓口径），不是 4xx。
  */
@@ -69,7 +76,7 @@ export function orderAdd(payload) {
     CustomerId: payload.CustomerId, MerchantId: payload.MerchantId, OrderId: payload.OrderId,
     Price: payload.Price, ProductInformation: payload.ProductInformation, Images: payload.Images,
     PayIf: payload.PayIf, DeliveryIf: payload.DeliveryIf, ReceiveIf: payload.ReceiveIf,
-    Quantity: payload.Quantity
+    Quantity: payload.Quantity, Items: payload.Items
   }))
 }
 
@@ -184,11 +191,20 @@ export function cartList(customerId) {
 }
 
 /**
- * 结算 ⇒ 逐行建订单（后端走 `OrderService.orderAdd` 的锁与五道闸），成功一行清一行。
+ * 结算 ⇒ **按商家分组，一个商家一笔订单**（后端走 `OrderService.orderAdd` 的锁与五道闸），
+ * 一组落库成功才清这一组。
+ *
+ * ⚠️ 可视化段 commit 0b 改：**改前是「逐行下单」**（N 行 ⇒ N 张互相独立的订单）。
+ * 现在 N 行 ⇒ **M 张**（M = 本车的商家数）。购物车可跨商家（`cart` 唯一键是
+ * `(CustomerId, ProductCode)`），而 `order.MerchantId` 是单值 ⇒ 分组键只能是商家。
+ * **单商家车（常态）才是「整车一单多行」。**
  *
  * @param {{CustomerId:string, ProductCode?:string}} params
  *        `ProductCode` 不传 ⇒ 结算**整车**。
  * @returns {Promise<{success:boolean, list:Array, msg?:string}>}
+ *          `list` 每项：`OrderId` / `MerchantId` / `ProductCode` / `Quantity` / `Price` / `Items`。
+ *          ⚠️ **消费者只读 `OrderId`**（`ShoppingCart.vue`）⇒ 多出来的键是**超集、不算破坏**；
+ *             单行组时那四个旧键与改前**逐字同值**，多行组时才是聚合值。
  *          ⚠️ **结算不是一笔原子操作**（订单链禁 `@Transactional`）⇒ 中途失败时
  *             `success:false` **且** `list` 里有**已经生成的那几笔**。前端**必须**把它们显示出来
  *             （把部分成功报成整体失败 = 让用户重复下单）。
