@@ -73,16 +73,18 @@ public class AdminTemplateController {
     @PostMapping("/create")
     public Result<Map<String, Object>> create(
             @RequestParam(value = "Type", required = false) String Type,
+            @RequestParam(value = "Kind", required = false) String Kind,
             @RequestParam(value = "Name", required = false) String Name,
             @RequestParam(value = "Title", required = false) String Title,
             @RequestParam(value = "Body", required = false) String Body,
             @RequestParam(value = "Sort", required = false) Integer Sort,
             HttpServletRequest request
     ) {
-        Map<String, Object> result = templateService.create(Type, Name, Title, Body, Sort);
+        Map<String, Object> result = templateService.create(Type, Kind, Name, Title, Body, Sort);
         if (Boolean.TRUE.equals(result.get("success"))) {
             Map<String, Object> after = new HashMap<>();
             after.put("Type", Type);
+            after.put("Kind", Kind);
             after.put("Name", Name);
             after.put("Title", Title);
             after.put("Sort", Sort);
@@ -104,17 +106,19 @@ public class AdminTemplateController {
             @RequestParam(value = "Body", required = false) String Body,
             @RequestParam(value = "Enabled", required = false) Integer Enabled,
             @RequestParam(value = "Sort", required = false) Integer Sort,
+            @RequestParam(value = "Kind", required = false) String Kind,
             HttpServletRequest request
     ) {
         if (id == null) {
             return Result.of(missingId());
         }
-        Map<String, Object> result = templateService.update(id, Name, Title, Body, Enabled, Sort);
+        Map<String, Object> result = templateService.update(id, Name, Title, Body, Enabled, Sort, Kind);
         if (Boolean.TRUE.equals(result.get("success"))) {
             Map<String, Object> after = new HashMap<>();
             after.put("Name", Name);
             after.put("Enabled", Enabled);
             after.put("Sort", Sort);
+            after.put("Kind", Kind);
             auditService.record(AuthSession.identify(request), AuditActions.TEMPLATE_UPDATE,
                     "template", id.toString(), result.get("before"), after);
         }

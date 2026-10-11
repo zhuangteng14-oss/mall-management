@@ -11,7 +11,7 @@
         仅看未读
       </label>
       <button class="act" type="button" :disabled="unread === 0 || busy" @click="markAll">
-        全部已读
+        <IconGlyph name="ok" />全部已读
       </button>
     </div>
 
@@ -73,7 +73,7 @@
 import { ref, computed, watch, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
 import { handleApiError } from '../api/http'
-import { getMerchantId, getCustomerId, isLoggedIn } from '../api/auth'
+import { getMerchantId, getCustomerId, isLoggedIn } from '../api/auth'; import IconGlyph from '../components/ui/IconGlyph.vue'   // ⚠️ 两条 import **同行**（2026-10-11 补图标那一笔）—— 合并到既有行 = 不新增行号漂移
 import { notifyList, notifyRead, notifyReadAll } from '../api/notify'
 import { eventLabel, isKnownEvent } from '../config/notify-events'
 

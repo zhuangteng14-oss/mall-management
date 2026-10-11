@@ -241,7 +241,7 @@
         <textarea id="bio" v-model="userInfo.selfintroduction" placeholder="暂无自我介绍"></textarea>
       </div>
       <div class="actions">
-        <button class="btn btn-primary" @click="saveUserInfo">保存个人信息</button>
+        <button class="btn btn-primary" @click="saveUserInfo"><IconGlyph name="ok" />保存个人信息</button>
       </div>
     </section>
 
@@ -269,7 +269,7 @@
         </div>
       </div>
       <div class="actions">
-        <button class="btn btn-primary" @click="saveProfile">保存资料完善</button>
+        <button class="btn btn-primary" @click="saveProfile"><IconGlyph name="ok" />保存资料完善</button>
         <span class="dp-hint">留空 = 清空该列（后端把「没填」当「没有」）</span>
       </div>
     </section>
@@ -281,7 +281,7 @@
 import { ref, onMounted, computed } from 'vue'
 import { http, handleApiError, assetOf } from '../api/http'
 import { endpoints } from '../api/endpoints'
-import { getUsername, isLoggedIn } from '../api/auth'
+import { getUsername, isLoggedIn } from '../api/auth'; import IconGlyph from '../components/ui/IconGlyph.vue'   // ⚠️ 两条 import **同行**（2026-10-11 补图标那一笔）—— 合并到既有行 = 不新增行号漂移（`api-contract.md` 按 `:99` 钉住本文件）
 
 const userInfo = ref({})
 const idType = ref('')

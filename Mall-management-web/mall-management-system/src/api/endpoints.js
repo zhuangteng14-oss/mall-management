@@ -4,7 +4,7 @@
 // 「路径字面量只允许出现在本文件」—— 后者强得多，且同样可 grep 自动化（方案 Q8）。
 //
 // 端点来源：14 个 view 里 **42 处 fetch + 6 处 URL 赋值**，逐条抽取
-// （2026-10-04，切换自 `9add994`）共 **31 个唯一端点**，按 M5 的四域分组（+2 条 `user.me` / `user.logout`：会话恢复笔与翻开关笔 2026-10-05 加，+1 条 `user.token`：多账户隔离笔 2026-10-06 加 —— 三条均**非** view 抽取 ⇒ 加上 C3 批 A 的 3 条 `admin.audit*`（2026-10-08）与 C3 块 1·I2 的 8 条（`admin.notify*` 4 + `notification.*` 4，2026-10-09，同样**非** view 抽取），再加 C3 块 2〈用户块〉的 11 条（`user.updateProfile` 1 + `merchant.*` 2 + `admin.accounts*` 8，2026-10-09，同样**非** view 抽取），本表实为 **56** 条；再加 C3 块 3〈商品块〉的 14 条（`goodsB3` 2 + `catalog` 1 + `catalogAdmin` 11，2026-10-10，同样**非** view 抽取）；再经同日〈模板表通用化〉就地改造（**删** `catalog` 1 + `catalogAdmin` 4 + `admin.notifyTemplate*` 2 = 7 条，**加** `template` 2 + `templateAdmin` 4 = 6 条），现为 **69** 条；再加 C3 块 4〈订单块〉的 9 条（`cart` 5 + `orderAdmin` 4，2026-10-10，同样**非** view 抽取 —— 唯一调用方是新建的 `api/order.js`），现为 **78** 条；再加 C3 块 4 补丁〈订单块〉的 1 条（`order.orderDetail`，2026-10-10，同样**非** view 抽取），现为 **79** 条）。
+// （2026-10-04，切换自 `9add994`）共 **31 个唯一端点**，按 M5 的四域分组（+2 条 `user.me` / `user.logout`：会话恢复笔与翻开关笔 2026-10-05 加，+1 条 `user.token`：多账户隔离笔 2026-10-06 加 —— 三条均**非** view 抽取 ⇒ 加上 C3 批 A 的 3 条 `admin.audit*`（2026-10-08）与 C3 块 1·I2 的 8 条（`admin.notify*` 4 + `notification.*` 4，2026-10-09，同样**非** view 抽取），再加 C3 块 2〈用户块〉的 11 条（`user.updateProfile` 1 + `merchant.*` 2 + `admin.accounts*` 8，2026-10-09，同样**非** view 抽取），本表实为 **56** 条；再加 C3 块 3〈商品块〉的 14 条（`goodsB3` 2 + `catalog` 1 + `catalogAdmin` 11，2026-10-10，同样**非** view 抽取）；再经同日〈模板表通用化〉就地改造（**删** `catalog` 1 + `catalogAdmin` 4 + `admin.notifyTemplate*` 2 = 7 条，**加** `template` 2 + `templateAdmin` 4 = 6 条），现为 **69** 条；再加 C3 块 4〈订单块〉的 9 条（`cart` 5 + `orderAdmin` 4，2026-10-10，同样**非** view 抽取 —— 唯一调用方是新建的 `api/order.js`），现为 **78** 条；再加 C3 块 4 补丁〈订单块〉的 1 条（`order.orderDetail`，2026-10-10，同样**非** view 抽取），现为 **79** 条；再加可视化段（2026-10-11）的 4 条（`goods.skuList` 1〔与 `goodsProductCodeSelect` 同行追加〕+ `stats.*` 3〔末尾新增组〕，同样**非** view 抽取），现为 **83** 条）。
 //
 // ⚠️ 路径里的 `GoodsProductCodeSelect` 是**大写开头**，与后端 `@PostMapping` 逐字一致，
 //    不是笔误 —— 改名会 404。
@@ -18,7 +18,7 @@ export const endpoints = {
     goodsUp: '/goods/goodsUp',
     productCodePrice: '/goods/productCodePrice',
     productSearch: '/goods/productSearch',
-    goodsProductCodeSelect: '/goods/GoodsProductCodeSelect',
+    goodsProductCodeSelect: '/goods/GoodsProductCodeSelect', skuList: '/goods/skuList',   // ⚠️ 2026-10-11（可视化段补丁）`skuList` **同行追加**，不新插一行 —— 本组下方各条被 view 与 `slot-registry.md` 按行号引，插行会整体下移。
   },
   user: {
     loginSelect: '/user/loginSelect',

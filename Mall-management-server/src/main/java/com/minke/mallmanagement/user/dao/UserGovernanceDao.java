@@ -47,15 +47,30 @@ import java.util.Map;
 @Repository
 public class UserGovernanceDao {
 
-    /** 管理员列表的共用列清单 —— 只此一处投影，自洽即可。⚠️ 时间列全部经 DATE_FORMAT（见类注释）。 */
+    /**
+     * 管理员列表的共用列清单 —— 只此一处投影，自洽即可。⚠️ 时间列全部经 DATE_FORMAT（见类注释）。
+     *
+     * <p>⚠️ 列名**一律带 {@code u.} 限定**：本清单从可视化段 commit 3 起配 {@code LEFT JOIN login}
+     * 使用（取注册时刻），而 {@code login.UserName} 与 {@code user.username} **同名**（MySQL 列名
+     * 大小写不敏感）⇒ 不限定会直接撞 {@code ERROR 1052 Column 'username' is ambiguous}。
+     *
+     * <p>{@code CreatedAt} 来自 {@code login.CreateTime}（可视化段 commit 3 的 Migration 新增）——
+     * 管理端「用户增长」曲线的唯一数据源。**必须 LEFT JOIN**：内连接会把「在 {@code user} 有行、
+     * 在 {@code login} 无行」的账号整条吞掉，管理员列表会静默少人（那是个业务事实，见
+     * {@code GoodsCacheService} 同款处置）。
+     */
     private static final String USER_COLUMNS =
-            "username, usertype, customerid, merchantid, gender, age, email, "
-                    + "banned, banReason, "
-                    + "DATE_FORMAT(bannedAt, '%Y-%m-%d %H:%i:%s') AS bannedAt, "
-                    + "DowngradeState, DowngradeReason, "
-                    + "DATE_FORMAT(ScheduledDowngradeAt, '%Y-%m-%d %H:%i:%s') AS ScheduledDowngradeAt, "
-                    + "DATE_FORMAT(FrozenAt, '%Y-%m-%d %H:%i:%s') AS FrozenAt, "
-                    + "DATE_FORMAT(FreezeUntil, '%Y-%m-%d %H:%i:%s') AS FreezeUntil ";
+            "u.username, u.usertype, u.customerid, u.merchantid, u.gender, u.age, u.email, "
+                    + "u.banned, u.banReason, "
+                    + "DATE_FORMAT(u.bannedAt, '%Y-%m-%d %H:%i:%s') AS bannedAt, "
+                    + "u.DowngradeState, u.DowngradeReason, "
+                    + "DATE_FORMAT(u.ScheduledDowngradeAt, '%Y-%m-%d %H:%i:%s') AS ScheduledDowngradeAt, "
+                    + "DATE_FORMAT(u.FrozenAt, '%Y-%m-%d %H:%i:%s') AS FrozenAt, "
+                    + "DATE_FORMAT(u.FreezeUntil, '%Y-%m-%d %H:%i:%s') AS FreezeUntil, "
+                    + "DATE_FORMAT(l.CreateTime, '%Y-%m-%d %H:%i:%s') AS CreatedAt ";
+
+    /** `USER_COLUMNS` 的唯一 FROM 子句 —— 与它成对改，别只改一处（两个读方法共用）。 */
+    private static final String USER_FROM = "FROM `user` u LEFT JOIN `login` l ON l.UserName = u.username ";
 
     private final JdbcClient jdbcClient;
 
@@ -135,9 +150,10 @@ public class UserGovernanceDao {
      */
     public List<Map<String, Object>> selectUsers(String keyword, int limit) {
         StringBuilder sql = new StringBuilder("SELECT ").append(USER_COLUMNS)
-                .append("FROM `user` WHERE 1 = 1 ");
+                .append(USER_FROM).append("WHERE 1 = 1 ");
         if (!isBlank(keyword)) {
-            sql.append("AND (username LIKE ? OR customerid LIKE ? OR merchantid LIKE ?) ");
+            // ⚠️ 三个列名都带 `u.` —— `username` 与 `login.UserName` 同名，不限定即 1052。
+            sql.append("AND (u.username LIKE ? OR u.customerid LIKE ? OR u.merchantid LIKE ?) ");
         }
         sql.append("ORDER BY banned DESC, username ASC LIMIT ?");
 
@@ -151,7 +167,7 @@ public class UserGovernanceDao {
 
     /** 单账号整行（封禁/解封/降级的审计 {@code before}/{@code after} 快照用）。查不到 ⇒ {@code null}。 */
     public Map<String, Object> selectUserRow(String username) {
-        String sql = "SELECT " + USER_COLUMNS + "FROM `user` WHERE username = ?";
+        String sql = "SELECT " + USER_COLUMNS + USER_FROM + "WHERE u.username = ?";
         List<Map<String, Object>> rows = jdbcClient.sql(sql).param(username).query().listOfRows();
         return rows.isEmpty() ? null : rows.get(0);
     }

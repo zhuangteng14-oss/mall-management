@@ -129,6 +129,14 @@ public class GoodsController {
             @NotBlank(message = "不能为空") @RequestParam("ProductCode") String ProductCode,
             @RequestParam("GoodTypeNew") int GoodTypeNew,
             @RequestParam(value = "TypeId", required = false) Integer TypeId, @RequestParam(value = "Detail", required = false) String Detail, @RequestParam(value = "Spec", required = false) String Spec, @RequestParam(value = "AfterSale", required = false) String AfterSale,
+            // 可视化段补丁：多规格矩阵快照（JSON 数组串）+ 4 个服务承诺位。
+            // ⚠️ 四项承诺 `required = false` **且**缺省按「真」处理（见 `GoodsAuditService.boolOrTrue`）——
+            //    老前端不传 ⇒ null ⇒ 当真 ⇒ 与改前「每件商品都显示四条承诺」一致（硬线：不动旧契约）。
+            @RequestParam(value = "SkuSpec", required = false) String SkuSpec,
+            @RequestParam(value = "PromiseGenuine", required = false) Boolean PromiseGenuine,
+            @RequestParam(value = "PromiseReturn7", required = false) Boolean PromiseReturn7,
+            @RequestParam(value = "PromiseFastRefund", required = false) Boolean PromiseFastRefund,
+            @RequestParam(value = "PromiseFreightIns", required = false) Boolean PromiseFreightIns,
             HttpServletRequest request
     ) throws IOException {
         // ⚠️ 第一行：上架只能挂到**自己**名下（管理员豁免）—— 必须在落盘/写库之前。
@@ -139,7 +147,8 @@ public class GoodsController {
         // 业务（本方法）改为「落一条 goods_audit(pending)，不写 goods 行」；
         // 只有提交成功才**触达管理端**（共享收件箱）+ 记账。
         Map<String, Object> result = goodsService.goodsAdd(MerchantId, GoodName, Price, file,
-                GoodType, ProductCode, GoodTypeNew, TypeId, Detail, Spec, AfterSale);
+                GoodType, ProductCode, GoodTypeNew, TypeId, Detail, Spec, AfterSale, SkuSpec,
+                PromiseGenuine, PromiseReturn7, PromiseFastRefund, PromiseFreightIns);
         if (Boolean.TRUE.equals(result.get("success"))) {
             String batchId = str(result.get("batchId"));
             notificationService.send(UUID.randomUUID().toString(),
@@ -222,6 +231,22 @@ public class GoodsController {
             @NotBlank(message = "不能为空") @RequestParam("ProductCode") String ProductCode
     ) {
         return Result.of(goodsService.productCodePrice(MerchantId, GoodName, ProductCode));
+    }
+
+    /**
+     * 某商家某商品的多规格矩阵（{@code goods_sku}）—— 商品详情页 / 上架页读回用（可视化段补丁）。
+     *
+     * <p>⚠️ <b>新端点是纯新增</b>：不改任何既有端点的入参 / 出参（硬线：不动旧契约）。
+     * 空 {@code list} = 该商品没有多规格 ⇒ 前端回落到既有的「单型号 {@code ProductCode}」路径。
+     * ⚠️ 与 {@code productCodePrice} 一样**不做身份闸**：读的是公开可见的商品信息（商家号 + 商品名
+     * 本来就是买家首页列表里就有的字段），加闸反而会让未登录的浏览路径拿不到规格。
+     */
+    @PostMapping("/skuList")
+    public Result<Map<String, Object>> skuList(
+            @NotBlank(message = "不能为空") @RequestParam("MerchantId") String MerchantId,
+            @NotBlank(message = "不能为空") @RequestParam("GoodName") String GoodName
+    ) {
+        return Result.of(goodsService.skusByMerchantGoodName(MerchantId, GoodName));
     }
 
     //这是一个接口（用于更新商品数据）

@@ -109,16 +109,27 @@ export function categoryAxis(t, data, opts = {}) {
  * 数值轴。⚠️ **一律不写 `name`** —— ECharts 把 y 轴名摆在轴顶端，多轴时几条会挤成一团
  * （丁版稿踩过这个坑，见 `docs/美化/c3-admin-preview/丁-运营蓝.html` 的 `#chart` 注释）
  * ⇒ 单位并进轴标签 `formatter`，轴名交给卡头那行「QPS / 锁等待 ms / 缓存命中率」。
+ *
+ * <p>⚠️ **2026-10-11 加两个可选入参**（都是为双 Y 轴，见 `LineChart.vue`），不传 = 逐字同改前：
+ * <ul>
+ *   <li>{@code color} —— 把轴标签染成**它那条序列的颜色**。双轴时不写 `name` 就没法标清
+ *       「哪个轴是哪个指标」，而染色是最省地方的一种标法（左轴色 = 左轴序列色，肉眼一对即知）。
+ *       单轴时**不传**（轴标签保持 `--axis-label`）。</li>
+ *   <li>{@code splitLine} 传 {@code false} —— 关掉本轴的横向网格线。<b>双轴必须关一条</b>：
+ *       两条轴的 splitLine 会画在同一批刻度上，叠成一深一浅两条线，看着像画坏了。</li>
+ * </ul>
  */
 export function valueAxis(t, opts = {}) {
   return {
     type: 'value',
     min: opts.min,
     max: opts.max,
-    splitLine: { lineStyle: { color: t.gridLine, type: 'solid' } },
+    splitLine: opts.splitLine === false
+      ? { show: false }
+      : { lineStyle: { color: t.gridLine, type: 'solid' } },
     axisLine: { show: false },
     axisTick: { show: false },
-    axisLabel: { color: t.axisLabel, formatter: opts.formatter },
+    axisLabel: { color: opts.color || t.axisLabel, formatter: opts.formatter },
   }
 }
 

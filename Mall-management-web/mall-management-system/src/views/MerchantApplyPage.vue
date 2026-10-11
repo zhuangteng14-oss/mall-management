@@ -46,7 +46,7 @@
 
           <div class="f-acts">
             <button type="submit" class="btn" :disabled="busy">
-              {{ busy ? '提交中…' : '提交申请' }}
+              <IconGlyph name="ok" />{{ busy ? '提交中…' : '提交申请' }}
             </button>
             <button type="button" class="btn btn-ghost" :disabled="busy" @click="resetForm">清空</button>
           </div>
@@ -79,7 +79,7 @@
           <li v-for="r in rows" :key="r.Id" class="app" :class="r.Status">
             <div class="app-l1">
               <b class="app-shop">{{ r.ShopName }}</b>
-              <span class="badge" :class="r.Status">{{ statusLabel(r.Status) }}</span>
+              <span class="badge" :class="r.Status"><IconGlyph :name="statusGlyph(r.Status)" />{{ statusLabel(r.Status) }}</span>
               <span class="grow"></span>
               <span class="dim">{{ fmt(r.SubmittedAt) }}</span>
             </div>
@@ -126,7 +126,7 @@
 <script setup>
 import { computed, onMounted, reactive, ref } from 'vue'
 import { getUsername } from '../api/auth'
-import { merchantApply, merchantMyApplications } from '../api/merchant'
+import { merchantApply, merchantMyApplications } from '../api/merchant'; import IconGlyph from '../components/ui/IconGlyph.vue'   // ⚠️ 两条 import **同行**（2026-10-11 补图标那一笔）—— 合并到既有行的惯例见各页同款注释
 
 // ── 申请人 ───────────────────────────────────────────────────────────────────
 // ⚠️ `getUsername()` 读 `sessionStorage`，未登录时可能回**字面串** `'null'` / `'undefined'`
@@ -156,6 +156,9 @@ function statusLabel(s) {
   if (s === 'rejected') return '已驳回'
   return dash(s)
 }
+// 状态徽章左侧那枚字形（2026-10-11 补图标那一笔；与 `admin/AccountsPage.vue` 同款 —— 两边判的是**同一批**
+// `merchant_application.Status`）。未知态给 `wait`：原文已由 `statusLabel` 显示。
+const statusGlyph = (s) => (s === 'approved' ? 'ok' : s === 'rejected' ? 'no' : 'wait')
 
 // ── 表单 ─────────────────────────────────────────────────────────────────────
 const form = reactive({

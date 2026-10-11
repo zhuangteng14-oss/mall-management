@@ -123,7 +123,7 @@
                  不写死、也不假造。 -->
             <div class="buyer" title="待 C3〈订单〉——买家昵称需关联用户表（N=2）；此处显示的是响应里的 CustomerId">{{ order.CustomerId }}</div>
             <div class="money">¥{{ Number(order.Price || 0).toFixed(2) }}</div>
-            <div class="cen"><span class="st" :class="stateOf(order)[0]">{{ stateOf(order)[1] }}</span></div>
+            <div class="cen"><span class="st" :class="stateOf(order)[0]"><IconGlyph :name="STATE_GLYPH[stateOf(order)[0]] || 'wait'" />{{ stateOf(order)[1] }}</span></div>
             <!-- 时间列（稿 :863-865）。第一行 = 下单时间；「已完成」视图该列为空 —— 既有缺陷，
                  详见下面那枚 `.dash` 的 title。第二行 = 更改日期，见 `.tcell` 上的说明。 -->
             <div class="tcell">
@@ -137,7 +137,7 @@
                  『用户未付款，暂不能发货』」这条路径在 UI 上消失；`handleDeliver()` 的三道守卫
                  **逐字保留**（纵深防御），且状态列已具名「未付款」。登记见 §一 commit 5。 -->
             <div class="op r">
-              <button v-if="canSend(order)" class="send" :disabled="order.DeliveryIf === 1 || order.ReceiveIf === 1" :class="{ disabled: order.DeliveryIf === 1 || order.ReceiveIf === 1 }" title="现有端点 order.orderDeliveryIfUp（endpoints.js:58）——本页唯一不禁用的按钮；C3 块4 补丁起改为先开【填写快递信息】弹窗，再发货" @click="openDeliver(order)">发货</button>
+              <button v-if="canSend(order)" class="send" :disabled="order.DeliveryIf === 1 || order.ReceiveIf === 1" :class="{ disabled: order.DeliveryIf === 1 || order.ReceiveIf === 1 }" title="现有端点 order.orderDeliveryIfUp（endpoints.js:58）——本页唯一不禁用的按钮；C3 块4 补丁起改为先开【填写快递信息】弹窗，再发货" @click="openDeliver(order)"><IconGlyph name="orders" />发货</button>
               <span v-else class="dash">—</span>
             </div>
           </div>
@@ -179,7 +179,7 @@
         </div>
         <div class="dlg-f">
           <button class="act" @click="deliverFor = null">取消</button>
-          <button class="send" :disabled="delivering" @click="confirmDeliver">{{ delivering ? '发货中…' : '确认发货' }}</button>
+          <button class="send" :disabled="delivering" @click="confirmDeliver"><IconGlyph name="ok" />{{ delivering ? '发货中…' : '确认发货' }}</button>
         </div>
       </div>
     </div>
@@ -191,7 +191,7 @@
 import { ref, onMounted } from 'vue'
 import { http, handleApiError, urlOf } from '../api/http'
 import { endpoints } from '../api/endpoints'
-import { getMerchantId, getUsername } from '../api/auth'
+import { getMerchantId, getUsername } from '../api/auth'; import IconGlyph from '../components/ui/IconGlyph.vue'   // ⚠️ 两条 import **同行**（2026-10-11 补图标那一笔）—— 合并到既有行 = 不新增行号漂移（`slot-registry.md:4551` 按 `:161` 钉住本文件）
 
 defineProps({
   orderTab: { type: String, default: 'order' },
@@ -215,7 +215,7 @@ const currentMerchantId = () => {
   return merchantId || null
 }
 
-const formatDateTime = (dateStr) => {   // ⚠️ **2026-10-10（问题 2，即时区：用户报「轨迹 22:27:51 vs 订单列表 14:29:16」差 8 小时）**：本页两个字段（`CreateTime` 由 SQL `NOW()`、`SettlementDate` 由 `OrderStateMachine` 的 `NOW()`）都是**库时钟**、库时钟是 **UTC**（VM / a3 实测 `@@system_time_zone=UTC`，见 `context-packs/c3-block-1-infra.md#pack-c3-block-1-infra-frontend-nav`）⇒ 交回 `'YYYY-MM-DD HH:mm:ss'` **无时区文本**；少补末尾那个 `Z`，`new Date()` 按**浏览器本地时区**解释它 ⇒ 整整差一个偏移且**错得很安静**。手法照 `views/admin/AuditPage.vue:190` 的 `toLocal`（本页此前漏了）。
+const formatDateTime = (dateStr) => {   // ⚠️ **2026-10-10（问题 2，即时区：用户报「轨迹 22:27:51 vs 订单列表 14:29:16」差 8 小时）**：本页两个字段（`CreateTime` 由 SQL `NOW()`、`SettlementDate` 由 `OrderStateMachine` 的 `NOW()`）都是**库时钟**、库时钟是 **UTC**（VM / a3 实测 `@@system_time_zone=UTC`，见 `context-packs/c3-block-1-infra.md#pack-c3-block-1-infra-frontend-nav`）⇒ 交回 `'YYYY-MM-DD HH:mm:ss'` **无时区文本**；少补末尾那个 `Z`，`new Date()` 按**浏览器本地时区**解释它 ⇒ 整整差一个偏移且**错得很安静**。手法照 `views/admin/AuditPage.vue:236` 的 `toLocal`（原 190 行 —— 2026-10-11 收口按 refs-scan 重指；本页此前漏了）。
   if (!dateStr) return ''
   const date = new Date(`${String(dateStr).replace(' ', 'T')}Z`)
   const year = date.getFullYear()
@@ -265,6 +265,9 @@ const STATE_OF = {
   '1,0,1': ['err', '已收货·未发货'],
   '1,1,1': ['ok', '已完成']
 }
+/** 状态徽章左侧那枚字形（2026-10-11 补图标那一笔；与 `OrderMine.vue` 的 `STATE_GLYPH` 同款 ——
+ *  两边判的是**同一张** `STATE_OF` 表）。键取**类名档**不取具名态，理由见 `OrderMine.vue` 那条。 */
+const STATE_GLYPH = { ok: 'ok', err: 'no', info: 'orders', warn: 'wait', draft: 'wait' }
 const stateOf = (order) => {
   if (order.CancelledAt) return ['err', '已取消']
   const key = [order.PayIf, order.DeliveryIf, order.ReceiveIf].join(',')

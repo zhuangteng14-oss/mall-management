@@ -159,7 +159,7 @@
               class="b ghost"
               title="现有功能：openPopup('cart')（→ cart.cartAdd，逐型号写 cart 表）"
               @click="openPopup('cart')"
-            >加入购物车</button>
+            ><IconGlyph name="cart" />加入购物车</button>
             <!-- 【立即购买】既有真功能 `openPopup`（弹窗内选型号 / 数量 → `order.orderAdd`）。
                  ⚠️ 稿 `:981` 的 title 逐字带「（ProductPage.vue:69 → order.orderAdd）」——
                     那是**稿引本仓行号**，而本笔正是重写这个文件的那一笔 ⇒ 当场失效
@@ -169,11 +169,11 @@
               class="b primary"
               title="现有功能：openPopup('buy')（→ order.orderAdd）"
               @click="openPopup('buy')"
-            >立即购买</button>
+            ><IconGlyph name="ok" />立即购买</button>
           </div>
 
-          <div class="promise">
-            <span>正品保障</span><span>7 天无理由</span><span>极速退款</span><span>运费险</span>
+          <div class="promise" v-if="promiseLabels.length">
+            <span v-for="p in promiseLabels" :key="p">{{ p }}</span>
           </div>
 
           <!-- ④【店铺主页】`data-slot` 按稿挂**整张商家卡**（⚠️ 不挂「进店逛逛」那个按钮：
@@ -423,7 +423,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { http, handleApiError } from '../api/http'
 import { endpoints } from '../api/endpoints'; import { orderAdd, cartAdd } from '../api/order'   // ⚠️ C3 块 4：**同行追加**（不新增行 —— 本文件 `:794`/`:803` 被 `slot-registry.md:1994-1995` 按行号引（〈Bug 1〉本笔 +19 行前为 `:775`/`:784`），此处加行会顶漂它们）。两个函数就是原先那两串 `URLSearchParams` + `http.post` + `res.json()` 的收口
 import CashierDialog from '../components/CashierDialog.vue'   // ⚠️ 2026-10-10（Bug 1）：收银台与「我的订单」**共用同一个组件** —— 本行**确实**新增了一行；本笔在 `ProductPage.vue` 净 +19 行（`git diff` 实测：模板 `:412` 起 +5、import +1、`handlePay` 段 +13）⇒ 下面两处 `:775`/`:784` 漂到 `:794`/`:803`，随本笔一并重指（见 `slot-registry.md:1994-1995`）
-import { getMerchantId, getCustomerId, isLoggedIn } from '../api/auth'
+import { getMerchantId, getCustomerId, isLoggedIn } from '../api/auth'; import IconGlyph from '../components/ui/IconGlyph.vue'   // ⚠️ 两条 import **同行**（2026-10-11 补图标那一笔）—— 合并到既有行 = 不新增行号漂移（本文件 `:794`/`:803` 被 `slot-registry.md:1994-1995` 按行号引，上面 `:424` 那条注释记过同一件事）
 
 const route = useRoute()
 const router = useRouter()
@@ -531,7 +531,7 @@ const loadPopupItems = async () => {
         })
       }
     }
-    popupAllItems.value = items
+    popupAllItems.value = await mergeSkus(items)   // 2026-10-11：有 SKU ⇒ 型号表换成 SKU 行（`mergeSkus` 定义在下方 `specRows` 那一行尾）；无 SKU ⇒ 原样返回 `items`（与改前逐字同）。⚠️ 同行替换，**不新增行**（行号互引约束同 `:794`/`:803`）
   } catch (e) {
     handleApiError(e, '请求失败')
   }
@@ -774,7 +774,7 @@ onMounted(async () => {
 //    走到 `orderAdd`（拆真检查）；`isLogin` 只决定**要不要跳登录** ⇒ 已登录商家原地不动（= 既有行为）。
 // ⚠️ redirect 取 `route.fullPath`（含本页 7 个 query），对象形式与 `main.js:49` 同款；登录后由
 //    `LoginPage.landingAfterLogin` 送回本页（T-guard-6/-10）。放文件末尾是**刻意的**：`WebAuthConfig.java:71` 引了本文件的 `onMounted` 段（那里原先写的 `:462-465` 是**陈旧值**，本品已就地更正为 `:766`），新增行落在被引行之后，上面 24 个被引目标才一个都不漂。⚠️ **2026-10-10〈Bug 1 · 立即购买补接收银台〉本笔破了这条约束**：+19 行落在 `:412`/`:425`/`:666`（均在 `:766` 之前）⇒ `:794`/`:803` 两处被引行随本笔重指（见 `slot-registry.md:1994-1995`），并已回写 `slot-registry.md:1992/1994/1995/2445`。
-/* 2026-10-10〈模板表通用化〉三段快照文本（`goods.Detail` / `Spec` / `AfterSale`）—— 全部写在**同一物理行**（新增行会顶漂下面 `slot-registry.md:1994-1995` 引的 `:794`/`:803`）。⚠️ 取值**从 `route.query` 现取**、不用 setup 期解构的 `sellerId`/`goodName`（`:433-434` 是普通 `const`，同路径只换 query 时组件被复用、它们**不更新**，理由同 `openPopup` 那条）。 */ const detailText = computed(() => { const q = route.query; const g = goodsWithUser.value.find((x) => x.MerchantId === q.MerchantId && x.GoodName === q.GoodName); return (g && g.Detail) || '' }); const specText = computed(() => { const q = route.query; const g = goodsWithUser.value.find((x) => x.MerchantId === q.MerchantId && x.GoodName === q.GoodName); return (g && g.Spec) || '' }); const afterSaleText = computed(() => { const q = route.query; const g = goodsWithUser.value.find((x) => x.MerchantId === q.MerchantId && x.GoodName === q.GoodName); return (g && g.AfterSale) || '' }); /* `Spec` 的行内 `键=值` 约定：一行一条，`=` 只切**第一处**（值里允许再有 `=`）；没有 `=` 的行**整行进 `.v`、`.k` 留空**，而不是丢掉它。 */ const specRows = computed(() => specText.value.split('\n').map((s) => s.trim()).filter((s) => s !== '').map((s) => { const i = s.indexOf('='); return i < 0 ? { k: '', v: s } : { k: s.slice(0, i).trim(), v: s.slice(i + 1).trim() } })); const isLogin = computed(() => isLoggedIn()); const activeTab = ref('desc')   // 结构二次调整（2026-10-07）：Tab 条当前面，UI 展示状态（不计功能量）；⚠️ **同行追加、不新增行** —— 上面那条「新增行落在最大被引行之后」的约束在本笔**不成立**（`slot-registry.md:1994-1995` 引的 `:794`/`:803` 都在下面），新增行会顶漂它们。
+/* 2026-10-10〈模板表通用化〉三段快照文本（`goods.Detail` / `Spec` / `AfterSale`）—— 全部写在**同一物理行**（新增行会顶漂下面 `slot-registry.md:1994-1995` 引的 `:794`/`:803`）。⚠️ 取值**从 `route.query` 现取**、不用 setup 期解构的 `sellerId`/`goodName`（`:433-434` 是普通 `const`，同路径只换 query 时组件被复用、它们**不更新**，理由同 `openPopup` 那条）。 */ const detailText = computed(() => { const q = route.query; const g = goodsWithUser.value.find((x) => x.MerchantId === q.MerchantId && x.GoodName === q.GoodName); return (g && g.Detail) || '' }); const specText = computed(() => { const q = route.query; const g = goodsWithUser.value.find((x) => x.MerchantId === q.MerchantId && x.GoodName === q.GoodName); return (g && g.Spec) || '' }); const afterSaleText = computed(() => { const q = route.query; const g = goodsWithUser.value.find((x) => x.MerchantId === q.MerchantId && x.GoodName === q.GoodName); return (g && g.AfterSale) || '' }); /* `Spec` 的行内 `键=值` 约定：一行一条，`=` 只切**第一处**（值里允许再有 `=`）；没有 `=` 的行**整行进 `.v`、`.k` 留空**，而不是丢掉它。 */ const specRows = computed(() => specText.value.split('\n').map((s) => s.trim()).filter((s) => s !== '').map((s) => { const i = s.indexOf('='); return i < 0 ? { k: '', v: s } : { k: s.slice(0, i).trim(), v: s.slice(i + 1).trim() } })); const promiseLabels = computed(() => { const q = route.query; const g = goodsWithUser.value.find((x) => x.MerchantId === q.MerchantId && x.GoodName === q.GoodName); const ALL = ['正品保障', '7 天无理由', '极速退款', '运费险']; const KEYS = ['PromiseGenuine', 'PromiseReturn7', 'PromiseFastRefund', 'PromiseFreightIns']; if (!g) return ALL; if (!KEYS.some((k) => g[k] !== undefined && g[k] !== null)) return ALL; return ALL.filter((_, i) => Number(g[KEYS[i]])) }); const mergeSkus = async (baseItems) => { try { const rs = await http.post(endpoints.goods.skuList, `MerchantId=${sellerId}&GoodName=${goodName}`); const ds = await rs.json(); const skus = (ds && ds.success && ds.list) || []; if (!skus.length) return baseItems; const img = baseItems.length ? baseItems[0].goodImg : ''; const merged = skus.map((s) => ({ productCode: String(s.SkuCode || ''), price: s.Price, goodImg: img })).filter((s) => s.productCode); return merged.length ? merged : baseItems } catch (e) { return baseItems } }; const isLogin = computed(() => isLoggedIn()); const activeTab = ref('desc')   // 结构二次调整（2026-10-07）：Tab 条当前面，UI 展示状态（不计功能量）；⚠️ **同行追加、不新增行** —— 上面那条「新增行落在最大被引行之后」的约束在本笔**不成立**（`slot-registry.md:1994-1995` 引的 `:794`/`:803` 都在下面），新增行会顶漂它们。
 </script>
 
 <style scoped>

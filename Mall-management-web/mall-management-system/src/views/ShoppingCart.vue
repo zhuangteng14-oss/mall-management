@@ -92,8 +92,8 @@
               <div class="op">
                 <button class="pay-btn" :disabled="busy || !row.GoodName"
                         :title="row.GoodName ? '只结算这一件' : '商品已下架，无法结算'"
-                        @click="checkout(row.ProductCode)">结算</button>
-                <button class="del-btn" :disabled="busy" @click="remove(row)">删除</button>
+                        @click="checkout(row.ProductCode)"><IconGlyph name="ok" />结算</button>
+                <button class="del-btn" :disabled="busy" @click="remove(row)"><IconGlyph name="no" />删除</button>
               </div>
             </div>
 
@@ -127,7 +127,7 @@
           </span>
         </span>
         <button class="go" :disabled="busy || !canCheckoutAll" @click="checkout()">
-          {{ busy ? '处理中…' : `去结算（${totalCount} 件）` }}
+          <IconGlyph name="ok" />{{ busy ? '处理中…' : `去结算（${totalCount} 件）` }}
         </button>
       </div>
     </div>
@@ -144,7 +144,7 @@
 import { ref, computed, onMounted } from 'vue'
 import { handleApiError } from '../api/http'
 import { cartList, cartUpdate, cartRemove, cartCheckout } from '../api/order'
-import { resolveBuyerId } from '../api/auth'
+import { resolveBuyerId } from '../api/auth'; import IconGlyph from '../components/ui/IconGlyph.vue'   // ⚠️ 两条 import **同行**（2026-10-11 补图标那一笔）—— 合并到既有行 = 不新增行号漂移（`api-contract.md` 按 `:108/156/190`、`slot-registry.md` 按 `:46/77/173/198` 钉住本文件）
 
 // 上界与后端 `CartService.MAX_QUANTITY` **同值**（999）。前端拿它当 `+` 的闸，
 // 后端仍是权威（超了回「数量最多 999 件」）—— 两处都留，免得只在一边拦。

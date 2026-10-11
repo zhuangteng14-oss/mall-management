@@ -35,7 +35,7 @@
         订单在 <code>order</code> 表里，只是还没被算成日聚合。点右边按钮跑一次全量重建。
       </span>
       <button type="button" class="a-btn a-btn-on" :disabled="rebuilding" @click="doRebuild">
-        {{ rebuilding ? '重建中…' : '立即全量重建' }}
+        <IconGlyph name="ok" />{{ rebuilding ? '重建中…' : '立即全量重建' }}
       </button>
     </div>
 
@@ -65,7 +65,7 @@
         <input v-model.trim="f.to" type="text" placeholder="YYYY-MM-DD" />
       </label>
       <div class="a-f-actions">
-        <button type="submit" class="a-btn a-btn-on" :disabled="loading">查询</button>
+        <button type="submit" class="a-btn a-btn-on" :disabled="loading"><IconGlyph name="ok" />查询</button>
         <button type="button" class="a-btn" :disabled="loading || rebuilding" @click="doRebuild">
           全量重建
         </button>
@@ -117,33 +117,29 @@
       />
     </div>
 
-    <!-- ══ ⑤ 成交额趋势（折线）═════════════════════════════════════════════════
+    <!-- ══ ⑤ 成交额 / 成单数趋势（双 Y 轴折线）══════════════════════════════════
          ⚠️ 折线按日期序列**补 0**（后端刻意不补，见 `StatsAggregateJob` / `StatsService`：
          服务端补零会让「这天没单」与「这天没聚合」在库里长得一样）。
-         做法：把 `days` 按 `StatDate` 铺成连续日期串，缺的填 0。 -->
-    <h2 class="a-h2">成交额趋势 <span class="a-h2n">单位：万元 · 缺日补 0</span></h2>
+         做法：把 `days` 按 `StatDate` 铺成连续日期串，缺的填 0。
+         ⚠️ **2026-10-11 用户裁决：合并为一张双 Y 轴折线**（原先是「成交额折线」+「成单数柱」
+         两张图 —— GMV 1e7 / 单数 1e1 差三个数量级，同轴会把小的压成一条线）。现在：
+         **左轴 = 成交额（万元）、右轴 = 成单数（单）**，两条轴各自染色 ⇒ 不写轴名也一眼对得上
+         （见 `LineChart.vue` 的 `y2Formatter` 与 `valueAxis` 的 `color` 入参）。
+         合起来的收益就是这张图存在的理由：**量涨价跌还是量价齐升**，分两张图要来回对眼珠。 -->
+    <h2 class="a-h2">
+      成交额 / 成单数趋势
+      <span class="a-h2n">左轴 ¥ 单位万元 · 右轴 单位单 · 缺日补 0</span>
+    </h2>
     <div class="a-card">
       <LineChart
         :categories="seriesDates"
-        :series="[{ name: '成交额', data: gmvSeries, area: true }]"
+        :series="[
+          { name: '成交额', data: gmvSeries, area: true },
+          { name: '成单数', data: ordersSeries, axis: 'right' },
+        ]"
         :height="'300px'"
         y-formatter="{value} 万"
-        :loading="loading"
-        :error="loadFailed ? loadMsg : ''"
-        @retry="load"
-      />
-    </div>
-
-    <!-- ══ ⑥ 成单数（柱）—— 与上一张**分两张图**：GMV 量级 1e7、单数量级 1e1，
-         叠在一个 y 轴上会把柱压成一条线（本仓 `LineChart` 不做双轴）。 -->
-    <h2 class="a-h2">成单数 <span class="a-h2n">单位：单</span></h2>
-    <div class="a-card">
-      <BarChart
-        :categories="seriesDates"
-        :series="[{ name: '成单数', data: ordersSeries }]"
-        :height="'240px'"
-        value-formatter="{value} 单"
-        :show-legend="false"
+        y2-formatter="{value} 单"
         :loading="loading"
         :error="loadFailed ? loadMsg : ''"
         @retry="load"
@@ -234,7 +230,7 @@ import { computed, onMounted, reactive, ref } from 'vue'
 import { adminStats, adminStatsRebuild } from '../../api/stats'
 import LineChart from '../../components/charts/LineChart.vue'
 import BarChart from '../../components/charts/BarChart.vue'
-import KpiCard from '../../components/ui/KpiCard.vue'
+import KpiCard from '../../components/ui/KpiCard.vue'; import IconGlyph from '../../components/ui/IconGlyph.vue'   // ⚠️ 两条 import **同行**（2026-10-11 补图标那一笔）—— 合并到既有行 = 不新增行号漂移
 
 /** 快捷档。⚠️ `days: null` = 「全部」= **不发任何日期参数**（后端退化成「不设谓词」），
  *  与 `days = 一个很大的数` **不等价** —— 后者会去编一个从今天往回数 N 天的区间。 */
@@ -499,7 +495,8 @@ onMounted(load)
   flex-wrap: wrap;
   align-items: flex-end;
   gap: var(--s4);
-  padding: var(--s4) var(--s5);
+  /* ⑥：与上面 `.a-card` 同一条理由（稿 `.pad` = 16 四周）—— 同一页里两种「面板内边距」是「不对齐」。 */
+  padding: var(--s4);
   background: var(--surface);
   border: 1px solid var(--line);
   border-radius: var(--r3);
@@ -603,10 +600,17 @@ onMounted(load)
   align-items: baseline;
   gap: var(--s3);
   flex-wrap: wrap;
-  margin: var(--s7) 0 var(--s4);
+  /* ⚠️ 2026-10-11（用户裁决 ⑥「去 AI 化」）：`--s7`(48) → `--s6`(32)、下 `--s4`(16) → `--s3`(12)。
+     改前「上一张卡 margin-bottom 16 + 本标题 margin-top 48」= 段间距 64px，稿里整个 `.body` 的块间距
+     是 16px（`丁-运营蓝.html:148`）—— 4 倍的留白正是「一眼 AI 味」。本页不能真收到 16（稿的标题在卡
+     **内**，本页标题在卡**外**、靠这两条 margin 划段）⇒ 收到 32/12。
+     ⚠️ 与商家端**对齐**：`merchant/StatsPage.vue:479-485` 的 `.ms-h2` 本来就是 `margin: var(--s6) 0 var(--s3)`
+     —— 两个看板此前一个 24px/48px、一个 19px/32px，是「同一件事两种排法」。 */
+  margin: var(--s6) 0 var(--s3);
   padding-bottom: var(--s2);
   border-bottom: 1px solid var(--line-2);
-  font-size: var(--fs-lg);
+  /* ⑥：`--fs-lg`(24) → `--fs-md`(19)，向商家端 `.ms-h2` 看齐（同上）。 */
+  font-size: var(--fs-md);
   font-weight: var(--fw-semi);
   color: var(--ink);
 }
@@ -624,7 +628,8 @@ onMounted(load)
 .a-kpis {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-  gap: var(--s4);
+  /* ⑥：`--s4`(16) → `--s3`(12) = 稿 `.kpis{gap:12px}`（`丁-运营蓝.html:176`）的**同一个 token**。 */
+  gap: var(--s3);
 }
 
 /* ── ⑤⑥⑦ 图卡 ───────────────────────────────────────────────────────────── */
@@ -632,7 +637,9 @@ onMounted(load)
   background: var(--surface);
   border: 1px solid var(--line);
   border-radius: var(--r3);
-  padding: var(--s4) var(--s5);
+  /* ⑥：`--s4 --s5`（16/24）→ `--s4`（16 四周）= 稿 `.pad{padding:16px}`（`丁-运营蓝.html:173`）。
+     卡内是图表与表格，左右各让出 8px 只会让图更宽，不动结构。 */
+  padding: var(--s4);
   margin-bottom: var(--s4);
 }
 

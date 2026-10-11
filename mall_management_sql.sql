@@ -899,3 +899,202 @@ CREATE TABLE IF NOT EXISTS `stats_daily` (
   UNIQUE KEY `uk_stats_daily_scope_date_merchant` (`Scope`,`StatDate`,`MerchantId`),
   KEY `idx_stats_daily_scope_date` (`Scope`,`StatDate`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='经营数据日聚合（可视化段 commit 2；Scope=site/merchant 两口径）';
+-- ============================================================
+-- Migration: 可视化段 commit 3（块 1-4 可视化补丁）  Date: 2026-10-11
+-- 依据：用户裁定（2026-10-11）——「无注册时间列 ≠ 砍功能；数据源缺失就建」
+-- 内容：`login` 加 1 列 `CreateTime`（注册时刻）—— 管理端「用户增长」曲线的唯一数据源
+-- 回滚（规则 v2：回滚 = 逻辑废弃，执行前须人工确认）：
+--       ALTER TABLE `login` DROP COLUMN `CreateTime`;
+-- 幂等：⚠️ 加列**不幂等**（同块2 那条口径：MySQL 无 `ADD COLUMN IF NOT EXISTS`）。
+--       CI 整份重导 ⇒ 每轮只执行一次；VM 库手动执行一次，重复执行报 Duplicate column（预期，非故障）。
+-- ⚠️ 本条**不写进文件上半部的基线 `CREATE TABLE login`**（同块2 的处置）：基线区保持历史原样，
+--    新列一律以末尾 Migration 块表达 ⇒ 全量重导后结构 = 基线 + 本块，不会出现重复列。
+-- ⚠️ **存量行一律 NULL，不回填** —— 这是把它写成两步的唯一理由：
+--    ① `ADD COLUMN … DEFAULT NULL` ⇒ 已有行拿 NULL；
+--    ② `MODIFY COLUMN … DEFAULT CURRENT_TIMESTAMP(3)` ⇒ **此后**新注册的行自动取库时钟
+--       （写侧 `UserDao.insertLoginCustomer/Merchant` 的 INSERT **一行不用改**）。
+--    若一步写成 `ADD COLUMN … DEFAULT CURRENT_TIMESTAMP(3)`，MySQL 会用「执行 ALTER 的那一刻」
+--    填满存量行 ⇒ 所有老账号被伪装成同一秒注册，用户增长曲线会凭空竖起一根假柱。
+--    注册时刻没有第二个来源、回填性为 0 ⇒ 老账号只能记「不知道」（同 `order_item` 不回填存量单）。
+--    （VM 实测：两步之后 8 行存量 `COUNT(CreateTime)` = 0，即全 NULL。✅）
+-- ⚠️ ⚠️ **两步里的第二步不能用 `ALTER COLUMN … SET DEFAULT`**：MySQL 8.4 对该子句报
+--    `ERROR 1064 … near 'CURRENT_TIMESTAMP(3)'`（实测 2026-10-11）—— 它只吃字面量默认值，
+--    时间函数默认值必须走 `MODIFY COLUMN`（且 MODIFY 要**重写整列定义 + COMMENT**，否则注释被清空）。
+-- ⚠️ 库时钟：VM 上 `NOW() == UTC_TIMESTAMP()`（2026-10-11 实测）⇒ 本列与
+--    `merchant_application.SubmittedAt` 同轴（都是「库时钟 UTC」）。本机开发库的时钟是机器本地
+--    时间，会差一个偏移 —— 环境差异，非本列缺陷。
+-- ============================================================
+ALTER TABLE `login`
+  ADD COLUMN `CreateTime` datetime(3) DEFAULT NULL COMMENT '注册时刻（库时钟 UTC）；⚠️ 补列之前的存量行恒为 NULL（无第二来源，不可回填）';
+
+ALTER TABLE `login`
+  MODIFY COLUMN `CreateTime` datetime(3) NULL DEFAULT CURRENT_TIMESTAMP(3) COMMENT '注册时刻（库时钟 UTC）；⚠️ 补列之前的存量行恒为 NULL（无第二来源，不可回填）';
+
+-- ============================================================
+-- Migration: 可视化段 commit 3（模板种子数据）  Date: 2026-10-11
+-- 依据：用户 2026-10-11 手验问题 ②③ ——「商品添加『规格说明』/ 服务模块『售后说明』的
+--       『选模板』按钮点了没反应」。
+-- 实测（`_work/diag-tpl.mjs` + `_work/diag-tpl-2.png`）：**按钮与弹窗都是好的** ——
+--       `.tp-scrim` display:flex / opacity:1 / z-index:300 打开正常，标题「选择规格模板」，
+--       三次 `POST /template/list`（Type = goods.detail / goods.spec / goods.afterSale）全 200。
+--       坏的是**表里一行都没有** ⇒ 弹窗只显示 `emptyText`「暂无规格模板（管理端建一条即可）」。
+--       ⇒ 这是**数据缺失，不是功能缺失**（口径同「数据源缺失 ≠ 砍功能」）。
+-- 内容：`template` 灌 6 个 type / 13 行默认模板（商品三件套 + 驳回·封禁理由三类）
+-- 回滚（规则 v2：回滚 = 逻辑废弃，执行前须人工确认）：
+--       DELETE FROM `template` WHERE `Type` IN
+--         ('goods.detail','goods.spec','goods.afterSale','goods.reject','merchant.reject','user.ban');
+-- 幂等：`ON DUPLICATE KEY UPDATE Id = template.Id` = 撞唯一键 `(Type,Name)` 时**啥也不改**
+--       —— 与上方「④ 搬迁 notification_template 的行」**逐字同款**（连同 RHS 必须限定到
+--       `template` 那条实测依据）。这样：整份重导（CI）⇒ 空表，正常插入；VM / 本机库重跑
+--       ⇒ 不覆盖管理员改过的模板。种子只是**起点**，不是「每次重导都复位」的权威副本。
+--       不用 `INSERT IGNORE`（会吞掉无关错误），也不用 `VALUES()`（8.0.20 起废弃且刷告警）。
+-- ⚠️ `Title` 一律空串：`TemplateTypes.requiresTitle()` 只对 `notification.` 前缀要求标题；
+--    商品类 / 理由类的内容在 `Body`（弹窗 `TemplatePicker.vue:38` 的 `v-if="r.Title"` 会跳过空标题）。
+-- ⚠️ `Body` 里的 `\n` 是**真换行**（MySQL 串默认吃反斜杠转义），不是 `\\n`。
+--    `Body` 只是**快照的起点**：选进去后商家/管理员可以随便改，落库的是商品自己那一行文本
+--    （`TemplateTypes` 块首：「快照文本」而非「引用 Id」）。
+-- ⚠️ 本块**只 INSERT**：不改结构、不删任何行、不动既有数据（规则 v2）。
+-- ⚠️ 只给**已知 type** 建行，不建 `comment.reply`（`TemplateTypes` 注明「块 6 才建行」）、
+--    不建 `merchant.approve`（「当前没有消费面」）—— 那两条建了就是永远点不到的孤儿数据。
+-- ============================================================
+
+-- ---- ① 商品三件套：问题 ②③ 的直接对象（`GoodsAdd.vue` 的三个「选模板」）----
+INSERT INTO `template` (`Type`,`Name`,`Title`,`Body`,`Enabled`,`Sort`) VALUES
+  ('goods.detail','通用详情模板','',
+   '【商品卖点】\n· 一句话说清它解决什么问题，写场景不写形容词\n\n【规格参数】\n· 材质：\n· 尺寸：\n· 重量：\n· 产地：\n\n【适用场景】\n· \n\n【发货说明】\n· 48 小时内发货，节假日顺延',
+   1, 10),
+  ('goods.detail','食品类详情模板','',
+   '【商品卖点】\n· \n\n【配料表】\n· \n\n【净含量 / 规格】\n· \n\n【保质期与储存】\n· 保质期：\n· 储存：阴凉干燥处，开封后请冷藏\n\n【食用提示】\n· 对本品过敏者慎用',
+   1, 20),
+  ('goods.spec','服装通用规格','',
+   '颜色=经典黑 / 米白 / 藏蓝\n尺码=S / M / L / XL\n材质=棉 95% · 氨纶 5%\n净重=约 220g\n洗涤=30℃ 以下机洗，忌漂白\n产地=中国大陆',
+   1, 10),
+  ('goods.spec','数码通用规格','',
+   '颜色=深空灰 / 银\n型号=\n接口=Type-C / USB-A\n供电=DC 5V 2A\n净重=约 180g\n包装清单=主机 ×1、说明书 ×1、保修卡 ×1\n保修=非人为损坏一年换新',
+   1, 20),
+  ('goods.afterSale','通用售后说明','',
+   '【退换货】\n· 7 天无理由退换：自签收之日起 7 天内，商品不影响二次销售\n· 质量问题：商家承担往返运费，免费换新\n· 人为损坏：可提供有偿维修，费用另议\n\n【响应时效】\n· 工作日 24 小时内回复，节假日 48 小时内\n\n【售后入口】\n· 订单详情 → 申请售后；或 消息 → 联系商家',
+   1, 10),
+  ('goods.afterSale','食品类售后说明','',
+   '【退换货】\n· 食品属特殊品类：未拆封且不影响二次销售可 7 天无理由退换\n· 已拆封：仅受理质量问题（变质 / 异物 / 临期发错）\n· 冷链商品：签收时请当面验货，签收后不再受理融化类问题\n\n【响应时效】\n· 质量问题 12 小时内响应',
+   1, 20),
+-- ---- ② 理由类：与 ②③ **同因**（同样是「选模板」开空列表），顺带补齐 ----
+-- 消费面：`goods.reject` → 管理端 `CatalogPage.vue` 提审驳回弹窗；
+--         `merchant.reject` / `user.ban` → 管理端 `AccountsPage.vue` 入驻审核 / 封禁弹窗。
+  ('goods.reject','资料不全','',
+   '商品详情缺少关键参数（材质 / 尺寸 / 产地），请补齐后重新提审',
+   1, 10),
+  ('goods.reject','图片不合规','',
+   '主图含联系方式 / 水印 / 拼接图，请换成白底实拍图后重新提审',
+   1, 20),
+  ('goods.reject','类目错放','',
+   '商品类目与实物不符，请选到正确类目后重新提审',
+   1, 30),
+  ('merchant.reject','资质不全','',
+   '营业执照 / 经营许可证缺失或模糊，请补传清晰原件扫描件',
+   1, 10),
+  ('merchant.reject','主体不符','',
+   '提交主体与资质主体不一致，请说明关联关系或换主体重新提交',
+   1, 20),
+  ('user.ban','违规刷单','',
+   '检测到异常交易行为（涉嫌刷单），账号封禁 7 天',
+   1, 10),
+  ('user.ban','恶意骚扰','',
+   '多次骚扰其他用户并被举报，账号封禁 30 天',
+   1, 20)
+ON DUPLICATE KEY UPDATE `Id` = `template`.`Id`;
+
+-- ============================================================
+-- Migration: 可视化段补丁 —— 商品侧（服务承诺 / SKU 矩阵 / 结构化规格模板）+ 模板表加 `Kind`
+--            Date: 2026-10-11
+-- 依据：用户 2026-10-11 裁决 —— ② 服务承诺四勾「真做」；③④ 规格「整套真做」；
+--       ④ 结构化规格模板的存储「给 `template` 加 `kind` 列」（而非用 `Type` 前缀硬编码）。
+-- 范围：只**加列 / 加表 / 灌种子 / 修一处正文**；不改既有列、不删行、不动其它既有数据（规则 v2）。
+-- 幂等：加列走 `information_schema` 守卫 + `PREPARE`（照上方 `goods.Detail` 先例，:588-593）；
+--       加表走 `CREATE TABLE IF NOT EXISTS`；种子走 `ON DUPLICATE KEY UPDATE Id = template.Id`。
+-- ⚠️ 每个 ALTER 组只按**组内首列**守卫（同组各列必然同批加，不出现「加了一半」的中间态）。
+-- 回滚（逻辑废弃，执行前须人工确认）：
+--       DROP TABLE IF EXISTS `goods_sku`;
+--       ALTER TABLE `goods`       DROP COLUMN `PromiseGenuine`, DROP COLUMN `PromiseReturn7`,
+--             DROP COLUMN `PromiseFastRefund`, DROP COLUMN `PromiseFreightIns`;
+--       ALTER TABLE `goods_audit` DROP COLUMN `PromiseGenuine`, DROP COLUMN `PromiseReturn7`,
+--             DROP COLUMN `PromiseFastRefund`, DROP COLUMN `PromiseFreightIns`, DROP COLUMN `SkuSpec`;
+--       ALTER TABLE `template`    DROP COLUMN `Kind`;
+-- ============================================================
+
+-- ---- ① `goods` 加 4 个服务承诺布尔列 ----
+-- ⚠️ 默认 **1** = 保持现状：详情页 `.promise` 改前对**每件**商品无条件渲染四条（`ProductPage.vue:175-177`）
+--    ⇒ 旧行默认全 1 后仍显示四条，向后兼容（规则：不能阻碍旧功能）。
+SET @s := (SELECT IF(COUNT(*) = 0,
+  'ALTER TABLE `goods` ADD COLUMN `PromiseGenuine` tinyint(1) NOT NULL DEFAULT 1 COMMENT ''服务承诺：正品保障（1=详情页显示 / 0=不显示）'' , ADD COLUMN `PromiseReturn7` tinyint(1) NOT NULL DEFAULT 1 COMMENT ''服务承诺：7 天无理由'' , ADD COLUMN `PromiseFastRefund` tinyint(1) NOT NULL DEFAULT 1 COMMENT ''服务承诺：极速退款'' , ADD COLUMN `PromiseFreightIns` tinyint(1) NOT NULL DEFAULT 1 COMMENT ''服务承诺：运费险''',
+  'DO 0')
+  FROM information_schema.COLUMNS
+  WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'goods' AND COLUMN_NAME = 'PromiseGenuine');
+PREPARE _p FROM @s; EXECUTE _p; DEALLOCATE PREPARE _p;
+
+-- ---- ② `goods_audit` 加同样 4 列（提审快照）+ `SkuSpec`（多规格矩阵快照）----
+-- ⚠️ 提审制下 `goods` 行由「审核通过」时用提审行**重建**（`GoodsAuditService.writeGoodsFromAudit`）
+--    ⇒ 承诺位与 SKU 快照必须**随提审单走**，否则通过后新行里这两处为空。
+-- ⚠️ `SkuSpec` 存 JSON 数组串（每元素 `{spec,price,stock,code}`）—— 与 `order.Items` 同款「结构化用 JSON 串」口径
+--    （自造分隔符会因商品名/规格名里出现该字符而错位）。
+SET @s := (SELECT IF(COUNT(*) = 0,
+  'ALTER TABLE `goods_audit` ADD COLUMN `PromiseGenuine` tinyint(1) NOT NULL DEFAULT 1 COMMENT ''服务承诺：正品保障（提审快照）'' , ADD COLUMN `PromiseReturn7` tinyint(1) NOT NULL DEFAULT 1 COMMENT ''服务承诺：7 天无理由'' , ADD COLUMN `PromiseFastRefund` tinyint(1) NOT NULL DEFAULT 1 COMMENT ''服务承诺：极速退款'' , ADD COLUMN `PromiseFreightIns` tinyint(1) NOT NULL DEFAULT 1 COMMENT ''服务承诺：运费险'' , ADD COLUMN `SkuSpec` mediumtext COMMENT ''多规格矩阵快照（JSON 数组串：spec/price/stock/code；未用多规格为 NULL）''',
+  'DO 0')
+  FROM information_schema.COLUMNS
+  WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'goods_audit' AND COLUMN_NAME = 'PromiseGenuine');
+PREPARE _p FROM @s; EXECUTE _p; DEALLOCATE PREPARE _p;
+
+-- ---- ③ `template` 加 `Kind`（模板形态：text=文本模板 / structured=结构化模板）----
+-- 用途：规格这块有两种模板 —— 文本（详情/售后/驳回理由，填一段话）与结构化（规格，矩阵行列定义）。
+--       `Kind` 是**写侧分流**的依据：`GoodsAdd.vue` 的「规格说明」选 `text`、「多规格矩阵」选 `structured`。
+-- ⚠️ 默认 `text` ⇒ 既有 13 行种子（含通知 / 理由类）全部保持「文本模板」，行为不变。
+SET @s := (SELECT IF(COUNT(*) = 0,
+  'ALTER TABLE `template` ADD COLUMN `Kind` varchar(16) NOT NULL DEFAULT ''text'' COMMENT ''模板形态：text=文本模板（填一段话）/ structured=结构化模板（如规格矩阵的行列定义）；字符串码不建 DB ENUM''',
+  'DO 0')
+  FROM information_schema.COLUMNS
+  WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'template' AND COLUMN_NAME = 'Kind');
+PREPARE _p FROM @s; EXECUTE _p; DEALLOCATE PREPARE _p;
+
+-- ---- ④ 新表 `goods_sku`（多规格矩阵：一行 = 一个规格组合，各自价格/库存/编码）----
+-- ⚠️ 照 `order_item` 先例（:846-862）：软引用、不设 FK；`created_at` / `updated_at` 齐备（agent.md 数据库管理规则 8）。
+-- ⚠️ `SkuCode` 是**商家填的编码**，也是详情页加入购物车时上报的 `ProductCode` ⇒ 下单/购物车链路**不改**
+--    （`cartAdd({…, ProductCode})` 收的就是这一串）。库存本轮**只存不扣**（用户已同意单独一轮）。
+-- ⚠️ 唯一键取 `(GoodsId, AxisName)`：同一商品同一组合只允许一行；`AxisName` 为空时另算（NULL 不进唯一键）。
+CREATE TABLE IF NOT EXISTS `goods_sku` (
+  `Id`         int NOT NULL AUTO_INCREMENT COMMENT '自增主键',
+  `GoodsId`    int NOT NULL COMMENT '父商品 Id（对齐 goods.Id；软引用，不设 FK）',
+  `MerchantId` char(20) NOT NULL DEFAULT '' COMMENT '卖家业务号（冗余自 goods，按商家聚合免联查）',
+  `GoodName`   char(40) NOT NULL DEFAULT '' COMMENT '商品名快照（免联查 goods）',
+  `AxisName`   varchar(255) NOT NULL DEFAULT '' COMMENT '规格组合标签（如「深空灰 / M」；由模板各轴取值做笛卡尔积得到）',
+  `Price`      double NOT NULL DEFAULT 0 COMMENT '该组合的价格（商家逐格填）',
+  `Stock`      int NOT NULL DEFAULT 0 COMMENT '该组合的库存（商家逐格填；本轮只存不扣）',
+  `SkuCode`    varchar(40) NOT NULL DEFAULT '' COMMENT 'SKU 编码（商家填；详情页加入购物车时作为 ProductCode 上报）',
+  `Sort`       int NOT NULL DEFAULT 0 COMMENT '展示排序（升序）；0=默认',
+  `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '行落库时刻（agent.md 数据库管理规则 8）',
+  `updated_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '行更新时刻',
+  PRIMARY KEY (`Id`),
+  UNIQUE KEY `uk_goods_sku_goods_axis` (`GoodsId`,`AxisName`),
+  KEY `idx_goods_sku_merchant_goods` (`MerchantId`,`GoodName`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='商品多规格矩阵（可视化段补丁；一行=一个规格组合，库存本轮只存不扣）';
+
+-- ---- ⑤ 种子：一条**结构化**规格模板（`Kind=structured`）----
+-- 正文约定：**一行一条轴，`轴名=值1,值2,…`**（`=` 后逗号分隔该轴的全部取值）。
+-- 商家在上架页「选规格模板」选它 → 前端按各轴取值做**笛卡尔积** → 自动生成矩阵行（行列结构来自模板，
+-- 价格/库存/编码留空由商家逐格填）。⚠️ 这与「文本规格模板」（`服装通用规格`，`键=值` 一行一条参数清单）
+-- 是**两种形态**：前者生成矩阵结构，后者填「规格说明」文本。
+-- ⚠️ 幂等：撞唯一键 `(Type,Name)` 时啥也不改（同上方商品三件套口径）。
+INSERT INTO `template` (`Type`,`Name`,`Title`,`Body`,`Enabled`,`Sort`,`Kind`) VALUES
+  ('goods.spec','服装规格模板','',
+   '颜色=深空灰,曜石黑,珍珠白\n尺码=S,M,L,XL',
+   1, 5, 'structured')
+ON DUPLICATE KEY UPDATE `Id` = `template`.`Id`;
+
+-- ---- ⑥ 修一处自造缺陷：`goods.spec` 两条种子的正文用了**全角 `：`** ----
+-- ⚠️ 页面约定是**半角 `=`**（`ProductPage.vue:777` 的 `specRows` 按行内第一个 `=` 切左右两列；
+--    全角冒号切不开 ⇒ 整行会塞进右列、左列留空）。上面 INSERT 已改半角，本 UPDATE 修**已经插过**的旧行。
+-- ⚠️ 精确到 `Name`，不做全表 REPLACE（避免误改管理员自建的、正文里正当含 `：` 的文本模板）。
+UPDATE `template` SET `Body` = REPLACE(`Body`, '：', '=')
+ WHERE `Type` = 'goods.spec'
+   AND `Name` IN ('服装通用规格','数码通用规格')
+   AND `Body` LIKE '%：%';
+

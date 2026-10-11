@@ -76,12 +76,55 @@
       </div>
     </form>
 
+    <!-- ── 审核通过率 · 类目分布（可视化段 commit 3）──────────────────────────────
+         ⚠️ 两张图的数据源都是**本次已取回的 `apps`**（受上面「状态 / 上限」约束，≤ 500），
+            不是全库提交量 —— 标题里带「本次 N 条」，与看板页对「区间」的处置同款。
+         ⚠️ 最容易被读错的一处：**筛选条一旦选了某个状态**，环图就只剩单色（选「已通过」
+            则为 100%、选「已驳回」则为 0%）—— 那不是通过率，是筛子的自拍照。故把
+            `appsFiltered` 直接标在标题里，让人一眼看到「这图被筛过」。 -->
+    <h2 class="c-h2">
+      审核通过率
+      <span class="c-h2n">
+        本次 {{ apps.length }} 条{{ appsFiltered ? '（⚠️ 已按状态筛选 —— 下面的比例是筛后口径）' : '' }}
+        · 已审毕 {{ auditMix.done }} 条（另 {{ auditMix.wait }} 条待审**不计入**通过率）
+      </span>
+    </h2>
+    <div class="c-card">
+      <DonutChart
+        :data="auditMix.data"
+        :height="'260px'"
+        :center-value="auditMix.rate === null ? '—' : `${auditMix.rate}%`"
+        center-title="通过率（已审毕）"
+        :loading="loadingApps"
+        empty-text="本次没有已审毕的提审单 —— 待审的还没结果，不算通过也不算驳回"
+      />
+    </div>
+
+    <h2 class="c-h2">
+      类目分布 × 月
+      <span class="c-h2n">
+        本次提审单按 `GoodType` 分组 · 每月一条 · 降序取前 10<span v-if="catByMonth.more">（另有 {{ catByMonth.more }} 个类目未画）</span>
+        <span v-if="catByMonth.moreMonths"> · ⚠️ 只画最近 3 个月，更早的 {{ catByMonth.moreMonths }} 个月未画</span>
+      </span>
+    </h2>
+    <div class="c-card">
+      <BarChart
+        :categories="catByMonth.cats"
+        :series="catByMonth.series"
+        :height="'320px'"
+        value-formatter="{value} 条"
+        :max-bar-width="18"
+        :loading="loadingApps"
+        empty-text="本次提审单没有可归类的 `GoodType`，或一行都没有可归月的提交时刻"
+      />
+    </div>
+
     <ol v-if="apps.length" class="c-stream">
       <li v-for="r in apps" :key="r.Id" class="c-card" :class="{ done: r.Status !== 'pending' }">
         <div class="c-card-l1">
           <code class="c-tag">#{{ r.Id }}</code>
           <b class="c-strong">{{ r.GoodName }}</b>
-          <span class="c-badge" :class="r.Status">{{ statusLabel(r.Status) }}</span>
+          <span class="c-badge" :class="r.Status"><IconGlyph :name="statusGlyph(r.Status)" />{{ statusLabel(r.Status) }}</span>
           <span class="c-dim">商家 {{ dash(r.MerchantId) }}</span>
           <span class="c-grow"></span>
           <span class="c-dim">{{ toLocal(r.SubmittedAt) }}</span>
@@ -111,11 +154,11 @@
           />
           <!-- 「选模板」= 从 `goods.reject` 取一段理由填进上面的输入框（填完**还能改**，见弹窗注释）。 -->
           <button type="button" class="c-btn" @click="openRejectTpl(r)">选模板</button>
-          <button type="button" class="c-btn c-btn-on" :disabled="busyId !== null" @click="approve(r)">
-            通过
+          <button type="button" class="c-btn c-btn-on" :disabled="busyKey !== null" @click="approve(r)">
+            <IconGlyph name="ok" />通过
           </button>
-          <button type="button" class="c-btn c-btn-danger" :disabled="busyId !== null" @click="reject(r)">
-            驳回
+          <button type="button" class="c-btn c-btn-danger" :disabled="busyKey !== null" @click="reject(r)">
+            <IconGlyph name="no" />驳回
           </button>
         </div>
       </li>
@@ -178,7 +221,7 @@
           <code class="c-tag">#{{ r.Id }}</code>
           <b class="c-strong">{{ r.GoodType }}</b>
           <span class="c-badge" :class="r.State === 0 ? 'rejected' : 'approved'">
-            {{ r.State === 0 ? '已停用' : '启用中' }}
+            <IconGlyph :name="r.State === 0 ? 'no' : 'ok'" />{{ r.State === 0 ? '已停用' : '启用中' }}
           </span>
           <span class="c-dim">一级 · 排序 {{ dash(r.Sort) }} · 新类型 {{ dash(r.GoodTypeNew) }}</span>
           <span class="c-grow"></span>
@@ -221,7 +264,7 @@
             <code class="c-tag">#{{ k.Id }}</code>
             <span class="c-strong">{{ k.GoodType }}</span>
             <span class="c-badge" :class="k.State === 0 ? 'rejected' : 'approved'">
-              {{ k.State === 0 ? '已停用' : '启用中' }}
+              <IconGlyph :name="k.State === 0 ? 'no' : 'ok'" />{{ k.State === 0 ? '已停用' : '启用中' }}
             </span>
             <span class="c-dim">二级 · 排序 {{ dash(k.Sort) }}</span>
             <span class="c-grow"></span>
@@ -281,6 +324,17 @@
           <option value="goods.reject">驳回理由（goods.reject）</option>
         </select>
       </label>
+      <label class="c-f">
+        <span>形态</span>
+        <!-- ⚠️ 2026-10-11（用户裁决 ④）：`Kind` 决定这条模板「怎么用正文」——
+             文本 = 填一段话（详情 / 售后 / 规格说明）；结构化 = 正文是**结构定义**
+             （规格矩阵的行列：一行一条轴，`轴名=值1,值2,…`），商家上架时按它生成矩阵行。
+             只有 `goods.spec` 两种形态都有意义，其余类型选结构化不会破坏什么、只是用不上。 -->
+        <select v-model="tf.Kind">
+          <option value="text">文本（填一段话）</option>
+          <option value="structured">结构化（生成矩阵，仅规格用）</option>
+        </select>
+      </label>
       <label class="c-f c-f-wide">
         <span>模板名</span>
         <input v-model.trim="tf.Name" type="text" placeholder="如：数码类默认详情" />
@@ -306,9 +360,11 @@
           <code class="c-tag">#{{ t.Id }}</code>
           <b class="c-strong">{{ t.Name }}</b>
           <span class="c-badge" :class="isTplEnabled(t) ? 'approved' : 'rejected'">
-            {{ isTplEnabled(t) ? '启用中' : '已停用' }}
+            <IconGlyph :name="isTplEnabled(t) ? 'ok' : 'no'" />{{ isTplEnabled(t) ? '启用中' : '已停用' }}
           </span>
           <span class="c-dim">{{ tplTypeLabel(t.Type) }}</span>
+          <!-- 结构化模板标出来（文本是默认形态，标它等于每条都带一句噪声 ⇒ 只标结构化）。 -->
+          <span v-if="t.Kind === 'structured'" class="c-dim">· 结构化</span>
           <span class="c-grow"></span>
           <button type="button" class="c-btn" :disabled="busyKey !== null" @click="toggleEdit('tpl', t)">
             {{ editing === 'tpl:' + t.Id ? '收起' : '改名 / 改内容' }}
@@ -327,6 +383,13 @@
           <label class="c-f c-f-wide">
             <span>名称</span>
             <input v-model.trim="ef.Name" type="text" />
+          </label>
+          <label class="c-f">
+            <span>形态</span>
+            <select v-model="ef.Kind">
+              <option value="text">文本（填一段话）</option>
+              <option value="structured">结构化（生成矩阵，仅规格用）</option>
+            </select>
           </label>
           <label class="c-f c-f-wide">
             <span>内容</span>
@@ -458,6 +521,9 @@ import {
 import { templateAdminCreate, templateAdminDelete, templateAdminList, templateAdminUpdate } from '../../api/template'
 // 「选模板」弹窗（本页只用一次：提审单的驳回理由）。
 import TemplatePicker from '../../components/TemplatePicker.vue'
+// 图表（可视化段 commit 3）—— 本页只用「审核通过率」环图 + 「类目分布」横条两张。
+import BarChart from '../../components/charts/BarChart.vue'
+import DonutChart from '../../components/charts/DonutChart.vue'; import IconGlyph from '../../components/ui/IconGlyph.vue'   // ⚠️ 两条 import **同行**（2026-10-11 补图标那一笔）：本文件**曾**被 `progress.md:1983` 按行号钉住（那两个「通过 / 驳回」按钮，**原 114/117 行**；该条 2026-10-11 收口已改「原 N 行」写法、不再钉），加行只会让账更难对。⚠️ 那两行上的 `busyId` 拼写在同笔**一并订正为 `busyKey`**（既有 bug，`progress.md:1983` 记的就是它；本笔顺手修掉，收口时已在该条上追加）—— 现落 **157/160 行**
 
 // ── 时区（照 `AccountsPage.vue` / `AuditPage.vue` 的 `toLocal` / `tzLabel`，逐字同款）──────
 // ⚠️ 后端时间列是 `DATE_FORMAT(…, '%Y-%m-%d %H:%i:%s')` 的**无时区文本**，而库里存的是 **UTC**。
@@ -522,7 +588,7 @@ const busyKey = ref(null)
 const editing = ref(null)
 
 /** 展开/收起某一行的编辑区，并把当前值灌进草稿（**不就地改行数据** —— 行是后端原样）。 */
-const ef = reactive({ GoodType: '', Sort: 0, ParentId: 0, Name: '', Body: '' })
+const ef = reactive({ GoodType: '', Sort: 0, ParentId: 0, Name: '', Body: '', Kind: 'text' })
 function toggleEdit(kind, row) {
   const key = `${kind}:${row.Id}`
   if (editing.value === key) {
@@ -536,6 +602,8 @@ function toggleEdit(kind, row) {
   // ⚠️ 模板行的正文列叫 **`Body`**（旧 `goods_template.Content` / `notification_template.BodyTemplate`
   //    已随两表删除），类目行没有这一列 ⇒ 读不到就是 `''`（`ef.Body` 是两 tab 共用的草稿字段）。
   ef.Body = row.Body == null ? '' : String(row.Body)
+  // 2026-10-11：形态（`Kind`）—— 类目行没有这一列 ⇒ 读不到就是 `'text'`（列默认值）。
+  ef.Kind = row.Kind === 'structured' ? 'structured' : 'text'
   editing.value = key
 }
 
@@ -577,6 +645,93 @@ function statusLabel(s) {
   if (s === 'rejected') return '已驳回'
   return dash(s)
 }
+
+/**
+ * `statusLabel` 的图标搭档（2026-10-11 补图标那一笔）—— 与文字**并排**画在状态徽章里。
+ * ⚠️ 三枚字形取自 `components/ui/glyphs.js` 的 `wait` / `ok` / `no`（**通用动作符**，
+ *    不绑导航项 ⇒ 同字形在别处复用是预期的）。未知状态回落 `wait` —— 与 `statusLabel`
+ *    的 `dash(s)` 回落**不同**：文案可以照实显示原值，图标没有「未知」这一枚，
+ *    ⚠️ 但**不能**因此就不画（少一枚图标是最不容易被发现的回归）。
+ * ⚠️ 与 `statusLabel` 分开写而不是合成一个返回 `{ label, glyph }`：那个函数的调用点
+ *    另有 3 处只吃字符串（筛选条 / 计数），改签名会连带改它们。
+ */
+function statusGlyph(s) {
+  if (s === 'approved') return 'ok'
+  if (s === 'rejected') return 'no'
+  return 'wait'
+}
+
+// ── 审核通过率 / 类目分布（可视化段 commit 3）──────────────────────────────────
+/**
+ * 本次 `apps` 的审核结果构成 + **通过率**。
+ *
+ * ⚠️ **通过率的分母是「已审毕」（`approved + rejected`），不含 `pending`** —— 待审的既没通过
+ *    也没驳回，把它算进分母等于「把还没发生的事算成不通过」，通过率会被待审积压量拖低。
+ *    故环图只画「已通过 / 已驳回」两片，`wait`（待审）在标题里单独报出来。
+ * ⚠️ 分母为 0 时 `rate = null`（不是 0）—— 洞里显示 `'—'`，环图自己走空态浮层。
+ *    写成 0 会得到一个「0% 通过率」的假数，那是本仓最忌讳的那种「看起来正常」。
+ * ⚠️ 值为 0 的片不塞进数组（图例里挂 0 项是噪声）。
+ */
+const auditMix = computed(() => {
+  let ok = 0
+  let no = 0
+  let wait = 0
+  for (const r of apps.value) {
+    if (r.Status === 'approved') ok += 1
+    else if (r.Status === 'rejected') no += 1
+    else if (r.Status === 'pending') wait += 1
+  }
+  const done = ok + no
+  const data = []
+  if (ok) data.push({ name: '已通过', value: ok })
+  if (no) data.push({ name: '已驳回', value: no })
+  return { data, ok, no, wait, done, rate: done ? Math.round((ok / done) * 100) : null }
+})
+
+/**
+ * 本次 `apps` 按 `GoodType` × **提交月** 的条数 —— 分组柱（x 轴 = 类目，每类里并排各月）。
+ *
+ * ⚠️ **2026-10-11 复合图整改**：原先是「类目排行榜」单系列横向柱 —— 只回答「哪个类目多」，
+ *    读不出**各类目的逐月走势**（上个月多的这个月还多吗）。改法：x 轴仍是类目（保住原榜的
+ *    降序读法），把**月改成序列**（每月一条）。月数天然只有 2-3 个，正好落在「一张图最多
+ *    2-3 个指标」里；反过来把 10 个类目塞进图例会得到一堵柱林，所以没那样做。
+ * ⚠️ 月份取**最近 3 个**（升序画），更早的**不画**、条数报进标题的 `moreMonths`
+ *    —— 与「降序取前 10 + `more`」同一套记账口径，**不偷偷截断**。
+ * ⚠️ 只画前 10 个类目而把 `more` 报在标题里，**不是**偷偷截断：类目可能有几十个，全画出来是一堵墙。
+ * ⚠️ `GoodType` 缺失的行归到 `dash()` 的 `'—'` 这一类（**不丢**）—— 丢掉的话各柱之和
+ *    会小于本次条数，读图的人会以为少统计了。**没有可归月的 `SubmittedAt` 的行同样不丢**：
+ *    它照样计入该类目的总条数（决定排名），只是所有月那一格都是 0、柱高为 0。
+ * ⚠️ 分月沿 `toLocal(r.SubmittedAt)` 再取前 7 字，**不是**直接切 `SubmittedAt`：
+ *    后者是 UTC 月，月初/月末那几个小时会被算到隔壁月（与 `AuditPage.vue` 的分桶同一条口径）。
+ * ⚠️ 排序的次键用 `localeCompare` 固定下来：同票数的类目在两次渲染间不能换位。
+ */
+const catByMonth = computed(() => {
+  const perCat = new Map() // 类目 → { total, byMonth: Map }
+  const months = new Set()
+  for (const r of apps.value) {
+    const k = dash(r.GoodType)
+    if (!perCat.has(k)) perCat.set(k, { total: 0, byMonth: new Map() })
+    const e = perCat.get(k)
+    e.total += 1
+    const m = toLocal(r.SubmittedAt).slice(0, 7)
+    if (/^\d{4}-\d{2}$/.test(m)) {
+      months.add(m)
+      e.byMonth.set(m, (e.byMonth.get(m) || 0) + 1)
+    }
+  }
+  const allM = [...months].sort()
+  const kept = allM.slice(-3)
+  const all = [...perCat.entries()].sort(
+    (a, b) => b[1].total - a[1].total || a[0].localeCompare(b[0])
+  )
+  const top = all.slice(0, 10)
+  return {
+    cats: top.map((e) => e[0]),
+    series: kept.map((m) => ({ name: m, data: top.map((e) => e[1].byMonth.get(m) || 0) })),
+    more: all.length - top.length,
+    moreMonths: allM.length - kept.length,
+  }
+})
 
 async function loadApps() {
   loadingApps.value = true
@@ -786,7 +941,7 @@ async function removeCat(row) {
 // ── ③ 模板库 ─────────────────────────────────────────────────────────────────
 const tpls = ref([])
 const loadingTpls = ref(false)
-const tf = reactive({ Type: 'goods.detail', Name: '', Body: '' })
+const tf = reactive({ Type: 'goods.detail', Name: '', Body: '', Kind: 'text' })
 
 /**
  * `Enabled` 是 `tinyint(1)`，Connector/J 默认（`tinyInt1isBit=true`）把它映射成 **Boolean**
@@ -836,11 +991,13 @@ async function createTpl() {
   }
   busyKey.value = 'tplCreate'
   try {
-    // ⚠️ 参数名 PascalCase（对着 `AdminTemplateController.create` 核）：`Type` / `Name` / `Title` / `Body` / `Sort`。
+    // ⚠️ 参数名 PascalCase（对着 `AdminTemplateController.create` 核）：`Type` / `Kind` / `Name` / `Title` / `Body` / `Sort`。
     //    ⚠️ 旧端点的 `TemplateType` / `Content` **已不存在** —— 传旧名 = 后端收到 `null` = 「未知模板类型」。
     //    ⚠️ 商品类模板 `Title` **允许为空**（只有 `notification.*` 强制非空），故这里不发。
+    //    `Kind` = 形态（text / structured），后端未知值一律回落 text（`TemplateTypes.normalizeKind`）。
     const data = await templateAdminCreate({
       Type: tf.Type,
+      Kind: tf.Kind,
       Name: tf.Name,
       Body: tf.Body,
     })
@@ -865,7 +1022,7 @@ async function saveTpl(row) {
   try {
     // ⚠️ `templateAdminUpdate` **没有 `Type` 参数**（type 落库即定、不许改）—— 别顺手带上：
     //    后端 `update` 端点根本不收它，带了也只是被忽略。
-    const data = await templateAdminUpdate({ id: row.Id, Name: ef.Name, Body: ef.Body })
+    const data = await templateAdminUpdate({ id: row.Id, Name: ef.Name, Body: ef.Body, Kind: ef.Kind })
     if (!data || !data.success) {
       say('bad', (data && data.msg) || '保存失败')
       return

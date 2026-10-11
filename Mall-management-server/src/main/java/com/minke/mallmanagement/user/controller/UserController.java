@@ -204,12 +204,17 @@ public class UserController {
      *       这是有意的）。⚠️ 用字面量而**不是** {@code Result.fail("未登录")}：后者的键序由
      *       HashMap 桶序决定，实测得到 {@code {"msg":…,"success":…}}，字节不同。</li>
      *   <li><b>身份来自 cookie 会话、且 {@code role=3}（管理员）⇒ HTTP 200 +
-     *       {@code {success:true,role:3}}</b> —— <b>降级作答</b>（多账户隔离笔新增）。
+     *       {@code {success:true,role:3,username:"…"}}</b> —— <b>降级作答</b>。
      *       管理员身份只认 token（见 {@link AuthSession#authorize}），故这种请求**拿不到资料**；
-     *       但它有权知道「你是管理员」—— {@link AuthInterceptor} 第 ④ 档放它进来就是为这一句
-     *       （{@link WebAuthConfig#AUTH_IDENTITY_PATHS}：管理员在新标签页里没有本地 token、
-     *       只有浏览器共享的 cookie 时，前端据此**退回登录页**，而不是静默当匿名）。
-     *       ⚠️ 断的是**资料**，不是**身份** —— 别为了「一张干净的响应」把这一支删掉。</li>
+     *       但它有权知道「你是管理员」**和自己是哪个登录名**—— {@link AuthInterceptor} 第 ④ 档
+     *       放它进来就是为这一句（{@link WebAuthConfig#AUTH_IDENTITY_PATHS}）。
+     *       ⚠️ 断的是**资料**，不是**身份** —— 别为了「一张干净的响应」把这一支删掉。
+     *       ⚠️ <b>2026-10-11 用户裁决「甲」：本支补答 {@code username}</b>。原版只答 {@code role}，
+     *       而前端 {@code api/auth.js} 的 {@code isLoggedIn()} 判据是 {@code !!(username||merchantid)}
+     *       ⇒ 恒判「未登录」⇒ 管理端入口（{@code main-admin.js} 明文写着「弃票后靠 cookie 会话
+     *       认身份」）在**新标签页 / 重开浏览器**时被登录守卫弹回 {@code /login} —— 实测「管理端
+     *       进不去」。补**名字**后识别口径完整；**授权口径一字未动**（{@code authorize} 仍把 cookie
+     *       来的 {@code role=3} 折成 {@code null}），customerid/merchantid/资料**仍不给**。</li>
      *   <li><b>有身份、但查不到这个业务号 ⇒ HTTP 200 + {@code {success:false,msg:"用户不存在"}}</b>。
      *       注意这是 **200**，不是 404：身份是有效的，只是它指向的用户在库里没了。
      *       ⚠️ 与 {@code getUserInfo} 失败时的「200 空体」**形状不同** —— 本端点答的是**可解析**的
@@ -232,11 +237,20 @@ public class UserController {
             return unauthorized();
         }
 
-        // 降级作答：认出「你是管理员」，但不给资料（管理员身份只认 token）—— 见上第 2 种出口。
+        // 降级作答：认出「你是管理员」，但**只**给登录名、不给资料（管理员身份只认 token）—— 见上第 2 种出口。
+        // ⚠️ 2026-10-11 用户裁决「甲」：`username` 必须带上 —— 前端 `isLoggedIn()` 只看
+        //    `username || merchantid`，只答 role 的话管理端在**新标签页**恒判未登录。理由与
+        //    边界（只给名字、不给 customerid/merchantid/资料）写在上面的 javadoc 第 2 种出口里。
+        // ⚠️ 名字取自 `publicInfo`（= `meInfo` 的第一跳，按**业务号**查、带缓存、0 行答 null）；
+        //    查不到就只答 role（不编造、不报错 —— 与「用户不存在」那一支的形状保持一致）。
         if (!identity.viaToken()
                 && identity.role() != null && identity.role() == AuthSession.ROLE_ADMIN) {
             Map<String, Object> roleOnly = new HashMap<>();
             roleOnly.put("role", identity.role());
+            Map<String, Object> row = userService.publicInfo(identity.userId());
+            if (row != null && row.get("username") != null) {
+                roleOnly.put("username", row.get("username"));
+            }
             return ResponseEntity.ok(Result.ok(roleOnly));
         }
 

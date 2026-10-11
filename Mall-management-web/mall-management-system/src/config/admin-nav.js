@@ -27,35 +27,35 @@
 //
 // 表项形状：
 //   · 域   `{ key, label, to, subs[] }`   —— `subs` 空数组 = 该域暂无子项（「概览」即是）
-//   · 子项 `{ key, label, to }`           —— `key` 与子路由 `meta.sub` **逐字相同**
+//   · 子项 `{ key, label, to, glyph? }`   —— `key` 与子路由 `meta.sub` **逐字相同**；`glyph?` = `components/ui/glyphs.js` 的**字形名**（不是字符本身 —— 页面里散落的裸字符 grep 不到，《看板规范》§4 的检查就是这么做的）。⚠️ 挂不挂的判据 = **这一项是不是能落到真页面的叶子**：11 条子项、「概览」（落 `AdminHome.vue`）、「通知收件箱」（落 `NotifyInbox.vue`）**都挂**；而「业务域」「可观测域」两条**不挂** —— 它们的 `component` 是 `AdminStub`（纯分组壳，`router/index.js:450`/`:458`），给一个「点进去只是占位页」的项挂图标，等于承诺了一个没有的页面
 // ⚠️ 子项的 `key` 在**本域内**唯一即可（点亮只比本域的子项），全表不要求唯一。
 export const ADMIN_SIDEBAR = [
-  { key: 'ov', label: '概览', to: '/admin', subs: [{ key: 'stats', label: '经营数据', to: '/admin/stats' }] },   // ⚠️ 可视化段 commit 2（2026-10-11）：`subs` 由 `[]` → 1 项。**同行替换、净零行数** —— 本文件的最大被引行是 `:43`（`c3-block-3-goods.md:221` / `c3-block-4-order.md:197` 钉的），在第 33 行**加行**会让 `:43`/`:44`/`:45` 那三条引用集体下移。落点是文件尾的 `router.addRoute('admin', { path: 'stats', … })`，**别**去 `routes` 的 `children` 里找它。为什么挂**概览域**而不是业务/可观测：它不是「治理」也不是「观测」，是**一眼看经营**
+  { key: 'ov', label: '概览', to: '/admin', glyph: 'overview', subs: [{ key: 'stats', label: '经营数据', to: '/admin/stats', glyph: 'metrics' }] },   // ⚠️ 可视化段 commit 2（2026-10-11）：`subs` 由 `[]` → 1 项。**同行替换、净零行数** —— 本文件的最大被引行是 `:43`（`c3-block-3-goods.md:221` / `c3-block-4-order.md:197` 钉的），在第 33 行**加行**会让 `:43`/`:44`/`:45` 那三条引用集体下移。落点是文件尾的 `router.addRoute('admin', { path: 'stats', … })`，**别**去 `routes` 的 `children` 里找它。为什么挂**概览域**而不是业务/可观测：它不是「治理」也不是「观测」，是**一眼看经营**
   // ⚠️ 补丁 B1（2026-10-09 手验后）：**通知收件箱**从 `AccountsPage.vue` 第 ⑤ 块提出来，
   //   成**顶层独立项**（`subs: []` ⇒ 侧边栏仍是**两级**、没增深）。⚠️ 「与「概览」同形」这句在 2026-10-11 之后**不再成立**（概览域加了「经营数据」子项）⇒ 本项成了本表**唯一** `subs: []` 的域。
   //   理由：那页页内有 4 块（入驻审核 / 用户治理 / 降级控制 / 收件箱），靠滚动区分；
   //   收件箱与前三块**不同域**（它是「发给管理员的待办」，不属用户与商家治理）⇒ 拆出去。
   //   URL `/admin/inbox`（`router/index.js` 的 `children` 末条，`meta.key` = `inbox` **逐字**）。
-  { key: 'inbox', label: '通知收件箱', to: '/admin/inbox', subs: [] },
+  { key: 'inbox', label: '通知收件箱', to: '/admin/inbox', glyph: 'msg', subs: [] },   // ⚠️ 有 `glyph` 而 `subs: []`：它是**叶子**（落 `NotifyInbox.vue`），不是纯分组 —— 判据见 `:30`
   {
     key: 'business', label: '业务域', to: '/admin/business',
     subs: [
-      { key: 'accounts',   label: '用户与商家治理', to: '/admin/business/accounts' },
-      { key: 'catalog',    label: '商品与类目治理', to: '/admin/business/catalog' },
-      { key: 'orders',     label: '订单治理',       to: '/admin/business/orders' },
-      { key: 'marketing',  label: '营销运营',       to: '/admin/business/marketing' },
-      { key: 'moderation', label: '消息与内容治理', to: '/admin/business/moderation' },
-      { key: 'notify',     label: '系统通知',       to: '/admin/business/notify' },
+      { key: 'accounts',   label: '用户与商家治理', to: '/admin/business/accounts',   glyph: 'users' },
+      { key: 'catalog',    label: '商品与类目治理', to: '/admin/business/catalog',    glyph: 'goods' },
+      { key: 'orders',     label: '订单治理',       to: '/admin/business/orders',     glyph: 'orders' },
+      { key: 'marketing',  label: '营销运营',       to: '/admin/business/marketing',  glyph: 'marketing' },
+      { key: 'moderation', label: '消息与内容治理', to: '/admin/business/moderation', glyph: 'moderation' },
+      { key: 'notify',     label: '系统通知',       to: '/admin/business/notify',     glyph: 'notify' },
     ],
   },
   {
     key: 'observe', label: '可观测域', to: '/admin/observe',
     subs: [
-      { key: 'attack-sim', label: '攻击模拟器',   to: '/admin/observe/attack-sim' },
-      { key: 'metrics',    label: '指标面板',     to: '/admin/observe/metrics' },
-      { key: 'timeline',   label: '状态流转',     to: '/admin/observe/timeline' },
-      { key: 'logs',       label: '实时日志',     to: '/admin/observe/logs' },
-      { key: 'audit',      label: '权限与审计',   to: '/admin/observe/audit' },
+      { key: 'attack-sim', label: '攻击模拟器',   to: '/admin/observe/attack-sim', glyph: 'attack' },
+      { key: 'metrics',    label: '指标面板',     to: '/admin/observe/metrics',    glyph: 'metrics' },
+      { key: 'timeline',   label: '状态流转',     to: '/admin/observe/timeline',   glyph: 'flow' },
+      { key: 'logs',       label: '实时日志',     to: '/admin/observe/logs',       glyph: 'logs' },
+      { key: 'audit',      label: '权限与审计',   to: '/admin/observe/audit',      glyph: 'audit' },
     ],
   },
 ]

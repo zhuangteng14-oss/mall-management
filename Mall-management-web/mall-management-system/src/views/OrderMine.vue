@@ -54,25 +54,25 @@
             <div class="oid">{{ order.OrderId }}</div>
             <div class="num">{{ quantityOf(order) }}</div>
             <div class="money">¥{{ formatPrice(order.Price) }}</div>
-            <div class="cen"><span class="st" :class="stateOf(order)[0]">{{ stateOf(order)[1] }}</span></div>
+            <div class="cen"><span class="st" :class="stateOf(order)[0]"><IconGlyph :name="STATE_GLYPH[stateOf(order)[0]] || 'wait'" />{{ stateOf(order)[1] }}</span></div>
             <div class="op">
               <button
                 v-if="order.PayIf !== 1 && !order.CancelledAt"
                 class="act"
                 @click="openPay(order)"
-              >付款</button>
+              ><IconGlyph name="ok" />付款</button>
               <button
                 v-if="canReceive(order)"
                 class="act"
                 @click="handleReceive(order)"
-              >收货</button>
+              ><IconGlyph name="ok" />收货</button>
               <!-- ⚠️ C3 块4 补丁：**发货之后**才有物流可看（`DeliveryIf === 1`）——
                    在「待发货」上画它只会弹一个空时间线。收货后仍保留（`ReceiveIf === 1` 也是 `DeliveryIf === 1`）。 -->
               <button
                 v-if="order.DeliveryIf === 1"
                 class="act"
                 @click="openDetail(order)"
-              >物流</button>
+              ><IconGlyph name="orders" />物流</button>
               <span v-if="order.PayIf === 1 && !canReceive(order) && order.DeliveryIf !== 1" class="dash">等待商家发货</span>
             </div>
           </div>
@@ -161,7 +161,7 @@ import { ref, computed, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
 import { handleApiError } from '../api/http'
 import { orderSelect, orderHistory, orderReceive, orderDetail } from '../api/order'
-import { resolveBuyerId } from '../api/auth'
+import { resolveBuyerId } from '../api/auth'; import IconGlyph from '../components/ui/IconGlyph.vue'   // ⚠️ 两条 import **同行**（2026-10-11 补图标那一笔）—— 合并到既有行 = 不新增行号漂移（`slot-registry.md:4551` 按 `:146` 钉住本文件）
 import CashierDialog from '../components/CashierDialog.vue'   // ⚠️ 2026-10-10：收银台抽成共享组件（商品详情页【立即购买】也要走同一个）`orderPay` 随之**从本页的 import 里退场**
 
 // 购物车 tab 的地址 —— 两壳路径不同（`/customer/cart` vs `/merchant/order/cart`），不写死。
@@ -182,7 +182,7 @@ const getBuyerId = () => resolveBuyerId()
 
 const formatPrice = (price) => Number(price || 0).toFixed(2)
 
-const formatDateTime = (dateStr) => {   // ⚠️ **2026-10-10（用户报：同一条单「轨迹 22:27:51 vs 订单列表 14:29:16」，差约 8 小时）**：后端**全部**时间列（`SettlementDate` 由 SQL `NOW()`、`TrackedAt` 由库时钟 `NOW(3)`/`DATE_ADD`）都是**库时钟**，而库时钟是 **UTC**（VM / a3 实测 `@@system_time_zone=UTC`，记录见 `context-packs/c3-block-1-infra.md#pack-c3-block-1-infra-frontend-nav`）⇒ 交回的是 `'YYYY-MM-DD HH:mm:ss'` 这种**无时区文本**。少补末尾那个 `Z`，`new Date()` 就按**浏览器本地时区**解释它 —— 等于把 UTC 值当成本地值，整整差一个偏移，而且**错得很安静**（格式完全正常，肉眼看不出来）。手法逐字照管理端的 `views/admin/AuditPage.vue:190` 的 `toLocal`（那 5 个管理页都有，**本页此前漏了这一步**）。
+const formatDateTime = (dateStr) => {   // ⚠️ **2026-10-10（用户报：同一条单「轨迹 22:27:51 vs 订单列表 14:29:16」，差约 8 小时）**：后端**全部**时间列（`SettlementDate` 由 SQL `NOW()`、`TrackedAt` 由库时钟 `NOW(3)`/`DATE_ADD`）都是**库时钟**，而库时钟是 **UTC**（VM / a3 实测 `@@system_time_zone=UTC`，记录见 `context-packs/c3-block-1-infra.md#pack-c3-block-1-infra-frontend-nav`）⇒ 交回的是 `'YYYY-MM-DD HH:mm:ss'` 这种**无时区文本**。少补末尾那个 `Z`，`new Date()` 就按**浏览器本地时区**解释它 —— 等于把 UTC 值当成本地值，整整差一个偏移，而且**错得很安静**（格式完全正常，肉眼看不出来）。手法逐字照管理端的 `views/admin/AuditPage.vue:236` 的 `toLocal`（原 190 行 —— 2026-10-11 收口按 refs-scan 重指）（那 5 个管理页都有，**本页此前漏了这一步**）。
   if (!dateStr) return ''
   const date = new Date(`${String(dateStr).replace(' ', 'T')}Z`)
   if (Number.isNaN(date.getTime())) return String(dateStr)
@@ -208,6 +208,12 @@ const STATE_OF = {
   '1,0,1': ['err', '已收货·未发货'],
   '1,1,1': ['ok', '已完成']
 }
+/** 状态徽章左侧那枚字形（2026-10-11 补图标那一笔）。
+ *  ⚠️ 键取的是 **`STATE_OF` 的类名档**（`draft/warn/info/err/ok`），不是 5 个具名态 —— 每档一枚，
+ *     与 `.st.<档>` 的底色**一一对应**（读者不会看到同一片底色上两个不同符号）。
+ *     `draft` 与 `warn` 同为 `wait` 但底色不同（灰 / 黄）：「未付款」与「待发货」都是**还没成交**，
+ *     差别在「谁该动」而不在「完没完」，那是文字的事，图标只回答后者。 */
+const STATE_GLYPH = { ok: 'ok', err: 'no', info: 'orders', warn: 'wait', draft: 'wait' }
 const stateOf = (order) => {
   if (order.CancelledAt) return ['err', '已取消']
   return STATE_OF[[order.PayIf, order.DeliveryIf, order.ReceiveIf].join(',')]

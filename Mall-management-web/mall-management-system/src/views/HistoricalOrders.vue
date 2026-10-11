@@ -70,7 +70,7 @@
           <td class="c-num num">{{ order.OrderId }}</td>
           <td class="c-nd num">{{ order.MerchantId }}</td>
           <td class="c-date num">{{ formatDateTime(order.SettlementDate) }}</td>
-          <td class="c-st"><span class="state">已经结单</span></td>
+          <td class="c-st"><span class="state"><IconGlyph name="ok" />已经结单</span></td>
           <!-- 稿 `:754` 是 `<button class="btn-text">复制商家 ID</button>`（稿外死控件：裸控件、无 data-slot）。
                ⚠️ **本页不是死控件** —— 原 Vue `:20` 的「复制」已是**真事件**（`copyMerchantId`）⇒ 保留实事件，
                **不挂 `disabled`、不进 §三**；文案照稿由「复制」改为「复制商家 ID」。 -->
@@ -88,7 +88,7 @@
 import { ref, onMounted } from 'vue'
 import { http, handleApiError } from '../api/http'
 import { endpoints } from '../api/endpoints'
-import { resolveBuyerId } from '../api/auth'
+import { resolveBuyerId } from '../api/auth'; import IconGlyph from '../components/ui/IconGlyph.vue'   // ⚠️ 两条 import **同行**（2026-10-11 补图标那一笔）—— 合并到既有行 = 不新增行号漂移
 
 const orderList = ref([])
 const loading = ref(false)
@@ -96,7 +96,7 @@ const loading = ref(false)
 // 降级链已收敛到 src/api/auth.js:resolveBuyerId()（与 ShoppingCart 逐字相同）。
 const getBuyerId = () => resolveBuyerId()
 
-const formatDateTime = (dateStr) => {   // ⚠️ **2026-10-10（问题 2，即时区：用户报「轨迹 22:27:51 vs 订单列表 14:29:16」差 8 小时）**：后端时间列是**库时钟**、库时钟是 **UTC**（VM / a3 实测 `@@system_time_zone=UTC`，见 `context-packs/c3-block-1-infra.md#pack-c3-block-1-infra-frontend-nav`）⇒ 交回 `'YYYY-MM-DD HH:mm:ss'` **无时区文本**；少补末尾那个 `Z`，`new Date()` 按**浏览器本地时区**解释它 ⇒ 整整差一个偏移且**错得很安静**。手法照 `views/admin/AuditPage.vue:190` 的 `toLocal`（本页此前漏了）。
+const formatDateTime = (dateStr) => {   // ⚠️ **2026-10-10（问题 2，即时区：用户报「轨迹 22:27:51 vs 订单列表 14:29:16」差 8 小时）**：后端时间列是**库时钟**、库时钟是 **UTC**（VM / a3 实测 `@@system_time_zone=UTC`，见 `context-packs/c3-block-1-infra.md#pack-c3-block-1-infra-frontend-nav`）⇒ 交回 `'YYYY-MM-DD HH:mm:ss'` **无时区文本**；少补末尾那个 `Z`，`new Date()` 按**浏览器本地时区**解释它 ⇒ 整整差一个偏移且**错得很安静**。手法照 `views/admin/AuditPage.vue:236` 的 `toLocal`（原 190 行 —— 2026-10-11 收口按 refs-scan 重指；本页此前漏了）。
   if (!dateStr) return '未知'
   const date = new Date(`${String(dateStr).replace(' ', 'T')}Z`)
   const year = date.getFullYear()

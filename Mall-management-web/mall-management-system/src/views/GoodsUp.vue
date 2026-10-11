@@ -208,7 +208,7 @@
       <div class="delbar">
         <input v-model="delGoodName" type="text" placeholder="商品名">
         <input v-model="delProductCode" type="text" placeholder="ProductCode">
-        <button type="button" class="btn-danger" @click="doDeleteGoods">下架商品</button>
+        <button type="button" class="btn-danger" @click="doDeleteGoods"><IconGlyph name="no" />下架商品</button>
       </div>
     </section>
   </main>
@@ -281,7 +281,7 @@
         <!-- 【取消】= 稿 `:507` 补的一枚（原实现只有「×」）⇒ 接**同一个** `closeModal`
              （不新增能力，功能量 +0）。 -->
         <button type="button" class="no" @click="closeModal">取消</button>
-        <button type="button" class="save" title="现有端点 goods.goodsUp" @click="doUpdateGoods">更新商品数据</button>
+        <button type="button" class="save" title="现有端点 goods.goodsUp" @click="doUpdateGoods"><IconGlyph name="ok" />更新商品数据</button>
       </div>
     </div>
   </div>
@@ -291,7 +291,7 @@
 import { ref, computed, onMounted } from 'vue'
 import { http, handleApiError, assetOf } from '../api/http'
 import { endpoints } from '../api/endpoints'
-import { getMerchantId, isLoggedIn } from '../api/auth'
+import { getMerchantId, isLoggedIn } from '../api/auth'; import IconGlyph from '../components/ui/IconGlyph.vue'   // ⚠️ 两条 import **同行**（2026-10-11 补图标那一笔）—— 合并到既有行 = 不新增行号漂移（`api-contract.md` 按 `GoodsUp.vue:170/215/275/327` 钉住本文件）
 
 const goodsList = ref([])
 const userInfo = ref({})

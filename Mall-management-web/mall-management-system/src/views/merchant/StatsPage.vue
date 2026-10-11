@@ -1,5 +1,5 @@
 <template>
-  <div class="ms-page">
+  <main class="ms-page">
     <header class="ms-head">
       <div>
         <h1 class="ms-h1">经营数据</h1>
@@ -46,7 +46,7 @@
         <span>结束（含）</span>
         <input v-model.trim="f.to" type="text" placeholder="YYYY-MM-DD" />
       </label>
-      <button type="submit" class="ms-btn ms-btn-on" :disabled="loading">查询</button>
+      <button type="submit" class="ms-btn ms-btn-on" :disabled="loading"><IconGlyph name="ok" />查询</button>
     </form>
 
     <!-- ══ 区间合计 ═══════════════════════════════════════════════════════════ -->
@@ -80,28 +80,25 @@
       />
     </div>
 
-    <!-- ══ 成交额趋势 ═════════════════════════════════════════════════════════ -->
-    <h2 class="ms-h2">成交额趋势 <span class="ms-h2n">单位：万元 · 缺日补 0</span></h2>
+    <!-- ══ 成交额 / 成单数趋势（双 Y 轴折线）═══════════════════════════════════
+         ⚠️ 2026-10-11：与**管理端** `views/admin/StatsPage.vue` 同款整改，两边口径必须一致
+         （同一个后端端点、同一批 `Scope = merchant` 的行，图长得不一样会让人以为数据不同）——
+         GMV 1e7 / 单数 1e1 差三个数量级，同轴会把小的压成一条线，故拆**左右两条轴**：
+         **左轴 = 成交额（万元）、右轴 = 成单数（单）**，轴各自染色（见 `LineChart.vue`）。 -->
+    <h2 class="ms-h2">
+      成交额 / 成单数趋势
+      <span class="ms-h2n">左轴 ¥ 单位万元 · 右轴 单位单 · 缺日补 0</span>
+    </h2>
     <div class="ms-card">
       <LineChart
         :categories="seriesDates"
-        :series="[{ name: '成交额', data: gmvSeries, area: true }]"
+        :series="[
+          { name: '成交额', data: gmvSeries, area: true },
+          { name: '成单数', data: ordersSeries, axis: 'right' },
+        ]"
         :height="'280px'"
         y-formatter="{value} 万"
-        :loading="loading"
-        :error="loadFailed ? loadMsg : ''"
-        @retry="load"
-      />
-    </div>
-
-    <h2 class="ms-h2">成单数 <span class="ms-h2n">单位：单</span></h2>
-    <div class="ms-card">
-      <BarChart
-        :categories="seriesDates"
-        :series="[{ name: '成单数', data: ordersSeries }]"
-        :height="'220px'"
-        value-formatter="{value} 单"
-        :show-legend="false"
+        y2-formatter="{value} 单"
         :loading="loading"
         :error="loadFailed ? loadMsg : ''"
         @retry="load"
@@ -166,7 +163,7 @@
         </tr>
       </tfoot>
     </table>
-  </div>
+  </main>
 </template>
 
 <!--
@@ -179,8 +176,10 @@
 
   ⚠️ **本页没有「重建」入口**：`POST /admin/stats/rebuild` 是全量写、属管理员。商家端只读。
 
-  ⚠️ 布局：本路由 `meta.layout = 'page'` ⇒ 壳**不给**内边距（`AppShell.vue` 的 `.page { padding: 0 }`），
-     页面自己提供居中宽度与留白（同 `MessageCenter.vue` 的 `.mc-bar`）。
+  ⚠️ **布局（2026-10-11，用户裁决 ④ 后重写）**：本页原挂 `/merchant`（`meta.layout:'page'`
+     ⇒ 独立整页、自带居中与留白），现挂 `merchantUser` 下 ⇒ 跑在**个人中心壳**的右栏
+     （`.user-page` 的 flex 行），居中与留白由 `.user-page` 给，本页只留 `flex:1; min-width:0`。
+     ⚠️ **地址没变**（仍是 `/merchant/stats`），靠的是子记录写绝对路径 —— 见 `router/index.js` 最尾。
 -->
 <script setup>
 import { computed, onMounted, reactive, ref } from 'vue'
@@ -188,7 +187,7 @@ import { merchantStats } from '../../api/stats'
 import { getMerchantId } from '../../api/auth'
 import LineChart from '../../components/charts/LineChart.vue'
 import BarChart from '../../components/charts/BarChart.vue'
-import KpiCard from '../../components/ui/KpiCard.vue'
+import KpiCard from '../../components/ui/KpiCard.vue'; import IconGlyph from '../../components/ui/IconGlyph.vue'   // ⚠️ 两条 import **同行**（2026-10-11 补图标那一笔）—— 合并到既有行 = 不新增行号漂移
 
 /** 快捷档。`days: null` = 「全部」= 不发日期参数（后端退化成不设谓词，**不等价于**一个很大的 N）。 */
 const RANGES = [
@@ -314,12 +313,25 @@ onMounted(load)
 </script>
 
 <style scoped>
-/* ⚠️ 本路由 `meta.layout = 'page'` ⇒ 壳的 `.page` **没有内边距**（`AppShell.vue`），
-   居中宽度与留白全在这里（同 `MessageCenter.vue` 的 `.mc-bar` 口径）。 */
+/* ⚠️ 2026-10-11（用户裁决 ④「经营数据入口放个人中心里」）：本页从 `/merchant/stats`
+   （`meta.layout:'page'` ⇒ 独立整页）改挂 `merchantUser` 下 ⇒ 现在渲染在**个人中心壳**
+   （`AppShell.vue` 的 `.user-page` 那个 flex 行）的右栏槽位里 —— 同槽位先例 =
+   `MerchantApplyPage.vue` / `HistoricalOrders.vue` / `FriendRoom.vue` / `GoodsAdd.vue` 各自那条
+   `.uc-main`。（本页**不叫** `uc-main`：那条规则在每个页面里都是**各页 scoped 各写一份**，
+   本页既然不要它那三条字体声明（见下 ⚠️），换个名反而更清楚 —— 元素类型 `<main>` 与那些页一致。）⇒ 两件事：
+   ① 本元素成了那个 flex 行的**直接子项** ⇒ 要 `flex:1; min-width:0` 才撑住右栏
+      （`min-width:0` 防 flex 子项被内容顶宽 —— 本页有宽表与长数字）。
+   ② 外层 chrome **交还给 `.user-page`**：它已经给了 `max-width:1140px` + `margin:0 auto` +
+      `padding: var(--s7) var(--s5) var(--s8)` ⇒ 本页**不能再各来一套**。改前那三行
+      （`1180` / `0 auto` / `--s6 --s5 --s8`）是「独立整页」时代的，留着就是**双份留白**、
+      而且 1140 与 1180 两个上限会打架。
+   ⚠️ 只动**外壳三件**：页内密度 / 字号 / 栅格一个没动 —— ④ 不夹带走 ⑥ 的版式改造。
+   ⚠️ 与 `.uc-main` 的差别：那些页面还在根上声明 `font-family:var(--font)` /
+      `font-size:var(--fs-sm)` / `color:var(--ink)`（照自己的稿），本页的字号本来**逐处显式**
+      （`--fs-lg` / `--fs-xs` / …）⇒ 不引那三条，免得顺手改了本页已验证的排版。 */
 .ms-page {
-  max-width: 1180px;
-  margin: 0 auto;
-  padding: var(--s6) var(--s5) var(--s8);
+  flex: 1;
+  min-width: 0;
 }
 
 .ms-head {
@@ -395,7 +407,8 @@ onMounted(load)
   align-items: flex-end;
   gap: var(--s4);
   margin-top: var(--s5);
-  padding: var(--s4) var(--s5);
+  /* ⑥：与 `.ms-card` 同一条理由（稿 `.pad` = 16 四周）。 */
+  padding: var(--s4);
   background: var(--surface);
   border: 1px solid var(--line);
   border-radius: var(--r3);
@@ -481,13 +494,16 @@ onMounted(load)
 .ms-kpis {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-  gap: var(--s4);
+  /* ⚠️ 2026-10-11（用户裁决 ⑥「去 AI 化」）：`--s4`(16) → `--s3`(12)，与 `admin/StatsPage.vue` 的
+     `.a-kpis` 同值（稿 `.kpis{gap:12px}`，`丁-运营蓝.html:176`）。 */
+  gap: var(--s3);
 }
 .ms-card {
   background: var(--surface);
   border: 1px solid var(--line);
   border-radius: var(--r3);
-  padding: var(--s4) var(--s5);
+  /* ⑥：`--s4 --s5`（16/24）→ `--s4`（16 四周）= 稿 `.pad{padding:16px}`（`丁-运营蓝.html:173`）。 */
+  padding: var(--s4);
 }
 
 .ms-tbl {

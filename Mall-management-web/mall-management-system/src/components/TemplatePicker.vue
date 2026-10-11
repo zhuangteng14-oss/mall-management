@@ -57,6 +57,14 @@ const props = defineProps({
   title: { type: String, default: '选择模板' },
   /** 列表为空时的提示语。 */
   emptyText: { type: String, default: '暂无模板' },
+  /**
+   * 只显示某种**形态**的模板（`'text'` 文本 / `'structured'` 结构化），可选。
+   *
+   * <p>用途：`goods.spec` 这一个 type 下同时存在两种形态 —— 文本模板（填「规格说明」一段话）
+   * 与结构化模板（生成多规格矩阵）。同一页两个入口要各取各的 ⇒ 传 `kind` 过滤。
+   * 不传 = 不过滤（沿用各页既有行为）。
+   */
+  kind: { type: String, default: '' },
 })
 
 /**
@@ -82,7 +90,11 @@ onMounted(async () => {
       error.value = (data && data.msg) || '模板列表加载失败'
       return
     }
-    rows.value = data.list || []
+    // ⚠️ `kind` 过滤在**前端**做（不是再开一个后端参数）：`/template/list` 只按 `Type` 筛，
+    //    加一个 `Kind` 参要动既有端点；而列表本就一次取回同 type 的全部行、条数极少。
+    // ⚠️ 缺 `Kind` 的行（老数据 / 后端未升级）**当作文本模板**（列默认就是 `text`）—— 与后端同口径。
+    const all = data.list || []
+    rows.value = props.kind ? all.filter((r) => (r.Kind || 'text') === props.kind) : all
   } catch (e) {
     error.value = '模板列表加载失败'
   } finally {
