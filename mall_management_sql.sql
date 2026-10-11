@@ -828,3 +828,35 @@ CREATE TABLE IF NOT EXISTS `order_shipping_track` (
 SET @s := (SELECT IF(COUNT(*) = 0, 'ALTER TABLE `order` ADD COLUMN `CancelledAt` datetime(3) DEFAULT NULL COMMENT ''订单取消时刻（超时未付款，调度器 CAS 写；NULL = 未取消）''', 'DO 0')
   FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'order' AND COLUMN_NAME = 'CancelledAt');
 PREPARE _p FROM @s; EXECUTE _p; DEALLOCATE PREPARE _p;
+
+-- ============================================================================
+-- 【可视化段 · commit 0（2026-10-11）】订单明细 order_item（A 档，用户裁「建数据源，不砍功能」）
+-- ============================================================================
+-- ⚠️ 为什么要有它：`order` 一行只装得下**一件**商品的成交信息（`Price` / `Quantity` 都是单值），
+--    而「一单多品」的清单被序列化进了文本列 `ProductInformation`（格式 `名:码`、多品以「；」分隔，
+--    见 ProductPage.vue 的 `buildProductInformation`）。商品维度的统计 / 明细 / 退货因此都做不了。
+-- ⚠️ 不设外键：`order` 是全量重导会 DROP 的基线表（逐字理由见本文件 order_shipping_track 段）。
+-- ⚠️ `OrderedAt` 与 `created_at` **刻意分开**：前者 = 下单**业务**时刻（库时钟 NOW(3)），
+--    后者 = 行**落库**时刻 —— 全量导入时后者会全挤在同一天，**不能**当统计维度
+--    （同 order_shipping_track 的 TrackedAt 口径）。
+-- ⚠️ 唯一键必须是 (OrderId, ProductCode)，**不能写成 UNIQUE(OrderId)** —— 后者会把「一单多品」
+--    直接堵死（一个 OrderId 只允许一行）。前者同时给出「结算重放幂等」（同单同商品只一行）。
+-- ⚠️ 写入方：`OrderService.addLocked` 的 `if (rows > 0)` 分支内（同一把 order-add 锁内；
+--    本仓订单链禁 @Transactional，故订单 INSERT 在 autocommit 下先提交、明细随后写）。
+CREATE TABLE IF NOT EXISTS `order_item` (
+  `Id`          int NOT NULL AUTO_INCREMENT COMMENT '自增主键',
+  `OrderId`     varchar(40) NOT NULL COMMENT '订单号（对齐 order.OrderId；不设外键）',
+  `MerchantId`  varchar(40) NOT NULL DEFAULT '' COMMENT '卖家业务号（冗余自 order，商家维度聚合免联查）',
+  `ProductCode` char(40) NOT NULL DEFAULT '' COMMENT '商品编码（对齐 goods.ProductCode；解析不出时为空串）',
+  `GoodName`    varchar(255) DEFAULT NULL COMMENT '商品名快照（免联查 goods）',
+  `Price`       double NOT NULL DEFAULT 0 COMMENT '成交单价快照',
+  `Quantity`    int NOT NULL DEFAULT 1 COMMENT '数量（≥1）',
+  `Subtotal`    decimal(14,2) NOT NULL DEFAULT 0.00 COMMENT '小计 = Price × Quantity',
+  `OrderedAt`   datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) COMMENT '下单时刻（业务时刻，库时钟 NOW(3)；非落库时刻）',
+  `created_at`  datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) COMMENT '行落库时刻（agent.md 数据库管理规则 8）',
+  `updated_at`  datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3) COMMENT '行更新时刻',
+  PRIMARY KEY (`Id`),
+  UNIQUE KEY `uk_order_item_order_product` (`OrderId`,`ProductCode`),
+  KEY `idx_order_item_goods_time` (`ProductCode`,`OrderedAt`),
+  KEY `idx_order_item_merchant_time` (`MerchantId`,`OrderedAt`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='订单明细（可视化段 commit 0；商品维度统计的数据源）';

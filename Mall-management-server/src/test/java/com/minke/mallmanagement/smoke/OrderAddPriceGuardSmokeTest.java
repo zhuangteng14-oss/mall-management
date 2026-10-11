@@ -61,7 +61,13 @@ class OrderAddPriceGuardSmokeTest extends AbstractSmokeTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.success").value(true))
                 .andExpect(jsonPath("$.msg").value("订单添加成功"));
-        verify(jdbcTemplate, times(1)).update(any(PreparedStatementCreator.class));
+        // ⚠️ **可视化段 commit 0 起这里是 2 次（改前 1 次）**，如实订正、不是放松：
+        //    本夹具的 `ProductInformation`（`可乐:SMOKE-PC-1`）**恰有一段且带 `:`** ⇒ 命中
+        //    `OrderService.resolveItems` 的**回落口径**，于是除订单那次 INSERT 外，多写一行
+        //    `order_item`。次数仍是**精确值** —— 改回 1 或涨到 3 都会红，阳性对照的作用不变。
+        //    ⚠️ 明细口径的完整判据在 `OrderAddItemsSmokeTest`；本类**仍只钉价格闸**，
+        //    它跟着明细功能一起红是这次耦合的已知代价（不是漏改）。
+        verify(jdbcTemplate, times(2)).update(any(PreparedStatementCreator.class));
     }
 
     /** 除 Price 外全部固定；形参名逐字对齐 {@code OrderController.orderAdd} 的 {@code @RequestParam}。 */

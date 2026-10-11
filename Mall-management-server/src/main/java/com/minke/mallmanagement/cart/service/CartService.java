@@ -179,7 +179,7 @@ public class CartService {
             String orderId = newOrderId();
             Map<String, Object> add = orderService.orderAdd(customerId, merchantId, orderId, total,
                     goodName + ":" + code, str(row.get("GoodImg")) == null ? "" : str(row.get("GoodImg")),
-                    0, 0, 0, qty);
+                    0, 0, 0, qty, null);   // ⚠️ 可视化段 commit 0：第 11 个形参是**显式商品明细** `Items`，此处**刻意传 null** —— 单车单一商品的 `名:码` 恰好落在 `OrderService` 的回落口径里（推得码、数量 = qty、单价 = total ÷ qty，是恒等式），故**本行改前改后行为逐字相同**；commit 0b 把整车改成「一单多行」时才改传显式 JSON。
             if (!Boolean.TRUE.equals(add.get("success"))) {
                 return partialFailure(created, String.valueOf(add.get("msg")));
             }

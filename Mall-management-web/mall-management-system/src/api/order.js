@@ -59,8 +59,15 @@ async function post(path, body) {
  *
  * @param {{CustomerId:string, MerchantId:string, OrderId:string, Price:number|string,
  *          ProductInformation:string, Images:string, PayIf:number, DeliveryIf:number,
- *          ReceiveIf:number, Quantity?:number}} payload
+ *          ReceiveIf:number, Quantity?:number, Items?:string}} payload
  *        ⚠️ `Quantity` 是 **C3 块 4（A2 甲）新加的入参**，不传 = 1（后端 `defaultValue="1"`）。
+ *        ⚠️ `Items` 是 **可视化段 commit 0 新加的入参**（**显式**商品明细 ⇒ 服务端写 `order_item` 表）：
+ *           一个 **JSON 数组串**，一件一项：`[{"code":"IJ-555","name":"222","price":5555,"qty":2}]`
+ *           （`code` 必填、`name` 可缺、`qty` 缺省 1、`price` 是**单价**）。⚠️ **不是**自造的分隔符串 ——
+ *           商品名未禁 `:` / `；`，分隔符一旦错位就是**脏数据**（理由见 `OrderService.resolveItems`）。
+ *           **不传 / 传空 ⇒ 后端回落到解析 `ProductInformation` 的既有格式**（`名:码` 以「；」分隔；
+ *           仅**恰有一段**时推得出单价 ⇒ 一单多品不写明细），再解析不出就不写 ⇒ **老调用方行为不变**。
+ *           ⚠️ `build()` 会把 `undefined` 转成**空串**（本文件 `:42`）⇒ 这里的「不传」到后端是 `Items=`。
  * @returns {Promise<{success:boolean, msg?:string}>}
  *          ⚠️ 失败是 **HTTP 200 + `success:false`**（本仓口径），不是 4xx。
  */
@@ -69,7 +76,7 @@ export function orderAdd(payload) {
     CustomerId: payload.CustomerId, MerchantId: payload.MerchantId, OrderId: payload.OrderId,
     Price: payload.Price, ProductInformation: payload.ProductInformation, Images: payload.Images,
     PayIf: payload.PayIf, DeliveryIf: payload.DeliveryIf, ReceiveIf: payload.ReceiveIf,
-    Quantity: payload.Quantity
+    Quantity: payload.Quantity, Items: payload.Items
   }))
 }
 

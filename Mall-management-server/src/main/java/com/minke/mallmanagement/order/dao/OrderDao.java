@@ -104,6 +104,51 @@ public class OrderDao {
                            int payIf, int deliveryIf, int receiveIf) {
     }
 
+    // ==================== 写：订单明细（可视化段 commit 0） ====================
+
+    /**
+     * 一条订单明细的载体。分量顺序 = {@link #insertItems} 的列顺序。
+     *
+     * <p>⚠️ {@code productCode} 可为**空串**（解析不出商品编码时）。唯一键是
+     * {@code (OrderId, ProductCode)} ⇒ **同单多件同码必须由调用方先合并数量**，
+     * 否则会撞 {@code uk_order_item_order_product}。
+     */
+    public record ItemRow(String orderId, String merchantId, String productCode, String goodName,
+                          double price, int quantity, double subtotal) {
+    }
+
+    /**
+     * 写入订单明细（一单多品 ⇒ 多条）。返回**累计影响行数**。
+     *
+     * <p>⚠️ <b>逐条 INSERT，不用批量 API</b>：本仓既有 DAO 无一处用批量写法，而明细条数有界
+     * （购物车行数 / 弹窗选购件数，均为个位数）⇒ 为省几次往返引一套新写法不划算。
+     *
+     * <p>⚠️ <b>跑在订单锁的临界区内</b>（调用方 = {@code OrderService.addLocked}）⇒ 与
+     * {@link #insertOrder} 同一条禁令：<b>不得加 {@code @Transactional}</b>（提交点必须在锁释放
+     * 之前，理由见本类注释）；{@code DistributedLockServiceTest.orderChainIsNotTransactional}
+     * 有结构断言兜底（它按**类**扫 {@code OrderDao}，本方法无注解即通过）。
+     *
+     * <p>⚠️ {@code OrderedAt} 由 SQL 的 {@code NOW(3)} 填 —— 与 {@code order.CreateTime} 同一口径的
+     * <b>库时钟</b>，Java 侧不构造任何时间点（TD-32）。
+     *
+     * <p>⚠️ <b>刻意不写 {@code ON DUPLICATE KEY UPDATE}</b>：本方法只在下单**成功后**、用**新生成的**
+     * OrderId 调用（{@code addLocked} 临界区内的查重已保证该 OrderId 此前不存在）⇒ 没有重复的可能，
+     * 也就没有「重放」语义要照顾。真撞上说明调用方没合并同码，该让它报错，而不是静默改写。
+     */
+    public int insertItems(List<ItemRow> items) {
+        String sql = "INSERT INTO mall_management_sql.`order_item` "
+                + "(OrderId, MerchantId, ProductCode, GoodName, Price, Quantity, Subtotal, OrderedAt) "
+                + "VALUES (?, ?, ?, ?, ?, ?, ?, NOW(3))";
+        int n = 0;
+        for (ItemRow it : items) {
+            n += jdbcClient.sql(sql)
+                    .params(it.orderId(), it.merchantId(), it.productCode(), it.goodName(),
+                            it.price(), it.quantity(), it.subtotal())
+                    .update();
+        }
+        return n;
+    }
+
     // ==================== 写：状态转移 ====================
 
     /**

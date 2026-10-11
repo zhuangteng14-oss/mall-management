@@ -83,7 +83,11 @@ class OrderAddStateGuardSmokeTest extends AbstractSmokeTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.success").value(true))
                 .andExpect(jsonPath("$.msg").value("订单添加成功"));
-        verify(jdbcTemplate, times(1)).update(any(PreparedStatementCreator.class));
+        // ⚠️ **可视化段 commit 0 起这里是 2 次（改前 1 次）**，如实订正、不是放松：本夹具的
+        //    `ProductInformation`（`可乐:SMOKE-PC-1`）**恰有一段且带 `:`** ⇒ 命中回落口径，
+        //    除订单那次 INSERT 外多写一行 `order_item`。次数仍是**精确值**（1 或 3 都会红）。
+        //    ⚠️ 明细口径的完整判据在 `OrderAddItemsSmokeTest`；本类**仍只钉出生状态闸**。
+        verify(jdbcTemplate, times(2)).update(any(PreparedStatementCreator.class));
         // 放行路径不许记「拦截」—— 否则 birth.rejected 会把放行的请求也算进去
         verify(orderTransitionRecorder, never()).rejectedAtBirth(anyInt(), anyInt(), anyInt(), any());
     }

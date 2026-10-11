@@ -104,6 +104,11 @@ public class OrderController {
             @RequestParam("DeliveryIf") int DeliveryIf,
             @RequestParam("ReceiveIf") int ReceiveIf,
             @RequestParam(value = "Quantity", required = false, defaultValue = "1") int Quantity,
+            // 可视化段 commit 0：可选的**显式商品明细**（JSON 数组串，见 OrderService.resolveItems）。
+            // ⚠️ 也加在末尾（同 Quantity 的先例）：既有的 10 个形参一名不动、一位不挪。
+            // ⚠️ `defaultValue = ""` 与前端 `build()` 把 undefined 转成空串（order.js:42）**同效** ——
+            //    两条路都落成「存在但为空」，服务端一律按 `isBlank` 判空 ⇒ 走回落口径。
+            @RequestParam(value = "Items", required = false, defaultValue = "") String Items,
             HttpServletRequest request
     ) {
         // ⚠️ 第一行：订单只能下在**自己**名下（管理员豁免）—— 必须在取锁之前（否则白取一把锁）。
@@ -112,7 +117,8 @@ public class OrderController {
             return IdentityGuard.forbidden();
         }
         return ResponseEntity.ok(Result.of(orderService.orderAdd(
-                CustomerId, MerchantId, OrderId, Price, ProductInformation, Images, PayIf, DeliveryIf, ReceiveIf, Quantity)));
+                CustomerId, MerchantId, OrderId, Price, ProductInformation, Images,
+                PayIf, DeliveryIf, ReceiveIf, Quantity, Items)));
     }
 
     //购物车搜索订单

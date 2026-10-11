@@ -645,7 +645,7 @@ const handlePay = async (ok) => {   // **C3 块 4 改判 + 2026-10-10 补丁改�
       CustomerId: d.CustomerId, MerchantId: d.MerchantId, OrderId: d.OrderId,
       Price: d.Price, ProductInformation: d.ProductInformation, Images: d.Images,
       PayIf: 0, DeliveryIf: d.DeliveryIf, ReceiveIf: d.ReceiveIf,
-      Quantity: popupCount.value   // C3 块 4：本单**总件数**（A2 甲新列；一个 OrderId 一单 ⇒ 不带型号维度）
+      Quantity: popupCount.value, Items: JSON.stringify(popupBuyList.value.map((i) => ({ code: i.productCode, name: goodName, price: i.price, qty: i.quantity }))),   // C3 块 4：本单**总件数**（A2 甲新列；一个 OrderId 一单 ⇒ 不带型号维度）＋ ⚠️ **可视化段 commit 0 同行追加 `Items`**（显式商品明细 ⇒ 服务端写 `order_item`；格式是 JSON 数组串，理由见 `OrderService.resolveItems`：商品名未禁 `:`/`；`，自造分隔符会错位）。⚠️ **同行追加、不新增行** —— 本文件 775 / 784 两行在下面，新增行会顶漂它们。⚠️ `name` 取页级 `goodName`：弹窗里全是**同一商品**的型号（`popupAllItems`），故一件一名的前提成立；`price` 是**单价**（`popupTotal` 是 `Σ price × quantity`，:572）
     })
 
     if (result.success) {
