@@ -1217,3 +1217,208 @@ SET @s := (SELECT IF(COUNT(*) = 0,
   FROM information_schema.COLUMNS
   WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'stats_daily' AND COLUMN_NAME = 'Source');
 PREPARE _p FROM @s; EXECUTE _p; DEALLOCATE PREPARE _p;
+
+-- ============================================================
+-- Migration: 块 5〈营销块〉—— 7 张新表 + 4 处加列
+--            Date: 2026-10-11
+-- 依据：用户 2026-10-11 裁决 A1–A5 全批（见 _work/b5-tables-A.md / _work/b5-rule-*.md）。
+-- 范围：**只加表 / 加列**；不改既有列、不删行、不改既有数据（规则 v2：向后兼容）。
+-- 幂等：加表走 `CREATE TABLE IF NOT EXISTS`；加列走 `information_schema` 守卫 + `PREPARE`
+--       （照本文件 :1030 / :1119 的先例）；重复执行第二遍起走 `'DO 0'` / 空操作。
+-- 表（7）：coupon / coupon_grant（A1 券）· subsidy_rule / subsidy_goods（A3 国补）·
+--          seckill_invitation / seckill_application / seckill_activity（A4 秒杀）
+-- 列（4）：goods.OriginalPrice（A2 划线原价）· order.CouponId / order.SubsidyAmount / order.PayAmount（A5 结算用券）
+-- ⚠️ P3 门禁：`ConcurrencyRunner.java` 的 KNOWN_TABLES 11 → 18、期望表数 22 → 29（**四处同改**）。
+-- 回滚（逻辑废弃，执行前须人工确认）：
+--       DROP TABLE IF EXISTS `seckill_activity`;
+--       DROP TABLE IF EXISTS `seckill_application`;
+--       DROP TABLE IF EXISTS `seckill_invitation`;
+--       DROP TABLE IF EXISTS `subsidy_goods`;
+--       DROP TABLE IF EXISTS `subsidy_rule`;
+--       DROP TABLE IF EXISTS `coupon_grant`;
+--       DROP TABLE IF EXISTS `coupon`;
+--       ALTER TABLE `goods` DROP COLUMN `OriginalPrice`;
+--       ALTER TABLE `order` DROP COLUMN `CouponId`;
+--       ALTER TABLE `order` DROP COLUMN `SubsidyAmount`;
+--       ALTER TABLE `order` DROP COLUMN `PayAmount`;
+-- ============================================================
+
+-- ---- ① 券定义（A1）----
+CREATE TABLE IF NOT EXISTS `coupon` (
+  `Id`              int NOT NULL AUTO_INCREMENT COMMENT '自增主键',
+  `CouponId`        varchar(40) NOT NULL COMMENT '业务标识串（留痕 TargetId 用）',
+  `Name`            varchar(64) NOT NULL COMMENT '券名',
+  `Type`            varchar(16) NOT NULL COMMENT '类型：threshold 满减 / percent 折扣 / none 无门槛',
+  `FaceValue`       decimal(10,2) NOT NULL DEFAULT 0.00 COMMENT '面值（满减/无门槛=减免金额；折扣=折扣率）',
+  `Threshold`       decimal(10,2) NOT NULL DEFAULT 0.00 COMMENT '门槛金额（无门槛=0）',
+  `TotalQty`        int NOT NULL DEFAULT 0 COMMENT '发放总量',
+  `ClaimedQty`      int NOT NULL DEFAULT 0 COMMENT '已领数',
+  `Scope`           varchar(16) NOT NULL DEFAULT 'all' COMMENT '适用档：all 全场 / merchant 部分商家（限商品种类）',
+  `MerchantAccount` varchar(40) NOT NULL DEFAULT '' COMMENT '空串=平台券；否则=商家券',
+  `CategoryMatch`   varchar(255) NOT NULL DEFAULT '' COMMENT '限商品种类（类目名逗号分隔；空=不限）',
+  `StartAt`         datetime DEFAULT NULL COMMENT '有效期起（九条 #2）',
+  `EndAt`           datetime DEFAULT NULL COMMENT '有效期止（后端判失效 / 前端灰掉标已失效）',
+  `Status`          varchar(16) NOT NULL DEFAULT 'active' COMMENT 'active / stopped（逻辑废弃）',
+  `created_at`      datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '行落库时刻',
+  `updated_at`      datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '行更新时刻',
+  PRIMARY KEY (`Id`),
+  UNIQUE KEY `uk_coupon_couponId` (`CouponId`),
+  KEY `idx_coupon_merchant_status` (`MerchantAccount`,`Status`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='优惠券定义（块 5 A1）';
+
+-- ---- ② 券领取 / 发放记录（A1）----
+CREATE TABLE IF NOT EXISTS `coupon_grant` (
+  `Id`         int NOT NULL AUTO_INCREMENT COMMENT '自增主键',
+  `CouponId`   varchar(40) NOT NULL COMMENT '对齐 coupon.CouponId',
+  `ToAccount`  varchar(40) NOT NULL COMMENT '领取人账号',
+  `Source`     varchar(16) NOT NULL DEFAULT 'claim' COMMENT '来源：claim 自助领取 / grant 定向发放',
+  `Status`     varchar(16) NOT NULL DEFAULT 'unused' COMMENT 'unused / used（expired 读侧现算，不入库）',
+  `UsedAt`     datetime DEFAULT NULL COMMENT '核销时刻',
+  `OrderId`    varchar(40) NOT NULL DEFAULT '' COMMENT '核销订单业务串',
+  `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`Id`),
+  UNIQUE KEY `uk_coupon_grant_coupon_acct` (`CouponId`,`ToAccount`),
+  KEY `idx_coupon_grant_acct_status` (`ToAccount`,`Status`),
+  KEY `idx_coupon_grant_coupon` (`CouponId`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='券领取/发放记录（块 5 A1）';
+
+-- ---- ③ 国补规则（A3）----
+CREATE TABLE IF NOT EXISTS `subsidy_rule` (
+  `Id`            int NOT NULL AUTO_INCREMENT COMMENT '自增主键',
+  `RuleId`        varchar(40) NOT NULL COMMENT '业务标识串（留痕 TargetId）',
+  `Name`          varchar(64) NOT NULL COMMENT '规则名',
+  `CategoryMatch` varchar(255) NOT NULL DEFAULT '' COMMENT '适用类目名（逗号分隔；空=不限）',
+  `Ratio`         decimal(6,4) NOT NULL DEFAULT 0.0000 COMMENT '补贴比例（0.1500=15%）',
+  `Cap`           decimal(10,2) NOT NULL DEFAULT 0.00 COMMENT '单笔补贴上限（0=不封顶）',
+  `StartAt`       datetime DEFAULT NULL COMMENT '生效起',
+  `EndAt`         datetime DEFAULT NULL COMMENT '生效止',
+  `Status`        varchar(16) NOT NULL DEFAULT 'active' COMMENT 'active / stopped',
+  `created_at`    datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at`    datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`Id`),
+  UNIQUE KEY `uk_subsidy_rule_ruleId` (`RuleId`),
+  KEY `idx_subsidy_rule_status` (`Status`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='国补规则（块 5 A3）';
+
+-- ---- ④ 国补商品提名 / 商家确认（A3 · 九条 #9 双向）----
+CREATE TABLE IF NOT EXISTS `subsidy_goods` (
+  `Id`         int NOT NULL AUTO_INCREMENT COMMENT '自增主键',
+  `RuleId`     varchar(40) NOT NULL COMMENT '对齐 subsidy_rule.RuleId',
+  `GoodsId`    int NOT NULL COMMENT '被提名商品（软引用 goods.Id）',
+  `GoodName`   char(40) NOT NULL DEFAULT '' COMMENT '商品名快照',
+  `MerchantId` char(20) NOT NULL DEFAULT '' COMMENT '卖家业务号（冗余自 goods）',
+  `Status`     varchar(16) NOT NULL DEFAULT 'pending' COMMENT 'pending 待商家确认 / confirmed / rejected',
+  `Reason`     varchar(255) NOT NULL DEFAULT '' COMMENT '商家拒绝理由',
+  `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`Id`),
+  UNIQUE KEY `uk_subsidy_goods_rule_goods` (`RuleId`,`GoodsId`),
+  KEY `idx_subsidy_goods_merchant_status` (`MerchantId`,`Status`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='国补商品提名/确认（块 5 A3·双向）';
+
+-- ---- ⑤ 秒杀邀请（A4 · 管理端→商家 · 流程表）----
+CREATE TABLE IF NOT EXISTS `seckill_invitation` (
+  `Id`              int NOT NULL AUTO_INCREMENT COMMENT '自增主键',
+  `InvitationId`    varchar(40) NOT NULL COMMENT '业务串（留痕 TargetId）',
+  `MerchantAccount` varchar(40) NOT NULL COMMENT '受邀商家',
+  `GoodsId`         int NOT NULL COMMENT '商品（软引用 goods.Id）',
+  `GoodName`        char(40) NOT NULL DEFAULT '' COMMENT '商品名快照',
+  `OriginalPrice`   decimal(10,2) NOT NULL DEFAULT 0.00 COMMENT '原价快照（发起时商品现价）',
+  `SeckillPrice`    decimal(10,2) NOT NULL DEFAULT 0.00 COMMENT '秒杀价（>0 且 < OriginalPrice）',
+  `Quantity`        int NOT NULL DEFAULT 0 COMMENT '报名限量',
+  `ApplyEndAt`      datetime DEFAULT NULL COMMENT '报名截止（九条 #7）',
+  `StartAt`         datetime DEFAULT NULL COMMENT '开始',
+  `EndAt`           datetime DEFAULT NULL COMMENT '结束',
+  `Status`          varchar(16) NOT NULL DEFAULT 'invited' COMMENT 'invited / accepted / declined',
+  `Reason`          varchar(255) NOT NULL DEFAULT '' COMMENT '拒绝理由',
+  `created_at`      datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at`      datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`Id`),
+  UNIQUE KEY `uk_seckill_invitation_id` (`InvitationId`),
+  KEY `idx_seckill_invitation_merchant_status` (`MerchantAccount`,`Status`),
+  KEY `idx_seckill_invitation_goods` (`GoodsId`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='秒杀邀请（管理端→商家；块 5 A4 流程表）';
+
+-- ---- ⑥ 秒杀申请（A4 · 商家→管理端 · 流程表）----
+CREATE TABLE IF NOT EXISTS `seckill_application` (
+  `Id`              int NOT NULL AUTO_INCREMENT COMMENT '自增主键',
+  `ApplicationId`   varchar(40) NOT NULL COMMENT '业务串（留痕 TargetId）',
+  `MerchantAccount` varchar(40) NOT NULL COMMENT '申请商家',
+  `GoodsId`         int NOT NULL COMMENT '商品（软引用 goods.Id）',
+  `GoodName`        char(40) NOT NULL DEFAULT '' COMMENT '商品名快照',
+  `OriginalPrice`   decimal(10,2) NOT NULL DEFAULT 0.00 COMMENT '原价快照',
+  `SeckillPrice`    decimal(10,2) NOT NULL DEFAULT 0.00 COMMENT '秒杀价（>0 且 < OriginalPrice）',
+  `Quantity`        int NOT NULL DEFAULT 0 COMMENT '报名限量',
+  `ApplyEndAt`      datetime DEFAULT NULL COMMENT '报名截止',
+  `StartAt`         datetime DEFAULT NULL COMMENT '开始',
+  `EndAt`           datetime DEFAULT NULL COMMENT '结束',
+  `Status`          varchar(16) NOT NULL DEFAULT 'submitted' COMMENT 'submitted / approved / rejected',
+  `Reason`          varchar(255) NOT NULL DEFAULT '' COMMENT '驳回理由',
+  `created_at`      datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at`      datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`Id`),
+  UNIQUE KEY `uk_seckill_application_id` (`ApplicationId`),
+  KEY `idx_seckill_application_merchant_status` (`MerchantAccount`,`Status`),
+  KEY `idx_seckill_application_goods` (`GoodsId`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='秒杀申请（商家→管理端；块 5 A4 流程表）';
+
+-- ---- ⑦ 秒杀活动（A4 · 取法甲：成立的秒杀 = 用户端读侧唯一来源）----
+-- 由「邀请被接受 / 申请被通过」生成一行；用户端 / 主页 / 秒杀页 只读本表。
+CREATE TABLE IF NOT EXISTS `seckill_activity` (
+  `Id`              int NOT NULL AUTO_INCREMENT COMMENT '自增主键',
+  `ActivityId`      varchar(40) NOT NULL COMMENT '业务串（留痕 TargetId）',
+  `Name`            varchar(64) NOT NULL DEFAULT '' COMMENT '活动名',
+  `MerchantAccount` varchar(40) NOT NULL COMMENT '卖家业务号',
+  `GoodsId`         int NOT NULL COMMENT '商品（软引用 goods.Id）',
+  `GoodName`        char(40) NOT NULL DEFAULT '' COMMENT '商品名快照',
+  `OriginalPrice`   decimal(10,2) NOT NULL DEFAULT 0.00 COMMENT '原价快照',
+  `SeckillPrice`    decimal(10,2) NOT NULL DEFAULT 0.00 COMMENT '秒杀价',
+  `TotalStock`      int NOT NULL DEFAULT 0 COMMENT '声明限量（只存不扣）',
+  `SoldStock`       int NOT NULL DEFAULT 0 COMMENT '已售（块 5 手动演示置满；真扣减块 7）',
+  `ApplyEndAt`      datetime DEFAULT NULL COMMENT '报名截止',
+  `StartAt`         datetime DEFAULT NULL COMMENT '开始',
+  `EndAt`           datetime DEFAULT NULL COMMENT '结束',
+  `SourceKind`      varchar(16) NOT NULL DEFAULT '' COMMENT '来源：invitation / application',
+  `SourceId`        varchar(40) NOT NULL DEFAULT '' COMMENT '来源报名单业务串',
+  `Status`          varchar(16) NOT NULL DEFAULT 'active' COMMENT 'active / stopped',
+  `created_at`      datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at`      datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`Id`),
+  UNIQUE KEY `uk_seckill_activity_id` (`ActivityId`),
+  KEY `idx_seckill_activity_merchant_status` (`MerchantAccount`,`Status`),
+  KEY `idx_seckill_activity_goods` (`GoodsId`),
+  KEY `idx_seckill_activity_window` (`StartAt`,`EndAt`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='秒杀活动（块 5 A4·成立的秒杀；用户端读侧唯一来源）';
+
+-- ---- ⑧ `goods` 加列 `OriginalPrice`（A2 划线原价）----
+SET @s := (SELECT IF(COUNT(*) = 0,
+  'ALTER TABLE `goods` ADD COLUMN `OriginalPrice` decimal(10,2) NOT NULL DEFAULT 0.00 COMMENT ''划线原价（0=无；折扣率读侧现算）''',
+  'DO 0')
+  FROM information_schema.COLUMNS
+  WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'goods' AND COLUMN_NAME = 'OriginalPrice');
+PREPARE _p FROM @s; EXECUTE _p; DEALLOCATE PREPARE _p;
+
+-- ---- ⑨ `order` 加列 `CouponId`（A5 核销券业务串）----
+SET @s := (SELECT IF(COUNT(*) = 0,
+  'ALTER TABLE `order` ADD COLUMN `CouponId` varchar(40) NOT NULL DEFAULT '''' COMMENT ''核销券业务串（块 5 A5）''',
+  'DO 0')
+  FROM information_schema.COLUMNS
+  WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'order' AND COLUMN_NAME = 'CouponId');
+PREPARE _p FROM @s; EXECUTE _p; DEALLOCATE PREPARE _p;
+
+-- ---- ⑩ `order` 加列 `SubsidyAmount`（A5 国补额快照）----
+SET @s := (SELECT IF(COUNT(*) = 0,
+  'ALTER TABLE `order` ADD COLUMN `SubsidyAmount` decimal(10,2) NOT NULL DEFAULT 0.00 COMMENT ''国补额快照（块 5 A5）''',
+  'DO 0')
+  FROM information_schema.COLUMNS
+  WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'order' AND COLUMN_NAME = 'SubsidyAmount');
+PREPARE _p FROM @s; EXECUTE _p; DEALLOCATE PREPARE _p;
+
+-- ---- ⑪ `order` 加列 `PayAmount`（A5 实付额快照）----
+SET @s := (SELECT IF(COUNT(*) = 0,
+  'ALTER TABLE `order` ADD COLUMN `PayAmount` decimal(10,2) NOT NULL DEFAULT 0.00 COMMENT ''实付额快照（块 5 A5；原 Price 保留=原价合计）''',
+  'DO 0')
+  FROM information_schema.COLUMNS
+  WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'order' AND COLUMN_NAME = 'PayAmount');
+PREPARE _p FROM @s; EXECUTE _p; DEALLOCATE PREPARE _p;
