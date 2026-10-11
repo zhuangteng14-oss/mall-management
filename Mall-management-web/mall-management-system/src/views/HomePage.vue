@@ -22,14 +22,14 @@
     <!-- ── 二级导航（稿 `:744-753`）──
          ⚠️ 壳里**没有** `.subnav`：`AppShell.vue:298-299` 自注「稿的 `.subnav a` 属**二级导航**、
          不属顶栏」⇒ C 笔既然把它从顶栏里摘出去了，就没人落过它 ⇒ 它是**页级**的，本笔落在首页顶部。
-         ⚠️ 6 项在本仓**都没有落点**（无路由、无对应页面）⇒ 一律 `disabled` + `title`
-         （`progress.md:1652` 判据①）。开放它们属**功能**笔，不在 D 笔边界内。
+         ⚠️ 6 项**本仓都没有路由** ⇒ 原一律 `disabled` + `title`（`progress.md:1652` 判据①）。
+         ⚠️ **2026-10-11（C3 块 5 · commit 1）「领券中心」接通**（用户批：《b5-placeholder-landing.md》§一 #2「接通（锚到券包区）」）⇒ 摘 `disabled`、改锚到本页 `.tickets`；**另 5 项仍是 `disabled`**（今日秒杀归本块 commit 4、剩余三项归属仍为 `<待定>`）。开放剩余项属**功能**笔，不在 D 笔边界内。
          登记见 `docs/agent/slot-registry.md`「commit 3 · 稿外死控件」。 -->
     <nav class="subnav">
       <div class="inner">
         <button type="button" class="now" disabled title="预留 · 全部商品分类（无落点：分类检索现走搜索页 GoodsSelect 的左分类树）">全部商品分类</button>
         <button type="button" class="hot" disabled title="预留 · 今日秒杀（无落点：本页秒杀位是预留位）">今日秒杀</button>
-        <button type="button" class="hot" disabled title="预留 · 领券中心（无落点：本页券包位是预留位）">领券中心</button>
+        <button type="button" class="hot" @click="scrollToTickets" title="领券中心 —— 锚到本页券包区（C3 块 5，2026-10-11 接线；原 data-slot「预留 · 领券中心」退场）">领券中心</button>
         <button type="button" disabled title="预留 · 品牌专区（无落点：无品牌数据模型）">品牌专区</button>
         <button type="button" disabled title="预留 · 会员中心（无落点：会员体系未落）">会员中心</button>
         <button type="button" disabled title="预留 · 客户服务（无落点：在线客服是预留位）">客户服务</button>
@@ -89,8 +89,8 @@
       </section>
 
       <!-- ── 功能入口（预留位，稿 `:787-804`）──
-           2026-10-07 裁决「**一律落**」：UI 照落。内层四项一律 `disabled` + `title`（角标只挂
-           区块级 ⇒ 不在每项重复 `data-slot`）。四个 SVG 逐字取稿。
+           2026-10-07 裁决「**一律落**」：UI 照落。内层四项原一律 `disabled` + `title`（角标只挂
+           区块级 ⇒ 不在每项重复 `data-slot`）。四个 SVG 逐字取稿。⚠️ **2026-10-11（块 5 · commit 1）**：仅「优惠券」接通（锚到 `.tickets`，清单 §一 #3），**另三项仍 `disabled`**。
            ⚠️ 稿的副标题带三个 **mock 数字**（待收货 2 / 3 张可用 / 最近 18 件）—— 照落会在真产品里
               显示假数字 ⇒ 只落**描述**、不落数字（与 ChatRoom 不写死「今天」同一条理由）；
               「在线客服 9:00 – 21:00」是服务时段陈述、不是 mock ⇒ 逐字落。 -->
@@ -99,7 +99,7 @@
           <span class="ic"><svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="2" width="14" height="16" rx="2"/><path d="M7 7h6M7 11h6M7 15h3" stroke-linecap="round"/></svg></span>
           <span class="tx"><b>我的订单</b><span>待付款 · 待收货</span></span>
         </button>
-        <button type="button" class="qi" disabled title="预留 · 优惠券（待 C3〈促销〉）">
+        <button type="button" class="qi" @click="scrollToTickets" title="优惠券 —— 我的券包（C3 块 5，2026-10-11 接线；原 data-slot「预留 · 优惠券（待 C3〈促销〉）」退场）">
           <span class="ic"><svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M2 6a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2z"/><path d="M2 7l8 5 8-5"/></svg></span>
           <span class="tx"><b>优惠券</b><span>我的券包</span></span>
         </button>
@@ -129,11 +129,64 @@
         </div>
       </section>
 
-      <!-- ── 券包（预留位，稿 `:817`）──
-           稿的 markup 里这条**本来就是空 section**，3 张券由 JS 塞（`TICKETS`）⇒ 券是 mock、
-           `.ticket*` 规则本仓无数据源、不搬。空容器照落 + 一行占位说明。 -->
-      <section class="tickets" data-slot="预留 · 券包位" title="预留 · 券包位（老稿 主页改造.html:817）· 无券数据源 · 归属待定 C3〈待定〉">
-        <p class="empty-tip">券包位预留 · 待接入优惠券接口后填充</p>
+      <!-- ── 券包（**块 5 · commit 1 落地**，2026-10-11）──
+           原为「预留 · 券包位」（稿 `:817` 的**空** section，3 张券由稿的 JS 塞 mock `TICKETS`）。
+           现在两栏都是真数据：左「领券中心」← `/marketing/coupons`，右「我的券包」← `/marketing/myCoupons`
+           （封装见 `src/api/marketing.js`）。
+           ⚠️ **排序不在这里**：券包的「快过期 → 正常 → 已用 / 已过期」由后端 `CouponDao.selectMyGrants`
+              定好（`Bucket` / `SortIdx`，`ORDER BY SortIdx`) ⇒ 本页**按数组原序渲染**，别自己再排一遍
+              —— 再排一次就会与「券包红点」的判据走岔（两者必须同一个阈值表达式）。
+           ⚠️ `Claimed` / `SoldOut` 的形态可能是 `true` 也可能是 `1`（Connector/J `tinyInt1isBit`）
+              ⇒ 判据走 `truthy()`，别写 `=== true`。
+           ⚠️ **核销不在这里**：券 `unused → used` 发生在结算（`orderAdd` 带 `couponId`，块 5 commit 5）
+              ⇒ 券包只**读**核销结果（`Bucket='used'`）。 -->
+      <section
+        class="tickets"
+        ref="ticketsEl"
+        title="C3 块 5〈营销块〉已接线（2026-10-11）：领券中心 /marketing/coupons、我的券包 /marketing/myCoupons、领券 /marketing/coupon/claim（封装 src/api/marketing.js）⇒ 原 data-slot「预留 · 券包位（老稿 主页改造.html:817）· 无券数据源」退场"
+      >
+        <!-- 左：领券中心（可领的券）—— 来自 `/marketing/coupons`，含「我已领 / 已领完」两个布尔。 -->
+        <div class="tk-col">
+          <div class="tk-h">
+            <h3>领券中心</h3>
+            <span class="tk-n">{{ customerId ? claimable.length + ' 张' : '未登录' }}</span>
+          </div>
+          <p v-if="!customerId" class="empty-tip">登录后可领取优惠券</p>
+          <p v-else-if="claimLoading" class="empty-tip">加载中…</p>
+          <p v-else-if="claimable.length === 0" class="empty-tip">暂时没有可领的券</p>
+          <ul v-else class="tk-list">
+            <li v-for="c in claimable" :key="c.CouponId" class="tk">
+              <span class="tk-amt">{{ couponFace(c) }}</span>
+              <span class="tk-cond">{{ couponCond(c) }}</span>
+              <button
+                type="button"
+                class="tk-get"
+                :disabled="truthy(c.Claimed) || truthy(c.SoldOut) || claiming === c.CouponId"
+                @click="doClaim(c)"
+              >{{ truthy(c.Claimed) ? '已领取' : truthy(c.SoldOut) ? '已领完' : claiming === c.CouponId ? '领取中…' : '领取' }}</button>
+            </li>
+          </ul>
+        </div>
+
+        <!-- 右：我的券包 —— 来自 `/marketing/myCoupons`（**顺序即后端给的顺序**，见上方注释）。 -->
+        <div class="tk-col">
+          <div class="tk-h">
+            <h3>我的券包<i v-if="redDot" class="tk-dot" title="有券快过期">●</i></h3>
+            <span class="tk-n">{{ customerId ? grants.length + ' 张' : '未登录' }}</span>
+          </div>
+          <p v-if="!customerId" class="empty-tip">登录后可查看我的券包</p>
+          <p v-else-if="grantLoading" class="empty-tip">加载中…</p>
+          <p v-else-if="grants.length === 0" class="empty-tip">券包还是空的，去左边领一张</p>
+          <ul v-else class="tk-list">
+            <li v-for="g in grants" :key="g.GrantId" class="tk">
+              <span class="tk-amt">{{ couponFace(g) }}</span>
+              <span class="tk-cond">{{ couponCond(g) }}</span>
+              <span class="tk-b" :class="'tk-b-' + g.Bucket">{{ bucketLabel(g.Bucket) }}</span>
+            </li>
+          </ul>
+        </div>
+
+        <p v-if="tkMsg" class="tk-msg">{{ tkMsg }}</p>
       </section>
 
       <!-- ── 推荐区（稿 `:820-826`）──
@@ -219,7 +272,7 @@
 import { ref, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { http, handleApiError } from '../api/http'
-import { endpoints } from '../api/endpoints'
+import { endpoints } from '../api/endpoints'; import { getCustomerId } from '../api/auth'; import { coupons, myCoupons, claim } from '../api/marketing'   // ⚠️ 三条 import **同行**（C3 块 5 · commit 1，2026-10-11）—— 本文件 `:119` / `:242` / `:262` 等多处被按行号引，**能省一行就省一行**（同 `ProductPage.vue:426` 那条的做法）
 
 // ── 未登录可逛公开面（2026-10-06 用户改判 2，登记见 progress.md §5-AG (13)）────────────
 // 本页原有三条「未登录 ⇒ 弹登录提示」拦截（goSearch / searchByType / toGoodsDetail）与一条
@@ -345,6 +398,113 @@ const getPriceDec = (price) => {
   const dot = s.split('.')[1]
   return dot ? dot.padEnd(2, '0').slice(0, 2) : '00'
 }
+
+// ══════════════════════════════════════════════════════════════════════════════
+// 券包 / 领券中心（C3 块 5 · commit 1，2026-10-11）—— 模板在 `tickets` section 那一段。
+//
+// ⚠️ **本段整块追加在 `<script setup>` 末尾**（而不是插在 `getHomeImgAndGoods` 旁边）：
+//    本文件的 `:119` / `:242` / `:262` / `:303-304` 等被文档按行号引（⚠️ **改前值**）⇒ 每多一个
+//    插入点就多一段集体漂移。收成**一个**插入点，`refs-scan` 的 before/after 只需解释一处偏移。
+//    同理，本段的取数挂在**第二个** `onMounted` 上（Vue 允许注册多次）—— 挪去改既有的那个，
+//    就又制造一个插入点。
+//    ⚠️ 本笔的**实际偏移**（`grep -n` 实测）：券包那一段 +53 行 ⇒ 上述四个目标改后依次为
+//    `:119`（未漂，在插入点之前）/ `:295` / `:315` / `:356-357`；本段 +107 行（模板 +53、样式 +95
+//    另计）⇒ **`<script>` 段的闭合行**由 `:348` 漂 **`:508`**（全文件 994 → 1251 行）。全表见 `_work/b5-repoint.md`（收口一次性重指）。⚠️ 这半句**故意不写那个闭合标签的字面量**：SFC 解析器在 `<script>` 段里一见到它就**当场截断本段**，真闭合行随即报 `x-invalid-end-tag`（`vue/no-parsing-error`）—— 实测踩过，别「顺手补全」。
+//
+// ⚠️ **身份**取 `getCustomerId()`（`api/auth.js` 是唯一允许读身份的地方），不碰 `sessionStorage`。
+//    本页 2026-10-06 起「已无匿名分支」（见 `:224-232`），券包**必须**有身份 ⇒ 这里**重新引入**
+//    一条「有身份才取数」的分支（形状同 `ShoppingCart.vue:193-195`）。它**不是登录墙**：
+//    页面照常逛，只是券包那一块显示「登录后可…」。
+const customerId = ref('')
+const claimable = ref([])
+const grants = ref([])
+const redDot = ref(false)
+const claimLoading = ref(false)
+const grantLoading = ref(false)
+const claiming = ref('')
+const tkMsg = ref('')
+const ticketsEl = ref(null)
+
+/** `Claimed` / `SoldOut` 的宽容判据 —— Connector/J 的 `tinyInt1isBit` 下可能是 `true`，也可能是 `1`。 */
+const truthy = (v) => v === true || v === 1 || v === '1'
+
+/** 面值的人话。与 `views/admin/MarketingPage.vue` 的 `faceLabel` **同口径**（折扣券读「8.5 折」，另两类读「¥N」）。 */
+const couponFace = (c) => {
+  const v = Number(c.FaceValue || 0)
+  return c.Type === 'percent' ? (v * 10).toFixed(1) + ' 折' : '¥' + (Math.round(v * 100) / 100)
+}
+
+/** 门槛的人话。`Threshold` 后端对 `none` 型**强制**置 0 ⇒ 「无门槛」是数据说的，不是我猜的。 */
+const couponCond = (c) => {
+  if (c.Type === 'percent') return '折扣券'
+  const t = Number(c.Threshold || 0)
+  return t > 0 ? '满 ' + t + ' 可用' : '无门槛'
+}
+
+/** `Bucket` → 中文。取值域 = `CouponDao.selectMyGrants` 那个 `CASE`（`expiring`/`usable`/`used`/`expired`）。 */
+const bucketLabel = (b) =>
+  ({ expiring: '快过期', usable: '可用', used: '已使用', expired: '已过期' }[b] || b)
+
+const loadCoupons = async (account) => {
+  claimLoading.value = true
+  try {
+    const data = await coupons(account, 6)
+    claimable.value = data && data.success && Array.isArray(data.list) ? data.list : []
+  } catch (e) {
+    handleApiError(e, '领券中心加载失败')
+  } finally {
+    claimLoading.value = false
+  }
+}
+
+const loadMyCoupons = async (account) => {
+  grantLoading.value = true
+  try {
+    const data = await myCoupons(account)
+    // ⚠️ 顺序**照后端给的**（`SortIdx` 已在 SQL 里排好）—— 前端不排（见模板那段注释）。
+    if (data && data.success) {
+      grants.value = Array.isArray(data.list) ? data.list : []
+      redDot.value = truthy(data.redDot)
+    } else {
+      grants.value = []
+      redDot.value = false
+    }
+  } catch (e) {
+    handleApiError(e, '券包加载失败')
+  } finally {
+    grantLoading.value = false
+  }
+}
+
+/** 领券。⚠️ 只「领」——核销在结算（块 5 commit 5），本页不碰 `grant.Status`。 */
+const doClaim = async (c) => {
+  claiming.value = c.CouponId
+  tkMsg.value = ''
+  try {
+    const data = await claim(customerId.value, c.CouponId)
+    const ok = !!(data && data.success)
+    tkMsg.value = ok
+      ? '已领取「' + c.Name + '」，见右侧券包'
+      : '领取失败：' + ((data && data.msg) || '未知原因')
+    if (ok) await Promise.all([loadCoupons(customerId.value), loadMyCoupons(customerId.value)])
+  } catch (e) {
+    handleApiError(e, '领取失败')
+  } finally {
+    claiming.value = ''
+  }
+}
+
+/** 「领券中心」（二级导航）/「优惠券」（功能入口）两处入口的落点 = 锚到本页券包区。 */
+const scrollToTickets = () => {
+  const el = ticketsEl.value
+  if (el && el.scrollIntoView) el.scrollIntoView({ behavior: 'smooth', block: 'start' })
+}
+
+onMounted(async () => {
+  customerId.value = getCustomerId() || ''
+  if (!customerId.value) return
+  await Promise.all([loadCoupons(customerId.value), loadMyCoupons(customerId.value)])
+})
 </script>
 
 <style scoped>
@@ -362,7 +522,7 @@ const getPriceDec = (price) => {
    ⚠️ 稿里**没有元素用到**的规则一律不搬，否则落进来就是悬空类名：
    `.promo`（`:435-453`，稿自己也没用在 body 里）、`.card-tags` / `.card-price .was`（本仓无标签 /
    划线价字段）、`.fl-*`（`:609-627`）与 `.ticket*`（`:633-658`）与 `.glaze-k` / `.glaze-s`
-   （`:370-389`）—— 后三组对应的都是稿 JS 里的 mock 内容，本仓无数据源。
+   （`:370-389`）—— 后三组对应的都是稿 JS 里的 mock 内容，本仓无数据源。⚠️ **2026-10-11（块 5 · commit 1）：`.ticket*` 那一组的「无数据源」不成立了**（券包接了真表 `coupon` / `coupon_grant`），但**仍不搬稿的类名** —— 本笔另起 `tk-` 前缀绑真字段，理由见下方券包那一节。
    ⚠️ 稿本页**没有 @media**（全文件 0 处）⇒ 本块也不加断点：`.grid` 用 auto-fill 自适应，
    其余栅格（4/4/3/4 列）在窄屏会挤但不会破版，与稿一致。 */
 
@@ -754,17 +914,114 @@ button {
   grid-column: 1 / -1;
 }
 
-/* ── 券包（预留位，稿 `:632-658`）──
-   ⚠️ 稿的 markup 里这条**本来就是空 section**（`:817`），3 张券由 JS 塞 mock ⇒ 本仓 0 条
-   `.ticket*` 规则（无数据源）。空 `display:grid` 高度为 0 ⇒ 会「落了却看不见」⇒ 出一行说明。 */
+/* ── 券包 / 领券中心（**块 5 · commit 1 落地**，2026-10-11；稿 `:632-658`）──
+   ⚠️ 稿的 markup 里这条**本来就是空 section**（`:817`），3 张券由稿的 JS 塞 mock（`TICKETS`）
+   ⇒ 稿的 `.ticket*` 规则本仓仍**不搬**（它们绑的是 mock 的类名与结构）。本笔另起一套 `tk-` 前缀、
+   绑**真字段**（`Type` / `FaceValue` / `Threshold` / `Bucket`）—— 两套类名别互相套用。
+   ⚠️ 两栏 = 领券中心（可领）+ 我的券包（已领）⇒ 原来的 3 列改 **2 列**。 */
 .tickets {
   margin-top: var(--s5);
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(2, 1fr);
   gap: var(--s4);
 }
-.tickets .empty-tip {
+.tickets .tk-msg {
   grid-column: 1 / -1;
+}
+.tk-col {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--r2);
+  padding: var(--s4);
+}
+.tk-h {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  padding-bottom: var(--s2);
+  margin-bottom: var(--s3);
+  border-bottom: 1px solid var(--line-2);
+}
+.tk-h h3 {
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-semi);
+  color: var(--ink);
+}
+.tk-n {
+  font-size: var(--fs-xs);
+  color: var(--ink-3);
+}
+/* 券包红点（裁定 #4 ②）—— 已领的券快过期**不发系统通知**，只在券包上点一个点。 */
+.tk-dot {
+  font-size: var(--fs-xs);
+  color: var(--danger);
+  font-style: normal;
+  margin-left: var(--s1);
+}
+.tk-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s2);
+}
+.tk {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  padding: var(--s2) var(--s3);
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  border-radius: var(--r2);
+}
+.tk-amt {
+  font-family: var(--font-mono);
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-semi);
+  color: var(--brand-ink);
+  min-width: 4.5em;
+}
+.tk-cond {
+  font-size: var(--fs-xs);
+  color: var(--ink-3);
+  flex: 1;
+}
+.tk-get {
+  font-size: var(--fs-xs);
+  color: var(--brand-ink);
+  background: var(--brand-soft);
+  border: 1px solid var(--brand-ink);
+  border-radius: var(--r1);
+  padding: 2px var(--s3);
+  cursor: pointer;
+}
+.tk-get[disabled] {
+  color: var(--ink-3);
+  background: var(--surface-3);
+  border-color: var(--line-2);
+  cursor: default;
+}
+/* 券包四态 —— **只有「快过期」是暖色**：它是这四态里唯一一件要人「现在动手」的事。 */
+.tk-b {
+  font-size: var(--fs-xs);
+  border-radius: var(--r1);
+  padding: 1px 6px;
+  white-space: nowrap;
+}
+.tk-b-expiring {
+  color: var(--warning-deep);
+  background: var(--warning-ground);
+}
+.tk-b-usable {
+  color: var(--success-deep);
+  background: var(--success-ground);
+}
+.tk-b-used,
+.tk-b-expired {
+  color: var(--ink-3);
+  background: var(--surface-3);
+}
+.tk-msg {
+  font-size: var(--fs-xs);
+  color: var(--brand-ink);
 }
 
 /* ── 推荐区（稿 `:455-548`）── */

@@ -40,6 +40,8 @@ import com.minke.mallmanagement.admin.dao.AdminOrderDao;
 import com.minke.mallmanagement.admin.service.AdminOrderService;
 import com.minke.mallmanagement.stats.dao.StatsDao;
 import com.minke.mallmanagement.stats.service.StatsService;
+import com.minke.mallmanagement.marketing.coupon.dao.CouponDao;
+import com.minke.mallmanagement.marketing.coupon.service.CouponService;
 import org.junit.jupiter.api.BeforeEach;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
@@ -203,7 +205,17 @@ import static org.mockito.Mockito.when;
         //    理由与上一笔的 `ShippingTrackAdvanceJob` **逐字相同**（切片里没有调度器；
         //    @EnableScheduling 挂在 MerchantDowngradeSchedulingConfig，不属 web 组件）。
         //    ⇒ 「默认 profile 手验」兜它（job 是滚动窗口，演示数据落窗外 ⇒ 手验要看数据请用 rebuild）。
-        StatsDao.class, StatsService.class})
+        StatsDao.class, StatsService.class,
+        // C3 块 5（营销块 · commit 1 券，2026-10-11）：新增两个 Controller（`CouponController` /
+        // `AdminCouponController`）+ 一个 @Service（`CouponService`）+ 一个 @Dao（`CouponDao`）——
+        // **第七次同一处地雷**：@WebMvcTest 无参会加载全部 @Controller，新控制器一进来，
+        // 切片上下文就会因为「找不到它要的 CouponService」而**启动失败**（同前六笔）。
+        // ⚠️ `AdminCouponController` 还吃 `AuditService`、`CouponService` 只吃 `CouponDao`
+        //    —— 两个依赖都在上面的清单里，无需重复登记。
+        // ⚠️ **刻意不 @Import `CouponExpiryJob`**：它是 @Component（切片不扫）且是 @Scheduled ——
+        //    理由与 `ShippingTrackAdvanceJob` / `StatsAggregateJob` **逐字相同**（切片里没有调度器；
+        //    @EnableScheduling 挂在 MerchantDowngradeSchedulingConfig，不属 web 组件）。
+        CouponDao.class, CouponService.class})
 public abstract class AbstractSmokeTest {
 
     @Autowired

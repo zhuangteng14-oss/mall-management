@@ -1,6 +1,7 @@
 // src/config/notify-events.js —— 系统通知**事件类型 code → 中文标签**（C3 块 1 · I2，2026-10-09）。
 //
-// 它对应后端的 `notification/NotificationEvents.java`（25 条常量）。**两张表必须逐字对齐** ——
+// 它对应后端的 `notification/NotificationEvents.java`（26 条常量 —— 2026-10-11 块 5 加了 `coupon.expiring.unclaimed`；
+// ⚠️ 本注释此前写的「25 条」与后端**当时**的 25 条常量其实是对齐的，只落后端的类注释（那句写 21）是陈旧的，已一并校正）。**两张表必须逐字对齐** ——
 // 后端那个类的类注释写明了「写入方与读出方各写一遍，第二处抄错双方都不报错」，本文件就是那个「读出方」。
 //
 // ⚠️ 【本文件最容易做错、也最不该做错的一条】**必须有兜底**。
@@ -16,7 +17,7 @@
 //    所以「一个恰好叫 `constructor` 的未知 code」是**可达**的。故判据必须是「**自有**属性」。
 
 /**
- * code → 中文标签。**25 条**，顺序与后端 `NotificationEvents.java` 的「归属块」分组一致。
+ * code → 中文标签。**26 条**，顺序与后端 `NotificationEvents.java` 的「归属块」分组一致。
  *
  * ⚠️ 加一条 = 后端 `NotificationEvents` 加常量 + 本表加一行 + `EVENT_OPTIONS` 加一项（**三处**）。
  *    漏掉本文件只会让**新类型**显示成 code 原文（兜底在，不崩），漏掉后端常量则写入方没得引 —— 不会静默。
@@ -66,6 +67,9 @@ export const EVENT_LABELS = {
   'seckill.invited': '秒杀邀请',
   'seckill.application.approved': '秒杀申请通过',
   'seckill.application.rejected': '秒杀申请驳回',
+  // ⚠️ 2026-10-11（C3 块 5 · commit 1 券）：**只发「未领」那一侧** —— 已领的券快过期
+  //    **不发系统通知**（走券包红点 + 排序），见 `CouponExpiryJob` 的类注释。
+  'coupon.expiring.unclaimed': '优惠券即将过期（未领取）',
 }
 
 /**
@@ -94,6 +98,7 @@ export const EVENT_OPTIONS = [
   { code: 'seckill.invited', label: '秒杀邀请' },
   { code: 'seckill.application.approved', label: '秒杀申请通过' },
   { code: 'seckill.application.rejected', label: '秒杀申请驳回' },
+  { code: 'coupon.expiring.unclaimed', label: '优惠券即将过期（未领取）' },
   { code: 'comment.on.post', label: '商品被评论' },
   { code: 'comment.on.user', label: '留言板被评论' },
   { code: 'comment.reply', label: '评论被回复' },

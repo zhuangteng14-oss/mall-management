@@ -99,23 +99,36 @@
             <span class="off">6.5 折</span>
           </div>
 
-          <!-- ②【促销 / 优惠券】整块级 ⇒ 只挂 `data-slot` + `title`；券框里的「领取」是**控件** ⇒
-               逐枚 `disabled` + 逐字取稿的 title。同样：本条 title 稿里不带 C3 前缀（同上）。 -->
+          <!-- ②【促销 / 优惠券】—— **C3 块 5〈营销块〉已接线**（2026-10-11）。
+               ⚠️ 数据 = **领券中心的前 6 张**（`/marketing/coupons`，封装 `src/api/marketing.js`）：
+                 · 「促销」行 = 其中 `Type='threshold'`（满减）的券，画成「满 A 减 B」；
+                 · 「领券」行 = **全部**可领的券 + 领取按钮（「领取」落 `coupon_grant`）。
+               🔴 **不按商品 / 类目过滤** —— 后端 `CouponDao.selectClaimable` **不接商品维度** ⇒ 这一块
+                  展示的是**全站可领的券**，别读成「这件商品可用的券」（真做过滤要动后端，超本笔边界）。
+               ⚠️ 未登录（无 `couponAccount`）时不出券、只出一行提示 —— 领券要有身份。 -->
           <div
             class="promo"
-            data-slot="预留 · 促销 / 优惠券（动现有代码 5 处 · 超档）"
-            title="无促销与优惠券字段：本页这一块的落码成本 = endpoints.js + ProductPage.vue = 2 处，**但券无法凭空存在** —— 跨页那套（PDP 领券 / 购物车可用券 / 个人中心我的券 / 结算已用券 / 首页领券中心）合计 5 处，**超档**，因清单点名而画出（见 README 挂账表）"
+            title="C3 块 5〈营销块〉已接线（2026-10-11）：促销行取满减类券、领券行取全站可领券，数据源 /marketing/coupons（封装 src/api/marketing.js）⇒ 原 data-slot「预留 · 促销 / 优惠券（动现有代码 5 处 · 超档）」退场"
           >
-            <div class="r"><span class="tag">促销</span><span class="cut">满 200 减 30&emsp;满 500 减 80</span></div>
+            <div class="r"><span class="tag">促销</span>
+              <span v-if="promoCuts.length" class="cut">{{ promoCuts.join('\u3000') }}</span>
+              <span v-else class="cut cut-off">暂无满减活动</span>
+            </div>
             <div class="r"><span class="tag">领券</span>
-              <span class="coupons">
-                <span class="coupon"><span class="amt"><i>¥</i>20</span>
-                  <span class="cond">满 199 可用</span>
-                  <button type="button" class="get" disabled title="领取优惠券（无端点）">领取</button></span>
-                <span class="coupon"><span class="amt"><i>¥</i>50</span>
-                  <span class="cond">满 499 可用</span>
-                  <button type="button" class="get" disabled title="领取优惠券（无端点）">领取</button></span>
+              <span v-if="claimList.length" class="coupons">
+                <span v-for="c in claimList" :key="c.CouponId" class="coupon">
+                  <span class="amt"><i v-if="c.Type !== 'percent'">¥</i>{{ faceNum(c) }}</span>
+                  <span class="cond">{{ faceCond(c) }}</span>
+                  <button
+                    type="button"
+                    class="get"
+                    :disabled="claimed(c) || claiming === c.CouponId"
+                    :title="claimed(c) ? '已领取' : '领取优惠券'"
+                    @click="doClaimCoupon(c)"
+                  >{{ claimed(c) ? '已领取' : claiming === c.CouponId ? '领取中' : '领取' }}</button>
+                </span>
               </span>
+              <span v-else class="coupons"><span class="cond cut-off">{{ couponAccount ? '暂无可用券' : '登录后可领券' }}</span></span>
             </div>
           </div>
 
@@ -364,10 +377,14 @@
           <div class="p-media"><div class="thumb"><img v-if="popupCurrentItem.goodImg" :src="popupCurrentItem.goodImg" /></div><div class="p-thumbs"><button type="button" v-for="(item, idx) in popupAllItems" :key="idx" class="pt" :class="{ on: idx === popupCurrentIndex }" :title="item.productCode" @click="popupCurrentIndex = idx"><img v-if="item.goodImg" :src="item.goodImg" /></button></div></div>   <!-- ⚠️ **2026-10-08 用户五条【3】**：大图下面加一排型号缩略图（点 = 切 `popupCurrentIndex`，与详情页 `.thumbs`→`currentIndex` 同形）。⚠️ 加了 `.p-media` 一层**包装**（大图 + 缩略图同属「图片列」）—— 属「补元素」不是重排。⚠️ **2026-10-08 用户复核后改判（本条推翻原文的 `v-if="popupAllItems.length > 1"`）**：小图排**不挂 `v-if`** —— **单型号时也要显示那一枚**（用户逐字：「小图在只有一个型号时也应有小图。之前是只有一个型号时干脆不显示」）。⇒ 大图侧本来就不挂 `v-if`（行为与改前一致），小图侧现在也一律渲染，两个分支的差别只剩「有几枚」。同轮把 `:title` 由「切换到型号 X」改成**只写型号本身**（单型号时没有「切换」可言）。⚠️ **净零**：本行前后各只换这一行。 -->
           <div class="p-buy">
             <div class="p-price"><i>¥</i><b>{{ popupCurrentItem.price }}</b></div>
-            <div class="p-promo"><span class="tag">促销</span><span class="cut">满 200 减 30&emsp;满 500 减 80</span></div>
+            <!-- 促销 / 领券：与主区 `:104-127` 那一块**同一份数据、同一对处理函数**
+                 （`promoCuts` / `claimList` / `doClaimCoupon`）—— 弹窗不是第二个实现，别各自拉一遍。 -->
+            <div class="p-promo"><span class="tag">促销</span>
+              <span v-if="promoCuts.length" class="cut">{{ promoCuts.join('\u3000') }}</span>
+              <span v-else class="cut cut-off">暂无满减活动</span></div>
             <div class="p-coupons"><span class="tag">领券</span>
-              <span class="coupon"><span class="amt"><i>¥</i>20</span><span class="cond">满 199 可用</span><button type="button" class="get" disabled title="领取优惠券（无端点）">领取</button></span>
-              <span class="coupon"><span class="amt"><i>¥</i>50</span><span class="cond">满 499 可用</span><button type="button" class="get" disabled title="领取优惠券（无端点）">领取</button></span></div>
+              <span v-for="c in claimList" :key="c.CouponId" class="coupon"><span class="amt"><i v-if="c.Type !== 'percent'">¥</i>{{ faceNum(c) }}</span><span class="cond">{{ faceCond(c) }}</span><button type="button" class="get" :disabled="claimed(c) || claiming === c.CouponId" :title="claimed(c) ? '已领取' : '领取优惠券'" @click="doClaimCoupon(c)">{{ claimed(c) ? '已领取' : claiming === c.CouponId ? '领取中' : '领取' }}</button></span>
+              <span v-if="!claimList.length" class="cond cut-off">{{ couponAccount ? '暂无可用券' : '登录后可领券' }}</span></div>
             <div class="p-opt"><span class="lbl">型号</span><button v-for="(item, idx) in popupAllItems" :key="idx" type="button"
                   class="md" :class="{ on: idx === popupCurrentIndex }" @click="popupCurrentIndex = idx">{{ item.productCode }}</button></div>
             <div class="p-qty"><span class="lbl">数量</span><span class="stepper">
@@ -423,7 +440,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { http, handleApiError } from '../api/http'
 import { endpoints } from '../api/endpoints'; import { orderAdd, cartAdd } from '../api/order'   // ⚠️ C3 块 4：**同行追加**（不新增行 —— 本文件 `:794`/`:803` 被 `slot-registry.md:1994-1995` 按行号引（〈Bug 1〉本笔 +19 行前为 `:775`/`:784`），此处加行会顶漂它们）。两个函数就是原先那两串 `URLSearchParams` + `http.post` + `res.json()` 的收口
 import CashierDialog from '../components/CashierDialog.vue'   // ⚠️ 2026-10-10（Bug 1）：收银台与「我的订单」**共用同一个组件** —— 本行**确实**新增了一行；本笔在 `ProductPage.vue` 净 +19 行（`git diff` 实测：模板 `:412` 起 +5、import +1、`handlePay` 段 +13）⇒ 下面两处 `:775`/`:784` 漂到 `:794`/`:803`，随本笔一并重指（见 `slot-registry.md:1994-1995`）
-import { getMerchantId, getCustomerId, isLoggedIn } from '../api/auth'; import IconGlyph from '../components/ui/IconGlyph.vue'   // ⚠️ 两条 import **同行**（2026-10-11 补图标那一笔）—— 合并到既有行 = 不新增行号漂移（本文件 `:794`/`:803` 被 `slot-registry.md:1994-1995` 按行号引，上面 `:424` 那条注释记过同一件事）
+import { getMerchantId, getCustomerId, isLoggedIn } from '../api/auth'; import IconGlyph from '../components/ui/IconGlyph.vue'; import { coupons, claim } from '../api/marketing'   // ⚠️ 三条 import **同行**（后两条：2026-10-11 补图标笔 + C3 块 5 · commit 1）—— 合并到既有行 = 不新增行号漂移（本文件 `:794`/`:803` 被 `slot-registry.md:1994-1995` 按行号引，上面 `:424` 那条注释记过同一件事）。⚠️ **块 5 · commit 1 仍整体 +90 行**（模板 +17 / `<script setup>` 尾 +70 / `<style>` +3）⇒ `slot-registry.md:1994` 引的 `:794` 漂 **`:881`**、`:1995` 引的 `:803` 漂 **`:890`**（两值均为 `grep -n` 实测，见 `_work/b5-repoint.md`）。
 
 const route = useRoute()
 const router = useRouter()
@@ -774,6 +791,76 @@ onMounted(async () => {
 //    走到 `orderAdd`（拆真检查）；`isLogin` 只决定**要不要跳登录** ⇒ 已登录商家原地不动（= 既有行为）。
 // ⚠️ redirect 取 `route.fullPath`（含本页 7 个 query），对象形式与 `main.js:49` 同款；登录后由
 //    `LoginPage.landingAfterLogin` 送回本页（T-guard-6/-10）。放文件末尾是**刻意的**：`WebAuthConfig.java:71` 引了本文件的 `onMounted` 段（那里原先写的 `:462-465` 是**陈旧值**，本品已就地更正为 `:766`），新增行落在被引行之后，上面 24 个被引目标才一个都不漂。⚠️ **2026-10-10〈Bug 1 · 立即购买补接收银台〉本笔破了这条约束**：+19 行落在 `:412`/`:425`/`:666`（均在 `:766` 之前）⇒ `:794`/`:803` 两处被引行随本笔重指（见 `slot-registry.md:1994-1995`），并已回写 `slot-registry.md:1992/1994/1995/2445`。
+
+// ── 优惠券（C3 块 5 · commit 1，2026-10-11）─────────────────────────────────────
+// 主区 `:104` 与购入弹窗两处「促销 / 领券」**共用这一段**（一份数据、一对处理函数 —— 弹窗不是
+// 第二个实现）。
+//
+// ⚠️ **身份用 `couponAccount`，不是本页既有的 `customerId`**：`customerId`（`:443`）自带一条
+//    「客户号为空则退回商家号」的降级链 —— 那是给 `orderAdd` 用的（商家也能下单）。券不行：
+//    `/marketing/*` 的 `Account` 语义是 **`user.customerid`**（见 `CouponController` 类注释），
+//    拿商家的 `merchantid` 去领券会落一条**永远核销不掉**的 grant。
+//    ⇒ 券只认客户号；没有就整块不出券（与 `HomePage.vue` 券包同一个判据）。
+const couponAccount = getCustomerId() || ''
+const claimList = ref([])
+const claiming = ref('')
+
+/** `Claimed` 宽容判据 —— Connector/J 的 `tinyInt1isBit` 下可能是 `true`，也可能是 `1`。 */
+const claimed = (c) => c.Claimed === true || c.Claimed === 1 || c.Claimed === '1'
+
+const r2 = (v) => Math.round(Number(v || 0) * 100) / 100
+
+/** 面值的**数字部分**。`¥` 号在模板里是单独一个 `<i>`，且折扣券**不出 `¥`**（模板里那个 `v-if`）。 */
+const faceNum = (c) =>
+  c.Type === 'percent' ? (Number(c.FaceValue || 0) * 10).toFixed(1) + '折' : String(r2(c.FaceValue))
+
+/** 门槛的人话。`Threshold` 对 `none` 型由后端**强制**置 0 ⇒ 「无门槛」是数据说的，不是我猜的。 */
+const faceCond = (c) => {
+  if (c.Type === 'percent') return '折扣券'
+  const t = Number(c.Threshold || 0)
+  return t > 0 ? '满 ' + t + ' 可用' : '无门槛'
+}
+
+/** 「促销」行 = 满减类券拼成的「满 A 减 B」—— ⚠️ 这是本页**唯一**拿得到的促销数据（无独立促销表）。 */
+const promoCuts = computed(() =>
+  claimList.value
+    .filter((c) => c.Type === 'threshold')
+    .map((c) => '满 ' + Number(c.Threshold || 0) + ' 减 ' + r2(c.FaceValue))
+)
+
+const loadClaimable = async () => {
+  if (!couponAccount) return
+  try {
+    const data = await coupons(couponAccount, 6)
+    claimList.value = data && data.success && Array.isArray(data.list) ? data.list : []
+  } catch (e) {
+    handleApiError(e, '优惠券加载失败')
+  }
+}
+
+/** 领券（落 `coupon_grant`）。⚠️ 与 `HomePage.vue` 的 `doClaim` 同款，但**不重拉券包**（本页无券包）。 */
+const doClaimCoupon = async (c) => {
+  claiming.value = c.CouponId
+  try {
+    const data = await claim(couponAccount, c.CouponId)
+    if (data && data.success) {
+      await loadClaimable()
+      alert('已领取「' + c.Name + '」，可在「我的券包」查看')
+    } else {
+      alert('领取失败：' + ((data && data.msg) || '未知原因'))
+    }
+  } catch (e) {
+    handleApiError(e, '领取失败')
+  } finally {
+    claiming.value = ''
+  }
+}
+
+// ⚠️ 这是本文件**第二个** `onMounted`（Vue 允许注册多次）。不并进 `:783` 那个，是为了让本笔
+//    在 `<script setup>` 里**只有一个插入点** —— 本文件所有 `文件:行号` 互引都在下面（`:794`/`:803`），
+//    插入点越少，收口时的重指表越短。
+onMounted(loadClaimable)
+
 /* 2026-10-10〈模板表通用化〉三段快照文本（`goods.Detail` / `Spec` / `AfterSale`）—— 全部写在**同一物理行**（新增行会顶漂下面 `slot-registry.md:1994-1995` 引的 `:794`/`:803`）。⚠️ 取值**从 `route.query` 现取**、不用 setup 期解构的 `sellerId`/`goodName`（`:433-434` 是普通 `const`，同路径只换 query 时组件被复用、它们**不更新**，理由同 `openPopup` 那条）。 */ const detailText = computed(() => { const q = route.query; const g = goodsWithUser.value.find((x) => x.MerchantId === q.MerchantId && x.GoodName === q.GoodName); return (g && g.Detail) || '' }); const specText = computed(() => { const q = route.query; const g = goodsWithUser.value.find((x) => x.MerchantId === q.MerchantId && x.GoodName === q.GoodName); return (g && g.Spec) || '' }); const afterSaleText = computed(() => { const q = route.query; const g = goodsWithUser.value.find((x) => x.MerchantId === q.MerchantId && x.GoodName === q.GoodName); return (g && g.AfterSale) || '' }); /* `Spec` 的行内 `键=值` 约定：一行一条，`=` 只切**第一处**（值里允许再有 `=`）；没有 `=` 的行**整行进 `.v`、`.k` 留空**，而不是丢掉它。 */ const specRows = computed(() => specText.value.split('\n').map((s) => s.trim()).filter((s) => s !== '').map((s) => { const i = s.indexOf('='); return i < 0 ? { k: '', v: s } : { k: s.slice(0, i).trim(), v: s.slice(i + 1).trim() } })); const promiseLabels = computed(() => { const q = route.query; const g = goodsWithUser.value.find((x) => x.MerchantId === q.MerchantId && x.GoodName === q.GoodName); const ALL = ['正品保障', '7 天无理由', '极速退款', '运费险']; const KEYS = ['PromiseGenuine', 'PromiseReturn7', 'PromiseFastRefund', 'PromiseFreightIns']; if (!g) return ALL; if (!KEYS.some((k) => g[k] !== undefined && g[k] !== null)) return ALL; return ALL.filter((_, i) => Number(g[KEYS[i]])) }); const mergeSkus = async (baseItems) => { try { const rs = await http.post(endpoints.goods.skuList, `MerchantId=${sellerId}&GoodName=${goodName}`); const ds = await rs.json(); const skus = (ds && ds.success && ds.list) || []; if (!skus.length) return baseItems; const img = baseItems.length ? baseItems[0].goodImg : ''; const merged = skus.map((s) => ({ productCode: String(s.SkuCode || ''), price: s.Price, goodImg: img })).filter((s) => s.productCode); return merged.length ? merged : baseItems } catch (e) { return baseItems } }; const isLogin = computed(() => isLoggedIn()); const activeTab = ref('desc')   // 结构二次调整（2026-10-07）：Tab 条当前面，UI 展示状态（不计功能量）；⚠️ **同行追加、不新增行** —— 上面那条「新增行落在最大被引行之后」的约束在本笔**不成立**（`slot-registry.md:1994-1995` 引的 `:794`/`:803` 都在下面），新增行会顶漂它们。
 </script>
 
@@ -895,6 +982,9 @@ button { background: none; border: 0; cursor: pointer; }
             gap: var(--s4); font-size: var(--fs-sm); }
 .promo .tag { font-size: var(--fs-xs); color: var(--ink-3); }
 .promo .cut { color: var(--ink-2); }
+/* 空态文案（「暂无满减活动」/「登录后可领券」）—— C3 块 5 · commit 1 新增：它占的是**内容位**而不是
+   标签位，故与 `.promo .cut` 的 `--ink-2` 分开一档（降到 `--ink-3`，与 `.tag` 同色）。 */
+.promo .cut-off { color: var(--ink-3); }
 .coupons { display: flex; gap: var(--s3); flex-wrap: wrap; align-items: center; }
 .coupon { flex: 0 0 auto; display: flex; align-items: center; gap: var(--s3);
           padding: var(--s2) var(--s3); border: 1px dashed var(--accent); border-radius: var(--r1); }

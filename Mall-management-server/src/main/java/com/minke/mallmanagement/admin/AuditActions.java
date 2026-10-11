@@ -161,6 +161,26 @@ public final class AuditActions {
     /** 买家收货 —— {@code POST /order/orderReceiveIfUp}。 */
     public static final String ORDER_RECEIVE = "order.receive";
 
+    // ==================== C3 块 5（营销块，2026-10-11）====================
+    // 券的四个挂钩点（commit 1）。域段是 `coupon`（**表名**，也是调用点传的 TargetType 字面量）。
+    // ⚠️ **TargetId 一律传 `CouponId`**（业务号，不是自增 Id）—— 同块 4 的理由，
+    //    `admin_audit.TargetId` 是 NOT NULL，传 null 会在留痕处炸掉整条链路（TD-20 的教训）。
+    // ⚠️ 核销（`coupon.redeem`）**不在这里**：它发生在**结算**（用户端下单），
+    //    由 orderAdd 带 couponId 触发、写自己的 OrderId 作 TargetId ⇒ 随 commit 5 一起挂。
+    // ⚠️ 剩下三个子域（折扣 / 国补 / 秒杀）的挂钩点各自随 commit 2/3/4 加。
+
+    /** 管理员建券 —— {@code POST /admin/marketing/coupon/create}。**新增类**动作 ⇒ {@code BeforeJson} 恒 NULL。 */
+    public static final String COUPON_CREATE = "coupon.create";
+
+    /** 管理员停用券（逻辑废弃）—— {@code POST /admin/marketing/coupon/stop}。 */
+    public static final String COUPON_STOP = "coupon.stop";
+
+    /** 管理员重新启用券 —— {@code POST /admin/marketing/coupon/activate}。 */
+    public static final String COUPON_ACTIVATE = "coupon.activate";
+
+    /** 管理员定向发放券 —— {@code POST /admin/marketing/coupon/grant}。**新增类**动作 ⇒ {@code BeforeJson} 恒 NULL。 */
+    public static final String COUPON_GRANT = "coupon.grant";
+
     private AuditActions() {
     }
 }

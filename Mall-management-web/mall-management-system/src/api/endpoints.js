@@ -4,7 +4,7 @@
 // 「路径字面量只允许出现在本文件」—— 后者强得多，且同样可 grep 自动化（方案 Q8）。
 //
 // 端点来源：14 个 view 里 **42 处 fetch + 6 处 URL 赋值**，逐条抽取
-// （2026-10-04，切换自 `9add994`）共 **31 个唯一端点**，按 M5 的四域分组（+2 条 `user.me` / `user.logout`：会话恢复笔与翻开关笔 2026-10-05 加，+1 条 `user.token`：多账户隔离笔 2026-10-06 加 —— 三条均**非** view 抽取 ⇒ 加上 C3 批 A 的 3 条 `admin.audit*`（2026-10-08）与 C3 块 1·I2 的 8 条（`admin.notify*` 4 + `notification.*` 4，2026-10-09，同样**非** view 抽取），再加 C3 块 2〈用户块〉的 11 条（`user.updateProfile` 1 + `merchant.*` 2 + `admin.accounts*` 8，2026-10-09，同样**非** view 抽取），本表实为 **56** 条；再加 C3 块 3〈商品块〉的 14 条（`goodsB3` 2 + `catalog` 1 + `catalogAdmin` 11，2026-10-10，同样**非** view 抽取）；再经同日〈模板表通用化〉就地改造（**删** `catalog` 1 + `catalogAdmin` 4 + `admin.notifyTemplate*` 2 = 7 条，**加** `template` 2 + `templateAdmin` 4 = 6 条），现为 **69** 条；再加 C3 块 4〈订单块〉的 9 条（`cart` 5 + `orderAdmin` 4，2026-10-10，同样**非** view 抽取 —— 唯一调用方是新建的 `api/order.js`），现为 **78** 条；再加 C3 块 4 补丁〈订单块〉的 1 条（`order.orderDetail`，2026-10-10，同样**非** view 抽取），现为 **79** 条；再加可视化段（2026-10-11）的 4 条（`goods.skuList` 1〔与 `goodsProductCodeSelect` 同行追加〕+ `stats.*` 3〔末尾新增组〕，同样**非** view 抽取），现为 **83** 条）。
+// （2026-10-04，切换自 `9add994`）共 **31 个唯一端点**，按 M5 的四域分组（+2 条 `user.me` / `user.logout`：会话恢复笔与翻开关笔 2026-10-05 加，+1 条 `user.token`：多账户隔离笔 2026-10-06 加 —— 三条均**非** view 抽取 ⇒ 加上 C3 批 A 的 3 条 `admin.audit*`（2026-10-08）与 C3 块 1·I2 的 8 条（`admin.notify*` 4 + `notification.*` 4，2026-10-09，同样**非** view 抽取），再加 C3 块 2〈用户块〉的 11 条（`user.updateProfile` 1 + `merchant.*` 2 + `admin.accounts*` 8，2026-10-09，同样**非** view 抽取），本表实为 **56** 条；再加 C3 块 3〈商品块〉的 14 条（`goodsB3` 2 + `catalog` 1 + `catalogAdmin` 11，2026-10-10，同样**非** view 抽取）；再经同日〈模板表通用化〉就地改造（**删** `catalog` 1 + `catalogAdmin` 4 + `admin.notifyTemplate*` 2 = 7 条，**加** `template` 2 + `templateAdmin` 4 = 6 条），现为 **69** 条；再加 C3 块 4〈订单块〉的 9 条（`cart` 5 + `orderAdmin` 4，2026-10-10，同样**非** view 抽取 —— 唯一调用方是新建的 `api/order.js`），现为 **78** 条；再加 C3 块 4 补丁〈订单块〉的 1 条（`order.orderDetail`，2026-10-10，同样**非** view 抽取），现为 **79** 条；再加可视化段（2026-10-11）的 4 条（`goods.skuList` 1〔与 `goodsProductCodeSelect` 同行追加〕+ `stats.*` 3〔末尾新增组〕，同样**非** view 抽取），现为 **83** 条）；再加 C3 块 5〈营销块〉commit 1（券，2026-10-11）的 10 条（`marketingCoupon` 7 + `marketing` 3，同样**非** view 抽取 —— 唯一调用方是新建的 `api/marketing.js`），现为 **93** 条）。
 //
 // ⚠️ 路径里的 `GoodsProductCodeSelect` 是**大写开头**，与后端 `@PostMapping` 逐字一致，
 //    不是笔误 —— 改名会 404。
@@ -209,5 +209,31 @@ export const endpoints = {
     admin: '/admin/stats',
     adminRebuild: '/admin/stats/rebuild',
     merchant: '/merchant/stats',
+  },
+  // ⚠️ C3 块 5（营销块 · commit 1 券，2026-10-11）：管理端**券治理** 7 条
+  //    （`@RequestMapping("/admin/marketing/coupon")`）。同 `orderAdmin` / `accounts` / `catalogAdmin`
+  //    各款（**非** view 抽取；唯一调用方 `views/admin/MarketingPage.vue`，经 `api/marketing.js` 包一层）。
+  //    ⚠️ **单列一组而不是塞进别的组**：往任何组里插行都会把本文件下面的条目整体下移，
+  //    而「新增行落在被引行之后」是本仓唯一的零漂移手法（同 `accounts` / `goodsB3` / `template`）。
+  //    ⚠️ 同样**不给角色闸留位置** —— 后端这 7 条也没有角色判据（TD-18：管理员 cookie 铸不出票）。
+  //    ⚠️ 只有 `create` / `stop` / `activate` / `grant` 是写端点 ⇒ 只有它们写 `admin_audit`；
+  //    `list` / `grants` / `stats` 是读，不留痕。
+  marketingCoupon: {
+    list: '/admin/marketing/coupon/list',
+    create: '/admin/marketing/coupon/create',
+    stop: '/admin/marketing/coupon/stop',
+    activate: '/admin/marketing/coupon/activate',
+    grants: '/admin/marketing/coupon/grants',
+    grant: '/admin/marketing/coupon/grant',
+    stats: '/admin/marketing/coupon/stats',
+  },
+  // ⚠️ C3 块 5（营销块 · commit 1 券，2026-10-11）：**用户端**领券 3 条（`@RequestMapping("/marketing")`）。
+  //    ⚠️ 与上一组**同前缀不同族**（`/admin/...` vs `/marketing/...`）⇒ 分组名不能也叫 `marketingCoupon`。
+  //    ⚠️ 三条**每条都跑** `IdentityGuard.requireSelfOrAdmin(request, Account)`
+  //    ⇒ 传**别人的** `Account` 是 **403**（不是「查不到」），与 `notification` / `cart` 同形态。
+  marketing: {
+    coupons: '/marketing/coupons',
+    myCoupons: '/marketing/myCoupons',
+    claim: '/marketing/coupon/claim',
   },
 }

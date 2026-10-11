@@ -216,6 +216,29 @@ public class NotificationDao {
         }
     }
 
+    // ==================== 读：投递幂等判据（定时任务用） ====================
+
+    /**
+     * 「这条通知是不是已经发给过这个人了？」—— 定时提醒类任务（{@code CouponExpiryJob}）的**幂等闸**。
+     *
+     * <p>判据是四元组 {@code (ToId, EventType, TargetType, TargetId)}。⚠️ 四列都要给：
+     * 只按 {@code ToId + EventType} 会让「同一个人收到过任意一条同 code 的通知」把所有
+     * 后续提醒都挡掉（那张券再也不会被提醒）；只按 {@code TargetId} 则会跨收件人串味。
+     *
+     * <p>⚠️ 本方法是**跨块新加的**（C3 块 5 · commit 1）：块 5 需要一个「不往 {@code coupon} 表
+     * 加列就能做幂等」的读法，而通知表本来就记着「谁、因为哪个对象、收过什么」。
+     * 加在**本域**而不是让 coupon 域去读 {@code notification} 表 —— 那张表的 SQL 只该在本类里。
+     *
+     * <p>走 {@code idx_notification_...} 未必能覆盖（本判据带了 {@code TargetType}/{@code TargetId}），
+     * 但调用方是小批量定时任务，不是热路径。
+     */
+    public boolean existsDelivery(String toId, String eventType, String targetType, String targetId) {
+        String sql = "SELECT COUNT(*) FROM mall_management_sql.notification "
+                + "WHERE ToId = ? AND EventType = ? AND TargetType = ? AND TargetId = ?";
+        return jdbcClient.sql(sql).params(toId, eventType, targetType, targetId)
+                .query(Long.class).single() > 0;
+    }
+
     // ==================== 读：受众（跨表只读投影） ====================
 
     /**
