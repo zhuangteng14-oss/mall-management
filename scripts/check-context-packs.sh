@@ -10,11 +10,20 @@
 # 它做什么：
 #   遍历 pack，抓出两种引用 token ——
 #     ① 具名引用   `<路径>.<后缀>` 或 `<路径>.<后缀>:<起>` / `:<起>-<止>` / `:<起>-...`
-#     ② 同行简写   `:73` / `:19-24`（无文件名）—— 归属「**最近一个**具名引用的路径」，跨行沿用
+#     ② 简写   `:73` / `:19-24`（无文件名）—— 归属**上文最近一个「自带行号」的具名引用**
+#                  （`File.java:42-154`）的路径，**可跨行沿用**。
+#                  ⚠️ 只提文件名、不带行号的裸引用（`db-schema.md`）**不成为归属目标** ——
+#                  否则 `S:173` / `G:347` 这类旧字母锚点、`IP:port` 会被错算到它头上，产生假 FAIL。
 #   然后逐条查两件事：
 #     · 文件找得到吗？（解析规则见下）
 #     · 起始行在文件行数以内、且**那一行不是空的**吗？
 #   最后打印报告。**只报告，不改任何文件。**
+#
+# 【活文档禁用行号】（2026-10-11 加，见 agent.md「文档三层治理」）——
+#   引用**活文档**（`db-schema.md` / `api-contract.md` / `context-packs/*.md`）时必须写
+#   `文件.md#锚点`，**不许**写 `文件.md:行号`（行号会随文档增删集体漂移，锚点不会）。
+#   本脚本对「目标解析到活文档、却带了 `:行号`」的 token 直接判 **FAIL**。账本 / 代码 / 稿
+#   不受此限（它们的行号本就保留）。
 #
 # 解析规则（路径怎么写都行，但要能唯一落到一个文件）：
 #   1. `<repo>/<路径>` 直接命中 ⇒ 用它；
@@ -60,12 +69,26 @@ resolve_by_suffix() {
         -type f -path "*/$1" -print 2>/dev/null | sort -u
 }
 
+# ── 目标是不是「活文档」？（见 agent.md「文档三层治理」）────────────────────
+#   活文档 = docs/agent/db-schema.md / docs/agent/api-contract.md / docs/agent/context-packs/*.md
+#   只有它们的引用被要求走 `#锚点`；账本 / 代码 / 稿不在此列（行号保留）。
+is_live_doc() {
+    case "$1" in
+        "$REPO/docs/agent/db-schema.md"|\
+        "$REPO/docs/agent/api-contract.md"|\
+        "$REPO"/docs/agent/context-packs/*.md) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
 for pack in $REPO/$GLOB; do
     [ -f "$pack" ] || continue
     packs=$((packs + 1))
     printf '\n── %s\n' "${pack#$REPO/}"
 
-    lastpath=""      # 最近一个具名引用的**路径部分**（不带行号）—— 同行简写的归属目标
+    # 「简写」的归属目标：上文最近一个**自带行号**的具名引用（跨行沿用）。
+    # 裸提文件名（无行号）**不**更新它 ⇒ 不会被误当归属目标（见文件头 ②）。
+    lastpath=""
     lineno=0
 
     while IFS= read -r line; do
@@ -74,17 +97,17 @@ for pack in $REPO/$GLOB; do
         for tok in $(grep -oE "$TOKEN_RE" <<<"$line"); do
             refpath=""; refspan=""
             case "$tok" in
-                :*)                       # 同行简写
+                :*)                       # 简写：归属上文最近的「带行号」具名引用（跨行沿用）
                     refpath="$lastpath"; refspan="${tok#:}" ;;
-                *:[0-9]*)                 # 具名引用（自带行号）
+                *:[0-9]*)                 # 具名引用（自带行号）—— 成为后续简写的归属目标
                     refpath="${tok%%:*}"; refspan="${tok##*:}"; lastpath="$refpath" ;;
-                *)                        # 具名引用（无行号）
-                    refpath="$tok"; lastpath="$tok" ;;
+                *)                        # 具名引用（无行号）—— **不**成为归属目标
+                    refpath="$tok" ;;
             esac
 
             if [ -z "$refpath" ]; then
                 warn=$((warn + 1))
-                report "WARN" "$lineno: 简写 '$tok' 之前没有具名引用，无法归属"
+                report "WARN" "$lineno: 简写 '$tok' 之前没有**带行号**的具名引用，无法归属"
                 continue
             fi
 
@@ -128,6 +151,16 @@ for pack in $REPO/$GLOB; do
                 continue
             fi
 
+            # ── 活文档禁用行号（见 agent.md「文档三层治理」）────────────
+            #   指向活文档却带了 `:行号` ⇒ FAIL（应写 `文件.md#锚点`）。
+            #   （简写只归属「自带行号的具名引用」⇒ 走到这里的目标必是真引用；裸提
+            #      活文档名不带行号的情形不会被简写误带入，判 FAIL 无假阳性。）
+            if is_live_doc "$target"; then
+                fail=$((fail + 1))
+                report "FAIL" "$lineno: '${refpath}:${refspan}' 指向**活文档**却用了 :行号 —— 必须改写 '${refpath}#锚点'（见 agent.md「文档三层治理」）"
+                continue
+            fi
+
             # ── 验行号 ────────────────────────────────────────────────
             start="${refspan%%-*}"
             total="$(awk 'END{print NR}' "$target")"
@@ -157,13 +190,16 @@ done
 printf '\n════════ %d 个 pack · 引用 OK %d · INFO %d · WARN %d · FAIL %d ════════\n' "$packs" "$ok" "$info" "$warn" "$fail"
 if [ "$fail" -gt 0 ]; then
     echo "⇒ 有 FAIL：上面每一行都要修（改 pack 的行号 / 路径，或改被引文件 —— 改后者要同步重指）。"
+    echo '   指向「活文档」的 :行号 一律改成 #锚点（见 agent.md「文档三层治理」）。'
     exit 1
 fi
 if [ "$warn" -gt 0 ]; then
-    echo "⇒ 有 WARN：**没标「待建」却又找不到**的路径 —— 要么补标，要么是笔误。"
+    echo "⇒ 有 WARN：两类 ——"
+    echo "   ① **没标「待建」却又找不到**的路径：要么补标，要么是笔误。"
+    echo "   ② **简写 :N 上文没有「带行号」的具名引用可归属**：先把文件名连行号写全一次，或本行写全。"
 fi
 if [ "$info" -gt 0 ]; then
     echo "（INFO 是**预期内**的：那些行本就写着「待建 / 新建」，见 c3-blocks-index.md §一。）"
 fi
-echo "⚠️ 本脚本只验「文件找得到 + 起始行非空」；**行号指对了没有、pack 写漏了没有，它查不到**。"
+echo "⚠️ 本脚本只验「文件找得到 + 起始行非空 + 活文档不用行号」；**行号指对了没有、锚点指向对不对、pack 写漏了没有，它查不到**。"
 exit 0
