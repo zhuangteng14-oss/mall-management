@@ -2,7 +2,7 @@
 
 > 索引：`docs/agent/c3-blocks-index.md`。**只精读下文列出的区间，不要整份读任何文件**（除注明「整份」的）。
 > ⚠️ **状态（2026-10-10）：落码完成 + 就地改造完成**（块 2 已 merge）；**待手验 / A3 复跑**。**A 档 4 项**：类目 = 扩 `goodstype` 加列 **+ 唯一键换代 `(ParentId, GoodType)`** / 审核 = 提审制（`goodsAdd` 不写 `goods` 行，通过才写）+ **`goods` 不加审核列**；⚠️ **原 A 档 #2（模板库 = 新表 `goods_template` + `goods` 加 3 个模板 Id 列）已被 2026-10-10 二次裁决改写**（模板改「**快照**」+ 两表合一 ⇒ 通用表 `template` + `goods` 存 3 段文本），见下文回执 8 与 `slot-registry.md §19-9`。**落地依据见 `_work/c3-block3-landing-plan.md`**。
-> ⚠️ **本 pack 所有行号均为「当前」（块 2 已 merge 后的工作区）实测**，`check-context-packs.sh` 复核过。
+> ⚠️ **本 pack 行号均为「本块落码时」（块 2 已 merge 后的工作区）实测**；其后已漂的按「**原 N 行**」读（如 §样板 3 处）—— **别当现值、别重指**。
 
 ## 一句话定位 {#pack-c3-block-3-goods-s2}
 
@@ -98,10 +98,10 @@
 ### 样板（照抄这些真页与既有形状，别自创风格） {#pack-c3-block-3-goods-s11}
 
 - `.../src/views/admin/AccountsPage.vue`（1144 行，块 2 建的**管理端真页**，本块管理端照它）：
-  · `:373` —— **页内 tab** 结构（`[入驻审核][用户治理][降级控制]`，本块对应 `[商品审核][类目树][模板库][违规处置]`）；
+  · **原 373 行** —— **页内 tab** 结构（`[入驻审核][用户治理][降级控制]`，本块对应 `[商品审核][类目树][模板库][违规处置]`）；
   · `:76-113` —— **审核卡片流**（`v-for` 卡片 + `pending` 态高亮 + 通过/驳回按钮 + **驳回理由必填** `:104`）；
-  · `:301` —— 端点注释块（`/admin/accounts/applications` · `application/audit`）；
-  · `:324` —— ⚠️ 「危险动作**要求填理由**、理由**会展示给当事人**」的界面口径。
+  · **原 301 行** —— 端点注释块（`/admin/accounts/applications` · `application/audit`）；
+  · **原 324 行** —— ⚠️ 「危险动作**要求填理由**、理由**会展示给当事人**」的界面口径。
 - `.../src/views/admin/NotifyPage.vue:335-377` —— `doSend()`：`try → if(!data.success) 记 msg → catch 记网络错误 → finally`；回执模板两态 ⇒ **本块的「提交 / 通过 / 驳回」按钮照它**。
 - `.../src/views/admin/AuditPage.vue:301-329` —— `load()`：错误走 `err.value = ...HTTP ${status}` ⇒ **本块的列表取数照它**。
 - 商家端提审入口：`.../src/views/GoodsAdd.vue:440`（`submitGoods` → `endpoints.goods.goodsAdd`）；`.../src/views/GoodsUp.vue:349`（列表 → `goodsSelect`）· `:390`（下架 → `goodsDe`）。
