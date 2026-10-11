@@ -1,11 +1,11 @@
-# context-pack: C3 块 4 —— 订单治理（三端，含购物车拆分）
+# context-pack: C3 块 4 —— 订单治理（三端，含购物车拆分） {#pack-c3-block-4-order-context-pack}
 
 > 索引：`docs/agent/c3-blocks-index.md`。**只精读下文列出的区间，不要整份读任何文件**（除注明「整份」的）。
 > ⚠️ **状态（2026-10-10 更新）：已落码 —— 构建/测试绿 + 两库已迁移；✅ 手验跑一轮（2026-10-10，回库核对；抓到并已修 `truncated` 谎报）；＋ 补丁〈模拟支付 / 物流全流程〉已落（2026-10-10，表数 18 → 19 —— 见文末「补丁」节）；未提交。** 块 3 已 merge（`fbf5c00`）；A 档 3 项已由用户 **2026-10-10 逐项批**（A1 建 `cart` / A2 `order` 加 `Quantity` / A3 只沿既有 CAS 边 + 3 端点归属校验）。落码结果与验收状态见 `slot-registry.md §二十`；契约以 `api-contract.md 附录 C` 为准。
 > ⚠️ **本 pack 的「现状」坐标全部是「块 4 落码前」的实测值 ⇒ 一律按「原 N 行」读，不要当现值用。**（例：文中的 `orderAdd` 在 `OrderController.java:70` 是**原 70 行**，现值 **`:95`**；`OrderDao.java` 两条 `selectByMerchant` SELECT 的原 138/141 行，现值 **`:146/:149`**。）块内**回指旧行号一律写「原 N 行」不带冒号**，否则 `check-context-packs.sh` 会把 `` `:数字` `` 当同行简写误归属。
 > ⚠️ **本 pack 所有行号字面仍保留落码前快照**（`check-context-packs.sh` 复核的就是那份快照）；**主要重指对照**（原 → 现，2026-10-10 实测）：`OrderController.java` 原 50/70/85/158/165/172 行 → 现 `:63` / `:95` / `:111` / `:184` / `:197` / `:215`；`OrderService.java` 原 177/205/456 行 → 现 `:199` / `:228` / `:562`；`OrderDao.java` 原 82/94/108/117 行 → 现 `:86` / `:102` / `:116` / `:125`；`AbstractSmokeTest.java` 原 156 行 → 现 `:160`。⚠️ **重写类锚点已不存在**：`ShoppingCart.vue` 原 266/302 行（该页已改成「真购物车」）· `OrderPane.vue` 原 2/3 行（已升格为两 tab 容器）—— 见 `slot-registry.md §二十`。**第 70 行与第 79 行的 `OrderDao` 引用已在原地重指**（第 70 行的 4 个 + 第 79 行的 1 个；其余行未动）。
 
-## 一句话定位
+## 一句话定位 {#pack-c3-block-4-order-s2}
 
 管理端「订单治理」块（`docs/agent/c3-modules.md:67-73`）：**订单全量视图（按用户/商家/状态/时间筛）+ 异常监控（超时/纠纷/退款）+ 介入（改状态/强制退款/强制完成）+ 通知双方**；
 并**同时**把用户端的 **`/customer/cart` 拆成「真购物车 + 订单中心」**（`docs/agent/c3-modules.md:263` 早已裁「购物车拆分属批 4 订单块，随该块一起做」）。
@@ -19,7 +19,7 @@
 ⚠️ 本块的**关键联动 = 通知管道的第三次实战**：商家发货 → 通知买家；用户收货 → 通知商家；管理员介入 → 通知双方。
 两条 code（`order.intervened` / `order.notice`）**块 1 已为本块预留**（见「要读 → 块 1 已落的基建」）。
 
-## 依赖块
+## 依赖块 {#pack-c3-block-4-order-s3}
 
 **块 1（基础设施）、块 2（用户块）、块 3（商品块）**。本块对三者的用法都是**照抄 / 消费**，不扩展接口：
 
@@ -32,9 +32,9 @@
 
 ⚠️ 本块**不改**三块的任何既有签名；可能动的公共登记簿只有 `NotificationEvents`（**无需加**，两条已预留）与 `AuditActions`（**要加** `ORDER_*` 常量，加常量不改表、不改 `send`）。
 
-## 要读
+## 要读 {#pack-c3-block-4-order-s4}
 
-### 设计意图（读区间）
+### 设计意图（读区间） {#pack-c3-block-4-order-s5}
 
 - `docs/agent/c3-modules.md:67-73` —— §2 `### 3. 订单治理` 的三行：全量订单 / 异常监控 / 操作日志，各配一个动作（介入改状态 / 强制退款·强制完成 / 通知双方）。
 - `docs/agent/c3-modules.md:119-124` —— §9 状态流转「**订单生命线**」四视图（**归块 7**，但以订单为数据源 ⇒ 本块的字段决定块 7 能不能画）。
@@ -42,7 +42,7 @@
 - `docs/agent/c3-blocks-index.md:16` —— 块 4 在 8 块路线里的位置与依赖（依赖块 3）。
 - ⚠️ **与 §八 的边界冲突，动手前先读**：`docs/agent/c3-modules.md:265`「不做壳内搜索」/ `:266`「不做多商家入驻」/ `:267`「不做细粒度权限」—— 后者是本块 admin 端点**不加角色闸**的依据（同 TD-18）。
 
-### 块 1 已落的基建 —— 本块要用的现成接口（**与块 2/块 3 相同，直接照抄**）
+### 块 1 已落的基建 —— 本块要用的现成接口（**与块 2/块 3 相同，直接照抄**） {#pack-c3-block-4-order-s6}
 
 - `.../notification/service/NotificationService.java:120-125` —— `send(batchId, toId, toType, eventType, title, content, targetType, targetId)：boolean`。**fail-soft 原语**：永不抛、不加事务、日志标记 `NOTIFY`；`batchId` 单发也要给。
 - ⚠️ **`.../notification/NotificationEvents.java:87-93` —— 本块的两条 code 块 1 已预留，直接引用**：
@@ -56,11 +56,11 @@
 - `.../shared/web/GlobalExceptionHandler.java:83` —— ⚠️ `@RestControllerAdvice(assignableTypes = {...})`：**新 Controller 不在白名单里** ⇒ 新端点**一个参数约束都不要加**（`@NotBlank` 等会逃逸成 400 空体；类级 `@Validated` 会撞 CGLIB 断言族）。
 - `.../smoke/AbstractSmokeTest.java:156` —— `@Import({OrderStateMachine, OrderService, OrderDao, ...})` 真 bean 名单：⚠️ **块 1/块 2/块 3 三次踩同一颗雷**（漏 import ⇒ 整个 `@WebMvcTest` 切片起不来）⇒ 本块新 Controller 的依赖 bean **必须同步加进这里**；`:304` `@MockitoBean OrderTransitionRecorder` 是订单域既有 mock 口。
 
-### 现状：订单域后端 —— **三位状态机 + CAS + 8 端点；无购物车、无通知、无审计**
+### 现状：订单域后端 —— **三位状态机 + CAS + 8 端点；无购物车、无通知、无审计** {#pack-c3-block-4-order-cas}
 
 - `.../order/controller/OrderController.java:50` —— `@RequestMapping("/order")`，**8 个端点全是 `@PostMapping`**（无 GET）：
   `:70` `orderAdd` · `:95` `orderSelect` · `:108` `orderDeliveryIfSelect` · `:123` `orderDeliverySelect` · `:139` `historicalOrdersSelect` · `:158` `orderPayIfUp` · `:165` `orderReceiveIfUp` · `:172` `orderDeliveryIfUp`
-  （登记见 `docs/agent/api-contract.md:121-132`）。⚠️ 类注释反复告警「**形参名与顺序必须逐字保留**」（`-parameters` 靠形参名解析入参）。
+  （登记见 `docs/agent/api-contract.md#api-order`）。⚠️ 类注释反复告警「**形参名与顺序必须逐字保留**」（`-parameters` 靠形参名解析入参）。
 - ⚠️ **身份门控两档**：5 个读/建端点在方法体第一行 `IdentityGuard.requireSelfOrAdmin`（以 `OrderController.java:85` 为例）；
   **3 个 CAS 端点 `:158`/`:165`/`:172` 只收 `orderId`、不判归属** —— **缺口**（登记 `progress.md §5-AF`，本块是否补属 A 档 3 的连带）。
 - `.../order/model/OrderState.java:44` —— 8 种三位组合：合法 5（`CREATED(0,0,0)` / `PAID(1,0,0)` / `SHIPPED(1,1,0)` / `RECEIVED_NODELIVERY(1,0,1)` / `COMPLETED(1,1,1)`）+ 非法 3；`:100` `legal()`；**`:137` `isInitial()` = 出生闸白名单恰为 `{(0,0,0),(1,0,0)}`**（全仓唯一判据处）。
@@ -74,7 +74,7 @@
 - `mall_management_sql.sql:224` —— `CREATE TABLE IF NOT EXISTS \`order_state_transition\``（B3 新增，块 7 时间线视图的数据源；唯一写入点 `OrderTimelineWriter`，**fail-soft 永不抛**）。
 - ⚠️ **订单域今天零 `notificationService.send` / 零 `auditService.record`**（对 `order` 包 grep = 0 命中）⇒ **本块是通知管道第三次实战的挂点**，全部要新挂。
 
-### 现状：购物车 —— **后端零实体；`/customer/cart` 是「购物车 + 订单列表」混合体**
+### 现状：购物车 —— **后端零实体；`/customer/cart` 是「购物车 + 订单列表」混合体** {#pack-c3-block-4-order-customer}
 
 - ⚠️ **后端没有任何购物车/结算/草稿实体、表或端点**：grep `cart|Cart`（Java）= **0**；grep「购物车」= 3 处**全是注释**，指的都是 `orderSelect`（`.../order/dao/OrderDao.java:125` 的 `ReceiveIf != 1`）。`settle` 只命中 `SettlementDate` 列名，**无结算业务逻辑**。
 - 前端 `.../src/views/ShoppingCart.vue`（720 行）= **客户唯一的订单列表页**，实为混合形态：
@@ -82,20 +82,20 @@
   · **占位** —— 商品行区块 `:77`（整块 `data-slot`）；「编辑」`:45` `disabled`；吸底结算栏 `:197` 的「去结算」**`:213` 是 `disabled` 死控件**（title「结算流程无端点」）；猜你喜欢 `:182`。
   · 商家复用**同一组件**（`.../src/views/merchant/OrderPane.vue:3`）。
 
-### 现状：订单域既有基建（可直接复用的现成形状）
+### 现状：订单域既有基建（可直接复用的现成形状） {#pack-c3-block-4-order-s9}
 
 - `.../order/model/OrderStateExecutor.java` —— B3 异步出口（有界 1024、丢最旧、daemon），时间线落库走它。
 - `.../order/model/OrderTransitionRecorder.java` —— 观测编排（读回三位 → 前后态 → 指标/事件 → 投递时间线）；含 `created`/`applied`/`rejected`/`errored`/`rejectedAtBirth`。
 - `.../order/metrics/MallOrderStateMetrics.java` —— 状态子系统**唯一埋点出口**（7 指标 + 512 槽事件环 `recentEvents()`）。⚠️ 「事件环」是**自有观测通道**，与 notification/audit **不是一回事**，别混。
 
-### 现状：管理端「订单治理」面 —— **占位，零业务；且⚠️ 稿里没有这一页**
+### 现状：管理端「订单治理」面 —— **占位，零业务；且⚠️ 稿里没有这一页** {#pack-c3-block-4-order-s10}
 
 - `.../src/router/index.js:453` —— `business/orders`（「订单治理」）今天 `component: AdminStub` —— **本块的替换点**（照同行替换做法 ⇒ 零漂移）。
 - `.../src/config/admin-nav.js:45` —— 侧边栏项 `orders`（`to: '/admin/business/orders'`）。**入口已在** ⇒ ⚠️ 导航表**本块不动**。
 - `.../src/views/admin/StubPage.vue:43` —— 占位组件**零请求**的显式理由（「管理员今天还没有可用的业务端点…一发请求就会 401」）。
 - ⚠️ **`docs/美化/pages/` 里没有管理端订单稿**（实测只有 `OrderCenter-merchant.html` / `ShoppingCart-customer.html`）⇒ 管理端这一页**无稿可对**，按块 2 `AccountsPage.vue` 的**真页样板**自建。
 
-### 现状：前端占位清单（订单块相关 —— `docs/美化/` 的「占位四件套」= `disabled` + `data-slot` + 角标 + `title`）
+### 现状：前端占位清单（订单块相关 —— `docs/美化/` 的「占位四件套」= `disabled` + `data-slot` + 角标 + `title`） {#pack-c3-block-4-order-docs}
 
 - `.../src/views/OrderCenter.vue`（844 行，**商家订单面**）：**真功能** = 发货按钮 `:140`（`handleDeliver` `:248`，`canSend` `:246`：`PayIf=1 && DeliveryIf=0 && ReceiveIf=0`）/ 稳态取数 `:202`（按 `orderStatus` 选 `orderDeliveryIfSelect`/`orderDeliverySelect`）/ 状态名表 `:234`。
   **占位** = 数据概览 KPI `:63`（4 处·超档）/ 标签页 `:76`（6 枚全 `disabled`，`:81`「已完成」N=0 仍 `disabled`）/ 筛选栏 `:87` / 批量操作 `:100` / 分页 `:149`。
@@ -105,7 +105,7 @@
 - 登记出处：`docs/agent/slot-registry.md:216`（订单中心占位表，归属列 `C3〈订单〉`）/ `:176`（付款/收货/进度条「是**订单**的职责」、目标 `/customer/orders` **本仓不存在** ⇒ 归「完整购物车笔」）。
 - ⚠️ **真功能锚点，勿误判为占位**：`OrderCenter.vue:140` 发货 · `ShoppingCart.vue:302`/`:324` 付款/收货 · `ProductPage.vue:638` 建单 · `HistoricalOrders.vue:122` 复制商家 Id。
 
-### 样板（照抄这些真页与既有形状，别自创风格）
+### 样板（照抄这些真页与既有形状，别自创风格） {#pack-c3-block-4-order-s12}
 
 - **管理端真页** `.../src/views/admin/AccountsPage.vue`（块 2 建、块 3 照它）—— 页内 tab（`:37` 渲染 / `:332` 的裁决口径）/ 审核卡片流 `:76` / **危险动作要求填理由且理由展示给当事人**（`:104` 驳回理由必填、`:349` 的口径注释）⇒ 本块管理端照它。
 - **三态回执** `.../src/views/admin/NotifyPage.vue:359` 的 `doSend()`（`try → if(!data.success) 记 msg → catch 记网络错误 → finally`）⇒ 本块的「介入／发货／收货」按钮照它。
@@ -113,17 +113,17 @@
 - **弹窗骨架** `.../src/views/GoodsUp.vue` 的 `.scrim` / `.dlg`（块 3 已抽成 `.../src/components/TemplatePicker.vue`，本块若需弹窗直接复用该组件形状）。
 - 商家端两态开关 = `.../src/views/merchant/OrderPane.vue:2`（`OrderCenter` ⇄ `ShoppingCart`）；`:33` `toCart` 的路由跳转 ⇒ **B 档 2 的改造点**。
 
-### 表 / 前端入口 / 登记
+### 表 / 前端入口 / 登记 {#pack-c3-block-4-order-s13}
 
 - `.../src/api/endpoints.js:53-62` —— `order` 组 8 条。⚠️ `endpoints.js` 有被 `progress.md` 按行号引的行（**当前最大被引 = 84**）⇒ **新增一律追加在文件尾**。
-- ⚠️ **订单端点今天没有任何 `api/*.js` 封装层** —— 8 条全部是**view 内联** `http.post(endpoints.order.*)` 直调（`ShoppingCart.vue:266` / `OrderCenter.vue:202` / `HistoricalOrders.vue:148` / `ProductPage.vue:638`）；调用方矩阵见 `docs/agent/api-contract.md:196-203`（⚠️ 其 `:196` 写 `ProductPage.vue:369` **已 stale**，实际 `:638`）。
+- ⚠️ **订单端点今天没有任何 `api/*.js` 封装层** —— 8 条全部是**view 内联** `http.post(endpoints.order.*)` 直调（`ShoppingCart.vue:266` / `OrderCenter.vue:202` / `HistoricalOrders.vue:148` / `ProductPage.vue:638`）；调用方矩阵见 `docs/agent/api-contract.md#api-5`（⚠️ 其表内 `ProductPage.vue:369` **已 stale**，实际 `:638`）。
 - `.../src/router/index.js` —— 客户壳 `:61`（`cart` → `/customer/cart`，`ShoppingCart` + `props:{showSwitch:false}`）· `:78`（客户 `history`）· `:118`（商家 `history`）；商家壳 `:95`（`order` → `OrderPane`，`orderTab:'order'`）· `:96`（`order/cart`，`orderTab:'cart'`）；`:126` `/shoppingCart` 按角色重定向；`:453` 管理端订单占位。⚠️ **最大被引 = 453** ⇒ 新增路由**同行替换或追加**。
 - `.../src/config/nav.js:31`（客户顶栏「购物车」→ `/customer/cart`）/ `:45`（商家顶栏「订单中心」→ `/merchant/order`）—— ⚠️ **导航表本块不动**（入口已在）。
-- `docs/agent/db-schema.md:229` §6.8 `order`（逐列 + `uk_order_orderId`）/ `:289` §6.12 `order_state_transition`。
+- `docs/agent/db-schema.md#db-6-8` §6.8 `order`（逐列 + `uk_order_orderId`）/ `docs/agent/db-schema.md#db-6-12` §6.12 `order_state_transition`。
 - `docs/agent/tech-debt.md:172` **TD-14**（`order.OrderId` 无索引，三个 CAS 端点全表扫）/ `:217` **TD-17**（`orderAdd` 不校验三位、客户端可伪造终态 —— C#6 2026-10-04 已裁拦截）。
 - `docs/agent/slot-registry.md:3770` —— §十八起（块 2 登记结构）⇒ **本块收口照 10 小节结构开 §二十**。
 
-## 要新建
+## 要新建 {#pack-c3-block-4-order-s14}
 
 > ### ⚠️ A 档待裁（3 项 —— 落在「建表 / 改契约」硬线上，**用户批了才落**）
 >
@@ -148,7 +148,7 @@
 >
 > 附带同一裁决里的**小项（也归 A1 的连带，一并裁）**：3 个 CAS 端点（`OrderController.java:158`/`:165`/`:172`）**是否补归属校验**（今天只收 `orderId`、谁都能改别人的单 —— `progress.md §5-AF` 登记的缺口）；本块**建议补**（`requireSelfOrAdminByUsername` 或按 `OrderId` 回查归属），代价 = 改既有契约。
 
-### B 档（自裁，已报备 —— 不落硬线，可落码）
+### B 档（自裁，已报备 —— 不落硬线，可落码） {#pack-c3-block-4-order-b}
 
 1. **订单中心路由拆分**（**用户已在块 4 定位里裁过**）：新增客户侧 **`/customer/orders`**（订单中心：付款 / 物流 / 收货）；`/customer/cart` 改**真购物车**。`ShoppingCart.vue` 的**订单列表部分**（`loadOrders` `:256` + 付款/收货 `:302`/`:324`）**迁到新页**。
    ⚠️ 既有 `/customer/cart` 的语义**变**（今天 = `ReceiveIf != 1` 的订单列表）—— 属「改契约」的**前端面**，但用户已裁 ⇒ 按 B 落、报备。
@@ -157,20 +157,20 @@
 4. **通知接线**（第三次实战）：`NotificationService.send` + **已预留**的两条 code（`NotificationEvents.java:90`/`:93`）；`AuditActions` 加 `ORDER_*` 常量（追加文件尾，照 `.../admin/AuditActions.java:53` 范式）；`.../src/config/notify-events.js:61-63` **两条中文标签已在**（`order.intervened` / `order.notice`）⇒ 无需补。
 5. **前端 API 分层**：**新建** `.../src/api/order.js` 承接 8 个既有端点（照块 2/块 3 的 `api/*.js` 惯例）；`endpoints.js` **文件尾追加**新端点。
 
-### C 档（自决 —— 落码时按此，不单独问）
+### C 档（自决 —— 落码时按此，不单独问） {#pack-c3-block-4-order-c}
 
 - **「真付款」口径** = 走**既有** `OrderController.java:158` `orderPayIfUp`（`PayIf` 0→1 的 CAS，真改库）；**不接第三方支付**（仓里无支付网关、无资金面）。结算 = `orderAdd`（`PayIf=0`）→ 立即 `orderPayIfUp`。
 - **购物车「改量」clamp** 沿用 `ProductPage.vue` 既有口径（min 0 / max 100）。
 - **订单中心筛/分页**：本块只接**既有 8 端点能支撑的**（状态/时间前端过滤，或后端新增只读端点）。
 
-### 表（**待 A 档裁后定稿** ⇒ 追加到 `mall_management_sql.sql` **末尾**，`IF NOT EXISTS`，`information_schema` 守卫，规则 7）
+### 表（**待 A 档裁后定稿** ⇒ 追加到 `mall_management_sql.sql` **末尾**，`IF NOT EXISTS`，`information_schema` 守卫，规则 7） {#pack-c3-block-4-order-mall_management_sql}
 
 - **新表 `cart`**（A1 裁甲时）：见上列列清单。
 - **`order` 加 `Quantity`**（A2 裁甲时）：`ADD COLUMN ... int NOT NULL DEFAULT 1 COMMENT ...`（加列在**表末**、带默认值、带 COMMENT）。
 - ⚠️ **加列不幂等**（MySQL 无 `ADD COLUMN IF NOT EXISTS`）⇒ 用 `information_schema` 守卫动态 `PREPARE`，两库都能跑、重跑是空操作（**块 3 的手法**）。
 - ⚠️ **表数变化** ⇒ 同笔更新 `scripts/concurrency/ConcurrencyRunner.java` 的 P3 `KNOWN_TABLES`（**当前 6，总数 17**）；**P4 种子门禁**（`order=6`）若被 `cart` 表影响则同笔核。
 
-### 后端（**建议**分层 —— B 档，报备）
+### 后端（**建议**分层 —— B 档，报备） {#pack-c3-block-4-order-s18}
 
 - **新域 `cart/`**（**新建**，与 `order/` 平级）：`dao/CartDao` · `service/CartService` · `controller/CartController`（`@RequestMapping("/cart")`）—— 加购 / 改量 / 删行 / 列出 / **结算**。
 - **订单域追加**：`OrderService` 新只读方法（管理端全量视图 / 异常监控）+ **介入写方法**（**沿既有 CAS 边**，见 A3）；⚠️ **不得加 `@Transactional`**（禁令 + `DistributedLockServiceTest.java:419` 结构断言），新的订单写路径同样走 `runLocked`。
@@ -179,14 +179,14 @@
 - `AuditActions.java` 文件尾**加常量**（照 `:53` 范式）：`order.intervene` / `order.deliver` / `order.receive`（**`TargetId` 一律传 `OrderId`** —— 别重蹈 TD-20）。
 - ⚠️ **测试面必改**：① 新 Controller 依赖的真 bean 同步进 `AbstractSmokeTest.java:156` 的 `@Import`；② 新 Controller **不得**带类级 `@Validated`；③ 若 `order` 加列，`Order*SmokeTest` 与 `ResultByteEquivalenceTest` 的字符串/形状断言要同笔核。
 
-### 前端（三端）
+### 前端（三端） {#pack-c3-block-4-order-s19}
 
 - **用户端**：新页 `.../src/views/OrderCenter-customer.vue`（**新建**，订单中心 —— 付款/物流/收货），**同行替换/追加** `router/index.js` 新增 `/customer/orders`；`ShoppingCart.vue` **改真购物车**（加购/改量/结算 —— 占位区块 `:77`/`:197` 转真，付款/收货迁走）。
 - **商家端**：`OrderPane.vue` 二态开关改文案（B2）；两页占位按能力接线。
 - **管理端**：**新建** `OrderPage.vue`（B3）。
 - `.../src/api/order.js` **新建**；`.../src/api/endpoints.js` **文件尾追加**（`cart` 组 + `orderAdmin` 组）；`.../src/config/notify-events.js` 两条标签已在、无需动。
 
-## 约束
+## 约束 {#pack-c3-block-4-order-s20}
 
 1. **fail-open / fail-soft**：审计与通知**永不抛** —— 失败**不许**把业务成功翻成 500（同块 1/2/3）。
 2. **逻辑废弃，不物理删**（规则 v2）：购物车删行 = 物理删**有争议** ⇒ 落码前按块 4 方案定（购物车行是**临时数据**，与「订单留痕」不同 —— 见 `_work/c3-block4-landing-plan.md §六`）。**订单/审计/时间线一律禁止 `DROP`/`DELETE`**。
@@ -199,7 +199,7 @@
 9. **时区**：新表时刻列一律 `CURRENT_TIMESTAMP(3)`（DB 存 UTC），**前端渲染再转**浏览器时区。
 10. ⚠️ **手验提醒（每次）**：日常手验挂 **`dev`** profile（2026-10-11 起 `a3` 收窄为 CI 专用，见 `tech-debt.md` TD-35）；`dev` 的鉴权闸与 a3 孪生、**也是关的**（`application-a3.properties:98`）—— **闸关，手验绿 ≠ 默认 profile 绿**。本块端点**全是身份敏感**（订单归属）⇒ **必须在默认 profile 再验一遍**。
 
-## 验收
+## 验收 {#pack-c3-block-4-order-s21}
 
 **核心 5 项必跑**（提速规则 2026-10-09 起；其余抽查）：
 
@@ -215,18 +215,18 @@
 
 **抽查**：`bash scripts/check-context-packs.sh`（本 pack 0 失效引用）；`refs-scan.sh`（动被引行时）；审计三态（正例有行 / 负例无行 / 有改前态的动作 `BeforeJson` 非空）；权限三档（非本人传**别人的** `CustomerId`/`MerchantId` → 403 / 本人 → 放行 / 管理员 → 放行）。
 
-## 扩展阅读（不够时按指针读）
+## 扩展阅读（不够时按指针读） {#pack-c3-block-4-order-s22}
 
 - `docs/agent/context-packs/c3-block-3-goods.md` —— **本 pack 的模板**（结构与行文照它，含「块 1 基建」段的照抄手法）。
-- `docs/agent/context-packs/c3-block-2-user.md:35` —— 块 1 基建的**第一份照抄**；块 2 的审核 CAS 是块 4 介入动作的直接来源。
+- `docs/agent/context-packs/c3-block-2-user.md#pack-c3-block-2-user-block1-reuse` —— 块 1 基建的**第一份照抄**；块 2 的审核 CAS 是块 4 介入动作的直接来源。
 - `docs/agent/context-packs/c3-block-1-infra.md` —— 挂钩四步与两条管子的完整口径；动笔前读它的「约束」一节。
 - `_work/c3-block4-landing-plan.md` —— **本块的落地方案**（A 档三项的备选与代价 / B·C 档自裁 / 表·后端·前端 / 验收 / 登记 / 零漂移手法）。
 - `docs/agent/c3-modules.md:67-73` · `:119-124` · `:263` —— 范围 / 订单生命线 / 购物车归属。
-- `docs/agent/db-schema.md`（`order` §6.8 `:229` · `order_state_transition` §6.12 `:289`）· `docs/agent/api-contract.md:121-132`（8 端点）· `docs/agent/tech-debt.md:172`（TD-14）· `:217`（TD-17）。
+- `docs/agent/db-schema.md`（`order` `db-schema.md#db-6-8` · `order_state_transition` `db-schema.md#db-6-12`）· `docs/agent/api-contract.md#api-order`（8 端点）· `docs/agent/tech-debt.md:172`（TD-14）· `:217`（TD-17）。
 - `scripts/probes/` —— 端到端验收脚本样板（本块写 `probe-c3-block4-e2e.mjs`，真后端 + VM 库、逐条断言、机器可读 JSON、失败非零退出）。
 - `docs/agent/slot-registry.md §二十`（**待开**，结构照 §十八/§十九）。
 
-## 补丁〈模拟支付 / 物流全流程〉（2026-10-10 落码；本 pack 之上的一笔）
+## 补丁〈模拟支付 / 物流全流程〉（2026-10-10 落码；本 pack 之上的一笔） {#pack-c3-block-4-order-pack}
 
 > **为什么有这一节**：块 4 把「付款 / 发货」做成了**纯状态位**（只翻 `PayIf` / `DeliveryIf`）⇒ 用户要求升格为**模拟全流程**：
 > 记交易号 / 支付方式 / 付款时刻 / 快递公司 / 运单号 / 发货时刻 / 收货时刻，并给买家一条**物流轨迹时间线**。

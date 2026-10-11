@@ -1,8 +1,8 @@
-# context-pack: C3 块 1 —— 基础设施（权限与审计 + 系统通知）
+# context-pack: C3 块 1 —— 基础设施（权限与审计 + 系统通知） {#pack-c3-block-1-infra-context-pack}
 
 > 索引：`docs/agent/c3-blocks-index.md`。**只精读下文列出的区间，不要整份读任何文件**（除注明「整份」的）。
 
-## 一句话定位
+## 一句话定位 {#pack-c3-block-1-infra-s2}
 
 C3 全部写操作的**横切底座**，两块各管一半：
 
@@ -16,21 +16,21 @@ C3 全部写操作的**横切底座**，两块各管一半：
 > 系统通知 = **块1·I2**（`slot-registry.md §十五`）。⇒ 本节以下凡标「待建」的，**I2 已全部兑现**
 > （见「要新建」逐条的 ✅）。⚠️ 但**块 6 的触发点仍刻意未实现**（只留 code 与 `send` 原语）。
 
-## 依赖块
+## 依赖块 {#pack-c3-block-1-infra-s3}
 
 **无。** 块 1 是根，被块 2–7 **全部**依赖（每块都往它上面挂）。
 ⇒ 本块的接口（`AuditService.record` 的签名、`AuditActions` 的命名口径）**改了就是全仓改**。
 
-## 要读
+## 要读 {#pack-c3-block-1-infra-s4}
 
-### 设计意图（读区间）
+### 设计意图（读区间） {#pack-c3-block-1-infra-s5}
 - `docs/agent/c3-modules.md:133-139` —— §11「权限与审计」的原始定义（**横切所有写操作**：记录 + 查看 / 筛选 / 导出）。
 - `docs/agent/c3-modules.md:96-104` —— §6「系统通知」的功能面（公告 / 群发 / 定向 / 模板）。
 - `docs/agent/c3-modules.md:272-321` —— §9.1 秒杀双向制 + §9.2 评论区多对象。
   ⚠️ **§9.2 末段是本块 I2 的硬约束**（通知要支持「被评论 / 被回复 / 被 @」）。
 - `docs/agent/c3-modules.md:325-336` —— §10 路线修订（本块 = 8 块路线里的第 1 块；§七 旧批次表已作废）。
 
-### 已落的代码 —— 审计半边（读它就是读**现成的形状**）
+### 已落的代码 —— 审计半边（读它就是读**现成的形状**） {#pack-c3-block-1-infra-s6}
 - `Mall-management-server/src/main/java/com/minke/mallmanagement/admin/service/AuditService.java:42-154`
   —— `record(...)`（`:73`）的签名 + **fail-open 契约**（`:81-84` catch 一切、只打 `ERROR ... AUDIT`，
   **不让审计失败翻业务**）。上限常量 `DEFAULT_LIMIT=100`（`:47`）/ `MAX_LIMIT=500`（`:50`）。
@@ -43,7 +43,7 @@ C3 全部写操作的**横切底座**，两块各管一半：
   `notification.send` `:51`）。
   ⚠️ `:19-25` 说明「**一开始只有 1 条常量不是遗漏**」—— 其余写端点**随各自那笔挂**。
 
-### 样板挂钩（块 1 交付的那个「1 个钩子」）
+### 样板挂钩（块 1 交付的那个「1 个钩子」） {#pack-c3-block-1-infra-s7}
 - `.../goods/controller/GoodsController.java:210-227` —— **四步形状**：改前快照 → 业务 → 判 `success` → 改后快照 + 记账。
   **块 2–6 每挂一个写端点，照这个形状抄一遍**（**刻意不抽工具方法**，理由见「约束」）。
 - `.../goods/service/GoodsService.java:475-478` —— 快照读的 Service 转发，**刻意非事务**
@@ -57,7 +57,7 @@ C3 全部写操作的**横切底座**，两块各管一半：
   （本表**跨全量重导保留** ⇒ 自增 Id 会漂）；**③ `AfterJson` 只留索引字段、不抄正文**
   （正文留在域表 `notification` 上，靠 `batchId` 一 join 就到 —— 审计做**索引**，正文留域表）。
 
-### 权限面（块 1 的另一半地基）
+### 权限面（块 1 的另一半地基） {#pack-c3-block-1-infra-s8}
 - `.../shared/web/IdentityGuard.java:71-80` —— `requireSelfOrAdmin` 的三档判据。
   ⚠️ `:36-49` 是「**解析不出身份 = 放行**」的理由 —— 最容易被误读成漏洞的一条。
 - `.../shared/web/AuthSession.java:77-134` —— `ROLE_ADMIN=3`（`:77`）/ `Identity`（`:84`）/
@@ -67,12 +67,12 @@ C3 全部写操作的**横切底座**，两块各管一半：
 - `.../shared/web/WebAuthConfig.java:97-116` —— `AUTH_WHITELIST`（白名单，**唯一出处**）+
   「身份识别例外」表（**与白名单不是一回事**）。
 
-### 先例：往日志表写，全仓只有一处 —— 照它
+### 先例：往日志表写，全仓只有一处 —— 照它 {#pack-c3-block-1-infra-log-precedent}
 - `.../order/model/OrderTimelineWriter.java:23-137` —— **永不抛 / fail-soft / 「允许丢，不许静默」**、
   WARN **只在状态翻转时**打一行、`TABLE`+`INSERT_SQL`+`PARAM_COUNT`（`:59`、`:68`、`:72`）由测试钉住。
   ⚠️ 这是全仓「往日志表写」的**唯一先例**，`AuditService` 就是照它写的；**系统通知的写入路径也要照它**。
 
-### 表
+### 表 {#pack-c3-block-1-infra-s10}
 - `mall_management_sql.sql:264-292` —— `admin_audit` 迁移块（`CREATE TABLE IF NOT EXISTS` 在 `:276`）。
   ⚠️ 看块头 `:271-273`：用 `IF NOT EXISTS` 且**不**在头部加 `DROP` ⇒ **全量重导不清审计历史**（刻意）。
 - `mall_management_sql.sql:294-327` —— **I2 的 `notification` 迁移块**（`CREATE TABLE IF NOT EXISTS` 在 `:309`）。
@@ -81,11 +81,11 @@ C3 全部写操作的**横切底座**，两块各管一半：
   ⚠️ `notification` 块注释 **`:305-307`** 逐字写着「`TargetId` 软引用、**无 FK**、前端容错」—— 与 pack 同口径，改一处必须改另一处。
 - `mall_management_sql.sql:120-133` —— 既有 `message` 表（点对点聊天）。**系统通知不放进它**，理由见「要新建」。
 
-### 账
+### 账 {#pack-c3-block-1-infra-s11}
 - `docs/agent/tech-debt.md:231-...` —— **TD-18**（管理员铸不出 token）。
   ⚠️ 本块的读 API 今天**没有角色闸**，根因就是这一条。
 
-### 前端（本块两个面各占一条**既有**导航项）
+### 前端（本块两个面各占一条**既有**导航项） {#pack-c3-block-1-infra-frontend-nav}
 - `Mall-management-web/mall-management-system/src/router/index.js:396-462` —— `/admin` 路由：
   记录在 `:436-439`（`AdminShell` 懒加载在 `:439`；`meta.roles:['3']` 在 `:438`）、
   局部常量 `AdminStub`（`:434`，懒加载 `StubPage`）、**11 条**占位记录（2 域入口 + 9 子项，`:447-462`）、
@@ -115,9 +115,9 @@ C3 全部写操作的**横切底座**，两块各管一半：
   `.../src/api/admin.js`（追加 `notifySend` / `notifyHistory` / `notifyTemplateList` / `notifyTemplateSave`）、
   `.../src/config/notify-events.js`（21 条 code → 中文标签；`eventLabel()` **兜底** `EVENT_LABELS[code] || code`）。
 
-## 要新建
+## 要新建 {#pack-c3-block-1-infra-s13}
 
-### 表
+### 表 {#pack-c3-block-1-infra-s14}
 - **`notification`** —— ✅ **已落**（I2，VM 库；`mall_management_sql.sql:294-327`，字段清单见 `db-schema.md §6.14`）。
   定稿列（**不再来回改**）：`BatchId` / `ToId` + `ToType` / `EventType` / `Title` / `Content` /
   `TargetType` + `TargetId`（可空）/ `ReadAt`（`NULL` = 未读）/ `CreatedAt`（`datetime(3)`，**DB 存 UTC**）。
@@ -135,7 +135,7 @@ C3 全部写操作的**横切底座**，两块各管一半：
   ⚠️ 块 1 **只做模板的存取 CRUD** —— `send` 收**字面** title/body，**不在发送时套用模板**（占位符渲染留后）。
 - （`admin_audit` **已建**，见「要读 → 表」。）
 
-### 后端
+### 后端 {#pack-c3-block-1-infra-s15}
 - **审计**：`AuditService` / `AdminAuditDao` / `AdminAuditController` / `AuditActions` —— **已落**（批 A）。
   15 个写端点的挂钩**待做但不在本块**（随各自那笔挂，见 `AuditActions.java:19-24`）。
 - **系统通知** —— ✅ **已落**（I2）。**切法 = 原语 vs 工作流**：行级 `send`（fail-soft 原语，块 6 要用）住**公共层**；
@@ -159,7 +159,7 @@ C3 全部写操作的**横切底座**，两块各管一半：
   ⚠️ 块 1 **只定接口与表，不实现块 6 的触发点**；但 21 条 code 已**把这三类事件留出来** ——
   `comment.on.post` / `comment.on.user`（被评论）、`comment.reply`（被回复）、`comment.mention`（被 @）。
 
-### 前端
+### 前端 {#pack-c3-block-1-infra-s16}
 - 管理端「权限与审计」页 —— ✅ **已落**（批 A）：`/admin/observe/audit` 占位 → 真页 `views/admin/AuditPage.vue`：
   列表 + 筛选（动作 / 对象 / 操作者 / 时间范围）+ 详情（**改前 / 改后并排 diff**）。
   ⚠️ **`OccurredAt` 渲染时按浏览器时区转换** —— 后端存的是 DB 时钟 **UTC**（全仓 `NOW()` 一致），**不要改写入**。
@@ -175,7 +175,7 @@ C3 全部写操作的**横切底座**，两块各管一半：
 - `src/api/endpoints.js` —— ✅ **已落**：`admin` 组（批 A 的 3 条 `/admin/audit/*` + I2 的 4 条 `/admin/notify/*`）
   + 文件尾 `notification` 组（I2 的 4 条接收端点）。
 
-## 约束
+## 约束 {#pack-c3-block-1-infra-s17}
 
 - **不抽工具方法**：样板挂钩在 Controller 里**就地四步展开**，不封装成切面 / 工具方法。
   (a) 本仓无 AOP 先例，且切面会让审计**隐式发生**，与「改前快照必须在 UPDATE **之前**」这条**显式**要求相冲突；
@@ -191,7 +191,7 @@ C3 全部写操作的**横切底座**，两块各管一半：
   （I2 的 `/admin/notify/*` 同理：**不加角色闸**。）
 - **不动 DB 时钟**：`OccurredAt` / `notification.CreatedAt` 用 `CURRENT_TIMESTAMP(3)`（**UTC**）；时区只在**前端**转。
 
-## 验收
+## 验收 {#pack-c3-block-1-infra-s18}
 
 1. **审计链通**：`POST /goods/goodsUp` 改一次价 → `admin_audit` 多一行；`BeforeJson` / `AfterJson`
    **只差被改的那一列**；`ActorId` = 商家业务号。
@@ -204,7 +204,7 @@ C3 全部写操作的**横切底座**，两块各管一半：
 7. **不回归**：`./mvnw -q -DskipTests compile` 退出 0；既有 smoke / A3 全绿
    （`IdentityGuard` 与审计挂钩对既有行为**零影响** —— 这是硬门槛）。
 
-### I2 系统通知（2026-10-09 实测 · 真后端 + VM 库，不 mock）
+### I2 系统通知（2026-10-09 实测 · 真后端 + VM 库，不 mock） {#pack-c3-block-1-infra-i2}
 
 8. **建表**：两个 Migration 块应用到 **VM 库**（**不**整份重导 —— 那会 DROP 现有表）；
    `information_schema` 里见到 `notification` / `notification_template`。
@@ -240,7 +240,7 @@ C3 全部写操作的**横切底座**，两块各管一半：
 16. **证据与探针的固定位置**（用户口径）：可复跑探针 → `scripts/probes/`；验收证据 →
     `docs/agent/evidence/<笔名>/`；临时产物 → `_work/`（已 gitignore）。见 `slot-registry.md §十五 15-9`。
 
-## 扩展阅读（不够时按指针读）
+## 扩展阅读（不够时按指针读） {#pack-c3-block-1-infra-s20}
 
 - `docs/agent/context-packs/three-layers.md` —— Controller / Service / DAO 三层约定（admin 域照它分层）。
 - `docs/agent/context-packs/cache-layer.md` §11 —— evict 面（给写端点挂钩时别忘缓存失效那一步）。

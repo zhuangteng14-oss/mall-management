@@ -1,10 +1,10 @@
-# context-pack: concurrency-test
+# context-pack: concurrency-test {#pack-concurrency-test-context-pack}
 
-## 任务
+## 任务 {#pack-concurrency-test-s2}
 
 开发 120 QPS 并发测试脚本，验证多线程场景下的业务正确性。
 
-## 必读文档
+## 必读文档 {#pack-concurrency-test-s3}
 
 - docs/agent/project-map.md §6（N+1 清单，并发脚本要避开这些干扰）
 - docs/agent/concurrency-map.md（现有并发现状；**重点 §5「缺失的并发防护清单」——A3 的断言目标即此清单**）
@@ -13,7 +13,7 @@
 - docs/agent/environment.md（A3 的 VM / MySQL 环境表与安全提醒）
 - docs/agent/business-decisions.md（BD-01 ~ BD-03）
 
-## 必读源码
+## 必读源码 {#pack-concurrency-test-s4}
 
 - Mall-management-server/src/main/java/com/minke/mallmanagement/order/controller/OrderController.java（订单路由）+ `order/service/OrderService.java`（订单核心逻辑：`orderAdd` / `orderPayIfUp` / `orderReceiveIfUp` / `orderDeliveryIfUp`）
 - Mall-management-server/src/main/java/com/minke/mallmanagement/user/controller/UserController.java（**仅路由**，三层第三笔后）+ `user/service/UserService.java`（业务体，`loginAdd` 的 `@Transactional` 在此）+ `user/dao/UserDao.java`（全部内联 SQL，含 `loginAdd` 的三表写入）
@@ -21,9 +21,9 @@
 
 > 路径注意：主源与测试源**现已统一**在 `com/minke/`（2026-10-02 笔 1 挪包与笔 2 改名之前，主源是 `com/minke/mallmanagement_controller/`「**无 `server` 段**」、测试源是 `com/minke/mallmanagementserver/`，两者不一致）。下文凡引用旧路径者均属**历史记录**。⚠️ **口径注**：本文所有 `:<行>` 为 **2026-10-02 实测**；重构后须重测。用户域旧 `U:<n>` 为三层前 264 行版 `UserController` 的历史坐标（2026-10-02 第三笔 `0c07e96` 后已重指）。
 
-## 前置准备
+## 前置准备 {#pack-concurrency-test-s5}
 
-### 目标环境：独立 MySQL 实例 + 同名库（Q1=B 定案）
+### 目标环境：独立 MySQL 实例 + 同名库（Q1=B 定案） {#pack-concurrency-test-mysql}
 
 A3 **不复用本机开发库，也不是「切库名」**，而是**另起一个 MySQL 实例，库名仍叫 `mall_management_sql`**。理由（TD-13，实测）：
 
@@ -33,7 +33,7 @@ A3 **不复用本机开发库，也不是「切库名」**，而是**另起一�
 > ⚠️ **本节原先写的「本地建 `mall_management_test` 库 + `sed` 过滤导入 + 切 `DB_URL`」三步已作废**（2026-09-20 重写）：按 Q1=B 与 TD-13，那三步均不成立 —— 切库名切不走硬编码，且「脚本的 JDBC 断言」与「后端的读写」必须在同一个实例上才谈得上互相印证。
 > 代价是本地需要第二个 MySQL 实例（VM）。这是**刻意的**：被测环境必须与开发环境分离，否则 A3 与日常开发互相污染。
 
-### VM 实例（`192.168.229.129`）、导入与账号
+### VM 实例（`192.168.229.129`）、导入与账号 {#pack-concurrency-test-vm}
 
 | 项 | 值 |
 |---|---|
@@ -61,7 +61,7 @@ echo 123456 | sudo -S -p '' mysql < /tmp/mall_management_sql.sql
 - **vmrun 不回传 guest 的 stdout** → 把输出落到 guest 文件，再 `CopyFileFromGuestToHost`。
 - `getGuestIPAddress` 的输出**含 CRLF**，不要用 `read -r` 捕获（会把 `\r` 并进路径）。
 
-### 启动验证（S0-5，2026-09-20 已实测）
+### 启动验证（S0-5，2026-09-20 已实测） {#pack-concurrency-test-start-verify}
 
 **不预设结论**：驱动 8.0.33 能否连 MySQL 8.4，是实测出来的。四步与实测结果：
 
@@ -75,11 +75,11 @@ echo 123456 | sudo -S -p '' mysql < /tmp/mall_management_sql.sql
 > ⚠️ **第 1 步的时机已更正（2026-09-20）**：原写「Hikari **懒初始化**，配置块在**第一次 `getConnection()`** 时才打印，服务启动日志里没有 —— 要用日志确认连的是哪台库，**必须先打一个请求**」，**该判断是错的**（用户指出，与 `worklog-2026-09-20-a3.md` 同一处更正）。实测本项目**启动期 Hibernate 初始化就会触发连接**，故 `HikariConfig` 块在 `Tomcat started` **之前**已打印，**不需要额外请求**。
 > 「先打一个请求」仍作为**备用路径**保留：TD-01 建议移除未使用的 `spring-boot-starter-data-jpa`（全部数据访问走 `JdbcTemplate`），届时 Hikari 不再被 Hibernate 触发，那一步才真的需要 —— 两种未来状态下这一行都说得通，故不删。
 
-### CI 环境
+### CI 环境 {#pack-concurrency-test-ci}
 
 CI 侧对应的是 `concurrency` job 的 **service container `mysql:8.4`**，库名同为 `mall_management_sql`，导入走**容器自带的 `mysql` 客户端**。详见 §CI 集成。
 
-## 约束
+## 约束 {#pack-concurrency-test-s10}
 
 - 目标 120 QPS
 - 必须有业务正确性断言
@@ -108,7 +108,7 @@ CI 侧对应的是 `concurrency` job 的 **service container `mysql:8.4`**，库
   - 不进 `surefire`，**`mvn test` 不会跑它** —— 避免 A2 定的「全量 `mvn test`」把每次 CI 都拖成必须起 MySQL
   - CI 侧**已新增独立 job**（带 `mysql` service）跑此脚本；**原 backend job 保持零 MySQL、全量快速**（已落地，见 §CI 集成）
 
-## 脚本内置校验 P0–P7（先证明「跑的是对的东西」，再谈结论）
+## 脚本内置校验 P0–P7（先证明「跑的是对的东西」，再谈结论） {#pack-concurrency-test-p0}
 
 A3 的结论只有在「确实压到了目标环境」时才成立。故脚本自己先做七道校验；**硬门禁失败即不继续**，且退出码 `2` 专用于「环境不对」，与「断言失败」区分开。SKIP 是**级联状态**（前一环没过，后一环无从谈起），不是「通过」。
 
@@ -163,7 +163,7 @@ A3 的结论只有在「确实压到了目标环境」时才成立。故脚本�
 ⚠️ **P6 的 FAIL 分支未实测**（改版前后一致）：本地构造不出（需后端连另一个库，须重启后端）。故「一致 → PASS」有实测（`runId=506a0997`，2026-09-27 全绿），其**反向分支仍无实测**。
 ⚠️ **P5 的就绪等待上限默认 60s 是本脚本的取值**，H3 未规定；`--ready-timeout-sec` 可覆盖（CI 用 180 —— 那是**刻意不同**）。落盘写明，以免日后被当成 H3 的规定。
 
-## 命名空间与清理
+## 命名空间与清理 {#pack-concurrency-test-s12}
 
 - **行数据命名空间**：`A3TEST-<runId8>`。种子 `OrderId` 形如 `ZHJC53759811`（4 大写字母 + 8 数字），与 `A3TEST-` 前缀**零碰撞**。
 - ~~**哨兵行**：`A3P-<runId8>`~~ —— **2026-09-27 起脚本不再产生任何 `A3P-` 行**（P6 改库身份对比，见上），该前缀连同其 20 字符长度约束一并成为历史。
@@ -175,7 +175,7 @@ A3 的结论只有在「确实压到了目标环境」时才成立。故脚本�
 - ⚠️ **自增值会前进，行删了值不复用**：B-2 的 5 轮消耗（`loginAdd` / `friendAdd` / `goodstype` 三处 INSERT **各自计数**）。报告须如实写「留自增计数前进」—— 这个差额是 P4「库脏」判据必须容忍的部分，不是有人手工改了数据。
 - **P6 不再写库，故不留自增痕迹**：原 P6 每轮消耗 1 个 `goodstype` 自增值（实测 12→15），旧文档据此写下「P6 不留痕迹」不成立 —— 该结论**已随哨兵机制作废**。2026-09-27 改版后 P6 全程只读，`goodstype` 的自增只由 B-2 的五轮驱动。
 
-## 验收标准
+## 验收标准 {#pack-concurrency-test-acceptance}
 
 4 个并发场景：只读（S1）、下单（S2）、支付（S3）、混合（S4）。每场景跑通并输出报告。
 
@@ -197,7 +197,7 @@ A3 的结论只有在「确实压到了目标环境」时才成立。故脚本�
 
 | 断言 | 预期结果 | 依据 |
 |---|---|---|
-| 并发同参 `orderAdd` 不产生重复 `OrderId` | ~~**预期失败**~~ → ✅ **PASS**（2026-09-30 S1a 翻转） | ~~`concurrency-map.md` §5 第 9 行（`order.OrderId` 无唯一索引，主键是自增 `Id`）~~ → §5 第 9 行**已标记「已消除」**（`1e2fcfa`）；本断言同日拆为 **`A-S2a-1a`（锁指标增量 == 20）/ `1b`（rows == 1）/ `1c`（msg 无「数据库错误」）**，见 `cache-layer.md:233` |
+| 并发同参 `orderAdd` 不产生重复 `OrderId` | ~~**预期失败**~~ → ✅ **PASS**（2026-09-30 S1a 翻转） | ~~`concurrency-map.md` §5 第 9 行（`order.OrderId` 无唯一索引，主键是自增 `Id`）~~ → §5 第 9 行**已标记「已消除」**（`1e2fcfa`）；本断言同日拆为 **`A-S2a-1a`（锁指标增量 == 20）/ `1b`（rows == 1）/ `1c`（msg 无「数据库错误」）**，见 `cache-layer.md#pack-cache-layer-6` |
 | 并发同参 `loginAdd` **不产生 HTTP 5xx** —— **不得**写成「不产生重复行」 | **预期失败**（信号 = **5xx > 0**） | `concurrency-map.md` §5 第 5 行（`UserDao.existsUserName:119` → `UserDao.insertUserCustomer:170` TOCTOU）。三表 `login` / `user` / `customerimage` **都有主键**（`UserName` / `username` / `UserName`）→ 重复行**不可能**产生；真实缺陷是未捕获的 `DuplicateKeyException` → HTTP 500（`UserService.loginAdd:125-160` 无 try/catch）。**此行的信号极性与其它各处相反**：这里的 5xx 是「缺陷复现」而非异常 |
 | 并发同参 `friendAdd` / `goodstype`(POST) 不产生重复行 | **预期失败**（信号 = **重复行 ≥ 2**） | `concurrency-map.md` §5 第 6–8、10 行（TOCTOU；`friend` 仅 PK `id`、`goodstype` 仅 PK 自增 → 两表可**真的插出重复行**） |
 | 并发下无死锁 / 无锁等待超时（MySQL 1213 / 1205） | 待实测 | 当前 `order` 仅 6 行种子数据，全表扫描代价极低，**小表上绿色不构成有意义的证据**，需在大数据量下复测 |
@@ -213,7 +213,7 @@ A3 的结论只有在「确实压到了目标环境」时才成立。故脚本�
 - 脚本直查 `CreateTime` / `SettlementDate` 须按**字符串**处理（两者均为 `varchar(50)`），**不得**按 TIMESTAMP 比较（F6，已核实 `SQL:152-153`）。
 - QPS 达标与业务断言**解耦**：CI runner 性能抖动大，建议 QPS 只记录、不设门禁，**门禁只卡业务断言**，否则 CI 会因性能波动随机变红。
 
-### 判定口径（verdict）与门禁
+### 判定口径（verdict）与门禁 {#pack-concurrency-test-verdict}
 
 | verdict | 含义 | 谁用 |
 |---|---|---|
@@ -234,7 +234,7 @@ A3 的结论只有在「确实压到了目标环境」时才成立。故脚本�
 - `CreateTime` / `SettlementDate` 按**字符串**比（F6：两者均 `varchar(50)`，已核实 `SQL:152-153`）。
 - `A-S1-3` 的 basis 是种子行 `SQL:99` `('123','123456',1,'pIzTWafaGp')`。
 
-### 实测数据（阶段 D / E 已跑出）
+### 实测数据（阶段 D / E 已跑出） {#pack-concurrency-test-s15}
 
 > 本节只放**结论性数字**；完整的发现过程、踩过的坑与原始日志见 `docs/agent/archive/worklog-2026-09-20-a3.md`。
 
@@ -248,7 +248,7 @@ A3 的结论只有在「确实压到了目标环境」时才成立。故脚本�
   - **报告不带什么**：S2a / S3 / S4a 是栅栏型（burst）、没有 `Load`，其取数是手写 `rec()` 的**头条计数**（如 `inconsistentOrders`），细粒度响应分类只存在于断言 `detail` 与日志里 —— 别以为 JSON 里能查到全部证据。
   - 报告**写失败不改变退出码**：报告是证据，不是判定；判定由门禁断言与退出码给出。但绝不静默 —— stderr 明确报错，stdout 摘要行落 `<<未落盘>>（见 stderr）`。
 
-## CI 集成（concurrency job）
+## CI 集成（concurrency job） {#pack-concurrency-test-ci-integration}
 
 `.github/workflows/ci.yml` 的第三个 job `concurrency` —— **有** `needs: backend`（要用 backend 构建出的 jar；**但 backend job 本身零 MySQL**，库在本 job 的 service container 里）；job 级 `concurrency` 覆盖 workflow 级的 `cancel-in-progress: true`（**被砍断的测量没有报告、日志也是截断的**，是最难排查的一种红）；`continue-on-error: true`。
 
@@ -265,7 +265,7 @@ A3 的结论只有在「确实压到了目标环境」时才成立。故脚本�
 - 本阶段**零业务 Java 改动**（除 D1 那一个测试类）。三条读码发现：① `--reset-db` 是死参数 → 登记 **TD-16**，不在本阶段实现；② `run.sh` 里 `--log-file` 的注释与代码相反（注释称「调用方优先」，实际是 run.sh 覆盖调用方）→ 已改注释，**未改行为**；③ 见上一条 `--skip-negative-control`。
 - 顺带更正一处**过期注释**：`backend` job 里「MySQL service 计划在 A3 阶段引入」已改为「落在 concurrency job；本 job 至今不需要 MySQL」。
 
-## 相关 TD / BD
+## 相关 TD / BD {#pack-concurrency-test-td}
 
 - TD-01（`spring-boot-starter-data-jpa` 空转 + `ddl-auto`，CI 起库时需确认不反向改表）—— ✅ **2026-10-04 已关闭（`B` 方案：依赖保留、`ddl-auto` 改 `validate`）**；P3 那条「未反向改表」的校验**照旧保留**。**同时是 D1 的根因**：无 `@Entity`，上下文加载根本不需要库，故 `contextLoads()` 连不上库也能过 —— ⚠️ **该根因不受 B 影响**（B 只把 `update` 换成 `validate`，仍是零 `@Entity`、仍空转）
 - TD-08（测试数据落盘污染 —— 选 `orderAdd` 系列可规避）
@@ -279,7 +279,7 @@ A3 的结论只有在「确实压到了目标环境」时才成立。故脚本�
 - BD-01（`SettlementDate` 被付款/发货/收货三处覆写，涉及支付场景的读取口径）
 - BD-03（零鉴权 —— 并发脚本无需处理登录态，可直接压接口）
 
-## 元教训：基于局部信息下结论（三个实例）
+## 元教训：基于局部信息下结论（三个实例） {#pack-concurrency-test-s18}
 
 本节由 2026-09-20 的两条同源子项**合并而成**（原为待落盘清单第 21 条的末条子项与第 23 条；清单已并入正文，故此处不再引编号 —— 单独立条只会将来续出 24、25 条，不如一次归类），实例 3 于同日晚由「H 组正文检索失败」一事补入。三例同源，且与 **TD-02**（根目录无 `.gitignore`）、**TD-07**（catch 归因错）同类：**都没读实际内容就下了结论**。
 
@@ -308,13 +308,13 @@ A3 的结论只有在「确实压到了目标环境」时才成立。故脚本�
 
 附带记下 `mask()` 的行为：返回 `"*".repeat(len)`，故脱敏后仍泄漏**口令长度**（横幅里是 7 个星号）。判断为可接受（长度不是秘密），未改。
 
-## 落盘前 checklist（v1 — 仅含已取证条目）
+## 落盘前 checklist（v1 — 仅含已取证条目） {#pack-concurrency-test-checklist}
 
 > 用途：本 pack 正文与探索结论之间**已出现漂移**。落盘时对着本表**逐项打勾**，不靠记忆。
 > 每条均附取证依据；无依据的条目一律不列入（`agent.md` 规则 9.1）。
 > **本表已于 2026-09-20 完成落盘核对，16 项全部 `[x]`**；「落盘位置」列指向 pack 正文对应章节，使本表兼作导航索引。
 
-### 核对状态汇总（2026-09-20）
+### 核对状态汇总（2026-09-20） {#pack-concurrency-test-s20}
 
 | 类别 | 条目 | 依据核对 | 落地状态 |
 |---|---|---|---|
@@ -350,7 +350,7 @@ A3 的结论只有在「确实压到了目标环境」时才成立。故脚本�
 | 15 | `[x]` | H3 / H4 / H5 / H6 正文 —— **已回填**（见 §附录 A）：4 处与已落盘冲突（C1–C4，**一律以已落盘为准**）保留在附录 A；2 处 H3 自身缺口（G1–G2）已在正文解决；7 项待裁决（D1–D7）**均已裁决并落地**（D1→§CI 集成、D2→§判定口径、D3→§约束、D4→§验收标准、D5→TD-17、D6→§判定口径、D7→本表第 16 项） | 正文**存在于本地转录**（`5574d7b3` 第 134 行，27208 字符，经 `json.loads` 解出）。原判「从未落盘」**为误** —— 根因见 §元教训「实例 3」 | §附录 A |
 | 16 | `[x]` | R12 —— **改本 pack 时须同步 grep `concurrency-map.md` §5**：第 5 行的 `loginAdd` 表述（以及第 9 行的 `order.OrderId`）是否仍与 pack 的 B 组断言口径一致 | H3 `risks.R12`；`agent.md` 规则 9.2 / 9.3（**引用外部文档的结论必须回原文核对**）。已当场核对过一次：第 5 行确为 `loginAdd` TOCTOU、第 9 行**当时**确为 `order.OrderId` 无唯一索引。⚠️ **2026-09-30 S1a 后第 9 行已改为「已消除」**（`1e2fcfa`），本 pack B 组第 1 行与 `A-S2a-1` 亦同日翻转 —— R12 下次重做时须按**新口径**核对（第 9 行现在应读作「有 UNIQUE 兜底」）。列为 checklist 项的理由：这是**每次改 pack 都要重做**的动作，不是一次性核对 —— 上游 §5 若增删行，pack 的 `basis` 会静默失准 | 本表（**动作项**，每次改 pack 重做） |
 
-### 附录 A —— H3–H6 与已落盘的冲突表（2026-09-20）
+### 附录 A —— H3–H6 与已落盘的冲突表（2026-09-20） {#pack-concurrency-test-app-a}
 
 > 本节保留**冲突表**（以已落盘为准）与**温和偏离表**（实现与 H3 写法不同但等价或更强）两类。H3 自身的两个缺口（G1 哨兵前缀、G2 P4 漏 friend）已在本 pack §命名空间与清理 / §脚本内置校验 P0–P7 解决，不在本附录重列；检索 H3–H6 的**失败根因**（按标签检索、命中被按文件整体归因丢弃）属「元教训」章节的第三个实例，见该节。
 >
@@ -378,7 +378,7 @@ A3 的结论只有在「确实压到了目标环境」时才成立。故脚本�
 
 > **原「待落盘清单」已并入本 pack 正文（2026-09-20）**：S0 记录进 §前置准备，P0–P7 判据进 §脚本内置校验，命名 / 清理进 §命名空间与清理，裁决与门禁进 §判定口径，实测数据（B-2 / S4b / 报告）进 §实测数据，CI 约定进 §CI 集成，H 组冲突进 §附录 A。清单本体删除 —— 索引留在正文里，不另存一份。
 
-## 待验证（⚠）
+## 待验证（⚠） {#pack-concurrency-test-s22}
 
 本 pack 中**未验证项与强度不足的判据**集中如下（正文各处已就地标注，此处仅作**索引**，不重复正文）：
 
