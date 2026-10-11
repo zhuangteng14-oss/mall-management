@@ -241,17 +241,28 @@ public class CouponService {
 
     // ==================== 用户端 ====================
 
-    /** 领券中心：启用中且未过期的券 + 「我是否已领 / 是否已领完」两个布尔。 */
-    public Map<String, Object> claimable(String account, Integer limit) {
+    /**
+     * 领券中心：启用中且未过期的券 + 「我是否已领 / 是否已领完」两个布尔。
+     *
+     * @param thisWeek {@code "1"} ⇒ 只回**本周新发布**的（主页领券中心）；其余 / 省略 ⇒ 全部可领
+     *                 （用户中心「可领」tab，含旧券）。两者是**同一个查询**的两个筛法（裁定「甲」，
+     *                 见 {@code CouponDao.selectClaimable}）⇒ 主页那批天然是「可领」的**子集**。
+     *                 ⚠️ 参数是**字符串**：本仓类级不得有 {@code @Validated}，一律 Service 手判
+     *                 （同组里的 {@code Status} / {@code Type} 都是这个形态）。
+     */
+    public Map<String, Object> claimable(String account, Integer limit, String thisWeek) {
         if (isBlank(account)) {
             return fail("缺少参数：Account");
         }
         int effective = normalizeLimit(limit);
+        boolean onlyWeek = "1".equals(thisWeek == null ? "" : thisWeek.trim());
         try {
             Map<String, Object> result = new HashMap<>();
             result.put("success", true);
-            result.put("list", couponDao.selectClaimable(account.trim(), effective));
+            result.put("list", couponDao.selectClaimable(account.trim(), effective, onlyWeek));
             result.put("limit", effective);
+            // 「本周还剩 N 天」——区块级小字，两种筛法都回（后端算，前端不碰浏览器钟）。
+            result.put("daysLeft", couponDao.selectWeekWindow().get("DaysLeft"));
             return result;
         } catch (Exception e) {
             e.printStackTrace();
@@ -298,6 +309,79 @@ public class CouponService {
         return doClaim(couponId.trim(), account.trim(), "claim");
     }
 
+    /**
+     * **一键领取「本周全部」** —— 批量自助领券（用户 2026-10-11 裁定 ②：真做、**不弹确认**，
+     * 券「领了就有」无损失 ⇒ 直接领 + 汇总提示）。
+     *
+     * <h3>【集合由**服务端**定，前端不传 CouponId 列表】</h3>
+     * 「本周」是**服务端语义**（{@code CouponDao.THIS_WEEK}）：让前端把列表传上来就等于
+     * 把「本周」的定义复制到前端，两处口径迟早走岔（本仓最忌「口径有两处可抄错」）；
+     * 服务端在**点击时刻**重算，也天然避开「前端手里是 1 分钟前的旧列表」。这同时堵掉
+     * 「构造任意 ID 列表刷这个接口」的面。
+     * <p>集合 = **本周新发布 + 启用中 + 未过期 + 我还没领过 + 还没领完**；逐张走 {@link #doClaim}
+     * （同一条单张路径、同一套闸，**不另写一份领券逻辑**）。
+     *
+     * <h3>【⚠️ 部分失败**不**回 {@code success:false}】</h3>
+     * 与 {@code NotificationBroadcastService.send} 类注释那段「刻意不因部分失败而回 false」同源：
+     * <ol>
+     *   <li>全仓 {@code success:false} 的语义是「这个**请求**没用 / 调用方该改参数或重试」——
+     *       部分失败**不是**一个可重试的请求错误；</li>
+     *   <li>回 false 会**诱导前端重发整批** ⇒ 已成功的那几张被再点一遍，用户看到一堆假报错，
+     *       还白跑一轮「占名额 / 退名额」；</li>
+     *   <li>每张的成败已经在 {@code items[].success} 逐条如实回报了。顶层 {@code success:true}
+     *       说的是「批量动作**执行完毕**」，与「全成功」是两件事。</li>
+     * </ol>
+     * ⚠️ 与 {@code CartService.partialFailure} 的方向**相反是有意的**：结算是 **fail-fast**
+     * （前几笔真成了订单，必须让用户停下），批量领券是**尽力而为**（一张失败不影响另一张）。
+     *
+     * <p>逐张**不中断**是天然的：{@link #doClaim} 内部 {@code catch (Exception)} 兜住一切、
+     * 回一个 Map、**从不抛异常**（本类刻意零事务，领券走「先占名额、撞键补偿」两条语句）。
+     */
+    public Map<String, Object> claimBatch(String account) {
+        if (isBlank(account)) {
+            return fail("缺少参数：Account");
+        }
+        String acct = account.trim();
+        try {
+            List<Map<String, Object>> rows = couponDao.selectClaimable(acct, MAX_LIMIT, true);
+            List<Map<String, Object>> items = new ArrayList<>();
+            int claimed = 0;
+            for (Map<String, Object> row : rows) {
+                // 已领 / 已领完的不进集合（「一键领取」只该领**还能领的**）。
+                // ⚠️ 这只减少无谓调用，**不是判据** —— 真判据在 doClaim 里 tryClaim 的 CAS 返回行数。
+                if (flag(row.get("Claimed")) || flag(row.get("SoldOut"))) {
+                    continue;
+                }
+                String couponId = str(row.get("CouponId"));
+                Map<String, Object> one = doClaim(couponId, acct, "claim");
+                Map<String, Object> item = new LinkedHashMap<>();
+                item.put("CouponId", couponId);
+                item.put("Name", str(row.get("Name")));
+                item.put("success", flag(one.get("success")));
+                item.put("msg", str(one.get("msg")));
+                items.add(item);
+                if (flag(one.get("success"))) {
+                    claimed++;
+                }
+            }
+            int failed = items.size() - claimed;
+            Map<String, Object> result = new HashMap<>();
+            result.put("success", true);   // ←「批量动作执行完毕」，**不是**「全成功」（见上面那节）
+            result.put("total", items.size());
+            result.put("claimed", claimed);
+            result.put("failed", failed);
+            result.put("items", items);
+            result.put("daysLeft", couponDao.selectWeekWindow().get("DaysLeft"));
+            result.put("msg", items.isEmpty()
+                    ? "本周没有可领的新券"
+                    : "已领取 " + claimed + " 张" + (failed > 0 ? "，" + failed + " 张失败" : ""));
+            return result;
+        } catch (Exception e) {
+            e.printStackTrace();
+            return fail("批量领取失败：" + e.getMessage());
+        }
+    }
+
     // ==================== 内部 ====================
 
     /**
@@ -320,8 +404,12 @@ public class CouponService {
             }
             int rows = couponDao.tryClaim(couponId);
             if (rows == 0) {
-                // 四种原因里最可能的是「过期」或「领完」—— 都念出来，别让用户猜。
-                return fail("领取失败：该券已过期或已领完");
+                // ⚠️ 这里**不再**合并成一句「该券已过期或已领完」了（用户 2026-10-11 手验要求拆开）。
+                //    那条话术的两个毛病：①「已过期」与「已领完」是两个不同的下一步（一个要另建券、
+                //    一个要等/加量），合并等于什么都没说；②它**漏了第三种原因「还没开始」**——
+                //    用户那次撞的就是这一种，却被指着去查「是不是过期了」，白查一轮。
+                //    真因按**库时钟**逐条判（`selectClaimBlock`，表达式与 `tryClaim` 的 WHERE 同款）。
+                return fail(claimBlockReason(couponId));
             }
             try {
                 couponDao.insertGrant(couponId, account, source);
@@ -332,7 +420,10 @@ public class CouponService {
             }
         } catch (Exception e) {
             e.printStackTrace();
-            return fail("领取失败：" + e.getMessage());
+            // ⚠️ 消息里**不带**「领取失败：」前缀：两个调用方（首页券包 / PDP 领券行）都会自己拼
+            //    `'领取失败：' + msg`，再带一层就成了「领取失败：领取失败：…」（用户 2026-10-11 手验）。
+            //    前缀归前端、原因归后端 —— 这条分工也适用于下面 `claimBlockReason` 的返回值。
+            return fail(e.getMessage());
         }
         Map<String, Object> result = new HashMap<>();
         result.put("success", true);
@@ -352,7 +443,7 @@ public class CouponService {
             if (before == null) {
                 return fail("券不存在");
             }
-            if (STATUS_ACTIVE.equals(target) && isExpired(before)) {
+            if (STATUS_ACTIVE.equals(target) && isExpired(id)) {
                 return fail("该券已过有效期，启用也不会有人能领 —— 请改有效期或另建一张");
             }
             int rows = couponDao.updateStatus(id, target);
@@ -372,16 +463,67 @@ public class CouponService {
         }
     }
 
-    /** {@code EndAt} 已经是过去（读回来的 {@code EndAt} 是 {@code 'YYYY-MM-DD HH:MM:SS'} 文本）。 */
-    private static boolean isExpired(Map<String, Object> coupon) {
-        Object endAt = coupon.get("EndAt");
-        if (endAt == null) {
+    /**
+     * {@link CouponDao#tryClaim} 返回 0 时，念一句**指得准**的原因。
+     *
+     * <p>三个标志**互相独立**（可以同时成立，例如一张既没开始又已领完的券）⇒ 按「用户最先该
+     * 处理哪一件事」排优先级：还没开始 &gt; 已过期 &gt; 已领完。都判不出来时回一句**如实**的兜底，
+     * 不编一个像模像样的原因（那正是本次要拆掉的那种话术）。
+     *
+     * <p>⚠️ 返回的是**光秃秃的原因**，不带「领取失败：」前缀 —— 两个前端调用点都自己拼前缀。
+     */
+    private String claimBlockReason(String couponId) {
+        Map<String, Object> block = couponDao.selectClaimBlock(couponId);
+        if (block == null) {
+            return "券不存在";
+        }
+        if (flag(block.get("NotStarted"))) {
+            return "该券还未开始";
+        }
+        if (flag(block.get("Expired"))) {
+            return "该券已过期";
+        }
+        if (flag(block.get("SoldOut"))) {
+            return "该券已领完";
+        }
+        // 三条都没命中却也没占上名额：只可能是「读完之后状态被改了」这类竞态 —— 如实说，别猜。
+        return "领取未成功（名额未占上，请稍后重试）";
+    }
+
+    /**
+     * 该券是不是**已经过期** —— 判据走**库时钟**（{@code NOW()}），与领券闸同一个钟。
+     *
+     * <p>⚠️ 2026-10-11 改：这里**曾经**是拿 {@code LocalDateTime.now()}（**JVM** 时钟）与读回来的
+     * {@code EndAt} 文本比字典序。在库时钟 = UTC、开发机时钟 = 东八区的环境里，那两个钟差 8 小时 ⇒
+     * 「启用」会在券**还有 8 小时**有效期时就拒掉它，而领券闸（走 {@code NOW()}）却认为还能领 ——
+     * 同一张券两个钟给两个答案。根因与用户 2026-10-11 手验报的那一条同族（**双时钟**），故一并收掉。
+     * 现在只认库时钟，全类不再有第二个「现在几点了」。
+     */
+    private boolean isExpired(String couponId) {
+        Map<String, Object> block = couponDao.selectClaimBlock(couponId);
+        return block != null && flag(block.get("Expired"));
+    }
+
+    /**
+     * 回读的「是/否」标志 —— 宽容判据。
+     *
+     * <p>⚠️ 同一个字段可能是 {@code Boolean.TRUE} 也可能是 {@code 1}/{@code "1"}（Connector/J 的
+     * {@code tinyInt1isBit} 与驱动版本相关）⇒ 别用 {@code Boolean.TRUE.equals(...)}，那会把
+     * 「其实是 1」判成否，**静默**给出错误结论（本仓 `AccountsPage.isBanned` / `notify-events.js`
+     * 都有同一句宽容写法）。
+     */
+    private static boolean flag(Object o) {
+        if (o == null) {
             return false;
         }
-        String now = java.time.LocalDateTime.now()
-                .format(java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"));
-        // 格式是零填充的 ISO 式 ⇒ 字典序比较即时间序（同 OrderPage 对 CreateTime 的口径）。
-        return String.valueOf(endAt).compareTo(now) <= 0;
+        if (o instanceof Boolean) {
+            return (Boolean) o;
+        }
+        if (o instanceof Number) {
+            return ((Number) o).intValue() != 0;
+        }
+        String s = String.valueOf(o).trim();
+        return "1".equals(s) || "true".equalsIgnoreCase(s);
     }
 
     /**

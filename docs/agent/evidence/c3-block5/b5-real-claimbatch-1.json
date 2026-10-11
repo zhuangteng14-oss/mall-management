@@ -1,0 +1,1 @@
+{"msg":"已领取 3 张","total":3,"success":true,"claimed":3,"failed":0,"daysLeft":1,"items":[{"CouponId":"CPSEED00000001","Name":"本周新券A","success":true,"msg":"领取成功"},{"CouponId":"CPSEED00000002","Name":"本周新券B","success":true,"msg":"领取成功"},{"CouponId":"CPSEED00000004","Name":"本周非新券D","success":true,"msg":"领取成功"}]}

@@ -29,7 +29,7 @@
       <div class="inner">
         <button type="button" class="now" disabled title="预留 · 全部商品分类（无落点：分类检索现走搜索页 GoodsSelect 的左分类树）">全部商品分类</button>
         <button type="button" class="hot" disabled title="预留 · 今日秒杀（无落点：本页秒杀位是预留位）">今日秒杀</button>
-        <button type="button" class="hot" @click="scrollToTickets" title="领券中心 —— 锚到本页券包区（C3 块 5，2026-10-11 接线；原 data-slot「预留 · 领券中心」退场）">领券中心</button>
+        <button type="button" class="hot" @click="scrollToTickets" title="领券中心 —— 锚到本页领券中心（C3 块 5 commit 1 接线；2026-10-11 信息架构重排后本页**只留领券中心**，券包已搬去用户中心弹窗）">领券中心</button>
         <button type="button" disabled title="预留 · 品牌专区（无落点：无品牌数据模型）">品牌专区</button>
         <button type="button" disabled title="预留 · 会员中心（无落点：会员体系未落）">会员中心</button>
         <button type="button" disabled title="预留 · 客户服务（无落点：在线客服是预留位）">客户服务</button>
@@ -90,7 +90,12 @@
 
       <!-- ── 功能入口（预留位，稿 `:787-804`）──
            2026-10-07 裁决「**一律落**」：UI 照落。内层四项原一律 `disabled` + `title`（角标只挂
-           区块级 ⇒ 不在每项重复 `data-slot`）。四个 SVG 逐字取稿。⚠️ **2026-10-11（块 5 · commit 1）**：仅「优惠券」接通（锚到 `.tickets`，清单 §一 #3），**另三项仍 `disabled`**。
+           区块级 ⇒ 不在每项重复 `data-slot`）。四个 SVG 逐字取稿。
+           ⚠️ **2026-10-11（块 5 · commit 1）**：「优惠券」一度接通（锚到 `.tickets`，清单 §一 #3）。
+           ⚠️ **同日「券的信息架构重排」把它整格删了**（用户定：**主页不显示券包** —— 券包是「我的东西」，
+              归用户中心）⇒ 本区块回到**四项全 `disabled`**，只剩三格。删的是整个 `<button class="qi">`，
+              不是改成别的落点：用户明确作废了「主页快捷块打开同一个弹窗」那条裁定。
+              ⚠️ `scrollToTickets` **保留**（`:32` 二级导航「领券中心」还在用它），删的只是快捷块这一格。
            ⚠️ 稿的副标题带三个 **mock 数字**（待收货 2 / 3 张可用 / 最近 18 件）—— 照落会在真产品里
               显示假数字 ⇒ 只落**描述**、不落数字（与 ChatRoom 不写死「今天」同一条理由）；
               「在线客服 9:00 – 21:00」是服务时段陈述、不是 mock ⇒ 逐字落。 -->
@@ -98,10 +103,6 @@
         <button type="button" class="qi" disabled title="预留 · 我的订单（待 C3〈订单〉）">
           <span class="ic"><svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="2" width="14" height="16" rx="2"/><path d="M7 7h6M7 11h6M7 15h3" stroke-linecap="round"/></svg></span>
           <span class="tx"><b>我的订单</b><span>待付款 · 待收货</span></span>
-        </button>
-        <button type="button" class="qi" @click="scrollToTickets" title="优惠券 —— 我的券包（C3 块 5，2026-10-11 接线；原 data-slot「预留 · 优惠券（待 C3〈促销〉）」退场）">
-          <span class="ic"><svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M2 6a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2z"/><path d="M2 7l8 5 8-5"/></svg></span>
-          <span class="tx"><b>优惠券</b><span>我的券包</span></span>
         </button>
         <button type="button" class="qi" disabled title="预留 · 浏览记录（待 C3〈个人中心〉）">
           <span class="ic"><svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="10" cy="10" r="7.5"/><path d="M10 6v4.5l3 1.8" stroke-linecap="round"/></svg></span>
@@ -129,34 +130,90 @@
         </div>
       </section>
 
-      <!-- ── 券包（**块 5 · commit 1 落地**，2026-10-11）──
+      <!-- ── 领券中心（**块 5**；2026-10-11「券的信息架构重排」后本页**只剩这一栏**）──
            原为「预留 · 券包位」（稿 `:817` 的**空** section，3 张券由稿的 JS 塞 mock `TICKETS`）。
-           现在两栏都是真数据：左「领券中心」← `/marketing/coupons`，右「我的券包」← `/marketing/myCoupons`
-           （封装见 `src/api/marketing.js`）。
-           ⚠️ **排序不在这里**：券包的「快过期 → 正常 → 已用 / 已过期」由后端 `CouponDao.selectMyGrants`
-              定好（`Bucket` / `SortIdx`，`ORDER BY SortIdx`) ⇒ 本页**按数组原序渲染**，别自己再排一遍
-              —— 再排一次就会与「券包红点」的判据走岔（两者必须同一个阈值表达式）。
-           ⚠️ `Claimed` / `SoldOut` 的形态可能是 `true` 也可能是 `1`（Connector/J `tinyInt1isBit`）
-              ⇒ 判据走 `truthy()`，别写 `=== true`。
+           commit 1 时这里是**两栏**（左「领券中心」+ 右「我的券包」）—— 用户 2026-10-11 重排后
+           **右栏整块删掉**：券包是「我的东西」，归**用户中心**（`views/UserInfoPage.vue` 的「优惠券」格
+           → `components/CouponWalletDialog.vue`），主页只回答「**现在有什么新券可以领**」。
+           ⇒ 左栏收窄成「**本周新发布的券**」（`thisWeek=1`，后端 `CouponDao.THIS_WEEK`）。
+
+           ⚠️ **「本周新」不是另一条查询**：它是**同一个 `SELECT` 加一个 `AND`**（用户裁定「甲」）
+              ⇒ 主页这批天然是用户中心「可领」tab 的**子集**，不会有两个真相。
+              见 `src/api/marketing.js` 里 `coupons()` 的第三参。
+           ⚠️ **排序不在这里**：「最早更新最左」由后端 `CouponDao.selectClaimable` 的 `updated_at ASC`
+              定好 ⇒ 本页**按数组原序渲染**，别自己再排一遍。
+           ⚠️ `Claimed` / `SoldOut` / `IsNew` 的形态可能是 `true` 也可能是 `1`（Connector/J `tinyInt1isBit`）
+              ⇒ 判据走 `truthy()`（已搬去 `config/coupon-format.js`），别写 `=== true`。
            ⚠️ **核销不在这里**：券 `unused → used` 发生在结算（`orderAdd` 带 `couponId`，块 5 commit 5）
-              ⇒ 券包只**读**核销结果（`Bucket='used'`）。 -->
+              ⇒ 券包的四个状态在**用户中心那个弹窗**里看，本页不碰。 -->
       <section
         class="tickets"
         ref="ticketsEl"
-        title="C3 块 5〈营销块〉已接线（2026-10-11）：领券中心 /marketing/coupons、我的券包 /marketing/myCoupons、领券 /marketing/coupon/claim（封装 src/api/marketing.js）⇒ 原 data-slot「预留 · 券包位（老稿 主页改造.html:817）· 无券数据源」退场"
+        title="C3 块 5〈营销块〉（2026-10-11 信息架构重排）：本页**只**是「本周新券」的领券中心 —— /marketing/coupons?thisWeek=1、领券 /marketing/coupon/claim、一键领取本周全部 /marketing/coupon/claimBatch（封装 src/api/marketing.js）。我的券包已搬去**用户中心 · 优惠券**（弹窗，四态 tab）"
       >
-        <!-- 左：领券中心（可领的券）—— 来自 `/marketing/coupons`，含「我已领 / 已领完」两个布尔。 -->
+        <!-- 领券中心（本周新券）—— 来自 `/marketing/coupons?thisWeek=1`，含「我已领 / 已领完 / 近 3 天新建」三个布尔。 -->
         <div class="tk-col">
           <div class="tk-h">
             <h3>领券中心</h3>
-            <span class="tk-n">{{ customerId ? claimable.length + ' 张' : '未登录' }}</span>
+            <div class="tk-h-r">
+              <!-- 区块级一行小字：**本周还剩几天**（用户 2026-10-11 裁定 ⑤：**整日粒度**、**区块级**，
+                   不是每张卡的有效期 —— 那是弹窗里的「X 天后过期」）。
+                   ⚠️ 数字来自**后端** `daysLeft`（`CouponDao.selectWeekWindow`，由**库时钟**算）——
+                      前端**不碰浏览器钟**：`new Date()` 在这里没有判据地位（同 TD-32）。
+                   ⚠️ 它是**周窗口**、与「还有几张可领」无关 ⇒ 0 张时也照显示（那就是「本周快过完了」）。 -->
+              <span v-if="customerId && daysLeft !== null" class="tk-left">本周还剩 {{ daysLeft }} 天</span>
+              <span class="tk-n">{{ customerId ? claimable.length + ' 张' : '未登录' }}</span>
+              <!-- 「一键领取本周全部」（用户 2026-10-11 裁定 ②：**真做**，取代原来那颗 disabled 占位）。
+                   ⚠️ **不传券 ID 列表** —— 领哪些由**服务端**定（「本周」是服务端语义，`CouponDao.THIS_WEEK`）
+                      ⇒ 前端手里那份列表可能已经旧了，也不该把「本周」的定义抄到前端来。
+                   ⚠️ **不弹确认**（同日裁决）—— 券「领了就有」、没有损失，直接领 + 汇总提示。
+                   ⚠️ 只在**有得领**时可用（一张都没得领就没什么好「一键」的）⇒ 见 `tkClaimable`。
+                   ⚠️ 汇总文案走 `.tk-msg`（**不是** `alert`）：顶层 `success:true` ≠ 全成功，
+                      要按 `claimed`/`failed` 说人话（见 `api/marketing.js` 里 `claimBatch()` 的 ⚠️）。 -->
+              <button
+                v-if="customerId"
+                type="button"
+                class="tk-all"
+                :disabled="batchBusy || tkClaimable === 0"
+                :title="tkClaimable === 0 ? '本周没有可领的新券' : '一键领取本周新发布、且我还没领过的券（' + tkClaimable + ' 张）'"
+                @click="doClaimBatch"
+              >{{ batchBusy ? '领取中…' : '一键领取本周全部' }}</button>
+              <!-- 「》」查看更多（用户 2026-10-11 手验 ①：**去掉细滚动条**，改成「越位渐隐 + 右侧 ›」）。
+                   只在**真被裁掉**时出现（`> TK_VISIBLE` 张）—— 5 张以内它没有存在的理由。
+                   点一下 = 展开全部（`.tk-strip-on` 把 `nowrap` 放开成 `wrap`），再点收起。
+                   ⚠️ 与左边「一键领取」**并排**（用户 ②：两个都要在右侧按钮区），故同放在 `.tk-h-r` 里。 -->
+              <button
+                v-if="customerId && claimable.length > TK_VISIBLE"
+                type="button"
+                class="tk-more"
+                :class="{ 'tk-more-on': tkExpanded }"
+                :title="tkExpanded ? '收起（只留前 ' + TK_VISIBLE + ' 张）' : '展开看全部 ' + claimable.length + ' 张'"
+                @click="tkExpanded = !tkExpanded"
+              >{{ tkExpanded ? '《' : '》' }}</button>
+            </div>
           </div>
           <p v-if="!customerId" class="empty-tip">登录后可领取优惠券</p>
           <p v-else-if="claimLoading" class="empty-tip">加载中…</p>
-          <p v-else-if="claimable.length === 0" class="empty-tip">暂时没有可领的券</p>
-          <ul v-else class="tk-list">
+          <!-- 空态（用户裁定 ③ 的文案）：说清楚「本页只放本周新的」，并**指一条去路** ——
+               用户中心的「优惠券 → 可领」tab（那是全量可领，含旧券）。空态最怕只报「没有」。 -->
+          <p v-else-if="claimable.length === 0" class="empty-tip">本周暂无新券 —— 去用户中心的「优惠券 · 可领」看全部可领券</p>
+          <!-- ③ 横向券条：从左到右铺开（顺序由后端 `CouponDao.selectClaimable` 按 `updated_at ASC` 定好
+               ⇒ **本页不排序**，见 `src/api/marketing.js` 里 `coupons()` 的 ⚠️）。 -->
+          <ul
+            v-else
+            class="tk-strip"
+            :class="{ 'tk-strip-cut': claimable.length > TK_VISIBLE && !tkExpanded, 'tk-strip-on': tkExpanded }"
+          >
             <li v-for="c in claimable" :key="c.CouponId" class="tk">
-              <span class="tk-amt">{{ couponFace(c) }}</span>
+              <!-- ⚠️ 面额与 NEW 角标**包一层**（`.tk-top`）：券卡是竖排 `column` 的
+                   （`.tk-strip > .tk`），不包的话角标会被顶到下一行、把卡撑高。 -->
+              <span class="tk-top">
+                <span class="tk-amt">{{ couponFace(c) }}</span>
+                <!-- NEW 角标 = **近 3 天新建**（用户裁定 ⑥）。
+                     ⚠️ 判据是**滚动 72 小时**（后端 `CouponDao.IS_NEW`）、**不是**「本周」——
+                        两者会分叉（周一建的券到周五仍是「本周」但已不是「新」），别把它挂到 `thisWeek` 上。 -->
+                <i v-if="truthy(c.IsNew)" class="tk-new">NEW</i>
+              </span>
               <span class="tk-cond">{{ couponCond(c) }}</span>
               <button
                 type="button"
@@ -164,24 +221,6 @@
                 :disabled="truthy(c.Claimed) || truthy(c.SoldOut) || claiming === c.CouponId"
                 @click="doClaim(c)"
               >{{ truthy(c.Claimed) ? '已领取' : truthy(c.SoldOut) ? '已领完' : claiming === c.CouponId ? '领取中…' : '领取' }}</button>
-            </li>
-          </ul>
-        </div>
-
-        <!-- 右：我的券包 —— 来自 `/marketing/myCoupons`（**顺序即后端给的顺序**，见上方注释）。 -->
-        <div class="tk-col">
-          <div class="tk-h">
-            <h3>我的券包<i v-if="redDot" class="tk-dot" title="有券快过期">●</i></h3>
-            <span class="tk-n">{{ customerId ? grants.length + ' 张' : '未登录' }}</span>
-          </div>
-          <p v-if="!customerId" class="empty-tip">登录后可查看我的券包</p>
-          <p v-else-if="grantLoading" class="empty-tip">加载中…</p>
-          <p v-else-if="grants.length === 0" class="empty-tip">券包还是空的，去左边领一张</p>
-          <ul v-else class="tk-list">
-            <li v-for="g in grants" :key="g.GrantId" class="tk">
-              <span class="tk-amt">{{ couponFace(g) }}</span>
-              <span class="tk-cond">{{ couponCond(g) }}</span>
-              <span class="tk-b" :class="'tk-b-' + g.Bucket">{{ bucketLabel(g.Bucket) }}</span>
             </li>
           </ul>
         </div>
@@ -269,10 +308,10 @@
 </template>
 
 <script setup>
-import { ref, onMounted, onUnmounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { http, handleApiError } from '../api/http'
-import { endpoints } from '../api/endpoints'; import { getCustomerId } from '../api/auth'; import { coupons, myCoupons, claim } from '../api/marketing'   // ⚠️ 三条 import **同行**（C3 块 5 · commit 1，2026-10-11）—— 本文件 `:119` / `:242` / `:262` 等多处被按行号引，**能省一行就省一行**（同 `ProductPage.vue:426` 那条的做法）
+import { endpoints } from '../api/endpoints'; import { getCustomerId } from '../api/auth'; import { coupons, claim, claimBatch } from '../api/marketing'; import { truthy, couponFace, couponCond } from '../config/coupon-format'   // ⚠️ 四条 import **同行**（C3 块 5 · commit 1，2026-10-11；同日「券的信息架构重排」又加两处）—— 本文件 `:119` / `:242` / `:262` 等多处被按行号引，**能省一行就省一行**（同 `ProductPage.vue:426` 那条的做法）。⚠️ `myCoupons` 已随右栏券包一并**删掉**，格式化三件套改从 `config/coupon-format.js` 取（主页与券包弹窗**共享**，见那个文件头）
 
 // ── 未登录可逛公开面（2026-10-06 用户改判 2，登记见 progress.md §5-AG (13)）────────────
 // 本页原有三条「未登录 ⇒ 弹登录提示」拦截（goSearch / searchByType / toGoodsDetail）与一条
@@ -409,7 +448,7 @@ const getPriceDec = (price) => {
 //    就又制造一个插入点。
 //    ⚠️ 本笔的**实际偏移**（`grep -n` 实测）：券包那一段 +53 行 ⇒ 上述四个目标改后依次为
 //    `:119`（未漂，在插入点之前）/ `:295` / `:315` / `:356-357`；本段 +107 行（模板 +53、样式 +95
-//    另计）⇒ **`<script>` 段的闭合行**由 `:348` 漂 **`:508`**（全文件 994 → 1251 行）。全表见 `_work/b5-repoint.md`（收口一次性重指）。⚠️ 这半句**故意不写那个闭合标签的字面量**：SFC 解析器在 `<script>` 段里一见到它就**当场截断本段**，真闭合行随即报 `x-invalid-end-tag`（`vue/no-parsing-error`）—— 实测踩过，别「顺手补全」。
+//    另计）⇒ **`<script>` 段的闭合行**由 `:348` 漂 **`:508`**（全文件 994 → 1251 行）。**再经同日两轮手验修**（第一轮：⑤ 卡片降高 + 越位渐隐 + 「一键领取」占位；第二轮：① 去掉细滚动条、改**右侧**渐隐 + 表头「》」展开，② 「一键领取」与「》」**并列**在右侧按钮区，③ 券条改**横向**且定序移到后端 `CouponDao.selectClaimable` 的 `updated_at ASC`）累计又 **+140** 行 ⇒ 闭合行 **`:550`**、全文件 **1391** 行。**再经同日「券的信息架构重排」**（删右栏券包 + 快捷块那格「优惠券」、领券中心收窄成**本周新券**、「一键领取本周全部」真接、NEW 角标 + 倒计时 + 空态、`TK_VISIBLE` 3 → 5、三个格式化 helper 搬去 `config/coupon-format.js`）**+35** 行 ⇒ 闭合行 **`:589`**、全文件 **1426** 行。全表见 `_work/b5-repoint.md`（收口一次性重指）。⚠️ 这半句**故意不写那个闭合标签的字面量**：SFC 解析器在 `<script>` 段里一见到它就**当场截断本段**，真闭合行随即报 `x-invalid-end-tag`（`vue/no-parsing-error`）—— 实测踩过，别「顺手补全」。
 //
 // ⚠️ **身份**取 `getCustomerId()`（`api/auth.js` 是唯一允许读身份的地方），不碰 `sessionStorage`。
 //    本页 2026-10-06 起「已无匿名分支」（见 `:224-232`），券包**必须**有身份 ⇒ 这里**重新引入**
@@ -417,39 +456,28 @@ const getPriceDec = (price) => {
 //    页面照常逛，只是券包那一块显示「登录后可…」。
 const customerId = ref('')
 const claimable = ref([])
-const grants = ref([])
-const redDot = ref(false)
 const claimLoading = ref(false)
-const grantLoading = ref(false)
 const claiming = ref('')
 const tkMsg = ref('')
 const ticketsEl = ref(null)
+/** 「本周还剩 N 天」—— 来自响应体 `daysLeft`（后端**库时钟**算）。`null` = 还没取到 ⇒ 不渲染那一行。 */
+const daysLeft = ref(null)
+/** 「一键领取本周全部」进行中（防连点）。 */
+const batchBusy = ref(false)
 
-/** `Claimed` / `SoldOut` 的宽容判据 —— Connector/J 的 `tinyInt1isBit` 下可能是 `true`，也可能是 `1`。 */
-const truthy = (v) => v === true || v === 1 || v === '1'
-
-/** 面值的人话。与 `views/admin/MarketingPage.vue` 的 `faceLabel` **同口径**（折扣券读「8.5 折」，另两类读「¥N」）。 */
-const couponFace = (c) => {
-  const v = Number(c.FaceValue || 0)
-  return c.Type === 'percent' ? (v * 10).toFixed(1) + ' 折' : '¥' + (Math.round(v * 100) / 100)
-}
-
-/** 门槛的人话。`Threshold` 后端对 `none` 型**强制**置 0 ⇒ 「无门槛」是数据说的，不是我猜的。 */
-const couponCond = (c) => {
-  if (c.Type === 'percent') return '折扣券'
-  const t = Number(c.Threshold || 0)
-  return t > 0 ? '满 ' + t + ' 可用' : '无门槛'
-}
-
-/** `Bucket` → 中文。取值域 = `CouponDao.selectMyGrants` 那个 `CASE`（`expiring`/`usable`/`used`/`expired`）。 */
-const bucketLabel = (b) =>
-  ({ expiring: '快过期', usable: '可用', used: '已使用', expired: '已过期' }[b] || b)
+// ⚠️ 本页**不再自带** `truthy` / `couponFace` / `couponCond` / `bucketLabel` —— 2026-10-11 起从
+//    `config/coupon-format.js` 取。搬家的理由：券包弹窗（`components/CouponWalletDialog.vue`）要用**同一套**
+//    口径，而这些函数的取值域（`Type` / `Bucket` / `Scope`）是**后端 SQL 里写死的**（`CouponDao`）——
+//    抄两份，第二处抄错时**两边都不报错**。`bucketLabel` 本页已用不到（右栏券包删了），随弹窗留在那边。
 
 const loadCoupons = async (account) => {
   claimLoading.value = true
   try {
-    const data = await coupons(account, 6)
+    // ⚠️ `thisWeek = '1'`（第三参）⇒ **本周新发布**的（用户裁定：主页只放本周新券，后端 `CouponDao.THIS_WEEK`）。
+    //    ⚠️ `limit` 从 6 提到 **10**：一行 5 张 ⇒ 点「》」展开后得有东西可看（6 张展开比收起多不出什么）。
+    const data = await coupons(account, 10, '1')
     claimable.value = data && data.success && Array.isArray(data.list) ? data.list : []
+    daysLeft.value = data && data.daysLeft !== undefined && data.daysLeft !== null ? data.daysLeft : null
   } catch (e) {
     handleApiError(e, '领券中心加载失败')
   } finally {
@@ -457,24 +485,13 @@ const loadCoupons = async (account) => {
   }
 }
 
-const loadMyCoupons = async (account) => {
-  grantLoading.value = true
-  try {
-    const data = await myCoupons(account)
-    // ⚠️ 顺序**照后端给的**（`SortIdx` 已在 SQL 里排好）—— 前端不排（见模板那段注释）。
-    if (data && data.success) {
-      grants.value = Array.isArray(data.list) ? data.list : []
-      redDot.value = truthy(data.redDot)
-    } else {
-      grants.value = []
-      redDot.value = false
-    }
-  } catch (e) {
-    handleApiError(e, '券包加载失败')
-  } finally {
-    grantLoading.value = false
-  }
-}
+/**
+ * 「**本周还剩 N 天** + 领哪几张」—— 一键领取只对**还领得动**的那几张有意义
+ * （已领 / 已领完仍在列表里、但不算「可领」⇒ 按钮的 `disabled` 与 `title` 都看这个数）。
+ */
+const tkClaimable = computed(
+  () => claimable.value.filter((c) => !truthy(c.Claimed) && !truthy(c.SoldOut)).length
+)
 
 /** 领券。⚠️ 只「领」——核销在结算（块 5 commit 5），本页不碰 `grant.Status`。 */
 const doClaim = async (c) => {
@@ -483,10 +500,11 @@ const doClaim = async (c) => {
   try {
     const data = await claim(customerId.value, c.CouponId)
     const ok = !!(data && data.success)
+    // ⚠️ 文案里**不再提「右侧券包」** —— 右栏已删，券包在**用户中心**（2026-10-11 重排）。
     tkMsg.value = ok
-      ? '已领取「' + c.Name + '」，见右侧券包'
+      ? '已领取「' + c.Name + '」，可在用户中心「优惠券」里查看'
       : '领取失败：' + ((data && data.msg) || '未知原因')
-    if (ok) await Promise.all([loadCoupons(customerId.value), loadMyCoupons(customerId.value)])
+    if (ok) await loadCoupons(customerId.value)
   } catch (e) {
     handleApiError(e, '领取失败')
   } finally {
@@ -494,7 +512,69 @@ const doClaim = async (c) => {
   }
 }
 
-/** 「领券中心」（二级导航）/「优惠券」（功能入口）两处入口的落点 = 锚到本页券包区。 */
+/**
+ * 「**一键领取本周全部**」（用户裁定 ②）。
+ * ⚠️ **不传券 ID 列表** —— 集合由**服务端**定（`CouponService.claimBatch` 自己跑 `THIS_WEEK` 那套筛选）。
+ *    前端手里这份 `claimable` 是**上一次请求**的快照，拿它当集合就是把「本周」的定义抄到前端来
+ *    （本仓最忌「同一口径有两处可抄错」）。
+ * ⚠️ **不看顶层 `success`** —— 它说的是「批量动作**执行完毕**」，部分失败**刻意**不回落 `false`
+ *    （理由三条写在 `CouponService.claimBatch`；与 `CartService.partialFailure` 方向相反是有意的）。
+ *    ⇒ 汇总要按 `claimed` / `failed` 说人话，逐张原因在 `items[]` 里。
+ * ⚠️ **不弹确认**（同日裁决）：券「领了就有」、没有损失。
+ */
+const doClaimBatch = async () => {
+  if (batchBusy.value) return
+  batchBusy.value = true
+  tkMsg.value = ''
+  try {
+    const data = await claimBatch(customerId.value)
+    if (!data || !data.success) {
+      tkMsg.value = '一键领取失败：' + ((data && data.msg) || '未知原因')
+      return
+    }
+    const claimed = Number(data.claimed || 0)
+    const failed = Number(data.failed || 0)
+    tkMsg.value = data.total === 0
+      ? '本周没有可领的新券'
+      : '一键领取：成功 ' + claimed + ' 张' + (failed > 0 ? '，失败 ' + failed + ' 张（' + firstFailReason(data) + '）' : '')
+    // ⚠️ 无论成败都重拉一次：成功的那几张要把按钮变「已领取」，**失败的那些也仍要在列表里**
+    //    （服务端重算过的集合可能与本地这份不同，比如刚刚有人把某张领光了）。
+    await loadCoupons(customerId.value)
+  } catch (e) {
+    handleApiError(e, '一键领取失败')
+  } finally {
+    batchBusy.value = false
+  }
+}
+
+/** 部分失败时挑**第一条**原因附在汇总里（逐条明细不在主页展开 —— 那是弹窗的事）。 */
+const firstFailReason = (data) => {
+  const bad = (data.items || []).find((it) => !it.success)
+  return (bad && bad.msg) || '详见券包'
+}
+
+/**
+ * 「领券中心」横向券条的**可见张数 + 越位渐隐 + 「》」展开**（用户 2026-10-11 手验**第二轮** ①②③）。
+ *
+ * 口径（取代第一轮的「纵向限高 + 细滚动条 + 底部渐隐」那一版）：
+ *   · **横向**：从左到右铺（③），左端 = 最早更新的那张（后端 `updated_at ASC` 定序）。
+ *   · 超过 `TK_VISIBLE` 张 ⇒ 加 `.tk-strip-cut`，**右侧**一段 `mask` 渐隐 + 表头出「》」。
+ *   · 点「》」⇒ `tkExpanded = true`，`wrap` 放开、全部铺开（渐隐同时撤掉）。
+ * ⚠️ **没有滚动条了**（用户 ① 点名去掉细滚动条）⇒ 收起的那些张在展开前**确实够不着**，
+ *    这是这次改动的**有意取舍**（用「渐隐 + 》」替代滚动条做「还有更多」的提示）。
+ * ⚠️ 上一条 `tkAtBottom` / `onTkScroll` 一整套**已删**：不滚了就不需要「滚到底撤渐隐」。
+ * ⚠️ **2026-10-11「券的信息架构重排」：`TK_VISIBLE` 3 → 5。** 右栏券包删掉后本栏**占满整页宽**
+ *    （原来约 600px、现在约 1200px）⇒ 一行 5 张（用户裁定 ⑦：卡宽约 230px）。
+ *    ⚠️ 它与样式里 `.tk-strip > .tk` 的基宽 `(100% - gap×(N-1)) / (N + 0.3)` 是**一对**，
+ *       改一处必须成对改；那个 `+0.3` 是「第 N+1 张露头约 30%」，**露头宽又必须 ≤ mask 渐隐带**
+ *       （`.tk-strip-cut` 的 88px）—— 三个数是一组，动了 N 要一起复核（探针里钉了这条不变量）。
+ * ⚠️ 后端 `loadCoupons` 的 `limit` 已从 6 提到 **10** ⇒ 这里最多 10 张、`TK_VISIBLE = 5` 即「5 张以内不裁」。
+ */
+const TK_VISIBLE = 5
+const tkExpanded = ref(false)
+
+/** 「领券中心」（二级导航 `:32`）的落点 = 锚到本页领券中心。
+ *  ⚠️ 原本还兼「优惠券」那格快捷块的落点 —— 那格 2026-10-11 已整格删掉，现在**只剩二级导航一个调用方**。 */
 const scrollToTickets = () => {
   const el = ticketsEl.value
   if (el && el.scrollIntoView) el.scrollIntoView({ behavior: 'smooth', block: 'start' })
@@ -503,7 +583,8 @@ const scrollToTickets = () => {
 onMounted(async () => {
   customerId.value = getCustomerId() || ''
   if (!customerId.value) return
-  await Promise.all([loadCoupons(customerId.value), loadMyCoupons(customerId.value)])
+  // ⚠️ 只剩一个请求了 —— 「我的券包」已搬去用户中心（那边的入口自己拉摘要，弹窗开窗时再拉明细）。
+  await loadCoupons(customerId.value)
 })
 </script>
 
@@ -914,15 +995,17 @@ button {
   grid-column: 1 / -1;
 }
 
-/* ── 券包 / 领券中心（**块 5 · commit 1 落地**，2026-10-11；稿 `:632-658`）──
+/* ── 领券中心（**块 5**；2026-10-11「券的信息架构重排」后**只剩这一栏**；稿 `:632-658`）──
    ⚠️ 稿的 markup 里这条**本来就是空 section**（`:817`），3 张券由稿的 JS 塞 mock（`TICKETS`）
    ⇒ 稿的 `.ticket*` 规则本仓仍**不搬**（它们绑的是 mock 的类名与结构）。本笔另起一套 `tk-` 前缀、
-   绑**真字段**（`Type` / `FaceValue` / `Threshold` / `Bucket`）—— 两套类名别互相套用。
-   ⚠️ 两栏 = 领券中心（可领）+ 我的券包（已领）⇒ 原来的 3 列改 **2 列**。 */
+   绑**真字段**（`Type` / `FaceValue` / `Threshold` / `IsNew` / `daysLeft`）—— 两套类名别互相套用。
+   ⚠️ **commit 1 时这里是两栏**（领券中心 + 我的券包）；2026-10-11 用户重排后右栏整块删掉
+   （券包搬去用户中心弹窗）⇒ **回到单栏**。留着 `grid` 是因为要在 `.tk-col` 下面另起一行放 `.tk-msg`
+   （一键领取的汇总），单列网格正好；`repeat(2, 1fr)` 已改 `1fr`。 */
 .tickets {
   margin-top: var(--s5);
   display: grid;
-  grid-template-columns: repeat(2, 1fr);
+  grid-template-columns: 1fr;
   gap: var(--s4);
 }
 .tickets .tk-msg {
@@ -933,6 +1016,12 @@ button {
   border: 1px solid var(--line);
   border-radius: var(--r2);
   padding: var(--s4);
+  /* ⚠️ 这一条是**结构性的**，别删 —— 但**理由已在 2026-10-11 换成新的**：
+     原来是为了解开 `repeat(2, 1fr)` 那个 `auto` 下限（两栏等宽的旧问题，那个问题随单栏消失）。
+     现在留着它是因为 `.tk-strip` 仍 `flex-wrap: nowrap` + `overflow: hidden`：券条的 min-content
+     是「所有券各自 max-content 之和」⇒ 没有 `min-width: 0` 的网格项会**拒绝收缩**，
+     整块横向溢出、把页面撑出横向滚动条。`probe-b5-claim-center.mjs` 钉着这条（`overflowX` 断言）。 */
+  min-width: 0;
 }
 .tk-h {
   display: flex;
@@ -951,23 +1040,106 @@ button {
   font-size: var(--fs-xs);
   color: var(--ink-3);
 }
-/* 券包红点（裁定 #4 ②）—— 已领的券快过期**不发系统通知**，只在券包上点一个点。 */
-.tk-dot {
-  font-size: var(--fs-xs);
-  color: var(--danger);
-  font-style: normal;
-  margin-left: var(--s1);
-}
-.tk-list {
+/* 表头右侧一组：「本周还剩 N 天」+ 张数 + 「一键领取本周全部」+「》」。 */
+.tk-h-r {
   display: flex;
-  flex-direction: column;
+  align-items: center;
   gap: var(--s2);
+}
+/* 「本周还剩 N 天」（裁定 ⑤：**区块级**一行小字、**整日粒度**）。最浅的一档灰 ——
+   它是背景信息，不该跟右边的张数与按钮抢注意力。 */
+.tk-left {
+  font-size: var(--fs-xs);
+  color: var(--ink-3);
+  white-space: nowrap;
+}
+.tk-all {
+  font: inherit;
+  font-size: var(--fs-xs);
+  color: var(--brand-ink);
+  background: var(--brand-soft);
+  border: 1px solid var(--brand-ink);
+  border-radius: var(--r1);
+  padding: 1px var(--s2);
+  white-space: nowrap;
+  cursor: pointer;
+}
+/* 不可用时（本周没有可领的 / 正在领）走全站统一的「灰掉 + 默认光标」。
+   ⚠️ commit 1 那版这里还是**占位**按钮（接口未定，恒 `disabled`）；2026-10-11 起它是**真按钮**，
+   只有上面那两个理由会让它变灰。 */
+.tk-all[disabled] {
+  color: var(--ink-3);
+  background: var(--surface-3);
+  border-color: var(--line-2);
+  cursor: default;
+}
+/* 「》」查看更多 —— 表头右侧第二颗按钮，与「一键领取」并排（用户 ②）。 */
+.tk-more {
+  font: inherit;
+  font-size: var(--fs-xs);
+  line-height: 1;
+  color: var(--brand-ink);
+  background: var(--surface-2);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r1);
+  padding: 2px var(--s2);
+  white-space: nowrap;
+  cursor: pointer;
+}
+.tk-more:hover {
+  border-color: var(--brand-ink);
+}
+/* 展开态：底色提亮一档，与收起态区分（文案由模板在 `》` / `《` 之间切）。 */
+.tk-more-on {
+  background: var(--brand-soft);
+  border-color: var(--brand-ink);
+}
+/* ── 领券中心：**横向**券条 + 越位渐隐（用户 2026-10-11 手验第二轮 ①③）──
+   ① 不再滚：`overflow: hidden` + 右侧渐隐 + 表头「》」展开，**没有滚动条**。
+   ③ 从左到右：左端 = 最早更新的那张（定序在后端 `CouponDao.selectClaimable`，本页不排）。 */
+.tk-strip {
+  display: flex;
+  flex-direction: row;
+  flex-wrap: nowrap;
+  gap: var(--s2);
+  /* 不滚（用户 ① 点名去掉细滚动条）：被裁的那几张**停在**这里，由「》」展开去看。
+     ⚠️ 它会把自己的 min-content 撑大 ⇒ 得靠 `.tk-col` 上那条 `min-width: 0` 解开（见那边注释）。 */
+  overflow: hidden;
+}
+/* 展开态（点过「》」）：放开换行，全部铺开 ⇒ 渐隐同时撤掉。 */
+.tk-strip-on {
+  flex-wrap: wrap;
+}
+/* 越位渐隐。
+   ⚠️ 渐隐带宽（**88px**，2026-10-11 由 56 改）必须**盖过**第 N+1 张露出来的那一角：
+   只盖一半的话，露出那半张**边缘是实的**，看着就像「那张卡本来就画得窄」—— 而不是「右边还有」。
+   露出宽 ≈ `0.30 × (行宽 / (N + 0.3))`：N=5、整页宽 ≈1200px ⇒ 卡宽 ≈ 215px、露头 ≈ 65px，
+   88px 有富余；改 `TK_VISIBLE` 或基宽那个 `+0.3` 时**必须回来复核这三个数**（探针钉了不变量）。
+   `-webkit-mask-image` 是给旧 WebKit 的，两条都要写。 */
+.tk-strip-cut {
+  mask-image: linear-gradient(to right, #000 calc(100% - 88px), transparent 100%);
+  -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 88px), transparent 100%);
+}
+/* 横条里的单张券：原来「金额 | 条件 | 领取」是一**行**，横过来后改成**竖排小卡**。
+   ⚠️ 基宽是 `(100% - (N-1) 个 gap) / (N + 0.3)`（N = `TK_VISIBLE` = 5）—— 那个 **`+0.3` 不是笔误**：
+     · 按整 N 算 ⇒ N 张正好铺满一行，第 N+1 张**整个落在裁切线之外、一点都露不出来**，
+       右侧渐隐就没有东西可淡，「还有更多」这个提示当场失效；
+     · 按 N+0.5 算（第一版是 `/3.5`）⇒ 第 N+1 张露出近一半，**看着像一张完整的卡**，同样不像「被裁」。
+   `+0.3` 是「露出约 1/4 张」—— 一眼能看出是**被裁掉**的、又被上面那 88px 渐隐吃掉。
+   ⚠️ 三个数（`TK_VISIBLE` / `+0.3` / mask 的 88px）是**一组**，与脚本里那个常量是一对，改一处要成对改。
+   `.tk-cond` 的 `flex: 1` 到竖排里正好把「领取」顶到底 ⇒ 同排几张卡等高时按钮对得齐。 */
+.tk-strip > .tk {
+  flex: 0 0 calc((100% - var(--s2) * 4) / 5.3);
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--s1);
 }
 .tk {
   display: flex;
   align-items: center;
   gap: var(--s2);
-  padding: var(--s2) var(--s3);
+  /* 卡高再压一档（手验「缩小单个券卡片高度」）：上下 8px → 4px。 */
+  padding: var(--s1) var(--s3);
   background: var(--surface-2);
   border: 1px solid var(--line);
   border-radius: var(--r2);
@@ -999,26 +1171,29 @@ button {
   border-color: var(--line-2);
   cursor: default;
 }
-/* 券包四态 —— **只有「快过期」是暖色**：它是这四态里唯一一件要人「现在动手」的事。 */
-.tk-b {
+/* 「面额 + NEW 角标」一行。⚠️ 券卡是竖排（上面 `.tk-strip > .tk` 的 `column`），
+   不包这一层的话角标会被 flex 顶到下一行、把卡撑高一档（同排几张就不齐了）。 */
+.tk-top {
+  display: flex;
+  align-items: center;
+  gap: var(--s1);
+}
+/* NEW 角标 = **近 3 天新建**（用户裁定 ⑥）。⚠️ 与「本周新券」**不是同一件事**：
+   前者是滚动 72 小时（后端 `CouponDao.IS_NEW`），后者是自然周（`THIS_WEEK`）—— 会分叉。
+   用品牌色小 chip，不抢面额那一行主数字的注意力。 */
+.tk-new {
+  font-style: normal;
   font-size: var(--fs-xs);
+  font-weight: var(--fw-semi);
+  line-height: 1;
+  color: var(--brand-ink);
+  background: var(--brand-soft);
   border-radius: var(--r1);
-  padding: 1px 6px;
-  white-space: nowrap;
+  padding: 1px 4px;
 }
-.tk-b-expiring {
-  color: var(--warning-deep);
-  background: var(--warning-ground);
-}
-.tk-b-usable {
-  color: var(--success-deep);
-  background: var(--success-ground);
-}
-.tk-b-used,
-.tk-b-expired {
-  color: var(--ink-3);
-  background: var(--surface-3);
-}
+/* ⚠️ 原先这里还有「券包四态」那一组（`.tk-b` / `.tk-b-expiring` / `.tk-b-usable` / `.tk-b-used` /
+   `.tk-b-expired`）—— 2026-10-11 右栏券包删掉后**全成死代码，已删**。四态的标签与配色改在
+   `components/CouponWalletDialog.vue`（`w-tag*`），那才是唯一还用得到它们的地方。 */
 .tk-msg {
   font-size: var(--fs-xs);
   color: var(--brand-ink);

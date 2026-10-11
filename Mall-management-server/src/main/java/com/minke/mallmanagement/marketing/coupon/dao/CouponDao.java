@@ -64,6 +64,41 @@ public class CouponDao {
             "LEAST(86400, GREATEST(TIMESTAMPDIFF(SECOND, "
                     + "COALESCE(c.StartAt, DATE_SUB(c.EndAt, INTERVAL 172800 SECOND)), c.EndAt) DIV 2, 1))";
 
+    /**
+     * 本地墙钟 = **库时钟（UTC）+ 固定 8 小时**。
+     *
+     * <p>⚠️ 时刻一律由**库时钟**产生，Java 侧不构造任何时间点（本仓 2026-10-10 定下的硬口径，
+     * 见 {@code tech-debt.md} TD-32；唯一「相对日期」来源是 {@code StatsDao.currentDate()}）。
+     * 用 {@code LocalDate.now()} 会拿 JVM 的钟 —— 与库 {@code NOW()} 差 8 小时、且**不报错**，
+     * 只是整段筛错一天（{@code CouponService.isExpired} 的注释记着同族事故）。
+     *
+     * <p>⚠️ 也**不用** {@code CONVERT_TZ(NOW(),'UTC','Asia/Shanghai')} 这种**命名时区**写法：
+     * 它依赖 {@code mysql.time_zone_name} 被 {@code mysql_tzinfo_to_sql} 灌过，而默认安装
+     * 常常是**空表** ⇒ 返回 {@code NULL}（**不报错**）⇒ 整条谓词变 {@code NULL}、谁都不匹配。
+     * 数字偏移（{@code '+08:00'}）不受此影响，但本仓已实测库时钟就是 UTC
+     * （{@code @@system_time_zone='UTC'}）⇒ 直接加 8 小时最省依赖、也最好读。
+     */
+    private static final String LOCAL_NOW = "(NOW() + INTERVAL 8 HOUR)";
+
+    /**
+     * 本地**自然周**的周一 00:00（{@code WEEKDAY}：周一 = 0 … 周日 = 6）。
+     * 用户 2026-10-11 裁定：本周 = 自然周、周一起、按本地（+08:00）时区。
+     */
+    private static final String WEEK_START =
+            "DATE_SUB(DATE(" + LOCAL_NOW + "), INTERVAL WEEKDAY(" + LOCAL_NOW + ") DAY)";
+
+    /**
+     * 「本周新建」：{@code created_at} 是 {@code DEFAULT CURRENT_TIMESTAMP} ⇒ 由**库时钟**产生（UTC），
+     * 故先 +8h 折成本地墙钟，再与本地周一比。
+     */
+    private static final String THIS_WEEK = "(c.created_at + INTERVAL 8 HOUR) >= " + WEEK_START;
+
+    /**
+     * 「近 3 天新建」（用户 2026-10-11 裁定 ⑥：NEW 角标只打近 3 天的）。
+     * ⚠️ 这是**滚动窗口**：两边同为 UTC ⇒ 8 小时相消、与上面那条不同，**与时区无关**，故不折。
+     */
+    private static final String IS_NEW = "(c.created_at >= NOW() - INTERVAL 3 DAY)";
+
     private final JdbcClient jdbcClient;
 
     public CouponDao(JdbcTemplate jdbcTemplate) {
@@ -101,8 +136,9 @@ public class CouponDao {
      * **占一个名额**（CAS）。四条判据全在 {@code WHERE} 里，逐条都要过：
      * 券在启用中 / 还有余量（{@code TotalQty = 0} 视作**不限量**）/ 已到有效期起 / 未过期。
      *
-     * <p>⚠️ 这是领券链路的**真闸**：{@code rows = 0} 就是「这一张领不到了」，四种原因由调用方
-     * 在动作前**先读一次**券状态给出更友好的话术；这里只负责「原子地占住名额」。
+     * <p>⚠️ 这是领券链路的**真闸**：{@code rows = 0} 就是「这一张领不到了」，原因由调用方
+     * 在**拿到 0 之后**用 {@link #selectClaimBlock} 逐条问出来（判据同款、同一个库时钟），
+     * 这里只负责「原子地占住名额」。
      */
     public int tryClaim(String couponId) {
         String sql = "UPDATE coupon SET ClaimedQty = ClaimedQty + 1 "
@@ -111,6 +147,30 @@ public class CouponDao {
                 + "AND (StartAt IS NULL OR StartAt <= NOW()) "
                 + "AND (EndAt IS NULL OR EndAt > NOW())";
         return jdbcClient.sql(sql).param(couponId).update();
+    }
+
+    /**
+     * **{@link #tryClaim} 返回 0 时，到底是哪一条判据没过** —— 逐条按**库时钟**算出来。
+     *
+     * <p>为什么要单独读一次：{@code rows = 0} 只说明「没占上名额」，而它的原因是**三**种
+     * （还没开始 / 已过期 / 已领完），三者对用户的下一步完全不同。此前它们被合并成一句
+     * 「该券已过期或已领完」⇒ 用户 2026-10-11 手验时就撞上了这条**指错方向**的话术
+     * （真因是「还没开始」，见下面那条时区注释），白查一轮。
+     *
+     * <p>⚠️ **判据表达式必须与 {@link #tryClaim} 的 {@code WHERE} 逐条同款、同一个时钟**
+     * （都是库内 {@code NOW()}）：换个写法或拿 JVM 的时钟来判，就会出现「话说的是 A、闸卡的是 B」。
+     * 这里刻意照抄那四条的否定式。
+     *
+     * <p>返回三键（键名即结论）：{@code NotStarted} / {@code Expired} / {@code SoldOut}。
+     * 券不存在时返回 {@code null}（调用方自己会说「券不存在」）。
+     */
+    public Map<String, Object> selectClaimBlock(String couponId) {
+        String sql = "SELECT (StartAt IS NOT NULL AND StartAt > NOW()) AS NotStarted, "
+                + "(EndAt IS NOT NULL AND EndAt <= NOW()) AS Expired, "
+                + "(TotalQty > 0 AND ClaimedQty >= TotalQty) AS SoldOut "
+                + "FROM coupon WHERE CouponId = ? LIMIT 1";
+        List<Map<String, Object>> list = jdbcClient.sql(sql).param(couponId).query().listOfRows();
+        return list.isEmpty() ? null : list.get(0);
     }
 
     /**
@@ -179,16 +239,52 @@ public class CouponDao {
      * <p>⚠️ 已领的**照样列出**（带 {@code Claimed=1} 让前端把它画成「已领取」）：
      * 直接筛掉会让「我明明领过怎么不见了」变成一次没有痕迹的困惑。
      * 领完的也照样列出（{@code SoldOut=1} → 「已领完」）。
+     *
+     * <h3>【一个查询、两个筛法 —— 用户 2026-10-11 裁定「甲」】</h3>
+     * {@code thisWeekOnly=true} 只回**本周新发布**的（主页领券中心）；
+     * {@code false} 回**全部可领**的（用户中心「可领」tab，含旧券）。
+     * 主页那批是「可领」的**子集** ⇒ 两者是**同一个 {@code SELECT} 加一个 {@code AND}**，
+     * 不是两条各写一遍的 SQL（否则「什么算可领」就有了两处可抄错）。
+     * <p>{@code IsNew}（近 3 天新建）**两种筛法都回** —— 「可领」tab 也想要那个 NEW 角标。
+     *
+     * <h3>【排序：按更新时间**升序** —— 最早更新的在最左】</h3>
+     * 用户 2026-10-11 裁定：领券中心是**横向**券条（从左到右铺），左端 = 最早更新的那张。
+     * ⚠️ **与券包不是一套口径，别合并**：券包走 {@link #selectMyGrants} 的 {@code SortIdx}
+     * （快过期最上 / 已过期沉底 —— 按**紧迫度**），这里按**新旧**。两处都定在 SQL 里
+     * ⇒ 前端一律按数组原序渲染，别在 view 里再排一遍。
+     * <p>⚠️ 用的是 {@code updated_at}（列定义带 {@code ON UPDATE CURRENT_TIMESTAMP}）⇒
+     * **领走一张会把那张挪到最右**（占名额那条 UPDATE 也会碰它）。这是「最早更新」的字面语义；
+     * 若哪天要的是「最早**建**的、领了也不动」，把这里换成 {@code c.created_at} 即可 —— 只此一处。
+     * <p>{@code c.Id ASC} 只是**同秒并列时的确定性兜底**（否则同秒两行的先后由存储引擎定，
+     * 同一份数据两次查询可能给出两种顺序）。
      */
-    public List<Map<String, Object>> selectClaimable(String account, int limit) {
-        String sql = "SELECT " + COUPON_COLUMNS
-                + ", (g.Id IS NOT NULL) AS Claimed "
-                + ", ((c.TotalQty > 0 AND c.ClaimedQty >= c.TotalQty)) AS SoldOut "
-                + "FROM coupon c LEFT JOIN coupon_grant g "
-                + "ON g.CouponId = c.CouponId AND g.ToAccount = ? "
-                + "WHERE c.Status = 'active' AND (c.EndAt IS NULL OR c.EndAt > NOW()) "
-                + "ORDER BY c.Id DESC LIMIT ?";
-        return jdbcClient.sql(sql).params(account, limit).query().listOfRows();
+    public List<Map<String, Object>> selectClaimable(String account, int limit, boolean thisWeekOnly) {
+        StringBuilder sql = new StringBuilder("SELECT ").append(COUPON_COLUMNS)
+                .append(", (g.Id IS NOT NULL) AS Claimed ")
+                .append(", ((c.TotalQty > 0 AND c.ClaimedQty >= c.TotalQty)) AS SoldOut ")
+                .append(", (").append(IS_NEW).append(") AS IsNew ")
+                .append("FROM coupon c LEFT JOIN coupon_grant g ")
+                .append("ON g.CouponId = c.CouponId AND g.ToAccount = ? ")
+                .append("WHERE c.Status = 'active' AND (c.EndAt IS NULL OR c.EndAt > NOW()) ");
+        if (thisWeekOnly) {
+            // ⚠️ 只多一个 AND、**不新增占位符** ⇒ 下面 params(account, limit) 的个数不变。
+            sql.append("AND ").append(THIS_WEEK).append(' ');
+        }
+        sql.append("ORDER BY c.updated_at ASC, c.Id ASC LIMIT ?");
+        return jdbcClient.sql(sql.toString()).params(account, limit).query().listOfRows();
+    }
+
+    /**
+     * 本周窗口（本地 +08:00）—— 「本周还剩 N 天」那个**区块级**小字。
+     *
+     * <p>{@code DaysLeft = 7 - WEEKDAY(本地今天)}：周一 = 7、周日 = 1，**恒 ≥ 1**（整日粒度）。
+     * <p>⚠️ 为什么由**后端**算而不是前端本地减：前端只能用**浏览器**的钟，而本仓硬口径是
+     * 「时刻一律由库时钟产生」（见 {@link #LOCAL_NOW}）。给一个**整数**也顺手把
+     * 「带不带偏移的 ISO 串」这类坑焊死了（逐秒 tick 没被采纳 ⇒ 不需要时刻串）。
+     */
+    public Map<String, Object> selectWeekWindow() {
+        String sql = "SELECT (7 - WEEKDAY(" + LOCAL_NOW + ")) AS DaysLeft";
+        return jdbcClient.sql(sql).query().singleRow();
     }
 
     /**
@@ -208,6 +304,23 @@ public class CouponDao {
      * 后者是用掉了。合并成一个「不可用」会把两种完全不同的历史画成一样。
      * <p>⚠️ 券被管理端**停用**（{@code CouponStatus='stopped'}）的表：已领的券不复原、也不删，
      * 仍按上面的分桶显示（{@code stopped} 只挡住**新的**领取，见 {@link #tryClaim}）。
+     *
+     * <h3>【桶内次序：前两桶「快过期最上」、后两桶「新 → 旧」】</h3>
+     * 用户 2026-10-11 裁定（用户中心 4 tab）：未使用 = 快过期最上；**已使用 / 已过期 = 新 → 旧**。
+     * ⚠️ 这**推翻**了本节原来的 {@code c.EndAt ASC}（对后两桶是**旧 → 新**）—— 四个桶的键与方向
+     * 各不相同，故写成四个 {@code CASE}：每个对**不匹配的桶恒 {@code NULL}** ⇒ 互不干扰，
+     * 而 {@code SortIdx} 仍是第一排序键 ⇒ 与分桶**不可能走岔**。
+     * <ul>
+     *   <li>桶 0/1（未使用）：{@code EndAt IS NULL} 先排（**无期限的沉底**，照旧），再 {@code EndAt ASC}。</li>
+     *   <li>桶 2（已使用）：{@code g.UsedAt DESC} —— 最近用掉的在前。</li>
+     *   <li>桶 3（已过期）：{@code c.EndAt DESC} —— 最近过期的在前。</li>
+     * </ul>
+     *
+     * <p>{@code EndDaysLeft} = {@code TIMESTAMPDIFF(DAY, NOW(), c.EndAt)}，给前端的「X 天后过期」标用。
+     * ⚠️ 判据刻意与 {@code Bucket='expiring'} / 红点**同轴**（都是拿 {@code NOW()} 比 {@code c.EndAt}）——
+     * {@code EndAt} 是用户填的本地墙钟原样入库，本域已按这条口径判「快过期」；两处必须同一个表达式，
+     * 否则「快过期」的标会与红点打架。{@code TIMESTAMPDIFF} 是**截断**（1.5 天 → 1）⇒ 前端对 {@code <= 0}
+     * 显示「今天过期」而不是「0 天后过期」。
      */
     public List<Map<String, Object>> selectMyGrants(String account) {
         String sql = "SELECT g.Id AS GrantId, g.CouponId, g.Source, g.Status AS GrantStatus, g.OrderId, "
@@ -217,6 +330,7 @@ public class CouponDao {
                 + "c.Status AS CouponStatus, "
                 + "DATE_FORMAT(c.StartAt, '%Y-%m-%d %H:%i:%s') AS StartAt, "
                 + "DATE_FORMAT(c.EndAt, '%Y-%m-%d %H:%i:%s') AS EndAt, "
+                + "TIMESTAMPDIFF(DAY, NOW(), c.EndAt) AS EndDaysLeft, "
                 + "CASE "
                 + "  WHEN g.Status = 'used' THEN 'used' "
                 + "  WHEN c.EndAt IS NOT NULL AND c.EndAt <= NOW() THEN 'expired' "
@@ -231,7 +345,12 @@ public class CouponDao {
                 + "  ELSE 1 END AS SortIdx "
                 + "FROM coupon_grant g JOIN coupon c ON c.CouponId = g.CouponId "
                 + "WHERE g.ToAccount = ? "
-                + "ORDER BY SortIdx ASC, c.EndAt IS NULL, c.EndAt ASC, g.Id DESC";
+                + "ORDER BY SortIdx ASC, "
+                + "CASE WHEN SortIdx IN (0, 1) THEN c.EndAt IS NULL END ASC, "
+                + "CASE WHEN SortIdx IN (0, 1) THEN c.EndAt END ASC, "
+                + "CASE WHEN SortIdx = 2 THEN g.UsedAt END DESC, "
+                + "CASE WHEN SortIdx = 3 THEN c.EndAt END DESC, "
+                + "g.Id DESC";
         return jdbcClient.sql(sql).param(account).query().listOfRows();
     }
 

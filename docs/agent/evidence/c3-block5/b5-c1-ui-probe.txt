@@ -1,0 +1,36 @@
+===== probe-b5-claim-center.mjs（用户端 · 领券中心 ⑤）=====
+── 1 张券 ── {"hasCol":true,"items":1,"cls":"tk-list","listH":35,"scrollH":35,"cardRect":"{\"x\":49,\"y\":454.578125,\"width\":558.5,\"height\":35.1875,\"top\":454.578125,\"right\":607.5,\"bottom\":489.765625,\"left\":49}","btnText":"一键领取","btnDisabled":true,"headerH":32,"emptyTip":""}
+── 6 张券 ── {"hasCol":true,"items":6,"cls":"tk-list tk-list-cut","listH":170,"scrollH":251,"cardRect":"{\"x\":49,\"y\":387.578125,\"width\":558.5,\"height\":170,\"top\":387.578125,\"right\":607.5,\"bottom\":557.578125,\"left\":49}","btnText":"一键领取","btnDisabled":true,"headerH":32,"emptyTip":""}
+── 6 张、滚到底 ── {"cls":"tk-list","scrollTop":81}
+OK   卡片渲染出来了
+OK   「一键领取」占位按钮在  → "一键领取"
+OK   占位按钮是 disabled
+OK   列表里有 1 行  → 1
+OK   1 张时**不加**渐隐类  → "tk-list"
+OK   列表里有 6 行  → 6
+OK   6 张时加了渐隐类  → "tk-list tk-list-cut"
+OK   列表被限高（内容比可视区高）  → "251 > 170"
+OK   列表可滚（scrollTop 能到 > 0）  → 81
+OK   滚到底后渐隐类**撤掉**  → "tk-list"
+OK   卡片比 6 行全展开时矮  → "listH=170"
+
+领券中心 ⑤: 11 项 / 0 失败
+
+===== probe-b5-admin-grants.mjs（管理端 · 明细行内展开 ④）=====
+── 点之前 ── {"rows":2,"kinds":["coupon","coupon"],"names":["探针满减券","探针折扣券"],"expandIdx":-1,"expandColspan":null,"expandInTbody":false,"heads":0,"tableCols":8,"grantsShown":-1,"beforeExpand":false}
+── 点第 1 行「明细」 ── {"rows":3,"kinds":["coupon","expand","coupon"],"names":["探针满减券","探针折扣券"],"expandIdx":1,"expandColspan":"8","expandInTbody":true,"heads":1,"tableCols":8,"grantsShown":2,"beforeExpand":true}
+── 再点第 2 行「明细」 ── {"rows":3,"kinds":["coupon","coupon","expand"],"names":["探针满减券","探针折扣券"],"expandIdx":2,"expandColspan":"8","expandInTbody":true,"heads":1,"tableCols":8,"grantsShown":2,"beforeExpand":true}
+── 点「收起」 ── {"rows":2,"kinds":["coupon","coupon"],"names":["探针满减券","探针折扣券"],"expandIdx":-1,"expandColspan":null,"expandInTbody":false,"heads":0,"tableCols":8,"grantsShown":-1,"beforeExpand":false}
+OK   表体只有 2 个券行  → ["coupon","coupon"]
+OK   点之前没有展开行
+OK   点之前页面无「领取明细」标题  → 0
+OK   展开行出现了
+OK   展开行紧跟在**第 1 个**券行之后  → 1
+OK   展开行 colspan = 表头列数  → "8 vs 8"
+OK   明细表渲染出 2 行领取记录  → 2
+OK   只有一处展开（不同时展开两处）  → ["coupon","coupon","expand"]
+OK   展开位换到第 2 个券行之后  → 2
+OK   收起后展开行消失
+OK   收起后仍是 2 个券行  → ["coupon","coupon"]
+
+管理端 券 · 明细行内展开 ④: 11 项 / 0 失败

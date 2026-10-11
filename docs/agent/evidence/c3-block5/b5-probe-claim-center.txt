@@ -1,0 +1,60 @@
+── 0 张券（空态） ── {"err":null,"colCount":1,"colW":[1201],"n":0,"cls":"","faces":[],"conds":[],"news":[],"getTexts":[],"getDisabled":[],"lefts":[],"tops":[],"visW":-1,"cardW":-1,"hiddenW":-1,"peekNext":-1,"overflowX":"","flexWrap":"","moreText":null,"moreOn":null,"allText":"一键领取本周全部","allDisabled":true,"leftText":"本周还剩 3 天","tip":"本周暂无新券 —— 去用户中心的「优惠券 · 可领」看全部可领券","maskPx":null}
+── 1 张券 ── {"err":null,"colCount":1,"colW":[1201],"n":1,"cls":"tk-strip","faces":["¥10"],"conds":["满 50 可用"],"news":[true],"getTexts":["领取"],"getDisabled":[false],"lefts":[0],"tops":[0],"visW":1167,"cardW":214,"hiddenW":0,"peekNext":-1,"overflowX":"hidden","flexWrap":"nowrap","moreText":null,"moreOn":null,"allText":"一键领取本周全部","allDisabled":false,"leftText":"本周还剩 3 天","tip":null,"maskPx":null}
+── 5 张券（= TK_VISIBLE 边界） ── {"err":null,"colCount":1,"colW":[1201],"n":5,"cls":"tk-strip","faces":["¥10","¥11","¥12","¥13","¥14"],"conds":["满 50 可用","满 50 可用","满 50 可用","满 50 可用","满 50 可用"],"news":[true,false,true,true,false],"getTexts":["领取","领取","领取","领取","领取"],"getDisabled":[false,false,false,false,false],"lefts":[0,222,444,666,889],"tops":[0,0,0,0,0],"visW":1167,"cardW":214,"hiddenW":0,"peekNext":-1,"overflowX":"hidden","flexWrap":"nowrap","moreText":null,"moreOn":null,"allText":"一键领取本周全部","allDisabled":false,"leftText":"本周还剩 3 天","tip":null,"maskPx":null}
+── 6 张券 ── {"err":null,"colCount":1,"colW":[1201],"n":6,"cls":"tk-strip tk-strip-cut","faces":["¥10","¥11","¥12","¥13","¥14","¥15"],"conds":["满 50 可用","满 50 可用","满 50 可用","满 50 可用","满 50 可用","满 50 可用"],"news":[true,false,true,true,false,false],"getTexts":["已领取","领取","领取","领取","领取","已领完"],"getDisabled":[true,false,false,false,false,true],"lefts":[0,222,444,666,889,1111],"tops":[0,0,0,0,0,0],"visW":1167,"cardW":214,"hiddenW":1,"peekNext":56,"overflowX":"hidden","flexWrap":"nowrap","moreText":"》","moreOn":false,"allText":"一键领取本周全部","allDisabled":false,"leftText":"本周还剩 3 天","tip":null,"maskPx":88}
+── 6 张、展开后 ── {"err":null,"colCount":1,"colW":[1201],"n":6,"cls":"tk-strip tk-strip-on","faces":["¥10","¥11","¥12","¥13","¥14","¥15"],"conds":["满 50 可用","满 50 可用","满 50 可用","满 50 可用","满 50 可用","满 50 可用"],"news":[true,false,true,true,false,false],"getTexts":["已领取","领取","领取","领取","领取","已领完"],"getDisabled":[true,false,false,false,false,true],"lefts":[0,222,444,666,889,0],"tops":[0,0,0,0,0,94],"visW":1167,"cardW":214,"hiddenW":0,"peekNext":1167,"overflowX":"hidden","flexWrap":"wrap","moreText":"《","moreOn":true,"allText":"一键领取本周全部","allDisabled":false,"leftText":"本周还剩 3 天","tip":null,"maskPx":null,"backToClosed":"tk-strip tk-strip-cut"}
+── 6 张、一键领取 ── {"err":null,"busy":{"text":"领取中…","disabled":true},"msg":"一键领取：成功 2 张，失败 1 张（您已领取过该券）","after":{"text":"一键领取本周全部","disabled":false}}
+── 6 张、请求体 ── {"coupons":["Account=probe_b5_tmp&limit=10&thisWeek=1","Account=probe_b5_tmp&limit=10&thisWeek=1"],"batch":["Account=probe_b5_tmp"],"claim":[]}
+OK   0 张时有 `.tk-col`、没有券条  → "null"
+OK   空态文案 ==「本周暂无新券 —— 去用户中心的「优惠券 · 可领」看全部可领券」  → "本周暂无新券 —— 去用户中心的「优惠券 · 可领」看全部可领券"
+OK   0 张时**仍**显示「本周还剩 N 天」（它是周窗口，与有几张无关）  → "本周还剩 3 天"
+OK   0 张时「一键领取本周全部」在且 disabled  → "一键领取本周全部 / disabled=true"
+OK   0 张时**不**出「》」  → null
+OK   1 张渲染出来了  → "ok"
+OK   **只有一栏**（右栏券包已删）  → "[1201]"
+OK   面额走 `couponFace` ⇒ ¥10  → "¥10"
+OK   门槛走 `couponCond` ⇒「满 50 可用」  → "满 50 可用"
+OK   `IsNew=1` ⇒ 出 NEW 角标  → "[true]"
+OK   「本周还剩 N 天」渲染出来  → "本周还剩 3 天"
+OK   1 张时**不**出「》」  → null
+OK   1 张时**不**加渐隐类  → "tk-strip"
+OK   领取按钮可点（这张没领过、没领完）  → "领取 / disabled=false"
+OK   5 张时**不**出「》」（判据是 `>` 不是 `>=`）  → null
+OK   5 张时**不**加渐隐类  → "tk-strip"
+OK   5 张**一张都没被裁**  → "hiddenW=0 visW=1167"
+OK   5 张同排铺开（一行，没换行）  → "[0,0,0,0,0]"
+OK   一行 5 张：每张卡宽约为券条的 1/5.3  → "cardW=214 visW=1167"
+OK   券条里有 6 张  → 6
+OK   不滚：券条 `overflow-x: hidden`  → "hidden"
+OK   6 张时加渐隐类  → "tk-strip tk-strip-cut"
+OK   收起态 `nowrap`（不换行）  → "nowrap"
+OK   6 张时**只有 1 张**被裁到界外（TK_VISIBLE=5）  → "hiddenW=1 visW=1167"
+OK   第 6 张**露一角**（不是整张消失在裁切线外）  → "露出 56px / 共 1167px"
+OK   ★ 不变量：露头宽 < 渐隐带宽（88px）⇒ 是被**淡掉**而不是被切掉  → "露 56px < mask 88px"
+OK   渐隐带实测就是 88px（与 CSS 一致）  → "88"
+OK   「》」按钮在  → "》"
+OK   「一键领取本周全部」与「》」**并存**（同一处按钮区）  → "一键领取本周全部"
+OK   同一排：6 张 `top` 全相同（一行铺开，没换行）  → "[0,0,0,0,0,0]"
+OK   **从左到右**：left 严格递增  → "[0,222,444,666,889,1111]"
+OK   顺序 == 数组原序（¥10…¥15，前端没重排）  → "¥10,¥11,¥12,¥13,¥14,¥15"
+OK   NEW 角标只打在 `IsNew` 为真的卡上（六种形态 1/0/true/"1"/false/"0" 全过一遍）  → "[true,false,true,true,false,false]"
+OK   已领取 ⇒ 按钮「已领取」且禁用  → "已领取 / true"
+OK   已领完 ⇒ 按钮「已领完」且禁用  → "已领完 / true"
+OK   其余 4 张仍可点「领取」  → "已领取,领取,领取,领取,领取,已领完"
+OK   点「》」后换成展开类  → "tk-strip tk-strip-on"
+OK   展开后渐隐类**撤掉**  → "tk-strip tk-strip-on"
+OK   展开后 `wrap` 换行  → "wrap"
+OK   展开后 6 张全可见  → 0
+OK   展开后不止一行（多行铺开）  → "[0,0,0,0,0,94]"
+OK   展开后按钮翻成「《」  → "《"
+OK   展开**不改列宽**（整块不跳）  → "1201 → 1201"
+OK   再点一下回到收起态  → "tk-strip tk-strip-cut"
+OK   每次取券都带 `thisWeek=1`（主页只放本周新券）  → "[\"Account=probe_b5_tmp&limit=10&thisWeek=1\",\"Account=probe_b5_tmp&limit=10&thisWeek=1\"]"
+OK   取券的 `limit` 是 10（够「》」展开看）  → "[\"Account=probe_b5_tmp&limit=10&thisWeek=1\",\"Account=probe_b5_tmp&limit=10&thisWeek=1\"]"
+OK   点到了「一键领取本周全部」  → null
+OK   ★ 批量请求**只传 Account**、不吃 CouponId（集合由服务端定）  → "[\"Account=probe_b5_tmp\"]"
+OK   点下去立刻进 busy：文案「领取中…」+ disabled  → "{\"text\":\"领取中…\",\"disabled\":true}"
+OK   落定后按 claimed/failed 汇总（顶层 success:true ≠ 全成功）  → "一键领取：成功 2 张，失败 1 张（您已领取过该券）"
+OK   落定后按钮复位为「一键领取本周全部」  → "一键领取本周全部"
+
+领券中心（本周新券 · 信息架构重排后）: 51 项 / 0 失败

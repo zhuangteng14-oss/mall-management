@@ -11,15 +11,15 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 /**
- * 用户端「优惠券」Web 层（C3 块 5 · commit 1）—— 3 个端点：
- * 领券中心 / 我的券包 / 领券。
+ * 用户端「优惠券」Web 层（C3 块 5 · commit 1）—— 4 个端点：
+ * 领券中心 / 我的券包 / 领券 / 一键领取本周全部。
  *
  * <h2>【挂 {@code /marketing}，**不**挂 {@code /customer/**}】</h2>
  * 与 {@code CartController}（{@code /cart}）同款：这是**用户侧的业务域**，不是壳。前端
- * {@code api/marketing.js} 是唯一调用方；三个端点都在**用户端壳**下被调用
- * （{@code HomePage.vue} 的「领券中心」与「券包位」）。
+ * {@code api/marketing.js} 是唯一调用方；四个端点都在**用户端壳**下被调用
+ * （{@code HomePage.vue} 的「领券中心」、用户中心的券包弹窗、{@code ProductPage.vue} 的领券块）。
  *
- * <h2>【3 个端点全部要身份：判的是 {@code Account} 入参】</h2>
+ * <h2>【4 个端点全部要身份：判的是 {@code Account} 入参】</h2>
  * 走 {@link IdentityGuard#requireSelfOrAdmin}（与购物车 5 条同款）—— 「券包只能看/领自己的」。
  * ⚠️ {@code Account} 在这里是**用户业务号**（{@code user.customerid}），不是登录名 ——
  * 与 {@code CartController} 的 {@code CustomerId} 是同一个东西、同一个判据。
@@ -44,17 +44,25 @@ public class CouponController {
         this.couponService = couponService;
     }
 
-    /** 领券中心：可领的券（含「我已领」与「已领完」两个布尔，供前端把按钮画灰）。 */
+    /**
+     * 领券中心：可领的券（含「我已领」与「已领完」两个布尔，供前端把按钮画灰）。
+     *
+     * @param thisWeek {@code "1"} ⇒ 只回**本周新发布的**（主页领券中心）；省略 ⇒ 全部可领
+     *                 （用户中心「可领」tab）。**同一个查询的两个筛法**，见 {@code CouponDao.selectClaimable}。
+     *                 ⚠️ 可选参数 &gt; 必填 —— 既有调用方（{@code ProductPage.vue} 的领券块）不传它，
+     *                 行为与改动前一致（仍是全量领券中心，没被收窄）。
+     */
     @PostMapping("/coupons")
     public ResponseEntity<Object> coupons(
             @RequestParam("Account") String Account,
             @RequestParam(value = "limit", required = false) Integer limit,
+            @RequestParam(value = "thisWeek", required = false) String thisWeek,
             HttpServletRequest request
     ) {
         if (!IdentityGuard.requireSelfOrAdmin(request, Account)) {
             return IdentityGuard.forbidden();
         }
-        return ResponseEntity.ok(Result.of(couponService.claimable(Account, limit)));
+        return ResponseEntity.ok(Result.of(couponService.claimable(Account, limit, thisWeek)));
     }
 
     /**
@@ -87,5 +95,22 @@ public class CouponController {
             return IdentityGuard.forbidden();
         }
         return ResponseEntity.ok(Result.of(couponService.claim(CouponId, Account)));
+    }
+
+    /**
+     * **一键领取本周全部**（主页领券中心右侧那颗按钮）。
+     * ⚠️ **不吃 {@code CouponId}** —— 集合由**服务端**定（「本周」是服务端语义），
+     * 见 {@code CouponService.claimBatch} 的头两节。逐张走同一条单张路径，返回每张的成败与原因；
+     * **部分失败仍回 {@code success:true}**（那里写了三条理由）。
+     */
+    @PostMapping("/coupon/claimBatch")
+    public ResponseEntity<Object> claimBatch(
+            @RequestParam("Account") String Account,
+            HttpServletRequest request
+    ) {
+        if (!IdentityGuard.requireSelfOrAdmin(request, Account)) {
+            return IdentityGuard.forbidden();
+        }
+        return ResponseEntity.ok(Result.of(couponService.claimBatch(Account)));
     }
 }

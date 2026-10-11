@@ -139,14 +139,34 @@
 
       <!-- ── ② 我的资产（客户版）—— 间距分隔（无线）+ 数字用色。稿 `:323-329` ───────
            ⚠️ 与商家版同一条：稿那 4 个数（1,280 / 3 张 / ¥286.50 / 12 件）是示意值，
-              无聚合端点 ⇒ **落 `—`**（F1 = 甲）。单位 `<small>张/¥/件</small>` 随之不落。 -->
+              **其余三格**无聚合端点 ⇒ **落 `—`**（F1 = 甲）。单位 `<small>张/¥/件</small>` 随之不落。
+           ⚠️ **2026-10-11（块 5 · 券的信息架构重排）：「优惠券」一格已接通** —— 它是「我的券包」的
+              **唯一入口**（用户定「主页不显示券包」，主页那两处入口已删）⇒ 从裸 `div` 改成
+              可点元素 + 真券数 + 快过期红点，点开是 `components/CouponWalletDialog.vue`。
+              另三格**不动**（仍是 `—`）。 ⇒ 本节 `title` 里「均无聚合端点（N=4）」那一句已不成立，随之改掉。
+           ⚠️ 这一格在 `<template v-else>`（**客户版**）里 —— 商家版 `.assets`（`:61-70`）是**另一个
+              template 分支**，动它碰不到商家版（商家看自己的券在管理端，不在这个壳里）。 -->
       <section
         class="assets"
         data-slot="预留 · 我的资产（待 C3〈个人中心〉）"
-        title="待 C3〈个人中心〉——积分/优惠券/余额均无聚合端点（N=4）；数字为示意；⚠️ 稿的 4 个数字为稿自注的示意值，本笔落 —（同 OrderCenter KPI 口径）"
+        title="待 C3〈个人中心〉——积分/余额/收藏三格无聚合端点（N=3）；⚠️ 「优惠券」一格已于 C3 块 5 接通（真券数 + 券包弹窗入口）；稿的 4 个数字为稿自注的示意值，未接通的仍落 —（同 OrderCenter KPI 口径）"
       >
         <div><div class="v">—</div><div class="k">积分</div></div>
-        <div><div class="v">—</div><div class="k">优惠券</div></div>
+        <!-- ⚠️ `div[role=button]` 而**不是** `<button>`：里面的 `.v` / `.k` 是块级 `div`（`.assets .k`
+             的 `margin-top` 要靠块级才生效），而 `<button>` 的内容模型只收**短语内容**。
+             要键盘可达就得自己补 `tabindex` + `keydown`（点开 = 打开券包弹窗）。 -->
+        <div
+          class="asset-entry"
+          role="button"
+          tabindex="0"
+          :title="walletTitle"
+          @click="openWallet"
+          @keydown.enter.prevent="openWallet"
+          @keydown.space.prevent="openWallet"
+        >
+          <div class="v">{{ walletCount === null ? '—' : walletCount }}<i v-if="walletRedDot" class="wallet-dot" title="有券快过期">●</i></div>
+          <div class="k">优惠券</div>
+        </div>
         <div><div class="v">—</div><div class="k">余额</div></div>
         <div><div class="v">—</div><div class="k">我的收藏</div></div>
       </section>
@@ -274,6 +294,16 @@
       </div>
     </section>
 
+
+    <!-- ⚠️ 券包弹窗挂在**客户分支内**（`<template v-else>` 里、`</main>` 之前）——
+         商家壳根本不 mount 它、也就不发那两个请求（`myCoupons` / `coupons`）。
+         ⚠️ 它是 `position: fixed` 的遮罩，放在 `<main>` 里不影响布局。 -->
+    <CouponWalletDialog
+      :open="walletOpen"
+      :account="customerId"
+      @close="walletOpen = false"
+      @changed="loadWallet"
+    />
   </main>
 </template>
 
@@ -282,6 +312,7 @@ import { ref, onMounted, computed } from 'vue'
 import { http, handleApiError, assetOf } from '../api/http'
 import { endpoints } from '../api/endpoints'
 import { getUsername, isLoggedIn } from '../api/auth'; import IconGlyph from '../components/ui/IconGlyph.vue'   // ⚠️ 两条 import **同行**（2026-10-11 补图标那一笔）—— 合并到既有行 = 不新增行号漂移（`api-contract.md` 按 `:99` 钉住本文件）
+import { myCoupons } from '../api/marketing'; import CouponWalletDialog from '../components/CouponWalletDialog.vue'   // ⚠️ 两条 import **同行**（C3 块 5 · 券的信息架构重排，2026-10-11）—— 同上一行的理由：本文件多处被按行号引，**能省一行就省一行**
 
 const userInfo = ref({})
 const idType = ref('')
@@ -363,6 +394,12 @@ const getUserData = async () => {
       idType.value = '商家 ID'
       idValue.value = data.merchantid
     }
+
+    // ⚠️ C3 块 5（2026-10-11）：券包的 `Account` 是**客户号**（`user.customerid`），且只给**客户壳**用 ——
+    //    商家壳的模板里根本没有那个入口（券包弹窗挂在 `<template v-else>` 内）⇒ 这里也**不发请求**：
+    //    券的治理在管理端，不在这个壳里。⚠️ `isMerchantShell` 此刻已按刚赋的 `userInfo.value` 算好。
+    customerId.value = data.customerid || ''
+    if (!isMerchantShell.value && customerId.value) loadWallet(customerId.value)
   } catch (e) {
     handleApiError(e, '获取用户信息失败')
   }
@@ -447,6 +484,61 @@ const saveProfile = async () => {
     }
   } catch (err) {
     alert('保存请求异常')
+  }
+}
+
+// ── 券包入口（C3 块 5 · 券的信息架构重排，2026-10-11）───────────────────────────────
+// 用户定「**主页不显示券包**」⇒ 本页「优惠券」那一格是「我的券包」的**唯一入口**。
+// 本段只管三件事：有几张 / 有没有快过期 / 点开弹窗；券的明细全在
+// `components/CouponWalletDialog.vue` 里（它自己拉数据）。
+
+/** 客户号（`user.customerid`）—— 券包 `Account` 与弹窗 `:account` 都用它。 */
+const customerId = ref('')
+
+/** 弹窗开关。 */
+const walletOpen = ref(false)
+
+/** `null` = 还没取到（渲染「—」）；数字 = **未使用**的张数（`expiring` ∪ `usable`）。 */
+const walletCount = ref(null)
+
+/** 有快过期的券 ⇒ 入口那枚红点（用户裁定 #4 ①）。 */
+const walletRedDot = ref(false)
+
+/** 未使用 / 总张数 —— 只用于 `title`（点开前先说清楚那个数字是什么）。 */
+const walletUseful = ref(0)
+const walletTotal = ref(0)
+
+const walletTitle = computed(() =>
+  walletCount.value === null
+    ? '我的券包 —— 暂时取不到券数，点开仍可查看'
+    : `我的券包：未使用 ${walletUseful.value} 张 / 共 ${walletTotal.value} 张（含已使用 / 已过期）—— 点开查看`
+)
+
+const openWallet = () => { walletOpen.value = true }
+
+/**
+ * 取券包的「摘要」（未使用张数 + 红点）。
+ * ⚠️ 只拉 `myCoupons` 一次，**不**在这里拉明细：明细归弹窗（它开窗那一刻再拉一次，
+ *    因为本函数跑在页面加载时，而弹窗要的是**点开时**的）。
+ * ⚠️ 取不到就回 `null`（渲染「—」）而**不是** `0` —— `0` 会被读成「你真的一张券都没有」。
+ */
+const loadWallet = async (account) => {
+  const acct = account || customerId.value
+  if (!acct) { walletCount.value = null; walletRedDot.value = false; return }
+  try {
+    const data = await myCoupons(acct)
+    if (!data || !data.success) { walletCount.value = null; walletRedDot.value = false; return }
+    const list = Array.isArray(data.list) ? data.list : []
+    walletUseful.value = list.filter((r) => r.Bucket === 'expiring' || r.Bucket === 'usable').length
+    walletTotal.value = list.length
+    walletCount.value = walletUseful.value
+    // ⚠️ 红点用**后端**给的 `redDot`（它按 `CouponDao.EXPIRING_THRESHOLD` 算），不在这里按 `Bucket` 再算一遍 ——
+    //    两处判据必须是**同一个表达式**，否则「快过期的标」与「红点」会打架（见那个常量的 ⚠️）。
+    walletRedDot.value = !!data.redDot || data.redDot === 1 || data.redDot === '1'
+  } catch (e) {
+    walletCount.value = null
+    walletRedDot.value = false
+    handleApiError(e, '券包加载失败')
   }
 }
 </script>
@@ -544,6 +636,15 @@ button {
              line-height: 1; letter-spacing: -.02em; color: var(--brand-ink);
              font-variant-numeric: tabular-nums; }
 .assets .k { margin-top: var(--s3); font-size: var(--fs-sm); color: var(--ink-2); }
+/* ⚠️ C3 块 5：「优惠券」那格从裸 `div` 变成**券包入口**（`div[role=button]`）——
+   这里只补「可点」的三个视觉线索（光标 / hover / 键盘焦点环），**不改尺寸**：
+   它得与另外三格在同一行上逐像素对齐（就是 `.assets` 的 grid 项，宽高本来就由网格定）。 */
+.asset-entry { cursor: pointer; border-radius: var(--r1); }
+.asset-entry:hover .k,
+.asset-entry:focus-visible .k { color: var(--brand-ink); }
+.asset-entry:focus-visible { outline: 2px solid var(--brand); outline-offset: var(--s2); }
+/* 快过期红点 —— 挂在数字右侧（`.v` 是 `line-height: 1` 的大字，红点跟着基线走，不撑行高）。 */
+.wallet-dot { font-style: normal; font-size: var(--fs-sm); color: var(--danger); margin-left: var(--s1); }
 /* ⚠️ 稿 `:181-182` / `:174-175` 的 `.assets .v small` **本页不落** —— 4 个值全落 `—`，
    后面再挂「件 / 单 / 条 / 张 / ¥」是自相矛盾（见 §一 commit 7 的有意偏离第 2 条）。 */
 

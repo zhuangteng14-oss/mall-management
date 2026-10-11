@@ -64,26 +64,47 @@
           <option value="merchant">部分商家（限商品种类）</option>
         </select>
       </label>
+      <!-- 联动：只有「部分商家」才显示类目 —— 「全场」下整块不出现（原来是 `:disabled` 灰着还占位）。
+           ⚠️ 「归属商家」字段已按裁决**移除**：它在本仓是正交的元数据（`MerchantAccount`，「空=平台券」），
+              原本挂在用户设想的「指定商家」那档上，而那一档在本仓不存在（后端只收 all/merchant）⇒ 无归属。
+              列与后端参数都还在，只是建券表单里不再暴露（详见本节注释）。 -->
+      <div v-if="c.Scope === 'merchant'" class="a-f a-f-wide a-cat">
+        <span>限商品种类 *</span>
+        <div class="a-cat-ctl">
+          <div v-if="catOpen" class="a-cat-scrim" @click="catOpen = false"></div>
+          <button
+            type="button"
+            class="a-cat-toggle"
+            :aria-expanded="catOpen ? 'true' : 'false'"
+            @click="catOpen = !catOpen"
+          >
+            <span v-if="!catPicked.length" class="a-cat-ph">选择类目…</span>
+            <span v-else class="a-cat-val">{{ catPicked.join('，') }}</span>
+            <span class="a-cat-caret">▾</span>
+          </button>
+          <button v-if="catPicked.length" type="button" class="a-cat-clear" @click="clearCats">
+            清空
+          </button>
+          <div v-if="catOpen" class="a-cat-menu">
+            <label v-for="g in categories" :key="g.Id" class="a-cat-opt">
+              <input
+                type="checkbox"
+                :checked="catPicked.includes(g.GoodType)"
+                @change="toggleCat(g.GoodType)"
+              />
+              <span>{{ g.GoodType }}</span>
+            </label>
+            <p v-if="!categories.length" class="a-cat-none">暂无类目</p>
+          </div>
+        </div>
+      </div>
       <label class="a-f a-f-wide">
-        <span>限商品种类{{ c.Scope === 'merchant' ? ' *' : '' }}</span>
-        <input
-          v-model.trim="c.CategoryMatch"
-          type="text"
-          :disabled="c.Scope !== 'merchant'"
-          placeholder="类目名，逗号分隔（如：手机,电脑）"
-        />
+        <span>有效期起（本地时区，可空）</span>
+        <input v-model="c.StartAt" type="datetime-local" />
       </label>
       <label class="a-f a-f-wide">
-        <span>归属商家（空 = 平台券）</span>
-        <input v-model.trim="c.MerchantAccount" type="text" placeholder="MerchantId（可空）" />
-      </label>
-      <label class="a-f a-f-wide">
-        <span>有效期起</span>
-        <input v-model.trim="c.StartAt" type="text" placeholder="YYYY-MM-DD HH:MM:SS（可空）" />
-      </label>
-      <label class="a-f a-f-wide">
-        <span>有效期止</span>
-        <input v-model.trim="c.EndAt" type="text" placeholder="YYYY-MM-DD HH:MM:SS（可空）" />
+        <span>有效期止（本地时区，可空）</span>
+        <input v-model="c.EndAt" type="datetime-local" />
       </label>
       <div class="a-f-actions">
         <button type="submit" class="a-btn a-btn-on" :disabled="creating">
@@ -95,7 +116,10 @@
     <p class="a-hint">
       · <b>折扣券的「面值」是折扣率</b>（<code>0.85</code> = 8.5 折，必须小于 1）；满减 / 无门槛券的面值才是<b>减免金额</b>。发满减券时<b>必须</b>给门槛。
       · <b>总量 <code>0</code> = 不限量</b>；范围选「部分商家」<b>必须</b>同时给类目名。
-      · 有效期必须<b>零填充</b>（<code>2026-11-11 00:00:00</code>）—— 后端按此格式校验，别的写法会被当场拒掉而不是静默改。
+      · 有效期按<b>你浏览器的本地时区</b>挑（<code>{{ tzLabel }}</code>），提交前换算成库内时钟（UTC）——
+        列表与明细里显示的时间都是<b>换算回本地</b>的，跟这里填的是同一个口径。
+      · <b>「已到有效期起」才算能领</b>：只填「止」不填「起」立即生效；填了「起」而那一刻还没到，领取会被拒
+        （话术是<b>「该券还未开始」</b>，不是「已过期」）。
       · 留空的有效期 = 不设那一条边界。
     </p>
 
@@ -145,7 +169,11 @@
         </tr>
       </thead>
       <tbody>
-        <tr v-for="r in rows" :key="r.CouponId">
+        <!-- ⚠️ 明细**展开在被点的那一行下方**（用户 2026-10-11 手验要求：原来是页底单独一块，
+             占整页高度、且离被点的行很远）。用 `<template v-for>` 包一对兄弟 `<tr>`：
+             一对是券行本身，另一对（可选）是它的明细 —— 表里加行不需要动列结构。 -->
+        <template v-for="r in rows" :key="r.CouponId">
+        <tr>
           <td>
             <div class="a-ink">{{ r.Name }}</div>
             <div class="a-mono a-mini">{{ r.CouponId }}</div>
@@ -159,7 +187,7 @@
           </td>
           <td class="num">{{ fmtInt(r.ClaimedQty) }} / {{ Number(r.TotalQty) === 0 ? '不限量' : fmtInt(r.TotalQty) }}</td>
           <td class="a-mono a-mini">
-            {{ r.StartAt || '—' }}<br />{{ r.EndAt || '—' }}
+            {{ toLocal(r.StartAt) }}<br />{{ toLocal(r.EndAt) }}
           </td>
           <td>
             <span class="a-chip" :class="r.Status === 'active' ? 'ok' : 'off'">
@@ -185,10 +213,64 @@
               type="button"
               class="a-btn a-btn-sm"
               :disabled="busy === r.CouponId"
-              @click="openGrants(r.CouponId)"
-            ><IconGlyph name="logs" />明细</button>
+              @click="toggleGrants(r.CouponId)"
+            ><IconGlyph name="logs" />{{ picked && picked.CouponId === r.CouponId ? '收起' : '明细' }}</button>
           </td>
         </tr>
+
+        <!-- ── 该行的明细（展开态）—— 原页底那一块整块搬进来，内容一字未改 ── -->
+        <tr v-if="picked && picked.CouponId === r.CouponId" class="a-expand">
+          <td colspan="8">
+            <div class="a-expand-h">
+              <b>领取明细 —— {{ picked.Name }}</b>
+              <span class="a-mono a-mini">{{ picked.CouponId }} · 按领取时间倒序</span>
+            </div>
+
+            <form class="a-filters a-filters-in" @submit.prevent="doGrant">
+              <label class="a-f a-f-wide">
+                <span>定向发放给（客户业务号）</span>
+                <input v-model.trim="grantTo" type="text" placeholder="user.customerid" />
+              </label>
+              <div class="a-f-actions">
+                <button type="submit" class="a-btn a-btn-on" :disabled="granting">
+                  <IconGlyph name="msg" />{{ granting ? '发放中…' : '发放' }}
+                </button>
+                <button type="button" class="a-btn" @click="closeGrants">收起</button>
+              </div>
+            </form>
+
+            <p v-if="!grantRows.length" class="a-empty">
+              {{ grantLoading ? '加载中…' : '这张券还没有人领取。' }}
+            </p>
+            <table v-else class="a-tbl a-tbl-in">
+              <thead>
+                <tr>
+                  <th>领取人</th>
+                  <th>来源</th>
+                  <th>状态</th>
+                  <th>领取时间</th>
+                  <th>核销时间</th>
+                  <th>订单</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="g in grantRows" :key="g.GrantId">
+                  <td class="a-mono">{{ g.ToAccount }}</td>
+                  <td>{{ g.Source === 'grant' ? '定向发放' : '自助领取' }}</td>
+                  <td>
+                    <span class="a-chip" :class="g.Status === 'used' ? 'ok' : 'wait'">
+                      {{ g.Status === 'used' ? '已核销' : '未使用' }}
+                    </span>
+                  </td>
+                  <td class="a-mono a-mini">{{ toLocal(g.GrantedAt) }}</td>
+                  <td class="a-mono a-mini">{{ toLocal(g.UsedAt) }}</td>
+                  <td class="a-mono a-mini">{{ g.OrderId || '—' }}</td>
+                </tr>
+              </tbody>
+            </table>
+          </td>
+        </tr>
+        </template>
       </tbody>
     </table>
 
@@ -227,57 +309,6 @@
         @retry="loadStats"
       />
     </div>
-
-    <!-- ══ ⑤ 领取明细 + 定向发放（选中某张券后才出现）══════════════════════════ -->
-    <template v-if="picked">
-      <h2 class="a-h2">
-        领取明细 —— {{ picked.Name }}
-        <span class="a-h2n">{{ picked.CouponId }} · 按领取时间倒序</span>
-      </h2>
-
-      <form class="a-filters" @submit.prevent="doGrant">
-        <label class="a-f a-f-wide">
-          <span>定向发放给（客户业务号）</span>
-          <input v-model.trim="grantTo" type="text" placeholder="user.customerid" />
-        </label>
-        <div class="a-f-actions">
-          <button type="submit" class="a-btn a-btn-on" :disabled="granting">
-            <IconGlyph name="msg" />{{ granting ? '发放中…' : '发放' }}
-          </button>
-          <button type="button" class="a-btn" @click="closeGrants">收起</button>
-        </div>
-      </form>
-
-      <p v-if="!grantRows.length" class="a-empty">
-        {{ grantLoading ? '加载中…' : '这张券还没有人领取。' }}
-      </p>
-      <table v-else class="a-tbl">
-        <thead>
-          <tr>
-            <th>领取人</th>
-            <th>来源</th>
-            <th>状态</th>
-            <th>领取时间</th>
-            <th>核销时间</th>
-            <th>订单</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr v-for="g in grantRows" :key="g.GrantId">
-            <td class="a-mono">{{ g.ToAccount }}</td>
-            <td>{{ g.Source === 'grant' ? '定向发放' : '自助领取' }}</td>
-            <td>
-              <span class="a-chip" :class="g.Status === 'used' ? 'ok' : 'wait'">
-                {{ g.Status === 'used' ? '已核销' : '未使用' }}
-              </span>
-            </td>
-            <td class="a-mono a-mini">{{ g.GrantedAt || '—' }}</td>
-            <td class="a-mono a-mini">{{ g.UsedAt || '—' }}</td>
-            <td class="a-mono a-mini">{{ g.OrderId || '—' }}</td>
-          </tr>
-        </tbody>
-      </table>
-    </template>
   </section>
 </template>
 
@@ -291,18 +322,24 @@
   ⚠️ **核销不在这里**：券的 `unused → used` 发生在**结算**（`orderAdd` 带 `couponId`），
      本页只「读」核销结果（明细里的状态与订单号），块 5 commit 5 才接上结算侧。
 
-  ⚠️ **时间列是库内无时区文本**（`'YYYY-MM-DD HH:MM:SS'`，后端 `DATE_FORMAT` 出来的）
-     ⇒ 本页所有时间都**原样显示**、不做 `new Date()` 再格式化（那会按浏览器时区解释无时区文本，
-     凭空造出偏移 —— 同 `StatsPage.vue` 的日期口径）。右侧那个 `tzLabel` 是**说明**，不是转换器。
+  ⚠️ **时间列是库内无时区文本**（`'YYYY-MM-DD HH:MM:SS'`，后端 `DATE_FORMAT` 出来的），**库时钟 = UTC**。
+     ⇒ 本页照 `AuditPage.vue` 的**既定口径**（用户 2026-10-08 裁决「库时钟 UTC 是对的，根因是前端没转时区」）：
+       · **显示** 库内文本 → 当 UTC 解析 → 按**浏览器时区**渲染（`toLocal`）；
+       · **输入** 用户按**本地时区**在 `datetime-local` 里挑 → 反算成 UTC 文本再发（`toSqlTime`）。
+     ⚠️ 2026-10-11 手验修的就是这一处：本页**曾经**把表单里的墙钟原样发出去（既不转、也不说明），
+        于是「22:01 起」在库内被当成 **UTC 22:01** = 本地次日 06:01 ⇒ 券在用户眼里「刚建好就领不了」，
+        而后端回的话术又是「已过期或已领完」（真因是**还没开始**）—— 两个错叠在一起，很难查。
+        同一根因的第二个落点在后端 `CouponService.isExpired`（拿 JVM 时钟判过期），已一并收掉。
 -->
 <script setup>
 /* ⚠️ 本仓 `eslint-plugin-vue` 是 8.7.1，`vue3-essential` 不带宏环境 ⇒ 只要用了 `defineProps` /
    `defineEmits` 就必须写这条（理由见 `components/charts/BaseChart.vue` 同款注释）。本页没有宏。 */
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref, watch } from 'vue'
 import {
   couponList, couponCreate, couponStop, couponActivate,
   couponGrants, couponGrant, couponStats,
 } from '../../api/marketing'
+import { catalogCategories } from '../../api/admin'
 import LineChart from '../../components/charts/LineChart.vue'
 import PieChart from '../../components/charts/PieChart.vue'
 import IconGlyph from '../../components/ui/IconGlyph.vue'
@@ -343,7 +380,55 @@ const c = reactive(blankCoupon())
 function blankCoupon() {
   return {
     Name: '', Type: 'threshold', FaceValue: '', Threshold: '', TotalQty: '',
+    // ⚠️ `MerchantAccount` 仍是提交字段（后端 `/admin/coupon` 有这个参数，空串=平台券）——
+    //    只是建券表单里不再有它对应的输入框（那格原属不存在的「指定商家」档，见模板注释）。
     Scope: 'all', MerchantAccount: '', CategoryMatch: '', StartAt: '', EndAt: '',
+  }
+}
+
+// ── 「限商品种类」多选（数据源 = 既有类目端点 `GET /goods/goodstype`）────────────────────
+// ⚠️ **单一真源 = `c.CategoryMatch`（逗号串，= 后端存储格式，不变）**；勾选数组只是它的**读侧派生**。
+//    刻意**不用** `v-model` 绑数组 + `watch` 回写：那条路上「数组」成了第二个真源，一旦同步漏一拍，
+//    就会发出 `Scope='merchant'` 却没有 CategoryMatch 的券（后端直接拒）—— 提交字段必须当场赋值。
+const categories = ref([])
+const catOpen = ref(false)
+const catPicked = computed(() => {
+  const s = (c.CategoryMatch || '').trim()
+  return s ? s.split(',').map((x) => x.trim()).filter(Boolean) : []
+})
+
+/** 勾 / 取消一个类目 —— 当场把它写回 `c.CategoryMatch`。 */
+function toggleCat(name) {
+  const next = catPicked.value.includes(name)
+    ? catPicked.value.filter((x) => x !== name)
+    : catPicked.value.concat([name])
+  c.CategoryMatch = next.join(',')
+}
+
+function clearCats() {
+  c.CategoryMatch = ''
+}
+
+// ⚠️ 切回「全场」要把已选清掉：否则会发一张 `Scope='all'` 但 `CategoryMatch='电子用品'` 的券 ——
+//    后端只在 merchant 档校验 CategoryMatch，不会拦，列表里就成了「全场」下面还挂一行类目名。
+//    顺带把菜单收起来（那一整块本来就要消失）。
+watch(() => c.Scope, (s) => {
+  if (s !== 'merchant') {
+    clearCats()
+    catOpen.value = false
+  }
+})
+
+/** 类目选项：只取**一级**（`ParentId === 0`）。现有 goodstype 是单层，这一步是恒等过滤。 */
+async function loadCategories() {
+  try {
+    const data = await catalogCategories()
+    categories.value =
+      data && data.success && Array.isArray(data.list)
+        ? data.list.filter((g) => g.ParentId === 0)
+        : []
+  } catch (e) {
+    categories.value = []
   }
 }
 
@@ -369,12 +454,51 @@ const facePlaceholder = computed(() => (c.Type === 'percent' ? '0.85' : '20'))
 
 const truncated = computed(() => rows.value.length >= limit.value && total.value > rows.value.length)
 
+// ── 时区换算（两个方向必须对称，否则「填进去的」和「显示出来的」对不上）──────────
+// ⚠️ 逐字照 `AuditPage.vue` 的同名两函数 —— 本页不另立一套口径（同 `api/marketing.js` 的 `q()`）。
+const pad = (n) => String(n).padStart(2, '0')
+
+/** 浏览器时区偏移标签，形如 `UTC+08:00`。 */
 const tzLabel = computed(() => {
-  const pad = (n) => String(n).padStart(2, '0')
   const mins = -new Date().getTimezoneOffset()
   const a = Math.abs(mins)
   return `UTC${mins >= 0 ? '+' : '-'}${pad(Math.floor(a / 60))}:${pad(a % 60)}`
 })
+
+/**
+ * 展示向：库内时钟文本（`'YYYY-MM-DD HH:MM:SS'`，UTC）→ 浏览器本地时间。
+ *
+ * ⚠️ 末尾那个 `Z` **不能省**：省掉它 `Date` 会按**本地**时区解析这串数字，等于把 UTC 当本地，
+ *    东八区整整差 8 小时，而且**错得很安静**（格式完全正常）。
+ */
+function toLocal(sqlTime) {
+  if (!sqlTime) return '—'
+  const d = new Date(`${String(sqlTime).replace(' ', 'T')}Z`)
+  if (Number.isNaN(d.getTime())) return String(sqlTime)
+  return (
+    `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ` +
+    `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`
+  )
+}
+
+/**
+ * 输入向：`<input type="datetime-local">` 的值（`'YYYY-MM-DDTHH:MM'`，**本地时区**语义）
+ * → 库内时钟文本（UTC）。
+ *
+ * 起补 `:00`、止补 `:59`：用户挑到哪一分，就把那一分**用满**。
+ * ⚠️ 止补 `:59` 还有一个实际作用：起止挑成同一分钟时（例如 `22:01–22:01`）窗口是 59 秒而不是 0 秒，
+ *    否则后端的 `EndAt 必须晚于 StartAt` 校验会当场拒掉一个「用户觉得没问题」的输入。
+ */
+function toSqlTime(localValue, isEnd) {
+  if (!localValue) return ''
+  const d = new Date(localValue) // 无偏移的 date-time ⇒ 按**本地**时区解析（ES2016+）
+  if (Number.isNaN(d.getTime())) return ''
+  d.setSeconds(isEnd ? 59 : 0, 0)
+  return (
+    `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())} ` +
+    `${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}:${pad(d.getUTCSeconds())}`
+  )
+}
 
 const trendDays = computed(() => stats.value.trend.days || [])
 const trendClaimed = computed(() => stats.value.trend.claimed || [])
@@ -392,6 +516,8 @@ function onTypeChange() {
 
 function resetCreate() {
   Object.assign(c, blankCoupon())
+  clearCats()
+  catOpen.value = false
 }
 
 function resetFilters() {
@@ -449,7 +575,13 @@ async function doCreate() {
   creating.value = true
   flash.text = ''
   try {
-    const data = await couponCreate({ ...c })
+    // ⚠️ 两个时间字段在表单里是**浏览器本地时区**的 `datetime-local` 值 ⇒ 发出去之前必须反算成
+    //    库内时钟（UTC）文本，否则后端存的是「本地墙钟、UTC 语义」，券会晚 8 小时才开始（见文件头）。
+    const data = await couponCreate({
+      ...c,
+      StartAt: toSqlTime(c.StartAt, false),
+      EndAt: toSqlTime(c.EndAt, true),
+    })
     if (!data || !data.success) {
       flash.kind = 'bad'
       flash.text = '建券失败：' + ((data && data.msg) || '未知原因')
@@ -493,7 +625,26 @@ async function changeStatus(couponId, action, verb) {
 const doStop = (id) => changeStatus(id, couponStop, '停用')
 const doActivate = (id) => changeStatus(id, couponActivate, '启用')
 
-async function openGrants(couponId) {
+/**
+ * 取某张券的领取明细并**就地**展开/收起。
+ *
+ * 用户 2026-10-11 手验要求：明细原来在页底单独占一块（点第 1 行的「明细」，
+ * 内容出现在整页最下方，得滚到底才看得见，且看不出跟哪一行有关）。改成在被点的
+ * **那一行下方**展开 —— 所以这里只维护 `picked`（=「哪一行展开着」），
+ * 展开位由模板里那对兄弟 `<tr>` 决定。
+ *
+ * 点的是已展开的那一行 ⇒ 收起（再点一次不该重新拉一遍）。
+ */
+async function toggleGrants(couponId) {
+  if (picked.value && picked.value.CouponId === couponId) {
+    closeGrants()
+    return
+  }
+  await loadGrants(couponId)
+}
+
+/** 加载并展开某张券的明细（令牌发放后要**刷新同一行**，故与 toggle 分开）。 */
+async function loadGrants(couponId) {
   const row = rows.value.find((r) => r.CouponId === couponId) || null
   picked.value = row
   grantRows.value = []
@@ -522,6 +673,7 @@ function closeGrants() {
   grantTo.value = ''
 }
 
+
 async function doGrant() {
   granting.value = true
   flash.text = ''
@@ -535,7 +687,7 @@ async function doGrant() {
     flash.kind = 'ok'
     flash.text = `已发放给 ${grantTo.value}`
     grantTo.value = ''
-    await openGrants(picked.value.CouponId)
+    await loadGrants(picked.value.CouponId)
     await loadList()
     await loadStats()
   } catch (e) {
@@ -549,6 +701,7 @@ async function doGrant() {
 onMounted(() => {
   loadList()
   loadStats()
+  loadCategories()
 })
 </script>
 
@@ -673,6 +826,110 @@ onMounted(() => {
   display: flex;
   gap: var(--s2);
   margin-left: auto;
+}
+
+/* ── 「限商品种类」多选下拉 ────────────────────────────────────────────── */
+.a-cat-ctl {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+}
+/* 点外面关菜单：整屏透明蒙层（比挂 document 监听干净）。toggle/菜单各抬 z-index 站到它上面。 */
+.a-cat-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 15;
+}
+.a-cat-toggle {
+  position: relative;
+  z-index: 21;
+  flex: 1 1 auto;
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  min-height: 34px;
+  font: inherit;
+  font-size: var(--fs-sm);
+  color: var(--ink);
+  text-align: left;
+  background: var(--surface-2);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r2);
+  padding: var(--s2) var(--s3);
+  cursor: pointer;
+}
+.a-cat-toggle:hover {
+  background: var(--surface-3);
+}
+.a-cat-ph {
+  color: var(--ink-3);
+}
+.a-cat-val {
+  flex: 1 1 auto;
+}
+.a-cat-caret {
+  margin-left: auto;
+  color: var(--ink-3);
+}
+.a-cat-clear {
+  position: relative;
+  z-index: 21;
+  font: inherit;
+  font-size: var(--fs-xs);
+  color: var(--ink-3);
+  background: none;
+  border: none;
+  padding: 0 var(--s1);
+  cursor: pointer;
+}
+.a-cat-clear:hover {
+  color: var(--ink);
+}
+.a-cat-menu {
+  position: absolute;
+  z-index: 20;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  max-height: 220px;
+  overflow-y: auto;
+  padding: var(--s2);
+  background: var(--surface);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r2);
+  box-shadow: 0 8px 24px rgb(0 0 0 / 12%);
+}
+.a-cat .a-cat-opt {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  padding: var(--s1) var(--s2);
+  font-size: var(--fs-sm);
+  color: var(--ink);
+  border-radius: var(--r2);
+  cursor: pointer;
+}
+.a-cat .a-cat-opt:hover {
+  background: var(--surface-3);
+}
+/* ⚠️ 必须盖过上面的 `.a-f input`（它把 input 一律当文本输入框给 padding/border/背景）。
+   `.a-cat .a-cat-opt input`（0,2,1）> `.a-f input`（0,1,1）⇒ 稳赢，不靠源码顺序。 */
+.a-cat .a-cat-opt input {
+  width: 14px;
+  height: 14px;
+  margin: 0;
+  padding: 0;
+  border: none;
+  border-radius: 0;
+  background: none;
+  accent-color: var(--brand-ink);
+  cursor: pointer;
+}
+.a-cat-none {
+  margin: var(--s2);
+  font-size: var(--fs-xs);
+  color: var(--ink-3);
 }
 
 .a-btn {
@@ -826,5 +1083,33 @@ onMounted(() => {
 .a-chip.wait {
   color: var(--warning-deep);
   background: var(--warning-ground);
+}
+
+/* ── 行内展开的明细（用户 2026-10-11 手验：从页底搬进被点的那一行下方）───────
+   展开行本身**不是**普通数据行：整格 colspan=8，用左色条 + 浅底跟上面的券行分开，
+   并给一点内缩，让人一眼看出「这属于上面那一行」。 */
+.a-expand > td {
+  padding: var(--s4) var(--s3) var(--s5);
+  background: var(--surface-2);
+  border-left: 3px solid var(--brand-ink);
+}
+.a-expand-h {
+  display: flex;
+  align-items: baseline;
+  gap: var(--s3);
+  flex-wrap: wrap;
+  margin-bottom: var(--s3);
+  font-size: var(--fs-sm);
+  color: var(--ink);
+}
+/* 展开位里的发放表单/明细表：去掉外框（已经在展开格子的底上了），只留内间距。 */
+.a-filters-in {
+  padding: 0;
+  background: transparent;
+  border: 0;
+  margin-bottom: var(--s3);
+}
+.a-tbl-in {
+  border: 1px solid var(--line-2);
 }
 </style>

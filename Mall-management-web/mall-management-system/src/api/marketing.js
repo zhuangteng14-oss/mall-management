@@ -2,8 +2,8 @@
 //
 // 两组端点、一个模块：
 //   · 管理端 `/admin/marketing/coupon/*` 7 条 —— 唯一调用方 `views/admin/MarketingPage.vue`
-//   · 用户端 `/marketing/*` 3 条 —— 调用方 `views/HomePage.vue`（领券中心 / 券包位）与
-//     `views/ProductPage.vue`（详情页「领券」块）
+//   · 用户端 `/marketing/*` 4 条 —— 调用方 `views/HomePage.vue`（领券中心 = 本周新券）、
+//     `components/CouponWalletDialog.vue`（用户中心的券包弹窗）与 `views/ProductPage.vue`（详情页「领券」块）
 // ⚠️ 两组**同域不同壳**（管理端 vs 用户端），故合在一个模块里 —— 它们读写的是**同一张 `coupon` 表**，
 //    拆成两个文件只会让「券的类型码 / Bucket 取值」这类口径有两处可抄错。
 //
@@ -127,15 +127,25 @@ export function couponStats() {
 /**
  * 领券中心：可领的券。
  * @param {string} account 用户业务号（`user.customerid`）。
- * @returns {Promise<{success:boolean, list:Array, limit:number}>}
+ * @param {number} [limit] 列表上限；省略 ⇒ 后端默认 100（`CouponService.DEFAULT_LIMIT`）。
+ * @param {'1'} [thisWeek] `'1'` ⇒ 只回**本周新发布**的（主页领券中心）；省略 ⇒ **全部可领**
+ *        （用户中心弹窗的「可领」tab，含旧券）。
+ *        ⚠️ 两者是**同一个查询的两个筛法**（用户 2026-10-11 裁定「甲」）⇒ 主页那批天然是
+ *        「可领」的**子集**，不会有两个真相。`q()` 对 `undefined` 不发键 ⇒ 省略即「全量」。
+ * @returns {Promise<{success:boolean, list:Array, limit:number, daysLeft:number}>}
  *          `list[]` 在券定义之外多两个**给这个人算的**布尔：
  *          · `Claimed`（`true`/`1`）—— 此人已领过 ⇒ 按钮画成「已领取」并禁用
  *          · `SoldOut`（`true`/`1`）—— 券已领完 ⇒ 按钮画成「已领完」并禁用
- *          ⚠️ 两个布尔的**形态可能是 `true` 也可能是 `1`**（Connector/J 的 `tinyInt1isBit`）
- *          ⇒ 判断要**宽容**（同 `notify-events.js` / `AccountsPage.isBanned` 的口径）。
+ *          外加一个 `IsNew`（`true`/`1`）—— **近 3 天新建**（用户裁定 ⑥）⇒ 打 NEW 角标。
+ *          `daysLeft` = **本周还剩几天**（后端按**库时钟**算，周一 = 7 … 周日 = 1；前端不碰浏览器钟）。
+ *          ⚠️ 三个布尔的**形态可能是 `true` 也可能是 `1`**（Connector/J 的 `tinyInt1isBit`）
+ *          ⇒ 判断要**宽容**（走 `config/coupon-format.js` 的 `truthy`）。
+ *          ⚠️ **排序由后端定好**（`CouponDao.selectClaimable` 按 `updated_at ASC` ⇒ **最早更新的在最左**，
+ *             用户 2026-10-11 裁定）⇒ 前端**按数组原序从左到右铺**（`HomePage.vue` 的 `.tk-strip`），
+ *             别自己再排一遍。⚠️ 与 `myCoupons()` **不是一套口径**：那边按**紧迫度**，这边按**新旧**。
  */
-export function coupons(account, limit) {
-  return post(endpoints.marketing.coupons, q({ Account: account, limit }))
+export function coupons(account, limit, thisWeek) {
+  return post(endpoints.marketing.coupons, q({ Account: account, limit, thisWeek }))
 }
 
 /**
@@ -156,9 +166,26 @@ export function myCoupons(account) {
  * 领券。
  * ⚠️ **核销不在这里** —— 核销发生在结算（`orderAdd` 带 `couponId`），块 5 commit 5 落。
  * @returns {Promise<{success:boolean, msg:string, CouponId?:string}>}
- *          失败话术有三档，别把它们合并：「券不存在」/「该券已停止发放」/「领取失败：该券已过期或已领完」，
- *          另有「您已领取过该券」。
+ *          ⚠️ 后端 `msg` **不带「领取失败：」前缀**（前缀归调用方 `HomePage.vue` / `ProductPage.vue` 拼），
+ *             也别把几档原因合并 —— 每条都是**一个**原因：「券不存在」/「该券还未开始」/「该券已过期」/「该券已领完」/「该券已停止发放」/「您已领取过该券」。
  */
 export function claim(account, couponId) {
   return post(endpoints.marketing.claim, q({ Account: account, CouponId: couponId }))
+}
+
+/**
+ * **一键领取「本周全部」**（主页领券中心右侧那颗按钮）。
+ *
+ * ⚠️ **不传 CouponId** —— 领哪些由**服务端**定（「本周新发布 + 启用 + 未过期 + 我还没领过 + 还有余量」）。
+ *    「本周」是服务端语义，前端手里那份列表可能是旧的 ⇒ 不在前端定集合。
+ * @param {string} account 用户业务号。
+ * @returns {Promise<{success:boolean, msg:string, total:number, claimed:number, failed:number,
+ *   daysLeft:number, items:Array<{CouponId:string, Name:string, success:boolean, msg:string}>}>}
+ *          ⚠️ **顶层 `success:true` ≠ 全成功** —— 它是「批量动作**执行完毕**」。
+ *          部分失败**刻意**不回落 `success:false`：那会诱导调用方重发整批，而每张的成败
+ *          已经在 `items[].success` 里逐条如实回报了（后端 `CouponService.claimBatch` 写了三条理由）。
+ *          ⇒ 前端要**按 `claimed` / `failed` 汇总**，别只看顶层布尔。
+ */
+export function claimBatch(account) {
+  return post(endpoints.marketing.claimBatch, q({ Account: account }))
 }
