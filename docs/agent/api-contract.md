@@ -373,3 +373,103 @@
 - `OrderMine.vue`：**收银台弹窗**（`PAY_METHODS` 三选一 → `orderPay(orderId, method)`；成功回显 `tradeNo`）+ **物流详情弹窗**（`orderDetail` 的 `shippingTrack` 画时间线）。
 - `OrderCenter.vue`：**发货弹窗**（快递公司 / 运单号，**可留空**）；原 `handleDeliver` 的三道守卫**逐字保留**、只从「点击即判」挪到「开窗前判」。
 - `views/admin/OrderPage.vue`：详情区加**支付 / 物流 7 列** + **第二条时间线**（`detail.shippingTrack`，**与 `detail.timeline` 并列不合并**）。
+
+## 附录 E：可视化段契约增补（commit 0 / 0b / 2 / 3 / 4，2026-10-11） {#api-app-e}
+
+> **范围**：`feat(fullstack)` 的 5 笔 —— commit 0〈`order_item` + `orderAdd` 可选 `Items`〉、commit 0b〈购物车**按商家分组**结算〉、commit 2〈经营数据看板 3 端点〉、commit 3〈补丁：承诺位 / `SkuSpec` / `skuList` / `login.CreateTime` / `/user/me` 补 `username`〉、commit 4〈`Source` 标记列，**无契约面**〉。
+> **判据档位**：本文 `:<行>` 一律 **2026-10-11 实测**（`grep -n '@PostMapping'`，口径 = **`@PostMapping` 行**，与正文 / 附录 C / D 一致）。
+> ⚠️ **新增端点只有 4 个**：`/goods/skuList` · `/admin/stats` · `/admin/stats/rebuild` · `/merchant/stats`。**没有任何旧端点被删、被改名、被改必填性**（硬线「禁止删除旧接口、旧字段」「不能阻碍旧功能」）。
+
+### E.1 新端点组 `/admin/stats` + `/merchant/stats`（commit 2） {#api-e-1}
+
+| 动词 | 路径 | 入参（全 `@RequestParam`，全 `required=false`） | 返回 | 副作用 | 坐标 |
+|---|---|---|---|---|---|
+| POST | `/admin/stats` | `from?` · `to?` · `days?` | `{success, builtRows, range, days[], totals, prevTotals, merchants[]}` | **纯读** | `AdminStatsController.java:56` |
+| POST | `/admin/stats/rebuild` | — | `{success, deleted, siteRows, merchantRows, totalRows}` | **写**：`stats_daily` 全清 + 从 `order` 重算 upsert | `AdminStatsController.java:71` |
+| POST | `/merchant/stats` | `MerchantId?` · `from?` · `to?` · `days?` · `goodsLimit?` | 同全站形状 **+ `MerchantId` + `topGoods[]`** | **纯读** | `MerchantStatsController.java:52` |
+
+- ⚠️ **参数只认查询串**：全 `@RequestParam`、类中无 `@RequestBody` ⇒ 必须 `POST /admin/stats?days=30`；**把 `days` 放进 body 不会被解析**（这是最容易踩的一条）。`days` 给了就按「最近 N 天」（相对**库时钟**，也是**唯一能给环比**的形态）；否则 `from`/`to`；都没给 ⇒ 全部已聚合日。
+- ⚠️ **错误一律 HTTP 200 + `{success:false, msg:"经营数据读取失败：…"}`**（重建失败是 `"重建失败：…"`）—— 同全仓口径：**没有 4xx/5xx、没有全局异常处理**。前端**必须**读 `success`，不能只看 HTTP 码。
+- ⚠️ `days[]` 每行 = `{StatDate, MerchantId, Orders, Gmv, Items, Buyers, aov}`（全站行的 `MerchantId` 是空串）；`totals` / `prevTotals` 同形状。
+- ⚠️ **`aov` 是读时现除**（`Gmv / Orders`，`Orders=0` 时给 0/—），**刻意不落列**（理由见 `db-schema.md §13.2`）。
+- ⚠️ **`Buyers` 是「人日」，不是人数**：逐日 `COUNT(DISTINCT CustomerId)` ⇒ **跨日相加会重复计人**；且 `site` 与 `merchant` 两口径**不可互推**（同一人当天在两店各下一单，全站算 1、两店相加算 2）。
+- ⚠️ **`topGoods` 上线即空**：`order_item` **不回填存量单**（用户裁定）⇒ 历史单没有明细行。**不是缺陷**（见 `db-schema.md §13.1`）。
+- ⚠️ **3 个端点都不加角色闸**：与其余 `/admin/*` 同款（TD-18 例外）—— 真正把它们挡在门外的是 `app.auth.enabled`（默认 profile 开）+ `AuthInterceptor`；加「须 role=3」会让**默认 profile 上管理员自己也 401**。⚠️ 别「顺手」补 `requireAdmin`。
+- ⚠️ **`rebuild` 不挂审计**（与 `/admin/order/intervene` 的唯一区别）：`admin_audit.TargetId` 是 NOT NULL，而 rebuild 没有业务对象可指、也不改任何对象**状态**，只重建一份派生表。
+- ⚠️ 端点**没进** `AdminApp` 的路由白名单？—— 是**有**的：`/admin/stats` 由 `views/admin/StatsPage.vue`（同 commit 2）调用；商家端由 `views/merchant/StatsPage.vue` 调 `/merchant/stats`。
+- ⚠️ **入参动词选 POST 不是 GET**（方案没写动词）：本仓管理端的读端点**全部**是 POST（`/admin/order/list` · `/admin/audit/list` · `/admin/catalog/*` …）⇒ 按**同域一致**办。**别照 REST 习惯改成 GET**（理由逐字在 `AdminStatsController` 块首）。
+
+### E.2 商品侧：新端点 `POST /goods/skuList` + `goodsAdd` 扩参（commit 0 补丁） {#api-e-2}
+
+| 项 | 内容 |
+|---|---|
+| 路径 | `/goods/skuList`（`@RequestMapping("/goods")` 之下）—— `GoodsController.java:244` |
+| 入参 | `MerchantId`（**必填**，`@NotBlank`）· `GoodName`（**必填**，`@NotBlank`） |
+| 返回 | `{success, list}`。**空 `list` = 该商品没有多规格** ⇒ 前端回落到既有的「单型号 `ProductCode`」路径 |
+| 归属 | **不做身份闸**（与 `productCodePrice` 同款）：读的是公开可见的商品信息，加闸会让未登录浏览路径拿不到规格 |
+| 证据 | `GoodsService.skusByMerchantGoodName`（`goods_sku` 按 `(MerchantId, GoodName)` 取、按 `Sort` 升序） |
+| ⚠️ 与下单链路的接口 | `goods_sku.SkuCode` 在**加入购物车时作为 `ProductCode` 上报** ⇒ `/cart/add` 与 `/order/orderAdd` 的契约**一个字没改**（`db-schema.md §13.3`） |
+| ⚠️ `Stock` **只存不扣** | 本端点答的是商家填的库存**陈列值**，**不是**可售余量；下单**不会**减它（用户已同意单独一轮） |
+
+- **`POST /goods/goodsAdd` 扩参 11 → 16**（`GoodsController.java:122`）：**尾部追加** `SkuSpec` + `PromiseGenuine` / `PromiseReturn7` / `PromiseFastRefund` / `PromiseFreightIns`，**全部 `required=false`**。
+  - ⚠️ **向后兼容的判据不是「不报错」，而是「与改前同效」**：4 个承诺位缺失（`null`）时由 `GoodsAuditService.boolOrTrue` 兜成 **「真」** ⇒ 老前端不传，详情页仍显示四条承诺（改前是**每件**商品无条件显示）⇒ **旧行为不变**。新的 `goods` 行因为 `DEFAULT 1` 也仍是四条。
+  - ⚠️ 既有的 11 个形参**一名不动、一位不挪**（规则 7 的「加在表末」同款口径）。
+  - ⚠️ 真库用例的连带：`GoodsAuditTxAtomicityTest` / `GoodsWriteTxAtomicityTest` 的 4 个调用点已同步补 5 个 `null`（**maven 增量编译会复用陈旧 test class 把签名破坏遮住 ⇒ 只有 `clean test` 是真判据**）。
+
+### E.3 订单侧：`/order/orderAdd` 扩参（commit 0）+ 结算口径（commit 0b） {#api-e-3}
+
+| 项 | 内容 |
+|---|---|
+| 路径 | `/order/orderAdd` —— `OrderController.java:95`（**坐标未动**） |
+| 扩参 | 10 → **11**：尾部追加 `Items?`（`@RequestParam(value="Items", required=false, defaultValue="")`，**JSON 数组串**） |
+| 语义 | `Items` 非空 ⇒ 逐条落 `order_item`（`{ProductCode, GoodName, Price, Quantity}`）；**空/缺省 ⇒ 完全回落到改前的路径**（把 `ProductInformation` 当唯一明细） |
+| 兼容性 | 既有的 10 个形参**一名不动、一位不挪**；`defaultValue=""` 与前端 `order.js` 的 `build()` 把 `undefined` 转空串**同效** ⇒ 服务端一律按 `isBlank` 判空 |
+| ⚠️ 多品单**只能挂一个商家** | `order.MerchantId` 是全单**唯一**字段 ⇒ 跨商家的一车要被拆成多张单（见下条），本端点**不**负责拆 |
+| 证据 | `OrderService.resolveItems`（解析 + 校验）、`OrderService.addLocked` 的 `if (rows > 0)` 分支（明细与主单在同一把 order-add 锁内；本仓订单链**禁 `@Transactional`**） |
+
+- ⚠️ **`POST /cart/checkout` 的结算口径改了（commit 0b）：逐行建单 → 按商家分组建单**（`CartController.java:110`）。**响应形状未变**（仍是 `{success, msg, …}` 家族），但**同样的车得到的主单张数变了**：改前 N 行 ⇒ **N 张单**，现在 N 行 ⇒ **M 张单**（M = 车主涉及的商家数）。`ProductCode` 传了 ⇒ 只结算那一行（那一行自然只属一个商家，**行为与改前一致**）。
+  - ⚠️ 这是本笔**唯一一处调用方可见的语义变化**（不是端点/字段增删）—— 前端 `ShoppingCart.vue` 的文案与提示随之改。
+
+### E.4 `POST /user/me`：管理员降级作答补 `username`（commit 3，**用户裁决「甲」**） {#api-e-4}
+
+| 出口 | 改前 | **改后** |
+|---|---|---|
+| cookie 会话 + `role=3`（管理员） | `200 {success:true, role:3}` | `200 {success:true, role:3, username:"…"}` |
+| 其余三出口（无身份 / 非管理员 / 业务号查不到） | 不变 | **不变** |
+
+- ⚠️ **授权口径一字未动**：`customerid` / `merchantid` / `usertype` / `gender` / `image` / 资料**仍不给**；`authorize` 仍把 cookie 来的 `role=3` 折成 `null`。补的**只是「你是哪个登录名」**；`username` 取自 `publicInfo`（按**业务号**查、带缓存），**查不到就只答 `role`**（不编造、不报错）。
+- ⚠️ **为什么必须补**：前端 `api/auth.js` 的 `isLoggedIn()` 判据是 `!!(username || merchantid)` ⇒ 只答 `role` 时，管理端在**新标签页 / 重开浏览器**（cookie 在、token 不在）恒判「未登录」⇒ 被登录守卫弹回 `/login`（实测「管理端进不去」）。
+- ⚠️ **同笔修掉的一个真缺陷（问题①）**：`/user/me` 答的 `role` 是 **JSON 数字 3**，而全站**一律按字符串比**（`router/index.js` 的 `meta.roles`、`ROLE_HOME` 键、`roleKey()`、`AdminShell.vue` 的角色名表）⇒ 恢复路径上每个角色比较**恒 false** ⇒ `ROLE_HOME[3] = undefined` ⇒ 重定向成环 ⇒ `router.isReady()` reject ⇒ `app.mount('#app')` **永不执行**（整页深色、无内容）。
+  **修法选在收端**：`api/auth.js` 里 `if (info.role) next.role = String(info.role)` —— **服务端契约不变**（`role` 仍是数字），只在客户端归一化（同 `LoginPage` 走 `res.text()` 本来就是字符串的形态）。
+- ⚠️ **测试判据已随之改写**（不是改代码去迁就测试）：`AuthTokenSmokeTest` 原断言「`publicInfo` 一次不调」**已不成立**（那一跳现在必须走）⇒ 改为「键集**恰好**是 `{success, role, username}`」+「`publicInfo` **恰好 1 次**」+「资料跳 / 头像跳**各 0 次**」。⚠️ 只断言「键缺失」是**弱判据**（「查了整行但没查到」也会变绿）。
+
+### E.5 `/admin/accounts/users`：行新增 `CreatedAt`（commit 3） {#api-e-5}
+
+| 项 | 内容 |
+|---|---|
+| 坐标 | `AdminAccountsController.java:73`（`@RequestMapping("/admin/accounts")` 之下，**路径与入参一字未改**） |
+| 变更 | 每行**多一个键** `CreatedAt` = `DATE_FORMAT(l.CreateTime, '%Y-%m-%d %H:%i:%s')`（**只加键，不改旧键**） |
+| ⚠️ 必须 `LEFT JOIN` | **不是** `INNER JOIN`：`login` 里没有对应行的账号**仍要出现**（`INNER` 会让这类账号整行消失 —— 那是「删数据」不是「加列」） |
+| ⚠️ **存量行恒 `null`** | `login.CreateTime` **不回填**（用户裁定）⇒ 老账号答 `null`，前端画 `—` |
+| 证据 | `UserGovernanceDao.java:57-70` |
+
+### E.6 前端封装增补 {#api-e-6}
+
+- `src/api/endpoints.js`：`goods` 组加 `skuList`（**与 `goodsProductCodeSelect` 同行追加** —— 本组下方各条被 view 与 `slot-registry.md` 按行号引，插行会整体下移）；**新增 `stats` 组 3 条**（`admin` / `adminRebuild` / `merchant`，**追加在文件尾**）；头部「现为 N 条」计数 **79 → 83**（同行改）. ⚠️ 本文件里**不出现**任何后端路径字面量以外的逻辑，故「4 个新端点是否都登记」可用 `grep` 直接判。
+- `src/api/stats.js`：新封装 3 条（`q()` 组装 `URLSearchParams`、`post()` 拆 `Response` 外壳，形状与 `api/admin.js` 有意一致）。⚠️ **没抽公共模块是刻意的**（本仓不建 `src/utils/`，同 `api/order.js` 的日期格式化多份副本）。
+- `src/api/auth.js`：`String(info.role)` 归一化（见 E.4）—— ⚠️ 该行**与前后三行同行压缩是故意的**（保住 `:108` / `:118` / `:146` 三个被引行号）。
+- **commit 1〈可视化体系〉与 commit 3 的图标、`chartTokens` / `LineChart` / `KpiCard` / 四页 admin / nav / router 改动**：**纯前端，零端点增减** —— 只改渲染与图标（`components/ui/glyphs.js`），故不在本契约文件另立条目。⚠️ 其中「四页 admin + nav + router 的图标行」与 commit 3 的后端改动**在同一文件里同行**（`git add -p` 在本环境不可用），这是 commit 3 / 4 切分时把 C1 折进 commit 3 的直接原因。
+- ⚠️ `docs/美化/看板规范.md §2 规矩 5` 的字形清单**已于 2026-10-11 文档收口订正**（原 11 枚 ⇒ 19 枚，见该节「订正记录」）—— 这条不属本附录的契约面，只作坐标登记。
+
+### E.7 坐标漂移登记（只登记、不修） {#api-e-7}
+
+⚠️ **附录 D.1 的 `OrderController` 坐标已**再次陈旧】 —— commit 0 在 `orderAdd` 尾部加了 1 个入参（+注释），其后各行集体 **+6**（`orderAdd` 本身 `:95` **未动**）：
+
+| 端点 | D.1 值（2026-10-10） | **本笔实测（2026-10-11）** |
+|---|---|---|
+| `/order/orderAdd` | `:95` | **`:95`**（不变） |
+| `/order/orderReceiveIfUp` | `:199` | **`:205`** |
+| `/order/orderDeliveryIfUp` | `:217` | **`:223`** |
+| `/order/orderDetail` | `:245` | **`:251`** |
+
+⚠️ 同理，`GoodsController` 的 `G:` 一族坐标（正文 §2）本笔**未重测**、`goodsAdd` 之后的端点已因扩参整体后移（`goodsAdd` 在 `:122`、`skuList` 在 `:244`）—— 按本文件既有口径，**重填归「文档飘移清理笔」**，本附录只登记。

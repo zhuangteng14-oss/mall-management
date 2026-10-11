@@ -4020,7 +4020,7 @@ C 档＝完全自裁）；**按用户要求做，不按稿做**（与 `c3-module
 - **行号互引整笔重定基**（`_work/renumber-b2.mjs`，机械 + **逐条打印**）：**具名 105 + 裸 21 = 126 处 / 20 文件**。
 - **refs-scan before / after**（HEAD 侧用 `git worktree add --detach` 取，**用完即删**）：
   **3597 → 3595**。逐**被引文件**计数**只有 `MessageCenter.vue` 少 1**，另少 **1 条裸续引** ——
-  两条**同出** `AccountsPage.vue:207` 那个**被有意删掉的 ⑤ 块注释**（它引 `MessageCenter.vue:35` + `NotifyInbox.vue:99-103`）
+  两条**同出** `AccountsPage.vue` 的**原 207 行**那个**被有意删掉的 ⑤ 块注释**（它引 `MessageCenter.vue:35` + `NotifyInbox.vue:99-103`。⚠️ 2026-10-11 可视化段收口改写法：该行**已删**，写成 `文件:行号` 会留下一个指向不存在位置的**活 token**（同 `repoint-record-emits-stale-token`）⇒ 一律写「原 N 行」）
   ⇒ **零非预期丢失**。
 - ⚠️ **踩坑记录**：临时 worktree 若留在仓内（`_work/head-wt`），`check-context-packs.sh` 会报
   **213 FAIL**（形如 `'admin-nav.js' 有 2 个候选`）—— 它**按文件名全仓解析**，仓里任何副本都变成**假 FAIL**。
@@ -4548,9 +4548,73 @@ C 档＝完全自裁）；**按用户要求做，不按稿做**（与 `c3-module
 | **新时序** | 1 `in_transit`「运输中」+15s（`transit-ms`）· 2 `picked_up`「驿站已揽收」+30s（`picked-up-ms`）· 3 `out_for_delivery`「驿站派送中」+45s（`delivery-ms`）· 4 `delivered`「已签收」+60s（`signed-ms`） |
 | **后端** | `order/job/ShippingTrackAdvanceJob`（javadoc 表格加「时序」列 + 「2026-10-11」说明段；四个 `@Value` 字段顺序与默认值对调；`advanceOne()` 四个 `if` 块按时序重排）· `order/dao/ShippingTrackDao.java:24` · `order/service/OrderService.java` 两处 javadoc · `order/controller/OrderController.java:227` 注释 |
 | **SQL** | `mall_management_sql.sql:803`（`Status` 取值注释）/ `:809`（`Description` 列 `COMMENT`）—— ⚠️ 改的只是**脚本里的注释文本**；**既有表的列 `COMMENT` 是建表那一刻写死的**，改脚本对既有表**不生效**（要看新文案得起新表 / 手工 `ALTER`） |
-| **前端** | `views/admin/OrderPage.vue:192` · `views/OrderCenter.vue:161` · `views/OrderMine.vue:146` · `api/order.js` 的 `orderDeliver` 文档注释 —— 全**同行替换**（净 0 行，无行号漂移） |
+| **前端** | `views/admin/OrderPage.vue:262`（⚠️ 行号 2026-10-11 可视化段收口重指，**原 192 行**）· `views/OrderCenter.vue:161` · `views/OrderMine.vue:146` · `api/order.js` 的 `orderDeliver` 文档注释 —— 全**同行替换**（净 0 行，无行号漂移） |
 | **文档** | `api-contract.md` §D.3 端点行 / §D.4 两条 · `db-schema.md:609-610` · `tech-debt.md` TD-28「现状」行 · 本文件 §20-9 调度器行（**同行改**）· `context-packs/c3-block-4-order.md:254`（手验步骤 3 的过期阈值 60000/120000/240000 → 15000/30000/45000/60000）· `application-dev.properties:95`（节点次序） |
 | **刻意不动** | `progress.md:2025` 与 `docs/agent/evidence/**` —— **历史记录不回溯改写**（与「轨迹是过程记录、存量行不改写」同一口径）。⇒ 读旧条目见「首条 `picked_up`、30/60/120/240 秒」须知那是**当时**的事实 |
 | **测试** | `./mvnw -q -B compile` **EXIT 0** · `./mvnw -B test` **258 / 0 fail / 0 error / 26 skipped · BUILD SUCCESS**（与补丁前同数 —— 本笔**零测试改动**，因为没有任何测试断言这四个文案/阈值） |
 
 **⚠️ 存量行**：2026-10-11 之前落的轨迹行（含「商家已揽收」旧文案、旧顺序）**一条都不回溯 UPDATE** ⇒ 手验与新一轮证据要看**新发的单**。
+
+## 二十一、可视化段〈可视化体系 + 经营数据 + 块 1-4 补丁 + 演示数据〉（2026-10-11；**6 笔全部已提交**）
+
+> 本节**追加在文件尾**（同 §19 / §20 的先例）。叙事版见 `progress.md §7-VIS`；本节只记**本文件关心的那一面**：文件 / 行号 / 零漂移手法 / 门禁 / 偏差。
+
+### 21-1　提交切分（分支 `feature/vis-dashboard`）
+
+| # | 内容 | commit |
+|---|---|---|
+| 0 | `order_item` 表 + `orderAdd` 可选 `Items` | `4991081` |
+| 0b | 购物车结算改「按商家分组建单」 | `4f06220` |
+| 1 | 可视化体系（前端） | `3d3ef21` |
+| 2 | 经营数据看板 | `93441c8` |
+| 3 | 块 1-4 补丁（A + B④）+ **C1 复合图** + 图标 | `5c06ce1` |
+| 4 | **D** 数据填充 + 存量脏数据清理 | `6b2a6c3` |
+
+⚠️ **C1 折进 commit 3 的实证理由**：四页 admin / `config/nav.js` / `config/admin-nav.js` / `router/index.js` 的**图标改动与 commit 3 的改动落在同一文件的同一行区间**，而 **`git add -p` 在本环境不可用** ⇒ 拆不开（用户 2026-10-11 裁定「C1 折进 commit 3」）。
+
+### 21-2　建表（全部**追加到 `mall_management_sql.sql` 末尾**）
+
+`:832-862` `order_item`（commit 0）· `:864-901` `stats_daily`（commit 2）· `:902-931` `login.CreateTime`（**两步** `ALTER`）· `:933-1005` `template` 模板种子（6 个 `Type` / 13 行）· `:1028-1099` 商品侧加列（`goods` +4 承诺位 / `goods_audit` +4 + `SkuSpec` / `template.Kind` / 新表 `goods_sku` `:1063-1078` / 结构化规格模板 1 行 / 修 `goods.spec` 两条种子）· `:1101-1219` `Source` ×11（commit 4）。
+⇒ 表数 **19 → 22**、`CREATE TABLE` **21 → 24**、非主键索引 **23 → 30**、非主键 UNIQUE **4 → 7**（**VM 库 `information_schema` 实测**，2026-10-11）。逐列定义见 `db-schema.md §13`、登记见 `db-migration.md` #11–#15 + 注意 14–17。
+
+### 21-3　后端
+
+新包 `stats/`（`StatsDao` / `StatsService` / `StatsAggregateJob` / `AdminStatsController` / `MerchantStatsController`）· `OrderService.resolveItems` + `orderAdd` 第 11 参 · `CartService` 结算**按商家分组** · `GoodsService.skusByMerchantGoodName` + **`POST /goods/skuList`** · `GoodsService.goodsAdd` 11 → 16 参 · `UserGovernanceDao` 的 `/admin/accounts/users` 查询改 **LEFT JOIN `login`** · `UserController.me` 管理员降级分支**补答 `username`**（用户裁决「甲」）· `api/auth.js` 的 `String(info.role)`。
+
+### 21-4　前端
+
+可视化体系（`components/charts/{chartTokens.js,LineChart.vue}`、`components/ui/KpiCard.vue`、`components/ui/glyphs.js`）· 四页 admin 图标 · `config/{nav,admin-nav}.js` · `router/index.js` · `views/admin/StatsPage.vue` · `views/merchant/StatsPage.vue` · `api/stats.js`（3 条，全 POST）· `endpoints.js` 计数 **79 → 83**（**同行改**）。
+
+### 21-5　零漂移手法与重指
+
+- **新表 / 新附录一律追加文件末**：`.sql`（`:832` 之后）、`db-schema.md`（**§13**）、`db-migration.md`（登记表 + 注意 **14–17**）、`api-contract.md`（**附录 E**）—— 中段**一行未插**。
+- **头部计数用「同行追加」订正**（净 0 行）：`db-schema.md` 表数行 / 行尾计数行 / §2 索引段 / §3 手写 DDL 行；`api/endpoints.js` 的「现为 79 条」行；`api/auth.js` 的 `role` 行（**与前后三行同行压缩是故意的**，保 `:108`/`:118`/`:146`）。
+- ⚠️ **本段唯一的行号外溢**：`api-contract.md` **附录 D.1** 的 `OrderController` 坐标因 `orderAdd` 扩参而**集体 +6**（`orderAdd` 自身 `:95` 不动；`orderReceiveIfUp` `:199`→`:205`、`orderDeliveryIfUp` `:217`→`:223`、`orderDetail` `:245`→`:251`）—— 已**只登记不修**地写进 **附录 E.7**，重填归「文档飘移清理笔」。
+- ⚠️ **前值订正**：本文件 / `db-schema.md` 头部此前散记的「**20** 个 `CREATE TABLE` / 净 **18** 张表」**漏算 `order_shipping_track`**（§20-9 那张表）⇒ 正确前值 = **21 / 19**（2026-10-11 订正）。
+- ⚠️ **`refs-scan` 口径照旧**：本节新增的 `文件:行号`（如上一格的 `:199` → `:205`）**算进扫描计数**，且**「旧引」那一半会被扫成活引用** —— 与 §一 commit 11/13 登记的扫描器误报**同源、不要据此回改**。
+- ⚠️ **收口时的重指（2026-10-11，`_work/block-3-updates.md` §B0 四步）**：定稿四页 ⇒ 跑 `refs-scan`（连跑数轮）⇒ 与 before（`_work/refs-c3-before.txt`，**4120 条 / 311 文件**）比 **token 集合**（不比原始产物，**以最后一次编辑之后生成的 `_work/refs-c3-after4.txt` 为准**，**4234 条 / 316 文件**）：差集「只在 before」= **9 条** —— **7 条是本笔的重指**、**2 条被改写成「原 N 行」**（所指行已删 / 所指 bug 已修）⇒ **不是丢失**；after 侧无新增陈旧 token。逐条重指（**按站点逐条**：`AuditPage.vue` 的 `toLocal` 190→**236**、时区块 173-217→**219-263**、`load()` 301-329→**441-469**、环境边界 161-163→**204-206**、`OrderPage.vue` 192→**262**；清单见 `progress.md §7-VIS` 尾）。**两条改写成「原 N 行」而不重指**：`AccountsPage.vue` 的**原 207 行**（所指的 ⑤ 块注释**已删**）与 `CatalogPage.vue` 的**原 114/117 行**（所指的 bug **同笔已修**，见 21-9 第 8 条）—— 写 `文件:行号` 会留一个指向不存在位置的**活 token**（`repoint-record-emits-stale-token`）。
+- **代码里就地写下的「文档级」说明 —— 决定不上移**（`_work/block-3-updates.md` §C 那 7 条：`UserGovernanceDao.USER_COLUMNS` 的 `u.` 前缀理由 / `AccountsPage.growth` 的 `dated` / `AccountsPage.banMix` 三态互斥 / `CatalogPage.auditMix` 通过率分母不含 `pending` · 分母 0 给 `null` / `CatalogPage.catMix` 只画前 10 且 `more` 报在标题 / `OrderPage.msOf` 两种时间形态 / `OrderPage.shipLag` 四种「算不出来」各自计数）。**理由**：① 它们**只对改这行代码的人有用**，恰好写在那一行；② 上移到 pack ⇒ 同一句话两处维护、且会新增一批**行号互引**（正是本段漂移的来源）；③ 活文档的定位是「**入口**」不是**复述**。⇒ **就地保留**，此处只登记「有这么 7 条、别当没写」。
+
+### 21-6　A3 门禁（P3 两次同笔 +1，全部**净零行数**）
+
+commit 0 加 `'order_item'`（`KNOWN_TABLES` **8 → 9**、期望 **19 → 20**）· commit 2 加 `'stats_daily'`（**9 → 10**、**20 → 21**）· commit 3 补丁加 `'goods_sku'`（**10 → 11**、**21 → 22**，**四处同改**：注释块 / IN 清单 / `KNOWN_TABLES` / PASS 文案串）。
+⚠️ `concurrency` job 是 **`continue-on-error`** ⇒ **只能读 artifact 的 `gates.count`，不能读 job 颜色**（同 §19 / §20 的教训）。
+
+### 21-7　验收
+
+🧪 `./mvnw -B **clean** test` ⇒ `Tests run: 280, Failures: 0, Errors: 0, Skipped: 26` + `BUILD SUCCESS`（`_work/closeout-mvn-test2.log:3516` / `:3519`）· `npm run build` ⇒ `DONE Build complete`（`_work/closeout-npm-build.log:177`）。⚠️ **`clean` 不能省**：maven 增量编译会**复用陈旧 test class**，把「主代码签名已破坏」整段遮住（本段实测踩过）—— 判据只能靠 `clean test`。
+
+### 21-8　未做 / 挂账（**已登记，不属本段**）
+
+① SKU 各自扣库存（`goods_sku.Stock` 只存不扣，用户已同意**单独一轮**）② 6 笔保留的旧单（`ProductInformation` 指向已删商品）③ **5 月中 → 10 月中空档**（看板用「近 30 天」绕开）④ `goods` **Id 120 重复行**（未清）⑤ `customerimage` / `merchantimage` **各 1 行残留**（未清）⑥ 深链 / 前退后退仍未验（沿用 §20-7 的挂账）⑦ 本段的**手工验收**由用户自验（agent 不跑 CDP 截图、不写重探针）⑧ **`_work/block-3-updates.md` §B3 待裁**：四页各多出的「图表」一节要不要在 `c3-modules.md` 的模块表里记一笔 —— **agent 倾向不记**（图表是**一节**不是**新模块**，模块表那 11 项说的是「有什么权力」，不是「页上有什么控件」）⇒ 按「倾向不记」收口，**若用户要记，补一句即可**。
+
+### 21-9　报备偏差（落码 ≠ 方案原文处）
+
+1. **读端点选 POST**：方案 §五 只给路径、没给动词 ⇒ `/admin/stats` 落地为 **POST**（理由：本仓管理端读端点**全是** POST）。**这是对未指定处的填补，不是对方案的偏离**。
+2. **承诺位默认「真」**：不是默认空 ⇒ 保证旧行仍显示四条承诺（硬线「不能阻碍旧功能」）。测试用例里按「老前端不传」给 `null`。
+3. **`goods_sku.Stock` 只存不扣**：方案要求「库存」，本轮只落地**陈列值**，扣减进**单独一轮**（用户已知并同意）。
+4. **`login.CreateTime` 存量不回填**：回填性为 0（没有第二个来源）⇒ 老账号记「不知道」，前端画 `—`。
+5. **`order_item` 存量单不回填**（用户裁定）⇒「商品榜上线即空」是**必然结果**，不是缺陷。
+6. **`seed-demo.sql` 的周末低谷按「执行日」算**（`DAYOFWEEK(CURDATE() - INTERVAL k DAY)`），**不**按生成时的相位钉死 ⇒ 换一天执行，低谷仍落在**真实的**周末。
+7. **演示口令 = 用户名**（对齐既有 `1/1`、`2222/2222` 惯例）⇒ **明文口令**；若 push 被 `[Credential Leakage]` 拦，**改占位符再 amend、不硬推**。
+8. **顺手修了一条既有 bug（`CatalogPage.vue` 的按钮闩）**：块 3「通过 / 驳回」两键的 `:disabled` 绑的是 **`busyId`**，而本页定义的是 **`busyKey`** ⇒ 绑到一个**未定义**的 ref，闩对这两个键**完全失效**（`progress.md:1983` 记作「按钮永不置灰」，**原 114/117 行**）。2026-10-11 补图标那一笔**同行替换时一并订正为 `busyKey`**（现落 **157/160 行**）。⚠️ 这**不在**方案原文里 —— 原记录写的是「只报告不修」⇒ 在此报备。**方向是「让它按本页既有的闩机制工作」，不动任何接口 / 字段 / 契约**；若用户认为该 bug 应留到「文档飘移清理笔」，回退点就是这两行。

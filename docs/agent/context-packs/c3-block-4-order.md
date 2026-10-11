@@ -109,7 +109,7 @@
 
 - **管理端真页** `.../src/views/admin/AccountsPage.vue`（块 2 建、块 3 照它）—— 页内 tab（`:37` 渲染 / `:332` 的裁决口径）/ 审核卡片流 `:76` / **危险动作要求填理由且理由展示给当事人**（`:104` 驳回理由必填、`:349` 的口径注释）⇒ 本块管理端照它。
 - **三态回执** `.../src/views/admin/NotifyPage.vue:359` 的 `doSend()`（`try → if(!data.success) 记 msg → catch 记网络错误 → finally`）⇒ 本块的「介入／发货／收货」按钮照它。
-- **列表取数** `.../src/views/admin/AuditPage.vue:301` 的 `load()`（错误走 `err.value = ...HTTP ${status}`）。
+- **列表取数** `.../src/views/admin/AuditPage.vue:441` 的 `load()`（错误走 `err.value = ...HTTP ${status}`）。〔行号 2026-10-11 可视化段收口重指：原 301 行〕
 - **弹窗骨架** `.../src/views/GoodsUp.vue` 的 `.scrim` / `.dlg`（块 3 已抽成 `.../src/components/TemplatePicker.vue`，本块若需弹窗直接复用该组件形状）。
 - 商家端两态开关 = `.../src/views/merchant/OrderPane.vue:2`（`OrderCenter` ⇄ `ShoppingCart`）；`:33` `toCart` 的路由跳转 ⇒ **B 档 2 的改造点**。
 

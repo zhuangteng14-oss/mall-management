@@ -5,14 +5,14 @@
 > **Java 坐标约定（2026-09-30 补）**：`G:` = `GoodsController.java`（前 `MallManagementGoodsController.java`）、`M:` = `MessageController.java`（前 `MallManagementMessage.java`）、`U:` = `UserController.java`（前 `MallManagementUserController.java`）的**语句行**（**不是** route 注解行，与 `api-contract.md` 的口径**相反**，两文件不要互抄）。B1 / B2 / B3 之后若干读写路径已搬到 `mallmanagement_service` 下的 Service ⇒ 本文件出现 `GoodsCacheService:` / `UserCacheService:` / `OrderStateMachine:` 等前缀，那是**跨文件搬迁**、不是行号漂移。**全文件 Java 坐标已于 2026-09-30 对 HEAD 逐条复核并替换** —— 原一版系统性偏旧（成因同 `api-contract.md#api-top`：各笔新代码插入后未同步）。⚠️ **三层四笔（order PR #25 `28194b4` / goods 2026-10-02 / user PR #32 `0c07e96` / message `8ed5fc1`）后**：`G:` / `M:` / `U:` 三个 Controller 已只剩路由 —— SQL 与业务体分别下沉 `<域>/dao/<域>Dao.java` 与 `<域>/service/`。**本文件下表凡涉这三个域的 `G:` / `M:` / `U:` 坐标，若未随该域的笔改写，一律已陈旧**；下表 `:41-48` 的用户域行已于第三笔、消息域行（`M:378`）已于第四笔改写，其余（`U:` 一族、`G:` 的未重测行）引用前请以源码为准。
 > ⚠️ **2026-10-02 笔 2 后**：订单端点的 SQL 已随 `OrderController` 拆出，迁至 `order/dao/OrderDao.java`；`GoodsController` 的商品行整体 **−9**（⚠️ 该「−9」只是**首两行**的口径：以 2026-09-30 基线 `148e77b` 逐条实测，`goodstype`/`goodsAdd` 为 −9、`goodsSelect` 一族 −8、`productCodePrice` −4、`goodsUp` 之后 +16/+23/+23，**不要拿 −9 换算全表**；详见 `api-contract.md#api-top`）。下表**订单相关行的 `G:` 已改指 `OrderDao`**，其余 `G:` 值**尚未重测** —— 引用前请以源码为准。
 > ⚠️ **2026-10-02 三层重构第二笔（商品域）后**：商品 **8 条内联 SQL** 从 `GoodsController` 下沉到 `goods/dao/GoodsDao.java`，写/读方法体进 `goods/service/GoodsService.java` —— 本表原 `G:` 的**商品行**据此改指 `GoodsDao.searchByKeyword`。这四个走缓存的读路径（`GoodsCacheService:81` / `:146` / `priceByTriple`）**未受影响**（它们的 SQL 本就在 Service，2026-09-30 已复核）。新增前缀：`S:` = `GoodsService.java`、`D:` = `GoodsDao.java`。
-> 表数量：**18** —— 11 张原始表 + 7 张由 `.sql` 末尾 Migration 块建的：`order_state_transition`（B3，2026-09-29，`:221-235`）· `admin_audit`（C3 批 A，2026-10-08，`:264-292`）· `notification`（C3 块1-I2，2026-10-09，`:294-327`）· `merchant_application`（C3 块 2〈用户块〉，2026-10-09，`:369-390`）· `template`（C3 块3 **就地改造**，2026-10-10 #8，`:556-569`）· `goods_audit`（C3 块 3〈商品块〉，2026-10-10，`:492-515`）· `cart`（C3 块 4〈订单块〉，2026-10-10，`:708-720`）。⚠️ **C3 块 4〈订单块〉（2026-10-10，分支 `feat/c3-admin-block4`）—— 本文件第二次「加表」但 `cart` 刻意不走本文件的中段**：`cart` 是 A1 甲（用户 2026-10-10 逐项裁决）的**真购物车载体**，逐列清单 / 索引 / 与 `order` 的关系**登记在文件末 §11**，**不就地插入 §1 表清单与 §6.x** —— 理由是零漂移：本文件当前有 **44 处外部 `文件:行号` 引用**（10 个文件，指向本文件 **26 个不同行号**）（`slot-registry.md` 26 / `selection-status.md` 5 / `progress.md` 4 / `defect-survey.md` 2 / context-pack 4 / `OrderCenter-merchant.html` 1 / `api-contract.md` 1 / `OrderDao.java` 1），中段插一行就让其后**全部**集体 +1；重指回本文件的工作归「文档漂移清理笔」（同 §十五 15-5 的登记不修口径）。另 `order` **加** `Quantity`（`.sql:730-738`，`int NOT NULL DEFAULT 1`，存量 6 行回填 1，**不增表、不改行数** ⇒ A3 的 P4 种子计数 `order=6` 不受影响）。⚠️ **`cart` 不在 `.sql:21` 起的 `DROP TABLE IF EXISTS` 基线清单里** —— 它是用户数据不是种子，整份重导**不清空购物车**（`.sql:689-690` 块注释）。⇒ 表数 **17 → 18**、索引 **16 → 18**（+`uk_cart_customer_product`、+`idx_cart_customer`）、**非主键 UNIQUE 3 → 4**（新增第 4 个 `uk_cart_customer_product`；⚠️ 三处计数均为**按 DDL 直接推导**，非实测查询结果，出处 `.sql:708-720`）。⚠️ **`notification_template`（`:329-345`）与 `goods_template`（`:474-484`）已由 #8 物理删** —— 两者在 `.sql` 里的 `CREATE TABLE` 语句**仍在原地**（零漂移手法），由块尾的 `DROP TABLE IF EXISTS` 中和 ⇒ 该文件里共 **20** 个 `CREATE TABLE`、**净 18 张表**（判据：导入后那两张表不存在）。
+> 表数量：**18** —— 11 张原始表 + 7 张由 `.sql` 末尾 Migration 块建的：`order_state_transition`（B3，2026-09-29，`:221-235`）· `admin_audit`（C3 批 A，2026-10-08，`:264-292`）· `notification`（C3 块1-I2，2026-10-09，`:294-327`）· `merchant_application`（C3 块 2〈用户块〉，2026-10-09，`:369-390`）· `template`（C3 块3 **就地改造**，2026-10-10 #8，`:556-569`）· `goods_audit`（C3 块 3〈商品块〉，2026-10-10，`:492-515`）· `cart`（C3 块 4〈订单块〉，2026-10-10，`:708-720`）。⚠️ **C3 块 4〈订单块〉（2026-10-10，分支 `feat/c3-admin-block4`）—— 本文件第二次「加表」但 `cart` 刻意不走本文件的中段**：`cart` 是 A1 甲（用户 2026-10-10 逐项裁决）的**真购物车载体**，逐列清单 / 索引 / 与 `order` 的关系**登记在文件末 §11**，**不就地插入 §1 表清单与 §6.x** —— 理由是零漂移：本文件当前有 **44 处外部 `文件:行号` 引用**（10 个文件，指向本文件 **26 个不同行号**）（`slot-registry.md` 26 / `selection-status.md` 5 / `progress.md` 4 / `defect-survey.md` 2 / context-pack 4 / `OrderCenter-merchant.html` 1 / `api-contract.md` 1 / `OrderDao.java` 1），中段插一行就让其后**全部**集体 +1；重指回本文件的工作归「文档漂移清理笔」（同 §十五 15-5 的登记不修口径）。另 `order` **加** `Quantity`（`.sql:730-738`，`int NOT NULL DEFAULT 1`，存量 6 行回填 1，**不增表、不改行数** ⇒ A3 的 P4 种子计数 `order=6` 不受影响）。⚠️ **`cart` 不在 `.sql:21` 起的 `DROP TABLE IF EXISTS` 基线清单里** —— 它是用户数据不是种子，整份重导**不清空购物车**（`.sql:689-690` 块注释）。⇒ 表数 **17 → 18**、索引 **16 → 18**（+`uk_cart_customer_product`、+`idx_cart_customer`）、**非主键 UNIQUE 3 → 4**（新增第 4 个 `uk_cart_customer_product`；⚠️ 三处计数均为**按 DDL 直接推导**，非实测查询结果，出处 `.sql:708-720`）。⚠️ **`notification_template`（`:329-345`）与 `goods_template`（`:474-484`）已由 #8 物理删** —— 两者在 `.sql` 里的 `CREATE TABLE` 语句**仍在原地**（零漂移手法），由块尾的 `DROP TABLE IF EXISTS` 中和 ⇒ **本笔之前**，该文件里共 **21** 个 `CREATE TABLE`、**净 19 张表**（判据：导入后那两张表不存在；⚠️ 原写「20 个 / 净 18 张」**漏算了 §12 的 `order_shipping_track`**，2026-10-11 订正）。⚠️ **可视化段（2026-10-11，commit 0–4）之后**：再加 **3 张表**（`order_item` commit 0 / `stats_daily` commit 2 / `goods_sku` commit 3 补丁）+ **4 张表加列**（`login.CreateTime` / `goods` ×4 / `goods_audit` ×5 / `template.Kind`）+ **11 张表各加一列 `Source`** ⇒ 表数 **19 → 22**、`CREATE TABLE` **21 → 24**、索引 **23 → 30**、非主键 UNIQUE **4 → 7**（VM 库 `information_schema` 实测，2026-10-11）。§1 表清单与 §6.x **刻意不插入**（零漂移，理由同本段开头的 `cart`）—— 逐列定义 / 净变化表见**文件末 §13**。
 > ⚠️ **块 2 还改了「两张既有表」，但加列不增表**：`user` +8 列（`:396-404`，封禁 3 + 降级 5）、`goods` +2 列（`:407-409`，`ShelfState` / `DelistedAt`）—— 故表数**只 +1**；那 10 列落在 §6.3 与 §6.10 的既有小节里（**不另开节**）。
 > ⚠️ **块 3 再改「两张既有表」+ 净增 2 张**：`goodstype` +3 列（`:449-451`，`ParentId` / `Sort` / `State`）**并换唯一键**（`:454-455`，`uk_goodstype_GoodType` → `uk_goodstype_parent_name (ParentId, GoodType)`）、`goods` +5 列（`:461-467`，`TypeId` / `DetailTemplateId` / `SpecTemplateId` / `AfterSaleTemplateId` / `DeletedAt`）；两张新表 `goods_template` / `goods_audit`。⇒ 表数 **16 → 18**，索引 **15 → 16**（换代一换一 + 净增 `idx_goodstype_parent_sort`），**非主键 UNIQUE 仍 3 个**。既有两表的加列落在 §6.4（`goodstype`）/ §6.3（`goods`）。 ⚠️ **块 3 就地改造（#8，2026-10-10）—— 本文件首次出现「删表 + 删列」**：新建**通用表** `template`（`:556-569`，`Type` 区分用途）；**物理删** `goods_template` + `notification_template`（用户明确批准，见 `db-migration.md` 注意 11）；`goods` **加** 3 段快照文本（`:588-607`，`Detail` / `Spec` / `AfterSale`）**删** 3 个模板引用 Id（`:611-630`，`DetailTemplateId` / `SpecTemplateId` / `AfterSaleTemplateId` —— 那三列**恒 NULL、全仓零写入**，见注意 10 末句）；`goods_audit` 加同 3 列（`:636-655`）。⇒ 表数 **18 → 17**、索引 **16 → 16**（净 0）、**非主键 UNIQUE 仍 3 个**（第三个从 `uk_notification_template_key` 换成 `uk_template_type_name`）。语义变化：商品侧由「**引用**模板 Id」（改模板 ⇒ 商品联动变）改为「**快照**」（选模板 → 填入 → **可改** → 存**最终文本** ⇒ 改模板**不影响**已上架商品）。
 > ⚠️ **2026-10-09 更正 —— 原写 12 是漏登**：先后漏了批 A 的 `admin_audit`；I2 登记时一并补齐（同一缺口见 `db-migration.md` 注意 8）。本文件此前所有「12 张表」的字面与据此推导的计数（索引张数、UNIQUE 个数）也随之更新。
 > `.sql` 末尾另有一段 S1a 追加的 Migration 块（`:236-245`，2026-09-30），**只含一条 `CREATE UNIQUE INDEX`，不建表**。
 > 全部为 `ENGINE=InnoDB`、`utf8mb4_0900_ai_ci`。
 >
-> ⚠️ 该 `.sql` 行尾是 CRLF（**738 个 `\n` / 738 个 `\r`，0 个裸 CR** —— 2026-10-10 **C3 块 4〈订单块〉**追加一块后**重新实测**〔LF 738 / CR 738 / 裸 CR 0；同次实测行首 `CREATE TABLE` 共 20 条〕；上一版为 680 / 680〔块 3 就地改造 #8 追加一块后，`CREATE TABLE` 19 条〕，更前为 409 / 409〔块 2 追加一块后〕，再上为 345 / 345〔I2 追加两块后〕、245 / 246，S1a 前原为 235 / 236）。用会把行尾归一化的编辑器改它，diff 会变成整份文件重写 —— 改前先确认 diff 只有预期行。
+> ⚠️ 该 `.sql` 行尾是 CRLF（**738 个 `\n` / 738 个 `\r`，0 个裸 CR** —— 2026-10-10 **C3 块 4〈订单块〉**追加一块后**重新实测**〔LF 738 / CR 738 / 裸 CR 0；同次实测行首 `CREATE TABLE` 共 20 条〕；上一版为 680 / 680〔块 3 就地改造 #8 追加一块后，`CREATE TABLE` 19 条〕，更前为 409 / 409〔块 2 追加一块后〕，再上为 345 / 345〔I2 追加两块后〕、245 / 246，S1a 前原为 235 / 236）。⚠️ **更新（2026-10-11，可视化段 commit 0–4 追加四个块后重新实测）**：**1219 行 / LF 1219 / CR 1219 / 裸 CR 0**、行首 `CREATE TABLE` **24 条**。用会把行尾归一化的编辑器改它，diff 会变成整份文件重写 —— 改前先确认 diff 只有预期行。
 >
 > **完整字段清单 / 索引基线 / 外键关系见 §6–§9**（2026-09-30 补齐，逐列逐索引以 `.sql` 为准）。⚠️ **C3 块 4 的 `cart` 与 `order.Quantity` 见文件末 §11** —— 本节群**刻意不含 `cart`**，理由（零漂移）见上。
 
@@ -43,7 +43,7 @@
 
 ## 2. 索引现状 {#db-2}
 
-**17 张表中 9 张有二级索引（共 20 个）**：`message` 2 个（`idx_from_to`、`idx_create_time`）、`order_state_transition` 1 个（`idx_order_state_transition_order`）、**`order` 1 个（`uk_order_orderId`，UNIQUE）**、**`goodstype` 2 个（`idx_goodstype_parent_sort` 普通 + `uk_goodstype_parent_name` UNIQUE，2026-10-10 #7 换代：原 `uk_goodstype_GoodType` 已删）**、**`admin_audit` 3 个**（批 A，非唯一）、**`notification` 3 个**（I2，非唯一）、**`merchant_application` 3 个**（块 2，非唯一）、**`goods_audit` 3 个**（块 3，非唯一）、**`template` 2 个（`uk_template_type_name` UNIQUE + `idx_template_type_enabled_sort` 普通，#8 新增）**。其余 **8 张表除主键外无任何索引**；全库**除主键外 3 个 UNIQUE**（`uk_order_orderId`，2026-09-30 S1a `:236-245`；**`uk_goodstype_parent_name`，2026-10-10 #7 `:455`〔换代自 `uk_goodstype_GoodType`〕**；**`uk_template_type_name`，2026-10-10 #8 `:567`**〔#8 前是 `uk_notification_template_key`，2026-10-09 I2 `:344`，**该表已删**〕；完整基线见 §7）。⚠️ **本行原写「共 16 个」是既有少算**（枚举里列了 `goods_template` / `goods_audit` 却漏进总数：2+1+1+2+3+3+1+3 = 16 少了块 3 两张表的 4 个）—— 本次按 **2026-10-10 实测**（VM 库 `information_schema.STATISTICS`，`INDEX_NAME <> 'PRIMARY'`）改为 **20**；⚠️ 与 #8 **无关**（#8 索引净增 0：−`goods_template` 1 − `notification_template` 1 + `template` 2）。已知高频查询列缺索引：
+**17 张表中 9 张有二级索引（共 20 个）**：`message` 2 个（`idx_from_to`、`idx_create_time`）、`order_state_transition` 1 个（`idx_order_state_transition_order`）、**`order` 1 个（`uk_order_orderId`，UNIQUE）**、**`goodstype` 2 个（`idx_goodstype_parent_sort` 普通 + `uk_goodstype_parent_name` UNIQUE，2026-10-10 #7 换代：原 `uk_goodstype_GoodType` 已删）**、**`admin_audit` 3 个**（批 A，非唯一）、**`notification` 3 个**（I2，非唯一）、**`merchant_application` 3 个**（块 2，非唯一）、**`goods_audit` 3 个**（块 3，非唯一）、**`template` 2 个（`uk_template_type_name` UNIQUE + `idx_template_type_enabled_sort` 普通，#8 新增）**。其余 **8 张表除主键外无任何索引**；全库**除主键外 3 个 UNIQUE**（`uk_order_orderId`，2026-09-30 S1a `:236-245`；**`uk_goodstype_parent_name`，2026-10-10 #7 `:455`〔换代自 `uk_goodstype_GoodType`〕**；**`uk_template_type_name`，2026-10-10 #8 `:567`**〔#8 前是 `uk_notification_template_key`，2026-10-09 I2 `:344`，**该表已删**〕；完整基线见 §7）。⚠️ **本行原写「共 16 个」是既有少算**（枚举里列了 `goods_template` / `goods_audit` 却漏进总数：2+1+1+2+3+3+1+3 = 16 少了块 3 两张表的 4 个）—— 本次按 **2026-10-10 实测**（VM 库 `information_schema.STATISTICS`，`INDEX_NAME <> 'PRIMARY'`）改为 **20**；⚠️ 与 #8 **无关**（#8 索引净增 0：−`goods_template` 1 − `notification_template` 1 + `template` 2）。⚠️ **可视化段（2026-10-11）净增 7 个索引 / 3 个非主键 UNIQUE**（`order_item` +3〔1 UNIQUE〕、`stats_daily` +2〔1 UNIQUE〕、`goods_sku` +2〔1 UNIQUE〕）⇒ 按 VM 库 `information_schema` 实测：**非主键索引 23 → 30、非主键 UNIQUE 4 → 7**（逐列见文件末 **§13.7**）。⚠️ 本段行首的「**17 张表**中 9 张有二级索引（共 **20** 个）」是 **17 张表口径**的旧实测（未含 `cart` 的 2 个与 `order_shipping_track` 的 1 个），**与 30 不矛盾也不相等** —— 引用总数时以 §13.7 的实测值 30 为准，本段只用于看「哪几列缺索引」。已知高频查询列缺索引：
 
 | 查询位置 | SQL 条件 | 涉及表 | 现况 |
 |---|---|---|---|
@@ -67,7 +67,7 @@
 |---|---|---|
 | 配置 | `spring.jpa.hibernate.ddl-auto=validate`（2026-10-04 起；原 `update`） | `application.properties:29` |
 | 依赖 | `spring-boot-starter-data-jpa` 已引入 | `pom.xml:51` |
-| 手写 DDL | `mall_management_sql.sql`，**19** 个 `CREATE TABLE`（11 原始 + 迁移块 8：B3 / S1a 后 5 + 块 3 追加 2 + #8 新增 `template` 1），其中 `notification_template` / `goods_template` 两块由 #8 尾部 `DROP TABLE IF EXISTS` 中和 ⇒ **净 17 张表**（2026-10-10 实测） | 全文件 |
+| 手写 DDL | `mall_management_sql.sql`，**19** 个 `CREATE TABLE`（11 原始 + 迁移块 8：B3 / S1a 后 5 + 块 3 追加 2 + #8 新增 `template` 1），其中 `notification_template` / `goods_template` 两块由 #8 尾部 `DROP TABLE IF EXISTS` 中和 ⇒ **净 17 张表**（2026-10-10 实测）。⚠️ **2026-10-11 订正（可视化段后）**：**24** 个 `CREATE TABLE`（＋`order_item` / `stats_daily` / `goods_sku`）— 同样中和两块 ⇒ **净 22 张表**（VM 库实测，见 §13.7） | 全文件 |
 
 **当前实际生效的是手写 `mall_management_sql.sql`。**
 原因：全项目**不存在任何 `@Entity`**——既有的唯一一个 POJO 曾是 `mallmanagement_class/info.java`（仅 `@Data`/`@AllArgsConstructor`/`@NoArgsConstructor` 三个 lombok 注解、无 JPA 注解、0 引用），**该类已于 2026-10-02 笔 1 挪包时删除**（`01df702`）。Hibernate 无实体可映射，`ddl-auto` 当前是**空转**，不会修改任何表结构。⚠️ **结论不变但依据换了**：从「有一个无注解的实体类」变成「**一个实体类都没有**」——条文原写「info.java 是唯一实体类」，笔 1 之后该句本身已不成立（详见 `project-map.md` 与 `tech-debt.md` TD-01）。
@@ -663,3 +663,138 @@
 - ⚠️ **取消不写 `order_state_transition`**：`OrderAction` 仍是 4 个（A3 的 `A-S3-2` 按 tag 基数断言），取消是**系统按时间**的动作、不是一条 CAS 边。后果登记 `tech-debt.md` **TD-34**。
 - ⚠️ **阈值不入库**：`mall.order.cancel.timeout-ms`（默认 60000）/ `.fixed-delay-ms`（默认 15000）走 properties；a3 profile 显式 `mall.order.cancel.enabled=false`（同族三道闸）。
 - ⚠️ **不动表数门禁**：只加列、不加表 ⇒ `ConcurrencyRunner` 的 P3 表数（11+6=17）与 P4 种子行数**全不变**（VM 库 `CancelledAt` 列**已实测存在**，2026-10-10）。
+
+## 13. 附录：可视化段（2026-10-11）的 3 张新表 · 4 张表加列 · 11 张表的 `Source` 标记列 {#db-13}
+
+> **本节为什么也在文件末**：理由与 §11 / §12 首段**逐字相同**（本文件有大量外部 `文件:行号` 引用，中段插行会让其后**集体**漂移）⇒ 同样取**零漂移**手法：外部引用一个不动，新表逐列定义放文件末。本笔一共动了 **4 个 Migration 块**：新增 **3 张表**（`order_item` / `stats_daily` / `goods_sku`）、给 **4 张既有表加列**（`login` / `goods` / `goods_audit` / `template`）、再给 **11 张表各加一列 `Source`**。
+> **出处**：`mall_management_sql.sql:832-862`（可视化段 commit 0）· `:864-901`（commit 2）· `:902-1099`（commit 3 + commit 3 补丁）· `:1101-1219`（commit 4）。**判据档位 = 可复核**（DDL 字面 + VM 库 `information_schema` 实测，见 `db-migration.md` 注意 14–17）。
+> ⚠️ **本笔不动任何基线表的结构**（`goods` / `goods_audit` / `template` / `login` 只**加列**，`Source` 也只加列）⇒ **不触发规则 v2 的「改列类型」前置**（四项前置见 `db-migration.md` 首段）。
+
+### 13.1 `order_item` —— 订单明细（可视化段 commit 0） {#db-13-1}
+
+`.sql:846-862`（Migration 块，`CREATE TABLE IF NOT EXISTS`）。**为什么要有它**：`order` 一行只装得下**一件**商品的成交信息（`Price` / `Quantity` 都是单值），「一单多品」的清单此前被序列化进文本列 `ProductInformation`（格式 `名:码`、多品以「；」分隔）⇒ **商品维度的统计 / 明细 / 退货都做不了**（`.sql:835-837`）。用户 2026-10-11 裁「建数据源，不砍功能」。
+
+| 字段 | 类型 | 约束 | 备注 |
+|---|---|---|---|
+| `Id` | int | **PK**, NOT NULL AUTO_INCREMENT | 内部主键，业务不使用 |
+| `OrderId` | varchar(40) | NOT NULL | 业务单号，**对齐 `order.OrderId`**（`:143`）。⚠️ **不建外键**（`order` 是全量重导会 `DROP` 的基线表） |
+| `MerchantId` | varchar(40) | NOT NULL DEFAULT '' | 卖家业务号，**冗余自 `order`** ⇒ 商家维度聚合免联查；对齐 `order.MerchantId` |
+| `ProductCode` | **char(40)** | NOT NULL DEFAULT '' | **对齐 `goods.ProductCode`**（`:61`）—— 与 `cart.ProductCode` 同一取宽口径；解析不出时为空串 |
+| `GoodName` | varchar(255) | NULL | 商品名**快照**（免联查 `goods`） |
+| `Price` | **double** | NOT NULL DEFAULT 0 | 成交单价快照（对齐 `goods.Price` 的 double，**不复制** `order.Price` 的 float） |
+| `Quantity` | int | NOT NULL DEFAULT 1 | 数量（≥1） |
+| `Subtotal` | decimal(14,2) | NOT NULL DEFAULT 0.00 | 小计 = `Price × Quantity` |
+| `OrderedAt` | datetime(3) | NOT NULL DEFAULT CURRENT_TIMESTAMP(3) | **下单业务时刻**（库时钟 `NOW(3)`）—— ⚠️ **与 `created_at` 刻意分开**：后者是**行落库**时刻，全量导入时会全挤在同一天，**不能**当统计维度（同 `order_shipping_track.TrackedAt` 的口径） |
+| `created_at` / `updated_at` | datetime(3) | NOT NULL DEFAULT CURRENT_TIMESTAMP(3)〔`updated_at` 另带 `ON UPDATE`〕 | 行落库 / 更新时刻（数据库管理规则 8） |
+
+- 主键 `Id`；**UNIQUE `uk_order_item_order_product (OrderId, ProductCode)`** ⇒ 同单同商品只一行（结算重放幂等）。⚠️ **不能写成 `UNIQUE(OrderId)`** —— 那会把「一单多品」直接堵死（`.sql:842-843`）。这是全库第 5 个非主键 UNIQUE（§10）。
+- 两个普通 KEY：`idx_order_item_goods_time (ProductCode, OrderedAt)` · `idx_order_item_merchant_time (MerchantId, OrderedAt)`。
+- **写入方**：`OrderService.addLocked` 的 `if (rows > 0)` 分支内（同一把 order-add 锁内；本仓订单链**禁 `@Transactional`** ⇒ 订单 INSERT 在 autocommit 下先提交、明细随后写 —— `.sql:844-845`）。
+- ⚠️ **存量单不回填**（用户裁定）：5 月中与 10 月中的存量单在 `order_item` 里**没有行** ⇒ 商品维度的历史统计天然为空。这是「商品榜上线即空」的**唯一**原因（不是缺陷）。
+
+### 13.2 `stats_daily` —— 经营数据日聚合（可视化段 commit 2） {#db-13-2}
+
+`.sql:887-901`（Migration 块，`CREATE TABLE IF NOT EXISTS`）。**为什么要有它**：GMV / 成单数 / 件数 / 买家数四项**从来没被算过**（不是「算错了」），端点里现算会随 `order` 增长线性变慢，且「日切口径」会被抄散在多个查询里；⇒ 收成一张**日聚合**表 + 一个预聚合任务，端点只做「读 + 求和」（`.sql:867-869`）。
+
+| 字段 | 类型 | 约束 | 备注 |
+|---|---|---|---|
+| `Id` | int | **PK**, NOT NULL AUTO_INCREMENT | 内部主键 |
+| `StatDate` | date | NOT NULL | 统计日期 —— 日切列是 **`order.CreateTime`** |
+| `Scope` | varchar(16) | NOT NULL DEFAULT 'site' | 口径：`site` = 全站 / `merchant` = 按商家 |
+| `MerchantId` | varchar(40) | NOT NULL DEFAULT '' | 商家业务号；`Scope=site` 时**恒为空串**（占唯一键位） |
+| `Orders` | int | NOT NULL DEFAULT 0 | 成单数 |
+| `Gmv` | decimal(14,2) | NOT NULL DEFAULT 0.00 | `CAST(SUM(order.Price) AS DECIMAL(14,2))` |
+| `Items` | int | NOT NULL DEFAULT 0 | `SUM(order.Quantity)` |
+| `Buyers` | int | NOT NULL DEFAULT 0 | `COUNT(DISTINCT order.CustomerId)` |
+| `created_at` / `updated_at` | datetime(3) | NOT NULL DEFAULT CURRENT_TIMESTAMP(3)〔`updated_at` 另带 `ON UPDATE`〕 | 行落库 / 更新时刻 |
+
+- 主键 `Id`；**UNIQUE `uk_stats_daily_scope_date_merchant (Scope, StatDate, MerchantId)`**（第 6 个非主键 UNIQUE）+ 普通 KEY `idx_stats_daily_scope_date (Scope, StatDate)` —— upsert 就打在唯一键上。
+- ⚠️ **为什么 `site` 与 `merchant` 两行都存，而不是只存 `merchant` 读时 `ROLLUP`**：`ROLLUP` 会丢掉 `COUNT(DISTINCT CustomerId)` 的**可加性** —— 同一人今天在两店各下一单，全站买家数算 **1**、两店相加算 **2** ⇒ 全站口径**必须单独算**。这是本表分 `Scope` 两行的**唯一**理由（`.sql:870-873`）。
+- ⚠️ **`Aov`（客单价）刻意不落列**：它是 `Gmv / Orders` 的派生值，存下来会在「订单被重导 / 口径修正后」与分子分母漂开、而**漂开没人会发现** ⇒ **读时现除**（`.sql:874-875`）。
+- ⚠️ **日切依赖 `order.CreateTime` 的文本格式**：该列是 `varchar(50)`、ISO 零填充 `'YYYY-MM-DD HH:MM:SS'`，`DATE(CreateTime)` 依赖那个**格式** —— 谁把写入格式改成非零填充，本表会**静默算错**（`.sql:876-879`）。同理不能当日切列的还有：`PaidAt`（12 行全 NULL）、`SettlementDate`（varchar 且部分 NULL）。
+- ⚠️ **`Gmv` 用 decimal 承接 + 显式 `CAST`**：`order.Price` 是 **float(4 字节)** —— 裸选显示 `10000000`、`CAST(… AS DOUBLE)` 却是 `9999999`；不显式转型，float 的显示舍入会渗进库里（`.sql:880-882`）。
+- **写入方唯一**：`StatsAggregateJob`（滚动窗口 upsert）与 `StatsService.rebuild()`（全量重算）**走同一条 upsert 语句** ⇒ 「job 算的」与「rebuild 算的」不可能算出两个口径（`.sql:883-884`）。
+- ⚠️ **`Source` 列在本表恒空**（commit 4 加的，见 §13.6）：本表的行由 `StatsService.computeAndUpsert` **唯一**写出、`POST /admin/stats/rebuild` 先 `deleteAll` 再从 `order` 重算 ⇒ **不走 `seed-demo.sql`**。⇒ 种子灌完后统计表里确实全是种子订单重算出来的行，但列上仍是 `''`。**列留着只为 11 张表形状一致**，**不是**「这张表干净不干净」的判据（`.sql:1114-1118`）。
+
+### 13.3 `goods_sku` —— 多规格矩阵（可视化段 commit 3 补丁） {#db-13-3}
+
+`.sql:1063-1078`（`CREATE TABLE IF NOT EXISTS`；照 `order_item` 先例 —— 软引用、不设 FK、`created_at` / `updated_at` 齐备）。一行 = **一个规格组合**。
+
+| 字段 | 类型 | 约束 | 备注 |
+|---|---|---|---|
+| `Id` | int | **PK**, NOT NULL AUTO_INCREMENT | 内部主键 |
+| `GoodsId` | int | NOT NULL | 父商品 `goods.Id`（**软引用，不设 FK**） |
+| `MerchantId` | **char(20)** | NOT NULL DEFAULT '' | 冗余自 `goods`；⚠️ 取宽**对齐 `goods.MerchantId`（char(20)）**，与 `order_item.MerchantId`（varchar(40)，对齐 `order`）**不同** —— 各自向**源列**对齐，是既定口径（同 `cart` 的说明），**不是**新缺陷 |
+| `GoodName` | **char(40)** | NOT NULL DEFAULT '' | 商品名快照（免联查）；取宽对齐 `goods.GoodName` |
+| `AxisName` | varchar(255) | NOT NULL DEFAULT '' | 规格组合标签（如「深空灰 / M」）= 模板各轴取值做**笛卡尔积** |
+| `Price` | double | NOT NULL DEFAULT 0 | 该组合的价格（商家逐格填） |
+| `Stock` | int | NOT NULL DEFAULT 0 | 该组合的库存 —— ⚠️ **本轮只存不扣**（用户已同意单独一轮；下单**不会**减它） |
+| `SkuCode` | varchar(40) | NOT NULL DEFAULT '' | SKU 编码（商家填）；**详情页加入购物车时作为 `ProductCode` 上报** ⇒ 下单 / 购物车链路**不改** |
+| `Sort` | int | NOT NULL DEFAULT 0 | 展示排序（升序） |
+| `created_at` / `updated_at` | datetime | NOT NULL DEFAULT CURRENT_TIMESTAMP〔`updated_at` 另带 `ON UPDATE`〕 | 行落库 / 更新时刻（⚠️ 本表是 **datetime**（无小数位），与上面三张 `datetime(3)` 不同 —— 未启用毫秒精度，不是笔误） |
+
+- 主键 `Id`；**UNIQUE `uk_goods_sku_goods_axis (GoodsId, AxisName)`**（第 7 个非主键 UNIQUE；⚠️ `AxisName` 为空时另算 —— **NULL 不进唯一键**，而本列 `NOT NULL DEFAULT ''` ⇒ 空串会进）+ 普通 KEY `idx_goods_sku_merchant_goods (MerchantId, GoodName)`。
+- 结构由**模板**给出（`template.Kind = 'structured'`，正文一行一条轴 `轴名=值1,值2,…`），价格 / 库存 / 编码留空由商家**逐格填**。
+
+### 13.4 `login` + `CreateTime` —— 注册时刻（可视化段 commit 3） {#db-13-4}
+
+`.sql:927-931`：**两条** `ALTER TABLE`，**刻意分两步**（这是本条的要点）。
+
+| 列 | 类型 | 默认 | 备注 |
+|---|---|---|---|
+| `CreateTime` | datetime(3) | **NULL**（存量行）→ `CURRENT_TIMESTAMP(3)`（此后新行） | 注册时刻（库时钟 UTC）；管理端「用户增长」曲线的**唯一**数据源 |
+
+- ⚠️ **为什么必须两步**：① `ADD COLUMN … DEFAULT NULL` ⇒ **已有行拿 NULL**；② `MODIFY COLUMN … DEFAULT CURRENT_TIMESTAMP(3)` ⇒ **此后**新注册的行自动取库时钟（写侧 `UserDao.insertLoginCustomer/Merchant` 的 INSERT **一行不用改**）。若**一步**写成 `ADD COLUMN … DEFAULT CURRENT_TIMESTAMP(3)`，MySQL 会用「执行 ALTER 的那一刻」**填满存量行** ⇒ 所有老账号被伪装成同一秒注册、增长曲线**凭空竖起一根假柱**（`.sql:912-918`）。
+- ⚠️ 第二步**不能**用 `ALTER COLUMN … SET DEFAULT`：MySQL 8.4 对该子句报 `ERROR 1064`（它只吃字面量默认值）；且 `MODIFY` 要**重写整列定义 + COMMENT**，否则注释被清空（`.sql:920-922`，实测见 `db-migration.md` 注意 16）。
+- ⚠️ **存量行一律 NULL、不回填**：注册时刻没有第二个来源、回填性为 **0** ⇒ 老账号只能记「不知道」（同 `order_item` 不回填存量单）。VM 实测：两步之后 `SELECT COUNT(*), COUNT(CreateTime) FROM login` = **8, 0**。
+- ⚠️ **加列不幂等**（MySQL 无 `ADD COLUMN IF NOT EXISTS`）：CI 整份重导 ⇒ 每轮只执行一次；VM / 本机库手动执行一次，**重复执行报 Duplicate column（预期，非故障）**（同块 2 / 块 3 的口径）。
+
+### 13.5 商品侧三处加列（可视化段 commit 3 补丁） {#db-13-5}
+
+出处 `.sql:1028-1056`，三段各自走 `information_schema` 守卫 + `PREPARE`（**每个 ALTER 组只按组内首列守卫**：同组各列必然同批加，不出现「加了一半」的中间态）。**只加列 / 加表 / 灌种子 / 修一处正文**，不改既有列、不删行、不动其它既有数据。
+
+| 表 | 加了什么 | 默认 | 为什么要加 |
+|---|---|---|---|
+| `goods` | 4 个服务承诺布尔列：`PromiseGenuine` / `PromiseReturn7` / `PromiseFastRefund` / `PromiseFreightIns` | **`tinyint(1) NOT NULL DEFAULT 1`** | 默认 **1 = 保持现状**：详情页 `.promise` 改前对**每件**商品无条件渲染四条 ⇒ 旧行默认全 1 后仍显示四条（**向后兼容**，硬线「不能阻碍旧功能」） |
+| `goods_audit` | 同样 4 列（**提审快照**）+ `SkuSpec mediumtext` | 承诺列 `DEFAULT 1`；`SkuSpec` NULL | ⚠️ 提审制下 `goods` 行由「审核通过」时用**提审行重建**（`GoodsAuditService.writeGoodsFromAudit`）⇒ 承诺位与 SKU 快照**必须随提审单走**，否则通过后新行里这两处为空。`SkuSpec` 存 **JSON 数组串**（每元素 `{spec,price,stock,code}`）—— 与 `order.Items` 同款「结构化用 JSON 串」口径（自造分隔符会因规格名里出现该字符而错位） |
+| `template` | `Kind varchar(16) NOT NULL DEFAULT 'text'` | `'text'` | **写侧分流**的依据：`text` = 文本模板（填一段话；详情 / 售后 / 驳回理由）/ `structured` = 结构化模板（规格矩阵的行列定义）。默认 `text` ⇒ 既有 13 行种子（含通知 / 理由类）**行为不变**。⚠️ **字符串码不建 DB ENUM**（同 `template.Type` 口径） |
+
+- 同块的**数据**部分（非结构）：`.sql:962-1005` 给 `template` 灌 **6 个 type / 13 行**默认模板（商品三件套 + 驳回 / 封禁理由三类）、`.sql:1086-1090` 再灌 **1 行 `Kind='structured'`** 的「服装规格模板」；`.sql:1096-1099` 是一个**修数据**的 `UPDATE`（把 `goods.spec` 两条种子的正文里**全角 `：`** 改成半角 `=` —— 页面按行内第一个 `=` 切左右两列，全角切不开 ⇒ 整行塞进右列），精确到 `Name`、**不做全表 REPLACE**。
+- ⚠️ 幂等一律 `ON DUPLICATE KEY UPDATE Id = template.Id`（撞 `uk_template_type_name` 时**啥也不改**）⇒ 整份重导正常插入、VM / 本机库重跑**不覆盖管理员改过的模板**。**种子只是起点，不是权威副本**。不用 `INSERT IGNORE`（吞无关错误）、不用 `VALUES()`（8.0.20 起废弃）。
+
+### 13.6 `Source` 标记列 —— 11 张表各一列（可视化段 commit 4） {#db-13-6}
+
+`.sql:1133-1219`：**11 段**同形语句（`information_schema` 守卫 + `PREPARE`，重复执行走 `DO 0`），每段 `ALTER TABLE … ADD COLUMN \`Source\` varchar(16) NOT NULL DEFAULT ''`。表清单：`login` · `user` · `goods` · `goods_audit` · `order` · `order_item` · `cart` · `notification` · `admin_audit` · `merchant_application` · `stats_daily`。
+
+- ⚠️ **语义（不能简写成「非种子」）**：`''` = **存量或真实业务**写入；`'seed'` = **`seed-demo.sql` 写的那一行**。⇒ 撤种子必须 `DELETE … WHERE Source = 'seed'`，**不能**按「表里有 Source 列」删（真实买家下单写进来的新行同样是 `''`）。这个列判别的**只有一件事**：这一行是不是 `seed-demo.sql` 写的（`.sql:1111-1113`）。
+- ⚠️ **`stats_daily` 的这一列恒空**（理由见 §13.2 末条）。
+- **回滚**（逻辑废弃，执行前须人工确认）：11 条 `DROP COLUMN Source` 已逐表写在 `.sql:1119-1130` 的块注释里。
+- ⚠️ 本块**只加列**：不改既有列、不删行、不改既有数据（规则 v2）。
+
+### 13.7 本笔对基线的净变化 {#db-13-7}
+
+| 基线 | 变化 | 判据档位 |
+|---|---|---|
+| 表数 | **19 → 22**（+`order_item` → +`stats_daily` → +`goods_sku`） | 可复核（VM 库 22 表实测） |
+| 行首 `CREATE TABLE` 条数 | **21 → 24** | 可复核（`grep -c '^CREATE TABLE'` = 24，2026-10-11 实测）。⚠️ 头部原文的「共 20 个 `CREATE TABLE` / 净 18 张表」**本就少算 1**（漏了 §12 的 `order_shipping_track`，`:805`）⇒ 正确的前值应为 **21 / 19**；两处已在本笔同日订正 |
+| 索引 | **23 → 30**（+`uk_order_item_order_product` / +`idx_order_item_goods_time` / +`idx_order_item_merchant_time` / +`uk_stats_daily_scope_date_merchant` / +`idx_stats_daily_scope_date` / +`uk_goods_sku_goods_axis` / +`idx_goods_sku_merchant_goods` = 净 +7） | 可复核（VM 库 `information_schema.STATISTICS` 实测 = **30**，2026-10-11；⚠️ §2 行内的「共 20 个」是 **17 张表口径**的旧实测，未含 `cart`（2）/ `order_shipping_track`（1）⇒ 30 − 2 − 1 = 27 ≠ 20 是**本文件既有的陈旧计数**，不是本笔引入的差） |
+| 非主键 UNIQUE | **4 → 7**（+ 上面三个 `uk_*`） | 可复核（VM 库 `NON_UNIQUE=0 AND INDEX_NAME<>'PRIMARY'` 实测 = **7**：存活的是 `uk_order_orderId` / `uk_goodstype_parent_name` / `uk_template_type_name` / `uk_cart_customer_product` / `uk_order_item_order_product` / `uk_stats_daily_scope_date_merchant` / `uk_goods_sku_goods_axis`） |
+| 加列 | `login` +1 · `goods` +4 · `goods_audit` +5 · `template` +1 · 11 张表各 +1 `Source` | 可复核（`information_schema.COLUMNS` 逐列实测） |
+| 种子行数（P4 判据 `order/goods/login/user/friend`） | **不变** `6/5/5/5/4`（**全是加列**，`ALTER ADD COLUMN` 不改行数） | 可复核 |
+| A3 P3 门禁 | `KNOWN_TABLES` **10 → 11**、期望表数 **21 → 22**（IN 清单加 `'goods_sku'`）—— ⚠️ **四处同改**，见 `ConcurrencyRunner.java` 的 P3 段注释 | 可复核（`db-migration.md` 注意 17） |
+
+> ⚠️ 索引 / UNIQUE 两处计数**已按 VM 库 `information_schema.STATISTICS` 实测校正**为 **30 / 7**（2026-10-11；本节初稿那句「按 DDL 推导、不是实测」**作废**，档位以上表两行写的「可复核」为准）。
+> ⚠️ **`.sql` 的行尾仍是 CRLF**：`1219 行 / LF 1219 / CR 1219 / 裸 CR 0`（2026-10-11 实测，本笔追加三个块之后重新数过）。
+
+### 13.8 演示种子 `seed-demo.sql` 的口径（D 笔） {#db-13-8}
+
+文件在**仓库根**（不在 `mall_management_sql.sql` 里）：`seed-demo.sql`，919 行 / 158.7 KiB；生成器 `scripts/seed-demo-gen.mjs`（`mulberry32(20261011)` ⇒ 同一天重跑**逐字相同**）；灌库后自查 `scripts/probes/seed-verify.sql`（18 条只读）；证据 `docs/agent/evidence/d-seed/`。
+
+1. **两条跑法**（顺序不能反）：① 先跑 `mall_management_sql.sql` 末尾的 Migration 块（建 `Source` 列，**只做一次**）→ ② 再灌 `seed-demo.sql` → ③ 最后打一次 `POST /admin/stats/rebuild`（统计表由 `order` 重算，**不是种子文件写的**）。
+2. **周末低谷是按「执行日」算的，不是按生成时的相位钉死**：`order` / `order_item` 两条 INSERT 带
+   `WHERE (v.gate = 0 OR DAYOFWEEK(DATE_SUB(CURDATE(), INTERVAL v.k DAY)) BETWEEN 2 AND 6)`
+   —— `gate=0` 的行**每天保底**（趋势图连续不跳日），`gate=1` 的行**只落工作日**。好处：换一天执行，低谷仍落在**真实的**周末。
+3. **`order.Price` 的口径**（沿用 `OrderService`）：`Price` = 这一单的**小计**、`Quantity` = **总件数**；`order_item.Subtotal` 逐行小计，**`Σ Subtotal = order.Price`**。
+4. **多品单只挂一个商家**：`order.MerchantId` 是全单**唯一**字段 ⇒ 多品也要从**同一商家**的货里挑；否则 `order_item.MerchantId` / `ProductCode` 对不上 `goods`，`selectTopGoods` 的 `(MerchantId, ProductCode)` 归类会落空（`evidence/d-seed/README.md` 记了第一次灌库就是栽在这里）。
+5. **演示口令 = 用户名**（对齐存量 `1/1`、`2222/2222` 的既有惯例）。⚠️ 这是**明文口令** —— **若 push 被 `[Credential Leakage]` 拦，改占位符再 amend，不要硬推**。
+6. **撤种子** = `DELETE … WHERE Source = 'seed'`（见 §13.6），**存量数据一行不动**；`stats_daily` 由 rebuild 自己覆盖，不在此列。

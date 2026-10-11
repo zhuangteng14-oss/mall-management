@@ -1932,7 +1932,7 @@
   **B2 按甲落黄条**（`AppShell.vue` 的 `.nav-notice`，与红点**同一支** 5s 轮询）。
 - 🧹 **行号互引整笔重定基**（`_work/renumber-b2.mjs`，机械 + 逐条打印）：**具名 105 + 裸 21 = 126 处 / 20 文件**；
   `check-context-packs.sh` → **290 引用 / 0 WARN / 0 FAIL**；`refs-scan` before/after **3597 → 3595**，
-  **零非预期丢失**（少的 2 条同出被有意删掉的 `AccountsPage.vue:207` 那个 ⑤ 块注释）。
+  **零非预期丢失**（少的 2 条同出被有意删掉的 `AccountsPage.vue` 的**原 207 行**那个 ⑤ 块注释；⚠️ 2026-10-11 可视化段收口**只改写写法**：该行已删，写成 `文件:行号` 会在扫描集里留下一个指向不存在位置的**活 token** ⇒ 改「原 N 行」，与 `slot-registry.md` §18-9 同处一并改）。
 
 - 🔧 **手验后补丁（第二轮，2026-10-09/10 用户手验，两条 A 组必修）**：详见 `slot-registry.md` §18-10。
   **Bug 1（`/admin/inbox` 403）真因 = 管理端带着「别人的票」** —— 403 只出 `IdentityGuard.forbidden()`
@@ -1980,7 +1980,7 @@
   ✅ **结清上一笔的 ⏸️**：`ProductPage.vue:226-230`/`:236-249` 三点待裁**全部作废**（无绑定⇒改快照、`spec`⇒行内 `键=值`、`after_sale`⇒接真渲染并**推翻** pack `c3-block-3-goods.md:117` 的「静态真功能 N=0」裁决）；留档见 `_work/c3-block3-landing-plan.md §十一`，覆盖口径见 §十二。
   🧪 `./mvnw -B test` **246 / 0 / 0**；`vue-cli-service build` **Build complete**；`eslint` exit 0。
   **文档** ⇒ `db-migration.md` #8（+ 注意 11；#7 状态由「VM 不可达」更正为「已落两库」）· `db-schema.md` **18 → 17**（**净 0 行**=549；§6.15 标已删 / §6.17 `goods_template` 改写成 `template` / §6.18 +3 列）· `slot-registry.md §19-9` · `_work/c3-block3-landing-plan.md §十一 结清 + §十二` · `c3-blocks-index.md:15` · pack 回执。~~未提交~~ ⇒ **已提交 `5695755` / PR #84 / merge `fbf5c00`**（收口见下方 ✅）。
-  ⚠️ **三件必须点明（已登记 §19-9-5，未修）**：① `CatalogPage.vue:114`/`:117` 用 `:disabled="busyId !== null"` 但文件定义的是 **`busyKey`** ⇒ 按钮**永不置灰**（**既有 bug**，只报告；行号 2026-10-10〈模板表通用化〉重指：原 112/115 行）；② `merchant.reject` / `user.ban` 两个 type **无录入面**；③ `template` 初始为空 ⇒ 6 处弹窗首开显示「暂无模板」**是预期**。
+  ⚠️ **三件必须点明（已登记 §19-9-5；① 已于 2026-10-11 修，②③ 未修）**：① `CatalogPage.vue` 的「通过 / 驳回」两键（**原 114/117 行** —— 2026-10-10〈模板表通用化〉已从原 112/115 行重指过一次）`:disabled` 绑的是 `busyId !== null`，而文件定义的是 **`busyKey`** ⇒ 按钮**永不置灰**（**既有 bug**，当时只报告不修；⚠️ **2026-10-11 可视化段补图标那一笔同行替换时已一并订正为 `busyKey`**，现落 **157/160 行**，报备见 `slot-registry.md` §21-9 第 8 条）；② `merchant.reject` / `user.ban` 两个 type **无录入面**；③ `template` 初始为空 ⇒ 6 处弹窗首开显示「暂无模板」**是预期**。
   ✅ **手验已跑并通过**（真后端 + **VM 库** + a3 profile；证据 `docs/agent/evidence/c3-block3-snapshot/hand-verify.txt`，探针 `scripts/probes/c3b3-snapshot-verify.sh`）：建模板 `goods.detail` Body=`AAA` → 商家 `/goods/goodsAdd` 提审（`Detail` **手改**成 `AAA-SHOP-EDITED`）⇒ **`goods` 零新行** + `goods_audit(pending)` 1 行 → 管理员通过 ⇒ **`goods` +1 行** + `Status=approved` + `GoodsId` 回填 → **把模板改成 `BBB`** → 重查该商品 `Detail` **仍是 `AAA-SHOP-EDITED`** ⇒ **快照语义成立**；结构断言同过（`%TemplateId%` 0 行 / 只剩 `template`）；跑完**已删回**探针造的行（VM `goods` 回到基线 5 行）。
   🐞 **手验当场抓出并修掉 1 个真缺陷**（见 `slot-registry.md §19-9-7`）：`GoodsAuditDao.insert`（`.../goods/dao/GoodsAuditDao.java:67`）的 `VALUES(…)` 值槽**多一个** —— 列 **14** + 字面量 `'pending'`，却写了 **14 个 `?`** 而只传 **13 个值** ⇒ 提审恒 `{"success":false,"msg":"商品提交失败"}`（后端 `SQLException: No value specified for parameter 14`）。**本笔引入**（加 `Detail`/`Spec`/`AfterSale` 三列时多打一个 `?`）；删掉 `'pending'` 前多余那个 `?` ⇒ 13 对 13。**单行、净 0 行。** ⚠️ **`mvn test` 246 绿 + `build` 通过 + `eslint` 0 三绿全过仍漏了它** —— Mockito 切片 `GoodsWriteTxAtomicityTest` 与 `@WebMvcTest` 的 `AbstractSmokeTest` **都不打真库**，覆盖不到「`?` 数 ≠ 传参数」。⇒ 已登记待办：DAO 层要一条**打真库**的冒烟（或「`?` 计数 == `.params()` 计数」的静态检查）。🐞 **第 2 个真缺陷：事后从后端进程日志抓到**（`/tmp/boot-a3b.log` 4 条 `action=template.create … targetId=null`；`admin_audit.TargetId` 是 **NOT NULL**，`mall_management_sql.sql:282`）—— `template.create` / `category.create` 两处「新增类」动作把 `TargetId` 也传了 `null` ⇒ **创建类留痕 100% 丢失**（fail-open 吞异常、只记 ERROR；三绿与 A3 都拦不住）；全仓 18 个 `auditService.record` 调用点逐个核过，只有这 2 处传 `null`。**已修**（2026-10-10 用户批「就地补业务标识串」：`Type:Name` / `ParentId:GoodType`，两处单行、净 0 行）；**未重新手验**（需重启后端），见 `slot-registry.md §19-9-8`。
   ✅ **块 3 收口（2026-10-10）**：commit **`5695755`** → push → **PR #84** → 用户 merge，**合并提交 `fbf5c00`**（远端 `feat/c3-admin-block3` 已删）。CI 三 job 全绿；**A3 一律按产物读**（`concurrency` job 是 `continue-on-error`，颜色无信息量）：`exitCode=0` / `gates.count=30` / `gates.failed=0` / `assertions 31`（0 条 `ok:false`）；飞前校验 **P3 = PASS 表数=17**（`KNOWN_TABLES` 7→6 生效）、**P4 = PASS** 种子 `order=6 goods=5 login=5 user=5 friend=4`、P0–P6 PASS / P7 SKIP。⏳ **遗留（不静默）**：`goodsUp` 改不了已上架商品的详情/规格/售后（**本块范围外已知缺口**）· **TD-20**（静默失败路径需专门测试）挂到**块 8 部署前**一并处理。⚠️ 提醒：`application-a3.properties:98` 的 `app.auth.enabled=false` —— **手验绿 ≠ 默认 profile 绿**（本笔手验即在闸关下跑的）。
@@ -2033,3 +2033,57 @@
 ⚠️ **本笔的零漂移口径（按用户 2026-10-10 新规降级）**：**不再**全仓逐条重指 ⇒ 只核**自己动过的引用**（块 4 pack 已就地核，结果见上）；本笔造成的**外部**引用偏移全部记账在 **`_work/drift-ledger-block4patch.md`**，留到**块 4 收口**或**块 7 之后的锚点改造**一次性处理（若那时改成 `#锚点`，该表整张作废）。
 ⚠️ **手验前必提醒**：`application-a3.properties:98` 的 **`app.auth.enabled=false`** ⇒ a3 闸关，**手验绿 ≠ 默认 profile 绿**；**归属校验（含 A5）在 a3 下测不出**。
 ⚠️ **未做**：补丁的**手工验收未跑**（块 4 那一轮手验在补丁之前）。
+
+### 7-VIS. 可视化段〈可视化体系 + 经营数据看板 + 块 1-4 补丁 + 演示数据〉（2026-10-11；**6 笔全部已提交**，`4991081` / `4f06220` / `3d3ef21` / `93441c8` / `5c06ce1` / `6b2a6c3`）
+
+> 本节**追加在文件尾**（同 §7-B4P 的先例）。上一条（§7-B4P）仍是块 4 补丁的收口说明。
+
+**用户口径（逐字要点）**：本段一次交付四件事 —— ① **可视化体系**（图表 / 图标 / 令牌）② **经营数据看板**（管理端 + 商家端）③ **块 1-4 的补丁**（六问题修复轮 + C1 复合图 + 图标落地）④ **演示数据**（`seed-demo.sql`）+ 存量脏数据清理。两条硬线贯穿全程：**禁止删旧接口 / 旧字段 / 旧表**、**不能阻碍旧功能（向后兼容）**。
+
+**提交切分**（分支 `feature/vis-dashboard`）：
+
+| # | 内容 | commit |
+|---|---|---|
+| 0 | `order_item` 表 + `orderAdd` 可选 `Items` | `4991081` |
+| 0b | 购物车结算改「**按商家分组建单**」 | `4f06220` |
+| 1 | 可视化体系（前端） | `3d3ef21` |
+| 2 | 经营数据看板 | `93441c8` |
+| 3 | 块 1-4 补丁（A + B④）+ C1 复合图 + 图标 | `5c06ce1` |
+| 4 | D 数据填充 + 存量脏数据清理 | `6b2a6c3` |
+
+⚠️ **切分边界的实证理由**：四页 admin / `config/nav.js` / `config/admin-nav.js` / `router/index.js` 的**图标改动与 commit 3 的改动落在同一文件的同一行区间**，而 `git add -p` 在本环境**不可用** ⇒ C1 只能折进 commit 3（用户 2026-10-11 裁定「**C1 折进 commit 3**」）。
+
+**表（`.sql:832-1219`；表数 19 → 22）** ⇒ 3 张新表 + 4 张表加列 + 11 张表加 `Source`：
+
+- 新表 **`order_item`**（`:846-862`；`UNIQUE uk_order_item_order_product (OrderId,ProductCode)`；⚠️ **存量单不回填**（用户裁定）⇒ **「商品榜上线即空」由此而来、不是缺陷**）
+- 新表 **`stats_daily`**（`:887-901`；`UNIQUE uk_stats_daily_scope_date_merchant (Scope,StatDate,MerchantId)`；`site` / `merchant` 两 `Scope` 都存（`COUNT(DISTINCT CustomerId)` **不可加**）；**`Aov` 刻意不落列**）
+- 新表 **`goods_sku`**（`:1063-1078`；`UNIQUE uk_goods_sku_goods_axis (GoodsId,AxisName)`；⚠️ **`Stock` 本轮只存不扣**）
+- 加列：`login.CreateTime`（**必须两步** `ALTER`，一步会**伪造**存量行注册时刻）· `goods` +4 承诺位（`DEFAULT 1` = 保持现状）· `goods_audit` +4 承诺位 + `SkuSpec`（提审快照）· `template.Kind`（`text` / `structured`）· **11 张表各 +`Source`**（`:1133-1219`）
+- **实测（VM 库 `information_schema`，档位 = 可复核）**：表 **22** · 非主键索引 **30** · 非主键 UNIQUE **7** · `COLUMN_NAME='Source'` 命中 **11** 张表 · `goods_sku` **11 列**；`.sql` **1219 行 / LF 1219 / CR 1219 / 裸 CR 0**、行首 `CREATE TABLE` **24** 条。
+- ⚠️ **前值订正**：本文件与 `db-schema.md` 此前散记的「**20** 个 `CREATE TABLE` / 净 **18** 张表」**漏算了 `order_shipping_track`**（§7-B4P 的那张表）⇒ 正确前值 = **21 / 19**。
+
+**后端** ⇒ 新包 `stats/`（`StatsDao` / `StatsService` / `StatsAggregateJob` / `AdminStatsController` / `MerchantStatsController`，3 个端点全是 **POST**、参数**只认查询串**）· `OrderService.resolveItems`（解析 `Items`；明细与主单落在**同一把 order-add 锁内**）· `CartService` 结算改**按商家分组**（N 行 ⇒ **M 张单**，M = 商家数；响应形状不变）· `GoodsService.skusByMerchantGoodName` + 新端点 **`POST /goods/skuList`** · `/admin/accounts/users` 的查询改 **LEFT JOIN `login`** 取 `CreatedAt`（⚠️ 必须 LEFT，INNER 会让无 `login` 行的账号**整行消失**；**存量行恒 NULL**）· `UserController.me` 的管理员降级分支**补答 `username`**（用户裁决「**甲**」，授权口径一字未动）· `GoodsService.goodsAdd` 扩参 **11 → 16**（尾部追加，`required=false`）。
+⚠️ **`app.auth.enabled` 与 TD-18 一字未动**：`/admin/stats` 等**不加**角色闸 —— 管理员 cookie 铸不出 token，加「须 role=3」会让**默认 profile 上管理员自己也 401**。
+
+**前端** ⇒ 可视化体系（`components/charts/{chartTokens.js,LineChart.vue}` · `components/ui/KpiCard.vue` · `components/ui/glyphs.js`）+ 四页 admin 图标 + `config/{nav,admin-nav}.js` + `router/index.js` + `views/admin/StatsPage.vue` + `views/merchant/StatsPage.vue` + 新封装 `api/stats.js`（3 条）+ `endpoints.js` 计数 **79 → 83**（同行改）。
+⚠️ **问题① 的根因与修法（本段最贵的一条）**：`/user/me` 答的 `role` 是 **JSON 数字**，而全站**一律按字符串比** ⇒ 会话恢复路径上每个角色比较**恒 false** ⇒ `ROLE_HOME[3]` = `undefined` ⇒ `/customer` 上再判仍 false ⇒ **重定向成环** ⇒ `router.isReady()` reject ⇒ `app.mount('#app')` **永不执行**（现象：整页深色、无内容）。**修在收端**：`api/auth.js` 里 `String(info.role)` —— **服务端契约不变**。
+
+**A3 门禁（P3 两次同笔 +1，全部按净零行数手法）** ⇒ commit 0 加 `order_item`（`KNOWN_TABLES` 8 → 9、期望 19 → 20）· commit 2 加 `stats_daily`（9 → 10、20 → 21）· commit 3 补丁加 `goods_sku`（10 → **11**、21 → **22**，**四处同改**：注释块 / IN 清单 / `KNOWN_TABLES` / PASS 文案串）。⚠️ `concurrency` job 是 **`continue-on-error`** ⇒ **只能读 artifact 的 `gates.count`，不能读 job 颜色**。
+
+🧪 **DoD（2026-10-11 实测，日志已落盘）** ⇒ `./mvnw -B **clean** test`：`Tests run: 280, Failures: 0, Errors: 0, Skipped: 26` + `BUILD SUCCESS`（`_work/closeout-mvn-test2.log:3516` / `:3519`）；`npm run build`：`DONE Build complete`（`_work/closeout-npm-build.log:177`）。
+⚠️ **一条判据教训（写下来免得再犯）**：先前那次「**280 tests / 1 failure**」是**陈旧 test class 造成的假象** —— `src/test` 无改动时 maven **增量编译复用旧 class**，把「主代码签名已破坏（`goodsAdd` 11 → 16 参）」整段遮住；**只有 `clean test` 是真判据**（CI 是干净检出 ⇒ 会真失败）。同步修的是 **4 个调用点**（`GoodsAuditTxAtomicityTest` ×2 / `GoodsWriteTxAtomicityTest` ×2）。
+⚠️ **另一处是「改判据」不是「改代码」**：`AuthTokenSmokeTest.adminCookie_onMe_getsDegradedAnswer` 原断言「`publicInfo` 一次不调」**已不成立**（裁决「甲」后那一跳必须走）⇒ 改写为「键集**恰好** `{success, role, username}`」+「`publicInfo` **恰好 1 次**」+「资料跳 / 头像跳**各 0 次**」（⚠️ 只断言「键缺失」是**弱判据**：查了整行但没查到也会变绿）。
+
+**文档（本笔一次性收口，按三层治理）** ⇒ **活文档**：`db-schema.md` 尾追加 **§13**（13.1–13.8）+ 头部**四处同行订正**（表数 / 行尾与 `CREATE TABLE` 计数 / §2 索引 / §3 手写 DDL）· `db-migration.md` 登记表补 **#10**（`order_shipping_track`，**补登**）+ **#11–#15**、注意事项追加 **14–17** · `api-contract.md` 尾追加 **附录 E**（E.1–E.7）。**账本**：本文件 §7-VIS · `slot-registry.md` 转正。**档案**：`docs/agent/evidence/**` 与旧条目**不动**。另：`c3-modules.md` / `tech-debt.md` 加按语、`docs/美化/看板规范.md` §2 规矩 5 的**字形清单订正**、`api/endpoints.js` 计数 **79 → 83**（同行改）。
+
+**数据填充（D 笔）** ⇒ `seed-demo.sql`（**919 行 / 158.7 KiB**；生成器 `scripts/seed-demo-gen.mjs`，`mulberry32(20261011)` ⇒ **同日重跑逐字相同**）+ 只读自查 `scripts/probes/seed-verify.sql`（**12 条带判据项 + 7 段分布核对**）+ 存量清理 `scripts/probes/cleanup-dirty-legacy.sql` + 证据 `docs/agent/evidence/d-seed/`。
+⚠️ **跑法顺序不能反**：① 先跑 `.sql` 末尾的 Migration 块（建 `Source` 列，只做一次）→ ② 再灌 `seed-demo.sql` → ③ 最后打一次 **`POST /admin/stats/rebuild`**（统计表由 `order` 重算，**不是种子文件写的**）。
+⚠️ **`Source` 的语义（别简写成「非种子」）**：`''` = 存量**或真实业务**写入；`'seed'` = `seed-demo.sql` 写的那一行 ⇒ 撤种子只能 `DELETE … WHERE Source='seed'`；⚠️ `stats_daily` 的一列**恒空**。
+⚠️ **演示口令 = 用户名**（对齐既有 `1/1`、`2222/2222` 惯例）= **明文口令** ⇒ **若 push 被 `[Credential Leakage]` 拦，改占位符再 `git commit --amend`，不硬推**。
+
+⚠️ **手验前必提醒**：a3 / dev profile 的 **`app.auth.enabled=false`** ⇒ 闸关，**手验绿 ≠ 默认 profile 绿**。
+⚠️ **挂账（本段不修）**：① **SKU 各自扣库存**（`goods_sku.Stock` 只存不扣 —— 用户已同意**单独一轮**）② **6 笔保留的旧单**（`ProductInformation` 指向已删商品）③ **5 月中 → 10 月中空档**（看板用「近 30 天」绕开）④ `goods` **Id 120 重复行**（未清）⑤ `customerimage` / `merchantimage` **各 1 行残留**（未清）。
+⚠️ **未做**：本段的**手工验收**由用户自验（agent 不跑 CDP 截图、不写重探针）；深链 / 前退后退**仍未验**（沿用 §7-B4 的挂账）。
+
+🔁 **行号漂移收口（2026-10-11，`_work/block-3-updates.md` §B0 四步）**：工作区快照跑 `scripts/refs-scan.sh`（连跑数轮；**以最后一次编辑之后生成的 `_work/refs-c3-after4.txt` 为准**，`-after` / `-after2` / `-after3` 是中间产物），对 before（`_work/refs-c3-before.txt`，**4120 条 / 311 文件**）比 **token 集合**（不比原始产物）：末次产物 **4234 条 / 316 文件**，差集「只在 before」= **9 条**，逐条**有据可查地对应到本笔的改动** —— **7 条是本笔的「重指」**（`AuditPage.vue` 的 `:190` / `:173-217` / `:82-141` / `:161-163` / `:301` / `:301-329`，以及 `OrderPage.vue` 的 `:192`）、**2 条被改写成「原 N 行」**（`AccountsPage.vue` 原 207 行所指的块注释**已删**、`CatalogPage.vue` 原 114 行所指的 bug **同笔已修**）⇒ **不是丢失**；after 侧**无新增陈旧 token**（末次产物与上一次**逐 token 完全相同**）。逐条重指（**按站点逐条**，清单如下 —— 代码注释侧 7 个文件、文档侧 6 个文件 —— 后者含 3 个 context-pack）：`AuditPage.vue` 的 `toLocal` **190 → 236**（`ChatRoom` / `HistoricalOrders` / `OrderCenter` / `OrderMine` 4 个引用者）、时区块 **173-217 → 219-263**（`NotifyPage.vue` 2 处）、`load()` **301-329 → 441-469**（3 个 pack + 4-order 的 `:301 → :441`）、环境边界 **161-163 → 204-206**（`tech-debt.md` TD-21）、`OrderPage.vue` **192 → 262**（`slot-registry.md` §20 那张表）。两条**改写成「原 N 行」而非重指**：`AccountsPage.vue` 的**原 207 行**（所指的 ⑤ 块注释**已删**，写 `文件:行号` 只会留一个指向不存在位置的**活 token**）、`CatalogPage.vue` 的**原 114/117 行**（所指的 bug **同笔已修**，见下条）。
+⚠️ **报备（不在任务书里，方向待用户点头）**：`CatalogPage.vue`「通过 / 驳回」两键的 `:disabled` 原绑 **`busyId`**（本页并无此名，定义的是 `busyKey`）⇒ 闩对这两键**完全失效**；补图标那一笔**同行替换时一并订正为 `busyKey`**（现 **157/160 行**）。改动方向 = 让它按本页**既有**的闩机制工作，**不动任何接口 / 字段 / 契约 / 表**；若用户认为该 bug 应留给「文档飘移清理笔」，回退点就是这两行。台账见 `slot-registry.md` §二十一 21-9 第 8 条。
