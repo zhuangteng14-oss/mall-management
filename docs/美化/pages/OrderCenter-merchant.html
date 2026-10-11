@@ -67,7 +67,7 @@
       各有调用方，注释明写「本笔不合并」。
     · `OrderDao.selectByMerchant` 的两条 SELECT **都不取 `CreateTime`**，
       而 `completed` 分支的调用方会渲染它 ⇒ **「已完成」tab 的下单时间整列空白**。
-      这是**既有缺陷**，`db-schema.md:91` 有记（Dao 注释 :131-133 也写明「本笔不趁手改」）。
+      这是**既有缺陷**，`db-schema.md#db-4-1` 有记（Dao 注释 :131-133 也写明「本笔不趁手改」）。
       ⇒ v4 把它画出来并**标注**，不是装作没有。
     · **状态机（`order/model/`）**：`OrderState` = 三个状态位 `(PayIf, DeliveryIf, ReceiveIf)`
       的 **8 种组合，5 合法 + 3 非法**，一一具名：

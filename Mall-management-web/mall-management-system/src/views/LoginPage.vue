@@ -317,11 +317,11 @@ export default {
         if(role === "0"){   // ⚠️ **本支不可达**（2026-10-09 核实，非本笔引入）：它排在 `:306` 的 `/user/me` **之后**，而 `role === "0"` 时后端不写会话 ⇒ 那一发必 401、先抛 ⇒ 异常被 `:328` 的通用文案接走，永远轮不到这里。留着只为**不动行号**（本文件最大被引行是 `:687`）。封禁（`"4"`）那支已按同一理由提到 `:300` 去早退。
           this.loginWarnText = "未找到该用户，请查看对应账号密码有无写错，或者前往右侧进行注册";
         }else if(role === "1"){
-          setUsername(this.loginAccount); setRole(role); await this.mintToken(role);   // ⚠️ 止血笔：同行追加，保持净零行数（防 `api-contract.md:172` 引的 `:216` 漂移）；P2.6 起 setCredentials → setUsername；多账户隔离笔（2026-10-06）再加铸票（见 mintToken）
+          setUsername(this.loginAccount); setRole(role); await this.mintToken(role);   // ⚠️ 止血笔：同行追加，保持净零行数（防 `api-contract.md#api-5` 引的 `:216` 漂移）；P2.6 起 setCredentials → setUsername；多账户隔离笔（2026-10-06）再加铸票（见 mintToken）
           this.$router.push(this.landingAfterLogin(role));   // 前端路由守卫笔（2026-10-06）：落点改由 landingAfterLogin 决定（有合法 redirect 则回原目标，否则 = 原来的 "/customer"）
         }
         else if(role === "2"){
-          setUsername(this.loginAccount); setRole(role); await this.mintToken(role);   // ⚠️ 止血笔：同行追加，保持净零行数（防 `api-contract.md:172` 引的 `:216` 漂移）；P2.6 起 setCredentials → setUsername；多账户隔离笔（2026-10-06）再加铸票（见 mintToken）
+          setUsername(this.loginAccount); setRole(role); await this.mintToken(role);   // ⚠️ 止血笔：同行追加，保持净零行数（防 `api-contract.md#api-5` 引的 `:216` 漂移）；P2.6 起 setCredentials → setUsername；多账户隔离笔（2026-10-06）再加铸票（见 mintToken）
           this.$router.push(this.landingAfterLogin(role));   // 前端路由守卫笔（2026-10-06）：同上，否则 = 原来的 "/merchant"
         }  else if(role === "3"){ setUsername(this.loginAccount); setRole(role); await this.mintToken(role); this.$router.push(this.landingAfterLogin(role)); }   // ✅ C3（2026-10-08，管理员）：⚠️ **整个分支贴在 `}` 尾巴上写完** —— 本文件最大被引行是 `:687`（全仓 15 条引用里最高的一条），`if/else` 链里在 `:326` 之后**插一行**就会让其后 360 行集体 +1、那条引用当场失效 ⇒ 沿用本链上方 `:320`/`:324` 既有的「同行追加保净零」手法。⚠️ `mintToken` 那一发今天**注定 401**（`/user/token` 明文禁止 cookie 管理员换票，是刻意的安全属性，见 slot-registry §十三 13-5）⇒ 被 `mintToken` 内部的 fail-open catch 吞掉，**不影响落点**；管理员身份今天只由 cookie 会话承载，骨架够用
       } catch (e) {

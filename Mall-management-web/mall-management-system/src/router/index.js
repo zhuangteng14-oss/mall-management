@@ -482,7 +482,7 @@ router.addRoute({
 //
 // ⚠️ **为什么又用 `addRoute`、而不是往上面的 `routes` 数组 / 两壳的 `children` 里插一条**：
 //   全仓对 `router/index.js` 的**最大被引行**是 `:462` —— 即 C3 骨架 `/admin` 块的末行
-//   （`context-packs/c3-block-1-infra.md:74` 引 `:396-462`；另 `slot-registry.md:2332` 按行号钉着
+//   （`context-packs/c3-block-1-infra.md#pack-c3-block-1-infra-log-precedent` 引 `:396-462`；另 `slot-registry.md:2332` 按行号钉着
 //   scrollBehavior 那 4 行 `:354-357`，`progress.md` 亦引 `:378`）——
 //   而两壳的 `children`（`:57-83` / `:88-122`）、`ROLE_HOME`（`:192`）、`landingFor`（`:197`）、
 //   两条守卫（`:241-299` / `:329-334`）**全都在这条线之前** ⇒ 往里插**任何**一行，它们集体漂移。

@@ -182,7 +182,7 @@ const getBuyerId = () => resolveBuyerId()
 
 const formatPrice = (price) => Number(price || 0).toFixed(2)
 
-const formatDateTime = (dateStr) => {   // ⚠️ **2026-10-10（用户报：同一条单「轨迹 22:27:51 vs 订单列表 14:29:16」，差约 8 小时）**：后端**全部**时间列（`SettlementDate` 由 SQL `NOW()`、`TrackedAt` 由库时钟 `NOW(3)`/`DATE_ADD`）都是**库时钟**，而库时钟是 **UTC**（VM / a3 实测 `@@system_time_zone=UTC`，记录见 `context-packs/c3-block-1-infra.md:109`）⇒ 交回的是 `'YYYY-MM-DD HH:mm:ss'` 这种**无时区文本**。少补末尾那个 `Z`，`new Date()` 就按**浏览器本地时区**解释它 —— 等于把 UTC 值当成本地值，整整差一个偏移，而且**错得很安静**（格式完全正常，肉眼看不出来）。手法逐字照管理端的 `views/admin/AuditPage.vue:190` 的 `toLocal`（那 5 个管理页都有，**本页此前漏了这一步**）。
+const formatDateTime = (dateStr) => {   // ⚠️ **2026-10-10（用户报：同一条单「轨迹 22:27:51 vs 订单列表 14:29:16」，差约 8 小时）**：后端**全部**时间列（`SettlementDate` 由 SQL `NOW()`、`TrackedAt` 由库时钟 `NOW(3)`/`DATE_ADD`）都是**库时钟**，而库时钟是 **UTC**（VM / a3 实测 `@@system_time_zone=UTC`，记录见 `context-packs/c3-block-1-infra.md#pack-c3-block-1-infra-frontend-nav`）⇒ 交回的是 `'YYYY-MM-DD HH:mm:ss'` 这种**无时区文本**。少补末尾那个 `Z`，`new Date()` 就按**浏览器本地时区**解释它 —— 等于把 UTC 值当成本地值，整整差一个偏移，而且**错得很安静**（格式完全正常，肉眼看不出来）。手法逐字照管理端的 `views/admin/AuditPage.vue:190` 的 `toLocal`（那 5 个管理页都有，**本页此前漏了这一步**）。
   if (!dateStr) return ''
   const date = new Date(`${String(dateStr).replace(' ', 'T')}Z`)
   if (Number.isNaN(date.getTime())) return String(dateStr)

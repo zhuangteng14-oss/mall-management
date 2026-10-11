@@ -1,4 +1,4 @@
-# context-pack: three-layers
+# context-pack: three-layers {#pack-three-layers-context-pack}
 
 > **定位**：三层重构**开工时读**。上游是 `defect-survey.md`（缺陷普查）+ `selection-status.md`（选型现状）+ `db-schema.md`（schema 视图）。
 > 本文**只做提取与归属**，不含新事实 —— 每条都能追到那三份文档之一。
@@ -8,11 +8,11 @@
 >
 > **修订（2026-10-04，`fix/goods-write-tx` = C#2 落地）** —— **C#2 已裁并落地**：商品域三个写方法（`GoodsService.goodsAdd` / `goodsUp` / `goodsDe`）加 `@Transactional` **+ catch 内标记回滚**。本文凡称 C#2「未裁 / 阻塞落笔 / 应当加」处已就地改为「✅ 已落地」，并订正 **D.1「现状」行的真注解计数（1 → 4 处）** —— 那个数被本笔改了。**D#1 禁令本身一字未动**。
 
-## 任务
+## 任务 {#pack-three-layers-s2}
 
 把 **Controller / Service / DAO** 三层拆出来，并把普查发现的缺陷按「属于哪一层」归位。
 
-## 三层范围定义（2026-09-30 定）
+## 三层范围定义（2026-09-30 定） {#pack-three-layers-s3}
 
 | 层 | 内容 |
 |---|---|
@@ -28,7 +28,7 @@
 
 > ⚠️ 「三层」这个名字**不等于**病 0 的四层。别把四层当成四笔工作。
 
-## 必读文档
+## 必读文档 {#pack-three-layers-s4}
 
 1. `agent.md`（规则）
 2. `docs/agent/defect-survey.md`（七病 + 七前提 + 元发现 + Class A/B 分岔）
@@ -36,14 +36,14 @@
 4. `docs/agent/selection-status.md`（选型现状；未落地的四项都**有触发条件**）
 5. `docs/agent/tech-debt.md`（TD-01 ~ TD-17；TD-17 含 2026-09-30 锚点更正）
 
-## 必读源码
+## 必读源码 {#pack-three-layers-must-read}
 
 - `GoodsController.java` / `OrderController.java`（商品与订单**路由 + 入参绑定**。⚠️ 两域的业务逻辑均已下沉，两个 Controller 现在都**不持有 `JdbcTemplate`**：商品 → `GoodsService`（业务）/ `GoodsDao`（8 条内联 SQL），订单 → `OrderService` / `OrderDao`。订单的 `@Transactional` 禁令现随业务逻辑下沉，见 `OrderService` 类 javadoc 与 D#1）
 - `GoodsService.java` / `GoodsDao.java`（**商品域三层，2026-10-02 落定**。DAO 边界的裁决是「**只收 Controller 内联的 8 条**」，四个缓存读路径**不进** DAO —— 代价与理由见 `GoodsDao` 类 javadoc）
-- `UserController.java`（user 域路由 + 入参绑定；业务体与全部内联 SQL 已下沉 `UserService`（319）/ `UserDao`（242），**2026-10-02 三层第三笔**）、`MessageController.java` / `MessageService.java` / `MessageDao.java`（**message 域三层，2026-10-03 第四笔落定**。`MessageController` 417 → **127** 行；DAO 的裁决是「只收 Controller 内联的 14 处调用点、合并其中一对逐字相同的 SQL ⇒ 13 方法」。⚠️ **message 域`不是`「数据出口收成一处」**：`FriendCacheService`（5 条）+ `UserCacheService.publicInfo`（1 条）是**缓存读路径**，按 `three-layers.md:40` 的边界裁决**不进** DAO —— 代价与理由见 `MessageDao` 类 javadoc）
+- `UserController.java`（user 域路由 + 入参绑定；业务体与全部内联 SQL 已下沉 `UserService`（319）/ `UserDao`（242），**2026-10-02 三层第三笔**）、`MessageController.java` / `MessageService.java` / `MessageDao.java`（**message 域三层，2026-10-03 第四笔落定**。`MessageController` 417 → **127** 行；DAO 的裁决是「只收 Controller 内联的 14 处调用点、合并其中一对逐字相同的 SQL ⇒ 13 方法」。⚠️ **message 域`不是`「数据出口收成一处」**：`FriendCacheService`（5 条）+ `UserCacheService.publicInfo`（1 条）是**缓存读路径**，按 `three-layers.md#pack-three-layers-must-read` 的边界裁决**不进** DAO —— 代价与理由见 `MessageDao` 类 javadoc）
 - `mall_management_sql.sql`（权威 schema，**CRLF 陷阱**）
 
-## 约束
+## 约束 {#pack-three-layers-constraints}
 
 1. 只允许**追加**：新增表 / 新增字段 / 新增索引（含 `UNIQUE`）无条件允许；新增 **FK** / 改列类型**有条件允许**
    （四项前置见 `agent.md` 数据库管理规则 4）。禁止删表、删列、删字段、删已有索引与约束（全局硬约束 3，规则 v2）。
@@ -52,7 +52,7 @@
 3. **向后兼容**：不得删旧接口、旧字段。
 4. ⚠️ **`orderAddLocked` 不得加 `@Transactional`** —— 见 D#1。**这条不可外推到其他方法**；反面是 C#2（`goodsAdd` **应当**加）—— ✅ **C#2 已于 2026-10-04 落地**（`fix/goods-write-tx`：商品域三个写方法 `goodsAdd` / `goodsUp` / `goodsDe` 加 `@Transactional` + catch 内标记回滚）。本禁令**不受影响**：它管的是「被打锁的临界区」，商品域无锁。
 
-## 验收标准
+## 验收标准 {#pack-three-layers-s7}
 
 共用底线：
 
@@ -63,13 +63,13 @@
 
 各阶段验收见文末「开工顺序建议」。
 
-## 相关 TD / BD
+## 相关 TD / BD {#pack-three-layers-td}
 
 TD-01（ddl-auto）、TD-03（回滚规则矛盾）、TD-04/06/07/08（锚点与上传）、TD-13（schema 硬编码）、TD-14（OrderId 无索引）、TD-15/16/17（静默谎言 / 死参数 / 伪造态）、BD-01（SettlementDate）、BD-03（无鉴权）。
 
 ---
 
-## A. P0 级 —— 不补会出错
+## A. P0 级 —— 不补会出错 {#pack-three-layers-a}
 
 | # | 项 | 位置 | 为什么是 P0 | 归属 | 工作量 |
 |---|---|---|---|---|---|
@@ -79,7 +79,7 @@ TD-01（ddl-auto）、TD-03（回滚规则矛盾）、TD-04/06/07/08（锚点与
 | 4 | **上传目录不可写 ⇒ 整个应用起不来** | `ImgPath.java:45-64`（`@PostConstruct`） | 非核心功能拖死服务，无降级 | ✅ **已修**（`70eace2`，A 批，启动降级）—— 原归属「三层内（Service，启动期）」 | 小 |
 | 5 | **`getUserInfo` null ⇒ HTTP 200 + 0 字节** | 全仓 `ResponseBodyAdvice` / `@ControllerAdvice` = 0 | 写路径整段在 `if (body != null)` 内 ⇒ 前端拿「成功」但无内容 | **三层内（全局异常出口）** | 小 |
 
-## A′. 与三层并行 —— 安全 / 环境
+## A′. 与三层并行 —— 安全 / 环境 {#pack-three-layers-s10}
 
 | # | 项 | 位置 | 说明 | 归属 | 工作量 |
 |---|---|---|---|---|---|
@@ -87,7 +87,7 @@ TD-01（ddl-auto）、TD-03（回滚规则矛盾）、TD-04/06/07/08（锚点与
 | 7 | 生产 = 默认 profile | 只有 `default` 与 `a3` | 它把 #1、#8 串起来；修它本身就是环境层 | 并行（环境层） | 中 |
 | 8 | root:123456 与 Redis 口令明文 | `application.properties:6-7`、`application-a3.properties:31` | 同 #7 | 并行（环境层） | 小～中 |
 
-## B. Class A —— 语义无歧义，可直接做
+## B. Class A —— 语义无歧义，可直接做 {#pack-three-layers-b}
 
 | # | 项 | 位置 | 归属 | 工作量 |
 |---|---|---|---|---|
@@ -100,7 +100,7 @@ TD-01（ddl-auto）、TD-03（回滚规则矛盾）、TD-04/06/07/08（锚点与
 | 7 | `L2HealthProbe.down` 改 CAS | `L2HealthProbe.java:154-177` | 并行（观测） | 小 |
 | 8 | 文档锚点 → 符号名 | `defect-survey.md §五` | 独立（文档）。**TD-17 已于 2026-09-30 改完**；TD-04/06/07 待改 | 小～中 |
 
-## C. Class B —— 语义未定，须先裁决
+## C. Class B —— 语义未定，须先裁决 {#pack-three-layers-c}
 
 | # | 项 | 卡住什么 | 归属 | 工作量 |
 |---|---|---|---|---|
@@ -111,7 +111,7 @@ TD-01（ddl-auto）、TD-03（回滚规则矛盾）、TD-04/06/07/08（锚点与
 | 5 | `BD-01` `SettlementDate` 归谁 | `db-schema.md §4` 方案 A/B/C | 裁决先行 → 三层后（C3） | 小 / 中 |
 | 6 | **TD-17 伪造态：拦截 vs 观测** | **校验层** —— ⚠️ **原记「拦截会使 A3 的 S4a 全部 8 条断言失去前置」已于 2026-10-04 实测订正**：S4a 的 5 个前置态按 `A-S4a-8` 的不变式**全是合法态** ⇒ 闸只让其中 3 个（`PD`/`PR`/`PDR`）的**前置构造方式**失效、**断言语义 0 条变**；**真正被打断的是 C 组**（`C_BITS` 八组合要求全部出生）。订正记录见 `progress.md §5-G` | ✅ **已落地（2026-10-04，`fix/order-state-guard`）** —— 取**拦截**：出生态白名单 `{(0,0,0),(1,0,0)}`，闸在 `runLocked` 前、**价格闸后**；A3 侧新增 `A-S4a-0` / `A-C6-1` / `A-C6-2`（`gates.count` 27 → 30） | 小 / 中 |
 
-## D. 结构性缺陷 —— 三层重构时会撞上的
+## D. 结构性缺陷 —— 三层重构时会撞上的 {#pack-three-layers-d}
 
 | # | 项 | 位置 | 为何会撞 | 归属 | 工作量 |
 |---|---|---|---|---|---|
@@ -124,7 +124,7 @@ TD-01（ddl-auto）、TD-03（回滚规则矛盾）、TD-04/06/07/08（锚点与
 | 7 | 无 logger（`printStackTrace` × 20 + `println` × 5）、无日志配置、`open-in-view` 默认 true | 病 D | 观测层欠账 | 并行（观测） | 小～中 |
 | 8 | 无迁移工具 / 无 Dockerfile | 全仓 0 命中 | 属环境层 | 并行（环境层） | 中 |
 
-### D.1 📌 登记：`orderAddLocked` 的 `@Transactional` 禁令（2026-09-30 本笔落定）
+### D.1 📌 登记：`orderAddLocked` 的 `@Transactional` 禁令（2026-09-30 本笔落定） {#pack-three-layers-d-1}
 
 > **D#1 的原话是「无处登记」** —— 本节就是那处。**一句话**：新层里任何被打上
 > `DistributedLockService.runLocked` 的临界区，**都不得加 `@Transactional`**。
@@ -137,7 +137,7 @@ TD-01（ddl-auto）、TD-03（回滚规则矛盾）、TD-04/06/07/08（锚点与
 | **⚠️ 不可外推** | 本禁令**只管被打锁的方法体**。它的反面是 **C#2**：`goodsAdd`（**没有**打锁）的事务边界**应当**加 `@Transactional` —— 只记住半边就会踩另一边。✅ **C#2 已于 2026-10-04 落地**（`fix/goods-write-tx`，范围含 `goodsUp` / `goodsDe`）；本禁令本身**不变**，两个方向都仍是原状 |
 | **现状** | 全项目**唯一一处「禁止用标准注解」**。`orderAddLocked` 目前**未加**（`亲读`：该方法体上无 `@Transactional`）。⚠️ **真注解计数：2026-10-04 起是 4 处** —— `UserService.loginAdd:124` + C#2 新增的 `GoodsService.goodsAdd` / `goodsUp` / `goodsDe`（均**不在此方法上**、也不在任何被打锁的方法上，禁令未破）。⚠️ 原记「全仓 10 处」已在 **2026-10-02 实测订正为 1 处** —— 10 是**把 javadoc / 注释里提到 `@Transactional` 的地方也数了进去**（`grep -rn "@Transactional"` 在 `src/main/java` 于 **2026-10-04 复测得 45 行，其中 4 行是真注解**；2026-10-02 的旧值是 18 行 / 1 行 —— 本笔自己就添了 3 处真注解与若干说明文字）；同源订正见 `selection-status.md §2` 与 `concurrency-map.md §1` 的「仅 1 处」 |
 
-### D.4 📌 登记：DAO 选型结论（2026-09-30 本笔落定）
+### D.4 📌 登记：DAO 选型结论（2026-09-30 本笔落定） {#pack-three-layers-d-4}
 
 > **结论**：**短期 `JdbcClient`，长期 `jOOQ`** —— **分两层，不是二选一**。
 > **结论本笔落、实现随三层第一笔（订单域开工）** —— 本笔**不动 `pom.xml`、不动任何 Java**。
@@ -149,7 +149,7 @@ TD-01（ddl-auto）、TD-03（回滚规则矛盾）、TD-04/06/07/08（锚点与
 | **长期（何时切 jOOQ）** | 等 **DAO 边界稳定**、且出现「类型安全的 SQL 构建 / 代码生成」的实际需求时。**现状（`亲读`）**：jOOQ **全仓 0 命中** —— `pom.xml` 无、`src` 无、`docs` 无；本机 m2 只有 `org/jooq/jooq-bom/3.19.32`（**BOM 元数据，无 jar**）⇒ 现在引入等于**新增一个依赖 + 一套生成流程**，而收益要等 DAO 边界定形才兑现 |
 | **与 D#1 / C#2 的关系** | **D#1** 是那条规则的**唯一例外** —— 两者必须一起读。⚠️ 但 2026-10-04 落地时 **C#2 的落点是 Service 写方法（`GoodsService`），不是 DAO**：注解要挂在「一个 bean 的公开方法」上才有代理，而跨两表的两条语句由 Service 编排 ⇒ 挂 DAO 反而要合并方法（见 `GoodsService` 类注释「C#2」） |
 
-## E. 三层前置 —— 开工前要知道的事实
+## E. 三层前置 —— 开工前要知道的事实 {#pack-three-layers-e}
 
 | 项 | 状态 | 说明 |
 |---|---|---|
@@ -161,7 +161,7 @@ TD-01（ddl-auto）、TD-03（回滚规则矛盾）、TD-04/06/07/08（锚点与
 | A3 C 组（时间线核对）**曾是 record-only**，2026-09-30 起升为**门禁**（`5544362`） | ✅ **门禁**（C-1/C-2） | 改坏时间线 **CI 会红**。⚠️ 本行原写「不门禁 / 静默通过」—— 那是**定稿时**（`e930b30`）的结论，**已过期** |
 | `mall_management_sql.sql` **CRLF + 1 个裸 CR** | ⚠️ 陷阱 | 用会归一化行尾的编辑器改它，diff 变成整份重写 |
 
-## F. 三层中做 —— 三层本身的产出，不是前置
+## F. 三层中做 —— 三层本身的产出，不是前置 {#pack-three-layers-f}
 
 | # | 项 | 位置 | 为什么不能提前做 |
 |---|---|---|---|
@@ -169,7 +169,7 @@ TD-01（ddl-auto）、TD-03（回滚规则矛盾）、TD-04/06/07/08（锚点与
 
 ---
 
-## G. 缺陷修复归属（2026-09-30 定）
+## G. 缺陷修复归属（2026-09-30 定） {#pack-three-layers-g}
 
 > **本节只做一件事**：给「还不知道谁来修」的缺陷指定**认领阶段**。`defect-survey.md` 病 0 说「四层都缺」，
 > 那四层**不等于**本文的 A～F 档 —— 本节是它们的映射表。
@@ -184,10 +184,10 @@ TD-01（ddl-auto）、TD-03（回滚规则矛盾）、TD-04/06/07/08（锚点与
 | **搜索 SQL**：`productSearch` 逐字 `OR GoodName LIKE` | 病 C（`api-contract.md` §2 的 `### /goods` 表下「**业务体现址**」段里 `productSearch` 那一行；⚠️ **行号逐笔重指**：原记 `:72` → 2026-10-03 重指 `:88` → **2026-10-04 鉴权笔 2 在前文插入 19 行 ⇒ 现址 `:107`**） | **三层期间（DAO）** —— 参数化与 schema 前缀在抽 DAO 时自然改完（⚠️ 同 §F#1 的已知矛盾：两笔 DAO 的裁决都是「逐字搬运、不顺手改」，**DAO 已建而这两条一条都没改**） | ⏳ **未做** —— 现址 `GoodsDao.searchByKeyword`（`:193-207`，2026-10-02 由 `GoodsController:385-387` 的 SQL 构造搬入）：`keyword.trim().split("")` 每字符一个 OR；单引号即 SQL 语法错误；`SELECT *` 无 schema 前缀、无 `LIMIT` |
 | **身份伪造**：登录是**业务接口级判断**，不是框架鉴权 | 病 A；**BD-03** | **鉴权阶段**（**三层后单独做**，见「三层范围定义」） | ⏳ **未做** —— **35** 个端点**仍零鉴权生效**（**handler 数口径**，见 `progress.md` §5-R (4) / §5-T；认证侧未启用）；⚠️ **「无拦截器」自 2026-10-04 起不成立**（已有 `AuthInterceptor`，登录闸「鉴权笔 1」），无 Spring Security。⚠️ **2026-10-05 订正**：闸与会话**写入方**（笔 2 的 `UserController.loginSelect` → `AuthSession.login`）**均已落地；⚠️ 同日「翻开关笔」已把 `app.auth.enabled` 翻 `true` ⇒ 认证链路自今日起真正启用** |
 | **上传文件名**：**无 basename 提取**（路径穿越）+ 零类型白名单（可传 `.html` / `.svg`） | 病 B；本文 **B#5**；§七 Class A **#4** | **三层内（Service 校验层）；C3 复用** | ⏳ **未做** —— `UploadStorage.store()` 直接 `uploadDir.resolve(file.getOriginalFilename())`：**basename 与白名单两者都还在**（2026-09-30 复核）。已修的只有**同名策略**那一半（§七 Class A **#5** ✅ `efe7959`）。⚠️ **可穿越性仍待验** —— 取决于 Tomcat 是否在 `getSubmittedFileName()` 剥离路径段；探针出来前只能写「无校验」 |
-| **分页** | `api-contract.md:15`「无分页参数，列表接口全量返回」；病 C（`productSearch` / `goodsDe` 均无 `LIMIT`） | **C3 顺带** | ⏳ **未做** |
-| **订单幂等**：`orderAdd` 非幂等（`OrderId` 由调用方提供） | `api-contract.md:113`（幂等列）/ `:137`（说明）；**TD-14**（**2026-10-03 +17 重指**，原记 `:77` / `:101`；**2026-10-04 鉴权笔 2 +19 ⇒ `:113` / `:137`**） | **C3 后** | ✅ **DB 面已做（2026-09-30 S1a，`1e2fcfa`）**：`uk_order_orderId` 已使「同单号重复插入」不可能。⏳ **接口面仍未做** —— 不同单号照旧每调一次插一行，幂等键仍由调用方负责（本文「约束 1」允许**新增索引**，S1a 正是依此落地） |
+| **分页** | `api-contract.md#api-1`「无分页参数，列表接口全量返回」；病 C（`productSearch` / `goodsDe` 均无 `LIMIT`） | **C3 顺带** | ⏳ **未做** |
+| **订单幂等**：`orderAdd` 非幂等（`OrderId` 由调用方提供） | `api-contract.md#api-goods`（幂等列）/ `api-contract.md#api-health`（说明）；**TD-14**（**2026-10-03 +17 重指**，原记 `:77` / `:101`；**2026-10-04 鉴权笔 2 +19 ⇒ `:113` / `api-contract.md#api-health`**） | **C3 后** | ✅ **DB 面已做（2026-09-30 S1a，`1e2fcfa`）**：`uk_order_orderId` 已使「同单号重复插入」不可能。⏳ **接口面仍未做** —— 不同单号照旧每调一次插一行，幂等键仍由调用方负责（本文「约束 1」允许**新增索引**，S1a 正是依此落地） |
 
-### G.1 ⚠️ 前端鉴权显示 ≠ 安全边界
+### G.1 ⚠️ 前端鉴权显示 ≠ 安全边界 {#pack-three-layers-g-1}
 
 > **一句话**：前端按 `sessionStorage` 切页面，那只是**显示**；安全边界只能在**后端拦截器**上。
 > （本小节的**前端**两条事实是 2026-09-30 亲读源码所得，其余均可追到病 A 与 `BD-03`。）
@@ -201,13 +201,13 @@ TD-01（ddl-auto）、TD-03（回滚规则矛盾）、TD-04/06/07/08（锚点与
 **归属**：**鉴权阶段**（三层后单独做）。BD-03 的三个方案里建议的 A / B **都是拦截器 + 令牌**（A：拦截器 + Redis Session；B：JWT + 拦截器）——
 「真安全在后端拦截器」是**既有裁决**，不是本节的新主张。落地位置与依赖见 **D#3（拦截器层）**、**D#2（全局异常出口）**：没有全局异常出口时，拦截器抛出的 401 / 403 会走 Boot 默认错误体。
 
-## H. A3 覆盖矩阵 —— A3 保护了什么（2026-09-30 实测）
+## H. A3 覆盖矩阵 —— A3 保护了什么（2026-09-30 实测） {#pack-three-layers-h}
 
 > **本节只回答一个问题**：改三层时，**哪些东西坏了 A3 会报警**。
 > 事实来源：`scripts/concurrency/ConcurrencyRunner.java`（**2907 行**，2026-10-04 复测；⚠️ 原记 **2795** 在 C#6 之前就已被此前的笔改旧，本笔再添约 80 行）。
 > ⚠️ 已有的 `concurrency-map.md`（13 行）只有「**有什么问题**」、**没有「保护范围」列** —— 本节是它的补集。
 
-### H.1 A3 实际打到的端点 —— 9 个（8 个业务端点 + 1 个探针）
+### H.1 A3 实际打到的端点 —— 9 个（8 个业务端点 + 1 个探针） {#pack-three-layers-h-1}
 
 | 端点 | 脚本里的角色 | 出现行（均为 `ConcurrencyRunner.java` 行号；**2026-10-04 复测**） |
 |---|---|---|
@@ -225,7 +225,7 @@ TD-01（ddl-auto）、TD-03（回滚规则矛盾）、TD-04/06/07/08（锚点与
 
 ⚠️ **本表的行号是「同笔快照」，每笔都会漂** —— C#6（2026-10-04）在 S4a 与 C 两段加了行，**S4b / C / B2 的端点行号整段上移**（见 §H.2 的同款告警）。改 runner 后引用本表，请先按**端点路径 grep** 复核；这是 Class A #8「锚点改符号名」在 runner 上的同型问题（runner 无符号可依，只能靠路径字符串）。
 
-### H.2 门禁项 —— `gate = true` 者失败即脚本退出码 1
+### H.2 门禁项 —— `gate = true` 者失败即脚本退出码 1 {#pack-three-layers-h-2}
 
 | 段 | 门禁项 | 编号 | 行 |
 |---|---|---|---|
@@ -250,7 +250,7 @@ TD-01（ddl-auto）、TD-03（回滚规则矛盾）、TD-04/06/07/08（锚点与
 
 ⚠️ **本节「门禁」指脚本退出码，不等于「CI 拦 merge」**：`concurrency` job 目前是 `continue-on-error: true`（`.github/workflows/ci.yml:117`，**观测跑**，门禁地位同 M2 / M3 / M4 未裁）。§验收标准 里「改坏时间线 CI 会红」是同一口径。
 
-### H.3 不在覆盖范围内的端点 —— **只有单测**
+### H.3 不在覆盖范围内的端点 —— **只有单测** {#pack-three-layers-h-3}
 
 `api-contract.md §2` 共 **33** 个路由，A3 打到 **9** 个（§H.1）⇒ 其余 **24** 个 **A3 一个都没打**：
 
@@ -266,18 +266,18 @@ TD-01（ddl-auto）、TD-03（回滚规则矛盾）、TD-04/06/07/08（锚点与
 
 ⚠️ **「断言口径盖不到」≠「端点没被调到」** —— 两个已知实例是 **TD-15**（`loginAdd` 无 else）与 **TD-17**（三个状态位可直传出终态）：`tech-debt.md:224` 逐字把它们归因于「**都是 A3 的断言口径盖不到的地方**」。⚠️ 别把两者混为一谈 —— `loginAdd` 本身**就在** A3 的 B-2 段里被调（§H.1），漏的是**断言**，不是调用。
 
-## 最容易漏的两条
+## 最容易漏的两条 {#pack-three-layers-s24}
 
 1. **D#1** —— `@Transactional` 禁令 **2026-09-30 已登记**（`### D.1`，本笔）。⚠️ 但**登记 ≠ 记住**：它仍是新层最容易踩的一条。且它与 **C#2** 是同一约束的两面（一边**必须加**、一边**禁止加**），只记住半边就会踩另一边。⚠️ **C#2 那半边已于 2026-10-04 落地**（`fix/goods-write-tx`）—— 落地的形状印证了这句话：真正的难点不在「加不加」，而在**加了之后 catch 会不会把回滚吞掉**。
 2. **E 档「C 组」** —— ⚠️ **此条已过期**：2026-09-30 `5544362` 起 C-1/C-2 是门禁，改了时间线 CI **会红**。仍留在「最容易漏」里，是因为它描述的陷阱换了形状、并没消失 —— **从旧文档读到「不门禁」的人，会以为时间线没有护栏**。
 
-## 待验 —— 开工前不该当成已知
+## 待验 —— 开工前不该当成已知 {#pack-three-layers-to-verify}
 
 1. `goodstype.GoodTypeNew` 显式 NULL 打 `NOT NULL DEFAULT '0'` 的实际行为
 2. 上传路径穿越的**可利用性** —— 代码侧确证**无 basename 提取**，但取决于 Tomcat 是否在 `getSubmittedFileName()` 剥离路径段。**探针结果出来前只能写「无校验」，不能写「可穿越」**
 3. 本机无 8.4 目标库 ⇒ C 组端到端跑不了（P1 版本门禁会拦下）
 
-## 开工顺序建议
+## 开工顺序建议 {#pack-three-layers-s26}
 
 1. ✅ **两条「新层须知」已于 2026-09-30 定（本笔）**：**D#4** = **`JdbcClient` 短期 + jOOQ 长期**（`### D.4`）+ **D#1** = `@Transactional` 禁令**已登记**（`### D.1`） —— 原文「不定就没法落笔」的**前置已满足**，可落笔
 2. **裁决先行**：~~**C#2**（事务边界）~~ ✅ **2026-10-04 已裁并落地**（`fix/goods-write-tx`）、~~**C#6**（TD-17 拦截 vs 观测）~~ ✅ **2026-10-04 已裁并落地**（`fix/order-state-guard`，取**拦截**）—— ⚠️ **本条原写「两条都阻塞落笔」，现已清零**（见 `progress.md §5-B`）
@@ -288,7 +288,7 @@ TD-01（ddl-auto）、TD-03（回滚规则矛盾）、TD-04/06/07/08（锚点与
 
 ---
 
-## 全项目进度表
+## 全项目进度表 {#pack-three-layers-s27}
 
 > 进度**不在本文维护** —— 本文 `:4` 自述「只做提取与归属，不含新事实」，全项目进度属跨文档状态，放这里会与各 pack 打架。
 > **权威进度表**：`docs/agent/progress.md`（2026-09-30 新建；命名约定见其 **§0**）。

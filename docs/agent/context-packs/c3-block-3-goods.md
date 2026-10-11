@@ -1,10 +1,10 @@
-# context-pack: C3 块 3 —— 商品与类目治理（三端）
+# context-pack: C3 块 3 —— 商品与类目治理（三端） {#pack-c3-block-3-goods-context-pack}
 
 > 索引：`docs/agent/c3-blocks-index.md`。**只精读下文列出的区间，不要整份读任何文件**（除注明「整份」的）。
 > ⚠️ **状态（2026-10-10）：落码完成 + 就地改造完成**（块 2 已 merge）；**待手验 / A3 复跑**。**A 档 4 项**：类目 = 扩 `goodstype` 加列 **+ 唯一键换代 `(ParentId, GoodType)`** / 审核 = 提审制（`goodsAdd` 不写 `goods` 行，通过才写）+ **`goods` 不加审核列**；⚠️ **原 A 档 #2（模板库 = 新表 `goods_template` + `goods` 加 3 个模板 Id 列）已被 2026-10-10 二次裁决改写**（模板改「**快照**」+ 两表合一 ⇒ 通用表 `template` + `goods` 存 3 段文本），见下文回执 8 与 `slot-registry.md §19-9`。**落地依据见 `_work/c3-block3-landing-plan.md`**。
 > ⚠️ **本 pack 所有行号均为「当前」（块 2 已 merge 后的工作区）实测**，`check-context-packs.sh` 复核过。
 
-## 一句话定位
+## 一句话定位 {#pack-c3-block-3-goods-s2}
 
 管理端「平台方治理」的第二块（`docs/agent/c3-modules.md:56-70`）：
 **类目树（增删改）+ 基础模板库（详情/规格/售后，平台方独有）+ 上架审核（商家提审 → 通过/驳回）+ 违规处置（下架/删除）**。
@@ -18,7 +18,7 @@
 写操作一律走块 1 的两条管子（审计 `admin_audit` + 通知 `notification`）；
 **审核联动照抄块 2**（`merchant_application` 的「待办列表 + 共享收件箱」模式），本块**不新建基建**。
 
-## 依赖块
+## 依赖块 {#pack-c3-block-3-goods-s3}
 
 **块 1（基础设施）与块 2（用户块）**。本块对二者的用法都是**照抄 / 消费**，不扩展接口：
 
@@ -30,9 +30,9 @@
 
 ⚠️ 本块**不改**块 1/块 2 的任何既有签名；唯一可能要动的公共登记簿是 `NotificationEvents` **加一条**常量（提审触达管理员，见「要新建」）—— 加常量**不改表、不改 `send`**（`NotificationEvents.java:19-24` 的「登记簿」口径）。
 
-## 要读
+## 要读 {#pack-c3-block-3-goods-s4}
 
-### 设计意图（读区间）
+### 设计意图（读区间） {#pack-c3-block-3-goods-s5}
 
 - `docs/agent/c3-modules.md:56-70` —— §2 的四视图 + 四个管理员动作。⚠️ `:65` 明写「**模板库是平台方独有权力**，普通商家不能编写」。
 - `docs/agent/c3-modules.md:27` —— 块表 row 2 = 「类目树 + 基础模板库 + 上架审核 + 违规处置」四件。
@@ -42,7 +42,7 @@
     判据是「落**占位**（`data-slot` 已在）≠ 造新面」，与 `:266` 的「不做多商家入驻」被块 2 突破是同一类偏离。
   · `:266` / `:267` —— 「不做多商家入驻」「不做细粒度权限（单一管理员角色）」：后者是本块 admin 端点**不加角色闸**的依据（同 TD-18）。
 
-### 块 1 已落的基建 —— 本块要用的现成接口（**与块 2 完全相同，直接照抄**）
+### 块 1 已落的基建 —— 本块要用的现成接口（**与块 2 完全相同，直接照抄**） {#pack-c3-block-3-goods-s6}
 
 - `.../notification/service/NotificationService.java:114-125` —— `send(batchId, toId, toType, eventType, title, content, targetType, targetId)：boolean`。**fail-soft 原语**：永不抛、不加事务、日志标记 `NOTIFY`；`batchId` 单发也要给。
 - `.../notification/NotificationEvents.java:78-85` —— **块 1 已为块 3 预留的 3 条 code，本块直接引用**：
@@ -57,16 +57,16 @@
 - `.../shared/web/GlobalExceptionHandler.java:83` —— ⚠️ `@RestControllerAdvice(assignableTypes = {MessageController, GoodsController})` —— **新 Controller 不在白名单里** ⇒ 新端点**一个参数约束都不要加**（`@NotBlank` 等会逃逸成 400 空体；类级 `@Validated` 会撞 CGLIB 断言族）。
 - `.../smoke/AbstractSmokeTest.java:137` —— `@Import({...})` 真 bean 名单：⚠️ **块 1/块 2 两次踩同一颗雷**（漏 import ⇒ 整个 `@WebMvcTest` 切片起不来，77 / 237 errors）⇒ 本块新 Controller 的依赖 bean **必须同步加进这里**。
 
-### 现状：商品域后端 —— **今天是「直上架、真删除」，无审核、无类目、无模板**
+### 现状：商品域后端 —— **今天是「直上架、真删除」，无审核、无类目、无模板** {#pack-c3-block-3-goods-s7}
 
-- ⚠️ **行号均按落码后（2026-10-10）**：`.../goods/controller/GoodsController.java:95` —— `/goods/goodstype`（**GET/POST 双形态**，全类唯一未随三层下沉的方法；原 82 行）· `:122` `goodsAdd`（原 108）· `:171` `goodsSelect`（原 133）· `:185` `goodsSelectHome`（原 147）· `:193` `goodsDe`（原 155）· `:218` `productCodePrice`（原 180）· `:233` `goodsUp`（原 195）· `:273` `GoodsProductCodeSelect`（原 235）· `:286` `productSearch`（原 248）—— **全部 9 个端点**（登记见 `docs/agent/api-contract.md:93-105`）；本块**另加** `categoryGoods`（291 行起）与 `myApplications`。
+- ⚠️ **行号均按落码后（2026-10-10）**：`.../goods/controller/GoodsController.java:95` —— `/goods/goodstype`（**GET/POST 双形态**，全类唯一未随三层下沉的方法；原 82 行）· `:122` `goodsAdd`（原 108）· `:171` `goodsSelect`（原 133）· `:185` `goodsSelectHome`（原 147）· `:193` `goodsDe`（原 155）· `:218` `productCodePrice`（原 180）· `:233` `goodsUp`（原 195）· `:273` `GoodsProductCodeSelect`（原 235）· `:286` `productSearch`（原 248）—— **全部 9 个端点**（登记见 `docs/agent/api-contract.md#api-goods`）；本块**另加** `categoryGoods`（291 行起）与 `myApplications`。
 - `.../goods/controller/GoodsController.java:47`（原 43 行）—— 审计挂钩**只服务 `goodsUp` 一个端点**（「横切所有写操作」的样板，其余随各自那笔挂）。
 - `.../goods/service/GoodsService.java:135-136`（`goodsAdd` + `@Transactional`；原 117-118）· `:310-311`（`goodsDe`；原 300-301）· `:359-360`（`goodsUp`；原 349-350）—— 三个 `@Transactional` 写方法。⚠️ **落码后口径变了**：`goodsDe` / `goodsUp` 唯一出口前仍 `evictByMerchant`（`:339` / `:415`），**而 `goodsAdd` 提审制后一行未动 `goods` 表 ⇒ 不再调它**（原 186 行那处已随改动消失）。
 - ⚠️ `.../goods/service/GoodsService.java:310-341`（原 300-320）—— **`goodsDe` = 两条真 `DELETE`**（`deleteGoods` + `deleteProductsales`），**不是**下架。既有「下架」语义**与 `ShelfState` 无关**（`ShelfState` 是块 2 为「商家降级冻结」加的，只被 `MerchantDowngradeService` 写）。⇒ 本块「违规下架」与「既有 goodsDe」是**两件事**，别混。
 - `.../goods/dao/GoodsDao.java:140-141`（`deleteGoods` 的 `WHERE MerchantId=? AND GoodName=? AND ProductCode=?`；原 132-133）· `:165-169`（`updateGoods` 的 `WHERE MerchantId=? AND ProductCode=?`，**谓词无 GoodName**；原 157-161）· `:243-245`（`selectGoodsForAudit`，`SELECT *`，返回 List；原 234-236）。
 - `.../goods/dao/GoodsShelfDao.java:50-51` / `:56-57` —— `delistAllByMerchant` / `relistAllByMerchant`：**只改 `ShelfState`，绝不 DELETE**。⚠️ 两条 SQL **无 schema 前缀**（这在本仓是已知例外，见该类 javadoc）。
 
-### 现状：买家侧查询 —— ⚠️ **`ShelfState` 过滤一条都没有**（块 3 要补的就是它）
+### 现状：买家侧查询 —— ⚠️ **`ShelfState` 过滤一条都没有**（块 3 要补的就是它） {#pack-c3-block-3-goods-shelfstate}
 
 逐条实测（三条读路径 SQL 均**无任何 `ShelfState` 条件**）：
 
@@ -77,7 +77,7 @@
 - `.../goods/service/GoodsCacheService.java:416-421` —— `evictByMerchant` **四条 evict**（`goodsHome` allEntries / `goodsByMerchant` key / `goodsCodes` allEntries / `goodsPrice` allEntries）。⚠️ **买家过滤一加，任何改 `ShelfState` 的写端点收尾必须 `evictByMerchant`**，否则首页缓存还挂着已下架品。
 - 挂账出处：`docs/agent/slot-registry.md:3936`（「`ShelfState=0` 的买家侧过滤 … 随块 3 做」）· `docs/agent/progress.md:1921`（同）。**⇐ 已裁，本块落地，不是选择题。**
 
-### 现状：类目（`goodstype`）—— 平表、公开端点、**被两处消费**
+### 现状：类目（`goodstype`）—— 平表、公开端点、**被两处消费** {#pack-c3-block-3-goods-goodstype}
 
 - `mall_management_sql.sql:74-79` —— `goodstype`（`Id` AI PK / `GoodTypeNew` int NOT NULL DEFAULT 0 / `GoodType` char(20) NOT NULL）；`uk_goodstype_GoodType` 唯一索引（collation `utf8mb4_0900_ai_ci`）—— ⚠️ **本块换代**为 `uk_goodstype_parent_name (ParentId, GoodType)`，见「A 档裁决回执 #4」。
   ⚠️ **种子 5 条、`GoodTypeNew` 全为 0**（`GoodTypeNew` 今天**零语义**，不是父级指针）。
@@ -86,7 +86,7 @@
 - `.../goods/service/GoodsTypeCacheService.java:45-47`（`listTypes`：`@Cacheable("goodstype", key="'all'")` + SQL `SELECT Id, GoodType, GoodTypeNew FROM ...goodstype`）· `:74-86`（`addType`：`@CacheEvict(allEntries)` + `SELECT COUNT(*) ... WHERE GoodType=?` 查重 + `INSERT`；catch 分 `DuplicateKeyException` / `Exception` 两支）· `:62-72`（唯一索引 javadoc）。
 - 消费点（**改类目就会动到它们，务必先看**）：`Mall-management-web/mall-management-system/src/views/HomePage.vue:281`（`getGoodType` 读 `/goods/goodstype` → 首屏分类 chips，`:46` 点击 `searchByType`）；`.../src/views/GoodsAdd.vue:359`（`loadGoodsType` GET `/goods/goodstype` → 类型 radio `:87-121`）与 `:390`（`saveNewTypeToDB` POST 加类型）。
 
-### 现状：管理端「商品与类目治理」面 —— **占位，零业务；且⚠️ 稿里没有这一页**
+### 现状：管理端「商品与类目治理」面 —— **占位，零业务；且⚠️ 稿里没有这一页** {#pack-c3-block-3-goods-s10}
 
 - `.../src/router/index.js:452` —— `business/catalog`（「商品与类目治理」）今天 `component: AdminStub` —— **本块的替换点**（照 `:451` accounts / `:456` notify 的**同行替换**做法 ⇒ 零漂移）。
 - `.../src/router/index.js:434` —— `AdminStub`；`:448-463` —— admin 壳 children（11 条占位 + 3 条真页）。`AdminStub` 懒加载占位组件 `StubPage.vue`（见下条）。
@@ -95,7 +95,7 @@
 - ⚠️ **`docs/美化/` 里没有管理端「商品与类目治理」的稿**（实测：`catalog` / 类目 / 模板 稿文件 = 0）。稿只覆盖**商家端**（`pages/GoodsUp.html` / `pages/GoodsAdd.html`）与**用户端**（`pages/GoodsSelect.html` / `pages/ProductPage.html`）。
   ⇒ 管理端这一页**无稿可对**，按块 2 `AccountsPage.vue` 的**真页样板**自建（见下「样板」）。
 
-### 样板（照抄这些真页与既有形状，别自创风格）
+### 样板（照抄这些真页与既有形状，别自创风格） {#pack-c3-block-3-goods-s11}
 
 - `.../src/views/admin/AccountsPage.vue`（1144 行，块 2 建的**管理端真页**，本块管理端照它）：
   · `:373` —— **页内 tab** 结构（`[入驻审核][用户治理][降级控制]`，本块对应 `[商品审核][类目树][模板库][违规处置]`）；
@@ -107,7 +107,7 @@
 - 商家端提审入口：`.../src/views/GoodsAdd.vue:440`（`submitGoods` → `endpoints.goods.goodsAdd`）；`.../src/views/GoodsUp.vue:349`（列表 → `goodsSelect`）· `:390`（下架 → `goodsDe`）。
 - 用户端筛选消费点：`.../src/views/GoodsSelect.vue:181-203`（`doSearch`：空关键词走 `goodsSelectHome`、非空走 `productSearch`）。
 
-### 现状：前端已有占位（设计稿目录 `docs/美化/` 的 `README` 第 130 行「占位四件套」= `disabled` + `data-slot` + 角标 + `title`）
+### 现状：前端已有占位（设计稿目录 `docs/美化/` 的 `README` 第 130 行「占位四件套」= `disabled` + `data-slot` + 角标 + `title`） {#pack-c3-block-3-goods-docs}
 
 ⚠️ `docs/美化/` 的 `README` 第 217 行 —— **占位判据** = 「无后端 **且** 加它要改的**既有文件** ≤ **3 处**」；本块**只接与四项功能相关的占位**，其余（多图 / SKU 矩阵 / 批量 / 分页…）**本块不动**（多数标「超档」）。
 
@@ -117,15 +117,15 @@
 - `.../src/views/ProductPage.vue:226-230`（详情富文本占位）· `:236-249`（规格参数占位，title「goods 表无参数列」）—— 与「模板库」相关；`:311-323`（售后保障）**不是占位**（显式判为「静态真功能」）。⇒ **2026-10-10 就地改造推翻后半句**：`:311-323` 已接**真渲染**（`goods.AfterSale` 快照），`:226-230` / `:236-249` 亦已成真渲染；该文件 1248 → **1253** 行，落码后行号见 §19-9-4。
 - ⚠️ **商家端 / 用户端今天没有任何「审核状态 / 违规」字段或占位**（实测 grep = 0）⇒ 提审态、违规态是**本块新造**的界面元素（管理端无稿可对，商家端需在 `GoodsUp.vue` 状态列 `:164` 处接真数据）。
 
-### 表 / 前端入口 / 登记
+### 表 / 前端入口 / 登记 {#pack-c3-block-3-goods-s13}
 
 - `.../src/api/endpoints.js:12-22` —— `goods` 组 9 条（`:13` `goodstype` … `:21` `goodsProductCodeSelect`）；`:70-83`（`admin` 组）· `:113-122`（`accounts` 组，块 2 加）· `:158-172`（`template` / `templateAdmin` 两组，2026-10-10 就地改造加，**在文件尾**）。⚠️ `:26` 被 `progress.md` 按行号引 ⇒ **新增一律追加在文件尾**。
 - `.../src/config/notify-events.js:52` —— **块 3 的 3 条中文标签已在**（`goods.audit.passed` / `goods.audit.rejected` / `goods.violation.removed`）⇒ 若加新 code（如 `goods.apply.submitted`）**要同步补标签**。
 - `.../src/api/admin.js` —— 管理端 API 封装（本块新端点照它加函数）；`:99-113` 是**通知**发送侧两条；`:117-122` 是「通知模板两条函数**已删**」的注释。⚠️ **原有那两条通知模板函数已下线**（2026-10-10 模板表通用化 ⇒ 存取改走 `src/api/template.js` 的 `templateAdmin*`；`admin.js` 现 218 行，**行号别照抄本节**，原 122-137 行）。
-- `docs/agent/db-schema.md:25`（`goods` 表行；原 24 行）· `:183`（`ShelfState` 列说明「买方过滤随块 3」；原 178 行）—— **本块已回填**（另新增 §6.17 / §6.18 两张新表）。⇒ **再经 2026-10-10 就地改造**：§6.17 已由 `goods_template` 改写成 **`template`**、§6.15 `notification_template` 标**已删**；文件仍 **549 行（净 0）**，两个被引行未漂。
+- `docs/agent/db-schema.md#db-1`（`goods` 表行；原 24 行）· `docs/agent/db-schema.md#db-6-3`（`ShelfState` 列说明「买方过滤随块 3」；原 178 行）—— **本块已回填**（另新增 §6.17 / §6.18 两张新表）。⇒ **再经 2026-10-10 就地改造**：§6.17 已由 `goods_template` 改写成 **`template`**、§6.15 `notification_template` 标**已删**；文件仍 **549 行（净 0）**，两个被引行未漂。
 - `docs/agent/slot-registry.md:3763` —— §十八（块 2 登记）起：**本块收口时照它的 10 小节结构**开 §十九（表 / 端点 / A 档裁决 / 门禁 / 未做待办 …）。
 
-## 要新建
+## 要新建 {#pack-c3-block-3-goods-s14}
 
 > ### ⚠️ 落码后回执（2026-10-10）—— **本节以下为方案原文，实际落地以 `slot-registry.md §十九` 为准**
 >
@@ -137,7 +137,7 @@
 > 4. ⚠️ **新 `CatalogController`（`POST /catalog/templates`）不在下文端点清单里** —— 落码时补上（管理端模板 CRUD 之外，还给了商家端一个只读模板口）。
 > 5. ✅ **表数 16 → 18 已同步**：`ConcurrencyRunner.java:2658` 的 `KNOWN_TABLES` 已 `5 → 7`（下文 §验收 第 1 项「当前 = 5」为落码前口径）。
 > 6. ⚠️ **VM 库迁移未落**（VM `192.168.229.129` 本笔不可达）—— 待办，见 §十九-6。**本机库已执行**（备份 `_work/b3-dbbackup/`）。
-> 7. ✅ **`db-schema.md` 已回填**：`goods` 行 `:24` → **`:25`**、`ShelfState` 列 `:178` → **`:183`**；新表登记见 §6.17 / §6.18。
+> 7. ✅ **`db-schema.md` 已回填**：`goods` 行 `db-schema.md#db-1`、`ShelfState` 列 `db-schema.md#db-6-3`；新表登记见 §6.17 / §6.18。
 >
 > ### ⚠️ 就地改造后回执（2026-10-10 二次裁决）—— **A 档 #2 被改写，以本节为准**
 >
@@ -152,7 +152,7 @@
 > 14. ✅ **VM 库迁移已落**（改「VM 补块 3 + 补本块」、**非整份重导 ⇒ 业务数据零损失**）⇒ 上文第 6 条的「VM 不可达 / 未落」**作废**；`db-migration.md` #7 状态已同步更正。
 > 15. ✅ **手验已过 + 当场修掉 1 个真缺陷**（判据见 §验收 第 1 项 / 第 3 项）：`GoodsAuditDao.insert`（`.../goods/dao/GoodsAuditDao.java`）的 `VALUES(…)` 值槽比传参**多一个** ⇒ 提审恒失败；已修（**单行、净 0 行**），详见 `docs/agent/slot-registry.md §19-9-7`。⚠️ **`mvn test` / `build` / `eslint` 三绿都没拦住它**（切片测试不打真库）⇒ 下文 §验收 第 5 项的「全绿」**不等于**写路径正确。⚠️ **第 2 个真缺陷是事后从后端日志里抓到的**（`admin_audit.TargetId` 是 NOT NULL，而 `template.create` / `category.create` 两处「新增类」动作把 `TargetId` 也传了 `null` ⇒ 创建类留痕 **100% 丢失**，fail-open 吞掉、三绿与 A3 都拦不住）；已按「就地补业务标识串」修（两处单行、净 0 行），详见 `docs/agent/slot-registry.md §19-9-8`。
 
-### A 档裁决回执（2026-10-10 用户已批 —— **落地依据，不再是选择题**）
+### A 档裁决回执（2026-10-10 用户已批 —— **落地依据，不再是选择题**） {#pack-c3-block-3-goods-a}
 
 > 判据 = 三条硬线（**建表 / 改契约 / 删文件**）。A 档 **4 项**全部落在硬线上，逐项已裁。
 
@@ -178,7 +178,7 @@
 > ② **`goods` 加 5 列**（`TypeId` / 3 个模板 Id / `DeletedAt`）**会经三条 `SELECT *` 读路径**（`.../goods/service/GoodsCacheService.java:94` / `:170` / `.../goods/dao/GoodsDao.java:213` —— 均按落码后行号，原 92 / 167 / 205）**泄进买家 API**（`/goods/goodsSelectHome` / `/goods/productSearch` / `/goods/goodsSelect`）。方案已裁**不剥**（同块 2 的 `user` 加列）。⚠️ 口径修正：去掉 `AuditState`/`RejectReason` 是 **6 → 4**，但 A 又加回 `TypeId` ⇒ **净 5**。
 > ③ **类目唯一键换代**（裁「乙」）：`(ParentId, GoodType)` 允许不同父级下同名子类目，**代价 = `goods` 的类目引用必须从「名字」升为「Id」**——今天买家筛选是**按名字**走的（`.../goods/dao/GoodsDao.java:204-217` 的 `AND (GoodType = ? OR GoodName LIKE …)`；原 196-210）；`.../src/views/HomePage.vue:46` 传 `item.GoodType`），只换唯一键不够。⇒ `goods.TypeId` + 回填 + 二级筛选走**新端点**；**`/goods/productSearch` 与 HomePage 名字路径一行不改**（详见「前端」一节的契约口径表）。⚠️ A3 的 B-2 门禁**不受影响**（并发加的都是 `ParentId=0`）。
 
-### 表（**已定稿** ⇒ 追加到 `mall_management_sql.sql` **末尾**，`IF NOT EXISTS`，块内不 DROP；加列一律**表末** + 默认值 + COMMENT，规则 7）
+### 表（**已定稿** ⇒ 追加到 `mall_management_sql.sql` **末尾**，`IF NOT EXISTS`，块内不 DROP；加列一律**表末** + 默认值 + COMMENT，规则 7） {#pack-c3-block-3-goods-mall_management_sql}
 
 - **`goodstype` 加 3 列 + 唯一键换代**：`ParentId` int NOT NULL DEFAULT 0（0=一级，自引用不设 FK）· `Sort` int NOT NULL DEFAULT 0 · `State` tinyint(1) NOT NULL DEFAULT 1（1 启用 / 0 停用）；索引 `(ParentId, Sort)`；**唯一键** `uk_goodstype_GoodType` → `uk_goodstype_parent_name (ParentId, GoodType)`（连带③）。
 - **新表 `goods_template`**：`Id` / `TemplateType` varchar(16) NOT NULL（`detail` / `spec` / `after_sale`，字符串码不建 ENUM）/ `Name` varchar(64) NOT NULL / `Content` mediumtext / `Enabled` tinyint(1) NOT NULL DEFAULT 1 / `created_at` / `updated_at`；索引 `(TemplateType, Enabled)`。
@@ -188,7 +188,7 @@
 - ⚠️ **加列不幂等**（MySQL 无 `ADD COLUMN IF NOT EXISTS`）⇒ VM 库手动跑一次；CI 整份重导安全。**不写进基线 CREATE TABLE**。
 - ⚠️ **表数 16 → 18** ⇒ 同笔更新 `scripts/concurrency/ConcurrencyRunner.java:2658` 的 `KNOWN_TABLES`（**5 → 7**）。
 
-### 后端（**建议**分层 —— B 档，报备）
+### 后端（**建议**分层 —— B 档，报备） {#pack-c3-block-3-goods-s17}
 
 - **新域 `catalog/`**（**新建**，与 `goods/` 平级）承载类目 + 模板：`dao/CategoryDao`（读写 **`goodstype`** 表，不建新表）· `service/CategoryService` · `dao/GoodsTemplateDao` · `service/GoodsTemplateService`；类目树读取**沿用既有** `/goods/goodstype`（不新开端点）。
 - **新域 `goods/` 追加**（**改既有**不建新域）：`GoodsAuditDao` / `GoodsAuditService`（提审单 + 审核 CAS）；`GoodsCacheService` 三条读路径 SQL **加 `ShelfState = 1 AND DeletedAt IS NULL`**；**`GoodsDao.searchByKeyword`（`:196-210`）一行不动**（二级筛选走新端点）。
@@ -201,7 +201,7 @@
 - `NotificationEvents.java:78-85` —— 3 条**已实测存在**，直接引用；**加 1 条** `goods.apply.submitted`。
 - ⚠️ **测试面必改**：① 新 Controller 依赖的真 bean 同步进 `AbstractSmokeTest.java:137` 的 `@Import`；② **`GoodsWriteTxAtomicityTest` 用例 1/2/3 按新语义重写**（原「goodsAdd 写 goods + productsales 各 1 行」随提审制失效，判据平移到审核通过路径）；③ **`GoodsTypeUniqueIndexTest:134` 的索引名断言**（`uk_goodstype_GoodType` → `uk_goodstype_parent_name`，唯一键换代连带）；④ 若改 `goodsAdd` 返回文案，同笔更新 `ResultByteEquivalenceTest:81` 的字符串（键形状不变）。**完整清单（全仓实测 9 个用例文件 + 新增 1 个）见 `_work/c3-block3-landing-plan.md` §七**。新 Controller **不得**带类级 `@Validated`。
 
-### 前端（三端）
+### 前端（三端） {#pack-c3-block-3-goods-s18}
 
 - **管理端真页** `.../src/views/admin/CatalogPage.vue`（**新建**）：页内 tab —— 商品审核（`pending` 列表 + 通过/驳回）/ 类目树（增删改）/ 模板库（三类 CRUD）/ 违规处置（下架/删除）。**同行替换** `router/index.js:452` 的 `AdminStub`。
 - **商家端提审**：`GoodsAdd.vue`（`:440` 提交**仍走 `/goods/goodsAdd`**，行为改为提审、提示语改「已提交审核」；落码前该行作 437 行，本笔净 +3 后下移）+ `GoodsUp.vue`（`:164` 状态列接真数据 —— ⚠️ **待审/驳回态不在 `goods` 表**，需并表 `/goods/goodsSelect` ∪ `/goods/myApplications`；`:44-58` 筛选接线）。
@@ -209,7 +209,7 @@
 - **用户端（续）**：`.../src/views/ProductPage.vue:226-230` / `:236-249` 详情 / 规格接模板内容。
 - `.../src/api/endpoints.js` **文件尾追加**（新 `catalog` 组 + `goods` 组补提审/类目）；`.../src/api/admin.js` 追加对应函数；若加 code，`.../src/config/notify-events.js` 同步补中文标签。
 
-## 约束
+## 约束 {#pack-c3-block-3-goods-s19}
 
 1. **fail-open / fail-soft**：审计与通知**永不抛** —— 它们失败**不许**把业务成功翻成 500（同块 1/块 2）。
 2. **逻辑废弃，不物理删**（规则 v2）：类目停用 = `State=0`；违规处置 = 软删。**禁止 `DROP` / `DELETE`**；留痕靠 `admin_audit`。
@@ -221,7 +221,7 @@
 8. **净零行数**：`router/index.js` / `endpoints.js` / `nav.js` / `admin-nav.js` 都有被按行号引的行（当前最大被引目标行：`router/index.js` = **451**、`endpoints.js` = **84**、`nav.js` = **61**、`admin-nav.js` = **43**）⇒ **新增一律追加在文件尾或同行替换**；动到被引行前后必须重跑 `refs-scan.sh`。
 9. ⚠️ **手验提醒（每次）**：`application-a3.properties:98` 的 `app.auth.enabled=false` —— **a3 profile 闸关，手验绿 ≠ 默认 profile 绿**。本块端点若有鉴权/登录态语义，**必须在默认 profile 再验一遍**。
 
-## 验收
+## 验收 {#pack-c3-block-3-goods-s20}
 
 **核心 5 项必跑**（提速规则 2026-10-09 起；其余抽查）：
 
@@ -237,12 +237,12 @@
 
 **抽查**：`bash scripts/check-context-packs.sh`（本 pack 0 失效引用）；`refs-scan.sh`（动被引行时）；审计三态（正例有行 / 负例无行 / 有改前态的动作 `BeforeJson` 非空）；权限三档（非管理员传**别人的** `MerchantId` → 403 / 自己 → 放行 / 管理员 → 放行）。
 
-## 扩展阅读（不够时按指针读）
+## 扩展阅读（不够时按指针读） {#pack-c3-block-3-goods-s21}
 
 - `docs/agent/context-packs/c3-block-2-user.md` —— **本块的模板**（结构与行文照它）；其「要新建」的审核 CAS / 收件箱是块 3 审核的直接来源。
 - `docs/agent/context-packs/c3-block-1-infra.md` —— 挂钩四步与两条管子的完整口径；本块动笔前读它的「约束」一节。
 - `_work/c3-block2-landing-plan.md` —— 块 2 的**落地方案**（本块方案照它的七节结构：裁决回执 / 表 / 后端 / 前端 / 验收 / 登记 / 零漂移手法）。
 - `docs/agent/context-packs/three-layers.md` —— Controller / Service / DAO 三层约定。
 - `scripts/probes/probe-i2-e2e.mjs` —— 端到端验收脚本样板（本块写 `probe-c3-block3-e2e.mjs`，落 `scripts/probes/`，照它：真后端 + VM 库、逐条断言、机器可读结果 JSON、失败非零退出）。
-- `docs/agent/db-schema.md`（**已回填** `:25` / `:183` + §6.17 / §6.18）· `docs/agent/db-migration.md`（**已登记 #7**，含注意 10）· `docs/agent/slot-registry.md §十九`（本块的登记，结构照 §十八）。
-- `docs/agent/api-contract.md:93-105` —— `/goods` 既有 9 端点（本块新增端点**同样只在 slot-registry 登记**，是否回填 `api-contract.md` 留给收口裁决）。
+- `docs/agent/db-schema.md`（**已回填** `db-schema.md#db-1` / `#db-6-3` + §6.17 / §6.18）· `docs/agent/db-migration.md`（**已登记 #7**，含注意 10）· `docs/agent/slot-registry.md §十九`（本块的登记，结构照 §十八）。
+- `docs/agent/api-contract.md#api-goods` —— `/goods` 既有 9 端点（本块新增端点**同样只在 slot-registry 登记**，是否回填 `api-contract.md` 留给收口裁决）。

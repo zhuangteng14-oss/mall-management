@@ -1,10 +1,10 @@
-# context-pack: C3 块 2 —— 用户块（三端）
+# context-pack: C3 块 2 —— 用户块（三端） {#pack-c3-block-2-user-context-pack}
 
 > 索引：`docs/agent/c3-blocks-index.md`。**只精读下文列出的区间，不要整份读任何文件**（除注明「整份」的）。
 > ⚠️ **状态（2026-10-09 晚）：A 档 5 项已裁决，块已落码 + 验收完成（未提交）。** 下文标「⚠️ 待裁」的条目**均已按裁决落地**；
 > ⚠️ **本 pack 的下文行号已随块 2 的改动重指过一次 ⇒ 均为「当前」行号**（重指清单见 `slot-registry.md §十八 18-6`）。现状 / 样板 / 坑**全部实测过**。
 
-## 一句话定位
+## 一句话定位 {#pack-c3-block-2-user-s2}
 
 用户 / 商家的**全生命周期**（`docs/agent/c3-modules.md:47-54` 的「用户与商家治理」）：
 **注册 → 资料 → 入驻申请 → 审核 → 封禁 / 解封**。
@@ -13,7 +13,7 @@
 它自己**不新建基建** —— 本块是块 1 那两个原语的**第一个真实消费者**
 （块 1 只留了原语 + 一个样板钩子，见其 pack「要读 → 样板挂钩」）。
 
-## 依赖块
+## 依赖块 {#pack-c3-block-2-user-s3}
 
 **块 1（基础设施）**。本块对它的用法是**照抄**、不是扩展：
 
@@ -22,9 +22,9 @@
 
 ⚠️ 本块**不改**块 1 的任何接口签名；唯一可能要动的是 `NotificationEvents` **加一条**常量（待裁 4）。
 
-## 要读
+## 要读 {#pack-c3-block-2-user-s4}
 
-### 设计意图（读区间）
+### 设计意图（读区间） {#pack-c3-block-2-user-s5}
 
 - `docs/agent/c3-modules.md:47-54` —— §1 的四视图 + 四个管理员动作。⚠️ 本块只做**前两行**（用户列表/详情 → 封禁/解封；商家列表/资质 → 入驻审核）；「举报工单」归块 6，「标签」**本块不做**。
 - `docs/agent/c3-modules.md:266` —— §八「**不做多商家入驻（新功能，先占位）**」。⚠️ **与本节任务冲突，已由用户裁决**（2026-10-09「按用户要求做，不按稿做」）：本块**做**「一个账号从客户升为商家」的入驻审核；**不做**的是「同一账号开多家店」。
@@ -32,7 +32,7 @@
 - `docs/agent/c3-blocks-index.md:14` —— 块 2 在 8 块路线里的位置与依赖。
 - `docs/agent/progress.md:940` / `:1474` —— 「**为什么当年不做 `#/register`**」与「**`ANON_RIGHT` 为什么不拆两条**」的原始裁决。⚠️ 本块要做前者 ⇒ **必须先读那两条理由**（一条是「凭空造路由 = 凭空造约定」，一条是「两个链接指同一处 = 假承诺」）。
 
-### 块 1 已落的基建 —— 本块要用的现成接口
+### 块 1 已落的基建 —— 本块要用的现成接口 {#pack-c3-block-2-user-block1-reuse}
 
 - `.../notification/service/NotificationService.java:114-125` —— `send(batchId, toId, toType, eventType, title, content, targetType, targetId)：boolean`。**fail-soft 原语**：永不抛、不加事务、日志标记 `NOTIFY`；`batchId` 单发也要给。
 - `.../notification/NotificationEvents.java:33-120` —— **24 条** code 常量（块 1 的 21 条 + 块 2 新增 3 条）。**块 2 要的 6 条全在**：
@@ -45,7 +45,7 @@
 - `.../shared/web/Result.java:64-133` —— `of(...)` / `ok(...)` / `fail(...)`；**禁 `putAll`**（`ResultByteEquivalenceTest` 钉着）。
 - `.../shared/web/GlobalExceptionHandler.java:83` —— ⚠️ `@RestControllerAdvice(assignableTypes = {MessageController, GoodsController})` —— **新 Controller 不在白名单里** ⇒ 新端点**一个参数约束都不要加**（`@NotBlank` 等会逃逸成 400 空体；类级 `@Validated` 会撞 CGLIB 断言族）。
 
-### 现状：用户 / 登录域（读它就是读**现成的形状**）
+### 现状：用户 / 登录域（读它就是读**现成的形状**） {#pack-c3-block-2-user-s7}
 
 - `mall_management_sql.sql:89-95` —— `login`（`UserName` PK / `Password` / `Role` int / `Id` 业务号）。**无任何状态列**；种子 `:99`。
 - `mall_management_sql.sql:182-193` —— `user` 9 列（`username` PK / `usertype` **中文** 客户·商家·管理员 / `customerid` / `merchantid` / `gender` / `age` / `email` / `selfintroduction` / `address`）。**无审核态、无封禁态**；种子 `:197`。
@@ -63,21 +63,21 @@
 - `agent.md:100-108` —— 数据库管理规则 7 / 8（新增字段三条件、新增表四条件）。
 - `docs/agent/tech-debt.md:231-240`（**TD-18**）—— 管理员**铸不出 token** ⇒ 管理端不加角色闸、接缝与 `AdminAuditController` 绑定；`docs/agent/tech-debt.md:242-251`（**TD-19**）—— 通知接收侧不校验 `toId × toType`（**无害空集**，登记不修）。
 
-### 现状：管理端「治理 / 审核」面 —— **全是占位，零业务**
+### 现状：管理端「治理 / 审核」面 —— **全是占位，零业务** {#pack-c3-block-2-user-s8}
 
 - `.../src/router/index.js:451` —— `/admin/business/accounts`（「用户与商家治理」）今天 `component: AdminStub` —— **本块的替换点**（照 `:456` notify / `:463` audit 的**同行替换**做法 ⇒ 零漂移）。
 - `.../src/router/index.js:434` —— `AdminStub` 定义；`:448-463` —— admin 壳的 children（11 条占位 + 2 条真页）。
 - `.../src/config/admin-nav.js:43` —— 侧边栏项 `accounts`（`to: '/admin/business/accounts'`）。**入口已在** ⇒ ⚠️ `admin-nav.js` **本块不动**（改 key/to 要三处同改）。
 - `.../src/views/admin/StubPage.vue:1-46` —— 占位组件（`:5` 自述「不写库，也不建业务端点」；`:44` 说明为何**故意零请求**）。
 
-### 样板（照抄这两个真页，别自创风格）
+### 样板（照抄这两个真页，别自创风格） {#pack-c3-block-2-user-s9}
 
 - `.../src/views/admin/NotifyPage.vue:335-377` —— `doSend()`：`try → if(!data.success) 记 msg → catch 记网络错误 → finally`；回执模板 `:99-105`（`.n-sent`，`ok` / `bad` 两态）。⇒ **本块的「提交 / 通过 / 驳回」按钮照它**。
 - `.../src/views/admin/AuditPage.vue:301-329` —— `load()`：错误走 `err.value = ...HTTP ${status}`；错误条模板 `:72-75`。⇒ **本块的列表取数照它**。
 - `.../src/views/admin/AuditPage.vue:82-141` —— 事件流 + 展开详情；`NotifyPage.vue:146-168` —— 按批归组的卡片列表。⇒ **「申请列表 / 用户列表」照它**。
 - `.../src/views/LoginPage.vue:359-390` —— `register()`：五字段手判 → `http.post(loginAdd, URLSearchParams)` → 按**返回字符串**分支（`添加成功！` / `0`）。
 
-### 表 / 前端入口
+### 表 / 前端入口 {#pack-c3-block-2-user-s10}
 
 - `.../src/config/nav.js:21-34`（`CUSTOMER_NAV`）/ `:36-48`（`MERCHANT_NAV`）—— **本块不动**；`:63` —— `ANON_RIGHT`（**只有一条** `登录 / 注册` → `/login`）。
 - `.../src/router/index.js:53` —— `/login`（`meta.public`）；`:55` / `:86` —— 两壳壳记录（customer = `roles:['1','3']`、merchant = `['2','3']`）；`:68-74` —— 用户中心 `meta.subMenu`；`:329-334` —— 第二条守卫（**角色边界 = `meta.roles`**）；`:504-505` —— 文件尾两条 `addRoute`。
@@ -87,9 +87,9 @@
 - `.../src/api/endpoints.js:23-41`（`user` 组）/ `:70-82`（`admin` 组）/ `:88-93`（`notification` 组）—— ⚠️ **上半部一行不能动**（`:26` 被 `progress.md` 按行号引）⇒ 新增一律**追加在文件尾**。
 - `.../src/config/notify-events.js:39-44`（块 1 的 6 条用户/商家标签**已在**）/ `:76-81`（发送页下拉项；⚠️ 2026-10-10 C3 块 3 在 `:56-59` 插了 `goods.apply.submitted` ⇒ 本行原引的 `:75-80` 顺移 +1，已同笔更正）。
 
-## 要新建
+## 要新建 {#pack-c3-block-2-user-s11}
 
-### ⚠️ 待裁（A 档 —— 用户批了才落）
+### ⚠️ 待裁（A 档 —— 用户批了才落） {#pack-c3-block-2-user-s12}
 
 1. **资质放哪**：新表 `merchant_application`（**建议**）vs 往 `user` 加列。
    **理由**：① `user` 被 `SELECT *` 整行读出（`UserDao.java:141`）⇒ 加列会**自动出现在 `/user/me` 与 `getUserInfo` 的返回里**（契约面被动扩大）；② 审核要「状态 / 理由 / 审核人 / 时间」4 列，且**同一账号可多次申请**（驳回后重申）⇒ 加列会把「申请历史」压成「当前态」；③ 资质是**申请材料**、不是用户属性。
@@ -98,10 +98,10 @@
 3. **封禁落在哪**：只标 `user`（**建议**）vs 只标 `login` vs 两者同标。
    **理由**：治理视图（用户列表）在 `user` 上；`login` 是**凭据表**（只有 `UserName`/`Password`/`Role`/`Id`），往里塞业务态会让「账号」与「状态」两义混在一处。登录闸在 `UserService.loginSelect`（`UserService.java:136-152`）加一步查 `user` 的封禁列即可。
 4. **「提交入驻 → 通知管理员」怎么落地**：扩 `ToType` 取值域加 `admin` + 管理端壳加通知面（**建议**）vs 不动通道（管理端拿「待审数」当待办）。
-   ⚠️ 这是**契约级缺口**，不是实现细节：`ToType` 现行取值域是**封闭的** `customer` / `merchant`（`docs/agent/db-schema.md:327`；原 `:314`，块 3 增量后重指），而管理端**今天没有收件箱**（块 1 的接收面只挂了两壳）。且**必须新增**一条事件 code（如 `merchant.apply.submitted`）—— 块 1 的 21 条清单里**没有**「提交通知管理员」这一条。
+   ⚠️ 这是**契约级缺口**，不是实现细节：`ToType` 现行取值域是**封闭的** `customer` / `merchant`（`docs/agent/db-schema.md#db-6-14`；原 314 行，块 3 增量后重指），而管理端**今天没有收件箱**（块 1 的接收面只挂了两壳）。且**必须新增**一条事件 code（如 `merchant.apply.submitted`）—— 块 1 的 21 条清单里**没有**「提交通知管理员」这一条。
    ⚠️ 附带事实：管理员在 `user` 表有一行（`usertype='管理员'`）且 `businessId` 把 role 3 映射到 `customerid` ⇒ 收件号取得到；「用 `customer` 通道冒充」是**语义撒谎**，不建议。
 
-### 表（待批后定稿 ⇒ 追加到 `mall_management_sql.sql` **末尾**）
+### 表（待批后定稿 ⇒ 追加到 `mall_management_sql.sql` **末尾**） {#pack-c3-block-2-user-mall_management_sql}
 
 - 新建 `merchant_application`（**建议列**）：
 
@@ -121,11 +121,11 @@
 | `created_at` / `updated_at` | datetime | 规则 8 |
 
   ⚠️ 索引：`(Status, SubmittedAt)`（管理端待审列表 = 最热查询）+ `(Username, SubmittedAt)`（我的申请）。
-  ⚠️ **不加 `UNIQUE(Username)`** —— 同一账号可多次申请；「同一时刻只有一条 `PENDING`」**由应用层保证**（全库除主键只有 3 个 UNIQUE，唯一性基本靠应用层，`docs/agent/db-schema.md:510-532`（原 `:454-476`，块 3 增量后重指））。
+  ⚠️ **不加 `UNIQUE(Username)`** —— 同一账号可多次申请；「同一时刻只有一条 `PENDING`」**由应用层保证**（全库除主键只有 3 个 UNIQUE，唯一性基本靠应用层，`docs/agent/db-schema.md#db-10`（原 454-476 行，块 3 增量后重指））。
 - 封禁列（**若**裁「标 user」，用 `ALTER TABLE ... ADD COLUMN` 追加，规则 7 三条件）：`BanState` tinyint(1) NOT NULL DEFAULT 0 / `BanReason` varchar(255) NULL / `BannedAt` datetime(3) NULL —— **都带 `COMMENT`、都加在表末尾**。
   ⚠️ **连带后果（必然发生，不是 bug）**：`user` 被 `SELECT *` 读 ⇒ 这三列会**自动出现在** `/user/me` 与 `/user/getUserInfo` 的返回 Map 里（前端多三个键）。**建议不剥**（少一处特判），但要知道它发生了。
 
-### 后端（**建议**分层 —— B 档，报备）
+### 后端（**建议**分层 —— B 档，报备） {#pack-c3-block-2-user-s14}
 
 - **新域 `merchant/`**（**新建**，与 `user/` 平级；全仓今天**没有** merchant 包）：
   · `.../merchant/dao/MerchantApplicationDao.java` —— **新建**：新表的唯一 SQL 出口（`@Repository` + `JdbcClient`，照 `NotificationDao.java:48-263` —— ⚠️ 原 48-290 行：2026-10-10〈模板表通用化〉删掉该类的模板两方法后文件只剩 263 行，此处已重指）。
@@ -145,7 +145,7 @@
   ⚠️ **既有端点一律不动**（`loginAdd` / `updateUserInfo` / `/user/me` 的参数与返回不变；唯一例外是 `loginSelect` 多一个返回值 `4`）。
 - ⚠️ **测试面必改**（块 1 的教训）：`@WebMvcTest` 会加载**全部** `@Controller`，新 Controller 依赖的真 bean 必须**同步加进** `Mall-management-server/src/test/java/com/minke/mallmanagement/smoke/AbstractSmokeTest.java:137-146` 的 `@Import` 名单（块 1 漏了它 ⇒ 77 errors）。另：新 Controller **不得**带类级 `@Validated`（否则撞 `Mall-management-server/src/test/java/com/minke/MallManagementApplicationTests.java:121` 起的断言族）。
 
-### 前端（本块 3 个面 + 1 个入口）
+### 前端（本块 3 个面 + 1 个入口） {#pack-c3-block-2-user-s15}
 
 - **注册直达 `#/register`**：`router/index.js` **追加**一条 `/register` 记录（懒加载**同一个** `LoginPage.vue`，`meta.public`），`LoginPage` 按 `route.path` / `?mode=register` **初态即注册态**（今天只有 `toggle()`（`:283-287`）能翻）。
   ⚠️ **不新造注册页组件** —— 注册逻辑（`register()` `:359-390`）与登录页共用 `#acc` / `#pwd` / 校验 / 成功面，拆页等于复刻一遍（`progress.md:940` 记过这条口径）。
@@ -155,7 +155,7 @@
 - **资料完善**：`.../src/views/UserInfoPage.vue` 增强（`gender` / `age` 由只读转可编辑 + 补只读区展示），调**新**端点 `/user/updateProfile`（**旧 `updateUserInfo` 不动**）。
 - `.../src/api/endpoints.js` **文件尾追加**（`admin` 组 6 条 + 新 `merchant` 组 2 条 + `user` 组 1 条）；`.../src/api/admin.js` 追加对应函数；若加 code，`.../src/config/notify-events.js` 要**同步补中文标签**。
 
-## 约束
+## 约束 {#pack-c3-block-2-user-s16}
 
 1. **fail-open / fail-soft**：审计与通知**永不抛** —— 它们失败**不许**把业务成功翻成 500（同 `OrderTimelineWriter`）。
 2. **`evictPublic` 收尾**：任何改 `user` 行的端点，写完必须 `UserCacheService.evictPublic(userId)`（`UserCacheService.java:130-133`）。
@@ -166,7 +166,7 @@
 7. **时区**：新表的时刻列一律 `CURRENT_TIMESTAMP(3)`（DB 存 UTC），**前端渲染时再转**浏览器时区（同 `AuditPage` / `NotifyInbox`）。
 8. **净零行数**：`router/index.js` / `endpoints.js` / `nav.js` / `admin-nav.js` 都有被按行号引的行 ⇒ **新增一律追加在文件尾或同行替换**；动到被引行前后必须重跑 `refs-scan.sh`。
 
-## 验收
+## 验收 {#pack-c3-block-2-user-s17}
 
 **核心 5 项必跑**（提速规则 2026-10-09 起；其余抽查）：
 
@@ -179,12 +179,12 @@
 
 **抽查**：`bash scripts/check-context-packs.sh`（本 pack 0 失效引用）；`refs-scan.sh`（只在动被引行时跑）；审计三态（正例有行 / 负例无行 / 有改前态的动作 `BeforeJson` 非空）。
 
-## 扩展阅读（不够时按指针读）
+## 扩展阅读（不够时按指针读） {#pack-c3-block-2-user-s18}
 
 - `docs/agent/context-packs/c3-block-1-infra.md` —— 块 1 的 pack：**挂钩四步**与两条管子的完整口径。本块是它的第一个消费者 ⇒ **动笔前读它的「约束」一节**。
 - `docs/agent/context-packs/three-layers.md` —— Controller / Service / DAO 三层约定。
 - `scripts/probes/probe-i2-e2e.mjs` —— 块 1 的**端到端验收脚本样板**（真后端 + VM 库、`R.ok(...)` 逐条断言、写一份机器可读的结果 JSON、失败非零退出）。⚠️ **本块的验收脚本照它写**（改名如 `probe-c3-block2-e2e.mjs`，落 `scripts/probes/`），别另起一套。
-- `docs/agent/db-schema.md` —— 表结构现状（新表要登记；`:454-476` 是「唯一性靠应用层」的基线）。
+- `docs/agent/db-schema.md` —— 表结构现状（新表要登记；`db-schema.md#db-10` 是「唯一性靠应用层」的基线）。
 - `docs/agent/db-migration.md` —— 变更登记（本块将是 **#6**；`#4` = 批 A、`#5` = I2，**注意 8** 记了「漏登」的来龙去脉）。
 - `docs/agent/slot-registry.md` §十五 / §十七 —— 块 1 的登记结构与 **CI 门禁 `KNOWN_TABLES` 的同步义务**。
-- `docs/agent/api-contract.md` —— ⚠️ **已 stale**：C3 的 11 个端点（`/admin/*` + `/notification/*`）**未登记**在内（`:18` 仍写「共 36 个」）。本块新增端点**建议同样只在 slot-registry 登记**（要不要回填 `api-contract.md` 留给块收口裁决）。
+- `docs/agent/api-contract.md` —— ⚠️ **已 stale**：C3 的 11 个端点（`/admin/*` + `/notification/*`）**未登记**在内（`api-contract.md#api-2` 仍写「共 36 个」）。本块新增端点**建议同样只在 slot-registry 登记**（要不要回填 `api-contract.md` 留给块收口裁决）。

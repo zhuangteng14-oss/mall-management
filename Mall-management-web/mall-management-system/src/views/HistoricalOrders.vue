@@ -96,7 +96,7 @@ const loading = ref(false)
 // 降级链已收敛到 src/api/auth.js:resolveBuyerId()（与 ShoppingCart 逐字相同）。
 const getBuyerId = () => resolveBuyerId()
 
-const formatDateTime = (dateStr) => {   // ⚠️ **2026-10-10（问题 2，即时区：用户报「轨迹 22:27:51 vs 订单列表 14:29:16」差 8 小时）**：后端时间列是**库时钟**、库时钟是 **UTC**（VM / a3 实测 `@@system_time_zone=UTC`，见 `context-packs/c3-block-1-infra.md:109`）⇒ 交回 `'YYYY-MM-DD HH:mm:ss'` **无时区文本**；少补末尾那个 `Z`，`new Date()` 按**浏览器本地时区**解释它 ⇒ 整整差一个偏移且**错得很安静**。手法照 `views/admin/AuditPage.vue:190` 的 `toLocal`（本页此前漏了）。
+const formatDateTime = (dateStr) => {   // ⚠️ **2026-10-10（问题 2，即时区：用户报「轨迹 22:27:51 vs 订单列表 14:29:16」差 8 小时）**：后端时间列是**库时钟**、库时钟是 **UTC**（VM / a3 实测 `@@system_time_zone=UTC`，见 `context-packs/c3-block-1-infra.md#pack-c3-block-1-infra-frontend-nav`）⇒ 交回 `'YYYY-MM-DD HH:mm:ss'` **无时区文本**；少补末尾那个 `Z`，`new Date()` 按**浏览器本地时区**解释它 ⇒ 整整差一个偏移且**错得很安静**。手法照 `views/admin/AuditPage.vue:190` 的 `toLocal`（本页此前漏了）。
   if (!dateStr) return '未知'
   const date = new Date(`${String(dateStr).replace(' ', 'T')}Z`)
   const year = date.getFullYear()

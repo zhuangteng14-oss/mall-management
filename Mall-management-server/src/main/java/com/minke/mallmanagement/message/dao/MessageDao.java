@@ -23,7 +23,7 @@ import java.util.Map;
  *   <li>{@link com.minke.mallmanagement.user.service.UserCacheService#publicInfo(String)} —— 1 条语句。</li>
  * </ul>
  * 二者都是**缓存读路径**，按商品笔的裁决「DAO 只收 Controller 内联的语句、缓存读路径不进 DAO」
- * （{@code three-layers.md:40}，理由见 {@code GoodsDao} 类 javadoc）留在原处。
+ * （{@code three-layers.md#pack-three-layers-must-read}，理由见 {@code GoodsDao} 类 javadoc）留在原处。
  * 故本类的覆盖范围是「{@code MessageController} 的 10 个端点」，不含那两条缓存路径。
  *
  * <h2>【SQL 字面量逐字未变 —— 这是本笔的验收判据，不是修辞】</h2>

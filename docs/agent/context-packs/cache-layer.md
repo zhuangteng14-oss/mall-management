@@ -1,4 +1,4 @@
-# context-pack: cache-layer（B1 方案）
+# context-pack: cache-layer（B1 方案） {#pack-cache-layer-context-pack}
 
 > **证据来源**：3 个 Controller 全文、`pom.xml`、`application.properties`、`scripts/concurrency/ConcurrencyRunner.java`（断言 ID 与场景负载逐条实测）、`docs/agent/cache-map.md`、`project-map.md §6`、`concurrency-map.md`、`api-contract.md`、`environment.md`。
 > **性质**：**方案文档，非实现。** 本文不含代码，不改 `pom.xml` / Java / properties。
@@ -9,7 +9,7 @@
 
 ---
 
-## 0. 【硬约束】缓存不得落在「先查后插」的查重查询上
+## 0. 【硬约束】缓存不得落在「先查后插」的查重查询上 {#pack-cache-layer-0}
 
 **本条优先级高于穿透 / 击穿 / 雪崩的全部防护设计。违反它的后果不是性能问题，是证据问题。**
 
@@ -30,7 +30,7 @@
 2. 任何「先 SELECT 判断存在性、再 INSERT/UPDATE」的查询，**天然排除在缓存范围外**，不因「读多」而入选。
 3. 实现完成后，`A-B2-1` 必须仍是 `EXPECTED_DEFECT_PRESENT`。若变成 `DEFECT_FIXED`，先怀疑缓存，不要先庆祝。
 
-### 0.1 这条约束在 `goodstype` 上怎么落地
+### 0.1 这条约束在 `goodstype` 上怎么落地 {#pack-cache-layer-0-1}
 
 **实测结论：`G:37` 的 GET 与 `G:47` 的 POST 在同一个方法里，不是两个方法。**
 
@@ -68,13 +68,13 @@ public Object goodstype(@RequestParam(required = false) String GoodType,
 
 ---
 
-## 1. 探索背景
+## 1. 探索背景 {#pack-cache-layer-1}
 
-### B1 目标
+### B1 目标 {#pack-cache-layer-b1}
 
 引入缓存层：Caffeine（一级本地）+ Redis（二级分布式），并实现缓存击穿 / 雪崩 / 穿透防护。
 
-### 约束变化（相对 A3）
+### 约束变化（相对 A3） {#pack-cache-layer-a3}
 
 | 约束 | A3 阶段 | B1 阶段 |
 |---|---|---|
@@ -84,20 +84,20 @@ public Object goodstype(@RequestParam(required = false) String GoodType,
 
 B1 就是来改这三条的。
 
-### 延续的约束
+### 延续的约束 {#pack-cache-layer-s7}
 
 - **feature 分支 + PR 流程**（`agent.md` 规则 4 / 4.1）
 - `scripts/concurrency/` 作为**回归验证工具**
 - `a3` profile（连 VM 库）
 - TD 登记习惯
 
-### 环境现状
+### 环境现状 {#pack-cache-layer-s8}
 
 Redis 已就绪：`192.168.229.129:6379`，redis-server **8.0.5**，`requirepass 123456`，`bind 0.0.0.0 -::1`，配置 `/etc/redis/redis.conf`，原版备份 `/etc/redis/redis.conf.a3bak`。详见 `docs/agent/environment.md`。
 
 ---
 
-## 2. 可缓存接口清单（9 条）
+## 2. 可缓存接口清单（9 条） {#pack-cache-layer-2}
 
 > **注解语义**：这里的「可缓存」是**方法级**判断——Spring 的 `@Cacheable` 挂在 **Service 方法**上，与 HTTP 方法是 POST 无关。POST 只是传输语义，缓存的是**方法返回值**。故本表列了多个 POST 接口，不代表「按 HTTP 方法缓」。
 
@@ -123,7 +123,7 @@ Redis 已就绪：`192.168.229.129:6379`，redis-server **8.0.5**，`requirepass
 
 ---
 
-## 3. 明确不可缓存清单
+## 3. 明确不可缓存清单 {#pack-cache-layer-3}
 
 | 接口 / 范围 | 类别 | 不缓存的理由 |
 |---|---|---|
@@ -139,7 +139,7 @@ Redis 已就绪：`192.168.229.129:6379`，redis-server **8.0.5**，`requirepass
 
 ---
 
-## 4. N+1 位置清单（4 处）
+## 4. N+1 位置清单（4 处） {#pack-cache-layer-4}
 
 **实测 4 处**，每处均回到源码确认循环结构：
 
@@ -160,7 +160,7 @@ Redis 已就绪：`192.168.229.129:6379`，redis-server **8.0.5**，`requirepass
 
 **结论：缓存对 N+1 基本无效。** N+1 的本质是「每行一次查询」，只有当多行**共享同一 ID** 时缓存才有命中；ID 全不同时缓存零命中、反而多一层开销。**解 N+1 只能改 SQL（JOIN / IN 批量）。**
 
-### 登记去向：两处 N+1 清单的关系
+### 登记去向：两处 N+1 清单的关系 {#pack-cache-layer-s12}
 
 `project-map.md §6` 与 `cache-map.md §6` **职责不同，但有 4 行重叠**：
 
@@ -182,7 +182,7 @@ Redis 已就绪：`192.168.229.129:6379`，redis-server **8.0.5**，`requirepass
 
 ---
 
-## 5. cache-map.md 现有方案评估
+## 5. cache-map.md 现有方案评估 {#pack-cache-layer-5}
 
 | 部分 | 处置 | 依据 |
 |---|---|---|
@@ -190,7 +190,7 @@ Redis 已就绪：`192.168.229.129:6379`，redis-server **8.0.5**，`requirepass
 | §6（引入后的可收益点） | **部分重做** | ① 补漏 `selectFriend`；② 补 `getUserInfoById` 的 1+2N 性质；③ 修 3 处**真错误**坐标（见下）。**注意：另有一批「坐标」实为约定差异，不是错误，不改** |
 | §7（若要引入缓存） | **重做** | 原文「先做 Caffeine 本地缓存，**后续多实例才上 Redis**」——**与 B1 的两级缓存目标直接冲突**。且其假设「要支持多实例才需要 Redis」，但 VM 上 Redis 已装好、B1 就是要用它。原文「最小改动路径」对本阶段不适用 |
 
-### §6 修正明细
+### §6 修正明细 {#pack-cache-layer-6-app}
 
 **真错误（改了）**：
 
@@ -211,13 +211,13 @@ Redis 已就绪：`192.168.229.129:6379`，redis-server **8.0.5**，`requirepass
 >
 > **2026-09-29 追注**：本节是 **2026-09-27 那轮**的记录，其中 friend 块的坐标（`M:238-240` / `M:242-248` / `M:244` / `M:330-369` / `M:331-333` / `M:349-350` / `M:353-354`，以及承自 `cache-map.md §6` 的同值）是**当时的实测值**；此后该段代码整体下移 **+11**，**现值与搬迁前后对照见 §2、§4 与 §11 ㊷**。本节作为历史记录**不改写**，但 ⚠️ **原文「按 +11 读即可」的换算已于 2026-10-02 作废** —— 见 §11 ㊷：实测漂移不是任何单一常数（同一文件内 +18 / +25 / +33 / +36 / +45 并存），引用本节的 `M:` 坐标一律**读到即重测**。⚠️ `cache-map.md §6` 的同两行（`M:238-240` / `M:309-311`）**坐标本身仍未同步** —— 本笔只在 `cache-map.md` 与 `project-map.md §6` 各补了一条同文的「读到即重测」作废说明，未改其坐标（消息域三层笔负责），属已知欠账。
 
-### §7 重做方向
+### §7 重做方向 {#pack-cache-layer-7-app}
 
 不再走「单实例 Caffeine → 多实例才 Redis」的渐进路径，改为**一次性两级缓存**（见 §8）。
 
 ---
 
-## 6. A3 断言影响清单
+## 6. A3 断言影响清单 {#pack-cache-layer-6}
 
 `ConcurrencyRunner.java` 实测共 **24 条断言**，分属 7 个场景（s1 / s2a / s2b / s3 / s4a / s4b / b2）。**先明确脚本实际打了哪些端点**（`grep` 路径字面量实测）：
 
@@ -246,7 +246,7 @@ orderPayIfUp 3 | loginSelect 1 | loginAdd 1 | friendAdd 1
 
 ---
 
-## 7. 实现顺序
+## 7. 实现顺序 {#pack-cache-layer-7}
 
 按**风险从低到高**排序：
 
@@ -260,7 +260,7 @@ orderPayIfUp 3 | loginSelect 1 | loginAdd 1 | friendAdd 1
 
 ---
 
-## 8. 两级缓存的实现决策
+## 8. 两级缓存的实现决策 {#pack-cache-layer-8}
 
 **Spring 的 `@Cacheable` 不原生支持两级缓存**（一个 `CacheManager` 就是一层）。三个方案取舍：
 
@@ -270,7 +270,7 @@ orderPayIfUp 3 | loginSelect 1 | loginAdd 1 | friendAdd 1
 | **B. 自写两级 CacheManager** | **性能**（本地命中不打网络） | 100–200 行基础设施 | **中** |
 | C. 业务层手写两级 | 灵活 | 注解优势丢失，代码散落 | 大 |
 
-### 采方案 B
+### 采方案 B {#pack-cache-layer-s19}
 
 **自写两级 `CacheManager` 包装（Caffeine → Redis），业务层仍用 `@Cacheable` 注解。**
 
@@ -278,7 +278,7 @@ orderPayIfUp 3 | loginSelect 1 | loginAdd 1 | friendAdd 1
 
 > 方案 B 与 §0.1 的 Service 抽取是同一件事的两半：Service 提供**注解落点**，两级 `CacheManager` 提供**注解背后的实现**。
 
-### 工程取舍（2026-09-28 补）
+### 工程取舍（2026-09-28 补） {#pack-cache-layer-s20}
 
 > **【诚实定位】两级缓存在本项目规模下的实际收益是 5%（S4b：单级 Redis `66.0` → 两级 `69.6` QPS），代价是 423 行基础设施（`wc -l`：`TwoLevelCache` 233 + `TwoLevelCacheManager` 73 + `CacheConfig` 117；另 `application.properties` 配置段 13 行） + L1/L2 一致性窗口（60s）。这是「展示性设计」，不是「工程必需」。**工程最优解是单级 Redis（Spring Boot 自动装配，0 行）—— 在当前单实例、1 个缓存键的规模下完全够用。选两级是为了展示「L1+L2 + 降级 + evict 传播」的完整设计。若将来嫌复杂，撤 L1 只留 L2 的改动很小。
 
@@ -305,7 +305,7 @@ orderPayIfUp 3 | loginSelect 1 | loginAdd 1 | friendAdd 1
 
 ---
 
-## 9. 穿透 / 击穿 / 雪崩 / 降级
+## 9. 穿透 / 击穿 / 雪崩 / 降级 {#pack-cache-layer-9}
 
 | 问题 | 在哪层解 | 具体做法 | 本项目的目标对象 |
 |---|---|---|---|
@@ -316,7 +316,7 @@ orderPayIfUp 3 | loginSelect 1 | loginAdd 1 | friendAdd 1
 
 > **降级不是优化项，是 B1 的硬约束**（见 §10 核心原则）。若不实现降级，`A-S1-1` / `A-S4b-1` 会把 Redis 的任何抖动传导为 HTTP 5xx。
 
-### §9.1 本项目的落地状态（2026-09-28 核对）
+### §9.1 本项目的落地状态（2026-09-28 核对） {#pack-cache-layer-9-1}
 
 上面那张表是**设计**，不是现状。逐项核对如下 —— **设计写了不等于生效**，本仓刚因「机制已写但从未被调用」吃过一次亏（见 §11「机制已写 ≠ 机制生效」）：
 
@@ -328,7 +328,7 @@ orderPayIfUp 3 | loginSelect 1 | loginAdd 1 | friendAdd 1
 | **雪崩（同时过期）** | ❌ **不实现 TTL 抖动** —— 但**触发条件本轮已从「纯理论」变成「结构上已就位」**（2026-09-28 更新） | 机制本身没变：L1 固定 60s、L2 固定 5m，全局同刻。变的是**键空间的形状**：`goodsByMerchant`（一维）与 `goodsPrice`（三维）的键**随入参无界**（零鉴权、入参可控，§11），且这两族的失效是**整片 `allEntries` 清**（§2）⇒「写一次 → 整片清 → 紧接着的读集中回填 → 同一固定 TTL 同刻到期」这条路径**结构上已经走得通**，不再需要「恰好很多键自然存在」这个前提。**但仍是未触发状态**：实测键数 **5 个三元组 + 4 个型号组**（个位数，同一批次回填的全部在同刻到期也只是 ≈10 次 DB 查询，DB 单查约 2.5ms）⇒ 收益为 0，**本轮不做**。**触发条件（与 §11 附 E 行同一判据）：某缓存族的 key 数 > ~10**。届时方案：L1 用 Caffeine 自定义 `Expiry` 加 0–20% 随机；L2 的 `entryTtl` 是静态的，需换逐键 TTL 供应商 |
 | **雪崩（Redis 整体不可达）** | ✅ **代价已测 + 冷却窗口已实现**（2026-09-28，`84cd200`） | 本项目真正会发生的雪崩是**这个**：Redis 一挂，全站读回落 DB。降级已保证 `5xx = 0`（`84cd200` 后 A3 复核：`A-S1-1` / `A-S4b-1` 均 `5xx=0 connErr=0`，报告 `a3-report-077eebf9`），但每次读仍要付一次「连不上」的代价。**代价已测，且两种故障差别很大**（均为本轮可复核的**首个冷读**，DB 本身约 2.5ms）：① **连接被拒**（端口关闭 = Redis 进程真挂了）→ **325ms**，之后亚毫秒级；② **SYN 被丢弃**（`192.0.2.1:6379`，TEST-NET）→ **3.40s**；③ **连得上但永不响应**（accept 后不回字节）→ **3.38s**。即**「秒级」只在网络路径黑洞时成立，真实故障（进程挂 = 端口关闭）是亚秒级**。**应对已实现**：冷却窗口 —— 窗口内所有 L2 操作直接跳过（零网络代价，只读一个 volatile），到期后由 CAS 选出的**唯一**一个请求探测一次（窗口 30s / 探测超时 200ms / `PROBE_INFLIGHT` 1s 互斥，启动期校验 1s > 200ms，违反即 WARN）。**黑洞端点实测**（7 样本，每样本 = 一次 `@CacheEvict` + 一次冷读）：首个冷读 3.376s → 之后 4~7ms、端点 accept 增量 **0**；窗口到期那一个样本 233ms（探测）、accept **+1**；探测失败即重设窗口，之后又回到 4ms。全程 `5xx=0`、`ERROR=0`、DB 查询数 = 请求数（确证回落 DB）。**探测代价**见下段 |
 
-#### §9.1 附：探测 ≠ 主通道健康（设计盲区，不假装能识别）
+#### §9.1 附：探测 ≠ 主通道健康（设计盲区，不假装能识别） {#pack-cache-layer-9-1-blind}
 
 探测通道与主工厂是**两条连接**（`L2ProbeConfig` 里探测通道是普通对象、**不是 bean** —— 若注册成 bean，会因 Boot 的 `@ConditionalOnMissingBean(RedisConnectionFactory.class)` 顶掉主工厂，整个 L2 静默跑在「200ms 超时、无连接池」的探测通道上，而 **A3 看不出来**：缓存照样能读能写）。故 PING 成功只证明「**端点**可达」，不证明「**主通道**可用」。反向（端点通、主通道坏 —— 例如口令只对探测通道正确，或主通道连接池耗尽）是本机制的**盲区，不假装能识别**；误判的后果有界且自纠正：清标记后真实操作若仍失败，会立刻 `markFailed` 重设窗口，最坏多付一次代价。
 
@@ -336,7 +336,7 @@ orderPayIfUp 3 | loginSelect 1 | loginAdd 1 | friendAdd 1
 
 ---
 
-## 10. 演进影响分析
+## 10. 演进影响分析 {#pack-cache-layer-10}
 
 本节列出「未来可能的改造」与「对缓存的影响」，以便 B1 第一版就选对抽象层。
 
@@ -347,7 +347,7 @@ orderPayIfUp 3 | loginSelect 1 | loginAdd 1 | friendAdd 1
 | 限流 / 熔断 / 降级 / 重试 | 与缓存协同 | 降级第一天就做 |
 | 状态机改造 | 写语义变多步 | 每个状态出口声明 evict |
 
-### 核心原则
+### 核心原则 {#pack-cache-layer-s25}
 
 - 缓存注解**挂 Service 方法**，不散落业务代码
 - 键用**业务标识**（`MerchantId` / `UserId`），不用行号、不用自增主键
@@ -356,7 +356,7 @@ orderPayIfUp 3 | loginSelect 1 | loginAdd 1 | friendAdd 1
 - 写接口的 **evict 范围写进注释**
 - **降级不是优化项**，是 B1 的硬约束
 
-### 写路径 evict 的单入口（2026-09-28 定，一笔 D）
+### 写路径 evict 的单入口（2026-09-28 定，一笔 D） {#pack-cache-layer-evict}
 
 > 与「复合键模板」同级：有实例、可机械执行；今后新增**写接口**照此执行，与本节冲突的写法即为错。
 
@@ -380,7 +380,7 @@ orderPayIfUp 3 | loginSelect 1 | loginAdd 1 | friendAdd 1
 
 **③ 代价（必须正视）：语义从「注解自动清」变「显式调用清」** —— 漏写那一行**不报错**，只表现为陈旧到 TTL 自愈。这是 §11「机制已写 ≠ 机制生效」同族，新增 §11 专行并附实测数字。**注意这不是 D 引入的新风险，而是 D 把风险从「placement 无关的注解」换成「placement 有关的一行调用」** —— 注解时代 `goodsAdd` 的图片为空分支也照样清（今天不清了，见 §11 ④）。
 
-### 复合键模板（2026-09-28 定，由 `goodsPrice` 三维 / `goodsCodes` 二维两个实例抽出）
+### 复合键模板（2026-09-28 定，由 `goodsPrice` 三维 / `goodsCodes` 二维两个实例抽出） {#pack-cache-layer-goodsprice}
 
 > 有 **≥2 个实例**才有引用价值 —— 所以这条不写在某笔的提交信息里，写进本节。今后新增复合键读接口（`userSelect` / `friendSelect` 的 per-user 键、`order` 族）**照此三条执行**；与本节冲突的写法即为错。
 
@@ -408,7 +408,7 @@ orderPayIfUp 3 | loginSelect 1 | loginAdd 1 | friendAdd 1
 
 > 附：**失败/空结果是值**。0 行返回的**非 null** 结果会被正常缓存到 TTL（`list: []`；`{success:false}` 曾是一例 —— 那种「把失败当值缓存」已于 `88a14e4`（`priceByTriple`）与 2026-10-03 的 ② 笔（`goodsHome` / `goodsByMerchant` / `goodsCodes`）**全部修掉**，见 §11），这与「空值缓存（负缓存）机制」**不是一回事**。新增复合键接口时先问：它的 0 行返回什么、是否会被缓存、谁能清掉它。本仓首例是 `productCodePrice`（见 §11 的 2026-10-03 订正）。
 
-### 关键澄清：读写与缓存的关系
+### 关键澄清：读写与缓存的关系 {#pack-cache-layer-s28}
 
 - **读**走缓存（`@Cacheable`）
 - **写**不走缓存（直接 DB）+ 写**必须清缓存**（`@CacheEvict`）
@@ -418,7 +418,7 @@ orderPayIfUp 3 | loginSelect 1 | loginAdd 1 | friendAdd 1
 
 ---
 
-## 11. 已知风险
+## 11. 已知风险 {#pack-cache-layer-11}
 
 | 风险 | 说明 | 应对 |
 |---|---|---|
@@ -439,7 +439,7 @@ orderPayIfUp 3 | loginSelect 1 | loginAdd 1 | friendAdd 1
 | **精确 evict 的三条边界**（2026-09-28 新增，同日补第三条） | ① **MySQL 比较 ≠ 缓存键比较**：`MerchantId` 是 `char(20)` 且默认 collation（`utf8mb4_0900_ai_ci`）**忽略尾空格与大小写**，而缓存键是**字符串精确比较** ⇒ 写侧传 `"1 "` 能改到 `"1"` 的行，却只清 `goodsByMerchant::1 `、清不到读侧用的 `goodsByMerchant::1` ⇒ 陈旧到 TTL 自愈。这是**精确清相对 allEntries 的唯一新增风险**（allEntries 对这类输入免疫，代价是别家列表被顺带清）。② **`@CacheEvict` 不是 `@Repeatable`**（spring-context 6.2.6 实证：常量池无 `Repeatable`，且该包下**没有** `CacheEvicts` / `Cacheables` 容器类 —— `unzip -l spring-context-*.jar \| grep cache/annotation/` 可复核）⇒ 一个方法要挂**两条不同精度**的 evict **只有** `@Caching(evict={…})` 一条路；单个 `@CacheEvict(cacheNames={A,B})` 只能表达**同精度**的多命名空间。③ **「条件性正确」——最坏形态**（2026-09-28 新增，由 `productCodePrice` 的键含 `GoodName` 而暴露）：若某个 key 分量**只在部分情况下**能从写接口入参构造出来，精确清就会**在常见情况下正确、在例外情况下静默漏清**。实例：`goodsPrice` 的键 `M::G::P`，`goodsUp` 的入参含 `M`/`P`（**未改名**时 `G` 也在）⇒ 精确清**看起来完全正确**，只在**改名**时漏清旧键 `M::旧G::P`（该行的真答案已变成 `{success:false}`）—— 而测试通常不改名 ⇒ **测试全绿、线上错**。**判据（可机械执行）**：取键的**每一个**分量，问「有哪个写接口能改到它、且该接口的 `WHERE`/入参含它的**旧值**」；**只要有一个分量缺 ⇒ 该 cacheName 只能 `allEntries`**（残余的精确清不是折中，是陷阱） | 三条均**登记为已知边界，本轮不改语义**：① 接受 TTL 内陈旧；若要免疫则退回 allEntries。② 已写进 `GoodsCacheService.evictByMerchant()` 的 javadoc（含上面的复核命令；**一笔 D 之后**三个写接口只留一行「调它」的注释，注解本体已搬到该 Service 方法上），免得后人以为能写两个 `@CacheEvict`。③ 已据此把 `goodsPrice` 与 `goodsCodes` **两个投影都**定为 `allEntries`（两个的键都含 `GoodName`，同一个原因）—— 判据本身已抽成 §10「复合键模板」的 evict 规则第 1 条，见 §2 表与代码注释 |
 | **`goodsSelect` / `goodsCodes` / `productCodePrice` 的键空间随入参无界** | 三个接口都零鉴权（BD-03）、分量全是任意入参 ⇒ 任何人可造键。**一维**：`goodsByMerchant::<任意值>`；**二维**：`goodsCodes::<任意 M>::<任意 G>`（每个 `(M,G)` 只有 1 个键，但 `(M,G)` 本身任取 ⇒ 键数无上界）；**三维**：`goodsPrice::<任意 M>::<任意 G>::<任意 P>` —— **造键速率三维最高**（2 次请求即可产出 2 个互不相干的键，**不需要数据存在**）。实测键空间：5 个三元组 = 5 行、**0 个重复三元组**；4 组 `(MerchantId, GoodName)`（`k` 分别为 2/1/1/1）。**低危**：L1 有 `app.cache.caffeine.max-size=1000` 硬上界、L2 条目随 TTL（5m）过期，每条目是一个小列表/小 map —— 与 `productSearch` 的无界（拼 SQL + 键空间双无界，§3）**不同量级**。⬆️ **最容易被误判的一点**：`goodsSelect` 的 0 行是 `success:true, list: []`（空结果被正常缓存，**不是**「空值缓存（负缓存）机制」）；`goodsCodes` 同（无型号时也是 `list: []`）；`productCodePrice` 的 0 行是 `{success:false}`（**失败被正常缓存**，同上，也不是空值缓存）⇒ §9.1「穿透：机制未验证」的结论**不因这三个接口改变** | 登记；若键基数上量（> ~10，与 §9.1 雪崩的触发条件同源）再考虑「只缓存已存在的商家/三元组」或加负 TTL。判据：随机造 N 组入参后数 `KEYS goodsByMerchant*` / `KEYS goodsPrice*` |
 | **新增 Service 层** | 项目原为「无分层」架构，B1 首次引入 Service bean | 只抽**被缓存的读路径**所需的极薄 Service，不全面重构分层（2026-09-28：已落地 `GoodsTypeCacheService`、`GoodsCacheService` 两个 —— 后者现含**三个**读方法 `listHome()` / `listByMerchant()` / `priceByTriple()`，外加**写路径的失效面** `evictByMerchant()`；**一笔 D 之后 evict 不再留在 Controller**，`@Caching` 四条全部集中在该 Service 方法上，`GoodsController` 恢复**无代理**。⚠️ **本条原写「三个写接口的方法体仍留在 Controller」—— 该句已于 2026-10-02 失效**：三层重构第二笔（商品域）把 8 个方法体整段搬进 `GoodsService`，内联 SQL 再下沉 `GoodsDao`。**「不全面重构分层」的边界因此被有意放宽了一次** —— ~~那次放宽只覆盖商品域，订单域三层（第一笔）同理；`UserController` / `MessageController` 的写逻辑**仍未搬**。~~ ⚠️ **2026-10-03 订正**：该句已**全数失效** —— 四个业务域（order / goods / user / message）的三层笔**均已落定**（user 域 `0c07e96`、message 域 `8ed5fc1`）⇒ 四个业务 Controller 的写逻辑**全部已搬**，无一例外；本仓的「Service 层」不再只是「被缓存读路径的极薄 Service」，而是**每域一个完整业务 Service**。`project-map.md §3` 的分层说明**已随之同步**，见 `project-map.md`） |
-| **失败结果被缓存**（2026-09-28 新增，本仓首例） | `productCodePrice` 的 `queryForMap` 在 0 行时抛 `EmptyResultDataAccessException`（>1 行抛 `IncorrectResultSizeDataAccessException`），被方法内 `catch (Exception e)` 吞成 `{success:false}` —— 一个**正常返回的非 null Map** ⇒ **会被缓存到 TTL**（a3 为 5m）。即：**失败的生命周期从「瞬时」变成「TTL」**。⚠️ 与「空值缓存（负缓存）机制」**不是一回事**（缓存的是失败结果，不是 null）。**⚠️ 2026-10-03 订正（② 笔）**：本行原只点名 `productCodePrice` 且记为「接受、不修」，两处都已不准确 —— ① `productCodePrice` 已于 `88a14e4`（2026-09-30）**修掉**（`queryForMap` → `queryForList`；0 行 ⇒ `null` ⇒ **真负缓存**，失败不再进缓存）⇒ 本行对它是**过期状态**；② 真正**未清理的是同一缺陷的另外三处**：`GoodsCacheService.listHome` 的**外层** catch（原 `:99-103`）、`listByMerchant`（原 `:150-154`）、`listCodes`（原 `:334-337`）—— 都是 `catch (Exception e)` 把技术异常吞成一个**正常返回的非 null Map**（前两者 `{success:false,msg:"查询失败"}`、`listCodes` `{success:false}` **无 `msg`**）⇒ 被缓存满 TTL。**这三处已于本笔（②，2026-10-03）修掉。** | 登记 + 接受。三条理由：① 常规解法 `unless` 被 `sync = true` **禁止**（spring-context 6.2.6 实证报文 `…sync=true operation does not support the unless attribute on '<method>'`），而放弃 `sync` 是**已实测的回归**（20 并发冷读 20 次 DB → 1 次，§9.1 击穿行）；② 唯一真实来源是前端用**未保存**的表单名查询（`GoodsUp.vue` 的 `switchPrice` 传 `editForm.goodName`），保存时即被 `goodsUp` 的 `allEntries` 清掉 ⇒ **自愈**；③ 0 行在本项目是**业务失败**，不是技术异常。**附**：重复三元组（`goods` 表无唯一约束、`goodsAdd` 不查重）会让本接口从「价格」变「失败」且被缓存到 TTL —— 实测当前 0 个重复三元组 ⇒ 该分支不可达，不修（建唯一索引属另一主题）。**⚠️ 2026-10-03 更新（② 笔）**：「登记 + 接受」只对 2026-09-28 成立 —— `productCodePrice` 已在 `88a14e4` 修掉，三个列表读实例在本笔修掉。修法与 `88a14e4` **同原则**（技术异常上抛 ⇒ `@Cacheable` 遇异常不写入：L1 `data.compute` 不落节点、L2 的 `l2Put` 因 `loadedHere` 分支不可达），但**保留返回形状** —— 这三个的 0 行本来就返回 `success:true, list:[]`，不存在 `queryForMap` 那种「0 行与异常被同一个 catch 折叠」⇒ 不需要改返回类型，只需把 try/catch 与响应组装**搬回** `GoodsService` 的三个调用方（`goodsSelectHome` / `goodsSelect` / `GoodsProductCodeSelect`），**对外零契约变更**（仍是 200 + 同一个 marker，不是 500）。`listHome` 的 **per-row 兜底**另收窄为 `catch (EmptyResultDataAccessException)`（只接「该商家在 login 无对应行」这个业务事实；`>1` 行与技术异常改为上抛 —— `login` 的 PK 是 `UserName`，`Id` 无唯一约束 ⇒ `>1` 行在 schema 层可达）。验收 = `GoodsListCacheFailTest`（6 条：阴性 3 + 阳性对照 1 + `listHome` per-row 两条），**差分对照实测**：把生产文件改回改前，其中 **4 条红、2 条对照绿**。**残留**：失败路径上单飞**退化**（同 key 的 N 个并发串行重跑 loader、每个都真占 Hikari 连接），见本表「单飞等待无超时、无计数上限」行。 |
+| **失败结果被缓存**（2026-09-28 新增，本仓首例） | `productCodePrice` 的 `queryForMap` 在 0 行时抛 `EmptyResultDataAccessException`（>1 行抛 `IncorrectResultSizeDataAccessException`），被方法内 `catch (Exception e)` 吞成 `{success:false}` —— 一个**正常返回的非 null Map** ⇒ **会被缓存到 TTL**（a3 为 5m）。即：**失败的生命周期从「瞬时」变成「TTL」**。⚠️ 与「空值缓存（负缓存）机制」**不是一回事**（缓存的是失败结果，不是 null）。**⚠️ 2026-10-03 订正（② 笔）**：本行原只点名 `productCodePrice` 且记为「接受、不修」，两处都已不准确 —— ① `productCodePrice` 已于 `88a14e4`（2026-09-30）**修掉**（`queryForMap` → `queryForList`；0 行 ⇒ `null` ⇒ **真负缓存**，失败不再进缓存）⇒ 本行对它是**过期状态**；② 真正**未清理的是同一缺陷的另外三处**：`GoodsCacheService.listHome` 的**外层** catch（原 99-103 行）、`listByMerchant`（原 150-154 行）、`listCodes`（原 334-337 行）—— 都是 `catch (Exception e)` 把技术异常吞成一个**正常返回的非 null Map**（前两者 `{success:false,msg:"查询失败"}`、`listCodes` `{success:false}` **无 `msg`**）⇒ 被缓存满 TTL。**这三处已于本笔（②，2026-10-03）修掉。** | 登记 + 接受。三条理由：① 常规解法 `unless` 被 `sync = true` **禁止**（spring-context 6.2.6 实证报文 `…sync=true operation does not support the unless attribute on '<method>'`），而放弃 `sync` 是**已实测的回归**（20 并发冷读 20 次 DB → 1 次，§9.1 击穿行）；② 唯一真实来源是前端用**未保存**的表单名查询（`GoodsUp.vue` 的 `switchPrice` 传 `editForm.goodName`），保存时即被 `goodsUp` 的 `allEntries` 清掉 ⇒ **自愈**；③ 0 行在本项目是**业务失败**，不是技术异常。**附**：重复三元组（`goods` 表无唯一约束、`goodsAdd` 不查重）会让本接口从「价格」变「失败」且被缓存到 TTL —— 实测当前 0 个重复三元组 ⇒ 该分支不可达，不修（建唯一索引属另一主题）。**⚠️ 2026-10-03 更新（② 笔）**：「登记 + 接受」只对 2026-09-28 成立 —— `productCodePrice` 已在 `88a14e4` 修掉，三个列表读实例在本笔修掉。修法与 `88a14e4` **同原则**（技术异常上抛 ⇒ `@Cacheable` 遇异常不写入：L1 `data.compute` 不落节点、L2 的 `l2Put` 因 `loadedHere` 分支不可达），但**保留返回形状** —— 这三个的 0 行本来就返回 `success:true, list:[]`，不存在 `queryForMap` 那种「0 行与异常被同一个 catch 折叠」⇒ 不需要改返回类型，只需把 try/catch 与响应组装**搬回** `GoodsService` 的三个调用方（`goodsSelectHome` / `goodsSelect` / `GoodsProductCodeSelect`），**对外零契约变更**（仍是 200 + 同一个 marker，不是 500）。`listHome` 的 **per-row 兜底**另收窄为 `catch (EmptyResultDataAccessException)`（只接「该商家在 login 无对应行」这个业务事实；`>1` 行与技术异常改为上抛 —— `login` 的 PK 是 `UserName`，`Id` 无唯一约束 ⇒ `>1` 行在 schema 层可达）。验收 = `GoodsListCacheFailTest`（6 条：阴性 3 + 阳性对照 1 + `listHome` per-row 两条），**差分对照实测**：把生产文件改回改前，其中 **4 条红、2 条对照绿**。**残留**：失败路径上单飞**退化**（同 key 的 N 个并发串行重跑 loader、每个都真占 Hikari 连接），见本表「单飞等待无超时、无计数上限」行。 |
 | **「方案 X」被考虑过、不采纳**（2026-09-28 立项登记） | **方案 X** = 异常上移到 Controller 以绕过 `@Cacheable`：Service 不 catch → `EmptyResultDataAccessException` 上抛 → 缓存不写（`@Cacheable` 遇异常不缓存）→ Controller 层 catch 后返回 `{success:false}`。**它同时解决「不缓存失败」与「保留单飞」**，所以看起来对 | **不采纳，理由：语义错位** —— 把**业务失败**（0 行）包装成**技术异常**去骗过缓存。三层重整后业务失败仍应返回业务结果（技术异常才上抛），届时此方案**必须改回来**；且它会制造**族内不一致**（另三个 Service 都是「成功失败都返回 Map」，唯独它「失败抛异常」）。若未来重提此方向（包括未来的我），**先读本条** |
 | **`DEL <key>` 只清 L2**（2026-09-28 新增的运维陷阱） | **L1 是进程内 Caffeine**，Redis 里没有它 ⇒ `DEL <key>` / `redis-cli` 的任何删除**只清 L2**，进程内那份仍在（60s）。实测现象：清缓存后**第一次读仍返回旧值且 `SQL=0`**，要等 L1 TTL 到期（或重启实例）才回落 DB。**与「机制已写 ≠ 机制生效」同族 —— 清了一半以为清干净了**，且它不会报错，只会给出「改了代码但行为没变」的假象 | 登记。**做缓存状态的验证时必须**：要么等 L1 TTL（本仓验证脚本统一用 65s），要么重启实例 —— **不要**用 `DEL` 之后的第一次读取当作「已冷」的证据。实测复现见 `productCodePrice` 那一笔的验证 d 步 |
 | **evict 清单可能领先于读接口落地**（2026-09-28 新增，本仓的顺序） | 本仓是**先加 evict、再加读**：`goodsCodes` 的三条 `@CacheEvict(allEntries=true)` 在 2026-09-28 随 `goodsPrice` 一笔挂上，而它的读接口（`GoodsCacheService.listCodes()`）**下一笔才存在** ⇒ 中间那段时间里每次写都对一个**尚无实际键**的 cacheName 做清理：L2 侧**建出空命名空间 + 一次 no-op 清理**（`TwoLevelCacheManager.getCache()` 是 `computeIfAbsent` 惰性建；SCAN 命中 0 键）。**不是 bug** —— `allEntries` 对空片是幂等 no-op、代价近乎零 —— 但**顺序不常见**，会让人误以为「这个 cacheName 一定已经有读接口在用了」。**为什么本仓会这样**：`goodsPrice` 那一笔的裁决是「三个写接口的 `@Caching` 一次性扩到 4 条」，避免同一份注解改两遍；代价就是 evict 领先一拍 | 登记。判据/消解：读接口一落地即自然消解（本笔已消解）。**若将来再出现「先挂 evict」，必须能答出「它什么时候会有实际键」**；答不出就是漏了读接口 |
@@ -463,7 +463,7 @@ orderPayIfUp 3 | loginSelect 1 | loginAdd 1 | friendAdd 1
 | **㊶ 负缓存的前置条件：`spring.cache.redis.cache-null-values` 必须为 `true`**（2026-09-29 新增） | 负缓存（`userPublic` 那套「0 行 → null → 被缓存」）**依赖该属性**。本仓**三处均未设**（`application.properties` / `application-a3.properties` / `CacheConfig` 无 `disableCachingNullValues()`）⇒ 取 Boot 默认 **true**（元数据 `defaultValue: True`；`CacheProperties$Redis` 字节码 `iconst_1 → putfield cacheNullValues`；`CacheConfig.l2Configuration()` 有 `if (!redis.isCacheNullValues()) config = config.disableCachingNullValues()` 的条件映射，证明该属性**被读到**）。**⚠️ 若把它改成 `false`**：`RedisCache.processAndCheckValue` 会抛 `IllegalArgumentException`（`Cache '%s' does not allow 'null' values…`），而**该异常不是 `DataAccessException`** ⇒ `TwoLevelCache.l2Put` 的降级 catch **不接**（它只 catch `DataAccessException`）⇒ 穿透防护**失效**（且不是「静默降级为普通缓存」这么温和） | **先读本条**：改这个属性前，先确认负缓存的失效面（`loginAdd` 的 evict）仍在，并重跑「0 行 → 第二次读 `SQL=0`」那条实测。⚠️ **订正一处原拟措辞**：原先打算写「此设置若改 false，穿透防护**静默**失效」—— **不准确**：它会**抛异常**（只是被包在**非** `DataAccessException` 的类型里、逃过降级 catch）。**推断部分（未实测，标注区分）**：null 条目在抛之前**已写进 L1**（Caffeine loader 先于 `l2Put` 完成）⇒ 行为可能是「首读抛 → 之后 60s 内命中 L1 正常 → 又抛」；且 L2 永远拿不到负条目。对 `userSelect` 而言，该异常被 Controller 既有 catch 兜住 ⇒ 返回 marker、**不是 5xx** ⇒ `A-S1-1` 不会因此变红 |
 | **㊷ `friendSelect` / `selectFriend` / `getUserInfoById` 的文档坐标漂移 +11**（2026-09-29 新增） | §2 与 §4 引用这三处的 `M:` 坐标**已过期**，实测均匀 **+11**（7 个锚点：`238→249`、`244→255`、`309→320`、`315→326`、`330→341` 与 `331→342`、`349→360`、`353→364`）。成因：**这两个读接口的方法体之后的区域**被整体下移，而引用它的两节没同步。⚠️ **不是「整个 friend 块」**：`friendAdd` 自己的查重 SELECT（§0 硬约束引用的 `M:215-216`）~~**未漂移**~~（`git show 549f74f` 实测 `215-216`）—— ⚠️ **2026-10-02 推翻**：B2 的 `friendAdd` 外包 `runLocked` + `friendAddLocked` 之后，该查重实测已到 **`M:240-241`**（`friendAddLocked` 内），§0 那处引用**同样需要重指** | 已在本笔一并订正（§2 两行、§4 两行 + 复杂度段），并按**搬迁后**的真实位置改为指向 `FriendCacheService`（读路径已搬走），同时保留**搬迁前**的实测值以便对照。⚠️ **2026-10-02 订正：「按 +11 读」的承诺作废。** 本行的 +11 修正写于 B2 **之前**，之后再未回改；本次以 `git show 549f74f`（即本行「实测值」那一列所测的状态）逐锚点比对，漂移**既不是 +11、也不是任何单一常数** —— 同一文件内 `friendAdd` 方法头 **+18**（207→225）、其查重 SELECT **+25**（215→240）、`selectFriend` 方法头 **+33**（247→280）、`friendSelect` 方法头 **+45**（317→362）、`getUserInfoById` 方法头 **+36**（341→377）。成因是两个方向相反的改动叠加：B1 把两个读接口的方法体**搬走**（该减），B2 给 `friendAdd` 外包 `runLocked` + 补注释（该增）。**§11 里凡是引用这两族 `M:` 坐标的行，一律「读到即重测」，不要做任何加减法换算** —— 按任何常数读都会读错。旧行未逐条改写，属已知欠账。**2026-10-02 补充**：本笔另在 `cache-map.md §6` 与 `project-map.md §6`（两处 assert 同一 +11 结论的文件）各补了一条同文的作废说明，并在本文件 §2 / §4 各加一条指向本行的提示；三处**坐标一律未改**（归消息域三层笔）。✅ **2026-10-03 结清（三层第四笔 message 域，`8ed5fc1`）**：本行点名的欠账**已全部兑现** —— §2 两行（`friendSelect` / `selectFriend` 的「Controller 只留路由 + 响应组装」）与 §4 的 `conversations` 行已重指为 `MessageService` / `MessageDao`；§0 硬约束引的 `friendAdd` 查重 SELECT 现址 `MessageDao.selectFriendPair:233-234`；本行与 §11 其它行内**三列式的「实测值」对照表（`M:238-240` 等）一律保留不改写** —— 它们是「当时实测」的存档，不是当前坐标。三分口径（当前重指 / 陈旧未标 → 已标 / 真历史留）见 `cache-map.md §6` 的 2026-10-03 结清注 |
 
-### §11 附：四项带触发条件的待办（2026-09-28 立项三项，2026-09-29 增一项；本轮均**不做**）
+### §11 附：四项带触发条件的待办（2026-09-28 立项三项，2026-09-29 增一项；本轮均**不做**） {#pack-cache-layer-11-app}
 
 | 待办 | 现状 | 触发条件 | 本轮不做的理由 |
 |---|---|---|---|
@@ -477,6 +477,6 @@ orderPayIfUp 3 | loginSelect 1 | loginAdd 1 | friendAdd 1
 
 ---
 
-## 相关 TD / BD
+## 相关 TD / BD {#pack-cache-layer-td}
 
 - 无新增。N+1 相关登记见 `project-map.md §6` 与 `cache-map.md §6`。
