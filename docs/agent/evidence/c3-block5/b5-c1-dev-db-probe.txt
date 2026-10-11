@@ -1,0 +1,22 @@
+库        : mall_management_sql
+
+── 7 张新表（commit 0）──
+  coupon               ❌ 缺
+  coupon_grant         ❌ 缺
+  subsidy_rule         ❌ 缺
+  subsidy_goods        ❌ 缺
+  seckill_invitation   ❌ 缺
+  seckill_application  ❌ 缺
+  seckill_activity     ❌ 缺
+
+── 4 个加列（commit 0）──
+  goods           . OriginalPrice   ❌ 缺
+  order           . CouponId        ❌ 缺
+  order           . SubsidyAmount   ❌ 缺
+  order           . PayAmount       ❌ 缺
+
+全部表数  : 22（P3 期望 = 11 + 18 = 29；P3 还要求 18 张已知追加表**逐个点名在**）
+
+种子计数  : order=184 goods=45 login=47
+
+⇒ 结论：迁移【未落全】—— 先落 `mall_management_sql.sql` 的 Migration 块再手验。
