@@ -1,0 +1,22 @@
+库        : mall_management_sql
+
+── 7 张新表（commit 0）──
+  coupon               有
+  coupon_grant         有
+  subsidy_rule         有
+  subsidy_goods        有
+  seckill_invitation   有
+  seckill_application  有
+  seckill_activity     有
+
+── 4 个加列（commit 0）──
+  goods           . OriginalPrice   有
+  order           . CouponId        有
+  order           . SubsidyAmount   有
+  order           . PayAmount       有
+
+全部表数  : 29（P3 期望 = 11 + 18 = 29；P3 还要求 18 张已知追加表**逐个点名在**）
+
+种子计数  : order=184 goods=45 login=47
+
+⇒ 结论：commit 0 迁移【已落库】，券端点具备运行前提。
