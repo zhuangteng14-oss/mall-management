@@ -161,7 +161,7 @@
   ⚠️ 已知边界【**推断，未实测**】：**本地开发库**（`application.properties` 那套，非 VM）的时钟
     应是机器本地时间、不是 UTC ⇒ 在本机开发库上看这张表，显示会**再差一个偏移**。这是环境差异，
     不是本页的 bug；真要判「显示对不对」，拿 VM / a3 那份看。
-    「库时钟 = UTC」这条本身有记录：`docs/agent/context-packs/c3-block-1-infra.md:109`。
+    「库时钟 = UTC」这条本身有记录：`docs/agent/context-packs/c3-block-1-infra.md#pack-c3-block-1-infra-frontend-nav`。
 
   【视觉】按 `c3-modules.md` §五「可观测域视觉化原则」：数字→状态（顶部三个大数）、
   表格→叙事（事件流卡片，不是宽表）、异常高亮（变化的列高亮）。布局**有意不分两栏**，理由见模板里那条注释。

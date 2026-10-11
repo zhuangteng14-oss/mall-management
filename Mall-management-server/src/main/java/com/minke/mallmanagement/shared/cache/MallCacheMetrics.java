@@ -62,7 +62,7 @@ import java.util.function.BooleanSupplier;
  *        由 L2 TTL 兜底）—— 三个取值都真实可达，非预留。
  * mall.cache.l1.size{cache}          L1 条数（Caffeine estimatedSize，O(1)）
  * mall.cache.l1.evictions{cache}     L1 因容量/TTL 被淘汰的累计数 —— 回答
- *                                    application.properties:24 与 cache-layer.md:426
+ *                                    application.properties:24 与 cache-layer.md#pack-cache-layer-11
  *                                    那笔「max-size=1000 是防御性上界，待 Micrometer 观测后调整」。
  * mall.cache.l2.up                   1=L2 可用；0=处于冷却窗口。
  *                                    ⚠️ 0 **不等于「Redis 已死」**：窗口内 L2 只是被跳过、

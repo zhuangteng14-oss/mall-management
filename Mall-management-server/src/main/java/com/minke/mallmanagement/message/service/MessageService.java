@@ -45,7 +45,7 @@ import java.time.LocalDateTime;
  * <h2>【本域**不是**「数据出口收成一处」—— 与 order / goods / user 三域的形状差】</h2>
  * 那三域是「域内所有 SQL 都收进唯一 DAO」；本域**不是**，因为三层前本域就有 3 条读路径
  * **不在 Controller 里**（在缓存 Service 里），按「DAO 只收 Controller 内联语句」的裁决
- * （{@code three-layers.md:40}，商品笔确立），它们<b>照旧不进 DAO</b>：
+ * （{@code three-layers.md#pack-three-layers-must-read}，商品笔确立），它们<b>照旧不进 DAO</b>：
  * <ul>
  *   <li>{@link FriendCacheService} 的 2 个 {@code @Cacheable} 读路径 + 1 个私有 enrich
  *       （{@code listFriends} / {@code listRequests} / {@code userInfoById}）—— 5 条语句；</li>

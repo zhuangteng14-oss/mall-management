@@ -138,7 +138,7 @@ public class OrderDao {
      *
      * <p>⚠️ 两条 SELECT **都不读 {@code CreateTime}**，而 {@code completed} 分支的调用方
      * （前端 OrderCenter.vue 的「已完成」tab）会渲染它 ⇒ 该列整列空白。这是**既有设计**
-     * （{@code db-schema.md:91} 有记），本笔不趁手改 —— 改它等于改响应字段集，属行为变更。
+     * （{@code db-schema.md#db-4-1} 有记），本笔不趁手改 —— 改它等于改响应字段集，属行为变更。
      */
     public List<Map<String, Object>> selectByMerchant(String merchantId, boolean completed) {
         String sql;

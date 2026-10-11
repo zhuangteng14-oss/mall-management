@@ -85,7 +85,7 @@ import com.minke.mallmanagement.shared.lock.DistributedLockService;
  * {@code Price} 客户端直传直落库」。本笔只做 {@link #priceRejection} 一处**边界收窄**，四条落定：
  *
  * <ol>
- *   <li><b>为什么不「换真值源」</b>：按 {@code goods.Price} 重算属 **C 档**（{@code three-layers.md:94}
+ *   <li><b>为什么不「换真值源」</b>：按 {@code goods.Price} 重算属 **C 档**（{@code three-layers.md#pack-three-layers-b}
  *       / {@code :181} 都写着「那是换真值源，不是加校验」），且**用现行契约做不到** —— 下单
  *       payload 里**没有商品 ID、也没有数量**（{@code ProductInformation} 只记「买了哪几个」，
  *       见 {@code ProductPage.vue:315-317} 的拼接），服务端拿不到数量就**原则上**算不出总价。
@@ -291,7 +291,7 @@ public class OrderService {
      * 两者仍一起保留 —— {@code isFinite} 让「有限性」逐字可见（读者不必自己推 NaN 的比较语义），
      * 正面形式则保证无论从哪条路径进来，NaN/±Inf 都落不进「接受」分支。
      *
-     * <p><b>下界为什么是 {@code >= 0} 而不是 {@code > 0}</b>：{@code three-layers.md:94} 与
+     * <p><b>下界为什么是 {@code >= 0} 而不是 {@code > 0}</b>：{@code three-layers.md#pack-three-layers-b} 与
      * {@code :181} 两处都写「只做 {@code Price >= 0} + 上界」；且 {@code goods.Price} 无下界约束
      * ⇒ 商家可以合法把商品设成 0 元，此时前端 {@code popupTotal} 会算出 0
      * （{@code ProductPage.vue:297-299}）⇒ {@code > 0} 会**误杀免费商品订单**。

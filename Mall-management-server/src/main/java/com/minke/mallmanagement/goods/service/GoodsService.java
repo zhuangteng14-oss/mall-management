@@ -74,7 +74,7 @@ import java.util.Map;
  *       {@code DistributedLockService.runLocked} 的临界区」（{@code orderAddLocked} /
  *       {@code friendAddLocked}），理由是「锁在 {@code finally} 里先释放、事务提交在方法返回之后
  *       ⇒ 后进者查重看到的是自己事务开始时的快照」。本域**无锁**（三个写方法都不走 {@code runLocked}）
- *       ⇒ 不存在该竞争，事务在这里是安全的。{@code three-layers.md:51} 的「**不可外推**」正是为此：
+ *       ⇒ 不存在该竞争，事务在这里是安全的。{@code three-layers.md#pack-three-layers-constraints} 的「**不可外推**」正是为此：
  *       {@code goodsAdd} 是 D#1 的**反面**，只记住半边就会踩另一边。</li>
  *   <li>⚠️ <b>代理生效 ≠ 会回滚</b>：三个方法都**自己 catch 掉了** DAO 异常、**不 rethrow**
  *       ⇒ Spring 看到的是正常返回 ⇒ 照常提交。故 catch 内必须显式标记回滚

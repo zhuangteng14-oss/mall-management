@@ -25,7 +25,7 @@ const API_BASE = process.env.VUE_APP_API_BASE || ''
 const ASSET_BASE = process.env.VUE_APP_ASSET_BASE || ''
 
 // ⚠️ 超时不能设小：后端 Redis 黑洞降级窗口的「首个冷读」实测 **3.376s / 3.40s / 3.38s**
-//    （`context-packs/cache-layer.md:329`，2026-09-28），该耗时**整个落在 HTTP 请求里**
+//    （`context-packs/cache-layer.md#pack-cache-layer-9-1`，2026-09-28），该耗时**整个落在 HTTP 请求里**
 //    ⇒ 设 3s 会误杀正常请求。10s = 覆盖最坏冷读 + 余量。
 const DEFAULT_TIMEOUT = 10000
 // 带 FormData 的上传（图片体积不可控）。
