@@ -1098,3 +1098,122 @@ UPDATE `template` SET `Body` = REPLACE(`Body`, '：', '=')
    AND `Name` IN ('服装通用规格','数码通用规格')
    AND `Body` LIKE '%：%';
 
+-- ============================================================
+-- Migration: 可视化段补丁 —— 演示种子标记列 `Source`（11 张表各一列）
+--            Date: 2026-10-11
+-- 依据：用户 2026-10-11 裁决 —— D 数据填充的种子标记取「加 `Source` 列」这一案
+--       （而非用户名前缀 / 单独的 id 映射表）。
+-- 用途：`seed-demo.sql` 写下的每一行都带 `Source = 'seed'`。将来要重灌演示数据时，
+--       只需 `DELETE … WHERE Source = 'seed'` 清掉上一次的种子行，**存量数据一行不动**。
+-- 范围：只**加列**；不改既有列、不删行、不改既有数据（规则 v2：向后兼容、不阻碍旧功能）。
+-- 幂等：走 `information_schema` 守卫 + `PREPARE`（照本文件 :1030 的商品侧先例）；
+--       重复执行时第二遍起走 `'DO 0'`，不报错。
+-- ⚠️ 默认 `''` = 「存量或真实业务写入」——**不是**「非种子」的干净反义：真实买家下单写进来的
+--    新行同样是 `''`。这个列判别的只有一件事：**这一行是不是 `seed-demo.sql` 写的**。
+--    因此撤种子必须**按 `Source = 'seed'` 删**，不能按「表里有 Source 列」删。
+-- ⚠️ `stats_daily` 的这一列**恒为空**：该表的行由 `StatsService.computeAndUpsert` 唯一写出
+--    （`POST /admin/stats/rebuild` 先 `deleteAll`、再从 `order` 全量重算），**不走 `seed-demo.sql`**。
+--    ⇒ 种子灌完之后统计表里确实**全是**由种子订单重算出来的行，但列上仍是 `''`（种子文件不碰它，
+--    碰了也会被那次 `deleteAll` 抹掉）。保留这一列只是为了 11 张表**形状一致**（同一套读法），
+--    不是因为统计表自己需要它 —— 如实记在这里，免得后来人拿它当「这张表干净不干净」的判据。
+-- 回滚（逻辑废弃，执行前须人工确认）：
+--       ALTER TABLE `login`                DROP COLUMN `Source`;
+--       ALTER TABLE `user`                 DROP COLUMN `Source`;
+--       ALTER TABLE `goods`                DROP COLUMN `Source`;
+--       ALTER TABLE `goods_audit`          DROP COLUMN `Source`;
+--       ALTER TABLE `order`                DROP COLUMN `Source`;
+--       ALTER TABLE `order_item`           DROP COLUMN `Source`;
+--       ALTER TABLE `cart`                 DROP COLUMN `Source`;
+--       ALTER TABLE `notification`         DROP COLUMN `Source`;
+--       ALTER TABLE `admin_audit`          DROP COLUMN `Source`;
+--       ALTER TABLE `merchant_application` DROP COLUMN `Source`;
+--       ALTER TABLE `stats_daily`          DROP COLUMN `Source`;
+-- ============================================================
+
+-- ---- ① `login` ----
+SET @s := (SELECT IF(COUNT(*) = 0,
+  'ALTER TABLE `login` ADD COLUMN `Source` varchar(16) NOT NULL DEFAULT '''' COMMENT ''数据来源：seed=演示种子（seed-demo.sql 写入）/ 空=存量或真实业务写入''',
+  'DO 0')
+  FROM information_schema.COLUMNS
+  WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'login' AND COLUMN_NAME = 'Source');
+PREPARE _p FROM @s; EXECUTE _p; DEALLOCATE PREPARE _p;
+
+-- ---- ② `user` ----
+SET @s := (SELECT IF(COUNT(*) = 0,
+  'ALTER TABLE `user` ADD COLUMN `Source` varchar(16) NOT NULL DEFAULT '''' COMMENT ''数据来源：seed=演示种子（seed-demo.sql 写入）/ 空=存量或真实业务写入''',
+  'DO 0')
+  FROM information_schema.COLUMNS
+  WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'user' AND COLUMN_NAME = 'Source');
+PREPARE _p FROM @s; EXECUTE _p; DEALLOCATE PREPARE _p;
+
+-- ---- ③ `goods` ----
+SET @s := (SELECT IF(COUNT(*) = 0,
+  'ALTER TABLE `goods` ADD COLUMN `Source` varchar(16) NOT NULL DEFAULT '''' COMMENT ''数据来源：seed=演示种子（seed-demo.sql 写入）/ 空=存量或真实业务写入''',
+  'DO 0')
+  FROM information_schema.COLUMNS
+  WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'goods' AND COLUMN_NAME = 'Source');
+PREPARE _p FROM @s; EXECUTE _p; DEALLOCATE PREPARE _p;
+
+-- ---- ④ `goods_audit` ----
+SET @s := (SELECT IF(COUNT(*) = 0,
+  'ALTER TABLE `goods_audit` ADD COLUMN `Source` varchar(16) NOT NULL DEFAULT '''' COMMENT ''数据来源：seed=演示种子（seed-demo.sql 写入）/ 空=存量或真实业务写入''',
+  'DO 0')
+  FROM information_schema.COLUMNS
+  WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'goods_audit' AND COLUMN_NAME = 'Source');
+PREPARE _p FROM @s; EXECUTE _p; DEALLOCATE PREPARE _p;
+
+-- ---- ⑤ `order` ----
+SET @s := (SELECT IF(COUNT(*) = 0,
+  'ALTER TABLE `order` ADD COLUMN `Source` varchar(16) NOT NULL DEFAULT '''' COMMENT ''数据来源：seed=演示种子（seed-demo.sql 写入）/ 空=存量或真实业务写入''',
+  'DO 0')
+  FROM information_schema.COLUMNS
+  WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'order' AND COLUMN_NAME = 'Source');
+PREPARE _p FROM @s; EXECUTE _p; DEALLOCATE PREPARE _p;
+
+-- ---- ⑥ `order_item` ----
+SET @s := (SELECT IF(COUNT(*) = 0,
+  'ALTER TABLE `order_item` ADD COLUMN `Source` varchar(16) NOT NULL DEFAULT '''' COMMENT ''数据来源：seed=演示种子（seed-demo.sql 写入）/ 空=存量或真实业务写入''',
+  'DO 0')
+  FROM information_schema.COLUMNS
+  WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'order_item' AND COLUMN_NAME = 'Source');
+PREPARE _p FROM @s; EXECUTE _p; DEALLOCATE PREPARE _p;
+
+-- ---- ⑦ `cart` ----
+SET @s := (SELECT IF(COUNT(*) = 0,
+  'ALTER TABLE `cart` ADD COLUMN `Source` varchar(16) NOT NULL DEFAULT '''' COMMENT ''数据来源：seed=演示种子（seed-demo.sql 写入）/ 空=存量或真实业务写入''',
+  'DO 0')
+  FROM information_schema.COLUMNS
+  WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'cart' AND COLUMN_NAME = 'Source');
+PREPARE _p FROM @s; EXECUTE _p; DEALLOCATE PREPARE _p;
+
+-- ---- ⑧ `notification` ----
+SET @s := (SELECT IF(COUNT(*) = 0,
+  'ALTER TABLE `notification` ADD COLUMN `Source` varchar(16) NOT NULL DEFAULT '''' COMMENT ''数据来源：seed=演示种子（seed-demo.sql 写入）/ 空=存量或真实业务写入''',
+  'DO 0')
+  FROM information_schema.COLUMNS
+  WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'notification' AND COLUMN_NAME = 'Source');
+PREPARE _p FROM @s; EXECUTE _p; DEALLOCATE PREPARE _p;
+
+-- ---- ⑨ `admin_audit` ----
+SET @s := (SELECT IF(COUNT(*) = 0,
+  'ALTER TABLE `admin_audit` ADD COLUMN `Source` varchar(16) NOT NULL DEFAULT '''' COMMENT ''数据来源：seed=演示种子（seed-demo.sql 写入）/ 空=存量或真实业务写入''',
+  'DO 0')
+  FROM information_schema.COLUMNS
+  WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'admin_audit' AND COLUMN_NAME = 'Source');
+PREPARE _p FROM @s; EXECUTE _p; DEALLOCATE PREPARE _p;
+
+-- ---- ⑩ `merchant_application` ----
+SET @s := (SELECT IF(COUNT(*) = 0,
+  'ALTER TABLE `merchant_application` ADD COLUMN `Source` varchar(16) NOT NULL DEFAULT '''' COMMENT ''数据来源：seed=演示种子（seed-demo.sql 写入）/ 空=存量或真实业务写入''',
+  'DO 0')
+  FROM information_schema.COLUMNS
+  WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'merchant_application' AND COLUMN_NAME = 'Source');
+PREPARE _p FROM @s; EXECUTE _p; DEALLOCATE PREPARE _p;
+
+-- ---- ⑪ `stats_daily`（列恒空，见上方说明；只为形状一致）----
+SET @s := (SELECT IF(COUNT(*) = 0,
+  'ALTER TABLE `stats_daily` ADD COLUMN `Source` varchar(16) NOT NULL DEFAULT '''' COMMENT ''数据来源：seed=演示种子（seed-demo.sql 写入）/ 空=存量或真实业务写入（本表由 stats rebuild 唯一写出 ⇒ 此列恒空）''',
+  'DO 0')
+  FROM information_schema.COLUMNS
+  WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'stats_daily' AND COLUMN_NAME = 'Source');
+PREPARE _p FROM @s; EXECUTE _p; DEALLOCATE PREPARE _p;
