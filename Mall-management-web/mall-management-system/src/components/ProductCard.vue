@@ -36,15 +36,25 @@
      · `SoldQty > 0` **才**画「已售 N 件」。43 行里卖不动的占多数，满屏「已售 0 件」是噪音。
      · `goods.UserName` 为空 ⇒ 左边**留空**，**不写「商家」**这种编出来的占位词。
 
+  ⚠️ `tag`（C3 块 5 · ShopHome 布局授权笔，2026-10-12）：图上角的一枚小签，**默认空串 = 不画**。
+     本笔**唯一**的消费方是 `ShopHome.vue` 的「本店商品」网格 —— 用户把原先那个独立的
+     「新品首发」模块改成了**卡上的红标签**（用户素材原话即「本店商品（含新品红标签）」），
+     顺手解掉了上一笔登记的「新品首发与本店商品内容重叠」那条待裁项。
+     ⚠️ 「哪几件算新品」的判据**在调用方**（`ShopHome` 的 `isNew`），**不在**本组件 ——
+     本组件只管把那枚签画出来，判据只有一处，不会两边各判一套。
+
   用法：
     <ProductCard :goods="g" />
     <ProductCard :goods="g" :before-nav="onCardNav" />   ← 需要「导航前副作用」的页面才传第二个
+    <ProductCard :goods="g" tag="新品" />                 ← 图上角的小标签（本笔只有 ShopHome 传）
 -->
 <template>
   <router-link class="pcard" :to="to" @click="onNav">
     <div class="pcard-img">
       <!-- ⚠️ `v-if` 不能省 —— 见文件头 ⑤（破图图标 vs 灰底；先例 `HistoricalOrders.vue:66`）。 -->
       <img v-if="goods.GoodImg" :src="goods.GoodImg" :alt="goods.GoodName" />
+      <!-- 图上角的小签（当前只有「新品」一种，见文件头）。空串 ⇒ 一个节点都不渲染。 -->
+      <span v-if="tag" class="pcard-tag">{{ tag }}</span>
     </div>
     <div class="pcard-tx">
       <div class="pcard-name">{{ goods.GoodName }}</div>
@@ -68,27 +78,20 @@
 
 <script setup>
 import { computed } from 'vue'
+import { productLink } from '../config/product-link'
 
 // eslint-disable-next-line no-undef
 const props = defineProps({
   goods: { type: Object, required: true },
   // 导航前的副作用（可空）。收 `goods` 参数以便调用方按行决策；见文件头 ②。
-  beforeNav: { type: Function, default: null }
+  beforeNav: { type: Function, default: null },
+  // 图上角的小签（可空）。空串 ⇒ 不画。见文件头。
+  tag: { type: String, default: '' }
 })
 
-// 7 个 query 参数，**顺序**同 `HomePage.vue` 改前那一份（URL 逐字可比）。见文件头 ①。
-const to = computed(() => ({
-  path: '/product',
-  query: {
-    Id: props.goods.Id,
-    MerchantId: props.goods.MerchantId,
-    GoodName: props.goods.GoodName,
-    Price: props.goods.Price,
-    GoodImg: props.goods.GoodImg,
-    GoodType: props.goods.GoodType,
-    ProductCode: props.goods.ProductCode
-  }
-}))
+// 7 个 query 参数**不再本文件自拼**，走 `config/product-link.js` 那一份共用契约
+// （本笔新增柱状图那处消费方 ⇒ 两处必须同源，见文件头 ① 与那个模块的头注）。
+const to = computed(() => productLink(props.goods))
 
 const onNav = () => {
   if (props.beforeNav) props.beforeNav(props.goods)
@@ -136,6 +139,8 @@ const soldQty = computed(() => Number(props.goods.SoldQty) || 0)
   align-items: center;
   justify-content: center;
   transition: background 0.2s;
+  /* ⚠️ 只给 `tag` 那枚小签定位用（它是图上角的一个绝对定位块）。 */
+  position: relative;
 }
 .pcard:hover .pcard-img {
   background: var(--brand-soft);
@@ -145,6 +150,26 @@ const soldQty = computed(() => Number(props.goods.SoldQty) || 0)
   width: 100%;
   height: 100%;
   object-fit: cover;
+}
+/* 图上角的小签 —— 朱砂族（`--accent` / `--accent-soft`）。`tokens.css:123` 把朱砂的职责
+   写死成「价格 / 促销 / 未读」三样，「新品」属于**促销**那一类，所以它**可以**用这一族，
+   而「名次」「分类」那类标记**不可以**（见 `ShopHome.vue` 柱状图的注释）。
+   ⚠️ 用 `--accent-soft` 底 + `--accent` 字（不是实心红底白字）：实心红块会把整张商品的
+   注意力从「图 + 价」上拽走，而它只是一枚**提示**。同形先例：`ShopHome.vue` 的 `.fact-cert`
+   （`--success-ground` + `--success`）。 */
+.pcard-tag {
+  position: absolute;
+  top: var(--s2);
+  left: var(--s2);
+  height: 20px;
+  line-height: 20px;
+  padding: 0 var(--s2);
+  border-radius: var(--r1);
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-med);
+  white-space: nowrap;
 }
 .pcard-tx {
   padding: var(--s3) var(--s4) var(--s4);

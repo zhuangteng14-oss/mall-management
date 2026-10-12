@@ -50,41 +50,55 @@
             <button type="button" class="act" title="真功能：message.send（与商品页「客服」同形）" @click="consultShop">客服</button>
           </span>
         </div>
-        <!-- ── 头卡事实行（C3 块 5 · B 组续笔 2026-10-12）─────────────────────────
-             四项「这家店是什么来头」，**逐项判显隐**，凑不齐就不画那一项 —— 全块同一条
-             「数据不足不显、不造假」（`ShopProfileService` 类注释里的「三个不编」是同一条）。
-             ⚠️ **每项各有各的判据，别把它们归成一个默认值**（见 `<script>` 里那四个 computed）：
+        <!-- ── 头卡事实行（认证徽章 / 主营 / 开店 / 累计售出）────────────────────────
+             ⚠️ 本行**永远渲染**（C3 块 5 · ShopHome 布局授权笔，2026-10-12 改）—— 改前是
+                「一项都凑不齐就整行不画」，用户裁定改为「**数据不足 → 占位，不静默消失**」。
+                四项全空时画一句「暂无店铺资料」。
+             ⚠️ **每项各有各的判据**（见 `<script>` 的 `certified` / `facts`）：
                 · 认证徽章：**只有 `CertStatus === 'approved'` 才画**。`pending` / `rejected` /
-                  一条申请都没有（后端回**空串**，不是 `'pending'`）⇒ **都不画** —— 画了就是假话。
-                · 主营 / 开店 / 累计售出：三个都是「没有就不 push 进 `facts`」。
-             ⚠️ 四项**不拼成一句**：中间没有 `·`、也没有顿号 —— 那是 `frontend-design` 点名的
-                AI 默认样（「`·` 拼接的元信息串」）。这里靠**间距**分组，每项自带单位（「件」「个月」）。 -->
-        <div v-if="certified || facts.length" class="facts">
+                  一条申请都没有（后端回**空串**）⇒ 都不画。
+                  ⚠️ **它没有占位，是本次唯一的一处例外**：空串的含义是「查不到」而不是「没认证」
+                  —— 实测 15 条 `merchant_application.Username` 与 13 家店名的**交集是空集**，
+                  更像两边键对不上。画一句「未认证」= 可能的一句**假否定**。**留人裁**。
+                · 主营 / 开店 / 累计售出：三个各自为空就不进 `facts`。
+             ⚠️ 各项**不拼成一句**：没有 `·`、也没有顿号 —— 那是「`·` 拼接的元信息串」这条
+                AI 默认样。靠**间距**分组，每项自带单位（「件」「个月」）。 -->
+        <div class="facts">
           <span v-if="certified" class="fact-cert" title="已通过平台入驻审核（读自 /shop/profile 的 CertStatus = approved）">
             <BadgeCheck class="fact-ic" aria-hidden="true" />已认证
           </span>
           <span v-for="f in facts" :key="f.k" class="fact"><i>{{ f.k }}</i><b>{{ f.v }}</b></span>
+          <span v-if="!certified && !facts.length" class="fact-none">暂无店铺资料</span>
         </div>
       </div>
     </section>
 
+    <!-- ══════════════════════════════════════════════════════════════════════════════
+         版面顺序（C3 块 5 · ShopHome 布局授权笔，2026-10-12，用户授权整体重排）：
+           ① 本店优惠券 → ② 本店热销（柱状图）→ ③ 本店商品 → ④ 本店折扣 → ⑤ 猜你喜欢
+         两条定序理由：
+           · **② 排在 ③ 之前**：热销榜回答的是「什么值得买」，是**结论**；货架是全量。
+             先结论后全量，且这一块是本页视觉主角，要早出现。
+           · **④ 排在 ③ 之后**：折扣品是「本店商品」的一个**子集** ⇒ 看完货架再给子集才顺。
+         高度节奏：短（头卡）· 短（券）· 中高（图）· 长（网格）· 短（折扣）· 长（猜你喜欢）
+         —— 没有两个同形的块相邻。
+         ⚠️ **「猜你喜欢」在最后是用户的硬约束**（原话：「底部『猜你喜欢』必须在页面最底」）。
+         ⚠️ 原「新品首发」独立模块**已取消**：用户素材表述是「本店商品（含新品红标签）」
+            ⇒ 改成卡上的一枚红签（`isNew`），顺手解掉了上一笔登记的「新品首发与本店商品
+            内容重叠」那条待裁项。 -->
     <div class="wrap">
-      <!-- ── ① 本店优惠券（C3 块 5 · B 组续笔）──────────────────────────────────
+      <!-- ── ① 本店优惠券 ───────────────────────────────────────────────────────
            数据 = `POST /marketing/coupons` 的第 4 参 `MerchantAccount` 传**本店**（`shopId`）——
            与 `ProductPage.vue` 的「领券」行**同一个口径、同一个 `api/marketing.js` 封装**。
-           ⚠️ **未登录 ⇒ 整块不渲染**（不是画一句「登录后可领券」）：那是**这一页**，不是领券中心
-              —— 头卡的粉丝数拿不到时也不画，同一条口径（`ShopHome` 头注那句「数据不足不显」）。
-              ⚠️ 已登录但本店**一张可领券都没有** ⇒ 同样不渲染：空态放这儿只会把页面撑长。
            ⚠️ 券包（我已领的）**不在这里** —— 它在用户中心 / 商品页的 `CouponWalletDialog`。
               本块只回答「**这家店现在有什么券可以领**」。
-           ⚠️ `Account` 传的是**登录名**（`getUsername()`），不是客户号 —— 2026-10-12 券改账号口径。 -->
-      <section
-        v-if="shopCoupons.length"
-        class="blk"
-        title="本店优惠券（C3 块 5 · B 组续笔 2026-10-12）：POST /marketing/coupons 带 Account（登录名）+ MerchantAccount（本店商家号），领取走 /marketing/coupon/claim。封装 src/api/marketing.js，与商品页「领券」行同源。"
-      >
+           ⚠️ `Account` 传的是**登录名**（`getUsername()`），不是客户号 —— 2026-10-12 券改账号口径。
+           ⚠️ 三种「没有券可显示」**各说各的话**（用户：「数据不足 → 占位，不静默消失」）：
+              未登录 ⇒ 「登录后可领取本店优惠券」+ 一个真出口；已登录但 0 张 ⇒ 「本店暂时没有
+              可领的优惠券」；还在读 ⇒ 「正在读取…」。**三句都不声称本店有没有券**，除非真查过。 -->
+      <section class="blk">
         <h2 class="sec-h">本店优惠券</h2>
-        <ul class="cpns">
+        <ul v-if="shopCoupons.length" class="cpns">
           <li v-for="c in shopCoupons" :key="c.CouponId" class="cpn">
             <span class="cpn-face">{{ couponFace(c) }}</span>
             <span class="cpn-tx">
@@ -100,18 +114,56 @@
             >{{ truthy(c.Claimed) ? '已领取' : truthy(c.SoldOut) ? '已领完' : claiming === c.CouponId ? '领取中…' : '领取' }}</button>
           </li>
         </ul>
+        <p v-else-if="!couponAccount" class="ph">
+          登录后可领取本店优惠券<router-link class="ph-link" :to="{ path: '/login', query: { redirect: route.fullPath } }">去登录</router-link>
+        </p>
+        <p v-else class="ph">{{ couponsReady ? '本店暂时没有可领的优惠券' : '正在读取…' }}</p>
       </section>
 
-      <!-- ── ② 本店商品（含分类筛选）──────────────────────────────────────────────
+      <!-- ── ② 本店热销：**竖直柱状图**（本笔的设计核心）────────────────────────────
+           用户原话：「本店热销这块要竖的那种。」⇒ 竖直柱：**X 轴 = 商品、Y 轴 = 销量**
+           （不是横条 —— 横条是「横向长度代表销量」，那是另一种图）。
+           数据 = 本店商品按 `SoldQty`（`goodsSelectHome` 那列，LEFT JOIN `order_item` 聚合）
+           降序取 5，**按 `ProductCode` 去重**（演示店 `dRD3gqtbFr` 的 `GD-101-9552` 在 `goods`
+           里两行，不去重同一件耳机要占两个名次）。
+           ⚠️ **一根柱都没有 ⇒ 占位**（用户新规），**不画一个空坐标轴** —— 空轴比一句话更假。
+           ⚠️ **整列可点**（进对应商品）—— 柱子这张图不是装饰，它就是入口。 -->
+      <section class="blk">
+        <h2 class="sec-h">本店热销<i class="sec-note">按销量排序</i></h2>
+        <!-- ⚠️ 整列 = 一个 `<router-link>`：`<a>` 里**不得**嵌交互内容 ⇒ 图 / 柱 / 数值 / 名次
+             全部是 `<span>`（同 `ProductCard.vue` 文件头 ④ 那条，同一处理由）。 -->
+        <div v-if="hotGoods.length" class="chart">
+          <router-link
+            v-for="(g, i) in hotGoods"
+            :key="g.Id"
+            class="col"
+            :to="productLink(g)"
+            :title="g.GoodName"
+          >
+            <span class="col-plot">
+              <span class="col-val">{{ soldOf(g) }}</span>
+              <span class="col-cap"><img v-if="g.GoodImg" :src="g.GoodImg" :alt="g.GoodName" /></span>
+              <span class="col-bar" :class="{ 'col-bar-hero': i === 0 }" :style="{ height: barPct(g) + '%' }"></span>
+            </span>
+            <span class="col-foot">
+              <span class="col-no">{{ i + 1 }}</span>
+              <span class="col-nm">{{ g.GoodName }}</span>
+            </span>
+          </router-link>
+        </div>
+        <p v-else-if="phHot" class="ph">{{ phHot }}</p>
+      </section>
+
+      <!-- ── ③ 本店商品（含分类筛选 + 新品红标签）──────────────────────────────────
            ⚠️ **不按 `MerchantId` 再请求一次**：`goodsSelectHome` 一次拉全量、前端过滤 —— 与主页 /
               详情页同一个端点、同一手法（零后端改动，见 `loadShop`）。
-           ⚠️ 分类 chip **只有本店商品种类 > 1 时才画**：一个 chip 没有信息量，画出来只是噪音
-              （同「数据不足不显」）。 -->
+           ⚠️ 分类 chip **本店只要有 1 个类目就画**（「全部」常驻 + 那一类 ⇒ 至少 2 个 chip，
+              点「全部」与点那一类结果相同但**控件是真的**）。改前是「> 1 类才画」，
+              那样本店只有一类时整行消失 —— 同「不静默消失」那条。 -->
       <section class="blk">
         <h2 class="sec-h">本店商品</h2>
 
-        <!-- 分类筛选：本店 `GoodType` 去重后的短名单。「全部」常驻左侧。 -->
-        <div v-if="categories.length > 1" class="chips">
+        <div v-if="categories.length" class="chips">
           <button
             type="button"
             class="chip"
@@ -144,90 +196,67 @@
           <button type="button" class="retry" @click="activeType = ''">看全部 {{ goods.length }} 件</button>
         </div>
         <div v-else class="cards">
-          <ProductCard v-for="g in filteredGoods" :key="g.Id" :goods="g" />
+          <ProductCard
+            v-for="g in filteredGoods"
+            :key="g.Id"
+            :goods="g"
+            :tag="isNew(g) ? '新品' : ''"
+          />
         </div>
       </section>
 
-      <!-- ── ③ 本店热销（销量前三）───────────────────────────────────────────────
-           数据 = 本店商品按 `SoldQty`（`goodsSelectHome` 新补的那一列，LEFT JOIN `order_item` 聚合）
-           降序取 3。
-           ⚠️ **必须按 `ProductCode` 去重** —— 演示店 `dRD3gqtbFr` 的 `GD-101-9552` 在 `goods` 里
-              **两行**（`Id=76` 与 `Id=120`，同名同价同码）⇒ 不去重的话同一件耳机占掉两个名次。
-           ⚠️ **一条 `SoldQty > 0` 的都没有 ⇒ 整块不渲染**（卖不动的店不该有「热销榜」）。
-           ⚠️ 序号（1 / 2 / 3）**不是装饰** —— 「前三」这个说法本身就靠它成立，去掉了只剩三张卡。 -->
-      <section
-        v-if="hotGoods.length"
-        class="blk"
-        title="本店热销前三：goodsSelectHome 的 SoldQty 降序取 3，按 ProductCode 去重（演示店有一条同码重复行）。"
-      >
-        <h2 class="sec-h">本店热销<i class="sec-note">按销量排序</i></h2>
-        <div class="shelf">
-          <div v-for="(g, i) in hotGoods" :key="g.Id" class="shelf-item">
-            <span class="rk">{{ i + 1 }}</span>
-            <ProductCard :goods="g" />
-          </div>
-        </div>
-      </section>
-
-      <!-- ── ④ 本店折扣专区──────────────────────────────────────────────────────
+      <!-- ── ④ 本店折扣 ─────────────────────────────────────────────────────────
            判据 = `Number(OriginalPrice) > 0`（有划线价才算折扣）。
-           ⚠️ **今天一块都不出**：全库 43 行 `OriginalPrice` **全是 `0.0`**（2026-10-12 实测，
-              见方案 §三）⇒ 本块是**代码在、数据没有**，等哪天有折扣价自己就冒出来了。
-              **不为了让它出现而造数据**（那是编）。 -->
-      <section
-        v-if="discountGoods.length"
-        class="blk"
-        title="本店折扣专区：判据是 goods.OriginalPrice > 0（有划线价）。⚠️ 当前库 43 行原价全为 0 ⇒ 本块恒不渲染，是数据没有不是代码没接。"
-      >
+           ⚠️ **今天一块都不出**：全库 43 行 `OriginalPrice` **全是 `0.0`**（2026-10-12 实测）
+              ⇒ 本块画的是占位句，**不是**「不渲染」。**不为了让它出现而造数据**（那是编）。 -->
+      <section class="blk">
         <h2 class="sec-h">本店折扣</h2>
-        <div class="cards">
-          <ProductCard v-for="g in discountGoods" :key="g.Id" :goods="g" />
+        <div v-if="discountGoods.length" class="cards">
+          <ProductCard
+            v-for="g in discountGoods"
+            :key="g.Id"
+            :goods="g"
+            :tag="isNew(g) ? '新品' : ''"
+          />
         </div>
+        <p v-else-if="phDiscount" class="ph">{{ phDiscount }}</p>
       </section>
 
-      <!-- ── ⑤ 新品首发──────────────────────────────────────────────────────────
-           ⚠️ **排序用 `goods.Id DESC`，不是时间列** —— `goods` 表**根本没有时间列**（基线 8 列 +
-              3 处迁移加列，2026-10-12 全查过）。`Id` 是 `AUTO_INCREMENT`（`mall_management_sql.sql:55`）
-              ⇒ **同一家店内 `Id` 越大 = 越晚入库**，这是**可复核的代理**，不是编的数。
-              要真上架时刻得先给 `goods` 加时间列（且不回填存量），那是另一笔。 -->
-      <section
-        v-if="newGoods.length"
-        class="blk"
-        title="新品首发：本店商品按 goods.Id DESC 取前 4。⚠️ goods 表没有时间列，Id 是 AUTO_INCREMENT 的代理（同店内 Id 大 = 入库晚），不是真上架时刻。"
-      >
-        <h2 class="sec-h">新品首发<i class="sec-note">按入库顺序</i></h2>
-        <div class="cards">
-          <ProductCard v-for="g in newGoods" :key="g.Id" :goods="g" />
-        </div>
-      </section>
-
-      <!-- ── ⑥ 猜你喜欢（别家同类的）────────────────────────────────────────────
+      <!-- ── ⑤ 猜你喜欢（别家同类的）—— **用户硬约束：页面最底** ────────────────────
            数据 = 全量 `goodsSelectHome` 里 `MerchantId !== 本店` **且** `GoodType === 本店主类目`
            的，取 4 条。
            ⚠️ 这是全页**唯一**取别家数据的地方，也是「逛完这家还有别家」的出口；一条都取不到
-              （本店主类目全站独一份）⇒ **不渲染**，不拿「暂无推荐」占位。
-           ⚠️ 主类目为空（本店一件商品都没有）⇒ 也算取不到。 -->
-      <section
-        v-if="recommend.length"
-        class="blk"
-        title="猜你喜欢：全量 goodsSelectHome 里别家、且与本店主类目相同的商品取 4 条（本页唯一的跨店出口）。"
-      >
+              （本店主类目全站独一份 / 本店一件商品都没有）⇒ **占位**，不静默消失。 -->
+      <section class="blk">
         <h2 class="sec-h">猜你喜欢<i class="sec-note">别家的{{ mainCategory }}</i></h2>
-        <div class="cards">
+        <div v-if="recommend.length" class="cards">
           <ProductCard v-for="g in recommend" :key="g.Id" :goods="g" />
         </div>
+        <p v-else-if="phRecommend" class="ph">{{ phRecommend }}</p>
       </section>
     </div>
   </div>
 </template>
 
 <script setup>
+// ⚠️ 改前的这 6 条 import 是**挤在同一行**的（先例 `HomePage.vue:284` / `ProductPage.vue:459`）。
+//    那手法的用途写得很清楚：本文件 `:19` 被 `scripts/refs-scan.sh` 扫出一条真引用、
+//    必须保住行号 ⇒「能省一行就省一行」。本笔是**整段重写**（758 → 928 行），行号本来就全变，
+//    没有要保的行号 ⇒ 拆成多行（可读性 > 省行）。
+// ⚠️ 但**前 23 行仍一字未动**（头注释 + 自带顶栏）：`ShopHome.vue:19` 那一行写着 `tokens.css:35`
+//    （「禁 · 嵌套卡片」）这条引用，`docs/agent/evidence/c3-block5/block5-f-shophome-modules.md:137`
+//    按行号钉着它、`refs-scan` 也扫得出来 ⇒ 整段照搬，那一条的**行号零漂移**。
 import { ref, computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { http, handleApiError } from '../api/http'
 import { endpoints } from '../api/endpoints'
 import { getMerchantId, getCustomerId, getUsername, isLoggedIn } from '../api/auth'
-import { follow, unfollow, followState, profile } from '../api/shop'; import { coupons, claim } from '../api/marketing'; import { truthy, couponFace, couponName, couponLine } from '../config/coupon-format'; import { BadgeCheck } from '@lucide/vue'; import ProductCard from '../components/ProductCard.vue'   // ⚠️ **六条 import 同行**（C3 块 5 · B 组续笔，2026-10-12）—— 本文件 `:19` 被 `scripts/refs-scan.sh` 扫出一条真引用（`ShopHome.vue:19:tokens.css:35`），**保它不动**（上面那 23 行头注释与顶栏一字未改），下面新增的模块一律落在其后；同行追加则是「能省一行就省一行」的老手法（同 `HomePage.vue:284` / `ProductPage.vue:459`）。⚠️ `BadgeCheck` 是 `@lucide/vue` 的第三处消费（前两处用户中心），**认证徽章**沿用同一枚图标；券的三件套取自 `config/coupon-format.js`（主页 / 券包弹窗 / 商品页**共用**那一份，别在本页另抄）
+import { follow, unfollow, followState, profile } from '../api/shop'
+import { coupons, claim } from '../api/marketing'
+import { truthy, couponFace, couponName, couponLine } from '../config/coupon-format'
+import { BadgeCheck } from '@lucide/vue'
+import ProductCard from '../components/ProductCard.vue'
+import { productLink } from '../config/product-link'
 
 const route = useRoute()
 const router = useRouter()
@@ -252,11 +281,19 @@ const isSelf = computed(() => !!buyerId && buyerId.toLowerCase() === shopId.toLo
 // 券包 / 领券的**账号**（2026-10-12 起 = **登录名**，不是客户号）。
 // ⚠️ 与 `ProductPage.vue:820` / `HomePage.vue:413` 取值**逐字同款**（`getUsername()`）——
 //    三处必须一起改，`api/auth.js` 是唯一允许读身份的地方。
-// ⚠️ 没有登录名（未登录）⇒ 空串 ⇒ 下面 `loadShopCoupons` 直接早退，整块不渲染。
 const couponAccount = getUsername() || ''
 
-/** 「新品首发」取几条。⚠️ 4 = 本店主网格一行的张数，多了会把页面拉长成第二份商品列表。 */
-const NEW_LIMIT = 4
+/** 热销榜取几根柱。⚠️ 5 是图表规范的推荐区间（5–8 根）的下沿 —— 再多这一块会抢过货架。 */
+const HOT_LIMIT = 5
+/**
+ * 最高那根柱占**图区高度**的百分比。
+ * ⚠️ 为什么不是 100：柱顶上面还要站「数值 + 圆形商品图」（见 `.col-plot` 那条注释），
+ *    柱子铺满就没地方放了。60% 实测刚好：204 + 130 ≤ 340。
+ * ⚠️ 所有柱共用**同一个**比例尺（都除以最大值）⇒ 柱间高度比是真的，只是整体没顶到框顶。
+ */
+const BAR_MAX_PCT = 60
+/** 「新品」红签最多几件。见 `NEW_MAX` 那条注释。 */
+const NEW_MAX = 3
 
 const goods = ref([])
 /** 全量（不过滤商家）—— 只为「猜你喜欢」那一块留着（要从**别家**取）。 */
@@ -268,18 +305,19 @@ const followers = ref(null)
 const busy = ref(false)
 const state = ref('loading')   // 'loading' | 'ready' | 'error'
 const errMsg = ref('')
-/** `/shop/profile` 的载荷；**取不到就留 `null`** ⇒ 头卡那几项各判各的、全不画（不把整页打成 error）。 */
+/** `/shop/profile` 的载荷；**取不到就留 `null`** ⇒ 头卡那几项各判各的（不把整页打成 error）。 */
 const info = ref(null)
 const shopCoupons = ref([])
+/** 券**问过了**（不管问出几张）—— 用来区分「还在读」与「读了是空的」。见 ① 那块的三句话。 */
+const couponsReady = ref(false)
 const claiming = ref('')
-/** 分类筛选的当前值；`''` = 全部。⚠️ 只筛「本店商品」那一格，不动热销 / 新品 / 猜你喜欢。 */
+/** 分类筛选的当前值；`''` = 全部。⚠️ 只筛「本店商品」那一格，不动热销 / 折扣 / 猜你喜欢。 */
 const activeType = ref('')
 
 /**
  * 店名 —— **两个来源，有主有备**：
- *   ① `/shop/profile` 的 `UserName`（**主**，2026-10-12 新端点给的；一件商品都没有的店也拿得到名字）；
+ *   ① `/shop/profile` 的 `UserName`（**主**，新端点给的；一件商品都没有的店也拿得到名字）；
  *   ② 商品行里的 `UserName`（**备**，与 `ProductPage.vue` 的 `currentItem.UserName` 同源）。
- * ⚠️ 改前只有 ② ⇒ 「一家一件商品都没有的店，本页拿不到它的名字」。现在 ① 补上了这条路。
  * ⚠️ 两个来源是**同一列**（`login.UserName`，`GoodsCacheService` 那条 `SELECT UserName FROM login`），
  *    不会打架；都不行时留空，头卡退化成「店铺」/「商」，**不编一个**。
  */
@@ -357,28 +395,69 @@ const mainCategory = computed(() => {
  */
 const totalSold = computed(() => dedupeByCode(goods.value).reduce((n, g) => n + soldOf(g), 0))
 
-/** 热销前三：去重 → 只留有销量的 → 降序 → 取 3。 */
+/** 热销榜：去重 → 只留有销量的 → 降序 → 取 `HOT_LIMIT` 根柱。 */
 const hotGoods = computed(() =>
   dedupeByCode(goods.value)
     .filter((g) => soldOf(g) > 0)
     .sort((a, b) => soldOf(b) - soldOf(a))
-    .slice(0, 3)
+    .slice(0, HOT_LIMIT)
 )
 
-/** 折扣专区：有划线价（`OriginalPrice > 0`）的。⚠️ 当前库 0 条（见模板头注）。 */
+/** 榜首那根的销量（比例尺的分母）。空榜 ⇒ 0。 */
+const hotMax = computed(() => (hotGoods.value.length ? soldOf(hotGoods.value[0]) : 0))
+
+/**
+ * 某根柱的高度百分比 = 自己 ÷ 榜首 × `BAR_MAX_PCT`。
+ * ⚠️ 比例尺**从 0 起**（图表规范：截断的轴会撒谎）⇒ 这根柱一定是榜首那根的几分之几，
+ *    不是「在最小值和最大值之间插值」那种会把 1 件和 10 件画得差不多的做法。
+ */
+const barPct = (g) => {
+  const max = hotMax.value
+  if (!max) return 0
+  return Math.round((soldOf(g) / max) * BAR_MAX_PCT)
+}
+
+/**
+ * 「新品」红签**最多盖几件** = `min(3, ⌊本店商品数 ÷ 3⌋)`。
+ * ⚠️ 这条分母**不是随手取的**：`goods` 表**没有时间列**（基线 8 列 + 3 处迁移加列，2026-10-12
+ *    全查过），唯一可复核的代理是 `Id` —— 它是 `AUTO_INCREMENT`（`mall_management_sql.sql:55`）
+ *    ⇒ **同一家店内 `Id` 越大 = 越晚入库**。
+ * ⚠️ 但「最新的 N 件」若 N 固定，5 件货的店会有 3 件挂着「新品」—— 那枚签就没有信息量了。
+ *    ÷3 保证它**永远是少数**：5 件 ⇒ 1 件，9 件 ⇒ 3 件，43 件 ⇒ 3 件（封顶）。
+ * ⚠️ 要真上架时刻得先给 `goods` 加时间列（且不回填存量），那是另一笔。
+ */
+const newCount = computed(() => Math.min(NEW_MAX, Math.floor(goods.value.length / 3)))
+
+/** 被盖上「新品」的那几件的键：有码用码、无码用 `id:` 前缀（同 `dedupeByCode` 的空码口径）。 */
+const newKeys = computed(() => {
+  const key = (g) => String(g.ProductCode || '') || 'id:' + g.Id
+  const top = dedupeByCode(goods.value)
+    .slice()
+    .sort((a, b) => Number(b.Id) - Number(a.Id))
+    .slice(0, newCount.value)
+  return new Set(top.map(key))
+})
+
+/** 这一件是不是「新品」（判据、上限、理由全在上面两段注释里）。 */
+const isNew = (g) => {
+  if (newCount.value <= 0) return false
+  return newKeys.value.has(String(g.ProductCode || '') || 'id:' + g.Id)
+}
+
+/** 折扣专区：有划线价（`OriginalPrice > 0`）的。⚠️ 当前库 0 行（见模板 ④ 的注释）。 */
 const discountGoods = computed(() => goods.value.filter((g) => Number(g.OriginalPrice) > 0))
 
-/** 新品首发：按 `Id` 降序取前 `NEW_LIMIT`（`Id` 是 `AUTO_INCREMENT` 的代理，见模板头注）。 */
-const newGoods = computed(() =>
-  goods.value.slice().sort((a, b) => Number(b.Id) - Number(a.Id)).slice(0, NEW_LIMIT)
-)
-
-/** 猜你喜欢：别家的、与本店主类目相同的，取 4 条。 */
+/**
+ * 猜你喜欢：别家的、与本店主类目相同的，取 4 条。
+ * ⚠️ 用 `dedupeByCode`：别家的同码重复行同样不该在推荐格里出现两次。
+ */
 const recommend = computed(() => {
   if (!mainCategory.value) return []
-  return allGoods.value
-    .filter((g) => String(g.MerchantId) !== shopId && String(g.GoodType || '') === mainCategory.value)
-    .slice(0, 4)
+  return dedupeByCode(
+    allGoods.value.filter(
+      (g) => String(g.MerchantId) !== shopId && String(g.GoodType || '') === mainCategory.value
+    )
+  ).slice(0, 4)
 })
 
 /** 认证徽章 —— **只有 `approved` 才画**（`pending` / `rejected` / 空串一律不画，见模板头注）。 */
@@ -407,7 +486,7 @@ const opened = computed(() => {
   return Math.floor(days / 30) + ' 个月'
 })
 
-/** 头卡事实行**除徽章外**的三项（各自为空就不进数组 ⇒ 不画）。 */
+/** 头卡事实行**除徽章外**的三项（各自为空就不进数组 ⇒ 不画那一项）。 */
 const facts = computed(() => {
   const out = []
   if (mainCategory.value) out.push({ k: '主营', v: mainCategory.value })
@@ -415,6 +494,23 @@ const facts = computed(() => {
   if (totalSold.value > 0) out.push({ k: '累计售出', v: totalSold.value + ' 件' })
   return out
 })
+
+/**
+ * 空块那一行话的**统一出口**（载入中 / 就绪但空 / 出错三种）。
+ * ⚠️ 出错时回**空串**（⇒ 那一块整行不渲染）：主块（本店商品）已经把错误 + 重试按钮放在手边了，
+ *    每一块再喊一遍「没取到」只是噪音。
+ * ⚠️ 载入中不冒充「没有」：`loading` 时说「正在读取…」—— 这也正是用户那条
+ *    「占位 ≠ 造假」的边界。
+ */
+const phText = (has, text) => {
+  if (state.value === 'loading') return '正在读取…'
+  if (state.value !== 'ready') return ''
+  return has ? '' : text
+}
+
+const phHot = computed(() => phText(hotGoods.value.length > 0, '本店还没有销售记录'))
+const phDiscount = computed(() => phText(discountGoods.value.length > 0, '本店暂时没有折扣商品'))
+const phRecommend = computed(() => phText(recommend.value.length > 0, '暂时没有可推荐的同类商品'))
 
 /**
  * 店铺档案（`/shop/profile`）—— 头卡的店名 / 开店时长 / 认证徽章。
@@ -435,7 +531,9 @@ const loadProfile = async () => {
  * 本店可领券 —— `coupons(account, limit, thisWeek, merchantAccount)` 的第 4 参就是本店。
  * ⚠️ 第 3 参（`thisWeek`）**不传**：本块要的是「本店现在能领的**全部**」（含旧券），
  *    不是主页那块「本周新发布」；`q()` 见空值不发这个键 ⇒ 后端不按周过滤。
- * ⚠️ 未登录（无 `couponAccount`）⇒ **一个请求都不发**（端点不在白名单，发出去只会 401）。
+ * ⚠️ 未登录（无 `couponAccount`）⇒ **一个请求都不发**（端点不在白名单，发出去只会 401）；
+ *    那一格的占位句由模板直接给（「登录后可领取本店优惠券」）。
+ * ⚠️ 无论成功失败都把 `couponsReady` 置真 —— 否则出过一次错，那一格会永远停在「正在读取…」。
  */
 const loadShopCoupons = async () => {
   if (!couponAccount || !shopId) return
@@ -444,6 +542,8 @@ const loadShopCoupons = async () => {
     shopCoupons.value = r && r.success && Array.isArray(r.list) ? r.list : []
   } catch (e) {
     console.error('本店优惠券读取失败', e)
+  } finally {
+    couponsReady.value = true
   }
 }
 
@@ -651,11 +751,14 @@ button { background: none; border: 0; cursor: pointer; }
        transition: background .15s, border-color .15s, color .15s; }
 .act:hover:not(:disabled) { border-color: var(--ink-3); color: var(--ink); }
 .act:disabled { color: var(--ink-3); cursor: default; }
-/* 「关注」= 全页**唯一**一处实心块 —— skill 的「把胆量花在一个地方、其余保持安静」。
+/* 「关注」= 头卡里唯一一处实心块 —— 「把胆量花在一个地方、其余保持安静」。
    未关注 = 实心 `--brand` + 白字（同 `FriendRoom.vue` 的 `.btn-solid`）；
    ⚠️ 「已关注」**退回描边**、不保持实心：它是个**状态**，不再是一次邀请 ——
    一个常亮的实心按钮会一直喊「点我」，而这里已经没有可做的动作。
-   ⚠️ 两态都**不吃** `--accent`（朱砂在本仓只负责价格 / 促销 / 未读）。 */
+   ⚠️ 两态都**不吃** `--accent`（朱砂在本仓只负责价格 / 促销 / 未读）。
+   ⚠️ 「全页唯一实心块」那句**本笔已收窄为「头卡里唯一」**：热销榜**榜首那根柱**也用实心
+      `--brand`（见 `.col-bar-hero`）。两者不冲突的理由写在那一处 —— 柱是**数据标记**，
+      没有任何可点的暗示；而这条纪律要管的是**控件**之间抢注意力。 */
 .act-on { background: var(--brand); border-color: var(--brand); color: #fff; }
 .act-on:hover:not(:disabled) { background: var(--brand-hover); border-color: var(--brand-hover); color: #fff; }
 
@@ -667,7 +770,10 @@ button { background: none; border: 0; cursor: pointer; }
 .fact { font-size: var(--fs-xs); white-space: nowrap; }
 .fact i { font-style: normal; color: var(--ink-3); margin-right: var(--s1); }
 .fact b { color: var(--ink-2); font-weight: var(--fw-med); font-variant-numeric: tabular-nums; }
-/* 认证徽章 —— 全页**唯一**用 `--success` 的地方（它就是一枚「已核验」的标记，不是装饰）。
+/* 四项全空时的那一句（用户新规：数据不足 → 占位，不静默消失）。比照实项再浅一档 ——
+   它说的是「这里本该有东西」，不是信息本身。 */
+.fact-none { font-size: var(--fs-xs); color: var(--ink-3); }
+/* 认证徽章 —— 「已核验」的一枚标记，不是装饰。
    ⚠️ 只在 `CertStatus === 'approved'` 时才会被渲染出来（判据在 `<script>` 的 `certified`）。 */
 .fact-cert { display: inline-flex; align-items: center; gap: var(--s1); height: 22px; padding: 0 var(--s3);
              border-radius: var(--r1); background: var(--success-ground); color: var(--success);
@@ -676,8 +782,8 @@ button { background: none; border: 0; cursor: pointer; }
 
 .wrap { max-width: 1180px; margin: 0 auto; padding: var(--s6) var(--s5) var(--s8); }
 .sec-h { font-family: var(--font-display); font-size: var(--fs-lg); font-weight: var(--fw-med); line-height: 1.3; }
-/* 栏题右侧那半句说明（「按销量排序」/「别家的 电子用品」）—— 它给的是这一块的**判据**，
-   不是装饰 ⇒ 用最浅一档灰、字号降到 `--fs-xs`，别跟栏题抢。 */
+/* 栏题右侧那半句说明（「按销量排序」）—— 它给的是这一块的**判据**，不是装饰 ⇒
+   用最浅一档灰、字号降到 `--fs-xs`，别跟栏题抢。 */
 .sec-note { margin-left: var(--s2); font-style: normal; font-size: var(--fs-xs); font-weight: var(--fw-reg); color: var(--ink-3); }
 
 /* ── 分块间距 ────────────────────────────────────────────────────────────────
@@ -685,9 +791,18 @@ button { background: none; border: 0; cursor: pointer; }
    再叠一层（那样首块会比设计稿低 48px）。块间距（48）> 块内间距（24）⇒ 一眼能看出分了几块。 */
 .blk + .blk { margin-top: var(--s7); }
 
+/* ── 占位（用户新规：数据不足 → 占位，不静默消失）─────────────────────────────
+   ⚠️ 一句**素话**，不套框、不配色、不加图标：占位是「这里本该有东西」的**说明**，
+   不是内容本身 —— 给它一个卡框，就等于把「没有」画成了「有」。
+   ⚠️ 文案一律**据实**（见 `<script>` 的 `phText` 与模板 ①②④⑤ 四处）：
+   「正在读取…」≠「没有」，「登录后可领」≠「本店没有券」。 */
+.ph { margin-top: var(--s5); font-size: var(--fs-sm); color: var(--ink-3); }
+.ph-link { margin-left: var(--s3); color: var(--brand-ink); text-decoration: none; }
+.ph-link:hover { text-decoration: underline; }
+
 /* ── ① 本店优惠券 ────────────────────────────────────────────────────────────
-   与主页「领券中心」的 `.tk` 同一个视觉语言（`--surface-2` 底 + 1px `--line` + `--r2`），
-   但**不共用那份 CSS**：那边是「横向条 + 越位渐隐 + `》` 展开」的 5 张版式，这里最多 3 张、
+   与主页「领券中心」的 `.tk` 同一个视觉语言（`--surface` 底 + 1px `--line` + `--r2`），
+   但**不共用那份 CSS**：那边是「横向条 + 越位渐隐 + `》` 展开」的版式，这里最多 3 张、
    且是本店专属 ⇒ 直接换行铺开，不需要裁切那套。 */
 .cpns { margin-top: var(--s5); display: flex; flex-wrap: wrap; gap: var(--s3); list-style: none; }
 /* ⚠️ `flex: 1 1 260px` —— 260 是「面额 + 券名 + 门槛 + 领取」四段不换行的最小宽（实测本页券名
@@ -714,9 +829,83 @@ button { background: none; border: 0; cursor: pointer; }
            background: var(--brand-soft); white-space: nowrap; }
 .cpn-get:disabled { color: var(--ink-3); background: var(--surface-3); border-color: var(--line-2); cursor: default; }
 
-/* ── ② 分类筛选 chip ─────────────────────────────────────────────────────────
-   选中态走 `--brand-soft` + `--brand-ink` **不是**实心 `--brand` —— 全页唯一的实心块是
-   「关注」（见 `.act-on` 那条注释）；chip 抢了那个位置，头卡那个按钮就没力了。 */
+/* ══ ② 本店热销：**竖直柱状图** ═══════════════════════════════════════════════
+   用户原话「本店热销这块要竖的那种」⇒ X 轴 = 商品、Y 轴 = 销量。
+
+   ⚠️ 每一列的**自下而上**是：柱 → 圆形商品图 → 数值。柱底**共一条 0 基线**，柱高同一个
+      比例尺 ⇒ 图与图之间的高低差就是销量差，「领奖台」那个感觉是从**数据**来的，
+      不是画上去的台阶。数值与圆图都**骑在自己那根柱的顶上**跟着走，所以三列会一起错落。
+
+   ⚠️ **图表规范的取材**（本笔联网查的，逐条对上，来源见交付说明）：
+      · 「Always start the value axis at zero」⇒ 比例尺从 0 起（`barPct` 除以榜首，不是插值）
+      · 「Columns → value on the cap」⇒ 数值在**柱顶上方**，不写在柱子正中
+      · 「slight rounding on top only」4px、基线方角 ⇒ `--r1 --r1 0 0`
+      · 「Rounding the top of a bar **suggests the value is rounded**」⇒ 圆的只有**商品图**，
+        柱子本身仍是直边；数字给的是精确值，两者不冲突
+      · 「Limit to 5–8 bars」⇒ `HOT_LIMIT = 5`
+      · 「reserving a highlight color for a hero bar」+「text should never wear the data color」
+        ⇒ 榜首那根走 `--brand`，其余 `--surface-3`；数值一律 `--ink-2`
+      · 轴 / 标签走既有 token：基线 `--axis-line`、名次 `--ink-3`、名 `--ink-2`
+
+   ⚠️ `.chart` 用 `fit-content` **不是**铺满 1180：只有 3–5 根柱时铺满会让柱间空得能跑马。
+      `grid-auto-columns: 184px` 固定列宽 ⇒ 柱与柱的间距**不随柱数变化**。
+      ⚠️ 184 这个数是**量出来的、不是拍的**：`.col-foot` 的内容宽 = 184 − 2×`--s3`(12) = 160，
+        再让给名次（`--fs-xs` 的「1」≈ 8px）+ `--s2` 间距 ⇒ 商品名拿到约 **146px**，
+        够「无线蓝牙耳机 声谷标准版」这种最长的名字**两行排完**且不把「标准版」切成「标/准版」。
+        改前是 168 + `--s4` 内边距（名宽 ≈ 122px）⇒ 截图里「声谷标准版」与「65W 双口」
+        都被断在半个词上。5 根柱时 5×184 + 4×24 = 1016 ≤ 1180，仍装得下。 */
+.chart { --chart-h: 340px; margin-top: var(--s5); position: relative; width: fit-content;
+         display: grid; grid-auto-flow: column; grid-auto-columns: 184px; column-gap: var(--s5); }
+/* 0 基线：**贯穿整行**的一条 1px。⚠️ 不能逐列各画一段 —— 列间有 `column-gap`，逐列画会在
+   gap 处断成虚线，而「所有柱从同一条 0 线长出来」正是这张图要说的第一件事。
+   位置 = 图区高度：`.col-plot` 的 border-box 高就是 `--chart-h` ⇒ 基线正好压在它底边上。 */
+.chart::after { content: ''; position: absolute; left: 0; right: 0; top: var(--chart-h);
+                height: 1px; background: var(--axis-line); }
+/* 整列 = 一个链接（`<a>` 内不得嵌交互内容 ⇒ 里面全是 `<span>`，见模板注释）。 */
+.col { display: flex; flex-direction: column; color: inherit; text-decoration: none; }
+/* 图区：**底对齐**的弹性列 ⇒ 整组（数值 + 圆图 + 柱）贴着基线往上长。
+   ⚠️ `--chart-h` 必须是**确定高度**：柱的 `height: N%` 是按它算的（百分比要有确定的父高）。 */
+.col-plot { height: var(--chart-h); display: flex; flex-direction: column;
+            justify-content: flex-end; align-items: center; padding: 0 var(--s4); }
+/* 数值 —— 骑在柱顶。⚠️ `--font-mono` + `tabular-nums`：五根柱的数字要能纵向对得上；
+   ⚠️ 颜色是 `--ink-2` **不是**柱色：图表规范写明「文字不该穿数据的颜色」。
+   ⚠️ 显式 `line-height`：等宽族与本页正文不同族（同 `.hd-nm` / `.cpn-face` 那两处）。 */
+.col-val { flex: none; margin-bottom: var(--s2); font-family: var(--font-mono); font-size: var(--fs-sm);
+           font-weight: var(--fw-med); line-height: 1.2; color: var(--ink-2);
+           font-variant-numeric: tabular-nums; }
+/* 圆形商品图（用户素材里的「圆图 / 图片圆头」）—— 直径 = 柱宽 ⇒ 它读起来是**这根柱的圆头**，
+   而不像一张浮在旁边的缩略图。⚠️ 1px 发丝边不能省：图缺失时圆是 `--img` 灰底，
+   而柱子是 `--surface-3`，两个灰挨着会糊成一块。 */
+.col-cap { flex: none; margin-bottom: var(--s2); width: 96px; height: 96px; border-radius: 50%;
+           overflow: hidden; background: var(--img); border: 1px solid var(--line); }
+.col-cap img { width: 100%; height: 100%; object-fit: cover; }
+/* 柱 —— 顶部 4px 圆角、**基线方角**（图表规范的「slight rounding on top only」）。
+   高度由 JS 按比例尺算好（`barPct`），圆心对齐基线。 */
+.col-bar { flex: none; width: 96px; border-radius: var(--r1) var(--r1) 0 0; background: var(--surface-3);
+           transition: background .15s; }
+/* 榜首那根 —— 全页**第二处**实心 `--brand`（第一处是头卡的「关注」按钮）。
+   ⚠️ 为什么不算破坏「一个实心块」那条纪律：那条管的是**控件**之间抢注意力（按钮喊「点我」），
+      柱是**数据标记**、没有任何可点的暗示；而图表规范本身也建议给「hero bar」一个高亮色。
+      两者在截图里是否真的互相压住，是**量出来的**，不是断言的（见交付说明的自评）。 */
+.col-bar-hero { background: var(--brand); }
+.col:hover .col-bar { background: var(--line-2); }
+.col:hover .col-bar-hero { background: var(--brand-hover); }
+/* 轴下方：名次 + 商品名。
+   ⚠️ 左内边距 `--s3` **故意比 `.col-plot` 的 `--s4` 小一档**（不是为了对齐，是为了给名字让宽）：
+   列宽固定 184 ⇒ 每一像素都是从商品名身上拿的，而轴下这行是全图**唯一需要排中文**的地方。
+   两行截断（`.col-nm`）兜住更长的名字 —— 名字不换行/不省略号，因为「标准版」被吃掉
+   会让人分不清是哪一件（那件 299 的耳机有两行同码记录，名字正是唯一的区分）。 */
+.col-foot { display: flex; align-items: baseline; gap: var(--s2); padding: var(--s3) var(--s3) 0; }
+/* 名次 —— 一枚最轻的数字。⚠️ 不吃 `--accent`：朱砂管价格 / 促销 / 未读，名次不是那三类。 */
+.col-no { flex: none; font-family: var(--font-mono); font-size: var(--fs-xs); color: var(--ink-3);
+          font-variant-numeric: tabular-nums; }
+.col-nm { font-size: var(--fs-xs); line-height: 1.4; color: var(--ink-2);
+          display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.col:hover .col-nm { color: var(--ink); }
+
+/* ── ③ 分类筛选 chip ─────────────────────────────────────────────────────────
+   选中态走 `--brand-soft` + `--brand-ink` **不是**实心 `--brand` —— 实心留给了「关注」与
+   榜首那根柱（见那两处注释）；chip 再抢一个，那两处就没力了。 */
 .chips { margin-top: var(--s4); display: flex; flex-wrap: wrap; gap: var(--s2); }
 .chip { height: 30px; padding: 0 var(--s4); border: 1px solid var(--line); border-radius: var(--r1);
         background: var(--surface); font-size: var(--fs-xs); color: var(--ink-2);
@@ -738,21 +927,9 @@ button { background: none; border: 0; cursor: pointer; }
 .retry:hover { border-color: var(--ink-3); color: var(--ink); }
 .note-err .retry { margin-left: var(--s2); }
 
-/* ── ③⑤⑥ 商品格 —— `.cards` 是**栅格**（版面），`.card` 本体已搬进 `src/components/ProductCard.vue`
-   （C3 块 5 · B 组续笔，2026-10-12）。
-   ⚠️ 改前本段的注释写着「与 `ProductPage.vue` 的 `.card` 同一套形制」—— **那是错的**（改前实测：
-   本页卡 1/1 图、无框、整值价；主页卡 4/3 图、有框、三段价），对照图见
-   `docs/agent/evidence/c3-block5/out-b5d-cards-before.png`。收成一件之后那句话才成立 ——
-   而且现在是**结构**保证的，不靠注释声明。 */
+/* ── ③④⑤ 商品格 —— `.cards` 是**栅格**（版面），`.card` 本体已搬进 `src/components/ProductCard.vue`。
+   ⚠️ 自本笔起这一段的注释不再说「与 `ProductPage.vue` 的 `.card` 同一套形制」—— 那句话改前是**错的**
+   （改前实测：本页卡 1/1 图、无框、整值价；主页卡 4/3 图、有框、三段价），收成一件之后
+   「三处一致」是**结构**保证的，不靠注释声明。 */
 .cards { margin-top: var(--s5); display: grid; grid-template-columns: repeat(4, 1fr); gap: var(--s5); }
-
-/* ── ③ 本店热销：**3 列**（比主网格宽一档）+ 名次 ──────────────────────────────
-   ⚠️ 3 列不是随手取的：这一块的**全部信息**就是「前三名」这个顺序 ⇒ 序号要有地方站，
-   而 4 列里挤一枚序号会把卡压得比主网格还小，读起来像「缩水的主网格」。 */
-.shelf { margin-top: var(--s5); display: grid; grid-template-columns: repeat(3, 1fr); gap: var(--s5); }
-.shelf-item { display: flex; flex-direction: column; gap: var(--s2); min-width: 0; }
-/* 名次 —— 一枚最轻的方签。⚠️ 不吃 `--accent`：朱砂管价格 / 促销 / 未读，名次不是那三类。 */
-.rk { align-self: flex-start; min-width: 22px; height: 22px; line-height: 20px; padding: 0 var(--s2);
-      text-align: center; border: 1px solid var(--line-2); border-radius: var(--r1);
-      font-size: var(--fs-xs); color: var(--ink-3); font-variant-numeric: tabular-nums; }
 </style>
