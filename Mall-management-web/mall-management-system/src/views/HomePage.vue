@@ -235,12 +235,17 @@
       </section>
 
       <!-- ── 推荐区（稿 `:820-826`）──
-           真实数据 `goodsList`（`goodsSelectHome`）。卡结构照稿（`.card > .card-img + .card-tx >
-           .card-name + .card-foot > .card-price + .card-buy`）。
+           真实数据 `goodsList`（`goodsSelectHome`）。
+           ⚠️ 卡片在 **C3 块 5 · B 组续笔（2026-10-12）收成公共组件** `components/ProductCard.vue`
+              （主页 / 店铺主页 / 商品页**三处共用**，`ShopHome` / `ProductPage` 也是这一枚）。
+              外观与字段的逐条对照、以及**为什么三处能收成一件**（7 个 query 参数 vs 4 个、
+              导航副作用、`<a>` 内不嵌 `<button>`）都写在那个组件的文件头。
+           ⚠️ **本页原来那份卡的三件事已随组件接管**：4/3 有框白底、三段价（`¥` + 整数 + `.` 小数）、
+              `disabled` 加购钮。本页**只留**「导航前清搜索缓存」这一条 ≠ 另两处的行为 ⇒ 走 `beforeNav`。
            ⚠️ 稿的 `.card-tags`（标签）与 `.card-price .was`（划线价）本仓**无对应字段**
-              ⇒ 不落结构、也不搬这两条规则（搬进来就是悬空类名）。
-           ⚠️ `.card-meta` 稿写的是「店铺 · 已售」（`CARD` 的 `g.shop · g.sold`），本仓无店铺 / 销量
-              字段 ⇒ 改落**真实存在**的 `goods.GoodType`（分类），不编数据。 -->
+              ⇒ 组件里也不落（搬进来就是悬空类名）。
+           ⚠️ **元信息行改过**：原 `.card-meta` 画 `goods.GoodType`（分类），现让给「店名 + 已售 N 件」
+              —— 用户本笔点名要的。分类的落点仍在（主页左侧分类导航 / 搜索页分类树 / `ShopHome` 筛选 chip）。 -->
       <section class="rec">
         <div class="rec-h">
           <h2>为你推荐</h2>
@@ -248,29 +253,7 @@
         </div>
         <p v-if="goodsList.length === 0" class="empty-tip">暂无商品</p>
         <div v-else class="grid">
-          <article v-for="goods in goodsList" :key="goods.Id" class="card" @click="toGoodsDetail(goods)">
-            <div class="card-img">
-              <img :src="goods.GoodImg" alt="商品图" />
-            </div>
-            <div class="card-tx">
-              <div class="card-name">{{ goods.GoodName }}</div>
-              <div class="card-foot">
-                <div class="card-price">
-                  <span class="sym">¥</span>
-                  <span class="int">{{ getPriceInt(goods.Price) }}</span>
-                  <span class="dec">.{{ getPriceDec(goods.Price) }}</span>
-                </div>
-                <!-- ⚠️ 稿的 `.card-buy` 是加购按钮（稿 `:917`，带 `CART_SVG`）。本仓本页的卡片**只进详情**
-                     （`toGoodsDetail`），加购要等「完整购物车」笔 ⇒ 落 `disabled` + `title`。
-                     ⚠️ 不挂 `data-slot`：稿没给这一枚 `data-slot`，挂了会让「Vue 里 data-slot 条数」
-                     与「稿里 4 条」对不上；它登记在 slot-registry.md「稿外死控件」一节。 -->
-                <button type="button" class="card-buy" disabled title="预留 · 加入购物车（待 C3〈购物车〉；本页卡片现只进详情页）">
-                  <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 5h10l-1 8.4a1 1 0 0 1-1 .9H5a1 1 0 0 1-1-.9z" stroke-linejoin="round"/><path d="M6 5V3.9a2 2 0 1 1 4 0V5" stroke-linecap="round"/></svg>
-                </button>
-              </div>
-              <div class="card-meta">{{ goods.GoodType }}</div>
-            </div>
-          </article>
+          <ProductCard v-for="goods in goodsList" :key="goods.Id" :goods="goods" :before-nav="onCardNav" />
         </div>
       </section>
 
@@ -315,9 +298,8 @@
 
 <script setup>
 import { ref, computed, onMounted, onUnmounted } from 'vue'
-import { useRouter } from 'vue-router'
 import { http, handleApiError } from '../api/http'
-import { endpoints } from '../api/endpoints'; import { getCustomerId } from '../api/auth'; import { coupons, claim, claimBatch } from '../api/marketing'; import { truthy, couponFace, couponName, couponLine } from '../config/coupon-format'   // ⚠️ 四条 import **同行**（C3 块 5 · commit 1，2026-10-11；同日「券的信息架构重排」又加两处）—— 本文件 `:119` / `:242` / `:262` 等多处被按行号引，**能省一行就省一行**（同 `ProductPage.vue:426` 那条的做法）。⚠️ `myCoupons` 已随右栏券包一并**删掉**，格式化三件套改从 `config/coupon-format.js` 取（主页与券包弹窗**共享**，见那个文件头）。⚠️ **A 组 · A7 后半**（2026-10-12）：券卡原先只有「金额 / 门槛 / NEW」三样，用户点名**缺券名 + 券类型** ⇒ 追加 `couponName`（券名）与 `couponLine`（类型·门槛合成一行，内部拿 `couponCond` 拼），仍从同一份 `coupon-format.js` 取。⚠️ `couponCond` 随之**从本页 import 里去掉**（券包弹窗仍直接用）；本页若还要裸用它，`eslint no-unused-vars` 会当场红
+import { endpoints } from '../api/endpoints'; import { getCustomerId } from '../api/auth'; import { coupons, claim, claimBatch } from '../api/marketing'; import { truthy, couponFace, couponName, couponLine } from '../config/coupon-format'; import ProductCard from '../components/ProductCard.vue'   // ⚠️ 四条 import **同行**（C3 块 5 · commit 1，2026-10-11；同日「券的信息架构重排」又加两处）—— 本文件 `:119` / `:242` / `:262` 等多处被按行号引，**能省一行就省一行**（同 `ProductPage.vue:426` 那条的做法）。⚠️ `myCoupons` 已随右栏券包一并**删掉**，格式化三件套改从 `config/coupon-format.js` 取（主页与券包弹窗**共享**，见那个文件头）。⚠️ **A 组 · A7 后半**（2026-10-12）：券卡原先只有「金额 / 门槛 / NEW」三样，用户点名**缺券名 + 券类型** ⇒ 追加 `couponName`（券名）与 `couponLine`（类型·门槛合成一行，内部拿 `couponCond` 拼），仍从同一份 `coupon-format.js` 取。⚠️ `couponCond` 随之**从本页 import 里去掉**（券包弹窗仍直接用）；本页若还要裸用它，`eslint no-unused-vars` 会当场红
 
 // ── 未登录可逛公开面（2026-10-06 用户改判 2，登记见 progress.md §5-AG (13)）────────────
 // 本页原有三条「未登录 ⇒ 弹登录提示」拦截（goSearch / searchByType / toGoodsDetail）与一条
@@ -329,7 +311,9 @@ import { endpoints } from '../api/endpoints'; import { getCustomerId } from '../
 // （config/nav.js 的 ANON_RIGHT）；登录后回原目标由路由守卫 + LoginPage.landingAfterLogin 承担。
 // ⚠️ 本页因此**不再有匿名分支** ⇒ `isLoggedIn` 的 import 与 `isLogin` computed 一并删除（原 `:119` 保留为按语，供 `main.js:21` 的指向不悬空）。
 
-const router = useRouter()
+// ⚠️ `const router = useRouter()` 已删（C3 块 5 · B 组续笔，2026-10-12）：本页**最后一处**
+//    `router.push` 就在 `toGoodsDetail` 里，随卡片搬进 `ProductCard.vue` 的 `<router-link>` 了。
+//    本页剩下的跳转全走 `emit('go-search')`（`searchByType` / 模板里的 `@click`）⇒ 壳层去路由。
 // eslint-disable-next-line no-undef
 const emit = defineEmits(['go-search'])
 
@@ -392,27 +376,25 @@ const getGoodType = async () => {
   }
 }
 
-// 主页进入商品页
-const toGoodsDetail = (goods) => {
-  // 未登录放行（2026-10-06 改判 2，§5-AG (13)）：`/product` 已由路由 `meta.public` 判为公开面。
-  // 这 4 行原是一道「弹登录提示 + return」的拦截，现已删除；购买动作仍锁在 ProductPage 的两处守卫里。
-  // ⚠️ 匿名进详情页**不会**触发 401：挂载期只打 goodsSelectHome / GoodsProductCodeSelect / productCodePrice，三条都在白名单。
-  // ⚠️ 下面 7 个 query 参数原样保留：会话过期后 `orderAdd` 401 的回跳靠它们还原本页（T-guard-6 判据）。
+// 主页进入商品页 —— **导航动作本身已搬进 `components/ProductCard.vue`**（三处共用那一枚），
+// 本页只剩**自己独有的那一步**：清搜索缓存。挂在组件的 `beforeNav` 上。
+//
+// ⚠️ 为什么只剩两步（原 `toGoodsDetail` 还有第三个动作）：`router.push` 没了 —— 组件的
+//    `<router-link>` 自己会跳，再 push 一次是同一目标的双跳。
+// ⚠️ 两个 `sessionStorage` 动作逐字保留：
+//    · `removeItem('SEARCH_KEYWORD')` —— 从主页点进商品，意味着「搜索」那一段重新开始
+//      （`GoodsSelect.vue:174` 会读它还原上次搜索；不删就会把用户带回上一次的关键词）；
+//    · `setItem('FROM_PAGE','home')` —— ⚠️ 全仓**只写不读**（`api/auth.js:10` 的清单里
+//      `FROM_PAGE 1` 就是这一处）；**不删它**：删了属于别的笔的账，先照旧。
+// ⚠️ 未登录放行（2026-10-06 改判 2，§5-AG (13)）：`/product` 已由路由 `meta.public` 判为公开面。
+//    匿名进详情页**不会**触发 401：挂载期只打 goodsSelectHome / GoodsProductCodeSelect /
+//    productCodePrice，三条都在白名单。
+// ⚠️ **7 个 query 参数**（`Id/MerchantId/GoodName/Price/GoodImg/GoodType/ProductCode`）原样保留：
+//    会话过期后 `orderAdd` 401 的回跳靠它们还原本页（T-guard-6 判据，`progress.md:1441`
+//    明写「7 个 query 参数都要在」）⇒ 组件的 query 组装**必须**与这里逐字同序，别改成 4 个。
+const onCardNav = () => {
   sessionStorage.setItem('FROM_PAGE', 'home')
   sessionStorage.removeItem('SEARCH_KEYWORD')
-
-  router.push({
-    path: '/product',
-    query: {
-      Id: goods.Id,
-      MerchantId: goods.MerchantId,
-      GoodName: goods.GoodName,
-      Price: goods.Price,
-      GoodImg: goods.GoodImg,
-      GoodType: goods.GoodType,
-      ProductCode: goods.ProductCode
-    }
-  })
 }
 
 onMounted(async () => {
@@ -432,17 +414,7 @@ const goToSlide = (index) => {
   currentIndex.value = index
 }
 
-const getPriceInt = (price) => {
-  if (!price) return '0'
-  return parseInt(price) || '0'
-}
-
-const getPriceDec = (price) => {
-  if (!price) return '00'
-  const s = String(price)
-  const dot = s.split('.')[1]
-  return dot ? dot.padEnd(2, '0').slice(0, 2) : '00'
-}
+// ⚠️ `getPriceInt` / `getPriceDec` 已随卡片搬进 `components/ProductCard.vue`（本页只那儿用过）。
 
 // ══════════════════════════════════════════════════════════════════════════════
 // 券包 / 领券中心（C3 块 5 · commit 1，2026-10-11）—— 模板在 `tickets` section 那一段。
@@ -1250,106 +1222,12 @@ button {
   gap: var(--s4);
 }
 
-/* 商品卡：容器感来自**明度台阶**，不来自圆角和阴影（稿 `:477-484`）。
-   页底 / 卡片白面 / 图占位 = 0 / 13.8% / 25.5% 三级。 */
-.card {
-  background: var(--surface);
-  border: 1px solid var(--line);
-  border-radius: var(--r2);
-  overflow: hidden;
-  cursor: pointer;
-  transition: border-color 0.16s;
-}
-.card:hover {
-  border-color: var(--brand);
-}
-.card-img {
-  aspect-ratio: 4 / 3;
-  background: var(--img);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  transition: background 0.2s;
-}
-.card:hover .card-img {
-  background: var(--brand-soft);
-}
-/* 稿的 `.card-img` 是**空图框**（稿 JS 里只有「商品图」三个字）；本仓有真图 ⇒ 保留 `<img>`，
-   与 GoodsSelect `.thumb` / ChatRoom `.pc .th` 同一处理（不为了照稿丢真功能）。 */
-.card-img img {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-}
-.card-tx {
-  padding: var(--s3) var(--s4) var(--s4);
-}
-.card-name {
-  font-size: var(--fs-sm);
-  font-weight: var(--fw-reg);
-  color: var(--ink);
-  line-height: 1.45;
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-  min-height: 2.9em;
-}
-.card-foot {
-  margin-top: var(--s2);
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--s2);
-}
-.card-price {
-  display: flex;
-  align-items: baseline;
-  gap: 2px;
-  color: var(--accent);
-}
-.card-price .sym {
-  font-size: 13px;
-  font-weight: var(--fw-med);
-}
-.card-price .int {
-  font-size: 22px;
-  font-weight: var(--fw-semi);
-  letter-spacing: -0.5px;
-}
-.card-price .dec {
-  font-size: 14px;
-  font-weight: var(--fw-med);
-}
-/* 加购：平时幽灵圆钮，**卡片 hover** 才转实心（稿 `:536-547`：12 个实心按钮会把货架变成按钮墙）。
-   ⚠️ 稿还有一条 `.card-buy:hover`（`:545`），本仓这枚恒 `disabled` ⇒ 那条不搬，只留卡片级那条。 */
-.card-buy {
-  flex: none;
-  width: 30px;
-  height: 30px;
-  padding: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: transparent;
-  color: var(--ink-3);
-  border: 1px solid var(--line-2);
-  border-radius: 50%;
-  transition: background 0.15s, color 0.15s, border-color 0.15s;
-}
-.card:hover .card-buy {
-  background: var(--brand);
-  border-color: var(--brand);
-  color: #fff;
-}
-.card-buy[disabled] {
-  cursor: not-allowed;
-}
-.card-meta {
-  margin-top: var(--s2);
-  font-size: var(--fs-xs);
-  color: var(--ink-3);
-}
+/* 商品卡样式（`.card` / `.card-img` / `.card-tx` / `.card-name` / `.card-foot` / `.card-price` /
+   `.card-buy` / `.card-meta`）**已整段搬进** `src/components/ProductCard.vue` 的 `<style scoped>`
+   （C3 块 5 · B 组续笔，2026-10-12；三处共用那一枚）。
+   ⚠️ 别在本页再留一份：`<style scoped>` 的作用域属性只打在子组件**根节点**上，本页写了也选不中卡**内部**，
+   而「两页一致」正是靠「只有一份」保证的。栅格（`.grid` 的 `auto-fill minmax(190px,1fr)`）
+   **不是卡的一部分**，仍留在本页 —— 那是版面，不是卡。 */
 
 /* ── 信任条（预留位，稿 `:663-678`）── */
 .trust {

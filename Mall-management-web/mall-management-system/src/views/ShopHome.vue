@@ -66,16 +66,7 @@
         <router-link class="retry" :to="getMerchantId() ? '/merchant' : '/customer'">先去逛逛别的</router-link>
       </div>
       <div v-else class="cards">
-        <router-link
-          v-for="g in goods"
-          :key="g.Id"
-          class="card"
-          :to="{ path: '/product', query: { MerchantId: g.MerchantId, GoodName: g.GoodName, GoodType: g.GoodType, Id: g.Id } }"
-        >
-          <div class="ph"><img v-if="g.GoodImg" :src="g.GoodImg" /></div>
-          <div class="nm">{{ g.GoodName }}</div>
-          <div class="pr"><i>¥</i><b>{{ g.Price }}</b></div>
-        </router-link>
+        <ProductCard v-for="g in goods" :key="g.Id" :goods="g" />
       </div>
     </div>
   </div>
@@ -87,7 +78,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { http, handleApiError } from '../api/http'
 import { endpoints } from '../api/endpoints'
 import { getMerchantId, getCustomerId, isLoggedIn } from '../api/auth'
-import { follow, unfollow, followState } from '../api/shop'
+import { follow, unfollow, followState } from '../api/shop'; import ProductCard from '../components/ProductCard.vue'   // ⚠️ 同行追加：本文件 `:262` / `:272` 等处被自身注释按行号引，能省一行就省一行（同 `HomePage.vue` 的 import 段）
 
 const route = useRoute()
 const router = useRouter()
@@ -322,16 +313,11 @@ button { background: none; border: 0; cursor: pointer; }
 .retry:hover { border-color: var(--ink-3); color: var(--ink); }
 .note-err .retry { margin-left: var(--s2); }
 
-/* 商品格 —— 与 `ProductPage.vue`「猜你喜欢」的 `.cards` / `.card` **同一套形制**
-   （这是「和旁边两页像一套吗」那条判据的落点：同一条 4 栏栅格、同一枚 `--line` 发丝框、
-   同一个 `--accent` 价格、同一个圆角档）。 */
+/* 商品格 —— `.cards` 是**栅格**（版面），`.card` 本体已搬进 `src/components/ProductCard.vue`
+   （C3 块 5 · B 组续笔，2026-10-12）。
+   ⚠️ 改前本段的注释写着「与 `ProductPage.vue` 的 `.card` 同一套形制」—— **那是错的**（改前实测：
+   本页卡 1/1 图、无框、整值价；主页卡 4/3 图、有框、三段价），对照图见
+   `docs/agent/evidence/c3-block5/out-b5d-cards-before.png`。收成一件之后那句话才成立 ——
+   而且现在是**结构**保证的，不靠注释声明。 */
 .cards { margin-top: var(--s5); display: grid; grid-template-columns: repeat(4, 1fr); gap: var(--s5); }
-.card { display: block; color: inherit; text-decoration: none; }
-.card .ph { aspect-ratio: 1/1; border: 1px solid var(--line); border-radius: var(--r2);
-            overflow: hidden; background: var(--surface-2); }
-.card .ph img { width: 100%; height: 100%; object-fit: cover; }
-.card .nm { margin-top: var(--s3); font-size: var(--fs-sm); line-height: 1.5; min-height: 3em; }
-.card .pr { margin-top: var(--s2); display: flex; align-items: baseline; color: var(--accent); }
-.card .pr i { font-style: normal; font-size: var(--fs-xs); margin-right: 1px; }
-.card .pr b { font-size: var(--fs-md); font-weight: var(--fw-med); line-height: 1; }
 </style>

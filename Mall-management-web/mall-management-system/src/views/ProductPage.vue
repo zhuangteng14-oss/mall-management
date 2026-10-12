@@ -353,26 +353,26 @@
 
       <!-- ── 三、推荐区（猜你喜欢）——**真功能**（`goods.goodsSelectHome` ⇒ `goodsWithUser`）──
            ⚠️ 稿的 4 张卡是 mock（声谷 Lite / 空气传导 / 数据线 / 蓝牙音箱），本区**有真数据**
-              ⇒ 落真卡：`goodsWithUser` 取前 4 条（与稿的 4 栏栅格对齐），每张是**真
-              `<router-link>`** 指向既有路由 `/product`，参数用本页已有的 4 个 query 名。
-           ⚠️ 稿的 `.pr` 是三段拆字（`¥` / `89` / `.00`）⇒ 只落前两段，`<em>` 那两位不落
-              （数据没有固定小数位，与主区 `.price` 同一口径）。
-           ⚠️ `.ph` 稿是灰方块 ⇒ 保留既有真图并补 `v-if`（`goodImg` 为空时裸 `<img src="">`
-              画的是破图图标 —— 同 `HistoricalOrders.vue:66` 先例）。 -->
+              ⇒ 落真卡：`goodsWithUser` 取前 4 条（与稿的 4 栏栅格对齐）。
+           ⚠️ 卡在 **C3 块 5 · B 组续笔（2026-10-12）收成公共组件** `components/ProductCard.vue`
+              （本页 / 主页 / 店铺主页**三处共用**）—— 本区改前那份手写卡（1/1 图、整值价、
+              4 个 query 参数）随之作废。组件与**主页**那一枚是同一份结构，差异只有本区不传
+              `beforeNav`（本页进商品页不需要清搜索缓存）。
+           ⚠️ 副作用逐条交代：组件统一按 **7 个 query 参数**跳（本区原为 4 个）——
+              多出来的 `Price/GoodImg/ProductCode` 本页**不读**（`:465` 只解构 4 个）⇒ 无害；
+              而少传会让主页那条 T-guard-6 判据（「7 个参数都要在」）失效，故取并集。
+           ⚠️ **改前实测（不是推断）**：三处卡形的逐条对照（图比例 / 有无框 / 价格段数 / 元信息行）见
+              `docs/agent/evidence/c3-block5/out-b5d-cards-before.png`（探针 `scripts/probes/c3b5d-cards-before.mjs`，两遍 16 项 / 0 失败）。
+           ⚠️ 原卡有**两处兜底**，组件里没有照搬，理由各一：
+              · `<img>` 上的 `v-if="goods.GoodImg"`（防 `src=''` 画破图）—— 实测 43/43 行都有
+                `GoodImg`，且组件那一枚 `<img>` 是**无条件**渲染的（空 `src` 是同一个破图）；
+              · 无 `alt` —— 组件补了 `:alt="goods.GoodName"`（43 张一样的「商品图」对读屏零信息）。
+           ⚠️ 未抽组件前，本区与店铺主页的「像不像」靠手写对齐；收成一件之后由**结构**保证。 -->
       <section class="reco">
         <h2 title="真功能：现有端点 goods.goodsSelectHome，本区不需要新端点">猜你喜欢</h2>
         <p v-if="goodsWithUser.length === 0" class="none">暂无推荐</p>
         <div v-else class="cards">
-          <router-link
-            v-for="goods in goodsWithUser.slice(0, 4)"
-            :key="goods.Id"
-            class="card"
-            :to="{ path: '/product', query: { MerchantId: goods.MerchantId, GoodName: goods.GoodName, GoodType: goods.GoodType, Id: goods.Id } }"
-          >
-            <div class="ph"><img v-if="goods.GoodImg" :src="goods.GoodImg" /></div>
-            <div class="nm">{{ goods.GoodName }}</div>
-            <div class="pr"><i>¥</i><b>{{ goods.Price }}</b></div>
-          </router-link>
+          <ProductCard v-for="goods in goodsWithUser.slice(0, 4)" :key="goods.Id" :goods="goods" />
         </div>
       </section>
     </div>
@@ -455,7 +455,7 @@ import { ref, onMounted, computed, watch, onBeforeUnmount } from 'vue'   // ⚠�
 import { useRoute, useRouter } from 'vue-router'
 import { http, handleApiError } from '../api/http'
 import { endpoints } from '../api/endpoints'; import { orderAdd, cartAdd } from '../api/order'   // ⚠️ C3 块 4：**同行追加**（不新增行 —— 本文件 `:794`/`:803` 被 `slot-registry.md:1994-1995` 按行号引（〈Bug 1〉本笔 +19 行前为 `:775`/`:784`），此处加行会顶漂它们）。两个函数就是原先那两串 `URLSearchParams` + `http.post` + `res.json()` 的收口
-import CashierDialog from '../components/CashierDialog.vue'   // ⚠️ 2026-10-10（Bug 1）：收银台与「我的订单」**共用同一个组件** —— 本行**确实**新增了一行；本笔在 `ProductPage.vue` 净 +19 行（`git diff` 实测：模板 `:412` 起 +5、import +1、`handlePay` 段 +13）⇒ 下面两处 `:775`/`:784` 漂到 `:794`/`:803`，随本笔一并重指（见 `slot-registry.md:1994-1995`）
+import CashierDialog from '../components/CashierDialog.vue'; import ProductCard from '../components/ProductCard.vue'   // ⚠️ 2026-10-10（Bug 1）：收银台与「我的订单」**共用同一个组件** —— 本行**确实**新增了一行；本笔在 `ProductPage.vue` 净 +19 行（`git diff` 实测：模板 `:412` 起 +5、import +1、`handlePay` 段 +13）⇒ 下面两处 `:775`/`:784` 漂到 `:794`/`:803`，随本笔一并重指（见 `slot-registry.md:1994-1995`）
 import { getMerchantId, getCustomerId, isLoggedIn } from '../api/auth'; import IconGlyph from '../components/ui/IconGlyph.vue'; import { coupons, claim } from '../api/marketing'; import { couponName } from '../config/coupon-format'   // ⚠️ 四条 import **同行**（第 2、3 条：2026-10-11 补图标笔 + C3 块 5 · commit 1；第 4 条 `couponName`：块 5 · A 组 · A7 后半）—— 合并到既有行 = 不新增行号漂移（本文件 `:794`/`:803` 被 `slot-registry.md:1994-1995` 按行号引，上面 `:424` 那条注释记过同一件事）。⚠️ **块 5 · commit 1 仍整体 +90 行**（模板 +17 / `<script setup>` 尾 +70 / `<style>` +3）⇒ `slot-registry.md:1994` 引的 `:794` 漂 **`:881`**、`:1995` 引的 `:803` 漂 **`:890`**（两值均为 `grep -n` 实测，见 `_work/b5-repoint.md`）。
 
 const route = useRoute()
@@ -1168,17 +1168,11 @@ button { background: none; border: 0; cursor: pointer; }
 .reco h2 { font-family: var(--font-display); font-size: var(--fs-lg); font-weight: var(--fw-med);
            letter-spacing: -.01em; }
 .reco .none { margin-top: var(--s5); font-size: var(--fs-sm); color: var(--ink-3); }
+/* ⚠️ 卡本体（`.card` / `.ph` / `.nm` / `.pr` 及其 `i` / `b`）**已整段搬进**
+   `src/components/ProductCard.vue`（C3 块 5 · B 组续笔，2026-10-12）。`.cards` 是**栅格**、
+   不是卡的一部分 ⇒ 留在本页。⚠️ 搬走的那一份里 `.pr` 带着 `font-family: var(--font-display)`
+   （楷体数字）—— 统一到主页那一套后**不再用**，价格随主页走同一款数字（登记为偏离）。 */
 .cards { margin-top: var(--s5); display: grid; grid-template-columns: repeat(4, 1fr); gap: var(--s5); }
-.card { display: block; color: inherit; text-decoration: none; }
-.card .ph { aspect-ratio: 1/1; border: 1px solid var(--line); border-radius: var(--r2);
-            background: var(--img); overflow: hidden; }
-.card .ph img { width: 100%; height: 100%; object-fit: cover; }
-.card .nm { margin-top: var(--s3); font-size: var(--fs-sm); line-height: 1.5; min-height: 3em;
-            display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
-.card .pr { margin-top: var(--s2); display: flex; align-items: baseline; color: var(--accent);
-            font-family: var(--font-display); font-variant-numeric: tabular-nums; }
-.card .pr i { font-style: normal; font-size: var(--fs-xs); margin-right: 1px; }
-.card .pr b { font-size: var(--fs-md); font-weight: var(--fw-med); line-height: 1; }
 
 /* ── 付款确认弹窗（稿 `dlg2`）────────────────────────────────────────────
    ⚠️ 居中用子元素 `margin:auto`，**不用** `align-items:center` —— 后者在内容比视口高时
