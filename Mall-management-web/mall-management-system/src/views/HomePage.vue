@@ -88,31 +88,13 @@
         </div>
       </section>
 
-      <!-- ── 功能入口（预留位，稿 `:787-804`）──
-           2026-10-07 裁决「**一律落**」：UI 照落。内层四项原一律 `disabled` + `title`（角标只挂
-           区块级 ⇒ 不在每项重复 `data-slot`）。四个 SVG 逐字取稿。
-           ⚠️ **2026-10-11（块 5 · commit 1）**：「优惠券」一度接通（锚到 `.tickets`，清单 §一 #3）。
-           ⚠️ **同日「券的信息架构重排」把它整格删了**（用户定：**主页不显示券包** —— 券包是「我的东西」，
-              归用户中心）⇒ 本区块回到**四项全 `disabled`**，只剩三格。删的是整个 `<button class="qi">`，
-              不是改成别的落点：用户明确作废了「主页快捷块打开同一个弹窗」那条裁定。
-              ⚠️ `scrollToTickets` **保留**（`:32` 二级导航「领券中心」还在用它），删的只是快捷块这一格。
-           ⚠️ 稿的副标题带三个 **mock 数字**（待收货 2 / 3 张可用 / 最近 18 件）—— 照落会在真产品里
-              显示假数字 ⇒ 只落**描述**、不落数字（与 ChatRoom 不写死「今天」同一条理由）；
-              「在线客服 9:00 – 21:00」是服务时段陈述、不是 mock ⇒ 逐字落。 -->
-      <section class="quick" data-slot="预留 · 功能入口" title="预留 · 功能入口（老稿 主页改造.html:787）· 归属待定 C3〈待定〉">
-        <button type="button" class="qi" disabled title="预留 · 我的订单（待 C3〈订单〉）">
-          <span class="ic"><svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="2" width="14" height="16" rx="2"/><path d="M7 7h6M7 11h6M7 15h3" stroke-linecap="round"/></svg></span>
-          <span class="tx"><b>我的订单</b><span>待付款 · 待收货</span></span>
-        </button>
-        <button type="button" class="qi" disabled title="预留 · 浏览记录（待 C3〈个人中心〉）">
-          <span class="ic"><svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="10" cy="10" r="7.5"/><path d="M10 6v4.5l3 1.8" stroke-linecap="round"/></svg></span>
-          <span class="tx"><b>浏览记录</b><span>最近看过的商品</span></span>
-        </button>
-        <button type="button" class="qi" disabled title="预留 · 在线客服（待 C3〈消息〉）">
-          <span class="ic"><svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M17 12.5a1.5 1.5 0 0 1-1.5 1.5h-11A1.5 1.5 0 0 1 3 12.5v-6A1.5 1.5 0 0 1 4.5 5h11A1.5 1.5 0 0 1 17 6.5z"/><path d="M6.5 5v10" stroke-linecap="round"/></svg></span>
-          <span class="tx"><b>在线客服</b><span>9:00 – 21:00</span></span>
-        </button>
-      </section>
+      <!-- ── 功能入口条：**已删**（用户 2026-10-12 指令）──
+           删前它是「我的订单 / 浏览记录 / 在线客服」三格 `disabled` 死控件（稿 `主页改造.html:787-804`，
+           2026-10-07 `88093e3` 落的四格，第四格「优惠券」2026-10-11 已删）—— 剩下的三格落在
+           `repeat(4, 1fr)` 里，**右边空一整格**（实测 `tailGap: 346px`）⇒ 看着像没做完的东西。
+           ⚠️ **不要照稿把它加回来**：稿上有不等于本产品要，用户已明确不要。
+           证据 `docs/agent/evidence/c3-block5/{before,after}-home-quickbar.png`。
+           ⚠️ `scrollToTickets` **保留**（`:32` 二级导航「领券中心」仍在用）—— 删的是这一块，不是那条跳转。 -->
 
       <!-- ── 限时秒杀（预留位，稿 `:807-814`）──
            ⚠️ 倒计时**不写死**：稿 `:966` 自己就注明了「真接进项目时应该用接口给的活动结束时间，
@@ -568,8 +550,8 @@ onMounted(async () => {
 
 <style scoped>
 /* ⚠️ D 笔（2026-10-07）：全块按 `docs/美化/主页改造.html` 的 `<style>` 重写。
-   类名一律取稿名（`wrap` / `hero` / `cats` / `glaze` / `dots` / `quick` / `flash` /
-   `tickets` / `rec` / `grid` / `card` / `trust` / `subnav` / `pts` …），旧名（`search` 以外的
+   类名一律取稿名（`wrap` / `hero` / `cats` / `glaze` / `dots` / `flash` / `tickets` /
+   `rec` / `grid` / `trust` / `subnav` / `pts` …；⚠️ `quick` / `card` **已删**，见 `:91`），旧名（`search` 以外的
    `banner-section` / `good-type-list` / `type-item` / `space` / `swiper-box` / `swiper-container` /
    `swiper-img` / `goods-list-section` / `goods-grid` / `goods-card` / `goods-img-box` /
    `goods-info` / `goods-name` / `goods-price` / `price-symbol` / `price-int` / `price-dec` /
@@ -864,55 +846,9 @@ button {
   background: var(--brand);
 }
 
-/* ── 功能入口条（预留位，稿 `:408-430`）── */
-.quick {
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  margin-top: var(--s6);
-  background: var(--zone);
-  border-radius: var(--r2);
-  /* 有底色就必须补内边距：没有它，「我的订单」的图标会顶到框上（稿 `:414-416`）。 */
-  padding: 0 var(--s5);
-}
-/* 稿的选择器是 `.quick a`；本仓的「项」是**死控件** ⇒ 必须是 `<button class="qi">`。
-   `.qi` 是本笔新加的类名，只为让 `<button>` 拿到稿给 `<a>` 的那套盒模型。 */
-.quick .qi {
-  display: flex;
-  align-items: center;
-  gap: var(--s3);
-  padding: var(--s5) var(--s4);
-  text-align: left;
-  border-right: 1px solid var(--line);
-}
-.quick .qi:first-child {
-  padding-left: 0;
-}
-.quick .qi:last-child {
-  border-right: none;
-  padding-right: 0;
-}
-.quick .ic {
-  color: var(--ink-3);
-  flex: none;
-  display: flex;
-  transition: color 0.15s;
-}
-.quick .qi:hover .ic {
-  color: var(--brand);
-}
-.quick .tx b {
-  display: block;
-  font-size: var(--fs-sm);
-  font-weight: var(--fw-med);
-  color: var(--ink);
-}
-.quick .tx span {
-  font-size: var(--fs-xs);
-  color: var(--ink-3);
-}
-.quick .qi[disabled] {
-  cursor: not-allowed;
-}
+/* ── 功能入口条：**样式随块一起删了**（2026-10-12）──
+   删掉的是 `.quick` / `.quick .qi*` / `.quick .ic` / `.quick .tx*` 整段（含 `repeat(4, 1fr)`）。
+   别只删模板留下这段 CSS —— 死样式比死标记更难发现。 */
 
 /* ── 限时秒杀（预留位，稿 `:578-627`）──
    全页唯一的暖底：它表示时间压力，不是装饰（稿 `:571-576`）。 */
