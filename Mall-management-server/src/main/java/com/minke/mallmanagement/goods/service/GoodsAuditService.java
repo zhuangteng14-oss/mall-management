@@ -107,13 +107,13 @@ public class GoodsAuditService {
      */
     @Transactional
     public Map<String, Object> submit(String merchantId, String batchId, String goodName,
-                                      Double price, String goodType, Integer goodTypeNew,
+                                      Double price, Double originalPrice, String goodType, Integer goodTypeNew,
                                       Integer typeId, String productCode, String goodImg, String detail, String spec, String afterSale,
                                       String skuSpec, Boolean promiseGenuine, Boolean promiseReturn7, Boolean promiseFastRefund, Boolean promiseFreightIns) {
         Map<String, Object> result = new HashMap<>();
         Integer effectiveTypeId = typeId != null ? typeId : goodsDao.selectTypeIdByName(goodType);
 
-        auditDao.insert(merchantId, batchId, goodName, price, goodType, goodTypeNew, effectiveTypeId,
+        auditDao.insert(merchantId, batchId, goodName, price, originalPrice, goodType, goodTypeNew, effectiveTypeId,
                 productCode, goodImg, detail, spec, afterSale, skuSpec, LocalDateTime.now(),
                 boolOrTrue(promiseGenuine), boolOrTrue(promiseReturn7), boolOrTrue(promiseFastRefund), boolOrTrue(promiseFreightIns));
 
@@ -278,6 +278,7 @@ public class GoodsAuditService {
                 str(auditRow.get("MerchantId")),
                 str(auditRow.get("GoodName")),
                 toDouble(auditRow.get("Price")),
+                toDouble(auditRow.get("OriginalPrice")),
                 str(auditRow.get("GoodImg")),
                 str(auditRow.get("GoodType")),
                 str(auditRow.get("ProductCode")),

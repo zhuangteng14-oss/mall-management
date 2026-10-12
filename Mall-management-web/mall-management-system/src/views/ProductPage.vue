@@ -81,22 +81,18 @@
         <div class="info">
           <h1 class="pname">{{ goodName }}</h1>
 
-          <!-- ①【原价 / 折扣】`data-slot` 按稿挂**整个 `.priceline`**，而**现价是真的**
-               （`allItems[].price` ⇒ `currentItem.price`）⇒ 这一块是**一块两档**：
-               块级（`<div>` 不是控件）⇒ 只挂 `data-slot` + `title`、**不 `disabled`**，
-               真价照常渲染。稿里 `.was` / `.off` 是**块内 mock** ⇒ 逐字保留（同 GoodsAdd §三）。
-               ⚠️ 稿的 `.dec`（`.00`）**不落**：本仓价格没有固定小数位，硬拆会凭空空造两位。
-               ⚠️ 本条 title 稿里**不带**「待 C3〈商品〉」前缀（它的 C3 归属写在另一个属性
-                  `data-future` 上，而 `data-future` 按 `ShoppingCart.vue:43` 先例不落）⇒
-                  归属只进台账，**不往 title 里塞 C3**（同 commit 11 #37 的处理）。 -->
-          <div
-            class="priceline"
-            data-slot="预留 · 原价 / 折扣（动现有代码 5 处 · 超档）"
-            title="goods 表无原价列（只有 Price 一列）：mall_management_sql.sql + GoodsDao.java + GoodsService.java + GoodsController.java + ProductPage.vue = 5 处，**超档**，因清单点名而画出（见 README 挂账表）"
-          >
+          <!-- ①【原价 / 折扣】—— C3 块 5〈折扣〉**落地**（2026-10-12 用户 A 档批准）。
+               改前：`.was`（`¥199.00`）与 `.off`（`6.5 折`）是**稿内 mock 的写死字面量**，
+               整块挂 `data-slot="预留 · 原价 / 折扣（动现有代码 5 处 · 超档）"`。
+               现在：两枚都由 `originalPrice` 真算 —— `originalPrice > 0` 才画，否则**一枚都不画**
+               （数据不足不显，不拿假划线价冒充）；`data-slot` 随之摘掉。
+               ⚠️ 折数**读侧现算**（`price / originalPrice × 10`），库里没有折率列 ——
+                  这样改了现价，角标自动跟着变，不会留下一个算不出来的陈旧折率。
+               ⚠️ 稿的 `.dec`（`.00`）**不落**：本仓价格没有固定小数位，硬拆会凭空空造两位。 -->
+          <div class="priceline">
             <span class="price"><span class="sym">¥</span><span class="int">{{ currentItem.price }}</span></span>
-            <span class="was">¥199.00</span>
-            <span class="off">6.5 折</span>
+            <span v-if="hasDiscount" class="was">¥{{ currentItem.originalPrice }}</span>
+            <span v-if="hasDiscount" class="off">{{ discountRate }} 折</span>
           </div>
 
           <!-- ②【促销 / 优惠券】—— **C3 块 5〈营销块〉已接线**（2026-10-11）。
@@ -479,6 +475,21 @@ const customerId = buyerId || ''
 const allItems = ref([])
 const currentIndex = ref(0)
 const currentItem = computed(() => allItems.value[currentIndex.value] || {})
+// ── 块 5〈折扣〉：划线价 + 折扣角标（读侧现算，见模板 ① 的注释）────────────────
+// `originalPrice` 由 `/goods/productCodePrice` 透出（本笔给那条 SELECT 加的列，响应键加性）。
+// ⚠️ 老响应没有这个键 ⇒ `undefined` ⇒ `hasDiscount` 为假 ⇒ **一枚都不画**（不画 ≠ 画假的）。
+const hasDiscount = computed(() => {
+  const o = Number(currentItem.value.originalPrice)
+  const p = Number(currentItem.value.price)
+  return o > 0 && p > 0 && o > p
+})
+const discountRate = computed(() => {
+  const o = Number(currentItem.value.originalPrice)
+  const p = Number(currentItem.value.price)
+  if (!(o > 0) || !(p > 0)) return ''
+  const r = Math.round((p / o) * 10 * 100) / 100
+  return r === Math.rint(r) ? String(Math.trunc(r)) : String(r)
+})
 const goodsWithUser = ref([])
 
 const start = ref(0)
@@ -516,6 +527,7 @@ const loadAllItems = async () => {
         items.push({
           productCode: code,
           price: d2.price,
+          originalPrice: d2.originalPrice, // 块 5〈折扣〉：划线价（0/undefined = 不打折）
           goodImg: d2.goodImg,
           UserName: ''
         })

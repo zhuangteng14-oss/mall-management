@@ -97,15 +97,19 @@ public class GoodsService {
     private final GoodsDao goodsDao;
     private final GoodsCacheService goodsCacheService;
     private final GoodsAuditService goodsAuditService;
+    /** 折扣上下限校验（营销域，块 5〈折扣〉）—— 只被 {@link #goodsAdd} 消费。 */
+    private final com.minke.mallmanagement.marketing.discount.service.DiscountLimitService discountLimitService;
     private final String uploadDir;
 
     public GoodsService(GoodsDao goodsDao,
                         GoodsCacheService goodsCacheService,
                         GoodsAuditService goodsAuditService,
+                        com.minke.mallmanagement.marketing.discount.service.DiscountLimitService discountLimitService,
                         @Value("${app.upload-dir:${user.dir}/src/main/resources/static/img/}") String uploadDir) {
         this.goodsDao = goodsDao;
         this.goodsCacheService = goodsCacheService;
         this.goodsAuditService = goodsAuditService;
+        this.discountLimitService = discountLimitService;
         this.uploadDir = uploadDir;
     }
 
@@ -137,6 +141,7 @@ public class GoodsService {
             String MerchantId,
             String GoodName,
             Double Price,
+            Double OriginalPrice,
             MultipartFile file,
             String GoodType,
             String ProductCode,
@@ -145,6 +150,16 @@ public class GoodsService {
             Boolean PromiseGenuine, Boolean PromiseReturn7, Boolean PromiseFastRefund, Boolean PromiseFreightIns
     ) {
         Map<String, Object> result = new HashMap<>();
+
+        // ═══ 块 5〈折扣〉：划线原价的**权威校验**（前端那处实时提示只是助手，不是判据）═══
+        // ⚠️ 位置是刻意的：**在任何 I/O 之前**（图片落盘也不做）—— 与两条既有早退同口径，
+        //    失败路径一条 JDBC、一次磁盘写都不执行。
+        String discountError = discountLimitService.validate(GoodType, Price, OriginalPrice);
+        if (discountError != null) {
+            result.put("success", false);
+            result.put("msg", discountError);
+            return result;
+        }
 
         // 图片保存路径
         Path uploadPath = Paths.get(uploadDir).toAbsolutePath().normalize();
@@ -176,7 +191,7 @@ public class GoodsService {
         try {
             // 提审：只写 goods_audit(pending)，**不写 goods 行**（提审制的定义，见类注释）。
             String batchId = GoodsAuditService.newBatchId();
-            goodsAuditService.submit(MerchantId, batchId, GoodName, Price, GoodType, GoodTypeNew, TypeId,
+            goodsAuditService.submit(MerchantId, batchId, GoodName, Price, OriginalPrice, GoodType, GoodTypeNew, TypeId,
                     ProductCode, GoodImg, Detail, Spec, AfterSale, SkuSpec,
                     PromiseGenuine, PromiseReturn7, PromiseFastRefund, PromiseFreightIns);
 
@@ -315,6 +330,9 @@ public class GoodsService {
             result.put("success", true);
             result.put("price", row.get("Price"));
             result.put("goodImg", row.get("GoodImg")); // 响应键与列名 GoodImg 不同名
+            // ⚠️ 块 5〈折扣〉加：**加性**键（老前端不读它，逐字节等价性不受影响）。
+            //    0 / null ⇒ 详情页不画划线价那一行 —— 判据在**前端**，这里原样透出。
+            result.put("originalPrice", row.get("OriginalPrice"));
         } catch (Exception e) {
             // 技术异常（含缓存 Service 侧「>1 行」抛出的 IncorrectResultSizeDataAccessException）：
             // 这里接住 ⇒ 仍是 200 + {success:false}，**不是 500**（对调用方零契约变更）。

@@ -80,11 +80,11 @@ public class GoodsDao {
      */
     public int insertGoods(GoodsRow r) {
         String sql = "INSERT INTO mall_management_sql.goods "
-                + "(MerchantId, GoodName, Price, GoodImg, GoodType, ProductCode, GoodTypeNew, TypeId, Detail, Spec, AfterSale, "
+                + "(MerchantId, GoodName, Price, OriginalPrice, GoodImg, GoodType, ProductCode, GoodTypeNew, TypeId, Detail, Spec, AfterSale, "
                 + " PromiseGenuine, PromiseReturn7, PromiseFastRefund, PromiseFreightIns) "
-                + "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+                + "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
         return jdbcClient.sql(sql)
-                .params(r.merchantId(), r.goodName(), r.price(), r.goodImg(), r.goodType(),
+                .params(r.merchantId(), r.goodName(), r.price(), r.originalPrice(), r.goodImg(), r.goodType(),
                         r.productCode(), r.goodTypeNew(), r.typeId(), r.detail(), r.spec(), r.afterSale(),
                         r.promiseGenuine(), r.promiseReturn7(), r.promiseFastRefund(), r.promiseFreightIns())
                 .update();
@@ -98,7 +98,7 @@ public class GoodsDao {
      * （提审时快照，通过时原样写进这里）。**可能为 {@code null}**（老调用方不传 / 名字解析不出），
      * 故用包装类型 {@code Integer} 而非 {@code int}。⚠️ 后 3 个分量 {@code detail / spec / afterSale}（C3 块 3 就地改造 2026-10-10 加的第 9-11 个）是详情 / 规格 / 售后的**快照文本**（{@code goods.Detail / Spec / AfterSale}，mediumtext，可空）—— 选模板 → 填内容 → **可改** ⇒ 落库的是商品自己那段文本、**不是**模板 Id（改模板不影响已上架商品）；提审制下来自 {@code goods_audit} 同名列。
      */
-    public record GoodsRow(String merchantId, String goodName, Double price, String goodImg,
+    public record GoodsRow(String merchantId, String goodName, Double price, Double originalPrice, String goodImg,
                            String goodType, String productCode, int goodTypeNew, Integer typeId, String detail, String spec, String afterSale,
                            boolean promiseGenuine, boolean promiseReturn7, boolean promiseFastRefund, boolean promiseFreightIns) {
     }

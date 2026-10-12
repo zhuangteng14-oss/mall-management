@@ -555,7 +555,7 @@ CREATE TABLE IF NOT EXISTS `goods_audit` (
 --    块 1 立下的「占位符渲染留后」口径**不变** —— 本块不做渲染接线。
 CREATE TABLE IF NOT EXISTS `template` (
   `Id` int NOT NULL AUTO_INCREMENT COMMENT '自增主键',
-  `Type` varchar(96) NOT NULL COMMENT '模板类型（点分字符串码，不建 DB ENUM）：goods.detail / goods.spec / goods.afterSale / goods.reject / merchant.reject / merchant.approve / user.ban / comment.reply / notification.<原 TemplateKey>。⚠️ 96 = notification.(13) + TemplateKey 上界(64) + 余量；原定 32 装不下（见下方加宽守卫）',
+  `Type` varchar(96) NOT NULL COMMENT '模板类型（点分字符串码，不建 DB ENUM）：goods.detail / goods.spec / goods.afterSale / goods.reject / merchant.reject / merchant.approve / user.ban / comment.reply / discount.rule / discount.limit / notification.<原 TemplateKey>。⚠️ 96 = notification.(13) + TemplateKey 上界(64) + 余量；原定 32 装不下（见下方加宽守卫）',
   `Name` varchar(64) NOT NULL COMMENT '模板名（弹窗列表的显示名；同 Type 内唯一）',
   `Title` varchar(255) DEFAULT NULL COMMENT '标题模板（通知类用，可含 {占位符}）；商品类为 NULL',
   `Body` mediumtext COMMENT '正文：商品类 = 纯文本内容（快照的起点，商家可改）；通知类 = 正文模板',
@@ -1450,3 +1450,28 @@ CREATE TABLE IF NOT EXISTS `shop_follow` (
   KEY `idx_shop_follow_merchant_created` (`MerchantId`,`created_at`),
   KEY `idx_shop_follow_cust_created` (`CustomerId`,`created_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='店铺关注关系（块 5 B）';
+
+-- ============================================================
+-- Migration: 块 5〈折扣〉—— `goods_audit` 加 1 列（不建表）
+--            Date: 2026-10-12
+-- 依据：用户 2026-10-12 A 档一次性批准（commit 2 · 折扣）。
+-- 范围：**只加列**；不改既有列、不删行、不改既有数据（规则 v2：向后兼容）。
+-- 幂等：加列走 `information_schema` 守卫 + `PREPARE/EXECUTE`（照本文件 :1394 先例）。
+-- 列（1）：goods_audit.OriginalPrice
+--   ⚠️ **为什么不是只加 goods.OriginalPrice**：本仓上架是**提审制** —— `goodsAdd` 只写
+--      `goods_audit(pending)`，审核通过才由提审单那一行**重建** `goods` 行
+--      （GoodsService.java:63-65 / GoodsAuditService.audit）。只加 `goods` 侧，
+--      商家填的划线价会在提审那一步丢掉（提审单里没有它可读）。
+--   `goods.OriginalPrice` 本身**早已存在**（本文件 ⑧，块 5 A 组已做）⇒ 本块不重复加。
+-- ⚠️ P3 门禁：本次**不新增表** ⇒ `ConcurrencyRunner.java` 的 KNOWN_TABLES / 期望表数不动。
+-- 回滚（逻辑废弃，执行前须人工确认）：
+--       ALTER TABLE `goods_audit` DROP COLUMN `OriginalPrice`;
+-- ============================================================
+
+-- ---- ⑬ `goods_audit` 加列 `OriginalPrice`（折扣 · 提审快照）----
+SET @s := (SELECT IF(COUNT(*) = 0,
+  'ALTER TABLE `goods_audit` ADD COLUMN `OriginalPrice` decimal(10,2) NOT NULL DEFAULT 0.00 COMMENT ''划线原价提审快照（块 5 折扣；0=无；通过时原样写进 goods.OriginalPrice）''',
+  'DO 0')
+  FROM information_schema.COLUMNS
+  WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'goods_audit' AND COLUMN_NAME = 'OriginalPrice');
+PREPARE _p FROM @s; EXECUTE _p; DEALLOCATE PREPARE _p;

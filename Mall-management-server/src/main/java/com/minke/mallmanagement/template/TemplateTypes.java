@@ -21,6 +21,10 @@ import java.util.Set;
  *       {@link #MERCHANT_APPROVE} / {@link #USER_BAN} —— 管理端在理由输入框旁的「选模板」。</li>
  *   <li><b>评论回复</b>：{@link #COMMENT_REPLY} —— ⚠️ **块 6 才建行**，本次只定义常量
  *       （见方案 §七 边界 3）。</li>
+ *   <li><b>折扣类</b>（{@code discount.*}）：{@link #DISCOUNT_RULE} / {@link #DISCOUNT_LIMIT}
+ *       —— 块 5〈折扣〉新增。前者是商家端「选模板」的**填充源**（正文 = 建议折率），
+ *       后者是**校验边界**（正文 = 类目折扣上下限 JSON）。两者的 {@code Body} 都不是"给用户看的一段话"，
+ *       但口径相同：**改了模板不影响已提交的商品数据**。</li>
  *   <li><b>通知类</b>（{@link #NOTIFICATION_PREFIX}）：{@code notification.<原 TemplateKey>}，
  *       由 {@link #notification(String)} 拼出。原 {@code notification_template} 的行在迁移块里
  *       就是这么搬过来的。⚠️ 一并搬过来的还有块 1 立下的口径：**占位符渲染与「send 时按 key 取模板」
@@ -63,6 +67,21 @@ public final class TemplateTypes {
     public static final String COMMENT_REPLY = "comment.reply";
 
     /**
+     * 折扣模板 —— **填充源**（块 5〈折扣〉，2026-10-12 用户 A 档批准）：商家在「划线原价 / 折扣」
+     * 输入框旁的「选模板」拉这一 type 的列表，选一条把它的建议折率**填进输入框**（可改）。
+     * 正文 {@code Body} = 建议折率 + 说明，格式 {@code 6.5折|夏促常规力度}（管道符前后两段）。
+     */
+    public static final String DISCOUNT_RULE = "discount.rule";
+
+    /**
+     * 类目折扣上下限 —— **校验边界**（块 5〈折扣〉）：一个类目一条模板，
+     * {@code Name} = 类目名（对齐 {@code goodstype.GoodType}），
+     * {@code Body} = 上下限 JSON {@code {"min":6.0,"max":9.5}}（单位：折）。
+     * 商家提交划线原价时按本商品类目查它，折数越界即拒。
+     */
+    public static final String DISCOUNT_LIMIT = "discount.limit";
+
+    /**
      * 通知类模板的 type 前缀 —— 合并前 {@code notification_template.TemplateKey} 的行
      * 在迁移块里一律落成 {@link #NOTIFICATION_PREFIX} + 原 key。
      */
@@ -85,7 +104,8 @@ public final class TemplateTypes {
     private static final Set<String> FIXED = Set.of(
             GOODS_DETAIL, GOODS_SPEC, GOODS_AFTER_SALE,
             GOODS_REJECT, MERCHANT_REJECT, MERCHANT_APPROVE, USER_BAN,
-            COMMENT_REPLY);
+            COMMENT_REPLY,
+            DISCOUNT_RULE, DISCOUNT_LIMIT);
 
     /** {@code notification.<原 TemplateKey>} —— 迁移块与 NotifyPage 共用这一个拼法。 */
     public static String notification(String templateKey) {

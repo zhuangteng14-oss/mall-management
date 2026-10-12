@@ -138,6 +138,11 @@ public class GoodsController {
             @NotBlank(message = "不能为空") @RequestParam("MerchantId") String MerchantId,
             @NotBlank(message = "不能为空") @RequestParam("GoodName") String GoodName,
             @RequestParam("Price") Double Price,
+            // ═══ C3 块 5〈折扣〉：**可选**的划线原价 ═══
+            // ⚠️ `required = false` 是硬要求，不是随手：老前端（以及全部既有 smoke 用例）
+            //    一个都不传 ⇒ 缺省 null ⇒ 走「没填折扣」那条，**旧契约逐字不变**（严格加性）。
+            //    校验（vs 现价、vs 类目上下限）在 Service 里，不在这一层 —— 参数绑定只管在不在。
+            @RequestParam(value = "OriginalPrice", required = false) Double OriginalPrice,
             @RequestParam("file") MultipartFile file,  // 图片用 MultipartFile
             @NotBlank(message = "不能为空") @RequestParam("GoodType") String GoodType,
             @NotBlank(message = "不能为空") @RequestParam("ProductCode") String ProductCode,
@@ -160,7 +165,7 @@ public class GoodsController {
         // ═══ C3 块 3：提审制的四步钩子（照 GoodsController.goodsUp 的形状）═══
         // 业务（本方法）改为「落一条 goods_audit(pending)，不写 goods 行」；
         // 只有提交成功才**触达管理端**（共享收件箱）+ 记账。
-        Map<String, Object> result = goodsService.goodsAdd(MerchantId, GoodName, Price, file,
+        Map<String, Object> result = goodsService.goodsAdd(MerchantId, GoodName, Price, OriginalPrice, file,
                 GoodType, ProductCode, GoodTypeNew, TypeId, Detail, Spec, AfterSale, SkuSpec,
                 PromiseGenuine, PromiseReturn7, PromiseFastRefund, PromiseFreightIns);
         if (Boolean.TRUE.equals(result.get("success"))) {
@@ -176,6 +181,7 @@ public class GoodsController {
             after.put("MerchantId", MerchantId);
             after.put("GoodName", GoodName);
             after.put("Price", Price);
+            after.put("OriginalPrice", OriginalPrice);
             after.put("GoodType", GoodType);
             after.put("ProductCode", ProductCode);
             auditService.record(AuthSession.identify(request), AuditActions.GOODS_APPLY_CREATE,
@@ -333,7 +339,7 @@ public class GoodsController {
             if (Boolean.TRUE.equals(couponResult.get("success"))) {
                 // 提审单只是那张待审券的**载体**：商品字段取本次提交的值（审核链用它做回显，
                 // 不会用它重建 goods —— 见 GoodsAuditService.audit 的带券分支）。
-                goodsAuditService.submit(MerchantId, batchId, GoodName, Price, GoodType,
+                goodsAuditService.submit(MerchantId, batchId, GoodName, Price, null, GoodType,
                         0, null, ProductCode, "", null, null, null, null, true, true, true, true);
                 result.put("couponId", couponResult.get("CouponId"));
                 result.put("couponPending", true);

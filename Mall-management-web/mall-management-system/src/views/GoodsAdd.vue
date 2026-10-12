@@ -136,24 +136,28 @@
             <div v-if="showTip && !Price" class="tip">请输入商品价格</div>
           </div>
 
-          <!-- 预留位 ①（稿 `:386-392`）—— 块级 `<div class="f">` ⇒ 只挂 `data-slot` + `title`。
-               ⚠️ 内部那个输入框是**稿外死控件**（无 `data-slot`）⇒ 落 `disabled` + `title`，见 §三。 -->
-          <div
-            class="f"
-            data-slot="预留 · 划线原价 / 折扣（动现有代码 5 处 · 超档）"
-            title="待 C3〈商品〉——goods 表只有 Price 一列，无原价 / 折扣列：mall_management_sql.sql + GoodsDao.java + GoodsService.java + GoodsController.java + GoodsAdd.vue = 5 处，**超档**，因清单点名而画出（见 README 挂账表）"
-          >
+          <!-- 划线原价 / 折扣 —— C3 块 5〈折扣〉**落地**（2026-10-12 用户 A 档批准）。
+               改前是 `data-slot="预留 · …（动现有代码 5 处 · 超档）"` 的死控件（`disabled`）。
+               ⚠️ 前端这处只是**实时提示**，不是判据 —— 权威校验在后端
+               `DiscountLimitService.validate`（同一条规则两处写会漂，故文案由后端兜底）。
+               留空 = 不打折（全库 43 行的既有状态），**不是**必填项。 -->
+          <div class="f">
             <span class="lb">划线原价 / 折扣</span>
-            <span class="money" data-off>
+            <span class="money" :class="{ err: !!discountError }">
               <span class="u">¥</span>
               <input
+                id="g-original"
+                v-model="OriginalPrice"
                 type="number"
                 placeholder="0.00"
-                disabled
-                title="待 C3〈商品〉——goods 无原价列，5 处改动（超档）"
+                title="填了原价才会在商品详情页显示划线价与折扣角标；不打折就留空"
               >
             </span>
-            <div class="hint">填了原价才会在商品详情页显示划线价与折扣角标。</div>
+            <button type="button" class="btn-quiet mt-s" @click="showDiscountTpl = true">选折扣模板</button>
+            <div v-if="discountError" class="tip">{{ discountError }}</div>
+            <div v-else class="hint">
+              {{ discountHint || '留空即不打折。填了原价才会在商品详情页显示划线价与折扣角标。' }}
+            </div>
           </div>
         </div>
 
@@ -422,14 +426,24 @@
       @pick="onPickAfterSaleTpl"
       @close="showAfterSaleTpl = false"
     />
+    <!-- 折扣模板（块 5〈折扣〉）：正文 = `6.5折|说明` ⇒ 选完按**建议折数**折算出划线原价填进框里。 -->
+    <TemplatePicker
+      v-if="showDiscountTpl"
+      type="discount.rule"
+      title="选择折扣模板"
+      empty-text="暂无折扣模板（管理端 营销运营 → 折扣 建一条即可）"
+      @pick="onPickDiscountTpl"
+      @close="showDiscountTpl = false"
+    />
 
   </main>
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { http, handleApiError } from '../api/http'
 import { endpoints } from '../api/endpoints'
+import { templateList } from '../api/template'   // 块 5〈折扣〉：类目上下限（公共读 /template/list）
 import { getMerchantId } from '../api/auth'; import IconGlyph from '../components/ui/IconGlyph.vue'   // ⚠️ 两条 import **同行**（2026-10-11 补图标那一笔）—— 合并到既有行 = 不新增行号漂移（`api-contract.md` 按 `GoodsAdd.vue:135/166/217` 钉住本文件）
 import TemplatePicker from '../components/TemplatePicker.vue'
 
@@ -442,6 +456,15 @@ const Price = ref('')
 const GoodType = ref('')
 const ProductCode = ref('')
 const GoodTypeNew = ref(0)
+
+// ── 块 5〈折扣〉（2026-10-12）：划线原价 / 折扣 ────────────────────────────────
+// ⚠️ 留空 = **不打折**，这是全库 43 行的既有状态 ⇒ 它不是必填项，`submitGoods` 那 5 项判据不动。
+// ⚠️ 本处的红字是**实时提示**，不是判据 —— 权威校验在后端 `DiscountLimitService.validate`；
+//    两处判据同源（同一个类目上下限），但**话语权在后端**：前端放行、后端拒绝时，仍按后端的 msg 报错。
+const OriginalPrice = ref('')
+const showDiscountTpl = ref(false)
+/** 类目名 → 上下限（`{min,max}`，单位：折）。拉不到 ⇒ 空对象 ⇒ 只做「高于现价 / ≤9.5 折」两条。 */
+const discountLimits = ref({})
 
 // ── 2026-10-10〈模板表通用化〉：goods 的三段**快照文本**（`Detail` / `Spec` / `AfterSale`）──
 // ⚠️ 语义是**快照不是引用**：模板只「提供思路」，选完填进框里、商家可改，提交落库的是**最终文本**。
@@ -475,7 +498,84 @@ const showTip = ref(false)
 
 onMounted(() => {
   loadGoodsType()
+  loadDiscountLimits()
 })
+
+/**
+ * 拉一次类目折扣上下限（`discount.limit` 模板，`Name` = 类目名、`Body` = `{"min":6.0,"max":9.5}`）。
+ * ⚠️ **失败不拦路** —— 拉不到就只做基础两条校验，权威判定仍在后端（本处的红字本来就只是助手）。
+ */
+const loadDiscountLimits = async () => {
+  try {
+    const data = await templateList('discount.limit')
+    const map = {}
+    ;(data.list || []).forEach((r) => {
+      const m = /"([a-zA-Z]+)"\s*:\s*([0-9]+(?:\.[0-9]+)?)/g
+      const one = {}
+      let hit
+      while ((hit = m.exec(r.Body || '')) !== null) one[hit[1]] = Number(hit[2])
+      if (Object.keys(one).length) map[r.Name] = one
+    })
+    discountLimits.value = map
+  } catch (err) {
+    // 静默：这是**增强**不是功能，拉不到不该在页面上红一条
+  }
+}
+
+/** 折数 → 文案（6.0 → `6`，6.5 → `6.5`）。 */
+const fmtRate = (v) => (v === Math.rint(v) ? String(Math.trunc(v)) : String(v))
+
+/** 当前输入的折数（现价 / 划线原价 × 10）；任一为空 ⇒ null。 */
+const currentRate = () => {
+  const p = Number(Price.value)
+  const o = Number(OriginalPrice.value)
+  if (!(p > 0) || !(o > 0)) return null
+  return Math.round((p / o) * 10 * 100) / 100
+}
+
+/** 红字 —— 与后端 `DiscountLimitService.validate` 同序同文案。空串 ⇒ 通过。 */
+const discountError = computed(() => {
+  if (!OriginalPrice.value) return ''
+  const o = Number(OriginalPrice.value)
+  if (!(o > 0)) return ''
+  const p = Number(Price.value)
+  if (!(p > 0)) return ''
+  if (o <= p) return '划线原价必须高于现价'
+  const rate = currentRate()
+  const lim = discountLimits.value[GoodType.value] || {}
+  const max = lim.max == null ? 9.5 : lim.max
+  if (rate > max) return `该类目折扣不得高于 ${fmtRate(max)} 折（当前 ${fmtRate(rate)} 折）`
+  if (lim.min != null && rate < lim.min) {
+    return `该类目折扣不得低于 ${fmtRate(lim.min)} 折（当前 ${fmtRate(rate)} 折）`
+  }
+  return ''
+})
+
+/** 灰字提示 —— 填得对时告诉商家详情页会长什么样（比空着一行强）。 */
+const discountHint = computed(() => {
+  if (discountError.value) return ''
+  const rate = currentRate()
+  if (rate == null) return ''
+  const p = Number(Price.value)
+  const o = Number(OriginalPrice.value)
+  if (!(o > p)) return ''
+  return `折扣 ${fmtRate(rate)} 折 —— 详情页会显示 ¥${fmtRate(o)} 划线价与「${fmtRate(rate)}折」角标。`
+})
+
+/** 选折扣模板：正文 `6.5折|说明` ⇒ 取前半段的折数，按**现价**折算出划线原价填进去。 */
+const onPickDiscountTpl = (row) => {
+  showDiscountTpl.value = false
+  const m = /([0-9]+(?:\.[0-9]+)?)\s*折/.exec(row.Body || '')
+  const p = Number(Price.value)
+  if (!m || !(p > 0)) {
+    // 模板正文没写折数 / 还没填现价 ⇒ 没东西可折算，只提示，**不编一个数进去**
+    if (!(p > 0)) alert('请先填「商品价格」，再按模板折率折算划线原价')
+    return
+  }
+  const rate = Number(m[1])
+  if (!(rate > 0)) return
+  OriginalPrice.value = String(Math.round((p / rate * 10) * 100) / 100)
+}
 
 const loadGoodsType = async () => {
   try {
@@ -610,6 +710,9 @@ const submitGoods = async () => {
   formData.append('MerchantId', merchantid)
   formData.append('GoodName', GoodName.value)
   formData.append('Price', Price.value)
+  // 块 5〈折扣〉：划线原价随提审一起走 —— 后端 `required = false`，**留空就不带这个键**
+  // （与「不打折」同义；带上空串会被 `Double` 绑定报 400）。
+  if (OriginalPrice.value) formData.append('OriginalPrice', OriginalPrice.value)
   formData.append('file', selectedFile.value)
   formData.append('GoodType', GoodType.value)
   formData.append('ProductCode', ProductCode.value)
@@ -651,6 +754,7 @@ const submitGoods = async () => {
       alert('已提交审核') // C3 块 3 提审制：goodsAdd 只落待审单、不写 goods 行 ⇒ 原文案「商品上架成功！」失真；本句与后端 msg 逐字同
       GoodName.value = ''
       Price.value = ''
+      OriginalPrice.value = '' // 块 5〈折扣〉：与 Price 同清（下一件默认不打折）
       GoodType.value = ''
       ProductCode.value = ''
       previewImg.value = ''

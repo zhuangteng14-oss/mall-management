@@ -46,6 +46,7 @@ import com.minke.mallmanagement.shop.follow.dao.ShopFollowDao;
 import com.minke.mallmanagement.shop.follow.service.ShopFollowService;
 import com.minke.mallmanagement.shop.profile.dao.ShopProfileDao;
 import com.minke.mallmanagement.shop.profile.service.ShopProfileService;
+import com.minke.mallmanagement.marketing.discount.service.DiscountLimitService;
 import org.junit.jupiter.api.BeforeEach;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
@@ -233,7 +234,14 @@ import static org.mockito.Mockito.when;
         // ⚠️ 依赖链只有三层（Controller → Service → Dao），Service 不另吃别的 bean。
         // ⚠️ 这个 Controller 走的是**公开面**（不在身份面），但「公开」与「要不要进 @Import」无关 ——
         //    切片加载所有 @Controller，与它挂不挂 IdentityGuard 无关。
-        ShopProfileDao.class, ShopProfileService.class})
+        ShopProfileDao.class, ShopProfileService.class,
+        // C3 块 5〈折扣〉（2026-10-12）：新增一个 @Service（`DiscountLimitService`）——
+        // **第十次同一处地雷**，但这次形状不同：**没有新 Controller**（管理端的折扣配置直接复用
+        // 现成的 `/admin/template/*`，本笔零新端点）。进这个清单的原因是 `GoodsService`
+        // 的构造器多吃了它一个 bean（`GoodsService` 本身已被 @Import，见上）——
+        // 它一缺席，整个切片上下文同样**启动失败**。
+        // ⚠️ 依赖链只有一层：`DiscountLimitService` → `TemplateService`（上面已 @Import）。没有 DAO。
+        DiscountLimitService.class})
 public abstract class AbstractSmokeTest {
 
     @Autowired

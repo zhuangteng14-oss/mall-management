@@ -138,7 +138,7 @@ class GoodsPriceCacheTest {
         service.priceByTriple("M1", "G1", "P1");
 
         assertThat(jdbc.lastSql).isEqualTo(
-                "SELECT Price, GoodImg FROM mall_management_sql.goods "
+                "SELECT Price, GoodImg, OriginalPrice FROM mall_management_sql.goods "
                         + "WHERE MerchantId=? AND GoodName=? AND ProductCode=?");
         assertThat(jdbc.lastArgs).containsExactly("M1", "G1", "P1");
     }
@@ -188,17 +188,17 @@ class GoodsPriceCacheTest {
 
         // ⚠️ 这三句是本类存在的一半理由：把「负缓存」与「未命中」分开。
         // 分得开的是 **wrapper 本身**，不是它的值 —— 看 .get() 才真的分不出来。
-        Cache.ValueWrapper negative = cache().get("M1::G1::P1");
+        Cache.ValueWrapper negative = cache().get("v2::M1::G1::P1");
         assertThat(negative.get()).isNull();                       // 值确实是 null
         assertThat(negative).as("负缓存 ⇒ wrapper 非 null").isNotNull();
-        assertThat(cache().get("M1::G1::P9")).as("对照组：没查过的键 ⇒ wrapper 是 null").isNull();
+        assertThat(cache().get("v2::M1::G1::P9")).as("对照组：没查过的键 ⇒ wrapper 是 null").isNull();
 
         // 机制（不是为了断言它，是为了让上一条读得懂）：存进去的是 Spring 的 NullValue，
         // fromStoreValue 把它降级成 null 是在 wrapper 内部发生的 —— 所以 wrapper 还在。
         @SuppressWarnings("unchecked")
         var nativeCache = (Map<Object, Object>) cache().getNativeCache();
-        assertThat(nativeCache).containsKey("M1::G1::P1");
-        assertThat(nativeCache.get("M1::G1::P1")).isInstanceOf(NullValue.class);
+        assertThat(nativeCache).containsKey("v2::M1::G1::P1");
+        assertThat(nativeCache.get("v2::M1::G1::P1")).isInstanceOf(NullValue.class);
     }
 
     @Test
@@ -253,7 +253,7 @@ class GoodsPriceCacheTest {
                 () -> assertThat(jdbc.calls).as("失败不得固化到 TTL").isEqualTo(2),
                 // isNull() 断言的是**整个 wrapper 为 null** = 真·未命中
                 // （与 zeroRowsIsCachedAsNullValue_notJustAMiss() 里那条「wrapper 在、值是 null」互为对照）。
-                () -> assertThat(cache().get("M1::G1::P1")).isNull());
+                () -> assertThat(cache().get("v2::M1::G1::P1")).isNull());
     }
 
     @Test
@@ -286,7 +286,7 @@ class GoodsPriceCacheTest {
 
         assertThatThrownBy(() -> service.priceByTriple("M1", "G1", "P1")).isSameAs(boom);
         assertThat(jdbc.calls).as("技术异常不得被缓存").isEqualTo(2);
-        assertThat(cache().get("M1::G1::P1")).isNull();
+        assertThat(cache().get("v2::M1::G1::P1")).isNull();
     }
 
     // ===================== 工具 =====================

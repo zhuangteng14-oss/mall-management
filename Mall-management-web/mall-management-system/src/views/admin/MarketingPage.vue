@@ -1,5 +1,22 @@
 <template>
   <section class="a-mk">
+    <!-- ══ 页内 tab（C3 块 5〈折扣〉长出来的，2026-10-12）══════════════════════════
+         改前这里**刻意没有 tab 栏**：本页当时只有「券」一个子域，摆一个只有一项的 tab 栏
+         等于承诺三个不存在的页面（同 `admin-nav.js` 不给占位页挂图标的那条口径）。
+         现在折扣落地 ⇒ 「多块才上 tab」的条件满足了，才长出这一条。
+         ⚠️ **只列已落地的两枚**：国补 / 秒杀仍是计划中的子域，**不预摆灰 tab**（同一条口径）。 -->
+    <nav class="a-tabs" role="tablist">
+      <button
+        v-for="t in TABS" :key="t.k" type="button" role="tab" class="a-tab"
+        :class="{ 'a-tab-on': tab === t.k }"
+        :aria-selected="tab === t.k ? 'true' : 'false'"
+        @click="tab = t.k"
+      >{{ t.label }}</button>
+    </nav>
+
+    <p v-if="flash.text" class="a-flash" :class="flash.kind">{{ flash.text }}</p>
+
+    <template v-if="tab === 'coupon'">
     <!-- ── ① 状态条（与 `StatsPage.vue` / `OrderPage.vue` / `AccountsPage.vue` 同款，不另立一套）──
          ⚠️ 「券总数」是**全表** `COUNT(*)`（`/list` 的 `total`），不是本次筛选数 —— 后端刻意分开
          回报（同 `AdminOrderService.list` 的口径），本页就把它摆在台面上，免得读成筛选数。 -->
@@ -26,8 +43,6 @@
         <span class="a-tz-off">{{ tzLabel }}</span>
       </div>
     </header>
-
-    <p v-if="flash.text" class="a-flash" :class="flash.kind">{{ flash.text }}</p>
 
     <!-- ══ ② 建券 ═════════════════════════════════════════════════════════════ -->
     <h2 class="a-h2">
@@ -309,6 +324,76 @@
         @retry="loadStats"
       />
     </div>
+    </template>
+
+    <!-- ══════════════════════════════════════════════════════════════════════
+         ══ 折扣（C3 块 5〈折扣〉）═════════════════════════════════════════════
+         两件事，**存的是同一张表 `template`**（⇒ 零新端点，走现成的 `/admin/template/*`）：
+           · 类目折扣上下限 → `Type='discount.limit'`，`Name`=类目名，`Body`={"min":6.0,"max":9.5}
+           · 折扣模板（填充源）→ `Type='discount.rule'`，`Body`=`6.5折|说明`
+         ⚠️ 上下限那张表**按类目列全**（`/goods/goodstype` 有几个类目就有几行），
+            没配的类目显示「未设置」而不是 0 —— 「没配」与「配成 0」是两件事（同后端口径）。 -->
+    <template v-else>
+      <h2 class="a-h2">
+        <IconGlyph name="marketing" />类目折扣上下限
+        <span class="a-h2n">商家填划线原价时按商品类目校验；留空 = 该类目不限</span>
+      </h2>
+      <div class="a-card">
+        <p v-if="limitLoading" class="a-note">加载中…</p>
+        <table v-else class="a-tbl">
+          <thead>
+            <tr><th>类目</th><th>折扣下限（折）</th><th>折扣上限（折）</th><th>状态</th><th></th></tr>
+          </thead>
+          <tbody>
+            <tr v-for="row in limitRows" :key="row.name">
+              <td>{{ row.name }}</td>
+              <td><input v-model.trim="row.min" class="a-inp-s" type="text" placeholder="不限"></td>
+              <td><input v-model.trim="row.max" class="a-inp-s" type="text" placeholder="9.5"></td>
+              <td>
+                <span class="a-chip" :class="row.Id ? 'ok' : 'off'">
+                  {{ row.Id ? '已设置' : '未设置' }}
+                </span>
+              </td>
+              <td><button type="button" class="a-btn-s" @click="saveLimit(row)">保存</button></td>
+            </tr>
+            <tr v-if="!limitRows.length"><td colspan="5" class="a-empty">还没有类目</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h2 class="a-h2">
+        <IconGlyph name="marketing" />折扣模板
+        <span class="a-h2n">商家上架时「选折扣模板」的来源；正文 = 建议折数|说明</span>
+      </h2>
+      <form class="a-filters" @submit.prevent="doCreateRule">
+        <label class="a-f a-f-wide">
+          <span>模板名 *</span>
+          <input v-model.trim="r.Name" type="text" placeholder="如：夏促常规力度">
+        </label>
+        <label class="a-f a-f-wide">
+          <span>正文 *</span>
+          <input v-model.trim="r.Body" type="text" placeholder="6.5折|全场通用，抹零处理">
+        </label>
+        <button type="submit" class="a-btn">新增模板</button>
+      </form>
+      <div class="a-card">
+        <table v-if="ruleRows.length" class="a-tbl">
+          <thead><tr><th>模板名</th><th>正文</th><th>状态</th><th></th></tr></thead>
+          <tbody>
+            <tr v-for="row in ruleRows" :key="row.Id">
+              <td>{{ row.Name }}</td>
+              <td class="a-mono">{{ row.Body }}</td>
+              <td><span class="a-chip" :class="isOn(row.Enabled) ? 'ok' : 'off'">{{ isOn(row.Enabled) ? '启用' : '停用' }}</span></td>
+              <td>
+                <button v-if="isOn(row.Enabled)" type="button" class="a-btn-s" @click="stopRule(row)">停用</button>
+                <button v-else type="button" class="a-btn-s" @click="activateRule(row)">启用</button>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+        <p v-else class="a-empty">还没有折扣模板 —— 建一条，商家上架时就能一键折算划线原价</p>
+      </div>
+    </template>
   </section>
 </template>
 
@@ -340,12 +425,131 @@ import {
   couponGrants, couponGrant, couponStats,
 } from '../../api/marketing'
 import { catalogCategories } from '../../api/admin'
+import {
+  templateList, templateAdminCreate, templateAdminUpdate,
+} from '../../api/template'
 import LineChart from '../../components/charts/LineChart.vue'
 import PieChart from '../../components/charts/PieChart.vue'
 import IconGlyph from '../../components/ui/IconGlyph.vue'
 
 /** 后端 `CouponService.TREND_DAYS` 的**回显**（图标题上写死一个数会与后端走岔）。 */
 const TREND_DAYS = 14
+
+// ── 页内 tab（C3 块 5〈折扣〉，2026-10-12）────────────────────────────────────
+// ⚠️ 只列**已落地**的：国补 / 秒杀还没做 ⇒ 不预摆灰 tab（见模板里那条注释）。
+const TABS = [
+  { k: 'coupon', label: '券' },
+  { k: 'discount', label: '折扣' },
+]
+const tab = ref('coupon')
+
+// ── 折扣子域：两个 type 都存 `template` 表，读写走现成的模板端点（零新端点）──
+/** 类目折扣上下限：`Type='discount.limit'`，`Name`=类目名，`Body`={"min":..,"max":..}。 */
+const limitRows = ref([])
+const limitLoading = ref(false)
+/** 折扣模板（填充源）：`Type='discount.rule'`，`Body`=`6.5折|说明`。 */
+const ruleRows = ref([])
+const r = reactive({ Name: '', Body: '' })
+
+/** 已知的两条唯一键前缀：`(Type, Name)` —— 上下限按类目名 upsert，模板按模板名建。 */
+const LIMIT_TYPE = 'discount.limit'
+const RULE_TYPE = 'discount.rule'
+
+/** `Enabled` 读回来可能是 `true` / `1` / `'1'`（连接器把 `tinyint(1)` 映射成 Boolean）⇒ 宽容判。 */
+const isOn = (v) => v === true || v === 1 || v === '1' || v === 'true'
+
+/** 从 `{"min":6.0,"max":9.5}` 里取一个数；没有 ⇒ `''`（**不是** 0）。 */
+function pickNum(body, key) {
+  const m = new RegExp('"' + key + '"\\s*:\\s*([0-9]+(?:\\.[0-9]+)?)').exec(body || '')
+  return m ? m[1] : ''
+}
+
+/**
+ * 类目上下限表：**按类目列全** —— 类目来源是 `goodstype`（不是 `template`），
+ * 所以「没配过的类目」也要出一行（显示「未设置」），否则管理员根本不知道该配哪些。
+ */
+async function loadLimits() {
+  limitLoading.value = true
+  try {
+    if (!categories.value.length) await loadCategories()
+    const data = await templateList(LIMIT_TYPE)
+    const byName = {}
+    ;(data.list || []).forEach((row) => { byName[row.Name] = row })
+    limitRows.value = categories.value.map((g) => {
+      const hit = byName[g.GoodType]
+      return {
+        name: g.GoodType,
+        Id: hit ? hit.Id : null,
+        min: hit ? pickNum(hit.Body, 'min') : '',
+        max: hit ? pickNum(hit.Body, 'max') : '',
+      }
+    })
+  } catch (e) {
+    limitRows.value = []
+  } finally {
+    limitLoading.value = false
+  }
+}
+
+/** 保存一行：有 `Id` ⇒ 改，没有 ⇒ 建（`(Type, Name)` 撞唯一键由库判定，同后端口径）。 */
+async function saveLimit(row) {
+  const body = JSON.stringify({
+    ...(row.min === '' ? {} : { min: Number(row.min) }),
+    ...(row.max === '' ? {} : { max: Number(row.max) }),
+  })
+  try {
+    // ⚠️ 后端参数名是**首字母大写**的 `Name` / `Body` / `Enabled`（`AdminTemplateController`），
+    //    只有主键那个是 `id` —— 写成小写会**静默不生效**（`required = false` ⇒ 当成"没传"）。
+    const res = row.Id
+      ? await templateAdminUpdate({ id: row.Id, Name: row.name, Body: body })
+      : await templateAdminCreate({ Type: LIMIT_TYPE, Name: row.name, Body: body })
+    flash.text = res.success ? `「${row.name}」已保存` : (res.msg || '保存失败')
+    flash.kind = res.success ? 'ok' : 'err'
+    if (res.success) await loadLimits()
+  } catch (e) {
+    flash.text = '保存失败'; flash.kind = 'err'
+  }
+}
+
+async function loadRules() {
+  try {
+    const data = await templateList(RULE_TYPE)
+    ruleRows.value = data.list || []
+  } catch (e) {
+    ruleRows.value = []
+  }
+}
+
+async function doCreateRule() {
+  if (!r.Name || !r.Body) { flash.text = '模板名与正文都不能空'; flash.kind = 'err'; return }
+  try {
+    const res = await templateAdminCreate({ Type: RULE_TYPE, Name: r.Name, Body: r.Body })
+    flash.text = res.success ? '折扣模板已新增' : (res.msg || '新增失败')
+    flash.kind = res.success ? 'ok' : 'err'
+    if (res.success) { r.Name = ''; r.Body = ''; await loadRules() }
+  } catch (e) {
+    flash.text = '新增失败'; flash.kind = 'err'
+  }
+}
+
+/** 启停 —— 走模板的 `update`（`Enabled` 发 `1`/`0`，后端收 `Integer`；读回来是 Boolean）。 */
+async function setRuleEnabled(row, on) {
+  try {
+    const res = await templateAdminUpdate({ id: row.Id, Enabled: on ? 1 : 0 })
+    flash.text = res.success ? (on ? '已启用' : '已停用') : (res.msg || '操作失败')
+    flash.kind = res.success ? 'ok' : 'err'
+    if (res.success) await loadRules()
+  } catch (e) {
+    flash.text = '操作失败'; flash.kind = 'err'
+  }
+}
+const stopRule = (row) => setRuleEnabled(row, false)
+const activateRule = (row) => setRuleEnabled(row, true)
+
+/** 切到折扣 tab 才拉数（不在 onMounted 里白白多打三条请求）。 */
+watch(tab, (v) => {
+  if (v === 'discount') { loadLimits(); loadRules() }
+})
 
 const TYPES = [
   { code: 'threshold', label: '满减' },
@@ -708,6 +912,73 @@ onMounted(() => {
 <style scoped>
 .a-mk {
   max-width: 1120px;
+}
+
+/* ── 页内 tab（块 5〈折扣〉，2026-10-12）────────────────────────────────────
+   形制照 `ShopHome.vue` 的 `.tabs`（同一枚规矩：**底边 2px 下划线**）——
+   胶囊 / 分段控件都要再套一层带底容器，那就落进 `tokens.css:36` 的射程（统一大圆角）。 */
+.a-tabs {
+  display: flex;
+  gap: var(--s6);
+  border-bottom: 1px solid var(--line);
+  margin-bottom: var(--s5);
+}
+.a-tab {
+  position: relative;
+  padding: var(--s3) 0;
+  font-size: var(--fs-sm);
+  color: var(--ink-3);
+  background: none;
+  border: 0;
+  cursor: pointer;
+  transition: color 0.15s;
+}
+.a-tab:hover {
+  color: var(--ink-2);
+}
+.a-tab-on {
+  color: var(--ink);
+  font-weight: var(--fw-med);
+}
+/* 下划线骑在那条 1px 发丝线上（`bottom: -1px`），不是另起一条 —— 否则会显成两条。 */
+.a-tab-on::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -1px;
+  height: 2px;
+  background: var(--brand);
+}
+/* 上下限那一列是**窄数字输入**（折数，如 `6.5`），不用撑满表格列。 */
+.a-inp-s {
+  width: 96px;
+  padding: var(--s2) var(--s3);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r1);
+  background: var(--surface);
+  color: var(--ink);
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+}
+.a-inp-s:focus {
+  outline: none;
+  border-color: var(--brand);
+}
+/* 表内小按钮（保存 / 启停）—— 比 `.a-btn` 小一档，12 个主按钮会把表变成按钮墙。 */
+.a-btn-s {
+  padding: var(--s1) var(--s3);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r1);
+  background: var(--surface);
+  color: var(--ink-2);
+  font-size: var(--fs-xs);
+  cursor: pointer;
+  transition: border-color 0.15s, color 0.15s;
+}
+.a-btn-s:hover {
+  border-color: var(--brand);
+  color: var(--brand);
 }
 
 /* ── ① 状态条（照 `StatsPage.vue`，逐字同源）────────────────────────────── */

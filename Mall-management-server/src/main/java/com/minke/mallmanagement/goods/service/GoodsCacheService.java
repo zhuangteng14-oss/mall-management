@@ -272,9 +272,12 @@ public class GoodsCacheService {
      *    缓存把这笔代价摊薄为「每 TTL 一次」，是**掩盖而非修复**。
      */
     @Cacheable(cacheNames = "goodsPrice",
-            key = "#MerchantId + '::' + #GoodName + '::' + #ProductCode", sync = true)
+            // ⚠️ 键前缀 `'v2::'` 是**形状版本**（块 5〈折扣〉2026-10-12 加）：本方法多选了
+            //    `OriginalPrice` 一列，响应**形状变了** ⇒ 照 cache-layer §10「响应形状变更 ⇒ bump 键版本」
+            //    把旧键撂下（否则滚动部署期间/未过期条目会返回**少一列**的旧形状，页面静默少个划线价）。
+            key = "'v2::' + #MerchantId + '::' + #GoodName + '::' + #ProductCode", sync = true)
     public Map<String, Object> priceByTriple(String MerchantId, String GoodName, String ProductCode) {
-        String sql = "SELECT Price, GoodImg FROM mall_management_sql.goods "
+        String sql = "SELECT Price, GoodImg, OriginalPrice FROM mall_management_sql.goods "
                 + "WHERE MerchantId=? AND GoodName=? AND ProductCode=?";
 
         List<Map<String, Object>> rows =
