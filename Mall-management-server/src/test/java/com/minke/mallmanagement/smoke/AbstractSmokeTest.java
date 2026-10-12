@@ -44,6 +44,8 @@ import com.minke.mallmanagement.marketing.coupon.dao.CouponDao;
 import com.minke.mallmanagement.marketing.coupon.service.CouponService;
 import com.minke.mallmanagement.shop.follow.dao.ShopFollowDao;
 import com.minke.mallmanagement.shop.follow.service.ShopFollowService;
+import com.minke.mallmanagement.shop.profile.dao.ShopProfileDao;
+import com.minke.mallmanagement.shop.profile.service.ShopProfileService;
 import org.junit.jupiter.api.BeforeEach;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
@@ -223,7 +225,15 @@ import static org.mockito.Mockito.when;
         // **第八次同一处地雷**：@WebMvcTest 无参会加载全部 @Controller，新控制器一进来，
         // 切片上下文就会因为「找不到它要的 ShopFollowService」而**启动失败**（同前七笔）。
         // ⚠️ 本域的依赖链只有三层（Controller → Service → Dao），Service 不另吃别的 bean。
-        ShopFollowDao.class, ShopFollowService.class})
+        ShopFollowDao.class, ShopFollowService.class,
+        // C3 块 5 · B 组续笔（店铺公开档案，2026-10-12）：新增一个 Controller（`ShopProfileController`）
+        // + 一个 @Service（`ShopProfileService`）+ 一个 @Dao（`ShopProfileDao`）——
+        // **第九次同一处地雷**：@WebMvcTest 无参会加载全部 @Controller，新控制器一进来，
+        // 切片上下文就会因为「找不到它要的 ShopProfileService」而**启动失败**（同前八笔）。
+        // ⚠️ 依赖链只有三层（Controller → Service → Dao），Service 不另吃别的 bean。
+        // ⚠️ 这个 Controller 走的是**公开面**（不在身份面），但「公开」与「要不要进 @Import」无关 ——
+        //    切片加载所有 @Controller，与它挂不挂 IdentityGuard 无关。
+        ShopProfileDao.class, ShopProfileService.class})
 public abstract class AbstractSmokeTest {
 
     @Autowired

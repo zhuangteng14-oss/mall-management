@@ -67,12 +67,16 @@ public class GoodsCacheService {
      * ⚠️ 本方法**不会返回 null**（异常也返回 success:false 的 map）⇒ 不产生空值缓存，
      *    cache-layer.md §9.1「穿透：机制未验证」的结论不因本接口改变。
      *
-     * ⚠️ SQL 逐字不动：本接口是 1 次 goods + 每行 1 次 login（N+1）。缓存把它的代价摊薄，
-     *    但**不修**它 —— 修正需要改 SQL（IN 一次查或 JOIN），超出本笔边界（§11 已记一条边界）。
+     * ⚠️ **N+1 不修**：本接口是 1 次 goods + 每行 1 次 login。缓存把它的代价摊薄，但**不改**它
+     *    —— 修正需要改这段逐行查询（IN 一次查或 JOIN），超出本笔边界（§11 已记一条边界）。
      *
-     * ⚠️ `SELECT *` ⇒ 缓存体是「列全集的快照」：goods 表加列后，旧条目缺该列、响应字段
-     *    缺失直到 TTL。处置沿用 §10 约定（响应形状变更 ⇒ bump 键版本），本笔不加版本前缀
-     *    （与既有 goodstype::all 保持一致）。
+     * ⚠️ 缓存体是「**响应形状**的快照」：行里少了哪个字段，就会一直少到该条目过期。
+     *    处置沿用 §10 约定（**响应形状变更 ⇒ bump 键版本**）。
+     *    **本方法在 C3 块 5 · B 组续笔（2026-10-12）第一次**真的触发了这一条：SQL 从 `SELECT *`
+     *    改成 `SELECT g.*, COALESCE(...,0) AS SoldQty`（销量列，见下），键随之 `'all'` → `'all-v2'`。
+     *    ⚠️ 别把键改回去 —— 库里那两个键**并存**，`'all'` 里的老条目**没有 SoldQty**，
+     *    命中的那一刻页面上所有「已售 N 件」会集体消失（且看起来像前端 bug）。
+     *    （先例：`goodstype::all` 至今没 bump 过，因为它的形状没变过。）
  *
  * ⚠️ **异常处理已改（2026-10-03，② 笔）**：原本**内外两层** `catch (Exception e)`，两者都把技术
  *    异常吞成一个正常返回的 Map / 字段 ⇒ **被缓存满 TTL**。现在：
@@ -84,15 +88,24 @@ public class GoodsCacheService {
  *      而前者是后者的**子类**（spring-tx 6.2.6 `javap` 实证）⇒ 这个 catch 精确只命中 0 行；
  *      **>1 行**（`login.Id` 无唯一约束 ⇒ schema 层可达）与技术异常一律上抛。
      */
-    @Cacheable(cacheNames = "goodsHome", key = "'all'", sync = true)
+    // ⚠️ key 从 'all' 升到 'all-v2'（2026-10-12 续笔）：响应多了 SoldQty 列，形状变了。
+    //    别改回去，理由见本方法 javadoc「缓存体是响应形状的快照」那一段。
+    @Cacheable(cacheNames = "goodsHome", key = "'all-v2'", sync = true)
     public Map<String, Object> listHome() {
         Map<String, Object> result = new HashMap<>();
 
         // 1. 先查所有商品
         // ⚠️ C3 块 3 加可见性过滤：下架（ShelfState=0）/ 违规删除（DeletedAt 非空）不对买家露出。
         //    这是块 2 挂账的结清（块 2 只加了 ShelfState 列，买家侧过滤留到本块）。
-        String sql = "SELECT * FROM mall_management_sql.goods "
-                + "WHERE ShelfState = 1 AND DeletedAt IS NULL";
+        // ⚠️ 2026-10-12 续笔加 SoldQty（销量）：LEFT JOIN 一次聚合出每个 ProductCode 的累计件数。
+        //    CAST(SUM(...) AS SIGNED) 照 StatsDao.selectTopGoods —— JDBC 会把 SUM(int) 退成 BigDecimal。
+        //    LEFT JOIN 而非 JOIN：没卖过的商品也要在（销量 0），否则商品会整行消失。
+        String sql = "SELECT g.*, COALESCE(s.SoldQty, 0) AS SoldQty "
+                + "FROM mall_management_sql.goods g "
+                + "LEFT JOIN (SELECT ProductCode, CAST(SUM(Quantity) AS SIGNED) AS SoldQty "
+                + "FROM mall_management_sql.order_item WHERE ProductCode <> '' "
+                + "GROUP BY ProductCode) s ON s.ProductCode = g.ProductCode "
+                + "WHERE g.ShelfState = 1 AND g.DeletedAt IS NULL";
         List<Map<String, Object>> goodsList = jdbcTemplate.queryForList(sql);
 
         // 2. 循环根据商品里的 MerchantId 查 login 表的 UserName
