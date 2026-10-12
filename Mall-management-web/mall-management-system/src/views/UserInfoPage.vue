@@ -54,37 +54,105 @@
          旧的为什么必须废、新的为什么只能是它：三条理由逐条写在 `<script setup>` 里那个同名 `computed` 上。 -->
     <template v-if="isMerchantShell">
 
-      <!-- ── ② 经营数据（商家版）—— 间距分隔（无线）+ 数字用色。稿 `:311-317` ─────────
-           ⚠️ 稿的四个数（18 件 / 3 单 / 26 单 / 5 条）是它的示意值，无聚合端点 ⇒ **落 `—`**
-              （用户裁决 F1 = 甲，与 commit 5 的 KPI 同一口径）。单位 `<small>` 随之不落 —— `—` 后面
-              挂「件 / 单 / 条」没有意义。标签逐字保留。 -->
-      <section
-        class="assets"
-        data-slot="预留 · 经营数据（待 C3〈商家中心〉）"
-        title="待 C3〈商家中心〉——无聚合端点（N=4）；数字为示意；⚠️ 稿的 4 个数字为稿自注的示意值，本笔落 —（同 OrderCenter KPI 口径）"
-      >
-        <div><div class="v">—</div><div class="k">在售商品</div></div>
-        <div><div class="v">—</div><div class="k">待发货</div></div>
-        <div><div class="v">—</div><div class="k">本周订单</div></div>
-        <div><div class="v">—</div><div class="k">未读消息</div></div>
-      </section>
-
-      <!-- ── ③ 待处理订单（商家版）—— 四格浅底色块。稿 `:320-333` ───────────────── -->
+      <!-- ── ② 我的订单（商家版）—— 四格浅底色块。稿 `:320-333` ─────────────────────
+           ⚠️ C3 块 5 · B 组（2026-10-12）**本块从 ③ 上移到 ②**（用户定稿「我的订单（4 项）← 上」），
+              与用户端**逐字同序**：订单在上、无名框在下。
+           ⚠️ 四格文案按用户 2026-10-12 裁定 2「**按用户写的**……与用户端逐字一致（含四格的副文案）」——
+              原来的「待发货 / 待收货 / 退款申请 / 待评价」（按处理状态分列）换成
+              「待付款 / 待发货 / 待收货 / 已完成」。**这是用户逐字指定的文案 + 用户给的项名，不是此处自裁。**
+           ⚠️ 右侧那枚 `disabled`「去订单中心」**保持现状**（方案 §4.1：本块只换四格文案与块序）。 -->
       <section
         class="sec"
-        data-slot="预留 · 待处理订单四入口（待 C3〈订单〉）"
+        data-slot="预留 · 我的订单四入口（待 C3〈订单〉）"
         title="待 C3〈订单〉——OrderDao.selectByMerchant 的 SELECT 不取状态筛选参数，无按状态分列端点（N=4）"
       >
         <div class="sec-h">
-          <h2>待处理订单</h2>
+          <h2>我的订单</h2>
           <button class="more" disabled title="订单中心在顶栏（/merchant/order），此处不做重复入口">去订单中心</button>
         </div>
         <!-- ⚠️ 角标只挂区块级：四格一律 disabled + title，不逐格加 data-slot（稿 `:326` 原话）。 -->
         <div class="tiles">
-          <button disabled title="待 C3〈订单〉——无按状态筛选端点"><b>待发货</b><span>买家已付款待处理</span></button>
-          <button disabled title="待 C3〈订单〉——无按状态筛选端点"><b>待收货</b><span>已发出在途</span></button>
-          <button disabled title="待 C3〈订单〉——OrderState 无退款位，加它是第 4 个状态位（≥6 处）"><b>退款申请</b><span>买家发起的售后</span></button>
-          <button disabled title="待 C3〈订单〉——无评价模块端点"><b>待评价</b><span>已完成待买家评价</span></button>
+          <button disabled title="待 C3〈订单〉——无按状态筛选端点"><b>待付款</b><span>下单后未完成支付</span></button>
+          <button disabled title="待 C3〈订单〉——无按状态筛选端点"><b>待发货</b><span>商家尚未发出</span></button>
+          <button disabled title="待 C3〈订单〉——无按状态筛选端点"><b>待收货</b><span>商品在途</span></button>
+          <button disabled title="待 C3〈订单〉——无按状态筛选端点"><b>已完成</b><span>确认收货的订单</span></button>
+        </div>
+      </section>
+
+      <!-- ── ③【无名框】7 项（商家版）—— **无块标题**（用户 2026-10-12 定稿「无名框，无块标题」）──
+           一格的形状与用户端那 4 格**逐条同款**：`.v`（大字号，--brand-ink）+ `.k`（小字标签）。
+           布局规则（用户定稿「布局规则」段，逐条落）：一行 4 块 · 超出换行 · 第 2 行不足 4 块**左对齐**（甲）
+           · **容器级纵向滚动**（乙）· 隐藏原生滚动条 · **下边缘渐隐**（「与领券中心统一」⇒ 78% 停点）。
+           ⇒ 多出来的 `.assets-scroll` **只挂这一份**：用户端那 4 项一行放得下 ⇒ 不滚、不渐隐（样式见 <style>）。
+           ⚠️ 七项里**只有「优惠券」复用客户版那颗 `div[role=button]`**（用户 2026-10-12 两处待定 ①：
+              「券包是『我这个人』的券，不分商家 / 用户视角」）—— 同一组件、同一数据源（`customerId`）。
+           ⚠️ **边界 2（用户 2026-10-12 要求给明确态）**：`user.customerid` 为空时券包**没有账号可挂**
+              ⇒ 那一格落 `—` + **不可点**（裸 `div` + `title` 说明原因），**不弹一个空账号的券包**。
+              ⚠️ 现实性（VM 库实测）：**14 个 `role=2` 商家、14 个 `customerid` 为空、0 个非空**（种子商家
+              是直接建号、没走过客户阶段；只有 `promoteToMerchant` 那条路才「刻意保留 customerid」）
+              ⇒ **手验时商家端这一格必然看到 `—`**；真入口要在「先注册成客户、再入驻通过」的账号上才看得到。
+           ⚠️ 「店铺信息」跳 `/shop?MerchantId=<自己的商家号>` —— **那条路由属 commit C**（本 commit 里
+              点它只有 vue-router 的控制台告警、不跳转），这是**按批准的三 commit 切分**排的，不是遗漏。 -->
+      <section
+        class="assets assets-scroll"
+        data-slot="预留 · 商家资产与等级（待 C3〈商家中心〉）"
+        title="待 C3〈商家中心〉——积分 / 余额 / 我的收藏三格无聚合端点（N=3），经营等级规则先占位（裁定 ④）；⚠️ 「优惠券」格已于 C3 块 5 接通（复用用户中心券包弹窗）、「店铺信息」「商家认证」两格已接通（跳店铺主页 / 读 /merchant/myApplications 最新一条的状态）"
+      >
+        <div><div class="v">—</div><div class="k">积分</div></div>
+        <div
+          v-if="customerId"
+          class="asset-entry"
+          role="button"
+          tabindex="0"
+          :title="walletTitle"
+          @click="openWallet"
+          @keydown.enter.prevent="openWallet"
+          @keydown.space.prevent="openWallet"
+        >
+          <div class="v">{{ walletCount === null ? '—' : walletCount }}<i v-if="walletRedDot" class="wallet-dot" title="有券快过期">●</i></div>
+          <div class="k">优惠券</div>
+        </div>
+        <!-- 边界 2 的空态：**不可点**的裸 `div`（与用户端另外三格同形），`title` 说明为什么没有。 -->
+        <div
+          v-else
+          title="本账号没有客户号（user.customerid 为空）—— 券包挂在客户号上，这一格因此没有券可看。入驻时若保留过客户号，它会自动变成真券包入口。"
+        >
+          <div class="v">—</div><div class="k">优惠券</div>
+        </div>
+        <div><div class="v">—</div><div class="k">余额</div></div>
+        <div><div class="v">—</div><div class="k">我的收藏</div></div>
+        <div
+          class="asset-entry"
+          role="button"
+          tabindex="0"
+          title="去我自己的店铺主页"
+          @click="enterMyShop"
+          @keydown.enter.prevent="enterMyShop"
+          @keydown.space.prevent="enterMyShop"
+        >
+          <div class="v">进店</div><div class="k">店铺信息</div>
+        </div>
+        <div
+          class="asset-entry"
+          role="button"
+          tabindex="0"
+          :title="certTitle"
+          @click="openCert"
+          @keydown.enter.prevent="openCert"
+          @keydown.space.prevent="openCert"
+        >
+          <div class="v">{{ certLabel }}</div><div class="k">商家认证</div>
+        </div>
+        <div
+          class="asset-entry"
+          role="button"
+          tabindex="0"
+          title="经营等级规则先占位（用户 2026-10-12 裁定 ④）—— 点开看说明"
+          @click="openLevel"
+          @keydown.enter.prevent="openLevel"
+          @keydown.space.prevent="openLevel"
+        >
+          <div class="v">—</div><div class="k">经营等级</div>
         </div>
       </section>
 
@@ -137,15 +205,40 @@
 
     <template v-else>
 
-      <!-- ── ② 我的资产（客户版）—— 间距分隔（无线）+ 数字用色。稿 `:323-329` ───────
+      <!-- ── ② 我的订单（客户版）—— 四格浅底色块。稿 `:332-345` ─────────────────────
+           ⚠️ C3 块 5 · B 组（2026-10-12）**本块从 ③ 上移到 ②**（用户定稿「我的订单（4 项）← 上」）。
+              本块**内容一字未动**（四格文案与各 `title` 照旧）—— 只换了它在页里的位置，
+              商家端那 4 格才是照本节文案改的（裁定 2：商家端「与用户端逐字一致」）。 -->
+      <section
+        class="sec"
+        data-slot="预留 · 我的订单四入口（待 C3〈订单〉）"
+        title="待 C3〈订单〉——客户侧只有一个整单列表页 /customer/cart，无按状态筛选端点（N=4）"
+      >
+        <div class="sec-h">
+          <h2>我的订单</h2>
+          <button class="more" disabled title="待 C3〈订单〉——无「全部订单」列表端点">全部订单</button>
+        </div>
+        <div class="tiles">
+          <button disabled title="待 C3〈订单〉——无按状态筛选端点"><b>待付款</b><span>下单后未完成支付</span></button>
+          <button disabled title="待 C3〈订单〉——无按状态筛选端点"><b>待发货</b><span>商家尚未发出</span></button>
+          <button disabled title="待 C3〈订单〉——无按状态筛选端点"><b>待收货</b><span>商品在途</span></button>
+          <button disabled title="待 C3〈订单〉——无按状态筛选端点"><b>已完成</b><span>确认收货的订单</span></button>
+        </div>
+      </section>
+
+      <!-- ── ③【无名框】4 项（客户版）—— **无块标题**，间距分隔（无线）+ 数字用色。稿 `:323-329` ────
+           ⚠️ C3 块 5 · B 组（2026-10-12）**本块从 ② 下移到 ③**（用户定稿「[无名框]（4 项）← 下」）。
+           ⚠️ 4 项一行放得下 ⇒ **不滚、不渐隐**：本节的 `class` **不加** `.assets-scroll`（那一条只挂商家版
+              7 项那一份）。这是两壳在样式上的唯一分叉，判据是「项数放不放得下」，不是「谁是商家」。
            ⚠️ 与商家版同一条：稿那 4 个数（1,280 / 3 张 / ¥286.50 / 12 件）是示意值，
               **其余三格**无聚合端点 ⇒ **落 `—`**（F1 = 甲）。单位 `<small>张/¥/件</small>` 随之不落。
            ⚠️ **2026-10-11（块 5 · 券的信息架构重排）：「优惠券」一格已接通** —— 它是「我的券包」的
               **唯一入口**（用户定「主页不显示券包」，主页那两处入口已删）⇒ 从裸 `div` 改成
               可点元素 + 真券数 + 快过期红点，点开是 `components/CouponWalletDialog.vue`。
               另三格**不动**（仍是 `—`）。 ⇒ 本节 `title` 里「均无聚合端点（N=4）」那一句已不成立，随之改掉。
-           ⚠️ 这一格在 `<template v-else>`（**客户版**）里 —— 商家版 `.assets`（`:61-70`）是**另一个
-              template 分支**，动它碰不到商家版（商家看自己的券在管理端，不在这个壳里）。 -->
+           ⚠️ **本节与商家版那 7 项里的「优惠券」格是同一颗 `div[role=button]`、同一个 `customerId`、
+              同一个弹窗**（块 5 B 组两处待定 ①：「券包是『我这个人』的券，不分视角」）—— 当年那句
+              「商家看自己的券在管理端，不在这个壳里」**已废**，别再按它推断商家壳里没有券包入口。 -->
       <section
         class="assets"
         data-slot="预留 · 我的资产（待 C3〈个人中心〉）"
@@ -169,24 +262,6 @@
         </div>
         <div><div class="v">—</div><div class="k">余额</div></div>
         <div><div class="v">—</div><div class="k">我的收藏</div></div>
-      </section>
-
-      <!-- ── ③ 我的订单（客户版）—— 四格浅底色块。稿 `:332-345` ─────────────────── -->
-      <section
-        class="sec"
-        data-slot="预留 · 我的订单四入口（待 C3〈订单〉）"
-        title="待 C3〈订单〉——客户侧只有一个整单列表页 /customer/cart，无按状态筛选端点（N=4）"
-      >
-        <div class="sec-h">
-          <h2>我的订单</h2>
-          <button class="more" disabled title="待 C3〈订单〉——无「全部订单」列表端点">全部订单</button>
-        </div>
-        <div class="tiles">
-          <button disabled title="待 C3〈订单〉——无按状态筛选端点"><b>待付款</b><span>下单后未完成支付</span></button>
-          <button disabled title="待 C3〈订单〉——无按状态筛选端点"><b>待发货</b><span>商家尚未发出</span></button>
-          <button disabled title="待 C3〈订单〉——无按状态筛选端点"><b>待收货</b><span>商品在途</span></button>
-          <button disabled title="待 C3〈订单〉——无按状态筛选端点"><b>已完成</b><span>确认收货的订单</span></button>
-        </div>
       </section>
 
       <!-- ── ④ 收藏 / 浏览足迹（客户版）—— 卡片 + hover。稿 `:348-368` ─────────────
@@ -295,15 +370,37 @@
     </section>
 
 
-    <!-- ⚠️ 券包弹窗挂在**客户分支内**（`<template v-else>` 里、`</main>` 之前）——
-         商家壳根本不 mount 它、也就不发那两个请求（`myCoupons` / `coupons`）。
-         ⚠️ 它是 `position: fixed` 的遮罩，放在 `<main>` 里不影响布局。 -->
+    <!-- ⚠️ 两枚弹窗都挂在**两支模板之外、`</main>` 之前**（与 ⑥⑦ 同层）⇒ 两支壳都 mount 得到。
+         ⚠️ 这里原来写着「券包弹窗挂在**客户分支内**（`<template v-else>` 里）／商家壳根本不 mount 它」
+            —— **注释与事实不符**：`<template v-else>` 在 ⑥ 之前就闭合了，本组件一直挂在两支之外
+            （块 5 B 组 2026-10-12 按方案 §4.3 复核时发现并订正：行为早就对，注释写反了）。
+            连带地，`getUserData()` 里那句「只给客户壳发券包请求」也一并改掉（见那处注释）。
+         ⚠️ 两枚都是 `position: fixed` 的遮罩，放在 `<main>` 里不影响布局。 -->
     <CouponWalletDialog
       :open="walletOpen"
       :account="customerId"
       @close="walletOpen = false"
       @changed="loadWallet"
     />
+
+    <!-- ⚠️ 商家端【无名框】里「商家认证」「经营等级」两格共用的**一枚**遮罩（用户 2026-10-12
+         裁定 ③「不跳新页」）—— 面板由 `cardPanel` 决定画哪一份。**不另建组件**：两格在同一格里
+         挨着，开两枚遮罩只会多一份要同步的 z-index 与关闭逻辑。
+         ⚠️ 视觉逐条对齐 `CouponWalletDialog.vue` 的遮罩（`.cscrim` 的 z-index 300 档、`.cdlg` 的
+            宽 / 圆角 / 边 / 阴影）—— 同一页里的两枚遮罩必须像一套；`.mc-*` 前缀避开它那套 `c-`/`w-`。 -->
+    <div v-if="cardPanel" class="mc-scrim" @click.self="cardPanel = null">
+      <div class="mc-dlg" role="dialog" aria-modal="true">
+        <div class="mc-dlg-h">
+          <span>{{ cardPanel === 'cert' ? '商家认证' : '经营等级' }}</span>
+          <button class="mc-x" aria-label="关闭" @click="cardPanel = null">×</button>
+        </div>
+        <div class="mc-dlg-b">
+          <p class="mc-state">{{ cardPanel === 'cert' ? certLabel : '—' }}</p>
+          <p v-if="cardPanel === 'cert'" class="mc-why">{{ certWhy }}</p>
+          <p v-else class="mc-why">经营等级规则尚未落地（敬请期待）—— 功能开发中。</p>
+        </div>
+      </div>
+    </div>
   </main>
 </template>
 
@@ -313,6 +410,7 @@ import { http, handleApiError, assetOf } from '../api/http'
 import { endpoints } from '../api/endpoints'
 import { getUsername, isLoggedIn } from '../api/auth'; import IconGlyph from '../components/ui/IconGlyph.vue'   // ⚠️ 两条 import **同行**（2026-10-11 补图标那一笔）—— 合并到既有行 = 不新增行号漂移（`api-contract.md` 按 `:99` 钉住本文件）
 import { myCoupons } from '../api/marketing'; import CouponWalletDialog from '../components/CouponWalletDialog.vue'   // ⚠️ 两条 import **同行**（C3 块 5 · 券的信息架构重排，2026-10-11）—— 同上一行的理由：本文件多处被按行号引，**能省一行就省一行**
+import { useRouter } from 'vue-router'; import { merchantMyApplications } from '../api/merchant'   // ⚠️ 两条 import **同行**（C3 块 5 · B 组，2026-10-12）—— 理由同上：`useRouter` 给「店铺信息」格跳 `/shop`用（那条路由属 commit C），`merchantMyApplications` 给「商家认证」格读本人提审历史（`/merchant/myApplications`，`api/merchant.js` 已有封装，**没有新增端点、没有动 `endpoints.js`**）
 
 const userInfo = ref({})
 const idType = ref('')
@@ -395,11 +493,18 @@ const getUserData = async () => {
       idValue.value = data.merchantid
     }
 
-    // ⚠️ C3 块 5（2026-10-11）：券包的 `Account` 是**客户号**（`user.customerid`），且只给**客户壳**用 ——
-    //    商家壳的模板里根本没有那个入口（券包弹窗挂在 `<template v-else>` 内）⇒ 这里也**不发请求**：
-    //    券的治理在管理端，不在这个壳里。⚠️ `isMerchantShell` 此刻已按刚赋的 `userInfo.value` 算好。
+    // ⚠️ C3 块 5（2026-10-11）：券包的 `Account` 是**客户号**（`user.customerid`）。
+    //    **块 5 B 组（2026-10-12）改了这一行**：券包入口现在**两支壳都有** —— 商家端【无名框】的第 2 格
+    //    复用同一颗 `div[role=button]` + 同一个弹窗（用户「两处待定 ①」：券包是「我这个人」的券，不分
+    //    商家 / 用户视角）⇒ 原来的 `!isMerchantShell.value` 守卫**已废**，判据只剩「有没有客户号」。
+    //    ⚠️ 这条守卫的**现实效果别读错**：VM 库里 14 个商家**全都没有** `customerid`（种子商家直接建号、
+    //       没走过客户阶段）⇒ 他们在这一行就返回，券格落「边界 2」的空态；真发出请求的只有
+    //       `promoteToMerchant` 那条路来的商家（老客户号被**刻意保留**）。
+    //    ⚠️ `isMerchantShell` 此刻已按刚赋的 `userInfo.value` 算好（它就是上面那两处判据的同源量）。
     customerId.value = data.customerid || ''
-    if (!isMerchantShell.value && customerId.value) loadWallet(customerId.value)
+    if (customerId.value) loadWallet(customerId.value)
+    // 「商家认证」那一格要一个**真状态**（不是 `—`）⇒ 与券包同一次资料加载里问一次，且**只在商家壳问**。
+    if (isMerchantShell.value) loadCert()
   } catch (e) {
     handleApiError(e, '获取用户信息失败')
   }
@@ -541,6 +646,111 @@ const loadWallet = async (account) => {
     handleApiError(e, '券包加载失败')
   }
 }
+
+// ── 商家端【无名框】的「店铺信息 / 商家认证 / 经营等级」三格（C3 块 5 · B 组，2026-10-12）────────
+// 三格各自一行逻辑，够短，**不另建组件**：两枚弹窗共用上面模板里那一枚遮罩（`cardPanel` 决定画哪份）。
+
+/** 路由 —— 「店铺信息」格跳 `/shop`。⚠️ 那条路由属 **commit C**（本 commit 里点它只有控制台告警）。 */
+const router = useRouter()
+
+/** 遮罩开着时画哪一份面板：`null` 关 / `'cert'` 商家认证 / `'level'` 经营等级。 */
+const cardPanel = ref(null)
+
+/**
+ * 「商家认证」格的归一化状态 —— 五值：`''`（还没问）/ `'none'`（没提交过）/ `'pending'` /
+ * `'approved'` / `'rejected'` / `'error'`（取不到）。
+ * ⚠️ 前四个直接是 `merchant_application.Status` 的取值（`MerchantApplicationDao`），**不在这里另造一套词**
+ *    —— 只在渲染时映射成给用户看的字（`certLabel`），两个地方各留一份映射才是漂移源。
+ */
+const certState = ref('')
+
+/** 最新一条申请（`SubmittedAt` 倒序取 `[0]`）；`null` = 没有记录。弹窗里要拿它的提交时刻与驳回理由。 */
+const certLast = ref(null)
+
+/** 取认证状态失败的原因（只在弹窗正文里说，**不弹 `alert`** —— 这里是展示格，不是一次用户发起的动作）。 */
+const certWhyErr = ref('')
+
+/** 状态 → 大字格里那行短文案（与 `.assets .v` 同款位）。 */
+const certLabel = computed(() => {
+  const map = { approved: '已认证', pending: '审核中', rejected: '已驳回', none: '未提交' }
+  return map[certState.value] || '—'
+})
+
+/** 大字格的 `title`：点开前先把状态说清楚（与券包那格的 `walletTitle` 同一种做法）。 */
+const certTitle = computed(() => {
+  if (certState.value === 'error') return `商家认证 —— ${certWhyErr.value || '取不到提审记录'}`
+  if (certState.value === '') return '商家认证 —— 正在读取提审记录'
+  return `商家认证：${certLabel.value} —— 点开看详情（状态读自 /merchant/myApplications 最新一条）`
+})
+
+/**
+ * 弹窗正文：状态 + 依据（哪一次提交 / 驳回理由 / 为什么取不到）。
+ * ⚠️ 正文是**给商家看的**，所以这里不写端点名（`/merchant/myApplications` 只出现在 `certTitle` 与
+ *    代码注释里）—— 「这一格的数据从哪来」是**归属问题**，该写在 `title` 里，不该念给用户听。
+ */
+const certWhy = computed(() => {
+  const at = certLast.value && certLast.value.SubmittedAt ? `（提交于 ${certLast.value.SubmittedAt}）` : ''
+  switch (certState.value) {
+    case 'approved':
+      return `管理端已通过你最近一次入驻申请${at}。`
+    case 'pending':
+      return `你最近一次入驻申请${at}正在审核中；通过后本格会变成「已认证」。`
+    case 'rejected': {
+      const r = certLast.value && certLast.value.RejectReason ? `驳回理由：${certLast.value.RejectReason}。` : '（这一条没有记驳回理由。）'
+      return `你最近一次入驻申请${at}被驳回。${r}可以改好资料后重新提交。`
+    }
+    case 'none':
+      return '没有查到你的入驻申请记录 —— 这一格读的是**你本人**提交过的入驻申请（提审历史）。'
+    case 'error':
+      return `取认证状态失败：${certWhyErr.value || '未知原因'}（不影响本页其它部分）。`
+    default:
+      return '正在读取提审记录……'
+  }
+})
+
+/**
+ * 读「商家认证」状态 —— `POST /merchant/myApplications`（`api/merchant.js` 已有封装，**零契约改动**）。
+ * ⚠️ 只在**商家壳**调（`getUserData()` 里那一行守卫）：客户壳根本没有这一格，问了也没处放。
+ * ⚠️ 失败**不抛**给页面（不 `alert`）：认证状态是**一格展示**，取不到就画 `—` + 在弹窗里说明原因 ——
+ *    与券包那格「取不到就 `null`（画 `—`）而不是 `0`」同一种取舍（`loadWallet` 的注释）。
+ */
+const loadCert = async () => {
+  const username = getUsername()
+  if (!username) {
+    certState.value = 'error'
+    certWhyErr.value = '没有登录态，取不到提审记录'
+    return
+  }
+  try {
+    const data = await merchantMyApplications({ username, limit: 1 })
+    if (!data || !data.success) {
+      certState.value = 'error'
+      certWhyErr.value = (data && data.msg) || '接口返回失败'
+      return
+    }
+    const list = Array.isArray(data.list) ? data.list : []
+    const last = list[0] || null
+    certLast.value = last
+    certState.value = last ? String(last.Status || 'none') : 'none'
+  } catch (e) {
+    certState.value = 'error'
+    certWhyErr.value = '请求异常'
+    handleApiError(e, '取商家认证状态失败')
+  }
+}
+
+/** 「店铺信息」格：跳自己的店铺主页。⚠️ `/shop` 那条路由由 **commit C** 建（本 commit 里跳不到）。 */
+const enterMyShop = () => {
+  const mid = userInfo.value.merchantid
+  if (!mid) { alert('取不到你的商家号，进不了店铺主页'); return }
+  router.push({ path: '/shop', query: { MerchantId: mid } })
+}
+
+/** 「商家认证」格：开弹窗（状态已在 `getUserData()` 那次问过）。 */
+const openCert = () => { cardPanel.value = 'cert' }
+
+/** 「经营等级」格：开弹窗。规则未定（用户 2026-10-12 裁定 ④「先占位，不做」）⇒ 面板是固定文案。 */
+const openLevel = () => { cardPanel.value = 'level' }
 </script>
 
 <style scoped>
@@ -750,4 +960,77 @@ button {
   .svc { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .form2 { grid-template-columns: 1fr; }
 }
+
+/* ══════════════════════════════════════════════════════════════════════════════
+   块 5 · B 组（2026-10-12）新增两组样式 —— 均**追加在文件尾**（本页多处被按行号引，
+   上面的行一律不动；这也是本仓对 `router/index.js` / `endpoints.js` 的同一手法）。
+   ══════════════════════════════════════════════════════════════════════════════ */
+
+/* ── 一、商家端【无名框】7 项的**滚动容器 + 下边缘渐隐** ──────────────────────────
+   用户定稿的布局规则：「容器级纵向滚动（乙）· 隐藏原生滚动条 · 下边缘渐隐（与领券中心统一）」。
+   **只挂商家那一份** `.assets`（7 项放不下）；用户端 4 项一行放得下 ⇒ 不加此类、不滚不渐隐。
+   判据是「项数放不放得下」，不是「谁是商家」—— 换言之这不是角色样式，是**溢出样式**。
+   ⚠️ 类**加在 `.assets` 同一个元素上**（`class="assets assets-scroll"`），**不是**外面再套一层 wrapper：
+      套一层会让 `.assets` 那条 `margin-top: calc(var(--s8) * 1.2)`（76.8px）落进滚动内容里
+      —— 首屏先把 76.8px 空白滚出去，第一行直接被顶出可视区。同类元素两份类 ⇒ 网格与间距全部沿用既有值。
+   ⚠️ 高度**用既有 token 算**（`--assets-row` 三项与 `.assets .v` / `.k` 的取值同源：大字 --d2
+      + `.k` 的上边距 --s3 + 一行字 ≈ `--fs-sm × 1.4`），**不拍一个裸 px**：
+      「≈ 一行」的判据是**它不随项数长高**（7 项和 70 项都一样高），不是像素级等于一行。
+      再留 `--s6 + --s5`（一个行间距 + 一段）⇒ 露出第 2 行顶部**约三分之一行高**：渐隐要有东西可渐，
+      否则渐的是空白、等于没做；三分之一这一档也是「与领券中心统一」那一句的落点
+      （`ProductPage.vue` 的领券行就是「一张 + 半张」）。⇒ 这是本节唯一一处**刻意不是一行整**的地方，
+      两者相权：**滚动条已隐藏**，若第 2 行一点不露，页面上就没有任何「还能往下滚」的线索。
+   ⚠️ 隐藏滚动条两条与 `ProductPage.vue:1330-1331` 同款；渐隐 78% 停点与领券中心
+      （`ProductPage.vue:1032` `.coupons-cut`）逐字相同，`mask-image` / `-webkit-mask-image` **两条都写**。 */
+.assets-scroll {
+  --assets-row: calc(var(--d2) + var(--s3) + var(--fs-sm) * 1.4);
+  max-height: calc(var(--assets-row) + var(--s6) + var(--s5));
+  overflow-y: auto;
+  scrollbar-width: none;
+  mask-image: linear-gradient(to bottom, #000 78%, transparent);
+  -webkit-mask-image: linear-gradient(to bottom, #000 78%, transparent);
+}
+.assets-scroll::-webkit-scrollbar { display: none; }
+
+/* ── 二、商家端两枚弹窗（商家认证 / 经营等级）的遮罩 + 面板 ────────────────────────
+   值逐条抄 `components/CouponWalletDialog.vue` 的 `.cscrim` / `.cdlg`：z-index **300 档**
+   （「弹窗叠弹窗」档，出处 `views/TemplatePicker.vue:105`，别顺手降到 100/200 的顺眼值）、
+   遮罩 `rgba(0,0,0,.42)`、面板 `min(560px, 100%)` / `--r2` / `--line-2` 边 /
+   `0 12px 48px rgba(0,0,0,.22)` 阴影 —— 同一页里两枚遮罩必须像一套。
+   `.mc-*` 前缀避开它那套 `c-`/`w-`（那是子组件自己的 scoped 块，两边互不覆盖）。
+   ⚠️ 只用 `--fs-xl`（32px）而不是 `.assets .v` 的 `--d2`（36px）：弹窗正文里 36px 会把
+      「已认证」顶成标题、把下面的说明挤掉一行。 */
+.mc-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 300;
+  background: rgba(0, 0, 0, 0.42);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--s5);
+}
+.mc-dlg {
+  width: min(560px, 100%);
+  background: var(--surface);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r2);
+  box-shadow: 0 12px 48px rgba(0, 0, 0, 0.22);
+}
+.mc-dlg-h {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--s4) var(--s5);
+  border-bottom: 1px solid var(--line);
+  font-family: var(--font-display);
+  font-size: var(--fs-md);
+  font-weight: var(--fw-med);
+}
+/* 关按钮：位置 / 字号 / 色与 `.cdlg-h .cx` 同款（`button` 的 `background`/`border` 已由上面那两条全局重设清掉）。 */
+.mc-x { font-size: var(--fs-lg); line-height: 1; color: var(--ink-3); }
+.mc-dlg-b { padding: var(--s5); }
+.mc-state { font-family: var(--font-display); font-size: var(--fs-xl); font-weight: var(--fw-med);
+            line-height: 1.1; color: var(--brand-ink); }
+.mc-why { margin-top: var(--s4); font-size: var(--fs-sm); color: var(--ink-2); line-height: 1.7; }
 </style>
