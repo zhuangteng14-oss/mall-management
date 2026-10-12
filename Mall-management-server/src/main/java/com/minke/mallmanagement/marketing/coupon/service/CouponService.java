@@ -471,6 +471,139 @@ public class CouponService {
         }
     }
 
+    // ==================== 结算用券（核销，C3 块 5 · commit 5）====================
+
+    /**
+     * 结算用券的结论。{@code ok=false} ⇒ 调用方**不得**建单（{@code discount} 恒 0，没有意义）。
+     *
+     * <p>为什么回一个 record 而不是 {@code {success, msg}} 那个 Map：调用方是
+     * {@code OrderService.addLocked}，它要的是「能不能用 + 减多少钱」这一对值，
+     * 不是一个准备直接 JSON 出去的响应体 —— 响应体的措辞归 {@code orderAdd} 自己。
+     */
+    public record Redeem(boolean ok, String msg, double discount) {
+
+        static Redeem yes(double discount) {
+            return new Redeem(true, "", discount);
+        }
+
+        static Redeem no(String msg) {
+            return new Redeem(false, msg, 0d);
+        }
+    }
+
+    /**
+     * **核销一张券并算出减免额**（{@code coupon_grant unused → used}）。结算那道闸的唯一实现。
+     *
+     * <p>顺序：**先把能拒的都拒掉（纯读），最后才 CAS 核销** —— 与 {@link #doClaim} 同一条纪律：
+     * CAS 是唯一的判据，前面那几读只为「把话说清楚」；反过来先核销再校验就会要求补偿腿。
+     *
+     * <p>⚠️ <b>「是不是我的券」判在 {@code account} 上</b>：{@code coupon_grant} 的键是
+     * {@code (CouponId, ToAccount)} 且 {@code ToAccount} 是**登录名** ⇒ 别人拿我的券号来核销，
+     * {@code selectGrant} 直接查不到（回「这张券不在你的券包里」），**不是**先查到再比一次。
+     *
+     * <p>⚠️ <b>时刻判据一律走 {@link CouponDao#selectClaimBlock}（库内 {@code NOW()}）</b>，
+     * 不拿 JVM 的钟比 —— 与 {@link #isExpired} 那条 2026-10-11 的教训同源（库时钟 UTC、
+     * 开发机东八区，两个钟差 8 小时，会把「还有 8 小时有效」说成已过期，而领券闸说还能领）。
+     *
+     * <p>⚠️ <b>不判「适用商家」</b>：`Scope='merchant'` 的限制维度是 `CategoryMatch`（商品种类），
+     * 而 `MerchantAccount` 是**发券那家商家的业务号**（`''` = 平台券）—— 拿它当放行条件会把
+     * 平台券与别家券全拒掉。理由与证据写在方法体里那段注释（`mall_management_sql.sql:1256`
+     * ＋ `CouponDao:128`）。按 `CategoryMatch` 判的规则稿里没有 ⇒ 列为**待裁项**，本笔不判。
+     *
+     * @param account    领券人**登录名**（会话业务号要先过 {@code CouponDao.selectUsernameByCustomerId}）
+     * @param couponId   券的业务串
+     * @param merchantId 本单商家**业务号** —— ⚠️ **当前未参与判定**，留着是为了
+     *                   「按 `CategoryMatch` 判」那条待裁项落地时不必再改签名
+     * @param orderTotal 本单**原价合计**（门槛比它、折扣按它算）
+     * @param orderId    本单业务串 —— 核销时写进 {@code coupon_grant.OrderId}，也是
+     *                   {@link #release} 认「是不是本单那一次核销」的钥匙
+     */
+    public Redeem redeem(String account, String couponId, String merchantId, double orderTotal, String orderId) {
+        if (isBlank(account)) {
+            // 会话里翻不出登录名（`user` 表没这个客户号 / 闸关的切片）⇒ 说不清是谁的券，不放行。
+            return Redeem.no("无法识别领券账户");
+        }
+        Map<String, Object> grant = couponDao.selectGrant(couponId, account);
+        if (grant == null) {
+            return Redeem.no("这张券不在你的券包里");
+        }
+        if (!"unused".equals(str(grant.get("Status")))) {
+            return Redeem.no("该券已被使用");
+        }
+        Map<String, Object> coupon = couponDao.selectCoupon(couponId);
+        if (coupon == null) {
+            return Redeem.no("券不存在");
+        }
+        if (!STATUS_ACTIVE.equals(str(coupon.get("Status")))) {
+            return Redeem.no("该券已停用");
+        }
+        Map<String, Object> block = couponDao.selectClaimBlock(couponId);
+        if (block != null && flag(block.get("NotStarted"))) {
+            return Redeem.no("该券还未开始");
+        }
+        if (block != null && flag(block.get("Expired"))) {
+            return Redeem.no("该券已过期");
+        }
+        // ⚠️ **刻意不判「适用商家」**（2026-10-12 落地当天改回，见文末 javadoc 末段）——
+        //    `Scope='merchant'` 的**限制维度是 `CategoryMatch`（商品种类）不是商家**：
+        //    建表注释 `mall_management_sql.sql:1256` 逐字写着「适用档：all 全场 / merchant
+        //    部分商家（**限商品种类**）」；`CouponDao` 类注释 `:128` 又把
+        //    `MerchantAccount IS NULL / = ''` 定义为**平台券**、非空是**发券那家商家的业务号**。
+        //    ⇒ 拿 `MerchantAccount` 是本单 `merchantId` 当放行条件，会把**每一张平台券**
+        //    和**每一张别家发的券**全拒掉（实测：券包里那张 `Scope=merchant` /
+        //    `MerchantAccount=''` / `CategoryMatch='生活用品,服装,美食'` 会被误判成「不适用于本店」）。
+        //    按 `CategoryMatch` 判需要本单的商品种类，而订单在 `addLocked` 那一步只有
+        //    `ProductCode`（种类要回查 `goods`）＋「一单混类目时算不算适用」这条规则**稿里没有**
+        //    ⇒ 不在这里自造规则，**列为待裁项**（见 commit 5 提交信息「待裁」段）。
+        String type = str(coupon.get("Type"));
+        double face = decimal(coupon.get("FaceValue"));
+        double threshold = decimal(coupon.get("Threshold"));
+        if (TYPE_THRESHOLD.equals(type) && orderTotal < threshold) {
+            return Redeem.no("本单金额未满 ¥" + money(threshold) + "，该券不适用");
+        }
+        // `percent` 的 `FaceValue` 是**折扣率**（0.85 = 8.5 折，见 `coupon-format.js` 的 `couponFace`）
+        // ⇒ 减的是 `总额 × (1 - 率)`；另两类 `FaceValue` 就是**减免金额**（`none` 型后端强制 Threshold=0）。
+        double discount = TYPE_PERCENT.equals(type) ? orderTotal * (1d - face) : face;
+        // 上限锁死在**本单金额**：超出部分是白送（`none` 券的面值可能大于本单），下限锁 0
+        // （`percent` 的 `FaceValue` 若被配成 >1，`1 - face` 会是负数 —— 那会**加价**）。
+        discount = Math.max(0d, Math.min(discount, orderTotal));
+        discount = Math.round(discount * 100d) / 100d;
+        // 唯一的判据：CAS。返回 0 ⇒ 两次结算同时用了同一张券，这一次没抢到。
+        if (couponDao.markUsed(couponId, account, orderId) == 0) {
+            return Redeem.no("该券已被使用");
+        }
+        return Redeem.yes(discount);
+    }
+
+    /**
+     * 业务号（{@code customerid}）→ 登录名 —— 券包的键。查无此人 ⇒ {@code null}。
+     *
+     * <p>结算侧的入口是 {@code orderAdd}（手里只有会话里的业务号），而
+     * {@code coupon_grant.ToAccount} 存的是**登录名** ⇒ 中间必须翻这一次。
+     * 查不到**不编身份**：返回 {@code null} 让 {@link #redeem} 说出「无法识别领券账户」。
+     */
+    public String usernameOf(String customerId) {
+        if (isBlank(customerId)) {
+            return null;
+        }
+        return couponDao.selectUsernameByCustomerId(customerId.trim());
+    }
+
+    /**
+     * {@link #redeem} 的**补偿腿**：券已经核销、订单却没建成 ⇒ 把这张券放回未使用。
+     *
+     * <p>⚠️ 只回退**本单**那一次（{@code OrderId} 钥匙，见 {@code CouponDao.releaseUsed} 的
+     * {@code WHERE} 说明）—— 按 {@code (CouponId, ToAccount)} 无脑回退会掀掉别人那次真实核销。
+     * <p>⚠️ 调用方（{@code OrderService.addLocked}）**fail-soft**：回退失败只记一行日志，
+     * 不改变「订单没建成」这个结论（那时用户已经拿到失败文案，再抛异常只会盖掉它）。
+     */
+    public boolean release(String account, String couponId, String orderId) {
+        if (isBlank(account) || isBlank(couponId) || isBlank(orderId)) {
+            return false;
+        }
+        return couponDao.releaseUsed(couponId, account, orderId) > 0;
+    }
+
     // ==================== 内部 ====================
 
     /**
@@ -760,5 +893,16 @@ public class CouponService {
         result.put("success", false);
         result.put("msg", msg);
         return result;
+    }
+
+    /** {@code decimal(10,2)} 列 → {@code double}（JDBC 可能给 {@code BigDecimal}）。取不到 ⇒ 0。 */
+    private static double decimal(Object o) {
+        return o instanceof Number n ? n.doubleValue() : 0d;
+    }
+
+    /** 金额说人话：整数不带 {@code .0}（「本单金额未满 ¥100」而不是「¥100.0」）。 */
+    private static String money(double v) {
+        String s = String.valueOf(Math.round(v * 100d) / 100d);
+        return s.endsWith(".0") ? s.substring(0, s.length() - 2) : s;
     }
 }

@@ -23,12 +23,12 @@
          ⚠️ 壳里**没有** `.subnav`：`AppShell.vue:298-299` 自注「稿的 `.subnav a` 属**二级导航**、
          不属顶栏」⇒ C 笔既然把它从顶栏里摘出去了，就没人落过它 ⇒ 它是**页级**的，本笔落在首页顶部。
          ⚠️ 6 项**本仓都没有路由** ⇒ 原一律 `disabled` + `title`（`progress.md:1652` 判据①）。
-         ⚠️ **2026-10-11（C3 块 5 · commit 1）「领券中心」接通**（用户批：《b5-placeholder-landing.md》§一 #2「接通（锚到券包区）」）⇒ 摘 `disabled`、改锚到本页 `.tickets`；**另 5 项仍是 `disabled`**（今日秒杀归本块 commit 4、剩余三项归属仍为 `<待定>`）。开放剩余项属**功能**笔，不在 D 笔边界内。
+         ⚠️ 已接通 **2 项**：**「领券中心」**（C3 块 5 · commit 1，2026-10-11，用户批《b5-placeholder-landing.md》§一 #2「接通（锚到券包区）」）⇒ 摘 `disabled`、锚到本页 `.tickets`；**「今日秒杀」**（本块 commit 5，2026-10-12）⇒ 摘 `disabled`、改 `<router-link to="/seckill">`（秒杀页 commit 4 已落地，**不再**是「预留位」；它**不走** `emit('go-search', …)` 那条路 —— 秒杀有自己的页）。**另 4 项仍是 `disabled`**（全部商品分类 / 品牌专区 / 会员中心 / 客户服务，归属仍为 `<待定>`）。开放剩余项属**功能**笔，不在 D 笔边界内。
          登记见 `docs/agent/slot-registry.md`「commit 3 · 稿外死控件」。 -->
     <nav class="subnav">
       <div class="inner">
         <button type="button" class="now" disabled title="预留 · 全部商品分类（无落点：分类检索现走搜索页 GoodsSelect 的左分类树）">全部商品分类</button>
-        <button type="button" class="hot" disabled title="预留 · 今日秒杀（无落点：本页秒杀位是预留位）">今日秒杀</button>
+        <router-link class="hot" to="/seckill" title="今日秒杀 —— 落到秒杀页（C3 块 5 · commit 5 接线；此前是「预留位」）">今日秒杀</router-link>
         <button type="button" class="hot" @click="scrollToTickets" title="领券中心 —— 锚到本页领券中心（C3 块 5 commit 1 接线；2026-10-11 信息架构重排后本页**只留领券中心**，券包已搬去用户中心弹窗）">领券中心</button>
         <button type="button" disabled title="预留 · 品牌专区（无落点：无品牌数据模型）">品牌专区</button>
         <button type="button" disabled title="预留 · 会员中心（无落点：会员体系未落）">会员中心</button>
@@ -720,24 +720,25 @@ button {
   align-items: center;
   gap: var(--s6);
 }
-.subnav button {
+.subnav button, .subnav a {
   font-size: 13.5px;
   color: var(--nav-tx);
   transition: color 0.15s;
   white-space: nowrap;
+  text-decoration: none;   /* `<router-link>` 落成 `<a>`，这行不给就带下划线（块 5 commit 5 起本栏有真链接） */
 }
-.subnav button:hover {
+.subnav button:hover, .subnav a:hover {
   color: var(--nav-tx-hi);
 }
-.subnav button.now {
+.subnav button.now, .subnav a.now {
   color: var(--nav-now);
   font-weight: var(--fw-semi);
 }
-.subnav button.hot {
+.subnav button.hot, .subnav a.hot {
   color: var(--nav-hot);
   font-weight: var(--fw-med);
 }
-/* 六项都无落点（disabled）⇒ 鼠标形态要说实话，别留着 `pointer` 骗人。 */
+/* 四项仍无落点（disabled）⇒ 鼠标形态要说实话，别留着 `pointer` 骗人。 */
 .subnav button[disabled] {
   cursor: not-allowed;
 }

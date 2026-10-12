@@ -199,9 +199,15 @@ export function cartList(customerId) {
  * `(CustomerId, ProductCode)`），而 `order.MerchantId` 是单值 ⇒ 分组键只能是商家。
  * **单商家车（常态）才是「整车一单多行」。**
  *
- * @param {{CustomerId:string, ProductCode?:string}} params
+ * @param {{CustomerId:string, ProductCode?:string, CouponId?:string}} params
  *        `ProductCode` 不传 ⇒ 结算**整车**。
+ *        ⚠️ **C3 块 5 commit 5 新增 `CouponId`**（结算用券）：不传 ⇒ 与加它之前**逐字节同行为**。
+ *        券的核销在 `OrderService.orderAdd` 的临界区内（CAS 抢不到就整单不建），
+ *        且**只随「整车且单商家」那一笔走** —— 多商家整车带券会被 `CartService.checkout`
+ *        直接拒（一张券只抵一笔订单）。空串会被上面的 `q()` 丢掉。
  * @returns {Promise<{success:boolean, list:Array, msg?:string}>}
+ *          ⚠️ 券真的核销掉时，回体里**多** `CouponId` / `Discount` 两个键（否则不出现）——
+ *             判据就是「有没有 `Discount`」（`OrderController` 据此写 `coupon.redeem` 审计）。
  *          `list` 每项：`OrderId` / `MerchantId` / `ProductCode` / `Quantity` / `Price` / `Items`。
  *          ⚠️ **消费者只读 `OrderId`**（`ShoppingCart.vue`）⇒ 多出来的键是**超集、不算破坏**；
  *             单行组时那四个旧键与改前**逐字同值**，多行组时才是聚合值。

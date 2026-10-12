@@ -264,11 +264,28 @@ public class CouponDao {
                 .params(couponId, toAccount, source).update();
     }
 
-    /** 核销（{@code unused → used}）。CAS：重复核销 {@code updated=0}。**块 5 commit 5 接结算**。 */
+    /** 核销（{@code unused → used}）。CAS：重复核销 {@code updated=0}。**块 5 commit 5 起结算在用**。 */
     public int markUsed(String couponId, String toAccount, String orderId) {
         return jdbcClient.sql("UPDATE coupon_grant SET Status = 'used', UsedAt = NOW(), OrderId = ? "
                         + "WHERE CouponId = ? AND ToAccount = ? AND Status = 'unused'")
                 .params(orderId, couponId, toAccount).update();
+    }
+
+    /**
+     * 核销的**补偿腿**：把券还回去（{@code used → unused}）—— 券核销了、订单却没建成时用。
+     *
+     * <p>⚠️ {@code WHERE} 里的 {@code OrderId = ?} 与 {@code Status = 'used'} 两个条件**一个都不能少**：
+     * 只按 {@code (CouponId, ToAccount)} 回退，会把**同一张券在另一次结算里刚核销掉的那一行**也
+     * 掀回未使用（一券一账号只有一行 ⇒ 那一次的真实核销被抹掉，用户可以拿它刷第二单）。
+     * 带上 {@code OrderId} ⇒ 只回退**本单自己**写下的那一次核销。
+     *
+     * <p>⚠️ 与 {@link #markUsed} 是**一对**：改一处的 {@code WHERE} 必须成对看另一处
+     * （同 {@code appendCouponFilters} 那条「成对改」要求）。
+     */
+    public int releaseUsed(String couponId, String toAccount, String orderId) {
+        return jdbcClient.sql("UPDATE coupon_grant SET Status = 'unused', UsedAt = NULL, OrderId = '' "
+                        + "WHERE CouponId = ? AND ToAccount = ? AND OrderId = ? AND Status = 'used'")
+                .params(couponId, toAccount, orderId).update();
     }
 
     // ==================== 读：券定义 ====================
@@ -560,7 +577,7 @@ public class CouponDao {
     }
 
     /**
-     * 某人某券的领取行（{@code unused} 的那条）；没有 ⇒ {@code null}。**块 5 commit 5 结算用券要读它**。
+     * 某人某券的领取行（{@code unused} 的那条）；没有 ⇒ {@code null}。**块 5 commit 5 起结算用券在读它**。
      * ⚠️ {@code toAccount} 是**登录名**（2026-10-12 起）。
      */
     public Map<String, Object> selectGrant(String couponId, String toAccount) {
@@ -569,6 +586,28 @@ public class CouponDao {
                         + "FROM coupon_grant g WHERE g.CouponId = ? AND g.ToAccount = ? LIMIT 1")
                 .params(couponId, toAccount).query().listOfRows();
         return rows.isEmpty() ? null : rows.get(0);
+    }
+
+    /**
+     * **业务号 → 登录名**（{@code user.customerid} → {@code user.username}），查无此人 ⇒ {@code null}。
+     *
+     * <p>为什么需要它：券包的键是**登录名**（{@code coupon_grant.ToAccount}，见
+     * {@link #insertGrant} 那条 2026-10-12 的口径），而下单侧手里只有会话里的**业务号**
+     * （{@code orderAdd} 的 {@code CustomerId}）⇒ 两边量的不是同一种东西，必须在这里翻一次。
+     *
+     * <p>⚠️ 与 {@link #selectMerchantIdByUsername} 是**反方向**的一条，别合并 —— 一个按
+     * {@code username} 查 {@code merchantid}，一个按 {@code customerid} 查 {@code username}；
+     * 商家号查不出客户、客户号也查不出商家号，合成一条只会多一个恒空的参数。
+     */
+    public String selectUsernameByCustomerId(String customerId) {
+        List<Map<String, Object>> rows = jdbcClient
+                .sql("SELECT username FROM user WHERE customerid = ? LIMIT 1")
+                .param(customerId).query().listOfRows();
+        if (rows.isEmpty()) {
+            return null;
+        }
+        Object v = rows.get(0).get("username");
+        return v == null ? null : v.toString();
     }
 
     // ==================== 内部 ====================

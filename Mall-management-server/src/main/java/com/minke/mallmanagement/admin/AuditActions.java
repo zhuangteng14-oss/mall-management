@@ -167,7 +167,8 @@ public final class AuditActions {
     //    `admin_audit.TargetId` 是 NOT NULL，传 null 会在留痕处炸掉整条链路（TD-20 的教训）。
     // ⚠️ 核销（`coupon.redeem`）**不在这里**：它发生在**结算**（用户端下单），
     //    由 orderAdd 带 couponId 触发、写自己的 OrderId 作 TargetId ⇒ 随 commit 5 一起挂。
-    // ⚠️ 剩下一个子域（结算用券）的挂钩点随 commit 5 加（秒杀已在 commit 4 挂上，见下）
+    // ⚠️ 块 5 的四个子域至此全部挂完：券（本批）/ 秒杀（commit 4，见下）/ 结算用券（commit 5，见下）
+    //    / 折扣（commit 2）
     //    —— 折扣（commit 2）**刻意零新挂钩点**：它的写口是既有的 `goodsAdd` / `goodsUp`
     //    与通用 `/admin/template/*`，留痕已由那两处自己的动作覆盖，再挂一条就是同一件事记两遍。
 
@@ -219,6 +220,16 @@ public final class AuditActions {
 
     /** 管理员停用已成立的秒杀活动（逻辑废弃）—— {@code POST /admin/marketing/seckill/stop}。 */
     public static final String SECKILL_STOP = "seckill.stop";
+
+    // ---- 结算用券的唯一挂钩点（commit 5，2026-10-12）------------------------------
+    // ⚠️ 这是全表里**唯一一条「用户（买家）自己的动作」**：其余都是管理员做的事。
+    //    它由 `OrderController.orderAdd` 在**券真的核销掉之后**写（判据 = 回体里带 `Discount`）。
+    // ⚠️ `TargetId` 是**订单业务串**、`TargetType` 是 `coupon` —— 看着别扭，理由是可查性：
+    //    `coupon_grant.OrderId` 一列就能反查回是哪张券，而券号 `CPxxx` 反过来查不出任何上下文。
+    //    `AfterJson` 里同时带着 `CouponId` 与 `Discount`，两个方向都查得到。
+
+    /** 买家**下单时核销**一张优惠券 —— {@code POST /order/orderAdd}（带 {@code CouponId}）。 */
+    public static final String COUPON_REDEEM = "coupon.redeem";
 
     private AuditActions() {
     }

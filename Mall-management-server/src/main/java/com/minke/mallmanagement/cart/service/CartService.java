@@ -169,8 +169,16 @@ public class CartService {
      * （并发 / 库错），而那条回不去（订单链禁 {@code @Transactional}），仍按类注释如实回报。
      * ⚠️ 校验期那两条失败**仍走 {@link #partialFailure}**（此时它必然空表 ⇒ 文案与改前**逐字相同**）：
      * 「结算失败：…」这个串前端是直接 alert 出去的，换一种写法就是一次可见的对外变更。
+     *
+     * <h2>【C3 块 5 commit 5：可选用券 {@code couponId}】</h2>
+     * 非空 ⇒ 只允许**单商家结算**（分组数 M = 1），并把券号透传给那一次 {@code orderAdd}；
+     * M &gt; 1 且带了券 ⇒ **一条 SQL 都不发**，直接回「优惠券请分单使用」。
+     * <p>⚠️ 为什么不在多商家时「随便挑一单用掉」：一张券只能抵一笔订单，而这一车会生成 M 笔，
+     * 挑哪一笔都没有依据 —— 那是**发明**一条用户没说过的规则。让用户自己分单，规则才是确定的。
+     * <p>⚠️ 前端（{@code ShoppingCart.vue}）按同一判据禁用券选择器（同 {@code MAX_QTY} 那条
+     * 「两处都留，免得只在一边拦」），但**真判据在这里** —— 前端可绕过。
      */
-    public Map<String, Object> checkout(String customerId, String productCode) {
+    public Map<String, Object> checkout(String customerId, String productCode, String couponId) {
         if (isBlank(customerId)) {
             return fail("缺少参数：CustomerId");
         }
@@ -211,16 +219,25 @@ public class CartService {
         }
 
         // 第二段：分组建单。**一组 = 一笔订单 = 一次 orderAdd**（锁、五道闸、查重全在它里面）。
-        for (Map.Entry<String, List<CheckoutLine>> group : groupByMerchant(lines).entrySet()) {
+        Map<String, List<CheckoutLine>> groups = groupByMerchant(lines);
+        // 用券闸：一张券只抵一笔订单，而本车会生成 M 笔 ⇒ 只有 M = 1 时「用这张券」才有确定含义。
+        // ⚠️ 排在**建任何订单之前**（此时 `created` 必然空表 ⇒ 一条 SQL 都没发出去）。
+        String coupon = couponId == null ? "" : couponId.trim();
+        if (!coupon.isEmpty() && groups.size() > 1) {
+            return fail("这一车含 " + groups.size() + " 个商家，优惠券只能用在单个商家的结算上（请分单结算）");
+        }
+        for (Map.Entry<String, List<CheckoutLine>> group : groups.entrySet()) {
             String merchantId = group.getKey();
             List<CheckoutLine> groupLines = group.getValue();
             OrderDraft draft = draftOf(groupLines);
             String orderId = newOrderId();
             // ⚠️ `Items` 交给 OrderService 编码（全仓唯一知道该格式的地方）。编码失败它返回 null
             //    ⇒ 服务端回落到 ProductInformation 口径 ⇒ 明细可能少几行，但**结算照常**。
+            // ⚠️ `coupon` 只在 M = 1 时才可能非空（上面那道闸），它减的是 `order.Price`（落库总价），
+            //    而 `Items` 里各行的单价仍是**原价** —— 明细记的是「卖了哪几件」，与实付是两回事。
             Map<String, Object> add = orderService.orderAdd(customerId, merchantId, orderId, draft.price(),
                     draft.productInformation(), draft.images(), 0, 0, 0, draft.quantity(),
-                    orderService.encodeItems(draft.items()));
+                    orderService.encodeItems(draft.items()), coupon);
             if (!Boolean.TRUE.equals(add.get("success"))) {
                 return partialFailure(created, String.valueOf(add.get("msg")));
             }
