@@ -134,7 +134,7 @@
                 </span>
               </span>
               <span v-else class="coupons"><span class="cond cut-off">{{ couponAccount ? '暂无可用券' : '登录后可领券' }}</span></span>
-              <!-- 「》」展开（用户 A4：两张半之外还有券时才出现）。
+              <!-- 「》」展开（用户 A4：裁切线外还有券时才出现）。
                    ⚠️ 与主页 `.tk-more` 是**同一个手势**（点一下铺开、再点收起），但**不共用 CSS** ——
                       主页那份钉在 `.tk-h-r` 里（表头右侧），这一颗在 `.r` 的第 3 列。 -->
               <button
@@ -821,11 +821,11 @@ const couponAccount = getCustomerId() || ''
 const claimList = ref([])
 const claiming = ref('')
 
-// ⚠️ **C3 块 5 · A 组 · A4（2026-10-12）**：领券行「几张算该收起」= **2**
-//    （用户逐字「两张半 + 第三张截断」）—— 与样式里 `.coupons > .coupon` 基宽那个 `2.3` 是**一对**
-//    （那个 `.3` 就是「露出来的半张」）。改这里必须成对改样式，否则「第 3 张露出多少」与
-//    「什么时候才出 `》`」会对不上（主页 `.tk` 那套 `TK_VISIBLE` / `+0.3` / mask 宽同款约定）。
-const CP_VISIBLE = 2
+// ⚠️ **C3 块 5 · A 组 · A4（2026-10-12）**：领券行「几张算该收起」= **1**。
+//    ⚠️ **手验后改**：原为 `2`（用户逐字「两张半 + 第三张截断」），但实测本版面券区只有 **315.9px** ⇒
+//    两张半 = 每张 **132.1px**，而卡内内容最小 **197px**（溢出 65px）—— 二者互斥，用户裁定取可读：
+//    `(315.9−12)/1.3 = **233.8px**`、第 2 张露 **70.1px（三成张）**。样式那三个 `1.3` / `78%` 要成对改。
+const CP_VISIBLE = 1
 /** 领券行的展开态（点「》」置真 ⇒ 样式 `.coupons-on` 放开 `nowrap`、渐隐同撤）。 */
 const cpExpanded = ref(false)
 
@@ -1013,24 +1013,24 @@ button { background: none; border: 0; cursor: pointer; }
    标签位，故与 `.promo .cut` 的 `--ink-2` 分开一档（降到 `--ink-3`，与 `.tag` 同色）。 */
 .promo .cut-off { color: var(--ink-3); }
 /* —— 领券行：**商家券**横向铺开（C3 块 5 · A 组 · A4）——
-   用户口径「两张半 + 第三张截断 + 渐隐 + `》`」，与主页 `.tk-strip` 是**同一套路**（不滚、裁切、渐隐、
-   `》` 展开），但**不共用那一份 CSS**：主页那条钉死在 `.tickets` 的 5 张版式里，这条在商品页 `.promo`。
-   ⚠️ 三个数是一组（同主页那条注释）：`CP_VISIBLE`(2) / 基宽那个 `+0.3` / 渐隐带宽 —— 改一处要成对改。 */
+   用户口径「两张半 + 第三张截断 + 渐隐 + `》`」⚠️ **2026-10-12 手验后按实测收成「一张半」**（券区只
+   315.9px，两张半 ⇒ 132.1px/张装不下内容；见 `CP_VISIBLE` 那条）。与主页 `.tk-strip` **同一套路**（不滚、
+   裁切、渐隐、`》`），但**不共用那份 CSS**（主页那条钉死在 `.tickets` 的 5 张版式里）。⚠️ 三个数是一组：`CP_VISIBLE`(1) / 基宽那个 `+0.3` / 渐隐带 `78%` —— 改一处要成对改。 */
 .coupons { display: flex; gap: var(--s3); flex-wrap: nowrap; align-items: center; overflow: hidden; }
 /* 展开态（点过 `》`）：放开换行 ⇒ 全部铺开（每行 2 张），渐隐同时撤掉。 */
 .coupons-on { flex-wrap: wrap; }
-/* 基宽 = `(100% - (N-1) 个 gap) / (N + 0.3)`（N = `CP_VISIBLE` = 2）。那个 **`+0.3` 不是笔误**：
-   按整 2 张算 ⇒ 第 3 张**整个落在裁切线之外、一点都露不出来**，右侧渐隐就没东西可淡（「还有更多」当场失效）；
-   按 `+0.5` ⇒ 第 3 张露出近一半，**看着像一张完整的窄卡**、也不像「被裁」。`+0.3` = 露出约 1/4 张。
-   ⚠️ 只作用在**领券行**（`.coupons >`）—— `.coupon` 本身还给购入弹窗的 `.p-coupons` 用（那边要自适应宽）。 */
-.coupons > .coupon { flex: 0 0 calc((100% - var(--s3)) / 2.3); }
-/* 越位渐隐。⚠️ 这里是**百分比**（87% 起）而**不是**主页那种固定 `88px`：商品页这一栏没有固定宽度
-   （`.promo .r` 是 `1fr`，随视口变），固定 px 在窄屏会盖过头、宽屏又盖不住那半张。百分比自带缩放：
-   第 3 张的露头恒在容器约 87% 处起（`(2×(100%-g)/2.3 + g) / 100%`，g=12px ≈ 87%）⇒ 87% 起淡正好。
+/* 基宽 = `(100% - 1 个 gap) / (N + 0.3)`（N = `CP_VISIBLE` = 1）。那个 **`+0.3` 不是笔误**：
+   按整 1 张算 ⇒ 第 2 张**整个落在裁切线之外、一点都露不出来**，右侧渐隐就没东西可淡（「还有更多」当场失效）；
+   按 `+0.5` ⇒ 第 2 张露出近一半，**看着像一张完整的窄卡**、也不像「被裁」。`+0.3` = 露出约三成张。
+   ⚠️ `min-width: 0` **必须写**（flex item 自动最小尺寸 = min-content，实测 197px；不写就被顶成 275.1/345.9/345.9 那种内容宽）—— 只作用**领券行**：`.coupon` 还给弹窗 `p-coupons` 用。 */
+.coupons > .coupon { flex: 0 0 calc((100% - var(--s3)) / 1.3); min-width: 0; }
+/* 越位渐隐。⚠️ 这里是**百分比**（78% 起）而**不是**主页那种固定 `88px`：商品页这一栏没有固定宽度
+   （`.promo .r` 是 `1fr`，随视口变），固定 px 在窄屏会盖过头、宽屏又盖不住那一角。百分比自带缩放：
+   第 2 张的露头恒在容器约 78% 处起（`((100%-g)/1.3 + g) / 100%`，g=12px ≈ 78%）⇒ 78% 起淡正好。
    `-webkit-mask-image` 是给旧 WebKit 的，两条都要写。 */
 .coupons-cut {
-  mask-image: linear-gradient(to right, #000 87%, transparent 100%);
-  -webkit-mask-image: linear-gradient(to right, #000 87%, transparent 100%);
+  mask-image: linear-gradient(to right, #000 78%, transparent 100%);
+  -webkit-mask-image: linear-gradient(to right, #000 78%, transparent 100%);
 }
 /* 「领券」行比「促销」行多一列（右侧 `》`）。⚠️ **只给这一行加第三列** —— 改公共的 `.promo .r` 会让
    上面「促销」行白留一格 `--s4` 的 gutter（那个 grid 是共用的，见上面那条注释）。 */
@@ -1048,7 +1048,7 @@ button { background: none; border: 0; cursor: pointer; }
                color: var(--accent); line-height: 1; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .coupon .amt i { font-style: normal; font-size: var(--fs-xs); margin-right: 1px; }
 /* 券名（A7 后半，与主页 `.tk-name` 同口径）：卡里唯一一行一级信息。
-   ⚠️ `flex: 1 1 auto` + `min-width: 0` 才**截得断** —— 卡被钉死在 `(100% - g)/2.3` 的窄框里，
+   ⚠️ `flex: 1 1 auto` + `min-width: 0` 才**截得断** —— 卡被钉死在 `(100% - g)/1.3` 的窄框里，
       券名是用户填的、不限长，不截断就会把「领取」顶出可视区（同主页那条的 `max-width: 100%`）。 */
 .coupon .nm { flex: 1 1 auto; min-width: 0; font-size: var(--fs-xs); font-weight: var(--fw-semi);
               color: var(--ink-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
