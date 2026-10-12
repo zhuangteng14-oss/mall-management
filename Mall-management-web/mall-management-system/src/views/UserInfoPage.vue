@@ -70,27 +70,38 @@
           <h2>我的订单</h2>
           <button class="more" disabled title="订单中心在顶栏（/merchant/order），此处不做重复入口">去订单中心</button>
         </div>
-        <!-- ⚠️ 角标只挂区块级：四格一律 disabled + title，不逐格加 data-slot（稿 `:326` 原话）。 -->
+        <!-- ⚠️ 角标只挂区块级：四格一律 disabled + title，不逐格加 data-slot（稿 `:326` 原话）。
+             ⚠️ 2026-10-12（B 组 commit B 手验三点之③「卡片式统一」）：每格**加一枚图标**（`@lucide/vue`），
+                图标画在**名称上方**（用户定稿的卡片解剖：上半图标、下半文字）。`disabled` 保持
+                —— 四格是「待 C3〈订单〉」的预留（无按状态筛选端点），不是可点入口；
+                「整块可点」在本格是**结构**属性（`<button>` 整块就是命中区），一旦将来接上端点即生效。 -->
         <div class="tiles">
-          <button disabled title="待 C3〈订单〉——无按状态筛选端点"><b>待付款</b><span>下单后未完成支付</span></button>
-          <button disabled title="待 C3〈订单〉——无按状态筛选端点"><b>待发货</b><span>商家尚未发出</span></button>
-          <button disabled title="待 C3〈订单〉——无按状态筛选端点"><b>待收货</b><span>商品在途</span></button>
-          <button disabled title="待 C3〈订单〉——无按状态筛选端点"><b>已完成</b><span>确认收货的订单</span></button>
+          <button disabled title="待 C3〈订单〉——无按状态筛选端点"><CreditCard class="card-ic" aria-hidden="true" /><b>待付款</b><span>下单后未完成支付</span></button>
+          <button disabled title="待 C3〈订单〉——无按状态筛选端点"><Package class="card-ic" aria-hidden="true" /><b>待发货</b><span>商家尚未发出</span></button>
+          <button disabled title="待 C3〈订单〉——无按状态筛选端点"><Truck class="card-ic" aria-hidden="true" /><b>待收货</b><span>商品在途</span></button>
+          <button disabled title="待 C3〈订单〉——无按状态筛选端点"><CircleCheck class="card-ic" aria-hidden="true" /><b>已完成</b><span>确认收货的订单</span></button>
         </div>
       </section>
 
       <!-- ── ③【无名框】7 项（商家版）—— **无块标题**（用户 2026-10-12 定稿「无名框，无块标题」）──
-           一格的形状与用户端那 4 格**逐条同款**：`.v`（大字号，--brand-ink）+ `.k`（小字标签）。
+           ⚠️ 2026-10-12（B 组 commit B 手验三点之③「卡片式统一」）：一格的形状**由「大数字 + 小标签」改成卡片**
+              —— 与「我的订单」四格**同一个卡片**（浅底 `--brand-tint` + `--r2` 圆角 + `--s4` 内边距），
+              卡片自上而下三段：**图标**（`@lucide/vue`）/ **名称**（`b`，--fs-md）/ **值**（`span`，--fs-xs）。
+              用户定稿的卡片解剖「上半：图标；下半：文字（名称 + 可选副文案）」逐条落在此处：
+              名称是原来那枚小标签（积分 / 优惠券 / …），值（券数 / 认证状态 / 进店 / `—`）降为副文案。
+              样式见 <style> 的 `.asset-card`。
            布局规则（用户定稿「布局规则」段，逐条落）：一行 4 块 · 超出换行 · 第 2 行不足 4 块**左对齐**（甲）
            · **容器级纵向滚动**（乙）· 隐藏原生滚动条 · **下边缘渐隐**（「与领券中心统一」⇒ 78% 停点）。
            ⇒ 多出来的 `.assets-scroll` **只挂这一份**：用户端那 4 项一行放得下 ⇒ 不滚、不渐隐（样式见 <style>）。
            ⚠️ 七项里**只有「优惠券」复用客户版那颗 `div[role=button]`**（用户 2026-10-12 两处待定 ①：
               「券包是『我这个人』的券，不分商家 / 用户视角」）—— 同一组件、同一数据源（`customerId`）。
            ⚠️ **边界 2（用户 2026-10-12 要求给明确态）**：`user.customerid` 为空时券包**没有账号可挂**
-              ⇒ 那一格落 `—` + **不可点**（裸 `div` + `title` 说明原因），**不弹一个空账号的券包**。
-              ⚠️ 现实性（VM 库实测）：**14 个 `role=2` 商家、14 个 `customerid` 为空、0 个非空**（种子商家
-              是直接建号、没走过客户阶段；只有 `promoteToMerchant` 那条路才「刻意保留 customerid」）
-              ⇒ **手验时商家端这一格必然看到 `—`**；真入口要在「先注册成客户、再入驻通过」的账号上才看得到。
+              ⇒ 那一格的值落 `—` + **不可点**（无 `role` / 无 `tabindex` 的裸 `div` + `title` 说明原因），
+              **不弹一个空账号的券包**。
+              ⚠️ 现实性（VM 库实测）：**14 个商家（`user.usertype='商家'`）、14 个 `customerid` 为空、
+              0 个非空**（种子商家是直接建号、没走过客户阶段；只有 `promoteToMerchant` 那条路才
+              「刻意保留 customerid」）⇒ **手验时商家端这一格必然看到 `—`**；
+              真入口要在「先注册成客户、再入驻通过」的账号上才看得到。
            ⚠️ 「店铺信息」跳 `/shop?MerchantId=<自己的商家号>` —— **那条路由属 commit C**（本 commit 里
               点它只有 vue-router 的控制台告警、不跳转），这是**按批准的三 commit 切分**排的，不是遗漏。 -->
       <section
@@ -98,10 +109,10 @@
         data-slot="预留 · 商家资产与等级（待 C3〈商家中心〉）"
         title="待 C3〈商家中心〉——积分 / 余额 / 我的收藏三格无聚合端点（N=3），经营等级规则先占位（裁定 ④）；⚠️ 「优惠券」格已于 C3 块 5 接通（复用用户中心券包弹窗）、「店铺信息」「商家认证」两格已接通（跳店铺主页 / 读 /merchant/myApplications 最新一条的状态）"
       >
-        <div><div class="v">—</div><div class="k">积分</div></div>
+        <div class="asset-card"><Star class="card-ic" aria-hidden="true" /><b>积分</b><span>—</span></div>
         <div
           v-if="customerId"
-          class="asset-entry"
+          class="asset-entry asset-card"
           role="button"
           tabindex="0"
           :title="walletTitle"
@@ -109,20 +120,23 @@
           @keydown.enter.prevent="openWallet"
           @keydown.space.prevent="openWallet"
         >
-          <div class="v">{{ walletCount === null ? '—' : walletCount }}<i v-if="walletRedDot" class="wallet-dot" title="有券快过期">●</i></div>
-          <div class="k">优惠券</div>
+          <Ticket class="card-ic" aria-hidden="true" />
+          <b>优惠券</b>
+          <span>{{ walletCount === null ? '—' : walletCount }}<i v-if="walletRedDot" class="wallet-dot" title="有券快过期">●</i></span>
         </div>
-        <!-- 边界 2 的空态：**不可点**的裸 `div`（与用户端另外三格同形），`title` 说明为什么没有。 -->
+        <!-- 边界 2 的空态：**不可点**的裸 `div`（与另外三格同形、同样有卡片外壳），`title` 说明为什么没有。 -->
         <div
           v-else
+          class="asset-card"
           title="本账号没有客户号（user.customerid 为空）—— 券包挂在客户号上，这一格因此没有券可看。入驻时若保留过客户号，它会自动变成真券包入口。"
         >
-          <div class="v">—</div><div class="k">优惠券</div>
+          <Ticket class="card-ic" aria-hidden="true" />
+          <b>优惠券</b><span>—</span>
         </div>
-        <div><div class="v">—</div><div class="k">余额</div></div>
-        <div><div class="v">—</div><div class="k">我的收藏</div></div>
+        <div class="asset-card"><Wallet class="card-ic" aria-hidden="true" /><b>余额</b><span>—</span></div>
+        <div class="asset-card"><Heart class="card-ic" aria-hidden="true" /><b>我的收藏</b><span>—</span></div>
         <div
-          class="asset-entry"
+          class="asset-entry asset-card"
           role="button"
           tabindex="0"
           title="去我自己的店铺主页"
@@ -130,10 +144,11 @@
           @keydown.enter.prevent="enterMyShop"
           @keydown.space.prevent="enterMyShop"
         >
-          <div class="v">进店</div><div class="k">店铺信息</div>
+          <Store class="card-ic" aria-hidden="true" />
+          <b>店铺信息</b><span>进店</span>
         </div>
         <div
-          class="asset-entry"
+          class="asset-entry asset-card"
           role="button"
           tabindex="0"
           :title="certTitle"
@@ -141,10 +156,11 @@
           @keydown.enter.prevent="openCert"
           @keydown.space.prevent="openCert"
         >
-          <div class="v">{{ certLabel }}</div><div class="k">商家认证</div>
+          <BadgeCheck class="card-ic" aria-hidden="true" />
+          <b>商家认证</b><span>{{ certLabel }}</span>
         </div>
         <div
-          class="asset-entry"
+          class="asset-entry asset-card"
           role="button"
           tabindex="0"
           title="经营等级规则先占位（用户 2026-10-12 裁定 ④）—— 点开看说明"
@@ -152,7 +168,8 @@
           @keydown.enter.prevent="openLevel"
           @keydown.space.prevent="openLevel"
         >
-          <div class="v">—</div><div class="k">经营等级</div>
+          <Trophy class="card-ic" aria-hidden="true" />
+          <b>经营等级</b><span>—</span>
         </div>
       </section>
 
@@ -218,24 +235,28 @@
           <h2>我的订单</h2>
           <button class="more" disabled title="待 C3〈订单〉——无「全部订单」列表端点">全部订单</button>
         </div>
+        <!-- ⚠️ 2026-10-12（B 组 commit B 手验三点之③「卡片式统一」）：四格**与商家版逐字同款**（含图标），
+             两壳的「我的订单」只差右上角那枚 `.more`（商家「去订单中心」/ 客户「全部订单」）。 -->
         <div class="tiles">
-          <button disabled title="待 C3〈订单〉——无按状态筛选端点"><b>待付款</b><span>下单后未完成支付</span></button>
-          <button disabled title="待 C3〈订单〉——无按状态筛选端点"><b>待发货</b><span>商家尚未发出</span></button>
-          <button disabled title="待 C3〈订单〉——无按状态筛选端点"><b>待收货</b><span>商品在途</span></button>
-          <button disabled title="待 C3〈订单〉——无按状态筛选端点"><b>已完成</b><span>确认收货的订单</span></button>
+          <button disabled title="待 C3〈订单〉——无按状态筛选端点"><CreditCard class="card-ic" aria-hidden="true" /><b>待付款</b><span>下单后未完成支付</span></button>
+          <button disabled title="待 C3〈订单〉——无按状态筛选端点"><Package class="card-ic" aria-hidden="true" /><b>待发货</b><span>商家尚未发出</span></button>
+          <button disabled title="待 C3〈订单〉——无按状态筛选端点"><Truck class="card-ic" aria-hidden="true" /><b>待收货</b><span>商品在途</span></button>
+          <button disabled title="待 C3〈订单〉——无按状态筛选端点"><CircleCheck class="card-ic" aria-hidden="true" /><b>已完成</b><span>确认收货的订单</span></button>
         </div>
       </section>
 
-      <!-- ── ③【无名框】4 项（客户版）—— **无块标题**，间距分隔（无线）+ 数字用色。稿 `:323-329` ────
+      <!-- ── ③【无名框】4 项（客户版）—— **无块标题**，间距分隔（无线）。稿 `:323-329` ────────────
            ⚠️ C3 块 5 · B 组（2026-10-12）**本块从 ② 下移到 ③**（用户定稿「[无名框]（4 项）← 下」）。
+           ⚠️ 2026-10-12（B 组 commit B 手验三点之③「卡片式统一」）：本块**与商家版那 7 项同款卡片** ——
+              图标 / 名称 / 值三段（`.asset-card`）。原来那句「数字用色」的 `.v` 大字已不成立，随之改掉。
            ⚠️ 4 项一行放得下 ⇒ **不滚、不渐隐**：本节的 `class` **不加** `.assets-scroll`（那一条只挂商家版
               7 项那一份）。这是两壳在样式上的唯一分叉，判据是「项数放不放得下」，不是「谁是商家」。
            ⚠️ 与商家版同一条：稿那 4 个数（1,280 / 3 张 / ¥286.50 / 12 件）是示意值，
-              **其余三格**无聚合端点 ⇒ **落 `—`**（F1 = 甲）。单位 `<small>张/¥/件</small>` 随之不落。
+              **其余三格**无聚合端点 ⇒ **值落 `—`**（F1 = 甲）。单位 `<small>张/¥/件</small>` 随之不落。
            ⚠️ **2026-10-11（块 5 · 券的信息架构重排）：「优惠券」一格已接通** —— 它是「我的券包」的
               **唯一入口**（用户定「主页不显示券包」，主页那两处入口已删）⇒ 从裸 `div` 改成
               可点元素 + 真券数 + 快过期红点，点开是 `components/CouponWalletDialog.vue`。
-              另三格**不动**（仍是 `—`）。 ⇒ 本节 `title` 里「均无聚合端点（N=4）」那一句已不成立，随之改掉。
+              另三格**不动**（值仍是 `—`）。 ⇒ 本节 `title` 里「均无聚合端点（N=4）」那一句已不成立，随之改掉。
            ⚠️ **本节与商家版那 7 项里的「优惠券」格是同一颗 `div[role=button]`、同一个 `customerId`、
               同一个弹窗**（块 5 B 组两处待定 ①：「券包是『我这个人』的券，不分视角」）—— 当年那句
               「商家看自己的券在管理端，不在这个壳里」**已废**，别再按它推断商家壳里没有券包入口。 -->
@@ -244,12 +265,12 @@
         data-slot="预留 · 我的资产（待 C3〈个人中心〉）"
         title="待 C3〈个人中心〉——积分/余额/收藏三格无聚合端点（N=3）；⚠️ 「优惠券」一格已于 C3 块 5 接通（真券数 + 券包弹窗入口）；稿的 4 个数字为稿自注的示意值，未接通的仍落 —（同 OrderCenter KPI 口径）"
       >
-        <div><div class="v">—</div><div class="k">积分</div></div>
-        <!-- ⚠️ `div[role=button]` 而**不是** `<button>`：里面的 `.v` / `.k` 是块级 `div`（`.assets .k`
-             的 `margin-top` 要靠块级才生效），而 `<button>` 的内容模型只收**短语内容**。
-             要键盘可达就得自己补 `tabindex` + `keydown`（点开 = 打开券包弹窗）。 -->
+        <div class="asset-card"><Star class="card-ic" aria-hidden="true" /><b>积分</b><span>—</span></div>
+        <!-- ⚠️ `div[role=button]` 而**不是** `<button>`：网格里**可点与不可点两态要共用同一套卡片外壳**
+             （另外三格是裸 `div`），`<button>` 还得额外抹掉 UA 的 `font` / `text-align` / 宽度才同形。
+             键盘可达因此得自己补 `tabindex` + `keydown`（点开 = 打开券包弹窗）。 -->
         <div
-          class="asset-entry"
+          class="asset-entry asset-card"
           role="button"
           tabindex="0"
           :title="walletTitle"
@@ -257,11 +278,12 @@
           @keydown.enter.prevent="openWallet"
           @keydown.space.prevent="openWallet"
         >
-          <div class="v">{{ walletCount === null ? '—' : walletCount }}<i v-if="walletRedDot" class="wallet-dot" title="有券快过期">●</i></div>
-          <div class="k">优惠券</div>
+          <Ticket class="card-ic" aria-hidden="true" />
+          <b>优惠券</b>
+          <span>{{ walletCount === null ? '—' : walletCount }}<i v-if="walletRedDot" class="wallet-dot" title="有券快过期">●</i></span>
         </div>
-        <div><div class="v">—</div><div class="k">余额</div></div>
-        <div><div class="v">—</div><div class="k">我的收藏</div></div>
+        <div class="asset-card"><Wallet class="card-ic" aria-hidden="true" /><b>余额</b><span>—</span></div>
+        <div class="asset-card"><Heart class="card-ic" aria-hidden="true" /><b>我的收藏</b><span>—</span></div>
       </section>
 
       <!-- ── ④ 收藏 / 浏览足迹（客户版）—— 卡片 + hover。稿 `:348-368` ─────────────
@@ -411,6 +433,7 @@ import { endpoints } from '../api/endpoints'
 import { getUsername, isLoggedIn } from '../api/auth'; import IconGlyph from '../components/ui/IconGlyph.vue'   // ⚠️ 两条 import **同行**（2026-10-11 补图标那一笔）—— 合并到既有行 = 不新增行号漂移（`api-contract.md` 按 `:99` 钉住本文件）
 import { myCoupons } from '../api/marketing'; import CouponWalletDialog from '../components/CouponWalletDialog.vue'   // ⚠️ 两条 import **同行**（C3 块 5 · 券的信息架构重排，2026-10-11）—— 同上一行的理由：本文件多处被按行号引，**能省一行就省一行**
 import { useRouter } from 'vue-router'; import { merchantMyApplications } from '../api/merchant'   // ⚠️ 两条 import **同行**（C3 块 5 · B 组，2026-10-12）—— 理由同上：`useRouter` 给「店铺信息」格跳 `/shop`用（那条路由属 commit C），`merchantMyApplications` 给「商家认证」格读本人提审历史（`/merchant/myApplications`，`api/merchant.js` 已有封装，**没有新增端点、没有动 `endpoints.js`**）
+import { Star, Ticket, Wallet, Heart, Store, BadgeCheck, Trophy, CreditCard, Package, Truck, CircleCheck } from '@lucide/vue'   // ⚠️ C3 块 5 · B 组（2026-10-12）手验三点之③「卡片式统一」：本页「我的订单」四格 + 【无名框】11 格的图标。⚠️ 这是**本仓第二个第三方运行时依赖**（第一个是可视化段为图表引的 `echarts`，见 `_work/vis-dashboard-landing-plan.md:51` 那条「(a) 沿用字形 / (b) 引图标库 / (c) 手写 SVG」的裁定）—— 用户 2026-10-12 裁定「照 echarts 那条先例用 npm 引」，**不是此处自裁**；依赖登记见 `_work/block5-b-pending-registry.md`。⚠️ 与同页两枚保存按钮的 `IconGlyph`（字形 ✓）**并存**，两套图标语言是这次裁定的已知代价。
 
 const userInfo = ref({})
 const idType = ref('')
@@ -670,13 +693,13 @@ const certLast = ref(null)
 /** 取认证状态失败的原因（只在弹窗正文里说，**不弹 `alert`** —— 这里是展示格，不是一次用户发起的动作）。 */
 const certWhyErr = ref('')
 
-/** 状态 → 大字格里那行短文案（与 `.assets .v` 同款位）。 */
+/** 状态 → 卡片里那行短文案（`③ 卡片式统一`之后是卡片第三段 = 值位，`.assets span`）。 */
 const certLabel = computed(() => {
   const map = { approved: '已认证', pending: '审核中', rejected: '已驳回', none: '未提交' }
   return map[certState.value] || '—'
 })
 
-/** 大字格的 `title`：点开前先把状态说清楚（与券包那格的 `walletTitle` 同一种做法）。 */
+/** 卡片那格的 `title`：点开前先把状态说清楚（与券包那格的 `walletTitle` 同一种做法）。 */
 const certTitle = computed(() => {
   if (certState.value === 'error') return `商家认证 —— ${certWhyErr.value || '取不到提审记录'}`
   if (certState.value === '') return '商家认证 —— 正在读取提审记录'
@@ -840,23 +863,36 @@ button {
 .ident-btn { margin-left: var(--s6); }
 .file-hidden { display: none; }
 
-/* ── ② 我的资产 / 经营数据：**不画线**，靠间距分隔；数字用色（--brand-ink 大衬线）─── */
-.assets { margin-top: calc(var(--s8) * 1.2); display: grid; grid-template-columns: repeat(4, 1fr); gap: var(--s6); }
-.assets .v { font-family: var(--font-display); font-size: var(--d2); font-weight: var(--fw-med);
-             line-height: 1; letter-spacing: -.02em; color: var(--brand-ink);
-             font-variant-numeric: tabular-nums; }
-.assets .k { margin-top: var(--s3); font-size: var(--fs-sm); color: var(--ink-2); }
-/* ⚠️ C3 块 5：「优惠券」那格从裸 `div` 变成**券包入口**（`div[role=button]`）——
-   这里只补「可点」的三个视觉线索（光标 / hover / 键盘焦点环），**不改尺寸**：
-   它得与另外三格在同一行上逐像素对齐（就是 `.assets` 的 grid 项，宽高本来就由网格定）。 */
-.asset-entry { cursor: pointer; border-radius: var(--r1); }
-.asset-entry:hover .k,
-.asset-entry:focus-visible .k { color: var(--brand-ink); }
+/* ── 卡片式统一（2026-10-12，B 组 commit B 手验三点之③）───────────────────────────
+   本页两处「格子」现在**共用同一张卡片**：`.tiles` 的「我的订单」四格 + `.assets` 的无名框 11 格
+   （商家 7 / 客户 4）。卡片自上而下三段：**图标**（`.card-ic`）/ **名称**（`b`）/ **值**（`span`）。
+   ⚠️ `.assets` 原来是「大数字（`.v`，`--d2` 36px）+ 小标签（`.k`）」两行 —— 用户 2026-10-12 定的
+      卡片解剖是「上半：图标；下半：文字（名称 + 可选副文案）」⇒ 名称升为主字、值（券数 / 认证状态 /
+      进店 / `—`）降为副文案。**`.assets .v` 与 `.assets .k` 两条随之删除**（选择器已无命中元素）。
+   ⚠️ 两条 `line-height: 1.4` **必须显式写**：文件尾 `.assets-scroll` 的容器高是拿这批 token 算出来的，
+      行高若走继承值，算式与实际渲染就会对不上（原来 `.v` 写 `line-height: 1` 也是同一理由）。
+   ⚠️ 格距由 `--s6`（32px）收成 `--s3`（12px）—— 与 `.tiles` 同缝宽；**有底色之后** 32px 的缝
+      会把一行拆成四张孤立的卡（无底色的旧版不存在这个问题）。 */
+.assets { margin-top: calc(var(--s8) * 1.2); display: grid; grid-template-columns: repeat(4, 1fr); gap: var(--s3); }
+.assets > .asset-card { padding: var(--s4); background: var(--brand-tint); border-radius: var(--r2); }
+.assets b, .tiles b { display: block; font-size: var(--fs-md); font-weight: var(--fw-med);
+                      line-height: 1.4; color: var(--brand-ink); }
+.assets span, .tiles span { display: block; margin-top: var(--s2); font-size: var(--fs-xs);
+                            line-height: 1.4; color: var(--ink-2); }
+/* 卡片图标 —— 边长吃 `--fs-lg`（24px，就是 `@lucide/vue` 的默认边长），色相吃 `--brand`
+   （`tokens.css:102` 那行自己注的就是「**填充**：按钮底、**图标**」⇒ 图标用 `--brand`，
+   文字才用 `--brand-ink`）。`display:block` ⇒ 图标独占一行、名称从下一行起。 */
+.card-ic { display: block; width: var(--fs-lg); height: var(--fs-lg); margin-bottom: var(--s3); color: var(--brand); }
+/* ⚠️ 「优惠券」那格是 `div[role=button]`（可点）而不是 `<button>` —— 理由见模板里那条注释。
+   这里只补「可点」的三个视觉线索（光标 / hover / 键盘焦点环），**尺寸不动**：
+   它得与同一行另外几格逐像素对齐（都是 `.assets` 的 grid 项，宽高由网格定）。 */
+.asset-entry { cursor: pointer; transition: background .15s; }
+.asset-entry:hover, .asset-entry:focus-visible { background: var(--brand-soft); }
 .asset-entry:focus-visible { outline: 2px solid var(--brand); outline-offset: var(--s2); }
-/* 快过期红点 —— 挂在数字右侧（`.v` 是 `line-height: 1` 的大字，红点跟着基线走，不撑行高）。 */
-.wallet-dot { font-style: normal; font-size: var(--fs-sm); color: var(--danger); margin-left: var(--s1); }
-/* ⚠️ 稿 `:181-182` / `:174-175` 的 `.assets .v small` **本页不落** —— 4 个值全落 `—`，
-   后面再挂「件 / 单 / 条 / 张 / ¥」是自相矛盾（见 §一 commit 7 的有意偏离第 2 条）。 */
+/* 快过期红点 —— 挂在券数右侧（`1em` ⇒ 跟 `span` 的 `--fs-xs` 同号，不撑行高）。 */
+.wallet-dot { font-style: normal; font-size: 1em; color: var(--danger); margin-left: var(--s1); }
+/* ⚠️ 稿 `:181-182` / `:174-175` 的「数字后挂单位」**本页不落** —— 4 个值里三个落 `—`，
+   只给券数挂「张」是自相矛盾（见 §一 commit 7 的有意偏离第 2 条）；卡片版改由**名称**给语境。 */
 
 /* ── ③ 我的订单 / 待处理订单：四格**浅底色块**（格间留缝、无边框）──────────── */
 .tiles { margin-top: var(--s4); display: grid; grid-template-columns: repeat(4, 1fr); gap: var(--s3); }
@@ -973,18 +1009,22 @@ button {
    ⚠️ 类**加在 `.assets` 同一个元素上**（`class="assets assets-scroll"`），**不是**外面再套一层 wrapper：
       套一层会让 `.assets` 那条 `margin-top: calc(var(--s8) * 1.2)`（76.8px）落进滚动内容里
       —— 首屏先把 76.8px 空白滚出去，第一行直接被顶出可视区。同类元素两份类 ⇒ 网格与间距全部沿用既有值。
-   ⚠️ 高度**用既有 token 算**（`--assets-row` 三项与 `.assets .v` / `.k` 的取值同源：大字 --d2
-      + `.k` 的上边距 --s3 + 一行字 ≈ `--fs-sm × 1.4`），**不拍一个裸 px**：
+   ⚠️ 高度**用既有 token 算**，**不拍一个裸 px**：`--assets-row` = 一张卡片的高度 =
+      padding×2（`--s4`）+ 图标（`--fs-lg`）+ 图标下边距（`--s3`）+ 名称（`--fs-md × 1.4`）
+      + 值上边距（`--s2`）+ 值（`--fs-xs × 1.4`）= 32 + 24 + 12 + 26.6 + 8 + 16.8 ≈ **119px**。
+      它**跟着卡片解剖走**：2026-10-12 ③ 把 `.assets` 从「大字 `--d2` + 小标签」改成
+      `.tiles` 同款卡片（图标 / 名称 / 值三段）之后，这个算式就是**同一批 token 的重排**，
+      不是另拍的一行数字 —— 卡片再动，这里跟着动。
       「≈ 一行」的判据是**它不随项数长高**（7 项和 70 项都一样高），不是像素级等于一行。
-      再留 `--s6 + --s5`（一个行间距 + 一段）⇒ 露出第 2 行顶部**约三分之一行高**：渐隐要有东西可渐，
-      否则渐的是空白、等于没做；三分之一这一档也是「与领券中心统一」那一句的落点
+      再留 `--s3 + --s5`（一个格间距 + 一段）⇒ 露出第 2 行顶部**约三分之一行高**：渐隐要有东西可渐，
+      否则渐的是空白、等于没做；这一档也是「与领券中心统一」那一句的落点
       （`ProductPage.vue` 的领券行就是「一张 + 半张」）。⇒ 这是本节唯一一处**刻意不是一行整**的地方，
       两者相权：**滚动条已隐藏**，若第 2 行一点不露，页面上就没有任何「还能往下滚」的线索。
    ⚠️ 隐藏滚动条两条与 `ProductPage.vue:1330-1331` 同款；渐隐 78% 停点与领券中心
       （`ProductPage.vue:1032` `.coupons-cut`）逐字相同，`mask-image` / `-webkit-mask-image` **两条都写**。 */
 .assets-scroll {
-  --assets-row: calc(var(--d2) + var(--s3) + var(--fs-sm) * 1.4);
-  max-height: calc(var(--assets-row) + var(--s6) + var(--s5));
+  --assets-row: calc(var(--s4) * 2 + var(--fs-lg) + var(--s3) + var(--fs-md) * 1.4 + var(--s2) + var(--fs-xs) * 1.4);
+  max-height: calc(var(--assets-row) + var(--s3) + var(--s5));
   overflow-y: auto;
   scrollbar-width: none;
   mask-image: linear-gradient(to bottom, #000 78%, transparent);
@@ -998,8 +1038,8 @@ button {
    遮罩 `rgba(0,0,0,.42)`、面板 `min(560px, 100%)` / `--r2` / `--line-2` 边 /
    `0 12px 48px rgba(0,0,0,.22)` 阴影 —— 同一页里两枚遮罩必须像一套。
    `.mc-*` 前缀避开它那套 `c-`/`w-`（那是子组件自己的 scoped 块，两边互不覆盖）。
-   ⚠️ 只用 `--fs-xl`（32px）而不是 `.assets .v` 的 `--d2`（36px）：弹窗正文里 36px 会把
-      「已认证」顶成标题、把下面的说明挤掉一行。 */
+   ⚠️ 只用 `--fs-xl`（32px）而不是 `--d2`（36px —— 本页原【无名框】大字用的那一档，已随
+      `③ 卡片式统一`停用）：弹窗正文里 36px 会把「已认证」顶成标题、把下面的说明挤掉一行。 */
 .mc-scrim {
   position: fixed;
   inset: 0;
