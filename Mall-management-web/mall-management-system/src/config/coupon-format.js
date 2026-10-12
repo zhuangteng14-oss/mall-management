@@ -47,6 +47,22 @@ export function toLocal(sqlTime) {
  */
 export const truthy = (v) => v === true || v === 1 || v === '1'
 
+/**
+ * **券名** —— 卡片主标题（C3 块 5 · A 组 · A7 后半）。
+ * 库里 `coupon.Name` 是 NOT NULL，但**空串也算没有** ⇒ 兜底成「优惠券」，不让标题渲染成空白
+ * （同 `notify-events.js` 那条「任何一行都不许渲染成空白」）。
+ */
+export const couponName = (c) => (c && c.Name ? String(c.Name) : '优惠券')
+
+/**
+ * **券类型**的人话（A7 后半）。取值域 = 后端 `coupon.Type`，逐字写在
+ * `marketing/coupon/service/CouponService.java` 的三个常量
+ * （`threshold` 满减 / `percent` 折扣 / `none` 无门槛）⇒ 第三处抄错会静默说错话，故收在这里。
+ * ⚠️ 与下面的 `couponCond` **不是一回事**：那一条是**门槛**（满 X 可用 / 无门槛），这一条是**类型**。
+ */
+export const couponTypeLabel = (c) =>
+  ({ threshold: '满减', percent: '折扣', none: '无门槛' }[c && c.Type] || '优惠券')
+
 /** 面值的人话：折扣券读「8.5 折」，另两类读「¥N」。 */
 export const couponFace = (c) => {
   const v = Number(c.FaceValue || 0)
@@ -58,6 +74,22 @@ export const couponCond = (c) => {
   if (c.Type === 'percent') return '折扣券'
   const t = Number(c.Threshold || 0)
   return t > 0 ? '满 ' + t + ' 可用' : '无门槛'
+}
+
+/**
+ * 券卡上那一行「**类型 · 门槛**」（A7 后半）—— 合成时**不重复说两遍类型**。
+ *
+ * `couponCond` 对 `percent` / `none` 两档**已经含了类型词**（「折扣券」/「无门槛」）
+ * ⇒ 无条件拼成 `类型标签 + ' · ' + couponCond` 会得到「无门槛 · 无门槛」「折扣 · 折扣券」，
+ * 在卡片上看着像坏了。判据用 `includes`：类型词在门槛那句里出现过就只留门槛那句。
+ * ⚠️ `threshold` 那档 `couponCond` 只给「满 X 可用」（没说类型）⇒ 才需要补上「满减」。
+ * ⚠️ 只能拿**常量取值的词**去比（`couponTypeLabel` 的输出是写死的三个词），别拿用户填的
+ *    `Name` 之类去 `includes` —— 那会随数据变化而随机地丢/不丢。
+ */
+export const couponLine = (c) => {
+  const cond = couponCond(c)
+  const type = couponTypeLabel(c)
+  return cond.includes(type) ? cond : type + ' · ' + cond
 }
 
 /**

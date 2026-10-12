@@ -2,8 +2,10 @@ package com.minke.mallmanagement.goods.controller;
 
 import com.minke.mallmanagement.admin.AuditActions;
 import com.minke.mallmanagement.admin.service.AuditService;
+import com.minke.mallmanagement.goods.service.GoodsAuditService;
 import com.minke.mallmanagement.goods.service.GoodsService;
 import com.minke.mallmanagement.goods.service.GoodsTypeCacheService;
+import com.minke.mallmanagement.marketing.coupon.service.CouponService;
 import com.minke.mallmanagement.notification.NotificationEvents;
 import com.minke.mallmanagement.notification.service.NotificationService;
 import com.minke.mallmanagement.shared.web.AuthSession;
@@ -79,6 +81,18 @@ public class GoodsController {
 
     @Autowired
     private NotificationService notificationService;
+
+    /**
+     * 提审链 —— **只服务 {@code goodsUp} 的「商品券随商品一起提审」**（C3 块 5 · A 组）。
+     * 落点在 Controller 而非 Service：本仓的旁路副作用（通知 / 审计）惯来由 Controller 编排
+     * （同 {@code goodsAdd} 那条腿），且这里要**跨域**动到券（营销域），不进商品 Service。
+     */
+    @Autowired
+    private GoodsAuditService goodsAuditService;
+
+    /** 券的业务口（营销域）—— 同上，只服务 {@code goodsUp} 那条带券的腿。 */
+    @Autowired
+    private CouponService couponService;
 
     /** 管理端共享收件箱的收件人标识（与块 2 的 `MerchantApplicationController` 同口径）。 */
     private static final String ADMIN_INBOX_ID = "*";
@@ -263,6 +277,16 @@ public class GoodsController {
             @RequestParam("GoodType") String GoodType,
             @RequestParam("ProductCode") String ProductCode,
             @RequestParam(value = "file", required = false) MultipartFile file,
+            // ═══ C3 块 5 · A 组：**可选**的商品券参数（挂「更改商品」的券块）═══
+            // 全部 required=false ⇒ 老前端一个都不传，本方法**逐字保持旧行为**（严格加性）。
+            // 判据只看 CouponName 非空 —— 填了券名才算「这一单带券」。
+            @RequestParam(value = "CouponName", required = false) String CouponName,
+            @RequestParam(value = "CouponType", required = false) String CouponType,
+            @RequestParam(value = "CouponFaceValue", required = false) String CouponFaceValue,
+            @RequestParam(value = "CouponThreshold", required = false) String CouponThreshold,
+            @RequestParam(value = "CouponTotalQty", required = false) String CouponTotalQty,
+            @RequestParam(value = "CouponStartAt", required = false) String CouponStartAt,
+            @RequestParam(value = "CouponEndAt", required = false) String CouponEndAt,
             HttpServletRequest request
     ) throws IOException {
         // ⚠️ 第一行：改价/改图只能改自己的（管理员豁免）—— 必须在落盘与 UPDATE 之前。
@@ -287,6 +311,38 @@ public class GoodsController {
             List<Map<String, Object>> after = goodsService.snapshotGoodsForAudit(MerchantId, ProductCode);
             auditService.record(AuthSession.identify(request), AuditActions.GOODS_UPDATE, "goods",
                     MerchantId + ":" + ProductCode, before, after);
+        }
+
+        // ═══ C3 块 5 · A 组：商品券随商品一起提审 ═══
+        // 「更改商品」里挂了券（CouponName 非空）才进来；商品本身照旧**直改**（goodsUp 的既有行为
+        // 一行未动），只有**券**要审。三步，顺序是刻意的：
+        //   ① 生提审批次号 → ② **先**落券（Status='stopped'，用户侧不可见）→ ③ 再落提审单。
+        // ⚠️ 顺序**不能反**：若先落提审单再落券，中间失败会留下「提审单在、券不在」的行
+        //    ⇒ 审核通过时判别不到券 ⇒ 落到 writeGoodsFromAudit ⇒ 给已有商品**重复插一行 goods**。
+        //    反过来失败，最坏是留一张 stopped 的孤儿券（用户永远看不到，无害）。
+        // ⚠️ 本块**不引入事务**：本仓写路径惯来不用事务回滚（见 CouponService 类注释的取舍），
+        //    且 goodsUp 的事务在 goodsService 里已经结束了。
+        if (Boolean.TRUE.equals(result.get("success"))
+                && CouponName != null && !CouponName.trim().isEmpty()) {
+            String batchId = GoodsAuditService.newBatchId();
+            Map<String, Object> couponResult = couponService.createPendingMerchantCoupon(
+                    batchId, MerchantId, CouponName, CouponType, CouponFaceValue, CouponThreshold,
+                    CouponTotalQty,
+                    // CategoryMatch 取**本商品类型**（券随商品走 ⇒ 限定在该类型的商品上）。
+                    GoodType, CouponStartAt, CouponEndAt);
+            if (Boolean.TRUE.equals(couponResult.get("success"))) {
+                // 提审单只是那张待审券的**载体**：商品字段取本次提交的值（审核链用它做回显，
+                // 不会用它重建 goods —— 见 GoodsAuditService.audit 的带券分支）。
+                goodsAuditService.submit(MerchantId, batchId, GoodName, Price, GoodType,
+                        0, null, ProductCode, "", null, null, null, null, true, true, true, true);
+                result.put("couponId", couponResult.get("CouponId"));
+                result.put("couponPending", true);
+                result.put("msg", "商品更新成功；商品券已提交审核");
+            } else {
+                // 券没过校验 ⇒ 商品照旧算改成功，但把券的问题如实回给前端（别静默吞）。
+                result.put("couponError", couponResult.get("msg"));
+                result.put("msg", "商品更新成功；商品券未提交：" + couponResult.get("msg"));
+            }
         }
         return ResponseEntity.ok(Result.of(result));
     }

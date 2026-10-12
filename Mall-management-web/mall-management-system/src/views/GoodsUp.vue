@@ -274,6 +274,45 @@
             <label>库存</label>
             <input class="slot" type="text" value="—" disabled title="待 C3〈商品〉——goods 无库存列，5 处改动（超档）">
           </div>
+
+          <!-- ═══ 商品券（C3 块 5 · A 组 · A2 + A3，2026-10-12）══════════════════════════
+               商家券 = **本商品独有**的一类券：在这一块填、随「更新商品数据」**一起提交**，
+               生不生效由**同一条商品审核链**（`goods_audit`）定 —— 管理员在「商品审核」里一并放行 / 驳回
+               （后端 `GoodsController.goodsUp` 建券 + 提审、`GoodsAuditService.audit` 通过时启用）。
+               ⚠️ **判据是「券名非空」**（后端逐字 `CouponName != null && !CouponName.trim().isEmpty()`）：
+                  整块留空 = 这回只改商品、不发券。**没有「删券」路径** —— 留空不会撤掉已生效的券。
+               ⚠️ **归属不由用户选**：`Scope='merchant'` + `MerchantAccount=本店` 全在后端钉死
+                  ⇒ 这里刻意**没有**「归属商家」输入框（A1 从管理端拿掉的就是那个字段；商家发券只可能是自己的）。
+               ⚠️ 校验**以后端为准**（`CouponService.validate`）：类型 / 面值（折扣须 `< 1`）/ 面值>0 /
+                  总量>0 / 止晚于起 —— 前端不抄一份，免得两边判据各说各话（提交失败会原话回显在 `alert` 里）。
+               ⚠️ 起止在表单里按**浏览器本地时区**挑（`datetime-local`）⇒ 发出去前**必须**反算成库内
+                  时钟文本（UTC），同 `admin/MarketingPage.vue` 的 `toSqlTime`（那边 2026-10-11 手验踩过
+                  「刚建好就领不了」，根因就是漏了这一步）。 -->
+          <div class="fl">
+            <label>商品券 （可空 · 填了随商品一起提交审核）</label>
+            <div class="cp-form">
+              <input v-model="editForm.couponName" class="cp-wide" type="text" placeholder="券名（如「满 100 减 10」）">
+              <select v-model="editForm.couponType">
+                <option value="threshold">满减</option>
+                <option value="percent">折扣</option>
+                <option value="none">无门槛</option>
+              </select>
+              <input
+                v-model="editForm.couponFaceValue"
+                type="text"
+                :placeholder="editForm.couponType === 'percent' ? '折扣率（0.85 = 8.5 折）' : '面值 ¥'"
+              >
+              <input
+                v-if="editForm.couponType !== 'none'"
+                v-model="editForm.couponThreshold"
+                type="text"
+                placeholder="门槛 ¥（可空 = 无门槛）"
+              >
+              <input v-model="editForm.couponTotalQty" type="text" placeholder="发放总量">
+              <input v-model="editForm.couponStartAt" type="datetime-local" title="有效期起（本地时区，可空）">
+              <input v-model="editForm.couponEndAt" type="datetime-local" title="有效期止（本地时区，可空）">
+            </div>
+          </div>
         </div>
       </div>
 
@@ -310,8 +349,36 @@ const editForm = ref({
   price: '',
   productCode: '',
   productCodeList: [],
+  // ── 商品券（A2/A3，2026-10-12）──────────────────────────────────────────────────
+  // ⚠️ 默认**全空** = 这次改商品**不挂券**（后端只看 `couponName` 非空）；`couponType` 给个
+  //    `'threshold'` 只是让下拉有个初始态，**不是**「默认发满减券」—— 券名空着就整块不发。
+  couponName: '',
+  couponType: 'threshold',
+  couponFaceValue: '',
+  couponThreshold: '',
+  couponTotalQty: '',
+  couponStartAt: '',
+  couponEndAt: '',
 })
 const picFile = ref(null)
+
+// ── 券的时间字段：本地 `datetime-local` → 库内时钟文本（UTC）（A2/A3，2026-10-12）────
+// ⚠️ 与 `admin/MarketingPage.vue` 的 `toSqlTime` **同款**（那边 2026-10-11 手验修的正是这一步）。
+//    本仓既有做法是**各文件自带一份**（`coupon-format.js` 里 `toLocal` 已有 7 份同款副本），
+//    ⇒ 这里不抽公共模块，抄同款（两边都被按行号引，动一处要连带核另一处）。
+// 起补 `:00`、止补 `:59`：用户挑到哪一分就用满那一分。⚠️ 止补 `:59` 还有个实际作用 —— 起止挑成
+// 同一分钟时窗口是 59 秒而不是 0 秒，否则后端「止必须晚于起」的校验会当场拒掉一个看着没问题的输入。
+const pad = (n) => String(n).padStart(2, '0')
+const toSqlTime = (localValue, isEnd) => {
+  if (!localValue) return ''
+  const d = new Date(localValue) // 无偏移的 date-time ⇒ 按**本地**时区解析（ES2016+）
+  if (Number.isNaN(d.getTime())) return ''
+  d.setSeconds(isEnd ? 59 : 0, 0)
+  return (
+    `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())} ` +
+    `${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}:${pad(d.getUTCSeconds())}`
+  )
+}
 
 // ------------------------------
 // 初始化
@@ -420,7 +487,16 @@ const openModal = async (item) => {
     goodImg: item.goodImg,
     price: item.price,
     productCode: codeList[0],
-    productCodeList: codeList
+    productCodeList: codeList,
+    // ⚠️ **每次开窗都清空**：这块是「本次提交要新建的券」，不是「这件商品已发的券」的回显
+    //    （本页**没有**查「该商品已有券」的端点 ⇒ 别在这里假装回显，那会让人以为改的是同一张券）。
+    couponName: '',
+    couponType: 'threshold',
+    couponFaceValue: '',
+    couponThreshold: '',
+    couponTotalQty: '',
+    couponStartAt: '',
+    couponEndAt: ''
   }
 
   // 🔥 修复：自动加载默认选中的第一个规格价格
@@ -487,11 +563,31 @@ const doUpdateGoods = async () => {
     formData.append('file', picFile.value.files[0])
   }
 
+  // ── 商品券（A2/A3）：**「券名」非空才算挂了券**（与后端判据逐字一致，见模板那段注释）──
+  // ⚠️ 只 append **非空**的键：后端全是 `required=false` + Service 手判，一个空串会被当成
+  //    「传了空值」而非「没传」（同 `api/marketing.js` 里 `q()` 那条理由）。
+  if (editForm.value.couponName.trim()) {
+    const put = (k, v) => {
+      if (v !== undefined && v !== null && String(v).trim() !== '') formData.append(k, String(v).trim())
+    }
+    put('CouponName', editForm.value.couponName)
+    put('CouponType', editForm.value.couponType)
+    put('CouponFaceValue', editForm.value.couponFaceValue)
+    put('CouponThreshold', editForm.value.couponThreshold)
+    put('CouponTotalQty', editForm.value.couponTotalQty)
+    // ⚠️ 起止必须**反算成库内时钟（UTC）**再发 —— 表单里是本地时区的 `datetime-local`。
+    put('CouponStartAt', toSqlTime(editForm.value.couponStartAt, false))
+    put('CouponEndAt', toSqlTime(editForm.value.couponEndAt, true))
+  }
+
   try {
     const res = await http.post(endpoints.goods.goodsUp, formData)
     const data = await res.json()
     if (data.success) {
-      alert('更新成功')
+      // ⚠️ 回了 `msg` 就用它 —— 带券成功时后端说的是「商品更新成功；商品券已提交审核」、
+      //    券没建成时是「…商品券未提交：<原因>」。两种情况**都不是**一句「更新成功」能说清的
+      //    （商品那半确实成功了，券那半没有）⇒ 别把它压成一句。
+      alert(data.msg ? data.msg : '更新成功')
       closeModal()
       getGoodsList()
     } else {
@@ -817,6 +913,19 @@ a { color: inherit; text-decoration: none; }
 .fl input[disabled] { background: var(--surface-2); color: var(--ink-3); cursor: not-allowed; }
 .fl input.slot { background: var(--surface-2); color: var(--ink-3); cursor: not-allowed; }
 .skus { display: flex; gap: var(--s3); flex-wrap: wrap; }
+/* ── 商品券表单（A2/A3）────────────────────────────────────────────────────────
+   ⚠️ 两块：`.cp-form` 是**双列网格**（券名横跨两列）；`.cp-form input` / `select` 要**自己重设**
+      `width/height` —— 上面 `.fl input` 是 `width:100%; height:38px`（表单里那些大字输入框的尺寸），
+      券这几个是小号辅助字段，不重设就会被撑成主字段那么大、把弹窗拉长。 */
+.cp-form { display: grid; grid-template-columns: 1fr 1fr; gap: var(--s2); }
+.cp-form .cp-wide { grid-column: 1 / -1; }
+.cp-form input, .cp-form select {
+  width: 100%; height: 34px; padding: 0 var(--s2); border: 1px solid var(--line-2);
+  border-radius: var(--r1); background: var(--surface); color: var(--ink); font-size: var(--fs-xs);
+}
+.cp-form input:focus, .cp-form select:focus {
+  outline: none; border-color: var(--brand); box-shadow: 0 0 0 3px var(--brand-tint);
+}
 .sku {
   height: 34px; padding: 0 var(--s5); border: 1px solid var(--line-2); border-radius: var(--r1);
   color: var(--ink-2); font-size: var(--fs-sm);

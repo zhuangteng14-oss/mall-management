@@ -67,7 +67,7 @@
               >
                 <span class="w-amt">{{ couponFace(c) }}</span>
                 <span class="w-mid">
-                  <b><i v-if="truthy(c.IsNew)" class="w-new">NEW</i>{{ c.Name }}</b>
+                  <b><i v-if="truthy(c.IsNew)" class="w-new">NEW</i>{{ couponName(c) }}</b>
                   <span class="w-sub">{{ subText(c) }}</span>
                   <span class="w-date">有效期 {{ periodLabel(c.StartAt, c.EndAt) }}</span>
                 </span>
@@ -86,6 +86,7 @@
             <!-- 点击展开详情（一次只展开一条）。 -->
             <dl v-if="expandedId === key(c)" class="w-detail">
               <div><dt>面额</dt><dd>{{ couponFace(c) }}</dd></div>
+              <div><dt>券类型</dt><dd>{{ couponTypeLabel(c) }}</dd></div>
               <div><dt>门槛</dt><dd>{{ couponCond(c) }}</dd></div>
               <div><dt>适用范围</dt><dd>{{ scopeLabel(c) }}</dd></div>
               <div><dt>有效期</dt><dd>{{ periodLabel(c.StartAt, c.EndAt) }}</dd></div>
@@ -116,7 +117,7 @@ import { computed, ref, watch } from 'vue'
 import { handleApiError } from '../api/http'
 import { claim, coupons, myCoupons } from '../api/marketing'
 import {
-  bucketLabel, couponCond, couponFace, endLabel, periodLabel, scopeLabel, toLocal, truthy,
+  bucketLabel, couponCond, couponFace, couponName, couponTypeLabel, endLabel, periodLabel, scopeLabel, toLocal, truthy,
 } from '../config/coupon-format'
 
 const props = defineProps({

@@ -137,6 +137,11 @@
           <div><dt>商品编码</dt><dd class="c-mono">{{ dash(r.ProductCode) }}</dd></div>
           <div><dt>图片</dt><dd>{{ dash(r.GoodImg) }}</dd></div>
           <div><dt>批次</dt><dd class="c-mono">{{ dash(r.BatchId) }}</dd></div>
+          <!-- C3 块 5 · A 组 · A3：**带券的提审单**（商家在「更改商品」里挂的商品券，随商品一起审）。
+               ⚠️ 没有 `Coupon` 字段就**整行不出** —— 普通商品单不渲染成一行空白（同 `notify-events.js`
+                  那条「任何一行都不许渲染成空白」）。⚠️ 这类单**通过时没有新商品上架**（商品当场就改好了），
+                  通过与否的效果是**券生效**（见 `couponText` 尾那截状态）—— 管理员得看得见这件事。 -->
+          <div v-if="r.Coupon"><dt>商品券</dt><dd class="c-mono">{{ couponText(r.Coupon) }}</dd></div>
           <div><dt>审毕</dt><dd>{{ r.ReviewedAt ? toLocal(r.ReviewedAt) : '—' }}</dd></div>
           <div><dt>审核人</dt><dd>{{ dash(r.ReviewedBy) }}</dd></div>
           <div><dt>落库商品 Id</dt><dd class="c-mono">{{ r.GoodsId == null ? '—（未通过）' : r.GoodsId }}</dd></div>
@@ -659,6 +664,28 @@ function statusGlyph(s) {
   if (s === 'approved') return 'ok'
   if (s === 'rejected') return 'no'
   return 'wait'
+}
+
+/**
+ * 提审单挂的**商品券**一句话（C3 块 5 · A 组 · A3，2026-10-12）。
+ *
+ * 入参 = 后端 `GoodsAuditService.listForAdmin` 给带券单挂上的 `Coupon`（`coupon` 表整行）。
+ * ⚠️ 取值域 `coupon.Type` ∈ `threshold` / `percent` / `none`，逐字写在后端 `CouponService`
+ *    （与 `config/coupon-format.js` 的 `couponTypeLabel` **同一份口径的另一份** —— 这里不 import 那个模块：
+ *    它服务用户端卡片，本页是管理端治理表，历史上一向各带一份，强行合并会牵动两边）。
+ * ⚠️ 券名留空兜底成「（未命名）」：`coupon.Name` NOT NULL 但空串合法，直出会画成一行空白。
+ * ⚠️ **未生效 / 已生效**读的是 `coupon.Status`（`stopped` / `active`）：商家提交时后端建的是一张
+ *    `stopped` 的券，管理员在这一页点「通过」才转 `active` ⇒ 这里的状态就是**这张单批不批**的直接后果。
+ */
+function couponText(c) {
+  if (!c) return '—'
+  const TYPE = { threshold: '满减', percent: '折扣', none: '无门槛' }
+  const face = c.Type === 'percent'
+    ? (Number(c.FaceValue || 0) * 10).toFixed(1) + ' 折'
+    : '¥' + Number(c.FaceValue || 0)
+  const th = c.Type !== 'percent' && Number(c.Threshold || 0) > 0 ? ' · 满 ' + c.Threshold + ' 可用' : ''
+  const st = c.Status === 'active' ? '已生效' : '未生效'
+  return `${c.Name || '（未命名）'} · ${TYPE[c.Type] || dash(c.Type)} · ${face}${th} · 共 ${dash(c.TotalQty)} 张 · ${st}`
 }
 
 // ── 审核通过率 / 类目分布（可视化段 commit 3）──────────────────────────────────

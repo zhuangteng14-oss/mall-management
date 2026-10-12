@@ -111,13 +111,29 @@ public class CouponDao {
     public int insertCoupon(String couponId, String name, String type, Double faceValue, Double threshold,
                             int totalQty, String scope, String merchantAccount, String categoryMatch,
                             String startAt, String endAt) {
+        return insertCoupon(couponId, name, type, faceValue, threshold, totalQty,
+                scope, merchantAccount, categoryMatch, startAt, endAt, "active");
+    }
+
+    /**
+     * 新建券（**状态可指定**）—— 商家券提审专用（C3 块 5 · A 组）。
+     *
+     * <p>为什么要有这一版：商家在「更改商品」里挂的商品券，**提交时即落库**（业务号由提审批次号派生，
+     * 见 {@code CouponService#pendingCouponId}），但 {@code Status='stopped'} ——
+     * 领券中心（{@code selectClaimable}）与券包（{@code selectMyGrants}）都只读 {@code active}
+     * ⇒ **用户侧整条链路都看不见它**，直到管理端审核通过把它翻 {@code active}。
+     * 这样「待审」这个状态**不用新增列**（零 DDL）。
+     */
+    public int insertCoupon(String couponId, String name, String type, Double faceValue, Double threshold,
+                            int totalQty, String scope, String merchantAccount, String categoryMatch,
+                            String startAt, String endAt, String status) {
         String sql = "INSERT INTO coupon "
                 + "(CouponId, Name, Type, FaceValue, Threshold, TotalQty, ClaimedQty, "
                 + "Scope, MerchantAccount, CategoryMatch, StartAt, EndAt, Status) "
-                + "VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, 'active')";
+                + "VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?)";
         return jdbcClient.sql(sql)
                 .params(couponId, name, type, faceValue, threshold, totalQty,
-                        scope, merchantAccount, categoryMatch, startAt, endAt)
+                        scope, merchantAccount, categoryMatch, startAt, endAt, status)
                 .update();
     }
 
@@ -259,6 +275,22 @@ public class CouponDao {
      * 同一份数据两次查询可能给出两种顺序）。
      */
     public List<Map<String, Object>> selectClaimable(String account, int limit, boolean thisWeekOnly) {
+        return selectClaimable(account, limit, thisWeekOnly, null);
+    }
+
+    /**
+     * 同上，另加一个**商家筛**（C3 块 5 · A 组 · 商品详情页领券区）：
+     * {@code merchantAccount} 非空 ⇒ 只回**该商家的商家券**（{@code Scope='merchant'} 且
+     * {@code MerchantAccount} 相符）；平台券（{@code Scope='all'}）**一条都不回** ——
+     * 详情页那块要的是「这件商品的店发的券」，平台券归主页 / 用户中心。
+     *
+     * <p>⚠️ 多一个 {@code ?} ⇒ 绑参三元变四元，顺序 = {@code ?} 的**出现序**：
+     * {@code account}（JOIN 里）→ {@code merchantAccount}（WHERE 里）→ {@code limit}（LIMIT）。
+     * 改本方法时**成对改**（同 {@code selectByStatus} 的警告）。
+     */
+    public List<Map<String, Object>> selectClaimable(String account, int limit, boolean thisWeekOnly,
+                                                     String merchantAccount) {
+        boolean byMerchant = merchantAccount != null && !merchantAccount.trim().isEmpty();
         StringBuilder sql = new StringBuilder("SELECT ").append(COUPON_COLUMNS)
                 .append(", (g.Id IS NOT NULL) AS Claimed ")
                 .append(", ((c.TotalQty > 0 AND c.ClaimedQty >= c.TotalQty)) AS SoldOut ")
@@ -266,12 +298,19 @@ public class CouponDao {
                 .append("FROM coupon c LEFT JOIN coupon_grant g ")
                 .append("ON g.CouponId = c.CouponId AND g.ToAccount = ? ")
                 .append("WHERE c.Status = 'active' AND (c.EndAt IS NULL OR c.EndAt > NOW()) ");
+        if (byMerchant) {
+            sql.append("AND c.Scope = 'merchant' AND c.MerchantAccount = ? ");
+        }
         if (thisWeekOnly) {
-            // ⚠️ 只多一个 AND、**不新增占位符** ⇒ 下面 params(account, limit) 的个数不变。
+            // ⚠️ 只多一个 AND、**不新增占位符** ⇒ 不改变下面绑参的个数。
             sql.append("AND ").append(THIS_WEEK).append(' ');
         }
         sql.append("ORDER BY c.updated_at ASC, c.Id ASC LIMIT ?");
-        return jdbcClient.sql(sql.toString()).params(account, limit).query().listOfRows();
+        JdbcClient.StatementSpec spec = jdbcClient.sql(sql.toString()).param(account);
+        if (byMerchant) {
+            spec = spec.param(merchantAccount.trim());
+        }
+        return spec.param(limit).query().listOfRows();
     }
 
     /**

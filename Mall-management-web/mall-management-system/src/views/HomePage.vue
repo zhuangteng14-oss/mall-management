@@ -214,7 +214,13 @@
                         两者会分叉（周一建的券到周五仍是「本周」但已不是「新」），别把它挂到 `thisWeek` 上。 -->
                 <i v-if="truthy(c.IsNew)" class="tk-new">NEW</i>
               </span>
-              <span class="tk-cond">{{ couponCond(c) }}</span>
+              <!-- ⚠️ 券名（A7 后半）——空串兜底在 `couponName()` 里，别在这里写 `{{ c.Name }}`：
+                   库里 `Name` NOT NULL 但**空串合法**，直出会渲染成一条空白行。 -->
+              <span class="tk-name">{{ couponName(c) }}</span>
+              <!-- ⚠️ 类型 · 门槛合成一行走 `couponLine()`（**不是**裸 `couponCond`）：`couponCond`
+                   对 `percent` / `none` 两档**已经含了类型词**（「折扣券」/「无门槛」），再拼一次类型标签
+                   就是「无门槛 · 无门槛」—— 那张卡看着像坏了。合成规则在那个函数里。 -->
+              <span class="tk-cond">{{ couponLine(c) }}</span>
               <button
                 type="button"
                 class="tk-get"
@@ -311,7 +317,7 @@
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { http, handleApiError } from '../api/http'
-import { endpoints } from '../api/endpoints'; import { getCustomerId } from '../api/auth'; import { coupons, claim, claimBatch } from '../api/marketing'; import { truthy, couponFace, couponCond } from '../config/coupon-format'   // ⚠️ 四条 import **同行**（C3 块 5 · commit 1，2026-10-11；同日「券的信息架构重排」又加两处）—— 本文件 `:119` / `:242` / `:262` 等多处被按行号引，**能省一行就省一行**（同 `ProductPage.vue:426` 那条的做法）。⚠️ `myCoupons` 已随右栏券包一并**删掉**，格式化三件套改从 `config/coupon-format.js` 取（主页与券包弹窗**共享**，见那个文件头）
+import { endpoints } from '../api/endpoints'; import { getCustomerId } from '../api/auth'; import { coupons, claim, claimBatch } from '../api/marketing'; import { truthy, couponFace, couponName, couponLine } from '../config/coupon-format'   // ⚠️ 四条 import **同行**（C3 块 5 · commit 1，2026-10-11；同日「券的信息架构重排」又加两处）—— 本文件 `:119` / `:242` / `:262` 等多处被按行号引，**能省一行就省一行**（同 `ProductPage.vue:426` 那条的做法）。⚠️ `myCoupons` 已随右栏券包一并**删掉**，格式化三件套改从 `config/coupon-format.js` 取（主页与券包弹窗**共享**，见那个文件头）。⚠️ **A 组 · A7 后半**（2026-10-12）：券卡原先只有「金额 / 门槛 / NEW」三样，用户点名**缺券名 + 券类型** ⇒ 追加 `couponName`（券名）与 `couponLine`（类型·门槛合成一行，内部拿 `couponCond` 拼），仍从同一份 `coupon-format.js` 取。⚠️ `couponCond` 随之**从本页 import 里去掉**（券包弹窗仍直接用）；本页若还要裸用它，`eslint no-unused-vars` 会当场红
 
 // ── 未登录可逛公开面（2026-10-06 用户改判 2，登记见 progress.md §5-AG (13)）────────────
 // 本页原有三条「未登录 ⇒ 弹登录提示」拦截（goSearch / searchByType / toGoodsDetail）与一条
@@ -1155,6 +1161,19 @@ button {
   font-size: var(--fs-xs);
   color: var(--ink-3);
   flex: 1;
+}
+/* 券名（A7 后半）——卡里**唯一**一行一级信息，故比 `.tk-cond` 重一档（`--fw-semi` / `--ink-2`）。
+   ⚠️ 券名是**用户填的**（管理端建券表单不限长）⇒ 单行截断，别让它把卡撑宽、把「领取」顶出画面。
+   ⚠️ 两个色档都是有据的：`--ink-2`（白底 8.0:1）、`--fs-xs` 同 `.tk-cond`（tokens.css）。 */
+.tk-name {
+  max-width: 100%;
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-semi);
+  line-height: 1.2;
+  color: var(--ink-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .tk-get {
   font-size: var(--fs-xs);

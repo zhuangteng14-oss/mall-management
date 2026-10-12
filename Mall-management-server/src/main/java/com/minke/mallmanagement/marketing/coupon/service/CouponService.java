@@ -143,6 +143,67 @@ public class CouponService {
         return result;
     }
 
+    /**
+     * **商家券提审**（C3 块 5 · A 组）——「更改商品」里挂的商品券，随商品一起提交审。
+     *
+     * <p>与 {@link #create} 的三点不同，逐条都有理由：
+     * <ol>
+     *   <li><b>业务号由提审批次号派生</b>（{@link #pendingCouponId}）—— 零 DDL 的挂接方式：
+     *       审核通过时只要拿提审单的 {@code BatchId} 反算出 {@code CouponId}，就知道该翻哪一张券，
+     *       <b>不需要在 {@code goods_audit} 上新增任何列</b>。</li>
+     *   <li><b>落库即 {@code stopped}</b> —— 领券中心（{@code selectClaimable}）与券包
+     *       （{@code selectMyGrants}）都只读 {@code active} ⇒ 待审券在用户侧**整条链路都不可见**。
+     *       「待审」这个状态就落在既有的 {@code Status} 上，不新增列。</li>
+     *   <li><b>{@code Scope} 恒 {@code merchant}、{@code MerchantAccount} 恒商家自己</b> ——
+     *       调用方传不进平台券（这个入口本就是给商家券的）。</li>
+     * </ol>
+     *
+     * <p>⚠️ 与 {@link #create} 共用同一套 {@link #validate} —— 校验口径不分商家 / 管理端。
+     *
+     * @param batchId 提审批次号（调用方生成；同一个号会写进那条 {@code goods_audit} 行）
+     */
+    public Map<String, Object> createPendingMerchantCoupon(String batchId, String merchantAccount,
+                                                           String name, String type, String faceValueRaw,
+                                                           String thresholdRaw, String totalQtyRaw,
+                                                           String categoryMatch, String startAt, String endAt) {
+        Map<String, Object> bad = validate(name, type, faceValueRaw, thresholdRaw, totalQtyRaw,
+                SCOPE_MERCHANT, merchantAccount, categoryMatch, startAt, endAt);
+        if (bad != null) {
+            return bad;
+        }
+        String t = type.trim().toLowerCase();
+        Double faceValue = parseDouble(faceValueRaw);
+        Double threshold = TYPE_NONE.equals(t) ? 0d : parseDouble(thresholdRaw, 0d);
+        int totalQty = parseTotalQty(totalQtyRaw);
+        String category = categoryMatch == null ? "" : categoryMatch.trim();
+        String couponId = pendingCouponId(batchId);
+        try {
+            couponDao.insertCoupon(couponId, name.trim(), t, faceValue, threshold, totalQty,
+                    SCOPE_MERCHANT, merchantAccount == null ? "" : merchantAccount.trim(), category,
+                    trimToNull(startAt), trimToNull(endAt), STATUS_STOPPED);
+        } catch (Exception e) {
+            e.printStackTrace();
+            return fail("建券失败：" + e.getMessage());
+        }
+        Map<String, Object> result = new HashMap<>();
+        result.put("success", true);
+        result.put("msg", "商品券已提交，待审核");
+        result.put("CouponId", couponId);
+        result.put("Pending", true);
+        return result;
+    }
+
+    /**
+     * 提审券的业务号 —— **由提审批次号派生**。零 DDL 挂接的另一半（见 {@link #createPendingMerchantCoupon}）：
+     * 审核链只凭 {@code goods_audit.BatchId} 就能找回这张待审券。
+     *
+     * <p>⚠️ 不撞 {@link #newCouponId} 的号段：管理端建券是 {@code CP} + 4 大写字母 + 8 数字（14 位），
+     * 这里是 {@code CP} + UUID（38 位）。{@code CouponId} 是 {@code varchar(40)} ⇒ 放得下。
+     */
+    public static String pendingCouponId(String batchId) {
+        return "CP" + batchId;
+    }
+
     /** 停用（**逻辑废弃**，不物理删 —— 规则 v2）。已领的券不受影响，只挡新的领取。 */
     public Map<String, Object> stop(String couponId) {
         return changeStatus(couponId, STATUS_STOPPED, "券已停用");
@@ -251,6 +312,18 @@ public class CouponService {
      *                 （同组里的 {@code Status} / {@code Type} 都是这个形态）。
      */
     public Map<String, Object> claimable(String account, Integer limit, String thisWeek) {
+        return claimable(account, limit, thisWeek, null);
+    }
+
+    /**
+     * 同上，另加**商家筛**（C3 块 5 · A 组 · 商品详情页领券区）：{@code merchantAccount} 非空 ⇒
+     * 只回该商家的**商家券**，平台券一条不回（口径见 {@link CouponDao#selectClaimable} 的四参版）。
+     *
+     * <p>⚠️ 详情页与主页**用的是同一个端点**，只是这里多一个可选筛 ⇒ 主页 / 用户中心那两处
+     * 不传它、行为一字未变（严格加性）。
+     */
+    public Map<String, Object> claimable(String account, Integer limit, String thisWeek,
+                                         String merchantAccount) {
         if (isBlank(account)) {
             return fail("缺少参数：Account");
         }
@@ -259,7 +332,7 @@ public class CouponService {
         try {
             Map<String, Object> result = new HashMap<>();
             result.put("success", true);
-            result.put("list", couponDao.selectClaimable(account.trim(), effective, onlyWeek));
+            result.put("list", couponDao.selectClaimable(account.trim(), effective, onlyWeek, merchantAccount));
             result.put("limit", effective);
             // 「本周还剩 N 天」——区块级小字，两种筛法都回（后端算，前端不碰浏览器钟）。
             result.put("daysLeft", couponDao.selectWeekWindow().get("DaysLeft"));

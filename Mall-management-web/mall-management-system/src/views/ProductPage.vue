@@ -114,10 +114,15 @@
               <span v-if="promoCuts.length" class="cut">{{ promoCuts.join('\u3000') }}</span>
               <span v-else class="cut cut-off">暂无满减活动</span>
             </div>
-            <div class="r"><span class="tag">领券</span>
-              <span v-if="claimList.length" class="coupons">
+            <div class="r r-coupons"><span class="tag">领券</span>
+              <span
+                v-if="claimList.length"
+                class="coupons"
+                :class="{ 'coupons-cut': claimList.length > CP_VISIBLE && !cpExpanded, 'coupons-on': cpExpanded }"
+              >
                 <span v-for="c in claimList" :key="c.CouponId" class="coupon">
                   <span class="amt"><i v-if="c.Type !== 'percent'">¥</i>{{ faceNum(c) }}</span>
+                  <span class="nm">{{ couponName(c) }}</span>
                   <span class="cond">{{ faceCond(c) }}</span>
                   <button
                     type="button"
@@ -129,6 +134,17 @@
                 </span>
               </span>
               <span v-else class="coupons"><span class="cond cut-off">{{ couponAccount ? '暂无可用券' : '登录后可领券' }}</span></span>
+              <!-- 「》」展开（用户 A4：两张半之外还有券时才出现）。
+                   ⚠️ 与主页 `.tk-more` 是**同一个手势**（点一下铺开、再点收起），但**不共用 CSS** ——
+                      主页那份钉在 `.tk-h-r` 里（表头右侧），这一颗在 `.r` 的第 3 列。 -->
+              <button
+                v-if="couponAccount && claimList.length > CP_VISIBLE"
+                type="button"
+                class="cp-more"
+                :class="{ 'cp-more-on': cpExpanded }"
+                :title="cpExpanded ? '收起（只留前 ' + CP_VISIBLE + ' 张）' : '展开看全部 ' + claimList.length + ' 张'"
+                @click="cpExpanded = !cpExpanded"
+              >{{ cpExpanded ? '《' : '》' }}</button>
             </div>
           </div>
 
@@ -440,7 +456,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { http, handleApiError } from '../api/http'
 import { endpoints } from '../api/endpoints'; import { orderAdd, cartAdd } from '../api/order'   // ⚠️ C3 块 4：**同行追加**（不新增行 —— 本文件 `:794`/`:803` 被 `slot-registry.md:1994-1995` 按行号引（〈Bug 1〉本笔 +19 行前为 `:775`/`:784`），此处加行会顶漂它们）。两个函数就是原先那两串 `URLSearchParams` + `http.post` + `res.json()` 的收口
 import CashierDialog from '../components/CashierDialog.vue'   // ⚠️ 2026-10-10（Bug 1）：收银台与「我的订单」**共用同一个组件** —— 本行**确实**新增了一行；本笔在 `ProductPage.vue` 净 +19 行（`git diff` 实测：模板 `:412` 起 +5、import +1、`handlePay` 段 +13）⇒ 下面两处 `:775`/`:784` 漂到 `:794`/`:803`，随本笔一并重指（见 `slot-registry.md:1994-1995`）
-import { getMerchantId, getCustomerId, isLoggedIn } from '../api/auth'; import IconGlyph from '../components/ui/IconGlyph.vue'; import { coupons, claim } from '../api/marketing'   // ⚠️ 三条 import **同行**（后两条：2026-10-11 补图标笔 + C3 块 5 · commit 1）—— 合并到既有行 = 不新增行号漂移（本文件 `:794`/`:803` 被 `slot-registry.md:1994-1995` 按行号引，上面 `:424` 那条注释记过同一件事）。⚠️ **块 5 · commit 1 仍整体 +90 行**（模板 +17 / `<script setup>` 尾 +70 / `<style>` +3）⇒ `slot-registry.md:1994` 引的 `:794` 漂 **`:881`**、`:1995` 引的 `:803` 漂 **`:890`**（两值均为 `grep -n` 实测，见 `_work/b5-repoint.md`）。
+import { getMerchantId, getCustomerId, isLoggedIn } from '../api/auth'; import IconGlyph from '../components/ui/IconGlyph.vue'; import { coupons, claim } from '../api/marketing'; import { couponName } from '../config/coupon-format'   // ⚠️ 四条 import **同行**（第 2、3 条：2026-10-11 补图标笔 + C3 块 5 · commit 1；第 4 条 `couponName`：块 5 · A 组 · A7 后半）—— 合并到既有行 = 不新增行号漂移（本文件 `:794`/`:803` 被 `slot-registry.md:1994-1995` 按行号引，上面 `:424` 那条注释记过同一件事）。⚠️ **块 5 · commit 1 仍整体 +90 行**（模板 +17 / `<script setup>` 尾 +70 / `<style>` +3）⇒ `slot-registry.md:1994` 引的 `:794` 漂 **`:881`**、`:1995` 引的 `:803` 漂 **`:890`**（两值均为 `grep -n` 实测，见 `_work/b5-repoint.md`）。
 
 const route = useRoute()
 const router = useRouter()
@@ -805,6 +821,14 @@ const couponAccount = getCustomerId() || ''
 const claimList = ref([])
 const claiming = ref('')
 
+// ⚠️ **C3 块 5 · A 组 · A4（2026-10-12）**：领券行「几张算该收起」= **2**
+//    （用户逐字「两张半 + 第三张截断」）—— 与样式里 `.coupons > .coupon` 基宽那个 `2.3` 是**一对**
+//    （那个 `.3` 就是「露出来的半张」）。改这里必须成对改样式，否则「第 3 张露出多少」与
+//    「什么时候才出 `》`」会对不上（主页 `.tk` 那套 `TK_VISIBLE` / `+0.3` / mask 宽同款约定）。
+const CP_VISIBLE = 2
+/** 领券行的展开态（点「》」置真 ⇒ 样式 `.coupons-on` 放开 `nowrap`、渐隐同撤）。 */
+const cpExpanded = ref(false)
+
 /** `Claimed` 宽容判据 —— Connector/J 的 `tinyInt1isBit` 下可能是 `true`，也可能是 `1`。 */
 const claimed = (c) => c.Claimed === true || c.Claimed === 1 || c.Claimed === '1'
 
@@ -831,7 +855,10 @@ const promoCuts = computed(() =>
 const loadClaimable = async () => {
   if (!couponAccount) return
   try {
-    const data = await coupons(couponAccount, 6)
+    // ⚠️ 第 4 参 `sellerId` = **本页在卖的那家店**（`route.query.MerchantId`）⇒ 后端只回
+    //    `Scope='merchant'` 且 `MerchantAccount` 命中的券（A4：不再列全站平台券）。
+    //    `sellerId` 为空时 `q()` 不发这个键 ⇒ 退回改动前的「全站可领」——**不是**「什么都看不到」。
+    const data = await coupons(couponAccount, 6, undefined, sellerId)
     claimList.value = data && data.success && Array.isArray(data.list) ? data.list : []
   } catch (e) {
     handleApiError(e, '优惠券加载失败')
@@ -985,12 +1012,46 @@ button { background: none; border: 0; cursor: pointer; }
 /* 空态文案（「暂无满减活动」/「登录后可领券」）—— C3 块 5 · commit 1 新增：它占的是**内容位**而不是
    标签位，故与 `.promo .cut` 的 `--ink-2` 分开一档（降到 `--ink-3`，与 `.tag` 同色）。 */
 .promo .cut-off { color: var(--ink-3); }
-.coupons { display: flex; gap: var(--s3); flex-wrap: wrap; align-items: center; }
+/* —— 领券行：**商家券**横向铺开（C3 块 5 · A 组 · A4）——
+   用户口径「两张半 + 第三张截断 + 渐隐 + `》`」，与主页 `.tk-strip` 是**同一套路**（不滚、裁切、渐隐、
+   `》` 展开），但**不共用那一份 CSS**：主页那条钉死在 `.tickets` 的 5 张版式里，这条在商品页 `.promo`。
+   ⚠️ 三个数是一组（同主页那条注释）：`CP_VISIBLE`(2) / 基宽那个 `+0.3` / 渐隐带宽 —— 改一处要成对改。 */
+.coupons { display: flex; gap: var(--s3); flex-wrap: nowrap; align-items: center; overflow: hidden; }
+/* 展开态（点过 `》`）：放开换行 ⇒ 全部铺开（每行 2 张），渐隐同时撤掉。 */
+.coupons-on { flex-wrap: wrap; }
+/* 基宽 = `(100% - (N-1) 个 gap) / (N + 0.3)`（N = `CP_VISIBLE` = 2）。那个 **`+0.3` 不是笔误**：
+   按整 2 张算 ⇒ 第 3 张**整个落在裁切线之外、一点都露不出来**，右侧渐隐就没东西可淡（「还有更多」当场失效）；
+   按 `+0.5` ⇒ 第 3 张露出近一半，**看着像一张完整的窄卡**、也不像「被裁」。`+0.3` = 露出约 1/4 张。
+   ⚠️ 只作用在**领券行**（`.coupons >`）—— `.coupon` 本身还给购入弹窗的 `.p-coupons` 用（那边要自适应宽）。 */
+.coupons > .coupon { flex: 0 0 calc((100% - var(--s3)) / 2.3); }
+/* 越位渐隐。⚠️ 这里是**百分比**（87% 起）而**不是**主页那种固定 `88px`：商品页这一栏没有固定宽度
+   （`.promo .r` 是 `1fr`，随视口变），固定 px 在窄屏会盖过头、宽屏又盖不住那半张。百分比自带缩放：
+   第 3 张的露头恒在容器约 87% 处起（`(2×(100%-g)/2.3 + g) / 100%`，g=12px ≈ 87%）⇒ 87% 起淡正好。
+   `-webkit-mask-image` 是给旧 WebKit 的，两条都要写。 */
+.coupons-cut {
+  mask-image: linear-gradient(to right, #000 87%, transparent 100%);
+  -webkit-mask-image: linear-gradient(to right, #000 87%, transparent 100%);
+}
+/* 「领券」行比「促销」行多一列（右侧 `》`）。⚠️ **只给这一行加第三列** —— 改公共的 `.promo .r` 会让
+   上面「促销」行白留一格 `--s4` 的 gutter（那个 grid 是共用的，见上面那条注释）。 */
+.promo .r-coupons { grid-template-columns: 36px minmax(0, 1fr) auto; }
+/* 「》」查看更多 —— 「领券」行右侧那颗（`grid` 第 3 列）。样式对齐主页 `.tk-more`（同一手势、同一外观）。 */
+.cp-more { flex: 0 0 auto; align-self: center; font: inherit; font-size: var(--fs-xs); line-height: 1;
+           color: var(--brand-ink); background: var(--surface-2); border: 1px solid var(--line-2);
+           border-radius: var(--r1); padding: 2px var(--s2); white-space: nowrap; cursor: pointer; }
+.cp-more:hover { border-color: var(--brand-ink); }
+/* 展开态：底色提亮一档，与收起态区分（文案由模板在 `》` / `《` 之间切）。 */
+.cp-more-on { background: var(--brand-soft); }
 .coupon { flex: 0 0 auto; display: flex; align-items: center; gap: var(--s3);
           padding: var(--s2) var(--s3); border: 1px dashed var(--accent); border-radius: var(--r1); }
 .coupon .amt { font-family: var(--font-display); font-size: var(--fs-md); font-weight: var(--fw-med);
                color: var(--accent); line-height: 1; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .coupon .amt i { font-style: normal; font-size: var(--fs-xs); margin-right: 1px; }
+/* 券名（A7 后半，与主页 `.tk-name` 同口径）：卡里唯一一行一级信息。
+   ⚠️ `flex: 1 1 auto` + `min-width: 0` 才**截得断** —— 卡被钉死在 `(100% - g)/2.3` 的窄框里，
+      券名是用户填的、不限长，不截断就会把「领取」顶出可视区（同主页那条的 `max-width: 100%`）。 */
+.coupon .nm { flex: 1 1 auto; min-width: 0; font-size: var(--fs-xs); font-weight: var(--fw-semi);
+              color: var(--ink-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .coupon .cond { font-size: var(--fs-xs); color: var(--ink-3); white-space: nowrap; }
 .coupon .get { flex: 0 0 auto; height: 26px; padding: 0 var(--s3); border: 1px solid var(--line-2);
                border-radius: var(--r1); font-size: var(--fs-xs); color: var(--ink-2); white-space: nowrap; }

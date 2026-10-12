@@ -132,6 +132,11 @@ export function couponStats() {
  *        （用户中心弹窗的「可领」tab，含旧券）。
  *        ⚠️ 两者是**同一个查询的两个筛法**（用户 2026-10-11 裁定「甲」）⇒ 主页那批天然是
  *        「可领」的**子集**，不会有两个真相。`q()` 对 `undefined` 不发键 ⇒ 省略即「全量」。
+ * @param {string} [merchantAccount] 商家业务号 ⇒ **只回该商家发的商家券**（后端 `Scope='merchant'`
+ *        那一支；空 / 省略 = 平台券与商家券**都要**，即改动前的行为）。
+ *        ⚠️ C3 块 5 · A 组新加（用户 A4）：商品详情页领券区显的是**这家店的券** ——
+ *        用户拍板的是「不按商品/类目过滤」（后端没有那一维），但**要按商家收窄**。
+ *        ⚠️ 与 `thisWeek` 是**正交**的两个筛：可以同时传（本店 · 本周新）。
  * @returns {Promise<{success:boolean, list:Array, limit:number, daysLeft:number}>}
  *          `list[]` 在券定义之外多两个**给这个人算的**布尔：
  *          · `Claimed`（`true`/`1`）—— 此人已领过 ⇒ 按钮画成「已领取」并禁用
@@ -144,8 +149,8 @@ export function couponStats() {
  *             用户 2026-10-11 裁定）⇒ 前端**按数组原序从左到右铺**（`HomePage.vue` 的 `.tk-strip`），
  *             别自己再排一遍。⚠️ 与 `myCoupons()` **不是一套口径**：那边按**紧迫度**，这边按**新旧**。
  */
-export function coupons(account, limit, thisWeek) {
-  return post(endpoints.marketing.coupons, q({ Account: account, limit, thisWeek }))
+export function coupons(account, limit, thisWeek, merchantAccount) {
+  return post(endpoints.marketing.coupons, q({ Account: account, limit, thisWeek, MerchantAccount: merchantAccount }))
 }
 
 /**

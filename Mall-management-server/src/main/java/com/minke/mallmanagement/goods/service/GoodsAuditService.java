@@ -4,6 +4,8 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.minke.mallmanagement.goods.dao.GoodsAuditDao;
 import com.minke.mallmanagement.goods.dao.GoodsDao;
+import com.minke.mallmanagement.marketing.coupon.dao.CouponDao;
+import com.minke.mallmanagement.marketing.coupon.service.CouponService;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -59,6 +61,17 @@ public class GoodsAuditService {
     private final GoodsDao goodsDao;
     private final GoodsCacheService goodsCacheService;
     /**
+     * 券定义读写口 —— **只服务「带券的提审单」**（C3 块 5 · A 组）。
+     *
+     * <p>为什么提审链要认识券：商家在「更改商品」里挂的**商品券**随商品一起提审，它没有自己的
+     * 待审表 —— 待审态就落在 {@code coupon.Status='stopped'} 上，业务号由提审批次号派生
+     * （{@link CouponService#pendingCouponId}）。故审核链要能：① 判断这条提审单带不带券
+     * （{@code selectCoupon('CP'+BatchId) != null}）、② 通过时把它翻 {@code active}。
+     * ⚠️ 判别**不借 {@code goods_audit.Source}** —— 那一列已被「11 张表种子标记列」占用
+     * （{@code mall_management_sql.sql:1102-1124} 的 {@code Source='seed'} 口径）。
+     */
+    private final CouponDao couponDao;
+    /**
      * 解析 {@code goods_audit.SkuSpec}（多规格矩阵快照，JSON 数组串）—— 与 {@code order.Items} /
      * {@code OrderService.resolveItems} 同款：线上用的就是 Spring Boot 自动配置的那个 ObjectMapper，
      * 不另建（那会波及既有端点的字节）。
@@ -68,10 +81,12 @@ public class GoodsAuditService {
     public GoodsAuditService(GoodsAuditDao auditDao,
                              GoodsDao goodsDao,
                              GoodsCacheService goodsCacheService,
+                             CouponDao couponDao,
                              ObjectMapper objectMapper) {
         this.auditDao = auditDao;
         this.goodsDao = goodsDao;
         this.goodsCacheService = goodsCacheService;
+        this.couponDao = couponDao;
         this.objectMapper = objectMapper;
     }
 
@@ -131,15 +146,41 @@ public class GoodsAuditService {
         return result;
     }
 
-    /** 管理端提审列表（{@code status} 可空 ⇒ 全部）。 */
+    /**
+     * 管理端提审列表（{@code status} 可空 ⇒ 全部）。
+     *
+     * <p>⚠️ C3 块 5 · A 组：**带券的提审单**在这里回显它挂的那张券（键 {@code Coupon}）——
+     * 审核人得先看见券面，才谈得上「一并审券」。判别 / 取法见 {@link #couponOfAuditRow}。
+     */
     public Map<String, Object> listForAdmin(String status, Integer limit) {
         int effective = normalizeLimit(limit);
+        List<Map<String, Object>> rows = auditDao.selectByStatus(status, effective);
+        for (Map<String, Object> row : rows) {
+            Map<String, Object> coupon = couponOfAuditRow(row);
+            if (coupon != null) {
+                row.put("Coupon", coupon);
+            }
+        }
         Map<String, Object> result = new HashMap<>();
         result.put("success", true);
-        result.put("list", auditDao.selectByStatus(status, effective));
+        result.put("list", rows);
         result.put("total", auditDao.countByStatus(status));
         result.put("limit", effective);
         return result;
+    }
+
+    /**
+     * 这条提审单挂的券 —— 由 {@code BatchId} 派生业务号（{@link CouponService#pendingCouponId}）
+     * 反查 {@code coupon}；查不到 ⇒ {@code null}（= 这是一条**普通商品提审单**）。
+     *
+     * <p>⚠️ 这就是「零 DDL 挂接」的全部实现：判别与取券**同一个查询**，不依赖任何新增列。
+     */
+    private Map<String, Object> couponOfAuditRow(Map<String, Object> auditRow) {
+        String batchId = str(auditRow.get("BatchId"));
+        if (isBlank(batchId)) {
+            return null;
+        }
+        return couponDao.selectCoupon(CouponService.pendingCouponId(batchId));
     }
 
     // ==================== 审核 ====================
@@ -191,6 +232,22 @@ public class GoodsAuditService {
             result.put("outcome", "rejected");
             result.put("merchantId", merchantId);
             result.put("rejectReason", rejectReason);
+            return result;
+        }
+
+        // ⚠️ C3 块 5 · A 组：**带券的提审单**走另一条通过腿 —— 它不代表「新增商品」，
+        //    只是那张待审商品券（Status='stopped'）的载体（商家在「更改商品」里挂券时，
+        //    goods 行**当场就改好了**，没有待建的商品）。若照下面走 writeGoodsFromAudit，
+        //    会给一件**已经存在**的商品再插一行 goods ⇒ 重复商品。
+        Map<String, Object> pendingCoupon = couponOfAuditRow(before);
+        if (pendingCoupon != null) {
+            // 待审 ⇒ 生效。updateStatus 谓词带 `Status <> ?` ⇒ 重复调用是幂等无操作。
+            couponDao.updateStatus(CouponService.pendingCouponId(str(before.get("BatchId"))), "active");
+            result.put("success", true);
+            result.put("outcome", "approved");
+            result.put("merchantId", merchantId);
+            result.put("couponId", pendingCoupon.get("CouponId"));
+            result.put("isCoupon", true);
             return result;
         }
 

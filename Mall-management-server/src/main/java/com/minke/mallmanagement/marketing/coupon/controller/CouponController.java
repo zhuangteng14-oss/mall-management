@@ -51,18 +51,22 @@ public class CouponController {
      *                 （用户中心「可领」tab）。**同一个查询的两个筛法**，见 {@code CouponDao.selectClaimable}。
      *                 ⚠️ 可选参数 &gt; 必填 —— 既有调用方（{@code ProductPage.vue} 的领券块）不传它，
      *                 行为与改动前一致（仍是全量领券中心，没被收窄）。
+     * @param merchantAccount 非空 ⇒ **只回该商家的商家券**（{@code Scope='merchant'}），
+     *                        平台券一条不回。C3 块 5 · A 组给**商品详情页领券区**加的筛
+     *                        （那里显本店发的券）；主页 / 用户中心不传它 ⇒ 行为一字未变。
      */
     @PostMapping("/coupons")
     public ResponseEntity<Object> coupons(
             @RequestParam("Account") String Account,
             @RequestParam(value = "limit", required = false) Integer limit,
             @RequestParam(value = "thisWeek", required = false) String thisWeek,
+            @RequestParam(value = "MerchantAccount", required = false) String MerchantAccount,
             HttpServletRequest request
     ) {
         if (!IdentityGuard.requireSelfOrAdmin(request, Account)) {
             return IdentityGuard.forbidden();
         }
-        return ResponseEntity.ok(Result.of(couponService.claimable(Account, limit, thisWeek)));
+        return ResponseEntity.ok(Result.of(couponService.claimable(Account, limit, thisWeek, MerchantAccount)));
     }
 
     /**
