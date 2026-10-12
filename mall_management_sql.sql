@@ -1422,3 +1422,31 @@ SET @s := (SELECT IF(COUNT(*) = 0,
   FROM information_schema.COLUMNS
   WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'order' AND COLUMN_NAME = 'PayAmount');
 PREPARE _p FROM @s; EXECUTE _p; DEALLOCATE PREPARE _p;
+
+-- ============================================================
+-- Migration: 块 5 B〈个人中心整改 / 店铺主页 / 关注关系〉—— 1 张新表
+--            Date: 2026-10-12
+-- 依据：用户 2026-10-12 裁决（B 组四处裁定 + 表结构两问，见 _work/block-5-updates.md）。
+-- 范围：**只加表**；不改既有列、不删行、不改既有数据（规则 v2：向后兼容）。
+-- 幂等：加表走 `CREATE TABLE IF NOT EXISTS`（照本文件 :1247 的先例）；重复执行第二遍起空操作。
+-- 表（1）：shop_follow（店铺关注关系 —— 买家 → 商家）
+-- ⚠️ P3 门禁：`ConcurrencyRunner.java` 的 KNOWN_TABLES 18 → 19、期望表数 29 → 30（**四处同改**）。
+-- 回滚（逻辑废弃，执行前须人工确认）：
+--       DROP TABLE IF EXISTS `shop_follow`;
+-- ============================================================
+
+-- ---- ⑫ 店铺关注关系（B 组 · 用户裁定 7「关注真做」）----
+-- 语义：一行 = 一个买家关注一个商家；取关 = **物理 DELETE 行**（关系表取关即删，
+--       与「业务实体不物理删」不冲突 —— 用户 2026-10-12 裁定 8）。
+--       关注后的通知**本块不做**，已登记待办（tech-debt.md）。
+CREATE TABLE IF NOT EXISTS `shop_follow` (
+  `Id`         int NOT NULL AUTO_INCREMENT COMMENT '自增主键',
+  `CustomerId` varchar(40) NOT NULL COMMENT '关注者业务号（对齐 user.customerid / cart.CustomerId）',
+  `MerchantId` varchar(40) NOT NULL COMMENT '被关注商家业务号（对齐 user.merchantid）',
+  `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '行落库时刻（= 关注时刻）',
+  `updated_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '行更新时刻',
+  PRIMARY KEY (`Id`),
+  UNIQUE KEY `uk_shop_follow_cust_merchant` (`CustomerId`,`MerchantId`),
+  KEY `idx_shop_follow_merchant_created` (`MerchantId`,`created_at`),
+  KEY `idx_shop_follow_cust_created` (`CustomerId`,`created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='店铺关注关系（块 5 B）';

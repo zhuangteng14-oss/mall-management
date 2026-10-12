@@ -42,6 +42,8 @@ import com.minke.mallmanagement.stats.dao.StatsDao;
 import com.minke.mallmanagement.stats.service.StatsService;
 import com.minke.mallmanagement.marketing.coupon.dao.CouponDao;
 import com.minke.mallmanagement.marketing.coupon.service.CouponService;
+import com.minke.mallmanagement.shop.follow.dao.ShopFollowDao;
+import com.minke.mallmanagement.shop.follow.service.ShopFollowService;
 import org.junit.jupiter.api.BeforeEach;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
@@ -215,7 +217,13 @@ import static org.mockito.Mockito.when;
         // ⚠️ **刻意不 @Import `CouponExpiryJob`**：它是 @Component（切片不扫）且是 @Scheduled ——
         //    理由与 `ShippingTrackAdvanceJob` / `StatsAggregateJob` **逐字相同**（切片里没有调度器；
         //    @EnableScheduling 挂在 MerchantDowngradeSchedulingConfig，不属 web 组件）。
-        CouponDao.class, CouponService.class})
+        CouponDao.class, CouponService.class,
+        // C3 块 5 · B 组（个人中心 / 店铺主页 / 关注关系，2026-10-12）：新增一个 Controller
+        // （`ShopFollowController`）+ 一个 @Service（`ShopFollowService`）+ 一个 @Dao（`ShopFollowDao`）——
+        // **第八次同一处地雷**：@WebMvcTest 无参会加载全部 @Controller，新控制器一进来，
+        // 切片上下文就会因为「找不到它要的 ShopFollowService」而**启动失败**（同前七笔）。
+        // ⚠️ 本域的依赖链只有三层（Controller → Service → Dao），Service 不另吃别的 bean。
+        ShopFollowDao.class, ShopFollowService.class})
 public abstract class AbstractSmokeTest {
 
     @Autowired
