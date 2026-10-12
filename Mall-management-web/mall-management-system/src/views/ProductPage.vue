@@ -97,7 +97,7 @@
                  ⚠️ 只在「这件商品通过了国补、规则在期、商品在架」时才有个数 —— 后端 `/marketing/subsidy/goods`
                     三处 JOIN 一起挡（商家点头 + 规则在期 + 商品在架）。**没有就不画**，不拿「暂无补贴」占位。
                  ⚠️ 金额**后端现算**（`SubsidyAmount`），本页只显示。 -->
-            <span v-if="subsidy" class="subsidy">国补 −¥{{ r2(subsidy.SubsidyAmount) }}</span>
+            <span v-if="subsidy" class="subsidy">国补 −¥{{ r2(subsidy.SubsidyAmount) }}</span><!-- ①-补【秒杀价】—— C3 块 5〈秒杀〉**落地**（2026-10-12）：与上面两枚同一条口径「没有就不画」。⚠️ 命中判据是 **`ProductCode`**（`seckill` computed），且**只有 `Stage === 'live'` 才算命中** —— `upcoming`（活动未开启）/`signup`（报名期）那一档后端也会回，但那句话归秒杀页 `/seckill` 说，本页不替它说。⚠️ 已售完时改说「已售完」：`SoldOut` 是后端在 **Java 侧**拿两个数字比出来的（SQL 里写 `0/1` 会被驱动退成字符串，`'0'` 在 JS 里是真值）。 --><span v-if="seckill" class="sk-tag">秒杀 ¥{{ seckill.SeckillPrice }}<template v-if="seckill.SoldOut"> · 已售完</template><template v-else-if="seckill.SoldLeft !== null && seckill.SoldLeft !== undefined"> · 剩 {{ seckill.SoldLeft }} 件</template></span>
           </div>
 
           <!-- ②【促销 / 优惠券】—— **C3 块 5〈营销块〉已接线**（2026-10-11）。
@@ -457,7 +457,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { http, handleApiError } from '../api/http'
 import { endpoints } from '../api/endpoints'; import { orderAdd, cartAdd } from '../api/order'   // ⚠️ C3 块 4：**同行追加**（不新增行 —— 本文件 `:794`/`:803` 被 `slot-registry.md:1994-1995` 按行号引（〈Bug 1〉本笔 +19 行前为 `:775`/`:784`），此处加行会顶漂它们）。两个函数就是原先那两串 `URLSearchParams` + `http.post` + `res.json()` 的收口
 import CashierDialog from '../components/CashierDialog.vue'; import ProductCard from '../components/ProductCard.vue'   // ⚠️ 2026-10-10（Bug 1）：收银台与「我的订单」**共用同一个组件** —— 本行**确实**新增了一行；本笔在 `ProductPage.vue` 净 +19 行（`git diff` 实测：模板 `:412` 起 +5、import +1、`handlePay` 段 +13）⇒ 下面两处 `:775`/`:784` 漂到 `:794`/`:803`，随本笔一并重指（见 `slot-registry.md:1994-1995`）
-import { getMerchantId, getCustomerId, getUsername, isLoggedIn } from '../api/auth'; import IconGlyph from '../components/ui/IconGlyph.vue'; import { coupons, claim, subsidyGoods } from '../api/marketing'; import { couponName } from '../config/coupon-format'   // ⚠️ 四条 import **同行**（第 2、3 条：2026-10-11 补图标笔 + C3 块 5 · commit 1；第 4 条 `couponName`：块 5 · A 组 · A7 后半；`getUsername`：块 5 券口径改登录名，2026-10-12）—— 合并到既有行 = 不新增行号漂移（本文件 `:794`/`:803` 被 `slot-registry.md:1994-1995` 按行号引，上面 `:424` 那条注释记过同一件事）。⚠️ **块 5 · commit 1 仍整体 +90 行**（模板 +17 / `<script setup>` 尾 +70 / `<style>` +3）⇒ `slot-registry.md:1994` 引的 `:794` 漂 **`:881`**、`:1995` 引的 `:803` 漂 **`:890`**（两值均为 `grep -n` 实测，见 `_work/b5-repoint.md`）。
+import { getMerchantId, getCustomerId, getUsername, isLoggedIn } from '../api/auth'; import IconGlyph from '../components/ui/IconGlyph.vue'; import { coupons, claim, subsidyGoods, seckillLive } from '../api/marketing'; import { couponName } from '../config/coupon-format'   // ⚠️ 四条 import **同行**（第 2、3 条：2026-10-11 补图标笔 + C3 块 5 · commit 1；第 4 条 `couponName`：块 5 · A 组 · A7 后半；`getUsername`：块 5 券口径改登录名，2026-10-12）—— 合并到既有行 = 不新增行号漂移（本文件 `:794`/`:803` 被 `slot-registry.md:1994-1995` 按行号引，上面 `:424` 那条注释记过同一件事）。⚠️ **块 5 · commit 1 仍整体 +90 行**（模板 +17 / `<script setup>` 尾 +70 / `<style>` +3）⇒ `slot-registry.md:1994` 引的 `:794` 漂 **`:881`**、`:1995` 引的 `:803` 漂 **`:890`**（两值均为 `grep -n` 实测，见 `_work/b5-repoint.md`）。
 
 const route = useRoute()
 const router = useRouter()
@@ -930,6 +930,37 @@ const loadSubsidy = async () => {
 onMounted(loadSubsidy)
 
 /* 2026-10-10〈模板表通用化〉三段快照文本（`goods.Detail` / `Spec` / `AfterSale`）—— 全部写在**同一物理行**（新增行会顶漂下面 `slot-registry.md:1994-1995` 引的 `:794`/`:803`）。⚠️ 取值**从 `route.query` 现取**、不用 setup 期解构的 `sellerId`/`goodName`（`:433-434` 是普通 `const`，同路径只换 query 时组件被复用、它们**不更新**，理由同 `openPopup` 那条）。 */ const detailText = computed(() => { const q = route.query; const g = goodsWithUser.value.find((x) => x.MerchantId === q.MerchantId && x.GoodName === q.GoodName); return (g && g.Detail) || '' }); const specText = computed(() => { const q = route.query; const g = goodsWithUser.value.find((x) => x.MerchantId === q.MerchantId && x.GoodName === q.GoodName); return (g && g.Spec) || '' }); const afterSaleText = computed(() => { const q = route.query; const g = goodsWithUser.value.find((x) => x.MerchantId === q.MerchantId && x.GoodName === q.GoodName); return (g && g.AfterSale) || '' }); /* `Spec` 的行内 `键=值` 约定：一行一条，`=` 只切**第一处**（值里允许再有 `=`）；没有 `=` 的行**整行进 `.v`、`.k` 留空**，而不是丢掉它。 */ const specRows = computed(() => specText.value.split('\n').map((s) => s.trim()).filter((s) => s !== '').map((s) => { const i = s.indexOf('='); return i < 0 ? { k: '', v: s } : { k: s.slice(0, i).trim(), v: s.slice(i + 1).trim() } })); const promiseLabels = computed(() => { const q = route.query; const g = goodsWithUser.value.find((x) => x.MerchantId === q.MerchantId && x.GoodName === q.GoodName); const ALL = ['正品保障', '7 天无理由', '极速退款', '运费险']; const KEYS = ['PromiseGenuine', 'PromiseReturn7', 'PromiseFastRefund', 'PromiseFreightIns']; if (!g) return ALL; if (!KEYS.some((k) => g[k] !== undefined && g[k] !== null)) return ALL; return ALL.filter((_, i) => Number(g[KEYS[i]])) }); const mergeSkus = async (baseItems) => { try { const rs = await http.post(endpoints.goods.skuList, `MerchantId=${sellerId}&GoodName=${goodName}`); const ds = await rs.json(); const skus = (ds && ds.success && ds.list) || []; if (!skus.length) return baseItems; const img = baseItems.length ? baseItems[0].goodImg : ''; const merged = skus.map((s) => ({ productCode: String(s.SkuCode || ''), price: s.Price, goodImg: img })).filter((s) => s.productCode); return merged.length ? merged : baseItems } catch (e) { return baseItems } }; const isLogin = computed(() => isLoggedIn()); const activeTab = ref('desc')   // 结构二次调整（2026-10-07）：Tab 条当前面，UI 展示状态（不计功能量）；⚠️ **同行追加、不新增行** —— 上面那条「新增行落在最大被引行之后」的约束在本笔**不成立**（`slot-registry.md:1994-1995` 引的 `:794`/`:803` 都在下面），新增行会顶漂它们。
+
+// ── 块 5〈秒杀〉：当前型号的秒杀价（C3 块 5 · commit 4，2026-10-12）─────────────────────
+// 本段落在 `<script setup>` 的**最末**（上面那行物理长行之后）：本文件的行号被
+// `slot-registry.md` / `progress.md` / `OrderService.java` 多处按行号引（`:297-299` / `:311-317`
+// / `:794` / `:803` / `<style>` 的 `:1032` 等）⇒ 新增行只有落在**最大被引行之后**，那些引用才一个都不漂。
+// ⚠️ 与上面券块 / 国补块**同一个先例**：`/marketing/seckill/live` 不挂闸、**也不在白名单**
+//    ⇒ 匿名 401 ⇒ 必须**先判登录**再发，否则 `http.js` 的 `handleUnauthorized` 会把商品页踢回登录页。
+// ⚠️ 命中判据用 **`ProductCode`**（不是 `GoodName`）：同一 `GoodName` 下各型号价不同 —— 拿别的型号的
+//    秒杀价画在这一屏上就是假话（与 ① 折扣角标、② 国补标签同一条口径）。
+// ⚠️ 价与「售罄」都由**后端**说了算：`SeckillPrice` 直接读，`SoldOut` / `SoldLeft` **只读不算** ——
+//    不限量那档（`TotalStock = 0`）的语义已经在 `SoldOut` 里定好了，别拿 `TotalStock` / `SoldStock` 自己比。
+// ⚠️ `Stage` 由后端按**库时钟**现算（`SeckillDao.stage`）：只有 `live` 才画；`upcoming`（未开启）
+//    与 `signup`（报名期）本页**都不画**（那句话归秒杀页 `/seckill` 说）。
+const seckillRows = ref([])
+const seckill = computed(() => {
+  const code = String(currentItem.value.productCode || '')
+  if (!code) return null
+  const hit = seckillRows.value.find((r) => String(r.ProductCode || '') === code)
+  return hit && hit.Stage === 'live' ? hit : null
+})
+const loadSeckill = async () => {
+  if (!isLoggedIn()) return
+  try {
+    const data = await seckillLive({ limit: 200 })
+    seckillRows.value = data && data.success && Array.isArray(data.list) ? data.list : []
+  } catch (e) {
+    seckillRows.value = []
+  }
+}
+// ⚠️ 本文件**第三个** `onMounted`（Vue 允许注册多次）；不并进上面两个，理由同 `:903-905` 那条。
+onMounted(loadSeckill)
 </script>
 
 <style scoped>
@@ -1464,4 +1495,13 @@ button { background: none; border: 0; cursor: pointer; }
 .subsidy { padding: 1px var(--s2); border-radius: var(--r1); background: var(--accent-soft);
            color: var(--accent); font-size: var(--fs-xs); font-weight: var(--fw-med);
            font-variant-numeric: tabular-nums; }
+/* ── 2026-10-12〈秒杀〉：价格行上的「秒杀 ¥N · 剩 M 件」徽标 ──────────────────────
+   ⚠️ 与 `.off`（折扣角标）/ `.subsidy`（国补）**同一套色**，理由同上（都是价格类标记，
+      `--accent` 的用法域就是「价格 / 促销 / 未读」）；三者靠**文字**区分，不靠再造颜色。
+   ⚠️ 与 `.subsidy` **不能合成一条**：一个是平台配的补率、一个是限时活动的售价，口径与生命周期都不同。
+   ⚠️ 秒杀价**不覆盖**上面那条 `.price`（现价仍是 `price` 列那个值）—— 本仓的成交价在结算时由
+      `orderAdd` 定，本页只把「这场活动此刻的价」摆出来，不假装站点价已经变了。 */
+.sk-tag { padding: 1px var(--s2); border-radius: var(--r1); background: var(--accent-soft);
+          color: var(--accent); font-size: var(--fs-xs); font-weight: var(--fw-med);
+          font-variant-numeric: tabular-nums; }
 </style>

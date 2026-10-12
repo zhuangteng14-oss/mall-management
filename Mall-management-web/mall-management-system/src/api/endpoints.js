@@ -4,7 +4,7 @@
 // 「路径字面量只允许出现在本文件」—— 后者强得多，且同样可 grep 自动化（方案 Q8）。
 //
 // 端点来源：14 个 view 里 **42 处 fetch + 6 处 URL 赋值**，逐条抽取
-// （2026-10-04，切换自 `9add994`）共 **31 个唯一端点**，按 M5 的四域分组（+2 条 `user.me` / `user.logout`：会话恢复笔与翻开关笔 2026-10-05 加，+1 条 `user.token`：多账户隔离笔 2026-10-06 加 —— 三条均**非** view 抽取 ⇒ 加上 C3 批 A 的 3 条 `admin.audit*`（2026-10-08）与 C3 块 1·I2 的 8 条（`admin.notify*` 4 + `notification.*` 4，2026-10-09，同样**非** view 抽取），再加 C3 块 2〈用户块〉的 11 条（`user.updateProfile` 1 + `merchant.*` 2 + `admin.accounts*` 8，2026-10-09，同样**非** view 抽取），本表实为 **56** 条；再加 C3 块 3〈商品块〉的 14 条（`goodsB3` 2 + `catalog` 1 + `catalogAdmin` 11，2026-10-10，同样**非** view 抽取）；再经同日〈模板表通用化〉就地改造（**删** `catalog` 1 + `catalogAdmin` 4 + `admin.notifyTemplate*` 2 = 7 条，**加** `template` 2 + `templateAdmin` 4 = 6 条），现为 **69** 条；再加 C3 块 4〈订单块〉的 9 条（`cart` 5 + `orderAdmin` 4，2026-10-10，同样**非** view 抽取 —— 唯一调用方是新建的 `api/order.js`），现为 **78** 条；再加 C3 块 4 补丁〈订单块〉的 1 条（`order.orderDetail`，2026-10-10，同样**非** view 抽取），现为 **79** 条；再加可视化段（2026-10-11）的 4 条（`goods.skuList` 1〔与 `goodsProductCodeSelect` 同行追加〕+ `stats.*` 3〔末尾新增组〕，同样**非** view 抽取），现为 **83** 条）；再加 C3 块 5〈营销块〉commit 1（券，2026-10-11）的 10 条（`marketingCoupon` 7 + `marketing` 3，同样**非** view 抽取 —— 唯一调用方是新建的 `api/marketing.js`），现为 **93** 条；再加同日〈券的信息架构重排〉的 1 条（`marketing.claimBatch` = `/marketing/coupon/claimBatch`，2026-10-11，同样**非** view 抽取 —— 仍是 `api/marketing.js` 的调用方），现为 **94** 条；再加 C3 块 5〈营销块〉B 组 + 续笔（店铺域，2026-10-12）的 4 条（`shop` 组：`follow` / `unfollow` / `followState` / `profile`，同样**非** view 抽取 —— 新建的 `api/shop.js`），现为 **98** 条；再加 C3 块 5〈营销块〉commit 3（国补，2026-10-12）的 9 条（`marketingSubsidy` 6 + `subsidy` 3，同样**非** view 抽取 —— 管理端六条走 `api/marketing.js`，商家侧三条里的两条给 `views/NotifyInbox.vue`、第三条给详情页 / 搜索页的国补标签），现为 **107** 条）。
+// （2026-10-04，切换自 `9add994`）共 **31 个唯一端点**，按 M5 的四域分组（+2 条 `user.me` / `user.logout`：会话恢复笔与翻开关笔 2026-10-05 加，+1 条 `user.token`：多账户隔离笔 2026-10-06 加 —— 三条均**非** view 抽取 ⇒ 加上 C3 批 A 的 3 条 `admin.audit*`（2026-10-08）与 C3 块 1·I2 的 8 条（`admin.notify*` 4 + `notification.*` 4，2026-10-09，同样**非** view 抽取），再加 C3 块 2〈用户块〉的 11 条（`user.updateProfile` 1 + `merchant.*` 2 + `admin.accounts*` 8，2026-10-09，同样**非** view 抽取），本表实为 **56** 条；再加 C3 块 3〈商品块〉的 14 条（`goodsB3` 2 + `catalog` 1 + `catalogAdmin` 11，2026-10-10，同样**非** view 抽取）；再经同日〈模板表通用化〉就地改造（**删** `catalog` 1 + `catalogAdmin` 4 + `admin.notifyTemplate*` 2 = 7 条，**加** `template` 2 + `templateAdmin` 4 = 6 条），现为 **69** 条；再加 C3 块 4〈订单块〉的 9 条（`cart` 5 + `orderAdmin` 4，2026-10-10，同样**非** view 抽取 —— 唯一调用方是新建的 `api/order.js`），现为 **78** 条；再加 C3 块 4 补丁〈订单块〉的 1 条（`order.orderDetail`，2026-10-10，同样**非** view 抽取），现为 **79** 条；再加可视化段（2026-10-11）的 4 条（`goods.skuList` 1〔与 `goodsProductCodeSelect` 同行追加〕+ `stats.*` 3〔末尾新增组〕，同样**非** view 抽取），现为 **83** 条）；再加 C3 块 5〈营销块〉commit 1（券，2026-10-11）的 10 条（`marketingCoupon` 7 + `marketing` 3，同样**非** view 抽取 —— 唯一调用方是新建的 `api/marketing.js`），现为 **93** 条；再加同日〈券的信息架构重排〉的 1 条（`marketing.claimBatch` = `/marketing/coupon/claimBatch`，2026-10-11，同样**非** view 抽取 —— 仍是 `api/marketing.js` 的调用方），现为 **94** 条；再加 C3 块 5〈营销块〉B 组 + 续笔（店铺域，2026-10-12）的 4 条（`shop` 组：`follow` / `unfollow` / `followState` / `profile`，同样**非** view 抽取 —— 新建的 `api/shop.js`），现为 **98** 条；再加 C3 块 5〈营销块〉commit 3（国补，2026-10-12）的 9 条（`marketingSubsidy` 6 + `subsidy` 3，同样**非** view 抽取 —— 管理端六条走 `api/marketing.js`，商家侧三条里的两条给 `views/NotifyInbox.vue`、第三条给详情页 / 搜索页的国补标签），现为 **107** 条；再加 C3 块 5〈营销块〉commit 4（秒杀，2026-10-12）的 12 条（`marketingSeckill` 6 + `seckill` 6，同样**非** view 抽取 —— 管理端六条与商家侧四条经 `api/marketing.js` 包一层，`live` 给主页秒杀模块），现为 **119** 条）。
 //
 // ⚠️ 路径里的 `GoodsProductCodeSelect` 是**大写开头**，与后端 `@PostMapping` 逐字一致，
 //    不是笔误 —— 改名会 404。
@@ -286,5 +286,36 @@ export const endpoints = {
     invitations: '/marketing/subsidy/invitations',
     confirm: '/marketing/subsidy/confirm',
     goods: '/marketing/subsidy/goods',
+  },
+  // ⚠️ C3 块 5（营销块 · commit 4 秒杀，2026-10-12）：管理端**秒杀治理** 6 条
+  //    （`AdminSeckillController`，`@RequestMapping("/admin/marketing/seckill")`）。
+  //    同 `marketingCoupon` / `marketingSubsidy` 各款（**非** view 抽取；唯一调用方
+  //    `views/admin/MarketingPage.vue`，经 `api/marketing.js` 包一层）。**单列一组、追加在对象尾**。
+  //    ⚠️ 秒杀是**双向制**：本组 6 条是管理端那一半（邀请 / 审核），商家那一半在下一组。
+  //    ⚠️ 同样**不给角色闸留位置** —— 后端这 6 条也没有角色判据（TD-18）。
+  //    ⚠️ 只有 `invite` / `review` / `stop` 是写端点 ⇒ 只有它们写 `admin_audit`；
+  //    `invitations` / `applications` / `activities` 是读，不留痕。
+  marketingSeckill: {
+    invitations: '/admin/marketing/seckill/invitations',
+    invite: '/admin/marketing/seckill/invite',
+    applications: '/admin/marketing/seckill/applications',
+    review: '/admin/marketing/seckill/review',
+    activities: '/admin/marketing/seckill/activities',
+    stop: '/admin/marketing/seckill/stop',
+  },
+  // ⚠️ C3 块 5（营销块 · commit 4 秒杀，2026-10-12）：**商家侧 + 用户侧** 5 条
+  //    （`SeckillController`，`@RequestMapping("/marketing")`）。
+  //    ⚠️ 与 `marketing`（券）/ `subsidy` **同前缀、不同路径段**（`/marketing/seckill/*`）⇒ 单列一组。
+  //    ⚠️ 前四条各跑 `IdentityGuard.requireSelfOrAdmin(request, MerchantAccount)` ⇒ 传**别人的**
+  //        `MerchantAccount` 是 **403**（不是「查不到」），与 `marketing` / `subsidy` 同形态。
+  //    ⚠️ 第五条 `live` **不挂 IdentityGuard**，但它**也不在 `AUTH_WHITELIST` 里**
+  //        ⇒ 未登录必 401（「登录可见、匿名不可见」）—— 口径逐字同上一组的 `subsidy.goods`。
+  seckill: {
+    invitations: '/marketing/seckill/invitations',
+    respond: '/marketing/seckill/respond',
+    applications: '/marketing/seckill/applications',
+    apply: '/marketing/seckill/apply',
+    activities: '/marketing/seckill/activities',
+    live: '/marketing/seckill/live',
   },
 }

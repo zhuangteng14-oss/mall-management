@@ -167,7 +167,7 @@ public final class AuditActions {
     //    `admin_audit.TargetId` 是 NOT NULL，传 null 会在留痕处炸掉整条链路（TD-20 的教训）。
     // ⚠️ 核销（`coupon.redeem`）**不在这里**：它发生在**结算**（用户端下单），
     //    由 orderAdd 带 couponId 触发、写自己的 OrderId 作 TargetId ⇒ 随 commit 5 一起挂。
-    // ⚠️ 剩下两个子域（秒杀 / 结算用券）的挂钩点各自随 commit 4/5 加
+    // ⚠️ 剩下一个子域（结算用券）的挂钩点随 commit 5 加（秒杀已在 commit 4 挂上，见下）
     //    —— 折扣（commit 2）**刻意零新挂钩点**：它的写口是既有的 `goodsAdd` / `goodsUp`
     //    与通用 `/admin/template/*`，留痕已由那两处自己的动作覆盖，再挂一条就是同一件事记两遍。
 
@@ -201,6 +201,24 @@ public final class AuditActions {
 
     /** 管理员提名商品参加国补 —— {@code POST /admin/marketing/subsidy/nominate}。**新增类** ⇒ {@code BeforeJson} 恒 NULL。 */
     public static final String SUBSIDY_NOMINATE = "subsidy.nominate";
+
+    // ---- 秒杀的三个挂钩点（commit 4，2026-10-12）。域段是 `seckill`（**表名族**，
+    //      也是调用点传的 TargetType 字面量）。⚠️ TargetId 一律传**业务串**
+    //      （邀请 `SKI-…` / 申请 `SKA-…` / 活动 `SKA-…`），不传自增 Id、更不传 null
+    //      —— 同券 / 国补那条的理由（`admin_audit.TargetId` 是 NOT NULL，传 null 会在
+    //      留痕处炸掉整条链路，TD-20）；业务串还与通知的 `TargetId` 同族，两处能对得上。
+    //      ⚠️ **商家的应答 / 报名不在这里**：那一侧是**用户动作**，走 `notification` 回管理端
+    //      （`seckill.responded` / `seckill.application.submitted`），`admin_audit`
+    //      只记**管理员自己**做的事 —— 同国补那条口径。
+
+    /** 管理员邀请商家上秒杀 —— {@code POST /admin/marketing/seckill/invite}。**新增类** ⇒ {@code BeforeJson} 恒 NULL。 */
+    public static final String SECKILL_INVITE = "seckill.invite";
+
+    /** 管理员审核商家秒杀申请（通过 / 驳回）—— {@code POST /admin/marketing/seckill/review}。 */
+    public static final String SECKILL_REVIEW = "seckill.review";
+
+    /** 管理员停用已成立的秒杀活动（逻辑废弃）—— {@code POST /admin/marketing/seckill/stop}。 */
+    public static final String SECKILL_STOP = "seckill.stop";
 
     private AuditActions() {
     }

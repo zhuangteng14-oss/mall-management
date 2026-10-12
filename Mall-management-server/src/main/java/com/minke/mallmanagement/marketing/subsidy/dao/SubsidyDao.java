@@ -26,11 +26,11 @@ import java.util.Map;
  * 浏览器时区转。**「规则在不在期内」的判定必须在 SQL 里做**（{@link #IN_EFFECT}）——
  * 若读成文本再回 Java 判，就会出现「库里的 NOW()」与「JVM 的 NOW()」两个时钟。
  *
- * <p>⚠️ {@link #LOCAL_NOW} = 库时钟（UTC）+ 固定 8 小时，**逐字照抄 {@code CouponDao}** ——
- * {@code StartAt} / {@code EndAt} 是**业务配置的时间**（人按本地时区填的），判据必须跟它同一个钟。
- * 不用 {@code CONVERT_TZ(...,'UTC','Asia/Shanghai')} 那种命名时区写法：它依赖
- * {@code mysql.time_zone_name} 被灌过，默认安装常是空表 ⇒ 返回 {@code NULL}（**不报错**）⇒
- * 整条谓词变 {@code NULL}、谁都不匹配。
+ * <p>⚠️ 「在不在期内」比的是**库时钟 {@code NOW()}**，**不是** {@code NOW() + 8h} ——
+ * 后者在券域只用于**日历**运算，抄到**时刻**判据上会让活动早开 / 晚开 8 小时（详见
+ * {@link #IN_EFFECT} 的修正记录）。也不用 {@code CONVERT_TZ(...,'UTC','Asia/Shanghai')}
+ * 那种命名时区写法：它依赖 {@code mysql.time_zone_name} 被灌过，默认安装常是空表
+ * ⇒ 返回 {@code NULL}（**不报错**）⇒ 整条谓词变 {@code NULL}、谁都不匹配。
  *
  * <h2>【补贴额**不入库**，读侧现算】</h2>
  * {@code subsidy_goods} 里只有「哪件商品挂在哪条规则下」，**没有**补贴金额列。金额由
@@ -63,21 +63,30 @@ public class SubsidyDao {
                     + "DATE_FORMAT(sg.updated_at, '%Y-%m-%d %H:%i:%s') AS updated_at ";
 
     /**
-     * 本地墙钟 = **库时钟（UTC）+ 固定 8 小时**。逐字照抄 {@code CouponDao.LOCAL_NOW}
-     * （那一处的长注释解释了为什么不用命名时区），理由见类注释。
-     */
-    private static final String LOCAL_NOW = "(NOW() + INTERVAL 8 HOUR)";
-
-    /**
      * 规则**在期内**的判据（{@link #selectRulesInEffect} 与 {@link #selectSubsidyGoods} 共用）。
      *
      * <p>⚠️ {@code StartAt} / {@code EndAt} 为 {@code NULL} = **不限**（建表默认值就是 {@code NULL}）
      * —— 与「{@code Cap = 0} = 不封顶」同一个口径：**没填 ≠ 填了 0**。
+     *
+     * <h2>【⚠️ 2026-10-12 修正：比的是 {@code NOW()}，**不是** {@code NOW() + 8h}】</h2>
+     * 本判据最初逐字照抄了 {@code CouponDao.LOCAL_NOW}，那是**抄错了地方**——
+     * {@code LOCAL_NOW}（{@code NOW() + INTERVAL 8 HOUR}）在券域只用于**日历**运算
+     * （「本周」边界 / 「还剩几天」），因为那些要的是**本地日期**；
+     * 而 {@code StartAt} / {@code EndAt} 是**时刻**，写侧进库的就是 UTC 文本
+     * （前端 {@code MarketingPage.vue} 的 {@code toSqlTime} 把 {@code datetime-local} 反算成 UTC），
+     * 券域自己的窗口谓词（{@code CouponDao.selectClaimable} 的 {@code StartAt <= NOW()} /
+     * {@code EndAt > NOW()}）比的也正是**库时钟 {@code NOW()}**。
+     *
+     * <p>在 a3 库上实测（2026-10-12）：{@code @@system_time_zone='UTC'}、
+     * {@code NOW()='2026-10-12 09:16:37'}、{@code NOW()+8h='2026-10-12 17:16:37'}，
+     * 而 JVM 本地钟同为 {@code 17:16:37}。用 {@code +8h} 比 ⇒ 一个「今天 23:00 到期」的规则
+     * （库内 {@code 15:00}）会被判成 {@code 15:00 >= 17:16} **不成立** ⇒ 规则建好了却**立刻不在期**，
+     * 而反方向（开始时刻）会**早开 8 小时**。两个错都**不报错**，只是标签该出不出的。
      */
     private static final String IN_EFFECT =
             "r.Status = 'active' "
-                    + "AND (r.StartAt IS NULL OR r.StartAt <= " + LOCAL_NOW + ") "
-                    + "AND (r.EndAt IS NULL OR r.EndAt >= " + LOCAL_NOW + ")";
+                    + "AND (r.StartAt IS NULL OR r.StartAt <= NOW()) "
+                    + "AND (r.EndAt IS NULL OR r.EndAt > NOW())";
 
     private final JdbcClient jdbc;
 

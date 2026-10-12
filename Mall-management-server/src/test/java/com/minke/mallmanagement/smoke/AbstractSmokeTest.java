@@ -49,6 +49,8 @@ import com.minke.mallmanagement.shop.profile.service.ShopProfileService;
 import com.minke.mallmanagement.marketing.discount.service.DiscountLimitService;
 import com.minke.mallmanagement.marketing.subsidy.dao.SubsidyDao;
 import com.minke.mallmanagement.marketing.subsidy.service.SubsidyService;
+import com.minke.mallmanagement.marketing.seckill.dao.SeckillDao;
+import com.minke.mallmanagement.marketing.seckill.service.SeckillService;
 import org.junit.jupiter.api.BeforeEach;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
@@ -250,7 +252,14 @@ import static org.mockito.Mockito.when;
         // 切片上下文就会因为「找不到 SubsidyService」而**启动失败**，同前十笔）。
         // ⚠️ 依赖链三层：Service → Dao；两个 Controller 另各吃一个**已在清单里**的 bean
         //    （`NotificationService` 块 1、`AuditService` 块 1）⇒ 这两条不必重复登记。
-        SubsidyDao.class, SubsidyService.class})
+        SubsidyDao.class, SubsidyService.class,
+        // C3 块 5〈秒杀〉（2026-10-12，commit 4）：**两个**新 Controller（`AdminSeckillController`
+        // + `SeckillController`）+ 一个 @Service（`SeckillService`）+ 一个 @Dao（`SeckillDao`）——
+        // **第十二次同一处地雷**（`@WebMvcTest` 无参会加载全部 @Controller，新控制器一进来，
+        // 切片上下文就会因为「找不到 SeckillService」而**启动失败**，同前十一笔）。
+        // ⚠️ 依赖链三层：Service → Dao；两个 Controller 另各吃一个**已在清单里**的 bean
+        //    （`NotificationService` 块 1、`AuditService` 块 1）⇒ 这两条不必重复登记。
+        SeckillDao.class, SeckillService.class})
 public abstract class AbstractSmokeTest {
 
     @Autowired

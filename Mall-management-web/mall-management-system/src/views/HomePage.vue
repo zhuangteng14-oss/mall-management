@@ -96,19 +96,19 @@
            证据 `docs/agent/evidence/c3-block5/{before,after}-home-quickbar.png`。
            ⚠️ `scrollToTickets` **保留**（`:32` 二级导航「领券中心」仍在用）—— 删的是这一块，不是那条跳转。 -->
 
-      <!-- ── 限时秒杀（预留位，稿 `:807-814`）──
-           ⚠️ 倒计时**不写死**：稿 `:966` 自己就注明了「真接进项目时应该用接口给的活动结束时间，
-              **不要在这里写死**」⇒ 三格落成 `--`，说明写进本区块的 `title`。
-           ⚠️ `.flash-g` 是稿的 JS 挂载点（`:813`，稿 markup 里就是**空 div**），本仓无活动接口
-              ⇒ 保持空容器 + 一行占位说明（空容器高度为 0，会「落了却看不见」）。 -->
-      <section class="flash" data-slot="预留 · 秒杀位" title="预留 · 秒杀位（老稿 主页改造.html:807）· 无活动接口，倒计时不写死（稿 :966 自注）· 归属待定 C3〈待定〉">
+      <!-- ── 限时秒杀（**C3 块 5 · commit 4 转真**，2026-10-12；原为稿 `:807-814` 的预留位）──
+           ⚠️ **只在拉到活动时才画**：`/marketing/seckill/live` **不在白名单**，匿名发它必 401、`handleUnauthorized` 会把公开页整体踢去登录页 ⇒ 未登录整块不出现，`data-slot="预留 · 秒杀位"` 随之撤掉（**收口时 `slot-registry.md` 那条要改判**）。倒计时读**后端的 `EndAt`**（`DATE_FORMAT` 出的是 **UTC** 文本 ⇒ 解析要补 `Z`；稿 `:966` 自注「不要写死」即此）—— `Stage` 由后端按**库时钟**现算：`live` 显秒杀价、`upcoming` 显「活动未开启」。 -->
+      <section v-if="flashRows.length" class="flash" title="C3 块 5〈营销块〉commit 4：读 /marketing/seckill/live（封装 src/api/marketing.js 的 seckillLive）· 后端已挡「已结束 / 已停用 / 商品下架」· Stage 由后端按库时钟现算 ⇒ 原 data-slot「预留 · 秒杀位」退场">
         <div class="flash-h">
           <h2>限时秒杀</h2>
-          <span class="cd">距结束 <b>--</b>:<b>--</b>:<b>--</b></span>
-          <button type="button" class="more" disabled title="预留 · 全部秒杀（无落点：秒杀位是预留位）">全部秒杀 →</button>
+          <span class="cd">{{ flashCdLabel }} <b>{{ flashCd.h }}</b>:<b>{{ flashCd.m }}</b>:<b>{{ flashCd.s }}</b></span>
+          <router-link class="more" to="/seckill">全部秒杀 →</router-link>
         </div>
         <div class="flash-g">
-          <p class="empty-tip">秒杀位预留 · 待接入活动接口后填充</p>
+          <router-link v-for="r in flashRows" :key="r.ActivityId" class="flash-c" :to="flashLink(r)" @click="onCardNav">
+            <img v-if="r.GoodImg" :src="r.GoodImg" :alt="r.Name || r.GoodName" />
+            <span class="fc-nm">{{ r.Name || r.GoodName }}</span><span v-if="r.Stage === 'live'" class="fc-pr">¥{{ flashMoney(r.SeckillPrice) }}</span><span v-else class="fc-soon">活动未开启</span>
+          </router-link>
         </div>
       </section>
 
@@ -281,7 +281,7 @@
 <script setup>
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { http, handleApiError } from '../api/http'
-import { endpoints } from '../api/endpoints'; import { getUsername } from '../api/auth'; import { coupons, claim, claimBatch } from '../api/marketing'; import { truthy, couponFace, couponName, couponLine } from '../config/coupon-format'; import ProductCard from '../components/ProductCard.vue'   // ⚠️ 四条 import **同行**（C3 块 5 · commit 1，2026-10-11；同日「券的信息架构重排」又加两处）—— 本文件 `:119` / `:242` / `:262` 等多处被按行号引，**能省一行就省一行**（同 `ProductPage.vue:426` 那条的做法）。⚠️ `myCoupons` 已随右栏券包一并**删掉**，格式化三件套改从 `config/coupon-format.js` 取（主页与券包弹窗**共享**，见那个文件头）。⚠️ **A 组 · A7 后半**（2026-10-12）：券卡原先只有「金额 / 门槛 / NEW」三样，用户点名**缺券名 + 券类型** ⇒ 追加 `couponName`（券名）与 `couponLine`（类型·门槛合成一行，内部拿 `couponCond` 拼），仍从同一份 `coupon-format.js` 取。⚠️ `couponCond` 随之**从本页 import 里去掉**（券包弹窗仍直接用）；本页若还要裸用它，`eslint no-unused-vars` 会当场红
+import { endpoints } from '../api/endpoints'; import { getUsername } from '../api/auth'; import { coupons, claim, claimBatch, seckillLive } from '../api/marketing'; import { truthy, couponFace, couponName, couponLine } from '../config/coupon-format'; import ProductCard from '../components/ProductCard.vue'   // ⚠️ 四条 import **同行**（C3 块 5 · commit 1，2026-10-11；同日「券的信息架构重排」又加两处）—— 本文件 `:119` / `:242` / `:262` 等多处被按行号引，**能省一行就省一行**（同 `ProductPage.vue:426` 那条的做法）。⚠️ `myCoupons` 已随右栏券包一并**删掉**，格式化三件套改从 `config/coupon-format.js` 取（主页与券包弹窗**共享**，见那个文件头）。⚠️ **A 组 · A7 后半**（2026-10-12）：券卡原先只有「金额 / 门槛 / NEW」三样，用户点名**缺券名 + 券类型** ⇒ 追加 `couponName`（券名）与 `couponLine`（类型·门槛合成一行，内部拿 `couponCond` 拼），仍从同一份 `coupon-format.js` 取。⚠️ `couponCond` 随之**从本页 import 里去掉**（券包弹窗仍直接用）；本页若还要裸用它，`eslint no-unused-vars` 会当场红
 
 // ── 未登录可逛公开面（2026-10-06 用户改判 2，登记见 progress.md §5-AG (13)）────────────
 // 本页原有三条「未登录 ⇒ 弹登录提示」拦截（goSearch / searchByType / toGoodsDetail）与一条
@@ -545,6 +545,68 @@ onMounted(async () => {
   if (!couponAccount.value) return
   // ⚠️ 只剩一个请求了 —— 「我的券包」已搬去用户中心（那边的入口自己拉摘要，弹窗开窗时再拉明细）。
   await loadCoupons(couponAccount.value)
+})
+
+// ── 限时秒杀（C3 块 5 · commit 4，2026-10-12）—— 模板在 `flash` section 那一段 ─────────
+// ⚠️ 取数走**本段自己的** `onMounted(loadFlash)`（Vue 允许注册多次）—— 本段的**每一个新增行都落在
+//    文件尾**，不动既有行号；本笔只让 `<script>` 闭合行与 `<style>` 整体后移，收口时按
+//    `_work/b5-repoint.md` 一并重指。
+// ⚠️ **未登录不发**：`/marketing/seckill/live` 不在白名单，匿名发它必 401，而 `http.js` 的
+//    `handleUnauthorized` 会把公开页整体踢去登录页 —— 与 `loadCoupons` 同一条「有身份才取数」。
+// ⚠️ **`signup` 那一档不画**（报名期对买家还不存在，后端 `SeckillDao.stage` 的注释同此）；
+//    条数**自己截到 4**（`.flash-g` 是 `repeat(4, 1fr)`），向端点要 8 是为了扣掉 `signup` 后仍够 4。
+const flashRows = ref([])
+const flashLeft = ref(0)
+let flashTimer = null
+/** UTC 文本 → 毫秒。⚠️ `DATE_FORMAT` 出的是**库时钟（UTC）**的裸文本，不补 `Z` 会被当**本地时间**解析。 */
+const flashTs = (s) => {
+  const d = new Date(String(s == null ? '' : s).replace(' ', 'T') + 'Z')
+  return isNaN(d.getTime()) ? null : d.getTime()
+}
+/** 倒计时瞄「**最近要跨过的那一刻**」：有进行中的就取最早 `EndAt`，否则取最早的 `StartAt`（未开启）。 */
+const flashTarget = computed(() => {
+  const live = flashRows.value.filter((r) => r.Stage === 'live')
+  const key = live.length ? 'EndAt' : 'StartAt'
+  const pick = live.length ? live : flashRows.value.filter((r) => r.Stage === 'upcoming')
+  const ts = pick.map((r) => flashTs(r[key])).filter((n) => n !== null)
+  return ts.length ? { at: Math.min(...ts), label: live.length ? '距结束' : '距开始' } : null
+})
+const flashCdLabel = computed(() => (flashTarget.value ? flashTarget.value.label : '距结束'))
+const flashCd = computed(() => {
+  const t = Math.max(0, Math.round(flashLeft.value / 1000))
+  const p = (n) => String(n).padStart(2, '0')
+  return { h: p(Math.floor(t / 3600)), m: p(Math.floor((t % 3600) / 60)), s: p(t % 60) }
+})
+const flashMoney = (v) => Number(v || 0).toFixed(2)
+/** 去商品页 —— `query` 四件套与 `ProductCard.vue` 逐字同序（那边是 4 个，`ProductPage` 的 7 个是另一回事）。 */
+const flashLink = (r) => ({
+  path: '/product',
+  query: { MerchantId: r.MerchantAccount, GoodName: r.Name || r.GoodName, GoodType: r.GoodType, Id: r.GoodsId },
+})
+const tickFlash = () => {
+  const t = flashTarget.value
+  flashLeft.value = t ? t.at - Date.now() : 0
+}
+const loadFlash = async () => {
+  if (!couponAccount.value) return
+  try {
+    const data = await seckillLive({ limit: 8 })
+    flashRows.value =
+      data && data.success && Array.isArray(data.list)
+        ? data.list.filter((r) => r.Stage !== 'signup').slice(0, 4)
+        : []
+  } catch (e) {
+    flashRows.value = []
+  }
+  if (flashRows.value.length) {
+    tickFlash()
+    flashTimer = setInterval(tickFlash, 1000)
+  }
+}
+// ⚠️ 第二个 `onUnmounted`（同 `onMounted`：Vue 允许注册多次）—— 并进 `:391` 那个就又多一个插入点。
+onMounted(loadFlash)
+onUnmounted(() => {
+  if (flashTimer) clearInterval(flashTimer)
 })
 </script>
 
@@ -904,10 +966,8 @@ button {
   grid-template-columns: repeat(4, 1fr);
   gap: var(--s5);
 }
-/* 空容器（本仓无活动接口）里那行说明要铺满整栅格，不然它只占第 1 列。 */
-.flash-g .empty-tip {
-  grid-column: 1 / -1;
-}
+/* ⚠️ `.flash-g .empty-tip`（空占位那行说明）**已删**：commit 4 转真后 `.flash-g` 里只有真卡片，
+   那句「秒杀位预留 · 待接入活动接口后填充」随之退场。连规则一起删而不只删模板 —— 死样式比死标记更难发现。 */
 
 /* ── 领券中心（**块 5**；2026-10-11「券的信息架构重排」后**只剩这一栏**；稿 `:632-658`）──
    ⚠️ 稿的 markup 里这条**本来就是空 section**（`:817`），3 张券由稿的 JS 塞 mock（`TICKETS`）
@@ -1256,4 +1316,15 @@ button {
   z-index: 9;
   background: var(--bg);
 }
+
+/* ── 限时秒杀模块里的卡片（C3 块 5 · commit 4 **转真**，2026-10-12）────────────────────
+   ⚠️ 一律落 `<style>` **尾部**（理由同上一段：全仓引用本页的行号都在更前面）。
+   ⚠️ 价格吃 `--accent`（朱砂只管价格 / 促销 / 未读，`tokens.css:34-42`）—— 本模块**没有**第二处
+      抢这个色：条数、倒计时都是中性灰，「活动未开启」也只是灰字（它**不是**警示，是状态）。 */
+.flash-h .more { text-decoration: none; } /* 它现在是 `<router-link>`（原是一颗 `disabled` 按钮）。 */
+.flash-c { display: flex; flex-direction: column; gap: var(--s2); text-decoration: none; color: inherit; }
+.flash-c img { width: 100%; aspect-ratio: 4 / 3; object-fit: cover; border-radius: var(--r1); background: var(--cin-100); }
+.flash-c .fc-nm { font-size: var(--fs-xs); color: var(--ink-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.flash-c .fc-pr { font-size: var(--fs-md); color: var(--accent); font-variant-numeric: tabular-nums; }
+.flash-c .fc-soon { font-size: var(--fs-xs); color: var(--ink-3); }
 </style>

@@ -4,7 +4,8 @@
          改前这里**刻意没有 tab 栏**：本页当时只有「券」一个子域，摆一个只有一项的 tab 栏
          等于承诺三个不存在的页面（同 `admin-nav.js` 不给占位页挂图标的那条口径）。
          现在折扣落地 ⇒ 「多块才上 tab」的条件满足了，才长出这一条。
-         ⚠️ **只列已落地的三枚**：秒杀仍是计划中的子域，**不预摆灰 tab**（同一条口径）。 -->
+         ⚠️ **只列已落地的四枚**：commit 4（秒杀）落地后补齐 —— 至此块 5 的四个子域
+         （券 / 折扣 / 国补 / 秒杀）全在，**没有预摆的灰 tab**（同一条口径）。 -->
     <nav class="a-tabs" role="tablist">
       <button
         v-for="t in TABS" :key="t.k" type="button" role="tab" class="a-tab"
@@ -401,7 +402,7 @@
          ⚠️ 提名之后**用户端什么都看不到**，直到商家点头（`subsidy_goods.Status='approved'`）——
              这一条必须**写在页面上**（下面「提名商品」那栏的 `a-h2n` 副标题里），
              否则「提了名怎么没生效」会变成反复问的问题。 -->
-    <template v-else>
+    <template v-else-if="tab === 'subsidy'">
       <h2 class="a-h2">
         <IconGlyph name="marketing" />国补规则
         <span class="a-h2n">按类目配补贴比例与单笔上限；提名商品后需商家在消息中心确认</span>
@@ -509,6 +510,174 @@
         <p v-else class="a-empty">还没有提名记录</p>
       </div>
     </template>
+
+    <!-- ══ ④ 秒杀（C3 块 5 · commit 4）════════════════════════════════════════════
+         **双向制**（`c3-modules.md` §9.1）：两条路径的**发起方与决定方相反** ——
+           · 路径 A 邀请：本页发起 → **商家**在消息中心应答（`NotifyInbox.vue` 里就地同意 / 拒绝）；
+           · 路径 B 申请：**商家**报名 → 本页审核（通过 / 驳回）。
+         ⚠️ **没有「管理端单向指定」** —— 那会让商家在不知情的情况下被挂上秒杀价。
+         ⚠️ 两条路径「成立」时各生成一行活动；**用户端只读活动表**（下面第三张表就是它）。
+         ⚠️ 时间一律经 `toSqlTime` 反算成 UTC 再发（文件头那条时区口径）—— 活动表的时间列是**时刻**，
+             后端判据比的是**库时钟 `NOW()`**，填错方向会早开 / 晚开 8 小时且**不报错**。 -->
+    <template v-else>
+      <h2 class="a-h2">
+        <IconGlyph name="marketing" />邀请商家上秒杀
+        <span class="a-h2n">路径 A：本页发起 → 商家在自己的消息中心同意 / 拒绝；同意后才成立活动</span>
+      </h2>
+
+      <form class="a-filters" @submit.prevent="doInvite">
+        <label class="a-f a-f-wide">
+          <span>商品 *</span>
+          <select v-model="inv.GoodsId">
+            <option value="">请选择</option>
+            <option v-for="g in pickGoods" :key="g.Id" :value="g.Id">
+              {{ g.GoodName }}（¥{{ fmtMoney(g.Price) }} · {{ g.UserName || '商家' }}）
+            </option>
+          </select>
+        </label>
+        <label class="a-f">
+          <span>秒杀价(元) *</span>
+          <input v-model.trim="inv.SeckillPrice" type="number" min="0" step="0.01" placeholder="须低于原价">
+        </label>
+        <label class="a-f">
+          <span>限量(件)</span>
+          <input v-model.trim="inv.Quantity" type="number" min="0" step="1" placeholder="0 = 不限量">
+        </label>
+        <label class="a-f">
+          <span>报名截止</span>
+          <input v-model="inv.ApplyEndAt" type="datetime-local">
+        </label>
+        <label class="a-f">
+          <span>开始</span>
+          <input v-model="inv.StartAt" type="datetime-local">
+        </label>
+        <label class="a-f">
+          <span>结束</span>
+          <input v-model="inv.EndAt" type="datetime-local">
+        </label>
+        <button type="submit" class="a-btn" :disabled="skBusy">发起邀请</button>
+      </form>
+
+      <div class="a-card">
+        <table v-if="skInvitations.length" class="a-tbl">
+          <thead>
+            <tr>
+              <th>商品</th><th>商家</th><th>原价</th><th>秒杀价</th><th>限量</th>
+              <th>活动时段</th><th>状态</th><th>商家回复</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="row in skInvitations" :key="row.Id">
+              <td>{{ row.GoodName || ('#' + row.GoodsId) }}</td>
+              <td class="a-mono">{{ row.MerchantAccount }}</td>
+              <td class="a-mono">¥{{ fmtMoney(row.OriginalPrice) }}</td>
+              <td class="a-mono">¥{{ fmtMoney(row.SeckillPrice) }}</td>
+              <td class="a-mono">{{ row.Quantity > 0 ? row.Quantity : '不限' }}</td>
+              <td class="a-mono">{{ fmtRange(row.StartAt, row.EndAt) }}</td>
+              <td><span class="a-chip" :class="skChip(row.Status, INV_LABELS)">{{ skLabel(row.Status, INV_LABELS) }}</span></td>
+              <td class="a-note">{{ row.Reason || '—' }}</td>
+            </tr>
+          </tbody>
+        </table>
+        <p v-else class="a-empty">还没有秒杀邀请 —— 先在上面挑一件商品发起</p>
+      </div>
+
+      <h2 class="a-h2">
+        <IconGlyph name="marketing" />审核商家报名
+        <span class="a-h2n">路径 B：商家报名只带商品与价格；**活动时段由本页在通过时**给出（缺时段不收）</span>
+      </h2>
+      <form class="a-filters" @submit.prevent="doReview(true)">
+        <label class="a-f a-f-wide">
+          <span>待审申请 *</span>
+          <select v-model="rev.Id">
+            <option value="">请选择</option>
+            <option v-for="row in pendingApplications" :key="row.Id" :value="row.Id">
+              {{ row.GoodName || ('#' + row.GoodsId) }}（{{ row.MerchantAccount }} · ¥{{ fmtMoney(row.SeckillPrice) }}）
+            </option>
+          </select>
+        </label>
+        <label class="a-f a-f-wide">
+          <span>活动名</span>
+          <input v-model.trim="rev.Name" type="text" placeholder="留空 = 用商品名">
+        </label>
+        <label class="a-f">
+          <span>报名截止</span>
+          <input v-model="rev.ApplyEndAt" type="datetime-local">
+        </label>
+        <label class="a-f">
+          <span>开始 *</span>
+          <input v-model="rev.StartAt" type="datetime-local">
+        </label>
+        <label class="a-f">
+          <span>结束 *</span>
+          <input v-model="rev.EndAt" type="datetime-local">
+        </label>
+        <label class="a-f a-f-wide">
+          <span>驳回理由</span>
+          <input v-model.trim="rev.Reason" type="text" placeholder="仅驳回时必填">
+        </label>
+        <button type="submit" class="a-btn" :disabled="skBusy">通过</button>
+        <button type="button" class="a-btn-s" :disabled="skBusy" @click="doReview(false)">驳回</button>
+      </form>
+
+      <div class="a-card">
+        <table v-if="skApplications.length" class="a-tbl">
+          <thead>
+            <tr>
+              <th>商品</th><th>商家</th><th>原价</th><th>报名价</th><th>限量</th>
+              <th>状态</th><th>回复 / 理由</th><th>提交时间</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="row in skApplications" :key="row.Id">
+              <td>{{ row.GoodName || ('#' + row.GoodsId) }}</td>
+              <td class="a-mono">{{ row.MerchantAccount }}</td>
+              <td class="a-mono">¥{{ fmtMoney(row.OriginalPrice) }}</td>
+              <td class="a-mono">¥{{ fmtMoney(row.SeckillPrice) }}</td>
+              <td class="a-mono">{{ row.Quantity > 0 ? row.Quantity : '不限' }}</td>
+              <td><span class="a-chip" :class="skChip(row.Status, APP_LABELS)">{{ skLabel(row.Status, APP_LABELS) }}</span></td>
+              <td class="a-note">{{ row.Reason || '—' }}</td>
+              <td class="a-mono">{{ toLocal(row.created_at) }}</td>
+            </tr>
+          </tbody>
+        </table>
+        <p v-else class="a-empty">还没有商家报名</p>
+      </div>
+
+      <h2 class="a-h2">
+        <IconGlyph name="marketing" />已成立的活动
+        <span class="a-h2n">两条路径成立时各生成一行 —— 用户端 / 主页 / 秒杀页**只读这张表**</span>
+      </h2>
+      <div class="a-card">
+        <table v-if="skActivities.length" class="a-tbl">
+          <thead>
+            <tr>
+              <th>活动</th><th>商品</th><th>商家</th><th>秒杀价</th><th>库存</th>
+              <th>时段</th><th>阶段</th><th>来源</th><th>状态</th><th></th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="row in skActivities" :key="row.Id">
+              <td class="a-mono">{{ row.ActivityId }}</td>
+              <td>{{ row.Name }}</td>
+              <td class="a-mono">{{ row.MerchantAccount }}</td>
+              <td class="a-mono">¥{{ fmtMoney(row.SeckillPrice) }}</td>
+              <td class="a-mono">{{ row.TotalStock > 0 ? (row.SoldStock + ' / ' + row.TotalStock) : (row.SoldStock + ' / 不限') }}</td>
+              <td class="a-mono">{{ fmtRange(row.StartAt, row.EndAt) }}</td>
+              <td><span class="a-chip" :class="stageChip(row.Stage)">{{ skLabel(row.Stage, STAGE_LABELS) }}</span></td>
+              <td class="a-note">{{ skLabel(row.SourceKind, SRC_LABELS) }}</td>
+              <td><span class="a-chip" :class="row.Status === 'active' ? 'ok' : 'off'">
+                {{ row.Status === 'active' ? '有效' : '已停用' }}</span></td>
+              <td>
+                <button v-if="row.Status === 'active'" type="button" class="a-btn-s"
+                  :disabled="skBusy" @click="doStopActivity(row)">停用</button>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+        <p v-else class="a-empty">还没有成立的活动 —— 商家应答邀请、或报名被通过后才会出现</p>
+      </div>
+    </template>
   </section>
 </template>
 
@@ -540,6 +709,8 @@ import {
   couponGrants, couponGrant, couponStats,
   subsidyRuleList, subsidyRuleCreate, subsidyRuleStop, subsidyRuleActivate,
   subsidyNominate, subsidyNominations,
+  seckillInvitationList, seckillInvite, seckillApplicationList, seckillReview,
+  seckillActivityList, seckillStop,
 } from '../../api/marketing'
 import { catalogCategories, catalogVisibleGoods } from '../../api/admin'
 import {
@@ -553,11 +724,12 @@ import IconGlyph from '../../components/ui/IconGlyph.vue'
 const TREND_DAYS = 14
 
 // ── 页内 tab（C3 块 5〈折扣〉，2026-10-12）────────────────────────────────────
-// ⚠️ 只列**已落地**的：秒杀还没做 ⇒ 不预摆灰 tab（见模板里那条注释）。
+// ⚠️ 只列**已落地**的：四枚都在了 ⇒ 不预摆灰 tab（见模板里那条注释）。
 const TABS = [
   { k: 'coupon', label: '券' },
   { k: 'discount', label: '折扣' },
   { k: 'subsidy', label: '国补' },
+  { k: 'seckill', label: '秒杀' },
 ]
 const tab = ref('coupon')
 
@@ -664,10 +836,11 @@ async function setRuleEnabled(row, on) {
 const stopRule = (row) => setRuleEnabled(row, false)
 const activateRule = (row) => setRuleEnabled(row, true)
 
-/** 切到折扣 / 国补 tab 才拉数（不在 onMounted 里白白多打几条请求）。 */
+/** 切到折扣 / 国补 / 秒杀 tab 才拉数（不在 onMounted 里白白多打几条请求）。 */
 watch(tab, (v) => {
   if (v === 'discount') { loadLimits(); loadRules() }
   if (v === 'subsidy') loadSubsidy()
+  if (v === 'seckill') loadSeckill()
 })
 
 // ── 国补子域（C3 块 5 · commit 3）：规则 / 提名 ─────────────────────────────────
@@ -836,6 +1009,185 @@ async function doNominate() {
     flash.text = '提名失败：' + ((e && e.message) || '未知原因')
   } finally {
     sbBusy.value = false
+  }
+}
+
+// ── 秒杀子域（C3 块 5 · commit 4，2026-10-12）────────────────────────────────────
+// **双向制**：本页有两件事要做 —— ① 邀请（等商家应答）② 审核商家的报名（本页裁决）。
+// ⚠️ 本页**不复刻**任何后端判据：秒杀价须低于原价、限量语义、时段不重叠、阶段（`Stage`）现算，
+//    全部由后端说了算（同国补那条「复刻出来的第二份一定会在某次改动里跑偏」）。
+const skInvitations = ref([])
+const skApplications = ref([])
+const skActivities = ref([])
+const skBusy = ref(false)
+/** 邀请表单。⚠️ **没有「商家」输入框** —— 商家由所选商品**决定**（`MerchantId`），
+ *  这也是后端那条归属校验（「这件商品不属于该商家」）不会被人为踩中的原因。 */
+const inv = reactive({ GoodsId: '', SeckillPrice: '', Quantity: '', ApplyEndAt: '', StartAt: '', EndAt: '' })
+/** 审核表单 —— 与邀请表单**分开**：一条是「我发起」，一条是「我裁决」，混在一个 reactive 里会串味。 */
+const rev = reactive({ Id: '', Name: '', ApplyEndAt: '', StartAt: '', EndAt: '', Reason: '' })
+
+/** 只有 `submitted` 的申请能审（后端也拦；这里前置拦，省得白点一次再吃回一条错）。 */
+const pendingApplications = computed(() => skApplications.value.filter((row) => row.Status === 'submitted'))
+
+/** 三组状态词典 + 一个取词函数（同一张表里三套状态，各写各的 `v-if` 链最容易抄错）。 */
+const INV_LABELS = { invited: '待商家应答', accepted: '商家已同意', declined: '商家已拒绝' }
+const APP_LABELS = { submitted: '待审核', approved: '已通过', rejected: '已驳回' }
+const STAGE_LABELS = { signup: '报名中', upcoming: '未开启', live: '进行中', ended: '已结束' }
+const SRC_LABELS = { invitation: '平台邀请', application: '商家报名' }
+const skLabel = (v, dict) => dict[v] || v || '—'
+
+/** 状态 → chip 色档。`wait` 那一档不抢 `--accent`（那色只管价格 / 促销 / 未读）。 */
+const OK_KEYS = ['accepted', 'approved', 'live']
+const OFF_KEYS = ['declined', 'rejected', 'ended', 'stopped']
+function skChip(v, dict) {
+  if (!dict[v]) return 'wait'
+  if (OK_KEYS.includes(v)) return 'ok'
+  if (OFF_KEYS.includes(v)) return 'off'
+  return 'wait'
+}
+const stageChip = (v) => (v === 'live' ? 'ok' : v === 'ended' ? 'off' : 'wait')
+
+async function loadSeckillInvitations() {
+  try {
+    const data = await seckillInvitationList({ limit: 200 })
+    skInvitations.value = data && data.success && Array.isArray(data.list) ? data.list : []
+  } catch (e) {
+    skInvitations.value = []
+    flash.kind = 'bad'
+    flash.text = '秒杀邀请读取失败：' + ((e && e.message) || '未知原因')
+  }
+}
+
+async function loadSeckillApplications() {
+  try {
+    const data = await seckillApplicationList({ limit: 200 })
+    skApplications.value = data && data.success && Array.isArray(data.list) ? data.list : []
+  } catch (e) {
+    skApplications.value = []
+    flash.kind = 'bad'
+    flash.text = '秒杀申请读取失败：' + ((e && e.message) || '未知原因')
+  }
+}
+
+async function loadSeckillActivities() {
+  try {
+    const data = await seckillActivityList({ limit: 200 })
+    skActivities.value = data && data.success && Array.isArray(data.list) ? data.list : []
+  } catch (e) {
+    skActivities.value = []
+    flash.kind = 'bad'
+    flash.text = '秒杀活动读取失败：' + ((e && e.message) || '未知原因')
+  }
+}
+
+/** 切到秒杀 tab 的入口：三条 + 商品下拉**并发**（串行的话最慢的那条决定整体观感）。 */
+async function loadSeckill() {
+  await Promise.all([
+    loadSeckillInvitations(), loadSeckillApplications(), loadSeckillActivities(), loadGoodsOptions(),
+  ])
+}
+
+/** 所选商品的 `MerchantId` —— 邀请的收件人就是它（见 `inv` 那条注释）。 */
+function pickedMerchant(goodsId) {
+  const hit = pickGoods.value.find((g) => String(g.Id) === String(goodsId))
+  return hit ? String(hit.MerchantId || '') : ''
+}
+
+/** 发起邀请 —— 三个 `datetime-local` 都经 `toSqlTime` 反算成 UTC（文件头时区口径）。 */
+async function doInvite() {
+  if (!inv.GoodsId) { flash.kind = 'bad'; flash.text = '请先选商品'; return }
+  if (!inv.SeckillPrice) { flash.kind = 'bad'; flash.text = '秒杀价不能为空'; return }
+  const merchant = pickedMerchant(inv.GoodsId)
+  if (!merchant) { flash.kind = 'bad'; flash.text = '这件商品没有所属商家，无法邀请'; return }
+  skBusy.value = true
+  flash.text = ''
+  try {
+    const data = await seckillInvite({
+      MerchantAccount: merchant,
+      GoodsId: inv.GoodsId,
+      SeckillPrice: inv.SeckillPrice,
+      // `Quantity` 留空 ⇒ 发 0 = 不限量（与后端 `parseDouble(quantityRaw, 0d)` 同解）。
+      Quantity: inv.Quantity === '' ? 0 : inv.Quantity,
+      ApplyEndAt: toSqlTime(inv.ApplyEndAt, true),
+      StartAt: toSqlTime(inv.StartAt, false),
+      EndAt: toSqlTime(inv.EndAt, true),
+    })
+    if (!data || !data.success) {
+      flash.kind = 'bad'
+      flash.text = '邀请失败：' + ((data && data.msg) || '未知原因')
+      return
+    }
+    flash.kind = 'ok'
+    flash.text = `已邀请 ${merchant} —— 等它在消息中心应答（${data.InvitationId}）`
+    Object.assign(inv, { GoodsId: '', SeckillPrice: '', Quantity: '', ApplyEndAt: '', StartAt: '', EndAt: '' })
+    await loadSeckillInvitations()
+  } catch (e) {
+    flash.kind = 'bad'
+    flash.text = '邀请失败：' + ((e && e.message) || '未知原因')
+  } finally {
+    skBusy.value = false
+  }
+}
+
+/** 审核（通过 / 驳回）。⚠️ 通过时**开始 / 结束必填** —— 后端不给补，缺了直接拒。 */
+async function doReview(approve) {
+  if (!rev.Id) { flash.kind = 'bad'; flash.text = '请先选一条待审申请'; return }
+  if (approve && (!rev.StartAt || !rev.EndAt)) {
+    flash.kind = 'bad'
+    flash.text = '通过必须给出开始与结束时间'
+    return
+  }
+  if (!approve && !rev.Reason) { flash.kind = 'bad'; flash.text = '驳回必须填写理由'; return }
+  skBusy.value = true
+  flash.text = ''
+  try {
+    const data = await seckillReview({
+      Id: rev.Id,
+      Approve: approve,
+      Reason: rev.Reason,
+      Name: rev.Name,
+      ApplyEndAt: toSqlTime(rev.ApplyEndAt, true),
+      StartAt: toSqlTime(rev.StartAt, false),
+      EndAt: toSqlTime(rev.EndAt, true),
+    })
+    if (!data || !data.success) {
+      flash.kind = 'bad'
+      flash.text = (approve ? '通过失败：' : '驳回失败：') + ((data && data.msg) || '未知原因')
+      return
+    }
+    flash.kind = 'ok'
+    flash.text = approve
+      ? `已通过，活动已成立（${data.ActivityId || ''}）`
+      : '已驳回'
+    Object.assign(rev, { Id: '', Name: '', ApplyEndAt: '', StartAt: '', EndAt: '', Reason: '' })
+    await Promise.all([loadSeckillApplications(), loadSeckillActivities()])
+  } catch (e) {
+    flash.kind = 'bad'
+    flash.text = (approve ? '通过失败：' : '驳回失败：') + ((e && e.message) || '未知原因')
+  } finally {
+    skBusy.value = false
+  }
+}
+
+/** 停用活动（逻辑废弃）。⚠️ 入参是**业务串** `ActivityId`（不是自增 `Id`）。 */
+async function doStopActivity(row) {
+  skBusy.value = true
+  flash.text = ''
+  try {
+    const data = await seckillStop(row.ActivityId)
+    if (!data || !data.success) {
+      flash.kind = 'bad'
+      flash.text = '停用失败：' + ((data && data.msg) || '未知原因')
+      return
+    }
+    flash.kind = 'ok'
+    flash.text = `活动 ${row.ActivityId} 已停用`
+    await loadSeckillActivities()
+  } catch (e) {
+    flash.kind = 'bad'
+    flash.text = '停用失败：' + ((e && e.message) || '未知原因')
+  } finally {
+    skBusy.value = false
   }
 }
 

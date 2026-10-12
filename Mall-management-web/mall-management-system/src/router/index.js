@@ -588,3 +588,23 @@ router.addRoute('merchantUser', { path: '/merchant/stats', component: () => impo
 // ══════════════════════════════════════════════════════════════════════════════════════════
 
 router.addRoute({ path: '/shop', component: () => import('../views/ShopHome.vue'), meta: { public: true } })
+
+// ══════════════════════════════════════════════════════════════════════════════════════════
+// ── C3 块 5〈营销块〉commit 4（2026-10-12）：秒杀页 `/seckill` ────────────────────────────────
+//
+// ⚠️ **又是「新增行落在最大被引行之后」**（第十次适用）：全仓对 `router/index.js` 的最大被引行
+//   在 `routes` 数组与两条守卫那一带 ⇒ 本记录追加在**文件最尾**（紧接上面那条 `/shop`），
+//   连 `:565` / `:566` / `:590` 三条既有 `addRoute` 的行号也不动。
+//
+// ⚠️ **形制照上一条 `/shop`**（壳外、顶层、`meta.public`）：第一个参数不写 name ⇒ 顶层记录，
+//   `matched` 链只有它自己 ⇒ 不进任何壳。理由同 `/shop` 那条：本页的入口之一是**主页的秒杀模块**
+//   与**商品详情页的秒杀价**，而这两处匿名就能到（`/product`、主页都在公开面）⇒ 挂 `/customer` 壳
+//   会被壳归属守卫踢去登录页。
+//
+// ⚠️ **`meta.public` 的判据**：本页取数的端点是 `/marketing/seckill/live`，它**不在**
+//   `AUTH_WHITELIST` 内（口径同 `/marketing/subsidy/goods` —— 后端刻意没放宽公开面）
+//   ⇒ `views/SeckillPage.vue` **只在有登录态时才发**（先判 `isLoggedIn()`，否则 `handleUnauthorized`
+//   会把公开页踢回登录页）。「路由可达」与「数据可取」是两件事，这条记录只管前者。
+// ══════════════════════════════════════════════════════════════════════════════════════════
+
+router.addRoute({ path: '/seckill', component: () => import('../views/SeckillPage.vue'), meta: { public: true } })

@@ -23,8 +23,8 @@ package com.minke.mallmanagement.notification;
  * <p>⇒ 代价：库里可能出现本类**没有**的 code。前端映射必须**兜底**（未知 code 原样显示 + 小号
  * chip，见 {@code src/config/notify-events.js} 的 {@code eventLabel}），不许静默成空白。
  *
- * <h2>【清单按「归属块」排 —— 29 条，覆盖到 C3 全部 8 块】</h2>
- * 块 1 本块就用（2 条）；其余 27 条是**预留登记**：各块的触发点**随各自那一笔挂**
+ * <h2>【清单按「归属块」排 —— 31 条，覆盖到 C3 全部 8 块】</h2>
+ * 块 1 本块就用（2 条）；其余 29 条是**预留登记**：各块的触发点**随各自那一笔挂**
  * （同 {@code AuditActions} 的 15 个挂钩点口径），本块只把 code 与 {@code send} 原语先留出来。
  * 硬约束来自 {@code docs/agent/c3-modules.md} §9.2：通知必须能被「被评论 / 被回复 / 被 @」三类事件触发
  * —— 对应 {@link #COMMENT_ON_POST} / {@link #COMMENT_ON_USER} / {@link #COMMENT_REPLY} /
@@ -165,6 +165,31 @@ public final class NotificationEvents {
      * 本条是「商家 → 管理员」的去向，那两条是「管理员 → 商家」的回执。
      */
     public static final String GOODS_APPLY_SUBMITTED = "goods.apply.submitted";
+
+    // ==================== 块 5（营销块）：秒杀双向制的「商家 → 管理端」两条（commit 4）====================
+    // ⚠️ 上面那三条 `seckill.invited` / `seckill.application.approved|rejected` 是**管理员 → 商家**的回执，
+    //    下面这两条是**反方向**（商家 → 管理端共享收件箱 `ToType='admin', ToId='*'`）——
+    //    与国补那一对（`subsidy.nominated` 去 / `subsidy.confirmed|rejected` 回）同一个对称结构。
+    //    ⚠️ 别把方向搞反：写反了通知照样入库，只是**收件箱错**（管理员看不见、商家自己收到自己的回执）。
+
+    /**
+     * 商家**应答**秒杀邀请（同意 / 拒绝）→ 触达**管理端共享收件箱**。
+     *
+     * <p>{@code docs/agent/c3-modules.md} §9.1 把它写成一条（不是拆两条）：与
+     * {@link #SUBSIDY_CONFIRMED} / {@link #SUBSIDY_REJECTED} 拆开的情形不同 ——
+     * 邀请这条路径上，管理端**本来就知道自己邀请了谁**，回执只需要「答没答、答的什么」；
+     * 具体结果写在标题里（「商家拒绝秒杀邀请：<商品>」），不必再多一个 code。
+     */
+    public static final String SECKILL_RESPONDED = "seckill.responded";
+
+    /**
+     * 商家**提交**秒杀申请（报名）→ 触达**管理端共享收件箱**，等管理端审核。
+     *
+     * <p>⚠️ 与预留的 {@link #SECKILL_APPLICATION_APPROVED} / {@link #SECKILL_APPLICATION_REJECTED}
+     * 是**一对**（形态逐字照 {@link #GOODS_APPLY_SUBMITTED} 与那两条 audit 的关系）：
+     * 本条是「商家 → 管理员」的去向，那两条是「管理员 → 商家」的裁决回执。
+     */
+    public static final String SECKILL_APPLICATION_SUBMITTED = "seckill.application.submitted";
 
     private NotificationEvents() {
     }

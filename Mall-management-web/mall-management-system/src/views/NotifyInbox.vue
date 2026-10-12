@@ -47,7 +47,8 @@
         <!-- ⚠️ C3 块 5〈国补〉（2026-10-12）：国补邀请**就地同意 / 拒绝**。
              ⚠️ **必须挂在 `.nrow` 这个 `<button>` 之外**（同一层 `<li>` 里、它下面）——
                  把按钮嵌进按钮是**非法 HTML**，浏览器会自行拆分 DOM，点击会落到意外的那一个上。
-             ⚠️ 只在**商家端**（`toType === 'merchant'`）且事件是 `subsidy.nominated` 时出现；
+             ⚠️ 只在**商家端**（`toType === 'merchant'`）且事件是 `subsidy.nominated` / `seckill.invited`
+                 时出现（两条都是「平台发起、等商家表态」，见 `ACTIONABLE_EVENTS`）；
                  另两端（客户 / 管理端）看到的是同一条通知，但**没有那两个按钮** —— 他们不是当事人。 -->
         <div v-if="canAct(row)" class="nacts">
           <template v-if="rejectFor === row.Id">
@@ -99,11 +100,18 @@ import { useRoute } from 'vue-router'
 import { handleApiError } from '../api/http'
 import { getMerchantId, getCustomerId, isLoggedIn } from '../api/auth'; import IconGlyph from '../components/ui/IconGlyph.vue'   // ⚠️ 两条 import **同行**（2026-10-11 补图标那一笔）—— 合并到既有行 = 不新增行号漂移
 import { notifyList, notifyRead, notifyReadAll } from '../api/notify'
-import { subsidyConfirm } from '../api/marketing'
+import { subsidyConfirm, seckillRespond } from '../api/marketing'
 import { eventLabel, isKnownEvent } from '../config/notify-events'
 
 /** 国补邀请的事件 code —— 与后端 `NotificationEvents.SUBSIDY_NOMINATED` **逐字一致**。 */
 const EVENT_SUBSIDY_NOMINATED = 'subsidy.nominated'
+
+/** 秒杀邀请的事件 code —— 与后端 `NotificationEvents.SECKILL_INVITED` **逐字一致**（commit 4）。 */
+const EVENT_SECKILL_INVITED = 'seckill.invited'
+
+/** 可就地应答的**邀请类**事件 —— 两条都是「平台发起、等商家表态」，同一套按钮、同一个形态。
+ *  ⚠️ 加第三种时**必须同时**在 `submitDecision` 里给出它对应哪个端点（那里是一条 `if/else`）。 */
+const ACTIONABLE_EVENTS = [EVENT_SUBSIDY_NOMINATED, EVENT_SECKILL_INVITED]
 
 /** 一页最多拉多少条。后端 `DEFAULT_LIMIT=100` / `MAX_LIMIT=500`（`NotificationService`），
  *  这里显式给 100：与后端默认值**同值但不同源**，写出来才能让「为什么只显示 100 条」
@@ -304,7 +312,7 @@ const handled = ref(new Set())     // 已处理过的**通知行** Id —— 处
 
 function canAct(row) {
   return toType.value === 'merchant'
-    && row.EventType === EVENT_SUBSIDY_NOMINATED
+    && ACTIONABLE_EVENTS.includes(row.EventType)
     && row.TargetId !== null && row.TargetId !== undefined && String(row.TargetId) !== ''
     && !handled.value.has(row.Id)
 }
@@ -347,7 +355,13 @@ async function submitDecision(row, approve, reason) {
   acting.value = true
   error.value = ''
   try {
-    const data = await subsidyConfirm(usableId.value, row.TargetId, approve, reason)
+    // ⚠️ 两条邀请类事件各自打自己的端点（`ACTIONABLE_EVENTS` 里加了新的，这里必须有对应分支）：
+    //    · 国补：`/marketing/subsidy/confirm`（`:Id` 是 `subsidy_goods.Id`）
+    //    · 秒杀：`/marketing/seckill/respond`（`:Id` 是 `seckill_invitation.Id`）
+    //    两者的第一参都是**商家业务号**（`usableId`），形态逐字相同，不是巧合 —— 邀请都是平台发的。
+    const data = row.EventType === EVENT_SECKILL_INVITED
+      ? await seckillRespond(usableId.value, row.TargetId, approve, reason)
+      : await subsidyConfirm(usableId.value, row.TargetId, approve, reason)
     if (!data || !data.success) {
       error.value = (data && data.msg) || '操作失败'
       return

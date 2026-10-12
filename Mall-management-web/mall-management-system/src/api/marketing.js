@@ -330,3 +330,186 @@ export function subsidyConfirm(merchantId, id, approve, reason) {
 export function subsidyGoods(params) {
   return post(endpoints.subsidy.goods, q(params))
 }
+
+// ── C3 块 5 · commit 4〈秒杀〉────────────────────────────────────────────────────
+//
+// **双向制**（`docs/agent/c3-modules.md` §9.1 的硬口径）：两条路径，发起方与决定方**相反** ——
+//   · 路径 A **邀请**：管理端发起（`/admin/marketing/seckill/invite`）→ **商家**应答
+//     （`/marketing/seckill/respond`）。
+//   · 路径 B **申请**：商家发起（`/marketing/seckill/apply`）→ **管理端**裁决
+//     （`/admin/marketing/seckill/review`）。
+// ⚠️ **没有「管理端单向指定」** —— 那会让商家在不知情的情况下被挂上秒杀价。
+// ⚠️ **两条路径「成立」时各生成一行 `seckill_activity`**；用户端 / 主页 / 秒杀页**只读活动表**
+//    （`/marketing/seckill/live`），不 union 两张流程表。
+//
+// ⚠️ **时间点进库前必须换算成 UTC**：`seckill_activity` / 两张流程表的 `ApplyEndAt` / `StartAt` /
+//    `EndAt` 都是**时刻**，后端判据比的是**库时钟 `NOW()`**（a3 实测 `@@system_time_zone='UTC'`）。
+//    页面侧 `datetime-local` 拿到的**是本地时间** ⇒ 必须经 `toSqlTime()` 反算成 UTC 文本再发
+//    （`MarketingPage.vue` 里那两个方向对称的换算函数），否则活动会**早开 / 晚开 8 小时且不报错**。
+//
+// ⚠️ **`/marketing/seckill/live` 是「登录可见、匿名 401」**（不挂 `IdentityGuard`，也不在
+//    `AUTH_WHITELIST` 里 —— 后端刻意没放宽公开面），口径逐字同 `/marketing/subsidy/goods`
+//    ⇒ 调用方必须**先判 `isLoggedIn()`** 再发，否则 `handleUnauthorized` 会把公开页踢回登录页。
+
+// ── 管理端：秒杀治理（`/admin/marketing/seckill/*`，TD-18：无角色闸）─────────────
+
+/**
+ * 邀请列表。
+ * @param {{Status?:string, MerchantAccount?:string, limit?:number}} [params]
+ *        `Status` 走白名单：`'invited'` / `'accepted'` / `'declined'`（未知值后端报错）。
+ * @returns {Promise<{success:boolean, list:Array, total:number, limit:number, msg?:string}>}
+ *          `list[]`：`{Id, InvitationId, MerchantAccount, GoodsId, GoodName, OriginalPrice,
+ *          SeckillPrice, Quantity, ApplyEndAt, StartAt, EndAt, Status, Reason, created_at,
+ *          updated_at, Stage}`
+ *          ⚠️ `Id`（自增）与 `InvitationId`（业务串 `SKI-…`）**两个都在**：前者是通知 `TargetId`
+ *          与商家「同意 / 拒绝」要打的那个号，后者进审计的 `TargetId`。
+ */
+export function seckillInvitationList(params) {
+  return post(endpoints.marketingSeckill.invitations, q(params))
+}
+
+/**
+ * 邀请商家上秒杀（路径 A 的发起端）—— 会**同时**给该商家发一条 `seckill.invited` 通知。
+ *
+ * @param {{MerchantAccount:string, GoodsId:number|string, SeckillPrice:string|number,
+ *          Quantity?:string|number, ApplyEndAt?:string, StartAt?:string, EndAt?:string}} params
+ *        · `MerchantAccount`：商家业务号 —— **必须与商品所属商家一致**（不一致后端报
+ *          「这件商品不属于该商家」，不许把 A 店的商品挂到 B 店名下打折）
+ *        · `SeckillPrice`：秒杀价。**必须 > 0 且 < 商品原价**
+ *        · `Quantity`：限量。`0` / 省略 = **不限量**（与「`Cap=0` 不封顶」同一个「没填」口径）
+ *        · `ApplyEndAt` / `StartAt` / `EndAt`：`'YYYY-MM-DD HH:MM:SS'`（**UTC**，见段注释），可空。
+ *          给了 `StartAt` 与 `EndAt` 时必须是「开始早于结束」；`ApplyEndAt` 不得晚于 `StartAt`
+ *        ⚠️ 数字一律以**字符串**发（后端自解析并点名是哪个字段错）。
+ * @returns {Promise<{success:boolean, msg:string, Id?:number, InvitationId?:string,
+ *   GoodName?:string, OriginalPrice?:number, SeckillPrice?:number}>}
+ *          ⚠️ 同商家同商品**已有一条待应答邀请**时 ⇒ `success:false` +「已有一条待应答的邀请」
+ *          （唯一键管不到这条，是 Service 层的守卫）。
+ */
+export function seckillInvite(params) {
+  return post(endpoints.marketingSeckill.invite, q(params))
+}
+
+/**
+ * 申请列表（管理端看全量）。`Status` ∈ `'submitted'` / `'approved'` / `'rejected'`；省略 = 全部。
+ * @returns {Promise<{success:boolean, list:Array, total:number, limit:number}>}
+ *          `list[]` 列同邀请，业务号那列是 `ApplicationId`（`SKA-…`）。
+ */
+export function seckillApplicationList(params) {
+  return post(endpoints.marketingSeckill.applications, q(params))
+}
+
+/**
+ * 审核商家的秒杀申请（路径 B 的裁决端）。
+ *
+ * @param {{Id:number|string, Approve:boolean, Reason?:string, Name?:string,
+ *          ApplyEndAt?:string, StartAt?:string, EndAt?:string}} params
+ *        · `Approve`：⚠️ **缺省 / 非 `"true"` 一律当驳回** —— 「没表态」绝不等于同意。
+ *          驳回时 `Reason` **必填**（后端判）。
+ *        · `Name`：活动名；留空 ⇒ 回落成**商品名**（流程表没有 `Name` 列）。
+ *        · **通过时 `StartAt` / `EndAt` 必填**（申请路径的时间由**管理端审核时**确认，不是商家报名时带的）
+ *          —— 缺了后端直接拒：没有窗口的活动判不出阶段。`ApplyEndAt` 可空。
+ * @returns {Promise<{success:boolean, outcome?:'approved'|'rejected'|'already-handled',
+ *   msg:string, Id?:number, ActivityId?:string, Name?:string}>}
+ *          ⚠️ `outcome:'already-handled'` 时 **`success` 仍是 `true`**（CAS 落空，不是失败）。
+ *          ⚠️ 时段与同商品已成立的活动**重叠** ⇒ `success:false`（不落一场重叠活动）。
+ */
+export function seckillReview(params) {
+  return post(endpoints.marketingSeckill.review, q(params))
+}
+
+/**
+ * 活动列表（**已成立**的那些：哪条路径来的、什么阶段、卖了多少）。
+ * @param {{Status?:string, MerchantAccount?:string, limit?:number}} [params] `Status` ∈ `'active'` / `'stopped'`
+ * @returns {Promise<{success:boolean, list:Array, total:number, limit:number}>}
+ *          `list[]`：`{Id, ActivityId, Name, MerchantAccount, GoodsId, GoodName, OriginalPrice,
+ *          SeckillPrice, TotalStock, SoldStock, SourceKind:'invitation'|'application', SourceId,
+ *          Status, ApplyEndAt, StartAt, EndAt, created_at, updated_at, Stage}`
+ *          ⚠️ `Stage` 由**后端按库时钟现算**（`'signup'|'upcoming'|'live'|'ended'`）——
+ *          前端**别自己拿时间再算一遍**（浏览器钟 ≠ 库钟，差 8 小时）。
+ */
+export function seckillActivityList(params) {
+  return post(endpoints.marketingSeckill.activities, q(params))
+}
+
+/**
+ * 停用一场已成立的秒杀活动（**逻辑废弃**：`Status='stopped'`，行还在）。
+ * ⚠️ 入参是 **`ActivityId` 业务串**（不是自增 `Id`）—— 那一列在管理端列表里就有。
+ * ⚠️ 本动作**不发通知**：商家在自己的活动列表里看得到 `stopped`，再寄一封就是同一件事说两遍。
+ */
+export function seckillStop(activityId) {
+  return post(endpoints.marketingSeckill.stop, q({ ActivityId: activityId }))
+}
+
+// ── 商家端 / 用户端（`/marketing/seckill/*`）────────────────────────────────────
+
+/**
+ * 商家端：**发给我的**秒杀邀请。
+ * @param {string} merchantAccount 商家业务号（`goods.MerchantId` = `login.Id`）。⚠️ 传别人的 ⇒ **403**。
+ * @param {{Status?:string, limit?:number}} [params] `Status` 省略 = 全部（页面自己分「待应答 / 已处理」）
+ */
+export function seckillInvitations(merchantAccount, params) {
+  return post(endpoints.seckill.invitations, q({ MerchantAccount: merchantAccount, ...(params || {}) }))
+}
+
+/**
+ * 商家端：同意 / 拒绝一条秒杀邀请。
+ *
+ * @param {string} merchantAccount 商家业务号 —— 传别人的 ⇒ **403**（`IdentityGuard`）。
+ * @param {number|string} id `seckill_invitation.Id`
+ * @param {boolean} accept ⚠️ **缺省即拒绝**。拒绝时 `reason` **必填**。
+ * @param {string} [reason] 拒绝理由（同意时忽略）
+ * @returns {Promise<{success:boolean, outcome?:'accepted'|'declined'|'already-handled',
+ *   msg:string, Id?:number, ActivityId?:string}>}
+ *          ⚠️ **同意 ⇒ 当场成立一场活动**（回带 `ActivityId`）；若该邀请**没有开始 / 结束时间**
+ *          或时段与已有活动**重叠** ⇒ `success:false`（**不会**翻状态，见后端 Service 的两道闸）。
+ *          ⚠️ `already-handled` 时 `success` 仍是 `true`，页面刷新即可，**别弹错误**。
+ */
+export function seckillRespond(merchantAccount, id, accept, reason) {
+  return post(endpoints.seckill.respond,
+    q({ MerchantAccount: merchantAccount, Id: id, Accept: accept ? 'true' : 'false', Reason: reason }))
+}
+
+/** 商家端：我提交过的秒杀申请（含审核结果）。 */
+export function seckillApplications(merchantAccount, params) {
+  return post(endpoints.seckill.applications, q({ MerchantAccount: merchantAccount, ...(params || {}) }))
+}
+
+/**
+ * 商家端：报名秒杀（路径 B 的发起端）—— 会**同时**给管理端发一条 `seckill.application.submitted`。
+ *
+ * ⚠️ **不带时间点**：申请路径的时间由管理端审核时确认。
+ * @param {string} merchantAccount 商家业务号 —— 商品必须属于它，否则后端拒。
+ * @param {number|string} goodsId `goods.Id`（**自增主键**，不是 `ProductCode`）
+ * @param {string|number} seckillPrice 秒杀价：**> 0 且 < 商品原价**
+ * @param {string|number} [quantity] 限量；`0` / 省略 = 不限量
+ * @returns {Promise<{success:boolean, msg:string, Id?:number, ApplicationId?:string}>}
+ *          同商品**已有一条待审核的申请** ⇒ `success:false`。
+ */
+export function seckillApply(merchantAccount, goodsId, seckillPrice, quantity) {
+  return post(endpoints.seckill.apply,
+    q({ MerchantAccount: merchantAccount, GoodsId: goodsId, SeckillPrice: seckillPrice, Quantity: quantity }))
+}
+
+/** 商家端：我参与（已成立）的秒杀活动 —— 含被停用的（`Status='stopped'`）。 */
+export function seckillActivities(merchantAccount, params) {
+  return post(endpoints.seckill.activities, q({ MerchantAccount: merchantAccount, ...(params || {}) }))
+}
+
+/**
+ * 用户端：进行中 / 未开启的秒杀活动（主页秒杀模块 + 秒杀页的唯一数据源）。
+ *
+ * ⚠️ **只在已登录时发**（见本段文件头那条）。后端已挡掉**已结束 / 已停用 / 商品下架**，
+ * 故见到一行就等于「这一场此刻仍然挂着」。
+ *
+ * @param {{limit?:number}} [params]
+ * @returns {Promise<{success:boolean, list:Array, total:number, limit:number}>}
+ *          `list[]` = 活动列 + `GoodImg` / `GoodType` / `ProductCode` + 后端补的两个字段：
+ *          · `Stage`：`'signup'`（报名期，**主页不显示**——后端会回，前端按 `Stage` 分流）/
+ *            `'upcoming'`（未开启，主页显「活动未开启」占位）/ `'live'`（进行中，显秒杀段）
+ *          · `SoldOut`（**真布尔**，后端在 Java 侧用数字比出来的）/ `SoldLeft`（剩余件数，不限量时为 `null`）
+ *            ⚠️ 别拿 `TotalStock` / `SoldStock` 自己比 —— 不限量（`TotalStock=0`）那一档的语义
+ *            在 `SoldOut` 里已经定好了。
+ */
+export function seckillLive(params) {
+  return post(endpoints.seckill.live, q(params))
+}
