@@ -93,6 +93,11 @@
             <span class="price"><span class="sym">¥</span><span class="int">{{ currentItem.price }}</span></span>
             <span v-if="hasDiscount" class="was">¥{{ currentItem.originalPrice }}</span>
             <span v-if="hasDiscount" class="off">{{ discountRate }} 折</span>
+            <!-- ①-补【国家补贴】—— C3 块 5〈国补〉**落地**（2026-10-12）。
+                 ⚠️ 只在「这件商品通过了国补、规则在期、商品在架」时才有个数 —— 后端 `/marketing/subsidy/goods`
+                    三处 JOIN 一起挡（商家点头 + 规则在期 + 商品在架）。**没有就不画**，不拿「暂无补贴」占位。
+                 ⚠️ 金额**后端现算**（`SubsidyAmount`），本页只显示。 -->
+            <span v-if="subsidy" class="subsidy">国补 −¥{{ r2(subsidy.SubsidyAmount) }}</span>
           </div>
 
           <!-- ②【促销 / 优惠券】—— **C3 块 5〈营销块〉已接线**（2026-10-11）。
@@ -452,7 +457,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { http, handleApiError } from '../api/http'
 import { endpoints } from '../api/endpoints'; import { orderAdd, cartAdd } from '../api/order'   // ⚠️ C3 块 4：**同行追加**（不新增行 —— 本文件 `:794`/`:803` 被 `slot-registry.md:1994-1995` 按行号引（〈Bug 1〉本笔 +19 行前为 `:775`/`:784`），此处加行会顶漂它们）。两个函数就是原先那两串 `URLSearchParams` + `http.post` + `res.json()` 的收口
 import CashierDialog from '../components/CashierDialog.vue'; import ProductCard from '../components/ProductCard.vue'   // ⚠️ 2026-10-10（Bug 1）：收银台与「我的订单」**共用同一个组件** —— 本行**确实**新增了一行；本笔在 `ProductPage.vue` 净 +19 行（`git diff` 实测：模板 `:412` 起 +5、import +1、`handlePay` 段 +13）⇒ 下面两处 `:775`/`:784` 漂到 `:794`/`:803`，随本笔一并重指（见 `slot-registry.md:1994-1995`）
-import { getMerchantId, getCustomerId, getUsername, isLoggedIn } from '../api/auth'; import IconGlyph from '../components/ui/IconGlyph.vue'; import { coupons, claim } from '../api/marketing'; import { couponName } from '../config/coupon-format'   // ⚠️ 四条 import **同行**（第 2、3 条：2026-10-11 补图标笔 + C3 块 5 · commit 1；第 4 条 `couponName`：块 5 · A 组 · A7 后半；`getUsername`：块 5 券口径改登录名，2026-10-12）—— 合并到既有行 = 不新增行号漂移（本文件 `:794`/`:803` 被 `slot-registry.md:1994-1995` 按行号引，上面 `:424` 那条注释记过同一件事）。⚠️ **块 5 · commit 1 仍整体 +90 行**（模板 +17 / `<script setup>` 尾 +70 / `<style>` +3）⇒ `slot-registry.md:1994` 引的 `:794` 漂 **`:881`**、`:1995` 引的 `:803` 漂 **`:890`**（两值均为 `grep -n` 实测，见 `_work/b5-repoint.md`）。
+import { getMerchantId, getCustomerId, getUsername, isLoggedIn } from '../api/auth'; import IconGlyph from '../components/ui/IconGlyph.vue'; import { coupons, claim, subsidyGoods } from '../api/marketing'; import { couponName } from '../config/coupon-format'   // ⚠️ 四条 import **同行**（第 2、3 条：2026-10-11 补图标笔 + C3 块 5 · commit 1；第 4 条 `couponName`：块 5 · A 组 · A7 后半；`getUsername`：块 5 券口径改登录名，2026-10-12）—— 合并到既有行 = 不新增行号漂移（本文件 `:794`/`:803` 被 `slot-registry.md:1994-1995` 按行号引，上面 `:424` 那条注释记过同一件事）。⚠️ **块 5 · commit 1 仍整体 +90 行**（模板 +17 / `<script setup>` 尾 +70 / `<style>` +3）⇒ `slot-registry.md:1994` 引的 `:794` 漂 **`:881`**、`:1995` 引的 `:803` 漂 **`:890`**（两值均为 `grep -n` 实测，见 `_work/b5-repoint.md`）。
 
 const route = useRoute()
 const router = useRouter()
@@ -899,6 +904,30 @@ const doClaimCoupon = async (c) => {
 //    在 `<script setup>` 里**只有一个插入点** —— 本文件所有 `文件:行号` 互引都在下面（`:794`/`:803`），
 //    插入点越少，收口时的重指表越短。
 onMounted(loadClaimable)
+
+// ── 块 5〈国补〉：国家补贴标签（C3 块 5 · commit 3，2026-10-12）─────────────────────
+// ⚠️ 与上面券块**同一个先例、同一个插入点**：`/marketing/subsidy/goods` 不挂闸、但**也不在白名单**
+//    ⇒ 匿名 401 ⇒ 必须**先判登录**再发，否则 `http.js` 的 `handleUnauthorized` 会把商品页踢回登录页。
+// ⚠️ 金额**后端现算**（`SubsidyAmount` / `PayAmount`，`Cap=0` = 不封顶），本页只显示，
+//    **不复刻** `min(price × ratio, cap)` —— 复刻出来的第二份一定会在某次改动里跑偏。
+// ⚠️ 只在**当前选中型号**的 `productCode` 命中时才画：同一 `GoodName` 下各型号价不同，
+//    拿别的型号的补贴额画在这一屏上就是假话（与 ① 折扣角标同一条口径）。
+const subsidyRows = ref([])
+const subsidy = computed(() => {
+  const code = String(currentItem.value.productCode || '')
+  if (!code) return null
+  return subsidyRows.value.find((r) => String(r.ProductCode || '') === code) || null
+})
+const loadSubsidy = async () => {
+  if (!isLoggedIn()) return
+  try {
+    const data = await subsidyGoods({ limit: 200 })
+    subsidyRows.value = data && data.success && Array.isArray(data.list) ? data.list : []
+  } catch (e) {
+    subsidyRows.value = []
+  }
+}
+onMounted(loadSubsidy)
 
 /* 2026-10-10〈模板表通用化〉三段快照文本（`goods.Detail` / `Spec` / `AfterSale`）—— 全部写在**同一物理行**（新增行会顶漂下面 `slot-registry.md:1994-1995` 引的 `:794`/`:803`）。⚠️ 取值**从 `route.query` 现取**、不用 setup 期解构的 `sellerId`/`goodName`（`:433-434` 是普通 `const`，同路径只换 query 时组件被复用、它们**不更新**，理由同 `openPopup` 那条）。 */ const detailText = computed(() => { const q = route.query; const g = goodsWithUser.value.find((x) => x.MerchantId === q.MerchantId && x.GoodName === q.GoodName); return (g && g.Detail) || '' }); const specText = computed(() => { const q = route.query; const g = goodsWithUser.value.find((x) => x.MerchantId === q.MerchantId && x.GoodName === q.GoodName); return (g && g.Spec) || '' }); const afterSaleText = computed(() => { const q = route.query; const g = goodsWithUser.value.find((x) => x.MerchantId === q.MerchantId && x.GoodName === q.GoodName); return (g && g.AfterSale) || '' }); /* `Spec` 的行内 `键=值` 约定：一行一条，`=` 只切**第一处**（值里允许再有 `=`）；没有 `=` 的行**整行进 `.v`、`.k` 留空**，而不是丢掉它。 */ const specRows = computed(() => specText.value.split('\n').map((s) => s.trim()).filter((s) => s !== '').map((s) => { const i = s.indexOf('='); return i < 0 ? { k: '', v: s } : { k: s.slice(0, i).trim(), v: s.slice(i + 1).trim() } })); const promiseLabels = computed(() => { const q = route.query; const g = goodsWithUser.value.find((x) => x.MerchantId === q.MerchantId && x.GoodName === q.GoodName); const ALL = ['正品保障', '7 天无理由', '极速退款', '运费险']; const KEYS = ['PromiseGenuine', 'PromiseReturn7', 'PromiseFastRefund', 'PromiseFreightIns']; if (!g) return ALL; if (!KEYS.some((k) => g[k] !== undefined && g[k] !== null)) return ALL; return ALL.filter((_, i) => Number(g[KEYS[i]])) }); const mergeSkus = async (baseItems) => { try { const rs = await http.post(endpoints.goods.skuList, `MerchantId=${sellerId}&GoodName=${goodName}`); const ds = await rs.json(); const skus = (ds && ds.success && ds.list) || []; if (!skus.length) return baseItems; const img = baseItems.length ? baseItems[0].goodImg : ''; const merged = skus.map((s) => ({ productCode: String(s.SkuCode || ''), price: s.Price, goodImg: img })).filter((s) => s.productCode); return merged.length ? merged : baseItems } catch (e) { return baseItems } }; const isLogin = computed(() => isLoggedIn()); const activeTab = ref('desc')   // 结构二次调整（2026-10-07）：Tab 条当前面，UI 展示状态（不计功能量）；⚠️ **同行追加、不新增行** —— 上面那条「新增行落在最大被引行之后」的约束在本笔**不成立**（`slot-registry.md:1994-1995` 引的 `:794`/`:803` 都在下面），新增行会顶漂它们。
 </script>
@@ -1426,4 +1455,13 @@ button { background: none; border: 0; cursor: pointer; }
    的纯文本 ⇒ 不写 `pre-wrap` 会被 HTML 压成一行。⚠️ 还要 `break-word`：一段没有空格的
    模板正文会把 `.para` 的 `max-width:68ch` 撑破、横向溢出整页。 */
 .para.pre { white-space: pre-wrap; word-break: break-word; }
+/* ── 2026-10-12〈国补〉：价格行上的「国补 −¥N」徽标 ────────────────────────────
+   ⚠️ 与 `.off`（折扣角标）**同一套色**（`--accent-soft` / `--accent`）—— 两者都是**价格类**标记，
+      `tokens.css:34-42` 把 `--accent` 的用法定为「价格 / 促销 / 未读」，这里正是那一档；
+      区分靠**文字**（「6.5 折」vs「国补 −¥15」），不靠再造一个颜色（调色板里没有第三个促销色）。
+   ⚠️ **不能**与 `.off` 合成一条规则：语义不同（一个是商家填的原价、一个是平台配的补率），
+      将来任一侧单独改口径时，合并的规则会逼着对方一起动。 */
+.subsidy { padding: 1px var(--s2); border-radius: var(--r1); background: var(--accent-soft);
+           color: var(--accent); font-size: var(--fs-xs); font-weight: var(--fw-med);
+           font-variant-numeric: tabular-nums; }
 </style>

@@ -4,7 +4,7 @@
          改前这里**刻意没有 tab 栏**：本页当时只有「券」一个子域，摆一个只有一项的 tab 栏
          等于承诺三个不存在的页面（同 `admin-nav.js` 不给占位页挂图标的那条口径）。
          现在折扣落地 ⇒ 「多块才上 tab」的条件满足了，才长出这一条。
-         ⚠️ **只列已落地的两枚**：国补 / 秒杀仍是计划中的子域，**不预摆灰 tab**（同一条口径）。 -->
+         ⚠️ **只列已落地的三枚**：秒杀仍是计划中的子域，**不预摆灰 tab**（同一条口径）。 -->
     <nav class="a-tabs" role="tablist">
       <button
         v-for="t in TABS" :key="t.k" type="button" role="tab" class="a-tab"
@@ -333,7 +333,7 @@
            · 折扣模板（填充源）→ `Type='discount.rule'`，`Body`=`6.5折|说明`
          ⚠️ 上下限那张表**按类目列全**（`/goods/goodstype` 有几个类目就有几行），
             没配的类目显示「未设置」而不是 0 —— 「没配」与「配成 0」是两件事（同后端口径）。 -->
-    <template v-else>
+    <template v-else-if="tab === 'discount'">
       <h2 class="a-h2">
         <IconGlyph name="marketing" />类目折扣上下限
         <span class="a-h2n">商家填划线原价时按商品类目校验；留空 = 该类目不限</span>
@@ -394,6 +394,121 @@
         <p v-else class="a-empty">还没有折扣模板 —— 建一条，商家上架时就能一键折算划线原价</p>
       </div>
     </template>
+
+    <!-- ══ ③ 国补（C3 块 5 · commit 3）════════════════════════════════════════════
+         双向制：**平台建规则 → 提名商品 → 商家在消息中心同意 / 拒绝**。
+         ⇒ 本页只管「前两段」，第三段在 `views/NotifyInbox.vue`（商家的收件箱里就地同意 / 拒绝）。
+         ⚠️ 提名之后**用户端什么都看不到**，直到商家点头（`subsidy_goods.Status='approved'`）——
+             这一条必须**写在页面上**（下面「提名商品」那栏的 `a-h2n` 副标题里），
+             否则「提了名怎么没生效」会变成反复问的问题。 -->
+    <template v-else>
+      <h2 class="a-h2">
+        <IconGlyph name="marketing" />国补规则
+        <span class="a-h2n">按类目配补贴比例与单笔上限；提名商品后需商家在消息中心确认</span>
+      </h2>
+
+      <form class="a-filters" @submit.prevent="doCreateRule2">
+        <label class="a-f a-f-wide">
+          <span>规则名 *</span>
+          <input v-model.trim="sb.Name" type="text" placeholder="如：家电以旧换新">
+        </label>
+        <label class="a-f a-f-wide">
+          <span>适用类目</span>
+          <input v-model.trim="sb.CategoryMatch" type="text" placeholder="电子用品,生活用品（空 = 不限）">
+        </label>
+        <label class="a-f">
+          <span>补贴比例(%) *</span>
+          <input v-model.trim="sb.Ratio" type="number" min="0" max="100" step="0.1" placeholder="15">
+        </label>
+        <label class="a-f">
+          <span>单笔上限(元)</span>
+          <input v-model.trim="sb.Cap" type="number" min="0" step="0.01" placeholder="0 = 不封顶">
+        </label>
+        <label class="a-f">
+          <span>生效起</span>
+          <input v-model="sb.StartAt" type="datetime-local">
+        </label>
+        <label class="a-f">
+          <span>生效止</span>
+          <input v-model="sb.EndAt" type="datetime-local">
+        </label>
+        <button type="submit" class="a-btn" :disabled="sbBusy">新建规则</button>
+      </form>
+
+      <div class="a-card">
+        <table v-if="sbRules.length" class="a-tbl">
+          <thead>
+            <tr>
+              <th>规则名</th><th>适用类目</th><th>补贴比例</th><th>单笔上限</th>
+              <th>有效期</th><th>状态</th><th></th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="row in sbRules" :key="row.RuleId">
+              <td>{{ row.Name }}</td>
+              <td>{{ row.CategoryMatch || '不限' }}</td>
+              <td class="a-mono">{{ fmtRatio(row.Ratio) }}</td>
+              <td class="a-mono">{{ fmtCap(row.Cap) }}</td>
+              <td class="a-mono">{{ fmtRange(row.StartAt, row.EndAt) }}</td>
+              <td><span class="a-chip" :class="row.Status === 'active' ? 'ok' : 'off'">
+                {{ row.Status === 'active' ? '启用' : '停用' }}</span></td>
+              <td>
+                <button v-if="row.Status === 'active'" type="button" class="a-btn-s"
+                  :disabled="sbBusy" @click="doStopRule(row)">停用</button>
+                <button v-else type="button" class="a-btn-s"
+                  :disabled="sbBusy" @click="doActivateRule(row)">启用</button>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+        <p v-else class="a-empty">还没有国补规则 —— 先建一条，再提名商品</p>
+      </div>
+
+      <h2 class="a-h2">
+        <IconGlyph name="marketing" />提名商品
+        <span class="a-h2n">提名只写一条待确认记录并给商家发通知；商家同意后才进用户端的「国家补贴」</span>
+      </h2>
+      <form class="a-filters" @submit.prevent="doNominate">
+        <label class="a-f a-f-wide">
+          <span>规则 *</span>
+          <select v-model="nom.RuleId">
+            <option value="">请选择</option>
+            <option v-for="row in activeRules" :key="row.RuleId" :value="row.RuleId">
+              {{ row.Name }}（{{ fmtRatio(row.Ratio) }}）
+            </option>
+          </select>
+        </label>
+        <label class="a-f a-f-wide">
+          <span>商品 *</span>
+          <select v-model="nom.GoodsId">
+            <option value="">请选择</option>
+            <option v-for="g in pickGoods" :key="g.Id" :value="g.Id">
+              {{ g.GoodName }}（¥{{ fmtMoney(g.Price) }} · {{ g.UserName || '商家' }}）
+            </option>
+          </select>
+        </label>
+        <button type="submit" class="a-btn" :disabled="sbBusy">提名</button>
+      </form>
+
+      <div class="a-card">
+        <table v-if="sbNoms.length" class="a-tbl">
+          <thead>
+            <tr><th>商品</th><th>商家</th><th>规则</th><th>状态</th><th>商家回复</th><th>提名时间</th></tr>
+          </thead>
+          <tbody>
+            <tr v-for="row in sbNoms" :key="row.Id">
+              <td>{{ row.GoodName || ('#' + row.GoodsId) }}</td>
+              <td class="a-mono">{{ row.MerchantId }}</td>
+              <td>{{ row.RuleName }}</td>
+              <td><span class="a-chip" :class="nomChip(row.Status)">{{ nomLabel(row.Status) }}</span></td>
+              <td class="a-note">{{ row.Reason || '—' }}</td>
+              <td class="a-mono">{{ toLocal(row.created_at) }}</td>
+            </tr>
+          </tbody>
+        </table>
+        <p v-else class="a-empty">还没有提名记录</p>
+      </div>
+    </template>
   </section>
 </template>
 
@@ -423,8 +538,10 @@ import { computed, onMounted, reactive, ref, watch } from 'vue'
 import {
   couponList, couponCreate, couponStop, couponActivate,
   couponGrants, couponGrant, couponStats,
+  subsidyRuleList, subsidyRuleCreate, subsidyRuleStop, subsidyRuleActivate,
+  subsidyNominate, subsidyNominations,
 } from '../../api/marketing'
-import { catalogCategories } from '../../api/admin'
+import { catalogCategories, catalogVisibleGoods } from '../../api/admin'
 import {
   templateList, templateAdminCreate, templateAdminUpdate,
 } from '../../api/template'
@@ -436,10 +553,11 @@ import IconGlyph from '../../components/ui/IconGlyph.vue'
 const TREND_DAYS = 14
 
 // ── 页内 tab（C3 块 5〈折扣〉，2026-10-12）────────────────────────────────────
-// ⚠️ 只列**已落地**的：国补 / 秒杀还没做 ⇒ 不预摆灰 tab（见模板里那条注释）。
+// ⚠️ 只列**已落地**的：秒杀还没做 ⇒ 不预摆灰 tab（见模板里那条注释）。
 const TABS = [
   { k: 'coupon', label: '券' },
   { k: 'discount', label: '折扣' },
+  { k: 'subsidy', label: '国补' },
 ]
 const tab = ref('coupon')
 
@@ -504,10 +622,10 @@ async function saveLimit(row) {
       ? await templateAdminUpdate({ id: row.Id, Name: row.name, Body: body })
       : await templateAdminCreate({ Type: LIMIT_TYPE, Name: row.name, Body: body })
     flash.text = res.success ? `「${row.name}」已保存` : (res.msg || '保存失败')
-    flash.kind = res.success ? 'ok' : 'err'
+    flash.kind = res.success ? 'ok' : 'bad'
     if (res.success) await loadLimits()
   } catch (e) {
-    flash.text = '保存失败'; flash.kind = 'err'
+    flash.text = '保存失败'; flash.kind = 'bad'
   }
 }
 
@@ -521,14 +639,14 @@ async function loadRules() {
 }
 
 async function doCreateRule() {
-  if (!r.Name || !r.Body) { flash.text = '模板名与正文都不能空'; flash.kind = 'err'; return }
+  if (!r.Name || !r.Body) { flash.text = '模板名与正文都不能空'; flash.kind = 'bad'; return }
   try {
     const res = await templateAdminCreate({ Type: RULE_TYPE, Name: r.Name, Body: r.Body })
     flash.text = res.success ? '折扣模板已新增' : (res.msg || '新增失败')
-    flash.kind = res.success ? 'ok' : 'err'
+    flash.kind = res.success ? 'ok' : 'bad'
     if (res.success) { r.Name = ''; r.Body = ''; await loadRules() }
   } catch (e) {
-    flash.text = '新增失败'; flash.kind = 'err'
+    flash.text = '新增失败'; flash.kind = 'bad'
   }
 }
 
@@ -537,19 +655,189 @@ async function setRuleEnabled(row, on) {
   try {
     const res = await templateAdminUpdate({ id: row.Id, Enabled: on ? 1 : 0 })
     flash.text = res.success ? (on ? '已启用' : '已停用') : (res.msg || '操作失败')
-    flash.kind = res.success ? 'ok' : 'err'
+    flash.kind = res.success ? 'ok' : 'bad'
     if (res.success) await loadRules()
   } catch (e) {
-    flash.text = '操作失败'; flash.kind = 'err'
+    flash.text = '操作失败'; flash.kind = 'bad'
   }
 }
 const stopRule = (row) => setRuleEnabled(row, false)
 const activateRule = (row) => setRuleEnabled(row, true)
 
-/** 切到折扣 tab 才拉数（不在 onMounted 里白白多打三条请求）。 */
+/** 切到折扣 / 国补 tab 才拉数（不在 onMounted 里白白多打几条请求）。 */
 watch(tab, (v) => {
   if (v === 'discount') { loadLimits(); loadRules() }
+  if (v === 'subsidy') loadSubsidy()
 })
+
+// ── 国补子域（C3 块 5 · commit 3）：规则 / 提名 ─────────────────────────────────
+// ⚠️ 与折扣那边**刻意相反**的口径：折扣把折算结果写进 `goods.OriginalPrice`（那是**商家填的事实**，
+//    配置不许事后改掉它）；国补的补率是**平台随时可调的** ⇒ 补贴额一律**后端现算**
+//    （`SubsidyAmount = min(Price × Ratio, Cap)`，`Cap = 0` = 不封顶，`PayAmount = Price − SubsidyAmount`）。
+//    本页**不复刻**那条算法 —— 复刻出来的第二份一定会在某次改动里跑偏（同 `api/marketing.js` 那条 ⚠️）。
+const sbRules = ref([])
+const sbNoms = ref([])
+/** 提名候选（`goodsSelectHome` 的在架商品）—— 只有它回 `UserName`，页面要显示店名。 */
+const pickGoods = ref([])
+const sbBusy = ref(false)
+const sb = reactive({ Name: '', CategoryMatch: '', Ratio: '', Cap: '', StartAt: '', EndAt: '' })
+const nom = reactive({ RuleId: '', GoodsId: '' })
+
+/** 只有 `active` 的规则能被提名（后端也拦；这里**前置**拦，省得用户白点一次再吃回一条错）。 */
+const activeRules = computed(() => sbRules.value.filter((row) => row.Status === 'active'))
+
+/** 补贴比例：库里存**小数**（`0.1500` = 15%），页面上按**百分数**显示更好读（`Number(…toFixed)` 去尾零）。 */
+const fmtRatio = (v) => {
+  const n = Number(v)
+  return Number.isFinite(n) ? `${Number((n * 100).toFixed(2))}%` : '—'
+}
+
+/** 单笔上限：`0` = **不封顶**（不是「补 0 元」）—— 与 `subsidy_rule.Cap` 的建表口径同一个意思。 */
+const fmtCap = (v) => (Number(v) > 0 ? `¥${fmtMoney(v)}` : '不封顶')
+
+/** 有效期：起止都可为 `null` = **不限**；两个都空 ⇒ 一行「不限」，比「— ~ —」干净。 */
+function fmtRange(start, end) {
+  if (!start && !end) return '不限'
+  return `${start ? toLocal(start) : '不限'} ~ ${end ? toLocal(end) : '不限'}`
+}
+
+/** 提名状态的人话。`pending` 用 `.a-chip.wait`（不抢 `--accent` —— 那色只管价格 / 促销 / 未读）。 */
+const NOM_LABELS = { pending: '待商家确认', approved: '商家已同意', rejected: '商家已拒绝' }
+const nomLabel = (s) => NOM_LABELS[s] || s || '—'
+const nomChip = (s) => (s === 'approved' ? 'ok' : s === 'rejected' ? 'off' : 'wait')
+
+async function loadSubsidyRules() {
+  try {
+    const data = await subsidyRuleList({ limit: 200 })
+    sbRules.value = data && data.success && Array.isArray(data.list) ? data.list : []
+  } catch (e) {
+    sbRules.value = []
+    flash.kind = 'bad'
+    flash.text = '国补规则读取失败：' + ((e && e.message) || '未知原因')
+  }
+}
+
+async function loadNominations() {
+  try {
+    const data = await subsidyNominations({ limit: 200 })
+    sbNoms.value = data && data.success && Array.isArray(data.list) ? data.list : []
+  } catch (e) {
+    sbNoms.value = []
+    flash.kind = 'bad'
+    flash.text = '提名列表读取失败：' + ((e && e.message) || '未知原因')
+  }
+}
+
+/**
+ * 提名候选 = `goodsSelectHome` 的在架商品。
+ *
+ * ⚠️ 按 `ProductCode` **去重**：库里 `GD-101-9552` 有两行（`Id=76` / `Id=120`，同名同价同码），
+ *    不去重的话下拉里会出现两条一模一样的选项。⚠️ 那两行的重复本身是**待裁项**——
+ *    在那边有结论之前，这里**只做展示层去重，一行数据都不动**。
+ */
+async function loadGoodsOptions() {
+  try {
+    const data = await catalogVisibleGoods()
+    const rows = data && data.success && Array.isArray(data.list) ? data.list : []
+    const seen = new Set()
+    pickGoods.value = rows.filter((g) => {
+      const code = String(g.ProductCode || '') || `#${g.Id}`
+      if (seen.has(code)) return false
+      seen.add(code)
+      return true
+    })
+  } catch (e) {
+    pickGoods.value = []
+  }
+}
+
+/** 切到国补 tab 的入口：三条**并发**（串行的话最慢的那条决定整体观感）。 */
+async function loadSubsidy() {
+  await Promise.all([loadSubsidyRules(), loadNominations(), loadGoodsOptions()])
+}
+
+/** 建规则 —— 两个 `datetime-local` 都要经 `toSqlTime` 反算成库内时钟（UTC），见文件头那条时区口径。 */
+async function doCreateRule2() {
+  if (!sb.Name) { flash.kind = 'bad'; flash.text = '规则名不能为空'; return }
+  if (!sb.Ratio) { flash.kind = 'bad'; flash.text = '补贴比例不能为空'; return }
+  sbBusy.value = true
+  flash.text = ''
+  try {
+    const data = await subsidyRuleCreate({
+      Name: sb.Name,
+      CategoryMatch: sb.CategoryMatch,
+      Ratio: sb.Ratio,
+      // `Cap` 留空 ⇒ 发 0 = 不封顶（后端 `parseDouble(capRaw, 0d)` 同解；显式发比省略少一层歧义）。
+      Cap: sb.Cap === '' ? 0 : sb.Cap,
+      StartAt: toSqlTime(sb.StartAt, false),
+      EndAt: toSqlTime(sb.EndAt, true),
+    })
+    if (!data || !data.success) {
+      flash.kind = 'bad'
+      flash.text = '建国补规则失败：' + ((data && data.msg) || '未知原因')
+      return
+    }
+    flash.kind = 'ok'
+    flash.text = `国补规则已创建：${data.RuleId}`
+    Object.assign(sb, { Name: '', CategoryMatch: '', Ratio: '', Cap: '', StartAt: '', EndAt: '' })
+    await loadSubsidyRules()
+  } catch (e) {
+    flash.kind = 'bad'
+    flash.text = '建国补规则失败：' + ((e && e.message) || '未知原因')
+  } finally {
+    sbBusy.value = false
+  }
+}
+
+/** 停用 / 启用共用一条腿（两个端点只差一个动词）。 */
+async function setSubsidyRuleEnabled(row, on) {
+  sbBusy.value = true
+  flash.text = ''
+  const verb = on ? '启用' : '停用'
+  try {
+    const data = on ? await subsidyRuleActivate(row.RuleId) : await subsidyRuleStop(row.RuleId)
+    if (!data || !data.success) {
+      flash.kind = 'bad'
+      flash.text = `${verb}失败：` + ((data && data.msg) || '未知原因')
+      return
+    }
+    flash.kind = 'ok'
+    flash.text = `规则「${row.Name}」已${verb}`
+    await loadSubsidyRules()
+  } catch (e) {
+    flash.kind = 'bad'
+    flash.text = `${verb}失败：` + ((e && e.message) || '未知原因')
+  } finally {
+    sbBusy.value = false
+  }
+}
+const doStopRule = (row) => setSubsidyRuleEnabled(row, false)
+const doActivateRule = (row) => setSubsidyRuleEnabled(row, true)
+
+/** 提名 —— 成功只写一条 `pending` + 给商家发通知；**用户端此刻什么都还看不到**（要等商家点头）。 */
+async function doNominate() {
+  if (!nom.RuleId) { flash.kind = 'bad'; flash.text = '请先选规则'; return }
+  if (!nom.GoodsId) { flash.kind = 'bad'; flash.text = '请先选商品'; return }
+  sbBusy.value = true
+  flash.text = ''
+  try {
+    const data = await subsidyNominate(nom.RuleId, nom.GoodsId)
+    if (!data || !data.success) {
+      flash.kind = 'bad'
+      flash.text = '提名失败：' + ((data && data.msg) || '未知原因')
+      return
+    }
+    flash.kind = 'ok'
+    flash.text = `已提名「${data.GoodName || data.GoodsId}」，等 ${data.MerchantId || '商家'} 在消息中心确认`
+    nom.GoodsId = ''
+    await loadNominations()
+  } catch (e) {
+    flash.kind = 'bad'
+    flash.text = '提名失败：' + ((e && e.message) || '未知原因')
+  } finally {
+    sbBusy.value = false
+  }
+}
 
 const TYPES = [
   { code: 'threshold', label: '满减' },

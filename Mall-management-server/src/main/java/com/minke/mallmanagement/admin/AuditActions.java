@@ -167,7 +167,9 @@ public final class AuditActions {
     //    `admin_audit.TargetId` 是 NOT NULL，传 null 会在留痕处炸掉整条链路（TD-20 的教训）。
     // ⚠️ 核销（`coupon.redeem`）**不在这里**：它发生在**结算**（用户端下单），
     //    由 orderAdd 带 couponId 触发、写自己的 OrderId 作 TargetId ⇒ 随 commit 5 一起挂。
-    // ⚠️ 剩下三个子域（折扣 / 国补 / 秒杀）的挂钩点各自随 commit 2/3/4 加。
+    // ⚠️ 剩下两个子域（秒杀 / 结算用券）的挂钩点各自随 commit 4/5 加
+    //    —— 折扣（commit 2）**刻意零新挂钩点**：它的写口是既有的 `goodsAdd` / `goodsUp`
+    //    与通用 `/admin/template/*`，留痕已由那两处自己的动作覆盖，再挂一条就是同一件事记两遍。
 
     /** 管理员建券 —— {@code POST /admin/marketing/coupon/create}。**新增类**动作 ⇒ {@code BeforeJson} 恒 NULL。 */
     public static final String COUPON_CREATE = "coupon.create";
@@ -180,6 +182,25 @@ public final class AuditActions {
 
     /** 管理员定向发放券 —— {@code POST /admin/marketing/coupon/grant}。**新增类**动作 ⇒ {@code BeforeJson} 恒 NULL。 */
     public static final String COUPON_GRANT = "coupon.grant";
+
+    // ---- 国补的四个挂钩点（commit 3，2026-10-12）。域段是 `subsidy`（**表名族**，
+    //      也是调用点传的 TargetType 字面量）。⚠️ TargetId 建规则传 `RuleId`、提名传
+    //      `RuleId:GoodsId` —— 同券那条的理由（`admin_audit.TargetId` 是 NOT NULL，传 null
+    //      会在留痕处炸掉整条链路，TD-20）。
+    //      ⚠️ **商家的确认 / 拒绝不在这里**：那一侧是**用户动作**，走 `notification` 回管理端，
+    //      管理端的「谁批的」由通知留档；`admin_audit` 只记**管理员自己**做的事。
+
+    /** 管理员建国补规则 —— {@code POST /admin/marketing/subsidy/create}。**新增类** ⇒ {@code BeforeJson} 恒 NULL。 */
+    public static final String SUBSIDY_RULE_CREATE = "subsidy.rule.create";
+
+    /** 管理员停用国补规则 —— {@code POST /admin/marketing/subsidy/stop}。 */
+    public static final String SUBSIDY_RULE_STOP = "subsidy.rule.stop";
+
+    /** 管理员重新启用国补规则 —— {@code POST /admin/marketing/subsidy/activate}。 */
+    public static final String SUBSIDY_RULE_ACTIVATE = "subsidy.rule.activate";
+
+    /** 管理员提名商品参加国补 —— {@code POST /admin/marketing/subsidy/nominate}。**新增类** ⇒ {@code BeforeJson} 恒 NULL。 */
+    public static final String SUBSIDY_NOMINATE = "subsidy.nominate";
 
     private AuditActions() {
     }

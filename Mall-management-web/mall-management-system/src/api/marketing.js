@@ -203,3 +203,130 @@ export function claim(account, couponId) {
 export function claimBatch(account) {
   return post(endpoints.marketing.claimBatch, q({ Account: account }))
 }
+
+// ── C3 块 5 · commit 3〈国补〉────────────────────────────────────────────────────
+//
+// 三个子域的**同一张表族**（`subsidy_rule` 规则 + `subsidy_goods` 提名/确认），双向制：
+// **平台提名 → 商家确认**。故这里的函数分两拨：管理端「建规则 / 提名 / 看提名」
+// （对应 `AdminSubsidyController`），商家端「看发给我的 / 同意或拒绝」（对应 `SubsidyController`）。
+//
+// ⚠️ **补贴金额由后端现算**（`SubsidyAmount` / `PayAmount`），前端**不许**自己拿
+//    `Price × Ratio` 再算一遍 —— 「Cap = 0 表示不封顶」这条规则复刻到前端就多一份会跑偏的真相。
+// ⚠️ **`/marketing/subsidy/goods` 是「登录可见、匿名 401」**（它不挂 `IdentityGuard`，但也不在
+//    `AUTH_WHITELIST` 里 —— 后端刻意没为它放宽公开面）。⇒ 调用方必须**先判 `isLoggedIn()`**
+//    再发，否则 `http.js` 的 `handleUnauthorized` 会把公开页踢回登录页（同 `NotifyInbox.vue`
+//    与商品详情页领券块那条先例）。
+
+// ── 管理端：国补治理（`/admin/marketing/subsidy/*`，TD-18：无角色闸）─────────────
+
+/**
+ * 国补规则列表。
+ * @param {{Status?:string, limit?:number}} [params]
+ *        `Status` 走白名单：`'active'` / `'stopped'`；**未知值后端报错**（不静默当成「不筛」）。
+ * @returns {Promise<{success:boolean, list:Array, total:number, limit:number, msg?:string}>}
+ *          `list[]`：`{Id, RuleId, Name, CategoryMatch, Ratio, Cap, Status, StartAt, EndAt, created_at, updated_at}`
+ *          ⚠️ `Ratio` 是**小数**（`0.1500` = 15%）；`Cap = 0` = **不封顶**。
+ *          `StartAt` / `EndAt` 为 `null` = **不限**（不是「已过期」）。
+ */
+export function subsidyRuleList(params) {
+  return post(endpoints.marketingSubsidy.list, q(params))
+}
+
+/**
+ * 建国补规则。
+ * @param {{Name:string, CategoryMatch?:string, Ratio:string|number, Cap?:string|number,
+ *          StartAt?:string, EndAt?:string}} params
+ *        · `CategoryMatch`：适用类目名，**逗号分隔**；空 = 不限（对齐 `goods.GoodType`）
+ *        · `Ratio`：补贴比例。⚠️ **既收 `0.15` 也收 `15`** —— 后者按百分数读成 0.15
+ *          （页面上那格写「15」比写「0.15」自然）。必须 > 0 且 ≤ 1（100%）
+ *        · `Cap`：单笔补贴上限（元）。`0` / 省略 = **不封顶**
+ *        · `StartAt` / `EndAt`：`'YYYY-MM-DD HH:MM:SS'`（也收 `'YYYY-MM-DD'`），可空 = 不限
+ * @returns {Promise<{success:boolean, msg:string, RuleId?:string}>}
+ *          成功时带新建的 `RuleId`（业务串，形如 `SBABCD12345678`）—— 提名 / 停用要它。
+ */
+export function subsidyRuleCreate(params) {
+  return post(endpoints.marketingSubsidy.create, q(params))
+}
+
+/** 停用国补规则（**逻辑废弃**：`Status='stopped'`，行还在）。重复停用 ⇒ `success:true` + `updated:0`。 */
+export function subsidyRuleStop(ruleId) {
+  return post(endpoints.marketingSubsidy.stop, q({ RuleId: ruleId }))
+}
+
+/** 重新启用国补规则。 */
+export function subsidyRuleActivate(ruleId) {
+  return post(endpoints.marketingSubsidy.activate, q({ RuleId: ruleId }))
+}
+
+/**
+ * 提名一件商品参加国补 —— 本域**唯一**会触达商家的写端点。
+ * ⚠️ 成功会**同时**给商品所属商家发一条 `subsidy.nominated` 系统通知（商家在消息中心同意 / 拒绝）。
+ *    ⇒ 商家那边收到之前，`subsidy_goods.Status` 恒为 `pending`，**用户端看不到任何东西**。
+ * @param {string} ruleId
+ * @param {number|string} goodsId `goods.Id`（**自增主键**，不是 `ProductCode`）
+ * @returns {Promise<{success:boolean, msg:string, GoodsId?:number, GoodName?:string,
+ *   MerchantId?:string, RuleName?:string}>}
+ *          重复提名 ⇒ `success:false` +「该商品已在这条规则下，无需重复提名」（撞唯一键，不是 500）。
+ */
+export function subsidyNominate(ruleId, goodsId) {
+  return post(endpoints.marketingSubsidy.nominate, q({ RuleId: ruleId, GoodsId: goodsId }))
+}
+
+/**
+ * 提名列表（管理端看全量：谁被提名了、商家点头没有）。
+ * @param {{Status?:string, MerchantId?:string, limit?:number}} [params]
+ *        `Status` ∈ `'pending'` / `'approved'` / `'rejected'`；省略 = 全部
+ * @returns {Promise<{success:boolean, list:Array, total:number, limit:number}>}
+ *          `list[]`：`{Id, RuleId, GoodsId, GoodName, MerchantId, Status, Reason, created_at, updated_at,
+ *          RuleName, Ratio, Cap}`
+ */
+export function subsidyNominations(params) {
+  return post(endpoints.marketingSubsidy.nominations, q(params))
+}
+
+// ── 商家端 / 用户端（`/marketing/subsidy/*`）───────────────────────────────────
+
+/**
+ * 商家端：**发给我的**国补提名。
+ * @param {string} merchantId 商家业务号（`goods.MerchantId` = `login.Id`）。⚠️ 传别人的 ⇒ **403**。
+ * @param {{Status?:string, limit?:number}} [params] `Status` 省略 = 全部（页面自己分「待处理 / 已处理」）
+ * @returns {Promise<{success:boolean, list:Array, msg?:string}>}
+ *          `list[]` 在提名行之外多带 `RuleName` / `Ratio` / `Cap` / `RuleEndAt`（页面要显示「补多少、到什么时候」）。
+ */
+export function subsidyInvitations(merchantId, params) {
+  return post(endpoints.subsidy.invitations, q({ MerchantId: merchantId, ...(params || {}) }))
+}
+
+/**
+ * 商家端：同意 / 拒绝一条提名。
+ *
+ * @param {string} merchantId 商家业务号 —— 传别人的 ⇒ **403**（`IdentityGuard`）。
+ * @param {number|string} id `subsidy_goods.Id`
+ * @param {boolean} approve ⚠️ **缺省即拒绝**（后端把非 `"true"` 一律当拒绝）——
+ *        「没表态」绝不等于「同意参加」。拒绝时 `reason` **必填**。
+ * @param {string} [reason] 拒绝理由（同意时忽略）
+ * @returns {Promise<{success:boolean, outcome?:'confirmed'|'rejected'|'already-handled',
+ *   msg:string, Id?:number}>}
+ *          ⚠️ `outcome:'already-handled'` 时 **`success` 仍是 `true`** —— 那是「这行早处理过了」，
+ *          不是失败（CAS 落空）。页面照常刷新列表即可，**别弹错误**。
+ */
+export function subsidyConfirm(merchantId, id, approve, reason) {
+  return post(endpoints.subsidy.confirm,
+    q({ MerchantId: merchantId, Id: id, Approve: approve ? 'true' : 'false', Reason: reason }))
+}
+
+/**
+ * 国补商品列表（用户端「国家补贴」标签 / 筛选的数据源）。
+ *
+ * ⚠️ **只在已登录时发**（见本段文件头那条）。后端只回**已确认 + 规则在期 + 商品在架**的行
+ * ⇒ 见到一行就等于「这件商品此刻真的在享受国补」。
+ *
+ * @param {{GoodType?:string, limit?:number}} [params] `GoodType` 非空 ⇒ 只回该类目
+ * @returns {Promise<{success:boolean, list:Array, total:number, limit:number}>}
+ *          `list[]`：`{Id, GoodsId, GoodName, MerchantId, RuleId, RuleName, Ratio, Cap,
+ *          Price, GoodImg, GoodType, ProductCode, SubsidyAmount, PayAmount}`
+ *          **`SubsidyAmount` / `PayAmount` 是后端算好的**（见文件头那条 ⚠️）。
+ */
+export function subsidyGoods(params) {
+  return post(endpoints.subsidy.goods, q(params))
+}

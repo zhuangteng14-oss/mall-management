@@ -47,6 +47,8 @@ import com.minke.mallmanagement.shop.follow.service.ShopFollowService;
 import com.minke.mallmanagement.shop.profile.dao.ShopProfileDao;
 import com.minke.mallmanagement.shop.profile.service.ShopProfileService;
 import com.minke.mallmanagement.marketing.discount.service.DiscountLimitService;
+import com.minke.mallmanagement.marketing.subsidy.dao.SubsidyDao;
+import com.minke.mallmanagement.marketing.subsidy.service.SubsidyService;
 import org.junit.jupiter.api.BeforeEach;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
@@ -241,7 +243,14 @@ import static org.mockito.Mockito.when;
         // 的构造器多吃了它一个 bean（`GoodsService` 本身已被 @Import，见上）——
         // 它一缺席，整个切片上下文同样**启动失败**。
         // ⚠️ 依赖链只有一层：`DiscountLimitService` → `TemplateService`（上面已 @Import）。没有 DAO。
-        DiscountLimitService.class})
+        DiscountLimitService.class,
+        // C3 块 5〈国补〉（2026-10-12，commit 3）：**两个**新 Controller（`AdminSubsidyController`
+        // + `SubsidyController`）+ 一个 @Service（`SubsidyService`）+ 一个 @Dao（`SubsidyDao`）——
+        // **第十一次同一处地雷**（`@WebMvcTest` 无参会加载全部 @Controller，新控制器一进来，
+        // 切片上下文就会因为「找不到 SubsidyService」而**启动失败**，同前十笔）。
+        // ⚠️ 依赖链三层：Service → Dao；两个 Controller 另各吃一个**已在清单里**的 bean
+        //    （`NotificationService` 块 1、`AuditService` 块 1）⇒ 这两条不必重复登记。
+        SubsidyDao.class, SubsidyService.class})
 public abstract class AbstractSmokeTest {
 
     @Autowired

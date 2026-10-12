@@ -4,7 +4,7 @@
 // 「路径字面量只允许出现在本文件」—— 后者强得多，且同样可 grep 自动化（方案 Q8）。
 //
 // 端点来源：14 个 view 里 **42 处 fetch + 6 处 URL 赋值**，逐条抽取
-// （2026-10-04，切换自 `9add994`）共 **31 个唯一端点**，按 M5 的四域分组（+2 条 `user.me` / `user.logout`：会话恢复笔与翻开关笔 2026-10-05 加，+1 条 `user.token`：多账户隔离笔 2026-10-06 加 —— 三条均**非** view 抽取 ⇒ 加上 C3 批 A 的 3 条 `admin.audit*`（2026-10-08）与 C3 块 1·I2 的 8 条（`admin.notify*` 4 + `notification.*` 4，2026-10-09，同样**非** view 抽取），再加 C3 块 2〈用户块〉的 11 条（`user.updateProfile` 1 + `merchant.*` 2 + `admin.accounts*` 8，2026-10-09，同样**非** view 抽取），本表实为 **56** 条；再加 C3 块 3〈商品块〉的 14 条（`goodsB3` 2 + `catalog` 1 + `catalogAdmin` 11，2026-10-10，同样**非** view 抽取）；再经同日〈模板表通用化〉就地改造（**删** `catalog` 1 + `catalogAdmin` 4 + `admin.notifyTemplate*` 2 = 7 条，**加** `template` 2 + `templateAdmin` 4 = 6 条），现为 **69** 条；再加 C3 块 4〈订单块〉的 9 条（`cart` 5 + `orderAdmin` 4，2026-10-10，同样**非** view 抽取 —— 唯一调用方是新建的 `api/order.js`），现为 **78** 条；再加 C3 块 4 补丁〈订单块〉的 1 条（`order.orderDetail`，2026-10-10，同样**非** view 抽取），现为 **79** 条；再加可视化段（2026-10-11）的 4 条（`goods.skuList` 1〔与 `goodsProductCodeSelect` 同行追加〕+ `stats.*` 3〔末尾新增组〕，同样**非** view 抽取），现为 **83** 条）；再加 C3 块 5〈营销块〉commit 1（券，2026-10-11）的 10 条（`marketingCoupon` 7 + `marketing` 3，同样**非** view 抽取 —— 唯一调用方是新建的 `api/marketing.js`），现为 **93** 条；再加同日〈券的信息架构重排〉的 1 条（`marketing.claimBatch` = `/marketing/coupon/claimBatch`，2026-10-11，同样**非** view 抽取 —— 仍是 `api/marketing.js` 的调用方），现为 **94** 条）。
+// （2026-10-04，切换自 `9add994`）共 **31 个唯一端点**，按 M5 的四域分组（+2 条 `user.me` / `user.logout`：会话恢复笔与翻开关笔 2026-10-05 加，+1 条 `user.token`：多账户隔离笔 2026-10-06 加 —— 三条均**非** view 抽取 ⇒ 加上 C3 批 A 的 3 条 `admin.audit*`（2026-10-08）与 C3 块 1·I2 的 8 条（`admin.notify*` 4 + `notification.*` 4，2026-10-09，同样**非** view 抽取），再加 C3 块 2〈用户块〉的 11 条（`user.updateProfile` 1 + `merchant.*` 2 + `admin.accounts*` 8，2026-10-09，同样**非** view 抽取），本表实为 **56** 条；再加 C3 块 3〈商品块〉的 14 条（`goodsB3` 2 + `catalog` 1 + `catalogAdmin` 11，2026-10-10，同样**非** view 抽取）；再经同日〈模板表通用化〉就地改造（**删** `catalog` 1 + `catalogAdmin` 4 + `admin.notifyTemplate*` 2 = 7 条，**加** `template` 2 + `templateAdmin` 4 = 6 条），现为 **69** 条；再加 C3 块 4〈订单块〉的 9 条（`cart` 5 + `orderAdmin` 4，2026-10-10，同样**非** view 抽取 —— 唯一调用方是新建的 `api/order.js`），现为 **78** 条；再加 C3 块 4 补丁〈订单块〉的 1 条（`order.orderDetail`，2026-10-10，同样**非** view 抽取），现为 **79** 条；再加可视化段（2026-10-11）的 4 条（`goods.skuList` 1〔与 `goodsProductCodeSelect` 同行追加〕+ `stats.*` 3〔末尾新增组〕，同样**非** view 抽取），现为 **83** 条）；再加 C3 块 5〈营销块〉commit 1（券，2026-10-11）的 10 条（`marketingCoupon` 7 + `marketing` 3，同样**非** view 抽取 —— 唯一调用方是新建的 `api/marketing.js`），现为 **93** 条；再加同日〈券的信息架构重排〉的 1 条（`marketing.claimBatch` = `/marketing/coupon/claimBatch`，2026-10-11，同样**非** view 抽取 —— 仍是 `api/marketing.js` 的调用方），现为 **94** 条；再加 C3 块 5〈营销块〉B 组 + 续笔（店铺域，2026-10-12）的 4 条（`shop` 组：`follow` / `unfollow` / `followState` / `profile`，同样**非** view 抽取 —— 新建的 `api/shop.js`），现为 **98** 条；再加 C3 块 5〈营销块〉commit 3（国补，2026-10-12）的 9 条（`marketingSubsidy` 6 + `subsidy` 3，同样**非** view 抽取 —— 管理端六条走 `api/marketing.js`，商家侧三条里的两条给 `views/NotifyInbox.vue`、第三条给详情页 / 搜索页的国补标签），现为 **107** 条）。
 //
 // ⚠️ 路径里的 `GoodsProductCodeSelect` 是**大写开头**，与后端 `@PostMapping` 逐字一致，
 //    不是笔误 —— 改名会 404。
@@ -257,5 +257,34 @@ export const endpoints = {
     followState: '/shop/followState',
     // 店铺公开档案（登录名 / 注册时刻 / 入驻审核状态）。⚠️ 与上三条不同族：**公开、无闸**。
     profile: '/shop/profile',
+  },
+  // ⚠️ C3 块 5（营销块 · commit 3 国补，2026-10-12）：管理端**国补治理** 6 条
+  //    （`AdminSubsidyController`，`@RequestMapping("/admin/marketing/subsidy")`）。
+  //    同 `marketingCoupon` 各款（**非** view 抽取；唯一调用方 `views/admin/MarketingPage.vue`，
+  //    经 `api/marketing.js` 包一层）。**单列一组、追加在对象尾**（往任何组里插行都会把本文件
+  //    下面的条目整体下移，而「新增行落在被引行之后」是本仓唯一的零漂移手法）。
+  //    ⚠️ 同样**不给角色闸留位置** —— 后端这 6 条也没有角色判据（TD-18：管理员 cookie 铸不出票）。
+  //    ⚠️ 只有 `create` / `stop` / `activate` / `nominate` 是写端点 ⇒ 只有它们写 `admin_audit`；
+  //    `list` / `nominations` 是读，不留痕。
+  marketingSubsidy: {
+    list: '/admin/marketing/subsidy/list',
+    create: '/admin/marketing/subsidy/create',
+    stop: '/admin/marketing/subsidy/stop',
+    activate: '/admin/marketing/subsidy/activate',
+    nominate: '/admin/marketing/subsidy/nominate',
+    nominations: '/admin/marketing/subsidy/nominations',
+  },
+  // ⚠️ C3 块 5（营销块 · commit 3 国补，2026-10-12）：**商家侧 + 用户侧** 3 条
+  //    （`SubsidyController`，`@RequestMapping("/marketing")`）。
+  //    ⚠️ 与 `marketing`（券）**同前缀、不同路径段**（`/marketing/subsidy/*`）⇒ 单列一组，
+  //        组名不能也叫 `marketing`。四条券端点一行没动，本组是**纯追加**。
+  //    ⚠️ 前两条各跑 `IdentityGuard.requireSelfOrAdmin(request, MerchantId)` ⇒ 传**别人的**
+  //        `MerchantId` 是 **403**（不是「查不到」），与 `marketing` / `order` 同形态。
+  //    ⚠️ 第三条 `goods` **不挂 IdentityGuard**，但它**也不在 `AUTH_WHITELIST` 里**
+  //        ⇒ 未登录必 401（「登录可见、匿名不可见」）。判据与代价记在 `api/marketing.js` 文件头。
+  subsidy: {
+    invitations: '/marketing/subsidy/invitations',
+    confirm: '/marketing/subsidy/confirm',
+    goods: '/marketing/subsidy/goods',
   },
 }
