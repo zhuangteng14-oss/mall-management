@@ -109,7 +109,15 @@ public class AdminCouponController {
         return Result.of(couponService.grants(CouponId, limit));
     }
 
-    /** 定向发放：管理端指定一个人给一张券。 */
+    /**
+     * 定向发放：管理端指定一个人给一张券。
+     *
+     * <p>⚠️ <b>{@code ToAccount} 是**登录名**（{@code login.UserName}）</b>—— 2026-10-12 起
+     * （用户裁定「乙」：券按**账号**口径，两端一份券包）。此前填的是 {@code user.customerid}，
+     * 且**十三家商家全都没有 customerid** ⇒ 旧口径下根本没法「发给某个商家」。
+     * <p>⚠️ 逐条判据（券存在 / 未停用 / 未过期 / 有余量 / 这个没领过 / **不是他自己发的**）
+     * 全在 {@code CouponService.doClaim} 里 —— 与用户端自助领取**同一条路径**，本端点不加自己的闸。
+     */
     @PostMapping("/grant")
     public Result<Map<String, Object>> grant(
             @RequestParam(value = "CouponId", required = false) String CouponId,

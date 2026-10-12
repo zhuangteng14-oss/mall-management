@@ -456,7 +456,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { http, handleApiError } from '../api/http'
 import { endpoints } from '../api/endpoints'; import { orderAdd, cartAdd } from '../api/order'   // ⚠️ C3 块 4：**同行追加**（不新增行 —— 本文件 `:794`/`:803` 被 `slot-registry.md:1994-1995` 按行号引（〈Bug 1〉本笔 +19 行前为 `:775`/`:784`），此处加行会顶漂它们）。两个函数就是原先那两串 `URLSearchParams` + `http.post` + `res.json()` 的收口
 import CashierDialog from '../components/CashierDialog.vue'; import ProductCard from '../components/ProductCard.vue'   // ⚠️ 2026-10-10（Bug 1）：收银台与「我的订单」**共用同一个组件** —— 本行**确实**新增了一行；本笔在 `ProductPage.vue` 净 +19 行（`git diff` 实测：模板 `:412` 起 +5、import +1、`handlePay` 段 +13）⇒ 下面两处 `:775`/`:784` 漂到 `:794`/`:803`，随本笔一并重指（见 `slot-registry.md:1994-1995`）
-import { getMerchantId, getCustomerId, isLoggedIn } from '../api/auth'; import IconGlyph from '../components/ui/IconGlyph.vue'; import { coupons, claim } from '../api/marketing'; import { couponName } from '../config/coupon-format'   // ⚠️ 四条 import **同行**（第 2、3 条：2026-10-11 补图标笔 + C3 块 5 · commit 1；第 4 条 `couponName`：块 5 · A 组 · A7 后半）—— 合并到既有行 = 不新增行号漂移（本文件 `:794`/`:803` 被 `slot-registry.md:1994-1995` 按行号引，上面 `:424` 那条注释记过同一件事）。⚠️ **块 5 · commit 1 仍整体 +90 行**（模板 +17 / `<script setup>` 尾 +70 / `<style>` +3）⇒ `slot-registry.md:1994` 引的 `:794` 漂 **`:881`**、`:1995` 引的 `:803` 漂 **`:890`**（两值均为 `grep -n` 实测，见 `_work/b5-repoint.md`）。
+import { getMerchantId, getCustomerId, getUsername, isLoggedIn } from '../api/auth'; import IconGlyph from '../components/ui/IconGlyph.vue'; import { coupons, claim } from '../api/marketing'; import { couponName } from '../config/coupon-format'   // ⚠️ 四条 import **同行**（第 2、3 条：2026-10-11 补图标笔 + C3 块 5 · commit 1；第 4 条 `couponName`：块 5 · A 组 · A7 后半；`getUsername`：块 5 券口径改登录名，2026-10-12）—— 合并到既有行 = 不新增行号漂移（本文件 `:794`/`:803` 被 `slot-registry.md:1994-1995` 按行号引，上面 `:424` 那条注释记过同一件事）。⚠️ **块 5 · commit 1 仍整体 +90 行**（模板 +17 / `<script setup>` 尾 +70 / `<style>` +3）⇒ `slot-registry.md:1994` 引的 `:794` 漂 **`:881`**、`:1995` 引的 `:803` 漂 **`:890`**（两值均为 `grep -n` 实测，见 `_work/b5-repoint.md`）。
 
 const route = useRoute()
 const router = useRouter()
@@ -813,11 +813,11 @@ onMounted(async () => {
 // 第二个实现）。
 //
 // ⚠️ **身份用 `couponAccount`，不是本页既有的 `customerId`**：`customerId`（`:443`）自带一条
-//    「客户号为空则退回商家号」的降级链 —— 那是给 `orderAdd` 用的（商家也能下单）。券不行：
-//    `/marketing/*` 的 `Account` 语义是 **`user.customerid`**（见 `CouponController` 类注释），
-//    拿商家的 `merchantid` 去领券会落一条**永远核销不掉**的 grant。
-//    ⇒ 券只认客户号；没有就整块不出券（与 `HomePage.vue` 券包同一个判据）。
-const couponAccount = getCustomerId() || ''
+//    「客户号为空则退回商家号」的降级链 —— 那是给 `orderAdd` 用的（商家也能下单）。券不走那套：
+//    `/marketing/*` 的 `Account` 语义是 **登录名**（`login.UserName`）—— 2026-10-12 用户裁定「乙」，
+//    **由 `user.customerid` 改过来**（见 `CouponController` / `CouponDao` 类注释）。对商家来说
+//    `customerid` 全是 NULL ⇒ 统一挂登录名，两端一份券包；没有登录名就整块不出券（同 `HomePage`）。
+const couponAccount = getUsername() || ''
 const claimList = ref([])
 const claiming = ref('')
 

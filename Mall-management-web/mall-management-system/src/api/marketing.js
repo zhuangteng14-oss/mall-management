@@ -17,6 +17,15 @@
 //
 // ⚠️ 与 `api/template.js` / `api/order.js` 的 `q()` / `post()` **是同形复制、不是共享** ——
 //    本仓 `api/*.js` 各模块自带这两个内联函数，未抽公共模块。
+//
+// ⚠️ **`account` 是「账号」= 登录名（`login.UserName` = `user.username`）—— 2026-10-12 改口径。**
+//    改前它是 `user.customerid`（客户业务号）。改制的**唯一理由**：真库 13 个商家 `customerid`
+//    全是 NULL（种子商家直接建号、没走过客户阶段）⇒ 商家在券包上**没有账号可挂**，「两端一份券包」
+//    就没法成立。登录名是两类账号**都有、且同一个**的那个键（`login` 47 行 ↔ `user` 47 行一一对应）。
+//    ⚠️ **后端别只改 DAO**：`CouponController` 四条的身份判据也从「比业务号」换成了
+//    `requireSelfOrAdminByUsername`（比登录名）—— 不换就是非管理员**恒 403**。
+//    ⚠️ 调用方一律用 `api/auth.js` 的 `getUsername()`，**不要**用 `getCustomerId()`（对商家是空串）
+//    也**不要**用 `resolveBuyerId()`（它 customerid 优先 ⇒ 客户会拿到错的那个值）。
 import { http } from './http'
 import { endpoints } from './endpoints'
 
@@ -126,7 +135,7 @@ export function couponStats() {
 
 /**
  * 领券中心：可领的券。
- * @param {string} account 用户业务号（`user.customerid`）。
+ * @param {string} account **账号（登录名）** —— 见文件头那条 ⚠️。
  * @param {number} [limit] 列表上限；省略 ⇒ 后端默认 100（`CouponService.DEFAULT_LIMIT`）。
  * @param {'1'} [thisWeek] `'1'` ⇒ 只回**本周新发布**的（主页领券中心）；省略 ⇒ **全部可领**
  *        （用户中心弹窗的「可领」tab，含旧券）。
@@ -156,7 +165,7 @@ export function coupons(account, limit, thisWeek, merchantAccount) {
 /**
  * 券包（我的券）。
  *
- * @param {string} account 用户业务号。
+ * @param {string} account **账号（登录名）**。
  * @returns {Promise<{success:boolean, list:Array, redDot:boolean, expiringCount:number}>}
  *          ⚠️ **排序由后端定好**（`expiring` 快过期 → 最上 / `usable` 正常 → 中间 /
  *          `used` 已用 / `expired` 已过期 → 沉底）⇒ **前端按数组原序渲染，别自己再排一遍**。
@@ -183,7 +192,7 @@ export function claim(account, couponId) {
  *
  * ⚠️ **不传 CouponId** —— 领哪些由**服务端**定（「本周新发布 + 启用 + 未过期 + 我还没领过 + 还有余量」）。
  *    「本周」是服务端语义，前端手里那份列表可能是旧的 ⇒ 不在前端定集合。
- * @param {string} account 用户业务号。
+ * @param {string} account **账号（登录名）**。
  * @returns {Promise<{success:boolean, msg:string, total:number, claimed:number, failed:number,
  *   daysLeft:number, items:Array<{CouponId:string, Name:string, success:boolean, msg:string}>}>}
  *          ⚠️ **顶层 `success:true` ≠ 全成功** —— 它是「批量动作**执行完毕**」。

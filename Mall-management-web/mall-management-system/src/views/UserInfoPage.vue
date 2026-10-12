@@ -101,14 +101,14 @@
               ⚠️ 但**外面那层容器 `div.assets-box` 两壳都有** —— 「区域边界」与「放不放得下」无关；
                  只有**滚动 + 渐隐**才是溢出样式（判据是项数，不是角色）。
            ⚠️ 七项里**只有「优惠券」复用客户版那颗 `div[role=button]`**（用户 2026-10-12 两处待定 ①：
-              「券包是『我这个人』的券，不分商家 / 用户视角」）—— 同一组件、同一数据源（`customerId`）。
-           ⚠️ **边界 2（用户 2026-10-12 要求给明确态）**：`user.customerid` 为空时券包**没有账号可挂**
-              ⇒ 那一格的值落 `—` + **不可点**（无 `role` / 无 `tabindex` 的裸 `div` + `title` 说明原因），
-              **不弹一个空账号的券包**。
-              ⚠️ 现实性（VM 库实测）：**14 个商家（`user.usertype='商家'`）、14 个 `customerid` 为空、
-              0 个非空**（种子商家是直接建号、没走过客户阶段；只有 `promoteToMerchant` 那条路才
-              「刻意保留 customerid」）⇒ **手验时商家端这一格必然看到 `—`**；
-              真入口要在「先注册成客户、再入驻通过」的账号上才看得到。
+              「券包是『我这个人』的券，不分商家 / 用户视角」）—— 同一组件、同一数据源（`couponAccount`，
+              口径 2026-10-12 由 `user.customerid` 改为**登录名**）。
+           ⚠️ **「边界 2」已废（2026-10-12 同一次裁定）**：不再按 `user.customerid` 是否为空分两支
+              —— 改口径后 `Account` = `login.UserName`，客户与商家**都有** ⇒ 这一格与客户版**逐字同形**，
+              恒可点；「没有券」这种空态画在**弹窗**里，不在这格上（见下面那颗 `div` 的头注释）。
+              ⚠️ 旧口径下 VM 库里 14 个商家 `customerid` 全空、0 个非空（种子商家直接建号、没走过
+              客户阶段；只有 `promoteToMerchant` 那条路才「刻意保留 customerid」）⇒ 当年手验这一格
+              必然是 `—` 且点不动 —— 那正是用户裁这次改口径要修的「漏点」。
            ⚠️ 「店铺信息」跳 `/shop?MerchantId=<自己的商家号>` —— **那条路由属 commit C**（本 commit 里
               点它只有 vue-router 的控制台告警、不跳转），这是**按批准的三 commit 切分**排的，不是遗漏。 -->
       <!-- ⚠️ 「区域边界」这一层**必须在滚动区之外**（理由 + 与 `tokens.css:35`「禁嵌套卡片」的关系
@@ -120,8 +120,17 @@
         title="待 C3〈商家中心〉——积分 / 余额 / 我的收藏三格无聚合端点（N=3），经营等级规则先占位（裁定 ④）；⚠️ 「优惠券」格已于 C3 块 5 接通（复用用户中心券包弹窗）、「店铺信息」「商家认证」两格已接通（跳店铺主页 / 读 /merchant/myApplications 最新一条的状态）"
       >
         <div class="asset-card"><Star class="card-ic" aria-hidden="true" /><b>积分</b><span>—</span></div>
+        <!-- ⚠️ 这一格**无条件可点**（「边界 2」已废：2026-10-12 券改**账号口径**）。
+             原先按 `user.customerid` 是否为空分「可点」与「不可点 + `—` + `title` 说明原因」两支，
+             理由是「券包挂在客户号上」。改口径后 `Account` = **登录名**（`login.UserName`），
+             客户与商家**都有**（VM 库实测 47 ↔ 47 一一对应）⇒ 两支合一，且与客户版那一格
+             **逐字同形**（用户：「两端券功能一字不差」——同组件 / 同数据源 / 同行为）。
+             ⚠️ 券数为 0 / 取不到时**不在这儿加空态**：`—` 照旧只由 `walletCount === null` 决定；
+             真正的空态画在弹窗里（用户：「customerid 为空 → 弹窗显示空态（不造假）」）。
+             ⚠️ 被删那一支当年还有个副作用：商家壳在 VM 库里**14 家全无 customerid** ⇒ 手验时
+             这一格恒落 `—` 且不可点。现在它在**任何已登录账号**下都是真入口。
+             ⚠️ 壳仍是 `div[role=button]`（同客户版）：可点 / 不可点两态共用同一套卡片外壳。 -->
         <div
-          v-if="customerId"
           class="asset-entry asset-card"
           role="button"
           tabindex="0"
@@ -133,15 +142,6 @@
           <Ticket class="card-ic" aria-hidden="true" />
           <b>优惠券</b>
           <span>{{ walletCount === null ? '—' : walletCount }}<i v-if="walletRedDot" class="wallet-dot" title="有券快过期">●</i></span>
-        </div>
-        <!-- 边界 2 的空态：**不可点**的裸 `div`（与另外三格同形、同样有卡片外壳），`title` 说明为什么没有。 -->
-        <div
-          v-else
-          class="asset-card"
-          title="本账号没有客户号（user.customerid 为空）—— 券包挂在客户号上，这一格因此没有券可看。入驻时若保留过客户号，它会自动变成真券包入口。"
-        >
-          <Ticket class="card-ic" aria-hidden="true" />
-          <b>优惠券</b><span>—</span>
         </div>
         <div class="asset-card"><Wallet class="card-ic" aria-hidden="true" /><b>余额</b><span>—</span></div>
         <div class="asset-card"><Heart class="card-ic" aria-hidden="true" /><b>我的收藏</b><span>—</span></div>
@@ -270,7 +270,7 @@
               **唯一入口**（用户定「主页不显示券包」，主页那两处入口已删）⇒ 从裸 `div` 改成
               可点元素 + 真券数 + 快过期红点，点开是 `components/CouponWalletDialog.vue`。
               另三格**不动**（值仍是 `—`）。 ⇒ 本节 `title` 里「均无聚合端点（N=4）」那一句已不成立，随之改掉。
-           ⚠️ **本节与商家版那 7 项里的「优惠券」格是同一颗 `div[role=button]`、同一个 `customerId`、
+           ⚠️ **本节与商家版那 7 项里的「优惠券」格是同一颗 `div[role=button]`、同一个 `couponAccount`、
               同一个弹窗**（块 5 B 组两处待定 ①：「券包是『我这个人』的券，不分视角」）—— 当年那句
               「商家看自己的券在管理端，不在这个壳里」**已废**，别再按它推断商家壳里没有券包入口。 -->
       <!-- ⚠️ 同商家版：区域边界（`div.assets-box`）在滚动区之外；两壳同款容器。 -->
@@ -414,7 +414,7 @@
          ⚠️ 两枚都是 `position: fixed` 的遮罩，放在 `<main>` 里不影响布局。 -->
     <CouponWalletDialog
       :open="walletOpen"
-      :account="customerId"
+      :account="couponAccount"
       @close="walletOpen = false"
       @changed="loadWallet"
     />
@@ -530,16 +530,16 @@ const getUserData = async () => {
       idValue.value = data.merchantid
     }
 
-    // ⚠️ C3 块 5（2026-10-11）：券包的 `Account` 是**客户号**（`user.customerid`）。
-    //    **块 5 B 组（2026-10-12）改了这一行**：券包入口现在**两支壳都有** —— 商家端【无名框】的第 2 格
-    //    复用同一颗 `div[role=button]` + 同一个弹窗（用户「两处待定 ①」：券包是「我这个人」的券，不分
-    //    商家 / 用户视角）⇒ 原来的 `!isMerchantShell.value` 守卫**已废**，判据只剩「有没有客户号」。
-    //    ⚠️ 这条守卫的**现实效果别读错**：VM 库里 14 个商家**全都没有** `customerid`（种子商家直接建号、
-    //       没走过客户阶段）⇒ 他们在这一行就返回，券格落「边界 2」的空态；真发出请求的只有
-    //       `promoteToMerchant` 那条路来的商家（老客户号被**刻意保留**）。
-    //    ⚠️ `isMerchantShell` 此刻已按刚赋的 `userInfo.value` 算好（它就是上面那两处判据的同源量）。
-    customerId.value = data.customerid || ''
-    if (customerId.value) loadWallet(customerId.value)
+    // ⚠️ C3 块 5（2026-10-11）：券包的 `Account` 当时是**客户号**（`user.customerid`）。
+    //    **2026-10-12 用户裁定「乙」—— 券改「账号口径」**：`Account` = **登录名**（`login.UserName`，
+    //    后端 `CouponController` / `CouponDao` 同笔改）。理由：VM 库 14 个商家 `customerid` **全空**
+    //    （种子商家直接建号、没走过客户阶段）⇒ 旧口径下商家在券包上**没有账号可挂**，那正是漏点。
+    //    ⚠️ 因此这一行**不再读 `data.customerid`**，改读登录名（`getUsername()`，与两处 `openWallet`
+    //       上方那颗 `div` 的判据同源）；`!isMerchantShell.value` 那道守卫在 B 组已废，这里也不再补。
+    //    ⚠️ 兜底不变：取不到账号 ⇒ `loadWallet` 直接回 `null`（券格显 `—`），**不编 0**。
+    //    ⚠️ 与 `HomePage.vue` / `ProductPage.vue` 是同一条判据（都 `getUsername()`）—— 三处要一起改。
+    couponAccount.value = getUsername() || ''
+    if (couponAccount.value) loadWallet(couponAccount.value)
     // 「商家认证」那一格要一个**真状态**（不是 `—`）⇒ 与券包同一次资料加载里问一次，且**只在商家壳问**。
     if (isMerchantShell.value) loadCert()
   } catch (e) {
@@ -634,8 +634,8 @@ const saveProfile = async () => {
 // 本段只管三件事：有几张 / 有没有快过期 / 点开弹窗；券的明细全在
 // `components/CouponWalletDialog.vue` 里（它自己拉数据）。
 
-/** 客户号（`user.customerid`）—— 券包 `Account` 与弹窗 `:account` 都用它。 */
-const customerId = ref('')
+/** 券包 `Account`（**登录名**，`login.UserName`，2026-10-12 起）—— 弹窗 `:account` 与摘要查询都用它。 */
+const couponAccount = ref('')
 
 /** 弹窗开关。 */
 const walletOpen = ref(false)
@@ -665,7 +665,7 @@ const openWallet = () => { walletOpen.value = true }
  * ⚠️ 取不到就回 `null`（渲染「—」）而**不是** `0` —— `0` 会被读成「你真的一张券都没有」。
  */
 const loadWallet = async (account) => {
-  const acct = account || customerId.value
+  const acct = account || couponAccount.value
   if (!acct) { walletCount.value = null; walletRedDot.value = false; return }
   try {
     const data = await myCoupons(acct)

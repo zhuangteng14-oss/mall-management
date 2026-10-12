@@ -4,9 +4,9 @@
      归**用户中心**。主页 `.tickets` 右栏整块与快捷块那格「优惠券 / 我的券包」都已删，
      用户中心「优惠券」格是**唯一入口**（`views/UserInfoPage.vue`）。
 
-  ⚠️ 为什么抽成组件（而不是内联进 UserInfoPage）：那页有个 `isMerchantShell` 分支，
-     商家壳**根本不该 mount 本组件**（否则商家账号一进用户中心就白发两个请求）。
-     组件化后 `v-if` 挂在客户分支里即可 —— 与 `CashierDialog` 的取舍同款。
+  ⚠️ 为什么抽成组件（而不是内联进 UserInfoPage）：那页的券包入口**两支壳都要有一颗**，组件化才只有一份实现
+     （同 `CashierDialog` 的取舍）。⚠️ **2026-10-12 起客户 / 商家两支壳都 mount 本组件**（用户：「两端券功能一字不差」）
+     —— 它挂在那页 `<main>` 尾部、两支模板**之外**，所以商家壳天然也拿得到；`:account` 一律传**登录名**。
 
   ⚠️ 本仓无组件库，这份 `<style scoped>` 自备完整一份：`<style scoped>` 只把作用域属性打在
      **子组件根节点**上，根节点**以内**的元素拿不到父页面的样式。
@@ -16,9 +16,9 @@
   数据**自己拉**（同 `CashierDialog` 自己调 `orderPay`，父页保持薄）：
     · 「可领」     ← `coupons(account)`  **不传 `thisWeek`** ⇒ 全量可领（含旧券）＝ 裁定「甲」的「可领」
     · 另三个 tab   ← `myCoupons(account)` 经 `Bucket` 分组，**不重排**（排序全在后端 SQL）
-
+  ⚠️ `account` = **登录名**（`login.UserName`，2026-10-12 由 `user.customerid` 改口径）—— 客户与商家同一把钥匙，本组件**不为商家做任何特殊化**；空账号 ⇒ `<p v-if="!account">` 那句空态，**不造假**。
   用法：
-    <CouponWalletDialog :open="walletOpen" :account="customerId"
+    <CouponWalletDialog :open="walletOpen" :account="couponAccount"
                         @close="walletOpen = false" @changed="loadWallet" />
   `open` 为 false ⇒ 不渲染（开/关都靠它）。
 -->

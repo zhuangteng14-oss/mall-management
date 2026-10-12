@@ -18,6 +18,26 @@ import java.util.Set;
  * ⚠️ 老域（{@code OrderDao} / {@code GoodsDao}）里的 {@code mall_management_sql.} 前缀是 F#1 的
  * 存量债，**别照抄**（照抄会让「一半带前缀、一半不带」的中间态扩散）。
  *
+ * <h2>【{@code Account} = **登录名**（{@code login.UserName} = {@code user.username}）—— 用户 2026-10-12 改口径】</h2>
+ * 本域所有 {@code Account} 入参、{@code coupon_grant.ToAccount} 列、以及它们的读法，量的都是
+ * **登录名**这一个东西。改制前用的是 {@code user.customerid}，改制的**唯一理由**是它撑不住
+ * 「两端一份券包」：真库里 **13 个商家 {@code customerid} 全是 {@code NULL}**
+ * （种子商家直接建号、没走过客户阶段）⇒ 商家在券包这一格上**根本没有账号可挂**。
+ * 登录名是两类账号**都有、且同一个**的那个键（实测 {@code login} 47 行与 {@code user} 47 行
+ * 按 {@code UserName = username} **一一对应、零差集**）。
+ *
+ * <p>⚠️ <b>改名不必——列本来就叫 {@code ToAccount}</b>（{@code mall_management_sql.sql} 的
+ * {@code Comment '领取人账号'}），入参本来就叫 {@code Account}。变的是**值**，不是名字：
+ * <ul>
+ *   <li>{@code coupon_grant.ToAccount}：{@code customerid} → {@code username}
+ *       （存量 2 行已迁移，见本笔 commit message）；</li>
+ *   <li>身份判据：{@code CouponController} 四条从 {@code requireSelfOrAdmin}
+ *       （比**业务号**）换成 {@code requireSelfOrAdminByUsername}（比**登录名**）——
+ *       <b>不换就是全员 403</b>，因为登录名永远不等于 {@code identity.userId()}。</li>
+ * </ul>
+ * ⚠️ 本类的 {@code ?} 全是登录名；**唯一的例外**是 {@link #selectClaimantAccounts}，
+ * 它把登录名翻回**客户业务号**再回（收件人那一侧至今仍按业务号寻址，见该方法的注释）。
+ *
  * <h2>【时间列一律 {@code DATE_FORMAT} 成无时区文本 —— 全仓读侧口径】</h2>
  * 与 {@code NotificationDao} / {@code AdminAuditDao} 同款：库里存 UTC，读出来是
  * {@code 'YYYY-MM-DD HH:MM:SS'} 文本，由**前端**按浏览器时区转。⚠️ 但本域**另有**一处例外：
@@ -98,6 +118,35 @@ public class CouponDao {
      * ⚠️ 这是**滚动窗口**：两边同为 UTC ⇒ 8 小时相消、与上面那条不同，**与时区无关**，故不折。
      */
     private static final String IS_NEW = "(c.created_at >= NOW() - INTERVAL 3 DAY)";
+
+    /**
+     * **「不给自己发的券」** —— 领券中心 / 一键领取的**共同排除式**（用户 2026-10-12 裁定「甲」：
+     * 商家不能领自己发的券，能领别家商家的券 + 平台券）。
+     *
+     * <p>三段读法：
+     * <ol>
+     *   <li>{@code MerchantAccount IS NULL} / {@code = ''} —— **平台券**，谁都能领。
+     *       ⚠️ 列现在是 {@code NOT NULL DEFAULT ''}（实测），{@code IS NULL} 那一支是**防御**，
+     *       不是现状；「空串 = 平台券」才是今天真正在用的那个标记。</li>
+     *   <li>否则：券的 {@code MerchantAccount}（= 发券商家的**业务号**）必须**不等于**调用者自己的
+     *       {@code merchantid}。</li>
+     *   <li>子查询里的 {@code ?} 是**调用者的登录名**（{@code coupon_grant.ToAccount} 与
+     *       {@code Account} 入参同为新口径 —— 见类注释「Account = 登录名」）。
+     *       {@code COALESCE(..., '')} 兜住两种「问不出商家号」：查无此人、以及**客户 / 管理员**
+     *       （他们的 {@code user.merchantid} 是 {@code NULL}）⇒ 回 {@code ''} ⇒ 第 2 段对任何
+     *       非空 {@code MerchantAccount} 都成立 ⇒ **客户照旧看得到全部商家券**。
+     *       ⚠️ 少了这个 {@code COALESCE}，客户侧的 {@code NULL} 会让整个比较变 {@code NULL}
+     *       ⇒ 一条商家券都选不出来（实测踩过这个形状）。</li>
+     * </ol>
+     *
+     * <p>⚠️ <b>本式对「平台券」与「别人的商家券」恒真</b>，只在「自己发的」那一行假 ——
+     * 这正是裁定要的三档。真库实测：客户 {@code 123} 见 11/11 张；商家 {@code yunqi_digital}
+     * 见 10/11（自己那张 {@code CPf65c03d8-…} 消失，平台券与别家的照旧在）。
+     */
+    private static final String NOT_SELF_ISSUED =
+            "(c.MerchantAccount IS NULL OR c.MerchantAccount = '' "
+                    + "OR c.MerchantAccount <> COALESCE((SELECT u.merchantid FROM user u "
+                    + "WHERE u.username = ?), ''))";
 
     private final JdbcClient jdbcClient;
 
@@ -204,6 +253,10 @@ public class CouponDao {
     /**
      * 写一行领取/发放记录。**每人每券限 1 张**由 {@code uk_coupon_grant_coupon_acct} 兜
      * ⇒ 重复领取抛 {@code DuplicateKeyException}（由 Service 接住并回「您已领取过该券」）。
+     *
+     * <p>⚠️ {@code toAccount} 是**登录名**（{@code login.UserName}）—— 2026-10-12 起。
+     * 唯一键与唯一索引都建在这一列上，故**口径一改，「每人限 1 张」里的「人」也跟着变成了账号**，
+     * 正是用户要的那件事（一个账号一份券包）。列名 {@code ToAccount} 本来就说的这个意思。
      */
     public int insertGrant(String couponId, String toAccount, String source) {
         return jdbcClient.sql("INSERT INTO coupon_grant (CouponId, ToAccount, Source, Status) "
@@ -252,6 +305,11 @@ public class CouponDao {
     /**
      * 领券中心：启用中且**未过期**的券，附两个**给这个人**算出来的布尔。
      *
+     * <p>⚠️ <b>「自己发的券」**不列出**</b>（{@link #NOT_SELF_ISSUED}，用户 2026-10-12 裁定「甲」）——
+     * 两条查询共用同一个筛，故一键领取也拿不到它。三道闸里的**第一道**（列表），
+     * 后两道在 {@code CouponService.doClaim}（真闸）。⚠️ 三处判据必须**同款**：
+     * 列表漏筛只是白点一下，列表筛了服务端没筛才是真漏。
+     *
      * <p>⚠️ 已领的**照样列出**（带 {@code Claimed=1} 让前端把它画成「已领取」）：
      * 直接筛掉会让「我明明领过怎么不见了」变成一次没有痕迹的困惑。
      * 领完的也照样列出（{@code SoldOut=1} → 「已领完」）。
@@ -284,9 +342,15 @@ public class CouponDao {
      * {@code MerchantAccount} 相符）；平台券（{@code Scope='all'}）**一条都不回** ——
      * 详情页那块要的是「这件商品的店发的券」，平台券归主页 / 用户中心。
      *
-     * <p>⚠️ 多一个 {@code ?} ⇒ 绑参三元变四元，顺序 = {@code ?} 的**出现序**：
-     * {@code account}（JOIN 里）→ {@code merchantAccount}（WHERE 里）→ {@code limit}（LIMIT）。
+     * <p>⚠️ 多一个 {@code ?} ⇒ 绑参四元，顺序 = {@code ?} 的**出现序**：
+     * {@code account}（JOIN 里）→ {@code account}（**同一个值，第二次**，见下）→
+     * {@code merchantAccount}（WHERE 里，仅 {@code byMerchant} 时）→ {@code limit}（LIMIT）。
      * 改本方法时**成对改**（同 {@code selectByStatus} 的警告）。
+     *
+     * <p>⚠️ 2026-10-12 新增的第 2 个 {@code ?}：{@link #NOT_SELF_ISSUED} 里那个子查询也要
+     * **调用者自己的登录名**（判「这张是不是我发的」）⇒ 同值绑两次。它是**无条件**加的
+     * （不随 {@code byMerchant} 开关）—— 裁定「甲」说的是「商家不能领自己发的券」，
+     * 与「这条查询筛不筛商家」是两件事。
      */
     public List<Map<String, Object>> selectClaimable(String account, int limit, boolean thisWeekOnly,
                                                      String merchantAccount) {
@@ -297,7 +361,8 @@ public class CouponDao {
                 .append(", (").append(IS_NEW).append(") AS IsNew ")
                 .append("FROM coupon c LEFT JOIN coupon_grant g ")
                 .append("ON g.CouponId = c.CouponId AND g.ToAccount = ? ")
-                .append("WHERE c.Status = 'active' AND (c.EndAt IS NULL OR c.EndAt > NOW()) ");
+                .append("WHERE c.Status = 'active' AND (c.EndAt IS NULL OR c.EndAt > NOW()) ")
+                .append("AND ").append(NOT_SELF_ISSUED).append(' ');
         if (byMerchant) {
             sql.append("AND c.Scope = 'merchant' AND c.MerchantAccount = ? ");
         }
@@ -306,7 +371,8 @@ public class CouponDao {
             sql.append("AND ").append(THIS_WEEK).append(' ');
         }
         sql.append("ORDER BY c.updated_at ASC, c.Id ASC LIMIT ?");
-        JdbcClient.StatementSpec spec = jdbcClient.sql(sql.toString()).param(account);
+        // ⚠️ 第二个 .param(account) 是 NOT_SELF_ISSUED 的子查询参数，**不是**笔误 —— 同值绑两次。
+        JdbcClient.StatementSpec spec = jdbcClient.sql(sql.toString()).param(account).param(account);
         if (byMerchant) {
             spec = spec.param(merchantAccount.trim());
         }
@@ -453,13 +519,50 @@ public class CouponDao {
         return jdbcClient.sql(sql).param(limit).query().listOfRows();
     }
 
-    /** 某张券**已经领过**的人（账号集）—— 定时任务据此把「已领的」从受众里剔掉。 */
+    /**
+     * 某张券**已经领过**的人（**客户业务号**集）—— 定时任务据此把「已领的」从受众里剔掉。
+     *
+     * <p>⚠️ <b>本方法是全类唯一「进去是登录名、出来是业务号」的口</b>（见类注释那条例外）：
+     * {@code ToAccount} 2026-10-12 起存登录名，而 {@code CouponExpiryJob} 的受众那一侧
+     * （{@code NotificationService.resolveAudience(AUDIENCE_CUSTOMER)}）**至今仍按
+     * {@code customerid} 寻址** ⇒ 这里 {@code JOIN user} 把口径**翻回去**，
+     * 让 {@code claimed.contains(toId)} 两边仍是同一种东西。
+     * <p>⚠️ 不翻会**静默**坏：集合永不为空、也永不命中 ⇒ 已领过的人照样收到「快来领」。
+     * 那种 bug 不会报错，只会让通知变成骚扰。
+     * <p>{@code customerid} 为空的行（商家 / 管理员领的）**天然不进集合** —— 他们本来就不在
+     * 客户受众里，翻不出来反而是对的。
+     */
     public Set<String> selectClaimantAccounts(String couponId) {
-        return new HashSet<>(jdbcClient.sql("SELECT ToAccount FROM coupon_grant WHERE CouponId = ?")
+        return new HashSet<>(jdbcClient.sql("SELECT u.customerid FROM coupon_grant g "
+                        + "JOIN user u ON u.username = g.ToAccount "
+                        + "WHERE g.CouponId = ? AND u.customerid IS NOT NULL AND u.customerid <> ''")
                 .param(couponId).query(String.class).list());
     }
 
-    /** 某人某券的领取行（{@code unused} 的那条）；没有 ⇒ {@code null}。**块 5 commit 5 结算用券要读它**。 */
+    /**
+     * 某个**登录名**对应的**商家业务号**；客户 / 管理员 / 查无此人 ⇒ {@code null}。
+     *
+     * <p>用途：{@code CouponService.doClaim} 判「这张券是不是我自己发的」（{@link #NOT_SELF_ISSUED}
+     * 是**同一条判据**的列表版 —— 两处必须同款，改一处要成对改）。
+     * <p>⚠️ 判据是 {@code merchantid == null ⇒ 不是商家 ⇒ 谈不上「自己发的券」}。
+     * ⚠️ 刻意**不写成**「顺带把 {@code coupon_grant} 也 JOIN 进来」：本方法只答一个问题，
+     * 两个调用点（列表 / 领券）要的是同一个答。
+     */
+    public String selectMerchantIdByUsername(String username) {
+        List<Map<String, Object>> rows = jdbcClient
+                .sql("SELECT merchantid FROM user WHERE username = ? LIMIT 1")
+                .param(username).query().listOfRows();
+        if (rows.isEmpty()) {
+            return null;
+        }
+        Object v = rows.get(0).get("merchantid");
+        return v == null ? null : v.toString();
+    }
+
+    /**
+     * 某人某券的领取行（{@code unused} 的那条）；没有 ⇒ {@code null}。**块 5 commit 5 结算用券要读它**。
+     * ⚠️ {@code toAccount} 是**登录名**（2026-10-12 起）。
+     */
     public Map<String, Object> selectGrant(String couponId, String toAccount) {
         List<Map<String, Object>> rows = jdbcClient
                 .sql("SELECT g.Id AS GrantId, g.CouponId, g.ToAccount, g.Source, g.Status, g.OrderId "

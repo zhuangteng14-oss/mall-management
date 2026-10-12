@@ -3,7 +3,9 @@ package com.minke.mallmanagement.marketing.coupon.controller;
 import com.minke.mallmanagement.marketing.coupon.service.CouponService;
 import com.minke.mallmanagement.shared.web.IdentityGuard;
 import com.minke.mallmanagement.shared.web.Result;
+import com.minke.mallmanagement.shared.web.UserStateLookup;
 import jakarta.servlet.http.HttpServletRequest;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -20,9 +22,24 @@ import org.springframework.web.bind.annotation.RestController;
  * （{@code HomePage.vue} 的「领券中心」、用户中心的券包弹窗、{@code ProductPage.vue} 的领券块）。
  *
  * <h2>【4 个端点全部要身份：判的是 {@code Account} 入参】</h2>
- * 走 {@link IdentityGuard#requireSelfOrAdmin}（与购物车 5 条同款）—— 「券包只能看/领自己的」。
- * ⚠️ {@code Account} 在这里是**用户业务号**（{@code user.customerid}），不是登录名 ——
- * 与 {@code CartController} 的 {@code CustomerId} 是同一个东西、同一个判据。
+ * 走 {@link IdentityGuard#requireSelfOrAdminByUsername}（补丁 A1 那条登录名版）——
+ * 「券包只能看/领自己的」。
+ * <p>⚠️ <b>2026-10-12 之前这里走的是 {@link IdentityGuard#requireSelfOrAdmin}，量的是业务号</b>
+ * （当时 {@code Account} = {@code user.customerid}）。随「券改按**账号**口径」（用户裁定「乙」）
+ * 改成登录名之后，**旧的判据必须一起换**：{@code requireSelfOrAdmin} 比的是
+ * {@code identity.userId()}（业务号），而登录名**永远不等于**它 ⇒ 不换就是对每个非管理员
+ * **恒 403**（前端会显示成「无权操作该账户」，而请求本身没错 —— 与补丁 A1 记录的那次
+ * 双 403 事故同一个形状）。
+ * <p>⚠️ {@code Account} 现在是**登录名**（{@code login.UserName} = {@code user.username}），
+ * 不再是 {@code user.customerid}。**列名 / 参数名都不用改**（{@code coupon_grant.ToAccount}
+ * 本来就叫这个），变的是**值**。改这个值的原因见 {@code CouponDao} 类注释那一节。
+ *
+ * <h2>【⚠️ {@code UserStateLookup} 一律走 {@code ObjectProvider}】</h2>
+ * 与 {@code MerchantApplicationController} 同款：{@code UserStateLookupService} 是
+ * {@code @Service} 而 {@code @WebMvcTest} 切片**不扫**它，且它**刻意不被
+ * {@code AbstractSmokeTest} {@code @Import}** ⇒ 裸注入会让整个切片上下文起不来。
+ * 取不到 ⇒ {@code getIfAvailable()} 回 {@code null} ⇒ {@code requireSelfOrAdminByUsername}
+ * 的第三处 fail-open（见那个方法的 ⚠️）。
  *
  * <h2>【⚠️ 类级不得有 {@code @Validated}】</h2>
  * 同 {@code CartController}：约束异常会逃逸成 400 空体，且撞 {@code xxxControllerIsNotAopProxied}
@@ -40,8 +57,16 @@ public class CouponController {
 
     private final CouponService couponService;
 
-    public CouponController(CouponService couponService) {
+    /**
+     * ⚠️ <b>刻意是 {@link ObjectProvider}、不是裸的 {@code UserStateLookup}</b> —— 理由见类注释
+     * 那一节（{@code @WebMvcTest} 切片不扫 {@code @Service}，裸注入会让上下文起不来）。
+     */
+    private final ObjectProvider<UserStateLookup> userStateLookupProvider;
+
+    public CouponController(CouponService couponService,
+                            ObjectProvider<UserStateLookup> userStateLookupProvider) {
         this.couponService = couponService;
+        this.userStateLookupProvider = userStateLookupProvider;
     }
 
     /**
@@ -63,7 +88,8 @@ public class CouponController {
             @RequestParam(value = "MerchantAccount", required = false) String MerchantAccount,
             HttpServletRequest request
     ) {
-        if (!IdentityGuard.requireSelfOrAdmin(request, Account)) {
+        if (!IdentityGuard.requireSelfOrAdminByUsername(request, Account,
+                userStateLookupProvider.getIfAvailable())) {
             return IdentityGuard.forbidden();
         }
         return ResponseEntity.ok(Result.of(couponService.claimable(Account, limit, thisWeek, MerchantAccount)));
@@ -79,7 +105,8 @@ public class CouponController {
             @RequestParam("Account") String Account,
             HttpServletRequest request
     ) {
-        if (!IdentityGuard.requireSelfOrAdmin(request, Account)) {
+        if (!IdentityGuard.requireSelfOrAdminByUsername(request, Account,
+                userStateLookupProvider.getIfAvailable())) {
             return IdentityGuard.forbidden();
         }
         return ResponseEntity.ok(Result.of(couponService.myCoupons(Account)));
@@ -95,7 +122,8 @@ public class CouponController {
             @RequestParam("CouponId") String CouponId,
             HttpServletRequest request
     ) {
-        if (!IdentityGuard.requireSelfOrAdmin(request, Account)) {
+        if (!IdentityGuard.requireSelfOrAdminByUsername(request, Account,
+                userStateLookupProvider.getIfAvailable())) {
             return IdentityGuard.forbidden();
         }
         return ResponseEntity.ok(Result.of(couponService.claim(CouponId, Account)));
@@ -112,7 +140,8 @@ public class CouponController {
             @RequestParam("Account") String Account,
             HttpServletRequest request
     ) {
-        if (!IdentityGuard.requireSelfOrAdmin(request, Account)) {
+        if (!IdentityGuard.requireSelfOrAdminByUsername(request, Account,
+                userStateLookupProvider.getIfAvailable())) {
             return IdentityGuard.forbidden();
         }
         return ResponseEntity.ok(Result.of(couponService.claimBatch(Account)));

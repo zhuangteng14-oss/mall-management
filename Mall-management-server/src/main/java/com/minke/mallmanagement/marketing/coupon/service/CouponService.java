@@ -29,6 +29,20 @@ import java.util.regex.Pattern;
  * 「折扣=折扣率」逐字一致）。若您要的是「减 N%」（{@code FaceValue ∈ (0,100)}），说一声，
  * 改的只有本类的 {@code validateTypeFields} 与前端那一行提示。
  *
+ * <h2>【{@code Account} = **登录名**（2026-10-12 改口径）；领券两道闸】</h2>
+ * {@code Account} 与 {@code coupon_grant.ToAccount} 一律是 {@code login.UserName}
+ * （= {@code user.username}），不再是 {@code user.customerid}。理由与迁移见
+ * {@code CouponDao} 类注释那一节（一句话：商家没有 customerid，两端合一份券包就没法挂）。
+ *
+ * <p><b>「不能领自己发的券」是两道闸，判据同款：</b>
+ * <ol>
+ *   <li><b>列表侧</b> —— {@code CouponDao.selectClaimable} 的 {@code NOT_SELF_ISSUED}：
+ *       领券中心与一键领取都拿不到它；</li>
+ *   <li><b>动作侧</b> —— {@link #doClaim} 里那一段（本类）：真闸，挡构造请求。</li>
+ * </ol>
+ * ⚠️ 两处判据必须成对改（{@code selfMerchantId == coupon.MerchantAccount}）。**只有一道都不算**：
+ * 列表那道管体验，动作那道管边界。
+ *
  * <h2>【{@code TotalQty = 0} 解释成「不限量」，不是「一个都不发」】</h2>
  * 这是本表的一处**语义选择**，写在明面上：{@code 0} 若按字面读会得到「一张都领不到」，
  * 那不是任何人建券时想要的。判据在 SQL 里一律写成 {@code (TotalQty = 0 OR ClaimedQty < TotalQty)}
@@ -391,8 +405,10 @@ public class CouponService {
      * 把「本周」的定义复制到前端，两处口径迟早走岔（本仓最忌「口径有两处可抄错」）；
      * 服务端在**点击时刻**重算，也天然避开「前端手里是 1 分钟前的旧列表」。这同时堵掉
      * 「构造任意 ID 列表刷这个接口」的面。
-     * <p>集合 = **本周新发布 + 启用中 + 未过期 + 我还没领过 + 还没领完**；逐张走 {@link #doClaim}
-     * （同一条单张路径、同一套闸，**不另写一份领券逻辑**）。
+     * <p>集合 = **本周新发布 + 启用中 + 未过期 + 我还没领过 + 还没领完 + 不是我发的**；
+     * 逐张走 {@link #doClaim}（同一条单张路径、同一套闸，**不另写一份领券逻辑**）。
+     * ⚠️ 「不是我发的」那一条来自 {@code selectClaimable} 的 {@code NOT_SELF_ISSUED}（列表侧）；
+     * {@link #doClaim} 里还有同款的第二道（动作侧）—— 两道都要在，见类注释。
      *
      * <h3>【⚠️ 部分失败**不**回 {@code success:false}】</h3>
      * 与 {@code NotificationBroadcastService.send} 类注释那段「刻意不因部分失败而回 false」同源：
@@ -474,6 +490,19 @@ public class CouponService {
             }
             if (STATUS_STOPPED.equals(str(coupon.get("Status")))) {
                 return fail("该券已停止发放");
+            }
+            // ⚠️ 「不能领自己发的券」（用户 2026-10-12 裁定「甲」）——**必须排在 tryClaim 之前**：
+            //    占名额是一条 UPDATE，先占了再拒就得再补一条 releaseClaim，而那正是「补偿腿只在
+            //    撞唯一键时跑」这条既有设计的**第二种补偿路径**，白多一处能忘。
+            // ⚠️ 判据与 `CouponDao.NOT_SELF_ISSUED`（列表侧那道筛）**同款**：发券商家的业务号
+            //    == 这个人自己的 merchantid。两处必须成对改 —— 列表漏筛只是白点一下，
+            //    列表筛了服务端没筛才是真漏（本闸就是防那一半）。
+            // ⚠️ 未登录 / 客户 / 管理员问不出 merchantid（回 null）⇒ **不拦**：他们谈不上
+            //    「自己发的券」（客户与管理员根本没有 merchantid，`user` 表实测全为 NULL）。
+            String selfMerchantId = couponDao.selectMerchantIdByUsername(account);
+            String issuer = str(coupon.get("MerchantAccount"));
+            if (selfMerchantId != null && !selfMerchantId.isEmpty() && selfMerchantId.equals(issuer)) {
+                return fail("不能领自己发的券");
             }
             int rows = couponDao.tryClaim(couponId);
             if (rows == 0) {

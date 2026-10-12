@@ -143,8 +143,8 @@
                    ⚠️ 数字来自**后端** `daysLeft`（`CouponDao.selectWeekWindow`，由**库时钟**算）——
                       前端**不碰浏览器钟**：`new Date()` 在这里没有判据地位（同 TD-32）。
                    ⚠️ 它是**周窗口**、与「还有几张可领」无关 ⇒ 0 张时也照显示（那就是「本周快过完了」）。 -->
-              <span v-if="customerId && daysLeft !== null" class="tk-left">本周还剩 {{ daysLeft }} 天</span>
-              <span class="tk-n">{{ customerId ? claimable.length + ' 张' : '未登录' }}</span>
+              <span v-if="couponAccount && daysLeft !== null" class="tk-left">本周还剩 {{ daysLeft }} 天</span>
+              <span class="tk-n">{{ couponAccount ? claimable.length + ' 张' : '未登录' }}</span>
               <!-- 「一键领取本周全部」（用户 2026-10-11 裁定 ②：**真做**，取代原来那颗 disabled 占位）。
                    ⚠️ **不传券 ID 列表** —— 领哪些由**服务端**定（「本周」是服务端语义，`CouponDao.THIS_WEEK`）
                       ⇒ 前端手里那份列表可能已经旧了，也不该把「本周」的定义抄到前端来。
@@ -153,7 +153,7 @@
                    ⚠️ 汇总文案走 `.tk-msg`（**不是** `alert`）：顶层 `success:true` ≠ 全成功，
                       要按 `claimed`/`failed` 说人话（见 `api/marketing.js` 里 `claimBatch()` 的 ⚠️）。 -->
               <button
-                v-if="customerId"
+                v-if="couponAccount"
                 type="button"
                 class="tk-all"
                 :disabled="batchBusy || tkClaimable === 0"
@@ -165,7 +165,7 @@
                    点一下 = 展开全部（`.tk-strip-on` 把 `nowrap` 放开成 `wrap`），再点收起。
                    ⚠️ 与左边「一键领取」**并排**（用户 ②：两个都要在右侧按钮区），故同放在 `.tk-h-r` 里。 -->
               <button
-                v-if="customerId && claimable.length > TK_VISIBLE"
+                v-if="couponAccount && claimable.length > TK_VISIBLE"
                 type="button"
                 class="tk-more"
                 :class="{ 'tk-more-on': tkExpanded }"
@@ -174,7 +174,7 @@
               >{{ tkExpanded ? '《' : '》' }}</button>
             </div>
           </div>
-          <p v-if="!customerId" class="empty-tip">登录后可领取优惠券</p>
+          <p v-if="!couponAccount" class="empty-tip">登录后可领取优惠券</p>
           <p v-else-if="claimLoading" class="empty-tip">加载中…</p>
           <!-- 空态（用户裁定 ③ 的文案）：说清楚「本页只放本周新的」，并**指一条去路** ——
                用户中心的「优惠券 → 可领」tab（那是全量可领，含旧券）。空态最怕只报「没有」。 -->
@@ -281,7 +281,7 @@
 <script setup>
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { http, handleApiError } from '../api/http'
-import { endpoints } from '../api/endpoints'; import { getCustomerId } from '../api/auth'; import { coupons, claim, claimBatch } from '../api/marketing'; import { truthy, couponFace, couponName, couponLine } from '../config/coupon-format'; import ProductCard from '../components/ProductCard.vue'   // ⚠️ 四条 import **同行**（C3 块 5 · commit 1，2026-10-11；同日「券的信息架构重排」又加两处）—— 本文件 `:119` / `:242` / `:262` 等多处被按行号引，**能省一行就省一行**（同 `ProductPage.vue:426` 那条的做法）。⚠️ `myCoupons` 已随右栏券包一并**删掉**，格式化三件套改从 `config/coupon-format.js` 取（主页与券包弹窗**共享**，见那个文件头）。⚠️ **A 组 · A7 后半**（2026-10-12）：券卡原先只有「金额 / 门槛 / NEW」三样，用户点名**缺券名 + 券类型** ⇒ 追加 `couponName`（券名）与 `couponLine`（类型·门槛合成一行，内部拿 `couponCond` 拼），仍从同一份 `coupon-format.js` 取。⚠️ `couponCond` 随之**从本页 import 里去掉**（券包弹窗仍直接用）；本页若还要裸用它，`eslint no-unused-vars` 会当场红
+import { endpoints } from '../api/endpoints'; import { getUsername } from '../api/auth'; import { coupons, claim, claimBatch } from '../api/marketing'; import { truthy, couponFace, couponName, couponLine } from '../config/coupon-format'; import ProductCard from '../components/ProductCard.vue'   // ⚠️ 四条 import **同行**（C3 块 5 · commit 1，2026-10-11；同日「券的信息架构重排」又加两处）—— 本文件 `:119` / `:242` / `:262` 等多处被按行号引，**能省一行就省一行**（同 `ProductPage.vue:426` 那条的做法）。⚠️ `myCoupons` 已随右栏券包一并**删掉**，格式化三件套改从 `config/coupon-format.js` 取（主页与券包弹窗**共享**，见那个文件头）。⚠️ **A 组 · A7 后半**（2026-10-12）：券卡原先只有「金额 / 门槛 / NEW」三样，用户点名**缺券名 + 券类型** ⇒ 追加 `couponName`（券名）与 `couponLine`（类型·门槛合成一行，内部拿 `couponCond` 拼），仍从同一份 `coupon-format.js` 取。⚠️ `couponCond` 随之**从本页 import 里去掉**（券包弹窗仍直接用）；本页若还要裸用它，`eslint no-unused-vars` 会当场红
 
 // ── 未登录可逛公开面（2026-10-06 用户改判 2，登记见 progress.md §5-AG (13)）────────────
 // 本页原有三条「未登录 ⇒ 弹登录提示」拦截（goSearch / searchByType / toGoodsDetail）与一条
@@ -410,11 +410,11 @@ const goToSlide = (index) => {
 //    `:119`（未漂，在插入点之前）/ `:295` / `:315` / `:356-357`；本段 +107 行（模板 +53、样式 +95
 //    另计）⇒ **`<script>` 段的闭合行**由 `:348` 漂 **`:508`**（全文件 994 → 1251 行）。**再经同日两轮手验修**（第一轮：⑤ 卡片降高 + 越位渐隐 + 「一键领取」占位；第二轮：① 去掉细滚动条、改**右侧**渐隐 + 表头「》」展开，② 「一键领取」与「》」**并列**在右侧按钮区，③ 券条改**横向**且定序移到后端 `CouponDao.selectClaimable` 的 `updated_at ASC`）累计又 **+140** 行 ⇒ 闭合行 **`:550`**、全文件 **1391** 行。**再经同日「券的信息架构重排」**（删右栏券包 + 快捷块那格「优惠券」、领券中心收窄成**本周新券**、「一键领取本周全部」真接、NEW 角标 + 倒计时 + 空态、`TK_VISIBLE` 3 → 5、三个格式化 helper 搬去 `config/coupon-format.js`）**+35** 行 ⇒ 闭合行 **`:589`**、全文件 **1426** 行。全表见 `_work/b5-repoint.md`（收口一次性重指）。⚠️ 这半句**故意不写那个闭合标签的字面量**：SFC 解析器在 `<script>` 段里一见到它就**当场截断本段**，真闭合行随即报 `x-invalid-end-tag`（`vue/no-parsing-error`）—— 实测踩过，别「顺手补全」。
 //
-// ⚠️ **身份**取 `getCustomerId()`（`api/auth.js` 是唯一允许读身份的地方），不碰 `sessionStorage`。
+// ⚠️ **身份**取 `getUsername()`（`api/auth.js` 是唯一允许读身份的地方），不碰 `sessionStorage` —— ⚠️ **2026-10-12 口径改动**：券包的「账号」由**客户业务号**（原 `getCustomerId()`）改成**登录名**，因为真库 13 个商家 `customerid` 全是 NULL、登录名才是客户 / 商家**都有**的那个键（`login` 47 行 ↔ `user` 47 行一一对应）；⚠️ 后端 `CouponController` 的身份判据已同笔换成比登录名（只改前端会让每个非管理员恒 403）。
 //    本页 2026-10-06 起「已无匿名分支」（见 `:224-232`），券包**必须**有身份 ⇒ 这里**重新引入**
 //    一条「有身份才取数」的分支（形状同 `ShoppingCart.vue:193-195`）。它**不是登录墙**：
 //    页面照常逛，只是券包那一块显示「登录后可…」。
-const customerId = ref('')
+const couponAccount = ref('')
 const claimable = ref([])
 const claimLoading = ref(false)
 const claiming = ref('')
@@ -458,13 +458,13 @@ const doClaim = async (c) => {
   claiming.value = c.CouponId
   tkMsg.value = ''
   try {
-    const data = await claim(customerId.value, c.CouponId)
+    const data = await claim(couponAccount.value, c.CouponId)
     const ok = !!(data && data.success)
     // ⚠️ 文案里**不再提「右侧券包」** —— 右栏已删，券包在**用户中心**（2026-10-11 重排）。
     tkMsg.value = ok
       ? '已领取「' + c.Name + '」，可在用户中心「优惠券」里查看'
       : '领取失败：' + ((data && data.msg) || '未知原因')
-    if (ok) await loadCoupons(customerId.value)
+    if (ok) await loadCoupons(couponAccount.value)
   } catch (e) {
     handleApiError(e, '领取失败')
   } finally {
@@ -487,7 +487,7 @@ const doClaimBatch = async () => {
   batchBusy.value = true
   tkMsg.value = ''
   try {
-    const data = await claimBatch(customerId.value)
+    const data = await claimBatch(couponAccount.value)
     if (!data || !data.success) {
       tkMsg.value = '一键领取失败：' + ((data && data.msg) || '未知原因')
       return
@@ -499,7 +499,7 @@ const doClaimBatch = async () => {
       : '一键领取：成功 ' + claimed + ' 张' + (failed > 0 ? '，失败 ' + failed + ' 张（' + firstFailReason(data) + '）' : '')
     // ⚠️ 无论成败都重拉一次：成功的那几张要把按钮变「已领取」，**失败的那些也仍要在列表里**
     //    （服务端重算过的集合可能与本地这份不同，比如刚刚有人把某张领光了）。
-    await loadCoupons(customerId.value)
+    await loadCoupons(couponAccount.value)
   } catch (e) {
     handleApiError(e, '一键领取失败')
   } finally {
@@ -541,10 +541,10 @@ const scrollToTickets = () => {
 }
 
 onMounted(async () => {
-  customerId.value = getCustomerId() || ''
-  if (!customerId.value) return
+  couponAccount.value = getUsername() || ''
+  if (!couponAccount.value) return
   // ⚠️ 只剩一个请求了 —— 「我的券包」已搬去用户中心（那边的入口自己拉摘要，弹窗开窗时再拉明细）。
-  await loadCoupons(customerId.value)
+  await loadCoupons(couponAccount.value)
 })
 </script>
 
