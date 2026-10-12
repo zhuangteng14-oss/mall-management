@@ -1,6 +1,8 @@
 // src/config/notify-events.js —— 系统通知**事件类型 code → 中文标签**（C3 块 1 · I2，2026-10-09）。
 //
-// 它对应后端的 `notification/NotificationEvents.java`（25 条常量）。**两张表必须逐字对齐** ——
+// 它对应后端的 `notification/NotificationEvents.java`（31 条常量 —— 2026-10-11 块 5 加了 `coupon.expiring.unclaimed`；
+// 2026-10-12 commit 3 加国补 3 条、commit 4 加秒杀 2 条（`seckill.responded` / `seckill.application.submitted`）；
+// ⚠️ 本注释此前写的「25 条」与后端**当时**的 25 条常量其实是对齐的，只落后端的类注释（那句写 21）是陈旧的，已一并校正）。**两张表必须逐字对齐** ——
 // 后端那个类的类注释写明了「写入方与读出方各写一遍，第二处抄错双方都不报错」，本文件就是那个「读出方」。
 //
 // ⚠️ 【本文件最容易做错、也最不该做错的一条】**必须有兜底**。
@@ -16,7 +18,7 @@
 //    所以「一个恰好叫 `constructor` 的未知 code」是**可达**的。故判据必须是「**自有**属性」。
 
 /**
- * code → 中文标签。**25 条**，顺序与后端 `NotificationEvents.java` 的「归属块」分组一致。
+ * code → 中文标签。**31 条**，顺序与后端 `NotificationEvents.java` 的「归属块」分组一致。
  *
  * ⚠️ 加一条 = 后端 `NotificationEvents` 加常量 + 本表加一行 + `EVENT_OPTIONS` 加一项（**三处**）。
  *    漏掉本文件只会让**新类型**显示成 code 原文（兜底在，不崩），漏掉后端常量则写入方没得引 —— 不会静默。
@@ -66,6 +68,23 @@ export const EVENT_LABELS = {
   'seckill.invited': '秒杀邀请',
   'seckill.application.approved': '秒杀申请通过',
   'seckill.application.rejected': '秒杀申请驳回',
+  // ⚠️ 2026-10-11（C3 块 5 · commit 1 券）：**只发「未领」那一侧** —— 已领的券快过期
+  //    **不发系统通知**（走券包红点 + 排序），见 `CouponExpiryJob` 的类注释。
+  'coupon.expiring.unclaimed': '优惠券即将过期（未领取）',
+  // ⚠️ 2026-10-12（C3 块 5 · commit 3 国补）：双向制的**两个方向各一条**。
+  //    方向 1 = 平台 → 商家（`ToType='merchant'`），商家在消息里同意 / 拒绝；
+  //    方向 2 = 商家 → **管理端共享收件箱**（`ToType='admin'` / `ToId='*'`）的回执，
+  //    同意与拒绝**分开两个 code**（一封要人跟进、一封只是回执，长得一样就没法处理）。
+  'subsidy.nominated': '国补邀请',
+  'subsidy.confirmed': '商家确认国补',
+  'subsidy.rejected': '商家拒绝国补',
+  // ⚠️ 2026-10-12（C3 块 5 · commit 4 秒杀）：**商家 → 管理端共享收件箱**的两条
+  //    （上面 `seckill.invited` / `seckill.application.approved|rejected` 是反方向：管理端 → 商家）。
+  //    ⚠️ 应答**只有一条 code**（`seckill.responded`，同意 / 拒绝写在标题里）——
+  //    与国补那对（`subsidy.confirmed` / `subsidy.rejected`）不同：邀请这条路径上管理端
+  //    本来就知道自己邀请了谁，回执只需「答没答、答的什么」。判据写在 `NotificationEvents` 该类注释里。
+  'seckill.responded': '商家应答秒杀邀请',
+  'seckill.application.submitted': '秒杀申请已提交（发往管理端）',
 }
 
 /**
@@ -94,6 +113,12 @@ export const EVENT_OPTIONS = [
   { code: 'seckill.invited', label: '秒杀邀请' },
   { code: 'seckill.application.approved', label: '秒杀申请通过' },
   { code: 'seckill.application.rejected', label: '秒杀申请驳回' },
+  { code: 'coupon.expiring.unclaimed', label: '优惠券即将过期（未领取）' },
+  { code: 'subsidy.nominated', label: '国补邀请（发往商家）' },
+  { code: 'subsidy.confirmed', label: '商家确认国补（发往管理端）' },
+  { code: 'subsidy.rejected', label: '商家拒绝国补（发往管理端）' },
+  { code: 'seckill.responded', label: '商家应答秒杀邀请（发往管理端）' },
+  { code: 'seckill.application.submitted', label: '秒杀申请已提交（发往管理端）' },
   { code: 'comment.on.post', label: '商品被评论' },
   { code: 'comment.on.user', label: '留言板被评论' },
   { code: 'comment.reply', label: '评论被回复' },

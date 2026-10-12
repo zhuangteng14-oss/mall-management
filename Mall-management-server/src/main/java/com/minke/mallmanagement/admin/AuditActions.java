@@ -161,6 +161,76 @@ public final class AuditActions {
     /** 买家收货 —— {@code POST /order/orderReceiveIfUp}。 */
     public static final String ORDER_RECEIVE = "order.receive";
 
+    // ==================== C3 块 5（营销块，2026-10-11）====================
+    // 券的四个挂钩点（commit 1）。域段是 `coupon`（**表名**，也是调用点传的 TargetType 字面量）。
+    // ⚠️ **TargetId 一律传 `CouponId`**（业务号，不是自增 Id）—— 同块 4 的理由，
+    //    `admin_audit.TargetId` 是 NOT NULL，传 null 会在留痕处炸掉整条链路（TD-20 的教训）。
+    // ⚠️ 核销（`coupon.redeem`）**不在这里**：它发生在**结算**（用户端下单），
+    //    由 orderAdd 带 couponId 触发、写自己的 OrderId 作 TargetId ⇒ 随 commit 5 一起挂。
+    // ⚠️ 块 5 的四个子域至此全部挂完：券（本批）/ 秒杀（commit 4，见下）/ 结算用券（commit 5，见下）
+    //    / 折扣（commit 2）
+    //    —— 折扣（commit 2）**刻意零新挂钩点**：它的写口是既有的 `goodsAdd` / `goodsUp`
+    //    与通用 `/admin/template/*`，留痕已由那两处自己的动作覆盖，再挂一条就是同一件事记两遍。
+
+    /** 管理员建券 —— {@code POST /admin/marketing/coupon/create}。**新增类**动作 ⇒ {@code BeforeJson} 恒 NULL。 */
+    public static final String COUPON_CREATE = "coupon.create";
+
+    /** 管理员停用券（逻辑废弃）—— {@code POST /admin/marketing/coupon/stop}。 */
+    public static final String COUPON_STOP = "coupon.stop";
+
+    /** 管理员重新启用券 —— {@code POST /admin/marketing/coupon/activate}。 */
+    public static final String COUPON_ACTIVATE = "coupon.activate";
+
+    /** 管理员定向发放券 —— {@code POST /admin/marketing/coupon/grant}。**新增类**动作 ⇒ {@code BeforeJson} 恒 NULL。 */
+    public static final String COUPON_GRANT = "coupon.grant";
+
+    // ---- 国补的四个挂钩点（commit 3，2026-10-12）。域段是 `subsidy`（**表名族**，
+    //      也是调用点传的 TargetType 字面量）。⚠️ TargetId 建规则传 `RuleId`、提名传
+    //      `RuleId:GoodsId` —— 同券那条的理由（`admin_audit.TargetId` 是 NOT NULL，传 null
+    //      会在留痕处炸掉整条链路，TD-20）。
+    //      ⚠️ **商家的确认 / 拒绝不在这里**：那一侧是**用户动作**，走 `notification` 回管理端，
+    //      管理端的「谁批的」由通知留档；`admin_audit` 只记**管理员自己**做的事。
+
+    /** 管理员建国补规则 —— {@code POST /admin/marketing/subsidy/create}。**新增类** ⇒ {@code BeforeJson} 恒 NULL。 */
+    public static final String SUBSIDY_RULE_CREATE = "subsidy.rule.create";
+
+    /** 管理员停用国补规则 —— {@code POST /admin/marketing/subsidy/stop}。 */
+    public static final String SUBSIDY_RULE_STOP = "subsidy.rule.stop";
+
+    /** 管理员重新启用国补规则 —— {@code POST /admin/marketing/subsidy/activate}。 */
+    public static final String SUBSIDY_RULE_ACTIVATE = "subsidy.rule.activate";
+
+    /** 管理员提名商品参加国补 —— {@code POST /admin/marketing/subsidy/nominate}。**新增类** ⇒ {@code BeforeJson} 恒 NULL。 */
+    public static final String SUBSIDY_NOMINATE = "subsidy.nominate";
+
+    // ---- 秒杀的三个挂钩点（commit 4，2026-10-12）。域段是 `seckill`（**表名族**，
+    //      也是调用点传的 TargetType 字面量）。⚠️ TargetId 一律传**业务串**
+    //      （邀请 `SKI-…` / 申请 `SKA-…` / 活动 `SKA-…`），不传自增 Id、更不传 null
+    //      —— 同券 / 国补那条的理由（`admin_audit.TargetId` 是 NOT NULL，传 null 会在
+    //      留痕处炸掉整条链路，TD-20）；业务串还与通知的 `TargetId` 同族，两处能对得上。
+    //      ⚠️ **商家的应答 / 报名不在这里**：那一侧是**用户动作**，走 `notification` 回管理端
+    //      （`seckill.responded` / `seckill.application.submitted`），`admin_audit`
+    //      只记**管理员自己**做的事 —— 同国补那条口径。
+
+    /** 管理员邀请商家上秒杀 —— {@code POST /admin/marketing/seckill/invite}。**新增类** ⇒ {@code BeforeJson} 恒 NULL。 */
+    public static final String SECKILL_INVITE = "seckill.invite";
+
+    /** 管理员审核商家秒杀申请（通过 / 驳回）—— {@code POST /admin/marketing/seckill/review}。 */
+    public static final String SECKILL_REVIEW = "seckill.review";
+
+    /** 管理员停用已成立的秒杀活动（逻辑废弃）—— {@code POST /admin/marketing/seckill/stop}。 */
+    public static final String SECKILL_STOP = "seckill.stop";
+
+    // ---- 结算用券的唯一挂钩点（commit 5，2026-10-12）------------------------------
+    // ⚠️ 这是全表里**唯一一条「用户（买家）自己的动作」**：其余都是管理员做的事。
+    //    它由 `OrderController.orderAdd` 在**券真的核销掉之后**写（判据 = 回体里带 `Discount`）。
+    // ⚠️ `TargetId` 是**订单业务串**、`TargetType` 是 `coupon` —— 看着别扭，理由是可查性：
+    //    `coupon_grant.OrderId` 一列就能反查回是哪张券，而券号 `CPxxx` 反过来查不出任何上下文。
+    //    `AfterJson` 里同时带着 `CouponId` 与 `Discount`，两个方向都查得到。
+
+    /** 买家**下单时核销**一张优惠券 —— {@code POST /order/orderAdd}（带 {@code CouponId}）。 */
+    public static final String COUPON_REDEEM = "coupon.redeem";
+
     private AuditActions() {
     }
 }

@@ -1,0 +1,27 @@
+── 初始（Scope=all）── {"hasCat":false,"hasMerchantWord":false,"menuOpen":false,"opts":[],"val":null,"placeholderShown":false,"hasClear":false,"checked":[]}
+── 切「部分商家」── {"hasCat":true,"hasMerchantWord":false,"menuOpen":false,"opts":[],"val":null,"placeholderShown":true,"hasClear":false,"checked":[]}
+── 打开下拉 ── {"hasCat":true,"hasMerchantWord":false,"menuOpen":true,"opts":["电子用品","生活用品","服装","美食","运动用品"],"val":null,"placeholderShown":true,"hasClear":false,"checked":[]}
+── 勾「电子用品」「服装」── {"hasCat":true,"hasMerchantWord":false,"menuOpen":true,"opts":["电子用品","生活用品","服装","美食","运动用品"],"val":"电子用品，服装","placeholderShown":false,"hasClear":true,"checked":["电子用品","服装"]}
+── 点「清空」── {"hasCat":true,"hasMerchantWord":false,"menuOpen":true,"opts":["电子用品","生活用品","服装","美食","运动用品"],"val":null,"placeholderShown":true,"hasClear":false,"checked":[]}
+── 提交请求体 CategoryMatch ── "电子用品,服装"
+── 切回「全场」── {"hasCat":false,"hasMerchantWord":false,"menuOpen":false,"opts":[],"val":null,"placeholderShown":false,"hasClear":false,"checked":[]}
+── 切回后再提交的 CategoryMatch ── null
+OK   「全场」下没有「限商品种类」块
+OK   页面上已无「归属商家」输入框  → false
+OK   「部分商家」下出现「限商品种类」块
+OK   菜单打开
+OK   选项数 = 类目数（5）  → 5
+OK   选项文案 = 真实一级类目  → ["电子用品","生活用品","服装","美食","运动用品"]
+OK   未选时按钮显示占位文案
+OK   展示串 = 全角逗号拼接  → "电子用品，服装"
+OK   两个 checkbox 为选中态  → ["电子用品","服装"]
+OK   出现「清空」按钮
+OK   清空后回到占位文案
+OK   清空后已选归零  → []
+OK   清空后「清空」按钮消失
+OK   清空后菜单仍开着（方便原地重选）
+OK   提交的 CategoryMatch = 半角逗号串  → "电子用品,服装"
+OK   切回「全场」后块消失
+OK   切回「全场」后不再发 CategoryMatch（已选被清）  → null
+
+管理端 券 · 限商品种类多选 + 适用范围联动: 17 项 / 0 失败

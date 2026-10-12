@@ -1,0 +1,37 @@
+── 1 张券 ── {"cls":"tk-strip","colW":[593,593],"n":1,"faces":["¥10"],"lefts":[0],"tops":[0],"visW":559,"hiddenW":0,"peek4":-1,"overflowX":"hidden","flexWrap":"nowrap","scrollbarWidth":"auto","moreText":null,"moreTitle":null,"moreOn":null,"allText":"一键领取","allDisabled":true}
+── 3 张券（= TK_VISIBLE 边界） ── {"cls":"tk-strip","colW":[593,593],"n":3,"faces":["¥10","¥11","¥12"],"lefts":[0,172,345],"tops":[0,0,0],"visW":559,"hiddenW":0,"peek4":-1,"overflowX":"hidden","flexWrap":"nowrap","scrollbarWidth":"auto","moreText":null,"moreTitle":null,"moreOn":null,"allText":"一键领取","allDisabled":true}
+── 6 张券 ── {"cls":"tk-strip tk-strip-cut","colW":[593,593],"n":6,"faces":["¥10","¥11","¥12","¥13","¥14","¥15"],"lefts":[0,172,345,517,690,862],"tops":[0,0,0,0,0,0],"visW":559,"hiddenW":3,"peek4":41,"overflowX":"hidden","flexWrap":"nowrap","scrollbarWidth":"auto","moreText":"》","moreTitle":"展开看全部 6 张","moreOn":false,"allText":"一键领取","allDisabled":true}
+── 6 张、展开后 ── {"cls":"tk-strip tk-strip-on","colW":[593,593],"n":6,"faces":["¥10","¥11","¥12","¥13","¥14","¥15"],"lefts":[0,172,345,0,172,345],"tops":[0,0,0,94,94,94],"visW":559,"hiddenW":0,"peek4":559,"overflowX":"hidden","flexWrap":"wrap","scrollbarWidth":"auto","moreText":"《","moreTitle":"收起（只留前 3 张）","moreOn":true,"allText":"一键领取","allDisabled":true,"backToClosed":"tk-strip tk-strip-cut"}
+OK   卡片渲染出来了  → "ok"
+OK   券条里有 1 张  → 1
+OK   「一键领取」占位按钮在  → "一键领取"
+OK   占位按钮是 disabled
+OK   1 张时**不**出「》」  → null
+OK   1 张时**不**加渐隐类  → "tk-strip"
+OK   3 张时**不**出「》」（判据是 `>` 不是 `>=`）  → null
+OK   3 张时**不**加渐隐类  → "tk-strip"
+OK   3 张**一张都没被裁**  → "hiddenW=0 visW=559"
+OK   券条里有 6 张  → 6
+OK   ① 看不到细滚动条：券条 `overflow-x: hidden`  → "hidden"
+OK   ① `scrollbar-width` 不再是 `thin`  → "auto"
+OK   ① 6 张时加渐隐类  → "tk-strip tk-strip-cut"
+OK   ① 收起态 `nowrap`（不换行）  → "nowrap"
+OK   ① 有 3 张被裁到界外  → 3
+OK   ① 第 4 张**露一角**（不是整张消失在裁切线外）  → "露出 41px / 共 559px"
+OK   ① 那一角比渐隐带（56px）**窄** ⇒ 是被淡掉而不是被切掉  → "露出 41px"
+OK   两栏严格等宽（`min-width: 0` 生效）  → "[593,593]"
+OK   ②「》」按钮在  → "》"
+OK   ②「一键领取」与「》」**并存**（同一处按钮区）
+OK   ③ 同一排：6 张 `top` 全相同（一行铺开，没换行）  → "[0,0,0,0,0,0]"
+OK   ③ **从左到右**：left 严格递增  → "[0,172,345,517,690,862]"
+OK   ③ 顺序 == 数组原序（¥10…¥15，前端没重排）  → "¥10,¥11,¥12,¥13,¥14,¥15"
+OK   ① 点「》」后换成展开类  → "tk-strip tk-strip-on"
+OK   ① 展开后渐隐类**撤掉**  → "tk-strip tk-strip-on"
+OK   ① 展开后 `wrap` 换行  → "wrap"
+OK   ① 展开后 6 张全可见  → 0
+OK   ① 展开后不止一行（多行铺开）  → "[0,0,0,94,94,94]"
+OK   ① 展开后按钮翻成「《」  → "《"
+OK   ① 展开**不改列宽**（两栏仍等宽，整块不跳）  → "593 → 593"
+OK   ① 再点一下回到收起态  → "tk-strip tk-strip-cut"
+
+领券中心 ①②③: 31 项 / 0 失败

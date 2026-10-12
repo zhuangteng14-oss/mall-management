@@ -13,7 +13,6 @@ import org.springframework.cache.support.NullValue;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.dao.DataAccessResourceFailureException;
-import org.springframework.dao.IncorrectResultSizeDataAccessException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.ContextConfiguration;
 import org.springframework.test.context.junit.jupiter.SpringExtension;
@@ -74,7 +73,9 @@ import static org.junit.jupiter.api.Assertions.assertAll;
  * <h2>本类不覆盖的</h2>
  * Controller 侧的响应成型（catch → {@code {success:false}}）在
  * {@code smoke.PriceTripleFailSmokeTest}；真实 MySQL 的 collation（B 环）与
- * 「当前 0 个重复三元组」在 A3 的 B 组。
+ * 「库内重复三元组有几组」在 A3 —— 2026-10-12〈Bug 1〉实测**有 1 组**
+ * （{@code dRD3gqtbFr} / {@code GD-101-9552} = Id 76/120），本类的替身给不了 ORDER BY，
+ * 故「取 MIN(Id)」这半边的判据在 SQL 字面量与那条 A3 实测，不在本类。
  */
 @ExtendWith(SpringExtension.class)
 @ContextConfiguration(classes = GoodsPriceCacheTest.Ctx.class)
@@ -138,8 +139,8 @@ class GoodsPriceCacheTest {
         service.priceByTriple("M1", "G1", "P1");
 
         assertThat(jdbc.lastSql).isEqualTo(
-                "SELECT Price, GoodImg FROM mall_management_sql.goods "
-                        + "WHERE MerchantId=? AND GoodName=? AND ProductCode=?");
+                "SELECT Price, GoodImg, OriginalPrice FROM mall_management_sql.goods "
+                        + "WHERE MerchantId=? AND GoodName=? AND ProductCode=? ORDER BY Id ASC LIMIT 1");
         assertThat(jdbc.lastArgs).containsExactly("M1", "G1", "P1");
     }
 
@@ -188,17 +189,17 @@ class GoodsPriceCacheTest {
 
         // ⚠️ 这三句是本类存在的一半理由：把「负缓存」与「未命中」分开。
         // 分得开的是 **wrapper 本身**，不是它的值 —— 看 .get() 才真的分不出来。
-        Cache.ValueWrapper negative = cache().get("M1::G1::P1");
+        Cache.ValueWrapper negative = cache().get("v2::M1::G1::P1");
         assertThat(negative.get()).isNull();                       // 值确实是 null
         assertThat(negative).as("负缓存 ⇒ wrapper 非 null").isNotNull();
-        assertThat(cache().get("M1::G1::P9")).as("对照组：没查过的键 ⇒ wrapper 是 null").isNull();
+        assertThat(cache().get("v2::M1::G1::P9")).as("对照组：没查过的键 ⇒ wrapper 是 null").isNull();
 
         // 机制（不是为了断言它，是为了让上一条读得懂）：存进去的是 Spring 的 NullValue，
         // fromStoreValue 把它降级成 null 是在 wrapper 内部发生的 —— 所以 wrapper 还在。
         @SuppressWarnings("unchecked")
         var nativeCache = (Map<Object, Object>) cache().getNativeCache();
-        assertThat(nativeCache).containsKey("M1::G1::P1");
-        assertThat(nativeCache.get("M1::G1::P1")).isInstanceOf(NullValue.class);
+        assertThat(nativeCache).containsKey("v2::M1::G1::P1");
+        assertThat(nativeCache.get("v2::M1::G1::P1")).isInstanceOf(NullValue.class);
     }
 
     @Test
@@ -215,61 +216,53 @@ class GoodsPriceCacheTest {
         assertThat(jdbc.calls).isEqualTo(2);
     }
 
-    // ===================== 四、多行：技术异常，不缓存（本次改动的要害） =====================
+    // ======== 四、多行：取 MIN(Id) 那一行（2026-10-12〈Bug 1〉改判；原为「抛异常」） ========
 
     @Test
-    @DisplayName(">1 行：抛 IncorrectResultSizeDataAccessException（与改前 queryForMap 同一个类型）")
-    void manyRowsThrowsIncorrectResultSize() {
+    @DisplayName(">1 行：**不再抛** —— 取第一行（序由 SQL 的 ORDER BY Id ASC LIMIT 1 保证）")
+    void manyRowsTakesTheFirstRowInsteadOfThrowing() {
         jdbc.rows = List.of(
                 row("Price", 9.9, "GoodImg", "/img/a.jpg"),
                 row("Price", 9.8, "GoodImg", "/img/a.jpg"));
 
-        assertThatThrownBy(() -> service.priceByTriple("M1", "G1", "P1"))
-                .isInstanceOf(IncorrectResultSizeDataAccessException.class)
-                .hasMessageContaining("expected 1")
-                .hasMessageContaining("actual 2");
+        assertThat(service.priceByTriple("M1", "G1", "P1").get("Price")).isEqualTo(9.9);
         assertThat(jdbc.calls).isEqualTo(1);
     }
 
     @Test
-    @DisplayName("★反向断言：该失败**不进缓存** —— 第二次仍要查库（改前的要害正是它不再查）")
-    void manyRowsFailureIsNeverCached() {
+    @DisplayName("★反向断言：多行不再是「调用方拿不到价」—— 改前它让 /goods/productCodePrice 恒失败")
+    void manyRowsNoLongerStarvesTheCaller() {
+        // 改前：这里抛 IncorrectResultSizeDataAccessException ⇒ GoodsService 接成 {success:false}
+        // ⇒ ProductPage.loadAllItems() 的 `if (d2.success)` 跳过 ⇒ allItems 空 ⇒ **整页空白**。
+        // 实测那条链：dRD3gqtbFr / GD-101-9552 有 Id 76/120 两行，且**两行数据都完整**
+        // （Price 299 / OriginalPrice 373.75 / ShelfState 1）—— 不是缺数据，是读侧抛了。
         jdbc.rows = List.of(
                 row("Price", 9.9, "GoodImg", "/img/a.jpg"),
                 row("Price", 9.8, "GoodImg", "/img/a.jpg"));
 
-        // ⚠️ 用 assertAll 而不是裸断言：本用例在**变异检查**里要同时报出两件事 ——
-        //    「没抛异常」和「calls 停在 1（失败被缓存）」。写成裸断言时，第一条一红就中止，
-        //    而第二条才是真正说明缺陷的那句，反而看不到（本次变异检查实测踩到，故改成 assertAll）。
+        // ⚠️ 用 assertAll 而不是裸断言：变异检查（把生产改回「抛」）时要同时报出「拿不到」与
+        //    「返回的不是第一行」两件事 —— 裸断言第一条一红就中止，第二条反而看不到。
         assertAll(
-                () -> assertThatThrownBy(() -> service.priceByTriple("M1", "G1", "P1"))
-                        .isInstanceOf(IncorrectResultSizeDataAccessException.class),
-                () -> assertThat(jdbc.calls).as("第一次：确实查了库").isEqualTo(1),
-
-                () -> assertThatThrownBy(() -> service.priceByTriple("M1", "G1", "P1"))
-                        .isInstanceOf(IncorrectResultSizeDataAccessException.class),
-                // ← 这句是本次修复的**全部内容**。改前这里是 1（失败 marker 被缓存，TTL 内不再查库），
-                //   于是「数据修好」在 TTL 内对调用方不可见；现在是 2（每次都如实撞上数据库）。
-                () -> assertThat(jdbc.calls).as("失败不得固化到 TTL").isEqualTo(2),
-                // isNull() 断言的是**整个 wrapper 为 null** = 真·未命中
-                // （与 zeroRowsIsCachedAsNullValue_notJustAMiss() 里那条「wrapper 在、值是 null」互为对照）。
-                () -> assertThat(cache().get("M1::G1::P1")).isNull());
+                () -> assertThat(service.priceByTriple("M1", "G1", "P1")).as("改前这里是抛").isNotNull(),
+                () -> assertThat(service.priceByTriple("M1", "G1", "P1").get("Price")).isEqualTo(9.9),
+                () -> assertThat(jdbc.calls).as("正常返回值 ⇒ 命中缓存，第二次不查库").isEqualTo(1));
     }
 
     @Test
-    @DisplayName("★自愈：数据一修好，下一次读取立刻正确（不需要等 TTL、不需要清缓存）")
-    void manyRowsFailureSelfHealsAsSoonAsDataIsFixed() {
+    @DisplayName("⚠️ 代价如实钉住：多行结果**会**进缓存（改前「自愈」那一条由此不再成立）")
+    void manyRowsResultIsCachedNow_unlikeTheOldThrowBehaviour() {
         jdbc.rows = List.of(
                 row("Price", 9.9, "GoodImg", "/img/a.jpg"),
                 row("Price", 9.8, "GoodImg", "/img/a.jpg"));
-        assertThatThrownBy(() -> service.priceByTriple("M1", "G1", "P1"))
-                .isInstanceOf(IncorrectResultSizeDataAccessException.class);
 
-        // 「有人把重复行删了」—— 不调 evict、不等 TTL。
-        jdbc.rows = List.of(row("Price", 9.9, "GoodImg", "/img/a.jpg"));
+        service.priceByTriple("M1", "G1", "P1");
+        assertThat(jdbc.calls).isEqualTo(1);
 
-        assertThat(service.priceByTriple("M1", "G1", "P1").get("Price")).isEqualTo(9.9);
-        assertThat(jdbc.calls).isEqualTo(2);
+        service.priceByTriple("M1", "G1", "P1");
+        // 改前这里是 2（异常 ⇒ @Cacheable 不写入 ⇒ 每次都真撞库 ⇒ 数据一修好立刻正确）。
+        // 现在多行是**正常返回值** ⇒ 进 TTL（a3 5m）：库里的重复行被删/改后，本键在 TTL 内仍回旧价;
+        // 自愈改由**写接口的 allEntries** 承担（evictByMerchant，见 evictClearsTheNegativeEntryToo）。
+        assertThat(jdbc.calls).as("多行结果被缓存，TTL 内不再查库").isEqualTo(1);
     }
 
     // ===================== 五、其它技术异常：原样上抛，同样不缓存 =====================
@@ -286,7 +279,7 @@ class GoodsPriceCacheTest {
 
         assertThatThrownBy(() -> service.priceByTriple("M1", "G1", "P1")).isSameAs(boom);
         assertThat(jdbc.calls).as("技术异常不得被缓存").isEqualTo(2);
-        assertThat(cache().get("M1::G1::P1")).isNull();
+        assertThat(cache().get("v2::M1::G1::P1")).isNull();
     }
 
     // ===================== 工具 =====================

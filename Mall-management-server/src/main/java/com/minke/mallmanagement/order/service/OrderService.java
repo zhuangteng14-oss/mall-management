@@ -19,6 +19,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ThreadLocalRandom;
+import com.minke.mallmanagement.marketing.coupon.service.CouponService;
 import com.minke.mallmanagement.notification.NotificationEvents;
 import com.minke.mallmanagement.notification.service.NotificationService;
 import com.minke.mallmanagement.order.model.OrderAction;
@@ -91,7 +92,7 @@ import com.minke.mallmanagement.shared.lock.DistributedLockService;
  *   <li><b>为什么不「换真值源」</b>：按 {@code goods.Price} 重算属 **C 档**（{@code three-layers.md#pack-three-layers-b}
  *       / {@code :181} 都写着「那是换真值源，不是加校验」），且**用现行契约做不到** —— 下单
  *       payload 里**没有商品 ID、也没有数量**（{@code ProductInformation} 只记「买了哪几个」，
- *       见 {@code ProductPage.vue:315-317} 的拼接），服务端拿不到数量就**原则上**算不出总价。
+ *       见 {@code ProductPage.vue:339-341} 的拼接），服务端拿不到数量就**原则上**算不出总价。
  *       故本笔只走 (a) 档「加校验」；(b) 档要改接口契约，是**另一笔**。</li>
  *   <li><b>⚠️ 本笔不消除资损，只是把「任意值」收窄成「有界值」</b>：{@code defect-survey.md:107}
  *       自述「仓内无支付网关 ⇒『可伪造价格』成立、『资损』是**条件后果**」。本笔**挡不住
@@ -175,6 +176,18 @@ public class OrderService {
      */
     private final ObjectMapper objectMapper;
 
+    /**
+     * 券域的核销出口（C3 块 5 · commit 5 新增）。结算带 {@code CouponId} 时用它「校验 + 核销 + 算减免」。
+     *
+     * <p>⚠️ <b>直接注入</b>（不是 {@code ObjectProvider}）：{@code CouponDao} / {@code CouponService}
+     * 早在块 5 commit 1 就进了 {@code AbstractSmokeTest} 的 {@code @Import}（是真 bean）⇒
+     * 切片里取得到，同 {@link #notificationService} 那条论证。若哪天它被移出 {@code @Import}，
+     * 本节会在**上下文加载期**红 —— 那时再改成 provider 形态。
+     * <p>⚠️ 依赖方向是「订单 → 券」，**不是**反过来：券域对订单域一无所知（它只认
+     * {@code couponId + merchantId + 金额 + orderId} 四个值）⇒ 没有环。
+     */
+    private final CouponService couponService;
+
     private static final Logger log = LoggerFactory.getLogger(OrderService.class);
 
     /** 支付流水号的日期段格式（{@code PAY} + {@code yyyyMMdd} + 6 位随机）。 */
@@ -187,7 +200,8 @@ public class OrderService {
                         ObjectProvider<UserStateLookup> userStateLookupProvider,
                         NotificationService notificationService,
                         ShippingTrackDao shippingTrackDao,
-                        ObjectMapper objectMapper) {
+                        ObjectMapper objectMapper,
+                        CouponService couponService) {
         this.orderDao = orderDao;
         this.lockService = lockService;
         this.orderStateMachine = orderStateMachine;
@@ -196,6 +210,7 @@ public class OrderService {
         this.notificationService = notificationService;
         this.shippingTrackDao = shippingTrackDao;
         this.objectMapper = objectMapper;
+        this.couponService = couponService;
     }
 
     // ==================== 下单 ====================
@@ -232,6 +247,11 @@ public class OrderService {
      * {@code order_item} 写不写、写几行 —— <b>不参与任何闸</b>（价格闸只看 {@code Price}、
      * 出生闸只看三个状态位、冻结闸只看 {@code MerchantId}）⇒ 对既有请求的**行为零影响**。
      * 格式与回落口径见 {@link #resolveItems}。
+     *
+     * <p>⚠️ <b>C3 块 5 commit 5 又在<b>末尾</b>加了 {@code CouponId}</b>（同 {@code Quantity} /
+     * {@code Items} 的理由：既有 11 个形参的相对顺序一字不动）。空 / 缺省 ⇒ 与加它之前**逐字节同行为**
+     * （老前端不发它、结算页面没选券时也不发）。非空 ⇒ 走 {@link #addLocked} 的用券段：
+     * 先校验、再核销，最后把 <b>折后价</b>写进 {@code order.Price}（那时入参 {@code Price} 是**原价**）。
      */
     public Map<String, Object> orderAdd(
             String CustomerId,
@@ -244,7 +264,8 @@ public class OrderService {
             int DeliveryIf,
             int ReceiveIf,
             int Quantity,
-            String Items
+            String Items,
+            String CouponId
     ) {
         // B#1：价格闸。放在锁外 —— 一是让非法请求不耗 Redis、不污染锁指标；二是让 addLocked
         // 的临界区保持逐字不动（B2 / D#1 的登记处就在那儿）。
@@ -269,7 +290,7 @@ public class OrderService {
         }
         return lockService.runLocked(LockName.ORDER_ADD, OrderId, () -> addLocked(
                 CustomerId, MerchantId, OrderId, Price, ProductInformation, Images,
-                PayIf, DeliveryIf, ReceiveIf, Quantity, Items));
+                PayIf, DeliveryIf, ReceiveIf, Quantity, Items, CouponId));
     }
 
     /**
@@ -315,7 +336,7 @@ public class OrderService {
      * <p><b>下界为什么是 {@code >= 0} 而不是 {@code > 0}</b>：{@code three-layers.md#pack-three-layers-b} 与
      * {@code :181} 两处都写「只做 {@code Price >= 0} + 上界」；且 {@code goods.Price} 无下界约束
      * ⇒ 商家可以合法把商品设成 0 元，此时前端 {@code popupTotal} 会算出 0
-     * （{@code ProductPage.vue:297-299}）⇒ {@code > 0} 会**误杀免费商品订单**。
+     * （{@code ProductPage.vue:321-323}）⇒ {@code > 0} 会**误杀免费商品订单**。
      *
      * <p><b>精度不校验</b>：{@code popupTotal} 是 JS 浮点求和 ⇒ 真实订单本来就可能带
      * {@code 9.999999999999998} 这类尾数，加「≤2 位小数」会**误杀真实订单**；且存储是
@@ -430,7 +451,7 @@ public class OrderService {
     private Map<String, Object> addLocked(
             String CustomerId, String MerchantId, String OrderId, float Price,
             String ProductInformation, String Images, int PayIf, int DeliveryIf, int ReceiveIf, int Quantity,
-            String Items) {
+            String Items, String CouponId) {
         Map<String, Object> result = new HashMap<>();
         // ⚠️ 临界区内先查后插 —— 这一段是 B2 对「同一 OrderId 落库 2 行」的真修复（A-S2a-1）：
         //    · 只有锁：并发变串行，但每个请求照旧裸 INSERT ⇒ 仍插 20 行；
@@ -451,9 +472,50 @@ public class OrderService {
             e.printStackTrace();
         }
 
+        // ── 用券段（C3 块 5 · commit 5）───────────────────────────────────────────────
+        // 位置是**刻意**的，三条理由：
+        //  ① 排在查重**之后**：重复提交该走的还是那条早退（`订单已存在`），不该先把券核销掉；
+        //  ② 排在 INSERT **之前**：核销是 CAS（`unused → used`），抢不到就**一张订单都不建** ——
+        //     反过来先建单再核销，抢不到时那张单已经落库且带着折后价，等于白送一次折扣；
+        //  ③ 排在**临界区内**：它是「本单」的一部分，而锁的 key 就是本 OrderId ⇒ 同一单的
+        //     重复提交在这里是串行的（跨单的同券竞态由 CAS 自己挡，与锁无关）。
+        double discount = 0d;
+        String couponAccount = null;
+        if (CouponId != null && !CouponId.isBlank()) {
+            // ⚠️ **折扣商品闸**（C3 块 5〈折扣商品用券规则〉，2026-10-12 用户 A 档批准）——
+            //    位置理由同上面 ②：排在核销之**前** ⇒ 拒了就是「一张订单都不建、券一次都不核销」。
+            //    判据（本单含任意一件 `goods.OriginalPrice > 0` 的商品 ⇒ 满减 / 折扣券整单拒）与
+            //    「为什么整单拒」写在 `CouponService.redeem` 的 javadoc 里，此处不重复。
+            Boolean hasDiscountItem = hasDiscountItem(MerchantId, Items, ProductInformation, Price, Quantity);
+            if (hasDiscountItem == null) {
+                // ⚠️ **查不出来就不放行**（fail-closed）—— 与 `writeItems` / 查重那两处的 fail-open
+                //    **刻意相反**，理由：那两处是「附加物 / 加固」，坏了不该挡住一次结算；这里是
+                //    **钱**的规则（多减一笔就真的少收一笔），而且它**只在这一单带券时才走到**
+                //    ⇒ 影响面收得住（不带券的下单一个字节都不受影响），代价是库抖时用券要重试。
+                result.put("success", false);
+                result.put("msg", "折扣商品校验失败，请稍后重试");
+                return result;
+            }
+            // ⚠️ 券包的键是**登录名**，本方法的入参是**业务号** —— 这里必须翻一次
+            //    （`coupon_grant.ToAccount` 的口径见 `CouponDao.insertGrant`）。
+            couponAccount = usernameOf(CustomerId);
+            CouponService.Redeem redeemed = couponService.redeem(
+                    couponAccount, CouponId.trim(), MerchantId, Price, hasDiscountItem, OrderId);
+            if (!redeemed.ok()) {
+                result.put("success", false);
+                result.put("msg", redeemed.msg());
+                return result;
+            }
+            discount = redeemed.discount();
+        }
+        // 折后价：`Price` 是**原价**（前端 / `CartService` 传的都是合计），实付价落库。
+        // `Math.max(0, …)` 防负数（券的减免上界已在 `CouponService.redeem` 里锁到 `orderTotal`，
+        // 这里再兜一层：金额为负的订单在 `order.Price` 的语义里没有解释）。
+        float payPrice = (float) Math.max(0d, Price - discount);
+
         try {
             int rows = orderDao.insertOrder(new OrderDao.OrderRow(
-                    OrderId, CustomerId, MerchantId, Price, Quantity, ProductInformation, Images,
+                    OrderId, CustomerId, MerchantId, payPrice, Quantity, ProductInformation, Images,
                     PayIf, DeliveryIf, ReceiveIf));
             if (rows > 0) {
                 result.put("success", true);
@@ -465,17 +527,99 @@ public class OrderService {
                 // ⚠️ 排在「订单已落库」这个结论**之后**、且自己 fail-open（见 writeItems）——
                 //    明细的成败**不改变**本方法的返回值，否则调用方会把「订单其实落了」
                 //    当成失败而**重复下单**。
+                // ⚠️ 传的仍是**原价** `Price`：`resolveItems` 的回落口径要拿它反推单价
+                //    （`一单多品` 时 `Price / Quantity`），传折后价会把单价一起算错 ——
+                //    明细记的是「卖了哪几件、各卖多少钱」，与实付金额是两回事。
                 writeItems(OrderId, MerchantId, resolveItems(Items, ProductInformation, Price, Quantity));
+                if (discount > 0d) {
+                    // 只读给调用方（Controller 的留痕 / 前端回显）；**不是**契约的一部分 ——
+                    // 不选券的老请求永远不会看到这两个键（`Result.of` 逐条 put）。
+                    result.put("CouponId", CouponId.trim());
+                    result.put("Discount", discount);
+                }
             } else {
                 result.put("success", false);
                 result.put("msg", "订单添加失败");
+                releaseCoupon(couponAccount, CouponId, OrderId, discount);
             }
         } catch (Exception e) {
             e.printStackTrace();
             result.put("success", false);
             result.put("msg", "数据库错误：" + e.getMessage());
+            releaseCoupon(couponAccount, CouponId, OrderId, discount);
         }
         return result;
+    }
+
+    /**
+     * 建单失败时把券放回未使用（{@link #addLocked} 用券段的补偿腿）。**fail-soft**。
+     *
+     * <p>⚠️ 不这么做的话：券核销了、订单没落 ⇒ 用户手里平白少一张券，而系统里没有任何一条记录
+     * 说它去哪了（{@code coupon_grant.OrderId} 指向一个不存在的单）。
+     *
+     * <p>⚠️ 回退失败**不改变返回值**：那时用户已经要看到「订单添加失败」了，再抛异常只会盖掉它。
+     * 记一行 WARN 就够 —— 库里 `Status='used'` 且 `OrderId` 无对应订单行，是**可查的**痕迹
+     * （同 {@code writeItems} 的 fail-open 口径）。
+     */
+    private void releaseCoupon(String account, String couponId, String orderId, double discount) {
+        if (discount <= 0d || couponId == null || couponId.isBlank()) {
+            return;
+        }
+        try {
+            if (!couponService.release(account, couponId.trim(), orderId)) {
+                log.warn("订单未建成，但优惠券回退未命中任何行（可能已被并发改动）：coupon={} order={}", couponId, orderId);
+            }
+        } catch (Exception e) {
+            log.warn("订单未建成，且优惠券回退失败（需人工核对）：coupon={} order={} —— {}", couponId, orderId, e.toString());
+        }
+    }
+
+    /**
+     * 业务号 → 登录名（券包的键）。查不到 ⇒ 原样回传，交给 {@code CouponService.redeem} 判缺参
+     * （它会回「无法识别领券账户」）—— 本方法**不**在这里编一个身份出来。
+     */
+    private String usernameOf(String customerId) {
+        try {
+            String username = couponService.usernameOf(customerId);
+            return username == null ? customerId : username;
+        } catch (Exception e) {
+            log.warn("业务号翻登录名失败（券核销将按原值判，多半会被拒）：customer={} —— {}", customerId, e.toString());
+            return customerId;
+        }
+    }
+
+    /**
+     * 本单**含不含折扣商品**（{@code goods.OriginalPrice > 0} 的任一件）。
+     *
+     * @return {@code TRUE} 含 / {@code FALSE} 不含 / {@code null} **查不出来** —— 三态是刻意的：
+     *         调用方（用券段）要按 {@code null} 走 fail-closed（见那里的注释），
+     *         把「查不出来」折叠成 {@code false} 就等于**静默放行**。
+     *
+     * <p>码从 {@link #resolveItems} 取 —— 与落明细（{@code writeItems}）**同一个来源**，
+     * 不另造一份解析（那份解析有两条路：显式 {@code Items} 与回落 {@code ProductInformation}，
+     * 抄第二份必定在某一条上分叉）。
+     * <p>⚠️ 传的 {@code Price} 仍是**原价合计**（此处 {@code payPrice} 还没算）——
+     * {@code resolveItems} 的回落口径要拿它反推单价，传折后价会把单价一起算错。
+     */
+    private Boolean hasDiscountItem(String merchantId, String Items, String ProductInformation,
+                                    float Price, int Quantity) {
+        List<String> codes = new ArrayList<>();
+        for (ItemSpec s : resolveItems(Items, ProductInformation, Price, Quantity)) {
+            if (s.code() != null && !s.code().isBlank()) {
+                codes.add(s.code());
+            }
+        }
+        if (codes.isEmpty()) {
+            // 一单里一个码都没解析出来：按「不含折扣商品」判 —— 这不是「查不出来」，
+            // 是**确实没有商品可判**（真到那一步，下单本身也会在别处被拦）。
+            return Boolean.FALSE;
+        }
+        try {
+            return !orderDao.selectDiscountCodes(merchantId, codes).isEmpty();
+        } catch (Exception e) {
+            log.warn("折扣商品判定失败（本单 {} 个码，用券将按「查不出来」拒）—— {}", codes.size(), e.toString());
+            return null;
+        }
     }
 
     // ==================== 订单明细（可视化段 commit 0） ====================

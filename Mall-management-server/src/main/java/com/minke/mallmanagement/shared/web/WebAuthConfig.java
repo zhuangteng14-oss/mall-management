@@ -59,19 +59,25 @@ public class WebAuthConfig implements WebMvcConfigurer {
      * <p>判据是<b>路径</b>，与 HTTP 方法无关（{@code /goods/goodstype} 是 GET/POST 双形态，
      * 一条即覆盖两者）。{@code /**} 由 {@code AntPathMatcher} 展开。
      *
-     * <h3>业务 8 条</h3>
+     * <h3>业务 9 条</h3>
      * <ul>
      *   <li><b>登录链 3 条</b>（{@code /user/loginSelect}、{@code /user/loginAdd}、
      *       {@code /user/getUserInfo}）—— 登录页在**未登录**状态下就打这三个，白名单少了它们
      *       等于闸一开就再也登不进去（⚠️ 其中 {@code /user/getUserInfo} 的前端消费点自 P2.6 起已归零、
      *       不再在登录链上 —— 仍留白名单属「端点只保留不删」，见 {@code progress.md} §5-AC）。</li>
-     *   <li><b>登录前后台页面 5 条</b>（{@code /goods/goodstype}、{@code /goods/goodsSelectHome}、
+     *   <li><b>登录前后台页面 6 条</b>（{@code /goods/goodstype}、{@code /goods/goodsSelectHome}、
      *       {@code /goods/GoodsProductCodeSelect}、{@code /goods/productCodePrice}、
-     *       {@code /goods/productSearch}）—— 首页 {@code HomePage.vue:186-193} 与商品页
-     *       {@code ProductPage.vue:766} 的 {@code onMounted} **没有任何登录态判断**
+     *       {@code /goods/productSearch}、{@code /shop/profile}）—— 首页 {@code HomePage.vue:201-208}
+     *       与商品页 {@code ProductPage.vue:796} 的 {@code onMounted} **没有任何登录态判断**
      *       （2026-10-04 逐行核实），且全仓无路由守卫 ⇒ 这两页在未登录时照常发这些请求。
      *       ⚠️ 其中 {@code productSearch} / {@code GoodsProductCodeSelect} / {@code productCodePrice}
-     *       属**「同类公开」**（与首页同为商品浏览面），不是「未登录必经」—— 这条区分见下。</li>
+     *       属**「同类公开」**（与首页同为商品浏览面），不是「未登录必经」—— 这条区分见下。
+     *       <p>⚠️ {@code /shop/profile}（C3 块 5 · B 组续笔，2026-10-12）是**店铺主页**的公开档案：
+     *       店铺主页是商品详情页「进店逛逛」的落点，而详情页本身是公开面
+     *       （{@code router/index.js} 里 {@code /product} 与 {@code /shop} 都挂 {@code meta.public}）
+     *       ⇒ 未登录点进店得看到店名 / 开店时长，否则那一格是空的。**同族另三条**
+     *       （{@code /shop/follow} / {@code /shop/unfollow} / {@code /shop/followState}）**仍在身份面**，
+     *       别顺手一起搬进来。</li>
      * </ul>
      *
      * <h3>基础设施 4 条</h3>
@@ -100,12 +106,14 @@ public class WebAuthConfig implements WebMvcConfigurer {
             "/user/loginSelect",
             "/user/loginAdd",
             "/user/getUserInfo",
-            // ===== 业务：登录前后台页面（首页 / 商品页 / 搜索页）=====
+            // ===== 业务：登录前后台页面（首页 / 商品页 / 搜索页 / 店铺主页）=====
             "/goods/goodstype",
             "/goods/goodsSelectHome",
             "/goods/GoodsProductCodeSelect",
             "/goods/productCodePrice",
             "/goods/productSearch",
+            // 店铺主页存档（公开档案：登录名 / 注册时刻 / 入驻审核状态）。⚠️ 同族 follow 三条**不在此**。
+            "/shop/profile",
             // ===== 基础设施 =====
             // 运维探针（⚠️ 仅 a3 profile 存在）。**归基础设施，不是业务** —— 理由见上。
             "/health/db",
@@ -160,7 +168,7 @@ public class WebAuthConfig implements WebMvcConfigurer {
     /**
      * 注册到 {@code /**}，白名单**不**走 {@code excludePathPatterns} —— ⚠️ 刻意的，别「顺手改成
      * excludePathPatterns」：被排除的路径**根本进不了 {@code preHandle}**，白名单就无法在拦截器
-     * 这一层被断言。当前写法让 {@code AuthGateSmokeTest} 能对 12 条逐条直调 {@code preHandle}
+     * 这一层被断言。当前写法让 {@code AuthGateSmokeTest} 能对 13 条逐条直调 {@code preHandle}
      * 钉死（「被排除」与「不存在」在下游都是 404，MockMvc 分不开；白名单的契约恰是「闸不拦它」）。
      */
     @Override

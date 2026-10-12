@@ -1,0 +1,49 @@
+C3 块 5 收口 —— VM 库 DDL 复核（只读探针，2026-10-12）
+命令：java -cp mysql-connector-j-8.0.33.jar _work/b5-query/Query.java < _work/b5-close-db.sql
+库：a3 profile 指向的 VM MySQL（库名 mall_management_sql）；凭据从 application-a3.properties 的 ${A3_DB_*:…} 剥壳，未落盘
+探针：_work/b5-query/Query.java（拒写关键字，只跑 SELECT）
+
+目的：db-migration.md 每条「落 VM 库证据」的**第一手**复核。
+      特别是 ⑭（goods_sku 加索引）—— 迁移段 D 未提交，此前无捕获的执行输出。
+
+================ 原始输出 ================
+── SELECT TABLE_NAME FROM information_schema.TABLES WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME IN ('coupon','coupon_grant','subsidy_rule','subsidy_goods','seckill_invitation','seckill_application','seckill_activity','shop_follow') ORDER BY TABLE_NAME ──
+TABLE_NAME
+----------
+coupon
+coupon_grant
+seckill_activity
+seckill_application
+seckill_invitation
+shop_follow
+subsidy_goods
+subsidy_rule
+(8 行)
+
+── SELECT INDEX_NAME,COLUMN_NAME,NON_UNIQUE,SEQ_IN_INDEX FROM information_schema.STATISTICS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='goods_sku' ORDER BY INDEX_NAME,SEQ_IN_INDEX ──
+INDEX_NAME | COLUMN_NAME | NON_UNIQUE | SEQ_IN_INDEX
+----------------------------------------------------
+idx_goods_sku_merchant_goods | MerchantId | 1 | 1
+idx_goods_sku_merchant_goods | GoodName | 1 | 2
+idx_goods_sku_sku_code | SkuCode | 1 | 1
+PRIMARY | Id | 0 | 1
+uk_goods_sku_goods_axis | GoodsId | 0 | 1
+uk_goods_sku_goods_axis | AxisName | 0 | 2
+(6 行)
+
+── SELECT TABLE_NAME,COLUMN_NAME,COLUMN_TYPE,IS_NULLABLE,COLUMN_DEFAULT FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND ((TABLE_NAME='goods' AND COLUMN_NAME='OriginalPrice') OR (TABLE_NAME='order' AND COLUMN_NAME IN ('CouponId','SubsidyAmount','PayAmount')) OR (TABLE_NAME='goods_audit' AND COLUMN_NAME='OriginalPrice')) ORDER BY TABLE_NAME,COLUMN_NAME ──
+TABLE_NAME | COLUMN_NAME | COLUMN_TYPE | IS_NULLABLE | COLUMN_DEFAULT
+---------------------------------------------------------------------
+goods | OriginalPrice | decimal(10,2) | NO | 0.00
+goods_audit | OriginalPrice | decimal(10,2) | NO | 0.00
+order | CouponId | varchar(40) | NO | 
+order | PayAmount | decimal(10,2) | NO | 0.00
+order | SubsidyAmount | decimal(10,2) | NO | 0.00
+(5 行)
+
+── SELECT COUNT(*) AS table_n FROM information_schema.TABLES WHERE TABLE_SCHEMA=DATABASE() ──
+table_n
+-------
+30
+(1 行)
+

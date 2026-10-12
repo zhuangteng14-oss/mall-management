@@ -81,41 +81,95 @@
         <div class="info">
           <h1 class="pname">{{ goodName }}</h1>
 
-          <!-- ①【原价 / 折扣】`data-slot` 按稿挂**整个 `.priceline`**，而**现价是真的**
-               （`allItems[].price` ⇒ `currentItem.price`）⇒ 这一块是**一块两档**：
-               块级（`<div>` 不是控件）⇒ 只挂 `data-slot` + `title`、**不 `disabled`**，
-               真价照常渲染。稿里 `.was` / `.off` 是**块内 mock** ⇒ 逐字保留（同 GoodsAdd §三）。
-               ⚠️ 稿的 `.dec`（`.00`）**不落**：本仓价格没有固定小数位，硬拆会凭空空造两位。
-               ⚠️ 本条 title 稿里**不带**「待 C3〈商品〉」前缀（它的 C3 归属写在另一个属性
-                  `data-future` 上，而 `data-future` 按 `ShoppingCart.vue:43` 先例不落）⇒
-                  归属只进台账，**不往 title 里塞 C3**（同 commit 11 #37 的处理）。 -->
-          <div
-            class="priceline"
-            data-slot="预留 · 原价 / 折扣（动现有代码 5 处 · 超档）"
-            title="goods 表无原价列（只有 Price 一列）：mall_management_sql.sql + GoodsDao.java + GoodsService.java + GoodsController.java + ProductPage.vue = 5 处，**超档**，因清单点名而画出（见 README 挂账表）"
-          >
+          <!-- ①【原价 / 折扣】—— C3 块 5〈折扣〉**落地**（2026-10-12 用户 A 档批准）。
+               改前：`.was`（`¥199.00`）与 `.off`（`6.5 折`）是**稿内 mock 的写死字面量**，
+               整块挂 `data-slot="预留 · 原价 / 折扣（动现有代码 5 处 · 超档）"`。
+               现在：两枚都由 `originalPrice` 真算 —— `originalPrice > 0` 才画，否则**一枚都不画**
+               （数据不足不显，不拿假划线价冒充）；`data-slot` 随之摘掉。
+               ⚠️ 折数**读侧现算**（`price / originalPrice × 10`），库里没有折率列 ——
+                  这样改了现价，角标自动跟着变，不会留下一个算不出来的陈旧折率。
+               ⚠️ 稿的 `.dec`（`.00`）**不落**：本仓价格没有固定小数位，硬拆会凭空空造两位。 -->
+          <div class="priceline">
             <span class="price"><span class="sym">¥</span><span class="int">{{ currentItem.price }}</span></span>
-            <span class="was">¥199.00</span>
-            <span class="off">6.5 折</span>
+            <span v-if="hasDiscount" class="was">¥{{ currentItem.originalPrice }}</span>
+            <span v-if="hasDiscount" class="off">{{ discountRate }} 折</span>
+            <!-- ①-补【国家补贴】—— C3 块 5〈国补〉**落地**（2026-10-12）。
+                 ⚠️ 只在「这件商品通过了国补、规则在期、商品在架」时才有个数 —— 后端 `/marketing/subsidy/goods`
+                    三处 JOIN 一起挡（商家点头 + 规则在期 + 商品在架）。**没有就不画**，不拿「暂无补贴」占位。
+                 ⚠️ 金额**后端现算**（`SubsidyAmount`），本页只显示。
+                 ⚠️ **2026-10-12 补**：除「−¥N」外**同时**摆出**补贴后价**（`PayAmount`，后端 `withAmounts`
+                    已经算好并返回）—— 只给一个减额，用户还得自己做减法才知道要付多少。`title` 里把
+                    「原价 → 到手」两个数都写全（悬停可复核），不另占版面。 -->
+            <span v-if="subsidy" class="subsidy" :title="'原价 ¥' + r2(currentItem.price) + ' → 补贴后 ¥' + r2(subsidy.PayAmount)">国补 −¥{{ r2(subsidy.SubsidyAmount) }}<i class="pay">到手 ¥{{ r2(subsidy.PayAmount) }}</i></span><!-- ①-补【秒杀价】—— C3 块 5〈秒杀〉**落地**（2026-10-12）：与上面两枚同一条口径「没有就不画」。⚠️ 命中判据是 **`ProductCode`**（`seckill` computed），且**只有 `Stage === 'live'` 才算命中** —— `upcoming`（活动未开启）/`signup`（报名期）那一档后端也会回，但那句话归秒杀页 `/seckill` 说，本页不替它说。⚠️ 已售完时改说「已售完」：`SoldOut` 是后端在 **Java 侧**拿两个数字比出来的（SQL 里写 `0/1` 会被驱动退成字符串，`'0'` 在 JS 里是真值）。 --></div><!-- ⚠️ **上面这一枚是修构建时补的**（2026-10-12）：同批把「秒杀价」徽标换成下面那个 `.sk-zone` 块时，**新块的 `</div>` 借走了原来关 `.priceline` 的那一枚** ⇒ `.priceline` 一直开着、错误一路冒到根 `div`（`VueCompilerError: Element is missing end tag. at :2:3`）。`.sk-zone` 是 `.priceline` 的**兄弟**（它是满行卡片、自带 `margin-top`），不是 flex 子项 —— 所以这一枚补在**价格行**末尾、新块之前。**同行追加以保零漂移**（下面 `<style>` 段被文档按行号引）。 -->
+
+          <!-- ①-补【秒杀区】—— C3 块 5〈秒杀〉**落地**（2026-10-12；同日用户配色令改版）。
+               ⚠️ **原方案是价格行上一枚 `.sk-tag` 徽标**（与 `.off` / `.subsidy` 同套色）——
+                  用户 2026-10-12 裁定**乙案**：**删徽标**，秒杀信息只在这**一个新块**里说一次
+                  （这里有它没有的三件：划线价 / 阶段 / 剩余件数）。整条 `.sk-tag` 规则随之退场。
+               ⚠️ 命中判据仍是 **`ProductCode`**（`seckill` computed），且**只有 `Stage === 'live'` 才算命中**
+                  —— `upcoming`（活动未开启）/`signup`（报名期）那一档后端也会回，但那句话归秒杀页
+                  `/seckill` 说，本页不替它说。**没有就不画**（不拿「暂无秒杀」占位）。
+               ⚠️ `SoldOut` / `SoldLeft` 由后端在 **Java 侧**算（SQL 里写 `0/1` 会被驱动退成字符串，
+                  `'0'` 在 JS 里是真值）—— 本页只读不算（不限量那档的语义已经在后端定好了）。 -->
+          <div v-if="seckill" class="sk-zone">
+            <div class="sk-card" :class="{ sold: seckill.SoldOut }">
+              <div class="sk-hd">
+                <span class="sk-mark">秒杀</span>
+                <span class="sk-left">{{ seckill.SoldOut ? '已售完' : (seckill.SoldLeft !== null && seckill.SoldLeft !== undefined ? '剩 ' + seckill.SoldLeft + ' 件' : '不限量') }}</span>
+              </div>
+              <div class="sk-pr">
+                <b class="sk-now">¥{{ seckill.SeckillPrice }}</b>
+                <s class="sk-was">¥{{ r2(currentItem.price) }}</s>
+              </div>
+            </div>
           </div>
 
-          <!-- ②【促销 / 优惠券】整块级 ⇒ 只挂 `data-slot` + `title`；券框里的「领取」是**控件** ⇒
-               逐枚 `disabled` + 逐字取稿的 title。同样：本条 title 稿里不带 C3 前缀（同上）。 -->
+          <!-- ②【促销 / 优惠券】—— **C3 块 5〈营销块〉已接线**（2026-10-11）。
+               ⚠️ 数据 = **领券中心的前 6 张**（`/marketing/coupons`，封装 `src/api/marketing.js`）：
+                 · 「促销」行 = 其中 `Type='threshold'`（满减）的券，画成「满 A 减 B」；
+                 · 「领券」行 = **全部**可领的券 + 领取按钮（「领取」落 `coupon_grant`）。
+               🔴 **不按商品 / 类目过滤** —— 后端 `CouponDao.selectClaimable` **不接商品维度** ⇒ 这一块
+                  展示的是**全站可领的券**，别读成「这件商品可用的券」（真做过滤要动后端，超本笔边界）。
+               ⚠️ 未登录（无 `couponAccount`）时不出券、只出一行提示 —— 领券要有身份。 -->
           <div
             class="promo"
-            data-slot="预留 · 促销 / 优惠券（动现有代码 5 处 · 超档）"
-            title="无促销与优惠券字段：本页这一块的落码成本 = endpoints.js + ProductPage.vue = 2 处，**但券无法凭空存在** —— 跨页那套（PDP 领券 / 购物车可用券 / 个人中心我的券 / 结算已用券 / 首页领券中心）合计 5 处，**超档**，因清单点名而画出（见 README 挂账表）"
+            title="C3 块 5〈营销块〉已接线（2026-10-11）：促销行取满减类券、领券行取全站可领券，数据源 /marketing/coupons（封装 src/api/marketing.js）⇒ 原 data-slot「预留 · 促销 / 优惠券（动现有代码 5 处 · 超档）」退场"
           >
-            <div class="r"><span class="tag">促销</span><span class="cut">满 200 减 30&emsp;满 500 减 80</span></div>
-            <div class="r"><span class="tag">领券</span>
-              <span class="coupons">
-                <span class="coupon"><span class="amt"><i>¥</i>20</span>
-                  <span class="cond">满 199 可用</span>
-                  <button type="button" class="get" disabled title="领取优惠券（无端点）">领取</button></span>
-                <span class="coupon"><span class="amt"><i>¥</i>50</span>
-                  <span class="cond">满 499 可用</span>
-                  <button type="button" class="get" disabled title="领取优惠券（无端点）">领取</button></span>
+            <div class="r"><span class="tag">促销</span>
+              <span v-if="promoCuts.length" class="cut">{{ promoCuts.join('\u3000') }}</span>
+              <span v-else class="cut cut-off">暂无满减活动</span>
+            </div>
+            <div class="r r-coupons"><span class="tag">领券</span>
+              <span
+                v-if="claimList.length"
+                class="coupons"
+                :class="{ 'coupons-cut': claimList.length > CP_VISIBLE && !cpExpanded, 'coupons-on': cpExpanded }"
+              >
+                <span v-for="c in claimList" :key="c.CouponId" class="coupon">
+                  <span class="amt"><i v-if="c.Type !== 'percent'">¥</i>{{ faceNum(c) }}</span>
+                  <span class="nm">{{ couponName(c) }}</span>
+                  <span class="cond">{{ faceCond(c) }}</span>
+                  <button
+                    type="button"
+                    class="get"
+                    :disabled="claimed(c) || claiming === c.CouponId"
+                    :title="claimed(c) ? '已领取' : '领取优惠券'"
+                    @click="doClaimCoupon(c)"
+                  >{{ claimed(c) ? '已领取' : claiming === c.CouponId ? '领取中' : '领取' }}</button>
+                </span>
               </span>
+              <span v-else class="coupons"><span class="cond cut-off">{{ couponAccount ? '暂无可用券' : '登录后可领券' }}</span></span>
+              <!-- 「》」展开（用户 A4：裁切线外还有券时才出现）。
+                   ⚠️ 与主页 `.tk-more` 是**同一个手势**（点一下铺开、再点收起），但**不共用 CSS** ——
+                      主页那份钉在 `.tk-h-r` 里（表头右侧），这一颗在 `.r` 的第 3 列。 -->
+              <button
+                v-if="couponAccount && claimList.length > CP_VISIBLE"
+                type="button"
+                class="cp-more"
+                :class="{ 'cp-more-on': cpExpanded }"
+                :title="cpExpanded ? '收起（只留前 ' + CP_VISIBLE + ' 张）' : '展开看全部 ' + claimList.length + ' 张'"
+                @click="cpExpanded = !cpExpanded"
+              >{{ cpExpanded ? '《' : '》' }}</button>
             </div>
           </div>
 
@@ -130,7 +184,7 @@
                 :key="idx"
                 type="button"
                 class="md"
-                :class="{ on: idx === currentIndex }"
+                :class="{ on: idx === currentIndex, sub: skuKind(item.productCode) === 'subsidy', sec: skuKind(item.productCode) === 'seckill' }"
                 @click="currentIndex = idx"
               >{{ item.productCode }}</button>
             </div>
@@ -176,18 +230,18 @@
             <span v-for="p in promiseLabels" :key="p">{{ p }}</span>
           </div>
 
-          <!-- ④【店铺主页】`data-slot` 按稿挂**整张商家卡**（⚠️ 不挂「进店逛逛」那个按钮：
-               角标要 250px、而按钮只有 90px，挂上去会横跨到左边的「客服」和店名；
-               这是「角标只挂区块级」的第三次应验）。标题里的 C3 前缀稿里**有**，逐字保留。
-               ⚠️「客服」是**真功能**（`consultProduct` → `message.send`）⇒ 不 `disabled`；
-                  只有「进店逛逛」无落点 ⇒ `disabled` + 逐字取稿的 title。
+          <!-- ④【店铺主页】—— **C3 块 5 B 组（2026-10-12）已落**：店铺主页 = 新建 `views/ShopHome.vue`，
+               路由 `/shop` 追加在 `router/index.js` **文件尾**。⛔ 本块原先挂着 `data-slot="预留 · 店铺主页…"`
+               与说明「进店逛逛无落点 ⇒ 四处改动超档」的 `title`，**两条随真落点一并撤掉** ——
+               它们描述的病已经治好，留着就是假话。
+               ⚠️ 原注里「按稿挂在**整张商家卡**上、**不挂**『进店逛逛』那个按钮」那条判据**不受本笔影响**
+               （角标要 250px、按钮只有 90px，挂上去会横跨到左边的「客服」和店名 —— 这是「角标只挂
+               区块级」的第三次应验）：本块现已无 `data-slot`，但那条讲的是**角标该挂在哪一层**，仍然有效。
+               ⚠️「客服」从来不在占位里（它一直是 `consultProduct` 真功能）⇒ 不 `disabled`；
+               本笔改的只有「进店逛逛」：它现在是**真按钮**（`enterShop` → `/shop`）。
                ⚠️ 店名与 `.sub` 后半句落真值（`currentItem.UserName` / `goodType`），
-                  摘掉稿里 mock 的「声谷小店」/「数码配件 ·」。 -->
-          <div
-            class="shop"
-            data-slot="预留 · 店铺主页（动现有代码 4 处 · 超档）"
-            title="待 C3〈店铺〉——「进店逛逛」无落点：router/index.js（加路由）+ ProductPage.vue（跳转）+ 商家侧装修入口 + 商家卡数据来源 = 4 处，**超档**，因清单点名而画出（见 README 挂账表）；店铺页本身是新建文件，不计入。⚠️ 「客服」是真功能（message.send），不在此占位内。"
-          >
+               摘掉稿里 mock 的「声谷小店」/「数码配件 ·」—— 与上述撤销无关，依旧有效。 -->
+          <div class="shop">
             <span class="mark">{{ (currentItem.UserName || '商')[0] }}</span>
             <span>
               <span class="nm">{{ currentItem.UserName }}小店</span>
@@ -195,7 +249,7 @@
             </span>
             <span class="ops">
               <button type="button" title="现有功能 consultProduct" @click="consultProduct">客服</button>
-              <button type="button" disabled title="待 C3〈店铺〉——无落点，4 处改动（超档），见商家卡角标">进店逛逛</button>
+              <button type="button" title="真跳转：/shop 店铺主页（新建页 ShopHome，卖家 = 本页 route 的 MerchantId）" @click="enterShop">进店逛逛</button>
             </span>
           </div>
         </div>
@@ -324,26 +378,26 @@
 
       <!-- ── 三、推荐区（猜你喜欢）——**真功能**（`goods.goodsSelectHome` ⇒ `goodsWithUser`）──
            ⚠️ 稿的 4 张卡是 mock（声谷 Lite / 空气传导 / 数据线 / 蓝牙音箱），本区**有真数据**
-              ⇒ 落真卡：`goodsWithUser` 取前 4 条（与稿的 4 栏栅格对齐），每张是**真
-              `<router-link>`** 指向既有路由 `/product`，参数用本页已有的 4 个 query 名。
-           ⚠️ 稿的 `.pr` 是三段拆字（`¥` / `89` / `.00`）⇒ 只落前两段，`<em>` 那两位不落
-              （数据没有固定小数位，与主区 `.price` 同一口径）。
-           ⚠️ `.ph` 稿是灰方块 ⇒ 保留既有真图并补 `v-if`（`goodImg` 为空时裸 `<img src="">`
-              画的是破图图标 —— 同 `HistoricalOrders.vue:66` 先例）。 -->
+              ⇒ 落真卡：`goodsWithUser` 取前 4 条（与稿的 4 栏栅格对齐）。
+           ⚠️ 卡在 **C3 块 5 · B 组续笔（2026-10-12）收成公共组件** `components/ProductCard.vue`
+              （本页 / 主页 / 店铺主页**三处共用**）—— 本区改前那份手写卡（1/1 图、整值价、
+              4 个 query 参数）随之作废。组件与**主页**那一枚是同一份结构，差异只有本区不传
+              `beforeNav`（本页进商品页不需要清搜索缓存）。
+           ⚠️ 副作用逐条交代：组件统一按 **7 个 query 参数**跳（本区原为 4 个）——
+              多出来的 `Price/GoodImg/ProductCode` 本页**不读**（`:465` 只解构 4 个）⇒ 无害；
+              而少传会让主页那条 T-guard-6 判据（「7 个参数都要在」）失效，故取并集。
+           ⚠️ **改前实测（不是推断）**：三处卡形的逐条对照（图比例 / 有无框 / 价格段数 / 元信息行）见
+              `docs/agent/evidence/c3-block5/out-b5d-cards-before.png`（探针 `scripts/probes/c3b5d-cards-before.mjs`，两遍 16 项 / 0 失败）。
+           ⚠️ 原卡有**两处兜底**，组件里没有照搬，理由各一：
+              · `<img>` 上的 `v-if="goods.GoodImg"`（防 `src=''` 画破图）—— 实测 43/43 行都有
+                `GoodImg`，且组件那一枚 `<img>` 是**无条件**渲染的（空 `src` 是同一个破图）；
+              · 无 `alt` —— 组件补了 `:alt="goods.GoodName"`（43 张一样的「商品图」对读屏零信息）。
+           ⚠️ 未抽组件前，本区与店铺主页的「像不像」靠手写对齐；收成一件之后由**结构**保证。 -->
       <section class="reco">
         <h2 title="真功能：现有端点 goods.goodsSelectHome，本区不需要新端点">猜你喜欢</h2>
-        <p v-if="goodsWithUser.length === 0" class="none">暂无推荐</p>
+        <p v-if="recommendGoods.length === 0" class="none">暂无推荐</p>
         <div v-else class="cards">
-          <router-link
-            v-for="goods in goodsWithUser.slice(0, 4)"
-            :key="goods.Id"
-            class="card"
-            :to="{ path: '/product', query: { MerchantId: goods.MerchantId, GoodName: goods.GoodName, GoodType: goods.GoodType, Id: goods.Id } }"
-          >
-            <div class="ph"><img v-if="goods.GoodImg" :src="goods.GoodImg" /></div>
-            <div class="nm">{{ goods.GoodName }}</div>
-            <div class="pr"><i>¥</i><b>{{ goods.Price }}</b></div>
-          </router-link>
+          <ProductCard v-for="goods in recommendGoods.slice(0, 4)" :key="goods.Id" :goods="goods" />
         </div>
       </section>
     </div>
@@ -364,12 +418,16 @@
           <div class="p-media"><div class="thumb"><img v-if="popupCurrentItem.goodImg" :src="popupCurrentItem.goodImg" /></div><div class="p-thumbs"><button type="button" v-for="(item, idx) in popupAllItems" :key="idx" class="pt" :class="{ on: idx === popupCurrentIndex }" :title="item.productCode" @click="popupCurrentIndex = idx"><img v-if="item.goodImg" :src="item.goodImg" /></button></div></div>   <!-- ⚠️ **2026-10-08 用户五条【3】**：大图下面加一排型号缩略图（点 = 切 `popupCurrentIndex`，与详情页 `.thumbs`→`currentIndex` 同形）。⚠️ 加了 `.p-media` 一层**包装**（大图 + 缩略图同属「图片列」）—— 属「补元素」不是重排。⚠️ **2026-10-08 用户复核后改判（本条推翻原文的 `v-if="popupAllItems.length > 1"`）**：小图排**不挂 `v-if`** —— **单型号时也要显示那一枚**（用户逐字：「小图在只有一个型号时也应有小图。之前是只有一个型号时干脆不显示」）。⇒ 大图侧本来就不挂 `v-if`（行为与改前一致），小图侧现在也一律渲染，两个分支的差别只剩「有几枚」。同轮把 `:title` 由「切换到型号 X」改成**只写型号本身**（单型号时没有「切换」可言）。⚠️ **净零**：本行前后各只换这一行。 -->
           <div class="p-buy">
             <div class="p-price"><i>¥</i><b>{{ popupCurrentItem.price }}</b></div>
-            <div class="p-promo"><span class="tag">促销</span><span class="cut">满 200 减 30&emsp;满 500 减 80</span></div>
+            <!-- 促销 / 领券：与主区 `:104-127` 那一块**同一份数据、同一对处理函数**
+                 （`promoCuts` / `claimList` / `doClaimCoupon`）—— 弹窗不是第二个实现，别各自拉一遍。 -->
+            <div class="p-promo"><span class="tag">促销</span>
+              <span v-if="promoCuts.length" class="cut">{{ promoCuts.join('\u3000') }}</span>
+              <span v-else class="cut cut-off">暂无满减活动</span></div>
             <div class="p-coupons"><span class="tag">领券</span>
-              <span class="coupon"><span class="amt"><i>¥</i>20</span><span class="cond">满 199 可用</span><button type="button" class="get" disabled title="领取优惠券（无端点）">领取</button></span>
-              <span class="coupon"><span class="amt"><i>¥</i>50</span><span class="cond">满 499 可用</span><button type="button" class="get" disabled title="领取优惠券（无端点）">领取</button></span></div>
+              <span v-for="c in claimList" :key="c.CouponId" class="coupon"><span class="amt"><i v-if="c.Type !== 'percent'">¥</i>{{ faceNum(c) }}</span><span class="cond">{{ faceCond(c) }}</span><button type="button" class="get" :disabled="claimed(c) || claiming === c.CouponId" :title="claimed(c) ? '已领取' : '领取优惠券'" @click="doClaimCoupon(c)">{{ claimed(c) ? '已领取' : claiming === c.CouponId ? '领取中' : '领取' }}</button></span>
+              <span v-if="!claimList.length" class="cond cut-off">{{ couponAccount ? '暂无可用券' : '登录后可领券' }}</span></div>
             <div class="p-opt"><span class="lbl">型号</span><button v-for="(item, idx) in popupAllItems" :key="idx" type="button"
-                  class="md" :class="{ on: idx === popupCurrentIndex }" @click="popupCurrentIndex = idx">{{ item.productCode }}</button></div>
+                  class="md" :class="{ on: idx === popupCurrentIndex, sub: skuKind(item.productCode) === 'subsidy', sec: skuKind(item.productCode) === 'seckill' }" @click="popupCurrentIndex = idx">{{ item.productCode }}</button></div>
             <div class="p-qty"><span class="lbl">数量</span><span class="stepper">
               <button type="button" title="减一（现有实现 min=0）" @click="setPopQty(-1)">−</button>
               <input type="text" :value="popupQty[popupCurrentItem.productCode] || 0" @input="setPopQtyInput($event.target.value)" />
@@ -388,8 +446,8 @@
             </div>
           </div>
           <aside class="p-sum"><div class="p-sum-h">结算</div>
-            <div class="p-sum-r"><span class="k">商品件数</span><span class="v">{{ popupCount }}</span></div><div class="p-sum-r"><span class="k">商品总额</span><span class="v">¥{{ Number(popupTotal).toFixed(2) }}</span></div>
-            <div class="p-sum-r"><span class="k">运费</span><span class="v">免运费</span></div><div class="p-sum-t"><span class="k">合计</span><span class="v"><i>¥</i>{{ Number(popupTotal).toFixed(2) }}</span></div>
+            <div class="p-sum-r"><span class="k">商品件数</span><span class="v">{{ popupCount }}</span></div><div class="p-sum-r"><span class="k">商品总额</span><span class="v">¥{{ Number(popupTotal).toFixed(2) }}</span></div><div class="p-sum-r" v-if="popupEntry === 'buy'"><span class="k">优惠券</span><span class="v"><span class="cp" :class="{ off: !couponPickable }" :title="couponHint"><select v-model="couponId" :disabled="!couponPickable"><option value="">{{ usableCoupons.length ? '不使用优惠券' : '暂无可用券' }}</option><option v-for="c in usableCoupons" :key="c.CouponId" :value="c.CouponId" :disabled="!!couponBlockedReason(c)">{{ couponLabel(c) }}{{ couponBlockedReason(c) ? '（' + couponBlockedReason(c) + '）' : '' }}</option></select><b v-if="discount > 0" class="save">−¥{{ Number(discount).toFixed(2) }}</b></span></span></div>
+            <div class="p-sum-r"><span class="k">运费</span><span class="v">免运费</span></div><div class="p-sum-t"><span class="k">合计</span><span class="v"><i>¥</i>{{ Number(payTotal).toFixed(2) }}</span></div>
             <button type="button" class="p-confirm" @click="confirmPurchase">{{ popupEntry === 'cart' ? '加入购物车' : '结算' }}</button>
           </aside></div>
       </div>
@@ -422,8 +480,8 @@ import { ref, onMounted, computed, watch, onBeforeUnmount } from 'vue'   // ⚠�
 import { useRoute, useRouter } from 'vue-router'
 import { http, handleApiError } from '../api/http'
 import { endpoints } from '../api/endpoints'; import { orderAdd, cartAdd } from '../api/order'   // ⚠️ C3 块 4：**同行追加**（不新增行 —— 本文件 `:794`/`:803` 被 `slot-registry.md:1994-1995` 按行号引（〈Bug 1〉本笔 +19 行前为 `:775`/`:784`），此处加行会顶漂它们）。两个函数就是原先那两串 `URLSearchParams` + `http.post` + `res.json()` 的收口
-import CashierDialog from '../components/CashierDialog.vue'   // ⚠️ 2026-10-10（Bug 1）：收银台与「我的订单」**共用同一个组件** —— 本行**确实**新增了一行；本笔在 `ProductPage.vue` 净 +19 行（`git diff` 实测：模板 `:412` 起 +5、import +1、`handlePay` 段 +13）⇒ 下面两处 `:775`/`:784` 漂到 `:794`/`:803`，随本笔一并重指（见 `slot-registry.md:1994-1995`）
-import { getMerchantId, getCustomerId, isLoggedIn } from '../api/auth'; import IconGlyph from '../components/ui/IconGlyph.vue'   // ⚠️ 两条 import **同行**（2026-10-11 补图标那一笔）—— 合并到既有行 = 不新增行号漂移（本文件 `:794`/`:803` 被 `slot-registry.md:1994-1995` 按行号引，上面 `:424` 那条注释记过同一件事）
+import CashierDialog from '../components/CashierDialog.vue'; import ProductCard from '../components/ProductCard.vue'; import { sharedList } from '../config/goods-flags'   // ⚠️ **同行追加** `sharedList`（C3 块 5 ·〈Bug 2/3〉落码，2026-10-12）：本页只用它算「猜你喜欢」（见 `:522` 那条按语）。本行已有一条「本笔确实新增了一行」的记账（2026-10-10 Bug 1），**这一笔不再加行** —— 本文件下面 `:571` / `:638` / `:794` / `:1032` / `:1330` 等处被文档按行号钉着   // ⚠️ 2026-10-10（Bug 1）：收银台与「我的订单」**共用同一个组件** —— 本行**确实**新增了一行；本笔在 `ProductPage.vue` 净 +19 行（`git diff` 实测：模板 `:412` 起 +5、import +1、`handlePay` 段 +13）⇒ 下面两处 `:775`/`:784` 漂到 `:794`/`:803`，随本笔一并重指（见 `slot-registry.md:1994-1995`）
+import { getMerchantId, getCustomerId, getUsername, isLoggedIn } from '../api/auth'; import IconGlyph from '../components/ui/IconGlyph.vue'; import { coupons, claim, subsidyGoods, seckillLive } from '../api/marketing'; import { couponName } from '../config/coupon-format'; import { useCouponPick } from '../composables/useCouponPick'   // ⚠️ 五条 import **同行**（第 5 条 `useCouponPick`：块 5 · commit 5 续笔「立即购买」也能用券，2026-10-12；与 `ShoppingCart.vue` 共用同一处，不抄第二份）（第 2、3 条：2026-10-11 补图标笔 + C3 块 5 · commit 1；第 4 条 `couponName`：块 5 · A 组 · A7 后半；`getUsername`：块 5 券口径改登录名，2026-10-12）—— 合并到既有行 = 不新增行号漂移（本文件 `:794`/`:803` 被 `slot-registry.md:1994-1995` 按行号引，上面 `:424` 那条注释记过同一件事）。⚠️ **块 5 · commit 1 仍整体 +90 行**（模板 +17 / `<script setup>` 尾 +70 / `<style>` +3）⇒ `slot-registry.md:1994` 引的 `:794` 漂 **`:881`**、`:1995` 引的 `:803` 漂 **`:890`**（两值均为 `grep -n` 实测，见 `_work/b5-repoint.md`）。
 
 const route = useRoute()
 const router = useRouter()
@@ -446,7 +504,22 @@ const customerId = buyerId || ''
 const allItems = ref([])
 const currentIndex = ref(0)
 const currentItem = computed(() => allItems.value[currentIndex.value] || {})
-const goodsWithUser = ref([])
+// ── 块 5〈折扣〉：划线价 + 折扣角标（读侧现算，见模板 ① 的注释）────────────────
+// `originalPrice` 由 `/goods/productCodePrice` 透出（本笔给那条 SELECT 加的列，响应键加性）。
+// ⚠️ 老响应没有这个键 ⇒ `undefined` ⇒ `hasDiscount` 为假 ⇒ **一枚都不画**（不画 ≠ 画假的）。
+const hasDiscount = computed(() => {
+  const o = Number(currentItem.value.originalPrice)
+  const p = Number(currentItem.value.price)
+  return o > 0 && p > 0 && o > p
+})
+const discountRate = computed(() => {
+  const o = Number(currentItem.value.originalPrice)
+  const p = Number(currentItem.value.price)
+  if (!(o > 0) || !(p > 0)) return ''
+  const r = Math.round((p / o) * 10 * 100) / 100
+  return Number.isInteger(r) ? String(Math.trunc(r)) : String(r)   // ⚠️ **原写 `Math.rint(r)`**（C3 块 5〈折扣〉落码时的口误）—— `Math.rint` 是 **Java 的**，JS 的 `Math` 上没有这个函数 ⇒ 一求值就 `TypeError: Math.rint is not a function`，**整支 render 函数抛出** ⇒ 本页停在「上一次成功的渲染」上（`allItems` 还空着的那一帧）⇒ 用户看到的就是**标题在（它来自 `route.query.GoodName`）、价格只剩 `¥`、型号空、图空**。⚠️ 它**只在 `discountRate` 被求值时**才炸，而模板只在 `hasDiscount` 为真时读它 ⇒ **全库 43 件在架商品里只有 2 件（有划线价的）中招**，另外 41 件照常 —— 这正是它藏了一整轮的原因。判据改成 `Number.isInteger`（`v === Math.rint(v)` 的原意就是「v 是整数」）。2026-10-12 修，同行替换、不新增行。
+})
+const goodsWithUser = ref([]); const recommendGoods = computed(() => sharedList(goodsWithUser.value))   // ⚠️ **同行追加**（C3 块 5 ·〈Bug 1/2〉落码，2026-10-12）：「猜你喜欢」真正渲染的那一份 = `goodsWithUser` 过一遍 `sharedList`（**去重 + 滤已售完**，共享面，与主页 / 搜索页 / 店铺页猜你喜欢同源，判据全在 `config/goods-flags.js`）。⚠️ **不能直接换掉 `goodsWithUser` 本身** —— 它还有第二个消费方：`loadAllItems` 里 `goodsWithUser.value.find(...)`（`:565`）要按 `MerchantId + GoodName` 取**当前这件**的 `UserName`；换掉它，已售完那件商品的详情页会**丢掉店名**（拿一个 2 行的改动换一个新 bug）。⇒ 只另开一支给模板用。⚠️ 同行追加 = 不新增行号（本文件多处被按行号引）
 
 const start = ref(0)
 const showImages = computed(() => allItems.value.slice(start.value, start.value + 3))
@@ -483,6 +556,7 @@ const loadAllItems = async () => {
         items.push({
           productCode: code,
           price: d2.price,
+          originalPrice: d2.originalPrice, // 块 5〈折扣〉：划线价（0/undefined = 不打折）
           goodImg: d2.goodImg,
           UserName: ''
         })
@@ -564,7 +638,7 @@ const popupBuyList = computed(() => {
     .map((i) => ({
       productCode: i.productCode,
       quantity: popupQty.value[i.productCode],
-      price: i.price,
+      price: i.price, originalPrice: i.originalPrice,   // ⚠️ **同行追加**（本文件 `:794`/`:803` 被引，且 `:1032` 那类 `<style>` 引用都在下面 ⇒ 多一行就顶漂）。块 5〈用券规则〉2026-10-12 要用它算「本单含不含折扣商品」；`popupBuyList` 原来是 `productCode/quantity/price/goodImg` 四件，`originalPrice` 只有 `popupAllItems` 有（`:559`）。
       goodImg: i.goodImg
     }))
 })
@@ -645,13 +719,19 @@ const handlePay = async (ok) => {   // **C3 块 4 改判 + 2026-10-10 补丁改�
       CustomerId: d.CustomerId, MerchantId: d.MerchantId, OrderId: d.OrderId,
       Price: d.Price, ProductInformation: d.ProductInformation, Images: d.Images,
       PayIf: 0, DeliveryIf: d.DeliveryIf, ReceiveIf: d.ReceiveIf,
+      CouponId: popupEntry.value === 'buy' ? couponId.value : '',   // C3 块 5 · commit 5 续笔：券随本单走。⚠️ `Price` 仍是**原价合计**（`d.Price` = `popupTotal`）—— 后端 `orderAdd` 拿原价算折后额、落库 `order.Price` 的是**折后价**，折了多少看回体里的 `Discount`。⚠️ 空串 = 不用券（`api/order.js` 的 `build()` **原样发每一条**，空串后端当 `""` 处理，逐字同加券之前）。
       Quantity: popupCount.value, Items: JSON.stringify(popupBuyList.value.map((i) => ({ code: i.productCode, name: goodName, price: i.price, qty: i.quantity }))),   // C3 块 4：本单**总件数**（A2 甲新列；一个 OrderId 一单 ⇒ 不带型号维度）＋ ⚠️ **可视化段 commit 0 同行追加 `Items`**（显式商品明细 ⇒ 服务端写 `order_item`；格式是 JSON 数组串，理由见 `OrderService.resolveItems`：商品名未禁 `:`/`；`，自造分隔符会错位）。⚠️ **同行追加、不新增行** —— 本文件 775 / 784 两行在下面，新增行会顶漂它们。⚠️ `name` 取页级 `goodName`：弹窗里全是**同一商品**的型号（`popupAllItems`），故一件一名的前提成立；`price` 是**单价**（`popupTotal` 是 `Σ price × quantity`，:572）
     })
 
     if (result.success) {
       // ⚠️ **不**在这里 `alert('订单提交成功！')`、也**不**跳页：单已经建好（待付款），
       //    下一步是付款 ⇒ 把收银台摆上来。跳页与关窗都由付完/关掉收银台之后决定（见 `afterCashier`）。⚠️ **2026-10-10（Bug 1 二次修；用户手验：「收银台弹出，但被白色结算弹窗挡在后面」）**：`showPopup.value = false` 管的正是**购入模块弹窗**（`.popup-mask`，`:1109` 那条 `z-index:150`）—— 改前它一直挂着、而收银台 `.cscrim` 只有 `60` ⇒ 收银台**真在它下面**；结算确认弹窗（`showPayConfirm`，`.scrim` `:1036` = `200`）在 `:624` 已关，本行补的是同一条链上的**第二层**（两层都要关，只关一层另一层照样盖住）。层级自身另在 `CashierDialog.vue:103` 提档。
-      showPopup.value = false; payFor.value = { OrderId: d.OrderId, Price: d.Price }
+      // ⚠️ 收银台显示的是**实付**（`d.Price` − 券的 `Discount`）—— 落库的 `order.Price` 已是折后价，
+      //    收银台再按原价收钱就是「页面说便宜了、付款还是原价」。没券时 `Discount` 缺省 0 ⇒ 逐字同改前。
+      // ⚠️ 只在**成功**这一支清券选择并重拉券包：失败时后端**没**烧券（CAS 抢不到就不建单，见
+      //    `OrderService.addLocked`），留着选择让用户直接重试（同购物车页那条）。
+      resetCoupon(); loadCoupons()
+      showPopup.value = false; payFor.value = { OrderId: d.OrderId, Price: Math.max(0, Number(d.Price) - Number(result.Discount || 0)) }
     } else {
       alert('订单提交失败：' + (result.msg || '未知错误'))
     }
@@ -762,7 +842,7 @@ const consultProduct = async () => {
     alert('网络错误，请稍后重试');
   }
 };
-
+const enterShop = () => router.push({ path: '/shop', query: { MerchantId: sellerId } })   // ⚠️ C3 块 5 B 组（2026-10-12）：「进店逛逛」的落点，只有这一处调用方（模板里那颗按钮）。⚠️ 本行**占的**是 `consultProduct` 与 `onMounted` 之间那个**空行**（空行已撤）—— 本文件 `:1032` / `:1107` / `:1330` 等被 `docs/` 按行号引（`slot-registry.md` 引 `:881`/`:890` 那两条同理），任何新增行都会顶漂它们 ⇒ **借一个空行放函数、净零**（同 `:592` 那条 `}; const setPopQtyByCode = …` 的手法）。⚠️ 传的只有 `MerchantId`：`ShopHome` 的店名从商品行的 `UserName` 取，本页不作第二个来源（理由见那一页的 `loadShop`）。
 onMounted(async () => {
   await loadGoodsWithUser();
   loadAllItems();
@@ -774,7 +854,186 @@ onMounted(async () => {
 //    走到 `orderAdd`（拆真检查）；`isLogin` 只决定**要不要跳登录** ⇒ 已登录商家原地不动（= 既有行为）。
 // ⚠️ redirect 取 `route.fullPath`（含本页 7 个 query），对象形式与 `main.js:49` 同款；登录后由
 //    `LoginPage.landingAfterLogin` 送回本页（T-guard-6/-10）。放文件末尾是**刻意的**：`WebAuthConfig.java:71` 引了本文件的 `onMounted` 段（那里原先写的 `:462-465` 是**陈旧值**，本品已就地更正为 `:766`），新增行落在被引行之后，上面 24 个被引目标才一个都不漂。⚠️ **2026-10-10〈Bug 1 · 立即购买补接收银台〉本笔破了这条约束**：+19 行落在 `:412`/`:425`/`:666`（均在 `:766` 之前）⇒ `:794`/`:803` 两处被引行随本笔重指（见 `slot-registry.md:1994-1995`），并已回写 `slot-registry.md:1992/1994/1995/2445`。
+
+// ── 优惠券（C3 块 5 · commit 1，2026-10-11）─────────────────────────────────────
+// 主区 `:104` 与购入弹窗两处「促销 / 领券」**共用这一段**（一份数据、一对处理函数 —— 弹窗不是
+// 第二个实现）。
+//
+// ⚠️ **身份用 `couponAccount`，不是本页既有的 `customerId`**：`customerId`（`:443`）自带一条
+//    「客户号为空则退回商家号」的降级链 —— 那是给 `orderAdd` 用的（商家也能下单）。券不走那套：
+//    `/marketing/*` 的 `Account` 语义是 **登录名**（`login.UserName`）—— 2026-10-12 用户裁定「乙」，
+//    **由 `user.customerid` 改过来**（见 `CouponController` / `CouponDao` 类注释）。对商家来说
+//    `customerid` 全是 NULL ⇒ 统一挂登录名，两端一份券包；没有登录名就整块不出券（同 `HomePage`）。
+const couponAccount = getUsername() || ''
+const claimList = ref([])
+const claiming = ref('')
+
+// ⚠️ **C3 块 5 · A 组 · A4（2026-10-12）**：领券行「几张算该收起」= **1**。
+//    ⚠️ **手验后改**：原为 `2`（用户逐字「两张半 + 第三张截断」），但实测本版面券区只有 **315.9px** ⇒
+//    两张半 = 每张 **132.1px**，而卡内内容最小 **197px**（溢出 65px）—— 二者互斥，用户裁定取可读：
+//    `(315.9−12)/1.3 = **233.8px**`、第 2 张露 **70.1px（三成张）**。样式那三个 `1.3` / `78%` 要成对改。
+const CP_VISIBLE = 1
+/** 领券行的展开态（点「》」置真 ⇒ 样式 `.coupons-on` 放开 `nowrap`、渐隐同撤）。 */
+const cpExpanded = ref(false)
+
+/** `Claimed` 宽容判据 —— Connector/J 的 `tinyInt1isBit` 下可能是 `true`，也可能是 `1`。 */
+const claimed = (c) => c.Claimed === true || c.Claimed === 1 || c.Claimed === '1'
+
+const r2 = (v) => Math.round(Number(v || 0) * 100) / 100
+
+/** 面值的**数字部分**。`¥` 号在模板里是单独一个 `<i>`，且折扣券**不出 `¥`**（模板里那个 `v-if`）。 */
+const faceNum = (c) =>
+  c.Type === 'percent' ? (Number(c.FaceValue || 0) * 10).toFixed(1) + '折' : String(r2(c.FaceValue))
+
+/** 门槛的人话。`Threshold` 对 `none` 型由后端**强制**置 0 ⇒ 「无门槛」是数据说的，不是我猜的。 */
+const faceCond = (c) => {
+  if (c.Type === 'percent') return '折扣券'
+  const t = Number(c.Threshold || 0)
+  return t > 0 ? '满 ' + t + ' 可用' : '无门槛'
+}
+
+/** 「促销」行 = 满减类券拼成的「满 A 减 B」—— ⚠️ 这是本页**唯一**拿得到的促销数据（无独立促销表）。 */
+const promoCuts = computed(() =>
+  claimList.value
+    .filter((c) => c.Type === 'threshold')
+    .map((c) => '满 ' + Number(c.Threshold || 0) + ' 减 ' + r2(c.FaceValue))
+)
+
+const loadClaimable = async () => {
+  if (!couponAccount) return
+  try {
+    // ⚠️ 第 4 参 `sellerId` = **本页在卖的那家店**（`route.query.MerchantId`）⇒ 后端只回
+    //    `Scope='merchant'` 且 `MerchantAccount` 命中的券（A4：不再列全站平台券）。
+    //    `sellerId` 为空时 `q()` 不发这个键 ⇒ 退回改动前的「全站可领」——**不是**「什么都看不到」。
+    const data = await coupons(couponAccount, 6, undefined, sellerId)
+    claimList.value = data && data.success && Array.isArray(data.list) ? data.list : []
+  } catch (e) {
+    handleApiError(e, '优惠券加载失败')
+  }
+}
+
+/** 领券（落 `coupon_grant`）。⚠️ 与 `HomePage.vue` 的 `doClaim` 同款，但**不重拉券包**（本页无券包）。 */
+const doClaimCoupon = async (c) => {
+  claiming.value = c.CouponId
+  try {
+    const data = await claim(couponAccount, c.CouponId)
+    if (data && data.success) {
+      await loadClaimable()
+      alert('已领取「' + c.Name + '」，可在「我的券包」查看')
+    } else {
+      alert('领取失败：' + ((data && data.msg) || '未知原因'))
+    }
+  } catch (e) {
+    handleApiError(e, '领取失败')
+  } finally {
+    claiming.value = ''
+  }
+}
+
+// ⚠️ 这是本文件**第二个** `onMounted`（Vue 允许注册多次）。不并进 `:783` 那个，是为了让本笔
+//    在 `<script setup>` 里**只有一个插入点** —— 本文件所有 `文件:行号` 互引都在下面（`:794`/`:803`），
+//    插入点越少，收口时的重指表越短。
+onMounted(loadClaimable)
+
+// ── 块 5〈国补〉：国家补贴标签（C3 块 5 · commit 3，2026-10-12）─────────────────────
+// ⚠️ 与上面券块**同一个先例、同一个插入点**：`/marketing/subsidy/goods` 不挂闸、但**也不在白名单**
+//    ⇒ 匿名 401 ⇒ 必须**先判登录**再发，否则 `http.js` 的 `handleUnauthorized` 会把商品页踢回登录页。
+// ⚠️ 金额**后端现算**（`SubsidyAmount` / `PayAmount`，`Cap=0` = 不封顶），本页只显示，
+//    **不复刻** `min(price × ratio, cap)` —— 复刻出来的第二份一定会在某次改动里跑偏。
+// ⚠️ 只在**当前选中型号**的 `productCode` 命中时才画：同一 `GoodName` 下各型号价不同，
+//    拿别的型号的补贴额画在这一屏上就是假话（与 ① 折扣角标同一条口径）。
+const subsidyRows = ref([])
+const subsidy = computed(() => {
+  const code = String(currentItem.value.productCode || '')
+  if (!code) return null
+  return subsidyRows.value.find((r) => String(r.ProductCode || '') === code) || null
+})
+const loadSubsidy = async () => {
+  if (!isLoggedIn()) return
+  try {
+    const data = await subsidyGoods({ limit: 200 })
+    subsidyRows.value = data && data.success && Array.isArray(data.list) ? data.list : []
+  } catch (e) {
+    subsidyRows.value = []
+  }
+}
+onMounted(loadSubsidy)
+
 /* 2026-10-10〈模板表通用化〉三段快照文本（`goods.Detail` / `Spec` / `AfterSale`）—— 全部写在**同一物理行**（新增行会顶漂下面 `slot-registry.md:1994-1995` 引的 `:794`/`:803`）。⚠️ 取值**从 `route.query` 现取**、不用 setup 期解构的 `sellerId`/`goodName`（`:433-434` 是普通 `const`，同路径只换 query 时组件被复用、它们**不更新**，理由同 `openPopup` 那条）。 */ const detailText = computed(() => { const q = route.query; const g = goodsWithUser.value.find((x) => x.MerchantId === q.MerchantId && x.GoodName === q.GoodName); return (g && g.Detail) || '' }); const specText = computed(() => { const q = route.query; const g = goodsWithUser.value.find((x) => x.MerchantId === q.MerchantId && x.GoodName === q.GoodName); return (g && g.Spec) || '' }); const afterSaleText = computed(() => { const q = route.query; const g = goodsWithUser.value.find((x) => x.MerchantId === q.MerchantId && x.GoodName === q.GoodName); return (g && g.AfterSale) || '' }); /* `Spec` 的行内 `键=值` 约定：一行一条，`=` 只切**第一处**（值里允许再有 `=`）；没有 `=` 的行**整行进 `.v`、`.k` 留空**，而不是丢掉它。 */ const specRows = computed(() => specText.value.split('\n').map((s) => s.trim()).filter((s) => s !== '').map((s) => { const i = s.indexOf('='); return i < 0 ? { k: '', v: s } : { k: s.slice(0, i).trim(), v: s.slice(i + 1).trim() } })); const promiseLabels = computed(() => { const q = route.query; const g = goodsWithUser.value.find((x) => x.MerchantId === q.MerchantId && x.GoodName === q.GoodName); const ALL = ['正品保障', '7 天无理由', '极速退款', '运费险']; const KEYS = ['PromiseGenuine', 'PromiseReturn7', 'PromiseFastRefund', 'PromiseFreightIns']; if (!g) return ALL; if (!KEYS.some((k) => g[k] !== undefined && g[k] !== null)) return ALL; return ALL.filter((_, i) => Number(g[KEYS[i]])) }); const mergeSkus = async (baseItems) => { try { const rs = await http.post(endpoints.goods.skuList, `MerchantId=${sellerId}&GoodName=${goodName}`); const ds = await rs.json(); const skus = (ds && ds.success && ds.list) || []; if (!skus.length) return baseItems; const img = baseItems.length ? baseItems[0].goodImg : ''; const merged = skus.map((s) => ({ productCode: String(s.SkuCode || ''), price: s.Price, goodImg: img })).filter((s) => s.productCode); return merged.length ? merged : baseItems } catch (e) { return baseItems } }; const isLogin = computed(() => isLoggedIn()); const activeTab = ref('desc')   // 结构二次调整（2026-10-07）：Tab 条当前面，UI 展示状态（不计功能量）；⚠️ **同行追加、不新增行** —— 上面那条「新增行落在最大被引行之后」的约束在本笔**不成立**（`slot-registry.md:1994-1995` 引的 `:794`/`:803` 都在下面），新增行会顶漂它们。
+
+// ── 块 5〈秒杀〉：当前型号的秒杀价（C3 块 5 · commit 4，2026-10-12）─────────────────────
+// 本段落在 `<script setup>` 的**最末**（上面那行物理长行之后）：本文件的行号被
+// `slot-registry.md` / `progress.md` / `OrderService.java` 多处按行号引（`:297-299` / `:311-317`
+// / `:794` / `:803` / `<style>` 的 `:1032` 等）⇒ 新增行只有落在**最大被引行之后**，那些引用才一个都不漂。
+// ⚠️ 与上面券块 / 国补块**同一个先例**：`/marketing/seckill/live` 不挂闸、**也不在白名单**
+//    ⇒ 匿名 401 ⇒ 必须**先判登录**再发，否则 `http.js` 的 `handleUnauthorized` 会把商品页踢回登录页。
+// ⚠️ 命中判据用 **`ProductCode`**（不是 `GoodName`）：同一 `GoodName` 下各型号价不同 —— 拿别的型号的
+//    秒杀价画在这一屏上就是假话（与 ① 折扣角标、② 国补标签同一条口径）。
+// ⚠️ 价与「售罄」都由**后端**说了算：`SeckillPrice` 直接读，`SoldOut` / `SoldLeft` **只读不算** ——
+//    不限量那档（`TotalStock = 0`）的语义已经在 `SoldOut` 里定好了，别拿 `TotalStock` / `SoldStock` 自己比。
+// ⚠️ `Stage` 由后端按**库时钟**现算（`SeckillDao.stage`）：只有 `live` 才画；`upcoming`（未开启）
+//    与 `signup`（报名期）本页**都不画**（那句话归秒杀页 `/seckill` 说）。
+const seckillRows = ref([])
+const seckill = computed(() => {
+  const code = String(currentItem.value.productCode || '')
+  if (!code) return null
+  const hit = seckillRows.value.find((r) => String(r.ProductCode || '') === code)
+  return hit && hit.Stage === 'live' ? hit : null
+})
+const loadSeckill = async () => {
+  if (!isLoggedIn()) return
+  try {
+    const data = await seckillLive({ limit: 200 })
+    seckillRows.value = data && data.success && Array.isArray(data.list) ? data.list : []
+  } catch (e) {
+    seckillRows.value = []
+  }
+}
+// ⚠️ 本文件**第三个** `onMounted`（Vue 允许注册多次）；不并进上面两个，理由同 `:903-905` 那条。
+onMounted(loadSeckill)
+
+// ── 块 5〈结算用券〉：购入弹窗里选券（C3 块 5 · commit 5 续笔，2026-10-12）────────────────
+// ⚠️ 本段落在 `<script setup>` 的**最末**（同上面「秒杀」块那条理由）：本文件被 `slot-registry.md`
+//    / `progress.md` 多处按行号引（`:297-299` / `:794` / `:803` / `<style>` 的 `:1032` 等）⇒
+//    新增行只有落在**最大被引行之后**，那些引用才一个都不漂。
+// ⚠️ 券逻辑**不自带算法** —— 与购物车吸底结算栏共用 `composables/useCouponPick.js` 那一处
+//    （两条链各抄一份 ⇒ 抄错时两边都不报错，只是某一处的「合计」慢慢算成另一个数）。
+// ⚠️ 只在**「立即购买」**入口可用（`popupEntry === 'buy'`）：「加入购物车」那一支**不带券**
+//    —— 车上选券归购物车页（`CouponId` 是 `CartService.checkout` 的入参，不是 `cartAdd` 的）。
+// ⚠️ `account` 用 `couponAccount`（`:837`）而不是本页 `customerId`：券包的键是**登录名**，
+//    与上面领券行同一个身份口径（理由见 `:832-836` 那段）。
+const {
+  couponId, usableCoupons, couponPickable, couponHint, couponLabel, couponBlockedReason,
+  discount, payTotal, loadCoupons, resetCoupon
+} = useCouponPick({
+  account: couponAccount,
+  orderTotal: popupTotal,   // 本单**原价**合计：门槛比它、折扣按它算（后端 `redeem` 收的也是原价）
+  enabled: computed(() => popupEntry.value === 'buy' && popupBuyList.value.length > 0),
+  blockedHint: '请先选择至少一件商品', hasDiscount: computed(() => popupBuyList.value.some((i) => Number(i.originalPrice) > 0))   // ⚠️ **同行追加**（理由同上面那条）。本单含折扣商品 = 弹窗里**要买的那几行**（`popupBuyList`）任一行 `originalPrice > 0`；⚠️ 判据是**整单**级、不是逐行（见 `useCouponPick.couponBlockedReason`）。取 `popupBuyList` 而非 `popupAllItems`：后者是**全部型号**，没选中的型号不该影响本单 —— 该商品的划线价虽通常各型号同值，但按**本单实际行**判才与后端一致。
+})
+
+// 弹窗一开（且是「立即购买」）就重拉一次券包：用户可能刚在本页领券行领过一张 —— 不重拉的话
+// 那张券要等刷新页面才出现在选择器里。⚠️ 落在这里而不是 `openPopup` 里：本文件的行号互引都在上面，
+// 往 `openPopup` 加行会让它们集体顶漂（同上面那两条注释的理由）。
+watch(showPopup, (on) => { if (on && popupEntry.value === 'buy') loadCoupons() })
+
+// ── 块 5〈型号按钮类别〉：每个型号按**自己**的类别上色（2026-10-12 用户五处挂账裁定 ④-c）────
+// ⚠️ 本段落在 `<script setup>` 的**最末**（同上面「秒杀」/「结算用券」两块那条理由）：本文件被
+//    `slot-registry.md` / `progress.md` / `OrderService.java` 多处按行号引 ⇒ 新增行只有落在
+//    **最大被引行之后**，那些引用才一个都不漂。
+// 判据：该型号的 `productCode` 在不在「国补命中集」/「进行中秒杀集」里 —— 两个集合本页**早就在手上**
+//    （`subsidyRows` / `seckillRows`，各自 load 一次、limit 200）⇒ **不新发请求**。
+// ⚠️ 国补判据与 `subsidy` computed（:946-950）**同一口径**（只比 `ProductCode`）；秒杀判据与
+//    `seckill` computed（:977-982）同一口径（必须 `Stage === 'live'`，`upcoming`/`signup` 不算）。
+// ⚠️ **两者都命中时取秒杀**：秒杀是**限时**的，且同屏价格行上已有一整块 `.sk-zone` 在说它 ——
+//    按钮上取国补会与那块自相矛盾。这是**裁量点**：用户若要反过来，只改下面 if 的先后。
+const skuKind = (code) => {
+  const c = String(code || '')
+  if (!c) return 'normal'
+  if (seckillRows.value.some((r) => String(r.ProductCode || '') === c && r.Stage === 'live')) return 'seckill'
+  if (subsidyRows.value.some((r) => String(r.ProductCode || '') === c)) return 'subsidy'
+  return 'normal'
+}
 </script>
 
 <style scoped>
@@ -895,12 +1154,49 @@ button { background: none; border: 0; cursor: pointer; }
             gap: var(--s4); font-size: var(--fs-sm); }
 .promo .tag { font-size: var(--fs-xs); color: var(--ink-3); }
 .promo .cut { color: var(--ink-2); }
-.coupons { display: flex; gap: var(--s3); flex-wrap: wrap; align-items: center; }
+/* 空态文案（「暂无满减活动」/「登录后可领券」）—— C3 块 5 · commit 1 新增：它占的是**内容位**而不是
+   标签位，故与 `.promo .cut` 的 `--ink-2` 分开一档（降到 `--ink-3`，与 `.tag` 同色）。 */
+.promo .cut-off { color: var(--ink-3); }
+/* —— 领券行：**商家券**横向铺开（C3 块 5 · A 组 · A4）——
+   用户口径「两张半 + 第三张截断 + 渐隐 + `》`」⚠️ **2026-10-12 手验后按实测收成「一张半」**（券区只
+   315.9px，两张半 ⇒ 132.1px/张装不下内容；见 `CP_VISIBLE` 那条）。与主页 `.tk-strip` **同一套路**（不滚、
+   裁切、渐隐、`》`），但**不共用那份 CSS**（主页那条钉死在 `.tickets` 的 5 张版式里）。⚠️ 三个数是一组：`CP_VISIBLE`(1) / 基宽那个 `+0.3` / 渐隐带 `78%` —— 改一处要成对改。 */
+.coupons { display: flex; gap: var(--s3); flex-wrap: nowrap; align-items: center; overflow: hidden; }
+/* 展开态（点过 `》`）：放开换行 ⇒ 全部铺开（每行 2 张），渐隐同时撤掉。 */
+.coupons-on { flex-wrap: wrap; }
+/* 基宽 = `(100% - 1 个 gap) / (N + 0.3)`（N = `CP_VISIBLE` = 1）。那个 **`+0.3` 不是笔误**：
+   按整 1 张算 ⇒ 第 2 张**整个落在裁切线之外、一点都露不出来**，右侧渐隐就没东西可淡（「还有更多」当场失效）；
+   按 `+0.5` ⇒ 第 2 张露出近一半，**看着像一张完整的窄卡**、也不像「被裁」。`+0.3` = 露出约三成张。
+   ⚠️ `min-width: 0` **必须写**（flex item 自动最小尺寸 = min-content，实测 197px；不写就被顶成 275.1/345.9/345.9 那种内容宽）—— 只作用**领券行**：`.coupon` 还给弹窗 `p-coupons` 用。 */
+.coupons > .coupon { flex: 0 0 calc((100% - var(--s3)) / 1.3); min-width: 0; }
+/* 越位渐隐。⚠️ 这里是**百分比**（78% 起）而**不是**主页那种固定 `88px`：商品页这一栏没有固定宽度
+   （`.promo .r` 是 `1fr`，随视口变），固定 px 在窄屏会盖过头、宽屏又盖不住那一角。百分比自带缩放：
+   第 2 张的露头恒在容器约 78% 处起（`((100%-g)/1.3 + g) / 100%`，g=12px ≈ 78%）⇒ 78% 起淡正好。
+   `-webkit-mask-image` 是给旧 WebKit 的，两条都要写。 */
+.coupons-cut {
+  mask-image: linear-gradient(to right, #000 78%, transparent 100%);
+  -webkit-mask-image: linear-gradient(to right, #000 78%, transparent 100%);
+}
+/* 「领券」行比「促销」行多一列（右侧 `》`）。⚠️ **只给这一行加第三列** —— 改公共的 `.promo .r` 会让
+   上面「促销」行白留一格 `--s4` 的 gutter（那个 grid 是共用的，见上面那条注释）。 */
+.promo .r-coupons { grid-template-columns: 36px minmax(0, 1fr) auto; }
+/* 「》」查看更多 —— 「领券」行右侧那颗（`grid` 第 3 列）。样式对齐主页 `.tk-more`（同一手势、同一外观）。 */
+.cp-more { flex: 0 0 auto; align-self: center; font: inherit; font-size: var(--fs-xs); line-height: 1;
+           color: var(--brand-ink); background: var(--surface-2); border: 1px solid var(--line-2);
+           border-radius: var(--r1); padding: 2px var(--s2); white-space: nowrap; cursor: pointer; }
+.cp-more:hover { border-color: var(--brand-ink); }
+/* 展开态：底色提亮一档，与收起态区分（文案由模板在 `》` / `《` 之间切）。 */
+.cp-more-on { background: var(--brand-soft); }
 .coupon { flex: 0 0 auto; display: flex; align-items: center; gap: var(--s3);
           padding: var(--s2) var(--s3); border: 1px dashed var(--accent); border-radius: var(--r1); }
 .coupon .amt { font-family: var(--font-display); font-size: var(--fs-md); font-weight: var(--fw-med);
                color: var(--accent); line-height: 1; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .coupon .amt i { font-style: normal; font-size: var(--fs-xs); margin-right: 1px; }
+/* 券名（A7 后半，与主页 `.tk-name` 同口径）：卡里唯一一行一级信息。
+   ⚠️ `flex: 1 1 auto` + `min-width: 0` 才**截得断** —— 卡被钉死在 `(100% - g)/1.3` 的窄框里，
+      券名是用户填的、不限长，不截断就会把「领取」顶出可视区（同主页那条的 `max-width: 100%`）。 */
+.coupon .nm { flex: 1 1 auto; min-width: 0; font-size: var(--fs-xs); font-weight: var(--fw-semi);
+              color: var(--ink-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .coupon .cond { font-size: var(--fs-xs); color: var(--ink-3); white-space: nowrap; }
 .coupon .get { flex: 0 0 auto; height: 26px; padding: 0 var(--s3); border: 1px solid var(--line-2);
                border-radius: var(--r1); font-size: var(--fs-xs); color: var(--ink-2); white-space: nowrap; }
@@ -914,6 +1210,15 @@ button { background: none; border: 0; cursor: pointer; }
       color: var(--ink-2); font-size: var(--fs-sm); }
 .md:hover { border-color: var(--ink-3); }
 .md.on { border-color: var(--brand); color: var(--brand-ink); font-weight: var(--fw-med); }
+/* ── 2026-10-12〈型号按钮按类别上色〉（用户五处挂账裁定 ④-c）──────────────────────────
+   三态：普通 = 白底 → 选中变绿；国补 = 天青底 → 选中外嵌绿框；秒杀 = 红底 → 选中外嵌绿框。
+   ⚠️ 绿框用 `outline` + `outline-offset`（**不占位、不推挤邻项**），**不是**左侧色条 ——
+      后者是 `tokens.css:34-42` 明令禁止的「侧边强调条」。⚠️ 底色**只标类别、不标选中**：
+      选中信号在普通件上是底色、在国补/秒杀件上是那道绿框（底色被类别占了，不能再兼任）。 */
+.md.sub { background: var(--brand-tint); }
+.md.sec { background: var(--cin-100); }
+.md.on:not(.sub):not(.sec) { background: var(--brand-tint); }
+.md.sub.on, .md.sec.on { outline: 2px solid var(--brand); outline-offset: 2px; }
 
 /* 数量：与购入弹窗里的那件同款步进器（同一模块同一形态）。
    ⚠️ 主区这一件本笔**接不上线**（`script` 段不动）⇒ 整组 `disabled`、压暗、禁点，
@@ -1017,17 +1322,11 @@ button { background: none; border: 0; cursor: pointer; }
 .reco h2 { font-family: var(--font-display); font-size: var(--fs-lg); font-weight: var(--fw-med);
            letter-spacing: -.01em; }
 .reco .none { margin-top: var(--s5); font-size: var(--fs-sm); color: var(--ink-3); }
+/* ⚠️ 卡本体（`.card` / `.ph` / `.nm` / `.pr` 及其 `i` / `b`）**已整段搬进**
+   `src/components/ProductCard.vue`（C3 块 5 · B 组续笔，2026-10-12）。`.cards` 是**栅格**、
+   不是卡的一部分 ⇒ 留在本页。⚠️ 搬走的那一份里 `.pr` 带着 `font-family: var(--font-display)`
+   （楷体数字）—— 统一到主页那一套后**不再用**，价格随主页走同一款数字（登记为偏离）。 */
 .cards { margin-top: var(--s5); display: grid; grid-template-columns: repeat(4, 1fr); gap: var(--s5); }
-.card { display: block; color: inherit; text-decoration: none; }
-.card .ph { aspect-ratio: 1/1; border: 1px solid var(--line); border-radius: var(--r2);
-            background: var(--img); overflow: hidden; }
-.card .ph img { width: 100%; height: 100%; object-fit: cover; }
-.card .nm { margin-top: var(--s3); font-size: var(--fs-sm); line-height: 1.5; min-height: 3em;
-            display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
-.card .pr { margin-top: var(--s2); display: flex; align-items: baseline; color: var(--accent);
-            font-family: var(--font-display); font-variant-numeric: tabular-nums; }
-.card .pr i { font-style: normal; font-size: var(--fs-xs); margin-right: 1px; }
-.card .pr b { font-size: var(--fs-md); font-weight: var(--fw-med); line-height: 1; }
 
 /* ── 付款确认弹窗（稿 `dlg2`）────────────────────────────────────────────
    ⚠️ 居中用子元素 `margin:auto`，**不用** `align-items:center` —— 后者在内容比视口高时
@@ -1269,4 +1568,65 @@ button { background: none; border: 0; cursor: pointer; }
    的纯文本 ⇒ 不写 `pre-wrap` 会被 HTML 压成一行。⚠️ 还要 `break-word`：一段没有空格的
    模板正文会把 `.para` 的 `max-width:68ch` 撑破、横向溢出整页。 */
 .para.pre { white-space: pre-wrap; word-break: break-word; }
+/* ── 2026-10-12〈国补〉：价格行上的「国补 −¥N」徽标 ────────────────────────────
+   ⚠️ 与 `.off`（折扣角标）**同一套色**（`--accent-soft` / `--accent`）—— 两者都是**价格类**标记，
+      `tokens.css:34-42` 把 `--accent` 的用法定为「价格 / 促销 / 未读」，这里正是那一档；
+      区分靠**文字**（「6.5 折」vs「国补 −¥15」），不靠再造一个颜色（调色板里没有第三个促销色）。
+   ⚠️ **不能**与 `.off` 合成一条规则：语义不同（一个是商家填的原价、一个是平台配的补率），
+      将来任一侧单独改口径时，合并的规则会逼着对方一起动。 */
+.subsidy { padding: 1px var(--s2); border-radius: var(--r1); background: var(--accent-soft);
+           color: var(--accent); font-size: var(--fs-xs); font-weight: var(--fw-med);
+           font-variant-numeric: tabular-nums; }
+/* 「到手价」那半 —— 同一枚徽标内的**第二段**（2026-10-12 补）：比减额那半**更弱**一档
+   （`--fw-reg` 正文重 + 左侧一条分隔线），靠**字重与分隔**分主次，不另起一枚徽标
+   （两枚同色徽标并排会被读成两个独立信息）。 */
+.subsidy .pay { font-style: normal; font-weight: var(--fw-reg); margin-left: var(--s2);
+                padding-left: var(--s2); border-left: 1px solid var(--accent); }
+/* ── 2026-10-12〈秒杀〉：详情页**秒杀区**（红底套白卡，用户配色令）──────────────────
+   ⚠️ 本块**有意**违反 `tokens.css:34-42`「禁 · 嵌套卡片（卡片只有一层）」的一条 —— 用户点名
+      要的「套层感」。做到最小：外层只当**框**（8px 内距、不放正文），外层圆角 `--r2` **大于**
+      内层 `--r1`（几何上才不别扭），**不**再叠第二套边框与阴影。
+   ⚠️ 色取朱砂阶梯**最深**一档 `--cin-700`：外层上只放标记、一律白字（8.31:1），正文全在白卡里。
+   ⚠️ 秒杀价用**青瓷绿** `--brand-ink`（2026-10-12 用户令：秒杀价与普通商品价格色**对调**），
+      白卡上 7.51:1；「秒杀」二字走朱砂（`--cin-600` 实底 + 白字 5.66:1）。⚠️ 原方案那枚
+      价格行徽标 `.sk-tag` 已随用户「乙案」退场（全文只在新块说一次）。
+   ⚠️ 秒杀价**不覆盖**上面那条 `.price`（现价仍是 `price` 列那个值）—— 本仓的成交价在结算时由
+      `orderAdd` 定，本页只把「这场活动此刻的价」摆出来，不假装站点价已经变了。 */
+.sk-zone { margin-top: var(--s4); padding: var(--s2); background: var(--cin-700); border-radius: var(--r2); }
+.sk-card { padding: var(--s3) var(--s4); background: var(--surface); border: 1px solid var(--cin-200); border-radius: var(--r1); }
+.sk-hd { display: flex; align-items: baseline; gap: var(--s3); }
+.sk-mark { padding: 1px var(--s2); border-radius: var(--r1); background: var(--cin-600);
+           color: var(--bg); font-size: var(--fs-xs); font-weight: var(--fw-semi); }
+.sk-left { font-size: var(--fs-xs); color: var(--cin-700); font-variant-numeric: tabular-nums; }
+.sk-pr { margin-top: var(--s2); display: flex; align-items: baseline; gap: var(--s3); }
+.sk-now { font-family: var(--font-display); font-size: var(--fs-lg); color: var(--brand-ink);
+          font-weight: var(--fw-med); font-variant-numeric: tabular-nums; }
+.sk-was { font-size: var(--fs-xs); color: var(--ink-3); }
+/* ⚠️ **售完 ⇒ 秒杀价退出强调色**（2026-10-12）：一件抢不到的商品，价格还亮着绿，等于页面在替它
+   喊「快买」。「已售完」三个字归 `.sk-left`（不另起置灰层，同 `SeckillPage.vue` 那套的反面取舍）。 */
+.sk-card.sold .sk-now { color: var(--ink-3); }
+.sk-card.sold .sk-left { color: var(--accent); font-weight: var(--fw-med); }
+/* ── 2026-10-12〈结算用券 · commit 5 续笔〉：购入弹窗「结算」栏里的券选择器 ──────────────
+   ⚠️ 与 `ShoppingCart.vue` 的 `.paybar .cp` **是同一枚控件**（同一套形制：券小签 + 原生
+      `<select>` + 折后额）；那边的作用域是吸底结算栏，这边是弹窗右栏，父级不同 ⇒ 各写一份
+      scoped 规则。⚠️ 本仓 `scoped` 下**没有**跨组件复用样式的口子（没有公共控件样式表，
+      只有 `tokens.css` 那层变量）⇒ 这份重复是**有意的**，但两处改一处要一起看。
+   ⚠️ `select` 高度照 `OrderCenter.vue` 的 `.status-select` 那一档（32px / `--line-2` 边框）；
+       `background: var(--surface)` 必须显式写 —— 原生 `<select>` 在暗色主题下默认是白底黑字。
+   ⚠️ `.off`（本单不可用券）只**降透明度**，不禁用整行：`title` 里的 `couponHint` 要说得出原因。 */
+.p-sum .cp { display: inline-flex; align-items: center; gap: var(--s2); }
+.p-sum .cp select {
+  max-width: 190px;
+  height: 32px;
+  padding: 0 var(--s2);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r1);
+  background: var(--surface);
+  color: var(--ink-2);
+  font-size: var(--fs-sm);
+  cursor: pointer;
+}
+.p-sum .cp.off { opacity: .5; }
+.p-sum .cp select[disabled] { cursor: not-allowed; }
+.p-sum .cp .save { font-size: var(--fs-sm); color: var(--accent); font-variant-numeric: tabular-nums; }
 </style>

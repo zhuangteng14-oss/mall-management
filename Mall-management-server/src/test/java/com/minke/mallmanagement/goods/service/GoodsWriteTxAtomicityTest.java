@@ -157,7 +157,8 @@ class GoodsWriteTxAtomicityTest {
     @DisplayName("用例 1：goodsAdd 不打桩 ⇒ goods_audit 1 行(pending)、goods/productsales 均 0 行（提审制）")
     void goodsAddWritesOnlyPendingAuditRow() {
         Map<String, Object> r = goodsService.goodsAdd(
-                merchantId, goodName, 1.0, jpeg(), "电子用品", productCode, 0, null, null, null, null,
+                // ⚠️ 块 5〈折扣〉：`Price` 之后插了 `OriginalPrice` 一参 —— 按「老前端不传」给 null。
+                merchantId, goodName, 1.0, null, jpeg(), "电子用品", productCode, 0, null, null, null, null,
                 // 可视化段补丁：goodsAdd 新增 5 个可选入参（多规格矩阵快照 SkuSpec + 4 个服务承诺位）。
                 // 此处按「老前端不传」的形状给 null —— 承诺位在 GoodsAuditService.boolOrTrue 里兜成「真」，
                 // 与本用例的判据（提审只写 goods_audit、不写 goods/productsales）无关。
@@ -302,7 +303,7 @@ class GoodsWriteTxAtomicityTest {
      */
     private long submitPending(String name) {
         Map<String, Object> r = goodsService.goodsAdd(
-                merchantId, name, 1.0, jpeg(), "电子用品", productCode, 0, null, null, null, null,
+                merchantId, name, 1.0, null, jpeg(), "电子用品", productCode, 0, null, null, null, null,
                 // 同上：可视化段补丁新增的 5 个可选入参，按「老前端不传」给 null。
                 null, null, null, null, null);
         assertThat(r).containsEntry("success", true);

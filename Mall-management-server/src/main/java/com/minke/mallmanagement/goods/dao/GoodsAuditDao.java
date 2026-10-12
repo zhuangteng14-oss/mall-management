@@ -36,7 +36,7 @@ public class GoodsAuditDao {
      * （让前端拿到的字符串稳定，不随 JDBC 时区映射变）。
      */
     private static final String COLUMNS =
-            "Id, MerchantId, BatchId, GoodName, Price, GoodType, GoodTypeNew, TypeId, "
+            "Id, MerchantId, BatchId, GoodName, Price, OriginalPrice, GoodType, GoodTypeNew, TypeId, "
                     + "ProductCode, GoodImg, Detail, Spec, AfterSale, SkuSpec, "
                     + "PromiseGenuine, PromiseReturn7, PromiseFastRefund, PromiseFreightIns, "
                     + "Status, RejectReason, GoodsId, ReviewedBy, "
@@ -60,22 +60,22 @@ public class GoodsAuditDao {
      *
      * @return 受影响行数（正常恒为 1）
      */
-    public int insert(String merchantId, String batchId, String goodName, Double price,
+    public int insert(String merchantId, String batchId, String goodName, Double price, Double originalPrice,
                       String goodType, Integer goodTypeNew, Integer typeId, String productCode, String goodImg,
                       String detail, String spec, String afterSale, String skuSpec, LocalDateTime submittedAt,
                       boolean promiseGenuine, boolean promiseReturn7, boolean promiseFastRefund, boolean promiseFreightIns) {
         String sql = "INSERT INTO mall_management_sql.goods_audit "
-                + "(MerchantId, BatchId, GoodName, Price, GoodType, GoodTypeNew, TypeId, ProductCode, GoodImg, "
+                + "(MerchantId, BatchId, GoodName, Price, OriginalPrice, GoodType, GoodTypeNew, TypeId, ProductCode, GoodImg, "
                 + " Detail, Spec, AfterSale, SkuSpec, "
                 + " PromiseGenuine, PromiseReturn7, PromiseFastRefund, PromiseFreightIns, Status, SubmittedAt) "
-                + "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)";
+                + "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)";
         return jdbcClient.sql(sql)
                 // ⚠️ 绑参顺序 = SQL 里 `?` 的**出现顺序**（不是形参顺序）：`SubmittedAt` 的 `?` 在**最后**
                 //    （`Status` 是字面量 'pending'、夹在 4 个承诺位与它之间）⇒ `submittedAt` 必须放在这一串的**末尾**。
                 //    2026-10-11 探针实测：放在 `skuSpec` 之后 ⇒ `submittedAt` 被塞进 `PromiseGenuine`
                 //    （`tinyint(1)`）⇒ `Data truncation: Out of range value for column 'PromiseGenuine'`，
                 //    且其后整串错位。编译期看不出来。
-                .params(merchantId, batchId, goodName, price, goodType, goodTypeNew, typeId, productCode, goodImg,
+                .params(merchantId, batchId, goodName, price, originalPrice, goodType, goodTypeNew, typeId, productCode, goodImg,
                         detail, spec, afterSale, skuSpec,
                         promiseGenuine, promiseReturn7, promiseFastRefund, promiseFreightIns, submittedAt)
                 .update();

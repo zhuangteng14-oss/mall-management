@@ -43,6 +43,31 @@
             </span>
           </span>
         </button>
+
+        <!-- ⚠️ C3 块 5〈国补〉（2026-10-12）：国补邀请**就地同意 / 拒绝**。
+             ⚠️ **必须挂在 `.nrow` 这个 `<button>` 之外**（同一层 `<li>` 里、它下面）——
+                 把按钮嵌进按钮是**非法 HTML**，浏览器会自行拆分 DOM，点击会落到意外的那一个上。
+             ⚠️ 只在**商家端**（`toType === 'merchant'`）且事件是 `subsidy.nominated` / `seckill.invited`
+                 时出现（两条都是「平台发起、等商家表态」，见 `ACTIONABLE_EVENTS`）；
+                 另两端（客户 / 管理端）看到的是同一条通知，但**没有那两个按钮** —— 他们不是当事人。 -->
+        <div v-if="canAct(row)" class="nacts">
+          <template v-if="rejectFor === row.Id">
+            <input
+              v-model="rejectReason"
+              class="nreason"
+              type="text"
+              maxlength="200"
+              placeholder="请填写拒绝理由（必填）"
+              :disabled="acting"
+            />
+            <button class="act" type="button" :disabled="acting" @click="doReject(row)">确认拒绝</button>
+            <button class="act quiet" type="button" :disabled="acting" @click="cancelReject">取消</button>
+          </template>
+          <template v-else>
+            <button class="act" type="button" :disabled="acting" @click="doAgree(row)">同意参加</button>
+            <button class="act quiet" type="button" :disabled="acting" @click="startReject(row)">拒绝</button>
+          </template>
+        </div>
       </li>
     </ul>
 
@@ -75,7 +100,18 @@ import { useRoute } from 'vue-router'
 import { handleApiError } from '../api/http'
 import { getMerchantId, getCustomerId, isLoggedIn } from '../api/auth'; import IconGlyph from '../components/ui/IconGlyph.vue'   // ⚠️ 两条 import **同行**（2026-10-11 补图标那一笔）—— 合并到既有行 = 不新增行号漂移
 import { notifyList, notifyRead, notifyReadAll } from '../api/notify'
+import { subsidyConfirm, seckillRespond } from '../api/marketing'
 import { eventLabel, isKnownEvent } from '../config/notify-events'
+
+/** 国补邀请的事件 code —— 与后端 `NotificationEvents.SUBSIDY_NOMINATED` **逐字一致**。 */
+const EVENT_SUBSIDY_NOMINATED = 'subsidy.nominated'
+
+/** 秒杀邀请的事件 code —— 与后端 `NotificationEvents.SECKILL_INVITED` **逐字一致**（commit 4）。 */
+const EVENT_SECKILL_INVITED = 'seckill.invited'
+
+/** 可就地应答的**邀请类**事件 —— 两条都是「平台发起、等商家表态」，同一套按钮、同一个形态。
+ *  ⚠️ 加第三种时**必须同时**在 `submitDecision` 里给出它对应哪个端点（那里是一条 `if/else`）。 */
+const ACTIONABLE_EVENTS = [EVENT_SUBSIDY_NOMINATED, EVENT_SECKILL_INVITED]
 
 /** 一页最多拉多少条。后端 `DEFAULT_LIMIT=100` / `MAX_LIMIT=500`（`NotificationService`），
  *  这里显式给 100：与后端默认值**同值但不同源**，写出来才能让「为什么只显示 100 条」
@@ -260,6 +296,89 @@ async function markAll() {
   }
 }
 
+// ── 国补邀请的「同意 / 拒绝」（C3 块 5 · commit 3）────────────────────────────
+//
+// ⚠️ **为什么这两个按钮长在通知列表里、而不是另起一个「国补邀请」页**：国补是**双向制** ——
+//    平台提名之后，商家的**唯一**动作入口就是那条通知。另起一页等于把同一件事在两处出现，
+//    而通知那一行仍然是「看得到、点不动」。故就地给这一个 code 加两个按钮。
+//
+// ⚠️ **判据三件缺一不可**：① 商家端（另两端的当事人不是他）、② code 是 `subsidy.nominated`、
+//    ③ `TargetId` 非空（它是 `subsidy_goods.Id` —— 后端 `AdminSubsidyController.nominate`
+//    写进去的那一个；**不是** `GoodsId`）。少了 ③ 按钮会打一个 id=undefined 的请求。
+const acting = ref(false)          // 正在提交 —— 期间按钮全禁，防同一行被点两次
+const rejectFor = ref(null)        // 正在填写拒绝理由的那一行（`row.Id`）；null = 没在填
+const rejectReason = ref('')
+const handled = ref(new Set())     // 已处理过的**通知行** Id —— 处理完就地收按钮，不等重拉
+
+function canAct(row) {
+  return toType.value === 'merchant'
+    && ACTIONABLE_EVENTS.includes(row.EventType)
+    && row.TargetId !== null && row.TargetId !== undefined && String(row.TargetId) !== ''
+    && !handled.value.has(row.Id)
+}
+
+function startReject(row) {
+  rejectFor.value = row.Id
+  rejectReason.value = ''
+}
+
+function cancelReject() {
+  rejectFor.value = null
+  rejectReason.value = ''
+}
+
+/** 同意参加。 */
+async function doAgree(row) {
+  await submitDecision(row, true, '')
+}
+
+/** 确认拒绝 —— 理由**必填**（后端也判；这里先拦一次，省一次往返）。 */
+async function doReject(row) {
+  const reason = rejectReason.value.trim()
+  if (!reason) {
+    error.value = '请先填写拒绝理由'
+    return
+  }
+  await submitDecision(row, false, reason)
+}
+
+/**
+ * 提交一次决定。
+ *
+ * ⚠️ **`outcome:'already-handled'` 不是失败**（后端 CAS 落空、`success` 仍是 `true`）——
+ *    那说明这行早被处理过（可能刚在另一个窗口点的）。照常收按钮、不弹错。
+ * ⚠️ 成功后**不重拉列表**：那条通知本来就还在（它是消息，不是提名记录本身），
+ *    收掉按钮就够了；重拉会把「已读/未读」的状态也一起抖一下。
+ */
+async function submitDecision(row, approve, reason) {
+  if (acting.value) return
+  acting.value = true
+  error.value = ''
+  try {
+    // ⚠️ 两条邀请类事件各自打自己的端点（`ACTIONABLE_EVENTS` 里加了新的，这里必须有对应分支）：
+    //    · 国补：`/marketing/subsidy/confirm`（`:Id` 是 `subsidy_goods.Id`）
+    //    · 秒杀：`/marketing/seckill/respond`（`:Id` 是 `seckill_invitation.Id`）
+    //    两者的第一参都是**商家业务号**（`usableId`），形态逐字相同，不是巧合 —— 邀请都是平台发的。
+    const data = row.EventType === EVENT_SECKILL_INVITED
+      ? await seckillRespond(usableId.value, row.TargetId, approve, reason)
+      : await subsidyConfirm(usableId.value, row.TargetId, approve, reason)
+    if (!data || !data.success) {
+      error.value = (data && data.msg) || '操作失败'
+      return
+    }
+    const next = new Set(handled.value)
+    next.add(row.Id)
+    handled.value = next
+    cancelReject()
+  } catch (e) {
+    // 403（不是你的提名）/ 网络错误都走这支。`handleApiError` 对 `HttpError` 会弹一次。
+    handleApiError(e, '国补邀请处理失败')
+    error.value = '操作失败，请稍后重试'
+  } finally {
+    acting.value = false
+  }
+}
+
 // ── 事件类型 → 展示文字 ──────────────────────────────────────────────────────
 // ⚠️ `isKnownEvent` 是**给工具条用的**（未知 code 要能看出来），不是给正文用的 ——
 //    正文一律走 `eventLabel`，它认不出就回 code 原文（**任何一行都不许渲染成空白**，
@@ -361,6 +480,37 @@ onMounted(load)
   background: var(--surface);
 }
 .nlist > li + li .nrow { border-top: 1px solid var(--line); }
+
+/* ── 国补邀请的就地操作条（C3 块 5 · commit 3）─────────────────────────────────
+   ⚠️ 挂在 `.nrow` **之外**（同一 `<li>` 内、它下面）：`.nrow` 本身是个 `<button>`，
+   按钮不能嵌按钮（非法 HTML，浏览器会拆 DOM）。故这里自己出一行，并把它与上面那一行
+   用同一条发丝线分格 —— 视觉上仍读作「这一行通知的操作区」。
+   ⚠️ 缩进对齐 `.stack` 的左内距（`var(--s5)`）与那条 3px 状态条，免得「操作区」比正文更靠左。 */
+.nacts {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  padding: var(--s2) var(--s5) var(--s4) calc(var(--s5) + 3px);
+  border-top: 1px dashed var(--line);
+  background: var(--surface-2);
+}
+.nreason {
+  flex: 1;
+  min-width: 0;
+  font: inherit;
+  font-size: var(--fs-xs);
+  color: var(--ink);
+  background: var(--surface);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r1);
+  padding: var(--s2) var(--s3);
+}
+/* 「拒绝」是次要动作（带后果）—— 压成描边款，别和「同意参加」抢同一档视觉重量。 */
+.nacts .act.quiet {
+  color: var(--ink-2);
+  background: transparent;
+  border-color: var(--line-2);
+}
 
 .nrow {
   display: grid;

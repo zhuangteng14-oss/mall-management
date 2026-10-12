@@ -104,10 +104,22 @@ public class AdminCatalogController {
         String outcome = result.get("outcome") == null ? null : result.get("outcome").toString();
         if (outcome != null && !"already-handled".equals(outcome)) {
             String merchantId = str(result.get("merchantId"));
-            if (pass) {
+            // ⚠️ C3 块 5 · A 组：**带券的提审单**（「更改商品」里挂的商品券）通过时**没有新商品上架**
+            //    —— 商品是当场就改好的，这张单只是券的载体。通知照商品的话术会骗人。
+            //    事件仍复用 GOODS_AUDIT_*（本块不新增通知事件），只换文案。
+            boolean couponOnly = Boolean.TRUE.equals(result.get("isCoupon"));
+            if (pass && couponOnly) {
+                notifyMerchant(merchantId, NotificationEvents.GOODS_AUDIT_PASSED,
+                        "商品券已通过审核",
+                        "您为商品提交的商品券已通过审核，现已生效，买家可以领取了。");
+            } else if (pass) {
                 notifyMerchant(merchantId, NotificationEvents.GOODS_AUDIT_PASSED,
                         "商品已通过审核",
                         "您提交的商品已通过审核，现已上架，买家可以看到了。");
+            } else if (couponOnly) {
+                notifyMerchant(merchantId, NotificationEvents.GOODS_AUDIT_REJECTED,
+                        "商品券未通过审核",
+                        "您为商品提交的商品券未通过审核。原因：" + (rejectReason == null ? "（未填写）" : rejectReason));
             } else {
                 notifyMerchant(merchantId, NotificationEvents.GOODS_AUDIT_REJECTED,
                         "商品未通过审核",

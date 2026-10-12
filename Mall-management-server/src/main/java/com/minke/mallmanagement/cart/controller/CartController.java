@@ -106,16 +106,21 @@ public class CartController {
      * 结算：**按商家分组建单**（走 {@code OrderService.orderAdd} 的锁与五道闸），一组成功清这一组。
      * ⚠️ 可视化段 commit 0b 改：**改前逐行建单**（N 行 ⇒ N 张）；现 N 行 ⇒ **M 张**（M = 商家数）。
      * <p>{@code ProductCode} 不传 ⇒ 结算**整车**；传了 ⇒ 只结算那一行（那一行自然只属一个商家）。
+     *
+     * <p>⚠️ C3 块 5 commit 5：多一个可选的 {@code CouponId}（结算用券）。不传 ⇒ 与加它之前
+     * **逐字节同行为**。多商家整车 + 带券 ⇒ {@code CartService.checkout} 直接回失败
+     * （{@code coupon_grant} 的核销在 {@code orderAdd} 里，一张券只抵一笔订单）。
      */
     @PostMapping("/checkout")
     public ResponseEntity<Object> checkout(
             @RequestParam("CustomerId") String CustomerId,
             @RequestParam(value = "ProductCode", required = false) String ProductCode,
+            @RequestParam(value = "CouponId", required = false, defaultValue = "") String CouponId,
             HttpServletRequest request
     ) {
         if (!IdentityGuard.requireSelfOrAdmin(request, CustomerId)) {
             return IdentityGuard.forbidden();
         }
-        return ResponseEntity.ok(Result.of(cartService.checkout(CustomerId, ProductCode)));
+        return ResponseEntity.ok(Result.of(cartService.checkout(CustomerId, ProductCode, CouponId)));
     }
 }

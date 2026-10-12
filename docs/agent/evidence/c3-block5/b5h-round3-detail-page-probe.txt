@@ -1,0 +1,29 @@
+店铺页「全部」tab 的卡：
+  氮化镓充电器 65W 双口  →  #/product?Id=85&MerchantId=dRD3gqtbFr&GoodName=%E6%B0%AE%E5%8C%96%E9%95%93%E5%85%85%E7%94%B5%E5%99%A8+65W+%E5%8F%8C%E5%8F%A3&Price=119&GoodImg=https://picsum.photos/seed/GD-110-087C/400&GoodType=%E7%94%B5%E5%AD%90%E7%94%A8%E5%93%81&ProductCode=GD-110-087C
+  无线蓝牙耳机 声谷标准版  →  #/product?Id=76&MerchantId=dRD3gqtbFr&GoodName=%E6%97%A0%E7%BA%BF%E8%93%9D%E7%89%99%E8%80%B3%E6%9C%BA+%E5%A3%B0%E8%B0%B7%E6%A0%87%E5%87%86%E7%89%88&Price=299&GoodImg=https://picsum.photos/seed/GD-101-9552/400&GoodType=%E7%94%B5%E5%AD%90%E7%94%A8%E5%93%81&ProductCode=GD-101-9552
+  机械键盘 87 键 茶轴  →  #/product?Id=79&MerchantId=dRD3gqtbFr&GoodName=%E6%9C%BA%E6%A2%B0%E9%94%AE%E7%9B%98+87+%E9%94%AE+%E8%8C%B6%E8%BD%B4&Price=329&GoodImg=https://picsum.photos/seed/GD-104-7045/400&GoodType=%E7%94%B5%E5%AD%90%E7%94%A8%E5%93%81&ProductCode=GD-104-7045
+  智能手环 5 代 血氧版  →  #/product?Id=82&MerchantId=dRD3gqtbFr&GoodName=%E6%99%BA%E8%83%BD%E6%89%8B%E7%8E%AF+5+%E4%BB%A3+%E8%A1%80%E6%B0%A7%E7%89%88&Price=249&GoodImg=https://picsum.photos/seed/GD-107-0959/400&GoodType=%E7%94%B5%E5%AD%90%E7%94%A8%E5%93%81&ProductCode=GD-107-0959
+  无线蓝牙耳机 声谷 Pro 降噪  →  #/product?Id=77&MerchantId=nlzzGB4vgV&GoodName=%E6%97%A0%E7%BA%BF%E8%93%9D%E7%89%99%E8%80%B3%E6%9C%BA+%E5%A3%B0%E8%B0%B7+Pro+%E9%99%8D%E5%99%AA&Price=599&GoodImg=https://picsum.photos/seed/GD-102-AF27/400&GoodType=%E7%94%B5%E5%AD%90%E7%94%A8%E5%93%81&ProductCode=GD-102-AF27
+  27 英寸 2K 显示器 锐视 S27  →  #/product?Id=78&MerchantId=yERU17koBc&GoodName=27+%E8%8B%B1%E5%AF%B8+2K+%E6%98%BE%E7%A4%BA%E5%99%A8+%E9%94%90%E8%A7%86+S27&Price=1299&GoodImg=https://picsum.photos/seed/GD-103-5196/400&GoodType=%E7%94%B5%E5%AD%90%E7%94%A8%E5%93%81&ProductCode=GD-103-5196
+  Type-C 快充数据线 1.5m  →  #/product?Id=80&MerchantId=nlzzGB4vgV&GoodName=Type-C+%E5%BF%AB%E5%85%85%E6%95%B0%E6%8D%AE%E7%BA%BF+1.5m&Price=19.9&GoodImg=https://picsum.photos/seed/GD-105-F28C/400&GoodType=%E7%94%B5%E5%AD%90%E7%94%A8%E5%93%81&ProductCode=GD-105-F28C
+  便携蓝牙音箱 防水款  →  #/product?Id=81&MerchantId=yERU17koBc&GoodName=%E4%BE%BF%E6%90%BA%E8%93%9D%E7%89%99%E9%9F%B3%E7%AE%B1+%E9%98%B2%E6%B0%B4%E6%AC%BE&Price=189&GoodImg=https://picsum.photos/seed/GD-106-0B34/400&GoodType=%E7%94%B5%E5%AD%90%E7%94%A8%E5%93%81&ProductCode=GD-106-0B34
+
+[耳机] http://localhost:8080#/product?Id=76&MerchantId=dRD3gqtbFr&GoodName=%E6%97%A0%E7%BA%BF%E8%93%9D%E7%89%99%E8%80%B3%E6%9C%BA+%E5%A3%B0%E8%B0%B7%E6%A0%87%E5%87%86%E7%89%88&Price=299&GoodImg=https://picsum.photos/seed/GD-101-9552/400&GoodType=%E7%94%B5%E5%AD%90%E7%94%A8%E5%93%81&ProductCode=GD-101-9552
+  DOM: {"hash":"#/product?Id=76&MerchantId=dRD3gqtbFr&GoodName=%E6%97%A0%E7%BA%BF%E8%93%9D%E7%89%99%E8%80%B3%E6%9C%BA+%E5%A3%B0%E8%B0%B7%E6%A0%87%E5%87%86%E7%89%88&Price=299&GoodImg=https://picsum.photos/seed/GD-101-9552/400&GoodType=%E7%94%B5%E5%AD%90%E7%94%A8%E5%93%81&ProductCode=GD-101-9552","pname":"无线蓝牙耳机 声谷标准版","priceLine":"¥299¥373.758 折","priceInt":"299","was":"¥373.75","off":"8 折","pickLabel":"型号","models":["GD-101-9552"],"bigImgs":[{"src":"https://picsum.photos/seed/GD-101-9552/400","w":400,"cls":"big-img active"}],"thumbs":1,"allItemsCfg":"no-vue","bodyHasPlaceholder":true}
+  8088 响应: 401 /user/me | 200 /goods/goodsSelectHome | 200 /goods/GoodsProductCodeSelect | 200 /goods/productCodePrice
+  报错: （无）
+
+[对照·充电器] http://localhost:8080#/product?Id=85&MerchantId=dRD3gqtbFr&GoodName=%E6%B0%AE%E5%8C%96%E9%95%93%E5%85%85%E7%94%B5%E5%99%A8+65W+%E5%8F%8C%E5%8F%A3&Price=119&GoodImg=https://picsum.photos/seed/GD-110-087C/400&GoodType=%E7%94%B5%E5%AD%90%E7%94%A8%E5%93%81&ProductCode=GD-110-087C
+  DOM: {"hash":"#/product?Id=85&MerchantId=dRD3gqtbFr&GoodName=%E6%B0%AE%E5%8C%96%E9%95%93%E5%85%85%E7%94%B5%E5%99%A8+65W+%E5%8F%8C%E5%8F%A3&Price=119&GoodImg=https://picsum.photos/seed/GD-110-087C/400&GoodType=%E7%94%B5%E5%AD%90%E7%94%A8%E5%93%81&ProductCode=GD-110-087C","pname":"氮化镓充电器 65W 双口","priceLine":"¥119","priceInt":"119","was":null,"off":null,"pickLabel":"型号","models":["GD-110-087C"],"bigImgs":[{"src":"https://picsum.photos/seed/GD-110-087C/400","w":400,"cls":"big-img active"}],"thumbs":1,"allItemsCfg":"no-vue","bodyHasPlaceholder":true}
+  8088 响应: 401 /user/me | 200 /goods/goodsSelectHome | 200 /goods/GoodsProductCodeSelect | 200 /goods/productCodePrice
+  报错: （无）
+OK   店铺页有耳机卡（取到它的 href）  → "#/product?Id=76&MerchantId=dRD3gqtbFr&GoodName=%E6%97%A0%E7%BA%BF%E8%93%9D%E7%89%99%E8%80%B3%E6%9C%BA+%E5%A3%B0%E8%B0%B7%E6%A0%87%E5%87%86%E7%89%88&Price=299&GoodImg=https://picsum.photos/seed/GD-101-9552/400&GoodType=%E7%94%B5%E5%AD%90%E7%94%A8%E5%93%81&ProductCode=GD-101-9552"
+OK   耳机：标题渲染出来了（与 route.query 同源）  → "无线蓝牙耳机 声谷标准版"
+OK   耳机：价格有数字  → "299"
+OK   耳机：型号钮 ≥1 个  → ["GD-101-9552"]
+OK   耳机：大图有 src  → [{"src":"https://picsum.photos/seed/GD-101-9552/400","w":400,"cls":"big-img active"}]
+OK   耳机：调到了 productCodePrice  → ["/user/me","/goods/goodsSelectHome","/goods/GoodsProductCodeSelect","/goods/productCodePrice"]
+OK   对照·充电器：价格有数字  → "119"
+OK   对照·充电器：大图有 src  → 1
+
+probe-b5h-bug2b-detail-page: 8 项 / 0 失败

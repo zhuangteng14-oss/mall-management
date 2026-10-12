@@ -68,7 +68,7 @@
       </aside>
 
       <div class="main">
-        <div v-if="goodsList.length === 0" class="empty">
+        <div v-if="shownList.length === 0" class="empty">
           <div class="big">没有找到相关商品</div>
           <div>换个关键词，或去掉品牌与价格区间限制再试一次。</div>
         </div>
@@ -88,7 +88,7 @@
                 <button class="sort" disabled title="价格降序 —— 同上，4 处，**超档**">价格 ↓</button>
                 <button class="sort" disabled title="有货优先 —— 动现有代码 5 处（goods 表**无库存列**：mall_management_sql.sql + GoodsDao + GoodsService + GoodsController + GoodsSelect.vue），**超档**">有货</button>
               </div>
-              <span class="right">共 {{ goodsList.length }} 件</span>
+              <span class="right">共 {{ shownList.length }} 件</span>
             </div>
             <div class="trow">
               <div class="tgroup">
@@ -106,22 +106,21 @@
               <div class="tgroup">
                 <span class="lbl">更多</span>
                 <button class="pick" disabled title="更多筛选（抽屉）—— 上面各项的聚合，动现有代码 ≥6 处（各项之和 + 抽屉组件），**超档**">更多筛选<span class="car"></span></button>
-              </div>
+              </div><div class="tgroup"><span class="lbl">国补</span><button class="pick" :class="{ on: subsidyOnly }" :disabled="!subsidyReady" :title="!isLoggedIn() ? '国补商品 —— 登录后可用（端点不在白名单，匿名会 401）' : (subsidyCodes.size ? '只看国家补贴商品（C3 块 5 · commit 3 已有端点 /marketing/subsidy/goods；本页是**客户端过滤**，未改任何 SQL）' : '当前没有国补商品（规则未配 / 商家未确认 / 不在期）')" @click="subsidyOnly = !subsidyOnly">国补商品</button></div>
             </div>
           </div>
 
+          <!-- 商品卡改用公共组件（C3 块 5 ·〈Bug 1/2/3〉落码，2026-10-12）—— **本页是「4 处复用」的
+               第 2 处**。换掉的是原来本页自持的那套（`.card` + `.thumb` + `.c-name` + `.c-price`）。
+               ⚠️ **`from="search"` 不能省**：原来这张卡跳转带 `from: 'search'`，而
+                  `ProductPage.goBack` 按 `route.query.from === 'search'` 决定回程去 `?back=search`
+                  （那一跳让本页 `onMounted` 的 `loadState()` 恢复上次结果）⇒ 不传就是**删行为**。
+               ⚠️ `:before-nav="saveState"` = 原来 `toGoodsDetail` 里那句「跳转前保存」的**同一件事**，
+                  挂在组件的 `beforeNav` 上（组件不自己碰 sessionStorage）。
+               ⚠️ **显示内容变了（有意）**：原卡写「商品名：型号」，现随组件走「图 + 名 + 价 + 类别标签
+                  + 店名 / 已售 N 件」。用户 ⑤ 点名四处统一，这一处是统一后的样子。 -->
           <div class="grid">
-            <div v-for="goods in goodsList" :key="goods.Id" class="card" @click="toGoodsDetail(goods)">
-              <div class="thumb">
-                <img :src="goods.GoodImg" alt="商品图" />
-              </div>
-              <div class="c-name">{{ goods.GoodName }}：{{ goods.ProductCode }}</div>
-              <div class="c-price">
-                <span class="sym">¥</span>
-                <span class="int">{{ getPriceInt(goods.Price) }}</span>
-                <span class="dec">.{{ getPriceDec(goods.Price) }}</span>
-              </div>
-            </div>
+            <ProductCard v-for="goods in shownList" :key="goods.Id" :goods="goods" :before-nav="saveState" from="search" />
           </div>
 
           <nav
@@ -145,9 +144,10 @@
 
 <script setup>
 import { ref, computed, onMounted, watch } from 'vue'
-import { useRouter, useRoute } from 'vue-router'
+import { useRoute } from 'vue-router'   // ⚠️ `useRouter` 随 `toGoodsDetail` 一起退役（卡片换公共组件后本页没有 `router.push` 了，只剩 `route`：`watch(route.query.kw)` / `onMounted(route.query.back)`）
 import { http, handleApiError, urlOf } from '../api/http'
-import { endpoints } from '../api/endpoints'
+import { endpoints } from '../api/endpoints'; import ProductCard from '../components/ProductCard.vue'; import { sharedList } from '../config/goods-flags'   // ⚠️ 两条 import **同行**（C3 块 5 ·〈Bug 2/3〉落码，2026-10-12）—— 合并到既有行 = 不新增行号漂移（同下面 `:151` 那条的做法）。`ProductCard` = 本页卡片改用的公共组件（⑤「4 处复用」的第 2 处）；`sharedList` = **共享面列表的唯一定义处**（去重 + 滤已售完），本页与主页 / 两处「猜你喜欢」同源
+import { isLoggedIn } from '../api/auth'; import { subsidyGoods } from '../api/marketing'   // ⚠️ 两条 import **同行**（2026-10-12 国补筛选那一笔）—— 合并到既有行 = 不新增行号漂移（同 `ShoppingCart.vue:146` 那条的做法）
 
 // ⚠️ 这个 name 是**两个壳**里 `<KeepAlive :include="['HomeTab', 'GoodsSelect']">` 的
 //    **唯一**匹配依据。改名（含改文件名）会让缓存**静默失效** —— 不报错，只是切回来
@@ -158,8 +158,7 @@ import { endpoints } from '../api/endpoints'
 // eslint-disable-next-line no-undef
 defineOptions({ name: 'GoodsSelect' })
 
-const router = useRouter()
-const route = useRoute()
+const route = useRoute()   // ⚠️ `const router = useRouter()` 已删（同上面那条 import 按语）：本页最后一处 `router.push` 就在 `toGoodsDetail` 里
 const searchKeyword = ref('')
 const goodsList = ref([])
 
@@ -227,35 +226,15 @@ watch(() => route.query.kw, (kw) => {
   if (kw) searchByKeyword(kw)
 }, { immediate: true })
 
-// 跳转到商品详情页，携带 from=search 标记，并保存当前状态
-const toGoodsDetail = (goods) => {
-  saveState()  // 跳转前保存
-  router.push({
-    path: '/product',
-    query: {
-      Id: goods.Id,
-      MerchantId: goods.MerchantId,
-      GoodName: goods.GoodName,
-      Price: goods.Price,
-      GoodImg: goods.GoodImg,
-      GoodType: goods.GoodType,
-      ProductCode: goods.ProductCode,
-      from: 'search'
-    }
-  })
-}
-
-// 辅助方法：价格格式化
-const getPriceInt = (price) => {
-  if (!price) return '0'
-  return parseInt(price) || '0'
-}
-const getPriceDec = (price) => {
-  if (!price) return '00'
-  const s = String(price)
-  const arr = s.split('.')
-  return arr[1] ? arr[1].padEnd(2, '0').slice(0, 2) : '00'
-}
+// ⚠️ **墓碑**：这里原来有两样，本笔（C3 块 5 ·〈Bug 2/3〉落码，2026-10-12）把卡片换成
+//    `components/ProductCard.vue` 之后它们**没有调用方了**，留着会被 `eslint no-unused-vars`
+//    判红（`npm run build` 直接红，同 `HomePage.vue:314` 那条按语的口径）：
+//      · `toGoodsDetail`（原来卡片 `@click` 的跳转，含 `from: 'search'`）⇒ 跳转交给组件的
+//        `<router-link>`；`from` 由那个组件的 `from` prop 带（理由见模板那段注释 —— 它是
+//        `ProductPage.goBack` 的回程判据，丢不得）；「跳转前保存」由 `:before-nav="saveState"` 承担。
+//      · `getPriceInt` / `getPriceDec`（原来本页卡片的价签）⇒ 随卡片搬进 `ProductCard.vue`，
+//        那一份现在**只有一处**（改前 `HomePage` / 本页 / `ChatRoom` 三处各一份、逐字同款）。
+//    ⚠️ 本段是**墓碑**，不是「待恢复」的东西。
 
 // 组件挂载时，如果是返回场景（URL 带有 back=search），则恢复数据
 onMounted(() => {
@@ -341,6 +320,49 @@ const loadByType = async () => {
 }
 
 onMounted(loadCats)
+
+// ── 国补筛选（C3 块 5 · commit 5 续笔，2026-10-12）────────────────────────────────────
+// 用户清单「用户端『国补商品』筛选」那一项：详情页的徽标 commit 3 就有（`ProductPage.vue:100`），
+// **列表页此前没有**。本段补的就是它。
+// ⚠️ 数据源是**既有的** `/marketing/subsidy/goods`（`subsidyGoods`）—— **不改 SQL、不加端点**：
+//    这一层是**客户端过滤**（拿服务端已经算好的国补商品集合与当前列表求交），故**不是**上面
+//    `.toolbar` 那条「4～6 处 · 超档」的说法所指 —— 那条针对的是「把筛选条件压进
+//    `searchByKeyword` 的 SQL」，本笔一条 SQL 都没碰。
+// ⚠️ 端点**不挂闸但也不在白名单** ⇒ 匿名 401 ⇒ **先判登录再发**（同 `ProductPage` 券 / 国补 /
+//    秒杀三块的口径；否则 `http.js` 的 `handleUnauthorized` 会把这一页踢回登录页）。
+// ⚠️ 命中判据是 **`ProductCode`**（国补按**型号**配）。
+//    ⚠️ **已知错配（如实登记，不假装没有）**：本页两个数据源给的 `ProductCode` 是
+//    `goods.ProductCode`，而多型号商品的国补行是按 `goods_sku.SkuCode` 配的 ⇒ **这类商品筛不出来**
+//    （表现是「有国补却筛不到」，**不会**反过来把没国补的筛成有）。要修得动 `GoodsCacheService`
+//    那条 SQL 或国补查询的键，属另一笔。
+const subsidyOnly = ref(false)
+const subsidyCodes = ref(new Set())
+/** 没登录 / 一条国补商品都没有 ⇒ 这枚 chip 不可点（并给出原因），不做一个点了没反应的控件。 */
+const subsidyReady = computed(() => isLoggedIn() && subsidyCodes.value.size > 0)
+/**
+ * 真正渲染的列表 = **共享面那一份**（去重 + 滤已售完）∩ 国补集合。
+ * ⚠️ 去重与滤售完**不在本页实现**，走 `config/goods-flags.js` 的 `sharedList` —— 那一处的头注
+ *    逐条写着两条判据（键为什么要含 `MerchantId`、为什么留 `MIN(Id)`、为什么先滤后去重要反过来）
+ *    以及「哪几个面走这一支、哪几个面不走」。本页是**第 2 个消费方**（另三处：主页「为你推荐」/
+ *    两处「猜你喜欢」），四处同源 ⇒ 换了一处就是四处一起换。
+ */
+const shownList = computed(() => {
+  const base = sharedList(goodsList.value)
+  return subsidyOnly.value
+    ? base.filter((g) => subsidyCodes.value.has(String(g.ProductCode || '')))
+    : base
+})
+const loadSubsidy = async () => {
+  if (!isLoggedIn()) return
+  try {
+    const data = await subsidyGoods({ limit: 200 })
+    const list = data && data.success && Array.isArray(data.list) ? data.list : []
+    subsidyCodes.value = new Set(list.map((r) => String(r.ProductCode || '')))
+  } catch (e) {
+    subsidyCodes.value = new Set()
+  }
+}
+onMounted(loadSubsidy)
 </script>
 
 
@@ -627,6 +649,20 @@ li.open > .lv1 {
 .pick[disabled] {
   cursor: not-allowed;
 }
+/* ── 2026-10-12〈国补筛选〉：`.pick` 的**选中态** ────────────────────────────────────
+   ⚠️ 借**同一条工具栏**里 `.sort.on` 的**色与字重**（`--brand-ink` + 加粗）—— 它是这一页
+      「当前生效的排序 / 筛选」既有的视觉语言（类目树那套 `.on` 也是同一族 `--brand-*`）。
+      ⚠️ **不借它的底**（`--brand-tint`）：`.sort` 自己带 `padding: var(--s1) var(--s3)`，
+      注释里写明「每个排序项都带 padding ⇒ 选中项加底色时**行高不跳**」；而 `.pick` **没有**
+      padding ⇒ 在这里补一层底会当场推挤同一 `tgroup` 里的 `.lbl` 与邻项。要底色得先给
+      `.pick` 补 padding（那会动到整条工具栏的既有间距）⇒ 本笔不做。
+   ⚠️ **有意不用 `--accent`**：`tokens.css` 的用法规矩把朱砂限定在「价格 / 促销 / 未读」，
+      一枚生效中的筛选 chip 不属于那三件事（本页唯一的朱砂用法是商品价）。
+   ⚠️ 只给国补这一枚用 —— 上面那些 `disabled` 的占位控件永远进不了 `.on`。 */
+.pick.on {
+  color: var(--brand-ink);
+  font-weight: var(--fw-med);
+}
 /* ⚠️ 用 CSS 三角，不用 `▾` 字形 —— 自托管子集里没有该码位，实测回落成一个小点。 */
 .pick .car {
   width: 0;
@@ -650,64 +686,11 @@ li.open > .lv1 {
   grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
   gap: 40px 24px;
 }
-/* 卡片 8px 内边距 + 等量负外边距 —— hover 底色块不紧贴图边，而栅格间距一个字没变。
-   ⚠️ 稿里 `.card` 是 `<a>`，这里是可点 `div` ⇒ 补 `cursor:pointer`。 */
-.card {
-  display: block;
-  padding: var(--s2);
-  margin: calc(var(--s2) * -1);
-  border-radius: var(--r2);
-  transition: background 0.15s;
-  cursor: pointer;
-}
-.card:hover {
-  background: var(--brand-tint);
-}
-/* 无图可放：底用 `--img`（tokens 里就是为「商品图占位」定义的），只加一圈发丝边。 */
-.thumb {
-  aspect-ratio: 1 / 1;
-  border-radius: var(--r2);
-  background: var(--img);
-  border: 1px solid var(--line);
-  overflow: hidden;
-}
-.thumb img {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-}
-/* ⚠️ `min-height:3em` = 两行：否则一行名 / 两行名的卡片价格不在同一水平线上。 */
-.c-name {
-  margin-top: var(--s3);
-  font-size: var(--fs-sm);
-  line-height: 1.5;
-  color: var(--ink-2);
-  min-height: 3em;
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-}
-/* 价格三档：¥ 13 / 整数 24 宋体 / 小数 13 */
-.c-price {
-  margin-top: var(--s2);
-  display: flex;
-  align-items: baseline;
-  color: var(--accent);
-  font-variant-numeric: tabular-nums;
-}
-.c-price .sym {
-  font-size: var(--fs-xs);
-}
-.c-price .int {
-  font-family: var(--font-display);
-  font-size: var(--fs-lg);
-  font-weight: var(--fw-med);
-  line-height: 1;
-}
-.c-price .dec {
-  font-size: var(--fs-xs);
-}
+/* ⚠️ **墓碑**（C3 块 5 ·〈Bug 2/3〉落码，2026-10-12）：这里原来有 `.card` / `.thumb` / `.c-name` /
+   `.c-price`（+ `.sym/.int/.dec`）一族 —— 本页卡片已换成 `components/ProductCard.vue`，那一族
+   **一个用了它的节点都不剩**（原来它们只服务模板里那个卡片 `div`）。样式随组件走（`scoped`），
+   不在本页留第二份：留着的话，下一个人改卡片时会以为改这里也生效。
+   ⚠️ 上面 `.grid`（栅格列宽 / 间距）**保留**：它是**版面**、不是卡片自己的漆面，换卡不换栅格。 */
 .empty {
   padding: var(--s8) 0;
   text-align: center;

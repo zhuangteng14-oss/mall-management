@@ -114,7 +114,7 @@
                 <th class="c-ck"></th>
                 <th class="c-img">图</th>
                 <th class="c-name">商品名</th>
-                <th>类型</th>
+                <th>类型</th><th title="商品类别（2026-10-12 用户裁定 ④ 问 2）—— 国补（绿）/ 普通商品（白）/ 秒杀商品（红）。⚠️ 与左边「类型」不是一回事：那列是 `goods.GoodType` 类目（电子用品…），这列是**这件商品此刻挂在哪个营销活动里**。判据 = 该商品名下的全部 `ProductCode` 有没有落进 `subsidy_goods` / `seckill_activity` 的码集合（见脚本里 `kindsOf`）。⚠️ 多型号商品**并排画多枚**（有几类画几枚），不二选一；一件商品可以既国补又秒杀。">商品类别</th>
                 <th class="c-num">单价</th>
                 <th class="c-num" title="占位：goods 表无库存列">库存</th>
                 <th class="c-num" title="占位：productsales.OrderVolume 恒为 0 且无 SELECT 读出">销量</th>
@@ -153,7 +153,7 @@
                     <div class="pcode">{{ goodsList.filter(g => g.GoodName === item.goodName).map(g => g.ProductCode).filter(Boolean).join(' / ') || '—' }}</div>
                   </div>
                 </td>
-                <td>{{ item.goodType }}</td>
+                <td>{{ item.goodType }}</td><td title="同表头。⚠️ 本表已按 `GoodName` 合并（同名只留一条）⇒ 多型号商品在此只有一行，故按名回 `goodsList` 取回**全部** `ProductCode` 再求类别，见脚本里 `kindsOf`。"><span v-for="k in kindsOf(item.goodName)" :key="k" class="kind" :class="k">{{ KIND_TEXT[k] }}</span></td>
                 <td class="c-num">
                   <span class="px"><span class="u">¥</span><span class="i">{{ formatPrice(item.price).int }}</span><span class="d">.{{ formatPrice(item.price).dec }}</span></span>
                 </td>
@@ -274,6 +274,45 @@
             <label>库存</label>
             <input class="slot" type="text" value="—" disabled title="待 C3〈商品〉——goods 无库存列，5 处改动（超档）">
           </div>
+
+          <!-- ═══ 商品券（C3 块 5 · A 组 · A2 + A3，2026-10-12）══════════════════════════
+               商家券 = **本商品独有**的一类券：在这一块填、随「更新商品数据」**一起提交**，
+               生不生效由**同一条商品审核链**（`goods_audit`）定 —— 管理员在「商品审核」里一并放行 / 驳回
+               （后端 `GoodsController.goodsUp` 建券 + 提审、`GoodsAuditService.audit` 通过时启用）。
+               ⚠️ **判据是「券名非空」**（后端逐字 `CouponName != null && !CouponName.trim().isEmpty()`）：
+                  整块留空 = 这回只改商品、不发券。**没有「删券」路径** —— 留空不会撤掉已生效的券。
+               ⚠️ **归属不由用户选**：`Scope='merchant'` + `MerchantAccount=本店` 全在后端钉死
+                  ⇒ 这里刻意**没有**「归属商家」输入框（A1 从管理端拿掉的就是那个字段；商家发券只可能是自己的）。
+               ⚠️ 校验**以后端为准**（`CouponService.validate`）：类型 / 面值（折扣须 `< 1`）/ 面值>0 /
+                  总量>0 / 止晚于起 —— 前端不抄一份，免得两边判据各说各话（提交失败会原话回显在 `alert` 里）。
+               ⚠️ 起止在表单里按**浏览器本地时区**挑（`datetime-local`）⇒ 发出去前**必须**反算成库内
+                  时钟文本（UTC），同 `admin/MarketingPage.vue` 的 `toSqlTime`（那边 2026-10-11 手验踩过
+                  「刚建好就领不了」，根因就是漏了这一步）。 -->
+          <div class="fl">
+            <label>商品券 （可空 · 填了随商品一起提交审核）</label>
+            <div class="cp-form">
+              <input v-model="editForm.couponName" class="cp-wide" type="text" placeholder="券名（如「满 100 减 10」）">
+              <select v-model="editForm.couponType">
+                <option value="threshold">满减</option>
+                <option value="percent">折扣</option>
+                <option value="none">无门槛</option>
+              </select>
+              <input
+                v-model="editForm.couponFaceValue"
+                type="text"
+                :placeholder="editForm.couponType === 'percent' ? '折扣率（0.85 = 8.5 折）' : '面值 ¥'"
+              >
+              <input
+                v-if="editForm.couponType !== 'none'"
+                v-model="editForm.couponThreshold"
+                type="text"
+                placeholder="门槛 ¥（可空 = 无门槛）"
+              >
+              <input v-model="editForm.couponTotalQty" type="text" placeholder="发放总量">
+              <input v-model="editForm.couponStartAt" type="datetime-local" title="有效期起（本地时区，可空）">
+              <input v-model="editForm.couponEndAt" type="datetime-local" title="有效期止（本地时区，可空）">
+            </div>
+          </div>
         </div>
       </div>
 
@@ -290,7 +329,7 @@
 <script setup>
 import { ref, computed, onMounted } from 'vue'
 import { http, handleApiError, assetOf } from '../api/http'
-import { endpoints } from '../api/endpoints'
+import { endpoints } from '../api/endpoints'; import { subsidyGoods, seckillLive } from '../api/marketing'   // ⚠️ 同样**同行**（同上一条手法）：本文件被 `api-contract.md` 与 `slot-registry.md` 按行号钉住 ⇒ 合并到既有行 = 零漂移
 import { getMerchantId, isLoggedIn } from '../api/auth'; import IconGlyph from '../components/ui/IconGlyph.vue'   // ⚠️ 两条 import **同行**（2026-10-11 补图标那一笔）—— 合并到既有行 = 不新增行号漂移（`api-contract.md` 按 `GoodsUp.vue:170/215/275/327` 钉住本文件）
 
 const goodsList = ref([])
@@ -310,8 +349,36 @@ const editForm = ref({
   price: '',
   productCode: '',
   productCodeList: [],
+  // ── 商品券（A2/A3，2026-10-12）──────────────────────────────────────────────────
+  // ⚠️ 默认**全空** = 这次改商品**不挂券**（后端只看 `couponName` 非空）；`couponType` 给个
+  //    `'threshold'` 只是让下拉有个初始态，**不是**「默认发满减券」—— 券名空着就整块不发。
+  couponName: '',
+  couponType: 'threshold',
+  couponFaceValue: '',
+  couponThreshold: '',
+  couponTotalQty: '',
+  couponStartAt: '',
+  couponEndAt: '',
 })
 const picFile = ref(null)
+
+// ── 券的时间字段：本地 `datetime-local` → 库内时钟文本（UTC）（A2/A3，2026-10-12）────
+// ⚠️ 与 `admin/MarketingPage.vue` 的 `toSqlTime` **同款**（那边 2026-10-11 手验修的正是这一步）。
+//    本仓既有做法是**各文件自带一份**（`coupon-format.js` 里 `toLocal` 已有 7 份同款副本），
+//    ⇒ 这里不抽公共模块，抄同款（两边都被按行号引，动一处要连带核另一处）。
+// 起补 `:00`、止补 `:59`：用户挑到哪一分就用满那一分。⚠️ 止补 `:59` 还有个实际作用 —— 起止挑成
+// 同一分钟时窗口是 59 秒而不是 0 秒，否则后端「止必须晚于起」的校验会当场拒掉一个看着没问题的输入。
+const pad = (n) => String(n).padStart(2, '0')
+const toSqlTime = (localValue, isEnd) => {
+  if (!localValue) return ''
+  const d = new Date(localValue) // 无偏移的 date-time ⇒ 按**本地**时区解析（ES2016+）
+  if (Number.isNaN(d.getTime())) return ''
+  d.setSeconds(isEnd ? 59 : 0, 0)
+  return (
+    `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())} ` +
+    `${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}:${pad(d.getUTCSeconds())}`
+  )
+}
 
 // ------------------------------
 // 初始化
@@ -420,7 +487,16 @@ const openModal = async (item) => {
     goodImg: item.goodImg,
     price: item.price,
     productCode: codeList[0],
-    productCodeList: codeList
+    productCodeList: codeList,
+    // ⚠️ **每次开窗都清空**：这块是「本次提交要新建的券」，不是「这件商品已发的券」的回显
+    //    （本页**没有**查「该商品已有券」的端点 ⇒ 别在这里假装回显，那会让人以为改的是同一张券）。
+    couponName: '',
+    couponType: 'threshold',
+    couponFaceValue: '',
+    couponThreshold: '',
+    couponTotalQty: '',
+    couponStartAt: '',
+    couponEndAt: ''
   }
 
   // 🔥 修复：自动加载默认选中的第一个规格价格
@@ -487,11 +563,31 @@ const doUpdateGoods = async () => {
     formData.append('file', picFile.value.files[0])
   }
 
+  // ── 商品券（A2/A3）：**「券名」非空才算挂了券**（与后端判据逐字一致，见模板那段注释）──
+  // ⚠️ 只 append **非空**的键：后端全是 `required=false` + Service 手判，一个空串会被当成
+  //    「传了空值」而非「没传」（同 `api/marketing.js` 里 `q()` 那条理由）。
+  if (editForm.value.couponName.trim()) {
+    const put = (k, v) => {
+      if (v !== undefined && v !== null && String(v).trim() !== '') formData.append(k, String(v).trim())
+    }
+    put('CouponName', editForm.value.couponName)
+    put('CouponType', editForm.value.couponType)
+    put('CouponFaceValue', editForm.value.couponFaceValue)
+    put('CouponThreshold', editForm.value.couponThreshold)
+    put('CouponTotalQty', editForm.value.couponTotalQty)
+    // ⚠️ 起止必须**反算成库内时钟（UTC）**再发 —— 表单里是本地时区的 `datetime-local`。
+    put('CouponStartAt', toSqlTime(editForm.value.couponStartAt, false))
+    put('CouponEndAt', toSqlTime(editForm.value.couponEndAt, true))
+  }
+
   try {
     const res = await http.post(endpoints.goods.goodsUp, formData)
     const data = await res.json()
     if (data.success) {
-      alert('更新成功')
+      // ⚠️ 回了 `msg` 就用它 —— 带券成功时后端说的是「商品更新成功；商品券已提交审核」、
+      //    券没建成时是「…商品券未提交：<原因>」。两种情况**都不是**一句「更新成功」能说清的
+      //    （商品那半确实成功了，券那半没有）⇒ 别把它压成一句。
+      alert(data.msg ? data.msg : '更新成功')
       closeModal()
       getGoodsList()
     } else {
@@ -589,6 +685,66 @@ const getMyApplications = async () => {
 
 // ⚠️ **另起一个** `onMounted` 而不是并进 `:319` 那个：并进去要往上插行（见本段块首第 3 条）。
 onMounted(() => { getMyApplications() })
+
+// ── C3 块 5〈商品类别〉：本店商品挂在哪个营销活动里（2026-10-12 用户裁定 ④ 问 2）─────────────
+// 需求逐字：「商家『查看商品』加一列 · 列名：商品类别 · 值：国补（绿）/ 普通商品（白）/
+// 秒杀商品（红）· 多型号商品 → 显示所有涉及类别标签。」
+//
+// 【判据】「这件商品在不在国补 / 秒杀里」——两个活动侧都按 **`ProductCode`** 记（`subsidy_goods`
+// / `seckill_activity` 的列；两个端点的 `list[]` 形状见 `api/marketing.js` 各自 javadoc 逐字列出的
+// 字段：`subsidyGoods` 有 `ProductCode`，`seckillLive` 是「活动列 + GoodImg/GoodType/ProductCode」）
+// ⇒ 取两个端点各自的 `ProductCode` 集合，再看要判的这一行**名下的全部** `ProductCode` 落不落在里面。
+// ⚠️ **为什么是「名下的全部 ProductCode」而不是「这一行自己的」**：本表 `showGoodsList` 是**按
+// `GoodName` 合并**过的（同名只留最后一条、没带码 —— 见本文件 `getGoodsList` 上方那段注释）
+// ⇒ 多型号商品（同一个 `GoodName`、几个 `ProductCode`）在本表里**只有一行**。用户裁定「多型号商品
+// 显示所有涉及类别标签」⇒ 必须按名回 `goodsList` 取回全部码求并，**不能**只看合并后剩下的那一个。
+//    （手法与「商品编号」那列的模板内联表达式**同源** —— 同一个 `goodsList.filter(g => g.GoodName
+//     === …)`，此处只是把取回的码拿去查集合，不重复造取数路径。）
+//
+// ⚠️ **两个端点都是「登录可见、匿名 401」**（`api/marketing.js` 两段段头逐字：不挂 `IdentityGuard`，
+//    也**不在** `AUTH_WHITELIST`）⇒ 未登录直接不发。失败时**两个集合都清空**、退化成「普通商品」，
+//    并且**不弹错、不把整页打成错误态** —— 这是本表的一个**附加列**，它取不到不该连累商品列表。
+//    （口径同「数据不足不显」的邻居：宁可少画一枚标签，也不画错一枚。）
+//
+// ⚠️ **一件商品可以既国补又秒杀** ⇒ 标签是**数组**、有几类画几类，**不做二选一**。
+//    `ProductPage.vue` 的型号按钮那里有同样的「两者都命中」情形，**那里**的裁量是取秒杀（因为
+//    它要选**一个**底色）；本表是**列类别**、不是选状态 ⇒ 两枚都画。两处口径不同是**有意的**。
+//
+// ⚠️ **不过滤 `Stage`**（2026-10-12 自裁，报备）：`seckillLive` 回的 `Stage` 是后端按**此刻**算出来的
+//    （`signup` / `upcoming` / `live`）—— 那是**状态**不是**类别**。按 `live` 过滤会让一场秒杀
+//    结束的当天，商品就从「秒杀商品」掉回「普通商品」，而本列问的是「这商品**属于**秒杀商品」。
+//    故这里一律不过滤（已结束 / 已停用的活动后端本来就挡了，见同一段 javadoc）。
+const KIND_TEXT = { subsidy: '国补', seckill: '秒杀商品', normal: '普通商品' }
+const subsidyCodes = ref(new Set())
+const seckillCodes = ref(new Set())
+
+const loadPromoKinds = async () => {
+  if (!isLoggedIn()) return
+  try {
+    const [sub, sek] = await Promise.all([subsidyGoods({ limit: 200 }), seckillLive({ limit: 200 })])
+    subsidyCodes.value = new Set(((sub && sub.list) || []).map((r) => String(r.ProductCode || '')).filter(Boolean))
+    seckillCodes.value = new Set(((sek && sek.list) || []).map((r) => String(r.ProductCode || '')).filter(Boolean))
+  } catch (e) {
+    // 见上面第 3 条 ⚠️：失败 = 不画标签，不是画错标签；也不打扰用户（附加列，不是主数据）
+    subsidyCodes.value = new Set()
+    seckillCodes.value = new Set()
+  }
+}
+
+// 一行的类别标签。`normal` 是**兜底**：两类都不沾 ⇒ 普通商品（不是「未知」——「没挂活动」就是普通）。
+const kindsOf = (goodName) => {
+  const codes = goodsList.value
+    .filter((g) => g.GoodName === goodName)
+    .map((g) => String(g.ProductCode || ''))
+    .filter(Boolean)
+  const out = []
+  if (codes.some((c) => subsidyCodes.value.has(c))) out.push('subsidy')
+  if (codes.some((c) => seckillCodes.value.has(c))) out.push('seckill')
+  return out.length ? out : ['normal']
+}
+
+// ⚠️ **另起一个** `onMounted`（理由同上面 `getMyApplications` 那条）：并进既有块要往上插行。
+onMounted(() => { loadPromoKinds() })
 </script>
 
 <style scoped>
@@ -618,7 +774,7 @@ onMounted(() => { getMyApplications() })
         的 `.head h1` 写的是 `font-size:var(--d2)`；`tokens.css` 里**没有** `--d2`（它只定义
         `--fs-*`）⇒ scoped 块若不自己定义，`var(--d2)` 在**计算值阶段**判为无效、整条声明被丢弃，
         标题**静默回落到继承来的 `--fs-sm`（15px）**，与正文同大。落法同 `UserInfoPage.vue:393` /
-        `GoodsAdd.vue:617`（写在本页根 `.uc-main` 上，`calc(x * 1.00)` ≡ `x` ⇒ 写 `var(--fs-2xl)`；⚠️ 2026-10-10〈模板表通用化〉重指：原 513 行 ⇒ 该文件插模板段后 +104）。
+        `GoodsAdd.vue:619`（写在本页根 `.uc-main` 上，`calc(x * 1.00)` ≡ `x` ⇒ 写 `var(--fs-2xl)`；⚠️ 2026-10-10〈模板表通用化〉重指：原 513 行 ⇒ 该文件插模板段后 +104）。
         ⚠️ 这只在**算出来的** 36px 上看得出来，肉眼扫模板扫不出 ⇒ `shot11.mjs` 已加 `h1Fs` 断言。
      ④ `.btn-primary` 由稿的 `<button>` 改成 `<router-link>`（判据：入口指向已存在路由）⇒
         **补 `display:inline-flex;align-items:center`**：`<a>` 是行内元素，不补则稿的
@@ -817,6 +973,19 @@ a { color: inherit; text-decoration: none; }
 .fl input[disabled] { background: var(--surface-2); color: var(--ink-3); cursor: not-allowed; }
 .fl input.slot { background: var(--surface-2); color: var(--ink-3); cursor: not-allowed; }
 .skus { display: flex; gap: var(--s3); flex-wrap: wrap; }
+/* ── 商品券表单（A2/A3）────────────────────────────────────────────────────────
+   ⚠️ 两块：`.cp-form` 是**双列网格**（券名横跨两列）；`.cp-form input` / `select` 要**自己重设**
+      `width/height` —— 上面 `.fl input` 是 `width:100%; height:38px`（表单里那些大字输入框的尺寸），
+      券这几个是小号辅助字段，不重设就会被撑成主字段那么大、把弹窗拉长。 */
+.cp-form { display: grid; grid-template-columns: 1fr 1fr; gap: var(--s2); }
+.cp-form .cp-wide { grid-column: 1 / -1; }
+.cp-form input, .cp-form select {
+  width: 100%; height: 34px; padding: 0 var(--s2); border: 1px solid var(--line-2);
+  border-radius: var(--r1); background: var(--surface); color: var(--ink); font-size: var(--fs-xs);
+}
+.cp-form input:focus, .cp-form select:focus {
+  outline: none; border-color: var(--brand); box-shadow: 0 0 0 3px var(--brand-tint);
+}
 .sku {
   height: 34px; padding: 0 var(--s5); border: 1px solid var(--line-2); border-radius: var(--r1);
   color: var(--ink-2); font-size: var(--fs-sm);
@@ -852,4 +1021,19 @@ a { color: inherit; text-decoration: none; }
   .find input, .find select { width: 100%; }
   .find { width: 100%; }
 }
+
+/* ── C3 块 5〈商品类别〉三色标签（2026-10-12 用户裁定 ④ 问 2）────────────────────────────────
+   国补（绿）/ 普通商品（白）/ 秒杀商品（红）—— 与 `ProductPage.vue` 的型号按钮**同一套类别语义**
+   （同一批配色令），但**那里的形状不能照抄到这里**：
+     · 那边是**按钮** ⇒ 要选中态、要给选中的加 `outline` 环（`tokens.css` 的用法规矩：态用 outline
+       画，不靠侧边条）；这边是**标签**、没有选中这回事 ⇒ 只吃底色 + 字色，**不做态、不加环**。
+     · 那边「两者都命中」只能选**一个**底色（裁量：取秒杀）；这边并排画**两枚**（见脚本那段 ⚠️）。
+   ⚠️ 三枚的**内距统一** `1px var(--s2)`；「普通商品」多一圈 `--line` 边，是为了**白底上仍看得出
+   这是一枚标签**（`--surface` 与卡片面同色，不描边就看不出来，会像只写了四个字）。
+   ⚠️ 多型号商品**并排画多枚** ⇒ 用 `inline-block` + 右外边距（不要 flex，flex 会把它们拉成等宽）。 */
+.kind { display: inline-block; margin-right: var(--s2); padding: 1px var(--s2); border-radius: var(--r1); font-size: var(--fs-xs); white-space: nowrap; }
+.kind:last-child { margin-right: 0; }
+.kind.normal { background: var(--surface); border: 1px solid var(--line); color: var(--ink-2); }
+.kind.subsidy { background: var(--brand-tint); color: var(--brand-ink); }
+.kind.seckill { background: var(--cin-100); color: var(--cin-700); }
 </style>

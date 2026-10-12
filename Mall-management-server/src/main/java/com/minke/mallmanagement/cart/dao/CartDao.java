@@ -49,6 +49,86 @@ public class CartDao {
     }
 
     /**
+     * 「{@code (MerchantId, SkuCode)} → 那一行 SKU」的**至多一行**投影。本类三处查询共用一份。
+     *
+     * <h2>为什么需要它（这是 C3 块 5 补的一处**真缺陷**）</h2>
+     * 卖多型号的商品，详情页加入购物车时上报的 {@code ProductCode} 是
+     * {@code goods_sku.SkuCode}，**不是** {@code goods.ProductCode} —— 这条是**建表时就定下的口径**，
+     * {@code mall_management_sql.sql:1071} 的列注释逐字写着「SKU 编码（商家填；详情页加入购物车时
+     * 作为 {@code ProductCode} 上报）」，{@code :1060} 又写着「⇒ 下单 / 购物车链路**不改**」。
+     * 而本类此前三处**只联 {@code goods}**（`WHERE g.ProductCode = c.ProductCode`）⇒ 型号件一律配不上
+     * ⇒ 加购回「商品不存在或已下架」、购物车里那一行的名字与价格变成 {@code null}。
+     * 修法在**本类**（调用方一个字不改）：{@code goods} 配不上时再拿 {@code SkuCode} 配一次。
+     *
+     * <p>⚠️ <b>为什么要 {@code MIN(Id)} 这一层</b>：{@code goods_sku} 的唯一键是
+     * {@code (GoodsId, AxisName)}（{@code mall_management_sql.sql:1076}）—— <b>{@code SkuCode} 上
+     * 没有唯一约束</b>，商家可以在两件商品上填同一个码。直接 JOIN 会让**购物车一行变两行**
+     * （{@link #selectByCustomer} 是列表，行数会当场翻倍）。取 {@code MIN(Id)} =「同一个码撞了就
+     * 用最早那一行」，是**确定性**的选法（可复核，不是随机的 {@code LIMIT 1}）。
+     *
+     * <p>⚠️ 也<b>排掉空码</b>：{@code SkuCode} 的默认值是 {@code ''}（列注释「商家填」⇒ 允许留空），
+     * 空码是「还没填」不是「一个叫空的型号」；不排掉的话所有没填码的 SKU 会按 {@code (MerchantId, '')}
+     * 挤成一行，再被别的商品的购物车行捡去。
+     *
+     * <p>⚠️ <b>这条 JOIN 的访问路径</b>（2026-10-12 更新）：原先 {@code goods_sku} 上只有
+     * {@code (GoodsId, AxisName)} 与 {@code (MerchantId, GoodName)}，**没有 {@code SkuCode} 的**
+     * ⇒ 下面那条 {@code GROUP BY} 是全表扫。用户 2026-10-12 裁定 ④-b（A 档）已加**普通**索引
+     * {@code idx_goods_sku_sku_code}（{@code mall_management_sql.sql} 尾部 ⑭ 块）。
+     * ⚠️ 实测（{@code EXPLAIN}，4 行演示数据）：等值反查 {@code WHERE SkuCode='…'} 走 {@code ref}
+     * + {@code Using index}（覆盖索引）；下面这条派生表内层由 {@code ALL} 变 {@code range}。
+     * ⚠️ <b>这句不能读成「这条 JOIN 现在全走索引了」</b>：{@code Using temporary} **仍在** ——
+     * 分组键是 {@code (MerchantId, SkuCode)}，单列索引消不掉那个临时表；索引改善的是**取数**
+     * 那一半，不是**分组**那一半。要连分组一起消掉得建 {@code (MerchantId, SkuCode)} 复合索引，
+     * 那是另一次 DDL、另一次裁定。
+     */
+    private static final String SKU_BY_CODE =
+            "SELECT s.MerchantId, s.SkuCode, s.GoodsId, s.GoodName, s.Price, s.AxisName "
+            + "FROM goods_sku s JOIN ("
+            + "SELECT MerchantId, SkuCode, MIN(Id) AS Id FROM goods_sku "
+            + "WHERE SkuCode <> '' GROUP BY MerchantId, SkuCode"
+            + ") k ON k.Id = s.Id";
+
+    /**
+     * 三处查询共用的「商品列」取值口径：**先认 {@code goods}，配不上再认 SKU**。
+     * <ul>
+     *   <li>{@code GoodName}：SKU 那一行自带 {@code GoodName} 快照（列注释「免联查 goods」），
+     *       但它是**写入时**的快照 —— 商品改名后不会跟着变。故 {@code goods.GoodName} 优先
+     *       （与「无型号商品」那条路径逐字同源），SKU 名只做兜底。</li>
+     *   <li>{@code GoodImg}：{@code goods_sku} **没有图列**（看建表 `:1063-1078`）⇒ 图必须由
+     *       {@code GoodsId} 回联父商品。SKU 自身的 {@code MerchantId} 已冗余，回联只用 {@code Id}。</li>
+     *   <li>{@code Price}：SKU 的价是**商家逐格填**的该组合价（`Price` 列注释）⇒ 型号件必须取它，
+     *       取父商品的价就是「按错价成交」。</li>
+     *   <li>{@code AxisName}：**2026-10-12 新增**（用户五处挂账裁定 ④-a「购物车多型号同名 ——
+     *       带上 {@code AxisName}」）。多型号商品的几个 SKU 共享同一个 {@code GoodName} ⇒ 购物车
+     *       里几行长得一模一样，看不出买的是哪个型号。{@code goods} 侧**没有**这个字段（只有
+     *       {@code goods_sku} 有）⇒ **不 COALESCE**，非型号件就是 {@code null}，前端据此不画。
+     *       （只作展示；结算 / 下单链路一个字不改。）</li>
+     *   <li>{@code OriginalPrice}：**2026-10-12 新增**（〈折扣商品用券规则〉的前端那一半）。
+     *       结算页要按「本单含不含折扣商品」把满减 / 折扣券灰掉（规则见
+     *       {@code CouponService.redeem} 的 javadoc），而购物车**整车**的判据只能从这里来
+     *       —— 商品页「立即购买」那条走的是 {@code /goods/productCodePrice} 自带的
+     *       {@code originalPrice}，不经过本方法。
+     *       ⚠️ 这一列**必须 COALESCE 到父商品**（划线原价加在 {@code goods} 上，型号件共享父商品
+     *       那一份）—— 形状与 {@code GoodImg} 逐字同款：无型号件走 {@code g}、型号件走 {@code pg}。
+     *       只读、不参与任何判据（后端那道闸走 {@code OrderDao.selectDiscountCodes}，
+     *       不依赖本列）。</li>
+     * </ul>
+     */
+    private static final String GOODS_COLS =
+            "COALESCE(g.GoodName, s.GoodName) AS GoodName, "
+            + "COALESCE(g.GoodImg, pg.GoodImg) AS GoodImg, "
+            + "COALESCE(g.Price, s.Price) AS PriceNow, "
+            + "s.AxisName AS AxisName, "
+            + "COALESCE(g.OriginalPrice, pg.OriginalPrice) AS OriginalPrice ";
+
+    /** {@link #GOODS_COLS} 配套的三个 LEFT JOIN（顺序不能换：`pg` 依赖 `s`）。 */
+    private static final String GOODS_JOINS =
+            "LEFT JOIN goods g ON g.MerchantId = c.MerchantId AND g.ProductCode = c.ProductCode "
+            + "LEFT JOIN (" + SKU_BY_CODE + ") s "
+            + "ON s.MerchantId = c.MerchantId AND s.SkuCode = c.ProductCode "
+            + "LEFT JOIN goods pg ON pg.Id = s.GoodsId ";
+
+    /**
      * 加购**新行**。撞 {@code uk_cart_customer_product} 时抛 {@code DuplicateKeyException}
      * （由 {@link com.minke.mallmanagement.cart.service.CartService#add} 接住并改走
      * {@link #addQuantity}）—— **不用** {@code ON DUPLICATE KEY UPDATE}：
@@ -103,9 +183,8 @@ public class CartDao {
     public List<Map<String, Object>> selectByCustomer(String customerId) {
         String sql = "SELECT c.Id, c.CustomerId, c.MerchantId, c.ProductCode, c.Quantity, c.PriceSnapshot, "
                 + "c.created_at, c.updated_at, "
-                + "g.GoodName AS GoodName, g.GoodImg AS GoodImg, g.Price AS PriceNow "
-                + "FROM cart c LEFT JOIN goods g "
-                + "ON g.MerchantId = c.MerchantId AND g.ProductCode = c.ProductCode "
+                + GOODS_COLS
+                + "FROM cart c " + GOODS_JOINS
                 + "WHERE c.CustomerId = ? "
                 + "ORDER BY c.updated_at DESC, c.Id DESC";
         return jdbcClient.sql(sql).param(customerId).query().listOfRows();
@@ -116,9 +195,8 @@ public class CartDao {
         // ⚠️ 两条完整 SQL，**不做字符串拼 where**：拼出来的 SQL 会多一个动态占位符，
         //    绑定顺序得跟着分支走 —— 那正是「运行时才发现的错位」。两条各绑各的，读起来也不用跳。
         String select = "SELECT c.MerchantId, c.ProductCode, c.Quantity, c.PriceSnapshot, "
-                + "g.GoodName AS GoodName, g.GoodImg AS GoodImg, g.Price AS PriceNow "
-                + "FROM cart c LEFT JOIN goods g "
-                + "ON g.MerchantId = c.MerchantId AND g.ProductCode = c.ProductCode ";
+                + GOODS_COLS
+                + "FROM cart c " + GOODS_JOINS;
         if (productCode != null && !productCode.isBlank()) {
             return jdbcClient.sql(select + "WHERE c.CustomerId = ? AND c.ProductCode = ? ORDER BY c.Id ASC")
                     .params(customerId, productCode)
@@ -139,8 +217,35 @@ public class CartDao {
      * （「1 元的电视」会变成「1 元的购物车行」）。故本方法是加购链路的**真值源**。
      */
     public GoodsSnapshot selectGoodsSnapshot(String merchantId, String productCode) {
-        String sql = "SELECT GoodName, GoodImg, Price FROM goods WHERE MerchantId = ? AND ProductCode = ? LIMIT 1";
-        return jdbcClient.sql(sql).params(merchantId, productCode)
+        // ① 先按 `goods.ProductCode` 找 —— **无型号商品走这条**（C3 块 4 起的既有路径）。
+        //    ⚠️ 补上 `ShelfState` / `DeletedAt` 两个条件（2026-10-12 续笔）：此前**一条都没有**，
+        //    而 `CartService` 的失败文案却是「商品不存在**或已下架**」—— 那句「或已下架」在改前
+        //    是**假的**（下架商品照样能加进车，一直要到结算才被 `goodName` 空白那条拦住）。
+        //    现在补上，文案才第一次说到做到。两个条件都有 DDL 依据：`ShelfState` 是
+        //    `tinyint(1) NOT NULL DEFAULT 1`（`:408`，**不会为 NULL** ⇒ `= 1` 不会漏行），
+        //    `DeletedAt` 默认 NULL = 正常（`:466`，逻辑删除）。与 `GoodsCacheService` 首页列表
+        //    的 `WHERE g.ShelfState = 1 AND g.DeletedAt IS NULL` **同口径**。
+        String byGoods = "SELECT GoodName, GoodImg, Price FROM goods "
+                + "WHERE MerchantId = ? AND ProductCode = ? AND ShelfState = 1 AND DeletedAt IS NULL LIMIT 1";
+        GoodsSnapshot hit = jdbcClient.sql(byGoods).params(merchantId, productCode)
+                .query((rs, rowNum) -> new GoodsSnapshot(
+                        rs.getString("GoodName"), rs.getString("GoodImg"), rs.getObject("Price", Double.class)))
+                .optional()
+                .orElse(null);
+        if (hit != null) {
+            return hit;
+        }
+        // ② 没配上 ⇒ 再按 `goods_sku.SkuCode` 找 —— **多型号商品走这条**。
+        //    `ProductCode` 就是详情页上报的 SKU 码（理由与形状见 `SKU_BY_CODE` 的方法体注释）；
+        //    ⚠️ 三个字段的取值口径（名优先 live 的 `goods`、图只能回联父商品、价必须取该组合价）
+        //    与 `GOODS_COLS` **同源**，改一处要一起看。
+        //    ⚠️ 父商品的上架 / 未删条件**同样要判** —— 型号是挂在商品下面的，父商品下架了，
+        //    它的型号一件都不该能加购（`JOIN` 上加条件 = 父商品不满足时整条落空 ⇒ 走不到这里）。
+        String bySku = "SELECT g.GoodName AS GoodName, g.GoodImg AS GoodImg, s.Price AS Price "
+                + "FROM (" + SKU_BY_CODE + ") s "
+                + "JOIN goods g ON g.Id = s.GoodsId "
+                + "WHERE s.MerchantId = ? AND s.SkuCode = ? AND g.ShelfState = 1 AND g.DeletedAt IS NULL";
+        return jdbcClient.sql(bySku).params(merchantId, productCode)
                 .query((rs, rowNum) -> new GoodsSnapshot(
                         rs.getString("GoodName"), rs.getString("GoodImg"), rs.getObject("Price", Double.class)))
                 .optional()

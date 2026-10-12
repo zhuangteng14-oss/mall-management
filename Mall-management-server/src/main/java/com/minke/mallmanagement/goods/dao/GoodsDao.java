@@ -1,5 +1,6 @@
 package com.minke.mallmanagement.goods.dao;
 
+import com.minke.mallmanagement.marketing.MarketingGoodsFlags;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
@@ -80,11 +81,11 @@ public class GoodsDao {
      */
     public int insertGoods(GoodsRow r) {
         String sql = "INSERT INTO mall_management_sql.goods "
-                + "(MerchantId, GoodName, Price, GoodImg, GoodType, ProductCode, GoodTypeNew, TypeId, Detail, Spec, AfterSale, "
+                + "(MerchantId, GoodName, Price, OriginalPrice, GoodImg, GoodType, ProductCode, GoodTypeNew, TypeId, Detail, Spec, AfterSale, "
                 + " PromiseGenuine, PromiseReturn7, PromiseFastRefund, PromiseFreightIns) "
-                + "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+                + "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
         return jdbcClient.sql(sql)
-                .params(r.merchantId(), r.goodName(), r.price(), r.goodImg(), r.goodType(),
+                .params(r.merchantId(), r.goodName(), r.price(), r.originalPrice(), r.goodImg(), r.goodType(),
                         r.productCode(), r.goodTypeNew(), r.typeId(), r.detail(), r.spec(), r.afterSale(),
                         r.promiseGenuine(), r.promiseReturn7(), r.promiseFastRefund(), r.promiseFreightIns())
                 .update();
@@ -98,7 +99,7 @@ public class GoodsDao {
      * （提审时快照，通过时原样写进这里）。**可能为 {@code null}**（老调用方不传 / 名字解析不出），
      * 故用包装类型 {@code Integer} 而非 {@code int}。⚠️ 后 3 个分量 {@code detail / spec / afterSale}（C3 块 3 就地改造 2026-10-10 加的第 9-11 个）是详情 / 规格 / 售后的**快照文本**（{@code goods.Detail / Spec / AfterSale}，mediumtext，可空）—— 选模板 → 填内容 → **可改** ⇒ 落库的是商品自己那段文本、**不是**模板 Id（改模板不影响已上架商品）；提审制下来自 {@code goods_audit} 同名列。
      */
-    public record GoodsRow(String merchantId, String goodName, Double price, String goodImg,
+    public record GoodsRow(String merchantId, String goodName, Double price, Double originalPrice, String goodImg,
                            String goodType, String productCode, int goodTypeNew, Integer typeId, String detail, String spec, String afterSale,
                            boolean promiseGenuine, boolean promiseReturn7, boolean promiseFastRefund, boolean promiseFreightIns) {
     }
@@ -258,13 +259,24 @@ public class GoodsDao {
         StringBuilder nameSql = new StringBuilder();
         for (String s : keys) {
             if (!s.isEmpty()) {
-                nameSql.append(" OR GoodName LIKE '%").append(s).append("%' ");
+                nameSql.append(" OR g.GoodName LIKE '%").append(s).append("%' ");
             }
         }
 
-        String sql = "SELECT * FROM goods WHERE 1=1 " +
-                "AND ShelfState = 1 AND DeletedAt IS NULL " +
-                "AND (GoodType = ? " +
+        // ⚠️ 2026-10-12〈Bug 2/3〉起本条的**列清单不再逐字等于三层前的 productSearch**：
+        //    SELECT * → SELECT g.* + 三个营销态布尔（IsSeckill / IsSoldOut / IsSubsidy，
+        //    谓词取自 `MarketingGoodsFlags`）。同批给表起了别名 `g`（三个 EXISTS 要引 `g.Id`）
+        //    ⇒ 连带的 `ShelfState`/`DeletedAt`/`GoodType`/`GoodName` 全加 `g.` 前缀。
+        //    ⚠️ 类注释那句「SQL 字面量逐字未变」说的是**三层重构那一笔的历史**；本笔的验收判据
+        //    改为「三个标志列逐字来自 MarketingGoodsFlags」+ a3 实测（两条列表端点同源）。
+        //    ⚠️ 仍然**没有** schema 前缀、仍然**没有** LIMIT / 分页 —— 那两条是既有账，本笔不动。
+        String sql = "SELECT g.*, "
+                + MarketingGoodsFlags.existsIsSeckill("g") + " AS IsSeckill, "
+                + MarketingGoodsFlags.existsIsSoldOut("g") + " AS IsSoldOut, "
+                + MarketingGoodsFlags.existsIsSubsidy("g") + " AS IsSubsidy " +
+                "FROM goods g WHERE 1=1 " +
+                "AND g.ShelfState = 1 AND g.DeletedAt IS NULL " +
+                "AND (g.GoodType = ? " +
                 nameSql + ")";
 
         return jdbcClient.sql(sql).param(keyword.trim()).query().listOfRows();

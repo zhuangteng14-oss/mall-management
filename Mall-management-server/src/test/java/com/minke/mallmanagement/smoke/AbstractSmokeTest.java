@@ -40,6 +40,17 @@ import com.minke.mallmanagement.admin.dao.AdminOrderDao;
 import com.minke.mallmanagement.admin.service.AdminOrderService;
 import com.minke.mallmanagement.stats.dao.StatsDao;
 import com.minke.mallmanagement.stats.service.StatsService;
+import com.minke.mallmanagement.marketing.coupon.dao.CouponDao;
+import com.minke.mallmanagement.marketing.coupon.service.CouponService;
+import com.minke.mallmanagement.shop.follow.dao.ShopFollowDao;
+import com.minke.mallmanagement.shop.follow.service.ShopFollowService;
+import com.minke.mallmanagement.shop.profile.dao.ShopProfileDao;
+import com.minke.mallmanagement.shop.profile.service.ShopProfileService;
+import com.minke.mallmanagement.marketing.discount.service.DiscountLimitService;
+import com.minke.mallmanagement.marketing.subsidy.dao.SubsidyDao;
+import com.minke.mallmanagement.marketing.subsidy.service.SubsidyService;
+import com.minke.mallmanagement.marketing.seckill.dao.SeckillDao;
+import com.minke.mallmanagement.marketing.seckill.service.SeckillService;
 import org.junit.jupiter.api.BeforeEach;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
@@ -203,7 +214,52 @@ import static org.mockito.Mockito.when;
         //    理由与上一笔的 `ShippingTrackAdvanceJob` **逐字相同**（切片里没有调度器；
         //    @EnableScheduling 挂在 MerchantDowngradeSchedulingConfig，不属 web 组件）。
         //    ⇒ 「默认 profile 手验」兜它（job 是滚动窗口，演示数据落窗外 ⇒ 手验要看数据请用 rebuild）。
-        StatsDao.class, StatsService.class})
+        StatsDao.class, StatsService.class,
+        // C3 块 5（营销块 · commit 1 券，2026-10-11）：新增两个 Controller（`CouponController` /
+        // `AdminCouponController`）+ 一个 @Service（`CouponService`）+ 一个 @Dao（`CouponDao`）——
+        // **第七次同一处地雷**：@WebMvcTest 无参会加载全部 @Controller，新控制器一进来，
+        // 切片上下文就会因为「找不到它要的 CouponService」而**启动失败**（同前六笔）。
+        // ⚠️ `AdminCouponController` 还吃 `AuditService`、`CouponService` 只吃 `CouponDao`
+        //    —— 两个依赖都在上面的清单里，无需重复登记。
+        // ⚠️ **刻意不 @Import `CouponExpiryJob`**：它是 @Component（切片不扫）且是 @Scheduled ——
+        //    理由与 `ShippingTrackAdvanceJob` / `StatsAggregateJob` **逐字相同**（切片里没有调度器；
+        //    @EnableScheduling 挂在 MerchantDowngradeSchedulingConfig，不属 web 组件）。
+        CouponDao.class, CouponService.class,
+        // C3 块 5 · B 组（个人中心 / 店铺主页 / 关注关系，2026-10-12）：新增一个 Controller
+        // （`ShopFollowController`）+ 一个 @Service（`ShopFollowService`）+ 一个 @Dao（`ShopFollowDao`）——
+        // **第八次同一处地雷**：@WebMvcTest 无参会加载全部 @Controller，新控制器一进来，
+        // 切片上下文就会因为「找不到它要的 ShopFollowService」而**启动失败**（同前七笔）。
+        // ⚠️ 本域的依赖链只有三层（Controller → Service → Dao），Service 不另吃别的 bean。
+        ShopFollowDao.class, ShopFollowService.class,
+        // C3 块 5 · B 组续笔（店铺公开档案，2026-10-12）：新增一个 Controller（`ShopProfileController`）
+        // + 一个 @Service（`ShopProfileService`）+ 一个 @Dao（`ShopProfileDao`）——
+        // **第九次同一处地雷**：@WebMvcTest 无参会加载全部 @Controller，新控制器一进来，
+        // 切片上下文就会因为「找不到它要的 ShopProfileService」而**启动失败**（同前八笔）。
+        // ⚠️ 依赖链只有三层（Controller → Service → Dao），Service 不另吃别的 bean。
+        // ⚠️ 这个 Controller 走的是**公开面**（不在身份面），但「公开」与「要不要进 @Import」无关 ——
+        //    切片加载所有 @Controller，与它挂不挂 IdentityGuard 无关。
+        ShopProfileDao.class, ShopProfileService.class,
+        // C3 块 5〈折扣〉（2026-10-12）：新增一个 @Service（`DiscountLimitService`）——
+        // **第十次同一处地雷**，但这次形状不同：**没有新 Controller**（管理端的折扣配置直接复用
+        // 现成的 `/admin/template/*`，本笔零新端点）。进这个清单的原因是 `GoodsService`
+        // 的构造器多吃了它一个 bean（`GoodsService` 本身已被 @Import，见上）——
+        // 它一缺席，整个切片上下文同样**启动失败**。
+        // ⚠️ 依赖链只有一层：`DiscountLimitService` → `TemplateService`（上面已 @Import）。没有 DAO。
+        DiscountLimitService.class,
+        // C3 块 5〈国补〉（2026-10-12，commit 3）：**两个**新 Controller（`AdminSubsidyController`
+        // + `SubsidyController`）+ 一个 @Service（`SubsidyService`）+ 一个 @Dao（`SubsidyDao`）——
+        // **第十一次同一处地雷**（`@WebMvcTest` 无参会加载全部 @Controller，新控制器一进来，
+        // 切片上下文就会因为「找不到 SubsidyService」而**启动失败**，同前十笔）。
+        // ⚠️ 依赖链三层：Service → Dao；两个 Controller 另各吃一个**已在清单里**的 bean
+        //    （`NotificationService` 块 1、`AuditService` 块 1）⇒ 这两条不必重复登记。
+        SubsidyDao.class, SubsidyService.class,
+        // C3 块 5〈秒杀〉（2026-10-12，commit 4）：**两个**新 Controller（`AdminSeckillController`
+        // + `SeckillController`）+ 一个 @Service（`SeckillService`）+ 一个 @Dao（`SeckillDao`）——
+        // **第十二次同一处地雷**（`@WebMvcTest` 无参会加载全部 @Controller，新控制器一进来，
+        // 切片上下文就会因为「找不到 SeckillService」而**启动失败**，同前十一笔）。
+        // ⚠️ 依赖链三层：Service → Dao；两个 Controller 另各吃一个**已在清单里**的 bean
+        //    （`NotificationService` 块 1、`AuditService` 块 1）⇒ 这两条不必重复登记。
+        SeckillDao.class, SeckillService.class})
 public abstract class AbstractSmokeTest {
 
     @Autowired

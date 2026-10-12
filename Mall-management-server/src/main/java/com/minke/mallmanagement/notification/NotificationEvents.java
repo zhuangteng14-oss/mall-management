@@ -23,8 +23,8 @@ package com.minke.mallmanagement.notification;
  * <p>⇒ 代价：库里可能出现本类**没有**的 code。前端映射必须**兜底**（未知 code 原样显示 + 小号
  * chip，见 {@code src/config/notify-events.js} 的 {@code eventLabel}），不许静默成空白。
  *
- * <h2>【清单按「归属块」排 —— 21 条，覆盖到 C3 全部 8 块】</h2>
- * 块 1 本块就用（2 条）；其余 19 条是**预留登记**：各块的触发点**随各自那一笔挂**
+ * <h2>【清单按「归属块」排 —— 31 条，覆盖到 C3 全部 8 块】</h2>
+ * 块 1 本块就用（2 条）；其余 29 条是**预留登记**：各块的触发点**随各自那一笔挂**
  * （同 {@code AuditActions} 的 15 个挂钩点口径），本块只把 code 与 {@code send} 原语先留出来。
  * 硬约束来自 {@code docs/agent/c3-modules.md} §9.2：通知必须能被「被评论 / 被回复 / 被 @」三类事件触发
  * —— 对应 {@link #COMMENT_ON_POST} / {@link #COMMENT_ON_USER} / {@link #COMMENT_REPLY} /
@@ -103,6 +103,44 @@ public final class NotificationEvents {
     /** 商家秒杀申请经管理端审核**驳回**（§9.1 路径 B）。 */
     public static final String SECKILL_APPLICATION_REJECTED = "seckill.application.rejected";
 
+    /**
+     * **未领的**临时券即将过期 —— 由 {@code CouponExpiryJob} 扫描后发给目标用户。
+     *
+     * <p>⚠️ 只管**未领**那一侧：**已领的券快过期不发系统通知**（用户 2026-10-11 裁定 #4 ②），
+     * 那一侧走**券包红点 + 排序**（无 code、无通知行）。故本 code 的语义是
+     * 「你**还没领**的这张券要过期了」—— 别拿它去做「你的券要过期了」。
+     */
+    public static final String COUPON_EXPIRING_UNCLAIMED = "coupon.expiring.unclaimed";
+
+    // ==================== 块 5（营销块）：国补双向制（commit 3） ====================
+
+    /**
+     * 平台**提名**某件商品参加国补 → 触达**商家**（{@code ToType='merchant'}、
+     * {@code ToId=goods.MerchantId}），商家在消息里同意 / 拒绝。
+     *
+     * <p>⚠️ 这条通知**是那一行 {@code subsidy_goods(pending)} 的收件箱面**：文案与
+     * {@code GoodsName} / {@code RuleName} 一起给出，商家据此决定要不要参加 ——
+     * 与 {@code goods.apply.submitted} 恰好**反向**（那条是商家 → 管理端，本条的原始动作是
+     * 管理端 → 商家，回执见 {@link #SUBSIDY_CONFIRMED}）。
+     */
+    public static final String SUBSIDY_NOMINATED = "subsidy.nominated";
+
+    /**
+     * 商家**确认**参加国补 → 触达**管理端共享收件箱**（{@code ToType='admin'}、{@code ToId='*'}，
+     * 同 {@code MerchantApplicationController.ADMIN_INBOX_ID} 的口径）。
+     */
+    public static final String SUBSIDY_CONFIRMED = "subsidy.confirmed";
+
+    /**
+     * 商家**拒绝**参加国补（附理由）→ 同样触达管理端共享收件箱。
+     *
+     * <p>⚠️ 这一条是**本笔在已批的两条之外补的第三条**（A3-① 批的是
+     * {@link #SUBSIDY_NOMINATED} / {@link #SUBSIDY_CONFIRMED}）：拒绝与同意是**两封不同的信**
+     * （一封要人跟进、一封只是回执），挤进同一个 code 会让管理端收件箱里「已确认」与「已拒绝」
+     * 长得一模一样。加一条**常量**不改表、不改后端（见类注释那条口径），故按自裁报备处理。
+     */
+    public static final String SUBSIDY_REJECTED = "subsidy.rejected";
+
     // ==================== 块 2（用户块）：本块新增 3 条（块 1 已预设的 audit/banned 6 条见上） ====================
 
     /**
@@ -127,6 +165,31 @@ public final class NotificationEvents {
      * 本条是「商家 → 管理员」的去向，那两条是「管理员 → 商家」的回执。
      */
     public static final String GOODS_APPLY_SUBMITTED = "goods.apply.submitted";
+
+    // ==================== 块 5（营销块）：秒杀双向制的「商家 → 管理端」两条（commit 4）====================
+    // ⚠️ 上面那三条 `seckill.invited` / `seckill.application.approved|rejected` 是**管理员 → 商家**的回执，
+    //    下面这两条是**反方向**（商家 → 管理端共享收件箱 `ToType='admin', ToId='*'`）——
+    //    与国补那一对（`subsidy.nominated` 去 / `subsidy.confirmed|rejected` 回）同一个对称结构。
+    //    ⚠️ 别把方向搞反：写反了通知照样入库，只是**收件箱错**（管理员看不见、商家自己收到自己的回执）。
+
+    /**
+     * 商家**应答**秒杀邀请（同意 / 拒绝）→ 触达**管理端共享收件箱**。
+     *
+     * <p>{@code docs/agent/c3-modules.md} §9.1 把它写成一条（不是拆两条）：与
+     * {@link #SUBSIDY_CONFIRMED} / {@link #SUBSIDY_REJECTED} 拆开的情形不同 ——
+     * 邀请这条路径上，管理端**本来就知道自己邀请了谁**，回执只需要「答没答、答的什么」；
+     * 具体结果写在标题里（「商家拒绝秒杀邀请：<商品>」），不必再多一个 code。
+     */
+    public static final String SECKILL_RESPONDED = "seckill.responded";
+
+    /**
+     * 商家**提交**秒杀申请（报名）→ 触达**管理端共享收件箱**，等管理端审核。
+     *
+     * <p>⚠️ 与预留的 {@link #SECKILL_APPLICATION_APPROVED} / {@link #SECKILL_APPLICATION_REJECTED}
+     * 是**一对**（形态逐字照 {@link #GOODS_APPLY_SUBMITTED} 与那两条 audit 的关系）：
+     * 本条是「商家 → 管理员」的去向，那两条是「管理员 → 商家」的裁决回执。
+     */
+    public static final String SECKILL_APPLICATION_SUBMITTED = "seckill.application.submitted";
 
     private NotificationEvents() {
     }

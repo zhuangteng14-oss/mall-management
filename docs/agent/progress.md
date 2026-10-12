@@ -760,7 +760,7 @@
 - **（5）搜索进 URL 的实证收益（用户补充要求 2 —— A 相对 B 的**唯一实证增量**）**：`/customer/search?kw=xxx` ① **可刷新还原**（刷新后 `watch` 的 `immediate` 立刻重搜）；② **可直接手输 URL**（首挂载即带 `kw` ⇒ 自动搜，不必先经过首页）；③ 可**深链 / 分享 / 后退**。B（`curPage` 可写 `computed`）下关键词只活在内存 ⇒ 这三条**一条都拿不到**。⚠️ 注意：`GoodsSelect` 的这条**第二条通道**与**商家侧的 ref 通道并存**、互不替换（用户决策 2 / 修正 2）。
 
 - **（6）兼容重定向（`router/index.js:81` / `:83-92`）两个分支 —— 都不能删**：① `?page=cart|user|msg|chat` → 对应子路由，**带走其余 query**（`otherId` / `otherType` / `_t` 是 `ChatRoom` 读的会话参数，丢了就打不开对应聊天；**认不出的 `page` 归位 `/customer`**）〔⚠️ **按语（`fix/legacy-chat-tab`，2026-10-05）**：本条**原记只有 3 键**（`cart|user|msg`）——R1 落码时 `LEGACY_TAB` 误写成 `{cart,user,msg}`、**漏了 `chat`** ⇒ 客户侧「咨询商品 / 好友点聊天」两条流程落回主页并丢会话参数；已加回 `chat`，键集合现为 **4 个**，逐条见 (16)1〕；② `?back=search` → `/customer/search` **且保留 `back`**（`GoodsSelect.vue:158` 仍靠它触发 `loadState()`）。三条理由已写进代码注释（`router/index.js:74-77`）：**R5 不做**（`ProductPage.vue:363` / `:388` / `:400` 仍推旧 URL）、`MerchantPage` **R2 才改**、书签 / 手敲 URL 不受代码控制。
-  - ⚠️ **只认精确路径 `/customer`** ⇒ `/merchant?page=order`（`ProductPage.vue:361`）**不受影响**（那是 R2 的活）。
+  - ⚠️ **只认精确路径 `/customer`** ⇒ `/merchant?page=order`（`ProductPage.vue:385`）**不受影响**（那是 R2 的活）。
   - ⚠️ `/customer/search` **不在** `LEGACY_TAB` 里 —— 它本来就不是旧 tab 名（用户 §三-3 认可）。
 
 - **（7）四条搜索入口（A 下逐一走通）**：① `HomePage` 搜索框 → `HomeTab` 适配器 → `/customer/search?kw=`；② `HomePage` 分类点击 → 同 ①（两者都走 `emit('go-search')`，`HomePage.vue:139` / `:148`）；③ `ProductPage.vue:380` 写 `PENDING_SEARCH_KEYWORD` 后推 `/customer` → 壳 `onMounted` 的 `handlePendingSearch()`（`CustomerPage.vue:108-113`）读出并**换成** `/customer/search?kw=`（关键词从此由 URL 承载）；④ `ProductPage.vue:388` 的「返回」推 `/customer?back=search` → 兼容守卫换 `/customer/search?back=search` ⇒ `loadState()` 恢复结果（`GoodsSelect.vue:157-161`）。
@@ -816,7 +816,7 @@
      - ⚠️ **同一条机制也是 R2 `HomeTab` 参数化（`props: { base }`）的依据** —— 用户据此认可（R2 的登记落 `§5-Y`，**本笔时尚未登记**）。
   3. **净零核对（本笔核心手法）**：`router/index.js` **123 → 123 行**（3 insertions / 3 deletions，**只改 3 行、均为行内追加**）⇒ 该文件**全部既有行号引用零漂移**（`:35` / `:44` / `:81` / `:83-92` / `:94` / `:96`，及 `progress.md:653` / `:714`）。代价 = 3 行变长（最长注释行约 430 字符）；**合法** —— 本仓 ESLint = `plugin:vue/vue3-essential` + `eslint:recommended`、`rules: {}`（`package.json` 的 `eslintConfig`），**无 `max-len`**。
   4. **成因未考**：两处都不是有意取舍，是**落码期的静默丢失**（键写错、`props` 整条漏抄）。**不追责、只登记**；要防的是同类 —— **兼容层的键集合必须由「生产者实测反推」，不能凭方案记忆、也不能由消费者侧代码推**（旧 watcher 能读的键集 ≠ 生产者会推的键集，本例两集合只是近似相交）。
-  5. **遗留**：`ProductPage.vue:361` 推的 `/merchant?page=order` **本笔仍不认**（守卫只认精确 `/customer`）⇒ 那是 **R2** 的活（R2 登记落 `§5-Y`，**本笔时尚未登记**）。
+  5. **遗留**：`ProductPage.vue:385` 推的 `/merchant?page=order` **本笔仍不认**（守卫只认精确 `/customer`）⇒ 那是 **R2** 的活（R2 登记落 `§5-Y`，**本笔时尚未登记**）。
 
 - **（17）不加「更新记录」行**（照 `§5-H (3)` / §5-N / `§5-Q (4)` / `§5-T (7)` 先例）。
 
@@ -1025,7 +1025,7 @@
 
 - **（7）`to.query` 透传（本笔与 R3 的唯一手法差别）**：`redirect: (to) => ({ path, query: to.query })`。R3 丢弃 `/` 的 query 是因为**无生产者**；这里 `kw` 有真实语义（`GoodsSelect.vue:124` 的 watch 读 `route.query.kw`）⇒ 手敲 `#/goodsSelect?kw=手机` 能落到搜索页并生效。
 
-- **（8）死控件第三例（附带发现，从基线就在）**：裸 `/shoppingCart` 渲染的 `ShoppingCart` 取 `showSwitch` 的**默认 `true`**（`ShoppingCart.vue:81`），而该记录**不传 `@toggle`** ⇒ 那个 📋/🛒 开关**点了没反应** —— 与 §5-X (16)2（R1 漏传 `:showSwitch="false"` 凭空造死开关）是**同一类病症的第三例**。收编后该裸挂形态消失 ⇒ 一并终结。
+- **（8）死控件第三例（附带发现，从基线就在）**：裸 `/shoppingCart` 渲染的 `ShoppingCart` 取 `showSwitch` 的**默认 `true`**（`ShoppingCart.vue:86`），而该记录**不传 `@toggle`** ⇒ 那个 📋/🛒 开关**点了没反应** —— 与 §5-X (16)2（R1 漏传 `:showSwitch="false"` 凭空造死开关）是**同一类病症的第三例**。收编后该裸挂形态消失 ⇒ 一并终结。
 
 - **（9）`ChatRoom.vue:348/367` 的 `page: 'chat'` 残留 —— 清法：同行改写（用户裁决 D4）**：`router.replace({ query: { ...rest, page: 'chat' } })` → `router.replace({ query: rest })`。**不删行** ⇒ `ChatRoom.vue` **578 → 578 行（净零）**，`api-contract.md:192-195` 的 5 个 ChatRoom 地址、`progress.md:752` / `:787`、`CustomerPage.vue:65` / `MerchantPage.vue:69` 引的 `ChatRoom.vue:369` **全部零漂移**（这就是不删行的**决定性理由**）。⚠️ **语义零变更**：`rest` 仍照旧剥掉 `otherId` / `otherType` / `_t`；两个 `eslint-disable-next-line no-unused-vars` 仍需要（三个键还是解构未用）。⚠️ **不成环**（推理核过，非手测）：`replace` 后 `route.query.otherId` / `otherType` 都变 `undefined` ⇒ `watch` 的 `if (newOtherId && newOtherType)` 守卫不成立 ⇒ **不再 replace**。**删后 URL** = 当前路径 + **无 query**：`/customer/msg`、`/customer/user/chat`、`/merchant/msg`、`/merchant/user/chat` 四种（四条 ChatRoom 挂载点）。⚠️ **判据**：全仓 `grep "route.query.page"` **零命中** ⇒ 纯残留；`LEGACY_TAB` 只认**精确** `/customer` `/merchant` 而 `replace` 不动路径 ⇒ 两边互不触发（与 §5-X (12)1 / §5-Y 的登记一致）。⚠️ **按语（§5-AB，R6，2026-10-05）**：本条引的 `CustomerPage.vue:65` / `MerchantPage.vue:69` —— 那两条「**别把 ChatRoom 加进 `CACHE_TABS`**」的注释**已随两壳合一搬进 `AppShell.vue:99`**（两文件已删 ⇒ 原地址**悬空**）；本条另引的 `ChatRoom.vue:369` **指向别文件、地址未漂**。
 
@@ -2087,3 +2087,39 @@
 
 🔁 **行号漂移收口（2026-10-11，`_work/block-3-updates.md` §B0 四步）**：工作区快照跑 `scripts/refs-scan.sh`（连跑数轮；**以最后一次编辑之后生成的 `_work/refs-c3-after4.txt` 为准**，`-after` / `-after2` / `-after3` 是中间产物），对 before（`_work/refs-c3-before.txt`，**4120 条 / 311 文件**）比 **token 集合**（不比原始产物）：末次产物 **4234 条 / 316 文件**，差集「只在 before」= **9 条**，逐条**有据可查地对应到本笔的改动** —— **7 条是本笔的「重指」**（`AuditPage.vue` 的 `:190` / `:173-217` / `:82-141` / `:161-163` / `:301` / `:301-329`，以及 `OrderPage.vue` 的 `:192`）、**2 条被改写成「原 N 行」**（`AccountsPage.vue` 原 207 行所指的块注释**已删**、`CatalogPage.vue` 原 114 行所指的 bug **同笔已修**）⇒ **不是丢失**；after 侧**无新增陈旧 token**（末次产物与上一次**逐 token 完全相同**）。逐条重指（**按站点逐条**，清单如下 —— 代码注释侧 7 个文件、文档侧 6 个文件 —— 后者含 3 个 context-pack）：`AuditPage.vue` 的 `toLocal` **190 → 236**（`ChatRoom` / `HistoricalOrders` / `OrderCenter` / `OrderMine` 4 个引用者）、时区块 **173-217 → 219-263**（`NotifyPage.vue` 2 处）、`load()` **301-329 → 441-469**（3 个 pack + 4-order 的 `:301 → :441`）、环境边界 **161-163 → 204-206**（`tech-debt.md` TD-21）、`OrderPage.vue` **192 → 262**（`slot-registry.md` §20 那张表）。两条**改写成「原 N 行」而非重指**：`AccountsPage.vue` 的**原 207 行**（所指的 ⑤ 块注释**已删**，写 `文件:行号` 只会留一个指向不存在位置的**活 token**）、`CatalogPage.vue` 的**原 114/117 行**（所指的 bug **同笔已修**，见下条）。
 ⚠️ **报备（不在任务书里，方向待用户点头）**：`CatalogPage.vue`「通过 / 驳回」两键的 `:disabled` 原绑 **`busyId`**（本页并无此名，定义的是 `busyKey`）⇒ 闩对这两键**完全失效**；补图标那一笔**同行替换时一并订正为 `busyKey`**（现 **157/160 行**）。改动方向 = 让它按本页**既有**的闩机制工作，**不动任何接口 / 字段 / 契约 / 表**；若用户认为该 bug 应留给「文档飘移清理笔」，回退点就是这两行。台账见 `slot-registry.md` §二十一 21-9 第 8 条。
+
+### 7-B5. C3 块 5〈营销块〉（2026-10-11/12；**27 笔落码 + 手验已过 + 收口中**；未提交时点）
+
+> 分 27 笔落在分支 `feat/c3-admin-block5`（基点 `e44d922` = main / PR #89）。本段是该块的**收口条**：范围 / 建表 / 后端 / 前端 / 门禁 / DoD / 文档收口 / 挂账。
+> 提交切分与槽位改判的**逐条**见 `slot-registry.md §二十二`（本节只记叙事面，两者不要互抄行号）。
+
+**范围** ⇒ 六件：**券**（建 / 审 / 领 / 券包 / 一键领取 / 结算核销）· **折扣**（划线原价 + 类目上下限校验）· **国补**（平台建规则 + 提名 + 商家应答）· **秒杀**（平台邀请 / 商家申请**双向制** + 用户端限时秒杀）· **店铺主页 `ShopHome`**（八模块 + 关注关系）· **商品卡收成一个组件**（`ProductCard.vue`，接 3 处）。
+
+**建表（四个 Migration 段，全部追加 `.sql` 末尾，①~⑭ 跨段连续）** ⇒ 段 A `:1222`（① `coupon` ② `coupon_grant` ③ `subsidy_rule` ④ `subsidy_goods` ⑤ `seckill_invitation` ⑥ `seckill_application` ⑦ `seckill_activity` + ⑧ `goods.OriginalPrice` ⑨ `order.CouponId` ⑩ `order.SubsidyAmount` ⑪ `order.PayAmount`，`a1b845d`）· 段 B `:1427`（⑫ `shop_follow`，`2a0c105`）· 段 C `:1455`（⑬ `goods_audit.OriginalPrice`，`2f631ba`）· 段 D `:1480`（⑭ `goods_sku` 加索引 `idx_goods_sku_sku_code`，本笔收口）。
+**实测（可复核）** ⇒ 表 **22 → 30**（VM 库 `information_schema.TABLES`）· 行首 `CREATE TABLE` **24 → 32**（仓内 `.sql`）· `.sql` **1505 行 / LF 1505 / CR 1505 / 裸 CR 0**。落库证据 `docs/agent/evidence/c3-block5/b5-close-db-ddl-verified.txt`（含 8 表命中 / `goods_sku` 6 条索引 / 5 列类型 / `table_n = 30`）。
+⚠️ **`goods_audit.OriginalPrice` 与 `goods.OriginalPrice` 两处都要** —— 上架是**提审制**，`goods` 行由审核通过时**用提审行重建** ⇒ 只加 `goods` 侧会在提审那步丢掉商家填的值（理由逐字见 `.sql:1458-1466`）。
+⚠️ **⑭ 落成普通索引、不是 UNIQUE**：全仓**没有任何一处**声明「`SkuCode` 唯一」是既定不变量 ⇒ 改 UNIQUE 是**新增一条契约**（`.sql:1483-1492`）。
+
+**后端** ⇒ 新包 `marketing/{coupon,subsidy,seckill}`（各 `controller` / `dao` / `service`，券另有 `job/CouponExpiryJob`）+ `marketing/discount`（只一个 `DiscountLimitService`）+ 新包 `shop/{follow,profile}`。
+⇒ **36 个新端点**（逐条见 `api-contract.md` **附录 F**）；全仓 method-level 端点 **84 → 120**。
+⚠️ **`/shop/profile` 是块 5 唯一进 `AUTH_WHITELIST` 的端点**（**12 → 13 条**）—— 也是本笔**唯一一处放宽安全边界**的动作，四处文案同笔改（`WebAuthConfig.java:62/68` · `AuthGateSmokeTest.java:57/179-180` · `MerchantStatsController.java:19`，均已实测到位）。
+⚠️ **`goodsSelectHome` 补一列 `SoldQty`**（LEFT JOIN `order_item` 聚合）⇒ 按 `cache-layer §10`「响应形状变更 ⇒ bump 键版本」把缓存键 **`'all'` → `'all-v2'`**。
+⚠️ **`/order/orderAdd` 扩可选 `CouponId`**（**不增端点**）：非空 ⇒ 走**用券核销**（`coupon_grant.unused → used` 的 **CAS**，防并发双花）；回体**多** `CouponId` / `Discount` 两键（判据是「有没有 `Discount`」）。⚠️ **`order.Price` 保留 = 原价合计**，实付看 `PayAmount`。
+⚠️ **一律不给 `/admin/**` 加角色闸（TD-18）**：管理员 cookie **铸不出 token** ⇒ 加「须 role=3」会让**默认 profile 上管理员自己 401**。四个新管理端 Controller 的类注释逐字写了这一条。
+
+**前端** ⇒ **新建** `views/ShopHome.vue` / `views/SeckillPage.vue` / `views/admin/MarketingPage.vue` / `components/ProductCard.vue` / `components/CouponWalletDialog.vue` / `config/{coupon-format.js,product-link.js}` / `api/{marketing.js,shop.js}`；**改动** `HomePage.vue`（秒杀模块转真 + 领券中心 + **功能入口条整块删**）· `ProductPage.vue` · `GoodsSelect.vue` · `GoodsAdd.vue` / `GoodsUp.vue` · `ShoppingCart.vue` · `UserInfoPage.vue` · `NotifyInbox.vue` · `admin/CatalogPage.vue` · `router/index.js` · `assets/tokens.css` · `api/{order.js,endpoints.js}` · `AbstractSmokeTest` 的 `@Import`。
+⇒ `endpoints.js` 头注计数 **83 → 119**（**同行改**）。
+⚠️ **判据只有一处**：列表侧的 `isSeckill` / `isSoldOut` / `isSubsidy` 与 `dedupeGoods` / `sharedList` **全在 `config/goods-flags.js`**（四处消费：主页 / 搜索页 / 详情页猜你喜欢 / `ShopHome`）。
+⚠️ **「已售完」的显隐是两条口径**：共享面**滤掉**（用户 ②），店铺页三个 tab 与 `/seckill` **照显**（灰态 + 红斜贴图）。
+
+**A3 门禁（P3 两次同笔 +1，**四处同改**、净零行数）** ⇒ 段 A：`KNOWN_TABLES` **11 → 18**、期望表数 **22 → 29** · 段 B：**18 → 19**、**29 → 30**（段 C / D 不新增表）。
+⚠️ `concurrency` job 是 **`continue-on-error`** ⇒ **只能读 artifact 的 `gates.count`，不能读 job 颜色**（同 §7-VIS 的教训）。
+
+🧪 **DoD（2026-10-12 实测，日志已落盘）** ⇒ `./mvnw -B **clean** test`：`Tests run: 284, Failures: 0, Errors: 0, Skipped: 26` + `BUILD SUCCESS`（`_work/b5-close-mvn-test.log:3521` / `:3524`；⚠️ block 4 是 280，+4 来自本块新增的 `CouponClaimBatchSmokeTest`）。`npm run build`：`DONE Build complete.`（exit 0；`Hash 974aafa6a6cf503c`、`Time 30785ms`、`Build at 2026-10-12T14:45:17.366Z`，日志 `_work/b5-close-npm-build-final.log`）。⚠️ 两个数都与**重指之后**的最终树一致（`mvn -B clean test` 亦在最终树复跑：`Tests run: 284, Failures: 0, Errors: 0, Skipped: 26` —— 与重指前逐字相同，31 处重指全是**注释内行号**、不改语义）。
+⚠️ **`clean` 不能省**：maven 增量编译会**复用陈旧 test class**，把「主代码签名已破坏」整段遮住（§7-VIS 实测踩过）—— 判据只能靠 `clean test`。
+⚠️ **手验由用户执行并已通过**（2026-10-12）。**手验挂 a3 profile ⇒ 闸关**（`app.auth.enabled=false`）⇒ **手验绿 ≠ 默认 profile 绿**；本块新增了一条**公开面**端点，它在默认 profile 下的行为（匿名 200）**只有默认 profile 能验**。
+
+**文档（本笔一次性收口）** ⇒ **活文档**：`db-schema.md` 尾追加 **§14** + 头部两处**同行订正**（表数量行 / 行尾 CRLF 计数行）· `db-migration.md` 登记表补 **#16–#29** + 注意 **18** · `api-contract.md` 尾追加 **附录 F**（F.0–F.9）。**账本**：本文件 §7-B5 · `slot-registry.md §二十二`。**挂账**：`tech-debt.md` **TD-38 – TD-45**。
+⚠️ **三个「端点总数」口径分开写，不混用**（`api-contract.md` F.0）：后端 method-level **120** · 本文件 §2 的 5 域 **36**（**块 5 一字未变**）· 前端 `endpoints.js` **119**。
+
+⚠️ **挂账（本段不修，逐条见 `tech-debt.md`）** ⇒ 【块 5 内】TD-38 秒杀**不真扣减**（`seckill_activity.SoldStock` 是陈列值 → 块 7）· TD-39 国补**商家主动申请通道未落**（只落了平台提名 → 商家应答，与秒杀的**双向制不对称**）· TD-40 `doc-anchor-check.sh` 两枚死锚点（226 / 267）· TD-41 `scripts/refs-*.txt` 产物入库（**已 30 份 / 4.9 MiB**，本笔再入库 5 份）· TD-42 `refs-scan` 的**兄弟 token 未扫全**（已知盲区）· TD-43 共享面**国补绿标待复验**（等有在售国补商品）· TD-44 五项**已落不挂账**（记账防误判）· TD-45 跨块（块 6 评论 / 块 7 可观测 / 块 8 部署 / 四批补充 / 数据重填）。⚠️ **`goods` Id 120 重复行**仍不清（沿用 TD-37 ② 的用户未裁状态）。

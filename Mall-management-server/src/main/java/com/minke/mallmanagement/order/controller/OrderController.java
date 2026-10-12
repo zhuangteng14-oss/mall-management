@@ -12,6 +12,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.Map;
 
 /**
@@ -109,6 +110,13 @@ public class OrderController {
             // ⚠️ `defaultValue = ""` 与前端 `build()` 把 undefined 转成空串（order.js:42）**同效** ——
             //    两条路都落成「存在但为空」，服务端一律按 `isBlank` 判空 ⇒ 走回落口径。
             @RequestParam(value = "Items", required = false, defaultValue = "") String Items,
+            // C3 块 5 commit 5：可选的**结算用券**（券的业务串 `coupon.CouponId`）。
+            // ⚠️ 加在末尾（同 `Quantity` / `Items` 的先例）：既有 11 个形参一名不动、一位不挪。
+            // ⚠️ `required = false` 是硬要求：老前端 / 购物车不选券时**不发**它 ⇒ 走「没用券」，
+            //    加它之前的行为**逐字节不变**。⚠️ 券的**归属**不在这里判：入参里没有「这是谁的券」，
+            //    判据是 `CouponService.redeem` 拿**会话翻出来的登录名**去 `coupon_grant` 查那一行 ——
+            //    别人拿我的券号来，查不到就是「不在你的券包里」，不是先查到再比一次。
+            @RequestParam(value = "CouponId", required = false, defaultValue = "") String CouponId,
             HttpServletRequest request
     ) {
         // ⚠️ 第一行：订单只能下在**自己**名下（管理员豁免）—— 必须在取锁之前（否则白取一把锁）。
@@ -116,9 +124,28 @@ public class OrderController {
         if (!IdentityGuard.requireSelfOrAdmin(request, CustomerId)) {
             return IdentityGuard.forbidden();
         }
-        return ResponseEntity.ok(Result.of(orderService.orderAdd(
+        Map<String, Object> result = orderService.orderAdd(
                 CustomerId, MerchantId, OrderId, Price, ProductInformation, Images,
-                PayIf, DeliveryIf, ReceiveIf, Quantity, Items)));
+                PayIf, DeliveryIf, ReceiveIf, Quantity, Items, CouponId);
+        // C3 块 5 commit 5：**券真的核销掉了**才留痕（`Discount` 只在核销成功且大于 0 时才被
+        // `orderAdd` 放进回体 ⇒ 用它当判据，不重算一遍）。
+        // ⚠️ 这是**下单人自己的动作**落在 `admin_audit` 里（同收货那条：actor = 当前调用者）——
+        //    本仓的留痕表就这一张，用户侧动作也没有第二处可写。
+        // ⚠️ TargetId 是**订单业务串**（不是券号）：`coupon_grant.OrderId` 反查得到券，
+        //    而券号是一串看不出上下文的业务码 —— 与 `AuditActions` 那条挂钩点注释同款说法。
+        Object discount = result.get("Discount");
+        if (Boolean.TRUE.equals(result.get("success")) && discount != null && CouponId != null && !CouponId.isBlank()) {
+            Map<String, Object> before = new LinkedHashMap<>();
+            before.put("Status", "unused");
+            Map<String, Object> after = new LinkedHashMap<>();
+            after.put("Status", "used");
+            after.put("CouponId", CouponId);
+            after.put("Discount", discount);
+            after.put("OrderId", OrderId);
+            auditService.record(AuthSession.identify(request), AuditActions.COUPON_REDEEM,
+                    "coupon", OrderId, before, after);
+        }
+        return ResponseEntity.ok(Result.of(result));
     }
 
     //购物车搜索订单

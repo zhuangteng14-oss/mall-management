@@ -22,14 +22,14 @@
     <!-- ── 二级导航（稿 `:744-753`）──
          ⚠️ 壳里**没有** `.subnav`：`AppShell.vue:298-299` 自注「稿的 `.subnav a` 属**二级导航**、
          不属顶栏」⇒ C 笔既然把它从顶栏里摘出去了，就没人落过它 ⇒ 它是**页级**的，本笔落在首页顶部。
-         ⚠️ 6 项在本仓**都没有落点**（无路由、无对应页面）⇒ 一律 `disabled` + `title`
-         （`progress.md:1652` 判据①）。开放它们属**功能**笔，不在 D 笔边界内。
+         ⚠️ 6 项**当初都没有路由** ⇒ 原一律 `disabled` + `title`（`progress.md:1652` 判据①）。
+         ⚠️ 已接通 **3 项**：**「领券中心」**（C3 块 5 · commit 1，2026-10-11，用户批《b5-placeholder-landing.md》§一 #2「接通（锚到券包区）」）⇒ 摘 `disabled`、锚到本页 `.tickets`；**「今日秒杀」**（本块 commit 5，2026-10-12）⇒ 摘 `disabled`、改 `<router-link to="/seckill">`（秒杀页 commit 4 已落地，**不再**是「预留位」；它**不走** `emit('go-search', …)` 那条路 —— 秒杀有自己的页）；**「全部商品分类」**（2026-10-12 用户裁定 #1）⇒ 摘 `disabled`、走 `searchByType('')` 落 `/<role>/search`。**另 3 项仍是 `disabled`**（品牌专区 / 会员中心 / 客户服务，归属仍为 `<待定>`）。开放剩余项属**功能**笔，不在 D 笔边界内。
          登记见 `docs/agent/slot-registry.md`「commit 3 · 稿外死控件」。 -->
     <nav class="subnav">
       <div class="inner">
-        <button type="button" class="now" disabled title="预留 · 全部商品分类（无落点：分类检索现走搜索页 GoodsSelect 的左分类树）">全部商品分类</button>
-        <button type="button" class="hot" disabled title="预留 · 今日秒杀（无落点：本页秒杀位是预留位）">今日秒杀</button>
-        <button type="button" class="hot" disabled title="预留 · 领券中心（无落点：本页券包位是预留位）">领券中心</button>
+        <button type="button" class="now" @click="searchByType('')" title="全部商品分类 —— 接通搜索页（2026-10-12 用户裁定 #1；不带关键词进 GoodsSelect ⇒ 左分类树在场，就是「按类目逛」的落点）">全部商品分类</button>
+        <router-link class="hot" to="/seckill" title="今日秒杀 —— 落到秒杀页（C3 块 5 · commit 5 接线；此前是「预留位」）">今日秒杀</router-link>
+        <button type="button" class="hot" @click="scrollToTickets" title="领券中心 —— 锚到本页领券中心（C3 块 5 commit 1 接线；2026-10-11 信息架构重排后本页**只留领券中心**，券包已搬去用户中心弹窗）">领券中心</button>
         <button type="button" disabled title="预留 · 品牌专区（无落点：无品牌数据模型）">品牌专区</button>
         <button type="button" disabled title="预留 · 会员中心（无落点：会员体系未落）">会员中心</button>
         <button type="button" disabled title="预留 · 客户服务（无落点：在线客服是预留位）">客户服务</button>
@@ -45,10 +45,10 @@
           <ul v-else>
             <li v-for="item in goodTypeList" :key="item.Id" @click="searchByType(item.GoodType)">{{ item.GoodType }}</li>
           </ul>
-          <!-- ⚠️ 稿 `:769` 的「查看全部 →」在稿里就是**死控件**（`cursor:pointer`、无处理函数、
-               也没挂 `data-slot`）⇒ 照判据①落 `disabled` + `title`。**不**自作主张接
-               `emit('go-search','')` —— 「无关键词进搜索页」是稿没画的行为，属功能笔。 -->
-          <button type="button" class="cats-more" disabled title="预留 · 查看全部分类（无落点：分类检索现走搜索页 GoodsSelect 的左分类树）">查看全部 →</button>
+          <!-- ⚠️ 稿 `:769` 的「查看全部 →」在稿里是**死控件**（`cursor:pointer`、无处理函数、
+               也没挂 `data-slot`）⇒ 原落 `disabled` + `title`。**2026-10-12 用户裁定 #5 起接通**
+               —— 走 `searchByType('')`（与分类项同一通路 ⇒ 壳层按角色落 `/<role>/search`）。 -->
+          <button type="button" class="cats-more" @click="searchByType('')" title="查看全部分类 —— 接通搜索页（2026-10-12 用户裁定 #5；不带关键词进 GoodsSelect）">查看全部 →</button>
         </aside>
 
         <div class="hero-main">
@@ -88,91 +88,169 @@
         </div>
       </section>
 
-      <!-- ── 功能入口（预留位，稿 `:787-804`）──
-           2026-10-07 裁决「**一律落**」：UI 照落。内层四项一律 `disabled` + `title`（角标只挂
-           区块级 ⇒ 不在每项重复 `data-slot`）。四个 SVG 逐字取稿。
-           ⚠️ 稿的副标题带三个 **mock 数字**（待收货 2 / 3 张可用 / 最近 18 件）—— 照落会在真产品里
-              显示假数字 ⇒ 只落**描述**、不落数字（与 ChatRoom 不写死「今天」同一条理由）；
-              「在线客服 9:00 – 21:00」是服务时段陈述、不是 mock ⇒ 逐字落。 -->
-      <section class="quick" data-slot="预留 · 功能入口" title="预留 · 功能入口（老稿 主页改造.html:787）· 归属待定 C3〈待定〉">
-        <button type="button" class="qi" disabled title="预留 · 我的订单（待 C3〈订单〉）">
-          <span class="ic"><svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="2" width="14" height="16" rx="2"/><path d="M7 7h6M7 11h6M7 15h3" stroke-linecap="round"/></svg></span>
-          <span class="tx"><b>我的订单</b><span>待付款 · 待收货</span></span>
-        </button>
-        <button type="button" class="qi" disabled title="预留 · 优惠券（待 C3〈促销〉）">
-          <span class="ic"><svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M2 6a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2z"/><path d="M2 7l8 5 8-5"/></svg></span>
-          <span class="tx"><b>优惠券</b><span>我的券包</span></span>
-        </button>
-        <button type="button" class="qi" disabled title="预留 · 浏览记录（待 C3〈个人中心〉）">
-          <span class="ic"><svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="10" cy="10" r="7.5"/><path d="M10 6v4.5l3 1.8" stroke-linecap="round"/></svg></span>
-          <span class="tx"><b>浏览记录</b><span>最近看过的商品</span></span>
-        </button>
-        <button type="button" class="qi" disabled title="预留 · 在线客服（待 C3〈消息〉）">
-          <span class="ic"><svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M17 12.5a1.5 1.5 0 0 1-1.5 1.5h-11A1.5 1.5 0 0 1 3 12.5v-6A1.5 1.5 0 0 1 4.5 5h11A1.5 1.5 0 0 1 17 6.5z"/><path d="M6.5 5v10" stroke-linecap="round"/></svg></span>
-          <span class="tx"><b>在线客服</b><span>9:00 – 21:00</span></span>
-        </button>
-      </section>
+      <!-- ── 功能入口条：**已删**（用户 2026-10-12 指令）──
+           删前它是「我的订单 / 浏览记录 / 在线客服」三格 `disabled` 死控件（稿 `主页改造.html:787-804`，
+           2026-10-07 `88093e3` 落的四格，第四格「优惠券」2026-10-11 已删）—— 剩下的三格落在
+           `repeat(4, 1fr)` 里，**右边空一整格**（实测 `tailGap: 346px`）⇒ 看着像没做完的东西。
+           ⚠️ **不要照稿把它加回来**：稿上有不等于本产品要，用户已明确不要。
+           证据 `docs/agent/evidence/c3-block5/{before,after}-home-quickbar.png`。
+           ⚠️ `scrollToTickets` **保留**（`:32` 二级导航「领券中心」仍在用）—— 删的是这一块，不是那条跳转。 -->
 
-      <!-- ── 限时秒杀（预留位，稿 `:807-814`）──
-           ⚠️ 倒计时**不写死**：稿 `:966` 自己就注明了「真接进项目时应该用接口给的活动结束时间，
-              **不要在这里写死**」⇒ 三格落成 `--`，说明写进本区块的 `title`。
-           ⚠️ `.flash-g` 是稿的 JS 挂载点（`:813`，稿 markup 里就是**空 div**），本仓无活动接口
-              ⇒ 保持空容器 + 一行占位说明（空容器高度为 0，会「落了却看不见」）。 -->
-      <section class="flash" data-slot="预留 · 秒杀位" title="预留 · 秒杀位（老稿 主页改造.html:807）· 无活动接口，倒计时不写死（稿 :966 自注）· 归属待定 C3〈待定〉">
+      <!-- ── 限时秒杀（**C3 块 5 · commit 4 转真**，2026-10-12；原为稿 `:807-814` 的预留位）──
+           ⚠️ **只在拉到活动时才画**：`/marketing/seckill/live` **不在白名单**，匿名发它必 401、`handleUnauthorized` 会把公开页整体踢去登录页 ⇒ 未登录整块不出现，`data-slot="预留 · 秒杀位"` 随之撤掉（**收口时 `slot-registry.md` 那条要改判**）。倒计时读**后端的 `EndAt`**（`DATE_FORMAT` 出的是 **UTC** 文本 ⇒ 解析要补 `Z`；稿 `:966` 自注「不要写死」即此）—— `Stage` 由后端按**库时钟**现算：`live` 显秒杀价、`upcoming` 显「活动未开启」。 -->
+      <section v-if="flashRows.length" class="flash" title="C3 块 5〈营销块〉commit 4：读 /marketing/seckill/live（封装 src/api/marketing.js 的 seckillLive）· 后端已挡「已结束 / 已停用 / 商品下架」· Stage 由后端按库时钟现算 ⇒ 原 data-slot「预留 · 秒杀位」退场">
         <div class="flash-h">
           <h2>限时秒杀</h2>
-          <span class="cd">距结束 <b>--</b>:<b>--</b>:<b>--</b></span>
-          <button type="button" class="more" disabled title="预留 · 全部秒杀（无落点：秒杀位是预留位）">全部秒杀 →</button>
+          <span class="cd">{{ flashCdLabel }} <b>{{ flashCd.h }}</b>:<b>{{ flashCd.m }}</b>:<b>{{ flashCd.s }}</b></span>
+          <router-link class="more" to="/seckill">全部秒杀 →</router-link>
         </div>
         <div class="flash-g">
-          <p class="empty-tip">秒杀位预留 · 待接入活动接口后填充</p>
+          <router-link v-for="r in flashRows" :key="r.ActivityId" class="flash-c" :to="flashLink(r)" @click="onCardNav">
+            <img v-if="r.GoodImg" :src="r.GoodImg" :alt="r.Name || r.GoodName" />
+            <span class="fc-nm">{{ r.Name || r.GoodName }}</span><span v-if="r.Stage === 'live'" class="fc-pr">¥{{ flashMoney(r.SeckillPrice) }}</span><span v-else class="fc-soon">活动未开启</span>
+          </router-link>
         </div>
       </section>
 
-      <!-- ── 券包（预留位，稿 `:817`）──
-           稿的 markup 里这条**本来就是空 section**，3 张券由 JS 塞（`TICKETS`）⇒ 券是 mock、
-           `.ticket*` 规则本仓无数据源、不搬。空容器照落 + 一行占位说明。 -->
-      <section class="tickets" data-slot="预留 · 券包位" title="预留 · 券包位（老稿 主页改造.html:817）· 无券数据源 · 归属待定 C3〈待定〉">
-        <p class="empty-tip">券包位预留 · 待接入优惠券接口后填充</p>
+      <!-- ── 秒杀**整块空态**（2026-10-12 补，C3 块 5 · commit 5 续笔）──────────────────
+           ⚠️ 与上面那块是**同一处的两个分支**：上面那条只画「有活动」时，`v-else-if` 这条画
+              「**登录了、也问过后端了、就是一场都没有**」。改前那种情况整块消失 ——
+              用户点名的那句「活动未开启」只在**逐行**（`.fc-soon`）有，**整块**没有。
+           ⚠️ 判据是 `flashLoaded`（不是「`flashRows` 为空」）：未登录**不发**请求 ⇒ 那时这里
+              也必须是**不出现**，否则等于对一个公开访客说「活动未开启」（我们并不知道）。
+           ⚠️ 不摆假数据、不画倒计时（没有 `EndAt` 可算）—— 只有一句实话 + 那个真落点。 -->
+      <section v-else-if="flashLoaded" class="flash" title="C3 块 5〈营销块〉：登录后读到 0 场进行中 / 即将开始的秒杀（后端已挡「已结束 / 已停用 / 商品下架」）">
+        <div class="flash-h">
+          <h2>限时秒杀</h2>
+          <router-link class="more" to="/seckill">全部秒杀 →</router-link>
+        </div>
+        <p class="flash-none">活动未开启，敬请期待 —— 有新场次会在这里出现。</p>
+      </section>
+
+      <!-- ── 领券中心（**块 5**；2026-10-11「券的信息架构重排」后本页**只剩这一栏**）──
+           原为「预留 · 券包位」（稿 `:817` 的**空** section，3 张券由稿的 JS 塞 mock `TICKETS`）。
+           commit 1 时这里是**两栏**（左「领券中心」+ 右「我的券包」）—— 用户 2026-10-11 重排后
+           **右栏整块删掉**：券包是「我的东西」，归**用户中心**（`views/UserInfoPage.vue` 的「优惠券」格
+           → `components/CouponWalletDialog.vue`），主页只回答「**现在有什么新券可以领**」。
+           ⇒ 左栏收窄成「**本周新发布的券**」（`thisWeek=1`，后端 `CouponDao.THIS_WEEK`）。
+
+           ⚠️ **「本周新」不是另一条查询**：它是**同一个 `SELECT` 加一个 `AND`**（用户裁定「甲」）
+              ⇒ 主页这批天然是用户中心「可领」tab 的**子集**，不会有两个真相。
+              见 `src/api/marketing.js` 里 `coupons()` 的第三参。
+           ⚠️ **排序不在这里**：「最早更新最左」由后端 `CouponDao.selectClaimable` 的 `updated_at ASC`
+              定好 ⇒ 本页**按数组原序渲染**，别自己再排一遍。
+           ⚠️ `Claimed` / `SoldOut` / `IsNew` 的形态可能是 `true` 也可能是 `1`（Connector/J `tinyInt1isBit`）
+              ⇒ 判据走 `truthy()`（已搬去 `config/coupon-format.js`），别写 `=== true`。
+           ⚠️ **核销不在这里**：券 `unused → used` 发生在结算（`orderAdd` 带 `couponId`，块 5 commit 5）
+              ⇒ 券包的四个状态在**用户中心那个弹窗**里看，本页不碰。 -->
+      <section
+        class="tickets"
+        ref="ticketsEl"
+        title="C3 块 5〈营销块〉（2026-10-11 信息架构重排）：本页**只**是「本周新券」的领券中心 —— /marketing/coupons?thisWeek=1、领券 /marketing/coupon/claim、一键领取本周全部 /marketing/coupon/claimBatch（封装 src/api/marketing.js）。我的券包已搬去**用户中心 · 优惠券**（弹窗，四态 tab）"
+      >
+        <!-- 领券中心（本周新券）—— 来自 `/marketing/coupons?thisWeek=1`，含「我已领 / 已领完 / 近 3 天新建」三个布尔。 -->
+        <div class="tk-col">
+          <div class="tk-h">
+            <h3>领券中心</h3>
+            <div class="tk-h-r">
+              <!-- 区块级一行小字：**本周还剩几天**（用户 2026-10-11 裁定 ⑤：**整日粒度**、**区块级**，
+                   不是每张卡的有效期 —— 那是弹窗里的「X 天后过期」）。
+                   ⚠️ 数字来自**后端** `daysLeft`（`CouponDao.selectWeekWindow`，由**库时钟**算）——
+                      前端**不碰浏览器钟**：`new Date()` 在这里没有判据地位（同 TD-32）。
+                   ⚠️ 它是**周窗口**、与「还有几张可领」无关 ⇒ 0 张时也照显示（那就是「本周快过完了」）。 -->
+              <span v-if="couponAccount && daysLeft !== null" class="tk-left">本周还剩 {{ daysLeft }} 天</span>
+              <span class="tk-n">{{ couponAccount ? claimable.length + ' 张' : '未登录' }}</span>
+              <!-- 「一键领取本周全部」（用户 2026-10-11 裁定 ②：**真做**，取代原来那颗 disabled 占位）。
+                   ⚠️ **不传券 ID 列表** —— 领哪些由**服务端**定（「本周」是服务端语义，`CouponDao.THIS_WEEK`）
+                      ⇒ 前端手里那份列表可能已经旧了，也不该把「本周」的定义抄到前端来。
+                   ⚠️ **不弹确认**（同日裁决）—— 券「领了就有」、没有损失，直接领 + 汇总提示。
+                   ⚠️ 只在**有得领**时可用（一张都没得领就没什么好「一键」的）⇒ 见 `tkClaimable`。
+                   ⚠️ 汇总文案走 `.tk-msg`（**不是** `alert`）：顶层 `success:true` ≠ 全成功，
+                      要按 `claimed`/`failed` 说人话（见 `api/marketing.js` 里 `claimBatch()` 的 ⚠️）。 -->
+              <button
+                v-if="couponAccount"
+                type="button"
+                class="tk-all"
+                :disabled="batchBusy || tkClaimable === 0"
+                :title="tkClaimable === 0 ? '本周没有可领的新券' : '一键领取本周新发布、且我还没领过的券（' + tkClaimable + ' 张）'"
+                @click="doClaimBatch"
+              >{{ batchBusy ? '领取中…' : '一键领取本周全部' }}</button>
+              <!-- 「》」查看更多（用户 2026-10-11 手验 ①：**去掉细滚动条**，改成「越位渐隐 + 右侧 ›」）。
+                   只在**真被裁掉**时出现（`> TK_VISIBLE` 张）—— 5 张以内它没有存在的理由。
+                   点一下 = 展开全部（`.tk-strip-on` 把 `nowrap` 放开成 `wrap`），再点收起。
+                   ⚠️ 与左边「一键领取」**并排**（用户 ②：两个都要在右侧按钮区），故同放在 `.tk-h-r` 里。 -->
+              <button
+                v-if="couponAccount && claimable.length > TK_VISIBLE"
+                type="button"
+                class="tk-more"
+                :class="{ 'tk-more-on': tkExpanded }"
+                :title="tkExpanded ? '收起（只留前 ' + TK_VISIBLE + ' 张）' : '展开看全部 ' + claimable.length + ' 张'"
+                @click="tkExpanded = !tkExpanded"
+              >{{ tkExpanded ? '《' : '》' }}</button>
+            </div>
+          </div>
+          <p v-if="!couponAccount" class="empty-tip">登录后可领取优惠券</p>
+          <p v-else-if="claimLoading" class="empty-tip">加载中…</p>
+          <!-- 空态（用户裁定 ③ 的文案）：说清楚「本页只放本周新的」，并**指一条去路** ——
+               用户中心的「优惠券 → 可领」tab（那是全量可领，含旧券）。空态最怕只报「没有」。 -->
+          <p v-else-if="claimable.length === 0" class="empty-tip">本周暂无新券 —— 去用户中心的「优惠券 · 可领」看全部可领券</p>
+          <!-- ③ 横向券条：从左到右铺开（顺序由后端 `CouponDao.selectClaimable` 按 `updated_at ASC` 定好
+               ⇒ **本页不排序**，见 `src/api/marketing.js` 里 `coupons()` 的 ⚠️）。 -->
+          <ul
+            v-else
+            class="tk-strip"
+            :class="{ 'tk-strip-cut': claimable.length > TK_VISIBLE && !tkExpanded, 'tk-strip-on': tkExpanded }"
+          >
+            <li v-for="c in claimable" :key="c.CouponId" class="tk">
+              <!-- ⚠️ 面额与 NEW 角标**包一层**（`.tk-top`）：券卡是竖排 `column` 的
+                   （`.tk-strip > .tk`），不包的话角标会被顶到下一行、把卡撑高。 -->
+              <span class="tk-top">
+                <span class="tk-amt">{{ couponFace(c) }}</span>
+                <!-- NEW 角标 = **近 3 天新建**（用户裁定 ⑥）。
+                     ⚠️ 判据是**滚动 72 小时**（后端 `CouponDao.IS_NEW`）、**不是**「本周」——
+                        两者会分叉（周一建的券到周五仍是「本周」但已不是「新」），别把它挂到 `thisWeek` 上。 -->
+                <i v-if="truthy(c.IsNew)" class="tk-new">NEW</i>
+              </span>
+              <!-- ⚠️ 券名（A7 后半）——空串兜底在 `couponName()` 里，别在这里写 `{{ c.Name }}`：
+                   库里 `Name` NOT NULL 但**空串合法**，直出会渲染成一条空白行。 -->
+              <span class="tk-name">{{ couponName(c) }}</span>
+              <!-- ⚠️ 类型 · 门槛合成一行走 `couponLine()`（**不是**裸 `couponCond`）：`couponCond`
+                   对 `percent` / `none` 两档**已经含了类型词**（「折扣券」/「无门槛」），再拼一次类型标签
+                   就是「无门槛 · 无门槛」—— 那张卡看着像坏了。合成规则在那个函数里。 -->
+              <span class="tk-cond">{{ couponLine(c) }}</span>
+              <button
+                type="button"
+                class="tk-get"
+                :disabled="truthy(c.Claimed) || truthy(c.SoldOut) || claiming === c.CouponId"
+                @click="doClaim(c)"
+              >{{ truthy(c.Claimed) ? '已领取' : truthy(c.SoldOut) ? '已领完' : claiming === c.CouponId ? '领取中…' : '领取' }}</button>
+            </li>
+          </ul>
+        </div>
+
+        <p v-if="tkMsg" class="tk-msg">{{ tkMsg }}</p>
       </section>
 
       <!-- ── 推荐区（稿 `:820-826`）──
-           真实数据 `goodsList`（`goodsSelectHome`）。卡结构照稿（`.card > .card-img + .card-tx >
-           .card-name + .card-foot > .card-price + .card-buy`）。
+           真实数据 `goodsList`（`goodsSelectHome`）。
+           ⚠️ 卡片在 **C3 块 5 · B 组续笔（2026-10-12）收成公共组件** `components/ProductCard.vue`
+              （主页 / 店铺主页 / 商品页**三处共用**，`ShopHome` / `ProductPage` 也是这一枚）。
+              外观与字段的逐条对照、以及**为什么三处能收成一件**（7 个 query 参数 vs 4 个、
+              导航副作用、`<a>` 内不嵌 `<button>`）都写在那个组件的文件头。
+           ⚠️ **本页原来那份卡的三件事已随组件接管**：4/3 有框白底、三段价（`¥` + 整数 + `.` 小数）、
+              `disabled` 加购钮。本页**只留**「导航前清搜索缓存」这一条 ≠ 另两处的行为 ⇒ 走 `beforeNav`。
            ⚠️ 稿的 `.card-tags`（标签）与 `.card-price .was`（划线价）本仓**无对应字段**
-              ⇒ 不落结构、也不搬这两条规则（搬进来就是悬空类名）。
-           ⚠️ `.card-meta` 稿写的是「店铺 · 已售」（`CARD` 的 `g.shop · g.sold`），本仓无店铺 / 销量
-              字段 ⇒ 改落**真实存在**的 `goods.GoodType`（分类），不编数据。 -->
+              ⇒ 组件里也不落（搬进来就是悬空类名）。
+           ⚠️ **元信息行改过**：原 `.card-meta` 画 `goods.GoodType`（分类），现让给「店名 + 已售 N 件」
+              —— 用户本笔点名要的。分类的落点仍在（主页左侧分类导航 / 搜索页分类树 / `ShopHome` 筛选 chip）。⚠️ **2026-10-12〈Bug 2/3〉**：本格数据在**装载时**就滤掉了 `IsSoldOut`（`:333`，共享页不显已售完）；卡上另加**类别标签**（秒杀红 / 国补绿），而「已售完灰态」在本页**看不到**（已被滤掉）。 -->
       <section class="rec">
         <div class="rec-h">
           <h2>为你推荐</h2>
-          <button type="button" class="more" disabled title="预留 · 查看全部商品（无落点：商品检索现走搜索页 GoodsSelect）">查看全部</button>
+          <button type="button" class="more" @click="searchByType('')" title="查看全部商品 —— 接通搜索页（2026-10-12 用户裁定 #6；不带关键词进 GoodsSelect）">查看全部</button>
         </div>
         <p v-if="goodsList.length === 0" class="empty-tip">暂无商品</p>
         <div v-else class="grid">
-          <article v-for="goods in goodsList" :key="goods.Id" class="card" @click="toGoodsDetail(goods)">
-            <div class="card-img">
-              <img :src="goods.GoodImg" alt="商品图" />
-            </div>
-            <div class="card-tx">
-              <div class="card-name">{{ goods.GoodName }}</div>
-              <div class="card-foot">
-                <div class="card-price">
-                  <span class="sym">¥</span>
-                  <span class="int">{{ getPriceInt(goods.Price) }}</span>
-                  <span class="dec">.{{ getPriceDec(goods.Price) }}</span>
-                </div>
-                <!-- ⚠️ 稿的 `.card-buy` 是加购按钮（稿 `:917`，带 `CART_SVG`）。本仓本页的卡片**只进详情**
-                     （`toGoodsDetail`），加购要等「完整购物车」笔 ⇒ 落 `disabled` + `title`。
-                     ⚠️ 不挂 `data-slot`：稿没给这一枚 `data-slot`，挂了会让「Vue 里 data-slot 条数」
-                     与「稿里 4 条」对不上；它登记在 slot-registry.md「稿外死控件」一节。 -->
-                <button type="button" class="card-buy" disabled title="预留 · 加入购物车（待 C3〈购物车〉；本页卡片现只进详情页）">
-                  <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 5h10l-1 8.4a1 1 0 0 1-1 .9H5a1 1 0 0 1-1-.9z" stroke-linejoin="round"/><path d="M6 5V3.9a2 2 0 1 1 4 0V5" stroke-linecap="round"/></svg>
-                </button>
-              </div>
-              <div class="card-meta">{{ goods.GoodType }}</div>
-            </div>
-          </article>
+          <ProductCard v-for="goods in goodsList" :key="goods.Id" :goods="goods" :before-nav="onCardNav" />
         </div>
       </section>
 
@@ -216,10 +294,9 @@
 </template>
 
 <script setup>
-import { ref, onMounted, onUnmounted } from 'vue'
-import { useRouter } from 'vue-router'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { http, handleApiError } from '../api/http'
-import { endpoints } from '../api/endpoints'
+import { endpoints } from '../api/endpoints'; import { getUsername } from '../api/auth'; import { coupons, claim, claimBatch, seckillLive } from '../api/marketing'; import { truthy, couponFace, couponName, couponLine } from '../config/coupon-format'; import ProductCard from '../components/ProductCard.vue'; import { sharedList } from '../config/goods-flags'   // ⚠️ 本条 import **同行**（C3 块 5 · commit 1，2026-10-11；同日「券的信息架构重排」又加两处；〈Bug 2/3〉落码 2026-10-12 再加 `sharedList` 一处）—— 本文件 `:119` / `:242` / `:262` 等多处被按行号引，**能省一行就省一行**（同 `ProductPage.vue:426` 那条的做法）。⚠️ `myCoupons` 已随右栏券包一并**删掉**，格式化三件套改从 `config/coupon-format.js` 取（主页与券包弹窗**共享**，见那个文件头）。⚠️ **A 组 · A7 后半**（2026-10-12）：券卡原先只有「金额 / 门槛 / NEW」三样，用户点名**缺券名 + 券类型** ⇒ 追加 `couponName`（券名）与 `couponLine`（类型·门槛合成一行，内部拿 `couponCond` 拼），仍从同一份 `coupon-format.js` 取。⚠️ `couponCond` 随之**从本页 import 里去掉**（券包弹窗仍直接用）；本页若还要裸用它，`eslint no-unused-vars` 会当场红。⚠️ **2026-10-12〈Bug 2/3〉又加一处** `sharedList`（`config/goods-flags.js` = 商品列表侧共用判据的唯一定义处）—— 本页只用它算「为你推荐」那一格，见 `:333` 那条按语
 
 // ── 未登录可逛公开面（2026-10-06 用户改判 2，登记见 progress.md §5-AG (13)）────────────
 // 本页原有三条「未登录 ⇒ 弹登录提示」拦截（goSearch / searchByType / toGoodsDetail）与一条
@@ -231,7 +308,9 @@ import { endpoints } from '../api/endpoints'
 // （config/nav.js 的 ANON_RIGHT）；登录后回原目标由路由守卫 + LoginPage.landingAfterLogin 承担。
 // ⚠️ 本页因此**不再有匿名分支** ⇒ `isLoggedIn` 的 import 与 `isLogin` computed 一并删除（原 `:119` 保留为按语，供 `main.js:21` 的指向不悬空）。
 
-const router = useRouter()
+// ⚠️ `const router = useRouter()` 已删（C3 块 5 · B 组续笔，2026-10-12）：本页**最后一处**
+//    `router.push` 就在 `toGoodsDetail` 里，随卡片搬进 `ProductCard.vue` 的 `<router-link>` 了。
+//    本页剩下的跳转全走 `emit('go-search')`（`searchByType` / 模板里的 `@click`）⇒ 壳层去路由。
 // eslint-disable-next-line no-undef
 const emit = defineEmits(['go-search'])
 
@@ -251,7 +330,7 @@ const getHomeImgAndGoods = async () => {
     const res = await http.post(endpoints.goods.goodsSelectHome)
     const data = await res.json()
     if (data.success) {
-      goodsList.value = data.list
+      goodsList.value = sharedList(data.list)   // ⚠️ ②（C3 块 5 ·〈Bug 1/2〉落码，2026-10-12）：共享面那一份 = **去重 + 滤已售完**，走 `config/goods-flags.js` 的 `sharedList`（判据只有那一个定义处：为什么键含 `MerchantId`、为什么留 `MIN(Id)`、哪几个面走这一支 …… 全写在那个模块头注）。用户裁定：已售完只在自己店铺页显示。⚠️ **只换这一条**：下一行 `homeImgList`（首屏轮播）**照旧吃全量** —— 它是**图**的轮换、不是商品列表，图上既不画名也不画价、也不带跳转，把一件货从轮播里摘掉只会让图少一张，说不了「已售完」这件事。⚠️ 同行追加 = 不新增行号（本页 `:116` / `:119` / `:242` 等多处被按行号引）
       homeImgList.value = data.list
     }
   } catch (e) {
@@ -294,27 +373,25 @@ const getGoodType = async () => {
   }
 }
 
-// 主页进入商品页
-const toGoodsDetail = (goods) => {
-  // 未登录放行（2026-10-06 改判 2，§5-AG (13)）：`/product` 已由路由 `meta.public` 判为公开面。
-  // 这 4 行原是一道「弹登录提示 + return」的拦截，现已删除；购买动作仍锁在 ProductPage 的两处守卫里。
-  // ⚠️ 匿名进详情页**不会**触发 401：挂载期只打 goodsSelectHome / GoodsProductCodeSelect / productCodePrice，三条都在白名单。
-  // ⚠️ 下面 7 个 query 参数原样保留：会话过期后 `orderAdd` 401 的回跳靠它们还原本页（T-guard-6 判据）。
+// 主页进入商品页 —— **导航动作本身已搬进 `components/ProductCard.vue`**（三处共用那一枚），
+// 本页只剩**自己独有的那一步**：清搜索缓存。挂在组件的 `beforeNav` 上。
+//
+// ⚠️ 为什么只剩两步（原 `toGoodsDetail` 还有第三个动作）：`router.push` 没了 —— 组件的
+//    `<router-link>` 自己会跳，再 push 一次是同一目标的双跳。
+// ⚠️ 两个 `sessionStorage` 动作逐字保留：
+//    · `removeItem('SEARCH_KEYWORD')` —— 从主页点进商品，意味着「搜索」那一段重新开始
+//      （`GoodsSelect.vue:173` 会读它还原上次搜索；不删就会把用户带回上一次的关键词）；
+//    · `setItem('FROM_PAGE','home')` —— ⚠️ 全仓**只写不读**（`api/auth.js:10` 的清单里
+//      `FROM_PAGE 1` 就是这一处）；**不删它**：删了属于别的笔的账，先照旧。
+// ⚠️ 未登录放行（2026-10-06 改判 2，§5-AG (13)）：`/product` 已由路由 `meta.public` 判为公开面。
+//    匿名进详情页**不会**触发 401：挂载期只打 goodsSelectHome / GoodsProductCodeSelect /
+//    productCodePrice，三条都在白名单。
+// ⚠️ **7 个 query 参数**（`Id/MerchantId/GoodName/Price/GoodImg/GoodType/ProductCode`）原样保留：
+//    会话过期后 `orderAdd` 401 的回跳靠它们还原本页（T-guard-6 判据，`progress.md:1441`
+//    明写「7 个 query 参数都要在」）⇒ 组件的 query 组装**必须**与这里逐字同序，别改成 4 个。
+const onCardNav = () => {
   sessionStorage.setItem('FROM_PAGE', 'home')
   sessionStorage.removeItem('SEARCH_KEYWORD')
-
-  router.push({
-    path: '/product',
-    query: {
-      Id: goods.Id,
-      MerchantId: goods.MerchantId,
-      GoodName: goods.GoodName,
-      Price: goods.Price,
-      GoodImg: goods.GoodImg,
-      GoodType: goods.GoodType,
-      ProductCode: goods.ProductCode
-    }
-  })
 }
 
 onMounted(async () => {
@@ -334,23 +411,230 @@ const goToSlide = (index) => {
   currentIndex.value = index
 }
 
-const getPriceInt = (price) => {
-  if (!price) return '0'
-  return parseInt(price) || '0'
+// ⚠️ `getPriceInt` / `getPriceDec` 已随卡片搬进 `components/ProductCard.vue`（本页只那儿用过）。
+
+// ══════════════════════════════════════════════════════════════════════════════
+// 券包 / 领券中心（C3 块 5 · commit 1，2026-10-11）—— 模板在 `tickets` section 那一段。
+//
+// ⚠️ **本段整块追加在 `<script setup>` 末尾**（而不是插在 `getHomeImgAndGoods` 旁边）：
+//    本文件的 `:119` / `:242` / `:262` / `:303-304` 等被文档按行号引（⚠️ **改前值**）⇒ 每多一个
+//    插入点就多一段集体漂移。收成**一个**插入点，`refs-scan` 的 before/after 只需解释一处偏移。
+//    同理，本段的取数挂在**第二个** `onMounted` 上（Vue 允许注册多次）—— 挪去改既有的那个，
+//    就又制造一个插入点。
+//    ⚠️ 本笔的**实际偏移**（`grep -n` 实测）：券包那一段 +53 行 ⇒ 上述四个目标改后依次为
+//    `:119`（未漂，在插入点之前）/ `:295` / `:315` / `:356-357`；本段 +107 行（模板 +53、样式 +95
+//    另计）⇒ **`<script>` 段的闭合行**由 `:348` 漂 **`:508`**（全文件 994 → 1251 行）。**再经同日两轮手验修**（第一轮：⑤ 卡片降高 + 越位渐隐 + 「一键领取」占位；第二轮：① 去掉细滚动条、改**右侧**渐隐 + 表头「》」展开，② 「一键领取」与「》」**并列**在右侧按钮区，③ 券条改**横向**且定序移到后端 `CouponDao.selectClaimable` 的 `updated_at ASC`）累计又 **+140** 行 ⇒ 闭合行 **`:550`**、全文件 **1391** 行。**再经同日「券的信息架构重排」**（删右栏券包 + 快捷块那格「优惠券」、领券中心收窄成**本周新券**、「一键领取本周全部」真接、NEW 角标 + 倒计时 + 空态、`TK_VISIBLE` 3 → 5、三个格式化 helper 搬去 `config/coupon-format.js`）**+35** 行 ⇒ 闭合行 **`:589`**、全文件 **1426** 行。全表见 `_work/b5-repoint.md`（收口一次性重指）。⚠️ 这半句**故意不写那个闭合标签的字面量**：SFC 解析器在 `<script>` 段里一见到它就**当场截断本段**，真闭合行随即报 `x-invalid-end-tag`（`vue/no-parsing-error`）—— 实测踩过，别「顺手补全」。
+//
+// ⚠️ **身份**取 `getUsername()`（`api/auth.js` 是唯一允许读身份的地方），不碰 `sessionStorage` —— ⚠️ **2026-10-12 口径改动**：券包的「账号」由**客户业务号**（原 `getCustomerId()`）改成**登录名**，因为真库 13 个商家 `customerid` 全是 NULL、登录名才是客户 / 商家**都有**的那个键（`login` 47 行 ↔ `user` 47 行一一对应）；⚠️ 后端 `CouponController` 的身份判据已同笔换成比登录名（只改前端会让每个非管理员恒 403）。
+//    本页 2026-10-06 起「已无匿名分支」（见 `:224-232`），券包**必须**有身份 ⇒ 这里**重新引入**
+//    一条「有身份才取数」的分支（形状同 `ShoppingCart.vue:198-200`）。它**不是登录墙**：
+//    页面照常逛，只是券包那一块显示「登录后可…」。
+const couponAccount = ref('')
+const claimable = ref([])
+const claimLoading = ref(false)
+const claiming = ref('')
+const tkMsg = ref('')
+const ticketsEl = ref(null)
+/** 「本周还剩 N 天」—— 来自响应体 `daysLeft`（后端**库时钟**算）。`null` = 还没取到 ⇒ 不渲染那一行。 */
+const daysLeft = ref(null)
+/** 「一键领取本周全部」进行中（防连点）。 */
+const batchBusy = ref(false)
+
+// ⚠️ 本页**不再自带** `truthy` / `couponFace` / `couponCond` / `bucketLabel` —— 2026-10-11 起从
+//    `config/coupon-format.js` 取。搬家的理由：券包弹窗（`components/CouponWalletDialog.vue`）要用**同一套**
+//    口径，而这些函数的取值域（`Type` / `Bucket` / `Scope`）是**后端 SQL 里写死的**（`CouponDao`）——
+//    抄两份，第二处抄错时**两边都不报错**。`bucketLabel` 本页已用不到（右栏券包删了），随弹窗留在那边。
+
+const loadCoupons = async (account) => {
+  claimLoading.value = true
+  try {
+    // ⚠️ `thisWeek = '1'`（第三参）⇒ **本周新发布**的（用户裁定：主页只放本周新券，后端 `CouponDao.THIS_WEEK`）。
+    //    ⚠️ `limit` 从 6 提到 **10**：一行 5 张 ⇒ 点「》」展开后得有东西可看（6 张展开比收起多不出什么）。
+    const data = await coupons(account, 10, '1')
+    claimable.value = data && data.success && Array.isArray(data.list) ? data.list : []
+    daysLeft.value = data && data.daysLeft !== undefined && data.daysLeft !== null ? data.daysLeft : null
+  } catch (e) {
+    handleApiError(e, '领券中心加载失败')
+  } finally {
+    claimLoading.value = false
+  }
 }
 
-const getPriceDec = (price) => {
-  if (!price) return '00'
-  const s = String(price)
-  const dot = s.split('.')[1]
-  return dot ? dot.padEnd(2, '0').slice(0, 2) : '00'
+/**
+ * 「**本周还剩 N 天** + 领哪几张」—— 一键领取只对**还领得动**的那几张有意义
+ * （已领 / 已领完仍在列表里、但不算「可领」⇒ 按钮的 `disabled` 与 `title` 都看这个数）。
+ */
+const tkClaimable = computed(
+  () => claimable.value.filter((c) => !truthy(c.Claimed) && !truthy(c.SoldOut)).length
+)
+
+/** 领券。⚠️ 只「领」——核销在结算（块 5 commit 5），本页不碰 `grant.Status`。 */
+const doClaim = async (c) => {
+  claiming.value = c.CouponId
+  tkMsg.value = ''
+  try {
+    const data = await claim(couponAccount.value, c.CouponId)
+    const ok = !!(data && data.success)
+    // ⚠️ 文案里**不再提「右侧券包」** —— 右栏已删，券包在**用户中心**（2026-10-11 重排）。
+    tkMsg.value = ok
+      ? '已领取「' + c.Name + '」，可在用户中心「优惠券」里查看'
+      : '领取失败：' + ((data && data.msg) || '未知原因')
+    if (ok) await loadCoupons(couponAccount.value)
+  } catch (e) {
+    handleApiError(e, '领取失败')
+  } finally {
+    claiming.value = ''
+  }
 }
+
+/**
+ * 「**一键领取本周全部**」（用户裁定 ②）。
+ * ⚠️ **不传券 ID 列表** —— 集合由**服务端**定（`CouponService.claimBatch` 自己跑 `THIS_WEEK` 那套筛选）。
+ *    前端手里这份 `claimable` 是**上一次请求**的快照，拿它当集合就是把「本周」的定义抄到前端来
+ *    （本仓最忌「同一口径有两处可抄错」）。
+ * ⚠️ **不看顶层 `success`** —— 它说的是「批量动作**执行完毕**」，部分失败**刻意**不回落 `false`
+ *    （理由三条写在 `CouponService.claimBatch`；与 `CartService.partialFailure` 方向相反是有意的）。
+ *    ⇒ 汇总要按 `claimed` / `failed` 说人话，逐张原因在 `items[]` 里。
+ * ⚠️ **不弹确认**（同日裁决）：券「领了就有」、没有损失。
+ */
+const doClaimBatch = async () => {
+  if (batchBusy.value) return
+  batchBusy.value = true
+  tkMsg.value = ''
+  try {
+    const data = await claimBatch(couponAccount.value)
+    if (!data || !data.success) {
+      tkMsg.value = '一键领取失败：' + ((data && data.msg) || '未知原因')
+      return
+    }
+    const claimed = Number(data.claimed || 0)
+    const failed = Number(data.failed || 0)
+    tkMsg.value = data.total === 0
+      ? '本周没有可领的新券'
+      : '一键领取：成功 ' + claimed + ' 张' + (failed > 0 ? '，失败 ' + failed + ' 张（' + firstFailReason(data) + '）' : '')
+    // ⚠️ 无论成败都重拉一次：成功的那几张要把按钮变「已领取」，**失败的那些也仍要在列表里**
+    //    （服务端重算过的集合可能与本地这份不同，比如刚刚有人把某张领光了）。
+    await loadCoupons(couponAccount.value)
+  } catch (e) {
+    handleApiError(e, '一键领取失败')
+  } finally {
+    batchBusy.value = false
+  }
+}
+
+/** 部分失败时挑**第一条**原因附在汇总里（逐条明细不在主页展开 —— 那是弹窗的事）。 */
+const firstFailReason = (data) => {
+  const bad = (data.items || []).find((it) => !it.success)
+  return (bad && bad.msg) || '详见券包'
+}
+
+/**
+ * 「领券中心」横向券条的**可见张数 + 越位渐隐 + 「》」展开**（用户 2026-10-11 手验**第二轮** ①②③）。
+ *
+ * 口径（取代第一轮的「纵向限高 + 细滚动条 + 底部渐隐」那一版）：
+ *   · **横向**：从左到右铺（③），左端 = 最早更新的那张（后端 `updated_at ASC` 定序）。
+ *   · 超过 `TK_VISIBLE` 张 ⇒ 加 `.tk-strip-cut`，**右侧**一段 `mask` 渐隐 + 表头出「》」。
+ *   · 点「》」⇒ `tkExpanded = true`，`wrap` 放开、全部铺开（渐隐同时撤掉）。
+ * ⚠️ **没有滚动条了**（用户 ① 点名去掉细滚动条）⇒ 收起的那些张在展开前**确实够不着**，
+ *    这是这次改动的**有意取舍**（用「渐隐 + 》」替代滚动条做「还有更多」的提示）。
+ * ⚠️ 上一条 `tkAtBottom` / `onTkScroll` 一整套**已删**：不滚了就不需要「滚到底撤渐隐」。
+ * ⚠️ **2026-10-11「券的信息架构重排」：`TK_VISIBLE` 3 → 5。** 右栏券包删掉后本栏**占满整页宽**
+ *    （原来约 600px、现在约 1200px）⇒ 一行 5 张（用户裁定 ⑦：卡宽约 230px）。
+ *    ⚠️ 它与样式里 `.tk-strip > .tk` 的基宽 `(100% - gap×(N-1)) / (N + 0.3)` 是**一对**，
+ *       改一处必须成对改；那个 `+0.3` 是「第 N+1 张露头约 30%」，**露头宽又必须 ≤ mask 渐隐带**
+ *       （`.tk-strip-cut` 的 88px）—— 三个数是一组，动了 N 要一起复核（探针里钉了这条不变量）。
+ * ⚠️ 后端 `loadCoupons` 的 `limit` 已从 6 提到 **10** ⇒ 这里最多 10 张、`TK_VISIBLE = 5` 即「5 张以内不裁」。
+ */
+const TK_VISIBLE = 5
+const tkExpanded = ref(false)
+
+/** 「领券中心」（二级导航 `:32`）的落点 = 锚到本页领券中心。
+ *  ⚠️ 原本还兼「优惠券」那格快捷块的落点 —— 那格 2026-10-11 已整格删掉，现在**只剩二级导航一个调用方**。 */
+const scrollToTickets = () => {
+  const el = ticketsEl.value
+  if (el && el.scrollIntoView) el.scrollIntoView({ behavior: 'smooth', block: 'start' })
+}
+
+onMounted(async () => {
+  couponAccount.value = getUsername() || ''
+  if (!couponAccount.value) return
+  // ⚠️ 只剩一个请求了 —— 「我的券包」已搬去用户中心（那边的入口自己拉摘要，弹窗开窗时再拉明细）。
+  await loadCoupons(couponAccount.value)
+})
+
+// ── 限时秒杀（C3 块 5 · commit 4，2026-10-12）—— 模板在 `flash` section 那一段 ─────────
+// ⚠️ 取数走**本段自己的** `onMounted(loadFlash)`（Vue 允许注册多次）—— 本段的**每一个新增行都落在
+//    文件尾**，不动既有行号；本笔只让 `<script>` 闭合行与 `<style>` 整体后移，收口时按
+//    `_work/b5-repoint.md` 一并重指。
+// ⚠️ **未登录不发**：`/marketing/seckill/live` 不在白名单，匿名发它必 401，而 `http.js` 的
+//    `handleUnauthorized` 会把公开页整体踢去登录页 —— 与 `loadCoupons` 同一条「有身份才取数」。
+// ⚠️ **`signup` 那一档不画**（报名期对买家还不存在，后端 `SeckillDao.stage` 的注释同此）；
+//    条数**自己截到 4**（`.flash-g` 是 `repeat(4, 1fr)`），向端点要 8 是为了扣掉 `signup` 后仍够 4。
+const flashRows = ref([])
+const flashLeft = ref(0)
+let flashTimer = null
+/** UTC 文本 → 毫秒。⚠️ `DATE_FORMAT` 出的是**库时钟（UTC）**的裸文本，不补 `Z` 会被当**本地时间**解析。 */
+const flashTs = (s) => {
+  const d = new Date(String(s == null ? '' : s).replace(' ', 'T') + 'Z')
+  return isNaN(d.getTime()) ? null : d.getTime()
+}
+/** 倒计时瞄「**最近要跨过的那一刻**」：有进行中的就取最早 `EndAt`，否则取最早的 `StartAt`（未开启）。 */
+const flashTarget = computed(() => {
+  const live = flashRows.value.filter((r) => r.Stage === 'live')
+  const key = live.length ? 'EndAt' : 'StartAt'
+  const pick = live.length ? live : flashRows.value.filter((r) => r.Stage === 'upcoming')
+  const ts = pick.map((r) => flashTs(r[key])).filter((n) => n !== null)
+  return ts.length ? { at: Math.min(...ts), label: live.length ? '距结束' : '距开始' } : null
+})
+const flashCdLabel = computed(() => (flashTarget.value ? flashTarget.value.label : '距结束'))
+const flashCd = computed(() => {
+  const t = Math.max(0, Math.round(flashLeft.value / 1000))
+  const p = (n) => String(n).padStart(2, '0')
+  return { h: p(Math.floor(t / 3600)), m: p(Math.floor((t % 3600) / 60)), s: p(t % 60) }
+})
+const flashMoney = (v) => Number(v || 0).toFixed(2)
+/** 去商品页 —— `query` 四件套与 `ProductCard.vue` 逐字同序（那边是 4 个，`ProductPage` 的 7 个是另一回事）。 */
+const flashLink = (r) => ({
+  path: '/product',
+  query: { MerchantId: r.MerchantAccount, GoodName: r.Name || r.GoodName, GoodType: r.GoodType, Id: r.GoodsId },
+})
+const tickFlash = () => {
+  const t = flashTarget.value
+  flashLeft.value = t ? t.at - Date.now() : 0
+}
+// ⚠️ `flashLoaded`（2026-10-12 补）：**区分「没登录」与「登录了但一场都没有」**。
+//    没登录时 `seckillLive` 必 401（不在白名单）⇒ 这一栏**故意不发**，那条路 `flashLoaded` 保持 false
+//    ⇒ 主页整块不出现（与改前逐字同行为，**不能**给匿名访客摆一句「活动未开启」——那就是在说假话）。
+//    登录且拉到了（哪怕 0 条）⇒ true ⇒ 空态那句「活动未开启 / 敬请期待」才出现。
+const flashLoaded = ref(false)
+const loadFlash = async () => {
+  if (!couponAccount.value) return
+  try {
+    const data = await seckillLive({ limit: 8 })
+    flashRows.value =
+      data && data.success && Array.isArray(data.list)
+        ? data.list.filter((r) => r.Stage !== 'signup').slice(0, 4)
+        : []
+  } catch (e) {
+    flashRows.value = []
+  }
+  flashLoaded.value = true
+  if (flashRows.value.length) {
+    tickFlash()
+    flashTimer = setInterval(tickFlash, 1000)
+  }
+}
+// ⚠️ 第二个 `onUnmounted`（同 `onMounted`：Vue 允许注册多次）—— 并进 `:391` 那个就又多一个插入点。
+onMounted(loadFlash)
+onUnmounted(() => {
+  if (flashTimer) clearInterval(flashTimer)
+})
 </script>
 
 <style scoped>
 /* ⚠️ D 笔（2026-10-07）：全块按 `docs/美化/主页改造.html` 的 `<style>` 重写。
-   类名一律取稿名（`wrap` / `hero` / `cats` / `glaze` / `dots` / `quick` / `flash` /
-   `tickets` / `rec` / `grid` / `card` / `trust` / `subnav` / `pts` …），旧名（`search` 以外的
+   类名一律取稿名（`wrap` / `hero` / `cats` / `glaze` / `dots` / `flash` / `tickets` /
+   `rec` / `grid` / `trust` / `subnav` / `pts` …；⚠️ `quick` / `card` **已删**，见 `:91`），旧名（`search` 以外的
    `banner-section` / `good-type-list` / `type-item` / `space` / `swiper-box` / `swiper-container` /
    `swiper-img` / `goods-list-section` / `goods-grid` / `goods-card` / `goods-img-box` /
    `goods-info` / `goods-name` / `goods-price` / `price-symbol` / `price-int` / `price-dec` /
@@ -362,7 +646,7 @@ const getPriceDec = (price) => {
    ⚠️ 稿里**没有元素用到**的规则一律不搬，否则落进来就是悬空类名：
    `.promo`（`:435-453`，稿自己也没用在 body 里）、`.card-tags` / `.card-price .was`（本仓无标签 /
    划线价字段）、`.fl-*`（`:609-627`）与 `.ticket*`（`:633-658`）与 `.glaze-k` / `.glaze-s`
-   （`:370-389`）—— 后三组对应的都是稿 JS 里的 mock 内容，本仓无数据源。
+   （`:370-389`）—— 后三组对应的都是稿 JS 里的 mock 内容，本仓无数据源。⚠️ **2026-10-11（块 5 · commit 1）：`.ticket*` 那一组的「无数据源」不成立了**（券包接了真表 `coupon` / `coupon_grant`），但**仍不搬稿的类名** —— 本笔另起 `tk-` 前缀绑真字段，理由见下方券包那一节。
    ⚠️ 稿本页**没有 @media**（全文件 0 处）⇒ 本块也不加断点：`.grid` 用 auto-fill 自适应，
    其余栅格（4/4/3/4 列）在窄屏会挤但不会破版，与稿一致。 */
 
@@ -457,24 +741,25 @@ button {
   align-items: center;
   gap: var(--s6);
 }
-.subnav button {
+.subnav button, .subnav a {
   font-size: 13.5px;
   color: var(--nav-tx);
   transition: color 0.15s;
   white-space: nowrap;
+  text-decoration: none;   /* `<router-link>` 落成 `<a>`，这行不给就带下划线（块 5 commit 5 起本栏有真链接） */
 }
-.subnav button:hover {
+.subnav button:hover, .subnav a:hover {
   color: var(--nav-tx-hi);
 }
-.subnav button.now {
+.subnav button.now, .subnav a.now {
   color: var(--nav-now);
   font-weight: var(--fw-semi);
 }
-.subnav button.hot {
+.subnav button.hot, .subnav a.hot {
   color: var(--nav-hot);
   font-weight: var(--fw-med);
 }
-/* 六项都无落点（disabled）⇒ 鼠标形态要说实话，别留着 `pointer` 骗人。 */
+/* 四项仍无落点（disabled）⇒ 鼠标形态要说实话，别留着 `pointer` 骗人。 */
 .subnav button[disabled] {
   cursor: not-allowed;
 }
@@ -535,8 +820,11 @@ button {
 .cats li:hover {
   color: var(--brand-ink);
 }
-/* 稿的 `.cats-more` 是 `<div>`；本仓落成 `<button disabled>` ⇒ 补 `text-align:left`
-   （按钮默认居中），并去掉 `cursor:pointer`（`:315-324` 那条随 `disabled` 一起失效）。 */
+/* 稿的 `.cats-more` 是 `<div>`；本仓落成 `<button>` ⇒ 补 `text-align:left`（按钮默认居中）。
+   ⚠️ 2026-10-12（用户裁定 #5，接通搜索页）：本项不再是死控件 ⇒ ① 补回 `cursor:pointer`
+   （原来那条 `:315-324` 的播放随 `disabled` 一起失效，现在反过来）；② 摘除随后失效的
+   `[disabled]` 规则 —— 死样式比死标记更难发现。摘掉的 3 行**补成这三行注**，为的是保住
+   本文件被 `api/auth.js` / `progress.md` 按行号引的净零行数（全仓 `文件:行号` 互引纪律）。 */
 .cats-more {
   margin-top: auto;
   text-align: left;
@@ -544,13 +832,10 @@ button {
   color: var(--ink-3);
   padding: var(--s3) 0 var(--s4);
   border-top: 1px solid var(--line-2);
-  transition: color 0.15s;
+  cursor: pointer; transition: color 0.15s;
 }
 .cats-more:hover {
   color: var(--brand-ink);
-}
-.cats-more[disabled] {
-  cursor: not-allowed;
 }
 
 /* ── 主视觉：不是灰底占位，是一块「釉」（稿 `:342-351`）──
@@ -645,55 +930,9 @@ button {
   background: var(--brand);
 }
 
-/* ── 功能入口条（预留位，稿 `:408-430`）── */
-.quick {
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  margin-top: var(--s6);
-  background: var(--zone);
-  border-radius: var(--r2);
-  /* 有底色就必须补内边距：没有它，「我的订单」的图标会顶到框上（稿 `:414-416`）。 */
-  padding: 0 var(--s5);
-}
-/* 稿的选择器是 `.quick a`；本仓的「项」是**死控件** ⇒ 必须是 `<button class="qi">`。
-   `.qi` 是本笔新加的类名，只为让 `<button>` 拿到稿给 `<a>` 的那套盒模型。 */
-.quick .qi {
-  display: flex;
-  align-items: center;
-  gap: var(--s3);
-  padding: var(--s5) var(--s4);
-  text-align: left;
-  border-right: 1px solid var(--line);
-}
-.quick .qi:first-child {
-  padding-left: 0;
-}
-.quick .qi:last-child {
-  border-right: none;
-  padding-right: 0;
-}
-.quick .ic {
-  color: var(--ink-3);
-  flex: none;
-  display: flex;
-  transition: color 0.15s;
-}
-.quick .qi:hover .ic {
-  color: var(--brand);
-}
-.quick .tx b {
-  display: block;
-  font-size: var(--fs-sm);
-  font-weight: var(--fw-med);
-  color: var(--ink);
-}
-.quick .tx span {
-  font-size: var(--fs-xs);
-  color: var(--ink-3);
-}
-.quick .qi[disabled] {
-  cursor: not-allowed;
-}
+/* ── 功能入口条：**样式随块一起删了**（2026-10-12）──
+   删掉的是 `.quick` / `.quick .qi*` / `.quick .ic` / `.quick .tx*` 整段（含 `repeat(4, 1fr)`）。
+   别只删模板留下这段 CSS —— 死样式比死标记更难发现。 */
 
 /* ── 限时秒杀（预留位，稿 `:578-627`）──
    全页唯一的暖底：它表示时间压力，不是装饰（稿 `:571-576`）。 */
@@ -749,22 +988,235 @@ button {
   grid-template-columns: repeat(4, 1fr);
   gap: var(--s5);
 }
-/* 空容器（本仓无活动接口）里那行说明要铺满整栅格，不然它只占第 1 列。 */
-.flash-g .empty-tip {
-  grid-column: 1 / -1;
+/* ⚠️ `.flash-g .empty-tip`（空占位那行说明）**已删**：commit 4 转真后 `.flash-g` 里只有真卡片，
+   那句「秒杀位预留 · 待接入活动接口后填充」随之退场。连规则一起删而不只删模板 —— 死样式比死标记更难发现。 */
+
+/* ── 秒杀**整块空态**（2026-10-12 补）────────────────────────────────────────────────
+   ⚠️ 与 `.flash-g .empty-tip`（上面那条被删的）**不是同一件事**：那一条是「接口还没接」时的
+      死占位（commit 4 转真后必须删）；这一条是「接口接了、后端如实回 0 场」时的**真结果**——
+      两者差一个「我们到底知不知道」，所以类名也另起（`.flash-none`），不复用死掉的那个。
+   ⚠️ 用与 `.flash-c .fc-soon` **同一个灰**（`--ink-3`）：它说的就是那件事的整块版。 */
+.flash-none {
+  margin: var(--s4) 0 0;
+  font-size: var(--fs-sm);
+  color: var(--ink-3);
 }
 
-/* ── 券包（预留位，稿 `:632-658`）──
-   ⚠️ 稿的 markup 里这条**本来就是空 section**（`:817`），3 张券由 JS 塞 mock ⇒ 本仓 0 条
-   `.ticket*` 规则（无数据源）。空 `display:grid` 高度为 0 ⇒ 会「落了却看不见」⇒ 出一行说明。 */
+/* ── 领券中心（**块 5**；2026-10-11「券的信息架构重排」后**只剩这一栏**；稿 `:632-658`）──
+   ⚠️ 稿的 markup 里这条**本来就是空 section**（`:817`），3 张券由稿的 JS 塞 mock（`TICKETS`）
+   ⇒ 稿的 `.ticket*` 规则本仓仍**不搬**（它们绑的是 mock 的类名与结构）。本笔另起一套 `tk-` 前缀、
+   绑**真字段**（`Type` / `FaceValue` / `Threshold` / `IsNew` / `daysLeft`）—— 两套类名别互相套用。
+   ⚠️ **commit 1 时这里是两栏**（领券中心 + 我的券包）；2026-10-11 用户重排后右栏整块删掉
+   （券包搬去用户中心弹窗）⇒ **回到单栏**。留着 `grid` 是因为要在 `.tk-col` 下面另起一行放 `.tk-msg`
+   （一键领取的汇总），单列网格正好；`repeat(2, 1fr)` 已改 `1fr`。 */
 .tickets {
   margin-top: var(--s5);
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: 1fr;
   gap: var(--s4);
 }
-.tickets .empty-tip {
+.tickets .tk-msg {
   grid-column: 1 / -1;
+}
+.tk-col {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--r2);
+  padding: var(--s4);
+  /* ⚠️ 这一条是**结构性的**，别删 —— 但**理由已在 2026-10-11 换成新的**：
+     原来是为了解开 `repeat(2, 1fr)` 那个 `auto` 下限（两栏等宽的旧问题，那个问题随单栏消失）。
+     现在留着它是因为 `.tk-strip` 仍 `flex-wrap: nowrap` + `overflow: hidden`：券条的 min-content
+     是「所有券各自 max-content 之和」⇒ 没有 `min-width: 0` 的网格项会**拒绝收缩**，
+     整块横向溢出、把页面撑出横向滚动条。`probe-b5-claim-center.mjs` 钉着这条（`overflowX` 断言）。 */
+  min-width: 0;
+}
+.tk-h {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  padding-bottom: var(--s2);
+  margin-bottom: var(--s3);
+  border-bottom: 1px solid var(--line-2);
+}
+.tk-h h3 {
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-semi);
+  color: var(--ink);
+}
+.tk-n {
+  font-size: var(--fs-xs);
+  color: var(--ink-3);
+}
+/* 表头右侧一组：「本周还剩 N 天」+ 张数 + 「一键领取本周全部」+「》」。 */
+.tk-h-r {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+}
+/* 「本周还剩 N 天」（裁定 ⑤：**区块级**一行小字、**整日粒度**）。最浅的一档灰 ——
+   它是背景信息，不该跟右边的张数与按钮抢注意力。 */
+.tk-left {
+  font-size: var(--fs-xs);
+  color: var(--ink-3);
+  white-space: nowrap;
+}
+.tk-all {
+  font: inherit;
+  font-size: var(--fs-xs);
+  color: var(--brand-ink);
+  background: var(--brand-soft);
+  border: 1px solid var(--brand-ink);
+  border-radius: var(--r1);
+  padding: 1px var(--s2);
+  white-space: nowrap;
+  cursor: pointer;
+}
+/* 不可用时（本周没有可领的 / 正在领）走全站统一的「灰掉 + 默认光标」。
+   ⚠️ commit 1 那版这里还是**占位**按钮（接口未定，恒 `disabled`）；2026-10-11 起它是**真按钮**，
+   只有上面那两个理由会让它变灰。 */
+.tk-all[disabled] {
+  color: var(--ink-3);
+  background: var(--surface-3);
+  border-color: var(--line-2);
+  cursor: default;
+}
+/* 「》」查看更多 —— 表头右侧第二颗按钮，与「一键领取」并排（用户 ②）。 */
+.tk-more {
+  font: inherit;
+  font-size: var(--fs-xs);
+  line-height: 1;
+  color: var(--brand-ink);
+  background: var(--surface-2);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r1);
+  padding: 2px var(--s2);
+  white-space: nowrap;
+  cursor: pointer;
+}
+.tk-more:hover {
+  border-color: var(--brand-ink);
+}
+/* 展开态：底色提亮一档，与收起态区分（文案由模板在 `》` / `《` 之间切）。 */
+.tk-more-on {
+  background: var(--brand-soft);
+  border-color: var(--brand-ink);
+}
+/* ── 领券中心：**横向**券条 + 越位渐隐（用户 2026-10-11 手验第二轮 ①③）──
+   ① 不再滚：`overflow: hidden` + 右侧渐隐 + 表头「》」展开，**没有滚动条**。
+   ③ 从左到右：左端 = 最早更新的那张（定序在后端 `CouponDao.selectClaimable`，本页不排）。 */
+.tk-strip {
+  display: flex;
+  flex-direction: row;
+  flex-wrap: nowrap;
+  gap: var(--s2);
+  /* 不滚（用户 ① 点名去掉细滚动条）：被裁的那几张**停在**这里，由「》」展开去看。
+     ⚠️ 它会把自己的 min-content 撑大 ⇒ 得靠 `.tk-col` 上那条 `min-width: 0` 解开（见那边注释）。 */
+  overflow: hidden;
+}
+/* 展开态（点过「》」）：放开换行，全部铺开 ⇒ 渐隐同时撤掉。 */
+.tk-strip-on {
+  flex-wrap: wrap;
+}
+/* 越位渐隐。
+   ⚠️ 渐隐带宽（**88px**，2026-10-11 由 56 改）必须**盖过**第 N+1 张露出来的那一角：
+   只盖一半的话，露出那半张**边缘是实的**，看着就像「那张卡本来就画得窄」—— 而不是「右边还有」。
+   露出宽 ≈ `0.30 × (行宽 / (N + 0.3))`：N=5、整页宽 ≈1200px ⇒ 卡宽 ≈ 215px、露头 ≈ 65px，
+   88px 有富余；改 `TK_VISIBLE` 或基宽那个 `+0.3` 时**必须回来复核这三个数**（探针钉了不变量）。
+   `-webkit-mask-image` 是给旧 WebKit 的，两条都要写。 */
+.tk-strip-cut {
+  mask-image: linear-gradient(to right, #000 calc(100% - 88px), transparent 100%);
+  -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 88px), transparent 100%);
+}
+/* 横条里的单张券：原来「金额 | 条件 | 领取」是一**行**，横过来后改成**竖排小卡**。
+   ⚠️ 基宽是 `(100% - (N-1) 个 gap) / (N + 0.3)`（N = `TK_VISIBLE` = 5）—— 那个 **`+0.3` 不是笔误**：
+     · 按整 N 算 ⇒ N 张正好铺满一行，第 N+1 张**整个落在裁切线之外、一点都露不出来**，
+       右侧渐隐就没有东西可淡，「还有更多」这个提示当场失效；
+     · 按 N+0.5 算（第一版是 `/3.5`）⇒ 第 N+1 张露出近一半，**看着像一张完整的卡**，同样不像「被裁」。
+   `+0.3` 是「露出约 1/4 张」—— 一眼能看出是**被裁掉**的、又被上面那 88px 渐隐吃掉。
+   ⚠️ 三个数（`TK_VISIBLE` / `+0.3` / mask 的 88px）是**一组**，与脚本里那个常量是一对，改一处要成对改。
+   `.tk-cond` 的 `flex: 1` 到竖排里正好把「领取」顶到底 ⇒ 同排几张卡等高时按钮对得齐。 */
+.tk-strip > .tk {
+  flex: 0 0 calc((100% - var(--s2) * 4) / 5.3);
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--s1);
+}
+.tk {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  /* 卡高再压一档（手验「缩小单个券卡片高度」）：上下 8px → 4px。 */
+  padding: var(--s1) var(--s3);
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  border-radius: var(--r2);
+}
+.tk-amt {
+  font-family: var(--font-mono);
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-semi);
+  color: var(--brand-ink);
+  min-width: 4.5em;
+}
+.tk-cond {
+  font-size: var(--fs-xs);
+  color: var(--ink-3);
+  flex: 1;
+}
+/* 券名（A7 后半）——卡里**唯一**一行一级信息，故比 `.tk-cond` 重一档（`--fw-semi` / `--ink-2`）。
+   ⚠️ 券名是**用户填的**（管理端建券表单不限长）⇒ 单行截断，别让它把卡撑宽、把「领取」顶出画面。
+   ⚠️ 两个色档都是有据的：`--ink-2`（白底 8.0:1）、`--fs-xs` 同 `.tk-cond`（tokens.css）。 */
+.tk-name {
+  max-width: 100%;
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-semi);
+  line-height: 1.2;
+  color: var(--ink-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.tk-get {
+  font-size: var(--fs-xs);
+  color: var(--brand-ink);
+  background: var(--brand-soft);
+  border: 1px solid var(--brand-ink);
+  border-radius: var(--r1);
+  padding: 2px var(--s3);
+  cursor: pointer;
+}
+.tk-get[disabled] {
+  color: var(--ink-3);
+  background: var(--surface-3);
+  border-color: var(--line-2);
+  cursor: default;
+}
+/* 「面额 + NEW 角标」一行。⚠️ 券卡是竖排（上面 `.tk-strip > .tk` 的 `column`），
+   不包这一层的话角标会被 flex 顶到下一行、把卡撑高一档（同排几张就不齐了）。 */
+.tk-top {
+  display: flex;
+  align-items: center;
+  gap: var(--s1);
+}
+/* NEW 角标 = **近 3 天新建**（用户裁定 ⑥）。⚠️ 与「本周新券」**不是同一件事**：
+   前者是滚动 72 小时（后端 `CouponDao.IS_NEW`），后者是自然周（`THIS_WEEK`）—— 会分叉。
+   用品牌色小 chip，不抢面额那一行主数字的注意力。 */
+.tk-new {
+  font-style: normal;
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-semi);
+  line-height: 1;
+  color: var(--brand-ink);
+  background: var(--brand-soft);
+  border-radius: var(--r1);
+  padding: 1px 4px;
+}
+/* ⚠️ 原先这里还有「券包四态」那一组（`.tk-b` / `.tk-b-expiring` / `.tk-b-usable` / `.tk-b-used` /
+   `.tk-b-expired`）—— 2026-10-11 右栏券包删掉后**全成死代码，已删**。四态的标签与配色改在
+   `components/CouponWalletDialog.vue`（`w-tag*`），那才是唯一还用得到它们的地方。 */
+.tk-msg {
+  font-size: var(--fs-xs);
+  color: var(--brand-ink);
 }
 
 /* ── 推荐区（稿 `:455-548`）── */
@@ -799,106 +1251,12 @@ button {
   gap: var(--s4);
 }
 
-/* 商品卡：容器感来自**明度台阶**，不来自圆角和阴影（稿 `:477-484`）。
-   页底 / 卡片白面 / 图占位 = 0 / 13.8% / 25.5% 三级。 */
-.card {
-  background: var(--surface);
-  border: 1px solid var(--line);
-  border-radius: var(--r2);
-  overflow: hidden;
-  cursor: pointer;
-  transition: border-color 0.16s;
-}
-.card:hover {
-  border-color: var(--brand);
-}
-.card-img {
-  aspect-ratio: 4 / 3;
-  background: var(--img);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  transition: background 0.2s;
-}
-.card:hover .card-img {
-  background: var(--brand-soft);
-}
-/* 稿的 `.card-img` 是**空图框**（稿 JS 里只有「商品图」三个字）；本仓有真图 ⇒ 保留 `<img>`，
-   与 GoodsSelect `.thumb` / ChatRoom `.pc .th` 同一处理（不为了照稿丢真功能）。 */
-.card-img img {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-}
-.card-tx {
-  padding: var(--s3) var(--s4) var(--s4);
-}
-.card-name {
-  font-size: var(--fs-sm);
-  font-weight: var(--fw-reg);
-  color: var(--ink);
-  line-height: 1.45;
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-  min-height: 2.9em;
-}
-.card-foot {
-  margin-top: var(--s2);
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--s2);
-}
-.card-price {
-  display: flex;
-  align-items: baseline;
-  gap: 2px;
-  color: var(--accent);
-}
-.card-price .sym {
-  font-size: 13px;
-  font-weight: var(--fw-med);
-}
-.card-price .int {
-  font-size: 22px;
-  font-weight: var(--fw-semi);
-  letter-spacing: -0.5px;
-}
-.card-price .dec {
-  font-size: 14px;
-  font-weight: var(--fw-med);
-}
-/* 加购：平时幽灵圆钮，**卡片 hover** 才转实心（稿 `:536-547`：12 个实心按钮会把货架变成按钮墙）。
-   ⚠️ 稿还有一条 `.card-buy:hover`（`:545`），本仓这枚恒 `disabled` ⇒ 那条不搬，只留卡片级那条。 */
-.card-buy {
-  flex: none;
-  width: 30px;
-  height: 30px;
-  padding: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: transparent;
-  color: var(--ink-3);
-  border: 1px solid var(--line-2);
-  border-radius: 50%;
-  transition: background 0.15s, color 0.15s, border-color 0.15s;
-}
-.card:hover .card-buy {
-  background: var(--brand);
-  border-color: var(--brand);
-  color: #fff;
-}
-.card-buy[disabled] {
-  cursor: not-allowed;
-}
-.card-meta {
-  margin-top: var(--s2);
-  font-size: var(--fs-xs);
-  color: var(--ink-3);
-}
+/* 商品卡样式（`.card` / `.card-img` / `.card-tx` / `.card-name` / `.card-foot` / `.card-price` /
+   `.card-buy` / `.card-meta`）**已整段搬进** `src/components/ProductCard.vue` 的 `<style scoped>`
+   （C3 块 5 · B 组续笔，2026-10-12；三处共用那一枚）。
+   ⚠️ 别在本页再留一份：`<style scoped>` 的作用域属性只打在子组件**根节点**上，本页写了也选不中卡**内部**，
+   而「两页一致」正是靠「只有一份」保证的。栅格（`.grid` 的 `auto-fill minmax(190px,1fr)`）
+   **不是卡的一部分**，仍留在本页 —— 那是版面，不是卡。 */
 
 /* ── 信任条（预留位，稿 `:663-678`）── */
 .trust {
@@ -991,4 +1349,15 @@ button {
   z-index: 9;
   background: var(--bg);
 }
+
+/* ── 限时秒杀模块里的卡片（C3 块 5 · commit 4 **转真**，2026-10-12）────────────────────
+   ⚠️ 一律落 `<style>` **尾部**（理由同上一段：全仓引用本页的行号都在更前面）。
+   ⚠️ 价格吃 `--accent`（朱砂只管价格 / 促销 / 未读，`tokens.css:34-42`）—— 本模块**没有**第二处
+      抢这个色：条数、倒计时都是中性灰，「活动未开启」也只是灰字（它**不是**警示，是状态）。 */
+.flash-h .more { text-decoration: none; } /* 它现在是 `<router-link>`（原是一颗 `disabled` 按钮）。 */
+.flash-c { display: flex; flex-direction: column; gap: var(--s2); text-decoration: none; color: inherit; }
+.flash-c img { width: 100%; aspect-ratio: 4 / 3; object-fit: cover; border-radius: var(--r1); background: var(--cin-100); }
+.flash-c .fc-nm { font-size: var(--fs-xs); color: var(--ink-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.flash-c .fc-pr { font-size: var(--fs-md); color: var(--brand-ink); font-variant-numeric: tabular-nums; }   /* ⚠️ 2026-10-12 用户配色令：**秒杀价 = 青瓷绿**（与普通商品价格对调）；压在 `--cin-100` 模块底上 6.44:1 */
+.flash-c .fc-soon { font-size: var(--fs-xs); color: var(--ink-3); }
 </style>

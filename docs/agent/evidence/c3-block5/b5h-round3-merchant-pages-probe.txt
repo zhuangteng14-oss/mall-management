@@ -1,0 +1,10 @@
+OK   对照：本运行时的 `Math.rint` 调用即抛（证明下面「无异常」有意义）  → "Math.rint is not a function"
+OK   GoodsAdd：页面进得去（未被登录守卫踢走）  → "#/merchant/user/add"
+OK   GoodsAdd：折扣提示行算出了「5 折」（`fmtRate` 跑通）  → "折扣 5 折 —— 详情页会显示 ¥200 划线价与「5折」角标。"
+OK   GoodsAdd：填值过程**零未捕获异常**  → []
+OK   秒杀报名页：页面进得去  → "#/merchant/seckill"
+OK   秒杀报名页：提示行给出了原价与区间（`hintBad` 求值到底、没在半路炸）  → "原价 ¥299.00 ⇒ 秒杀价须大于 0 且低于原价；限量须是非负整数。  报名不带时间：开始 / 结束时间由管理端在审核通过时确认。"
+OK   秒杀报名页：限量填 5 时**不是** bad 态（合法值不该报错）  → "skl-hint"
+OK   秒杀报名页：填值过程**零未捕获异常**  → []
+
+probe-b5h-matrint-merchant-pages: 8 项 / 0 失败
