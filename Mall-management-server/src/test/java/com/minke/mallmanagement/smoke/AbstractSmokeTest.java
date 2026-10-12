@@ -51,6 +51,8 @@ import com.minke.mallmanagement.marketing.subsidy.dao.SubsidyDao;
 import com.minke.mallmanagement.marketing.subsidy.service.SubsidyService;
 import com.minke.mallmanagement.marketing.seckill.dao.SeckillDao;
 import com.minke.mallmanagement.marketing.seckill.service.SeckillService;
+import com.minke.mallmanagement.comment.dao.CommentDao;
+import com.minke.mallmanagement.comment.service.CommentService;
 import org.junit.jupiter.api.BeforeEach;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
@@ -259,7 +261,16 @@ import static org.mockito.Mockito.when;
         // 切片上下文就会因为「找不到 SeckillService」而**启动失败**，同前十一笔）。
         // ⚠️ 依赖链三层：Service → Dao；两个 Controller 另各吃一个**已在清单里**的 bean
         //    （`NotificationService` 块 1、`AuditService` 块 1）⇒ 这两条不必重复登记。
-        SeckillDao.class, SeckillService.class})
+        SeckillDao.class, SeckillService.class,
+        // C3 块 6（内容+消息块，2026-10-12 · commit 1 评论）：新增一个 Controller
+        // （`CommentController`）+ 一个 @Service（`CommentService`）+ 一个 @Dao（`CommentDao`）——
+        // **第十三次同一处地雷**（@WebMvcTest 无参会加载全部 @Controller，新控制器一进来，
+        // 切片上下文就会因为「找不到 CommentService」而**启动失败**，同前十二笔）。
+        // ⚠️ 依赖链三层：Service → Dao；Service 另吃一个**不是 bean** 的 `app.upload-dir`
+        //    （@Value 注入的 String，照 GoodsService / UserService 的既有做法）⇒ 无需额外登记。
+        // ⚠️ `CommentController` 另收 `ObjectProvider<UserStateLookup>` —— **刻意不 @Import**
+        //    `UserStateLookupService`（理由见本文件它处那条 ⚠️，它是@WebMvcTest 切片的已知缺口）。
+        CommentDao.class, CommentService.class})
 public abstract class AbstractSmokeTest {
 
     @Autowired

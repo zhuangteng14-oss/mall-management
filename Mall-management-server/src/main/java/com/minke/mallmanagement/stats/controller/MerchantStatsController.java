@@ -16,7 +16,7 @@ import java.util.Map;
  * 方案 §一 A2 曾担心 {@code AuthInterceptor} 的放行清单按 {@code /merchant/*} 前缀匹配、
  * 会把这个端点**越权放行**。实测**推翻**（见漂移台账 §E-1，三条反证）：
  * <ol>
- *   <li>{@code WebAuthConfig.AUTH_WHITELIST} 只有 **13 条精确路径**，**没有任何 {@code /merchant/**}
+ *   <li>{@code WebAuthConfig.AUTH_WHITELIST} 只有 **14 条精确路径**，**没有任何 {@code /merchant/**}
  *       —— 唯一的通配是 {@code /img/**}；</li>
  *   <li>{@code AuthInterceptor.isWhitelisted} 是逐条 {@code MATCHER.match(pattern, uri)}，
  *       **没有前缀短路**；</li>
