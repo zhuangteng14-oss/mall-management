@@ -205,18 +205,18 @@
             <span v-for="p in promiseLabels" :key="p">{{ p }}</span>
           </div>
 
-          <!-- ④【店铺主页】`data-slot` 按稿挂**整张商家卡**（⚠️ 不挂「进店逛逛」那个按钮：
-               角标要 250px、而按钮只有 90px，挂上去会横跨到左边的「客服」和店名；
-               这是「角标只挂区块级」的第三次应验）。标题里的 C3 前缀稿里**有**，逐字保留。
-               ⚠️「客服」是**真功能**（`consultProduct` → `message.send`）⇒ 不 `disabled`；
-                  只有「进店逛逛」无落点 ⇒ `disabled` + 逐字取稿的 title。
+          <!-- ④【店铺主页】—— **C3 块 5 B 组（2026-10-12）已落**：店铺主页 = 新建 `views/ShopHome.vue`，
+               路由 `/shop` 追加在 `router/index.js` **文件尾**。⛔ 本块原先挂着 `data-slot="预留 · 店铺主页…"`
+               与说明「进店逛逛无落点 ⇒ 四处改动超档」的 `title`，**两条随真落点一并撤掉** ——
+               它们描述的病已经治好，留着就是假话。
+               ⚠️ 原注里「按稿挂在**整张商家卡**上、**不挂**『进店逛逛』那个按钮」那条判据**不受本笔影响**
+               （角标要 250px、按钮只有 90px，挂上去会横跨到左边的「客服」和店名 —— 这是「角标只挂
+               区块级」的第三次应验）：本块现已无 `data-slot`，但那条讲的是**角标该挂在哪一层**，仍然有效。
+               ⚠️「客服」从来不在占位里（它一直是 `consultProduct` 真功能）⇒ 不 `disabled`；
+               本笔改的只有「进店逛逛」：它现在是**真按钮**（`enterShop` → `/shop`）。
                ⚠️ 店名与 `.sub` 后半句落真值（`currentItem.UserName` / `goodType`），
-                  摘掉稿里 mock 的「声谷小店」/「数码配件 ·」。 -->
-          <div
-            class="shop"
-            data-slot="预留 · 店铺主页（动现有代码 4 处 · 超档）"
-            title="待 C3〈店铺〉——「进店逛逛」无落点：router/index.js（加路由）+ ProductPage.vue（跳转）+ 商家侧装修入口 + 商家卡数据来源 = 4 处，**超档**，因清单点名而画出（见 README 挂账表）；店铺页本身是新建文件，不计入。⚠️ 「客服」是真功能（message.send），不在此占位内。"
-          >
+               摘掉稿里 mock 的「声谷小店」/「数码配件 ·」—— 与上述撤销无关，依旧有效。 -->
+          <div class="shop">
             <span class="mark">{{ (currentItem.UserName || '商')[0] }}</span>
             <span>
               <span class="nm">{{ currentItem.UserName }}小店</span>
@@ -224,7 +224,7 @@
             </span>
             <span class="ops">
               <button type="button" title="现有功能 consultProduct" @click="consultProduct">客服</button>
-              <button type="button" disabled title="待 C3〈店铺〉——无落点，4 处改动（超档），见商家卡角标">进店逛逛</button>
+              <button type="button" title="真跳转：/shop 店铺主页（新建页 ShopHome，卖家 = 本页 route 的 MerchantId）" @click="enterShop">进店逛逛</button>
             </span>
           </div>
         </div>
@@ -795,7 +795,7 @@ const consultProduct = async () => {
     alert('网络错误，请稍后重试');
   }
 };
-
+const enterShop = () => router.push({ path: '/shop', query: { MerchantId: sellerId } })   // ⚠️ C3 块 5 B 组（2026-10-12）：「进店逛逛」的落点，只有这一处调用方（模板里那颗按钮）。⚠️ 本行**占的**是 `consultProduct` 与 `onMounted` 之间那个**空行**（空行已撤）—— 本文件 `:1032` / `:1107` / `:1330` 等被 `docs/` 按行号引（`slot-registry.md` 引 `:881`/`:890` 那两条同理），任何新增行都会顶漂它们 ⇒ **借一个空行放函数、净零**（同 `:592` 那条 `}; const setPopQtyByCode = …` 的手法）。⚠️ 传的只有 `MerchantId`：`ShopHome` 的店名从商品行的 `UserName` 取，本页不作第二个来源（理由见那一页的 `loadShop`）。
 onMounted(async () => {
   await loadGoodsWithUser();
   loadAllItems();

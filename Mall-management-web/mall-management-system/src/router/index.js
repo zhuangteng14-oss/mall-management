@@ -257,10 +257,10 @@ function searchLanding(to) {
 //    401 出口的落点（`main.js:49`）⇒ 一旦被标成「要登录」，就是**无限重定向**
 //    （未登录 → /login → 守卫又要登录 → /login …）。全站只有这一条会成环。
 //
-// ⚠️ **公开面 = 7 条**（`meta.public: true`）：`/login`、`/register`（C3 块 2〈用户块〉加：与 `/login` **同一个组件、另一个 tab**，记录落在文件尾那块，理由与判据都在那里）、两壳的**首页**子路由、两壳的**搜索**子路由、
-//    `/product`。判据不是感觉，是**后端白名单**：这 7 条下的端点在 `AUTH_WHITELIST` 内（`/register` 靠注册 tab 的 `/user/loginAdd`，`WebAuthConfig.java:101` 已有），匿名
+// ⚠️ **公开面 = 8 条**（`meta.public: true`）：`/login`、`/register`（C3 块 2〈用户块〉加：与 `/login` **同一个组件、另一个 tab**，记录落在文件尾那块，理由与判据都在那里）、两壳的**首页**子路由、两壳的**搜索**子路由、
+//    `/product`、`/shop`（C3 块 5 B 组加，记录同样落在文件尾那块）。判据不是感觉，是**后端白名单**：这 8 条**各自取数用的**端点在 `AUTH_WHITELIST` 内（`/register` 靠注册 tab 的 `/user/loginAdd`，`WebAuthConfig.java:101` 已有），匿名
 //    拿得到数据（`HomePage` 的 `goodsSelectHome`/`goodstype`、`GoodsSelect` 的 `productSearch`、
-//    `ProductPage` 的三个商品端点）。反过来，**保护集 = 「该页全部端点都在白名单外」**——
+//    `ProductPage` 的三个商品端点、`ShopHome` 的**同一个** `goodsSelectHome`）。⚠️ 这条判据说的是**页面的数据面**，不是「页上每个动作都匿名可做」——`/product` 与 `/shop` 页上的写动作（下单 / 咨询 / 关注）本来就在白名单外，前端也是**只在有登录态时才发**。反过来，**保护集 = 「该页全部端点都在白名单外」**——
 //    即 R3 的 `navFor()` 在匿名时已经藏起来的那三项（消息 / 购物车|订单中心 / 用户中心）。
 //    ⚠️ 两处**各自维护、无代码引用关系**（nav 管呈现、守卫管可达）：改一处**回头核另一处**，
 //    不会报错 —— 这是本笔唯一「静默分歧」型的风险。
@@ -564,3 +564,27 @@ router.addRoute({ path: '/register', component: LoginPage, meta: { public: true,
 
 router.addRoute('admin', { path: 'stats', component: () => import('../views/admin/StatsPage.vue'), meta: { key: 'ov', sub: 'stats', title: '经营数据' } })
 router.addRoute('merchantUser', { path: '/merchant/stats', component: () => import('../views/merchant/StatsPage.vue'), meta: { sub: 'stats' } })   // ⚠️ 可视化段 commit 3（2026-10-11，用户裁决 ④）**改了父记录**：commit 2 时是 `addRoute('merchant', { path: 'stats', … meta: { tab: 'stats', layout: 'page' } })` —— 挂 `/merchant` 下 ⇒ **不在**个人中心壳里，只能靠顶栏那项进；用户裁定「放个人中心里」⇒ 改挂 `merchantUser` 下（`matched` 链多出 `UserCenter` ⇒ 左菜单在场、`sub: 'stats'` 点亮「经营数据」）。⚠️ **`path` 写成绝对路径**（`'/merchant/stats'`）而**不是**兄弟那条 `addRoute('customerUser', { path: 'apply', … })` 的相对写法（`'/customer/user/apply'`）：**地址一个字不改**是本笔的硬约束 —— `/merchant/stats` 是 commit 2 **已交付**的地址（`scripts/probes/probe-vis-dashboard.mjs` 与 `docs/agent/evidence/vis-dashboard/page-merchant-stats.png` 按它断言/落图），改地址 = 让那份证据当场作废。vue-router 4 允许子记录写绝对路径（按字面解析，**嵌套渲染关系仍按记录层级**）⇒ 两件事都成立。⚠️ `meta` 只剩 `sub`：`layout` / `tab` 由父记录（`user-page` / `'user'`）合并而来 —— 「经营数据」不再是顶栏项 ⇒ 若自己写 `tab: 'stats'` 会让**所有**顶栏项都不亮（`nav.js` 块首那条判据），写 `'user'` 才对（人在用户中心里）
+
+// ══════════════════════════════════════════════════════════════════════════════════════════
+// ── C3 块 5〈营销块〉B 组 · commit C（2026-10-12）：店铺主页 `/shop` ───────────────────────────
+//
+// ⚠️ **又是「新增行落在最大被引行之后」**（第九次适用）：全仓对 `router/index.js` 的**最大被引行**
+//   是 `:454`（C3 骨架 `/admin` 的 children 末条），而 `routes` 数组、两壳的 `children`、
+//   `ROLE_HOME`、`landingFor`、两条守卫**全在那条线之前** ⇒ 往那里插任何一行都让它们集体漂移。
+//   本记录追加在**文件最尾** ⇒ 连上面那两条（`:565` / `:566`）行号也不动。
+//
+// ⚠️ **照 `:540` 那条 `/register` 的形制**（本仓**唯一**另一条「壳外、顶层、`meta.public`」的记录）：
+//   第一个参数不写 name ⇒ 顶层记录，`matched` 链**只有它自己** ⇒ 不进任何壳（无左菜单、无壳顶栏）。
+//
+// ⚠️ **`meta.public: true` 的判据**：本页**取数**的端点是 `/goods/goodsSelectHome`，它在
+//   `WebAuthConfig.AUTH_WHITELIST` 内 ⇒ 匿名进得来、看得到货（与 `ProductPage` 同一情形 ——
+//   那一页也在公开面，而页上的 `orderAdd` / `message.send` 都不在白名单）。
+//   ⚠️ `ShopHome` 页上的三条 `/shop/*` **不在**白名单 ⇒ 它**只在有登录态时才发**（判据在
+//   `views/ShopHome.vue` 的 `readFollowState` / `toggleFollow`，与 `api/shop.js` 文件头）。
+//
+// ⚠️ **为什么是裸页而不是挂某个壳**：入口之一是 `ProductPage`（`:125`，`meta.public`）——
+//   **未登录的买家本来就能走到商品详情**，挂 `/customer` 壳会被**壳归属守卫**（`:329-334`）
+//   踢去登录页 ⇒ 「进店逛逛」对匿名用户当场断掉。与 `ProductPage` 一致是最小惊讶的选择。
+// ══════════════════════════════════════════════════════════════════════════════════════════
+
+router.addRoute({ path: '/shop', component: () => import('../views/ShopHome.vue'), meta: { public: true } })

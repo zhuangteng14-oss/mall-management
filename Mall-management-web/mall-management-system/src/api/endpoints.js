@@ -239,4 +239,18 @@ export const endpoints = {
     //    `CouponDao.THIS_WEEK`）⇒ 前端不传 ID 列表，也就没有「把定义抄到前端」的机会。
     claimBatch: '/marketing/coupon/claimBatch',
   },
+  // ⚠️ C3 块 5（营销块 · B 组 · commit C，2026-10-12）：**店铺域** 3 条（`@RequestMapping("/shop")`）。
+  //    ⚠️ **单列一组、追加在对象尾** —— 同 `stats` / `marketingCoupon` / `marketing` 各款（往某个组里
+  //    插行会把本文件下面的条目整体下移，而「新增行落在被引行之后」是本仓唯一的零漂移手法）。
+  //    唯一调用方 = 新建的 `api/shop.js`（**非** view 抽取）。
+  //    ⚠️ 三条**全是 POST**：后端 `ShopFollowController` 三个方法都是 `@PostMapping`。
+  //    ⚠️ 三条**每条都跑** `IdentityGuard.requireSelfOrAdmin(request, CustomerId)`
+  //    ⇒ 传**别人的** `CustomerId` 是 **403**（不是「查不到」），与 `marketing` / `cart` / `notification` 同形态。
+  //    ⚠️ **不在** `WebAuthConfig.AUTH_WHITELIST` 里 ⇒ 匿名调它必 401。调用方
+  //    （`ShopHome.vue`）因此**只在已登录时才发**这三条 —— 判据写在 `api/shop.js` 文件头。
+  shop: {
+    follow: '/shop/follow',
+    unfollow: '/shop/unfollow',
+    followState: '/shop/followState',
+  },
 }
