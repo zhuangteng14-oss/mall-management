@@ -84,12 +84,15 @@
       </section>
 
       <!-- ── ③【无名框】7 项（商家版）—— **无块标题**（用户 2026-10-12 定稿「无名框，无块标题」）──
-           ⚠️ 2026-10-12（B 组 commit B 手验三点之③「卡片式统一」）：一格的形状**由「大数字 + 小标签」改成卡片**
-              —— 与「我的订单」四格**同一个卡片**（浅底 `--brand-tint` + `--r2` 圆角 + `--s4` 内边距），
-              卡片自上而下三段：**图标**（`@lucide/vue`）/ **名称**（`b`，--fs-md）/ **值**（`span`，--fs-xs）。
-              用户定稿的卡片解剖「上半：图标；下半：文字（名称 + 可选副文案）」逐条落在此处：
-              名称是原来那枚小标签（积分 / 优惠券 / …），值（券数 / 认证状态 / 进店 / `—`）降为副文案。
-              样式见 <style> 的 `.asset-card`。
+           ⚠️ 2026-10-12（③ 卡片式统一 → 当日第二轮「甲案：上亮下素」）：一格的形状**由「大数字 + 小标签」
+              改成卡片**，本轮再**由「竖向」改成横向行卡** —— 本块与「我的订单」四格**共用同一套三段解剖**
+              （图标 `@lucide/vue` / 名称 `b` / 值 `span`），但**不再共用同一张卡壳**：
+                上半「我的订单」= 浅绿底 `--brand-tint` + 无边框 + `--r2` —— **已验收，本轮一行未动**；
+                本块 = **白底 `--surface` + 1px 发丝线 `--line` + `--r1`** ⇒ 更素（用户定的「上亮下素」）。
+              版式：**图标在左、名称与值两行在右**（名称 `--fs-sm` / `--ink`，值 `--fs-xs` / `--ink-3`；
+              这一档字阶与同页「服务」块 `.svc` 逐值相同）。⇒ 卡片因此**矮掉约三分之一**
+              （≈80px vs 上半 ≈119px）—— 「矮」本身就在说它比上半轻，不靠阴影或加粗去说。
+              模板 `<svg> <b> <span>` 的顺序**一行未改**（横向版式纯靠 CSS 网格，见 <style>「上亮下素」段）。
            布局规则（用户定稿「布局规则」段，逐条落）：一行 4 块 · 超出换行 · 第 2 行不足 4 块**左对齐**（甲）
            · **容器级纵向滚动**（乙）· 隐藏原生滚动条 · **下边缘渐隐**（「与领券中心统一」⇒ 78% 停点）。
            ⇒ 多出来的 `.assets-scroll` **只挂这一份**：用户端那 4 项一行放得下 ⇒ 不滚、不渐隐（样式见 <style>）。
@@ -247,8 +250,10 @@
 
       <!-- ── ③【无名框】4 项（客户版）—— **无块标题**，间距分隔（无线）。稿 `:323-329` ────────────
            ⚠️ C3 块 5 · B 组（2026-10-12）**本块从 ② 下移到 ③**（用户定稿「[无名框]（4 项）← 下」）。
-           ⚠️ 2026-10-12（B 组 commit B 手验三点之③「卡片式统一」）：本块**与商家版那 7 项同款卡片** ——
-              图标 / 名称 / 值三段（`.asset-card`）。原来那句「数字用色」的 `.v` 大字已不成立，随之改掉。
+           ⚠️ 2026-10-12（③ 卡片式统一 → 当日第二轮「甲案：上亮下素」）：本块**与商家版那 7 项同款卡片**
+              —— **白底 + 1px 发丝线 + `--r1`**、横向行卡（图标左 / 名称与值两行右），三段解剖不变。
+              与上半「我的订单」四格的分工见商家版那段注释（上亮下素）。原来那句「数字用色」的
+              `.v` 大字已不成立，随之改掉。
            ⚠️ 4 项一行放得下 ⇒ **不滚、不渐隐**：本节的 `class` **不加** `.assets-scroll`（那一条只挂商家版
               7 项那一份）。这是两壳在样式上的唯一分叉，判据是「项数放不放得下」，不是「谁是商家」。
            ⚠️ 与商家版同一条：稿那 4 个数（1,280 / 3 张 / ¥286.50 / 12 件）是示意值，
@@ -863,31 +868,66 @@ button {
 .ident-btn { margin-left: var(--s6); }
 .file-hidden { display: none; }
 
-/* ── 卡片式统一（2026-10-12，B 组 commit B 手验三点之③）───────────────────────────
-   本页两处「格子」现在**共用同一张卡片**：`.tiles` 的「我的订单」四格 + `.assets` 的无名框 11 格
-   （商家 7 / 客户 4）。卡片自上而下三段：**图标**（`.card-ic`）/ **名称**（`b`）/ **值**（`span`）。
-   ⚠️ `.assets` 原来是「大数字（`.v`，`--d2` 36px）+ 小标签（`.k`）」两行 —— 用户 2026-10-12 定的
-      卡片解剖是「上半：图标；下半：文字（名称 + 可选副文案）」⇒ 名称升为主字、值（券数 / 认证状态 /
-      进店 / `—`）降为副文案。**`.assets .v` 与 `.assets .k` 两条随之删除**（选择器已无命中元素）。
+/* ── 两处「格子」的分工：**上亮下素**（2026-10-12；③ 建的卡片式统一 → 当日第二轮「甲案」改的下半）
+   两处共用**同一套三段解剖**（图标 `.card-ic` / 名称 `b` / 值 `span`），但**不再共用同一张卡壳** ——
+   用户 2026-10-12 定的分工是「上亮下素」：
+     · 上半 `.tiles`（我的订单 4 格）= **浅绿底 + 无边框**（`--brand-tint` / `--r2`），一屏的视觉焦点。
+       已验收 ⇒ 本轮**一行未动**（它那几条在下面自己那段里，本段不再重复声明）。
+     · 下半 `.assets`（无名框：商家 7 / 客户 4 格）= **白底 + 1px 发丝线 + `--r1`**，更素、更矮、更轻。
+   上下差异是**五处**（底色 / 有无边框 / 圆角 / 字阶 / 版式），不是「同一种卡换个颜色」——
+   层级靠**结构装置**说（这里是「矮一半」），不靠阴影和加粗。
+   ⚠️ 版式：下半是**横向行卡**（图标左 / 名称+值右两行左对齐）⇒ 卡片**矮掉约三分之一**
+      （≈80px vs 上半 ≈119px）。矮，本身就是「它比上半轻」那句话。
+   ⚠️ **一条 `box-shadow` 都没有** —— 这不是「懒得加」，是本仓**成文的规矩**：
+      `tokens.css:35-36` 的「用法规矩」原文就是「**禁 · 阴影铺满（改用 1px 发丝线 `--line`）**」
+      + 「禁 · 统一大圆角（只用 `--r1/--r2/--r3`）」；`tokens.css:91` 那行 `--line` 自注的也是
+      「发丝线（**替代阴影的主力**）」。本页「次级」的既有 idiom 同样是描边：
+      `.btn-plain:1003`，以及 ⑥ 账号设置的输入框 `.f input:988`（白底 + 1px + `transition: border-color`）。
+   ⚠️ 名称字色由 `--brand-ink` 降成 `--ink`、字号由 `--fs-md`(19) 降成 `--fs-sm`(15) —— 绿只留给**图标**，
+      下半卡面不再有绿。**字阶与同页 `.svc`（服务块 `:979` / `:981`）逐值相同**
+      （`b` = `--fs-sm`/`--fw-med`/`--ink`，`span` = `margin-top:var(--s2)`/`--fs-xs`/`--ink-3`），
+      只有 `line-height` 不同（`.svc` 是 1.6，这里 1.4）—— 卡片里两行本就紧邻，且 1.4 要进容器高算式。
    ⚠️ 两条 `line-height: 1.4` **必须显式写**：文件尾 `.assets-scroll` 的容器高是拿这批 token 算出来的，
-      行高若走继承值，算式与实际渲染就会对不上（原来 `.v` 写 `line-height: 1` 也是同一理由）。
-   ⚠️ 格距由 `--s6`（32px）收成 `--s3`（12px）—— 与 `.tiles` 同缝宽；**有底色之后** 32px 的缝
-      会把一行拆成四张孤立的卡（无底色的旧版不存在这个问题）。 */
+      行高若走继承值，算式与实际渲染就会对不上。
+   ⚠️ 格距仍是 `--s3`（12px）—— 与 `.tiles` 同缝宽；**有边框之后** 32px 的缝会把一行拆成四张孤立的卡。 */
 .assets { margin-top: calc(var(--s8) * 1.2); display: grid; grid-template-columns: repeat(4, 1fr); gap: var(--s3); }
-.assets > .asset-card { padding: var(--s4); background: var(--brand-tint); border-radius: var(--r2); }
-.assets b, .tiles b { display: block; font-size: var(--fs-md); font-weight: var(--fw-med);
-                      line-height: 1.4; color: var(--brand-ink); }
-.assets span, .tiles span { display: block; margin-top: var(--s2); font-size: var(--fs-xs);
-                            line-height: 1.4; color: var(--ink-2); }
+/* 横向行卡 = 两列网格（`auto` 图标 / `minmax(0,1fr)` 文字块）+ 图标 `grid-row: 1 / span 2` 跨过
+   名称与值那两行 ⇒ **零 DOM 改动**就得到「图标左、名称+值上下两行右」这版式
+   （模板里 `<svg> <b> <span>` 的顺序本就正好是这个，一行未改）。 */
+.assets > .asset-card {
+  display: grid; grid-template-columns: auto minmax(0, 1fr); column-gap: var(--s3);
+  padding: var(--s4); background: var(--surface);
+  border: 1px solid var(--line); border-radius: var(--r1);
+}
+.tiles b { display: block; font-size: var(--fs-md); font-weight: var(--fw-med);
+           line-height: 1.4; color: var(--brand-ink); }
+.tiles span { display: block; margin-top: var(--s2); font-size: var(--fs-xs);
+              line-height: 1.4; color: var(--ink-2); }
+.assets b { display: block; font-size: var(--fs-sm); font-weight: var(--fw-med);
+            line-height: 1.4; color: var(--ink); }
+.assets span { display: block; margin-top: var(--s2); font-size: var(--fs-xs);
+               line-height: 1.4; color: var(--ink-3); }
 /* 卡片图标 —— 边长吃 `--fs-lg`（24px，就是 `@lucide/vue` 的默认边长），色相吃 `--brand`
-   （`tokens.css:102` 那行自己注的就是「**填充**：按钮底、**图标**」⇒ 图标用 `--brand`，
-   文字才用 `--brand-ink`）。`display:block` ⇒ 图标独占一行、名称从下一行起。 */
+   （`tokens.css:100-101` 那两行自己注的就是「填充与文字**必须分开**：`--brand` 用于按钮底、**图标**；
+   `--brand-ink` 用于白/区块底上的**文字**」⇒ 图标用 `--brand`，文字才用 `--brand-ink`）。
+   ⚠️ 这里原来引的是 `tokens.css:102` —— **引错了**：`:102` 是裸的 `--brand: #3b7966;` 赋值行，
+      而那句「**填充**：按钮底、图标」在 **`:271`**，属于 `html[data-theme="admin"]` 的**暗色块**
+      （值也不同，是 `#2f6fed` 蓝）⇒ 本笔顺手重指到亮色块那条（`:100`）。
+   上下半**共用这一条**，各自只加一句定位：
+   上半 `.tiles` 竖向（`margin-bottom: --s3` ⇒ 图标独占一行、名称从下一行起，**保持 ③ 那版不动**）；
+   下半 `.assets` 横向（`grid-row: 1 / span 2` 跨过名称+值两行 + `align-self: center` ⇒ 图标在两行文字左侧居中）。 */
 .card-ic { display: block; width: var(--fs-lg); height: var(--fs-lg); margin-bottom: var(--s3); color: var(--brand); }
+.assets .card-ic { grid-row: 1 / span 2; align-self: center; margin-bottom: 0; }
 /* ⚠️ 「优惠券」那格是 `div[role=button]`（可点）而不是 `<button>` —— 理由见模板里那条注释。
    这里只补「可点」的三个视觉线索（光标 / hover / 键盘焦点环），**尺寸不动**：
-   它得与同一行另外几格逐像素对齐（都是 `.assets` 的 grid 项，宽高由网格定）。 */
-.asset-entry { cursor: pointer; transition: background .15s; }
-.asset-entry:hover, .asset-entry:focus-visible { background: var(--brand-soft); }
+   它得与同一行另外几格逐像素对齐（都是 `.assets` 的 grid 项，宽高由网格定）。
+   ⚠️ hover 换的是**边色不是底色**（`.btn-plain:hover:1004` 与 `.f input:focus` 同款）：底色一变就
+      「又亮回去了」，与「下半更素」自相矛盾，还会和上半 `.tiles` 的 hover 撞语义。
+      ⚠️ 这一处**偏离 `tokens.css:37` 那句「（hover 用底色变化）」的字面** —— 那句的主语是
+      「禁 · **侧边强调条**」，禁的是拿左侧色条当悬停指示；而**本页自己的两处描边元素**
+      （`.btn-plain` / `.f input`）hover 换的都是边色 ⇒ 这里照**页面自己的话**讲，不照那句的字面。 */
+.asset-entry { cursor: pointer; transition: border-color .15s; }
+.asset-entry:hover, .asset-entry:focus-visible { border-color: var(--brand); }
 .asset-entry:focus-visible { outline: 2px solid var(--brand); outline-offset: var(--s2); }
 /* 快过期红点 —— 挂在券数右侧（`1em` ⇒ 跟 `span` 的 `--fs-xs` 同号，不撑行高）。 */
 .wallet-dot { font-style: normal; font-size: 1em; color: var(--danger); margin-left: var(--s1); }
@@ -899,8 +939,9 @@ button {
 .tiles button { display: block; width: 100%; text-align: left; padding: var(--s4);
                 background: var(--brand-tint); border-radius: var(--r2); transition: background .15s; }
 .tiles button:hover:not([disabled]) { background: var(--brand-soft); }
-.tiles b { display: block; font-size: var(--fs-md); font-weight: var(--fw-med); color: var(--brand-ink); }
-.tiles span { display: block; margin-top: var(--s2); font-size: var(--fs-xs); color: var(--ink-2); }
+/* ⚠️ 这里原有一对 `.tiles b` / `.tiles span`（③ 那笔留下的），与上面「上亮下素」段里那两条
+   **逐字重复**（只少了 `line-height: 1.4`，而那一条由上面那份提供）⇒ 本轮删掉，不留两份。
+   计算值零变化的实测见 `docs/agent/evidence/c3-block5/`。 */
 .tiles button[disabled] { cursor: not-allowed; }
 
 /* ── 通用区块 ─────────────────────────────────────────────────────────────── */
@@ -1009,12 +1050,13 @@ button {
    ⚠️ 类**加在 `.assets` 同一个元素上**（`class="assets assets-scroll"`），**不是**外面再套一层 wrapper：
       套一层会让 `.assets` 那条 `margin-top: calc(var(--s8) * 1.2)`（76.8px）落进滚动内容里
       —— 首屏先把 76.8px 空白滚出去，第一行直接被顶出可视区。同类元素两份类 ⇒ 网格与间距全部沿用既有值。
-   ⚠️ 高度**用既有 token 算**，**不拍一个裸 px**：`--assets-row` = 一张卡片的高度 =
-      padding×2（`--s4`）+ 图标（`--fs-lg`）+ 图标下边距（`--s3`）+ 名称（`--fs-md × 1.4`）
-      + 值上边距（`--s2`）+ 值（`--fs-xs × 1.4`）= 32 + 24 + 12 + 26.6 + 8 + 16.8 ≈ **119px**。
-      它**跟着卡片解剖走**：2026-10-12 ③ 把 `.assets` 从「大字 `--d2` + 小标签」改成
-      `.tiles` 同款卡片（图标 / 名称 / 值三段）之后，这个算式就是**同一批 token 的重排**，
-      不是另拍的一行数字 —— 卡片再动，这里跟着动。
+   ⚠️ 高度**用既有 token 算**，**不拍一个裸 px**：`--assets-row` = 一张**横向行卡**的高度 =
+      padding×2（`--s4`）+ 文字块（名称 `--fs-sm × 1.4` + 值上边距 `--s2` + 值 `--fs-xs × 1.4`）
+      + 两条 1px 边框 = 32 + (21 + 8 + 16.8) + 2 ≈ **79.8px**。
+      ⚠️ 算式里**没有 `--fs-lg`（图标）那一项** —— 图标 24px 比文字块 45.8px 矮，卡高由文字块定
+      （图标 `align-self: center` 在两行里居中，不撑高）。**若日后把 `--fs-lg` 调到 45.8 以上，这一项要加回来。**
+      它**跟着卡片解剖走**：③ 建的卡片、当日「甲案」改的横向版式 —— 卡片再动，这里跟着动。
+      ⇒ **同一个 token 算式、值从 119.4 变成 79.8**，因为解剖本身变了，不是另拍一行数字。
       「≈ 一行」的判据是**它不随项数长高**（7 项和 70 项都一样高），不是像素级等于一行。
       再留 `--s3 + --s5`（一个格间距 + 一段）⇒ 露出第 2 行顶部**约三分之一行高**：渐隐要有东西可渐，
       否则渐的是空白、等于没做；这一档也是「与领券中心统一」那一句的落点
@@ -1023,7 +1065,7 @@ button {
    ⚠️ 隐藏滚动条两条与 `ProductPage.vue:1330-1331` 同款；渐隐 78% 停点与领券中心
       （`ProductPage.vue:1032` `.coupons-cut`）逐字相同，`mask-image` / `-webkit-mask-image` **两条都写**。 */
 .assets-scroll {
-  --assets-row: calc(var(--s4) * 2 + var(--fs-lg) + var(--s3) + var(--fs-md) * 1.4 + var(--s2) + var(--fs-xs) * 1.4);
+  --assets-row: calc(var(--s4) * 2 + var(--fs-sm) * 1.4 + var(--s2) + var(--fs-xs) * 1.4 + 2px);
   max-height: calc(var(--assets-row) + var(--s3) + var(--s5));
   overflow-y: auto;
   scrollbar-width: none;
