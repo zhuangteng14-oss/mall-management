@@ -74,20 +74,19 @@
     </section>
 
     <!-- ══════════════════════════════════════════════════════════════════════════════
-         版面顺序（C3 块 5 · ShopHome 布局授权笔，2026-10-12，用户授权整体重排）：
-           ① 本店优惠券 → ② 本店热销（柱状图）→ ③ 本店商品 → ④ 本店折扣 → ⑤ 猜你喜欢
-         两条定序理由：
-           · **② 排在 ③ 之前**：热销榜回答的是「什么值得买」，是**结论**；货架是全量。
-             先结论后全量，且这一块是本页视觉主角，要早出现。
-           · **④ 排在 ③ 之后**：折扣品是「本店商品」的一个**子集** ⇒ 看完货架再给子集才顺。
-         高度节奏：短（头卡）· 短（券）· 中高（图）· 长（网格）· 短（折扣）· 长（猜你喜欢）
-         —— 没有两个同形的块相邻。
-         ⚠️ **「猜你喜欢」在最后是用户的硬约束**（原话：「底部『猜你喜欢』必须在页面最底」）。
-         ⚠️ 原「新品首发」独立模块**已取消**：用户素材表述是「本店商品（含新品红标签）」
-            ⇒ 改成卡上的一枚红签（`isNew`），顺手解掉了上一笔登记的「新品首发与本店商品
-            内容重叠」那条待裁项。 -->
+         版面 = **丙方案定稿**（用户 2026-10-12 第二次授权，逐条对照）：
+           一 · 头卡（不动）  →  二 · 本店券  →  三 · Tab [热销 | 全部 | 折扣]  →  四 · 猜你喜欢
+         用户的四条要点（原文）：
+           · 「头卡 + 本店券 固定在上（不随 tab 切）」
+           · 「Tab 只切中间内容区」
+           · 「猜你喜欢在三个 tab 内容下方 —— 不管切哪个 tab 都显示（或至少默认在『全部』下方）」
+           · 「相对简洁，不像『纵向堆 6 模块』」
+         ⚠️ 本方案**替掉上一版的纵向三块**（热销 / 商品 / 折扣各占一块）：那三块是**互斥地看**的
+            （你一次只关心一件事），纵向堆起来却要三倍滚动，还得各配一条 `<h2>`。
+         ⚠️ 猜你喜欢取的是**「不管切哪个 tab 都显示」**那一支（用户给了「或至少…」的退路，
+            但硬约束是「必须在页面最底」，一直显示最不可能违反它）。 -->
     <div class="wrap">
-      <!-- ── ① 本店优惠券 ───────────────────────────────────────────────────────
+      <!-- ── 二 · 本店优惠券（**不随 tab 切**）────────────────────────────────────
            数据 = `POST /marketing/coupons` 的第 4 参 `MerchantAccount` 传**本店**（`shopId`）——
            与 `ProductPage.vue` 的「领券」行**同一个口径、同一个 `api/marketing.js` 封装**。
            ⚠️ 券包（我已领的）**不在这里** —— 它在用户中心 / 商品页的 `CouponWalletDialog`。
@@ -120,111 +119,136 @@
         <p v-else class="ph">{{ couponsReady ? '本店暂时没有可领的优惠券' : '正在读取…' }}</p>
       </section>
 
-      <!-- ── ② 本店热销：**竖直柱状图**（本笔的设计核心）────────────────────────────
-           用户原话：「本店热销这块要竖的那种。」⇒ 竖直柱：**X 轴 = 商品、Y 轴 = 销量**
-           （不是横条 —— 横条是「横向长度代表销量」，那是另一种图）。
-           数据 = 本店商品按 `SoldQty`（`goodsSelectHome` 那列，LEFT JOIN `order_item` 聚合）
-           降序取 5，**按 `ProductCode` 去重**（演示店 `dRD3gqtbFr` 的 `GD-101-9552` 在 `goods`
-           里两行，不去重同一件耳机要占两个名次）。
-           ⚠️ **一根柱都没有 ⇒ 占位**（用户新规），**不画一个空坐标轴** —— 空轴比一句话更假。
-           ⚠️ **整列可点**（进对应商品）—— 柱子这张图不是装饰，它就是入口。 -->
-      <section class="blk">
-        <h2 class="sec-h">本店热销<i class="sec-note">按销量排序</i></h2>
-        <!-- ⚠️ 整列 = 一个 `<router-link>`：`<a>` 里**不得**嵌交互内容 ⇒ 图 / 柱 / 数值 / 名次
-             全部是 `<span>`（同 `ProductCard.vue` 文件头 ④ 那条，同一处理由）。 -->
-        <div v-if="hotGoods.length" class="chart">
-          <router-link
-            v-for="(g, i) in hotGoods"
-            :key="g.Id"
-            class="col"
-            :to="productLink(g)"
-            :title="g.GoodName"
-          >
-            <span class="col-plot">
-              <span class="col-val">{{ soldOf(g) }}</span>
-              <span class="col-cap"><img v-if="g.GoodImg" :src="g.GoodImg" :alt="g.GoodName" /></span>
-              <span class="col-bar" :class="{ 'col-bar-hero': i === 0 }" :style="{ height: barPct(g) + '%' }"></span>
-            </span>
-            <span class="col-foot">
-              <span class="col-no">{{ i + 1 }}</span>
-              <span class="col-nm">{{ g.GoodName }}</span>
-            </span>
-          </router-link>
-        </div>
-        <p v-else-if="phHot" class="ph">{{ phHot }}</p>
-      </section>
-
-      <!-- ── ③ 本店商品（含分类筛选 + 新品红标签）──────────────────────────────────
-           ⚠️ **不按 `MerchantId` 再请求一次**：`goodsSelectHome` 一次拉全量、前端过滤 —— 与主页 /
-              详情页同一个端点、同一手法（零后端改动，见 `loadShop`）。
-           ⚠️ 分类 chip **本店只要有 1 个类目就画**（「全部」常驻 + 那一类 ⇒ 至少 2 个 chip，
-              点「全部」与点那一类结果相同但**控件是真的**）。改前是「> 1 类才画」，
-              那样本店只有一类时整行消失 —— 同「不静默消失」那条。 -->
+      <!-- ── 三 · Tab 区（**只有这一块随 tab 切**）──────────────────────────────────
+           ⚠️ 栏题是「本店商品」而不是「本店热销」：三个 tab 都在讲同一件事的三种切法
+              （这家店卖什么 / 卖得最好的是哪几件 / 哪几件在打折），栏题要覆盖得住三个。
+           ⚠️ `role="tablist"` + `role="tab"` + `aria-selected`：这三枚是**真 tab**
+              （各带一块互斥内容），不是「看起来像 tab 的链接」。用原生 `<button>`，
+              键盘可达性不靠额外代码。 -->
       <section class="blk">
         <h2 class="sec-h">本店商品</h2>
-
-        <div v-if="categories.length" class="chips">
+        <div class="tabs" role="tablist">
           <button
+            v-for="t in TABS"
+            :key="t.k"
             type="button"
-            class="chip"
-            :class="{ 'chip-on': activeType === '' }"
-            @click="activeType = ''"
-          >全部 <i class="chip-n">{{ goods.length }}</i></button>
-          <button
-            v-for="t in categories"
-            :key="t"
-            type="button"
-            class="chip"
-            :class="{ 'chip-on': activeType === t }"
-            @click="activeType = t"
-          >{{ t }} <i class="chip-n">{{ countOfType(t) }}</i></button>
+            role="tab"
+            class="tab"
+            :class="{ 'tab-on': activeTab === t.k }"
+            :aria-selected="activeTab === t.k ? 'true' : 'false'"
+            @click="activeTab = t.k"
+          >{{ t.label }}</button>
         </div>
 
-        <p v-if="state === 'loading'" class="note">正在载入店铺…</p>
-        <p v-else-if="state === 'error'" class="note note-err">
-          {{ errMsg }}
-          <button type="button" class="retry" @click="loadShop">重试</button>
-        </p>
-        <div v-else-if="goods.length === 0" class="note note-empty">
-          <p>这家店还没有上架商品。</p>
-          <router-link class="retry" :to="getMerchantId() ? '/merchant' : '/customer'">先去逛逛别的</router-link>
+        <!-- 三-a · 热销：**2-1-3 山峰式**竖直柱状图（Top3）──────────────────────────
+             用户原话：「只显示 Top3」·「竖直柱状图，居中排布」·「2-1-3 山峰式
+             （1 名居中、2 名左、3 名右）」·「图片圆头」·「点柱 → 进商品」·
+             「柱底共基线、数值骑柱顶」· 数据不足 → 占位「暂无销售数据」。
+             ⚠️ **视觉顺序 = 2、1、3，但每根柱脚底下写的是它自己的名次** —— 排序是**版式**
+                （把最高的那根放中间才成「山峰」），名次是**事实**（不随版式动）。两者必须分开，
+                否则「左边第一根写着 2」会被读成「左起第一根 = 第 2 名」。
+             ⚠️ 柱底共一条 0 基线、同一比例尺（都除以榜首）⇒ 中间的峰**是数据长的**，不是画上去的
+                台阶。一根柱都没有 ⇒ 占位，**不画一个空坐标轴**（空轴比一句话更假）。
+             ⚠️ 整列 = 一个 `<router-link>`（点柱进商品）：`<a>` 里**不得**嵌交互内容 ⇒
+                图 / 柱 / 数值 / 名次全部是 `<span>`。 -->
+        <div v-if="activeTab === 'hot'" class="pane">
+          <div v-if="hotCols.length" class="chart">
+            <router-link
+              v-for="c in hotCols"
+              :key="c.g.Id"
+              class="col"
+              :to="productLink(c.g)"
+              :title="c.g.GoodName"
+            >
+              <span class="col-plot">
+                <span class="col-val">{{ soldOf(c.g) }}</span>
+                <span class="col-cap"><img v-if="c.g.GoodImg" :src="c.g.GoodImg" :alt="c.g.GoodName" /></span>
+                <span class="col-bar" :class="{ 'col-bar-hero': c.rank === 1 }" :style="{ height: barPct(c.g) + '%' }"></span>
+              </span>
+              <span class="col-foot">
+                <span class="col-no">{{ c.rank }}</span>
+                <span class="col-nm">{{ c.g.GoodName }}</span>
+              </span>
+            </router-link>
+          </div>
+          <p v-else-if="phHot" class="ph">{{ phHot }}</p>
         </div>
-        <!-- 「这个分类下没有商品」是**筛选**的结果，不是这家店空 —— 给一条一键回全的路，
-             不写「没有商品」（那是另一句话，上面那支已经说过了）。 -->
-        <div v-else-if="filteredGoods.length === 0" class="note note-empty">
-          <p>本店「{{ activeType }}」下暂时没有商品。</p>
-          <button type="button" class="retry" @click="activeType = ''">看全部 {{ goods.length }} 件</button>
+
+        <!-- 三-b · 全部：商品网格（**新品靠前**）+ 分类 chip ─────────────────────────
+             ⚠️ **不按 `MerchantId` 再请求一次**：`goodsSelectHome` 一次拉全量、前端过滤 ——
+                与主页 / 详情页同一个端点、同一手法（零后端改动，见 `loadShop`）。
+             ⚠️ 分类 chip **本店有 ≥2 个类目才画**：本笔从改前的「> 1 类」放宽过、
+                又**收窄回 ≥2** —— 因为 Tab 里已经有一个叫「全部」的东西，本店只有一类时
+                chip 行会画成「全部 5 | 电子用品 5」，**两个名字、同一个集合**，纯冗余。
+                多类目时它才是真筛选。 -->
+        <div v-else-if="activeTab === 'all'" class="pane">
+          <div v-if="categories.length > 1" class="chips">
+            <button
+              type="button"
+              class="chip"
+              :class="{ 'chip-on': activeType === '' }"
+              @click="activeType = ''"
+            >全部 <i class="chip-n">{{ goods.length }}</i></button>
+            <button
+              v-for="t in categories"
+              :key="t"
+              type="button"
+              class="chip"
+              :class="{ 'chip-on': activeType === t }"
+              @click="activeType = t"
+            >{{ t }} <i class="chip-n">{{ countOfType(t) }}</i></button>
+          </div>
+
+          <p v-if="state === 'loading'" class="note">正在载入店铺…</p>
+          <p v-else-if="state === 'error'" class="note note-err">
+            {{ errMsg }}
+            <button type="button" class="retry" @click="loadShop">重试</button>
+          </p>
+          <div v-else-if="goods.length === 0" class="note note-empty">
+            <p>这家店还没有上架商品。</p>
+            <router-link class="retry" :to="getMerchantId() ? '/merchant' : '/customer'">先去逛逛别的</router-link>
+          </div>
+          <!-- 「这个分类下没有商品」是**筛选**的结果，不是这家店空 —— 给一条一键回全的路，
+               不写「没有商品」（那是另一句话，上面那支已经说过了）。 -->
+          <div v-else-if="filteredGoods.length === 0" class="note note-empty">
+            <p>本店「{{ activeType }}」下暂时没有商品。</p>
+            <button type="button" class="retry" @click="activeType = ''">看全部 {{ goods.length }} 件</button>
+          </div>
+          <div v-else class="cards">
+            <ProductCard
+              v-for="g in shelfGoods"
+              :key="g.Id"
+              :goods="g"
+              :tag="isNew(g) ? '新品' : ''"
+            />
+          </div>
         </div>
-        <div v-else class="cards">
-          <ProductCard
-            v-for="g in filteredGoods"
-            :key="g.Id"
-            :goods="g"
-            :tag="isNew(g) ? '新品' : ''"
-          />
+
+        <!-- 三-c · 折扣：折扣商品网格（`OriginalPrice` 有值才算）────────────────────
+             判据 = `Number(OriginalPrice) > 0`。
+             ⚠️ 用户写的是「OriginalPrice **非空**」，本笔落的是 `> 0` —— **不是同一条**：
+                全库 43 行 `OriginalPrice` 都是 `0.0`（列早在、值全是 0），按「非空」判会把
+                **43 件全算成折扣**。`0.0` 在库里是「没填」的默认值，不是「打 0 折」。
+             ⚠️ 所以这一格**今天必然是占位**（`本店暂无折扣商品`）—— 代码在、数据没有；
+                占位句是**用户定稿里逐字给的**，不是本笔另写的。 -->
+        <div v-else class="pane">
+          <div v-if="discountGoods.length" class="cards">
+            <ProductCard
+              v-for="g in discountGoods"
+              :key="g.Id"
+              :goods="g"
+              :tag="isNew(g) ? '新品' : ''"
+            />
+          </div>
+          <p v-else-if="phDiscount" class="ph">{{ phDiscount }}</p>
         </div>
       </section>
 
-      <!-- ── ④ 本店折扣 ─────────────────────────────────────────────────────────
-           判据 = `Number(OriginalPrice) > 0`（有划线价才算折扣）。
-           ⚠️ **今天一块都不出**：全库 43 行 `OriginalPrice` **全是 `0.0`**（2026-10-12 实测）
-              ⇒ 本块画的是占位句，**不是**「不渲染」。**不为了让它出现而造数据**（那是编）。 -->
-      <section class="blk">
-        <h2 class="sec-h">本店折扣</h2>
-        <div v-if="discountGoods.length" class="cards">
-          <ProductCard
-            v-for="g in discountGoods"
-            :key="g.Id"
-            :goods="g"
-            :tag="isNew(g) ? '新品' : ''"
-          />
-        </div>
-        <p v-else-if="phDiscount" class="ph">{{ phDiscount }}</p>
-      </section>
-
-      <!-- ── ⑤ 猜你喜欢（别家同类的）—— **用户硬约束：页面最底** ────────────────────
+      <!-- ── 四 · 猜你喜欢（别家同类的）—— **不随 tab 切，且必须在页面最底** ──────────
+           ⚠️ 用户给了「不管切哪个 tab 都显示（或至少默认在『全部』下方）」两条路，本笔取**前者**
+              —— 硬约束是「必须在页面最底」，一直显示最不可能违反它。
            数据 = 全量 `goodsSelectHome` 里 `MerchantId !== 本店` **且** `GoodType === 本店主类目`
-           的，取 4 条。
+           的，取 4 条（**全宽铺开**：4 列铺满 `.wrap` 的 1180px）。
            ⚠️ 这是全页**唯一**取别家数据的地方，也是「逛完这家还有别家」的出口；一条都取不到
               （本店主类目全站独一份 / 本店一件商品都没有）⇒ **占位**，不静默消失。 -->
       <section class="blk">
@@ -241,7 +265,7 @@
 <script setup>
 // ⚠️ 改前的这 6 条 import 是**挤在同一行**的（先例 `HomePage.vue:284` / `ProductPage.vue:459`）。
 //    那手法的用途写得很清楚：本文件 `:19` 被 `scripts/refs-scan.sh` 扫出一条真引用、
-//    必须保住行号 ⇒「能省一行就省一行」。本笔是**整段重写**（758 → 928 行），行号本来就全变，
+//    必须保住行号 ⇒「能省一行就省一行」。本笔是**整段重写**（758 → 935 行），行号本来就全变，
 //    没有要保的行号 ⇒ 拆成多行（可读性 > 省行）。
 // ⚠️ 但**前 23 行仍一字未动**（头注释 + 自带顶栏）：`ShopHome.vue:19` 那一行写着 `tokens.css:35`
 //    （「禁 · 嵌套卡片」）这条引用，`docs/agent/evidence/c3-block5/block5-f-shophome-modules.md:137`
@@ -283,8 +307,25 @@ const isSelf = computed(() => !!buyerId && buyerId.toLowerCase() === shopId.toLo
 //    三处必须一起改，`api/auth.js` 是唯一允许读身份的地方。
 const couponAccount = getUsername() || ''
 
-/** 热销榜取几根柱。⚠️ 5 是图表规范的推荐区间（5–8 根）的下沿 —— 再多这一块会抢过货架。 */
-const HOT_LIMIT = 5
+/**
+ * 三个 tab。
+ * ⚠️ 顺序 = 用户定稿的顺序（`[热销] [全部] [折扣]`），**默认停在第一个** —— 「先给结论
+ *    （卖得最好的是哪几件），再给全量」。
+ * ⚠️ `activeTab` 存的是 `k` 而不是中文：中文是**标签**（会改），`k` 是**键**（不该改），
+ *    判等写在键上 ⇒ 改文案不会把 tab 状态打散。
+ */
+const TABS = [
+  { k: 'hot', label: '热销' },
+  { k: 'all', label: '全部' },
+  { k: 'discount', label: '折扣' }
+]
+const activeTab = ref('hot')
+
+/**
+ * 热销榜取几根柱 —— 用户定稿「**只显示 Top3**」。
+ * ⚠️ 改前是 5（图表规范推荐的 5–8 根）。定稿把它压到 3：3 根才摆得出「2-1-3」这座山峰。
+ */
+const HOT_LIMIT = 3
 /**
  * 最高那根柱占**图区高度**的百分比。
  * ⚠️ 为什么不是 100：柱顶上面还要站「数值 + 圆形商品图」（见 `.col-plot` 那条注释），
@@ -292,7 +333,7 @@ const HOT_LIMIT = 5
  * ⚠️ 所有柱共用**同一个**比例尺（都除以最大值）⇒ 柱间高度比是真的，只是整体没顶到框顶。
  */
 const BAR_MAX_PCT = 60
-/** 「新品」红签最多几件。见 `NEW_MAX` 那条注释。 */
+/** 「新品」红签最多几件。见 `newCount` 那条注释。 */
 const NEW_MAX = 3
 
 const goods = ref([])
@@ -308,10 +349,10 @@ const errMsg = ref('')
 /** `/shop/profile` 的载荷；**取不到就留 `null`** ⇒ 头卡那几项各判各的（不把整页打成 error）。 */
 const info = ref(null)
 const shopCoupons = ref([])
-/** 券**问过了**（不管问出几张）—— 用来区分「还在读」与「读了是空的」。见 ① 那块的三句话。 */
+/** 券**问过了**（不管问出几张）—— 用来区分「还在读」与「读了是空的」。见 二 那块的三句话。 */
 const couponsReady = ref(false)
 const claiming = ref('')
-/** 分类筛选的当前值；`''` = 全部。⚠️ 只筛「本店商品」那一格，不动热销 / 折扣 / 猜你喜欢。 */
+/** 分类筛选的当前值；`''` = 全部。⚠️ 只筛「全部」那个 tab 的网格，不动热销 / 折扣 / 猜你喜欢。 */
 const activeType = ref('')
 
 /**
@@ -407,6 +448,19 @@ const hotGoods = computed(() =>
 const hotMax = computed(() => (hotGoods.value.length ? soldOf(hotGoods.value[0]) : 0))
 
 /**
+ * 柱的**渲染序** = 「2-1-3 山峰式」（用户定稿：1 名居中、2 名左、3 名右）。
+ * ⚠️ **只重排版式，不动名次**：每根柱自带 `rank`（1 起），柱脚底下写的是 `rank` 而不是下标
+ *    —— 两者混了的话，「左边第一根」会被读成「第 1 名」。
+ * ⚠️ **不足 3 根不摆山峰**（1 根 / 2 根时「中间那根」没有定义）⇒ 按名次原序排。
+ *    判据写死（`length === 3`），不是「大概齐」。
+ */
+const hotCols = computed(() => {
+  const base = hotGoods.value.map((g, i) => ({ g, rank: i + 1 }))
+  if (base.length !== 3) return base
+  return [base[1], base[0], base[2]]
+})
+
+/**
  * 某根柱的高度百分比 = 自己 ÷ 榜首 × `BAR_MAX_PCT`。
  * ⚠️ 比例尺**从 0 起**（图表规范：截断的轴会撒谎）⇒ 这根柱一定是榜首那根的几分之几，
  *    不是「在最小值和最大值之间插值」那种会把 1 件和 10 件画得差不多的做法。
@@ -422,9 +476,11 @@ const barPct = (g) => {
  * ⚠️ 这条分母**不是随手取的**：`goods` 表**没有时间列**（基线 8 列 + 3 处迁移加列，2026-10-12
  *    全查过），唯一可复核的代理是 `Id` —— 它是 `AUTO_INCREMENT`（`mall_management_sql.sql:55`）
  *    ⇒ **同一家店内 `Id` 越大 = 越晚入库**。
+ *    ⚠️ 用户定稿这一行写的是「**created_at 近 3 天优先**」—— **那个字段不存在**，
+ *       本笔落的是这条 `Id` 代理，并登记为待裁（要真上架时刻得给 `goods` 加时间列、
+ *       且不回填存量，那是另一笔 = 建表硬线，须用户点头）。
  * ⚠️ 但「最新的 N 件」若 N 固定，5 件货的店会有 3 件挂着「新品」—— 那枚签就没有信息量了。
  *    ÷3 保证它**永远是少数**：5 件 ⇒ 1 件，9 件 ⇒ 3 件，43 件 ⇒ 3 件（封顶）。
- * ⚠️ 要真上架时刻得先给 `goods` 加时间列（且不回填存量），那是另一笔。
  */
 const newCount = computed(() => Math.min(NEW_MAX, Math.floor(goods.value.length / 3)))
 
@@ -444,7 +500,24 @@ const isNew = (g) => {
   return newKeys.value.has(String(g.ProductCode || '') || 'id:' + g.Id)
 }
 
-/** 折扣专区：有划线价（`OriginalPrice > 0`）的。⚠️ 当前库 0 行（见模板 ④ 的注释）。 */
+/**
+ * 「全部」tab 的**摆法**：新品靠前（用户定稿「新品靠前排序」），其余保持原序。
+ * ⚠️ 用**稳定分区**而不是 `sort`：JS 的 `sort` 从 ES2019 起才是稳定的，但这里根本不需要
+ *    比较函数 —— 「是不是新品」是个布尔，分成两堆再拼起来，**组内原顺序天然不动**，
+ *    比写一个 `(a, b) => isNew(b) - isNew(a)` 更好读，也不可能因为比较函数写错而乱掉。
+ * ⚠️ 判据（`isNew`）来自**全店**商品，不随当前分类 chip 变 —— 换 chip 不该改变一件货的
+ *    「新品」身份。
+ */
+const shelfGoods = computed(() => {
+  const list = filteredGoods.value
+  if (!newCount.value) return list
+  const fresh = []
+  const rest = []
+  list.forEach((g) => (isNew(g) ? fresh : rest).push(g))
+  return fresh.concat(rest)
+})
+
+/** 折扣 tab：有划线价（`OriginalPrice > 0`）的。⚠️ 当前库 0 行（见模板 三-c 的注释）。 */
 const discountGoods = computed(() => goods.value.filter((g) => Number(g.OriginalPrice) > 0))
 
 /**
@@ -497,8 +570,8 @@ const facts = computed(() => {
 
 /**
  * 空块那一行话的**统一出口**（载入中 / 就绪但空 / 出错三种）。
- * ⚠️ 出错时回**空串**（⇒ 那一块整行不渲染）：主块（本店商品）已经把错误 + 重试按钮放在手边了，
- *    每一块再喊一遍「没取到」只是噪音。
+ * ⚠️ 出错时回**空串**（⇒ 那一块整行不渲染）：主块（「全部」那一格）已经把错误 + 重试按钮
+ *    放在手边了，每一块再喊一遍「没取到」只是噪音。
  * ⚠️ 载入中不冒充「没有」：`loading` 时说「正在读取…」—— 这也正是用户那条
  *    「占位 ≠ 造假」的边界。
  */
@@ -508,8 +581,10 @@ const phText = (has, text) => {
   return has ? '' : text
 }
 
-const phHot = computed(() => phText(hotGoods.value.length > 0, '本店还没有销售记录'))
-const phDiscount = computed(() => phText(discountGoods.value.length > 0, '本店暂时没有折扣商品'))
+// ⚠️ 热销 / 折扣两句是**用户定稿里逐字给的**（「暂无销售数据」/「本店暂无折扣商品」），
+//    不是本笔另写的。
+const phHot = computed(() => phText(hotGoods.value.length > 0, '暂无销售数据'))
+const phDiscount = computed(() => phText(discountGoods.value.length > 0, '本店暂无折扣商品'))
 const phRecommend = computed(() => phText(recommend.value.length > 0, '暂时没有可推荐的同类商品'))
 
 /**
@@ -756,7 +831,7 @@ button { background: none; border: 0; cursor: pointer; }
    ⚠️ 「已关注」**退回描边**、不保持实心：它是个**状态**，不再是一次邀请 ——
    一个常亮的实心按钮会一直喊「点我」，而这里已经没有可做的动作。
    ⚠️ 两态都**不吃** `--accent`（朱砂在本仓只负责价格 / 促销 / 未读）。
-   ⚠️ 「全页唯一实心块」那句**本笔已收窄为「头卡里唯一」**：热销榜**榜首那根柱**也用实心
+   ⚠️ 「全页唯一实心块」那句**已收窄为「头卡里唯一」**：热销榜**榜首那根柱**也用实心
       `--brand`（见 `.col-bar-hero`）。两者不冲突的理由写在那一处 —— 柱是**数据标记**，
       没有任何可点的暗示；而这条纪律要管的是**控件**之间抢注意力。 */
 .act-on { background: var(--brand); border-color: var(--brand); color: #fff; }
@@ -782,25 +857,43 @@ button { background: none; border: 0; cursor: pointer; }
 
 .wrap { max-width: 1180px; margin: 0 auto; padding: var(--s6) var(--s5) var(--s8); }
 .sec-h { font-family: var(--font-display); font-size: var(--fs-lg); font-weight: var(--fw-med); line-height: 1.3; }
-/* 栏题右侧那半句说明（「按销量排序」）—— 它给的是这一块的**判据**，不是装饰 ⇒
+/* 栏题右侧那半句说明（「别家的电子用品」）—— 它给的是这一块的**判据**，不是装饰 ⇒
    用最浅一档灰、字号降到 `--fs-xs`，别跟栏题抢。 */
 .sec-note { margin-left: var(--s2); font-style: normal; font-size: var(--fs-xs); font-weight: var(--fw-reg); color: var(--ink-3); }
 
 /* ── 分块间距 ────────────────────────────────────────────────────────────────
    ⚠️ 用**相邻兄弟**（`+`）而不是 `.blk { margin-top }`：第一块不该在 `.wrap` 的顶内边距之上
-   再叠一层（那样首块会比设计稿低 48px）。块间距（48）> 块内间距（24）⇒ 一眼能看出分了几块。 */
+   再叠一层（那样首块会比设计稿低 48px）。块间距（48）> 块内间距（24）⇒ 一眼能看出分了几块。
+   ⚠️ 丙方案下只剩三块（券 / Tab 区 / 猜你喜欢）⇒ 相邻关系只有两处。 */
 .blk + .blk { margin-top: var(--s7); }
+
+/* ── 三 · Tab 条 ─────────────────────────────────────────────────────────────
+   ⚠️ 形制选的是**下划线式**，不是胶囊 / 分段控件：
+     · 胶囊（药丸圆角）落在 `tokens.css:36` 那几条「不做」的射程内（统一大圆角）；
+     · 分段控件要在外面再套一层带底的容器 ⇒ 又一种「容器套容器」，
+       而这一页刚刚才把「纵向堆三块、各配一条栏题」的容器感减下去，不该在这里加回来。
+   ⚠️ 指示条是**底边**那 2px（贴着 tab 自己的左右缘），不是侧边强调条 —— `tokens.css:37` 禁的是
+      「卡片 / 提示左缘那根竖条」，不是 tab 的选中态。
+   ⚠️ 整条横线（`border-bottom`）铺满内容宽、选中的那一格把自身的 2px 压在它上面
+      （`bottom: -1px`）⇒ 选中态是「接上了这条线」，不是「浮在线上」。 */
+.tabs { margin-top: var(--s4); display: flex; gap: var(--s6); border-bottom: 1px solid var(--line); }
+.tab { position: relative; padding: var(--s3) 0; font-size: var(--fs-sm); color: var(--ink-3);
+       white-space: nowrap; transition: color .15s; }
+.tab:hover { color: var(--ink-2); }
+.tab-on { color: var(--ink); font-weight: var(--fw-med); }
+.tab-on::after { content: ''; position: absolute; left: 0; right: 0; bottom: -1px;
+                 height: 2px; background: var(--brand); }
 
 /* ── 占位（用户新规：数据不足 → 占位，不静默消失）─────────────────────────────
    ⚠️ 一句**素话**，不套框、不配色、不加图标：占位是「这里本该有东西」的**说明**，
    不是内容本身 —— 给它一个卡框，就等于把「没有」画成了「有」。
-   ⚠️ 文案一律**据实**（见 `<script>` 的 `phText` 与模板 ①②④⑤ 四处）：
+   ⚠️ 文案一律**据实**（见 `<script>` 的 `phText` 与模板三处占位）：
    「正在读取…」≠「没有」，「登录后可领」≠「本店没有券」。 */
 .ph { margin-top: var(--s5); font-size: var(--fs-sm); color: var(--ink-3); }
 .ph-link { margin-left: var(--s3); color: var(--brand-ink); text-decoration: none; }
 .ph-link:hover { text-decoration: underline; }
 
-/* ── ① 本店优惠券 ────────────────────────────────────────────────────────────
+/* ── 二 · 本店优惠券 ─────────────────────────────────────────────────────────
    与主页「领券中心」的 `.tk` 同一个视觉语言（`--surface` 底 + 1px `--line` + `--r2`），
    但**不共用那份 CSS**：那边是「横向条 + 越位渐隐 + `》` 展开」的版式，这里最多 3 张、
    且是本店专属 ⇒ 直接换行铺开，不需要裁切那套。 */
@@ -829,12 +922,13 @@ button { background: none; border: 0; cursor: pointer; }
            background: var(--brand-soft); white-space: nowrap; }
 .cpn-get:disabled { color: var(--ink-3); background: var(--surface-3); border-color: var(--line-2); cursor: default; }
 
-/* ══ ② 本店热销：**竖直柱状图** ═══════════════════════════════════════════════
-   用户原话「本店热销这块要竖的那种」⇒ X 轴 = 商品、Y 轴 = 销量。
+/* ══ 三-a 热销：**2-1-3 山峰式**竖直柱状图 ═══════════════════════════════════
+   用户定稿：「只显示 Top3」·「竖直柱状图，居中排布」·「2-1-3 山峰式」·「图片圆头」·
+   「点柱 → 进商品」·「柱底共基线、数值骑柱顶」。
+   竖向柱：**X 轴 = 商品、Y 轴 = 销量**（横条是「横向长度代表销量」，那是另一种图）。
 
    ⚠️ 每一列的**自下而上**是：柱 → 圆形商品图 → 数值。柱底**共一条 0 基线**，柱高同一个
-      比例尺 ⇒ 图与图之间的高低差就是销量差，「领奖台」那个感觉是从**数据**来的，
-      不是画上去的台阶。数值与圆图都**骑在自己那根柱的顶上**跟着走，所以三列会一起错落。
+      比例尺 ⇒「山峰」是**数据长的**，不是画上去的台阶。
 
    ⚠️ **图表规范的取材**（本笔联网查的，逐条对上，来源见交付说明）：
       · 「Always start the value axis at zero」⇒ 比例尺从 0 起（`barPct` 除以榜首，不是插值）
@@ -842,19 +936,20 @@ button { background: none; border: 0; cursor: pointer; }
       · 「slight rounding on top only」4px、基线方角 ⇒ `--r1 --r1 0 0`
       · 「Rounding the top of a bar **suggests the value is rounded**」⇒ 圆的只有**商品图**，
         柱子本身仍是直边；数字给的是精确值，两者不冲突
-      · 「Limit to 5–8 bars」⇒ `HOT_LIMIT = 5`
+      · 「Order bars by value」⇒ 降序（本笔再按用户的 2-1-3 重排**版式**，名次不动）
       · 「reserving a highlight color for a hero bar」+「text should never wear the data color」
         ⇒ 榜首那根走 `--brand`，其余 `--surface-3`；数值一律 `--ink-2`
       · 轴 / 标签走既有 token：基线 `--axis-line`、名次 `--ink-3`、名 `--ink-2`
 
-   ⚠️ `.chart` 用 `fit-content` **不是**铺满 1180：只有 3–5 根柱时铺满会让柱间空得能跑马。
+   ⚠️ `.chart` 用 `fit-content` **不是**铺满 1180，再加 `margin: … auto` **居中**（用户
+      「居中排布」）：三根柱铺满 1180 会让柱间空得能跑马，而居中的一峰两肩本来就该窄。
       `grid-auto-columns: 184px` 固定列宽 ⇒ 柱与柱的间距**不随柱数变化**。
       ⚠️ 184 这个数是**量出来的、不是拍的**：`.col-foot` 的内容宽 = 184 − 2×`--s3`(12) = 160，
         再让给名次（`--fs-xs` 的「1」≈ 8px）+ `--s2` 间距 ⇒ 商品名拿到约 **146px**，
         够「无线蓝牙耳机 声谷标准版」这种最长的名字**两行排完**且不把「标准版」切成「标/准版」。
-        改前是 168 + `--s4` 内边距（名宽 ≈ 122px）⇒ 截图里「声谷标准版」与「65W 双口」
-        都被断在半个词上。5 根柱时 5×184 + 4×24 = 1016 ≤ 1180，仍装得下。 */
-.chart { --chart-h: 340px; margin-top: var(--s5); position: relative; width: fit-content;
+        （168 + `--s4` 内边距时名宽只有 ~122px ⇒ 截图里「声谷标准版」与「65W 双口」
+        都被断在半个词上。）3 根柱时 3×184 + 2×24 = 600 ≤ 1180，居中后左右各留一片空。 */
+.chart { --chart-h: 340px; margin: var(--s5) auto 0; position: relative; width: fit-content;
          display: grid; grid-auto-flow: column; grid-auto-columns: 184px; column-gap: var(--s5); }
 /* 0 基线：**贯穿整行**的一条 1px。⚠️ 不能逐列各画一段 —— 列间有 `column-gap`，逐列画会在
    gap 处断成虚线，而「所有柱从同一条 0 线长出来」正是这张图要说的第一件事。
@@ -867,7 +962,7 @@ button { background: none; border: 0; cursor: pointer; }
    ⚠️ `--chart-h` 必须是**确定高度**：柱的 `height: N%` 是按它算的（百分比要有确定的父高）。 */
 .col-plot { height: var(--chart-h); display: flex; flex-direction: column;
             justify-content: flex-end; align-items: center; padding: 0 var(--s4); }
-/* 数值 —— 骑在柱顶。⚠️ `--font-mono` + `tabular-nums`：五根柱的数字要能纵向对得上；
+/* 数值 —— 骑在柱顶。⚠️ `--font-mono` + `tabular-nums`：三根柱的数字要能纵向对得上；
    ⚠️ 颜色是 `--ink-2` **不是**柱色：图表规范写明「文字不该穿数据的颜色」。
    ⚠️ 显式 `line-height`：等宽族与本页正文不同族（同 `.hd-nm` / `.cpn-face` 那两处）。 */
 .col-val { flex: none; margin-bottom: var(--s2); font-family: var(--font-mono); font-size: var(--fs-sm);
@@ -884,29 +979,33 @@ button { background: none; border: 0; cursor: pointer; }
 .col-bar { flex: none; width: 96px; border-radius: var(--r1) var(--r1) 0 0; background: var(--surface-3);
            transition: background .15s; }
 /* 榜首那根 —— 全页**第二处**实心 `--brand`（第一处是头卡的「关注」按钮）。
+   ⚠️ 判据是 `rank === 1` **不是下标 0**：2-1-3 山峰式下，名次 1 的那根**在中间**
+      （见 `<script>` 的 `hotCols`）。按下标写会把 hero 色画到「左边第一根」上。
    ⚠️ 为什么不算破坏「一个实心块」那条纪律：那条管的是**控件**之间抢注意力（按钮喊「点我」），
       柱是**数据标记**、没有任何可点的暗示；而图表规范本身也建议给「hero bar」一个高亮色。
-      两者在截图里是否真的互相压住，是**量出来的**，不是断言的（见交付说明的自评）。 */
+      两者在截图里是否真的互相压住，是**量出来的**（`--brand` = `#3b7966` 低饱和墨绿、
+      「关注」是右上角 34px 高的描边小按钮）—— 实测**不打架**。 */
 .col-bar-hero { background: var(--brand); }
 .col:hover .col-bar { background: var(--line-2); }
 .col:hover .col-bar-hero { background: var(--brand-hover); }
 /* 轴下方：名次 + 商品名。
    ⚠️ 左内边距 `--s3` **故意比 `.col-plot` 的 `--s4` 小一档**（不是为了对齐，是为了给名字让宽）：
    列宽固定 184 ⇒ 每一像素都是从商品名身上拿的，而轴下这行是全图**唯一需要排中文**的地方。
-   两行截断（`.col-nm`）兜住更长的名字 —— 名字不换行/不省略号，因为「标准版」被吃掉
+   两行截断（`.col-nm`）兜住更长的名字 —— 名字不换行 / 不省略号，因为「标准版」被吃掉
    会让人分不清是哪一件（那件 299 的耳机有两行同码记录，名字正是唯一的区分）。 */
 .col-foot { display: flex; align-items: baseline; gap: var(--s2); padding: var(--s3) var(--s3) 0; }
-/* 名次 —— 一枚最轻的数字。⚠️ 不吃 `--accent`：朱砂管价格 / 促销 / 未读，名次不是那三类。 */
+/* 名次 —— 一枚最轻的数字。⚠️ 不吃 `--accent`：朱砂管价格 / 促销 / 未读，名次不是那三类。
+   ⚠️ 写的是 `rank`（事实），不是渲染序下标（版式）—— 见 `hotCols` 那条注释。 */
 .col-no { flex: none; font-family: var(--font-mono); font-size: var(--fs-xs); color: var(--ink-3);
           font-variant-numeric: tabular-nums; }
 .col-nm { font-size: var(--fs-xs); line-height: 1.4; color: var(--ink-2);
           display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 .col:hover .col-nm { color: var(--ink); }
 
-/* ── ③ 分类筛选 chip ─────────────────────────────────────────────────────────
+/* ── 三-b 分类筛选 chip（**只在 ≥2 个类目时渲染**，理由见模板那条注释）────────────────
    选中态走 `--brand-soft` + `--brand-ink` **不是**实心 `--brand` —— 实心留给了「关注」与
    榜首那根柱（见那两处注释）；chip 再抢一个，那两处就没力了。 */
-.chips { margin-top: var(--s4); display: flex; flex-wrap: wrap; gap: var(--s2); }
+.chips { margin-bottom: var(--s5); display: flex; flex-wrap: wrap; gap: var(--s2); }
 .chip { height: 30px; padding: 0 var(--s4); border: 1px solid var(--line); border-radius: var(--r1);
         background: var(--surface); font-size: var(--fs-xs); color: var(--ink-2);
         white-space: nowrap; transition: border-color .15s, background .15s, color .15s; }
@@ -916,8 +1015,9 @@ button { background: none; border: 0; cursor: pointer; }
 .chip-n { font-style: normal; color: var(--ink-3); font-variant-numeric: tabular-nums; }
 .chip-on .chip-n { color: var(--brand-ink); }
 
-/* 三态（载入 / 报错 / 空）—— 空态是**一次邀请**（给一个真能走的去处），不是一句情绪；
-   报错说清是什么没成、并把重试放在手边，不道歉也不含糊。 */
+/* ── 三-b 三态（载入 / 报错 / 空）────────────────────────────────────────────
+   空态是**一次邀请**（给一个真能走的去处），不是一句情绪；报错说清是什么没成、
+   并把重试放在手边，不道歉也不含糊。 */
 .note { margin-top: var(--s5); font-size: var(--fs-sm); color: var(--ink-3); }
 .note-err { color: var(--danger); }
 .note-empty p { margin-bottom: var(--s3); }
@@ -927,9 +1027,16 @@ button { background: none; border: 0; cursor: pointer; }
 .retry:hover { border-color: var(--ink-3); color: var(--ink); }
 .note-err .retry { margin-left: var(--s2); }
 
-/* ── ③④⑤ 商品格 —— `.cards` 是**栅格**（版面），`.card` 本体已搬进 `src/components/ProductCard.vue`。
-   ⚠️ 自本笔起这一段的注释不再说「与 `ProductPage.vue` 的 `.card` 同一套形制」—— 那句话改前是**错的**
-   （改前实测：本页卡 1/1 图、无框、整值价；主页卡 4/3 图、有框、三段价），收成一件之后
-   「三处一致」是**结构**保证的，不靠注释声明。 */
+/* ── 三-b / 三-c / 四 商品格 —— `.cards` 是**栅格**（版面），`.card` 本体已搬进
+   `src/components/ProductCard.vue`。
+   ⚠️ 自「商品卡收成一个组件」那一笔起这一段的注释不再说「与 `ProductPage.vue` 的 `.card`
+   同一套形制」—— 那句话改前是**错的**（改前实测：本页卡 1/1 图、无框、整值价；主页卡 4/3 图、
+   有框、三段价），收成一件之后「三处一致」是**结构**保证的，不靠注释声明。
+   ⚠️ 猜你喜欢「**全宽铺开**」= 这一条栅格（4 列铺满 `.wrap` 的 1180px），不是铺到视口边。 */
 .cards { margin-top: var(--s5); display: grid; grid-template-columns: repeat(4, 1fr); gap: var(--s5); }
+/* ⚠️ chip 行在时它自己已经带了 `margin-bottom`，栅格的上边距就不该再叠一层（否则第一排
+   商品被顶低 24px）。用**相邻兄弟**判，不靠「有没有 chip」的 if。 */
+.chips + .cards, .chips + .note { margin-top: 0; }
+/* tab 面板本身**不设边距** —— 让里面各块自己的 `margin-top` 说话（`.cards` / `.chart` / `.ph`
+   各有一套），少一层容器就少一处要对齐的间距。 */
 </style>

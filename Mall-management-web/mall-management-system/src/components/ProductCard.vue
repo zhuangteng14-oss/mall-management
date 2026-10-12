@@ -160,7 +160,9 @@ const soldQty = computed(() => Number(props.goods.SoldQty) || 0)
 .pcard-tag {
   position: absolute;
   top: var(--s2);
-  left: var(--s2);
+  /* ⚠️ **右上角**（丙方案定稿，2026-10-12 从 `left` 改过来）：用户原话「新品红标签在图片
+     右上角」。右下角是价钱那侧、左上角与读图动线的起点撞在一起，右上角是这枚签最不挡货的地方。 */
+  right: var(--s2);
   height: 20px;
   line-height: 20px;
   padding: 0 var(--s2);
