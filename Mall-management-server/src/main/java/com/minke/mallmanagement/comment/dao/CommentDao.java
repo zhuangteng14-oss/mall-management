@@ -524,4 +524,40 @@ public class CommentDao {
         return jdbcClient.sql("UPDATE `comment` SET `DislikeCount` = GREATEST(`DislikeCount` + ?, 0) WHERE `Id` = ?")
                 .params(delta, commentId).update();
     }
+
+    // ==================== 读 / 写：@ 关系（comment_mention，块 6 commit 3） ====================
+
+    /**
+     * 落一条 @ 关系（方案 §4.1「@ 由后端自动生成」）—— 一行 = 「这条评论 @ 了这个人」。
+     *
+     * <p>⚠️ 本表**没有唯一键**（DDL 只有两个普通索引）⇒ 同一 {@code (CommentId, MentionedId)} 可以出现
+     * 多次。本域**不会**造出重复：{@link com.minke.mallmanagement.comment.service.CommentService}
+     * 对一条评论只解析**一个**被 @ 人、只插**一次**。故这里不加 {@code INSERT IGNORE} / {@code ON DUPLICATE}
+     * —— 那是为「允许重复」准备的写法，用在这里反而会掩盖调用方真的插了两次。
+     *
+     * <p>⚠️ {@code MentionedId} 是**登录名**（对齐 {@code login.UserName}，DDL 注释逐字），
+     * 不是业务号 —— 与调用方解析出的那一列同一个键。
+     */
+    public int insertMention(long commentId, String mentionedId) {
+        return jdbcClient.sql("INSERT INTO `comment_mention` (`CommentId`, `MentionedId`) VALUES (?, ?)")
+                .params(commentId, mentionedId).update();
+    }
+
+    /**
+     * 商品的商家**登录名**（{@code comment.TargetType='goods'} 时「@ 该商品商家」的解析）。
+     *
+     * <p>路径 = {@code goods.Id → goods.MerchantId（业务号）→ user.merchantid → user.username（登录名）}。
+     * ⚠️ 中间那一跳**不能省**：{@code goods.MerchantId} 存的是**商家的业务号**
+     * （本类注释「三个账号」一节逐字），与 {@code comment.AuthorId} 要写的**登录名**不是同一个键。
+     *
+     * <p>商品不存在 / 该商品没挂到任何商家 ⇒ {@code null}（调用方据此**不 @ 任何人**，
+     * 而不是 @ 一个空串）。
+     */
+    public String selectMerchantUsernameByGoodsId(long goodsId) {
+        List<String> rows = jdbcClient.sql("SELECT u.`username` FROM `goods` g "
+                        + "JOIN `user` u ON u.`merchantid` = g.`MerchantId` "
+                        + "WHERE g.`Id` = ? LIMIT 1")
+                .param(goodsId).query(String.class).list();
+        return rows.isEmpty() ? null : rows.get(0);
+    }
 }

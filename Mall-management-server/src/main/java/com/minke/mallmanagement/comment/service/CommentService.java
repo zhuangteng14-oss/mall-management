@@ -21,7 +21,8 @@ import java.util.Map;
 import java.util.UUID;
 
 /**
- * 内容域的服务层（C3 块 6 · commit 1「评论」）—— <b>业务规则 + 响应组装</b>。
+ * 内容域的服务层（C3 块 6 · commit 1「评论」/ commit 2「问答」/ commit 3「@ 自动生成」）
+ * —— <b>业务规则 + 响应组装</b>。
  * 路由与入参绑定在 {@code CommentController}，数据访问全在 {@link CommentDao}；
  * 字面量（{@code TargetType} / {@code Kind} / 状态 / 角色）一律引 {@link CommentKinds}。
  * 契约与规则见 {@code docs/agent/context-packs/块6参考.md}（下称「方案」）。
@@ -259,6 +260,10 @@ public class CommentService {
             String tid;
             String kind;
             boolean merchantFirst = false;
+            // @ 自动生成（方案 §4.1）的被 @ 人 —— 登录名。三条规则各在下面两个分支里解析出来
+            // （顶层 → 商品商家 / 留言板主；回复 → 顶层作者；回复回复 → 被回复人）。
+            // 解析不出来（商品不存在 / 留言板主查无）时为 null ⇒ {@link #recordMention} 不 @ 任何人。
+            String mentionTo = null;
             if (parentId == null) {
                 tt = isBlank(targetType) ? CommentKinds.TARGET_GOODS : targetType.trim();
                 if (!CommentKinds.knownTargetType(tt)) {
@@ -282,6 +287,7 @@ public class CommentService {
                         return bad;
                     }
                 }
+                mentionTo = resolveTopLevelMention(tt, tid);
             } else {
                 Map<String, Object> parent = commentDao.selectComment(parentId);
                 if (parent == null) {
@@ -299,6 +305,8 @@ public class CommentService {
                 tid = str(parent.get("TargetId"));
                 kind = CommentKinds.QUESTION.equals(str(parent.get("Kind")))
                         ? CommentKinds.ANSWER : CommentKinds.REVIEW;
+                // 「回复顶层 → @ 顶层作者」——父行的作者（已经是登录名）。
+                mentionTo = str(parent.get("AuthorId"));
                 if (replyToId != null) {
                     Map<String, Object> target = commentDao.selectComment(replyToId);
                     if (target == null) {
@@ -307,6 +315,8 @@ public class CommentService {
                     if (!String.valueOf(parentId).equals(str(target.get("ParentId")))) {
                         return fail("ReplyToId 与被回复的楼层不匹配");
                     }
+                    // 「回复回复 → @ 被回复人」——覆盖上面那句（被 @ 的是**被回复那条**的作者）。
+                    mentionTo = str(target.get("AuthorId"));
                 }
                 // 方案 §4.1「商家首次回复 → 置顶；商家后续回复 → 混排」—— 进楼层前先数一次。
                 merchantFirst = role == CommentKinds.ROLE_MERCHANT
@@ -324,6 +334,11 @@ public class CommentService {
             // ⚠️ 与上面那条 INSERT 同事务（类上 @Transactional）才认得住：无事务时
             //    LAST_INSERT_ID() 可能落在**另一条连接**上，拿到的是别人的行号。
             long id = commentDao.lastInsertId();
+
+            // @ 自动生成（方案 §4.1）—— 落 comment_mention + 发 comment.mention 通知。
+            // ⚠️ 放在图片那段**之前**：图片目录不可用会 `return okAdded(...)`（见那段），
+            //    放后面的话那条早退会把 @ 一起跳过。
+            recordMention(id, mentionTo, author, text, anonymous);
 
             int stored = 0;
             int failed = 0;
@@ -387,6 +402,92 @@ public class CommentService {
             return fail("您已评价过该商品，不能重复评价");
         }
         return null;
+    }
+
+    // ==================== 写：@ 自动生成（块 6 commit 3） ====================
+
+    /**
+     * 顶层评论该 @ 谁（方案 §4.1「顶层评论 → @ 该商品商家」）。回**登录名** / {@code null}。
+     *
+     * <ul>
+     *   <li>{@code TargetType='goods'} ⇒ 该商品的**商家** —— 经
+     *       {@code goods.Id → MerchantId（业务号）→ user.merchantid → 登录名} 两跳解析
+     *       （{@link CommentDao#selectMerchantUsernameByGoodsId}）；</li>
+     *   <li>{@code TargetType='user'}（用户留言板）⇒ **板主本人** —— 方案 §4.1 只写了商品那一条，
+     *       这是**本地裁定**：留言板没有「商家」，与「被 @ 的那个人 = 这个对象的主人」同一语义，
+     *       故取 {@code TargetId}（业务号）翻成登录名。不补这一条的话，留言板上的评论会
+     *       **静默地一个 @ 都不产生**（不报错、没人看得出漏了）。</li>
+     * </ul>
+     *
+     * <p>⚠️ 解析不出（商品不存在 / 板主查无 / {@code TargetId} 非数字）⇒ {@code null}，
+     * **不**退化成 @ 一个空串（那会落一行 {@code MentionedId=''} 的脏关系）。
+     */
+    private String resolveTopLevelMention(String targetType, String targetId) {
+        if (CommentKinds.TARGET_GOODS.equals(targetType)) {
+            Long goodsId = parseLong(targetId);
+            return goodsId == null ? null : commentDao.selectMerchantUsernameByGoodsId(goodsId);
+        }
+        if (CommentKinds.TARGET_USER.equals(targetType)) {
+            return commentDao.selectUsernameByUserId(targetId);
+        }
+        return null;
+    }
+
+    /**
+     * 落 @ 关系 + 发 {@code comment.mention} 通知（方案 §4.1「@ 由后端自动生成」）。
+     *
+     * <h2>【⚠️ 自 @ 不落、也不发】</h2>
+     * 被 @ 人与发表人是同一个人时（作者回复自己的顶层评论 / 商家评论自家商品 —— 后者被
+     * 「买过才评」挡住，前者真实可达）**直接跳过**：@ 的唯一用途是**通知对方**，
+     * 通知自己是一条纯噪声。方案没写这一条，是**本地裁定**（同 {@code MAX_IMAGES} 的处置）。
+     * ⇒ {@code comment_mention} 表里因此**不会**出现「作者 @ 自己」的行。（改这条前先想清楚
+     * 下游有没有靠「行数 = 提及次数」做统计的——目前没有。）
+     *
+     * <h2>【⚠️ 关系没落住就不发通知】</h2>
+     * {@code comment_mention} 是「被 @ 」这件事的**凭据**，通知是它的**派生物**。若关系插入失败而
+     * 通知照发，收件人会读到一条「你被 @ 了」、点进去却找不到任何 @ 关系（下游按 {@code comment_mention}
+     * 反查谁会看到这个不一致）。故插入失败即 return。
+     *
+     * <h2>【⚠️ 全程 fail-soft —— 绝不把评论翻成失败】</h2>
+     * 本方法在评论**已经落库**之后调用（同 {@link #notifyAccepted} / 图片那段）。@ 是**派生物**，
+     * 它出问题不该让用户以为评论没发出去（那他会重发，于是多一条评论）。故整段 catch —— 但
+     * **如实记日志**，不静默。
+     *
+     * <h2>【⚠️ 匿名不得经通知反查】</h2>
+     * 回答（{@code answer}）恒匿名、评价可勾匿名 ⇒ 正文里**不写发表人**，写「有人」。
+     * 否则一条「匿名」的回复会经由发给对方的通知**实名暴露**作者（与 {@link #decorate} 抹
+     * {@code AuthorId} 是同一个理由）。
+     *
+     * @param mentioned 被 @ 人（登录名）；{@code null} / 空白 ⇒ 无事发生
+     * @param author    发表人（登录名）—— 用于判自 @ 与（非匿名时）填进正文
+     */
+    private void recordMention(long commentId, String mentioned, String author, String content, boolean anonymous) {
+        if (isBlank(mentioned)) {
+            return;
+        }
+        String to = mentioned.trim();
+        if (to.equals(author)) {
+            return;   // 自 @ —— 见方法注释
+        }
+        try {
+            commentDao.insertMention(commentId, to);
+        } catch (Exception e) {
+            e.printStackTrace();
+            return;   // 关系没落住就不发通知 —— 见方法注释
+        }
+        try {
+            Integer role = commentDao.selectRoleByUsername(to);
+            String toType = (role != null && role == CommentKinds.ROLE_MERCHANT)
+                    ? NotificationService.TO_TYPE_MERCHANT : NotificationService.TO_TYPE_CUSTOMER;
+            String who = anonymous ? "有人" : "「" + author + "」";
+            notificationService.send(UUID.randomUUID().toString(), to, toType,
+                    NotificationEvents.COMMENT_MENTION,
+                    "你被 @ 提及",
+                    who + "在评论中 @ 了你：" + brief(content),
+                    NOTIFY_TARGET_COMMENT, String.valueOf(commentId));
+        } catch (Exception e) {
+            e.printStackTrace();   // 通知已落库还是没落库 —— send 自己 fail-soft，这里兜解析角色那一步
+        }
     }
 
     // ==================== 写：删除 ====================
