@@ -18,7 +18,8 @@
 //    所以「一个恰好叫 `constructor` 的未知 code」是**可达**的。故判据必须是「**自有**属性」。
 
 /**
- * code → 中文标签。**31 条**，顺序与后端 `NotificationEvents.java` 的「归属块」分组一致。
+ * code → 中文标签。**33 条**，顺序与后端 `NotificationEvents.java` 的「归属块」分组一致
+ * （块 5 收口时 31 条，块 6 commit 2 问答补 `comment.accepted` / `question.timeout` 两条到 33）。
  *
  * ⚠️ 加一条 = 后端 `NotificationEvents` 加常量 + 本表加一行 + `EVENT_OPTIONS` 加一项（**三处**）。
  *    漏掉本文件只会让**新类型**显示成 code 原文（兜底在，不崩），漏掉后端常量则写入方没得引 —— 不会静默。
@@ -85,6 +86,14 @@ export const EVENT_LABELS = {
   //    本来就知道自己邀请了谁，回执只需「答没答、答的什么」。判据写在 `NotificationEvents` 该类注释里。
   'seckill.responded': '商家应答秒杀邀请',
   'seckill.application.submitted': '秒杀申请已提交（发往管理端）',
+
+  // ── 块 6：问答（commit 2，2026-10-12）────────────────────────────────────
+  // ⚠️ 上面那一节「评论区三类事件 + 举报结果」5 条是**建块 1 时就登记的预留**；
+  //    下面这 2 条是**问答**这一笔才第一次有人发的（`CommentService.accept` / `QuestionTimeoutJob`）。
+  //    ⚠️ 收件人各异，别照抄：`comment.accepted` 发给**回答者**本人（ToType 随其角色 customer/merchant）；
+  //    `question.timeout` 发给**管理端共享收件箱**（ToType='admin' / ToId='*'）。
+  'comment.accepted': '回答被采纳',
+  'question.timeout': '提问超时未解决（发往管理端）',
 }
 
 /**
@@ -124,6 +133,8 @@ export const EVENT_OPTIONS = [
   { code: 'comment.reply', label: '评论被回复' },
   { code: 'comment.mention', label: '被 @ 提及' },
   { code: 'report.handled', label: '举报已处理' },
+  { code: 'comment.accepted', label: '回答被采纳' },
+  { code: 'question.timeout', label: '提问超时未解决（发往管理端）' },
 ]
 
 /**

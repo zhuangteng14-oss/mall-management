@@ -6,19 +6,22 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 /**
- * C3 块 6 · 内容域（commit 1「评论」）的 smoke test：{@code POST /comment/*} 五个端点的**入参闸**。
+ * C3 块 6 · 内容域（commit 1「评论」+ commit 2「问答」）的 smoke test：
+ * {@code POST /comment/*} 六个端点的**入参闸**。
  *
  * <h2>【本类钉的是什么 —— 以及**不**钉什么】</h2>
  * 钉的是**碰库之前**就能判定的拒绝路径：缺 {@code TargetId} / 未知 {@code TargetType} /
  * 未知 {@code Kind} / 未知 {@code Sort} / 空正文 / 正文超长 / 缺 {@code Id} /
- * 未知 {@code Type} / 缺 {@code Account}。它们全部在 {@code CommentService} 的**第一段**
+ * 未知 {@code Type} / 缺 {@code Account} / 缺 {@code ReplyId}（采纳那两个入参）。
+ * 它们全部在 {@code CommentService} 的**第一段**
  * （或 {@code CommentController} 的入参检查）返回，**一次库都不碰** ⇒ 用
  * {@code @MockitoBean JdbcTemplate} 的切片就能真跑（同 {@code CartSmokeTest} 的理由）。
  *
  * <p>⚠️ <b>本类**不**覆盖任何真读写路径</b>，且这条边界对本域尤其重要 —— 本域的**核心规则
  * 全在库里**：买过没有（{@code order_item} 回联 {@code goods}）、是不是重复评价
  * （{@code countTopLevelByAuthor}）、匿名行会不会漏 {@code AuthorId}、商家首次回复置不置顶、
- * 一人一条的赞踩。这些一律要真库，{@code JdbcClient} 打到被 mock 的 {@code JdbcTemplate} 上
+ * 一人一条的赞踩、**采纳的五道闸与「采纳后不可改」**（{@code IsSolved=0 AND AcceptedReplyId IS NULL}
+ * 那道 {@code WHERE} 到底拦不拦得住第二次）。这些一律要真库，{@code JdbcClient} 打到被 mock 的 {@code JdbcTemplate} 上
  * 只会抛 NPE，落进 catch 变成一句「…失败：…」文案 ⇒ 断言它们等于在断言 Mockito 的默认行为。
  * 那几条的验收归 A3（{@code concurrency}，**continue-on-error ⇒ 按 artifact 的
  * {@code gates.count} 读，别读 job 颜色**）与 VM 上的手工验证。
@@ -141,6 +144,47 @@ class CommentSmokeTest extends AbstractSmokeTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.success").value(false))
                 .andExpect(jsonPath("$.msg").value("缺少参数：Id"));
+    }
+
+    // ==================== /comment/accept（问答，commit 2）====================
+
+    /** 缺 {@code Id}（哪条提问）⇒ 在 Controller 一层就拒。 */
+    @Test
+    void acceptWithoutIdIsRejected() throws Exception {
+        mockMvc.perform(post("/comment/accept")
+                        .param("Account", "smoke-user")
+                        .param("ReplyId", "2"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(false))
+                .andExpect(jsonPath("$.msg").value("缺少参数：Id"));
+    }
+
+    /**
+     * 缺 {@code ReplyId}（采纳哪条回答）⇒ 拒。
+     *
+     * <p>⚠️ 两个参数都要，且**顺序**在话术上是有意的：先问「哪条提问」再问「采纳哪条回答」
+     * —— 与 {@code CommentService.accept} 里前三道闸（提问存在 / 是顶层提问 / 我是提问者）
+     * 都在读回答之前同一序。
+     */
+    @Test
+    void acceptWithoutReplyIdIsRejected() throws Exception {
+        mockMvc.perform(post("/comment/accept")
+                        .param("Account", "smoke-user")
+                        .param("Id", "1"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(false))
+                .andExpect(jsonPath("$.msg").value("缺少参数：ReplyId"));
+    }
+
+    /** 缺 {@code Account} ⇒ 拒（「是不是提问者本人」这条规则没有它就无从判起）。 */
+    @Test
+    void acceptWithoutAccountIsRejected() throws Exception {
+        mockMvc.perform(post("/comment/accept")
+                        .param("Id", "1")
+                        .param("ReplyId", "2"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(false))
+                .andExpect(jsonPath("$.msg").value("缺少参数：Account"));
     }
 
     // ==================== /comment/like ====================

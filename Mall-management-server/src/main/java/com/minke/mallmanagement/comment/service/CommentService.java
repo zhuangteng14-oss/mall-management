@@ -2,6 +2,8 @@ package com.minke.mallmanagement.comment.service;
 
 import com.minke.mallmanagement.comment.CommentKinds;
 import com.minke.mallmanagement.comment.dao.CommentDao;
+import com.minke.mallmanagement.notification.NotificationEvents;
+import com.minke.mallmanagement.notification.service.NotificationService;
 import com.minke.mallmanagement.shared.upload.UploadStorage;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
@@ -16,6 +18,7 @@ import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 
 /**
  * 内容域的服务层（C3 块 6 · commit 1「评论」）—— <b>业务规则 + 响应组装</b>。
@@ -80,6 +83,18 @@ public class CommentService {
     private static final String IMG_SUBDIR = "comment";
 
     /**
+     * 发通知时写在 {@code notification.TargetType} 里的值（建表注释的取值域
+     * {@code goods / user / comment…} 里的 {@code comment}）。
+     *
+     * <p>⚠️ <b>别和 {@code comment.TargetType} 混</b> —— 那是**另一个表的另一列**，
+     * 本域那一列的值只有 {@code goods} / {@code user} 两种（见 {@link CommentKinds} 类注释
+     * 那条「别把 {@code TargetType='comment'} 写进来」）。这里写 {@code 'comment'} 是给
+     * **通知**用的：「这条通知说的是某条评论」—— 与「某条评论挂在什么对象上」是两回事。
+     * 正因为它俩同名不同义，才不在 {@code CommentKinds} 里给它一个常量（放进去必然被误引）。
+     */
+    private static final String NOTIFY_TARGET_COMMENT = "comment";
+
+    /**
      * 图片 URL 前缀。⚠️ 照既有三处上传点（{@code GoodsService} / {@code UserService}）的
      * **硬编码 host** 口径 —— 前端 {@code <img :src="item.goodImg">} 用的是绝对 URL，
      * 改这里要连带改前端（或一次把四处都改成同源相对路径，那是另一笔）。
@@ -87,11 +102,14 @@ public class CommentService {
     private static final String IMG_URL_PREFIX = "http://localhost:8088/img/" + IMG_SUBDIR + "/";
 
     private final CommentDao commentDao;
+    private final NotificationService notificationService;
     private final String uploadDir;
 
     public CommentService(CommentDao commentDao,
+                          NotificationService notificationService,
                           @Value("${app.upload-dir:${user.dir}/src/main/resources/static/img/}") String uploadDir) {
         this.commentDao = commentDao;
+        this.notificationService = notificationService;
         this.uploadDir = uploadDir;
     }
 
@@ -151,12 +169,19 @@ public class CommentService {
             List<Map<String, Object>> list = new ArrayList<>(top.size());
             for (Map<String, Object> row : top) {
                 Map<String, Object> item = decorate(row, viewer, imagesByComment, myLikeByComment);
+                Long acceptedId = longOrNull(row.get("AcceptedReplyId"));
                 List<Map<String, Object>> children = new ArrayList<>();
                 for (Map<String, Object> reply : repliesByParent.getOrDefault(id(row), List.of())) {
                     Map<String, Object> child = decorate(reply, viewer, imagesByComment, myLikeByComment);
                     child.put("Replies", List.of());   // 两层扁平：回复下不再有第三层
+                    child.put("Accepted", acceptedId != null && acceptedId.equals(id(reply)));
                     children.add(child);
                 }
+                // 方案 §4.2「采纳 → 置顶」：把它排在回复区最前。⚠️ 用**稳定排序**（同键保序），
+                // 故未被采纳的那些仍守着 selectReplies 的「商家首复置顶 + 时间正序」。
+                // 放在这里而不是 SQL 的 ORDER BY：置顶是**呈现**次序，SQL 那一层已经按楼内自然序出好了
+                // （且那条排序键还带着 ParentId，插一个相关子查询进去会更难读）。
+                children.sort((a, b) -> Boolean.compare(!flag(a.get("Accepted")), !flag(b.get("Accepted"))));
                 item.put("Replies", children);
                 list.add(item);
             }
@@ -405,6 +430,105 @@ public class CommentService {
         }
     }
 
+    // ==================== 写：采纳答案（问答，块 6 commit 2） ====================
+
+    /**
+     * 采纳一条答案（方案 §4.2）。提问者（或管理员）在**顶层提问**下选一条回复 ⇒ 该回复置顶、
+     * 提问标记已解决、**回答者收到一条通知**。
+     *
+     * <p>五道闸，顺序 = 先不用查库的、后要查库的（同 {@link #add}）：
+     * <ol>
+     *   <li>提问存在且未删；</li>
+     *   <li>它是**顶层提问**（{@code Kind='question'} 且 {@code ParentId IS NULL}）——
+     *       「评价」没有可采纳的答案，回复更不行；</li>
+     *   <li>调用者是提问者本人（管理员除外，与 {@link #delete} 同一档）；</li>
+     *   <li>回答存在、未删、且**确实挂在这个提问下**；</li>
+     *   <li>该提问**还没被采纳过** —— 方案 §4.2「采纳后不可改」。</li>
+     * </ol>
+     *
+     * <p>⚠️ 第 5 条**说了两遍**（这里读一次 + {@link CommentDao#acceptAnswer} 的 {@code WHERE} 里再闸一次），
+     * 这不是重复：这里的读是为了给出**准确的话术**，那里的 {@code WHERE} 才是**并发下的真闸**
+     * （见那个方法的 ⚠️）。少了 SQL 那一道，两条同刻的采纳请求会双双通过。
+     *
+     * <p>⚠️ 通知是 **fail-soft**（{@code NotificationService.send} 自己不抛）—— 采纳已经写进库了，
+     * 一条通知发不出去不该把它翻成失败。口径同 {@code CouponExpiryJob} 等所有调用点。
+     */
+    public Map<String, Object> accept(long questionId, long replyId, String account, boolean admin) {
+        if (isBlank(account)) {
+            return fail("缺少参数：Account");
+        }
+        String operator = account.trim();
+        try {
+            Map<String, Object> question = commentDao.selectComment(questionId);
+            if (question == null) {
+                return fail("提问不存在");
+            }
+            if (CommentKinds.STATUS_DELETED.equals(str(question.get("Status")))) {
+                return fail("该提问已删除");
+            }
+            if (question.get("ParentId") != null
+                    || !CommentKinds.QUESTION.equals(str(question.get("Kind")))) {
+                return fail("只能对顶层提问采纳答案");
+            }
+            if (!admin && !operator.equals(str(question.get("AuthorId")))) {
+                // ⚠️ 与 delete 同款：调用者身份已验明（IdentityGuard），剩下的纯是业务判断 ⇒
+                //    success:false 比 403 更贴前端话术出口（403 会被 http.js 当登录态问题处理）。
+                return fail("只有提问者本人可以采纳答案");
+            }
+            if (flag(question.get("IsSolved")) || question.get("AcceptedReplyId") != null) {
+                return fail("该提问已采纳过答案，不能更改");
+            }
+
+            Map<String, Object> reply = commentDao.selectComment(replyId);
+            if (reply == null || CommentKinds.STATUS_DELETED.equals(str(reply.get("Status")))) {
+                return fail("该回答不存在");
+            }
+            Object parentOfReply = reply.get("ParentId");
+            if (!(parentOfReply instanceof Number n) || n.longValue() != questionId) {
+                return fail("这条回答不属于该提问");
+            }
+
+            if (commentDao.acceptAnswer(questionId, replyId) == 0) {
+                // 走到这里 = 上面那次读与这次写之间被人抢了先（并发）⇒ 与第 5 道闸同一句话术。
+                return fail("该提问已采纳过答案，不能更改");
+            }
+            notifyAccepted(question, reply);
+
+            Map<String, Object> result = new HashMap<>();
+            result.put("success", true);
+            result.put("Id", questionId);
+            result.put("AcceptedReplyId", replyId);
+            result.put("msg", "已采纳该答案");
+            return result;
+        } catch (Exception e) {
+            e.printStackTrace();
+            return fail("采纳失败：" + e.getMessage());
+        }
+    }
+
+    /**
+     * 「你的回答被采纳了」—— 收件人是**回答者**（不是提问者：这个动作是他自己做的，
+     * 通知他自己没有意义）。
+     *
+     * <p>{@code ToType} 随回答者的 {@code AuthorRole} 走（{@code customer} / {@code merchant}）：
+     * 收件箱是按 {@code (ToId, ToType)} 两个键查的，跟角色不同的那一边发，商家在自己的消息中心
+     * **永远看不到**这条（通知照样落库，只是落在了一个没人读的抽屉里）。
+     */
+    private void notifyAccepted(Map<String, Object> question, Map<String, Object> reply) {
+        String toId = str(reply.get("AuthorId"));
+        if (isBlank(toId)) {
+            return;
+        }
+        int role = parseIntOr(str(reply.get("AuthorRole")), CommentKinds.ROLE_CUSTOMER);
+        String toType = role == CommentKinds.ROLE_MERCHANT
+                ? NotificationService.TO_TYPE_MERCHANT : NotificationService.TO_TYPE_CUSTOMER;
+        notificationService.send(UUID.randomUUID().toString(), toId, toType,
+                NotificationEvents.COMMENT_ACCEPTED,
+                "你的回答被采纳",
+                "你在提问「" + brief(question.get("Content")) + "」下的回答已被采纳。",
+                NOTIFY_TARGET_COMMENT, String.valueOf(question.get("Id")));
+    }
+
     // ==================== 写：赞 / 踩 ====================
 
     /**
@@ -640,6 +764,36 @@ public class CommentService {
     private static Long id(Map<String, Object> row) {
         Object v = row.get("Id");
         return (v instanceof Number n) ? n.longValue() : null;
+    }
+
+    /** 某列当 {@code Long} 读（{@code AcceptedReplyId} 这类**可空**的外键列）—— 非数字 ⇒ {@code null}。 */
+    private static Long longOrNull(Object v) {
+        return (v instanceof Number n) ? n.longValue() : null;
+    }
+
+    /** 数字串转 {@code int}，转不动 / 空 ⇒ 用兜底值（回角色号那一处：读不到就按客户走）。 */
+    private static int parseIntOr(String s, int fallback) {
+        Integer v = parseInt(s);
+        return v == null ? fallback : v;
+    }
+
+    /**
+     * 通知正文里引一句用户写的东西 —— 截到 30 字。
+     *
+     * <p>⚠️ 通知的标题/正文是**给别人看的摘要**，不是这条评论的第二份存储：不截的话一条 1000 字的
+     * 提问会把整句「你在提问「…」下的回答已被采纳」淹掉。
+     * <p>⚠️ 而且它会**真的写不进去**：{@code notification.Content} 是 {@code varchar(1024)}、
+     * {@code Title} 是 {@code varchar(128)}（{@code mall_management_sql.sql} 的建表注释逐字），
+     * 而 {@code comment.Content} 是 {@code varchar(1000)} —— 正文 1000 字再加两侧引号与那句话，
+     * 正好顶穿 1024，strict mode 下 MySQL 直接拒插 ⇒ 回答者**收不到这条通知**（而且因为
+     * {@code NotificationService.send} 是 fail-soft，外面连异常都看不见）。截到 30 字把这个缺口堵死。
+     */
+    private static String brief(Object content) {
+        String s = str(content);
+        if (s == null) {
+            return "";
+        }
+        return s.length() <= 30 ? s : s.substring(0, 30) + "…";
     }
 
     /** 按某一列分组（{@code CommentId} / {@code ParentId}），值收成 list。 */

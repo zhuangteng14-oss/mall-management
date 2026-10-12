@@ -19,12 +19,13 @@ import java.util.Collections;
 import java.util.List;
 
 /**
- * 内容域「评论」Web 层（C3 块 6 · commit 1）—— 5 个端点：
- * 列表（公开）/ 发表（评论·回复·提问·回答共用）/ 删除 / 赞踩 / 我的历史订单。
+ * 内容域「评论 / 问答」Web 层（C3 块 6 · commit 1 评论 + commit 2 问答）—— 6 个端点：
+ * 列表（公开）/ 发表（评论·回复·提问·回答共用）/ 删除 / **采纳答案** / 赞踩 / 我的历史订单。
  *
  * <h2>【挂 {@code /comment}，与方案 §三 的端点清单逐字一致】</h2>
- * 方案 A4 与 {@code 块6参考.md §三} 定死了 13 个端点与其路径，本类占前 5 个
- * （{@code /comment/accept} 归 commit 2 的问答、{@code /comment/imageReview} 归 commit 4）。
+ * 方案 A4 与 {@code 块6参考.md §三} 定死了 13 个端点与其路径，本类占前 6 个
+ * （{@code /comment/imageReview} 归 commit 4，其余 6 个归 {@code /report/**} 与
+ * {@code /sensitive/**} 两个新 Controller）。
  *
  * <h2>【{@code /comment/list} 是**公开**端点 ⇒ 已登记进 {@code WebAuthConfig.AUTH_WHITELIST}】</h2>
  * 商品详情页的评价区要能在**未登录**时读（那页本身是浏览面）。⚠️ 公开的是**读** ——
@@ -32,7 +33,7 @@ import java.util.List;
  * <b>不接受入参声明自己是谁</b>：那等于让人拿别人的登录名去问「这条匿名评论是不是你写的」，
  * 匿名就成了摆设（见 {@code CommentService.decorate} 的 ⚠️）。
  *
- * <h2>【5 个端点里 4 个走 {@code Account} 入参判据（登录名版）】</h2>
+ * <h2>【6 个端点里 5 个走 {@code Account} 入参判据（登录名版）】</h2>
  * {@code comment.AuthorId} / {@code comment_like.UserId} 存的是**登录名**
  * （{@code login.UserName}），故走 {@link IdentityGuard#requireSelfOrAdminByUsername} ——
  * 不是业务号版的 {@code requireSelfOrAdmin}。⚠️ 两者的区别与「双 403 事故」见
@@ -148,6 +149,36 @@ public class CommentController {
             return ResponseEntity.ok(Result.fail("缺少参数：Id"));
         }
         return ResponseEntity.ok(Result.of(commentService.delete(Id.longValue(), Account, isAdmin(request))));
+    }
+
+    /**
+     * 采纳一条答案（问答，方案 §4.2）。
+     *
+     * @param Id      被采纳答案所在的**顶层提问** Id（{@code comment.Id}）
+     * @param ReplyId 被采纳的那条**回复** Id —— ⚠️ 必须挂在 {@code Id} 这条提问下，
+     *                否则 {@code CommentService.accept} 拒（「这条回答不属于该提问」）
+     */
+    @PostMapping("/accept")
+    public ResponseEntity<Object> accept(
+            @RequestParam(value = "Account", required = false) String Account,
+            @RequestParam(value = "Id", required = false) Integer Id,
+            @RequestParam(value = "ReplyId", required = false) Integer ReplyId,
+            HttpServletRequest request
+    ) {
+        // ⚠️ 与 delete 同档：身份面判据（登录名版）在这里，**「是不是提问者」那一条判在 Service**
+        //    —— 管理员也能过这道闸（可代采纳），而「只有提问者本人 / 管理员」是业务规则。
+        if (!IdentityGuard.requireSelfOrAdminByUsername(request, Account,
+                userStateLookupProvider.getIfAvailable())) {
+            return IdentityGuard.forbidden();
+        }
+        if (Id == null) {
+            return ResponseEntity.ok(Result.fail("缺少参数：Id"));
+        }
+        if (ReplyId == null) {
+            return ResponseEntity.ok(Result.fail("缺少参数：ReplyId"));
+        }
+        return ResponseEntity.ok(Result.of(commentService.accept(
+                Id.longValue(), ReplyId.longValue(), Account, isAdmin(request))));
     }
 
     /**

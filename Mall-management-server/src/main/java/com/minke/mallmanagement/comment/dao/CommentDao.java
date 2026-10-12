@@ -14,6 +14,9 @@ import java.util.Map;
  * {@code comment_image} / {@code comment_like} 四张表（{@code report} / {@code sensitive_word}
  * 归各自 DAO）。
  *
+ * <p>⚠️ 唯一例外是 {@link #selectTimedOutQuestions}：它额外读了一次 {@code notification}
+ * （判「这条提问报过管理端没有」），理由与边界写在那个方法的注释里 —— **只此一处、只读**。
+ *
  * <h2>【SQL 不带 schema 前缀 —— 新域口径】</h2>
  * 同 {@code CartDao} / {@code TemplateDao} / {@code CouponDao}：新域一律**裸表名**。
  * ⚠️ 老域（{@code OrderDao} / {@code GoodsDao}）里的 {@code mall_management_sql.} 前缀是存量债，别照抄。
@@ -353,6 +356,89 @@ public class CommentDao {
                 + "WHERE `TargetType` = ? AND `TargetId` = ? AND `Kind` = 'question' "
                 + "AND `ParentId` IS NULL AND `Status` <> 'deleted'";
         return jdbcClient.sql(sql).params(targetType, targetId).query().singleRow();
+    }
+
+    // ==================== 写：采纳答案（问答，块 6 commit 2） ====================
+
+    /**
+     * 采纳一条答案（方案 §4.2「提问者选一个答案 → {@code AcceptedReplyId} + {@code IsSolved=1} + 置顶」）。
+     *
+     * <p>⚠️ <b>「采纳后不可改」这个闸在 {@code WHERE} 里，不在调用方</b>：
+     * {@code IsSolved = 0 AND AcceptedReplyId IS NULL} ⇒ 第二次调用影响 **0 行**。
+     * 若写成「先 {@code SELECT} 看 {@code IsSolved} 再 {@code UPDATE}」，两条同刻的采纳请求
+     * 会**双双读到 0** 然后都写下去（read-then-write 的经典 TOCTOU）—— 采纳是**不可逆**动作，
+     * 值一道真闸。（{@link #countMerchantFirstUnder} 那处 TOCTOU 是**故意留的**，
+     * 因为它只影响展示次序；这一处不是。）
+     *
+     * <p>⚠️ 「这条回复确实挂在这个提问下」**不在本方法里判** —— 它是调用方
+     * （{@code CommentService.accept}）已经读过的父行信息，在这里再查一次等于同一件事做两遍。
+     * 本方法只管「一条**未被采纳过**的提问行」这一个谓词。
+     *
+     * @return 1 = 采纳成功；0 = 该提问已被采纳过（或已删 / 不存在）
+     */
+    public int acceptAnswer(long questionId, long replyId) {
+        return jdbcClient.sql("UPDATE `comment` SET `AcceptedReplyId` = ?, `IsSolved` = 1 "
+                        + "WHERE `Id` = ? AND `Status` <> 'deleted' "
+                        + "AND `IsSolved` = 0 AND `AcceptedReplyId` IS NULL")
+                .params(replyId, questionId).update();
+    }
+
+    // ==================== 读：超时未解决的提问（QuestionTimeoutJob） ====================
+
+    /**
+     * 超过 {@code minutes} 分钟仍未采纳、且**还没报过管理端**的顶层提问 ——
+     * {@code QuestionTimeoutJob} 的扫描目标（方案 §4.2「30 分钟未解决 → Job 报管理端」）。
+     *
+     * <p>投影是**通知正文要用的最小集**，不是整行：{@code Id}（幂等键与 {@code TargetId}）、
+     * {@code TargetType}/{@code TargetId}（点进去看哪件商品的问答）、{@code AuthorId}（提问人）、
+     * 以及**截断到 60 字的正文**。
+     *
+     * <p>⚠️ 正文在 **SQL 里截断**（{@code LEFT}）而不是搬整列回 Java 再截：{@code Content} 是
+     * {@code varchar(1000)}，一次扫几百条就是几百 KB 只为了往标题里塞一句话。
+     * {@code LEFT} 按**字符**数（不是字节），utf8mb4 下中英一致。
+     *
+     * <p>⚠️ {@code NOW() - INTERVAL ? MINUTE} 是**扫描窗口**，属于 {@code CouponDao}
+     * 「{@code EXPIRING_THRESHOLD} 单一表达式」那一类用法 —— 类注释说的「别在 SQL 里做时间比较」
+     * 针对的是**读给前端的展示列**（那一侧一律 {@code DATE_FORMAT} 成无时区文本，由浏览器转），
+     * 不是筛选取值。{@code CreatedAt} 这一列仍按要求 {@code DATE_FORMAT} 出去。
+     *
+     * <h2>【⚠️ 「已报过的不再入队」为什么必须在 SQL 里，不能放在 Java 里跳】</h2>
+     * 直觉写法是「查 {@code LIMIT N} 条，回到 Java 用 {@code NotificationDao.existsDelivery}
+     * 把报过的跳掉」。那样会**饥饿**：排序是 {@code created_at ASC}，已报过的那批恰好永远占据
+     * 前 N 个位置 ⇒ 第 N+1 条起**永远扫不到**，而它才是最该被报的。改成 {@code LIMIT} 拿大一点
+     * 只是把这个悬崖推远，没有消除。
+     * <p>故判据进 {@code WHERE}（{@code NOT EXISTS}），让「已报过的」**根本不占名额**：
+     * 每轮的前 N 个位置恒为「还没报过的最老那几条」。
+     *
+     * <h2>【⚠️ 本方法是本类唯一一处读**别人的表**】</h2>
+     * {@code notification} 归 {@code NotificationDao}。这里读它是为了上面那条饥饿修复
+     * —— 判据不参与 {@code LIMIT} 就修不掉。先例是 {@code NotificationDao.existsDelivery}
+     * 自己也是跨表谓词，且 {@code NotificationDao} 已有一处读 {@code user} 表并写明理由；
+     * 本条按同一档处理：**只读、只此一处**（本类别的查询一律只碰 {@code comment*} 四张表）。
+     * <p>⚠️ {@code TargetId} 是 {@code varchar(128)}、{@code comment.Id} 是数字 ⇒ 必须
+     * {@code CAST(... AS CHAR)} 对齐：不转的话 MySQL 会把 {@code varchar} 侧**转成数字**比较
+     * （{@code TargetId='abc'} 变 0），既可能误命中又用不上索引。
+     *
+     * <p>排序 {@code created_at ASC} ⇒ 最急（最老）的先处理；{@code LIMIT} 给这一轮的写量封顶
+     * （同 {@code CouponExpiryJob.MAX_COUPONS_PER_ROUND} 的「爆炸半径上界」口径）。
+     *
+     * @param notifyTo    管理端共享收件箱的 {@code ToId}（{@code "*"}）
+     * @param notifyEvent 本条报文的 {@code EventType}（{@code question.timeout}）
+     */
+    public List<Map<String, Object>> selectTimedOutQuestions(int minutes, int limit,
+                                                             String notifyTo, String notifyEvent) {
+        String sql = "SELECT `Id`, `TargetType`, `TargetId`, `AuthorId`, "
+                + "LEFT(`Content`, 60) AS `Content`, "
+                + "DATE_FORMAT(`created_at`, '%Y-%m-%d %H:%i:%s') AS `CreatedAt` "
+                + "FROM `comment` "
+                + "WHERE `Kind` = 'question' AND `ParentId` IS NULL AND `Status` <> 'deleted' "
+                + "AND `IsSolved` = 0 "
+                + "AND `created_at` <= NOW() - INTERVAL ? MINUTE "
+                + "AND NOT EXISTS (SELECT 1 FROM `notification` n "
+                + "  WHERE n.`ToId` = ? AND n.`EventType` = ? AND n.`TargetType` = 'comment' "
+                + "    AND n.`TargetId` = CAST(`comment`.`Id` AS CHAR)) "
+                + "ORDER BY `created_at` ASC LIMIT ?";
+        return jdbcClient.sql(sql).params(minutes, notifyTo, notifyEvent, limit).query().listOfRows();
     }
 
     // ==================== 读 / 写：图片 ====================

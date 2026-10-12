@@ -1,9 +1,11 @@
-// src/api/comment.js —— 内容域「评论 / 回复 / 赞踩」API 封装（C3 块 6 · commit 1；2026-10-12）。
+// src/api/comment.js —— 内容域「评论 / 问答 / 回复 / 赞踩」API 封装
+// （C3 块 6 · commit 1 评论 + commit 2 问答；2026-10-12）。
 //
-// 五个端点、一个模块（后端 `CommentController`，`@RequestMapping("/comment")`，五条全 POST）：
-//   list     —— 唯一调用方 `views/ProductPage.vue`（「累计评价」页签）。
+// 六个端点、一个模块（后端 `CommentController`，`@RequestMapping("/comment")`，六条全 POST）：
+//   list     —— 唯一调用方 `views/ProductPage.vue`（「累计评价」页签下的评论 / 问答两个子 tab）。
 //   add      —— 发表：评论 / 回复 / 提问 / 回答**共用一个端点**（方案 §三的端点表逐字）。
 //   delete   —— 作者 / 管理员删一条（顶层连带回复）。
+//   accept   —— 采纳答案（问答，commit 2）：提问者选一条回答 ⇒ 置顶 + 标记已解决。
 //   like     —— 赞 / 踩（顶层与回复都适用）。
 //   myOrders —— 发表评论时「选对应商品」的下拉（本人**已确认收货**的历史订单里的商品）。
 //
@@ -19,13 +21,14 @@
 // ⚠️ 与 `api/shop.js` / `api/order.js` / `api/marketing.js` 的 `q()` / `post()` 是**同形复制、
 //    不是共享** —— 本仓 `api/*.js` 各模块自带这两个内联函数，未抽公共模块。
 //
-// ⚠️ **五条里只有 `list` 是公开面**（块 6 唯一进白名单的一条）：`/comment/list` 已进
+// ⚠️ **六条里只有 `list` 是公开面**（块 6 唯一进白名单的一条）：`/comment/list` 已进
 //    `WebAuthConfig.AUTH_WHITELIST`（**13 → 14 条**）⇒ **未登录也能打** —— 商品详情页
-//    （`meta.public`）的评价区在匿名状态下照常加载。**另四条**（add / delete / like / myOrders）
-//    **仍不在白名单**（匿名调必 401，与 `cart` / `shop.follow` 同族）。
-//    ⚠️ 别因为「都在 `/comment` 下」就把五条一起当公开面。
+//    （`meta.public`）的评论 / 问答区在匿名状态下照常加载。**另五条**
+//    （add / delete / **accept** / like / myOrders）**仍不在白名单**（匿名调必 401，
+//    与 `cart` / `shop.follow` 同族）。
+//    ⚠️ 别因为「都在 `/comment` 下」就把六条一起当公开面。
 //
-// ⚠️ **四条写端点的判据是「登录名」，不是业务号**：`comment.AuthorId` / `comment_like.UserId`
+// ⚠️ **五条写端点的判据是「登录名」，不是业务号**：`comment.AuthorId` / `comment_like.UserId`
 //    存的是 `login.UserName`（见 `CommentDao` 类注释），后端跑的是
 //    `IdentityGuard.requireSelfOrAdminByUsername(request, Account)` ⇒ 传**别人的** `Account`
 //    是 **403**（不是「查不到」）⇒ `account` **绝不要**从路由 / URL 取，只能是**当前登录者自己的**。
@@ -182,6 +185,28 @@ export function add(p) {
  */
 export function remove(account, id) {
   return post(endpoints.comment.delete, q({ Account: account, Id: id }))
+}
+
+/**
+ * 采纳一条答案（问答，块 6 commit 2）。
+ *
+ * ⚠️ **它是「提问者的动作」，但收件人是回答者**：后端会顺手给被采纳那条回答的作者发一条
+ *    `comment.accepted` 通知（fail-soft）⇒ 调用方**不需要**再自己发通知，也别因为
+ *    「没看到通知」以为采纳没成功。
+ *
+ * ⚠️ **采纳后不可改**（方案 §4.2）：后端那道闸在 SQL 的 `WHERE` 里。
+ *    已采纳过 ⇒ `success:false` + `该提问已采纳过答案，不能更改`
+ *    —— 那是**业务规则**（不是故障），前端据此把按钮置灰而不是弹「系统错误」。
+ *
+ * @param {string} account 提问者**登录名**（只能是自己，除非是管理员）—— 见文件头 ⚠️。
+ * @param {string|number} id 那条**顶层提问**的 Id（不是回答的 Id）。
+ * @param {string|number} replyId 要采纳的那条**回答**的 Id（必须挂在该提问下）。
+ * @returns {Promise<{success:boolean, Id:number, AcceptedReplyId:number, msg:string}>}
+ *          ⚠️ 成功后**回读列表**（`list`）而不是本地把这条回复挪到最前 —— 置顶次序是
+ *          后端 `Replies` 数组的顺序（`Accepted` 为真的那条在最前），本地再排一遍会两处漂开。
+ */
+export function accept(account, id, replyId) {
+  return post(endpoints.comment.accept, q({ Account: account, Id: id, ReplyId: replyId }))
 }
 
 /**
