@@ -263,7 +263,7 @@ class AuthGateSwitchOnTest extends AbstractSmokeTest {
      * 白名单里的 {@code goodstype} 是 **GET/POST 双形态**（同一个 {@code @RequestMapping}），
      * 而白名单判据是路径、与 HTTP 方法无关 ⇒ 两个方法都必须穿过去。
      *
-     * <p>这条不是多余的：前端两种都打（首页 {@code HomePage.vue:153} 用 POST、上架页
+     * <p>这条不是多余的：前端两种都打（首页 {@code HomePage.vue:168} 用 POST、上架页
      * {@code GoodsAdd.vue:138} 用 GET），只放行一种就是隐性故障。
      */
     @Test

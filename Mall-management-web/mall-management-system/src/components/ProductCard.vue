@@ -12,7 +12,7 @@
        另两处只传 **4 个**（`MerchantId/GoodName/GoodType/Id`）。
        ⇒ 本组件一律按 **7 个** 组装。理由：`HomePage.vue:400` 的注释把 7 个参数写成契约 ——
        T-guard-6 ①（`progress.md:1441`）**要求「7 个 query 参数都要在」**，少传就是削弱一条既有判据；
-       另两处**多收 3 个**参数是无害的（`ProductPage.vue:465` 只解构 4 个，多出来的不读）。
+       另两处**多收 3 个**参数是无害的（`ProductPage.vue:489` 只解构 4 个，多出来的不读）。
     ② **副作用不一样**：`HomePage` 的 `toGoodsDetail` 还写 `sessionStorage`（清搜索缓存）
        ⇒ 落成**可选 prop `beforeNav`**，`HomePage` 传自己的那两行；另两处不传。
     ③ **元素不一样**：`HomePage` 是 `<article @click>` + `router.push`，另两处是 `<router-link>`。
@@ -36,6 +36,17 @@
      · `SoldQty > 0` **才**画「已售 N 件」。43 行里卖不动的占多数，满屏「已售 0 件」是噪音。
      · `goods.UserName` 为空 ⇒ 左边**留空**，**不写「商家」**这种编出来的占位词。
 
+  ⚠️ **标签行等高占位**（用户 ①，2026-10-12）：「一条不显」与「整行不画」是**两件事** —— 上面那两条
+     不画的是**行内的一段**（行还在），而类别标签行改前是 `v-if="kinds.length"` ⇒ 普通商品**连行
+     都不画** ⇒ 无标签的卡比有标签的卡**矮一行**，栅格里撑得一行行参差。现在**恒渲染**这一行：
+     一枚标签都不命中时画一枚**隐形签**（`.pcard-kind.ghost`，`visibility: hidden`）。
+     ⚠️ 为什么用「隐形同形签」而不是给 `.pcard-kinds` 写死一个 `min-height`：前者的等高是
+     **构造保证**（同一个元素、同一套 class、同一个 `font-size`/`padding`，高度不可能不同），
+     后者要拿一个 px 值去追字体度量，换个字体就错。⚠️ 占位签**沿用真签的类名与文案**
+     （不是空文本、也不是 `&nbsp;`）：4 个 CJK 字才会选到与真签**同一个**字体回退 ——
+     空白字符可能落到另一套 ascent/descent 上，height 就白占错了。⚠️ 它带 `aria-hidden`：
+     `visibility: hidden` 本就把节点移出无障碍树，这一条是**明写**给人看的（别以为它读得出来）。
+
   ⚠️ `tag`（C3 块 5 · ShopHome 布局授权笔，2026-10-12）：图上角的一枚小签，**默认空串 = 不画**。
      本笔**唯一**的消费方是 `ShopHome.vue` 的「本店商品」网格 —— 用户把原先那个独立的
      「新品首发」模块改成了**卡上的红标签**（用户素材原话即「本店商品（含新品红标签）」），
@@ -43,21 +54,58 @@
      ⚠️ 「哪几件算新品」的判据**在调用方**（`ShopHome` 的 `isNew`），**不在**本组件 ——
      本组件只管把那枚签画出来，判据只有一处，不会两边各判一套。
 
+  ⚠️ **类别标签与已售完**（C3 块 5 ·〈Bug 2/3〉落码，2026-10-12）：卡上新增两样，判据都来自后端
+     投影列（`MarketingGoodsFlags.java` 那条 SQL 是唯一真相，本组件只读不算）：
+     · **类别标签**（名字与价格之间那一行）：`IsSeckill` ⇒ 红「秒杀商品」、`IsSubsidy` ⇒ 绿「国补」；
+       两个都命中就**都画**（两个独立标记，不是二选一），一个都不命中 ⇒ **一行都不渲染**（普通商品
+       既不画红也不画绿，同「数据不足不显」）。
+     · **已售完**（`IsSoldOut`）：整卡置灰（底色压暗 + 内容降不透明度，见 `<style>` 里那条「为什么
+       不用 `grayscale`」）+ 图上一枚**红斜「已售完」**贴图。⚠️ **共享页看不到这一态** —— 它们在
+       渲染前就把这类行滤掉了（`HomePage` / `GoodsSelect` / 两处「猜你喜欢」四处过滤**同源**，
+       都取 `config/goods-flags.js`）；画出来的只有店铺页本店商品 / 热销 / 折扣那几个 tab。
+
+  ⚠️ **落码时去掉了 `showKinds` 这个 prop**（用户 ⑤ 原话是「props = 商品对象 + showKinds」）：四个
+     消费点用户都点名要显标签 ⇒ 一个**恒为真**的开关就是没人拧的旋钮，留着只会让人以为「关掉会
+     怎样」。真出现「某处不显标签」的需求时再加回它（判据仍只有一处）。
+  ⚠️ **为什么要 `from` 这个 prop**（⑤ 没预料到的那个）：`GoodsSelect.vue` 原来的卡片跳转带着
+     `from: 'search'`，而 `ProductPage.goBack` 逐字按 `route.query.from === 'search'` 决定
+     回程去 `/customer?back=search`（那一跳会让搜索页 `onMounted` 走 `loadState()` 恢复结果）。
+     把那一处换成本组件时**不带上它，就等于悄悄删掉一条既有行为** ⇒ 卡片收 `from`（空串不传键），
+     `GoodsSelect` 传 `from="search"`，另三处不传。
+  ⚠️ **已售完不拦点**：本卡不是成交入口（它只进详情页），售完该说的话由**详情页**说
+     （`ProductPage.vue` 的秒杀区在 `SoldOut` 时写「已售完」）。`SeckillPage.vue` 那处 `preventDefault`
+     + 红字提示是**那一页**的裁定（它自己是成交入口），不在本组件里复制一份。
+
   用法：
     <ProductCard :goods="g" />
     <ProductCard :goods="g" :before-nav="onCardNav" />   ← 需要「导航前副作用」的页面才传第二个
     <ProductCard :goods="g" tag="新品" />                 ← 图上角的小标签（本笔只有 ShopHome 传）
+    <ProductCard :goods="g" from="search" />              ← 搜索页才传（详情页靠它回搜索页并恢复结果）
 -->
 <template>
-  <router-link class="pcard" :to="to" @click="onNav">
+  <router-link class="pcard" :class="{ sold: soldOut }" :to="to" @click="onNav">
     <div class="pcard-img">
       <!-- ⚠️ `v-if` 不能省 —— 见文件头 ⑤（破图图标 vs 灰底；先例 `HistoricalOrders.vue:66`）。 -->
       <img v-if="goods.GoodImg" :src="goods.GoodImg" :alt="goods.GoodName" />
       <!-- 图上角的小签（当前只有「新品」一种，见文件头）。空串 ⇒ 一个节点都不渲染。 -->
       <span v-if="tag" class="pcard-tag">{{ tag }}</span>
+      <!-- 已售完那枚**斜向贴图**：压在图面正中、不接收事件（见文件头〈类别标签与已售完〉）。 -->
+      <span v-if="soldOut" class="pcard-stamp" aria-hidden="true">已售完</span>
     </div>
     <div class="pcard-tx">
       <div class="pcard-name">{{ goods.GoodName }}</div>
+      <!-- 类别标签（秒杀 / 国补）：**独立标记、可以同屏**，也可以一枚都没有（普通商品）。
+           ⚠️ 整行**恒渲染**（不写 `v-if`）—— 一枚都没有时画一枚隐形签占住这一行的高度，
+              否则「有标签的卡高、没标签的卡矮」，栅格参差。见文件头〈标签行等高占位〉。 -->
+      <div class="pcard-kinds">
+        <i
+          v-for="k in rowKinds"
+          :key="k.key"
+          class="pcard-kind"
+          :class="[k.key, { ghost: k.ghost }]"
+          :aria-hidden="k.ghost ? 'true' : null"
+        >{{ k.text }}</i>
+      </div>
       <div class="pcard-foot">
         <div class="pcard-price">
           <span class="sym">¥</span><span class="int">{{ priceInt }}</span><span class="dec">.{{ priceDec }}</span>
@@ -79,6 +127,9 @@
 <script setup>
 import { computed } from 'vue'
 import { productLink } from '../config/product-link'
+// ⚠️ 三个类别 / 售完判据一律从 `config/goods-flags.js` 取（**本文件不重写一遍**）—— 见文件头
+//    〈类别标签与已售完〉与被 import 那个模块的头注。
+import { isSeckill, isSubsidy, isSoldOut } from '../config/goods-flags'
 
 // eslint-disable-next-line no-undef
 const props = defineProps({
@@ -86,12 +137,20 @@ const props = defineProps({
   // 导航前的副作用（可空）。收 `goods` 参数以便调用方按行决策；见文件头 ②。
   beforeNav: { type: Function, default: null },
   // 图上角的小签（可空）。空串 ⇒ 不画。见文件头。
-  tag: { type: String, default: '' }
+  tag: { type: String, default: '' },
+  // 来源标记（可空）。空串 ⇒ **一个键都不加**（URL 逐字同改前）。见文件头〈为什么要 `from` 这个 prop〉。
+  from: { type: String, default: '' }
 })
 
 // 7 个 query 参数**不再本文件自拼**，走 `config/product-link.js` 那一份共用契约
 // （本笔新增柱状图那处消费方 ⇒ 两处必须同源，见文件头 ① 与那个模块的头注）。
-const to = computed(() => productLink(props.goods))
+// ⚠️ `from` **追加在末尾**（那个模块头注的约定：后加的参数一律追加、不许插中间）—— 它**不在**
+//    那 7 个里，是调用方按需带上的第 8 个；不传时 `query` 与改前逐字相同。
+const to = computed(() => {
+  const t = productLink(props.goods)
+  if (props.from) t.query.from = props.from
+  return t
+})
 
 const onNav = () => {
   if (props.beforeNav) props.beforeNav(props.goods)
@@ -112,6 +171,27 @@ const priceDec = computed(() => {
 // `SoldQty` 由 `GoodsCacheService.listHome` 的 LEFT JOIN 补出（本笔同批后端改动）。
 // 老响应里没有这个键 ⇒ `undefined || 0` = 0 ⇒ 不画那一段（不画 ≠ 画 0）。
 const soldQty = computed(() => Number(props.goods.SoldQty) || 0)
+
+// ── 类别标签与已售完（C3 块 5 ·〈Bug 2/3〉落码，2026-10-12）────────────────────────────
+// ⚠️ 三个标记都是**后端算好的**（`goodsSelectHome` / `productSearch` 投影里的 `IsSeckill` /
+//    `IsSoldOut` / `IsSubsidy`，谓词唯一真相在 `MarketingGoodsFlags.java`）—— 本组件只读不算：
+//    「在不在期 / 售没售完」要按**库时钟**判，浏览器钟差 8 小时且错得很安静。
+const soldOut = computed(() => isSoldOut(props.goods))
+/** 标签**有序**（秒杀在前、国补在后）且**没有就不画** —— 普通商品既不画红也不画绿。
+ *  ⚠️ 「不画」不 = 「行不占位」：这一支只决定**画几枚**，占位由下面的 `rowKinds` 兜底。 */
+const kinds = computed(() => {
+  const out = []
+  if (isSeckill(props.goods)) out.push({ key: 'seckill', text: '秒杀商品' })
+  if (isSubsidy(props.goods)) out.push({ key: 'subsidy', text: '国补' })
+  return out
+})
+
+/** 这一行**实际渲染**的签：有标签就是标签本人，没有则给一枚**隐形签**（`ghost: true`）占高度。
+ *  ⚠️ 文案与类名**故意**沿用真签那一套（`秒杀商品` / `seckill`）—— 见文件头〈标签行等高占位〉：
+ *     等高的保证来自「同一个元素 + 同一套 class + 同一个字体」，换一套写法就得自己去算高度了。 */
+const rowKinds = computed(() => (
+  kinds.value.length ? kinds.value : [{ key: 'seckill', text: '秒杀商品', ghost: true }]
+))
 </script>
 
 <style scoped>
@@ -131,6 +211,20 @@ const soldQty = computed(() => Number(props.goods.SoldQty) || 0)
 }
 .pcard:hover {
   border-color: var(--brand);
+}
+/* ── 已售完态（C3 块 5 ·〈Bug 2〉落码，2026-10-12）────────────────────────────────────
+   ⚠️ **只有店铺页会看到这一态**：共享页（主页为你推荐 / 搜索 / 两处「猜你喜欢」）在**渲染前**
+      就把 `IsSoldOut` 的行滤掉了（`config/goods-flags.js`）⇒ 那边这张卡根本不会挂 `.sold`。
+   ⚠️ **不**用 `filter: grayscale()` 置灰 —— 那会把**商品图**也一起洗成灰，而图是商家的资产、
+      不该被页面改色（同 `SeckillPage.vue:289` 那条判据逐字）。走「底色压暗 + 内容降不透明度」
+      这两条只作用于本组件自己漆面的做法。⚠️ 降透明度的对象是**图与文字**两段，**不含那枚
+      斜向贴图** —— 贴图是「这张卡现在不能成交」的**结论**，它要是也跟着淡下去就白贴了。 */
+.pcard.sold {
+  background: var(--zone);
+}
+.pcard.sold .pcard-img img,
+.pcard.sold .pcard-tx {
+  opacity: 0.55;
 }
 .pcard-img {
   aspect-ratio: 4 / 3;
@@ -173,6 +267,27 @@ const soldQty = computed(() => Number(props.goods.SoldQty) || 0)
   font-weight: var(--fw-med);
   white-space: nowrap;
 }
+/* 已售完那枚斜向贴图 —— 形制照抄 `SeckillPage.vue:303` 的 `.stamp`（同一件事的第二处用法，
+   不另发明一种「售完」的样子）。⚠️ 字号从 `--fs-md` 收到 `--fs-sm`：那边是 96px 宽的图，
+   这里是 4/3 的网格卡（≈190px 宽），`--fs-md` 配 `.12em` 字距会把三个字撑到接近图宽。
+   ⚠️ 颜色取 `--accent`（朱砂）—— 同 `tokens.css:123` 给它的职责（价格 / 促销 / 未读），
+   而「售完」说的正是「促销没了」。 */
+.pcard-stamp {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%) rotate(-14deg);
+  pointer-events: none;
+  user-select: none;
+  white-space: nowrap;
+  padding: 2px var(--s4);
+  border: 2px solid var(--accent);
+  border-radius: var(--r1);
+  color: var(--accent);
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-semi);
+  letter-spacing: 0.12em;
+}
 .pcard-tx {
   padding: var(--s3) var(--s4) var(--s4);
 }
@@ -187,6 +302,42 @@ const soldQty = computed(() => Number(props.goods.SoldQty) || 0)
   overflow: hidden;
   /* 两行截断 ⇒ 定高，一行标题与两行标题的卡**同高**（栅格里参差最显眼）。 */
   min-height: 2.9em;
+}
+/* ── 类别标签行（秒杀 / 国补）—— C3 块 5 ·〈Bug 3〉落码，2026-10-12 ────────────────────
+   ⚠️ **位置取原稿 `.card-tags`**（`docs/美化/主页改造.html:515`，名字与价格之间）：那一块此前一直
+      「无对应字段」（`HomePage.vue:257` 的按语），本笔字段有了，落回原位。
+   ⚠️ 配色**照抄 `GoodsUp.vue:1037-1038` 的 `.kind` 两枚**（商家端「我的商品」早就在画这两个类别）：
+      秒杀 = `--cin-100`/`--cin-700`（朱砂族）、国补 = `--brand-tint`/`--brand-ink`（青瓷绿族）——
+      **不另造颜色**：用户口令「秒杀红 / 国补绿」与这两族逐字对上，全仓同一个词也就同一种色。
+   ⚠️ 与图上角那枚 `tag`（新品）**不是一件事**：那枚在**图**上、判据由调用方给；这两枚在**文字区**、
+      判据是后端标记 ⇒ 一张卡可以同时有角签 + 两个类别标签（三枚共存合法）。 */
+.pcard-kinds {
+  margin-top: var(--s2);
+  display: flex;
+  gap: var(--s1);
+}
+.pcard-kind {
+  font-style: normal;
+  padding: 1px var(--s2);
+  border-radius: var(--r1);
+  font-size: var(--fs-xs);
+  white-space: nowrap;
+}
+.pcard-kind.seckill {
+  background: var(--cin-100);
+  color: var(--cin-700);
+}
+.pcard-kind.subsidy {
+  background: var(--brand-tint);
+  color: var(--brand-ink);
+}
+/* ── 隐形占位签（用户 ①，2026-10-12）────────────────────────────────────────────────
+   普通商品（两枚类别标签都不命中）在这一行画的那一枚：**只占高度、不显示**。
+   ⚠️ 用 `visibility: hidden` 而不是 `display: none` —— 后者会把盒子整个从版面撤掉，
+     高度又没了，等于没修（`opacity: 0` 也能占位，但那个仍留在无障碍树 / 命中测试里）。
+   ⚠️ 别的什么都不改（字号 / padding / 文案 / 类名都跟真签一模一样）—— 等高正是从这里来的。 */
+.pcard-kind.ghost {
+  visibility: hidden;
 }
 .pcard-foot {
   margin-top: var(--s2);

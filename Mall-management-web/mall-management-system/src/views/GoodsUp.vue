@@ -114,7 +114,7 @@
                 <th class="c-ck"></th>
                 <th class="c-img">图</th>
                 <th class="c-name">商品名</th>
-                <th>类型</th>
+                <th>类型</th><th title="商品类别（2026-10-12 用户裁定 ④ 问 2）—— 国补（绿）/ 普通商品（白）/ 秒杀商品（红）。⚠️ 与左边「类型」不是一回事：那列是 `goods.GoodType` 类目（电子用品…），这列是**这件商品此刻挂在哪个营销活动里**。判据 = 该商品名下的全部 `ProductCode` 有没有落进 `subsidy_goods` / `seckill_activity` 的码集合（见脚本里 `kindsOf`）。⚠️ 多型号商品**并排画多枚**（有几类画几枚），不二选一；一件商品可以既国补又秒杀。">商品类别</th>
                 <th class="c-num">单价</th>
                 <th class="c-num" title="占位：goods 表无库存列">库存</th>
                 <th class="c-num" title="占位：productsales.OrderVolume 恒为 0 且无 SELECT 读出">销量</th>
@@ -153,7 +153,7 @@
                     <div class="pcode">{{ goodsList.filter(g => g.GoodName === item.goodName).map(g => g.ProductCode).filter(Boolean).join(' / ') || '—' }}</div>
                   </div>
                 </td>
-                <td>{{ item.goodType }}</td>
+                <td>{{ item.goodType }}</td><td title="同表头。⚠️ 本表已按 `GoodName` 合并（同名只留一条）⇒ 多型号商品在此只有一行，故按名回 `goodsList` 取回**全部** `ProductCode` 再求类别，见脚本里 `kindsOf`。"><span v-for="k in kindsOf(item.goodName)" :key="k" class="kind" :class="k">{{ KIND_TEXT[k] }}</span></td>
                 <td class="c-num">
                   <span class="px"><span class="u">¥</span><span class="i">{{ formatPrice(item.price).int }}</span><span class="d">.{{ formatPrice(item.price).dec }}</span></span>
                 </td>
@@ -329,7 +329,7 @@
 <script setup>
 import { ref, computed, onMounted } from 'vue'
 import { http, handleApiError, assetOf } from '../api/http'
-import { endpoints } from '../api/endpoints'
+import { endpoints } from '../api/endpoints'; import { subsidyGoods, seckillLive } from '../api/marketing'   // ⚠️ 同样**同行**（同上一条手法）：本文件被 `api-contract.md` 与 `slot-registry.md` 按行号钉住 ⇒ 合并到既有行 = 零漂移
 import { getMerchantId, isLoggedIn } from '../api/auth'; import IconGlyph from '../components/ui/IconGlyph.vue'   // ⚠️ 两条 import **同行**（2026-10-11 补图标那一笔）—— 合并到既有行 = 不新增行号漂移（`api-contract.md` 按 `GoodsUp.vue:170/215/275/327` 钉住本文件）
 
 const goodsList = ref([])
@@ -685,6 +685,66 @@ const getMyApplications = async () => {
 
 // ⚠️ **另起一个** `onMounted` 而不是并进 `:319` 那个：并进去要往上插行（见本段块首第 3 条）。
 onMounted(() => { getMyApplications() })
+
+// ── C3 块 5〈商品类别〉：本店商品挂在哪个营销活动里（2026-10-12 用户裁定 ④ 问 2）─────────────
+// 需求逐字：「商家『查看商品』加一列 · 列名：商品类别 · 值：国补（绿）/ 普通商品（白）/
+// 秒杀商品（红）· 多型号商品 → 显示所有涉及类别标签。」
+//
+// 【判据】「这件商品在不在国补 / 秒杀里」——两个活动侧都按 **`ProductCode`** 记（`subsidy_goods`
+// / `seckill_activity` 的列；两个端点的 `list[]` 形状见 `api/marketing.js` 各自 javadoc 逐字列出的
+// 字段：`subsidyGoods` 有 `ProductCode`，`seckillLive` 是「活动列 + GoodImg/GoodType/ProductCode」）
+// ⇒ 取两个端点各自的 `ProductCode` 集合，再看要判的这一行**名下的全部** `ProductCode` 落不落在里面。
+// ⚠️ **为什么是「名下的全部 ProductCode」而不是「这一行自己的」**：本表 `showGoodsList` 是**按
+// `GoodName` 合并**过的（同名只留最后一条、没带码 —— 见本文件 `getGoodsList` 上方那段注释）
+// ⇒ 多型号商品（同一个 `GoodName`、几个 `ProductCode`）在本表里**只有一行**。用户裁定「多型号商品
+// 显示所有涉及类别标签」⇒ 必须按名回 `goodsList` 取回全部码求并，**不能**只看合并后剩下的那一个。
+//    （手法与「商品编号」那列的模板内联表达式**同源** —— 同一个 `goodsList.filter(g => g.GoodName
+//     === …)`，此处只是把取回的码拿去查集合，不重复造取数路径。）
+//
+// ⚠️ **两个端点都是「登录可见、匿名 401」**（`api/marketing.js` 两段段头逐字：不挂 `IdentityGuard`，
+//    也**不在** `AUTH_WHITELIST`）⇒ 未登录直接不发。失败时**两个集合都清空**、退化成「普通商品」，
+//    并且**不弹错、不把整页打成错误态** —— 这是本表的一个**附加列**，它取不到不该连累商品列表。
+//    （口径同「数据不足不显」的邻居：宁可少画一枚标签，也不画错一枚。）
+//
+// ⚠️ **一件商品可以既国补又秒杀** ⇒ 标签是**数组**、有几类画几类，**不做二选一**。
+//    `ProductPage.vue` 的型号按钮那里有同样的「两者都命中」情形，**那里**的裁量是取秒杀（因为
+//    它要选**一个**底色）；本表是**列类别**、不是选状态 ⇒ 两枚都画。两处口径不同是**有意的**。
+//
+// ⚠️ **不过滤 `Stage`**（2026-10-12 自裁，报备）：`seckillLive` 回的 `Stage` 是后端按**此刻**算出来的
+//    （`signup` / `upcoming` / `live`）—— 那是**状态**不是**类别**。按 `live` 过滤会让一场秒杀
+//    结束的当天，商品就从「秒杀商品」掉回「普通商品」，而本列问的是「这商品**属于**秒杀商品」。
+//    故这里一律不过滤（已结束 / 已停用的活动后端本来就挡了，见同一段 javadoc）。
+const KIND_TEXT = { subsidy: '国补', seckill: '秒杀商品', normal: '普通商品' }
+const subsidyCodes = ref(new Set())
+const seckillCodes = ref(new Set())
+
+const loadPromoKinds = async () => {
+  if (!isLoggedIn()) return
+  try {
+    const [sub, sek] = await Promise.all([subsidyGoods({ limit: 200 }), seckillLive({ limit: 200 })])
+    subsidyCodes.value = new Set(((sub && sub.list) || []).map((r) => String(r.ProductCode || '')).filter(Boolean))
+    seckillCodes.value = new Set(((sek && sek.list) || []).map((r) => String(r.ProductCode || '')).filter(Boolean))
+  } catch (e) {
+    // 见上面第 3 条 ⚠️：失败 = 不画标签，不是画错标签；也不打扰用户（附加列，不是主数据）
+    subsidyCodes.value = new Set()
+    seckillCodes.value = new Set()
+  }
+}
+
+// 一行的类别标签。`normal` 是**兜底**：两类都不沾 ⇒ 普通商品（不是「未知」——「没挂活动」就是普通）。
+const kindsOf = (goodName) => {
+  const codes = goodsList.value
+    .filter((g) => g.GoodName === goodName)
+    .map((g) => String(g.ProductCode || ''))
+    .filter(Boolean)
+  const out = []
+  if (codes.some((c) => subsidyCodes.value.has(c))) out.push('subsidy')
+  if (codes.some((c) => seckillCodes.value.has(c))) out.push('seckill')
+  return out.length ? out : ['normal']
+}
+
+// ⚠️ **另起一个** `onMounted`（理由同上面 `getMyApplications` 那条）：并进既有块要往上插行。
+onMounted(() => { loadPromoKinds() })
 </script>
 
 <style scoped>
@@ -714,7 +774,7 @@ onMounted(() => { getMyApplications() })
         的 `.head h1` 写的是 `font-size:var(--d2)`；`tokens.css` 里**没有** `--d2`（它只定义
         `--fs-*`）⇒ scoped 块若不自己定义，`var(--d2)` 在**计算值阶段**判为无效、整条声明被丢弃，
         标题**静默回落到继承来的 `--fs-sm`（15px）**，与正文同大。落法同 `UserInfoPage.vue:393` /
-        `GoodsAdd.vue:617`（写在本页根 `.uc-main` 上，`calc(x * 1.00)` ≡ `x` ⇒ 写 `var(--fs-2xl)`；⚠️ 2026-10-10〈模板表通用化〉重指：原 513 行 ⇒ 该文件插模板段后 +104）。
+        `GoodsAdd.vue:619`（写在本页根 `.uc-main` 上，`calc(x * 1.00)` ≡ `x` ⇒ 写 `var(--fs-2xl)`；⚠️ 2026-10-10〈模板表通用化〉重指：原 513 行 ⇒ 该文件插模板段后 +104）。
         ⚠️ 这只在**算出来的** 36px 上看得出来，肉眼扫模板扫不出 ⇒ `shot11.mjs` 已加 `h1Fs` 断言。
      ④ `.btn-primary` 由稿的 `<button>` 改成 `<router-link>`（判据：入口指向已存在路由）⇒
         **补 `display:inline-flex;align-items:center`**：`<a>` 是行内元素，不补则稿的
@@ -961,4 +1021,19 @@ a { color: inherit; text-decoration: none; }
   .find input, .find select { width: 100%; }
   .find { width: 100%; }
 }
+
+/* ── C3 块 5〈商品类别〉三色标签（2026-10-12 用户裁定 ④ 问 2）────────────────────────────────
+   国补（绿）/ 普通商品（白）/ 秒杀商品（红）—— 与 `ProductPage.vue` 的型号按钮**同一套类别语义**
+   （同一批配色令），但**那里的形状不能照抄到这里**：
+     · 那边是**按钮** ⇒ 要选中态、要给选中的加 `outline` 环（`tokens.css` 的用法规矩：态用 outline
+       画，不靠侧边条）；这边是**标签**、没有选中这回事 ⇒ 只吃底色 + 字色，**不做态、不加环**。
+     · 那边「两者都命中」只能选**一个**底色（裁量：取秒杀）；这边并排画**两枚**（见脚本那段 ⚠️）。
+   ⚠️ 三枚的**内距统一** `1px var(--s2)`；「普通商品」多一圈 `--line` 边，是为了**白底上仍看得出
+   这是一枚标签**（`--surface` 与卡片面同色，不描边就看不出来，会像只写了四个字）。
+   ⚠️ 多型号商品**并排画多枚** ⇒ 用 `inline-block` + 右外边距（不要 flex，flex 会把它们拉成等宽）。 */
+.kind { display: inline-block; margin-right: var(--s2); padding: 1px var(--s2); border-radius: var(--r1); font-size: var(--fs-xs); white-space: nowrap; }
+.kind:last-child { margin-right: 0; }
+.kind.normal { background: var(--surface); border: 1px solid var(--line); color: var(--ink-2); }
+.kind.subsidy { background: var(--brand-tint); color: var(--brand-ink); }
+.kind.seckill { background: var(--cin-100); color: var(--cin-700); }
 </style>

@@ -193,13 +193,13 @@
 | `/goods/productCodePrice` | `GoodsUp.vue:275`、`ProductPage.vue:193`、`ProductPage.vue:245` |
 | `/goods/GoodsProductCodeSelect` | `ProductPage.vue:184`、`ProductPage.vue:236` |
 | `/goods/productSearch` | `GoodsSelect.vue:89`※（R2 重指；R1 记 `:88`、原记 `:78`） |
-| `/order/orderAdd` | `ProductPage.vue:369` |
-| `/order/orderSelect` | `ShoppingCart.vue:108` |
+| `/order/orderAdd` | `ProductPage.vue:393` |
+| `/order/orderSelect` | `ShoppingCart.vue:113` |
 | `/order/orderDeliveryIfSelect` | `OrderCenter.vue:125`※ |
 | `/order/orderDeliverySelect` | `OrderCenter.vue:127`※ |
 | `/order/historicalOrdersSelect` | `HistoricalOrders.vue:95` |
 | `/order/orderPayIfUp` | `ShoppingCart.vue:156` |
-| `/order/orderReceiveIfUp` | `ShoppingCart.vue:190` |
+| `/order/orderReceiveIfUp` | `ShoppingCart.vue:195` |
 | `/order/orderDeliveryIfUp` | `OrderCenter.vue:171` |
 | `/message/conversations` | `ChatRoom.vue:184`、`AppShell.vue:161`（**R6 合一重指**：两个壳的 `fetchUnreadCount()` —— `CustomerPage.vue:108` / `MerchantPage.vue:107` —— **已合并到本处**，两文件已随 R6 删除；其沿革：原记 `:97`（R1 时在 `HEAD` 已漂 3、实为 `:100`）⇒ R1/R2 各重指过一次） |
 | `/message/history` | `ChatRoom.vue:213`、`ChatRoom.vue:279` |
@@ -473,3 +473,143 @@
 | `/order/orderDetail` | `:245` | **`:251`** |
 
 ⚠️ 同理，`GoodsController` 的 `G:` 一族坐标（正文 §2）本笔**未重测**、`goodsAdd` 之后的端点已因扩参整体后移（`goodsAdd` 在 `:122`、`skuList` 在 `:244`）—— 按本文件既有口径，**重填归「文档飘移清理笔」**，本附录只登记。
+
+## 附录 F：C3 块 5〈营销块〉契约增补（2026-10-11/12） {#api-app-f}
+
+> **块 5 = 两个新域 + 36 个新端点**，全部 `POST`、全部 `@RequestParam`（无 `@RequestBody`）、全部 `required=false` + Service 手判（除下表标「必填」的那几个）。
+> 逐条坐标 = 该方法的 `@PostMapping` 所在行（**本文件口径**，与 `db-schema.md#db-top` 相反）。
+
+### F.0 三个「端点总数」要分开读（口径注，别互抄） {#api-f-0}
+
+| 口径 | 定义 | 块 5 前（`main`） | 块 5 后（HEAD） | 出处 |
+|---|---|---|---|---|
+| **后端 method-level** | 全仓 `*Controller.java` 中 `^\s*@(Post\|Get\|Put\|Delete)Mapping` 行数（**不含**类级 `@RequestMapping`） | **84** | **120**（+36） | 2026-10-12 实测（`git grep … main` / HEAD） |
+| **本文件 §2 的「36 个」** | 只数 **5 个核心 Controller**（`/user` 8 · `/message` 10 · `/goods` 9 · `/order` 8 · `/health` 1） | 36 | **36（一字未变）** | §2 标题 |
+| **前端 `endpoints.js`** | `key: '/path'` 条目数（含 2 处**同行两条**） | 83 | **119** | 该文件头注记账链（… → 107 → 119） |
+
+⚠️ **块 5 的 36 个端点全部落在 §2 与 §3 的 5 个 Controller 之外** ⇒ §2 的「共 36 个」**不需要改**（它本来就不是全仓计数）；本附录就是那 36 条的契约面。
+⚠️ **`marketing` / `shop` 两域不进 §2 的清单**（同附录 C/D/E 的手法：零漂移，正文表不插入）—— 域标题只在**本附录**里出现。
+
+### F.1 新域 `/admin/marketing/coupon/*` —— 管理端券 7 条 {#api-f-1}
+
+`AdminCouponController.java`（`@RequestMapping("/admin/marketing/coupon")` @ `:38`）—— 返回一律 `Result<Map<String,Object>>`。
+
+| 路径 | 入参（全部 `required=false`） | 返回要点 | 身份 | 坐标 |
+|---|---|---|---|---|
+| `/list` | `Status`（走白名单，未知值报错**不静默当「不筛」**）· `keyword` · `limit` | `{success, list:[…], total}` | 闸后（**无角色闸**，见下） | `:50` |
+| `/create` | `Name` · `Type`(threshold/percent/none) · `FaceValue` · `Threshold` · `TotalQty` · `Scope`(all/merchant) · `MerchantAccount`（空串 = 平台券）· `CategoryMatch` · `StartAt` · `EndAt` | `{success, msg?, CouponId}`（成功回带业务号） | 同上 | `:60` |
+| `/stop` | `CouponId` | `{success, msg?, before}`（`before` = 改前状态快照） | 同上 | `:86` |
+| `/activate` | `CouponId` | 同 `/stop` 形状 | 同上 | `:95` |
+| `/grants` | `CouponId` · `limit` | `{success, coupon:{…}, list:[…]}`（券定义 + 领取明细并排） | 同上（**读**，不留痕） | `:104` |
+| `/grant` | `CouponId` · `ToAccount` ⚠️ **= 登录名 `login.UserName`**（2026-10-12 用户裁定「乙」，非 `user.customerid`） | `{success, msg?}` | 同上 | `:121` |
+| `/stats` | **无参** | `{success, claimTrend:[…], usedTrend:[…], typeShare:[…]}`（三件齐里的「图」） | 同上（读） | `:139` |
+
+- ⚠️ **不给 `/admin/**` 设角色闸（TD-18）**：管理员 cookie **铸不出 token** ⇒ 加「须 `role=3`」会让**默认 profile 上管理员自己 401**，而放进白名单是放宽。**别顺手补 `requireAdmin`**（类 javadoc `:21-24`）。
+- ⚠️ **四个写端点挂审计**（`create` / `stop` / `activate` / `grant`），三个读端点（`list` / `grants` / `stats`）**不挂**。`TargetId` 一律传 `CouponId`（业务号）—— `admin_audit.TargetId` 是 NOT NULL，传 null 会在留痕处炸掉整条链路（TD-20）。
+- ⚠️ **`grant` 的逐条判据与用户端自助领取同一条路径**（`CouponService.doClaim`）：券存在 / 未停用 / 未过期 / 有余量 / 这个没领过 / **不是他自己发的**。本端点**不加自己的闸**。
+
+### F.2 新域 `/marketing` —— 用户端券 4 条 {#api-f-2}
+
+`CouponController.java`（`@RequestMapping("/marketing")` @ `:55`）—— 返回 `ResponseEntity<Object>`。
+
+| 路径 | 入参 | 返回要点 | 身份 | 坐标 |
+|---|---|---|---|---|
+| `/coupons` | `Account` **必填** · `limit` · `thisWeek`（`"1"` ⇒ 只回本周新发布）· `MerchantAccount`（非空 ⇒ 只回该商家的商家券） | 领券中心：可领的券，每张带「我已领」「已领完」两个布尔（供按钮画灰） | `requireSelfOrAdminByUsername(request, Account)` | `:83` |
+| `/myCoupons` | `Account` **必填** | 券包（我的券）：排序与分桶在**后端**做，每行带 `Bucket`；回体另带 `redDot` / `expiringCount` | 同上 | `:103` |
+| `/coupon/claim` | `Account` **必填** · `CouponId` **必填** | `{success, msg?}` | 同上 | `:119` |
+| `/coupon/claimBatch` | `Account` **必填** | **一键领取本周全部**；**不吃 `CouponId`**（「本周」是服务端语义）；逐张走单张路径，返回每张成败；**部分失败仍回 `success:true`** | 同上 | `:138` |
+
+- ⚠️ **两个可选参数都向后兼容**（`thisWeek` / `MerchantAccount` 是**加筛不是收窄**）：既有调用方不传 ⇒ 行为与改动前一致（`ProductPage.vue` 的领券块就是这一类）。
+- ⚠️ **核销**（`unused → used`）**不在这四条里** —— 它发生在结算，由 `/order/orderAdd` 带 `CouponId` 触发（见 F.7）。
+
+### F.3 新域 `/admin/marketing/subsidy/*` —— 管理端国补 6 条 {#api-f-3}
+
+`AdminSubsidyController.java`（`@RequestMapping("/admin/marketing/subsidy")` @ `:44`）—— 返回 `Result<Map<String,Object>>`。
+
+| 路径 | 入参 | 返回要点 | 坐标 |
+|---|---|---|---|
+| `/list` | `Status` · `limit` | 规则列表 | `:62` |
+| `/create` | `Name` · `CategoryMatch` · `Ratio` · `Cap`（`0` = 不封顶） · `StartAt` · `EndAt` | `{success, msg?, RuleId}` | `:71` |
+| `/stop` | `RuleId` | `{success, msg?}` | `:91` |
+| `/activate` | `RuleId` | 同 `/stop` | `:100` |
+| `/nominate` | `RuleId` · `GoodsId` | ⚠️ 本域**唯一**会触达商家的写端点（提名 ⇒ 商家侧出一条「待应答」） | `:114` |
+| `/nominations` | `Status` · `MerchantId` · `limit` | 提名明细（含商品快照） | `:150` |
+
+### F.4 新域 `/marketing` —— 商家 / 用户端国补 3 条 {#api-f-4}
+
+`SubsidyController.java`（`@RequestMapping("/marketing")` @ `:60`）。
+
+| 路径 | 入参 | 返回要点 | 身份 | 坐标 |
+|---|---|---|---|---|
+| `/subsidy/invitations` | `MerchantId` **必填** · `Status`（省略 ⇒ 全部） · `limit` · `OnlyOpen` | 发给我的国补提名（页面自己分「待处理 / 已处理」） | `requireSelfOrAdmin` | `:83` |
+| `/subsidy/confirm` | `MerchantId` **必填** · `Id` **必填** · `Approve` · `Reason` | `{success, msg?}` | 同上 | `:104` |
+| `/subsidy/goods` | `GoodType` · `limit` | 国补商品列表（**用户端标签 / 筛选的数据源**），每行带现算的 `SubsidyAmount` | **无身份闸**（闸后读面，不进白名单 ⇒ 需登录） | `:140` |
+
+- ⚠️ **`/subsidy/goods` 是入口**：主页 / 搜索页 / 详情页的「国补」绿标都读它（`marketingSubsidy` 组的读端）。
+
+### F.5 新域 `/admin/marketing/seckill/*` —— 管理端秒杀 6 条 {#api-f-5}
+
+`AdminSeckillController.java`（`@RequestMapping("/admin/marketing/seckill")` @ `:54`）—— 返回 `Result<Map<String,Object>>`；**邀请 / 审核 / 停用三条挂审计**。
+
+| 路径 | 入参 | 返回要点 | 坐标 |
+|---|---|---|---|
+| `/invitations` | `Status` · `MerchantAccount` · `limit` | 平台发出的邀请（读） | `:72` |
+| `/invite` | `MerchantAccount` · `GoodsId` · `SeckillPrice` · `Quantity` · `ApplyEndAt` · `StartAt` · `EndAt` | 邀请商家上秒杀 —— **本笔触达商家的两个写端点之一** | `:87` |
+| `/applications` | `Status` · `MerchantAccount` · `limit` | 商家报名单（读） | `:133` |
+| `/review` | `Id` · `Approve` · `Reason` · `Name` · `ApplyEndAt` · `StartAt` · `EndAt` | **通过时这一跳直接建 `seckill_activity`**（审核 = 成立） | `:149` |
+| `/activities` | `Status` · `MerchantAccount` · `limit` | 已成立的秒杀（读） | `:191` |
+| `/stop` | `ActivityId` | 停用一场活动（逻辑废弃） | `:206` |
+
+### F.6 新域 `/marketing` —— 商家 / 用户端秒杀 6 条 {#api-f-6}
+
+`SeckillController.java`（`@RequestMapping("/marketing")` @ `:56`）。
+
+| 路径 | 入参 | 返回要点 | 身份 | 坐标 |
+|---|---|---|---|---|
+| `/seckill/invitations` | `MerchantAccount` **必填** · `Status` · `limit` | 发给我的邀请 | `requireSelfOrAdmin` | `:73` |
+| `/seckill/respond` | `MerchantAccount` **必填** · `Id` **必填** · `Accept` · `Reason` | **同意 ⇒ 直接建 `seckill_activity`**（邀请式走这条） | 同上 | `:92` |
+| `/seckill/applications` | `MerchantAccount` **必填** · `Status` · `limit` | 我提交的报名 | 同上 | `:124` |
+| `/seckill/apply` | `MerchantAccount` **必填** · `GoodsId` · `SeckillPrice` · `Quantity` | 商家报名秒杀（**路径 B 的发起端**，等管理端 `/review`） | 同上 | `:143` |
+| `/seckill/activities` | `MerchantAccount` **必填** · `Status` · `limit` | 我的秒杀 | 同上 | `:168` |
+| `/seckill/live` | `limit` | **用户端**：进行中 / 未开启的秒杀，每行带 `Stage` 与现算的 `SoldOut` | **无身份闸**（闸后读面） | `:186` |
+
+- ⚠️ **`/seckill/live` 是主页「今日秒杀」模块与 `/seckill` 秒杀页的**唯一**数据源**；`seckill_activity` 是**用户端读侧的唯一表**（邀请 / 申请是流程表，见 `db-schema.md §14.1`）。
+- ⚠️ **已售完在秒杀页照显**（用户 ② 口径，2026-10-12）：共享面的过滤（`sharedList`）**不作用**于本端点。
+
+### F.7 新域 `/shop/*` —— 店铺 4 条（**唯一含公开面的一组**） {#api-f-7}
+
+| 路径 | 类 · 坐标 | 入参 | 返回要点 | 身份 |
+|---|---|---|---|---|
+| `/shop/follow` | `ShopFollowController` `:65` | `CustomerId` · `MerchantId` | `{success, msg?}`；**幂等**（已关注再点仍是 `success:true`，表里仍 1 行） | `requireSelfOrAdmin(request, CustomerId)` |
+| `/shop/unfollow` | 同 `:81` | 同 | **物理 `DELETE` 行**（用户 2026-10-12 裁定 8）；本来就没关注 ⇒ 也回 `success:true` | 同上 |
+| `/shop/followState` | 同 `:97` | 同 | 关注状态 + 粉丝数（`ShopHome` 头卡一次请求） | 同上 |
+| `/shop/profile` | `ShopProfileController` `:56` | `MerchantId` | `{success, MerchantId, UserName, RegisteredAt, CertStatus}` —— 「**这家店本身是谁**」（不要身份） | ⚠️ **无**（**有意公开**） |
+
+- ⚠️ **`/shop/profile` 是块 5 唯一进白名单的端点**：`AUTH_WHITELIST` **12 → 13 条**（`WebAuthConfig.java:116`，加在「业务：登录前后台页面」组末尾）。**四处文案同笔改**：`WebAuthConfig.java:68`（5 → 6 条 + 补「店铺主页」）、`AuthGateSmokeTest.java:180`（`hasSize(12)` → `13`、「业务 8 + 基础设施 4」→「业务 9 + 基础设施 4」）、`AuthGateSmokeTest.java:57`（javadoc 12 → 13）、`MerchantStatsController.java:19`（12 → 13，后半句「没有任何 `/merchant/**`」仍成立）。
+- ⚠️ **`followState` 与 `profile` 分工别混**：前者回「**我和这家店的关系**」（要身份、要 `CustomerId`），后者回「**这家店本身是谁**」（不要身份、只要 `MerchantId`）。
+- ⚠️ `CertStatus` **查不到就回 `''`，不编成 `pending`**；`RegisteredAt` 源自 `login.CreateTime`，**存量不回填** ⇒ 回 `null`（同 E.5 口径）。前端对两者都是「**没有就不画**」。
+
+### F.8 结算面的契约改动（`/order/orderAdd`，块 5 commit 5） {#api-f-8}
+
+⚠️ **这一条改的是既有端点，不增端点**（故不在 F.1–F.7 的 36 条里）：
+
+| 项 | 内容 |
+|---|---|
+| 端点 | `POST /order/orderAdd`（`OrderController.java`，坐标见附录 E.7 的 `:95`） |
+| 新增入参 | `CouponId`（可选，`required=false` + `defaultValue=""`）—— 非空 ⇒ 走**用券核销**（`coupon_grant.unused → used` 的 **CAS**，带 `used` 判据，防并发双花） |
+| 新增落库列 | `order.CouponId` · `order.SubsidyAmount` · `order.PayAmount`（三列同笔加，见 `db-schema.md §14.2`） |
+| ⚠️ 口径 | **`order.Price` 保留 = 原价合计**；`PayAmount` = 实付额快照 ⇒ **别拿 `Price` 当实付** |
+| ⚠️ 返回面 | 券**真的核销掉**时，回体里**多** `CouponId` / `Discount` 两个键（不传券 / 券没核销掉 ⇒ **两个键都不出现**）⇒ 前端判据是「**有没有 `Discount`**」，不是「`Discount` 是不是 0」 |
+| ⚠️ 留痕 | 券核销的审计在**这一跳**挂（此前管理端 `grant` 没有 `OrderId` 可写，见 F.1 末句） |
+| 证据 | `CouponService` 的核销腿 + `OrderService` 的结算腿（同笔） |
+
+### F.9 前端封装增补 {#api-f-9}
+
+| 文件 | 增补 | 备注 |
+|---|---|---|
+| `src/api/endpoints.js` | `marketingCoupon` 7 · `marketing` 4 · `marketingSubsidy` 6 · `subsidy` 3 · `marketingSeckill` 6 · `seckill` 6 · `shop` 4 = **36 条**（全非 view 抽取，唯一调用方是新封装） | 头注「现为 N 条」**83 → 119**；⚠️ 组内 / 文件尾追加，**不插行** |
+| `src/api/marketing.js` | **32 个导出**（实测）：管理端券 7 + 用户端券 4 + 管理端国补 6 + 商家侧国补 **3** + 管理端秒杀 6 + 商家侧秒杀 **6** | 一个文件覆盖「营销」侧全部管理端与商家端；⚠️ 六组与上面六个 `endpoints.js` 组一一对应（**36 个端点里** 32 个走本文件，剩 4 条 = `shop` 组） |
+| `src/api/order.js` | `orderAdd` 增 `couponId` 透传 | 结算用券 |
+| `src/api/shop.js` | **新建**，4 条（`follow` / `unfollow` / `followState` / `profile`）；⚠️ 文件头「三条都不在 `AUTH_WHITELIST`」那句已订正为「**只有 `/profile` 是公开面**，另三条不是」 | 唯一公开面在组内 |
+
+⚠️ **本文件（`api-contract.md`）的正文 §2 / §3 / §5 矩阵**本笔**未重测、未插入** —— 36 条新端点全部落在附录 F；正文坐标重填归「文档漂移清理笔」（同附录 E.7 的口径）。

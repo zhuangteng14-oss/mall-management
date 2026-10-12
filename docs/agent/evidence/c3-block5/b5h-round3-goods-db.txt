@@ -1,0 +1,46 @@
+── SHOW COLUMNS FROM goods ──
+Field | Type | Null | Key | Default | Extra
+-------------------------------------------
+Id | int | NO | PRI | null | auto_increment
+MerchantId | char(20) | NO |  | null | 
+GoodName | char(40) | NO |  | null | 
+Price | double | NO |  | null | 
+GoodImg | char(100) | NO |  | null | 
+GoodType | char(20) | YES |  | null | 
+ProductCode | char(40) | YES |  | null | 
+GoodTypeNew | int | YES |  | null | 
+ShelfState | tinyint(1) | NO |  | 1 | 
+DelistedAt | datetime(3) | YES |  | null | 
+TypeId | int | YES |  | null | 
+DeletedAt | datetime(3) | YES |  | null | 
+Detail | mediumtext | YES |  | null | 
+Spec | mediumtext | YES |  | null | 
+AfterSale | mediumtext | YES |  | null | 
+PromiseGenuine | tinyint(1) | NO |  | 1 | 
+PromiseReturn7 | tinyint(1) | NO |  | 1 | 
+PromiseFastRefund | tinyint(1) | NO |  | 1 | 
+PromiseFreightIns | tinyint(1) | NO |  | 1 | 
+Source | varchar(16) | NO |  |  | 
+OriginalPrice | decimal(10,2) | NO |  | 0.00 | 
+(21 行)
+
+── SELECT * FROM goods WHERE ProductCode='GD-101-9552' ──
+Id | MerchantId | GoodName | Price | GoodImg | GoodType | ProductCode | GoodTypeNew | ShelfState | DelistedAt | TypeId | DeletedAt | Detail | Spec | AfterSale | PromiseGenuine | PromiseReturn7 | PromiseFastRefund | PromiseFreightIns | Source | OriginalPrice
+----------------------------------------------------------------------------------------------------
+76 | dRD3gqtbFr | 无线蓝牙耳机 声谷标准版 | 299.0 | https://picsum.photos/seed/GD-101-9552/400 | 电子用品 | GD-101-9552 | 0 | 1 | null | 1 | null | null | null | null | 1 | 1 | 1 | 1 | seed | 373.75
+120 | dRD3gqtbFr | 无线蓝牙耳机 声谷标准版 | 299.0 | https://picsum.photos/seed/GD-101-9552/400 | 电子用品 | GD-101-9552 | 0 | 1 | null | 1 | null | null | null | null | 1 | 1 | 1 | 1 |  | 373.75
+(2 行)
+
+── SELECT Id, GoodName, Price, OriginalPrice, ProductCode, MerchantId FROM goods WHERE OriginalPrice > 0 ORDER BY Id ──
+Id | GoodName | Price | OriginalPrice | ProductCode | MerchantId
+----------------------------------------------------------------
+76 | 无线蓝牙耳机 声谷标准版 | 299.0 | 373.75 | GD-101-9552 | dRD3gqtbFr
+120 | 无线蓝牙耳机 声谷标准版 | 299.0 | 373.75 | GD-101-9552 | dRD3gqtbFr
+(2 行)
+
+── SELECT COUNT(*) AS n FROM goods WHERE ShelfState = 1 AND DeletedAt IS NULL ──
+n
+-
+43
+(1 行)
+

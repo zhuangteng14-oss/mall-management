@@ -289,7 +289,7 @@ export function subsidyNominations(params) {
 /**
  * 商家端：**发给我的**国补提名。
  * @param {string} merchantId 商家业务号（`goods.MerchantId` = `login.Id`）。⚠️ 传别人的 ⇒ **403**。
- * @param {{Status?:string, limit?:number}} [params] `Status` 省略 = 全部（页面自己分「待处理 / 已处理」）
+ * @param {{Status?:string, OnlyOpen?:string, limit?:number}} [params] `Status` 省略 = 全部（页面自己分「待处理 / 已处理」）；`OnlyOpen` 传字面 `'true'` ⇒ 只回**规则还没到期**的行（店铺主页「平台活动」tab 的待办表用，⚠️ 缺省即同旧行为）—— ⚠️ 那条判据比的是 `subsidy_rule.EndAt`，是**替代量**（`subsidy_goods` 没有报名截止列），只作**列表显示范围**用、不是准入闸（逐字见 `SubsidyDao.NOT_EXPIRED` 的 javadoc）
  * @returns {Promise<{success:boolean, list:Array, msg?:string}>}
  *          `list[]` 在提名行之外多带 `RuleName` / `Ratio` / `Cap` / `RuleEndAt`（页面要显示「补多少、到什么时候」）。
  */
@@ -445,7 +445,7 @@ export function seckillStop(activityId) {
 /**
  * 商家端：**发给我的**秒杀邀请。
  * @param {string} merchantAccount 商家业务号（`goods.MerchantId` = `login.Id`）。⚠️ 传别人的 ⇒ **403**。
- * @param {{Status?:string, limit?:number}} [params] `Status` 省略 = 全部（页面自己分「待应答 / 已处理」）
+ * @param {{Status?:string, limit?:number}} [params] `Status` 省略 = 全部（页面自己分「待应答 / 已处理」）。⚠️ `list[]` 每行带 **`Stage`**（`SeckillDao.stage()` 在**库时钟**上算的：`signup` 报名截止未到 / `upcoming` 未开启 / `live` 进行中 / `ended` 已结束）——「平台活动」tab 的待办表只留 `signup`（⚠️ 前端**不自己比时间**：库里存 UTC、浏览器按本地时区解析会差一个时区）。⚠️ 回体**不含 `Status` 列**（`INVITATION_COLUMNS` 没投影它）⇒ 「还没答」只能靠入参 `Status:'invited'` 收窄，别想在行上判
  */
 export function seckillInvitations(merchantAccount, params) {
   return post(endpoints.seckill.invitations, q({ MerchantAccount: merchantAccount, ...(params || {}) }))

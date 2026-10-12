@@ -334,7 +334,7 @@ public class GoodsService {
             //    0 / null ⇒ 详情页不画划线价那一行 —— 判据在**前端**，这里原样透出。
             result.put("originalPrice", row.get("OriginalPrice"));
         } catch (Exception e) {
-            // 技术异常（含缓存 Service 侧「>1 行」抛出的 IncorrectResultSizeDataAccessException）：
+            // 技术异常（2026-10-12〈Bug 1〉起「>1 行」不再从这里来 —— 那条路改走 MIN(Id)）：
             // 这里接住 ⇒ 仍是 200 + {success:false}，**不是 500**（对调用方零契约变更）。
             e.printStackTrace();
             result.put("success", false);

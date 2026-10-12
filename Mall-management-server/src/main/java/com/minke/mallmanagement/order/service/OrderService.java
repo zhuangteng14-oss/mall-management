@@ -92,7 +92,7 @@ import com.minke.mallmanagement.shared.lock.DistributedLockService;
  *   <li><b>为什么不「换真值源」</b>：按 {@code goods.Price} 重算属 **C 档**（{@code three-layers.md#pack-three-layers-b}
  *       / {@code :181} 都写着「那是换真值源，不是加校验」），且**用现行契约做不到** —— 下单
  *       payload 里**没有商品 ID、也没有数量**（{@code ProductInformation} 只记「买了哪几个」，
- *       见 {@code ProductPage.vue:315-317} 的拼接），服务端拿不到数量就**原则上**算不出总价。
+ *       见 {@code ProductPage.vue:339-341} 的拼接），服务端拿不到数量就**原则上**算不出总价。
  *       故本笔只走 (a) 档「加校验」；(b) 档要改接口契约，是**另一笔**。</li>
  *   <li><b>⚠️ 本笔不消除资损，只是把「任意值」收窄成「有界值」</b>：{@code defect-survey.md:107}
  *       自述「仓内无支付网关 ⇒『可伪造价格』成立、『资损』是**条件后果**」。本笔**挡不住
@@ -336,7 +336,7 @@ public class OrderService {
      * <p><b>下界为什么是 {@code >= 0} 而不是 {@code > 0}</b>：{@code three-layers.md#pack-three-layers-b} 与
      * {@code :181} 两处都写「只做 {@code Price >= 0} + 上界」；且 {@code goods.Price} 无下界约束
      * ⇒ 商家可以合法把商品设成 0 元，此时前端 {@code popupTotal} 会算出 0
-     * （{@code ProductPage.vue:297-299}）⇒ {@code > 0} 会**误杀免费商品订单**。
+     * （{@code ProductPage.vue:321-323}）⇒ {@code > 0} 会**误杀免费商品订单**。
      *
      * <p><b>精度不校验</b>：{@code popupTotal} 是 JS 浮点求和 ⇒ 真实订单本来就可能带
      * {@code 9.999999999999998} 这类尾数，加「≤2 位小数」会**误杀真实订单**；且存储是
@@ -482,11 +482,25 @@ public class OrderService {
         double discount = 0d;
         String couponAccount = null;
         if (CouponId != null && !CouponId.isBlank()) {
+            // ⚠️ **折扣商品闸**（C3 块 5〈折扣商品用券规则〉，2026-10-12 用户 A 档批准）——
+            //    位置理由同上面 ②：排在核销之**前** ⇒ 拒了就是「一张订单都不建、券一次都不核销」。
+            //    判据（本单含任意一件 `goods.OriginalPrice > 0` 的商品 ⇒ 满减 / 折扣券整单拒）与
+            //    「为什么整单拒」写在 `CouponService.redeem` 的 javadoc 里，此处不重复。
+            Boolean hasDiscountItem = hasDiscountItem(MerchantId, Items, ProductInformation, Price, Quantity);
+            if (hasDiscountItem == null) {
+                // ⚠️ **查不出来就不放行**（fail-closed）—— 与 `writeItems` / 查重那两处的 fail-open
+                //    **刻意相反**，理由：那两处是「附加物 / 加固」，坏了不该挡住一次结算；这里是
+                //    **钱**的规则（多减一笔就真的少收一笔），而且它**只在这一单带券时才走到**
+                //    ⇒ 影响面收得住（不带券的下单一个字节都不受影响），代价是库抖时用券要重试。
+                result.put("success", false);
+                result.put("msg", "折扣商品校验失败，请稍后重试");
+                return result;
+            }
             // ⚠️ 券包的键是**登录名**，本方法的入参是**业务号** —— 这里必须翻一次
             //    （`coupon_grant.ToAccount` 的口径见 `CouponDao.insertGrant`）。
             couponAccount = usernameOf(CustomerId);
             CouponService.Redeem redeemed = couponService.redeem(
-                    couponAccount, CouponId.trim(), MerchantId, Price, OrderId);
+                    couponAccount, CouponId.trim(), MerchantId, Price, hasDiscountItem, OrderId);
             if (!redeemed.ok()) {
                 result.put("success", false);
                 result.put("msg", redeemed.msg());
@@ -571,6 +585,40 @@ public class OrderService {
         } catch (Exception e) {
             log.warn("业务号翻登录名失败（券核销将按原值判，多半会被拒）：customer={} —— {}", customerId, e.toString());
             return customerId;
+        }
+    }
+
+    /**
+     * 本单**含不含折扣商品**（{@code goods.OriginalPrice > 0} 的任一件）。
+     *
+     * @return {@code TRUE} 含 / {@code FALSE} 不含 / {@code null} **查不出来** —— 三态是刻意的：
+     *         调用方（用券段）要按 {@code null} 走 fail-closed（见那里的注释），
+     *         把「查不出来」折叠成 {@code false} 就等于**静默放行**。
+     *
+     * <p>码从 {@link #resolveItems} 取 —— 与落明细（{@code writeItems}）**同一个来源**，
+     * 不另造一份解析（那份解析有两条路：显式 {@code Items} 与回落 {@code ProductInformation}，
+     * 抄第二份必定在某一条上分叉）。
+     * <p>⚠️ 传的 {@code Price} 仍是**原价合计**（此处 {@code payPrice} 还没算）——
+     * {@code resolveItems} 的回落口径要拿它反推单价，传折后价会把单价一起算错。
+     */
+    private Boolean hasDiscountItem(String merchantId, String Items, String ProductInformation,
+                                    float Price, int Quantity) {
+        List<String> codes = new ArrayList<>();
+        for (ItemSpec s : resolveItems(Items, ProductInformation, Price, Quantity)) {
+            if (s.code() != null && !s.code().isBlank()) {
+                codes.add(s.code());
+            }
+        }
+        if (codes.isEmpty()) {
+            // 一单里一个码都没解析出来：按「不含折扣商品」判 —— 这不是「查不出来」，
+            // 是**确实没有商品可判**（真到那一步，下单本身也会在别处被拦）。
+            return Boolean.FALSE;
+        }
+        try {
+            return !orderDao.selectDiscountCodes(merchantId, codes).isEmpty();
+        } catch (Exception e) {
+            log.warn("折扣商品判定失败（本单 {} 个码，用券将按「查不出来」拒）—— {}", codes.size(), e.toString());
+            return null;
         }
     }
 

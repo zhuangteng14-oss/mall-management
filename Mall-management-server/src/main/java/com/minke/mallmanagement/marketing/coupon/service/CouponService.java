@@ -510,15 +510,38 @@ public class CouponService {
      * 平台券与别家券全拒掉。理由与证据写在方法体里那段注释（`mall_management_sql.sql:1256`
      * ＋ `CouponDao:128`）。按 `CategoryMatch` 判的规则稿里没有 ⇒ 列为**待裁项**，本笔不判。
      *
+     * <p>⚠️ <b>【折扣商品不叠满减 / 折扣券】（2026-10-12 用户 A 档批准）</b>：本单含**任意一件**
+     * 折扣商品（{@code goods.OriginalPrice > 0}）时，{@code threshold}（满减）与 {@code percent}
+     * （折扣）两类券**整单拒**；{@code none}（无门槛）放行。判据逐字来自用户原话 ——
+     * 「折扣商品：✅ 可以用**无门槛券**；❌ 不能用**满减券**、**折扣券**」。
+     * <ul>
+     *   <li><b>为什么整单拒而不是「只对那件商品不折」</b>：券抵的是**本单合计**，部分应用要么得
+     *       重新定义「哪些行参与门槛」、要么得按行分摊减免额 —— 两条规则稿里都没有。用户原话是
+     *       「若有折扣商品 + 满减 / 折扣券 → 拒」，故只做**整单**这一档。</li>
+     *   <li><b>为什么不在这里查</b>：本类只认 {@code coupon} / {@code coupon_grant} 两张表，
+     *       「本单有没有折扣商品」要读 {@code order_item} 的码再回 {@code goods} / {@code goods_sku}
+     *       —— 那是 {@code OrderDao.selectDiscountCodes} 的活（多型号商品的码是
+     *       {@code goods_sku.SkuCode}，须经 {@code GoodsId} 回联父商品取划线原价）。
+     *       查的结论由调用方**当参数**传进来（{@code hasDiscountItem}），本类不反向依赖订单域。</li>
+     *   <li><b>排在门槛判断之前</b>：这一条是「这张券根本不能用于这一单」，比「本单金额未满」更靠前
+     *       —— 一单里两样都不满足时，先说「不可用」才是用户能动作的那句（凑单凑到门槛之上也还是
+     *       不能用）。</li>
+     * </ul>
+     *
      * @param account    领券人**登录名**（会话业务号要先过 {@code CouponDao.selectUsernameByCustomerId}）
      * @param couponId   券的业务串
      * @param merchantId 本单商家**业务号** —— ⚠️ **当前未参与判定**，留着是为了
      *                   「按 `CategoryMatch` 判」那条待裁项落地时不必再改签名
      * @param orderTotal 本单**原价合计**（门槛比它、折扣按它算）
+     * @param hasDiscountItem 本单**含不含折扣商品**（{@code goods.OriginalPrice > 0} 的任一件）。
+     *                   ⚠️ 调用方（{@code OrderService.addLocked}）**必须先查准**：本方法只拿它做
+     *                   一条纯判定，不会自己去查 —— 本类不认识 {@code order_item} / {@code goods_sku}，
+     *                   那是订单域与商品域的取数。判据与拒因见下方「折扣商品」那段。
      * @param orderId    本单业务串 —— 核销时写进 {@code coupon_grant.OrderId}，也是
      *                   {@link #release} 认「是不是本单那一次核销」的钥匙
      */
-    public Redeem redeem(String account, String couponId, String merchantId, double orderTotal, String orderId) {
+    public Redeem redeem(String account, String couponId, String merchantId, double orderTotal,
+                         boolean hasDiscountItem, String orderId) {
         if (isBlank(account)) {
             // 会话里翻不出登录名（`user` 表没这个客户号 / 闸关的切片）⇒ 说不清是谁的券，不放行。
             return Redeem.no("无法识别领券账户");
@@ -556,6 +579,10 @@ public class CouponService {
         //    `ProductCode`（种类要回查 `goods`）＋「一单混类目时算不算适用」这条规则**稿里没有**
         //    ⇒ 不在这里自造规则，**列为待裁项**（见 commit 5 提交信息「待裁」段）。
         String type = str(coupon.get("Type"));
+        // ⚠️ 折扣商品闸 —— 见方法 javadoc 那段；`none`（无门槛）放行，另两类整单拒。
+        if (hasDiscountItem && (TYPE_THRESHOLD.equals(type) || TYPE_PERCENT.equals(type))) {
+            return Redeem.no("本单含折扣商品，满减 / 折扣券不可用");
+        }
         double face = decimal(coupon.get("FaceValue"));
         double threshold = decimal(coupon.get("Threshold"));
         if (TYPE_THRESHOLD.equals(type) && orderTotal < threshold) {

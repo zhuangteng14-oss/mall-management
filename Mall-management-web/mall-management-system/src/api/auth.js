@@ -116,7 +116,7 @@ export function isLoggedIn() {
  *   `ShoppingCart.vue:88-93` / `HistoricalOrders.vue:36-41`（customerid → merchantid → loginUsername）—— 均为**历史地址**，悬空成因见 `progress.md §5-AC`
  *
  * ⚠️ **不要**拿它替换另外 2 处 —— 它们形似而实不同，换掉就是改行为：
- *   `ProductPage.vue:145-147` 只有 2 级（无 loginUsername 兜底）；
+ *   `ProductPage.vue:169-171` 只有 2 级（无 loginUsername 兜底）；
  *   `OrderCenter.vue:95-97` 是**另一条链**（merchantid → loginUsername，不含 customerid）。
  *   这两处**本笔未动**，登记为「角色/身份判定的口径统一」另议。
  */

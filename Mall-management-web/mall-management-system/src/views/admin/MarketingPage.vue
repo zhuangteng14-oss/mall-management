@@ -783,6 +783,14 @@ async function loadLimits() {
 
 /** 保存一行：有 `Id` ⇒ 改，没有 ⇒ 建（`(Type, Name)` 撞唯一键由库判定，同后端口径）。 */
 async function saveLimit(row) {
+  // ⚠️ **全局硬上限 9.5 折**（2026-10-12 补）：后端 `DiscountLimitService.validate` 把「类目 `max`」
+  //    与这条全局线**取严**（`Math.min`）⇒ 存进去 9.8 / 10 也不会生效，只是给商家一条**永远撞不到
+  //    也永远满足不了**的配置。这里**直接拦住并说明**，不静默改掉管理员填的数（改了才是更难查的坑）。
+  //    下限**不在此拦**：`min` 的语义是「不许比 X 折更低」，没有全局线（见该服务 javadoc）。
+  if (row.max !== '' && Number(row.max) > 9.5) {
+    flash.text = '折数上限不得高于 9.5 折（全局硬上限，类目只能收紧不能放宽）'; flash.kind = 'bad'
+    return
+  }
   const body = JSON.stringify({
     ...(row.min === '' ? {} : { min: Number(row.min) }),
     ...(row.max === '' ? {} : { max: Number(row.max) }),

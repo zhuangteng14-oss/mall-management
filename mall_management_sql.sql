@@ -1475,3 +1475,31 @@ SET @s := (SELECT IF(COUNT(*) = 0,
   FROM information_schema.COLUMNS
   WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'goods_audit' AND COLUMN_NAME = 'OriginalPrice');
 PREPARE _p FROM @s; EXECUTE _p; DEALLOCATE PREPARE _p;
+
+-- ============================================================
+-- Migration: 块 5〈加购按码反查〉—— `goods_sku` 加 1 个索引（不建表、不加列）
+--            Date: 2026-10-12
+-- 依据：用户 2026-10-12 五处挂账裁定 ④-b「SkuCode 无索引 —— 加（A 档）」。
+-- 范围：**只加索引**；不改列、不删行、不改既有数据（规则 v2：向后兼容）。
+-- 幂等：走 `information_schema.STATISTICS` 守卫 + `PREPARE/EXECUTE`（照本文件 ⑬ 先例）。
+-- 索引（1）：goods_sku.SkuCode
+--   ⚠️ **为什么需要**：`SkuCode` 就是加购上报的 `ProductCode`（本文件 `goods_sku` 建表注释
+--      第 8 条逐字写着）⇒ `/cart/add` 与 `CartDao` 的 `SKU_BY_CODE` 都是**按它反查**，
+--      而它此前**既无唯一约束也无索引**（本文件 `:1076` 只有 `(GoodsId, AxisName)`，
+--      `:1077` 只有 `(MerchantId, GoodName)`）⇒ 那两条查询是**全表扫**。
+--   ⚠️ **为什么是普通索引而不是 UNIQUE**：全仓**没有任何一处**声明「SkuCode 唯一」是既定
+--      不变量 —— 建表注释只说「商家填」。改成 UNIQUE 是**新增一条契约**（会让未来合法插入
+--      被拒），超出「加索引」这四个字。今天实测 4 行、码全非空、重复 0 条，但那是**当前数据
+--      的巧合**，不是可依赖的约束。真要唯一，请单独裁（那是一条独立的 A 档）。
+-- ⚠️ P3 门禁：本次**不新增表** ⇒ `ConcurrencyRunner.java` 的 KNOWN_TABLES / 期望表数不动。
+-- 回滚（逻辑废弃，执行前须人工确认）：
+--       ALTER TABLE `goods_sku` DROP INDEX `idx_goods_sku_sku_code`;
+-- ============================================================
+
+-- ---- ⑭ `goods_sku` 加索引 `idx_goods_sku_sku_code`（加购按码反查）----
+SET @s := (SELECT IF(COUNT(*) = 0,
+  'ALTER TABLE `goods_sku` ADD INDEX `idx_goods_sku_sku_code` (`SkuCode`)',
+  'DO 0')
+  FROM information_schema.STATISTICS
+  WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'goods_sku' AND INDEX_NAME = 'idx_goods_sku_sku_code');
+PREPARE _p FROM @s; EXECUTE _p; DEALLOCATE PREPARE _p;

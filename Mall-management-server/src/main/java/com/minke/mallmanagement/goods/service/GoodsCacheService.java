@@ -1,5 +1,6 @@
 package com.minke.mallmanagement.goods.service;
 
+import com.minke.mallmanagement.marketing.MarketingGoodsFlags;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.cache.annotation.CacheEvict;
 import org.springframework.cache.annotation.Cacheable;
@@ -89,8 +90,11 @@ public class GoodsCacheService {
  *      **>1 行**（`login.Id` 无唯一约束 ⇒ schema 层可达）与技术异常一律上抛。
      */
     // ⚠️ key 从 'all' 升到 'all-v2'（2026-10-12 续笔）：响应多了 SoldQty 列，形状变了。
+    // ⚠️ 再从 'all-v2' 升到 'all-v3'（2026-10-12〈Bug 2/3〉）：响应又多了 IsSeckill / IsSoldOut /
+    //    IsSubsidy 三列（营销态，见下面 SQL 的注释）。三个键并存 ⇒ 命中哪个看运气，
+    //    而老键里**没有这三列** ⇒ 页面会**静默**地少标签 / 不过滤已售完（看起来像前端 bug）。
     //    别改回去，理由见本方法 javadoc「缓存体是响应形状的快照」那一段。
-    @Cacheable(cacheNames = "goodsHome", key = "'all-v2'", sync = true)
+    @Cacheable(cacheNames = "goodsHome", key = "'all-v3'", sync = true)
     public Map<String, Object> listHome() {
         Map<String, Object> result = new HashMap<>();
 
@@ -100,7 +104,19 @@ public class GoodsCacheService {
         // ⚠️ 2026-10-12 续笔加 SoldQty（销量）：LEFT JOIN 一次聚合出每个 ProductCode 的累计件数。
         //    CAST(SUM(...) AS SIGNED) 照 StatsDao.selectTopGoods —— JDBC 会把 SUM(int) 退成 BigDecimal。
         //    LEFT JOIN 而非 JOIN：没卖过的商品也要在（销量 0），否则商品会整行消失。
-        String sql = "SELECT g.*, COALESCE(s.SoldQty, 0) AS SoldQty "
+        // ⚠️ 2026-10-12〈Bug 2/3〉再加三列**营销态布尔**（消费侧据它们过滤「已售完」与画类别标签）：
+        //    IsSeckill（挂着一条 live 的秒杀）/ IsSoldOut（那条秒杀库存已满）/ IsSubsidy（国补已确认且在期）。
+        //    三者的谓词**一律取自营销域自己的定义**（MarketingGoodsFlags 拼 SeckillDao.stage() 与
+        //    SubsidyDao.IN_EFFECT）—— 不在这里抄第二份 CASE：「在不在秒杀」「规则在不在期」各有唯一真相，
+        //    抄一份就会漂，且差 8 小时 / 把 signup 当 live 这类错**都不报错**，只是标签该出不出的。
+        //    ⚠️ 三个 EXISTS **无条件**在投影里：同一个端点同时喂「已售完要过滤」的共享页与
+        //    「已售完要显示」的店铺页 ⇒ 服务端筛不了，筛与不筛由消费侧决定。
+        //    ⚠️ 全表扫的代价：三个 EXISTS 各自走子查（seckill_activity / subsidy_goods+subsidy_rule），
+        //    两张表当前都是个位行数；缓存把这笔摊薄成每 TTL 一次，与 `SoldQty` 那条同款（掩盖而非修复）。
+        String sql = "SELECT g.*, COALESCE(s.SoldQty, 0) AS SoldQty, "
+                + MarketingGoodsFlags.existsIsSeckill("g") + " AS IsSeckill, "
+                + MarketingGoodsFlags.existsIsSoldOut("g") + " AS IsSoldOut, "
+                + MarketingGoodsFlags.existsIsSubsidy("g") + " AS IsSubsidy "
                 + "FROM mall_management_sql.goods g "
                 + "LEFT JOIN (SELECT ProductCode, CAST(SUM(Quantity) AS SIGNED) AS SoldQty "
                 + "FROM mall_management_sql.order_item WHERE ProductCode <> '' "
@@ -243,11 +259,11 @@ public class GoodsCacheService {
      * <ol>
      *   <li>**0 行 → `null`**（业务事实：查无此三元组）⇒ 是**值** ⇒ 被缓存（负缓存 / 防穿透）。
      *       防穿透**与改前持平**：改前 0 行同样被缓存，只是缓存的是 marker 而不是 null。</li>
-     *   <li>**&gt;1 行 → 异常上抛**（不 catch）⇒ @Cacheable 遇异常不写入 ⇒ 该失败**不固化到
-     *       TTL**，数据一修好，下一次读取立刻正确。</li>
+     *   <li>**&gt;1 行 → 取 MIN(Id)**（`ORDER BY Id ASC LIMIT 1`；2026-10-12〈Bug 1〉改判，原为
+     *       「异常上抛」）⇒ 同码重复不再让详情页整页空白；代价：该结果**会**进缓存（见方法尾注释）。</li>
      * </ol>
-     * 实现上只把 `queryForMap` 换成 `queryForList`（0 行不再抛，成为一个 `isEmpty()` 分支），
-     * 其余（cacheName、key 拼接、sync=true、失效面）**一字未动**。
+     * 实现上把 `queryForMap` 换成 `queryForList`（0 行不再抛，成为一个 `isEmpty()` 分支），SQL 尾加
+     * `ORDER BY Id ASC LIMIT 1`；其余（cacheName、key 拼接、sync=true、失效面）**一字未动**。
      *
      * 【返回契约随之改变（调用方只有一处）】本方法不再返回 `{success, price, goodImg}`，而是返回
      * **裸行**（键 = 列名 `Price` / `GoodImg`）或 `null`；成型（catch + 组装响应）移到
@@ -258,9 +274,9 @@ public class GoodsCacheService {
      *
      * 【本次没动的两件事（边界）】
      * ① 第 1/2 环：`goods` 表**无三元组唯一约束**、`goodsAdd` 不查重，且 collation 是
-     *    `utf8mb4_0900_ai_ci`（大小写/重音不敏感）⇒ 仍可造出「只差大小写」的两行使本接口失败。
-     *    改后该失败**不再被缓存**（这正是本次要关的那一环），但**失败本身依旧存在** ——
-     *    实测当前 0 个重复三元组 ⇒ 该分支不可达；建唯一索引属另一主题（schema 变更）。
+     *    `utf8mb4_0900_ai_ci`（大小写/重音不敏感）⇒ 仍可造出「只差大小写」的两行命中本接口。
+     *    **2026-10-12〈Bug 1〉实测：库内真有 1 组**（`dRD3gqtbFr`/`GD-101-9552` = Id 76/120，
+     *    两行数据均完整）⇒ **多行这件事不是理论上的**；根因修法（唯一索引）属 schema 变更，另裁。
      * ② 响应文案：0 行与技术异常在 Controller 侧落**同一个** `{success:false}`，调用方仍分不出
      *    「真没有」还是「后端出错」—— 既有瑕疵（§11 ㊹④），改它是可观测的契约变更，须单列一笔。
      *
@@ -278,7 +294,7 @@ public class GoodsCacheService {
             key = "'v2::' + #MerchantId + '::' + #GoodName + '::' + #ProductCode", sync = true)
     public Map<String, Object> priceByTriple(String MerchantId, String GoodName, String ProductCode) {
         String sql = "SELECT Price, GoodImg, OriginalPrice FROM mall_management_sql.goods "
-                + "WHERE MerchantId=? AND GoodName=? AND ProductCode=?";
+                + "WHERE MerchantId=? AND GoodName=? AND ProductCode=? ORDER BY Id ASC LIMIT 1";
 
         List<Map<String, Object>> rows =
                 jdbcTemplate.queryForList(sql, MerchantId, GoodName, ProductCode);
@@ -288,14 +304,14 @@ public class GoodsCacheService {
             // 与改前的差别不是「该不该缓存」，而是「缓存 null，而不是缓存一个失败 marker」。
             return null;
         }
-        if (rows.size() > 1) {
-            // 多行 = 数据完整性异常（前提 B 不成立：三元组无唯一约束，而 collation
-            // utf8mb4_0900_ai_ci 大小写/重音不敏感 ⇒ 两行只差大小写即可同时命中）。
-            // ⚠️ 这一条**必须抛**，不能像改前那样吞成 {success:false}：吞下去它就是一个
-            //    「正常返回的非 null Map」⇒ 被缓存满 TTL，且 TTL 内不因数据修好而自愈。
-            // 类型与改前 queryForMap 抛的**同一个**；queryForList 自己不会为多行抛，故显式构造。
-            throw new IncorrectResultSizeDataAccessException(1, rows.size());
-        }
+        // 【2026-10-12 块 5〈Bug 1〉改判】**多行不再抛** —— SQL 已 `ORDER BY Id ASC LIMIT 1`：同码
+        // 重复时取 MIN(Id)（Id 是 AUTO_INCREMENT ⇒ 该三元组最早的那一行），详情页照常出图出价。
+        // 改前此处抛 IncorrectResultSizeDataAccessException（换来的只是「失败不被负缓存」，代价却是
+        // `/goods/productCodePrice` 对同码商品**恒失败** ⇒ 前端 `if (d2.success)` 全跳过 ⇒
+        // `allItems` 空 ⇒ **整页空白**）。实测坐实：`dRD3gqtbFr` 的 `GD-101-9552` 有 Id 76/120
+        // 两行，**两行数据都完整**（Price 299 / OriginalPrice 373.75 / ShelfState 1），不是缺数据。
+        // ⚠️ 多行仍是**数据的病**（`goods` 无三元组唯一约束、collation `utf8mb4_0900_ai_ci`
+        //    大小写/重音不敏感）：读侧只是不再被它拖成空白 —— 真修（加唯一索引）属 schema 变更，另裁。
         return rows.get(0);   // 裸行（键 = 列名 Price / GoodImg）；成型由 Controller 负责
     }
 

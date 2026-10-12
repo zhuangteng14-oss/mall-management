@@ -165,7 +165,7 @@
         <div
           class="f mt"
           data-slot="预留 · 库存（动现有代码 5 处 · 超档）"
-          title="待 C3〈商品〉——goods 表无库存列（GoodsDao.java:76 的 INSERT 列序实测 7 列）：mall_management_sql.sql + GoodsDao.java + GoodsService.java + GoodsController.java + GoodsAdd.vue = 5 处，**超档**，因清单点名而画出（见 README 挂账表）"
+          title="待 C3〈商品〉——goods 表无库存列（GoodsDao.java:77 的 INSERT 列序实测 7 列）：mall_management_sql.sql + GoodsDao.java + GoodsService.java + GoodsController.java + GoodsAdd.vue = 5 处，**超档**，因清单点名而画出（见 README 挂账表）"
         >
           <label for="g-stock">库存</label>
           <input
@@ -523,7 +523,7 @@ const loadDiscountLimits = async () => {
 }
 
 /** 折数 → 文案（6.0 → `6`，6.5 → `6.5`）。 */
-const fmtRate = (v) => (v === Math.rint(v) ? String(Math.trunc(v)) : String(v))
+const fmtRate = (v) => (Number.isInteger(v) ? String(Math.trunc(v)) : String(v))   // ⚠️ 原写 `v === Math.rint(v)` —— **`Math.rint` 是 Java 的、JS 没有**（同批误用，见 `ProductPage.vue:520`）：本函数被下面 `discountError` / `discountHint` 两个 computed 调用 ⇒ 商家一填对「划线原价」这两行提示就整体 `TypeError`（渲染中断）。2026-10-12 同行修正，判据 `Number.isInteger`。
 
 /** 当前输入的折数（现价 / 划线原价 × 10）；任一为空 ⇒ null。 */
 const currentRate = () => {
@@ -543,7 +543,9 @@ const discountError = computed(() => {
   if (o <= p) return '划线原价必须高于现价'
   const rate = currentRate()
   const lim = discountLimits.value[GoodType.value] || {}
-  const max = lim.max == null ? 9.5 : lim.max
+  // ⚠️ 与后端 `DiscountLimitService` **取严同源**：`min(类目配的值, 全局硬上限 9.5)` —— 类目只能收紧、
+  //    不能放宽（2026-10-12 补；此前类目一配 `max`，这条 9.5 就被绕开）。这里是**提示**，权威在后端。
+  const max = Math.min(lim.max == null ? 9.5 : Number(lim.max), 9.5)
   if (rate > max) return `该类目折扣不得高于 ${fmtRate(max)} 折（当前 ${fmtRate(rate)} 折）`
   if (lim.min != null && rate < lim.min) {
     return `该类目折扣不得低于 ${fmtRate(lim.min)} 折（当前 ${fmtRate(rate)} 折）`

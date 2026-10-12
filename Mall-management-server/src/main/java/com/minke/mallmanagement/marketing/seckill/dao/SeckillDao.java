@@ -61,8 +61,11 @@ public class SeckillDao {
      *
      * <p>⚠️ 时间点为空的情况：{@code EndAt} 为空 ⇒ 永不 ended；{@code StartAt} 为空 ⇒ 直接 live。
      * 「没填」= **不限**，与 {@code subsidy_rule.Cap = 0} = 不封顶同一个口径。
+     * <p>⚠️ <b>2026-10-12 起是 {@code public}（+ {@code static}）</b>：商品域的两条公开列表 SQL
+     * 要判「这件商品在不在秒杀」，复用**这一份**四态定义（{@link com.minke.mallmanagement.marketing.MarketingGoodsFlags}），
+     * 不另抄一个「时间窗内」的近似。改本方法 = 同时改两个商品列表面的标签与过滤。
      */
-    private static String stage(String a) {
+    public static String stage(String a) {
         return "CASE "
                 + "WHEN " + a + ".ApplyEndAt IS NOT NULL AND " + a + ".ApplyEndAt > NOW() THEN 'signup' "
                 + "WHEN " + a + ".EndAt IS NOT NULL AND " + a + ".EndAt <= NOW() THEN 'ended' "

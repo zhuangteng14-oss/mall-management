@@ -667,7 +667,7 @@ overflowX 断言（两档宽度 × 全部路由）」，跑了、46 组全 0，*
 ⇒ scoped 块**不自己定义**时，`var()` 在**计算值阶段**判无效、**整条声明被丢弃**，标题**静默回落 15px**
 （= 正文的 `--fs-sm`）。**eslint 不报、build 不报、模板扫不出来**，只有**算出值**看得见。
 - **落法**：`--d2: var(--fs-2xl)` 写在**本页根 `.uc-main`** 上（同 `UserInfoPage.vue:393` 先例；
-  `ShoppingCart.vue:465` 是另一支落法 —— 那条直接写 `var(--fs-2xl)`、不设 `--d2`，**值相同**）。
+  `ShoppingCart.vue:427` 是另一支落法 —— 那条直接写 `var(--fs-2xl)`、不设 `--d2`，**值相同**）。
 - **怎么暴露的**：先由**元素级截图**看出页头不对（那个截图的坑见 §五），再量算出值坐实。
 - **新增两支可复跑扫描**：`shot10.mjs` 断言「页标题**算出字号** = 36px」+「本页 scoped 规则消费的
   `var(--x)` **全部解析得出**」；`美化/varscan.mjs` 把同一口径扫到**全站 21 条路由**（实测全绿），
@@ -972,7 +972,7 @@ script 段的行号位移就是模板增量）。
 3. **`--d2` 先例照搬**（commit 10 揪出的静默失效）：稿的 `.pname` / `.price .int` 消费 `var(--d-title)` /
    `var(--d-price)`，而这两个名只定义在**稿自己的** `:root` ⇒ 本页在根 `.goods-detail-page` 上
    写 `--d-title: var(--fs-lg)` / `--d-price: var(--fs-2xl)`（同 `UserInfoPage.vue:393` /
-   `GoodsAdd.vue:617` / `GoodsUp.vue` 的先例）。实测：本页 scoped 规则消费的 `var(--x)` **全部解析得出**
+   `GoodsAdd.vue:619` / `GoodsUp.vue` 的先例）。实测：本页 scoped 规则消费的 `var(--x)` **全部解析得出**
    （未解析 **0** 个）、`.pname` **算出字号 24px**、`.price .int` **算出 36px**、`.price` 走 accent 锐色
    （`rgb(178, 66, 47)`，非黑）。⚠️ 算式值才是判据 —— 光写 `var()` 不算落。
 4. **`100vw` → `100%`**：稿的 `.goods-detail-page` 是 `width: 100vw`，而本仓 `#app` 里嵌在
@@ -1203,7 +1203,7 @@ placeholder 逐字）。**待用户裁示**：若裁定「必须按用户要求�
    **稿里没有它**（客户稿 `:14-15` 明写「客户侧不画」）。它是**商家宿主的回程**：
    `/merchant/order/cart` 走 `OrderPane.vue:3` 的 `v-else`，删掉它商家就无法切回订单面 ⇒
    与 §一 commit 4 的「选 1（共用骨架 + `showSwitch` 分叉）」裁决配套，**不是新增功能**。
-2. `.op button` 付款 / 收货 —— `ShoppingCart.vue:127-139`，`@click="handlePay(order)"` /
+2. `.op button` 付款 / 收货 —— `ShoppingCart.vue:132-144`，`@click="handlePay(order)"` /
    `@click="handleReceive(order)"`，`:disabled` / `:class` **逐字保留原实现**（见 §一 commit 4 注 1）。
 
 ---
@@ -1988,9 +1988,9 @@ comm -23 /tmp/b.tok /tmp/a.tok   # 只在 before ⇒ **丢失，应为 0**
 判据：新 token 的**宿主含 `ProductPage.vue`**。全部来自本笔在模板 / 样式里写的注释，共 8 条 ——
 `ProductPage.html:262-263`（写在 `ProductPage.vue:8`，顶栏「与稿有意不同」）、
 `AppShell.vue:231`（写在 `ProductPage.vue:12`，壳内搜索入口）、
-`ProductPage.html:1011-1012`（写在 `ProductPage.vue:210`，`desc` 补 `class="on"`）、
+`ProductPage.html:1011-1012`（写在 `ProductPage.vue:234`，`desc` 补 `class="on"`）、
 `ProductPage.html:706-772`（写在 `ProductPage.vue:351` 与 `ProductPage.vue:1070`，`dlg1` 面 ⚠️ **C 笔后为 `:352` / `:1051`**（前者 +1、后者**未动** —— 尾部 hunk 从 1050 起、起点不变）；⚠️ **2026-10-10〈Bug 1 · 立即购买补接收银台〉重指**：本笔在 `ProductPage.vue` 净 +19 行，且**全部落在 398 行之后、1051 行之前**（`git diff` 实测 4 处：模板 `:412` 起 +5、import +1、`handlePay` 段 +13（含 `-1`））⇒ 后一处由**原 1051 行** → `:1070`，前一处 `:352` **不变**（398 亦不变）；见 §八 8-8。token 目标本身不变）、
-`ProductPage.html:769-789`（写在 `ProductPage.vue:398`，`dlg2` 面）、
+`ProductPage.html:769-789`（写在 `ProductPage.vue:422`，`dlg2` 面）、
 `ProductPage.html:225-226`（写在 `ProductPage.vue:794`，稿的 `:root`；⚠️ **2026-10-10〈Bug 1 · 立即购买补接收银台〉重指**：同笔在 `ProductPage.vue` 净 +19 行 ⇒ 本处由**原 775 行** → `:794`）、
 `GoodsUp.vue:637` 与 `GoodsAdd.vue:612`（同写在 `ProductPage.vue:803`，`button` 归零先例；⚠️ 2026-10-10〈模板表通用化〉同笔重指：`GoodsAdd.vue:508` → **`GoodsAdd.vue:612`**）。⚠️ **2026-10-10（C3 块 3 · 商品块）重指**：`GoodsUp.vue` 因同笔在两处加行（`<script setup>` 末尾 +88 行「状态并表 / 筛选接线」/ `<style>` 的 `.state` 三态 +6 行）而整体下移 **88 行**（`<script>` 段的行号一个没动，见 §十七 漂移表的按语）⇒ 本处由 `:549` → **`:637`**。⚠️ **2026-10-10〈Bug 1 · 立即购买补接收银台〉重指**：同笔在 `ProductPage.vue` 净 +19 行 ⇒ 本处由**原 784 行** → `:803`（token 目标 `GoodsUp.vue:637` / `GoodsAdd.vue:612` 本身不变）。
 
@@ -2737,7 +2737,7 @@ find Mall-management-web/mall-management-system/src -name "CustomerPage.vue"
   2. **一单一号**：`popupOrderId` 开窗生成、**各行显示同一枚**，`confirmPurchase` 上报的也是**同一枚**（「所见即所报」）⇒ 与 `图3.jpg` **每行不同号有意不同**；
   3. **顶部步进器保留** + 新增行内 ±（两个入口同源）—— 与更早那条「数量选择只出现在顶部」的旧口径**并存**，见 10-10 ⑦。
 - 有意**没做**的三件（对照 `图3.jpg` 的省略，**不是漏**）：复选框列、全选 / 已选行、以及「结算与支付流程属 C3」那句图示文字。
-- ⚠️ **`运费 免运费`**：`ShoppingCart.vue:192-193` 记着该页「运费 免运费 **也无来源、不落**」—— 那条说的是**订单制**的购物车页；本弹窗只有「本单即时购买」一种来源，故按图落「免运费」并**在此登记这处口径差**。
+- ⚠️ **`运费 免运费`**：`ShoppingCart.vue:197-198` 记着该页「运费 免运费 **也无来源、不落**」—— 那条说的是**订单制**的购物车页；本弹窗只有「本单即时购买」一种来源，故按图落「免运费」并**在此登记这处口径差**。
 - ✅ **实测**（`美化/probe-pp-cart.mjs`，**30 项 0 失败**，1440 + 960/900/820/768 四窄档）：
   - 1440：sheet `[213,1213]`、列表 `[245,925]`、结算栏 `[949,1181]`（**真在右侧**）；表头五列与行格右边界差 **≤1px**；表头在滚动区**之上**（`headBottom 620 ≤ rowTop 663`）；页 / sheet 横向溢出 **0**；
   - 开窗即有 1 行（不再是空表），行内副行 = `规格：P001` + `订单号 <id>`；结算栏四行 = `商品件数1 / 商品总额¥129.00 / 运费免运费 / 合计¥129.00`；
@@ -4618,3 +4618,94 @@ commit 0 加 `'order_item'`（`KNOWN_TABLES` **8 → 9**、期望 **19 → 20**�
 6. **`seed-demo.sql` 的周末低谷按「执行日」算**（`DAYOFWEEK(CURDATE() - INTERVAL k DAY)`），**不**按生成时的相位钉死 ⇒ 换一天执行，低谷仍落在**真实的**周末。
 7. **演示口令 = 用户名**（对齐既有 `1/1`、`2222/2222` 惯例）⇒ **明文口令**；若 push 被 `[Credential Leakage]` 拦，**改占位符再 amend、不硬推**。
 8. **顺手修了一条既有 bug（`CatalogPage.vue` 的按钮闩）**：块 3「通过 / 驳回」两键的 `:disabled` 绑的是 **`busyId`**，而本页定义的是 **`busyKey`** ⇒ 绑到一个**未定义**的 ref，闩对这两个键**完全失效**（`progress.md:1983` 记作「按钮永不置灰」，**原 114/117 行**）。2026-10-11 补图标那一笔**同行替换时一并订正为 `busyKey`**（现落 **157/160 行**）。⚠️ 这**不在**方案原文里 —— 原记录写的是「只报告不修」⇒ 在此报备。**方向是「让它按本页既有的闩机制工作」，不动任何接口 / 字段 / 契约**；若用户认为该 bug 应留到「文档飘移清理笔」，回退点就是这两行。
+
+---
+
+## 二十二、C3 块 5〈营销块〉（2026-10-11/12；**27 笔落码 + 手验已过 + 收口登记**）
+
+> 本节**追加在文件尾**（同 §19 / §20 / §21 的先例）。叙事版见 `progress.md §7` 的块 5 条；本节只记**本文件关心的那一面**：槽位改判 / 文件 / 行号 / 零漂移手法 / 门禁 / 偏差。
+> 命名沿用「§二十X」的段号形制，但本节编号写作 **22-X**（§二十一 用的是 `21-X`）。
+
+### 22-1　提交切分（分支 `feat/c3-admin-block5`，基点 `e44d922` = main / PR #89）
+
+27 笔，按块内分组（`git log --oneline main..HEAD`，自上而下 = 新到旧）：
+
+| 组 | 笔 | 内容 |
+|---|---|---|
+| 前置 | `e69c244` · `51e1c9f` | 项目级规则落盘（补 6 条）· 块 5 pack 出档 + 索引同步 |
+| A 建表 | `a1b845d` | **commit 0 —— 建表迁移（7 新表 + 4 加列）** |
+| A 券 | `0915716` · `6b121af` · `e4abc52` · `b0bf612` | commit 1 券（后端 + 管理端 + 用户端）· 券信息架构重排（本周新券 / 券包弹窗 / 一键领取）· A 组商品券（建 / 审 / 领）+ 券卡补券名与类型 · A4 手验修券卡基宽 |
+| A 证据 | `23cbeeb` · `a3c1d3f` | 迁移**只读**探针 + 手验前置证据 · 迁移落 VM 库（**两遍** + 前后探针） |
+| B 店铺 | `2a0c105` · `34fa036` · `208c0de` · `0182a45` · `2e24056` · `195a71b` | commit A 建 `shop_follow` + shop 域关注三端点 · commit B 个人中心两壳重排 + 商家端【无名框】7 项 · 手验四笔（甲案上亮下素 / 卡片式统一 + `@lucide/vue` / 边框加深一档 / 下半加容器层） |
+| B 续笔 | `ba736a2` · `9c760a5` · `18b2e80` · `d027d40` · `429a0b0` · `1e65a62` · `671356c` · `97450bb` | commit C 店铺主页裸页 +「进店逛逛」真跳转 · （1/2）后端 `goodsSelectHome` 补销量列 + 新公开端点 `/shop/profile` · （2/2）三处商品卡收成 `ProductCard.vue` · （3/3）**删主页「功能入口」三格服务条** · 券改**账号口径** + 「不能领自己发的券」· （第 3 步）`ShopHome` 补成完整店铺主页（八模块）· 整体布局重排 + 本店热销改**竖直柱状图** · 版面改**丙方案（Tab 式）** |
+| C 折扣 | `2f631ba` | 商家填划线原价 + 类目上下限校验 + 详情页划线价 / 折扣角标 |
+| D 国补 | `341a225` | 平台建规则 + 提名商品 + 商家在消息中心双向确认 |
+| E 秒杀 | `121f655` | 平台邀请 / 商家申请**双向制** + 用户端限时秒杀（主页模块 + 秒杀页 + 商品页徽标） |
+| F 结算用券 | `270af55` | 购物车选券核销（**CAS**）+ 券归属按**登录名**反查 + 主页「今日秒杀」接通秒杀页 |
+
+### 22-2　建表（**四个** Migration 段，全部追加到 `mall_management_sql.sql` 末尾，段内 ①~⑭ 跨段连续）
+
+段 A `:1222`（① `coupon` `:1247-1267` ② `coupon_grant` `:1270-1284` ③ `subsidy_rule` `:1287-1302` ④ `subsidy_goods` `:1305-1318` ⑤ `seckill_invitation` `:1321-1341` ⑥ `seckill_application` `:1344-1364` ⑦ `seckill_activity` `:1368-1392` ⑧ `goods.OriginalPrice` `:1394-1400` ⑨ `order.CouponId` `:1402-1408` ⑩ `order.SubsidyAmount` `:1410-1416` ⑪ `order.PayAmount` `:1418-1424`，commit `a1b845d`）· 段 B `:1427`（⑫ `shop_follow` `:1442-1452`，`2a0c105`）· 段 C `:1455`（⑬ `goods_audit.OriginalPrice` `:1471-1477`，`2f631ba`）· 段 D `:1480`（⑭ `goods_sku` 加索引 `idx_goods_sku_sku_code` `:1499-1505`，本笔收口）。
+⇒ 表数 **22 → 30**、`CREATE TABLE` **24 → 32**（VM 库 `information_schema.TABLES` = 30、仓内 `.sql` 实测 = 32，2026-10-12）。逐列定义见 `db-schema.md §14`、登记见 `db-migration.md` #16–#29 + 注意 18、落库证据 `docs/agent/evidence/c3-block5/b5-close-db-ddl-verified.txt`。
+
+### 22-3　后端
+
+新包 **`marketing/{coupon,subsidy,seckill}`**（各 `controller` / `dao` / `service`，券另有 `job/CouponExpiryJob`）+ **`marketing/discount`**（只一个 `DiscountLimitService`，无 controller —— 它是商品读写路径上的校验腿）+ 新包 **`shop/{follow,profile}`**。
+⇒ 全仓 method-level 端点 **84 → 120**（块 5 +36：`marketing` 域 26 + `shop` 域 4 + …，逐条见 `api-contract.md` **附录 F**）。
+⚠️ **`/shop/profile` 是块 5 唯一进 `AUTH_WHITELIST` 的端点**（**12 → 13 条**，`WebAuthConfig.java:116`）。
+⚠️ **`goodsSelectHome` 补一列 `SoldQty`**（LEFT JOIN `order_item` 聚合）⇒ 缓存键 **`'all'` → `'all-v2'`**（`cache-layer §10` 的「响应形状变更 ⇒ bump 键版本」）；`/order/orderAdd` 扩可选 `CouponId`（**不增端点**）。
+
+### 22-4　前端
+
+**新建**：`views/ShopHome.vue`（店铺主页，八模块）· `views/SeckillPage.vue` · `views/admin/MarketingPage.vue` · `components/ProductCard.vue` · `components/CouponWalletDialog.vue` · `config/{coupon-format.js,product-link.js}` · `api/{marketing.js,shop.js}`。
+**改动**：`HomePage.vue`（秒杀模块转真 + 领券中心 + **功能入口条整块删**）· `ProductPage.vue`（划线价 / 折扣角标 / 国补绿标 / 猜你喜欢换 `ProductCard`）· `ShopHome.vue` · `GoodsSelect.vue`（搜索页换卡 + 已售完过滤）· `GoodsAdd.vue` / `GoodsUp.vue`（划线原价）· `ShoppingCart.vue`（选券核销）· `UserInfoPage.vue`（券包格 + 个人中心两壳重排）· `NotifyInbox.vue`（国补 / 秒杀待应答）· `admin/CatalogPage.vue` · `router/index.js` · `assets/tokens.css` · `api/{order.js,endpoints.js}` · `AbstractSmokeTest` 的 `@Import` 清单。
+⇒ `endpoints.js` 头注计数 **83 → 119**（**同行改**，不插行）。
+
+### 22-5　槽位改判（**本节的核心** —— 稿基线表那 4 条老稿预留位，块 5 一次性结清 3 条）
+
+§一 的「稿基线表」把 #5–#8 四条预留位全落成 `data-slot` 占位（用户 2026-10-07 裁「一律落」，归属记 `C3〈待定〉`）。块 5 之后：
+
+| # | 原登记 | **块 5 后** | 证据 |
+|---|---|---|---|
+| #5 预留 · 功能入口 | `HomePage.vue:97` `<section class="quick">` | **已删**（用户 2026-10-12 指令：稿上有、产品不要）—— 模板 + 整段 CSS（`.quick` / `.qi*` / `.ic` / `.tx*`）一并删 | `d027d40`；`HomePage.vue:91-96` 的「已删」注释 + `:933-934` 的样式墓碑；证据图 `docs/agent/evidence/c3-block5/{before,after}-home-quickbar.png` |
+| #6 预留 · 秒杀位 | `HomePage.vue:121` `<section class="flash">` | **已落地** —— `data-slot` **退场**；改为 `v-if="flashRows.length"` 的真模块（另有 `v-else-if="flashLoaded"` 的**整块空态**），读 `/marketing/seckill/live`，倒计时读后端 `EndAt`（`DATE_FORMAT` 出的是 **UTC** ⇒ 解析补 `Z`），`Stage` 由后端按**库时钟**现算 | `121f655`（秒杀）+ `270af55`（主页接线）；`HomePage.vue:99-128` / `:565-620` / `:937-994`（样式墓碑 + 空态）。⚠️ 该处代码注释**自己点了本段的名**：「收口时 `slot-registry.md` 那条要改判」 |
+| #7 预留 · 券包位 | `HomePage.vue:135` `<section class="tickets">` | **已落地** —— `data-slot` **退场**；左栏成「领券中心（本周新券，`thisWeek=1`）」，右栏「我的券包」**整块删掉**并搬进**用户中心**（`UserInfoPage.vue` 的「优惠券」格 → `components/CouponWalletDialog.vue`，四态 tab） | `0915716` + `6b121af`（信息架构重排）；`HomePage.vue:130-150` |
+| #8 预留 · 信任位 | `HomePage.vue:181` `<section class="trust">` | **仍未落**（`data-slot="预留 · 信任位"` 仍在原处，4 项静态承诺文案） | `HomePage.vue:259` —— 块 5 **未碰** |
+
+⚠️ **副产品**：`HomePage.vue` 因 #5 删除 + #6/#7 转真而**大幅改形** ⇒ 本文件 §一 / 稿基线表里所有指向 `HomePage.vue` 的**旧行号全部漂移**（`:97` / `:121` / `:135` / `:181` 都不再指原位）—— 重指归**块 5 收口的 refs-scan 那一步**（见 22-6）。
+⚠️ 另两处「无落点」登记**已结**：`:811` `.flash-h .more`「全部秒杀 →」（原记「无落点 ⇒ `C3〈促销〉`」）现落 `/seckill`；`:744-753` `.subnav` 六项里的「今日秒杀」摘 `disabled` 改 `<router-link to="/seckill">`、「领券中心」锚到本页 `.tickets`、「全部商品分类」走 `searchByType('')`（**另 3 项仍 `disabled`**：品牌专区 / 会员中心 / 客户服务）。
+
+### 22-6　零漂移手法与重指
+
+- **新表 / 新附录一律追加文件末**：`.sql`（`:1222` 之后四段）、`db-schema.md`（**§14**）、`db-migration.md`（登记表 **#16–#29** + 注意 **18**）、`api-contract.md`（**附录 F**）、本文件（**§二十二**）—— 中段**一行未插**。
+- **头部计数用「同行追加」订正**（净 0 行）：`db-schema.md` 表数量行 / 行尾 CRLF 计数行；`db-migration.md` 注意 18 与 14 行登记；`api-contract.md` 附录 F.0；`api/endpoints.js` 的「现为 N 条」行；`WebAuthConfig.java:62`（业务 9 条）/ `:68`（登录前后台页面 6 条）、`AuthGateSmokeTest.java:57`/`:179-180`（白名单 13 条 / 业务 9 + 基础设施 4）、`MerchantStatsController.java:19`（13 条精确路径）—— **四处已实测逐处到位**。
+- ⚠️ **本节的 `文件:行号` 全部是「收口时」的实测值** —— 块 5 期间本文件与 `progress.md` **一行未动**（无「块 5」字样）⇒ 本节是**从零新增**，不存在「回填」。§一 侧指向 `HomePage.vue` 的旧行号**未在本笔就地改**：那是 refs-scan 的活（重指逐条核、不猜，见 `progress.md §7` 收口条）。
+- ⚠️ **refs-scan 口径照旧**：`bash scripts/refs-scan.sh <产物>`，扫描根 = 前端 `src` + 后端 `src` + `docs`（`_work/` 与 `scripts/probes/` **不在**范围），跳过 `refs-(before|after).*\.txt`；比 **token 集合**（两侧 `LC_ALL=C sort -u`），`comm -23` = LOST、`comm -13` = NEW；**已知盲区**：目标文件内部行号是否还指对，扫描器看不见。块 5 收口的 before = `scripts/refs-b5-close-before.txt`（**4524 条 / 2589 token**，与 `scripts/refs-b5h2-after.txt` md5 逐字节相同 ⇒ 两轮之间无新编辑）。
+
+### 22-7　A3 门禁（P3 **两次**同笔 +1，全部**净零行数**、**四处同改**）
+
+段 A（`a1b845d`）：`KNOWN_TABLES` **11 → 18**、期望表数 **22 → 29**（一次加 7 张券 / 国补 / 秒杀表）。段 B（`2a0c105`）：**18 → 19**、**29 → 30**（`shop_follow`）。段 C / 段 D **不新增表** ⇒ 门禁不动。
+**四处** = 注释块 / IN 清单 / `KNOWN_TABLES` 常量 / PASS 文案串（`scripts/concurrency/ConcurrencyRunner.java:2645-2669`）—— 少改一处 A3 的 P3 必红。
+⚠️ `concurrency` job 是 **`continue-on-error`** ⇒ **只能读 artifact 的 `gates.count`，不能读 job 颜色**（同 §19 / §20 / §21 的教训）。
+
+### 22-8　验收
+
+🧪 块 5 手验由用户执行并**已通过**（本笔按用户 2026-10-12 的收口指令登记）。CI 结果见 PR 页；⚠️ **A3 颜色不看，只读产物 `gates.count`**。
+⚠️ **手验挂 a3 profile ⇒ 闸关**（`app.auth.enabled=false`）⇒ **手验绿 ≠ 默认 profile 绿**；块 5 新增了一条**公开面**端点（`/shop/profile`），它在默认 profile 下的行为（匿名 200）**只有默认 profile 能验**。
+
+### 22-9　未做 / 挂账（**已登记，不属本节**）
+
+见 `tech-debt.md` 的 **TD-38 起**（块 5 内挂账）+ `progress.md §7` 的块 5 条。要点：秒杀 / SKU **真扣减**（`goods_sku.Stock` 与 `seckill_activity.SoldStock` 当前**只存不扣**）→ 块 7 · 国补**商家主动申请通道**未落（只落了平台提名 → 商家应答）· 死锚点清理 · `refs-*.txt` 清理（4.2M 入库）· 兄弟 token 扫全 · **Id 120 重复行**（未清）。
+
+### 22-10　报备偏差（落码 ≠ 方案原文处，逐条）
+
+1. **`ShopHome` 本店网格也做同码去重**（5 行 → 4 张卡）：用户字面只要求「含已售完」，去重不在其内 —— 理由是不去重则同一件货两张卡、两张都点进同一详情页（详情页只认 `Id` 最小那行）。**自裁 + 报备**，回退点是一行改动。
+2. **共享面（主页 / 搜索 / 两处猜你喜欢）过滤已售完，店铺页三个 tab 与 `/seckill` 照显**（用户 ② 口径，2026-10-12）—— 判据落在 `config/goods-flags.js` 的 `sharedList`，**一处定义、四处消费**。
+3. **`ProductCard.vue` 元信息行用「左店名 / 右已售 N 件」两端对齐**，**不再上分类名**（分类仍在主页左侧导航 / 搜索页分类树 / `ShopHome` 筛选 chip）；`SoldQty > 0` **才渲染**那一段（「数据不足不显」）。
+4. **`ShopHome` / `ProductPage` 的图由 1/1 改 4/3** —— 「三处收成一个组件」的必然结果（用户裁「甲 + 接 3 处」）。
+5. **「新品首发」用 `goods.Id DESC` 而不是时间列** —— `goods` 表**没有任何时间列**（基线 + 全部迁移加列查过）；`Id` 是 `AUTO_INCREMENT` ⇒ 同店内 `Id` 大小 = 上架先后，是**可复核的代理**，不是编的数。
+6. **`/shop/profile` 扩公开面（12 → 13 条）** —— 块 5 唯一一处**放宽安全边界**的动作，四处文案同笔改（见 22-6）。
+7. **认证徽章在当前演示数据下不显**：`merchant_application` 15 条的 `Username` 与 13 家店名**交集为空** ⇒ 通道建好、数据没有（符合「数据不足不显」，不造假）。
+8. **顺手修了一条真 bug（耳机详情页空白）**：根因是「同码两行」取行不稳 —— 判据 = 三元组 `(MerchantId, GoodName, ProductCode)`，`priceByTriple` 改 `ORDER BY Id ASC LIMIT 1`；⚠️ 代价是**多行进缓存的机会变多**（测试专门钉住）。证据 `docs/agent/evidence/c3-block5/b5h-bug1-detail-blank.md`。
+9. **一律不做 `requireAdmin`**（TD-18）：管理员 cookie 铸不出 token ⇒ 给 `/admin/**` 加「须 role=3」会让**默认 profile 上管理员自己 401**。四个新管理端 Controller 的类注释逐字写了这一条。
+10. **`goods_sku.SkuCode` 的索引落成普通索引、不是 UNIQUE** —— 全仓**没有任何一处**声明「`SkuCode` 唯一」是既定不变量 ⇒ 改 UNIQUE 是**新增一条契约**，超出「加索引」。

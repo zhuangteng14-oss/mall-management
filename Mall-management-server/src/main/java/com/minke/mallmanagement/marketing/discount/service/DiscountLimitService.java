@@ -26,8 +26,8 @@ import java.util.regex.Pattern;
  *       全库 43 行的 {@code OriginalPrice} 都是 0（块 5 A 组加的列，值恒 0）。</li>
  *   <li>{@code 划线原价 <= 现价} ⇒ 拒。这不是"折扣"，是"涨价"。</li>
  *   <li>折数 = {@code 现价 / 划线原价 × 10}，须落在 {@code [min, max]}。
- *       {@code max} 恒有（默认 {@value #DEFAULT_MAX} 折 = 至少让利 5%）；{@code min} **只有配了才管**
- *       —— "类目没配上限"与"类目下限为 0"是两件事，不编造缺失的配置。</li>
+ *       {@code max} 恒有 = {@code min(类目配置值, }{@value #GLOBAL_MAX}{@code )}（类目没配就取全局上限）；
+ *       {@code min} **只有配了才管** —— "类目没配上限"与"类目下限为 0"是两件事，不编造缺失的配置。</li>
  * </ol>
  *
  * <h2>【⚠️ 折的口径】</h2>
@@ -41,8 +41,16 @@ import java.util.regex.Pattern;
 @Service
 public class DiscountLimitService {
 
-    /** 折数上限的兜底值：没给 {@code max} 时不许比这更"不划算"。9.5 折 = 至少让利 5%。 */
-    public static final double DEFAULT_MAX = 9.5;
+    /**
+     * **折数全局硬上限**（9.5 折 = 至少让利 5%）。2026-10-12 补：此前 {@code 9.5} 只是
+     * 「类目**没配** {@code max} 时的兜底值」—— 类目一旦配了 {@code max}（管理端那三个输入框
+     * **没有任何校验**，可以配成 9.8 / 10），这条 9.5 就被整个绕开。现在它与类目配置**取严**
+     * （{@code Math.min}）⇒ 类目只能把上限**收紧**，不能放宽。
+     */
+    public static final double GLOBAL_MAX = 9.5;
+
+    /** 类目**没配** {@code max} 时取的值 —— 就是全局硬上限（兜底取的不是另一条线）。 */
+    public static final double DEFAULT_MAX = GLOBAL_MAX;
 
     /** 折数下限的兜底值 —— 只在**配置解析失败**时兜底，正常"没配"是**不限**（{@code null}）。 */
     public static final double FLOOR_MIN = 0.1;
@@ -75,7 +83,10 @@ public class DiscountLimitService {
         }
         double rate = round2(price / originalPrice * 10.0);
         double min = limitOf(goodType, "min", null);
-        double max = limitOf(goodType, "max", DEFAULT_MAX);
+        // ⚠️ 上限 = **类目配置与全局硬上限取严**（`Math.min`）：类目只能收紧、不能放宽。
+        //    文案里报的是**生效值** `max` 而不是类目配的那个数 —— 配了 9.8 而实际按 9.5 拒时，
+        //    报 9.8 会让商家以为「9.7 折可以」，报 9.5 才是他真正撞上的那条线。
+        double max = Math.min(limitOf(goodType, "max", GLOBAL_MAX), GLOBAL_MAX);
         if (rate > max) {
             return "该类目折扣不得高于 " + trim(max) + " 折（当前 " + trim(rate) + " 折）";
         }

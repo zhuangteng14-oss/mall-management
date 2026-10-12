@@ -68,7 +68,11 @@ async function post(path, body) {
  *           **不传 / 传空 ⇒ 后端回落到解析 `ProductInformation` 的既有格式**（`名:码` 以「；」分隔；
  *           仅**恰有一段**时推得出单价 ⇒ 一单多品不写明细），再解析不出就不写 ⇒ **老调用方行为不变**。
  *           ⚠️ `build()` 会把 `undefined` 转成**空串**（本文件 `:42`）⇒ 这里的「不传」到后端是 `Items=`。
- * @returns {Promise<{success:boolean, msg?:string}>}
+ *        ⚠️ `CouponId` 是 **C3 块 5 · commit 5 续笔新加的入参**（「立即购买」结算用券，2026-10-12）：
+ *           不传 / 传空串 ⇒ 与加它之前**逐字同行为**（后端 `CouponId` 是 `required=false`、缺省 `""`）。
+ *           ⚠️ 传了它 **`Price` 仍要传原价合计** —— 后端在临界区内按原价算折后额、落库 `order.Price`
+ *           是**折后价**（回体里多 `CouponId` / `Discount` 两个键，判据是「有没有 `Discount`」）。
+ * @returns {Promise<{success:boolean, msg?:string, CouponId?:string, Discount?:number}>}
  *          ⚠️ 失败是 **HTTP 200 + `success:false`**（本仓口径），不是 4xx。
  */
 export function orderAdd(payload) {
@@ -76,7 +80,7 @@ export function orderAdd(payload) {
     CustomerId: payload.CustomerId, MerchantId: payload.MerchantId, OrderId: payload.OrderId,
     Price: payload.Price, ProductInformation: payload.ProductInformation, Images: payload.Images,
     PayIf: payload.PayIf, DeliveryIf: payload.DeliveryIf, ReceiveIf: payload.ReceiveIf,
-    Quantity: payload.Quantity, Items: payload.Items
+    Quantity: payload.Quantity, Items: payload.Items, CouponId: payload.CouponId
   }))
 }
 

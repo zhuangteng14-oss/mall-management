@@ -83,10 +83,25 @@ public class SubsidyDao {
      * （库内 {@code 15:00}）会被判成 {@code 15:00 >= 17:16} **不成立** ⇒ 规则建好了却**立刻不在期**，
      * 而反方向（开始时刻）会**早开 8 小时**。两个错都**不报错**，只是标签该出不出的。
      */
-    private static final String IN_EFFECT =
+    /**
+     * 「规则**还没到期**」那半条 —— {@link #IN_EFFECT} 与 {@link #selectInvitations} 的
+     * {@code onlyOpen} 共用（一处定义、两处拼装；别名 {@code r} 由调用方保证）。
+     *
+     * <p>⚠️ {@code EndAt} 为 {@code NULL} = **不限**（同 {@link #IN_EFFECT} 那条「没填 ≠ 填了 0」）；
+     * 比的仍是**库时钟 {@code NOW()}**，理由逐字见 {@link #IN_EFFECT} 的「修正」段。
+     *
+     * <p>⚠️ <b>这是一个「替代量」</b>（2026-10-12 用户逐字知情：见下）—— 用户原话是
+     * 「只显示『报名截止未到』的活动」，但 {@code subsidy_goods} **没有报名截止那种列**，
+     * 规则表的 {@code EndAt}（规则失效时刻）是**最接近的可用量**。两者语义**不等价**：
+     * 「这条规则失效了」不等于「商家不能再确认这条提名」（后者后端**没有**拦）。
+     * ⇒ 本判据只作**列表显示范围**用，**不作**任何准入判定。后人在别处复用它之前先读这段。
+     */
+    private static final String NOT_EXPIRED = "(r.EndAt IS NULL OR r.EndAt > NOW())";
+    /** 「规则生效中」—— ⚠️ 2026-10-12 起 **public**：商品域的两条公开列表 SQL 判「这件商品是不是国补」复用的是**这一份**（`MarketingGoodsFlags`），别名 `r` 由调用方拼。改这里 = 同时改两个商品列表面的国补标签。 */
+    public static final String IN_EFFECT =
             "r.Status = 'active' "
                     + "AND (r.StartAt IS NULL OR r.StartAt <= NOW()) "
-                    + "AND (r.EndAt IS NULL OR r.EndAt > NOW())";
+                    + "AND " + NOT_EXPIRED;
 
     private final JdbcClient jdbc;
 
@@ -229,13 +244,22 @@ public class SubsidyDao {
                 .single();
     }
 
-    /** 商家端：**发给我的**提名（{@code ToId} 那一侧，按商家业务号）。 */
-    public List<Map<String, Object>> selectInvitations(String merchantId, String status, int limit) {
+    /**
+     * 商家端：**发给我的**提名（{@code ToId} 那一侧，按商家业务号）。
+     *
+     * @param onlyOpen {@code true} ⇒ 只回**规则还没到期**的行（{@link #NOT_EXPIRED}）。
+     *                 2026-10-12 用户 A 档批准：给店铺主页「平台活动」tab 用 —— 那一栏只摆
+     *                 「还能参加的」。{@code false}（含**全部既有调用方**）⇒ 与加这个参数之前
+     *                 **逐字节同行为**（同 {@code orderAdd} 的 {@code Items} / {@code CouponId}
+     *                 那两个「空 / 缺省 ⇒ 同行为」的先例）。
+     */
+    public List<Map<String, Object>> selectInvitations(String merchantId, String status, int limit, boolean onlyOpen) {
         return jdbc.sql("SELECT " + GOODS_COLUMNS + ", r.Name AS RuleName, r.Ratio, r.Cap, "
                         + "DATE_FORMAT(r.EndAt, '%Y-%m-%d %H:%i:%s') AS RuleEndAt "
                         + "FROM subsidy_goods sg JOIN subsidy_rule r ON r.RuleId = sg.RuleId "
                         + "WHERE sg.MerchantId = :merchantId "
                         + (isBlank(status) ? "" : "AND sg.Status = :status ")
+                        + (onlyOpen ? "AND " + NOT_EXPIRED + " " : "")
                         + "ORDER BY sg.Id DESC LIMIT :limit")
                 .param("merchantId", merchantId)
                 .param("status", status == null ? "" : status)

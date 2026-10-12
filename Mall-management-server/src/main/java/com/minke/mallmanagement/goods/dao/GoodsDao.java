@@ -1,5 +1,6 @@
 package com.minke.mallmanagement.goods.dao;
 
+import com.minke.mallmanagement.marketing.MarketingGoodsFlags;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
@@ -258,13 +259,24 @@ public class GoodsDao {
         StringBuilder nameSql = new StringBuilder();
         for (String s : keys) {
             if (!s.isEmpty()) {
-                nameSql.append(" OR GoodName LIKE '%").append(s).append("%' ");
+                nameSql.append(" OR g.GoodName LIKE '%").append(s).append("%' ");
             }
         }
 
-        String sql = "SELECT * FROM goods WHERE 1=1 " +
-                "AND ShelfState = 1 AND DeletedAt IS NULL " +
-                "AND (GoodType = ? " +
+        // ⚠️ 2026-10-12〈Bug 2/3〉起本条的**列清单不再逐字等于三层前的 productSearch**：
+        //    SELECT * → SELECT g.* + 三个营销态布尔（IsSeckill / IsSoldOut / IsSubsidy，
+        //    谓词取自 `MarketingGoodsFlags`）。同批给表起了别名 `g`（三个 EXISTS 要引 `g.Id`）
+        //    ⇒ 连带的 `ShelfState`/`DeletedAt`/`GoodType`/`GoodName` 全加 `g.` 前缀。
+        //    ⚠️ 类注释那句「SQL 字面量逐字未变」说的是**三层重构那一笔的历史**；本笔的验收判据
+        //    改为「三个标志列逐字来自 MarketingGoodsFlags」+ a3 实测（两条列表端点同源）。
+        //    ⚠️ 仍然**没有** schema 前缀、仍然**没有** LIMIT / 分页 —— 那两条是既有账，本笔不动。
+        String sql = "SELECT g.*, "
+                + MarketingGoodsFlags.existsIsSeckill("g") + " AS IsSeckill, "
+                + MarketingGoodsFlags.existsIsSoldOut("g") + " AS IsSoldOut, "
+                + MarketingGoodsFlags.existsIsSubsidy("g") + " AS IsSubsidy " +
+                "FROM goods g WHERE 1=1 " +
+                "AND g.ShelfState = 1 AND g.DeletedAt IS NULL " +
+                "AND (g.GoodType = ? " +
                 nameSql + ")";
 
         return jdbcClient.sql(sql).param(keyword.trim()).query().listOfRows();

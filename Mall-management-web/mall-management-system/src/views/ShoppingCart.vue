@@ -70,7 +70,12 @@
                      `CartService.checkout` 遇到这种行会整单中止（`商品已不存在，无法结算：…`），
                      前端先说，比让用户点了才弹错要好。 -->
                 <div class="t" :class="{ gone: !row.GoodName }">{{ row.GoodName || '商品已下架' }}</div>
-                <div class="spec">商品编号 {{ row.ProductCode }}</div>
+                <!-- ⚠️ 型号名（`row.AxisName`）—— **2026-10-12 用户五处挂账裁定 ④-a**：多型号商品的几个
+                     SKU 共享同一个 `GoodName` ⇒ 车里几行长得一模一样，看不出买的是哪个型号。后端
+                     `/cart/list` 自本笔起多回一列 `AxisName`（`CartDao.GOODS_COLS`）。非型号件为 `null`
+                     ⇒ 这半句**整段不画**（不写「型号 —」）。间隔用 `&emsp;` **实体**、不直接敲全角空格（`eslint` 的
+                     `no-irregular-whitespace` 不认模板文本里的 U+3000；先例 `ProductPage.vue:284`）。**不用 `·` 拼接** —— 那是仓里点名的 AI 默认样。 -->
+                <div class="spec"><template v-if="row.AxisName">型号 {{ row.AxisName }}&emsp;</template>商品编号 {{ row.ProductCode }}<span v-if="Number(row.OriginalPrice) > 0" class="dsc" title="这件是折扣商品（划线原价 &gt; 0）⇒ 本单的满减 / 折扣券不可用（无门槛券仍可用）。判据见 useCouponPick.couponBlockedReason，与后端 CouponService.redeem 那条闸逐字对齐。">折扣商品</span></div>
               </div>
               <div class="unit">
                 <span class="v">¥{{ formatPrice(unitPrice(row)) }}</span>
@@ -119,7 +124,7 @@
     <div v-if="rows.length > 0" class="paybar">
       <div class="paybar-in">
         <span class="sel">共 {{ totalCount }} 件商品</span>
-        <span class="cp" :class="{ off: !couponPickable }" :title="couponHint"><i>券</i><select v-model="couponId" :disabled="busy || !couponPickable"><option value="">{{ usableCoupons.length ? '不使用优惠券' : '暂无可用券' }}</option><option v-for="c in usableCoupons" :key="c.CouponId" :value="c.CouponId">{{ couponLabel(c) }}</option></select><b v-if="discount > 0" class="save">−¥{{ formatPrice(discount) }}</b></span>
+        <span class="cp" :class="{ off: !couponPickable }" :title="couponHint"><i>券</i><select v-model="couponId" :disabled="busy || !couponPickable"><option value="">{{ usableCoupons.length ? '不使用优惠券' : '暂无可用券' }}</option><option v-for="c in usableCoupons" :key="c.CouponId" :value="c.CouponId" :disabled="!!couponBlockedReason(c)">{{ couponLabel(c) }}{{ couponBlockedReason(c) ? '（' + couponBlockedReason(c) + '）' : '' }}</option></select><b v-if="discount > 0" class="save">−¥{{ formatPrice(discount) }}</b></span>
         <span class="sums">
           <span class="d">商品总额 ¥{{ formatPrice(cartTotal) }}</span>
           <span class="total" title="口径：Σ（成交价快照 × 数量）− 该券的减免；未选券时与加券之前逐字同值。">
@@ -143,7 +148,7 @@
 /* eslint-disable no-undef */
 import { ref, computed, onMounted } from 'vue'
 import { handleApiError } from '../api/http'
-import { cartList, cartUpdate, cartRemove, cartCheckout } from '../api/order'; import { myCoupons } from '../api/marketing'; import { couponName, couponLine } from '../config/coupon-format'   // ⚠️ 三条 import **同行**（2026-10-12 结算用券那一笔）—— 本文件被 `api-contract.md` 按 `:108/156/190`、`slot-registry.md` 按 `:46/77/173/198` 等钉住，**多一行就是十几处集体顶漂**（同 `HomePage.vue:284` 那条的做法）
+import { cartList, cartUpdate, cartRemove, cartCheckout } from '../api/order'; import { useCouponPick } from '../composables/useCouponPick'   // ⚠️ 两条 import **同行**（2026-10-12 结算用券那一笔）—— 本文件被 `api-contract.md` 按 `:108/156/190`、`slot-registry.md` 按 `:46/77/173/198` 等钉住，**多一行就是十几处集体顶漂**（同 `HomePage.vue:284` 那条的做法）
 import { resolveBuyerId, getUsername } from '../api/auth'; import IconGlyph from '../components/ui/IconGlyph.vue'   // ⚠️ 两条 import **同行**（2026-10-11 补图标那一笔）—— 合并到既有行 = 不新增行号漂移（`api-contract.md` 按 `:108/156/190`、`slot-registry.md` 按 `:46/77/173/198` 钉住本文件）
 
 // 上界与后端 `CartService.MAX_QUANTITY` **同值**（999）。前端拿它当 `+` 的闸，
@@ -250,68 +255,25 @@ const remove = async (row) => {
 }
 
 // ==================== 结算用券（C3 块 5 · commit 5）====================
-// ⚠️ 本节的减免额是**预估值**，唯一权威在后端 `CouponService.redeem`（真正的抢券 CAS
-//    也在那一步）。前端算这一份只为把「−¥X」与「合计」当场显示出来 —— 同 `popupTotal`
-//    那条先例：显示归显示，**落库的数以服务端回体里的 `Discount` 为准**。
-
-/** 领券账户 = **登录名**（`coupon_grant.ToAccount` 存的就是 `login.UserName`，2026-10-12 起）。 */
-const couponAccount = getUsername() || ''
-const couponId = ref('')
-const myGrantList = ref([])   // 券包里 Bucket ∈ {usable, expiring} 的那些（已用/已过期不参与）
+// ⚠️ 本节**不自带算法** —— 与商品页「立即购买」的购入弹窗共用 `composables/useCouponPick.js`
+//    那一处（两条链各抄一份 ⇒ 抄错时**两边都不报错**，只是某一处的「合计」慢慢算成另一个数）。
+//    里面算的仍是**预估值**，唯一权威在后端 `CouponService.redeem`（真正的抢券 CAS 在那一步）——
+//    同 `popupTotal` 那条先例：显示归显示，**落库的数以服务端回体里的 `Discount` 为准**。
 
 /** 整车只含**一个商家**时才允许用券 —— 一张券只抵一笔订单（后端同判，见 `CartService.checkout`）。 */
-const groupCount = computed(() => shopGroups.value.length)
-const couponPickable = computed(() => rows.value.length > 0 && groupCount.value === 1)
+const groupCount = computed(() => shopGroups.value.length); const hasDiscount = computed(() => rows.value.some((r) => Number(r.OriginalPrice) > 0))   // ⚠️ 两条**同行**（同 `:151` 那对 import 的理由：本文件被 `slot-registry.md` 按 `:369/372/446/465`、`api-contract.md` 按 `:108/156/190` 钉住 ⇒ **多一行就集体顶漂**）。`hasDiscount` = 车里**任一行**的 `OriginalPrice > 0`（`CartDao.GOODS_COLS` 2026-10-12 起回这一列）；⚠️ 判据是**整单**级、不是逐行（见 `useCouponPick.couponBlockedReason`）。
 
-/** 立即可选的券 = 券包里**未使用**的那两桶（`loadCoupons` 已经滤过）。
- *  ⚠️ **不按商家筛** —— 券的适用档 `Scope='merchant'` 限制的是**商品种类**（`CategoryMatch`），
- *     而 `MerchantAccount` 是**发券那家商家**的业务号（`''` = 平台券），不是「本单商家」。
- *     拿商家筛会把平台券与别家发的券一起藏掉（后端 `CouponService.redeem` 同笔同样不判，
- *     理由与证据见那里的方法体注释）。 */
-const usableCoupons = computed(() => myGrantList.value)
-
-const couponHint = computed(() => {
-  if (groupCount.value > 1) return `本车含 ${groupCount.value} 个商家，优惠券只能抵一笔订单 —— 请按商家分单结算`
-  if (!usableCoupons.value.length) return '券包里暂时没有可用的券'
-  return '选一张券抵本单；不选则按原价结算'
+const {
+  couponId, usableCoupons, couponPickable, couponHint, couponLabel, couponBlockedReason,
+  discount, payTotal, loadCoupons, resetCoupon
+} = useCouponPick({
+  // 领券账户 = **登录名**（`coupon_grant.ToAccount` 存的就是 `login.UserName`，2026-10-12 起）
+  account: getUsername() || '',
+  orderTotal: cartTotal,
+  enabled: computed(() => rows.value.length > 0 && groupCount.value === 1),
+  // ⚠️ 传 computed 不传字符串：整车是**异步**拉回来的，字符串会冻结在 setup 那一刻（恒「含 0 个商家」）
+  blockedHint: computed(() => `本车含 ${groupCount.value} 个商家，优惠券只能抵一笔订单 —— 请按商家分单结算`), hasDiscount
 })
-
-const couponLabel = (c) => couponName(c) + '（' + couponLine(c) + '）'
-
-const selectedCoupon = computed(
-  () => usableCoupons.value.find((c) => String(c.CouponId) === String(couponId.value)) || null
-)
-
-/**
- * 选中券的**预估**减免额（元）。三档判据逐条对齐后端 `CouponService.redeem`：
- * `threshold` 未达门槛 ⇒ 0；`percent` 的 `FaceValue` 是**折扣率**（0.85 = 减 15%）；其余按面值减。
- * 再按后端那两行 `Math.max(0, Math.min(discount, orderTotal))` + 两位四舍五入收口。
- */
-const discount = computed(() => {
-  const c = selectedCoupon.value
-  if (!c) return 0
-  const total = cartTotal.value
-  const face = Number(c.FaceValue || 0)
-  if (c.Type === 'threshold' && total < Number(c.Threshold || 0)) return 0
-  const raw = c.Type === 'percent' ? total * (1 - face) : face
-  return Math.round(Math.max(0, Math.min(raw, total)) * 100) / 100
-})
-
-/** 实付 = 商品总额 − 减免。未选券时与加券之前**逐字同值**（`discount` 恒 0）。 */
-const payTotal = computed(() => Math.max(0, cartTotal.value - discount.value))
-
-/** 拉券包，只留**未使用**的两桶。⚠️ 排序由后端定（`expiring` 在前）⇒ 本处不重排。 */
-const loadCoupons = async () => {
-  if (!couponAccount) return
-  try {
-    const data = await myCoupons(couponAccount)
-    const list = data && data.success && Array.isArray(data.list) ? data.list : []
-    myGrantList.value = list.filter((c) => c.Bucket === 'usable' || c.Bucket === 'expiring')
-  } catch (err) {
-    // 券包挂了不该把购物车也画坏 ⇒ 只是这一栏不可选（同 `CouponWalletDialog.load` 的分别成败）
-    console.warn('券包加载失败，结算用券不可选', err)
-  }
-}
 
 /**
  * 结算。不传 `productCode` = 整车；传了 = 只结算那一件。
@@ -332,7 +294,7 @@ const checkout = async (productCode) => {
       // 券已核销 ⇒ 清掉选择并重拉券包（那张券不会再出现在可选项里）。
       // ⚠️ 只在**成功**这一支重置：失败时后端**没**烧券（`addLocked` 里 CAS 抢不到就不建单），
       //    留着选择让用户直接重试。
-      couponId.value = ''
+      resetCoupon()
       await loadCoupons()
       alert(res.msg || '结算成功')
       await load()
@@ -651,5 +613,21 @@ onMounted(loadCoupons)
   .paybar .cp { width: 100%; }
   .paybar .cp select { flex: 1; max-width: none; }
   .go { width: 100%; padding: 0; }
+}
+
+/* ── 折扣商品小标（C3 块 5 · 用券规则那一笔，2026-10-12）
+   ⚠️ 规则写在**文件尾**是**刻意的**：本文件被 `slot-registry.md` 按 `:369/372/446/465` 钉住，
+      插到 `.nm .spec`（`:415` 附近）旁边会让 `:446/:465` 集体顶漂 ⇒ 规则落在**最大被引行之后**，
+      零漂移。选色与 `.unit .chg`（同页既有的「价格类」强调）同一枚 `--accent`。
+   ⚠️ 只是**说明**，不是闸 —— 真正的拒在服务端（同全仓「前端仅提示、后端拒」口径）。 */
+.nm .spec .dsc {
+  margin-left: var(--s2);
+  padding: 0 var(--s2);
+  font-size: var(--fs-xs);
+  line-height: 16px;
+  display: inline-block;
+  color: var(--accent);
+  border: 1px solid currentColor;
+  border-radius: var(--r1);
 }
 </style>

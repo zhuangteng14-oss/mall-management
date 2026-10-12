@@ -213,8 +213,14 @@ public class SubsidyService {
      * 商家端：**发给我的**提名。{@code status} 省略 ⇒ 全部（页面自己分「待处理 / 已处理」）。
      * ⚠️ {@code merchantId} 是**调用者的号**，由 Controller 过 {@code IdentityGuard} 之后再传进来
      * —— 本方法不判身份（那是 Web 层的事，全仓同款）。
+     *
+     * @param onlyOpen {@code true} ⇒ 只回**规则还没到期**的行（店铺主页「平台活动」tab 用）。
+     *                 缺省 / {@code false} ⇒ 与加这个参数之前**逐字节同行为**。
+     *                 ⚠️ 判据落在 SQL 的 {@code NOW()} 上、**不是在 Java 里比时刻** ——
+     *                 库里存 UTC、JVM 是本地钟，两边差 8 小时（{@code SubsidyDao.NOT_EXPIRED}
+     *                 的注释把这条教训记全了）。也**不是**在 Controller 层过滤：那同样要读时刻。
      */
-    public Map<String, Object> invitations(String merchantId, String status, Integer limit) {
+    public Map<String, Object> invitations(String merchantId, String status, Integer limit, Boolean onlyOpen) {
         if (isBlank(merchantId)) {
             return fail("缺少参数：MerchantId");
         }
@@ -225,7 +231,8 @@ public class SubsidyService {
         int effective = normalizeLimit(limit);
         Map<String, Object> result = new HashMap<>();
         result.put("success", true);
-        result.put("list", subsidyDao.selectInvitations(merchantId.trim(), st, effective));
+        result.put("list", subsidyDao.selectInvitations(merchantId.trim(), st, effective,
+                Boolean.TRUE.equals(onlyOpen)));
         return result;
     }
 

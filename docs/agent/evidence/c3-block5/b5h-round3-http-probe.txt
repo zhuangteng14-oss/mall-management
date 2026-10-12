@@ -1,0 +1,83 @@
+{
+  "at": "2026-10-12T13:58:40.045Z",
+  "base": "http://localhost:8088",
+  "home": {
+    "status": 200,
+    "rows": 43,
+    "cacheSecondCall": 43,
+    "hasThreeFlags": true,
+    "isSeckill": 2,
+    "isSoldOut": 1,
+    "isSubsidy": 2,
+    "dups": [
+      {
+        "key": "dRD3gqtbFr|GD-101-9552",
+        "rows": [
+          {
+            "Id": 76,
+            "GoodName": "无线蓝牙耳机 声谷标准版",
+            "Price": 299
+          },
+          {
+            "Id": 120,
+            "GoodName": "无线蓝牙耳机 声谷标准版",
+            "Price": 299
+          }
+        ]
+      }
+    ],
+    "sharedListLen": 41,
+    "dedupeLen": 42,
+    "soldOutNames": [
+      "82/智能手环 5 代 血氧版/GD-107-0959"
+    ]
+  },
+  "search": {
+    "status": 200,
+    "keyword": "耳机",
+    "rows": 4,
+    "hasThreeFlags": true,
+    "isSeckill": 1,
+    "isSoldOut": 0,
+    "isSubsidy": 1,
+    "dups": [
+      {
+        "key": "dRD3gqtbFr|GD-101-9552",
+        "rows": [
+          {
+            "Id": 76,
+            "GoodName": "无线蓝牙耳机 声谷标准版",
+            "Price": 299
+          },
+          {
+            "Id": 120,
+            "GoodName": "无线蓝牙耳机 声谷标准版",
+            "Price": 299
+          }
+        ]
+      }
+    ],
+    "sharedListLen": 3,
+    "codes": [
+      "GD-101-9552",
+      "GD-102-AF27",
+      "GD-104-7045",
+      "GD-101-9552"
+    ]
+  },
+  "shop": {
+    "status": 200,
+    "merchant": "dRD3gqtbFr",
+    "rows": 5,
+    "hasThreeFlags": false,
+    "isSoldOut": 0,
+    "soldOutNames": []
+  }
+}
+
+── 摘要 ──
+主页 goodsSelectHome：43 行，三列齐；秒杀 2 / 售完 1 / 国补 2；去重后 42 行 ⇒ sharedList 41 行（第二次调用仍 43 行）
+同码重复组：1 组 → [{"key":"dRD3gqtbFr|GD-101-9552","rows":[{"Id":76,"GoodName":"无线蓝牙耳机 声谷标准版","Price":299},{"Id":120,"GoodName":"无线蓝牙耳机 声谷标准版","Price":299}]}]
+搜索「耳机」：4 行 ⇒ sharedList 3 行；售完 0；码 = GD-101-9552, GD-102-AF27, GD-104-7045, GD-101-9552
+本店 goodsSelect(dRD3gqtbFr)：5 行，其中已售完 0 行（店铺页照显）
+原始响应 → C:\Users\86159\Desktop\软件工程\期末项目\_work\b5h-probe-round3.json

@@ -85,7 +85,7 @@
             （你一次只关心一件事），纵向堆起来却要三倍滚动，还得各配一条 `<h2>`。
          ⚠️ 猜你喜欢取的是**「不管切哪个 tab 都显示」**那一支（用户给了「或至少…」的退路，
             但硬约束是「必须在页面最底」，一直显示最不可能违反它）。 -->
-    <div class="wrap">
+    <div class="wrap"><nav v-if="isSelf" class="pact-tabs" role="tablist"><button v-for="t in SUBTABS" :key="t.k" type="button" role="tab" class="pact-tab" :class="{ 'pact-tab-on': topTab === t.k }" :aria-selected="topTab === t.k ? 'true' : 'false'" @click="topTab = t.k">{{ t.label }}</button></nav><!-- 一级 tab（C3 块 5 · 2026-10-12 用户裁定 ④）：**只有店主看自己的店**才画第二格（那面板里全是商家侧动作，别人看没有意义，后端两个端点本也 403）；默认停「本店商品」。只切**中间内容区** —— 头卡与本店券在两边都显示（沿用丙方案「头卡 + 本店券 固定在上」）。面板本体见 `components/PlatformActivityPanel.vue` 的文件头。⚠️ 本行与上面那行都压成一行是刻意的：本文件被 `refs-scan` 扫出 8 条 token（`:19/:266/:270/:271/:306/:477/:872/:875`），新增行会让它们集体顶漂。 -->
       <!-- ── 二 · 本店优惠券（**不随 tab 切**）────────────────────────────────────
            数据 = `POST /marketing/coupons` 的第 4 参 `MerchantAccount` 传**本店**（`shopId`）——
            与 `ProductPage.vue` 的「领券」行**同一个口径、同一个 `api/marketing.js` 封装**。
@@ -117,7 +117,7 @@
           登录后可领取本店优惠券<router-link class="ph-link" :to="{ path: '/login', query: { redirect: route.fullPath } }">去登录</router-link>
         </p>
         <p v-else class="ph">{{ couponsReady ? '本店暂时没有可领的优惠券' : '正在读取…' }}</p>
-      </section>
+      </section><PlatformActivityPanel v-if="topTab === 'active'" :merchant-id="shopId" />
 
       <!-- ── 三 · Tab 区（**只有这一块随 tab 切**）──────────────────────────────────
            ⚠️ 栏题是「本店商品」而不是「本店热销」：三个 tab 都在讲同一件事的三种切法
@@ -125,7 +125,7 @@
            ⚠️ `role="tablist"` + `role="tab"` + `aria-selected`：这三枚是**真 tab**
               （各带一块互斥内容），不是「看起来像 tab 的链接」。用原生 `<button>`，
               键盘可达性不靠额外代码。 -->
-      <section class="blk">
+      <section v-if="topTab === 'shop'" class="blk">
         <h2 class="sec-h">本店商品</h2>
         <div class="tabs" role="tablist">
           <button
@@ -251,7 +251,7 @@
            的，取 4 条（**全宽铺开**：4 列铺满 `.wrap` 的 1180px）。
            ⚠️ 这是全页**唯一**取别家数据的地方，也是「逛完这家还有别家」的出口；一条都取不到
               （本店主类目全站独一份 / 本店一件商品都没有）⇒ **占位**，不静默消失。 -->
-      <section class="blk">
+      <section v-if="topTab === 'shop'" class="blk">
         <h2 class="sec-h">猜你喜欢<i class="sec-note">别家的{{ mainCategory }}</i></h2>
         <div v-if="recommend.length" class="cards">
           <ProductCard v-for="g in recommend" :key="g.Id" :goods="g" />
@@ -275,11 +275,11 @@ import { useRoute, useRouter } from 'vue-router'
 import { http, handleApiError } from '../api/http'
 import { endpoints } from '../api/endpoints'
 import { getMerchantId, getCustomerId, getUsername, isLoggedIn } from '../api/auth'
-import { follow, unfollow, followState, profile } from '../api/shop'
+import { follow, unfollow, followState, profile } from '../api/shop'; import { dedupeGoods, sharedList } from '../config/goods-flags'   // ⚠️ 〈Bug 1/2〉落码（2026-10-12）把这两件**并进这一行**（不新增行）—— 本文件 `:266` / `:270` / `:306` 三处注释按行号引别的文件，多一行就集体顶漂。`dedupeGoods` / `sharedList` 都在 `config/goods-flags.js`，那是**列表侧共用判据的唯一定义处**（本页原来自己那份 `dedupeByCode` 已退役，见下面墓碑）
 import { coupons, claim } from '../api/marketing'
 import { truthy, couponFace, couponName, couponLine } from '../config/coupon-format'
 import { BadgeCheck } from '@lucide/vue'
-import ProductCard from '../components/ProductCard.vue'
+import ProductCard from '../components/ProductCard.vue'; import PlatformActivityPanel from '../components/PlatformActivityPanel.vue'   // ⚠️ 两条 import **同行**（同 `:151` / `:266` 那几条的手法）：本文件有 8 条 refs token，多一行就集体顶漂。`PlatformActivityPanel` = 一级 tab「平台活动」的面板（2026-10-12 用户裁定 ④）。
 import { productLink } from '../config/product-link'
 
 const route = useRoute()
@@ -319,7 +319,7 @@ const TABS = [
   { k: 'all', label: '全部' },
   { k: 'discount', label: '折扣' }
 ]
-const activeTab = ref('hot')
+const activeTab = ref('hot'); const SUBTABS = [ { k: 'shop', label: '本店商品' }, { k: 'active', label: '平台活动' } ]; const topTab = ref('shop')   // ⚠️ 三条**同行**（理由同 `:322` 上面那条）。**一级** tab（2026-10-12 用户裁定 ④）：`shop` = 下面那三个二级 tab + 猜你喜欢；`active` = 平台邀请应答 + 秒杀报名（`components/PlatformActivityPanel.vue`）。⚠️ 键仍是**键**（`shop`/`active`）、标签才是中文，与 `TABS` 同一条规矩。⚠️ 默认 `shop` 是用户逐条裁定的第 3 条。
 
 /**
  * 热销榜取几根柱 —— 用户定稿「**只显示 Top3**」。
@@ -392,24 +392,24 @@ const filteredGoods = computed(() =>
 const soldOf = (g) => Number(g.SoldQty) || 0
 
 /**
- * 按 `ProductCode` 去重 —— 演示店 `dRD3gqtbFr` 的 `GD-101-9552` 在 `goods` 里**两行**
- * （`Id=76` / `Id=120`，同名同价同码），留第一条即可（同码 ⇒ `SoldQty` 也同值，聚合是按码分组的）。
- * ⚠️ **空码不并**：`ProductCode=''` 的意思是「没登记编码」，多行空码是**不同**的商品，
- *    并成一个就是凭空少了几件（SQL 那边也写着 `WHERE ProductCode <> ''`）。
+ * 〈Bug 1〉退役（2026-10-12）：这里原来有一份**只按 `ProductCode`** 去重的 `dedupeByCode`。
+ *   · **为什么退役**：同一个判据 `GoodsSelect` / `HomePage` / `ProductPage` 三处也要用，
+ *     各留一份就成了「同一件事两个真相」；而且**只按码**在**跨店**列表上本来就是错的
+ *     —— 不同店用同一个 `ProductCode` 是两件**不同**的货（各自的编号体系），会误并掉一件。
+ *   · **现在在哪**：`config/goods-flags.js` 的 `dedupeGoods`，键 = `MerchantId|ProductCode`，
+ *     同键留 **`Id` 最小**那一行 —— 与详情页 `ORDER BY Id ASC LIMIT 1` **刻意同判据**
+ *     （列表里选中的那行，与点进去读到的那行，必须是同一行）。
+ *   · **本页四个调用方**都改调它：`totalSold` / `hotGoods` / `newKeys` / `recommend`。
+ *     前三个是**单店**（`goods` 里全是 `MerchantId === shopId` 的）⇒ 多出的 `MerchantId`
+ *     这一维**不改变任何一行**的去留；`recommend` 是**跨店**取的，那里反而修掉了一个真错
+ *     （别家同码的两件货原先会被并成一件）。
+ *   · **原注释的两条按语仍成立**：**空码不并**（`ProductCode=''` = 「没登记编码」，多行空码
+ *     是**不同**商品，后端聚合 SQL 也写着 `WHERE ProductCode <> ''`）、**留哪一行**（`Id` 最小）。
+ *     两条都搬进 `dedupeGoods` 的文档注释，此处不再复述。
+ *   · ⚠️ **本块行数刻意补满 19 行**（原 6 行注释 + 13 行函数）：本文件 `:1050` 那条注释按
+ *     行号引 `:872/:875`，本块少一行，它俩连同下面所有按行号的引用就集体顶漂；也**别**把
+ *     它改成一个一行转发（名字「by code」就成了假话，且两个名字一件事仍留在仓里）。
  */
-const dedupeByCode = (list) => {
-  const seen = new Set()
-  const out = []
-  list.forEach((g) => {
-    const code = String(g.ProductCode || '')
-    if (code) {
-      if (seen.has(code)) return
-      seen.add(code)
-    }
-    out.push(g)
-  })
-  return out
-}
 
 /**
  * 主营类目 = 本店商品的 **`GoodType` 众数**。
@@ -434,11 +434,11 @@ const mainCategory = computed(() => {
  * 累计销量 = Σ 本店商品的 `SoldQty`，**先去重**（同码两行会被 `SoldQty` 算两遍 ——
  * 聚合本身是按 `ProductCode` 分组的，一件货只该计一次）。
  */
-const totalSold = computed(() => dedupeByCode(goods.value).reduce((n, g) => n + soldOf(g), 0))
+const totalSold = computed(() => dedupeGoods(goods.value).reduce((n, g) => n + soldOf(g), 0))
 
 /** 热销榜：去重 → 只留有销量的 → 降序 → 取 `HOT_LIMIT` 根柱。 */
 const hotGoods = computed(() =>
-  dedupeByCode(goods.value)
+  dedupeGoods(goods.value)
     .filter((g) => soldOf(g) > 0)
     .sort((a, b) => soldOf(b) - soldOf(a))
     .slice(0, HOT_LIMIT)
@@ -484,10 +484,10 @@ const barPct = (g) => {
  */
 const newCount = computed(() => Math.min(NEW_MAX, Math.floor(goods.value.length / 3)))
 
-/** 被盖上「新品」的那几件的键：有码用码、无码用 `id:` 前缀（同 `dedupeByCode` 的空码口径）。 */
+/** 被盖上「新品」的那几件的键：有码用码、无码用 `id:` 前缀（同 `dedupeGoods` 的空码口径）。 */
 const newKeys = computed(() => {
   const key = (g) => String(g.ProductCode || '') || 'id:' + g.Id
-  const top = dedupeByCode(goods.value)
+  const top = dedupeGoods(goods.value)
     .slice()
     .sort((a, b) => Number(b.Id) - Number(a.Id))
     .slice(0, newCount.value)
@@ -521,12 +521,12 @@ const shelfGoods = computed(() => {
 const discountGoods = computed(() => goods.value.filter((g) => Number(g.OriginalPrice) > 0))
 
 /**
- * 猜你喜欢：别家的、与本店主类目相同的，取 4 条。
- * ⚠️ 用 `dedupeByCode`：别家的同码重复行同样不该在推荐格里出现两次。
+ * 猜你喜欢：别家的、与本店主类目相同的，取 4 条 —— **整支走 `sharedList`**（C3 块 5 ·〈Bug 1/2〉落码，2026-10-12）。⚠️ 它 = **同码去重**（键 `MerchantId|ProductCode`；别家同码是**两件不同的货**，只按码并会误删一件）+ **滤掉已售完**。这一格是**共享面**（取别家的货）⇒ 已售完的别家商品不该在这里出现（用户裁定：已售完只在自己店铺页显示）；定义在 `config/goods-flags.js`，与主页「为你推荐」/ 搜索页 / 详情页「猜你喜欢」三处**同源** —— 同一个函数，不是「照抄的四份」。
+ * ⚠️ 顺序「先去重、后滤售完」：去重后一件货只剩一行，而那一行正是详情页会读到的那一行（两边都取 `Id` 最小），列表藏了它、详情页也说「已售完」，不打架。本店「全部 / 热销 / 折扣」三个 tab **不过这一层**（本店要显示含已售完；灰态 + 红斜标由 `ProductCard` 自己按 `IsSoldOut` 画）。⚠️ 本条注释**刻意压成 4 行**：本文件那段「`:872/:875`」自引是按行号说的，注释多一行下面就集体顶漂。
  */
 const recommend = computed(() => {
   if (!mainCategory.value) return []
-  return dedupeByCode(
+  return sharedList(
     allGoods.value.filter(
       (g) => String(g.MerchantId) !== shopId && String(g.GoodType || '') === mainCategory.value
     )
@@ -664,7 +664,7 @@ const loadShop = async () => {
     }
     const all = data.list || []
     allGoods.value = all
-    goods.value = all.filter((g) => String(g.MerchantId) === shopId)
+    goods.value = dedupeGoods(all.filter((g) => String(g.MerchantId) === shopId))   // ⚠️ 〈Bug 1〉落码（2026-10-12）：本店网格也**同码去重**（判据 = `MerchantId|ProductCode`，留 `Id` 最小 —— 与详情页同一条）。理由：本店 `dRD3gqtbFr` 的 `GD-101-9552` 在库里两行（`Id` 76 / 120，同名同价），不去重则**同一件货在店铺页画两张卡**、且两张都点进同一个详情页（详情页只认 `Id` 最小那一行）。⚠️ **只去重、不过滤已售完**：本页三个 tab 是「自己店铺页」，用户 ② 裁定要**显示**已售完（灰态 + 红斜标由 `ProductCard` 画）。⚠️ `totalSold` / `hotGoods` / `newKeys` 仍然各自调 `dedupeGoods`（对本已是去重的列表是幂等的）—— 不靠「上游已经去过重」这种隐式前提。
     state.value = 'ready'
     await readFollowState()
   } catch (e) {
@@ -1039,4 +1039,28 @@ button { background: none; border: 0; cursor: pointer; }
 .chips + .cards, .chips + .note { margin-top: 0; }
 /* tab 面板本身**不设边距** —— 让里面各块自己的 `margin-top` 说话（`.cards` / `.chart` / `.ph`
    各有一套），少一层容器就少一处要对齐的间距。 */
+
+/* ── 一级 tab（`本店商品` / `平台活动`，2026-10-12 用户裁定 ④）────────────────────
+   ⚠️ 规则写在**文件尾**是**刻意的**：本文件有 8 条 refs token，其中 `:872/:875` 就在下面
+      这段 `<style>` 里 ⇒ 新规则落在**最大被引行之后**，一个都不漂（同上一条注释的同一笔账）。
+   ⚠️ 形制与二级 `.tabs` **有意不同**：那一套是 `--fs-sm` + **整条 `border-bottom`**（选中格把
+      自己的 2px 压在那条线上）；这一套升到栏题字号（`--fs-lg` + `--font-display`）、**不画通栏横线**，
+      选中态是**自己脚下那 2px**。两级 tab 若长得一样，读起来会是「六个平级的 tab」。
+   ⚠️ 下边距取 `--s7`（48）：与 `.blk + .blk` 的块间距同值 ⇒ 一级 tab 之下仍是一套块节奏。 */
+.pact-tabs { display: flex; gap: var(--s6); margin-bottom: var(--s7); }
+.pact-tab {
+  position: relative;
+  padding: 0 0 var(--s3);
+  border: 0;
+  background: none;
+  font-family: var(--font-display);
+  font-size: var(--fs-lg);
+  font-weight: var(--fw-med);
+  line-height: 1.3;
+  color: var(--ink-3);
+  cursor: pointer;
+}
+.pact-tab:hover { color: var(--ink-2); }
+.pact-tab-on { color: var(--ink); }
+.pact-tab-on::after { content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 2px; background: var(--brand); }
 </style>

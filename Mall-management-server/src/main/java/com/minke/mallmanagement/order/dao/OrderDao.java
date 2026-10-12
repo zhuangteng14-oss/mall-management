@@ -4,6 +4,8 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
 
+import java.util.ArrayList;
+import java.util.Collection;
 import java.util.List;
 import java.util.Map;
 
@@ -346,5 +348,68 @@ public class OrderDao {
         String sql = "UPDATE mall_management_sql.`order` SET CancelledAt = NOW(3) "
                 + "WHERE OrderId = ? AND PayIf = 0 AND CancelledAt IS NULL";
         return jdbcClient.sql(sql).param(orderId).update();
+    }
+
+    // ==================== 折扣商品判定（C3 块 5〈折扣商品用券规则〉） ====================
+
+    /**
+     * 本单的码里，**哪些是折扣商品**（{@code goods.OriginalPrice > 0}）。只读、只判「在不在」。
+     *
+     * <p>给 {@code OrderService.addLocked} 的用券段用：本单含任意一件折扣商品 ⇒ 满减 / 折扣券
+     * 整单拒，{@code none}（无门槛）放行 —— 规则与理由见 {@code CouponService.redeem} 的 javadoc。
+     *
+     * <p>⚠️ <b>为什么要两条 SQL</b>：本单的码（{@code order_item.ProductCode} / 前端上报的
+     * {@code ProductCode}）对**无型号商品**是 {@code goods.ProductCode}、对**多型号商品**是
+     * {@code goods_sku.SkuCode}（建表注释 {@code mall_management_sql.sql:1071} 明文：
+     * 「SKU 编码（商家填；详情页加入购物车时作为 {@code ProductCode} 上报）」）。
+     * 而划线原价 {@code OriginalPrice} 加在 **{@code goods}** 上（型号件共享父商品那一份）
+     * ⇒ 后一条必须经 {@code goods_sku.GoodsId} 回联父商品才读得到它。
+     * 两条**不合并成 UNION**：各绑各的参数，读起来不用来回数占位符（同 {@code CartDao} 那条
+     * 「两条完整 SQL、不做字符串拼 where」的理由）。
+     *
+     * <p>⚠️ <b>占位符是拼的、值不是</b>：{@code ?} 的**个数**按入参码数生成（{@code IN} 列表长度
+     * 没法用单个 {@code ?} 表达），而每一个码都走 {@code .params(...)} **绑定** —— 与
+     * {@link #selectUnpaidExpired} 那种「把数值本身拼进 SQL」不是一回事（那里拼的是来自
+     * properties 的阈值）。码里含逗号也安全（不像 {@code FIND_IN_SET} 会被逗号切碎）。
+     *
+     * <p>⚠️ <b>不要读成「本单商品都属于该商家」</b>：这里只按 {@code MerchantId} 收窄
+     * （同 {@code CartDao.selectGoodsSnapshot} 的口径 —— {@code ProductCode} 跨商家不保证唯一），
+     * 「这单是不是他自己的商品」由下单链路自己管，不在本方法职责内。
+     *
+     * @param merchantId 本单商家业务号
+     * @param codes      本单的码（可空 / 可含空串；空串与 {@code null} 一律跳过）
+     * @return 命中的**码**（不是布尔）—— 调用方要拿它写日志 / 组文案；一个都没命中回空表
+     */
+    public List<String> selectDiscountCodes(String merchantId, Collection<String> codes) {
+        List<String> marks = new ArrayList<>();
+        StringBuilder in = new StringBuilder();
+        if (codes != null) {
+            for (String c : codes) {
+                if (c == null || c.isBlank()) {
+                    continue;
+                }
+                if (in.length() > 0) {
+                    in.append(',');
+                }
+                in.append('?');
+                marks.add(c);
+            }
+        }
+        if (merchantId == null || merchantId.isBlank() || marks.isEmpty()) {
+            return List.of();
+        }
+        List<Object> byGoodsParams = new ArrayList<>();
+        byGoodsParams.add(merchantId);
+        byGoodsParams.addAll(marks);
+        List<String> hit = new ArrayList<>(jdbcClient
+                .sql("SELECT ProductCode FROM mall_management_sql.goods "
+                        + "WHERE MerchantId = ? AND OriginalPrice > 0 AND ProductCode IN (" + in + ")")
+                .params(byGoodsParams).query(String.class).list());
+        hit.addAll(jdbcClient
+                .sql("SELECT s.SkuCode FROM mall_management_sql.goods_sku s "
+                        + "JOIN mall_management_sql.goods g ON g.Id = s.GoodsId "
+                        + "WHERE s.MerchantId = ? AND g.OriginalPrice > 0 AND s.SkuCode IN (" + in + ")")
+                .params(byGoodsParams).query(String.class).list());
+        return hit;
     }
 }

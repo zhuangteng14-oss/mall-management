@@ -106,7 +106,7 @@ const routes = [
             { label: '上架商品', sub: 'add', to: '/merchant/user/add', glyph: 'goods' },
             { label: '查看商品', sub: 'list', to: '/merchant/user/list', glyph: 'logs' },
             { label: '历史购买记录', sub: 'history', to: '/merchant/user/history', glyph: 'orders' },
-            { label: '好友', sub: 'friend', to: '/merchant/user/friend', glyph: 'msg' },{ label: '经营数据', sub: 'stats', to: '/merchant/stats', glyph: 'metrics' },   // ⚠️ 可视化段 commit 3（2026-10-11，用户裁决 ④）：**同行**追加（净零行数，理由同上方 `:71` 那条）。落点在文件尾 `addRoute('merchantUser', { path: '/merchant/stats', … })`，**别**在 `children` 字面数组里找它。⚠️ `to` 写**绝对**地址 `/merchant/stats`：该地址是**可视化段 commit 2 已交付物**（那份探针与截图按它断言）⇒ 不改；子记录同写绝对路径（见文件尾那条的注释）。`sub: 'stats'` 是左菜单高亮判据（`UserCenter.vue:8` 的 `route.meta.sub === item.sub`）。**客户侧不加**：本段只有 `/admin/stats` 与 `/merchant/stats` 两个端点，没有客户维度
+            { label: '好友', sub: 'friend', to: '/merchant/user/friend', glyph: 'msg' },{ label: '经营数据', sub: 'stats', to: '/merchant/stats', glyph: 'metrics' },   // ⚠️ 可视化段 commit 3（2026-10-11，用户裁决 ④）：**同行**追加（净零行数，理由同上方 `:71` 那条）。落点在文件尾 `addRoute('merchantUser', { path: '/merchant/stats', … })`，**别**在 `children` 字面数组里找它。⚠️ `to` 写**绝对**地址 `/merchant/stats`：该地址是**可视化段 commit 2 已交付物**（那份探针与截图按它断言）⇒ 不改；子记录同写绝对路径（见文件尾那条的注释）。`sub: 'stats'` 是左菜单高亮判据（`UserCenter.vue:8` 的 `route.meta.sub === item.sub`）。**客户侧不加**：本段只有 `/admin/stats` 与 `/merchant/stats` 两个端点，没有客户维度。⚠️ 本行末**曾有**『秒杀报名』（C3 块 5 · commit 4 补笔 2026-10-12 加、**同日同批删**，用户裁定 ④）—— 删的是**左菜单项**，理由是那个入口已归**店铺主页的一级 tab「平台活动」**（`views/ShopHome.vue` + `components/PlatformActivityPanel.vue`）：秒杀报名本来就该与「等我应答的平台邀请」摆在一起，而不是并进左菜单这一串「本店管理」。⚠️ **路由留着** —— 文件**最尾**那条 `addRoute('merchantUser', { path: '/merchant/seckill', … })` 一字未动 ⇒ `#/merchant/seckill` 深链仍可直达；`SeckillApplyPage.vue` 也仍在（被面板当组件复用，带 `embedded`）。同理 `components/ui/glyphs.js:52` 那枚 `marketing` **不删**（`config/admin-nav.js:46` 的「营销运营」与 `views/admin/MarketingPage.vue` 的八处 `IconGlyph name="marketing"` 都还在用它）
             // ⚠️ A5（2026-10-07 用户裁定）：原第 6 项「消息」（`sub: 'chat'` → `/merchant/user/chat`）**已删** —— 同上（客户侧）
           ]
         },
@@ -136,7 +136,7 @@ const router = createRouter({
 // ── 兼容重定向（R1 起；R2 合表，2026-10-05）：旧 `?page=` / `?back=search` 深层链接 ⇒ 新子路由 ──
 // 旧形态：`#/customer?page=cart|user|chat`（R1 前由 `CustomerPage.vue` 的 `onMounted` + 两个
 //   `route.query` watcher 解读）、`#/merchant?page=order|user|chat`（R2 前同理，在 `MerchantPage.vue`）、
-//   `#/…?back=search`（`ProductPage.vue:388` 的「返回」推的）。两壳同一套形状 ⇒ **一张表驱动**。
+//   `#/…?back=search`（`ProductPage.vue:412` 的「返回」推的）。两壳同一套形状 ⇒ **一张表驱动**。
 // ⚠️ **这些映射都不能省**，两条理由：
 //   ① R5（商品详情页进壳）**不做** ⇒ `ProductPage.vue:361` / `:363` / `:388` / `:398` / `:400`
 //      仍推旧 URL（商家的 3 处 + 客户的 2 处，见 `progress.md` §5-Y 的生产者表）；
@@ -608,3 +608,23 @@ router.addRoute({ path: '/shop', component: () => import('../views/ShopHome.vue'
 // ══════════════════════════════════════════════════════════════════════════════════════════
 
 router.addRoute({ path: '/seckill', component: () => import('../views/SeckillPage.vue'), meta: { public: true } })
+
+// ══════════════════════════════════════════════════════════════════════════════════════════
+// ── C3 块 5〈营销块〉commit 4 补笔（2026-10-12）：商家秒杀报名 `/merchant/seckill` ────────────────
+//
+// ⚠️ **又是「新增行落在最大被引行之后」**（第十一次适用）：本记录追加在**文件最尾**（紧接上面
+//    那条 `/seckill`），上面 `:565` / `:566` / `:590` / `:610` 四条既有 `addRoute` 的行号**全不动**。
+//
+// ⚠️ **挂 `merchantUser` 下、不新开壳**（形制照 `:566` 那条 `/merchant/stats` —— 用户裁决 ④
+//    「放个人中心里」的同一手法）：`matched` 链多出 `UserCenter` ⇒ 个人中心左菜单在场，
+//    `sub: 'seckill'` 点亮本页那一项（判据 = `UserCenter.vue:8` 的 `route.meta.sub === item.sub`）。
+//    `path` 写**绝对**路径（`'/merchant/seckill'`），与左菜单里的 `to` 逐字相同。
+//    ⚠️ `meta` 只写 `sub`：`layout`（`user-page`）从父记录合并而来 —— 自己别再写 `layout: 'page'`，
+//       那会跳出个人中心壳、左菜单当场消失（`:566` 那条注释里同一陷阱）。
+//
+// ⚠️ **为什么是「补笔」**：路径 B 的服务端（`SeckillController.java:143` 的 `/marketing/seckill/apply`）
+//    与前端封装（`api/marketing.js:488` 的 `seckillApply`）在 commit 4 就交付了，缺的只是**调用方**
+//    ⇒ 本页 + 本条记录。**端点、封装、条数一律不动**（`endpoints.js` 仍是 119 条）。
+// ══════════════════════════════════════════════════════════════════════════════════════════
+
+router.addRoute('merchantUser', { path: '/merchant/seckill', component: () => import('../views/merchant/SeckillApplyPage.vue'), meta: { sub: 'seckill' } })

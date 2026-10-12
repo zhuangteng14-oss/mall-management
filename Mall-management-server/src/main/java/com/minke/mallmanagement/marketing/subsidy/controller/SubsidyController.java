@@ -73,18 +73,26 @@ public class SubsidyController {
         this.notificationService = notificationService;
     }
 
-    /** 发给我的国补提名。{@code Status} 省略 ⇒ 全部（页面自己分「待处理 / 已处理」）。 */
+    /**
+     * 发给我的国补提名。{@code Status} 省略 ⇒ 全部（页面自己分「待处理 / 已处理」）。
+     *
+     * @param OnlyOpen {@code "true"} ⇒ 只回**规则还没到期**的行（店铺主页「平台活动」tab 用）；
+     *                 其余（**含缺省**）⇒ 与加这个参数之前**逐字节同行为**。
+     *                 ⚠️ 只认字面 {@code "true"}（同 {@code Approve} 那条的口径：没表态 ≠ 表态）。
+     */
     @PostMapping("/subsidy/invitations")
     public ResponseEntity<Object> invitations(
             @RequestParam("MerchantId") String MerchantId,
             @RequestParam(value = "Status", required = false) String Status,
             @RequestParam(value = "limit", required = false) Integer limit,
+            @RequestParam(value = "OnlyOpen", required = false) String OnlyOpen,
             HttpServletRequest request
     ) {
         if (!IdentityGuard.requireSelfOrAdmin(request, MerchantId)) {
             return IdentityGuard.forbidden();
         }
-        return ResponseEntity.ok(Result.of(subsidyService.invitations(MerchantId, Status, limit)));
+        return ResponseEntity.ok(Result.of(
+                subsidyService.invitations(MerchantId, Status, limit, "true".equals(OnlyOpen))));
     }
 
     /**
