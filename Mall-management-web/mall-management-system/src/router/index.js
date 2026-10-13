@@ -452,7 +452,7 @@ router.addRoute({
     { path: 'business/catalog',    meta: { key: 'business', sub: 'catalog',    title: '商品与类目治理' }, component: () => import('../views/admin/CatalogPage.vue') },   // C3 块 3〈商品块〉：占位 → 真页（**同行替换**，照 `:451` accounts / `:456` notify 那两条的做法）
     { path: 'business/orders',     meta: { key: 'business', sub: 'orders',     title: '订单治理' },       component: () => import('../views/admin/OrderPage.vue') },   // C3 块 4〈订单块〉：占位 → 真页（**同行替换**，照 `:451` accounts / `:452` catalog / `:456` notify 那三条的做法）
     { path: 'business/marketing',  meta: { key: 'business', sub: 'marketing',  title: '营销运营' },       component: () => import('../views/admin/MarketingPage.vue') },   // C3 块 5〈营销块〉：占位 → 真页（**同行替换**，照 `:451` accounts / `:452` catalog / `:453` orders / `:456` notify 那四条的做法）
-    { path: 'business/moderation', meta: { key: 'business', sub: 'moderation', title: '消息与内容治理' }, component: AdminStub },
+    { path: 'business/moderation', meta: { key: 'business', sub: 'moderation', title: '消息与内容治理' }, component: () => import('../views/admin/ModerationPage.vue') },   // C3 块 6〈内容块〉：占位 → 真页（**同行替换**，照 `:451` accounts / `:452` catalog / `:453` orders / `:454` marketing / `:456` notify 那五条的做法）
     { path: 'business/notify',     meta: { key: 'business', sub: 'notify',     title: '系统通知' },       component: () => import('../views/admin/NotifyPage.vue') },   // C3 块1·I2：占位 → 真页（同行替换）
 
     { path: 'observe', meta: { key: 'observe', title: '可观测域' }, component: AdminStub },
