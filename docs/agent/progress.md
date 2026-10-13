@@ -2216,3 +2216,63 @@ DB 级唯一锁探针 `ProbeB6c7Lock` = **PASS 12 / FAIL 0**；接口级 8 条�
 ① **「讲过的数」也要重新取一遍**：`ProbeB6c7Seed` 那次「未来时间」是**方案本身**写对、字面量写反 —— 凡是「几分钟前 / 几小时后」这类**相对时刻**，都要加一条「读数与 NOW() 的大小关系」的断言，别靠眼看。
 ② **手验与预跑的措辞是安全边界**：`b6-c7-handverify.txt` 原题「手验实录（…『手验全部通过』）」**越权**（手验由用户跑、判据在用户手里），已改题「**agent 预跑记录（非用户手验，仅供参考）**」并同步本文件与 `slot-registry.md` —— 今后**任何记录里都不写「手验全部通过」**。
 ③ **`refs-scan` 的绿 ≠ 互引没漂**：它只比「token 文本 + 引用所在行」，「**目标**那一行内容有没有变」它**看不见**（脚本自己写在头部已知边界里）。本轮它报 `LOST = 0` 的同时，目标行已悄悄移了 **12 处**。⇒ **凡改动过带入向引用的文件，跑完 `refs-scan` 必须再跑一遍「目标行内容回解」**（`_work/_refs-drift-rew.py` 即为此写），否则「零漂移」是假绿。
+
+### 7-B6-ter. C3 块 6 **通知号域补笔**（2026-10-13；用户批文 ②③ 修法 + ① 方案 + 两个待裁点）
+
+> 用户批文顺序：**②③ → 孤儿清理 → ①**。本小节记这一轮的落点与**作废的旧结论**；
+> 逐条见 `slot-registry.md §23-12`，最小收验输出落 `docs/agent/evidence/c3-block6/b6-commit3-mention.txt` §七/§八。
+
+**一 · 缺陷（「一列两种号」写错了一列）** ⇒ 5 个 `EventType`（`comment.mention` / `comment.reply` /
+`comment.on.post` / `comment.accepted` / `report.handled`）把**登录名**写进了
+`notification.ToId`，而契约是**业务号**（`user.customerid` / `user.merchantid`；
+`db-schema.md` 的 `ToId` 行 / `:466` —— **契约本来就写对了，是代码违背了它**）。
+前端 `/notification/list` 按 `(ToId,ToType)` 查 ⇒ **这 5 类通知一条都投不进收件箱**；
+其余 17 个 `EventType` 一直写业务号，**未受影响**。
+
+⚠️ **旧结论作废**：`tech-debt.md` TD-52 ⑥（原记「@ 已落」）已就地更正为**半落**；
+`evidence/c3-block6/` 的 `b6-c3-mention-probe.txt` 整份作废、`b6-commit3-mention.txt` §一/§三 作废、
+`b6-c7-fake-data.txt` §4.9-乙 的 `ToId` 列标注为**缺陷现场** —— 三处都**保留原文**、只加更正段
+（史料不覆盖，这是本仓对证据档的既有处置）。
+
+**二 · 修法（用户批「按方案 A：让发送方写业务号」）** ⇒ `send(...)` 的 `ToId` 改由
+`CommentDao.selectUserIdByUsername`（`CommentService.java:830`）/ `selectMerchantIdByGoodsId`
+（`:845`；`ReportDao.java:317` 同名同责）换算；两方法都**追加在各自文件尾部**（最大被引用行之后）以压行号漂移。
+⚠️ **三条不许动的边界**：① `insertMention` 仍传**登录名**（`comment_mention.MentionedId` 域不变）；
+② 自 @ / 自回复的判定**仍走登录名域**、**先判后换算、顺序不能反**（`recordMention:615→634`、
+`notifyReply:718→728`）；③ `notifyOnPost` 直接取 `goods.MerchantId`（本身就是业务号），
+它的自评防比的是**两侧同域**（`:687`），不是「必须写成登录名」。
+
+**三 · 存量回填（用户裁决一「批」）** ⇒ 快照先行（`_work/_b6-backfill-before.txt`，可回滚）→
+`UPDATE notification JOIN user … SET ToId = COALESCE(merchantid,customerid) WHERE EventType IN (那 5 个)` →
+复读对照。**实动 32 行**，其余 17 个 `EventType` **一行未碰**；两读 `updated_at` **逐字节相同**
+（是**值改写**，不是删了重插）。
+
+**四 · 孤儿清理（用户裁决二「批」）** ⇒ 清掉 `comment` 204–207 / 211–213、
+`comment_mention` 56/57/58/62/63/64、`notification` 456–460 / 466–470，逐个复核归零；
+六表计数（`_work/_b6-sixtable-final.txt`）：**4 张逐字回到诊断前基线**
+（`comment_image` 6 / `comment_like` 8 / `report` 7 / `sensitive_word` 11），
+`comment` 21→**33**（+12）与 `comment_mention` 17→**27**（+10）**逐行可归因**：
+`comment` 214–216 / 223–225 / 230–235 与 `comment_mention` 65–67 / 72–74 / 78–81，
+三段分别来自 ②③ 修复后的**首轮手工复验**（214–216）、`_b6-notify-postfix.py`（223–225）、
+`probe-b6c3-mention.py` 重跑（230–235）。⇒ **不是孤儿**，且**正是** §八 引用的那批证据行
+（删了证据就没了）⇒ 本轮**保留**，若要「字面回到基线」需用户单独裁。
+
+**五 · ① 甲案（抽公共 `ReportDialog.vue`）** ⇒ 仓规「同一件事不抄第二份」；`ProductPage`
+**净 −67 行**（**不是**先前口头估的 −82 —— `ProductPage` 的付款确认弹窗仍要共用
+`.scrim`/`.dlg`/`.dacts` 那层皮肤）；重指 `ProductPage.vue:NNN` 一次，**父案配对口径
+真 `LOST` = 0**（A 类行位移 47 / B 类真丢 8 = **全部是有意重指**、各自被 C 类新 token 接住）。
+`ShopHome` 侧落在 `.hd-ops` 内、**关注右侧、与客服同一行**，按钮 `v-if="isLogin && !isSelf"`；
+⚠️ **举报商家按钮是「搬」不是「加」**（从 `ProductPage` 移到 `ShopHome`）—— 这一条按字面「移动」理解，
+若用户本意是**两处都留**，需要改回。
+
+**六 · 教训（面上判据，登记 TD-59）** ⇒ `probe-b6c3-mention.py` 当时拿**登录名**去拉收件箱
+⇒ **它和缺陷共用同一错误前提**，故必然全绿。这是「**校验器报 OK ≠ 没问题**」的实例：
+**凡「读取端与被测端共用同一个常量 / 口径表」的探针，绿不证明对** —— 评审时要先问
+「校验器的期望值是从哪来的」。**已修**：新增 `BIZ`（登录名 → 业务号）只用于**读**、
+`stale_domain_hits()` + 段 **N**「旧口径必须恒空」的**反向控制** ——
+**旧口径空、新口径有**，才叫真绿。另修同文件 `save_ids()` 的**整份覆盖**缺陷（D1：
+上一轮 id 被顶掉 ⇒ `--clean` 够不着 ⇒ 孤儿），改为只增不减的 `_history` + 并集。
+
+🧪 **本轮最小收验（⚠️ 非用户手验）** ⇒ 后端 `./mvnw -B test` = `Tests run: 309 / Failures 0 / Errors 0 / Skipped 26` + `BUILD SUCCESS`（`Total time: 01:05 min`，2026-10-13 17:13；TD-58 那条计时敏感用例本轮**未红**）；
+前端 `build` = `DONE`（`Hash 8d3685921932c375`、`Time 94680ms`、exit 0，**① 甲案之后**重跑）、`npx eslint src` = **exit 0**（同轮重跑）；
+探针 `probe-b6c3-mention.py` = **EXIT 0**（A1–A4 / B1 全绿、B2 与段 N 全 0）。

@@ -4724,7 +4724,7 @@ commit 0 加 `'order_item'`（`KNOWN_TABLES` **8 → 9**、期望 **19 → 20**�
 | 建表 | `2e47565` | **commit 0 —— 建表迁移（6 新表 + `user.WarnCount` + 敏感词预置）** |
 | 评论 | `c483d15` | commit 1 评论区后端 5 端点 + 商品详情页「累计评价」落真功能 |
 | 问答 | `ec1892a` | commit 2 问答闭环（采纳 + 置顶 + `comment.accepted` 通知）+ 超时提醒 Job + 商品页问答子 tab |
-| @ 关系 | `639b74f` | commit 3 `@` 自动生成 —— 三条 `@` 规则落 `comment_mention` + `comment.mention` 通知 |
+| @ 关系 | `639b74f` | commit 3 `@` 自动生成 —— 三条 `@` 规则落 `comment_mention` + `comment.mention` 通知。⚠️ **2026-10-13 更正**：`comment_mention` 那一半成立；**通知那一半当时的验收是假绿**（`notification.ToId` 写了**登录名**，而探针也拿登录名拉收件箱 ⇒ 两边同错），已按批文 **②③** 修为**业务号**并重造场景 —— 见 `evidence/c3-block6/b6-commit3-mention.txt` §七/§八 与 `tech-debt.md` **TD-59** |
 | 整改 ① 契约纠偏 | `5db5e00` | **删** `comment.on.user`，**补** `comment.on.post` / `comment.reply` 调用点 |
 | 整改 ② 评论漏项 | `25a8083` | 可评价闸 + 回复 `@X` + 折叠 + `ProductCode` 落库 |
 | 整改 ③ 问答漏项 | `b873972` | 提问**不可自删** + 左圆比例图（环图） |
@@ -4844,3 +4844,44 @@ commit 0 加 `'order_item'`（`KNOWN_TABLES` **8 → 9**、期望 **19 → 20**�
 DB 级唯一锁探针 `scripts/probes/ProbeB6c7Lock.java` = **PASS 12 / FAIL 0**（含并发档「成功 1 / 1062 1 / 落库 1」）。手验清单另立一档（见 23-8 尾注）。
 ⚠️ 上面那次全绿之后，又为「互引净零化」改了两处注释再复跑，**连着两轮各红一条** `L2HealthProbeConcurrencyTest`（计时敏感）—— **非本轮改动引起**（两棵树该类的 `.class` md5 逐字节相同）⇒ 登记 **TD-58**，本轮**不改该用例**。
 🧭 **互引核验（refs）** ⇒ 配对口径（键 = 引用者文件 + token，不含引用者行号）**真 LOST = 0 / NEW = 9**（9 条全为 docs → `mall_management_sql.sql` 的 ⑯ 段新坐标 ⇒ **源侧新增引用 = 0**）；另跑「目标行内容回解」，指向本轮 **24** 个改动文件的 **337** 条 token 首跑 **12 条真漂移**、**净零化后复跑 0**。⚠️ 报告本体只落 `_work/`（`refs-before-rew.txt` / `refs-after-rew2.txt` / `_refs-drift-rew.py` / `_pair-rew.py`），**不进 `docs/`**。详见 `progress.md` §7-B6-bis 尾。
+
+### 23-12　通知号域补笔（2026-10-13 用户批文 ②③ 修法 + ① 方案 + 两个待裁点；**再收口之后追加的一段**）
+
+> 顺序按用户批文：**②③ → 孤儿清理 → ①**。叙事面见 `progress.md` §7-B6-ter（**两边不要互抄行号**）。
+
+**① 缺陷 · 「一列两种号」写错一列** ⇒ `notification.ToId` 契约是**业务号**（`db-schema.md` 的 `ToId` 行 / `:466`，
+**契约本来就对**），而块 6 的 5 个 `EventType`（`comment.mention` / `comment.reply` / `comment.on.post` /
+`comment.accepted` / `report.handled`）写的是**登录名** ⇒ 前端按 `(ToId,ToType)` 查，**一条都读不到**。
+其余 17 个 `EventType` 一直写业务号，**未受影响**。⚠️ 见 23-12 末「旧结论作废」清单。
+
+**② 修法（用户批「方案 A：让发送方写业务号」）** ⇒ `send(...)` 的 `ToId` 改由
+`CommentDao.selectUserIdByUsername`（`CommentService.java:830`）/ `selectMerchantIdByGoodsId`（`:845`；
+`ReportDao.java:317` 同名同责）换算；两方法**追加在各自文件尾部**（最大被引用行之后）以压行号漂移。
+**三条不许动的边界**：ⅰ `insertMention` 仍传登录名（`comment_mention.MentionedId` 域不变，`:619`）；
+ⅱ 自 @ / 自回复**先判后换算、顺序不能反**（`recordMention:615→634`、`notifyReply:718→728`）；
+ⅲ `notifyOnPost` 直接取 `goods.MerchantId`（本身即业务号），其自评防比的是**两侧同域**（`:687`）。
+
+**③ 存量回填（用户裁决一「批」）** ⇒ 快照先行 → `UPDATE notification JOIN user … SET ToId =
+COALESCE(merchantid,customerid) WHERE EventType IN (那 5 个)` → 复读对照。**实动 32 行**
+（`_work/_b6-backfill-before.txt` / `_after.txt`，两读 `updated_at` **逐字节相同** ⇒ 值改写非重插），
+其余 17 个 `EventType` **一行未碰**。
+
+**④ 孤儿清理（用户裁决二「批」）** ⇒ 清 `comment` 204–207 / 211–213、`comment_mention` 56/57/58/62/63/64、
+`notification` 456–460 / 466–470，逐个复核归零。六表计数（`_work/_b6-sixtable-final.txt`）：`comment_image` 6 / `comment_like` 8 /
+`report` 7 / `sensitive_word` 11 **逐字回到诊断前基线**；`comment` 21→**33**（+12）· `comment_mention` 17→**27**（+10）
+**逐行可归因**（②③ 复验三段自造：`comment` 214–216 / 223–225 / 230–235 ↔
+`comment_mention` 65–67 / 72–74 / 78–81），**非孤儿**，且**正是** §七/§八 引用的证据行（保留）。
+
+**⑤ ① 甲案（抽公共 `ReportDialog.vue`）** ⇒ 仓规「同一件事不抄第二份」。`ProductPage.vue` **净 −67 行**
+（**非**先前口头估的 −82 —— 付款确认弹窗仍共用 `.scrim`/`.dlg`/`.dacts` 皮肤）；
+`ProductPage.vue:NNN` 重指一次，配对口径 **真 `LOST` = 0**（A 类行位移 47 / B 类真丢 8 = **全为有意重指**、
+各被 C 类新 token 接住）。`ShopHome` 侧落在 `.hd-ops` 内、**关注右侧、与客服同一行**，
+按钮 `v-if="isLogin && !isSelf"`。⚠️ **举报商家按钮是「搬」不是「加」**（`ProductPage` → `ShopHome`），
+按字面「移动」理解；**若本意是两处都留，需改回** —— 报备待裁。
+
+**⑥ 旧结论作废清单（史料不覆盖，只加更正段）** ⇒ `tech-debt.md` TD-52 ⑥ 由「已落」改判**半落**；
+`evidence/c3-block6/b6-c3-mention-probe.txt` **整份作废**、`b6-commit3-mention.txt` §一/§三 作废、
+`b6-c7-fake-data.txt` §4.9-乙 的 `ToId` 列标注为**缺陷现场**；本表 23-1「@ 关系」行就地加更正。
+⇒ 面上教训（**校验器与被测端共用同一口径 ⇒ 假绿**）登记 **TD-59**，并已给探针加**反向控制**。
+
+**⑦ 验收（agent 最小收验，⚠️ 非用户手验）** ⇒ 后端 `./mvnw -B test` = `Tests run: 309 / Failures 0 / Errors 0 / Skipped 26` + `BUILD SUCCESS`（17:13，**TD-58 那条本轮未红**）；前端 `build` = `DONE`（`Hash 8d3685921932c375`、`Time 94680ms`，① 甲案之后重跑）、`npx eslint src` = **exit 0**；`probe-b6c3-mention.py` = **EXIT 0**（A1–A4 / B1 绿，B2 与段 N 全 0）。重造场景证据 `b6-commit3-mention.txt` §七/§八。
