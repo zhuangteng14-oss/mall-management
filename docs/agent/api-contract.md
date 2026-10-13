@@ -193,7 +193,7 @@
 | `/goods/productCodePrice` | `GoodsUp.vue:275`、`ProductPage.vue:193`、`ProductPage.vue:245` |
 | `/goods/GoodsProductCodeSelect` | `ProductPage.vue:184`、`ProductPage.vue:236` |
 | `/goods/productSearch` | `GoodsSelect.vue:89`※（R2 重指；R1 记 `:88`、原记 `:78`） |
-| `/order/orderAdd` | `ProductPage.vue:393`（⚠️ **旧行号 · 已知陈旧族，不修** —— 块 6 之前就对不上；2026-10-13 实测真调用点 = `ProductPage.vue:913`，重填归「文档漂移清理笔」，见附录 G 末条） |
+| `/order/orderAdd` | `ProductPage.vue:393`（⚠️ **旧行号 · 已知陈旧族，不修** —— 块 6 之前就对不上；2026-10-13 实测真调用点 = `ProductPage.vue:897`（① 甲案 −16 行后），重填归「文档漂移清理笔」，见附录 G 末条） |
 | `/order/orderSelect` | `ShoppingCart.vue:113` |
 | `/order/orderDeliveryIfSelect` | `OrderCenter.vue:125`※ |
 | `/order/orderDeliverySelect` | `OrderCenter.vue:127`※ |
@@ -203,7 +203,7 @@
 | `/order/orderDeliveryIfUp` | `OrderCenter.vue:171` |
 | `/message/conversations` | `ChatRoom.vue:184`、`AppShell.vue:161`（**R6 合一重指**：两个壳的 `fetchUnreadCount()` —— `CustomerPage.vue:108` / `MerchantPage.vue:107` —— **已合并到本处**，两文件已随 R6 删除；其沿革：原记 `:97`（R1 时在 `HEAD` 已漂 3、实为 `:100`）⇒ R1/R2 各重指过一次） |
 | `/message/history` | `ChatRoom.vue:213`、`ChatRoom.vue:279` |
-| `/message/send` | `ChatRoom.vue:327`、`ProductPage.vue:459`（⚠️ **旧行号 · 已知陈旧族，不修** —— 同上；2026-10-13 实测真调用点 = `ProductPage.vue:1018`） |
+| `/message/send` | `ChatRoom.vue:327`、`ProductPage.vue:459`（⚠️ **旧行号 · 已知陈旧族，不修** —— 同上；2026-10-13 实测真调用点 = `ProductPage.vue:1002`（① 甲案 −16 行后）） |
 | `/message/userSelect` | `ChatRoom.vue:164`、`FriendRoom.vue:132` |
 | `/message/friendSelect` | `FriendRoom.vue:107` |
 | `/message/friendAdd` | `FriendRoom.vue:159` |
@@ -730,4 +730,4 @@
 
 ⚠️ **本文件（`api-contract.md`）的正文 §2 / §3 / §5 矩阵**本笔**未重测、未插入** —— 14 条新端点全部落在附录 G；正文坐标重填归「文档漂移清理笔」（同附录 E.7 的口径）。
 ⚠️ **已知的既有陈旧（不属本笔，登记不修）**：§2 的 C.1 表里 `/order/orderAdd` → `ProductPage.vue:393`、`/message/send` → `ProductPage.vue:459` 两条**在块 6 之前就与实际调用点对不上**（**不修**），故本笔的自动重指**刻意跳过**它们（行内已留「旧行号 · 不修」标记，属重指脚本的 GUARD 触发词）。
-**实测真调用点（第一手，2026-10-13）**：`/order/orderAdd` = `ProductPage.vue:913`（`await orderAdd({`）、`/message/send` = `ProductPage.vue:1018`（`http.post(endpoints.message.send, …)`）—— 正文坐标重填归「文档漂移清理笔」，台账见 `slot-registry.md` §二十三 的「已知误指族」。
+**实测真调用点（第一手，2026-10-13）**：`/order/orderAdd` = `ProductPage.vue:897`（`await orderAdd({`）、`/message/send` = `ProductPage.vue:1002`（`http.post(endpoints.message.send, …)`）—— 两值均已按 ① 甲案（`ProductPage.vue` −16 行）重指—— 正文坐标重填归「文档漂移清理笔」，台账见 `slot-registry.md` §二十三 的「已知误指族」。
