@@ -1,6 +1,8 @@
 package com.minke.mallmanagement.order.job;
 
 import com.minke.mallmanagement.goods.dao.GoodsDao;
+import com.minke.mallmanagement.observe.metrics.StockMetrics;
+import com.minke.mallmanagement.observe.metrics.StockMetrics.Release;
 import com.minke.mallmanagement.order.dao.OrderDao;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -69,13 +71,24 @@ public class OrderTimeoutCancelJob {
      */
     private final GoodsDao goodsDao;
 
+    /**
+     * 库存面的观测出口（C3 块 7 · 可观测域 · commit 2）：回补的每条明细各记一次 ——
+     * 回没回上、回了几件（{@code mall.stock.release} + 一条事件）。
+     *
+     * <p>⚠️ <b>只记事实、不定结论</b>：入参是枚举（不是 throwable），DAO 异常在上面的
+     * {@code releaseStock} 里先被接住 ⇒ 埋点不会改变「取消已落库」这个既成事实，
+     * 也不会把异常带出逐条循环。
+     */
+    private final StockMetrics stockMetrics;
+
     /** 超时阈值（创建后多久未付款即取消）。**演示默认 60 秒**；生产口径 30 分钟改这里。 */
     @Value("${mall.order.cancel.timeout-ms:60000}")
     private long timeoutMs;
 
-    public OrderTimeoutCancelJob(OrderDao orderDao, GoodsDao goodsDao) {
+    public OrderTimeoutCancelJob(OrderDao orderDao, GoodsDao goodsDao, StockMetrics stockMetrics) {
         this.orderDao = orderDao;
         this.goodsDao = goodsDao;
+        this.stockMetrics = stockMetrics;
     }
 
     /**
@@ -133,6 +146,10 @@ public class OrderTimeoutCancelJob {
      * <p>⚠️ <b>逐条 try/catch</b>：一条 SKU 回补失败不拖垮整轮，也不与其他条互相牵连
      * （同 {@code advance} 的单条守卫）。明细读不出来则**整单不回补**并留 WARN —— 宁可偏账留痕，
      * 也不在「明细未知」时瞎猜数量。
+     *
+     * <p>⚠️ <b>本方法同时是库存环（{@code StockMetrics}）释放腿的唯一写入点</b>（块 7 · commit 2）：
+     * 每条明细各记一次 {@code mall.stock.release} + 一条事件。埋点是**观察者** ——
+     * 0 行记 {@code MISSING}（无处可放）、异常记 {@code ERROR}，两者都不改变本方法的控制流。
      */
     private void releaseStock(String orderId) {
         List<Map<String, Object>> items;
@@ -150,8 +167,14 @@ public class OrderTimeoutCancelJob {
                 continue;
             }
             try {
-                goodsDao.releaseStock(skuCode, qty);
+                int rows = goodsDao.releaseStock(skuCode, qty);
+                // 块 7 · 观测（commit 2）：与 OrderService.deductStocks 对称，两条通道同一调用点一起发。
+                // 0 行记 MISSING（该码在 goods_sku 里没有行 ⇒ 无处可放），**不是** ERROR ——
+                // 非矩阵商品本来就没有 goods_sku 行，这类明细每单都会走到这里。
+                stockMetrics.release(skuCode, qty,
+                        rows == 1 ? Release.OK : Release.MISSING);
             } catch (Exception e) {
+                stockMetrics.release(skuCode, qty, Release.ERROR);
                 log.warn("超时释放：订单 {} 的 SKU {} 回补失败（跳过该条）：{}", orderId, skuCode, e.toString());
             }
         }

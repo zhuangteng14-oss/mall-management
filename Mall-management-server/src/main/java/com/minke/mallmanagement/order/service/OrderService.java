@@ -23,6 +23,8 @@ import com.minke.mallmanagement.goods.dao.GoodsDao;
 import com.minke.mallmanagement.marketing.coupon.service.CouponService;
 import com.minke.mallmanagement.notification.NotificationEvents;
 import com.minke.mallmanagement.notification.service.NotificationService;
+import com.minke.mallmanagement.observe.metrics.StockMetrics;
+import com.minke.mallmanagement.observe.metrics.StockMetrics.Deduct;
 import com.minke.mallmanagement.order.model.OrderAction;
 import com.minke.mallmanagement.order.dao.OrderDao;
 import com.minke.mallmanagement.order.dao.ShippingTrackDao;
@@ -201,6 +203,18 @@ public class OrderService {
      */
     private final GoodsDao goodsDao;
 
+    /**
+     * 库存面的观测出口（C3 块 7 · 可观测域新增，{@code observe/metrics/StockMetrics.java}）。
+     * 下单即扣的每条明细各记一次 —— 扣没扣到、扣了几件。
+     *
+     * <p>⚠️ <b>只记事实、不定结论</b>：{@link StockMetrics#deduct} 的入参是<b>枚举</b>（不是 throwable），
+     * DAO 的异常在上面的 {@link #deductStocks} 里先被接住 ⇒ 埋点不会改变 {@code orderAdd} 的返回值，
+     * 也不会把异常从方法里带出去。这与既有三环（缓存 / 锁 / 订单）的口径一致。
+     * <p>⚠️ 依赖方向是「订单 → 观测」，而观测域<b>对订单域一无所知</b>（{@code StockMetrics}
+     * 只认 {@code skuCode + qty + 枚举} 三个值）⇒ 没有环。
+     */
+    private final StockMetrics stockMetrics;
+
     private static final Logger log = LoggerFactory.getLogger(OrderService.class);
 
     /** 支付流水号的日期段格式（{@code PAY} + {@code yyyyMMdd} + 6 位随机）。 */
@@ -215,7 +229,8 @@ public class OrderService {
                         ShippingTrackDao shippingTrackDao,
                         ObjectMapper objectMapper,
                         CouponService couponService,
-                        GoodsDao goodsDao) {
+                        GoodsDao goodsDao,
+                        StockMetrics stockMetrics) {
         this.orderDao = orderDao;
         this.lockService = lockService;
         this.orderStateMachine = orderStateMachine;
@@ -226,6 +241,7 @@ public class OrderService {
         this.objectMapper = objectMapper;
         this.couponService = couponService;
         this.goodsDao = goodsDao;
+        this.stockMetrics = stockMetrics;
     }
 
     // ==================== 下单 ====================
@@ -854,6 +870,11 @@ public class OrderService {
      * <p>⚠️ <b>本方法在订单锁的临界区内</b>（调用方 = {@link #addLocked}）⇒ 与
      * {@code OrderDao.insertOrder} 同一条禁令：不得加 {@code @Transactional}
      * （{@code DistributedLockServiceTest.orderChainIsNotTransactional} 有结构断言兜底）。
+     *
+     * <p>⚠️ <b>本方法同时是库存环（{@code StockMetrics}）唯一的写入点之一</b>（块 7 · commit 2）：
+     * 每条明细各记一次 {@code mall.stock.deduct} + 一条事件（另一处在 {@code OrderTimeoutCancelJob}
+     * 的 {@code mall.stock.release}）。埋点是**观察者**：入参只有枚举、异常那一支也先接住再记，
+     * 故「记不记」不影响本方法的控制流。
      */
     private void deductStocks(List<ItemSpec> specs) {
         for (ItemSpec s : specs) {
@@ -861,8 +882,15 @@ public class OrderService {
                 continue;
             }
             try {
-                goodsDao.deductStock(clip(s.code(), 40), s.qty());
+                int rows = goodsDao.deductStock(clip(s.code(), 40), s.qty());
+                // 块 7 · 观测（commit 2）：**两条通道在同一调用点**发（计数 + 事件流）——
+                // 与既有三环同款。0 行记 INSUFFICIENT 而**不是** ERROR：CAS 没命中是正常分支
+                // （库存不足 / 非矩阵商品无行，见上面的 javadoc），记成错误会让告警误报。
+                stockMetrics.deduct(s.code(), s.qty(),
+                        rows == 1 ? Deduct.OK : Deduct.INSUFFICIENT);
             } catch (Exception e) {
+                // 异常这一路也埋点：否则「扣减根本没发出去」在指标上与「一次都没下单」无法区分。
+                stockMetrics.deduct(s.code(), s.qty(), Deduct.ERROR);
                 log.warn("订单明细 {} 的库存扣减失败（跳过该条，不动订单结论）：{}", s.code(), e.toString());
             }
         }

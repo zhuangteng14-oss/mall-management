@@ -20,6 +20,7 @@ import com.minke.mallmanagement.goods.service.GoodsService;
 import com.minke.mallmanagement.goods.service.GoodsTypeCacheService;
 import com.minke.mallmanagement.template.dao.TemplateDao;
 import com.minke.mallmanagement.template.service.TemplateService;
+import com.minke.mallmanagement.observe.metrics.StockMetrics;
 import com.minke.mallmanagement.order.dao.OrderDao;
 import com.minke.mallmanagement.order.service.OrderService;
 import com.minke.mallmanagement.order.model.OrderStateMachine;
@@ -57,6 +58,7 @@ import com.minke.mallmanagement.comment.dao.SensitiveWordDao;
 import com.minke.mallmanagement.comment.service.CommentService;
 import com.minke.mallmanagement.comment.service.ReportService;
 import com.minke.mallmanagement.comment.service.SensitiveWordService;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
@@ -296,7 +298,24 @@ import static org.mockito.Mockito.when;
         //    **`CommentService` 自己也起不来**，会把 `CommentSmokeTest` 一起拖红。
         // ⚠️ 本笔还给 `CommentDao` 加了「扫老评论」那两个方法（`selectContentsContaining` /
         //    `updateContent`），**不新增 bean** ⇒ 这里没有第二条要登记的。
-        SensitiveWordDao.class, SensitiveWordService.class})
+        SensitiveWordDao.class, SensitiveWordService.class,
+        // C3 块 7 · commit 2〈5 套新事件环〉（2026-10-13）：**本笔零新 Controller、零新 @Service**
+        // —— 地雷形状与〈折扣〉那一笔相同（没有新端点），但成因是「**既有** bean 的构造器多了一个形参」：
+        // `OrderService`（上面已 @Import 的真 bean）本笔新增库存环 `StockMetrics`
+        // （`observe/metrics/StockMetrics.java`，写入点见该类注释）—— 它一缺席，整个切片上下文
+        // 同样在加载期**启动失败**（`NoSuchBeanDefinitionException: StockMetrics`，同前十五笔同一处地雷）。
+        // ⚠️ **刻意不 @Import 其余四环**（`AuditMetrics` / `NotifyMetrics` / `SensitiveMetrics` /
+        //    `IdentityMetrics`）：本笔没有任何 bean 吃它们（写入点 = 下一笔的攻击引擎）⇒ 照
+        //    `MallCacheMetrics` / `MallOrderStateMetrics` 的既有处置 —— 切片只登记**被吃到**的埋点 bean。
+        // ⚠️ `StockMetrics` 只吃 `MeterRegistry`—— 但 `@WebMvcTest` 切片**不加载** micrometer 的
+        //    自动配置（2026-10-13 实测：`No qualifying bean of type 'io.micrometer.core.instrument.MeterRegistry'`，
+        //    报错链正是 `adminOrderController → AdminOrderService → OrderService → StockMetrics`）
+        //    ⇒ 这里补一个 `SimpleMeterRegistry`（micrometer 自带的内存实现：无外部依赖、无生命周期）
+        //    喂它。**不给 `StockMetrics` 开「切片里可为空」的口子** —— 那会把埋点语义改掉，
+        //    与「不得降级」相悖；补一个内存实现则连「计数真的在跑」都顺带留住了。
+        // ⚠️ 既有三环（缓存 / 锁 / 订单）**不需要**这一行：它们从未进过本切片（清单里没有任何
+        //    bean 吃它们）⇒ **本笔是第一次有切片内的 bean 依赖埋点出口**。
+        StockMetrics.class, SimpleMeterRegistry.class})
 public abstract class AbstractSmokeTest {
 
     @Autowired
