@@ -587,6 +587,8 @@ public class CommentService {
      * 调用者已经**有**身份、{@code Account} 也已验明是本人（{@link com.minke.mallmanagement.shared.web.IdentityGuard}），
      * 剩下的纯粹是「你不是这条评论的作者」这条业务判断 ⇒ {@code success:false} 比 403 更贴
      * 前端的话术出口（403 会被 {@code api/http.js} 当登录态问题处理）。
+     *
+     * <p>⚠️ 一条**额外**的闸（方案 §4.2）：**顶层提问不可被提问者删**，管理员除外。见方法体内注释。
      */
     public Map<String, Object> delete(long id, String account, boolean admin) {
         if (isBlank(account)) {
@@ -602,6 +604,15 @@ public class CommentService {
             }
             if (!admin && !account.trim().equals(str(row.get("AuthorId")))) {
                 return fail("只能删除自己发表的评论");
+            }
+            // 方案 §4.2「删除：提问者不能删；商家可提删 → 管理端裁判」。
+            // ⚠️ **顶层提问**（`Kind='question'` 且 `ParentId` 空）不在「作者可删」那一条里 ——
+            // 提问一旦被删，下面全部回答（含已被采纳的那条）就都失去了宿主 ⇒ 只有管理端能直接删。
+            // 非管理员（含提问者本人，也含商家）走到这里一律拒；商家的诉求表达走**提删**
+            // （= 走举报通道，`TargetType='comment'`，见 ReportService），由管理端裁决。
+            if (!admin && row.get("ParentId") == null
+                    && CommentKinds.QUESTION.equals(str(row.get("Kind")))) {
+                return fail("提问不能自行删除，如有需要可请商家提删、由管理端裁决");
             }
             boolean topLevel = row.get("ParentId") == null;
             int cascaded = topLevel ? commentDao.softDeleteRepliesUnder(id) : 0;

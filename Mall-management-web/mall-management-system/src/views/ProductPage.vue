@@ -328,16 +328,22 @@
             </template>
             <!-- 问答子 tab：已解决 / 未解决比例（方案 §4.2「左圆比例图」）。
                  ⚠️ 那条「一条都没有 ⇒ 显 `—`」的判据在 `revQuestionNumbers` 里，不在模板里：
-                 模板只负责画，`0` 与「没有」的分野是计算的事。 -->
+                 模板只负责画，`0` 与「没有」的分野是计算的事。
+                 ⚠️ 用**环图**而不是横向比例条：§4.2 逐字写着「**左圆**比例图」（commit 2 落成了
+                 一根横条，本次整改拉回原方案）。图形一律走 `charts/` 那套既有组件 —— 与
+                 `views/admin/AccountsPage.vue` 的「封禁分布」同款（`DonutChart` + 洞里的那组数）。 -->
             <template v-else>
               <div class="n">{{ revQuestionNumbers.label }}</div>
               <div class="of">共 {{ revTotalLabel }} 个提问</div>
-              <div class="qbar" aria-hidden="true">
-                <span class="yes" :style="{ width: revSolvedPct + '%' }"></span>
-              </div>
-              <div class="qlegend">
-                <span><i class="dot yes"></i>已解决 {{ revQuestionNumbers.solved }}</span>
-                <span><i class="dot no"></i>未解决 {{ revQuestionNumbers.unsolved }}</span>
+              <div class="qdonut">
+                <DonutChart
+                  :data="revQaMix"
+                  :height="'200px'"
+                  :center-value="revQuestionNumbers.solved"
+                  center-title="已解决"
+                  :loading="revLoading"
+                  empty-text="还没有提问"
+                />
               </div>
               <p class="qtip">商家与买过的人都能回答；提问者采纳后标记为已解决。</p>
             </template>
@@ -433,7 +439,10 @@
                   <button type="button" :class="{ on: r.MyLike === 'like' }" @click="likeRev(r, 'like')">赞 {{ r.LikeCount || 0 }}</button>
                   <button type="button" :class="{ on: r.MyLike === 'dislike' }" @click="likeRev(r, 'dislike')">踩 {{ r.DislikeCount || 0 }}</button>
                   <button type="button" @click="openReply(r, null)">回复</button>
-                  <button type="button" v-if="r.Mine" @click="removeRev(r)">删除</button>
+                  <!-- ⚠️ 顶层**提问**不给「删除」：方案 §4.2「提问者不能删」（后端 `CommentService.delete`
+                       同一判据）。提问被删会连带毁掉下面全部回答 ⇒ 只有管理端能直接删，
+                       商家的诉求走「提删」（举报通道，管理端裁决）。 -->
+                  <button type="button" v-if="r.Mine && !revIsQuestion" @click="removeRev(r)">删除</button>
                 </div>
 
                 <!-- 回复框：挂在**被回复的那一层**（顶层回复挂在顶层行下、回复某条回复挂在回复块下）
@@ -633,7 +642,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { http, handleApiError } from '../api/http'
 import { endpoints } from '../api/endpoints'; import { orderAdd, cartAdd } from '../api/order'   // ⚠️ C3 块 4：**同行追加**（不新增行 —— 本文件 `:794`/`:803` 被 `slot-registry.md:1994-1995` 按行号引（〈Bug 1〉本笔 +19 行前为 `:775`/`:784`），此处加行会顶漂它们）。两个函数就是原先那两串 `URLSearchParams` + `http.post` + `res.json()` 的收口
 import CashierDialog from '../components/CashierDialog.vue'; import ProductCard from '../components/ProductCard.vue'; import { sharedList } from '../config/goods-flags'   // ⚠️ **同行追加** `sharedList`（C3 块 5 ·〈Bug 2/3〉落码，2026-10-12）：本页只用它算「猜你喜欢」（见 `:522` 那条按语）。本行已有一条「本笔确实新增了一行」的记账（2026-10-10 Bug 1），**这一笔不再加行** —— 本文件下面 `:571` / `:638` / `:794` / `:1032` / `:1330` 等处被文档按行号钉着   // ⚠️ 2026-10-10（Bug 1）：收银台与「我的订单」**共用同一个组件** —— 本行**确实**新增了一行；本笔在 `ProductPage.vue` 净 +19 行（`git diff` 实测：模板 `:412` 起 +5、import +1、`handlePay` 段 +13）⇒ 下面两处 `:775`/`:784` 漂到 `:794`/`:803`，随本笔一并重指（见 `slot-registry.md:1994-1995`）
-import { getMerchantId, getCustomerId, getUsername, isLoggedIn } from '../api/auth'; import IconGlyph from '../components/ui/IconGlyph.vue'; import { coupons, claim, subsidyGoods, seckillLive } from '../api/marketing'; import { couponName } from '../config/coupon-format'; import { useCouponPick } from '../composables/useCouponPick'; import { list as commentList, add as commentAdd, remove as commentRemove, accept as commentAccept, like as commentLike, myOrders as commentOrders } from '../api/comment'   // ⚠️ 六条 import **同行**（第 6 条 `../api/comment` 的六个别名：块 6 · commit 1「评论」+ commit 2「问答」的 `accept`，2026-10-12 —— 别名是必需的，`list`/`add` 这种裸名在本文件里跟 `allItems` 那些局部名撞脸，读不出是谁的）（第 5 条 `useCouponPick`：块 5 · commit 5 续笔「立即购买」也能用券，2026-10-12；与 `ShoppingCart.vue` 共用同一处，不抄第二份）（第 2、3 条：2026-10-11 补图标笔 + C3 块 5 · commit 1；第 4 条 `couponName`：块 5 · A 组 · A7 后半；`getUsername`：块 5 券口径改登录名，2026-10-12）—— 合并到既有行 = 不新增行号漂移（本文件 `:794`/`:803` 被 `slot-registry.md:1994-1995` 按行号引，上面 `:424` 那条注释记过同一件事）。⚠️ **块 5 · commit 1 仍整体 +90 行**（模板 +17 / `<script setup>` 尾 +70 / `<style>` +3）⇒ `slot-registry.md:1994` 引的 `:794` 漂 **`:881`**、`:1995` 引的 `:803` 漂 **`:890`**（两值均为 `grep -n` 实测，见 `_work/b5-repoint.md`）。⚠️ **块 6 · commit 1 又整体 +N 行**、**commit 2（问答）再 +M 行**，漂移台账见 `_work/b6-commit1-repoint.md` 与 `_work/b6-commit2-repoint.md`（收口 commit 逐处重指）。
+import { getMerchantId, getCustomerId, getUsername, isLoggedIn } from '../api/auth'; import IconGlyph from '../components/ui/IconGlyph.vue'; import { coupons, claim, subsidyGoods, seckillLive } from '../api/marketing'; import { couponName } from '../config/coupon-format'; import { useCouponPick } from '../composables/useCouponPick'; import { list as commentList, add as commentAdd, remove as commentRemove, accept as commentAccept, like as commentLike, myOrders as commentOrders } from '../api/comment'; import DonutChart from '../components/charts/DonutChart.vue'   // ⚠️ **块 6 整改 commit 2〈问答漏项补齐〉同行追加** `DonutChart`（§4.2「左圆比例图」，与 `views/admin/AccountsPage.vue` 的「封禁分布」同款）—— **不新增行**，故本行行号不动。⚠️ 六条 import **同行**（第 6 条 `../api/comment` 的六个别名：块 6 · commit 1「评论」+ commit 2「问答」的 `accept`，2026-10-12 —— 别名是必需的，`list`/`add` 这种裸名在本文件里跟 `allItems` 那些局部名撞脸，读不出是谁的）（第 5 条 `useCouponPick`：块 5 · commit 5 续笔「立即购买」也能用券，2026-10-12；与 `ShoppingCart.vue` 共用同一处，不抄第二份）（第 2、3 条：2026-10-11 补图标笔 + C3 块 5 · commit 1；第 4 条 `couponName`：块 5 · A 组 · A7 后半；`getUsername`：块 5 券口径改登录名，2026-10-12）—— 合并到既有行 = 不新增行号漂移（本文件 `:794`/`:803` 被 `slot-registry.md:1994-1995` 按行号引，上面 `:424` 那条注释记过同一件事）。⚠️ **块 5 · commit 1 仍整体 +90 行**（模板 +17 / `<script setup>` 尾 +70 / `<style>` +3）⇒ `slot-registry.md:1994` 引的 `:794` 漂 **`:881`**、`:1995` 引的 `:803` 漂 **`:890`**（两值均为 `grep -n` 实测，见 `_work/b5-repoint.md`）。⚠️ **块 6 · commit 1 又整体 +N 行**、**commit 2（问答）再 +M 行**，漂移台账见 `_work/b6-commit1-repoint.md` 与 `_work/b6-commit2-repoint.md`（收口 commit 逐处重指）。
 
 const route = useRoute()
 const router = useRouter()
@@ -1252,6 +1261,21 @@ const revQuestionNumbers = computed(() => {
     unsolved: String(Number(s.Unsolved) || 0),
     label: revSolvedPct.value + '%',
   }
+})
+/**
+ * 环图的两片（方案 §4.2「左圆比例图」的输入）。`{name, value}` 是 `DonutChart` 的契形。
+ *
+ * ⚠️ **一条提问都没有 ⇒ 空数组**（不是两片 0）—— `DonutChart` 见 `data.length === 0` 就落
+ * 「还没有提问」的空态，而两片 0 在 echarts 里会画出一个**空环**（看着像「全都 0%」而不是
+ * 「没有数据」）。这与 {@link revQuestionNumbers} 把 `—` 与 `0` 分开是同一条口径。
+ */
+const revQaMix = computed(() => {
+  const s = revStats.value || {}
+  if ((Number(s.Total) || 0) === 0) return []
+  return [
+    { name: '已解决', value: Number(s.Solved) || 0 },
+    { name: '未解决', value: Number(s.Unsolved) || 0 },
+  ]
 })
 
 /**
@@ -2329,16 +2353,11 @@ button { background: none; border: 0; cursor: pointer; }
                   border-radius: var(--r1); font-size: var(--fs-xs); color: var(--ink-3); }
 .subtabs button.on { border-color: var(--ink-3); color: var(--ink); font-weight: var(--fw-med); }
 
-/* 左侧「解决率」（方案 §4.2 的「左圆比例图」）：一条横比例条 + 图例。
-   ⚠️ 刻意与上面的 5→1 星分布 `.bars` **同形**（同一根 `--surface-3` 轨道 + 一根填充）——
-   读者不必为问答再学第二套图形语言，两个子 tab 的左侧是同一块版。 */
-.qbar { margin-top: var(--s5); height: 8px; border-radius: 4px; background: var(--surface-3); overflow: hidden; }
-.qbar .yes { display: block; height: 100%; background: var(--brand-ink); }
-.qlegend { margin-top: var(--s3); display: flex; flex-direction: column; gap: var(--s2);
-           font-size: var(--fs-xs); color: var(--ink-3); }
-.qlegend span { display: flex; align-items: center; gap: var(--s2); }
-.qlegend .dot { width: 8px; height: 8px; flex: 0 0 auto; border-radius: 50%; background: var(--surface-3); }
-.qlegend .dot.yes { background: var(--brand-ink); }
+/* 左侧「解决率」（方案 §4.2 的「左圆比例图」）：一圈环 + 洞里的已解决数 + 自带图例。
+   ⚠️ 图形本体由 `charts/DonutChart.vue` 画（`echarts` 按需注册在 `charts/echarts.js`），
+   这里只负责**留位**：左右各留一点边距，免得扇区标签贴到面板边。（原先那根横比例条
+   `.qbar` / 自绘图例 `.qlegend` 已随本次整改退役 —— §4.2 要的是「圆比例图」。） */
+.qdonut { margin-top: var(--s4); padding: 0 var(--s2); }
 .qtip { margin-top: var(--s4); font-size: var(--fs-xs); line-height: 1.8; color: var(--ink-3); }
 
 /* 结局标签（已解决 / 未解决 / 已采纳）。⚠️ `.rep .tag` 那份已在上面（`2224` 上下）定义，
