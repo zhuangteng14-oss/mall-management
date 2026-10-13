@@ -1,0 +1,193 @@
+package com.minke.mallmanagement.observe.service;
+
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.minke.mallmanagement.observe.dao.DrillRecordDao;
+import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
+
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
+
+/**
+ * {@link DrillRecordService}：**跑完落库**与**读回来拆字段**两条边（库用替身，不起 Spring）。
+ *
+ * <p>⚠️ 本类测的是「长文本 → 分字段」与「口令与上限」——这两条是**契约**（方案 §1.5：后端解析后
+ * 分字段给前端，不是为了展示原始长文本）。真正的演练不在这里测（它要真发 HTTP）。
+ */
+class DrillRecordServiceTest {
+
+    private final DrillRecordDao dao = mock(DrillRecordDao.class);
+    private final AttackEngine engine = mock(AttackEngine.class);
+    private final DrillRecordService service = new DrillRecordService(dao, engine, new ObjectMapper());
+
+    /** 一行 {@code drill_record}（列名与**顺序**都与 {@code DrillRecordDao.COLUMNS} 一致）。 */
+    private static Map<String, Object> row(String result, String scenario) {
+        Map<String, Object> r = new LinkedHashMap<>();
+        r.put("Id", 7L);
+        r.put("OperatorId", "c-1");
+        r.put("OperatorRole", 1);
+        r.put("Name", "自定义");
+        r.put("Scenario", scenario);
+        r.put("TotalRequests", 100);
+        r.put("BlockedRequests", 30);
+        r.put("FailedRequests", 1);
+        r.put("DurationMs", 60000L);
+        r.put("Result", result);
+        r.put("CreatedAt", "2026-10-13 20:00:00");
+        return r;
+    }
+
+    // ==================== 一、读回来：拆字段 ====================
+
+    /** 正常行：{@code Result} / {@code Scenario} 都变成**对象**（不是长文本）。 */
+    @Test
+    void splitsLongTextColumnsIntoObjects() {
+        when(dao.selectRecords(anyInt(), anyInt())).thenReturn(List.of(
+                row("{\"Scenarios\":[{\"Key\":\"seckill\"}]}", "{\"c\":100,\"d\":60}")));
+        when(dao.countRecords()).thenReturn(1L);
+
+        Map<String, Object> out = service.records(null, null);
+
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> list = (List<Map<String, Object>>) out.get("list");
+        assertEquals(1, list.size());
+        assertTrue(list.get(0).get("Result") instanceof Map, "Result 必须是对象");
+        assertTrue(list.get(0).get("Scenario") instanceof Map, "Scenario 必须是对象");
+        assertFalse(list.get(0).containsKey("ResultRaw"), "解析成功不该留原串");
+        // 列顺序保序（前端表格列顺序靠它稳定）
+        assertEquals(List.of("Id", "OperatorId", "OperatorRole", "Name", "Scenario",
+                        "TotalRequests", "BlockedRequests", "FailedRequests", "DurationMs",
+                        "CreatedAt", "Result"),
+                List.copyOf(list.get(0).keySet()));
+        assertEquals(1L, out.get("total"));
+        assertEquals(DrillRecordService.DEFAULT_LIMIT, out.get("limit"));
+        assertEquals(0, out.get("offset"));
+    }
+
+    /** 坏行：解析失败 ⇒ {@code Result} 为 null + 原串挂 {@code ResultRaw} + 标错（**不静默**）。 */
+    @Test
+    void keepsRawTextWhenResultIsNotJson() {
+        when(dao.selectRecords(anyInt(), anyInt())).thenReturn(List.of(
+                row("这不是 JSON", "")));
+        when(dao.countRecords()).thenReturn(1L);
+
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> list =
+                (List<Map<String, Object>>) service.records(null, null).get("list");
+
+        assertNull(list.get(0).get("Result"));
+        assertEquals("这不是 JSON", list.get(0).get("ResultRaw"));
+        assertNotNull(list.get(0).get("ResultParseError"));
+        // 空的 Scenario 列不算「坏」：null 直接回 null，不落 Raw（否则每一行都会挂一个解析错误）
+        assertNull(list.get(0).get("Scenario"));
+        assertFalse(list.get(0).containsKey("ScenarioRaw"));
+    }
+
+    /** 口令与上限：缺省 20、超上限收到 200、负数 offset 归 0、非整数报 400（抛）。 */
+    @Test
+    void clampsLimitAndOffset() {
+        when(dao.selectRecords(anyInt(), anyInt())).thenReturn(List.of());
+        when(dao.countRecords()).thenReturn(0L);
+
+        Map<String, Object> out = service.records("9999", "-5");
+        verify(dao).selectRecords(eq(DrillRecordService.MAX_LIMIT), eq(0));
+        assertEquals(DrillRecordService.MAX_LIMIT, out.get("limit"));
+        assertEquals(0, out.get("offset"));
+
+        Map<String, Object> def = service.records("0", null);
+        verify(dao).selectRecords(eq(DrillRecordService.DEFAULT_LIMIT), eq(0));
+        assertEquals(DrillRecordService.DEFAULT_LIMIT, def.get("limit"));
+
+        // ⚠️ 形状错（不是整数）走 400 —— 与「数值越界收进区间」是两条不同的路
+        assertThrows(IllegalArgumentException.class, () -> service.records("abc", null));
+    }
+
+    // ==================== 二、跑一轮：落库 + 回体 ====================
+
+    /** 跑完 ⇒ 落一行并把那一轮的字段化结果**同时**回给调用方（前端不必再拉一次列表）。 */
+    @Test
+    void runPersistsRowAndEchoesResult() {
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("Scenarios", List.of(Map.of("Key", "seckill")));
+        when(engine.run(any(), any())).thenReturn(new AttackEngine.DrillRun("自定义", "{\"c\":100}",
+                100, 30, 1, 60000L, result));
+        when(dao.insert(anyString(), anyInt(), anyString(), anyString(), anyInt(), anyInt(), anyInt(),
+                anyLong(), anyString())).thenReturn(7L);
+
+        Map<String, Object> out = service.run("自定义", null, null, null, "c-1", 1,
+                "http://localhost:8088");
+
+        assertEquals(7L, out.get("Id"));
+        assertEquals(100, out.get("TotalRequests"));
+        assertEquals(30, out.get("BlockedRequests"));
+        assertEquals(1, out.get("FailedRequests"));
+        assertEquals(60000L, out.get("DurationMs"));
+        assertEquals(result, out.get("Result"));
+        assertTrue(Boolean.TRUE.equals(out.get("success")));
+        // 落库那一行的 Result 是**序列化后的文本**（列是 mediumtext）
+        verify(dao).insert(eq("c-1"), eq(1), eq("自定义"), eq("{\"c\":100}"), eq(100), eq(30), eq(1),
+                eq(60000L), anyString());
+    }
+
+    /**
+     * ⚠️ {@code scenarios} 到服务层还是**表单里的 JSON 数组串**（端点收 {@code @RequestParam}）：
+     * 本类负责把它解成结构再交给引擎（{@code AttackEngine.parse} 只认结构），数值参数**保持字符串**
+     * —— 「必须是整数」那句话由引擎的 {@code clampInt} 说（那里是唯一校验出口）。
+     */
+    @Test
+    void decodesScenariosJsonStringBeforeHandingToTheEngine() {
+        when(engine.run(any(), any())).thenReturn(new AttackEngine.DrillRun("压测", "{}", 0, 0, 0, 0L,
+                Map.of()));
+
+        service.run("压测", "200", "30",
+                "[{\"key\":\"seckill\",\"weight\":80},{\"key\":\"cacheCold\",\"weight\":20}]",
+                "c-1", 1, "http://localhost:8088");
+
+        // 空白 scenarios = 没勾 = **null**（引擎按全 8 个场景跑），不是空数组（空数组是「一个都没勾」⇒ 抛）
+        service.run(null, null, null, "  ", "c-1", 1, "http://localhost:8088");
+
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<Map<String, Object>> captor = ArgumentCaptor.forClass(Map.class);
+        verify(engine, times(2)).run(captor.capture(), eq("http://localhost:8088"));
+        Map<String, Object> body = captor.getAllValues().get(0);
+        assertEquals("压测", body.get("name"));
+        assertEquals("200", body.get("concurrency"), "数值保持字符串，校验归引擎");
+        assertEquals("30", body.get("durationSeconds"));
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> scenarios = (List<Map<String, Object>>) body.get("scenarios");
+        assertEquals(2, scenarios.size());
+        assertEquals("seckill", scenarios.get(0).get("key"));
+        assertEquals(80, scenarios.get(0).get("weight"));
+        assertNull(captor.getAllValues().get(1).get("scenarios"));
+
+        // ⚠️ 串不是 JSON 数组 ⇒ 抛（400）。**不**回落到「全 8 个场景」：那会让页面显示一串没人勾的场景
+        assertThrows(IllegalArgumentException.class, () -> service.run(null, null, null, "seckill",
+                "c-1", 1, "http://localhost:8088"));
+    }
+
+    /** 场景清单透传（控制器那条端点只做一层转发）。 */
+    @Test
+    void scenariosComeFromTheEngine() {
+        when(engine.scenarios()).thenReturn(List.of(Map.of("Key", "seckill")));
+        Map<String, Object> out = service.scenarios();
+        assertTrue(Boolean.TRUE.equals(out.get("success")));
+        assertEquals(1, ((List<?>) out.get("list")).size());
+    }
+}

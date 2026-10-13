@@ -1,12 +1,12 @@
-// src/api/observe.js —— 可观测面板的 SSE 客户端（块 7 commit 3）。
+// src/api/observe.js —— 可观测面板的客户端（块 7 commit 3 的 SSE + commit 4 的三个普通 POST）。
 //
-// 三条端点（`POST /admin/observe/{metrics,orders,events}/stream`，**全在** `endpoints.js` 里，
-// 本文件一个后端路径字面量都不出现 —— 那条判据可 grep 自动化）：
-//   metrics → 指标面板（KPI / 锁 / 防护 / 库存水位）
-//   orders  → 状态流转页（五态计数 / 最近订单 / 本拍流转）
-//   events  → 实时日志页（8 类归一化事件流）
+// 六条端点（**全在** `endpoints.js` 里，本文件一个后端路径字面量都不出现 —— 那条判据可 grep 自动化）：
+//   metrics → 指标面板（KPI / 锁 / 防护 / 库存水位）          ┐
+//   orders  → 状态流转页（五态计数 / 最近订单 / 本拍流转）      ├ 三条 **SSE 流**（commit 3）
+//   events  → 实时日志页（8 类归一化事件流）                  ┘
+//   attackScenarios / attackRun / attackRecords → 攻击模拟器（commit 4）—— 三条**普通 POST**
 //
-// ⚠️ **不用浏览器原生 `EventSource`**。两条独立的理由，任一条都足够：
+// ⚠️ **不用浏览器原生 `EventSource`**（只针对上面三条流）。两条独立的理由，任一条都足够：
 //   ① 它**不能带自定义请求头**，而本仓的鉴权票走 `Authorization: Bearer`（默认 profile 上
 //      管理员 cookie 会被后端 `AuthInterceptor` 折成未登录，见 `http.js` 的 `buildInit`）
 //      ⇒ 用 `EventSource` 必然 401；
@@ -17,8 +17,11 @@
 // ⚠️ 帧格式只有一种（`SseStreamWriter` 只写这一种）：`data: <单行 JSON>\n\n`。
 //   `event:` / `id:` / `retry:` 三个字段后端**不写** ⇒ 本文件也不认（写了反成误导）。
 //   解析仍按 SSE 规范最小形态做：可有多行 `data:`（用 `\n` 连接）、容忍 `\r\n`。
+//
+// ⚠️ 攻击那三条**走的不是流**（`http.post` + 表单串，见文件尾那节）：它们的响应是**一次性的
+//   JSON**，没有「拍」的概念 —— 别为了统一而把它们也塞进 `openStream`。
 
-import { streamPost } from './http'
+import { http, streamPost } from './http'
 import { endpoints } from './endpoints'
 
 /** 指标面板流（1 秒 1 帧）。 */
@@ -135,4 +138,111 @@ function parseBlock(block) {
   }
   if (data.length === 0) return null
   return JSON.parse(data.join('\n'))
+}
+
+// ==================== 攻击模拟器（块 7 · commit 4）====================
+//
+// 三条端点（`AttackController`，`@RequestMapping("/admin/observe/attack")`）：
+//   scenarios —— 8 个预置场景（key / 中文名 / 同时演示的防护 / 需要的人工前提 / 缺省权重）
+//   run       —— 跑一轮演练（**同步跑到结束**，见下面那条 ⚠️）
+//   records   —— 演练记录（时间倒序；后端已把 `Result` 长文本拆成字段）
+//
+// ⚠️ **这三条不是流**，故不走 `openStream`：响应是一次性的 JSON，没有「拍」。
+//
+// ⚠️ **`runAttack` 必须显式传长 timeout**（本模块唯一一处传 `timeout` 的调用）：
+//   后端是**同步**跑完一轮才回（拿得到「跑完就能看的数字」，代价就是这几十秒的连接），
+//   而 `http.post` 的默认超时是 `DEFAULT_TIMEOUT = 10000`（10 秒，见 `http.js`）——
+//   不给超时的话，60 秒的演练会在第 10 秒被前端自己 abort 成 `TimeoutError`
+//   （后端那轮照跑完、照落库，页面上却只有一条超时提示）。
+//
+// ⚠️ **`scenarios` 是 JSON 数组串**（`[{"key":"seckill","weight":80}]`），后端收的是
+//   `@RequestParam` + 自己解 JSON —— 别在这里改成「发 JSON body」：`http.post` 对 POST 一律
+//   钉 `application/x-www-form-urlencoded`（见 `http.js#buildInit`），JSON body 到不了后端。
+//   与 `api/sensitive.js` / `api/admin.js` 的 `q()` / `post()` 是**同形复制、不是共享**（本仓
+//   `api/*.js` 各模块自带这两个内联函数）。
+
+/**
+ * 组装表单 body：只收**有值**的键（`null` / `undefined` / `''` 一律不发）。
+ * ⚠️ 后端六个入参全部 `required = false`，而**空串与缺省不同**：空串会被
+ * `DrillRecordService.decodeScenarios` 当「没勾」处理（这个是安全的），但 `limit=''` 会走
+ * `intOr` 的「空白 = 用缺省」分支 —— 两条都对，只是别指望空串能表达「0」。
+ */
+function q(params) {
+  const usp = new URLSearchParams()
+  Object.entries(params || {}).forEach(([k, v]) => {
+    if (v !== undefined && v !== null && String(v) !== '') usp.append(k, String(v))
+  })
+  return usp.toString()
+}
+
+/**
+ * 发一发 POST 并**拆掉 `Response` 外壳**，直接答 JSON body（同 `api/admin.js` 的做法）。
+ */
+async function postJson(path, body, opts) {
+  return (await http.post(path, body, opts)).json()
+}
+
+/**
+ * 一轮演练的超时余量（毫秒）：给「后端收口 + 汇总 + 落库 + 网络往返」留的。
+ * ⚠️ 演练里还有一段 `redisDown` 是**另算**的 5 秒（不在 `durationSeconds` 里），故余量取 60 秒。
+ */
+const RUN_GRACE_MS = 60000
+
+/** 后端缺省的持续秒数（与 `AttackEngine.DEFAULT_DURATION_SECONDS` 一致，用于算超时）。 */
+const DEFAULT_DURATION_SECONDS = 60
+
+/**
+ * 8 个预置场景。
+ *
+ * @returns {Promise<{success:boolean, list:Array<{Key:string,Name:string,Protections:string,
+ *          Needs:string,DefaultWeight:number}>}>}
+ *          `Protections` 是「这个场景同时演示哪几条防护」、`Needs` 是「跑它之前需要什么人工前提」
+ *          —— 两列都是**中文原话**，直接展示（别在前端再翻译一遍）。
+ */
+export function attackScenarios() {
+  // 这条例外：body 传空串（本仓既有形态，同 `adminStatsRebuild()` 的 `post(path, '')`）。
+  return postJson(endpoints.observe.attackScenarios, '')
+}
+
+/**
+ * 跑一轮演练（**同步，几十秒**；见文件头那条 ⚠️）。
+ *
+ * @param {object} [p]
+ * @param {string} [p.name]            场景名（缺省「自定义」）
+ * @param {number} [p.concurrency]     总并发数（缺省 100、上限 500）
+ * @param {number} [p.durationSeconds] 持续秒数（缺省 60、上限 600）
+ * @param {Array<{key:string,weight:number}>} [p.scenarios] 勾选与权重；**不传 = 全 8 个场景**
+ *        ⚠️ 权重为 0 的场景**等于没勾**（后端会剔除），别用 0 表达「跑一下试试」。
+ * @returns {Promise<{success:boolean, Id:number, Name:string, TotalRequests:number,
+ *          BlockedRequests:number, FailedRequests:number, DurationMs:number, Result:object}>}
+ *          `Id` = 刚落库那一行的主键（后端**先跑后落**，失败会抛 `HttpError`：400 = 入参不合法，
+ *          body 里是 `{success:false,msg}`，`msg` 就是「哪个参数不对」）。
+ */
+export function runAttack(p) {
+  const o = p || {}
+  const seconds = Number(o.durationSeconds) > 0 ? Number(o.durationSeconds)
+    : DEFAULT_DURATION_SECONDS
+  return postJson(endpoints.observe.attackRun, q({
+    name: o.name,
+    concurrency: o.concurrency,
+    durationSeconds: o.durationSeconds,
+    // ⚠️ 数组 → JSON 串（后端只认这个；传对象或裸串会 400）
+    scenarios: Array.isArray(o.scenarios) ? JSON.stringify(o.scenarios) : o.scenarios,
+  }), { timeout: seconds * 1000 + RUN_GRACE_MS })
+}
+
+/**
+ * 演练记录（时间倒序）。
+ *
+ * @param {object} [p]
+ * @param {number} [p.limit]  每页条数（缺省 20、上限 200）
+ * @param {number} [p.offset] 偏移（负数归 0）
+ * @returns {Promise<{success:boolean, list:Array, total:number, limit:number, offset:number}>}
+ *          每行的 `Result` / `Scenario` 已是**对象**（后端拆过字段）；解析失败的那行
+ *          `Result` 为 `null` 并额外带 `ResultRaw` + `ResultParseError`（页面应把那种行画成
+ *          「记录损坏」，别画成一个没有结果的成功演练）。
+ */
+export function attackRecords(p) {
+  const o = p || {}
+  return postJson(endpoints.observe.attackRecords, q({ limit: o.limit, offset: o.offset }))
 }

@@ -30,6 +30,11 @@ import com.minke.mallmanagement.observe.service.EventBroadcaster;
 import com.minke.mallmanagement.observe.service.MetricsSnapshotService;
 import com.minke.mallmanagement.observe.service.OrderStreamService;
 import com.minke.mallmanagement.observe.service.EventStreamService;
+import com.minke.mallmanagement.observe.service.AttackEngine;
+import com.minke.mallmanagement.observe.service.DrillRecordService;
+import com.minke.mallmanagement.observe.dao.DrillTargetDao;
+import com.minke.mallmanagement.observe.dao.DrillRecordDao;
+import com.minke.mallmanagement.shared.cache.L2HealthProbe;
 import com.minke.mallmanagement.shared.cache.MallCacheMetrics;
 import com.minke.mallmanagement.shared.lock.MallLockMetrics;
 import com.minke.mallmanagement.order.metrics.MallOrderStateMetrics;
@@ -349,7 +354,24 @@ import static org.mockito.Mockito.when;
         SseStreamWriter.class, EventBroadcaster.class,
         MetricsSnapshotService.class, OrderStreamService.class, EventStreamService.class,
         MallCacheMetrics.class, MallLockMetrics.class, MallOrderStateMetrics.class,
-        AuditMetrics.class, NotifyMetrics.class, SensitiveMetrics.class, IdentityMetrics.class})
+        AuditMetrics.class, NotifyMetrics.class, SensitiveMetrics.class, IdentityMetrics.class,
+        // C3 块 7 · commit 4〈攻击引擎 + 演练记录〉（2026-10-14）：**一个**新 Controller
+        // （`AttackController`）+ 两个 @Service（`AttackEngine` / `DrillRecordService`）
+        // + 两个 @Dao（`DrillTargetDao` / `DrillRecordDao`）——
+        // **第十八次同一处地雷**（@WebMvcTest 无参会加载全部 @Controller，新控制器一进来，
+        // 切片上下文就会因为「找不到 DrillRecordService」而**启动失败**，同前十七笔）。
+        // ⚠️ 2026-10-14 实测的形状：全量 402 例里 **132 errors**，全部落在本包 ——
+        //    报错链正是 `attackController → DrillRecordService`（与块 1 那次 237/77 同形）。
+        // ⚠️ 依赖链：`DrillRecordService` → `DrillRecordDao`（本行）+ `AttackEngine`（本行）
+        //    + `ObjectMapper`（`@WebMvcTest` 含 JacksonAutoConfiguration，**不需要**登记）；
+        //    `AttackEngine` → `DrillTargetDao`（本行）+ `L2HealthProbe`（**下面的替身**）
+        //    + `ObjectMapper`；两个类都没有 `@Value`（无配置项要喂）。
+        // ⚠️ 两个 DAO 只吃 `JdbcTemplate` ⇒ 落回下面那个 @MockitoBean，**SQL 仍不出切片**。
+        // ⚠️ **本基类第一处「不能 @Import 真 bean」的依赖**：`L2HealthProbe` 由
+        //    `L2ProbeConfig` 生产，而它要一个 `RedisConnectionFactory` —— `@WebMvcTest` 切片
+        //    没有 Redis 自动配置 ⇒ 真 bean 根本构造不出来。故照 `DistributedLockService`
+        //    那条既有处置（同为 Redis 依赖）用 `@MockitoBean`，见下面那个字段的注释。
+        DrillRecordDao.class, DrillTargetDao.class, AttackEngine.class, DrillRecordService.class})
 public abstract class AbstractSmokeTest {
 
     @Autowired
@@ -479,6 +501,30 @@ public abstract class AbstractSmokeTest {
      */
     @MockitoBean
     protected OrderTransitionRecorder orderTransitionRecorder;
+
+    /**
+     * 同一类问题，第七次遇到，但**形状与前六次不同**：块 7 commit 4 的 {@code AttackEngine}
+     * （上面 {@code @Import} 的真 bean）要一个 {@code L2HealthProbe}（场景 6 `redisDown`
+     * 靠它真注入一次 L2 故障）。
+     *
+     * <p>⚠️ **本基类第一处「连真 bean 都进不来」的依赖**：`L2HealthProbe` 由
+     * {@code L2ProbeConfig}（@Configuration）生产，构造它要一个 {@code RedisConnectionFactory}
+     * —— `@WebMvcTest` 切片没有 Redis 自动配置、也没有任何 bean 提供那个工厂
+     * ⇒ 真 bean 在**上下文加载期**就会失败。故**不能**照 DAO 那条范式 @Import 真 bean，
+     * 只能给替身（与 {@code DistributedLockService} 那条既有处置同因：Redis 依赖）。
+     *
+     * <p>⚠️ **代价写在这里**：替身的方法全部空转，{@code isHealthy()} 默认回 `false`
+     * ⇒ 切片里的 `redisDown` 场景**注入不了故障**。这不影响任何用例 —— 本基类的**零个**
+     * 子类打 `/admin/observe/attack/*`（三个端点只由块 7 commit 5 的攻击模拟器页调用），
+     * 这个替身只承担「让切片上下文起得来」一件事。演练本身的判据在**默认 profile 的实跑**
+     * （见 {@code AttackEngine} 类注释末节），不在这里。
+     *
+     * <p>⚠️ 而「谁在切片里会问它」这个问题是**空的**：切片内没有任何 bean 读它
+     * （唯一的读方是 `TwoLevelCache`，它由 `CacheConfig` 造 —— 而 `CacheConfig` 是
+     * @Configuration，不属 web 组件、不进本切片）。⇒ 替身的默认值不会渗进任何断言。
+     */
+    @MockitoBean
+    protected L2HealthProbe l2HealthProbe;
 
     /**
      * 锁替身的行为：**直接执行 action**（不做任何互斥、不碰 Redis）。
