@@ -1,5 +1,6 @@
 package com.minke.mallmanagement.shared.web;
 
+import com.minke.mallmanagement.observe.metrics.IdentityMetrics;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.http.ResponseEntity;
@@ -60,6 +61,30 @@ public final class IdentityGuard {
     private IdentityGuard() {
     }
 
+    /** 观测出口（块 7 · commit 2b）。⚠️ 本类是**静态工具**，拿不到构造注入 ⇒ 由
+     *  {@code ObserveMetricsConfig} 装配；未装配（{@code null}）时**一律不记** ——
+     *  观测失败绝不影响判据本身（fail-soft，同本类其余 fail-open 的纪律）。 */
+    private static volatile IdentityMetrics metrics;
+
+    /** 装配点：只给 {@code ObserveMetricsConfig} 调（生产路径唯一）。 */
+    public static void bind(IdentityMetrics m) {
+        metrics = m;
+    }
+
+    /** 记一次判据结果并**原样返回它** —— 「记录的值」与「返回的值」永远是同一次计算的结果
+     *  （分两处写判据迟早在某一边漂）。未装配 ⇒ 只返回，其余行为逐字不变。 */
+    private static boolean recordAndReturn(boolean allowed, String subject) {
+        IdentityMetrics m = metrics;
+        if (m != null) {
+            if (allowed) {
+                m.passed(subject);
+            } else {
+                m.rejected(subject, "入参指向他人且调用者不是管理员");
+            }
+        }
+        return allowed;
+    }
+
     /**
      * 放行判据。{@code true} = 放行（自己 / 管理员 / 解析不出身份）；{@code false} = 该答 403。
      *
@@ -73,12 +98,12 @@ public final class IdentityGuard {
     public static boolean requireSelfOrAdmin(HttpServletRequest request, String paramId) {
         AuthSession.Identity identity = AuthSession.identify(request);
         if (identity == null) {
-            return true;   // 见类注释「为什么解析不出身份 = 放行」
+            return recordAndReturn(true, paramId);   // 见类注释「为什么解析不出身份 = 放行」
         }
         if (paramId == null || paramId.equals(identity.userId())) {
-            return true;   // 第 1 档
+            return recordAndReturn(true, paramId);   // 第 1 档
         }
-        return identity.role() != null && identity.role() == AuthSession.ROLE_ADMIN;   // 第 2 / 3 档
+        return recordAndReturn(identity.role() != null && identity.role() == AuthSession.ROLE_ADMIN, paramId);   // 第 2 / 3 档
     }
 
     /**
@@ -107,18 +132,18 @@ public final class IdentityGuard {
                                                        UserStateLookup lookup) {
         AuthSession.Identity identity = AuthSession.identify(request);
         if (identity == null) {
-            return true;   // 见类注释「为什么解析不出身份 = 放行」
+            return recordAndReturn(true, username);   // 见类注释「为什么解析不出身份 = 放行」
         }
         if (username == null) {
-            return true;   // 没传参：不是本类该拦的（缺参由 Service 报）
+            return recordAndReturn(true, username);   // 没传参：不是本类该拦的（缺参由 Service 报）
         }
         if (identity.role() != null && identity.role() == AuthSession.ROLE_ADMIN) {
-            return true;   // 第 2 档
+            return recordAndReturn(true, username);   // 第 2 档
         }
         if (lookup == null) {
-            return true;   // 切片里取不到探针 ⇒ 判不出来 ⇒ 放行（同上 ③）
+            return recordAndReturn(true, username);   // 切片里取不到探针 ⇒ 判不出来 ⇒ 放行（同上 ③）
         }
-        return username.equals(lookup.usernameOf(identity.userId(), identity.role()));   // 第 1 档
+        return recordAndReturn(username.equals(lookup.usernameOf(identity.userId(), identity.role())), username);   // 第 1 档
     }
 
     /**

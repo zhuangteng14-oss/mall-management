@@ -42,12 +42,12 @@ import java.util.concurrent.atomic.AtomicLong;
  *   result=masked|rejected   scene=安检场景   hit=命中词数   total=参与判定的词数
  * </pre>
  *
- * <h2>【⚠️ 本环的写入点：**不在**块 6 的敏感词服务里】</h2>
- * 内容安检的实现属<b>块 6</b>，而 pack §约束写死：「块 7 <b>不碰块 6</b> 的表 / 端点 / 代码
- * （只读它们的指标 / 事件）」⇒ 本笔<b>只建出口</b>：写入点挂在块 7 自己的代码
- * （下一笔的攻击引擎 —— 场景 8「敏感词攻击」真发内容、真触发两档处置，然后把结果记进来）。
- * ⚠️ 同 {@code AuditMetrics}：这条 B 档自裁已报备；若要求「由块 6 的服务自己埋点」，
- * 那是动块 6 的代码 = 越界，必须另批。
+ * <h2>【本环的写入点（已被 commit 2b 接上）：块 6 的 {@code SensitiveWordService}】</h2>
+ * commit 2 当时只建出口；**commit 2b 改走真观测点**：{@code filter(...)} 在拒收 / 打码
+ * 两档处置后各记一条（干净文本在三处早退里，压根到不了那一行 ⇒ 天然不记，与本类口径一致）。
+ * 在块 6 的代码里只加「发事件」一步：不动它的阈值判定、不动返回的四个键、不改端点与契约。
+ * ⚠️ pack §约束「块 7 不碰块 6 的表 / 端点 / 代码」经用户裁决放宽为「表 / 端点 / 契约不碰，
+ * 允许在既有写入点补一行观测出口」⇒ 本条<b>不再是</b> B 档自裁。
  *
  * <h2>【热路径代价】</h2>
  * 同既有三环：registry 查表 + LongAdder 自增 + 一次数组赋值 + 一个小对象；无锁、无 I/O、
@@ -103,7 +103,7 @@ public class SensitiveMetrics {
      * 最近的事件快照，按 {@code seq} 升序。并发口径同 {@link StockMetrics#recentEvents()}：
      * 每个槽位用 {@code e.seq() == seq} 自校验，对不上就跳过。
      *
-     * <p>本笔<b>不</b>把它对外暴露（事件流端点属下一笔）；目前只被单测调用。
+     * <p>被 {@code EventBroadcaster}（块 7 · commit 3 的三条 SSE 端点）与单测共同调用。
      */
     public List<SensitiveEvent> recentEvents() {
         long next = eventCursor.get();

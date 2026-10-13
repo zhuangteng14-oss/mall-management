@@ -1,6 +1,7 @@
 package com.minke.mallmanagement.notification.service;
 
 import com.minke.mallmanagement.notification.dao.NotificationDao;
+import com.minke.mallmanagement.observe.metrics.NotifyMetrics;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -101,8 +102,12 @@ public class NotificationService {
 
     private final NotificationDao notificationDao;
 
-    public NotificationService(NotificationDao notificationDao) {
+    /** 观测出口（块 7 · commit 2b）—— 本方法是 fail-soft 原语，「失败率」只有本环读得到。 */
+    private final NotifyMetrics notifyMetrics;
+
+    public NotificationService(NotificationDao notificationDao, NotifyMetrics notifyMetrics) {
         this.notificationDao = notificationDao;
+        this.notifyMetrics = notifyMetrics;
     }
 
     // ==================== 写：投递一行（fail-soft 原语） ====================
@@ -121,11 +126,14 @@ public class NotificationService {
                         String title, String content, String targetType, String targetId) {
         try {
             notificationDao.insertOne(batchId, toId, toType, eventType, title, content, targetType, targetId);
+            // 块 7 · 观测（commit 2b）：走到这里 = 那一行真的进库了（返回值 true 的唯一含义）。
+            notifyMetrics.sent(toType, eventType, toId);
             return true;
         } catch (Exception e) {
             // fail-soft：调用方的业务动作已经成功了，不能让通知把它翻成失败。见类注释。
             log.error("通知投递失败（NOTIFY）：toId={} toType={} eventType={} batchId={} —— 调用方业务已完成，本行丢失",
                     toId, toType, eventType, batchId, e);
+            notifyMetrics.failed(toType, eventType, toId, e.toString());
             return false;
         }
     }

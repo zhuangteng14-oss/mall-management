@@ -45,12 +45,12 @@ import java.util.concurrent.atomic.AtomicLong;
  *   result=passed|rejected   subject=被校验的业务号   reason=拒绝原因（passed 时为 null）
  * </pre>
  *
- * <h2>【⚠️ 本环的写入点：**不在**鉴权链里】</h2>
- * 身份校验的实现在块 1 建的 {@code shared/web}（{@code AuthInterceptor} / {@code WebAuthConfig}）
- * 与块 2 的封禁探针（{@code UserStateLookup}）里；块 7 的边界是「照抄不扩展」+「不碰块 6 的代码」
- * ⇒ 本笔<b>只建出口</b>：写入点挂在块 7 自己的代码（下一笔的攻击引擎 —— 场景 7「封禁用户攻击」
- * 真发带伪造身份的请求、真被拒，然后把结果记进来）。⚠️ 同 {@code AuditMetrics}：B 档自裁已报备；
- * 若要求「鉴权链自己埋点」，那是动块 1 / 块 2 的代码 = <b>扩面</b>，须另批。
+ * <h2>【本环的写入点（已被 commit 2b 接上）：{@code IdentityGuard} 的 8 个出口】</h2>
+ * commit 2 当时只建出口；**commit 2b 改走真观测点**：{@code shared/web/IdentityGuard} 的
+ * 两条判据（业务号版 / 登录名版）在放行与拒绝两路各记一条 —— 拒绝率的分母由此才成立。
+ * ⚠️ 该守卫是静态工具、拿不到构造注入 ⇒ 走 {@code bind(...)} 静态口，由
+ * {@code ObserveMetricsConfig} 在启动期装配；未装配（切片 / 单测）一律不记。
+ * ⇒ 观测失败不影响判据本身（fail-soft，同该守卫其余 fail-open 的纪律）。
  *
  * <h2>【热路径代价】</h2>
  * 同既有三环：registry 查表 + LongAdder 自增 + 一次数组赋值 + 一个小对象；无锁、无 I/O、

@@ -39,12 +39,12 @@ import java.util.concurrent.atomic.AtomicLong;
  *   result=sent|failed   toType=收件人类型   eventType=通知类型   key=收件人业务号   reason=失败原因
  * </pre>
  *
- * <h2>【⚠️ 本环的写入点：**不在** {@code NotificationService} 里】</h2>
- * 通知的发送口是块 1 的 {@code notification/service/NotificationService.send(...)}，
- * 而 <b>块 7 不碰块 1 / 块 6 的业务代码</b>（pack §约束：「照抄不扩展」）⇒ 本笔<b>只建出口</b>：
- * 写入点挂在块 7 自己的代码（下一笔的攻击引擎）。⚠️ 同 {@code AuditMetrics}：这条 B 档自裁
- * 已报备；若要求「通知面由 {@code NotificationService} 自己埋点」（真观测点），那是动块 1 的
- * 代码 = <b>扩面</b>，须另批。
+ * <h2>【本环的写入点（已被 commit 2b 接上）：块 1 的 {@code NotificationService}】</h2>
+ * commit 2 当时只建出口；**commit 2b 改走真观测点**：{@code NotificationService.send} 的
+ * 返回 true 之前记 {@code sent}、catch 里记 {@code failed}（那一路 fail-soft、不外抛，
+ * 失败**只有**本环看得见）。在块 1 的代码里只加「发事件」一步，判据与返回不动。
+ * ⚠️ pack §约束「照抄不扩展」经用户裁决放宽为「不扩展行为、允许在既有写入点补观测出口」
+ * ⇒ 本条<b>不再是</b> B 档自裁；下一笔的攻击引擎仍**经真发送路径**发流量，不自己记结果。
  *
  * <h2>【热路径代价】</h2>
  * 同既有三环：registry 查表 + LongAdder 自增 + 一次数组赋值 + 一个小对象；无锁、无 I/O、

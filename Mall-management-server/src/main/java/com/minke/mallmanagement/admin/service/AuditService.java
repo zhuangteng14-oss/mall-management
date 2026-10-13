@@ -2,6 +2,7 @@ package com.minke.mallmanagement.admin.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.minke.mallmanagement.admin.dao.AdminAuditDao;
+import com.minke.mallmanagement.observe.metrics.AuditMetrics;
 import com.minke.mallmanagement.shared.web.AuthSession;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -52,9 +53,13 @@ public class AuditService {
     private final AdminAuditDao auditDao;
     private final ObjectMapper objectMapper;
 
-    public AuditService(AdminAuditDao auditDao, ObjectMapper objectMapper) {
+    /** 观测出口（块 7 · commit 2b）—— 只读的一个计数器 + 一条环形事件，见 {@link AuditMetrics}。 */
+    private final AuditMetrics auditMetrics;
+
+    public AuditService(AdminAuditDao auditDao, ObjectMapper objectMapper, AuditMetrics auditMetrics) {
         this.auditDao = auditDao;
         this.objectMapper = objectMapper;
+        this.auditMetrics = auditMetrics;
     }
 
     // ==================== 写 ====================
@@ -78,10 +83,14 @@ public class AuditService {
                     actor == null ? null : actor.role(),
                     action, targetType, targetId,
                     toJson(before), toJson(after));
+            // 块 7 · 观测（commit 2b）：走到这里 = 那条 INSERT 真的发出去了。actor 取**会话**
+            //（与上面几行同源），失败率这个数只有本环读得到 —— 本方法吞异常。
+            auditMetrics.written(actor == null ? null : actor.userId(), action);
         } catch (Exception e) {
             // fail-open：业务已经成功了，不能让审计把它翻成失败。见类注释「为什么吞异常」。
             log.error("审计写入失败（AUDIT）：action={} targetType={} targetId={} —— 业务操作已完成，本行丢失",
                     action, targetType, targetId, e);
+            auditMetrics.failed(actor == null ? null : actor.userId(), action, e.toString());
         }
     }
 

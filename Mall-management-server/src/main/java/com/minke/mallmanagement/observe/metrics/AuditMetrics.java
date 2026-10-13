@@ -42,13 +42,13 @@ import java.util.concurrent.atomic.AtomicLong;
  *   result=written|failed   actor=业务号   action=动作名   reason=失败原因（written 时为 null）
  * </pre>
  *
- * <h2>【⚠️ 本环的写入点：**不在** {@code AuditService} 里】</h2>
- * 审计的写入口是块 1 的 {@code admin/service/AuditService}（fail-open），而
- * <b>块 7 不碰块 1 / 块 6 的业务代码</b>（pack §约束：「块 1 的通知与审计照抄不扩展」、
- * 「块 7 不碰块 6 的表 / 端点 / 代码，只读它们的指标 / 事件」）⇒ 本笔<b>只建出口</b>：
- * 写入点挂在块 7 自己的代码（下一笔的攻击引擎，它真发流量、真触发审计写入，然后把结果记进来）。
- * ⚠️ 这条是 B 档自裁并已报备：若要求「审计面由 {@code AuditService} 自己埋点」（= 真观测点，
- * 而非演练侧记录），那要动块 1 的代码 —— 属**扩面**，须另批。
+ * <h2>【本环的写入点（已被 commit 2b 接上）：块 1 的 {@code AuditService}】</h2>
+ * commit 2 当时只建出口、把写入点挂在块 7 自己的代码上；**commit 2b 改走真观测点**：
+ * {@code AuditService.record} 的 try / catch 两路各记一条（written / failed）——
+ * 那条 fail-open 的失败**只有**本环看得见。在块 1 的代码里只加「发事件」一步，判据与返回不动。
+ * ⚠️ pack §约束「块 1 的通知与审计照抄不扩展」经用户裁决放宽为「不扩展行为、允许在既有写入点补
+ * 观测出口」⇒ 本条<b>不再是</b> B 档自裁。
+ * 下一笔的攻击引擎仍**经这些真路径**发流量（真提交动作、真写审计行），不再自己记结果。
  *
  * <h2>【热路径代价】</h2>
  * 同既有三环：registry 查表 + LongAdder 自增 + 一次数组赋值 + 一个小对象；无锁、无 I/O、

@@ -1,13 +1,17 @@
 package com.minke.mallmanagement.observe;
 
+import com.minke.mallmanagement.observe.metrics.IdentityMetrics;
+import com.minke.mallmanagement.shared.web.IdentityGuard;
 import io.micrometer.core.instrument.Meter;
 import io.micrometer.core.instrument.config.MeterFilter;
 import io.micrometer.core.instrument.distribution.DistributionStatisticConfig;
+import jakarta.annotation.PostConstruct;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
 /**
- * 指标面板要读的分位数 —— **只给一个指标**开直方图式分位。
+ * 观测域的**装配点**（两件事）：① 指标面板要读的分位数 —— **只给一个指标**开直方图式分位；
+ * ② 身份守卫（静态工具，拿不到构造注入）的观测出口绑定 —— 见 {@link #bindIdentityGuard()}。
  *
  * <h2>【为什么需要这一笔】</h2>
  * 面板的 KPI 卡里有一张「P99 延迟」（《块 7 参考》§2.2 第 2 项）。Micrometer 的
@@ -41,6 +45,25 @@ public class ObserveMetricsConfig {
 
     /** 与 {@code MetricsSnapshotService.HTTP} 同一个名字（那一处是读取方，本处是开启方）。 */
     private static final String HTTP_SERVER_REQUESTS = "http.server.requests";
+
+    private final IdentityMetrics identityMetrics;
+
+    public ObserveMetricsConfig(IdentityMetrics identityMetrics) {
+        this.identityMetrics = identityMetrics;
+    }
+
+    /**
+     * 把身份守卫的观测出口接上（块 7 · commit 2b）。
+     *
+     * <p>{@link IdentityGuard} 是 {@code final} + 私有构造 + 全 {@code static} 的工具类
+     * —— 不是 bean、拿不到构造注入，故走一个静态装配口。⚠️ 不装配的后果是**不记**（不是报错）：
+     * 切片里（{@code @WebMvcTest} 只 {@code @Import} 被吃到的 bean）本就该没有流量数字，
+     * 真起应用时本类在启动期就把线接上。
+     */
+    @PostConstruct
+    void bindIdentityGuard() {
+        IdentityGuard.bind(identityMetrics);
+    }
 
     /**
      * 给 HTTP 计时器开 0.5 / 0.95 / 0.99 三档分位。

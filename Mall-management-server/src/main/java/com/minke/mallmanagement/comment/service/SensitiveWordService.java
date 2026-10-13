@@ -2,6 +2,7 @@ package com.minke.mallmanagement.comment.service;
 
 import com.minke.mallmanagement.comment.dao.CommentDao;
 import com.minke.mallmanagement.comment.dao.SensitiveWordDao;
+import com.minke.mallmanagement.observe.metrics.SensitiveMetrics;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -81,9 +82,14 @@ public class SensitiveWordService {
     private final SensitiveWordDao sensitiveWordDao;
     private final CommentDao commentDao;
 
-    public SensitiveWordService(SensitiveWordDao sensitiveWordDao, CommentDao commentDao) {
+    /** 观测出口（块 7 · commit 2b）—— 「拦住了多少」只有本环读得到（拒收那条早退不抛异常）。 */
+    private final SensitiveMetrics sensitiveMetrics;
+
+    public SensitiveWordService(SensitiveWordDao sensitiveWordDao, CommentDao commentDao,
+                                SensitiveMetrics sensitiveMetrics) {
         this.sensitiveWordDao = sensitiveWordDao;
         this.commentDao = commentDao;
+        this.sensitiveMetrics = sensitiveMetrics;
     }
 
     // ==================== 读：词表（管理端） ====================
@@ -261,6 +267,15 @@ public class SensitiveWordService {
         result.put("hitRatio", ratio);
         if (ratio >= REJECT_RATIO) {
             result.put("rejected", true);
+        }
+        // 块 7 · 观测（commit 2b）：只记**真被处置的** —— 干净文本在上面三处早退里压根到不了这行
+        //（与 commit 2 建环时的口径一致）。total 取**正文字符数** = 本类 ratio 的分母 ⇒ 事件里的
+        // `hit / total` 就等于被拿去比阈值的那个命中率；场景现值只有一个（唯一调用点 =
+        // `CommentService.add` 发表前）。
+        if (Boolean.TRUE.equals(result.get("rejected"))) {
+            sensitiveMetrics.rejected("评论", hit, text.length());
+        } else {
+            sensitiveMetrics.masked("评论", hit, text.length());
         }
         return result;
     }
