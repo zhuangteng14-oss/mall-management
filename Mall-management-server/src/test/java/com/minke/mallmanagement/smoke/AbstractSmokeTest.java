@@ -21,6 +21,18 @@ import com.minke.mallmanagement.goods.service.GoodsTypeCacheService;
 import com.minke.mallmanagement.template.dao.TemplateDao;
 import com.minke.mallmanagement.template.service.TemplateService;
 import com.minke.mallmanagement.observe.metrics.StockMetrics;
+import com.minke.mallmanagement.observe.metrics.AuditMetrics;
+import com.minke.mallmanagement.observe.metrics.NotifyMetrics;
+import com.minke.mallmanagement.observe.metrics.SensitiveMetrics;
+import com.minke.mallmanagement.observe.metrics.IdentityMetrics;
+import com.minke.mallmanagement.observe.service.SseStreamWriter;
+import com.minke.mallmanagement.observe.service.EventBroadcaster;
+import com.minke.mallmanagement.observe.service.MetricsSnapshotService;
+import com.minke.mallmanagement.observe.service.OrderStreamService;
+import com.minke.mallmanagement.observe.service.EventStreamService;
+import com.minke.mallmanagement.shared.cache.MallCacheMetrics;
+import com.minke.mallmanagement.shared.lock.MallLockMetrics;
+import com.minke.mallmanagement.order.metrics.MallOrderStateMetrics;
 import com.minke.mallmanagement.order.dao.OrderDao;
 import com.minke.mallmanagement.order.service.OrderService;
 import com.minke.mallmanagement.order.model.OrderStateMachine;
@@ -315,7 +327,29 @@ import static org.mockito.Mockito.when;
         //    与「不得降级」相悖；补一个内存实现则连「计数真的在跑」都顺带留住了。
         // ⚠️ 既有三环（缓存 / 锁 / 订单）**不需要**这一行：它们从未进过本切片（清单里没有任何
         //    bean 吃它们）⇒ **本笔是第一次有切片内的 bean 依赖埋点出口**。
-        StockMetrics.class, SimpleMeterRegistry.class})
+        StockMetrics.class, SimpleMeterRegistry.class,
+        // C3 块 7 · commit 3〈3 个 SSE 端点 + 事件广播器〉（2026-10-13）：**三个**新 Controller
+        // （`MetricsStreamController` / `OrderStreamController` / `EventStreamController`）
+        // + 四个新 bean（`SseStreamWriter` / `EventBroadcaster` / 三个产帧服务）
+        // —— **第十七次同一处地雷**（@WebMvcTest 无参会加载全部 @Controller，新控制器一进来，
+        // 切片上下文就会因为「找不到 MetricsSnapshotService」而**启动失败**，同前十六笔）。
+        // ⚠️ 本笔与〈5 套新事件环〉那一笔的差别：那一笔是「既有 bean 多了个形参」，本笔是
+        //    「新 bean 被新 Controller 吃」——**形状回到最普通的第 1 种**，但**数量是历笔最多**：
+        //    事件广播器一个人吃**八个环**，故这里第一次把**既有三环**
+        //    （`MallCacheMetrics` / `MallLockMetrics` / `MallOrderStateMetrics`）也拉进切片
+        //    （此前它们的处置是「切片里没有任何 bean 吃它们 ⇒ 不登记」，见上一笔那条注释）。
+        // ⚠️ 四个新环（`AuditMetrics` / `NotifyMetrics` / `SensitiveMetrics` / `IdentityMetrics`）
+        //    本笔**必须**一并进来：它们是 `EventBroadcaster` 的构造器形参 ⇒
+        //    「上一笔刻意不 @Import」在**本笔作废**（那时没人吃它们，现在广播器吃）。
+        // ⚠️ `MetricsSnapshotService` 还吃 `GoodsDao`（上面已登记）；
+        //    `OrderStreamService` 还吃 `OrderDao`（上面已登记）⇒ 这两个不必重复登记。
+        // ⚠️ 三个产帧服务与 `SseStreamWriter` 都收 `@Value("${mall.observe.sse.*}")` ——
+        //    两个属性都带默认值（1000 / 0），但 `application-smoke.properties` 把 **max-ticks 钉成 1**
+        //    （理由见那个文件；否则 `ObserveStreamSmokeTest` 会对着一条永不结束的流等下去）。
+        SseStreamWriter.class, EventBroadcaster.class,
+        MetricsSnapshotService.class, OrderStreamService.class, EventStreamService.class,
+        MallCacheMetrics.class, MallLockMetrics.class, MallOrderStateMetrics.class,
+        AuditMetrics.class, NotifyMetrics.class, SensitiveMetrics.class, IdentityMetrics.class})
 public abstract class AbstractSmokeTest {
 
     @Autowired

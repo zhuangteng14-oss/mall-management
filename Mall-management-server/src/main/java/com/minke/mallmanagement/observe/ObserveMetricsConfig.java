@@ -1,0 +1,66 @@
+package com.minke.mallmanagement.observe;
+
+import io.micrometer.core.instrument.Meter;
+import io.micrometer.core.instrument.config.MeterFilter;
+import io.micrometer.core.instrument.distribution.DistributionStatisticConfig;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+
+/**
+ * 指标面板要读的分位数 —— **只给一个指标**开直方图式分位。
+ *
+ * <h2>【为什么需要这一笔】</h2>
+ * 面板的 KPI 卡里有一张「P99 延迟」（《块 7 参考》§2.2 第 2 项）。Micrometer 的
+ * {@code Timer} 默认**不保留**分位数（{@code takeSnapshot().percentileValues()} 是空数组）
+ * ⇒ 不开关的话，那格只能显示「—」。开关有两条路：
+ * <ol>
+ *   <li>配置项 {@code management.metrics.distribution.percentiles.http.server.requests=0.95,0.99}
+ *       —— 属**部署配置**。块 7 的边界明写「不改部署配置」（pack §约束），故不走这条；</li>
+ *   <li>一个 {@link MeterFilter} bean（本类）—— 是**代码**，且能精确限定到**一个**指标。</li>
+ * </ol>
+ *
+ * <h2>【⚠️ 开销与边界，如实记下】</h2>
+ * <ul>
+ *   <li>开启分位 = 该指标多带一份分位缓冲（每个 {@code method × uri × status} 组合一份），
+ *       记录时日志级开销。**只开这一个指标**：本仓的自定义指标（{@code mall.*}）一个都不动
+ *       —— 那些指标的读法是「每拍计数器的差」，不需要分位。</li>
+ *   <li>⚠️ <b>已经在过滤器注册之前建出来的 meter 不吃新配置</b>。本类在容器启动期就位，
+ *       而 {@code http.server.requests} 要到**第一个真实请求**才建 ⇒ 正常路径上不存在
+ *       「漏开」的窗口；但**测试里**用 {@code SimpleMeterRegistry} 手工建的 timer 不受影响
+ *       （那些测试自己决定配置）。</li>
+ *   <li>⚠️ 它**不改变任何既有断言的输入**：只给这一个指标补了分位数，计数 / 计时 / tag 一个字不动。</li>
+ * </ul>
+ *
+ * <h2>【B 档自裁 + 报备】</h2>
+ * 「P99 是配置开还是代码开」在《块 7 参考》里**没有写**（B 档只列了 SSE 动词 / 事件环容量 /
+ * 推送频率 / SIM- 前缀四件）。本块选**代码开**，理由如上（部署配置不动）；若要求「配置开」，
+ * 改成 {@code application.properties} 里那一行 + 删掉本类即可，两处**互不影响**（同一开关的两种形态）。
+ */
+@Configuration
+public class ObserveMetricsConfig {
+
+    /** 与 {@code MetricsSnapshotService.HTTP} 同一个名字（那一处是读取方，本处是开启方）。 */
+    private static final String HTTP_SERVER_REQUESTS = "http.server.requests";
+
+    /**
+     * 给 HTTP 计时器开 0.5 / 0.95 / 0.99 三档分位。
+     *
+     * <p>用 {@code merge} 而不是新建：配置里**已有**的项（如 TTL 的衰减窗口、SLA 边界）
+     * 原样保留，本类只补 {@code percentiles} 一项 —— 否则等于把 Boot 的默认分发配置整份覆盖掉。
+     */
+    @Bean
+    MeterFilter observeHttpPercentiles() {
+        return new MeterFilter() {
+            @Override
+            public DistributionStatisticConfig configure(Meter.Id id, DistributionStatisticConfig config) {
+                if (!HTTP_SERVER_REQUESTS.equals(id.getName())) {
+                    return config;
+                }
+                return DistributionStatisticConfig.builder()
+                        .percentiles(0.5, 0.95, 0.99)
+                        .build()
+                        .merge(config);
+            }
+        };
+    }
+}

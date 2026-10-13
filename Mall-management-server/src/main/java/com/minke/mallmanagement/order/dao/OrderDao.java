@@ -435,4 +435,61 @@ public class OrderDao {
                         + "WHERE OrderId = ?")
                 .param(orderId).query().listOfRows();
     }
+
+    // ==================== 读：五态计数 + 最近订单（C3 块 7 · 状态流转页的两条读）====================
+
+    /**
+     * 全表按**五态**计数 —— 状态流转页顶部那排计数卡的唯一输入（C3 块 7 · commit 3）。
+     *
+     * <p>判据链**逐条**与 {@code OrderStreamService.stateOf} 对齐（那里也写了一份，两处必须一起改）：
+     * <pre>
+     *   CancelledAt 非空                                    → cancelled
+     *   CancelledAt IS NULL AND ReceiveIf = 1               → completed
+     *   CancelledAt IS NULL AND ReceiveIf = 0 AND DeliveryIf = 1 → waitReceive
+     *   CancelledAt IS NULL AND ReceiveIf = 0 AND DeliveryIf = 0 AND PayIf = 1 → waitShip
+     *   其余（三位全 0 且未取消）                              → waitPay
+     * </pre>
+     * ⚠️ <b>{@code CancelledAt} 必须最先判</b>：取消的单三位仍是 {@code (0,0,0)}，
+     * 与「未付款」**完全相同**（见 {@code OrderTimeoutCancelJob} 类注释）——
+     * 先判三位就会把取消的单算进「待付款」。
+     *
+     * <p>⚠️ 数值型列（{@code PayIf} 等）统一用 {@code = 1} 判「是」：与
+     * {@code AdminOrderDao.selectMonitor} 的既有写法一致（不写 {@code COALESCE}，
+     * 也不假设它们非空 —— {@code NULL} 落进「否则」分支，与 Java 侧 {@code isOne()} 同）。
+     *
+     * <p>外层的 {@code COALESCE} 是给**空表**兜底：没有行的表只应回 5 个 0。
+     */
+    public Map<String, Object> countOrderStates() {
+        String sql = "SELECT "
+                + "COALESCE(SUM(CASE WHEN CancelledAt IS NOT NULL THEN 1 ELSE 0 END), 0) AS cancelled, "
+                + "COALESCE(SUM(CASE WHEN CancelledAt IS NULL AND ReceiveIf = 1 THEN 1 ELSE 0 END), 0) AS completed, "
+                + "COALESCE(SUM(CASE WHEN CancelledAt IS NULL AND ReceiveIf = 0 AND DeliveryIf = 1 THEN 1 ELSE 0 END), 0) AS waitReceive, "
+                + "COALESCE(SUM(CASE WHEN CancelledAt IS NULL AND ReceiveIf = 0 AND DeliveryIf = 0 AND PayIf = 1 THEN 1 ELSE 0 END), 0) AS waitShip, "
+                + "COALESCE(SUM(CASE WHEN CancelledAt IS NULL AND ReceiveIf = 0 AND DeliveryIf = 0 AND PayIf = 0 THEN 1 ELSE 0 END), 0) AS waitPay, "
+                + "COUNT(*) AS total "
+                + "FROM mall_management_sql.`order`";
+        return jdbcClient.sql(sql).query().listOfRows().stream().findFirst().orElse(Map.of());
+    }
+
+    /**
+     * 最近 {@code limit} 张单 —— 状态流转页「实时订单列表」的唯一输入（C3 块 7 · commit 3）。
+     *
+     * <p>排序用 {@code CreateTime DESC, OrderId DESC}：{@code CreateTime} 是字符串列
+     * （ISO 式零填充，同 {@code selectOrders} 的既有口径），同秒下单时靠 OrderId 保证**顺序稳定**
+     * （否则同一拍两次读可能给出不同的行序，页面上的列表会无理由地抖）。
+     *
+     * <p>只取页面要展示的列：{@code ProductInformation} 是列表上的商品名，
+     * {@code Price} / {@code Quantity} 是金额与件数；状态由 {@code PayIf/DeliveryIf/ReceiveIf}
+     * + {@code CancelledAt} 现算（**不取** {@code SettlementDate} 等本页用不到的列）。
+     *
+     * <p>⚠️ {@code limit} 由调用方给（{@code OrderStreamService.RECENT_LIMIT} = 20），
+     * 本方法**不再夹**一个上限：这里是「页面要几行就给几行」的读，与
+     * {@code AdminOrderService} 那套分页截断（{@code clampLimit}）不是一回事。
+     */
+    public List<Map<String, Object>> selectRecentOrders(int limit) {
+        String sql = "SELECT OrderId, CustomerId, MerchantId, Price, Quantity, ProductInformation, "
+                + "PayIf, DeliveryIf, ReceiveIf, CancelledAt, CreateTime "
+                + "FROM mall_management_sql.`order` ORDER BY CreateTime DESC, OrderId DESC LIMIT ?";
+        return jdbcClient.sql(sql).param(limit).query().listOfRows();
+    }
 }

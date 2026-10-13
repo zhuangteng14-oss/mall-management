@@ -432,4 +432,31 @@ public class GoodsDao {
         String sql = "UPDATE mall_management_sql.goods_sku SET Stock = Stock + ? WHERE SkuCode = ?";
         return jdbcClient.sql(sql).params(n, skuCode).update();
     }
+
+    // ==================== 读：库存水位（C3 块 7 · 指标面板的「库存水位进度条」）====================
+
+    /**
+     * 最靠前的 {@code limit} 条多规格库存 —— 指标面板「库存水位」段的**唯一**输入
+     * （C3 块 7 · commit 3，调用方 {@code MetricsSnapshotService#stock}）。
+     *
+     * <p><b>排序 = 水位低的先出</b>（{@code Stock ASC}，同值按 {@code Id} 保证稳定）——
+     * 这块面板要回答的是「**哪些快没了**」，按 Id 排会先给出一屏水位健康、看不出问题的行。
+     *
+     * <p>⚠️ <b>只读、不改任何行</b>：与同段落的 {@link #deductStock} / {@link #releaseStock}
+     * 是两回事（那两个是写）。本方法不参与库存治理，它只是把现状读出来给人看。
+     *
+     * <p>⚠️ {@code BaselineStock} 可以是 {@code NULL}（Migration ⑰-2 加的列，演示前才
+     * {@code UPDATE … SET BaselineStock = Stock}）：它为 {@code NULL} 时调用方
+     * 把「水位占比」那一格留空 —— 本方法不替它算（{@code Stock / NULL} 没有意义，
+     * 用 {@code Stock} 自己当分母会画出「永远 100%」的假水位条）。
+     *
+     * <p>⚠️ <b>不含 {@code goods} 表</b>：商品名就在 {@code goods_sku.GoodName} 里
+     * （加购时写入，见 {@code selectSkusByMerchantGoodName} 的既有读法）⇒ 不做 join
+     * ——多一个 join 就多一处将来会漂的口径。
+     */
+    public java.util.List<Map<String, Object>> selectStockLevels(int limit) {
+        String sql = "SELECT SkuCode, GoodName, AxisName, Stock, BaselineStock "
+                + "FROM mall_management_sql.goods_sku ORDER BY Stock ASC, Id ASC LIMIT ?";
+        return jdbcClient.sql(sql).param(limit).query().listOfRows();
+    }
 }
