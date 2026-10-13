@@ -45,6 +45,7 @@
 | 35 | 2026-10-13 | C3 块6 整改⑤⑮-6 敏感词库 `sensitive_word` | 新增表 + 种子数据 | `sensitive_word` | `mall_management_sql.sql:1613-1621`（4 列 + 主键 + `UNIQUE uk_sensitive_word(Word)`）；种子在 `:1631-1634`（① 的 10 词，`INSERT IGNORE` 靠该 UNIQUE 幂等） | `DROP TABLE IF EXISTS \`sensitive_word\`;`（见注意 6；⚠️ 词表无第二份副本，删表即丢） | 块6 整改 commit 5（`c34e905`） | ✅ 已落 VM 库（同上；10 词逐条实读，见 `docs/agent/evidence/c3-block6/b6-c7-fake-data.txt` §4.7） |
 | 36 | 2026-10-13 | C3 块6 整改④⑮-7 `user` 加列 `WarnCount` | 新增字段 | `user` | `mall_management_sql.sql:1623-1629`（`information_schema.COLUMNS` 守卫 + `PREPARE`/`EXECUTE` 照 ⑬ 先例，`int NOT NULL DEFAULT 0`；达 3 由 `ReportService` 自动置 `user.banned=1`） | `UPDATE \`user\` SET \`WarnCount\` = 0;`（见注意 1：**不得** `DROP COLUMN`） | 块6 整改 commit 4（`0a56123`） | ✅ 已落 VM 库（实读 47 行用户全列存在） |
 | 37 | 2026-10-13 | C3 块6 整改〈顶层评价唯一锁 ⑯〉`comment` 加**生成列** `ReviewLockKey` + **唯一键** | **新增字段 + 新增索引**（⑯-1 + ⑯-2，两个独立守卫） | `comment` | `mall_management_sql.sql:1641-1678`（⑯-1：`information_schema.COLUMNS` 守卫 + `PREPARE`/`EXECUTE`，`varchar(120) GENERATED ALWAYS AS (CASE WHEN TargetType='goods' AND Kind='review' AND ParentId IS NULL AND Status='normal' THEN CONCAT(TargetType,':',TargetId,':',AuthorId) ELSE NULL END) STORED`）+ `:1680-1686`（⑯-2：`information_schema.STATISTICS` 守卫，`ALTER TABLE \`comment\` ADD UNIQUE KEY \`uk_comment_review_once\` (\`ReviewLockKey\`)`） | `ALTER TABLE \`comment\` DROP INDEX \`uk_comment_review_once\`;` **然后** `ALTER TABLE \`comment\` DROP COLUMN \`ReviewLockKey\`;`（见注意 1：**规则 v2 口径下这属于「删除」，不是回滚** —— 本行的**合规则回滚**是「**保留列与索引 + 停用写入**」，即让 `CommentService` 不再依赖它；**两条 DDL 只在本地开发库重导时用，且执行前须人工确认**） | 块6 整改（用户 2026-10-13 批文三） | ✅ 已落 **VM 库**（自检：生成列在 · 唯一键在 · **现存重复组 0 组** · 当前被锁行 **5 / 全表 18**；`scripts/probes/ProbeB6c7Lock.java` = **PASS 12 / FAIL 0**，含并发档「成功 1 / 1062 1 / 落库 1」） |
+| 38 | 2026-10-13 | C3 块7〈可观测域 + 库存治理〉Migration ⑰ —— 演练记录表 `drill_record` + 2 个演示基线列 + 块 6 六表补 `Source` | 新增表 + 新增字段 | `drill_record` · `goods_sku` · `seckill_activity` · `comment` · `comment_image` · `comment_like` · `comment_mention` · `report` · `sensitive_word` | `mall_management_sql.sql:1688-1797`（Migration 块 ⑰，段头 `:1688-1715`）—— ① 新表 `drill_record`（`:1717-1733`，12 列 + 主键 + `idx_drill_created`）② `goods_sku` 加列 `BaselineStock int NULL`（`:1735-1741`）③ `seckill_activity` 加列 `BaselineSoldStock int NULL`（`:1743-1749`）④ 六表各加列 `Source varchar(16) NOT NULL DEFAULT ''`（`:1751-1797`，逐表一个 `information_schema` 守卫） | `DROP TABLE IF EXISTS \`drill_record\`;` · 两个基线列按注意 1（逻辑废弃、**不得** `DROP COLUMN`）—— 其「废用」动作即 `UPDATE goods_sku SET BaselineStock = NULL;` / `UPDATE seckill_activity SET BaselineSoldStock = NULL;` · 六列 `Source` 同为逻辑废弃（保留列 + 停止写入；如需清标记可 `UPDATE … SET Source = ''`） | 块7 commit 0（**本笔**） | ✅ 已落 **VM 库**（全库 **37** 表、非主键索引 **69** / UNIQUE **19**；`drill_record` 12 列 · InnoDB · 0 行，六列 `Source` + 两列基线列**逐列实读**，2026-10-13）；落库 **33/33 OK**、复跑 **33/33 OK 无 1060** ⇒ 幂等确证 —— 证据见注意 21 |
 
 ## 登记格式
 
@@ -218,4 +219,30 @@ CREATE INDEX idx_xxx ON xxx(col);
    - **幂等**：两个半段各带独立守卫（⑯-1 查 `information_schema.COLUMNS`、⑯-2 查 `information_schema.STATISTICS`）+ `PREPARE`/`EXECUTE`，重复执行第二遍起走 `DO 0` ⇒ **全部空操作**。
    - **✅ 落 VM 库证据（第一手复核，2026-10-13）**：`scripts/probes/ProbeB6c7Lock.java`（凭据只从环境变量读、**未落盘未打印**）⇒ 自检「生成列在 · 唯一键在 · **现存重复组 0 组** · 当前被锁行 5 / 全表 18 行」，探针整体 **PASS 12 / FAIL 0**，含**并发档**「两连接同刻插同一 `(goods,999902,b6lock_probe)` ⇒ 成功 1 / 唯一键拒（1062）1 / 落库 1」，以及对照的 `performance_schema…SUM_ERRORS` 增量（证明那一条**真执行到 DB 才被拒**，不是被业务预检提前挡下）。全文落 `_work/_b6c7-lock-probe.txt`，收验汇总落 `docs/agent/evidence/c3-block6/b6-c7-rework-accept.txt`。
    - **⚠️ 回滚**：规则 v2 口径下「删列 / 删索引」**不是回滚**。本行的**合规则回滚 = 保留列与索引 + 停用写入**（让 `CommentService` 不再依赖它）。登记表里那两条 `DROP` 只在**本地开发库重建**时用，且**执行前须人工确认**（同注意 1 / 注意 6 的口径）。
+
+21. **⚠️ 块 7（#38）—— 表数 36 → 37；一个 Migration 段 ⑰（1 建表 + 8 加列），**两组加列语义不同** —— 2026-10-13 记**：C3 块 7〈可观测域 4 项 + 库存治理 2 项〉的库变更只一段（`mall_management_sql.sql:1688-1797`，段头 `:1688-1715`），编号 ⑰-1~⑰-9 与登记 #38 一一对应：
+
+   | 段内编号 | `.sql` 行 | 内容 | 对应登记 |
+   |---|---|---|---|
+   | ⑰-1 | `:1717-1733` | 建表 `drill_record`（12 列 + 主键 + `idx_drill_created`） | #38 |
+   | ⑰-2 | `:1735-1741` | `goods_sku` 加列 `BaselineStock int NULL` | #38 |
+   | ⑰-3 | `:1743-1749` | `seckill_activity` 加列 `BaselineSoldStock int NULL` | #38 |
+   | ⑰-4 | `:1751-1757` | `comment` 加列 `Source` | #38 |
+   | ⑰-5 | `:1759-1765` | `comment_image` 加列 `Source` | #38 |
+   | ⑰-6 | `:1767-1773` | `comment_like` 加列 `Source` | #38 |
+   | ⑰-7 | `:1775-1781` | `comment_mention` 加列 `Source` | #38 |
+   | ⑰-8 | `:1783-1789` | `report` 加列 `Source` | #38 |
+   | ⑰-9 | `:1791-1797` | `sensitive_word` 加列 `Source` | #38 |
+
+   - **计数**：表数 **36 → 37**（+1：`drill_record`）；加列 **8 个**（2 个演示基线列 + 6 个 `Source`）；加索引 **1 个**（`drill_record.idx_drill_created`，普通 KEY，**非 UNIQUE**）。
+   - **全库实测计数（2026-10-13，`information_schema`，档位 = 可复核）**：表数 **37**、非主键索引 **69**、非主键 UNIQUE **19**（口径同注意 20：`INDEX_NAME <> 'PRIMARY'` 的 `COUNT(DISTINCT 表.索引名)`）。与 ⑯ 之后那次（**36 / 68 / 19**）差 **+1 表 / +1 索引 / +0 UNIQUE**，与上面「⑰ 段自身净变化」**对得上**。
+   - ⚠️ **两组加列语义不同，别混为一谈**：① `BaselineStock` / `BaselineSoldStock` 是**演示基线列**（用户 2026-10-13 批复「第三方案」），语义 = 「演示开始那一刻的数值快照」；**刻意不给这两张表加 `Source`** —— `Source` 的判据是「这**一行**是谁写进来的」，而库存行的**行本身不是攻击创建的**，只是**数值被改** ⇒ 给它加 `Source` 属**语义错位**。「攻击动过它」这件事由基线列**能否还原**表达，不由 `Source` 表达。② 六表 `Source` 是**块 6 的补齐**（块 5 可视化段已给 11 张表加过 `Source`，见注意 17；块 6 六表当时**漏加**）。
+   - ⚠️ **六表 `Source` 的 COMMENT 比块 5 那 11 张多一段 `attack=`**（`.sql:1709` 逐字记了这条）：那批加列时**还没有攻击模拟器**，故只写了 `seed=` 与空值两支；本块多出 `attack=攻击模拟器写入` 这一支。⚠️ **这是刻意的不一致**（新语义必须能表达），不是抄漏；`varchar(16)` 宽度、默认值、守卫形态**都不变**。
+   - ⚠️ **`drill_record` 刻意不进文件头（`:21` 起）的 `DROP TABLE IF EXISTS` 基线清单**（同 `cart` / `order_shipping_track` / `order_item` / `stats_daily`：它是**业务数据**不是种子）⇒ **整份重导不清空演练记录**，表结构变更必须写独立 Migration（本块即是）。
+   - ⚠️ **`Result mediumtext` 是「后端解析后分字段给前端」的原文**，不是让前端展示原始长文（`.sql:1728` 列注释逐字）；`Scenario varchar(500)` 装场景配置 JSON（8 场景勾选 + 各自权重 + 总并发 + 持续秒数）。
+   - ⚠️ **P3 门禁同笔 +1（**四处同改**）**：`ConcurrencyRunner.java` 的 IN 清单加 `'drill_record'`、`KNOWN_TABLES` **25 → 26**、期望表数 **36 → 37**、**外加 P3 的 PASS 文案串**（`:2663` 常量 / `:2670` 文案，同一笔已改）。少改一处 **P3 必红**；⚠️ `concurrency` job 是 `continue-on-error` ⇒ **只能读 artifact 的 `gates.count`，不能读 job 颜色**（同块 3 / 4 / 5 / 6 的教训）。
+   - **幂等**：建表走 `CREATE TABLE IF NOT EXISTS`；8 个加列**逐列一个** `information_schema.COLUMNS` 守卫 + `PREPARE`/`EXECUTE`（照 ⑬ 先例，**不写循环** —— 守卫必须能单独重跑）⇒ 连跑 2 次 `EXIT = 0`。
+   - **✅ 落 VM 库证据（第一手复核，2026-10-13）**：`_work/ApplyMigration.java` + `_work/b6-c7-db-env.sh`（凭据从 `application-a3.properties` 剥壳、**未打印未落盘**，只作参数传给 JDBC）—— 落库 **33/33 语句 OK**，**复跑第二次 33/33 OK、无 1060 Duplicate column**（幂等确证）；只读复核 `information_schema` 实测 **全库 37 表**、`drill_record` **12 列 / InnoDB / 0 行**、`goods_sku.BaselineStock int YES`、`seckill_activity.BaselineSoldStock int YES`、六表 `Source varchar(16) NO`（`CHARACTER_MAXIMUM_LENGTH = 16`）；中文 `COLUMN_COMMENT` **实读无乱码**（`comment.Source` = 「数据来源：seed=演示种子… / attack=攻击模拟器写入 / 空=存量或真实业务写入」）。
+   - ⚠️ **回滚**：`drill_record` 是新表 ⇒ 按注意 6，规则 v2 的回滚是「保留表 + 停止写入」，**不物理 `DROP`**；8 个加列按注意 1，回滚 = **逻辑废弃**（保留列 + 停用写入，**不得** `DROP COLUMN`）—— 两个基线列的合规则「废用」动作恰是 `UPDATE … SET BaselineStock = NULL`（它本来就是 NULL 语义 = 未处于演示中）。段头 `:1711-1714` 的 `ROLLBACK` 注释逐条写了这些语句并标注「**执行前须人工确认**」。
+   - ⚠️ **跨文件口径必须一致**：本条的表数（**37**）、`db-schema.md` 的块 7 段、`slot-registry.md` 的块 7 登记、`progress.md §7-B7` **同源**；`api-contract.md` 附录 H 是**端点**侧（与本条无关，可观测域 **6** 条端点）。⚠️ 这几处**由块 7 commit 9（收口）回头核**，本笔（commit 0）**只落库 + 只登记本文件**。
 

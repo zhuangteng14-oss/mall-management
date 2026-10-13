@@ -1684,3 +1684,114 @@ SET @s := (SELECT IF(COUNT(*) = 0,
   FROM information_schema.STATISTICS
   WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'comment' AND INDEX_NAME = 'uk_comment_review_once');
 PREPARE _p FROM @s; EXECUTE _p; DEALLOCATE PREPARE _p;
+
+-- ============================================================
+-- Migration: 块 7〈可观测域 + 库存治理〉—— 1 张新表 + 8 列
+--            Date: 2026-10-13
+-- 依据：用户 2026-10-13《块 7 参考》v1.0 定稿（§1.5 演练记录 / §九 A 档 1–2）+《两个问题批复》。
+--       pack 见 docs/agent/context-packs/c3-block-7-observe.md。
+-- 范围：**只加表 + 只加列**；不改既有列、不删行、不改既有数据（规则 v2：向后兼容）。
+-- 幂等：加表走 `CREATE TABLE IF NOT EXISTS`（照本文件 ⑮-1 先例）；加列走
+--       `information_schema` 守卫 + `PREPARE/EXECUTE`（照本文件 ⑬ 先例）。重复执行第二遍起空操作。
+-- 表（1）：drill_record —— 攻击演练记录（场景 / 请求数 / 拦截数 / 长文本结果）。
+-- 列（8）—— **两组，语义不同**：
+--   ① **演示「基线列」**（不是 Source）—— `goods_sku.BaselineStock` / `seckill_activity.BaselineSoldStock`。
+--      ⚠️ 为什么不给这两张表加 Source：行**不是**攻击创建的，只是**数值被改**
+--      （Add Source 的判据是「这一行是谁写进来的」）⇒ 加 Source 属语义错位。
+--      基线列用法（演示前 / 演示后各一条 UPDATE，跑十次攻击也能一键还原）：
+--        · 演示前：UPDATE goods_sku SET BaselineStock = Stock WHERE BaselineStock IS NULL;
+--        · 演示后：UPDATE goods_sku SET Stock = BaselineStock;
+--        · 收尾：  UPDATE goods_sku SET BaselineStock = NULL;
+--        （seckill_activity 同款，列名 BaselineSoldStock）。NULL = 未处于演示中。
+--   ② **块 6 六表补 `Source`** —— comment / comment_image / comment_like / comment_mention / report / sensitive_word。
+--      ⚠️ 块 5 可视化段已给 11 张表加过 Source（本文件 :1102-1218），**块 6 六表当时未加** ⇒ 本块补齐。
+--      用途：攻击场景 8（敏感词攻击）会写 comment / sensitive_word ⇒ 需按 Source='attack' 与真实数据区分。
+--      ⚠️ 本列 COMMENT 比块 5 那 11 张**多一段 `attack=`**（那批加列时还没有攻击模拟器）—— 刻意如此。
+-- ⚠️ P3 门禁：新增 1 张表 ⇒ `ConcurrencyRunner.java` 的 KNOWN_TABLES 25 → 26、期望表数 36 → 37（**四处同改**）。
+-- 回滚（逻辑废弃，执行前须人工确认；**不 DROP 旧表/旧列**，只停用）：
+--       UPDATE `goods_sku`        SET `BaselineStock` = NULL;
+--       UPDATE `seckill_activity` SET `BaselineSoldStock` = NULL;
+--       DROP TABLE IF EXISTS `drill_record`;
+-- ============================================================
+
+-- ---- ⑰-1 攻击演练记录（每次「跑攻击」落一行；`Result` 长文本由后端拆字段给前端）----
+CREATE TABLE IF NOT EXISTS `drill_record` (
+  `Id`              bigint NOT NULL AUTO_INCREMENT COMMENT '自增主键',
+  `OperatorId`      varchar(40) NOT NULL DEFAULT '' COMMENT '发起演练者业务号（对齐 user.customerid / user.merchantid，**不是**登录名）',
+  `OperatorRole`    tinyint NOT NULL DEFAULT 0 COMMENT '1=用户 / 2=商家 / 3=管理员',
+  `Name`            varchar(64) NOT NULL DEFAULT '' COMMENT '场景名（预置 8 场景之一）或「自定义」',
+  `Scenario`        varchar(500) NOT NULL DEFAULT '' COMMENT '场景配置 JSON（8 场景勾选 + 各自权重 + 总并发 + 持续秒数）',
+  `TotalRequests`   int NOT NULL DEFAULT 0 COMMENT '本轮总请求数',
+  `BlockedRequests` int NOT NULL DEFAULT 0 COMMENT '被防护拦下数',
+  `FailedRequests`  int NOT NULL DEFAULT 0 COMMENT '真失败数（5xx 等）',
+  `DurationMs`      bigint NOT NULL DEFAULT 0 COMMENT '本轮耗时（毫秒）',
+  `Result`          mediumtext COMMENT '长文本结果（后端解析后分字段给前端显示 —— 不是让前端展示原始长文）',
+  `created_at`      datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '行落库时刻（agent.md 数据库管理规则 8）',
+  `updated_at`      datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '行更新时刻',
+  PRIMARY KEY (`Id`),
+  KEY `idx_drill_created` (`created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='攻击演练记录（块 7 可观测域）';
+
+-- ---- ⑰-2 `goods_sku` 加列 `BaselineStock`（演示基线：攻击前库存快照，演示后一行 UPDATE 还原）----
+SET @s := (SELECT IF(COUNT(*) = 0,
+  'ALTER TABLE `goods_sku` ADD COLUMN `BaselineStock` int DEFAULT NULL COMMENT ''演示基线库存（块 7）：演示前 = Stock，演示后一行 UPDATE 还原；NULL = 未处于演示中''',
+  'DO 0')
+  FROM information_schema.COLUMNS
+  WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'goods_sku' AND COLUMN_NAME = 'BaselineStock');
+PREPARE _p FROM @s; EXECUTE _p; DEALLOCATE PREPARE _p;
+
+-- ---- ⑰-3 `seckill_activity` 加列 `BaselineSoldStock`（同 ⑰-2，秒杀侧）----
+SET @s := (SELECT IF(COUNT(*) = 0,
+  'ALTER TABLE `seckill_activity` ADD COLUMN `BaselineSoldStock` int DEFAULT NULL COMMENT ''演示基线已售（块 7）：演示前 = SoldStock，演示后一行 UPDATE 还原；NULL = 未处于演示中''',
+  'DO 0')
+  FROM information_schema.COLUMNS
+  WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'seckill_activity' AND COLUMN_NAME = 'BaselineSoldStock');
+PREPARE _p FROM @s; EXECUTE _p; DEALLOCATE PREPARE _p;
+
+-- ---- ⑰-4 `comment` 加列 `Source`（块 6 六表补齐；攻击场景 8 会写本表）----
+SET @s := (SELECT IF(COUNT(*) = 0,
+  'ALTER TABLE `comment` ADD COLUMN `Source` varchar(16) NOT NULL DEFAULT '''' COMMENT ''数据来源：seed=演示种子（seed-demo.sql 写入）/ attack=攻击模拟器写入 / 空=存量或真实业务写入''',
+  'DO 0')
+  FROM information_schema.COLUMNS
+  WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'comment' AND COLUMN_NAME = 'Source');
+PREPARE _p FROM @s; EXECUTE _p; DEALLOCATE PREPARE _p;
+
+-- ---- ⑰-5 `comment_image` 加列 `Source`（块 6 六表补齐）----
+SET @s := (SELECT IF(COUNT(*) = 0,
+  'ALTER TABLE `comment_image` ADD COLUMN `Source` varchar(16) NOT NULL DEFAULT '''' COMMENT ''数据来源：seed=演示种子（seed-demo.sql 写入）/ attack=攻击模拟器写入 / 空=存量或真实业务写入''',
+  'DO 0')
+  FROM information_schema.COLUMNS
+  WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'comment_image' AND COLUMN_NAME = 'Source');
+PREPARE _p FROM @s; EXECUTE _p; DEALLOCATE PREPARE _p;
+
+-- ---- ⑰-6 `comment_like` 加列 `Source`（块 6 六表补齐）----
+SET @s := (SELECT IF(COUNT(*) = 0,
+  'ALTER TABLE `comment_like` ADD COLUMN `Source` varchar(16) NOT NULL DEFAULT '''' COMMENT ''数据来源：seed=演示种子（seed-demo.sql 写入）/ attack=攻击模拟器写入 / 空=存量或真实业务写入''',
+  'DO 0')
+  FROM information_schema.COLUMNS
+  WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'comment_like' AND COLUMN_NAME = 'Source');
+PREPARE _p FROM @s; EXECUTE _p; DEALLOCATE PREPARE _p;
+
+-- ---- ⑰-7 `comment_mention` 加列 `Source`（块 6 六表补齐）----
+SET @s := (SELECT IF(COUNT(*) = 0,
+  'ALTER TABLE `comment_mention` ADD COLUMN `Source` varchar(16) NOT NULL DEFAULT '''' COMMENT ''数据来源：seed=演示种子（seed-demo.sql 写入）/ attack=攻击模拟器写入 / 空=存量或真实业务写入''',
+  'DO 0')
+  FROM information_schema.COLUMNS
+  WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'comment_mention' AND COLUMN_NAME = 'Source');
+PREPARE _p FROM @s; EXECUTE _p; DEALLOCATE PREPARE _p;
+
+-- ---- ⑰-8 `report` 加列 `Source`（块 6 六表补齐）----
+SET @s := (SELECT IF(COUNT(*) = 0,
+  'ALTER TABLE `report` ADD COLUMN `Source` varchar(16) NOT NULL DEFAULT '''' COMMENT ''数据来源：seed=演示种子（seed-demo.sql 写入）/ attack=攻击模拟器写入 / 空=存量或真实业务写入''',
+  'DO 0')
+  FROM information_schema.COLUMNS
+  WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'report' AND COLUMN_NAME = 'Source');
+PREPARE _p FROM @s; EXECUTE _p; DEALLOCATE PREPARE _p;
+
+-- ---- ⑰-9 `sensitive_word` 加列 `Source`（块 6 六表补齐；攻击场景 8 会写本表）----
+SET @s := (SELECT IF(COUNT(*) = 0,
+  'ALTER TABLE `sensitive_word` ADD COLUMN `Source` varchar(16) NOT NULL DEFAULT '''' COMMENT ''数据来源：seed=演示种子（seed-demo.sql 写入）/ attack=攻击模拟器写入 / 空=存量或真实业务写入''',
+  'DO 0')
+  FROM information_schema.COLUMNS
+  WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'sensitive_word' AND COLUMN_NAME = 'Source');
+PREPARE _p FROM @s; EXECUTE _p; DEALLOCATE PREPARE _p;
