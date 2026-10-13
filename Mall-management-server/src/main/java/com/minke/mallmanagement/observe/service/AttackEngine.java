@@ -84,8 +84,9 @@ import java.util.concurrent.atomic.AtomicInteger;
  * <ul>
  *   <li><b>业务串 / 正文前缀 {@link #ATTACK_PREFIX}（{@code SIM-}）</b> —— 订单业务串、评论正文。
  *       它扛的是「人肉看得见」与「{@code LIKE 'SIM-%'} 一把清掉」；</li>
- *   <li><b>写入来源列 {@link #ATTACK_SOURCE}（{@code Source='attack'}）</b> —— 今天只有
- *       {@code comment} 这一张表在写它（{@code /comment/add} 的可选入参）。</li>
+ *   <li><b>写入来源列 {@link #ATTACK_SOURCE}（{@code Source='attack'}）</b> —— 两张表在写它：
+ *       {@code comment}（{@code /comment/add} 的可选入参）与 {@code order}
+ *       （{@code /order/orderAdd} 的可选入参，边界补笔 2026-10-14 补齐）。</li>
  * </ul>
  *
  * <p>⚠️ <b>块 7 · commit B（2026-10-14）把参考文 §1.4 的两条兑现了，逐条对照（此前本段登记的是
@@ -106,12 +107,15 @@ import java.util.concurrent.atomic.AtomicInteger;
  *       其它防护怎么处理」—— 演示时先用 {@code false} 跑一轮看取消、再用 {@code true} 跑一轮看留存。
  *   </li>
  * </ol>
- * ⚠️ <b>仍如实登记一条边界</b>：{@code order.Source} 这一列（块 5 可视化段加的 11 张表之一）
- * <b>今天没有任何写入点写 {@code 'attack'}</b> —— 演练订单只带 {@code SIM-} 前缀。
- * ⇒ {@code OrderTimeoutCancelJob} 那个谓词的 {@code Source='attack'} 那一半**目前匹配不到行**
- * （它写着是为了「按标记跳行」这件事本身完整，且将来若有写入方写这一列，闸自动生效）。
- * 要给订单也落这一列，得给 {@code /order/orderAdd} 加一个可选 {@code Source} 入参
- * （与 {@code /comment/add} 同款）——**那是订单域的契约改动，本笔未做、不做**。
+ *
+ * <p>⚠️ <b>块 7 · 边界补笔（2026-10-14）把上面那条边界消除了</b>：{@code order.Source} 这一列
+ * （块 5 可视化段加的 11 张表之一）此前**没有任何写入点写 {@code 'attack'}** —— 演练订单只带
+ * {@code SIM-} 前缀 ⇒ {@code OrderTimeoutCancelJob} 谓词里 {@code Source='attack'} 那一半
+ * **匹配不到行**。补笔给订单域也补上了写入通道：{@code /order/orderAdd} 加**可选** {@code Source}
+ * 入参（{@code required=false}，真实前端一个都不改、落 {@code ''}）、{@code OrderDao.insertOrder}
+ * 写 {@code order.Source} 列，而**本类的四个下单场景（1/2/3/4）经 {@link #orderForm} 统一传
+ * {@code Source='attack'}** ⇒ 谓词的两半**都**有真实数据可命中了。
+ * ⚠️ 前缀 {@code SIM-} 与列 {@code Source='attack'} **两条都写、不是二选一**（理由见上方两条）。
  *
  * <p>清理口径（两条标记各一份，见 {@code Result.Notes} 与演示手册）：
  * {@code DELETE FROM comment WHERE Source = 'attack';}（结构化，首选）/
@@ -570,7 +574,12 @@ public class AttackEngine {
         }
     }
 
-    /** {@code /order/orderAdd} 的表单（服务端按名取参，顺序无关）。 */
+    /**
+     * {@code /order/orderAdd} 的表单（服务端按名取参，顺序无关）。
+     *
+     * <p>⚠️ <b>四个会下单的场景（1 秒杀 / 2 突发 / 3 重复提交 / 4 未付款超时）全部走本方法</b>
+     * ⇒ {@code Source} 只需在这里加一处，四个场景一起具备（别在各分支里再各加一遍）。
+     */
     private static Map<String, String> orderForm(Target t, Sku sku, String orderId, String price,
                                                  int payIf, int deliveryIf, int receiveIf,
                                                  int quantity) {
@@ -585,6 +594,13 @@ public class AttackEngine {
         p.put("DeliveryIf", String.valueOf(deliveryIf));
         p.put("ReceiveIf", String.valueOf(receiveIf));
         p.put("Quantity", String.valueOf(quantity));
+        // 块 7 · 边界补笔（2026-10-14）：把「这一单是演练写的」落成**库里的列**（`order.Source`），
+        // 与 `OrderId` 前缀 `SIM-` 是**两条都要**的互补标记（理由见 ①② 与类注释五）。
+        // ⚠️ 接口侧是 `required=false` ⇒ 真实前端 / 购物车 / 秒杀页**都不发**它、落 `''`，
+        //    「真实下单」与「演练下单」由此在**结构化**维度上分得开（前缀是自由文本，会误命中）。
+        // ⚠️ 这也是 `OrderTimeoutCancelJob.skip-attack-data` 谓词 `Source='attack'` 那一半
+        //    真正的写入方 —— 在本次补笔之前，那一半匹配不到任何行。
+        p.put("Source", ATTACK_SOURCE);
         // ⚠️ 键名 `code` / `name` / `price` / `qty` 取自 OrderService.resolveItems 的解析
         //    （record ItemSpec(code,name,price,qty)）；也**必须**给 Items —— 不给的话它会回落到
         //    「按 ProductInformation 猜」，明细就不可控了。
@@ -887,9 +903,10 @@ public class AttackEngine {
 
         List<String> notes = new ArrayList<>();
         notes.add("判据：401/403 与 200+success:false 记 Blocked；5xx/404/超时/响应体不合本仓形状记 Failed");
-        notes.add("攻击数据标记 " + ATTACK_PREFIX + "（订单业务串 / 评论正文）+ comment.Source='"
-                + ATTACK_SOURCE + "'。清理："
+        notes.add("攻击数据标记 " + ATTACK_PREFIX + "（订单业务串 / 评论正文）+ `Source`='"
+                + ATTACK_SOURCE + "'（`order` 与 `comment` **两张表**都写它）。清理："
                 + "DELETE FROM `order` WHERE OrderId LIKE '" + ATTACK_PREFIX + "%'；"
+                + "DELETE FROM `order` WHERE `Source` = '" + ATTACK_SOURCE + "'；"
                 + "DELETE FROM comment WHERE Source = '" + ATTACK_SOURCE + "' 或 Content LIKE '"
                 + ATTACK_PREFIX + "%'");
         notes.add("库存基线是人工四步：演示前 UPDATE goods_sku SET BaselineStock = Stock "

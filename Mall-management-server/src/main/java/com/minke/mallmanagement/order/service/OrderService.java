@@ -309,6 +309,18 @@ public class OrderService {
      * <p>⚠️ <b>它是「本单是秒杀单」的唯一声明</b>：{@code order} / {@code order_item} 都没有活动列，
      * {@code ProductInformation} / {@code Items} 也不带活动信息 ⇒ 不传就等于「不是秒杀单」，
      * 服务端**不猜**（猜错的方向是「普通单被当成秒杀单、白白吃掉一个名额」，比漏扣更坏）。
+     *
+     * <p>⚠️ <b>C3 块 7 · 边界补笔（2026-10-14）又在<b>末尾</b>加了 {@code Source}</b>（同
+     * {@code Quantity} / {@code Items} / {@code CouponId} / {@code ActivityId} 的理由：既有 13 个
+     * 形参的相对顺序一字不动）。它是**可选的写入来源标记**、落 {@code order.Source} 列
+     * （块 5 可视化段给 11 张表加的那一列），让演练写入的行**在库里可辨认**：
+     * 不传 / 空白 ⇒ {@code insertOrder} 归一成 {@code ""}，与加它之前**逐字节同行为**；
+     * 传 ⇒ 原样落库（{@code AttackEngine} 下演练单时传 {@code 'attack'}）。
+     * <p>⚠️ <b>超长**拒**而不是截断</b>（判据 = {@link #MAX_SOURCE}，见 {@link #sourceRejection}）：
+     * 它和 {@code /comment/add} 的 {@code Source} 是**同一口径**，理由也同一句 ——
+     * 悄悄截断会让 {@code attack} 悄悄变成别的东西而**不报错**（标错来源比没有来源坏）。
+     * <p>⚠️ <b>{@code Source} 不是身份声明、不参与鉴权</b>：谁能下单仍**只看**
+     * {@code IdentityGuard}，本参数的存在理由**唯一**是让行可辨认（同 {@code /comment/add} 的那句）。
      */
     public Map<String, Object> orderAdd(
             String CustomerId,
@@ -323,7 +335,8 @@ public class OrderService {
             int Quantity,
             String Items,
             String CouponId,
-            String ActivityId
+            String ActivityId,
+            String Source
     ) {
         // B#1：价格闸。放在锁外 —— 一是让非法请求不耗 Redis、不污染锁指标；二是让 addLocked
         // 的临界区保持逐字不动（B2 / D#1 的登记处就在那儿）。
@@ -346,9 +359,16 @@ public class OrderService {
         if (frozen != null) {
             return frozen;
         }
+        // 边界补笔：Source 闸。**排在三闸之后**、{@code runLocked} **之前** ——
+        // 位置理由与前三条同款（非法请求不取锁、不触库），且排在**最后**，
+        // 不扰动「价格 vs 状态 vs 冻结」那三条已发布契约的措辞与顺序（与 C3 块 2 的冻结闸同一条纪律）。
+        Map<String, Object> badSource = sourceRejection(Source);
+        if (badSource != null) {
+            return badSource;
+        }
         return lockService.runLocked(LockName.ORDER_ADD, OrderId, () -> addLocked(
                 CustomerId, MerchantId, OrderId, Price, ProductInformation, Images,
-                PayIf, DeliveryIf, ReceiveIf, Quantity, Items, CouponId, ActivityId));
+                PayIf, DeliveryIf, ReceiveIf, Quantity, Items, CouponId, ActivityId, Source));
     }
 
     /**
@@ -497,6 +517,40 @@ public class OrderService {
     }
 
     /**
+     * {@code order.Source} 列是 {@code varchar(16)}（块 5 可视化段给 11 张表加的那一列，
+     * {@code mall_management_sql.sql:1167}）。C3 块 7 · 边界补笔起由 {@code /order/orderAdd}
+     * 的**可选**入参写入 —— 与 {@code CommentService.MAX_SOURCE} 是**同一个数、同一句话**
+     * （两处各自持有，刻意不抽公共常量：一个是订单域、一个是内容域）。
+     */
+    private static final int MAX_SOURCE = 16;
+
+    /**
+     * {@code Source} 闸。**可接受 ⇒ {@code null}；超长 ⇒ 既有形状的失败响应**。
+     *
+     * <p>判据是**正面形式**：{@code 拒 ⟺ 非空白 && trim().length() > MAX_SOURCE}。
+     * 空白 / {@code null} 一律**放行** —— 它们是「不标来源」，由 {@code OrderDao.insertOrder}
+     * 归一成 {@code ""}（与列默认值同一个值），不是错误。
+     *
+     * <h2>【为什么是「拒」不是「截断」】</h2>
+     * 与 {@code CommentService} 的 {@code Source} 那条**逐字同源**：本列是写入方自己声明的标记，
+     * 悄悄截断会让一个 17 字符的标记**静默变成**它的前 16 个字符、且**不报错** ——
+     * 标错来源比没有来源坏。故宁可拒。
+     *
+     * <h2>【为什么在锁外、且排在三闸之后】</h2>
+     * 同 {@link #priceRejection} / {@link #freezeRejection}：非法请求不取锁、不触库。
+     * ⚠️ 排在**最后**是为了不动「价格 → 状态 → 冻结」那三条已发布契约的措辞与顺序。
+     */
+    private Map<String, Object> sourceRejection(String source) {
+        if (source == null || source.isBlank() || source.trim().length() <= MAX_SOURCE) {
+            return null;
+        }
+        Map<String, Object> result = new HashMap<>();
+        result.put("success", false);
+        result.put("msg", "Source 最多 " + MAX_SOURCE + " 字符");
+        return result;
+    }
+
+    /**
      * {@code orderAdd} 的临界区。**原方法体逐字未动**（B2 的边界：只加一层锁，不动既有分支），
      * 仅在开头**插入**了查重；本笔只把两条 SQL 换成 {@link OrderDao} 调用。
      *
@@ -505,6 +559,10 @@ public class OrderService {
      * commit 2d 的「扣减成功标记」（{@code OrderDao.markStockDeducted}）。
      * 三段的相对顺序**不是随意的**：秒杀段排在 INSERT 之前（抢不到就不建单）、
      * 扣减段与标记排在 INSERT 之后（`order_item` 与 `goods_sku` 是同一批 specs 的两个落点）。
+     *
+     * <p>⚠️ <b>边界补笔（2026-10-14）的 {@code Source} 不是第四段</b>：它**没有分支**，只是从
+     * 形参一路透传到 {@link OrderDao.OrderRow}（超长那条闸在 {@code addLocked} **之前**，
+     * 见 {@code sourceRejection}）⇒ 这里的临界区**依旧只多了那三段的语义**，既有分支逐字未动。
      *
      * <p>⚠️ 本方法**不得**加 {@code @Transactional} —— 理由见类注释的两条（锁外事务 / 跨 bean 调用）。
      * 一句话：事务的提交发生在方法返回**之后**，而锁在 {@code runLocked} 的 {@code finally} 里、
@@ -515,7 +573,7 @@ public class OrderService {
     private Map<String, Object> addLocked(
             String CustomerId, String MerchantId, String OrderId, float Price,
             String ProductInformation, String Images, int PayIf, int DeliveryIf, int ReceiveIf, int Quantity,
-            String Items, String CouponId, String ActivityId) {
+            String Items, String CouponId, String ActivityId, String Source) {
         Map<String, Object> result = new HashMap<>();
         // ⚠️ 临界区内先查后插 —— 这一段是 B2 对「同一 OrderId 落库 2 行」的真修复（A-S2a-1）：
         //    · 只有锁：并发变串行，但每个请求照旧裸 INSERT ⇒ 仍插 20 行；
@@ -629,7 +687,7 @@ public class OrderService {
         try {
             int rows = orderDao.insertOrder(new OrderDao.OrderRow(
                     OrderId, CustomerId, MerchantId, payPrice, Quantity, ProductInformation, Images,
-                    PayIf, DeliveryIf, ReceiveIf));
+                    PayIf, DeliveryIf, ReceiveIf, Source));
             if (rows > 0) {
                 result.put("success", true);
                 result.put("msg", "订单添加成功");

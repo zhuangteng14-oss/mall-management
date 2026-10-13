@@ -84,26 +84,51 @@ public class OrderDao {
      * <p>⚠️ <b>C3 块 4（A2 甲）在此加了 {@code Quantity}</b>：列位**紧跟 {@code Price}**
      * （单价旁边就是数量），参数位同理 —— 两处都加在**同一相对位置**，这是「列序 = 参数序」
      * 这条纪律在加列时唯一安全的做法（加在末尾也能跑，但下次谁按语义插列就错位了）。
+     *
+     * <p>⚠️ <b>C3 块 7 · 边界补笔（2026-10-14）又加了 {@code `Source`}</b>：位置上它排在
+     * {@code ReceiveIf} 之后、{@code CreateTime} **之前**（不是文件尾）—— 因为 {@code CreateTime}
+     * 是 VALUES 里唯一写死 {@code NOW()} 的列、本就不占参数位，把 {@code Source} 排在它前面，
+     * 「列序 = 参数序 = {@link OrderRow} 分量序」这条线性对应才不被一个非参列打断。
+     * <p>⚠️ <b>落库前**归一**：{@code null} / 纯空白 ⇒ {@code ""}</b>（列是
+     * {@code NOT NULL DEFAULT ''}）—— 口径与 {@code CommentDao.insertComment} 的 {@code Source}
+     * **逐字同源**（那里也先 trim、空则落空串）。⚠️ 归一放在**这里**而不是调用方：本列是
+     * 「写入方自己声明的标记」，任何调用方（含将来的）都不该因为传了个 null 就撞 NOT NULL。
+     * <p>⚠️ 反引号是**刻意**加的（本仓既有 INSERT 通篇不加引号）：{@code SOURCE} 在 MySQL 8 里
+     * 是非保留关键字，加引号「无论如何都安全」，且与 {@link #selectUnpaidExpired} 的投影、
+     * 以及全仓 DDL / 探针 SQL 的写法一致。⚠️ 表名 {@code mall_management_sql.order} 仍**不加**引号
+     * —— 那是既有形态，理由见类注释（跟随点号的词按标识符解析，保留字也无需引号），本笔不动。
      */
     public int insertOrder(OrderRow r) {
         String sql = "INSERT INTO mall_management_sql.order " +
-                "(OrderId, CustomerId, MerchantId, Price, Quantity, ProductInformation, Images, PayIf, DeliveryIf, ReceiveIf, CreateTime) " +
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())";
+                "(OrderId, CustomerId, MerchantId, Price, Quantity, ProductInformation, Images, PayIf, DeliveryIf, ReceiveIf, `Source`, CreateTime) " +
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())";
         return jdbcClient.sql(sql)
                 .params(r.orderId(), r.customerId(), r.merchantId(), r.price(), r.quantity(),
                         r.productInformation(), r.images(),
-                        r.payIf(), r.deliveryIf(), r.receiveIf())
+                        r.payIf(), r.deliveryIf(), r.receiveIf(), normaliseSource(r.source()))
                 .update();
     }
 
     /**
-     * 下单入参的载体（10 个位置参数，用 record 免掉一个 10 参方法签名）。嵌套在此，不另立文件。
+     * {@code Source} 的归一：{@code null} / 纯空白 ⇒ {@code ""}，其余 {@code trim()} 后原样。
      *
-     * <p>⚠️ 分量顺序 = {@link #insertOrder} 的列顺序（{@code Quantity} 在 {@code price} 之后）。
+     * <p>⚠️ 与 {@code CommentDao.insertComment} 里那句三元是**同一口径的两份实现**（两个域各自持有，
+     * 刻意不抽公共工具）：列都是 {@code varchar(16) NOT NULL DEFAULT ''}，都不截断（超长由
+     * 各自的 Service 层**拒**，见 {@code OrderService.MAX_SOURCE}）。
+     */
+    private static String normaliseSource(String source) {
+        return source == null || source.isBlank() ? "" : source.trim();
+    }
+
+    /**
+     * 下单入参的载体（11 个位置参数，用 record 免掉一个 11 参方法签名）。嵌套在此，不另立文件。
+     *
+     * <p>⚠️ 分量顺序 = {@link #insertOrder} 的列顺序（{@code Quantity} 在 {@code price} 之后、
+     * {@code source} 在 {@code receiveIf} 之后）。
      */
     public record OrderRow(String orderId, String customerId, String merchantId, float price, int quantity,
                            String productInformation, String images,
-                           int payIf, int deliveryIf, int receiveIf) {
+                           int payIf, int deliveryIf, int receiveIf, String source) {
     }
 
     // ==================== 写：订单明细（可视化段 commit 0） ====================
@@ -326,6 +351,10 @@ public class OrderDao {
      * （C3 块 7 · commit B，2026-10-14）：{@code Source} 是「演练数据标记」（块 5 可视化段给 11 张表
      * 加的那一列，{@code mall_management_sql.sql:1167}）⇒ 它是 {@code skip-attack-data} 那条谓词
      * 两个判据之一。
+     * <p>⚠️ <b>该列的写入通道已由「边界补笔」（2026-10-14）补齐</b>：{@code insertOrder} 现在写它、
+     * {@code /order/orderAdd} 有可选 {@code Source} 入参、{@code AttackEngine} 下演练单时传
+     * {@code 'attack'} ⇒ 本投影取到的 {@code Source} **不再恒为空串**（commit B 时它还没有写入方，
+     * 谓词里 {@code Source='attack'} 那一半匹配不到行）。
      * <p>⚠️ <b>筛子**刻意留在 Java 侧**（{@link com.minke.mallmanagement.order.job.OrderTimeoutCancelJob}
      * 的 {@code isAttackData}），不在本 SQL 里</b>：那个开关是**运行时配置**（{@code @Value} 读
      * properties），进 WHERE 就得两条 SQL 各写一遍阈值比较 —— 而阈值比较是本方法唯一容易写错的东西
@@ -334,7 +363,7 @@ public class OrderDao {
      * {@code AttackEngine}（演练域）与 {@code OrderTimeoutCancelJob}（本域）各一份，理由写在后者。
      */
     public List<Map<String, Object>> selectUnpaidExpired(long timeoutSeconds) {
-        String sql = "SELECT OrderId, Source FROM mall_management_sql.`order` "
+        String sql = "SELECT OrderId, `Source` FROM mall_management_sql.`order` "
                 + "WHERE PayIf = 0 AND CancelledAt IS NULL "
                 + "AND CreateTime < DATE_FORMAT(DATE_SUB(NOW(), INTERVAL " + timeoutSeconds + " SECOND), '%Y-%m-%d %H:%i:%s')";
         return jdbcClient.sql(sql).query().listOfRows();

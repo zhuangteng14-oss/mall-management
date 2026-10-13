@@ -5,14 +5,21 @@ import com.minke.mallmanagement.observe.metrics.StockMetrics;
 import com.minke.mallmanagement.order.dao.OrderDao;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.core.PreparedStatementCreator;
 import org.springframework.test.util.ReflectionTestUtils;
 
+import java.sql.Connection;
+import java.sql.PreparedStatement;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -163,6 +170,51 @@ class OrderTimeoutCancelJobSkipAttackDataTest {
         assertThat(OrderTimeoutCancelJob.isAttackData("ORDER-SIM-1", null))
                 .as("真正的演练单是 `SIM-` **开头**；把 contains 写进来的话，正常单里带这三个字符的也会被跳过")
                 .isFalse();
+    }
+
+    // ==================== 五、与写入链路合拢（边界补笔，2026-10-14）====================
+
+    /**
+     * ⚠️ <b>本用例是「补写入通道」这一笔与② 的**接缝**</b>：commit B 落地时，
+     * {@code Source='attack'} 那一半谓词**匹配不到任何行** —— {@code order.Source} 列在，
+     * 却没有任何路径往里写它。补笔给订单域补了写入通道（{@code /order/orderAdd} 可选入参 +
+     * {@code OrderDao.insertOrder} 写该列 + {@code AttackEngine} 下单场景传 {@code 'attack'}）。
+     *
+     * <p>这里用**真 {@code OrderDao}**（{@code JdbcTemplate} 替身）从 JDBC 收口**读回**「库里那一列
+     * 会是什么」，再拿它喂给 {@link OrderTimeoutCancelJob#isAttackData} —— 订单号
+     * <b>不带 {@code SIM-} 前缀</b>，所以命中只可能来自 {@code Source} 那一半。
+     * 断言的是「写入侧真的产出了跳行谓词认得的那个值」，而不是「谓词字面量对」。
+     */
+    @Test
+    @DisplayName("与写入链路合拢：insertOrder 落的 Source 值，喂给 isAttackData ⇒ true（订单号无前缀）")
+    void sourceWrittenByTheDao_aloneIsEnoughForThePredicate() throws Exception {
+        String written = insertAndCaptureSource("attack");
+
+        assertThat(OrderTimeoutCancelJob.isAttackData(NORMAL_ORDER, written))
+                .as("订单号 " + NORMAL_ORDER + " 无 SIM- 前缀 ⇒ 命中只可能来自 Source 列").isTrue();
+        assertThat(OrderTimeoutCancelJob.isAttackData(NORMAL_ORDER, ""))
+                .as("阴性对照：不传 Source 的真实下单落空串 ⇒ 不该被跳过").isFalse();
+    }
+
+    /** 跑一次 {@code OrderDao.insertOrder}，从 JDBC 上读回绑到 {@code Source} 位的值（第 11 个 {@code ?}）。 */
+    private static String insertAndCaptureSource(String source) throws Exception {
+        JdbcTemplate jdbcTemplate = mock(JdbcTemplate.class);
+        PreparedStatement statement = mock(PreparedStatement.class);
+        Connection connection = mock(Connection.class);
+        when(connection.prepareStatement(anyString())).thenReturn(statement);
+        // OrderDao 走 JdbcClient ⇒ 落到 JdbcTemplate.update(PreparedStatementCreator) 单参重载（见 CommentDaoSourceColumnTest 的说明）。
+        when(jdbcTemplate.update(any(PreparedStatementCreator.class))).thenAnswer(inv -> {
+            PreparedStatementCreator creator = inv.getArgument(0);
+            creator.createPreparedStatement(connection);
+            return 1;
+        });
+
+        new OrderDao(jdbcTemplate).insertOrder(new OrderDao.OrderRow(
+                "ORDER-WRITE-1", "CUST-1", "MERCH-1", 5f, 1, "可乐", "", 0, 0, 0, source));
+
+        ArgumentCaptor<String> bound = ArgumentCaptor.forClass(String.class);
+        verify(statement).setString(eq(11), bound.capture());   // `Source` 是列清单第 11 列 ⇒ 第 11 个 ?
+        return bound.getValue();
     }
 
     // ==================== 桩 ====================

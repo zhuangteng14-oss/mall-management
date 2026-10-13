@@ -74,11 +74,14 @@ import java.util.Map;
  * <p>⚠️ <b>标记有两个载体，谓词两半都认</b>（{@link #isAttackData}）：
  * ①{@code OrderId} 前缀 {@link #ATTACK_ORDER_PREFIX}（{@code SIM-}）；
  * ②{@code order.Source} 列 == {@link #ATTACK_SOURCE}（{@code attack}）。
- * <p>⚠️ <b>如实登记的边界</b>：{@code order.Source} 列**存在**（块 5 建表，{@code varchar(16) NOT NULL DEFAULT ''}），
- * 但**今天没有任何写入点往里写 {@code 'attack'}**（{@code seed-demo.sql} 写的是 {@code 'seed'}；
- * 给 {@code /order/orderAdd} 加可选 {@code Source} 入参属于**订单域的契约改动**，本笔不做）
- * ⇒ 谓词里 {@code Source='attack'} 那一半**目前匹配不到行**，实际起作用的是前缀那一半。
- * 这一半**照样写**：它是「将来真落了这一列就自动生效」的挂钩，删掉才是把参考文的口径砍半。
+ * <p>⚠️ <b>边界已由「边界补笔」（2026-10-14）消除</b>：本条①（{@code Source='attack'}）此前
+ * **没有任何写入方** —— {@code order.Source} 列虽在（块 5 建表，{@code varchar(16) NOT NULL DEFAULT ''}），
+ * 但从没有路径往里写 {@code 'attack'}（{@code seed-demo.sql} 写的是 {@code 'seed'}）⇒ 谓词里
+ * {@code Source='attack'} 那一半**匹配不到行**。补笔给订单域补上了写入通道
+ * （{@code /order/orderAdd} 的可选 {@code Source} 入参 + {@code OrderDao.insertOrder} 写该列 +
+ * {@code AttackEngine} 的四个下单场景传 {@code 'attack'}）⇒ 这一半**现在有真实数据可命中**。
+ * ⚠️ 两半**照样都留着**（不是二选一）：前缀扛「人肉看得见 / {@code LIKE 'SIM-%'} 一把清」，
+ * 列扛「结构化可查」—— 删掉任何一半都是把参考文的口径砍半。
  */
 @Component
 @ConditionalOnProperty(name = "mall.order.cancel.enabled", havingValue = "true", matchIfMissing = true)
