@@ -61,13 +61,16 @@ class OrderAddPriceGuardSmokeTest extends AbstractSmokeTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.success").value(true))
                 .andExpect(jsonPath("$.msg").value("订单添加成功"));
-        // ⚠️ **块 7（2026-10-13）起这里是 3 次**（可视化段 commit 0 时 2 次 / 更早 1 次）—— 如实订正、
-        //    不是放松：本夹具的 `ProductInformation`（`可乐:SMOKE-PC-1`）**恰有一段且带 `:`** ⇒ 命中
-        //    `OrderService.resolveItems` 的**回落口径**，于是除订单那次 INSERT 外多写一行 `order_item`；
-        //    块 7 又对这行明细**下单即扣**一行 `goods_sku.Stock`（TD-36，与订单/明细同走
-        //    `JdbcClient.update()`）。次数仍是**精确值** —— 2 或 4 都会红，阳性对照的作用不变。
-        //    ⚠️ 明细口径的完整判据在 `OrderAddItemsSmokeTest`；本类**仍只钉价格闸**，跟着红是已知耦合、不是漏改。
-        verify(jdbcTemplate, times(3)).update(any(PreparedStatementCreator.class));
+        // ⚠️ **块 7 commit 2d（2026-10-14）起这里是 4 次**（commit 2d 之前 3 次 / 可视化段 commit 0 时 2 次 /
+        //    更早 1 次）—— 如实订正、不是放松：本夹具的 `ProductInformation`（`可乐:SMOKE-PC-1`）
+        //    **恰有一段且带 `:`** ⇒ 命中 `OrderService.resolveItems` 的**回落口径**，于是除订单那次 INSERT
+        //    外多写一行 `order_item`；块 7 又对这行明细**下单即扣**一行 `goods_sku.Stock`（TD-36），
+        //    commit 2d 再补一句**整单一次**的 `order.StockDeducted = 1`（判据是「这批扣减至少命中一行」，
+        //    切片里替身恒回 1 ⇒ 恰多一次）—— 四句都走 `JdbcClient.update()`。次数仍是**精确值** ——
+        //    3 或 5 都会红，阳性对照的作用不变。
+        //    ⚠️ 明细/扣减口径的完整判据在 `OrderAddItemsSmokeTest`（地基公式：1 + N + N + 1）；
+        //    本类**仍只钉价格闸**，跟着红是已知耦合、不是漏改。
+        verify(jdbcTemplate, times(4)).update(any(PreparedStatementCreator.class));
     }
 
     /** 除 Price 外全部固定；形参名逐字对齐 {@code OrderController.orderAdd} 的 {@code @RequestParam}。 */

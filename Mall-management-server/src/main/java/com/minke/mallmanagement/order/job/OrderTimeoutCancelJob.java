@@ -137,11 +137,20 @@ public class OrderTimeoutCancelJob {
      * {@code (ProductCode, Quantity)}，再 {@link GoodsDao#releaseStock} 加回。**不另解析一遍明细**
      * ——扣谁回谁本来就该是同一批行。
      *
-     * <p>⚠️ <b>已知边界（本次核对新增 · 用户 2026-10-13 已批 A 档第 4 项）</b>：
-     * {@link GoodsDao#releaseStock} 是**无条件加回**，它无从知道这单当初 {@link GoodsDao#deductStock}
-     * 是否真的扣成过。于是「下单时库存不足 ⇒ 扣减 0 行、但单照样落库」这种单，超时取消时会被
-     * **凭空补出一份库存**（偏账）。取口径：演示用 {@code goods_sku.BaselineStock} 复位兜住
-     * （《块 7 参考》§4 的 4 步）。要根治得记「本单扣减是否成功」—— 那是**新契约**，须另批，本笔不动。
+     * <p>⚠️ <b>前置判据（块 7 · commit 2d · 用户 2026-10-13 批 A 档第 4 项）</b>：本方法**不再无条件回补** ——
+     * 先读 {@code order.StockDeducted}（{@link OrderDao#selectStockDeducted}），**只有 1 才继续**。
+     * 该列由 {@code OrderService.markStockDeducted} 在「本轮 CAS 真的扣成过 ≥1 行」时写入
+     * （Migration ⑱；它是「本单库存被动过」的**唯一**载体）。
+     *
+     * <p>⚠️ <b>它修掉的正是 2d 之前那个偏账</b>：那时 {@link GoodsDao#releaseStock} 无条件加回，
+     * 「下单时库存不足 ⇒ 扣减 0 行、但单照样落库」的单超时取消时会被**凭空补出一份库存**。
+     * ⚠️ 存量单（2d 之前落的）这一列默认 0 = 「没扣过」⇒ 一律不回补 —— 这正是**要的口径**：
+     * 那些单走的本来就是 2d 之前的下单路径，无从回判，宁可不补也不虚增。
+     *
+     * <p>⚠️ <b>读不出来时**不回补**（fail-closed）</b>：与 {@code OrderService.deductStocks} 的
+     * fail-open 刻意相反 —— 偏账方向选「少还一件」而不是「凭空补一件」。⚠️ 剩余边界：精度到
+     * **单**不到**行** —— 混合单（一行真扣成、一行当时库存不足）只要有一行扣成过就整单回补；
+     * 要根治得把标记下沉到 {@code order_item} 粒度（新列 + 新契约），本笔不动。
      *
      * <p>⚠️ <b>逐条 try/catch</b>：一条 SKU 回补失败不拖垮整轮，也不与其他条互相牵连
      * （同 {@code advance} 的单条守卫）。明细读不出来则**整单不回补**并留 WARN —— 宁可偏账留痕，
@@ -152,6 +161,21 @@ public class OrderTimeoutCancelJob {
      * 0 行记 {@code MISSING}（无处可放）、异常记 {@code ERROR}，两者都不改变本方法的控制流。
      */
     private void releaseStock(String orderId) {
+        // 块 7 · commit 2d：**只有当初真的扣成过库存的单才回补**（order.StockDeducted = 1）。
+        int deducted;
+        try {
+            deducted = orderDao.selectStockDeducted(orderId);
+        } catch (Exception e) {
+            // 读不出来 ⇒ 不回补（fail-closed）：宁可漏回（偏账 = 少还一件），也不在
+            // 「这单扣没扣过未知」时凭空补一份出来。异常被吞在这里，取消是既成事实、不回滚。
+            log.warn("超时释放：订单 {} 的扣减标记读取失败（保守起见本轮不回补）：{}", orderId, e.toString());
+            return;
+        }
+        if (deducted != 1) {
+            // 0 = 当初 CAS 一行没命中（库存不足 / 非矩阵商品无 goods_sku 行）/ 存量单；查无此行也回落 0。
+            log.info("超时释放：订单 {} 当初未真正扣减库存（StockDeducted={}），跳过回补", orderId, deducted);
+            return;
+        }
         List<Map<String, Object>> items;
         try {
             items = orderDao.selectItemStocksByOrder(orderId);

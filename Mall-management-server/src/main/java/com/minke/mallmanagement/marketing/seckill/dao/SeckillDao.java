@@ -382,19 +382,42 @@ public class SeckillDao {
      * <p>⚠️ {@code rows == 0} 是**正常分支**（同 {@code OrderDao.casUpdate} 口径）：或「卖满了」
      * （{@code SoldStock + n > TotalStock}）、或活动不存在。
      *
-     * <p>⚠️ <b>本方法今天没有生产调用点 —— 这是块 7 已知的缺口，不是疏漏</b>：
-     * 订单链路（{@code OrderService.orderAdd}）装的是 {@code ProductCode}，
-     * <b>不带 {@code ActivityId}</b> —— 秒杀页的下单走的是与「立即购买」**同一条**
-     * {@code order.orderAdd}（{@code ProductPage.vue} 的 {@code handlePay}），
-     * 前端只把「这场活动此刻的价」摆出来、不改下单报文 ⇒ 后端下单时**无法确定**该落到哪一场活动。
-     * <p>⇒ 本方法先按 §5.4 落成 API，**调用点归块 7 的攻击引擎**（场景 ① 秒杀抢购）。
-     * 在它被接上之前，{@code SoldStock} 仍是**陈列值**：TD-38 那句「同一场秒杀可以被无限下单」
-     * <b>尚未被真正堵住</b>。要真兑现，须给 {@code orderAdd} 加 {@code ActivityId} 入参 ——
-     * 那是**新契约**，须另批（用户 2026-10-13 批复的 A 档 5 项里没有这一条）。
+     * <p>⚠️ <b>调用点 = {@code OrderService.addLocked} 的秒杀段</b>（块 7 · commit 2c 接上，2026-10-14）：
+     * 可选入参 {@code orderAdd.ActivityId} 非空 ⇒ 先按 {@code ActivityId} 查出活动行、再调本方法。
+     * ⚠️ <b>本方法 0 行在那条路上是 fail-closed</b>（CAS 没抢到 ⇒ **整单不落**），
+     * 与 {@code goods_sku} 侧 {@code GoodsDao.deductStock} 的 fail-open <b>刻意相反</b> ——
+     * 理由两条：① 那边 0 行有「非矩阵商品没有 {@code goods_sku} 行」这个**常态**成因，
+     * 判失败会让调用方重复下单；本方法能走到就说明调用方**显式声明**了「这是一张秒杀单」，
+     * 名额没抢到就是这单不该成立（「不把待裁项留空」在此的落点 = 超卖必须真被拦住）。
+     * ② 判定「超卖」的**不是** {@code SoldStock} 变负（本方法不会让它变负），而是
+     * <b>本轮 CAS 有没有抢到</b>：并发下恰好 {@code TotalStock} 个请求得 {@code rows == 1}。
+     * <p>⚠️ <b>{@code TotalStock = 0} 的活动扣不动</b>（{@code SoldStock + n <= 0} 恒假）——
+     * 本仓没有「不限量秒杀」这条业务，故**不实现**不限量分支；写在这里，免得被当成漏洞。
      */
     public int deductSoldStock(long id, int n) {
         return jdbc.sql("UPDATE seckill_activity SET SoldStock = SoldStock + :n "
                         + "WHERE Id = :id AND SoldStock + :n <= TotalStock")
+                .param("n", n).param("id", id).update();
+    }
+
+    /**
+     * <b>回滚</b>一场秒杀的已售数（{@code SoldStock -= n}）—— {@link #deductSoldStock} 的
+     * **补偿腿**（C3 块 7 · commit 2c，2026-10-14）。
+     *
+     * <p>⚠️ <b>为什么必须有它</b>：秒杀段是**先扣名额、后建单**（与 {@code OrderService.addLocked}
+     * 的用券段同形）—— 券那边抢到了再建单失败要 {@code releaseCoupon} 把券放回未使用，
+     * 这边抢到了再建单失败就必须把名额**退回去**。少了这条腿，一次建单失败会
+     * **永久吞掉一个名额**：活动看着「卖完了」，而库里一张单都没有，谁也没法解释那个数去哪了。
+     *
+     * <p>⚠️ <b>不加「这单当初扣成过没有」的前置判据</b>（与 {@code GoodsDao.releaseStock} 同款）：
+     * 调用方**只在确知本轮 CAS 抢到过**（{@code rows == 1}）时才调它 ⇒ 那个判据在调用方手里，
+     * 这里再加一次就是把同一个事实记两遍。活动行不存在 ⇒ {@code 0} 行 = no-op。
+     * <p>⚠️ <b>不做「卖出去的单被取消 ⇒ 退回名额」</b>：那是**另一条契约**（超时取消要不要
+     * 退还秒杀名额），本轮没有批过 —— 本方法**只**服务「建单失败」这一条补偿腿。
+     */
+    public int releaseSoldStock(long id, int n) {
+        return jdbc.sql("UPDATE seckill_activity SET SoldStock = SoldStock - :n "
+                        + "WHERE Id = :id AND SoldStock >= :n")
                 .param("n", n).param("id", id).update();
     }
 }

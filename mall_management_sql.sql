@@ -1795,3 +1795,36 @@ SET @s := (SELECT IF(COUNT(*) = 0,
   FROM information_schema.COLUMNS
   WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'sensitive_word' AND COLUMN_NAME = 'Source');
 PREPARE _p FROM @s; EXECUTE _p; DEALLOCATE PREPARE _p;
+-- ============================================================
+-- Migration: 块 7〈库存治理补完〉—— 1 列（超时释放条件化）
+--            Date: 2026-10-14
+-- 依据：用户 2026-10-13《块 7 参考》§5.2 B5 丙 / §5.3 C5 甲 + 用户 2026-10-14 本批批复
+--       （「2d · 超时释放条件化 —— 已批」）。pack 见 docs/agent/context-packs/c3-block-7-observe.md。
+-- 范围：**只加列**；不改既有列、不删行、**不做任何回填**（规则 v2：向后兼容）。
+-- 幂等：`information_schema` 守卫 + `PREPARE/EXECUTE`（照本文件 ⑬ / ⑰ 先例）。重复执行第二遍起空操作。
+-- 列（1）：`order.StockDeducted` —— 「本单的 goods_sku 库存**真扣成过**」的唯一载体。
+--   ⚠️ 为什么需要它：块 7 commit 1 起「下单即扣」，但 0 行**不挡单**（库存不足 / 非矩阵商品
+--      没有 goods_sku 行 —— 见 OrderService.deductStocks 的 javadoc）⇒ 单落库 ≠ 库存被动过。
+--      超时取消若无条件回补，就会给「当初一行也没扣成」的单**凭空补出一份库存**。
+--      commit 2d 把这条事实落成一列：下单时 CAS 真扣成 ≥1 行 ⇒ =1，否则 =0；
+--      超时释放**先读这一列、只有 1 才回补**（OrderTimeoutCancelJob.releaseStock）。
+--   ⚠️ **不回填**（用户 2026-10-14 明批）：默认 0 = 「没扣过」。2d 之前落的单大多数确实没走过
+--      「下单即扣」，无从回判 ⇒ 一律不回补，正是要的口径（宁可不补也不虚增）。
+--   ⚠️ 精度到**单**不到**行**：混合单（一行真扣成、一行当时库存不足）只要有一行扣成过就整单回补；
+--      根治要把标记下沉到 `order_item` 粒度（新列 + 新契约）—— 本笔不做。
+--   ⚠️ 写入点：OrderService.markStockDeducted（落库后一句幂等 UPDATE，
+--      `WHERE OrderId=? AND StockDeducted=0`）；读取点：OrderDao.selectStockDeducted。
+-- ⚠️ **本笔不改表数**（37 不变）⇒ ConcurrencyRunner 的 KNOWN_TABLES / 期望表数**不动**。
+-- 回滚（逻辑废弃，执行前须人工确认；**不 DROP 列**，只停用）：
+--       UPDATE `order` SET `StockDeducted` = 0;
+--       —— 退回 2d 之前的口径「超时释放无条件回补」（等价于把这一列恒置 0）。
+--       ⚠️ 列本身保留（agent.md 数据库规则：只允许追加，回滚 = 逻辑废弃，不 DROP COLUMN）。
+-- ============================================================
+
+-- ---- ⑱-1 `order` 加列 `StockDeducted`（本单库存真扣成过的标记；超时释放的前置判据）----
+SET @s := (SELECT IF(COUNT(*) = 0,
+  'ALTER TABLE `order` ADD COLUMN `StockDeducted` tinyint(1) NOT NULL DEFAULT 0 COMMENT ''本单库存真扣成过（块 7 commit 2d）：1=下单时 CAS 命中并动了 goods_sku.Stock / 0=没动过（库存不足、非矩阵商品无 sku 行、或 2d 之前的存量单）；超时释放只有 =1 才回补''',
+  'DO 0')
+  FROM information_schema.COLUMNS
+  WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'order' AND COLUMN_NAME = 'StockDeducted');
+PREPARE _p FROM @s; EXECUTE _p; DEALLOCATE PREPARE _p;

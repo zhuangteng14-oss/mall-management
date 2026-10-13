@@ -21,6 +21,7 @@ import java.util.UUID;
 import java.util.concurrent.ThreadLocalRandom;
 import com.minke.mallmanagement.goods.dao.GoodsDao;
 import com.minke.mallmanagement.marketing.coupon.service.CouponService;
+import com.minke.mallmanagement.marketing.seckill.dao.SeckillDao;
 import com.minke.mallmanagement.notification.NotificationEvents;
 import com.minke.mallmanagement.notification.service.NotificationService;
 import com.minke.mallmanagement.observe.metrics.StockMetrics;
@@ -204,6 +205,20 @@ public class OrderService {
     private final GoodsDao goodsDao;
 
     /**
+     * 秒杀域的活动出口（C3 块 7 · commit 2c 新增，2026-10-14）。可选入参 {@code ActivityId} 非空时：
+     * 先 {@link SeckillDao#selectActivityByActivityId} 把业务串换成自增 {@code Id}，
+     * 再 {@link SeckillDao#deductSoldStock} 抢名额（CAS）；建单失败时用
+     * {@link SeckillDao#releaseSoldStock} 把名额退回去。
+     *
+     * <p>⚠️ <b>直接注入</b>（不是 {@code ObjectProvider}）：{@code SeckillDao} 早在块 5 commit 1
+     * 就进了 {@code AbstractSmokeTest} 的 {@code @Import}（是真 bean）⇒ 切片里取得到，同
+     * {@link #notificationService} / {@link #couponService} / {@link #goodsDao} 那条论证。
+     * <p>⚠️ 依赖方向是「订单 → 秒杀」，**不是**反过来：秒杀域对订单域一无所知
+     * （{@code SeckillDao} 只认 {@code activityId + id + n} 三个值）⇒ 没有环。
+     */
+    private final SeckillDao seckillDao;
+
+    /**
      * 库存面的观测出口（C3 块 7 · 可观测域新增，{@code observe/metrics/StockMetrics.java}）。
      * 下单即扣的每条明细各记一次 —— 扣没扣到、扣了几件。
      *
@@ -230,6 +245,7 @@ public class OrderService {
                         ObjectMapper objectMapper,
                         CouponService couponService,
                         GoodsDao goodsDao,
+                        SeckillDao seckillDao,
                         StockMetrics stockMetrics) {
         this.orderDao = orderDao;
         this.lockService = lockService;
@@ -241,6 +257,7 @@ public class OrderService {
         this.objectMapper = objectMapper;
         this.couponService = couponService;
         this.goodsDao = goodsDao;
+        this.seckillDao = seckillDao;
         this.stockMetrics = stockMetrics;
     }
 
@@ -283,6 +300,15 @@ public class OrderService {
      * {@code Items} 的理由：既有 11 个形参的相对顺序一字不动）。空 / 缺省 ⇒ 与加它之前**逐字节同行为**
      * （老前端不发它、结算页面没选券时也不发）。非空 ⇒ 走 {@link #addLocked} 的用券段：
      * 先校验、再核销，最后把 <b>折后价</b>写进 {@code order.Price}（那时入参 {@code Price} 是**原价**）。
+     *
+     * <p>⚠️ <b>C3 块 7 · commit 2c 又在<b>末尾</b>加了 {@code ActivityId}</b>（同 {@code Quantity} /
+     * {@code Items} / {@code CouponId} 的理由：既有 12 个形参的相对顺序一字不动）。
+     * 空 / 缺省 ⇒ 与加它之前**逐字节同行为**（不读活动表、不碰名额）。非空 ⇒ 走
+     * {@link #addLocked} 的**秒杀段**：抢名额（CAS），抢不到 ⇒ <b>整单不落</b>
+     * —— 那是本类唯一一条 fail-closed 的下单路径，理由见秒杀段内注释。
+     * <p>⚠️ <b>它是「本单是秒杀单」的唯一声明</b>：{@code order} / {@code order_item} 都没有活动列，
+     * {@code ProductInformation} / {@code Items} 也不带活动信息 ⇒ 不传就等于「不是秒杀单」，
+     * 服务端**不猜**（猜错的方向是「普通单被当成秒杀单、白白吃掉一个名额」，比漏扣更坏）。
      */
     public Map<String, Object> orderAdd(
             String CustomerId,
@@ -296,7 +322,8 @@ public class OrderService {
             int ReceiveIf,
             int Quantity,
             String Items,
-            String CouponId
+            String CouponId,
+            String ActivityId
     ) {
         // B#1：价格闸。放在锁外 —— 一是让非法请求不耗 Redis、不污染锁指标；二是让 addLocked
         // 的临界区保持逐字不动（B2 / D#1 的登记处就在那儿）。
@@ -321,7 +348,7 @@ public class OrderService {
         }
         return lockService.runLocked(LockName.ORDER_ADD, OrderId, () -> addLocked(
                 CustomerId, MerchantId, OrderId, Price, ProductInformation, Images,
-                PayIf, DeliveryIf, ReceiveIf, Quantity, Items, CouponId));
+                PayIf, DeliveryIf, ReceiveIf, Quantity, Items, CouponId, ActivityId));
     }
 
     /**
@@ -473,6 +500,12 @@ public class OrderService {
      * {@code orderAdd} 的临界区。**原方法体逐字未动**（B2 的边界：只加一层锁，不动既有分支），
      * 仅在开头**插入**了查重；本笔只把两条 SQL 换成 {@link OrderDao} 调用。
      *
+     * <p>⚠️ <b>块 7 在本临界区内加了三段</b>（都是**追加**，既有分支逐字未动）：
+     * commit 1 的「下单即扣库存」（{@link #deductStocks}）、commit 2c 的「秒杀段」、
+     * commit 2d 的「扣减成功标记」（{@code OrderDao.markStockDeducted}）。
+     * 三段的相对顺序**不是随意的**：秒杀段排在 INSERT 之前（抢不到就不建单）、
+     * 扣减段与标记排在 INSERT 之后（`order_item` 与 `goods_sku` 是同一批 specs 的两个落点）。
+     *
      * <p>⚠️ 本方法**不得**加 {@code @Transactional} —— 理由见类注释的两条（锁外事务 / 跨 bean 调用）。
      * 一句话：事务的提交发生在方法返回**之后**，而锁在 {@code runLocked} 的 {@code finally} 里、
      * 即方法返回**之前**已释放 —— 后进者拿到锁后的 {@code COUNT(*)} 在 RR 下读的是自己事务
@@ -482,7 +515,7 @@ public class OrderService {
     private Map<String, Object> addLocked(
             String CustomerId, String MerchantId, String OrderId, float Price,
             String ProductInformation, String Images, int PayIf, int DeliveryIf, int ReceiveIf, int Quantity,
-            String Items, String CouponId) {
+            String Items, String CouponId, String ActivityId) {
         Map<String, Object> result = new HashMap<>();
         // ⚠️ 临界区内先查后插 —— 这一段是 B2 对「同一 OrderId 落库 2 行」的真修复（A-S2a-1）：
         //    · 只有锁：并发变串行，但每个请求照旧裸 INSERT ⇒ 仍插 20 行；
@@ -544,6 +577,55 @@ public class OrderService {
         // 这里再兜一层：金额为负的订单在 `order.Price` 的语义里没有解释）。
         float payPrice = (float) Math.max(0d, Price - discount);
 
+        // ── 秒杀段（C3 块 7 · commit 2c，2026-10-14）────────────────────────────────────
+        // 位置是**刻意**的，三条理由（前两条与上面用券段逐字同源）：
+        //  ① 排在**查重 / 用券之后**：那两条该走的早退还走它们自己的文案，不先动活动名额；
+        //  ② 排在 **INSERT 之前**：名额没抢到 ⇒ **一张单一都不建** ——「超卖被拦住」只有排在
+        //     这里才成立（排到 insertOrder 之后就只能写「先超卖、再补救」）；
+        //  ③ 排在**临界区内**（锁 key = 本 OrderId）：同一单的重复提交在这里串行；
+        //     跨单的抢名额竞态由 CAS 自己挡（与锁无关，同用券段的 CAS）。
+        // ⚠️ 与 goods_sku 侧的 {@link #deductStocks} **刻意相反**：那边 0 行是 **fail-open**
+        //    （非矩阵商品没有 goods_sku 行 ⇒ 0 行是常态，判失败会让调用方重复下单）；
+        //    本段 0 行是 **fail-closed** —— 走到这里就说明调用方**显式声明**了「这是一张秒杀单」，
+        //    名额没抢到 ⇒ 这单不该成立。这是本类唯一一条 fail-closed 的下单路径。
+        // ⚠️ **不传 ActivityId ⇒ 这一整段一次库读都不发**（逐字节同加它之前的行为）。
+        long seckillId = -1L;
+        int seckillQty = 0;
+        String seckillReject = null;
+        if (ActivityId != null && !ActivityId.isBlank()) {
+            // 件数口径 = **本单声明的总件数**（`order.Quantity`，与 resolveItems 的 `Math.max(1, Quantity)` 同源）：
+            // 活动挂的是**一个 GoodsId**、名额也按「件」计，订单级没有第二个「件数」可言。
+            seckillQty = Math.max(1, Quantity);
+            try {
+                Map<String, Object> activity = seckillDao.selectActivityByActivityId(ActivityId.trim());
+                if (activity == null) {
+                    // 业务串打错 / 活动行被删 —— 同样**不建单**：宁可给一句明确的拒绝，
+                    // 也不给一张「名义上是秒杀单、其实没占名额」的单（那会同时骗过人和统计）。
+                    seckillReject = "秒杀活动不存在";
+                } else {
+                    seckillId = ((Number) activity.get("Id")).longValue();
+                    if (seckillDao.deductSoldStock(seckillId, seckillQty) == 0) {
+                        seckillId = -1L;   // 没抢到名额 ⇒ 下面没有补偿腿要跑
+                        seckillReject = "秒杀活动已售完";
+                    }
+                }
+            } catch (Exception e) {
+                // 读活动表 / 抢名额抛异常 ⇒ **不放行**（fail-closed，与用券段「查不出来就不放行」同款）。
+                // ⚠️ 这一支**刻意不留补偿腿**：异常时「名额到底动了没有」**未知**，
+                //    退一次可能把没加上的减掉（SQL 里 `AND SoldStock >= :n` 只能防负、防不了错）——
+                //    宁可留一行带 ActivityId 的 WARN 让偏账可查，也不做一次猜的写。
+                seckillId = -1L;
+                seckillReject = "秒杀活动校验失败，请稍后重试";
+                log.warn("订单 {} 的秒杀段异常（不建单；名额是否已动未知，故不补偿）：activityId={} {}",
+                        OrderId, ActivityId, e.toString());
+            }
+            if (seckillReject != null) {
+                result.put("success", false);
+                result.put("msg", seckillReject);
+                return result;
+            }
+        }
+
         try {
             int rows = orderDao.insertOrder(new OrderDao.OrderRow(
                     OrderId, CustomerId, MerchantId, payPrice, Quantity, ProductInformation, Images,
@@ -568,7 +650,13 @@ public class OrderService {
                 //    扣谁、扣多少，与「这单卖了什么」本来就是同一个事实，不另解析一次。
                 // ⚠️ 与 writeItems 同款 **fail-open**：扣减 0 行（库存不足 / 非矩阵商品无
                 //    goods_sku 行）都不改本方法的返回值 —— 判成失败会让调用方重复下单。
-                deductStocks(itemSpecs);
+                // 块 7 · commit 2d：把「这批扣减**真的动过库存**」记下来（{@code order.StockDeducted}，
+                // Migration ⑱）—— 超时释放的前置判据**只有这一列**。
+                // ⚠️ fail-soft：标记写不进去**不改订单结论**（订单已落库是既成事实，改成失败会让
+                //    调用方重复下单），代价是那单超时取消时**不回补**（偏账方向选「少还一件」，不选「虚增」）。
+                if (deductStocks(itemSpecs)) {
+                    markStockDeducted(OrderId);
+                }
                 if (discount > 0d) {
                     // 只读给调用方（Controller 的留痕 / 前端回显）；**不是**契约的一部分 ——
                     // 不选券的老请求永远不会看到这两个键（`Result.of` 逐条 put）。
@@ -579,12 +667,14 @@ public class OrderService {
                 result.put("success", false);
                 result.put("msg", "订单添加失败");
                 releaseCoupon(couponAccount, CouponId, OrderId, discount);
+                releaseSeckill(seckillId, seckillQty, OrderId);
             }
         } catch (Exception e) {
             e.printStackTrace();
             result.put("success", false);
             result.put("msg", "数据库错误：" + e.getMessage());
             releaseCoupon(couponAccount, CouponId, OrderId, discount);
+            releaseSeckill(seckillId, seckillQty, OrderId);
         }
         return result;
     }
@@ -875,8 +965,16 @@ public class OrderService {
      * 每条明细各记一次 {@code mall.stock.deduct} + 一条事件（另一处在 {@code OrderTimeoutCancelJob}
      * 的 {@code mall.stock.release}）。埋点是**观察者**：入参只有枚举、异常那一支也先接住再记，
      * 故「记不记」不影响本方法的控制流。
+     *
+     * <p>⚠️ <b>返回值（块 7 · commit 2d 新增）</b>：{@code true} = 这批扣减里**至少有一条真的
+     * 动过库存**（CAS 命中 ≥1 行）。调用方 {@link #addLocked} 拿它当 {@code order.StockDeducted}
+     * 的唯一判据 —— 超时释放靠那一列决定「该不该回补」。注意它与上面埋点用的 {@code rows == 1}
+     * **刻意不是同一个判据**，理由见方法内注释（{@code SkuCode} 非唯一键）。
+     *
+     * @return 是否至少有一条明细真的扣成了库存
      */
-    private void deductStocks(List<ItemSpec> specs) {
+    private boolean deductStocks(List<ItemSpec> specs) {
+        boolean anyDeducted = false;
         for (ItemSpec s : specs) {
             if (s.code() == null || s.code().isBlank() || s.qty() < 1) {
                 continue;
@@ -886,13 +984,68 @@ public class OrderService {
                 // 块 7 · 观测（commit 2）：**两条通道在同一调用点**发（计数 + 事件流）——
                 // 与既有三环同款。0 行记 INSUFFICIENT 而**不是** ERROR：CAS 没命中是正常分支
                 // （库存不足 / 非矩阵商品无行，见上面的 javadoc），记成错误会让告警误报。
+                //
+                // ⚠️ 埋点判据与下面的返回值判据**刻意不同**（{@code rows == 1} vs {@code rows > 0}）：
+                //    指标口径是既有契约，本笔不动；返回值的语义是「这批库存**被动过**吗」，
+                //    只要有一行命中就成立 —— {@code SkuCode} 不是唯一键，理论上一条明细可以命中多行。
                 stockMetrics.deduct(s.code(), s.qty(),
                         rows == 1 ? Deduct.OK : Deduct.INSUFFICIENT);
+                if (rows > 0) {
+                    anyDeducted = true;
+                }
             } catch (Exception e) {
                 // 异常这一路也埋点：否则「扣减根本没发出去」在指标上与「一次都没下单」无法区分。
                 stockMetrics.deduct(s.code(), s.qty(), Deduct.ERROR);
                 log.warn("订单明细 {} 的库存扣减失败（跳过该条，不动订单结论）：{}", s.code(), e.toString());
             }
+        }
+        return anyDeducted;
+    }
+
+    /**
+     * 把「本单库存真扣成过」落到 {@code order.StockDeducted = 1}（Migration ⑱）。**fail-soft**。
+     *
+     * <p>⚠️ 写失败**不改订单结论**（订单已落库是既成事实）：记一行 WARN 就往下走。代价是那单
+     * 超时取消时不会回补库存 —— 偏账方向刻意选「少还一件」而不是「无中生有补一件」
+     * （{@code OrderTimeoutCancelJob} 的前置判据读这一列，读不到 = 没扣过 = 不回补）。
+     */
+    private void markStockDeducted(String orderId) {
+        try {
+            int rows = orderDao.markStockDeducted(orderId);
+            if (rows == 0) {
+                // `AND StockDeducted = 0` 下的 0 行只有两种可能：订单行不见了，或已被标记过（幂等命中）。
+                // 前者意味着「扣了库存但订单没了」—— 值得一行 WARN。
+                log.warn("订单 {} 的库存扣减标记未写入（订单行不存在或已标记过）：库存已动，超时取消时可能不回补", orderId);
+            }
+        } catch (Exception e) {
+            log.warn("订单 {} 的库存扣减标记写入失败（订单照常成立；该单超时取消时不会回补库存）：{}", orderId, e.toString());
+        }
+    }
+
+    /**
+     * 建单失败时把秒杀名额退回（{@link #addLocked} 秒杀段的补偿腿）。**fail-soft**。
+     *
+     * <p>⚠️ 与券补偿同款：秒杀名额是**先扣后建单**，建单失败不退 ⇒ 一个名额被**永久吞掉**
+     * （活动少卖一件，且账面上「已售」比真实成交多）。
+     *
+     * <p>⚠️ {@code seckillId <= 0} 直接 return —— 没走到扣减那一步（活动不存在 / 已售完 /
+     * 校验异常 / 本单压根没带 {@code ActivityId}）时都不该退，退了就是**凭空加库存**。
+     *
+     * <p>⚠️ 退失败不改返回值，只记 WARN（同 {@link #releaseCoupon}）——
+     * {@code seckill_activity.SoldStock} 与真实成交的差额是**可查**的痕迹。
+     */
+    private void releaseSeckill(long seckillId, int qty, String orderId) {
+        if (seckillId <= 0L || qty < 1) {
+            return;
+        }
+        try {
+            if (seckillDao.releaseSoldStock(seckillId, qty) == 0) {
+                log.warn("订单未建成，但秒杀名额退回未命中任何行（名额可能已被并发改动）：seckillId={} qty={} order={}",
+                        seckillId, qty, orderId);
+            }
+        } catch (Exception e) {
+            log.warn("订单未建成，且秒杀名额退回失败（需人工核对）：seckillId={} qty={} order={} —— {}",
+                    seckillId, qty, orderId, e.toString());
         }
     }
 

@@ -492,4 +492,43 @@ public class OrderDao {
                 + "FROM mall_management_sql.`order` ORDER BY CreateTime DESC, OrderId DESC LIMIT ?";
         return jdbcClient.sql(sql).param(limit).query().listOfRows();
     }
+
+    // ==================== 写 / 读：本单库存「真扣成过」标记（C3 块 7 · commit 2d · Migration ⑱）====================
+
+    /**
+     * 标一条单「**本单的 {@code goods_sku} 库存真扣成过**」（{@code StockDeducted = 1}）——
+     * 订单**超时取消**时决定要不要回补库存的**唯一判据**（C3 块 7 · TD-36 的第四条腿）。
+     *
+     * <p>⚠️ <b>为什么不是 {@code insertOrder} 列清单里的第 12 列、而是建单之后再 UPDATE 一句</b>：
+     * INSERT 发生在 {@code addLocked} 里「订单落库」那一刻，而「扣成没扣成」要等
+     * {@code deductStocks} 跑完才知道 ⇒ <b>INSERT 那一刻这个值还不存在</b>。两条路：
+     * （a）先扣后建单（值就能随 INSERT 一起落库）；（b）先建单后扣、再补这一句。
+     * 取 (b)：块 7 commit 1 已把「下单即扣」**排在落库与明细之后**（那条顺序有自己的理由 ——
+     * 明细与扣减吃同一批 specs、且都不许改订单结论），本笔**不动那个顺序**，
+     * 代价是每张真扣过库存的单多一句单行 UPDATE（{@code PRIMARY} 之外无索引，按 OrderId 走全表扫，
+     * 演示库量级可忽略）。
+     *
+     * <p>⚠️ {@code AND StockDeducted = 0} 让本方法**幂等**（同 {@code cancelIfUnpaid} 的写法）：
+     * 已经是 1 就回 {@code 0}，调用方不必先读、也不必判重。
+     */
+    public int markStockDeducted(String orderId) {
+        String sql = "UPDATE mall_management_sql.`order` SET StockDeducted = 1 "
+                + "WHERE OrderId = ? AND StockDeducted = 0";
+        return jdbcClient.sql(sql).param(orderId).update();
+    }
+
+    /**
+     * 读一条单的 {@code StockDeducted}（{@code 0} / {@code 1}）—— 超时释放的前置判据
+     * （唯一调用方 {@code OrderTimeoutCancelJob#releaseStock}）。
+     *
+     * <p>⚠️ <b>查无此行 ⇒ 回 {@code 0}</b>（=「没扣过」，与列默认值同义）：那单要么不存在、
+     * 要么是本列加列之前的**存量单** —— 两种都**不该回补**（存量单的库存本来就没动过，
+     * 回补就是凭空加库存，正是 2d 要堵的那个偏账）。故这里**不抛**「找不到订单」：
+     * 调用方要的就是一个「要不要回补」的判据。
+     */
+    public int selectStockDeducted(String orderId) {
+        return jdbcClient.sql("SELECT StockDeducted FROM mall_management_sql.`order` "
+                        + "WHERE OrderId = ? LIMIT 1")
+                .param(orderId).query(Integer.class).optional().orElse(0);
+    }
 }

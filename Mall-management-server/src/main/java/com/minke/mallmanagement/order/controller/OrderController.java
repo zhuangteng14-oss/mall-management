@@ -117,6 +117,12 @@ public class OrderController {
             //    判据是 `CouponService.redeem` 拿**会话翻出来的登录名**去 `coupon_grant` 查那一行 ——
             //    别人拿我的券号来，查不到就是「不在你的券包里」，不是先查到再比一次。
             @RequestParam(value = "CouponId", required = false, defaultValue = "") String CouponId,
+            // C3 块 7 commit 2c：可选的**秒杀活动串**（`seckill_activity.ActivityId`）。
+            // ⚠️ 加在末尾（同 `Quantity` / `Items` / `CouponId` 的先例）：既有 12 个形参一名不动、一位不挪。
+            // ⚠️ `required = false` 是硬要求：商品页 / 购物车下单**不发**它 ⇒ 一次库读都不发、
+            //    秒杀段整段跳过，加它之前的行为**逐字节不变**。⚠️ 服务端**不猜**「这单是不是秒杀单」——
+            //    本仓订单装的是 ProductCode、秒杀活动挂的是 ActivityId，两者无推导关系，只能由调用方声明。
+            @RequestParam(value = "ActivityId", required = false, defaultValue = "") String ActivityId,
             HttpServletRequest request
     ) {
         // ⚠️ 第一行：订单只能下在**自己**名下（管理员豁免）—— 必须在取锁之前（否则白取一把锁）。
@@ -126,7 +132,7 @@ public class OrderController {
         }
         Map<String, Object> result = orderService.orderAdd(
                 CustomerId, MerchantId, OrderId, Price, ProductInformation, Images,
-                PayIf, DeliveryIf, ReceiveIf, Quantity, Items, CouponId);
+                PayIf, DeliveryIf, ReceiveIf, Quantity, Items, CouponId, ActivityId);
         // C3 块 5 commit 5：**券真的核销掉了**才留痕（`Discount` 只在核销成功且大于 0 时才被
         // `orderAdd` 放进回体 ⇒ 用它当判据，不重算一遍）。
         // ⚠️ 这是**下单人自己的动作**落在 `admin_audit` 里（同收货那条：actor = 当前调用者）——

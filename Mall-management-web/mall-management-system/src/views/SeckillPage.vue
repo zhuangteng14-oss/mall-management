@@ -141,7 +141,7 @@ const money = (v) => Number(v || 0).toFixed(2)
 /** 图片：本仓商品图存的是相对路径，与 `ProductPage` / `HomePage` 同一处理（裸路径直接当 src）。 */
 const imgSrc = (u) => String(u)
 
-/** 去商品详情页 —— `query` 四件套与三处商品卡**逐字相同**（那边是 `ProductCard.vue` 的口径）。 */
+/** 去商品详情页 —— `query` 四件套与三处商品卡**逐字相同**（那边是 `ProductCard.vue` 的口径），**外加第五个键 `ActivityId`**（C3 块 7 · commit 2c，2026-10-14：秒杀页**独有** —— 商品详情页拿它当「这单是秒杀单」的声明，下单时转手发给 `/order/orderAdd` 去扣 `SoldStock`；四件套是**所有入口**都有的，只有这一个键区分得出「从秒杀页来的」）。⚠️ **同行追加、不新增行**（本文件行号被文档按行号引）。 */
 function productLink(row) {
   return {
     path: '/product',
@@ -149,7 +149,7 @@ function productLink(row) {
       MerchantId: row.MerchantAccount,
       GoodName: row.Name || row.GoodName,
       GoodType: row.GoodType,
-      Id: row.GoodsId,
+      Id: row.GoodsId, ActivityId: row.ActivityId,
     },
   }
 }
@@ -160,9 +160,9 @@ function goBack() {
 }
 
 // ── 抢购这一层 + 红字提示（C3 块 5 · commit 5 续笔，2026-10-12）────────────────────────
-// ⚠️ **真扣减（扣 `SoldStock` / 扣名额）留块 7** —— 本段**不碰任何库存**，只把「能点到成交入口」
-//    这一层补上：`live` + 未售完 ⇒ 落商品详情页（那里有唯一的真成交链路
-//    `openPopup → confirmPurchase → handlePay → order.orderAdd`）。
+// ⚠️ **真扣减（扣 `SoldStock` / 扣名额）在订单侧**（`OrderService.addLocked` 的秒杀段，块 7 commit 2c，
+//    2026-10-14 接线）—— 本段**仍不碰任何库存**，只是把活动的 `ActivityId` 塞进 `productLink` 的 query
+//    带过去；「扣动没扣动」由后端在订单锁临界区内 CAS 说了算。
 // ⚠️ **售完 / 未开始时不给「点了没反应」的死钮**：按钮看着是灰的，点下去给一句**红字**
 //    （`.notice`）说明为什么 —— 不成交是**有意**的（后端 `SoldOut` 就是最终判据），
 //    但「有意」不等于「不说」。
@@ -177,9 +177,9 @@ onBeforeUnmount(() => { if (noticeTimer) clearTimeout(noticeTimer) })
 
 const grabLabel = (row) => (row.SoldOut ? '已售完' : row.Stage !== 'live' ? '未开始' : '立即抢购')
 const grabTitle = (row) => {
-  if (row.SoldOut) return '这一场已经抢完 —— 库存 / 名额由后端 SoldOut 判定（真扣减留块 7）'
+  if (row.SoldOut) return '这一场已经抢完 —— 库存 / 名额由后端 SoldOut 判定（真扣减在订单侧：块 7 commit 2c 已接线）'
   if (row.Stage !== 'live') return '这场还没开始（阶段由后端按库时钟现算）'
-  return '去商品详情页下单（本页不扣库存；真扣减留块 7）'
+  return '去商品详情页下单（本页不扣库存；真扣减在订单侧 —— 块 7 commit 2c 已接线，本页只把 ActivityId 带过去）'
 }
 
 /** 整卡点击：**售完那一档拦下跳转**并给红字（`.item-in` 是 `<router-link>`，不拦就跳走了）。 */

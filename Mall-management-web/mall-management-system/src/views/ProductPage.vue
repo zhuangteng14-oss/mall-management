@@ -666,7 +666,7 @@ const route = useRoute()
 const router = useRouter()
 
 // 从路由参数获取商品所属商家ID (卖家)
-const { MerchantId, GoodName, GoodType, Id } = route.query
+const { MerchantId, GoodName, GoodType, Id, ActivityId: activityId } = route.query   // ⚠️ C3 块 7 · commit 2c：`ActivityId` **只在「从秒杀页点进来」时才有**（`SeckillPage.productLink` 带过来的第五个 query）；其余入口（首页 / 商品卡 / 直接输 URL）是 `undefined` ⇒ 下单时发空串、后端 `required=false` ⇒ 那些入口与本笔之前**逐字同行为**。⚠️ 改名成小写 `activityId` 是为了与其它四个 query 键的「原样解出」区分开（它是本页**唯一**一个「有条件」的键）。**同行追加、不新增行**（本文件多处行号被文档按行号引）。
 const sellerId = MerchantId
 const goodName = GoodName
 const goodType = GoodType
@@ -897,7 +897,7 @@ const handlePay = async (ok) => {   // **C3 块 4 改判 + 2026-10-10 补丁改�
     const result = await orderAdd({
       CustomerId: d.CustomerId, MerchantId: d.MerchantId, OrderId: d.OrderId,
       Price: d.Price, ProductInformation: d.ProductInformation, Images: d.Images,
-      PayIf: 0, DeliveryIf: d.DeliveryIf, ReceiveIf: d.ReceiveIf,
+      PayIf: 0, DeliveryIf: d.DeliveryIf, ReceiveIf: d.ReceiveIf, ActivityId: activityId || '',   // C3 块 7 · commit 2c：**「这单是秒杀单」的唯一声明**（只有从秒杀页点进来这一路非空）。⚠️ 传了它 ⇒ 后端在**订单锁临界区内**按活动 CAS 扣 `seckill_activity.SoldStock`，**扣不到就不建单**（回 `success:false` + `秒杀活动已售完`）—— 这是本仓**唯一**一条 fail-closed 的下单路径（与库存扣减「0 行不挡单」刻意相反，理由见 `OrderService.addLocked` 秒杀段）；不传 ⇒ **一次库读都不发**。⚠️ `''` 是显式的（`build()` 原样发每一条，空串与不传后端同判 `isBlank`）。**同行追加、不新增行**。
       CouponId: popupEntry.value === 'buy' ? couponId.value : '',   // C3 块 5 · commit 5 续笔：券随本单走。⚠️ `Price` 仍是**原价合计**（`d.Price` = `popupTotal`）—— 后端 `orderAdd` 拿原价算折后额、落库 `order.Price` 的是**折后价**，折了多少看回体里的 `Discount`。⚠️ 空串 = 不用券（`api/order.js` 的 `build()` **原样发每一条**，空串后端当 `""` 处理，逐字同加券之前）。
       Quantity: popupCount.value, Items: JSON.stringify(popupBuyList.value.map((i) => ({ code: i.productCode, name: goodName, price: i.price, qty: i.quantity }))),   // C3 块 4：本单**总件数**（A2 甲新列；一个 OrderId 一单 ⇒ 不带型号维度）＋ ⚠️ **可视化段 commit 0 同行追加 `Items`**（显式商品明细 ⇒ 服务端写 `order_item`；格式是 JSON 数组串，理由见 `OrderService.resolveItems`：商品名未禁 `:`/`；`，自造分隔符会错位）。⚠️ **同行追加、不新增行** —— 本文件 775 / 784 两行在下面，新增行会顶漂它们。⚠️ `name` 取页级 `goodName`：弹窗里全是**同一商品**的型号（`popupAllItems`），故一件一名的前提成立；`price` 是**单价**（`popupTotal` 是 `Σ price × quantity`，:572）
     })

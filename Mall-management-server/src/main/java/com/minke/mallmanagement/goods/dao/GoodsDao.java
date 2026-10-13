@@ -418,15 +418,17 @@ public class GoodsDao {
      * <b>释放（回补）</b>一条多规格的库存 —— 订单**超时取消**时把下单时扣掉的量加回去
      * （C3 块 7 · TD-36 的第三条腿，C5 甲：复用 {@code OrderTimeoutCancelJob}，不新加 job）。
      *
-     * <p>⚠️ <b>刻意不做「这单当时到底扣成了没有」的判据</b>：本仓没有任何一处记录「某单对某 SKU
-     * 的扣减是否成功」（{@code order_item} 只存成交快照，存不下这个结论）。本方法只管
-     * 「按码加回 {@code n}」；非矩阵商品查无此行 ⇒ {@code 0} 行 = no-op（与
-     * {@link #deductStock} 的第二条边界同源）。
+     * <p>⚠️ <b>前置判据不在本方法里，在调用方</b>（块 7 · commit 2d 补，2026-10-14）：本方法只管
+     * 「按码加回 {@code n}」；「这单当初到底扣成了没有」已记进 {@code order.StockDeducted}
+     * （Migration ⑱），由 {@code OrderTimeoutCancelJob.releaseStock} **先读它、只有 1 才调本方法**。
+     * 非矩阵商品查无此行 ⇒ {@code 0} 行 = no-op（与 {@link #deductStock} 的第二条边界同源）。
      *
-     * <p>⚠️ <b>已知边界（取舍，不是缺陷）</b>：若下单时 {@link #deductStock} 因**库存不足**返回 0
-     * （那一单仍照常落库），超时取消时本方法**仍会加回 {@code n}** ⇒ 该 SKU 的库存会**虚增**。
-     * 块 7 的演示靠 {@code goods_sku.BaselineStock}（Migration ⑰-2）一键复位兜住，见
-     * 《块 7 参考》§九 A 档 2。要根治得新增「本单扣减是否成功」的记录 —— 那是**新契约**，须另批。
+     * <p>⚠️ <b>历史边界（2d 之前）—— 留档，别按它理解现在的行为</b>：那时本方法是**无条件加回**
+     * ⇒ 「下单时因库存不足扣减 0 行、单照样落库」的那种单，超时取消会**凭空补出一份库存**（虚增）。
+     * <p>⚠️ <b>2d 之后的精度到「单」不到「行」</b>：一单里既有真扣成的行、又有 0 行的行（混合单）
+     * 时，{@code StockDeducted = 1} ⇒ 拿 0 行的那几行明细仍会被回补。这是**已知取舍**，
+     * 不是疏漏 —— 要根治得把判据下沉到 {@code order_item} 粒度，那是**新列 + 新契约**，须另批。
+     * 块 7 的演示另有 {@code goods_sku.BaselineStock}（Migration ⑰-2）一键复位兜底。
      */
     public int releaseStock(String skuCode, int n) {
         String sql = "UPDATE mall_management_sql.goods_sku SET Stock = Stock + ? WHERE SkuCode = ?";

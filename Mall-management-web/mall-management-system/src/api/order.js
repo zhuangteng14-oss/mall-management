@@ -59,7 +59,7 @@ async function post(path, body) {
  *
  * @param {{CustomerId:string, MerchantId:string, OrderId:string, Price:number|string,
  *          ProductInformation:string, Images:string, PayIf:number, DeliveryIf:number,
- *          ReceiveIf:number, Quantity?:number, Items?:string}} payload
+ *          ReceiveIf:number, Quantity?:number, Items?:string, CouponId?:string, ActivityId?:string}} payload
  *        ⚠️ `Quantity` 是 **C3 块 4（A2 甲）新加的入参**，不传 = 1（后端 `defaultValue="1"`）。
  *        ⚠️ `Items` 是 **可视化段 commit 0 新加的入参**（**显式**商品明细 ⇒ 服务端写 `order_item` 表）：
  *           一个 **JSON 数组串**，一件一项：`[{"code":"IJ-555","name":"222","price":5555,"qty":2}]`
@@ -72,6 +72,14 @@ async function post(path, body) {
  *           不传 / 传空串 ⇒ 与加它之前**逐字同行为**（后端 `CouponId` 是 `required=false`、缺省 `""`）。
  *           ⚠️ 传了它 **`Price` 仍要传原价合计** —— 后端在临界区内按原价算折后额、落库 `order.Price`
  *           是**折后价**（回体里多 `CouponId` / `Discount` 两个键，判据是「有没有 `Discount`」）。
+ *        ⚠️ `ActivityId` 是 **C3 块 7 · commit 2c 新加的入参**（秒杀页下单，2026-10-14）：
+ *           秒杀活动串 `seckill_activity.ActivityId`。**不传 / 传空串 ⇒ 一次库读都不发**、
+ *           秒杀段整段跳过 —— 与加它之前**逐字同行为**（后端 `required=false`、缺省 `""`）。
+ *           传了它 ⇒ 后端在**订单锁临界区内**按活动 CAS 扣 `seckill_activity.SoldStock`；
+ *           **扣不到就不建单**（回 `success:false` + `msg:"秒杀活动已售完"`）—— 这是本仓唯一一条
+ *           **fail-closed** 的下单路径（与库存扣减「0 行不挡单」刻意相反）。
+ *           ⚠️ 服务端**不猜**这单是不是秒杀单（订单装的是 `ProductCode`、活动挂的是 `ActivityId`，
+ *           两者无推导关系）⇒ 只有秒杀页的调用点会传它。
  * @returns {Promise<{success:boolean, msg?:string, CouponId?:string, Discount?:number}>}
  *          ⚠️ 失败是 **HTTP 200 + `success:false`**（本仓口径），不是 4xx。
  */
@@ -80,7 +88,8 @@ export function orderAdd(payload) {
     CustomerId: payload.CustomerId, MerchantId: payload.MerchantId, OrderId: payload.OrderId,
     Price: payload.Price, ProductInformation: payload.ProductInformation, Images: payload.Images,
     PayIf: payload.PayIf, DeliveryIf: payload.DeliveryIf, ReceiveIf: payload.ReceiveIf,
-    Quantity: payload.Quantity, Items: payload.Items, CouponId: payload.CouponId
+    Quantity: payload.Quantity, Items: payload.Items, CouponId: payload.CouponId,
+    ActivityId: payload.ActivityId
   }))
 }
 

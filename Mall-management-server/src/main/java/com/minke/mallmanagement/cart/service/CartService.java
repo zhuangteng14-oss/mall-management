@@ -237,7 +237,7 @@ public class CartService {
             //    而 `Items` 里各行的单价仍是**原价** —— 明细记的是「卖了哪几件」，与实付是两回事。
             Map<String, Object> add = orderService.orderAdd(customerId, merchantId, orderId, draft.price(),
                     draft.productInformation(), draft.images(), 0, 0, 0, draft.quantity(),
-                    orderService.encodeItems(draft.items()), coupon);
+                    orderService.encodeItems(draft.items()), coupon, "");   // 末一个形参 = `ActivityId`（C3 块 7 · commit 2c 新增的第 13 参）：**购物车结算不是秒杀单** —— 活动串只有秒杀页那一路带得过来（`SeckillPage` → `/product` 的 query → `ProductPage` 的 `orderAdd`），本路径**传空串**，后端 `required=false` + `isBlank` 判空 ⇒ 秒杀段整段跳过、一次库读都不发，与本笔之前**逐字同行为**。⚠️ **同行追加、不新增行**（本文件行号被文档按行号引）。
             if (!Boolean.TRUE.equals(add.get("success"))) {
                 return partialFailure(created, String.valueOf(add.get("msg")));
             }
