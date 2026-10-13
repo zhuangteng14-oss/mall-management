@@ -1,0 +1,292 @@
+块 6 整改 · commit 7〈收口〉—— 方案 §十一「假数据（用于管理端演示）」5 项取证　⚠️ **§4.9-乙 那张 `notification` 表的 `ToId` 列是「登录名」= 缺陷现场**（契约要**业务号**；2026-10-13 批文 ②③ 已修）—— 见文末「更正」；根因见 `tech-debt.md` TD-59。
+生成时间：2026-10-13（本机 a3 profile，库 = mall_management_sql @ VM 192.168.229.129）
+探针：scripts/probes/ProbeB6c7Seed.java（幂等，只从环境变量读凭据）
+
+═══════ 0. 跑法（逐字可复跑；凭据只从环境变量读，本文件不含口令） ═══════
+  # 三件套：从 Mall-management-server/src/main/resources/application-a3.properties 的
+  #   spring.datasource.{url,username,password} 取值（写的是 ${ENV:default} 占位符 ⇒ 取默认值）
+  export A3_DB_URL=... A3_DB_USER=... A3_DB_PASSWORD=...
+  JAR=$HOME/.m2/repository/com/mysql/mysql-connector-j/8.0.31/mysql-connector-j-8.0.31.jar
+
+  # ① 图片文件先进 uploads 目录（ImageUrl 指 http://localhost:8088/img/comment/<名>）
+  cp Mall-management-server/src/main/resources/static/img/Mall-Section-1.jpg $TEMP/a3-uploads/comment/b6c7-review-1.jpg
+  cp Mall-management-server/src/main/resources/static/img/Mall-Section-2.jpg $TEMP/a3-uploads/comment/b6c7-review-2.jpg
+
+  # ② 探针：不带 --exec 只读（打印现状）；带 --exec 才写（哨兵在则自动跳过）
+  java -cp $JAR scripts/probes/ProbeB6c7Seed.java
+  java -cp $JAR scripts/probes/ProbeB6c7Seed.java --exec
+
+═══════ 1. 图片文件（① 的产物） ═══════
+total 112
+drwxr-xr-x 1 86159 197609     0 Oct 13 11:54 .
+drwxr-xr-x 1 86159 197609     0 Oct 13 11:54 ..
+-rw-r--r-- 1 86159 197609 45525 Oct 13 11:54 b6c7-review-1.jpg
+-rw-r--r-- 1 86159 197609 60353 Oct 13 11:54 b6c7-review-2.jpg
+
+═══════ 2. 探针只读现状（未灌前 / 已灌后同一条命令） ═══════
+=== 播种前现状 ===
+  comment=8（review=5 question=2 answer=1 未解决提问=1）
+  comment_image=2（pending=1 approved=1 rejected=0）
+  comment_like=7 comment_mention=5
+  report=2（pending=2）
+  sensitive_word=10（预置 10 —— 方案 §十一 第 4 项）
+  哨兵 review#3333 = 117
+
+-- 只读模式：一行都没写。要播种就加 --exec。
+
+═══════ 3. 探针 --exec（幂等：哨兵 review#3333 已在 ⇒ 跳过写入，不重复造） ═══════
+=== 播种前现状 ===
+  comment=8（review=5 question=2 answer=1 未解决提问=1）
+  comment_image=2（pending=1 approved=1 rejected=0）
+  comment_like=7 comment_mention=5
+  report=2（pending=2）
+  sensitive_word=10（预置 10 —— 方案 §十一 第 4 项）
+  哨兵 review#3333 = 117
+
+-- 哨兵已存在（review Id=117）⇒ 这一批播过了，跳过写入。
+
+═══════ 4. 逐行明细（上面那组计数背后到底是哪几行 —— 只读 SQL，中文原样） ═══════
+
+── 4.1 comment：goods 76 下的全部行（含 commit 2 手验留下的两条问答） ──
+
+⚠️ **`Id=114–117` 这 4 行的 `created_at` 是「修前播的」，已回拨 —— 下表是回拨后的读数。**
+   根因：`ProbeB6c7Seed` 的 4 个 `minutesAgo` 字面量**符号写反**，负负得正 ⇒ 落到**未来**，
+   页面上就出现「匿名评价比实名评价更新、顾客回复比商家回复更旧」这种倒序。
+   回拨依据：2026-10-13 用户**批文五**（先贴现值再动）+ **裁决二（批）**。
+   回拨前现值 / 目标值 / 为什么见 `b6-c7-rework-accept.txt` §9；回拨后 4 行读数见其 §9 尾。
+   ⚠️ 只动了这 4 个 `created_at` 单元格，`updated_at` 用 `= updated_at` 显式保住（未被顶成 `NOW()`）。
+Id	Kind	ParentId	ReplyToId	AuthorId	AuthorRole	IsAnonymous	Rating	IsMerchantFirst	IsSolved	AcceptedReplyId	LikeCount	DislikeCount	ProductCode	created_at
+110	question	null	null	chenh99	1	0	0	0	0	null	0	0	null	2026-10-13 02:42:38
+111	question	null	null	chenh99	1	0	0	0	1	112	0	0	null	2026-10-13 02:43:50
+112	answer	111	null	yunqi_digital	2	0	0	1	0	null	0	0	null	2026-10-13 02:45:33
+113	review	null	null	1111	1	0	3	0	0	null	0	0	null	2026-10-13 02:47:06
+114	review	null	null	1111	1	1	5	0	0	null	4	2	GD-101-9552	2026-10-13 01:55:11
+115	review	null	null	123	1	0	4	0	0	null	0	0	GD-101-9552	2026-10-13 02:25:11
+116	review	114	null	yunqi_digital	2	0	5	1	0	null	1	0	null	2026-10-13 02:35:11
+117	review	114	116	3333	1	0	5	0	0	null	0	0	null	2026-10-13 02:55:11
+-- rows: 8
+
+── 4.2 comment 正文（单列，免得中文挤在宽表里看不清） ──
+Id	content
+110	AAAAAA？
+111	BBBBB？
+112	那我问你
+113	啊实打实大苏打
+114	收到货了，包装完好，做工比想象中细。用了两天没发现问题，唯一小缺点是说明书有点简略。（如图）
+115	第二次买了，这次是送朋友的。发货快，第二天就到。少给一星是因为外包装箱有压痕。
+116	感谢支持！包装问题我们已经反馈给仓配，下次下单备注一下，我们单独加固。有需要随时联系客服。
+117	@yunqi_digital 客服回复很快，问题已解决，赞一个。
+-- rows: 8
+
+── 4.3 comment_image（方案 §十一 第 2 项「待审图片」） ──
+Id	CommentId	ImageUrl	Status	SortOrder
+4	114	http://localhost:8088/img/comment/b6c7-review-1.jpg	pending	0
+5	114	http://localhost:8088/img/comment/b6c7-review-2.jpg	approved	1
+-- rows: 2
+
+── 4.4 comment_like（方案 §十一 第 5 项「含点赞」） ──
+Id	CommentId	UserId	Type
+5	114	gaoq44	dislike
+6	114	guox50	dislike
+1	114	123	like
+2	114	3333	like
+3	114	aaa	like
+4	114	chenh99	like
+7	116	123	like
+-- rows: 7
+
+── 4.5 comment_mention（@ 规则，commit 3 补的漏项） ──
+Id	CommentId	MentionedId
+9	110	yunqi_digital
+10	111	yunqi_digital
+11	112	chenh99
+12	113	yunqi_digital
+13	117	yunqi_digital
+-- rows: 5
+
+── 4.6 report（方案 §十一 第 3 项「待处理举报单」） ──
+Id	TargetType	TargetId	ReporterId	ReporterRole	Reason	Description	Status	created_at
+1	comment	114	aaa	1	广告	null	pending	2026-10-13 03:55:11
+2	goods	76	3333	1	其他	商品描述与实际不符，主图疑似盗用其他店铺。	pending	2026-10-13 03:55:11
+-- rows: 2
+   ⚠️ 上面这组是**播种后（手验前）**的取值。手验把 Id=1 这一单「驳回 → 同人同对象再举报（revive）」
+     推过一遍（`_work/b6-hv-full.txt` ㉔ / ㉔′）⇒ 它现在的 `created_at` 已经是手验时刻，
+       **这不是漂移、是设计**：`ReportDao.revive`（`ReportDao.java:128-134`）里有一句显式的
+      `SET … created_at = CURRENT_TIMESTAMP` —— 复活一条被驳回的举报 = 「当作新举报重新排队」，
+      举报时间重算，否则页面上的「多久没人处理」会拿驳回前的时间骗人。
+      ⇒ 与 §4.9 同口径，这一段也是「甲 = 手验前 / 乙 = 手验后」两栏；乙在 §4.12。
+
+── 4.7 sensitive_word（方案 §十一 第 4 项「预置 10 个敏感词」） ──
+Id	Word	created_at
+1	广告	2026-10-12 15:07:11
+2	刷单	2026-10-12 15:07:11
+3	博彩	2026-10-12 15:07:11
+4	赌博	2026-10-12 15:07:11
+5	诈骗	2026-10-12 15:07:11
+6	传销	2026-10-12 15:07:11
+7	违禁	2026-10-12 15:07:11
+8	高仿	2026-10-12 15:07:11
+9	山寨	2026-10-12 15:07:11
+10	代开发票	2026-10-12 15:07:11
+-- rows: 10
+
+── 4.8 user.WarnCount（3 次警告封号那条链路；全 0 = 还没人吃到警告。**手验前**取值） ──
+users	warn_total	warned_users
+47	0	0
+-- rows: 1
+   ⚠️ 手验后同一句 SQL 是 `48 / 3 / 1`（多出来的第 48 个 = 手验现场注册的一次性作者
+      `hv_b6_troll`，它吃完 3 次警告被封）。见 §4.12。
+      ⚠️ **记账**：最后一次手验跑完，`WHERE WarnCount > 0` 里除了 `hv_b6_troll` 还挂着
+      `1111`（= 种子评论 114 的作者）`WarnCount=1` —— 那是**更早那发预跑**「通过」了一单告 114 的
+      举报留下的，不是最后一发造的（最后一发对 Id=1 那一单做的是**驳回**）。已经把这一格清回 0，
+      并补进 `_work/b6-hv-cleanup.sh` 第 14 步（那一步是事后补的，注释里写明了）。
+
+── 4.9 notification：本块两条治理回流（question.timeout 发往管理端 / report.handled 发举报人） ──
+   ⚠️ 本表读态列叫 ReadAt（NULL = 未读），事件列叫 EventType —— 不是 EventCode/IsRead。
+   ⚠️ **口径**：`WHERE EventType IN ('question.timeout','report.handled')`。
+   这一段取过**两次**，两次跑的是同一句 SQL，只是时点不同 —— 见下面 4.9-甲 / 4.9-乙。
+
+── 4.9-甲 播种后（手验前）：0 行 —— 这两条都由**动作**产生，静态播种造不出 ──
+Id	ToId	ToType	EventType	Title	TargetType	TargetId	ReadAt	created_at
+-- rows: 0
+
+── 4.9-乙 手验跑完之后：7 行（同一句 SQL 重取；这就是 §4.9-甲 那句承诺的回填） ──
+Id	ToId	ToType	EventType	Title	TargetType	TargetId	ReadAt	created_at
+401	*	admin	question.timeout	提问超时未解决	comment	110	null	2026-10-13 04:46:40
+420	hv_b6_troll	customer	report.handled	举报处理结果	comment	149	null	2026-10-13 04:48:21
+421	aaa	customer	report.handled	举报已处理	comment	149	null	2026-10-13 04:48:21
+422	hv_b6_troll	customer	report.handled	举报处理结果	comment	150	null	2026-10-13 04:48:22
+423	aaa	customer	report.handled	举报已处理	comment	150	null	2026-10-13 04:48:22
+424	hv_b6_troll	customer	report.handled	举报处理结果	comment	151	null	2026-10-13 04:48:22
+425	aaa	customer	report.handled	举报已处理	comment	151	null	2026-10-13 04:48:22
+-- rows: 7
+   ⚠️ `created_at` 与界面时区差 8 小时（库内 UTC、页面 UTC+08:00）⇒ 上表的 04:46/04:48 是
+      本地 12:46/12:48，与 `_work/b6-hv-full.txt` 的跑批时刻对得上。
+   ⚠️ **这 7 行是谁造的**：
+      · `401 question.timeout` —— 手验期间**手工**做的两步（不是探针脚本里的一段）：
+        ① 后端以 `-Dspring-boot.run.arguments=--mall.downgrade.job.enabled=true
+        --mall.comment.question.timeout.enabled=true --mall.comment.question.timeout.fixed-delay-ms=15000`
+        起（a3 里前两个都写的是 `false`，见 `application-a3.properties:110/:160`）；
+        ② 删掉 `comment` 110 已有的 `question.timeout` 通知行（判据是 `NOT EXISTS (notification …)`，
+        见 `QuestionTimeoutJob.java:29`），让下一轮重新判它超时。
+        ⇒ 调度器 **12:46:40 自己发出**这一行：`_work/b6-close-handverify-backend.log:128`
+        `…QuestionTimeoutJob : 提问超时提醒：NOTIFY…处理 1 条…通知 1 条`，与表里 `created_at` 同秒。
+        **不是**手写 INSERT。
+      · `420/422/424 举报处理结果` 收件人 = 被举报内容的**作者**（`hv_b6_troll`）；
+        `421/423/425 举报已处理` 收件人 = **举报人**（`aaa`）。一对一行，来自 `ReportService.notifyHandled`
+        的两次 `notify(...)`。三单 = 手验 ㉕（第 1 次警告）+ ㊱-1（第 2 次）+ ㊱-2（第 3 次，触发封号）。
+   ⚠️ 手验还产出 18 条**块内其它**事件（`comment.mention` / `comment.reply` / `comment.on.post` /
+      `comment.accepted`，Id 402–419，收件人是 `jixin_digital` / `123` / `yunqi_digital` / `chenh99`）。
+      它们不属于方案 §十一 点名的「两条治理回流」，故不进上表；要看全量就
+      `SELECT * FROM notification WHERE Id >= 401`。
+
+── 4.10 全库内容域六表的行数（一屏看全） ──
+t	n
+comment	8
+comment_image	2
+comment_like	7
+comment_mention	5
+report	2
+sensitive_word	10
+-- rows: 6
+
+── 4.11 全库计数（补测 2026-10-13；只读探针 `_work/Sql.java`，凭据只从环境变量读） ──
+q	tables_total	nonpk_indexes	nonpk_unique
+1	36	67	18
+-- rows: 1
+   表数 36       = COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE()
+   索引 67       = COUNT(DISTINCT TABLE_NAME, INDEX_NAME)，INDEX_NAME <> 'PRIMARY'
+   UNIQUE 18     = 同上再加 NON_UNIQUE = 0
+   ⚠️ 这条是**本笔的独立实测**（三行 SQL 见上，可原样重跑）；`db-migration.md` 注意 18 / `db-schema.md §14.4` 里那些旧索引数（「30 个」等）是**当年各自的写法**，两者口径不同、**不做减法**。
+
+── 4.12 手验跑完之后的同一批口径（甲 = §4.1/§4.3/§4.8/§4.10 那组「手验前」，乙 = 本段） ──
+六表行数：
+t	n
+comment	18
+comment_image	4
+comment_like	8
+comment_mention	14
+report	5
+sensitive_word	11
+-- rows: 6
+
+user.WarnCount：users	WarnCount>0 的人	max	被封
+48	1	3	1
+-- rows: 1
+   ⇒ 那一个就是手验现场注册的一次性作者 `hv_b6_troll`：`WarnCount=3`、`banned=1`、
+     `banReason='内容多次违规，累计 3 次警告，系统自动封禁'`（`AUTO_BAN_REASON` 原串）。
+
+增量的**逐行**落点（甲里没有、乙里有的）：
+  表             Id                                  备注
+  comment        142–151（10 行）                     142/143/148 = goods 80 的实名/匿名/含图评价；144/145 = 对 115/142 的回复；
+                                                      146/147 = 提问 + 回答；149/150/151 = 一次性作者的 3 条回复，**已被举报链软删**（`Status='deleted'`）
+  comment_image  10 / 11（2 行）                      都挂 `CommentId=148`：10 = `rejected`（文件已真删）、11 = `approved`
+  comment_like   15（1 行）                            `114 / 1111 / dislike`
+  comment_mention 36–44（9 行）                       跟着本段新评论走
+  report         9 / 10 / 11（3 行）                  都 `handled`、`HandlerId='qa7PmpUojO'`（手验那个管理员会话）
+  sensitive_word 17（1 行）                           「线材」—— ㉙ 加、命中 1 条历史评论；㉗ 的 `hv_b6_probe_word`(Id=16) 已被 ㉙″ 删掉
+   ⚠️ **Id 有洞不是漏行**：预跑的先占掉了 `comment` 118–141 / `comment_image` 6–9 / `report` 3–8 /
+      `comment_mention` 14–35 / `comment_like` 13–14 / `sensitive_word` 11–15 这些号段，清理删了行但
+      MySQL 的 `AUTO_INCREMENT` 不回退 ⇒ 最后一发从洞后面接着发号。
+   ⚠️ 甲里 `comment_image` 的种子待审图 `Id=4` 在乙里**仍是 `pending`** —— 手验第九段驳回的是
+      **本段自己上传**的那一张（`Id=10`），不是种子那张。种子那张留着，好让「待审图片」这一栏
+      在演示时有东西可审（页面状态条上的 `1 待审图片` 就是它）。
+   ⚠️ **本段的读数被污染过一次、已回退**：收口令冒烟时把探针的段号开关写成了**位置参数** ⇒
+      整条流程又跑了一遍，多出一组产物（`comment` 152–157 / `report` 12–14 / `notification` 426–443 /
+      `comment_like` 17 / `comment_mention` 45–50），并把上面这几个值也动了（`comment_image.Id=4`
+      被翻成 `approved`、`hv_b6_troll` 的警告数 3→6）。已用 `_work/b6-hv-revert-accidental.sh`
+      回退到本段的读数。经过、以及**唯一一处不回拨**（`report.Id=1` 的 `created_at` 停在事故那一刻，
+      它本来就每次重算）见 `b6-c7-handverify.txt` §6.7 + TD-55。
+
+═══════ 5. 逐条对照（方案 §十一「必做 5 个」→ 落点 / 证据行） ═══════
+
+| # | 方案 §十一 的要求 | 落点 | 本文档证据 |
+|---|---|---|---|
+| 1 | 30 分钟前已超时的未解决问答（触发 QuestionTimeoutJob） | `comment.Id=110`（goods 76，`Kind='question'`，`IsSolved=0`，`AcceptedReplyId` 为 NULL，`created_at` = 2026-10-13 02:42:38 ⇒ 至取证时刻已逾 9 小时）。⚠️ 这一条是 commit 2 手验留下的，**不是**本探针插的 —— 探针只把它的邻居 `Id=111` 补成「已解决 + 已采纳 112」，好让「问答管理」那一栏的环图**两种态都看得到**。 | §4.1 第 1、2 行 + §4.2 |
+| 2 | 待审图片（触发图片审核） | `comment_image` 两条都挂在 `CommentId=114`：`Id=4` `pending` + `Id=5` `approved`；文件已拷进 `$TEMP/a3-uploads/comment/b6c7-review-{1,2}.jpg`。⚠️ **不留 `rejected` 种子行** —— 那条态的定义是「已删仓库文件」，造一条指向不存在文件的种子行页面上就是个破图框；驳回路径留给手验现场点一次。 ✅ **手验已点**：第九段驳回 `Id=10`，响应 `fileDeleted:true`、`$TEMP/a3-uploads/comment/b6c7-hv-img-a.jpg` 从盘上消失（`_work/b6-hv-full.txt` ㉜）。 | §1 + §4.3 + §4.12 |
+| 3 | 待处理举报单（触发举报处理） | `report.Id=1`（告评论 114，理由「广告」）+ `Id=2`（告商品 76，理由「其他」，带说明），两条都 `pending`。⚠️ 一条告评论、一条告商品 —— 页面上「看该对象评论」那枚跳转**只有后者跳得动**（`report` 表没存评论挂在谁身上）。 | §4.6 |
+| 4 | 预置 10 个敏感词 | `sensitive_word` 10 行（广告 / 刷单 / 博彩 / 赌博 / 诈骗 / 传销 / 违禁 / 高仿 / 山寨 / 代开发票），commit 0 随建表落库（`mall_management_sql.sql` 的 Migration ⑮-8），**不是**本探针插的 —— 探针只核数。 | §4.7 |
+| 5 | 若干评论（含匿名、含图、含回复、含点赞） | `comment.Id=114` 匿名（`IsAnonymous=1`，强制 5 星）**含图**（两条 `comment_image`）**含点赞**（4 赞 / 2 踩，`comment_like` 与冗余计数 `LikeCount`/`DislikeCount` 一致）+ `Id=115` 实名 4 星 + `Id=116` 商家首次回复（`IsMerchantFirst=1`，置顶）+ `Id=117` 客户回复带 `@yunqi_digital`（`comment_mention` 一行）。⚠️ 冗余计数是**按 `comment_like` 实际行数回填**的 —— 种子里手写一个对不上的数，页面上的互动数就成了假话。 ✅ 手验又现场补了 10 行（含匿名 `Id=143`、含图 `Id=148`、含回复 `145/144`、含点赞 `comment_like Id=15`），见 §4.12。 | §4.1–§4.5 + §4.12 |
+
+⚠️ **本轮播种的哨兵**：`comment` 表 goods 76 下 `AuthorId='3333'` 的 review（= `Id=117`）。探针以它为幂等哨兵：在就整批跳过。⇒ 本文档 §3 那次 `--exec` **没有重复插行**（`§2` 与 `§3` 的计数逐字相同）。
+
+⚠️ **§4.9-甲的 0 行是预期值，不是失败**：本块两条治理回流（`question.timeout` 发管理端共享收件箱 / `report.handled` 发举报人）都由**动作**产生 —— 前者要 `QuestionTimeoutJob` 醒一次（a3 profile 下调度器总闸关着，见 `application-a3.properties:110/:160`），后者要先处理掉一张举报单。
+✅ **已回填**：两者都在 commit 7 的手验里现场产生了，共 7 行，见 §4.9-乙（那份实录的逐条走查在 `_work/b6-hv-full.txt`，界面侧在 `hv-shots/result.json` 26 项 / 0 失败）。
+
+⚠️ **本文档两套时点，别看串**：§1–§4.11 是**播种后 / 手验前**的种子态（本笔交付的「假数据」就是这个态）；§4.6 尾注、§4.8 尾注、§4.12 是**手验之后**的实测态。手验会改数据（那是它的活），所以两套数不同是正常的；能对上的地方（如六表行数 = 种子数 + §4.12 的增量）才是判据。
+
+
+═══════ 【更正 · 2026-10-13】§4.9-乙 的 `ToId` 列 —— 是缺陷现场，不是正确形态 ═══════
+
+⚠️ 上文 §4.9-乙 那张表里，7 行的 `ToId` 全是**登录名**：
+
+     401  *              admin     question.timeout
+     420  hv_b6_troll    customer  report.handled
+     421  aaa            customer  report.handled
+     422  hv_b6_troll    customer  report.handled
+     423  aaa            customer  report.handled
+     424  hv_b6_troll    customer  report.handled
+     425  aaa            customer  report.handled
+
+   以及该表尾注提到的那 18 条 `Id=402–419`（`comment.mention` / `comment.reply` /
+   `comment.on.post` / `comment.accepted`），文里也是拿**登录名**（`jixin_digital` /
+   `123` / `yunqi_digital` / `chenh99`）当**收件人**报的。
+
+缺陷：`notification.ToId` 的契约是**业务号**（`user.customerid` / `user.merchantid`；
+见 `db-schema.md` 的 `ToId` 行与 `db-schema.md:466`）。块 6 的 5 个 `EventType`
+（`comment.mention` / `comment.reply` / `comment.on.post` / `comment.accepted` /
+`report.handled`）当时写的是**登录名** ⇒ 前端 `/notification/list` 按业务号查，
+**这 5 类通知一条都投不进收件箱**。（其余 17 个 `EventType` 一直写业务号，未受影响。）
+
+⇒ 本文件 §4.9-乙 只能当**行数 / 时序 / 谁造的**那一半证据读；**`ToId` 的取值不作数**。
+⇒ 2026-10-13 批文 ②③ 已修：`send(...)` 的 `ToId` 改由
+   `CommentDao.selectUserIdByUsername` / `selectMerchantIdByGoodsId` 换算成**业务号**；
+   `comment_mention.MentionedId` **保持登录名不变**；自 @ / 自回复的判定**先判后换算**。
+   重造场景 + 重贴证据见同目录 `b6-commit3-mention.txt` §七 / §八；
+   根因与面上教训（「校验器报 OK ≠ 没问题」）见 `tech-debt.md` **TD-59**。
+⇒ 存量已**回填**（2026-10-13，用户裁决一）：`UPDATE notification JOIN user … SET ToId =
+   COALESCE(merchantid,customerid) WHERE EventType IN (这 5 个 code)` ——
+   **实动 32 行**（`_work/_b6-backfill-before.txt` 表尾 `-- rows: 32`，after 同为 32 行），
+   其余 17 个 `EventType` **一行未碰**。快照先行（`_b6-backfill-before.txt` 可回滚），
+   复读两次对照见 `_b6-backfill-after.txt`；每行的 `updated_at` 前后**逐字节相同**
+   （如 `Id=402` 两读都是 `2026-10-13 04:48:20`）⇒ 证明是**值改写**、不是删了重插。

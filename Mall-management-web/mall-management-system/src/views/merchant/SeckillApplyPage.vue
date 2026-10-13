@@ -152,7 +152,7 @@ const hintBad = computed(() => {
   const v = Number(price.value)
   const q = Number(quantity.value)
   const priceBad = price.value !== '' && (!isFinite(v) || v <= 0 || (isFinite(orig) && orig > 0 && v >= orig))
-  const qtyBad = quantity.value !== '' && (!isFinite(q) || q < 0 || !Number.isInteger(q))   // ⚠️ 原写 `q !== Math.rint(q)` —— **`Math.rint` 是 Java 的、JS 没有**（同批误用，见 `ProductPage.vue:520`）：`isFinite(q) || q < 0` 两个短路支**都是假**时才轮到它 ⇒ **商家一填限量就 `TypeError`**，红字提示整条渲染中断。2026-10-12 同行修正，判据 `Number.isInteger`（原意就是「q 不是整数」）。
+  const qtyBad = quantity.value !== '' && (!isFinite(q) || q < 0 || !Number.isInteger(q))   // ⚠️ 原写 `q !== Math.rint(q)` —— **`Math.rint` 是 Java 的、JS 没有**（同批误用，见 `ProductPage.vue:699`；① 甲案 −16 行后）：`isFinite(q) || q < 0` 两个短路支**都是假**时才轮到它 ⇒ **商家一填限量就 `TypeError`**，红字提示整条渲染中断。2026-10-12 同行修正，判据 `Number.isInteger`（原意就是「q 不是整数」）。
   return priceBad || qtyBad
 })
 

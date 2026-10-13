@@ -1,0 +1,78 @@
+################################################################
+# C3 块 6 · commit 2〈问答〉· 手验证据（2026-10-13）
+# 环境：VM 库 192.168.229.129 / mall_management_sql，后端 a3 profile，端口 8088
+# ⚠️ a3 的 app.auth.enabled=false ⇒ IdentityGuard 三处 fail-open 全放行
+#    ⇒ 本证据**验不到 403 那条线**（闸开着 + 传别人的登录名），只验业务规则。
+#    **闸关 ⇒ 手验绿 ≠ 默认 profile 绿。**
+################################################################
+
+=========== 一、采纳答案 /comment/accept：五道闸 + 采纳后不可改 ===========
+（见本目录 b6-c2-accept-probe.txt —— 探针 stdout 原文）
+
+=========== 二、TimeoutJob：调度器总闸的发现（★ 这一条最容易被漏）===========
+现象：按 a3 profile 原样起服务（mall.comment.question.timeout.enabled=false），
+      把某条提问的 created_at 改到 31 分钟前，**跑 45 秒一条通知都没有**。
+根因（读码确认，不是猜）：@EnableScheduling **不在启动类上**，它挂在一个自己也被
+      @ConditionalOnProperty 关着的载体类上 ——
+      merchant/job/MerchantDowngradeSchedulingConfig.java:23
+        @Configuration @EnableScheduling
+        @ConditionalOnProperty(name = "mall.downgrade.job.enabled",
+                               havingValue = "true", matchIfMissing = true)
+      而 application-a3.properties 把 mall.downgrade.job.enabled 钉成 false
+      ⇒ **a3 下整个调度器都不存在**，任何 @Scheduled 都不醒，与本任务自己的开关无关。
+      ⇒ 本任务在 a3 是**双闸关闭**：① 载体类没建 ⇒ 无调度器；② 自己那行 enabled=false。
+         application-a3.properties:156-157 那条注释写的正是这个层级关系，本次实测证实。
+   ⇒ 要真跑起来，必须**同时**放开载体闸：
+      -Dspring-boot.run.arguments=--mall.downgrade.job.enabled=true \
+                                --mall.comment.question.timeout.enabled=true \
+                                --mall.comment.question.timeout.fixed-delay-ms=15000
+      （只放开总闸、不动其它任务自己的开关 ⇒ 其余 5 个 job 仍各自关着，不会一起来凑热闹。）
+
+=========== 三、TimeoutJob：送达 + 幂等 ===========
+造数据：Q5=24 / Q6=25 由 API 正常提问，再用 SQL 把 created_at 拨到 31 分钟前
+  UPDATE `comment` SET created_at = NOW() - INTERVAL 31 MINUTE WHERE Id IN (24,25);
+
+-- 通知表（question.timeout）：
+Id      ToId    ToType  EventType         TargetType  TargetId  BatchId                               T
+269     *       admin   question.timeout  comment     24        395a3a2f-d9ba-4718-a5a9-eb76c16997f2  16:04:42
+270     *       admin   question.timeout  comment     25        395a3a2f-d9ba-4718-a5a9-eb76c16997f2  16:04:42
+  ⇒ 收件人 = 管理端共享收件箱（ToId='*' / ToType='admin'），与 GoodsController /
+    SeckillController 逐字同款；
+  ⇒ 同一轮的两条共用一个 BatchId（一次投递 = 一个 BatchId + N 行，管理端通知历史据此收成一行）；
+  ⇒ TargetType='comment' 且 TargetId=提问 Id —— 这正是 SQL NOT EXISTS 的幂等键。
+
+-- 幂等（同一条提问不再报第二遍）：上面 2 行之后又跑了 8+ 轮（15 秒一轮），
+   SELECT COUNT(*) WHERE EventType='question.timeout' 恒为 2。
+
+=========== 四、TimeoutJob：饥饿（NOT EXISTS 必须在 SQL 里）===========
+为什么单独造 60 条：MAX_PER_ROUND=50。若「已报过的」判据放在 **Java 里**跳，
+第 1 轮报 50 条之后，那 50 条会永远占据 ORDER BY created_at ASC + LIMIT 50 的
+前 50 个名额 ⇒ 第 51 条起**永远扫不到**。判据放进 SQL 的 NOT EXISTS 才没有这个饥饿。
+
+-- 造 60 条 30 分钟前的未解决提问（内容 STARVE-001..060，created_at 距当下 120-n 分钟，
+   越靠前越老）：
+   INSERT ... SELECT ... LIMIT 60    ⇒ Id 26..85，60 行
+
+-- 作业日志（服务端控制台是 GBK ⇒ 日志文件里的中文是乱码，这里给译文）：
+   00:04:42  QuestionTimeoutJob : 问答超时提醒（NOTIFY）：本轮命中 2 条，落库 2 条
+   00:06:12  QuestionTimeoutJob : 问答超时提醒（NOTIFY）：本轮命中 50 条，落库 50 条  ← 第 1 轮，吃满上限
+   00:06:27  QuestionTimeoutJob : 问答超时提醒（NOTIFY）：本轮命中 10 条，落库 10 条  ← 15 秒后第 2 轮，接着报剩下的
+
+-- 结果核对：
+   STARVE 已被报过的条数 = 60 / 60        starve_left（还没报的）= 0
+   ⇒ 60 条**全部**送达。若判据在 Java 里跳，第 2 轮会打「命中 50 / 落库 0」，
+     且 starve_left 会停在 10（剩下 10 条永远报不出去）。
+
+-- 附：两轮的**原始行**（比上面那三行日志更硬 —— 日志文件是 GBK 乱码，这组是库里的真值）：
+   Id 271..320  TargetId 26..75  created_at 16:06:12   ← 第 1 轮，50 行
+   Id 321..330  TargetId 76..85  created_at 16:06:27   ← 第 2 轮（15 秒后），10 行
+   60 行分两批、按 TargetId 顺序递增、无一条重复 —— 这就是 NOT EXISTS 参与 LIMIT 的可观测后果。
+
+=========== 五、'comment.accepted' 通知（采纳时顺手发）===========
+Id   ToId           ToType     EventType         TargetType  TargetId  Title
+267  beichen_home   merchant   comment.accepted  comment     15        你的回答被采纳
+268  gaoq44         customer   comment.accepted  comment     21        你的回答被采纳
+  ⇒ ToId/ToType 跟**回答者**走（不是提问者）：收件箱按 (ToId,ToType) 两键查，
+    发给角色不同的一边 = 通知落库了但没人读得到。267 是商家答的、268 是客户答的，两条各走各的。
+  ⇒ Content 里的提问正文被截到 30 字（notification.Content 是 varchar(1024)、
+    comment.Content 是 varchar(1000)，不截会顶穿列宽；而 send 是 fail-soft ⇒ 外面看不见异常）。

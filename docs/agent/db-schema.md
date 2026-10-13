@@ -5,14 +5,14 @@
 > **Java 坐标约定（2026-09-30 补）**：`G:` = `GoodsController.java`（前 `MallManagementGoodsController.java`）、`M:` = `MessageController.java`（前 `MallManagementMessage.java`）、`U:` = `UserController.java`（前 `MallManagementUserController.java`）的**语句行**（**不是** route 注解行，与 `api-contract.md` 的口径**相反**，两文件不要互抄）。B1 / B2 / B3 之后若干读写路径已搬到 `mallmanagement_service` 下的 Service ⇒ 本文件出现 `GoodsCacheService:` / `UserCacheService:` / `OrderStateMachine:` 等前缀，那是**跨文件搬迁**、不是行号漂移。**全文件 Java 坐标已于 2026-09-30 对 HEAD 逐条复核并替换** —— 原一版系统性偏旧（成因同 `api-contract.md#api-top`：各笔新代码插入后未同步）。⚠️ **三层四笔（order PR #25 `28194b4` / goods 2026-10-02 / user PR #32 `0c07e96` / message `8ed5fc1`）后**：`G:` / `M:` / `U:` 三个 Controller 已只剩路由 —— SQL 与业务体分别下沉 `<域>/dao/<域>Dao.java` 与 `<域>/service/`。**本文件下表凡涉这三个域的 `G:` / `M:` / `U:` 坐标，若未随该域的笔改写，一律已陈旧**；下表 `:41-48` 的用户域行已于第三笔、消息域行（`M:378`）已于第四笔改写，其余（`U:` 一族、`G:` 的未重测行）引用前请以源码为准。
 > ⚠️ **2026-10-02 笔 2 后**：订单端点的 SQL 已随 `OrderController` 拆出，迁至 `order/dao/OrderDao.java`；`GoodsController` 的商品行整体 **−9**（⚠️ 该「−9」只是**首两行**的口径：以 2026-09-30 基线 `148e77b` 逐条实测，`goodstype`/`goodsAdd` 为 −9、`goodsSelect` 一族 −8、`productCodePrice` −4、`goodsUp` 之后 +16/+23/+23，**不要拿 −9 换算全表**；详见 `api-contract.md#api-top`）。下表**订单相关行的 `G:` 已改指 `OrderDao`**，其余 `G:` 值**尚未重测** —— 引用前请以源码为准。
 > ⚠️ **2026-10-02 三层重构第二笔（商品域）后**：商品 **8 条内联 SQL** 从 `GoodsController` 下沉到 `goods/dao/GoodsDao.java`，写/读方法体进 `goods/service/GoodsService.java` —— 本表原 `G:` 的**商品行**据此改指 `GoodsDao.searchByKeyword`。这四个走缓存的读路径（`GoodsCacheService:81` / `:146` / `priceByTriple`）**未受影响**（它们的 SQL 本就在 Service，2026-09-30 已复核）。新增前缀：`S:` = `GoodsService.java`、`D:` = `GoodsDao.java`。
-> 表数量：**18** —— 11 张原始表 + 7 张由 `.sql` 末尾 Migration 块建的：`order_state_transition`（B3，2026-09-29，`:221-235`）· `admin_audit`（C3 批 A，2026-10-08，`:264-292`）· `notification`（C3 块1-I2，2026-10-09，`:294-327`）· `merchant_application`（C3 块 2〈用户块〉，2026-10-09，`:369-390`）· `template`（C3 块3 **就地改造**，2026-10-10 #8，`:556-569`）· `goods_audit`（C3 块 3〈商品块〉，2026-10-10，`:492-515`）· `cart`（C3 块 4〈订单块〉，2026-10-10，`:708-720`）。⚠️ **C3 块 4〈订单块〉（2026-10-10，分支 `feat/c3-admin-block4`）—— 本文件第二次「加表」但 `cart` 刻意不走本文件的中段**：`cart` 是 A1 甲（用户 2026-10-10 逐项裁决）的**真购物车载体**，逐列清单 / 索引 / 与 `order` 的关系**登记在文件末 §11**，**不就地插入 §1 表清单与 §6.x** —— 理由是零漂移：本文件当前有 **44 处外部 `文件:行号` 引用**（10 个文件，指向本文件 **26 个不同行号**）（`slot-registry.md` 26 / `selection-status.md` 5 / `progress.md` 4 / `defect-survey.md` 2 / context-pack 4 / `OrderCenter-merchant.html` 1 / `api-contract.md` 1 / `OrderDao.java` 1），中段插一行就让其后**全部**集体 +1；重指回本文件的工作归「文档漂移清理笔」（同 §十五 15-5 的登记不修口径）。另 `order` **加** `Quantity`（`.sql:730-738`，`int NOT NULL DEFAULT 1`，存量 6 行回填 1，**不增表、不改行数** ⇒ A3 的 P4 种子计数 `order=6` 不受影响）。⚠️ **`cart` 不在 `.sql:21` 起的 `DROP TABLE IF EXISTS` 基线清单里** —— 它是用户数据不是种子，整份重导**不清空购物车**（`.sql:689-690` 块注释）。⇒ 表数 **17 → 18**、索引 **16 → 18**（+`uk_cart_customer_product`、+`idx_cart_customer`）、**非主键 UNIQUE 3 → 4**（新增第 4 个 `uk_cart_customer_product`；⚠️ 三处计数均为**按 DDL 直接推导**，非实测查询结果，出处 `.sql:708-720`）。⚠️ **`notification_template`（`:329-345`）与 `goods_template`（`:474-484`）已由 #8 物理删** —— 两者在 `.sql` 里的 `CREATE TABLE` 语句**仍在原地**（零漂移手法），由块尾的 `DROP TABLE IF EXISTS` 中和 ⇒ **本笔之前**，该文件里共 **21** 个 `CREATE TABLE`、**净 19 张表**（判据：导入后那两张表不存在；⚠️ 原写「20 个 / 净 18 张」**漏算了 §12 的 `order_shipping_track`**，2026-10-11 订正）。⚠️ **可视化段（2026-10-11，commit 0–4）之后**：再加 **3 张表**（`order_item` commit 0 / `stats_daily` commit 2 / `goods_sku` commit 3 补丁）+ **4 张表加列**（`login.CreateTime` / `goods` ×4 / `goods_audit` ×5 / `template.Kind`）+ **11 张表各加一列 `Source`** ⇒ 表数 **19 → 22**、`CREATE TABLE` **21 → 24**、索引 **23 → 30**、非主键 UNIQUE **4 → 7**（VM 库 `information_schema` 实测，2026-10-11）。§1 表清单与 §6.x **刻意不插入**（零漂移，理由同本段开头的 `cart`）—— 逐列定义 / 净变化表见**文件末 §13**。⚠️ **C3 块 5〈营销块〉（2026-10-11/12）之后**：再加 **8 张表**（`coupon` / `coupon_grant` / `subsidy_rule` / `subsidy_goods` / `seckill_invitation` / `seckill_application` / `seckill_activity` / `shop_follow`）+ **6 处加列**（`goods.OriginalPrice` / `order.CouponId` / `order.SubsidyAmount` / `order.PayAmount` / `goods_audit.OriginalPrice`）+ **1 个新索引**（`goods_sku` 的 `idx_goods_sku_sku_code`）⇒ 表数 **22 → 30**、行首 `CREATE TABLE` **24 → 32**（VM 库 `information_schema.TABLES` 实测 = 30、本文件所在仓的 `.sql` 实测 `CREATE TABLE` = 32，2026-10-12）。**本行的「表数量：18」与 §2 行首的「17 张表 / 共 20 个索引」一律按各自写作时的实测口径读，不要拿它们做减法**；块 5 口径以 **§14** 为准（逐列定义 / 加列 / 索引 / 净变化表）。
+> 表数量：**18** —— 11 张原始表 + 7 张由 `.sql` 末尾 Migration 块建的：`order_state_transition`（B3，2026-09-29，`:221-235`）· `admin_audit`（C3 批 A，2026-10-08，`:264-292`）· `notification`（C3 块1-I2，2026-10-09，`:294-327`）· `merchant_application`（C3 块 2〈用户块〉，2026-10-09，`:369-390`）· `template`（C3 块3 **就地改造**，2026-10-10 #8，`:556-569`）· `goods_audit`（C3 块 3〈商品块〉，2026-10-10，`:492-515`）· `cart`（C3 块 4〈订单块〉，2026-10-10，`:708-720`）。⚠️ **C3 块 4〈订单块〉（2026-10-10，分支 `feat/c3-admin-block4`）—— 本文件第二次「加表」但 `cart` 刻意不走本文件的中段**：`cart` 是 A1 甲（用户 2026-10-10 逐项裁决）的**真购物车载体**，逐列清单 / 索引 / 与 `order` 的关系**登记在文件末 §11**，**不就地插入 §1 表清单与 §6.x** —— 理由是零漂移：本文件当前有 **44 处外部 `文件:行号` 引用**（10 个文件，指向本文件 **26 个不同行号**）（`slot-registry.md` 26 / `selection-status.md` 5 / `progress.md` 4 / `defect-survey.md` 2 / context-pack 4 / `OrderCenter-merchant.html` 1 / `api-contract.md` 1 / `OrderDao.java` 1），中段插一行就让其后**全部**集体 +1；重指回本文件的工作归「文档漂移清理笔」（同 §十五 15-5 的登记不修口径）。另 `order` **加** `Quantity`（`.sql:730-738`，`int NOT NULL DEFAULT 1`，存量 6 行回填 1，**不增表、不改行数** ⇒ A3 的 P4 种子计数 `order=6` 不受影响）。⚠️ **`cart` 不在 `.sql:21` 起的 `DROP TABLE IF EXISTS` 基线清单里** —— 它是用户数据不是种子，整份重导**不清空购物车**（`.sql:689-690` 块注释）。⇒ 表数 **17 → 18**、索引 **16 → 18**（+`uk_cart_customer_product`、+`idx_cart_customer`）、**非主键 UNIQUE 3 → 4**（新增第 4 个 `uk_cart_customer_product`；⚠️ 三处计数均为**按 DDL 直接推导**，非实测查询结果，出处 `.sql:708-720`）。⚠️ **`notification_template`（`:329-345`）与 `goods_template`（`:474-484`）已由 #8 物理删** —— 两者在 `.sql` 里的 `CREATE TABLE` 语句**仍在原地**（零漂移手法），由块尾的 `DROP TABLE IF EXISTS` 中和 ⇒ **本笔之前**，该文件里共 **21** 个 `CREATE TABLE`、**净 19 张表**（判据：导入后那两张表不存在；⚠️ 原写「20 个 / 净 18 张」**漏算了 §12 的 `order_shipping_track`**，2026-10-11 订正）。⚠️ **可视化段（2026-10-11，commit 0–4）之后**：再加 **3 张表**（`order_item` commit 0 / `stats_daily` commit 2 / `goods_sku` commit 3 补丁）+ **4 张表加列**（`login.CreateTime` / `goods` ×4 / `goods_audit` ×5 / `template.Kind`）+ **11 张表各加一列 `Source`** ⇒ 表数 **19 → 22**、`CREATE TABLE` **21 → 24**、索引 **23 → 30**、非主键 UNIQUE **4 → 7**（VM 库 `information_schema` 实测，2026-10-11）。§1 表清单与 §6.x **刻意不插入**（零漂移，理由同本段开头的 `cart`）—— 逐列定义 / 净变化表见**文件末 §13**。⚠️ **C3 块 5〈营销块〉（2026-10-11/12）之后**：再加 **8 张表**（`coupon` / `coupon_grant` / `subsidy_rule` / `subsidy_goods` / `seckill_invitation` / `seckill_application` / `seckill_activity` / `shop_follow`）+ **6 处加列**（`goods.OriginalPrice` / `order.CouponId` / `order.SubsidyAmount` / `order.PayAmount` / `goods_audit.OriginalPrice`）+ **1 个新索引**（`goods_sku` 的 `idx_goods_sku_sku_code`）⇒ 表数 **22 → 30**、行首 `CREATE TABLE` **24 → 32**（VM 库 `information_schema.TABLES` 实测 = 30、本文件所在仓的 `.sql` 实测 `CREATE TABLE` = 32，2026-10-12）。**本行的「表数量：18」与 §2 行首的「17 张表 / 共 20 个索引」一律按各自写作时的实测口径读，不要拿它们做减法**；块 5 口径以 **§14** 为准（逐列定义 / 加列 / 索引 / 净变化表）。⚠️ **C3 块 6〈内容+消息块〉（2026-10-12/13）之后**：再加 **6 张表**（`comment` / `comment_mention` / `comment_image` / `comment_like` / `report` / `sensitive_word`）+ **1 处加列**（`user.WarnCount`，`int NOT NULL DEFAULT 0`）⇒ 表数 **30 → 36**、行首 `CREATE TABLE` **32 → 38**（VM 库 `information_schema.TABLES` 实测 = 36、本仓 `.sql` 实测 `CREATE TABLE` = 38，2026-10-13）。§1 表清单与 §6.x **同块 5 一样刻意不插入**（零漂移），块 6 口径以文件末 **§15** 为准（逐列定义 / 加列 / 索引 / 净变化表）。
 > ⚠️ **块 2 还改了「两张既有表」，但加列不增表**：`user` +8 列（`:396-404`，封禁 3 + 降级 5）、`goods` +2 列（`:407-409`，`ShelfState` / `DelistedAt`）—— 故表数**只 +1**；那 10 列落在 §6.3 与 §6.10 的既有小节里（**不另开节**）。
 > ⚠️ **块 3 再改「两张既有表」+ 净增 2 张**：`goodstype` +3 列（`:449-451`，`ParentId` / `Sort` / `State`）**并换唯一键**（`:454-455`，`uk_goodstype_GoodType` → `uk_goodstype_parent_name (ParentId, GoodType)`）、`goods` +5 列（`:461-467`，`TypeId` / `DetailTemplateId` / `SpecTemplateId` / `AfterSaleTemplateId` / `DeletedAt`）；两张新表 `goods_template` / `goods_audit`。⇒ 表数 **16 → 18**，索引 **15 → 16**（换代一换一 + 净增 `idx_goodstype_parent_sort`），**非主键 UNIQUE 仍 3 个**。既有两表的加列落在 §6.4（`goodstype`）/ §6.3（`goods`）。 ⚠️ **块 3 就地改造（#8，2026-10-10）—— 本文件首次出现「删表 + 删列」**：新建**通用表** `template`（`:556-569`，`Type` 区分用途）；**物理删** `goods_template` + `notification_template`（用户明确批准，见 `db-migration.md` 注意 11）；`goods` **加** 3 段快照文本（`:588-607`，`Detail` / `Spec` / `AfterSale`）**删** 3 个模板引用 Id（`:611-630`，`DetailTemplateId` / `SpecTemplateId` / `AfterSaleTemplateId` —— 那三列**恒 NULL、全仓零写入**，见注意 10 末句）；`goods_audit` 加同 3 列（`:636-655`）。⇒ 表数 **18 → 17**、索引 **16 → 16**（净 0）、**非主键 UNIQUE 仍 3 个**（第三个从 `uk_notification_template_key` 换成 `uk_template_type_name`）。语义变化：商品侧由「**引用**模板 Id」（改模板 ⇒ 商品联动变）改为「**快照**」（选模板 → 填入 → **可改** → 存**最终文本** ⇒ 改模板**不影响**已上架商品）。
 > ⚠️ **2026-10-09 更正 —— 原写 12 是漏登**：先后漏了批 A 的 `admin_audit`；I2 登记时一并补齐（同一缺口见 `db-migration.md` 注意 8）。本文件此前所有「12 张表」的字面与据此推导的计数（索引张数、UNIQUE 个数）也随之更新。
 > `.sql` 末尾另有一段 S1a 追加的 Migration 块（`:236-245`，2026-09-30），**只含一条 `CREATE UNIQUE INDEX`，不建表**。
 > 全部为 `ENGINE=InnoDB`、`utf8mb4_0900_ai_ci`。
 >
-> ⚠️ 该 `.sql` 行尾是 CRLF（**738 个 `\n` / 738 个 `\r`，0 个裸 CR** —— 2026-10-10 **C3 块 4〈订单块〉**追加一块后**重新实测**〔LF 738 / CR 738 / 裸 CR 0；同次实测行首 `CREATE TABLE` 共 20 条〕；上一版为 680 / 680〔块 3 就地改造 #8 追加一块后，`CREATE TABLE` 19 条〕，更前为 409 / 409〔块 2 追加一块后〕，再上为 345 / 345〔I2 追加两块后〕、245 / 246，S1a 前原为 235 / 236）。⚠️ **更新（2026-10-11，可视化段 commit 0–4 追加四个块后重新实测）**：**1219 行 / LF 1219 / CR 1219 / 裸 CR 0**、行首 `CREATE TABLE` **24 条**。用会把行尾归一化的编辑器改它，diff 会变成整份文件重写 —— 改前先确认 diff 只有预期行。⚠️ **更新（2026-10-12，C3 块 5〈营销块〉追加四个块后重新实测）**：**1505 行 / LF 1505 / CR 1505 / 裸 CR 0**、行首 `CREATE TABLE` **32 条**（+8，见 §14.1）。
+> ⚠️ 该 `.sql` 行尾是 CRLF（**738 个 `\n` / 738 个 `\r`，0 个裸 CR** —— 2026-10-10 **C3 块 4〈订单块〉**追加一块后**重新实测**〔LF 738 / CR 738 / 裸 CR 0；同次实测行首 `CREATE TABLE` 共 20 条〕；上一版为 680 / 680〔块 3 就地改造 #8 追加一块后，`CREATE TABLE` 19 条〕，更前为 409 / 409〔块 2 追加一块后〕，再上为 345 / 345〔I2 追加两块后〕、245 / 246，S1a 前原为 235 / 236）。⚠️ **更新（2026-10-11，可视化段 commit 0–4 追加四个块后重新实测）**：**1219 行 / LF 1219 / CR 1219 / 裸 CR 0**、行首 `CREATE TABLE` **24 条**。用会把行尾归一化的编辑器改它，diff 会变成整份文件重写 —— 改前先确认 diff 只有预期行。⚠️ **更新（2026-10-12，C3 块 5〈营销块〉追加四个块后重新实测）**：**1505 行 / LF 1505 / CR 1505 / 裸 CR 0**、行首 `CREATE TABLE` **32 条**（+8，见 §14.1）。⚠️ **更新（2026-10-13，C3 块 6〈内容+消息块〉追加一个块后重新实测）**：**1634 行 / LF 1634 / CR 1634 / 裸 CR 0**、行首 `CREATE TABLE` **38 条**（+6，见 §15.1）。
 >
 > **完整字段清单 / 索引基线 / 外键关系见 §6–§9**（2026-09-30 补齐，逐列逐索引以 `.sql` 为准）。⚠️ **C3 块 4 的 `cart` 与 `order.Quantity` 见文件末 §11** —— 本节群**刻意不含 `cart`**，理由（零漂移）见上。
 
@@ -852,3 +852,77 @@
 
 ⚠️ **`.sql` 的行尾仍是 CRLF**：`1505 行 / LF 1505 / CR 1505 / 裸 CR 0`（2026-10-12 实测，块 5 四个块追加之后重新数过）。
 ⚠️ **本附录的「档位」一律标了出处**：类型 / 默认值 / 索引名 = **可复核**（实读库）；索引总数未重算 ⇒ **不写数**（避免又添一处像 §2 那样的陈旧计数）。
+
+## 15. 附录：C3 块 6〈内容+消息块〉（2026-10-12/13）的 6 张新表 · 2 处加列 · 15 个新索引 {#db-15}
+
+> 与 §11 / §12 / §13 / §14 同一手法：**§1 表清单与 §6.x 刻意不插入**（零漂移），块 6 的库变更全部落在本附录里。
+> 权威源 = `mall_management_sql.sql` 末尾的**两个** Migration 块（⑮，段头 `:1507-1526`，段内编号 ⑮-1~⑮-8 连续；段体 `:1528-1634`）＋ **⑯**（整改补笔，2026-10-13：段头 `:1636-1639`，⑯-1 生成列 `:1641-1678` / ⑯-2 唯一键 `:1680-1686`）；登记表见 `db-migration.md` **#30–#37** + 注意 **19–20**。
+> ⚠️ **块 6 的库变更只有「加表 6 + 加列 2 + 加索引 15」** —— 不改既有列、不删行、不改既有数据（规则 v2：向后兼容）。
+
+### 15.1 六张新表 {#db-15-1}
+
+| 表名 | 用途（段内编号） | 主键 | 关键列 | 索引（除主键外） | 证据（`.sql` 行号） |
+|---|---|---|---|---|---|
+| `comment` | **统一评论表**（⑮-1）—— 评价 / 提问 / 回答 / 楼中楼**同一张表**，`Kind` 分流 | `Id` 自增 | `TargetType`(goods/user) · `TargetId` · `ParentId`(NULL=顶层；≠NULL=回复，**指向顶层行**) · `ReplyToId`(回复的回复，两层封顶) · `Kind`(review/question/answer) · `AuthorId` · `AuthorRole`(1 用户/2 商家) · `IsAnonymous`(匿名⇒强制 5 星) · `Rating`(1-5；问答=0) · `Content`(敏感词命中<40% 已就地屏蔽为 `***`) · `Status`(normal/deleted，**逻辑删**) · `IsSolved`/`AcceptedReplyId`(问答采纳) · `IsMerchantFirst`(商家首答置顶) · `ProductCode`(购买型号，评论时从历史订单选) · `LikeCount`/`DislikeCount`(**冗余计数**) · `created_at`/`updated_at` · **`ReviewLockKey`**（⑯-1 **STORED 生成列**：仅**顶层商品评价**有值，其余 NULL） | `idx_comment_target(TargetType,TargetId,created_at)` · `idx_comment_parent(ParentId,created_at)` · `idx_comment_author(AuthorId,created_at)` · `idx_comment_kind(Kind,TargetType,TargetId)` · **`uk_comment_review_once(ReviewLockKey)` UNIQUE**（⑯-2） | `:1528-1555` + `:1641-1686` |
+| `comment_mention` | 评论 **@ 关系**（⑮-2）—— 后端自动生成，**无前端输入框** | `Id` 自增 | `CommentId`(comment.Id) · `MentionedId`(被 @ 的账号，对齐 `login.UserName`) · `created_at` | `idx_mention_comment(CommentId)` · `idx_mention_user(MentionedId,created_at)` | `:1557-1566` |
+| `comment_image` | 评论图片（⑮-3）—— **先审后发** | `Id` 自增 | `CommentId` · `ImageUrl`(`/img/comment/xxx`) · **`Status`(pending 待审 / approved 通过 / rejected 不合规〔已删仓库文件〕)** · `SortOrder` · `created_at` | `idx_image_comment(CommentId,SortOrder)` · `idx_image_status(Status,created_at)` | `:1568-1579` |
+| `comment_like` | 评论**点赞 / 踩**（⑮-4）—— 同一用户对同一评论**只能赞或踩一次** | `Id` 自增 | `CommentId`(顶层 or 回复的 Id，都是 `comment` 行) · `UserId` · `Type`(like/dislike) · `created_at` | **`uk_like_comment_user(CommentId,UserId)` UNIQUE** · `idx_like_user(UserId,created_at)` | `:1581-1591` |
+| `report` | **举报单**（⑮-5）—— 同内容同人不能二次举报；**驳回后再举报 = `UPDATE` 同一行复活** | `Id` 自增 | `TargetType`(comment/goods/user) · `TargetId` · `ReporterId` · `ReporterRole`(1 用户/2 商家) · `Reason`(辱骂/广告/违法/其他) · `Description`(理由=其他 时填) · `Status`(pending/handled/rejected) · `HandlerId` · `HandleNote` · `created_at`/`updated_at` | **`uk_report_target_reporter(TargetType,TargetId,ReporterId)` UNIQUE** · `idx_report_status(Status,created_at)` · `idx_report_reporter(ReporterId,created_at)` | `:1593-1611` |
+| `sensitive_word` | **敏感词库**（⑮-6）—— 预置 10 词（⑮-8 种子） | `Id` 自增 | `Word` · `created_at`/`updated_at` | **`uk_sensitive_word(Word)` UNIQUE** | `:1613-1621` |
+
+⚠️ **`comment` 一表装四件事**：`Kind` 分流 `review` / `question` / `answer`，`ParentId` 永远指向**顶层行**、「回复某条回复」用 `ReplyToId` 表达（**两层封顶**）⇒ **别按表名当「评论表」读** —— 评价、留言、楼中楼、问答**都在这张表里**（段头 `.sql:1528` 注释写明）。
+⚠️ **`LikeCount` / `DislikeCount` 是冗余计数**，真值在 `comment_like`（`COUNT(*)` by `Type`）—— 两处必须**同步回填**，种子若手写一个对不上的数，页面上的互动数就成了假话（`evidence/c3-block6/b6-c7-fake-data.txt` §5 第 5 条记了这条纪律）。
+⚠️ **`Status` 一律是受控字符串码，不建 DB `ENUM`**（`comment_image` 三态 / `report` 三态 / `comment` 二态）—— 同 `template.Kind` 的口径：取值受控在应用层，改值不用动 DDL。
+⚠️ **六张表都带 `created_at`**（`comment` / `report` / `sensitive_word` 另带 `updated_at`）—— 满足 `agent.md` 数据库管理规则 8（表必须有时间列）。
+
+### 15.2 两处加列 {#db-15-2}
+
+| # | 表.列 | 类型 | 默认 | 语义 | 证据 |
+|---|---|---|---|---|---|
+| ⑮-7 | `user.WarnCount` | `int NOT NULL DEFAULT 0` | `0` | **警告累计**（块 6 举报链）：达 **3** 自动封号（写 `user.banned=1`）；**解封后由管理端手动清零** | `.sql:1623-1629`（加列走 `information_schema.COLUMNS` 守卫 + `PREPARE`/`EXECUTE`，重复执行走 `DO 0`） |
+| ⑯-1 | `comment.ReviewLockKey` | `varchar(120)` **GENERATED ALWAYS AS (…) STORED** | —（生成列无默认值） | **顶层商品评价的唯一锁载体**（⑯，2026-10-13 整改补笔）= `CASE WHEN TargetType='goods' AND Kind='review' AND ParentId IS NULL AND Status='normal' THEN CONCAT(TargetType,':',TargetId,':',AuthorId) ELSE NULL END`；配 ⑯-2 的 UNIQUE 一起构成「一商品一用户只能评一条评价」的 **DB 层**闸 | `.sql:1641-1678`（守卫式 `ALTER`，判据 = `information_schema.COLUMNS` 里 `ReviewLockKey` 不存在） |
+
+⚠️ **存量行一律不变**：47 个存量用户取默认值 `0`（VM 库实测 `WarnCount` 合计 = 0，`b6-c7-fake-data.txt` §4.8）—— **不改行数、不改既有列**。
+⚠️ **别新建「封号表」**：块 6 复用既有 `user.banned`（块 2 加的），`WarnCount` 只记**计数**（口径见 `.sql:1625` 的列注释）。
+⚠️ **⑯-1 是「生成列」，不是普通加列** —— 它**由数据算出**、不可写入；列宽 `varchar(120)` 的算法写在 DDL 注释里（`16 + 1 + 50 + 1 + 40 = 108`，留余量；utf8mb4 下 480 B < 3072 B 索引上限）。
+⚠️ **为什么是「生成列 + NULL」而不是裸的三列唯一键**：裸三列会把「同一用户对同一商品下的**第二条回复**」也锁死（那是**降级**）；NULL 在唯一键下互不相等 ⇒ 一条 DDL 同时给出四类豁免（回复 / 提问 / 回答 / 留言板）。理由逐条写在 `.sql:1646-1654`。
+⚠️ **`Status='normal'` 走白名单而非 `<>'deleted'`**：与 Service 侧「作者删了自己那条后能重评」**同口径**（`.sql:1652-1654`）。
+
+### 15.3 十五处新索引 {#db-15-3}
+
+| # | 表 | 索引 | 类型 |
+|---|---|---|---|
+| 1 | `comment` | `idx_comment_target(TargetType,TargetId,created_at)` | 普通 |
+| 2 | `comment` | `idx_comment_parent(ParentId,created_at)` | 普通 |
+| 3 | `comment` | `idx_comment_author(AuthorId,created_at)` | 普通 |
+| 4 | `comment` | `idx_comment_kind(Kind,TargetType,TargetId)` | 普通 |
+| 5 | `comment_mention` | `idx_mention_comment(CommentId)` | 普通 |
+| 6 | `comment_mention` | `idx_mention_user(MentionedId,created_at)` | 普通 |
+| 7 | `comment_image` | `idx_image_comment(CommentId,SortOrder)` | 普通 |
+| 8 | `comment_image` | `idx_image_status(Status,created_at)` | 普通 |
+| 9 | `comment_like` | `uk_like_comment_user(CommentId,UserId)` | **UNIQUE** |
+| 10 | `comment_like` | `idx_like_user(UserId,created_at)` | 普通 |
+| 11 | `report` | `uk_report_target_reporter(TargetType,TargetId,ReporterId)` | **UNIQUE** |
+| 12 | `report` | `idx_report_status(Status,created_at)` | 普通 |
+| 13 | `report` | `idx_report_reporter(ReporterId,created_at)` | 普通 |
+| 14 | `sensitive_word` | `uk_sensitive_word(Word)` | **UNIQUE** |
+| 15 | `comment` | `uk_comment_review_once(ReviewLockKey)`（⑯-2，2026-10-13 整改补笔） | **UNIQUE** |
+
+⚠️ **四个 UNIQUE 各是一道业务闸**，不是纯性能索引：`uk_like_comment_user` = 「同人同评论只能赞或踩一次」；`uk_report_target_reporter` = 「同内容同人不能二次举报」（**驳回后再举报靠 `UPDATE` 同一行复活**，正因有这条唯一键才不会写出两行）；`uk_sensitive_word` = 敏感词**去重**（⑮-8 的 `INSERT IGNORE` 幂等就靠它）；**`uk_comment_review_once` = 「一商品一用户只能评一条评价」的 DB 层兜底**（Service 侧那道预检是「先查后插」，两个并发请求可以同时通过预检 ⇒ 必须有 DB 侧闸；**它不是**把预检删掉、而是同一判据的 DB 版本）。
+⚠️ **15 个索引均**由 §15.1 的 DDL **逐条可数**；全库总数另**实测**过一次（2026-10-13 整改后重测，`information_schema`，口径 = `COUNT(DISTINCT 表.索引名)` 且 `INDEX_NAME <> 'PRIMARY'`）：**非主键索引 68 / 非主键 UNIQUE 19**（⑯ 之前那次是 **67 / 18** ⇒ ⑯ 净 **+1 索引 / +1 UNIQUE**，对得上）。⚠️ **别和 §14.4 那个「30」做减法** —— 那是块 5 当年**未重算**的写法，口径不同；本笔起以实测口径为准。
+
+### 15.4 本笔对基线的净变化 {#db-15-4}
+
+| 基线 | 变化 | 判据档位 |
+|---|---|---|
+| 表数 | **30 → 36**（+6 张，见 §15.1） | 可复核（VM 库 `information_schema.TABLES` 实测 = **36**，2026-10-13；`b6-c7-fake-data.txt` §4.10 六表行数逐张命中） |
+| 行首 `CREATE TABLE` 条数 | **32 → 38** | 可复核（实读 `.sql`：`CREATE TABLE` 行首 = **38**，2026-10-13 实测） |
+| 加列 | `user` **+1**（`WarnCount`）+ `comment` **+1**（`ReviewLockKey` 生成列，⑯-1）⇒ 共 **+2** | 可复核（`.sql:1623-1629` / `.sql:1641-1678` 守卫式 `ALTER`；VM 库 `information_schema.COLUMNS` 实读可用，§15.2） |
+| 索引 | **+15**（含 UNIQUE **4**，见 §15.3；⑯-2 是第 15 个 / 第 4 个 UNIQUE）；全库实测 **非主键 68 / 非主键 UNIQUE 19**（2026-10-13 整改后重测，口径 = 排除主键与 `PRIMARY`） | 可复核（新表索引由 DDL 逐条可数；全库数见 §15.3 那一段的实测命令） |
+| 种子行数（P4 判据 `order/goods/login/user/friend`） | **不变**（纯「加表 + 加列」，`ALTER ADD COLUMN` 不改行数，新表 0 行） | 可复核 |
+| A3 P3 门禁 | `KNOWN_TABLES` **19 → 25**、期望表数 **30 → 36**（同笔一处；⚠️ **四处同改**，见 `ConcurrencyRunner.java:2664`/`:2670`） | 可复核（`db-migration.md` 注意 19） |
+
+⚠️ **`.sql` 的行尾仍是 CRLF**：`1686 行 / LF 1686 / CR 1686 / 裸 CR 0`（2026-10-13 实测，**⑯ 块追加之后**重新数过；⑯ 之前是 `1634 行`）。
+⚠️ **本附录的「档位」一律标了出处**：类型 / 默认值 / 索引名 = **可复核**（实读 DDL）；表数 36 = **可复核**（VM 库 `information_schema` 实测，`b6-c7-fake-data.txt` §4.11）；索引 **68 / UNIQUE 19** = **可复核**（2026-10-13 整改后重测，命令见 §15.3）；`user.WarnCount` 另有 VM 库实读（同证据 §4.8）。
+⚠️ **跨文件口径必须一致**：本条的表数（**36**，⑯ 不改表数）、`db-migration.md` 注意 19–20、`slot-registry.md §二十三`、`progress.md §7-B6` **同源**；`api-contract.md` 附录 G 是**端点**侧（与本条无关，内容域 **14** 条端点）。
+

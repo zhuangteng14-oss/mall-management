@@ -1,0 +1,176 @@
+################################################################
+# C3 块 6 · commit 3〈@ 自动生成〉· 手验证据（2026-10-13）　⚠️⚠️ **§一 / §三 的「@ 已落」结论已于 2026-10-13 作废**（`notification.ToId` 写了登录名，施工方与当时的探针错在同一个号域 ⇒ 假绿）—— **以文末 §七/§八 为准**；原因见 `tech-debt.md` TD-59。
+# 环境：VM 库 192.168.229.129 / mall_management_sql，后端 a3 profile，端口 8088
+# 依据：docs/agent/context-packs/块6参考.md §4.1「@ 自动」（三条规则）
+# ⚠️ a3 的 app.auth.enabled=false ⇒ IdentityGuard fail-open 全放行
+#    ⇒ 本证据**验不到 403 那条线**，只验业务规则。**闸关 ⇒ 手验绿 ≠ 默认 profile 绿。**
+# ⚠️ a3 另有 mall.comment.question.timeout.enabled=false ⇒ 探针跑的时候那个 @Scheduled
+#    不醒，库里只有探针自己造出来的通知行（便于核对条数）。本笔无新 job，与它无关。
+################################################################
+
+=========== 一、三条 @ 规则 + 两条边界（探针 stdout 原文）===========
+（见本目录 b6-c3-mention-probe.txt —— python scripts/probes/probe-b6c3-mention.py 的 stdout）
+
+覆盖（每条都验 ① comment_mention 落了哪一行 + ② comment.mention 通知投没投得进
+「收件人自己点得开」的那个抽屉 —— 走 /notification/list 真端点读，不读库）：
+
+  A1  顶层提问   → @ 该商品商家        ✅ 商家收件箱 1 行
+  A2  回复顶层   → @ 顶层作者          ✅ 提问者收件箱 1 行（商家答，实名 ⇒ 正文带其名）
+  A3  回复回复   → @ 被回复人          ✅ 被回复人收件箱 1 行（客户答，匿名 ⇒ 正文「有人」，**不含作者名**）
+  A4  作者回复自己的提问（自 @）       ✅ 0 行（不落关系、不发通知）
+  B1  顶层评价   → @ 该商品商家        ✅ 商家收件箱 1 行（实名评价 ⇒ 正文带作者名）
+  B2  作者回复自己的评价（自 @）       ✅ 0 行
+
+⚠️ 为什么通知走 API 读、而不是只核对库里的行：`ToId` 对了而 `ToType` 错了的话，
+   通知**照样落库**，只是落在收件人**永远不查**的那个抽屉里（收件箱按 (ToId,ToType) 两键查）。
+   只看库里的行看不出这种错，只有「以收件人的身份去读」才验得到。
+
+=========== 二、comment_mention 表（库里真值）===========
+   SELECT CommentId, MentionedId FROM comment_mention WHERE CommentId IN (104..109);
+   CommentId  MentionedId
+   104        yunqi_digital   ← A1 顶层提问 → goods 76 的商家
+   105        chenh99         ← A2 回复顶层 → 提问者
+   106        yunqi_digital   ← A3 回复回复 → 被回复那条的作者
+   108        yunqi_digital   ← B1 顶层评价 → 商家
+   （107 / 109 无行 = A4 / B2 自 @ 被跳过；全表恰 4 行，无多余）
+   ⇒ 与探针打印的期望**逐行一致**。
+
+=========== 三、notification 表（库里真值）===========
+   SELECT Id,ToId,ToType,EventType,TargetType,TargetId,Title FROM notification
+    WHERE TargetType='comment' AND TargetId IN (104..109) ORDER BY Id;
+   ToId           ToType     EventType         TargetId  Title
+   yunqi_digital  merchant   comment.mention   104       你被 @ 提及
+   chenh99        customer   comment.mention   105       你被 @ 提及
+   yunqi_digital  merchant   comment.mention   106       你被 @ 提及
+   yunqi_digital  merchant   comment.mention   108       你被 @ 提及
+   ⇒ 4 行、ToType 随收件人角色（商家 merchant / 客户 customer）、无自 @ 的行。
+
+=========== 四、两条本地裁定（方案没写，本笔自裁 + 报备）===========
+① **自 @ 跳过**（被 @ 人 == 发表人 ⇒ 既不落 comment_mention、也不发通知）。
+   理由：@ 的唯一用途是通知对方，通知自己是一条纯噪声。方案 §4.1 只写了三条「谁 @ 谁」，
+   没写「作者撞上自己怎么办」——本仓对这类空白的既有处置是**本地裁定 + 写进注释 + 报备**
+   （先例：评论图片上限 MAX_IMAGES=9）。A4/B2 即此裁定的一对证伪用例。
+   ⇒ 后果：comment_mention 表**不会**出现「作者 @ 自己」的行。
+
+② **用户留言板（TargetType='user'）也 @ 板主**。方案 §4.1 只写了「顶层评论 → @ 该商品商家」
+   （写的是商品侧）。留言板没有商家，本笔按同一语义取「被 @ 人 = 这个对象的主人」
+   （TargetId 是板主的业务号 ⇒ 翻成登录名）。
+   ⇒ 不补这一条的话，留言板上的评论会**静默地一个 @ 都不产生**（不报错、没人看得出漏了）。
+   ⚠️ 留言板本块**无前端面**（方案 §9.2 的第二种对象），故本条只落了后端代码路径，未做端到端手验。
+
+=========== 五、一条观察（不在本笔范围，报备留档）===========
+块 6 预留的 5 条 comment/report code 里，`comment.on.post`（商品被评论 → 商家）与
+`comment.reply`（评论被回复 → 当事人）到本笔为止**仍无任何调用点**（全仓 grep 只命中
+NotificationEvents 的定义处）——它们与「@ 自动」的三条规则**语义重叠**
+（三层 @ 的收件人恰好就是这两条事件各自的当事人）。
+⇒ 本笔按用户 2026-10-13 给的口径**只发 comment.mention 一条**；那两条是否还要单独发
+（或就此废弃、收口时从 code 表里摘掉），留待裁决。**未自作主张补发。**
+
+=========== 六、清理 ============
+探针自造的数据已全删（comment / comment_mention / notification 三处），
+核对回到基线：comment=0、comment_mention=0、notification=165（与探测前一致）。
+清单：_work/b6c3-cleanup.sql（逐条 DELETE，Sql.java 一次只吃一条语句）。
+
+
+=========== 七、【更正 · 2026-10-13】上文 §一 / §三 的「@ 已落」结论——作废 ===========
+
+⚠️ 本文件 §一 的六条 ✅ 与 §三 的 `ToId` 真值表 **全部作废**。缺陷症状：
+   **`notification.ToId` 该写「业务号」（`user.customerid` / `user.merchantid`，10 位字母数字），
+   本笔当时写的是「登录名」**；而当时的探针**也拿登录名当 `ToId` 去拉收件箱** ⇒ 施工方与
+   读取方错在同一个号域，断言**必然全绿**（这是「校验器报 OK ≠ 没问题」的实例，见
+   `tech-debt.md` TD-59）。
+   ⇒ §三 表里 `ToId = yunqi_digital / chenh99` 那几行**不是正确形态，是缺陷现场**。
+   ⇒ §五 那条「`comment.reply` / `comment.on.post` 到本笔为止无调用点」的观察**亦已过时**
+     （现两者都有调用点；用户 2026-10-13 裁定不得再以「语义重叠」为由摘除契约 code）——
+     见下面 §八 真值表里的 495 / 497 / 499 三行。
+
+=========== 八、【重造场景 + 重贴证据 · 2026-10-13 ②③ 修复后】===========
+
+修复内容（`CommentService` / `ReportService`，逐行可核）：
+  ① `send(...)` 的 `ToId` 由**登录名**改为**业务号** —— 新增换算
+     `CommentDao.selectUserIdByUsername`（`CommentService.java:830`）与
+     `CommentDao.selectMerchantIdByGoodsId`（`:845`，`ReportDao.java:317` 同名同责），
+     两者都**追加在各自文件尾部**（最大被引用行之后）以压住行号漂移。
+  ② `insertMention` **不变** —— 仍写**登录名**到 `comment_mention.MentionedId`
+     （`CommentService.java:619` 传的就是未换算的 `to`）。
+  ③ **自 @ / 自回复的判定仍走登录名域，先判后换算，顺序不能反**：
+     `recordMention` 在 `:615` 先比 `to.equals(author)`，`:634` 才换算；
+     `notifyReply` 在 `:718` 先比 `repliedTo.trim().equals(author)`，`:728` 才换算。
+     （唯一例外并已注明：`notifyOnPost` 的 `:687` 两侧**同为业务号**，因为 `:680` 取的就是
+     商家的业务号 —— 判据两侧同域即可，不是「必须写成登录名」。）
+  ⇒ 结果：**同一次发言往两张表写两种号**（「一列两种号」），各归各表。
+
+重跑探针（`python scripts/probes/probe-b6c3-mention.py`，**EXIT=0**；stdout 原文）：
+
+----------------------------------------------------------------
+造好：Q=230(A_M=231,A_O=232,A_S=233) / R=234@goods79(R_S=235)
+
+=== A1 · 顶层提问 → 商家收到 comment.mention（应 1 行）
+[{"Content": "「chenh99」在评论中 @ 了你：Q1 does the widget include a s…", "Title": "你被 @ 提及", "ToId": "dRD3gqtbFr", "ToType": "merchant"}]
+=== A2 · 回复顶层 → 顶层作者收到 comment.mention（应 1 行；商家回答实名⇒正文带其名）
+[{"Content": "「yunqi_digital」在评论中 @ 了你：A1 merchant: yes a spare cable…", "ToType": "customer"}]
+=== A3 · 回复回复 → 被回复人（商家）收到 comment.mention（应 1 行）
+[{"Content": "有人在评论中 @ 了你：A2 follow-up question on the a…", "ToType": "merchant"}]
+=== A4 · 作者回复自己的提问（自 @）→ 应 0 行 comment_mention
+{"hits": 0}
+=== B1 · 顶层评价（goods 79）→ 商家收到 comment.mention（应 1 行；实名评价⇒正文带作者名）
+[{"Content": "「123」在评论中 @ 了你：R1 solid build quality", "ToType": "merchant"}]
+=== B2 · 作者回复自己的评价（自 @）→ 应 0 行 comment_mention
+{"hits": 0}
+
+=== N · 反向控制 · 旧口径（登录名当 ToId）必须恒空
+[{"comment": 230, "hits": 0, "login": "yunqi_digital"}, {"comment": 231, "hits": 0, "login": "chenh99"}, {"comment": 232, "hits": 0, "login": "yunqi_digital"}, {"comment": 234, "hits": 0, "login": "yunqi_digital"}]
+
+=== M · comment_mention 期望恰好这几行（其余为 0）：
+   CommentId=230 → MentionedId=yunqi_digital   (A1 顶层提问→商家)
+   CommentId=231 → MentionedId=chenh99   (A2 回复顶层→提问者)
+   CommentId=232 → MentionedId=yunqi_digital   (A3 回复回复→被回复人)
+   CommentId=234 → MentionedId=yunqi_digital   (B1 顶层评价→商家)
+   且 CommentId IN (233,235) 必须**一行都没有**（A4/B2 自 @）
+   SELECT CommentId, MentionedId FROM comment_mention WHERE CommentId IN (230,231,232,233,234,235) ORDER BY CommentId;
+
+全部符合期望（通知侧）。comment_mention 那几行按上面 SQL 核对。
+----------------------------------------------------------------
+
+库里真值 · `notification`（`_work/b6-hv-sql.sh`，2026-10-13）：
+
+    SELECT Id,ToId,ToType,EventType,TargetType,TargetId,Title FROM notification
+     WHERE TargetType='comment' AND TargetId IN (230,231,232,233,234,235) ORDER BY Id;
+
+    Id   ToId         ToType    EventType         TargetId  Title
+    493  dRD3gqtbFr   merchant  comment.mention   230       你被 @ 提及
+    494  bcmJhZaB5D   customer  comment.mention   231       你被 @ 提及
+    495  bcmJhZaB5D   customer  comment.reply     231       您的评论收到回复
+    496  dRD3gqtbFr   merchant  comment.mention   232       你被 @ 提及
+    497  dRD3gqtbFr   merchant  comment.reply     232       您的评论收到回复
+    498  dRD3gqtbFr   merchant  comment.mention   234       你被 @ 提及
+    499  dRD3gqtbFr   merchant  comment.on.post   234       您的商品收到新评价
+    -- rows: 7
+
+  ⇒ **`ToId` 全是业务号**（`dRD3gqtbFr` = 商家 `yunqi_digital` 的 `merchantid`；
+    `bcmJhZaB5D` = 提问者 `chenh99` 的 `customerid`），**一个登录名都没有**。
+    与 §三 那张表逐行对照，即修复前 / 修复后。
+
+库里真值 · `comment_mention`（同一轮）：
+
+    SELECT CommentId,MentionedId FROM comment_mention
+     WHERE CommentId IN (230,231,232,233,234,235) ORDER BY CommentId;
+
+    230  yunqi_digital    231  chenh99    232  yunqi_digital    234  yunqi_digital
+    -- rows: 4
+
+  ⇒ **`MentionedId` 仍是登录名**（② 未改，语义不变），且 233 / 235（自 @）**无行**。
+    与 §二 一致。
+
+**反向控制才是这一轮的关键**：探针段 N 把「登录名当 `ToId`」的**旧口径**再拉一遍，
+四条全 `hits: 0` ⇒ **旧口径空、新口径有**，才叫真绿；若两边都空或两边都有，
+说明口径又退回同一域（假绿复现）。这一层是本轮新加的，上一版探针**没有**。
+
+⚠️ 仍未消除的边界（同 §抬头）：a3 的 `app.auth.enabled=false` ⇒ **闸关，手验绿 ≠ 默认 profile 绿**。
+
+=========== 九、【顺带修掉的探针自体缺陷 D1】===========
+`save_ids()` 原本**整份覆盖** `_work/b6c3-probe-ids.json`：重跑撞 `MSG_DUPLICATE_REVIEW`
+抛 `SystemExit` 时，`remember()` 已把**本轮** id 写进文件、把**上一轮**的 key（含 B 组两条）
+顶掉 ⇒ `--clean` 生成的 `DELETE` 够不着那些行 ⇒ 留下孤儿。**已修**：`save_ids()` 维护只增不
+减的 `_history`，`cleanup_sql()` 并上历轮全部 id。同族孤儿 217–222 即由此产生，
+已按 `_work/_b6-probe-leftover-snapshot.txt` 清掉并复核归零。详见 `tech-debt.md` TD-59。

@@ -1,0 +1,38 @@
+造好：Q=104(A_M=105,A_O=106,A_S=107) / R=108(R_S=109)
+
+=== A1 · 顶层提问 → 商家收到 comment.mention（应 1 行）
+[{"Content": "「chenh99」在评论中 @ 了你：Q1 does the widget include a s…", "Title": "你被 @ 提及", "ToId": "yunqi_digital", "ToType": "merchant"}]
+=== A2 · 回复顶层 → 顶层作者收到 comment.mention（应 1 行；商家回答实名⇒正文带其名）
+[{"Content": "「yunqi_digital」在评论中 @ 了你：A1 merchant: yes a spare cable…", "ToType": "customer"}]
+=== A3 · 回复回复 → 被回复人（商家）收到 comment.mention（应 1 行）
+[{"Content": "有人在评论中 @ 了你：A2 follow-up question on the a…", "ToType": "merchant"}]
+=== A4 · 作者回复自己的提问（自 @）→ 应 0 行 comment.mention
+{"hits": 0}
+=== B1 · 顶层评价 → 商家收到 comment.mention（应 1 行；实名评价⇒正文带作者名）
+[{"Content": "「1111」在评论中 @ 了你：R1 solid build quality", "ToType": "merchant"}]
+=== B2 · 作者回复自己的评价（自 @）→ 应 0 行 comment.mention
+{"hits": 0}
+
+=== M · comment_mention 期望恰好这几行（其余为 0）：
+   CommentId=104 → MentionedId=yunqi_digital   (A1 顶层提问→商家)
+   CommentId=105 → MentionedId=chenh99   (A2 回复顶层→提问者)
+   CommentId=106 → MentionedId=yunqi_digital   (A3 回复回复→被回复人)
+   CommentId=108 → MentionedId=yunqi_digital   (B1 顶层评价→商家)
+   且 CommentId IN (107,109) 必须**一行都没有**（A4/B2 自 @）
+   SELECT CommentId, MentionedId FROM comment_mention WHERE CommentId IN (104,105,106,107,108,109) ORDER BY CommentId;
+
+全部符合期望（通知侧）。comment_mention 那几行按上面 SQL 核对。
+
+
+################################################################
+# ⚠️⚠️ 【2026-10-13 更正 —— 本文件整份作废】
+#
+# 本文件是 ②③ 修复**之前**那一版探针的 stdout。缺陷：施工方把**登录名**写进了
+# `notification.ToId`（契约要**业务号**），而**本探针也拿登录名当 `ToId` 去拉收件箱**
+# ⇒ 两边错在同一个号域，A1–B2 六条**必然全绿**。故：
+#   · 上面那句「全部符合期望」**不成立**（期望值本身就取自被测方）；
+#   · 本文件里出现的 `ToId: "yunqi_digital"` 等 —— 是**缺陷现场**，不是正确形态；
+#   · 「@ 已落」的验收结论**作废**。
+# 根因与面上教训（「校验器报 OK ≠ 没问题」）见 `docs/agent/tech-debt.md` **TD-59**；
+# 重造场景 + 重贴证据见同目录 `b6-commit3-mention.txt` §七 / §八。
+################################################################

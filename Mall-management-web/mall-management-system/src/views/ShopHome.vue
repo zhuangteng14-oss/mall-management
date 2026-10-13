@@ -47,6 +47,15 @@
               :title="following ? '取关' : '关注这家店'"
               @click="toggleFollow"
             >{{ following ? '已关注' : '关注' }}</button>
+            <!-- 举报商家（2026-10-13 用户裁定 ①）—— 从 `ProductPage.vue` 那条商品行**搬过来**的：
+                 举报的是**店**，落点在店的主页上才顺（原来挤在商品页的「客服 / 进店逛逛」旁边）。
+                 ⚠️ 对象是**用户**不是店铺 ⇒ `targetId` 传商家**业务号** `shopId`
+                 （= 本页 route 的 `MerchantId`，与 `api/report.js` 的 `add` 对 `targetType='user'` 的要求一致）。
+                 ⚠️ `isLogin && !isSelf`：没登录发不出去（后端要 `Account`）；自己的店不举报自己
+                 （后端也拦，这里是不画那枚注定被拒的按钮）——与左边关注按钮同一套判据。 -->
+            <button type="button" v-if="isLogin && !isSelf" class="act"
+                    title="举报这家店（真功能：/report/add，对象为商家）"
+                    @click="openReport('user', shopId, '商家')">举报商家</button>
             <button type="button" class="act" title="真功能：message.send（与商品页「客服」同形）" @click="consultShop">客服</button>
           </span>
         </div>
@@ -259,6 +268,12 @@
         <p v-else-if="phRecommend" class="ph">{{ phRecommend }}</p>
       </section>
     </div>
+
+    <!-- 举报弹窗（2026-10-13 用户裁定 ①）—— 与 `ProductPage.vue` **同一个组件**
+         （`components/ReportDialog.vue`，仓规「同一件事不抄第二份」：弹窗本体只此一份）。
+         ⚠️ 举报对象是**商家这个用户**（不是店铺）—— `targetId` 传商家的**业务号** `shopId`，
+         号域见上面的按钮按语。开关由本页的 `rptOpen` 持有（组件不自己开关）。 -->
+    <ReportDialog :open="rptOpen" :target="rptTarget" @close="closeReport" />
   </div>
 </template>
 
@@ -279,8 +294,21 @@ import { follow, unfollow, followState, profile } from '../api/shop'; import { d
 import { coupons, claim } from '../api/marketing'
 import { truthy, couponFace, couponName, couponLine } from '../config/coupon-format'
 import { BadgeCheck } from '@lucide/vue'
-import ProductCard from '../components/ProductCard.vue'; import PlatformActivityPanel from '../components/PlatformActivityPanel.vue'   // ⚠️ 两条 import **同行**（同 `:151` / `:266` 那几条的手法）：本文件有 8 条 refs token，多一行就集体顶漂。`PlatformActivityPanel` = 一级 tab「平台活动」的面板（2026-10-12 用户裁定 ④）。
+import ProductCard from '../components/ProductCard.vue'; import PlatformActivityPanel from '../components/PlatformActivityPanel.vue'; import ReportDialog from '../components/ReportDialog.vue'   // ⚠️ 三条 import **同行**（同 `:151` / `:266` 那几条的手法）：本文件有 8 条 refs token，多一行就集体顶漂。`PlatformActivityPanel` = 一级 tab「平台活动」的面板（2026-10-12 用户裁定 ④）。`ReportDialog` = 举报弹窗（2026-10-13 用户裁定 ①，与 `ProductPage.vue` 共用同一个组件）。
 import { productLink } from '../config/product-link'
+
+// 举报弹窗的状态（2026-10-13 用户裁定 ①「举报商家」）—— 与 `ProductPage.vue` 同款两个状态：
+// **开着没** + **举报谁**。理由 / 说明 / 提交 / 回执都在 `components/ReportDialog.vue` 里
+// （组件自带一份，本页不复制 —— 仓规「同一件事不抄第二份」，这正是抽组件的那条理由）。
+const rptOpen = ref(false)
+const rptTarget = ref(null)     // `{ targetType, targetId, label }` —— 原样转交组件，本页不解读
+
+/** 打开举报弹窗。⚠️ 本页只有「举报商家」一个入口（`targetId` = 商家业务号 `shopId`）。 */
+const openReport = (targetType, targetId, label) => {
+  rptTarget.value = { targetType, targetId, label }
+  rptOpen.value = true
+}
+const closeReport = () => { rptOpen.value = false }
 
 const route = useRoute()
 const router = useRouter()
@@ -303,7 +331,7 @@ const isLogin = computed(() => isLoggedIn())
 const isSelf = computed(() => !!buyerId && buyerId.toLowerCase() === shopId.toLowerCase())
 
 // 券包 / 领券的**账号**（2026-10-12 起 = **登录名**，不是客户号）。
-// ⚠️ 与 `ProductPage.vue:820` / `HomePage.vue:413` 取值**逐字同款**（`getUsername()`）——
+// ⚠️ 与 `ProductPage.vue:1015` / `HomePage.vue:413` 取值**逐字同款**（`getUsername()`）——
 //    三处必须一起改，`api/auth.js` 是唯一允许读身份的地方。
 const couponAccount = getUsername() || ''
 

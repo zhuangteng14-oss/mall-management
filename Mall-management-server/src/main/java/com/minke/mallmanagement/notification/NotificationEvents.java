@@ -23,12 +23,20 @@ package com.minke.mallmanagement.notification;
  * <p>⇒ 代价：库里可能出现本类**没有**的 code。前端映射必须**兜底**（未知 code 原样显示 + 小号
  * chip，见 {@code src/config/notify-events.js} 的 {@code eventLabel}），不许静默成空白。
  *
- * <h2>【清单按「归属块」排 —— 31 条，覆盖到 C3 全部 8 块】</h2>
- * 块 1 本块就用（2 条）；其余 29 条是**预留登记**：各块的触发点**随各自那一笔挂**
+ * <h2>【清单按「归属块」排 —— 32 条，覆盖到 C3 全部 8 块】</h2>
+ * 块 1 本块就用（2 条）；其余 30 条是**预留登记 + 各自块落地时补的**：各块的触发点**随各自那一笔挂**
  * （同 {@code AuditActions} 的 15 个挂钩点口径），本块只把 code 与 {@code send} 原语先留出来。
+ * ⚠️ 所以这个数**每块都在长** —— 块 5 收口时是 31，块 6 commit 2 补了 {@link #COMMENT_ACCEPTED} /
+ * {@link #QUESTION_TIMEOUT} 两条到 33；块 6「契约纠偏」一笔再**摘除**块 1 预留的
+ * {@code comment.on.user}（留言板被评论）一条，回到 32。改这个数时**同笔**改
+ * {@code src/config/notify-events.js} 的 {@code EVENT_LABELS} / {@code EVENT_OPTIONS} 两处
+ * （那张表文件头写的「三处」里的另两处）。
  * 硬约束来自 {@code docs/agent/c3-modules.md} §9.2：通知必须能被「被评论 / 被回复 / 被 @」三类事件触发
- * —— 对应 {@link #COMMENT_ON_POST} / {@link #COMMENT_ON_USER} / {@link #COMMENT_REPLY} /
- * {@link #COMMENT_MENTION} 四条。
+ * —— 块 6 基准文档 {@code docs/agent/context-packs/块6参考.md} §二 A1 定稿的 6 个 code 即
+ * {@link #COMMENT_ON_POST} / {@link #COMMENT_REPLY} / {@link #COMMENT_MENTION} /
+ * {@link #COMMENT_ACCEPTED} / {@link #QUESTION_TIMEOUT} / {@link #REPORT_HANDLED}。
+ * （原预留的 {@code comment.on.user}「留言板被评论」**不在**该 6 code 内，2026-10-13 按用户裁定摘除；
+ *  §9.2 的「用户留言」对象本块无前端面，其「被评论」语义由 {@link #COMMENT_ON_POST} 的商品侧覆盖。）
  */
 public final class NotificationEvents {
 
@@ -41,14 +49,15 @@ public final class NotificationEvents {
     public static final String SYSTEM_NOTICE = "system.notice";
 
     // ==================== 块 6（内容 + 消息块）：评论区三类事件（§9.2 硬约束） ====================
+    // ⚠️ 块 1 建通知域时此处预留了 4 条（on.post / on.user / reply / mention）；2026-10-13
+    //    块 6「契约纠偏」按用户裁定**摘除** `comment.on.user`（留言板被评论）—— 块 6 基准文档
+    //    `块6参考.md` §二 A1 定稿的评论区事件恰为 3 条（on.post / reply / mention），不含 on.user。
+    //    摘除时全仓零调用点，故只删常量 + 前端两处标签，无行为回归。
 
-    /** 被评论 —— 商品 / 内容被评论，触达当事人。 */
+    /** 被评论 —— 商品被评论，触达该商品商家。 */
     public static final String COMMENT_ON_POST = "comment.on.post";
 
-    /** 被留言 —— 用户留言板被评论，触达当事人。 */
-    public static final String COMMENT_ON_USER = "comment.on.user";
-
-    /** 被回复 —— 评论被回复（楼中楼 / 问答式共用同一 {@code parentId}）。 */
+    /** 被回复 —— 评论被回复（楼中楼 / 问答式共用同一 {@code parentId}），触达**被回复那条**的作者。 */
     public static final String COMMENT_REPLY = "comment.reply";
 
     /** 被 @ —— 由 {@code comment_mention} 表记录的提及关系触发。 */
@@ -190,6 +199,39 @@ public final class NotificationEvents {
      * 本条是「商家 → 管理员」的去向，那两条是「管理员 → 商家」的裁决回执。
      */
     public static final String SECKILL_APPLICATION_SUBMITTED = "seckill.application.submitted";
+
+    // ==================== 块 6（内容+消息块）· commit 2「问答」：本块补 2 条 ====================
+    // ⚠️ 上面「块 6」那一节的 4 条（comment.on.post / comment.reply /
+    //    comment.mention / report.handled）是**块 1 建通知域时预留**的；下面 2 条是**问答**这一笔
+    //    才第一次有人发的 —— 按本类类注释那条口径「各块的触发点**随各自那一笔挂**」，
+    //    它们跟着**第一个调用点**（`CommentService.accept` / `QuestionTimeoutJob`）一起落，
+    //    而不是先留一个常量在那儿空等。
+    //    ⇒ 本节因此比 `_work/c3-block6-landing-plan.md` §四 写的「commit 3 补 2 code」**提前了一笔**，
+    //      理由与记账见该笔 commit message（B 档自裁 + 报备）。
+    //    ⚠️ 两条都**不是**「管理员手发」的通知（它们是后台动作的产物），但按 `notify-events.js`
+    //      的既有口径（`coupon.expiring.unclaimed` 同款）**三处仍然各补一条**：那张下拉是
+    //      「code 的全集」，不是「管理员能发的子集」。
+
+    /**
+     * 提问被**采纳** → 触达**被采纳那条回答的作者**（{@code ToType} = {@code customer} /
+     * {@code merchant}，随回答者的 {@code AuthorRole}）。
+     *
+     * <p>收件人由 {@code CommentService.accept} 从**被采纳的那行回复**上取，不是提问者自己
+     * —— 这正是这条通知存在的原因：回答者并不知道自己的答案被选中了。
+     */
+    public static final String COMMENT_ACCEPTED = "comment.accepted";
+
+    /**
+     * 提问**超过 30 分钟仍未解决** → 触达**管理端共享收件箱**（{@code ToType='admin'}、
+     * {@code ToId='*'}，同 {@link #MERCHANT_APPLY_SUBMITTED} 的口径），由
+     * {@code QuestionTimeoutJob} 扫描后发出。
+     *
+     * <p>⚠️ 这是「**待办**」而不是「结果」：管理端据它去问答 tab 人工介入（方案 §4.2 的
+     * 「30 分钟未解决 → Job 报管理端」）。故它**必须**带 {@code TargetType}/{@code TargetId}
+     * 指回那条提问 —— {@code QuestionTimeoutJob} 的幂等判据正是
+     * {@code existsDelivery(收件人, 本 code, "comment", 提问Id)}。
+     */
+    public static final String QUESTION_TIMEOUT = "question.timeout";
 
     private NotificationEvents() {
     }

@@ -59,16 +59,16 @@ public class WebAuthConfig implements WebMvcConfigurer {
      * <p>判据是<b>路径</b>，与 HTTP 方法无关（{@code /goods/goodstype} 是 GET/POST 双形态，
      * 一条即覆盖两者）。{@code /**} 由 {@code AntPathMatcher} 展开。
      *
-     * <h3>业务 9 条</h3>
+     * <h3>业务 10 条</h3>
      * <ul>
      *   <li><b>登录链 3 条</b>（{@code /user/loginSelect}、{@code /user/loginAdd}、
      *       {@code /user/getUserInfo}）—— 登录页在**未登录**状态下就打这三个，白名单少了它们
      *       等于闸一开就再也登不进去（⚠️ 其中 {@code /user/getUserInfo} 的前端消费点自 P2.6 起已归零、
      *       不再在登录链上 —— 仍留白名单属「端点只保留不删」，见 {@code progress.md} §5-AC）。</li>
-     *   <li><b>登录前后台页面 6 条</b>（{@code /goods/goodstype}、{@code /goods/goodsSelectHome}、
+     *   <li><b>登录前后台页面 7 条</b>（{@code /goods/goodstype}、{@code /goods/goodsSelectHome}、
      *       {@code /goods/GoodsProductCodeSelect}、{@code /goods/productCodePrice}、
      *       {@code /goods/productSearch}、{@code /shop/profile}）—— 首页 {@code HomePage.vue:201-208}
-     *       与商品页 {@code ProductPage.vue:796} 的 {@code onMounted} **没有任何登录态判断**
+     *       与商品页 {@code ProductPage.vue:991} 的 {@code onMounted} **没有任何登录态判断**
      *       （2026-10-04 逐行核实），且全仓无路由守卫 ⇒ 这两页在未登录时照常发这些请求。
      *       ⚠️ 其中 {@code productSearch} / {@code GoodsProductCodeSelect} / {@code productCodePrice}
      *       属**「同类公开」**（与首页同为商品浏览面），不是「未登录必经」—— 这条区分见下。
@@ -77,7 +77,11 @@ public class WebAuthConfig implements WebMvcConfigurer {
      *       （{@code router/index.js} 里 {@code /product} 与 {@code /shop} 都挂 {@code meta.public}）
      *       ⇒ 未登录点进店得看到店名 / 开店时长，否则那一格是空的。**同族另三条**
      *       （{@code /shop/follow} / {@code /shop/unfollow} / {@code /shop/followState}）**仍在身份面**，
-     *       别顺手一起搬进来。</li>
+     *       别顺手一起搬进来。
+     *       <p>⚠️ 第 7 条 {@code /comment/list}（C3 块 6 评论列表，2026-10-12）同为**公开面**：
+     *       商品详情页 {@code ProductPage.vue} 的「累计评价」区在未登录时照常加载，而该页挂
+     *       {@code meta.public} ⇒ 少这一条，未登录用户看到的是一格空评价区（外加 401 噪音）。
+     *       <b>同域另 4 个写端点（add / delete / like / myOrders）仍在身份面</b>，别顺手一起搬。⚠️ 2026-10-13 补一笔：内容域第 14 条 {@code /comment/adminList}（**管理端**全站列表）<b>同样不进本表</b> —— 白名单的判据是「公开面」，而管理端端点没有一条是公开面；它走 {@code AuthInterceptor}（注册在 {@code /**}）⇒ 闸开着时匿名 <b>401</b>（a3 profile 闸关下它匿名可达，那是该 profile 下**每一个**管理端端点的既定形态）。</li>
      * </ul>
      *
      * <h3>基础设施 4 条</h3>
@@ -114,6 +118,9 @@ public class WebAuthConfig implements WebMvcConfigurer {
             "/goods/productSearch",
             // 店铺主页存档（公开档案：登录名 / 注册时刻 / 入驻审核状态）。⚠️ 同族 follow 三条**不在此**。
             "/shop/profile",
+            // 商品评论列表（C3 块 6，2026-10-12）—— 商品详情页评价区的读，⭐ **只放读**：
+            // 同域的 add / delete / like / myOrders 四个写端点仍在身份面（见上面那段 ⚠️）；⚠️ 2026-10-13 补笔的第 14 条 comment/adminList（管理端全站列表）**也不在本表**（同上）。
+            "/comment/list",
             // ===== 基础设施 =====
             // 运维探针（⚠️ 仅 a3 profile 存在）。**归基础设施，不是业务** —— 理由见上。
             "/health/db",
@@ -168,7 +175,7 @@ public class WebAuthConfig implements WebMvcConfigurer {
     /**
      * 注册到 {@code /**}，白名单**不**走 {@code excludePathPatterns} —— ⚠️ 刻意的，别「顺手改成
      * excludePathPatterns」：被排除的路径**根本进不了 {@code preHandle}**，白名单就无法在拦截器
-     * 这一层被断言。当前写法让 {@code AuthGateSmokeTest} 能对 13 条逐条直调 {@code preHandle}
+     * 这一层被断言。当前写法让 {@code AuthGateSmokeTest} 能对 14 条逐条直调 {@code preHandle}
      * 钉死（「被排除」与「不存在」在下游都是 404，MockMvc 分不开；白名单的契约恰是「闸不拦它」）。
      */
     @Override

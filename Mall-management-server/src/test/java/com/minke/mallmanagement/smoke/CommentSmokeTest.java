@@ -1,0 +1,316 @@
+package com.minke.mallmanagement.smoke;
+
+import org.junit.jupiter.api.Test;
+
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
+
+/**
+ * C3 块 6 · 内容域（commit 1「评论」+ commit 2「问答」+ 整改补笔「管理端全站列表」）的 smoke test：
+ * {@code POST /comment/*} 八个端点的**入参闸**。
+ *
+ * <h2>【本类钉的是什么 —— 以及**不**钉什么】</h2>
+ * 钉的是**碰库之前**就能判定的拒绝路径：缺 {@code TargetId} / 未知 {@code TargetType} /
+ * 未知 {@code Kind} / 未知 {@code Sort} / 空正文 / 正文超长 / 缺 {@code Id} /
+ * 未知 {@code Type} / 缺 {@code Account} / 缺 {@code ReplyId}（采纳那两个入参）/
+ * {@code adminList} 的五条（缺 {@code Kind} / 未知 {@code Kind} / 给非提问传 {@code Solved} /
+ * 未知 {@code Solved} / 半个对象键）。
+ * 它们全部在 {@code CommentService} 的**第一段**
+ * （或 {@code CommentController} 的入参检查）返回，**一次库都不碰** ⇒ 用
+ * {@code @MockitoBean JdbcTemplate} 的切片就能真跑（同 {@code CartSmokeTest} 的理由）。
+ *
+ * <p>⚠️ <b>本类**不**覆盖任何真读写路径</b>，且这条边界对本域尤其重要 —— 本域的**核心规则
+ * 全在库里**：买过没有（{@code order_item} 回联 {@code goods}）、是不是重复评价
+ * （{@code countTopLevelByAuthor}）、匿名行会不会漏 {@code AuthorId}、商家首次回复置不置顶、
+ * 一人一条的赞踩、**采纳的五道闸与「采纳后不可改」**（{@code IsSolved=0 AND AcceptedReplyId IS NULL}
+ * 那道 {@code WHERE} 到底拦不拦得住第二次）、**{@code adminList} 的 {@code IsTimeout} 算得对不对**。
+ * 这些一律要真库，{@code JdbcClient} 打到被 mock 的 {@code JdbcTemplate} 上
+ * 只会抛 NPE，落进 catch 变成一句「…失败：…」文案 ⇒ 断言它们等于在断言 Mockito 的默认行为。
+ * 那几条的验收归 A3（{@code concurrency}，**continue-on-error ⇒ 按 artifact 的
+ * {@code gates.count} 读，别读 job 颜色**）与 VM 上的手工验证。
+ *
+ * <p>⚠️ 另一条本域特有的边界：{@code CommentService.add} 上的 {@code @Transactional}
+ * 在切片里是 **no-op**（无 DataSource ⇒ 无 {@code TransactionManager}）⇒
+ * 「{@code INSERT} 与 {@code LAST_INSERT_ID()} 是否同一条连接」本类测不了，归真库侧。
+ */
+class CommentSmokeTest extends AbstractSmokeTest {
+
+    // ==================== /comment/list（公开端点，无身份闸）====================
+
+    /** 缺 {@code TargetId} ⇒ 在碰库之前拒（否则会变成一次全表扫描）。 */
+    @Test
+    void listWithoutTargetIdIsRejected() throws Exception {
+        mockMvc.perform(post("/comment/list"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(false))
+                .andExpect(jsonPath("$.msg").value("缺少参数：TargetId"));
+    }
+
+    /** 未知 {@code TargetType} ⇒ 拒。⚠️ 读侧**不**静默当成 {@code goods}（那会把一次拼错变成空列表）。 */
+    @Test
+    void listWithUnknownTargetTypeIsRejected() throws Exception {
+        mockMvc.perform(post("/comment/list")
+                        .param("TargetType", "good")
+                        .param("TargetId", "1"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(false))
+                .andExpect(jsonPath("$.msg").value("未知的评论对象类型：good（只能是 goods / user）"));
+    }
+
+    /** 未知 {@code Kind} ⇒ 拒（同 {@code CouponService} 对 {@code Status} 的处置：不静默当「不筛」）。 */
+    @Test
+    void listWithUnknownKindIsRejected() throws Exception {
+        mockMvc.perform(post("/comment/list")
+                        .param("TargetId", "1")
+                        .param("Kind", "complaint"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(false))
+                .andExpect(jsonPath("$.msg").value("未知的评论类型：complaint（只能是 review / question / answer）"));
+    }
+
+    /** 未知 {@code Sort} ⇒ 拒。⚠️ 这条同时是一道**注入面**的闸：{@code Sort} 会参与 {@code ORDER BY} 拼串。 */
+    @Test
+    void listWithUnknownSortIsRejected() throws Exception {
+        mockMvc.perform(post("/comment/list")
+                        .param("TargetId", "1")
+                        .param("Sort", "LikeCount DESC; DROP TABLE comment"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(false))
+                .andExpect(jsonPath("$.msg").value("未知的排序方式：LikeCount DESC; DROP TABLE comment（只能是 hot / new）"));
+    }
+
+    // ==================== /comment/add ====================
+
+    /** 空正文 ⇒ 拒（第一步就拒，免得白跑一趟买过判定）。 */
+    @Test
+    void addWithBlankContentIsRejected() throws Exception {
+        mockMvc.perform(post("/comment/add")
+                        .param("Account", "smoke-user")
+                        .param("TargetId", "1")
+                        .param("Content", "   "))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(false))
+                .andExpect(jsonPath("$.msg").value("评论内容不能为空"));
+    }
+
+    /**
+     * 正文超长 ⇒ 拒。
+     *
+     * <p>⚠️ 断言串里的 {@code 1000} / {@code 1001} 与 {@code CommentService.MAX_CONTENT}
+     * **是两个地方** —— 谁改了常量而没改这里，本用例会红。那是想要的：{@code Content} 是
+     * {@code varchar(1000)}，这个数是**库里那一列的长度**，不是能随手调的内部参数。
+     */
+    @Test
+    void addWithOverlongContentIsRejected() throws Exception {
+        mockMvc.perform(post("/comment/add")
+                        .param("Account", "smoke-user")
+                        .param("TargetId", "1")
+                        .param("Content", "x".repeat(1001)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(false))
+                .andExpect(jsonPath("$.msg").value("评论内容最多 1000 字（当前 1001 字）"));
+    }
+
+    /** 缺 {@code Account} ⇒ 拒（身份判据的入参是它；没它就说不清是谁发的）。 */
+    @Test
+    void addWithoutAccountIsRejected() throws Exception {
+        mockMvc.perform(post("/comment/add")
+                        .param("TargetId", "1")
+                        .param("Content", "很好"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(false))
+                .andExpect(jsonPath("$.msg").value("缺少参数：Account"));
+    }
+
+    /** 非数字的 {@code ParentId} ⇒ 拒。⚠️ 收成 {@code String} 再由 Service 解析是**刻意**的：
+     *  {@code @RequestParam Integer} 遇到 {@code "abc"} 会抛类型转换异常 → 400 空体，
+     *  而本仓的口径是「业务失败 = 200 + {@code success:false} + 说得清的话」。 */
+    @Test
+    void addWithNonNumericParentIdIsRejected() throws Exception {
+        mockMvc.perform(post("/comment/add")
+                        .param("Account", "smoke-user")
+                        .param("TargetId", "1")
+                        .param("ParentId", "abc")
+                        .param("Content", "回复"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(false))
+                .andExpect(jsonPath("$.msg").value("ParentId 必须是数字：abc"));
+    }
+
+    // ==================== /comment/delete ====================
+
+    /** 缺 {@code Id} ⇒ 在 Controller 一层就拒（不劳 Service）。 */
+    @Test
+    void deleteWithoutIdIsRejected() throws Exception {
+        mockMvc.perform(post("/comment/delete")
+                        .param("Account", "smoke-user"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(false))
+                .andExpect(jsonPath("$.msg").value("缺少参数：Id"));
+    }
+
+    // ==================== /comment/accept（问答，commit 2）====================
+
+    /** 缺 {@code Id}（哪条提问）⇒ 在 Controller 一层就拒。 */
+    @Test
+    void acceptWithoutIdIsRejected() throws Exception {
+        mockMvc.perform(post("/comment/accept")
+                        .param("Account", "smoke-user")
+                        .param("ReplyId", "2"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(false))
+                .andExpect(jsonPath("$.msg").value("缺少参数：Id"));
+    }
+
+    /**
+     * 缺 {@code ReplyId}（采纳哪条回答）⇒ 拒。
+     *
+     * <p>⚠️ 两个参数都要，且**顺序**在话术上是有意的：先问「哪条提问」再问「采纳哪条回答」
+     * —— 与 {@code CommentService.accept} 里前三道闸（提问存在 / 是顶层提问 / 我是提问者）
+     * 都在读回答之前同一序。
+     */
+    @Test
+    void acceptWithoutReplyIdIsRejected() throws Exception {
+        mockMvc.perform(post("/comment/accept")
+                        .param("Account", "smoke-user")
+                        .param("Id", "1"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(false))
+                .andExpect(jsonPath("$.msg").value("缺少参数：ReplyId"));
+    }
+
+    /** 缺 {@code Account} ⇒ 拒（「是不是提问者本人」这条规则没有它就无从判起）。 */
+    @Test
+    void acceptWithoutAccountIsRejected() throws Exception {
+        mockMvc.perform(post("/comment/accept")
+                        .param("Id", "1")
+                        .param("ReplyId", "2"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(false))
+                .andExpect(jsonPath("$.msg").value("缺少参数：Account"));
+    }
+
+    // ==================== /comment/like ====================
+
+    /** 缺 {@code Id} ⇒ 拒。 */
+    @Test
+    void likeWithoutIdIsRejected() throws Exception {
+        mockMvc.perform(post("/comment/like")
+                        .param("Account", "smoke-user")
+                        .param("Type", "like"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(false))
+                .andExpect(jsonPath("$.msg").value("缺少参数：Id"));
+    }
+
+    /**
+     * 未知 {@code Type} ⇒ 拒。
+     *
+     * <p>⚠️ {@code Type} **必填**（不接受「省略 = 切换」这种隐式语义）：隐式语义在前端
+     * 重试/重复点击时会翻成反效果 —— 用户以为在点赞，实际把上一次的赞取消了。
+     * 「再点同一种 = 取消」也走**显式**传同一个值这条路。
+     */
+    @Test
+    void likeWithUnknownTypeIsRejected() throws Exception {
+        mockMvc.perform(post("/comment/like")
+                        .param("Account", "smoke-user")
+                        .param("Id", "1")
+                        .param("Type", "love"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(false))
+                .andExpect(jsonPath("$.msg").value("缺少参数：Type（只能是 like / dislike）"));
+    }
+
+    // ==================== /comment/myOrders ====================
+
+    /** 缺 {@code Account} ⇒ 拒（查的是「谁的」历史订单，没它就无从查起）。 */
+    @Test
+    void myOrdersWithoutAccountIsRejected() throws Exception {
+        mockMvc.perform(post("/comment/myOrders"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(false))
+                .andExpect(jsonPath("$.msg").value("缺少参数：Account"));
+    }
+
+    // ==================== /comment/adminList（管理端全站列表，第 14 条端点）====================
+
+    /**
+     * 缺 {@code Kind} ⇒ 拒。
+     *
+     * <p>⚠️ <b>本端点把 {@code Kind} 定成必填</b>（与公开面 {@code /comment/list} 相反：那条省略
+     * {@code =} 不筛）。理由：它一次能拉全站**所有**内容，省了 {@code Kind} 就是「点开就拉全表」——
+     * 管理端两个 tab 各有各的语义（评论 / 问答），没有「都要」这个用法。
+     */
+    @Test
+    void adminListWithoutKindIsRejected() throws Exception {
+        mockMvc.perform(post("/comment/adminList"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(false))
+                .andExpect(jsonPath("$.msg").value("缺少参数：Kind（只能是 review / question / answer）"));
+    }
+
+    /** 未知 {@code Kind} ⇒ 拒（同公开面：未知值不静默当「不筛」）。 */
+    @Test
+    void adminListWithUnknownKindIsRejected() throws Exception {
+        mockMvc.perform(post("/comment/adminList")
+                        .param("Kind", "complaint"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(false))
+                .andExpect(jsonPath("$.msg").value("未知的评论类型：complaint（只能是 review / question / answer）"));
+    }
+
+    /**
+     * {@code Solved} 给非提问的 {@code Kind} ⇒ 拒（**不是**静默忽略）。
+     *
+     * <p>⚠️ 静默忽略会让前端以为筛过了：管理员勾着「未解决」却看到一屏评价 / 回答，
+     * 而每一条都长得像「未被解决」的提问 —— 那是**假读数**，比拒绝难发现得多。
+     */
+    @Test
+    void adminListWithSolvedOnNonQuestionKindIsRejected() throws Exception {
+        mockMvc.perform(post("/comment/adminList")
+                        .param("Kind", "answer")
+                        .param("Solved", "1"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(false))
+                .andExpect(jsonPath("$.msg").value("解决状态只对提问有意义（Kind=question），当前 Kind=answer"));
+    }
+
+    /** 未知 {@code Solved} ⇒ 拒（与 {@code Kind} / {@code Sort} 同一口径：未知值不静默）。 */
+    @Test
+    void adminListWithUnknownSolvedIsRejected() throws Exception {
+        mockMvc.perform(post("/comment/adminList")
+                        .param("Kind", "question")
+                        .param("Solved", "2"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(false))
+                .andExpect(jsonPath("$.msg").value("未知的解决状态：2（只能是 0 / 1）"));
+    }
+
+    /**
+     * 只给 {@code TargetType} 不给 {@code TargetId} ⇒ 拒。
+     *
+     * <p>⚠️ 这条是**「半个键」**的处置：若静默当「全站」，管理员以为自己筛到某个商品下、
+     * 实际看到的是全站列表 —— 一次筛错的读数没有任何迹象。成对给才是收窄，成对不给才是全站。
+     */
+    @Test
+    void adminListWithHalfATargetIsRejected() throws Exception {
+        mockMvc.perform(post("/comment/adminList")
+                        .param("Kind", "review")
+                        .param("TargetType", "goods"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(false))
+                .andExpect(jsonPath("$.msg").value("TargetType 与 TargetId 要么都给、要么都不给（都不给 = 全站）"));
+    }
+
+    /** 收窄时 {@code TargetType} 未知 ⇒ 拒（与公开面同一句话术：这一句两处必须一字不差）。 */
+    @Test
+    void adminListWithUnknownTargetTypeIsRejected() throws Exception {
+        mockMvc.perform(post("/comment/adminList")
+                        .param("Kind", "review")
+                        .param("TargetType", "good")
+                        .param("TargetId", "1"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(false))
+                .andExpect(jsonPath("$.msg").value("未知的评论对象类型：good（只能是 goods / user）"));
+    }
+}

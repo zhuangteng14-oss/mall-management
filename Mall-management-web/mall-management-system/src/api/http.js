@@ -100,9 +100,9 @@ export function urlOf(path) {
   return /^https?:\/\//.test(path) ? path : API_BASE + path
 }
 
-/** 静态资源路径 → 绝对 URL。 */
+/** 静态资源路径 → 绝对 URL。⚠️ 已是绝对 URL 则原样返回（与 `urlOf` 同口径）—— `comment_image.ImageUrl` 存的就是绝对地址，裸拼前缀会拼出 `http://localhost:8088http://…`（管理端「待审图片」破图即此）。 */
 export function assetOf(path) {
-  return ASSET_BASE + path
+  return /^https?:\/\//.test(path) ? path : ASSET_BASE + path
 }
 
 /**

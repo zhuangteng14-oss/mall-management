@@ -1,0 +1,196 @@
+== C3 块 6 收口 · 引用重指**最终**判定（2026-10-13）==
+
+基线 BASE = f2b1535（= main / PR #90 合并点）。工具链：`scripts/refs-scan.sh` →
+`_work/b6-refs-target-drift.py`（漂移表）→ `_work/b6-repoint-apply.py`（**只应用 MOVED-SAME**，
+其余 SKIP 并记理由）→ `_work/b6-refs-pair3.py`（before/after 配对）。
+
+---- 0. 一份产物、三种口径（**计数是移动靶**）----
+每一次往 docs 里加一行带 `文件:行号` 的正文，after 侧就多一条 —— 所以本档给出**三份**快照：
+  (a) 正文口径 = `_work/b6-refs-after3.txt`（全部**文档编辑完成**、**本证据档尚未落盘**时取）
+  (b) 全树口径 = `_work/b6-refs-after4.txt`（含本档自身引入的引用）—— **已被 (c) 取代**
+  (c) 收口口径 = `_work/b6-refs-after5.txt`（**收口笔最后一轮**：§8 那处页面改动已落、
+      手验两档 `b6-c7-handverify.txt` / `b6-c7-fake-data.txt` 的追加已落、`progress.md`
+      §7-B6 与 `slot-registry.md` §23-8 的收口段已落）—— **以这一份为准**
+`docs/agent/evidence/**` 在重指护栏里是 **PREFIX（史料，不碰）** ⇒ (b)/(c) 比 (a) 多出来的部分
+不参与任何重指判定，只是那几个证据档自己的正文坐标。
+⚠️ **本档自己在 (c) 之后又被改过一次**（就是这一段）⇒ 再跑一次全树口径还会再多几条。
+   **终止条件不是某个计数，是「真 LOST = 0」** —— 每个 `LOST` 都必须在 after 侧找到它的配对项。
+
+---- 1. before/after 配对 ----
+(c) 收口口径（`_work/b6-refs-pairing3-after5.txt`）：
+before=4582 after=4752
+raw lost=25 raw new=195
+成对（同一引用者、token 按位移表改号）= 25
+真 LOST = 0
+真 NEW = 175
+  ⚠️ **源侧（非 `docs/`）真 NEW 只有 2 条**，与 (a) 那轮**逐字相同**、一条没多：
+     ① `src/router/index.js` 的 `WebAuthConfig.java:105`（本块新写的一处引用）
+     ② `src/views/admin/ModerationPage.vue` 的 `OrderPage.vue:638-642`（该文件本身是本块新建的）
+     ⇒ 收口笔的这轮改动**没有在活代码里**造出任何新引用。
+
+(a) 正文口径（`_work/b6-refs-pairing3-after3.txt`）：
+before=4582 after=4632
+raw lost=25 raw new=75
+成对（同一引用者、token 按位移表改号）= 25
+真 LOST = 0
+真 NEW = 55
+  NEW  Mall-management-web/mall-management-system/src/router/index.js  WebAuthConfig.java:105  x1
+  NEW  Mall-management-web/mall-management-system/src/views/admin/ModerationPage.vue  OrderPage.vue:638-642  x1
+  NEW  docs/agent/api-contract.md  :120  x1
+  NEW  docs/agent/api-contract.md  :175  x1
+  NEW  docs/agent/api-contract.md  :68  x1
+  NEW  docs/agent/api-contract.md  MerchantStatsController.java:19  x1
+  NEW  docs/agent/api-contract.md  ProductPage.vue:1018  x2
+  NEW  docs/agent/api-contract.md  ProductPage.vue:393  x1
+  NEW  docs/agent/api-contract.md  ProductPage.vue:459  x1
+  NEW  docs/agent/api-contract.md  ProductPage.vue:913  x2
+  NEW  docs/agent/api-contract.md  WebAuthConfig.java:62  x1
+  NEW  docs/agent/db-migration.md  .sql:1507-1634  x1
+  NEW  docs/agent/db-migration.md  .sql:1528  x1
+  NEW  docs/agent/db-migration.md  :1507-1526  x1
+  NEW  docs/agent/db-migration.md  :1631-1634  x1
+  NEW  docs/agent/db-migration.md  mall_management_sql.sql:1528-1555  x1
+  NEW  docs/agent/db-migration.md  mall_management_sql.sql:1557-1566  x1
+  NEW  docs/agent/db-migration.md  mall_management_sql.sql:1568-1579  x1
+  NEW  docs/agent/db-migration.md  mall_management_sql.sql:1581-1591  x1
+  NEW  docs/agent/db-migration.md  mall_management_sql.sql:1593-1611  x1
+  NEW  docs/agent/db-migration.md  mall_management_sql.sql:1613-1621  x1
+  NEW  docs/agent/db-migration.md  mall_management_sql.sql:1623-1629  x1
+  NEW  docs/agent/db-schema.md  .sql:1528  x1
+  NEW  docs/agent/db-schema.md  .sql:1623-1629  x2
+  NEW  docs/agent/db-schema.md  .sql:1625  x1
+  NEW  docs/agent/db-schema.md  :2670  x1
+  NEW  docs/agent/db-schema.md  ConcurrencyRunner.java:2664  x1
+  NEW  docs/agent/evidence/c3-block6/b6-commit2-handverify.txt  application-a3.properties:156-157  x1
+  NEW  docs/agent/evidence/c3-block6/b6-commit2-handverify.txt  merchant/job/MerchantDowngradeSchedulingConfig.java:23  x1
+  NEW  docs/agent/progress.md  MerchantStatsController.java:19  x1
+  NEW  docs/agent/progress.md  ProductPage.vue:557  x1
+  NEW  docs/agent/progress.md  WebAuthConfig.java:101-117  x1
+  NEW  docs/agent/progress.md  WebAuthConfig.java:94-99  x2
+  NEW  docs/agent/slot-registry.md  :1018  x1
+  NEW  docs/agent/slot-registry.md  :393  x1
+  NEW  docs/agent/slot-registry.md  :459  x1
+  NEW  docs/agent/slot-registry.md  :913  x1
+  NEW  docs/agent/slot-registry.md  MerchantStatsController.java:19  x1
+  NEW  docs/agent/slot-registry.md  OrderPage.vue:638-642  x1
+  NEW  docs/agent/slot-registry.md  ProductPage.vue:311-319  x2
+  NEW  docs/agent/slot-registry.md  ProductPage.vue:354  x1
+  NEW  docs/agent/slot-registry.md  application-a3.properties:156-157  x1
+  NEW  docs/agent/slot-registry.md  merchant/job/MerchantDowngradeSchedulingConfig.java:23  x1
+  NEW  docs/agent/tech-debt.md  :1018  x1
+  NEW  docs/agent/tech-debt.md  :354  x1
+  NEW  docs/agent/tech-debt.md  :913  x1
+  NEW  docs/agent/tech-debt.md  ProductPage.vue:354  x1
+  NEW  docs/agent/tech-debt.md  ProductPage.vue:393  x1
+  NEW  docs/agent/tech-debt.md  ProductPage.vue:459  x1
+  NEW  docs/agent/tech-debt.md  merchant/job/MerchantDowngradeSchedulingConfig.java:23  x1
+
+  (b) 全树口径（`_work/b6-refs-pairing3-after4.txt`）：**已作废（被 (c) 取代）**
+      before=4582 after=4738
+      raw lost=25 raw new=181
+      成对（同一引用者、token 按位移表改号）= 25
+      真 LOST = 0
+      真 NEW = 161
+      ⇒ 差 = 106 条，全部由本证据档自身引入。**三种口径的真 LOST 都是 0。**
+
+---- 2. 漂移表的坐标归属（判「该不该重指」）----
+判据：token 文本是否出现在 `git show f2b1535:<引用者文件>` 里。
+    出现 ⇒ 该行仍持**基线坐标**（真候选）；不出现 ⇒ 已是**新坐标**（重指过 / 本笔新写）⇒ 不应用。
+
+    BASE-ERA    CONTENT-DIFF   35
+    BASE-ERA    MOVED-SAME    106
+    NEW-COORD   CONTENT-DIFF    2
+    NEW-COORD   MOVED-BLANK     2
+    NEW-COORD   MOVED-SAME     28
+    NEW-COORD   OUT-OF-OLD     11
+
+---- 3. 本轮「应用候选」19 条 —— 逐条判定为**新坐标**（全部不应用）----
+    NEW-COORD  Mall-management-web/mall-management-system/src/router/index.js:261  WebAuthConfig.java:105 -> 109
+    NEW-COORD  Mall-management-web/mall-management-system/src/router/index.js:528  WebAuthConfig.java:105 -> 109
+    NEW-COORD  docs/agent/progress.md:693  WebAuthConfig.java:107-111 -> 111
+    NEW-COORD  Mall-management-web/mall-management-system/src/router/index.js:251  WebAuthConfig.java:94-99 -> 98
+    NEW-COORD  docs/agent/progress.md:1375  WebAuthConfig.java:94-99 -> 98
+    NEW-COORD  docs/agent/progress.md:1396  WebAuthConfig.java:94-99 -> 98
+    NEW-COORD  docs/agent/progress.md:1456  WebAuthConfig.java:94-99 -> 98
+    NEW-COORD  docs/agent/slot-registry.md:4198  AbstractSmokeTest.java:143 -> 149
+    NEW-COORD  docs/agent/slot-registry.md:4169  notify-events.js:57 -> 62
+    NEW-COORD  Mall-management-web/mall-management-system/src/views/ShopHome.vue:306  ProductPage.vue:1015 -> 1210
+    NEW-COORD  Mall-management-web/mall-management-system/src/views/AppShell.vue:493  ProductPage.vue:1022-1030 -> 1217
+    NEW-COORD  Mall-management-web/mall-management-system/src/views/ShoppingCart.vue:77  ProductPage.vue:289 -> 294
+    NEW-COORD  docs/agent/progress.md:763  ProductPage.vue:557 -> 752
+    NEW-COORD  docs/agent/progress.md:819  ProductPage.vue:557 -> 752
+    NEW-COORD  Mall-management-web/mall-management-system/src/router/index.js:139  ProductPage.vue:584 -> 779
+    NEW-COORD  Mall-management-web/mall-management-system/src/router/index.js:148  ProductPage.vue:619 -> 814
+    NEW-COORD  docs/agent/progress.md:812  ProductPage.vue:619 -> 814
+    NEW-COORD  Mall-management-web/mall-management-system/src/components/ProductCard.vue:15  ProductPage.vue:684 -> 879
+    NEW-COORD  Mall-management-server/src/main/java/com/minke/mallmanagement/shared/web/WebAuthConfig.java:71  ProductPage.vue:991 -> 1186
+
+    ⇒ 19/19 全为 NEW-COORD。**根因**：本笔重指与文档编辑**分两轮**做，
+       第二轮跑时引用者已不在基线坐标上；而 shift() 的判据（old[N]==new[N+Δ]）
+       对 `}` / 空行这类**退化行**恒真 ⇒ 假阳（样例：WebAuthConfig.java:71 的
+       `ProductPage.vue:991 → :1186`，两侧第 N 行都只是 `}`）。
+       **正确判据** = 「token ∈ 基线版引用者文件」；**正确流程** = 重指晚于全部文档编辑、且一次跑完。
+
+---- 4. 未应用族（141 行）分组（逐条清单见 tech-debt.md TD-54）----
+  源侧 13 行：
+     CONTENT-DIFF CONTENT-DIFF 8
+     MOVED-SAME   GUARD        2
+     MOVED-SAME   SIBLING      3
+  文档侧 128 行：
+     CONTENT-DIFF CONTENT-DIFF 27
+     MOVED-SAME   GUARD        33
+     MOVED-SAME   PINNED       2
+     MOVED-SAME   PREFIX       47
+     MOVED-SAME   RANGE-DIFF   1
+     MOVED-SAME   SIBLING      18
+
+  分组明细（含引用者:行号）见 `_work/b6-baseera-movedsame-by-reason.txt`。
+
+---- 5. ProductPage.vue 位移表（BASE 1633 → HEAD 2500 行；本块引用最密的目标）----
+BASE 1633 -> HEAD 2500 lines
+  : 297 -> :302  SAME   <div class="r"><span class="k">材质</span><span class="v">ABS + 液态硅胶</sp
+  : 321 -> :348  DIFF   <div class="b"><i>3 星</i><span class="track"><span class="fill" style=
+  : 323 -> :350  DIFF   <div class="b"><i>1 星</i><span class="track"><span class="fill" style=
+  : 339 -> :412  DIFF   <div class="h"><span class="who">拾***</span>
+  : 341 -> :414  DIFF   <span class="when">2026-09-21</span></div>
+  : 351 -> :522  SAME   </div>
+  : 354 -> :526  DIFF   <button type="button" class="on" disabled title="评价分页无端点（≥4 处 · 超档），本笔
+  : 361 -> :533  SAME   </div>
+  : 363 -> :535  SAME   </div>
+  : 380 -> :552  SAME   ⚠️ 稿的 4 张卡是 mock（声谷 Lite / 空气传导 / 数据线 / 蓝牙音箱），本区**有真数据**
+  : 388 -> :560  SAME   而少传会让主页那条 T-guard-6 判据（「7 个参数都要在」）失效，故取并集。
+  : 398 -> :570  SAME   <p v-if="recommendGoods.length === 0" class="none">暂无推荐</p>
+  : 400 -> :572  SAME   <ProductCard v-for="goods in recommendGoods.slice(0, 4)" :key="goods.I
+  : 402 -> :574  SAME   </section>
+  : 415 -> :587  SAME   <div class="popup-mask" v-if="showPopup" @click="showPopup=false">
+  : 426 -> :598  SAME   <div class="p-coupons"><span class="tag">领券</span>
+  : 447 -> :619  SAME   </div>
+  : 459 -> :631  SAME   旧 `.pay-confirm-*` / `.dialog-*` / `.yes-btn` / `.no-btn` 一并退役。⚠️ **20
+  : 462 -> :634  SAME   <div class="dlg-h">{{ popupEntry === 'cart' ? '是否加入购物车？' : '是否现在付款？' }
+  : 465 -> :637  SAME   <button type="button" class="b no" @click="handlePay(false)">否</button
+  : 471 -> :643  SAME   <!-- 收银台（2026-10-10，Bug 1）—— 与「我的订单」的【付款】**同一个组件**：
+  : 490 -> :685  SAME   const { MerchantId, GoodName, GoodType, Id } = route.query
+  : 510 -> :705  SAME   const hasDiscount = computed(() => {
+  : 515 -> :710  SAME   const discountRate = computed(() => {
+  : 520 -> :715  SAME   return Number.isInteger(r) ? String(Math.trunc(r)) : String(r)   // ⚠️
+  : 546 -> :741  SAME   const loadAllItems = async () => {
+  : 557 -> :752  SAME   productCode: code,
+  : 571 -> :766  SAME   handleApiError(e, '请求失败')
+  : 608 -> :803  SAME   popupAllItems.value = await mergeSkus(items)   // 2026-10-11：有 SKU ⇒ 型
+  : 619 -> :814  SAME   num = Math.max(0, Math.min(100, num))
+  : 638 -> :833  SAME   .map((i) => ({
+  : 654 -> :849  SAME   const generateOrderId = () => {
+  : 684 -> :879  SAME   pendingOrderData = {
+  : 715 -> :910  SAME   
+  : 757 -> :952  SAME   router.push(getMerchantId() ? '/merchant/order/cart?tab=orders' : '/cu
+  : 758 -> :953  SAME   }
+  : 794 -> :989  SAME   return;
+  : 797 -> :992  SAME   alert('不能咨询自己的商品');
+  : 803 -> :998  SAME   return;
+  : 805 -> :1000 SAME   const productInfo = {
+  : 820 -> :1015 SAME   params.append('toType', 'merchant');
+  : 991 -> :1186 SAME   }
+  :1015 -> :1210 SAME   // 弹窗一开（且是「立即购买」）就重拉一次券包：用户可能刚在本页领券行领过一张 —— 不重拉的话
+  :1022 -> :1217 SAME   //    `slot-registry.md` / `progress.md` / `OrderService.java` 多处按行号引 
+  :1030 -> :1225 SAME   const skuKind = (code) => {
+  :1070 -> :1795 SAME   .brand { font-family: var(--font-display); font-size: var(--fs-lg); fo

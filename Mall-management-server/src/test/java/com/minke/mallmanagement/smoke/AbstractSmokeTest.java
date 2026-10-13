@@ -51,6 +51,12 @@ import com.minke.mallmanagement.marketing.subsidy.dao.SubsidyDao;
 import com.minke.mallmanagement.marketing.subsidy.service.SubsidyService;
 import com.minke.mallmanagement.marketing.seckill.dao.SeckillDao;
 import com.minke.mallmanagement.marketing.seckill.service.SeckillService;
+import com.minke.mallmanagement.comment.dao.CommentDao;
+import com.minke.mallmanagement.comment.dao.ReportDao;
+import com.minke.mallmanagement.comment.dao.SensitiveWordDao;
+import com.minke.mallmanagement.comment.service.CommentService;
+import com.minke.mallmanagement.comment.service.ReportService;
+import com.minke.mallmanagement.comment.service.SensitiveWordService;
 import org.junit.jupiter.api.BeforeEach;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
@@ -259,7 +265,38 @@ import static org.mockito.Mockito.when;
         // 切片上下文就会因为「找不到 SeckillService」而**启动失败**，同前十一笔）。
         // ⚠️ 依赖链三层：Service → Dao；两个 Controller 另各吃一个**已在清单里**的 bean
         //    （`NotificationService` 块 1、`AuditService` 块 1）⇒ 这两条不必重复登记。
-        SeckillDao.class, SeckillService.class})
+        SeckillDao.class, SeckillService.class,
+        // C3 块 6（内容+消息块，2026-10-12 · commit 1 评论）：新增一个 Controller
+        // （`CommentController`）+ 一个 @Service（`CommentService`）+ 一个 @Dao（`CommentDao`）——
+        // **第十三次同一处地雷**（@WebMvcTest 无参会加载全部 @Controller，新控制器一进来，
+        // 切片上下文就会因为「找不到 CommentService」而**启动失败**，同前十二笔）。
+        // ⚠️ 依赖链三层：Service → Dao；Service 另吃一个**不是 bean** 的 `app.upload-dir`
+        //    （@Value 注入的 String，照 GoodsService / UserService 的既有做法）⇒ 无需额外登记。
+        // ⚠️ `CommentController` 另收 `ObjectProvider<UserStateLookup>` —— **刻意不 @Import**
+        //    `UserStateLookupService`（理由见本文件它处那条 ⚠️，它是@WebMvcTest 切片的已知缺口）。
+        CommentDao.class, CommentService.class,
+        // C3 块 6 整改 · commit 4〈举报 + 图片审核 + 3 次警告封号〉（2026-10-13）：新增一个 Controller
+        // （`ReportController`）+ 一个 @Service（`ReportService`）+ 一个 @Dao（`ReportDao`）——
+        // **第十四次同一处地雷**（@WebMvcTest 无参会加载全部 @Controller，新控制器一进来，
+        // 切片上下文就会因为「找不到 ReportService」而**启动失败**，同前十三笔）。
+        // ⚠️ 依赖链三层：Service → Dao；`ReportService` 另吃 `CommentService`（上面已登记）、
+        //    `GoodsViolationService`（块 3 已登记）、`UserGovernanceService`（块 2 已登记）、
+        //    `NotificationService`（块 1 已登记）⇒ 这四个**无需重复登记**。
+        // ⚠️ `ReportController` 另收 `ObjectProvider<UserStateLookup>`（同 `CommentController`）。
+        // ⚠️ 本笔还给 `CommentService` / `CommentDao` 加了「图片审核」那一支（`/comment/imageReview`），
+        //    **不新增 bean**（两个类都在上）⇒ 这里没有第二条要登记的。
+        ReportDao.class, ReportService.class,
+        // C3 块 6 整改 · commit 5〈敏感词〉（2026-10-13）：新增一个 Controller
+        // （`SensitiveWordController`）+ 一个 @Service（`SensitiveWordService`）+ 一个 @Dao
+        // （`SensitiveWordDao`）—— **第十五次同一处地雷**（@WebMvcTest 无参会加载全部 @Controller，
+        // 新控制器一进来，切片上下文就会因为「找不到 SensitiveWordService」而**启动失败**，同前十四笔）。
+        // ⚠️ 依赖链三层：Service → `SensitiveWordDao`（本行）+ `CommentDao`（上面已登记）；
+        //    `CommentService` 本笔**反向**多依赖了一个 `SensitiveWordService`（发表前过敏感词闸）
+        //    ⇒ 这一条是**双向登记**：漏了 `SensitiveWordService` 不只是新 Controller 起不来，
+        //    **`CommentService` 自己也起不来**，会把 `CommentSmokeTest` 一起拖红。
+        // ⚠️ 本笔还给 `CommentDao` 加了「扫老评论」那两个方法（`selectContentsContaining` /
+        //    `updateContent`），**不新增 bean** ⇒ 这里没有第二条要登记的。
+        SensitiveWordDao.class, SensitiveWordService.class})
 public abstract class AbstractSmokeTest {
 
     @Autowired

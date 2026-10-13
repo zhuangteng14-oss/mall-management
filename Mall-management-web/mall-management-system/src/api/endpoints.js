@@ -4,7 +4,7 @@
 // 「路径字面量只允许出现在本文件」—— 后者强得多，且同样可 grep 自动化（方案 Q8）。
 //
 // 端点来源：14 个 view 里 **42 处 fetch + 6 处 URL 赋值**，逐条抽取
-// （2026-10-04，切换自 `9add994`）共 **31 个唯一端点**，按 M5 的四域分组（+2 条 `user.me` / `user.logout`：会话恢复笔与翻开关笔 2026-10-05 加，+1 条 `user.token`：多账户隔离笔 2026-10-06 加 —— 三条均**非** view 抽取 ⇒ 加上 C3 批 A 的 3 条 `admin.audit*`（2026-10-08）与 C3 块 1·I2 的 8 条（`admin.notify*` 4 + `notification.*` 4，2026-10-09，同样**非** view 抽取），再加 C3 块 2〈用户块〉的 11 条（`user.updateProfile` 1 + `merchant.*` 2 + `admin.accounts*` 8，2026-10-09，同样**非** view 抽取），本表实为 **56** 条；再加 C3 块 3〈商品块〉的 14 条（`goodsB3` 2 + `catalog` 1 + `catalogAdmin` 11，2026-10-10，同样**非** view 抽取）；再经同日〈模板表通用化〉就地改造（**删** `catalog` 1 + `catalogAdmin` 4 + `admin.notifyTemplate*` 2 = 7 条，**加** `template` 2 + `templateAdmin` 4 = 6 条），现为 **69** 条；再加 C3 块 4〈订单块〉的 9 条（`cart` 5 + `orderAdmin` 4，2026-10-10，同样**非** view 抽取 —— 唯一调用方是新建的 `api/order.js`），现为 **78** 条；再加 C3 块 4 补丁〈订单块〉的 1 条（`order.orderDetail`，2026-10-10，同样**非** view 抽取），现为 **79** 条；再加可视化段（2026-10-11）的 4 条（`goods.skuList` 1〔与 `goodsProductCodeSelect` 同行追加〕+ `stats.*` 3〔末尾新增组〕，同样**非** view 抽取），现为 **83** 条）；再加 C3 块 5〈营销块〉commit 1（券，2026-10-11）的 10 条（`marketingCoupon` 7 + `marketing` 3，同样**非** view 抽取 —— 唯一调用方是新建的 `api/marketing.js`），现为 **93** 条；再加同日〈券的信息架构重排〉的 1 条（`marketing.claimBatch` = `/marketing/coupon/claimBatch`，2026-10-11，同样**非** view 抽取 —— 仍是 `api/marketing.js` 的调用方），现为 **94** 条；再加 C3 块 5〈营销块〉B 组 + 续笔（店铺域，2026-10-12）的 4 条（`shop` 组：`follow` / `unfollow` / `followState` / `profile`，同样**非** view 抽取 —— 新建的 `api/shop.js`），现为 **98** 条；再加 C3 块 5〈营销块〉commit 3（国补，2026-10-12）的 9 条（`marketingSubsidy` 6 + `subsidy` 3，同样**非** view 抽取 —— 管理端六条走 `api/marketing.js`，商家侧三条里的两条给 `views/NotifyInbox.vue`、第三条给详情页 / 搜索页的国补标签），现为 **107** 条；再加 C3 块 5〈营销块〉commit 4（秒杀，2026-10-12）的 12 条（`marketingSeckill` 6 + `seckill` 6，同样**非** view 抽取 —— 管理端六条与商家侧四条经 `api/marketing.js` 包一层，`live` 给主页秒杀模块），现为 **119** 条）。
+// （2026-10-04，切换自 `9add994`）共 **31 个唯一端点**，按 M5 的四域分组（+2 条 `user.me` / `user.logout`：会话恢复笔与翻开关笔 2026-10-05 加，+1 条 `user.token`：多账户隔离笔 2026-10-06 加 —— 三条均**非** view 抽取 ⇒ 加上 C3 批 A 的 3 条 `admin.audit*`（2026-10-08）与 C3 块 1·I2 的 8 条（`admin.notify*` 4 + `notification.*` 4，2026-10-09，同样**非** view 抽取），再加 C3 块 2〈用户块〉的 11 条（`user.updateProfile` 1 + `merchant.*` 2 + `admin.accounts*` 8，2026-10-09，同样**非** view 抽取），本表实为 **56** 条；再加 C3 块 3〈商品块〉的 14 条（`goodsB3` 2 + `catalog` 1 + `catalogAdmin` 11，2026-10-10，同样**非** view 抽取）；再经同日〈模板表通用化〉就地改造（**删** `catalog` 1 + `catalogAdmin` 4 + `admin.notifyTemplate*` 2 = 7 条，**加** `template` 2 + `templateAdmin` 4 = 6 条），现为 **69** 条；再加 C3 块 4〈订单块〉的 9 条（`cart` 5 + `orderAdmin` 4，2026-10-10，同样**非** view 抽取 —— 唯一调用方是新建的 `api/order.js`），现为 **78** 条；再加 C3 块 4 补丁〈订单块〉的 1 条（`order.orderDetail`，2026-10-10，同样**非** view 抽取），现为 **79** 条；再加可视化段（2026-10-11）的 4 条（`goods.skuList` 1〔与 `goodsProductCodeSelect` 同行追加〕+ `stats.*` 3〔末尾新增组〕，同样**非** view 抽取），现为 **83** 条）；再加 C3 块 5〈营销块〉commit 1（券，2026-10-11）的 10 条（`marketingCoupon` 7 + `marketing` 3，同样**非** view 抽取 —— 唯一调用方是新建的 `api/marketing.js`），现为 **93** 条；再加同日〈券的信息架构重排〉的 1 条（`marketing.claimBatch` = `/marketing/coupon/claimBatch`，2026-10-11，同样**非** view 抽取 —— 仍是 `api/marketing.js` 的调用方），现为 **94** 条；再加 C3 块 5〈营销块〉B 组 + 续笔（店铺域，2026-10-12）的 4 条（`shop` 组：`follow` / `unfollow` / `followState` / `profile`，同样**非** view 抽取 —— 新建的 `api/shop.js`），现为 **98** 条；再加 C3 块 5〈营销块〉commit 3（国补，2026-10-12）的 9 条（`marketingSubsidy` 6 + `subsidy` 3，同样**非** view 抽取 —— 管理端六条走 `api/marketing.js`，商家侧三条里的两条给 `views/NotifyInbox.vue`、第三条给详情页 / 搜索页的国补标签），现为 **107** 条；再加 C3 块 5〈营销块〉commit 4（秒杀，2026-10-12）的 12 条（`marketingSeckill` 6 + `seckill` 6，同样**非** view 抽取 —— 管理端六条与商家侧四条经 `api/marketing.js` 包一层，`live` 给主页秒杀模块），现为 **119** 条；再加 C3 块 6〈内容块〉commit 1（评论，2026-10-12）的 5 条（`comment` 组，同样**非** view 抽取 —— 商品页 `ProductPage.vue` 直调 + 新建的 `api/comment.js`），现为 **124** 条；再加 C3 块 6〈内容块〉commit 2（问答，2026-10-12）的 1 条（`comment.accept`，同样**非** view 抽取 —— 仍是 `api/comment.js` 的调用方），现为 **125** 条；再加 C3 块 6 整改 · commit 4（举报 + 图片审核，2026-10-13）的 4 条（`comment.imageReview` 1 + 新组 `report` 3，同样**非** view 抽取 —— `imageReview` 经 `api/comment.js`、三条 report 经新建的 `api/report.js`），现为 **129** 条；再加 C3 块 6 整改 · commit 5（敏感词，2026-10-13）的 3 条（`sensitive` 组，同样**非** view 抽取 —— 经新建的 `api/sensitive.js`，其唯一调用方是管理端「敏感词库」tab），现为 **132** 条；再加 C3 块 6〈内容块〉整改补笔（管理端全站列表，2026-10-13）的 1 条（`comment.adminList`，同样**非** view 抽取 —— 仍是 `api/comment.js` 的调用方，其唯一调用方是管理端「评论管理 / 问答管理」两栏），现为 **133** 条）。
 //
 // ⚠️ 路径里的 `GoodsProductCodeSelect` 是**大写开头**，与后端 `@PostMapping` 逐字一致，
 //    不是笔误 —— 改名会 404。
@@ -317,5 +317,63 @@ export const endpoints = {
     apply: '/marketing/seckill/apply',
     activities: '/marketing/seckill/activities',
     live: '/marketing/seckill/live',
+  },
+  // ⚠️ C3 块 6（内容块 · commit 1 评论 + commit 2 问答 + 整改 commit 4 图片审核 + 整改补笔
+  //    管理端全站列表，2026-10-12/13）：`CommentController` 的 **8** 条（`@RequestMapping("/comment")`）。
+  //    **非** view 抽取 —— 商品页 `ProductPage.vue` 直调这八条里的一条（`list`），
+  //    其余经新建的 `api/comment.js` 包一层。**单列一组、追加在对象尾**。
+  //    ⚠️ 本组是**内容域 13 条里的 7 条**（方案 A4）：`/report/*` 3 条见下方新组、
+  //       `/sensitive/*` 3 条归 commit 5（敏感词）。
+  //       ⚠️ **2026-10-13 追加第 8 条 `adminList` ⇒ 内容域 14 条**（用户批准的甲案，
+  //       不在方案 A4 的 13 条里）—— 该条**仍不是**公开面，见下一条 ⚠️。
+  //    ⚠️ **只有 `list` 在白名单里**（公开面 —— 商品页未登录也要看评价）：本组另七条
+  //       未登录必 **401**（`adminList` 与 `imageReview` 亦然）。别因为「都在 `/comment` 下」
+  //       就把八条一起当公开。
+  //    ⚠️ 六条写端点走 `IdentityGuard.requireSelfOrAdminByUsername(request, Account)`
+  //        —— 判据是**登录名**（`comment.AuthorId` 存的就是它），传**别人的** `Account` 是 **403**。
+  //        ⚠️ 两个管理端端点（`imageReview` / `adminList`）**不收 `Account`**：身份不由入参声明。
+  comment: {
+    list: '/comment/list',
+    add: '/comment/add',
+    delete: '/comment/delete',
+    // ⚠️ 采纳答案（问答，commit 2）。⚠️ **两个 Id 都要**：`Id` = 哪条提问、`ReplyId` = 采纳哪条回答；
+    //    只传 `Id` 会被后端拒（「缺少参数：ReplyId」）。
+    accept: '/comment/accept',
+    like: '/comment/like',
+    myOrders: '/comment/myOrders',
+    // ⚠️ 图片审核（管理端，块 6 整改 commit 4；方案 §4.3）—— **一条端点、三个动作**，
+    //    靠 `Action` 分派（`list` / `approve` / `reject`）。管理端「待审图片」整页走它。
+    imageReview: '/comment/imageReview',
+    // ⚠️ 管理端**全站列表**（块 6 整改补笔，2026-10-13；内容域第 14 条）—— 唯一调用方是
+    //    管理端「评论管理 / 问答管理」两栏（`views/admin/ModerationPage.vue`）。
+    //    `Kind` **必填**（`review` / `question` / `answer`）；`TargetType`+`TargetId` 可选**成对**
+    //    收窄；`Solved` 仅 `Kind=question` 有意义。⚠️ **不在白名单**（未登录 401）。
+    adminList: '/comment/adminList',
+  },
+  // ⚠️ C3 块 6 整改 · commit 4〈举报 + 图片审核 + 3 次警告封号〉（2026-10-13）：`ReportController`
+  //    的 **3** 条（`@RequestMapping("/report")`）。**非** view 抽取 —— 商品页的「举报 / 提删」
+  //    弹窗 + 管理端「举报中心」经新建的 `api/report.js` 包一层。**单列一组、追加在对象尾**。
+  //    ⚠️ 本组是**内容域 13 条里的 3 条**（方案 A4）；内容域至此 10 条（comment 7 + report 3），
+  //       余下 `/sensitive/*` 3 条归 commit 5。
+  //    ⚠️ `add` 是登录面（`IdentityGuard.requireSelfOrAdminByUsername`，判据 = 举报人登录名）；
+  //       `list` / `handle` 是**管理端**面 —— 按本仓一贯做法**不挂 `requireAdmin`**（靠
+  //       `AuthInterceptor` + `app.auth.enabled` 两道闸，口径同 `admin/**Controller`）。
+  report: {
+    add: '/report/add',
+    list: '/report/list',
+    handle: '/report/handle',
+  },
+  // ⚠️ C3 块 6 整改 · commit 5〈敏感词〉（2026-10-13）：`SensitiveWordController` 的 **3** 条
+  //    （`@RequestMapping("/sensitive")`）。**非** view 抽取 —— 唯一调用方是管理端「敏感词库」tab，
+  //    经新建的 `api/sensitive.js` 包一层。**单列一组、追加在对象尾**。
+  //    ⚠️ 内容域 13 条（方案 A4）至此**全部落地**：`comment` 7 + `report` 3 + `sensitive` 3。
+  //    ⚠️ 三条**都是管理端**面 —— 按本仓一贯做法**不挂 `requireAdmin`**（靠 `AuthInterceptor`
+  //       + `app.auth.enabled` 两道闸，口径同 `admin/**Controller`）。
+  //    ⚠️ 与 `comment` / `report` 的写端点不同，本组**不收 `Account`**：词表没有作者列，
+  //       加词 / 删词不需要声明身份（见 `SensitiveWordController` 类注释那条 ⚠️）。
+  sensitive: {
+    list: '/sensitive/list',
+    add: '/sensitive/add',
+    delete: '/sensitive/delete',
   },
 }

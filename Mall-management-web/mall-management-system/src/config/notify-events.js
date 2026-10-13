@@ -1,8 +1,8 @@
 // src/config/notify-events.js —— 系统通知**事件类型 code → 中文标签**（C3 块 1 · I2，2026-10-09）。
 //
-// 它对应后端的 `notification/NotificationEvents.java`（31 条常量 —— 2026-10-11 块 5 加了 `coupon.expiring.unclaimed`；
-// 2026-10-12 commit 3 加国补 3 条、commit 4 加秒杀 2 条（`seckill.responded` / `seckill.application.submitted`）；
-// ⚠️ 本注释此前写的「25 条」与后端**当时**的 25 条常量其实是对齐的，只落后端的类注释（那句写 21）是陈旧的，已一并校正）。**两张表必须逐字对齐** ——
+// 它对应后端的 `notification/NotificationEvents.java`（**32 条常量** —— 块 1 建域起，各块递增：
+// 块 5 加 `coupon.expiring.unclaimed`，块 5 commit 3/4 加国补 3 条与秒杀 2 条，块 6 commit 2 问答加
+// `comment.accepted` / `question.timeout` 到 33，块 6「契约纠偏」摘 `comment.on.user` 回到 32）。**两张表必须逐字对齐** ——
 // 后端那个类的类注释写明了「写入方与读出方各写一遍，第二处抄错双方都不报错」，本文件就是那个「读出方」。
 //
 // ⚠️ 【本文件最容易做错、也最不该做错的一条】**必须有兜底**。
@@ -18,7 +18,9 @@
 //    所以「一个恰好叫 `constructor` 的未知 code」是**可达**的。故判据必须是「**自有**属性」。
 
 /**
- * code → 中文标签。**31 条**，顺序与后端 `NotificationEvents.java` 的「归属块」分组一致。
+ * code → 中文标签。**32 条**，顺序与后端 `NotificationEvents.java` 的「归属块」分组一致
+ * （块 5 收口时 31 条，块 6 commit 2 问答补 `comment.accepted` / `question.timeout` 两条到 33；
+ *  块 6「契约纠偏」摘除预留的 `comment.on.user` 一条回到 32）。
  *
  * ⚠️ 加一条 = 后端 `NotificationEvents` 加常量 + 本表加一行 + `EVENT_OPTIONS` 加一项（**三处**）。
  *    漏掉本文件只会让**新类型**显示成 code 原文（兜底在，不崩），漏掉后端常量则写入方没得引 —— 不会静默。
@@ -29,15 +31,18 @@ export const EVENT_LABELS = {
   'system.notice': '系统通知',
 
   // ── 块 6：评论区三类事件（§9.2 硬约束）+ 举报结果 ────────────────────────
+  // ⚠️ 块 6 基准文档 `块6参考.md` §二 A1 定稿的评论区事件为 `comment.on.post` / `comment.reply` /
+  //    `comment.mention` 三条 + 举报结果 `report.handled`。原预留的 `comment.on.user`
+  //    （留言板被评论）**不在**该清单内，2026-10-13 按用户裁定摘除（全仓零调用点）。
   'comment.on.post': '商品被评论',
-  'comment.on.user': '留言板被评论',
   'comment.reply': '评论被回复',
   'comment.mention': '被 @ 提及',
   'report.handled': '举报已处理',
 
   // ── 块 2：用户与商家治理 ────────────────────────────────────────────────
-  // ⚠️ 上面 6 条**建块 1 时就登记了**（那张表是「清单要覆盖到后续所有块」，不是「本块会发」）；
-  //    下面 3 条是块 2 真正**开始发**的（2026-10-09）—— 判据记在此处，免得日后误以为前 6 条没实现。
+  // ⚠️ 上面块 1 的 2 条与块 6 的 4 条**建块 1 时就登记了**（那张表是「清单要覆盖到后续所有块」，
+  //    不是「本块会发」）；下面几条是块 2 真正**开始发**的（2026-10-09）—— 判据记在此处，
+  //    免得日后误以为上面那几条没实现。
   'user.audit.passed': '用户审核通过',
   'user.audit.rejected': '用户审核驳回',
   'user.banned': '账号被封禁',
@@ -85,6 +90,14 @@ export const EVENT_LABELS = {
   //    本来就知道自己邀请了谁，回执只需「答没答、答的什么」。判据写在 `NotificationEvents` 该类注释里。
   'seckill.responded': '商家应答秒杀邀请',
   'seckill.application.submitted': '秒杀申请已提交（发往管理端）',
+
+  // ── 块 6：问答（commit 2，2026-10-12）────────────────────────────────────
+  // ⚠️ 上面那一节「评论区三类事件 + 举报结果」4 条是**建块 1 时就登记的预留**；
+  //    下面这 2 条是**问答**这一笔才第一次有人发的（`CommentService.accept` / `QuestionTimeoutJob`）。
+  //    ⚠️ 收件人各异，别照抄：`comment.accepted` 发给**回答者**本人（ToType 随其角色 customer/merchant）；
+  //    `question.timeout` 发给**管理端共享收件箱**（ToType='admin' / ToId='*'）。
+  'comment.accepted': '回答被采纳',
+  'question.timeout': '提问超时未解决（发往管理端）',
 }
 
 /**
@@ -120,10 +133,11 @@ export const EVENT_OPTIONS = [
   { code: 'seckill.responded', label: '商家应答秒杀邀请（发往管理端）' },
   { code: 'seckill.application.submitted', label: '秒杀申请已提交（发往管理端）' },
   { code: 'comment.on.post', label: '商品被评论' },
-  { code: 'comment.on.user', label: '留言板被评论' },
   { code: 'comment.reply', label: '评论被回复' },
   { code: 'comment.mention', label: '被 @ 提及' },
   { code: 'report.handled', label: '举报已处理' },
+  { code: 'comment.accepted', label: '回答被采纳' },
+  { code: 'question.timeout', label: '提问超时未解决（发往管理端）' },
 ]
 
 /**

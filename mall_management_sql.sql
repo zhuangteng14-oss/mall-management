@@ -1503,3 +1503,184 @@ SET @s := (SELECT IF(COUNT(*) = 0,
   FROM information_schema.STATISTICS
   WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'goods_sku' AND INDEX_NAME = 'idx_goods_sku_sku_code');
 PREPARE _p FROM @s; EXECUTE _p; DEALLOCATE PREPARE _p;
+
+-- ============================================================
+-- Migration: 块 6〈内容+消息块〉—— 6 张新表 + `user` 加 1 列
+--            Date: 2026-10-12
+-- 依据：用户 2026-10-12 交付《块 6 · 内容+消息块 —— 最终执行方案 v1.0 定稿》
+--       （A1 六表 / A2 user.WarnCount / A3 通知 code / A4 十三端点 / A5 图片存储）。
+-- 范围：**只加表 + 只加列**；不改既有列、不删行、不改既有数据（规则 v2：向后兼容）。
+-- 幂等：加表走 `CREATE TABLE IF NOT EXISTS`（照本文件 :1442 先例）；加列走
+--       `information_schema` 守卫 + `PREPARE/EXECUTE`（照本文件 ⑬ 先例）。重复执行第二遍起空操作。
+-- 表（6）：comment / comment_mention / comment_image / comment_like / report / sensitive_word
+-- 列（1）：user.WarnCount
+-- ⚠️ P3 门禁：`ConcurrencyRunner.java` 的 KNOWN_TABLES 19 → 25、期望表数 30 → 36（**四处同改**）。
+-- 回滚（逻辑废弃，执行前须人工确认；**不 DROP 旧表/旧列**，只停用）：
+--       UPDATE `user` SET `WarnCount` = 0;
+--       DROP TABLE IF EXISTS `sensitive_word`;
+--       DROP TABLE IF EXISTS `report`;
+--       DROP TABLE IF EXISTS `comment_like`;
+--       DROP TABLE IF EXISTS `comment_image`;
+--       DROP TABLE IF EXISTS `comment_mention`;
+--       DROP TABLE IF EXISTS `comment`;
+-- ============================================================
+
+-- ---- ⑮-1 统一评论表（块 6 主表：商品评论 / 用户留言 / 楼中楼 / 问答，同一张表）----
+CREATE TABLE IF NOT EXISTS `comment` (
+  `Id`              bigint NOT NULL AUTO_INCREMENT COMMENT '自增主键',
+  `TargetType`      varchar(16) NOT NULL COMMENT '评论对象类型：goods / user',
+  `TargetId`        varchar(50) NOT NULL COMMENT '对象 ID（商品=GoodsId / 型号串，用户=业务号）',
+  `ParentId`        bigint DEFAULT NULL COMMENT 'NULL=顶层评论；!=NULL=回复（指向顶层评论 Id）',
+  `ReplyToId`       bigint DEFAULT NULL COMMENT '回复的回复：被回复的回复 Id；普通回复=NULL',
+  `Kind`            varchar(16) NOT NULL DEFAULT 'review' COMMENT 'review 评价 / question 提问 / answer 回答',
+  `AuthorId`        varchar(40) NOT NULL COMMENT '作者账号（对齐 login.UserName）',
+  `AuthorRole`      tinyint NOT NULL COMMENT '1=用户 / 2=商家',
+  `IsAnonymous`     tinyint(1) NOT NULL DEFAULT 0 COMMENT '0=实名 / 1=匿名（匿名者评价强制 5 星、显示 首字*****）',
+  `Rating`          tinyint NOT NULL DEFAULT 5 COMMENT '1-5；匿名=强制 5；问答=0',
+  `Content`         varchar(1000) NOT NULL COMMENT '正文（敏感词命中占比<40% 时已就地屏蔽为 ***）',
+  `Status`          varchar(16) NOT NULL DEFAULT 'normal' COMMENT 'normal / deleted（作者或管理员删除 = 逻辑删）',
+  `IsSolved`        tinyint(1) NOT NULL DEFAULT 0 COMMENT '问答：0 未解决 / 1 已解决',
+  `AcceptedReplyId` bigint DEFAULT NULL COMMENT '问答：被采纳的回复 Id（采纳后不可改）',
+  `IsMerchantFirst` tinyint(1) NOT NULL DEFAULT 0 COMMENT '商家首次回复置顶标记',
+  `ProductCode`     varchar(40) DEFAULT NULL COMMENT '购买型号（评论时从历史订单选，见 /comment/myOrders）',
+  `LikeCount`       int NOT NULL DEFAULT 0 COMMENT '点赞数冗余（顶层评论与回复同用）',
+  `DislikeCount`    int NOT NULL DEFAULT 0 COMMENT '踩数冗余',
+  `created_at`      datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '行落库时刻',
+  `updated_at`      datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '行更新时刻',
+  PRIMARY KEY (`Id`),
+  KEY `idx_comment_target` (`TargetType`,`TargetId`,`created_at`),
+  KEY `idx_comment_parent` (`ParentId`,`created_at`),
+  KEY `idx_comment_author` (`AuthorId`,`created_at`),
+  KEY `idx_comment_kind`   (`Kind`,`TargetType`,`TargetId`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='统一评论表（块 6）';
+
+-- ---- ⑮-2 评论 @ 关系（后端自动生成，无前端输入框）----
+CREATE TABLE IF NOT EXISTS `comment_mention` (
+  `Id`          bigint NOT NULL AUTO_INCREMENT COMMENT '自增主键',
+  `CommentId`   bigint NOT NULL COMMENT '本条评论 Id（comment.Id）',
+  `MentionedId` varchar(40) NOT NULL COMMENT '被 @ 的账号（对齐 login.UserName）',
+  `created_at`  datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '行落库时刻',
+  PRIMARY KEY (`Id`),
+  KEY `idx_mention_comment` (`CommentId`),
+  KEY `idx_mention_user` (`MentionedId`,`created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='评论 @ 关系（块 6）';
+
+-- ---- ⑮-3 评论图片（先审后发：pending / approved / rejected）----
+CREATE TABLE IF NOT EXISTS `comment_image` (
+  `Id`         bigint NOT NULL AUTO_INCREMENT COMMENT '自增主键',
+  `CommentId`  bigint NOT NULL COMMENT '所属评论 Id（comment.Id）',
+  `ImageUrl`   varchar(255) NOT NULL COMMENT '图片 URL（/img/comment/xxx；由 UploadStorage.store 返回值拼）',
+  `Status`     varchar(16) NOT NULL DEFAULT 'pending' COMMENT 'pending 待审 / approved 通过 / rejected 不合规（已删仓库文件）',
+  `SortOrder`  int NOT NULL DEFAULT 0 COMMENT '同评论内排序',
+  `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '行落库时刻',
+  PRIMARY KEY (`Id`),
+  KEY `idx_image_comment` (`CommentId`,`SortOrder`),
+  KEY `idx_image_status` (`Status`,`created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='评论图片（先审后发，块 6）';
+
+-- ---- ⑮-4 评论点赞 / 踩（同一用户对同一评论只能赞或踩一次）----
+CREATE TABLE IF NOT EXISTS `comment_like` (
+  `Id`         bigint NOT NULL AUTO_INCREMENT COMMENT '自增主键',
+  `CommentId`  bigint NOT NULL COMMENT '顶层评论 or 回复的 Id（都是 comment 行）',
+  `UserId`     varchar(40) NOT NULL COMMENT '点赞人账号（对齐 login.UserName）',
+  `Type`       varchar(8) NOT NULL COMMENT 'like / dislike',
+  `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '行落库时刻',
+  PRIMARY KEY (`Id`),
+  UNIQUE KEY `uk_like_comment_user` (`CommentId`,`UserId`),
+  KEY `idx_like_user` (`UserId`,`created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='评论点赞/踩（块 6）';
+
+-- ---- ⑮-5 举报单（同内容同人不能二次举报；驳回后「再举报」= UPDATE 同一行复活，见方案 §4.4）----
+CREATE TABLE IF NOT EXISTS `report` (
+  `Id`           bigint NOT NULL AUTO_INCREMENT COMMENT '自增主键',
+  `TargetType`   varchar(16) NOT NULL COMMENT '举报对象类型：comment / goods / user',
+  `TargetId`     varchar(50) NOT NULL COMMENT '被举报对象 ID',
+  `ReporterId`   varchar(40) NOT NULL COMMENT '举报人账号（对齐 login.UserName）',
+  `ReporterRole` tinyint NOT NULL COMMENT '1=用户 / 2=商家',
+  `Reason`       varchar(32) NOT NULL COMMENT '辱骂 / 广告 / 违法 / 其他',
+  `Description`  varchar(500) DEFAULT NULL COMMENT '理由=其他 时填（前端限 100 字）',
+  `Status`       varchar(16) NOT NULL DEFAULT 'pending' COMMENT 'pending 待处理 / handled 已处理 / rejected 已驳回',
+  `HandlerId`    varchar(40) DEFAULT NULL COMMENT '处理人账号',
+  `HandleNote`   varchar(500) DEFAULT NULL COMMENT '处理说明',
+  `created_at`   datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '行落库时刻',
+  `updated_at`   datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '行更新时刻',
+  PRIMARY KEY (`Id`),
+  UNIQUE KEY `uk_report_target_reporter` (`TargetType`,`TargetId`,`ReporterId`),
+  KEY `idx_report_status` (`Status`,`created_at`),
+  KEY `idx_report_reporter` (`ReporterId`,`created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='举报单（块 6）';
+
+-- ---- ⑮-6 敏感词库（预置 10 个常见词，见 seed-demo.sql / 迁移后种子）----
+CREATE TABLE IF NOT EXISTS `sensitive_word` (
+  `Id`         bigint NOT NULL AUTO_INCREMENT COMMENT '自增主键',
+  `Word`       varchar(64) NOT NULL COMMENT '敏感词',
+  `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '行落库时刻',
+  `updated_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '行更新时刻',
+  PRIMARY KEY (`Id`),
+  UNIQUE KEY `uk_sensitive_word` (`Word`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='敏感词库（块 6）';
+
+-- ---- ⑮-7 `user` 加列 `WarnCount`（警告累计；达 3 自动封号 —— 复用 user.banned）----
+SET @s := (SELECT IF(COUNT(*) = 0,
+  'ALTER TABLE `user` ADD COLUMN `WarnCount` int NOT NULL DEFAULT 0 COMMENT ''警告累计（块 6 举报）：达 3 自动封号（写 user.banned=1）；解封后由管理端手动清零''',
+  'DO 0')
+  FROM information_schema.COLUMNS
+  WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'user' AND COLUMN_NAME = 'WarnCount');
+PREPARE _p FROM @s; EXECUTE _p; DEALLOCATE PREPARE _p;
+
+-- ---- ⑮-8 敏感词库预置 10 词（方案 §一.6「预置 10 个常见词」；`INSERT IGNORE` 靠 uk_sensitive_word 幂等）----
+INSERT IGNORE INTO `sensitive_word` (`Word`) VALUES
+  ('广告'), ('刷单'), ('博彩'), ('赌博'), ('诈骗'),
+  ('传销'), ('违禁'), ('高仿'), ('山寨'), ('代开发票');
+
+-- ============================================================
+-- 块 6 整改 · 补笔（用户 2026-10-13 逐条裁决）—— 内容域补一件：顶层评价的 DB 层唯一锁
+--   ⚠️ 本节之前块 6 的号段停在 ⑮-8（见上）；本节新增 **⑯**。
+-- ============================================================
+
+-- ---- ⑯ 顶层商品评价唯一锁（方案 §4.1「一商品一用户只能评一条」的 DB 层最后一道闸）----
+-- 【为什么要有它】Service 那道预检（CommentService.checkReviewEligible →
+--   CommentDao.countTopLevelByAuthor）是「先查后插」，两个并发请求可以同时通过预检、双双落库。
+--   本键是**同一判据**的 DB 层版本：Service 管话术、DB 管不变量。
+--
+-- 【为什么是「生成列 + NULL」而不是裸 (TargetType,TargetId,AuthorId)】三条都是判据，不是口味：
+--   ① 裸三列会把「同一用户对同一商品下的**第二条回复**」也锁死 —— 而方案 §4.1 明写
+--      「回复权限：任何登录用户」、回复不限条数 ⇒ 那会是一次**降级**；
+--   ② MySQL 唯一索引视 NULL 互不相等 ⇒ 让「非顶层商品评价」一律算出 NULL 即天然豁免，
+--      一条 DDL 同时覆盖四类豁免：ParentId != NULL（回复）/ Kind='question'（提问）/
+--      Kind='answer'（回答）/ TargetType='user'（留言板，无「买过」约束）；
+--   ③ Status='normal' 走**白名单**（不是 <>'deleted'）：CommentDao.countTopLevelByAuthor
+--      本就排除已删行（「作者删掉自己那条后应当能重评」）⇒ 已删行的键为 NULL、锁随之解除，
+--      两侧语义逐字一致；今后若添新状态，白名单下它**不会**被误锁。
+--
+-- 【两条口径要跟着走】
+--   · 排序列继承表级 utf8mb4_0900_ai_ci ⇒ 与 Service 那句 `AuthorId = ?` 是**同一套比较口径**
+--     （大小写 / 重音同口径），不会出现「Service 认为是同一人、DB 认为是两个人」。
+--   · TargetType='goods' 钉死了 TargetId 是**数字**（非数字在 Service 层即被
+--     「商品评论的 TargetId 必须是商品 Id（数字）」拒掉）⇒ 分隔符 `:` 不会被
+--     「对象 ID 里含冒号」混成同一个键。
+--   ⚠️ 列宽 = 16 + 1 + 50 + 1 + 40 = 108 ⇒ varchar(120)（utf8mb4 下 480 B < 3072 B 索引上限）。
+--
+-- ⚠️ **建键之前先自查重复**（有重复 ⇒ ALTER 直接 1062 失败）：
+--   SELECT TargetType,TargetId,AuthorId,Kind,COUNT(*) AS n,GROUP_CONCAT(Id) AS ids FROM `comment`
+--   WHERE ParentId IS NULL AND Kind='review' AND Status='normal'
+--   GROUP BY TargetType,TargetId,AuthorId,Kind HAVING n > 1;
+--   2026-10-13 实测命中 1 组：goods / 76 / 1111 = Id 113 + 114 ⇒ 已**逻辑删 113**清掉
+--   （保留 114：它是种子探针的 reviewAnon，被 comment_image Id 4/5、comment_like 4 赞 2 踩、
+--    report.Id=1 的 TargetId、证据档 §4.1/§4.3/§4.9/§4.12 锚住）。
+--   ⚠️ 清理脚本是 _work/b6-c7-unique-lock-cleanup.sh，**刻意不进本文件** —— 新库建表时 comment 为空，
+--      那行只存在于那一个环境；把一条 DELETE 烤进共享的重建脚本 = 给下一个人埋雷。
+SET @s := (SELECT IF(COUNT(*) = 0,
+  'ALTER TABLE `comment` ADD COLUMN `ReviewLockKey` varchar(120) GENERATED ALWAYS AS (CASE WHEN `TargetType` = ''goods'' AND `Kind` = ''review'' AND `ParentId` IS NULL AND `Status` = ''normal'' THEN CONCAT(`TargetType`, '':'', `TargetId`, '':'', `AuthorId`) ELSE NULL END) STORED COMMENT ''唯一锁载体（块 6 ⑯）：仅顶层商品评价有值，其余 NULL —— 判据对齐 CommentDao.countTopLevelByAuthor''',
+  'DO 0')
+  FROM information_schema.COLUMNS
+  WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'comment' AND COLUMN_NAME = 'ReviewLockKey');
+PREPARE _p FROM @s; EXECUTE _p; DEALLOCATE PREPARE _p;
+
+-- ---- ⑯-2 唯一键本体（判据与 ⑯-1 的生成列同为一份；分开两个守卫，任一半失败可单独重跑）----
+SET @s := (SELECT IF(COUNT(*) = 0,
+  'ALTER TABLE `comment` ADD UNIQUE KEY `uk_comment_review_once` (`ReviewLockKey`)',
+  'DO 0')
+  FROM information_schema.STATISTICS
+  WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'comment' AND INDEX_NAME = 'uk_comment_review_once');
+PREPARE _p FROM @s; EXECUTE _p; DEALLOCATE PREPARE _p;
