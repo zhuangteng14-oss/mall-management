@@ -300,4 +300,24 @@ public class ReportDao {
                 .param(username).query(String.class).list();
         return rows.isEmpty() ? null : rows.get(0);
     }
+
+    // ==================== 读：账号换算（业务号方向 —— 2026-10-13 通知域修复） ====================
+
+    /**
+     * 登录名 → **业务号**（{@code COALESCE(merchantid, customerid)}）。查无 ⇒ {@code null}。
+     *
+     * <p>⚠️ 与上面 {@link #selectCustomerIdByUsername} 的区别见 {@code CommentDao} 同名方法的
+     * javadoc（那一处写得最全）：那一个只取 {@code customerid}（商家行上是 NULL），
+     * 本方法按角色二选一，是「这个人作为**收件人**该用哪个号」的答案。
+     *
+     * <p>用途：{@code report.handled} 的两个收件人（原内容作者 / 举报人）与举报行本身一样
+     * 存的是**登录名**，而 {@code notification.ToId} 的契约是**业务号**
+     * ⇒ 2026-10-13 之前这一条通知对举报人等于没发（写进去的是登录名，收件箱按业务号拉）。
+     */
+    public String selectUserIdByUsername(String username) {
+        List<String> rows = jdbcClient.sql("SELECT COALESCE(`merchantid`, `customerid`) FROM `user` "
+                        + "WHERE `username` = ? LIMIT 1")
+                .param(username).query(String.class).list();
+        return rows.isEmpty() ? null : rows.get(0);
+    }
 }

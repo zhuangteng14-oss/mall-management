@@ -625,8 +625,18 @@ public class CommentService {
             Integer role = commentDao.selectRoleByUsername(to);
             String toType = (role != null && role == CommentKinds.ROLE_MERCHANT)
                     ? NotificationService.TO_TYPE_MERCHANT : NotificationService.TO_TYPE_CUSTOMER;
+            // ⚠️ **自 @ 判据已经在上面比完了（登录名域），这里才开始换算** —— 顺序不能反：
+            //    换完域再比，比的就成了「两个人的业务号」，而上面 `to.equals(author)` 那条
+            //    是「同一个登录名」，两件事。见【一列两种号】。
+            // ⚠️ 【一列两种号】`comment_mention.MentionedId` 要**登录名**（上面 insertMention 传的就是 `to`），
+            //    `notification.ToId` 要**业务号**（见 NotificationController 的 javadoc）。
+            //    同一次发言往两张表写两种号 ⇒ 这里是唯一一处换算。
+            String toBizId = commentDao.selectUserIdByUsername(to);
+            if (isBlank(toBizId)) {
+                return;   // 换算不出业务号 ⇒ 收件箱按业务号拉，写了也是一条谁都读不到的死行
+            }
             String who = anonymous ? "有人" : "「" + author + "」";
-            notificationService.send(UUID.randomUUID().toString(), to, toType,
+            notificationService.send(UUID.randomUUID().toString(), toBizId, toType,
                     NotificationEvents.COMMENT_MENTION,
                     "你被 @ 提及",
                     who + "在评论中 @ 了你：" + brief(content),
@@ -664,12 +674,21 @@ public class CommentService {
             if (goodsId == null) {
                 return;
             }
-            String merchant = commentDao.selectMerchantUsernameByGoodsId(goodsId);
-            if (isBlank(merchant) || merchant.equals(author)) {
+            // ⚠️ 【一列两种号】收件人只要**业务号**（`notification.ToId` 的契约）
+            //    ⇒ 直接取 `goods.MerchantId`，**不必**绕 `user.merchantid → user.username` 那一跳
+            //    （那一跳是给 `comment_mention.MentionedId` 用的，见 resolveTopLevelMention）。
+            String merchantBizId = commentDao.selectMerchantIdByGoodsId(goodsId);
+            if (isBlank(merchantBizId)) {
+                return;
+            }
+            // 自评（商家评自家商品，本被 checkReviewEligible「买过才评」挡住，此处仍设一道防）⇒ 跳过。
+            // ⚠️ 判据两侧必须**同域**：上面取的是商家的业务号，故这里要比发表人的**业务号**
+            //    （比登录名 = 拿两种号相比，恒不相等，这道防等于没有）。
+            if (merchantBizId.equals(commentDao.selectUserIdByUsername(author))) {
                 return;
             }
             String who = anonymous ? "有人" : "「" + author + "」";
-            notificationService.send(UUID.randomUUID().toString(), merchant,
+            notificationService.send(UUID.randomUUID().toString(), merchantBizId,
                     NotificationService.TO_TYPE_MERCHANT,
                     NotificationEvents.COMMENT_ON_POST,
                     "您的商品收到新评价",
@@ -704,8 +723,14 @@ public class CommentService {
             Integer role = commentDao.selectRoleByUsername(to);
             String toType = (role != null && role == CommentKinds.ROLE_MERCHANT)
                     ? NotificationService.TO_TYPE_MERCHANT : NotificationService.TO_TYPE_CUSTOMER;
+            // ⚠️ 【一列两种号】`repliedTo` 全程是**登录名**（自回复那条判据在上面就比完了，
+            //    同理不许换到这儿再比）；`notification.ToId` 要业务号 ⇒ 这里换算一次。
+            String toBizId = commentDao.selectUserIdByUsername(to);
+            if (isBlank(toBizId)) {
+                return;   // 同 recordMention：换算不出就别写死行
+            }
             String who = anonymous ? "有人" : "「" + author + "」";
-            notificationService.send(UUID.randomUUID().toString(), to, toType,
+            notificationService.send(UUID.randomUUID().toString(), toBizId, toType,
                     NotificationEvents.COMMENT_REPLY,
                     "您的评论收到回复",
                     who + "回复了你：" + brief(content),
@@ -983,7 +1008,13 @@ public class CommentService {
         int role = parseIntOr(str(reply.get("AuthorRole")), CommentKinds.ROLE_CUSTOMER);
         String toType = role == CommentKinds.ROLE_MERCHANT
                 ? NotificationService.TO_TYPE_MERCHANT : NotificationService.TO_TYPE_CUSTOMER;
-        notificationService.send(UUID.randomUUID().toString(), toId, toType,
+        // ⚠️ 【一列两种号】`toId` 取自 `reply.AuthorId` —— 那是**登录名**；
+        //    `notification.ToId` 的契约是**业务号** ⇒ 这里换算（本方法只发通知，不动 comment_mention）。
+        String toBizId = commentDao.selectUserIdByUsername(toId);
+        if (isBlank(toBizId)) {
+            return;   // 同 recordMention：换算不出就别写死行
+        }
+        notificationService.send(UUID.randomUUID().toString(), toBizId, toType,
                 NotificationEvents.COMMENT_ACCEPTED,
                 "你的回答被采纳",
                 "你在提问「" + brief(question.get("Content")) + "」下的回答已被采纳。",

@@ -802,4 +802,49 @@ public class CommentDao {
         return jdbcClient.sql("UPDATE `comment` SET `Content` = ? WHERE `Id` = ?")
                 .params(content, id).update();
     }
+
+    // ==================== 读：账号换算（业务号方向 —— 2026-10-13 通知域修复） ====================
+
+    /**
+     * 登录名 → **业务号**（{@code COALESCE(merchantid, customerid)}）。查无此人 ⇒ {@code null}。
+     *
+     * <h2>【⚠️ 与 {@link #selectCustomerIdByUsername} 不是同一个东西 —— 别合并】</h2>
+     * 那一个取的是 {@code customerid} 一列，商家行上它是 {@code NULL} ⇒ **商家查出来是 null**；
+     * 那正是「算 <em>客户</em>业务号」时想要的答案（{@code checkReviewEligible} 靠它判「商家账号没有购买记录」）。
+     * 本方法要的是「这个人**作为收件人时**该用哪个号」，{@code customerid} 与 {@code merchantid}
+     * 分属两个序列、且互斥为 NULL，故按角色二选一 —— 管理员行借 {@code customerid} 存 {@code login.Id}
+     * （见 {@code slot-registry §十三 13-3}），跟着客户那一支走。
+     *
+     * <h2>【它为什么必须存在：{@code notification.ToId} 是业务号】</h2>
+     * {@code notification.ToId} 的契约是**业务号**（{@code NotificationController} 的 javadoc 逐字，
+     * 也见 {@code NotificationDao.selectCustomerIds} —— 它取的就是 {@code customerid}）；
+     * 而 {@code comment.AuthorId} / {@code report.ReporterId} 存的是**登录名**。
+     * 两者在 2026-10-13 之前被直接当成同一个键用 ⇒ 块 6 的五条通知（{@code comment.mention} /
+     * {@code comment.reply} / {@code comment.on.post} / {@code comment.accepted} / {@code report.handled}）
+     * 全部写成了登录名，收件箱按业务号拉 ⇒ **收件人一条都读不到**。本方法就是那个缺的换算口。
+     *
+     * <p>⚠️ <b>反向锁死：{@code comment_mention.MentionedId} 要的是**登录名**</b>
+     * （见 {@link #insertMention} 的 ⚠️）⇒ 同一次发言往两张表写**两种号**，
+     * 调用方**不许**拿本方法的返回值去写 {@code comment_mention}，反之亦然。
+     */
+    public String selectUserIdByUsername(String username) {
+        List<String> rows = jdbcClient.sql("SELECT COALESCE(`merchantid`, `customerid`) FROM `user` "
+                        + "WHERE `username` = ? LIMIT 1")
+                .param(username).query(String.class).list();
+        return rows.isEmpty() ? null : rows.get(0);
+    }
+
+    /**
+     * 商品的商家**业务号**（就是 {@code goods.MerchantId} 本身，一跳都不用绕）。查无 ⇒ {@code null}。
+     *
+     * <p>⚠️ 与 {@link #selectMerchantUsernameByGoodsId} 是**同一个起点的两条路**，别搞混：
+     * 那个多绕一跳（{@code MerchantId → user.merchantid → user.username}）拿到的是**登录名**，
+     * 给 {@code comment_mention.MentionedId} 用；本方法拿到的是**业务号**，给
+     * {@code notification.ToId} 用。收件人是商家时两条都要，各取所需。
+     */
+    public String selectMerchantIdByGoodsId(long goodsId) {
+        List<String> rows = jdbcClient.sql("SELECT `MerchantId` FROM `goods` WHERE `Id` = ? LIMIT 1")
+                .param(goodsId).query(String.class).list();
+        return rows.isEmpty() ? null : rows.get(0);
+    }
 }

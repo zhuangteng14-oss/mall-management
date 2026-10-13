@@ -391,12 +391,24 @@ public class ReportService {
         }
     }
 
-    /** 按收件人角色选 {@code ToType}，发一条 {@code report.handled}。 */
+    /** 按收件人角色选 {@code ToType}，发一条 {@code report.handled}。
+     *
+     * <p>⚠️ <b>【一列两种号】{@code to} 是**登录名**（本类全长都按登录名走，见
+     * {@link #resolveTargetAuthor}），而 {@code notification.ToId} 的契约是**业务号**
+     * （{@code NotificationController} 的 javadoc 逐字）⇒ 中间必须换算一次。</b>
+     * 漏这一步时这条通知对收件人等于没发：行写进去了，收件箱按业务号拉 ⇒ 拉不到
+     * （2026-10-13 实测：8 行 {@code report.handled} 的 ToId 全是登录名，举报人一条都看不见）。
+     * 两个收件人（原内容作者 / 举报人）同走本方法 ⇒ 一处修，两条都对。
+     */
     private void send(String to, String title, String content, String targetType, String targetId) {
         Integer role = reportDao.selectRoleByUsername(to);
         String toType = (role != null && role == 2)
                 ? NotificationService.TO_TYPE_MERCHANT : NotificationService.TO_TYPE_CUSTOMER;
-        notificationService.send(UUID.randomUUID().toString(), to, toType,
+        String toBizId = reportDao.selectUserIdByUsername(to);
+        if (isBlank(toBizId)) {
+            return;   // 换算不出业务号 ⇒ 写了也是一条谁都读不到的死行（同 CommentService 那三处）
+        }
+        notificationService.send(UUID.randomUUID().toString(), toBizId, toType,
                 NotificationEvents.REPORT_HANDLED, title, content,
                 notifyTargetType(targetType), targetId);
     }
