@@ -105,7 +105,7 @@ class CommentServiceReviewLockTest {
                 .as("与 DB 撞键那条路**同一句话**（两处各写一遍字面量必然漂开）")
                 .isEqualTo(MSG_DUPLICATE);
         verify(dao, never()).insertComment(anyString(), anyString(), any(), any(), anyString(), anyString(),
-                anyInt(), anyBoolean(), anyInt(), anyString(), any(), anyBoolean());
+                anyInt(), anyBoolean(), anyInt(), anyString(), any(), anyBoolean(), any());
     }
 
     // ==================== 二、正例：证明上面两个用例不是「半路早退」蒙对的 ====================
@@ -124,7 +124,7 @@ class CommentServiceReviewLockTest {
         assertThat(res.get("Id")).as("回体键名是 Id（不是 id）—— okAdded 的形状").isEqualTo(7L);
         assertThat(res.get("msg")).isEqualTo("评论已发表");
         verify(dao).insertComment(anyString(), anyString(), any(), any(), anyString(), anyString(),
-                anyInt(), anyBoolean(), anyInt(), anyString(), any(), anyBoolean());
+                anyInt(), anyBoolean(), anyInt(), anyString(), any(), anyBoolean(), any());
     }
 
     // ==================== 三、不变项：四类豁免在 Service 层不能被任何第二道闸拦下 ====================
@@ -147,19 +147,19 @@ class CommentServiceReviewLockTest {
 
         assertTwoBothSucceed("回复（ParentId ≠ NULL，Kind 由父亲推 = review）", () ->
                 service.add(AUTHOR, CommentKinds.TARGET_GOODS, GOODS, String.valueOf(PARENT_REVIEW), null,
-                        CommentKinds.REVIEW, "回复内容", "5", null, null, List.of()));
+                        CommentKinds.REVIEW, "回复内容", "5", null, null, List.of(), null));
 
         assertTwoBothSucceed("提问（顶层 + Kind=question —— 不查「买过」、不限一条）", () ->
                 service.add(AUTHOR, CommentKinds.TARGET_GOODS, GOODS, null, null,
-                        CommentKinds.QUESTION, "提问内容", null, null, null, List.of()));
+                        CommentKinds.QUESTION, "提问内容", null, null, null, List.of(), null));
 
         assertTwoBothSucceed("回答（ParentId 指向一条提问，Kind 由父亲推 = answer）", () ->
                 service.add(AUTHOR, CommentKinds.TARGET_GOODS, GOODS, String.valueOf(PARENT_QUESTION), null,
-                        CommentKinds.ANSWER, "回答内容", null, null, null, List.of()));
+                        CommentKinds.ANSWER, "回答内容", null, null, null, List.of(), null));
 
         assertTwoBothSucceed("留言板（TargetType=user —— 没有「买过」可言，也没有唯一条数）", () ->
                 service.add(AUTHOR, CommentKinds.TARGET_USER, "77", null, null,
-                        CommentKinds.REVIEW, "留言内容", "5", null, null, List.of()));
+                        CommentKinds.REVIEW, "留言内容", "5", null, null, List.of(), null));
     }
 
     // ==================== 桩与调用 ====================
@@ -189,17 +189,20 @@ class CommentServiceReviewLockTest {
     /** 顶层商品评价（本文件的主路）。 */
     private Map<String, Object> addReview() {
         return service.add(AUTHOR, CommentKinds.TARGET_GOODS, GOODS, null, null, CommentKinds.REVIEW,
-                "这条是测试内容", "5", null, null, List.of());
+                "这条是测试内容", "5", null, null, List.of(), null);
     }
 
     /**
-     * {@code insertComment} 的桩口 —— 12 个形参**写一处**，免得每个用例各抄一遍。
+     * {@code insertComment} 的桩口 —— 13 个形参**写一处**，免得每个用例各抄一遍。
      * ⚠️ 抄错一个 matcher 就配不到真调用，`thenThrow` 会成为空桩、用例静默走成功路径
      * ⇒ 本文件的正例（{@link #happyPathReachesTheInsertAndReturnsTheNewId()}）就是钉这一点的。
+     * ⚠️ 末位 {@code Source}（C3 块 7 · commit B 加的第 13 个）用 {@code any()} 而**不是**
+     * {@code anyString()}：本文件四个调用点都**不传**它 ⇒ 真值是 {@code null}，
+     * {@code anyString()} **配不上 null**，桩会静默落空（那正是上面那句 ⚠️ 说的失效模式）。
      */
     private org.mockito.stubbing.OngoingStubbing<Integer> givenInsert() {
         return when(dao.insertComment(anyString(), anyString(), any(), any(), anyString(), anyString(),
-                anyInt(), anyBoolean(), anyInt(), anyString(), any(), anyBoolean()));
+                anyInt(), anyBoolean(), anyInt(), anyString(), any(), anyBoolean(), any()));
     }
 
     /** 直连的替身父行：{@code add} 的回复路径只读这四个键（TargetType / TargetId / Kind / AuthorId / ParentId / Status）。 */

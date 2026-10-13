@@ -91,6 +91,12 @@ public class CommentService {
     /** {@code ProductCode} 列是 {@code varchar(40)}（方案 §一.1）。 */
     private static final int MAX_PRODUCT_CODE = 40;
 
+    /**
+     * {@code comment.Source} 列是 {@code varchar(16)}（Migration ⑰-4 加的；块 5 给 11 张表
+     * 加的那一列同宽）。C3 块 7 · commit B 起由 {@code /comment/add} 的**可选**入参写入。
+     */
+    private static final int MAX_SOURCE = 16;
+
     /** 上传子目录 —— 方案 §A5「图片存储 {@code static/img/comment/}」。 */
     private static final String IMG_SUBDIR = "comment";
 
@@ -328,11 +334,18 @@ public class CommentService {
      *                    一律以父行为准，入参里那两个被忽略）
      * @param replyToIdRaw 非空 ⇒ 回的是**回复**（楼中楼），必须与 {@code ParentId} 同楼
      * @param files      评论图片（可为空 / {@code null}）；落盘后一律 {@code pending}
+     * @param source     **可选**的写入来源（C3 块 7 · commit B 新增，加在**末尾**）——
+     *                   写进 {@code comment.Source}（{@code varchar(16)}）。空 / 缺省 ⇒ 写 {@code ''}，
+     *                   与加它之前**逐字节同行为**（既有调用点一个都不改）。
+     *                   ⚠️ 它的**唯一**用途是让演练写入的行可辨认（{@code 'attack'}），
+     *                   而 {@code /comment/add} 是**公开面**端点 ⇒ 这**不是**一个身份声明、
+     *                   也**不参与任何鉴权判断**（谁能发评论仍由 {@code IdentityGuard} 说了算）。
      */
     @Transactional
     public Map<String, Object> add(String account, String targetType, String targetId, String parentIdRaw,
                                    String replyToIdRaw, String kindRaw, String content, String ratingRaw,
-                                   String anonymousRaw, String productCode, List<MultipartFile> files) {
+                                   String anonymousRaw, String productCode, List<MultipartFile> files,
+                                   String source) {
         if (isBlank(account)) {
             return fail("缺少参数：Account");
         }
@@ -346,6 +359,12 @@ public class CommentService {
         }
         if (!isBlank(productCode) && productCode.trim().length() > MAX_PRODUCT_CODE) {
             return fail("ProductCode 最多 " + MAX_PRODUCT_CODE + " 字符");
+        }
+        // ⚠️ 超长**拒**而不是截断：Source 是写入方自己声明的标记，悄悄截断会让
+        //    `attack` 变成 `attack` 之外的别的东西而**不报错**（标错来源比没有来源坏）。
+        //    位置在**碰库之前** —— 同 ProductCode 那条，白跑一趟没有意义。
+        if (!isBlank(source) && source.trim().length() > MAX_SOURCE) {
+            return fail("Source 最多 " + MAX_SOURCE + " 字符");
         }
         List<MultipartFile> images = nonEmptyFiles(files);
         if (images.size() > MAX_IMAGES) {
@@ -454,7 +473,7 @@ public class CommentService {
             try {
                 inserted = commentDao.insertComment(tt, tid, parentId, replyToId, kind, author, role,
                         anonymous, rating, text, isBlank(productCode) ? null : productCode.trim(),
-                        merchantFirst);
+                        merchantFirst, source);
             } catch (DuplicateKeyException e) {
                 // Migration ⑯ 的 uk_comment_review_once —— **只在并发**下才会先于上面那道预检拦到
                 // （两个请求同刻过了 `checkReviewEligible`、双双走到这里）。

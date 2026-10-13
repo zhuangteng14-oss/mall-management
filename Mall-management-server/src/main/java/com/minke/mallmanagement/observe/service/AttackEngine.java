@@ -80,19 +80,42 @@ import java.util.concurrent.atomic.AtomicInteger;
  *
  * <h2>【五、靶子与数据标记】</h2>
  * 靶子（SKU / 账号 / 敏感词）由 {@link DrillTargetDao} 在**跑之前**从库里挑一次（见那里的判据）。
- * 演练写下的数据一律带可辨识标记 {@link #ATTACK_PREFIX}（订单业务串前缀 = C2 甲口径；评论正文
- * 前缀 = 为可清理而加的同一前缀）。
- * ⚠️ <b>已知偏离（如实登记，未自行改动契约）</b>：Migration ⑰-4 给 {@code comment} 加
- * {@code Source} 列时写的用途是「攻击场景 8 会写本表 ⇒ 需按 {@code Source='attack'} 区分」，
- * 但 {@code CommentDao.insertComment} 的列清单里**没有 {@code Source}**、{@code /comment/add}
- * 也没有这个入参 ⇒ 演练写下的评论落在 {@code Source=''}，与真实写入不可区分。要让 ⑰-4 的用途
- * 成立，必须给写入链路加一个「这是演练」的通道（新入参 / 新请求头 / 新端点）——**那是契约改动**，
- * 按硬线须另批。本笔只保证「可辨识 + 可清理」：正文前缀 {@code SIM-} ⇒
- * {@code DELETE FROM comment WHERE Content LIKE 'SIM-%'}。
- * 同理，参考文 §1.4 写的「job 扫描时跳过带标记的行」在 {@code OrderTimeoutCancelJob} 里
- * **也没有实现**（它的 WHERE 只按 {@code PayIf=0 AND CancelledAt IS NULL} 筛）⇒ 演练造出的
- * 未付款 {@code SIM-} 单会在 dev 下 60 秒后被 job 真取消（并触发 commit 1 的库存回补）。
- * 这**不是** bug（那些单本就该被取消），但会改变演示观感，已写进 {@code Result} 的 Notes。
+ * 演练写下的数据带两个**互补**的标记（C2 甲 + C3 甲，见参考文 §1.4）：
+ * <ul>
+ *   <li><b>业务串 / 正文前缀 {@link #ATTACK_PREFIX}（{@code SIM-}）</b> —— 订单业务串、评论正文。
+ *       它扛的是「人肉看得见」与「{@code LIKE 'SIM-%'} 一把清掉」；</li>
+ *   <li><b>写入来源列 {@link #ATTACK_SOURCE}（{@code Source='attack'}）</b> —— 今天只有
+ *       {@code comment} 这一张表在写它（{@code /comment/add} 的可选入参）。</li>
+ * </ul>
+ *
+ * <p>⚠️ <b>块 7 · commit B（2026-10-14）把参考文 §1.4 的两条兑现了，逐条对照（此前本段登记的是
+ * 「已知偏离 / 未实现」）</b>：
+ * <ol>
+ *   <li><b>⑰-4 的用途成立了</b>：Migration ⑰-4 给 {@code comment} 加 {@code Source} 时写的用途
+ *       是「攻击场景 8 会写本表 ⇒ 需按 {@code Source='attack'} 与真实数据区分」，而
+ *       {@code CommentDao.insertComment} 的列清单里**当时没有 {@code Source}**、{@code /comment/add}
+ *       也没有这个入参 ⇒ 演练写下的评论落在 {@code Source=''}，与真实写入不可区分。
+ *       本笔给写入链路补上了那条通道：{@code /comment/add} 加**可选** {@code Source} 入参
+ *       （{@code required=false}，真实前端一个都不改、落 {@code ''}）；场景 8 发它。</li>
+ *   <li><b>「job 扫描时跳过带标记的行」实现了</b>：{@code OrderTimeoutCancelJob} 加了
+ *       {@code mall.order.cancel.skip-attack-data}（**dev 默认 false**）。
+ *       {@code false} ⇒ 与加它之前逐字节同行为（演练造的未付款 {@code SIM-} 单 60 秒后被真取消，
+ *       并触发 commit 1 的库存回补）；{@code true} ⇒ 带标记的行**根本不进候选**
+ *       （谓词 = {@code SIM-} 前缀 OR {@code Source='attack'}）⇒ 那一半演练数据逃过 job 注入。
+ *       ⚠️ 这正是参考文要的「**一半数据被 job 拦截、一半跳过 job 注入**，能同时看 job 生效 +
+ *       其它防护怎么处理」—— 演示时先用 {@code false} 跑一轮看取消、再用 {@code true} 跑一轮看留存。
+ *   </li>
+ * </ol>
+ * ⚠️ <b>仍如实登记一条边界</b>：{@code order.Source} 这一列（块 5 可视化段加的 11 张表之一）
+ * <b>今天没有任何写入点写 {@code 'attack'}</b> —— 演练订单只带 {@code SIM-} 前缀。
+ * ⇒ {@code OrderTimeoutCancelJob} 那个谓词的 {@code Source='attack'} 那一半**目前匹配不到行**
+ * （它写着是为了「按标记跳行」这件事本身完整，且将来若有写入方写这一列，闸自动生效）。
+ * 要给订单也落这一列，得给 {@code /order/orderAdd} 加一个可选 {@code Source} 入参
+ * （与 {@code /comment/add} 同款）——**那是订单域的契约改动，本笔未做、不做**。
+ *
+ * <p>清理口径（两条标记各一份，见 {@code Result.Notes} 与演示手册）：
+ * {@code DELETE FROM comment WHERE Source = 'attack';}（结构化，首选）/
+ * {@code DELETE FROM comment WHERE Content LIKE 'SIM-%';}（按前缀）/ 订单按业务串前缀删。
  *
  * <h2>【六、不自动还原库存基线】</h2>
  * Migration ⑰-2 给 {@code goods_sku} 加的 {@code BaselineStock} 是**人工四步**的载体
@@ -126,6 +149,19 @@ public class AttackEngine {
 
     /** 演练数据标记前缀（C2 甲：订单业务串前缀）。评论正文复用同一个前缀便于统一清理。 */
     static final String ATTACK_PREFIX = "SIM-";
+
+    /**
+     * 演练写入的 {@code Source} 列值（C3 甲：`seed / real / attack` 三档里的第三档）。
+     *
+     * <p>⚠️ <b>与 {@link #ATTACK_PREFIX} 是**同一件事的两种载体，都要写、不是二选一</b>：
+     * 前缀扛「人肉看得见 / {@code LIKE 'SIM-%'} 可清」，本列扛「结构化可查」。
+     * <p>⚠️ <b>{@code OrderTimeoutCancelJob} 的 {@code skip-attack-data} 谓词按这两个标记跳行</b>
+     * —— 它那边有一份**逐字相同的字面量**（{@code "SIM-"} / {@code "attack"}，见该类的
+     * {@code isAttackData}）。跨域 import 一个常量不值当（订单域不该依赖演练域），
+     * 故这里登记成「**同源字面量**」：谁改这个前缀，必须同时改那个类 ——
+     * 它那边也写了一条反向的 ⚠️ 指回本处。
+     */
+    static final String ATTACK_SOURCE = "attack";
 
     /** {@code drill_record.Name} 是 {@code varchar(64)}、{@code Scenario} 是 {@code varchar(500)}。 */
     static final int NAME_MAX = 64;
@@ -519,6 +555,14 @@ public class AttackEngine {
                 p.put("Rating", "5");
                 p.put("Anonymous", "0");
                 p.put("ProductCode", t.main().code());
+                // 块 7 · commit B（2026-10-14）：把「这一行是演练写的」落成**库里的列**，
+                // 而不是只靠正文前缀 `SIM-`。⑰-4 给 comment 加 Source 时写的用途逐字是
+                // 「攻击场景 8 会写本表 ⇒ 需按 Source='attack' 与真实数据区分」—— 这一行就是它的兑现。
+                // ⚠️ 与正文前缀**两条都要**（不是二选一）：前缀扛「人肉看得见 / LIKE 可清」，
+                //    本列扛「结构化可查」（前缀是自由文本，`SIM-` 恰好出现在正文中段就会误命中）。
+                // ⚠️ `/comment/add` 的 `Source` 是 `required=false` ⇒ 真实前端**不发**它、
+                //    落 `''`，「真实写入」与「演练写入」由此分得开。
+                p.put("Source", ATTACK_SOURCE);
                 return post(baseUrl, "/comment/add", p);
             }
             default:
@@ -843,14 +887,17 @@ public class AttackEngine {
 
         List<String> notes = new ArrayList<>();
         notes.add("判据：401/403 与 200+success:false 记 Blocked；5xx/404/超时/响应体不合本仓形状记 Failed");
-        notes.add("攻击数据标记 " + ATTACK_PREFIX + "（订单业务串 / 评论正文）。清理："
+        notes.add("攻击数据标记 " + ATTACK_PREFIX + "（订单业务串 / 评论正文）+ comment.Source='"
+                + ATTACK_SOURCE + "'。清理："
                 + "DELETE FROM `order` WHERE OrderId LIKE '" + ATTACK_PREFIX + "%'；"
-                + "DELETE FROM comment WHERE Content LIKE '" + ATTACK_PREFIX + "%'");
+                + "DELETE FROM comment WHERE Source = '" + ATTACK_SOURCE + "' 或 Content LIKE '"
+                + ATTACK_PREFIX + "%'");
         notes.add("库存基线是人工四步：演示前 UPDATE goods_sku SET BaselineStock = Stock "
                 + "WHERE BaselineStock IS NULL；演示后 UPDATE goods_sku SET Stock = BaselineStock；"
                 + "收尾 UPDATE goods_sku SET BaselineStock = NULL");
-        notes.add("dev 的超时取消 job 会在 60 秒后取消未付款的 " + ATTACK_PREFIX
-                + " 单并回补库存 ⇒ 秒杀场景「库存归零」这条证据要当场看");
+        notes.add("超时取消 job：dev 默认（mall.order.cancel.skip-attack-data=false）会在 60 秒后取消未付款的 "
+                + ATTACK_PREFIX + " 单并回补库存 ⇒ 秒杀场景「库存归零」这条证据要当场看；"
+                + "置 true 则带标记的行**整个不进候选**（演示「一半被拦截、一半跳过」的另一半）");
         notes.add("封禁闸那一路的 401 只在默认 profile（app.auth.enabled=true）出现；闸关的 dev / a3 下"
                 + "IdentityGuard 三处 fail-open ⇒ 匿名请求照常放行（现状，非缺陷）");
         if (t.other() == null) {

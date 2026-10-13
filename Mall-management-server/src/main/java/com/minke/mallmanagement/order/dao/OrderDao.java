@@ -321,9 +321,20 @@ public class OrderDao {
      *
      * <p>{@code CancelledAt IS NULL} 这条不只是「跳过已取消的」—— 它同时是**幂等**的来源：
      * 取消过的单不会再进候选集。
+     *
+     * <p>⚠️ <b>投影从「只有 {@code OrderId}」扩到「{@code OrderId} + {@code Source}」</b>
+     * （C3 块 7 · commit B，2026-10-14）：{@code Source} 是「演练数据标记」（块 5 可视化段给 11 张表
+     * 加的那一列，{@code mall_management_sql.sql:1167}）⇒ 它是 {@code skip-attack-data} 那条谓词
+     * 两个判据之一。
+     * <p>⚠️ <b>筛子**刻意留在 Java 侧**（{@link com.minke.mallmanagement.order.job.OrderTimeoutCancelJob}
+     * 的 {@code isAttackData}），不在本 SQL 里</b>：那个开关是**运行时配置**（{@code @Value} 读
+     * properties），进 WHERE 就得两条 SQL 各写一遍阈值比较 —— 而阈值比较是本方法唯一容易写错的东西
+     * （见上一段 ⚠️）。多带一列几乎不要钱（{@code varchar(16)} × 候选条数），一条谓词只写一处。
+     * <p>⚠️ 本方法**不认识**演练业务串前缀 —— 「{@code SIM-}」这个字面量在
+     * {@code AttackEngine}（演练域）与 {@code OrderTimeoutCancelJob}（本域）各一份，理由写在后者。
      */
     public List<Map<String, Object>> selectUnpaidExpired(long timeoutSeconds) {
-        String sql = "SELECT OrderId FROM mall_management_sql.`order` "
+        String sql = "SELECT OrderId, Source FROM mall_management_sql.`order` "
                 + "WHERE PayIf = 0 AND CancelledAt IS NULL "
                 + "AND CreateTime < DATE_FORMAT(DATE_SUB(NOW(), INTERVAL " + timeoutSeconds + " SECOND), '%Y-%m-%d %H:%i:%s')";
         return jdbcClient.sql(sql).query().listOfRows();

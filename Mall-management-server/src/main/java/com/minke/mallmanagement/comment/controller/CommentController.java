@@ -191,6 +191,13 @@ public class CommentController {
             @RequestParam(value = "Rating", required = false) String Rating,
             @RequestParam(value = "Anonymous", required = false) String Anonymous,
             @RequestParam(value = "ProductCode", required = false) String ProductCode,
+            // C3 块 7 · commit B（2026-10-14）：可选的**写入来源标记**，写进 `comment.Source`
+            // （Migration ⑰-4 那一列，varchar(16)）。⚠️ 加在**末尾**（同 CouponId / ActivityId 的先例：
+            // 既有 10 个形参一名不动、一位不挪）。
+            // ⚠️ `required = false` 是硬要求：本域既有调用点**一条都不发它** ⇒ 与加它之前逐字节同行为。
+            // ⚠️ 它**不是身份声明、不参与鉴权**（谁能发评论仍看 IdentityGuard）；
+            //    它存在的唯一理由是让「演练写入的行」在库里可辨认（攻击引擎传 `attack`）。
+            @RequestParam(value = "Source", required = false, defaultValue = "") String Source,
             HttpServletRequest request
     ) {
         if (!IdentityGuard.requireSelfOrAdminByUsername(request, Account,
@@ -198,7 +205,8 @@ public class CommentController {
             return IdentityGuard.forbidden();
         }
         return ResponseEntity.ok(Result.of(commentService.add(Account, TargetType, TargetId,
-                ParentId, ReplyToId, Kind, Content, Rating, Anonymous, ProductCode, filesOf(request))));
+                ParentId, ReplyToId, Kind, Content, Rating, Anonymous, ProductCode, filesOf(request),
+                Source)));
     }
 
     /**

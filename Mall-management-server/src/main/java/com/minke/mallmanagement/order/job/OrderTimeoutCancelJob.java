@@ -56,6 +56,29 @@ import java.util.Map;
  * <p>⚠️ <b>调度器总闸不在本类手里</b>（{@code @EnableScheduling} 挂在
  * {@code MerchantDowngradeSchedulingConfig}、由 {@code mall.downgrade.job.enabled} 把关）
  * ⇒ <b>a3 下调度器根本不存在</b>，本类即便 flag 忘了关也不会跑。要看超时取消必须用**默认 profile**。
+ *
+ * <h2>【块 7 · commit B（②）：跳过「演练带标记的行」—— 默认关闭】</h2>
+ * 《块 7 参考》§1.4 的 C2 甲：「攻击数据带标记（如 {@code OrderId} 前缀 {@code SIM-}），
+ * job 扫描时**跳过带标记的行**」。落地为 {@link #skipAttackData}
+ * （{@code mall.order.cancel.skip-attack-data}，**dev 默认 {@code false}**）+ {@link #isAttackData}。
+ *
+ * <table border="1">
+ *   <tr><th>开关</th><th>演练造的 {@code SIM-} 未付款单</th><th>普通未付款单</th></tr>
+ *   <tr><td>{@code false}（缺省）</td><td>照取消（= 加开关前行为）</td><td>照取消</td></tr>
+ *   <tr><td>{@code true}</td><td><b>跳过</b>，不取消、不回补库存</td><td>照取消</td></tr>
+ * </table>
+ *
+ * <p><b>判据（用户逐字给的验收口径）</b>：{@code false} ⇒ {@code SIM-} 未付款单 **60 秒后真被取消**；
+ * {@code true} ⇒ **60 秒后仍在**（{@code CancelledAt} 仍为 {@code NULL}、{@code PayIf} 仍 0）。
+ *
+ * <p>⚠️ <b>标记有两个载体，谓词两半都认</b>（{@link #isAttackData}）：
+ * ①{@code OrderId} 前缀 {@link #ATTACK_ORDER_PREFIX}（{@code SIM-}）；
+ * ②{@code order.Source} 列 == {@link #ATTACK_SOURCE}（{@code attack}）。
+ * <p>⚠️ <b>如实登记的边界</b>：{@code order.Source} 列**存在**（块 5 建表，{@code varchar(16) NOT NULL DEFAULT ''}），
+ * 但**今天没有任何写入点往里写 {@code 'attack'}**（{@code seed-demo.sql} 写的是 {@code 'seed'}；
+ * 给 {@code /order/orderAdd} 加可选 {@code Source} 入参属于**订单域的契约改动**，本笔不做）
+ * ⇒ 谓词里 {@code Source='attack'} 那一半**目前匹配不到行**，实际起作用的是前缀那一半。
+ * 这一半**照样写**：它是「将来真落了这一列就自动生效」的挂钩，删掉才是把参考文的口径砍半。
  */
 @Component
 @ConditionalOnProperty(name = "mall.order.cancel.enabled", havingValue = "true", matchIfMissing = true)
@@ -85,6 +108,38 @@ public class OrderTimeoutCancelJob {
     @Value("${mall.order.cancel.timeout-ms:60000}")
     private long timeoutMs;
 
+    /**
+     * 是否跳过「演练带标记的行」（C3 块 7 · commit B，2026-10-14；参考文 §1.4 的
+     * C2 甲「攻击数据带标记，job 扫描时跳过带标记的行」）。
+     *
+     * <p>⚠️ <b>{@code false}（缺省）= 与加这个开关之前**逐字节同行为**</b>：所有未付款超时的单
+     * 一律照取消（含演练造的 {@code SIM-} 单）。{@code true} ⇒ 带标记的候选**在这一轮直接跳过**，
+     * 不取消、也不回补库存。
+     *
+     * <p>⚠️ <b>为什么缺省是 false（而不是 true）</b>：本类的主职责是「超时未付款就取消」，
+     * {@code true} 会让这个职责对有标记的单**不成立**。参考文要的是「**一半数据被 job 拦截、
+     * 一半跳过 job 注入**」这个**对照**（看 job 生效 vs 看其它防护怎么办），
+     * 对照要手工开 —— 故它是个**演示开关**，不是新常态。
+     *
+     * <p>⚠️ <b>与 {@code mall.order.cancel.enabled} 不是一回事</b>：那一个是「有没有这个 job」
+     * （整类 {@code @ConditionalOnProperty}），本开关是「这个 job 挑不挑食」。两个都关才是
+     * 「什么都不发生」。
+     */
+    @Value("${mall.order.cancel.skip-attack-data:false}")
+    private boolean skipAttackData;
+
+    /**
+     * 演练订单的**业务串前缀** —— 与 {@code AttackEngine.ATTACK_PREFIX} **逐字同源**
+     * （演练域不宜被订单域 import ⇒ 这里写第二份字面量，两边各留一条反向 ⚠️）。
+     */
+    static final String ATTACK_ORDER_PREFIX = "SIM-";
+
+    /**
+     * 演练写入的 {@code Source} 列值 —— 与 {@code AttackEngine.ATTACK_SOURCE} **逐字同源**
+     * （同上一行的理由）。⚠️ 这两个常量是 {@link #isAttackData} 的全部判据，别在别处再写一遍。
+     */
+    static final String ATTACK_SOURCE = "attack";
+
     public OrderTimeoutCancelJob(OrderDao orderDao, GoodsDao goodsDao, StockMetrics stockMetrics) {
         this.orderDao = orderDao;
         this.goodsDao = goodsDao;
@@ -112,7 +167,18 @@ public class OrderTimeoutCancelJob {
         }
         for (Map<String, Object> one : candidates) {
             String orderId = String.valueOf(one.get("OrderId"));
+            String source = asString(one.get("Source"));
             try {
+                // 块 7 · commit B（② /《块 7 参考》§1.4 C2 甲）：带演练标记的候选**整条不进本轮处置**。
+                // ⚠️ 跳过点**必须排在 cancelIfUnpaid 之前**：那是唯一的写点，排到后面「取消」这个副作用
+                //    已经发生（CancelledAt 已写、库存已回补），再判就没意义了。
+                // ⚠️ 用 continue 而**不是 return**：跳过的只是**这一条**，同轮其余正常单照取消。
+                // ⚠️ 开关为 false 时这一行的结果与加它之前**逐字节同行为**（谓词都不求值）。
+                if (skipAttackData && isAttackData(orderId, source)) {
+                    log.info("超时取消：订单 {} 带演练标记（Source={}），按 skip-attack-data=true 跳过（不取消、不回补）",
+                            orderId, source);
+                    continue;
+                }
                 if (orderDao.cancelIfUnpaid(orderId) == 1) {
                     log.info("超时取消：订单 {} 超过 {} 秒未付款，已置 CancelledAt", orderId, timeoutSeconds);
                     // 块 7 · 库存治理 TD-36 第三拍：**取消成功**才回补。
@@ -202,6 +268,36 @@ public class OrderTimeoutCancelJob {
                 log.warn("超时释放：订单 {} 的 SKU {} 回补失败（跳过该条）：{}", orderId, skuCode, e.toString());
             }
         }
+    }
+
+    /**
+     * 「这行是不是演练造的」的**唯一判据**（C3 块 7 · commit B · ②）。两个载体**任一**命中即算：
+     *
+     * <ol>
+     *   <li>{@code OrderId} 以 {@link #ATTACK_ORDER_PREFIX}（{@code SIM-}）开头 —— 演练造单时贴的
+     *       业务串前缀（{@code AttackEngine.ATTACK_PREFIX} 同源字面量）；</li>
+     *   <li>{@code Source} 列等于 {@link #ATTACK_SOURCE}（{@code attack}，忽略大小写、前后空白已去）。</li>
+     * </ol>
+     *
+     * <p>⚠️ <b>为什么用 {@code static} 且只吃两个 {@code String}</b>：判据是**纯函数**，不碰
+     * {@code skipAttackData}（那是调用方的闸）也不碰库 —— 故能被单测直接钉边界
+     * （大小写 / 空白 / null / 只命中一半）。把闸和判据分开，是在「开关关着时谓词一次都不求值」
+     * 这件事上不留歧义。
+     *
+     * <p>⚠️ {@code source} 用 {@code trim()} 后比：列是 {@code NOT NULL DEFAULT ''} 但没人保证
+     * 写入方不回一个带空白的值；{@code equalsIgnoreCase} 而不是 {@code equals} —— 这一列没有
+     * collation 约定（{@code seed} / {@code attack} 全是手写的小写字面量），宁松不严。
+     * ⚠️ 空串 / {@code null} 都**不是**演练数据（{@code ""} 是列默认值，绝大多数行都是它）。
+     *
+     * <p>⚠️ <b>与 {@code AttackEngine.ATTACK_PREFIX} 是逐字同源的两份字面量</b>，改一边必须改另一边
+     * （两边各留了一条反向 ⚠️）—— 本类在订单域、那个类在演练域，跨域 import 一个常量比抄一行
+     * 字面量更脆（那会把两个域的编译期绑在一起）。
+     */
+    static boolean isAttackData(String orderId, String source) {
+        if (orderId != null && orderId.startsWith(ATTACK_ORDER_PREFIX)) {
+            return true;
+        }
+        return source != null && source.trim().equalsIgnoreCase(ATTACK_SOURCE);
     }
 
     /** {@code ResultSet} 里列的取值：{@code null} 原样返回，其余 {@code String.valueOf}（char 列已去尾空格）。 */
