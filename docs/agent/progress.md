@@ -624,7 +624,7 @@
   3. `src/api/http.js`：401 出口加**单次调用级**旁路 `{ allowUnauthorized: true }`（**不做**全局开关）。
   4. `src/main.js`：`bootstrap()` 中 `await restoreIdentity()`，**排在 `app.use(router)` 之前**。
 
-- **（2）⚠️ 本笔最关键的坑（已解）**：`/user/me` **不在** `AUTH_WHITELIST`（`WebAuthConfig.java:97-113` 共 12 条，无它）⇒ 匿名访客**注定**收到 401 ⇒ 若照常走笔 4 的出口，**谁都没登录时一进站就被踢到 `/login`**（首页本是**公开页**）= 回归。故旁路为必需项，且旁路时**不置闩锁**（连 `handleUnauthorized` 都不进）。**判据 = 手测 T3**；突变对照 **B** = 撤 `allowUnauthorized` ⇒ T3 必变红。
+- **（2）⚠️ 本笔最关键的坑（已解）**：`/user/me` **不在** `AUTH_WHITELIST`（`WebAuthConfig.java:101-117` 共 12 条，无它）⇒ 匿名访客**注定**收到 401 ⇒ 若照常走笔 4 的出口，**谁都没登录时一进站就被踢到 `/login`**（首页本是**公开页**）= 回归。故旁路为必需项，且旁路时**不置闩锁**（连 `handleUnauthorized` 都不进）。**判据 = 手测 T3**；突变对照 **B** = 撤 `allowUnauthorized` ⇒ T3 必变红。
 
 - **（3）读口顺序的实现对裁决**收严**了（请追认）**：裁决（本笔方案 §3.1）是「6 个写口全部**同步**缓存」。本笔实现为 6 个写口一律 `dropRestored()`（**整体作废**），而非逐字段同步。理由：本模块写口**只有两类调用方** —— 登录（`LoginPage.vue`）与退出（`CustomerPage` / `MerchantPage` / `http.js` 的 401 出口），两者都是**身份变更**。丢弃给出可证不变量「**任何一次写之后，读口 ≡ 笔前行为**」；逐字段同步反而留过期字段：新标签页恢复成商家 Y 之后再登录成客户 B、而 B 的 `merchantid` 为空（`LoginPage.vue:148` 的 `if` 跳过写）⇒ `restored.merchantId` 留着 Y、存储里是空的、「优先」就把 Y 读出来。**「优先」只在恢复窗口内生效**（窗口 = 启动到第一次本地写）。⚠️ **再按语（§5-AB，R6，2026-10-05）**：本条举证里的两个壳**已随 R6 删除** ⇒「本模块写口只有两类调用方（登录 / 退出）」这个**结论**未变，但退出侧的落点现在**只有** `UserCenter.vue:52-55`（+ `http.js` 的 401 出口），壳内已无写口。
 
@@ -690,7 +690,7 @@
 
 > **性质**：前端 **2 代码文件 + 1 文档** / **0 新文件**。不动后端、不动 `ci.yml`、不动 A3 脚本、不动 `src/test/**`、不动 `CustomerPage.vue` / `MerchantPage.vue`。⚠️ **按语（§5-Y，R2，2026-10-05）**：这两条壳文件后来**都被改过**（`CustomerPage.vue` 被 R1、`MerchantPage.vue` 被 R2）—— 「不动」是**§5-W 本笔**的边界，不是永久约束。⚠️ `router/index.js` 本笔**只改了一处注释措辞**（见 (5)②），**未做任何路由结构改动**（R1 / R3 的活）。⚠️ **再按语（§5-AB，R6，2026-10-05）—— 本节（§5-W）整节按语**：本条点名的两个壳**已随 R6 合一删除**（用户裁决 D2）⇒ 节内（含 (4) 提到的 `emit('go-search')` 那条链）所有 `CustomerPage` / `MerchantPage` 引用**一律悬空**（历史记录保留原样），逐条见 §5-AB (11)。
 > **来源**：§5-V 只治了「**已登录**在 `#/` 卡死」。**未登录**那一半没治 —— `HomePage.vue:4` 的整页遮罩（`.lock-mask`，原 CSS `:225-233`：`position:absolute; z-index:99; width:100vw; height:100%`）把**整个首页**盖住 ⇒ 搜索框连聚焦都做不到、所有点击一律变成开弹窗 = **什么都点不了**。而**商品页本来就是「默认让看、只在购买/咨询弹提示」**（`ProductPage.vue:311-314` / `:408-412`）⇒ **首页的整页锁在全项目是孤例**。 ⚠️ **按语（§5-AG (13)，2026-10-06）**：本句引的 `HomePage.vue:4` 整页遮罩 → 提示条 → **现已整条删除**（黄条冗余：顶栏匿名形态已承担该入口）；`ProductPage.vue` 那两处**仍在**（本笔明确不动）。 ⚠️ **再按语（收口笔 §5-AG (15)，2026-10-06）**：`ProductPage.vue` 的 `:311-314` / `:408-412` 两处**判据（`!customerId`）与文案逐字未变**，但 (15) 在 `alert` **之后**接了一句「未登录则跳 `/login?redirect=<本页 fullPath>`」⇒ 本条「首页锁是孤例」的结论不变；变的是**商品页也终于给了去登录的出口**。
-> **判据面**：未登录能看到的首页数据全走**白名单**端点（`WebAuthConfig.java:103-107`：`goodstype` / `goodsSelectHome` / `GoodsProductCodeSelect` / `productCodePrice` / `productSearch`）⇒ **服务器侧本来就支持匿名浏览，本笔不需要动后端**。
+> **判据面**：未登录能看到的首页数据全走**白名单**端点（`WebAuthConfig.java:107-111`：`goodstype` / `goodsSelectHome` / `GoodsProductCodeSelect` / `productCodePrice` / `productSearch`）⇒ **服务器侧本来就支持匿名浏览，本笔不需要动后端**。
 
 - **（1）改动 3 文件（2 代码 + 1 文档）**：
   1. `src/views/HomePage.vue`：`:4` **一行换一行** —— `.lock-mask`（`@click="showLoginModal = true"`）→ `.login-hint-bar`（`@click="router.push('/login')"`，文案「未登录 · 点此登录后可搜索 / 购买」）；原 `.lock-mask` CSS 块（`:225-233`，**9 行**）**原地改写**为 `.login-hint-bar`（**同为 9 行**：`width:100%; padding:10px 16px; background:#fff8e1; color:#8a6d3b; font-size:13px; text-align:center; cursor:pointer`）。 ⚠️ **按语（§5-AG (13)，2026-10-06）**：该 9 行 CSS 块**已删除**（`:225-233` 现为**一行按语**）；`HomePage.vue` 由 443 → **389 行**，但本行段提到的 `:4`、以及 `:116` / `:119` / `:121` / `:154` / `:135` / `:144` / `:165` 等被引行号**全部未漂**（改判 2 沿用「按语 + 净零」手法）。
@@ -760,7 +760,7 @@
 - **（5）搜索进 URL 的实证收益（用户补充要求 2 —— A 相对 B 的**唯一实证增量**）**：`/customer/search?kw=xxx` ① **可刷新还原**（刷新后 `watch` 的 `immediate` 立刻重搜）；② **可直接手输 URL**（首挂载即带 `kw` ⇒ 自动搜，不必先经过首页）；③ 可**深链 / 分享 / 后退**。B（`curPage` 可写 `computed`）下关键词只活在内存 ⇒ 这三条**一条都拿不到**。⚠️ 注意：`GoodsSelect` 的这条**第二条通道**与**商家侧的 ref 通道并存**、互不替换（用户决策 2 / 修正 2）。
 
 - **（6）兼容重定向（`router/index.js:81` / `:83-92`）两个分支 —— 都不能删**：① `?page=cart|user|msg|chat` → 对应子路由，**带走其余 query**（`otherId` / `otherType` / `_t` 是 `ChatRoom` 读的会话参数，丢了就打不开对应聊天；**认不出的 `page` 归位 `/customer`**）〔⚠️ **按语（`fix/legacy-chat-tab`，2026-10-05）**：本条**原记只有 3 键**（`cart|user|msg`）——R1 落码时 `LEGACY_TAB` 误写成 `{cart,user,msg}`、**漏了 `chat`** ⇒ 客户侧「咨询商品 / 好友点聊天」两条流程落回主页并丢会话参数；已加回 `chat`，键集合现为 **4 个**，逐条见 (16)1〕；② `?back=search` → `/customer/search` **且保留 `back`**（`GoodsSelect.vue:158` 仍靠它触发 `loadState()`）。三条理由已写进代码注释（`router/index.js:74-77`）：**R5 不做**（`ProductPage.vue:363` / `:388` / `:400` 仍推旧 URL）、`MerchantPage` **R2 才改**、书签 / 手敲 URL 不受代码控制。
-  - ⚠️ **只认精确路径 `/customer`** ⇒ `/merchant?page=order`（`ProductPage.vue:385`）**不受影响**（那是 R2 的活）。
+  - ⚠️ **只认精确路径 `/customer`** ⇒ `/merchant?page=order`（`ProductPage.vue:557`）**不受影响**（那是 R2 的活）。
   - ⚠️ `/customer/search` **不在** `LEGACY_TAB` 里 —— 它本来就不是旧 tab 名（用户 §三-3 认可）。
 
 - **（7）四条搜索入口（A 下逐一走通）**：① `HomePage` 搜索框 → `HomeTab` 适配器 → `/customer/search?kw=`；② `HomePage` 分类点击 → 同 ①（两者都走 `emit('go-search')`，`HomePage.vue:139` / `:148`）；③ `ProductPage.vue:380` 写 `PENDING_SEARCH_KEYWORD` 后推 `/customer` → 壳 `onMounted` 的 `handlePendingSearch()`（`CustomerPage.vue:108-113`）读出并**换成** `/customer/search?kw=`（关键词从此由 URL 承载）；④ `ProductPage.vue:388` 的「返回」推 `/customer?back=search` → 兼容守卫换 `/customer/search?back=search` ⇒ `loadState()` 恢复结果（`GoodsSelect.vue:157-161`）。
@@ -809,14 +809,14 @@
   1. **兼容层漏键：`LEGACY_TAB` 少了 `chat`** ⇒ 客户侧两条流程落回主页。**错在落码、不在方案** —— R1 方案原文写的是 `{ cart, user, chat }`，落码写成 `{ cart, user, msg }` ⇒ **`chat` 丢、`msg` 多**。
      - **判据 = 生产者实测反推**：全仓 `?page=` 生产者共 7 处（`ProductPage.vue:361/363/398/400/447`、`FriendRoom.vue:246`、`ChatRoom.vue:348/367`），**实际推的键只有 `cart` / `user` / `chat` / `order`** —— 客户侧 = `cart`（`ProductPage.vue:363`）、`user`（`:400`）、`chat`（`:447` 与 `FriendRoom.vue:246`）；**`msg` 全仓零生产者**。⚠️ **按语（§5-AA，R4，2026-10-05）**：本条写「共 **7** 处」，但**它自己列出的清单是 8 项**（`ProductPage.vue:361/363/398/400/447` 5 项 + `FriendRoom.vue:246` 1 项 + `ChatRoom.vue:348/367` 2 项）—— R4 实测复核后**以清单为准**记账：**R4 只清 `ChatRoom.vue:348/367` 这 2 处**（`page: 'chat'` 不再写回 URL，§5-AA (9)）⇒ **R4 后 = 6 处**（那 5 + 1 处**一字未动**）。⚠️ 计数与清单不符这一条**本笔只登记、不改原句**（它是 R1/`fix/legacy-chat-tab` 的如实记录）。⚠️ 地址 `ChatRoom.vue:348/367` **未漂**（R4 净零）—— 变的是**事实**（已清），不是地址。
      - **R1 前的行为（`9eb0729` 实测）**：旧 `CustomerPage.vue` 的两处**都认 `chat`**、**都不认 `msg`** —— `onMounted` 分支 `:175-180`（`chat` → `curPage='msg'`）与 `watch(route.query.page)` 分支 `:154-160` ⇒ R1 前有效键 = `cart|user|chat`。
-     - **R1 后的后果**：`page=chat` 不命中 ⇒ 走 `{ path: '/customer' }` 兜底 ⇒ 「咨询商品」（`ProductPage.vue:447`）/「好友点聊天」（`FriendRoom.vue:246`）**落回主页、且丢会话参数**（`otherId` / `otherType` / `_t` 是 `ChatRoom` 读的）。
+     - **R1 后的后果**：`page=chat` 不命中 ⇒ 走 `{ path: '/customer' }` 兜底 ⇒ 「咨询商品」（`ProductPage.vue:619`）/「好友点聊天」（`FriendRoom.vue:246`）**落回主页、且丢会话参数**（`otherId` / `otherType` / `_t` 是 `ChatRoom` 读的）。
      - **修法**：`router/index.js:81` 加回 `chat: '/customer/msg'`；**`msg` 保留** —— 它是 R1 前的历史键（手敲 URL 也算），删它属**改行为**、不是修 bug。修后键集合 **4 个** ✅。
   2. **客户购物车丢了 `:showSwitch="false"`** ⇒ 多出一个**死控件**。R1 前客户壳是 `<ShoppingCart :showSwitch="false" />`（`9eb0729` 实测 `CustomerPage.vue:32`），迁进子路由时**整条 `props` 漏抄** ⇒ `ShoppingCart.vue:81` 的 `default: true` 生效（`:4` `v-if="showSwitch"`）⇒ 页头凭空多出 📋/🛒 开关。⚠️ 它**不是**「多余但能用」：`ShoppingCart` 的 `handleToggle` 只 `emit('toggle')`，而客户壳**从未**挂 `@toggle`（`9eb0729` 实测该文件 `toggle` / `showSwitch` 只出现这 1 行）⇒ **点了没反应**。
      - **修法 = 路由记录上加 `props`**（`router/index.js:44`）：`props: { showSwitch: false }`。⚠️ **按语（§5-Y，R2，2026-10-05）**：该记录 R2 后实测在 **`router/index.js:61`**（`{ path: 'cart', component: ShoppingCart, props: { showSwitch: false }, … }`，行末带 `fix/legacy-chat-tab` 的成因说明）—— R2 重写了 `router/index.js`（123 → 201 行）⇒ `:44` 失效。**前提已先验**：本项目 vue-router **4.6.4** 的 `<router-view v-slot>` 仍把路由记录的 `props` **预绑**到 slot 拿到的 `Component` 上（`node_modules/vue-router/dist/vue-router.mjs:1101-1106`：`const routePropsOption = matchedRoute.props[currentName]; … h(ViewComponent, assign({}, routeProps, attrs, …))`）⇒ 生效且 `CustomerPage.vue` **一字不动**。
      - ⚠️ **同一条机制也是 R2 `HomeTab` 参数化（`props: { base }`）的依据** —— 用户据此认可（R2 的登记落 `§5-Y`，**本笔时尚未登记**）。
   3. **净零核对（本笔核心手法）**：`router/index.js` **123 → 123 行**（3 insertions / 3 deletions，**只改 3 行、均为行内追加**）⇒ 该文件**全部既有行号引用零漂移**（`:35` / `:44` / `:81` / `:83-92` / `:94` / `:96`，及 `progress.md:653` / `:714`）。代价 = 3 行变长（最长注释行约 430 字符）；**合法** —— 本仓 ESLint = `plugin:vue/vue3-essential` + `eslint:recommended`、`rules: {}`（`package.json` 的 `eslintConfig`），**无 `max-len`**。
   4. **成因未考**：两处都不是有意取舍，是**落码期的静默丢失**（键写错、`props` 整条漏抄）。**不追责、只登记**；要防的是同类 —— **兼容层的键集合必须由「生产者实测反推」，不能凭方案记忆、也不能由消费者侧代码推**（旧 watcher 能读的键集 ≠ 生产者会推的键集，本例两集合只是近似相交）。
-  5. **遗留**：`ProductPage.vue:385` 推的 `/merchant?page=order` **本笔仍不认**（守卫只认精确 `/customer`）⇒ 那是 **R2** 的活（R2 登记落 `§5-Y`，**本笔时尚未登记**）。
+  5. **遗留**：`ProductPage.vue:557` 推的 `/merchant?page=order` **本笔仍不认**（守卫只认精确 `/customer`）⇒ 那是 **R2** 的活（R2 登记落 `§5-Y`，**本笔时尚未登记**）。
 
 - **（17）不加「更新记录」行**（照 `§5-H (3)` / §5-N / `§5-Q (4)` / `§5-T (7)` 先例）。
 
@@ -1372,7 +1372,7 @@
 
 **（1）治的病与归属**
 - **病**（= §5-AE (3) 登记的现象、T-iso-5 同一条）：未登录 / 无会话时**手敲受保护页**（`#/customer/user/info` 等）照样被路由送进去 ⇒ 页内请求被闸 **401**、又**无人接管** ⇒ **空白页**。成因 = `router/index.js` **全文只有一条 `beforeEach`**（`LEGACY_TAB` 归一器，`:161`）、**无鉴权分支**；且全仓**没有 catch-all** ⇒ 也没有兜底面。
-- **归属**：§5-AC 的裁决 **D5**（`progress.md:1189`）已把该缺口判给本笔；§5-AD **D3** 同。⚠️ `WebAuthConfig.java:90-95` 那 6 条 `REACHABLE_BUT_NOT_PUBLIC` 的归属也是本笔 —— 处置见 (9)。
+- **归属**：§5-AC 的裁决 **D5**（`progress.md:1189`）已把该缺口判给本笔；§5-AD **D3** 同。⚠️ `WebAuthConfig.java:94-99` 那 6 条 `REACHABLE_BUT_NOT_PUBLIC` 的归属也是本笔 —— 处置见 (9)。
 
 **（2）边界怎么划的**（⚠️ 本笔的核心；用户明确指示「边界由 agent 自己分析，我的想法并非一定」）
 三档候选与采纳：
@@ -1383,7 +1383,7 @@
 | 宽松 | 只保护 `/…/user*`（用户中心） | **否** —— 消息页 / 购物车在匿名下同样是空列表，且 `navFor` 的匿名形态**已经把这三项一起换掉** ⇒ 三档不一致 |
 
 **判据不是感觉，是三个独立来源**：
-1. **后端白名单**（亲读，`WebAuthConfig.java:97-113`）—— 白名单 = **公开面**（12 条）。6 条 `meta.public` 记录所调端点**全在白名单内** ⇒ 匿名**拿得到**数据。
+1. **后端白名单**（亲读，`WebAuthConfig.java:101-117`）—— 白名单 = **公开面**（12 条）。6 条 `meta.public` 记录所调端点**全在白名单内** ⇒ 匿名**拿得到**数据。
 2. **既有前端行为**（亲读，`src/config/nav.js`）—— `navFor(table, false)` 把右三项**整体**换成「登录」单项（`ANON_RIGHT`，`:53`），注释原文：「未登录访客**可以进壳** —— 但顶栏右三项（消息 / 购物车\|订单中心 / 用户中心）**每一项都以登录态为前提**」（`:41-43`）⇒ **产品决定早就存在**，本笔只是让路由与它一致（不是本笔新立的口径）。
 3. **页内行为**（文档档，§5-AE (3) + `ShoppingCart.vue` 亲读）—— 这些页的 `onMounted` **没有**登录判据（`loadOrders()` 直接发 `POST /order/orderSelect`）⇒ 匿名进入 = 空壳 + 401。
 
@@ -1393,7 +1393,7 @@
 
 **（3）守卫形态：默认拒绝 + 显式 `meta.public` 白名单**（`router/index.js:241-299`：一段注释 + 5 行守卫）
 - **为什么是「默认拒绝」而不是逐条标 `requiresAuth`**：漏标一条在默认拒绝下 = **静默受保护**（错得更安全），在 `requiresAuth` 下 = **静默公开**。**红利**：C3 的 `#/admin` 将来**自动**落在受保护一侧，不必回来改。**风险（本笔唯一「静默分歧」型）**：公开面与 `navFor` 的匿名隐藏集是**两处各自维护、无代码引用关系** ⇒ 改一处要回头核另一处，不会报错。
-- **与后端同构**：白名单 = 公开面（照抄 `WebAuthConfig.java:90-95` 的那句「白名单是**公开面**，不是『未登录可达面』」）。
+- **与后端同构**：白名单 = 公开面（照抄 `WebAuthConfig.java:94-99` 的那句「白名单是**公开面**，不是『未登录可达面』」）。
 - **与既有 `LEGACY_TAB` 守卫共存**：**两条** `beforeEach` 并存（`:161` 旧、`:294` 新）。注册序**不影响判定** —— 归一器返回的是**新导航**（`pushWithRedirect` 递归）⇒ 全部守卫在新目标上**重跑**（`:285-287` 的注释，本笔按此设计、运行时探针实测过）。
 - **#1 不变量：`/login` 必须公开**（`:53` 的 `meta.public` 别删）—— 它同时是**本守卫的落点**与 **401 出口的落点**（`main.js:49`）⇒ 标成「要登录」= **无限重定向**。全站只有这一条会成环。
 - **元数据继承**：`meta` 沿 `matched` 链合并、子覆盖父 —— 这既是「只标 6 条就够」的原因，也是 `LoginPage.landingAfterLogin` 能**复用同一条规则**的原因（见 (4)）。
@@ -1453,7 +1453,7 @@
 - **将来范围（供那笔估工）**：`cart` 表（`customerId` + `goodsId` + `quantity`）+ **3~5 个端点**（加入 / 列表 / 改数量 / 删 / 结算转单）+ 前端改造（`ProductPage` 的「加入购物车」按钮 —— ⚠️ **R5 的禁令只覆盖「商品详情页进壳」，不含这个按钮**，届时要与 R5 裁定对齐）+ **未登录购物车**（`localStorage`）与**登录后合并**（登录那一刻把本地车并进服务端车）+ 手测项 + 文档。
 - **与已落地事实的接口（两条，别漏）**：① `#/shoppingCart` 这条**旧地址**已由 R4 收编成 `cartLanding`（`router/index.js:126`）⇒ 那笔改的是 **`/…/cart` 的语义**，`/shoppingCart` 的落点逻辑**不用动**；② `nav.js:31` 的 tab 键 `cart`、`router/index.js:61` 的记录、`:217` 的 `ROLE_CART` 是**同一个概念的三个拷贝**。
 
-**（9）`WebAuthConfig.java:90-95` 的 6 条 —— 本笔的处置（已结清）**
+**（9）`WebAuthConfig.java:94-99` 的 6 条 —— 本笔的处置（已结清）**
 那 6 条 `REACHABLE_BUT_NOT_PUBLIC`（`/goods/goodsAdd`、`/goods/goodsDe`、`/message/friendAdd`、`/message/userSelect`、`/user/updateAvatar`、`/user/updateUserInfo`）**逐条**核过归属：它们的**调用页**（`GoodsAdd.vue` / `GoodsUp.vue` / `FriendRoom.vue` / `UserInfoPage.vue`）**全部落在守卫的受保护一侧** ⇒ 匿名再也到不了 ⇒ 当年「可达」的成因（**前端缺守卫**）**已消除**。**但仍不进 `AUTH_WHITELIST`** —— 白名单的判据是「公开面」，这 6 条一条都不是。⇒ 就地改写 `:93-95` 三条 javadoc 为「**已结清**」（净零）。
 
 **（10）新发现的既有陈旧（**不属本笔**，登记在此）**
@@ -2123,3 +2123,49 @@
 ⚠️ **三个「端点总数」口径分开写，不混用**（`api-contract.md` F.0）：后端 method-level **120** · 本文件 §2 的 5 域 **36**（**块 5 一字未变**）· 前端 `endpoints.js` **119**。
 
 ⚠️ **挂账（本段不修，逐条见 `tech-debt.md`）** ⇒ 【块 5 内】TD-38 秒杀**不真扣减**（`seckill_activity.SoldStock` 是陈列值 → 块 7）· TD-39 国补**商家主动申请通道未落**（只落了平台提名 → 商家应答，与秒杀的**双向制不对称**）· TD-40 `doc-anchor-check.sh` 两枚死锚点（226 / 267）· TD-41 `scripts/refs-*.txt` 产物入库（**已 30 份 / 4.9 MiB**，本笔再入库 5 份）· TD-42 `refs-scan` 的**兄弟 token 未扫全**（已知盲区）· TD-43 共享面**国补绿标待复验**（等有在售国补商品）· TD-44 五项**已落不挂账**（记账防误判）· TD-45 跨块（块 6 评论 / 块 7 可观测 / 块 8 部署 / 四批补充 / 数据重填）。⚠️ **`goods` Id 120 重复行**仍不清（沿用 TD-37 ② 的用户未裁状态）。
+
+### 7-B6. C3 块 6〈内容与消息治理〉（2026-10-12/13；**11 笔落码 + 收口登记**）
+
+> 分 11 笔落在分支 `feat/c3-admin-block6`（基点 `f2b1535` = main / PR #90）：块内自然分段 4 笔（commit 0 建表 / 1 评论 / 2 问答 / 3 @ 关系）+ 一轮整改 6 笔 + 收口 1 笔。本段是该块的**收口条**：范围 / 建表 / 后端 / 前端 / 门禁 / DoD / 文档收口 / 挂账。
+> 提交切分与槽位改判的**逐条**见 `slot-registry.md §二十三`（本节只记叙事面，两者不要互抄行号）。
+> 用户指令原文见 2026-10-13《块 6 整改指令》：**不降级、不删审核、不省人工治理、不把待裁项留空**；已做但偏题 / 漏做的全部拉回原方案，未做的全量补齐。
+
+**范围** ⇒ 四件：**评论**（商品评价 + 楼中楼 + 点赞/踩 + 匿名 + 图片先审后发）· **问答**（提问 / 回答 / 采纳置顶 / 30 分钟超时提醒）· **治理**（举报 + 3 次警告封号 + 敏感词库 + 加词扫历史）· **管理端「消息与内容治理」页**（六 tab）。⚠️ 内容域共 **13** 个端点（方案 A4），**不加第 14 个** —— 图片走 `/comment/add` 的同一请求多 part。
+
+**建表（一个 Migration 段 ⑮，追加 `.sql` 末尾，⑮-1~⑮-8 连续）** ⇒ `:1507-1634`：⑮-1 `comment` `:1528-1555`（**一张表装四件事**：`Kind` 分流 review/question/answer）· ⑮-2 `comment_mention` · ⑮-3 `comment_image`（三态 pending/approved/rejected）· ⑮-4 `comment_like`（`uk_like_comment_user`）· ⑮-5 `report`（`uk_report_target_reporter`）· ⑮-6 `sensitive_word`（`uk_sensitive_word`）· ⑮-7 `user.WarnCount`（守卫式 `ALTER`）· ⑮-8 敏感词预置 10 词（`INSERT IGNORE`）。
+**实测（可复核）** ⇒ 表 **30 → 36**（VM 库 `information_schema.TABLES`）· 行首 `CREATE TABLE` **32 → 38**（仓内 `.sql`）· `.sql` **1634 行 / LF 1634 / CR 1634 / 裸 CR 0** · 非主键索引 **67** / 非主键 UNIQUE **18**。落库证据 `docs/agent/evidence/c3-block6/b6-c7-fake-data.txt`（§4.7 十词 / §4.8 `WarnCount` / §4.10 六表行数 / §4.11 全库计数）。
+⚠️ **`comment` 的行级语义**：`ParentId` 永远指向**顶层行**、「回复某条回复」用 `ReplyToId` 表达（**两层封顶**）；`LikeCount`/`DislikeCount` 是**冗余计数**，真值在 `comment_like`（两处必须同步回填）。
+
+**后端** ⇒ 新包 `comment/{controller,service,dao,job}` + `CommentKinds`（三个 Controller 一个域）。
+⇒ **13 个新端点**（逐条见 `api-contract.md` **附录 G**）；全仓 method-level 端点 **120 → 133**。
+⚠️ **`/comment/list` 是块 6 唯一进 `AUTH_WHITELIST` 的端点**（**13 → 14 条**，业务 **9 → 10**）—— 本笔**唯一一处放宽安全边界**的动作，**四处同改**（`WebAuthConfig.java` 的 javadoc ×2 + 清单 + `:175`；`AuthGateSmokeTest.java` ×3；`MerchantStatsController.java:19`，均已实测到位）。⚠️ **同域 4 个写端点仍在身份面，别顺手搬**。
+⚠️ **一律不给管理端端点加 `requireAdmin`**（TD-18）：管理员 cookie **铸不出 token** ⇒ 加「须 role=3」会让**默认 profile 上管理员自己 401**。本块四个管理端端点的 javadoc 逐字写了这一条。
+⚠️ **通知 code +2 / −1**：新增 `comment.accepted` / `question.timeout`；**摘除**块 1 预留的 `comment.on.user`（用户 2026-10-13 裁定，全仓零调用点）⇒ **31 → 33 → 32**，同笔改 `config/notify-events.js` 两处。
+
+**前端** ⇒ **新建** `api/comment.js`（7）· `api/report.js`（3）· `api/sensitive.js`（3）· `views/admin/ModerationPage.vue`（**六 tab**：评论管理 / 问答管理 / 待审图片 / 举报中心 / 敏感词库 / 消息管理）。
+**改动** `views/ProductPage.vue`（「累计评价」落真功能 + 问答子 tab + 举报 / 提删 —— **本块改动量最大的一处**）· `router/index.js`（`business/moderation` 占位 → 真页，**同行替换**）· `api/endpoints.js` · `config/notify-events.js` · `AbstractSmokeTest` 的 `@Import`。
+⇒ `endpoints.js` 头注计数 **119 → 132**（**同行改 / 文件尾追加**）。
+⚠️ **槽位改判 1 条**：`ProductPage.vue` 的 `data-slot="预留 · 累计评价（动现有代码 ≥4 处 · 超档）"` **已退役 → 真功能**；稿的演示态（`4.8` / `12,043 条评价` / 三条假评论 / 5 枚 `disabled` 分页）**一个都不留**（纯假数据，与真列表并排等于摆两个互斥事实）。
+
+**A3 门禁（P3 一次 +6，**四处同改**）** ⇒ `KNOWN_TABLES` **19 → 25**、期望表数 **30 → 36**（`ConcurrencyRunner.java` 的 IN 清单 / 常量 / 期望式 / PASS 文案串）。
+⚠️ `concurrency` job 是 **`continue-on-error`** ⇒ **只能读 artifact 的 `gates.count`，不能读 job 颜色**（同 §7-VIS 的教训）。
+
+🧪 **DoD（2026-10-13 实测，日志已落盘）** ⇒ `./mvnw -B **clean** test`：`Tests run: 299, Failures: 0, Errors: 0, Skipped: 26` + `BUILD SUCCESS`（`_work/b6-close-mvn-test.log:3525` / `:3528`；⚠️ 块 5 是 284，**+15** 来自本块新增的 `CommentSmokeTest` 一族）。`npx vue-cli-service build`：`DONE Build complete.`（exit 0；`Hash bf3d1eb43f87af07`、`Time 30772ms`、`Build at 2026-10-13T04:19:59.652Z`，日志 `_work/b6-close-npm-build.log:196` / `:198`）。
+⚠️ **`clean` 不能省**：maven 增量编译会**复用陈旧 test class**，把「主代码签名已破坏」整段遮住（§7-VIS / §7-B5 实测踩过）—— 判据只能靠 `clean test`。
+⚠️ **手验跑 a3 profile ⇒ 闸关**（`app.auth.enabled=false`）⇒ **手验绿 ≠ 默认 profile 绿**；本块新增了一条**公开面**端点（`/comment/list`），它在默认 profile 下的行为（匿名 200）**只有默认 profile 能验**。
+⚠️ **`question.timeout` 通知在 a3 下默认验不出来**：`@EnableScheduling` 挂在被 `mall.downgrade.job.enabled` 关着的**别人的**载体类上 ⇒ a3 下**整台调度器不存在**，本块自己的 `mall.comment.question.timeout.enabled=false` 是第二层闸（逐条见 `tech-debt.md` TD-46）。
+✅ **收口笔已把两道闸手工放开、现场验到它**：后端以 `--mall.downgrade.job.enabled=true --mall.comment.question.timeout.enabled=true --mall.comment.question.timeout.fixed-delay-ms=15000` 起，删掉 `comment 110` 已有的 `question.timeout` 通知行（判据是 `NOT EXISTS (notification …)`），12:46:40 调度器自己发出一条新的 ⇒ 验收假数据里该事件 **7 行**（`b6-c7-fake-data.txt` §4.9-乙）。⚠️ 这是**手工放开总闸**换来的，别读成「a3 默认就醒」—— 默认态下它仍是 0 行。
+
+🧪 **手验（2026-10-13，整改指令 §八「手验全部通过」）** ⇒ 两层都落盘（`docs/agent/evidence/c3-block6/`）：
+① HTTP 层 `scripts/probes/probe-b6c7-handverify.py` → `_work/b6-hv-full.txt`（1948 行，exit 0）：HTTP 200 × 67、`success:true` × 49、**刻意构造的 `success:false` × 15**（每条都返回它该返回的业务话术）；
+② 界面层 `scripts/probes/probe-b6c7-admin-ui.mjs`（**真后端、不 mock**）→ `hv-shots/result.json` = `{total:26, failed:0}` + 9 张截图。
+逐条对表与记账说明见 `b6-c7-handverify.txt`（含「`report.Id=1` 的 `created_at` 被 revive 重算」「1111 那格警告计数是预跑残留、已回退」两条显式记账）。
+
+🔧 **收口笔顺带修的一处**（**不在**方案清单里，是界面手验实拍出来的）⇒ `views/admin/ModerationPage.vue` 的 `onMounted` 原来直接 `await loadComments()`，而冷进页面时下钻框 `TargetId` 必然为空 ⇒ 缺参分支把「还没下钻」当成**失败**，页顶弹一条红 flash（`hv-shots/ui-01-overview.png` 改前那张实拍到了）。修法 = `loadComments({ silent })`：**自动**路径（挂载时 / 切 tab 时）传 `silent: true`，模板补一条灰底引导文案；点「加载」走的仍是会发红条的 `silent=false`。判据进了界面探针（`① 冷进页面无红 flash` + `① … 停在灰底引导文案上`），改后复跑仍 **26 项 / 0 失败**。
+⚠️ 该文件**没有任何**「`ModerationPage.vue:行号`」形态的跨文件引用（全仓 `grep -rn 'ModerationPage\.vue:[0-9]'` 只命中 `_work/` 的扫描产物）⇒ 这次 +12 行**不产生**重指义务；它自己第 742 行那句 `OrderPage.vue:638-642` 随之移到 **:749**（引用者位移，token 未变）。
+
+**文档（本笔一次性收口）** ⇒ **活文档**：`db-schema.md` 尾追加 **§15** + 头部两处**同行订正**（表数量行 / 行尾 CRLF 计数行）· `db-migration.md` 登记表补 **#30–#36** + 注意 **19** · `api-contract.md` 尾追加 **附录 G**（G.0–G.7）。**账本**：本文件 §7-B6 · `slot-registry.md §二十三`。**挂账**：`tech-debt.md` **TD-46 – TD-54**（TD-54 = 重指未应用族逐条清单）。
+⚠️ **三个「端点总数」口径分开写，不混用**（`api-contract.md` G.0）：后端 method-level **133** · 本文件 §2 的 5 域 **36**（**块 6 一字未变**）· 前端 `endpoints.js` **132**。
+⚠️ **重指（零漂移）** ⇒ 块 6 **真 `LOST` = 0**（**三种口径都是 0**）。**正文口径** `_work/b6-refs-after3.txt`（全部文档编辑完成、收口证据档尚未落盘时取）：before 4582 → after **4632** 条；原始「丢」**25** 行**全部**成对，原始「新」**75** = 25 成对 + **55 条真新引用**（全部是本笔新增/改写的正文）。**全树口径** `_work/b6-refs-after4.txt` = 4738 条 / 真 NEW **161**（**已被下一条取代**）。**收口口径（以这一份为准）** `_work/b6-refs-after5.txt` = **4752** 条 / 真 NEW **175**，配对 `_work/b6-refs-pairing3-after5.txt`；⚠️ 那一轮**源侧真 NEW 仍只有 2 条**（`router/index.js` 的 `WebAuthConfig.java:105` + `ModerationPage.vue` 的 `OrderPage.vue:638-642`），与正文口径**逐字相同** ⇒ 收口笔的改动**没在活代码里造出新引用**。⚠️ **计数是移动靶**（本档每加一行带 `文件:行号` 的正文，after 就多一条）⇒ **终止条件是「真 LOST = 0」，不是某个计数**。⚠️ **双移位陷阱（本笔实测）**：脚本的 `shift()` 对**已经重指过**的 token 会**再移一次**（`}` / 空行这类**退化行**判据假阳）⇒ 复跑的 **19 条候选**经「`token ∈ git show f2b1535:<引用者文件>`」判定**全部是新坐标，一条都不应用**。⚠️ **未应用族 = 141 行**（源侧 13 + 文档侧 128）逐条见 `tech-debt.md` **TD-54**。台账 `_work/b6-repoint.md` / 配对 `_work/b6-refs-pairing3-after{3,4,5}.txt`。⚠️ **顺序约束**：重指要在**全部文档编辑之后、且一轮跑完**（`db-migration.md` 173 → 203 行是**中段插入**，会让其后每一行下移；本笔**实测**该文件入向引用 = 0，纪律照留）。
+
+⚠️ **挂账（本段不修，逐条见 `tech-debt.md`）** ⇒ 【块 6 内】TD-46 问答超时 Job 在 a3 **默认态**下**不醒**（两层总闸叠加；收口笔手工放开总闸后已当场验到一次，见上）· TD-47 举报的 `user` 类型**无处置落点** · TD-48 `comment_image.rejected` **故意不留种子**（定义是「已删文件」）· TD-49 敏感词**加词只扫一次 / 删词不回填 `***`** · TD-50 **验收假数据不在 `seed-demo.sql` 里**（重灌即丢）· TD-51 **三族既有误指登记不修** · **TD-54 重指未应用族 141 行逐条**（源侧 13 + 文档侧 128；含族⑤「本块顶偏、`SIBLING` 保护整簇未修」）· TD-52 **已落九项**（记账，防被当成漏做）· TD-53 跨块挂账（块 7 / 8 / 四批补充 / 数据重填；⚠️ 原 TD-45 里「`comment` 与 `user.WarnCount` 未建」的说法**已失效**）。

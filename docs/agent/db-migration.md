@@ -37,6 +37,13 @@
 | 27 | 2026-10-12 | C3 块5 B 组〈店铺关注关系 `shop_follow`〉 | 新增表 | `shop_follow` | `mall_management_sql.sql:1442-1452`（Migration 块 B，5 列 + 主键 + `UNIQUE uk_shop_follow_cust_merchant (CustomerId,MerchantId)` + `KEY idx_shop_follow_merchant_created` + `KEY idx_shop_follow_cust_created`） | `DROP TABLE IF EXISTS \`shop_follow\`;`（见注意 6；**执行前须人工确认**） | 块5 B 组 `2a0c105` | ✅ 已落 **VM 库**（表在，2026-10-12 实测，见注意 18）；证据 `docs/agent/evidence/c3-block5/block5-b-commitA-shop-follow.md`（表数 29→30、5 列形状 + 4 索引逐条核、连跑两遍幂等）。⚠️ 取关 = **物理 DELETE 行**（关系表；用户 2026-10-12 裁定 8） |
 | 28 | 2026-10-12 | C3 块5〈折扣〉⑬ `goods_audit` 加列 `OriginalPrice` | **新增字段** | `goods_audit` | `mall_management_sql.sql:1471-1477`（Migration 块 C，`decimal(10,2) NOT NULL DEFAULT 0.00`） | `ALTER TABLE \`goods_audit\` DROP COLUMN \`OriginalPrice\`;`（见注意 1；**执行前须人工确认**） | 块5 commit 2 `2f631ba` | ✅ 已落 **VM 库**（列在、类型 `decimal(10,2) NO default 0.00`，2026-10-12 实测，见注意 18）。⚠️ **为什么同一张 `goods` 之外还要给提审表加**：上架是**提审制**，`goods` 行由审核通过时用提审行重建 ⇒ 只加 `goods` 侧会在提审那步丢掉商家填的划线价（块内逐字注释见 `.sql:1458-1466`） |
 | 29 | 2026-10-12 | C3 块5〈加购按码反查〉⑭ `goods_sku` 加索引 | **新增索引**（普通索引，**非 UNIQUE**） | `goods_sku` | `mall_management_sql.sql:1499-1505`（Migration 块 D，`information_schema.STATISTICS` 守卫 + `PREPARE`，`ALTER TABLE \`goods_sku\` ADD INDEX \`idx_goods_sku_sku_code\` (\`SkuCode\`)`） | `ALTER TABLE \`goods_sku\` DROP INDEX \`idx_goods_sku_sku_code\`;`（见注意 1；**执行前须人工确认**） | 块5（**本笔**，用户 2026-10-12 挂账裁定 ④-b「加（A 档）」） | ✅ 已落 **VM 库**（`information_schema.STATISTICS` 实测 `idx_goods_sku_sku_code / SkuCode / NON_UNIQUE=1`，2026-10-12，见注意 18）。⚠️ **不是 UNIQUE**：全仓无「`SkuCode` 唯一」这条不变量声明 ⇒ 改成 UNIQUE 是**新增契约**，超出「加索引」（块内理由见 `.sql:1483-1492`） |
+| 30 | 2026-10-12 | C3 块6〈内容+消息块〉⑮-1 统一评论表 `comment` | 新增表 | `comment` | `mall_management_sql.sql:1528-1555`（Migration 块 ⑮，`CREATE TABLE IF NOT EXISTS`，20 列 + 主键 + 4 个 KEY：`idx_comment_target(TargetType,TargetId,created_at)` / `idx_comment_parent(ParentId,created_at)` / `idx_comment_author(AuthorId,created_at)` / `idx_comment_kind(Kind,TargetType,TargetId)`） | `DROP TABLE IF EXISTS \`comment\`;`（见注意 6；**执行前须人工确认**） | 块6 commit 0（**本笔**） | ✅ 已落 **VM 库**（`information_schema.TABLES` 实测全库 **36** 张，2026-10-13） |
+| 31 | 2026-10-12 | C3 块6〈内容+消息块〉⑮-2 评论 @ 关系 `comment_mention` | 新增表 | `comment_mention` | `mall_management_sql.sql:1557-1566`（4 列 + 主键 + 2 个 KEY） | `DROP TABLE IF EXISTS \`comment_mention\`;`（见注意 6） | 块6 commit 3（`639b74f`） | ✅ 已落 VM 库（同上） |
+| 32 | 2026-10-12 | C3 块6〈内容+消息块〉⑮-3 评论图片 `comment_image` | 新增表 | `comment_image` | `mall_management_sql.sql:1568-1579`（6 列 + 主键 + 2 个 KEY；`Status` 三态 pending/approved/rejected） | `DROP TABLE IF EXISTS \`comment_image\`;`（见注意 6） | 块6 整改 commit 4（`0a56123`） | ✅ 已落 VM 库（同上） |
+| 33 | 2026-10-12 | C3 块6〈内容+消息块〉⑮-4 评论点赞 / 踩 `comment_like` | 新增表 | `comment_like` | `mall_management_sql.sql:1581-1591`（5 列 + 主键 + `UNIQUE uk_like_comment_user(CommentId,UserId)` + `idx_like_user`） | `DROP TABLE IF EXISTS \`comment_like\`;`（见注意 6） | 块6 commit 1（`c483d15`） | ✅ 已落 VM 库（同上） |
+| 34 | 2026-10-13 | C3 块6 整改④⑮-5 举报单 `report` | 新增表 | `report` | `mall_management_sql.sql:1593-1611`（12 列 + 主键 + `UNIQUE uk_report_target_reporter(TargetType,TargetId,ReporterId)` + 2 个 KEY） | `DROP TABLE IF EXISTS \`report\`;`（见注意 6） | 块6 整改 commit 4（`0a56123`） | ✅ 已落 VM 库（同上） |
+| 35 | 2026-10-13 | C3 块6 整改⑤⑮-6 敏感词库 `sensitive_word` | 新增表 + 种子数据 | `sensitive_word` | `mall_management_sql.sql:1613-1621`（4 列 + 主键 + `UNIQUE uk_sensitive_word(Word)`）；种子在 `:1631-1634`（① 的 10 词，`INSERT IGNORE` 靠该 UNIQUE 幂等） | `DROP TABLE IF EXISTS \`sensitive_word\`;`（见注意 6；⚠️ 词表无第二份副本，删表即丢） | 块6 整改 commit 5（`c34e905`） | ✅ 已落 VM 库（同上；10 词逐条实读，见 `docs/agent/evidence/c3-block6/b6-c7-fake-data.txt` §4.7） |
+| 36 | 2026-10-13 | C3 块6 整改④⑮-7 `user` 加列 `WarnCount` | 新增字段 | `user` | `mall_management_sql.sql:1623-1629`（`information_schema.COLUMNS` 守卫 + `PREPARE`/`EXECUTE` 照 ⑬ 先例，`int NOT NULL DEFAULT 0`；达 3 由 `ReportService` 自动置 `user.banned=1`） | `UPDATE \`user\` SET \`WarnCount\` = 0;`（见注意 1：**不得** `DROP COLUMN`） | 块6 整改 commit 4（`0a56123`） | ✅ 已落 VM 库（实读 47 行用户全列存在） |
 
 ## 登记格式
 
@@ -170,3 +177,26 @@ CREATE INDEX idx_xxx ON xxx(col);
    - **⚠️ 存量行一律不因加列而变**：`goods` / `order` 的 5 个新列全部带 `DEFAULT`（`''` 或 `0.00`）⇒ 老行取默认值，**不改行数、不改既有列**（规则 v2：向后兼容）。`order` 的 `CouponId` 默认**空串**（「没用券」），不是 `NULL`。
    - **⚠️ 回滚**：8 张新表按注意 6（保留表 + 停止写入，**不物理 `DROP`**）；6 个加列按注意 1（保留列 + 停止写入，**不得** `DROP COLUMN`）；⑭ 的索引回滚 = `DROP INDEX` 后**不再建**（逻辑废弃）。块内各自的 `ROLLBACK` 注释写在对应段头。
    - ⚠️ **跨文件口径必须一致**：本条的表数（**30**）、`db-schema.md §14`、`slot-registry.md §二十二`、`progress.md §7` 的块 5 条目**同源**；`api-contract.md` 附录 F 是**端点**侧（与本条无关）。
+
+19. **⚠️ 块 6（#30–#36）—— 表数 30 → 36；**一个** Migration 段 ⑮、编号连续 1~8 —— 2026-10-13 记**：C3 块 6〈内容+消息块〉的库变更**只一段**（`.sql:1507-1634`，段头注释 `:1507-1526`，段内 Date 2026-10-12），编号 ⑮-1~⑮-8 与登记 #30–#36 一一对应：
+
+   | 段内编号 | `.sql` 行 | 内容 | 对应登记 |
+   |---|---|---|---|
+   | ⑮-1 | `:1528-1555` | 建表 `comment` | #30 |
+   | ⑮-2 | `:1557-1566` | 建表 `comment_mention` | #31 |
+   | ⑮-3 | `:1568-1579` | 建表 `comment_image` | #32 |
+   | ⑮-4 | `:1581-1591` | 建表 `comment_like` | #33 |
+   | ⑮-5 | `:1593-1611` | 建表 `report` | #34 |
+   | ⑮-6 | `:1613-1621` | 建表 `sensitive_word` | #35 |
+   | ⑮-7 | `:1623-1629` | `user` 加列 `WarnCount` | #36 |
+   | ⑮-8 | `:1631-1634` | 敏感词预置 10 词（种子，`INSERT IGNORE`） | （随 #35） |
+
+   - **计数**：表数 **30 → 36**（+6：`comment` / `comment_mention` / `comment_image` / `comment_like` / `report` / `sensitive_word`）；加列 **1 个**（`user.WarnCount`）；加索引 **14 个**（非主键，**其中 UNIQUE 3 个**）。14 个按表拆：`comment` 4（`idx_comment_target` / `_parent` / `_author` / `_kind`）、`comment_mention` 2、`comment_image` 2、`comment_like` 2（含 UNIQUE `uk_like_comment_user`）、`report` 3（含 UNIQUE `uk_report_target_reporter`）、`sensitive_word` 1（UNIQUE `uk_sensitive_word`）。⚠️ **全库实测计数（2026-10-13，`information_schema`，档位 = 可复核）**：表数 **36**、非主键索引 **67**、非主键 UNIQUE **18**（出处 `docs/agent/evidence/c3-block6/b6-c7-fake-data.txt` §4.11，三行 SQL 可原样重跑）—— 上面那 14 个 / 3 个由 `db-schema.md §15.1` 的 DDL **逐条可数**，整库数则是**查库实测**。⚠️ **别拿 67 去减块 5 的「30 个」** —— 那是两把不同的尺（块 5 当年**未重算**、口径未标）；**本笔起全库索引 / UNIQUE 数一律以这个实测口径为准**。
+   - **⚠️ P3 门禁同笔 +6（四处同改）**：`ConcurrencyRunner.java` 的 IN 清单加那 6 张表、`KNOWN_TABLES` **19 → 25**、期望表数 **30 → 36**、**外加 P3 的 PASS 文案串**（`:2664` 常量 / `:2670` 文案，同一笔已改；清单那 6 张必须**真在库**，否则 `known == KNOWN_TABLES` 那一半不成立）。⚠️ `concurrency` job 是 `continue-on-error` ⇒ **只能读 artifact 的 `gates.count`，不能读 job 颜色**（同块 3 / 4 / 5 / 可视化段的教训，本文件这是第几次记已数不过来）。
+   - **幂等**：建表走 `CREATE TABLE IF NOT EXISTS`；加列走 `information_schema.COLUMNS` 守卫 + `PREPARE` / `EXECUTE`（照 ⑬ 先例）；种子走 `INSERT IGNORE`（靠 `uk_sensitive_word` 幂等）⇒ 重复执行第二遍起**全部空操作**。
+   - **✅ 落 VM 库证据（第一手复核，2026-10-13）**：`docs/agent/evidence/c3-block6/b6-c7-fake-data.txt`（只读探针 `scripts/probes/ProbeB6c7Seed.java`，凭据从 `application-a3.properties` 剥壳、**未落盘**）实测 —— **全库 36 张表**、6 张新表**逐张命中**（§4.10 六表行数：`comment` 8 / `comment_image` 2 / `comment_like` 7 / `comment_mention` 5 / `report` 2 / `sensitive_word` 10）、`user.WarnCount` 列**实读可用**（§4.8：47 用户 / `WarnCount` 合计 0）、10 个敏感词**逐条打印**（§4.7）。⚠️ **本笔的目的一**：块 6 的 5 个假数据项此前**只有方案、没有行** ⇒ 本探针把每条**补成可参照的行**（不是「按方案推断该有」，是**实插 + 实读**，§5 有逐条对照）。
+   - ⚠️ **六张新表都带 `created_at`**（`comment` / `report` / `sensitive_word` 另带 `updated_at`）—— 满足 `agent.md` 数据库管理规则 8（表必须有时间列）；`comment_image.Status` 是**三态字符串码**（`pending` / `approved` / `rejected`），`report.Status` 同理（`pending` / `handled` / `rejected`）—— **不建 DB `ENUM`**（同 `template.Kind` 的口径：取值受控在应用层，改值不用动 DDL）。
+   - ⚠️ **`comment` 是「一张表装四件事」**：`Kind` 区分 `review` / `question` / `answer`，`ParentId` 永远指向**顶层行**、「回复某条回复」用 `ReplyToId` 表达（两层封顶）。⇒ **别按表名把它当「评论表」读** —— 评价、用户留言、楼中楼、问答**都在这张表里**（这是块 6 的核心取舍，`.sql:1528` 段头注释写了）。
+   - **⚠️ 回滚**：6 张新表按注意 6（保留表 + 停止写入，**不物理 `DROP`**）；`user.WarnCount` 按注意 1（保留列 + 清零 `UPDATE user SET WarnCount = 0`，**不得** `DROP COLUMN`）。段头 `:1518-1525` 的 `ROLLBACK` 注释块逐条写了这些语句，并标注「**执行前须人工确认**」。
+   - ⚠️ **跨文件口径必须一致**：本条的表数（**36**）、`db-schema.md §15`、`slot-registry.md §二十三`、`progress.md §7-B6` **同源**；`api-contract.md` 附录 G 是**端点**侧（与本条无关，13 条内容域端点）。
+

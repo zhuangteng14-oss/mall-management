@@ -74,7 +74,7 @@
                      SKU 共享同一个 `GoodName` ⇒ 车里几行长得一模一样，看不出买的是哪个型号。后端
                      `/cart/list` 自本笔起多回一列 `AxisName`（`CartDao.GOODS_COLS`）。非型号件为 `null`
                      ⇒ 这半句**整段不画**（不写「型号 —」）。间隔用 `&emsp;` **实体**、不直接敲全角空格（`eslint` 的
-                     `no-irregular-whitespace` 不认模板文本里的 U+3000；先例 `ProductPage.vue:284`）。**不用 `·` 拼接** —— 那是仓里点名的 AI 默认样。 -->
+                     `no-irregular-whitespace` 不认模板文本里的 U+3000；先例 `ProductPage.vue:289`）。**不用 `·` 拼接** —— 那是仓里点名的 AI 默认样。 -->
                 <div class="spec"><template v-if="row.AxisName">型号 {{ row.AxisName }}&emsp;</template>商品编号 {{ row.ProductCode }}<span v-if="Number(row.OriginalPrice) > 0" class="dsc" title="这件是折扣商品（划线原价 &gt; 0）⇒ 本单的满减 / 折扣券不可用（无门槛券仍可用）。判据见 useCouponPick.couponBlockedReason，与后端 CouponService.redeem 那条闸逐字对齐。">折扣商品</span></div>
               </div>
               <div class="unit">

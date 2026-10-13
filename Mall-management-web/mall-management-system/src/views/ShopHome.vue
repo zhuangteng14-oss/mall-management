@@ -303,7 +303,7 @@ const isLogin = computed(() => isLoggedIn())
 const isSelf = computed(() => !!buyerId && buyerId.toLowerCase() === shopId.toLowerCase())
 
 // 券包 / 领券的**账号**（2026-10-12 起 = **登录名**，不是客户号）。
-// ⚠️ 与 `ProductPage.vue:820` / `HomePage.vue:413` 取值**逐字同款**（`getUsername()`）——
+// ⚠️ 与 `ProductPage.vue:1015` / `HomePage.vue:413` 取值**逐字同款**（`getUsername()`）——
 //    三处必须一起改，`api/auth.js` 是唯一允许读身份的地方。
 const couponAccount = getUsername() || ''
 

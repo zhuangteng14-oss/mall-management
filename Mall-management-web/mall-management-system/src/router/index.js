@@ -136,7 +136,7 @@ const router = createRouter({
 // ── 兼容重定向（R1 起；R2 合表，2026-10-05）：旧 `?page=` / `?back=search` 深层链接 ⇒ 新子路由 ──
 // 旧形态：`#/customer?page=cart|user|chat`（R1 前由 `CustomerPage.vue` 的 `onMounted` + 两个
 //   `route.query` watcher 解读）、`#/merchant?page=order|user|chat`（R2 前同理，在 `MerchantPage.vue`）、
-//   `#/…?back=search`（`ProductPage.vue:412` 的「返回」推的）。两壳同一套形状 ⇒ **一张表驱动**。
+//   `#/…?back=search`（`ProductPage.vue:584` 的「返回」推的）。两壳同一套形状 ⇒ **一张表驱动**。
 // ⚠️ **这些映射都不能省**，两条理由：
 //   ① R5（商品详情页进壳）**不做** ⇒ `ProductPage.vue:361` / `:363` / `:388` / `:398` / `:400`
 //      仍推旧 URL（商家的 3 处 + 客户的 2 处，见 `progress.md` §5-Y 的生产者表）；
@@ -145,7 +145,7 @@ const router = createRouter({
 //    商家侧的生产者是 `ProductPage`（理由 ①），不是壳自己了。
 // 取舍：认出的 `page` 换成路径并**带走其余 query**（`otherId` / `otherType` / `_t` 是 `ChatRoom.vue`
 //   读的会话参数，丢了就打不开对应聊天）；⚠️ **客户侧的 `chat` 与 `msg` 两个键都要收** —— `chat`
-//   才是**生产者实际推的**键（`FriendRoom.vue:246`、`ProductPage.vue:447`），`msg` 是 R1 前的历史键
+//   才是**生产者实际推的**键（`FriendRoom.vue:246`、`ProductPage.vue:619`），`msg` 是 R1 前的历史键
 //   （旧 watcher 认它、且手敲 URL 也算）；R1 落码时误写成只收 `msg` ⇒ 「咨询商品 / 好友点聊天」
 //   两条客户流程落回主页并丢会话参数，`fix/legacy-chat-tab` 加回（见 progress.md §5-X (16)1）。
 //   认不出的 `page` 归位该壳的首页（顺带丢掉脏参数）；
@@ -248,7 +248,7 @@ function searchLanding(to) {
 //    送进一个注定空白的页」，不负责拦人。故本笔**不动**任何后端判据与白名单。
 //
 // ⚠️ **形态 = 默认拒绝 + 显式 `meta.public` 白名单**，与后端 `AUTH_WHITELIST` 同构
-//    （`WebAuthConfig.java:90-95` 的原话：「白名单是**公开面**，不是『未登录可达面』」）。
+//    （`WebAuthConfig.java:94-99` 的原话：「白名单是**公开面**，不是『未登录可达面』」）。
 //    为什么不用 `meta.requiresAuth` 逐条标注受保护页：那样**漏标一条 = 静默公开**，
 //    而默认拒绝下**漏标一条 = 静默受保护**（错得更安全）。红利：C3 加 `#/admin` 时
 //    **自动**落在受保护一侧，不需要回来改这里。
@@ -258,7 +258,7 @@ function searchLanding(to) {
 //    （未登录 → /login → 守卫又要登录 → /login …）。全站只有这一条会成环。
 //
 // ⚠️ **公开面 = 8 条**（`meta.public: true`）：`/login`、`/register`（C3 块 2〈用户块〉加：与 `/login` **同一个组件、另一个 tab**，记录落在文件尾那块，理由与判据都在那里）、两壳的**首页**子路由、两壳的**搜索**子路由、
-//    `/product`、`/shop`（C3 块 5 B 组加，记录同样落在文件尾那块）。判据不是感觉，是**后端白名单**：这 8 条**各自取数用的**端点在 `AUTH_WHITELIST` 内（`/register` 靠注册 tab 的 `/user/loginAdd`，`WebAuthConfig.java:101` 已有），匿名
+//    `/product`、`/shop`（C3 块 5 B 组加，记录同样落在文件尾那块）。判据不是感觉，是**后端白名单**：这 8 条**各自取数用的**端点在 `AUTH_WHITELIST` 内（`/register` 靠注册 tab 的 `/user/loginAdd`，`WebAuthConfig.java:105` 已有），匿名
 //    拿得到数据（`HomePage` 的 `goodsSelectHome`/`goodstype`、`GoodsSelect` 的 `productSearch`、
 //    `ProductPage` 的三个商品端点、`ShopHome` 的**同一个** `goodsSelectHome`）。⚠️ 这条判据说的是**页面的数据面**，不是「页上每个动作都匿名可做」——`/product` 与 `/shop` 页上的写动作（下单 / 咨询 / 关注）本来就在白名单外，前端也是**只在有登录态时才发**。反过来，**保护集 = 「该页全部端点都在白名单外」**——
 //    即 R3 的 `navFor()` 在匿名时已经藏起来的那三项（消息 / 购物车|订单中心 / 用户中心）。
@@ -525,7 +525,7 @@ router.addRoute('merchant', { path: 'notify', redirect: '/merchant/msg?tab=notif
 //   本记录只多带一个 `meta.register`，它**只当「初始 tab」**用（`LoginPage.vue` 的 `data()` 读它），
 //   **不参与**任何守卫判据。
 // ⚠️ **`meta.public: true` 的判据仍是后端白名单**：注册 tab 的 POST 打 `/user/loginAdd`，
-//   它**本来就在** `AUTH_WHITELIST` 内（`WebAuthConfig.java:101`）⇒ 这一条**不是**「把受保护端点放行」，
+//   它**本来就在** `AUTH_WHITELIST` 内（`WebAuthConfig.java:105`）⇒ 这一条**不是**「把受保护端点放行」，
 //   只是给同一个组件补一个能直达注册 tab 的地址。⇒ 公开面 **6 → 7 条**：
 //   `:262` / `:263` 那两处的数目与 `:271` 的壳外列举**已同步改**（三处一处不改就是静默分歧）。
 //

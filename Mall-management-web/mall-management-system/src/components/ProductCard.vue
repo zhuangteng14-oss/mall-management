@@ -12,7 +12,7 @@
        另两处只传 **4 个**（`MerchantId/GoodName/GoodType/Id`）。
        ⇒ 本组件一律按 **7 个** 组装。理由：`HomePage.vue:400` 的注释把 7 个参数写成契约 ——
        T-guard-6 ①（`progress.md:1441`）**要求「7 个 query 参数都要在」**，少传就是削弱一条既有判据；
-       另两处**多收 3 个**参数是无害的（`ProductPage.vue:489` 只解构 4 个，多出来的不读）。
+       另两处**多收 3 个**参数是无害的（`ProductPage.vue:684` 只解构 4 个，多出来的不读）。
     ② **副作用不一样**：`HomePage` 的 `toGoodsDetail` 还写 `sessionStorage`（清搜索缓存）
        ⇒ 落成**可选 prop `beforeNav`**，`HomePage` 传自己的那两行；另两处不传。
     ③ **元素不一样**：`HomePage` 是 `<article @click>` + `router.push`，另两处是 `<router-link>`。

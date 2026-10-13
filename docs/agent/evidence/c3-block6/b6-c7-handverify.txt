@@ -1,0 +1,187 @@
+块 6 整改 · commit 7〈收口〉—— 手验实录（整改指令 §八「手验全部通过」）
+生成时间：2026-10-13（本机 a3 profile；库 = mall_management_sql @ VM 192.168.229.129）
+════════════════════════════════════════════════════════════════════════════
+
+0. 跑法（逐字可复跑）
+  # 后端（a3；**总闸必须手工放开**，否则 §八 第 1 项那条 job 链路整条不存在）
+  cd Mall-management-server
+  SPRING_PROFILES_ACTIVE=a3 ./mvnw spring-boot:run \
+    -Dspring-boot.run.arguments="--mall.downgrade.job.enabled=true \
+      --mall.comment.question.timeout.enabled=true \
+      --mall.comment.question.timeout.fixed-delay-ms=15000"
+  # 前端
+  cd Mall-management-web/mall-management-system && npm run serve      # :8080
+
+  # ① 回退到种子态（跑之前先跑，保证「最后一发实录」是唯一一组产物）
+  bash _work/b6-hv-cleanup.sh
+
+  # ② HTTP 层手验（49 OK / 15 有意失败；落 _work/b6-hv-full.txt）
+  PYTHONIOENCODING=utf-8 python scripts/probes/probe-b6c7-handverify.py > _work/b6-hv-full.txt
+
+  # ③ 界面层手验（真后端、不 mock；26 项；落 hv-shots/）
+  node scripts/probes/probe-b6c7-admin-ui.mjs
+
+  # ④ 库侧真值（只读；凭据只从环境变量读，见 _work/b6-hv-sql.sh）
+  bash _work/b6-hv-sql.sh "<SQL>"
+
+1. 两层手验的结论
+   ┌ HTTP 层 `scripts/probes/probe-b6c7-handverify.py`
+   │   _work/b6-hv-full.txt（1948 行）—— exit 0
+   │   HTTP 200 × 67；`"success": true` × 49；`"success": false` × 15
+   │   ⚠️ 那 15 个 false **全部是刻意构造的负例**，每一条都返回了它该返回的业务话术
+   │      （逐条见 §2.1）。「49 绿 + 15 红」才是这一发通过的样子 —— 没有红的不叫验过闸。
+   └ 界面层 `scripts/probes/probe-b6c7-admin-ui.mjs`
+       hv-shots/result.json = `{"total": 26, "failed": 0}`
+       **不 mock 任何请求**（对照：`docs/美化/` 下那批 `probe-*.mjs` 是就地伪造 8088 的交互验收）。
+       这一发要验的是「§2 那批产物有没有从 HTTP 冒到界面上」，mock 一拦就什么都验不到。
+       截图 9 张：ui-01-overview / ui-02-0 … ui-07-5 / ui-08-comments-drilldown /
+       ui-09-questions-drilldown（`hv-shots/`）。
+
+2. HTTP 层实录：`_work/b6-hv-full.txt`
+2.1 刻意构造的 15 条负例（**这 15 条必须红**，否则说明闸漏了）
+   L490  ⑤′  /comment/list 缺 TargetId            -> 缺少参数：TargetId
+   L561  ⑪   /comment/like 缺 Type                -> 缺少参数：Type（只能是 like / dislike）
+   L628  ⑯   /comment/accept 非提问者             -> 只有提问者本人可以采纳答案
+   L636  ⑯′  /comment/accept 拿别的回复当答案      -> 这条回答不属于该提问
+   L654  ⑰′  /comment/accept 再采纳一次           -> 该提问已采纳过答案，不能更改
+   L802  ⑳′  /comment/imageReview 非法 Status     -> 未知的图片状态：nope（只能是 pending / approved / rejected）
+   L810  ⑳″  /comment/imageReview 不存在的 Id     -> 图片不存在
+   L936  ㉓   /report/add 理由「其他」不填说明       -> 选择「其他」时必须填写说明
+   L944  ㉓′  /report/add 举报自己发布的内容        -> 不能举报自己发布的内容
+   L985  ㉕′  /report/handle 重复处理同一单         -> 该举报已被处理
+   L993  ㉕″  /report/handle 不存在的 Id           -> 举报不存在
+   L1078 ㉘   /sensitive/add 重复加同一个词         -> 该敏感词已存在
+   L1100 ㉙′  /sensitive/add 空 Word              -> 缺少参数：Word
+   L1235 ①′  /comment/list 对象类型写 comment     -> 未知的评论对象类型：comment（只能是 goods / user）
+   L1868 ㉜″  /comment/imageReview 再驳回同一张     -> 该图片已被审核
+   ⚠️ ⑯ / ⑯′ **刻意排在 ⑰（成功采纳）之前**：采纳一旦成功，这道闸就会被「已采纳」挡在前面，
+      测到的就不是「只有提问者本人」而是「已采纳」了。
+   ⚠️ ⑯ 用的是**空 cookie jar**（`ANON_OPENER`）发同一发请求。带管理员 cookie 时
+      `AuthSession.isAdmin(request)` 为真 ⇒ `CommentService.accept` 那句话的 `!admin` 短路 ⇒
+      代采纳**是设计里的能力**；两个口径都在实录里，别只看一条。
+
+2.2 关键成功项的逐字关键字段（原文可核）
+   · ⓪  /user/loginSelect(ops_duan) 返回裸 `3`；`/user/me` -> `{"role":3,"success":true,"username":"ops_duan"}`
+        ⇒ §八 需要「有身份」那一步（`/report/handle` 认人，不是授权）在此立住。
+   · ⑦  匿名评价传 `Rating=4` -> 落库 `Rating=5`（匿名强制 5 星）
+   · ⑬  作者回复自己的顶层并 @ 自己 -> `comment_mention` **无新增行**（自 @ 不通知）
+   · ⑲  图片通过 -> `"已通过"`，且**不删文件**（与 ㉜ 成对看）
+   · ㉔/㉔′ 驳回 -> `"已驳回（举报人可在原理由上重新举报）"`；同人同对象再举报 -> `"已重新提交举报"` +
+        `"revived": true`（**不新插行**，Id 仍是 1）
+   · ㉕  举报通过 -> `"warnCount": 1, "banned": false, "contentAffected": 1`
+   · ㉙  加词「线材」-> `"已添加，并屏蔽了 1 条历史评论"` + `"masked": 1`
+        ⚠️ 这个 1 是**可预先算准**的：选「线材」是因为它只出现在本手验自己第 2 段 ⑥ 那条正文里，
+        种子评论 110–117 一个都不含 ⇒ `masked` 只能是 1，且种子行不会被这一发改到。
+        （上一版选的词在探针自己的回复里也出现过，`masked` 是 2 —— 那种就复核不了。）
+   · ㉙″ 删词 -> `"已删除（历史评论里的 *** 不回填）"`（**单向性**：打码不回滚）
+   · ㉜  驳回待审图 -> `"已驳回并删除图片文件"` + `"fileDeleted": true`
+        `落盘目录（㉜ 之前）` 有 4 个文件，`（㉜ 之后）` 只剩 3 个 ⇒ **真删**，且删的是被驳那张。
+   · ㊱-1 第 2 次警告 -> `"warnCount": 2, "banned": false`
+   · ㊱-2 第 3 次警告 -> `"msg": "已处理，该用户累计 3 次警告已自动封禁", "warnCount": 3, "banned": true`
+        ⇒ 「3 次警告自动封号」这条链路**端到端**走通，且用到的是**一次性注册的账号**
+        （`hv_b6_troll`），没碰任何演示账号。
+
+3. 界面层：`hv-shots/result.json` = 26 项 / 0 失败
+   验的是「第 2 段那批产物到了页面上没有」，不是「页面能不能点」：
+   · 状态条五格实读：`2 待处理举报 / 1 待审图片 / 11 敏感词 / 0 本页评论·提问 / 16 未读治理消息`
+   · 六个 tab 与 `TABS` 顺序逐位一致（图标字形 + 角标数字都进了 `innerText` ⇒ 断言用 `includes`）
+   · 评论管理下钻 `goods 80` 命中 3 条（手验 ⑥/⑦/⑱′ 那三条），面板里有 ECharts 画布
+   · 问答管理下钻 `goods 76` 命中 3 条，面板里有 ECharts 画布；全页画布 ≥ 8
+   · 全程 `console.error` / `unhandledrejection` 计数 = 0
+   ⚠️ `v-show` 让六个面板的 DOM 一直挂着 ⇒ 「当前可见面板」必须先按 `offsetParent !== null` 过滤，
+      再数行；四个面板的行标记还不是同一个选择器（`.g-row` / `tbody tr` / `.g-shot` / `.g-ev`）。
+
+4. 库侧真值（手验**之后**；甲=手验前那组见 `b6-c7-fake-data.txt` §4，乙=这里）
+   表              甲(种子)  乙(手验后)   增量是谁
+   comment         8         18         142–151（含匿名 143、含图 148、回复 144/145、被举报软删的 149–151）
+   comment_image   2         4          10 rejected（文件已真删）+ 11 approved，都挂 148
+   comment_like    7         8          15：114 / 1111 / dislike
+   comment_mention 5         14         36–44
+   report          2         5          9/10/11，都 handled、HandlerId=qa7PmpUojO
+   sensitive_word  10        11         17「线材」（㉗ 的 hv_b6_probe_word=16 已被 ㉙″ 删掉）
+   user             47 人    48 人      +hv_b6_troll；`WarnCount>0` 1 人、max 3、`banned=1`
+   notification（两条治理回流，`EventType IN ('question.timeout','report.handled')`）
+                    0 行      7 行       401 + 420–425（见 `b6-c7-fake-data.txt` §4.9-乙）
+   ⚠️ **Id 有洞不是漏行**：预跑占掉了 comment 118–141 / comment_image 6–9 / report 3–8 /
+      comment_mention 14–35 / comment_like 13–14 / sensitive_word 11–15 这些号段；清理删了行，
+      MySQL 的 `AUTO_INCREMENT` 不回退 ⇒ 最后一发从洞后面接着发号。
+   ⚠️ 种子待审图 `comment_image.Id=4` 在手验后**仍是 pending** —— 被驳回的是手验自己上传的那张
+      （Id=10）。留着种子那张，「待审图片」这一栏在演示时才有东西可审。
+
+5. 时间线（含调度器那一步的**手工**记账）
+   11:54  种子图片文件拷进 `$TEMP/a3-uploads/comment/`（`b6-c7-fake-data.txt` §1）
+   12:29  后端以 a3 + 两道总闸放开起（PID 166880，Tomcat :8088）
+          `_work/b6-close-handverify-backend.log:120` `Started MallManagementApplication in 6.184 s`
+   12:29:09.526  调度器首轮就命中一条 -> `QuestionTimeoutJob : 提问超时提醒…处理 1 条…通知 1 条`
+   12:4x  `_work/b6-hv-cleanup.sh` 回退到种子态（顺带删掉 12:29 那条 timeout 通知，见 §6）
+   12:46:40.384  `_work/b6-close-handverify-backend.log:128`
+          `QuestionTimeoutJob : 提问超时提醒：NOTIFY…处理 1 条…通知 1 条`
+          ⇒ 与 `notification.Id=401` 的 `created_at`（库内 04:46:40 UTC = 本地 12:46:40）**同秒**。
+             这一行是**调度器自己发的**，不是任何 INSERT。
+   ⚠️ 那一步不是探针里的代码段：手工做的是 ① 后端带两个闸起来（`application-a3.properties:110`
+      `mall.downgrade.job.enabled=false`、`:160` `mall.comment.question.timeout.enabled=false`
+      —— 不放开的话 `@EnableScheduling` 的载体类都不实例化，**整台调度器不存在**）；
+      ② 删掉 `comment 110` 已有的 `question.timeout` 通知行（判据是
+      `NOT EXISTS (notification … EventType='question.timeout' AND TargetId=提问Id)`，
+      见 `QuestionTimeoutJob.java:29`），让下一轮重新判它超时。
+   12:48  HTTP 层实录收尾（`_work/b6-hv-full.txt`）
+   12:53–12:54  界面层手验**最终那一发**（`hv-shots/*.png` + `result.json` 的落盘时刻；
+          探针只读，不改库 —— 它点「加载」走的都是下钻读端点）
+   （§8 那处页面改动是同分钟落的（`ModerationPage.vue` mtime 12:53）⇒ 这一发就是**改后**的读数，
+     红条判据那两条断言 + `ui-01-overview.png` 里红条已消失，都在这一发里）
+
+6. ⚠️ 记账与口径说明（**这些不是「顺手改数据」，是显式记账**）
+   6.1 种子正文还原：`comment` 114 / 115 在第一发预跑里被「加词打码」改过（`***`），
+       最后一发之前按 `b6-c7-fake-data.txt` §4.2 的原文逐字还原。
+       理由：不还原的话「种子态」这一栏就是假的，§4.12 的甲乙对照也就对不上。
+   6.2 补记一格警告计数：最后一发跑完，`SELECT … WHERE WarnCount>0` 里除 `hv_b6_troll` 还挂着
+       `1111`（种子评论 114 的作者）`WarnCount=1` —— 那是**更早那发预跑**「通过」了一单告 114 的
+       举报留下的（最后一发对 Id=1 做的是**驳回**，不产生警告）。已清回 0，并补进
+       `_work/b6-hv-cleanup.sh` 第 14 步（那一步是**事后**补的，注释里写明了）。
+   6.3 `report.Id=1` 的 `created_at` 在手验里往前走了：`ReportDao.revive`（`ReportDao.java:128-134`）
+       里有一句显式的 `SET … created_at = CURRENT_TIMESTAMP`。**这是设计**：复活一条被驳回的举报
+       = 当作新举报重新排队，否则页面上「多久没人处理」会拿驳回前的时间骗人。
+   6.4 a3 的落盘目录是 `$TEMP/a3-uploads/`（`app.upload-dir=${java.io.tmpdir}/a3-uploads/`），
+       **不是**仓库里的 `src/main/resources/static/img/`。⇒ 「驳回真删文件」删的是
+       `%TEMP%/a3-uploads/comment/b6c7-hv-img-a.jpg`，**仓库一个字节没动**。
+       这条要说清：看 `fileDeleted: true` 就以为「仓库少了张图」是误读。
+   6.5 为什么两张待审图要**不同文件名 + 不同内容**：`UploadStorage.store` 对「同名同内容」
+       复用同一个落盘文件（已知限制，见 tech-debt）。同内容的话驳回一张会连带打断另一张的 URL。
+   6.6 敏感词那两发的取向：㉗ 加的新词故意选表里没有的（`masked` 应为 0），㉙ 选的「线材」故意
+       只命中本手验自己的评论（`masked` 应为 1）⇒ 两条断言都能**预先算准**，不是「跑完看数」。
+   6.7 ⚠️ **事故与回退** —— §4 那张表记的是**最后一发**手验跑完的时刻，而它被**污染过一次**，已回退：
+       收口令给 `probe-b6c7-handverify.py` 加了 `--stage <n>` 开关（`STAGE = sys.argv[sys.argv.index("--stage") + 1]`），
+       冒烟试第 0 段时写成了**位置参数** —— 位置参数被忽略，**整条流程又跑了一遍**，
+       往库里写了一组新产物（本地 13:06 一瞬：`comment` 152–157、`report` 12–14、`notification` 426–443、
+       `comment_like` 17、`comment_mention` 45–50；副作用还把种子待审图 `comment_image.Id=4` 从
+       `pending` 翻成 `approved`、把 `hv_b6_troll` 的 `WarnCount` 从 3 推到 6）。已全部回退 ⇒
+       六表回到 **18 / 4 / 8 / 14 / 5 / 11**、治理回流回到 **7 行**（401 + 420–425）、
+       `WarnCount>0` 只 `hv_b6_troll`=3（`banned=1`）、`comment_like.Id=15` 与
+       `comment_image.Id=4=pending` 都在。**复读逐格对上 §4**。回退脚本 = `_work/b6-hv-revert-accidental.sh`
+       （逐行带理由；⚠️ 它**不回到种子态**，回种子态是 `b6-hv-cleanup.sh` 的活，两者别混）。
+       ⚠️ **一处不回拨**：`report.Id=1` 的 `created_at` 现在停在事故那一刻。理由：它本来就是个
+          **每次手验都会重算**的值（§6.3），而「该退到哪一秒」没有出处 —— 编一个秒填回去，
+          不如把这件事写出来（§4.6 尾注那句「是手验时刻」不依赖具体数值，仍然成立）。
+       ⚠️ 教训已另立 **TD-55**（带开关的探针，冒烟必须走开关本身；对未知参数应当报错而不是静默跑全量）。
+
+7. 与整改指令 §八 的逐条对表
+   §八 要求                                   落点 / 证据
+   ─────────────────────────────────────────  ────────────────────────────────────────────────
+   30 分钟前已超时的未解决问答（触发 job）      §5 12:46:40 那一行 + `b6-c7-fake-data.txt` §4.9-乙
+   待审图片（触发图片审核）                     §2.1 ⑲/㉜ + §2.2 ㉜ + §4（10 rejected / 11 approved）
+   待处理举报单（触发举报处理）                 §2.1 ㉓/㉓′/㉕′/㉕″ + §2.2 ㉔/㉔′/㉕
+   预置 10 个敏感词                             `b6-c7-fake-data.txt` §4.7 + §4（手验后 11 = 10 + 1）
+   若干评论（匿名/含图/含回复/含点赞）          §2.2 ⑦/⑲ + §4（comment 18 / mention 14 / like 8）
+   3 次警告封号                                 §2.2 ㊱-1/㊱-2（1 -> 2 -> 3，第 3 次 `banned:true`）
+   管理端页面能看到这些产物                      §3（26 项 / 0 失败）+ 9 张截图
+   ─────────────────────────────────────────  ────────────────────────────────────────────────
+   ⚠️ **a3 的 `app.auth.enabled=false`**：手验全绿 ≠ 默认 profile 全绿。这份实录里的授权类结论
+      （哪些动作要身份、`isAdmin` 短路了什么）都只在 a3 口径下成立。
+
+8. 本次收口顺带修掉的一处（页面冷进红条）
+   `ModerationPage.vue` 的 `onMounted` 原来直接 `await loadComments()`，而冷进页面时下钻框
+   `TargetId` 必然是空的 ⇒ `loadComments` 的缺参分支把「还没下钻」当成了**失败**，
+   页面顶部弹一条红 flash。修法：`loadComments({ silent })`，自动路径（挂载时 / 切 tab 时）
+   传 `silent: true`，模板里补一条灰底引导文案；点「加载」走的仍是会发红条的 `silent=false`。
+   ⇒ 判据进了界面探针：`① 冷进页面无红 flash` + `① 冷进页面 · 评论栏停在灰底引导文案上`
+   （外加 `ui-01-overview.png` 那张图，红条已经不在了）。

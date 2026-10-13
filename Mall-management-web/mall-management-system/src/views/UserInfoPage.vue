@@ -1095,8 +1095,8 @@ button {
       否则渐的是空白、等于没做；这一档也是「与领券中心统一」那一句的落点
       （`ProductPage.vue` 的领券行就是「一张 + 半张」）。⇒ 这是本节唯一一处**刻意不是一行整**的地方，
       两者相权：**滚动条已隐藏**，若第 2 行一点不露，页面上就没有任何「还能往下滚」的线索。
-   ⚠️ 隐藏滚动条两条与 `ProductPage.vue:1412-1413` 同款；渐隐 78% 停点与领券中心
-      （`ProductPage.vue:1105` `.coupons-cut`）逐字相同，`mask-image` / `-webkit-mask-image` **两条都写**。 */
+   ⚠️ 隐藏滚动条两条与 `ProductPage.vue:2156-2157` 同款；渐隐 78% 停点与领券中心
+      （`ProductPage.vue:1830` `.coupons-cut`）逐字相同，`mask-image` / `-webkit-mask-image` **两条都写**。 */
 .assets-scroll {
   --assets-row: calc(var(--s4) * 2 + var(--fs-sm) * 1.4 + var(--s2) + var(--fs-xs) * 1.4);
   max-height: calc(var(--assets-row) + var(--s3) + var(--s5));

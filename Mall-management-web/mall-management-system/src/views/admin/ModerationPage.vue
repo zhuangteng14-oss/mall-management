@@ -106,6 +106,13 @@
 
       <p v-if="c.err" class="g-err">{{ c.err }}</p>
 
+      <!-- 冷进页面 / 点过「清空」之后：`TargetId` 为空是**正常初态**，不是失败。
+           这里走灰底 `g-note`，别再复用上面那条红 `g-err` —— 手验 `ui-01-overview.png`
+           实拍到过「冷进页面就弹红字『缺少参数：TargetId』」。 -->
+      <p v-if="!c.loaded && !c.err" class="g-note">
+        本栏按对象下钻：选好「对象类型」、填一个「对象 ID」，再点「加载」。
+      </p>
+
       <div v-if="c.loaded" class="g-grid2">
         <div class="g-card">
           <h3 class="g-h3">评分分布<span class="g-h3n">本次显示口径 · 只统计顶层评价</span></h3>
@@ -938,7 +945,7 @@ function badgeOf(key) {
 /** 切 tab：该栏还没加载过就**顺手拉一次**（`loaded` 只置一次，切回来不会重复请求）。 */
 function switchTab(key) {
   tab.value = key
-  if (key === 'comments' && !c.loaded) loadComments()
+  if (key === 'comments' && !c.loaded) loadComments({ silent: true })
   else if (key === 'questions' && !q.loaded) loadQuestions()
   else if (key === 'images' && !im.loaded) loadImages()
   else if (key === 'reports' && !re.loaded) loadReports()
@@ -990,8 +997,11 @@ async function loadCounts() {
 const cs = reactive({ targetType: 'goods', targetId: '', kind: 'review', sort: 'new', limit: 20 })
 const c = reactive({ rows: [], total: 0, loading: false, loaded: false, err: '', busyId: null, stats: {} })
 
-async function loadComments() {
+/** `silent=true` = 由**自动**路径调（挂载时 / 切 tab 时）：`TargetId` 还空着只说明「还没下钻」，
+ *  不是失败 ⇒ 不弹红条，让面板停在模板里那条灰提示上。点「加载」走的仍是 `silent=false`。 */
+async function loadComments({ silent = false } = {}) {
   if (!cs.targetId) {
+    if (silent) return
     c.err = '缺少参数：TargetId —— 本栏按对象下钻，先选对象类型并填一个对象 ID。'
     say('bad', c.err)
     return
@@ -1522,7 +1532,9 @@ function jumpToObject(row) {
 
 onMounted(async () => {
   await loadCounts()
-  await loadComments()
+  // 冷进页面时 `TargetId` 必然是空的 ⇒ 只拉状态条，**不**调 `loadComments()`：
+  // 那一下会把「还没下钻」当成失败，在页面顶部弹一条红字（手验 `ui-01-overview.png` 实拍到）。
+  await loadComments({ silent: true })
 })
 </script>
 

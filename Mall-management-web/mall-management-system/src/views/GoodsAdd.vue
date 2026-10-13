@@ -523,7 +523,7 @@ const loadDiscountLimits = async () => {
 }
 
 /** 折数 → 文案（6.0 → `6`，6.5 → `6.5`）。 */
-const fmtRate = (v) => (Number.isInteger(v) ? String(Math.trunc(v)) : String(v))   // ⚠️ 原写 `v === Math.rint(v)` —— **`Math.rint` 是 Java 的、JS 没有**（同批误用，见 `ProductPage.vue:520`）：本函数被下面 `discountError` / `discountHint` 两个 computed 调用 ⇒ 商家一填对「划线原价」这两行提示就整体 `TypeError`（渲染中断）。2026-10-12 同行修正，判据 `Number.isInteger`。
+const fmtRate = (v) => (Number.isInteger(v) ? String(Math.trunc(v)) : String(v))   // ⚠️ 原写 `v === Math.rint(v)` —— **`Math.rint` 是 Java 的、JS 没有**（同批误用，见 `ProductPage.vue:715`）：本函数被下面 `discountError` / `discountHint` 两个 computed 调用 ⇒ 商家一填对「划线原价」这两行提示就整体 `TypeError`（渲染中断）。2026-10-12 同行修正，判据 `Number.isInteger`。
 
 /** 当前输入的折数（现价 / 划线原价 × 10）；任一为空 ⇒ null。 */
 const currentRate = () => {

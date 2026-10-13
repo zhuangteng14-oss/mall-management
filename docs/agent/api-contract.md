@@ -193,7 +193,7 @@
 | `/goods/productCodePrice` | `GoodsUp.vue:275`、`ProductPage.vue:193`、`ProductPage.vue:245` |
 | `/goods/GoodsProductCodeSelect` | `ProductPage.vue:184`、`ProductPage.vue:236` |
 | `/goods/productSearch` | `GoodsSelect.vue:89`※（R2 重指；R1 记 `:88`、原记 `:78`） |
-| `/order/orderAdd` | `ProductPage.vue:393` |
+| `/order/orderAdd` | `ProductPage.vue:393`（⚠️ **旧行号 · 已知陈旧族，不修** —— 块 6 之前就对不上；2026-10-13 实测真调用点 = `ProductPage.vue:913`，重填归「文档漂移清理笔」，见附录 G 末条） |
 | `/order/orderSelect` | `ShoppingCart.vue:113` |
 | `/order/orderDeliveryIfSelect` | `OrderCenter.vue:125`※ |
 | `/order/orderDeliverySelect` | `OrderCenter.vue:127`※ |
@@ -203,7 +203,7 @@
 | `/order/orderDeliveryIfUp` | `OrderCenter.vue:171` |
 | `/message/conversations` | `ChatRoom.vue:184`、`AppShell.vue:161`（**R6 合一重指**：两个壳的 `fetchUnreadCount()` —— `CustomerPage.vue:108` / `MerchantPage.vue:107` —— **已合并到本处**，两文件已随 R6 删除；其沿革：原记 `:97`（R1 时在 `HEAD` 已漂 3、实为 `:100`）⇒ R1/R2 各重指过一次） |
 | `/message/history` | `ChatRoom.vue:213`、`ChatRoom.vue:279` |
-| `/message/send` | `ChatRoom.vue:327`、`ProductPage.vue:459` |
+| `/message/send` | `ChatRoom.vue:327`、`ProductPage.vue:459`（⚠️ **旧行号 · 已知陈旧族，不修** —— 同上；2026-10-13 实测真调用点 = `ProductPage.vue:1018`） |
 | `/message/userSelect` | `ChatRoom.vue:164`、`FriendRoom.vue:132` |
 | `/message/friendSelect` | `FriendRoom.vue:107` |
 | `/message/friendAdd` | `FriendRoom.vue:159` |
@@ -613,3 +613,103 @@
 | `src/api/shop.js` | **新建**，4 条（`follow` / `unfollow` / `followState` / `profile`）；⚠️ 文件头「三条都不在 `AUTH_WHITELIST`」那句已订正为「**只有 `/profile` 是公开面**，另三条不是」 | 唯一公开面在组内 |
 
 ⚠️ **本文件（`api-contract.md`）的正文 §2 / §3 / §5 矩阵**本笔**未重测、未插入** —— 36 条新端点全部落在附录 F；正文坐标重填归「文档漂移清理笔」（同附录 E.7 的口径）。
+
+## 附录 G：C3 块 6〈内容+消息块〉契约增补（2026-10-12/13） {#api-app-g}
+
+> **块 6 = 一个新域（内容域）+ 13 个新端点**（`comment` 7 + `report` 3 + `sensitive` 3，即方案 A4 的「十三端点」），全部 `POST`、全部 `@RequestParam`（无 `@RequestBody`）、全部 `required=false` + Service 手判。
+> 逐条坐标 = 该方法的 `@PostMapping` 所在行（**本文件口径**，与 `db-schema.md#db-top` 相反）。
+> 实现落在**一个后端包** `comment/`（`controller` / `service` / `dao` / `job` 四层 + `CommentKinds`），三个 Controller 一个域。
+
+### G.0 三个「端点总数」要分开读（口径注，别互抄） {#api-g-0}
+
+| 口径 | 定义 | 块 6 前（=块 5 后） | 块 6 后（HEAD） | 出处 |
+|---|---|---|---|---|
+| **后端 method-level** | 全仓 `*Controller.java` 中 `^\s*@(Post\|Get\|Put\|Delete)Mapping` 行数（**不含**类级 `@RequestMapping`） | **120** | **133**（+13） | 2026-10-13 实测（`f2b1535` / HEAD 各数一遍） |
+| **本文件 §2 的「36 个」** | 只数 **5 个核心 Controller**（`/user` 8 · `/message` 10 · `/goods` 9 · `/order` 8 · `/health` 1） | 36 | **36（一字未变）** | §2 标题 |
+| **前端 `endpoints.js`** | `key: '/path'` 条目数（含 2 处**同行两条**） | 119 | **132** | 该文件头注记账链（… → 124 → 125 → 129 → 132） |
+
+⚠️ **块 6 的 13 个端点全部落在 §2 与 §3 的 5 个 Controller 之外** ⇒ §2 的「共 36 个」**不需要改**（它本来就不是全仓计数）；本附录就是那 13 条的契约面。
+⚠️ **`comment` / `report` / `sensitive` 三域不进 §2 的清单**（同附录 C/D/E/F 的手法：零漂移，正文表不插入）—— 域标题只在**本附录**里出现。
+
+### G.1 新域 `/comment/*` —— 内容域主域 7 条 {#api-g-1}
+
+`CommentController.java`（`@RequestMapping("/comment")` @ `:58`）—— 返回一律 `Result<Map<String,Object>>`。
+
+| 路径 | 入参（全部 `required=false`） | 返回要点 | 身份 | 坐标 |
+|---|---|---|---|---|
+| `/list` | `TargetType`（默认 `goods`）· `TargetId` · `Kind`(review/question) · `Sort`(hot/new) · `Solved` · `Limit` · `Offset` | 顶层评论 + 该楼回复 + 统计卡；观众只有**会话**一个来源 | **无身份闸** —— ⭐ **公开面，本块唯一进 `AUTH_WHITELIST` 的一条**（见 G.6） | `:83` |
+| `/add` | `Account` · `TargetType` · `TargetId` · `ParentId` · `ReplyToId` · `Kind` · `Content` · `Rating` · `Anonymous` · `ProductCode` + **多 part `Files`** | 评论 / 回复 / 提问 / 回答**四形态共用一个端点**（靠 `ParentId` 与 `Kind` 区分，规则在 `CommentService.add`） | `requireSelfOrAdminByUsername` | `:114` |
+| `/delete` | `Account` · `Id` | 逻辑删（`comment.Status='deleted'`）；**顶层删除连带该楼回复** | 同上（管理员可代删） | `:139` |
+| `/accept` | `Account` · `Id`（**顶层提问** Id）· `ReplyId`（被采纳的**回复** Id） | 采纳：置顶 + `IsSolved=1` + 通知被采纳那条回答的作者 | 同上（「是不是提问者」判在 **Service**，管理员可代采纳） | `:162` |
+| `/like` | `Account` · `Id` · `Type` ⚠️ **必填**（`like` / `dislike`） | 赞 / 踩；**再点同一种是「取消」**（显式传同一个值，不靠「省略 = 切换」） | 同上 | `:189` |
+| `/imageReview` | `Action`(`list`/`approve`/`reject`) · `Id` · `Status`(pending/approved/rejected) · `Limit` · `Offset` | 图片审核：一条端点、三个动作，靠 `Action` 分派 | 管理端面 —— **刻意不挂 `requireAdmin`**（见下 ⚠️） | `:218` |
+| `/myOrders` | `Account` | 可评论的历史商品（发表评论时「选对应商品」下拉） | `requireSelfOrAdminByUsername` | `:231` |
+
+⚠️ **`/imageReview` 是本仓「管理端页面上的端点」的又一例：不挂 `requireAdmin`** —— 闸开着时 `AuthInterceptor` 已把非管理员的 `role=3` cookie 挡在外面，闸关着时（`app.auth.enabled=false`）本就是本地演示场景。**别「顺手补一个 `requireAdmin`」**（`CommentController#imageReview` 的 javadoc 逐字写了这条）。
+⚠️ **`/list` 的观众（`viewerUserId`）只有「会话」一个来源**，且给的只是**业务号**、「业务号 → 登录名」那一跳在 Service 里、**校验通过之后**才做 —— 提前查会把 smoke 切片里 `JdbcTemplate` 替身的参数校验用例打成 NPE（`CommentController` 类注释）。
+
+### G.2 新域 `/report/*` —— 举报 3 条 {#api-g-2}
+
+`ReportController.java`（`@RequestMapping("/report")` @ `:49`）。
+
+| 路径 | 入参 | 返回要点 | 身份 | 坐标 |
+|---|---|---|---|---|
+| `/add` | `Account` · `TargetType`(comment/goods/user) · `TargetId` · `Reason`(辱骂/广告/违法/其他) · `Description`（理由 = 其他 时必填，≤ 100 字） | 提交一条举报。**同内容同人不能二次举报**（靠 `uk_report_target_reporter`）；**驳回后再举报 = `UPDATE` 同一行复活**，不新增行 | `requireSelfOrAdminByUsername` | `:73` |
+| `/list` | `Status` · `Limit` · `Offset` | 举报列表（管理端「举报中心」） | 管理端面 —— **不挂 `requireAdmin`** | `:97` |
+| `/handle` | `Id` · `Approve`（`"1"`/`"true"` = 通过；其余含省略 = 驳回）· `Note` | 通过 ⇒ **删内容 + 警告 +（满 3 次）封号 + 通知双方**；驳回 ⇒ 留待再举报 | 管理端面 —— **不挂 `requireAdmin`** | `:122` |
+
+⚠️ **`/handle` 的处理人取「会话身份」的 `userId`（`AuthSession.identify`，识别口径），不是入参** —— 用入参等于让人随便署别人的名；且必须用**识别**口径而非 `currentUserId`（授权口径）：后者会把 cookie 登录的管理员（`role=3`、`viaToken=false`）折成 `null` ⇒ 管理端正常用 cookie 登录时反而「查无处理人」（`ReportController#handle` 的 javadoc）。
+
+### G.3 新域 `/sensitive/*` —— 敏感词库 3 条 {#api-g-3}
+
+`SensitiveWordController.java`（`@RequestMapping("/sensitive")` @ `:44`）。
+
+| 路径 | 入参 | 返回要点 | 身份 | 坐标 |
+|---|---|---|---|---|
+| `/list` | `Limit` · `Offset` | 词表（管理端「敏感词库」tab） | 管理端面 —— **不挂 `requireAdmin`** | `:59` |
+| `/add` | `Word`（≤ 64 字符） | 加词 **并立刻扫一遍历史评论**；回体 `masked` = **真被改写**的行数（原本已打码的不算）；重复 ⇒ `success:false` +「该敏感词已存在」 | 同上 | `:76` |
+| `/delete` | `Id` | 删一个词。⚠️ **历史评论里的 `***` 不回填**（原文没有第二份副本） | 同上 | `:91` |
+
+⚠️ **本组三条都不收 `Account`** —— 词表 DDL 只有四列（无作者列），加词 / 删词不需要声明身份；造一个只为满足仪式感的入参，只会给下一个人「原来这里也该有身份」的错误信号（`SensitiveWordController` 类注释逐字）。
+⚠️ **加词「一条都没命中」是正常结果，不是失败**（`masked=0`）—— 前端要如实报「已屏蔽 N 条历史评论」，别用 `success` 一个字段概括。
+
+### G.4 通知事件 code 的契约改动（**+2 / −1**） {#api-g-4}
+
+| 项 | 内容 |
+|---|---|
+| **新增 2 条** | `comment.accepted`（提问被采纳 → 触达**被采纳那条回答的作者**）· `question.timeout`（提问**超 30 分钟仍未解决** → 触达**管理端共享收件箱**，`ToType='admin'`、`ToId='*'`） |
+| **摘除 1 条** | `comment.on.user`（「留言板被评论」）—— 块 1 建通知域时**预留**，块 6 基准文档 §二 A1 定稿的 6 个 code **不含**它，2026-10-13 用户裁定**摘除**（全仓零调用点，只删常量 + 前端两处标签，无行为回归） |
+| 计数沿革 | 块 5 收口 **31** → 块 6 commit 2 补 2 条到 **33** → 同笔「契约纠偏」摘 1 条 ⇒ **32** |
+| 同笔改的落点 | `NotificationEvents.java` 的常量 + 前端 `src/config/notify-events.js` 的 `EVENT_LABELS` / `EVENT_OPTIONS`（**三处必须同笔**） |
+| ⚠️ 关键口径 | `NotificationService.send` **不校验 code**（未知 code 照样落库）—— 这是「加通知类型不改表、不改后端」成立的前提；代价是前端映射**必须兜底**（未知 code 原样显示，不许静默成空白） |
+
+⚠️ **`question.timeout` 必须带 `TargetType`/`TargetId` 指回那条提问** —— `QuestionTimeoutJob` 的幂等判据正是 `existsDelivery(收件人, 本 code, "comment", 提问Id)`（那是个**待办**，不是结果；管理端据它去问答 tab 人工介入）。
+
+### G.5 前端封装增补 {#api-g-5}
+
+| 文件 | 增补 | 备注 |
+|---|---|---|
+| `src/api/endpoints.js` | `comment` **7** + `report` **3** + `sensitive` **3** = **13 条**（全**非** view 抽取，唯一调用方是新封装） | 头注「现为 N 条」**119 → 132**；⚠️ 组内 / 文件尾追加，**不插行** |
+| `src/api/comment.js` | **新建**，**7 个导出**（`list` / `add` / `remove` / `accept` / `like` / `myOrders` / `imageReview`） | 七个端点一个模块；`list` 的唯一调用方是 `ProductPage.vue` |
+| `src/api/report.js` | **新建**，**3 个导出**（`add` / `list` / `handle`） | `add` 的调用方是 `ProductPage.vue`（评论 / 回复行的「举报」、商品行的「举报」、提问行的「提删」）；`list` / `handle` 给管理端 |
+| `src/api/sensitive.js` | **新建**，**3 个导出**（`list` / `add` / `remove`） | 唯一调用方是管理端「敏感词库」tab |
+| `src/views/ProductPage.vue` | **直调** `comment.*`（评价 / 问答两个子 tab：列表、发表、删、赞踩、选商品）+ `report.add`（举报 / 提删） | ⚠️ 本文件是块 6 改动量最大的一处（约 **+916 / −49**）⇒ 全仓指它的 `文件:行号` 引用集体后移，重指台账见 `slot-registry.md` §二十三 |
+| `src/views/admin/ModerationPage.vue` | **新建**，管理端「消息与内容治理」页 —— **六个 tab**：评论管理 / 问答管理 / 待审图片 / 举报中心 / 敏感词库 / 消息管理 | 比例走环图 / 柱图（`DonutChart` / `BarChart`），色值一律走 `chartTokens` |
+| `src/router/index.js` | `business/moderation` 记录由 `AdminStub` 占位 → **真页**（**同行替换**，照 `:455` 那一行的注释记账） | **不动**路由结构 |
+
+### G.6 白名单的契约改动：`AUTH_WHITELIST` **13 → 14** {#api-g-6}
+
+| 项 | 内容 |
+|---|---|
+| 新增条目 | `/comment/list`（**只放读**）—— 商品详情页「累计评价」区在未登录时照常加载，而 `/product` 挂 `meta.public` ⇒ 少这一条，未登录用户看到的是一格**空评价区**（外加 401 噪音） |
+| 条数口径 | 业务 **9 → 10** 条（登录链 3 + 登录前后台页面 **6 → 7**），基础设施 4 条不变 ⇒ 总 **13 → 14** |
+| ⚠️ **四处同改** | `WebAuthConfig.java:62`（javadoc「业务 9 条」→「10 条」）· 同文件 `:68`（「登录前后台页面 6 条」→「7 条」+ 补第 7 条那条 ⚠️）· 同文件清单本体（`:120` 加 `"/comment/list"`）· 同文件 `:175`（「13 条逐条直调」→ **14**）；**另加** `AuthGateSmokeTest.java`（javadoc 两处 + `hasSize(13)` → `14` + 断言文案「业务 9 + 基础 4」→「业务 10 + 基础 4」）与 `MerchantStatsController.java:19`（13 → 14，后半句「没有任何 `/merchant/**`」仍成立） |
+| ⚠️ 别顺手搬 | 同域另 **4 个写端点**（`add` / `delete` / `like` / `myOrders`）**仍在身份面**；`/shop/follow` / `unfollow` / `followState` 三条同理（`WebAuthConfig` 那段 javadoc 逐字警告） |
+
+### G.7 本块的硬线：**不加第 14 个端点** {#api-g-7}
+
+⚠️ **图片走 `/comment/add` 的同一个请求、多 part（`getFiles("Files")`），不另开端点**：方案 A4 是「13 个端点」，加第 14 个是要批的契约改动；且评论文本与它的图本就是一次提交。用 `MultipartHttpServletRequest#getFiles` 手工取 part、而非 `@RequestParam List<MultipartFile>`（后者在**非 multipart** 请求〔= 一条纯文字的评论〕上的绑定行为随 Spring 版本而变；前者两种情况下都是「没有文件」）。
+
+⚠️ **本文件（`api-contract.md`）的正文 §2 / §3 / §5 矩阵**本笔**未重测、未插入** —— 13 条新端点全部落在附录 G；正文坐标重填归「文档漂移清理笔」（同附录 E.7 的口径）。
+⚠️ **已知的既有陈旧（不属本笔，登记不修）**：§2 的 C.1 表里 `/order/orderAdd` → `ProductPage.vue:393`、`/message/send` → `ProductPage.vue:459` 两条**在块 6 之前就与实际调用点对不上**（**不修**），故本笔的自动重指**刻意跳过**它们（行内已留「旧行号 · 不修」标记，属重指脚本的 GUARD 触发词）。
+**实测真调用点（第一手，2026-10-13）**：`/order/orderAdd` = `ProductPage.vue:913`（`await orderAdd({`）、`/message/send` = `ProductPage.vue:1018`（`http.post(endpoints.message.send, …)`）—— 正文坐标重填归「文档漂移清理笔」，台账见 `slot-registry.md` §二十三 的「已知误指族」。
