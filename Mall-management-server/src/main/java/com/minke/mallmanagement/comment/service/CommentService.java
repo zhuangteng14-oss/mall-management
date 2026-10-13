@@ -339,6 +339,14 @@ public class CommentService {
             // ⚠️ 放在图片那段**之前**：图片目录不可用会 `return okAdded(...)`（见那段），
             //    放后面的话那条早退会把 @ 一起跳过。
             recordMention(id, mentionTo, author, text, anonymous);
+            // 通知矩阵其余两条 code（块 6 基准文档 §二 A1；用户 2026-10-13 裁定的 6 code 全程）：
+            //   ① `comment.on.post` —— 商品被**评价**（Kind=review、TargetType=goods、ParentId 空）→ 商家；
+            //   ② `comment.reply`   —— 评论被**回复**（ParentId 非空）→ 被回复人。
+            // ⚠️ 上述三条 code（mention / on.post / reply）是**彼此独立**的事件，同一次发表可能同时命中
+            //    （如某客户评价商品、另一客户在其下回复）⇒ 按用户口径各发各的，**不因语义重叠合并**
+            //    （用户 2026-10-13：「不得再以『语义重叠』为由摘除契约 code」）。
+            notifyOnPost(id, parentId, tt, tid, kind, author, text, anonymous);
+            notifyReply(id, parentId, mentionTo, author, text, anonymous);
 
             int stored = 0;
             int failed = 0;
@@ -487,6 +495,85 @@ public class CommentService {
                     NOTIFY_TARGET_COMMENT, String.valueOf(commentId));
         } catch (Exception e) {
             e.printStackTrace();   // 通知已落库还是没落库 —— send 自己 fail-soft，这里兜解析角色那一步
+        }
+    }
+
+    // ==================== 写：通知矩阵其余两条 code（块 6 commit 3 契约纠偏） ====================
+
+    /**
+     * {@code comment.on.post} —— **商品被评价**（方案 A1「被评论」）→ 触达该商品的**商家**。
+     *
+     * <p>触发条件三合一（缺一不可）：{@code ParentId IS NULL}（顶层）+ {@code TargetType='goods'}
+     * + {@code Kind='review'}（评价）。**提问**（{@code question}）不在此列 —— 顶层提问 @ 商家
+     * 走的是 {@link #recordMention} 的 {@code comment.mention}（方案 A1 把「评价商品」与
+     * 「提问/被 @」分成两个 code，用户 2026-10-13 裁定不得因语义重叠合并）。
+     *
+     * <p>收件人解析不出的（商品查无 / 无商家）或**就是发表人自己**（商家评自家商品，本被
+     * {@code checkReviewEligible} 的「买过才评」挡住，此处仍设一道防）⇒ 跳过。
+     *
+     * <p>⚠️ 全程 fail-soft（同 {@link #recordMention}）：本条在评论**已经落库**之后调用，
+     * 派生通知出问题不该把评论翻成失败（翻了用户会重发、多一条评论）。
+     */
+    private void notifyOnPost(long commentId, Long parentId, String targetType, String targetId,
+                              String kind, String author, String content, boolean anonymous) {
+        if (parentId != null
+                || !CommentKinds.TARGET_GOODS.equals(targetType)
+                || !CommentKinds.REVIEW.equals(kind)) {
+            return;
+        }
+        try {
+            Long goodsId = parseLong(targetId);
+            if (goodsId == null) {
+                return;
+            }
+            String merchant = commentDao.selectMerchantUsernameByGoodsId(goodsId);
+            if (isBlank(merchant) || merchant.equals(author)) {
+                return;
+            }
+            String who = anonymous ? "有人" : "「" + author + "」";
+            notificationService.send(UUID.randomUUID().toString(), merchant,
+                    NotificationService.TO_TYPE_MERCHANT,
+                    NotificationEvents.COMMENT_ON_POST,
+                    "您的商品收到新评价",
+                    who + "评价了您的商品：" + brief(content),
+                    NOTIFY_TARGET_COMMENT, String.valueOf(commentId));
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+    }
+
+    /**
+     * {@code comment.reply} —— **评论被回复**（方案 A1「被回复」）→ 触达**被回复人**。
+     *
+     * <p>{@code ParentId} 非空即触发；被回复人取 {@code add} 里三层 @ 规则的解析结果
+     * （{@code mentionTo}：回顶层 → 顶层作者；回复回复 → {@code ReplyToId} 那条的作者），
+     * 本方法直接复用、不重复解析 —— 那两条规则给出的「被 @ 人」与「被回复人」在回复路径上
+     * 是**同一个人**。
+     *
+     * <p>自回复（被回复人就是发表人，如作者在自己的楼层下追问）跳过 —— 与
+     * {@link #recordMention} 的自 @ 跳过同一判据（通知自己是一条纯噪声）。方案未写此边界，
+     * 属**本地裁定**（先例：{@code MAX_IMAGES}）。
+     *
+     * <p>⚠️ 全程 fail-soft（同 {@link #recordMention}）。
+     */
+    private void notifyReply(long commentId, Long parentId, String repliedTo, String author,
+                             String content, boolean anonymous) {
+        if (parentId == null || isBlank(repliedTo) || repliedTo.trim().equals(author)) {
+            return;
+        }
+        String to = repliedTo.trim();
+        try {
+            Integer role = commentDao.selectRoleByUsername(to);
+            String toType = (role != null && role == CommentKinds.ROLE_MERCHANT)
+                    ? NotificationService.TO_TYPE_MERCHANT : NotificationService.TO_TYPE_CUSTOMER;
+            String who = anonymous ? "有人" : "「" + author + "」";
+            notificationService.send(UUID.randomUUID().toString(), to, toType,
+                    NotificationEvents.COMMENT_REPLY,
+                    "您的评论收到回复",
+                    who + "回复了你：" + brief(content),
+                    NOTIFY_TARGET_COMMENT, String.valueOf(commentId));
+        } catch (Exception e) {
+            e.printStackTrace();
         }
     }
 
