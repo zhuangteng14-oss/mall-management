@@ -2,10 +2,12 @@ package com.minke.mallmanagement.comment.service;
 
 import com.minke.mallmanagement.comment.CommentKinds;
 import com.minke.mallmanagement.comment.dao.CommentDao;
+import com.minke.mallmanagement.comment.job.QuestionTimeoutJob;
 import com.minke.mallmanagement.notification.NotificationEvents;
 import com.minke.mallmanagement.notification.service.NotificationService;
 import com.minke.mallmanagement.shared.upload.UploadStorage;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
@@ -111,6 +113,15 @@ public class CommentService {
      */
     private static final String IMG_URL_PREFIX = "http://localhost:8088/img/" + IMG_SUBDIR + "/";
 
+    /**
+     * 「一商品一用户只能评一条」的**用户可见话术** —— 两条闸共用这一份。
+     *
+     * <p>两条闸 = ① {@code checkReviewEligible} 的预检（先查后插，能给得出话术）；
+     * ② Migration ⑯ 的 {@code uk_comment_review_once}（DB 层不变量，**只在并发**下才会先于 ① 拦到）。
+     * ⚠️ 两处各写一遍字面量必然漂开（改一处漏一处，且两边都不报错）⇒ 收成常量。
+     */
+    private static final String MSG_DUPLICATE_REVIEW = "您已评价过该商品，不能重复评价";
+
     private final CommentDao commentDao;
     private final NotificationService notificationService;
     private final SensitiveWordService sensitiveWordService;
@@ -210,6 +221,93 @@ public class CommentService {
             result.put("stats", (CommentKinds.QUESTION.equals(k))
                     ? commentDao.selectQuestionStats(tt, targetId.trim())
                     : commentDao.selectReviewStats(tt, targetId.trim()));
+            return result;
+        } catch (Exception e) {
+            e.printStackTrace();
+            return fail("查询失败：" + e.getMessage());
+        }
+    }
+
+    // ==================== 读：管理端全站列表（第 14 条端点） ====================
+
+    /**
+     * 管理端**全站**列表（{@code /comment/adminList}）。用户 2026-10-13 批的甲案 ——
+     * 管理端「评论管理 / 问答管理」两栏此前只能**按对象下钻**（公开面 {@code /comment/list}
+     * 强制要 {@code TargetId}，那条约束**不动**），缺的正是这张全站表。
+     *
+     * <h2>【与公开面 {@link #list} 的三条口径差别】</h2>
+     * <ol>
+     *   <li><b>没有观看者</b>：不收 {@code viewerUserId}、不回 {@code Mine} / {@code MyLike}
+     *       （管理端列表里没有「我」这个视角）。⚠️ 但**匿名打码照旧** —— 见下面那条 ⚠️；</li>
+     *   <li><b>顶层与回复都回</b>（公开面只要顶层）：回复同样会违规，管理端得看得见它。
+     *       故 {@code Kind=answer} 在本方法里是有意义的（回答全是回复）；</li>
+     *   <li><b>多一列 {@code IsTimeout}</b>：只对「顶层 + 未解决 + 超时」的提问为 {@code true}，
+     *       分钟数取自 {@link QuestionTimeoutJob#TIMEOUT_MINUTES}（**不是**本类另写的数），
+     *       判据在 SQL 里与 {@code QuestionTimeoutJob} 的扫描同源。</li>
+     * </ol>
+     *
+     * <p>⚠️ <b>匿名行在这里同样不泄露 {@code AuthorId}</b>：{@link #decorate} 把匿名行的
+     * {@code AuthorId} 置 {@code null}、显示名打码。这是**本地裁定**（方案只写了公开面那条）：
+     * 「管理端要治谁一目了然」是个**新能力**，没人批过；而匿名是用户在商品页上被承诺过的口径 ——
+     * 治理需要身份的话，那是一次独立的需求变更（要改就改在这里，别顺手把 decorate 绕过去）。
+     *
+     * @param kind   **必填**：{@code review} / {@code question} / {@code answer}（未知值拒，不静默当「全筛」）
+     * @param targetType / targetId  可选**成对**收窄到某个对象下（只给一个 ⇒ 拒：半个键是拼错的调用，
+     *               静默当「全站」会让管理员以为筛过了）
+     * @param solved  仅 {@code kind=question} 有意义：{@code "1"} 已解决 / {@code "0"} 未解决 ——
+     *               ⚠️ 给别的 kind 传它 ⇒ 拒（不是「忽略」：忽略会让前端以为筛了）
+     */
+    public Map<String, Object> adminList(String kind, String targetType, String targetId, String solved,
+                                         Integer limit, Integer offset) {
+        if (isBlank(kind)) {
+            return fail("缺少参数：Kind（只能是 review / question / answer）");
+        }
+        String k = kind.trim();
+        if (!CommentKinds.knownKind(k)) {
+            return fail("未知的评论类型：" + kind + "（只能是 review / question / answer）");
+        }
+        String tt = null;
+        String tid = null;
+        if (!isBlank(targetType) || !isBlank(targetId)) {
+            if (isBlank(targetType) || isBlank(targetId)) {
+                return fail("TargetType 与 TargetId 要么都给、要么都不给（都不给 = 全站）");
+            }
+            tt = targetType.trim();
+            if (!CommentKinds.knownTargetType(tt)) {
+                return fail("未知的评论对象类型：" + targetType + "（只能是 goods / user）");
+            }
+            tid = targetId.trim();
+        }
+        String solvedKey = isBlank(solved) ? null : solved.trim();
+        if (solvedKey != null && !"0".equals(solvedKey) && !"1".equals(solvedKey)) {
+            return fail("未知的解决状态：" + solved + "（只能是 0 / 1）");
+        }
+        if (solvedKey != null && !CommentKinds.QUESTION.equals(k)) {
+            return fail("解决状态只对提问有意义（Kind=question），当前 Kind=" + k);
+        }
+        int effectiveLimit = normalizeLimit(limit);
+        int effectiveOffset = (offset == null || offset < 0) ? 0 : offset;
+        try {
+            List<Map<String, Object>> rows = commentDao.selectForAdmin(tt, tid, k, solvedKey,
+                    QuestionTimeoutJob.TIMEOUT_MINUTES, effectiveLimit, effectiveOffset);
+            long total = commentDao.countForAdmin(tt, tid, k, solvedKey);
+            List<Map<String, Object>> out = new ArrayList<>();
+            for (Map<String, Object> row : rows) {
+                // viewer=null + 空图 / 空赞表：管理端列表不掺「我的」视角，也不展开图与赞
+                //（下钻到对象那条路上有）。⚠️ 匿名打码在这条路上**照样生效**，理由见方法注释。
+                Map<String, Object> item = decorate(row, null, Map.of(), Map.of());
+                // ⚠️ 超时标记**后端算、前端只渲染**（用户 2026-10-13 裁定）：前端自己拿数字比对
+                //    就是第二处口径 —— 它跟 job 漂开时两边都不报错，只是「标红的」与「报过的」
+                //    悄悄变成两批记录。分钟数的唯一出处是 QuestionTimeoutJob.TIMEOUT_MINUTES。
+                item.put("IsTimeout", flag(row.get("IsTimeout")));
+                out.add(item);
+            }
+            Map<String, Object> result = new HashMap<>();
+            result.put("success", true);
+            result.put("list", out);
+            result.put("total", total);
+            result.put("limit", effectiveLimit);
+            result.put("offset", effectiveOffset);
             return result;
         } catch (Exception e) {
             e.printStackTrace();
@@ -352,9 +450,23 @@ public class CommentService {
             boolean anonymous = resolveAnonymous(kind, role, anonymousRaw);
             int rating = resolveRating(kind, anonymous, ratingRaw);
 
-            if (commentDao.insertComment(tt, tid, parentId, replyToId, kind, author, role,
-                    anonymous, rating, text, isBlank(productCode) ? null : productCode.trim(),
-                    merchantFirst) == 0) {
+            int inserted;
+            try {
+                inserted = commentDao.insertComment(tt, tid, parentId, replyToId, kind, author, role,
+                        anonymous, rating, text, isBlank(productCode) ? null : productCode.trim(),
+                        merchantFirst);
+            } catch (DuplicateKeyException e) {
+                // Migration ⑯ 的 uk_comment_review_once —— **只在并发**下才会先于上面那道预检拦到
+                // （两个请求同刻过了 `checkReviewEligible`、双双走到这里）。
+                // ⚠️ 必须在这里翻成业务话术：`add` 外层那个 `catch (Exception)` 会把它渲染成
+                //    「评论发表失败：Duplicate entry 'goods:76:1111' for key …」—— 那是把 DB 内部
+                //    标识（键名、拼出来的键值）端到用户面前，且与预检那句话说不到一块去。
+                // ⚠️ 这句 catch 刻意**只包 INSERT 这一句**：它能抛 DuplicateKeyException 的唯一
+                //    出处就是本键（comment 表其余 4 个 KEY 都不唯一），但把包子范围收窄成「就这一句」
+                //    之后，将来若有人给 comment 加第二个唯一键，这里不会替它撒谎。
+                return fail(MSG_DUPLICATE_REVIEW);
+            }
+            if (inserted == 0) {
                 return fail("评论发表失败，请重试");
             }
             // ⚠️ 与上面那条 INSERT 同事务（类上 @Transactional）才认得住：无事务时
@@ -433,7 +545,7 @@ public class CommentService {
             return fail("购买并确认收货后才能评价");
         }
         if (commentDao.countTopLevelByAuthor(targetType, targetId, CommentKinds.REVIEW, author) > 0) {
-            return fail("您已评价过该商品，不能重复评价");
+            return fail(MSG_DUPLICATE_REVIEW);
         }
         return null;
     }
@@ -727,6 +839,12 @@ public class CommentService {
             ok.put("Id", id);
             ok.put("Status", next);
             ok.put("fileDeleted", fileDeleted);
+            // ⚠️ `before` = 审核**之前**那张图的整行快照 —— 给调用方挂钩审计用
+            //    （`CommentController` 的 `comment.image.approve` / `comment.image.reject`）。
+            //    口径同 `AdminCatalogController` / `AdminTemplateController` 的 `result.get("before")`。
+            //    审核**不可逆**（驳回真删文件），这一列就是「当时那张图是什么」的唯一凭据。
+            //    ⚠️ 它的 `Status` 恒为 `pending` —— 上面那条 CAS 的 `WHERE` 已经保证了这一点。
+            ok.put("before", image);
             ok.put("msg", approve ? "已通过" : "已驳回并删除图片文件");
             return ok;
         } catch (Exception e) {

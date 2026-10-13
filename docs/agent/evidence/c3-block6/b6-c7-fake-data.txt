@@ -48,15 +48,22 @@ drwxr-xr-x 1 86159 197609     0 Oct 13 11:54 ..
 ═══════ 4. 逐行明细（上面那组计数背后到底是哪几行 —— 只读 SQL，中文原样） ═══════
 
 ── 4.1 comment：goods 76 下的全部行（含 commit 2 手验留下的两条问答） ──
+
+⚠️ **`Id=114–117` 这 4 行的 `created_at` 是「修前播的」，已回拨 —— 下表是回拨后的读数。**
+   根因：`ProbeB6c7Seed` 的 4 个 `minutesAgo` 字面量**符号写反**，负负得正 ⇒ 落到**未来**，
+   页面上就出现「匿名评价比实名评价更新、顾客回复比商家回复更旧」这种倒序。
+   回拨依据：2026-10-13 用户**批文五**（先贴现值再动）+ **裁决二（批）**。
+   回拨前现值 / 目标值 / 为什么见 `b6-c7-rework-accept.txt` §9；回拨后 4 行读数见其 §9 尾。
+   ⚠️ 只动了这 4 个 `created_at` 单元格，`updated_at` 用 `= updated_at` 显式保住（未被顶成 `NOW()`）。
 Id	Kind	ParentId	ReplyToId	AuthorId	AuthorRole	IsAnonymous	Rating	IsMerchantFirst	IsSolved	AcceptedReplyId	LikeCount	DislikeCount	ProductCode	created_at
 110	question	null	null	chenh99	1	0	0	0	0	null	0	0	null	2026-10-13 02:42:38
 111	question	null	null	chenh99	1	0	0	0	1	112	0	0	null	2026-10-13 02:43:50
 112	answer	111	null	yunqi_digital	2	0	0	1	0	null	0	0	null	2026-10-13 02:45:33
 113	review	null	null	1111	1	0	3	0	0	null	0	0	null	2026-10-13 02:47:06
-114	review	null	null	1111	1	1	5	0	0	null	4	2	GD-101-9552	2026-10-13 05:55:11
-115	review	null	null	123	1	0	4	0	0	null	0	0	GD-101-9552	2026-10-13 05:25:11
-116	review	114	null	yunqi_digital	2	0	5	1	0	null	1	0	null	2026-10-13 05:35:11
-117	review	114	116	3333	1	0	5	0	0	null	0	0	null	2026-10-13 04:55:11
+114	review	null	null	1111	1	1	5	0	0	null	4	2	GD-101-9552	2026-10-13 01:55:11
+115	review	null	null	123	1	0	4	0	0	null	0	0	GD-101-9552	2026-10-13 02:25:11
+116	review	114	null	yunqi_digital	2	0	5	1	0	null	1	0	null	2026-10-13 02:35:11
+117	review	114	116	3333	1	0	5	0	0	null	0	0	null	2026-10-13 02:55:11
 -- rows: 8
 
 ── 4.2 comment 正文（单列，免得中文挤在宽表里看不清） ──

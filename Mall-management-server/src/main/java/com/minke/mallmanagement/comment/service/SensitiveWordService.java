@@ -173,7 +173,10 @@ public class SensitiveWordService {
             return fail("缺少参数：Id");
         }
         try {
-            if (sensitiveWordDao.selectById(id) == null) {
+            // 改前态**先取下来**：`deleteById` 之后这一行就没了，`Word` 也就无从查起
+            // —— 而审计（`admin_audit`）要的就是「删的是哪个词」，详见回体那两个键。
+            Map<String, Object> row = sensitiveWordDao.selectById(id);
+            if (row == null) {
                 return fail("敏感词不存在");
             }
             if (sensitiveWordDao.deleteById(id) == 0) {
@@ -182,6 +185,12 @@ public class SensitiveWordService {
             Map<String, Object> ok = new HashMap<>();
             ok.put("success", true);
             ok.put("Id", id);
+            // ⚠️ `Word` / `before` 是给**调用方挂钩审计**用的（`SensitiveWordController` 的
+            //    `AuditActions.SENSITIVE_WORD_DELETE`）：删词是不可逆的，词面是这行的业务键
+            //    ⇒ 审计的 `TargetId` 得是它，而不是那个删完就没人对得上的自增 Id。
+            //    口径同 `AdminCatalogController` / `AdminTemplateController` 的 `result.get("before")`。
+            ok.put("Word", row.get("Word"));
+            ok.put("before", row);
             ok.put("msg", "已删除（历史评论里的 *** 不回填）");
             return ok;
         } catch (Exception e) {

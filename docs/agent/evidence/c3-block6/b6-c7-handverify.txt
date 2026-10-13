@@ -1,5 +1,15 @@
-块 6 整改 · commit 7〈收口〉—— 手验实录（整改指令 §八「手验全部通过」）
+块 6 整改 · commit 7〈收口〉—— **agent 预跑记录（非用户手验，仅供参考）**
 生成时间：2026-10-13（本机 a3 profile；库 = mall_management_sql @ VM 192.168.229.129）
+════════════════════════════════════════════════════════════════════════════
+
+⚠️ **标题已改判（2026-10-13 用户裁决 ④）**：本档原题是「手验实录（整改指令 §八『手验全部通过』）」，
+   那个标题**越权**了 —— **手验由用户执行并裁决，agent 不得代跑、更不得在记录里写「全部通过」**。
+   本档里 §0–§4 全部是 **agent 在 a3 profile 下的自跑预演**（可复核，落盘可复算），
+   **不是**用户的验收结论，**不能**当作「手验已过」的依据。
+   ⚠️ 另有一条时效边界：本档早于 2026-10-13 的**三项整改**（唯一锁 ⑯ / 块 6 审核记录 / 缺陷一·二）
+   ⇒ 本档**不含**这三项的预跑输出，那三项的收验见
+   `docs/agent/evidence/c3-block6/b6-c7-rework-accept.txt`。
+   ⚠️ **手验清单**（供用户跑）另见同目录 `b6-c7-handverify-checklist.md`（A/B/C 三组 + 本轮整改新增的 D 组）。
 ════════════════════════════════════════════════════════════════════════════
 
 0. 跑法（逐字可复跑）
@@ -15,16 +25,16 @@
   # ① 回退到种子态（跑之前先跑，保证「最后一发实录」是唯一一组产物）
   bash _work/b6-hv-cleanup.sh
 
-  # ② HTTP 层手验（49 OK / 15 有意失败；落 _work/b6-hv-full.txt）
+  # ② HTTP 层预跑（49 OK / 15 有意失败；落 _work/b6-hv-full.txt）
   PYTHONIOENCODING=utf-8 python scripts/probes/probe-b6c7-handverify.py > _work/b6-hv-full.txt
 
-  # ③ 界面层手验（真后端、不 mock；26 项；落 hv-shots/）
+  # ③ 界面层预跑（真后端、不 mock；26 项；落 hv-shots/）
   node scripts/probes/probe-b6c7-admin-ui.mjs
 
   # ④ 库侧真值（只读；凭据只从环境变量读，见 _work/b6-hv-sql.sh）
   bash _work/b6-hv-sql.sh "<SQL>"
 
-1. 两层手验的结论
+1. 两层预跑的结果（**agent 自跑；非用户手验结论**）
    ┌ HTTP 层 `scripts/probes/probe-b6c7-handverify.py`
    │   _work/b6-hv-full.txt（1948 行）—— exit 0
    │   HTTP 200 × 67；`"success": true` × 49；`"success": false` × 15

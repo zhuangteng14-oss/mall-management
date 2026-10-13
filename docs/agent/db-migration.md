@@ -44,6 +44,7 @@
 | 34 | 2026-10-13 | C3 块6 整改④⑮-5 举报单 `report` | 新增表 | `report` | `mall_management_sql.sql:1593-1611`（12 列 + 主键 + `UNIQUE uk_report_target_reporter(TargetType,TargetId,ReporterId)` + 2 个 KEY） | `DROP TABLE IF EXISTS \`report\`;`（见注意 6） | 块6 整改 commit 4（`0a56123`） | ✅ 已落 VM 库（同上） |
 | 35 | 2026-10-13 | C3 块6 整改⑤⑮-6 敏感词库 `sensitive_word` | 新增表 + 种子数据 | `sensitive_word` | `mall_management_sql.sql:1613-1621`（4 列 + 主键 + `UNIQUE uk_sensitive_word(Word)`）；种子在 `:1631-1634`（① 的 10 词，`INSERT IGNORE` 靠该 UNIQUE 幂等） | `DROP TABLE IF EXISTS \`sensitive_word\`;`（见注意 6；⚠️ 词表无第二份副本，删表即丢） | 块6 整改 commit 5（`c34e905`） | ✅ 已落 VM 库（同上；10 词逐条实读，见 `docs/agent/evidence/c3-block6/b6-c7-fake-data.txt` §4.7） |
 | 36 | 2026-10-13 | C3 块6 整改④⑮-7 `user` 加列 `WarnCount` | 新增字段 | `user` | `mall_management_sql.sql:1623-1629`（`information_schema.COLUMNS` 守卫 + `PREPARE`/`EXECUTE` 照 ⑬ 先例，`int NOT NULL DEFAULT 0`；达 3 由 `ReportService` 自动置 `user.banned=1`） | `UPDATE \`user\` SET \`WarnCount\` = 0;`（见注意 1：**不得** `DROP COLUMN`） | 块6 整改 commit 4（`0a56123`） | ✅ 已落 VM 库（实读 47 行用户全列存在） |
+| 37 | 2026-10-13 | C3 块6 整改〈顶层评价唯一锁 ⑯〉`comment` 加**生成列** `ReviewLockKey` + **唯一键** | **新增字段 + 新增索引**（⑯-1 + ⑯-2，两个独立守卫） | `comment` | `mall_management_sql.sql:1641-1678`（⑯-1：`information_schema.COLUMNS` 守卫 + `PREPARE`/`EXECUTE`，`varchar(120) GENERATED ALWAYS AS (CASE WHEN TargetType='goods' AND Kind='review' AND ParentId IS NULL AND Status='normal' THEN CONCAT(TargetType,':',TargetId,':',AuthorId) ELSE NULL END) STORED`）+ `:1680-1686`（⑯-2：`information_schema.STATISTICS` 守卫，`ALTER TABLE \`comment\` ADD UNIQUE KEY \`uk_comment_review_once\` (\`ReviewLockKey\`)`） | `ALTER TABLE \`comment\` DROP INDEX \`uk_comment_review_once\`;` **然后** `ALTER TABLE \`comment\` DROP COLUMN \`ReviewLockKey\`;`（见注意 1：**规则 v2 口径下这属于「删除」，不是回滚** —— 本行的**合规则回滚**是「**保留列与索引 + 停用写入**」，即让 `CommentService` 不再依赖它；**两条 DDL 只在本地开发库重导时用，且执行前须人工确认**） | 块6 整改（用户 2026-10-13 批文三） | ✅ 已落 **VM 库**（自检：生成列在 · 唯一键在 · **现存重复组 0 组** · 当前被锁行 **5 / 全表 18**；`scripts/probes/ProbeB6c7Lock.java` = **PASS 12 / FAIL 0**，含并发档「成功 1 / 1062 1 / 落库 1」） |
 
 ## 登记格式
 
@@ -198,5 +199,23 @@ CREATE INDEX idx_xxx ON xxx(col);
    - ⚠️ **六张新表都带 `created_at`**（`comment` / `report` / `sensitive_word` 另带 `updated_at`）—— 满足 `agent.md` 数据库管理规则 8（表必须有时间列）；`comment_image.Status` 是**三态字符串码**（`pending` / `approved` / `rejected`），`report.Status` 同理（`pending` / `handled` / `rejected`）—— **不建 DB `ENUM`**（同 `template.Kind` 的口径：取值受控在应用层，改值不用动 DDL）。
    - ⚠️ **`comment` 是「一张表装四件事」**：`Kind` 区分 `review` / `question` / `answer`，`ParentId` 永远指向**顶层行**、「回复某条回复」用 `ReplyToId` 表达（两层封顶）。⇒ **别按表名把它当「评论表」读** —— 评价、用户留言、楼中楼、问答**都在这张表里**（这是块 6 的核心取舍，`.sql:1528` 段头注释写了）。
    - **⚠️ 回滚**：6 张新表按注意 6（保留表 + 停止写入，**不物理 `DROP`**）；`user.WarnCount` 按注意 1（保留列 + 清零 `UPDATE user SET WarnCount = 0`，**不得** `DROP COLUMN`）。段头 `:1518-1525` 的 `ROLLBACK` 注释块逐条写了这些语句，并标注「**执行前须人工确认**」。
-   - ⚠️ **跨文件口径必须一致**：本条的表数（**36**）、`db-schema.md §15`、`slot-registry.md §二十三`、`progress.md §7-B6` **同源**；`api-contract.md` 附录 G 是**端点**侧（与本条无关，13 条内容域端点）。
+   - ⚠️ **跨文件口径必须一致**：本条的表数（**36**）、`db-schema.md §15`、`slot-registry.md §二十三`、`progress.md §7-B6` **同源**；`api-contract.md` 附录 G 是**端点**侧（与本条无关，内容域 **14** 条端点）。
+   - ⚠️ **上一条「14 个索引 / UNIQUE 3 / 全库 67 / 18」是 ⑯ 落库之前那一时点的读数**（⑮ 单段的净变化，未变）；**⑯ 落地后的当前全库读数见注意 20**。
+
+20. **⚠️ 块 6 整改补笔（#37）—— `comment` 加**生成列 + 唯一键**；**表数不变（仍 36）** —— 2026-10-13 记**：用户 2026-10-13 批文三（唯一锁）⇒ `mall_management_sql.sql` 末尾追加**第二个** Migration 段（**⑯**，段头 `:1636-1639`），与登记 **#37** 一一对应：
+
+   | 段内编号 | `.sql` 行 | 内容 | 对应登记 |
+   |---|---|---|---|
+   | ⑯-1 | `:1641-1678` | `comment` 加 **STORED 生成列** `ReviewLockKey`（仅顶层商品评价有值，其余 NULL） | #37 |
+   | ⑯-2 | `:1680-1686` | `ALTER TABLE comment ADD UNIQUE KEY uk_comment_review_once (ReviewLockKey)` | #37 |
+
+   - **计数（⑯ 段自身净变化）**：表数 **+0**（仍 36）；加列 **+1**（`comment.ReviewLockKey`）；加索引 **+1**（非主键，**其中 UNIQUE 1 个** = `uk_comment_review_once`）。⇒ 块 6 合计变成：加列 **2 个**（`user.WarnCount` + `comment.ReviewLockKey`）、加索引 **15 个**（**其中 UNIQUE 4 个**）。
+   - **全库实测计数（2026-10-13 整改后重测，档位 = 可复核）**：表数 **36**、非主键索引 **68**、非主键 UNIQUE **19**（口径 = `information_schema` 里 `INDEX_NAME <> 'PRIMARY'` 的 `COUNT(DISTINCT 表.索引名)`）。与 ⑯ 之前那次（**67 / 18**）差 **+1 索引 / +1 UNIQUE**，与上面「⑯ 段自身净变化 +1」**对得上**。
+   - **⚠️ 为什么是「生成列 + NULL」而不是裸 `(TargetType,TargetId,AuthorId)` 三列唯一键**（三条都是判据，不是口味；逐字见 `.sql:1646-1654`）：① 裸三列会把「同一用户对该商品下的**第二条回复**」也锁死 —— 而方案 §4.1 明写「回复权限：任何登录用户」⇒ 那是**降级**；② MySQL 唯一索引**视 NULL 互不相等** ⇒ 让「非顶层商品评价」一律算出 NULL，一条 DDL 天然覆盖四类豁免（回复 = `ParentId IS NOT NULL` / 提问 = `Kind='question'` / 回答 = `Kind='answer'` / 留言板 = `TargetType='user'`）；③ `Status='normal'` 走**白名单**（不是 `<>'deleted'`），与 Service 侧「作者删掉自己那条后应当能重评」**逐字同口径**，且今后添新状态**不会**被误锁。
+   - **⚠️ 建键前必须先自查重复**（有重复 ⇒ `ALTER` 直接 `1062` 失败）：自查 SQL 写在 `.sql:1665-1667`。**2026-10-13 实测命中 1 组**：`goods` / `76` / 同一作者 = `Id=113` + `114` ⇒ 已**逻辑删 113**清掉（保留 114：它是种子探针的 `reviewAnon`，被 `comment_image` `Id=4/5`、`comment_like` 4 赞 2 踩、`report.Id=1` 的 `TargetId`、证据档 §4.1/§4.3/§4.9/§4.12 锚住）。
+     ⚠️ **一条早先说法就地更正**：曾写「113 无任何档/表引用」，**实测不成立** —— `comment_mention` `Id=12` 的 `CommentId=113` 指着它。影响评估：该表在 Java 侧**只写不读**（全仓无该表的 SELECT），且 113 **仍在表里**（`Status='deleted'`）⇒ 无悬挂影响；**但措辞必须改过来**。
+     ⚠️ **清理脚本 `_work/b6-c7-unique-lock-cleanup.sh` 刻意不进 `.sql`** —— 新库建表时 `comment` 为空，那行只存在于本机这一个环境；把一条 `DELETE` 烤进共享的重建脚本 = 给下一个人埋雷（`.sql:1671-1672` 逐字记了这条）。
+   - **幂等**：两个半段各带独立守卫（⑯-1 查 `information_schema.COLUMNS`、⑯-2 查 `information_schema.STATISTICS`）+ `PREPARE`/`EXECUTE`，重复执行第二遍起走 `DO 0` ⇒ **全部空操作**。
+   - **✅ 落 VM 库证据（第一手复核，2026-10-13）**：`scripts/probes/ProbeB6c7Lock.java`（凭据只从环境变量读、**未落盘未打印**）⇒ 自检「生成列在 · 唯一键在 · **现存重复组 0 组** · 当前被锁行 5 / 全表 18 行」，探针整体 **PASS 12 / FAIL 0**，含**并发档**「两连接同刻插同一 `(goods,999902,b6lock_probe)` ⇒ 成功 1 / 唯一键拒（1062）1 / 落库 1」，以及对照的 `performance_schema…SUM_ERRORS` 增量（证明那一条**真执行到 DB 才被拒**，不是被业务预检提前挡下）。全文落 `_work/_b6c7-lock-probe.txt`，收验汇总落 `docs/agent/evidence/c3-block6/b6-c7-rework-accept.txt`。
+   - **⚠️ 回滚**：规则 v2 口径下「删列 / 删索引」**不是回滚**。本行的**合规则回滚 = 保留列与索引 + 停用写入**（让 `CommentService` 不再依赖它）。登记表里那两条 `DROP` 只在**本地开发库重建**时用，且**执行前须人工确认**（同注意 1 / 注意 6 的口径）。
 

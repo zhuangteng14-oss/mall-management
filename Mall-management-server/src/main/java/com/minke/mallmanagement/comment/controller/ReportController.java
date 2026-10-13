@@ -1,5 +1,7 @@
 package com.minke.mallmanagement.comment.controller;
 
+import com.minke.mallmanagement.admin.AuditActions;
+import com.minke.mallmanagement.admin.service.AuditService;
 import com.minke.mallmanagement.comment.service.ReportService;
 import com.minke.mallmanagement.shared.web.AuthSession;
 import com.minke.mallmanagement.shared.web.IdentityGuard;
@@ -12,6 +14,9 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+
+import java.util.HashMap;
+import java.util.Map;
 
 /**
  * 举报域 Web 层（C3 块 6 · commit 4「举报 + 图片审核 + 3 次警告封号」）—— 3 个端点：
@@ -51,12 +56,21 @@ public class ReportController {
 
     private final ReportService reportService;
 
+    /**
+     * 审计写入口（2026-10-13 整改补笔，「处理举报」留痕）。
+     * ⚠️ 它**已在** {@code AbstractSmokeTest} 的 {@code @Import} 里（块 1 起就在）——
+     * 这次不必动那个文件，但地雷形状不变：给 Controller 加构造依赖 = 那个 bean 必须在切片里拿得到。
+     */
+    private final AuditService auditService;
+
     /** ⚠️ 刻意是 {@link ObjectProvider}，不是裸的 {@code UserStateLookup} —— 见类注释。 */
     private final ObjectProvider<UserStateLookup> userStateLookupProvider;
 
     public ReportController(ReportService reportService,
+                            AuditService auditService,
                             ObjectProvider<UserStateLookup> userStateLookupProvider) {
         this.reportService = reportService;
+        this.auditService = auditService;
         this.userStateLookupProvider = userStateLookupProvider;
     }
 
@@ -109,6 +123,9 @@ public class ReportController {
      * <p>处理人（落 {@code report.HandlerId}）取**会话身份**里的 {@code userId}：
      * 与 {@code auditService.record(AuthSession.identify(request), …)} 同一口径、同一个来源
      * （{@code AdminAuditDao.ActorId} 存的也是它）。⚠️ 不用入参 —— 那等于让人随便署别人的名。
+     * <p>⚠️ 2026-10-13 整改补笔起，这一发**真的**会留痕（{@link AuditActions#REPORT_HANDLE}）：
+     * 上面那句以前只是「口径一致」的说明，现在是同一个 {@code identity} 同时也喂给审计
+     * —— 两处**不是各取一次**，是同一个值。
      *
      * <p>⚠️ 用 <b>{@link AuthSession#identify}</b>（识别口径）而不是 {@link AuthSession#currentUserId}
      * （授权口径）：后者会把 **cookie 登录的管理员**（{@code role=3}、{@code viaToken=false}）
@@ -135,7 +152,25 @@ public class ReportController {
             return ResponseEntity.ok(Result.fail("无法确定处理人身份"));
         }
         boolean approve = "1".equals(Approve) || "true".equalsIgnoreCase(Approve);
-        return ResponseEntity.ok(Result.of(reportService.handle(
-                Id.longValue(), approve, Note, handler)));
+        Map<String, Object> result = reportService.handle(Id.longValue(), approve, Note, handler);
+        if (Boolean.TRUE.equals(result.get("success"))) {
+            // ⚠️ 处理一条举报**不可逆**（通过 = 删被举报内容 + 作者警告 + 可能封号）
+            //    ⇒ 审计行是它事后的追溯依据。`BeforeJson` 是举报单处理前的整行快照
+            //    （含举报人 `ReporterId` / 被举报对象 `TargetType:TargetId` / `Reason`）；
+            //    `AfterJson` 是**这次判了什么、动了什么**。
+            // ⚠️ `TargetId` 这里是举报单的自增 `Id`，**不是**业务串 —— `report` 表没有任何
+            //    业务串（它自己的身份就是这一行的 Id），且举报单是运行期数据、从不被重新播种
+            //    ⇒ 块 2 那种「重导换号」的风险在此不存在。管理端页面上认的也是这个 Id（对得上）。
+            Map<String, Object> after = new HashMap<>();
+            after.put("Approve", approve);
+            after.put("Status", result.get("Status"));
+            after.put("Note", Note);
+            after.put("ContentAffected", result.get("contentAffected"));
+            after.put("WarnCount", result.get("warnCount"));
+            after.put("Banned", result.get("banned"));
+            auditService.record(identity, AuditActions.REPORT_HANDLE, "report",
+                    String.valueOf(Id), result.get("before"), after);
+        }
+        return ResponseEntity.ok(Result.of(result));
     }
 }

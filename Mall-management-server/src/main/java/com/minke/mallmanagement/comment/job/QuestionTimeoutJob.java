@@ -52,8 +52,14 @@ public class QuestionTimeoutJob {
      *
      * <p>⚠️ 与 {@code CouponExpiryJob.MAX_COUPONS_PER_ROUND} 那类可调参数不同，**这个数不该随手调**：
      * 它是**用户可见口径**（方案逐字），调大调小都是需求变更，不是调优。
+     *
+     * <p>⚠️ <b>{@code public} 是给管理端全站列表用的</b>（{@code CommentService.adminList} 把它作为
+     * {@code IsTimeout} 的分钟数下发；用户 2026-10-13 裁定「列表的超时判据必须与本类的
+     * {@code TIMEOUT_MINUTES} 同源、后端下发布尔、前端只渲染」）。<b>只读不改</b>：本类仍是它唯一的
+     * 定义处，别的类拿它当参数，不许在别处再写一遍 30。SQL 侧的同源判据见
+     * {@code CommentDao.TIMED_OUT_QUESTION_PREDICATE}。
      */
-    private static final int TIMEOUT_MINUTES = 30;
+    public static final int TIMEOUT_MINUTES = 30;
 
     /**
      * 每轮最多报几条。**不是性能调优，是爆炸半径的上界**：一轮的落库行数 ≤ 这个数

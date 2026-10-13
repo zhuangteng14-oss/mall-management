@@ -260,6 +260,9 @@ public class ReportService {
                 ok.put("success", true);
                 ok.put("Id", id);
                 ok.put("Status", STATUS_REJECTED);
+                // 改前态 —— 给调用方挂钩审计用（`ReportController` 的 `report.handle`）。
+                // 口径同 `AdminCatalogController` / `AdminTemplateController` 的 `result.get("before")`。
+                ok.put("before", row);
                 ok.put("msg", "已驳回（举报人可在原理由上重新举报）");
                 return ok;
             }
@@ -285,6 +288,8 @@ public class ReportService {
             ok.put("contentAffected", contentAffected);
             ok.put("warnCount", warn);
             ok.put("banned", banned);
+            // 改前态 —— 同上面驳回那条（`before` 同时是「这次是不是一次写」的判据）。
+            ok.put("before", row);
             ok.put("msg", banned ? "已处理，该用户累计 3 次警告已自动封禁" : "已处理");
             return ok;
         } catch (Exception e) {

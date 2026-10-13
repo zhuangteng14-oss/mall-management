@@ -75,6 +75,25 @@ public class CommentDao {
             "`Id`, `CommentId`, `ImageUrl`, `Status`, `SortOrder`, "
                     + "DATE_FORMAT(`created_at`, '%Y-%m-%d %H:%i:%s') AS `CreatedAt`";
 
+    /**
+     * 「提问超时未解决」的**唯一**判据 —— 两个消费方共用这一份字面量：
+     * <ol>
+     *   <li>{@link #selectTimedOutQuestions}：{@code QuestionTimeoutJob} 的扫描（{@code WHERE} 里）；</li>
+     *   <li>{@link #selectForAdmin}：管理端全站列表下发给前端的 {@code IsTimeout} 列（{@code CASE WHEN} 里）。</li>
+     * </ol>
+     * <p>⚠️ <b>两处各写一遍必然漂开</b>：job 报的「超时」与管理端列表标出来的「超时」会是两批
+     * 记录，而两边都不报错（一边照发通知、一边照标红，谁也看不出对不上）。故收成常量 ——
+     * 「同源」在这里是**字面量同源**，不是「约定同步改」。
+     *
+     * <p>⚠️ 它的 {@code ?} 是**分钟数**（{@code INTERVAL ? MINUTE}），值来自
+     * {@code QuestionTimeoutJob.TIMEOUT_MINUTES}（该类注释写明「这个数不该随手调：它是用户可见口径」）。
+     * 缺任何一个 {@code ?} ⇒ 运行时 1064 语法错，不会静默算错。
+     */
+    private static final String TIMED_OUT_QUESTION_PREDICATE =
+            "`Kind` = 'question' AND `ParentId` IS NULL AND `Status` <> 'deleted' "
+                    + "AND `IsSolved` = 0 "
+                    + "AND `created_at` <= NOW() - INTERVAL ? MINUTE ";
+
     private final JdbcClient jdbcClient;
 
     public CommentDao(JdbcTemplate jdbcTemplate) {
@@ -307,6 +326,92 @@ public class CommentDao {
     }
 
     /**
+     * 管理端**全站**列表（{@code /comment/adminList} —— 用户 2026-10-13 批的**第 14 条**内容域端点契约）。
+     *
+     * <h2>【与 {@link #selectTopLevel} 的两点差别，别的都一样】</h2>
+     * <ol>
+     *   <li><b>不筛对象</b>：{@code TargetType} / {@code TargetId} 可给可不给 —— 给了就是「收窄到某个
+     *       对象下」。公开面那条**必须**给（缺参即拒），这是两者语义上的根本差别，故谓词另起一处
+     *       （理由见 {@link #adminWhere}）；</li>
+     *   <li><b>顶层与回复都在里面</b>（公开面那条刻意只要顶层）：<b>管理要能看到回复</b> —— 一条回复
+     *       同样可以违规。故这里没有 {@code ParentId IS NULL} 那道闸，{@code Kind='answer'}
+     *       这个筛子也因此有意义（回答全是回复）。</li>
+     * </ol>
+     * <p>外加一列 {@code IsTimeout} —— 只可能对「顶层 + 未解决 + 超时」的提问为 1，判据与
+     * {@link #TIMED_OUT_QUESTION_PREDICATE} **同源**（见那个常量的 ⚠️）。
+     *
+     * <p>⚠️ 排序**恒为** {@code created_at DESC}、不接 {@code sort} 入参：公开面那个 {@code hot}
+     * 是给商品页「最热评价」用的**呈现**选择；管理端的动线是「最新进来的先看」。且 {@code hot}
+     * 按 {@code LikeCount} 排序，同分行之间没有稳定的次序键 ⇒ 分页时同一批行会在两页里重复出现 /
+     * 整批漏掉。
+     *
+     * @param solved  {@code "1"} / {@code "0"} ⇒ 只回已 / 未解决（{@code null} = 不筛）。
+     *                ⚠️ 传它时 {@code kind} 必须已是 {@code question} —— 那条约束在 Service 层拒
+     *                （这里不兜：SQL 里再判一次就成第二处口径）。
+     */
+    public List<Map<String, Object>> selectForAdmin(String targetType, String targetId, String kind,
+                                                    String solved, int timeoutMinutes, int limit, int offset) {
+        List<Object> params = new ArrayList<>();
+        String where = adminWhere(targetType, targetId, kind, solved, params);
+        // ⚠️ 超时那一段进的是 **SELECT**（下发给前端的标记），不是 WHERE（筛子）——
+        //    「标出超时」与「只查超时」是两件事，管理端要的是前者。
+        String sql = "SELECT " + COMMENT_COLUMNS + ", "
+                + "(CASE WHEN " + TIMED_OUT_QUESTION_PREDICATE + "THEN 1 ELSE 0 END) AS `IsTimeout` "
+                + "FROM `comment` " + where
+                + " ORDER BY `created_at` DESC LIMIT ? OFFSET ?";
+        // ⚠️ 参数顺序 = **SQL 文本里 `?` 出现的顺序**：CASE 在 SELECT 里、WHERE 之前 ⇒ 分钟数
+        //    必须排到最前。adminWhere 刚把 WHERE 那几个加在 list 末尾，故这里是 add(0, ...)。
+        params.add(0, timeoutMinutes);
+        params.add(limit);
+        params.add(offset);
+        return jdbcClient.sql(sql).params(params).query().listOfRows();
+    }
+
+    /**
+     * 同筛选下的总数。谓词与 {@link #selectForAdmin} **共用 {@link #adminWhere}**
+     * —— 口径同 {@link #countTopLevel}：两处手抄一遍必然漂开，而「{@code total} 与页数对不上」
+     * 是最难看出来的一种分页 bug。
+     */
+    public long countForAdmin(String targetType, String targetId, String kind, String solved) {
+        List<Object> params = new ArrayList<>();
+        String where = adminWhere(targetType, targetId, kind, solved, params);
+        return jdbcClient.sql("SELECT COUNT(*) FROM `comment` " + where)
+                .params(params).query(Long.class).single();
+    }
+
+    /**
+     * {@link #selectForAdmin} / {@link #countForAdmin} 的**唯一**谓词构造处。
+     *
+     * <p>⚠️ 刻意**不与 {@link #topLevelWhere} 合并**（虽然两段很像）：那一条的语义是「某对象下的
+     * **顶层**行」—— {@code TargetType = ?}、{@code TargetId = ?}、{@code ParentId IS NULL}
+     * 三条**都是定义的一部分**，公开面少任一条就退化成全表扫描（也就是本仓刻意不让它变成的形状）。
+     * 本方法那几条则**都可省**（省了 = 全站）。把两者并成一个「传 null 就放开」的方法，等于给
+     * 公开面那三个参数各开一个后门 —— 那正是要防的事。
+     */
+    private static String adminWhere(String targetType, String targetId, String kind, String solved,
+                                     List<Object> params) {
+        StringBuilder sb = new StringBuilder("WHERE `Status` <> 'deleted'");
+        if (targetType != null) {
+            sb.append(" AND `TargetType` = ?");
+            params.add(targetType);
+        }
+        if (targetId != null) {
+            sb.append(" AND `TargetId` = ?");
+            params.add(targetId);
+        }
+        if (kind != null) {
+            sb.append(" AND `Kind` = ?");
+            params.add(kind);
+        }
+        if ("1".equals(solved)) {
+            sb.append(" AND `IsSolved` = 1");
+        } else if ("0".equals(solved)) {
+            sb.append(" AND `IsSolved` = 0");
+        }
+        return sb.toString();
+    }
+
+    /**
      * 一批顶层评论下的**全部**回复（两层扁平，方案 §4.1 的「回复区（缩进）」）。
      *
      * <p>排序：{@code IsMerchantFirst DESC, created_at ASC} —— 商家**首次**回复置顶，其余按时间正序
@@ -449,9 +554,7 @@ public class CommentDao {
                 + "LEFT(`Content`, 60) AS `Content`, "
                 + "DATE_FORMAT(`created_at`, '%Y-%m-%d %H:%i:%s') AS `CreatedAt` "
                 + "FROM `comment` "
-                + "WHERE `Kind` = 'question' AND `ParentId` IS NULL AND `Status` <> 'deleted' "
-                + "AND `IsSolved` = 0 "
-                + "AND `created_at` <= NOW() - INTERVAL ? MINUTE "
+                + "WHERE " + TIMED_OUT_QUESTION_PREDICATE
                 + "AND NOT EXISTS (SELECT 1 FROM `notification` n "
                 + "  WHERE n.`ToId` = ? AND n.`EventType` = ? AND n.`TargetType` = 'comment' "
                 + "    AND n.`TargetId` = CAST(`comment`.`Id` AS CHAR)) "

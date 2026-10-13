@@ -616,7 +616,7 @@
 
 ## 附录 G：C3 块 6〈内容+消息块〉契约增补（2026-10-12/13） {#api-app-g}
 
-> **块 6 = 一个新域（内容域）+ 13 个新端点**（`comment` 7 + `report` 3 + `sensitive` 3，即方案 A4 的「十三端点」），全部 `POST`、全部 `@RequestParam`（无 `@RequestBody`）、全部 `required=false` + Service 手判。
+> **块 6 = 一个新域（内容域）+ 14 个新端点**（`comment` **8** + `report` 3 + `sensitive` 3）—— 前 13 条是方案 A4 的「十三端点」，第 **14** 条 `POST /comment/adminList` 是 2026-10-13 用户**另批**的契约改动（甲案，见本附录 **G.7**）；全部 `POST`、全部 `@RequestParam`（无 `@RequestBody`）、全部 `required=false` + Service 手判。
 > 逐条坐标 = 该方法的 `@PostMapping` 所在行（**本文件口径**，与 `db-schema.md#db-top` 相反）。
 > 实现落在**一个后端包** `comment/`（`controller` / `service` / `dao` / `job` 四层 + `CommentKinds`），三个 Controller 一个域。
 
@@ -624,14 +624,14 @@
 
 | 口径 | 定义 | 块 6 前（=块 5 后） | 块 6 后（HEAD） | 出处 |
 |---|---|---|---|---|
-| **后端 method-level** | 全仓 `*Controller.java` 中 `^\s*@(Post\|Get\|Put\|Delete)Mapping` 行数（**不含**类级 `@RequestMapping`） | **120** | **133**（+13） | 2026-10-13 实测（`f2b1535` / HEAD 各数一遍） |
+| **后端 method-level** | 全仓 `*Controller.java` 中 `^\s*@(Post\|Get\|Put\|Delete)Mapping` 行数（**不含**类级 `@RequestMapping`） | **120** | **134**（+14） | 2026-10-13 `grep -rhE "^\s*@(Post\|Get\|Put\|Delete)Mapping" --include=*Controller.java Mall-management-server/src/main/java \| wc -l` 实测：**补笔后的工作区 = 134**；⚠️ **提交态 HEAD（`392361e`）仍是 133**（那 13 条，不含 `adminList`）—— 两列之差 13→14 就是第 14 条 |
 | **本文件 §2 的「36 个」** | 只数 **5 个核心 Controller**（`/user` 8 · `/message` 10 · `/goods` 9 · `/order` 8 · `/health` 1） | 36 | **36（一字未变）** | §2 标题 |
-| **前端 `endpoints.js`** | `key: '/path'` 条目数（含 2 处**同行两条**） | 119 | **132** | 该文件头注记账链（… → 124 → 125 → 129 → 132） |
+| **前端 `endpoints.js`** | `key: '/path'` 条目数（含 2 处**同行两条**） | 119 | **133** | 该文件头注记账链（… → 124 → 125 → 129 → 132 → **133**）；实测 `grep -cE "^[[:space:]]*[A-Za-z0-9_]+:[[:space:]]*'/" endpoints.js` = **131** 行、+2 处同行两条 = 133 |
 
-⚠️ **块 6 的 13 个端点全部落在 §2 与 §3 的 5 个 Controller 之外** ⇒ §2 的「共 36 个」**不需要改**（它本来就不是全仓计数）；本附录就是那 13 条的契约面。
+⚠️ **块 6 的 14 个端点全部落在 §2 与 §3 的 5 个 Controller 之外** ⇒ §2 的「共 36 个」**不需要改**（它本来就不是全仓计数）；本附录就是那 14 条的契约面。
 ⚠️ **`comment` / `report` / `sensitive` 三域不进 §2 的清单**（同附录 C/D/E/F 的手法：零漂移，正文表不插入）—— 域标题只在**本附录**里出现。
 
-### G.1 新域 `/comment/*` —— 内容域主域 7 条 {#api-g-1}
+### G.1 新域 `/comment/*` —— 内容域主域 8 条 {#api-g-1}
 
 `CommentController.java`（`@RequestMapping("/comment")` @ `:58`）—— 返回一律 `Result<Map<String,Object>>`。
 
@@ -644,9 +644,21 @@
 | `/like` | `Account` · `Id` · `Type` ⚠️ **必填**（`like` / `dislike`） | 赞 / 踩；**再点同一种是「取消」**（显式传同一个值，不靠「省略 = 切换」） | 同上 | `:189` |
 | `/imageReview` | `Action`(`list`/`approve`/`reject`) · `Id` · `Status`(pending/approved/rejected) · `Limit` · `Offset` | 图片审核：一条端点、三个动作，靠 `Action` 分派 | 管理端面 —— **刻意不挂 `requireAdmin`**（见下 ⚠️） | `:218` |
 | `/myOrders` | `Account` | 可评论的历史商品（发表评论时「选对应商品」下拉） | `requireSelfOrAdminByUsername` | `:231` |
+| `/adminList` | `Kind` ⚠️ **必填**（`review` / `question` / `answer`）· `TargetType` + `TargetId`（可选，**成对**收窄）· `Solved`（仅 `Kind=question` 有意义）· `Limit` · `Offset` | 管理端**全站**列表 —— 修「评论管理 / 问答管理两栏看不到全站待办」；行内带 `IsTimeout`（后端按 `QuestionTimeoutJob.TIMEOUT_MINUTES` **现算**，前端只渲染、**不重算**） | 管理端面 —— **刻意不挂 `requireAdmin`**，且**不在** `AUTH_WHITELIST`（逐字见 G.7） | `:156` |
 
 ⚠️ **`/imageReview` 是本仓「管理端页面上的端点」的又一例：不挂 `requireAdmin`** —— 闸开着时 `AuthInterceptor` 已把非管理员的 `role=3` cookie 挡在外面，闸关着时（`app.auth.enabled=false`）本就是本地演示场景。**别「顺手补一个 `requireAdmin`」**（`CommentController#imageReview` 的 javadoc 逐字写了这条）。
 ⚠️ **`/list` 的观众（`viewerUserId`）只有「会话」一个来源**，且给的只是**业务号**、「业务号 → 登录名」那一跳在 Service 里、**校验通过之后**才做 —— 提前查会把 smoke 切片里 `JdbcTemplate` 替身的参数校验用例打成 NPE（`CommentController` 类注释）。
+
+#### G.1.1 第 14 条 `/comment/adminList` 的契约要点（2026-10-13 补笔） {#api-g-1-1}
+
+- **`Kind` 必填**，且只认 `review` / `question` / `answer` 三个值 —— 缺 ⇒ `success:false` + 「缺少参数：Kind（只能是 review / question / answer）」；未知值另有一句。这与**公开面** `/list` 相反（那边 `Kind` 可省、默认取 `review`）：全站列表没有「默认看什么」可言，默认值只会让人误读「全站只有评价」。
+- **`TargetType` / `TargetId` 要么都给、要么都不给**（都不给 = 全站；只给一个 ⇒ `success:false` + 「TargetType 与 TargetId 要么都给、要么都不给（都不给 = 全站）」）。半对参数在公开面 `list` 里是「缺 TargetId」的错；这里能是「全站」是**新语义**，故必须显式区分。
+- **`Solved` 只对 `Kind=question` 有意义**：给别的 kind ⇒ **拒**（`success:false` + 「解决状态只对提问有意义（Kind=question），当前 Kind=review」），**不是**静默忽略 —— 静默忽略会让「我筛了已解决却还是看到全部」变成一个查不出的体验问题。
+- **`IsTimeout` 由后端发**：判据与 `QuestionTimeoutJob` 的 `TIMEOUT_MINUTES` **同源**（同一个常量一处定义）。前端**只渲染**，页面**不持有**那个阈值 —— 曾经前端自己算过一版（`isOverdue`），补笔已删（见 `ModerationPage.vue` 的注释）。
+- **不在 `AUTH_WHITELIST`**：白名单里 `/comment` 域只有 `/comment/list` 一条（公开面）。本端点走 `AuthInterceptor`（注册在 `/**`）⇒ 闸开着时匿名 **401**，与 `imageReview` / `report.*` / `sensitive.*` 同族。⚠️ **a3 profile（`app.auth.enabled=false`）下它匿名可达 —— 那是验证环境的既定形态（该 profile 下每一个管理端端点都如此），不是本端点引入的口子**，也不是放宽契约（读 `CommentController#adminList` 的 javadoc 与 G.7 那段）。
+- **不收 `Account`、也不读会话**：与 `imageReview` 同处置（管理端端点靠「路由受保护 + 会话」识别处理人，不由入参声明）；与 `list` 相反，本列表没有「我」这个视角（`Mine` 恒 `false`）⇒ 不转发 `AuthSession`。
+- **排序固定 `created_at DESC`**、**不收 `Sort`**：全站分页下按热度排序会让「翻页时同一行出现两次 / 一次都不出现」（热点行在查询间隙换位），而本列表的用途是**待办巡检**，不是「看热门」。
+- **回体是扁平行**（无 `Replies`），且**顶层与回复都在里面**（管理要能看到回复 —— 一条回复同样可以违规；公开面那条刻意只要顶层）。匿名行照旧打码：`AuthorId` 为 `null`、`Author` 是 `1*****`（实测 2026-10-13：`adminList` 与公开面 `list` 对同一行 Id=114 给出**逐字相同**的这两个值）。
 
 ### G.2 新域 `/report/*` —— 举报 3 条 {#api-g-2}
 
@@ -689,12 +701,12 @@
 
 | 文件 | 增补 | 备注 |
 |---|---|---|
-| `src/api/endpoints.js` | `comment` **7** + `report` **3** + `sensitive` **3** = **13 条**（全**非** view 抽取，唯一调用方是新封装） | 头注「现为 N 条」**119 → 132**；⚠️ 组内 / 文件尾追加，**不插行** |
-| `src/api/comment.js` | **新建**，**7 个导出**（`list` / `add` / `remove` / `accept` / `like` / `myOrders` / `imageReview`） | 七个端点一个模块；`list` 的唯一调用方是 `ProductPage.vue` |
+| `src/api/endpoints.js` | `comment` **8** + `report` **3** + `sensitive` **3** = **14 条**（全**非** view 抽取，唯一调用方是新封装） | 头注「现为 N 条」**119 → 133**；⚠️ 组内 / 文件尾追加，**不插行** |
+| `src/api/comment.js` | **新建**，**8 个导出**（`list` / `add` / `remove` / `accept` / `like` / `myOrders` / `imageReview` / **`adminList`**） | 八个端点一个模块；`list` 的唯一调用方是 `ProductPage.vue`，`adminList` 的唯一调用方是管理端「评论管理 / 问答管理」两栏 |
 | `src/api/report.js` | **新建**，**3 个导出**（`add` / `list` / `handle`） | `add` 的调用方是 `ProductPage.vue`（评论 / 回复行的「举报」、商品行的「举报」、提问行的「提删」）；`list` / `handle` 给管理端 |
 | `src/api/sensitive.js` | **新建**，**3 个导出**（`list` / `add` / `remove`） | 唯一调用方是管理端「敏感词库」tab |
 | `src/views/ProductPage.vue` | **直调** `comment.*`（评价 / 问答两个子 tab：列表、发表、删、赞踩、选商品）+ `report.add`（举报 / 提删） | ⚠️ 本文件是块 6 改动量最大的一处（约 **+916 / −49**）⇒ 全仓指它的 `文件:行号` 引用集体后移，重指台账见 `slot-registry.md` §二十三 |
-| `src/views/admin/ModerationPage.vue` | **新建**，管理端「消息与内容治理」页 —— **六个 tab**：评论管理 / 问答管理 / 待审图片 / 举报中心 / 敏感词库 / 消息管理 | 比例走环图 / 柱图（`DonutChart` / `BarChart`），色值一律走 `chartTokens` |
+| `src/views/admin/ModerationPage.vue` | **新建**，管理端「消息与内容治理」页 —— **六个 tab**：评论管理 / 问答管理 / 待审图片 / 举报中心 / 敏感词库 / 消息管理。⚠️ 2026-10-13 补笔：评论管理 / 问答管理两栏各**多一段「全站列表」**（走第 14 条 `adminList`），原来的「按对象下钻」表单**保留在下面**（那条走公开面 `/comment/list`，仍强制 `TargetId`） | 比例走环图 / 柱图（`DonutChart` / `BarChart`），色值一律走 `chartTokens`；⚠️ 页面对「超时」**不再自己算**（`IsTimeout` 由后端发，前端只渲染） |
 | `src/router/index.js` | `business/moderation` 记录由 `AdminStub` 占位 → **真页**（**同行替换**，照 `:455` 那一行的注释记账） | **不动**路由结构 |
 
 ### G.6 白名单的契约改动：`AUTH_WHITELIST` **13 → 14** {#api-g-6}
@@ -704,12 +716,18 @@
 | 新增条目 | `/comment/list`（**只放读**）—— 商品详情页「累计评价」区在未登录时照常加载，而 `/product` 挂 `meta.public` ⇒ 少这一条，未登录用户看到的是一格**空评价区**（外加 401 噪音） |
 | 条数口径 | 业务 **9 → 10** 条（登录链 3 + 登录前后台页面 **6 → 7**），基础设施 4 条不变 ⇒ 总 **13 → 14** |
 | ⚠️ **四处同改** | `WebAuthConfig.java:62`（javadoc「业务 9 条」→「10 条」）· 同文件 `:68`（「登录前后台页面 6 条」→「7 条」+ 补第 7 条那条 ⚠️）· 同文件清单本体（`:120` 加 `"/comment/list"`）· 同文件 `:175`（「13 条逐条直调」→ **14**）；**另加** `AuthGateSmokeTest.java`（javadoc 两处 + `hasSize(13)` → `14` + 断言文案「业务 9 + 基础 4」→「业务 10 + 基础 4」）与 `MerchantStatsController.java:19`（13 → 14，后半句「没有任何 `/merchant/**`」仍成立） |
-| ⚠️ 别顺手搬 | 同域另 **4 个写端点**（`add` / `delete` / `like` / `myOrders`）**仍在身份面**；`/shop/follow` / `unfollow` / `followState` 三条同理（`WebAuthConfig` 那段 javadoc 逐字警告） |
+| ⚠️ 别顺手搬 | 同域另 **4 个写端点**（`add` / `delete` / `like` / `myOrders`）**仍在身份面**；`/shop/follow` / `unfollow` / `followState` 三条同理（`WebAuthConfig` 那段 javadoc 逐字警告）。⚠️ 2026-10-13 补一笔：第 14 条 `adminList`（**管理端**全站列表）**同样不进白名单** —— 白名单的判据是「公开面」，管理端端点没有一条是公开面（`WebAuthConfig` 那两处文案已同步点名） |
 
-### G.7 本块的硬线：**不加第 14 个端点** {#api-g-7}
+### G.7 第 14 个端点：**图片仍不另开**，但全站列表**已批、已落** {#api-g-7}
 
-⚠️ **图片走 `/comment/add` 的同一个请求、多 part（`getFiles("Files")`），不另开端点**：方案 A4 是「13 个端点」，加第 14 个是要批的契约改动；且评论文本与它的图本就是一次提交。用 `MultipartHttpServletRequest#getFiles` 手工取 part、而非 `@RequestParam List<MultipartFile>`（后者在**非 multipart** 请求〔= 一条纯文字的评论〕上的绑定行为随 Spring 版本而变；前者两种情况下都是「没有文件」）。
+⚠️ **图片依旧走 `/comment/add` 的同一个请求、多 part（`getFiles("Files")`），不另开端点** —— 这一条**不变**：评论文本与它的图本就是一次提交。用 `MultipartHttpServletRequest#getFiles` 手工取 part、而非 `@RequestParam List<MultipartFile>`（后者在**非 multipart** 请求〔= 一条纯文字的评论〕上的绑定行为随 Spring 版本而变；前者两种情况下都是「没有文件」）。
 
-⚠️ **本文件（`api-contract.md`）的正文 §2 / §3 / §5 矩阵**本笔**未重测、未插入** —— 13 条新端点全部落在附录 G；正文坐标重填归「文档漂移清理笔」（同附录 E.7 的口径）。
+⚠️ **本节原先写的是「本块的硬线：不加第 14 个端点」—— 那条硬线已在 2026-10-13 被用户**单独批准**地开了一个口子**：内容域第 14 条 = `POST /comment/adminList`（管理端全站列表，见 **G.1.1**）。开这个口子的理由是**功能缺口**而不是口味：管理端「评论管理 / 问答管理」两栏此前只有「按对象下钻」一种手法（公开面 `list` 强制 `TargetId`），**看不到全站待办** —— 而另四栏（待审图片 / 举报中心 / 敏感词库 / 消息管理）都有全站列表，六栏里两栏缺，属**功能不一致**。甲案（新端点）胜出的另外两条候选：
+- **改公开面语义**（让 `/comment/list` 的 `TargetId` 可省）：**否** —— 那会动公开面契约，而 `/comment/list` 是**白名单里的公开面**，放开等于把「全站评论」无条件暴露给未登录访客；
+- **复用 `list` + 管理端开关**：**否** —— 同一个端点在两种身份下两种语义，是「参数长得一样、行为不一样」的形状，比多一条端点难维护得多。
+
+⚠️ 因此本块的契约面计数**是 14 而不是 13**（G.0 / G.1 / G.5 三处已同步）；`/comment/*` 内部是 **8 条**（G.1）。
+
+⚠️ **本文件（`api-contract.md`）的正文 §2 / §3 / §5 矩阵**本笔**未重测、未插入** —— 14 条新端点全部落在附录 G；正文坐标重填归「文档漂移清理笔」（同附录 E.7 的口径）。
 ⚠️ **已知的既有陈旧（不属本笔，登记不修）**：§2 的 C.1 表里 `/order/orderAdd` → `ProductPage.vue:393`、`/message/send` → `ProductPage.vue:459` 两条**在块 6 之前就与实际调用点对不上**（**不修**），故本笔的自动重指**刻意跳过**它们（行内已留「旧行号 · 不修」标记，属重指脚本的 GUARD 触发词）。
 **实测真调用点（第一手，2026-10-13）**：`/order/orderAdd` = `ProductPage.vue:913`（`await orderAdd({`）、`/message/send` = `ProductPage.vue:1018`（`http.post(endpoints.message.send, …)`）—— 正文坐标重填归「文档漂移清理笔」，台账见 `slot-registry.md` §二十三 的「已知误指族」。

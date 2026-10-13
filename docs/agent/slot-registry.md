@@ -4745,7 +4745,7 @@ commit 0 加 `'order_item'`（`KNOWN_TABLES` **8 → 9**、期望 **19 → 20**�
 ### 23-3　后端
 
 新包 **`comment/`**：`controller/{Comment,Report,SensitiveWord}Controller`（**三个 Controller 一个域**）+ `service/{Comment,Report,SensitiveWord}Service` + `dao/{Comment,Report,SensitiveWord}Dao` + `job/QuestionTimeoutJob` + `CommentKinds`。
-⇒ 全仓 method-level 端点 **120 → 133**（块 6 **+13** = 内容域 `comment` 7 + `report` 3 + `sensitive` 3，逐条见 `api-contract.md` **附录 G**）。
+⇒ 全仓 method-level 端点 **120 → 133**（收口时点）；2026-10-13 用户**另批第 14 条** `POST /comment/adminList`（甲案，缺陷二）⇒ **→ 134**。块 6 **+14** = 内容域 `comment` **8** + `report` 3 + `sensitive` 3，逐条见 `api-contract.md` **附录 G**（第 14 条的契约要点在 **G.1.1**）。
 ⚠️ **`/comment/list` 是块 6 唯一进 `AUTH_WHITELIST` 的端点**（**13 → 14 条**，业务 **9 → 10**）—— 也是本笔**唯一一处放宽安全边界**的动作，**四处同改**（`WebAuthConfig.java` 的 javadoc 两处 + 清单本体 + `:175`；`AuthGateSmokeTest.java` 的 javadoc / `hasSize` / 断言文案；`MerchantStatsController.java:19`），均已实测到位。
 ⚠️ **同域另 4 个写端点（`add` / `delete` / `like` / `myOrders`）仍在身份面**，**别顺手搬**（`WebAuthConfig` 那段 javadoc 逐字警告）。
 ⚠️ **一律不给管理端端点加 `requireAdmin`**（TD-18 口径）：管理员 cookie 铸不出 token ⇒ 加「须 role=3」会让**默认 profile 上管理员自己 401**。本块三个管理端端点（`/comment/imageReview`、`/report/list`、`/report/handle`、`/sensitive/*`）的 javadoc 逐字写了这一条。
@@ -4753,15 +4753,15 @@ commit 0 加 `'order_item'`（`KNOWN_TABLES` **8 → 9**、期望 **19 → 20**�
 
 ### 23-4　前端
 
-**新建**：`api/comment.js`（7 导出）· `api/report.js`（3）· `api/sensitive.js`（3）· `views/admin/ModerationPage.vue`（六 tab）。
+**新建**：`api/comment.js`（**7 → 8** 导出，第 14 条 `adminList` 后加）· `api/report.js`（3）· `api/sensitive.js`（3）· `views/admin/ModerationPage.vue`（六 tab）。
 **改动**：`views/ProductPage.vue`（评论 / 问答两个子 tab + 举报 / 提删 —— ⚠️ **本块改动量最大的一处**）· `router/index.js`（`business/moderation` 占位 → 真页，**同行替换**）· `api/endpoints.js` · `config/notify-events.js` · `test/.../AbstractSmokeTest.java` 的 `@Import`。
-⇒ `endpoints.js` 头注计数 **119 → 132**（**同行改 / 文件尾追加**，不插行）。
+⇒ `endpoints.js` 头注计数 **119 → 132**（收口时点）**→ 133**（第 14 条落地后实测；**同行改 / 文件尾追加**，不插行）。
 
 ### 23-5　槽位改判（稿基线表的老稿预留位，块 6 结清 **1** 条）
 
 | # | 原登记 | **块 6 后** | 证据 |
 |---|---|---|---|
-| 预留 · 累计评价 | `ProductPage.vue` 的 `data-slot="预留 · 累计评价（动现有代码 ≥4 处 · 超档）"` 整块占位 | **已退役 → 真功能**：块 6 新增的 7 个 `/comment/*` 端点把它落实（均分 + 5→1 星分布 + 实拍图墙 + 评论 / 问答双子 tab）。⚠️ **稿的演示态一个都不留**（`4.8` / `12,043 条评价` / 三条假评论 / 5 枚 `disabled` 分页）—— 那几个数是**纯假数据**，真列表来了还并排画 12,043 条，等于把两个互斥的事实摆在同一块里 | `c483d15`；`ProductPage.vue:311-319` 的退役注释 |
+| 预留 · 累计评价 | `ProductPage.vue` 的 `data-slot="预留 · 累计评价（动现有代码 ≥4 处 · 超档）"` 整块占位 | **已退役 → 真功能**：块 6 新增的 `/comment/*` 端点把它落实（均分 + 5→1 星分布 + 实拍图墙 + 评论 / 问答双子 tab）。⚠️ **稿的演示态一个都不留**（`4.8` / `12,043 条评价` / 三条假评论 / 5 枚 `disabled` 分页）—— 那几个数是**纯假数据**，真列表来了还并排画 12,043 条，等于把两个互斥的事实摆在同一块里 | `c483d15`；`ProductPage.vue:311-319` 的退役注释 |
 | 其余（原价/折扣 · 详情富文本 · 规格参数 · 店铺主页 · 信任位） | — | **块 6 未碰**（前两条块 5 已结清，后三条仍在） | — |
 
 ⚠️ **「引述 vs 占位」陷阱（本笔新增的一条判据）**：现 `ProductPage.vue:311-319` 那段注释**引述**了已退役的占位串（`data-slot="预留 · 累计评价…"`）⇒ **字符串匹配会命中一段注释**，别据此判「占位还在、块 6 没做」。判据只能是**活属性**（模板里 `data-slot=` 作为元素属性）而不是全文 grep。
@@ -4790,7 +4790,9 @@ commit 0 加 `'order_item'`（`KNOWN_TABLES` **8 → 9**、期望 **19 → 20**�
 ⚠️ **手验跑 a3 profile ⇒ 闸关**（`app.auth.enabled=false`）⇒ **手验绿 ≠ 默认 profile 绿**；本块新增了一条**公开面**端点（`/comment/list`），它在默认 profile 下的行为（匿名 200）**只有默认 profile 能验**。
 ⚠️ **`question.timeout` 那条通知在 a3 **默认态**下验不出来**（两层总闸，见 `tech-debt.md` TD-46）—— 验收假数据里该事件 **0 行是默认态的预期值**。✅ 收口笔**手工放开两道闸**（`--mall.downgrade.job.enabled=true --mall.comment.question.timeout.enabled=true --mall.comment.question.timeout.fixed-delay-ms=15000`）+ 删掉 `comment 110` 已有那行通知，12:46:40 由 `QuestionTimeoutJob` **自己发出**一条新的 ⇒ 落库共 **7 行**（`_work/b6-close-handverify-backend.log:128`；`b6-c7-fake-data.txt` §4.9-乙）。
 
-🧪 **手验（整改指令 §八）** ⇒ 两层都落盘：HTTP 层 `_work/b6-hv-full.txt`（1948 行，exit 0；`success:true` × 49 + **刻意红** × 15）· 界面层 `hv-shots/result.json` = `{total:26, failed:0}` + 9 张截图（**真后端、不 mock**）。逐条对表见 `docs/agent/evidence/c3-block6/b6-c7-handverify.txt`。
+🧪 **agent 预跑（收口时点；⚠️ 非用户手验）** ⇒ 两层都落盘：HTTP 层 `_work/b6-hv-full.txt`（1948 行，exit 0；`success:true` × 49 + **刻意红** × 15）· 界面层 `hv-shots/result.json` = `{total:26, failed:0}` + 9 张截图（**真后端、不 mock**）。逐条对表见 `docs/agent/evidence/c3-block6/b6-c7-handverify.txt`。
+⚠️ **该档标题已按用户裁决 ④ 改判**：原题「手验实录（整改指令 §八『手验全部通过』）」**越权** ⇒ 现题「**agent 预跑记录（非用户手验，仅供参考）**」。
+**手验由用户执行并裁决，agent 不代跑、不在任何记录里写「手验全部通过」。** 供用户跑的清单另立一档：`docs/agent/evidence/c3-block6/b6-c7-handverify-checklist.md`。
 🔧 顺带修掉一处界面手验实拍出来的瑕疵（`ModerationPage.vue` 冷进页面的红 flash，`onMounted` 拿空 `TargetId` 调 `loadComments()`）⇒ 判据进了探针，改后复跑仍 26/0。
 
 ### 23-9　未做 / 挂账（**已登记，不属本节**）
@@ -4802,6 +4804,43 @@ commit 0 加 `'order_item'`（`KNOWN_TABLES` **8 → 9**、期望 **19 → 20**�
 1. **通知 code 比计划**提前一笔**补**：方案写「commit 3 补 2 个 code」，实落在 **commit 2**（问答那一笔，因为 `CommentService.accept` / `QuestionTimeoutJob` 就是它们的第一个调用点 —— 按本仓「触发点随各自那一笔挂」的口径，不预先留常量空等）。已在该笔 commit message 里报备。
 2. **摘除 `comment.on.user`**：块 1 建通知域时预留，块 6 基准文档 §二 A1 定稿的 6 个 code 不含它 ⇒ 2026-10-13 按用户裁定**摘除**（全仓零调用点，无行为回归）。
 3. **图片走 `/comment/add` 的同一个请求、多 part，不另开端点** —— 方案 A4 是「13 个端点」，加第 14 个是要批的契约改动；且评论文本与它的图本就是一次提交（`CommentController#add` 的 javadoc 逐字）。
+3-bis. ⚠️ **第 14 个端点（2026-10-13 追加报备）**：**图片仍不另开**（上一条不变），但**全站列表**另批了一个端点 ——
+   **`POST /comment/adminList`**（缺陷二 / 甲案）。它**不替代** `/comment/list`（公开面语义**一字未改**，不带 `TargetId` 仍报缺参），
+   而是给管理端「评论管理 / 问答管理」两个 tab 一个**不带对象下钻**也能看全站的入口。
+   用户否决的两个替代方案也一并记下：① 改公开面 `list` 的语义（会把「公开面先审后发」和「管理端全站」两件事塞进一个端点）；
+   ② 复用 `list` + 前端加管理端开关（闸在**前端**，等于把管理端能力放到匿名可达面）。
 4. **一律不挂 `requireAdmin`**（TD-18）：理由同 §22-10 第 9 条。
 5. **`comment` 一张表装四件事**（评价 / 留言 / 楼中楼 / 问答）：方案 A1 的建表口径，`Kind` + `ParentId` + `ReplyToId` 三列表达，**不是**四张表。
 6. **管理端页落成 `ModerationPage.vue` 的六个 tab**：含**消息管理**（管理端共享收件箱，读的是块 1 的通知域，**不新增端点**）—— 用户指令的「消息与内容治理页」在一个页面里同时收口「内容治理」与「消息」两侧。
+
+### 23-11　整改续笔（2026-10-13 用户批文 一 ~ 七；**收口之后追加的一段**）
+
+> 收口笔（`392361e`）之后，用户另批了一轮整改：一 缺陷一 · 二 缺陷二（甲案）· 三 唯一锁 · 四 审核记录 · 五 种子时间 · 六 手验清单 · 七 PR #91 不 merge。
+> 本小节只记**对 §23 既有登记的增量**；最小收验输出落 `docs/agent/evidence/c3-block6/b6-c7-rework-accept.txt`。
+
+**建表（迁移 ⑯）** ⇒ `comment` **加一列 + 加一个唯一键**（**不改表数**）：
+- 新增 **STORED 生成列** `ReviewLockKey` = `CASE WHEN TargetType='goods' AND Kind='review' AND ParentId IS NULL AND Status='normal' THEN CONCAT(TargetType,':',TargetId,':',AuthorId) ELSE NULL END`；
+- 新增 **UNIQUE** `uk_comment_review_once(ReviewLockKey)` —— 「一商品一用户一条评价」的 **DB 兜底**（此前只有业务预检，预检到插入之间有窗口）。
+- ⚠️ **NULL 豁免就是豁免矩阵**：回复（`ParentId != NULL`）/ 提问 / 回答（`Kind` 非 review）/ 留言板（`TargetType != 'goods'`）四类都算 `NULL`，NULL 在唯一键下互不相等 ⇒ **四类形态各发两条都成功**。
+- 落库前清掉 1 组历史重复（`goods` / `76` / 同一作者 = `Id=113` + `114`）：**逻辑删 113、保留 114**。
+  ⚠️ **一条早先说法就地更正**：曾写「113 无任何档/表引用」—— 实测**不成立**（`comment_mention` `Id=12` 指着它）。该表在 Java 侧**只写不读**，且 113 仍在表里（`Status='deleted'`）⇒ 无悬挂影响，但**措辞必须改**。
+- 对应 `db-schema.md` §15 的「1 处加列 · 14 个新索引」→ **2 处加列 · 15 个新索引**、`db-migration.md` 登记 **#37** + 注意 **20**。
+
+**后端** ⇒ `CommentService` 加**窄 catch**：只吞本锁的 `1062` 并翻成「您已评价过该商品，不能重复评价」，**其它 SQL 异常照旧上抛**（不得把它降级成通用失败话术 —— 否则等于把 DB 内部结构泄给用户）。新增 Service 层 JUnit `CommentServiceReviewLockTest`（4 条）。
+
+**审核记录** ⇒ **复用 `admin_audit`**，**不新建表 / 不加列**。新增 **5 个 `Action`**（域段 = 表名）：
+`comment.image.approve` · `comment.image.reject` · `sensitive_word.add` · `sensitive_word.delete` · `report.handle`（**一条 tag 覆盖通过 / 驳回两条路**）。
+挂钩点一律在 Controller 里、`success == true` **之后**（失败动作**不落记录**）；
+`ActorId` 取**会话**（`AuthSession.identify`）**不是入参**；`TargetId` 用**业务键**（敏感词 = 词面本身；图 = 文件名；举报 = 自增 `Id`，该表无业务串，属如实记下的例外）。
+
+**前端** ⇒ ① 缺陷一：`api/http.js` 一行（图片地址走 `assetOf`）—— 管理端「待审图片」tab 拿到可用 URL；**公开面不动**（未过审仍 `Url: null`）。
+② 缺陷二：`api/comment.js` +1 导出（`adminList`）、`api/endpoints.js` 计数 **132 → 133**、管理端页两个 tab 冷进页面直接看全站列表（`Kind=review` / `Kind=question`，行内 `IsTimeout` 由**后端**下发）。
+
+**种子时间（批文五）** ⇒ `ProbeB6c7Seed` 里 4 个 `minutesAgo` 字面量**由负转正**（原来负负得正 ⇒ 四条种子被插到**未来**，页面上成了「N 小时后」）；
+根因：MySQL 服务端时钟 UTC / 宿主 CST(+8)，`NOW()` 低 8 小时。同步 `pickAuthors` **插入前判重**（唯一锁下重名作者会让整个种子回滚）。
+⚠️ **库里那 4 行 `created_at` 的回拨**：批文五要求「先贴现值让用户看一眼再动」⇒ 先贴了现值，2026-10-13 **用户裁决二「批」**后执行（`affected: 4`，复读两次一致，顺序 114 → 115 → 116 → 117 递增；只动 `created_at`，`updated_at` 显式保住）。现值 / 目标值 / 语句 / 复读见 `b6-c7-rework-accept.txt` §9。
+
+**验收** ⇒ agent 最小收验（**非用户手验**）：后端 `./mvnw -B test` = `Tests run: 309 / Failures 0 / Errors 0 / Skipped 26` + `BUILD SUCCESS`（14:38:34 重跑一轮，覆盖本轮全部 Java 改动）；前端 `npx vue-cli-service build` = `DONE`（`Hash 26156ad36788376d`，14:36:58）+ `npx eslint src` = exit 0。
+DB 级唯一锁探针 `scripts/probes/ProbeB6c7Lock.java` = **PASS 12 / FAIL 0**（含并发档「成功 1 / 1062 1 / 落库 1」）。手验清单另立一档（见 23-8 尾注）。
+⚠️ 上面那次全绿之后，又为「互引净零化」改了两处注释再复跑，**连着两轮各红一条** `L2HealthProbeConcurrencyTest`（计时敏感）—— **非本轮改动引起**（两棵树该类的 `.class` md5 逐字节相同）⇒ 登记 **TD-58**，本轮**不改该用例**。
+🧭 **互引核验（refs）** ⇒ 配对口径（键 = 引用者文件 + token，不含引用者行号）**真 LOST = 0 / NEW = 9**（9 条全为 docs → `mall_management_sql.sql` 的 ⑯ 段新坐标 ⇒ **源侧新增引用 = 0**）；另跑「目标行内容回解」，指向本轮 **24** 个改动文件的 **337** 条 token 首跑 **12 条真漂移**、**净零化后复跑 0**。⚠️ 报告本体只落 `_work/`（`refs-before-rew.txt` / `refs-after-rew2.txt` / `_refs-drift-rew.py` / `_pair-rew.py`），**不进 `docs/`**。详见 `progress.md` §7-B6-bis 尾。

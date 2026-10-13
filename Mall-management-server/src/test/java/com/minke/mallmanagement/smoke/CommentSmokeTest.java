@@ -6,13 +6,15 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 /**
- * C3 块 6 · 内容域（commit 1「评论」+ commit 2「问答」）的 smoke test：
- * {@code POST /comment/*} 六个端点的**入参闸**。
+ * C3 块 6 · 内容域（commit 1「评论」+ commit 2「问答」+ 整改补笔「管理端全站列表」）的 smoke test：
+ * {@code POST /comment/*} 八个端点的**入参闸**。
  *
  * <h2>【本类钉的是什么 —— 以及**不**钉什么】</h2>
  * 钉的是**碰库之前**就能判定的拒绝路径：缺 {@code TargetId} / 未知 {@code TargetType} /
  * 未知 {@code Kind} / 未知 {@code Sort} / 空正文 / 正文超长 / 缺 {@code Id} /
- * 未知 {@code Type} / 缺 {@code Account} / 缺 {@code ReplyId}（采纳那两个入参）。
+ * 未知 {@code Type} / 缺 {@code Account} / 缺 {@code ReplyId}（采纳那两个入参）/
+ * {@code adminList} 的五条（缺 {@code Kind} / 未知 {@code Kind} / 给非提问传 {@code Solved} /
+ * 未知 {@code Solved} / 半个对象键）。
  * 它们全部在 {@code CommentService} 的**第一段**
  * （或 {@code CommentController} 的入参检查）返回，**一次库都不碰** ⇒ 用
  * {@code @MockitoBean JdbcTemplate} 的切片就能真跑（同 {@code CartSmokeTest} 的理由）。
@@ -21,7 +23,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * 全在库里**：买过没有（{@code order_item} 回联 {@code goods}）、是不是重复评价
  * （{@code countTopLevelByAuthor}）、匿名行会不会漏 {@code AuthorId}、商家首次回复置不置顶、
  * 一人一条的赞踩、**采纳的五道闸与「采纳后不可改」**（{@code IsSolved=0 AND AcceptedReplyId IS NULL}
- * 那道 {@code WHERE} 到底拦不拦得住第二次）。这些一律要真库，{@code JdbcClient} 打到被 mock 的 {@code JdbcTemplate} 上
+ * 那道 {@code WHERE} 到底拦不拦得住第二次）、**{@code adminList} 的 {@code IsTimeout} 算得对不对**。
+ * 这些一律要真库，{@code JdbcClient} 打到被 mock 的 {@code JdbcTemplate} 上
  * 只会抛 NPE，落进 catch 变成一句「…失败：…」文案 ⇒ 断言它们等于在断言 Mockito 的默认行为。
  * 那几条的验收归 A3（{@code concurrency}，**continue-on-error ⇒ 按 artifact 的
  * {@code gates.count} 读，别读 job 颜色**）与 VM 上的手工验证。
@@ -227,5 +230,87 @@ class CommentSmokeTest extends AbstractSmokeTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.success").value(false))
                 .andExpect(jsonPath("$.msg").value("缺少参数：Account"));
+    }
+
+    // ==================== /comment/adminList（管理端全站列表，第 14 条端点）====================
+
+    /**
+     * 缺 {@code Kind} ⇒ 拒。
+     *
+     * <p>⚠️ <b>本端点把 {@code Kind} 定成必填</b>（与公开面 {@code /comment/list} 相反：那条省略
+     * {@code =} 不筛）。理由：它一次能拉全站**所有**内容，省了 {@code Kind} 就是「点开就拉全表」——
+     * 管理端两个 tab 各有各的语义（评论 / 问答），没有「都要」这个用法。
+     */
+    @Test
+    void adminListWithoutKindIsRejected() throws Exception {
+        mockMvc.perform(post("/comment/adminList"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(false))
+                .andExpect(jsonPath("$.msg").value("缺少参数：Kind（只能是 review / question / answer）"));
+    }
+
+    /** 未知 {@code Kind} ⇒ 拒（同公开面：未知值不静默当「不筛」）。 */
+    @Test
+    void adminListWithUnknownKindIsRejected() throws Exception {
+        mockMvc.perform(post("/comment/adminList")
+                        .param("Kind", "complaint"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(false))
+                .andExpect(jsonPath("$.msg").value("未知的评论类型：complaint（只能是 review / question / answer）"));
+    }
+
+    /**
+     * {@code Solved} 给非提问的 {@code Kind} ⇒ 拒（**不是**静默忽略）。
+     *
+     * <p>⚠️ 静默忽略会让前端以为筛过了：管理员勾着「未解决」却看到一屏评价 / 回答，
+     * 而每一条都长得像「未被解决」的提问 —— 那是**假读数**，比拒绝难发现得多。
+     */
+    @Test
+    void adminListWithSolvedOnNonQuestionKindIsRejected() throws Exception {
+        mockMvc.perform(post("/comment/adminList")
+                        .param("Kind", "answer")
+                        .param("Solved", "1"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(false))
+                .andExpect(jsonPath("$.msg").value("解决状态只对提问有意义（Kind=question），当前 Kind=answer"));
+    }
+
+    /** 未知 {@code Solved} ⇒ 拒（与 {@code Kind} / {@code Sort} 同一口径：未知值不静默）。 */
+    @Test
+    void adminListWithUnknownSolvedIsRejected() throws Exception {
+        mockMvc.perform(post("/comment/adminList")
+                        .param("Kind", "question")
+                        .param("Solved", "2"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(false))
+                .andExpect(jsonPath("$.msg").value("未知的解决状态：2（只能是 0 / 1）"));
+    }
+
+    /**
+     * 只给 {@code TargetType} 不给 {@code TargetId} ⇒ 拒。
+     *
+     * <p>⚠️ 这条是**「半个键」**的处置：若静默当「全站」，管理员以为自己筛到某个商品下、
+     * 实际看到的是全站列表 —— 一次筛错的读数没有任何迹象。成对给才是收窄，成对不给才是全站。
+     */
+    @Test
+    void adminListWithHalfATargetIsRejected() throws Exception {
+        mockMvc.perform(post("/comment/adminList")
+                        .param("Kind", "review")
+                        .param("TargetType", "goods"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(false))
+                .andExpect(jsonPath("$.msg").value("TargetType 与 TargetId 要么都给、要么都不给（都不给 = 全站）"));
+    }
+
+    /** 收窄时 {@code TargetType} 未知 ⇒ 拒（与公开面同一句话术：这一句两处必须一字不差）。 */
+    @Test
+    void adminListWithUnknownTargetTypeIsRejected() throws Exception {
+        mockMvc.perform(post("/comment/adminList")
+                        .param("Kind", "review")
+                        .param("TargetType", "good")
+                        .param("TargetId", "1"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(false))
+                .andExpect(jsonPath("$.msg").value("未知的评论对象类型：good（只能是 goods / user）"));
     }
 }

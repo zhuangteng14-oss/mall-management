@@ -85,17 +85,21 @@ public class ProbeB6c7Seed {
                 List<String> authors = pickAuthors(c);
                 System.out.println();
                 System.out.println("=== 开始播种（authors=" + authors + "） ===");
+                // ⚠️ 这四个数是**正数**「多少分钟前」。这里曾经写成负数（`-120`），
+                //    而 SQL 是 `NOW() - INTERVAL ? MINUTE` ⇒ 负负得正，四条种子全被插到了
+                //    **未来**（`created_at` 比 `NOW()` 还晚）—— 页面上就成了「2 小时后」。
+                //    别再把这里的符号「顺手」改回去：这里要的是过去的时刻。
                 long reviewAnon = insertReview(c, authors.get(0), true, 5,
                         "收到货了，包装完好，做工比想象中细。用了两天没发现问题，"
-                                + "唯一小缺点是说明书有点简略。（如图）", -120);
+                                + "唯一小缺点是说明书有点简略。（如图）", 120);
                 long reviewReal = insertReview(c, authors.get(1), false, 4,
                         "第二次买了，这次是送朋友的。发货快，第二天就到。"
-                                + "少给一星是因为外包装箱有压痕。", -90);
+                                + "少给一星是因为外包装箱有压痕。", 90);
                 long merchantReply = insertReply(c, reviewAnon, null, "yunqi_digital", 2, false,
                         "感谢支持！包装问题我们已经反馈给仓配，下次下单备注一下，我们单独加固。"
-                                + "有需要随时联系客服。", true, -100);
+                                + "有需要随时联系客服。", true, 100);
                 long customerReply = insertReply(c, reviewAnon, merchantReply, authors.get(2), 1, false,
-                        "@yunqi_digital 客服回复很快，问题已解决，赞一个。", false, -60);
+                        "@yunqi_digital 客服回复很快，问题已解决，赞一个。", false, 60);
                 insertMention(c, customerReply, "yunqi_digital");
 
                 System.out.println("  评论：review#anon=" + reviewAnon + " review#real=" + reviewReal
@@ -297,20 +301,34 @@ public class ProbeB6c7Seed {
 
     /**
      * 取几个**互不相同**的真实客户账号来当作者 / 点赞人 —— 不写死名字：
-     * 库里客户是被重导过的（见 `cleanup-dirty-legacy.sql` 那一族），写死的名字下次可能就不在了。
+     * 库里客户是被重导过的（见 {@code cleanup-dirty-legacy.sql} 那一族），写死的名字下次可能就不在了。
      * ⚠️ 至少要有 4 个才够（2 个作者 + 点赞人），不够就抛 —— 与其播一批半残的种子，不如停下来。
+     *
+     * <p>⚠️ <b>{@code DISTINCT} + 去重是后加的（2026-10-13 整改补笔）</b>，不是装饰：
+     * 2026-10-13 起 {@code comment} 上有一条「同一用户对同一商品只能评一条顶层评价」的
+     * <b>唯一锁</b>（生成列 + {@code UNIQUE}）。两行种子评价都挂在 goods 76 上 ——
+     * 只要 {@code authors.get(0)} 与 {@code authors.get(1)} 撞成同一个人，第二条 INSERT
+     * 就会撞唯一键（{@code 1062}）把整批播种回滚掉。{@code user} 表的 {@code username}
+     * 在本仓**没有**唯一约束（重导遗留），故「取 8 行」不等于「取到 8 个不同的人」——
+     * 这里自己去重，并且按**去重后**的个数判够不够。
      */
     private static List<String> pickAuthors(Connection c) throws Exception {
         List<String> out = new ArrayList<>();
         try (PreparedStatement ps = c.prepareStatement(
-                "SELECT `username` FROM `user` WHERE `usertype` = '客户' ORDER BY `username` LIMIT 8");
+                "SELECT DISTINCT `username` FROM `user` WHERE `usertype` = '客户' ORDER BY `username` LIMIT 8");
              ResultSet rs = ps.executeQuery()) {
             while (rs.next()) {
-                out.add(rs.getString(1));
+                String u = rs.getString(1);
+                // 双保险：`DISTINCT` 挡不住「'a' 与 'a '」这种带尾空格的同人异写，
+                // 而唯一锁比的是**列值相等**，尾空格在 `varchar` 比较里会被折叠 ⇒ 这里也折叠。
+                if (u != null && !out.contains(u)) {
+                    out.add(u);
+                }
             }
         }
         if (out.size() < 4) {
-            throw new IllegalStateException("客户账号不足 4 个（实得 " + out.size() + "）—— 播种需要 2 个作者 + 点赞人");
+            throw new IllegalStateException("客户账号不足 4 个不同的人（实得 " + out.size()
+                    + "）—— 播种需要 2 个作者 + 点赞人");
         }
         return out;
     }

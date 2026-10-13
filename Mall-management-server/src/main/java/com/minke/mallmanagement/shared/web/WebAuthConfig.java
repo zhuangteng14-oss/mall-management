@@ -81,7 +81,7 @@ public class WebAuthConfig implements WebMvcConfigurer {
      *       <p>⚠️ 第 7 条 {@code /comment/list}（C3 块 6 评论列表，2026-10-12）同为**公开面**：
      *       商品详情页 {@code ProductPage.vue} 的「累计评价」区在未登录时照常加载，而该页挂
      *       {@code meta.public} ⇒ 少这一条，未登录用户看到的是一格空评价区（外加 401 噪音）。
-     *       <b>同域另 4 个写端点（add / delete / like / myOrders）仍在身份面</b>，别顺手一起搬。</li>
+     *       <b>同域另 4 个写端点（add / delete / like / myOrders）仍在身份面</b>，别顺手一起搬。⚠️ 2026-10-13 补一笔：内容域第 14 条 {@code /comment/adminList}（**管理端**全站列表）<b>同样不进本表</b> —— 白名单的判据是「公开面」，而管理端端点没有一条是公开面；它走 {@code AuthInterceptor}（注册在 {@code /**}）⇒ 闸开着时匿名 <b>401</b>（a3 profile 闸关下它匿名可达，那是该 profile 下**每一个**管理端端点的既定形态）。</li>
      * </ul>
      *
      * <h3>基础设施 4 条</h3>
@@ -119,7 +119,7 @@ public class WebAuthConfig implements WebMvcConfigurer {
             // 店铺主页存档（公开档案：登录名 / 注册时刻 / 入驻审核状态）。⚠️ 同族 follow 三条**不在此**。
             "/shop/profile",
             // 商品评论列表（C3 块 6，2026-10-12）—— 商品详情页评价区的读，⭐ **只放读**：
-            // 同域的 add / delete / like / myOrders 四个写端点仍在身份面（见上面那段 ⚠️）。
+            // 同域的 add / delete / like / myOrders 四个写端点仍在身份面（见上面那段 ⚠️）；⚠️ 2026-10-13 补笔的第 14 条 comment/adminList（管理端全站列表）**也不在本表**（同上）。
             "/comment/list",
             // ===== 基础设施 =====
             // 运维探针（⚠️ 仅 a3 profile 存在）。**归基础设施，不是业务** —— 理由见上。

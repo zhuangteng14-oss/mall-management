@@ -57,11 +57,86 @@
     <!-- ══════════════════════════════ tab 1 · 评论管理 ══════════════════════ -->
     <div v-show="tab === 'comments'" class="g-panel">
       <p class="g-hint">
-        方案 A4 把内容域钉死在 <b>13 条</b>端点，<code>/comment/list</code> 就<b>要求 <code>TargetId</code></b>
-        （缺参即拒 —— 后端刻意不让它退化成全表扫描）⇒ <b>没有「全站评论列表」这种东西</b>。
-        本栏因此是<b>按对象下钻</b>：先选一个对象，再看它下面的评论与回复。
-        从「举报中心」「待审图片」点「<b>看该对象评论</b>」可一键把对象带过来。
+        本栏是<b>两段口径</b>，别混读：上面「<b>全站评价</b>」走管理端专用端点
+        <code>/comment/adminList</code>（<b>自动加载</b>，全站所有 <code>Kind=review</code> 的行
+        —— 顶层评价与回复都在，按时间倒序）；下面「<b>按对象下钻</b>」才是公开面
+        <code>/comment/list</code> —— 那条<b>要求 <code>TargetId</code></b>
+        （缺参即拒，不让它退化成全表扫描），一次只拉一个对象下的。
+        ⚠️ 全站这一列<b>不展开图与赞踩明细</b>（那是下钻那条路的活）；要看全某一条，
+        点「<b>看该对象评论</b>」把它挂的那个对象带进下钻。
       </p>
+
+      <!-- ── ① 全站评价列表（管理端专用端点 `/comment/adminList`，自动加载）────────
+           ⚠️ 这是内容域**第 14 条**端点（2026-10-13 用户批的甲案），**不在**
+           `WebAuthConfig.AUTH_WHITELIST` 里 ⇒ 闸开着时匿名 401（与其余管理端端点同族）。
+           ⚠️ 它的行是**扁的**：`Replies` 不在（那是公开面 `list` 的组装），故上膛文案
+           不能说「连同 N 条回复」；也没展开图与赞踩明细。 -->
+      <div class="g-site">
+        <h3 class="g-h3">
+          全站评价
+          <span class="g-h3n">全站口径 · Kind=review · 顶层与回复都在 · 按时间倒序</span>
+        </h3>
+
+        <div class="g-site-bar">
+          <span class="g-dim">共 <b>{{ cl.total }}</b> 条</span>
+          <span class="g-grow"></span>
+          <label class="g-f g-f-narrow">
+            <span>上限</span>
+            <select v-model.number="cl.limit" @change="loadAllComments">
+              <option v-for="n in [20, 50, 100]" :key="n" :value="n">{{ n }}</option>
+            </select>
+          </label>
+          <button type="button" class="g-btn" :disabled="cl.loading" @click="loadAllComments">
+            <IconGlyph name="moderation" />{{ cl.loading ? '加载中…' : '刷新' }}
+          </button>
+        </div>
+
+        <p v-if="cl.err" class="g-err">{{ cl.err }}</p>
+        <p v-if="cl.loaded && !cl.rows.length && !cl.err" class="g-empty">全站还没有任何评价。</p>
+
+        <ol v-if="cl.rows.length" class="g-list">
+          <li v-for="row in cl.rows" :key="row.Id" class="g-row">
+            <div class="g-row-h">
+              <span class="g-kind" :class="row.Kind">{{ kindLabel(row.Kind) }}</span>
+              <b class="g-author">{{ row.Author || '（无作者）' }}</b>
+              <span v-if="anonymous(row)" class="g-tag g-tag-dim">匿名</span>
+              <span v-if="row.ProductCode" class="g-tag g-tag-dim"><code>{{ row.ProductCode }}</code></span>
+              <span v-if="row.Rating" class="g-stars">{{ stars(row.Rating) }}</span>
+              <span class="g-grow"></span>
+              <span class="g-dim">{{ toLocal(row.CreatedAt) }}</span>
+            </div>
+
+            <p class="g-body">{{ row.Content }}</p>
+
+            <div class="g-row-f">
+              <span class="g-dim">Id <code>{{ row.Id }}</code></span>
+              <span class="g-dim">对象 {{ row.TargetType }} / <code>{{ row.TargetId }}</code></span>
+              <span class="g-dim">赞 {{ row.LikeCount }} · 踩 {{ row.DislikeCount }}</span>
+              <span class="g-grow"></span>
+              <button type="button" class="g-link" @click="jumpToObject(row)">看该对象评论</button>
+              <button
+                type="button"
+                class="g-btn g-btn-danger"
+                :class="{ armed: armed === 'acl:' + row.Id }"
+                :disabled="cl.busyId === row.Id"
+                @click="deleteFlat(row, cl, 'acl:', loadAllComments)"
+              >
+                <IconGlyph name="no" />{{ armed === 'acl:' + row.Id ? '再点一次确认删除' : '删除' }}
+              </button>
+            </div>
+          </li>
+        </ol>
+
+        <p v-if="cl.loaded && cl.total > cl.rows.length" class="g-note">
+          只显示了前 {{ cl.rows.length }} 条（共 {{ cl.total }} 条）—— 把上限调大，或用下面的下钻收窄到某个对象。
+        </p>
+      </div>
+
+      <!-- ── ② 按对象下钻（公开面 `/comment/list`，**仍要求 `TargetId`**）────────── -->
+      <h3 class="g-h3">
+        按对象下钻
+        <span class="g-h3n">公开面 /comment/list · 一次一个对象 · 带评分分布与赞踩排行</span>
+      </h3>
 
       <form class="g-filters" @submit.prevent="loadComments()">
         <label class="g-f">
@@ -214,14 +289,117 @@
     <!-- ══════════════════════════════ tab 2 · 问答管理 ══════════════════════ -->
     <div v-show="tab === 'questions'" class="g-panel">
       <p class="g-hint">
-        与「评论管理」同一条口径：<b>按对象下钻</b>，没有全站提问列表。本栏多一个「解决状态」筛子，
-        并把 <b>超过 {{ TIMEOUT_MINUTES }} 分钟仍未解决</b>的提问标出
+        与「评论管理」同为<b>两段口径</b>：上面「<b>全站问答</b>」走管理端专用端点
+        <code>/comment/adminList</code>（<b>自动加载</b>，可按 <code>question</code> / <code>answer</code>
+        切、按解决状态筛）；下面「<b>按对象下钻</b>」走公开面 <code>/comment/list</code>
+        （<b>要求 <code>TargetId</code></b>）。
+        <b>超时未解决</b>的标记
         <span class="g-tag g-tag-warn"><IconGlyph name="wait" />超时未解决</span>
-        —— 那个判据与后端 <code>QuestionTimeoutJob</code> 的 <code>TIMEOUT_MINUTES</code> <b>同值同源</b>
-        （本页只读不写，真正的超时上报是那台 job 发 <code>question.timeout</code> 给管理端收件箱）。
+        由<b>后端下发</b>（<code>IsTimeout</code>）—— 判据与 <code>QuestionTimeoutJob.TIMEOUT_MINUTES</code>
+        <b>同源</b>（后端那段 SQL 谓词与 job 用的是<b>同一份字面量</b>），<b>本页只渲染、不自己算</b>。
+        ⇒ 下钻那一段（公开面不回这个字段）只显示「已 N 分钟」的<b>时间读数</b>，不再标红。
         ⚠️ a3 profile 下 <code>mall.downgrade.job.enabled=false</code> ⇒ <b>整台调度器不存在</b>，
-        本页的「超时」标记是按同一判据<b>现算</b>的，与 job 醒不醒无关。
+        但上面那个标记照常显示 —— 它是<b>读时算的</b>，与 job 醒不醒无关
+        （job 醒着才会 <b>发</b> <code>question.timeout</code> 通知）。
       </p>
+
+      <!-- ── ① 全站问答列表（管理端专用端点 `/comment/adminList`，自动加载）────────
+           ⚠️ `Kind=answer` 时**不发** `Solved` —— 后端对「非提问 + Solved」是**拒**不是忽略。 -->
+      <div class="g-site">
+        <h3 class="g-h3">
+          全站问答
+          <span class="g-h3n">全站口径 · 顶层与回复都在 · 按时间倒序</span>
+        </h3>
+
+        <div class="g-site-bar">
+          <span class="g-dim">共 <b>{{ ql.total }}</b> 条</span>
+          <span class="g-grow"></span>
+          <label class="g-f">
+            <span>类型</span>
+            <select v-model="ql.kind" @change="onQLKind">
+              <option value="question">question（提问）</option>
+              <option value="answer">answer（回答）</option>
+            </select>
+          </label>
+          <label class="g-f">
+            <span>解决状态</span>
+            <select v-model="ql.solved" @change="loadAllQuestions" :disabled="ql.kind !== 'question'">
+              <option value="">全部</option>
+              <option value="0">未解决</option>
+              <option value="1">已解决</option>
+            </select>
+          </label>
+          <label class="g-f g-f-narrow">
+            <span>上限</span>
+            <select v-model.number="ql.limit" @change="loadAllQuestions">
+              <option v-for="n in [20, 50, 100]" :key="n" :value="n">{{ n }}</option>
+            </select>
+          </label>
+          <button type="button" class="g-btn" :disabled="ql.loading" @click="loadAllQuestions">
+            <IconGlyph name="moderation" />{{ ql.loading ? '加载中…' : '刷新' }}
+          </button>
+        </div>
+
+        <p v-if="ql.err" class="g-err">{{ ql.err }}</p>
+        <p v-if="ql.loaded && !ql.rows.length && !ql.err" class="g-empty">
+          全站没有命中任何{{ ql.kind === 'answer' ? '回答' : '提问' }}。
+        </p>
+
+        <ol v-if="ql.rows.length" class="g-list">
+          <li v-for="row in ql.rows" :key="row.Id" class="g-row">
+            <div class="g-row-h">
+              <span class="g-kind" :class="row.Kind">{{ kindLabel(row.Kind) }}</span>
+              <b class="g-author">{{ row.Author || '（无作者）' }}</b>
+              <span v-if="anonymous(row)" class="g-tag g-tag-dim">匿名</span>
+              <template v-if="row.Kind === 'question'">
+                <span v-if="flag(row.IsSolved) || row.AcceptedReplyId" class="g-tag g-tag-ok">
+                  <IconGlyph name="ok" />已解决
+                </span>
+                <!-- ⚠️ `IsTimeout` 是**后端下发的**（与超时 job 同源），这里只渲染 —— 别改成
+                     拿 `CreatedAt` 自己比分钟数（那是第二处口径，见文件头那条裁定）。 -->
+                <span v-else-if="flag(row.IsTimeout)" class="g-tag g-tag-warn">
+                  <IconGlyph name="wait" />超时未解决 · 已 {{ minutesSince(row.CreatedAt) }} 分钟
+                </span>
+                <span v-else class="g-tag g-tag-dim">未解决 · 已 {{ minutesSince(row.CreatedAt) }} 分钟</span>
+              </template>
+              <span v-if="row.ParentId" class="g-tag g-tag-dim">
+                回复 · 父行 <code>{{ row.ParentId }}</code>
+              </span>
+              <span class="g-grow"></span>
+              <span class="g-dim">{{ toLocal(row.CreatedAt) }}</span>
+            </div>
+
+            <p class="g-body">{{ row.Content }}</p>
+
+            <div class="g-row-f">
+              <span class="g-dim">Id <code>{{ row.Id }}</code></span>
+              <span class="g-dim">对象 {{ row.TargetType }} / <code>{{ row.TargetId }}</code></span>
+              <span v-if="row.AcceptedReplyId" class="g-dim">已采纳 <code>{{ row.AcceptedReplyId }}</code></span>
+              <span class="g-grow"></span>
+              <button type="button" class="g-link" @click="jumpToObject(row)">看该对象问答</button>
+              <button
+                type="button"
+                class="g-btn g-btn-danger"
+                :class="{ armed: armed === 'aql:' + row.Id }"
+                :disabled="ql.busyId === row.Id"
+                @click="deleteFlat(row, ql, 'aql:', loadAllQuestions)"
+              >
+                <IconGlyph name="no" />{{ armed === 'aql:' + row.Id ? '再点一次确认删除' : '提删' }}
+              </button>
+            </div>
+          </li>
+        </ol>
+
+        <p v-if="ql.loaded && ql.total > ql.rows.length" class="g-note">
+          只显示了前 {{ ql.rows.length }} 条（共 {{ ql.total }} 条）—— 把上限调大，或用下面的下钻收窄。
+        </p>
+      </div>
+
+      <!-- ── ② 按对象下钻（公开面 `/comment/list`，**仍要求 `TargetId`**）────────── -->
+      <h3 class="g-h3">
+        按对象下钻
+        <span class="g-h3n">公开面 /comment/list · 一次一个对象 · 带解决率与应答深度</span>
+      </h3>
 
       <form class="g-filters" @submit.prevent="loadQuestions()">
         <label class="g-f">
@@ -294,9 +472,10 @@
             <span v-if="flag(row.IsSolved) || row.AcceptedReplyId" class="g-tag g-tag-ok">
               <IconGlyph name="ok" />已解决
             </span>
-            <span v-else-if="isOverdue(row)" class="g-tag g-tag-warn">
-              <IconGlyph name="wait" />超时未解决 · 已 {{ minutesSince(row.CreatedAt) }} 分钟
-            </span>
+            <!-- ⚠️ 这里**刻意不标红**：公开面 `/comment/list` 不回 `IsTimeout`，而本页不许自己拿
+                 `CreatedAt` 与 30 分钟去比（那是第二处口径 —— 与 job 漂开时两边都不报错，
+                 只是「列表标红的」和「job 报过的」悄悄变成两批记录）。
+                 超时标记只在上面那段全站列表里、由后端下发；这段只给**时间读数**。 -->
             <span v-else class="g-tag g-tag-dim">未解决 · 已 {{ minutesSince(row.CreatedAt) }} 分钟</span>
             <span class="g-grow"></span>
             <span class="g-dim">{{ toLocal(row.CreatedAt) }}</span>
@@ -712,14 +891,15 @@
 </template>
 
 <!--
-  消息与内容治理页（C3 块 6 · commit 6，2026-10-13）—— `/admin/business/moderation` 的真页。
+  消息与内容治理页（C3 块 6 · commit 6 + 整改补笔「管理端全站列表」，2026-10-12/13）
+  —— `/admin/business/moderation` 的真页。
 
   它是**占位里第六个换成真页的**（原走 `StubPage.vue`，路由记录 `router/index.js` 里
   `component: AdminStub` → 懒加载本组件，**同行替换**）。前五个依次是 `AuditPage`（批 A）、
   `AccountsPage`（块 2）、`CatalogPage`（块 3）、`OrderPage`（块 4）、`MarketingPage`（块 5）；
   第七个是 `NotifyPage`（块 1 · I2，位置在它下面一行）。
 
-  【它消费的是「内容域 13 条」全部】方案 A4 把内容域钉死在 13 条端点，本页是它们的
+  【它消费的是「内容域 14 条」】方案 A4 把内容域钉死在 13 条端点，本页是它们的
   **唯一管理端消费面**：
     · `/comment/list` · `/comment/delete`（评论管理 / 问答管理）—— `api/comment.js`
     · `/comment/imageReview`（待审图片，一条端点三个动作）—— `api/comment.js`
@@ -728,22 +908,34 @@
   另加**公共层**的 `/notification/*`（消息管理那一栏 —— 管理端共享收件箱 `ToId='*'`）：
   那是「收」，与 `NotifyPage.vue` 的「发」（`/admin/notify/*`）**是两个 Controller**，
   本页与那页**有意不合并**（口径同 `api/notify.js` 文件头）。
+  <p>⚠️ **2026-10-13 起多了一条 `/comment/adminList`（内容域第 14 条）** —— 见下面那节。
 
   【六个 tab 的「可操作」判据】方案 §五 逐字要求六个页签**都可操作**（不是六个只读列表）：
     评论管理 → 删（顶层连带回复 / 回复只删自己）· 问答管理 → 提删 · 待审图片 → 通过 / 驳回·
     举报中心 → 通过（删内容 + 警告 + 满 3 封号）/ 驳回 · 敏感词库 → 加词（并扫历史）/ 删词 ·
     消息管理 → 标记已读 / 全部已读。
 
-  【⚠️ 「评论管理 / 问答管理」为什么是**下钻**而不是全站列表】方案 §五 写的是
-  「评论管理（全站评论列表 / 删）」与「问答管理（超时未解决 / 手动删）」，但——
-    · 同一份方案 A4 把内容域端点钉死在 **13 条**，其中**没有**任何「全站评论 / 提问列表」；
-    · 唯一的列表端点 `/comment/list` **要求 `TargetId`**（缺参即拒，`CommentSmokeTest`
-      的 `listWithoutTargetIdIsRejected` 就是钉这一条，后端给了「不让它退化成全表扫描」的理由）。
-    ⇒ 要兑现「全站列表」就得**加第 14 个端点**，那是**改契约**（本笔唯一被授权的契约改动只有
-      `comment.on.user` 的删 / `comment.on.post`+`comment.reply` 的加，见 commit 1）。
-      **不加。** 落到「按对象下钻 + 从一个对象跳到另一个对象」——
-      「举报中心 / 待审图片」两栏各自带出了 `TargetType` / `TargetId`，点一下就能把对象喂进
-      评论管理（`jumpToObject`），这条动线把「找一条评论」实际要走的步骤补齐了。
+  【⚠️ 「评论管理 / 问答管理」的两段口径 —— 2026-10-13 起**有**全站列表了】
+  方案 §五 写的是「评论管理（全站评论列表 / 删）」与「问答管理（超时未解决 / 手动删）」，
+  但方案 A4 把内容域端点钉死在 **13 条**，其中**没有**任何「全站评论 / 提问列表」；唯一的列表端点
+  `/comment/list` **要求 `TargetId`**（缺参即拒，`CommentSmokeTest` 的 `listWithoutTargetIdIsRejected`
+  就是钉这一条，后端给了「不让它退化成全表扫描」的理由）。第一版因此**只**落了「按对象下钻」，
+  并留了一段「为什么不加第 14 个端点」的说明。
+  <p>⚠️ <b>那段说明已经在 2026-10-13 被推翻了</b>：用户发现「评论管理 / 问答管理」两栏**摸不到全站待办**
+  （另四栏都有全站列表），**批了甲案 —— 新增第 14 条端点 `/comment/adminList`**。故本页现在是**两段**：
+    · ① <b>全站列表</b>（`Kind=review` / `question` / `answer`，顶层与回复都回，**自动加载**）
+      —— 走 `commentAdminList`，见 `api/comment.js` 的 `adminList`；
+    · ② <b>按对象下钻</b>（`/comment/list`，**仍要求 `TargetId`** —— 那条约束一个字没动）
+      —— 带评分分布 / 赞踩排行 / 解决率 / 应答深度四张图与每条的回复展开。
+  <p>两段**不是**重复：① 回答「全站有没有该我处理的东西」，② 回答「这一个对象下具体长什么样」。
+  「举报中心 / 待审图片」两栏的「看该对象评论」走 `jumpToObject` 把对象喂进 ②（① 的行也能这么做）
+  —— 这条动线从「找一条评论」变成「从一条评论跳到它所属的对象」。
+  <p>⚠️ <b>① 的「超时未解决」标记必须由后端下发</b>（`IsTimeout`）：用户 2026-10-13 裁定
+  「判据与 `QuestionTimeoutJob.TIMEOUT_MINUTES` 同源 ⇒ 后端下发布尔，前端只渲染」。
+  故本页**不再持有** 30 这个数、**不再有** `isOverdue` 那种前端判据（曾经有过，已删）；
+  `minutesSince()` 留着是因为它是**时间读数**（「已 N 分钟」）不是判据。
+  ② 那段（公开面不回 `IsTimeout`）**只显示时间读数、不标红** —— 少了这个标记，但换来了
+  「全仓只有一处说得出『多久算超时』」。
 
   【⚠️ 本页**没有** `confirm()`/`alert()`】`eslintConfig` 的 `env` 里没有 `browser`（用浏览器
   全局会触发 `no-undef`），且本仓管理页的既有惯例（`OrderPage.vue:638-642` 那条 ⚠️）就是
@@ -766,7 +958,7 @@
 import { computed, onMounted, reactive, ref } from 'vue'
 import { getUsername } from '../../api/auth'
 import { assetOf } from '../../api/http'
-import { imageReview, list as commentList, remove as commentRemove } from '../../api/comment'
+import { adminList as commentAdminList, imageReview, list as commentList, remove as commentRemove } from '../../api/comment'
 import { handle as reportHandle, list as reportList } from '../../api/report'
 import { add as sensitiveAdd, list as sensitiveList, remove as sensitiveRemove } from '../../api/sensitive'
 import { notifyList, notifyRead, notifyReadAll } from '../../api/notify'
@@ -775,13 +967,15 @@ import DonutChart from '../../components/charts/DonutChart.vue'
 import BarChart from '../../components/charts/BarChart.vue'; import IconGlyph from '../../components/ui/IconGlyph.vue'
 
 /**
- * 问答超时阈值 —— 与后端 `QuestionTimeoutJob.TIMEOUT_MINUTES` **同值同源**（方案 §4.2 写死的 30）。
- * ⚠️ 本页**只读不写**：真正的「超时上报」是那台 job 发 `question.timeout` 进管理端收件箱。
- *    这里的红标是**按同一判据现算**的 —— 后台调度器在 a3 profile 下整台不存在
- *    （`mall.downgrade.job.enabled=false` 关掉了 `@EnableScheduling` 的载体类），
- *    但「一条 40 分钟没人答的提问该被看见」这件事不该跟着调度器一起消失。
+ * ⚠️ 本页**曾经**在这里放了一个 `TIMEOUT_MINUTES = 30` 常量 + 一个 `isOverdue(row)` 判据
+ * （前端自己拿 `CreatedAt` 比 30 分钟）。<b>2026-10-13 用户裁定已删</b>：
+ * 判据只能有一处 —— 后端在 `/comment/adminList` 下发 `IsTimeout`
+ * （它的 SQL 与 `QuestionTimeoutJob` 共用**同一份字面量谓词**，见 `CommentDao.TIMED_OUT_QUESTION_PREDICATE`），
+ * 前端**只渲染**。两处各算一遍必然漂开，而漂开时两边都不报错。
+ * <p>`minutesSince()` <b>保留</b> —— 它是**时间读数**（「已 N 分钟」）不是判据，
+ * 谁也用不着它判「是不是超时了」。真正的「超时上报」（发 `question.timeout` 进管理端收件箱）
+ * 是那台 job 的事，与本页无关。
  */
-const TIMEOUT_MINUTES = 30
 
 /** 管理端共享收件箱的哨兵收件人 —— 与后端 `MerchantApplicationController.ADMIN_INBOX_ID` 逐字一致。 */
 const ADMIN_INBOX = { toId: '*', toType: 'admin' }
@@ -836,18 +1030,12 @@ function toLocal(sqlTime) {
   )
 }
 
-/** 距现在多少分钟（向上取整）。两条时间都是**绝对时刻**（库内文本补 `Z` 后即真 UTC），故可直接相减。 */
+/** 距现在多少分钟（四舍五入）。两条时间都是**绝对时刻**（库内文本补 `Z` 后即真 UTC），故可直接相减。 */
 function minutesSince(sqlTime) {
   if (!sqlTime) return 0
   const t = new Date(`${String(sqlTime).replace(' ', 'T')}Z`).getTime()
   if (Number.isNaN(t)) return 0
   return Math.max(0, Math.round((Date.now() - t) / 60000))
-}
-
-/** 「超时未解决」= 未解决 且 已过 30 分钟。判据写在**一处**，模板两处引用都走它。 */
-function isOverdue(row) {
-  if (flag(row.IsSolved) || row.AcceptedReplyId) return false
-  return minutesSince(row.CreatedAt) > TIMEOUT_MINUTES
 }
 
 /** 事件类型的稳定配色（照 `NotifyPage.hue` —— 同一 code 永远同一个色相）。 */
@@ -945,9 +1133,15 @@ function badgeOf(key) {
 /** 切 tab：该栏还没加载过就**顺手拉一次**（`loaded` 只置一次，切回来不会重复请求）。 */
 function switchTab(key) {
   tab.value = key
-  if (key === 'comments' && !c.loaded) loadComments({ silent: true })
-  else if (key === 'questions' && !q.loaded) loadQuestions()
-  else if (key === 'images' && !im.loaded) loadImages()
+  // 「评论管理 / 问答管理」各有**两段**：① 全站列表（自动加载）+ ② 按对象下钻（`TargetId` 空着
+  // 就什么都不做 —— 故那两处传 `silent: true`，别让「还没下钻」在页顶弹一条红字）。
+  if (key === 'comments') {
+    if (!cl.loaded) loadAllComments()
+    if (!c.loaded) loadComments({ silent: true })
+  } else if (key === 'questions') {
+    if (!ql.loaded) loadAllQuestions()
+    if (!q.loaded) loadQuestions({ silent: true })
+  } else if (key === 'images' && !im.loaded) loadImages()
   else if (key === 'reports' && !re.loaded) loadReports()
   else if (key === 'sensitive' && !sw.loaded) loadWords()
   else if (key === 'messages' && !ms.loaded) loadMessages()
@@ -994,6 +1188,85 @@ async function loadCounts() {
 }
 
 // ── tab 1 · 评论管理 ─────────────────────────────────────────────────────────
+
+// ① 全站评价列表（管理端专用端点 `/comment/adminList`，**自动加载**）
+//    ⚠️ 与下面 ② 的 `c` / `loadComments` 是**两条路、两个端点**，别合并：
+//    ② 走公开面 `/comment/list`（要求 `TargetId`、带 `Replies` / 图 / 赞踩 / stats），
+//    ① 走管理端 `/comment/adminList`（全站、扁行、带后端下发的 `IsTimeout`）。
+const cl = reactive({ rows: [], total: 0, limit: 50, loading: false, loaded: false, err: '', busyId: null })
+
+/**
+ * 拉「全站评价」（`Kind` 恒 `review` —— 本段就是评价栏）。
+ *
+ * ⚠️ 失败**只落在本段头上的 `g-err`**，**不** `say('bad', …)`：这段是**自动加载**的
+ * （挂载 / 切 tab 就发），冷进页面或闸开着没登录时它本来就可能失败 ——
+ * 那种情况该显示在它自己那一格里，而不是在页顶飘一条与当前动作无关的红字。
+ */
+async function loadAllComments() {
+  cl.loading = true
+  cl.err = ''
+  try {
+    const data = await commentAdminList({ kind: 'review', limit: cl.limit, offset: 0 })
+    if (!data || !data.success) {
+      cl.err = (data && data.msg) || '加载失败'
+      cl.rows = []
+      return
+    }
+    cl.rows = Array.isArray(data.list) ? data.list : []
+    cl.total = num(data.total)
+    cl.loaded = true
+  } catch (e) {
+    cl.err = failOf(e)
+    cl.rows = []
+  } finally {
+    cl.loading = false
+  }
+}
+
+/**
+ * 删「全站列表」里的一条（① 的两段，评论与问答共用）。
+ *
+ * ⚠️ 与 ② 的 `deleteContent` / `deleteQuestion` 走**同一个端点**（`/comment/delete`）、
+ *    同一条 `Account` 判据，差别只在：
+ *    · 这里的行是**扁的** —— `Replies` 不在（那是公开面 `list` 的组装）⇒ 上膛文案
+ *      **说不出**「连同 N 条回复」，只能说「若它是顶层行，下面的回复会一并删除」；
+ *    · 删完重拉的是**这一段自己的**列表（`reload`），不是 ② 那一段；
+ *    · 上膛键前缀与 ② 的 `c:` / `q:` **分开**（`acl:` / `aql:`）—— 同一条 Id 在两段里
+ *      可能同时出现，共用一个键会让「在 ① 上膛」把 ② 那颗按钮也点亮。
+ *
+ * @param {object}   row    列表里的一行（顶层或回复）
+ * @param {object}   box    那一段的状态（`cl` / `ql`）—— 借它的 `busyId` 做按钮禁用
+ * @param {string}   prefix 上膛键前缀（`acl:` / `aql:`）
+ * @param {Function} reload 删完重拉哪一段（传函数引用，不是它的返回值）
+ */
+async function deleteFlat(row, box, prefix, reload) {
+  const login = getUsername()
+  if (!login) {
+    say('bad', '未取得当前管理员的登录名（会话里没有 username）⇒ 不发请求。`/comment/delete` 需要 Account。')
+    return
+  }
+  const isReply = row.ParentId !== null && row.ParentId !== undefined
+  if (!confirmTwice(prefix + row.Id, isReply
+    ? `再点一次以确认：删除回复 Id ${row.Id} —— 它下面没有别的楼层，只删这一条。`
+    : `再点一次以确认：删除 Id ${row.Id}。⚠️ 若它是顶层行，它下面的**全部回复会一并删除**（这一段列表不展开回复数，删完看回体里的条数）。`)) return
+  box.busyId = row.Id
+  try {
+    const data = await commentRemove(login, row.Id)
+    if (!data || !data.success) {
+      say('bad', (data && data.msg) || '删除失败')
+      return
+    }
+    say('ok', `已删除 Id ${row.Id}${data.replies ? `，连带回复 ${data.replies} 条` : ''}。列表已刷新。`)
+    await reload()
+    await loadCounts()
+  } catch (e) {
+    say('bad', `删除失败：${failOf(e)}`)
+  } finally {
+    box.busyId = null
+  }
+}
+
+// ② 按对象下钻（公开面 `/comment/list`）
 const cs = reactive({ targetType: 'goods', targetId: '', kind: 'review', sort: 'new', limit: 20 })
 const c = reactive({ rows: [], total: 0, loading: false, loaded: false, err: '', busyId: null, stats: {} })
 
@@ -1107,11 +1380,64 @@ async function deleteContent(row, isReply) {
 }
 
 // ── tab 2 · 问答管理 ─────────────────────────────────────────────────────────
+
+// ① 全站问答列表（管理端专用端点 `/comment/adminList`，**自动加载**）
+const ql = reactive({
+  rows: [], total: 0, kind: 'question', solved: '', limit: 50,
+  loading: false, loaded: false, err: '', busyId: null,
+})
+
+/**
+ * 拉「全站问答」。
+ *
+ * ⚠️ `Solved` **只对 `Kind=question` 有意义**：`Kind=answer` 时**一个字节都不发** ——
+ *    后端收到「非提问 + Solved」是**拒**（`解决状态只对提问有意义（Kind=question）…`），
+ *    不是忽略。发了就是自找一条红。
+ */
+async function loadAllQuestions() {
+  ql.loading = true
+  ql.err = ''
+  try {
+    const data = await commentAdminList({
+      kind: ql.kind,
+      solved: ql.kind === 'question' ? (ql.solved || undefined) : undefined,
+      limit: ql.limit,
+      offset: 0,
+    })
+    if (!data || !data.success) {
+      ql.err = (data && data.msg) || '加载失败'
+      ql.rows = []
+      return
+    }
+    ql.rows = Array.isArray(data.list) ? data.list : []
+    ql.total = num(data.total)
+    ql.loaded = true
+  } catch (e) {
+    ql.err = failOf(e)
+    ql.rows = []
+  } finally {
+    ql.loading = false
+  }
+}
+
+/**
+ * 类型换了（`question` ⇄ `answer`）：`answer` 没有「解决状态」可言 ⇒ 把筛子清掉再拉
+ * —— 别留一个「看起来还生效、其实后端根本不认」的空壳（那个 `<select>` 同时也被 `disabled`）。
+ */
+function onQLKind() {
+  if (ql.kind !== 'question') ql.solved = ''
+  loadAllQuestions()
+}
+
+// ② 按对象下钻（公开面 `/comment/list`）
 const qs = reactive({ targetType: 'goods', targetId: '', solved: '', limit: 20 })
 const q = reactive({ rows: [], total: 0, loading: false, loaded: false, err: '', busyId: null, stats: {} })
 
-async function loadQuestions() {
+/** `silent=true` = 由**自动**路径调（切 tab 时）：`TargetId` 还空着只说明「还没下钻」，
+ *  不是失败 ⇒ 不弹红条，让面板停在模板里那条灰提示上（与 `loadComments` 同一处置）。 */
+async function loadQuestions({ silent = false } = {}) {
   if (!qs.targetId) {
+    if (silent) return
     q.err = '缺少参数：TargetId —— 本栏按对象下钻，先填一个对象 ID。'
     say('bad', q.err)
     return
@@ -1504,11 +1830,14 @@ async function markAllRead() {
   }
 }
 
-// ── 跨栏跳转：从「举报中心 / 待审图片」带着对象去评论管理 ─────────────────────
+// ── 跨栏跳转：把一行带出来的对象喂进「按对象下钻」 ───────────────────────────
 /**
- * 「看该对象评论」—— 把这一行带出来的 `TargetType` / `TargetId` 喂进评论管理并**立刻加载**。
- * 这条动线是本页对「没有全站列表」那个缺口的补法：管理员实际要找一条评论时，
- * 手里往往先有一条举报单或一张待审图 —— 从那里点进来比让人手抄业务号可靠。
+ * 「看该对象评论 / 看该对象问答」—— 把这一行带出来的 `TargetType` / `TargetId` 喂进
+ * 评论管理的**下钻那一段**（②）并立刻加载。
+ *
+ * ⚠️ 入口现在有**四类**行：举报中心、待审图片，以及「评论管理 / 问答管理」两栏**自己的
+ * 全站列表**（①）。后两类下这是**同一栏内**的跳转（tab 不变）—— 那一下必须发一条 flash，
+ * 否则点了按钮页面看着毫无变化（真正变的在下面那一段）。
  */
 function jumpToObject(row) {
   const tt = row.TargetType || 'goods'
@@ -1523,18 +1852,24 @@ function jumpToObject(row) {
     say('bad', `「${tt}」这一档没有可下钻的对象 ID（举报单只存了被举报对象的 Id，没存它挂在谁身上）—— 请手动选对象。`)
     return
   }
+  const wasHere = tab.value === 'comments'
   cs.targetType = tt
   cs.targetId = String(tid)
   cs.kind = ''
   tab.value = 'comments'
+  say('ok', `${wasHere ? '已把对象' : '已切到「评论管理」，把对象'} ${tt} / ${tid} `
+    + '填进下面的「按对象下钻」，正在加载…')
   loadComments()
 }
 
 onMounted(async () => {
   await loadCounts()
-  // 冷进页面时 `TargetId` 必然是空的 ⇒ 只拉状态条，**不**调 `loadComments()`：
-  // 那一下会把「还没下钻」当成失败，在页面顶部弹一条红字（手验 `ui-01-overview.png` 实拍到）。
-  await loadComments({ silent: true })
+  // 本栏（默认 tab）的两段：① 全站列表**自动加载**；② 下钻那段**不** ——
+  // 冷进页面时 `TargetId` 必然是空的，调了会把「还没下钻」当成失败、
+  // 在页面顶部弹一条红字（手验 `ui-01-overview.png` 实拍到过），故传 `silent: true`。
+  // ⚠️ 「问答管理」那两段**不在这里预拉**：它的内容只在切到那个 tab 时才显示，
+  //    由 `switchTab` 懒加载（少两个冷进页面的请求）。
+  await Promise.all([loadAllComments(), loadComments({ silent: true })])
 })
 </script>
 
@@ -1663,6 +1998,22 @@ onMounted(async () => {
   flex-wrap: wrap;
 }
 .g-h3n { font-size: var(--fs-xs); font-weight: 400; color: var(--ink-3); }
+
+/* ── 「评论管理 / 问答管理」两栏的**全站列表**那一段（①）────────────────────
+   它下面是同一栏的「按对象下钻」（②）—— 两段是**两个端点、两条口径**，用一条实线分开，
+   免得读者把「全站共 N 条」读成「这个对象下共 N 条」。 */
+.g-site {
+  padding-bottom: var(--s5);
+  margin-bottom: var(--s5);
+  border-bottom: 1px solid var(--line-2);
+}
+.g-site-bar {
+  display: flex;
+  align-items: flex-end;
+  gap: var(--s3);
+  flex-wrap: wrap;
+  margin-bottom: var(--s3);
+}
 
 /* 三态计数小表（待审图片那一栏的右半） */
 .g-mix { list-style: none; margin: 0; padding: 0; }

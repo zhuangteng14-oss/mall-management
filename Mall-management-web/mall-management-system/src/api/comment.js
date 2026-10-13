@@ -1,7 +1,7 @@
-// src/api/comment.js —— 内容域「评论 / 问答 / 回复 / 赞踩 / 图片审核」API 封装
-// （C3 块 6 · commit 1 评论 + commit 2 问答 + 整改 commit 4 图片审核；2026-10-12/13）。
+// src/api/comment.js —— 内容域「评论 / 问答 / 回复 / 赞踩 / 图片审核 / 管理端全站列表」API 封装
+// （C3 块 6 · commit 1 评论 + commit 2 问答 + 整改 commit 4 图片审核 + 整改补笔 管理端全站列表；2026-10-12/13）。
 //
-// 七个端点、一个模块（后端 `CommentController`，`@RequestMapping("/comment")`，七条全 POST）：
+// 八个端点、一个模块（后端 `CommentController`，`@RequestMapping("/comment")`，八条全 POST）：
 //   list        —— 唯一调用方 `views/ProductPage.vue`（「累计评价」页签下的评论 / 问答两个子 tab）。
 //   add         —— 发表：评论 / 回复 / 提问 / 回答**共用一个端点**（方案 §三的端点表逐字）。
 //   delete      —— 作者 / 管理员删一条（顶层连带回复）。
@@ -9,6 +9,9 @@
 //   like        —— 赞 / 踩（顶层与回复都适用）。
 //   myOrders    —— 发表评论时「选对应商品」的下拉（本人**已确认收货**的历史订单里的商品）。
 //   imageReview —— 图片审核（**管理端**，整改 commit 4）：list / approve / reject 三动作。
+//   adminList   —— **管理端全站列表**（整改补笔，2026-10-13；内容域第 14 条）：`Kind` 筛
+//                  review / question / answer，顶层与回复都回，带后端下发的 `IsTimeout`。
+//                  唯一调用方是管理端「评论管理 / 问答管理」两栏。
 //
 // 为什么单列一个模块（而不是在 view 里直接 `http.post`）：三条理由与 `api/shop.js` / `api/marketing.js`
 // 逐字同款 ——
@@ -22,12 +25,13 @@
 // ⚠️ 与 `api/shop.js` / `api/order.js` / `api/marketing.js` 的 `q()` / `post()` 是**同形复制、
 //    不是共享** —— 本仓 `api/*.js` 各模块自带这两个内联函数，未抽公共模块。
 //
-// ⚠️ **七条里只有 `list` 是公开面**（块 6 唯一进白名单的一条）：`/comment/list` 已进
+// ⚠️ **八条里只有 `list` 是公开面**（块 6 唯一进白名单的一条）：`/comment/list` 已进
 //    `WebAuthConfig.AUTH_WHITELIST`（**13 → 14 条**）⇒ **未登录也能打** —— 商品详情页
-//    （`meta.public`）的评论 / 问答区在匿名状态下照常加载。**另六条**
-//    （add / delete / **accept** / like / myOrders / **imageReview**）**仍不在白名单**
+//    （`meta.public`）的评论 / 问答区在匿名状态下照常加载。**另七条**
+//    （add / delete / **accept** / like / myOrders / **imageReview** / **adminList**）**仍不在白名单**
 //    （匿名调必 401，与 `cart` / `shop.follow` 同族）。
-//    ⚠️ 别因为「都在 `/comment` 下」就把七条一起当公开面。
+//    ⚠️ 别因为「都在 `/comment` 下」就把八条一起当公开面。
+//    ⚠️ 其中两条是**管理端**端点（`imageReview` / `adminList`）—— 它们与「写端点」不是一回事：**不收 `Account`**。
 //
 // ⚠️ **五条写端点的判据是「登录名」，不是业务号**：`comment.AuthorId` / `comment_like.UserId`
 //    存的是 `login.UserName`（见 `CommentDao` 类注释），后端跑的是
@@ -270,6 +274,65 @@ export function imageReview(p) {
     Action: p.action,
     Id: p.id,
     Status: p.status,
+    Limit: p.limit,
+    Offset: p.offset,
+  }))
+}
+
+/**
+ * **管理端**全站列表（整改补笔，2026-10-13；内容域**第 14 条**端点）。
+ *
+ * <p>它补的是「评论管理 / 问答管理两栏看不到全站待办」这个缺口 —— 公开面 {@link list} 强制要
+ * `TargetId`（一次只拉一个对象下的），管理端要的是「全站所有评价 / 所有提问」。
+ * ⚠️ 公开面那条约束**没有**为它放宽（本函数与 `list` 是两个端点，各走各的口径）。
+ *
+ * <h2>【⚠️ 不在白名单，匿名调会 401】</h2>
+ * `WebAuthConfig.AUTH_WHITELIST` 里 `/comment` 域**只有** `/comment/list` 一条；
+ * 本端点走 `AuthInterceptor`（注册在 `/**`）⇒ 闸开着（默认 profile / prod）时匿名请求 401。
+ * ⚠️ **a3 profile 下它匿名可达**（`app.auth.enabled=false`）—— 那是**验证环境**的既定形态、
+ * 全仓每一个管理端端点都如此，**不是**本端点开的口子，别据此以为它「其实是公开面」。
+ *
+ * <h2>【⚠️ 它不收 `Account`】</h2>
+ * 与 {@link imageReview} 同族：管理端端点靠「路由受保护 + 会话」识别处理人，
+ * **不由入参声明**。别顺手给它加一个 `account` —— 加了只会变成「谁都能传自己的名字」的假闸。
+ *
+ * @param {object} p
+ * @param {'review'|'question'|'answer'} p.kind ⚠️ **必填**（与公开面 `list` 相反：
+ *        那条省略 = 不筛）。后端缺它 ⇒ `缺少参数：Kind（只能是 review / question / answer）`；
+ *        未知值 ⇒ `未知的评论类型：…`。理由：它一次能拉全站**所有**内容，省了 Kind 就是
+ *        「点开就拉全表」；两个 tab 各有各的语义，没有「都要」这个用法。
+ * @param {string} [p.targetType] / @param {string|number} [p.targetId] 可选**成对**收窄：
+ *        两个都给 = 只看某个对象下的；两个都不给 = **全站**。
+ *        ⚠️ **只给一个 ⇒ 后端拒**（`TargetType 与 TargetId 要么都给、要么都不给（都不给 = 全站）`）——
+ *        静默当「全站」的话，管理员以为自己筛到某个商品下、实际看到的是全站列表，
+ *        这种筛错的读数**没有任何迹象**。
+ * @param {string} [p.solved] 仅 `kind='question'` 有意义：`'1'` 已解决 / `'0'` 未解决。
+ *        ⚠️ 给别的 kind 一并传它 ⇒ **后端拒**（`解决状态只对提问有意义（Kind=question）…`），
+ *        不是静默忽略 —— 静默忽略会让管理员勾着「未解决」看到一屏评价 / 回答，
+ *        而每一条都长得像「未被解决」的提问，那是**假读数**。
+ * @param {number} [p.limit]  页大小（默认 20，上限 **100** —— 超了按 100 收）。
+ * @param {number} [p.offset] 偏移（默认 0）。
+ * @returns {Promise<{success:boolean, list:Array, total:number, limit:number, offset:number,
+ *                    msg?:string}>}
+ *          <p>⚠️ **行里有 `IsTimeout`（后端下发的布尔）** —— 只有 `kind='question'` 的行才可能为真，
+ *          判据与 `QuestionTimeoutJob.TIMEOUT_MINUTES`（30 分钟）**同源**
+ *          （后端 SQL 里那个 `CASE WHEN` 与超时 job 的 `WHERE` 用的是同一段谓词）。
+ *          ⇒ **前端只渲染它，别自己拿 `CreatedAt` 算一遍**：两处各算一遍必然会漂
+ *          （常量改了、时钟差一点、边界含不含都会让「列表标了超时但 job 没动它」成为可能）。
+ *          <p>⚠️ 本列表含**顶层与回复**（所以 `kind='answer'` 才有东西）—— 与公开面
+ *          `list` 的「顶层 + 顶层自带 Replies」结构**不同**：这里每一行都是平的，
+ *          **不**带 `Replies`。要做「看该对象下的评论 / 问答」，用 `list` 下钻，别在本地拼。
+ *          <p>⚠️ 匿名行**照样是匿名的**（`Author` 打码、`AuthorId` 为 `null`）—— 管理端**不**因此
+ *          看到真实作者；要看作者请在对象页里看（口径与公开面一致，见 `list` 的 ⚠️）。
+ *          <p>⚠️ 排序固定 `created_at DESC`，**没有** `sort` 入参 —— 免得翻页时次序漂
+ *          （`hot` 的次序会随着别人点赞而变，翻到第二页会漏行 / 重复行）。
+ */
+export function adminList(p) {
+  return post(endpoints.comment.adminList, q({
+    Kind: p.kind,
+    TargetType: p.targetType,
+    TargetId: p.targetId,
+    Solved: p.solved,
     Limit: p.limit,
     Offset: p.offset,
   }))

@@ -22,7 +22,7 @@ package com.minke.mallmanagement.admin;
  * 其余 15 个改库端点**随各自那一笔**挂（横切本来就该跟着业务改动走，见
  * {@code docs/agent/c3-modules.md} §11 与 {@code slot-registry.md} 末条）。
  * ⇒ 每挂一个新勾，**在这里加一条**。今天有 2 条：{@link #GOODS_UPDATE}（批 A 的样板）
- * 与 {@link #NOTIFICATION_SEND}（块 1 · I2 的**第二个**挂钩点）。
+ * 与 {@link #NOTIFICATION_SEND}（块 1 · I2 的**第二个**挂钩点）。⚠️ 上面那两句说的是**开笔当时**的实况，别拿它当今天的清单：此后块 2～6 各自把自己那一笔挂了上来，**今天共 42 条**（数常量、不数调用点 —— {@code coupon.stop} 等一条 tag 覆盖两个端点，{@code seckill.*} 三个 tag 挂在同一个 Controller 的三个方法上）；**清单就是下面那些常量**，本段只是「为什么一开始只有 1 条」的由来。
  */
 public final class AuditActions {
 
@@ -230,6 +230,46 @@ public final class AuditActions {
 
     /** 买家**下单时核销**一张优惠券 —— {@code POST /order/orderAdd}（带 {@code CouponId}）。 */
     public static final String COUPON_REDEEM = "coupon.redeem";
+
+    // ==================== C3 块 6（内容块，2026-10-13 整改补笔）====================
+    // 五个审核 / 治理动作。域段是**表名**（`comment_image` / `sensitive_word` / `report`），
+    // 同块 2～5 的口径。
+    // ⚠️ 这一批里有三条**不可逆**动作（驳回图 = 真删仓库文件 / 删词 / 处理举报 = 真删内容）
+    //    —— 审计行是它们**事后唯一**的追溯依据：东西被删了，只有这张表还记着「谁在什么时候
+    //    删了什么」，以及删之前的快照。
+    // ⚠️ TargetId 一律传**业务键**（同块 2～5、TD-20 那条），三处各不相同、各有理由：
+    //    · 词 → {@code Word} 词面本身：`sensitive_word.Word` 上有唯一键，**它就是这个词的身份**；
+    //      自增 `Id` 反而会在「删了再加同一个词」时指向另一行；
+    //    · 图 → `ImageUrl` 的**尾段（落盘名）**：那张图唯一的稳定标识（URL 前缀会随部署变）；
+    //    · 举报单 → 自增 `Id`。⚠️ **这一处是例外，如实记下**：`report` 表没有任何业务串
+    //      （只有举报人 / 被举报对象 / 理由三列，后两者都在 AfterJson 里），
+    //      而管理端页面上认的就是这个 Id ⇒ 用它与列表对得上。举报单是运行期数据、
+    //      从不被重新播种 ⇒ 这里没有块 2 那种「重导换号」的风险（那是业务键规则的由来）。
+    // ⚠️ `report.handle` **一条 tag 覆盖通过 / 驳回两条路**（口径同 `seckill.review` /
+    //    `merchant.apply.audit`：那两张单的「审」也是一个动作、结论进 AfterJson）。
+    //    驳回**不**另立 tag 的理由：它改的是同一个对象的同一个字段（`report.Status`），
+    //    分不分都能从 AfterJson 的 `Approve` 读出来；而图片那两条**分**，是因为驳回
+    //    多了一个不可逆的副作用（删文件）—— 要能一条筛选查出「删过哪些文件」。
+
+    /** 管理员**通过**一张评论图（{@code pending → approved}，图从此对外可见）—— {@code POST /comment/imageReview}。 */
+    public static final String COMMENT_IMAGE_APPROVE = "comment.image.approve";
+
+    /** 管理员**驳回**一张评论图（{@code pending → rejected}，**并真删仓库文件**）—— {@code POST /comment/imageReview}。 */
+    public static final String COMMENT_IMAGE_REJECT = "comment.image.reject";
+
+    /**
+     * 管理员加一个敏感词 —— {@code POST /sensitive/add}。**新增类**动作 ⇒ {@code BeforeJson} 恒 NULL。
+     *
+     * <p>⚠️ 它**有副作用**：同一个请求里会扫一遍历史评论并就地打码（方案 §4.5）。
+     * 那个条数进 {@code AfterJson.Masked} —— 事后问「这条词当时屏蔽了多少条」只有这里答得出。
+     */
+    public static final String SENSITIVE_WORD_ADD = "sensitive_word.add";
+
+    /** 管理员删一个敏感词 —— {@code POST /sensitive/delete}。⚠️ 历史评论里的 {@code ***} **不回填**。 */
+    public static final String SENSITIVE_WORD_DELETE = "sensitive_word.delete";
+
+    /** 管理员处理一条举报（通过 = 删内容 + 警告 + 可能封号；驳回 = 留待再举报）—— {@code POST /report/handle}。 */
+    public static final String REPORT_HANDLE = "report.handle";
 
     private AuditActions() {
     }

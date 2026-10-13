@@ -1,0 +1,296 @@
+块 6 整改（2026-10-13 用户批文 一 ~ 七）—— agent 最小收验输出
+生成时间：2026-10-13 14:0x–14:3x（本机 a3 profile；库 = mall_management_sql @ VM 192.168.229.129）
+════════════════════════════════════════════════════════════════════════════
+
+⚠️ **定性（先读这条）**：
+  本档是 **agent 的最小收验**（mvn test / build / 接口能返回 / 库有变化），
+  **不是用户的手验结论**。手验由用户执行并裁决，逐条清单见同目录
+  `b6-c7-handverify-checklist.md`。
+  本档**只覆盖本轮整改的 5 件事**；块 6 的其它面（与整改无关的既有行为）见
+  `b6-c7-handverify.txt`（该档已改判为「agent 预跑记录」）。
+  ⚠️ 本档**刻意不写 `文件:行号` 形态的坐标** —— 那是 refs-scan 的 token 源，写进来会让
+    后续重指扫描把证据档当成引用者（块 6 收口时的教训）。
+
+════════════════════════════════════════════════════════════════════════════
+
+0. 本轮改了什么（对应批文 一 ~ 五）
+
+  批文一 · 缺陷一（待审图片 tab 碎图）：前端 `api/http.js` 一行（图片地址装配改走
+      `assetOf`）—— 管理端列表拿到可用的 URL；公开面 **不动**（未过审仍旧 `Url: null`）。
+  批文二 · 缺陷二（两个 tab 看不到全站待办）：新端点 `POST /comment/adminList`
+      （第 14 条契约，甲案），`Kind` 必填（review / question / answer），行内带后端下发的
+      `IsTimeout`（与 `QuestionTimeoutJob` 的 `TIMEOUT_MINUTES` **同源**，前端只渲染）。
+      `AUTH_WHITELIST` **未加它**；`WebAuthConfig` 只补了说明性 javadoc，白名单条数 **14 未变**。
+  批文三 · 唯一锁：迁移 ⑯ —— `comment` 加 STORED 生成列 `ReviewLockKey` + `UNIQUE KEY
+      `uk_comment_review_once`；`CommentService` 加**窄 catch**（只吞本锁的 1062，翻成
+      「您已评价过该商品，不能重复评价」；其它 SQL 异常仍上抛）。
+  批文四 · 审核记录：复用 `admin_audit`（**不新建表 / 不加列**），5 个挂钩点
+      （敏感词加 / 敏感词删 / 图通过 / 图驳回 / 举报处理）。
+  批文五 · 种子时间：`ProbeB6c7Seed` 里 4 个 `minutesAgo` 字面量由负转正（原来负负得正，
+      四条种子被插到**未来**）+ `pickAuthors` 插入前判重（唯一锁下重名作者会让整个种子回滚）。
+
+════════════════════════════════════════════════════════════════════════════
+
+1. 档 a —— 唯一锁 DB 级探针（`scripts/probes/ProbeB6c7Lock.java`）
+
+  跑法（凭据只从环境变量读，不落盘不打印）：
+    java -cp _work/_cls ProbeB6c7Lock --exec        # 输出全文落 _work/_b6c7-lock-probe.txt
+
+  实测全文（可复核；本轮复跑一次）：
+    === ⑯ 唯一锁现状自查 ===
+      ⑯-1 生成列 ReviewLockKey（STORED）：在 · ⑯-2 唯一键 uk_comment_review_once：在
+      现存重复组：0 组
+      当前被锁行：5 / 全表 18 行（其余 13 行键为 NULL ⇒ 不在锁的作用域内）
+
+    === 一、锁在：同作者同商品第二条顶层评价必须被 DB 拒 ===
+      [PASS] 顶层评价 #1（合法）
+      [PASS] 顶层评价 #2（同作者同商品，直连插，绕过 Service）
+             —— 1062 被拒：Duplicate entry 'goods:999901:b6lock_probe' for key 'comment.uk_comment_review_once'
+      [PASS] 落库行数恰好 1（实测 1）
+
+    === 二、锁不外溢：四类同作者同对象两条都必须成功 ===
+      [PASS] 回复 ×2（ParentId != NULL）
+      [PASS] 提问 ×2（Kind=question）
+      [PASS] 回答 ×2（Kind=answer）
+      [PASS] 留言板 ×2（TargetType=user，无「买过」约束）
+
+    === 三、已删行解除锁定（作者删了自己那条后能重评）===
+      [PASS] 逻辑删第一条（affected=1）
+      [PASS] 删后重评成功
+
+    === 四、并发：两连接同刻插同一 (goods,999902,b6lock_probe) 顶层评价 ===
+      成功=1 被唯一键拒(1062)=1 落库行数=1
+      [PASS] 并发后恰好 1 行落库
+      [PASS] 恰一条走成功、一条走 1062（成功 1 / 1062 1）
+
+    === 五、清理（自清，靶上残留必须 0）===
+      DELETE 11 行
+      [PASS] 靶上残留 0 行（实测 0）
+
+    === 汇总：PASS 12 / FAIL 0（本轮共写 11 行，已全部清理）===
+
+  ⚠️ **判据不是「某一条断言每次红」**：并发那一档是**分布**（成功 1 / 1062 1），
+     换台机器跑，「谁赢」可能换，但「成功 1 行、1062 1 次、落库 1 行」这三个数必须不动。
+  ⚠️ 并发档还配了一条 `performance_schema.events_statements_summary_by_digest.SUM_ERRORS`
+     增量：证明那一条**是真执行到 DB 才被 1062 拒**，不是被业务预检提前挡掉。
+     （若只看「被拒」，这两种情形长得一模一样。）
+
+2. 档 b —— Service 层 JUnit（`CommentServiceReviewLockTest`）
+
+  跑法：`cd Mall-management-server && ./mvnw -B test -Dtest=CommentServiceReviewLockTest`
+  实测：4 条，全绿。钉住的东西：
+    · 用户可见文案字面量 = 「您已评价过该商品，不能重复评价」；
+    · 该文案里**不得**出现通用失败话术 / `Duplicate entry` / `uk_comment_review_once` / `SQL`
+      （窄 catch 的意义就在这 —— 否则等于把 DB 内部结构泄给用户）；
+    · 四类「不该被锁」的形态（回复 / 提问 / 回答 / 留言板）各连发两条都成功 —— 与档 a 第二节同构，
+      这一层是纯 Mockito（不起 Spring、不连库），所以它验的是**分支决策**，不是 SQL。
+  ⚠️ 这一档是**有意与档 a 重复**的：档 a 验 DB 真会拒，档 b 验 Service 把拒绝翻成了人话。
+
+3. 档 c —— 并发（已并入档 a 第四节；此处只记脚本与原始日志）
+
+  · `_work/_b6c7-lock-probe.txt`（档 a 全文）
+  · 另有一次 HTTP 层并发（`_work/HttpRace.java` + `_work/b6-c7-race-*.sh`），后端日志
+    `_work/b6-c7-race-backend.log`。该次为 **HTTP 层**对照（走真实 Controller ⇒ Service ⇒ DB 全链路），
+    结论与 DB 直连那一档一致：**成功 1 / 被唯一键拒 1 / 落库 1**。
+
+4. 档 d —— 缺陷一 · 缺陷二 运行期验收（接口「能返回」级，非全流程）
+
+  全文落 `_work/_acc/*.json`（逐条可复核）。逐条：
+
+  4.1 `/comment/adminList` 的入参闸
+    a1_missingKind.json  = {"success":false,"msg":"缺少参数：Kind（只能是 review / question / answer）"}
+    a2_unknownKind.json  = {"success":false,"msg":"未知的评论类型：xxx（只能是 review / question / answer）"}
+    a5_halfTarget.json   = {"success":false,"msg":"TargetType 与 TargetId 要么都给、要么都不给（都不给 = 全站）"}
+    a7_solvedOnReview.json = {"success":false,"msg":"解决状态只对提问有意义（Kind=question），当前 Kind=review"}
+
+  4.2 `/comment/adminList` 的正例
+    a3_question.json ⇒ `total=3`，三条 `Kind=question`；其中 `Id=110` 的
+       `IsTimeout=true`（另两条 146 / 111 `IsTimeout=false`，均已采纳）
+       ⚠️ `IsTimeout` 是**后端下发**的字段，前端不做时间比较。
+    a4_review.json   ⇒ `total=9`、`limit=3`，三行按 `CreatedAt DESC`（05:55:11 → 05:35:11 → 05:25:11），
+       且**扁平**（顶层行直接给，不带 `Replies` 嵌套）+ 匿名那条 `AuthorId=null` / `Author="1*****"`
+       —— 与公开面同一套脱敏口径。
+    a6_solved.json   ⇒ `Kind=question&Solved=1` ⇒ `total=2`（`Id=146` / `Id=111`，两条都已采纳）。
+    ⚠️ `Solved` 只在 `Kind=question` 下有意义；给了别的 Kind 是**报错**不是**忽略**（见 a7）。
+
+  4.3 **缺陷一 的反向确认（公开面没被破）**
+    b1_listNoTarget.json ⇒ 公开面 `/comment/list`**不带 `TargetId` 仍拒**：
+       {"success":false,"msg":"缺少参数：TargetId"}
+       —— 全站列表是新端点给的，**没有**把公开面改成「不给参数就全站」。
+    b2_listGoods76.json   ⇒ 商品 76 的公开列表：
+       · `Id=114`（匿名 5 星、含图）`Images = [{"Id":4,"Status":"pending","Url":null},
+         {"Id":5,"Status":"approved","Url":"http://localhost:8088/img/comment/b6c7-review-2.jpg"}]`
+         ⇒ **未过审的那张 `Url` 仍是 `null`**，过审的那张有 URL。
+       ⇒ 缺陷一的修法（管理端拿到可用 URL）**没有**把公开面的「先审后发」一起放开。
+
+5. 档 e —— 审核记录（复用 `admin_audit`）
+
+  实测（只读查询，本轮重取）：
+    SELECT Id, Action, TargetType, TargetId, ActorId FROM admin_audit WHERE Id >= 231 ORDER BY Id
+    Id   Action                 TargetType      TargetId                 ActorId
+    231  sensitive_word.add     sensitive_word  b6c7auditprobe           null
+    232  sensitive_word.delete  sensitive_word  b6c7auditprobe           null
+    233  comment.image.approve  comment_image   b6c7-audit-ap.jpg        null
+    234  comment.image.reject   comment_image   b6c7-audit-rj.jpg        null
+    235  report.handle          report          15                       adm1nC3r00t
+    -- rows: 5
+
+  分组计数（证明这 5 个 Action 全仓各只有 1 行、没有历史污染）：
+    sensitive_word.add 1 · sensitive_word.delete 1 · comment.image.approve 1 ·
+    comment.image.reject 1 · report.handle 1        （admin_audit 全表 164 行）
+
+  逐条挂钩点对应的 HTTP 返回（`_work/_acc/`）：
+    s1_add.json     = {"success":true,"msg":"已添加（历史评论无命中）","Word":"b6c7auditprobe","masked":0,"Id":19}
+    s2_del.json     = {"success":true,"msg":"已删除（历史评论里的 *** 不回填）","Word":"b6c7auditprobe",
+                       "before":{"Id":19,"Word":"b6c7auditprobe","CreatedAt":"..."},"Id":19}
+    i1_approve.json = {"success":true,"Status":"approved","msg":"已通过","Id":12,"fileDeleted":false,
+                       "before":{...图 12 的整行快照，含 CommentContent / TargetType / TargetId...}}
+    i2_reject.json  = {"success":true,"Status":"rejected","msg":"已驳回并删除图片文件","Id":13,"fileDeleted":true,
+                       "before":{...图 13 的整行快照...}}
+    r2_handle.json  = {"success":true,"Status":"rejected","msg":"已驳回（举报人可在原理由上重新举报）","Id":15,
+                       "before":{...举报单 15 的整行快照...}}
+
+  ⚠️ **两条必须如实记下的形态**（不粉饰）：
+    ① 231–234 的 `ActorId = null`。原因是这四条是在 **a3（闸关）+ 未登录**下打的 ——
+       `AuthSession.identify` 拿不到身份。**行仍然落了**（`TargetId` 是业务键，非空，满足 NOT NULL）。
+       235 是**先 `POST /user/loginSelect` 拿到 `role=3` 的 JSESSIONID** 再打的，所以 `ActorId = adm1nC3r00t`
+       —— 这恰好证明 `ActorId` 取自**会话**、不是入参（`/report/handle` 在无会话时直接拒：
+       `_work/_acc/r1_handle.json` = {"success":false,"msg":"无法确定处理人身份"}）。
+    ② 上面 231–235 这五行是 **agent 探针留下的台账**（真实写入、真实挂钩），
+       不是种子数据。**刻意保留不删**，理由：删了就没法证明挂钩点真的落行。
+
+6. 档 f —— 库侧落点（本轮新增的对象，刻意保留）
+
+  · `comment_image` `Id=12`（approved）、`Id=13`（**rejected 且盘上文件真被删**）—— 挂在评论 115 下。
+    ⇒ 顺带把 TD-48 那条「`rejected` 故意不留常驻样例」**在验收面上**补上了一个真实例
+      （种子仍不常驻 rejected，这条是**验收产物**，重灌库即消失）。
+  · `sensitive_word` `Id=19`（加了又删，净 0）。
+  · `report` `Id=15`（探针造的举报单，已驳回）。
+  · `admin_audit` `Id=231–235`（见 §5）。
+  · `comment` `Id=113` → `Status='deleted'`（⑯ 落库前清掉的历史重复组；见 §7）。
+
+7. ⑯ 迁移落库时清掉的那一组重复（**按批文要求，先把实情摆出来**）
+
+  迁移前实测命中 1 组：`(TargetType='goods', TargetId='76', AuthorId=同一人)` = `Id=113` + `Id=114`。
+  处置：**逻辑删 113、保留 114**（114 是种子探针的 `reviewAnon`，被 `comment_image` `Id=4/5`、
+  `comment_like` 4 赞 2 踩、`report.Id=1` 的 `TargetId`、以及证据档的 §4.1/§4.3/§4.9/§4.12 锚住）。
+
+  ⚠️ **一条早先的说法必须就地更正**：
+    · 早先写的是「**113 无任何档/表引用**」。
+    · 实测**不成立**：`comment_mention` `Id=12` 的 `CommentId=113`、`MentionedId='yunqi_digital'`。
+    · 影响评估：`comment_mention` 在 Java 侧**只写不读**（全仓无该表的 SELECT），
+      且 113 这行**仍在表里**（只是 `Status='deleted'`）⇒ 没有任何悬挂指针，
+      业务与页面上都看不到差异。**但说法本身要改过来**，不能留「零引用」这种不实措辞。
+
+8. 最小收验（构建 / 测试 / 门禁）
+
+  8.1 后端全量测试
+    跑法：`cd Mall-management-server && ./mvnw -B test`
+    实测（**本档定稿前重跑的一轮**，`Finished at: 2026-10-13T14:38:34+08:00`，
+      覆盖本轮全部 Java 改动 —— 含 `WebAuthConfig` 的说明性 javadoc）：
+      Tests run: 309, Failures: 0, Errors: 0, Skipped: 26
+      BUILD SUCCESS（总耗时 43.75 s）
+    相对收口时点（299 条）+10 的来源，两条可复核：
+      · `CommentSmokeTest` 15 → 21（+6：`adminList` 的六条拒参用例）
+      · `CommentServiceReviewLockTest` 0 → 4（本轮新建，见 §2）
+    ⚠️ surefire 的 `.txt` 报告**不会被 maven 自动清理**，全量累加会把上一轮算进来
+      ⇒ 读数前先按报告时间戳过滤（本档读的就是这一轮）。
+    ⚠️ **测试数不是判据**，判据是「指定套件整体」的分布；本档只报结果。
+    ⚠️ 本轮**未**跑 `clean test`：`clean` 的作用是防「陈旧 test class 遮住签名破坏」，
+      而本轮的 Java 改动都是**新增**（新方法 / 新测试类）+ 一段 javadoc，
+      没有改既有方法签名。**这一条是判断，不是实测** —— 若要按最严口径，
+      请以 `./mvnw -B clean test` 复跑一次为准。
+
+  8.2 前端构建与静态检查
+    · `cd Mall-management-web/mall-management-system && npx vue-cli-service build`
+      实测：`DONE  Build complete. The dist directory is ready to be deployed.`
+      （`Build at: 2026-10-13T06:36:58.977Z`（= 本机 14:36:58）· `Hash: 26156ad36788376d` · `Time: 100356ms`）
+      ⚠️ 这一次的 hash 与块 6 收口时那一次（`bf3d1eb43f87af07`）**不同** —— 收口之后前端动过
+      （缺陷一的 `api/http.js` 一行、缺陷二的 `api/comment.js` / `api/endpoints.js` / 管理端页），
+      所以**必须**重跑构建，不能沿用收口时的读数。
+    · `npx eslint src --ext .js,.vue` ⇒ exit **0**（无告警；只有一条 browserslist 数据陈旧的环境提示，与本笔无关）
+
+  8.3 门禁（A3 P3）：本轮**未改表数**（⑯ 是加列 + 加索引，不改 `information_schema.TABLES` 计数）
+    ⇒ `ConcurrencyRunner` 的 `KNOWN_TABLES` / 期望表数 **不动**（仍 25 / 36）。
+
+  8.4 ⚠️ **8.1 之后又复跑了两轮：同一条用例偶发红**（如实补记，不覆盖 8.1）
+    8.1 那轮（14:38:34）是绿的、真实发生。此后为了「互引净零化」把
+      `AuditActions.java` / `WebAuthConfig.java` 的新注释**折进既有行**
+      （**只动注释与空行，不动任何语句**），再复跑全量：
+      · `Finished at 2026-10-13T14:48:21+08:00` ⇒ Tests run: 309 / **Failures: 1** / Errors: 0 / Skipped: 26
+      · `Finished at 2026-10-13T15:05:26+08:00` ⇒ Tests run: 309 / **Failures: 1** / Errors: 0 / Skipped: 26
+      · `Finished at 2026-10-13T15:16:41+08:00`（**已移除临时工作树之后**）⇒ Tests run: 309 /
+        **Failures: 0** / Errors: 0 / Skipped: 26 · **BUILD SUCCESS** —— 与本条判断一致（是抖动不是回归）
+    红的都是 `L2HealthProbeConcurrencyTest.everyWindowHasExactlyOneProber`
+      （「第 N 个窗口：20 并发应恰好 1 次探测」，`expected: 1 but was: 2`），
+      两次报的窗口号不同（round 195 / round 120）⇒ 随机。
+    **判据（决定性的一条）**：拿未改动的 `HEAD 392361e` 建临时工作树对照，
+      两棵树的 `L2HealthProbe.class` 与 `L2HealthProbeConcurrencyTest.class`
+      **md5 逐字节相同**（`82e7cdc6ad6b041a41f80f26dd2b14f5` / `4bea868cce97d207c4d21bd9d0b96175`）
+      ⇒ 跑的是同一份字节码，差异**不可能**来自本轮源码改动。
+      另：该用例是纯 JUnit（mock `RedisConnectionFactory` + `SimpleMeterRegistry`，不起 Spring），
+      本轮改的两个类都不在它的类路径上。
+    分布（单用例 `surefire:test`，本机 2026-10-13）：
+      · 工作区 **19 次 → 红 3 / 绿 16**；基线 `HEAD 392361e` **19 次 → 红 0 / 绿 19**
+        （含 6 轮**交错**对照：基线 0 红 / 工作区 1 红）
+      · Fisher 精确检验 `0/19 vs 3/19` ⇒ p ≈ 0.23，**统计上分不开**（所以只靠分布不足以定案，
+        定案靠上面的 md5 相同）
+      · 基线 + **16 路人为 CPU 负载** 跑 3 次 → **0 红** ⇒ 「笼统的机器忙」不足以复现
+    机理：用例自带 20ms 冷却窗口 + 每轮 `sleep(cooldown + 3ms)`（**余量仅 3ms**），
+      它自己的 javadoc 记着「实测跨度 max 0.62ms（2026-09-29，本机 200 轮）」并自陈这类
+      flaky 的代价 ⇒ 突发 + GC/JIT 抖动顶过剩余 ~17ms 就会跨窗，计数变 2。
+    ⇒ 已登记 `tech-debt.md` **TD-58**（**不排期、本轮不改用例** —— 放宽断言 / 加大窗口
+      都等于把「CAS 是否原子」这条不变量验松，属降级测试判据，需用户单独裁）。
+    ⚠️ **读本档的人**：8.1 的 `309 / 0 / 0` 与 8.4 的 `309 / 1 / 0`（**连着两轮**同一条用例）都真，别只挑一个看；
+      本条用例红 ⇒ 先按计时抖动处理，复核办法就是比两棵树的 `L2HealthProbe*.class` md5。
+
+9. ✅ **4 行 `created_at` 回拨（已执行 —— 2026-10-13 用户裁决二「批」）**
+
+  批文五要求：「回拨那 4 行 UPDATE 前，先贴一遍现值，让用户看一眼再动」。
+  **回拨前现值（实测，`comment.created_at` / `updated_at` 两列都贴）**：
+    Id=114（匿名评价） created_at 2026-10-13 05:55:11 · updated_at 05:12:08
+    Id=115（实名评价） created_at 2026-10-13 05:25:11 · updated_at 04:46:44
+    Id=116（商家回复） created_at 2026-10-13 05:35:11 · updated_at 03:55:11
+    Id=117（顾客回复） created_at 2026-10-13 04:55:11 · updated_at 03:55:11
+
+  **意图的目标值**（= 种子落库时刻 03:55:11 − 各自的 `minutesAgo`：120 / 90 / 100 / 60）：
+    Id=114 → 01:55:11 · Id=115 → 02:25:11 · Id=116 → 02:35:11 · Id=117 → 02:55:11
+
+  **为什么必须回拨**：符号翻转把**意图的时间先后**翻了过来 ——
+    · 页面上「匿名评价（05:55）」比「实名评价（05:25）」**更晚**；
+    · 「顾客回复（04:55）」比「商家回复（05:35）」**更早**。
+  根因：MySQL 服务端时钟是 UTC，宿主是 CST(+8)，`NOW()` 读数比宿主低 8 小时；
+  种子脚本里 `NOW() - INTERVAL ? MINUTE` 的 `?` 被写成负数 ⇒ 负负得正 ⇒ 落到未来。
+
+  **执行的 UPDATE（一条语句，显式字面量 —— 不再用相对时刻，免得同一个坑再踩）**：
+    UPDATE comment SET created_at = CASE Id
+      WHEN 114 THEN '2026-10-13 01:55:11' WHEN 115 THEN '2026-10-13 02:25:11'
+      WHEN 116 THEN '2026-10-13 02:35:11' WHEN 117 THEN '2026-10-13 02:55:11'
+      ELSE created_at END,
+      updated_at = updated_at                    -- 显式赋当前值 = 抑制 ON UPDATE CURRENT_TIMESTAMP
+     WHERE Id IN (114,115,116,117);
+    ⇒ `-- affected: 4`
+
+  **回拨后复读（连读两次，第二次重连，逐字一致）**：
+    Id  AuthorId        created_at           updated_at
+    114 1111（匿名）     2026-10-13 01:55:11  2026-10-13 05:12:08
+    115 123             2026-10-13 02:25:11  2026-10-13 04:46:44
+    116 yunqi_digital   2026-10-13 02:35:11  2026-10-13 03:55:11
+    117 3333            2026-10-13 02:55:11  2026-10-13 03:55:11
+    顺序核：114 → 115 → 116 → 117 **严格递增**（用户裁决二点名要的顺序通）。
+    ⚠️ **`updated_at` 四行逐字未变**（与回拨前那张表逐字相同）⇒ 只动了 `created_at` 一列，
+      没有被 `ON UPDATE CURRENT_TIMESTAMP` 顺带顶成 `NOW()`。
+    ⚠️ 回拨后 4 行的 `updated_at` 仍**晚于**各自的 `created_at` ⇒ 语义自洽。
+
+  ⚠️ 同步面：`docs/agent/evidence/c3-block6/b6-c7-fake-data.txt` §4.1 的逐行读数已改为**回拨后**的值，
+    并在那张表上方加了「这 4 行是修前播的、已回拨」的注记（用户裁决二点名要求）。
+
+════════════════════════════════════════════════════════════════════════════
+
+附：本档用到的探针 / 脚本（**按名登记，无 README 索引**）
+  · `scripts/probes/ProbeB6c7Lock.java` —— ⑥ 唯一锁 DB 级探针（档 a）
+  · `scripts/probes/ProbeB6c7Seed.java` —— 种子（本轮改 4 个字面量 + `pickAuthors` 判重）
+  · `scripts/probes/probe-b6c7-handverify.py` / `probe-b6c7-admin-ui.mjs` —— 块 6 收口时的预跑（见另一档）
+  · `_work/HttpRace.java` · `_work/b6-c7-race-*.sh` · `_work/_b6c7-lock-probe.txt` · `_work/_acc/*.json`
+  ⚠️ 本档与上述产物**都不进 `docs/` 的正文引用面**（`_work/` 是临时产物目录，
+    `docs/agent/evidence/` 里只有本档与清单档是持久产物）。

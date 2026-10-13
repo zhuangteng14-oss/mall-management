@@ -1,5 +1,7 @@
 package com.minke.mallmanagement.comment.controller;
 
+import com.minke.mallmanagement.admin.AuditActions;
+import com.minke.mallmanagement.admin.service.AuditService;
 import com.minke.mallmanagement.comment.service.CommentService;
 import com.minke.mallmanagement.shared.web.AuthSession;
 import com.minke.mallmanagement.shared.web.IdentityGuard;
@@ -16,17 +18,23 @@ import org.springframework.web.multipart.MultipartFile;
 import org.springframework.web.multipart.MultipartHttpServletRequest;
 
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 /**
- * 内容域「评论 / 问答」Web 层（C3 块 6 · commit 1 评论 + commit 2 问答 + 整改 commit 4 图片审核）
- * —— 7 个端点：列表（公开）/ 发表（评论·回复·提问·回答共用）/ 删除 / **采纳答案** / 赞踩 /
- * 我的历史订单 / **图片审核（管理端）**。
+ * 内容域「评论 / 问答」Web 层（C3 块 6 · commit 1 评论 + commit 2 问答 + 整改 commit 4 图片审核
+ * + 整改补笔 {@code /adminList}）—— <b>8 个端点</b>：列表（公开）/ **全站列表（管理端，第 14 条）** /
+ * 发表（评论·回复·提问·回答共用）/ 删除 / **采纳答案** / 赞踩 / 我的历史订单 / **图片审核（管理端）**。
  *
  * <h2>【挂 {@code /comment}，与方案 §三 的端点清单逐字一致】</h2>
  * 方案 A4 与 {@code 块6参考.md §三} 定死了 13 个端点与其路径，本类占其中 7 个
  * （其余 6 个归 {@code /report/**} 与 {@code /sensitive/**} 两个新 Controller，
  * 见 {@code ReportController} / {@code SensitiveWordController}）。
+ * <p>⚠️ <b>2026-10-13 起内容域是 14 条</b>：用户批准新增 {@link #adminList}
+ * （{@code /comment/adminList}，管理端全站列表 —— 修「评论管理 / 问答管理两栏看不到全站待办」）。
+ * 它**不在方案 A4 的 13 条里**，是本笔**唯一**一条经批准的契约新增；其余 6 个 Controller 的端点
+ * 一条没动，公开面 {@code /comment/list} 的「必须给 {@code TargetId}」也没动。
  *
  * <h2>【{@code /comment/list} 是**公开**端点 ⇒ 已登记进 {@code WebAuthConfig.AUTH_WHITELIST}】</h2>
  * 商品详情页的评价区要能在**未登录**时读（那页本身是浏览面）。⚠️ 公开的是**读** ——
@@ -53,6 +61,9 @@ import java.util.List;
  * <h2>【⚠️ 新增 Controller 必须进 {@code AbstractSmokeTest} 的 {@code @Import}】</h2>
  * 本类依赖 {@code CommentController → CommentService → CommentDao}，两个 bean 都要登记，
  * 否则切片在上下文加载期红（这是本仓**第 13 次**同一处地雷，见该文件里的计数）。
+ * <p>⚠️ 2026-10-13 整改补笔又给本类加了一个构造参数 {@link AuditService}（图片审核留痕，
+ * 见 {@link #auditImageReview}）—— 那个 bean **已在**该文件的 {@code @Import} 里（块 1 起就在），
+ * 故这次不需要动它；地雷形状不变：给 Controller 加构造依赖 = 那个 bean 必须在切片里拿得到。
  */
 @RestController
 @RequestMapping("/comment")
@@ -60,12 +71,21 @@ public class CommentController {
 
     private final CommentService commentService;
 
+    /**
+     * 审计写入口（2026-10-13 整改补笔）。⚠️ 与 {@code ReportController} / {@code SensitiveWordController}
+     * 同款 —— 它**已在** {@code AbstractSmokeTest} 的 {@code @Import} 里（块 1 起就在），
+     * 故这次不必动那个文件；但地雷的形状不变：给 Controller 加构造依赖 = 那个 bean 必须在切片里拿得到。
+     */
+    private final AuditService auditService;
+
     /** ⚠️ 刻意是 {@link ObjectProvider}，不是裸的 {@code UserStateLookup} —— 见类注释。 */
     private final ObjectProvider<UserStateLookup> userStateLookupProvider;
 
     public CommentController(CommentService commentService,
+                             AuditService auditService,
                              ObjectProvider<UserStateLookup> userStateLookupProvider) {
         this.commentService = commentService;
+        this.auditService = auditService;
         this.userStateLookupProvider = userStateLookupProvider;
     }
 
@@ -100,13 +120,61 @@ public class CommentController {
     }
 
     /**
+     * <b>管理端</b>全站列表（{@code /comment/adminList}）—— 内容域的**第 14 条端点**，
+     * 用户 2026-10-13 批的甲案（「评论管理 / 问答管理」两栏此前缺全站列表：公开面
+     * {@code /comment/list} 强制要 {@code TargetId}，那条约束**不动**）。
+     *
+     * <h2>【逐字确认：本端点**不在** {@code WebAuthConfig.AUTH_WHITELIST}】</h2>
+     * 白名单里 {@code /comment} 域只有 {@code /comment/list} 一条。本端点走
+     * {@code AuthInterceptor}（注册在 {@code /**}）—— <b>闸开着（默认 profile / prod）时匿名请求
+     * 收 401</b>，与 {@code imageReview} / {@code report.*} / {@code sensitive.*} 其余管理端端点同族。
+     *
+     * <h2>【⚠️ 但 a3 profile 下它匿名可达 —— 这是全仓同口径，不是本端点引入的漏洞】</h2>
+     * a3 是 {@code app.auth.enabled=false}（闸关）⇒ 拦截器只补水身份、不做强制
+     * （见 {@code WebAuthConfig} 的构造那一段）。<b>该 profile 下的每一个管理端端点都如此</b>
+     * （{@code admin/**} 全部、{@code report/handle}、{@code sensitive/add|delete}、
+     * {@code comment/imageReview} …）—— 故「a3 匿名能拉全站评论」既不是契约放宽、也不是本笔
+     * 新开的口子，它是**验证环境**的既定形态。默认 profile 下的判据以 401 为准（手验清单里那条）。
+     *
+     * <h2>【不收 {@code Account}、也不挂 {@code requireAdmin}】</h2>
+     * 与 {@link #imageReview} 同一处置：本仓管理端端点靠「路由受保护 + 会话」识别处理人，
+     * **不由入参声明**。⚠️ 故这里**没有** {@code IdentityGuard} 调用 —— 无 {@code Account} 可判，
+     * 加一个只会变成「谁都能传自己的名字」的假闸。
+     *
+     * <h2>【⚠️ 也不收观看者（会话身份）】</h2>
+     * 与 {@link #list} 相反：那条要从会话取 {@code viewerUserId} 算 {@code Mine} / {@code MyLike}
+     * （所以它必须转发 {@code AuthSession}）；本列表没有「我」这个视角
+     * （{@code Mine} 恒 {@code false}），故**不读会话** —— 少一处就不必担心「会话里有谁」
+     * 会改变响应内容。
+     *
+     * @param Kind       **必填**：{@code review} / {@code question} / {@code answer}（未知值拒）
+     * @param TargetType / TargetId 可选**成对**收窄（都不传 = 全站；只传一个 ⇒ 拒）
+     * @param Solved     仅 {@code Kind=question} 有意义：{@code "1"} / {@code "0"}（给别的 kind ⇒ 拒）
+     * @param Limit      页大小（默认 20，上限 100）
+     * @param Offset     偏移（默认 0）
+     */
+    @PostMapping("/adminList")
+    public ResponseEntity<Object> adminList(
+            @RequestParam(value = "Kind", required = false) String Kind,
+            @RequestParam(value = "TargetType", required = false) String TargetType,
+            @RequestParam(value = "TargetId", required = false) String TargetId,
+            @RequestParam(value = "Solved", required = false) String Solved,
+            @RequestParam(value = "Limit", required = false) Integer Limit,
+            @RequestParam(value = "Offset", required = false) Integer Offset
+    ) {
+        return ResponseEntity.ok(Result.of(commentService.adminList(
+                Kind, TargetType, TargetId, Solved, Limit, Offset)));
+    }
+
+    /**
      * 发表 —— 评论 / 回复 / 提问 / 回答**共用一个端点**（方案 §三的端点表逐字）。
      *
      * <p>四种形态靠 {@code ParentId} 与 {@code Kind} 区分，规则在
      * {@code CommentService.add}（顶层 {@code Kind} 吃入参、回复的 {@code Kind} 由父行推）。
      *
      * <p>⚠️ <b>图片走同一个请求的多 part，不另开端点</b>：方案 A4 是「13 个端点」，
-     * 加第 14 个是要批的契约改动；且评论文本与它的图本就是一次提交。
+     * 加第 14 个是要批的契约改动（⚠️ 该批准已于 2026-10-13 用于 {@link #adminList}，
+     * 但**不是**给图片用的）；且评论文本与它的图本就是一次提交。
      * 故这里用 {@link MultipartHttpServletRequest#getFiles} 手工取 part，而不是
      * {@code @RequestParam List<MultipartFile>} —— 后者在**非 multipart** 请求（就是一条
      * 纯文字的评论）上的绑定行为随 Spring 版本而变，前者两种情况下都是「没有文件」。
@@ -221,10 +289,13 @@ public class CommentController {
             @RequestParam(value = "Id", required = false) Integer Id,
             @RequestParam(value = "Status", required = false) String Status,
             @RequestParam(value = "Limit", required = false) Integer Limit,
-            @RequestParam(value = "Offset", required = false) Integer Offset
+            @RequestParam(value = "Offset", required = false) Integer Offset,
+            HttpServletRequest request
     ) {
         Long id = Id == null ? null : Id.longValue();
-        return ResponseEntity.ok(Result.of(commentService.imageReview(Action, id, Status, Limit, Offset)));
+        Map<String, Object> result = commentService.imageReview(Action, id, Status, Limit, Offset);
+        auditImageReview(result, request);
+        return ResponseEntity.ok(Result.of(result));
     }
 
     /** 可评论的历史商品（发表评论时「选对应商品」的下拉，方案 §4.1）。 */
@@ -241,6 +312,62 @@ public class CommentController {
     }
 
     // ==================== 内部 ====================
+
+    /**
+     * 图片审核的审计挂钩点（2026-10-13 整改补笔）—— 只有 {@code approve} / {@code reject}
+     * 两条**写**路留痕，{@code list} 不留（读动作不进 {@code admin_audit}，同全仓口径）。
+     *
+     * <p>判据用回体里的 {@code before}：**只有写路会带它**（`CommentService.imageReview` 在
+     * CAS 成功之后 `put("before", image)`），`list` 那条路连这个键都没有
+     * ⇒ 它同时就是「这次是不是一次写」的判据，不必在这里把 {@code Action} 再归一化一遍
+     * （那会是第二处 `list / approve / reject` 的分支，与 Service 里那份漂开只是时间问题）。
+     *
+     * <p>⚠️ <b>处理人取 {@link AuthSession#identify}（会话），不加 {@code Account} 入参</b>
+     * —— 与 {@code report.handle} 同口径：入参声明身份等于让人随便署别人的名。
+     *
+     * <p>⚠️ {@code TargetId} 用 `ImageUrl` 的**尾段（落盘名）**而不是图的自增 Id：
+     * 落盘名是那张图唯一的稳定标识（URL 前缀随部署变），且驳回会把文件**真删掉**
+     * ⇒ 事后要问「删的是哪个文件」，只有这一列答得出。取不到尾段时退回整条 URL。
+     */
+    private void auditImageReview(Map<String, Object> result, HttpServletRequest request) {
+        Object before = result.get("before");
+        if (!Boolean.TRUE.equals(result.get("success")) || !(before instanceof Map<?, ?> image)) {
+            return;
+        }
+        // 通过 / 驳回看**回体里的新状态**（`before` 那份恒是 `pending`，判不出结论）。
+        boolean rejected = "rejected".equals(safeStr(result.get("Status")));
+        Map<String, Object> after = new HashMap<>();
+        after.put("Status", result.get("Status"));
+        after.put("FileDeleted", result.get("fileDeleted"));
+        after.put("CommentId", image.get("CommentId"));
+        after.put("ImageUrl", image.get("ImageUrl"));
+        // 被评论的对象（商品 / 用户）—— 图本身只挂在评论下，这一层是事后追查的入口。
+        after.put("TargetType", image.get("TargetType"));
+        after.put("TargetId", image.get("TargetId"));
+        after.put("AuthorId", image.get("AuthorId"));
+        auditService.record(AuthSession.identify(request),
+                rejected ? AuditActions.COMMENT_IMAGE_REJECT : AuditActions.COMMENT_IMAGE_APPROVE,
+                "comment_image", imageFileName(safeStr(image.get("ImageUrl"))), image, after);
+    }
+
+    /**
+     * `ImageUrl` → 落盘名（尾段）。⚠️ 与 `CommentService.deleteImageFile` 剥的是**同一个前缀**，
+     * 但**故意不复用**那个私有方法（它是「删文件」链路的一环，共用一个取名字的函数会让
+     * 「改了删除策略顺手动到审计的业务键」成为可能）—— 两处都以后缀名取尾段，改前缀会同时红。
+     */
+    private static String imageFileName(String imageUrl) {
+        if (imageUrl == null || imageUrl.isBlank()) {
+            return "(无 ImageUrl)";
+        }
+        int slash = imageUrl.lastIndexOf('/');
+        String name = slash < 0 ? imageUrl : imageUrl.substring(slash + 1);
+        return name.isBlank() ? imageUrl : name;
+    }
+
+    /** {@code Object → String}（{@code null} ⇒ {@code null}）—— 避免各处 {@code String.valueOf} 写出 "null" 字面量。 */
+    private static String safeStr(Object v) {
+        return v == null ? null : v.toString();
+    }
 
     /**
      * 取本次请求的图片 part（非 multipart 请求 ⇒ 空表）。见 {@link #add} 的 ⚠️。

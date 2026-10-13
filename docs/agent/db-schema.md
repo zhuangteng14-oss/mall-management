@@ -853,17 +853,17 @@
 ⚠️ **`.sql` 的行尾仍是 CRLF**：`1505 行 / LF 1505 / CR 1505 / 裸 CR 0`（2026-10-12 实测，块 5 四个块追加之后重新数过）。
 ⚠️ **本附录的「档位」一律标了出处**：类型 / 默认值 / 索引名 = **可复核**（实读库）；索引总数未重算 ⇒ **不写数**（避免又添一处像 §2 那样的陈旧计数）。
 
-## 15. 附录：C3 块 6〈内容+消息块〉（2026-10-12/13）的 6 张新表 · 1 处加列 · 14 个新索引 {#db-15}
+## 15. 附录：C3 块 6〈内容+消息块〉（2026-10-12/13）的 6 张新表 · 2 处加列 · 15 个新索引 {#db-15}
 
 > 与 §11 / §12 / §13 / §14 同一手法：**§1 表清单与 §6.x 刻意不插入**（零漂移），块 6 的库变更全部落在本附录里。
-> 权威源 = `mall_management_sql.sql` 末尾的**一个** Migration 块（⑮，段头 `:1507-1526`，段内编号 ⑮-1~⑮-8 连续；段体 `:1528-1634`）；登记表见 `db-migration.md` **#30–#36** + 注意 **19**。
-> ⚠️ **块 6 的库变更只有「加表 6 + 加列 1」** —— 不改既有列、不删行、不改既有数据（规则 v2：向后兼容）。
+> 权威源 = `mall_management_sql.sql` 末尾的**两个** Migration 块（⑮，段头 `:1507-1526`，段内编号 ⑮-1~⑮-8 连续；段体 `:1528-1634`）＋ **⑯**（整改补笔，2026-10-13：段头 `:1636-1639`，⑯-1 生成列 `:1641-1678` / ⑯-2 唯一键 `:1680-1686`）；登记表见 `db-migration.md` **#30–#37** + 注意 **19–20**。
+> ⚠️ **块 6 的库变更只有「加表 6 + 加列 2 + 加索引 15」** —— 不改既有列、不删行、不改既有数据（规则 v2：向后兼容）。
 
 ### 15.1 六张新表 {#db-15-1}
 
 | 表名 | 用途（段内编号） | 主键 | 关键列 | 索引（除主键外） | 证据（`.sql` 行号） |
 |---|---|---|---|---|---|
-| `comment` | **统一评论表**（⑮-1）—— 评价 / 提问 / 回答 / 楼中楼**同一张表**，`Kind` 分流 | `Id` 自增 | `TargetType`(goods/user) · `TargetId` · `ParentId`(NULL=顶层；≠NULL=回复，**指向顶层行**) · `ReplyToId`(回复的回复，两层封顶) · `Kind`(review/question/answer) · `AuthorId` · `AuthorRole`(1 用户/2 商家) · `IsAnonymous`(匿名⇒强制 5 星) · `Rating`(1-5；问答=0) · `Content`(敏感词命中<40% 已就地屏蔽为 `***`) · `Status`(normal/deleted，**逻辑删**) · `IsSolved`/`AcceptedReplyId`(问答采纳) · `IsMerchantFirst`(商家首答置顶) · `ProductCode`(购买型号，评论时从历史订单选) · `LikeCount`/`DislikeCount`(**冗余计数**) · `created_at`/`updated_at` | `idx_comment_target(TargetType,TargetId,created_at)` · `idx_comment_parent(ParentId,created_at)` · `idx_comment_author(AuthorId,created_at)` · `idx_comment_kind(Kind,TargetType,TargetId)` | `:1528-1555` |
+| `comment` | **统一评论表**（⑮-1）—— 评价 / 提问 / 回答 / 楼中楼**同一张表**，`Kind` 分流 | `Id` 自增 | `TargetType`(goods/user) · `TargetId` · `ParentId`(NULL=顶层；≠NULL=回复，**指向顶层行**) · `ReplyToId`(回复的回复，两层封顶) · `Kind`(review/question/answer) · `AuthorId` · `AuthorRole`(1 用户/2 商家) · `IsAnonymous`(匿名⇒强制 5 星) · `Rating`(1-5；问答=0) · `Content`(敏感词命中<40% 已就地屏蔽为 `***`) · `Status`(normal/deleted，**逻辑删**) · `IsSolved`/`AcceptedReplyId`(问答采纳) · `IsMerchantFirst`(商家首答置顶) · `ProductCode`(购买型号，评论时从历史订单选) · `LikeCount`/`DislikeCount`(**冗余计数**) · `created_at`/`updated_at` · **`ReviewLockKey`**（⑯-1 **STORED 生成列**：仅**顶层商品评价**有值，其余 NULL） | `idx_comment_target(TargetType,TargetId,created_at)` · `idx_comment_parent(ParentId,created_at)` · `idx_comment_author(AuthorId,created_at)` · `idx_comment_kind(Kind,TargetType,TargetId)` · **`uk_comment_review_once(ReviewLockKey)` UNIQUE**（⑯-2） | `:1528-1555` + `:1641-1686` |
 | `comment_mention` | 评论 **@ 关系**（⑮-2）—— 后端自动生成，**无前端输入框** | `Id` 自增 | `CommentId`(comment.Id) · `MentionedId`(被 @ 的账号，对齐 `login.UserName`) · `created_at` | `idx_mention_comment(CommentId)` · `idx_mention_user(MentionedId,created_at)` | `:1557-1566` |
 | `comment_image` | 评论图片（⑮-3）—— **先审后发** | `Id` 自增 | `CommentId` · `ImageUrl`(`/img/comment/xxx`) · **`Status`(pending 待审 / approved 通过 / rejected 不合规〔已删仓库文件〕)** · `SortOrder` · `created_at` | `idx_image_comment(CommentId,SortOrder)` · `idx_image_status(Status,created_at)` | `:1568-1579` |
 | `comment_like` | 评论**点赞 / 踩**（⑮-4）—— 同一用户对同一评论**只能赞或踩一次** | `Id` 自增 | `CommentId`(顶层 or 回复的 Id，都是 `comment` 行) · `UserId` · `Type`(like/dislike) · `created_at` | **`uk_like_comment_user(CommentId,UserId)` UNIQUE** · `idx_like_user(UserId,created_at)` | `:1581-1591` |
@@ -875,16 +875,20 @@
 ⚠️ **`Status` 一律是受控字符串码，不建 DB `ENUM`**（`comment_image` 三态 / `report` 三态 / `comment` 二态）—— 同 `template.Kind` 的口径：取值受控在应用层，改值不用动 DDL。
 ⚠️ **六张表都带 `created_at`**（`comment` / `report` / `sensitive_word` 另带 `updated_at`）—— 满足 `agent.md` 数据库管理规则 8（表必须有时间列）。
 
-### 15.2 一处加列 {#db-15-2}
+### 15.2 两处加列 {#db-15-2}
 
 | # | 表.列 | 类型 | 默认 | 语义 | 证据 |
 |---|---|---|---|---|---|
 | ⑮-7 | `user.WarnCount` | `int NOT NULL DEFAULT 0` | `0` | **警告累计**（块 6 举报链）：达 **3** 自动封号（写 `user.banned=1`）；**解封后由管理端手动清零** | `.sql:1623-1629`（加列走 `information_schema.COLUMNS` 守卫 + `PREPARE`/`EXECUTE`，重复执行走 `DO 0`） |
+| ⑯-1 | `comment.ReviewLockKey` | `varchar(120)` **GENERATED ALWAYS AS (…) STORED** | —（生成列无默认值） | **顶层商品评价的唯一锁载体**（⑯，2026-10-13 整改补笔）= `CASE WHEN TargetType='goods' AND Kind='review' AND ParentId IS NULL AND Status='normal' THEN CONCAT(TargetType,':',TargetId,':',AuthorId) ELSE NULL END`；配 ⑯-2 的 UNIQUE 一起构成「一商品一用户只能评一条评价」的 **DB 层**闸 | `.sql:1641-1678`（守卫式 `ALTER`，判据 = `information_schema.COLUMNS` 里 `ReviewLockKey` 不存在） |
 
 ⚠️ **存量行一律不变**：47 个存量用户取默认值 `0`（VM 库实测 `WarnCount` 合计 = 0，`b6-c7-fake-data.txt` §4.8）—— **不改行数、不改既有列**。
 ⚠️ **别新建「封号表」**：块 6 复用既有 `user.banned`（块 2 加的），`WarnCount` 只记**计数**（口径见 `.sql:1625` 的列注释）。
+⚠️ **⑯-1 是「生成列」，不是普通加列** —— 它**由数据算出**、不可写入；列宽 `varchar(120)` 的算法写在 DDL 注释里（`16 + 1 + 50 + 1 + 40 = 108`，留余量；utf8mb4 下 480 B < 3072 B 索引上限）。
+⚠️ **为什么是「生成列 + NULL」而不是裸的三列唯一键**：裸三列会把「同一用户对同一商品下的**第二条回复**」也锁死（那是**降级**）；NULL 在唯一键下互不相等 ⇒ 一条 DDL 同时给出四类豁免（回复 / 提问 / 回答 / 留言板）。理由逐条写在 `.sql:1646-1654`。
+⚠️ **`Status='normal'` 走白名单而非 `<>'deleted'`**：与 Service 侧「作者删了自己那条后能重评」**同口径**（`.sql:1652-1654`）。
 
-### 15.3 十四处新索引 {#db-15-3}
+### 15.3 十五处新索引 {#db-15-3}
 
 | # | 表 | 索引 | 类型 |
 |---|---|---|---|
@@ -902,9 +906,10 @@
 | 12 | `report` | `idx_report_status(Status,created_at)` | 普通 |
 | 13 | `report` | `idx_report_reporter(ReporterId,created_at)` | 普通 |
 | 14 | `sensitive_word` | `uk_sensitive_word(Word)` | **UNIQUE** |
+| 15 | `comment` | `uk_comment_review_once(ReviewLockKey)`（⑯-2，2026-10-13 整改补笔） | **UNIQUE** |
 
-⚠️ **三个 UNIQUE 各是一道业务闸**，不是纯性能索引：`uk_like_comment_user` = 「同人同评论只能赞或踩一次」；`uk_report_target_reporter` = 「同内容同人不能二次举报」（**驳回后再举报靠 `UPDATE` 同一行复活**，正因有这条唯一键才不会写出两行）；`uk_sensitive_word` = 敏感词**去重**（⑮-8 的 `INSERT IGNORE` 幂等就靠它）。
-⚠️ **14 个索引均**由 §15.1 的 DDL **逐条可数**；全库总数另**实测**过一次（2026-10-13，`information_schema`，排除主键）：**非主键索引 67 / 非主键 UNIQUE 18**（`b6-c7-fake-data.txt` §4.11）。⚠️ **别和 §14.4 那个「30」做减法** —— 那是块 5 当年**未重算**的写法，口径不同；本笔起以实测口径为准。
+⚠️ **四个 UNIQUE 各是一道业务闸**，不是纯性能索引：`uk_like_comment_user` = 「同人同评论只能赞或踩一次」；`uk_report_target_reporter` = 「同内容同人不能二次举报」（**驳回后再举报靠 `UPDATE` 同一行复活**，正因有这条唯一键才不会写出两行）；`uk_sensitive_word` = 敏感词**去重**（⑮-8 的 `INSERT IGNORE` 幂等就靠它）；**`uk_comment_review_once` = 「一商品一用户只能评一条评价」的 DB 层兜底**（Service 侧那道预检是「先查后插」，两个并发请求可以同时通过预检 ⇒ 必须有 DB 侧闸；**它不是**把预检删掉、而是同一判据的 DB 版本）。
+⚠️ **15 个索引均**由 §15.1 的 DDL **逐条可数**；全库总数另**实测**过一次（2026-10-13 整改后重测，`information_schema`，口径 = `COUNT(DISTINCT 表.索引名)` 且 `INDEX_NAME <> 'PRIMARY'`）：**非主键索引 68 / 非主键 UNIQUE 19**（⑯ 之前那次是 **67 / 18** ⇒ ⑯ 净 **+1 索引 / +1 UNIQUE**，对得上）。⚠️ **别和 §14.4 那个「30」做减法** —— 那是块 5 当年**未重算**的写法，口径不同；本笔起以实测口径为准。
 
 ### 15.4 本笔对基线的净变化 {#db-15-4}
 
@@ -912,12 +917,12 @@
 |---|---|---|
 | 表数 | **30 → 36**（+6 张，见 §15.1） | 可复核（VM 库 `information_schema.TABLES` 实测 = **36**，2026-10-13；`b6-c7-fake-data.txt` §4.10 六表行数逐张命中） |
 | 行首 `CREATE TABLE` 条数 | **32 → 38** | 可复核（实读 `.sql`：`CREATE TABLE` 行首 = **38**，2026-10-13 实测） |
-| 加列 | `user` **+1**（`WarnCount`） | 可复核（`.sql:1623-1629` 守卫式 `ALTER`；VM 库 `information_schema.COLUMNS` 实读可用，§15.2） |
-| 索引 | **+14**（含 UNIQUE **3**，见 §15.3）；全库实测 **非主键 67 / 非主键 UNIQUE 18**（2026-10-13，排除主键与 `PRIMARY`） | 可复核（新表索引由 DDL 逐条可数；全库数见 `b6-c7-fake-data.txt` §4.11） |
+| 加列 | `user` **+1**（`WarnCount`）+ `comment` **+1**（`ReviewLockKey` 生成列，⑯-1）⇒ 共 **+2** | 可复核（`.sql:1623-1629` / `.sql:1641-1678` 守卫式 `ALTER`；VM 库 `information_schema.COLUMNS` 实读可用，§15.2） |
+| 索引 | **+15**（含 UNIQUE **4**，见 §15.3；⑯-2 是第 15 个 / 第 4 个 UNIQUE）；全库实测 **非主键 68 / 非主键 UNIQUE 19**（2026-10-13 整改后重测，口径 = 排除主键与 `PRIMARY`） | 可复核（新表索引由 DDL 逐条可数；全库数见 §15.3 那一段的实测命令） |
 | 种子行数（P4 判据 `order/goods/login/user/friend`） | **不变**（纯「加表 + 加列」，`ALTER ADD COLUMN` 不改行数，新表 0 行） | 可复核 |
 | A3 P3 门禁 | `KNOWN_TABLES` **19 → 25**、期望表数 **30 → 36**（同笔一处；⚠️ **四处同改**，见 `ConcurrencyRunner.java:2664`/`:2670`） | 可复核（`db-migration.md` 注意 19） |
 
-⚠️ **`.sql` 的行尾仍是 CRLF**：`1634 行 / LF 1634 / CR 1634 / 裸 CR 0`（2026-10-13 实测，块 6 一个块追加之后重新数过）。
-⚠️ **本附录的「档位」一律标了出处**：类型 / 默认值 / 索引名 = **可复核**（实读 DDL）；表数 36 / 索引 67 / UNIQUE 18 = **可复核**（VM 库 `information_schema` 实测，`b6-c7-fake-data.txt` §4.11）；`user.WarnCount` 另有 VM 库实读（同证据 §4.8）。
-⚠️ **跨文件口径必须一致**：本条的表数（**36**）、`db-migration.md` 注意 19、`slot-registry.md §二十三`、`progress.md §7-B6` **同源**；`api-contract.md` 附录 G 是**端点**侧（与本条无关，13 条内容域端点）。
+⚠️ **`.sql` 的行尾仍是 CRLF**：`1686 行 / LF 1686 / CR 1686 / 裸 CR 0`（2026-10-13 实测，**⑯ 块追加之后**重新数过；⑯ 之前是 `1634 行`）。
+⚠️ **本附录的「档位」一律标了出处**：类型 / 默认值 / 索引名 = **可复核**（实读 DDL）；表数 36 = **可复核**（VM 库 `information_schema` 实测，`b6-c7-fake-data.txt` §4.11）；索引 **68 / UNIQUE 19** = **可复核**（2026-10-13 整改后重测，命令见 §15.3）；`user.WarnCount` 另有 VM 库实读（同证据 §4.8）。
+⚠️ **跨文件口径必须一致**：本条的表数（**36**，⑯ 不改表数）、`db-migration.md` 注意 19–20、`slot-registry.md §二十三`、`progress.md §7-B6` **同源**；`api-contract.md` 附录 G 是**端点**侧（与本条无关，内容域 **14** 条端点）。
 
