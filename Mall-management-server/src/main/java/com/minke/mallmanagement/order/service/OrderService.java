@@ -19,6 +19,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ThreadLocalRandom;
+import com.minke.mallmanagement.goods.dao.GoodsDao;
 import com.minke.mallmanagement.marketing.coupon.service.CouponService;
 import com.minke.mallmanagement.notification.NotificationEvents;
 import com.minke.mallmanagement.notification.service.NotificationService;
@@ -188,6 +189,18 @@ public class OrderService {
      */
     private final CouponService couponService;
 
+    /**
+     * 商品域的库存出口（C3 块 7 · 库存治理 TD-36 新增）。下单即扣走 {@link GoodsDao#deductStock}、
+     * 超时取消回补走 `OrderTimeoutCancelJob` 侧的 {@link GoodsDao#releaseStock}。
+     *
+     * <p>⚠️ <b>直接注入</b>（不是 {@code ObjectProvider}）：{@code GoodsDao} 早在三层第二笔就进了
+     * {@code AbstractSmokeTest} 的 {@code @Import}（是真 bean）⇒ 切片里取得到，同
+     * {@link #notificationService} / {@link #couponService} 那条论证。
+     * <p>⚠️ 依赖方向是「订单 → 商品」，**不是**反过来：商品域对订单域一无所知
+     * （{@code GoodsDao} 只认 {@code skuCode + n} 两个值）⇒ 没有环。
+     */
+    private final GoodsDao goodsDao;
+
     private static final Logger log = LoggerFactory.getLogger(OrderService.class);
 
     /** 支付流水号的日期段格式（{@code PAY} + {@code yyyyMMdd} + 6 位随机）。 */
@@ -201,7 +214,8 @@ public class OrderService {
                         NotificationService notificationService,
                         ShippingTrackDao shippingTrackDao,
                         ObjectMapper objectMapper,
-                        CouponService couponService) {
+                        CouponService couponService,
+                        GoodsDao goodsDao) {
         this.orderDao = orderDao;
         this.lockService = lockService;
         this.orderStateMachine = orderStateMachine;
@@ -211,6 +225,7 @@ public class OrderService {
         this.shippingTrackDao = shippingTrackDao;
         this.objectMapper = objectMapper;
         this.couponService = couponService;
+        this.goodsDao = goodsDao;
     }
 
     // ==================== 下单 ====================
@@ -530,7 +545,14 @@ public class OrderService {
                 // ⚠️ 传的仍是**原价** `Price`：`resolveItems` 的回落口径要拿它反推单价
                 //    （`一单多品` 时 `Price / Quantity`），传折后价会把单价一起算错 ——
                 //    明细记的是「卖了哪几件、各卖多少钱」，与实付金额是两回事。
-                writeItems(OrderId, MerchantId, resolveItems(Items, ProductInformation, Price, Quantity));
+                List<ItemSpec> itemSpecs = resolveItems(Items, ProductInformation, Price, Quantity);
+                writeItems(OrderId, MerchantId, itemSpecs);
+                // 块 7 · 库存治理（TD-36）：**下单即扣**（《块 7 参考》§5.2 B5 丙的第一拍）。
+                // ⚠️ 排在「订单已落库 + 明细已写」之后、吃**同一批 itemSpecs** ——
+                //    扣谁、扣多少，与「这单卖了什么」本来就是同一个事实，不另解析一次。
+                // ⚠️ 与 writeItems 同款 **fail-open**：扣减 0 行（库存不足 / 非矩阵商品无
+                //    goods_sku 行）都不改本方法的返回值 —— 判成失败会让调用方重复下单。
+                deductStocks(itemSpecs);
                 if (discount > 0d) {
                     // 只读给调用方（Controller 的留痕 / 前端回显）；**不是**契约的一部分 ——
                     // 不选券的老请求永远不会看到这两个键（`Result.of` 逐条 put）。
@@ -804,6 +826,45 @@ public class OrderService {
             orderDao.insertItems(rows);
         } catch (Exception e) {
             log.warn("订单 {} 的 {} 行明细写失败（订单已落库、明细缺失）：{}", OrderId, rows.size(), e.toString());
+        }
+    }
+
+    /**
+     * <b>下单即扣库存</b>（C3 块 7 · 库存治理 TD-36 的**第一拍**，《块 7 参考》§5.2 B5 丙）。
+     *
+     * <p>按 {@link ItemSpec#code()} 逐条 CAS 扣 {@code goods_sku.Stock}
+     * （{@link GoodsDao#deductStock}）。与 {@link #writeItems} **吃同一批 specs**：扣谁、扣多少，
+     * 与「这单卖了什么」是同一个事实。
+     *
+     * <p>⚠️ <b>「0 行」不是失败</b> —— 两种 0 行都**不挡单**、**不改 {@code orderAdd} 的返回值**：
+     * <ol>
+     *   <li><b>库存不足</b>（防超卖命中）—— 本方法的主要目的；</li>
+     *   <li><b>非矩阵商品根本没有 {@code goods_sku} 行</b> —— 订单装的是 {@code ProductCode}，
+     *       只有矩阵商品的 {@code SkuCode} 才与之相等。这是本次核对新增的边界
+     *       （用户 2026-10-13 批的 A 档 4 第二条）。</li>
+     * </ol>
+     * 把 0 行判成失败会让调用方**重复下单** —— 与 {@link #writeItems} 把明细失败吞掉是同一条理由。
+     *
+     * <p>⚠️ <b>单条失败只记 WARN、继续下一条</b>：一条 SKU 的意外不该吞掉整单其它 SKU 的扣减
+     * （与 {@code writeItems} 的「整批 fail-open」略不同 —— 那里是批量 INSERT、这里逐条独立）。
+     *
+     * <p>⚠️ {@code code} 空 / {@code qty < 1} 的明细**直接跳过**：{@code resolveItems} 已把缺失的
+     * {@code qty} 规整成 1，这里只管显式给了 0 / 负数的情况 —— 那种行不该去「加库存」。
+     *
+     * <p>⚠️ <b>本方法在订单锁的临界区内</b>（调用方 = {@link #addLocked}）⇒ 与
+     * {@code OrderDao.insertOrder} 同一条禁令：不得加 {@code @Transactional}
+     * （{@code DistributedLockServiceTest.orderChainIsNotTransactional} 有结构断言兜底）。
+     */
+    private void deductStocks(List<ItemSpec> specs) {
+        for (ItemSpec s : specs) {
+            if (s.code() == null || s.code().isBlank() || s.qty() < 1) {
+                continue;
+            }
+            try {
+                goodsDao.deductStock(clip(s.code(), 40), s.qty());
+            } catch (Exception e) {
+                log.warn("订单明细 {} 的库存扣减失败（跳过该条，不动订单结论）：{}", s.code(), e.toString());
+            }
         }
     }
 

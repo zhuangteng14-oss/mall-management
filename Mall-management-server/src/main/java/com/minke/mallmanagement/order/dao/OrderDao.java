@@ -412,4 +412,27 @@ public class OrderDao {
                 .params(byGoodsParams).query(String.class).list());
         return hit;
     }
+
+    // ==================== 读：某单的「商品码 + 数量」（C3 块 7 · 超时释放库存的输入）====================
+
+    /**
+     * 读一张单的「{@code ProductCode} + {@code Quantity}」两列 —— 订单**超时取消**时把库存按码
+     * 加回去的**唯一输入**（C3 块 7 · TD-36 的释放腿，调用方 = {@code OrderTimeoutCancelJob}）。
+     *
+     * <p>⚠️ <b>只取这两列</b>：释放的判据是 {@code goods_sku.SkuCode}、只关心数量；单价 / 名 /
+     * 小计 / 时刻都不参与 —— 多取一列就多一处将来会漂的快照（同 {@code writeItems} 只记成交事实）。
+     *
+     * <p>⚠️ <b>两种「空结果」都不必调用方另外兜</b>：
+     * <ul>
+     *   <li>该单**没有明细行**（存量单 / {@code resolveItems} 解析为空）⇒ 返回**空表**
+     *       ⇒ 调用方一行不动（同 {@code writeItems} 的 fail-open）；</li>
+     *   <li>明细的 {@code ProductCode} 是**空串**（解析不出商品编码时）⇒ 行照常返回，
+     *       但拿它去查 {@code goods_sku} 必然 0 行 ⇒ 天然 no-op。调用方**不需要**先滤空串。</li>
+     * </ul>
+     */
+    public List<Map<String, Object>> selectItemStocksByOrder(String orderId) {
+        return jdbcClient.sql("SELECT ProductCode, Quantity FROM mall_management_sql.`order_item` "
+                        + "WHERE OrderId = ?")
+                .param(orderId).query().listOfRows();
+    }
 }

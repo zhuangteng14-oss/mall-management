@@ -387,4 +387,49 @@ public class GoodsDao {
                 + "WHERE MerchantId=? AND GoodName=? AND ProductCode=? AND DeletedAt IS NULL";
         return jdbcClient.sql(sql).params(deletedAt, MerchantId, GoodName, ProductCode).update();
     }
+
+    // ==================== 写：多规格库存的扣减 / 释放（C3 块 7 · 库存治理 TD-36 的落地）====================
+
+    /**
+     * <b>CAS 扣减</b>一条多规格的库存，返回**影响行数**（C3 块 7 · 库存治理 TD-36）。
+     *
+     * <p>语句逐字照《块 7 参考》§5.1，与订单状态机同款：<b>把判据写进 {@code WHERE}、由数据库一把定胜负</b>，
+     * 不先 {@code SELECT} 再 {@code UPDATE}（那样两个并发请求会读到同一个旧值）。
+     *
+     * <p>⚠️ <b>{@code rows == 0} 是正常分支、不是错误</b>（同 {@code OrderDao.casUpdate} 的口径）。
+     * 它由两种**完全不同的**原因产生，调用方必须都按「什么也没发生」处理：
+     * <ol>
+     *   <li><b>库存不足</b>（{@code Stock < n}）—— 防超卖命中，这是本方法的**主要目的**；</li>
+     *   <li><b>该 {@code SkuCode} 没有行</b> —— 即 <b>非矩阵商品</b>。订单链路装的是
+     *       {@code order_item.ProductCode} / {@code OrderService.ItemSpec.code()}，而
+     *       {@code goods_sku.SkuCode} 只在**矩阵商品**下与之相等（加购时把 {@code SkuCode}
+     *       作为 {@code ProductCode} 上报）⇒ 非矩阵商品**必然查无此行**。</li>
+     * </ol>
+     * ⚠️ <b>两种 0 行都不得被调用方判成「订单失败」</b> —— 那样会让调用方重复下单，
+     * 与 {@code OrderService.writeItems} 的 fail-open 是同一条理由。
+     */
+    public int deductStock(String skuCode, int n) {
+        String sql = "UPDATE mall_management_sql.goods_sku SET Stock = Stock - ? "
+                + "WHERE SkuCode = ? AND Stock >= ?";
+        return jdbcClient.sql(sql).params(n, skuCode, n).update();
+    }
+
+    /**
+     * <b>释放（回补）</b>一条多规格的库存 —— 订单**超时取消**时把下单时扣掉的量加回去
+     * （C3 块 7 · TD-36 的第三条腿，C5 甲：复用 {@code OrderTimeoutCancelJob}，不新加 job）。
+     *
+     * <p>⚠️ <b>刻意不做「这单当时到底扣成了没有」的判据</b>：本仓没有任何一处记录「某单对某 SKU
+     * 的扣减是否成功」（{@code order_item} 只存成交快照，存不下这个结论）。本方法只管
+     * 「按码加回 {@code n}」；非矩阵商品查无此行 ⇒ {@code 0} 行 = no-op（与
+     * {@link #deductStock} 的第二条边界同源）。
+     *
+     * <p>⚠️ <b>已知边界（取舍，不是缺陷）</b>：若下单时 {@link #deductStock} 因**库存不足**返回 0
+     * （那一单仍照常落库），超时取消时本方法**仍会加回 {@code n}** ⇒ 该 SKU 的库存会**虚增**。
+     * 块 7 的演示靠 {@code goods_sku.BaselineStock}（Migration ⑰-2）一键复位兜住，见
+     * 《块 7 参考》§九 A 档 2。要根治得新增「本单扣减是否成功」的记录 —— 那是**新契约**，须另批。
+     */
+    public int releaseStock(String skuCode, int n) {
+        String sql = "UPDATE mall_management_sql.goods_sku SET Stock = Stock + ? WHERE SkuCode = ?";
+        return jdbcClient.sql(sql).params(n, skuCode).update();
+    }
 }

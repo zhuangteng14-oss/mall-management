@@ -371,4 +371,30 @@ public class SeckillDao {
     private static boolean isBlank(String s) {
         return s == null || s.isBlank();
     }
+
+    // ==================== 写：秒杀已售数的 CAS 扣减（C3 块 7 · 库存治理 TD-38）====================
+
+    /**
+     * <b>CAS 扣减</b>一场秒杀的已售数（{@code SoldStock += n}），返回**影响行数**
+     * （C3 块 7 · 库存治理 TD-38）。语句逐字照《块 7 参考》§5.1 的第二条 —— 与
+     * {@code GoodsDao.deductStock} 同款：判据写进 {@code WHERE}，不先读后写。
+     *
+     * <p>⚠️ {@code rows == 0} 是**正常分支**（同 {@code OrderDao.casUpdate} 口径）：或「卖满了」
+     * （{@code SoldStock + n > TotalStock}）、或活动不存在。
+     *
+     * <p>⚠️ <b>本方法今天没有生产调用点 —— 这是块 7 已知的缺口，不是疏漏</b>：
+     * 订单链路（{@code OrderService.orderAdd}）装的是 {@code ProductCode}，
+     * <b>不带 {@code ActivityId}</b> —— 秒杀页的下单走的是与「立即购买」**同一条**
+     * {@code order.orderAdd}（{@code ProductPage.vue} 的 {@code handlePay}），
+     * 前端只把「这场活动此刻的价」摆出来、不改下单报文 ⇒ 后端下单时**无法确定**该落到哪一场活动。
+     * <p>⇒ 本方法先按 §5.4 落成 API，**调用点归块 7 的攻击引擎**（场景 ① 秒杀抢购）。
+     * 在它被接上之前，{@code SoldStock} 仍是**陈列值**：TD-38 那句「同一场秒杀可以被无限下单」
+     * <b>尚未被真正堵住</b>。要真兑现，须给 {@code orderAdd} 加 {@code ActivityId} 入参 ——
+     * 那是**新契约**，须另批（用户 2026-10-13 批复的 A 档 5 项里没有这一条）。
+     */
+    public int deductSoldStock(long id, int n) {
+        return jdbc.sql("UPDATE seckill_activity SET SoldStock = SoldStock + :n "
+                        + "WHERE Id = :id AND SoldStock + :n <= TotalStock")
+                .param("n", n).param("id", id).update();
+    }
 }

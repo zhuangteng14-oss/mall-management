@@ -22,7 +22,9 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * 切片里 {@code JdbcTemplate} 是替身（{@code AbstractSmokeTest} 上那个 {@code @MockitoBean}），
  * 而 {@code OrderDao} 的写侧走 {@code JdbcClient.update()} ⇒ 落到
  * {@code JdbcTemplate.update(PreparedStatementCreator)} <b>单参重载</b>。
- * 于是 <b>调用次数 = 1（订单那一行）+ N（明细行数）</b> —— 这是本类全部断言的地基。
+ * 于是 <b>调用次数 = 1（订单那一行）+ N（明细行数）+ N（明细逐条的 {@code goods_sku.Stock} 下单即扣）</b>
+ * —— 这是本类全部断言的地基（<b>末项 = 块 7 TD-36 新增</b>：{@code OrderService.deductStocks} 与
+ * {@code writeItems} 同吃一批 specs，故 <b>有 N 行明细就恰多 N 次 update</b>，一条也不多）。
  * ⚠️ 这也是它**能**在 backend 那个阻塞 job 里真跑（不连 MySQL / 不连 Redis、不带
  * {@code A3_ENABLED} 门控）的原因，与 {@code OrderAddPriceGuardSmokeTest} 同一条理由。
  *
@@ -73,46 +75,46 @@ class OrderAddItemsSmokeTest extends AbstractSmokeTest {
 
     // ==================== 一、显式 Items（首选口径） ====================
 
-    /** 显式明细两件 ⇒ 1（订单）+ 2（明细）= 3 次。一单多品在这里第一次成为**数据**。 */
+    /** 显式明细两件 ⇒ 1（订单）+ 2（明细）+ 2（块 7 逐件的库存扣减）= 5 次。一单多品在这里第一次成为**数据**。 */
     @Test
     void explicitItems_twoProducts_writeTwoRows() throws Exception {
-        assertOrderLandsWithWrites(3, baseRequest("8", "5", "甲:A1；乙:B2").param("Items",
+        assertOrderLandsWithWrites(5, baseRequest("8", "5", "甲:A1；乙:B2").param("Items",
                 "[{\"code\":\"A1\",\"name\":\"甲\",\"price\":2.5,\"qty\":2},"
                         + "{\"code\":\"B2\",\"name\":\"乙\",\"price\":1,\"qty\":3}]"));
     }
 
-    /** 显式明细一件 ⇒ 1（订单）+ 1（明细）= 2 次。 */
+    /** 显式明细一件 ⇒ 1（订单）+ 1（明细）+ 1（块 7 该件库存扣减）= 3 次。 */
     @Test
     void explicitItems_oneProduct_writesOneRow() throws Exception {
-        assertOrderLandsWithWrites(2, baseRequest("5", "1", "甲:A1")
+        assertOrderLandsWithWrites(3, baseRequest("5", "1", "甲:A1")
                 .param("Items", "[{\"code\":\"A1\",\"name\":\"甲\",\"price\":5,\"qty\":1}]"));
     }
 
     /**
-     * 同码两件被**合并成一行** ⇒ 1（订单）+ 1（明细）= 2 次。
+     * 同码两件被**合并成一行** ⇒ 1（订单）+ 1（明细）+ 1（块 7：合并后仍只一条库存扣减）= 3 次。
      *
      * <p>⚠️ 这条钉的是「明细整批丢失」那个失效模式：{@code order_item} 的唯一键是
      * {@code (OrderId, ProductCode)}，合并漏了 ⇒ 第 2 行撞键 ⇒ 整批 INSERT 报错 ⇒
      * 被 {@code writeItems} 的 fail-open 吞掉 ⇒ <b>订单好好的、明细一条不剩</b>，
      * 而这一整套断言仍然全绿（因为写库次数只数「尝试了几次 update」，不数成功几行）。
-     * 所以这里的 {@code 2} 是「合并确实发生过」的**唯一**切片内证据。
+     * 所以这里的 {@code 3} 是「合并确实发生过」的**唯一**切片内证据。
      */
     @Test
     void explicitItems_sameCodeTwice_mergedIntoOneRow() throws Exception {
-        assertOrderLandsWithWrites(2, baseRequest("10", "3", "甲:A1")
+        assertOrderLandsWithWrites(3, baseRequest("10", "3", "甲:A1")
                 .param("Items", "[{\"code\":\"A1\",\"name\":\"甲\",\"price\":2.5,\"qty\":1},"
                         + "{\"code\":\"A1\",\"name\":\"甲\",\"price\":2.5,\"qty\":2}]"));
     }
 
     /**
-     * 缺 {@code code} 的那一条被丢掉，另一条照写 ⇒ 1（订单）+ 1（明细）= 2 次。
+     * 缺 {@code code} 的那一条被丢掉，另一条照写 ⇒ 1（订单）+ 1（明细）+ 1（块 7：只有留下那条扣）= 3 次。
      *
      * <p>⚠️ 「丢一条、留一条」而不是「整批不写」是刻意的：没有码就没法把这一件挂到商品维度，
      * 但**其余几件是好的** —— 为一条坏数据丢掉整单明细是「错数据比没数据更坏」的反面误用。
      */
     @Test
     void explicitItems_rowWithoutCode_isDroppedTheOthersLive() throws Exception {
-        assertOrderLandsWithWrites(2, baseRequest("5", "1", "甲:A1")
+        assertOrderLandsWithWrites(3, baseRequest("5", "1", "甲:A1")
                 .param("Items", "[{\"name\":\"没有码\",\"price\":9,\"qty\":1},"
                         + "{\"code\":\"A1\",\"name\":\"甲\",\"price\":5,\"qty\":1}]"));
     }
@@ -121,14 +123,14 @@ class OrderAddItemsSmokeTest extends AbstractSmokeTest {
 
     /**
      * 坏 JSON ⇒ 记 WARN、显式口径产出空 ⇒ **继续走回落口径**（本夹具的 {@code 甲:A1} 恰一段）
-     * ⇒ 1（订单）+ 1（明细）= 2 次。
+     * ⇒ 1（订单）+ 1（明细）+ 1（块 7：回落出的那件扣减）= 3 次。
      *
      * <p>⚠️ 这条钉的是「坏 JSON **不等于** 不写明细」：{@code parseExplicitItems} 返回空表是
      * 「这一路没产出」，不是「本次不许有明细」—— 两路是**串联**的（见 {@code resolveItems}）。
      */
     @Test
     void malformedItemsJson_fallsBackToProductInformation() throws Exception {
-        assertOrderLandsWithWrites(2, baseRequest("5", "1", "甲:A1").param("Items", "{不是 JSON"));
+        assertOrderLandsWithWrites(3, baseRequest("5", "1", "甲:A1").param("Items", "{不是 JSON"));
     }
 
     /**
@@ -146,17 +148,17 @@ class OrderAddItemsSmokeTest extends AbstractSmokeTest {
     /** 空 {@code Items}（前端 {@code build()} 把 {@code undefined} 转成空串就是这一形状）⇒ 走回落口径。 */
     @Test
     void blankItems_paramPresentButEmpty_fallsBack() throws Exception {
-        assertOrderLandsWithWrites(2, baseRequest("10", "2", "可乐:PC-1").param("Items", ""));
+        assertOrderLandsWithWrites(3, baseRequest("10", "2", "可乐:PC-1").param("Items", ""));
     }
 
     /**
      * 回落：{@code ProductInformation} **恰一段且带 {@code :}** ⇒ 推得出一件
      * （码 = 最后一个 {@code :} 之后，数量 = {@code Quantity}，单价 = {@code Price ÷ Quantity}）
-     * ⇒ 1（订单）+ 1（明细）= 2 次。购物车结算在 commit 0b 之前走的正是这一形状。
+     * ⇒ 1（订单）+ 1（明细）+ 1（块 7：该件库存扣减）= 3 次。购物车结算在 commit 0b 之前走的正是这一形状。
      */
     @Test
     void fallback_singleSegmentProductInformation_writesOneRow() throws Exception {
-        assertOrderLandsWithWrites(2, baseRequest("10", "2", "可乐:PC-1"));
+        assertOrderLandsWithWrites(3, baseRequest("10", "2", "可乐:PC-1"));
     }
 
     /**
