@@ -312,15 +312,33 @@ public class CommentDao {
      * <p>排序：{@code IsMerchantFirst DESC, created_at ASC} —— 商家**首次**回复置顶，其余按时间正序
      * （楼中楼的自然读序）。⚠️ 置顶维度**只有** {@code IsMerchantFirst} 一个：
      * 商家**后续**回复按时间混排（方案逐字），不因为它也是商家就再往上提。
+     *
+     * <p>额外带一列 {@code ReplyToName} —— 方案 §4.1 的展示元素写着
+     * 「用户B **回复 @用户A**：内容」，前端要那个被回复人的显示名。
+     * <ul>
+     *   <li>用**相关子查询**而不是 JOIN 自己：{@link #COMMENT_COLUMNS} 是**不带表别名**的投影，
+     *       {@code JOIN comment p} 会让 {@code Id} / {@code ParentId} / {@code created_at} 等
+     *       撞成 ambiguous。子查询让外层仍只有一张表（别名 {@code c} 只为子查询里引用它而给），
+     *       投影一个字都不用改。</li>
+     *   <li>⚠️ <b>被回复那条若是匿名，这里回 {@code NULL}</b>（不是 {@code ReplyToId} 空）。
+     *       直接回它的 {@code AuthorId} 会把一条匿名回复**经由「回复 @X」这四个字实名暴露**
+     *       —— 与 {@code CommentService.decorate} 抹 {@code AuthorId}、通知正文写「有人」
+     *       是同一条口径。⇒ 判据留在 SQL 这一处，前端拿到 {@code null} 就不画那个前缀。</li>
+     *   <li>普通回复（{@code ReplyToId IS NULL}）天然取不到 ⇒ 也是 {@code NULL}，
+     *       前端只在「回复回复」那一种上画出前缀。</li>
+     * </ul>
      */
     public List<Map<String, Object>> selectReplies(List<Long> parentIds) {
         if (parentIds == null || parentIds.isEmpty()) {
             return List.of();
         }
         String placeholders = String.join(",", Collections.nCopies(parentIds.size(), "?"));
-        String sql = "SELECT " + COMMENT_COLUMNS + " FROM `comment` "
-                + "WHERE `ParentId` IN (" + placeholders + ") AND `Status` <> 'deleted' "
-                + "ORDER BY `ParentId`, `IsMerchantFirst` DESC, `created_at` ASC";
+        String sql = "SELECT " + COMMENT_COLUMNS + ", "
+                + "(SELECT CASE WHEN p.`IsAnonymous` = 1 THEN NULL ELSE p.`AuthorId` END "
+                + "FROM `comment` p WHERE p.`Id` = c.`ReplyToId`) AS `ReplyToName` "
+                + "FROM `comment` c "
+                + "WHERE c.`ParentId` IN (" + placeholders + ") AND c.`Status` <> 'deleted' "
+                + "ORDER BY c.`ParentId`, c.`IsMerchantFirst` DESC, c.`created_at` ASC";
         return jdbcClient.sql(sql).params(parentIds).query().listOfRows();
     }
 

@@ -353,7 +353,7 @@
               <button type="button" :class="{ on: revSort === 'new' }" @click="setRevSort('new')">最新</button>
               <button type="button" :class="{ on: revSort === 'hot' }" @click="setRevSort('hot')">最热</button>
               <span class="sp"></span>
-              <button type="button" class="wr" v-if="revAccount && !revIsQuestion && !revCompose" @click="openRevCompose">写评价</button>
+              <button type="button" class="wr" v-if="revAccount && !revIsQuestion && !revCompose" :disabled="!revCanReview" :title="revCanReview ? '' : '购买后可评价'" @click="openRevCompose">写评价</button>
               <button type="button" class="wr" v-if="revAccount && revIsQuestion && !askCompose" @click="openAskCompose">我要提问</button>
               <span class="hint" v-if="!revAccount">{{ revIsQuestion ? '登录后可以提问' : '登录后可发表评价' }}</span>
             </div>
@@ -455,14 +455,17 @@
                 </div>
 
                 <div class="rreps" v-if="r.Replies && r.Replies.length">
-                  <div class="rep" v-for="p in r.Replies" :key="p.Id">
+                  <div class="rep" v-for="p in revShownReplies(r)" :key="p.Id">
                     <div class="h">
                       <span class="who">{{ p.Author }}</span>
                       <span class="tag" v-if="p.IsMerchantFirst">商家首复</span>
                       <span class="tag" v-else-if="p.AuthorRole === 2">商家</span>
                       <span class="when">{{ p.CreatedAt }}</span>
                     </div>
-                    <p class="txt">{{ p.Content }}</p>
+                    <!-- ⚠️「回复 @X」前缀：`ReplyToName` 由后端 `selectReplies` 的关联子查询给出
+                         （方案 §4.1「楼中楼要能看出回的是谁」）。**匿名回复者恒为 NULL** —— 后端刻意
+                         不把匿名的 `AuthorId` 吐出来，否则这一行就成了匿名去匿名化的后门。 -->
+                    <p class="txt"><span class="rt" v-if="p.ReplyToName">回复 @{{ p.ReplyToName }}：</span>{{ p.Content }}</p>
                     <div class="ract">
                       <!-- 被采纳的那条打个标（`Accepted` 由后端在 `Replies` 的稳定排序里给出，
                            且它一定排在第一 —— 见 `CommentService.list`）。 -->
@@ -489,6 +492,12 @@
                       </div>
                     </div>
                   </div>
+                  <!-- 折叠（方案 §4.1「回复多了要收起来，默认只看前 3 条」）。⚠️ **只在评价 tab 折叠**：
+                       问答 tab 的回答是主内容、不是附属（§4.2 左图右列的核心），收起来等于藏正文。 -->
+                  <button type="button" class="rmore" v-if="!revIsQuestion && r.Replies.length > REV_REPLY_VISIBLE"
+                          @click="revToggleReplies(r)">
+                    {{ revExpanded[r.Id] ? '收起' : `共 ${r.Replies.length} 条回复 · 展开` }}
+                  </button>
                 </div>
               </div>
             </div>
@@ -1317,7 +1326,9 @@ const moreReviews = () => { if (!revLoading.value) loadRev(true) }
  *   <li>清 `revRows` —— 否则新 tab 的第一帧会显示**上一个 tab 的行**（`loadRev` 是异步的）；
  *       连 `revTotal` / `revStats` 一起清，不然「共 N 条评价」在问答 tab 上闪一下；</li>
  *   <li>关掉两个发表框 —— 它们各自绑着 `kind`（评价 vs 提问），跨 tab 留着会发错类型；</li>
- *   <li>清 `revError` —— 上一个 tab 的失败提示留在新 tab 上会让人以为新 tab 也坏了。</li>
+ *   <li>清 `revError` —— 上一个 tab 的失败提示留在新 tab 上会让人以为新 tab 也坏了；</li>
+ *   <li>清 `revExpanded` —— 展开态是按行 `Id` 记的，而两 tab 的行不是同一批（`Id` 空间不同），
+ *       留着就是「切回来发现某行莫名是展开的」。</li>
  * </ol>
  */
 const setRevKind = (k) => {
@@ -1330,6 +1341,7 @@ const setRevKind = (k) => {
   revCompose.value = false
   askCompose.value = false
   repDraft.value = null
+  revExpanded.value = {}
   loadRev(false)
 }
 
@@ -1344,6 +1356,38 @@ const revSubmitting = ref(false)
 const revMsg = ref('')
 
 const revOtherGoods = computed(() => !!revGoodsId.value && String(revGoodsId.value) !== String(productId))
+/**
+ * 这一页「能不能写评价」= 后端 `myOrders` 回没回东西（方案 §4.1「未购买 → 评论按钮 disabled +
+ * tooltip『购买后可评价』」）。⚠️ **它只是提前拦一下**（权威在后端 `checkReviewEligible`）；
+ * 「一件都没回」的三种来源——真没买过 / 全是未收货 / 全评过了——在这一格上**同形**，
+ * 那句话（`revOrderMsg`）留给发表框去说清具体是哪种。⚠️ 未加载完时 `revOrders` 是空数组
+ * ⇒ 按钮**短暂置灰**，加载回来即放开（第四个 `onMounted` 里预拉，见那一处）。
+ */
+const revCanReview = computed(() => revOrders.value.length > 0)
+
+// ── 回复区折叠（方案 §4.1 展示元素的「└ 共 N 条回复 [展开]」）─────────────────────
+/**
+ * 每个顶层行只先铺 {@link REV_REPLY_VISIBLE} 条回复，其余的收在「共 N 条回复 · 展开」后面。
+ *
+ * <p>⚠️ **只在评价（`review`）这一侧生效，问答区不折**：问答的「回答」是主体内容（方案 §4.2
+ * 「右问答列表」），折起来等于把答案藏了；而 §4.1 那句「共 N 条回复 [展开]」写在**评论区**的
+ * 展示元素里。判据落在 {@link revShownReplies} 一处。
+ *
+ * <p>⚠️ 被采纳的那条**永远可见**：后端 `CommentService.list` 已把它稳定排序到 `Replies` 最前，
+ * 而这里只 `slice(0, N)`（N ≥ 3）⇒ 它必在前 N 条里。别改成「先过滤再取前 N」。
+ *
+ * <p>展开态是**每楼各自**的（`{ [顶层 Id]: true }`），不是一个全局开关 —— 一楼展开不该把别楼也铺开。
+ */
+const REV_REPLY_VISIBLE = 3
+const revExpanded = ref({})
+const revShownReplies = (row) => {
+  const all = row.Replies || []
+  if (revIsQuestion.value || revExpanded.value[row.Id] || all.length <= REV_REPLY_VISIBLE) return all
+  return all.slice(0, REV_REPLY_VISIBLE)
+}
+const revToggleReplies = (row) => {
+  revExpanded.value = { ...revExpanded.value, [row.Id]: !revExpanded.value[row.Id] }
+}
 const revFileNote = computed(() => (revFiles.value.length
   ? `已选 ${revFiles.value.length} 张，图片先审后显`
   : '图片先审后显'))
@@ -1480,6 +1524,10 @@ const submitReview = async () => {
       content: text,
       rating: revDraft.value.rating,
       anonymous: revDraft.value.anonymous,
+      // ⚠️ 方案 §4.1「评论时选'对应商品'（从历史订单里选，`ProductCode` 落库）」——
+      //    不传这一格后端 `comment.ProductCode` 就落 NULL，行内「型号：」那一行永远空
+      //    （展示侧早在 commit 1 就位，断的只是这里）。取的是**当前选中那笔订单**的货号。
+      productCode: (revOrders.value.find((o) => String(o.GoodsId) === String(revGoodsId.value)) || {}).ProductCode,
       files: revFiles.value,
     })
     if (!d || !d.success) { revMsg.value = (d && d.msg) || '发表失败'; return }
@@ -1585,7 +1633,7 @@ const removeRev = async (row) => {
 // ⚠️ 本文件**第四个** `onMounted`（Vue 允许注册多次）；不并进上面三个，理由同 `:992` 那条。
 //    评价区**未登录也照常加载**（商品详情页是浏览面，`/comment/list` 已进 `AUTH_WHITELIST`）——
 //    故这里**没有** `if (!isLoggedIn()) return`，与上面 `loadSeckill` 那一条**刻意不同**。
-onMounted(() => { loadRev(false) })
+onMounted(() => { loadRev(false); loadRevOrders() })   // ⚠️ 同批预拉「可评价商品」—— 否则「未购买 ⇒ 写评价 disabled + tooltip『购买后可评价』」（方案 §4.1）在用户点开之前判不出来（`revCanReview` 恒假）。两个请求各自 fail-soft，互不阻塞。
 </script>
 
 <style scoped>
@@ -2193,6 +2241,10 @@ button { background: none; border: 0; cursor: pointer; }
                     border-radius: var(--r1); font-size: var(--fs-xs); color: var(--ink-2); }
 .rev .rbar button.on { border-color: var(--ink-3); color: var(--ink); font-weight: var(--fw-med); }
 .rev .rbar button.wr { margin-left: auto; border-color: var(--brand-ink); color: var(--brand-ink); }
+/* 「未购买 ⇒ 写评价 置灰 + tooltip」（方案 §4.1）。⚠️ 必须显式写：`button.wr` 那条把颜色钉在
+   `--brand-ink` 上，不覆盖的话禁用态**看起来跟能点的一模一样**（`.rbar button` 的通用禁用规则
+   优先级低于 `button.wr`）。 */
+.rev .rbar button.wr:disabled { border-color: var(--line-2); color: var(--ink-3); cursor: not-allowed; }
 .rev .rbar .sp { flex: 1 1 auto; }        /* `写评价` 出现时由它占位，按钮不吃 `auto` */
 .rev .rbar .hint { margin-left: auto; font-size: var(--fs-xs); color: var(--ink-3); }
 /* ⚠️ 列表限高 + 内部滚动（方案 §4.1）。`max-height` 只在更长时才生效 ⇒ 评价少的商品形态不变。
@@ -2226,6 +2278,12 @@ button { background: none; border: 0; cursor: pointer; }
 .rep .txt { margin-top: var(--s2); max-width: 60ch; font-size: var(--fs-sm); line-height: 1.8; color: var(--ink-2); }
 .rep .tag { padding: 1px var(--s2); border-radius: var(--r1); background: var(--surface-3);
             font-size: var(--fs-xs); color: var(--ink-3); }
+/* 「回复 @X：」前缀 —— 比正文浅一档、不加粗，读到它就知道这条是回给谁的。 */
+.rep .txt .rt { color: var(--brand-ink); }
+/* 「共 N 条回复 · 展开 / 收起」—— 同 `.ract button` 那一档的轻按钮，但自成一行。 */
+.rmore { margin-top: var(--s2); height: 26px; padding: 0 var(--s3); border: 1px solid transparent;
+         border-radius: var(--r1); font-size: var(--fs-xs); color: var(--ink-3); font-variant-numeric: tabular-nums; }
+.rmore:hover { color: var(--ink-2); border-color: var(--line-2); }
 
 /* 发表 / 回复框 */
 .wbox { margin: var(--s4) 0; padding: var(--s4); border: 1px solid var(--line-2); border-radius: var(--r2); }
