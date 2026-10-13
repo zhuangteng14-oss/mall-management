@@ -54,6 +54,15 @@ import java.util.UUID;
  * 故落盘失败时**不**把整条评论判失败（那会让用户重发一次已经存在的评论）——
  * 如实回一句 {@code msg} 与 {@code imageFailed} 计数，让用户自己看着办。
  * 本仓零业务异常抛出的口径（同 {@code CartService} / {@code CouponService}）在这里同样适用。
+ *
+ * <h2>【敏感词：发表前过一道闸（方案 §4.5，整改 commit 5）】</h2>
+ * {@link #add} 在 {@code INSERT} 之前调 {@link SensitiveWordService#filter}：
+ * 命中占比 {@code < 40%} ⇒ 正文**就地打码**（{@code ***}）后照常入库；
+ * {@code >= 40%} ⇒ **拒收**（只回一句不点名词的话 —— 方案 §4.5「不提示用户」）。
+ * ⚠️ 判定与占比口径**只在 {@code SensitiveWordService} 一处**，本类只做「拒 or 换」，
+ * 别在这里再算一遍（两处算会出现「打码了但没拒 / 拒了但没打码」的分叉）。
+ * ⚠️ 打码发生在**通知与正文落库之前**：{@code recordMention} / {@code notifyOnPost} /
+ * {@code notifyReply} 拿到的 {@code text} 也是打码后的 —— 通知正文里不该出现原文。
  */
 @Service
 public class CommentService {
@@ -104,13 +113,16 @@ public class CommentService {
 
     private final CommentDao commentDao;
     private final NotificationService notificationService;
+    private final SensitiveWordService sensitiveWordService;
     private final String uploadDir;
 
     public CommentService(CommentDao commentDao,
                           NotificationService notificationService,
+                          SensitiveWordService sensitiveWordService,
                           @Value("${app.upload-dir:${user.dir}/src/main/resources/static/img/}") String uploadDir) {
         this.commentDao = commentDao;
         this.notificationService = notificationService;
+        this.sensitiveWordService = sensitiveWordService;
         this.uploadDir = uploadDir;
     }
 
@@ -255,6 +267,20 @@ public class CommentService {
             if (role == null) {
                 return fail("账号不存在：" + author);
             }
+
+            // ── 敏感词（方案 §4.5；用户 2026-10-13 整改指令 §六）──────────────────────────
+            // 命中占比 < 40% ⇒ 正文就地打码（`text` 换成打码版，后面 INSERT / 通知 / 正文落库全用它）；
+            // 命中占比 >= 40% ⇒ **拒收**。判定与口径全在 `SensitiveWordService.filter` 那一处，
+            // 本类只做「拒 or 换」这一个决定 —— 别在这里再实现一遍占比。
+            // ⚠️ 位置在**碰库之后、INSERT 之前**：`selectRoleByUsername` 已经证明这条连接是通的，
+            //    词表读不到会在这里抛出、落进本方法既有的 catch ⇒ fail-closed（不带着未检正文入库）。
+            // ⚠️ 「不提示用户」（§4.5）：拒收只回一句不点名词的 `REJECT_MSG`；打码路径**回成功**，
+            //    用户自己在列表里看见 `***`。
+            Map<String, Object> sensitive = sensitiveWordService.filter(text);
+            if (Boolean.TRUE.equals(sensitive.get("rejected"))) {
+                return fail(SensitiveWordService.REJECT_MSG);
+            }
+            text = String.valueOf(sensitive.get("masked"));
 
             String tt;
             String tid;

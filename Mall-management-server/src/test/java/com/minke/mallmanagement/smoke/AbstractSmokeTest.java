@@ -53,8 +53,10 @@ import com.minke.mallmanagement.marketing.seckill.dao.SeckillDao;
 import com.minke.mallmanagement.marketing.seckill.service.SeckillService;
 import com.minke.mallmanagement.comment.dao.CommentDao;
 import com.minke.mallmanagement.comment.dao.ReportDao;
+import com.minke.mallmanagement.comment.dao.SensitiveWordDao;
 import com.minke.mallmanagement.comment.service.CommentService;
 import com.minke.mallmanagement.comment.service.ReportService;
+import com.minke.mallmanagement.comment.service.SensitiveWordService;
 import org.junit.jupiter.api.BeforeEach;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
@@ -283,7 +285,18 @@ import static org.mockito.Mockito.when;
         // ⚠️ `ReportController` 另收 `ObjectProvider<UserStateLookup>`（同 `CommentController`）。
         // ⚠️ 本笔还给 `CommentService` / `CommentDao` 加了「图片审核」那一支（`/comment/imageReview`），
         //    **不新增 bean**（两个类都在上）⇒ 这里没有第二条要登记的。
-        ReportDao.class, ReportService.class})
+        ReportDao.class, ReportService.class,
+        // C3 块 6 整改 · commit 5〈敏感词〉（2026-10-13）：新增一个 Controller
+        // （`SensitiveWordController`）+ 一个 @Service（`SensitiveWordService`）+ 一个 @Dao
+        // （`SensitiveWordDao`）—— **第十五次同一处地雷**（@WebMvcTest 无参会加载全部 @Controller，
+        // 新控制器一进来，切片上下文就会因为「找不到 SensitiveWordService」而**启动失败**，同前十四笔）。
+        // ⚠️ 依赖链三层：Service → `SensitiveWordDao`（本行）+ `CommentDao`（上面已登记）；
+        //    `CommentService` 本笔**反向**多依赖了一个 `SensitiveWordService`（发表前过敏感词闸）
+        //    ⇒ 这一条是**双向登记**：漏了 `SensitiveWordService` 不只是新 Controller 起不来，
+        //    **`CommentService` 自己也起不来**，会把 `CommentSmokeTest` 一起拖红。
+        // ⚠️ 本笔还给 `CommentDao` 加了「扫老评论」那两个方法（`selectContentsContaining` /
+        //    `updateContent`），**不新增 bean** ⇒ 这里没有第二条要登记的。
+        SensitiveWordDao.class, SensitiveWordService.class})
 public abstract class AbstractSmokeTest {
 
     @Autowired

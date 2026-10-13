@@ -654,4 +654,49 @@ public class CommentDao {
                 .param(goodsId).query(String.class).list();
         return rows.isEmpty() ? null : rows.get(0);
     }
+
+    // ==================== 读 / 写：敏感词扫描（块 6 整改 commit 5，方案 §4.5） ====================
+
+    /**
+     * 找出**未删除**、且正文含给定词的评论（回 {@code Id} + {@code Content} 两列）——
+     * 「加词后扫老评论」的取数口（方案 §4.5 逐字）。
+     *
+     * <p>⚠️ <b>为什么在 SQL 里做「含不含」而不是全表拉回 Java 筛</b>：本表会随演示一直长，
+     * 全表拉回是 O(全部评论) 内存；而 {@code LIKE} 这一发只回命中行。代价是要处理
+     * {@code LIKE} 的两个通配符 —— 见下一条。
+     *
+     * <p>⚠️ <b>{@code % } 与 {@code _} 必须转义，且用 {@code '!'} 而不是反斜杠</b>：
+     * 词是**管理端输入**的，一个含 {@code %} 的词（如 {@code '100%'}）若原样进 {@code LIKE}，
+     * 会变成「匹配任意串」—— 那一发 {@code UPDATE} 会打码**全表**。转义在 SQL 里做
+     * （{@code REPLACE} 三段，先转义转义符本身），{@code ESCAPE '!'} 是因为反斜杠在 MySQL
+     * 字符串字面量里本身是转义符（{@code ESCAPE '\\'} 要再套一层 Java 转义，两边都容易写错）；
+     * {@code '!'} 在两个语言里都无特殊含义。
+     *
+     * @param word 词面（**不要**自己拼 {@code %}** —— 本方法负责包裹与转义）
+     */
+    public List<Map<String, Object>> selectContentsContaining(String word) {
+        return jdbcClient.sql("SELECT `Id`, `Content` FROM `comment` "
+                        + "WHERE `Status` <> 'deleted' "
+                        + "AND `Content` LIKE CONCAT('%', "
+                        + "REPLACE(REPLACE(REPLACE(?, '!', '!!'), '%', '!%'), '_', '!_'), '%') "
+                        + "ESCAPE '!'")
+                .param(word).query().listOfRows();
+    }
+
+    /**
+     * 覆写一条评论的正文（敏感词打码用）。
+     *
+     * <p>⚠️ <b>这是本仓唯一一处「改 {@code comment.Content}」</b>（发表时那次是 {@code INSERT}）——
+     * 它刻意不碰 {@code Status} / 计数 / 时间列：打码是**展示层内容的替换**，
+     * 不是一次重新发表，也不该让「最后修改时间」动起来（{@code created_at} 是评论的时间锚，
+     * 改了会让列表排序与「30 分钟前」那类文案全部失准）。
+     *
+     * <p>⚠️ 不加 {@code WHERE Content <> ?}：调用方已先比过新旧值
+     * （{@code SensitiveWordService.maskOldComments}），多一个条件只会在并发下
+     * 把「另一个人刚改过」变成静默 0 行 —— 这里要的是「以我这次算出来的为准」。
+     */
+    public int updateContent(long id, String content) {
+        return jdbcClient.sql("UPDATE `comment` SET `Content` = ? WHERE `Id` = ?")
+                .params(content, id).update();
+    }
 }
