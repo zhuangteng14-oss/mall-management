@@ -250,6 +250,11 @@
             <span class="ops">
               <button type="button" title="现有功能 consultProduct" @click="consultProduct">客服</button>
               <button type="button" title="真跳转：/shop 店铺主页（新建页 ShopHome，卖家 = 本页 route 的 MerchantId）" @click="enterShop">进店逛逛</button>
+              <!-- 举报入口（方案 §4.4「可举报：评论 / 回复 / 商品 / 用户」）—— 商品与商家两条：
+                   对象不同（`goods.Id` vs 商家的业务号），故两个按钮、各自 `openReport`。
+                   ⚠️ 未登录不给（举报要有身份）：与服务端 `IdentityGuard` 同判据。 -->
+              <button type="button" v-if="revAccount" @click="openReport('goods', Id, '商品')">举报商品</button>
+              <button type="button" v-if="revAccount" @click="openReport('user', sellerId, '商家')">举报商家</button>
             </span>
           </div>
         </div>
@@ -439,6 +444,11 @@
                   <button type="button" :class="{ on: r.MyLike === 'like' }" @click="likeRev(r, 'like')">赞 {{ r.LikeCount || 0 }}</button>
                   <button type="button" :class="{ on: r.MyLike === 'dislike' }" @click="likeRev(r, 'dislike')">踩 {{ r.DislikeCount || 0 }}</button>
                   <button type="button" @click="openReply(r, null)">回复</button>
+                  <!-- 举报 / 提删（方案 §4.4、§4.2）—— 自己的内容不给（服务端「不能举报自己」同判据）。
+                       提问上商家看到的措辞是**提删**（§4.2「商家可提删 → 管理端裁判」），
+                       走的**是同一条**举报通道（对象 = 这条提问），只是按钮名不同。 -->
+                  <button type="button" v-if="revAccount && !r.Mine"
+                          @click="openReport('comment', r.Id, revIsQuestion ? (revIsMerchant ? '提删该提问' : '举报提问') : '举报评价')">{{ revIsQuestion && revIsMerchant ? '提删' : '举报' }}</button>
                   <!-- ⚠️ 顶层**提问**不给「删除」：方案 §4.2「提问者不能删」（后端 `CommentService.delete`
                        同一判据）。提问被删会连带毁掉下面全部回答 ⇒ 只有管理端能直接删，
                        商家的诉求走「提删」（举报通道，管理端裁决）。 -->
@@ -487,6 +497,7 @@
                       <button type="button" class="acc" v-if="revIsQuestion && r.Mine && Number(r.IsSolved) !== 1"
                               @click="acceptAnswer(r, p)">采纳</button>
                       <button type="button" v-if="p.Mine" @click="removeRev(p)">删除</button>
+                      <button type="button" v-if="revAccount && !p.Mine" @click="openReport('comment', p.Id, '该回复')">举报</button>
                     </div>
                     <div class="wbox rep" v-if="repDraft && repDraft.parentId === r.Id && repDraft.replyToId === p.Id">
                       <div class="wrow"><span class="wk">{{ revIsQuestion ? '回答' : '回复' }}</span><span class="wk2">@ {{ p.Author }}</span>
@@ -633,6 +644,29 @@
          订单建成（待付款）后立刻摆上来，不再「绕过收银台直接成已付款单」。
          ⚠️ 付完与关掉都走 `afterCashier`（落「我的订单」），区别只在付没付。 -->
     <CashierDialog :order="payFor" @close="afterCashier" @paid="afterCashier" />
+
+    <!-- 举报弹窗（方案 §4.4）—— 四个理由单选 + 「其他」的 100 字文本框；提交走 `/report/add`。
+         对象是 商品 / 商家 / 评价 / 回复 / 提问 **同一个弹窗**，靠 `rptTarget` 带过去
+         （复用本页既有的 `.scrim` / `.dlg` 弹窗皮肤，不新造一套）。
+         ⚠️ 状态名全是 `rpt*`（report）—— `rep*` 被下方「回复」那一节占了，见 script 里的说明。 -->
+    <div class="scrim" v-if="rptOpen" @click.self="closeReport">
+      <div class="dlg dlg-narrow">
+        <div class="dlg-h">举报{{ rptTarget ? rptTarget.label : '' }}</div>
+        <div class="dlg-sub">请选择举报理由。举报人对被举报人<strong>匿名</strong>，管理员可见你的账号。</div>
+        <div class="reasons">
+          <label v-for="rs in REP_REASONS" :key="rs">
+            <input type="radio" name="rep-reason" :value="rs" v-model="rptReason"> {{ rs }}
+          </label>
+        </div>
+        <textarea v-if="rptReason === '其他'" v-model="rptDesc" class="rdesc" maxlength="100"
+                  placeholder="请填写说明（必填，最多 100 字）"></textarea>
+        <p class="rmsg" v-if="rptMsg">{{ rptMsg }}</p>
+        <div class="dacts">
+          <button type="button" class="b no" @click="closeReport">取消</button>
+          <button type="button" class="b ok" :disabled="rptSubmitting" @click="submitReport">{{ rptSubmitting ? '提交中…' : '提交举报' }}</button>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -642,7 +676,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { http, handleApiError } from '../api/http'
 import { endpoints } from '../api/endpoints'; import { orderAdd, cartAdd } from '../api/order'   // ⚠️ C3 块 4：**同行追加**（不新增行 —— 本文件 `:794`/`:803` 被 `slot-registry.md:1994-1995` 按行号引（〈Bug 1〉本笔 +19 行前为 `:775`/`:784`），此处加行会顶漂它们）。两个函数就是原先那两串 `URLSearchParams` + `http.post` + `res.json()` 的收口
 import CashierDialog from '../components/CashierDialog.vue'; import ProductCard from '../components/ProductCard.vue'; import { sharedList } from '../config/goods-flags'   // ⚠️ **同行追加** `sharedList`（C3 块 5 ·〈Bug 2/3〉落码，2026-10-12）：本页只用它算「猜你喜欢」（见 `:522` 那条按语）。本行已有一条「本笔确实新增了一行」的记账（2026-10-10 Bug 1），**这一笔不再加行** —— 本文件下面 `:571` / `:638` / `:794` / `:1032` / `:1330` 等处被文档按行号钉着   // ⚠️ 2026-10-10（Bug 1）：收银台与「我的订单」**共用同一个组件** —— 本行**确实**新增了一行；本笔在 `ProductPage.vue` 净 +19 行（`git diff` 实测：模板 `:412` 起 +5、import +1、`handlePay` 段 +13）⇒ 下面两处 `:775`/`:784` 漂到 `:794`/`:803`，随本笔一并重指（见 `slot-registry.md:1994-1995`）
-import { getMerchantId, getCustomerId, getUsername, isLoggedIn } from '../api/auth'; import IconGlyph from '../components/ui/IconGlyph.vue'; import { coupons, claim, subsidyGoods, seckillLive } from '../api/marketing'; import { couponName } from '../config/coupon-format'; import { useCouponPick } from '../composables/useCouponPick'; import { list as commentList, add as commentAdd, remove as commentRemove, accept as commentAccept, like as commentLike, myOrders as commentOrders } from '../api/comment'; import DonutChart from '../components/charts/DonutChart.vue'   // ⚠️ **块 6 整改 commit 2〈问答漏项补齐〉同行追加** `DonutChart`（§4.2「左圆比例图」，与 `views/admin/AccountsPage.vue` 的「封禁分布」同款）—— **不新增行**，故本行行号不动。⚠️ 六条 import **同行**（第 6 条 `../api/comment` 的六个别名：块 6 · commit 1「评论」+ commit 2「问答」的 `accept`，2026-10-12 —— 别名是必需的，`list`/`add` 这种裸名在本文件里跟 `allItems` 那些局部名撞脸，读不出是谁的）（第 5 条 `useCouponPick`：块 5 · commit 5 续笔「立即购买」也能用券，2026-10-12；与 `ShoppingCart.vue` 共用同一处，不抄第二份）（第 2、3 条：2026-10-11 补图标笔 + C3 块 5 · commit 1；第 4 条 `couponName`：块 5 · A 组 · A7 后半；`getUsername`：块 5 券口径改登录名，2026-10-12）—— 合并到既有行 = 不新增行号漂移（本文件 `:794`/`:803` 被 `slot-registry.md:1994-1995` 按行号引，上面 `:424` 那条注释记过同一件事）。⚠️ **块 5 · commit 1 仍整体 +90 行**（模板 +17 / `<script setup>` 尾 +70 / `<style>` +3）⇒ `slot-registry.md:1994` 引的 `:794` 漂 **`:881`**、`:1995` 引的 `:803` 漂 **`:890`**（两值均为 `grep -n` 实测，见 `_work/b5-repoint.md`）。⚠️ **块 6 · commit 1 又整体 +N 行**、**commit 2（问答）再 +M 行**，漂移台账见 `_work/b6-commit1-repoint.md` 与 `_work/b6-commit2-repoint.md`（收口 commit 逐处重指）。
+import { getMerchantId, getCustomerId, getUsername, isLoggedIn, getRole } from '../api/auth'; import IconGlyph from '../components/ui/IconGlyph.vue'; import { coupons, claim, subsidyGoods, seckillLive } from '../api/marketing'; import { couponName } from '../config/coupon-format'; import { useCouponPick } from '../composables/useCouponPick'; import { list as commentList, add as commentAdd, remove as commentRemove, accept as commentAccept, like as commentLike, myOrders as commentOrders } from '../api/comment'; import DonutChart from '../components/charts/DonutChart.vue'; import { add as reportAdd } from '../api/report'   // ⚠️ **块 6 整改 commit 2〈问答漏项补齐〉同行追加** `DonutChart`（§4.2「左圆比例图」，与 `views/admin/AccountsPage.vue` 的「封禁分布」同款）—— **不新增行**，故本行行号不动。⚠️ **整改 commit 4〈举报〉再同行追加** `reportAdd`（`/report/add`；本页的「举报 / 提删」弹窗，§4.4 与 §4.2 的商家提删走同一条）—— 同样**不新增行**。⚠️ 六条 import **同行**（第 6 条 `../api/comment` 的六个别名：块 6 · commit 1「评论」+ commit 2「问答」的 `accept`，2026-10-12 —— 别名是必需的，`list`/`add` 这种裸名在本文件里跟 `allItems` 那些局部名撞脸，读不出是谁的）（第 5 条 `useCouponPick`：块 5 · commit 5 续笔「立即购买」也能用券，2026-10-12；与 `ShoppingCart.vue` 共用同一处，不抄第二份）（第 2、3 条：2026-10-11 补图标笔 + C3 块 5 · commit 1；第 4 条 `couponName`：块 5 · A 组 · A7 后半；`getUsername`：块 5 券口径改登录名，2026-10-12）—— 合并到既有行 = 不新增行号漂移（本文件 `:794`/`:803` 被 `slot-registry.md:1994-1995` 按行号引，上面 `:424` 那条注释记过同一件事）。⚠️ **块 5 · commit 1 仍整体 +90 行**（模板 +17 / `<script setup>` 尾 +70 / `<style>` +3）⇒ `slot-registry.md:1994` 引的 `:794` 漂 **`:881`**、`:1995` 引的 `:803` 漂 **`:890`**（两值均为 `grep -n` 实测，见 `_work/b5-repoint.md`）。⚠️ **块 6 · commit 1 又整体 +N 行**、**commit 2（问答）再 +M 行**，漂移台账见 `_work/b6-commit1-repoint.md` 与 `_work/b6-commit2-repoint.md`（收口 commit 逐处重指）。
 
 const route = useRoute()
 const router = useRouter()
@@ -1389,6 +1423,73 @@ const revOtherGoods = computed(() => !!revGoodsId.value && String(revGoodsId.val
  */
 const revCanReview = computed(() => revOrders.value.length > 0)
 
+// ── 举报 / 提删（块 6 整改 commit 4，方案 §4.4；提问的「商家提删」见 §4.2）──────────
+/**
+ * 本页登录者是不是**商家**。只影响一处措辞：在**提问**行上，商家看到的按钮叫「提删」
+ * 而不是「举报」（方案 §4.2「商家可提删 → 管理端裁判」）。
+ *
+ * ⚠️ 二者走的是**同一条**举报通道（`/report/add`，对象 = 这条提问）—— 不另开端点、不另开表：
+ * 「提删」在数据上就是一条针对该提问的举报单，由管理端裁决。
+ */
+const revIsMerchant = computed(() => getRole() === '2')
+
+/** 举报的四个理由（方案 §4.4 逐字）。⚠️ 与后端 `ReportService.REASONS` 是同一组值（写侧收紧）。 */
+const REP_REASONS = ['辱骂', '广告', '违法', '其他']
+
+// ⚠️ 这一组的变量一律带 `rpt` 前缀（report），**不是** `rep` —— 本文件下方「回复」那一节
+//    （`openReply` / `submitReply`）已经占了 `repDraft` / `repSubmitting` / `repMsg` 三个名字。
+//    `<script setup>` 是**同一个平铺作用域**，两边叫同名 = 重复声明，整个 SFC 编译不过。
+const rptOpen = ref(false)
+const rptTarget = ref(null)     // `{ targetType, targetId, label }`
+const rptReason = ref('')
+const rptDesc = ref('')
+const rptSubmitting = ref(false)
+const rptMsg = ref('')
+
+/** 打开举报弹窗。⚠️ 每次**重置**理由与说明 —— 上一单填的「其他」正文不该带到下一单。 */
+const openReport = (targetType, targetId, label) => {
+  rptTarget.value = { targetType, targetId, label }
+  rptReason.value = ''
+  rptDesc.value = ''
+  rptMsg.value = ''
+  rptSubmitting.value = false
+  rptOpen.value = true
+}
+const closeReport = () => { rptOpen.value = false; rptMsg.value = '' }
+
+/**
+ * 提交举报（`/report/add`）。
+ *
+ * ⚠️ 「其他」必须填说明（后端 §4.4 的硬闸）—— 前端先拦一道，给一句人话而不是把后端原话抛出去。
+ * ⚠️ 「不能举报自己 / 已举报过」是**业务规则**（后端回 `success:false`）⇒ 就地显示、不弹「系统错误」。
+ */
+const submitReport = async () => {
+  if (!rptAccountCheck()) return
+  if (!rptReason.value) { rptMsg.value = '请选择举报理由'; return }
+  const desc = (rptDesc.value || '').trim()
+  if (rptReason.value === '其他' && !desc) { rptMsg.value = '选择「其他」时必须填写说明'; return }
+  if (desc.length > 100) { rptMsg.value = '举报说明最多 100 字'; return }
+  rptSubmitting.value = true
+  try {
+    const d = await reportAdd({
+      account: getUsername(),
+      targetType: rptTarget.value.targetType,
+      targetId: rptTarget.value.targetId,
+      reason: rptReason.value,
+      description: desc || undefined,
+    })
+    if (!d || !d.success) { rptMsg.value = (d && d.msg) || '举报提交失败'; return }
+    closeReport()
+    alert(d.msg || '举报已提交，等待管理员处理')
+  } catch (e) {
+    handleApiError(e, '举报失败：')
+    rptMsg.value = '举报提交失败'
+  } finally {
+    rptSubmitting.value = false
+  }
+}
+const rptAccountCheck = () => (!!getUsername() || (rptMsg.value = '登录后才能举报', false))
+
 // ── 回复区折叠（方案 §4.1 展示元素的「└ 共 N 条回复 [展开]」）─────────────────────
 /**
  * 每个顶层行只先铺 {@link REV_REPLY_VISIBLE} 条回复，其余的收在「共 N 条回复 · 展开」后面。
@@ -1880,7 +1981,7 @@ button { background: none; border: 0; cursor: pointer; }
               display: flex; align-items: center; justify-content: center; }
 .shop .nm { display: block; font-size: var(--fs-sm); font-weight: var(--fw-med); }
 .shop .sub { display: block; margin-top: 2px; font-size: var(--fs-xs); color: var(--ink-3); }
-.shop .ops { margin-left: auto; display: flex; gap: var(--s2); flex: 0 0 auto; }
+.shop .ops { margin-left: auto; display: flex; gap: var(--s2); flex: 0 0 auto; flex-wrap: wrap; justify-content: flex-end; }
 .shop .ops button { height: 32px; padding: 0 var(--s3); border: 1px solid var(--line-2);
                     border-radius: var(--r1); font-size: var(--fs-xs); color: var(--ink-2); white-space: nowrap; }
 .shop .ops button:not(:disabled):hover { border-color: var(--ink-3); color: var(--ink); }
@@ -1970,6 +2071,25 @@ button { background: none; border: 0; cursor: pointer; }
 .dacts .ok:hover { background: var(--brand-hover); }
 .dacts .no { flex: 0 0 120px; border: 1px solid var(--line-2); color: var(--ink-2); }
 .dacts .no:hover { border-color: var(--ink-3); }
+
+/* ── 举报弹窗（自「付款确认弹窗」那套 `.scrim`/`.dlg`/`.dacts` 续用，只补三样）────
+   `.reasons` 是**单选行**（四条理由竖排，一条一行，热区整行可点）；`.rdesc` 是「其他」时才出现的
+   说明框（上限 100 字，同文案字数口径写在后端 `ReportService.MAX_DESCRIPTION`）；`.rmsg` 是
+   业务规则的**回执行**（「已举报过」「不能举报自己」—— 后端 `success:false` 的原话）。
+   ⚠️ `.rmsg` 用 `--accent`：本文件里告警/驳回类文案已经统一在这一档（同 `.wk2.warn` /
+   `.rshots .s.bad`），不是新开一个色。 */
+.reasons { margin-top: var(--s4); display: flex; flex-direction: column; gap: var(--s1); }
+.reasons label { display: flex; align-items: center; gap: var(--s3); padding: var(--s3);
+                 border: 1px solid var(--line-2); border-radius: var(--r2); cursor: pointer;
+                 font-size: var(--fs-sm); color: var(--ink-2); }
+.reasons label:hover { border-color: var(--ink-3); color: var(--ink); }
+.reasons input { accent-color: var(--brand); margin: 0; }
+.rdesc { margin-top: var(--s3); width: 100%; min-height: 84px; padding: var(--s3);
+         border: 1px solid var(--line-2); border-radius: var(--r2); background: var(--surface);
+         color: var(--ink); font-size: var(--fs-sm); font-family: inherit; line-height: 1.6;
+         resize: vertical; }
+.rdesc:focus { outline: none; border-color: var(--brand); }
+.rmsg { margin-top: var(--s3); font-size: var(--fs-xs); color: var(--accent); }
 
 /* ── 窄屏 ──────────────────────────────────────────────────────────────── */
 @media (max-width: 1080px) {

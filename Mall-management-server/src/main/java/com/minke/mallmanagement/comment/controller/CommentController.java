@@ -19,13 +19,14 @@ import java.util.Collections;
 import java.util.List;
 
 /**
- * 内容域「评论 / 问答」Web 层（C3 块 6 · commit 1 评论 + commit 2 问答）—— 6 个端点：
- * 列表（公开）/ 发表（评论·回复·提问·回答共用）/ 删除 / **采纳答案** / 赞踩 / 我的历史订单。
+ * 内容域「评论 / 问答」Web 层（C3 块 6 · commit 1 评论 + commit 2 问答 + 整改 commit 4 图片审核）
+ * —— 7 个端点：列表（公开）/ 发表（评论·回复·提问·回答共用）/ 删除 / **采纳答案** / 赞踩 /
+ * 我的历史订单 / **图片审核（管理端）**。
  *
  * <h2>【挂 {@code /comment}，与方案 §三 的端点清单逐字一致】</h2>
- * 方案 A4 与 {@code 块6参考.md §三} 定死了 13 个端点与其路径，本类占前 6 个
- * （{@code /comment/imageReview} 归 commit 4，其余 6 个归 {@code /report/**} 与
- * {@code /sensitive/**} 两个新 Controller）。
+ * 方案 A4 与 {@code 块6参考.md §三} 定死了 13 个端点与其路径，本类占其中 7 个
+ * （其余 6 个归 {@code /report/**} 与 {@code /sensitive/**} 两个新 Controller，
+ * 见 {@code ReportController} / {@code SensitiveWordController}）。
  *
  * <h2>【{@code /comment/list} 是**公开**端点 ⇒ 已登记进 {@code WebAuthConfig.AUTH_WHITELIST}】</h2>
  * 商品详情页的评价区要能在**未登录**时读（那页本身是浏览面）。⚠️ 公开的是**读** ——
@@ -200,6 +201,30 @@ public class CommentController {
             return ResponseEntity.ok(Result.fail("缺少参数：Id"));
         }
         return ResponseEntity.ok(Result.of(commentService.like(Id.longValue(), Account, Type)));
+    }
+
+    /**
+     * 图片审核（管理端，方案 §4.3）—— 一条端点、三个动作，靠 {@code Action} 分派。
+     *
+     * <p>⚠️ <b>本端点是管理端专属，但**刻意不挂 {@code requireAdmin}**</b> —— 本仓对「管理端页面上
+     * 的端点」一贯如此（见 {@code admin/**Controller} 的既有做法）：闸开着时 {@code AuthInterceptor}
+     * 已经把非管理员的 {@code role=3} cookie 挡在外面，闸关着时（{@code app.auth.enabled=false}）
+     * 本就是本地开发/演示场景。此处**不新造**一道与全仓不一致的鉴权。
+     *
+     * @param Action {@code list}（默认）/ {@code approve} / {@code reject}
+     * @param Id     单张图 Id（{@code approve} / {@code reject} 必填）
+     * @param Status {@code list} 的筛子：{@code pending}（默认）/ {@code approved} / {@code rejected}
+     */
+    @PostMapping("/imageReview")
+    public ResponseEntity<Object> imageReview(
+            @RequestParam(value = "Action", required = false) String Action,
+            @RequestParam(value = "Id", required = false) Integer Id,
+            @RequestParam(value = "Status", required = false) String Status,
+            @RequestParam(value = "Limit", required = false) Integer Limit,
+            @RequestParam(value = "Offset", required = false) Integer Offset
+    ) {
+        Long id = Id == null ? null : Id.longValue();
+        return ResponseEntity.ok(Result.of(commentService.imageReview(Action, id, Status, Limit, Offset)));
     }
 
     /** 可评论的历史商品（发表评论时「选对应商品」的下拉，方案 §4.1）。 */

@@ -629,6 +629,124 @@ public class CommentService {
         }
     }
 
+    // ==================== 图片审核（管理端，块 6 · commit 4，方案 §4.3） ====================
+
+    /** {@code imageReview} 的三个动作（写侧收紧，别把入参原样当动作使）。 */
+    public static final String ACTION_LIST = "list";
+    public static final String ACTION_APPROVE = "approve";
+    public static final String ACTION_REJECT = "reject";
+
+    /**
+     * 图片审核（方案 §4.3）—— <b>一条端点、三个动作</b>，靠 {@code action} 分派：
+     * <pre>
+     *   action=list（默认）→ 按 {@code status} 拉一批（默认 pending），供管理端「待审图片」；
+     *   action=approve     → 过审：pending → approved，前端随之正常显示；
+     *   action=reject      → 驳回：pending → rejected **+ 删仓库文件**，前端显「图片违规已删除」。
+     * </pre>
+     *
+     * <p>⚠️ 为什么是**一条**端点而不是三条：方案 §三 把端点总数钉死在 13 个，且这三个动作
+     * 天然是「图片审核」一件事（同 {@link #add} 用 {@code Kind}/{@code ParentId} 分四态的做法）。
+     *
+     * <p>⚠️ 驳回删文件用的是 {@code ImageUrl} 的**尾段**（= 落盘名）—— 见 {@code UploadStorage.store}
+     * 那条「必须用返回值拼 URL，不能拿原始上传名」；此处反过来，从 URL 剥前缀还原落盘名。
+     *
+     * @param action {@code list / approve / reject}；空白 = {@code list}
+     * @param id     单张图 Id（{@code approve} / {@code reject} 必填）
+     * @param status {@code list} 的筛子：{@code pending / approved / rejected}；空白 = {@code pending}
+     */
+    public Map<String, Object> imageReview(String action, Long id, String status,
+                                           Integer limit, Integer offset) {
+        String act = isBlank(action) ? ACTION_LIST : action.trim().toLowerCase();
+        if (ACTION_LIST.equals(act)) {
+            String st = isBlank(status) ? CommentKinds.IMAGE_PENDING : status.trim();
+            if (!isImageStatus(st)) {
+                return fail("未知的图片状态：" + status + "（只能是 pending / approved / rejected）");
+            }
+            int effectiveLimit = normalizeLimit(limit);
+            int effectiveOffset = (offset == null || offset < 0) ? 0 : offset;
+            try {
+                Map<String, Object> result = new HashMap<>();
+                result.put("success", true);
+                result.put("list", commentDao.selectImagesByStatus(st, effectiveLimit, effectiveOffset));
+                result.put("total", commentDao.countImagesByStatus(st));
+                result.put("limit", effectiveLimit);
+                result.put("offset", effectiveOffset);
+                return result;
+            } catch (Exception e) {
+                e.printStackTrace();
+                return fail("图片列表加载失败：" + e.getMessage());
+            }
+        }
+        if (!ACTION_APPROVE.equals(act) && !ACTION_REJECT.equals(act)) {
+            return fail("未知的动作：" + action + "（只能是 list / approve / reject）");
+        }
+        if (id == null) {
+            return fail("缺少参数：Id");
+        }
+        boolean approve = ACTION_APPROVE.equals(act);
+        try {
+            Map<String, Object> image = commentDao.selectImage(id);
+            if (image == null) {
+                return fail("图片不存在");
+            }
+            String next = approve ? CommentKinds.IMAGE_APPROVED : CommentKinds.IMAGE_REJECTED;
+            // ⚠️ CAS：`UPDATE … WHERE Id = ? AND Status = 'pending'` ⇒ 并发下第二个人的 affected=0
+            //    ⇒「删仓库文件」这一记不可逆动作**只发生一次**。
+            if (commentDao.updateImageStatus(id, next) == 0) {
+                return fail("该图片已被审核");
+            }
+            boolean fileDeleted = !approve && deleteImageFile(str(image.get("ImageUrl")));
+            Map<String, Object> ok = new HashMap<>();
+            ok.put("success", true);
+            ok.put("Id", id);
+            ok.put("Status", next);
+            ok.put("fileDeleted", fileDeleted);
+            ok.put("msg", approve ? "已通过" : "已驳回并删除图片文件");
+            return ok;
+        } catch (Exception e) {
+            e.printStackTrace();
+            return fail("图片审核失败：" + e.getMessage());
+        }
+    }
+
+    /**
+     * 删一张已落盘的评论图（方案 §4.3 第 5 步）。
+     *
+     * <p>入参是 {@code comment_image.ImageUrl}（{@link #IMG_URL_PREFIX} + 落盘名）⇒
+     * 先确认它确是本前缀下的 URL，再取**尾段**当文件名，拒绝任何带路径分隔符的尾段
+     * （防 {@code ..} 之类越出上传目录；落盘名由 {@code UploadStorage} 生成、本不含分隔符，
+     * 这一条是**纵深防御**而非必要步骤）。文件不在 ⇒ 也算成功（幂等）。
+     *
+     * <p>⚠️ 已知局限（如实记）：{@code UploadStorage} 对「同名同内容」的多份上传**复用同一个文件**
+     * ⇒ 若两条 {@code comment_image} 行指向同一个 URL，驳回其中一条会连带让另一条 404。
+     * 方案 §4.3 要的就是「驳回即删文件」，这里不改那条策略，只把代价写清楚。
+     *
+     * @return 是否确实删掉了一个文件（不存在 / 非法 URL ⇒ {@code false}，但**不算失败**）
+     */
+    private boolean deleteImageFile(String imageUrl) {
+        if (isBlank(imageUrl) || !imageUrl.startsWith(IMG_URL_PREFIX)) {
+            return false;
+        }
+        String name = imageUrl.substring(IMG_URL_PREFIX.length());
+        if (name.isEmpty() || name.contains("/") || name.contains("\\")) {
+            return false;
+        }
+        try {
+            Path dir = Paths.get(uploadDir).toAbsolutePath().normalize().resolve(IMG_SUBDIR);
+            return Files.deleteIfExists(dir.resolve(name));
+        } catch (Exception e) {
+            e.printStackTrace();
+            return false;
+        }
+    }
+
+    /** 图片三态的白名单判据（写侧收紧，同 {@code CommentKinds} 的取值域）。 */
+    private static boolean isImageStatus(String s) {
+        return CommentKinds.IMAGE_PENDING.equals(s)
+                || CommentKinds.IMAGE_APPROVED.equals(s)
+                || CommentKinds.IMAGE_REJECTED.equals(s);
+    }
+
     // ==================== 写：采纳答案（问答，块 6 commit 2） ====================
 
     /**

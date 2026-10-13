@@ -1,13 +1,14 @@
-// src/api/comment.js —— 内容域「评论 / 问答 / 回复 / 赞踩」API 封装
-// （C3 块 6 · commit 1 评论 + commit 2 问答；2026-10-12）。
+// src/api/comment.js —— 内容域「评论 / 问答 / 回复 / 赞踩 / 图片审核」API 封装
+// （C3 块 6 · commit 1 评论 + commit 2 问答 + 整改 commit 4 图片审核；2026-10-12/13）。
 //
-// 六个端点、一个模块（后端 `CommentController`，`@RequestMapping("/comment")`，六条全 POST）：
-//   list     —— 唯一调用方 `views/ProductPage.vue`（「累计评价」页签下的评论 / 问答两个子 tab）。
-//   add      —— 发表：评论 / 回复 / 提问 / 回答**共用一个端点**（方案 §三的端点表逐字）。
-//   delete   —— 作者 / 管理员删一条（顶层连带回复）。
-//   accept   —— 采纳答案（问答，commit 2）：提问者选一条回答 ⇒ 置顶 + 标记已解决。
-//   like     —— 赞 / 踩（顶层与回复都适用）。
-//   myOrders —— 发表评论时「选对应商品」的下拉（本人**已确认收货**的历史订单里的商品）。
+// 七个端点、一个模块（后端 `CommentController`，`@RequestMapping("/comment")`，七条全 POST）：
+//   list        —— 唯一调用方 `views/ProductPage.vue`（「累计评价」页签下的评论 / 问答两个子 tab）。
+//   add         —— 发表：评论 / 回复 / 提问 / 回答**共用一个端点**（方案 §三的端点表逐字）。
+//   delete      —— 作者 / 管理员删一条（顶层连带回复）。
+//   accept      —— 采纳答案（问答，commit 2）：提问者选一条回答 ⇒ 置顶 + 标记已解决。
+//   like        —— 赞 / 踩（顶层与回复都适用）。
+//   myOrders    —— 发表评论时「选对应商品」的下拉（本人**已确认收货**的历史订单里的商品）。
+//   imageReview —— 图片审核（**管理端**，整改 commit 4）：list / approve / reject 三动作。
 //
 // 为什么单列一个模块（而不是在 view 里直接 `http.post`）：三条理由与 `api/shop.js` / `api/marketing.js`
 // 逐字同款 ——
@@ -21,17 +22,18 @@
 // ⚠️ 与 `api/shop.js` / `api/order.js` / `api/marketing.js` 的 `q()` / `post()` 是**同形复制、
 //    不是共享** —— 本仓 `api/*.js` 各模块自带这两个内联函数，未抽公共模块。
 //
-// ⚠️ **六条里只有 `list` 是公开面**（块 6 唯一进白名单的一条）：`/comment/list` 已进
+// ⚠️ **七条里只有 `list` 是公开面**（块 6 唯一进白名单的一条）：`/comment/list` 已进
 //    `WebAuthConfig.AUTH_WHITELIST`（**13 → 14 条**）⇒ **未登录也能打** —— 商品详情页
-//    （`meta.public`）的评论 / 问答区在匿名状态下照常加载。**另五条**
-//    （add / delete / **accept** / like / myOrders）**仍不在白名单**（匿名调必 401，
-//    与 `cart` / `shop.follow` 同族）。
-//    ⚠️ 别因为「都在 `/comment` 下」就把六条一起当公开面。
+//    （`meta.public`）的评论 / 问答区在匿名状态下照常加载。**另六条**
+//    （add / delete / **accept** / like / myOrders / **imageReview**）**仍不在白名单**
+//    （匿名调必 401，与 `cart` / `shop.follow` 同族）。
+//    ⚠️ 别因为「都在 `/comment` 下」就把七条一起当公开面。
 //
 // ⚠️ **五条写端点的判据是「登录名」，不是业务号**：`comment.AuthorId` / `comment_like.UserId`
 //    存的是 `login.UserName`（见 `CommentDao` 类注释），后端跑的是
 //    `IdentityGuard.requireSelfOrAdminByUsername(request, Account)` ⇒ 传**别人的** `Account`
 //    是 **403**（不是「查不到」）⇒ `account` **绝不要**从路由 / URL 取，只能是**当前登录者自己的**。
+//    ⚠️ 第七条的 `imageReview` **不在此列** —— 它是管理端端点、**不收 `Account`**（见其函数注释）。
 //
 // ⚠️ **`list` 的「这条是不是我发的」不由入参决定**：观看者只有**会话**一个来源
 //    （`AuthSession.currentUserId`）⇒ 本模块**刻意不接受** `Account` 参数给 `list`。
@@ -242,4 +244,33 @@ export function like(account, id, type) {
  */
 export function myOrders(account) {
   return post(endpoints.comment.myOrders, q({ Account: account }))
+}
+
+/**
+ * 图片审核（**管理端**，块 6 整改 commit 4；方案 §4.3）—— 一条端点、三个动作。
+ *
+ * ⚠️ **管理端端点，但照样不传 `Account`**：后端按本仓一贯做法**不挂 `requireAdmin`**
+ *    （见 `CommentController.imageReview` 的 ⚠️），处理人身份不由入参给。
+ *
+ * ⚠️ **驳回会真删仓库文件**（`static/img/comment/` 下那张）⇒ 这一发**不可逆**：
+ *    前端要二次确认，别做成「点一下就驳回」。
+ *
+ * @param {object} p
+ * @param {'list'|'approve'|'reject'} [p.action] 省略 = `list`。
+ * @param {string|number} [p.id]  单张图 Id（`approve` / `reject` 必填）。
+ * @param {string} [p.status]     `list` 的筛子：`pending`（默认）/ `approved` / `rejected`。
+ * @param {number} [p.limit] / @param {number} [p.offset] 分页（默认 100 / 0，上限 500）。
+ * @returns {Promise<{success:boolean, list?:Array, total?:number, Id?:number, Status?:string,
+ *                    fileDeleted?:boolean, msg?:string}>}
+ *          ⚠️ `list` 项里**带 `ImageUrl`（即便 `pending`）** —— 那是**管理端**要看着图判，
+ *          与公开 `list` 的「未过审不给 Url」是两码事，别把这两处口径混了。
+ */
+export function imageReview(p) {
+  return post(endpoints.comment.imageReview, q({
+    Action: p.action,
+    Id: p.id,
+    Status: p.status,
+    Limit: p.limit,
+    Offset: p.offset,
+  }))
 }

@@ -52,7 +52,9 @@ import com.minke.mallmanagement.marketing.subsidy.service.SubsidyService;
 import com.minke.mallmanagement.marketing.seckill.dao.SeckillDao;
 import com.minke.mallmanagement.marketing.seckill.service.SeckillService;
 import com.minke.mallmanagement.comment.dao.CommentDao;
+import com.minke.mallmanagement.comment.dao.ReportDao;
 import com.minke.mallmanagement.comment.service.CommentService;
+import com.minke.mallmanagement.comment.service.ReportService;
 import org.junit.jupiter.api.BeforeEach;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
@@ -270,7 +272,18 @@ import static org.mockito.Mockito.when;
         //    （@Value 注入的 String，照 GoodsService / UserService 的既有做法）⇒ 无需额外登记。
         // ⚠️ `CommentController` 另收 `ObjectProvider<UserStateLookup>` —— **刻意不 @Import**
         //    `UserStateLookupService`（理由见本文件它处那条 ⚠️，它是@WebMvcTest 切片的已知缺口）。
-        CommentDao.class, CommentService.class})
+        CommentDao.class, CommentService.class,
+        // C3 块 6 整改 · commit 4〈举报 + 图片审核 + 3 次警告封号〉（2026-10-13）：新增一个 Controller
+        // （`ReportController`）+ 一个 @Service（`ReportService`）+ 一个 @Dao（`ReportDao`）——
+        // **第十四次同一处地雷**（@WebMvcTest 无参会加载全部 @Controller，新控制器一进来，
+        // 切片上下文就会因为「找不到 ReportService」而**启动失败**，同前十三笔）。
+        // ⚠️ 依赖链三层：Service → Dao；`ReportService` 另吃 `CommentService`（上面已登记）、
+        //    `GoodsViolationService`（块 3 已登记）、`UserGovernanceService`（块 2 已登记）、
+        //    `NotificationService`（块 1 已登记）⇒ 这四个**无需重复登记**。
+        // ⚠️ `ReportController` 另收 `ObjectProvider<UserStateLookup>`（同 `CommentController`）。
+        // ⚠️ 本笔还给 `CommentService` / `CommentDao` 加了「图片审核」那一支（`/comment/imageReview`），
+        //    **不新增 bean**（两个类都在上）⇒ 这里没有第二条要登记的。
+        ReportDao.class, ReportService.class})
 public abstract class AbstractSmokeTest {
 
     @Autowired

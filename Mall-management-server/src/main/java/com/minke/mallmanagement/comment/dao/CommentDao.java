@@ -482,6 +482,82 @@ public class CommentDao {
                 .params(commentId, imageUrl, sortOrder).update();
     }
 
+    // ==================== 读 / 写：图片审核（块 6 · commit 4，方案 §4.3） ====================
+
+    /**
+     * 管理端「待审图片」的读投影 —— {@code comment_image} 与它所属 {@code comment} 的
+     * <b>限定（带别名）</b>投影。
+     *
+     * <p>⚠️ <b>不能复用 {@link #IMAGE_COLUMNS}</b>：那是不带别名的，一旦 {@code JOIN comment}
+     * 就有 {@code Id} / {@code Status} / {@code created_at} 三个列名两边重名 ⇒ ambiguous。
+     * 与 {@code ReportDao.TARGET_COLUMNS} 是同一个理由、同一种写法。
+     *
+     * <p>带出 {@code AuthorId} / {@code Kind} / {@code CommentContent} 是让管理员
+     * <b>看着上下文判图</b> —— 一张图合不合规常常取决于它挂在什么评论下。
+     */
+    private static final String IMAGE_REVIEW_COLUMNS =
+            "i.`Id`, i.`CommentId`, i.`ImageUrl`, i.`Status`, i.`SortOrder`, "
+                    + "DATE_FORMAT(i.`created_at`, '%Y-%m-%d %H:%i:%s') AS `CreatedAt`, "
+                    + "c.`AuthorId` AS `AuthorId`, c.`Kind` AS `Kind`, c.`TargetType` AS `TargetType`, "
+                    + "c.`TargetId` AS `TargetId`, c.`Content` AS `CommentContent`";
+
+    /**
+     * 待审 / 已审图片列表（管理端）。{@code status} 空白 = 不筛。时间倒序 ——
+     * 新传的在前（待审的队列要按提交先后看）。
+     */
+    public List<Map<String, Object>> selectImagesByStatus(String status, int limit, int offset) {
+        List<Object> params = new ArrayList<>();
+        String sql = "SELECT " + IMAGE_REVIEW_COLUMNS + " FROM `comment_image` i "
+                + "LEFT JOIN `comment` c ON c.`Id` = i.`CommentId` " + imageWhere(status, params)
+                + " ORDER BY i.`created_at` DESC, i.`Id` DESC LIMIT ? OFFSET ?";
+        params.add(limit);
+        params.add(offset);
+        return jdbcClient.sql(sql).params(params).query().listOfRows();
+    }
+
+    /** 同筛选下的图数（口径同 {@link #countTopLevel}：与列表**共用** {@link #imageWhere}）。 */
+    public long countImagesByStatus(String status) {
+        List<Object> params = new ArrayList<>();
+        String where = imageWhere(status, params);
+        Long n = jdbcClient.sql("SELECT COUNT(*) FROM `comment_image` i " + where)
+                .params(params).query(Long.class).single();
+        return n == null ? 0L : n;
+    }
+
+    /** {@link #selectImagesByStatus} / {@link #countImagesByStatus} 的**唯一**谓词构造处。 */
+    private static String imageWhere(String status, List<Object> params) {
+        StringBuilder sb = new StringBuilder("WHERE 1 = 1");
+        if (status != null && !status.trim().isEmpty()) {
+            sb.append(" AND i.`Status` = ?");
+            params.add(status.trim());
+        }
+        return sb.toString();
+    }
+
+    /** 单张图 + 它的上下文（审核前取「这是谁的图 / 挂在哪条评论下」）。查无 ⇒ {@code null}。 */
+    public Map<String, Object> selectImage(long id) {
+        List<Map<String, Object>> rows = jdbcClient
+                .sql("SELECT " + IMAGE_REVIEW_COLUMNS + " FROM `comment_image` i "
+                        + "LEFT JOIN `comment` c ON c.`Id` = i.`CommentId` WHERE i.`Id` = ? LIMIT 1")
+                .param(id).query().listOfRows();
+        return rows.isEmpty() ? null : rows.get(0);
+    }
+
+    /**
+     * 改一张图的状态（通过 / 驳回）。
+     *
+     * <p>⚠️ <b>CAS</b>：谓词带 {@code AND Status = 'pending'} —— 两个管理员同时点「驳回」，
+     * 第二个的 {@code affected} 是 0（Service 翻成「该图片已被审核」），于是
+     * <b>删仓库文件只发生一次</b>。与 {@code ReportDao.updateHandle} 同一手法、同一个理由。
+     *
+     * @return 受影响行数（{@code 0} = 已被审过 / 不存在）
+     */
+    public int updateImageStatus(long id, String status) {
+        return jdbcClient.sql("UPDATE `comment_image` SET `Status` = ? "
+                        + "WHERE `Id` = ? AND `Status` = 'pending'")
+                .params(status, id).update();
+    }
+
     // ==================== 读 / 写：点赞踩 ====================
 
     /** 某用户对一批评论的既有态度（{@code CommentId → like / dislike}），供前端把按钮点亮。 */
