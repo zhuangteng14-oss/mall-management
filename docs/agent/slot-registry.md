@@ -4886,15 +4886,15 @@ COALESCE(merchantid,customerid) WHERE EventType IN (那 5 个)` → 复读对照
 
 **⑦ 验收（agent 最小收验，⚠️ 非用户手验）** ⇒ 后端 `./mvnw -B test` = `Tests run: 309 / Failures 0 / Errors 0 / Skipped 26` + `BUILD SUCCESS`（17:13，**TD-58 那条本轮未红**）；前端 `build` = `DONE`（`Hash 8d3685921932c375`、`Time 94680ms`，① 甲案之后重跑）、`npx eslint src` = **exit 0**；`probe-b6c3-mention.py` = **EXIT 0**（A1–A4 / B1 绿，B2 与段 N 全 0）。重造场景证据 `b6-commit3-mention.txt` §七/§八。
 
-## 二十四、C3 块 7〈可观测域 4 项 + 库存治理 2 项〉（2026-10-13/14；**开段：本笔只登 commit 8b，前 16 笔的逐条槽位归 commit 9 收口**）
+## 二十四、C3 块 7〈可观测域 4 项 + 库存治理 2 项〉（2026-10-13/14；**收口条：24-1 已列前 20 笔，本笔（commit 9）收口**）
 
 > 本节**追加在文件尾**（同 §19 / §20 / §21 / §22 / §23 的先例）。叙事版见 `progress.md §7-B7`；本节只记**本文件关心的那一面**：槽位改判 / 文件 / 行号 / 零漂移手法 / 门禁 / 偏差。
-> ⚠️ **本节是「开段」不是「收口条」**：块 7 的**范围 / 建表 / 后端 / 前端 / 门禁 / DoD / 挂账总表归 commit 9**；本笔（**commit 8b**）只把**这一笔**的面记下来。**前 16 笔（`195edc9` pack + `b1ffc6e` commit 0 … `b773bf3` commit 8）的逐条槽位一律不发**（同 §23-11 / §23-12 那种「收口之后再追加一段」的反面 —— 这里是**开段先落一笔、其余后补**）。
+> ⚠️ ~~**本节是「开段」不是「收口条」**：块 7 的**范围 / 建表 / 后端 / 前端 / 门禁 / DoD / 挂账总表归 commit 9**；本笔（**commit 8b**）只把**这一笔**的面记下来。**前 16 笔的逐条槽位一律不发**~~ ⇒ **已兑现**：本节由 **commit 8b 开段**、**commit 9 收口** —— 24-1 的提交切分表已补全到 **20 笔**，收口专章接在 **24-6 起**。
 > 命名沿用「§二十X」的段号形制，本节点编号写作 **24-X**（§二十三 用的是 `23-X`）。
 
 ### 24-1　提交切分（分支 `feat/c3-admin-block7`，基点 `c2efb81` = PR #91 合并点）
 
-块内至今 **16 笔**（`git log --oneline c2efb81..HEAD`，自上而下 = 新到旧）；**本笔（commit 8b）是第 17 笔**：
+块内至今 **20 笔**（`git log --oneline c2efb81..HEAD` 实测，12 字短哈希）；**commit 8b 是第 18 笔**、**本笔（commit 9 · 收口）是第 21 笔**（下表按时间正序 = 旧到新）：
 
 | 组 | 笔 | 内容 |
 |---|---|---|
@@ -4914,9 +4914,13 @@ COALESCE(merchantid,customerid) WHERE EventType IN (那 5 个)` → 复读对照
 | 后端 traceId | `b6619c5` | commit 6b 后端 traceId —— `TraceIdFilter` + logback 轮转 + 慢 SQL 告警（`datasource-proxy`） |
 | 页 · 流转 | `033d62a` | commit 7 状态流转页 `OrderFlow.vue` —— 5 图落地（五态计数 + 环图 + 进度条列表 + 状态机 + 时间线） |
 | 页 · 日志 | `b773bf3` | commit 8 实时日志页 `EventLog.vue` —— 8 类事件卡片流 + traceId 链路抽屉（后端补 Object/Trace 三列 + 帧补 `traces` + 补挂 2 处审计） |
-| **台账 + 清理** | （**本笔**） | **commit 8b —— 事件台账 `observed_event` + 清理 job + 清场端点（Migration ⑲）+ 修 `DrillTargetDao` + 补 `TraceLog` 单测** |
+| 杂活 | `358c00d` | **chore 归置未跟踪残留** —— 三份收笔报告入库 + 攻击模拟器探针（`.mjs` + `.png`）（**单独一笔**，不混进 8b 的功能改动） |
+| **台账 + 清理** | `b1215f3` | **commit 8b —— 事件台账 `observed_event` + 清理 job + 清场端点（Migration ⑲）+ 修 `DrillTargetDao` + 补 `TraceLog` 单测** |
+| 指标修 | `136b27c` | commit 8b2 指标 P99 剔除 SSE 长连接 + 无样本留空（**P99 26.8 秒的误红**） |
+| 事件出口 | `2047f41` | commit 8c 事件出口 —— MQ 发布/消费 + 批次跨线程透传 + MQ 缺席上屏接通 |
+| **收口** | （**本笔**） | **commit 9 —— 文档统一补（附录 H / §17 / §7-B7 / §二十四 / #40）+ 中文标签层 + 清场按钮 + 演示种子 + 手验清单 + 重指** |
 
-### 24-2　commit 8b〈事件台账 + 清理〉（**本笔**）
+### 24-2　commit 8b〈事件台账 + 清理〉（`b1215f3`；**开段那一笔，原文保留**）
 
 **库变更（迁移 ⑲）** ⇒ `mall_management_sql.sql:1832-1918`：段头 `:1832-1863` · **⑲-1 建表 `observed_event`** `:1865-1887`（**11 列 + 4 个非唯一索引**）· **⑲-2..⑲-5 四表加列 `BatchId varchar(36) DEFAULT NULL`**（`drill_record` `:1888` / `order` `:1896` / `comment` `:1904` / `admin_audit` `:1912`，逐列一个 `information_schema` 守卫 + `PREPARE/EXECUTE`，不写循环）。
 ⇒ 表数 **37 → 38**、行首 `CREATE TABLE` **38 → 40**、非主键索引 **69 → 73**、非主键 UNIQUE **19 不变**、`.sql` **1918 行 / LF 1918 / CR 1918 / 裸 CR 0**（磁盘 CRLF）。**全库实测**（2026-10-14，`information_schema`，`_work/b7c8b-verify.txt`）：**表 38 / 非主键索引 73 / UNIQUE 19**；`observed_event` **11 列 / 4 索引 / 0 行**。
@@ -4932,7 +4936,7 @@ COALESCE(merchantid,customerid) WHERE EventType IN (那 5 个)` → 复读对照
 ⚠️ **本笔实测逮到一条「会随机红的绿测试」** ⇒ `containsExactlyEntriesOf(Map.of(...))` 是**逐位比较**、而 `Map.of` 迭代序不保证 ⇒ 同一份代码两次运行可一绿一红（首次整仓跑红在「same elements but not in the same order, at index 0」）。已改 **`containsExactlyInAnyOrderEntriesOf`**。
 
 **前端** ⇒ `api/endpoints.js` 头注 **139 → 140**（**同行替换**）+ `observe` 组尾追加 `attackCleanup`（`:407` 起 +11 行）· `api/observe.js` 端点封装 **6 → 7**（+ `cleanupAttack()`）。
-⚠️ **本笔只到 API 层** —— 攻击模拟器页上那枚「清场」按钮**不在本笔范围**。⚠️ 它是本表**第一条破坏性端点**，调用点必须**二次确认 + 回显 `summary`**。
+⚠️ **本笔只到 API 层** —— 攻击模拟器页上那枚「清场」按钮**不在本笔范围**（**commit 9 已补上**，见 **24-7**）。⚠️ 它是本表**第一条破坏性端点**，调用点必须**二次确认 + 回显 `summary`**。
 
 **A3 门禁（P3 一次 +1，四处同改）** ⇒ IN 清单加 `'observed_event'` · `KNOWN_TABLES` **26 → 27** · 期望表数 **37 → 38** · PASS 文案串同改。⚠️ `concurrency` job 是 `continue-on-error` ⇒ **只能读 artifact 的 `gates.count`**（同 §23-7 的教训）。
 
@@ -4945,7 +4949,7 @@ COALESCE(merchantid,customerid) WHERE EventType IN (那 5 个)` → 复读对照
 ### 24-4　文档同步（本笔四处 + 一处更正）
 
 四处同改齐：`db-schema.md §16`（新建）· `db-migration.md`（注意 22 改口 + 注意 23 + `#40`）· `progress.md §7-B7`（**开段**）· 本文件 **§二十四**（**开段**）；外加 `ConcurrencyRunner` 的 `KNOWN_TABLES` **27**。
-⚠️ **一处命名假设更正**：`api-contract.md` **没有「附录 H」**（其附录**到 G 为止** = 块 6 的内容域，`grep observe` = 0）⇒ `db-migration.md` 注意 21 那句是**前瞻指针**；块 7 的**可观测域端点 7 条**的契约（附录 H）**本笔不新建**，归 **commit 9**。
+⚠️ **一处命名假设更正**：`api-contract.md` **没有「附录 H」**（其附录**到 G 为止** = 块 6 的内容域，`grep observe` = 0）⇒ `db-migration.md` 注意 21 那句是**前瞻指针**；块 7 的**可观测域端点 7 条**的契约（附录 H）**本笔不新建**，归 **commit 9** ⇒ **commit 9 已落**（见 **24-6**）。
 
 ### 24-5　报备偏差（落码 ≠ 方案原文处，逐条）
 
@@ -4953,4 +4957,89 @@ COALESCE(merchantid,customerid) WHERE EventType IN (那 5 个)` → 复读对照
 2. **批文「5 张表加列」实测更正**：见 24-2，实为**加 4 张**（另 3 张早有）。
 3. **两条谓词 OR 是本笔的自裁**（批文只给判据「清完这两种谓词的数据全消失」）：只按一种会漏 —— 评论链路只有 `Source`、单号链路只有前缀。
 4. **`observed_event` 的写入留 8c**（用户裁决）：本笔表空、恒删 0 行 ⇒ **「保留期真的按天数删对行」这件事本笔只有单测能证**，真库证据要等 8c 之后。别把「本笔跑绿」当「保留期验过」。
-5. **§二十四 / §7-B7 为「开段」**：前 16 笔的逐条槽位**本笔不发**，归 commit 9 —— 既满足批文的「4 文档同步」，也不越权代登未核的笔。
+5. **§二十四 / §7-B7 为「开段」**：前 16 笔的逐条槽位**本笔不发**，归 commit 9 —— 既满足批文的「4 文档同步」，也不越权代登未核的笔 ⇒ **commit 9 已补齐**（24-1 的 20 笔表 + `progress.md §7-B7` 的收口条）。
+
+---
+
+### 24-6　commit 9〈块 7 收口〉—— 文档统一补 + 中文标签层 + 清场按钮 + 演示种子 + 手验清单
+
+**六件**（用户 2026-10-14《开工 commit 9》批文：9.1–9.6），逐条落点如下。
+
+**9.1 文档统一补（前 18 笔欠账）** ⇒ 四处活文档 + 一处登记表：
+
+| 落点 | 内容 | 手法 |
+|---|---|---|
+| `api-contract.md` **附录 H** | 可观测域 **7** 条端点契约（H.0 三个端点总数口径 · H.1 攻击四出口 + 8 场景表 · H.2 三条 SSE · H.3 帧节流项 · H.4 前端封装 · H.5 白名单零改动 · H.6 `X-Drill-Batch` 跨线程契约面 · H.7 台账边界） | **尾追加**（既有引用不动） |
+| `db-schema.md` **§17** | 块 7 的 ⑰ / ⑱ 两段（§16 只登了 ⑲）—— `drill_record` 12 列 · 两个演示基线列 · 块 6 六表 `Source` · `order.StockDeducted` | **尾追加** + §16 头部两处**同行订正**（「归 commit 9」→ 已落） |
+| `progress.md §7-B7` | 收口条 + 前 **20** 笔逐笔登记 | 标题 / 引言**同行订正** + 尾追加 |
+| `slot-registry.md §二十四` | 本节（24-1 补全 20 笔 + 24-6..24-9） | 表内**同行订正** + 尾追加 |
+| `db-migration.md` | 登记表补 **#40**（⑲）+ **#39 的状态列由「⏳ 待落库」改「✅ 已落」**（注意 22 那句改口当时**漏了登记表这一行**） | 表内**新增 1 行** + 同行订正 |
+
+⚠️ **`db-migration.md` 登记表 #39 的状态列是本笔补的** —— commit 8b 改了注意 22 的正文（`:253` 那句），但**表格里的状态列仍是「⏳ 待落库」**；批文点名的「`:253` 改口」在 8b 就已做，**真正漏的是这一行**。
+⚠️ **`db-migration.md` 新增 1 行 ⇒ 该文件 `:50` 之后的行号集体 +1**（token 值一字未变）—— 这是本笔**唯一**的中段插入，已按「引用者自身位移 = 成对 LOST/NEW」的口径核过（见 **24-9**）。
+
+**9.2 中文标签层（新目录 `src/config/labels/`，五个文件）** ⇒ 照 `config/notify-events.js` 惯例（`export const` 映射表 + `export function` 取值函数）：`observe-labels.js`（由 `config/observe-labels.js` **移动**而来，见下 ⚠️）· `audit-labels.js` · `order-labels.js` · `report-labels.js` · `user-labels.js`。
+⚠️ **兜底是硬要求**：映射表里没有的 code ⇒ **原样显示 code**；实现用 `Object.prototype.hasOwnProperty.call(TBL, k)` 判定，**不是** `TBL[k] || k`（后者会把 `constructor` / `toString` 这类**原型链键**渲染成函数体）。
+⚠️ **`<option>` 的 `:value` 仍是 code**（**不改后端契约**，只换显示文本）。
+⚠️ **三类字段分治**：① 枚举 code → 纯中文；② 业务号 → 中文前缀 + 原值（`商品:#123`）；③ 数值 → 中文单位。
+⚠️ **最容易抄错的一处**：举报单的中档是 `handled`（已处理）、评论图的中档是 `approved`（已通过）—— **两张表两键同名而中档不同名**（`report-labels.js` vs `observe-labels.js`），已写进手验清单 §F 与桌面诊断档 `块7-中文标签诊断清单.txt`。
+⚠️ **`observe-labels.js` 从 `src/config/` 移到 `src/config/labels/`** ⇒ 该文件**自身第 51 行**的 2 条 token 的**引用者路径**变了（行号未变）—— refs-scan 会记成「同 token、引用者路径不同」，属**搬家**不属漂移。
+
+**9.3 清场按钮（8b 遗留的「API 层有、页面没有」）** ⇒ `AttackConsole.vue` 新增第 **⑤ 区**：两段式确认（`armedClean` 第一次点**只上膛**、按钮转 `.a-btn-danger` + 页顶 flash 条，第二次才发请求）+ 回显后端 `summary` + 清完自动 `loadRecords()`。
+⚠️ **批文说「照 `AccountsPage` 的二次确认风格」—— 该页 `grep confirm|再点|armed` 实测 0 命中，它没有二次确认**；本仓真先例是 **`OrderPage.vue` 的 `armed` 模式**（`OrderPage.vue:636` 起），`.a-btn-danger` 是两页共用的**危险色按钮**样式（三处同值）。⇒ 本笔照 **OrderPage 的流程** + **AccountsPage 的配色**，**照实登记这条前提不符**。
+⚠️ **清场按钮不动 `drill_record`**（后端语义：清的是「演练污染出来的业务数据」，不是「演练这件事的记录」）⇒ 手验时**别把遗留的 `drill_record` 行当成没清干净**。
+
+**9.4 重指（refs-scan）** ⇒ before/after 逐条核，见 **24-9**。
+
+**9.5 演示种子（`scripts/seed-demo-gen.mjs` + `seed-demo.sql`）** ⇒ 新增可演练 SKU **4 件**（`SkuCode = 'SEED-…'`、`Stock = 240/180/120/60`）。
+⚠️ **批文「若干 SKU 带**基线库存**」按后端语义**不能那样做****：`BaselineStock` **不是种子**，是「人工四步」的载体（`UPDATE BaselineStock = Stock` → 演示 → `Stock = BaselineStock` → `BaselineStock = NULL`），库里 **NULL = 未处于演示中**；预置非 NULL 会让引擎把「上一轮的基线」当成这一轮的、「扣了多少」当场变**假读数** ⇒ 种子里**刻意留 NULL**。
+⚠️ **`goods_sku` 没有 `Source` 列**（Migration ⑰-2 只加了 `BaselineStock`）⇒ 批文说的「演示数据带 `Source='seed'`」在这一段**不适用**，改用**码前缀** `SkuCode LIKE 'SEED-%'` 作撤销判据（`.sql` 的 ① 段最前，**必须排在 `goods` 删除之前**）。
+⚠️ **批文另两件前提实测已满足、本笔不重复造**：敏感词库里已有 **11** 条（10 条来自 `.sql:1632` 的 ⑮-8 预置，全 `Source=''`）——**不改写它们的 `Source`**（改了会让撤种子删掉建表文件该保留的基线词）；「有 `customerid` + 未封禁 + 有登录名」的账号已有 **33** 个。
+落库 + 读回证据 `docs/agent/evidence/c3-block7/b7c9-seed-sku.txt`（`DELETE affected=4` / `INSERT affected=4` / 复跑 4/4 幂等 / `BaselineStock` 全 NULL / 中文按 `HEX()` 核未 mojibake / `pickSku` 主靶现为 `SEED-GD-101-9552` 240）。
+
+**9.6 手验清单** ⇒ 落桌面 `块7-commit9-收口-报告.txt`（**用户明令：报告直接丢桌面**），三列式「操作步骤 → 期望 → 判据」，分 〇 前置 / A 攻击模拟器 / B 指标 / C 状态流转 / D 实时日志 / **E 跨线程透传端到端** / F 中文标签 / G MQ 缺席 / H 收尾自检。
+⚠️ **§E 是本笔专门补的 8c 判据① 端到端**（8c 当时只验到单元 + 日志）：判据是「该批次 `COUNT>0` · `COUNT(DISTINCT BatchId)=1` · `Traces>1` · 时间落演练窗口内」，**不是**「全表都带批次」——`BatchId IS NULL` 是**正常值**（非请求上下文），证据 `docs/agent/evidence/c3-block7/b7c9-e2e-batch.txt`。
+⚠️ **§〇-5 是本清单最重要的一条前置**：事件台账的落库**由 SSE 流线程驱动**（`EventStreamService:81` → `EventBroadcaster.poll()`）⇒ **不打开实时日志页就查不到台账行**；本笔实测对照：不开流当场 **0 行** → 开流后同一批次 **2140 行**且时间戳仍落在演练当时（**落库滞后 ≠ 透传丢了**）。
+
+### 24-7　commit 9 的前端落点（含 9.3 清场按钮详录）
+
+| 文件 | 改动 | 零漂移手法 |
+|---|---|---|
+| `views/admin/observe/AttackConsole.vue` | import 行**合并** `cleanupAttack`；新增 `armedClean` / `cleaning` 两态 + `doCleanup()`；模板新增第 **⑤ 区**「清场」；样式新增 `.a-btn-danger`（三行，插在 `.a-btn:disabled` 之前） | 该文件**入向 `文件:行号` 引用实测 = 0** ⇒ 可自由加行（本笔 +约 55 行） |
+| `views/admin/observe/EventLog.vue` / `OrderFlow.vue` / `views/admin/ModerationPage.vue` / `views/admin/AuditPage.vue` / `views/admin/OrderPage.vue` / `views/NotifyInbox.vue` | 接入中文标签层（**import 合并到既有 import 行**；模板/逻辑的映射调用**同行替换**） | 已按「增行只加在被引行**之下**」核过；见 24-9 的逐文件位移表 |
+| `config/labels/*.js`（5 个） | **新目录**（`observe-labels.js` 由 `config/` **移动**进来，其余 4 个新建） | 新文件；`config/observe-labels.js` 的旧路径引用（若有）按搬迁处理 |
+| `api/endpoints.js` | `:407-410` 那段注释**同行替换**（补「页面按钮是 commit 9 补的」） | **净 0 行** |
+
+⚠️ **清场按钮为什么是两段式而不是 `confirm()`**：本仓 `eslintConfig.env` **没有 `browser`** ⇒ 管理页里 `window.confirm` / `alert` 会踩 `no-undef`；且即便能过 lint，「原生弹窗在自动化探针里点不到」会让这条**不可撤销**的动作变成验不了的代码。⇒ 走 `armed` 态（第一次点**只上膛**、页面自己画确认），与 `OrderPage.vue:636` 起的先例一致。
+⚠️ **`IconGlyph` 用 `name="no"`**：`components/ui/glyphs.js` 里**没有** `trash` 字形（照搬别的名字会渲染成空）。
+⚠️ **`doCleanup` 必须回显后端 `summary`**（形如「共 N 行（comment 1 / order 3 / …）」）—— 只回「已清场」三个字，用户就无从知道**到底删了什么**；这是本表第一条**真 DELETE** 端点，回显即护栏。
+
+### 24-8　门禁 / DoD（本笔实测）
+
+🧪 **后端** ⇒ `./mvnw -B -o **clean** test`：`Tests run: 471, Failures: 0, Errors: 0, Skipped: 26` + `BUILD SUCCESS`（`Total time: 44.189 s`，`2026-10-14T23:17:19+08:00`，日志 `_work/b7c9-mvn-test.log:5126` / `:5129` / `:5131`）。
+⚠️ **471 与 commit 8c 那次同数** —— 本笔（commit 9）**不含后端代码改动**（文档 + 前端 + 种子），故测试数**不应**变化；若它变了，先怀疑是不是混进了别的改动。⚠️ **`clean` 不能省**（增量编译复用陈旧 test class，同 §7-B6 判据）；本笔是 `clean test`，**不存在 surefire 残留**（残留问题见 `tech-debt.md`）。
+🧪 **前端** ⇒ `npm run lint` + `npm run build` 见下方「本笔实测」行（日志 `_work/b7c9-npm-lint.log` / `_work/b7c9-npm-build.log`）。
+
+**A3 门禁** ⇒ 本笔**不动** `ConcurrencyRunner`（表数仍 **38** / `KNOWN_TABLES` 仍 **27**，由 commit 8b 落定）。⚠️ `concurrency` job 是 `continue-on-error` ⇒ **只能读 artifact 的 `gates.count`，不能读 job 颜色**（同 §23-7 的教训）。
+
+### 24-9　零漂移（本笔逐文件核过）
+
+- **中段插入只有一处**：`db-migration.md` 登记表新增 **#40** 一行 ⇒ 该文件 `:50` 之后的自身 token 行号集体 **+1**（**token 值一字未变**）。⚠️ 该文件的**入向** `文件:行号` 引用**实测 = 0**（commit 8b 已核过，本笔复核仍为 0）⇒ 只影响它自己那 200 余条自指，按「引用者自身位移 = 成对 LOST/NEW」口径核（见下 ⚠️）。
+- **纯尾追加（既有引用零影响）**：`api-contract.md` 附录 H · `db-schema.md §17` · `progress.md §7-B7` 的收口条 · 本文件 §二十四 的 24-6..24-9。
+- **同行订正（净 0 行）**：`db-schema.md` `:8` / `:933`（§16 头部两处）· `progress.md §7-B7` 标题 + 引言 · 本文件 §二十四 标题 + 引言 + 24-1 引言 + 24-2 标题 + 末尾两处 · `db-migration.md` 登记表 **#39 的状态列** · `api/endpoints.js:407-410`。
+- ⚠️ **`slot-registry.md` 的入向 `文件:行号` 引用**（`context-packs` ×6 · `progress.md` ×2 · `router/index.js` ×1，**全部指向 `:4192` 之前**）**一处不受影响** —— 本笔对 §二十四（`:4889` 起）的改动**全在该点之后**，且其中无一处是「行内插入」（只有尾追加 + 同行替换）。
+- ⚠️ **本笔新增的 `文件:行号` 引用**（附录 H / §17 / 本节的正文里）会**抬高** after 计数 —— 计数是**移动靶**，**终止条件是「真 LOST = 0」，不是某个计数**（同 §7-B6 的判据）。
+
+**✅ refs-scan 复核实测（2026-10-14，**最后一次编辑之后**跑）** ⇒ before `_work/b7c9-refs-before.txt` **4904 条** / after `_work/b7c9-refs-after.txt` **4930 条**；按 **「(引用者, token)」对**归一后 **before 3856 对 / after 3881 对**（比对脚本与逐条台账在 `_work/b7c9-refs-diff.*`，**按护栏不进 `docs/`**）。
+- **真 LOST = 2 对，且 2 对全部由 `observe-labels.js` 搬家解释**：同一份文件的两条 token（一条是裸行号、一条是 CSS 引用），**行号同为 51、内容一字未变**，只是**引用者路径**由 `config/` 变成 `config/labels/` ⇒ 旧路径那对报 LOST、新路径那对报 NEW，**成对相抵**。**扣掉搬家 = 真丢失 0。**
+- **新增 27 对全部可解释**：2 对 = 上述搬家的 NEW 侧；其余 25 对**全是本笔新写入的正文**（`api-contract.md` 附录 H 的 2 条 · `db-migration.md` 新 `#40` 行的 4 条 · `db-schema.md §17` 的 7 条 · `slot-registry.md` 本节的 6 条 · `tech-debt.md` TD-60..68 的 6 条）。**没有一条落在「既有文件被本笔改动」上**。
+- ⚠️ **判据口径**：`LOST` 里那 2 条与 `NEW` 里那 2 条**必须逐条配对**（同 token、同行号、仅路径前缀不同）才算「搬家」；**只数 `LOST` 的条数会误判成「漂了 2 处」**（同 §7-B6 的「成对伪报」教训）。
+
+### 24-10　报备偏差（commit 9，逐条）
+
+1. **批文 9.3 的前提不符**：`AccountsPage` **没有**二次确认（`grep` 0 命中）⇒ 本笔照的是 `OrderPage` 的 `armed` 流程 + `AccountsPage` 的**配色**。已如实登记（见 24-7）。
+2. **批文 9.5 的前提不符**：① `BaselineStock` **刻意不预置**（它是人工四步的载体）；② `goods_sku` **没有 `Source` 列** ⇒ 那一段改用码前缀 `SEED-%`；③ 敏感词库里已有 11 条，**不重复预置、也不改写它们的 `Source`**；④ 「若干用户有 login + user 行」库里已满足（33 个）。
+3. **批文点名的「`db-migration.md:253` 改口」在 commit 8b 就已做**；本笔真正补的是**登记表 #39 的状态列**（那一行当时漏了）。**这是「照批文找行号」会漏掉一处的情形**：行号给的是注意段，而漏的在表格里。
+4. **`drill_record` 里留了本笔两次收口验证的行**（`Name = b7c9-e2e` / `b7c9-e2e2`）—— 清场按钮**不动** `drill_record`，它们会一直在；手验清单 §H-2 已写明**别当成没清干净**。
+5. **§二十四 24-1 原写「自上而下 = 新到旧」与表内实际顺序（旧到新）相反**，已就地更正（表本身未动，只改这半句）。
+6. **本笔不 push / 不 merge** —— 块 7 全部手验通过后由用户决定（批文明确）。

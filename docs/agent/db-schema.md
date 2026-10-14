@@ -5,7 +5,7 @@
 > **Java 坐标约定（2026-09-30 补）**：`G:` = `GoodsController.java`（前 `MallManagementGoodsController.java`）、`M:` = `MessageController.java`（前 `MallManagementMessage.java`）、`U:` = `UserController.java`（前 `MallManagementUserController.java`）的**语句行**（**不是** route 注解行，与 `api-contract.md` 的口径**相反**，两文件不要互抄）。B1 / B2 / B3 之后若干读写路径已搬到 `mallmanagement_service` 下的 Service ⇒ 本文件出现 `GoodsCacheService:` / `UserCacheService:` / `OrderStateMachine:` 等前缀，那是**跨文件搬迁**、不是行号漂移。**全文件 Java 坐标已于 2026-09-30 对 HEAD 逐条复核并替换** —— 原一版系统性偏旧（成因同 `api-contract.md#api-top`：各笔新代码插入后未同步）。⚠️ **三层四笔（order PR #25 `28194b4` / goods 2026-10-02 / user PR #32 `0c07e96` / message `8ed5fc1`）后**：`G:` / `M:` / `U:` 三个 Controller 已只剩路由 —— SQL 与业务体分别下沉 `<域>/dao/<域>Dao.java` 与 `<域>/service/`。**本文件下表凡涉这三个域的 `G:` / `M:` / `U:` 坐标，若未随该域的笔改写，一律已陈旧**；下表 `:41-48` 的用户域行已于第三笔、消息域行（`M:378`）已于第四笔改写，其余（`U:` 一族、`G:` 的未重测行）引用前请以源码为准。
 > ⚠️ **2026-10-02 笔 2 后**：订单端点的 SQL 已随 `OrderController` 拆出，迁至 `order/dao/OrderDao.java`；`GoodsController` 的商品行整体 **−9**（⚠️ 该「−9」只是**首两行**的口径：以 2026-09-30 基线 `148e77b` 逐条实测，`goodstype`/`goodsAdd` 为 −9、`goodsSelect` 一族 −8、`productCodePrice` −4、`goodsUp` 之后 +16/+23/+23，**不要拿 −9 换算全表**；详见 `api-contract.md#api-top`）。下表**订单相关行的 `G:` 已改指 `OrderDao`**，其余 `G:` 值**尚未重测** —— 引用前请以源码为准。
 > ⚠️ **2026-10-02 三层重构第二笔（商品域）后**：商品 **8 条内联 SQL** 从 `GoodsController` 下沉到 `goods/dao/GoodsDao.java`，写/读方法体进 `goods/service/GoodsService.java` —— 本表原 `G:` 的**商品行**据此改指 `GoodsDao.searchByKeyword`。这四个走缓存的读路径（`GoodsCacheService:81` / `:146` / `priceByTriple`）**未受影响**（它们的 SQL 本就在 Service，2026-09-30 已复核）。新增前缀：`S:` = `GoodsService.java`、`D:` = `GoodsDao.java`。
-> 表数量：**18** —— 11 张原始表 + 7 张由 `.sql` 末尾 Migration 块建的：`order_state_transition`（B3，2026-09-29，`:221-235`）· `admin_audit`（C3 批 A，2026-10-08，`:264-292`）· `notification`（C3 块1-I2，2026-10-09，`:294-327`）· `merchant_application`（C3 块 2〈用户块〉，2026-10-09，`:369-390`）· `template`（C3 块3 **就地改造**，2026-10-10 #8，`:556-569`）· `goods_audit`（C3 块 3〈商品块〉，2026-10-10，`:492-515`）· `cart`（C3 块 4〈订单块〉，2026-10-10，`:708-720`）。⚠️ **C3 块 4〈订单块〉（2026-10-10，分支 `feat/c3-admin-block4`）—— 本文件第二次「加表」但 `cart` 刻意不走本文件的中段**：`cart` 是 A1 甲（用户 2026-10-10 逐项裁决）的**真购物车载体**，逐列清单 / 索引 / 与 `order` 的关系**登记在文件末 §11**，**不就地插入 §1 表清单与 §6.x** —— 理由是零漂移：本文件当前有 **44 处外部 `文件:行号` 引用**（10 个文件，指向本文件 **26 个不同行号**）（`slot-registry.md` 26 / `selection-status.md` 5 / `progress.md` 4 / `defect-survey.md` 2 / context-pack 4 / `OrderCenter-merchant.html` 1 / `api-contract.md` 1 / `OrderDao.java` 1），中段插一行就让其后**全部**集体 +1；重指回本文件的工作归「文档漂移清理笔」（同 §十五 15-5 的登记不修口径）。另 `order` **加** `Quantity`（`.sql:730-738`，`int NOT NULL DEFAULT 1`，存量 6 行回填 1，**不增表、不改行数** ⇒ A3 的 P4 种子计数 `order=6` 不受影响）。⚠️ **`cart` 不在 `.sql:21` 起的 `DROP TABLE IF EXISTS` 基线清单里** —— 它是用户数据不是种子，整份重导**不清空购物车**（`.sql:689-690` 块注释）。⇒ 表数 **17 → 18**、索引 **16 → 18**（+`uk_cart_customer_product`、+`idx_cart_customer`）、**非主键 UNIQUE 3 → 4**（新增第 4 个 `uk_cart_customer_product`；⚠️ 三处计数均为**按 DDL 直接推导**，非实测查询结果，出处 `.sql:708-720`）。⚠️ **`notification_template`（`:329-345`）与 `goods_template`（`:474-484`）已由 #8 物理删** —— 两者在 `.sql` 里的 `CREATE TABLE` 语句**仍在原地**（零漂移手法），由块尾的 `DROP TABLE IF EXISTS` 中和 ⇒ **本笔之前**，该文件里共 **21** 个 `CREATE TABLE`、**净 19 张表**（判据：导入后那两张表不存在；⚠️ 原写「20 个 / 净 18 张」**漏算了 §12 的 `order_shipping_track`**，2026-10-11 订正）。⚠️ **可视化段（2026-10-11，commit 0–4）之后**：再加 **3 张表**（`order_item` commit 0 / `stats_daily` commit 2 / `goods_sku` commit 3 补丁）+ **4 张表加列**（`login.CreateTime` / `goods` ×4 / `goods_audit` ×5 / `template.Kind`）+ **11 张表各加一列 `Source`** ⇒ 表数 **19 → 22**、`CREATE TABLE` **21 → 24**、索引 **23 → 30**、非主键 UNIQUE **4 → 7**（VM 库 `information_schema` 实测，2026-10-11）。§1 表清单与 §6.x **刻意不插入**（零漂移，理由同本段开头的 `cart`）—— 逐列定义 / 净变化表见**文件末 §13**。⚠️ **C3 块 5〈营销块〉（2026-10-11/12）之后**：再加 **8 张表**（`coupon` / `coupon_grant` / `subsidy_rule` / `subsidy_goods` / `seckill_invitation` / `seckill_application` / `seckill_activity` / `shop_follow`）+ **6 处加列**（`goods.OriginalPrice` / `order.CouponId` / `order.SubsidyAmount` / `order.PayAmount` / `goods_audit.OriginalPrice`）+ **1 个新索引**（`goods_sku` 的 `idx_goods_sku_sku_code`）⇒ 表数 **22 → 30**、行首 `CREATE TABLE` **24 → 32**（VM 库 `information_schema.TABLES` 实测 = 30、本文件所在仓的 `.sql` 实测 `CREATE TABLE` = 32，2026-10-12）。**本行的「表数量：18」与 §2 行首的「17 张表 / 共 20 个索引」一律按各自写作时的实测口径读，不要拿它们做减法**；块 5 口径以 **§14** 为准（逐列定义 / 加列 / 索引 / 净变化表）。⚠️ **C3 块 6〈内容+消息块〉（2026-10-12/13）之后**：再加 **6 张表**（`comment` / `comment_mention` / `comment_image` / `comment_like` / `report` / `sensitive_word`）+ **1 处加列**（`user.WarnCount`，`int NOT NULL DEFAULT 0`）⇒ 表数 **30 → 36**、行首 `CREATE TABLE` **32 → 38**（VM 库 `information_schema.TABLES` 实测 = 36、本仓 `.sql` 实测 `CREATE TABLE` = 38，2026-10-13）。§1 表清单与 §6.x **同块 5 一样刻意不插入**（零漂移），块 6 口径以文件末 **§15** 为准（逐列定义 / 加列 / 索引 / 净变化表）。⚠️ **C3 块 7〈可观测域 + 库存治理〉（2026-10-13/14）之后**：Migration 段 ⑰ 加 **1 张表**（`drill_record`）+ **8 列**（2 个演示基线列 + 块 6 六表的 `Source`）、⑱ 加 **1 列**（`order.StockDeducted`）⇒ 表数 **36 → 37**；commit 8b 的 ⑲ 再加 **1 张表**（`observed_event`）+ **4 列**（`BatchId`）⇒ 表数 **37 → 38**、行首 `CREATE TABLE` **38 → 40**（VM 库 `information_schema` 实测 = 38 表 / 非主键索引 73 / 非主键 UNIQUE 19，2026-10-14）。⚠️ **块 7 的 ⑰ / ⑱ 两段本文件尚未登记**（`drill_record` 12 列 · `goods_sku.BaselineStock` · `seckill_activity.BaselineSoldStock` · 块 6 六表 `Source` · `order.StockDeducted`）—— 按 `db-migration.md` 注意 21/22 的口径**归块 7 commit 9（收口）**；本文件末 **§16** 只登 commit 8b 那一段（`observed_event` + 4 处 `BatchId`）。
+> 表数量：**18** —— 11 张原始表 + 7 张由 `.sql` 末尾 Migration 块建的：`order_state_transition`（B3，2026-09-29，`:221-235`）· `admin_audit`（C3 批 A，2026-10-08，`:264-292`）· `notification`（C3 块1-I2，2026-10-09，`:294-327`）· `merchant_application`（C3 块 2〈用户块〉，2026-10-09，`:369-390`）· `template`（C3 块3 **就地改造**，2026-10-10 #8，`:556-569`）· `goods_audit`（C3 块 3〈商品块〉，2026-10-10，`:492-515`）· `cart`（C3 块 4〈订单块〉，2026-10-10，`:708-720`）。⚠️ **C3 块 4〈订单块〉（2026-10-10，分支 `feat/c3-admin-block4`）—— 本文件第二次「加表」但 `cart` 刻意不走本文件的中段**：`cart` 是 A1 甲（用户 2026-10-10 逐项裁决）的**真购物车载体**，逐列清单 / 索引 / 与 `order` 的关系**登记在文件末 §11**，**不就地插入 §1 表清单与 §6.x** —— 理由是零漂移：本文件当前有 **44 处外部 `文件:行号` 引用**（10 个文件，指向本文件 **26 个不同行号**）（`slot-registry.md` 26 / `selection-status.md` 5 / `progress.md` 4 / `defect-survey.md` 2 / context-pack 4 / `OrderCenter-merchant.html` 1 / `api-contract.md` 1 / `OrderDao.java` 1），中段插一行就让其后**全部**集体 +1；重指回本文件的工作归「文档漂移清理笔」（同 §十五 15-5 的登记不修口径）。另 `order` **加** `Quantity`（`.sql:730-738`，`int NOT NULL DEFAULT 1`，存量 6 行回填 1，**不增表、不改行数** ⇒ A3 的 P4 种子计数 `order=6` 不受影响）。⚠️ **`cart` 不在 `.sql:21` 起的 `DROP TABLE IF EXISTS` 基线清单里** —— 它是用户数据不是种子，整份重导**不清空购物车**（`.sql:689-690` 块注释）。⇒ 表数 **17 → 18**、索引 **16 → 18**（+`uk_cart_customer_product`、+`idx_cart_customer`）、**非主键 UNIQUE 3 → 4**（新增第 4 个 `uk_cart_customer_product`；⚠️ 三处计数均为**按 DDL 直接推导**，非实测查询结果，出处 `.sql:708-720`）。⚠️ **`notification_template`（`:329-345`）与 `goods_template`（`:474-484`）已由 #8 物理删** —— 两者在 `.sql` 里的 `CREATE TABLE` 语句**仍在原地**（零漂移手法），由块尾的 `DROP TABLE IF EXISTS` 中和 ⇒ **本笔之前**，该文件里共 **21** 个 `CREATE TABLE`、**净 19 张表**（判据：导入后那两张表不存在；⚠️ 原写「20 个 / 净 18 张」**漏算了 §12 的 `order_shipping_track`**，2026-10-11 订正）。⚠️ **可视化段（2026-10-11，commit 0–4）之后**：再加 **3 张表**（`order_item` commit 0 / `stats_daily` commit 2 / `goods_sku` commit 3 补丁）+ **4 张表加列**（`login.CreateTime` / `goods` ×4 / `goods_audit` ×5 / `template.Kind`）+ **11 张表各加一列 `Source`** ⇒ 表数 **19 → 22**、`CREATE TABLE` **21 → 24**、索引 **23 → 30**、非主键 UNIQUE **4 → 7**（VM 库 `information_schema` 实测，2026-10-11）。§1 表清单与 §6.x **刻意不插入**（零漂移，理由同本段开头的 `cart`）—— 逐列定义 / 净变化表见**文件末 §13**。⚠️ **C3 块 5〈营销块〉（2026-10-11/12）之后**：再加 **8 张表**（`coupon` / `coupon_grant` / `subsidy_rule` / `subsidy_goods` / `seckill_invitation` / `seckill_application` / `seckill_activity` / `shop_follow`）+ **6 处加列**（`goods.OriginalPrice` / `order.CouponId` / `order.SubsidyAmount` / `order.PayAmount` / `goods_audit.OriginalPrice`）+ **1 个新索引**（`goods_sku` 的 `idx_goods_sku_sku_code`）⇒ 表数 **22 → 30**、行首 `CREATE TABLE` **24 → 32**（VM 库 `information_schema.TABLES` 实测 = 30、本文件所在仓的 `.sql` 实测 `CREATE TABLE` = 32，2026-10-12）。**本行的「表数量：18」与 §2 行首的「17 张表 / 共 20 个索引」一律按各自写作时的实测口径读，不要拿它们做减法**；块 5 口径以 **§14** 为准（逐列定义 / 加列 / 索引 / 净变化表）。⚠️ **C3 块 6〈内容+消息块〉（2026-10-12/13）之后**：再加 **6 张表**（`comment` / `comment_mention` / `comment_image` / `comment_like` / `report` / `sensitive_word`）+ **1 处加列**（`user.WarnCount`，`int NOT NULL DEFAULT 0`）⇒ 表数 **30 → 36**、行首 `CREATE TABLE` **32 → 38**（VM 库 `information_schema.TABLES` 实测 = 36、本仓 `.sql` 实测 `CREATE TABLE` = 38，2026-10-13）。§1 表清单与 §6.x **同块 5 一样刻意不插入**（零漂移），块 6 口径以文件末 **§15** 为准（逐列定义 / 加列 / 索引 / 净变化表）。⚠️ **C3 块 7〈可观测域 + 库存治理〉（2026-10-13/14）之后**：Migration 段 ⑰ 加 **1 张表**（`drill_record`）+ **8 列**（2 个演示基线列 + 块 6 六表的 `Source`）、⑱ 加 **1 列**（`order.StockDeducted`）⇒ 表数 **36 → 37**；commit 8b 的 ⑲ 再加 **1 张表**（`observed_event`）+ **4 列**（`BatchId`）⇒ 表数 **37 → 38**、行首 `CREATE TABLE` **38 → 40**（VM 库 `information_schema` 实测 = 38 表 / 非主键索引 73 / 非主键 UNIQUE 19，2026-10-14）。⚠️ **块 7 的 ⑰ / ⑱ 两段本文件尚未登记**（`drill_record` 12 列 · `goods_sku.BaselineStock` · `seckill_activity.BaselineSoldStock` · 块 6 六表 `Source` · `order.StockDeducted`）—— 按 `db-migration.md` 注意 21/22 的口径**归块 7 commit 9（收口）**；本文件末 **§16** 只登 commit 8b 那一段（`observed_event` + 4 处 `BatchId`），**§17**（commit 9 补登）登 ⑰ / ⑱ 两段。
 > ⚠️ **块 2 还改了「两张既有表」，但加列不增表**：`user` +8 列（`:396-404`，封禁 3 + 降级 5）、`goods` +2 列（`:407-409`，`ShelfState` / `DelistedAt`）—— 故表数**只 +1**；那 10 列落在 §6.3 与 §6.10 的既有小节里（**不另开节**）。
 > ⚠️ **块 3 再改「两张既有表」+ 净增 2 张**：`goodstype` +3 列（`:449-451`，`ParentId` / `Sort` / `State`）**并换唯一键**（`:454-455`，`uk_goodstype_GoodType` → `uk_goodstype_parent_name (ParentId, GoodType)`）、`goods` +5 列（`:461-467`，`TypeId` / `DetailTemplateId` / `SpecTemplateId` / `AfterSaleTemplateId` / `DeletedAt`）；两张新表 `goods_template` / `goods_audit`。⇒ 表数 **16 → 18**，索引 **15 → 16**（换代一换一 + 净增 `idx_goodstype_parent_sort`），**非主键 UNIQUE 仍 3 个**。既有两表的加列落在 §6.4（`goodstype`）/ §6.3（`goods`）。 ⚠️ **块 3 就地改造（#8，2026-10-10）—— 本文件首次出现「删表 + 删列」**：新建**通用表** `template`（`:556-569`，`Type` 区分用途）；**物理删** `goods_template` + `notification_template`（用户明确批准，见 `db-migration.md` 注意 11）；`goods` **加** 3 段快照文本（`:588-607`，`Detail` / `Spec` / `AfterSale`）**删** 3 个模板引用 Id（`:611-630`，`DetailTemplateId` / `SpecTemplateId` / `AfterSaleTemplateId` —— 那三列**恒 NULL、全仓零写入**，见注意 10 末句）；`goods_audit` 加同 3 列（`:636-655`）。⇒ 表数 **18 → 17**、索引 **16 → 16**（净 0）、**非主键 UNIQUE 仍 3 个**（第三个从 `uk_notification_template_key` 换成 `uk_template_type_name`）。语义变化：商品侧由「**引用**模板 Id」（改模板 ⇒ 商品联动变）改为「**快照**」（选模板 → 填入 → **可改** → 存**最终文本** ⇒ 改模板**不影响**已上架商品）。
 > ⚠️ **2026-10-09 更正 —— 原写 12 是漏登**：先后漏了批 A 的 `admin_audit`；I2 登记时一并补齐（同一缺口见 `db-migration.md` 注意 8）。本文件此前所有「12 张表」的字面与据此推导的计数（索引张数、UNIQUE 个数）也随之更新。
@@ -930,7 +930,7 @@
 
 > 与 §11–§15 同一手法：**§1 表清单与 §6.x 刻意不插入**（零漂移），库变更全部落在本附录里。
 > 权威源 = `mall_management_sql.sql` 末尾的**第四个** Migration 段（**⑲**，段头 `:1832-1863`，⑲-1 建表 `:1865-1887`，⑲-2..⑲-5 加列 `:1888-1918`）；登记表见 `db-migration.md` **#40** + 注意 **23**。
-> ⚠️ **本附录只登 ⑲ 这一段。** 块 7 的前两段（**⑰** = 建 `drill_record` + 8 列；**⑱** = `order` 加 `StockDeducted`）**本文件尚未登记** —— 按 `db-migration.md` 注意 **21 / 22** 的口径，那两段的登记（`drill_record` 12 列、`goods_sku.BaselineStock`、`seckill_activity.BaselineSoldStock`、块 6 六表各自加 `Source`、`order.StockDeducted`）**归块 7 commit 9（收口）** ⇒ 本附录**只给指针、不代登**（注意 22 亦逐字记了「本笔只登 `db-migration.md`，不改 `db-schema.md`」）。
+> ⚠️ **本附录只登 ⑲ 这一段。** 块 7 的前两段（**⑰** = 建 `drill_record` + 8 列；**⑱** = `order` 加 `StockDeducted`）**已由 commit 9（收口）登在 §17**（原文写「本文件尚未登记 —— 归块 7 commit 9」）—— 那一段的登记（`drill_record` 12 列、`goods_sku.BaselineStock`、`seckill_activity.BaselineSoldStock`、块 6 六表各自加 `Source`、`order.StockDeducted`）**见下 §17**；`db-migration.md` 注意 22 那句「本笔只登 `db-migration.md`，不改 `db-schema.md`」说的是**当时**（commit 0 那笔）的口径。
 > ⚠️ **本段的库变更只有「加表 1 + 加列 4」** —— 不改既有列、不删行、不改既有数据（规则 v2：向后兼容）；且**只建表、不接写入**（写入方 = 8c 的 MQ consumer）⇒ 本笔之后这张表**是空的、0 行**。
 > ⚠️ **两条线上的表数别互相减**：本条的表数是 **38**，§15.4 是块 6 的 **36**（中间隔着 ⑰ 的 +1）；本文件§15.4 索引一栏的最后数字是 **68**（块 6 口径），本条的基线 **69** 来自 ⑰ 之后的实测（`db-migration.md` 注意 21）—— **69 这个数不在本文件里**。
 
@@ -994,5 +994,87 @@
 ⚠️ **两档保留期（本段只是「基础设施先行」，不是已有数据在跑）**：**攻击批次 3 天 / 日常 30 天**，判据 = `BatchId IS NOT NULL` 分档、按 **`OccurredAt`** 算（**不是** `created_at` —— 判的是「事件**发生**了多久」，落库延迟不该延长保留）。⚠️ **本笔跑起来表是空的、清理 job 每轮删 0 行** —— 这不是缺陷，是「保留期」这件基础设施提前就位（写入方 8c 才接）。
 ⚠️ **回滚**：新表按注意 6 / 规则 v2 = 「**保留表 + 停止写入**」（`DROP TABLE` 只在本地库重建时用）；4 个加列按注意 1 = **逻辑废弃**（保留列 + 停用写入，**不得** `DROP COLUMN`）。段头 `:1856-1862` 的 `ROLLBACK` 注释逐条写了这些语句并标注「**执行前须人工确认**」。
 ⚠️ **`observed_event` 刻意不进文件头（`:21` 起）的 `DROP TABLE IF EXISTS` 基线清单**（同 `cart` / `drill_record` / `order_item` / `stats_daily`：它是**业务数据**不是种子）⇒ **整份重导不清空事件台账**；表结构变更必须写独立 Migration（本段即是）。
-⚠️ **跨文件口径必须一致**：本条的表数（**38**）、行首 `CREATE TABLE`（**40**）、非主键索引（**73**）、`db-migration.md` 注意 21–23、`slot-registry.md` 的块 7 登记、`progress.md §7-B7`、`ConcurrencyRunner` 的 `KNOWN_TABLES`（**27**）**同源**；`api-contract.md` 的**可观测域端点**（**7** 条）是**端点**侧 —— ⚠️ 该文件的附录**到 G 为止**（那是块 6 的内容域），**块 7 的「附录 H」本文件尚未落**，归 **commit 9 收口**。
+⚠️ **跨文件口径必须一致**：本条的表数（**38**）、行首 `CREATE TABLE`（**40**）、非主键索引（**73**）、`db-migration.md` 注意 21–23、`slot-registry.md` 的块 7 登记、`progress.md §7-B7`、`ConcurrencyRunner` 的 `KNOWN_TABLES`（**27**）**同源**；`api-contract.md` 的**可观测域端点**（**7** 条）是**端点**侧 —— 该文件的**附录 H** 已由 **commit 9（收口）** 落（原写「尚未落」）。
+⚠️ **块 7 的 ⑰ / ⑱ 两段**（本附录写作时未登的那两段）已由 **commit 9（收口）** 登记在 **§17**（见下）—— 本附录开头那句「那两段的登记归 commit 9」**已兑现**。
+
+## 17. 附录：C3 块 7〈可观测域 + 库存治理〉· 前两段（⑰ 演练记录 / ⑱ 库存扣成标记）的库变更（2026-10-13/14，**commit 9 补登**） {#db-17}
+
+> 与 §11–§16 同一手法：**§1 表清单与 §6.x 刻意不插入**（零漂移），库变更全部落在本附录里。
+> 权威源 = `mall_management_sql.sql` 末尾的**第一、二个**块 7 Migration 段：**⑰**（段头 `:1688-1715`，⑰-1..⑰-9 本体 `:1717-1797`）与 **⑱**（段头 `:1798-1822`，⑱-1 本体 `:1824-1830`）；登记见 `db-migration.md` **#38**（注意 21）+ **#39**（注意 22）。
+> ⚠️ **本附录就是 §16 开头那条延后指针的兑现** —— 两段此前只登在 `db-migration.md`（注意 22 逐字写了「本笔只登本文件，不改 `db-schema.md`」），表结构快照（本文件）缺这一段。
+> ⚠️ **两条线上的表数别互相减**：本附录的终点是 **37**（⑰ 之后），§16 的终点是 **38**（⑲ 之后）；本附录的索引终点是 **69**，§16 是 **73**。
+
+### 17.1 `drill_record` —— 攻击演练记录（⑰-1，`.sql:1717-1733`） {#db-17-1}
+
+| 列 | 类型 / 约束 | 可空 | 默认 | 语义（列注释逐字） |
+|---|---|---|---|---|
+| `Id` | `bigint AUTO_INCREMENT` | NO | — | 自增主键 |
+| `OperatorId` | `varchar(40)` | NO | `''` | 发起演练者业务号（对齐 `user.customerid` / `user.merchantid`，**不是**登录名） |
+| `OperatorRole` | `tinyint` | NO | `0` | 1=用户 / 2=商家 / 3=管理员（认不出 = 0，**不编造**） |
+| `Name` | `varchar(64)` | NO | `''` | 场景名（预置 8 场景之一）或「自定义」 |
+| `Scenario` | `varchar(500)` | NO | `''` | 场景配置 JSON（8 场景勾选 + 各自权重 + 总并发 + 持续秒数） |
+| `TotalRequests` | `int` | NO | `0` | 本轮总请求数 |
+| `BlockedRequests` | `int` | NO | `0` | 被防护拦下数 |
+| `FailedRequests` | `int` | NO | `0` | 真失败数（5xx 等） |
+| `DurationMs` | `bigint` | NO | `0` | 本轮耗时（毫秒） |
+| `Result` | `mediumtext` | **YES** | `NULL` | 长文本结果（**后端解析后分字段**给前端显示 —— 不是让前端展示原始长文） |
+| `created_at` | `datetime` | NO | `CURRENT_TIMESTAMP` | 行落库时刻 |
+| `updated_at` | `datetime` | NO | `CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP` | 行更新时刻 |
+
+索引（**除主键外 1 个，非唯一**）：`idx_drill_created (created_at)` —— 列表按时间倒序取（`.sql:1732`）。
+⚠️ **12 列**（含两个时间列）＝ §16.1 那 11 列之外多一个 `updated_at`；本表**没有** `BatchId`（⑲-2 才补）。
+⚠️ **`OperatorId` 是业务号不是登录名**（列注释逐字）；**认不出 ⇒ `''` / `0`**，不编造（闸关着的 dev / a3 就是这一档）。
+⚠️ **`Result mediumtext` 刻意是长文本**：它由后端 `split()` 拆成字段后再给前端（解析失败落 `ResultRaw` + `ResultParseError`，**不静默** —— 同 `SensitiveWordController` 那条「`masked=0` 也必须报出来」的口径）。
+
+### 17.2 两个「演示基线列」（⑰-2 / ⑰-3） {#db-17-2}
+
+| # | 表.列 | 类型 | 语义 | `.sql` |
+|---|---|---|---|---|
+| ⑰-2 | `goods_sku.BaselineStock` | `int DEFAULT NULL` | 演示基线库存：演示前 = `Stock`，演示后一行 `UPDATE` 还原；**NULL = 未处于演示中** | `:1735-1741` |
+| ⑰-3 | `seckill_activity.BaselineSoldStock` | `int DEFAULT NULL` | 同 ⑰-2，秒杀侧（演示基线**已售**） | `:1743-1749` |
+
+⚠️ **这两列不是 `Source` 列，语义相反**（`db-migration.md` 注意 21 逐字）：`Source` 的判据是「这一**行**是谁写进来的」，而库存行的**行本身不是攻击创建的**、只是**数值被改** ⇒ 给这两张表加 `Source` 属**语义错位**。「攻击动过它」由**基线列能否还原**表达。
+⚠️ **⚠️ 库里 `NULL` = 未处于演示中**（这是设计语义，不是「没填」）：演示三/四步 —— 演示前 `UPDATE goods_sku SET BaselineStock = Stock WHERE BaselineStock IS NULL;` → 演示后 `UPDATE goods_sku SET Stock = BaselineStock;` → 收尾 `UPDATE goods_sku SET BaselineStock = NULL;`。⇒ **种子脚本刻意不预置非 NULL 值**（预置了引擎会把「上一轮的基线」当成这一轮的，`Result.Stock.Baseline` 当场变**假读数**）。
+⚠️ **`goods_sku` 因此没有 `Source` 列** —— 块 7 的 `seed-demo.sql` 演示种子那一段用**码前缀**（`SkuCode LIKE 'SEED-%'`）当撤销判据，而不是 `Source='seed'`。
+
+### 17.3 块 6 六表补 `Source`（⑰-4 .. ⑰-9） {#db-17-3}
+
+| # | 表 | `.sql` | 说明 |
+|---|---|---|---|
+| ⑰-4 | `comment` | `:1751-1757` | 攻击场景 8（敏感词攻击）会写本表 |
+| ⑰-5 | `comment_image` | `:1759-1765` | 块 6 六表补齐 |
+| ⑰-6 | `comment_like` | `:1767-1773` | 同上 |
+| ⑰-7 | `comment_mention` | `:1775-1781` | 同上 |
+| ⑰-8 | `report` | `:1783-1789` | 同上 |
+| ⑰-9 | `sensitive_word` | `:1791-1797` | 攻击场景 8 会写本表 |
+
+六列**同形**：`ALTER TABLE … ADD COLUMN Source varchar(16) NOT NULL DEFAULT ''`，逐表一个 `information_schema.COLUMNS` 守卫 + `PREPARE`/`EXECUTE`（照 ⑬ 先例，**不写循环**）。
+⚠️ **块 5 可视化段已给 11 张表加过 `Source`**（本文件 §13.6），块 6 六表当时**漏加** ⇒ 本段是**补齐**；补齐后全库 **17 张表**有 `Source`（11 + 6；`goods_sku` / `seckill_activity` **不在**其中，见 §17.2）
+⚠️ **六列 `COMMENT` 比块 5 那 11 张多一段 `attack=`**（`.sql:1709` 逐字记了这条）：那批加列时**还没有攻击模拟器**，只写了 `seed=` 与空值两支；本块多出 `attack=攻击模拟器写入` 这一支。**这是刻意的不一致**（新语义必须能表达），不是抄漏；`varchar(16)` 宽度、默认值、守卫形态**都不变**。
+
+### 17.4 `order.StockDeducted`（⑱-1，`.sql:1824-1830`） {#db-17-4}
+
+| 列 | 类型 / 约束 | 可空 | 默认 | 语义（列注释逐字） |
+|---|---|---|---|---|
+| `StockDeducted` | `tinyint(1)` | NO | `0` | 本单库存**真扣成过**（块 7 commit 2d）：1 = 下单时 CAS 命中并动了 `goods_sku.Stock` / 0 = 没动过（库存不足、非矩阵商品无 sku 行、或 2d 之前的存量单）；超时释放**只有 = 1 才回补** |
+
+⚠️ **为什么需要它**（`.sql:1806-1810` 逐字）：块 7 commit 1 起「下单即扣」，但 **0 行不挡单**（库存不足 / 非矩阵商品没有 `goods_sku` 行）⇒ **单落库 ≠ 库存被动过**。超时取消若无条件回补，就会给「当初一行也没扣成」的单**凭空补出一份库存**。
+⚠️ **刻意不回填**（用户 2026-10-14 明批）：2d 之前落的单大多数确实**没走过**「下单即扣」，无从回判 ⇒ 一律不回补（偏账方向选「少还一件」，不是「凭空补一件」）。
+⚠️ **精度到「单」不到「行」**：混合单（一行真扣成、一行当时库存不足）只要有一行扣成过就**整单**回补。根治要把标记下沉到 `order_item` 粒度（新列 + 新契约）—— **本块不做**。
+⚠️ **写入 / 读取点**：写 = `OrderService.markStockDeducted`（落库后一句幂等 UPDATE，`WHERE OrderId=? AND StockDeducted=0`）；读 = `OrderDao.selectStockDeducted`（查无此行回落 0）；**唯一读判据点** = `OrderTimeoutCancelJob.releaseStock`（`== 1` 才回补，读失败 **fail-closed** + WARN）。
+
+### 17.5 段 ⑰ / ⑱ 对基线的净变化 {#db-17-5}
+
+| 基线 | ⑰ 之后 | ⑱ 之后（= 本附录终点） | 判据档位 |
+|---|---|---|---|
+| 表数 | **36 → 37**（+1：`drill_record`） | **仍 37**（只加列） | 可复核（VM 库 `information_schema.TABLES` 实测 = **37**，2026-10-13） |
+| 加列 | **+8**（2 个演示基线列 + 6 个 `Source`） | **+1**（`order.StockDeducted`）⇒ 两段合计 **+9** | 可复核（`.sql:1735-1797` 八个守卫 + `:1824-1830` 一个守卫，逐条可数） |
+| 索引 | 非主键 **68 → 69**（+1：`drill_record.idx_drill_created`，**非 UNIQUE**） | **仍 69**（加列不加索引） | 可复核（VM 库 `information_schema`，口径 = `COUNT(DISTINCT 表.索引名)` 且 `INDEX_NAME <> 'PRIMARY'`） |
+| 非主键 UNIQUE | **19（不变）** | **19（不变）** | 可复核（同上口径） |
+| A3 P3 门禁 | `KNOWN_TABLES` **25 → 26**、期望表数 **36 → 37**（**四处同改**，见 `db-migration.md` 注意 21） | **一处不改**（与 ⑰ 方向相反，见注意 22） | 可复核（`ConcurrencyRunner.java`） |
+| 行首 `CREATE TABLE` | **36 → 37** | **仍 37** | ⚠️ **这是 ⑰/⑱ 的中间态** —— §16 已把「块 7 三段合计」记成 **40**（⑲ 又 +1 表），两处**别互相减** |
+
+⚠️ **落库证据（第一手复核）**：⑰ 于 **2026-10-13** 落 VM 库（**33/33 语句 OK**、复跑 **33/33 OK** 无 1060）、⑱ 与 ⑲ 于 **2026-10-14** 由同一次 `ApplyMigration`（marker `库存治理补完`，**21 条语句**）落库（**21/21 OK**、复跑 21/21 OK）—— 逐条见 `db-migration.md` 注意 21 / 22 / 23，原文落在 `_work/b7c8b-verify.txt`。⑱ 落地时的只读复核顺带确认 `order.StockDeducted` = `tinyint(1)` / NOT NULL / DEFAULT 0。
+⚠️ **回滚**：`drill_record` 是新表 ⇒ 按注意 6 = 「**保留表 + 停止写入**」（`DROP TABLE` 只在本地库重建时用）；8 个加列按注意 1 = **逻辑废弃**（保留列 + 停用写入，**不得** `DROP COLUMN`）；两个基线列的合规「废用」动作恰是 `UPDATE … SET BaselineStock = NULL`（它本来就是 NULL 语义）。段头 `:1711-1714` / `:1818-1821` 的 `ROLLBACK` 注释逐条写了这些语句并标注「**执行前须人工确认**」。
+⚠️ **`drill_record` 刻意不进文件头（`:21` 起）的 `DROP TABLE IF EXISTS` 基线清单**（同 `cart` / `order_item` / `stats_daily` / `observed_event`：它是**业务数据**不是种子）⇒ **整份重导不清空演练记录**；表结构变更必须写独立 Migration。
 

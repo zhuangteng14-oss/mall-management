@@ -2277,10 +2277,10 @@ DB 级唯一锁探针 `ProbeB6c7Lock` = **PASS 12 / FAIL 0**；接口级 8 条�
 前端 `build` = `DONE`（`Hash 8d3685921932c375`、`Time 94680ms`、exit 0，**① 甲案之后**重跑）、`npx eslint src` = **exit 0**（同轮重跑）；
 探针 `probe-b6c3-mention.py` = **EXIT 0**（A1–A4 / B1 全绿、B2 与段 N 全 0）。
 
-### 7-B7. C3 块 7〈可观测域 4 项 + 库存治理 2 项〉（2026-10-13/14；**开段：本小节由 commit 8b 登记，前 16 笔的子节归 commit 9 收口**）
+### 7-B7. C3 块 7〈可观测域 4 项 + 库存治理 2 项〉（2026-10-13/14；**收口条：前 20 笔逐笔登记见本节末尾，本小节由 commit 8b 开段、commit 9 收口**）
 
 > 分支 `feat/c3-admin-block7`（切自 **`c2efb81`** = PR #91 合并点，即块 6 收口之后）。块内已提交 **16 笔**（`195edc9` pack + `b1ffc6e` commit 0 … `b773bf3` commit 8），本笔（**commit 8b**）是**第 17 笔**。
-> ⚠️ **本小节是「开段」，不是收口条**：块 7 的范围 / 建表 / 后端 / 前端 / 门禁 / DoD / 挂账**总表归 commit 9**；本笔只把 commit 8b 这一笔的面记下来（同 `slot-registry.md §二十四` 的开段口径）。
+> ⚠️ ~~**本小节是「开段」，不是收口条**：块 7 的范围 / 建表 / 后端 / 前端 / 门禁 / DoD / 挂账**总表归 commit 9**；本笔只把 commit 8b 这一笔的面记下来~~ ⇒ **已兑现**：本小节由 **commit 8b 开段**、**commit 9 收口**（下面「8b 那一笔的面」保留原文，收口总表 + 前 20 笔逐笔登记接在本小节末尾）。
 > ⚠️ 块 7 已入库的三份收笔报告在 `docs/agent/archive/`：〈2c+2d 与新发展两项〉·〈commit 4 攻击引擎〉·〈边界补笔 `order.Source` 写入通道〉（**本笔的「未跟踪残留归置」一笔入库**，见下）。
 
 **本笔 = commit 8b〈事件台账 + 清理〉**（2026-10-14，用户批文《commit 8 已核 —— 通过。开工 commit 8b》）⇒ 主体三件（**新表 + 清理 job + 清场端点**）+ 四项收尾（修 `DrillTargetDao` 的 `u.id` / 补 `TraceLog` 单测 / 未跟踪残留归置 / `db-migration.md` 的「⏳ 待落库」改口）。
@@ -2312,3 +2312,50 @@ DB 级唯一锁探针 `ProbeB6c7Lock` = **PASS 12 / FAIL 0**；接口级 8 条�
 ⚠️ **一处命名假设更正**：`api-contract.md` **没有「附录 H」**（其附录**到 G 为止** = 块 6 的内容域）⇒ `db-migration.md` 注意 21 那句是**前瞻指针**；块 7 的端点契约（可观测域 **7** 条）**本笔不新建**，归 **commit 9**。
 
 **未跟踪残留（另起一笔 chore，不混进 8b 的功能改动）** ⇒ 入库 `docs/agent/archive/` 三份 txt + `scripts/probes/probe-b7c5-attack-console.mjs` 与它的 `out-b7c5-attack-console.png`（探针是资产，照 commit 3–8 惯例入库）。
+
+#### 7-B7-收口　块 7 总表（**commit 9**，2026-10-14；**本小节至此由「开段」转「收口」**）
+
+**范围（批文一，原样 6 项）** ⇒ 可观测域 4 项：**① 攻击模拟器 · ② 指标面板 · ③ 状态流转 · ④ 实时日志**；库存治理 2 项：**⑤ 库存扣成标记（CAS + 下单即扣 + 超时释放）· ⑥ 事件出口（MQ 发布/消费 + 批次跨线程透传）**。批外补笔 4 处（`order.Source` 写入通道 · 边界补笔 · 通知号域 · 演示种子）。
+
+**提交切分（块内 **20 笔**，`git log --reverse c2efb81..HEAD` 实测；**commit 9 = 第 21 笔**）**
+
+| # | 短哈希 | 时点 | 一笔是什么 |
+|---|---|---|---|
+| 1 | `195edc9` | 10-13 21:52 | pack（可观测域 4 项 + 库存治理 2 项）+ 方案原文入库 |
+| 2 | `b1ffc6e` | 10-13 22:16 | **commit 0** 建表 `drill_record` + 演示基线列 2 + 块 6 六表补 `Source`（Migration ⑰）+ P3 门禁 25→26 / 36→37 |
+| 3 | `b1477cc` | 10-13 22:34 | **commit 1** 库存治理 —— CAS 扣减 + 下单即扣 + 超时释放（TD-36 / TD-38） |
+| 4 | `46cf986` | 10-13 22:42 | **commit 2** 五套新事件环（Stock / Audit / Notify / Sensitive / Identity） |
+| 5 | `ede4493` | 10-13 23:10 | **commit 3** 三条 SSE 观测端点 + 事件广播器（`StreamingResponseBody` / 1s 一拍 / 512 槽） |
+| 6 | `a1d2a9c` | 10-13 23:39 | **commit 2b** 四环改真观测点（审计/通知/敏感词/身份各在原写入点补发事件） |
+| 7 | `5c823eb` | 10-14 00:07 | **commit 4** 攻击引擎 —— 八场景真压测 + 演练记录落库 + 三条端点 + 前端薄封装 |
+| 8 | `96232eb` | 10-14 00:42 | **commit 2c+2d** 秒杀扣减接线（TD-38 兑现）+ 超时释放条件化（库存偏账根治） |
+| 9 | `b201437` | 10-14 01:03 | **① 评论写入链路补齐 `Source` + ② 超时取消 job 跳过演练带标记的行** |
+| 10 | `776306a` | 10-14 01:19 | 边界补笔 —— `order.Source` 写入通道（`/order/orderAdd` 可选 `Source` + 攻击引擎下单带 `attack`） |
+| 11 | `2181d07` | 10-14 13:14 | **commit 5** 攻击模拟器页 —— 八场景一键 + 权重编排 + 演练记录 |
+| 12 | `5b971f1` | 10-14 13:34 | **commit 5b** 断循环依赖 —— `ObserveMetricsConfig` 的 `MeterFilter` 改 `static`（一个词，环自断） |
+| 13 | `20df0a8` | 10-14 16:52 | **commit 6** 指标面板 + `Pager.vue` —— 7 项图表（`HeatmapChart` 首次启用） |
+| 14 | `b6619c5` | 10-14 17:21 | **commit 6b** 后端 traceId —— `TraceIdFilter` + logback 轮转 + 慢 SQL 告警（datasource-proxy） |
+| 15 | `033d62a` | 10-14 17:46 | **commit 7** 状态流转页 `OrderFlow.vue` —— 5 图（五态计数 + 环图 + 进度条列表 + 状态机 + 时间线） |
+| 16 | `b773bf3` | 10-14 18:39 | **commit 8** 实时日志页 `EventLog.vue` —— 8 类事件卡片流 + traceId 链路抽屉 |
+| 17 | `358c00d` | 10-14 19:31 | **chore** 归置未跟踪残留（三份收笔报告入库 + 攻击模拟器探针 mjs + png） |
+| 18 | `b1215f3` | 10-14 19:32 | **commit 8b** 事件台账 + 清理 —— `observed_event` 建表 + 保留期 job + 清场端点（Migration ⑲） |
+| 19 | `136b27c` | 10-14 19:55 | **commit 8b2** 指标 P99 剔除 SSE 长连接 + 无样本留空（P99 26.8 秒的误红） |
+| 20 | `2047f41` | 10-14 22:38 | **commit 8c** 事件出口 —— MQ 发布/消费 + 批次跨线程透传 + MQ 缺席上屏接通 |
+| **21** | （**本笔**） | 10-14 | **commit 9 · 收口** —— 文档统一补 + 中文标签层 + 清场按钮 + 演示种子 + 手验清单 |
+
+⚠️ **早先那版「16 笔 / 本笔是第 17 笔」的记账漏了两笔**（`358c00d` chore 与 `136b27c` 8b2）—— 它们各自是独立提交，**计入块内笔数**；更正后 = **20 笔**。
+
+**库变更汇总（Migration ⑰ ⑱ ⑲ 三段，全落 VM 库）** ⇒ 表数 **36 → 38**（+`drill_record` +`observed_event`）· 行首 `CREATE TABLE` **37 → 40** · 非主键索引 **69 → 73** · 非主键 UNIQUE **19 不变** · 加列：⑰ 六表 `Source` + 两表演示基线列（`goods_sku.BaselineStock` / `seckill_activity.BaselineSoldStock`）+ ⑱ `order.StockDeducted` + ⑲ 四表 `BatchId` —— 全库**有 `Source` 的表 = 17 张**（`goods_sku` / `seckill_activity` **不在**其中）。逐项见 `db-schema.md §16`（commit 8b 登）与 **§17**（commit 9 补登 ⑰ / ⑱）+ `db-migration.md` 登记 **#39 / #40**。
+
+**后端汇总** ⇒ `observe` 包 **14 类 / 86 例**（commit 8b 时点）· 新增端点 **7** 条（攻击 4 + SSE 3）· `AuditActions` **44 → 45** · `@Scheduled` **6 → 7** 处（总闸仍挂在别人的类上，a3 下整台不醒）· `TraceIdFilter` 新增（`X-Trace-Id` / `X-Drill-Batch` 双头 + MDC 双键）· RabbitMQ 发布/消费（`ObservedEventConsumer`，含 5 分钟周期 WARN）。
+**前端汇总** ⇒ 新增页面 4（`AttackConsole` / `MetricsPanel` / `OrderFlow` / `EventLog`）· 新增通用件 2（`Pager.vue` / `HeatmapChart` 首次启用）· `endpoints.js` **133 → 140**（头注同数）· `api/observe.js` **7 条** · **中文标签层 5 文件**（`src/config/labels/`，commit 9 建）。
+
+**A3 门禁** ⇒ P3 一次 +1：IN 清单加 `'observed_event'` · `KNOWN_TABLES` **26 → 27** · 期望表数 **37 → 38**（同一笔四处同改）。⚠️ `concurrency` job 是 `continue-on-error` ⇒ **只能读 artifact 的 `gates.count`，不能读 job 颜色**（同 §7-B6 教训）。
+
+🧪 **DoD（commit 9 实测，2026-10-14T23:17:19+08:00）** ⇒ 后端 `./mvnw -B -o **clean** test` = `Tests run: **471**, Failures: 0, Errors: 0, Skipped: 26` + `BUILD SUCCESS`（`44.189 s`，日志 `_work/b7c9-mvn-test.log:5126` / `:5129` / `:5131`）。⚠️ **471 与 commit 8c 同数**（commit 9 不含后端代码改动）。前端 `npm run lint` = **`DONE No lint errors found!` / exit 0**（`_work/b7c9-npm-lint.log`）+ `npm run build` = **`DONE Build complete.` / exit 0**（Hash `2790b6a641b00e77`、`25872ms`，`_work/b7c9-npm-build.log`）。`clean` **不能省**（增量编译复用陈旧 test class）。
+
+⚠️ **零漂移（commit 9 逐文件核过）** ⇒ 详见 `slot-registry.md` **24-9**（中段插入仅 `db-migration.md` 表格 +1 行且该文件入向引用 = 0 · 其余全为尾追加 + 同行替换 · `slot-registry.md` 自身入向引用全指向 `:4192` 之前）。**refs-scan before/after 逐条核对**的结论同表。
+
+**块 7 挂账** ⇒ 逐条见 `tech-debt.md`（commit 9 补登 §块 7 段）：**TD-51**（`AbstractSmokeTest.java` 既有误指族）· **TD-54**（未应用的族）· **TD-58**（计时敏感用例）等；另 `TD-18`（SSE 无角色闸）与本块同源。⚠️ **台账落库边界**（`EventBroadcaster.poll()` 由 **SSE 流线程**驱动 ⇒ **没人开实时日志页就不落库**）不是缺陷、是设计，已写进 `api-contract.md` 附录 H.7。
+
+⚠️ **本笔不 push / 不 merge** —— 块 7 **全部手验通过**后由用户决定（批文明确）。手验清单另见桌面 `块7-commit9-收口-报告.txt`（三列式：操作步骤 → 期望 → 判据）。

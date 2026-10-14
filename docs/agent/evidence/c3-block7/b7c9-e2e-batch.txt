@@ -1,0 +1,55 @@
+b7 commit 9 (块 7 收口) · 9.6 手验第一项 —— 跨线程透传端到端（8c 判据① 补齐）
+时间：2026-10-14 23:06 ~ 23:09 · 后端 dev profile :8088（PID 164448）· VM 库 192.168.229.129
+链路：AttackEngine(请求线程) → bind 到 drill-* 线程 → 出站头 X-Drill-Batch → TraceIdFilter 入 MDC
+      → 八环记录点读 MDC → observed_event.BatchId（MQ 发 / 消费端批写）
+
+== 前置（必须先知道，否则会把 [A] 读成「坏了」）：台账落库由「有人读事件流」驱动 ==
+   EventBroadcaster.poll() 由 SSE 流线程每秒驱动（类注释「已知边界」）：没人读流 ⇒ 合并环不动 ⇒
+   事件**不发布**、台账不落库。它不是「无人值守的全量审计流水」，是「观看时的过程记录」。
+
+== [A] 第一轮 b7c9-e2e（23:06，**没开流**就跑）：
+   A-1 跑完当场查台账 = 0 行（这就是边界的现场）
+   A-2 23:08 开了流之后再查同一批次 = 2140 行，且**时间戳落在演练窗口内**（23:06:51–59）
+   ⇒ 结论：0 行 ≠ 透传丢了（批次号正确、行数非零、时间对得上），只是**落库滞后到有人读流**。
+Id	Name	BatchId	TotalRequests	BlockedRequests
+4	b7c9-e2e	99d2637a-aa5f-48ae-a127-9c97057c9c24	1572	669
+-- rows: 1
+Rows_	Batches	Traces	Kinds	T0	T1
+2140	1	1096	5	2026-10-14 23:06:51.719	2026-10-14 23:06:59.530
+-- rows: 1
+
+== [B] 第二轮 b7c9-e2e2（23:08，**先开 events/stream 再跑**）：判据① 核心 ==
+Id	Name	BatchId	TotalRequests	BlockedRequests
+5	b7c9-e2e2	102973f7-b9ac-4f52-8940-bb9d27c30018	1194	508
+-- rows: 1
+-- 批次数必须 = 1（一个不漏、也不混入别的批次）；traceId 数 > 1（每条子请求各一个号 ⇒ 批次≠链路）：
+Rows_	Batches	Traces	Kinds	T0	T1
+3697	1	1194	5	2026-10-14 23:08:33.366	2026-10-14 23:08:41.378
+-- rows: 1
+Kind	N
+identity	1194
+lock	976
+order	643
+stock	488
+sensitive	396
+-- rows: 5
+-- identity 环打到的业务路径（应是演练真打的端点；**不含** /admin/observe/attack/run）：
+ObjectId	N
+/order/orderAdd	798
+/comment/add	396
+-- rows: 2
+
+== [C] 反证面：BatchId IS NULL 的行 = 非请求上下文（定时任务等）产生的日常事件 —— 正常值，不是漏传 ==
+Kind	N	T0	T1
+stock	420	2026-10-14 23:08:03.024	2026-10-14 23:08:07.355
+-- rows: 1
+Total	NullBatch
+12365	420
+-- rows: 1
+
+== [D] 复现命令（判据① 的三步）==
+  1) curl -N -m 30 -X POST http://localhost:8088/admin/observe/events/stream   # 先开着
+  2) curl -X POST http://localhost:8088/admin/observe/attack/run \
+       --data-urlencode 'name=任何名' --data-urlencode 'concurrency=4' --data-urlencode 'durationSeconds=8' \
+       --data-urlencode 'scenarios=[{"key":"orderBurst","weight":50},{"key":"seckill","weight":30},{"key":"sensitiveWord","weight":20}]'
+  3) 查 SELECT COUNT(*), COUNT(DISTINCT BatchId) FROM observed_event WHERE BatchId=<上一步 drill_record 那行>

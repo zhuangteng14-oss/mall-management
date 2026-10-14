@@ -1,17 +1,17 @@
-// src/config/observe-labels.js —— 可观测域的**中文标签层**（C3 块 7 · commit 8，2026-10-14）。
+// src/config/labels/observe-labels.js —— 可观测域的**中文标签层**（commit 8 起头，commit 9 收口）。
 //
-// ⚠️ 【本笔只**起个头**，不是收敛完成】用户 2026-10-14 批文：commit 8 的实时日志页
-//    「本页先硬编码（同 commit 7），commit 9 统一收敛到 `observe-labels.js` —— 但本笔要给
-//    `observe-labels.js` 起个头（至少本页用到的键先登记）」。⇒ 本文件今天**只登记 `EventLog.vue`
-//    用到的那些键**；`MetricsPanel.vue` / `OrderFlow.vue` / `AttackConsole.vue` 里那几份硬编码
-//    中文（指标名、五态名、场景名）**还没搬进来**，那是 commit 9 的活。
-//    ⇒ 判据：**今天出现两个中文来源是预期的，不是漏搬**；commit 9 收敛后本注释要一并改掉。
+// ⚠️ 【commit 8 只**起个头**，commit 9 才收敛完】commit 8 的批文只要求「至少把 `EventLog.vue`
+//    用到的键先登记」；commit 9 批文把 `MetricsPanel` / `OrderFlow` / `AttackConsole` 里那几份
+//    硬编码中文（指标名、五态名、场景名）一并搬进来 ⇒ **本文件现已是可观测域唯一的中文来源**。
+//    判据：那四页里不该再出现「裸露的中文标签字面量表」—— 表只能有一份，就在本文件。
+//    ⚠️ 收敛搬的是**表**，不是数据：页面渲染的仍是后端帧里那个 tag，本文件只把 tag 翻成人话。
 //
-// ⚠️ 【为什么落在 `src/config/`】与 `notify-events.js` / `goods-flags.js` 同层：本仓把
-//    「**code → 中文**」这类表放 `src/config/`（而非 `views/` 下），因为它是**多个页共用的**只读表
-//    —— commit 9 收敛时 `MetricsPanel` / `OrderFlow` 要从这里取，跨 `views/*` 子目录引
-//    `views/admin/observe/x.js` 会读成「某个页的私有件」。与 `notify-events.js` 一样，
-//    **每张表都必须有兜底**（理由见下面每条）。
+// ⚠️ 【为什么落在 `src/config/labels/`】与 `notify-events.js` / `goods-flags.js` 同域：本仓把
+//    「**code → 中文**」这类表放 `src/config/` 下（而非 `views/` 里），因为它是**多个页共用的**只读表
+//    —— 跨 `views/*` 子目录引 `views/admin/observe/x.js` 会读成「某个页的私有件」。commit 9 立起
+//    `labels/` 子目录：审计 / 订单 / 举报 / 用户各有自己的表，本文件管**可观测域**。与
+//    `notify-events.js` 一样，**每张表都必须有兜底**：新增一类事件 / 一个新场景时，后端常量表
+//    与这里**各自独立改**，漏跟的一方只会让页面显示一个看得见的英文 tag —— 而不是一条空白。
 
 /**
  * 8 类事件的**声明序**（tag）。⚠️ 与后端 `EventBroadcaster.Kind` 的枚举声明序**逐字对齐**
@@ -147,9 +147,9 @@ export const SEVERITIES = ['info', 'warn', 'error']
  *    `identity` 取**被校验的请求路径**（同上新补）。
  *    ⇒ 同一格在这八类里指的**不是同一种东西**，所以说明词必须逐类给，不能统一写「对象」。
  *
- * ⚠️ 这一格的值**照原文上屏**（中文词、请求路径、业务号…），**不做翻译**：
- *    `objectType` 那一列（`goods` / `comment` / `order` …，取值面 = `AuditActions` 的 44 条 tag
- *    的域前缀）的**中文表不在本笔**（属 commit 9 的收敛范围），故页面上它只以等宽小字出现。
+ * ⚠️ 这一格的值**照原文上屏**（中文词、请求路径、业务号…），**不做翻译** —— 唯一的例外是
+ *    `objectType`：它是 `AuditActions` 的 **45 条** tag 的域前缀（`goods` / `comment_image` …），
+ *    commit 9 起由 `labels/audit-labels.js` 的 `targetTypeLabel` 翻成中文（见其 `TARGET_TYPE_LABEL`）。
  */
 export const OBJECT_FIELD_LABEL = {
   cache: '键',
@@ -194,4 +194,59 @@ export function severityLabel(tag) {
 /** 取严重度色（认不出回落中性灰）。 */
 export function severityColor(tag) {
   return Object.prototype.hasOwnProperty.call(SEVERITY_COLOR, tag) ? SEVERITY_COLOR[tag] : FALLBACK_COLOR
+}
+
+/**
+ * 攻击演练的 **8 个场景** key → 中文名（commit 9 从 `AttackConsole.vue` 的场景读数搬入）。
+ *
+ * ⚠️ 【为什么这里还需要一张 key→中文的表，后端不是已经返回 `Name` 了吗】
+ *    因为**记录里存的是 key、不是 `Name`**：`drill_record.Result` 里存下来的勾选清单与分场景读数
+ *    （页面上的 `x.k` / `p.Key`）带的都是 key ⇒ 回看一条老记录时，`Name` 已经不在手上。
+ *
+ * ⚠️ 取值**逐字抄自后端** `observe/service/AttackEngine.java` 的 `SCENARIOS`（那个 `List<ScenarioSpec>`
+ *    是唯一出处，连 `/attack/scenarios` 端点返回的 `Name` 也从它来）。本表是它的镜像。
+ *
+ * ⚠️ 认不出回落 **key 原文**（同 `KIND_LABEL` 的兜底口径）：后端加第 9 个场景而这里没跟，
+ *    页面应当显示一个看得见的英文 key，不是空白。
+ */
+export const SCENARIO_LABEL = {
+  seckill: '秒杀抢购',
+  orderBurst: '订单并发',
+  repeatSubmit: '重复提交',
+  unpaidTimeout: '超时不付款',
+  cacheCold: '缓存冷启',
+  redisDown: 'Redis 断开',
+  bannedUser: '封禁用户攻击',
+  sensitiveWord: '敏感词攻击',
+}
+
+/**
+ * 订单状态流转页（`OrderFlow.vue`）的**五态** key → 中文（commit 9 从该页搬入）。
+ *
+ * ⚠️ 键名与后端 `OrderStreamService` 帧里的 `counts` / `state` **逐字相同**。它们**不是**
+ *    `OrderState` 的枚举名，是后端为**这一页**另起的一套 key（`CREATED` → `waitPay`）
+ *    ⇒ 别拿 `labels/order-labels.js` 的 `ORDER_STATE_LABEL` 来替代本表（两者是两套坐标，
+ *    见那个文件块首的 📌）。
+ *
+ * ⚠️ **展示顺序**（计数卡 / 环图）不在本文件：那是那一页的版面问题，留在页面的 `STATES` 数组里。
+ *    本文件只管「key 该翻成什么」这一件事。
+ */
+export const ORDER_FLOW_STATE_LABEL = {
+  waitPay: '待付款',
+  waitShip: '待发货',
+  waitReceive: '待收货',
+  completed: '已完成',
+  cancelled: '已取消',
+}
+
+/** 取场景中文名（认不出回落 key 原文）。 */
+export function scenarioLabel(key) {
+  return Object.prototype.hasOwnProperty.call(SCENARIO_LABEL, key) ? SCENARIO_LABEL[key] : String(key == null ? '' : key)
+}
+
+/** 取五态中文名（认不出回落 key 原文）。 */
+export function orderFlowStateLabel(key) {
+  return Object.prototype.hasOwnProperty.call(ORDER_FLOW_STATE_LABEL, key)
+    ? ORDER_FLOW_STATE_LABEL[key]
+    : String(key == null ? '' : key)
 }

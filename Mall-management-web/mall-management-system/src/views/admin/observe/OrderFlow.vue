@@ -98,7 +98,7 @@
           @keydown.enter.prevent="openTimeline(r.orderId)"
           @keydown.space.prevent="openTimeline(r.orderId)"
         >
-          <span class="a-of-id">{{ r.orderId }}</span>
+          <span class="a-of-id">#{{ r.orderId }}</span>
 
           <!-- 4 节点进度条：`step` 由后端算好（0–4）⇒ 前端不重推一遍状态链（两处判据已经够多了）。 -->
           <span class="a-of-track" :class="{ 'is-dead': r.cancelled }" aria-hidden="true">
@@ -192,7 +192,7 @@
     <div v-if="openedId" class="a-of-modal" @click.self="closeTimeline">
       <div class="a-of-modal-box" role="dialog" aria-modal="true" :aria-label="'订单 ' + openedId + ' 的时间线'">
         <header class="a-of-modal-hd">
-          <b class="a-of-id">{{ openedId }}</b>
+          <b class="a-of-id">#{{ openedId }}</b>
           <span v-if="openedRow" class="a-of-st" :class="'is-' + openedRow.state">{{ stateLabel(openedRow.state) }}</span>
           <button type="button" class="a-btn a-of-close" @click="closeTimeline">关闭</button>
         </header>
@@ -243,9 +243,9 @@
   ⚠️ **页面卸载必须 `close()`**（`onBeforeUnmount`）：SSE 的 `StreamingResponseBody` 在服务端占
      **一条异步线程**，不断开就是一条常驻线程 —— 与 `MetricsPanel.vue` 同一条代价。
 
-  ⚠️ **中文标签是硬编码的**（`STATES` / `STATE_LABEL`）：块 7 的中文标签层 `observe-labels.js`
-     属 commit 8/9，此刻仓里**没有这个文件**（已核）。按批文「若 commit 8 还没做，本页先硬编码，
-     commit 9 统一收敛」⇒ 这里就是那个待收敛的临时点。文案照 `UserInfoPage.vue:62` 用户逐字指定的
+  ⚠️ **中文标签 commit 9 已收敛**（原 `STATES` 里那 5 个中文串 → `config/labels/observe-labels.js`
+     的 `ORDER_FLOW_STATE_LABEL`）：本页只留 key 的**展示顺序**（那是版面问题，仍留在 `STATES` 里），
+     中文一律从那一张表取 ⇒ 本页不该再出现第二份五态中文。文案仍是 `UserInfoPage.vue:62` 用户逐字指定的
      「待付款 / 待发货 / 待收货 / 已完成」+ 后端第五态「已取消」。
 -->
 
@@ -257,6 +257,7 @@ import KpiCard from '../../../components/ui/KpiCard.vue'
 import DonutChart from '../../../components/charts/DonutChart.vue'
 import Pager from '../../../components/Pager.vue'
 import { chartTokens } from '../../../components/charts/chartTokens'
+import { orderFlowStateLabel } from '../../../config/labels/observe-labels'
 
 /** 后端每拍推的「最近订单」条数（`OrderStreamService.RECENT_LIMIT`）。本页只用来写说明。 */
 const RECENT_LIMIT = 20
@@ -271,11 +272,11 @@ const TWEEN_MS = 300
 
 /** 五态（顺序 = 上方计数卡与环图的显示顺序）。键名与后端 `counts` / `state` 逐字相同。 */
 const STATES = [
-  { key: 'waitPay', label: '待付款' },
-  { key: 'waitShip', label: '待发货' },
-  { key: 'waitReceive', label: '待收货' },
-  { key: 'completed', label: '已完成' },
-  { key: 'cancelled', label: '已取消' },
+  { key: 'waitPay', label: orderFlowStateLabel('waitPay') },
+  { key: 'waitShip', label: orderFlowStateLabel('waitShip') },
+  { key: 'waitReceive', label: orderFlowStateLabel('waitReceive') },
+  { key: 'completed', label: orderFlowStateLabel('completed') },
+  { key: 'cancelled', label: orderFlowStateLabel('cancelled') },
 ]
 const STATE_LABEL = Object.fromEntries(STATES.map((s) => [s.key, s.label]))
 

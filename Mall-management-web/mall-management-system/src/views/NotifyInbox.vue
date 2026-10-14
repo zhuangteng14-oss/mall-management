@@ -101,7 +101,7 @@ import { handleApiError } from '../api/http'
 import { getMerchantId, getCustomerId, isLoggedIn } from '../api/auth'; import IconGlyph from '../components/ui/IconGlyph.vue'   // ⚠️ 两条 import **同行**（2026-10-11 补图标那一笔）—— 合并到既有行 = 不新增行号漂移
 import { notifyList, notifyRead, notifyReadAll } from '../api/notify'
 import { subsidyConfirm, seckillRespond } from '../api/marketing'
-import { eventLabel, isKnownEvent } from '../config/notify-events'
+import { eventLabel, isKnownEvent } from '../config/notify-events'; import { targetTypeLabel } from '../config/labels/audit-labels'   // ⚠️ 两条 import **同行**（commit 9 标签层那一笔）—— 本文件被多处引 `:99-103`/`:134-135`/`:248`/`:385`/`:563`，合并到既有行 = 不新增行号漂移
 
 /** 国补邀请的事件 code —— 与后端 `NotificationEvents.SUBSIDY_NOMINATED` **逐字一致**。 */
 const EVENT_SUBSIDY_NOMINATED = 'subsidy.nominated'
@@ -179,7 +179,7 @@ function resolveTarget(row) {
     //    然后被当成解析器调用（同 `config/notify-events.js:13-16` 那条，同一个坑）。
     const has = Object.prototype.hasOwnProperty.call(TARGET_RESOLVERS, type)
     if (!has || typeof TARGET_RESOLVERS[type] !== 'function') {
-      return { kind: 'raw', text: `关联：${isBlank(type) ? '?' : type} · ${isBlank(id) ? '?' : id}` }
+      return { kind: 'raw', text: `关联：${isBlank(type) ? '?' : targetTypeLabel(type)} · ${isBlank(id) ? '?' : '#' + id}` }
     }
     const hit = TARGET_RESOLVERS[type](id)
     if (!hit) return { kind: 'gone', text: '（相关对象已删除）' }

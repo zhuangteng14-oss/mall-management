@@ -19,6 +19,8 @@
 --         那次 rebuild 会先 deleteAll 再从 `order` 重算 ⇒ 手写进去的会被抹掉。
 --
 -- 【幂等】每次执行先按 `Source = 'seed'` **先子后父**删掉上一次的种子行，再整批插入。
+--   ⚠️ 唯一例外：`goods_sku`（⑤-b 段）**没有 `Source` 列** ⇒ 那一条按码前缀撤
+--      （`SkuCode LIKE 'SEED-%'`，见 ① 段）。
 --   存量数据（`Source = ''`）一行不删、一行不改 —— 唯一的例外是下面那段
 --   `login.CreateTime` 补值，它带 `WHERE CreateTime IS NULL` 守卫，同样可重复执行。
 --   撤种子：`DELETE FROM `order_item` WHERE Source='seed'` …（照本文件删除段的顺序即可）
@@ -49,7 +51,19 @@ SELECT CONCAT('seed 前置检查：Source 列 ', COUNT(*), '/11 张表就位') A
    AND TABLE_NAME IN ('login','user','goods','goods_audit','order','order_item','cart',
                       'notification','admin_audit','merchant_application','stats_daily');
 
+-- ---- ⓪-b 前置检查（块 7 攻击模拟器）：`goods_sku.BaselineStock` 列（期望 1/1）----
+-- ⚠️ 这一段**只是报个数**，缺列不会中止本文件（⑤-b 的 INSERT 不写那一列）—— 它缺的是
+--    `AttackEngine` 读演示基线那一步：那种情况下 `Result.Stock.Baseline` 恒为 null，
+--    秒杀场景的「演示前 / 演示后」两个读数仍在，只是**没有基线可比**。
+SELECT CONCAT('seed 前置检查：BaselineStock 列 ', COUNT(*), '/1 张表就位') AS `seed_precheck_baseline`
+  FROM information_schema.COLUMNS
+ WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'goods_sku' AND COLUMN_NAME = 'BaselineStock';
+
 -- ---- ① 清上一次的种子行（**先子后父**；存量行 Source='' 一律不动）----
+-- ⚠️ **唯一一条不走 `Source` 的删除**：`goods_sku` 没有那一列（Migration ⑰-2 只加了
+--    `BaselineStock`）⇒ 按**码前缀**撤。它必须排在 `goods` 之前 —— `GoodsId` 是软引用，
+--    父商品先没了就找不到该删哪些 SKU 了（反过来说：删完 SKU 再删商品，不留悬空行）。
+DELETE FROM `goods_sku`           WHERE `SkuCode` LIKE 'SEED-%';
 DELETE FROM `order_item`           WHERE `Source` = 'seed';
 DELETE FROM `order`                WHERE `Source` = 'seed';
 DELETE FROM `cart`                 WHERE `Source` = 'seed';
@@ -209,6 +223,25 @@ INSERT INTO `goods`
   ('u2DeIvRsrQ', '折叠登山杖 两支装', 189, 'https://picsum.photos/seed/GD-542-9A2A/400', '运动用品', 'GD-542-9A2A', 0, 1, 5, 'seed'),
   ('AjcbVDAVrA', '速干运动短裤 男款', 119, 'https://picsum.photos/seed/GD-543-DEE8/400', '运动用品', 'GD-543-DEE8', 0, 1, 5, 'seed'),
   ('u2DeIvRsrQ', '运动加压护膝 一对', 69, 'https://picsum.photos/seed/GD-544-08B2/400', '运动用品', 'GD-544-08B2', 0, 1, 5, 'seed');
+
+-- ---- ⑤-b `goods_sku`：4 件可演练 SKU（块 7 攻击模拟器「一键跑」的靶子）----
+-- 【为什么要有这一段】引擎开跑前从库里挑靶子（`DrillTargetDao.pickSku`），判据四条：
+--   `Stock > 0` · `SkuCode <> ''` · 父 `goods` 在架未删 · 商家未冻结。挑不到就抛 4xx
+--   （「库里挑不到可演练的商品：…演示种子数据导入了吗？」）⇒ 一台**新导的库**必须能供上。
+-- 【`GoodsId` 为什么用子查询】`goods.Id` 是自增、运行时才知道（同 ⑥ 的 `GoodsId` 手法）。
+-- 【为什么不写 `BaselineStock`】**它不是种子**，是「人工四步」的载体（`AttackEngine` 备注）：
+--   演示前 `UPDATE goods_sku SET BaselineStock = Stock WHERE SkuCode = '<靶子>';`
+--   演示后 `UPDATE goods_sku SET Stock = BaselineStock WHERE SkuCode = '<靶子>';`
+--   收尾   `UPDATE goods_sku SET BaselineStock = NULL WHERE SkuCode = '<靶子>';`
+--   库里 `NULL` = **未处于演示中** ⇒ 本段走列默认（NULL），别预置 —— 预置会让引擎把
+--   上一轮的基线当成这一轮的（`Result.Stock.Baseline` 变假读数）。
+-- 【`SEED-` 前缀的用途】`goods_sku` **没有** `Source` 列 ⇒ 撤这一段的种子按前缀（见 ① 段）：
+--   `DELETE FROM `goods_sku` WHERE `SkuCode` LIKE 'SEED-%';` —— 前缀是「来源标记」的替身。
+INSERT INTO `goods_sku` (`GoodsId`,`MerchantId`,`GoodName`,`AxisName`,`Price`,`Stock`,`SkuCode`,`Sort`) VALUES
+  ((SELECT `Id` FROM `goods` WHERE `ProductCode` = 'GD-101-9552' LIMIT 1), 'dRD3gqtbFr', '无线蓝牙耳机 声谷标准版', '默认规格', 299, 240, 'SEED-GD-101-9552', 0),
+  ((SELECT `Id` FROM `goods` WHERE `ProductCode` = 'GD-102-AF27' LIMIT 1), 'nlzzGB4vgV', '无线蓝牙耳机 声谷 Pro 降噪', '默认规格', 599, 180, 'SEED-GD-102-AF27', 0),
+  ((SELECT `Id` FROM `goods` WHERE `ProductCode` = 'GD-103-5196' LIMIT 1), 'yERU17koBc', '27 英寸 2K 显示器 锐视 S27', '默认规格', 1299, 120, 'SEED-GD-103-5196', 0),
+  ((SELECT `Id` FROM `goods` WHERE `ProductCode` = 'GD-104-7045' LIMIT 1), 'dRD3gqtbFr', '机械键盘 87 键 茶轴', '默认规格', 329, 60, 'SEED-GD-104-7045', 0);
 
 -- ---- ⑥ `goods_audit`：24 条提审，覆盖 pending / approved / rejected 三态 ----
 -- 通过的行 `GoodsId` 用标量子查询挂到**已经存在的**商品行上（自增 Id 运行时才知道）。
@@ -903,7 +936,9 @@ INSERT INTO `admin_audit` (`ActorId`,`ActorRole`,`Action`,`TargetType`,`TargetId
 -- 全量重算 ⇒ 看板的 GMV / 成单数 / 买家数与你刚灌的订单一一对应。
 
 -- ---- 自检（可选，跑完看一眼）----
+-- ⚠️ `goods_sku` 那一行按**码前缀**数（它没有 `Source` 列，见 ① 段与 ⑤-b 段）。
 SELECT 'login' AS `table`, COUNT(*) AS `seed_rows` FROM `login` WHERE `Source`='seed'
+UNION ALL SELECT 'goods_sku', COUNT(*) FROM `goods_sku` WHERE `SkuCode` LIKE 'SEED-%'
 UNION ALL SELECT 'user', COUNT(*) FROM `user` WHERE `Source`='seed'
 UNION ALL SELECT 'goods', COUNT(*) FROM `goods` WHERE `Source`='seed'
 UNION ALL SELECT 'goods_audit', COUNT(*) FROM `goods_audit` WHERE `Source`='seed'

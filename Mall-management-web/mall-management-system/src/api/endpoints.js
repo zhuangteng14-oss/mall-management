@@ -405,9 +405,9 @@ export const endpoints = {
     attackRun: '/admin/observe/attack/run',
     attackRecords: '/admin/observe/attack/records',
     // ⚠️ C3 块 7〈可观测域〉· commit 8b（清理，2026-10-14）：同一个 `AttackController` 的**第 4** 条。
-    //    **非** view 抽取 —— 仍是 `api/observe.js` 的调用方（同上那页；⚠️ **本笔只到
-    //    `api/observe.js#cleanupAttack` 这一层**，页面按钮不在本笔范围，别照着上面那条注释
-    //    以为页面上已经有它了）。
+    //    **非** view 抽取 —— 仍是 `api/observe.js` 的调用方（同上那页；commit 8b **只到
+    //    `api/observe.js#cleanupAttack` 这一层**，页面按钮是 commit 9 补的 —— 现已在
+    //    `AttackConsole.vue` 第 ⑤ 区，两段式确认）。
     //    ⚠️ **无入参**（后端方法不收任何 `@RequestParam`）：清什么由**后端**按标记判
     //       （`SIM-%` 前缀 OR `Source='attack'`，两种谓词缺一会漏 —— 见 `ObservedEventCleanupDao`
     //       类注释），**不是**让前端挑范围。调用方传空串即可，别臆造参数名。

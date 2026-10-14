@@ -212,8 +212,8 @@
       <p>· <b>事件是内存里的、有界且会被覆盖</b>：八个源环各留最近 512 条，合并环再留最近 512 条；本页自己留最近 {{ EVENT_CAP }} 条。⇒ 「窗口内」是本页能看到的全部，<b>不是历史总量</b>。</p>
       <p>· <b>首帧可能很大</b>：冷启动时八个环可能各自攒了一屏，首帧会把合并环留得下的最后 512 条一次送出（页面按 {{ EVENT_CAP }} 条封顶）。之后每拍只送真正新发生的（正常是个位数）。</p>
       <p>· <b>规则表在后端</b>：严重度那三档（info / warn / error）由后端 severityOf 一处判定，本页只负责把 tag 画成人话 —— 前端不重推一遍判据。</p>
-      <p>· <b>对象列八类不是同一种东西</b>：锁/缓存/通知取各自的键、订单取订单号、库存取 SKU、审计取 TargetType:TargetId、敏感词取<b>命中的词</b>、身份取<b>请求路径</b>（逐类口径见 config/observe-labels.js 的 OBJECT_FIELD_LABEL）。</p>
-      <p>· <b>本页的中文标签还是硬编码</b>：本笔只把本页要用的键登记进了 config/observe-labels.js（用户 2026-10-14 批文「起个头」）；MetricsPanel / OrderFlow / AttackConsole 那几份收敛属 commit 9。</p>
+      <p>· <b>对象列八类不是同一种东西</b>：锁/缓存/通知取各自的键、订单取订单号、库存取 SKU、审计取对象类型 + #Id、敏感词取<b>命中的词</b>、身份取<b>请求路径</b>（逐类口径见 config/labels/observe-labels.js 的 OBJECT_FIELD_LABEL）。</p>
+      <p>· <b>中文标签 commit 9 已全部收敛</b>：本页 + 指标 / 状态流转 / 攻击模拟器四页的中文表**只在** config/labels/ 下那一处（可观测域是本目录的 observe-labels.js）；页面只负责把后端帧里的 tag 画成人话，不重推任何判据。</p>
     </div>
   </section>
 </template>
@@ -250,7 +250,9 @@ import {
   kindLabel, kindColor, kindIcon,
   severityLabel, severityColor,
   objectFieldLabel,
-} from '../../../config/observe-labels'
+} from '../../../config/labels/observe-labels'
+// commit 9：审计那一类的 `objectType` 是英文域前缀（`goods` / `comment_image`…）⇒ 复用审计域那张表。
+import { targetTypeLabel } from '../../../config/labels/audit-labels'
 
 /** 本页自己累积的事件上限。⚠️ 必须有：SSE 每秒推若干条，不封顶跑一晚上就是几万条。 */
 const EVENT_CAP = 1000
@@ -323,14 +325,14 @@ function hmsms(v) {
 }
 
 /** 对象列那一格：`说明词：值`。八类的说明词不同（见 `observe-labels.js` 的 `OBJECT_FIELD_LABEL`）。
- *  ⚠️ `audit` 那一类把 `objectType` 也带上（`order:O-1`）—— 它那一格的「是什么」由类型说，
+ *  ⚠️ `audit` 那一类把 `objectType` 也带上（`商品:#20`）—— 它那一格的「是什么」由类型说，
  *  只有 `TargetId` 看不出动的是商品还是订单；其余七类的类型是**类名本身**（`sku` / `identity`…），
- *  再写一遍是重复。 */
+ *  再写一遍是重复。⚠️ commit 9 起 `objectType` 走 `targetTypeLabel()`（原先是英文域前缀直出）。 */
 function objText(ev) {
   const id = ev.objectId
   if (id === null || id === undefined || id === '') return ''
   const label = objectFieldLabel(ev.kind)
-  const type = ev.kind === 'audit' && ev.objectType ? `${ev.objectType}:` : ''
+  const type = ev.kind === 'audit' && ev.objectType ? `${targetTypeLabel(ev.objectType)}:#` : ''
   return `${label} ${type}${id}`
 }
 

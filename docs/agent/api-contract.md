@@ -731,3 +731,121 @@
 ⚠️ **本文件（`api-contract.md`）的正文 §2 / §3 / §5 矩阵**本笔**未重测、未插入** —— 14 条新端点全部落在附录 G；正文坐标重填归「文档漂移清理笔」（同附录 E.7 的口径）。
 ⚠️ **已知的既有陈旧（不属本笔，登记不修）**：§2 的 C.1 表里 `/order/orderAdd` → `ProductPage.vue:393`、`/message/send` → `ProductPage.vue:459` 两条**在块 6 之前就与实际调用点对不上**（**不修**），故本笔的自动重指**刻意跳过**它们（行内已留「旧行号 · 不修」标记，属重指脚本的 GUARD 触发词）。
 **实测真调用点（第一手，2026-10-13）**：`/order/orderAdd` = `ProductPage.vue:897`（`await orderAdd({`）、`/message/send` = `ProductPage.vue:1002`（`http.post(endpoints.message.send, …)`）—— 两值均已按 ① 甲案（`ProductPage.vue` −16 行）重指—— 正文坐标重填归「文档漂移清理笔」，台账见 `slot-registry.md` §二十三 的「已知误指族」。
+
+## 附录 H：C3 块 7〈可观测域〉契约增补（2026-10-13/14） {#api-app-h}
+
+> **块 7 = 一个新域（可观测域）+ 7 条端点**：`/admin/observe/attack/*` **4 条**（commit 4 前三条 + commit 8b 第四条 `cleanup`）+ **三条 SSE**（`/admin/observe/{metrics,orders,events}/stream`，commit 3）。**全部 `POST`**、全部**不加角色闸**、全部**不在 `AUTH_WHITELIST`**。
+> 逐条坐标 = 该方法的 `@PostMapping` 所在行（**本文件口径**，与 `db-schema.md#db-top` 相反）。
+> 实现落在**一个后端包** `observe/`（`controller` / `service` / `dao` / `metrics` / `mq` / `job` 六层）。
+> ⚠️ **与附录 C–G 的关键差别**：本域是**观测面** —— 它不改任何业务端点的入参 / 返回，对业务域的改动**只有两处**（出站头 `X-Drill-Batch`、台账表 `observed_event`），见 **H.6** / **H.7**。
+
+### H.0 三个「端点总数」要分开读（口径注，别互抄） {#api-h-0}
+
+| 口径 | 定义 | 块 7 前 | 块 7 后（HEAD） | 出处 |
+|---|---|---|---|---|
+| **后端 method-level** | 全仓 `*Controller.java` 中 `^\s*@(Post\|Get\|Put\|Delete)Mapping` 行数（**不含**类级 `@RequestMapping`） | **134** | **141**（+7） | 2026-10-14 实测：`grep -rhE "^\s*@(Post\|Get\|Put\|Delete)Mapping" --include=*Controller.java … \| wc -l` ⇒ 141 |
+| **本文件 §2 的「36 个」** | 只数 5 个核心 Controller（`/user` / `/message` / `/goods` / `/order` / `/health`） | 36 | **36（一字未变）** | §2 标题 |
+| **前端 `endpoints.js`** | `key: '/path'` 条目数（含 2 处**同行两条**） | 133 | **140** | 该文件头注记账链（… → 133 → **140**）：块 7 commit 3 的 3 条 SSE + commit 4 的 3 条 + commit 8b 的 1 条 = 7 条，**全落 `observe` 组**；实测 `grep -cE "^[[:space:]]*[A-Za-z0-9_]+:[[:space:]]*'/"` = **138 行**、+2 处同行两条 = 140 |
+
+⚠️ **块 7 的 7 条全部落在 §2 与 §3 的 5 个 Controller 之外** ⇒ §2 的「共 36 个」**不需要改**；本附录就是那 7 条的契约面。
+⚠️ **`observe` 域不进 §2 的清单**（同附录 C/D/E/F/G 的手法：零漂移，正文表不插入）—— 域标题只在**本附录**里出现。
+
+### H.1 新域 `/admin/observe/attack/*` —— 攻击模拟器四出口 {#api-h-1}
+
+`AttackController.java`（`@RequestMapping("/admin/observe/attack")` @ `:65`）—— 返回一律 `Result<Map<String,Object>>`（`/run`、`/records` 走 `ResponseEntity` 显式构造 4xx）。
+
+| 路径 | 入参（全部 `required=false`，**一律 `String`**） | 返回要点 | 身份 | 坐标 |
+|---|---|---|---|---|
+| `/scenarios` | **无** | 8 个预置场景（`key` / 中文名 / 同时演示的防护 / 需要的人工动作 / 默认权重） | 无 | `:90` |
+| `/run` | `name`（缺省「自定义」，> 64 字符按列宽截断）· `concurrency`（缺省 **100**、上限 **500**）· `durationSeconds`（缺省 **60**、上限 **600**）· `scenarios`（**JSON 数组串**，见下） | 跑完一轮 ⇒ `Id` / `Name` / `TotalRequests` / `BlockedRequests` / `FailedRequests` / `DurationMs` / `Result` | 会话（**只记谁点的**，不转发凭据） | `:114` |
+| `/records` | `limit`（缺省 **20**、上限 **200**）· `offset`（负数归 0） | 时间倒序记录列表；行内 `Result` 长文本已**拆成字段**（解析失败 ⇒ 落 `ResultRaw` + `ResultParseError`，不静默） | 无 | `:141` |
+| `/cleanup` | **无**（清什么由**后端**按标记判，不让前端挑范围） | `success` / `deleted`（**只含真删了行的表**）/ `total`（各行数之和）/ `summary`（一句话，同一句进审计行） | 识别口径（`AuthSession.identify`），认不出记 NULL | `:189` |
+
+**8 个场景**（`key` → 中文名 → 默认权重）：
+
+| key | 中文名 | 演示的防护 | 默认权重 |
+|---|---|---|---|
+| `seckill` | 秒杀抢购 | 库存扣减 + CAS + 唯一索引 + 锁 | 15 |
+| `orderBurst` | 订单并发 | 出生闸 + 价格闸 + 冻结闸 + 锁 + CAS | 15 |
+| `repeatSubmit` | 重复提交 | 幂等 + 唯一索引 + 锁 | 10 |
+| `unpaidTimeout` | 超时不付款 | 超时取消 job + 库存释放 | 10 |
+| `cacheCold` | 缓存冷启 | 单飞（sync=true）+ 负缓存 | 10 |
+| `redisDown` | Redis 断开 | 冷却窗口 + fail-open | 10 |
+| `bannedUser` | 封禁用户攻击 | 封禁闸 + 身份校验 | 15 |
+| `sensitiveWord` | 敏感词攻击 | 两阈值（< 40% 打码 / ≥ 40% 拒收）+ 图片先审 | 15 |
+
+（合计 **100**；缺省 = 全 8 个按上表权重。）
+
+⚠️ **四条端点一律 `@RequestParam`（+ 一个 JSON 串参数），不用 `@RequestBody`** —— 三条理由任一条都成立：① 全仓管理端写端点**全部**收 `@RequestParam`、前端一律 `URLSearchParams`（`http.js#buildInit` 把 POST 钉成 urlencoded）；② 否则**前端发不出去**（`http.post` 没有自定义头的口子 ⇒ JSON body 到不了 `@RequestBody`）；③ 「勾选 + 权重」这种嵌套结构沿用 `orderAdd` 的既有先例（一个 JSON **数组串**参数，同 `Items`）。
+⚠️ **数值参数也收 `String`**（不是 `Integer`）：交给 `AttackEngine.parse` 的 `clampInt` 校验并给**统一形状**的 400（`Result.fail`）。声明成 `Integer` 的话，「abc」会在 Spring 参数绑定阶段抛 `MethodArgumentTypeMismatchException`，而 `GlobalExceptionHandler` 的类级白名单只覆盖 Message / Goods ⇒ 那会变成默认错误页。
+⚠️ **参数非法走 4xx，不是 200 + `success:false`** —— 全仓口径是「**业务**失败 200，入参**形状**失败 400」；权重写成负数 / 场景 key 不认识 / 并发数越界都是后者。用 `ResponseEntity` 显式构造、**不抛异常**（同上那条白名单）。
+⚠️ **`/run` 会阻塞到演练跑完（几十秒）** —— 引擎同步跑完才回（这样「跑完就能看到数字」，不需要轮询 + 状态机）。代价写在明处：**调用方必须给这条请求一个远大于默认值的超时**（`http.post` 的默认 10s 会把 60 秒的演练当场掐断）—— 前端在 `api/observe.js#runAttack` 里带了 `timeout`。这也是**不**选「异步起任务 + 轮询」的理由：那要多一个「跑到哪一步了」的状态面，而本仓没有任务表。
+⚠️ **打哪个地址：从当前请求推**（`scheme` / `serverName` / `serverPort`），**不引配置项** —— 块 7 的边界是「不改部署配置」，且现推出来的地址**永远指回打进来的那台**。只支持 http（本仓没有 TLS 终结层）。
+⚠️ **`scenarios` 解析失败 ⇒ 直接 400（不回落）** —— 与 `OrderService` 的 `Items`（解析失败记 WARN + 回落）**取舍相反**：本端点的**全部语义**就是「按勾选的场景跑」，回落到「全 8 个」等于替调用者做了**另一个决定**，而页面上会显示一串他没勾的场景 —— 那不是降级，是失真。
+⚠️ **`/run` 只把「谁来点的」记下来，不把「他的凭据」传下去** —— 引擎**自己给演练账号铸票**。转发发起人的 `Authorization` / `Cookie` 会让身份守卫走管理员豁免（场景 `bannedUser` 的 403 永远出不来）、并让「故意不带票」的那一路被管理员会话认成已登录（理由全文在 `AttackEngine` 类注释第二节）。
+⚠️ **`/cleanup` 是本仓第一个破坏性管理端点**（真 DELETE、不可撤销）。三条护栏：① 真删之前**不**由任何定时任务调用（保留期 job 只碰 `observed_event`）；② 每次调用**写一条审计**（`observe.attack.cleanup`，含按表计数）；③ 响应把**删了哪几张表各多少行**原样回给前端，不是只回一个 `true`。**为什么敢做成无参**：判据是**标记**不是**时间** —— `SIM-%` 前缀 OR `Source='attack'`，这两样本仓**只有攻击引擎会写**（实测 2026-10-14：全库只有 `order` / `order_item` / `order_state_transition` / `comment` 四张表有，共 10 行）⇒ 「清掉攻击数据」与「清掉带标记的行」是**同一件事**。身份取**识别口径**（cookie 登录的管理员不该被记成匿名）；闸关着的 dev / a3 上返回 `null` ⇒ 审计行 `ActorId` 记 NULL，**不编造**。
+
+### H.2 三条 SSE {#api-h-2}
+
+| 路径 | 类 · 坐标 | 帧内容（`frame()` 的顶层键） | 会读库吗 |
+|---|---|---|---|
+| `POST /admin/observe/metrics/stream` | `MetricsStreamController.java` @ `:34`（方法 `:57`） | `seq` · `ts` · `intervalMs` · `health` · `requests` · `cache` · `gauges` · `locks` · `protections` · `stock` | **否**（全读 micrometer 注册表） |
+| `POST /admin/observe/orders/stream` | `OrderStreamController.java` @ `:22`（方法 `:39`） | `seq` · `ts` · `counts` · `orders` · `moves` · `moveCount` | **是**（每拍两次只读查询：五态计数聚合 + 最近订单） |
+| `POST /admin/observe/events/stream` | `EventStreamController.java` @ `:23`（方法 `:40`） | `seq` · `ts` · `cursor` · `count` · `rate` · `counts`（按 8 类）· `severity`（按严重度）· `events`（本拍增量）· `traces`（本拍走完的请求）· `mq`（MQ 桥接状态） | **否**（读内存合并环 + `TraceLog`） |
+
+⚠️ **读端点为什么是 `POST`**：SSE 的惯例是 `GET`（`EventSource` 只支持 GET），本仓选 `POST`，理由与 `AdminStatsController` 那两条读端点**同一条** —— 管理端的读端点**全部**是 POST，单为这三条开一个 GET 面会让「读端点的动词」在本仓出现两种。前端**不**用 `EventSource`（它不能带 `Authorization` 头），改用 `fetch` + `ReadableStream` 自己解析 ⇒ POST 不构成任何实现障碍。
+⚠️ **`Content-Type` 必须在方法体里手动设** —— `@PostMapping(produces=…)` **不会**替 `StreamingResponseBody` 写上响应头（`produces` 只在基于消息转换器的返回路径上被消费，而 `StreamingResponseBody` 走异步返回路径；实测取证：不加那一行时响应头只有 `Cache-Control`，见 `ObserveStreamSmokeTest` 对媒体类型的断言）。两条都留着：`produces` 管**路由与 Accept 协商**，那一行管**真实响应头**。
+⚠️ **不加角色闸（TD-18 口径）**：管理员 cookie 铸不出 token ⇒ 加「须 `role=3`」会让**默认 profile 上管理员自己也 401**。真正把端点挡在门外的是 `app.auth.enabled` + `AuthInterceptor`（**本域七条都不在 `AUTH_WHITELIST` 里**）⇒ 未登录打过来就是 **401（流还没开就 401**，不是「开了流再断」）。
+⚠️ **`events` 流读的是八环合并后的公共流**（`EventBroadcaster`）—— 它的「一拍只算一次」语义对本流尤其重要：日志页开着的时候攻击模拟器页并不读事件（它只发流量），但**同一页面的两次刷新**会短暂重叠 ⇒ 没有那层保护就会有一条流看着像死机。**⚠️ 也因此：`poll()` 的唯一调用点就是这条流**（见 H.7 的「已知边界」）。
+⚠️ **`orders` 流是观测面里唯一会读库的一条**；它**不改任何库**。
+⚠️ **`metrics` 流的 P99 只收「能当一次请求处理时长看」的序列**（`isLatencyTimer`），计数那一路是**全量** —— SSE 也是真请求，只是它的耗时不是延迟。块 7 · commit 8b2 修的就是这一条：长连接（几百秒）混进延迟序列会打出「P99 = 26.8 秒」的**误红**。
+⚠️ **断连**：客户端关页面 / 刷新 ⇒ 写已关闭的输出流抛 `IOException` ⇒ `SseStreamWriter` 的 catch 收工（不重试、不刷 WARN）。服务端**没有**独立的「连接表」要清理：状态全在各单例 Service 里（无连接态）。
+
+### H.3 帧的节流与可配项 {#api-h-3}
+
+| 配置项 | 缺省 | 作用 |
+|---|---|---|
+| `mall.observe.sse.interval-ms` | `1000` | 帧间隔（`FramePacer`）；**同一拍内多次请求复用同一帧** |
+| `mall.observe.sse.max-ticks` | `0`（= 不停） | 只用于测试的「跑 N 拍即收」口子 |
+
+⚠️ **调用方不能假设「一请求一拍」** —— `FramePacer` 会把间隔内的重复请求**复用**上一帧（带自己的 `seq`）。
+
+### H.4 前端封装增补 {#api-h-4}
+
+| 文件 | 增补 | 备注 |
+|---|---|---|
+| `src/api/endpoints.js` | `observe` 组 **7 条**（3 条 SSE + 3 条攻击出口 + 1 条清理），**全非 view 抽取** | 头注「现为 N 条」**133 → 140**；**单列一组、追加在对象尾**，不插行 |
+| `src/api/observe.js` | **新建**：3 个流开启器（`openMetricsStream` / `openOrderStream` / `openEventStream`，内部共用 `openStream`）+ 4 个攻击出口（`attackScenarios` / `runAttack` / `attackRecords` / `cleanupAttack`） | ⚠️ **两条路不同**：三条 SSE 走自写的 `fetch` + `ReadableStream` 解析；四条攻击出口走 `http.post`（表单串）。⚠️ `runAttack` **必须显式传长 timeout** |
+| `src/views/admin/observe/AttackConsole.vue` | 新建，攻击模拟器页（8 卡片 / 一键跑 / 自定义编排 / 演练记录 / **清场**） | ⚠️ 清场按钮走**两段式确认**（`armed` 态，第一次点只上膛、第二次才发请求），先例是 `OrderPage.vue` 的 `armed` 模式 |
+| `src/views/admin/observe/MetricsPanel.vue` · `OrderFlow.vue` · `EventLog.vue` | 新建，指标面板 / 状态流转 / 实时日志 | 三页各开一条流 |
+| `src/config/labels/` | **新建目录**（照 `config/notify-events.js` 惯例）：`observe-labels.js` / `report-labels.js` / `audit-labels.js` / `order-labels.js` / `user-labels.js` | **块 7 commit 9 的中文标签层**：英文 code → 中文；**兜底 = 认不出回 code 原文**（用 `hasOwnProperty` 判，不是 `TBL[k] \|\| k`） |
+
+### H.5 白名单的契约改动：**零** {#api-h-5}
+
+⚠️ **`AUTH_WHITELIST` 块 7 **维持 14 条不变** —— 可观测域**一条都不进**。判据是「公开面」：本域七条全是**管理端**端点，而管理端端点没有一条是公开面（同附录 G.6 那条 ⚠️）。
+⚠️ **同理不加角色闸**（TD-18）：真正把端点挡在门外的是 `app.auth.enabled` + `AuthInterceptor`。
+⚠️ **a3 / dev 两 profile 的 `app.auth.enabled=false` ⇒ 本域七条匿名可达** —— 那是验证环境的既定形态（该 profile 下**每一个**管理端端点都如此），不是本域引入的口子。
+
+### H.6 跨线程透传的契约面：出站头 `X-Drill-Batch` {#api-h-6}
+
+块 7 对**业务端点**的唯一契约改动不是一个入参，而是一个**出站请求头**：
+
+| 头 | 常量 | 作用 |
+|---|---|---|
+| `X-Trace-Id` | `TraceIdFilter.HEADER`（`TraceIdFilter.java:67`） | 既有：链路号 |
+| `X-Drill-Batch` | `TraceIdFilter.BATCH_HEADER`（同文件 `:79`） | **块 7 新增**：演练批次号 |
+
+链路：`AttackEngine`（请求线程）`new ObserveContext(TraceIdFilter.current(), currentBatch)` → `ctx.run()` 绑到 `drill-<key>` 线程（线程名 `"drill-" + key`）→ 出站带 `X-Drill-Batch`（**刻意不带 `X-Trace-Id`** ⇒ 每条子请求各有自己的链路号）→ `TraceIdFilter.doFilterInternal` 入 MDC（键 `batchId`，常量 `MDC_BATCH_KEY` @ `:82`）→ 八环记录点读 MDC → `observed_event.BatchId`。
+
+⚠️ **MDC 键名两个**：`traceId`（`MDC_KEY` @ `:70`）与 `batchId`（`MDC_BATCH_KEY` @ `:82`）—— 两者都是「本线程当前上下文」的一部分（`TraceIdFilter.bind` 一次 `put` 两个）。
+⚠️ **`ObscureContext` / `ObserveContext` 不生成任何号** —— 它只是把调用线程上已有的两个值**搬**到子线程；批次号在**发流量之前**由 `AttackEngine` 生成一次。
+⚠️ **日常流量的 `BatchId` 是 `NULL`**（不是空串）—— 非请求上下文（定时任务等）产生的事件没有批次，这是**正常值**（建表时列注释就这么定的）。判据是「**该批次**一个不漏、不混别批次」，**不是**「全表都带批次」。
+
+### H.7 与业务域 / 台账的关系（本域的两处「落点」） {#api-h-7}
+
+⚠️ **本域只在业务侧留两处痕迹**：① 上面那个出站头（**不**改任何业务端点的入参 / 返回）；② 新建台账表 `observed_event`（DDL 见 `db-schema.md`）。块 7 的八环记录点**跨域补挂**了两条审计（`goods.delete` / `comment.delete`）—— 那是**既有审计清单**的补挂，不是新端点。
+⚠️ **⚠️ 台账的已知边界（逐字摘自 `EventBroadcaster` 类注释）**：`poll()` 由 **SSE 流线程**每秒驱动，唯一调用点是 `EventStreamService:81`（**events 流**）⇒ **没有人打开实时日志页时，合并环不动、也就没有事件落库**。台账是「**观看时的过程记录**」，不是「无人值守的全量审计流水」。
+⚠️ **保留期 job**：`ObservedEventCleanupJob` @ `:63`，`@Scheduled(fixedDelayString = "${mall.observe.cleanup.fixed-delay-ms:3600000}")`（缺省 1 小时）；两条保留期 —— 攻击批次行 `mall.observe.cleanup.attack-retention-days`（缺省 **3** 天）、日常事件行 `…normal-retention-days`（缺省 **30** 天）。⚠️ 总闸 `mall.observe.cleanup.job.enabled`（dev / a3 关着）+ `@EnableScheduling` 的**载体类**另受 `mall.downgrade.job.enabled` 管（见 `tech-debt.md`）。
+⚠️ **MQ 缺席**：`mall.observe.mq.warn-interval-ms`（缺省 **300000** ms = 5 分钟）—— 每次重连失败距上次 WARN 超阈值即打一条 `[EVENT]` WARN（翻转时另有一条，双保险）；MQ 不在时**事件仍上屏**（走内存环），页面顶上的点变黄。
+
+⚠️ **本文件（`api-contract.md`）的正文 §2 / §3 / §5 矩阵**本笔**未重测、未插入** —— 7 条新端点全部落在附录 H；正文坐标重填归「文档漂移清理笔」（同附录 E.7 的口径）。

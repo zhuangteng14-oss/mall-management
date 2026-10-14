@@ -146,7 +146,7 @@
             </span>
             <span class="a-ev-l2">
               <span class="a-who-chip">{{ r.OperatorId || '（认不出身份）' }}</span>
-              <span class="a-dim">角色 {{ r.OperatorRole == null ? '—' : r.OperatorRole }}</span>
+              <span class="a-dim">角色 {{ roleLabel(r.OperatorRole) }}</span>
               <span class="a-dim">耗时 {{ fmtMs(r.DurationMs) }}</span>
             </span>
           </span>
@@ -178,7 +178,7 @@
             <p class="a-kv">
               并发 <b>{{ cfgOf(r).c }}</b> · 持续 <b>{{ cfgOf(r).d }}</b> 秒 · 勾选
               <template v-if="cfgOf(r).s.length">
-                <code v-for="x in cfgOf(r).s" :key="x.k" class="a-chip">{{ x.k }}={{ x.w }}%</code>
+                <code v-for="x in cfgOf(r).s" :key="x.k" class="a-chip" :title="x.k">{{ scenarioLabel(x.k) }}={{ x.w }}%</code>
               </template>
               <template v-else>—（记录里没有勾选清单）</template>
             </p>
@@ -249,6 +249,34 @@
       </li>
     </ol>
     <p v-else-if="!loadingRecords && !recErr" class="a-empty">还没有任何演练记录。</p>
+
+    <!-- ── ⑤ 清场（破坏性 · commit 9 补上 8b 遗留的按钮）─────────────────────────
+         ⚠️ 本页**唯一**会真删数据的动作，也是**唯一**两段式确认的按钮（同 `OrderPage.vue`
+            的 `armed`）：第一次点只上膛（按钮转危险色 + 页顶一行提示），第二次点才发请求。
+         ⚠️ 它清的是**演练标记出来的业务数据**（`SIM-` 单号前缀 **OR** `Source='attack'`，
+            后端 `ObservedEventCleanupDao` 判的），**不含**上面那份 `drill_record` 自己。 -->
+    <h2 class="a-h2">
+      清场
+      <span class="a-h2n">真删 · 不可撤销 · 清的是演练写进业务表的行（不含演练记录本身）</span>
+    </h2>
+    <div class="a-card">
+      <p class="a-note">
+        按演练留下的标记清（`SIM-` 开头单号 **OR** `Source='attack'` 两种一起判，缺一会漏）：
+        订单 / 评论 / 事件台账等业务行会被**真删**，清完回显每张表各删了几行。
+      </p>
+      <div class="a-f-actions">
+        <button
+          type="button"
+          class="a-btn"
+          :class="{ 'a-btn-danger': armedClean }"
+          :disabled="cleaning || running"
+          @click="doCleanup"
+        >
+          <IconGlyph name="no" />
+          {{ cleaning ? '清场中…' : armedClean ? '再点一次：确认清场（不可撤销）' : '清理本次演练数据' }}
+        </button>
+      </div>
+    </div>
   </section>
 </template>
 
@@ -294,9 +322,12 @@
 /* eslint-disable no-undef */ /* 理由见 `../../../components/charts/BaseChart.vue` 同款注释（eslint-plugin-vue 8.7.1 缺宏环境） */
 import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 // ⚠️ 三层 `../`（不是管理端其它页的两层）：本页在 `views/admin/observe/`，比 `views/admin/` 深一层。
-import { attackRecords, attackScenarios, runAttack } from '../../../api/observe'
+import { attackRecords, attackScenarios, cleanupAttack, runAttack } from '../../../api/observe'
 import WeightSlider from '../../../components/observe/WeightSlider.vue'
 import IconGlyph from '../../../components/ui/IconGlyph.vue'
+// commit 9 收敛：场景 key → 中文（`config/labels/observe-labels.js` 的 `SCENARIO_LABEL`）+ 角色码 → 中文。
+import { scenarioLabel } from '../../../config/labels/observe-labels'
+import { roleLabel } from '../../../config/labels/user-labels'
 
 // ── 入参上下限（**与后端逐字对齐**）──────────────────────────────────────────
 // 后端 `AttackEngine.clampInt` 的口径：缺省 100 / 1..500（并发）、缺省 60 / 1..600（秒）。
@@ -334,6 +365,11 @@ const loadingRecords = ref(false)
 const recErr = ref('')
 const f = reactive({ limit: 20 })
 const openId = ref(null)
+
+// ── 清场（破坏性 · commit 9 补上 8b 遗留的按钮）──────────────────────────────
+/** 「上膛」态：点了第一次**不发请求**（见 `doCleanup`）。 */
+const armedClean = ref(false)
+const cleaning = ref(false)
 
 // ── 编排状态 ─────────────────────────────────────────────────────────────────
 const weightOf = (key) => Number(weights[key]) || 0
@@ -513,6 +549,40 @@ async function loadRecords() {
 }
 
 const truncated = computed(() => total.value > records.value.length)
+
+// ── 清场（破坏性 · 见 `api/observe.js#cleanupAttack` 的三条 ⚠️）──────────────
+/**
+ * 清掉攻击演练写进业务表的行。**两次点击**才算数（第一次上膛、第二次执行）——
+ * 这条是真 `DELETE`、**没有撤销**，而本仓管理页的既有惯例里**没有** `confirm()`
+ * （`eslintConfig.env` 没有 `browser`，用浏览器全局会触发 `no-undef`，见文件头）
+ * ⇒ 二次确认落在按钮自己身上，与 `OrderPage.vue` 的 `armed` 同一套（按钮变红 + 页顶一行话）。
+ *
+ * ⚠️ 必须回显后端 `summary`（如「共 10 行（comment 1 / order 3 / …）」）—— 只报一句「成功」
+ *    等于把「到底删了几行」藏起来（`api/observe.js#cleanupAttack` 注释原话）。
+ * ⚠️ 清完 `loadRecords()`：清的是**演练标记出来的业务数据**（`SIM-%` 前缀 OR `Source='attack'`），
+ *    `drill_record` 本身不在范围内，但页顶计数与列表口径要跟库一致 ⇒ 顺手刷新。
+ */
+async function doCleanup() {
+  if (!armedClean.value) {
+    armedClean.value = true
+    flash.kind = 'ok'
+    flash.text = '再点一次「确认清场」：会真删掉攻击演练写进业务表的行（订单 / 评论 / 事件台账等），不可撤销。'
+    return
+  }
+  armedClean.value = false
+  cleaning.value = true
+  try {
+    const data = await cleanupAttack()
+    flash.kind = 'ok'
+    flash.text = `已清场：${(data && data.summary) || '共 0 行（库里没有待清的攻击数据）'}`
+    await loadRecords()
+  } catch (e) {
+    flash.kind = 'bad'
+    flash.text = `清场失败：${errText(e)}`
+  } finally {
+    cleaning.value = false
+  }
+}
 
 // ── 跑 ───────────────────────────────────────────────────────────────────────
 /**
@@ -816,6 +886,12 @@ onBeforeUnmount(() => {
   color: var(--brand-ink);
   background: var(--brand-soft);
   border-color: var(--brand-ink);
+}
+/* 「上膛」态 = 危险动作（同 `OrderPage.vue` / `AccountsPage.vue` 的 `.a-btn-danger`，色值取同一组变量）。 */
+.a-btn-danger {
+  color: var(--danger);
+  background: var(--danger-ground);
+  border-color: var(--danger);
 }
 .a-btn:disabled {
   cursor: default;
