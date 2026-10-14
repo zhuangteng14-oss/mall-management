@@ -128,6 +128,23 @@
             <artifactId>redisson</artifactId>
             <version>3.46.0</version>
         </dependency>
+
+        <!-- 慢 SQL 观测（C3 块 7 · commit 6b · 批文 Q4「丁」）：给 DataSource 包一层，按耗时打 WARN。
+             装配点 shared/sql/SlowSqlConfig.java；为什么自己写 listener 而不用库自带的
+             logSlowQueryBySlf4j（会丢 traceId + 每条查询排一个定时任务）见 SlowSqlListener 类注释。
+
+             ⚠️ 版本为什么是 1.11.0，而不是「当时最新」的 1.11.1：本机 Maven 走 aliyun 镜像
+             （~/.m2/settings.xml 的 mirrorOf=central），而该镜像**没收录** 1.11.1 ——
+             2026-10-14 实测该 jar 在 aliyun 上 404、1.11.0 为 200；同一时刻 Central 直连两版都在。
+             取「本机能装到 且 CI 也能装到」的交集 ⇒ 1.11.0。
+             ⚠️ 别只看 aliyun 的 maven-metadata.xml：它写的 <release> 是 1.11.1（**元数据比产物新**），
+             照它写版本号会得到一个装不上的依赖。
+             复核：curl -sI https://maven.aliyun.com/repository/public/net/ttddyy/datasource-proxy/1.11.0/datasource-proxy-1.11.0.jar -->
+        <dependency>
+            <groupId>net.ttddyy</groupId>
+            <artifactId>datasource-proxy</artifactId>
+            <version>1.11.0</version>
+        </dependency>
     </dependencies>
 
     <build>
