@@ -66,13 +66,13 @@ public class ObserveMetricsConfig {
     }
 
     /**
-     * 给 HTTP 计时器开 0.5 / 0.95 / 0.99 三档分位。
+     * 给 HTTP 计时器开 0.5 / 0.95 / 0.99 三档分位。⚠️ <b>本方法必须是 {@code static}</b>：非 static 时，MeterFilter 要在 {@code simpleMeterRegistry} **创建过程中**被收集，Spring 就得先实例化本 {@code @Configuration} ⇒ 本类构造注入了 {@link IdentityMetrics} ⇒ 要 {@code MeterRegistry}（此刻正在创建中）⇒ **循环依赖，整台起不来**（2026-10-14 实测，a3 / dev 同一现象）；静态 {@code @Bean} 方法不需要实例化配置类 ⇒ 环自断（本行的加字是行内补写，未增删行 —— 仓规零漂移）。
      *
      * <p>用 {@code merge} 而不是新建：配置里**已有**的项（如 TTL 的衰减窗口、SLA 边界）
      * 原样保留，本类只补 {@code percentiles} 一项 —— 否则等于把 Boot 的默认分发配置整份覆盖掉。
      */
     @Bean
-    MeterFilter observeHttpPercentiles() {
+    static MeterFilter observeHttpPercentiles() {
         return new MeterFilter() {
             @Override
             public DistributionStatisticConfig configure(Meter.Id id, DistributionStatisticConfig config) {
