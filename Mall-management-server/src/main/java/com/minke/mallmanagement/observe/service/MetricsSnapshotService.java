@@ -94,8 +94,21 @@ public class MetricsSnapshotService {
     private static final double ERROR_RATE_ERROR = 0.05;
     /** 5xx 占比超过它 = 健康度黄（同上）。 */
     private static final double ERROR_RATE_WARN = 0.01;
-    /** P99 超过它（ms）= 健康度红（同上；1s 是本仓最慢那条链路的实测上限，见 {@code http.js} 的超时注释）。 */
+    /**
+     * P99 超过它（ms）= 健康度红（同上；1s 是本仓最慢那条链路的实测上限，见 {@code http.js} 的超时注释）。
+     * ⚠️ 参评的 P99 **已剔除 SSE 长连接**（见 {@link #isLatencyTimer}）—— 不剔的话这里会被
+     * 三条观测流的「连接存活时长」天天点亮（2026-10-14 实测：P99 26,843 ms 的红就是这么来的）。
+     */
     private static final double P99_MS_ERROR = 1000.0;
+
+    /**
+     * 「耗时不算延迟」的 uri 后缀 —— SSE 长连接（块 7 的三条观测流）。
+     * ⚠️ 与 {@code shared/web/TraceLog.SKIP_SUFFIX} **同一个字面量、同一个理由**：那条请求要等客户端
+     * 断开才结束，记下来的「耗时」是**连接存活时长**而非一次请求的处理时长。
+     * 排除的实测依据见 {@link #isLatencyTimer}。
+     */
+    private static final String SSE_URI_SUFFIX = "/stream";
+
     /** 库存水位一次最多列多少条（面板一屏够看；不做分页 —— 这是「水位条」不是「库存管理页」）。 */
     private static final int STOCK_LIMIT = 20;
 
@@ -166,13 +179,15 @@ public class MetricsSnapshotService {
     /** HTTP 段：本拍请求数 / 速率 / 错误率 / 延迟（均值 + 分位）。 */
     private Map<String, Object> requests(double seconds) {
         double count = 0.0;
-        double totalMs = 0.0;
         double errors5xx = 0.0;
         double errors4xx = 0.0;
+        // 延迟那一路**只收**能当「一次请求的处理时长」看的序列（见 isLatencyTimer）；
+        // 计数那一路是**全量** —— SSE 也是真请求，只是它的耗时不是延迟。
+        double latencyCount = 0.0;
+        double latencyMs = 0.0;
         for (Timer t : registry.find(HTTP).timers()) {
             double c = t.count();
             count += c;
-            totalMs += t.totalTime(TimeUnit.MILLISECONDS);
             String status = t.getId().getTag("status");
             if (status != null && status.length() >= 1) {
                 if (status.startsWith("5")) {
@@ -181,12 +196,22 @@ public class MetricsSnapshotService {
                     errors4xx += c;
                 }
             }
+            if (isLatencyTimer(t)) {
+                latencyCount += c;
+                latencyMs += t.totalTime(TimeUnit.MILLISECONDS);
+            }
         }
 
         double dCount = delta(key(HTTP, "count"), count);
-        double dTotalMs = delta(key(HTTP, "totalMs"), totalMs);
+        double dLatencyCount = delta(key(HTTP, "latencyCount"), latencyCount);
+        double dLatencyMs = delta(key(HTTP, "latencyMs"), latencyMs);
         double d5xx = delta(key(HTTP, "5xx"), errors5xx);
         double d4xx = delta(key(HTTP, "4xx"), errors4xx);
+        // ⚠️ 本拍**有没有**「能当延迟看的」样本：没有就一律留空（null）。
+        //    两条理由：① 均值 / 分位在 0 样本上无从谈起 —— 报 0 会被页面画成「快到 0 ms」的假好；
+        //    ② 只在**这一拍真的发生过这类请求**时，Micrometer 那个衰减窗口才代表当下，
+        //       否则它报的是上一个窗口里的陈迹（本笔要修的正是这个 —— 见 isLatencyTimer）。
+        boolean hasLatency = dLatencyCount > 0;
 
         Map<String, Object> out = new LinkedHashMap<>();
         out.put("count", (long) dCount);
@@ -195,12 +220,38 @@ public class MetricsSnapshotService {
         out.put("errors4xx", (long) d4xx);
         out.put("errorRate", ratio(d5xx, dCount));
         out.put("clientErrorRate", ratio(d4xx, dCount));
-        out.put("meanMs", dCount <= 0 ? null : round(dTotalMs / dCount));
-        out.put("p95Ms", percentile(0.95));
-        out.put("p99Ms", percentile(0.99));
+        out.put("meanMs", hasLatency ? round(dLatencyMs / dLatencyCount) : null);
+        out.put("p95Ms", hasLatency ? percentile(0.95) : null);
+        out.put("p99Ms", hasLatency ? percentile(0.99) : null);
         // max 是 Micrometer 的衰减窗口最大值（默认 2 分钟），**不是**本拍最大 —— 字段名照实写明。
-        out.put("maxMs", maxMs());
+        out.put("maxMs", hasLatency ? maxMs() : null);
         return out;
+    }
+
+    /**
+     * 这条时间序列的耗时**能不能当延迟看**。
+     *
+     * <p>⚠️ <b>排除 SSE 长连接（uri 以 {@code /stream} 结尾）</b>：那三条（metrics / orders / events
+     * 观测流）的「耗时」是**连接存活时长** —— 客户端挂着多久就记多久，不是一次请求的处理时长。
+     * 实测（2026-10-14，dev 8088，actuator {@code http.server.requests} 按 uri 拆）：
+     * <pre>
+     *   /admin/observe/metrics/stream   6 次 / 109.07 s（均摊 18.2 s）
+     *   /admin/observe/events/stream    4 次 /  51.62 s（均摊 12.9 s）
+     *   /admin/observe/orders/stream    3 次 /  20.33 s（均摊  6.8 s）
+     *   /order/orderAdd（真业务）    1654 次 /  73.13 s（均摊  44 ms）
+     * </pre>
+     * ⇒ 13 条长连接贡献约 181 s，而 1654 条真业务请求拢共才 73 s。它们把衰减窗口里的分位抬到
+     * 26,843 ms，面板照实画成「P99 26.8 秒」并点亮健康度红 —— 那个红是**误报**。
+     *
+     * <p>它们**仍计入** {@code count} / {@code qps} / {@code errors4xx} / {@code errors5xx}：
+     * 「发生过几次请求、几成出错」与「请求快不快」是两件事，SSE 对前者的贡献是真的。
+     *
+     * <p>⚠️ 后缀判据不是本处新发明的口径 —— {@code shared/web/TraceLog} 早就有
+     * {@code SKIP_SUFFIX = "/stream"}`，两处**同一个字面量、同一个理由**（别各写各的）。
+     */
+    private static boolean isLatencyTimer(Timer t) {
+        String uri = t.getId().getTag("uri");
+        return uri == null || !uri.endsWith(SSE_URI_SUFFIX);
     }
 
     /** 缓存段：本拍 L1 命中 / 未命中 / 命中率 + L2 降级跳过数。 */
@@ -449,10 +500,16 @@ public class MetricsSnapshotService {
      * 分位数未开启时返回 {@code null}（{@code application.properties} 里没配
      * {@code management.metrics.distribution.percentiles.*}，由本块
      * {@code observe/ObserveMetricsConfig.java} 直接给这一个指标开了 0.5/0.95/0.99）。
+     *
+     * <p>⚠️ <b>只算非 SSE 的时间序列</b>（见 {@link #isLatencyTimer}）：长连接的存活时长混进来，
+     * 这个字段就变成「客户端挂了多久」而不是「接口多慢」。
      */
     private Double percentile(double p) {
         Double best = null;
         for (Timer t : registry.find(HTTP).timers()) {
+            if (!isLatencyTimer(t)) {
+                continue;
+            }
             for (ValueAtPercentile v : t.takeSnapshot().percentileValues()) {
                 if (Math.abs(v.percentile() - p) < 1.0e-9) {
                     double ms = v.value(TimeUnit.MILLISECONDS);
@@ -466,6 +523,9 @@ public class MetricsSnapshotService {
     private Double maxMs() {
         Double best = null;
         for (Timer t : registry.find(HTTP).timers()) {
+            if (!isLatencyTimer(t)) {
+                continue;
+            }
             double ms = t.max(TimeUnit.MILLISECONDS);
             if (!Double.isNaN(ms)) {
                 best = best == null ? ms : Math.max(best, ms);

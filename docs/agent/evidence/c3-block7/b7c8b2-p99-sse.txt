@@ -1,0 +1,62 @@
+块 7 · commit 8b2〈指标 P99 剔除 SSE 长连接〉—— 实测证据（2026-10-14，dev profile + VM 库）
+================================================================================
+
+现象（用户三页截图反馈）
+--------------------------------------------------------------------------------
+指标面板 P99 = 26,843.546 ms 标红 + 判据条「P99 26843.546ms（≥ 1000ms）」。
+用户原判：「无数据时的默认值（没有请求，Micrometer 走默认）」。
+⇒ **实测不成立**，真机制见下。
+
+真机制（actuator http.server.requests 按 uri 拆，2026-10-14 dev 8088）
+--------------------------------------------------------------------------------
+  /admin/observe/metrics/stream    6 次 / 109.07 s  → 均摊 18.2 s
+  /admin/observe/events/stream     4 次 /  51.62 s  → 均摊 12.9 s
+  /admin/observe/orders/stream     3 次 /  20.33 s  → 均摊  6.8 s
+  /admin/observe/attack/run        1 次 /  13.06 s
+  /order/orderAdd（真业务）     1654 次 /  73.13 s  → 均摊 44 ms
+⇒ 13 条 SSE 长连接贡献约 **181 s** 的「耗时」，而 1654 条真业务请求拢共才 73 s。
+   SSE 的「耗时」是**连接存活时长**（客户端挂多久），不是一次请求的处理时长；
+   它被 Micrometer 的衰减窗口抬进分位 ⇒ P99 报 26.8 s ⇒ 健康度误判成红。
+
+修法（A + B，两段，都在 MetricsSnapshotService 一个文件）
+--------------------------------------------------------------------------------
+A · 延迟聚合剔除 SSE：meanMs / p95Ms / p99Ms / maxMs 只聚 **uri 不以 `/stream` 结尾** 的序列；
+    count / qps / errors4xx / errors5xx **仍算全量**（SSE 也是真请求，只是其耗时不是延迟）。
+    （判据字面量与既有 `shared/web/TraceLog.SKIP_SUFFIX = "/stream"` 相同 —— 两处同一口径。）
+B · 本拍无延迟样本 ⇒ p95Ms / p99Ms / meanMs / maxMs 一律 **null**（页面据此显 "—"）。
+    ⚠️ 单靠 B 修不掉截图那个红：那一拍 `count=1`、`qps≠0`（见下面 seq 0 的实测）。
+    前端 MetricsPanel.vue 本来就是 `p99 === null ? '—'` ⇒ **前端零改动**。
+
+实测 ① 本机 dev 8088 · 无业务流量（_work/b7c8b2-after-idle.txt）
+--------------------------------------------------------------------------------
+  seq 3  count 0  qps 0.0  mean None  p95 None  p99 None  max None  health ok
+  seq 4  count 0  qps 0.0  mean None  p95 None  p99 None  max None  health ok
+  seq 5  count 0  qps 0.0  mean None  p95 None  p99 None  max None  health ok
+⇒ 无流量 ⇒ 延迟四项全 null（页面显 "—"）、不告警。判据达成。
+
+实测 ② 同上 · 期间发 40 次 /goods/goodsSelectHome（_work/b7c8b2-after-load.txt）
+--------------------------------------------------------------------------------
+  seq 0   count 1  qps 0.084  mean None     p95 None    p99 None     max None     health ok
+      ⚠️ 这一拍正是「只开了 SSE 长连接」的形态（count=1 / qps≠0 / 延迟留空）——
+         截图那个红就出在这类拍上，所以批文原判据「QPS=0 才留空」单用抓不到。
+  seq 4   count 5  qps 4.93   mean 44.055  p95 218.038 p99 218.038  max 210.528  health ok
+  seq 5   count 8  qps 7.901  mean 1.95    p95 218.038 p99 218.038  max 210.528  health ok
+  seq 6   count 8  qps 7.872  mean 1.867   p95 2.949   p99 218.038  max 210.528  health ok
+  seq 7   count 9  qps 8.868  mean 1.757   p95 2.949   p99 218.038  max 210.528  health ok
+  seq 9   count 1  qps 0.994  mean 2.479   p95 2.949   p99 218.038  max 210.528  health ok
+  seq 10  count 0  qps 0.0    mean None    p95 None    p99 None     max None     health ok
+⇒ 有流量 ⇒ 真值（p99 218 ms，全在 1000 ms 阈值下）⇒ 不误红。
+
+实测 ③ 反向对照（单测，不碰 DB）
+--------------------------------------------------------------------------------
+MetricsSnapshotServiceTest 新增 3 例（本类合计 9 例全绿）：
+  · sseOnlyTrafficLeavesLatencyFieldsEmpty —— 只开 SSE ⇒ count/qps 照记、延迟四项留空、health ok
+  · sseLongDurationDoesNotPolluteLatency     —— 业务 + SSE 并存 ⇒ p99 = 60 ms（不是 26.8 s）
+  · genuinelySlowBusinessRequestStillTurnsP99Red —— **真慢的业务请求（1500 ms）仍然红**，
+      理由字符串里含 "P99" ⇒ 改的是「认对对象」，不是「把红线改死」。
+
+整仓回归
+--------------------------------------------------------------------------------
+./mvnw -B -o clean test = Tests run: 462, Failures: 0, Errors: 0, Skipped: 26 + BUILD SUCCESS
+（日志 _work/b7c8b2-mvn-test.log；8b 时为 459 ⇒ 本笔 +3 即上面三例）
+⚠️ 本笔零后端契约改动、零建表、零新依赖、零前端改动。

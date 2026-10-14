@@ -1,6 +1,7 @@
 package com.minke.mallmanagement.observe.service;
 
 import com.minke.mallmanagement.goods.dao.GoodsDao;
+import io.micrometer.core.instrument.Timer;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -8,6 +9,7 @@ import org.junit.jupiter.api.Test;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.anyInt;
@@ -136,11 +138,83 @@ class MetricsSnapshotServiceTest {
         assertThat((List<?>) health.get("reasons")).as("页面要能说出为什么黄").isNotEmpty();
     }
 
+    // ================= SSE 长连接不参与延迟（commit 8b2） =================
+
+    @Test
+    @DisplayName("⚠️ 只开了 SSE 长连接：count/qps 照记，但 P99 / 均值 / max 一律**留空**（不是 0，也不是连接存活时长）")
+    void sseOnlyTrafficLeavesLatencyFieldsEmpty() {
+        when(goodsDao.selectStockLevels(anyInt())).thenReturn(List.of());
+        Timer stream = Timer.builder("http.server.requests")
+                .tags("uri", "/admin/observe/metrics/stream", "status", "200")
+                .register(registry);
+        service.frame(0);                                  // 先拍一次，进 primed 状态
+
+        stream.record(26_843, TimeUnit.MILLISECONDS);      // 客户端挂了 26.8 秒才断开
+        Map<String, Object> frame = service.frame(1);
+
+        assertThat(requestsOf(frame)).as("SSE 也是真请求 ⇒ 计数那一路照记").containsEntry("count", 1L);
+        assertThat((Double) requestsOf(frame).get("qps"))
+                .as("qps ≠ 0 —— 正是截图那一拍（所以「QPS=0 才留空」单用抓不到）").isGreaterThan(0.0);
+        assertThat(requestsOf(frame).get("p95Ms")).as("0 个「能当延迟看的」样本 ⇒ 留空（页面显示 —）").isNull();
+        assertThat(requestsOf(frame).get("p99Ms")).as("26,843 ms 是连接存活时长，不是延迟").isNull();
+        assertThat(requestsOf(frame).get("meanMs")).as("均值同样无从谈起（此前它会把 18 秒的均摊报上来）").isNull();
+        assertThat(requestsOf(frame).get("maxMs")).isNull();
+        assertThat(healthOf(frame)).as("这一拍不该红").containsEntry("level", "ok");
+    }
+
+    @Test
+    @DisplayName("⚠️ 真业务与 SSE 并存：P99 只由业务请求算 —— 长连接的 26.8 秒不进分位，也不点亮 P99 红")
+    void sseLongDurationDoesNotPolluteLatency() {
+        when(goodsDao.selectStockLevels(anyInt())).thenReturn(List.of());
+        Timer business = Timer.builder("http.server.requests")
+                .tags("uri", "/order/orderAdd", "status", "200")
+                .publishPercentiles(0.5, 0.95, 0.99)
+                .register(registry);
+        Timer stream = Timer.builder("http.server.requests")
+                .tags("uri", "/admin/observe/events/stream", "status", "200")
+                .register(registry);
+        service.frame(0);
+
+        business.record(40, TimeUnit.MILLISECONDS);
+        business.record(60, TimeUnit.MILLISECONDS);
+        stream.record(26_843, TimeUnit.MILLISECONDS);
+        Map<String, Object> frame = service.frame(1);
+
+        assertThat(requestsOf(frame)).as("两条都算进计数（SSE 的请求数是真的）").containsEntry("count", 3L);
+        Double p99 = (Double) requestsOf(frame).get("p99Ms");
+        assertThat(p99).as("有业务样本 ⇒ 报真值（不是 null）").isNotNull();
+        assertThat(p99).as("只由业务请求算：~60 ms，不是长连接的 26.8 秒").isLessThan(1000.0);
+        assertThat(healthOf(frame)).as("P99 未越过 1000 ms 阈值 ⇒ 不该有那个红").containsEntry("level", "ok");
+    }
+
+    @Test
+    @DisplayName("⚠️ 反向对照：真慢的**业务**请求仍然点亮 P99 红（改动不是把红线改死，是让它认对对象）")
+    void genuinelySlowBusinessRequestStillTurnsP99Red() {
+        when(goodsDao.selectStockLevels(anyInt())).thenReturn(List.of());
+        Timer business = Timer.builder("http.server.requests")
+                .tags("uri", "/order/orderAdd", "status", "200")
+                .publishPercentiles(0.5, 0.95, 0.99)
+                .register(registry);
+        service.frame(0);
+
+        business.record(1_500, TimeUnit.MILLISECONDS);     // 一条真·慢请求（> 1000 ms 阈值）
+        Map<String, Object> frame = service.frame(1);
+
+        assertThat(healthOf(frame)).as("业务请求真的慢了 ⇒ 该红").containsEntry("level", "error");
+        assertThat((List<?>) healthOf(frame).get("reasons")).as("理由要说得出来是 P99")
+                .anySatisfy(r -> assertThat(String.valueOf(r)).contains("P99"));
+    }
+
     // ================= 工具 =================
 
     @SuppressWarnings("unchecked")
     private static Map<String, Object> cacheOf(Map<String, Object> frame) {
         return (Map<String, Object>) frame.get("cache");
+    }
+
+    @SuppressWarnings("unchecked")
+    private static Map<String, Object> healthOf(Map<String, Object> frame) {
+        return (Map<String, Object>) frame.get("health");
     }
 
     @SuppressWarnings("unchecked")
