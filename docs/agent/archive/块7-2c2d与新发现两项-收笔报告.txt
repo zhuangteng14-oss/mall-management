@@ -1,0 +1,146 @@
+块 7 · 补笔〈2c + 2d ＋ 新发现 ① + 新发现 ②〉收笔报告
+生成时间：2026-10-14（本地时间，凌晨）
+本批两笔提交（**均为本地提交：未 push、未 merge、未开 PR** —— 推与合并按口径由您执行）：
+  · commit A = 96232eb  2c + 2d（秒杀扣减接线 + 超时释放条件化）
+  · commit B = b201437  ① + ②（评论写入链路补齐 Source + 超时取消 job 跳过演练带标记的行）
+分支：feat/c3-admin-block7（HEAD = b201437，工作区**干净**）
+
+================================================================
+一、一句话
+================================================================
+您批的四项**全部落地并各自成笔**：2c 让秒杀页下单真的扣名额（TD-38 兑现）、2d 给库存回补
+加「当初真扣过才回补」的前置判据（库存偏账根治）、① 给 /comment/add 加可选 Source 让
+Migration ⑰-4 那句「按 Source='attack' 区分」不再悬空、② 给超时取消 job 加
+`skip-attack-data` 开关（**dev 默认 false**，与加它之前逐字节同行为）。
+两笔共 28 个文件、+1222 / −103；测试 408 → 421 run 全绿，lint / build exit 0。
+
+================================================================
+二、交付清单
+================================================================
+commit A（96232eb，17 文件 / +630 −69）
+  2c  order/service/OrderService.java  `orderAdd` 末尾 +ActivityId、新增「秒杀段」
+      order/controller/OrderController.java  `@RequestParam ActivityId`
+      marketing/seckill/dao/SeckillDao.java  尾追加 releaseSoldStock（补偿腿）
+      cart/service/CartService.java  同行追加 `, ""`（购物车不是秒杀单）
+      web: api/order.js / views/ProductPage.vue / views/SeckillPage.vue
+  2d  mall_management_sql.sql  尾追加 Migration ⑱（order 加列 StockDeducted）
+      order/dao/OrderDao.java  markStockDeducted / selectStockDeducted
+      order/service/OrderService.java  deductStocks 改 boolean + 落标记
+      order/job/OrderTimeoutCancelJob.java  releaseStock 加前置判据
+      goods/dao/GoodsDao.java  javadoc 重写（方法体未动）
+      docs/agent/db-migration.md  #39 + 注意 22
+  测试：新建 OrderTimeoutCancelJobStockGateTest（3 例）/ SeckillOrderDeductSmokeTest（3 例）；
+        3 个既有 smoke 的写库次数如实订正（3 → 4、5 → 6）
+
+commit B（b201437，11 文件 / +592 −34）
+  ①  comment/dao/CommentDao.java       insertComment 末尾 +source（列清单补 `Source`，12 → 13 参数）
+      comment/service/CommentService.java  add 末尾 +source、MAX_SOURCE=16、超长**拒**
+      comment/controller/CommentController.java  `@RequestParam Source`（required=false）
+      observe/service/AttackEngine.java  ATTACK_SOURCE 常量 + 场景 8 发 Source=attack
+      web: 无（本笔零前端改动）
+  ②  order/job/OrderTimeoutCancelJob.java  开关字段 + 常量 + isAttackData 谓词 + advance 跳过分支
+      order/dao/OrderDao.java              selectUnpaidExpired 投影 +Source
+      main/resources/application-dev.properties      skip-attack-data=false（+注释）
+  测试：新建 OrderTimeoutCancelJobSkipAttackDataTest（8 例）/
+        CommentDaoSourceColumnTest（5 例）；CommentServiceReviewLockTest matcher 12 → 13
+
+⚠️ 数据库：**两笔都零库变更**。comment.Source（Migration ⑰-4 / 登记表 #38）与
+   order.Source（#15）**两列都早已落库**，本批不加 Migration、不改表数（仍 37）
+   ⇒ db-migration.md 在 commit B 里不动（commit A 动了，因为 2d 确实加了新列，状态「待落库」）。
+
+================================================================
+三、收验（我跑过的 / 我没跑的）—— 口径：手验由您本人跑
+================================================================
+跑过的（两笔各跑一轮，末轮都在各自提交树的工作区上）：
+  commit A  ./mvnw -o test            → 408 run / 0 fail / 0 error / 26 skip / BUILD SUCCESS
+  commit B  ./mvnw -o test            → 421 run / 0 fail / 0 error / 26 skip / BUILD SUCCESS
+            （+13 = 8 job + 5 DAO；26 skip 与改动前**同集合**）
+  两笔都跑了  npx vue-cli-service lint --no-fix   → exit 0「No lint errors found!」
+  两笔都跑了  npx vue-cli-service build            → exit 0（A: f1903621b8181bb9 / B: cc6ec377fc4fdf89）
+  ⚠️ 跑 lint / build 的正确目录是 Mall-management-web/mall-management-system/（真 app 在那）。
+     在 Mall-management-web/ 跑会让 npx 去网上抓同名的 sh-only 包装包，Windows 上报
+     `'"/bin/sh"' 不是内部或外部命令` —— 本笔踩过一次，不是仓库坏了。
+
+没跑的（按口径，判据在您手里）：
+  ✗ **四项的任何手验**。特别提醒 ② 的两条判据（false ⇒ SIM- 未付款单 60 秒后真被取消 /
+    true ⇒ 60 秒后仍在）**必须用默认 profile 手验**：a3 下 `app.auth.enabled=false`，
+    且 `@EnableScheduling` 总闸挂在 `mall.downgrade.job.enabled` 上 ⇒ a3 下整个调度器不存在。
+  ✗ 没有 push / merge / 开 PR；✗ 没开 commit 5（前端页面那笔）。
+
+================================================================
+四、逐项对照（您的口径 → 落地）
+================================================================
+2c · 秒杀扣减接线   orderAdd 尾部加可选 ActivityId（required=false）；秒杀页下单带上；
+                    现有调用点**一行不动**（只多一句显式补空串的编译代价）；
+                    传 ⇒ 调 deductSoldStock；不传 ⇒ 一次库读都不发、现有行为。
+                    ⚠️ 本段是本仓唯一一条 **fail-closed** 的下单路径（名额没抢到 ⇒ 一张单都不建），
+                       与同一次 orderAdd 里 deductStocks 的 fail-open **刻意相反**。
+
+2d · 超时释放条件化 order 加列 StockDeducted（tinyint(1) NOT NULL DEFAULT 0，加在表末尾）；
+                    Migration ⑱ 追加 .sql 末尾（**本批不改表数**）；deductStock 改返回「是否真扣成功」；
+                    下单 CAS 真扣 ⇒ 1、0 行 no-op ⇒ 0；releaseStock 前置判据 == 1 才释放；**不回填**（明批）。
+                    读不出标记时 **fail-closed**（宁可少还一件，不凭空补一件）。
+
+① · Source='attack'  /comment/add 加可选 Source 入参；CommentDao.insertComment 写 Source 列；
+                    攻击引擎调 /comment/add 时传 Source='attack'；现有调用点不传 ⇒ Source 空；
+                    **SIM- 前缀替代保障保留**（两条标记都要，不是二选一）。
+                    ⚠️ null / 空白归一成 ''（列是 NOT NULL）；超长**拒**而不是截断。
+
+② · job 跳过带标记   `mall.order.cancel.skip-attack-data=true/false`；true ⇒ 跳过带标记
+                    （SIM- 前缀 **或** Source='attack'）的行；false ⇒ 现有行为；**dev 默认 = false**。
+                    跳过点**排在唯一写点 cancelIfUnpaid 之前**，用 continue 不是 return
+                    （跳的是这一条，同轮其余正常单照取消）—— 这条有专门用例钉住。
+
+笔的划分：一笔 = 2c + 2d（96232eb），一笔 = ① + ②（b201437）。
+
+================================================================
+五、⚠️ 如实登记的边界（三条，都写进了代码 javadoc，不留在会话里）
+================================================================
+1. **order.Source 今天没有任何写入点写 'attack'**。该列存在（块 5 给 11 张表加的，.sql:1167），
+   但演练订单只带 SIM- 前缀（seed-demo.sql 写的是 'seed'）⇒ ② 谓词里 `Source='attack'`
+   那一半**目前匹配不到行**，实际起作用的是前缀那一半。
+   ⚠️ 这一半**照样写、不删**（将来真落了这一列就自动生效）。要有写入方，得给**已发布**的
+   `/order/orderAdd` 加可选 Source 入参 —— **那是订单域的契约改动，本笔未做、不做**。
+   ⇒ 供您裁决：要不要另批给订单域也补上这条通道。
+
+2. **api-contract.md 的 /comment/add 入参清单现在少了可选的 Source**（`:641` 那行）。
+   按本批口径（commit 1–8 以代码为主、收口 commit 9 统一处理文档）本笔**不动**，此处**显式登记**。
+   ⚠️ 同处末列的 `:114` 指向 CommentController，本笔插入点在原 :193 之后 ⇒ 该坐标不受影响。
+
+3. **CommentService.java:830 / :619 这两条被引坐标在本笔之前就是陈旧/悬空的**：
+   实测 `CommentDao.selectUserIdByUsername` 的调用点在 HEAD 就在 728 / 1013（不在 830），
+   本笔之后为 747 / 1032 ⇒ 本笔只让它**继续陈旧 +19**，不新引入误指。
+   （同族已知问题，归 commit 9 的 refs-scan 判。）
+
+================================================================
+六、行号漂移（供 commit 9 收口用，本批不在笔内重指）
+================================================================
+commit A 已在提交信息 §六 登记；commit B 的登记如下（数字取自 `git diff -U0` 的 hunk 头，非估算）：
+
+  文件                                             净增   插入点（原行号）
+  comment/controller/CommentController.java        +8     :193 后 +7；:201 同行替换
+  comment/dao/CommentDao.java                      +11    :114 后 +10；:118/:121/:125
+  comment/service/CommentService.java              +19    :93 后 +6；:330 后 +6；:335 后 +1；:349 后 +6
+  observe/service/AttackEngine.java                +47    :83-95 段重写 +23；:129 后 +13；:521 后 +8；:846/:848/:852
+  order/dao/OrderDao.java                          +11    :323 后 +11；:326 同行替换
+  order/job/OrderTimeoutCancelJob.java             +96    :58 后 +23；:87 后 +32；:114/+115；:206 后 +30
+  comment/service/CommentServiceReviewLockTest.java +3    :198 后 +3（其余 9 处为同行替换）
+  main/resources/application-dev.properties        +7     :101 后 +7
+  test/resources/application-smoke.properties      +7     :57 后 +7
+
+**已实测核过、一位不动的高频坐标**（全部落在插入点之前）：
+  · OrderDao.java  :116(×388) :117(×106) :125(×103) :133(×427) :138(×296) :141 :146 :265 :272 :310 :312 :317 :319
+    —— 唯一被推移的是 :363(×35) ⇒ 374、:324(×2) ⇒ 335（+11），归 commit 9。
+    （已核 commit A 的 OrderDao 改动在文件尾 @@ -492,4，也在 323 之后 ⇒ 只被推移这一次。）
+  · application-dev.properties :36 :80(×75) :81 :95(×92)   · application-smoke.properties :31(×204)
+  · CommentController.java :27 :28 :29 :114 :124 :128      · CommentDao.java :14 :97（后者之前）
+  · AttackEngine.java / OrderTimeoutCancelJob.java / CommentServiceReviewLockTest.java：grep 0 命中
+
+================================================================
+七、工作区状态 / 明确没做的事
+================================================================
+  · git status --short 为空（两笔都已提交，无残留改动）。
+  · 提交卫生：commit -F 传文件（未用 heredoc）、git add 逐个具体文件（未用 -A）、
+    提交前对**全部暂存文件 + 提交信息**跑了「连续重复行」扫描 ⇒ 0 命中。
+  · 没做：开 commit 5（前端页面）、push、merge、开 PR、跑手验、改任何库、动表数。
+  · 本报告为**收笔报告**，只落桌面 txt；扫描/日志等过程产物在 _work/（logs 见 _work/logs/c7-*）。
