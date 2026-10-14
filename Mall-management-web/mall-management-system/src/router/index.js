@@ -420,16 +420,16 @@ function restoreScrollWhenSettled(savedPosition) {
 //     · `sub`   —— **子项**的点亮键（域入口记录没有这个键），与 `subs[].key` **逐字相同**；
 //     · `title` —— 顶栏面包屑（`AdminShell.vue` 读 `route.meta.title`）。
 //   ⚠️ **不加 `meta.roles`**：父记录的 `['3']` 沿 `matched` 链**合并**下来（与另两壳同一机制）。
-//   ⚠️ **11 条占位记录共用 `StubPage.vue`**（2026-10-08 少一条：`observe/audit` → 真页 `AuditPage.vue`；
-//      2026-10-09 再少一条：`business/notify` → 真页 `NotifyPage.vue`，C3 块 1 · I2；2026-10-09 同日 C3 块 2〈用户块〉再少一条：`business/accounts` → 真页 `AccountsPage.vue`）—— 余下 **10** 条**只差数据**，没有一处结构差异；
-//      而那正是「不该各写一个文件」的判据（见该组件块首注）。
+//   ⚠️ **5 条占位记录共用 `StubPage.vue`**（2 个域入口 + 3 个子项）—— 历次减记：2026-10-08 `observe/audit` → 真页 `AuditPage.vue`；
+//      2026-10-09 `business/notify` → 真页 `NotifyPage.vue`（C3 块 1 · I2）· `business/accounts` → 真页 `AccountsPage.vue`（C3 块 2）；C3 块 3–6 各少一条（`business/{catalog,orders,marketing,moderation}` → 各自真页 —— ⚠️ 那四笔**当时漏记**，2026-10-14 按 `grep -c 'component: AdminStub'` 实测 = 6 一并更正）；2026-10-14 块 7 · commit 5 少一条 `observe/attack-sim` → 真页 `AttackConsole.vue`；
+//      —— 余下 **5** 条**只差数据**，没有一处结构差异；而那正是「不该各写一个文件」的判据（见该组件块首注）。
 //   ⚠️ **第三笔的两处命名更正**（用户裁决）：域名「风控域」→「**可观测域**」；
 //      URL `/admin/biz` → `/admin/business`、`/admin/risk` → `/admin/observe`。旧名**已废**。
 //   ⚠️ **URL 裁决（2026-10-08，第三笔过审后）**：两条子项 URL 改名 —— `content` → **`moderation`**、
 //      `flows` → **`timeline`**（其余 9 条保留；理由见 `config/admin-nav.js` 块首）。`meta.sub` 同步改。
 //   ⚠️ 以上所有条**都在本文件最大被引行 `:378` 之后**（那份说明在本块上方），故加行**零漂移**。
-// ⚠️ **10 条占位记录共用同一个组件**（2 个域入口 + 8 个子项；`observe/audit`、`business/notify`、`business/accounts` 已换真页）⇒ 抽成局部常量，
-//   免得同一句 `import()` 抄 11 遍。改名的前因见 `StubPage.vue` 块首（它第二笔叫 `DomainStub`）。
+// ⚠️ **5 条占位记录共用同一个组件**（2 个域入口 + 3 个子项：`observe/{metrics,timeline,logs}`）⇒ 抽成局部常量，
+//   免得同一句 `import()` 抄 5 遍。改名的前因见 `StubPage.vue` 块首（它第二笔叫 `DomainStub`）。
 //   ⚠️ 这是**局部**常量（`addRoute` 之前、`:378` 之后），不是顶部 import —— 顶部加行会漂移。
 const AdminStub = () => import('../views/admin/StubPage.vue')
 
@@ -456,7 +456,7 @@ router.addRoute({
     { path: 'business/notify',     meta: { key: 'business', sub: 'notify',     title: '系统通知' },       component: () => import('../views/admin/NotifyPage.vue') },   // C3 块1·I2：占位 → 真页（同行替换）
 
     { path: 'observe', meta: { key: 'observe', title: '可观测域' }, component: AdminStub },
-    { path: 'observe/attack-sim', meta: { key: 'observe', sub: 'attack-sim', title: '攻击模拟器' }, component: AdminStub },
+    { path: 'observe/attack-sim', meta: { key: 'observe', sub: 'attack-sim', title: '攻击模拟器' }, component: () => import('../views/admin/observe/AttackConsole.vue') },   // C3 块 7〈可观测域〉commit 5（2026-10-14）：占位 → 真页（**同行替换**，照 `:451` accounts / `:452` catalog / `:453` orders / `:454` marketing / `:455` moderation / `:456` notify 那六条的做法）
     { path: 'observe/metrics',    meta: { key: 'observe', sub: 'metrics',    title: '指标面板' },   component: AdminStub },
     { path: 'observe/timeline',   meta: { key: 'observe', sub: 'timeline',   title: '状态流转' },   component: AdminStub },
     { path: 'observe/logs',       meta: { key: 'observe', sub: 'logs',       title: '实时日志' },   component: AdminStub },
