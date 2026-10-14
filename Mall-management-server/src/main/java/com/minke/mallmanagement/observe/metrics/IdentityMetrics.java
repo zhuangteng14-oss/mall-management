@@ -1,5 +1,6 @@
 package com.minke.mallmanagement.observe.metrics;
 
+import com.minke.mallmanagement.shared.web.TraceIdFilter;
 import io.micrometer.core.instrument.MeterRegistry;
 import org.springframework.stereotype.Component;
 
@@ -82,20 +83,24 @@ public class IdentityMetrics {
      * 一次<b>放行</b>的身份校验。
      *
      * @param subject 被校验的业务号。⚠️ 只进事件流，绝不进 tag（基数无界）
+     * @param path    被校验的那个**请求路径**（块 7 · commit 8 新增）—— 一次鉴权闸判的是「这个端点」，
+     *                只有业务号看不出判的是哪个端点；实时日志页要用它标出「这条身份事件挡在哪」。
+     *                拿不到请求时传 null（切片 / 非 web 调用）
      */
-    public void passed(String subject) {
+    public void passed(String subject, String path) {
         registry.counter(CHECKS, "result", Result.PASSED.tag).increment();
-        event(Result.PASSED.tag, subject, null);
+        event(Result.PASSED.tag, subject, null, path);
     }
 
     /**
      * 一次<b>拒绝</b>的身份校验。
      *
      * @param reason 拒绝原因（简短文本，由发起校验的那一处给）。只进事件流 —— 自由文本、基数无界
+     * @param path   ／同 {@link #passed}
      */
-    public void rejected(String subject, String reason) {
+    public void rejected(String subject, String reason, String path) {
         registry.counter(CHECKS, "result", Result.REJECTED.tag).increment();
-        event(Result.REJECTED.tag, subject, reason);
+        event(Result.REJECTED.tag, subject, reason, path);
     }
 
     // ================= 事件流 =================
@@ -120,11 +125,12 @@ public class IdentityMetrics {
     }
 
     /** 追加一条事件。{@code subject} / {@code reason} 只在事件里以字符串形式出现 —— tag 里绝不能有它们。 */
-    private void event(String result, String subject, String reason) {
+    private void event(String result, String subject, String reason, String path) {
         long seq = eventCursor.getAndIncrement();
         events[(int) (seq & EVENT_MASK)] = new IdentityEvent(
                 seq, System.currentTimeMillis(), result,
-                subject == null ? null : String.valueOf(subject), reason);
+                subject == null ? null : String.valueOf(subject), reason,
+                path == null ? null : String.valueOf(path), TraceIdFilter.current());
     }
 
     /**
@@ -135,9 +141,11 @@ public class IdentityMetrics {
      * @param result     passed | rejected
      * @param subject    被校验的业务号
      * @param reason     拒绝原因；{@code passed} 时为 null
+     * @param path       被校验的请求路径（块 7 · commit 8 新增）
+     * @param traceId    产生本条事件的那次请求的号（块 7 · commit 8 新增）；不在请求线程上时为 null
      */
     public record IdentityEvent(long seq, long epochMilli, String result,
-                                String subject, String reason) {
+                                String subject, String reason, String path, String traceId) {
     }
 
     /** {@code mall.identity.checks} 的 result 取值。tag 字段避免每次调用拼字符串。 */

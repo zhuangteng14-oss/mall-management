@@ -149,7 +149,7 @@ public class StockMetrics {
         long seq = eventCursor.getAndIncrement();
         events[(int) (seq & EVENT_MASK)] = new StockEvent(
                 seq, System.currentTimeMillis(), kind, result,
-                skuCode == null ? null : String.valueOf(skuCode), qty);
+                skuCode == null ? null : String.valueOf(skuCode), qty, com.minke.mallmanagement.shared.web.TraceIdFilter.current());   // 块 7 · commit 8：写全限定名而非 import，理由同 {@code MallCacheMetrics#event}（保本文件 `:75` 的引用不下移）
     }
 
     /**
@@ -163,7 +163,7 @@ public class StockMetrics {
      * @param qty        本次数量（进/出库的件数）
      */
     public record StockEvent(long seq, long epochMilli, String kind, String result,
-                             String skuCode, int qty) {
+                             String skuCode, int qty, String traceId) {
     }
 
     /** {@code mall.stock.deduct} 的 result 取值。tag 字段避免每次调用拼字符串。 */

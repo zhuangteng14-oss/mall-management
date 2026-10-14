@@ -230,7 +230,20 @@ public class GoodsController {
         if (!IdentityGuard.requireSelfOrAdmin(request, MerchantId)) {
             return IdentityGuard.forbidden();
         }
-        return ResponseEntity.ok(Result.of(goodsService.goodsDe(MerchantId, GoodName, ProductCode)));
+        // ═══ 块 7 · commit 8：跨域补挂的**审计漏挂**（本端点是块 1 就有的，当时只给 goodsUp 挂了样板）═══
+        // 形状同 goodsUp 四步，但**顺序是本条的关键**：两条真 DELETE 一走，行就从表里没了
+        // ⇒ 快照**必须**在业务之前取，否则「改前」恒为空数组（同 AdminCatalogController 那两条
+        //   违规处置的写法，它们也是先 snapshot 后动作）。
+        // ⚠️ 快照谓词借的是 selectGoodsForAudit(MerchantId, ProductCode)（**不含 GoodName**，
+        //    比 deleteGoods 的三元组宽）。这是本仓**既有**口径：违规下架 / 违规删除两条端点
+        //    同样拿这条读去对三元组动作 —— 本笔随大流，未顺手改它。
+        List<Map<String, Object>> before = goodsService.snapshotGoodsForAudit(MerchantId, ProductCode);
+        Map<String, Object> deleted = goodsService.goodsDe(MerchantId, GoodName, ProductCode);
+        if (Boolean.TRUE.equals(deleted.get("success"))) {
+            auditService.record(AuthSession.identify(request), AuditActions.GOODS_DELETE, "goods",
+                    MerchantId + ":" + ProductCode, before, null);
+        }
+        return ResponseEntity.ok(Result.of(deleted));
     }
 
     //这是一个接口（用于根据商品的不同型号切换显示对应的价格）

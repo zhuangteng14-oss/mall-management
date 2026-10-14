@@ -9,8 +9,10 @@ import org.springframework.transaction.annotation.Transactional;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * 敏感词域的服务层（C3 块 6 · 整改 commit 5）—— <b>词表维护 + 命中判定 + 历史评论扫描</b>。
@@ -243,6 +245,9 @@ public class SensitiveWordService {
         }
 
         StringBuilder sb = new StringBuilder(text.length());
+        // 块 7 · commit 8：命中的**词**（去重 + 插入序）。以前只往事件流报「命中几个」，页面答不出
+        // 「命中了什么」—— 而那恰恰是看敏感词环时最该看的一个数。⚠️ 只进事件流，绝不进 tag。
+        Set<String> hitWords = new LinkedHashSet<>();
         int hit = 0;
         int i = 0;
         while (i < text.length()) {
@@ -252,6 +257,7 @@ public class SensitiveWordService {
                 i++;
             } else {
                 sb.append(MASK);
+                hitWords.add(matched);
                 hit += matched.length();
                 i += matched.length();
             }
@@ -273,9 +279,9 @@ public class SensitiveWordService {
         // `hit / total` 就等于被拿去比阈值的那个命中率；场景现值只有一个（唯一调用点 =
         // `CommentService.add` 发表前）。
         if (Boolean.TRUE.equals(result.get("rejected"))) {
-            sensitiveMetrics.rejected("评论", hit, text.length());
+            sensitiveMetrics.rejected("评论", hit, text.length(), joinWords(hitWords));
         } else {
-            sensitiveMetrics.masked("评论", hit, text.length());
+            sensitiveMetrics.masked("评论", hit, text.length(), joinWords(hitWords));
         }
         return result;
     }
@@ -367,6 +373,20 @@ public class SensitiveWordService {
     private static String str(Object o) {
         return o == null ? null : String.valueOf(o);
     }
+
+    /** 命中的词拼成一行事件字段（块 7 · commit 8）。去重已由调用方的 {@link LinkedHashSet} 做掉，
+     *  这里只管**限长** —— 词表里可以有很长的条目，而事件流是给页面看的，不该被它撑爆一条记录。
+     *  一个都没命中 ⇒ 回 {@code null}（事件里「没有命中的词」与「命中的词是空串」不该长得一样）。 */
+    private static String joinWords(Set<String> hitWords) {
+        if (hitWords.isEmpty()) {
+            return null;
+        }
+        String joined = String.join(",", hitWords);
+        return joined.length() <= MAX_WORDS_CHARS ? joined : joined.substring(0, MAX_WORDS_CHARS) + "…";
+    }
+
+    /** 命中词字段的长度上限（字符）。够看清「命中了什么」，又不至于让一条事件变成几百字。 */
+    private static final int MAX_WORDS_CHARS = 200;
 
     private static boolean isBlank(String s) {
         return s == null || s.isBlank();

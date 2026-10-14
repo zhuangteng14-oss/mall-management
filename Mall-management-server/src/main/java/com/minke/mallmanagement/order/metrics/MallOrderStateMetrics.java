@@ -259,7 +259,7 @@ public class MallOrderStateMetrics {
         long seq = eventCursor.getAndIncrement();
         events[(int) (seq & EVENT_MASK)] = new OrderStateEvent(
                 seq, System.currentTimeMillis(), kind, action, from, to, result, shape,
-                key == null ? null : String.valueOf(key));
+                key == null ? null : String.valueOf(key), com.minke.mallmanagement.shared.web.TraceIdFilter.current());   // 块 7 · commit 8：写全限定名而非 import，理由同 {@code MallCacheMetrics#event}（保本文件 `:3` 与 `:104` 的引用不下移）
     }
 
     /**
@@ -278,7 +278,7 @@ public class MallOrderStateMetrics {
      * @param key        涉及的业务键（订单号）
      */
     public record OrderStateEvent(long seq, long epochMilli, String kind, String action,
-                                  String from, String to, String result, String shape, String key) {
+                                  String from, String to, String result, String shape, String key, String traceId) {
     }
 
     /** {@code mall.order.state.transitions} 的 result 取值。tag 字段避免每次调用拼字符串。 */

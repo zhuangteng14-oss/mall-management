@@ -11,13 +11,16 @@ import com.minke.mallmanagement.order.metrics.MallOrderStateMetrics;
 import com.minke.mallmanagement.order.model.OrderAction;
 import com.minke.mallmanagement.shared.cache.MallCacheMetrics;
 import com.minke.mallmanagement.shared.lock.MallLockMetrics;
+import com.minke.mallmanagement.shared.web.TraceIdFilter;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.slf4j.MDC;
 
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.tuple;
 
 /**
  * 事件广播器（{@link EventBroadcaster}）的语义实测 —— 八环合并、游标、severity 规则表、
@@ -98,14 +101,14 @@ class EventBroadcasterTest {
         stock.deduct(SKU, 1, StockMetrics.Deduct.INSUFFICIENT);      // warn
         stock.release(SKU, 1, StockMetrics.Release.ERROR);           // error
         stock.release(SKU, 1, StockMetrics.Release.MISSING);         // info（「什么也没发生」）
-        audit.written("C-1", "goods.add");                           // info
-        audit.failed("C-1", "goods.add", "db down");                 // warn
+        audit.written("C-1", "goods.add", "goods", "M-1:P-1");       // info
+        audit.failed("C-1", "goods.add", "db down", "goods", "M-1:P-1");  // warn
         notify.sent("email", "order.paid", "C-1");                   // info
         notify.failed("email", "order.paid", "C-1", "smtp 550");     // warn
-        sensitive.masked("comment", 1, 20);                          // info
-        sensitive.rejected("comment", 9, 10);                        // warn
-        identity.passed("C-1");                                      // info
-        identity.rejected("C-1", "令牌过期");                          // warn
+        sensitive.masked("comment", 1, 20, "傻逼");                   // info
+        sensitive.rejected("comment", 9, 10, "滚");                   // warn
+        identity.passed("C-1", "/goods/goodsUp");                    // info
+        identity.rejected("C-1", "令牌过期", "/goods/goodsUp");        // warn
         lock.acquire("order:create", "O-9", MallLockMetrics.Outcome.TIMEOUT, 3_000_000L);  // warn（fail-open）
         cache.l1Request("goods", "k1", false);                       // info（miss 刻意不染黄）
 
@@ -160,6 +163,43 @@ class EventBroadcasterTest {
                 .allSatisfy(ts -> assertThat(ts).isPositive());
     }
 
+    @Test
+    @DisplayName("对象字段逐环补全（块 7 · commit 8）：五环取各自的业务键，审计取 TargetType/TargetId、"
+            + "敏感词取命中的词、身份取请求路径")
+    void objectFieldsAreFilledPerRing() {
+        emitOneOfEach();
+        broadcaster.poll();
+
+        assertThat(broadcaster.since(-1))
+                .extracting(ObservedEvent::kind, ObservedEvent::objectType, ObservedEvent::objectId)
+                .as("顺序 = 环序（同 poll 的分组口径）")
+                .containsExactly(
+                        tuple("cache", "cache", "k1"),
+                        tuple("lock", "lock", "O-1"),
+                        tuple("order", "order", "O-1"),
+                        tuple("stock", "sku", SKU),
+                        tuple("audit", "order", "O-1"),        // ← 补的就是这两列
+                        tuple("notify", "notify", "C-1"),
+                        tuple("sensitive", "sensitive", null), // ← 一条也没命中 ⇒ 没有「命中的词」
+                        tuple("identity", "identity", "/order/orderReceive"));  // ← 补的就是这一列
+    }
+
+    @Test
+    @DisplayName("traceId 在**记录那一刻**取（MDC）—— 不是在 poll() 那一刻取（流线程上 MDC 是空的）")
+    void traceIdIsCapturedAtRecordTime() {
+        MDC.put(TraceIdFilter.MDC_KEY, "trace0001");
+        try {
+            emitOneOfEach();
+        } finally {
+            MDC.remove(TraceIdFilter.MDC_KEY);
+        }
+        // 到这里 MDC 已经清空 —— 若取值点落在 poll() / since() 上，下面每一条都会是 null。
+        broadcaster.poll();
+
+        assertThat(broadcaster.since(-1)).extracting(ObservedEvent::traceId)
+                .as("八条都带上了记录那一刻的 traceId").containsOnly("trace0001");
+    }
+
     // ================= 覆盖边界 =================
 
     @Test
@@ -201,10 +241,10 @@ class EventBroadcasterTest {
         lock.acquire("order:create", "O-1", MallLockMetrics.Outcome.ACQUIRED, 1_000_000L);
         order.transition(OrderAction.CREATE, "none", "waitPay", MallOrderStateMetrics.Result.APPLIED, "O-1");
         stock.deduct(SKU, 1, StockMetrics.Deduct.OK);
-        audit.written("C-1", "order.add");
+        audit.written("C-1", "order.add", "order", "O-1");
         notify.sent("email", "order.created", "C-1");
-        sensitive.masked("comment", 0, 20);
-        identity.passed("C-1");
+        sensitive.masked("comment", 0, 20, null);
+        identity.passed("C-1", "/order/orderReceive");
     }
 
     private List<String> titlesOf(Severity severity) {

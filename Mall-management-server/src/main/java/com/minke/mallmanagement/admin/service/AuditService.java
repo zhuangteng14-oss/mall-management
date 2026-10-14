@@ -85,12 +85,12 @@ public class AuditService {
                     toJson(before), toJson(after));
             // 块 7 · 观测（commit 2b）：走到这里 = 那条 INSERT 真的发出去了。actor 取**会话**
             //（与上面几行同源），失败率这个数只有本环读得到 —— 本方法吞异常。
-            auditMetrics.written(actor == null ? null : actor.userId(), action);
+            auditMetrics.written(actor == null ? null : actor.userId(), action, targetType, targetId);   // 块 7 · commit 8：本行多带两个入参（同行改，未增删行）—— targetType / targetId 本就在本方法入参里，以前只是没往事件流带
         } catch (Exception e) {
             // fail-open：业务已经成功了，不能让审计把它翻成失败。见类注释「为什么吞异常」。
             log.error("审计写入失败（AUDIT）：action={} targetType={} targetId={} —— 业务操作已完成，本行丢失",
                     action, targetType, targetId, e);
-            auditMetrics.failed(actor == null ? null : actor.userId(), action, e.toString());
+            auditMetrics.failed(actor == null ? null : actor.userId(), action, e.toString(), targetType, targetId);   // 块 7 · commit 8：同上（同行改）
         }
     }
 

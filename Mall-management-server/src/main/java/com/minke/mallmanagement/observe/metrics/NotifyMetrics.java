@@ -1,5 +1,6 @@
 package com.minke.mallmanagement.observe.metrics;
 
+import com.minke.mallmanagement.shared.web.TraceIdFilter;
 import io.micrometer.core.instrument.MeterRegistry;
 import org.springframework.stereotype.Component;
 
@@ -124,7 +125,7 @@ public class NotifyMetrics {
                 seq, System.currentTimeMillis(), result,
                 toType == null ? null : String.valueOf(toType),
                 eventType == null ? null : String.valueOf(eventType),
-                key == null ? null : String.valueOf(key), reason);
+                key == null ? null : String.valueOf(key), reason, TraceIdFilter.current());
     }
 
     /**
@@ -139,7 +140,7 @@ public class NotifyMetrics {
      * @param reason     失败原因；{@code sent} 时为 null
      */
     public record NotifyEvent(long seq, long epochMilli, String result, String toType,
-                              String eventType, String key, String reason) {
+                              String eventType, String key, String reason, String traceId) {
     }
 
     /** {@code mall.notify.sends} 的 result 取值。tag 字段避免每次调用拼字符串。 */

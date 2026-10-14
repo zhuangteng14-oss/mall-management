@@ -65,16 +65,37 @@ public class TraceIdFilter extends OncePerRequestFilter {
      */
     private static final Pattern ACCEPTED = Pattern.compile("[A-Za-z0-9_-]{8,64}");
 
+    /**
+     * 当前线程正在服务的请求号；不在请求线程上（定时任务 / SSE 流线程 / 异步池）返回 {@code null}。
+     *
+     * <p>存在的理由是块 7 · commit 8 的<b>归属</b>：八个事件环的记录点都在请求线程上，它们要给自己
+     * 记出的每条事件标一个号（{@code ObservedEvent.traceId}），前端才可能把「页面上那张卡片」
+     * 归到「哪一次请求」并画出链路。取值只能走 MDC —— 那是本类唯一的写入点，别处不许再设。
+     *
+     * <p>⚠️ <b>这是有意的静态口，不是漏了注入</b>：调用方（{@code observe/metrics/*} 与
+     * {@code shared/{cache,lock}} 的指标类）全都是 {@code @Component}，本可以注入 —— 但那样每个
+     * 记录点都要多带一个字段、多一份切片里可能取不到的依赖，而 MDC 本身就是个线程局部静态表，
+     * 包一层注入只是把同一个静态读打扮成实例调用。读一次是 {@code ThreadLocal} 的 map 查表，热路径上可忽略。
+     */
+    public static String current() {
+        return MDC.get(MDC_KEY);
+    }
+
     @Override
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain chain)
             throws ServletException, IOException {
         String traceId = pick(request.getHeader(HEADER));
+        long startMs = System.currentTimeMillis();
         MDC.put(MDC_KEY, traceId);
         // 先设头再放行：即使后面被 AuthInterceptor 拒了（401），响应上也带着号 —— 这正是排查时最需要的那个场景。
         response.setHeader(HEADER, traceId);
         try {
             chain.doFilter(request, response);
         } finally {
+            // 块 7 · commit 8：把「这一趟跑了多久」记进台账。前端抽屉的「总耗时 xx ms」与链路两端
+            //（请求开始 / 请求结束）都出自这一行 —— 事件本身推不出「请求何时结束」。
+            TraceLog.record(traceId, request.getMethod(), request.getRequestURI(), response.getStatus(),
+                    startMs, System.currentTimeMillis());
             // ⚠️ 必须清：Tomcat 的工作线程是**复用**的，不清就会把上一个请求的号带进下一个请求的日志。
             MDC.remove(MDC_KEY);
         }

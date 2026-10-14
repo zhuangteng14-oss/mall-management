@@ -26,8 +26,8 @@ class IdentityMetricsTest {
     @Test
     @DisplayName("passed / rejected **两路都记**（要有分母才看得出拒绝率），rejected 带原因")
     void bothOutcomesAreRecorded() {
-        metrics.passed(SUBJECT);
-        metrics.rejected(SUBJECT, "封禁用户");
+        metrics.passed(SUBJECT, "/goods/goodsUp");
+        metrics.rejected(SUBJECT, "封禁用户", "/goods/goodsUp");
 
         assertThat(count("passed")).isEqualTo(1.0);
         assertThat(count("rejected")).isEqualTo(1.0);
@@ -37,13 +37,17 @@ class IdentityMetricsTest {
         assertThat(events).extracting(IdentityEvent::subject).containsExactly(SUBJECT, SUBJECT);
         assertThat(events.get(0).reason()).as("放行没有原因").isNull();
         assertThat(events.get(1).reason()).isEqualTo("封禁用户");
+        // 块 7 · commit 8 新带的第三列：被访问的请求路径（身份环的「对象字段补全」第一层）
+        assertThat(events).extracting(IdentityEvent::path)
+                .containsExactly("/goods/goodsUp", "/goods/goodsUp");
+        assertThat(events.get(0).traceId()).as("不在请求线程上 ⇒ traceId 为 null").isNull();
     }
 
     @Test
     @DisplayName("不埋「拒绝率」：它是 rejected / (passed + rejected) 的派生量（规范第 6 条）")
     void rejectionRateIsNotItsOwnCounter() {
-        metrics.passed(SUBJECT);
-        metrics.rejected(SUBJECT, "令牌无效");
+        metrics.passed(SUBJECT, "/order/orderReceive");
+        metrics.rejected(SUBJECT, "令牌无效", "/order/orderReceive");
 
         assertThat(registry.find(IdentityMetrics.CHECKS).counters())
                 .as("本指标下只有两路计数，没有第三个「率」").hasSize(2);
@@ -53,8 +57,8 @@ class IdentityMetricsTest {
     @Test
     @DisplayName("基数铁律：业务号与原因文本都不进 tag —— 两个不同主体共用一个时间序列")
     void subjectAndReasonNeverBecomeTags() {
-        metrics.rejected("U0001", "封禁用户");
-        metrics.rejected("U0002", "令牌无效");
+        metrics.rejected("U0001", "封禁用户", "/goods/goodsUp");
+        metrics.rejected("U0002", "令牌无效", "/order/orderReceive");
 
         assertThat(count("rejected")).as("两个不同的主体 + 两条不同的原因落在同一条计数上").isEqualTo(2.0);
         assertThat(registry.find(IdentityMetrics.CHECKS).counters())
@@ -69,7 +73,7 @@ class IdentityMetricsTest {
         int capacity = 512;
         int extra = 8;
         for (int i = 0; i < capacity + extra; i++) {
-            metrics.passed(SUBJECT);
+            metrics.passed(SUBJECT, "/goods/goodsUp");
         }
 
         List<IdentityEvent> events = metrics.recentEvents();

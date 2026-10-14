@@ -185,7 +185,7 @@ public class MallLockMetrics {
         long seq = eventCursor.getAndIncrement();
         events[(int) (seq & EVENT_MASK)] = new MallLockEvent(
                 seq, System.currentTimeMillis(), lock, kind, result,
-                key == null ? null : String.valueOf(key));
+                key == null ? null : String.valueOf(key), com.minke.mallmanagement.shared.web.TraceIdFilter.current());   // 块 7 · commit 8：写全限定名而非 import，理由同 {@code MallCacheMetrics#event}（保本文件 `:71`/`:72`/`:74` 的引用不下移）
     }
 
     /**
@@ -199,7 +199,7 @@ public class MallLockMetrics {
      * @param key        涉及的业务键；翻转为 null
      */
     public record MallLockEvent(long seq, long epochMilli, String lock, String kind,
-                                String result, String key) {
+                                String result, String key, String traceId) {
     }
 
     /** {@code mall.lock.acquires} 的 result 取值。tag 字段避免每次调用拼字符串。 */

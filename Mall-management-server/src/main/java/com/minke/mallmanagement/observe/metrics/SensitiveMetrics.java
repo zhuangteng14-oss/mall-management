@@ -1,5 +1,6 @@
 package com.minke.mallmanagement.observe.metrics;
 
+import com.minke.mallmanagement.shared.web.TraceIdFilter;
 import io.micrometer.core.instrument.MeterRegistry;
 import org.springframework.stereotype.Component;
 
@@ -81,20 +82,24 @@ public class SensitiveMetrics {
      * @param scene 安检场景（评论 / 举报 / 昵称…）。⚠️ 只进事件流，绝不进 tag
      * @param hit   命中的敏感词数
      * @param total 参与本次判定的词数（{@code hit / total} 就是那个被拿去比阈值的命中率）
+     * @param words <b>命中的那些词</b>（块 7 · commit 8 新增，逗号分隔，已去重、已截断）——
+     *              以前只记「命中几个」，实时日志页答不出「命中了什么」这个最该看的数。
+     *              ⚠️ 只进事件流，绝不进 tag（它是**词表内容**，基数无界且可能含攻击者构造的长串）
      */
-    public void masked(String scene, int hit, int total) {
+    public void masked(String scene, int hit, int total, String words) {
         registry.counter(CHECKS, "result", Result.MASKED.tag).increment();
-        event(Result.MASKED.tag, scene, hit, total);
+        event(Result.MASKED.tag, scene, hit, total, words);
     }
 
     /**
      * 一次<b>拒收</b>的处置（命中率达到阈值）。
      *
      * @param scene 安检场景（只进事件流，理由同 {@link #masked}）
+     * @param words ／同 {@link #masked}
      */
-    public void rejected(String scene, int hit, int total) {
+    public void rejected(String scene, int hit, int total, String words) {
         registry.counter(CHECKS, "result", Result.REJECTED.tag).increment();
-        event(Result.REJECTED.tag, scene, hit, total);
+        event(Result.REJECTED.tag, scene, hit, total, words);
     }
 
     // ================= 事件流 =================
@@ -119,11 +124,11 @@ public class SensitiveMetrics {
     }
 
     /** 追加一条事件。{@code scene} 只在事件里以字符串形式出现 —— tag 里绝不能有它。 */
-    private void event(String result, String scene, int hit, int total) {
+    private void event(String result, String scene, int hit, int total, String words) {
         long seq = eventCursor.getAndIncrement();
         events[(int) (seq & EVENT_MASK)] = new SensitiveEvent(
                 seq, System.currentTimeMillis(), result,
-                scene == null ? null : String.valueOf(scene), hit, total);
+                scene == null ? null : String.valueOf(scene), hit, total, words, TraceIdFilter.current());
     }
 
     /**
@@ -135,9 +140,11 @@ public class SensitiveMetrics {
      * @param scene      安检场景
      * @param hit        命中词数
      * @param total      参与判定的词数
+     * @param words      命中的词（块 7 · commit 8 新增，逗号分隔；一个都没命中时为 null）
+     * @param traceId    产生本条事件的那次请求的号（块 7 · commit 8 新增）；不在请求线程上时为 null
      */
     public record SensitiveEvent(long seq, long epochMilli, String result,
-                                 String scene, int hit, int total) {
+                                 String scene, int hit, int total, String words, String traceId) {
     }
 
     /** {@code mall.sensitive.checks} 的 result 取值。tag 字段避免每次调用拼字符串。 */

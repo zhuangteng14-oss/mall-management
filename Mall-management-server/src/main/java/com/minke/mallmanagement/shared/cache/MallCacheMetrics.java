@@ -273,7 +273,7 @@ public class MallCacheMetrics {
         long seq = eventCursor.getAndIncrement();
         events[(int) (seq & EVENT_MASK)] = new MallCacheEvent(
                 seq, System.currentTimeMillis(), cache, kind, result,
-                key == null ? null : String.valueOf(key));
+                key == null ? null : String.valueOf(key), com.minke.mallmanagement.shared.web.TraceIdFilter.current());   // 块 7 · commit 8：写全限定名而非 import —— 本文件 `:65`/`:102-103`/`:109` 那批「文件:行号」引用不能因加一行 import 而下移
     }
 
     /**
@@ -288,7 +288,7 @@ public class MallCacheMetrics {
      * @param key        涉及的业务键；整片失效、探活、翻转为 null
      */
     public record MallCacheEvent(long seq, long epochMilli, String cache, String kind,
-                                 String result, String key) {
+                                 String result, String key, String traceId) {
     }
 
     /** {@code mall.cache.l2.requests} 的 result 取值。tag 字段避免每次调用拼字符串。 */

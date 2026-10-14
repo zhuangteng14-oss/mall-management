@@ -420,16 +420,16 @@ function restoreScrollWhenSettled(savedPosition) {
 //     · `sub`   —— **子项**的点亮键（域入口记录没有这个键），与 `subs[].key` **逐字相同**；
 //     · `title` —— 顶栏面包屑（`AdminShell.vue` 读 `route.meta.title`）。
 //   ⚠️ **不加 `meta.roles`**：父记录的 `['3']` 沿 `matched` 链**合并**下来（与另两壳同一机制）。
-//   ⚠️ **4 条占位记录共用 `StubPage.vue`**（2 个域入口 + 2 个子项）—— 历次减记：2026-10-08 `observe/audit` → 真页 `AuditPage.vue`；
-//      2026-10-09 `business/notify` → 真页 `NotifyPage.vue`（C3 块 1 · I2）· `business/accounts` → 真页 `AccountsPage.vue`（C3 块 2）；C3 块 3–6 各少一条（`business/{catalog,orders,marketing,moderation}` → 各自真页 —— ⚠️ 那四笔**当时漏记**，2026-10-14 按 `grep -c 'component: AdminStub'` 实测 = 6 一并更正）；2026-10-14 块 7 · commit 5 少一条 `observe/attack-sim` → 真页 `AttackConsole.vue`；2026-10-14 块 7 · commit 6 少一条 `observe/metrics` → 真页 `MetricsPanel.vue`（Pager.vue 同批新增，本笔尚无调用点）；
-//      —— 余下 **4** 条**只差数据**，没有一处结构差异；而那正是「不该各写一个文件」的判据（见该组件块首注）。
+//   ⚠️ **2 条占位记录共用 `StubPage.vue`**（2 个域入口）—— 历次减记：2026-10-08 `observe/audit` → 真页 `AuditPage.vue`；
+//      2026-10-09 `business/notify` → 真页 `NotifyPage.vue`（C3 块 1 · I2）· `business/accounts` → 真页 `AccountsPage.vue`（C3 块 2）；C3 块 3–6 各少一条（`business/{catalog,orders,marketing,moderation}` → 各自真页 —— ⚠️ 那四笔**当时漏记**，2026-10-14 按 `grep -c 'component: AdminStub'` 实测 = 6 一并更正）；2026-10-14 块 7 · commit 5 少一条 `observe/attack-sim` → 真页 `AttackConsole.vue`；2026-10-14 块 7 · commit 6 少一条 `observe/metrics` → 真页 `MetricsPanel.vue`（Pager.vue 同批新增，本笔尚无调用点）；2026-10-14 块 7 · commit 7 少一条 `observe/timeline` → 真页 `OrderFlow.vue`（Pager.vue 从本笔起有调用点）；2026-10-14 块 7 · commit 8 少一条 `observe/logs` → 真页 `EventLog.vue`；
+//      —— 余下 **2** 条**只差数据**，没有一处结构差异；而那正是「不该各写一个文件」的判据（见该组件块首注）。
 //   ⚠️ **第三笔的两处命名更正**（用户裁决）：域名「风控域」→「**可观测域**」；
 //      URL `/admin/biz` → `/admin/business`、`/admin/risk` → `/admin/observe`。旧名**已废**。
 //   ⚠️ **URL 裁决（2026-10-08，第三笔过审后）**：两条子项 URL 改名 —— `content` → **`moderation`**、
 //      `flows` → **`timeline`**（其余 9 条保留；理由见 `config/admin-nav.js` 块首）。`meta.sub` 同步改。
 //   ⚠️ 以上所有条**都在本文件最大被引行 `:378` 之后**（那份说明在本块上方），故加行**零漂移**。
-// ⚠️ **4 条占位记录共用同一个组件**（2 个域入口 + 2 个子项：`observe/{timeline,logs}`）⇒ 抽成局部常量，
-//   免得同一句 `import()` 抄 4 遍。改名的前因见 `StubPage.vue` 块首（它第二笔叫 `DomainStub`）。
+// ⚠️ **2 条占位记录共用同一个组件**（2 个域入口）⇒ 抽成局部常量，
+//   免得同一句 `import()` 抄 2 遍。改名的前因见 `StubPage.vue` 块首（它第二笔叫 `DomainStub`）。
 //   ⚠️ 这是**局部**常量（`addRoute` 之前、`:378` 之后），不是顶部 import —— 顶部加行会漂移。
 const AdminStub = () => import('../views/admin/StubPage.vue')
 
@@ -459,7 +459,7 @@ router.addRoute({
     { path: 'observe/attack-sim', meta: { key: 'observe', sub: 'attack-sim', title: '攻击模拟器' }, component: () => import('../views/admin/observe/AttackConsole.vue') },   // C3 块 7〈可观测域〉commit 5（2026-10-14）：占位 → 真页（**同行替换**，照 `:451` accounts / `:452` catalog / `:453` orders / `:454` marketing / `:455` moderation / `:456` notify 那六条的做法）
     { path: 'observe/metrics',    meta: { key: 'observe', sub: 'metrics',    title: '指标面板' },   component: () => import('../views/admin/observe/MetricsPanel.vue') },   // C3 块 7〈可观测域〉commit 6（2026-10-14）：占位 → 真页（**同行替换**，照 `:459` attack-sim 那条的做法）。⚠️ 本页数据源是 **SSE 流**（不是一次性 JSON）⇒ 没有「查询」按钮，唯一的用户动作是「重新连接」
     { path: 'observe/timeline',   meta: { key: 'observe', sub: 'timeline',   title: '状态流转' },   component: () => import('../views/admin/observe/OrderFlow.vue') },   // C3 块 7〈可观测域〉commit 7（2026-10-14）：占位 → 真页（**同行替换**，照 `:459` attack-sim / `:460` metrics 两条的做法）。⚠️ 数据源同样是 SSE 流，但比指标面板多一层**前端累积** —— 流的每拍只推最近 20 单，翻页与本会话的回看都要靠本页自己攒（组件头注释记了理由）
-    { path: 'observe/logs',       meta: { key: 'observe', sub: 'logs',       title: '实时日志' },   component: AdminStub },
+    { path: 'observe/logs',       meta: { key: 'observe', sub: 'logs',       title: '实时日志' },   component: () => import('../views/admin/observe/EventLog.vue') },   // C3 块 7〈可观测域〉commit 8（2026-10-14）：占位 → 真页（**同行替换**，照 `:459` attack-sim / `:460` metrics / `:461` timeline 三条的做法）。⚠️ 本页的数据源也是 SSE 流（`openEventStream`），但它比前两页多消费**一块帧外的内容**：帧里的 `traces` 数组（请求起止台账）—— 抽屉里那条「这一次请求的完整链路」的两端就靠它
     { path: 'observe/audit',      meta: { key: 'observe', sub: 'audit',      title: '权限与审计' }, component: () => import('../views/admin/AuditPage.vue') },
 
     // C3 块 2〈用户块〉补丁 B1（2026-10-09 手验后）：管理员**共享收件箱**从 `AccountsPage.vue`

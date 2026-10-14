@@ -8,6 +8,7 @@ import com.minke.mallmanagement.observe.metrics.StockMetrics;
 import com.minke.mallmanagement.order.metrics.MallOrderStateMetrics;
 import com.minke.mallmanagement.shared.cache.MallCacheMetrics;
 import com.minke.mallmanagement.shared.lock.MallLockMetrics;
+import com.minke.mallmanagement.shared.web.TraceLog;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -50,7 +51,7 @@ class EventStreamServiceTest {
     void firstFrameCarriesEverythingAlreadyInTheRings() {
         stock.deduct(SKU, 1, StockMetrics.Deduct.OK);
         stock.deduct(SKU, 2, StockMetrics.Deduct.INSUFFICIENT);
-        audit.failed("C-1", "goods.add", "db down");
+        audit.failed("C-1", "goods.add", "db down", "goods", "M-1:P-1");
 
         Map<String, Object> frame = service.frame(0);
 
@@ -97,10 +98,33 @@ class EventStreamServiceTest {
                 (List<Map<String, Object>>) service.frame(0).get("events");
 
         assertThat(events).hasSize(1);
-        assertThat(events.get(0)).containsOnlyKeys("seq", "ts", "kind", "severity", "title", "detail", "key");
+        assertThat(events.get(0)).containsOnlyKeys("seq", "ts", "kind", "severity", "title", "detail", "key",
+                "objectType", "objectId", "traceId");   // 块 7 · commit 8 新增的三键（前端抽屉 / 对象列要用）
         assertThat(events.get(0)).containsEntry("kind", "stock").containsEntry("severity", "info")
                 .containsEntry("title", "库存扣减").containsEntry("key", "SKU-9");
+        assertThat(events.get(0)).containsEntry("objectType", "sku").containsEntry("objectId", "SKU-9");
         assertThat(events.get(0).get("detail").toString()).as("卡片第二行：业务字段 + 溯源").contains("src=stock#0");
         assertThat((Long) events.get(0).get("ts")).as("墙钟，不是 nanoTime").isPositive();
+    }
+
+    @Test
+    @DisplayName("帧里另有一条 traces 数组（块 7 · commit 8）—— 与 events 同为**增量**（送过的不再送）")
+    void frameCarriesTraceLogIncrementally() {
+        // ⚠️ 先空跑一拍：把存量（同 JVM 里其它用例经 TraceIdFilter 记下的）送掉 —— TraceLog 是**静态**台账，
+        //    本用例只能断言自己的增量，不能假定它一开始就是空的。
+        assertThat(service.frame(0)).containsKey("traces");
+
+        TraceLog.record("trace0001", "POST", "/goods/goodsUp", 200, 1_000L, 1_042L);
+        List<Map<String, Object>> traces = tracesOf(service.frame(1));
+        assertThat(traces).as("本拍只含本用例新记的那一条").hasSize(1);
+        assertThat(traces.get(0)).containsEntry("traceId", "trace0001").containsEntry("path", "/goods/goodsUp")
+                .containsEntry("status", 200).containsEntry("ms", 42L);
+
+        assertThat(tracesOf(service.frame(2))).as("送过的不再送（与 events 同一增量口径）").isEmpty();
+    }
+
+    @SuppressWarnings("unchecked")
+    private static List<Map<String, Object>> tracesOf(Map<String, Object> frame) {
+        return (List<Map<String, Object>>) frame.get("traces");
     }
 }

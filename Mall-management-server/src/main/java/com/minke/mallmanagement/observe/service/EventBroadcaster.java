@@ -129,9 +129,20 @@ public class EventBroadcaster {
      * @param title      中文短标题（卡片第一行）
      * @param detail     明细串（卡片第二行）：含源的业务字段 + {@code src=环名#源seq}
      * @param key        涉及的业务键（订单号 / SKU / 收件人……）；没有就 null
+     * @param objectType <b>这条事件动的是「什么类型的东西」</b>（块 7 · commit 8 新增）——
+     *                   缓存 / 锁 / 订单 / 商品（SKU）/ 通知 五环取的是各自那个稳定词，审计环取的是
+     *                   {@code audit} 表本来就有的 {@code TargetType}（{@code goods} / {@code comment}…），
+     *                   敏感词环是 {@code sensitive}，身份环是 {@code identity}。取值在八个 {@code ingestXxx} 里逐环给定
+     * @param objectId   上面那个类型的**具体标识**（块 7 · commit 8 新增）：缓存键 / 锁键 / 订单号 /
+     *                   SKU 码 / 通知收件人 → 那是各环本来就有的 {@code key}；审计环是 {@code TargetId}；
+     *                   敏感词环是**命中的词**；身份环是**请求路径**。没有就 null
+     * @param traceId    产生本条事件的那次请求的号（块 7 · commit 8 新增）；定时任务 / 流线程上产生时为 null。
+     *                   ⚠️ 它由**源环在记录那一刻**从 MDC 取好（见各 metrics 类的 {@code event(...)}），
+     *                   不是并入本环时取的 —— 并入跑在 SSE 流线程上，那里 MDC 是空的
      */
     public record ObservedEvent(long seq, long epochMilli, String kind, String severity,
-                                String title, String detail, String key) {
+                                String title, String detail, String key,
+                                String objectType, String objectId, String traceId) {
     }
 
     private final MallCacheMetrics cacheMetrics;
@@ -224,7 +235,7 @@ public class EventBroadcaster {
             if (e.seq() <= last) {
                 continue;
             }
-            add(e.epochMilli(), Kind.CACHE, fromCache(e), e.key(), e.seq());
+            add(e.epochMilli(), Kind.CACHE, fromCache(e), e.key(), e.seq(), "cache", str(e.key()), e.traceId());
             last = e.seq();
         }
         sourceSeq[Kind.CACHE.ordinal()] = last;
@@ -236,7 +247,7 @@ public class EventBroadcaster {
             if (e.seq() <= last) {
                 continue;
             }
-            add(e.epochMilli(), Kind.LOCK, fromLock(e), e.key(), e.seq());
+            add(e.epochMilli(), Kind.LOCK, fromLock(e), e.key(), e.seq(), "lock", str(e.key()), e.traceId());
             last = e.seq();
         }
         sourceSeq[Kind.LOCK.ordinal()] = last;
@@ -248,7 +259,7 @@ public class EventBroadcaster {
             if (e.seq() <= last) {
                 continue;
             }
-            add(e.epochMilli(), Kind.ORDER, fromOrder(e), e.key(), e.seq());
+            add(e.epochMilli(), Kind.ORDER, fromOrder(e), e.key(), e.seq(), "order", str(e.key()), e.traceId());
             last = e.seq();
         }
         sourceSeq[Kind.ORDER.ordinal()] = last;
@@ -260,7 +271,7 @@ public class EventBroadcaster {
             if (e.seq() <= last) {
                 continue;
             }
-            add(e.epochMilli(), Kind.STOCK, fromStock(e), e.skuCode(), e.seq());
+            add(e.epochMilli(), Kind.STOCK, fromStock(e), e.skuCode(), e.seq(), "sku", str(e.skuCode()), e.traceId());
             last = e.seq();
         }
         sourceSeq[Kind.STOCK.ordinal()] = last;
@@ -272,7 +283,7 @@ public class EventBroadcaster {
             if (e.seq() <= last) {
                 continue;
             }
-            add(e.epochMilli(), Kind.AUDIT, fromAudit(e), e.actor(), e.seq());
+            add(e.epochMilli(), Kind.AUDIT, fromAudit(e), e.actor(), e.seq(), str(e.targetType()), str(e.targetId()), e.traceId());
             last = e.seq();
         }
         sourceSeq[Kind.AUDIT.ordinal()] = last;
@@ -284,7 +295,7 @@ public class EventBroadcaster {
             if (e.seq() <= last) {
                 continue;
             }
-            add(e.epochMilli(), Kind.NOTIFY, fromNotify(e), e.key(), e.seq());
+            add(e.epochMilli(), Kind.NOTIFY, fromNotify(e), e.key(), e.seq(), "notify", str(e.key()), e.traceId());
             last = e.seq();
         }
         sourceSeq[Kind.NOTIFY.ordinal()] = last;
@@ -296,7 +307,7 @@ public class EventBroadcaster {
             if (e.seq() <= last) {
                 continue;
             }
-            add(e.epochMilli(), Kind.SENSITIVE, fromSensitive(e), e.scene(), e.seq());
+            add(e.epochMilli(), Kind.SENSITIVE, fromSensitive(e), e.scene(), e.seq(), "sensitive", str(e.words()), e.traceId());
             last = e.seq();
         }
         sourceSeq[Kind.SENSITIVE.ordinal()] = last;
@@ -308,7 +319,7 @@ public class EventBroadcaster {
             if (e.seq() <= last) {
                 continue;
             }
-            add(e.epochMilli(), Kind.IDENTITY, fromIdentity(e), e.subject(), e.seq());
+            add(e.epochMilli(), Kind.IDENTITY, fromIdentity(e), e.subject(), e.seq(), "identity", str(e.path()), e.traceId());
             last = e.seq();
         }
         sourceSeq[Kind.IDENTITY.ordinal()] = last;
@@ -521,11 +532,22 @@ public class EventBroadcaster {
      *
      * @param srcSeq 源环的 seq —— 只进 {@code detail} 尾部（形如 {@code src=stock#128}），
      *               供排查时定位回原环；⚠️ **不是** {@link ObservedEvent#seq()}（那个是本环的）
+     * @param objectType 被操作对象的**类型**（块 7 · commit 8 新增）—— 八个 {@code ingestXxx}
+     *                   在调用点逐环给定；取值口径见 {@link ObservedEvent#objectType()}
+     * @param objectId   被操作对象的**标识**（同上）；取值口径见 {@link ObservedEvent#objectId()}
+     * @param traceId    产生本条事件的那次请求的号（同上）；不在请求线程上时为 {@code null}
      */
-    private void add(long epochMilli, Kind kind, String[] triple, String key, long srcSeq) {
+    private void add(long epochMilli, Kind kind, String[] triple, String key, long srcSeq,
+                     String objectType, String objectId, String traceId) {
         long seq = cursor.getAndIncrement();
         events[(int) (seq & EVENT_MASK)] = new ObservedEvent(
                 seq, epochMilli, kind.tag, triple[0], triple[1], triple[2] + " src=" + kind.tag + "#" + srcSeq,
-                key == null ? null : String.valueOf(key));
+                key == null ? null : String.valueOf(key), objectType, objectId, traceId);
+    }
+
+    /** {@code null → null}（三个新字段的空值口径与 {@code key} 一致：缺就记 {@code null}，
+     * 不写 {@code "null"} 字面量）；否则转成字符串。 */
+    private static String str(Object value) {
+        return value == null ? null : String.valueOf(value);
     }
 }

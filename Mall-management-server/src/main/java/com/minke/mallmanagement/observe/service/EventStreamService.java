@@ -3,6 +3,7 @@ package com.minke.mallmanagement.observe.service;
 import com.minke.mallmanagement.observe.service.EventBroadcaster.Kind;
 import com.minke.mallmanagement.observe.service.EventBroadcaster.ObservedEvent;
 import com.minke.mallmanagement.observe.service.EventBroadcaster.Severity;
+import com.minke.mallmanagement.shared.web.TraceLog;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
@@ -46,6 +47,9 @@ public class EventStreamService {
     /** 已送出到合并环的哪个 seq；-1 = 还没送过（首帧送一屏）。 */
     private long sentSeq = -1L;
 
+    /** 已送出到 {@link TraceLog} 的哪个 seq；口径同 {@link #sentSeq}（-1 = 首帧送一屏）。 */
+    private long sentTraceSeq = -1L;
+
     /** 上一次**真算**的时刻（速率的分母）；0 = 还没算过（首拍速率报 0，不报无穷）。 */
     private long lastRealNanos;
 
@@ -88,6 +92,16 @@ public class EventStreamService {
             events.add(asMap(e));
         }
 
+        // 本拍新走完的请求（commit 8）：与 events 同口径的增量 —— 页面的 traceId 抽屉靠它把
+        // 「这一次请求的起止与总耗时」与事件卡片上的 traceId 对上。⚠️ 长连接 /stream 自己不记
+        // （见 TraceLog.SKIP_SUFFIX），否则总耗时被这条永不结束的连接污染。
+        List<TraceLog.RequestTrace> freshTraces = TraceLog.since(sentTraceSeq);
+        List<Map<String, Object>> traces = new ArrayList<>(freshTraces.size());
+        for (TraceLog.RequestTrace t : freshTraces) {
+            traces.add(asTraceMap(t));
+        }
+        sentTraceSeq = TraceLog.latestSeq();
+
         Map<String, Object> frame = new LinkedHashMap<>();
         frame.put("seq", tick);
         frame.put("ts", System.currentTimeMillis());
@@ -97,6 +111,7 @@ public class EventStreamService {
         frame.put("counts", byKind);
         frame.put("severity", bySeverity);
         frame.put("events", events);
+        frame.put("traces", traces);
         pacer.remember(frame, now);
         return frame;
     }
@@ -117,6 +132,23 @@ public class EventStreamService {
         row.put("title", e.title());
         row.put("detail", e.detail());
         row.put("key", e.key());
+        row.put("objectType", e.objectType());
+        row.put("objectId", e.objectId());
+        row.put("traceId", e.traceId());
+        return row;
+    }
+
+    /** 一条「请求的起止」—— 实时日志页的 traceId 抽屉拿它算总耗时、画链路骨架。 */
+    private static Map<String, Object> asTraceMap(TraceLog.RequestTrace t) {
+        Map<String, Object> row = new LinkedHashMap<>();
+        row.put("seq", t.seq());
+        row.put("traceId", t.traceId());
+        row.put("method", t.method());
+        row.put("path", t.path());
+        row.put("status", t.status());
+        row.put("startMs", t.startMs());
+        row.put("endMs", t.endMs());
+        row.put("ms", t.ms());
         return row;
     }
 

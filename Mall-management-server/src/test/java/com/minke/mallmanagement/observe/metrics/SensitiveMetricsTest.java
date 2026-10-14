@@ -27,8 +27,8 @@ class SensitiveMetricsTest {
     @Test
     @DisplayName("masked / rejected 两档各自计数，命中数与被判词数一并进事件（命中率是它们的派生量）")
     void bothOutcomesAreRecorded() {
-        metrics.masked(SCENE, 1, 20);
-        metrics.rejected(SCENE, 9, 20);
+        metrics.masked(SCENE, 1, 20, "傻逼");
+        metrics.rejected(SCENE, 9, 20, "傻逼,滚");
 
         assertThat(count(Result.MASKED.tag)).isEqualTo(1.0);
         assertThat(count(Result.REJECTED.tag)).isEqualTo(1.0);
@@ -38,12 +38,15 @@ class SensitiveMetricsTest {
         assertThat(events).extracting(SensitiveEvent::scene).containsExactly(SCENE, SCENE);
         assertThat(events).extracting(SensitiveEvent::hit).containsExactly(1, 9);
         assertThat(events).extracting(SensitiveEvent::total).containsExactly(20, 20);
+        // 块 7 · commit 8 新带的一列：**命中的词**（敏感性环的「对象字段补全」第一层）
+        assertThat(events).extracting(SensitiveEvent::words).containsExactly("傻逼", "傻逼,滚");
+        assertThat(events.get(0).traceId()).as("不在请求线程上 ⇒ traceId 为 null").isNull();
     }
 
     @Test
     @DisplayName("⚠️ 干净文本不记进本环 —— 本环回答「拦住了多少」，不是「扫了多少」")
     void cleanTextIsNotRecorded() {
-        metrics.masked(SCENE, 1, 20);
+        metrics.masked(SCENE, 1, 20, "傻逼");
 
         assertThat(registry.find(SensitiveMetrics.CHECKS).counters())
                 .as("只有被处置（打码 / 拒收）的才该在这里出现；多出来的那条就是把分母混进了分子")
@@ -54,8 +57,8 @@ class SensitiveMetricsTest {
     @Test
     @DisplayName("基数铁律：场景不进 tag —— 两个不同场景共用一个时间序列")
     void sceneNeverBecomesATag() {
-        metrics.masked("comment", 1, 20);
-        metrics.masked("nickname", 1, 20);
+        metrics.masked("comment", 1, 20, "傻逼");
+        metrics.masked("nickname", 1, 20, "滚");
 
         assertThat(count("masked")).as("两个不同的场景落在同一条计数上").isEqualTo(2.0);
         assertThat(registry.find(SensitiveMetrics.CHECKS).counters())
@@ -70,7 +73,7 @@ class SensitiveMetricsTest {
         int capacity = 512;
         int extra = 16;
         for (int i = 0; i < capacity + extra; i++) {
-            metrics.rejected(SCENE, 9, 20);
+            metrics.rejected(SCENE, 9, 20, "傻逼");
         }
 
         List<SensitiveEvent> events = metrics.recentEvents();

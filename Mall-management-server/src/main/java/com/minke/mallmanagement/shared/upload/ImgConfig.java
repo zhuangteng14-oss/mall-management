@@ -68,7 +68,7 @@ public class ImgConfig {
     public CorsFilter corsFilter(@Value(ALLOWED_ORIGINS) String allowedOrigins) {
         CorsConfiguration config = new CorsConfiguration();
         applyAllowedOrigins(config, allowedOrigins);   // ← 本笔唯一的行为改动（原为 addAllowedOriginPattern("*")）
-        config.addAllowedHeader("*");
+        config.addAllowedHeader("*"); config.addExposedHeader(com.minke.mallmanagement.shared.web.TraceIdFilter.HEADER);   // 行内补写（未增删行）：块 7 · commit 8 —— 不放开它，前端读不到 X-Trace-Id（跨源响应头默认对 JS 不可见）。写全限定名而非 import，是为了不给本文件底下的 `:70`/`:73`/`:77`/`:88-110` 那批「文件:行号」引用添一次整体下移
         config.addAllowedMethod("*");
         config.setAllowCredentials(true);
         config.setMaxAge(3600L);

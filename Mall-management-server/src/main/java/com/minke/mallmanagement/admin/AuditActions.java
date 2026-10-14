@@ -22,7 +22,7 @@ package com.minke.mallmanagement.admin;
  * 其余 15 个改库端点**随各自那一笔**挂（横切本来就该跟着业务改动走，见
  * {@code docs/agent/c3-modules.md} §11 与 {@code slot-registry.md} 末条）。
  * ⇒ 每挂一个新勾，**在这里加一条**。今天有 2 条：{@link #GOODS_UPDATE}（批 A 的样板）
- * 与 {@link #NOTIFICATION_SEND}（块 1 · I2 的**第二个**挂钩点）。⚠️ 上面那两句说的是**开笔当时**的实况，别拿它当今天的清单：此后块 2～6 各自把自己那一笔挂了上来，**今天共 42 条**（数常量、不数调用点 —— {@code coupon.stop} 等一条 tag 覆盖两个端点，{@code seckill.*} 三个 tag 挂在同一个 Controller 的三个方法上）；**清单就是下面那些常量**，本段只是「为什么一开始只有 1 条」的由来。
+ * 与 {@link #NOTIFICATION_SEND}（块 1 · I2 的**第二个**挂钩点）。⚠️ 上面那两句说的是**开笔当时**的实况，别拿它当今天的清单：此后块 2～6 各自把自己那一笔挂了上来，**今天共 44 条**（块 7 · commit 8 跨域补挂 {@link #GOODS_DELETE} / {@link #COMMENT_DELETE} 两条）（数常量、不数调用点 —— {@code coupon.stop} 等一条 tag 覆盖两个端点，{@code seckill.*} 三个 tag 挂在同一个 Controller 的三个方法上）；**清单就是下面那些常量**，本段只是「为什么一开始只有 1 条」的由来。
  */
 public final class AuditActions {
 
@@ -270,6 +270,41 @@ public final class AuditActions {
 
     /** 管理员处理一条举报（通过 = 删内容 + 警告 + 可能封号；驳回 = 留待再举报）—— {@code POST /report/handle}。 */
     public static final String REPORT_HANDLE = "report.handle";
+
+    // ==================== 块 7 · commit 8（实时日志笔）跨域补挂的 2 条 ====================
+    // 由来：这两条**不在块 7 自己的域里**，是块 7 逐端点核对「谁改了库却没留痕」时查出来的
+    // **跨域负债**（用户 2026-10-14 批文：「跨域补 2 处审计漏挂」）。两条都追加在**文件尾**
+    // ⇒ 本文件既有常量的行号一个不挪。
+
+    /**
+     * 商品下架（**两条真 DELETE**：{@code goods} + {@code productsales}）—— {@code POST /goods/goodsDe}。
+     *
+     * <p>⚠️ 它与 {@link #GOODS_VIOLATION_DELIST} / {@link #GOODS_VIOLATION_DELETE} **是两回事**：
+     * 那两条是平台违规处置（改 {@code ShelfState} / 置 {@code DeletedAt}），本条是**商家自己删货**、
+     * 行**从表里真的没了**。故 {@code AfterJson} 恒 {@code NULL}（没有「改后」可读），
+     * 能记的「改前」= 删除**之前**那一次快照 —— 调用点必须**先快照后删**（顺序见调用点注释）。
+     *
+     * <p>{@code TargetId} 用 {@code MerchantId:ProductCode}（同 {@link #GOODS_UPDATE} 的业务键口径，
+     * 不用自增 {@code Id}：本表跨重导保留）。
+     */
+    public static final String GOODS_DELETE = "goods.delete";
+
+    /**
+     * 删除一条评论（软删 {@code Status='deleted'}；顶层**连带**其下回复一并软删）—— {@code POST /comment/delete}。
+     *
+     * <p>⚠️ 它是**用户侧**动作、不是管理端专属：作者删自己的评论走同一端点，管理员删任意评论也走它
+     * ⇒ 审计行的 {@code ActorId} 两种都可能出现。这正是要留痕的理由（删评论是内容治理里争议最大的一类动作，
+     * 事后必须答得出「谁删的」）。
+     *
+     * <p>{@code TargetId} 用自增 {@code Id}。⚠️ 这是**块 5 {@code report.handle} 那条例外的同款**
+     * （见上面那段注释）：{@code comment} 表没有稳定业务串，而它同样是**运行期数据、从不被重新播种**
+     * ⇒ 不存在块 2 那种「重导换号」的风险。被审的对象类型 {@code TargetType} 传 {@code "comment"}，
+     * 与 {@link #COMMENT_IMAGE_APPROVE} 的 {@code "comment_image"} **刻意不同**（一条评论 ≠ 一张评论图）。
+     *
+     * <p>⚠️ {@code BeforeJson} 传 {@code null}：软删的「改前」是那一行的原样，而取它要再读一次
+     * {@code comment} 表 —— 本笔**不做**（同一 id 在 {@code AfterJson} 里已可定位）。
+     */
+    public static final String COMMENT_DELETE = "comment.delete";
 
     private AuditActions() {
     }

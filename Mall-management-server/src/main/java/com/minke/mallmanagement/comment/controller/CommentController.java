@@ -225,7 +225,19 @@ public class CommentController {
         if (Id == null) {
             return ResponseEntity.ok(Result.fail("缺少参数：Id"));
         }
-        return ResponseEntity.ok(Result.of(commentService.delete(Id.longValue(), Account, isAdmin(request))));
+        // ═══ 块 7 · commit 8：跨域补挂的**审计漏挂**（本端点是块 6 建的，当时漏了）═══
+        // 形状照 {@code GoodsController.goodsUp} 的四步（改前快照 → 业务 → 判成功 → 记账），
+        // 只去掉「改前快照」那一步：软删的改前态要再读一次 comment 表才拿得到，本笔不做
+        // （见 AuditActions.COMMENT_DELETE 的注释）。⚠️ 只记 success=true —— 「评论不存在」/
+        // 「只能删自己的」等 fail 分支一行未改库，没有「删」可记。
+        // ⚠️ actor 取**识别**口径（AuthSession.identify），同 adminList / imageReview：
+        //    cookie 登录的管理员不该被记成匿名。
+        Map<String, Object> deleted = commentService.delete(Id.longValue(), Account, isAdmin(request));
+        if (Boolean.TRUE.equals(deleted.get("success"))) {
+            auditService.record(AuthSession.identify(request), AuditActions.COMMENT_DELETE, "comment",
+                    String.valueOf(Id), null, deleted);
+        }
+        return ResponseEntity.ok(Result.of(deleted));
     }
 
     /**

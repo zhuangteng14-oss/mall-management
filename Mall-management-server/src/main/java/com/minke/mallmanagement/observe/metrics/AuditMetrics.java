@@ -1,5 +1,6 @@
 package com.minke.mallmanagement.observe.metrics;
 
+import com.minke.mallmanagement.shared.web.TraceIdFilter;
 import io.micrometer.core.instrument.MeterRegistry;
 import org.springframework.stereotype.Component;
 
@@ -81,20 +82,24 @@ public class AuditMetrics {
      * @param actor  业务号。⚠️ 口径同 {@code AuditService}：取<b>会话</b>、不是入参
      *               （入参由调用方给 ⇒ 可伪造）。只进事件流，绝不进 tag
      * @param action 动作名（{@code AuditActions} 里的常量）
+     * @param targetType 被改对象类型（块 7 · commit 8 新增）—— {@link AuditService#record} 本来就收它，
+     *                   以前只是没往事件里带；实时日志页要用它标出「这条审计动的是谁」
+     * @param targetId   被改对象标识（同上）
      */
-    public void written(String actor, String action) {
+    public void written(String actor, String action, String targetType, String targetId) {
         registry.counter(WRITES, "result", Result.WRITTEN.tag).increment();
-        event(Result.WRITTEN.tag, actor, action, null);
+        event(Result.WRITTEN.tag, actor, action, null, targetType, targetId);
     }
 
     /**
      * 一次<b>失败</b>的审计写入（fail-open：调用方照常返回业务结论，这里只留痕）。
      *
      * @param reason 失败原因（异常摘要）。⚠️ 只进事件流 —— 它是自由文本，基数无界
+     * @param targetType ／{@code targetId} 同 {@link #written}
      */
-    public void failed(String actor, String action, String reason) {
+    public void failed(String actor, String action, String reason, String targetType, String targetId) {
         registry.counter(WRITES, "result", Result.FAILED.tag).increment();
-        event(Result.FAILED.tag, actor, action, reason);
+        event(Result.FAILED.tag, actor, action, reason, targetType, targetId);
     }
 
     // ================= 事件流 =================
@@ -119,12 +124,15 @@ public class AuditMetrics {
     }
 
     /** 追加一条事件。{@code actor} / {@code reason} 只在事件里以字符串形式出现 —— tag 里绝不能有它们。 */
-    private void event(String result, String actor, String action, String reason) {
+    private void event(String result, String actor, String action, String reason,
+                       String targetType, String targetId) {
         long seq = eventCursor.getAndIncrement();
         events[(int) (seq & EVENT_MASK)] = new AuditEvent(
                 seq, System.currentTimeMillis(), result,
                 actor == null ? null : String.valueOf(actor),
-                action == null ? null : String.valueOf(action), reason);
+                action == null ? null : String.valueOf(action), reason,
+                targetType == null ? null : String.valueOf(targetType),
+                targetId == null ? null : String.valueOf(targetId), TraceIdFilter.current());
     }
 
     /**
@@ -136,9 +144,14 @@ public class AuditMetrics {
      * @param actor      谁写的（业务号，会话取值）
      * @param action     动作名
      * @param reason     失败原因；{@code written} 时为 null
+     * @param targetType 被改对象类型（块 7 · commit 8 新增；{@code audit} 表的 {@code TargetType} 同源）
+     * @param targetId   被改对象标识（同上）
+     * @param traceId    产生本条事件的那次请求的号（块 7 · commit 8 新增）；不在请求线程上时为 null。
+     *                   ⚠️ {@link #event} 里现读 MDC —— <b>不是</b>并入合并环时读（那时在流线程上，读不到）
      */
     public record AuditEvent(long seq, long epochMilli, String result,
-                             String actor, String action, String reason) {
+                             String actor, String action, String reason,
+                             String targetType, String targetId, String traceId) {
     }
 
     /** {@code mall.audit.writes} 的 result 取值。tag 字段避免每次调用拼字符串。 */
