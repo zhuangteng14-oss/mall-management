@@ -98,7 +98,8 @@ public class DrillRecordService {
         Map<String, Object> ok = new HashMap<>();
         ok.put("success", true);
         ok.put("Id", drillRecordDao.insert(operatorId, operatorRole, run.name(), run.scenarioJson(),
-                run.total(), run.blocked(), run.failed(), run.durationMs(), toJson(run.result())));
+                run.total(), run.blocked(), run.failed(), run.durationMs(), toJson(run.result()),
+                run.batchId()));   // 块 7 · commit 8c：这一轮的批次（与 observed_event.BatchId 同源）
         ok.put("Name", run.name());
         ok.put("TotalRequests", run.total());
         ok.put("BlockedRequests", run.blocked());

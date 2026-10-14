@@ -130,7 +130,8 @@ public class IdentityMetrics {
         events[(int) (seq & EVENT_MASK)] = new IdentityEvent(
                 seq, System.currentTimeMillis(), result,
                 subject == null ? null : String.valueOf(subject), reason,
-                path == null ? null : String.valueOf(path), TraceIdFilter.current());
+                path == null ? null : String.valueOf(path),
+                TraceIdFilter.current(), TraceIdFilter.currentBatch());
     }
 
     /**
@@ -143,9 +144,11 @@ public class IdentityMetrics {
      * @param reason     拒绝原因；{@code passed} 时为 null
      * @param path       被校验的请求路径（块 7 · commit 8 新增）
      * @param traceId    产生本条事件的那次请求的号（块 7 · commit 8 新增）；不在请求线程上时为 null
+     * @param batchId    产生本条事件的那次请求**所属的演练批次**（块 7 · commit 8c，来自
+     *                   {@code X-Drill-Batch} 头）；日常流量为 {@code null}。同 {@code traceId} 现读
      */
     public record IdentityEvent(long seq, long epochMilli, String result,
-                                String subject, String reason, String path, String traceId) {
+                                String subject, String reason, String path, String traceId, String batchId) {
     }
 
     /** {@code mall.identity.checks} 的 result 取值。tag 字段避免每次调用拼字符串。 */

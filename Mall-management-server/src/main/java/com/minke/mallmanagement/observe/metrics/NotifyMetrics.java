@@ -125,7 +125,8 @@ public class NotifyMetrics {
                 seq, System.currentTimeMillis(), result,
                 toType == null ? null : String.valueOf(toType),
                 eventType == null ? null : String.valueOf(eventType),
-                key == null ? null : String.valueOf(key), reason, TraceIdFilter.current());
+                key == null ? null : String.valueOf(key), reason,
+                TraceIdFilter.current(), TraceIdFilter.currentBatch());
     }
 
     /**
@@ -138,9 +139,12 @@ public class NotifyMetrics {
      * @param eventType  通知类型
      * @param key        收件人业务号
      * @param reason     失败原因；{@code sent} 时为 null
+     * @param traceId    产生本条事件的那次请求的号（块 7 · commit 8 新增）；不在请求线程上时为 null
+     * @param batchId    产生本条事件的那次请求**所属的演练批次**（块 7 · commit 8c，来自
+     *                   {@code X-Drill-Batch} 头）；日常流量为 {@code null}。同 {@code traceId} 现读
      */
     public record NotifyEvent(long seq, long epochMilli, String result, String toType,
-                              String eventType, String key, String reason, String traceId) {
+                              String eventType, String key, String reason, String traceId, String batchId) {
     }
 
     /** {@code mall.notify.sends} 的 result 取值。tag 字段避免每次调用拼字符串。 */

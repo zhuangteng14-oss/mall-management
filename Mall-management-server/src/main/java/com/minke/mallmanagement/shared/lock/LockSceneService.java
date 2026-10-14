@@ -460,9 +460,28 @@ public class LockSceneService {
         private final AtomicInteger seq = new AtomicInteger();
         private final List<Thread> created = new CopyOnWriteArrayList<>();
 
+        /**
+         * 块 7 · commit 8c：取一次**本线程**（= 调用 {@link #run} 的那条线程，请求线程）的
+         * (traceId, batchId) 快照，供下面每条新建线程绑上。
+         *
+         * <p>⚠️ 为什么捕获点在这里、而不是在投递任务的地方：本对象**在请求线程上被构造**
+         * （{@code run} 里的 {@code new ThreadRecorder()}），而线程是在它之后才建的 —— 字段初始化
+         * 发生在构造期 ⇒ 拿到的正是请求线程的上下文。⚠️ 为什么绑定发生在**建线程**而不是
+         * **投递任务**：{@code ThreadPoolExecutor} 交给 {@code ThreadFactory} 的那个 {@code r}
+         * 是**工作线程的循环体**（不是某一个任务），绑它 = 这条线程接下来跑的全部任务都在上下文里；
+         * 而本池每次 {@code run} 现建现销毁 ⇒ 它的生命周期恰好等于一次场景。
+         * ⚠️ 于是有一个**已知边界**：泄漏判定为真（线程没能终止）时，那条线程上的上下文也不会被还原
+         * —— 但那正是「场景已经出问题」的状态，`anyThreadLeaked=true` 已经把它报出来了。
+         */
+        private final com.minke.mallmanagement.shared.web.ObserveContext ctx =
+                com.minke.mallmanagement.shared.web.ObserveContext.capture();
+
         @Override
         public Thread newThread(Runnable r) {
-            Thread thread = new Thread(r, "lock-scene-" + seq.incrementAndGet());
+            // 块 7 · commit 8c：包一层把上下文绑到工作线程上（理由见上面那个字段）。
+            // ⚠️ 写全限定名而非 import：本文件 `:358` 被 defect-survey.md 按「文件:行号」引用，
+            // 加一行 import 会让它下移。
+            Thread thread = new Thread(() -> ctx.run(r), "lock-scene-" + seq.incrementAndGet());
             thread.setDaemon(true);
             created.add(thread);
             return thread;

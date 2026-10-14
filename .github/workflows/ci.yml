@@ -136,6 +136,36 @@ jobs:
           --health-timeout=5s
           --health-retries=12
 
+      # 【块 7 · commit 8c 加的这一格：今天是**空转**的，加它是为了「同一族风险的下一次」】
+      # 8c 给事件台账接了出口（业务事件 → RabbitMQ → 消费端批写 observed_event），拓扑与
+      # 声明都在代码里（RabbitObserveConfig 的 @Bean），**本 job 不需要它**：a3 profile
+      # **刻意不配** spring.rabbitmq.*（理由写在 application-a3.properties 末尾），客户端于是
+      # 按 Boot 默认连 localhost:5672，而本 job 里后端进程在 runner 上、不在这个容器里。
+      #
+      # ⚠️ 把「空转」写明白，免得下一个人以为它在干活：
+      #   · guest 用户**只许从容器内 loopback 登录**（RabbitMQ 的默认限制），连接来自 docker 网桥
+      #     ⇒ 即便映射了端口，认证也会被拒；
+      #   · 被拒的后果 = **发布侧**探针记 WARN（首条 + 每 5 分钟一条；**消费侧 bean 在 a3 里
+      #     根本不存在**，见 application-a3.properties 末尾那段），**业务请求照走**（契约是
+      #     fail-soft；这正是 A3 要的姿态：MQ 缺席时门禁数字必须不变，不能靠「本地有 broker」掩盖）。
+      #     ⚠️ 反过来才是要防的：哪天 a3 也注册了监听器（比如有人把 host 那行挪进公共配置），
+      #     本格这个「在、但拒 guest」的 broker 会把**启动**变成硬失败
+      #     （`FatalListenerStartupException` → `Failed to start bean '…internalRabbitListenerEndpointRegistry'`
+      #     → 上下文 refresh 失败；8c 验证时空口令那次实测到过同一栈）—— 那时红的是整个 job，不是几条 WARN。
+      #   · 因此本格**不设** RABBITMQ_DEFAULT_USER / _PASS：将来 a3 真要连时，用户名与口令必须
+      #     与**届时**在 application-a3.properties 里新加的那份配置对齐，而那件事会**同时**改三处
+      #     （application-a3.properties / 本格 / 口令注入方式），漏改一处就会红 —— 留白是刻意的。
+      #   · 就绪判据照 mysql 那格的形状给（rabbitmq-diagnostics -q ping），不另立一套。
+      rabbitmq:
+        image: rabbitmq:3-management
+        ports:
+          - 5672:5672
+        options: >-
+          --health-cmd="rabbitmq-diagnostics -q ping"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=12
+
     steps:
       - name: 检出代码
         uses: actions/checkout@v4

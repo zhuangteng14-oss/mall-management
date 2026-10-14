@@ -127,9 +127,9 @@ class DrillRecordServiceTest {
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("Scenarios", List.of(Map.of("Key", "seckill")));
         when(engine.run(any(), any())).thenReturn(new AttackEngine.DrillRun("自定义", "{\"c\":100}",
-                100, 30, 1, 60000L, result));
+                100, 30, 1, 60000L, result, "batch-8c"));
         when(dao.insert(anyString(), anyInt(), anyString(), anyString(), anyInt(), anyInt(), anyInt(),
-                anyLong(), anyString())).thenReturn(7L);
+                anyLong(), anyString(), anyString())).thenReturn(7L);
 
         Map<String, Object> out = service.run("自定义", null, null, null, "c-1", 1,
                 "http://localhost:8088");
@@ -143,7 +143,7 @@ class DrillRecordServiceTest {
         assertTrue(Boolean.TRUE.equals(out.get("success")));
         // 落库那一行的 Result 是**序列化后的文本**（列是 mediumtext）
         verify(dao).insert(eq("c-1"), eq(1), eq("自定义"), eq("{\"c\":100}"), eq(100), eq(30), eq(1),
-                eq(60000L), anyString());
+                eq(60000L), anyString(), eq("batch-8c"));
     }
 
     /**
@@ -154,7 +154,7 @@ class DrillRecordServiceTest {
     @Test
     void decodesScenariosJsonStringBeforeHandingToTheEngine() {
         when(engine.run(any(), any())).thenReturn(new AttackEngine.DrillRun("压测", "{}", 0, 0, 0, 0L,
-                Map.of()));
+                Map.of(), "batch-8c"));
 
         service.run("压测", "200", "30",
                 "[{\"key\":\"seckill\",\"weight\":80},{\"key\":\"cacheCold\",\"weight\":20}]",

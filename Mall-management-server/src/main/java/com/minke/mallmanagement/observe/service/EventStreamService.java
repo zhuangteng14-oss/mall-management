@@ -3,6 +3,7 @@ package com.minke.mallmanagement.observe.service;
 import com.minke.mallmanagement.observe.service.EventBroadcaster.Kind;
 import com.minke.mallmanagement.observe.service.EventBroadcaster.ObservedEvent;
 import com.minke.mallmanagement.observe.service.EventBroadcaster.Severity;
+import com.minke.mallmanagement.observe.mq.EventPublisher;
 import com.minke.mallmanagement.shared.web.TraceLog;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
@@ -44,6 +45,12 @@ public class EventStreamService {
     private final EventBroadcaster broadcaster;
     private final FramePacer pacer;
 
+    /**
+     * 事件台账的出口（块 7 · commit 8c）—— 本类只用它的 {@code connected()} 给帧里的 {@code mq}
+     * 字段取值。⚠️ **本类不发布任何东西**：发布在 {@link EventBroadcaster#add} 里（唯一调点）。
+     */
+    private final EventPublisher publisher;
+
     /** 已送出到合并环的哪个 seq；-1 = 还没送过（首帧送一屏）。 */
     private long sentSeq = -1L;
 
@@ -53,9 +60,10 @@ public class EventStreamService {
     /** 上一次**真算**的时刻（速率的分母）；0 = 还没算过（首拍速率报 0，不报无穷）。 */
     private long lastRealNanos;
 
-    public EventStreamService(EventBroadcaster broadcaster,
+    public EventStreamService(EventBroadcaster broadcaster, EventPublisher publisher,
                               @Value("${mall.observe.sse.interval-ms:1000}") long intervalMs) {
         this.broadcaster = broadcaster;
+        this.publisher = publisher;
         this.pacer = new FramePacer(intervalMs);
     }
 
@@ -112,6 +120,10 @@ public class EventStreamService {
         frame.put("severity", bySeverity);
         frame.put("events", events);
         frame.put("traces", traces);
+        // 块 7 · commit 8c：MQ 桥接状态（true = 事件会落库 + 进 Redis）。页面上那个黄点读它 ——
+        // 它是**实测**值（探测线程每 5 秒问一次 broker，见 RabbitEventPublisher），
+        // 不是「本拍有没有发布成功」：后者会把「exchange 名字写错」也画成「MQ 离线」。
+        frame.put("mq", publisher.connected());
         pacer.remember(frame, now);
         return frame;
     }
@@ -135,6 +147,9 @@ public class EventStreamService {
         row.put("objectType", e.objectType());
         row.put("objectId", e.objectId());
         row.put("traceId", e.traceId());
+        // 块 7 · commit 8c：演练批次（日常流量为 null）。页面的 traceId 抽屉按它把
+        // 「一次演练里的全部事件」与日常流量分开 —— 只读展示，不参与筛选。
+        row.put("batchId", e.batchId());
         return row;
     }
 

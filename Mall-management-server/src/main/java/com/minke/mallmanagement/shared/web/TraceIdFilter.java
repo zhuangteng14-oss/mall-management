@@ -43,10 +43,21 @@ import java.util.regex.Pattern;
  *
  * <h2>【已知边界，如实记】</h2>
  * ① 只覆盖**请求线程**：SSE 那条流（{@code StreamingResponseBody}）在**另一个线程**上跑，
- *    MDC 不跨线程传递 ⇒ 流内打的日志**没有** traceId。跨线程透传按批文归 8c（纯乙：显式传参），
- *    本笔不做，也不假装做了。
+ *    MDC 不跨线程传递 ⇒ 流内打的日志**没有** traceId。
+ *    <b>块 7 · commit 8c 已补上跨线程那一半</b>：搬运件是 {@link ObserveContext}
+ *    （纯乙 = 三处**显式传参**：{@code OrderStateExecutor#submit} / {@code LockSceneService#run}
+ *    / {@code AttackEngine#runPhase}），它只管「把本线程的 (traceId, batchId) 带到那个线程」，
+ *    MDC 的写入点**仍然只有本类**（走 {@link #bind}）。⇒ 流线程自己那几行日志照旧没有 traceId
+ *    —— 那属于「谁产生的事件谁带号」，不是本 filter 的职责，别把两件事混为一谈。
  * ② 异步分派不会让本 filter 再跑一次（{@code OncePerRequestFilter.shouldNotFilterAsyncDispatch()}
  *    默认 true），故一次请求**恰好**一个 id，不会因为 async 又被换掉。
+ *
+ * <h2>【块 7 · commit 8c 新增：{@code X-Drill-Batch} —— 第二个请求级上下文】</h2>
+ * 与 traceId 同款（同一个 filter、同一套白名单、同一个「不合法就静默丢弃」），差别只有三点：
+ * ① 它是**外来才有**的：日常请求不带这个头 ⇒ {@link #currentBatch()} 返回 {@code null}
+ *    （「不属于任何演练批次」是个合法状态，不是缺失）；② 它**不自生成**（自造一个批次号没有意义，
+ *    会把「日常流量」错标成「某次演练」）；③ 它会被写进 {@code observed_event.BatchId}
+ *    （8b 建表时该列注释逐字写的就是「8c 由 X-Drill-Batch 头注入」）。
  */
 @Component
 @Order(Ordered.HIGHEST_PRECEDENCE + 1)
@@ -57,6 +68,18 @@ public class TraceIdFilter extends OncePerRequestFilter {
 
     /** MDC 键名。⚠️ 必须与 {@code logback-spring.xml} pattern 里的 {@code %X{traceId}} **逐字一致**。 */
     public static final String MDC_KEY = "traceId";
+
+    /**
+     * 演练批次头（块 7 · commit 8c）。与 {@link #HEADER} 同款，但只由**攻击模拟器**带出
+     * （见 {@code AttackEngine#post}）—— 日常请求不带它，于是 {@link #currentBatch()} 为 {@code null}。
+     *
+     * <p>⚠️ 它**不是**给前端读的响应头（本类不回带它）：批次的产生者是 {@code AttackEngine}
+     * （一轮 = 一个 UUID），前端拿到它没有任何用处。响应头只回 traceId。
+     */
+    public static final String BATCH_HEADER = "X-Drill-Batch";
+
+    /** 批次号的 MDC 键名。⚠️ 与 {@link #MDC_KEY} 一样，是「本线程当前上下文」的一部分。 */
+    public static final String MDC_BATCH_KEY = "batchId";
 
     /**
      * 可接受的外来 id 形状。⚠️ 上限 64 与 {@code UUID} 的 36 不同：36 是**我们生成**的长度
@@ -81,12 +104,54 @@ public class TraceIdFilter extends OncePerRequestFilter {
         return MDC.get(MDC_KEY);
     }
 
+    /**
+     * 当前线程正在服务的**演练批次号**；不在演练请求里（或不在请求线程上）返回 {@code null}。
+     *
+     * <p>取值口径与 {@link #current()} **完全同款**（同一个 MDC、同一批调用点、同样必须在**记录那一刻**
+     * 读）：八环的记录点在请求线程上，而并入合并环跑在 SSE 流线程上 —— 那时 MDC 是空的。
+     * ⇒ 「本条事件属不属于某次演练」这件事，只能在记录点回答。
+     *
+     * <p>⚠️ {@code null} 是**正常值**：日常流量（含 A3 的压测、含种子数据）本来就不属于任何批次，
+     * 它在 {@code observed_event.BatchId} 里就是 {@code NULL}（8b 的列注释逐字如此）。
+     * 别为了「省一个判空」把它换成空串 —— 那会让「日常」与「批次号为空串」两种行混为一谈。
+     */
+    public static String currentBatch() {
+        return MDC.get(MDC_BATCH_KEY);
+    }
+
+    /**
+     * 把一对 {@code (traceId, batchId)} 绑到**当前线程**的 MDC 上（块 7 · commit 8c）。
+     *
+     * <p>存在的理由是跨线程：{@link com.minke.mallmanagement.shared.web.ObserveContext}
+     * 在**请求线程**上捕获这一对，到**另一个线程**上再绑一次，于是那条线程上记出的事件照样带号。
+     * ⚠️ 本类仍是 MDC 的**唯一写入点** —— 搬运件只持有值，不碰 MDC。
+     *
+     * <p>值为 {@code null} 的键会被 **移除**（不是写成空串）：这样「还原成一个没有上下文的线程」
+     * 与「本来就没有上下文」是同一种状态，池线程被复用时的残留也就无从谈起。
+     */
+    public static void bind(String traceId, String batchId) {
+        put(MDC_KEY, traceId);
+        put(MDC_BATCH_KEY, batchId);
+    }
+
+    private static void put(String key, String value) {
+        if (value == null) {
+            MDC.remove(key);
+        } else {
+            MDC.put(key, value);
+        }
+    }
+
     @Override
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain chain)
             throws ServletException, IOException {
         String traceId = pick(request.getHeader(HEADER));
+        String batchId = pickBatch(request.getHeader(BATCH_HEADER));
         long startMs = System.currentTimeMillis();
         MDC.put(MDC_KEY, traceId);
+        if (batchId != null) {
+            MDC.put(MDC_BATCH_KEY, batchId);
+        }
         // 先设头再放行：即使后面被 AuthInterceptor 拒了（401），响应上也带着号 —— 这正是排查时最需要的那个场景。
         response.setHeader(HEADER, traceId);
         try {
@@ -97,8 +162,25 @@ public class TraceIdFilter extends OncePerRequestFilter {
             TraceLog.record(traceId, request.getMethod(), request.getRequestURI(), response.getStatus(),
                     startMs, System.currentTimeMillis());
             // ⚠️ 必须清：Tomcat 的工作线程是**复用**的，不清就会把上一个请求的号带进下一个请求的日志。
+            // batchId 同理 —— 且它更危险：漏清会让**一次演练之后的全部日常请求**（复用同一条工作线程的）
+            // 被标成那次演练的批次，于是「精准批次」变成「把整个下午都算进去」。
             MDC.remove(MDC_KEY);
+            MDC.remove(MDC_BATCH_KEY);
         }
+    }
+
+    /**
+     * 选一个批次号：外来值合法就用它，**否则返回 {@code null}**（丢弃，不是自生成 —— 理由见类注释）。
+     *
+     * <p>白名单与 traceId **共用同一个** {@link #ACCEPTED}：两个值都进 MDC、都会被打进日志，
+     * 注入面完全相同，没有理由给批次开一个更宽的口子。
+     * <p>包级可见的理由与 {@link #pick} 逐字相同（为了可单测）。
+     */
+    static String pickBatch(String incoming) {
+        if (incoming != null && ACCEPTED.matcher(incoming).matches()) {
+            return incoming;
+        }
+        return null;
     }
 
     /**

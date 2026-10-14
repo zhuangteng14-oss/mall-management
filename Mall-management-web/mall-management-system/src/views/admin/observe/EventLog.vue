@@ -18,11 +18,11 @@
         <span class="a-chip-live">{{ phaseText }}</span>
         <span>第 <b>{{ seq }}</b> 拍 · 每秒 1 拍</span>
         <span class="a-tz-off">{{ lastTickAt }}</span>
-        <!-- ⚠️ MQ 缺席的**上屏位置**（用户 2026-10-14 批文，见 `<script>` 的 `MQ_CONNECTED`）——
-             本笔没有数据源 ⇒ 恒按「未连接」画（黄点 + 一句提示），8c 接通后把常量换成帧字段。
-             黄点用 `--warning`：它不是错误（错误红留给严重度），是「这台还没接上」。 -->
-        <span class="a-el-mq" :class="MQ_CONNECTED ? 'is-on' : 'is-off'">
-          <i class="a-el-mqdot" aria-hidden="true"></i>MQ {{ MQ_CONNECTED ? '已连接' : '未连接' }}
+        <!-- ⚠️ MQ 桥接的**上屏位置**（用户 2026-10-14 批文；8c 已接通，见 `<script>` 的 `mqConnected`）。
+             值来自帧里的 `mq` 键（后端每 5 秒实探一次）⇒ 最多滞后 5 秒，不是「猜」的。
+             黄点用 `--warning`：它不是错误（错误红留给严重度），是「这台此刻没把事件交给队列」。 -->
+        <span class="a-el-mq" :class="mqConnected ? 'is-on' : 'is-off'">
+          <i class="a-el-mqdot" aria-hidden="true"></i>MQ {{ mqConnected ? '已连接' : '未连接' }}
         </span>
       </div>
     </header>
@@ -31,9 +31,9 @@
       实时日志流中断：{{ errMsg }}
       <button type="button" class="a-btn" @click="connect">重新连接</button>
     </p>
-    <p v-if="!MQ_CONNECTED" class="a-flash warn">
+    <p v-if="!mqConnected" class="a-flash warn">
       MQ 未连接：八环的事件都只在<b>进程内存</b>里（每环 512 条覆盖式环），<b>不落库</b> —— 这台服务一重启，这些事件就没了。
-      <span class="a-el-flashnote">（接通在 commit 8c；本页已留好位置）</span>
+      <span class="a-el-flashnote">（后端每 5 秒实探一次；连上后本行自动消失，检测中请稍候）</span>
     </p>
 
     <!-- ══ ② 8 类图例（兼筛选）═══════════════════════════════════════════════════════
@@ -262,14 +262,23 @@ const PAGE_SIZES = [50, 100, 200]
 const PAGE_DEFAULT = 100
 
 /**
- * MQ 桥接状态。⚠️ **本笔没有数据源**：实时日志帧（`EventStreamService.frame()`）的 9 个键里
- * 没有 MQ 相关的任何一个。用户 2026-10-14 批文：「MQ 缺席上屏：状态条加黄点 / 一行提示
- * 『MQ 未连接，事件不落库』—— 本笔先留位置，8c 后接通」。
- * ⇒ 这里就是那个位置：一个**常量**。8c 接通时把它换成读帧里的字段（一行改动）。
- * ⚠️ 恒 `false` **不是**「查过了说没连」，是「还没有得查」；但页面上那句「MQ 未连接」在
- * **今天**是**事实**（八环都在进程内存里、事件不落库），8c 接通后它会变假 —— 那时要一起改。
+ * MQ 桥接状态 —— **已接通**（块 7 · commit 8c，2026-10-14）。用户批文原话：「commit 8 留的黄点
+ * （恒 false）→ 本笔接通（MQ_CONNECTED 从 broker 实探，或消费端心跳）」。
+ *
+ * 数据源 = 实时日志帧的第 10 个键 `mq`（`EventStreamService.frame()` 里 `publisher.connected()`）。
+ * 后端侧的实探点：`RabbitEventPublisher` 有一条 daemon 探针线程，每 5 秒握一次手。它记日志的
+ * 口径是「**连上只记翻转**（INFO）+ **断开记两档**（翻转 WARN / 稳态按 `mall.observe.mq.warn-interval-ms`
+ * 周期 WARN，默认 5 分钟）」—— 故这里的值最多滞后 5 秒，与后端日志同源、同一个判据。
+ * ⚠️ 别把「日志里有几条 WARN」当成「断了多久」：稳态是**每 5 分钟**一条，不是每 5 秒一条。
+ *
+ * ⚠️ 两处口径必须知道：
+ *   ① 它**只用于上屏**，不参与任何业务判定（后端接口注释里写死了这一条）。红/黄点表达的是
+ *      「这台服务此刻有没有把事件交给队列」，不是「事件有没有问题」（严重度是另一套配色）。
+ *   ② `false` 的含义是「**事件只在进程内存里**（每环 512 条覆盖式环），不落库」—— 这仍然是
+ *      **事实描摹**：`RabbitEventPublisher.publish` 在已知连不上时**一次网络都不碰**，直接返回。
+ *      所以下面那条 warn 条在 `false` 时说得出口。
  */
-const MQ_CONNECTED = false
+const mqConnected = ref(false)
 
 /* ── 页面状态 ───────────────────────────────────────────────────────────────── */
 const phase = ref('connecting')            // connecting | live | stopped
@@ -473,6 +482,9 @@ function onFrame(f) {
   seq.value = num(f.seq)
   ts.value = num(f.ts) || Date.now()
   rate.value = num(f.rate)
+  // ⚠️ `f.mq === true` 而不是 `!!f.mq`：帧里缺这个键的后端（本笔之前的提交）会让 `!!undefined`
+  //    变成 false ⇒ 与「恒假常量」逐字同行为，页面不会因为升级错位而闪一个「已连接」。
+  mqConnected.value = f.mq === true
   absorbEvents(Array.isArray(f.events) ? f.events : [])
   absorbTraces(Array.isArray(f.traces) ? f.traces : [])
 }
@@ -560,7 +572,7 @@ onBeforeUnmount(closeStream)
   color: var(--brand-ink);
 }
 
-/* ── MQ 黄点（本笔只上屏、无数据源；见 `<script>` 的 `MQ_CONNECTED`）─────────── */
+/* ── MQ 黄点（8c 起有数据源：帧里的 `mq` 键；见 `<script>` 的 `mqConnected`）─── */
 .a-el-mq {
   display: inline-flex;
   align-items: center;

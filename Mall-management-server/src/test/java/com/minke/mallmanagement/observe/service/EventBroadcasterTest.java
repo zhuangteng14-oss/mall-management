@@ -7,6 +7,7 @@ import com.minke.mallmanagement.observe.metrics.SensitiveMetrics;
 import com.minke.mallmanagement.observe.metrics.StockMetrics;
 import com.minke.mallmanagement.observe.service.EventBroadcaster.ObservedEvent;
 import com.minke.mallmanagement.observe.service.EventBroadcaster.Severity;
+import com.minke.mallmanagement.observe.mq.EventPublisher;
 import com.minke.mallmanagement.order.metrics.MallOrderStateMetrics;
 import com.minke.mallmanagement.order.model.OrderAction;
 import com.minke.mallmanagement.shared.cache.MallCacheMetrics;
@@ -21,6 +22,7 @@ import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.tuple;
+import static org.mockito.Mockito.mock;
 
 /**
  * 事件广播器（{@link EventBroadcaster}）的语义实测 —— 八环合并、游标、severity 规则表、
@@ -42,8 +44,10 @@ class EventBroadcasterTest {
     private final NotifyMetrics notify = new NotifyMetrics(registry);
     private final SensitiveMetrics sensitive = new SensitiveMetrics(registry);
     private final IdentityMetrics identity = new IdentityMetrics(registry);
+    /** 台账出口的替身（块 7 · commit 8c）：本文件测的是**广播器这一层**，不测 MQ。 */
+    private final EventPublisher publisher = mock(EventPublisher.class);
     private final EventBroadcaster broadcaster = new EventBroadcaster(
-            cache, lock, order, stock, audit, notify, sensitive, identity);
+            cache, lock, order, stock, audit, notify, sensitive, identity, publisher);
 
     // ================= 合并与游标 =================
 

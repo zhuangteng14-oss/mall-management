@@ -11,7 +11,8 @@ import java.util.Map;
 
 /**
  * 可观测域的**内联 SQL 唯一出口**（块 7 · commit 4）—— 只碰一张表 {@code drill_record}
- * （建表在 {@code mall_management_sql.sql} 的 Migration ⑰-1，12 列）。
+ * （建表在 {@code mall_management_sql.sql} 的 Migration ⑰-1，12 列；commit 8c 的 ⑲-2 再加
+ * {@code BatchId} ⇒ 现 **13 列**）。
  *
  * <p>范式照 {@link com.minke.mallmanagement.admin.dao.AdminAuditDao}：{@code @Repository} +
  * 构造器**收 {@code JdbcTemplate} 而不是 {@code JdbcClient}**（让 {@code @WebMvcTest} 切片里既有的
@@ -59,6 +60,11 @@ public class DrillRecordDao {
      *
      * @param scenario  场景配置 JSON（勾选 + 权重 + 总并发 + 持续秒数）
      * @param result    长文本结果 JSON（后端解析后分字段给前端，不是让前端展示原文）
+     * @param batchId   这一次演练的**批次 UUID**（块 7 · commit 8c 新增；列由 Migration ⑲-2 加）。
+     *                  它是 {@code observed_event.BatchId} 的**同一串值**（引擎在一轮开始时生成、
+     *                  同时写进两边）⇒ 「这一轮演练污染出来的事件」与「这一轮演练这一行记录」
+     *                  靠它对得上。⚠️ 存量行是 {@code NULL}（不是空串）：空串会被清理谓词读成
+     *                  「属于一个叫空的批次」。
      * @return **新行的 {@code Id}**（不是受影响行数）
      *
      * <p>⚠️ <b>为什么这里不走本仓惯用的 {@code SELECT LAST_INSERT_ID()}</b>
@@ -72,14 +78,14 @@ public class DrillRecordDao {
      */
     public long insert(String operatorId, Integer operatorRole, String name, String scenario,
                        int totalRequests, int blockedRequests, int failedRequests, long durationMs,
-                       String result) {
+                       String result, String batchId) {
         String sql = "INSERT INTO mall_management_sql.drill_record "
                 + "(OperatorId, OperatorRole, Name, Scenario, TotalRequests, BlockedRequests, "
-                + "FailedRequests, DurationMs, Result) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)";
+                + "FailedRequests, DurationMs, Result, BatchId) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
         KeyHolder keys = new GeneratedKeyHolder();
         jdbcClient.sql(sql)
                 .params(operatorId, operatorRole, name, scenario, totalRequests, blockedRequests,
-                        failedRequests, durationMs, result)
+                        failedRequests, durationMs, result, batchId)
                 .update(keys);
         Number key = keys.getKey();
         return key == null ? 0L : key.longValue();

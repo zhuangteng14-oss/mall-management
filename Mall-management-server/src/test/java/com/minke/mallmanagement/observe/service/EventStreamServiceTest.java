@@ -5,18 +5,23 @@ import com.minke.mallmanagement.observe.metrics.IdentityMetrics;
 import com.minke.mallmanagement.observe.metrics.NotifyMetrics;
 import com.minke.mallmanagement.observe.metrics.SensitiveMetrics;
 import com.minke.mallmanagement.observe.metrics.StockMetrics;
+import com.minke.mallmanagement.observe.mq.EventPublisher;
 import com.minke.mallmanagement.order.metrics.MallOrderStateMetrics;
 import com.minke.mallmanagement.shared.cache.MallCacheMetrics;
 import com.minke.mallmanagement.shared.lock.MallLockMetrics;
+import com.minke.mallmanagement.shared.web.TraceIdFilter;
 import com.minke.mallmanagement.shared.web.TraceLog;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.slf4j.MDC;
 
 import java.util.List;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 /**
  * 实时日志页产帧（{@link EventStreamService}）的实测 —— 增量、三个汇总、首帧语义。
@@ -41,10 +46,14 @@ class EventStreamServiceTest {
     private final SensitiveMetrics sensitive = new SensitiveMetrics(registry);
     private final IdentityMetrics identity = new IdentityMetrics(registry);
 
+    /** 台账出口的替身（块 7 · commit 8c）。⚠️ 默认 {@code connected()=false} —— 本文件另有一条
+     *  用例把它设成 true 来验帧里的 `mq` 字段；其余用例只关心**帧的形状**，不关心 MQ 通不通。 */
+    private final EventPublisher publisher = mock(EventPublisher.class);
+
     /** ⚠️ 广播器认的必须是**上面那几个**环实例（各环的缓冲是实例字段，不是 registry 里的东西）。 */
     private final EventBroadcaster broadcaster = new EventBroadcaster(
-            cache, lock, order, stock, audit, notify, sensitive, identity);
-    private final EventStreamService service = new EventStreamService(broadcaster, 0);
+            cache, lock, order, stock, audit, notify, sensitive, identity, publisher);
+    private final EventStreamService service = new EventStreamService(broadcaster, publisher, 0);
 
     @Test
     @DisplayName("首帧：把八环已攒的都送出来，三个汇总都是**本拍**的；第一拍速率报 0（不报无穷）")
@@ -99,7 +108,7 @@ class EventStreamServiceTest {
 
         assertThat(events).hasSize(1);
         assertThat(events.get(0)).containsOnlyKeys("seq", "ts", "kind", "severity", "title", "detail", "key",
-                "objectType", "objectId", "traceId");   // 块 7 · commit 8 新增的三键（前端抽屉 / 对象列要用）
+                "objectType", "objectId", "traceId", "batchId");   // 块 7 · commit 8 新增三键（抽屉 / 对象列）+ commit 8c 的 batchId
         assertThat(events.get(0)).containsEntry("kind", "stock").containsEntry("severity", "info")
                 .containsEntry("title", "库存扣减").containsEntry("key", "SKU-9");
         assertThat(events.get(0)).containsEntry("objectType", "sku").containsEntry("objectId", "SKU-9");
@@ -121,6 +130,42 @@ class EventStreamServiceTest {
                 .containsEntry("status", 200).containsEntry("ms", 42L);
 
         assertThat(tracesOf(service.frame(2))).as("送过的不再送（与 events 同一增量口径）").isEmpty();
+    }
+
+    @Test
+    @DisplayName("块 7 · commit 8c：帧里的 `mq` = 发布方**实测**的连接状态（页面那个黄点读它）")
+    void frameCarriesMqConnectivity() {
+        when(publisher.connected()).thenReturn(false);
+        assertThat(service.frame(0)).as("连不上 ⇒ 帧里是 false（页面画黄点 + 那句「不落库」）")
+                .containsEntry("mq", false);
+
+        when(publisher.connected()).thenReturn(true);
+        assertThat(service.frame(1)).as("连上了 ⇒ true。⚠️ 只有这一条用例会把替身设成 true")
+                .containsEntry("mq", true);
+    }
+
+    /**
+     * 块 7 · commit 8c 的判据：「演练批次要从**记录事件的那条线程**一路带到帧里」。
+     * 这里走的是**源环 → 广播器 → 帧**全程 —— 各 metrics 类在记事件那一刻现读 MDC
+     * （{@code TraceIdFilter.currentBatch()}），所以测试只要在同一个线程上把 MDC 设好。
+     */
+    @Test
+    @DisplayName("块 7 · commit 8c：MDC 里的演练批次一路进到卡片（日常流量为 null）")
+    void eventCarriesDrillBatchFromMdc() {
+        MDC.put(TraceIdFilter.MDC_BATCH_KEY, "batch-8c");
+        try {
+            stock.deduct(SKU, 1, StockMetrics.Deduct.OK);
+        } finally {
+            // ⚠️ 必须清：MDC 是 ThreadLocal，JUnit 默认**同一线程**跑下一个用例
+            //    （不共享 MDC 的干净线程只在别处出现）⇒ 漏清会让别的用例读到这个批次。
+            MDC.remove(TraceIdFilter.MDC_BATCH_KEY);
+        }
+
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> events =
+                (List<Map<String, Object>>) service.frame(0).get("events");
+        assertThat(events).hasSize(1);
+        assertThat(events.get(0)).containsEntry("batchId", "batch-8c");
     }
 
     @SuppressWarnings("unchecked")

@@ -132,7 +132,8 @@ public class AuditMetrics {
                 actor == null ? null : String.valueOf(actor),
                 action == null ? null : String.valueOf(action), reason,
                 targetType == null ? null : String.valueOf(targetType),
-                targetId == null ? null : String.valueOf(targetId), TraceIdFilter.current());
+                targetId == null ? null : String.valueOf(targetId),
+                TraceIdFilter.current(), TraceIdFilter.currentBatch());
     }
 
     /**
@@ -148,10 +149,13 @@ public class AuditMetrics {
      * @param targetId   被改对象标识（同上）
      * @param traceId    产生本条事件的那次请求的号（块 7 · commit 8 新增）；不在请求线程上时为 null。
      *                   ⚠️ {@link #event} 里现读 MDC —— <b>不是</b>并入合并环时读（那时在流线程上，读不到）
+     * @param batchId    产生本条事件的那次请求**所属的演练批次**（块 7 · commit 8c，来自
+     *                   {@code X-Drill-Batch} 头）；日常流量为 {@code null}（「不属于任何批次」）。
+     *                   ⚠️ 与 {@code traceId} 同一处、同一刻现读 —— 理由逐字相同
      */
     public record AuditEvent(long seq, long epochMilli, String result,
                              String actor, String action, String reason,
-                             String targetType, String targetId, String traceId) {
+                             String targetType, String targetId, String traceId, String batchId) {
     }
 
     /** {@code mall.audit.writes} 的 result 取值。tag 字段避免每次调用拼字符串。 */

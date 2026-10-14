@@ -128,7 +128,8 @@ public class SensitiveMetrics {
         long seq = eventCursor.getAndIncrement();
         events[(int) (seq & EVENT_MASK)] = new SensitiveEvent(
                 seq, System.currentTimeMillis(), result,
-                scene == null ? null : String.valueOf(scene), hit, total, words, TraceIdFilter.current());
+                scene == null ? null : String.valueOf(scene), hit, total, words,
+                TraceIdFilter.current(), TraceIdFilter.currentBatch());
     }
 
     /**
@@ -142,9 +143,11 @@ public class SensitiveMetrics {
      * @param total      参与判定的词数
      * @param words      命中的词（块 7 · commit 8 新增，逗号分隔；一个都没命中时为 null）
      * @param traceId    产生本条事件的那次请求的号（块 7 · commit 8 新增）；不在请求线程上时为 null
+     * @param batchId    产生本条事件的那次请求**所属的演练批次**（块 7 · commit 8c，来自
+     *                   {@code X-Drill-Batch} 头）；日常流量为 {@code null}。同 {@code traceId} 现读
      */
     public record SensitiveEvent(long seq, long epochMilli, String result,
-                                 String scene, int hit, int total, String words, String traceId) {
+                                 String scene, int hit, int total, String words, String traceId, String batchId) {
     }
 
     /** {@code mall.sensitive.checks} 的 result 取值。tag 字段避免每次调用拼字符串。 */

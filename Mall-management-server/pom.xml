@@ -145,6 +145,20 @@
             <artifactId>datasource-proxy</artifactId>
             <version>1.11.0</version>
         </dependency>
+
+        <!-- 消息队列（C3 块 7 · commit 8c）：观测事件台账的异步出口。
+             ⚠️ 只引 starter，不单独引 spring-rabbit —— starter 负责装配 RabbitTemplate 与
+             SimpleRabbitListenerContainerFactory（后者按 application-*.properties 生效）；
+             拓扑（exchange / queue / DLQ）与两处 Jackson2JsonMessageConverter 见
+             observe/mq/RabbitObserveConfig.java 的类注释。
+             ⚠️ a3 profile 刻意 **不配** spring.rabbitmq.*：连不上只 WARN 降级（MQ 缺席不算故障，
+             见 RabbitEventPublisher 类注释）；CI 由 ci.yml 的 services 里 rabbitmq:3-management 顶上。
+             ⚠️ 追加在依赖段末尾是刻意的：pom.xml 被全仓以 file:行号 互引（`:40` / `:51` / `:72` /
+             `:82-85` / `:117-121` 等），插在中间会让其后所有引用集体偏移。 -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-amqp</artifactId>
+        </dependency>
     </dependencies>
 
     <build>

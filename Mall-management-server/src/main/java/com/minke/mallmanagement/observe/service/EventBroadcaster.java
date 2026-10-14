@@ -10,6 +10,7 @@ import com.minke.mallmanagement.observe.metrics.SensitiveMetrics;
 import com.minke.mallmanagement.observe.metrics.SensitiveMetrics.SensitiveEvent;
 import com.minke.mallmanagement.observe.metrics.StockMetrics;
 import com.minke.mallmanagement.observe.metrics.StockMetrics.StockEvent;
+import com.minke.mallmanagement.observe.mq.EventPublisher;
 import com.minke.mallmanagement.order.metrics.MallOrderStateMetrics;
 import com.minke.mallmanagement.order.metrics.MallOrderStateMetrics.OrderStateEvent;
 import com.minke.mallmanagement.shared.cache.MallCacheMetrics;
@@ -78,6 +79,16 @@ import java.util.concurrent.atomic.AtomicLong;
  * {@link #poll()} 是**被流线程每秒调一次**的（不是在业务线程上）：八次
  * {@code recentEvents()}（各 ≤512 条、无锁）+ 一次 {@code synchronized}。
  * 业务侧（下单、扣库存……）**从不**调本类 ⇒ 本类不在任何临界区里。
+ *
+ * <h2>【块 7 · commit 8c：事件台账的出口，以及它的**已知边界**】</h2>
+ * {@link #poll()} 并入一条的同时，把那条 {@link ObservedEvent} 交给 {@link EventPublisher}
+ * （MQ → {@code observed_event} 落库 + Redis {@code events:latest}）。调点只有
+ * {@link #add} 一处（理由见那个字段的注释）。
+ * <p>⚠️ <b>边界（必须知道，不许假装不存在）</b>：{@code poll()} 由 <b>SSE 流线程</b>驱动
+ * ⇒ <b>没有人打开实时日志页时，合并环不动、也就没有事件落库</b>。也就是说本笔的台账
+ * 是「**观看时**的过程记录」，不是「无人值守的全量审计流水」。要让它与观看无关，
+ * 得另给 {@code poll()} 一个时钟（定时任务）—— 那会动到「a3 下调度器总闸关着」这条既有口径，
+ * 超出本笔（批文只授权「调点挂归一点」），如实登记，不在本笔偷偷加。
  */
 @Component
 public class EventBroadcaster {
@@ -139,10 +150,14 @@ public class EventBroadcaster {
      * @param traceId    产生本条事件的那次请求的号（块 7 · commit 8 新增）；定时任务 / 流线程上产生时为 null。
      *                   ⚠️ 它由**源环在记录那一刻**从 MDC 取好（见各 metrics 类的 {@code event(...)}），
      *                   不是并入本环时取的 —— 并入跑在 SSE 流线程上，那里 MDC 是空的
+     * @param batchId    产生本条事件的请求**所属的演练批次**（块 7 · commit 8c 新增）；
+     *                   {@code null} = 不属于任何演练批次（日常流量）。
+     *                   ⚠️ 取值点与 {@code traceId} 逐字相同（源环记录那一刻现读 MDC），
+     *                   原因也相同 —— 并入时读不到。它落进 {@code observed_event.BatchId}
      */
     public record ObservedEvent(long seq, long epochMilli, String kind, String severity,
                                 String title, String detail, String key,
-                                String objectType, String objectId, String traceId) {
+                                String objectType, String objectId, String traceId, String batchId) {
     }
 
     private final MallCacheMetrics cacheMetrics;
@@ -153,6 +168,17 @@ public class EventBroadcaster {
     private final NotifyMetrics notifyMetrics;
     private final SensitiveMetrics sensitiveMetrics;
     private final IdentityMetrics identityMetrics;
+
+    /**
+     * 事件台账（{@code observed_event}）的出口（块 7 · commit 8c）。⚠️ <b>调点只有本类一处</b>
+     * —— 八个环各自发布会在「哪条事件算已发布」这件事上产生八份口径（其中七份迟早会漂），
+     * 而 {@link #add} 本来就是**唯一**创建 {@link ObservedEvent} 的地方。
+     *
+     * <p>⚠️ 由此带来一个**必须知道**的后果：{@link #add} 只在 {@link #poll()} 里被调到，而
+     * {@code poll()} 由 SSE 流线程驱动 ⇒ <b>没人打开实时日志页时，事件不落库</b>（合并环不动）。
+     * 这是本笔的已知边界，如实记在这里，不假装它不存在（见类注释末节与 {@code EventPublisher}）。
+     */
+    private final EventPublisher eventPublisher;
 
     /** 合并环本体 + 单调游标（写者只做「数组赋值 + 游标自增」，读者靠 seq 自校验）。 */
     private final ObservedEvent[] events = new ObservedEvent[EVENT_CAPACITY];
@@ -168,7 +194,8 @@ public class EventBroadcaster {
                             AuditMetrics auditMetrics,
                             NotifyMetrics notifyMetrics,
                             SensitiveMetrics sensitiveMetrics,
-                            IdentityMetrics identityMetrics) {
+                            IdentityMetrics identityMetrics,
+                            EventPublisher eventPublisher) {
         this.cacheMetrics = cacheMetrics;
         this.lockMetrics = lockMetrics;
         this.orderMetrics = orderMetrics;
@@ -177,6 +204,7 @@ public class EventBroadcaster {
         this.notifyMetrics = notifyMetrics;
         this.sensitiveMetrics = sensitiveMetrics;
         this.identityMetrics = identityMetrics;
+        this.eventPublisher = eventPublisher;
         Arrays.fill(sourceSeq, -1L);
     }
 
@@ -235,7 +263,7 @@ public class EventBroadcaster {
             if (e.seq() <= last) {
                 continue;
             }
-            add(e.epochMilli(), Kind.CACHE, fromCache(e), e.key(), e.seq(), "cache", str(e.key()), e.traceId());
+            add(e.epochMilli(), Kind.CACHE, fromCache(e), e.key(), e.seq(), "cache", str(e.key()), e.traceId(), e.batchId());
             last = e.seq();
         }
         sourceSeq[Kind.CACHE.ordinal()] = last;
@@ -247,7 +275,7 @@ public class EventBroadcaster {
             if (e.seq() <= last) {
                 continue;
             }
-            add(e.epochMilli(), Kind.LOCK, fromLock(e), e.key(), e.seq(), "lock", str(e.key()), e.traceId());
+            add(e.epochMilli(), Kind.LOCK, fromLock(e), e.key(), e.seq(), "lock", str(e.key()), e.traceId(), e.batchId());
             last = e.seq();
         }
         sourceSeq[Kind.LOCK.ordinal()] = last;
@@ -259,7 +287,7 @@ public class EventBroadcaster {
             if (e.seq() <= last) {
                 continue;
             }
-            add(e.epochMilli(), Kind.ORDER, fromOrder(e), e.key(), e.seq(), "order", str(e.key()), e.traceId());
+            add(e.epochMilli(), Kind.ORDER, fromOrder(e), e.key(), e.seq(), "order", str(e.key()), e.traceId(), e.batchId());
             last = e.seq();
         }
         sourceSeq[Kind.ORDER.ordinal()] = last;
@@ -271,7 +299,7 @@ public class EventBroadcaster {
             if (e.seq() <= last) {
                 continue;
             }
-            add(e.epochMilli(), Kind.STOCK, fromStock(e), e.skuCode(), e.seq(), "sku", str(e.skuCode()), e.traceId());
+            add(e.epochMilli(), Kind.STOCK, fromStock(e), e.skuCode(), e.seq(), "sku", str(e.skuCode()), e.traceId(), e.batchId());
             last = e.seq();
         }
         sourceSeq[Kind.STOCK.ordinal()] = last;
@@ -283,7 +311,7 @@ public class EventBroadcaster {
             if (e.seq() <= last) {
                 continue;
             }
-            add(e.epochMilli(), Kind.AUDIT, fromAudit(e), e.actor(), e.seq(), str(e.targetType()), str(e.targetId()), e.traceId());
+            add(e.epochMilli(), Kind.AUDIT, fromAudit(e), e.actor(), e.seq(), str(e.targetType()), str(e.targetId()), e.traceId(), e.batchId());
             last = e.seq();
         }
         sourceSeq[Kind.AUDIT.ordinal()] = last;
@@ -295,7 +323,7 @@ public class EventBroadcaster {
             if (e.seq() <= last) {
                 continue;
             }
-            add(e.epochMilli(), Kind.NOTIFY, fromNotify(e), e.key(), e.seq(), "notify", str(e.key()), e.traceId());
+            add(e.epochMilli(), Kind.NOTIFY, fromNotify(e), e.key(), e.seq(), "notify", str(e.key()), e.traceId(), e.batchId());
             last = e.seq();
         }
         sourceSeq[Kind.NOTIFY.ordinal()] = last;
@@ -307,7 +335,7 @@ public class EventBroadcaster {
             if (e.seq() <= last) {
                 continue;
             }
-            add(e.epochMilli(), Kind.SENSITIVE, fromSensitive(e), e.scene(), e.seq(), "sensitive", str(e.words()), e.traceId());
+            add(e.epochMilli(), Kind.SENSITIVE, fromSensitive(e), e.scene(), e.seq(), "sensitive", str(e.words()), e.traceId(), e.batchId());
             last = e.seq();
         }
         sourceSeq[Kind.SENSITIVE.ordinal()] = last;
@@ -319,7 +347,7 @@ public class EventBroadcaster {
             if (e.seq() <= last) {
                 continue;
             }
-            add(e.epochMilli(), Kind.IDENTITY, fromIdentity(e), e.subject(), e.seq(), "identity", str(e.path()), e.traceId());
+            add(e.epochMilli(), Kind.IDENTITY, fromIdentity(e), e.subject(), e.seq(), "identity", str(e.path()), e.traceId(), e.batchId());
             last = e.seq();
         }
         sourceSeq[Kind.IDENTITY.ordinal()] = last;
@@ -536,13 +564,20 @@ public class EventBroadcaster {
      *                   在调用点逐环给定；取值口径见 {@link ObservedEvent#objectType()}
      * @param objectId   被操作对象的**标识**（同上）；取值口径见 {@link ObservedEvent#objectId()}
      * @param traceId    产生本条事件的那次请求的号（同上）；不在请求线程上时为 {@code null}
+     * @param batchId    产生本条事件的请求所属的演练批次（块 7 · commit 8c，同上）；
+     *                   不属于任何批次时为 {@code null}
      */
     private void add(long epochMilli, Kind kind, String[] triple, String key, long srcSeq,
-                     String objectType, String objectId, String traceId) {
+                     String objectType, String objectId, String traceId, String batchId) {
         long seq = cursor.getAndIncrement();
-        events[(int) (seq & EVENT_MASK)] = new ObservedEvent(
+        ObservedEvent event = new ObservedEvent(
                 seq, epochMilli, kind.tag, triple[0], triple[1], triple[2] + " src=" + kind.tag + "#" + srcSeq,
-                key == null ? null : String.valueOf(key), objectType, objectId, traceId);
+                key == null ? null : String.valueOf(key), objectType, objectId, traceId, batchId);
+        events[(int) (seq & EVENT_MASK)] = event;
+        // 块 7 · commit 8c：并入合并环 = 「这条事件已经成形」的那一刻，发布台账就走这里。
+        // ⚠️ 发布方**不抛**（fail-soft，见 EventPublisher）—— 台账落不了库不该让日志页断流。
+        // ⚠️ 顺序刻意是「先入环、后发布」：发布方再怎么慢/挂，内存环与页面都已拿到这一条。
+        eventPublisher.publish(event);
     }
 
     /** {@code null → null}（三个新字段的空值口径与 {@code key} 一致：缺就记 {@code null}，

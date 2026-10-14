@@ -259,7 +259,7 @@ public class MallOrderStateMetrics {
         long seq = eventCursor.getAndIncrement();
         events[(int) (seq & EVENT_MASK)] = new OrderStateEvent(
                 seq, System.currentTimeMillis(), kind, action, from, to, result, shape,
-                key == null ? null : String.valueOf(key), com.minke.mallmanagement.shared.web.TraceIdFilter.current());   // 块 7 · commit 8：写全限定名而非 import，理由同 {@code MallCacheMetrics#event}（保本文件 `:3` 与 `:104` 的引用不下移）
+                key == null ? null : String.valueOf(key), com.minke.mallmanagement.shared.web.TraceIdFilter.current(), com.minke.mallmanagement.shared.web.TraceIdFilter.currentBatch());   // 块 7 · commit 8/8c：写全限定名而非 import，理由同 {@code MallCacheMetrics#event}（保本文件 `:3` 与 `:104` 的引用不下移）
     }
 
     /**
@@ -276,9 +276,13 @@ public class MallOrderStateMetrics {
      * @param result     transition 的结果 / async 的结果（ok|error|rejected）；illegal 为 null
      * @param shape      illegal 的三位串或 non_binary；async 被拒时放 reason；其余 null
      * @param key        涉及的业务键（订单号）
+     * @param traceId    产生本条事件的那次请求的号（块 7 · commit 8 新增）；不在请求线程上时为 null
+     * @param batchId    产生本条事件的那次请求**所属的演练批次**（块 7 · commit 8c，来自
+     *                   {@code X-Drill-Batch} 头）；日常流量为 {@code null}。同 {@code traceId} 现读
      */
     public record OrderStateEvent(long seq, long epochMilli, String kind, String action,
-                                  String from, String to, String result, String shape, String key, String traceId) {
+                                  String from, String to, String result, String shape, String key,
+                                  String traceId, String batchId) {
     }
 
     /** {@code mall.order.state.transitions} 的 result 取值。tag 字段避免每次调用拼字符串。 */

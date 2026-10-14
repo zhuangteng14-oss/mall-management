@@ -552,6 +552,32 @@ public abstract class AbstractSmokeTest {
     protected L2HealthProbe l2HealthProbe;
 
     /**
+     * 同一类问题，第八次遇到，形状与第七次同族：块 7 commit 8c 给事件台账加了出口，
+     * {@code @Import} 里的两个真 bean（{@code EventBroadcaster} 与 {@code EventStreamService}）
+     * 各要一个 {@code EventPublisher}。
+     *
+     * <p>⚠️ **为什么不能照 DAO 那条范式 @Import 真 bean**：真实现 {@code RabbitEventPublisher}
+     * 要一个 {@code RabbitTemplate} —— {@code @WebMvcTest} 切片没有 AMQP 自动配置
+     * （{@code spring-boot-starter-amqp} 也在，但切片只装 web 组件，{@code RabbitObserveConfig}
+     * 是 {@code @Configuration}、不进切片）⇒ 上下文加载期就会失败。故只能给替身。
+     *
+     * <p>⚠️ **一个替身，不是两个**：接口上的 {@code connected()} 把原本计划的 {@code MqPresence}
+     * 折了进来（页面那个黄点读的就是它）⇒ 两个 bean 吃的是同一个类型、同一个替身。
+     *
+     * <p>⚠️ **代价写在这里**：替身的方法全部空转 —— {@code publish(...)} 什么也不做（事件不发往
+     * 任何队列）、{@code connected()} 默认回 {@code false}（帧里的 {@code mq} 恒假）。
+     * 这不影响任何用例：本基类的子类打的是各域列表 / 操作端点，**零个**断言读帧里的 {@code mq}
+     * 键（实时日志页那一屏的验证在 A3 / 手验）。发出去的语义验证在 {@code EventBroadcasterTest}
+     * （替身 + 捕获）与 {@code EventStreamServiceTest}（{@code connected()} 两个取值各测一次）。
+     */
+    // ⚠️ 这里写**全限定名**而不是加 import：本文件被 `defect-survey.md` / `project-map.md` /
+    //    `progress.md` 按「文件:行号」引用（`:43-45` / `:47` / `:69` / `:153`），全都在 import 块
+    //    之后 ⇒ 加一行 import 会让它们集体下移。本笔的做法与本批另外两处同款
+    //    （`OrderStateExecutor.submit` 与 `LockSceneService.ThreadRecorder` 里的 `ObserveContext`）。
+    @MockitoBean
+    protected com.minke.mallmanagement.observe.mq.EventPublisher eventPublisher;
+
+    /**
      * 锁替身的行为：**直接执行 action**（不做任何互斥、不碰 Redis）。
      *
      * <p>为什么不逐用例 stub：smoke 测的是 Controller 的分支与响应文案，锁是**穿过它的一层**；

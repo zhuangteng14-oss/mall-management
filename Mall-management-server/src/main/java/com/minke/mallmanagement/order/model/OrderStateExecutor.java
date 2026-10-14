@@ -130,8 +130,15 @@ public class OrderStateExecutor implements DisposableBean {
      *                本类不替它 catch —— 但**计时**在 {@code finally} 里，抛了也照记。
      */
     public void submit(String orderId, Runnable task) {
+        // 块 7 · commit 8c：把 (traceId, batchId) 从**调用线程**搬到池线程。池线程是「建一次用多次」
+        // 的，MDC 不会跟着任务过来（理由见 ObserveContext 类注释）⇒ 时间线落库路径上记出的事件
+        // 若不带这两个号，抽屉里就串不起来。⚠️ 捕获点必须在**入队之前**：入队之后就没有
+        // 「请求线程」这个身份了。⚠️ 写全限定名而非 import：本文件 `:79` 被
+        // concurrency-map.md 按「文件:行号」引用（两处），加一行 import 会让它下移。
+        com.minke.mallmanagement.shared.web.ObserveContext ctx =
+                com.minke.mallmanagement.shared.web.ObserveContext.capture();
         try {
-            executor.execute(new TimelineTask(orderId, timed(task)));
+            executor.execute(new TimelineTask(orderId, () -> ctx.run(timed(task))));
         } catch (RejectedExecutionException e) {
             // 正常路径不该到这里：rejectingPolicy() 已经处理了队列满与关闭两种情形，且它自己
             // 不再上抛。能落到这里只可能是「处理器内部再次 execute 时又撞上关闭」的竞态，

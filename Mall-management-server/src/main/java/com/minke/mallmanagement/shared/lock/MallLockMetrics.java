@@ -185,7 +185,7 @@ public class MallLockMetrics {
         long seq = eventCursor.getAndIncrement();
         events[(int) (seq & EVENT_MASK)] = new MallLockEvent(
                 seq, System.currentTimeMillis(), lock, kind, result,
-                key == null ? null : String.valueOf(key), com.minke.mallmanagement.shared.web.TraceIdFilter.current());   // 块 7 · commit 8：写全限定名而非 import，理由同 {@code MallCacheMetrics#event}（保本文件 `:71`/`:72`/`:74` 的引用不下移）
+                key == null ? null : String.valueOf(key), com.minke.mallmanagement.shared.web.TraceIdFilter.current(), com.minke.mallmanagement.shared.web.TraceIdFilter.currentBatch());   // 块 7 · commit 8/8c：写全限定名而非 import，理由同 {@code MallCacheMetrics#event}（保本文件 `:71`/`:72`/`:74` 的引用不下移）
     }
 
     /**
@@ -197,9 +197,12 @@ public class MallLockMetrics {
      * @param kind       acquire | hold | transition
      * @param result     该 kind 下的结果
      * @param key        涉及的业务键；翻转为 null
+     * @param traceId    产生本条事件的那次请求的号（块 7 · commit 8 新增）；不在请求线程上时为 null
+     * @param batchId    产生本条事件的那次请求**所属的演练批次**（块 7 · commit 8c，来自
+     *                   {@code X-Drill-Batch} 头）；日常流量为 {@code null}。同 {@code traceId} 现读
      */
     public record MallLockEvent(long seq, long epochMilli, String lock, String kind,
-                                String result, String key, String traceId) {
+                                String result, String key, String traceId, String batchId) {
     }
 
     /** {@code mall.lock.acquires} 的 result 取值。tag 字段避免每次调用拼字符串。 */

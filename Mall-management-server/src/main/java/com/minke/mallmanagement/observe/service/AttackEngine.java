@@ -5,6 +5,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.minke.mallmanagement.observe.dao.DrillTargetDao;
 import com.minke.mallmanagement.shared.cache.L2HealthProbe;
 import com.minke.mallmanagement.shared.web.AuthTokenStore;
+import com.minke.mallmanagement.shared.web.ObserveContext;
+import com.minke.mallmanagement.shared.web.TraceIdFilter;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
@@ -24,6 +26,7 @@ import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
@@ -236,7 +239,7 @@ public class AttackEngine {
      * 的列，{@code result} 序列化成 {@code Result} 长文本）。
      */
     public record DrillRun(String name, String scenarioJson, int total, int blocked, int failed,
-                           long durationMs, Map<String, Object> result) {
+                           long durationMs, Map<String, Object> result, String batchId) {
     }
 
     /** 判定档位（类注释三）。 */
@@ -310,6 +313,21 @@ public class AttackEngine {
      */
     private volatile String currentToken = "";
 
+    /**
+     * 本轮演练的**批次号**（块 7 · commit 8c）。一轮一个 {@code UUID.randomUUID()}，
+     * 由 {@link #run} 生成、写进两处：
+     * <ol>
+     *   <li>{@link DrillRun#batchId()} —— 落进 {@code drill_record.BatchId}（这一轮**这件事**）；</li>
+     *   <li>每个请求的 {@code X-Drill-Batch} 头（见 {@link #post}）—— 服务端那一侧由
+     *       {@code TraceIdFilter} 收进 MDC，于是**这轮打出来的事件**都带上它，
+     *       落进 {@code observed_event.BatchId}。</li>
+     * </ol>
+     * ⚠️ 与 {@link #currentToken} 是同一族的写法（工作线程靠 volatile 读），也**登记同一个代价**：
+     * 两轮演练**并发**发起时，后发起那轮会把批次覆盖掉，先那轮工作线程发出去的请求可能带上
+     * 后那轮的批次 —— 本仓的演示口径是「一次点一个开始」（见 {@link #currentToken} 的注释）。
+     */
+    private volatile String currentBatch = "";
+
     public AttackEngine(DrillTargetDao drillTargetDao, L2HealthProbe l2HealthProbe,
                         ObjectMapper objectMapper) {
         this.drillTargetDao = drillTargetDao;
@@ -347,6 +365,11 @@ public class AttackEngine {
         Config cfg = parse(body);
         long startedNanos = System.nanoTime();
         long runSeq = System.currentTimeMillis() % 100000L;   // 只用于造可辨识的业务串
+        // 块 7 · commit 8c：一轮一个批次号（varchar(36)，与 drill_record / observed_event 的列宽一致）。
+        // ⚠️ 在**发流量之前**就定下来：它要同时出现在「请求头」「记录那一行」「事件台账」三处，
+        //    跑完再生成会让前两处没法回填。
+        String batchId = UUID.randomUUID().toString();
+        currentBatch = batchId;
         Target target = resolveTarget();
 
         Meter[] meters = new Meter[SCENARIOS.size()];
@@ -391,7 +414,7 @@ public class AttackEngine {
         Map<String, Object> result = buildResult(target, meters, redisDownInfo, orderIds, stockBefore,
                 stockAfter, baseline, runSeq);
         return new DrillRun(cfg.name(), buildScenarioJson(cfg), sum(meters, 0), sum(meters, 1),
-                sum(meters, 2), durationMs, result);
+                sum(meters, 2), durationMs, result, batchId);
     }
 
     /** 一个阶段：把 {@link #threadPlan} 排出的线程计划跑起来，到截止时刻收口。 */
@@ -401,10 +424,14 @@ public class AttackEngine {
         List<String> plan = threadPlan(chosen, concurrency);
         long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(seconds);
         CountDownLatch done = new CountDownLatch(plan.size());
+        // 块 7 · commit 8c：把 (traceId, batchId) 绑到演练自己的线程上。⚠️ 这里绑的是
+        // **批次的来源**那一侧：本线程是「发请求的人」，服务端那一侧靠请求头
+        // （X-Drill-Batch，见 post）自己收 —— 两条路都要走，缺一条就有一半事件不带号。
+        ObserveContext ctx = new ObserveContext(TraceIdFilter.current(), currentBatch);
         for (String key : plan) {
             // ⚠️ 守护线程：演练是「可被进程关闭打断」的长动作。非守护线程会让一次演练把 JVM 的
             //    关闭拖到整整 durationSeconds 之后（容器刷下去时最难受）。
-            Thread t = new Thread(() -> {
+            Thread t = new Thread(() -> ctx.run(() -> {
                 try {
                     Meter meter = meters[INDEX.get(key)];
                     AtomicInteger seq = seqs.get(key);
@@ -423,7 +450,7 @@ public class AttackEngine {
                 } finally {
                     done.countDown();
                 }
-            }, "drill-" + key);
+            }), "drill-" + key);
             t.setDaemon(true);
             t.start();
         }
@@ -678,6 +705,12 @@ public class AttackEngine {
                 .POST(HttpRequest.BodyPublishers.ofString(formEncode(params), StandardCharsets.UTF_8));
         if (withToken) {
             builder.header(AuthTokenStore.HEADER, AuthTokenStore.BEARER + currentToken);
+        }
+        // 块 7 · commit 8c：把本轮批次告诉服务端。⚠️ 它是**服务端那一半**的唯一入口 ——
+        // TraceIdFilter 收到它才写进 MDC，之后这轮打出来的事件才带 batchId（见 currentBatch）。
+        // ⚠️ 刻意**无条件**带（含匿名那一路）：批次是「这是演练造的」的标记，与带不带票无关。
+        if (!currentBatch.isEmpty()) {
+            builder.header(TraceIdFilter.BATCH_HEADER, currentBatch);
         }
         try {
             HttpResponse<String> resp = http.send(builder.build(),
