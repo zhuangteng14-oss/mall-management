@@ -4885,3 +4885,72 @@ COALESCE(merchantid,customerid) WHERE EventType IN (那 5 个)` → 复读对照
 ⇒ 面上教训（**校验器与被测端共用同一口径 ⇒ 假绿**）登记 **TD-59**，并已给探针加**反向控制**。
 
 **⑦ 验收（agent 最小收验，⚠️ 非用户手验）** ⇒ 后端 `./mvnw -B test` = `Tests run: 309 / Failures 0 / Errors 0 / Skipped 26` + `BUILD SUCCESS`（17:13，**TD-58 那条本轮未红**）；前端 `build` = `DONE`（`Hash 8d3685921932c375`、`Time 94680ms`，① 甲案之后重跑）、`npx eslint src` = **exit 0**；`probe-b6c3-mention.py` = **EXIT 0**（A1–A4 / B1 绿，B2 与段 N 全 0）。重造场景证据 `b6-commit3-mention.txt` §七/§八。
+
+## 二十四、C3 块 7〈可观测域 4 项 + 库存治理 2 项〉（2026-10-13/14；**开段：本笔只登 commit 8b，前 16 笔的逐条槽位归 commit 9 收口**）
+
+> 本节**追加在文件尾**（同 §19 / §20 / §21 / §22 / §23 的先例）。叙事版见 `progress.md §7-B7`；本节只记**本文件关心的那一面**：槽位改判 / 文件 / 行号 / 零漂移手法 / 门禁 / 偏差。
+> ⚠️ **本节是「开段」不是「收口条」**：块 7 的**范围 / 建表 / 后端 / 前端 / 门禁 / DoD / 挂账总表归 commit 9**；本笔（**commit 8b**）只把**这一笔**的面记下来。**前 16 笔（`195edc9` pack + `b1ffc6e` commit 0 … `b773bf3` commit 8）的逐条槽位一律不发**（同 §23-11 / §23-12 那种「收口之后再追加一段」的反面 —— 这里是**开段先落一笔、其余后补**）。
+> 命名沿用「§二十X」的段号形制，本节点编号写作 **24-X**（§二十三 用的是 `23-X`）。
+
+### 24-1　提交切分（分支 `feat/c3-admin-block7`，基点 `c2efb81` = PR #91 合并点）
+
+块内至今 **16 笔**（`git log --oneline c2efb81..HEAD`，自上而下 = 新到旧）；**本笔（commit 8b）是第 17 笔**：
+
+| 组 | 笔 | 内容 |
+|---|---|---|
+| 方案 | `195edc9` | **pack —— 块 7〈可观测域 4 项 + 库存治理 2 项〉方案原文入库** |
+| 建表 | `b1ffc6e` | **commit 0 —— 建 `drill_record` + 演示基线列 2 + 块 6 六表补 `Source`（Migration ⑰）+ P3 门禁 25→26 / 36→37** |
+| 库存 | `b1477cc` | commit 1 库存治理 —— CAS 扣减 + 下单即扣 + 超时释放（TD-36 / TD-38） |
+| 事件环 | `46cf986` | commit 2 五套新事件环 —— Stock / Audit / Notify / Sensitive / Identity（`observe/metrics`） |
+| 补挂 | `ede4493` | commit 3 三条 SSE 观测端点 + 事件广播器（`StreamingResponseBody` / 1s 一拍 / 512 槽） |
+| 补观测点 | `a1d2a9c` | commit 2b 四环改真观测点 —— 审计 / 通知 / 敏感词 / 身份各在原写入点补一行发事件 |
+| 攻击引擎 | `5c823eb` | commit 4 攻击引擎 —— 八场景真压测 + 演练记录落库 + 三条端点 + 前端薄封装 |
+| 库存续 | `96232eb` | commit 2c+2d —— 秒杀扣减接线（TD-38 兑现）+ 超时释放条件化（库存偏账根治） |
+| 边界补笔 ① ② | `b201437` | ① 评论写入链路补齐 `Source` + ② 超时取消 job 跳过演练带标记的行 |
+| 边界补笔 | `776306a` | `order.Source` 写入通道（`/order/orderAdd` 可选 `Source` + 攻击引擎下单带 `attack`） |
+| 页 · 攻击 | `2181d07` | commit 5 攻击模拟器页 —— 八场景一键 + 权重编排 + 演练记录（前端薄封装落地） |
+| 断环 | `5b971f1` | commit 5b 断循环依赖 —— `ObserveMetricsConfig` 的 `MeterFilter` 改 `static`（一个词，环自断） |
+| 页 · 指标 | `20df0a8` | commit 6 指标面板 + `Pager.vue` —— 7 项图表落地（`HeatmapChart` 首次启用） |
+| 后端 traceId | `b6619c5` | commit 6b 后端 traceId —— `TraceIdFilter` + logback 轮转 + 慢 SQL 告警（`datasource-proxy`） |
+| 页 · 流转 | `033d62a` | commit 7 状态流转页 `OrderFlow.vue` —— 5 图落地（五态计数 + 环图 + 进度条列表 + 状态机 + 时间线） |
+| 页 · 日志 | `b773bf3` | commit 8 实时日志页 `EventLog.vue` —— 8 类事件卡片流 + traceId 链路抽屉（后端补 Object/Trace 三列 + 帧补 `traces` + 补挂 2 处审计） |
+| **台账 + 清理** | （**本笔**） | **commit 8b —— 事件台账 `observed_event` + 清理 job + 清场端点（Migration ⑲）+ 修 `DrillTargetDao` + 补 `TraceLog` 单测** |
+
+### 24-2　commit 8b〈事件台账 + 清理〉（**本笔**）
+
+**库变更（迁移 ⑲）** ⇒ `mall_management_sql.sql:1832-1918`：段头 `:1832-1863` · **⑲-1 建表 `observed_event`** `:1865-1887`（**11 列 + 4 个非唯一索引**）· **⑲-2..⑲-5 四表加列 `BatchId varchar(36) DEFAULT NULL`**（`drill_record` `:1888` / `order` `:1896` / `comment` `:1904` / `admin_audit` `:1912`，逐列一个 `information_schema` 守卫 + `PREPARE/EXECUTE`，不写循环）。
+⇒ 表数 **37 → 38**、行首 `CREATE TABLE` **38 → 40**、非主键索引 **69 → 73**、非主键 UNIQUE **19 不变**、`.sql` **1918 行 / LF 1918 / CR 1918 / 裸 CR 0**（磁盘 CRLF）。**全库实测**（2026-10-14，`information_schema`，`_work/b7c8b-verify.txt`）：**表 38 / 非主键索引 73 / UNIQUE 19**；`observed_event` **11 列 / 4 索引 / 0 行**。
+逐列定义见 `db-schema.md §16`、登记见 `db-migration.md` **#40** + 注意 **22**（「⏳ 待落库」改「✅ 已落库（实测）」）+ 注意 **23**、落库证据 = **21/21 OK ×2**（marker ⑱+⑲ 一次跑完 ⇒ 幂等确证）。
+⚠️ **批文的「5 张表加 `BatchId`」与实测不符**：库里**早有**该列的是 **3 张**（`notification` / `goods_audit` / `merchant_application`，皆 `NOT NULL`）⇒ 本段**只加缺的 4 张**（皆 `NULL` —— 「不属于任何演练批次」是**没有值**）。已就地更正登记。
+
+**后端** ⇒ 新建 `observe/{dao,service,job}` 三件：`ObservedEventCleanupDao`（200 行）· `ObservedEventCleanupService`（121 行）· `ObservedEventCleanupJob`（71 行，第 **7** 个 `@Scheduled` 实例）· `AttackController` 第 **4** 个出口 `POST /admin/observe/attack/cleanup`（`:189`）· 审计常量 `AuditActions.OBSERVE_ATTACK_CLEANUP`（`:329`，**44 → 45 条**，追加文件尾）。
+⚠️ **两种谓词 OR**（用户 2026-10-14 批文判据）：`OrderId LIKE 'SIM-%'` **OR** `Source='attack'`；`drill_record` **两种谓词都排除**（它是「演练这件事本身」的记录）。
+⚠️ **两档保留期** ⇒ 攻击批次 **3 天** / 日常 **30 天**，按 `BatchId IS NULL` 分档、按 **`OccurredAt`** 算、**一条语句两档 OR**（拆两条会产生「一条成一条败」的中间态）。**本笔恒删 0 行是设计**（写入方 = 8c 的 MQ consumer）。**job 管表，端点管业务**（业务行只人工触发删）。
+⚠️ **修 `DrillTargetDao` 的 `u.id`**：`user` 表主键是 `username char(20)`、**没有 `id` 列** ⇒ 原 SQL 在真库上必 500。
+
+**测试** ⇒ 新建 `observe/dao/ObservedEventCleanupDaoTest`（**5 例**，替身 `JdbcTemplate` 钉两种谓词 / 两档 OR / 子表优先 / `drill_record` 排除）· `shared/web/TraceLogTest`（**8 例**，`record`/`since` 的**起止两列各有独立断言**）。
+⚠️ **本笔实测逮到一条「会随机红的绿测试」** ⇒ `containsExactlyEntriesOf(Map.of(...))` 是**逐位比较**、而 `Map.of` 迭代序不保证 ⇒ 同一份代码两次运行可一绿一红（首次整仓跑红在「same elements but not in the same order, at index 0」）。已改 **`containsExactlyInAnyOrderEntriesOf`**。
+
+**前端** ⇒ `api/endpoints.js` 头注 **139 → 140**（**同行替换**）+ `observe` 组尾追加 `attackCleanup`（`:407` 起 +11 行）· `api/observe.js` 端点封装 **6 → 7**（+ `cleanupAttack()`）。
+⚠️ **本笔只到 API 层** —— 攻击模拟器页上那枚「清场」按钮**不在本笔范围**。⚠️ 它是本表**第一条破坏性端点**，调用点必须**二次确认 + 回显 `summary`**。
+
+**A3 门禁（P3 一次 +1，四处同改）** ⇒ IN 清单加 `'observed_event'` · `KNOWN_TABLES` **26 → 27** · 期望表数 **37 → 38** · PASS 文案串同改。⚠️ `concurrency` job 是 `continue-on-error` ⇒ **只能读 artifact 的 `gates.count`**（同 §23-7 的教训）。
+
+### 24-3　零漂移（**本笔逐文件核过**）
+
+- **净零 / 未漂**：`AuditActions.java` 的 +22 行**全在文件尾**（既有常量行号一个不挪；唯一改动 = `:25` 的**同行替换** 44 → 45）· `endpoints.js` `:7` 同行替换 + `:407` 起追加（**最大被引 `:58` 未漂**）· `ConcurrencyRunner.java` 三处**同行替换、净 0 行** · `db-schema.md` `:8` / `:15` 同行替换 + 文件尾 §16（既有引用 `:5` / `:91` / `:205` / `:732` 未漂）· `db-migration.md` **入向引用实测 = 0** · `api/observe.js` / `AttackController.java` / `DrillTargetDao.java` / 三处 properties / `.sql`（尾追加）**入向 `文件:行号` 引用实测 = 0**。
+- ⚠️ **一处真漂移（只登记、本笔不重指）**：`AbstractSmokeTest.java` 本笔 **+25 行**（import 块 **+2** / `@Import` 尾部登记注释 **+23**）⇒ 指向它的外部行号集体下移 —— `progress.md:411` 引的 `AbstractSmokeTest.java:45` 现实为 **`:47`**；context-packs 里那 4 处（`:137` / `:137-146` / `:156` / `:163-206`）**在块 2–6 期间就已被 `@Import` 扩容甩到 `:376` 起**，属**既有误指族**（TD-51），不在本笔范围。
+- ⚠️ **切片地雷（批文点名要盯）**：`AbstractSmokeTest` 是 `@WebMvcTest` ⇒ 新增 `@Service`/`@Dao` 必须同步进 `@Import`（历次 77 / 237 / 132 errors）。本笔**新增三个 `@Component`**（`ObservedEventCleanupDao` / `Service` / `Job`）⇒ **`@Import` 是必须动作**，已加（这正是 +25 行的来源）；**本笔未复现 errors 地雷**。
+
+### 24-4　文档同步（本笔四处 + 一处更正）
+
+四处同改齐：`db-schema.md §16`（新建）· `db-migration.md`（注意 22 改口 + 注意 23 + `#40`）· `progress.md §7-B7`（**开段**）· 本文件 **§二十四**（**开段**）；外加 `ConcurrencyRunner` 的 `KNOWN_TABLES` **27**。
+⚠️ **一处命名假设更正**：`api-contract.md` **没有「附录 H」**（其附录**到 G 为止** = 块 6 的内容域，`grep observe` = 0）⇒ `db-migration.md` 注意 21 那句是**前瞻指针**；块 7 的**可观测域端点 7 条**的契约（附录 H）**本笔不新建**，归 **commit 9**。
+
+### 24-5　报备偏差（落码 ≠ 方案原文处，逐条）
+
+1. **cleanup 挂审计属超批文追加**：批文没要求把清场动作写进 `admin_audit`，但它是**破坏性端点** ⇒ 按本仓「管理端写动作必挂审计」的既有口径补挂（`OBSERVE_ATTACK_CLEANUP`）。
+2. **批文「5 张表加列」实测更正**：见 24-2，实为**加 4 张**（另 3 张早有）。
+3. **两条谓词 OR 是本笔的自裁**（批文只给判据「清完这两种谓词的数据全消失」）：只按一种会漏 —— 评论链路只有 `Source`、单号链路只有前缀。
+4. **`observed_event` 的写入留 8c**（用户裁决）：本笔表空、恒删 0 行 ⇒ **「保留期真的按天数删对行」这件事本笔只有单测能证**，真库证据要等 8c 之后。别把「本笔跑绿」当「保留期验过」。
+5. **§二十四 / §7-B7 为「开段」**：前 16 笔的逐条槽位**本笔不发**，归 commit 9 —— 既满足批文的「4 文档同步」，也不越权代登未核的笔。

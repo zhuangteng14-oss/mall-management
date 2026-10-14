@@ -1,0 +1,92 @@
+块 7 · commit 8b〈事件台账 + 清理〉—— 运行期验收实证（2026-10-14，dev profile + VM 库）
+================================================================================
+
+环境（重启后三查，逐条实测）
+--------------------------------------------------------------------------------
+· 后端重启：任务 ID bp3udtqt2，`./mvnw -B -o spring-boot:run -Dspring-boot.run.profiles=dev`
+  （在 Mall-management-server/ 下起），日志 _work/b7c8b-boot.log
+· 端口   = 8088（Tomcat started on port 8088）
+· profile = dev（"The following 1 profile is active: \"dev\""）
+· 库     = jdbc:mysql://192.168.229.129:3306/mall_management_sql（VM）
+· 启动时刻 2026-10-14 19:25:27，PID 174460
+· 为什么必须重启：上一台（PID 169700，18:30 起）编译自 18:30 的 target/classes，
+  而本笔的后端改动落在 18:53–18:56 ⇒ 老进程**没有** cleanup 端点。
+
+① 攻击引擎真跑（批文待裁 1 的判据）
+--------------------------------------------------------------------------------
+请求：POST /admin/observe/attack/run  name=B7C8B-VERIFY  concurrency=20  durationSeconds=8
+（scenarios 缺省 = 全 8 个按各自缺省权重）
+响应：HTTP 200，原始 JSON 落 _work/b7c8b-run.json
+  TotalRequests   = 59032
+  BlockedRequests = 31844
+  FailedRequests  = 0
+  DurationMs      = 13039
+  drill_record.Id = 1
+八场景**逐个都产生了请求**（Key / Requests / Blocked）：
+  seckill            335    / 0
+  orderBurst         604    / 302
+  repeatSubmit       712    / 711
+  unpaidTimeout        3    / 0
+  cacheCold        20202    / 20202
+  redisDown        31835    / 7959
+  bannedUser        4562    / 2281
+  sensitiveWord      779    / 389
+⇒ 8 场景能打。后端日志（_work/b7c8b-boot.log）在本轮窗口内**无 ERROR / 无 Exception**，
+  唯一一条 WARN 是 redisDown 场景**故意注入**的 L2 故障（"SIM演练注入"，场景自带，不是缺陷）。
+
+①-bis DrillTargetDao 的 u.id 修复（批文待裁 1 的根因）
+--------------------------------------------------------------------------------
+· 修法：`ORDER BY u.id ASC` → `ORDER BY u.username ASC`（user 表主键是 username char(20)，
+  没有 id 列 ⇒ 原写法在这台库上必抛 Unknown column 'u.id' in 'order clause' ⇒ 整条 run 500）。
+· 修后该查询在真库上**返回一行**（只读复核）：
+    pickCustomer => Account=1111 CustomerId=uDopHnCeLS
+  ⇒ 不是「空结果被吞掉」的假绿。
+
+② 清场端点（批文待裁 2 的判据）
+--------------------------------------------------------------------------------
+请求：POST /admin/observe/attack/cleanup（无参），HTTP 200，原始 JSON 落 _work/b7c8b-cleanup.json
+响应 summary = "共 2323 行：order_item 644 / order_state_transition 644 / order 644 / comment 391"
+  deleted = { order_item: 644, order_state_transition: 644, order: 644, comment: 391 }
+⚠️ order 只算 644（不是 644 + 644）：两种谓词在这台库上命中的是**同一批行**，
+   第二条 DELETE 命中 0 ⇒ 相加仍是 644。单测里 "3 + 3 = 6" 是替身各自返回 3 的合成场景。
+
+DB 侧只读复核（谓词一：Source='attack'，谓词二：OrderId LIKE 'SIM-%'）
+· **清之前**（跑完 8 场景、清之前，_work/AttackRows.java）：
+    Source='attack'          → comment 391 / order 644
+    OrderId LIKE 'SIM-%'     → order 644 / order_item 644 / order_state_transition 644
+· **清之后**（同一探针，逐表重扫）：
+    Source='attack'          → 全库 0 行
+    OrderId LIKE 'SIM-%'     → 全库 0 行
+⇒ **两种谓词的数据全消失**（批文判据达成）。
+
+三条护栏的实证
+· drill_record **没被清**：行数 = 1，内容 id=1 name=B7C8B-VERIFY total=59032 failed=0
+  （它是「演练这件事本身」的记录，两种谓词都排除 —— 实测确证）。
+· 审计行落库：admin_audit Id=243  Action=observe.attack.cleanup  TargetType=attack
+    ActorId = null（dev 闸关 app.auth.enabled=false ⇒ 识别不出，如实记 NULL，不编造）
+    TargetId = "共 2323 行：…"
+    AfterJson = {"order":644,"comment":391,"order_item":644,"order_state_transition":644}
+    BatchId = null
+· observed_event 行数 = 0（本笔写入方要到 8c 才接 ⇒ 恒删 0 行是设计，见 §③）
+
+③ 保留期基础设施（本笔的「形」，非「效」）
+--------------------------------------------------------------------------------
+observed_event 表存在但在本笔恒为 0 行 ⇒ 「保留期真按天数删对行」这件事**本笔只有单测能证**
+（ObservedEventCleanupDaoTest 用替身 JdbcTemplate 钉两档 OR 的字面与绑定参数）。
+真库侧证据要等 8c（RabbitMQ consumer）接通之后。别把本节②的绿读成「保留期验过」。
+
+④ 前端构建
+--------------------------------------------------------------------------------
+`npm run build`（在 mall-management-system/ 下）EXIT = 0，日志 _work/b7c8b-npm-build.log
+  DONE Build complete.
+  Build at: 2026-10-14T11:30:23.662Z（UTC）= 19:30 CST
+  Hash: 17c0d23d61f351cf   Time: 30645ms
+⚠️ 本笔前端**只到 API 层**（endpoints.js 头注 139→140 + observe.js 的 cleanupAttack 封装）；
+   攻击模拟器页上那枚「清场」按钮不在本笔范围，故 build 绿只证明「新封装不破坏编译」。
+
+⑤ 附：本笔的边界（别越读）
+--------------------------------------------------------------------------------
+· ②的清理**只清标记数据**（SIM-% / Source='attack'），不动业务行；job 只碰 observed_event。
+· 本笔跑完后 VM 库被清干净（两种谓词皆 0），drill_record 保留 1 条演练记录。
+· 只读探针：_work/AttackRows.java（列清单现查）、_work/B7C8bFinal.java（清后计数）、
+  _work/PickCustomer.java（①-bis）。均为 _work/ 临时产物，不入库。

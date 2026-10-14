@@ -1,6 +1,9 @@
 package com.minke.mallmanagement.observe.controller;
 
+import com.minke.mallmanagement.admin.AuditActions;
+import com.minke.mallmanagement.admin.service.AuditService;
 import com.minke.mallmanagement.observe.service.DrillRecordService;
+import com.minke.mallmanagement.observe.service.ObservedEventCleanupService;
 import com.minke.mallmanagement.shared.web.AuthSession;
 import com.minke.mallmanagement.shared.web.Result;
 import jakarta.servlet.http.HttpServletRequest;
@@ -13,10 +16,11 @@ import org.springframework.web.bind.annotation.RestController;
 import java.util.Map;
 
 /**
- * 攻击模拟器的三个出口（块 7 · commit 4）：场景清单 / 跑一轮 / 演练记录。
+ * 攻击模拟器的四个出口（块 7 · commit 4 建前三条、commit 8b 加第四条）：
+ * 场景清单 / 跑一轮 / 演练记录 / **清理演练数据**。
  *
  * <h2>【端点口径：全 POST、不加角色闸、不在白名单】</h2>
- * 三条与本批 SSE 三条**逐字同款**（{@code MetricsStreamController} 写了完整理由）：
+ * 四条与本批 SSE 三条**逐字同款**（{@code MetricsStreamController} 写了完整理由）：
  * 管理端读端点在本仓一律 POST；{@code AUTH_WHITELIST} 维持 14 不动（管理端端点没有公开面，
  * 靠 {@code AuthInterceptor} 拦）；不给 {@code /admin/**} 加角色判据（TD-18 —— 加了之后默认 profile
  * 上管理员自己也进不来）。
@@ -63,8 +67,23 @@ public class AttackController {
 
     private final DrillRecordService drillRecordService;
 
-    public AttackController(DrillRecordService drillRecordService) {
+    /**
+     * 清理服务（块 7 · commit 8b 新增的本类**第二个**依赖）。
+     * ⚠️ 它一进构造器，{@code AbstractSmokeTest} 的 {@code @Import} 就**必须**跟着加
+     * （{@code ObservedEventCleanupService} + {@code ObservedEventCleanupDao}）——
+     * 否则整个 smoke 切片上下文启动失败。这是本仓**第十九次**同一处地雷，见那个文件里的登记。
+     */
+    private final ObservedEventCleanupService cleanupService;
+
+    /** 审计（块 7 · commit 8b 新增的本类**第三个**依赖）—— 清理是破坏性动作，必须留痕。 */
+    private final AuditService auditService;
+
+    public AttackController(DrillRecordService drillRecordService,
+                            ObservedEventCleanupService cleanupService,
+                            AuditService auditService) {
         this.drillRecordService = drillRecordService;
+        this.cleanupService = cleanupService;
+        this.auditService = auditService;
     }
 
     /** 8 个预置场景（key / 中文名 / 同时演示的防护 / 需要的人工动作 / 默认权重）。无入参。 */
@@ -137,5 +156,41 @@ public class AttackController {
         int port = request.getServerPort();
         String authority = request.getServerName() + ((port == 80 || port == 443) ? "" : ":" + port);
         return request.getScheme() + "://" + authority;
+    }
+
+    // ==================== 块 7 · commit 8b：清理（第四条出口）====================
+
+    /**
+     * 清掉**攻击演练污染出来的数据**（无入参，一次清干净）。
+     *
+     * <h2>【⚠️ 本仓第一个破坏性管理端点，所以理由要写足】</h2>
+     * <ol>
+     *   <li><b>为什么是端点、不是让运维手敲 SQL</b>：块 7 · commit 4 当时的口径是
+     *       「清理属运维动作……**不给端点**」（{@code DrillRecordDao} 类注释逐字），清理 SQL 只以
+     *       文本形式躺在 {@code AttackEngine} 的演练结果里。演示现场改口径的理由是**答辩场景**：
+     *       跑一轮演示泼出去的数据，第二次演示前要能**当场一键恢复**（用户 2026-10-14 裁决
+     *       「练完清场」）。让演示人在答辩台上打开 SQL 客户端敲 DELETE，是把一次演示赌在
+     *       「他记得住那张表清单」上 —— 而那张清单正是本笔要固化的东西。</li>
+     *   <li><b>为什么敢做成无参（一次全清）</b>：判据是**标记**不是**时间**——
+     *       `SIM-%` 与 `Source='attack'` 这两样东西，本仓**只有攻击引擎会写**（实测 2026-10-14：
+     *       全库只有 {@code order}/{@code order_item}/{@code order_state_transition}/{@code comment}
+     *       四张表有，共 10 行）。⇒ 「清掉攻击数据」与「清掉带标记的行」是**同一件事**，
+     *       不需要再让人填参数（多一个参数就多一种填错的方式）。</li>
+     *   <li><b>⚠️ 但它仍然是破坏性的</b>：删的是**真行**、不可撤销。⇒ 三条护栏：
+     *       ① 真删之前不由任何定时任务调用（job 只碰 {@code observed_event}，见其类注释）；
+     *       ② 每次调用**写一条审计**（{@code OBSERVE_ATTACK_CLEANUP}，含按表计数）；
+     *       ③ 响应把**删了哪几张表各多少行**原样回给前端，不是只回一个 true。</li>
+     * </ol>
+     *
+     * <p>⚠️ 身份**取识别口径**（{@code AuthSession.identify}）：cookie 登录的管理员不该被记成匿名
+     * （同 {@code CommentController} 那两处补挂的处置）。闸关着的 dev / a3 上它会返回
+     * {@code null} ⇒ 审计行的 {@code ActorId} 记 NULL，**不编造**（同 {@code /run} 的处置）。
+     */
+    @PostMapping("/cleanup")
+    public Result<Map<String, Object>> cleanup(HttpServletRequest request) {
+        Map<String, Object> payload = cleanupService.cleanupAttackData();
+        auditService.record(AuthSession.identify(request), AuditActions.OBSERVE_ATTACK_CLEANUP, "attack",
+                String.valueOf(payload.get("summary")), null, payload.get("deleted"));
+        return Result.of(payload);
     }
 }

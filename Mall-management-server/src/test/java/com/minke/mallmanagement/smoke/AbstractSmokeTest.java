@@ -32,8 +32,10 @@ import com.minke.mallmanagement.observe.service.OrderStreamService;
 import com.minke.mallmanagement.observe.service.EventStreamService;
 import com.minke.mallmanagement.observe.service.AttackEngine;
 import com.minke.mallmanagement.observe.service.DrillRecordService;
+import com.minke.mallmanagement.observe.service.ObservedEventCleanupService;
 import com.minke.mallmanagement.observe.dao.DrillTargetDao;
 import com.minke.mallmanagement.observe.dao.DrillRecordDao;
+import com.minke.mallmanagement.observe.dao.ObservedEventCleanupDao;
 import com.minke.mallmanagement.shared.cache.L2HealthProbe;
 import com.minke.mallmanagement.shared.cache.MallCacheMetrics;
 import com.minke.mallmanagement.shared.lock.MallLockMetrics;
@@ -371,7 +373,30 @@ import static org.mockito.Mockito.when;
         //    `L2ProbeConfig` 生产，而它要一个 `RedisConnectionFactory` —— `@WebMvcTest` 切片
         //    没有 Redis 自动配置 ⇒ 真 bean 根本构造不出来。故照 `DistributedLockService`
         //    那条既有处置（同为 Redis 依赖）用 `@MockitoBean`，见下面那个字段的注释。
-        DrillRecordDao.class, DrillTargetDao.class, AttackEngine.class, DrillRecordService.class})
+        DrillRecordDao.class, DrillTargetDao.class, AttackEngine.class, DrillRecordService.class,
+        // C3 块 7 · commit 8b〈事件台账 + 清理〉（2026-10-14）：**没有**新 Controller（既有
+        // `AttackController` 多吃了两个构造器形参），但多了两个新 bean
+        // （`ObservedEventCleanupService` / `ObservedEventCleanupDao`）——
+        // **第十九次同一处地雷**（@WebMvcTest 无参会加载全部 @Controller，`AttackController`
+        // 一多要一个 `ObservedEventCleanupService`，切片上下文就会因为「找不到它」而
+        // **启动失败**，同前十八笔）。
+        // ⚠️ 与上一笔（commit 4）的差别值得记一笔：**那一笔是「新 Controller 吃新 bean」，
+        //    本笔是「老 Controller 多吃一个 bean」** —— 形状更隐蔽（不新增 Controller 就
+        //    不会有人想到去看这个清单），后果一模一样（整片起不来，且报错指向的是
+        //    `attackController` 而不是新类）。⇒ **判据不是「本笔有没有新 Controller」，
+        //    是「本笔有没有新 @Service/@Dao」**。
+        // ⚠️ 本笔**没有**对应的实测 errors 数：改这个清单时就手改，未先跑一次红——
+        //    一旦真漏了，形状与 commit 4 的 132 errors 同款（全批量、全落本包）。
+        // ⚠️ 依赖链：`ObservedEventCleanupService` → `ObservedEventCleanupDao`（同一行）
+        //    + 两个 `@Value`（`mall.observe.cleanup.*`，两个都带默认值 ⇒ 切片不喂也能起）；
+        //    `ObservedEventCleanupDao` 只吃 `JdbcTemplate` ⇒ 落回下面那个 @MockitoBean，
+        //    **SQL 仍不出切片**。`AttackController` 的第三个新形参 `AuditService` 在
+        //    块 1 就已登记，**不重复**。
+        // ⚠️ **刻意不 @Import `ObservedEventCleanupJob`**：它是 @Component（切片不扫）且是
+        //    @Scheduled —— 同 `ShippingTrackAdvanceJob` / `StatsAggregateJob` / `CouponExpiryJob`
+        //    那三处的处置（切片里没有调度器：@EnableScheduling 挂在
+        //    `MerchantDowngradeSchedulingConfig`、不属 web 组件）。它是 @Scheduled 的第 6 个实例。
+        ObservedEventCleanupDao.class, ObservedEventCleanupService.class})
 public abstract class AbstractSmokeTest {
 
     @Autowired

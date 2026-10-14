@@ -1,10 +1,12 @@
-// src/api/observe.js —— 可观测面板的客户端（块 7 commit 3 的 SSE + commit 4 的三个普通 POST）。
+// src/api/observe.js —— 可观测面板的客户端（块 7 commit 3 的 SSE + commit 4 的三个普通 POST
+// + commit 8b 的清场）。
 //
-// 六条端点（**全在** `endpoints.js` 里，本文件一个后端路径字面量都不出现 —— 那条判据可 grep 自动化）：
+// 七条端点（**全在** `endpoints.js` 里，本文件一个后端路径字面量都不出现 —— 那条判据可 grep 自动化）：
 //   metrics → 指标面板（KPI / 锁 / 防护 / 库存水位）          ┐
 //   orders  → 状态流转页（五态计数 / 最近订单 / 本拍流转）      ├ 三条 **SSE 流**（commit 3）
 //   events  → 实时日志页（8 类归一化事件流）                  ┘
 //   attackScenarios / attackRun / attackRecords → 攻击模拟器（commit 4）—— 三条**普通 POST**
+//   attackCleanup → 清场（commit 8b）—— 同样**普通 POST**、**无入参**，但它是**破坏性**的（后端真 DELETE）
 //
 // ⚠️ **不用浏览器原生 `EventSource`**（只针对上面三条流）。两条独立的理由，任一条都足够：
 //   ① 它**不能带自定义请求头**，而本仓的鉴权票走 `Authorization: Bearer`（默认 profile 上
@@ -142,7 +144,9 @@ function parseBlock(block) {
 
 // ==================== 攻击模拟器（块 7 · commit 4）====================
 //
-// 三条端点（`AttackController`，`@RequestMapping("/admin/observe/attack")`）：
+// 三条端点（`AttackController`，`@RequestMapping("/admin/observe/attack")`）——
+// 该 Controller 的**第四条**（清场）在文件尾那一节，**不属于**这里：本节三条都是「读/跑」，
+// 那一条是**破坏性**的，单独成节是为了不让它混在「随便点点」的三条里：
 //   scenarios —— 8 个预置场景（key / 中文名 / 同时演示的防护 / 需要的人工前提 / 缺省权重）
 //   run       —— 跑一轮演练（**同步跑到结束**，见下面那条 ⚠️）
 //   records   —— 演练记录（时间倒序；后端已把 `Result` 长文本拆成字段）
@@ -245,4 +249,34 @@ export function runAttack(p) {
 export function attackRecords(p) {
   const o = p || {}
   return postJson(endpoints.observe.attackRecords, q({ limit: o.limit, offset: o.offset }))
+}
+
+// ==================== 清场（块 7 · commit 8b）====================
+//
+// ⚠️ **本模块唯一一条破坏性调用**（后端在 `ObservedEventCleanupDao` 里真发 `DELETE`）。
+//
+// ⚠️ **它没有成功与否的中间态**：后端要么删干净要么抛（DAO 层异常不吞，见
+//   `ObservedEventCleanupService` 类注释）⇒ 页面拿到的 `deleted` 就是**真删掉的**，
+//   **别**再写「没删到也算成功」那种兜底话术。
+//
+// ⚠️ **`deleted` 里只含真删了行的表**（全 0 的表不出现），`total` 是各表行数之和、
+//   `summary` 是一句可直接显示的中文（如「共 10 行（comment 1 / order 3 / …）」，
+//   或「共 0 行（库里没有待清的攻击数据）」）—— 调用点**应回显 `summary`**，只 toast
+//   一个「成功」等于把「到底删了几行」藏起来。
+//
+// ⚠️ 清什么由**后端**按标记判（`SIM-%` 单号前缀 **OR** `Source='attack'` 写入标记，
+//   两种谓词缺一会漏 —— 见 `ObservedEventCleanupDao.deleteAttackData` 的类注释），
+//   前端**不传范围、也没有范围可传**：`q()` 在这里没有用武之地。
+
+/**
+ * 清掉攻击演练污染出来的数据（**无入参、一次清干净**）。
+ *
+ * @returns {Promise<{success:boolean, deleted:Object<string,number>, total:number, summary:string}>}
+ *          `deleted` = 「表名 → 删掉的行数」（只含非零项）、`total` = 总行数、
+ *          `summary` = 中文一句话摘要（**直接显示它**）。
+ *          ⚠️ 调用点**必须先二次确认**再调本函数：这是真删，没有撤销。
+ */
+export function cleanupAttack() {
+  // body 传空串：本仓 POST 一律带 urlencoded 头（同 `attackScenarios()`），后端不读 body。
+  return postJson(endpoints.observe.attackCleanup, '')
 }

@@ -1828,3 +1828,91 @@ SET @s := (SELECT IF(COUNT(*) = 0,
   FROM information_schema.COLUMNS
   WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'order' AND COLUMN_NAME = 'StockDeducted');
 PREPARE _p FROM @s; EXECUTE _p; DEALLOCATE PREPARE _p;
+
+-- ============================================================
+-- Migration: 块 7〈可观测域〉commit 8b —— 1 张新表 + 4 列
+--            Date: 2026-10-14
+-- 依据：用户 2026-10-14 批文《【commit 8 已核 —— 通过。开工 commit 8b】》。
+--       pack 见 docs/agent/context-packs/c3-block-7-observe.md（本笔不在 pack §十二 的 9 笔里，是加笔）。
+-- 范围：**只加表 + 只加列**；不改既有列、不删行、不改既有数据（规则 v2：向后兼容）。
+-- 幂等：加表走 `CREATE TABLE IF NOT EXISTS`（照本文件 ⑮-1 / ⑰-1 先例）；加列走
+--       `information_schema` 守卫 + `PREPARE/EXECUTE`（照本文件 ⑬ / ⑰ 先例）。重复执行第二遍起空操作。
+-- 表（1）：`observed_event` —— 八环事件的**落库台账**（今天它们只在进程内存的 512 槽环里，重启即失）。
+--   ⚠️ **本笔只建表，不接写入**：写入方 = 8c 的 RabbitMQ consumer（用户 2026-10-14 裁决
+--      「8b 只建表 + 清理，写入留 8c」）。⇒ 实时日志页那句「MQ 未连接，事件不落库」在本笔
+--      **仍然是真话**，8c 接通后才需要改。
+-- 列（4）：`drill_record` / `order` / `comment` / `admin_audit` 各加
+--   `BatchId varchar(36) NULL` —— 「这一行是哪一次演练写进来的」的载体（8c 由 `X-Drill-Batch` 头注入）。
+--   ⚠️ **批文原文列的是 5 张表**（含 `notification`）；实测 `notification.BatchId` **块 1 · I2 就有**
+--      （`varchar(36) NOT NULL`，语义 = 一次投递的批次 UUID）⇒ 本段只加 **4 张**，`notification` 一字不动。
+--      ⚠️ 两处语义**相容但不同源**：`notification` 那一列是「一次群发的扇出批次」，本段的四列是
+--      「一次演练的批次」；攻击演练发通知时把演练批次借写进 `notification.BatchId` 是可行的
+--      （两者同为 varchar(36) 的批次号），但**接线点必须写清是借用**，8c 处理。
+--   ⚠️ 为什么是 `NULL` 而不是本仓 `Source` 那种 `NOT NULL DEFAULT ''`：`Source` 的空串是一个
+--      **有意义的取值**（「存量或真实业务写入」）；而 BatchId 的空态是「这一行不属于任何演练批次」
+--      —— 那是**没有值**。写空串会给清理谓词 `BatchId IS NOT NULL` 添一个假的「批次」。
+--   ⚠️ **四张表只加列、不改任何业务代码**（本轮没有任何写入方）⇒ 属「加列」而非「改契约语义」。
+-- ⚠️ P3 门禁：新增 1 张表 ⇒ `ConcurrencyRunner.java` 的 KNOWN_TABLES 26 → 27、期望表数 37 → 38（**四处同改**）。
+-- 回滚（逻辑废弃，执行前须人工确认；**不 DROP 旧列**，只停用）：
+--       DROP TABLE IF EXISTS `observed_event`;
+--       ALTER TABLE `drill_record` DROP COLUMN `BatchId`;   -- 须人工确认
+--       ALTER TABLE `order`        DROP COLUMN `BatchId`;   -- 须人工确认
+--       ALTER TABLE `comment`      DROP COLUMN `BatchId`;   -- 须人工确认
+--       ALTER TABLE `admin_audit`  DROP COLUMN `BatchId`;   -- 须人工确认
+--       ⚠️ 新表按规则 v2 的回滚是「保留表 + 停止写入」，上头的 DROP TABLE 只在本地库重建时用。
+-- ============================================================
+
+-- ---- ⑲-1 八环事件落库台账（写入方 = 8c 的 MQ consumer；本笔只建表）----
+CREATE TABLE IF NOT EXISTS `observed_event` (
+  `Id`          bigint NOT NULL AUTO_INCREMENT COMMENT '自增主键',
+  `Kind`        varchar(16) NOT NULL COMMENT '事件所属环：cache / lock / order / stock / audit / notify / sensitive / identity（对齐前端 KIND_LABEL）',
+  `Severity`    varchar(16) NOT NULL DEFAULT 'info' COMMENT '严重度：info / warn / error（对齐前端 SEVERITY_LABEL）',
+  `Title`       varchar(255) NOT NULL DEFAULT '' COMMENT '事件标题（一句话，含业务键时由后端截断）',
+  `ObjectType`  varchar(32) DEFAULT NULL COMMENT '对象类型（审计=TargetType / 敏感词=命中的词 / 身份=请求路径 等）；无则 NULL',
+  `ObjectId`    varchar(128) DEFAULT NULL COMMENT '对象标识（与 ObjectType 成对；对齐 ObservedEvent.objectId）',
+  `TraceId`     varchar(64) DEFAULT NULL COMMENT '本次请求的 traceId（TraceIdFilter 发号；抽屉链路按它归组）',
+  `BatchId`     varchar(36) DEFAULT NULL COMMENT '演练批次 UUID（8c 由 X-Drill-Batch 头注入）；NULL = 不属于任何演练批次',
+  `OccurredAt`  datetime(3) NOT NULL COMMENT '事件发生时刻（毫秒精度，对齐 ObservedEvent.ts）',
+  `created_at`  datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '行落库时刻（agent.md 数据库管理规则 8）',
+  `updated_at`  datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '行更新时刻',
+  PRIMARY KEY (`Id`),
+  KEY `idx_observed_event_kind_time` (`Kind`,`OccurredAt`),
+  KEY `idx_observed_event_time`      (`OccurredAt`),
+  KEY `idx_observed_event_trace`     (`TraceId`),
+  KEY `idx_observed_event_batch`     (`BatchId`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='八环事件落库台账（块 7 commit 8b；写入方 = 8c 的 MQ consumer）';
+-- ⚠️ 四个索引各有唯一归属，别减：① `(Kind,OccurredAt)` = 日志页按类过滤 + 按时刻排（前列等值 ⇒ 后列有序，
+--    反向扫即满足 ORDER BY OccurredAt DESC，不 filesort）；② `(OccurredAt)` = 保留期扫描（清理 job 的主查询）；
+--    ③ `(TraceId)` = 抽屉「这一次请求的完整链路」按 traceId 取整组；④ `(BatchId)` = 按演练批次一次性清理。
+
+-- ---- ⑲-2 `drill_record` 加列 `BatchId`（本行是哪一次演练产生的）----
+SET @s := (SELECT IF(COUNT(*) = 0,
+  'ALTER TABLE `drill_record` ADD COLUMN `BatchId` varchar(36) DEFAULT NULL COMMENT ''演练批次 UUID（块 7 commit 8b）：一次「跑攻击」一个；NULL = 存量行或不是演练产生的''',
+  'DO 0')
+  FROM information_schema.COLUMNS
+  WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'drill_record' AND COLUMN_NAME = 'BatchId');
+PREPARE _p FROM @s; EXECUTE _p; DEALLOCATE PREPARE _p;
+
+-- ---- ⑲-3 `order` 加列 `BatchId`（攻击演练下的单；按批清理的载体）----
+SET @s := (SELECT IF(COUNT(*) = 0,
+  'ALTER TABLE `order` ADD COLUMN `BatchId` varchar(36) DEFAULT NULL COMMENT ''演练批次 UUID（块 7 commit 8b）：8c 由 X-Drill-Batch 头注入；NULL = 非演练写入''',
+  'DO 0')
+  FROM information_schema.COLUMNS
+  WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'order' AND COLUMN_NAME = 'BatchId');
+PREPARE _p FROM @s; EXECUTE _p; DEALLOCATE PREPARE _p;
+
+-- ---- ⑲-4 `comment` 加列 `BatchId`（攻击场景 8 的评论；按批清理的载体）----
+SET @s := (SELECT IF(COUNT(*) = 0,
+  'ALTER TABLE `comment` ADD COLUMN `BatchId` varchar(36) DEFAULT NULL COMMENT ''演练批次 UUID（块 7 commit 8b）：8c 由 X-Drill-Batch 头注入；NULL = 非演练写入''',
+  'DO 0')
+  FROM information_schema.COLUMNS
+  WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'comment' AND COLUMN_NAME = 'BatchId');
+PREPARE _p FROM @s; EXECUTE _p; DEALLOCATE PREPARE _p;
+
+-- ---- ⑲-5 `admin_audit` 加列 `BatchId`（演练产生的审计行；按批清理的载体）----
+SET @s := (SELECT IF(COUNT(*) = 0,
+  'ALTER TABLE `admin_audit` ADD COLUMN `BatchId` varchar(36) DEFAULT NULL COMMENT ''演练批次 UUID（块 7 commit 8b）：8c 由 X-Drill-Batch 头注入；NULL = 非演练写入''',
+  'DO 0')
+  FROM information_schema.COLUMNS
+  WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'admin_audit' AND COLUMN_NAME = 'BatchId');
+PREPARE _p FROM @s; EXECUTE _p; DEALLOCATE PREPARE _p;

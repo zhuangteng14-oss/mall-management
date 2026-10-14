@@ -2276,3 +2276,39 @@ DB 级唯一锁探针 `ProbeB6c7Lock` = **PASS 12 / FAIL 0**；接口级 8 条�
 🧪 **本轮最小收验（⚠️ 非用户手验）** ⇒ 后端 `./mvnw -B test` = `Tests run: 309 / Failures 0 / Errors 0 / Skipped 26` + `BUILD SUCCESS`（`Total time: 01:05 min`，2026-10-13 17:13；TD-58 那条计时敏感用例本轮**未红**）；
 前端 `build` = `DONE`（`Hash 8d3685921932c375`、`Time 94680ms`、exit 0，**① 甲案之后**重跑）、`npx eslint src` = **exit 0**（同轮重跑）；
 探针 `probe-b6c3-mention.py` = **EXIT 0**（A1–A4 / B1 全绿、B2 与段 N 全 0）。
+
+### 7-B7. C3 块 7〈可观测域 4 项 + 库存治理 2 项〉（2026-10-13/14；**开段：本小节由 commit 8b 登记，前 16 笔的子节归 commit 9 收口**）
+
+> 分支 `feat/c3-admin-block7`（切自 **`c2efb81`** = PR #91 合并点，即块 6 收口之后）。块内已提交 **16 笔**（`195edc9` pack + `b1ffc6e` commit 0 … `b773bf3` commit 8），本笔（**commit 8b**）是**第 17 笔**。
+> ⚠️ **本小节是「开段」，不是收口条**：块 7 的范围 / 建表 / 后端 / 前端 / 门禁 / DoD / 挂账**总表归 commit 9**；本笔只把 commit 8b 这一笔的面记下来（同 `slot-registry.md §二十四` 的开段口径）。
+> ⚠️ 块 7 已入库的三份收笔报告在 `docs/agent/archive/`：〈2c+2d 与新发展两项〉·〈commit 4 攻击引擎〉·〈边界补笔 `order.Source` 写入通道〉（**本笔的「未跟踪残留归置」一笔入库**，见下）。
+
+**本笔 = commit 8b〈事件台账 + 清理〉**（2026-10-14，用户批文《commit 8 已核 —— 通过。开工 commit 8b》）⇒ 主体三件（**新表 + 清理 job + 清场端点**）+ 四项收尾（修 `DrillTargetDao` 的 `u.id` / 补 `TraceLog` 单测 / 未跟踪残留归置 / `db-migration.md` 的「⏳ 待落库」改口）。
+
+**库变更（Migration 段 ⑲）** ⇒ `.sql:1832-1918`：⑲-1 建表 `observed_event`（**11 列 + 4 个非唯一索引**）· ⑲-2..⑲-5 四表加 `BatchId varchar(36) DEFAULT NULL`（`drill_record` / `order` / `comment` / `admin_audit`）。
+**实测（可复核）** ⇒ 表数 **37 → 38** · 行首 `CREATE TABLE` **38 → 40** · 非主键索引 **69 → 73** · 非主键 UNIQUE **19 不变** · `.sql` **1918 行 / LF 1918 / CR 1918 / 裸 CR 0** · `observed_event` **11 列 / 4 索引 / 0 行**。落库 **21/21 OK ×2**（`marker = 库存治理补完` ⇒ ⑱ + ⑲ 一次跑完，幂等确证），只读复核 `_work/b7c8b-verify.txt`；详见 `db-migration.md` 注意 23 + `db-schema.md §16`。
+⚠️ **批文的「5 张表加 `BatchId`」与实测不符**：库里**早有**该列的是 **3 张**（`notification` / `goods_audit` / `merchant_application`，皆 `NOT NULL`）⇒ 本段**只加缺的 4 张**（皆 `NULL`，因为「不属于任何演练批次」是**没有值**）。已就地更正登记。
+
+**后端** ⇒ 新建 `observe/{dao,service,job}` 三件（`ObservedEventCleanupDao` / `ObservedEventCleanupService` / `ObservedEventCleanupJob`）· `AttackController` 第 **4** 个出口 `POST /admin/observe/attack/cleanup` · 审计常量 `AuditActions.OBSERVE_ATTACK_CLEANUP`（**44 → 45 条**，追加文件尾）。
+⚠️ **清理按两种谓词 OR**（用户 2026-10-14 批文原文的判据）：`OrderId LIKE 'SIM-%'` **OR** `Source='attack'` —— 只按一种会漏（评论链路只有 `Source`、单号链路只有前缀）。`drill_record` **两种谓词都排除**（它是「演练这件事本身」的记录，语义与「演练污染出来的数据」相反）。
+⚠️ **两档保留期** ⇒ 攻击批次 **3 天** / 日常 **30 天**，按 `BatchId IS NULL` 分档、按 **`OccurredAt`** 算（不是 `created_at`）。⚠️ **本笔不接写入**（写入方 = **8c 的 RabbitMQ consumer**）⇒ 表空、每轮删 **0 行** —— 这是保留期基础设施**提前就位**，不是缺陷（理由逐字写在 `ObservedEventCleanupJob` 类注释）。
+⚠️ **它把 `@Scheduled` 实例加到第 7 个**（`grep -rn '@Scheduled' …/main/java` 实测既有 **6** 处）—— 而调度器**总闸**仍挂在别人的类上（`MerchantDowngradeSchedulingConfig`，被 `mall.downgrade.job.enabled` 关着）⇒ **a3 下它本来就不醒**；本笔另把它自己的开关在 **dev = `true` / a3 = `false` / smoke = `false`** 三处登记齐（同族第七处坦白）。
+⚠️ **修 `DrillTargetDao` 的 `u.id`（批文待裁 1）** ⇒ `user` 表主键是 `username char(20)`、**没有 `id` 列** ⇒ 原 SQL 在真库上必 500（攻击引擎选目标用户时踩到）。判据 = 攻击引擎在 **dev + VM 库**上真跑起来、**8 场景能打**。
+⚠️ **补 `TraceLog` 单测（批文点名要补）** ⇒ `shared/web/TraceLogTest.java`（**8 例**）：起止两列**各有独立断言**（`ms = end − start` 在 `start == end` 时也等于 0 ⇒ 推不出来），另记一条实测事实 —— `latestSeq()` = **最后一条的 seq**，与 `since()` 同坐标系。SQL 侧另补 `observe/dao/ObservedEventCleanupDaoTest`（**5 例**，替身 `JdbcTemplate` 钉两种谓词 / 两档 OR / 子表优先 / `drill_record` 排除）。
+
+**前端** ⇒ `endpoints.js` 头注 **139 → 140**（**同行替换**）+ `observe` 组尾追加 `attackCleanup`（`:407` 起 +11 行）· `api/observe.js` **六条 → 七条**（导出 `cleanupAttack()`）。
+⚠️ **本笔只到 API 层**：攻击模拟器页上那枚「清场」按钮**不在本笔范围**（别照着注释以为页面已经有了）。
+⚠️ **调用点必须二次确认 + 回显 `summary`** —— 它是本表**第一条破坏性端点**（后端真 DELETE、没有撤销、没有中间态）。
+
+**A3 门禁（P3 一次 +1，四处同改）** ⇒ IN 清单加 `'observed_event'` · `KNOWN_TABLES` **26 → 27** · 期望表数 **37 → 38** · PASS 文案串同改。⚠️ `concurrency` job 是 `continue-on-error` ⇒ **只能读 artifact 的 `gates.count`，不能读 job 颜色**（同 §7-B6 的教训）。
+
+🧪 **DoD（本笔实测）** ⇒ `./mvnw -B -o **clean** test`：`Tests run: 459, Failures: 0, Errors: 0, Skipped: 26` + `BUILD SUCCESS`（`Total time: 47.537 s`，2026-10-14T19:21:12+08:00，日志 `_work/b7c8b-mvn-test.log`；块 6 收口时点是 **309** ⇒ 差额来自块 7 各笔累计新增，其中 observe 包 **14 类 / 86 例**）。`clean` 不能省（增量编译会复用陈旧 test class，同 §7-B6 的判据）。
+⚠️ **整仓跑逮到一条「会随机红的绿测试」（本笔实测）** ⇒ `ObservedEventCleanupDaoTest` 第一版用 `containsExactlyEntriesOf(Map.of("order_item",3,"order",6))` —— **`Map.of` 的迭代序不保证**，而那个断言是**逐位比较**的 ⇒ 同一份代码两次运行可以一次绿一次红（首次整仓跑红在「same elements but not in the same order, at index 0」）。已改 `containsExactlyInAnyOrderEntriesOf`。**教训**：断言 map 内容一律用 any-order 版；「单跑绿」不能替代整仓跑。
+
+⚠️ **零漂移（本笔逐文件核过）** ⇒ `AuditActions.java` 的 +22 行**全在文件尾**（既有常量行号一个不挪；唯一改动是 `:25` 的**同行替换** 44 → 45）· `endpoints.js` `:7` 同行替换 + `:407` 起追加（**最大被引 `:58` 未漂**）· `db-schema.md` `:8` / `:15` 同行替换 + 文件尾 §16（既有引用 `:5` / `:91` / `:205` / `:732` 未漂）· `ConcurrencyRunner.java` 三处**同行替换、净 0 行** · `db-migration.md` **入向引用实测 = 0**（改动只在末条注意 23 内）· `api/observe.js` / `AttackController.java` / `DrillTargetDao.java` / 三处 properties / `mall_management_sql.sql`（尾追加）**入向 `文件:行号` 引用实测 = 0**。
+⚠️ **一处真漂移（只登记、本笔不重指）**：`AbstractSmokeTest.java` 本笔 **+25 行**（import 块 **+2** / `@Import` 尾部登记注释 **+23**）⇒ 指向它的外部行号集体下移 —— `progress.md:411` 引的 `AbstractSmokeTest.java:45` 现实为 **`:47`**；context-packs 里那 4 处（`:137` / `:137-146` / `:156` / `:163-206`）**在块 2–6 期间就已被 `@Import` 扩容甩到 `:376` 起**，属**既有误指族**（TD-51），不在本笔范围。
+
+**文档（本笔同步）** ⇒ `db-migration.md` 注意 **23**（登记 **#40**）+ 注意 **22** 的「⏳ 待落库」改「✅ 已落库（实测）」· `db-schema.md` 尾追加 **§16** + 头部两处**同行订正**（表数量行 / 行尾 CRLF 计数行）· 本文件 **§7-B7**（开段）· `slot-registry.md` **§二十四**（开段）。
+⚠️ **一处命名假设更正**：`api-contract.md` **没有「附录 H」**（其附录**到 G 为止** = 块 6 的内容域）⇒ `db-migration.md` 注意 21 那句是**前瞻指针**；块 7 的端点契约（可观测域 **7** 条）**本笔不新建**，归 **commit 9**。
+
+**未跟踪残留（另起一笔 chore，不混进 8b 的功能改动）** ⇒ 入库 `docs/agent/archive/` 三份 txt + `scripts/probes/probe-b7c5-attack-console.mjs` 与它的 `out-b7c5-attack-console.png`（探针是资产，照 commit 3–8 惯例入库）。

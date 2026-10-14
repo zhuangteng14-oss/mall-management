@@ -86,14 +86,23 @@ public class DrillTargetDao {
                 .query().listOfRows());
     }
 
-    /** 演练账号：一个**未封禁**的客户（业务号 + 登录名一起取，见类注释第 2 条）。 */
+    /**
+     * 演练账号：一个**未封禁**的客户（业务号 + 登录名一起取，见类注释第 2 条）。
+     *
+     * <p>⚠️ <b>排序键是 {@code u.username}，不是 {@code u.id}</b>（2026-10-14 块 7 · commit 8b 修）：
+     * 本仓 {@code user} 表的**主键就是 {@code username}**（`char(20)`），**没有 {@code id} 列** ——
+     * 之前写 {@code ORDER BY u.id} 在这台 dev/VM 库上直接抛
+     * {@code Unknown column 'u.id' in 'order clause'} ⇒ 整条 {@code POST /admin/observe/attack/run}
+     * 500、攻击模拟器跑不起来（答辩核心功能）。选 {@code username} 而不是别的列，是因为它
+     * **是主键**：既稳定（不受后续 UPDATE 影响）又走索引（不必 filesort）。
+     */
     public Map<String, Object> pickCustomer() {
         return first(jdbcClient.sql(
                         "SELECT u.customerid AS CustomerId, u.username AS Account "
                                 + "FROM mall_management_sql.`user` u "
                                 + "WHERE u.customerid IS NOT NULL AND u.customerid <> '' "
                                 + "AND (u.banned IS NULL OR u.banned = 0) "
-                                + "ORDER BY u.id ASC LIMIT 1")
+                                + "ORDER BY u.username ASC LIMIT 1")
                 .query().listOfRows());
     }
 
