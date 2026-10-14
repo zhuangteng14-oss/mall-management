@@ -458,7 +458,7 @@ router.addRoute({
     { path: 'observe', meta: { key: 'observe', title: '可观测域' }, component: AdminStub },
     { path: 'observe/attack-sim', meta: { key: 'observe', sub: 'attack-sim', title: '攻击模拟器' }, component: () => import('../views/admin/observe/AttackConsole.vue') },   // C3 块 7〈可观测域〉commit 5（2026-10-14）：占位 → 真页（**同行替换**，照 `:451` accounts / `:452` catalog / `:453` orders / `:454` marketing / `:455` moderation / `:456` notify 那六条的做法）
     { path: 'observe/metrics',    meta: { key: 'observe', sub: 'metrics',    title: '指标面板' },   component: () => import('../views/admin/observe/MetricsPanel.vue') },   // C3 块 7〈可观测域〉commit 6（2026-10-14）：占位 → 真页（**同行替换**，照 `:459` attack-sim 那条的做法）。⚠️ 本页数据源是 **SSE 流**（不是一次性 JSON）⇒ 没有「查询」按钮，唯一的用户动作是「重新连接」
-    { path: 'observe/timeline',   meta: { key: 'observe', sub: 'timeline',   title: '状态流转' },   component: AdminStub },
+    { path: 'observe/timeline',   meta: { key: 'observe', sub: 'timeline',   title: '状态流转' },   component: () => import('../views/admin/observe/OrderFlow.vue') },   // C3 块 7〈可观测域〉commit 7（2026-10-14）：占位 → 真页（**同行替换**，照 `:459` attack-sim / `:460` metrics 两条的做法）。⚠️ 数据源同样是 SSE 流，但比指标面板多一层**前端累积** —— 流的每拍只推最近 20 单，翻页与本会话的回看都要靠本页自己攒（组件头注释记了理由）
     { path: 'observe/logs',       meta: { key: 'observe', sub: 'logs',       title: '实时日志' },   component: AdminStub },
     { path: 'observe/audit',      meta: { key: 'observe', sub: 'audit',      title: '权限与审计' }, component: () => import('../views/admin/AuditPage.vue') },
 
