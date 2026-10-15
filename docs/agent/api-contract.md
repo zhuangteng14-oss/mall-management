@@ -844,7 +844,7 @@
 ### H.7 与业务域 / 台账的关系（本域的两处「落点」） {#api-h-7}
 
 ⚠️ **本域只在业务侧留两处痕迹**：① 上面那个出站头（**不**改任何业务端点的入参 / 返回）；② 新建台账表 `observed_event`（DDL 见 `db-schema.md`）。块 7 的八环记录点**跨域补挂**了两条审计（`goods.delete` / `comment.delete`）—— 那是**既有审计清单**的补挂，不是新端点。
-⚠️ **⚠️ 台账的已知边界（逐字摘自 `EventBroadcaster` 类注释）**：`poll()` 由 **SSE 流线程**每秒驱动，唯一调用点是 `EventStreamService:81`（**events 流**）⇒ **没有人打开实时日志页时，合并环不动、也就没有事件落库**。台账是「**观看时的过程记录**」，不是「无人值守的全量审计流水」。
+⚠️ **⚠️ 台账的已知边界（逐字摘自 `EventBroadcaster` 类注释）**：`poll()` 由 **SSE 流线程**每秒驱动，唯一调用点是 `EventStreamService:96`（**events 流**；⚠️ **2026-10-15 块 7 commit 10b 重指**：**原 81 行** → **96 行**；且该调用点此后落在**每连接一份**的帧源里（丙）⇒ **每秒调用次数 = 打开页面数**，不再恒为 1；「没人看就不落库」的结论不变）⇒ **没有人打开实时日志页时，合并环不动、也就没有事件落库**。台账是「**观看时的过程记录**」，不是「无人值守的全量审计流水」。
 ⚠️ **保留期 job**：`ObservedEventCleanupJob` @ `:63`，`@Scheduled(fixedDelayString = "${mall.observe.cleanup.fixed-delay-ms:3600000}")`（缺省 1 小时）；两条保留期 —— 攻击批次行 `mall.observe.cleanup.attack-retention-days`（缺省 **3** 天）、日常事件行 `…normal-retention-days`（缺省 **30** 天）。⚠️ 总闸 `mall.observe.cleanup.job.enabled`（dev / a3 关着）+ `@EnableScheduling` 的**载体类**另受 `mall.downgrade.job.enabled` 管（见 `tech-debt.md`）。
 ⚠️ **MQ 缺席**：`mall.observe.mq.warn-interval-ms`（缺省 **300000** ms = 5 分钟）—— 每次重连失败距上次 WARN 超阈值即打一条 `[EVENT]` WARN（翻转时另有一条，双保险）；MQ 不在时**事件仍上屏**（走内存环），页面顶上的点变黄。
 

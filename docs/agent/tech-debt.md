@@ -298,9 +298,9 @@
 | 两级缓存 | `TwoLevelCacheManager` + `TwoLevelCache`（Caffeine L1 60s / 上限 1000 + Redis L2 5m）；**8 个 cacheName**：`goodstype`、`userPublic`、`goodsHome`、`goodsByMerchant`、`goodsPrice`、`goodsCodes`、`friendList`、`friendRequests`；写路径 evict 收敛成 Service 单入口（3 个实例） | `3678719`；`79d2a0d` … `52a944f`（8 个 cacheName）；`a3e50cf`（单入口） |
 | 缓存三防护（逐项定态） | **击穿** ✅ `sync = true` 单飞（冷 L1 + 冷 L2 打 20 并发：修前 20 次 DB → 修后 1 次）；**穿透** ✅ 负缓存（0 行 → 真 `null` → 被缓存，首个实例 `userPublic`）；**布隆过滤器** ❌ **明确不采纳**（记不采纳，不冒充欠债）；**雪崩（Redis 不可达）** ✅ 冷却窗口 30s + 探测超时 200ms（黑洞端点实测：首个冷读 3.376s → 之后 4~7ms，全程 `5xx = 0`）；**雪崩（TTL 抖动）** ❌ 不实现（触发条件：某缓存族 key 数 > ~10） | `f693bdb`（击穿）；`549f74f`（负缓存）；`84cd200`（冷却窗口）；`cache-layer.md §9.1` |
 | L2 探活 | `L2HealthProbe` 单例 + `L2ProbeConfig`（探测通道**不注册为 bean** —— 否则会顶掉主连接工厂，L2 静默跑在无连接池的探测通道上而 A3 看不出）；探测代价实测稳态 **233ms**、进程内首次 **489 / 612 / 772ms**；`mall.cache.l2.up` gauge（⚠️ 0 ≠ Redis 已死） | `437140e`、`84cd200`、`9c245d2` |
-| 观测地基 | `MallCacheMetrics` —— **11 个 `mall.cache.*` 指标** + **512 槽事件环**，「计数 + 事件流」合并于同一调用点（防两通道口径漂移）；Actuator 暴露 `health,metrics`；**关闭 Boot 的 Redis health indicator**（它是绕过冷却窗口的第二条探测通道） | `aab3b9d` |
+| 观测地基 | `MallCacheMetrics` —— **11 个 `mall.cache.*` 指标** + **2048 槽事件环**（**原 512**；2026-10-15 块 7 commit 10b），「计数 + 事件流」合并于同一调用点（防两通道口径漂移）；Actuator 暴露 `health,metrics`；**关闭 Boot 的 Redis health indicator**（它是绕过冷却窗口的第二条探测通道） | `aab3b9d` |
 | 分布式锁 | `DistributedLockService.runLocked` 模板方法 + **5 个落点**（`order-add` / `order-pay` / `order-receive` / `order-delivery` / `friend-add`）；`app.lock.wait=5s` / `lease=10s` / `cooldown=30s`；**fail-open**：取锁超时、Redis 不可达、冷却窗口**三路都回落原路径**，不新发任何拒绝文案 | `8810efe` |
-| 锁观测 | `MallLockMetrics` —— **4 个 `mall.lock.*` 指标**（`acquires` / `wait.duration` / `holds` / `up`）+ **独立** 512 槽事件环（不共用缓存那份，代价换 C1 一个字不动） | `8810efe`；`application.properties` B2 节 |
+| 锁观测 | `MallLockMetrics` —— **4 个 `mall.lock.*` 指标**（`acquires` / `wait.duration` / `holds` / `up`）+ **独立** 2048 槽事件环（不共用缓存那份，代价换 C1 一个字不动；**原 512**，2026-10-15 块 7 commit 10b） | `8810efe`；`application.properties` B2 节 |
 | 锁专项场景 | `LockSceneService` 四形状（`WAIT` / `CONFLICT` / `TIMEOUT` / `DEADLOCK`）；完备性不变量「四路计数之和 == 预期取锁次数」，对不上即抛 —— 不返回偏小的分布 | `8810efe`、`LockSceneServiceTest` |
 | **缺陷翻转（终态）** | **A-S2a-1 `EXPECTED_DEFECT_PRESENT` → `PASS`**：20 并发同 `OrderId` 的 `orderAdd` 落库行数 **20 → 1**；**B-2 的 friend 那一路 `friendDupRounds` 5/5 → 0/5**（`friendAdd` 原有查重的 TOCTOU 窗口被锁关闭）。**未翻转两路**：`login5xxRounds` 5/5、`goodstypeDupRounds` 5/5 —— 与「5 落点不含 `loginAdd` / `goodstype`」自洽 | 对照 **18 份** B2 前报告（`2026-09-20` ~ `09-29 14:40`，`friendDupRounds` **全部 5**；其中 **12 份**含 S2a 段，`rowsForSameOrderId` **全部 20**）+ `a3-report-b2-0929a-20260929-195531.json`、`a3-report-b2-0929b-20260929-202046.json` |
 | 文档 | B1 收尾 worklog `archive/worklog-2026-09-29-b1.md` **327 行**（含「三档数字」可复核性口径）；方案/现状 `context-packs/cache-layer.md` **476 行** | `1e53788`、`7012176` |
@@ -833,7 +833,7 @@
 
 | 项 | 内容 |
 |---|---|
-| 现状 | `observed_event` 的落库由 `EventBroadcaster.poll()` 驱动，而它的**唯一调用点**是 `EventStreamService:81`（**events 流**）—— 即由 **SSE 流线程每秒一拍**推进。⇒ **没人打开实时日志页（`/admin/observe/logs`）时，合并环不动、事件不落库。** |
+| 现状 | `observed_event` 的落库由 `EventBroadcaster.poll()` 驱动，而它的**唯一调用点**是 `EventStreamService:96`（**events 流**；⚠️ **2026-10-15 块 7 commit 10b 重指**：**原 81 行** → **96 行**，且此后落在**每连接一份**帧源里（丙）⇒ 每秒调用次数 = 打开页面数）—— 即由 **SSE 流线程每秒一拍**推进。⇒ **没人打开实时日志页（`/admin/observe/logs`）时，合并环不动、事件不落库。** |
 | 判据（本笔实测） | 同一批次演练两轮对照：**[A] 不开流**跑到结束 ⇒ 当场查台账 **0 行**；随后**开流**同一批次 ⇒ **2140 行**落库、且 `OccurredAt` 时间戳**仍落在演练当时**（`23:06:51.719–23:06:59.530`）。⇒ **落库滞后 ≠ 透传丢了**，两者要分开判。证据 `docs/agent/evidence/c3-block7/b7c9-e2e-batch.txt` §A/§B。 |
 | 后果 | ① 拿台账回答「某段时间系统发生了什么」会**系统性缺行**（缺的正是没人看的那段）；② 但**演练期间打开页面**就能拿到当批完整记录（§B：3697 行 / 1 批次 / 1194 trace / 5 类）。**这不是缺陷**，是「观测数据按需采集」的形态。 |
 | 处理时机 | **不修**。⚠️ **读台账的人须知**：`observed_event` 的行数**取决于有没有人在看**，不能当「系统一共发生了 N 件事」的证据。若将来要全量审计流水，得把 `poll()` 从 SSE 流线程解耦到独立调度（届时另开一笔）。 |

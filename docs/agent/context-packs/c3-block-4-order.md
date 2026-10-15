@@ -86,7 +86,7 @@
 
 - `.../order/model/OrderStateExecutor.java` —— B3 异步出口（有界 1024、丢最旧、daemon），时间线落库走它。
 - `.../order/model/OrderTransitionRecorder.java` —— 观测编排（读回三位 → 前后态 → 指标/事件 → 投递时间线）；含 `created`/`applied`/`rejected`/`errored`/`rejectedAtBirth`。
-- `.../order/metrics/MallOrderStateMetrics.java` —— 状态子系统**唯一埋点出口**（7 指标 + 512 槽事件环 `recentEvents()`）。⚠️ 「事件环」是**自有观测通道**，与 notification/audit **不是一回事**，别混。
+- `.../order/metrics/MallOrderStateMetrics.java` —— 状态子系统**唯一埋点出口**（7 指标 + 2048 槽事件环 `recentEvents()`；**原 512**，2026-10-15 块 7 commit 10b）。⚠️ 「事件环」是**自有观测通道**，与 notification/audit **不是一回事**，别混。
 
 ### 现状：管理端「订单治理」面 —— **占位，零业务；且⚠️ 稿里没有这一页** {#pack-c3-block-4-order-s10}
 

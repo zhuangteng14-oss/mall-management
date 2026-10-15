@@ -208,7 +208,7 @@
 |---|---|---|
 | **SSE 客户端** | **不用 `EventSource`，改 `fetch` + `ReadableStream` 手工解析 `text/event-stream`** | ⚠️ 本仓**管理员身份只能由 token 承载**（`AuthInterceptor.java:178-180`：`role=3` 的 cookie 会话被折成未登录）⇒ 必须发 `Authorization: Bearer` 头；而 `EventSource` **不能带自定义头** ⇒ `EventSource` 在默认 profile 下**必然 401**。**这不是口味选择，是被鉴权锁死。** |
 | **SSE 方法** | 三端点一律 **`POST`** | 顺本仓管理端读端点惯例（`块7参考.txt:357`）。因客户端已是 `fetch`，「GET vs POST」不再受 `EventSource` 约束 ⇒ 自由，取 POST |
-| **SSE 频率 / 环容量** | **1 秒 / 次** · **512 槽** | 沿用方案建议（`块7参考.txt:460-461`）；512 = 既有三环同值 |
+| **SSE 频率 / 环容量** | **1 秒 / 次** · **2048 槽** | 沿用方案建议（`块7参考.txt:460-461`）；2048 = 既有三环同值（**原 512**；⚠️ **2026-10-15 块 7 commit 10b 按裁决 2 改**，且改的是**九个**容量常量〔八源环 + 合并环〕，不止这三环） |
 | **攻击数据标记** | **`OrderId` 前缀 `SIM-`**（C2 甲） | 沿用（`块7参考.txt:79`）：一半数据被 job 拦截、一半跳过 job 注入 |
 
 ### C 档（自决 —— 落码时按此，不单独问） {#pack-c3-block-7-observe-c}
