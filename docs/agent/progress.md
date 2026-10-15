@@ -2444,3 +2444,64 @@ DB 级唯一锁探针 `ProbeB6c7Lock` = **PASS 12 / FAIL 0**；接口级 8 条�
 **⚠️ 本笔给 D 段留的两条新账** ⇒ `tech-debt.md` **TD-72**（回放空批次面：事件行 3 天保留期 vs 记录行**不**删 ⇒ 旧批次点〔回放〕得空表）· **TD-73**（「模拟日常」假数据只在这两处留痕：日志页 MQ 点「未连接」+ 指标页健康度自报；且它的 `protections` 是**前端假造**的 ⇒ D 段防护接真闸后，**「开/关防护」的对照在演示模式下走不出来**，只能在正常模式接后端真跑）。
 
 **⚠️ 本笔未还项：只有 ④ 一条**（三块小型预览）—— 其余七项均已落码/落稿。**总账**：本笔使块 7 的 API 面从 8 条 → **10 条**（+`/attack/status` +`/admin/observe/replay`），并把这四条系列的后三笔（D 段）钉在一份**可查证的规划文档**上。
+
+#### 7-B7-D2. **D 段 · commit 2**〈后端防护接闸〉（2026-10-15）—— 口径：**3 键接闸 + 1 键登记 TD + 1 键记录位**
+
+**这一段做什么** ⇒ 把上一小节 ⑥ 那份 D 段 pack 里「五个防护开关」的**前三项接成真闸**，并按用户
+2026-10-15 的补充裁定收口。⚠️ **口径的唯一代码出处是 `ProtectionGate.WIRED_KEYS`**（不是本文件、不是报告）——
+**不许**写成「4 键已接闸」或「5 键里 4 键已接闸」。
+
+**裁定落实表（七条，逐条给落点）**
+
+| 裁定 | 落点 | 证据 |
+|---|---|---|
+| ① 第 9 类事件环 `protection`（枚举 + 源环 + 落库 + 前端 5 处 labels + 测试） | `EventBroadcaster.Kind.PROTECTION` · `observe/metrics/ProtectionMetrics` · `observe-labels.js`（5 张表各 +1）· `EventLog.vue`（**零改动**：`v-for="k in KINDS"` 自动多一格） | `ProtectionMetricsTest`（6 条）· `EventBroadcasterTest` / `EventStreamServiceTest` 已扩 |
+| ② 熔断：包**关键 DAO / 服务 / 下游**（**禁入站层**、**禁只挂订单 / 支付**） | `GoodsService` **5 处** + `OrderService.orderAdd` **1 处**（跨域、读写分开两个实例） | `CircuitBreakerWiringTest`（4 条，逐方法钉） |
+| ② 阈值：错误率 **50%** / **30s** 窗口 / 半开 **30s 后放 5 个** / **必须设最小请求数** / 半开恢复要有记录 | `application.properties` 的 `resilience4j.circuitbreaker.configs.default.*`（最小请求数 **20**）· `ProtectionMetricsBinder`（订阅 `getEventPublisher()`） | `ProtectionThresholdsTest`（4 条逐值）· `ProtectionMetricsBinderTest`（5 条，真熔断器的三档翻转 + 被拦） |
+| ③ 限流：入站统一闸 **200 QPS**、白名单（健康检查 / 静态资源 / 探针 / error 页）、超限 **429** | `InboundRateLimitInterceptor` + `ProtectConfig`（挂 `/**`，`HIGHEST_PRECEDENCE`） | `InboundRateLimitInterceptorTest`（7 条）· 运行期探针 `probe-d2-inbound-gate.mjs`（**320 发 = 200 放行 + 120×429**） |
+| ④ 重试：**本笔不落码，只登记 TD** | `tech-debt.md` **TD-74**（触发条件 / 落点 / 不得挂哪两处 / 落地前先做并发压测） | 文档；代码侧仅 `ProtectionGate.wired("retry") == false` |
+| ⑤ 线程池分池 | `ObservePoolConfig`（core 8 / max 32 / queue 64，满则 SHED + 503；关掉 ⇒ 无界） | `ProtectionThresholdsTest`（三个数有限）· 启动日志 |
+| **degrade**：只记录；UI 若必展示 ⇒ **标灰 + tooltip**；**禁死控件** | `observe-labels.js` 的 `PROTECTIONS_NOT_WIRED` / `PROTECTION_NOT_WIRED_TIP` + `AttackConsole.vue`（`is-locked` + `disabled` + `aria-disabled` + 「不可开关」角标 + `toggleProtection` 的 JS 守卫） | 探针 `probe-d2-locked-switches.mjs`（**21/21**，含「抠掉 `disabled` 再点仍不变」）+ 截图 `evidence/c3-block7/d2-protection-switches.png` |
+
+**落码清单**
+
+| # | 项 | 落点 | 实证 |
+|---|---|---|---|
+| 1 | 依赖与配置 | `pom.xml`（+`spring-boot-starter-aop` + `resilience4j-spring-boot3:2.3.0`）· `application.properties`（熔断六项 + MQ 消费池 2/8） | `ProtectionThresholdsTest` |
+| 2 | 防护开关的运行时状态 | `protect/ProtectionGate`（五个布尔位 + `apply` / `resetToDefault` / `wired`） | `ProtectionGateTest`（9 条）· `ProtectionKeysAlignmentTest`（2 条） |
+| 3 | 入站限流闸 | `protect/InboundRateLimitInterceptor`（**拦截器，不是 Filter** —— `Filter` 是切片地雷）· `protect/ProtectConfig` | 见上 |
+| 4 | 熔断挂载 + 状态记录 | `GoodsService` / `OrderService` 的 6 处注解 · `protect/ProtectionMetricsBinder` | 见上 |
+| 5 | 观测池分池 | `protect/ObservePoolConfig`（`GatedExecutor` 每次 `execute` 现读开关） | `ProtectionThresholdsTest` |
+| 6 | 第 9 类事件环 | `observe/metrics/ProtectionMetrics` · `EventBroadcaster`（`Kind` + 源环 + `ingestProtection`） | `ProtectionMetricsTest` |
+| 7 | 演练侧接线 | `DrillRecordService`（**run 之前**写入、**`finally` 复位**；缺省全开的**唯一换算点**） | `DrillRecordServiceTest`（2 条新增） |
+| 8 | 前端 | `observe-labels.js`（9 类 + 两枚锁定表）· `AttackConsole.vue`（标灰 + 两枚 tooltip + CSS 两条类名） | 探针 21/21 + 截图 |
+| 9 | 三方 key 表同序 | 后端两份由 `ProtectionKeysAlignmentTest` 钉；**前端第三份跨语言** ⇒ 探针 `probe-d2-protection-keys-alignment.mjs`（**含突变对照**：打乱前端表 ⇒ 退出码 1，还原后 md5 一致） | `_work/d2/keys-alignment.txt` |
+
+**⚠️ 本笔的事实更正（五处，都是实测，不是推断）**
+
+1. **`RateLimiter` 2.3.0 没有 `tryAcquirePermission()`** —— `javap` 实测接口里只有 `acquirePermission()` / `acquirePermission(int)` / `reservePermission()` / `reservePermission(int)` / `drainPermissions()`。本仓用 `acquirePermission()`，而**「不排队」由 `timeoutDuration = 0` 保证，不由方法名保证**（已写成 `ProtectConfig.TIMEOUT` 常量 + 断言，改大就红）。
+2. **`AntPathMatcher` 的 `/**` 匹配零个或多个路径段** ⇒ `/health/**` 也匹配裸的 `/health`、`/admin/observe/**` 也匹配 `/admin/observe`（本仓没有后一个端点，实际影响为零）。⚠️ 按「`/**` 至少要一段」去推白名单边界会推错。
+3. **`ThreadPoolTaskExecutor` 不是 bean 时必须显式 `initialize()`**（`afterPropertiesSet()` 只对 bean 生效），且其线程**默认非守护** ⇒ 不 `setDaemon(true)` 会吊住 JVM、卡住后端重启脚本。
+4. **`@CircuitBreaker` 的切面 order = `2147483643`**（= `Integer.MAX_VALUE - 4`，2026-10-15 从 `resilience4j-spring6-2.3.0.jar` 常量池读出）< 事务切面 `MAX` ⇒ **熔断天然在事务之外**（开路时连事务都不开）。这条是**取值实测**，不是「应该在外层」。
+5. **`--c9` 早就存在**（`assets/tokens.css` 浅色 `:201` / admin `:301`，两套主题同值）⇒ 第 9 类直接用 `var(--c9)`，**本笔没动 `tokens.css`**（动了会让那两处引用漂移）。
+
+**⚠️ 本笔给 D 段/块 8 留的两条新账** ⇒ `tech-debt.md` **TD-74**（重试：触发条件是「先有死锁实测」，落点 = `GoodsService` 三处写方法；⚠️ **不得挂 `OrderService`**（订单链刻意禁 `@Transactional`）、**不得拿 `DistributedLockService` 当重试**（那是锁等待）；未来落地注意 AOP 同类自调用无效 + 重试必须在事务之外 + 落地前先做并发压测）· **TD-75**（熔断**只挂 MySQL** 两个实例：Redis / MQ 已有手写熔断，再叠 r4j 是重复造）。
+
+**测试** ⇒ 基线 **498** → 本笔 **541 passed / 0 failed / 0 errors / 26 skipped**（**+43**；新增 7 个测试类：`ProtectionGateTest` 9 · `ProtectionKeysAlignmentTest` 2 · `ProtectionMetricsTest` 6 · `InboundRateLimitInterceptorTest` 7 · `ProtectionMetricsBinderTest` 5 · `ProtectionThresholdsTest` 4 · `CircuitBreakerWiringTest` 4，其余为既有类扩条）。
+
+**⚠️ 本笔不 push / 不 merge**；**手验**按批文仍推迟到 **commit 4 之后**统一一轮。⚠️ **dev / a3 两个 profile 都是 `app.auth.enabled=false`** ⇒ 手验绿 ≠ 默认 profile 绿。
+
+**补登（收口时追加，三条；与 D pack 尾部〈未还项〉逐条对齐）**
+
+1. **未还项 · 帧读数第 9 条 ⇒ 归 commit 3**：`MetricsSnapshotService` 的 `protections(...)` 仍返回**8 条**防护命中
+   （`cacheHit` / … / `identityRejected`），本笔新增的防护动作**只**从帧 `counts` 的第 9 键 `protection` 与
+   `mall.protection.events` 指标回答 —— 即 §⑨ 第 1 条要的「指标帧反映防护」**没做**。原文与三条未还项见
+   `context-packs/c3-block-D-hardening.md` 尾部〈未还项〉。
+2. **订正 · 「加类要一起改」的两处实测不必改**（pack 原判 → 以实测为准）：① `smoke/ObserveStreamSmokeTest.java:69`
+   是 `contains(...)` **子集**断言（只证「原有 8 键一个不少」）⇒ 加第 9 类**不会红**；⚠️ 代价是**切片层不看第 9 键**，
+   帧里真有它由 `observe/service/EventStreamServiceTest.java:81` 的 `containsOnlyKeys(9 个)` 与探针守。
+   ② `scripts/probes/probe-b7c8-event-log.mjs:69` 只是 `['cache',…,'identity'][i % 8]` **轮流取**（不校验枚举完整性）。
+   ⇒ 两文件本笔**未动**。
+3. **补 · 第 9 类 `protection` 的两处枚举**：`mall_management_sql.sql:1868`（`ObservedEvent` 的 `Kind` 列注释里那份 8 名清单）
+   与 `docs/agent/db-schema.md:942`（同款清单）各补 `protection`（**同行替换、净 0 行**）。⚠️ 数据层另三处
+   （`ObservedEventDao` 的 `KIND_MAX` / `clip(e.kind(), …)` / INSERT 列清单）实测**无需改**（列宽 16 ≥ 10，无枚举白名单）。

@@ -159,6 +159,33 @@
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-amqp</artifactId>
         </dependency>
+
+        <!-- AOP 织入面（D 段 · commit 2 · A 档 A1）：熔断注解 @CircuitBreaker 要生效，必须有人
+             把代理织出来。⚠️ 显式写出来而不是指望 resilience4j-spring-boot3 传递带入 ——
+             传递依赖一被上游改 POM 就会静默消失，而那时熔断会**安静地不生效**
+             （注解在、代理不在，编译测试全绿），是本段最不想留的那种失效。
+             版本由 Boot 的 dependencyManagement 给，不写 version。 -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-aop</artifactId>
+        </dependency>
+
+        <!-- 限流 + 熔断（D 段 · commit 2 · A 档 A1）：只引 starter，局部类（ProtectionGate /
+             InboundRateLimitFilter / ProtectionMetrics）都在本仓，见 protect/ 包。
+             ⚠️ 版本必须**显式写**：Boot 3.4.5 的 spring-boot-dependencies 里
+             **没有** resilience4j 的 dependencyManagement（2026-10-15 实测：该 pom 内
+             grep resilience4j 零命中）⇒ 不写 version 会当场解析失败，不是「取最新」。
+             ⚠️ 版本为什么是 2.3.0 而不是当时最新的 2.4.0（依据可复核）：resilience4j 2.3.0
+             对的是 Spring Boot 3.4 线、2.4.0 对的是 3.5 线，而本仓 parent 是 3.4.5
+             （pom.xml:7-8）；跨线取新会引一个只被 3.5 验证过的 starter。
+             复核：curl -sI https://repo1.maven.org/maven2/io/github/resilience4j/resilience4j-spring-boot3/2.3.0/resilience4j-spring-boot3-2.3.0.jar
+             ⚠️ 追加在依赖段末尾是刻意的：pom.xml 被全仓以 file:行号 互引，插在中间会让其后
+             所有引用集体偏移（同上面 amqp 那一族的处置）。 -->
+        <dependency>
+            <groupId>io.github.resilience4j</groupId>
+            <artifactId>resilience4j-spring-boot3</artifactId>
+            <version>2.3.0</version>
+        </dependency>
     </dependencies>
 
     <build>

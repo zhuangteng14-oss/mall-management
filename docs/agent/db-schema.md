@@ -939,7 +939,7 @@
 | 列 | 类型 / 约束 | 可空 | 默认 | 语义（列注释逐字） |
 |---|---|---|---|---|
 | `Id` | `bigint AUTO_INCREMENT` | NO | — | 自增主键 |
-| `Kind` | `varchar(16)` | NO | —（**必填**） | 事件所属环：`cache` / `lock` / `order` / `stock` / `audit` / `notify` / `sensitive` / `identity`（对齐前端 `KIND_LABEL`） |
+| `Kind` | `varchar(16)` | NO | —（**必填**） | 事件所属环：`cache` / `lock` / `order` / `stock` / `audit` / `notify` / `sensitive` / `identity` / `protection`（对齐前端 `KIND_LABEL`；第 9 类 `protection` 由 D 段 commit 2 加，2026-10-15，`.sql` 同步） |
 | `Severity` | `varchar(16)` | NO | `info` | `info` / `warn` / `error`（对齐前端 `SEVERITY_LABEL`） |
 | `Title` | `varchar(255)` | NO | `''` | 事件标题（一句话；含业务键时由后端截断） |
 | `ObjectType` | `varchar(32)` | **YES** | `NULL` | 对象类型（审计 = `TargetType` / 敏感词 = 命中的词 / 身份 = 请求路径 …）；**无则 NULL** |

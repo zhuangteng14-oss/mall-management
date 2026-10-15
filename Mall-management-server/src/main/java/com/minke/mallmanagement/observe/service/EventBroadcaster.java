@@ -6,6 +6,8 @@ import com.minke.mallmanagement.observe.metrics.IdentityMetrics;
 import com.minke.mallmanagement.observe.metrics.IdentityMetrics.IdentityEvent;
 import com.minke.mallmanagement.observe.metrics.NotifyMetrics;
 import com.minke.mallmanagement.observe.metrics.NotifyMetrics.NotifyEvent;
+import com.minke.mallmanagement.observe.metrics.ProtectionMetrics;
+import com.minke.mallmanagement.observe.metrics.ProtectionMetrics.ProtectionEvent;
 import com.minke.mallmanagement.observe.metrics.SensitiveMetrics;
 import com.minke.mallmanagement.observe.metrics.SensitiveMetrics.SensitiveEvent;
 import com.minke.mallmanagement.observe.metrics.StockMetrics;
@@ -25,10 +27,17 @@ import java.util.List;
 import java.util.concurrent.atomic.AtomicLong;
 
 /**
- * 事件广播器 —— 把**八个事件环**（既有三环 + 块 7 五环）汇成一条有序的事件流，
+ * 事件广播器 —— 把**九个事件环**（既有三环 + 块 7 五环 + D 段一环「防护」）汇成一条有序的事件流，
  * 供 {@code POST /admin/observe/events/stream}（实时日志页）读。
  *
- * <h2>【为什么需要这一层：八个环各自「有界且会被覆盖」，而读的人只想要一条时间线】</h2>
+ * <p>⚠️ <b>第九环（{@link Kind#PROTECTION}）与其他八环有一处性质不同，必须知道</b>：前八环记的是
+ * 「业务与基础设施发生了什么」，第九环记的是「**防护层自己做了什么**」（限流拦下 / 熔断翻转 /
+ * 池挤出）。它由 {@code protect/} 包内三处闸写入，且熔断那一路的翻转<b>可能没有任何业务请求在跑</b>
+ * （Resilience4j 的半开由它自己的线程按等待期推动）⇒ 它不是「业务请求的副产品」，
+ * 是一条独立的信号源。本类对它的处置与前八环逐字相同（只读、只过滤），
+ * 差别只在「它的写入方在哪」——写进源环的时机不受本类影响。
+ *
+ * <h2>【为什么需要这一层：九个环各自「有界且会被覆盖」，而读的人只想要一条时间线】</h2>
  * 每个环都是 2048 槽的**覆盖式**环形缓冲，读法只有「读最近一屏」。实时日志页要的是
  * 「**这一拍新发生的**」，于是需要一个「按源记住读到哪了」的游标 —— 那就是本类。
  * ⚠️ <b>本类不重写任何环、不改变它们的语义</b>：只读 {@code recentEvents()}（各环公开的
@@ -36,29 +45,32 @@ import java.util.concurrent.atomic.AtomicLong;
  *
  * <h2>【三件事，逐件说清】</h2>
  * <ol>
- *   <li><b>归一化</b>：八环的事件记录字段各不相同（缓存环有 {@code cache} 没有 {@code orderId}，
- *       订单环有九列……）。本类把它们翻成一个统一的 {@link ObservedEvent}
- *       （{@code kind / severity / title / detail / key}）——「哪些平台字段」是**页面要的**，
- *       不是「环里有的」。翻译表逐条写在下面的 {@code fromXxx} 私有方法里。</li>
- *   <li><b>severity 规则（一处定义，八处适用）</b>：
+ *   <li><b>归一化</b>：九环的事件记录字段各不相同（缓存环有 {@code cache} 没有 {@code orderId}，
+ *       订单环有九列，防护环是 {@code key / scope / detail} 三列……）。本类把它们翻成一个统一的
+ *       {@link ObservedEvent}（{@code kind / severity / title / detail / key}）——「哪些平台字段」
+ *       是**页面要的**，不是「环里有的」。翻译表逐条写在下面的 {@code fromXxx} 私有方法里。</li>
+ *   <li><b>severity 规则（一处定义，九处适用）</b>：
  *       <pre>
  *       error  ← result = error（抛异常 / 真失败）
  *       warn   ← result ∈ {failed, rejected, timeout, degraded, skipped_degraded,
- *                          insufficient, lease_lost} —— 「被挡下 / 被拒 / 降级 / 抢不到」
+ *                          insufficient, lease_lost, blocked, opened, half_open, shed}
+ *                —— 「被挡下 / 被拒 / 降级 / 抢不到 / 闸动了」
  *       info   ← 其余（成功路径、以及 miss / missing 这类「什么也没发生」）
  *       </pre>
  *       ⚠️ 它是**展示口径**（页面据此配色），不是契约 —— 改它只影响日志页的颜色，
  *       不影响任何计数。⚠️ {@code miss} / {@code missing} 刻意留在 info：
  *       本环回答「**发生了什么**」，把每一次未命中都染成黄/红会让整屏都是警告色。
- *       想读「防护拦了多少」请走指标（那是 {@link MetricsSnapshotService} 的活）。</li>
+ *       想读「防护拦了多少」请走指标（那是 {@link MetricsSnapshotService} 的活）。
+ *       ⚠️ D 段第九环的 {@code closed}（熔断试探通过、恢复关闭）也刻意留在 info：
+ *       那是**恢复**，染成黄/红会让「闸刚救回来一次」看起来像又一次故障。</li>
  *   <li><b>游标 + 合并环</b>：每个源记一个「已并入的最大 seq」（初始 -1 = 空环）；
- *       {@link #poll()} 把八环里更新的条目按源顺序并入本类的 2048 槽环，
+ *       {@link #poll()} 把九环里更新的条目按源顺序并入本类的 2048 槽环，
  *       {@link #since(long)} 让调用方按「我上次读到哪」取增量。</li>
  * </ol>
  *
  * <h2>【⚠️ 边界：一拍内超过 2048 条会丢——而且**丢的是最早的**，不是最新的】</h2>
  * 源环自己就是覆盖式的：一拍内某源写了 3000 条，它的 {@code recentEvents()} 只答得出最后 2048 条。
- * 本类**照抄**这个语义（合并环同样是 2048 槽覆盖式，与八环同值），不另设统计口径。
+ * 本类**照抄**这个语义（合并环同样是 2048 槽覆盖式，与九环同值），不另设统计口径。
  * 依据：@调度器/攻击引擎把每秒事件数打到 2048 以上时，**逐条读已经不是正确的读法**
  * （那要看 {@code mall.*} 的计数），日志页要的是**可读的过程**，不是完整审计流水。
  *
@@ -79,14 +91,18 @@ import java.util.concurrent.atomic.AtomicLong;
  *
  * <h2>【⚠️ 同一拍内的顺序 = **环序**，不是事件发生的先后】</h2>
  * {@link #poll()} 是**一环一环地并**的（{@code cache → lock → order → stock → audit → notify
- * → sensitive → identity}），故同一拍里跨环的事件在合并环中是**按环分组**的：本拍最后一刻发生的
- * 缓存事件，会排在本拍最早发生的订单事件**前面**。这是本类明确的口径，不是实现疏漏 ——
- * 逐条按墙钟全局排序需要跨环合并后重排（而各环的墙钟只保证「同环内单调」），
+ * → sensitive → identity → protection}），故同一拍里跨环的事件在合并环中是**按环分组**的：
+ * 本拍最后一刻发生的缓存事件，会排在本拍最早发生的订单事件**前面**。这是本类明确的口径，
+ * 不是实现疏漏 —— 逐条按墙钟全局排序需要跨环合并后重排（而各环的墙钟只保证「同环内单调」），
  * 本块的取舍是**不排序**：日志页要的是「这一拍发生了什么」，跨环的毫秒级先后由卡片上的
  * {@code ts} 自己还原。测试钉这条口径的位置：{@code EventBroadcasterTest#severityFollowsTheOneRuleTable}。
+ * <p>⚠️ 第九环排在**最后**，理由只有一条：**不改既有八环的相对顺序**（那八条顺序写在文档里、
+ * 也被测试钉着；把它插在中间会让所有引用「第 N 环」的地方集体漂移）。⚠️ 由此**不要**从
+ * 合并环的顺序去推因果 —— {@code protection} 排在最末**不代表**「这一拍里防护事件发生得最晚」，
+ * 环序与事件时间无关这件事对第九环同样成立。
  *
  * <h2>【热路径代价】</h2>
- * {@link #poll()} 是**被流线程每秒调一次**的（不是在业务线程上）：八次
+ * {@link #poll()} 是**被流线程每秒调一次**的（不是在业务线程上）：九次
  * {@code recentEvents()}（各 ≤2048 条、无锁）+ 一次 {@code synchronized}（+ 环满时两个计数自增）。
  * 业务侧（下单、扣库存……）**从不**调本类 ⇒ 本类不在任何临界区里。
  *
@@ -103,11 +119,16 @@ import java.util.concurrent.atomic.AtomicLong;
 @Component
 public class EventBroadcaster {
 
-    /** 合并环容量：与八个源环同值（2048 = 2 的幂，位与定位；语义与取舍见类注释最后一节）。 */
+    /** 合并环容量：与九个源环同值（2048 = 2 的幂，位与定位；语义与取舍见类注释最后一节）。 */
     private static final int EVENT_CAPACITY = 2048;
     private static final int EVENT_MASK = EVENT_CAPACITY - 1;
 
-    /** 事件类别 —— 与《块 7 参考》§4.2 的八类一一对应（顺序 = 页面图例顺序）。 */
+    /**
+     * 事件类别 —— 前八类与《块 7 参考》§4.2 的八类一一对应，第九类 {@link #PROTECTION} 是
+     * D 段新增（顺序 = 页面图例顺序，也 = {@link #poll()} 的并入顺序）。
+     * ⚠️ {@code tag} 是**页面筛选键**，改它等于改协议（前端 {@code observe-labels.js} 的
+     * {@code KINDS} 与攻击页的过滤类都按它匹配）；加类要两边一起加。
+     */
     public enum Kind {
         CACHE("cache", "缓存"),
         LOCK("lock", "锁"),
@@ -116,7 +137,9 @@ public class EventBroadcaster {
         AUDIT("audit", "审计"),
         NOTIFY("notify", "通知"),
         SENSITIVE("sensitive", "敏感词"),
-        IDENTITY("identity", "身份");
+        IDENTITY("identity", "身份"),
+        /** 防护层自己的动作（限流拦下 / 熔断翻转 / 池挤出）—— D 段新增，源环是 {@code ProtectionMetrics}。 */
+        PROTECTION("protection", "防护");
 
         /** 页面用作筛选键 / 配色的稳定标识（英文，别拿 {@code label} 当键）。 */
         public final String tag;
@@ -153,10 +176,13 @@ public class EventBroadcaster {
      * @param objectType <b>这条事件动的是「什么类型的东西」</b>（块 7 · commit 8 新增）——
      *                   缓存 / 锁 / 订单 / 商品（SKU）/ 通知 五环取的是各自那个稳定词，审计环取的是
      *                   {@code audit} 表本来就有的 {@code TargetType}（{@code goods} / {@code comment}…），
-     *                   敏感词环是 {@code sensitive}，身份环是 {@code identity}。取值在八个 {@code ingestXxx} 里逐环给定
+     *                   敏感词环是 {@code sensitive}，身份环是 {@code identity}，
+     *                   防护环（D 段）是 {@code protection}。取值在九个 {@code ingestXxx} 里逐环给定
      * @param objectId   上面那个类型的**具体标识**（块 7 · commit 8 新增）：缓存键 / 锁键 / 订单号 /
      *                   SKU 码 / 通知收件人 → 那是各环本来就有的 {@code key}；审计环是 {@code TargetId}；
-     *                   敏感词环是**命中的词**；身份环是**请求路径**。没有就 null
+     *                   敏感词环是**命中的词**；身份环是**请求路径**；防护环是**防护开关 key**
+     *                   （{@code rateLimit} / {@code circuitBreak} / {@code poolIsolation}……）。
+     *                   没有就 null
      * @param traceId    产生本条事件的那次请求的号（块 7 · commit 8 新增）；定时任务 / 流线程上产生时为 null。
      *                   ⚠️ 它由**源环在记录那一刻**从 MDC 取好（见各 metrics 类的 {@code event(...)}），
      *                   不是并入本环时取的 —— 并入跑在 SSE 流线程上，那里 MDC 是空的
@@ -180,8 +206,15 @@ public class EventBroadcaster {
     private final IdentityMetrics identityMetrics;
 
     /**
+     * 第 9 类源环（D 段新增）。⚠️ 它是九个源里**唯一一个写入方可能不在业务请求线程上**的
+     * —— 熔断半开由 Resilience4j 自己的线程推动（见类注释首节）。本类对此无所谓（只读快照），
+     * 但排障时要记住：本环有事件**不等于**那一刻有业务流量。
+     */
+    private final ProtectionMetrics protectionMetrics;
+
+    /**
      * 事件台账（{@code observed_event}）的出口（块 7 · commit 8c）。⚠️ <b>调点只有本类一处</b>
-     * —— 八个环各自发布会在「哪条事件算已发布」这件事上产生八份口径（其中七份迟早会漂），
+     * —— 九个环各自发布会在「哪条事件算已发布」这件事上产生九份口径（其中八份迟早会漂），
      * 而 {@link #add} 本来就是**唯一**创建 {@link ObservedEvent} 的地方。
      *
      * <p>⚠️ 由此带来一个**必须知道**的后果：{@link #add} 只在 {@link #poll()} 里被调到，而
@@ -205,6 +238,7 @@ public class EventBroadcaster {
                             NotifyMetrics notifyMetrics,
                             SensitiveMetrics sensitiveMetrics,
                             IdentityMetrics identityMetrics,
+                            ProtectionMetrics protectionMetrics,
                             EventPublisher eventPublisher) {
         this.cacheMetrics = cacheMetrics;
         this.lockMetrics = lockMetrics;
@@ -214,15 +248,16 @@ public class EventBroadcaster {
         this.notifyMetrics = notifyMetrics;
         this.sensitiveMetrics = sensitiveMetrics;
         this.identityMetrics = identityMetrics;
+        this.protectionMetrics = protectionMetrics;
         this.eventPublisher = eventPublisher;
         Arrays.fill(sourceSeq, -1L);
     }
 
     /**
-     * 把八个源环里**还没并入过**的事件并进合并环。由流线程每秒调一次。
+     * 把九个源环里**还没并入过**的事件并进合并环。由流线程每秒调一次。
      *
      * @return 本次并入的条数（页面「每秒事件速率」用的就是这个数 —— 它是**新增**而不是累计）。
-     *         ⚠️ **冷启动那一拍会偏大**：八个环各自可能已经攒了一屏（≤2048 × 8），首拍一并并入。
+     *         ⚠️ **冷启动那一拍会偏大**：九个环各自可能已经攒了一屏（≤2048 × 9），首拍一并并入。
      *         这是**真实发生的事**（那一拍确实读到了这么多），不修正、不封顶 —— 页面按 60 秒窗口
      *         显示，尖峰自己会滚出去；`since(-1)` 也只取合并环留得下的最后 2048 条。
      */
@@ -236,6 +271,7 @@ public class EventBroadcaster {
         ingestNotify();
         ingestSensitive();
         ingestIdentity();
+        ingestProtection();
         return (int) (cursor.get() - before);
     }
 
@@ -435,6 +471,29 @@ public class EventBroadcaster {
         sourceSeq[Kind.IDENTITY.ordinal()] = last;
     }
 
+    private void ingestProtection() {
+        long previous = sourceSeq[Kind.PROTECTION.ordinal()];
+        long last = previous;
+        long first = -1L;
+        for (ProtectionEvent e : protectionMetrics.recentEvents()) {
+            if (first < 0L) {
+                first = e.seq();
+            }
+            if (e.seq() <= last) {
+                continue;
+            }
+            // ⚠️ 这里的 key 取的是**防护开关 key**（rateLimit / circuitBreak / poolIsolation），
+            //    不是「被拦的那个业务键」—— 防护事件没有业务键。页面「涉及对象」那一列因此显示
+            //    「防护开关名」，这是刻意的：它回答「哪道闸动了」，而不是「谁被拦了」
+            //    （后者要看同拍里业务侧的 429/503 记录）。
+            add(e.epochMilli(), Kind.PROTECTION, fromProtection(e), e.key(), e.seq(),
+                    "protection", str(e.key()), e.traceId(), e.batchId());
+            last = e.seq();
+        }
+        droppedIngest += missed(previous, first);
+        sourceSeq[Kind.PROTECTION.ordinal()] = last;
+    }
+
     // ==================== 翻译：源事件 → (severity, title, detail) ====================
 
     /** 缓存环：kind ∈ {l1, l2, load, singleflight, evict, probe, transition}（取值表在 {@code MallCacheMetrics} 类注释）。 */
@@ -598,6 +657,53 @@ public class EventBroadcaster {
                 passed ? "身份放行" : "身份拒绝", detail};
     }
 
+    /**
+     * 防护环（第 9 类 · D 段）：result ∈ {blocked, opened, half_open, closed, shed}
+     * （各档语义在 {@code ProtectionMetrics.Result} 的枚举注释里）。
+     *
+     * <p>⚠️ 标题按「**哪道闸 + 哪一档**」拼，不按 result 一档一个标题：{@code blocked} 同时来自
+     * 入站限流与熔断开路，而这两者的排障方向相反（前者查流量、后者查下游），挤成同一个标题
+     * 会让人读错方向。severity 仍走 {@link #severityOf} 那唯一一处规则（四档都是 warn）。
+     */
+    private static String[] fromProtection(ProtectionEvent e) {
+        String result = String.valueOf(e.result());
+        String key = e.key() == null ? "-" : e.key();
+        String detail = "protection=" + key + " scope=" + (e.scope() == null ? "-" : e.scope())
+                + (e.detail() == null ? "" : " " + e.detail());
+        String title;
+        switch (result) {
+            case "blocked":
+                // 本环只有两处会记 blocked：入站限流闸与熔断开路。按 key 分开写，
+                // 认不出 key 时**不硬套**其中任何一个（套错会把「限流挡的」说成「下游坏了」）。
+                if ("rateLimit".equals(key)) {
+                    title = "入站限流拦下";
+                } else if ("circuitBreak".equals(key)) {
+                    title = "熔断开路拒绝（未执行）";
+                } else {
+                    title = "防护拦下：" + key;
+                }
+                break;
+            case "opened":
+                title = "熔断打开";
+                break;
+            case "half_open":
+                title = "熔断半开（放行试探）";
+                break;
+            case "closed":
+                title = "熔断恢复关闭";
+                break;
+            case "shed":
+                title = "线程池挤出（未排队）";
+                break;
+            default:
+                // 五档是**枚举给定的有界集**，真出现第六种值只可能是「有人加了 result 却忘了改这里」
+                // —— 那就照实显示，不猜一个好看的标题（与各标签表「认不出就不翻译」同源）。
+                title = "防护处置：" + result;
+                break;
+        }
+        return new String[]{severityOf(result), title, detail};
+    }
+
     // ==================== 小工具 ====================
 
     /** 命中类事件（缓存命中 / 回源 / 单飞）：一律 info。 */
@@ -618,6 +724,13 @@ public class EventBroadcaster {
             case "skipped_degraded":
             case "insufficient":
             case "lease_lost":
+            // ↓ D 段第九环（防护）的四档：闸拦下了 / 闸自己翻转了 —— 都属于「系统偏离了常规路径」。
+            //   ⚠️ 第五档 closed（熔断恢复关闭）**不在这里**，它落进下面的 default = info：
+            //   那是恢复，不是故障（理由写在类注释第 2 件里）。
+            case "blocked":
+            case "opened":
+            case "half_open":
+            case "shed":
                 return Severity.WARN.tag;
             default:
                 return Severity.INFO.tag;
@@ -642,7 +755,7 @@ public class EventBroadcaster {
      *
      * @param srcSeq 源环的 seq —— 只进 {@code detail} 尾部（形如 {@code src=stock#128}），
      *               供排查时定位回原环；⚠️ **不是** {@link ObservedEvent#seq()}（那个是本环的）
-     * @param objectType 被操作对象的**类型**（块 7 · commit 8 新增）—— 八个 {@code ingestXxx}
+     * @param objectType 被操作对象的**类型**（块 7 · commit 8 新增）—— 九个 {@code ingestXxx}
      *                   在调用点逐环给定；取值口径见 {@link ObservedEvent#objectType()}
      * @param objectId   被操作对象的**标识**（同上）；取值口径见 {@link ObservedEvent#objectId()}
      * @param traceId    产生本条事件的那次请求的号（同上）；不在请求线程上时为 {@code null}
@@ -675,8 +788,8 @@ public class EventBroadcaster {
     // —— 而「看起来正常」正是本块最不想要的那种失效。所以：丢可以，但**要留下数**。
     //
     // 【丢失只可能发生在两个消费口，两个口各记各的 —— 且**口径不同**】
-    //   ① 源环 → 合并环（在八个 ingestXxx 里）：源环一拍写了 3000 条，它的 recentEvents()
-    //      只答得出最后 2048 条 ⇒ 中间那截就没了。**这是全进程的现象**（八个源环是单例、
+    //   ① 源环 → 合并环（在九个 ingestXxx 里）：源环一拍写了 3000 条，它的 recentEvents()
+    //      只答得出最后 2048 条 ⇒ 中间那截就没了。**这是全进程的现象**（九个源环是单例、
     //      与谁在观看无关）⇒ 记成**全局累计** {@link #droppedIngest()}。
     //   ② 合并环 → 调用方（在 {@link #sinceWithLoss} 里）：调用方上次读到 afterSeq，再读时
     //      那一截已经被后来的事件覆盖。**这是「每连接一份」的现象**（游标本身就每连接一份）
@@ -691,7 +804,7 @@ public class EventBroadcaster {
     //    （或者压根没人开页面）。要看「我这条流跟丢了没有」，读帧里的 {@code dropped} /
     //    {@code droppedTotal}（来自 ②），不要把这两个数当同一个东西。
 
-    /** 源环 → 合并环 一路丢掉的累计条数（八个源环合计，全进程口径，见上面那段注释 ①）。 */
+    /** 源环 → 合并环 一路丢掉的累计条数（九个源环合计，全进程口径，见上面那段注释 ①）。 */
     private long droppedIngest;
 
     /**

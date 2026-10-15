@@ -20,6 +20,7 @@ import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ThreadLocalRandom;
 import com.minke.mallmanagement.goods.dao.GoodsDao;
+import io.github.resilience4j.circuitbreaker.annotation.CircuitBreaker;
 import com.minke.mallmanagement.marketing.coupon.service.CouponService;
 import com.minke.mallmanagement.marketing.seckill.dao.SeckillDao;
 import com.minke.mallmanagement.notification.NotificationEvents;
@@ -322,6 +323,15 @@ public class OrderService {
      * <p>⚠️ <b>{@code Source} 不是身份声明、不参与鉴权</b>：谁能下单仍**只看**
      * {@code IdentityGuard}，本参数的存在理由**唯一**是让行可辨认（同 {@code /comment/add} 的那句）。
      */
+    // ⚠️ 【D 段 · commit 2：这里加的是**熔断**，不是事务 —— 两者不相干，别读混】
+    //    本类「不得加 @Transactional」那条禁令（类注释与 addLocked 的 javadoc 各写了一遍）
+    //    **一字不动、依然有效**：熔断是「下游已经不行了就先别发请求」，
+    //    而事务是「这一段要么全成要么全不成」，前者不碰后者的语义。
+    //    ⚠️ 而且两者在 AOP 层的先后是**实测**的：CircuitBreakerAspect 的 order 是 2147483643
+    //    < 事务切面的 Integer.MAX_VALUE ⇒ 熔断在外。本类没有事务切面，这条对本类无影响，
+    //    写在这里是因为「订单链上一出现注解」最容易被读成「禁令破了个口子」。
+    //    落点跨域的理由（为什么不能只挂订单/支付）见 `GoodsService` 里那段同款注释。
+    @CircuitBreaker(name = "mallMysqlWrite")
     public Map<String, Object> orderAdd(
             String CustomerId,
             String MerchantId,

@@ -3,6 +3,7 @@ package com.minke.mallmanagement.observe.service;
 import com.minke.mallmanagement.observe.metrics.AuditMetrics;
 import com.minke.mallmanagement.observe.metrics.IdentityMetrics;
 import com.minke.mallmanagement.observe.metrics.NotifyMetrics;
+import com.minke.mallmanagement.observe.metrics.ProtectionMetrics;
 import com.minke.mallmanagement.observe.metrics.SensitiveMetrics;
 import com.minke.mallmanagement.observe.metrics.StockMetrics;
 import com.minke.mallmanagement.observe.mq.EventPublisher;
@@ -47,6 +48,8 @@ class EventStreamServiceTest {
     private final NotifyMetrics notify = new NotifyMetrics(registry);
     private final SensitiveMetrics sensitive = new SensitiveMetrics(registry);
     private final IdentityMetrics identity = new IdentityMetrics(registry);
+    /** 第 9 类源环（D 段 · commit 2）：本文件只要求它**在构造函数里占位**（帧的形状与它无关）。 */
+    private final ProtectionMetrics protection = new ProtectionMetrics(registry);
 
     /** 台账出口的替身（块 7 · commit 8c）。⚠️ 默认 {@code connected()=false} —— 本文件另有一条
      *  用例把它设成 true 来验帧里的 `mq` 字段；其余用例只关心**帧的形状**，不关心 MQ 通不通。 */
@@ -54,7 +57,7 @@ class EventStreamServiceTest {
 
     /** ⚠️ 广播器认的必须是**上面那几个**环实例（各环的缓冲是实例字段，不是 registry 里的东西）。 */
     private final EventBroadcaster broadcaster = new EventBroadcaster(
-            cache, lock, order, stock, audit, notify, sensitive, identity, publisher);
+            cache, lock, order, stock, audit, notify, sensitive, identity, protection, publisher);
     private final EventStreamService service = new EventStreamService(broadcaster, publisher);
 
     /** 本用例的那**一条连接**（JUnit 每个用例一个新实例 ⇒ 这条会话不会被别的用例读过）。 */
@@ -74,8 +77,8 @@ class EventStreamServiceTest {
 
         @SuppressWarnings("unchecked")
         Map<String, Object> byKind = (Map<String, Object>) frame.get("counts");
-        assertThat(byKind).as("8 类键一个不少（顺序 = Kind 声明序）").containsOnlyKeys(
-                "cache", "lock", "order", "stock", "audit", "notify", "sensitive", "identity");
+        assertThat(byKind).as("9 类键一个不少（顺序 = Kind 声明序；第 9 类 protection 是 D 段新增）").containsOnlyKeys(
+                "cache", "lock", "order", "stock", "audit", "notify", "sensitive", "identity", "protection");
         assertThat(byKind).containsEntry("stock", 2).containsEntry("audit", 1).containsEntry("cache", 0);
 
         @SuppressWarnings("unchecked")

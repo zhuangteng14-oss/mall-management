@@ -3,6 +3,7 @@ package com.minke.mallmanagement.observe.service;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.minke.mallmanagement.observe.dao.DrillRecordDao;
+import com.minke.mallmanagement.protect.ProtectionGate;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
@@ -41,11 +42,19 @@ public class DrillRecordService {
     private final AttackEngine attackEngine;
     private final ObjectMapper objectMapper;
 
+    /**
+     * 防护开关的运行时状态（D 段 · commit 2）。⚠️ 它是本类**唯一**的写点：
+     * {@link #run} 开跑前写、收尾（{@code finally}）复位。理由见那里的注释与
+     * {@code ProtectionGate} 类注释末节。
+     */
+    private final ProtectionGate gate;
+
     public DrillRecordService(DrillRecordDao drillRecordDao, AttackEngine attackEngine,
-                              ObjectMapper objectMapper) {
+                              ObjectMapper objectMapper, ProtectionGate gate) {
         this.drillRecordDao = drillRecordDao;
         this.attackEngine = attackEngine;
         this.objectMapper = objectMapper;
+        this.gate = gate;
     }
 
     // ==================== 面 1：场景清单 ====================
@@ -97,13 +106,30 @@ public class DrillRecordService {
         body.put("scenarios", decodeScenarios(scenarios));
         // 丁的两个开关与 `scenarios` **同一种传输形状**（JSON 数组串 ⇒ 结构）—— 理由同
         // decodeScenarios：自造分隔符要么错位、要么得再造一套转义规则。
-        body.put("protections", decodeKeys(protections, "protections"));
+        List<String> onProtections = decodeKeys(protections, "protections");
+        body.put("protections", onProtections);
         body.put("injections", decodeKeys(injections, "injections"));
 
         // ⚠️ 这里**不**转发调用者的 Authorization / Cookie：引擎自己铸票，转发发起人（管理员）的凭据
         //    会让身份守卫走管理员豁免（场景 7 的 403 永远出不来）、转发 Cookie 更会让「故意不带票」
         //    的那一路被会话悄悄认成已登录。理由全文在 `AttackEngine` 类注释第二节。
-        AttackEngine.DrillRun run = attackEngine.run(body, baseUrl);
+        //
+        // ── D 段（commit 2）：防护门在**引擎开跑之前**写入，在**这一轮收尾之后**复位 ──
+        // ⚠️ 顺序不能反：闸读的是 `ProtectionGate` 的运行时位，而这一轮的第一发请求在
+        //    `attackEngine.run` 内部就发出去了 —— 写入放在 run 之后等于本轮全程读的是**上一轮的**开关。
+        // ⚠️ 缺省（`protections` 没给 ⇒ 解码得 null）在这一层必须翻成「全开」：面板缺省就是全开，
+        //    而 `apply(null)` 的语义是「全关」（它按「勾了哪些」写，null = 一个都没勾）。
+        //    两个 null 含义相反，这里是**唯一**的换算点；不换算的后果是「不传这个参数 ⇒ 把防护全关了」，
+        //    恰是最坏的那种默认值。
+        // ⚠️ 复位必须放 `finally`：`run` 会抛（参数非法、下游全挂、被叫停……），
+        //    不复位就等于「上一轮把限流关掉」越过那一轮留在进程里（逐字理由见 ProtectionGate 类注释）。
+        AttackEngine.DrillRun run;
+        gate.apply(onProtections == null ? ProtectionGate.KEYS : onProtections);
+        try {
+            run = attackEngine.run(body, baseUrl);
+        } finally {
+            gate.resetToDefault();
+        }
 
         Map<String, Object> ok = new HashMap<>();
         ok.put("success", true);

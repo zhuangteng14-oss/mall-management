@@ -5150,3 +5150,93 @@ COALESCE(merchantid,customerid) WHERE EventType IN (那 5 个)` → 复读对照
 1. **④ 三块小型预览 —— 留 TODO、本笔不做**（批文给定分支：「调研 agent 结果已回 → 一并做；没回 → 留 TODO · 形态不锁」）。登记落在 `progress.md` `#### 7-B7-收尾`（**唯一落点**）；⚠️ **不落 `selection-status.md §8`**（编号空间与 PR 号同形）。两条未决前提（(a) 三条流怎么接 · (b) 「暂停」口径）见那一节。
 2. **手验压成一轮** ⇒ 块 7 + D 段合并一份三列式清单，由 **commit 4** 出；⚠️ 凡涉鉴权的标「**默认 profile**」（dev / a3 两档 `app.auth.enabled=false`，验不出鉴权）。
 3. **本笔不 push / 不 merge**。
+
+---
+
+## 二十六、D 段 · commit 2〈后端防护接闸〉（2026-10-15；**本笔已落码**）
+
+> ⚠️ **口径的唯一代码出处是 `ProtectionGate.WIRED_KEYS`**（不是本文件、不是收笔报告）：
+> **3 键接闸（`rateLimit` / `circuitBreak` / `poolIsolation`）+ 1 键登记 TD（`retry` ⇒ TD-74）
+> + 1 键记录位（`degrade`）**。**不许**写成「4 键已接闸」或「5 键里 4 键已接闸」。
+
+### 26-0　落码面（新增 13 源文件 + 探针 3 + 证据 4；修改 20 文件）
+
+**新增 · 后端主代码（6 文件 / 919 行）**
+
+| 文件 | 行数 | 关键坐标 |
+|---|---|---|
+| `protect/ProtectionGate.java` | 168 | `KEYS`:69 · `WIRED_KEYS`:73 · `TD_ONLY_KEY="retry"`:76 · `RECORD_ONLY_KEY="degrade"`:79 · `wired(key)`:143 · `snapshot()`:148 |
+| `protect/InboundRateLimitInterceptor.java` | 169 | 类:72 · `EXEMPT_PATHS`（六条）:75-81 |
+| `protect/ProtectConfig.java` | 107 | 挂 `/**` + `HIGHEST_PRECEDENCE` · `TIMEOUT=ZERO`（**不排队靠它，不靠方法名**） |
+| `protect/ProtectionMetricsBinder.java` | 111 | 订阅 `getEventPublisher()` ⇒ 开路 / 半开 / 恢复都留痕 |
+| `protect/ObservePoolConfig.java` | 180 | `GatedExecutor`（core 8 / max 32 / queue 64，满则 SHED + 503） |
+| `observe/metrics/ProtectionMetrics.java` | 184 | `mall.protection.events{protection,result}` |
+
+**新增 · 测试（7 文件 / 879 行）**：`protect/ProtectionGateTest`(145) · `protect/InboundRateLimitInterceptorTest`(166) ·
+`protect/ProtectionMetricsBinderTest`(135) · `protect/ProtectionThresholdsTest`(115) · `protect/CircuitBreakerWiringTest`(115) ·
+`observe/metrics/ProtectionMetricsTest`(151) · `observe/service/ProtectionKeysAlignmentTest`(52)。
+
+**新增 · 探针 / 证据**：`scripts/probes/probe-d2-{inbound-gate,locked-switches,protection-keys-alignment}.mjs` ·
+`docs/agent/evidence/c3-block7/d2-{inbound-gate,locked-switches,keys-alignment}.txt` + `d2-protection-switches.png`。
+
+**修改 · 后端**：`pom.xml`（+`spring-boot-starter-aop` + `resilience4j-spring-boot3:2.3.0`，**版本必须显式写**）·
+`application.properties`（熔断六项 + MQ 消费池）· `GoodsService`（**5 处** `@CircuitBreaker`）· `OrderService.orderAdd`（1 处）·
+`EventBroadcaster`（`Kind`@:132 加 `PROTECTION`@:142 + `ingestProtection()`@:474-495，`poll()` 调用@:274）·
+`DrillRecordService`（`gate.apply(...)`@:127 在 `run` 之前、`resetToDefault()`@:131 在 `finally`）·
+`AttackEngine`（`PROTECTION_KEYS`@:330）· `AttackController`（`:111` 入参口径注释）。**前端**：`observe-labels.js` · `AttackConsole.vue`。
+
+**规模**：`git diff --stat` 未暂存 **20 文件 / +863 / −116**，另加 13 源文件 + 3 探针 + 4 证据。**测试**：基线 **498 ⇒ 541 passed / 0 failed / 0 errors / 26 skipped**（**+43**）。
+
+### 26-1　五枚开关的落点（逐枚，不是「都接上了」）
+
+| key | 本笔状态 | 落点 | 面板 |
+|---|---|---|---|
+| `rateLimit` | ✅ **接闸** | `InboundRateLimitInterceptor`（200 QPS，白名单六条，超限 429） | 可拨 |
+| `circuitBreak` | ✅ **接闸** | `GoodsService` 5 处 + `OrderService.orderAdd`（错误率 50% / 30s / 最小请求 20 / 半开 30s 放 5） | 可拨 |
+| `poolIsolation` | ✅ **接闸** | `ObservePoolConfig`（关掉 ⇒ 无界；开 ⇒ 有界 + 满则 503） | 可拨 |
+| `retry` | ⏸ **只登记 TD-74** | 一行重试代码都没有 | **不可开关** |
+| `degrade` | ⏸ **只作记录位** | 无落点（系统固有 fail-open） | **不可开关** |
+
+**两枚不可开关的 UI 处置（禁死控件 ⇒ 四处一起做）**：`observe-labels.js` 的 `PROTECTIONS_NOT_WIRED`:305 与
+`PROTECTION_NOT_WIRED_TIP`:308（**逐枚** tooltip：`degrade` = 裁定原话「记录位，不可开关，系统固有 fail-open 设计」；
+`retry` = 指向 TD-74）· `AttackConsole.vue` 的 `is-locked`:132 + `disabled`:138 + `aria-disabled`:134 + 「不可开关」角标:143 +
+`toggleProtection` 的 JS 守卫:686。**实证**：`d2-locked-switches.txt`（**21 项 / 0 失败**，含「抠掉 `disabled` 再点仍不变」
+与「接通的那枚点一下**状态真变**」的对照）。
+
+### 26-2　第 9 类 `protection` 的落点（后端 + 前端 + 数据层）
+
+- **后端**：`EventBroadcaster.Kind.PROTECTION`:142（`KIND` 序第 9）· 源环 `ingestProtection()`:474-495 · `ProtectionMetrics`。
+- **前端 labels 五处**（`observe-labels.js`，**各同行替换、净 0 行**）：`KINDS`:27 · `KIND_LABEL`:46（「防护」）·
+  `KIND_COLOR`:72（`var(--c9)`，**没动 `tokens.css`**）· `KIND_ICON`:131 · `OBJECT_FIELD_LABEL`:179（「防护开关」）。
+  ⚠️ `EventLog.vue` **零改动**（`v-for="k in KINDS"` 自动多一格）。
+- **数据层两处枚举**：`mall_management_sql.sql`:1868 与 `docs/agent/db-schema.md`:942（`Kind` 列注释的 8 名清单各补
+  `protection`，**同行替换、净 0 行**）。⚠️ `ObservedEventDao` 三处（`KIND_MAX` / `clip` / INSERT 列清单）实测**无需改**。
+- **测试**：`EventStreamServiceTest:81` 的 `containsOnlyKeys(9 个)` 钉帧；⚠️ `smoke/ObserveStreamSmokeTest:69` 是
+  `contains` **子集**断言 ⇒ 加第 9 类**不会红**（也**不看**第 9 键）。
+
+### 26-3　refs 处置（本笔三类判据，逐条可复核）
+
+1. **重指 34 条**（甲类 · 本笔顶偏、原值当时准确）：**D pack 自身 33 条**（其〈行号重指表〉内逐条可核；
+   其中 `refs-diff.mjs` 的 LOST∩NEW **可指认 22 条**、**扫描器看不见 11 条**为手工重指）+ **`api-contract.md`
+   第 799 行 1 条**（见下第 4 点），全部**同行替换**、净 0 行；⚠️ 旧值一律写「**原 N 行**」不写 `` `:N` ``
+   （避免重指记录自己往引用集合注入陈旧 token）。
+2. **订正 2 条**（乙类 · 本笔顶偏、原值当时即偏）：`EventBroadcaster.java` 的**原 652 行** ⇒ **`:767`**、**原 176-182 行**
+   ⇒ **`:221`**（取点当天真值 654 / 188，**偏差被放大到 113 / 43 行** ⇒ 按实测真值订正，理由落在 pack〈落地登记〉）。
+3. **只登记 39 条**（丙类 · 本笔没让它们更差 / 引用者本身是**漂移账或史料**）：`refs-diff.mjs` 实测「**两侧一字未动、
+   而目标行被本笔移动**」共 **39 条**，逐条判读后**一条都不重指**，三类理由：**史料类 20 条** —— 引用者自己就是「旧引用账 /
+   重指记录」（`tech-debt.md` 的原 762 / 889 行 · 本文件六处 · `progress.md` 三处 · b6 重指记录 · 两份旧收笔/核实 txt）
+   —— 改了等于**篡改史料**；**他块 pack 18 条** —— **本笔之前就已陈旧**（例：`AbstractSmokeTest.java` 的原 137 行那批
+   指的是 `@Import` 真 bean 名单，而该注解在 HEAD 已到 **203**；`GoodsService.java` 的原 475-478 / 310-341 行在 HEAD 是空行）；
+   **本笔 pack 1 条** —— `c3-block-D-hardening.md:77` 引的 `pom.xml` 原 159-162 行，而 pom 是**纯尾插**（`@@ -161,0 +162,27 @@`），
+   被引的 159-161 未动，口径与 pack〈落地登记〉「只登记、不改」一致。
+   ⚠️ 扫描器**看不见**的 6 条「无主裸续引」（`observe-labels.js` 五处 + 原 `:315-319`）为**手工**逐条重指并已在 pack 登记。
+4. **补回 1 条**：`api-contract.md:799` 的 `protections` 属实行改写时把旧引（`AttackController` 的原 110 行）一并去掉了 ⇒ 补回
+   `AttackController:111`（**同一行内**加，净 0 行），与本表 `injections` 行的 `AttackController:112` 同形。
+
+### 26-4　未还项（本笔）
+
+1. **帧读数第 9 条**（§⑨ 第 1 条「指标帧要反映防护」）**没做** —— `MetricsSnapshotService.protections(...)` 仍返回 **8 条**，本笔新增的防护动作只从帧 `counts` 第 9 键与 `mall.protection.events` 回答 ⇒ **归 commit 3**。
+2. **`retry` 见 TD-74**（触发条件 = 先有死锁实测；落点 = `GoodsService` 三处写方法；**不得挂 `OrderService`**）；**Redis / MQ 不加熔断**见 TD-75。
+3. §⑧ 四条边界（SSE 连接保护 / MQ 幂等与 DLQ / 无上限列表 / 脱敏）**本笔一条没动** ⇒ 归 commit 3。
+4. **手验**仍压到 **commit 4 之后**统一一轮；⚠️ dev / a3 两档 `app.auth.enabled=false` ⇒ 手验绿 ≠ 默认 profile 绿。
+5. **本笔不 push / 不 merge / 不开 PR。**

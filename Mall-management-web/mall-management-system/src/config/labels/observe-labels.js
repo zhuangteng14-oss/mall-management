@@ -14,20 +14,23 @@
 //    与这里**各自独立改**，漏跟的一方只会让页面显示一个看得见的英文 tag —— 而不是一条空白。
 
 /**
- * 8 类事件的**声明序**（tag）。⚠️ 与后端 `EventBroadcaster.Kind` 的枚举声明序**逐字对齐**
- * （`cache → lock → order → stock → audit → notify → sensitive → identity`）。
+ * 9 类事件的**声明序**（tag）。⚠️ 与后端 `EventBroadcaster.Kind` 的枚举声明序**逐字对齐**
+ * （`cache → lock → order → stock → audit → notify → sensitive → identity → protection`）。
  *
  * ⚠️ 顺序不是审美：后端 `EventStreamService.frame()` 的 `counts` 是 `LinkedHashMap`，按这个序
  * 装进帧；页面的图例、卡片配色、抽屉里的链路排序全都吃这个序 ⇒ 两处一旦不一致，
  * 「图例第 3 个」与「卡片第 3 色」就会指向不同的类，而且**不会报错**。
+ *
+ * ⚠️ 第 9 类 `protection`（防护）是 D 段 · commit 2 新增，**追加在末尾**：既有的八条序一字未动
+ * （后端 `Kind` 的声明序同样把 `PROTECTION` 放在最后，两处都动才叫「逐字对齐」）。
  */
-export const KINDS = ['cache', 'lock', 'order', 'stock', 'audit', 'notify', 'sensitive', 'identity']
+export const KINDS = ['cache', 'lock', 'order', 'stock', 'audit', 'notify', 'sensitive', 'identity', 'protection']
 
 /**
  * tag → 中文名。**取值逐字抄自后端** `EventBroadcaster.Kind` 的 `label` 字段
  * （后端那两列是「页面图例上的中文名」的**唯一出处**，前端这份是它的镜像）。
  *
- * ⚠️ 认不出时回落成 **tag 原文**（同 `notify-events.js` 的兜底口径）：后端加了第 9 类而这里没跟，
+ * ⚠️ 认不出时回落成 **tag 原文**（同 `notify-events.js` 的兜底口径）：后端加了第 10 类而这里没跟，
  *    页面应当显示一个看得见的英文 `weird`，**不是空白** —— 空白会被读成「这条事件没分类」，
  *    而真相是「前端不认识它」。
  */
@@ -40,15 +43,19 @@ export const KIND_LABEL = {
   notify: '通知',
   sensitive: '敏感词',
   identity: '身份',
+  protection: '防护',
 }
 
 /**
  * tag → 色（**CSS 变量引用**，不是色值）。
  *
- * ⚠️ 八类落 `--c1`–`--c8`，`KINDS` 序一一对应。写 `var(--cN)` 而不是 `#hex`：本仓两套主题
- *   （浅色 `:root` / 管理端 `html[data-theme="admin"]`）下这 8 个名字**同名不同值**
+ * ⚠️ 九类落 `--c1`–`--c9`，`KINDS` 序一一对应。写 `var(--cN)` 而不是 `#hex`：本仓两套主题
+ *   （浅色 `:root` / 管理端 `html[data-theme="admin"]`）下这些名字**同名不同值**
  *   （`--c3` 浅色 `#00a64a` / 管理端 `#22c55e`）—— 硬编码色值会在另一套主题上错，
  *   而且错得不明显（都是绿）。见 `assets/tokens.css:200` / `:300` 两行。
+ *   ⚠️ `--c9` 与 `--c10` **不是本文件新造的**：色板早就到 `--c10`（可视化段 commit 1 的图表十色）。
+ *   第 9 类只是**第一次有事件环用到 `--c9`** ⇒ 防护环的类色与图表第 9 色**同一个值**（`#ec4899`）。
+ *   这是取用既有色板、不新造色的取舍 —— 同页同时出现折线与卡片时，两处的粉指向不同东西。
  *
  * ⚠️ 与**严重度**色（`--info` / `--warning` / `--danger`）是**两套轴**：类色说「这是哪个环」，
  *   严重度色说「它好不好」。卡片上类色走左侧色条 + 图标，严重度色走角标 —— 不混用。
@@ -62,6 +69,7 @@ export const KIND_COLOR = {
   notify: 'var(--c6)',
   sensitive: 'var(--c7)',
   identity: 'var(--c8)',
+  protection: 'var(--c9)',
 }
 
 /**
@@ -119,6 +127,11 @@ export const KIND_ICON = {
     'M8 4.2a2.1 2.1 0 1 0 0 4.2 2.1 2.1 0 0 0 0-4.2z',
     'M3.8 13.4c0-2.3 1.9-3.6 4.2-3.6s4.2 1.3 4.2 3.6',
   ],
+  // 防护：盾（外轮廓）+ 中间一竖（闸闩）—— D 段第 9 类
+  protection: [
+    'M8 2.4 12.9 4.3v3.7c0 2.7-1.9 4.8-4.9 5.6-3-.8-4.9-2.9-4.9-5.6V4.3z',
+    'M8 5.6v6.6',
+  ],
 }
 
 /** 认不出的类用的图标：一枚空心方框（与 `KIND_LABEL` / `KIND_COLOR` 的兜底同一理由）。 */
@@ -140,12 +153,13 @@ export const SEVERITIES = ['info', 'warn', 'error']
 /**
  * tag → **对象列**该叫什么（实时日志页那张卡片上「这事件动的是谁」那一格的说明词）。
  *
- * ⚠️ 八类的 `objectId` **来源各不相同**（逐环口径见后端 `EventBroadcaster` 里八处 `add(...)`）：
+ * ⚠️ 九类的 `objectId` **来源各不相同**（逐环口径见后端 `EventBroadcaster` 里九处 `add(...)`）：
  *    `cache`/`lock`/`notify` 取各自的事件键，`order` 取订单号，`stock` 取 SKU，
  *    `audit` 取 `TargetType` + `TargetId`（**块 7 · commit 8 新补的两列**），
  *    `sensitive` 取**命中的词**（同上新补，「以前只记命中几个」），
- *    `identity` 取**被校验的请求路径**（同上新补）。
- *    ⇒ 同一格在这八类里指的**不是同一种东西**，所以说明词必须逐类给，不能统一写「对象」。
+ *    `identity` 取**被校验的请求路径**（同上新补），
+ *    `protection` 取**防护开关 key**（D 段 · commit 2 新补：限流 / 熔断 / 分池）。
+ *    ⇒ 同一格在这九类里指的**不是同一种东西**，所以说明词必须逐类给，不能统一写「对象」。
  *
  * ⚠️ 这一格的值**照原文上屏**（中文词、请求路径、业务号…），**不做翻译** —— 唯一的例外是
  *    `objectType`：它是 `AuditActions` 的 **45 条** tag 的域前缀（`goods` / `comment_image` …），
@@ -160,6 +174,9 @@ export const OBJECT_FIELD_LABEL = {
   notify: '收件人',
   sensitive: '命中的词',
   identity: '请求路径',
+  // ⚠️ 写「防护开关」而不是「对象」：这一列在防护环里装的是**哪道闸动了**（rateLimit / circuitBreak /
+  //    poolIsolation），不是「谁被拦了」—— 后者在防护环里根本不存在（事件不带业务键）。
+  protection: '防护开关',
 }
 
 /** 认不出 ⇒ 用最中性的那个词（同各表的兜底口径）。 */
@@ -266,6 +283,34 @@ export const PROTECTION_LABEL = {
 }
 
 /**
+ * **本段没有真闸**的两枚 —— 面板必须把它们画成**不可开关**（标灰 + tooltip）。D 段 · commit 2。
+ *
+ * ⚠️ 这是后端 `protect/ProtectionGate` 的**镜像**，三处逐字对应、缺一不可：
+ *    `WIRED_KEYS = List.of("rateLimit","circuitBreak","poolIsolation")`（真有闸的三个）
+ *    与 `TD_ONLY_KEY = "retry"` / `RECORD_ONLY_KEY = "degrade"`（各自一个）。
+ *    后端那份是**判据的唯一出处**（`ProtectionGate.wired(key)` 可断言）；前端这份只用于
+ *    「开跑之前就把话说明白」——那一刻没有结果可读。
+ *
+ * ⚠️ 【口径：本段是 **3 键接闸 + 1 键登记 TD + 1 键记录位**】
+ *    写成「4 键已接闸」或「5 键里 4 键已接闸」都是错的（用户 2026-10-15 逐字纠正过）。
+ *    两枚关掉的原因**不同**，所以 tooltip 是两句话，不是一句话：
+ *      · `degrade` 不是「没实现」，是**系统本来就没有这一层**（缓存 L2 回落 / 锁 fail-open /
+ *        MQ 缺席 / 审计 fail-open 都是固有行为，不由这个开关管）⇒ 它是**记录位**；
+ *      · `retry` 是**本段不落码**：落点与触发条件都已定（TD-74），等实测证据。
+ *
+ * ⚠️ 【为什么是「标灰 + tooltip」而不是「藏起来」】藏起来会让「面板上少了一枚」与
+ *    「这一笔忘了做」读起来一样；画成一个**能拨但什么也不发生**的开关则是**死控件**——
+ *    用户明令禁止。标灰 + 说清理由，是唯一既不骗人也不留白的那一种。
+ */
+export const PROTECTIONS_NOT_WIRED = ['degrade', 'retry']
+
+/** `PROTECTIONS_NOT_WIRED` 里每个 key 的 tooltip（两枚的理由不同，逐枚给）。 */
+export const PROTECTION_NOT_WIRED_TIP = {
+  degrade: '记录位，不可开关，系统固有 fail-open 设计',
+  retry: '本段不落码：只登记 TD-74（有死锁实测证据后再落 GoodsService 三处写方法，本段一行重试代码都没有）',
+}
+
+/**
  * 攻击演练的**三个故障注入开关** key → 中文名 + 声明序（commit 10c 起头）。
  *
  * ⚠️ 【key 与顺序对齐后端】`AttackEngine.java` 的
@@ -316,6 +361,18 @@ export function protectionLabel(key) {
   return Object.prototype.hasOwnProperty.call(PROTECTION_LABEL, key)
     ? PROTECTION_LABEL[key]
     : String(key == null ? '' : key)
+}
+
+/** 这枚防护开关**本段有没有真闸**（`false` ⇒ 面板必须标灰，见 `PROTECTIONS_NOT_WIRED`）。 */
+export function protectionWired(key) {
+  return !PROTECTIONS_NOT_WIRED.includes(key)
+}
+
+/** 取「没真闸」那两枚的 tooltip（认不出回落空串 —— 有闸的开关不该有提示，空串即「不显示」）。 */
+export function protectionNotWiredTip(key) {
+  return Object.prototype.hasOwnProperty.call(PROTECTION_NOT_WIRED_TIP, key)
+    ? PROTECTION_NOT_WIRED_TIP[key]
+    : ''
 }
 
 /** 取注入开关中文名（认不出回落 key 原文）。 */

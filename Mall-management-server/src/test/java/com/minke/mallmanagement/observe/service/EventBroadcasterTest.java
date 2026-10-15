@@ -3,6 +3,8 @@ package com.minke.mallmanagement.observe.service;
 import com.minke.mallmanagement.observe.metrics.AuditMetrics;
 import com.minke.mallmanagement.observe.metrics.IdentityMetrics;
 import com.minke.mallmanagement.observe.metrics.NotifyMetrics;
+import com.minke.mallmanagement.observe.metrics.ProtectionMetrics;
+import com.minke.mallmanagement.observe.metrics.ProtectionMetrics.Result;
 import com.minke.mallmanagement.observe.metrics.SensitiveMetrics;
 import com.minke.mallmanagement.observe.metrics.StockMetrics;
 import com.minke.mallmanagement.observe.service.EventBroadcaster.ObservedEvent;
@@ -25,11 +27,12 @@ import static org.assertj.core.api.Assertions.tuple;
 import static org.mockito.Mockito.mock;
 
 /**
- * 事件广播器（{@link EventBroadcaster}）的语义实测 —— 八环合并、游标、severity 规则表、
+ * 事件广播器（{@link EventBroadcaster}）的语义实测 —— 九环合并、游标、severity 规则表、
  * 覆盖边界。**不起 Spring、不起 MySQL**（同 {@code MallLockMetricsTest} 的姿势）。
  *
- * <p>⚠️ 本文件测的是**广播器这一层**（归一化 + 游标 + 合并环）。八个源环各自的语义
- * （哪个情形记哪个值）由各自的 {@code *MetricsTest} 负责，这里不重复。
+ * <p>⚠️ 本文件测的是**广播器这一层**（归一化 + 游标 + 合并环）。九个源环各自的语义
+ * （哪个情形记哪个值）由各自的 {@code *MetricsTest} 负责，这里不重复 —— 第八环「防护」
+ * 的源语义在 {@code ProtectionMetricsTest}，本文件只测它**并入后的翻译与配色**。
  */
 class EventBroadcasterTest {
 
@@ -44,28 +47,31 @@ class EventBroadcasterTest {
     private final NotifyMetrics notify = new NotifyMetrics(registry);
     private final SensitiveMetrics sensitive = new SensitiveMetrics(registry);
     private final IdentityMetrics identity = new IdentityMetrics(registry);
+    /** 第 9 类源环（D 段 · commit 2）。 */
+    private final ProtectionMetrics protection = new ProtectionMetrics(registry);
     /** 台账出口的替身（块 7 · commit 8c）：本文件测的是**广播器这一层**，不测 MQ。 */
     private final EventPublisher publisher = mock(EventPublisher.class);
     private final EventBroadcaster broadcaster = new EventBroadcaster(
-            cache, lock, order, stock, audit, notify, sensitive, identity, publisher);
+            cache, lock, order, stock, audit, notify, sensitive, identity, protection, publisher);
 
     // ================= 合并与游标 =================
 
     @Test
-    @DisplayName("八环各发一条 ⇒ poll() 报 8 条、类序 = Kind 声明序；再 poll 报 0（幂等）")
-    void pollMergesAllEightRingsExactlyOnce() {
+    @DisplayName("九环各发一条 ⇒ poll() 报 9 条、类序 = Kind 声明序；再 poll 报 0（幂等）")
+    void pollMergesAllRingsExactlyOnce() {
         emitOneOfEach();
 
-        assertThat(broadcaster.poll()).as("八条一次并入").isEqualTo(8);
+        assertThat(broadcaster.poll()).as("九条一次并入").isEqualTo(9);
         List<ObservedEvent> all = broadcaster.since(-1);
         assertThat(all).extracting(ObservedEvent::kind)
-                .as("顺序 = Kind 声明序（页面图例顺序），与入参的八环顺序一致")
-                .containsExactly("cache", "lock", "order", "stock", "audit", "notify", "sensitive", "identity");
+                .as("顺序 = Kind 声明序（页面图例顺序），与入参的九环顺序一致")
+                .containsExactly("cache", "lock", "order", "stock", "audit", "notify", "sensitive",
+                        "identity", "protection");
         assertThat(all).extracting(ObservedEvent::seq)
-                .as("合并环自己的 seq 连续从 0 起").containsExactly(0L, 1L, 2L, 3L, 4L, 5L, 6L, 7L);
+                .as("合并环自己的 seq 连续从 0 起").containsExactly(0L, 1L, 2L, 3L, 4L, 5L, 6L, 7L, 8L);
 
         assertThat(broadcaster.poll()).as("第二次 poll：没有新事件 ⇒ 0（游标推进到哪就说哪）").isZero();
-        assertThat(broadcaster.since(7L)).as("已读到最新 ⇒ 没有增量").isEmpty();
+        assertThat(broadcaster.since(8L)).as("已读到最新 ⇒ 没有增量").isEmpty();
     }
 
     @Test
@@ -169,7 +175,7 @@ class EventBroadcasterTest {
 
     @Test
     @DisplayName("对象字段逐环补全（块 7 · commit 8）：五环取各自的业务键，审计取 TargetType/TargetId、"
-            + "敏感词取命中的词、身份取请求路径")
+            + "敏感词取命中的词、身份取请求路径、防护取防护开关 key")
     void objectFieldsAreFilledPerRing() {
         emitOneOfEach();
         broadcaster.poll();
@@ -185,7 +191,10 @@ class EventBroadcasterTest {
                         tuple("audit", "order", "O-1"),        // ← 补的就是这两列
                         tuple("notify", "notify", "C-1"),
                         tuple("sensitive", "sensitive", null), // ← 一条也没命中 ⇒ 没有「命中的词」
-                        tuple("identity", "identity", "/order/orderReceive"));  // ← 补的就是这一列
+                        tuple("identity", "identity", "/order/orderReceive"),  // ← 补的就是这一列
+                        // 防护环（D 段）：objectId 取的是**防护开关 key**，不是业务键 ——
+                        // 防护事件没有业务键（理由写在 EventBroadcaster.ingestProtection 的注释里）。
+                        tuple("protection", "protection", "circuitBreak"));
     }
 
     @Test
@@ -201,7 +210,50 @@ class EventBroadcasterTest {
         broadcaster.poll();
 
         assertThat(broadcaster.since(-1)).extracting(ObservedEvent::traceId)
-                .as("八条都带上了记录那一刻的 traceId").containsOnly("trace0001");
+                .as("九条都带上了记录那一刻的 traceId").containsOnly("trace0001");
+    }
+
+    // ================= 第 9 类：防护（D 段 · commit 2） =================
+
+    @Test
+    @DisplayName("防护环翻译：blocked 按 key 分标题（限流 / 熔断）、四档 warn、closed 落 info")
+    void protectionRingIsTranslatedPerGate() {
+        // 两条 blocked 的 key 不同 —— 标题必须跟着分岔：两者都是 warn，但排障方向相反
+        // （限流查流量、熔断查下游）。合并成一个标题就等于把两条线索糊成一条。
+        protection.blocked("rateLimit", "inbound", "path=/goods/goodsSelectHome 每 1s 放 200 条，这一拍没有余量");
+        protection.blocked("circuitBreak", "mysql", "circuitBreaker=mallMysqlWrite 已打开：本次调用未执行");
+        protection.state(Result.OPENED, "circuitBreak", "mysql", "circuitBreaker=mallMysqlWrite CLOSED → OPEN 失败率=62.5%");
+        protection.state(Result.HALF_OPEN, "circuitBreak", "mysql", "circuitBreaker=mallMysqlWrite OPEN → HALF_OPEN");
+        protection.state(Result.CLOSED, "circuitBreak", "mysql", "circuitBreaker=mallMysqlWrite HALF_OPEN → CLOSED");
+        protection.shed("poolIsolation", "pool", "pool=observe-stream active=32 ⇒ 拒绝（不排队）");
+        broadcaster.poll();
+
+        assertThat(severityOfAll())
+                .as("四档 warn，第五档 closed（恢复）刻意落 info —— 见类注释第 2 件")
+                .containsExactly("warn", "warn", "warn", "warn", "info", "warn");
+        assertThat(titlesOf(Severity.WARN)).containsExactly(
+                "入站限流拦下", "熔断开路拒绝（未执行）", "熔断打开", "熔断半开（放行试探）", "线程池挤出（未排队）");
+        assertThat(titlesOf(Severity.INFO)).containsExactly("熔断恢复关闭");
+
+        assertThat(broadcaster.since(-1)).extracting(ObservedEvent::kind).containsOnly("protection");
+        assertThat(broadcaster.since(-1)).extracting(ObservedEvent::objectType).containsOnly("protection");
+        assertThat(broadcaster.since(-1)).extracting(ObservedEvent::objectId)
+                .as("objectId = 防护开关 key（rateLimit / circuitBreak / poolIsolation）")
+                .containsExactly("rateLimit", "circuitBreak", "circuitBreak", "circuitBreak", "circuitBreak", "poolIsolation");
+        assertThat(broadcaster.since(-1).get(0).detail())
+                .as("源环的 scope 与自由文本明细都进了 detail，尾部照旧带 src=环名#源seq")
+                .contains("protection=rateLimit").contains("scope=inbound").endsWith("src=protection#0");
+    }
+
+    @Test
+    @DisplayName("防护环的第一条 blocked 的 key 认不出时：**不硬套**某个闸名，照实写 key")
+    void protectionBlockedWithUnknownGateDoesNotGuess() {
+        protection.blocked("degrade", "somewhere", "一个本段不该出现的 key");
+        broadcaster.poll();
+
+        assertThat(titlesOf(Severity.WARN)).as("不写「入站限流拦下」也不写「熔断开路拒绝」—— 两者都是猜")
+                .containsExactly("防护拦下：degrade");
+        assertThat(severityOfAll()).containsExactly("warn");
     }
 
     // ================= 覆盖边界 =================
@@ -244,7 +296,7 @@ class EventBroadcasterTest {
 
     // ================= 工具 =================
 
-    /** 八个环各发一条（值都取「成功路径」，故本用例只关心**类序**）。 */
+    /** 九个环各发一条（值都取「成功路径」，故本用例只关心**类序**）。 */
     private void emitOneOfEach() {
         cache.l1Request("goods", "k1", true);
         lock.acquire("order:create", "O-1", MallLockMetrics.Outcome.ACQUIRED, 1_000_000L);
@@ -254,6 +306,9 @@ class EventBroadcasterTest {
         notify.sent("email", "order.created", "C-1");
         sensitive.masked("comment", 0, 20, null);
         identity.passed("C-1", "/order/orderReceive");
+        // 第 9 环取 closed（熔断恢复关闭）而不是 blocked：它是防护环五档里**唯一**落 info 的一档，
+        // 于是这条共用夹具不会把 severity 规则表那几条断言搅乱（那几条按档位分组断言标题）。
+        protection.state(Result.CLOSED, "circuitBreak", "mysql", "circuitBreaker=mallMysqlWrite HALF_OPEN → CLOSED");
     }
 
     private List<String> titlesOf(Severity severity) {

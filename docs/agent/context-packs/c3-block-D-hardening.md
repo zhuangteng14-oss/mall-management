@@ -4,7 +4,7 @@
 > ⚠️ **本段不是 8 块之一** —— 块表（块 1–8）里没有它。它是**块 7 与块 8 之间**插入的一段加固，
 > 由用户 2026-10-15 的**重排期批文**定名「**D 段**」；它没有独立分支，工作继续落在
 > `feat/c3-admin-block7` 上（块 7 收尾 commit 1 之后接着 commit 2/3/4）。
-> ⚠️ **状态（2026-10-15）：规划文档 · 未落码** —— 批文 ⑥ 逐字：「D 段 pack（规划，**不写代码**）出
+> ⚠️ **状态（2026-10-15 更新）：规划文档；①②③⑤⑥ 已由 D 段 commit 2 落码**（④ 重试只登记 **TD-74**、`degrade` 只作**记录位**；边界四项与演示联动归 commit 3）—— 批文 ⑥ 逐字：「D 段 pack（规划，**不写代码**）出
 > `docs/agent/context-packs/c3-block-D-hardening.md` · 行号实测」。本 pack 即该产物。
 > ⚠️ **「现状」全是快照**：取点 = `4d75eec`（块 7 收尾 commit 1 落码前的 HEAD）+ 本笔工作区实测。
 > 行号随代码增删会漂 ⇒ 回指旧行号按「取点当时实测」理解。**引用活文档一律写 `文件.md#锚点`；
@@ -14,7 +14,7 @@
 
 把块 7 造出来的「攻击模拟器」从**只会打分**变成**真的挨了打还会接住**：块 7 已经能让后端被打
 （8 个预置场景 + 自定义权重、真发并发流量、真把库压出计数），但**被打了之后没有任何补救** ——
-限流、熔断、降级、重试、分池五个开关**今天只记录不实现**（`AttackEngine.java:325` 起那段类注释、
+限流、熔断、降级、重试、分池五个开关**在取点当天只记录不实现**（`AttackEngine.java:325` 起那段类注释、
 `:1652` 起那句回显文案）。D 段做的就是把那五个名字**接上真闸**，外加四件「边界」活
 （SSE 连接保护 / MQ 幂等与 DLQ 出口 / 无上限列表 / 敏感字段输出），最后收口出一份**块 7 + D 段合并**的手验清单。
 
@@ -130,17 +130,17 @@ D 段要的是**它的下半场** ——「关掉防护 + 注入故障 ⇒ 崩�
 
 ### ⑤ 事件类 —— 8 类的位置，加第 9 类要动 **19 处** {#pack-c3-block-d-hardening-s11}
 
-**唯一出处**：`observe/service/EventBroadcaster.java:111-119` 的 `enum Kind`
+**唯一出处**：`observe/service/EventBroadcaster.java:132-140` 的 `enum Kind`
 （`CACHE` / `LOCK` / `ORDER` / `STOCK` / `AUDIT` / `NOTIFY` / `SENSITIVE` / `IDENTITY`，
-每项带 `tag` + `label`，`:121-124`）。实测**正是这 8 个**。
+每项带 `tag` + `label`，`:144-147`）。实测**正是这 8 个**（第 9 类 `PROTECTION` 见尾部〈落地登记〉）。
 
 | 层 | 要动的地方（实测坐标） |
 |---|---|
-| 后端枚举 | `EventBroadcaster.java:111-119`（加项）· `:173-180`（源 metrics 字段）· `:200-218`（构造器形参）· `:229-240`（`poll()` 里加调用）· **新增一个 `ingestXxx` + 源环**（现有 8 段 `:294-435`，每段末都有 `droppedIngest += missed(...)`） |
-| 后端落库 | `ObservedEventDao.java:47`（`KIND_MAX = 16`）· `:99`（`params.add(clip(e.kind(), KIND_MAX))`）· INSERT 列清单 `:110-112` |
-| 数据 / 文档 | `mall_management_sql.sql:1868`（列注释里**写死**了 8 个名）· `db-schema.md#db-16-1`（同一句 8 名清单） |
-| 前端 | `config/labels/observe-labels.js`：`KINDS`（`:24`）· `KIND_LABEL`（`:34-43`）· `KIND_COLOR`（`:56-65`）· `KIND_ICON`（`:90-122`）· `OBJECT_FIELD_LABEL`（`:154-163`）。⚠️ 色 token **已存在**（`assets/tokens.css:201` / `:301` 的 `--c9: #ec4899`）⇒ **不用新增** |
-| 测试 / 探针（会因枚举数变化而**红**） | `EventBroadcasterTest.java:63`（`containsExactly` 8 个 tag）· `EventStreamServiceTest.java:78` · `smoke/ObserveStreamSmokeTest.java:69` · `scripts/probes/probe-b7c8-event-log.mjs:69`（`[…'identity'][i % 8]`） |
+| 后端枚举 | `EventBroadcaster.java:132-140`（加项）· `:199-206`（源 metrics 字段）· `:233-253`（构造器形参）· `:264-276`（`poll()` 里加调用）· **新增一个 `ingestXxx` + 源环**（既有 8 段 `:330-471`，每段末都有 `droppedIngest += missed(...)`；第 9 段 `ingestProtection` 在 `:474-495`） |
+| 后端落库 | `ObservedEventDao.java:47`（`KIND_MAX = 16`）· `:99`（`params.add(clip(e.kind(), KIND_MAX))`）· INSERT 列清单 `:110-112` —— ⚠️ 三处**都不需要改**（`KIND_MAX` 16 ≥ `"protection"` 的 10 字符，其余两处与 kind 取值无关） |
+| 数据 / 文档 | `mall_management_sql.sql:1868`（列注释里**写死**了 8 个名）· `db-schema.md#db-16-1`（同一句 8 名清单）—— 两处均已由 commit 2 补上 `protection`（同行替换） |
+| 前端 | `config/labels/observe-labels.js`：`KINDS`（`:27`）· `KIND_LABEL`（`:37-47`）· `KIND_COLOR`（`:63-73`）· `KIND_ICON`（`:98-135`）· `OBJECT_FIELD_LABEL`（`:168-180`）。⚠️ 色 token **已存在**（`assets/tokens.css:201` / `:301` 的 `--c9: #ec4899`）⇒ **不用新增** |
+| 测试 / 探针 | `EventBroadcasterTest.java:68`（`containsExactly` 9 个 tag）· `EventStreamServiceTest.java:81` · `smoke/ObserveStreamSmokeTest.java:69` · `scripts/probes/probe-b7c8-event-log.mjs:69`（`[…'identity'][i % 8]`）—— ⚠️ **后两处实测不必改**：前者用 `contains(...)` 子集断言（枚举多一项**不会红**，与本节所写不同，已实测定正）；后者只是从 8 个名字里轮流取，多一类**不影响它跑** |
 
 ⚠️ 帧里的 `counts` 由 `Kind.values()` **自动生成**（`EventStreamService.java:104-107`）⇒ 加枚举项后
 「最新一拍有第 9 个类」**自动生效**，但那四处测试/探针的**期望值**要一起改（否则一改就红）。
@@ -155,21 +155,21 @@ static final List<String> PROTECTION_KEYS =
 - 校验：`parseKeys(...)` `AttackEngine.java:1495-1510`（`:1509` 未知键 ⇒ `IllegalArgumentException`
   ⇒ 控制器侧 400）；调用点 `:1480-1481`。
 - 回显：`AttackEngine.java:1635` `engine.put("Protections", cfg.protections())`。
-- 落进演练记录：`DrillRecordService.java:100`（`decodeKeys(protections, "protections")`）。
-- 前端开关面板：`views/admin/observe/AttackConsole.vue` —— 模板 `:117-136`（`v-for="k in PROTECTIONS"` `:123`）·
-  状态 `:613`（`ref(new Set(PROTECTIONS))`，**默认全开**）· 拨动 `:663-669` · 提交 `:982`。
-- 中文标签：`config/labels/observe-labels.js:257`（`PROTECTIONS`）· `:260-266`（`PROTECTION_LABEL`：
-  限流 / 熔断 / 降级 / 重试 / 分池）· `:315-319`（`protectionLabel`）。
+- 落进演练记录：`DrillRecordService.java:109`（`decodeKeys(protections, "protections")` —— commit 2 起先收进局部量 `onProtections`，再由 `ProtectionGate` 消费）。
+- 前端开关面板：`views/admin/observe/AttackConsole.vue` —— 模板 `:122-145`（`v-for="k in PROTECTIONS"` `:128`）·
+  状态 `:624`（`ref(new Set(PROTECTIONS))`，**默认全开**）· 拨动 `:674-692` · 提交 `:1005`。
+- 中文标签：`config/labels/observe-labels.js:274`（`PROTECTIONS`）· `:277-283`（`PROTECTION_LABEL`：
+  限流 / 熔断 / 降级 / 重试 / 分池）· `:360-364`（`protectionLabel`）。
 
 **三处「只记录不实现」的原话**（D 段做完要**逐处改**，改的时候别只改一处）：
-1. `AttackEngine.java:325`（类注释）：「⚠️ **本笔只负责把它们「收下来、记进演练记录、打进日志」，
+1. `AttackEngine.java:325`（类注释）**原话**：「⚠️ **本笔只负责把它们「收下来、记进演练记录、打进日志」，
    一条防护逻辑都不实现** …… 硬边界 A 逐字是「加固（扩池 / 扩线程 / 优化慢 SQL）与补救
-   （限流 / 熔断 / 降级 / 重试）**都在 D 段**」」。
-2. `AttackEngine.java:1652`（回显文案）：「Protections 五个开关本笔**只记录不实现**（防护在 D 段）」。
-3. 前端 `AttackConsole.vue:119`（「默认全开 · 本笔只记录、不改读数（接闸在 D 段）」）与 `:129`。
-4. 契约侧另有：`api-contract.md#api-h-1` 的载体表注（「两者都先落成契约面 …… 语义落地归 D 段
-   —— 这一条是**如实登记**」）—— ⚠️ 那句里引的是**快照行号**（`AttackController:110`），
-   D 段落地后 `AttackController` 会再长，届时**同笔改**。
+   （限流 / 熔断 / 降级 / 重试）**都在 D 段**」」—— ⚠️ **commit 2 已改**（`:325-328` 现址不变，见尾部〈落地登记〉）。
+2. `AttackEngine.java:1652`（回显文案）**原话**：「Protections 五个开关本笔**只记录不实现**（防护在 D 段）」—— ⚠️ **commit 2 已改**（现为「五枚里三枚真生效…」，同占 `:1652-1653`）。
+3. 前端 `AttackConsole.vue:124`（原「默认全开 · 本笔只记录、不改读数（接闸在 D 段）」）与 `:134` —— ⚠️ **两处均已由 commit 2 改**（`:124` 的新文案 + `:134` 的 `:aria-disabled` 守卫；**别再按原话 grep**）。
+4. 契约侧另有：`api-contract.md#api-h-1` 的载体表注（原「两者都先落成契约面 …… 语义落地归 D 段
+   —— 这一条是**如实登记**」）—— ⚠️ **commit 2 已同笔改**（改为「✅ 已接闸（3 键 + 1 键 TD + 1 键记录位）」
+   + 附录 `#api-i-3` 指针）；原引的**快照行号**（`AttackController:110`）随之删去，不再需要重指。
 
 ⚠️ **`degrade`（降级）在本仓已有半个实体**：`Mall-management-server` 里有一族「降级」行为
 （缓存 L1/L2 回落、锁取超时 fail-open、MQ 缺席只 WARN、审计 fail-open）—— 它们**不是**由一个开关管的。
@@ -186,7 +186,7 @@ static final List<String> PROTECTION_KEYS =
 - 「死锁」在本仓**今天的形状**是 `LockSceneService` 里的一个**演示场景**
   （`SceneKind.DEADLOCK`，`LockSceneService.java:100-108`），不是线上会自然发生的那条路。
 - 锁**取锁超时一律 fail-open、无重试**：`DistributedLockService.java:270-273`（`if (!held) { … return action.get(); }`）。
-- 订单关键路径**无重试**：`OrderService.java:369`（`ORDER_ADD`）/ `:1169` / `:1188` / `:1225` 四个
+- 订单关键路径**无重试**：`OrderService.java:379`（`ORDER_ADD`）/ `:1179` / `:1198` / `:1235` 四个
   `runLocked` 调用点，正文里没有重试循环。
 
 ⚠️ ⇒ 批文 ④「Spring Retry 只对**死锁类**异常 2–3 次」落地时，**要先回答两个问题**（本 pack 无法单方面定）：
@@ -202,7 +202,7 @@ static final List<String> PROTECTION_KEYS =
 - 现成范式：**默认 100 / 上限 500** 的 `normalizeLimit` 已在至少 20 处生效
   （`AuditService:157-161` · `UserGovernanceService:110-114` · `ReportService:489-493` ·
   `SubsidyService:381-385` · `CouponService:862-867` · `SeckillService:596-600` …）；
-  攻击记录是 **默认 20 / 上限 200**（`DrillRecordService.java:187-189`，常量 `:37-38`）；
+  攻击记录是 **默认 20 / 上限 200**（`DrillRecordService.java:213-215`，常量 `:38-39`）；
   回放是 **默认 5000 / 上限 50000**（`ReplayService.java:115-119`）。
 - **真正无上限的列表**（实测逐条 —— 这些才是批文 ③ 的靶子）：
 
@@ -263,8 +263,8 @@ static final List<String> PROTECTION_KEYS =
 
 ## B 档 / C 档（自裁，报备 —— 不落硬线，可落码）{#pack-c3-block-d-hardening-b}
 
-- **B1** 五个防护开关键**在页面上的可见后果**：接闸后，`AttackConsole.vue:119` 那句
-  「本笔只记录、不改读数（接闸在 D 段）」必须**当笔改**（否则页面在说谎 —— TD-20 那一族）。
+- **B1** 五个防护开关键**在页面上的可见后果**：接闸后，`AttackConsole.vue:124` 那句
+  「本笔只记录、不改读数（接闸在 D 段）」必须**当笔改**（否则页面在说谎 —— TD-20 那一族）—— ✅ commit 2 已改。
 - **B2** 熔断 / 限流的**参数键名**：照本仓惯例走 `mall.*` + `@Value` 默认值（先例：
   `mall.observe.sse.interval-ms`、`mall.drill.engine.in-flight-cap:512`）⇒ 若只是默认值、不落 properties，不算 A 档。
 - **B3** 单元测试**照既有分层写**：纯逻辑进 `*Test`（不起 Spring），需要真 bean 的进切片
@@ -293,14 +293,14 @@ static final List<String> PROTECTION_KEYS =
      OccurredAt, created_at, updated_at`（`mall_management_sql.sql:1866-1883`）—— **没有 `Seq`**，
      也没有任何唯一键（只有 `PRIMARY KEY(Id)` + 4 个普通索引）。
    - 内存里**确实有**一个 `seq`，但它**不能**当幂等键：`ObservedEvent.seq` 是**合并环游标**
-     （`EventBroadcaster.java:652` `cursor.getAndIncrement()`；record 定义 `:168-170`）——
+     （`EventBroadcaster.java:767` `cursor.getAndIncrement()`；record 定义 `:194-196`）——
      进程内单调、**重启归零、跨实例不可比、且 2048 回绕**。
      它能安全使用的地方只有一个：**同一条消息字节被重投**时那个数**不变**（这正是幂等需要的那半）。
    - ⇒ 口径二选一（**待裁**）：**(甲)** 加列 `Seq` + `UNIQUE (TraceId, Seq)`（A 档：新字段 + 新 DDL）；
      **(乙)** 不加列，用 `(TraceId, OccurredAt, Kind, Title)` 之类做唯一键（**弱**：同毫秒同 trace 的
      两条同类同题事件会被当重复**丢掉**）。
    - ⚠️ 不论甲乙，`(TraceId, …)` 对**无 traceId 的事件恒不生效**：`TraceId` 可为 `NULL`
-     （定时任务 / SSE 流线程上产生的事件，`EventBroadcaster.java:160-162` 逐字），
+     （定时任务 / SSE 流线程上产生的事件，`EventBroadcaster.java:186-188` 逐字），
      而 MySQL 的 UNIQUE **不把两个 `NULL` 当相等** ⇒ 「那批事件**天生**去不了重」。这一条必须写进验收口径。
 3. **「数据脱敏（手机号 / 邮箱 / 地址）」—— 靶子变了。**
    手机号与收货地址**在本仓不存在**（见 §⑧(b)）；真实靶子是 `user.email` / `user.address` /
@@ -313,7 +313,7 @@ static final List<String> PROTECTION_KEYS =
    要么把这一项改回正值（**等于撤 10b 的一部分**）。**两条路都不能偷偷做**，属待裁。
 5. **「线程池分池（订单 / 事件 / SSE / MQ）」—— 四个里只有「订单」今天真的是池。**
    事件环并入跑在 **SSE 流线程**上（`EventBroadcaster.add` 只由 `poll()` 调，
-   `poll()` 由流线程驱动 ⇒ **没人开日志页，事件就不落库**，`EventBroadcaster.java:176-182` 逐字）；
+   `poll()` 由流线程驱动 ⇒ **没人开日志页，事件就不落库**，`EventBroadcaster.java:221` 逐字）；
    SSE 的推流线程是**容器的异步线程**；MQ 是**监听容器线程**（今天单并发）。
    ⇒ 「分池」在 SSE / MQ 两处其实是「**新建池或限并发**」，与「订单池（已存在）」不是同一种活。
 
@@ -371,3 +371,98 @@ static final List<String> PROTECTION_KEYS =
   与 `progress.md` 同节；帧字段清单见 `api-contract.md#api-h-2` 与 `#api-h-3`。
 - 攻击面契约原文：`api-contract.md#api-h-1`（五出口）· `#api-h-6`（`X-Drill-Batch` 出站头）。
 - MQ 链路的**为什么**（每一处拓扑取舍）：`observe/mq/RabbitObserveConfig.java` 类注释（**逐行读它**）。
+
+## 落地登记（2026-10-15 · D 段 commit 2〈后端防护接闸〉） {#pack-c3-block-d-hardening-landed}
+
+⚠️ 本节**不改本 pack 的任何结论**，只做两件事：① 把**被本笔顶偏**的行号重指到现址（本节以下的行号
+一律是**本笔落定后**实测）；② 把**被本笔弄失真**的原文逐处标注（改的时候别只改一处）。
+
+### 落码面 —— pack 预测 vs 实际
+
+| pack 里说要动的 | 实际 |
+|---|---|
+| ⑤ 第 9 类事件环 | 枚举 `EventBroadcaster.java:132-142`（第 9 项 `PROTECTION`）· 新源环 `observe/metrics/ProtectionMetrics.java` · 并入段 `ingestProtection` `:474-495`（`poll()` 里的调用 `:274`） |
+| ⑤ 落库 | `ObservedEventDao` **一行没改**（`KIND_MAX = 16` ≥ `"protection"` 的 10 字符，另两处与 kind 取值无关） |
+| ⑤ 数据 / 文档 | `mall_management_sql.sql:1868` 与 `db-schema.md` §16-1 的 8 名清单**各补上 `protection`**（同行替换，净 0 行） |
+| ⑥ 五键 | `AttackEngine.PROTECTION_KEYS` **未动**（只读）；接闸口径 = **3 键接闸 + 1 键登记 TD-74 + 1 键记录位**，判据落在新建的 `protect/ProtectionGate`（`KEYS` / `WIRED_KEYS`） |
+| ⑥ 面板 | 三枚可拨；`retry` / `degrade` **标灰 + `disabled` + `aria-disabled` + 逐枚 tooltip**（禁止死控件） |
+| ⑦ 重试 | **未落码** —— 只登记 **TD-74**（本笔没有 `@Retry` / retry 依赖） |
+| ⑧ 熔断 | `mallMysqlRead` / `mallMysqlWrite` 两个实例；Redis / MQ 不加（手写熔断已在，登记 **TD-75**） |
+| ⑨ 3「帧读数要反映防护」 | **未做** ⇒ 帧里的 `protections` 读数仍是 8 条（见下「未还项」） |
+
+### 行号重指表（**本笔顶偏的 33 条引用**，同行替换、净 0 行）
+
+⚠️ 数法：本表**逐条列引用**（不是列行）⇒ 合计 **33 条**。其中**扫描器看得见 22 条**（`refs-diff.mjs` 的
+LOST∩NEW 逐条可指认，本节以下给的就是它们的旧 → 新）· **扫描器看不见 11 条** —— 两处：
+`observe-labels.js` 五处 + 原 `:315-319`（**6 条**，见 `:142` / `:161` 两行）与 `AttackConsole.vue` 五处
+（**5 条**，见 `:159-160` 行）；判据同一条：那些行里只有**裸续引**、没有「有名 token」，`refs-scan.sh`
+按「无主裸续引」丢弃 ⇒ **那 11 条是手工重指的**（22 + 11 = 33）。
+
+| 本 pack 行 | 引用 | 旧 → 新 |
+|---|---|---|
+| `:133` `:139` | `EventBroadcaster.java` 枚举 | `111-119` → **`132-140`** |
+| `:135` | 同上（`tag` / `label` 两项） | `121-124` → **`144-147`** |
+| `:139` | 源 metrics 字段 | `173-180` → **`199-206`** |
+| `:139` | 构造器形参 | `200-218` → **`233-253`** |
+| `:139` | `poll()` 里加调用 | `229-240` → **`264-276`** |
+| `:139` | 既有 8 段 `ingestXxx` | `294-435` → **`330-471`** |
+| `:142` | `observe-labels.js` 五处（**扫描器看不见**：同行无「有名 token」，`refs-scan.sh` 把它当无主裸续引丢掉） | `24` / `34-43` / `56-65` / `90-122` / `154-163` → **`27` / `37-47` / `63-73` / `98-135` / `168-180`** |
+| `:143` | `EventBroadcasterTest.java` / `EventStreamServiceTest.java` | `63` / `78` → **`68`** / **`81`** |
+| `:158` | `DrillRecordService.java` 落库点 | `100` → **`109`** |
+| `:161` `:162` | `observe-labels.js` 三处（`:315-319` 同样**扫描器看不见**） | `257` / `260-266` / `315-319` → **`274`** / **`277-283`** / **`360-364`** |
+| `:159-160` | `AttackConsole.vue` 面板五处（⚠️ **同 `:142`：这五条也是裸续引 ⇒ 扫描器看不见、手工重指**） | `117-136` / `123` / `613` / `663-669` / `982` → **`122-145`** / **`128`** / **`624`** / **`674-692`** / **`1005`** |
+| `:169` `:266` | `AttackConsole.vue` 两处文案 | `119` → **`124`**；`:129` → **`134`** |
+| `:189` | `OrderService.java` 四个 `runLocked` | `369` / `1169` / `1188` / `1225` → **`379`** / **`1179`** / **`1198`** / **`1235`** |
+| `:205` | `DrillRecordService.java` 两处 | `187-189` / `37-38` → **`213-215`** / **`38-39`** |
+| `:296` | record 定义 | `168-170` → **`194-196`** |
+| `:303` | `@param traceId` 那句 | `160-162` → **`186-188`** |
+
+### 两处「原值在取点当天就已偏」的引用（本笔**订正**，不是平移）
+
+| 本 pack 行 | 引用 | 取点当天真值 | 现址 |
+|---|---|---|---|
+| `:296` | `EventBroadcaster.java` 的**原 652 行**（所述内容 = `cursor.getAndIncrement()`） | 实为 **654**（原值差 2 行） | **`767`** |
+| `:316` | `EventBroadcaster.java` 的**原 176-182 行**（所述内容 = 「`poll()` 由流线程驱动…」那句） | 实为 **188**（原值那一带是 metrics 字段，不是那句话） | **`221`** |
+
+⚠️ 为什么这两条**订正**而不是「只登记」：本笔把它们的偏差从 2 行 / 6-12 行放大到 **113 行 / 43 行**
+（目标整体下移）⇒ 保留原样已经没有「快照」的意义；而两处的所指由上下文逐字可定（一条是代码、
+一条是原句），故按实测真值改。
+
+### 本笔**只登记、不改**的两条（本笔没让它们更差）
+
+| 本 pack 行 | 引用 | 实测真值 |
+|---|---|---|
+| `:76` | `pom.xml` 的**原 150-159 行**（MQ 依赖那段注释块） | **`149-157`**（原值起点 +1、终点 +2） |
+| `:77` | `pom.xml` 的**原 159-162 行**（`spring-boot-starter-amqp`） | **`158-161`**（原值整体 +1） |
+
+⚠️ 本笔的 pom 改动是**纯尾插**（`@@ -161,0 +162,27 @@`）⇒ 上面这两段的行号**没有移动**，
+故按 `agent.md`「代码引用是快照，漂了不追」与全仓同批口径（其余 8 个文件里的陈旧引用一律只登记）
+处理。**要改的话请单独一笔**，别混进功能笔。
+
+### 被本笔弄失真的原文（共 6 处代码 + 3 处本 pack 自身）
+
+| 文件 | 旧话 | 现话 |
+|---|---|---|
+| `AttackEngine.java:160`（§八 标题） | 「本笔只收下、只记录，不实现」 | 「D 段 commit 2 起：三键真生效 / 一登记 TD / 一记录位」 |
+| `AttackEngine.java:163-164` | 「本笔一条防护逻辑都不实现」 | 「本类一条防护逻辑都不实现 …… 真闸在 D 段 commit 2 落地」 |
+| `AttackEngine.java:320`（分节横幅） | 「本笔只收下、只记录」 | 「本类只收下、只记录；真闸在 `ProtectionGate`」 |
+| `AttackEngine.java:325-328`（`PROTECTION_KEYS` 类注释） | 「本笔只负责把它们收下来 …… 一条防护逻辑都不实现」 | 「本类只负责收下来 …… 口径 3 键接闸 + 1 键登记 TD + 1 键记录位」 |
+| `AttackEngine.java:1652-1653`（`/attack/run` 响应里的 `Engine.Notes`） | 「Protections 五个开关本笔只记录不实现（防护在 D 段）」 | 「五枚里三枚真生效 …… `retry` 只登记 TD-74、`degrade` 只作记录位 ⇒ 面板上不可开关」 |
+| `AttackController.java:111`（`@param protections`） | 「本笔只记录不实现（防护逻辑在 D 段）」 | 「D 段 commit 2 起真生效：三键接闸；`retry` 只登记 TD-74、`degrade` 只作记录位」 |
+| `AttackConsole.vue:510-512`（SFC 文档块） | 「5 个防护开关 …… 本笔只收下、只记录、不实现」 | 「防护那组自 D 段 commit 2 起三键真生效 …… 另两枚画成不可开关」 |
+| 本 pack `:17`（一句话定位） | 「五个开关**今天只记录不实现**」 | 「**在取点当天**只记录不实现」 |
+| 本 pack `:164-169`（三处原话） | 三条原话 + 「D 段做完要逐处改」 | 原文保留为**原话**，各条后面标「**commit 2 已改**」 |
+| 本 pack `:266-267`（B1） | 「必须当笔改」 | 同上，尾注「✅ commit 2 已改」 |
+
+⚠️ `api-contract.md#api-h-1` 的载体表注（§⑥ 第 4 条点名的第四处）**已同笔改**（「⚠️ 只记录不实现」→
+「✅ 已接闸（3 键 + 1 键 TD + 1 键记录位）」，并接上新附录 `#api-i-3`）；`progress.md` 里那句
+「（丁：只记录不实现）」属**commit 10c 那一笔的史料**，按「史料不追」**保持原样**。
+
+### 未还项（**不属本笔，别当成做完了**）
+
+1. **帧读数第 9 条**：§⑨ 第 1 条要的「指标帧要反映防护」**没有做** —— `MetricsSnapshotService`
+   的 `protections(...)` 仍返回**8 条**防护命中（`cacheHit` / `lockTimeout` / … / `identityRejected`），
+   本笔新增的防护动作**只**从帧的 `counts`（第 9 键 `protection`）与 `mall.protection.events` 指标回答。
+   ⇒ 归 **commit 3**（攻防联动那笔要在页面上给出「改读数」的可见后果）。
+2. **`retry`** 见 `tech-debt.md` **TD-74**；**Redis / MQ 不加熔断**的理由见 **TD-75**。
+3. §⑧ 的四条（SSE 连接保护 / MQ 幂等与 DLQ / 无上限列表 / 脱敏）**本笔一条没动** ⇒ 归 commit 3。

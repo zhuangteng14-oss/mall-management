@@ -791,15 +791,15 @@
 
 （合计 **100**；缺省 = 全 8 个按上表权重。）
 
-⚠️ **commit 10c 新增的三个「丁」入参（只在 `/run` 上）—— 别把「能传」当成「已实现」**：
+⚠️ **commit 10c 新增的三个「丁」入参（只在 `/run` 上）—— ⚠️ D 段 commit 2 起 `protections` 真生效了，`injections` 仍只接通一路**：
 
 | 入参 | 形状 | 缺省 | 语义 | 实现状态 |
 |---|---|---|---|---|
 | `targetQps` | 数值串 | `0` = **不限速** | 目标 QPS（`AttackEngine.Pacer` 按它节流，`AttackEngine:390`） | ✅ 已实现 |
-| `protections` | JSON 数组串 | **全开**（`rateLimit` / `circuitBreak` / `degrade` / `retry` / `poolIsolation`） | 面板上「防护开/关」的载体 | ⚠️ **只记录不实现**（`AttackController:110`：防护逻辑在 **D 段**） |
+| `protections` | JSON 数组串 | **全开**（`rateLimit` / `circuitBreak` / `degrade` / `retry` / `poolIsolation`） | 面板上「防护开/关」的载体 | ✅ **已接闸**（**3 键 + 1 键 TD + 1 键记录位** —— 见 `#api-i-3`；后两枚在面板上**不可开关**；入参口径见 `AttackController:111`） |
 | `injections` | JSON 数组串 | **全关**（`redisDown` / `mqDown` / `dbSlow`） | 故障注入开关 | ⚠️ 只有 `redisDown` **真接通**（`AttackController:112`） |
 
-⇒ `protections` 传了也只是写进 `drill_record`，**关掉它不会让任何防护真的停**；`injections` 里只有 `redisDown` 会真起作用。两者**都先落成契约面**（传得进来、记下来了），语义落地归 D 段 —— 这一条是**如实登记**，不是遗漏。
+⇒ `protections` **现在真的会改读数**：勾中的开着、没勾的一律关掉，跑完复位全开（`DrillRecordService` 的 `finally`）。⚠️ 但**不是五枚都有闸** —— `retry`（本段不落码，TD-74）与 `degrade`（记录位）**拨了也没有对应行为**，故面板把它们画成不可开关（见 `#api-i-4`）。`injections` 里仍只有 `redisDown` 会真起作用。这一条是**如实登记**，别读成「五枚全接通了」。
 ⚠️ **`targetQps` 与 `concurrency` 测的不是同一件事**：前者是**发射速率**（每秒发多少个），后者是**同时在途上限**（`permits = min(concurrency, in-flight-cap)`）。「档位 120 / 400 / 拉满」调的是前者。
 
 ⚠️ **五条端点一律 `@RequestParam`（+ 一个 JSON 串参数），不用 `@RequestBody`** —— 三条理由任一条都成立：① 全仓管理端写端点**全部**收 `@RequestParam`、前端一律 `URLSearchParams`（`http.js#buildInit` 把 POST 钉成 urlencoded）；② 否则**前端发不出去**（`http.post` 没有自定义头的口子 ⇒ JSON body 到不了 `@RequestBody`）；③ 「勾选 + 权重」这种嵌套结构沿用 `orderAdd` 的既有先例（一个 JSON **数组串**参数，同 `Items`）。
@@ -899,3 +899,88 @@
 
 ⚠️ **播法由前端定**：拿到 JSON 后**按 `OccurredAt` 严格按原时间戳撒点** —— 不是一次性刷出来，也不是按数组下标均匀撒。
 ⚠️ **UI 上明说这句**：**「回放数据来自「当时开着日志页的演练」」** —— 因为台账的已知边界（见 **H.7** 那条：`poll()` 由 SSE 流线程驱动、**没人打开日志页就不落库**）⇒ 回放**只能**放得出「当时有人在看」的批次。这句是**如实告知**，不是免责声明。
+
+## 附录 I：D 段〈防护加固〉契约增补（commit 2，2026-10-15） {#api-app-i}
+
+⚠️ 本附录记的是**全站契约面**的变化 —— 与前七个附录不同，D 段**没有新端点**，它动的是
+「**所有端点的外面那一层**」：一个新增的状态码（429）、一个新增的事件 kind（`protection`）、
+以及一个**已有入参的语义从「只记录」变成「真生效」**。
+
+### I.0 三个「数」要分开读（口径注，别互抄） {#api-i-0}
+
+| 数 | 值 | 出处 |
+|---|---|---|
+| 新端点 | **0** | 本段一行 Controller 都没加（限流/熔断/分池都在既有点位**外面**） |
+| 新增**入站状态码** | **1**（`429`） | I.1 |
+| 事件 kind | **8 → 9**（第 9 类 `protection`） | I.2 |
+| 真接闸的防护开关 | **3**（+1 键登记 TD +1 键记录位） | I.3 |
+
+### I.1 全站新增 `429`：入站限流 {#api-i-1}
+
+| 项 | 口径 |
+|---|---|
+| 谁答的 | `InboundRateLimitInterceptor`（挂 `/**`，`ProtectConfig` 注册，order = `Ordered.HIGHEST_PRECEDENCE`）—— **不是**任何 Controller |
+| 什么时候 | 令牌桶空（阈值 **200 条 / 秒**，**等待 0** ⇒ 不排队、当场答）。⚠️ 「不排队」由 `timeoutDuration=0` 保证，不由方法名保证（`ProtectConfig.TIMEOUT`） |
+| 响应 | `429` + `application/json;charset=UTF-8`，体 `{"success":false,"msg":"请求过于频繁：入站限流每 N 秒放行 M 条，这一拍没有余量，请稍后重试"}` —— **形状与 `Result.fail(msg)` 逐字同款**（前端 `http.js` 的失败分支读的就是 `success` / `msg`） |
+| 白名单（**6 条**） | `/health/**` · `/actuator/**` · `/error` · `/img/**` · `/favicon.ico` · `/admin/observe/**` |
+| ⚠️ 第 6 条为什么在 | 观测域整段豁免：面板的〔暂停〕打的是 `/admin/observe/attack/stop`，闸一开、演练一满档，这条控制请求会和演练自己的流量抢同一桶令牌 ⇒ **「演示现场按不动停止按钮」**。⚠️ 它**不放宽任何业务面**（八条业务端点一条都没进白名单） |
+| 已知缺口（如实记） | ① **拦截器不覆盖「没匹配到 handler」的请求**（404 在 `DispatcherServlet` 找 handler 时就结束了）⇒ 拿不存在的路径刷量**不计数、不拦**；② **异步分派会让 `preHandle` 再跑一次** ⇒ 一条 SSE 流占两个令牌（三条流页均 3 条，数量级上不可见） |
+| 前端 | **零改动** —— 429 走既有的失败分支（`http.js` 已把非 2xx 转成 `HttpError` 并带 `msg`） |
+
+### I.2 第 9 类事件 kind：`protection` {#api-i-2}
+
+| 项 | 口径 |
+|---|---|
+| 在哪儿 | SSE 帧 `counts` 里多一个键 `protection`（**8 → 9**）；`EventLog.vue` 的过滤类自动多一格（`v-for="k in KINDS"`） |
+| 记什么 | **防护层自己做了什么**：限流拦下 / 熔断开路 / 熔断半开 / 熔断恢复 / 池挤出 |
+| 指标 | `mall.protection.events{protection=…, result=…}` —— `protection` 五值、`result` 五档（`blocked` / `opened` / `half_open` / `closed` / `shed`），**两列都有界**；⚠️ `scope` 与 `detail` **绝不进 tag**（`detail` 是自由文本，含路径与异常类名） |
+| 明说不埋的 | **不埋「放行了多少」** —— 那是「到达量 − 拦下量」的派生量，到达量由 `http.server.requests` 回答（规范第 6 条：可派生的值不重复埋点） |
+| 三处写入点 | `InboundRateLimitInterceptor`（429）· `ProtectionMetricsBinder`（订阅 `CircuitBreaker` 的状态事件流）· `ObservePoolConfig` 的拒绝策略（池挤出） |
+| ⚠️ 半开恢复**为什么有记录** | 因为它挂在 `getEventPublisher()` 上，而不是散在调用点上的日志 —— 三档翻转（打开 / 半开 / 恢复）**不是业务代码触发的**，可能由 r4j 自己的线程在**没有任何请求**时完成 |
+
+### I.3 `protections` 入参：从「只记录」变成「真生效」（**3 键 + 1 键 TD + 1 键记录位**） {#api-i-3}
+
+| key | 本段状态 | 闸在哪 | 关掉它的后果 |
+|---|---|---|---|
+| `rateLimit` | ✅ 接闸 | 入站限流（I.1，200 QPS） | 没有闸：整站按后端能力吃满 |
+| `circuitBreak` | ✅ 接闸 | 关键下游熔断（I.5） | 没有熔断：MySQL 慢/挂时请求照打下去 |
+| `poolIsolation` | ✅ 接闸 | 观测池分池（有界 ↔ **无界**） | 回到无界池：观测面的任务不再被挤 |
+| `retry` | ❌ **不落码** | 无 | **没有后果** —— 本段一行重试代码都没有（登记 **TD-74**） |
+| `degrade` | ➖ **只记录** | 无（系统固有 fail-open） | **没有后果** —— 缓存 L2 回落 / 锁 fail-open / MQ 缺席 / 审计 fail-open 本来就存在，不由这个开关管 |
+
+⚠️ **口径**：本段是 **3 键接闸 + 1 键登记 TD + 1 键记录位**。**不许**写成「4 键已接闸」或「5 键里 4 键已接闸」。
+⚠️ **写入时机**：`DrillRecordService` 在 `attackEngine.run(...)` **之前**写入、在 `finally` 里复位成**全开** —— 不复位就等于「这一轮把限流关掉」这件事越过那一轮留在进程里。
+⚠️ **缺省口径的唯一换算点**：入参缺省是**全开**，而 `ProtectionGate.apply(null)` 的语义是**全关** ⇒ `DrillRecordService` 是这两者之间**唯一**的换算处（`protections == null ? ProtectionGate.KEYS : protections`）。
+
+### I.4 面板：两枚**不可开关**（不是死控件，也不是藏起来） {#api-i-4}
+
+| 项 | 口径 |
+|---|---|
+| 哪两枚 | `retry`（重试）/ `degrade`（降级）—— 判据来源 `ProtectionGate.WIRED_KEYS` 的镜像 `PROTECTIONS_NOT_WIRED` |
+| 画法 | **标灰**（`opacity .7`、虚线边、`cursor: default`）+ `disabled` + `aria-disabled="true"` + 一枚**可见的**「不可开关」角标 |
+| 说明 | `title`（tooltip）**逐枚不同**：`degrade` = 「记录位，不可开关，系统固有 fail-open 设计」；`retry` = 「本段不落码：只登记 TD-74（…）」 |
+| ⚠️ 为什么不是「藏起来」 | 藏起来会让「面板上少了一枚」与「这一笔忘了做」读起来一样 |
+| ⚠️ 为什么不能是「能拨但没效果」 | 用户 2026-10-15 明令：**禁止死控件**。⇒ 模板 `disabled` + JS 里 `toggleProtection` 的守卫**两道都要有**（只画灰的话，模板一改就漏） |
+| 证据 | 探针 `scripts/probes/probe-d2-locked-switches.mjs`（21 项，含「抠掉 `disabled` 再点仍不变」）+ 截图 `docs/agent/evidence/c3-block7/d2-protection-switches.png` |
+
+### I.5 熔断：两个实例，**只挂 MySQL 这一条下游** {#api-i-5}
+
+| 项 | 口径 |
+|---|---|
+| 实例 | `mallMysqlRead` / `mallMysqlWrite`（**按读 / 写分开**：演练灌的是读，「读被打开时写仍能过」是可演示的收益） |
+| 落点 | `GoodsService` **5 处**（读 2：`goodsSelectHome` / `productSearch`；写 3：`goodsAdd` / `goodsDe` / `goodsUp`）+ `OrderService.orderAdd` **1 处** —— **跨域**（裁定禁止「只挂订单 / 支付」） |
+| ⚠️ 为什么不挂 Controller | 本仓有结构断言钉死「Controller 不得被 AOP 代理」（`MallManagementApplicationTests#goodsControllerIsNotAopProxied`），且裁定明禁「把熔断挂到入站层」—— 两条指向同一件事：熔断要挂在**看得见下游**的那一层 |
+| 阈值 | 错误率 **50%** · `TIME_BASED` 窗口 **30s** · 最小请求数 **20** · 半开 **放 5 个** · 打开后等 **30s** · **慢调用**（≥1s）也算失败（50%）· `IllegalArgumentException` 不计入 |
+| 切面顺序 | r4j 的 `CircuitBreakerAspect` order = `2147483643`（= `Integer.MAX_VALUE - 4`）< 事务切面 `MAX` ⇒ **熔断在外、事务在内**：开路时连事务都不会开。⚠️ 这是**实测值**，不是「应该在外层」 |
+| ⚠️ 为什么不挂 Redis / MQ | 那两条**本仓已有手写熔断**（`RabbitEventPublisher` 的 `connected` 闸 + 探测线程；`DistributedLockService` 的 cooldown + `L2HealthProbe`）⇒ 再叠一层是重复造。见 **TD-75** |
+| 证据 | `ProtectionThresholdsTest`（阈值逐条）+ `CircuitBreakerWiringTest`（挂载点逐个）+ `ProtectionMetricsBinderTest`（真熔断器的三档翻转与「被拦」记录） |
+
+### I.6 前端封装增补 {#api-i-6}
+
+**零新增 API 封装**（没有新端点）。改的是三处**表**与一处**模板**：`observe-labels.js` 的
+`KINDS` / `KIND_LABEL` / `KIND_COLOR` / `KIND_ICON` / `OBJECT_FIELD_LABEL`（各多一条 `protection`）
++ 新增 `PROTECTIONS_NOT_WIRED` / `PROTECTION_NOT_WIRED_TIP` / `protectionWired` / `protectionNotWiredTip`；
+`AttackConsole.vue` 的防护开关那一排（I.4）。
+
+⚠️ **色 token 用的是既有的 `--c9`**（`assets/tokens.css` 的浅色 `:201` / admin `:301` 早就定义了，两套主题同值）
+⇒ **本笔没有动 `tokens.css`**（动了就会让那两处引用漂移）。

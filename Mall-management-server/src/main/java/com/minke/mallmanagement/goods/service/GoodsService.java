@@ -2,6 +2,7 @@ package com.minke.mallmanagement.goods.service;
 
 import com.minke.mallmanagement.goods.dao.GoodsDao;
 import com.minke.mallmanagement.shared.upload.UploadStorage;
+import io.github.resilience4j.circuitbreaker.annotation.CircuitBreaker;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -136,6 +137,20 @@ public class GoodsService {
      * 本方法保留 {@link Transactional}（覆盖「落盘 + 写提审单」），catch 内仍须
      * {@link #markRollbackOnlyIfActive()}。
      */
+    // ==================== D 段 · commit 2：熔断（本类 5 处，读 2 / 写 3）====================
+    //
+    // 下面是本仓**唯一**一条「看见 MySQL 状态」的防线。三条口径写在明处：
+    //  ① 分读 / 写两个实例（`mallMysqlRead` / `mallMysqlWrite`）：演练灌的是读，而写要保住 ——
+    //     「读被熔断打开时写仍能过」是可演示的收益，合成一个实例就没了。
+    //  ② ⚠️ **不能挂 Controller**：本仓有结构断言钉死「Controller 不得被 AOP 代理」
+    //     （`MallManagementApplicationTests#goodsControllerIsNotAopProxied`），而且裁定也明禁
+    //     「把熔断挂到入站层」。这两条指向同一件事：熔断必须挂在**能看见下游**的那一层。
+    //  ③ ⚠️ 注解**写在 `@Transactional` 上面**只是可读性；真正的先后由切面 order 决定，而它是
+    //     **实测**过的：CircuitBreakerAspect 默认 order 2147483643（MAX-4）< 事务切面的 MAX
+    //     ⇒ 熔断在外、事务在内，**开路时连事务都不会开**。别把这一行当成「顺序由书写决定」。
+    // 参数（错误率 50% / 30s 窗口 / 半开 30s 放 5 个 / 最小请求数 20 / 慢调用 1s）全在
+    // `application.properties` 的 `resilience4j.circuitbreaker.configs.default.*`，不在本类。
+    @CircuitBreaker(name = "mallMysqlWrite")
     @Transactional
     public Map<String, Object> goodsAdd(
             String MerchantId,
@@ -234,6 +249,7 @@ public class GoodsService {
     }
 
     /** 客户端首页商品列表。**委托 + 响应组装** —— 注解与 {@code SELECT *} 都在 {@link GoodsCacheService#listHome}。 */
+    @CircuitBreaker(name = "mallMysqlRead")
     public Map<String, Object> goodsSelectHome() {
         try {
             return goodsCacheService.listHome();
@@ -351,6 +367,7 @@ public class GoodsService {
      * {@link Transactional}；DB 块的 catch 内**必须**调 {@link #markRollbackOnlyIfActive()}，
      * 否则「删了 goods、没删 productsales」会留在库里。
      */
+    @CircuitBreaker(name = "mallMysqlWrite")
     @Transactional
     public Map<String, Object> goodsDe(
             String MerchantId,
@@ -400,6 +417,7 @@ public class GoodsService {
      * {@link Transactional}；DB 块的 catch 内**必须**调 {@link #markRollbackOnlyIfActive()}，
      * 否则「改了 goods 名、没改 productsales 名」会留在库里（两表名不一致）。
      */
+    @CircuitBreaker(name = "mallMysqlWrite")
     @Transactional
     public Map<String, Object> goodsUp(
             String MerchantId,
@@ -468,6 +486,7 @@ public class GoodsService {
      * <p>⚠️ {@code keyword == null ⇒ ""} 这条归一**留在本类**：它是入参规则，不是 SQL
      * （DAO 侧要求非空）。原方法体就是这么分的。
      */
+    @CircuitBreaker(name = "mallMysqlRead")
     public Map<String, Object> productSearch(String keyword) {
         Map<String, Object> result = new HashMap<>();
         try {

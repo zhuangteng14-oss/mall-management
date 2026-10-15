@@ -157,11 +157,11 @@ import java.util.concurrent.atomic.AtomicLong;
  * ⚠️ 因此登记一条**行为变更**：{@code concurrency} 这个入参的含义从「线程数」收紧成
  * 「在途上限（且不超过 {@link #inFlightCap}）」—— 同一个 500 并发不再意味着 500 条线程。
  *
- * <h2>【八、丁：防护 / 注入开关（本笔只收下、只记录，不实现）】</h2>
+ * <h2>【八、丁：防护 / 注入开关（D 段 commit 2 起：三键真生效 / 一登记 TD / 一记录位）】</h2>
  * {@code /attack/run} 新增两个入参（{@code protections} / {@code injections}），它们成为
  * {@code drill_record.Scenario} 的一部分 ⇒「这一轮是按哪套开关跑的」**可复现**。
- * ⚠️ 但<b>本笔一条防护逻辑都不实现</b>：{@code protections} 五个开关后端只读、只记、只打日志，
- * 「限流 / 熔断 / 降级 / 重试 / 分池」的落地属 D 段（硬边界 A：加固与补救都在 D 段）。
+ * ⚠️ 但<b>本类一条防护逻辑都不实现</b>：{@code protections} 五个开关在本类只读、只记、只打日志，
+ * 真闸在 D 段 commit 2 落地，口径是 **3 键接闸 + 1 键登记 TD-74 + 1 键记录位**（见 {@code ProtectionGate}）。
  * 三个注入里**只有 {@link #INJECTION_REDIS_DOWN} 真接通**（复用 {@code L2HealthProbe} 那套现成原语，
  * 见类注释四）；{@code mqDown} / {@code dbSlow} 收得下、记得住，但没有任何实现
  * —— 结果里会把它们列进 {@code NotWired}，免得看数字的人以为它们生效了。
@@ -317,15 +317,15 @@ public class AttackEngine {
         }
     }
 
-    // ==================== 丁：防护 / 注入开关（本笔只收下、只记录）====================
+    // ============= 丁：防护 / 注入开关（本类只收下、只记录；真闸在 ProtectionGate）=============
 
     /**
      * 五个**防护开关**的 key（丁的开关面板，用户 2026-10-14 定稿：默认全开）。
      *
-     * <p>⚠️ <b>本笔只负责把它们「收下来、记进演练记录、打进日志」，一条防护逻辑都不实现</b>
+     * <p>⚠️ <b>本类只负责把它们「收下来、记进演练记录、打进日志」—— 真闸不在这里</b>
      * —— 硬边界 A 逐字是「加固（扩池 / 扩线程 / 优化慢 SQL）与补救（限流 / 熔断 / 降级 / 重试）
-     * 都在 D 段」。这里存在的作用是**接口位**：开关先成为 {@code drill_record.Scenario} 的一部分
-     * （于是「这一轮是按哪套开关跑的」可复现），D 段再让它们真的接上闸。
+     * 都在 D 段」。D 段 commit 2 的接闸口径是 **3 键接闸 + 1 键登记 TD + 1 键记录位**（限流 / 熔断 /
+     * 分池真生效，{@code retry} 见 TD-74，{@code degrade} 只作记录位）⇒ **别读成「五枚都接上了」**。
      */
     static final List<String> PROTECTION_KEYS =
             List.of("rateLimit", "circuitBreak", "degrade", "retry", "poolIsolation");
@@ -1649,8 +1649,8 @@ public class AttackEngine {
                         + "Requests/Passed/Blocked/Failed 任何一档 —— 记 failed 是撒谎",
                 "Abandoned = 收尾宽限 " + GRACE_SECONDS + "s 用尽后被**取消**的在途请求。"
                         + "同样不并入任何一档：那条请求可能已经在服务端跑完了，只是响应没等到",
-                "Protections 五个开关本笔**只记录不实现**（防护在 D 段）；"
-                        + "Injections 里只有 redisDown 真接通"));
+                "Protections 五枚里**三枚真生效**（rateLimit / circuitBreak / poolIsolation，D 段 commit 2）；"
+                        + "retry 只登记 TD-74、degrade 只作记录位 ⇒ 面板上不可开关；Injections 里只有 redisDown 真接通"));
         out.put("Engine", engine);
 
         List<String> notes = new ArrayList<>();

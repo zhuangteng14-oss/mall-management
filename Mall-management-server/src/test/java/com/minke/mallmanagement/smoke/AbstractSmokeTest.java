@@ -25,6 +25,8 @@ import com.minke.mallmanagement.observe.metrics.AuditMetrics;
 import com.minke.mallmanagement.observe.metrics.NotifyMetrics;
 import com.minke.mallmanagement.observe.metrics.SensitiveMetrics;
 import com.minke.mallmanagement.observe.metrics.IdentityMetrics;
+import com.minke.mallmanagement.observe.metrics.ProtectionMetrics;
+import com.minke.mallmanagement.protect.ProtectionGate;
 import com.minke.mallmanagement.observe.service.SseStreamWriter;
 import com.minke.mallmanagement.observe.service.EventBroadcaster;
 import com.minke.mallmanagement.observe.service.MetricsSnapshotService;
@@ -410,7 +412,24 @@ import static org.mockito.Mockito.when;
         //    `public static final`，没有配置项要喂）。`ReplayController` 只吃 `ReplayService`。
         // ⚠️ `ObservedEventDao` 是**本笔第一次**进这个清单（8c 那笔只登记了它的兄弟
         //    `ObservedEventCleanupDao` —— 写类一次、读类一次，两者不是同一个 bean）。
-        ObservedEventDao.class, ReplayService.class})
+        ObservedEventDao.class, ReplayService.class,
+        // C3 块 7 · D 段 commit 2〈D 段后端防护〉（2026-10-15）：**零新 Controller**，但有两个
+        // **既有** bean 的构造器各多了一个形参 ⇒ **第二十一次同一处地雷**，形状与〈5 套新事件环〉
+        // 那笔逐字相同（「既有 bean 多吃一个 bean」，最隐蔽的那一种）。
+        // ⚠️ 报错形状（真漏了的话）：整片切片上下文在加载期起不来，报错链会指向**老 bean**
+        //    （`drillRecordService → ProtectionGate` / `eventBroadcaster → ProtectionMetrics`），
+        //    而不是指向本笔新加的两个类 —— 与 8b 那笔的坑同一个（判据见那里那句：
+        //    「本笔有没有新 @Service/@Dao」，本笔两个都不算 @Service，是 @Component 环与状态位）。
+        // ⚠️ `ProtectionGate` 是 `@Component`（切片不扫），`DrillRecordService` 的构造器现在收它；
+        //    `ProtectionMetrics` 是第 9 类事件环，`EventBroadcaster` 的构造器现在收它。
+        //    两个都只吃 `MeterRegistry` / 无参 ⇒ `SimpleMeterRegistry` 上面已登记（那一笔的注释解释了
+        //    为什么切片必须补一个内存实现），这里**不重复**。
+        // ⚠️ **刻意不 @Import `ProtectConfig` / `ObservePoolConfig` / `ProtectionMetricsBinder`**：
+        //    前两个是 `WebMvcConfigurer`（**切片本来就会扫到**，不需要登记），且它们全部依赖走
+        //    `ObjectProvider` ⇒ 切片里取不到就空转（理由写在两个类的类注释里）；
+        //    第三个是普通 `@Configuration`（切片不扫，与 `RabbitObserveConfig` 同款）⇒ 它不进切片，
+        //    **也正因如此切片里不需要 `CircuitBreakerRegistry`**。三处都不登记是有意的，别「补齐」。
+        ProtectionGate.class, ProtectionMetrics.class})
 public abstract class AbstractSmokeTest {
 
     @Autowired

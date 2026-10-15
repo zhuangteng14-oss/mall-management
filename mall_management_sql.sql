@@ -1865,7 +1865,7 @@ PREPARE _p FROM @s; EXECUTE _p; DEALLOCATE PREPARE _p;
 -- ---- ⑲-1 八环事件落库台账（写入方 = 8c 的 MQ consumer；本笔只建表）----
 CREATE TABLE IF NOT EXISTS `observed_event` (
   `Id`          bigint NOT NULL AUTO_INCREMENT COMMENT '自增主键',
-  `Kind`        varchar(16) NOT NULL COMMENT '事件所属环：cache / lock / order / stock / audit / notify / sensitive / identity（对齐前端 KIND_LABEL）',
+  `Kind`        varchar(16) NOT NULL COMMENT '事件所属环：cache / lock / order / stock / audit / notify / sensitive / identity / protection（对齐前端 KIND_LABEL；第 9 类 `protection` 由 D 段 commit 2 加，2026-10-15）',
   `Severity`    varchar(16) NOT NULL DEFAULT 'info' COMMENT '严重度：info / warn / error（对齐前端 SEVERITY_LABEL）',
   `Title`       varchar(255) NOT NULL DEFAULT '' COMMENT '事件标题（一句话，含业务键时由后端截断）',
   `ObjectType`  varchar(32) DEFAULT NULL COMMENT '对象类型（审计=TargetType / 敏感词=命中的词 / 身份=请求路径 等）；无则 NULL',

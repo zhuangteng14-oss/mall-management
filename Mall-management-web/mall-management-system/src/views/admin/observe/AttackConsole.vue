@@ -105,18 +105,23 @@
         </button>
       </div>
 
-      <!-- ── ③c 防护 / 注入开关（丁 · commit 10c）────────────────────────────────
-           ⚠️ **本笔只收下、只记录、不实现**（硬边界 A：限流 / 熔断 / 降级 / 重试 / 分池的落地在
-              D 段）⇒ **拨这两组开关不会改变这一轮的读数**。这句话必须写在页面上：不写的话，看到
-              「拦下变多了」的人会以为是刚打开的限流起了作用。
-           ⚠️ 两组开关都进 `drill_record`（后端 `AttackEngine.buildScenarioJson` 写进 `Result.Engine`）
-              ⇒ 「这一轮到底是按哪套开关跑的」事后可复现 —— 这才是本笔给它们的**唯一**作用。
+      <!-- ── ③c 防护 / 注入开关（丁 · commit 10c；D 段 · commit 2 起分化）────────────
+           ⚠️ 【D 段起：这五枚**不再一样**，逐档说清】后端 `ProtectionGate` 的口径是
+              **3 键接闸（限流 / 熔断 / 分池）+ 1 键登记 TD（重试）+ 1 键记录位（降级）**：
+                · 有闸的三枚（限流 / 熔断 / 分池）—— **拨了真的改读数**，这就是 D 段的演示点；
+                · `retry` / `degrade` 两枚 —— 面板上**标灰 + 不可开关 + tooltip 说理由**
+                  （理由见 `PROTECTIONS_NOT_WIRED` / `PROTECTION_NOT_WIRED_TIP`，两枚不同）。
+              ⚠️ **禁止死控件**（用户 2026-10-15 逐字）：能点但无效果的开关一律不允许 ⇒
+              两枚一律 `disabled`（不是「拨得动但标未接通」——那是注入那组的处置，
+              那组**真的会进引擎并写进记录**，这两枚不会改变任何读数，形状不同就该长得不同）。
+           ⚠️ 五枚都照旧进 `drill_record`（后端 `AttackEngine.buildScenarioJson` 写进 `Result.Engine`）
+              ⇒ 「这一轮到底是按哪套开关跑的」事后可复现仍是它们的价值之一。
            ⚠️ 缺省 = 防护**全开** / 注入**全关**（后端白名单：表外的 key 一律 400，不静默忽略）。
            ⚠️ 注入里 `mqDown` / `dbSlow` **未接通**：拨得动、进记录，但读数不变 —— 后端把这种
               「收了但没实现」如实列进结果的 `Engine.InjectionsNotWired`（见 `INJECTIONS_NOT_WIRED`）。 -->
       <h3 class="a-sub">
         防护开关
-        <span class="a-subn">默认全开 · 本笔只记录、不改读数（接闸在 D 段）</span>
+        <span class="a-subn">默认全开 · 限流 / 熔断 / 分池已接闸，改读数；重试与降级不可开关</span>
       </h3>
       <div class="a-switches">
         <button
@@ -124,14 +129,18 @@
           :key="k"
           type="button"
           class="a-sw"
-          :class="{ 'is-off': !protections.has(k) }"
+          :class="{ 'is-off': !protections.has(k), 'is-locked': !protectionWired(k) }"
           :aria-pressed="protections.has(k) ? 'true' : 'false'"
-          :title="`${protectionLabel(k)}：${protections.has(k) ? '已开' : '已关'}（点一下拨动）—— 本笔只记录，读数不变`"
-          :disabled="running"
+          :aria-disabled="protectionWired(k) ? 'false' : 'true'"
+          :title="protectionWired(k)
+            ? `${protectionLabel(k)}：${protections.has(k) ? '已开' : '已关'}（点一下拨动）—— 已接闸，读数会变`
+            : `${protectionLabel(k)}：${protectionNotWiredTip(k)}`"
+          :disabled="running || !protectionWired(k)"
           @click="toggleProtection(k)"
         >
           <i class="a-sw-dot" aria-hidden="true"></i>
           <span class="a-sw-n">{{ protectionLabel(k) }}</span>
+          <span v-if="!protectionWired(k)" class="a-sw-locked">不可开关</span>
         </button>
       </div>
 
@@ -498,9 +507,9 @@
   【commit 10c 给本页加的三样东西（丁 · 开关面板）】
     · **压力档位**（120 / 400 / 拉满）—— 值就是 `targetQps`；与「总并发数」是两把各管各的旋钮，
       见 `TIERS` 的注释（「拉满」给的是**不限速**，854 是本机实测的参考量级，不是设出来的目标）；
-    · **5 个防护开关 + 3 个注入开关** —— **本笔只收下、只记录、不实现**（硬边界 A：防护的真正落地
-      在 D 段）⇒ 拨它们**不会改变这一轮的读数**，这句话写在面板上（不写就会被读成「我开了限流
-      所以拦下变多了」）；两组都进 `drill_record` ⇒ 「这一轮按哪套开关跑的」事后可复现；
+    · **5 个防护开关 + 3 个注入开关** —— 防护那组自 **D 段 commit 2** 起**三键真生效**（限流 /
+      熔断 / 分池），另两枚（`retry` 见 TD-74 / `degrade` 只作记录位）**画成不可开关** ⇒ 拨得动的
+      那些会改读数、拨不动的那两枚不下发；两组都进 `drill_record` ⇒ 「这一轮按哪套开关跑的」事后可复现；
     · **`[暂停]`** —— 走 `/attack/stop`，语义是「**停止派发 + 排空在途**」而不是掐断：本轮不再发
       新请求，在途那批走 3 秒宽限，等 `/run` 的**同一个** await 几秒内拿到结果
       （`Engine.Stopped=true`）⇒ 本页不换通路、不加超时。
@@ -549,6 +558,8 @@ import {
   kindLabel,
   PROTECTIONS,
   protectionLabel,
+  protectionNotWiredTip,
+  protectionWired,
   scenarioLabel,
   severityColor,
   severityLabel,
@@ -660,8 +671,20 @@ function setWeight(key, v) {
  */
 const wired = (key) => !INJECTIONS_NOT_WIRED.includes(key)
 
-/** 拨一枚防护开关。写法与 `EventLog.vue#toggleKind` 同款（`new Set(旧)` → 整体替换）。 */
+/**
+ * `retry` / `degrade` 两枚**有没有真闸** —— 判据取自 `PROTECTIONS_NOT_WIRED`（后端
+ * `ProtectionGate.WIRED_KEYS` 的镜像，见 `observe-labels.js` 那张表）。页面**不自己判断**
+ * 哪几枚没接闸（那是后端事实，前端写第二遍迟早对不上）。⚠️ 与 `wired(k)` 是**两个不同的判据**，
+ * 别合并：那个说的是「这一路**注入**接通了没有」，这个说的是「这枚**防护开关**接了闸没有」。
+ */
+const protectionOn = (key) => protectionWired(key)
+
+/** 拨一枚防护开关。写法与 `EventLog.vue#toggleKind` 同款（`new Set(旧)` → 整体替换）。
+ *  ⚠️ 没接闸的两枚**直接不响应**（按钮已经是 `disabled`，这里再兜一道）：这条守卫是
+ *  「禁止死控件」的**落点** —— 让它在代码里**不可能**被拨动，而不是只在模板上画灰
+ *  （模板一改就会漏，比如将来有人把它挪进一个 `v-if` 分支里）。 */
 function toggleProtection(key) {
+  if (!protectionOn(key)) return
   const next = new Set(protections.value)
   if (next.has(key)) next.delete(key)
   else next.add(key)
@@ -1508,6 +1531,28 @@ onBeforeUnmount(() => {
   font-size: var(--fs-xs);
   color: var(--warning);
   border: 1px dashed var(--warning);
+  border-radius: var(--r1);
+  padding: 0 var(--s1);
+}
+/* 「不可开关」的那两枚防护开关（D 段 · commit 2：`retry` = 本段不落码只登记 TD，
+   `degrade` = 记录位）—— **标灰 + 虚线边 + 中性色角标**。
+   ⚠️ 与上面 `.a-sw.is-na`（注入的「未接通」）**不是同一件事**，故另起两条类名，不共用：
+   那个说的是「接通了没有」（**拨得动**，拨动会进记录）；这个说的是「**能不能拨**」（不可开关）。
+   共用一条会让两枚防护开关看起来「也能拨」，而它们的模板 `disabled` 是常开的。 */
+.a-sw.is-locked {
+  border-style: dashed;
+  background: transparent;
+  color: var(--ink-3);
+  opacity: 0.7;
+}
+.a-sw.is-locked .a-sw-dot {
+  background: var(--ink-3);
+}
+/* 「不可开关」的角标 —— **中性灰**（不是 `--warning` 的橙）：它不是警告，是「这一位没有闸」。 */
+.a-sw-locked {
+  font-size: var(--fs-xs);
+  color: var(--ink-3);
+  border: 1px dashed var(--line-2);
   border-radius: var(--r1);
   padding: 0 var(--s1);
 }

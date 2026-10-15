@@ -2,9 +2,11 @@ package com.minke.mallmanagement.observe.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.minke.mallmanagement.observe.dao.DrillRecordDao;
+import com.minke.mallmanagement.protect.ProtectionGate;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -35,7 +37,12 @@ class DrillRecordServiceTest {
 
     private final DrillRecordDao dao = mock(DrillRecordDao.class);
     private final AttackEngine engine = mock(AttackEngine.class);
-    private final DrillRecordService service = new DrillRecordService(dao, engine, new ObjectMapper());
+    /**
+     * 防护门用**真件**（D 段 · commit 2）：它没有依赖、没有 I/O（就是一个进程内的五个布尔位），
+     * 而本类要测的恰恰是「写入与复位的**时机**」—— 换成替身就把它要测的东西替掉了。
+     */
+    private final ProtectionGate gate = new ProtectionGate();
+    private final DrillRecordService service = new DrillRecordService(dao, engine, new ObjectMapper(), gate);
 
     /** 一行 {@code drill_record}（列名与**顺序**都与 {@code DrillRecordDao.COLUMNS} 一致）。 */
     private static Map<String, Object> row(String result, String scenario) {
@@ -202,6 +209,60 @@ class DrillRecordServiceTest {
         // ⚠️ 开关串形状错同样**抛**（不回落成缺省：那会让结果页显示一套没人勾的开关）
         assertThrows(IllegalArgumentException.class, () -> service.run(null, null, null, null, null,
                 "rateLimit", null, "c-1", 1, "http://localhost:8088"));
+    }
+
+    // ==================== 二·补、D 段：防护门的写入时机与复位 ====================
+
+    /**
+     * ⚠️ 本用例测的是**时机**，不是「值传对了」：
+     * <ol>
+     *   <li>写入必须发生在 {@code engine.run} <b>之前</b> —— 判据是「引擎跑的那一刻读门，读到的是本轮的」；</li>
+     *   <li>复位必须发生在 {@code finally} —— 判据是「引擎<b>抛了</b>，门也回到全开」。</li>
+     * </ol>
+     * 第 2 条故意让引擎抛：复位写在外面（try 之后）的实现会在这里留下 4 个关着的键，
+     * 而那正是「上一轮的开关越过那一轮留在进程里」这个故障的**最小复现**。
+     */
+    @Test
+    void appliesGateBeforeRunningAndResetsItEvenWhenTheEngineThrows() {
+        List<Boolean> atRunTime = new ArrayList<>();
+        when(engine.run(any(), any())).thenAnswer(invocation -> {
+            for (String key : ProtectionGate.KEYS) {
+                atRunTime.add(gate.isOn(key));
+            }
+            throw new IllegalStateException("引擎在半路炸了");
+        });
+
+        assertThrows(IllegalStateException.class, () -> service.run("压测", null, null, null, null,
+                "[\"rateLimit\"]", null, "c-1", 1, "http://localhost:8088"));
+
+        assertEquals(List.of(true, false, false, false, false), atRunTime,
+                "引擎跑的那一刻：只有 rateLimit 开着（其余四个被写入成 false）");
+        assertTrue(gate.snapshot().values().stream().allMatch(Boolean::booleanValue),
+                "引擎抛了也必须复位成全开");
+    }
+
+    /**
+     * ⚠️ {@code protections} **不传**（表单没给）时：{@code decodeKeys} 答 {@code null}，
+     * 而 {@code apply(null)} 的语义是「**全关**」（它按「勾了哪些」写）。
+     * 两个 null 含义相反 ⇒ 服务层必须把它翻成「全开」，否则「不传这个参数」会静默地把防护全关掉
+     * —— 那恰好是最坏的一种默认值。本用例钉住这个换算。
+     */
+    @Test
+    void missingProtectionsMeansAllOnNotAllOff() {
+        List<Boolean> atRunTime = new ArrayList<>();
+        when(engine.run(any(), any())).thenAnswer(invocation -> {
+            for (String key : ProtectionGate.KEYS) {
+                atRunTime.add(gate.isOn(key));
+            }
+            return new AttackEngine.DrillRun("压测", "{}", 0, 0, 0, 0, 0, 0L, Map.of(), "batch-8c");
+        });
+        when(dao.insert(anyString(), anyInt(), anyString(), anyString(), anyInt(), anyInt(), anyInt(),
+                anyLong(), anyString(), anyString())).thenReturn(1L);
+
+        service.run("压测", null, null, null, null, null, null, "c-1", 1, "http://localhost:8088");
+
+        assertEquals(List.of(true, true, true, true, true), atRunTime,
+                "没给 protections = 面板缺省 = 全开（不是「全关」）");
     }
 
     /** [暂停]：一层转发（令旗在引擎里）—— 后端只要如实把引擎答的 true/false 返回去。 */
