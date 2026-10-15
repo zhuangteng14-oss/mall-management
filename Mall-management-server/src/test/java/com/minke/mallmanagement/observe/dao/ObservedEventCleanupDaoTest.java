@@ -28,8 +28,10 @@ import static org.mockito.Mockito.when;
  * {@link ObservedEventCleanupDao} 的**纯替身单测**（块 7 · commit 8b）—— 钉三件事：
  * ① 清理**真的同时下发两种谓词**（用户 2026-10-14 批文的判据原文：「清完**这两种谓词**的数据全消失」，
  * 而「只按一种」是本笔最可能的失效形态）；② 保留期是**两档 OR**（只写一档会让另一档永不清理）；
- * ③ 演练批次的事件台账行（块 7 · commit 10 的第 ③ 段）按 {@code BatchId IS NOT NULL} 单独下发
+ * ③ 演练批次的事件台账行（块 7 · commit 10 的第 ③ 段）按**三条 OR** 单独下发
  * —— 两种谓词**一个都碰不到** {@code observed_event}（它没有 {@code OrderId} 也没有 {@code Source} 列）。
+ * ⚠️ 判据在 10c-2（2026-10-15）由一条扩到三条：只按 {@code BatchId IS NOT NULL} 实测会**留下 1742 条**
+ * 非请求上下文写出的演练副产物（种子 SKU 的库存事件 + 清场动作自己的审计行），详见 DAO 第 ③ 段注释。
  *
  * <h2>【为什么这两件事只能在这一层验】</h2>
  * 谓词那一半在真库上验得到（本笔的验收就是跑一次端点、看两种谓词的行全没），
@@ -173,7 +175,7 @@ class ObservedEventCleanupDaoTest {
     // ==================== ③ 演练批次的事件台账（commit 10 新增）====================
 
     @Test
-    @DisplayName("演练批次的事件台账行：按 BatchId IS NOT NULL 单独一条 DELETE（两种谓词都碰不到它）")
+    @DisplayName("演练批次的事件台账行：三条 OR 单独一条 DELETE（两种谓词都碰不到它）")
     void observedEventBatchRowsAreSweptByBatchId() {
         stubColumns(List.of(), List.of());
         stubDeletes(11);
@@ -189,6 +191,12 @@ class ObservedEventCleanupDaoTest {
                 .as("判据是「属于某次演练」，**不是**时间：保留期那个 job 在 a3 / dev 下压根不醒"
                         + "（@EnableScheduling 挂在被 mall.downgrade.job.enabled 关着的类上）")
                 .contains("`BatchId` IS NOT NULL")
+                .as("第 2 条：非请求上下文写出的库存事件 —— ObjectId 是种子 SKU（日常没人动它们）")
+                .contains("`ObjectType` = 'sku' AND `ObjectId` LIKE 'SEED-%'")
+                .as("第 3 条：清场动作自己的审计行 —— 少它一条，每按一次清场就多留一条")
+                .contains("`ObjectType` = 'attack'")
+                .as("三条都是**资源域**判据 ⇒ 不许出现时间窗（时间窗会随时间推移吃真日常证据）")
+                .doesNotContain("OccurredAt")
                 .as("日常事件行是**运维证据**，归保留期管、不归清场按钮管 ⇒ 这一段不许带 IS NULL 那半")
                 .doesNotContain("`BatchId` IS NULL");
         assertThat(preparedBinds.get(i)).as("字面语句、无占位符（不是拼字符串）").isEmpty();

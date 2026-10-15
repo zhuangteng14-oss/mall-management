@@ -65,8 +65,12 @@ public class ObservedEventCleanupService {
      * 故它是「总删除行数」而不是「总表数」。
      *
      * <p><b>块 7 · commit 10 扩大了本端点的作用面</b>（用户 2026-10-14 裁决「清场按钮清全套」）：
-     * 除了两种谓词命中的业务行，现在还删 {@code observed_event} 里 {@code BatchId IS NOT NULL}
-     * 的**演练台账行**。两条独立的理由：
+     * 除了两种谓词命中的业务行，现在还删 {@code observed_event} 里的**演练台账行**。
+     * ⚠️ <b>判据在 10c-2（2026-10-15）由一条扩到三条</b> ——
+     * {@code BatchId IS NOT NULL} <b>OR</b>（{@code ObjectType='sku' AND ObjectId LIKE 'SEED-%'}）
+     * <b>OR</b> {@code ObjectType='attack'}。理由：只按第一条实测会**留下 1742 条**非请求上下文
+     * 写出的演练副产物（种子 SKU 的库存事件 + 清场动作自己的审计行），
+     * 详见 {@code ObservedEventCleanupDao} 第 ③ 段的实测构成。两条独立的理由：
      * <ol>
      *   <li>那两种谓词**一个都碰不到**它（它既没有 {@code OrderId} 也没有 {@code Source} 列，
      *       因为它是事件不是业务行）⇒ 不清它，「清场」之后页面上的实时日志仍挂着上一轮的内容；</li>
@@ -74,9 +78,9 @@ public class ObservedEventCleanupService {
      *       挂在一个被 {@code mall.downgrade.job.enabled} 关着的类上）⇒ 保留期那个 job 根本不会醒。
      *       在这套环境里，手动入口是**唯一**能把台账清掉的途径。</li>
      * </ol>
-     * ⚠️ 这是一处**破坏性作用面的扩大**（用户批文里按「非 A 档但需报备」登记过），
-     * 判据仍是 {@code BatchId IS NOT NULL}（= 属于某次演练），日常事件行**不动**
-     * —— 那是运维证据，归保留期管，不归清场按钮管。
+     * ⚠️ 这是一处**破坏性作用面的扩大**（用户批文里按「非 A 档但需报备」登记过）。
+     * 三条判据全是**资源域**的（演练批次号 / 种子 SKU / 攻击域对象），**不含时间窗**；
+     * 日常事件行**不动** —— 那是运维证据，归保留期管，不归清场按钮管。
      */
     public Map<String, Object> cleanupAttackData() {
         Map<String, Integer> deleted = cleanupDao.deleteAttackData();

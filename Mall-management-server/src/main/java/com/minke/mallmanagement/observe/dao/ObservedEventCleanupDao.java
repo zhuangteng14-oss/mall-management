@@ -133,12 +133,25 @@ public class ObservedEventCleanupDao {
         //    ⚠️ 上面两种谓词**一个都碰不到** observed_event：它没有 OrderId 列、也没有 Source 列
         //       ——因为它是事件不是业务行。⇒ 只按谓词清，演练留下的十几万行台账会**原地不动**，
         //       而那是页面「实时日志」那三块最容易看出来的脏数据（BatchId 还在，界面会以为
-        //       那一轮还在跑）。判据与保留期 job 同源（{@code BatchId IS NOT NULL} = 属于某次演练），
-        //       但这里**不看天、一次清光** —— 清场按钮的语义就是「现在就回到干净态」。
-        //    ⚠️ 这条是本类里唯一**按时间无关的整批删**：它不参与上面的动态发现，因为
+        //       那一轮还在跑）。
+        //    ⚠️ **判据是三条 OR，不是一条**（2026-10-15 块 7 · commit 10c-2，实测后扩）：
+        //       只按 `BatchId IS NOT NULL` 会**留下 1742 条**演练副产物 —— 它们由「非请求上下文」
+        //       的线程写出（库存扣减 / 审计），拿不到当轮的 BatchId。三类构成（对备份 152184 行实测）：
+        //         · 库存事件 1740 条 —— `ObjectType='sku'` 且 ObjectId **全是种子 SKU**（`SEED-%`）：
+        //           种子 SKU 只有演练驱动脚本 `restore()` 会去复原，日常没有人动它们；
+        //         · 审计 2 条 —— `ObjectType='attack'`，正文是**清场动作自己**的汇总
+        //           （「共 30148 行（order_item …）」）⇒ 不清它，**每按一次清场就多一条**，
+        //           页面永远留着上一轮的痕迹。
+        //       这三条都是**资源域**判据（前缀 / 对象类型），**不含时间窗**：时间窗要另找一个
+        //       「本轮是哪一段」的标记，而事件表自己没有；且时间窗判据会随时间推移开始吃真日常证据。
+        //    ⚠️ 保留期那个 job（下面的 {@code pruneObservedEvents}）**有意不同步**这三条：
+        //       它按龄、语义是「到点清一切」；与「清场 = 现在回到干净态」目的不同，混一起会两边都说不清。
+        //    ⚠️ 这条是本类里唯一**不看时间**的整批删：它不参与上面的动态发现，因为
         //       observed_event 是一张固定的表（不是「有某列的表」之一）。
         int events = jdbcClient.sql("DELETE FROM mall_management_sql.observed_event "
-                + "WHERE `BatchId` IS NOT NULL").update();
+                + "WHERE `BatchId` IS NOT NULL "
+                + "OR (`ObjectType` = 'sku' AND `ObjectId` LIKE 'SEED-%') "
+                + "OR `ObjectType` = 'attack'").update();
         if (events > 0) {
             deleted.put("observed_event", events);
         }
