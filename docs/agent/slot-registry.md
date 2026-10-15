@@ -5043,3 +5043,51 @@ COALESCE(merchantid,customerid) WHERE EventType IN (那 5 个)` → 复读对照
 4. **`drill_record` 里留了本笔两次收口验证的行**（`Name = b7c9-e2e` / `b7c9-e2e2`）—— 清场按钮**不动** `drill_record`，它们会一直在；手验清单 §H-2 已写明**别当成没清干净**。
 5. **§二十四 24-1 原写「自上而下 = 新到旧」与表内实际顺序（旧到新）相反**，已就地更正（表本身未动，只改这半句）。
 6. **本笔不 push / 不 merge** —— 块 7 全部手验通过后由用户决定（批文明确）。
+
+---
+
+### 24-11　commit 10 系列 + 收口（**commit 10d**，2026-10-15）—— 块 7 第 **22** 笔起
+
+**提交切分（11 笔，`git log --reverse 50439fa..21bae15` 实测；commit 9 = 第 21 笔，故本段起于第 22 笔）**
+
+| 笔 | 短哈希 | 内容 |
+|---|---|---|
+| 22 | `50439fa` | **chore 修探针陈旧期望** —— `.a-of-id` 的 `#` 前缀（`ab6f71d` 引入，与 10 无关 ⇒ **单独一笔**） |
+| 23 | `3022dad` | **commit 10a 演练批次号链路** —— `order.BatchId` 写入 + 帧带 `batchId` + `countOrderStatesByBatch` |
+| 24 | `1b5afcb` | **commit 10b 观测流三改** —— 每连接一份帧源（丙）+ 事件环 **512→2048** 与环满记账 + `spring.mvc.async.request-timeout=-1` |
+| 25 | `41e0a5e` | **commit 10c 攻击引擎 v2** —— 甲异步引擎 + 丁开关面板/档位 + `/attack/stop` + 前端重连 |
+| 26 | `57e19b7` | **docs 10 收口** —— refs 重指 4 处 + 512→2048 文档同步 6 处 + 两处既有陈旧登记（零 Java / 零前端，**+9/−9**） |
+| 27 | `4da212a` | **feat 10c-2 前置** —— `MAX_CONCURRENCY` **500→4000** + `AttackConsole.vue` `CONC_MAX` + 一行为 http P99 开分位 |
+| 28 | `ef178da` | **feat 清场谓词扩三条 OR** —— 种子 SKU 库存 + 清场审计行纳入清理（`ObservedEventCleanupDao` 第 ③ 段） |
+| 29 | `1c42f30` | **docs** `selection-status.md:98` 的 8192 计划记为**已裁**（维持 2048） |
+| 30 | `d74f9e3` | **docs 登记 TD-69** —— 保留期 Job 把演练副产物当「日常」多留 30 天（仅追加 EOF，+11/−0） |
+| 31 | `c495997` | **chore 撤 `4da212a` 多加的配置**（**15 行**）—— 分位早由 `ObserveMetricsConfig` 给 |
+| 32 | `21bae15` | **fix 延迟口径排除演练启动端点** —— `/attack/run` 全等排除（`DRILL_RUN_URI`） |
+| 33 | `071c2cc` | **chore 订正 `AttackController` 陈旧注释** —— concurrency 上限 500 → 4000（**净 0 行**；**单独一笔**） |
+| **34** | （**本笔 · 收口**） | **commit 10d · 收口** —— 文档统一补 + 手验清单 + 假数据清场 + refs 重指 |
+
+**本文件关心的那一面（逐笔的槽位 / 文件 / 行号）**
+
+- **10a `3022dad`** ⇒ `OrderDao` 两个成员**尾追加**（在上面的 `selectStockDeducted` 之后）· `OrderRow` 加第 **12** 分量 · `OrderFlow.vue` **+237 行**。⚠️ 该文件有 **4 处行号引用目标侧漂移**，**全部落在未跟踪的 `docs/agent/context-packs/`** ⇒ 活文档零漂移。
+- **10b `1b5afcb`** ⇒ 三个产帧服务改**工厂**（`newFrameSource()`）· `FramePacer` **删除** · **九处**容量常量同步 **512→2048**（八源环 + `EventBroadcaster` 合并环）· 帧新增 `dropped`/`droppedTotal`/`droppedIngest` · `properties` **尾追加 `:203-228`**（配置行在 **`:228`**）。
+- **10c `41e0a5e`** ⇒ `AttackEngine.java` **+824 行** / `AttackConsole.vue` **+342 行**（本块单笔位移最大的一笔）· `endpoints.js` 加 `attackStop`（第 **141** 条）· `api/observe.js` 加 `openResilientStream` / `stopAttack()`。⇒ 这两处大位移的 refs 重指**推到收口笔**（见 24-12）。
+- **10 收口 `57e19b7`** ⇒ 重指 **4 处**：`EventStreamService` **81 → 96 行**（10b 的「每连接一份」在这段之上插 15 行；已核 `:96` 即 `broadcaster.poll()`，「唯一调用点」仍成立，但**每秒调用次数 = 打开页面数**）· `MallOrderStateMetrics` **88 → 113 行**（`:113` = `private static final int EVENT_CAPACITY = 2048;`；88 在 `ab6f71d` 就已错，顺手订正）。⚠️ **自我更正**：第一版注把新值写成 `` `:96` ``（**带冒号**）⇒ 扫描立刻报出两条**无主裸 token**（「重指记录自己会造陈旧 token」的形态）⇒ 改成「**96 行**」后裸 token 归零。
+- **`4da212a` → `c495997`** ⇒ 前者在 `properties` 尾加「1 空行 + 13 行注释 + 1 行分位配置」= **15 行**；后者**整体撤掉**，验收 = `git diff 4da212a^ -- <该文件>` **输出为空**（逐字节一致）。⚠️ 撤的理由之一：actuator 的 `/actuator/metrics/<timer>` **结构上不吐分位数**（Micrometer 只报 COUNT/TOTAL_TIME/MAX），那段注释把人引向走不通的路。
+- **`21bae15`** ⇒ `MetricsSnapshotService` 加常量 `DRILL_RUN_URI`（`:139`）+ `isLatencyTimer`（`:407-413`）加一支 **全等**排除（**非** `/attack/*` 前缀 —— `/stop` 是毫秒级真请求，照算）· `MetricsSnapshotServiceTest` **+2 例**。
+
+### 24-12　零漂移 + refs（本系列，逐笔）
+
+- **通用手法** ⇒ 新代码**一律尾追加**、订正走**同行替换**（净 0 行）；**唯一例外**是 10d 本笔对 `AttackController.java:100-102` 的改（`concurrency` 上限 **500 → 4000**），也是**行数不变**。
+- **10 收口 `57e19b7`（本系列唯一一次 refs 全跑）** ⇒ `./scripts/refs-scan.sh` → `_work/b10c-refs-final.txt`：配对比 **LOST = 4**（**全是本笔这 4 处有意重指**）/ **NEW = 62** = 4 重指落点 + 1 真·新引用（`OrderFlow.vue:346` → `OrderState.java:44-72`）+ **57 来自 11 份未跟踪的 context-packs**。**裸 token 归零**。⚠️ **判据仍是「真 LOST = 0」**，不是某个计数（同 24-9）。
+- **`21bae15`** ⇒ LOST = **0**；22 条 NEW 全部来自三个未跟踪的 `docs/agent/context-packs/*.txt`（与改动无关）。
+- ⚠️ **本系列自身产生的漂移集中在未跟踪的时点稿里** —— `docs/agent/context-packs/` 是**核实时点的记录，不应重指**（`_work/b10c-target-drift.py` 的 27 条 `!!` 里 21 条是它；⚠️ 该工具**只覆盖「本次改动过 ∩ 被行号引用」的 23 文件 / 97 区间**，且**重指过的会继续标 `!!`**——正确判据是「新落点那一行确实是它宣称的构造」，这一步**人读**）。
+- ⚠️ **本文件尾部追加零影响** ⇒ §二十四 的入向 `文件:行号` 引用（`context-packs` ×6 · `progress.md` ×2 · `router/index.js` ×1）**全部指向 `:4192` 之前**，本节追加在该点之后（同 24-9 的结论）。
+
+### 24-13　报备偏差 / 待裁（commit 10 系列 + 10d，逐条）
+
+1. **⚠️ 没有 `/attack/status` 这个端点**（用户 10d 清单点名要写进 `api-contract.md`）—— 实测五条映射是 `/scenarios` `/run` `/stop` `/records` `/cleanup`，**无 `status`**。同 A-3 那一类**前提不符**。⇒ 附录 H 写的是**真实存在的五条**。
+2. **⚠️ 种子基线是 190 行、不是「~12 行」**（用户 10d §二预期）—— `order` 清场实测：**12,268 → 190**（删 12,078 条 `SIM-%`）。订正预期，**非缺陷**。
+3. **`/attack/stop` 是 10c 新增的，但 `api-contract.md` 附录 H 当时没收它** ⇒ 本笔（10d）补登第 5 条出口。⚠️ 与 8b 时「附录 H 只有 4 条」的口径不同，这里说的漏是**10c 之后**发生的。
+4. **`AttackController.java:100-102` 的陈旧注释** ⇒ 原写「上限 **500**、硬顶 **512**」，与 `4da212a` 抬到 **4000** 的 `MAX_CONCURRENCY` 不符 ⇒ 本笔**净 0 行**订正（避免造漂移）。**10c 抬上限时漏改了这处注释**。
+5. **10d 本笔不 push / 不 merge** —— 块 7 全部手验通过后由用户决定。
+6. **⚠️ 一处待归置** ⇒ `docs/agent/context-packs/块7-*.txt` **3 份未跟踪**（10d 时点又新增）—— 若入库会给引用图注入噪声对；建议归置到 `_work/`（同 57e19b7 收口报告 §戊 的建议，**未做**）。

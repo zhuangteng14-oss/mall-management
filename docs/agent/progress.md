@@ -2359,3 +2359,44 @@ DB 级唯一锁探针 `ProbeB6c7Lock` = **PASS 12 / FAIL 0**；接口级 8 条�
 **块 7 挂账** ⇒ 逐条见 `tech-debt.md`（commit 9 补登 §块 7 段）：**TD-51**（`AbstractSmokeTest.java` 既有误指族）· **TD-54**（未应用的族）· **TD-58**（计时敏感用例）等；另 `TD-18`（SSE 无角色闸）与本块同源。⚠️ **台账落库边界**（`EventBroadcaster.poll()` 由 **SSE 流线程**驱动 ⇒ **没人开实时日志页就不落库**）不是缺陷、是设计，已写进 `api-contract.md` 附录 H.7。
 
 ⚠️ **本笔不 push / 不 merge** —— 块 7 **全部手验通过**后由用户决定（批文明确）。手验清单另见桌面 `块7-commit9-收口-报告.txt`（三列式：操作步骤 → 期望 → 判据）。
+
+#### 7-B7-续　commit 10 系列 + 收口（**commit 10d**，2026-10-15）
+
+**这一段做什么** ⇒ 块 7 的**第 22 笔起**（接上面 20 笔 + commit 9 之后）。三条功能主线：**① 演练批次号链路（10a）· ② 观测流三改（10b）· ③ 攻击引擎 v2（10c）**；其余是收口与订正（10 收口 · 10c-2 前置 + 三笔订正 · 撤 4da212a 冗余配置 · 延迟口径排除）。**本系列零 DDL**（`git log 57e19b7..HEAD --name-only` 实测无 `.sql` 变更）—— 库变更仍到 **⑲** 为止。
+
+**提交切分（本系列 11 笔，`git log --reverse 50439fa..21bae15` 实测；commit 9 = 块内第 21 笔，故本段起于第 22 笔）**
+
+| # | 短哈希 | 时点 | 一笔是什么 |
+|---|---|---|---|
+| 22 | `50439fa` | 10-15 14:58 | **chore** 修探针陈旧期望 —— `.a-of-id` 的 `#` 前缀（ab6f71d 引入，与 10 无关，故单作杂活一笔） |
+| 23 | `3022dad` | 10-15 14:58 | **commit 10a** 演练批次号链路 —— `order.BatchId` 写入 + 帧带 `batchId` + 本批次五态计数（`countOrderStatesByBatch`） |
+| 24 | `1b5afcb` | 10-15 15:23 | **commit 10b** 观测流三改 —— **每连接一份帧源（丙）** + 事件环 **512→2048** 与环满记账（`dropped`/`droppedTotal`/`droppedIngest`）+ **`spring.mvc.async.request-timeout=-1`** |
+| 25 | `41e0a5e` | 10-15 15:59 | **commit 10c** 攻击引擎 v2 —— **甲异步引擎**（`sendAsync` + 32 派发线程 + 在途许可 + `Pacer` 令牌桶）+ **丁开关面板/档位** + **`/attack/stop`** + 前端 **指数退避重连** |
+| 26 | `57e19b7` | 10-15 16:24 | **docs** 10 收口 —— refs 重指 4 处（`EventStreamService:81→:96` 等）+ 512→2048 口径同步 6 处 + 两处既有陈旧登记（零 Java / 零前端，+9/−9） |
+| 27 | `4da212a` | 10-15 16:56 | **feat** 10c-2 前置 —— 引擎并发上限 **500→4000**（+ `AttackConsole.vue` `CONC_MAX`）+ 加一行为 http P99 开分位 |
+| 28 | `ef178da` | 10-15 16:56 | **feat** 清场谓词扩到**三条 OR** —— 种子 SKU 库存（`SEED-%`）+ 清场审计行（`ObjectType='attack'`）纳入清理 |
+| 29 | `1c42f30` | 10-15 16:56 | **docs** `selection-status.md:98` 的 8192 计划记为**已裁**（维持 2048，原计划撤销） |
+| 30 | `d74f9e3` | 10-15 16:57 | **docs** 登记 **TD-69** —— 保留期 Job 把演练副产物当「日常」多留 30 天（+11/−0，仅追加 EOF） |
+| 31 | `c495997` | 10-15 | **chore** 撤 `4da212a` 多加的那段配置（**15 行**）—— 分位早由 `ObserveMetricsConfig` 给，配置本就多余 |
+| 32 | `21bae15` | 10-15 | **fix** 延迟口径排除**演练启动端点** —— `/attack/run` 挂满整场演练的时长不算接口延迟（`DRILL_RUN_URI` 全等排除） |
+| 33 | `071c2cc` | 10-15 | **chore** 订正 `AttackController` 陈旧注释 —— concurrency 上限 500 → 4000（**净 0 行**；**单独一笔**，不混进下面那笔） |
+| **34** | （**本笔 · 收口**） | 10-15 | **commit 10d · 收口** —— 文档统一补（api-contract / tech-debt / progress / slot-registry）+ 手验清单 + 假数据清场 + refs 重指 |
+
+**端点变更（本系列）** ⇒ `/attack/run` 新增 **3 个入参** `targetQps` / `protections` / `injections`（丁：只记录不实现）；新增**第 5 条出口** `POST /admin/observe/attack/stop`；响应新增 **`Engine` 块**（真实生效配置回显）与帧字段 **`batchId` / `batchCounts` / `dropped` / `droppedTotal` / `droppedIngest`**。⚠️ **没有** `/attack/status` 这个端点（实测五条映射 = `/scenarios` `/run` `/stop` `/records` `/cleanup`）。
+**配置（本系列）** ⇒ `spring.mvc.async.request-timeout=-1`（`application.properties:228`，10b 追加）；引擎两键 `mall.drill.engine.in-flight-cap:512` / `mall.drill.engine.shed-wait-ms:50` **只在 `@Value` 默认值里**（`AttackEngine:608` / `:612`），**未落 properties**；`4da212a` 加的那行 `management.metrics.distribution.percentiles[...]` 已由 `c495997` **撤回**。
+
+⚠️ **边界 A 两笔都写明**：10b / 10c 只抬高**引擎与观测侧自己的能力**，连接池 / Tomcat 线程 / 慢 SQL **一律不动** —— 后端慢的地方照旧慢，那是 10c-1（瓶颈定位）的观察对象。
+⚠️ **一处自我更正（41e0a5e 报文内）**：10c 第一版报文写「`AttackConsole.vue` 的档位/开关面板/[暂停]**一行未动**」——读漏了批文（批文 §九 的切分明写 10c 含「开关面板/档位/`/attack/stop`」）。amend 后补上该块，文件数 / 行数 / 报文随之更正。
+⚠️ **一处过程坑（41e0a5e 实测）**：首次整仓跑红 `limitedPacerHandsOutSpacedSlots`，查明是**测试自己的判据**问题（1ms 窗口与 `invokedynamic` 引导 + 类加载**同量级**，第二格常被吃掉退化成 0）⇒ 间隔改**秒级**后 3/3 绿。**裸 JVM 里试不出来**（冷态窗口 0.53–0.90ms，8 次全绿），探针留 `_work/b10c-pacer-probe.java`。
+⚠️ **一处自我更正（57e19b7 报文内）**：第一版重指注把新值写成 `` `:96` ``（**带冒号**）⇒ 扫描立刻报出两条**无主裸 token**（正是「重指记录自己会造陈旧 token」那条纪律的形态）；改成「**96 行**」后裸 token 归零。
+
+🧪 **DoD（本系列各笔实测，逐笔见各提交信息）** ⇒ 基线 **483**（10c）→ **485**（10d 前，`21bae15` 新增 2 条用例：`drillRunLongDurationDoesNotPolluteLatency` / `drillStopStillCountsAsLatency`）。⚠️ 10c 报文的 483 与 10b 的 473 差 10 = 10c 新增的 10 条用例，与 Maven 汇总一致；10a 的 472 按 surefire **时间戳**过滤后汇总（避免把上轮残留报告算进来）。**块 7 收口（commit 9）= 471** ⇒ 本系列累计 +14。
+
+**A3 门禁** ⇒ 本系列**无表结构变更**（零 DDL）⇒ P3 门禁计数（`KNOWN_TABLES` 27 / 期望表数 38）**不变**。
+
+⚠️ **零漂移（各笔逐文件核过）** ⇒ 通用做法：新代码**一律尾追加**、订正走**同行替换**（净 0 行）—— 全仓大量「文件:行号」互引，插在中间会让其后每一处引用集体偏移。本系列自身产生的漂移主要在**未跟踪**的 `docs/agent/context-packs/` 时点稿里（**不应重指**）；活文档（progress / slot-registry / db-schema / tech-debt / api-contract）零漂移 —— 逐条见 `slot-registry.md` **24-10**。
+⚠️ **一处刻意用净 0 行的修正（10d 本笔）** ⇒ `AttackController.java:100-102` 的 `concurrency` 说明原写「上限 **500**、硬顶 **512**」，与 `AttackEngine.MAX_CONCURRENCY = 4000`（`4da212a` 抬的）**不符** ⇒ 就地改成「上限 **4000**」+「引擎侧 `in-flight-cap`，缺省 512」，**行数不变**（避免造漂移）。
+
+**本笔（10d）文档同步面** ⇒ `api-contract.md` 附录 H（补 `/stop` 第 5 条出口 · 三个「丁」入参 · `batchCounts` · 两处引擎配置键 · 坐标/counts 订正）· `tech-debt.md`（TD-60 表补 SSE 异步超时 + 延迟口径排除两条 ✅已修 · 新增 **TD-70** 延迟排除名单是手工白名单 · 新增 **TD-71** JVM `-Xms/-Xmx` 未固定）· 本小节 · `slot-registry.md §二十四` 续段。⚠️ `db-schema.md` / `db-migration.md` **本笔不改**（⑲ 落库时已登，本系列零 DDL ⇒ 无新增登记）。
+
+⚠️ **本笔不 push / 不 merge**（同上：块 7 全部手验通过后由用户决定）。**手验清单**另见桌面 `块7-commit10d-收口-报告.txt`（三列式：操作步骤 → 期望 → 判据；**凡涉及鉴权的一律标「默认 profile」，dev/a3 因 `app.auth.enabled=false` 验不出鉴权**）。
