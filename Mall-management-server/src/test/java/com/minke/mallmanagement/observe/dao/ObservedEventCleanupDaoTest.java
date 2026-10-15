@@ -25,9 +25,11 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 /**
- * {@link ObservedEventCleanupDao} 的**纯替身单测**（块 7 · commit 8b）—— 钉两件事：
+ * {@link ObservedEventCleanupDao} 的**纯替身单测**（块 7 · commit 8b）—— 钉三件事：
  * ① 清理**真的同时下发两种谓词**（用户 2026-10-14 批文的判据原文：「清完**这两种谓词**的数据全消失」，
- * 而「只按一种」是本笔最可能的失效形态）；② 保留期是**两档 OR**（只写一档会让另一档永不清理）。
+ * 而「只按一种」是本笔最可能的失效形态）；② 保留期是**两档 OR**（只写一档会让另一档永不清理）；
+ * ③ 演练批次的事件台账行（块 7 · commit 10 的第 ③ 段）按 {@code BatchId IS NOT NULL} 单独下发
+ * —— 两种谓词**一个都碰不到** {@code observed_event}（它没有 {@code OrderId} 也没有 {@code Source} 列）。
  *
  * <h2>【为什么这两件事只能在这一层验】</h2>
  * 谓词那一半在真库上验得到（本笔的验收就是跑一次端点、看两种谓词的行全没），
@@ -161,9 +163,35 @@ class ObservedEventCleanupDaoTest {
 
         Map<String, Integer> deleted = dao.deleteAttackData();
 
-        assertThat(indicesOfSqlContaining("DELETE")).as("一条 DELETE 都不该下发（含 drill_record 的那条）")
-                .isEmpty();
-        assertThat(deleted).as("全部被排除 ⇒ 空结果（不是「删了 0 行」）").isEmpty();
+        // ⚠️ 断言按**谓词**查，不按「有没有 DELETE」查：块 7 · commit 10 起本方法末尾**恒定**多下发
+        //    一条 observed_event 的 DELETE（第 ③ 段），那条与排除清单无关。
+        assertThat(indicesOfSqlContaining("`OrderId` LIKE ?")).as("含 drill_record 的那条不下发").isEmpty();
+        assertThat(indicesOfSqlContaining("`Source` = ?")).as("含 drill_record 的那条不下发").isEmpty();
+        assertThat(deleted).as("全部被排除（第 ③ 段也没删到行）⇒ 空结果（不是「删了 0 行」）").isEmpty();
+    }
+
+    // ==================== ③ 演练批次的事件台账（commit 10 新增）====================
+
+    @Test
+    @DisplayName("演练批次的事件台账行：按 BatchId IS NOT NULL 单独一条 DELETE（两种谓词都碰不到它）")
+    void observedEventBatchRowsAreSweptByBatchId() {
+        stubColumns(List.of(), List.of());
+        stubDeletes(11);
+
+        Map<String, Integer> deleted = dao.deleteAttackData();
+
+        assertThat(deleted).as("只含非零项：这一段的删除要能看到").containsExactlyEntriesOf(
+                Map.of("observed_event", 11));
+        int i = firstIndexOfSqlContaining("DELETE FROM mall_management_sql.observed_event");
+        assertThat(i).as("必须真的下发 —— 不删它，清场之后页面上的实时日志仍挂着上一轮的内容")
+                .isNotNegative();
+        assertThat(preparedSql.get(i))
+                .as("判据是「属于某次演练」，**不是**时间：保留期那个 job 在 a3 / dev 下压根不醒"
+                        + "（@EnableScheduling 挂在被 mall.downgrade.job.enabled 关着的类上）")
+                .contains("`BatchId` IS NOT NULL")
+                .as("日常事件行是**运维证据**，归保留期管、不归清场按钮管 ⇒ 这一段不许带 IS NULL 那半")
+                .doesNotContain("`BatchId` IS NULL");
+        assertThat(preparedBinds.get(i)).as("字面语句、无占位符（不是拼字符串）").isEmpty();
     }
 
     // ==================== ② 保留期 ====================

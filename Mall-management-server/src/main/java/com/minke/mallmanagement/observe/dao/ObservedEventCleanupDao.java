@@ -11,7 +11,8 @@ import java.util.Map;
 
 /**
  * 可观测域的**清理 SQL 唯一出口**（块 7 · commit 8b）—— 只碰两类事：
- * ① 按谓词删「攻击演练污染的业务行」；② 按龄删 {@code observed_event} 的过期行。
+ * ① 按谓词删「攻击演练污染的业务行」（commit 10 起连带**演练批次的事件台账行**，见
+ * {@link #deleteAttackData} 的第三段）；② 按龄删 {@code observed_event} 的过期行。
  *
  * <p>范式照 {@link DrillRecordDao}：{@code @Repository} + 构造器**收 {@code JdbcTemplate}**
  * （让 {@code @WebMvcTest} 切片里既有的 {@code @MockitoBean JdbcTemplate} 继续喂给本类）+
@@ -73,7 +74,8 @@ public class ObservedEventCleanupDao {
     // ==================== ① 按谓词清「攻击污染的业务行」 ====================
 
     /**
-     * 把两种谓词命中的行**真删掉**，返回「哪张表删了几行」（只含非零项）。
+     * 把两种谓词命中的行**真删掉**（外加一段：演练批次的事件台账行），返回「哪张表删了几行」
+     * （只含非零项）。
      *
      * <h2>【谓词（判据来自用户 2026-10-14 批文，两种缺一不可）】</h2>
      * <ul>
@@ -125,6 +127,20 @@ public class ObservedEventCleanupDao {
             if (n > 0) {
                 deleted.merge(table, n, Integer::sum);
             }
+        }
+
+        // ③ 演练批次的**事件台账**行（块 7 · commit 10：清场按钮清全套）。
+        //    ⚠️ 上面两种谓词**一个都碰不到** observed_event：它没有 OrderId 列、也没有 Source 列
+        //       ——因为它是事件不是业务行。⇒ 只按谓词清，演练留下的十几万行台账会**原地不动**，
+        //       而那是页面「实时日志」那三块最容易看出来的脏数据（BatchId 还在，界面会以为
+        //       那一轮还在跑）。判据与保留期 job 同源（{@code BatchId IS NOT NULL} = 属于某次演练），
+        //       但这里**不看天、一次清光** —— 清场按钮的语义就是「现在就回到干净态」。
+        //    ⚠️ 这条是本类里唯一**按时间无关的整批删**：它不参与上面的动态发现，因为
+        //       observed_event 是一张固定的表（不是「有某列的表」之一）。
+        int events = jdbcClient.sql("DELETE FROM mall_management_sql.observed_event "
+                + "WHERE `BatchId` IS NOT NULL").update();
+        if (events > 0) {
+            deleted.put("observed_event", events);
         }
         return deleted;
     }

@@ -1,12 +1,13 @@
 // src/api/observe.js —— 可观测面板的客户端（块 7 commit 3 的 SSE + commit 4 的三个普通 POST
-// + commit 8b 的清场）。
+// + commit 8b 的清场 + commit 10c 的暂停与三条流的自动重连）。
 //
-// 七条端点（**全在** `endpoints.js` 里，本文件一个后端路径字面量都不出现 —— 那条判据可 grep 自动化）：
+// 八条端点（**全在** `endpoints.js` 里，本文件一个后端路径字面量都不出现 —— 那条判据可 grep 自动化）：
 //   metrics → 指标面板（KPI / 锁 / 防护 / 库存水位）          ┐
-//   orders  → 状态流转页（五态计数 / 最近订单 / 本拍流转）      ├ 三条 **SSE 流**（commit 3）
-//   events  → 实时日志页（8 类归一化事件流）                  ┘
+//   orders  → 状态流转页（五态计数 / 最近订单 / 本拍流转）      ├ 三条 **SSE 流**（commit 3；
+//   events  → 实时日志页（8 类归一化事件流）                  ┘ commit 10c 起**自带自动重连**）
 //   attackScenarios / attackRun / attackRecords → 攻击模拟器（commit 4）—— 三条**普通 POST**
 //   attackCleanup → 清场（commit 8b）—— 同样**普通 POST**、**无入参**，但它是**破坏性**的（后端真 DELETE）
+//   attackStop    → 暂停一轮（commit 10c）—— 同样**普通 POST**、**无入参**，**非**破坏性（只置令旗）
 //
 // ⚠️ **不用浏览器原生 `EventSource`**（只针对上面三条流）。两条独立的理由，任一条都足够：
 //   ① 它**不能带自定义请求头**，而本仓的鉴权票走 `Authorization: Bearer`（默认 profile 上
@@ -26,19 +27,109 @@
 import { http, streamPost } from './http'
 import { endpoints } from './endpoints'
 
-/** 指标面板流（1 秒 1 帧）。 */
+/** 指标面板流（1 秒 1 帧）。⚠️ 块 7 · commit 10c 起：**断了会自己接回来**（见 `openResilientStream`）。 */
 export function openMetricsStream(handlers) {
-  return openStream(endpoints.observe.metrics, handlers)
+  return openResilientStream(endpoints.observe.metrics, handlers)
 }
 
-/** 状态流转页流（1 秒 1 帧）。 */
+/** 状态流转页流（1 秒 1 帧）。⚠️ 同上：断了会自己接回来。 */
 export function openOrderStream(handlers) {
-  return openStream(endpoints.observe.orders, handlers)
+  return openResilientStream(endpoints.observe.orders, handlers)
 }
 
-/** 实时日志页流（1 秒 1 帧）。 */
+/** 实时日志页流（1 秒 1 帧）。⚠️ 同上：断了会自己接回来。 */
 export function openEventStream(handlers) {
-  return openStream(endpoints.observe.events, handlers)
+  return openResilientStream(endpoints.observe.events, handlers)
+}
+
+// ==================== 自动重连（块 7 · commit 10c）====================
+//
+// ⚠️ **本层存在的全部理由：这三条流可以「正常地」断**。它们不是一次性的 JSON，而是常驻连接，
+//   而常驻连接在本仓有三种**非故障**的收尾方式：
+//     ① 后端重启（演示现场天天发生）；
+//     ② 中间层/浏览器掐空闲连接；
+//     ③ `spring.mvc.async.request-timeout` 到点（块 7 commit 10c 已把它配进配置文件，
+//        缺省的 30 秒会给每条流来一次「正常收尾」）。
+//   那时 `openStream` 报的是 `onEnd(null)` —— **`errMsg` 一路为空**。页面上数字不变、也不报错，
+//   于是「界面一切正常，其实早就不更新了」。这就是**静默陈旧**，比看得见的报错坏得多。
+//   ⇒ 本层把「流结束」一律当事件上报（`onLost`）并自动重连。
+//
+// ⚠️ **退避而不是立刻重连**：后端重启那几秒里，立刻重连会打出几十条必然失败的请求
+//   （每条都要走一遍鉴权 + 建连接），日志会很脏、后端启动还要陪着挨打。
+//
+// ⚠️ **不放弃**：退避封顶（8 秒）之后**继续**每 8 秒重试。理由是演示现场：后端被我重启一次
+//   之后，三块面板应当自己恢复，而不是停在「已断开」等用户点按钮。
+//
+// ⚠️ `close()` 必须能停掉重连：页面切走之后还在后台每 8 秒打一次请求 = 攒连接 + 攒日志
+//   （`openStream` 头注释里那条「必须 close()」的代价，在重连层上又多一层）。
+
+/**
+ * 退避序列（毫秒）。走到末尾之后**固定用最后一个**（8 秒一次）。
+ * ⚠️ 5 档、首档 500ms：后端重启通常 5–15 秒 ⇒ 前几档就能接上，同时不给那十几秒添几百条请求。
+ */
+const RETRY_BACKOFF_MS = [500, 1000, 2000, 4000, 8000]
+
+/**
+ * 打一条**会自己接回来**的 SSE 流：`openStream` 外面套指数退避。
+ *
+ * @param {string} path `endpoints.observe.{metrics,orders,events}` 之一
+ * @param {{onOpen?:Function, onFrame:Function, onLost?:Function}} handlers
+ *   `onOpen()`          **每次**连接建立（第一次 + 每次重连成功）—— 页面在这里清断线标记
+ *   `onFrame(frame)`    同 `openStream`
+ *   `onLost(state)`     **流结束了**：`{ err, attempt, nextRetryInMs }`
+ *                       ⚠️ `err === null` 也报（服务端正常收尾）—— 这正是本层要治的那一格；
+ *                       页面**不许**用 `if (err)` 当唯一判据，否则又回到静默陈旧。
+ *                       `attempt` = 这是第几次重连（1 起）、`nextRetryInMs` = 多久后重连。
+ * @returns {{close:Function}} `close()` 停流**并停掉重连**（页面卸载必须调）。
+ *          ⚠️ 不给 `done`：重连意味着「这一次连接」会反复结束，一个 `done` 表达不了任何东西。
+ */
+export function openResilientStream(path, { onOpen, onFrame, onLost } = {}) {
+  let closed = false
+  /** 连着断了几次（连上一次就归零）；退避档位与上报的 `attempt` 都看它。 */
+  let attempt = 0
+  let timer = null
+  let current = null
+
+  function start() {
+    current = openStream(path, {
+      onOpen() {
+        attempt = 0
+        if (!closed) onOpen && onOpen()
+      },
+      onFrame(f) {
+        if (!closed) onFrame && onFrame(f)
+      },
+      onEnd(err) {
+        current = null
+        // ⚠️ 自己 close() 引起的那次收尾不报：调用方已经在卸载路径上了（与 `openStream` 同口径）。
+        if (closed) return
+        // ⚠️ 这里**不判 err**：正常收尾与真出错走同一条路（理由见本节头注释）。
+        const delay = RETRY_BACKOFF_MS[Math.min(attempt, RETRY_BACKOFF_MS.length - 1)]
+        attempt += 1
+        onLost && onLost({ err: err || null, attempt, nextRetryInMs: delay })
+        timer = setTimeout(() => {
+          timer = null
+          if (!closed) start()
+        }, delay)
+      },
+    })
+  }
+
+  start()
+
+  return {
+    close() {
+      closed = true
+      if (timer) {
+        clearTimeout(timer)
+        timer = null
+      }
+      if (current) {
+        current.close()
+        current = null
+      }
+    },
+  }
 }
 
 /**
@@ -215,12 +306,27 @@ export function attackScenarios() {
  * @param {string} [p.name]            场景名（缺省「自定义」）
  * @param {number} [p.concurrency]     总并发数（缺省 100、上限 500）
  * @param {number} [p.durationSeconds] 持续秒数（缺省 60、上限 600）
+ * @param {number} [p.targetQps]       目标 QPS（commit 10c 甲的**限速**档）。
+ *        ⚠️ **0 = 不限速**（「拉满」档）：后端只受在途许可约束，量出来的 QPS 是这台机器＋后端的
+ *        **真实上限**，不是我们设的一个数 ⇒ 不许把 0 当「没填」而省略。上限 100000。
  * @param {Array<{key:string,weight:number}>} [p.scenarios] 勾选与权重；**不传 = 全 8 个场景**
  *        ⚠️ 权重为 0 的场景**等于没勾**（后端会剔除），别用 0 表达「跑一下试试」。
+ * @param {string[]} [p.protections]   五条防护开关（`rateLimit` / `circuitBreak` / `degrade` /
+ *        `retry` / `poolIsolation`）。**不传 = 全开**、传 `[]` = **全关**（两者不同，别混）。
+ *        ⚠️ 后端**只收下、只记录、只回显**，**不实现任何防护逻辑** —— 那是 D 段（硬边界 A），
+ *        本笔只把开关位与字段留出来。⇒ 拨动它**不会**改变这一轮的读数。
+ * @param {string[]} [p.injections]    三个故障注入（`redisDown` / `mqDown` / `dbSlow`）。
+ *        **不传 = 全关**。⚠️ 只有 `redisDown` 真的接了线（演练里会真的把 L2 标成不可用 5 秒）；
+ *        `mqDown` / `dbSlow` 后端**未接通**，响应里会如实列在 `Engine.InjectionsNotWired`
+ *        ⇒ 界面必须把这两个画成「未接通」，别让它们看起来能拨。
  * @returns {Promise<{success:boolean, Id:number, Name:string, TotalRequests:number,
- *          BlockedRequests:number, FailedRequests:number, DurationMs:number, Result:object}>}
+ *          BlockedRequests:number, FailedRequests:number, ShedRequests:number,
+ *          AbandonedRequests:number, DurationMs:number, Result:object}>}
  *          `Id` = 刚落库那一行的主键（后端**先跑后落**，失败会抛 `HttpError`：400 = 入参不合法，
  *          body 里是 `{success:false,msg}`，`msg` 就是「哪个参数不对」）。
+ *          ⚠️ `ShedRequests`（背压弃投）/ `AbandonedRequests`（被取消）是 commit 10c 甲的两个数，
+ *          与「拦截 / 失败」**不是同一档**：弃投的请求**压根没发出去**、被取消的**没等到结果**
+ *          ⇒ 页面上要单列，别把它们并进「失败」。
  */
 export function runAttack(p) {
   const o = p || {}
@@ -230,9 +336,34 @@ export function runAttack(p) {
     name: o.name,
     concurrency: o.concurrency,
     durationSeconds: o.durationSeconds,
-    // ⚠️ 数组 → JSON 串（后端只认这个；传对象或裸串会 400）
+    targetQps: o.targetQps,
+    // ⚠️ 数组 → JSON 串（后端只认这个；传对象或裸串会 400）。
+    //    ⚠️ 三个数组字段都是这个形状：**空数组与缺省在后端是两件事**
+    //    （`[]` = 全关 / 全没有，缺省 = 防护全开、注入全关），故这里**不**把 `[]` 滤掉 ——
+    //    `q()` 只滤 `''`/`null`/`undefined`，`JSON.stringify([])` 是 `'[]'`，会照原样发出去。
     scenarios: Array.isArray(o.scenarios) ? JSON.stringify(o.scenarios) : o.scenarios,
+    protections: Array.isArray(o.protections) ? JSON.stringify(o.protections) : o.protections,
+    injections: Array.isArray(o.injections) ? JSON.stringify(o.injections) : o.injections,
   }), { timeout: seconds * 1000 + RUN_GRACE_MS })
+}
+
+/**
+ * 暂停**当前这一轮**演练（commit 10c）。
+ *
+ * @returns {Promise<{success:boolean, stopped:boolean, summary:string}>}
+ *          `stopped` = 后端是否真的够到了那一轮（`false` = 此刻没有在跑的演练 ⇒ **不是故障**，
+ *          多半是那一轮已经自己跑完了）。`summary` 是后端写好的中文一句话，**直接显示**。
+ *
+ * ⚠️ **它不掐断 `runAttack` 那条连接**：语义是「停止派发 + 排空在途」——本轮不再发新请求，
+ *    已经在途的那批跑完（`GRACE_SECONDS` 内）再收口 ⇒ 正在等 `runAttack` 的那个调用点
+ *    **几秒内**就会拿到响应（`Result.Engine.Stopped = true`），**用不着**给它换一条通路或加超时。
+ * ⚠️ 超时用短的那一档（`http.post` 的默认 10 秒就够）：这条请求后端**立刻**回，
+ *    它不等演练跑完 —— 与 `runAttack` 恰好相反，别顺手给它也加 `RUN_GRACE_MS`。
+ * ⚠️ **不写审计**（与清场不同）：一轮没跑完就没有可落的记录 ⇒ 审计在 `runAttack` 那一侧。
+ */
+export function stopAttack() {
+  // body 传空串：本仓 POST 一律带 urlencoded 头（同 `attackScenarios()`），后端不读 body。
+  return postJson(endpoints.observe.attackStop, '')
 }
 
 /**

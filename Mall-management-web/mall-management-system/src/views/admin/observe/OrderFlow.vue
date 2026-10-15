@@ -17,9 +17,13 @@
       </div>
     </header>
 
-    <p v-if="errMsg" class="a-flash bad">
-      状态流转流中断：{{ errMsg }}
-      <button type="button" class="a-btn" @click="connect">重新连接</button>
+    <!-- ⚠️ 断线条的判据是 `lost`、**不是** `errMsg`（块 7 · commit 10c）：
+         服务端**正常收尾**（`onEnd(null)`）时 `errMsg` 一路为空，而那种情况下不提示
+         就等于「五态计数与「最近订单」静静停在上一次连接的那一拍」—— 页面上一切正常、
+         其实早就不更新了。 -->
+    <p v-if="lost" class="a-flash bad">
+      {{ lostText }}
+      <button type="button" class="a-btn" @click="connect">立即重连</button>
     </p>
 
     <!-- ══ ② 五态计数卡 + 状态分布环图 ═════════════════════════════════════════════
@@ -454,6 +458,13 @@ const batchCountsRows = computed(() => (batchCounts.value
 /* ── 页面状态 ───────────────────────────────────────────────────────────────── */
 const phase = ref('connecting')            // connecting | live | stopped
 const errMsg = ref('')
+/**
+ * 断线状态：`null` = 没断；否则 `{ err, attempt, nextRetryInMs }`（`openResilientStream` 的
+ * `onLost` 原样存下来，commit 10c）。
+ * ⚠️ 它和 `errMsg` 是**两个判据**：`errMsg` 只装**真错误**（非 2xx / 帧解析失败 / 读失败），
+ * 而「服务端正常收尾」那一格 `errMsg` 是空的 —— 断线条必须覆盖它（见模板里那条注释）。
+ */
+const lost = ref(null)
 const seq = ref(0)
 const ts = ref(0)
 const counts = ref({})                     // 本拍五态计数（后端权威口径）
@@ -522,6 +533,22 @@ function flash(setRef, key) {
 const first = computed(() => seq.value === 0 && !errMsg.value)
 const total = computed(() => num(counts.value.total) || sumOf(counts.value))
 const phaseText = computed(() => (phase.value === 'live' ? '已连接' : (phase.value === 'stopped' ? '已断开' : '连接中')))
+
+/**
+ * 断线条那句话（commit 10c）。⚠️ 两种都要写全：真错误（`err`）与**服务端正常收尾**
+ * （`err === null`，例如后端重启、中间层掐连接、`async.request-timeout` 到点）——
+ * 后者不是故障，但页面上的五态计数同样停在断开前那一拍，不说清楚就回到「静默陈旧」。
+ * ⚠️ `nextRetryInMs / 1000` 不必格式化：退避档位就是 500/1000/2000/4000/8000，
+ * 除以 1000 恰好是 0.5 / 1 / 2 / 4 / 8。
+ */
+const lostText = computed(() => {
+  const s = lost.value
+  if (!s) return ''
+  const head = s.err
+    ? `状态流转流中断：${(s.err && s.err.message) || '连接中断'}`
+    : '状态流转流已断开（服务端正常收尾）'
+  return `${head} —— 上面的数字停在断开前最后一拍，${s.nextRetryInMs / 1000} 秒后自动重连（第 ${s.attempt} 次）`
+})
 const lastTickAt = computed(() => (ts.value ? hms(ts.value) : '—'))
 function sumOf(c) {
   return STATES.reduce((a, s) => a + num(c && c[s.key]), 0)
@@ -743,14 +770,22 @@ function onFrame(f) {
 function connect() {
   closeStream()
   errMsg.value = ''
+  lost.value = null
   phase.value = 'connecting'
+  // ⚠️ `openOrderStream` 从 commit 10c 起是**带自动重连**的那一层（`onEnd` → `onLost`）：
+  //    `onLost` **每次**断开都报，含「服务端正常收尾」那一格 —— 这是本笔要治的那一格。
   stream = openOrderStream({
-    onOpen() { phase.value = 'live' },
+    onOpen() {
+      phase.value = 'live'
+      lost.value = null
+      errMsg.value = ''
+    },
     onFrame,
-    onEnd(err) {
-      // `onEnd(null)` = 服务端正常收尾（推满后关闭）—— 不是故障，但流确实断了，故也置 stopped。
+    onLost(s) {
       phase.value = 'stopped'
-      if (err) errMsg.value = (err && err.message) || '连接中断'
+      lost.value = s
+      // ⚠️ `errMsg` 只装**真错误**：它同时是「还没收到第一拍」那个加载闸的判据（见 `first`）。
+      errMsg.value = s.err ? ((s.err && s.err.message) || '连接中断') : ''
     },
   })
 }

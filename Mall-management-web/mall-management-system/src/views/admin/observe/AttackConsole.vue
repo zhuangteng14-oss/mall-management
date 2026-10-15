@@ -34,7 +34,7 @@
          勾选固定成一个场景、参数仍取面板上的值 —— 这样「先把并发调到 300 再点秒杀风暴」也成立。 -->
     <h2 class="a-h2">
       固定一键
-      <span class="a-h2n">点一下 = 单独跑这一个场景（按下面的并发 / 持续秒数）</span>
+      <span class="a-h2n">点一下 = 单独跑这一个场景（按下面的并发 / 持续秒数 / 档位）</span>
     </h2>
 
     <p v-if="!scenarios.length" class="a-empty">
@@ -74,6 +74,91 @@
         />
       </div>
 
+      <!-- ── ③b 压力档位（丁 · commit 10c）───────────────────────────────────────
+           三选一：120 / 400 / 拉满。「档位」= **目标 QPS**（后端 `AttackEngine.Pacer` 真的按它
+           限速），与上面的「总并发数」是**两把各管各的旋钮**：并发 = 同时几个在飞，档位 = 一秒
+           发几个。只给并发不给档位的话，实际 QPS = 在途 ÷ 响应耗时，那是**后端速度决定的**一个数
+           ⇒ 120 与 400 会打出同一个读数（那种档位是假旋钮）。
+           ⚠️ 「拉满」= `targetQps=0` = 不限速：读数是这台机器 ＋ 后端的**真实上限**，不是我们设
+              的一个数。引用出处：本机 200 并发 × 300 秒实测 **854.1 QPS**（`_work/c10-200x300.json`
+              的 `actualQps`），后端 `AttackEngine.java` 的 `WORKER_THREADS` / `Pacer` 两处类注释
+              引的也是这个数（「32 条足够推满 854 QPS 一档」「验收判据里的 ≥854」）。⚠️ 它是**本机**
+              的读数，不是任何机器上都成立 → 页面上只当「量级参考」，不当承诺。 -->
+      <h3 class="a-sub">
+        压力档位
+        <span class="a-subn">目标 QPS · 与并发是两把旋钮（拉满 = 不限速，读数为真实上限）</span>
+      </h3>
+      <div class="a-tiers">
+        <button
+          v-for="t in TIERS"
+          :key="t.qps"
+          type="button"
+          class="a-tier"
+          :class="{ 'is-on': tier === t.qps }"
+          :aria-pressed="tier === t.qps ? 'true' : 'false'"
+          :title="t.hint"
+          :disabled="running"
+          @click="tier = t.qps"
+        >
+          <b>{{ t.label }}</b>
+          <span>{{ t.note }}</span>
+        </button>
+      </div>
+
+      <!-- ── ③c 防护 / 注入开关（丁 · commit 10c）────────────────────────────────
+           ⚠️ **本笔只收下、只记录、不实现**（硬边界 A：限流 / 熔断 / 降级 / 重试 / 分池的落地在
+              D 段）⇒ **拨这两组开关不会改变这一轮的读数**。这句话必须写在页面上：不写的话，看到
+              「拦下变多了」的人会以为是刚打开的限流起了作用。
+           ⚠️ 两组开关都进 `drill_record`（后端 `AttackEngine.buildScenarioJson` 写进 `Result.Engine`）
+              ⇒ 「这一轮到底是按哪套开关跑的」事后可复现 —— 这才是本笔给它们的**唯一**作用。
+           ⚠️ 缺省 = 防护**全开** / 注入**全关**（后端白名单：表外的 key 一律 400，不静默忽略）。
+           ⚠️ 注入里 `mqDown` / `dbSlow` **未接通**：拨得动、进记录，但读数不变 —— 后端把这种
+              「收了但没实现」如实列进结果的 `Engine.InjectionsNotWired`（见 `INJECTIONS_NOT_WIRED`）。 -->
+      <h3 class="a-sub">
+        防护开关
+        <span class="a-subn">默认全开 · 本笔只记录、不改读数（接闸在 D 段）</span>
+      </h3>
+      <div class="a-switches">
+        <button
+          v-for="k in PROTECTIONS"
+          :key="k"
+          type="button"
+          class="a-sw"
+          :class="{ 'is-off': !protections.has(k) }"
+          :aria-pressed="protections.has(k) ? 'true' : 'false'"
+          :title="`${protectionLabel(k)}：${protections.has(k) ? '已开' : '已关'}（点一下拨动）—— 本笔只记录，读数不变`"
+          :disabled="running"
+          @click="toggleProtection(k)"
+        >
+          <i class="a-sw-dot" aria-hidden="true"></i>
+          <span class="a-sw-n">{{ protectionLabel(k) }}</span>
+        </button>
+      </div>
+
+      <h3 class="a-sub">
+        故障注入
+        <span class="a-subn">默认全关 · 标「未接通」的两个拨了也不变读数</span>
+      </h3>
+      <div class="a-switches">
+        <button
+          v-for="k in INJECTIONS"
+          :key="k"
+          type="button"
+          class="a-sw"
+          :class="{ 'is-off': !injections.has(k), 'is-na': !wired(k) }"
+          :aria-pressed="injections.has(k) ? 'true' : 'false'"
+          :title="wired(k)
+            ? `${injectionLabel(k)}：${injections.has(k) ? '已开' : '已关'}（点一下拨动）—— 这一路真接通了`
+            : `${injectionLabel(k)}：未接通 —— 拨动只进记录，读数不变（结果里列进 InjectionsNotWired）`"
+          :disabled="running"
+          @click="toggleInjection(k)"
+        >
+          <i class="a-sw-dot" aria-hidden="true"></i>
+          <span class="a-sw-n">{{ injectionLabel(k) }}</span>
+          <span v-if="!wired(k)" class="a-sw-na">未接通</span>
+        </button>
+      </div>
+
       <div class="a-run">
         <label class="a-f a-f-narrow">
           <span>总并发数</span>
@@ -93,6 +178,22 @@
           @click="runCustom"
         >
           <IconGlyph name="ok" />{{ running ? '演练中…' : '开始' }}
+        </button>
+        <!-- [暂停]（commit 10c · A 档第 5 条）—— 走 `POST /admin/observe/attack/stop`：
+             语义是「**停止派发 + 排空在途**」，**不掐断**这条 `/run` 连接 ⇒ 本轮不再发新请求，
+             已经在途的那批跑完（3 秒宽限）就收口，等 `/run` 的**同一个** await 几秒内拿到结果
+             （带 `Engine.Stopped=true`）。⇒ 本页不用换通路、也不用加超时。
+             ⚠️ 只在 `running` 时出现：它是**本页自己发起的那一轮**的伴生按钮。页面半路刷新后，
+                后端那一轮还在跑而本页已经没有 `running` ⇒ 这里也画不出暂停（后端那枚令旗是真的，
+                只是本页不知道 —— 那种情况用 curl 打 `/attack/stop`，它照样停）。 -->
+        <button
+          v-if="running"
+          type="button"
+          class="a-btn"
+          :disabled="stopping"
+          @click="stopRun"
+        >
+          <IconGlyph name="no" />{{ stopping ? '叫停中…' : '暂停' }}
         </button>
       </div>
 
@@ -290,12 +391,26 @@
   ⚠️ 那条「不塞三面板」是**用户 2026-10-13 的改判**（原 D2 = 三面板同屏当总控台）；
      别按更早的方案把它合回去。
 
-  【它消费后端 3 个端点，全部经 `api/observe.js`】
+  【它消费后端 5 个端点，全部经 `api/observe.js`】
     · `attackScenarios()` —— 8 个预置场景（Key / Name / Protections / Needs / DefaultWeight）；
     · `runAttack(p)`      —— 跑一轮（**同步跑到结束**，见下）；
-    · `attackRecords(p)`  —— 演练记录（`Result` 长文本已由后端拆成字段）。
+    · `attackRecords(p)`  —— 演练记录（`Result` 长文本已由后端拆成字段）；
+    · `cleanupAttack()`   —— 清场（commit 9 补的按钮，破坏性、两段式确认）；
+    · `stopAttack()`      —— 叫停正在跑的那一轮（commit 10c 的 `[暂停]`）。
   ⚠️ 本页**不出现任何后端路径字面量**（那条判据可 grep 自动化：路径只许出现在
-     `api/endpoints.js`）。三个函数名即全部后端面。
+     `api/endpoints.js`）。五个函数名即全部后端面。
+
+  【commit 10c 给本页加的三样东西（丁 · 开关面板）】
+    · **压力档位**（120 / 400 / 拉满）—— 值就是 `targetQps`；与「总并发数」是两把各管各的旋钮，
+      见 `TIERS` 的注释（「拉满」给的是**不限速**，854 是本机实测的参考量级，不是设出来的目标）；
+    · **5 个防护开关 + 3 个注入开关** —— **本笔只收下、只记录、不实现**（硬边界 A：防护的真正落地
+      在 D 段）⇒ 拨它们**不会改变这一轮的读数**，这句话写在面板上（不写就会被读成「我开了限流
+      所以拦下变多了」）；两组都进 `drill_record` ⇒ 「这一轮按哪套开关跑的」事后可复现；
+    · **`[暂停]`** —— 走 `/attack/stop`，语义是「**停止派发 + 排空在途**」而不是掐断：本轮不再发
+      新请求，在途那批走 3 秒宽限，等 `/run` 的**同一个** await 几秒内拿到结果
+      （`Engine.Stopped=true`）⇒ 本页不换通路、不加超时。
+    ⚠️ 中文名（限流 / 熔断 / 降级 / 重试 / 分池 等）**不写在本页** —— 去
+       `config/labels/observe-labels.js` 取（那条「可观测域的中文只有一份」的判据见该文件头）。
 
   【⚠️ 跑一轮是**同步**请求 —— 这是本页最容易写错的一处】
   `AttackController#run` 阻塞到演练跑完（几十秒）才回。两条后果都落在本页：
@@ -322,11 +437,21 @@
 /* eslint-disable no-undef */ /* 理由见 `../../../components/charts/BaseChart.vue` 同款注释（eslint-plugin-vue 8.7.1 缺宏环境） */
 import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 // ⚠️ 三层 `../`（不是管理端其它页的两层）：本页在 `views/admin/observe/`，比 `views/admin/` 深一层。
-import { attackRecords, attackScenarios, cleanupAttack, runAttack } from '../../../api/observe'
+import { attackRecords, attackScenarios, cleanupAttack, runAttack, stopAttack } from '../../../api/observe'
 import WeightSlider from '../../../components/observe/WeightSlider.vue'
 import IconGlyph from '../../../components/ui/IconGlyph.vue'
 // commit 9 收敛：场景 key → 中文（`config/labels/observe-labels.js` 的 `SCENARIO_LABEL`）+ 角色码 → 中文。
-import { scenarioLabel } from '../../../config/labels/observe-labels'
+// ⚠️ commit 10c 起本页还吃两张新表：`PROTECTIONS`/`PROTECTION_LABEL`（五个防护开关）与
+//    `INJECTIONS`/`INJECTION_LABEL`（三个注入）—— 连同声明序一起去 `labels/` 取，本页**不写死**
+//    任何开关中文（那条判据见 `observe-labels.js` 文件头：可观测域的中文只有一份，在那）。
+import {
+  INJECTIONS,
+  INJECTIONS_NOT_WIRED,
+  injectionLabel,
+  PROTECTIONS,
+  protectionLabel,
+  scenarioLabel,
+} from '../../../config/labels/observe-labels'
 import { roleLabel } from '../../../config/labels/user-labels'
 
 // ── 入参上下限（**与后端逐字对齐**）──────────────────────────────────────────
@@ -343,6 +468,30 @@ const DUR_DEFAULT = 60
 /** 跑一轮的预计耗时里，`durationSeconds` 之外的那一段（Redis 断开阶段 B 的 5 秒）。 */
 const REDIS_DOWN_GRACE_MS = 5000
 
+/**
+ * 三个**压力档位**（丁 · commit 10c）—— 值就是后端 `/attack/run` 的 `targetQps`。
+ *
+ * ⚠️ 【`0` 是「不限速」而不是「0 QPS」】后端 `AttackEngine` 的口径是 `targetQps <= 0` ⇒
+ *    `Pacer.reserve()` 恒返 0、限速器形同不存在，实际上限交给在途许可 —— 即「拉满」。
+ *    ⇒ 三个档是 `120 / 400 / 0(拉满)`，界面上把 `0` 显示成「拉满」，**不显示成 0**。
+ *
+ * ⚠️ 【「854」是**本机实测**、不是我们设的目标值】档位里唯一一个带数字的第三档给的是
+ *    **不限速**，854 是「不限速时这台机器 ＋ 后端读出来多少」的**参考量级**，出处是
+ *    `_work/c10-200x300.json` 的 `actualQps`（200 并发 × 300 秒 = 854.1）；后端
+ *    `AttackEngine.WORKER_THREADS` 与 `Pacer` 两处类注释引的也是这个数。⇒ 它写在 `note` 里
+ *    当量级参考，**不写成目标值**（写成目标就成了我们自己编的一个数）。
+ *
+ * ⚠️ 【缺省我选了温和档 120 —— 这是本笔**有意改的一处默认行为**】改前本页**根本不发**
+ *    `targetQps`（那个入参是 commit 10c 才有的）⇒ 后端缺省 `0` = 拉满，也就是「按一下开始
+ *    就是满速」。缺省挪到 120 是为了让「随手点一下」不先把后端打满 —— 要复现改前的读数，
+ *    点「拉满」。这条如实登记在 commit 报文里，不是笔误。
+ */
+const TIERS = [
+  { qps: 120, label: '120', note: '温和 · 真限速', hint: '目标 120 QPS（后端限速器真的按它隔开）' },
+  { qps: 400, label: '400', note: '中档 · 真限速', hint: '目标 400 QPS（后端限速器真的按它隔开）' },
+  { qps: 0, label: '拉满', note: '不限速 · 本机实测 854', hint: '不限速：读数是这台机器 ＋ 后端的真实上限，不是我们设的一个数（本机 200 并发实测 854 QPS）' },
+]
+
 const scenarios = ref([])
 const loadingScenarios = ref(false)
 /** `Key → 权重`。缺省值来自后端（见 `loadScenarios`），本页不写死一套分布。 */
@@ -350,7 +499,21 @@ const weights = reactive({})
 const concurrency = ref(CONC_DEFAULT)
 const durationSeconds = ref(DUR_DEFAULT)
 
+// ── 丁：档位 + 两组开关（commit 10c）──────────────────────────────────────────
+/** 当前档位 = `targetQps`。缺省取 `TIERS[0]`（120）—— 为什么不是「拉满」见 `TIERS` 的第三条 ⚠️。 */
+const tier = ref(TIERS[0].qps)
+/**
+ * 开着的**防护**（缺省**全开** —— 用户 2026-10-14 定稿）。
+ * ⚠️ 用 `Set` 而不是对象字面量：判据是「含不含」，写成一个 `{rateLimit: true, …}` 就要靠
+ *    `!!x[k]` 去读，多一层可以写错的地方（同 `EventLog.vue#activeKinds`）。
+ */
+const protections = ref(new Set(PROTECTIONS))
+/** 开着的**注入**（缺省**全关**）。 */
+const injections = ref(new Set())
+
 const running = ref(false)
+/** 叫停请求在途（按钮显示「叫停中…」并禁用，避免连点出两发）。 */
+const stopping = ref(false)
 const flash = reactive({ text: '', kind: '' })
 const plannedSeconds = ref(DUR_DEFAULT)
 const elapsedMs = ref(0)
@@ -375,6 +538,32 @@ const cleaning = ref(false)
 const weightOf = (key) => Number(weights[key]) || 0
 function setWeight(key, v) {
   weights[key] = Number(v) || 0
+}
+
+// ── 丁：开关的拨动（commit 10c）──────────────────────────────────────────────
+/**
+ * 这一路注入**真接通了没有**。判据取自 `INJECTIONS_NOT_WIRED` —— 它是后端
+ * `AttackEngine.INJECTIONS_NOT_WIRED` 的镜像，页面**不自己判断**哪几个未接通
+ * （那是一条后端事实，前端写第二遍迟早对不上）。
+ */
+const wired = (key) => !INJECTIONS_NOT_WIRED.includes(key)
+
+/** 拨一枚防护开关。写法与 `EventLog.vue#toggleKind` 同款（`new Set(旧)` → 整体替换）。 */
+function toggleProtection(key) {
+  const next = new Set(protections.value)
+  if (next.has(key)) next.delete(key)
+  else next.add(key)
+  protections.value = next
+}
+
+/** 拨一枚注入开关（同上）。⚠️ 未接通的那两枚**照样拨得动**：它们的意义就是「接口位」——
+ *  拨不动会让人以为「后端根本没有这个开关」，而它确实在白名单里、收得下、记得住，
+ *  只是这一路没有实现 ⇒ 用「拨得动 + 标着未接通」说这件事，比禁用更如实（见 `INJECTIONS_NOT_WIRED`）。 */
+function toggleInjection(key) {
+  const next = new Set(injections.value)
+  if (next.has(key)) next.delete(key)
+  else next.add(key)
+  injections.value = next
 }
 
 /** 勾选 = 权重 > 0（后端 `parse` 把 0 权重直接剔除，见 `WeightSlider.vue` 块首）。 */
@@ -613,12 +802,27 @@ async function fire(name, chosen) {
       name,
       concurrency: normInt(concurrency.value, CONC_MIN, CONC_MAX, CONC_DEFAULT),
       durationSeconds: secs,
+      targetQps: tier.value,
       scenarios: chosen,
+      // ⚠️ 两组开关**一律显式传**（不靠后端那句「缺省 = 防护全开／注入全关」）：丁要的可复现性
+      //    是「这一轮到底是按**哪一套**开关跑的」，显式传出去的才是页面上这一份。
+      //    ⚠️ 空数组 ≠ 没给 —— 全关时传的是 `[]`，后端照收（那正是「一个都不开」）；
+      //    **不传**才是「缺省 = 全开」。⇒ `api/observe.js#runAttack` 对数组一律 `JSON.stringify`。
+      protections: PROTECTIONS.filter((k) => protections.value.has(k)),
+      injections: INJECTIONS.filter((k) => injections.value.has(k)),
     })
+    // 甲：这一轮有没有被叫停过、有没有背压弃投 / 取消。后两个数是 `DrillRecordService.run()`
+    // 在**响应根上**单列出来的（`ShedRequests` / `AbandonedRequests`），**不并进「失败」那一档**
+    // ——「没发出去」与「发出去失败了」是两件事。非 0 才写进这行提示（0 是常态，不必占屏）。
+    const eng = (data && data.Result && data.Result.Engine) || {}
+    const engNotes = []
+    if (Number(data.ShedRequests) > 0) engNotes.push(`背压弃投 ${data.ShedRequests}（没发出去，不算失败）`)
+    if (Number(data.AbandonedRequests) > 0) engNotes.push(`取消 ${data.AbandonedRequests}`)
     flash.kind = 'ok'
     flash.text =
-      `「${data.Name || name}」跑完：总请求 ${data.TotalRequests} · 拦下 ${data.BlockedRequests} · ` +
-      `失败 ${data.FailedRequests} · 耗时 ${fmtMs(data.DurationMs)}。` +
+      `${eng.Stopped ? '已叫停' : `「${data.Name || name}」跑完`}：总请求 ${data.TotalRequests} · ` +
+      `拦下 ${data.BlockedRequests} · 失败 ${data.FailedRequests} · 耗时 ${fmtMs(data.DurationMs)}。` +
+      (engNotes.length ? ` ${engNotes.join(' · ')}。` : '') +
       `记录 Id=${data.Id} 已刷新到「演练记录」并展开。`
     // 跑完刷新列表并按 Id 展开 —— 理由见文件头「跑完之后为什么不再自己拼一行」。
     await loadRecords()
@@ -643,6 +847,32 @@ function runPreset(s) {
 /** 自定义编排：按滑条勾选跑。 */
 function runCustom() {
   fire('自定义', picked.value.map((c) => ({ key: c.key, weight: c.weight })))
+}
+
+/**
+ * 叫停正在跑的那一轮（`[暂停]` · commit 10c）。
+ *
+ * ⚠️ **回显后端自己的 `summary`**，不在前端重写那句话 —— 「停的是什么、在途那批怎么处理」的
+ *    唯一出处在 `AttackController#stop`（与 `doCleanup` 回显 `summary` 同一口径）。
+ * ⚠️ 后端 `stopped=false`（当时没有在跑的演练）**不是失败** —— 多半是这一轮刚好自己跑完了
+ *    ⇒ 照实说（中性提示，不给红条），不编造成一个「已停止」。
+ * ⚠️ 这个函数**不发**第二轮演练、也**不改** `running`：`running` 归 `fire()` 的 `finally` 管
+ *    （叫停之后 `/run` 那个 await 几秒内就会回来，届时报文里带 `Engine.Stopped=true`）。
+ */
+async function stopRun() {
+  if (!running.value || stopping.value) return
+  stopping.value = true
+  try {
+    const data = await stopAttack()
+    flash.kind = data && data.stopped ? 'ok' : 'info'
+    flash.text = (data && data.summary)
+      || (data && data.stopped ? '已发出停止令。' : '当时没有正在跑的演练。')
+  } catch (e) {
+    flash.kind = 'bad'
+    flash.text = `叫停没发出去：${errText(e)}`
+  } finally {
+    stopping.value = false
+  }
 }
 
 function toggle(r) {
@@ -761,6 +991,12 @@ onBeforeUnmount(() => {
   color: var(--danger);
   background: var(--danger-ground);
 }
+/* 中性提示（commit 10c 新增）：既不是成功也不是失败 —— 现只用于「叫停时后端说没有在跑的
+   一轮」。⚠️ 不拿 `.ok`（绿）去装它：那是「做成了」的意思，会把这个读数读反。 */
+.a-flash.info {
+  color: var(--ink-2);
+  background: var(--surface-2);
+}
 .a-err {
   font-size: var(--fs-sm);
   color: var(--danger);
@@ -834,6 +1070,89 @@ onBeforeUnmount(() => {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
   gap: var(--s2);
+}
+/* ── ③b 档位 / ③c 开关（丁 · commit 10c）────────────────────────────────────
+   两排都是「一排小按钮」。样式照 `EventLog.vue` 的图例兼筛选（`.a-el-kind` / `.is-off`）同款：
+   同域、最近邻，不另立一套 —— 那边也是「一排可拨的 chip，关掉的压暗并去色」。
+   ⚠️ 那两处的样式各自 scoped，**不能跨组件复用**，所以这里是**同款而不是同一个类**。 */
+.a-tiers,
+.a-switches {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--s2);
+}
+.a-tier,
+.a-sw {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s2);
+  font: inherit;
+  font-size: var(--fs-xs);
+  color: var(--ink);
+  background: var(--surface-2);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r2);
+  padding: var(--s1) var(--s3);
+  cursor: pointer;
+}
+.a-tier:hover:not(:disabled),
+.a-sw:hover:not(:disabled) {
+  background: var(--surface-3);
+}
+.a-tier:disabled,
+.a-sw:disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+/* 档位的「选中的那一个」：品牌色（同 `.a-btn-on` 的一组变量）。 */
+.a-tier.is-on {
+  color: var(--brand-ink);
+  background: var(--brand-soft);
+  border-color: var(--brand-ink);
+}
+.a-tier b {
+  font-family: var(--font-mono);
+  font-size: var(--fs-sm);
+  font-variant-numeric: tabular-nums;
+}
+.a-tier span {
+  color: var(--ink-3);
+}
+.a-tier.is-on span {
+  color: inherit;
+  opacity: 0.8;
+}
+/* 开关「关掉」态：**整枚压暗**（同 `.a-el-kind.is-off` 的处置 —— 留一点色会被读成还开着）。 */
+.a-sw.is-off {
+  opacity: 0.45;
+}
+.a-sw-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--c3);
+  flex: none;
+}
+.a-sw.is-off .a-sw-dot {
+  background: var(--ink-3);
+}
+.a-sw-n {
+  font-size: var(--fs-xs);
+}
+/* 未接通的那两枚（`mqDown` / `dbSlow`）：整枚改成虚线边 —— 一眼看出它是个**占位**。
+   ⚠️ 但**不置灰到不可点**：拨得动是故意的（理由见 `toggleInjection` —— 拨不动会被读成
+   「后端根本没这个开关」，而它确实在白名单里）。 */
+.a-sw.is-na {
+  border-style: dashed;
+}
+/* 「未接通」的角标 —— 虚线边 + 警示色：它是一条**说明**，不是一个按钮。 */
+.a-sw-na {
+  font-size: var(--fs-xs);
+  color: var(--warning);
+  border: 1px dashed var(--warning);
+  border-radius: var(--r1);
+  padding: 0 var(--s1);
 }
 .a-run {
   display: flex;
@@ -1095,6 +1414,13 @@ onBeforeUnmount(() => {
   font-weight: var(--fw-med);
   color: var(--ink-3);
   margin: var(--s3) 0 var(--s2);
+}
+/* 小标题右边那半句「这东西是怎么用的」（commit 10c 新增；同 `.a-h2n` 的处置，小一号）。 */
+.a-subn {
+  font-weight: var(--fw-reg);
+  color: var(--ink-3);
+  opacity: 0.85;
+  margin-left: var(--s2);
 }
 .a-kv {
   font-size: var(--fs-xs);

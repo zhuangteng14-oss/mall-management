@@ -127,17 +127,20 @@ class DrillRecordServiceTest {
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("Scenarios", List.of(Map.of("Key", "seckill")));
         when(engine.run(any(), any())).thenReturn(new AttackEngine.DrillRun("自定义", "{\"c\":100}",
-                100, 30, 1, 60000L, result, "batch-8c"));
+                100, 30, 1, 2, 3, 60000L, result, "batch-8c"));
         when(dao.insert(anyString(), anyInt(), anyString(), anyString(), anyInt(), anyInt(), anyInt(),
                 anyLong(), anyString(), anyString())).thenReturn(7L);
 
-        Map<String, Object> out = service.run("自定义", null, null, null, "c-1", 1,
+        Map<String, Object> out = service.run("自定义", null, null, null, null, null, null, "c-1", 1,
                 "http://localhost:8088");
 
         assertEquals(7L, out.get("Id"));
         assertEquals(100, out.get("TotalRequests"));
         assertEquals(30, out.get("BlockedRequests"));
         assertEquals(1, out.get("FailedRequests"));
+        // 甲的两个数**单列**（不进上面三档）：背压弃投 2 / 被取消 3
+        assertEquals(2, out.get("ShedRequests"));
+        assertEquals(3, out.get("AbandonedRequests"));
         assertEquals(60000L, out.get("DurationMs"));
         assertEquals(result, out.get("Result"));
         assertTrue(Boolean.TRUE.equals(out.get("success")));
@@ -150,18 +153,21 @@ class DrillRecordServiceTest {
      * ⚠️ {@code scenarios} 到服务层还是**表单里的 JSON 数组串**（端点收 {@code @RequestParam}）：
      * 本类负责把它解成结构再交给引擎（{@code AttackEngine.parse} 只认结构），数值参数**保持字符串**
      * —— 「必须是整数」那句话由引擎的 {@code clampInt} 说（那里是唯一校验出口）。
+     *
+     * <p>丁的两个开关与它**同一种传输形状**（也不在服务层校验 key —— 那份白名单在引擎里），
+     * 故一并钉在这里。
      */
     @Test
     void decodesScenariosJsonStringBeforeHandingToTheEngine() {
-        when(engine.run(any(), any())).thenReturn(new AttackEngine.DrillRun("压测", "{}", 0, 0, 0, 0L,
-                Map.of(), "batch-8c"));
+        when(engine.run(any(), any())).thenReturn(new AttackEngine.DrillRun("压测", "{}", 0, 0, 0, 0, 0,
+                0L, Map.of(), "batch-8c"));
 
-        service.run("压测", "200", "30",
+        service.run("压测", "200", "30", "400",
                 "[{\"key\":\"seckill\",\"weight\":80},{\"key\":\"cacheCold\",\"weight\":20}]",
-                "c-1", 1, "http://localhost:8088");
+                "[\"rateLimit\",\"retry\"]", "[\"redisDown\"]", "c-1", 1, "http://localhost:8088");
 
         // 空白 scenarios = 没勾 = **null**（引擎按全 8 个场景跑），不是空数组（空数组是「一个都没勾」⇒ 抛）
-        service.run(null, null, null, "  ", "c-1", 1, "http://localhost:8088");
+        service.run(null, null, null, null, "  ", "  ", null, "c-1", 1, "http://localhost:8088");
 
         @SuppressWarnings("unchecked")
         ArgumentCaptor<Map<String, Object>> captor = ArgumentCaptor.forClass(Map.class);
@@ -170,16 +176,36 @@ class DrillRecordServiceTest {
         assertEquals("压测", body.get("name"));
         assertEquals("200", body.get("concurrency"), "数值保持字符串，校验归引擎");
         assertEquals("30", body.get("durationSeconds"));
+        assertEquals("400", body.get("targetQps"), "甲的目标 QPS 同样保持字符串");
         @SuppressWarnings("unchecked")
         List<Map<String, Object>> scenarios = (List<Map<String, Object>>) body.get("scenarios");
         assertEquals(2, scenarios.size());
         assertEquals("seckill", scenarios.get(0).get("key"));
         assertEquals(80, scenarios.get(0).get("weight"));
+        assertEquals(List.of("rateLimit", "retry"), body.get("protections"));
+        assertEquals(List.of("redisDown"), body.get("injections"));
         assertNull(captor.getAllValues().get(1).get("scenarios"));
+        // ⚠️ 空白 = **没给**（引擎用缺省：防护全开 / 注入全关）；给了 `[]` 才是「一个都不开」
+        assertNull(captor.getAllValues().get(1).get("protections"));
+        assertNull(captor.getAllValues().get(1).get("injections"));
 
         // ⚠️ 串不是 JSON 数组 ⇒ 抛（400）。**不**回落到「全 8 个场景」：那会让页面显示一串没人勾的场景
-        assertThrows(IllegalArgumentException.class, () -> service.run(null, null, null, "seckill",
-                "c-1", 1, "http://localhost:8088"));
+        assertThrows(IllegalArgumentException.class, () -> service.run(null, null, null, null,
+                "seckill", null, null, "c-1", 1, "http://localhost:8088"));
+        // ⚠️ 开关串形状错同样**抛**（不回落成缺省：那会让结果页显示一套没人勾的开关）
+        assertThrows(IllegalArgumentException.class, () -> service.run(null, null, null, null, null,
+                "rateLimit", null, "c-1", 1, "http://localhost:8088"));
+    }
+
+    /** [暂停]：一层转发（令旗在引擎里）—— 后端只要如实把引擎答的 true/false 返回去。 */
+    @Test
+    void stopIsForwardedToTheEngine() {
+        when(engine.stop()).thenReturn(true);
+        assertTrue(service.stop());
+
+        when(engine.stop()).thenReturn(false);
+        assertFalse(service.stop());
+        verify(engine, times(2)).stop();
     }
 
     /** 场景清单透传（控制器那条端点只做一层转发）。 */

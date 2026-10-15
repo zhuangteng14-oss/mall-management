@@ -239,6 +239,66 @@ export const ORDER_FLOW_STATE_LABEL = {
   cancelled: '已取消',
 }
 
+/**
+ * 攻击演练的**五个防护开关** key → 中文名 + 声明序（commit 10c 起头）。
+ *
+ * ⚠️ 【key 与顺序**逐字对齐后端**】`observe/service/AttackEngine.java` 的
+ *    `PROTECTION_KEYS = List.of("rateLimit","circuitBreak","degrade","retry","poolIsolation")`
+ *    —— 那是唯一出处（后端用它做白名单：表外的 key 一律 400）。本表是它的镜像。
+ *
+ * ⚠️ 【中文名抄自后端**同一份类注释**】`AttackEngine.java` 讲硬边界 A 的那句逐字是
+ *    「补救（**限流 / 熔断 / 降级 / 重试 / 分池**）」，五行与上表五 key 一一对应、顺序相同。
+ *    ⇒ 中文不在本文件新起；这里是那五个词的**登记处**（`labels/` 是中文的唯一来源）。
+ *
+ * ⚠️ 【顺序不是审美】面板上五枚开关的先后、以及将来 D 段把它们接上闸时的顺序，都吃这个序
+ *    —— 两处一旦不一致，看数字的人会把「第 2 个开关」指到另一个防护上，而且**不会报错**
+ *    （同文件头 `KINDS` 那条 ⚠️ 的道理）。
+ */
+export const PROTECTIONS = ['rateLimit', 'circuitBreak', 'degrade', 'retry', 'poolIsolation']
+
+/** `PROTECTIONS` 的 key → 中文（与后端类注释逐字对应，见上）。 */
+export const PROTECTION_LABEL = {
+  rateLimit: '限流',
+  circuitBreak: '熔断',
+  degrade: '降级',
+  retry: '重试',
+  poolIsolation: '分池',
+}
+
+/**
+ * 攻击演练的**三个故障注入开关** key → 中文名 + 声明序（commit 10c 起头）。
+ *
+ * ⚠️ 【key 与顺序对齐后端】`AttackEngine.java` 的
+ *    `INJECTION_KEYS = List.of("redisDown","mqDown","dbSlow")` 是唯一出处。
+ *
+ * ⚠️ 【中文名是**本仓新起**的，不是抄来的】后端对这三个 key **没有**中文文案
+ *    （`redisDown` 那一路复用的是 `AttackEngine.REDIS_DOWN_CAUSE` 那句「SIM：演练注入的 L2 故障…」，
+ *    那是日志文案不是开关名）。故这里如实登记：`Redis 断开` / `MQ 断开` / `慢 SQL` 三个词
+ *    **出自本文件**（前两个与 `SCENARIO_LABEL.redisDown`、`AttackEngine` 里「慢 SQL」的用词对齐）。
+ *
+ * ⚠️ 【`redisDown` 这个词在两处出现，含义不同】这里说的是**注入开关**（让 L2 真的不可用）；
+ *    `SCENARIO_LABEL.redisDown` 说的是**场景**（打 Redis 相关读的那一类请求）。
+ *    两者能同时开、也能只开一个 —— 别把两张表合成一张。
+ */
+export const INJECTIONS = ['redisDown', 'mqDown', 'dbSlow']
+
+/** `INJECTIONS` 的 key → 中文（本仓新起，见上）。 */
+export const INJECTION_LABEL = {
+  redisDown: 'Redis 断开',
+  mqDown: 'MQ 断开',
+  dbSlow: '慢 SQL',
+}
+
+/**
+ * **本笔没有真接通**的注入 —— 面板必须把它们画成「未接通」（可点也要标出来，或不给点）。
+ *
+ * ⚠️ 这是后端 `AttackEngine.INJECTIONS_NOT_WIRED = List.of("mqDown","dbSlow")` 的**镜像**。
+ *    后端把「这一轮哪些注入其实没生效」如实列进结果里的 `Engine.InjectionsNotWired`
+ *    ⇒ 前端这份只用于**开跑之前**就把话说明白（那一刻还没有结果可读）。
+ *    ⚠️ 未接通 = 拨了它**读数不会变**。画成一个能拨的开关而不标出来，等于骗人。
+ */
+export const INJECTIONS_NOT_WIRED = ['mqDown', 'dbSlow']
+
 /** 取场景中文名（认不出回落 key 原文）。 */
 export function scenarioLabel(key) {
   return Object.prototype.hasOwnProperty.call(SCENARIO_LABEL, key) ? SCENARIO_LABEL[key] : String(key == null ? '' : key)
@@ -248,5 +308,19 @@ export function scenarioLabel(key) {
 export function orderFlowStateLabel(key) {
   return Object.prototype.hasOwnProperty.call(ORDER_FLOW_STATE_LABEL, key)
     ? ORDER_FLOW_STATE_LABEL[key]
+    : String(key == null ? '' : key)
+}
+
+/** 取防护开关中文名（认不出回落 key 原文）。 */
+export function protectionLabel(key) {
+  return Object.prototype.hasOwnProperty.call(PROTECTION_LABEL, key)
+    ? PROTECTION_LABEL[key]
+    : String(key == null ? '' : key)
+}
+
+/** 取注入开关中文名（认不出回落 key 原文）。 */
+export function injectionLabel(key) {
+  return Object.prototype.hasOwnProperty.call(INJECTION_LABEL, key)
+    ? INJECTION_LABEL[key]
     : String(key == null ? '' : key)
 }

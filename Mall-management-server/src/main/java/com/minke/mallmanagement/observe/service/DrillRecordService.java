@@ -14,11 +14,12 @@ import java.util.Map;
 /**
  * 演练记录服务（块 7 · commit 4）—— <b>跑一次演练 + 把那一行读回来</b>。三条端点各对应一个方法。
  *
- * <h2>【它做的三件事，以及它<b>不</b>做的事】</h2>
+ * <h2>【它做的四件事，以及它<b>不</b>做的事】</h2>
  * <ol>
  *   <li>{@link #scenarios()} —— 场景清单（8 条，硬编码在 {@link AttackEngine}）；</li>
  *   <li>{@link #run} —— 交给 {@link AttackEngine} 真跑，然后把结果落一行 {@code drill_record}；</li>
- *   <li>{@link #records} —— 读回来，并把 {@code Result} 那个**长文本 JSON 拆成字段**。</li>
+ *   <li>{@link #records} —— 读回来，并把 {@code Result} 那个**长文本 JSON 拆成字段**；</li>
+ *   <li>{@link #stop} —— 叫停正在跑的那一轮（块 7 · commit 10 的 [暂停]；一层转发，见该方法的注释）。</li>
  * </ol>
  * ⚠️ <b>发流量、汇总、判定「拦下 / 失败」全在 {@link AttackEngine} 里</b>，本类不含任何请求逻辑
  * —— 分开的理由是前者可以纯单测（不碰库、不起 Spring），后者只做「编排 + 落库 + 反序列化」。
@@ -73,13 +74,17 @@ public class DrillRecordService {
      * @param name            场景名（空白 ⇒ 引擎给「自定义」）
      * @param concurrency     总并发数（空白 ⇒ 缺省；上下限见引擎常量）
      * @param durationSeconds 持续秒数（同上）
+     * @param targetQps       目标 QPS（甲；空白 ⇒ {@code 0} = 不限速 = 加这个参数之前的行为）
      * @param scenarios       勾选与权重的 JSON 数组串，见 {@link #decodeScenarios}；空白 ⇒ 全 8 个场景
+     * @param protections     防护开关的 JSON 数组串（丁）；空白 ⇒ 全开（面板缺省）
+     * @param injections      注入开关的 JSON 数组串（丁）；空白 ⇒ 全关
      * @param operatorId      发起者业务号（**取会话**，认不出则 {@code ""}）
      * @param operatorRole    1/2/3（认不出则 {@code 0}）
      * @param baseUrl         打哪个地址（由 {@code AttackController} 从**当前请求**推出来，见那里的说明）
      */
     public Map<String, Object> run(String name, String concurrency, String durationSeconds,
-                                   String scenarios, String operatorId, Integer operatorRole,
+                                   String targetQps, String scenarios, String protections,
+                                   String injections, String operatorId, Integer operatorRole,
                                    String baseUrl) {
         // ⚠️ 汇成一个报文交给引擎：引擎的 `parse` 是**唯一的校验出口**（单测钉住的就是它），
         //    本类只负责把「表单串」翻译成它认的报文形状（数值保持字符串 —— clampInt 两种都吃，
@@ -88,7 +93,12 @@ public class DrillRecordService {
         body.put("name", name);
         body.put("concurrency", concurrency);
         body.put("durationSeconds", durationSeconds);
+        body.put("targetQps", targetQps);
         body.put("scenarios", decodeScenarios(scenarios));
+        // 丁的两个开关与 `scenarios` **同一种传输形状**（JSON 数组串 ⇒ 结构）—— 理由同
+        // decodeScenarios：自造分隔符要么错位、要么得再造一套转义规则。
+        body.put("protections", decodeKeys(protections, "protections"));
+        body.put("injections", decodeKeys(injections, "injections"));
 
         // ⚠️ 这里**不**转发调用者的 Authorization / Cookie：引擎自己铸票，转发发起人（管理员）的凭据
         //    会让身份守卫走管理员豁免（场景 7 的 403 永远出不来）、转发 Cookie 更会让「故意不带票」
@@ -104,11 +114,40 @@ public class DrillRecordService {
         ok.put("TotalRequests", run.total());
         ok.put("BlockedRequests", run.blocked());
         ok.put("FailedRequests", run.failed());
+        // 甲的两个数（背压弃投 / 取消）**单列**：它们不并进上面三档（理由见 AttackEngine.Meter）
+        ok.put("ShedRequests", run.shed());
+        ok.put("AbandonedRequests", run.abandoned());
         ok.put("DurationMs", run.durationMs());
         // ⚠️ 这一份是**刚跑完的那一轮**的字段化结果（不是从库里读回来的）⇒ 前端跑完即可直接入表，
         //    不必再拉一次列表。「记录里那一行」与「这里这一份」同源（run.result()）。
         ok.put("Result", run.result());
         return ok;
+    }
+
+    // ==================== 面 4：叫停（块 7 · commit 10）====================
+
+    /**
+     * 叫停正在跑的那一轮（{@code POST /admin/observe/attack/stop}）。
+     *
+     * <p>⚠️ <b>为什么本笔必须新增这个出口</b>（用户 2026-10-14 实测踩到）：{@code /run} 是
+     * <b>同步跑到结束</b>的（几十秒到几分钟），而在它之前全仓**没有任何停止手段** ——
+     * 上一轮探针崩了但 {@code /run} 已经服务端起飞，只能干等到它自己跑完。
+     *
+     * <p>⚠️ 语义是「**停止派发 + 排空在途**」，不是「立即掐断」：在途的请求走
+     * {@code AttackEngine} 的宽限排空（{@code GRACE_SECONDS}），宽限用尽才取消并记
+     * {@code Abandoned}。理由与旧代码同源 —— 硬掐已经真发出去的请求会记成假失败。
+     *
+     * <p>⚠️ 本类只是**转发**（一层薄壳）：真正的令旗在 {@code AttackEngine} 里。放在这里而不是
+     * 让 {@code AttackController} 直接注 {@code AttackEngine}，是为了不给控制器添第四个构造依赖
+     * （本仓在那处登记过「第十九次」地雷：控制器多一个依赖，{@code AbstractSmokeTest} 的
+     * {@code @Import} 就得跟着加）。
+     *
+     * @return {@code true} = 确实叫停了一轮正在跑的；{@code false} = 当时没有在跑的轮次
+     *         （跑完了 / 从没跑过）。⚠️ 这个布尔**如实回给前端**：它决定按钮该不该提示
+     *         「没有在跑的演练」，不编造成一个 success:true 了事。
+     */
+    public boolean stop() {
+        return attackEngine.stop();
     }
 
     // ==================== 面 3：记录列表（拆字段） ====================
@@ -167,6 +206,28 @@ public class DrillRecordService {
             // 把正确形状写进消息里：这是可以被 curl 直接打的一条端点，报错要能照着改。
             throw new IllegalArgumentException(
                     "scenarios 必须是 JSON 数组，如 [{\"key\":\"seckill\",\"weight\":80}]");
+        }
+    }
+
+    /**
+     * 开关参数（**JSON 数组串**）→ 字符串列表。空白 ⇒ {@code null}（= 没给 ⇒ 引擎用缺省）。
+     *
+     * <p>⚠️ 与 {@link #decodeScenarios} 同一条口径：解析失败**直接抛**（400），不回落。
+     * 回落成「全部开关按缺省」等于替调用者做了另一个决定，而结果页上会显示一套他没勾的开关
+     * —— 那不是降级，是失真（同 {@code OrderService.parseExplicitItems} 那边的取舍差异）。
+     *
+     * <p>⚠️ 「没给」与「给了 {@code []}」是**两件事**：前者是缺省（防护全开 / 注入全关），
+     * 后者是「这一轮一个都不开」这个有意义的状态。空串按「没给」处理（表单控件不发空值）。
+     */
+    private List<String> decodeKeys(String raw, String what) {
+        if (raw == null || raw.isBlank()) {
+            return null;
+        }
+        try {
+            return objectMapper.readValue(raw, new TypeReference<List<String>>() { });
+        } catch (Exception e) {
+            throw new IllegalArgumentException(
+                    what + " 必须是 JSON 字符串数组，如 [\"redisDown\"]");
         }
     }
 
