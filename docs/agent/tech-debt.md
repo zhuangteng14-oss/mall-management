@@ -1012,3 +1012,17 @@
 | 为什么不改 | 把手写那两处改写成 r4j 是**重构**、不是本段边界（会让块 2 / 块 7 已验收的降级行为全部重测）。 |
 | 处理时机 | 若将来要统一，前提是「手写那两处的语义能被 r4j 完整表达」——⚠️ 至少 `RabbitEventPublisher` 那处不是纯熔断（它还要在断连时**降级成 no-op 而不是抛异常**），r4j 的 `CircuitBreaker` 只能返回异常或调用 fallback，语义要重新设计一次。 |
 | 状态 | ⏸ **登记（2026-10-15，D 段 commit 2）**。 |
+
+## TD-76 `goods.MerchantId` 索引（Migration ⑳）**只缩锁粒度、不拆环** —— 它不替代重试，重试也不替代它
+
+> 本条的由来：顾问 2026-10-16 追问问到「索引到底治好了什么」。⚠️ **与 TD-74 不重复** ——
+> TD-74 记的是「重试该落在哪、触发条件满没满」，本条记的是「这枚索引本身是什么性质」。
+> ⚠️ 本节**刻意不写「文件:行号」**（理由同〈TD-74 订正〉节首）：要定位请用**符号名**。
+
+| 项 | 内容 |
+|---|---|
+| **现象** | 同一探针、同一场景、同一台库，48 轮 ×（1×A + 4×B）：加索引前 `ER_LOCK_DEADLOCK` 增量 **149**、HTTP 5xx **139**；加索引后 1213 增量 **139**、**HTTP 5xx 仍然是 139**（一个都没少）；再落重试后 1213 增量 **141**、5xx **0**。⇒ 索引只改变了「每次死锁**牵连多少行**」，没有改变「死锁**还发不发生**」。 |
+| **性质** | **缩锁粒度、不治本环。** 环的成因是两个事务**访问顺序相反**（`MerchantApplicationService.audit` 写序 user→goods × `MerchantDowngradeService.relist` 写序 goods→user），与各自锁住几行无关。索引把 `relistAllByMerchant` 那条 `UPDATE goods SET ShelfState = 1, DelistedAt = NULL WHERE MerchantId = ?` 的锁，从「全表扫到的**每一行**都加 X 锁（`SHOW ENGINE INNODB STATUS` 报该事务持 **49 row lock(s)**）」压到「`idx_goods_merchant` 上的**单条** record lock」——缩的是**牵连面**，不是**环**。 |
+| **价值** | 对**别的**并发写路径有益：任何按 `MerchantId` 写 `goods` 的事务不再顺带锁住整张表（读路径的顺带收益见 `db-schema.md §18`：`GoodsCacheService` 那两处此前也是全表扫）。代价是一枚二级索引（写路径多维护一棵 B+ 树，本仓数据量下可忽略）。 |
+| **触发条件** | 若将来**别的**写路径也撞上死锁，**先查这条**：判据 = `SHOW ENGINE INNODB STATUS` 的 `LATEST DETECTED DEADLOCK` 段里，某一侧持 `N row lock(s)` 且 **N 远大于 1、N ≈ 表行数**（即「无索引 ⇒ 全表扫 ⇒ 行锁 × N」），再去找与它**方向相反**的那个写序。⚠️ **防的是这一种读法**：后人看到「死锁问题 + 有索引」以为索引治好了，把重试删掉 ⇒ 500 立刻回来（判据永远读证据，不读「有没有索引」）。 |
+| **状态** | ✅ **已落、已实测、已记账**（2026-10-15 · D 段 · 阶段 2b）：Migration ⑳ 已 apply 到 VM 库。「不拆环、不替代重试」按顾问 2026-10-16 裁定要写进**三处**，三处现状：① 收笔报告（**逐字**）= `reports/块7-阶段2b-死锁修复-报告.txt`；② 迁移块注释（**逐字**）= `mall_management_sql.sql` 段⑳ 内；③ 本表（上方「性质」「触发条件」两行，按要点重述、非逐字）。另：`db-schema.md §18` / `db-migration.md` 注意 24 记的是这条索引自己的落点与读法。证据：`docs/agent/evidence/c3-block7/d2-deadlock-scout-48x4.txt`（基线，含 49 row lock(s) 与两个事务的持锁/等锁两列）· 同目录 `d2-deadlock-scout-after-index.txt`（只加索引：锁粒度已压到单条、5xx 仍 139）· `d2-deadlock-scout-with-retry.txt`（加索引 + 重试：5xx 0）。 |

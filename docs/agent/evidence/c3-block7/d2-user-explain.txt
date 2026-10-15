@@ -1,0 +1,105 @@
+=================================================================================
+D 段 · 阶段 2b —— 顾问追问（2026-10-16）问题 2 的只读实测：user 侧那条 UPDATE 走不走 PRIMARY
+生成时间（本地）: 2026-10-16 00:24:50 +0800
+后端库       : MySQL 8.4.11（VM 192.168.229.129:3306 / mall_management_sql）
+探针         : _work/d2/Explain.java —— **只接受** EXPLAIN / SELECT / SHOW / DESC（其余一律拒绝）
+被问的语句   : UPDATE `user` SET DowngradeState='none', ScheduledDowngradeAt=NULL,
+               DowngradeReason=NULL, FrozenAt=NULL, FreezeUntil=NULL WHERE username = ?
+               （= UserGovernanceDao.clearDowngrade 的原文；relist 事务内 user 侧那条）
+=================================================================================
+
+── ① user 表索引（主键就是 username；48 行表、无二级索引） ───────────────────
+Table	Non_unique	Key_name	Seq_in_index	Column_name	Collation	Cardinality	Sub_part	Packed	Null	Index_type	Comment	Index_comment	Visible	Expression
+user	0	PRIMARY	1	username	A	48	null	null		BTREE			YES	null
+-- rows: 1
+
+── ② EXPLAIN UPDATE（顾问点名的那条；EXPLAIN 只出计划、不执行语句） ──────────
+id	select_type	table	partitions	type	possible_keys	key	key_len	ref	rows	filtered	Extra
+1	UPDATE	user	null	range	PRIMARY	PRIMARY	80	const	1	100.0	Using where
+-- rows: 1
+
+── ③ 对照：EXPLAIN SELECT 同条件 ────────────────────────────────────────────
+id	select_type	table	partitions	type	possible_keys	key	key_len	ref	rows	filtered	Extra
+1	SIMPLE	user	null	const	PRIMARY	PRIMARY	80	const	1	100.0	null
+-- rows: 1
+
+── ④ 对照：不存在的 username（结论不变：仍走 PRIMARY、rows 仍估 1） ──────────
+id	select_type	table	partitions	type	possible_keys	key	key_len	ref	rows	filtered	Extra
+1	UPDATE	user	null	range	PRIMARY	PRIMARY	80	const	1	100.0	Using where
+-- rows: 1
+
+── ⑤ 版本 ──────────────────────────────────────────────────────────────────
+v
+8.4.11-0ubuntu0.26.04.1
+-- rows: 1
+
+── ⑥ INNODB STATUS 死锁段：逐条摘录（三份原始证据） ─────────────────────────
+
+来源 48x4（无索引基线） —— docs/agent/evidence/c3-block7/d2-deadlock-scout-48x4.txt
+71:LOCK WAIT 8 lock struct(s), heap size 1128, 4 row lock(s), undo log entries 1
+75:*** (1) HOLDS THE LOCK(S):
+76:RECORD LOCKS space id 23 page no 4 n bits 128 index PRIMARY of table `mall_management_sql`.`user` trx id 4847059 lock_mode X locks rec but not gap
+101:*** (1) WAITING FOR THIS LOCK TO BE GRANTED:
+102:RECORD LOCKS space id 16 page no 4 n bits 120 index PRIMARY of table `mall_management_sql`.`goods` trx id 4847059 lock_mode X waiting
+135:LOCK WAIT 4 lock struct(s), heap size 1128, 49 row lock(s)
+139:*** (2) HOLDS THE LOCK(S):
+140:RECORD LOCKS space id 16 page no 4 n bits 120 index PRIMARY of table `mall_management_sql`.`goods` trx id 4847062 lock_mode X
+
+来源 after-index（已加索引） —— docs/agent/evidence/c3-block7/d2-deadlock-scout-after-index.txt
+94:LOCK WAIT 6 lock struct(s), heap size 1128, 4 row lock(s)
+98:*** (1) HOLDS THE LOCK(S):
+99:RECORD LOCKS space id 16 page no 5 n bits 120 index idx_goods_merchant of table `mall_management_sql`.`goods` trx id 4848479 lock_mode X
+105:*** (1) WAITING FOR THIS LOCK TO BE GRANTED:
+106:RECORD LOCKS space id 23 page no 4 n bits 128 index PRIMARY of table `mall_management_sql`.`user` trx id 4848479 lock_mode X locks rec but not gap waiting
+134:LOCK WAIT 8 lock struct(s), heap size 1128, 4 row lock(s), undo log entries 1
+138:*** (2) HOLDS THE LOCK(S):
+139:RECORD LOCKS space id 23 page no 4 n bits 128 index PRIMARY of table `mall_management_sql`.`user` trx id 4848478 lock_mode X locks rec but not gap
+164:*** (2) WAITING FOR THIS LOCK TO BE GRANTED:
+165:RECORD LOCKS space id 16 page no 5 n bits 120 index idx_goods_merchant of table `mall_management_sql`.`goods` trx id 4848478 lock_mode X waiting
+
+来源 with-retry（索引+重试） —— docs/agent/evidence/c3-block7/d2-deadlock-scout-with-retry.txt
+115:LOCK WAIT 8 lock struct(s), heap size 1128, 4 row lock(s), undo log entries 1
+119:*** (1) HOLDS THE LOCK(S):
+120:RECORD LOCKS space id 23 page no 4 n bits 128 index PRIMARY of table `mall_management_sql`.`user` trx id 4849527 lock_mode X locks rec but not gap
+145:*** (1) WAITING FOR THIS LOCK TO BE GRANTED:
+146:RECORD LOCKS space id 16 page no 5 n bits 120 index idx_goods_merchant of table `mall_management_sql`.`goods` trx id 4849527 lock_mode X waiting
+155:LOCK WAIT 6 lock struct(s), heap size 1128, 4 row lock(s)
+159:*** (2) HOLDS THE LOCK(S):
+160:RECORD LOCKS space id 16 page no 5 n bits 120 index idx_goods_merchant of table `mall_management_sql`.`goods` trx id 4849529 lock_mode X
+166:*** (2) WAITING FOR THIS LOCK TO BE GRANTED:
+167:RECORD LOCKS space id 23 page no 4 n bits 128 index PRIMARY of table `mall_management_sql`.`user` trx id 4849529 lock_mode X locks rec but not gap waiting
+
+── ⑦ 逐段计数：每条 RECORD LOCKS 段下面有几条 Record lock 行 ────────────────
+   （清单由 _work/d2/count-user-locks.mjs 数出，非目测）
+   
+   ──── docs/agent/evidence/c3-block7/d2-deadlock-scout-48x4.txt
+      user.PRIMARY  [lock_mode X locks rec but not gap]  ⇒ Record lock 行数 = 1
+      goods.PRIMARY  [lock_mode X waiting]  ⇒ Record lock 行数 = 1
+      goods.PRIMARY  [lock_mode X]  ⇒ Record lock 行数 = 1
+   
+   ──── docs/agent/evidence/c3-block7/d2-deadlock-scout-after-index.txt
+      goods.idx_goods_merchant  [lock_mode X]  ⇒ Record lock 行数 = 1
+      user.PRIMARY  [lock_mode X locks rec but not gap waiting]  ⇒ Record lock 行数 = 1
+      user.PRIMARY  [lock_mode X locks rec but not gap]  ⇒ Record lock 行数 = 1
+      goods.idx_goods_merchant  [lock_mode X waiting]  ⇒ Record lock 行数 = 1
+   
+   ──── docs/agent/evidence/c3-block7/d2-deadlock-scout-with-retry.txt
+      user.PRIMARY  [lock_mode X locks rec but not gap]  ⇒ Record lock 行数 = 1
+      goods.idx_goods_merchant  [lock_mode X waiting]  ⇒ Record lock 行数 = 1
+      goods.idx_goods_merchant  [lock_mode X]  ⇒ Record lock 行数 = 1
+      user.PRIMARY  [lock_mode X locks rec but not gap waiting]  ⇒ Record lock 行数 = 1
+
+── ⑧ 读法（这一条要读准） ──────────────────────────────────────────────────
+· ① ② ⇒ user 侧那条 UPDATE **走 PRIMARY**：key=PRIMARY / key_len=80 / rows=1 / filtered=100。
+  （type 显示 range 而不是 const 属正常：**DML 的修改目标**在计划里一律记 range，即便等值是唯一键。）
+· ⑦ ⇒ 三份 dump 里，**user 侧每一段 RECORD LOCKS 都只有 1 条 Record lock**（持有 1 条、
+  等待也是 1 条；从未出现 user 侧多行锁）。而 '49 row lock(s)' 只出现在基线那一份，
+  且**全部在 goods 侧**（relist 那条无索引可走的 UPDATE 全表扫描）。
+· 审计侧事务的 4 row lock(s) = user 侧 1 条 + goods 侧 3 条（它自己那侧也没有批量行锁）。
+⇒ 结论：该侧本来就只锁 1 行 ⇒ user.merchantid 索引**不必加**。
+
+⚠️ 口径边界（别把这条读宽）：三份 dump 是**三种配置各一段** —— 探针只在收尾读一次
+   LATEST DETECTED DEADLOCK（见 scripts/probes/d2-deadlock-scout.mjs 第 5 节），
+   故本文件能支持的结论是『三次现场都只有 1 条』，**不是**『48×3 轮逐轮都查过』。
+   要把后者做成立论，探针需改成每轮读一次并留全量 dump。
+=================================================================================

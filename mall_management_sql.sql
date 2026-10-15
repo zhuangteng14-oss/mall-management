@@ -1933,7 +1933,7 @@ PREPARE _p FROM @s; EXECUTE _p; DEALLOCATE PREPARE _p;
 --      —— `SHOW ENGINE INNODB STATUS` 里该事务持 **49 row lock(s)**（全表 + supremum），
 --      且一直持到事务结束 ⇒ 与 `MerchantApplicationService.audit`（写序 user→goods）
 --      构成反向锁序环。加了本索引，该 UPDATE 只锁命中行 ⇒ 「锁 49 行」压到「锁 1 行」。
---   ⚠️ **本索引治的是「争用窗口的宽度」，不替代重试**（甲）：窗口变窄 ≠ 窗口消失。
+--   ⚠️ **本索引治的是「争用窗口的宽度」，不替代重试**（甲）：窗口变窄 ≠ 窗口消失。⚠️ **此索引不拆 audit × relist 那条环，只缩小 goods 侧锁粒度。环的兜底是 MerchantDowngradeService.relist 的重试。**（防后人看到「死锁问题 + 有索引」以为索引治好了 ⇒ 把重试删掉、500 立刻回来。）
 --      丙 / 甲 是同一次裁定里的两条，落点与理由见 `docs/agent/tech-debt.md` 的 TD-74。
 --   ⚠️ **为什么是普通索引不是 UNIQUE**：`MerchantId` 天然一对多（一个商家多件商品），
 --      建 UNIQUE 直接失败。理由同 ⑭。

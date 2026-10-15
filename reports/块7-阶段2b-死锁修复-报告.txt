@@ -1,0 +1,273 @@
+================================================================================
+C3 块 7 · D 段 · 阶段 2b〈死锁修复：索引 + 重试 + 重试可视化〉收笔报告
+日期：2026-10-15 / 16        分支：feat/c3-admin-block7        未 push / 未 merge / 未开 PR
+================================================================================
+
+【一笔话】
+落顾问 2026-10-15 裁定「一 死锁修复（阶段 2b，独立一笔）」：治因加索引（Migration ⑳）、
+治果给 relist 落死锁重试（编程式 RetryTemplate）、并把重试动作发成 protection 事件；
+接闸口径由「3 键」翻转为「4 键接闸 + 1 键记录位」。
+
+【必报四项】
+  commit hash : cfe2948
+  一句话      : D 段 · 阶段 2b —— 死锁修复（索引 + 重试 + 重试可视化）
+  文件数      : 30（25 修改 + 5 新增）
+  行数        : +1566 / −171
+  测试结果    : 后端 548 passed / 0 failed / 0 errors / 26 skipped
+                （`./mvnw -B -o test` BUILD SUCCESS；基线 541 ⇒ 本笔 +7）
+                前端探针 probe-d2-locked-switches.mjs：20 项 / 0 失败 / exit 0
+
+================================================================================
+一、两条治则 + 可视化，各给落点
+================================================================================
+
+  治因（丙）加索引
+    · Migration ⑳：`goods` 上的 `idx_goods_merchant (MerchantId)`
+    · 只加索引：不改列、不删行、幂等（`information_schema.STATISTICS` 守卫 + PREPARE/EXECUTE，
+      照本文件 ⑭ 先例；走「文件末追加的迁移块」⇒ 其后行号零移动）
+    · 落在：mall_management_sql.sql 段⑳ · docs/agent/db-schema.md §18 · db-migration.md 注意 24
+    · ⚠️ `user.merchantid` 的同类索引**本次不加**：裁定原文「留 agent 实测后再定」，
+      实测的答案就是「不必」——`user` 侧那条 `UPDATE user … WHERE username = ?` 走的是 PRIMARY
+      （`user` 的主键就是 `username`），本来就只锁 1 行；那 49 行锁全部来自 `goods` 侧。
+      （2026-10-16 顾问追问后补实测复核：`EXPLAIN UPDATE user … WHERE username = ?` ⇒
+       `key=PRIMARY` / `key_len=80` / `rows=1` / `filtered=100`（MySQL 8.4.11）；
+       且三份 INNODB STATUS 死锁段里，**user 侧被持有的锁恒为 1 条 record lock**
+       （`index PRIMARY of table user … lock_mode X locks rec but not gap`），
+       `49 row lock(s)` 只出现在基线那一份、且全部在 `goods` 侧。⇒ 结论成立，不加。
+       原始输出：docs/agent/evidence/c3-block7/d2-user-explain.txt）
+
+  ⚠️ 索引不治本环 —— 环的成因是两个事务访问顺序相反，与各自锁住几行无关。索引只把锁粒度
+     从「持 49 row lock」压到「单条 record lock」，缩小牵连面，不拆环。真正兜住 500 的是
+     重试（见对照表第三行：5xx = 0）。
+
+     （这一段是**裁定要求写进三处**的其中一处（本段与迁移块注释为**逐字**，TD-76 按要点重述）；
+       另两处 = `docs/agent/tech-debt.md` 的 TD-76、`mall_management_sql.sql` Migration ⑳ 的
+       块注释。理由：防后人看到「死锁问题 + 有索引」以为索引治好了，把重试删掉 ⇒ 500 立刻回来。）
+
+  治果（甲）落重试
+    · 落点：MerchantDowngradeService.relist（不是 GoodsService 三处写方法 —— 见第三节）
+    · 形态：装配**编程式** RetryTemplate（要读运行时开关，故不用注解 @Retryable）
+      次数 3（RELIST_MAX_ATTEMPTS）/ 退避 40ms 起 ×2 封顶 200ms / 只认 CannotAcquireLockException
+    · ⚠️ 重试在事务之外：relist 不挂 @Transactional，事务由内层 TransactionTemplate 开
+      ⇒ 每次尝试都是一个新事务（两条结构钉钉住）
+
+  重试可视化（要）
+    · ProtectionMetrics 新增 retry(...) 入口 + 两档 result：retry_success / retry_failed
+      （result 由五档变七档）
+    · 事件明细：action=retry attempt=N result=success|deadlock，带 traceId / batchId
+
+    （2026-10-16 顾问**收尾裁定：维持现状** —— `ProtectionEvent` 结构不动、**不加** `action` / `attempt`
+      字段；`action` 落在 `detail` 文本（与 `key=retry` 同义，不另立字段），`attempt` 也落在 `detail`
+      （无界值，不进字段更不进 tag）；`retry_success` / `retry_failed` 保持为 `Result` 的第 6、7 档；
+      前端 labels 不用改。顾问并**自我更正**：上一轮追问里说的「原裁定：不动 Result 枚举」属
+      **措辞错误**（那是临时建议、不是历史裁定），agent 的查证成立。⇒ 本节两行即最终口径。）
+
+================================================================================
+二、判据 —— 这一条最容易读反：结论是「死锁次数不变、5xx 归零」
+================================================================================
+
+  同一探针（scripts/probes/d2-deadlock-scout.mjs）、同一场景、同一台 VM 库，48 轮：
+
+    轮次文件（docs/agent/evidence/c3-block7/）    goods索引  relist重试  1213增量  HTTP 5xx
+    ------------------------------------------------------------------------------------
+    d2-deadlock-scout-48x4.txt                        无         无       149      139
+    d2-deadlock-scout-after-index.txt                 有         无       139      139
+    d2-deadlock-scout-with-retry.txt                  有         有       141        0
+
+  · 索引确实生效，但 5xx 一个都没少（139 → 139）
+    锁粒度由「持 49 row lock(s)」压到「持 idx_goods_merchant 上的单条 record lock」。
+    ⚠️ 既别读成「索引没用」，也别读成「索引能替代重试」—— 环的成因是两个事务**访问顺序相反**
+    （MerchantApplicationService.audit 写序 user→goods × relist 写序 goods→user），
+    与各自锁住几行无关 ⇒ 缩锁范围只能减少牵连面，拆不掉环。
+
+  · 加重试之后 5xx = 0，而 1213 增量 141 与上一份 139 同量级
+    ⇒ 死锁照旧在发生，只是每一次都被第 2 次尝试兜住了。
+
+  · 因果闭合的那一环（光看 5xx=0 不够 —— 它还能被「异常被别处吞了」「端点压根没被打到」解释掉）：
+    探针跑完**立刻读同进程 actuator**
+      mall.protection.events{result=retry_success} = 141   （与 1213 增量逐一对上）
+      mall.protection.events{result=retry_failed}  = 0 条  （没有一次用满 3 次尝试）
+
+================================================================================
+三、被实测推翻的两条预判（TD-74 订正）
+================================================================================
+
+  1. 落点：原判 = GoodsService 三处写方法 ⇒ 实测 = MerchantDowngradeService.relist
+     全仓**唯一**的反向锁序对是 audit(user→goods) × relist(goods→user)；
+     GoodsService 那三处不在任何一个环上。
+     ⇒ 「多表事务 ⇒ 死锁只可能在这类地方」这条推理链没错，
+       错的是「本仓的多表事务里恰好有反向对的那一对在哪」。
+
+  2. 锁侧：原判「两表都只有主键、两条 UPDATE 都全表扫描」⇒ 实测只有 goods 侧全表扫。
+
+================================================================================
+四、口径翻转的连锁（本笔最隐蔽的风险）
+================================================================================
+
+  落码后全仓还有一批注释 / **用户可见文案**写着「retry 不落码 / 3 键接闸」。
+  按 D pack B1 逐字「必须当笔改（否则页面在说谎 —— TD-20 那一族）」全部同步：
+
+    AttackEngine（含 /attack/run 响应里**用户可见的** Engine.Notes 回显文案）
+    AttackController 的 @param protections
+    application.properties 的开关注释段
+    api-contract.md（九处，全部同行替换）
+    tech-debt.md（TD-74 状态行 + 追加〈TD-74 订正〉）
+    progress.md / c3-block-D-hardening.md（各追加续笔）
+    探针断言
+
+  ⚠️ 面板那枚 retry 由「必须不可点」翻转为「能拨且有事发生」
+     （observe-labels.js 的 PROTECTIONS_NOT_WIRED 只剩 degrade）
+     —— 留在死控件清单里**反而会造出一个死控件**，正是上一笔明令禁止的那一种。
+
+  ⚠️ 口径的唯一代码出处是 protect/ProtectionGate.WIRED_KEYS（现为 4 个键），
+     不是本报告、不是任何一节文档。不许写成「5 键已接闸」。
+
+================================================================================
+五、其他实现要点（都是实测）
+================================================================================
+
+  · RetryTemplate 是「先问 canRetry、再执行」的循环
+    ⇒ 把运行时开关直接短路在 canRetry 上，会让「关掉重试」变成「连第一次都不执行」
+      （抛 RetryException，且它**没有 cause** —— 原始死锁在异常链上就丢了）。
+      修法一行：if (context.getLastThrowable() == null) return true;
+    另：RetryContext.getRetryCount() 首次为 0 ⇒ attempt = count + 1。
+
+  · 重试发事件时也带 traceId / batchId（记录那一刻从 MDC 取，与既有九环同款）。
+
+  · 结构钉两条（RelistDeadlockRetryTest）：
+      ① 反射断言 relist 上没有 @Transactional
+         （有人加回去 ⇒ 重试退化成「在已回滚的事务里重试」）
+      ② 计数替身 CountingTxManager 断言每次尝试各起一个新事务
+
+================================================================================
+六、refs（漂移核对）
+================================================================================
+
+  before = git worktree add --detach 出的临时树（HEAD = f0697eb）扫描产物
+  after  = 本笔工作区扫描产物
+  比对口径 = 「(引用者文件, token) 组合」，**不比裸 token**
+            （删掉引用者自己的一行会让它的引用成对报 LOST+NEW 而 token 未变）
+
+  结果：
+    · 引用条数：before 5163 → after 5183（引用者文件数两侧同为 189）
+    · 组合数：before 4101 → after 4113
+    · **丢失组合 5 条 —— 全部是本笔有意重指，且各有对应的新增组合，逐条配对可指认
+      ⇒ 真漂移 = 0**
+    · 新增组合 17 条 = D pack 重指后的新值 8 条 + db-schema.md §18 引 mall_management_sql.sql
+      段⑳ 的 9 条（逐条实测核对过内容）
+
+  5 条 LOST 逐条配对：
+    D pack 原 169 行   AttackConsole.vue 原 124 / 134 行 → AttackConsole.vue:127 / :137
+    D pack 原 266 行   AttackConsole.vue 原 124 行       → AttackConsole.vue:127
+    D pack 原 296 行   EventBroadcaster.java 原 767 行   → EventBroadcaster.java:774
+    D pack 原 452 行   AttackConsole.vue 原 510-512 行   → AttackConsole.vue:513-515
+
+  ⚠️ 旧值一律写「原 N 行」、不写 `文件:N` —— 重指记录自己也是一条引用，
+     写成 token 会往引用集合里注入一个指向旧位置的**陈旧 token**（本仓 §26-3 记过这条坑）。
+  ⚠️ 本笔新增的文档文本里不含指向旧位置的 token（progress.md 新增区实测 0 条）。
+  ⚠️ 只登记、不重指：本笔之前就已存在的快照行号（各块 pack / evidence / slot-registry 前部 /
+     progress.md 前部）—— 按「快照，漂了不追」与「史料不追」两条纪律一律不动。
+
+  临时 worktree 已 git worktree remove（_work/refs-2b-before）。
+
+================================================================================
+七、本笔改了哪些文件（30）
+================================================================================
+
+  后端主代码（7）
+    merchant/service/MerchantDowngradeService.java   300 → 457 行   （重试整段）
+    observe/metrics/ProtectionMetrics.java           184 → 207 行   （retry 入口 + 两档）
+    protect/ProtectionGate.java                      168 → 174 行   （WIRED_KEYS 3 → 4）
+    observe/service/EventBroadcaster.java            +10 / −3      （净增 7 行）
+    observe/service/AttackEngine.java                +6 / −6       （全部同行替换、净 0 行）
+    observe/controller/AttackController.java         +1 / −1       （净 0 行）
+    resources/application.properties                 +4 / −4       （净 0 行）
+
+  后端测试（5 修改 + 1 新增）
+    merchant/service/RelistDeadlockRetryTest.java    **新增** 285 行 / 7 条
+    observe/metrics/ProtectionMetricsTest.java       五档 → 七档
+    observe/service/EventBroadcasterTest.java        注释
+    observe/service/ProtectionKeysAlignmentTest.java
+    protect/ProtectionGateTest.java
+    smoke/AbstractSmokeTest.java
+
+  前端（2）
+    config/labels/observe-labels.js                  +16 / −13
+    views/admin/observe/AttackConsole.vue            +18 / −15（副标题块净插 3 行）
+
+  数据 / 文档（7）
+    mall_management_sql.sql                          +41（段⑳）
+    db-schema.md                                     +60 / −2（§18）
+    db-migration.md                                  +11（注意 24）
+    tech-debt.md                                     +26 / −1（TD-74 状态行 + 订正表）
+    api-contract.md                                  +12 / −12（九处同行替换）
+    progress.md                                      +81 / −3（3 处同行替换 + 尾部纯插 78 行）
+    context-packs/c3-block-D-hardening.md            +81 / −18（同行替换 + 尾部纯插 63 行）
+    slot-registry.md                                 **追加 §二十七**
+
+  探针（2）
+    scripts/probes/d2-deadlock-scout.mjs             +21 / −5
+    scripts/probes/probe-d2-locked-switches.mjs      +36 / −26（20 项 / 0 失败）
+
+  依赖（1）
+    pom.xml                                          +12（+ spring-retry）
+
+  证据（4 新增）
+    docs/agent/evidence/c3-block7/d2-deadlock-scout-after-index.txt
+    docs/agent/evidence/c3-block7/d2-deadlock-scout-with-retry.txt
+    docs/agent/evidence/c3-block7/d2-locked-switches-after-2b.txt
+    docs/agent/evidence/c3-block7/d2-protection-switches-after-2b.png
+
+================================================================================
+八、顺带核实掉的一条（别再照旧说法加启动参数）
+================================================================================
+
+  曾有说法：「ObserveMetricsConfig 构造注入 + 定义 MeterFilter ⇒ 循环依赖 ⇒ 整台起不来，
+  要加 --spring.main.allow-circular-references=true」。
+
+  **实测该环已自断** —— 那个 @Bean 方法已改成 static（提交 5b971f1），
+  理由逐字写在该类注释里。本笔的 dev 启动**没有**加该参数，后端正常起来并跑完 48 轮死锁侦查
+  （_work/d2/boot-2b.sh 头部逐字记着「刻意不带」）。
+
+  ⚠️ tech-debt.md 本就记作「✅ 已修」—— 过期的只是这条口头说法，已同步订正。
+
+================================================================================
+九、边界与未还项（如实登记）
+================================================================================
+
+  · 不 push / 不 merge / 不开 PR；手验仍压到 commit 4 之后统一一轮
+  · ⚠️ dev / a3 两档 app.auth.enabled=false ⇒ 手验绿 ≠ 默认 profile 绿
+
+  未还项：
+    ① 帧读数第 9 条（MetricsSnapshotService.protections 仍返回 8 条）**仍未做** ⇒ 归 commit 3
+    ② 右侧统计的 KPI「重试成功率」那一格**归 commit 3**
+       （本笔只落了后端两档 result 与 attempt=N）
+    ③ 重试的次数与退避是**实验值**：下游延迟或 goods 数据量显著变化时，
+       应重跑 scripts/probes/d2-deadlock-scout.mjs（判据 = HTTP 5xx 应为 0）
+
+================================================================================
+十、怎么复核（取证路径，全部在仓内）
+================================================================================
+
+  git show --stat cfe2948
+  git log -1 --format=%B cfe2948
+
+  三份对照表的原始输出（探针未删改）：
+    docs/agent/evidence/c3-block7/d2-deadlock-scout-48x4.txt
+    docs/agent/evidence/c3-block7/d2-deadlock-scout-after-index.txt
+    docs/agent/evidence/c3-block7/d2-deadlock-scout-with-retry.txt
+
+  user 侧那条索引判据的只读实测（顾问 2026-10-16 追问 P2）：
+    docs/agent/evidence/c3-block7/d2-user-explain.txt
+    （EXPLAIN UPDATE user … WHERE username = ? ⇒ key=PRIMARY / rows=1；
+      三份 dump 的锁段摘录 + 逐段 Record lock 计数）
+
+  面板口径的实测：docs/agent/evidence/c3-block7/d2-locked-switches-after-2b.txt
+                  + d2-protection-switches-after-2b.png
+
+  测试：cd Mall-management-server && ./mvnw -B -o test
+
+  refs 漂移核对产物（未进 docs/，只在 _work/）：
+    _work/d2/refs-2b-before.txt  /  refs-2b-after-final.txt  /  refs-diff-2b-final.json
+
+================================================================================
