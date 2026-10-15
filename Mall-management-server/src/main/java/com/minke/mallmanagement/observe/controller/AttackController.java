@@ -97,8 +97,8 @@ public class AttackController {
      * 跑一轮演练（**同步跑到结束**，见类注释）。
      *
      * @param name            场景名（可选，缺省「自定义」；超 64 字符按列宽截断）
-     * @param concurrency     总并发数（可选，缺省 100、上限 500）。⚠️ 块 7 · commit 10 起它的含义
-     *                        收紧成「**在途上限**（且不超过引擎侧的硬顶 512）」—— 不再等于线程数
+     * @param concurrency     总并发数（可选，缺省 100、上限 4000）。⚠️ 块 7 · commit 10 起它的含义
+     *                        收紧成「**在途上限**（且不超过引擎侧的 `in-flight-cap`，缺省 512）」—— 不再等于线程数
      *                        （派发线程固定 32 条），理由见 {@code AttackEngine} 类注释七
      * @param durationSeconds 持续秒数（可选，缺省 60、上限 600）
      * @param targetQps       目标 QPS（可选，缺省 {@code 0} = **不限速**；档位 120 / 400 / 拉满 的载体）
