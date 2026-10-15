@@ -1,0 +1,26 @@
+===== 会话 A（1→2）启动 =====
+===== 会话 B（2→1）启动 =====
+----- A 输出 -----
+Id
+1
+SLEEP(2)
+0
+Id
+2
+----- B 输出 -----
+Id
+2
+SLEEP(2)
+0
+ERROR 1213 (40001) at line 5: Deadlock found when trying to get lock; try restarting transaction
+
+===== 计数器（对照前应为 0，对照后 ER_LOCK_DEADLOCK 应 ≥ 1）=====
++--------------+----------------------+------------------+
+| ERROR_NUMBER | ERROR_NAME           | SUM_ERROR_RAISED |
++--------------+----------------------+------------------+
+|         1205 | ER_LOCK_WAIT_TIMEOUT |                0 |
+|         1213 | ER_LOCK_DEADLOCK     |              169 |
++--------------+----------------------+------------------+
+
+===== INNODB STATUS 是否出现 LATEST DETECTED DEADLOCK =====
+命中行数: 1

@@ -1,0 +1,123 @@
+===== 0 · 前置 =====
+后端 http://localhost:8088/actuator/health → 200
+===== 1 · 夹具 =====
+账号=__dlprobe__ 商家号=dlprobeM01 申请Id=34  goods 行数≈45（全表扫描的代价就在这个数上）
+===== 2 · 基线 =====
+ER_LOCK_DEADLOCK=169  ER_LOCK_WAIT_TIMEOUT=0
+INNODB STATUS 现有死锁段（历史/对照）:  | ------------------------ | 2026-10-15 14:32:18 124825805833920 | *** (1) TRANSACTION:
+===== 3 · 开压：36 轮 × (1×A + 1×B)，错开量扫 0..7.7ms（12 档 × 0.7ms） =====
+  轮  1/36 错开= 0ms  A=200 approved-restored  B=[200]  1213增量=0
+  轮  2/36 错开= 1ms  A=200 approved  B=[200]  1213增量=0
+  ★ 轮 3（错开 1ms）出现死锁，累计 1213 = 1
+  轮  3/36 错开= 1ms  A=200 approved-restored  B=[500]  1213增量=1
+  轮  4/36 错开= 2ms  A=200 approved-restored  B=[200]  1213增量=1
+  轮  5/36 错开= 3ms  A=200 approved-restored  B=[200]  1213增量=1
+  轮  6/36 错开= 4ms  A=200 approved-restored  B=[200]  1213增量=1
+  轮  7/36 错开= 4ms  A=200 approved-restored  B=[200]  1213增量=1
+  轮  8/36 错开= 5ms  A=200 approved-restored  B=[200]  1213增量=1
+  轮  9/36 错开= 6ms  A=200 approved-restored  B=[200]  1213增量=1
+  轮 10/36 错开= 6ms  A=200 approved-restored  B=[200]  1213增量=1
+  轮 11/36 错开= 7ms  A=200 approved-restored  B=[200]  1213增量=1
+  轮 12/36 错开= 8ms  A=200 approved  B=[200]  1213增量=1
+  轮 13/36 错开= 0ms  A=200 approved-restored  B=[200]  1213增量=1
+  轮 14/36 错开= 1ms  A=200 approved  B=[200]  1213增量=1
+  轮 15/36 错开= 1ms  A=200 approved  B=[200]  1213增量=1
+  轮 16/36 错开= 2ms  A=200 approved-restored  B=[200]  1213增量=1
+  轮 17/36 错开= 3ms  A=200 approved-restored  B=[500]  1213增量=2
+  轮 18/36 错开= 4ms  A=200 approved-restored  B=[200]  1213增量=2
+  轮 19/36 错开= 4ms  A=200 approved-restored  B=[200]  1213增量=2
+  轮 20/36 错开= 5ms  A=200 approved  B=[200]  1213增量=2
+  轮 21/36 错开= 6ms  A=200 approved-restored  B=[200]  1213增量=2
+  轮 22/36 错开= 6ms  A=200 approved-restored  B=[200]  1213增量=2
+  轮 23/36 错开= 7ms  A=200 approved-restored  B=[200]  1213增量=2
+  轮 24/36 错开= 8ms  A=200 approved-restored  B=[200]  1213增量=2
+  轮 25/36 错开= 0ms  A=200 approved-restored  B=[500]  1213增量=3
+  轮 26/36 错开= 1ms  A=200 approved-restored  B=[200]  1213增量=3
+  轮 27/36 错开= 1ms  A=200 approved-restored  B=[200]  1213增量=3
+  轮 28/36 错开= 2ms  A=200 approved-restored  B=[200]  1213增量=3
+  轮 29/36 错开= 3ms  A=200 approved-restored  B=[200]  1213增量=3
+  轮 30/36 错开= 4ms  A=200 approved-restored  B=[200]  1213增量=3
+  轮 31/36 错开= 4ms  A=200 approved-restored  B=[200]  1213增量=3
+  轮 32/36 错开= 5ms  A=200 approved-restored  B=[200]  1213增量=3
+  轮 33/36 错开= 6ms  A=200 approved-restored  B=[200]  1213增量=3
+  轮 34/36 错开= 6ms  A=200 approved-restored  B=[200]  1213增量=3
+  轮 35/36 错开= 7ms  A=200 approved-restored  B=[200]  1213增量=3
+  轮 36/36 错开= 8ms  A=200 approved-restored  B=[500]  1213增量=4
+===== 4 · 结果 =====
+ER_LOCK_DEADLOCK: 169 → 173   （增量 4）
+ER_LOCK_WAIT_TIMEOUT: 0 → 0   （增量 0）
+HTTP 5xx 次数=4
+A 走完整链（outcome=approved-restored，即真碰到 goods）的次数=31；只到 approved（未碰 goods）=5
+首次死锁出现在第 3 轮
+===== 5 · INNODB STATUS 的死锁段（含锁序）=====
+LATEST DETECTED DEADLOCK
+------------------------
+2026-10-15 14:32:26 124825805833920
+*** (1) TRANSACTION:
+TRANSACTION 4847547, ACTIVE 0 sec starting index read
+mysql tables in use 1, locked 1
+LOCK WAIT 6 lock struct(s), heap size 1128, 49 row lock(s)
+MySQL thread id 657, OS thread handle 124825716586176, query id 6107742 192.168.229.1 test updating
+UPDATE `user` SET DowngradeState = 'none', ScheduledDowngradeAt = NULL, DowngradeReason = NULL,     FrozenAt = NULL, FreezeUntil = NULL WHERE username = '__dlprobe__'
+
+*** (1) HOLDS THE LOCK(S):
+RECORD LOCKS space id 16 page no 4 n bits 120 index PRIMARY of table `mall_management_sql`.`goods` trx id 4847547 lock_mode X
+Record lock, heap no 1 PHYSICAL RECORD: n_fields 1; compact format; info bits 0
+ 0: len 8; hex 73757072656d756d; asc supremum;;
+
+Record lock, heap no 3 PHYSICAL RECORD: n_fields 26; compact format; info bits 64
+ 0: len 4; hex 8000004d; asc    M;;
+ 1: len 6; hex 00000008171f; asc       ;;
+ 2: len 7; hex 82000000ba011d; asc        ;;
+ 3: len 20; hex 6e6c7a7a47423476675620202020202020202020; asc nlzzGB4vgV          ;;
+ 4: len 30; hex e697a0e7babfe8939de78999e880b3e69cba20e5a3b0e8b0b72050726f20; asc                           Pro ; (total 40 bytes);
+ 5: len 8; hex 0000000000b88240; asc        @;;
+ 6: len 30; hex 68747470733a2f2f70696373756d2e70686f746f732f736565642f47442d; asc https://picsum.photos/seed/GD-; (total 100 bytes);
+ 7: len 20; hex e794b5e5ad90e794a8e593812020202020202020; asc                     ;;
+ 8: len 30; hex 47442d3130322d4146323720202020202020202020202020202020202020; asc GD-102-AF27                   ; (total 40 bytes);
+ 9: len 4; hex 80000000; asc     ;;
+ 10: len 1; hex 81; asc  ;;
+ 11: SQL NULL;
+ 12: len 4; hex 80000001; asc     ;;
+ 13: len 30; hex 818181817365656404281464281401e80a40002001148000004e00000008; asc     seed ( d(    @       N    ; (total 4294967291 bytes);
+ 14: len 30; hex 818181817365656404281464281401e80a40002001148000004e00000008; asc     seed ( d(    @       N    ; (total 4294967291 bytes);
+ 15: len 30; hex 818181817365656404281464281401e80a40002001148000004e00000008; asc     seed ( d(    @       N    ; (total 4294967291 bytes);
+ 16: SQL NULL;
+ 17: SQL NULL;
+ 18: SQL NULL;
+ 19: SQL NULL;
+ 20: len 1; hex 81; asc  ;;
+ 21: len 1; hex 81; asc  ;;
+ 22: len 1; hex 81; asc  ;;
+ 23: len 1; hex 81; asc  ;;
+ 24: len 4; hex 73656564; asc seed;;
+ 25: SQL DEFAULT;
+
+Record lock, heap no 4 PHYSICAL RECORD: n_fields 26; compact format; info bits 64
+ 0: len 4; hex 8000004e; asc    N;;
+ 1: len 6; hex 00000008171f; asc       ;;
+ 2: len 7; hex 82000000ba012a; asc       *;;
+ 3: len 20; hex 7945525531376b6f426320202020202020202020; asc yERU17koBc          ;;
+ 4: len 30; hex 323720e88bb1e5afb820324b20e698bee7a4bae599a820e99490e8a78620; asc 27        2K                  ; (total 40 bytes);
+ 5: len 8; hex 00000000004c9440; asc      L @;;
+ 6: len 30; hex 68747470733a2f2f70696373756d2e70686f746f732f736565642f47442d; asc https://picsum.photos/seed/GD-; (total 100 bytes);
+ 7: len 20; hex e794b5e5ad90e794a8e593812020202020202020; asc                     ;;
+ 8: len 30; hex 47442d3130332d3531393620202020202020202020202020202020202020; asc GD-103-5196                   ; (total 40 bytes);
+ 9: len 4; hex 80000000; asc     ;;
+ 10: len 1; hex 81; asc  ;;
+ 11: SQL NULL;
+ 12: len 4; hex 80000001; asc     ;;
+ 13: len 30; hex 818181817365656404281464281401e80a40002801148000004f00000008; asc     seed ( d(    @ (     O    ; (total 4294967291 bytes);
+ 14: len 30; hex 818181817365656404281464281401e80a40002801148000004f00000008; asc     seed ( d(    @ (     O    ; (total 4294967291 bytes);
+ 15: len 30; hex 818181817365656404281464281401e80a40002801148000004f00000008; asc     seed ( d(    @ (     O    ; (total 4294967291 bytes);
+ 16: SQL NULL;
+ 17: SQL NULL;
+ 18: SQL NULL;
+ 19: SQL NULL;
+ 20: len 1; hex 81; asc  ;;
+ 21: len 1; hex 81; asc  ;;
+ 22: len 1; hex 81; asc  ;;
+ 23: len 1; hex 81; asc  ;;
+ 24: len 4; 
+===== 6 · 收尾 =====
+夹具已删（user / login / merchant_application / goods 各删探针行）；INNODB STATUS 是服务器内存里的历史，不会被本探针清掉。

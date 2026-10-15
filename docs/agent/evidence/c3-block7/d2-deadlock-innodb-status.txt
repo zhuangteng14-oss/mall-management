@@ -1,0 +1,95 @@
+# SHOW ENGINE INNODB STATUS —— LATEST DETECTED DEADLOCK（只抽锁序骨架，hex 载荷已略）
+# 采集时刻：2026-10-15，48 轮 × KB=4 扫描之后
+
+LATEST DETECTED DEADLOCK
+------------------------
+2026-10-15 14:14:12 124825805833920
+*** (1) TRANSACTION:
+TRANSACTION 4847059, ACTIVE 0 sec starting index read
+mysql tables in use 1, locked 1
+LOCK WAIT 8 lock struct(s), heap size 1128, 4 row lock(s), undo log entries 1
+MySQL thread id 397, OS thread handle 124825717642944, query id 6095304 192.168.229.1 test updating
+UPDATE goods SET ShelfState = 1, DelistedAt = NULL WHERE MerchantId = 'dlprobeM01'
+*** (1) HOLDS THE LOCK(S):
+RECORD LOCKS space id 23 page no 4 n bits 128 index PRIMARY of table `mall_management_sql`.`user` trx id 4847059 lock_mode X locks rec but not gap
+Record lock, heap no 59 PHYSICAL RECORD: n_fields 21; compact format; info bits 64
+ 0: len 20; hex 5f5f646c70726f62655f5f202020202020202020; asc __dlprobe__         ;;
+ 5: len 20; hex 646c70726f62654d303120202020202020202020; asc dlprobeM01          ;;
+*** (1) WAITING FOR THIS LOCK TO BE GRANTED:
+RECORD LOCKS space id 16 page no 4 n bits 120 index PRIMARY of table `mall_management_sql`.`goods` trx id 4847059 lock_mode X waiting
+Record lock, heap no 48 PHYSICAL RECORD: n_fields 26; compact format; info bits 64
+*** (2) TRANSACTION:
+TRANSACTION 4847062, ACTIVE 0 sec starting index read
+mysql tables in use 1, locked 1
+LOCK WAIT 4 lock struct(s), heap size 1128, 49 row lock(s)
+MySQL thread id 395, OS thread handle 124825722922688, query id 6095309 192.168.229.1 test updating
+UPDATE `user` SET DowngradeState = 'none', ScheduledDowngradeAt = NULL, DowngradeReason = NULL,     FrozenAt = NULL, FreezeUntil = NULL WHERE username = '__dlprobe__'
+*** (2) HOLDS THE LOCK(S):
+RECORD LOCKS space id 16 page no 4 n bits 120 index PRIMARY of table `mall_management_sql`.`goods` trx id 4847062 lock_mode X
+Record lock, heap no 1 PHYSICAL RECORD: n_fields 1; compact format; info bits 0
+ 0: len 8; hex 73757072656d756d; asc supremum;;
+Record lock, heap no 3 PHYSICAL RECORD: n_fields 26; compact format; info bits 64
+Record lock, heap no 4 PHYSICAL RECORD: n_fields 26; compact format; info bits 64
+Record lock, heap no 5 PHYSICAL RECORD: n_fields 26; compact format; info bits 64
+Record lock, heap no 6 PHYSICAL RECORD: n_fields 26; compact format; info bits 64
+Record lock, heap no 7 PHYSICAL RECORD: n_fields 26; compact format; info bits 64
+Record lock, heap no 8 PHYSICAL RECORD: n_fields 26; compact format; info bits 64
+Record lock, heap no 9 PHYSICAL RECORD: n_fields 26; compact format; info bits 64
+Record lock, heap no 10 PHYSICAL RECORD: n_fields 26; compact format; info bits 64
+Record lock, heap no 11 PHYSICAL RECORD: n_fields 26; compact format; info bits 64
+Record lock, heap no 12 PHYSICAL RECORD: n_fields 26; compact format; info bits 64
+Record lock, heap no 13 PHYSICAL RECORD: n_fields 26; compact format; info bits 64
+Record lock, heap no 14 PHYSICAL RECORD: n_fields 26; compact format; info bits 64
+Record lock, heap no 15 PHYSICAL RECORD: n_fields 26; compact format; info bits 64
+Record lock, heap no 16 PHYSICAL RECORD: n_fields 26; compact format; info bits 64
+Record lock, heap no 17 PHYSICAL RECORD: n_fields 26; compact format; info bits 64
+Record lock, heap no 18 PHYSICAL RECORD: n_fields 26; compact format; info bits 64
+Record lock, heap no 19 PHYSICAL RECORD: n_fields 26; compact format; info bits 64
+Record lock, heap no 20 PHYSICAL RECORD: n_fields 26; compact format; info bits 64
+Record lock, heap no 21 PHYSICAL RECORD: n_fields 26; compact format; info bits 64
+Record lock, heap no 22 PHYSICAL RECORD: n_fields 26; compact format; info bits 64
+Record lock, heap no 23 PHYSICAL RECORD: n_fields 26; compact format; info bits 64
+Record lock, heap no 24 PHYSICAL RECORD: n_fields 26; compact format; info bits 64
+Record lock, heap no 25 PHYSICAL RECORD: n_fields 26; compact format; info bits 64
+Record lock, heap no 26 PHYSICAL RECORD: n_fields 26; compact format; info bits 64
+Record lock, heap no 27 PHYSICAL RECORD: n_fields 26; compact format; info bits 64
+Record lock, heap no 28 PHYSICAL RECORD: n_fields 26; compact format; info bits 64
+Record lock, heap no 29 PHYSICAL RECORD: n_fields 26; compact format; info bits 64
+Record lock, heap no 30 PHYSICAL RECORD: n_fields 26; compact format; info bits 64
+Record lock, heap no 31 PHYSICAL RECORD: n_fields 26; compact format; info bits 64
+Record lock, heap no 32 PHYSICAL RECORD: n_fields 26; compact format; info bits 64
+Record lock, heap no 33 PHYSICAL RECORD: n_fields 26; compact format; info bits 64
+Record lock, heap no 34 PHYSICAL RECORD: n_fields 26; compact format; info bits 64
+Record lock, heap no 35 PHYSICAL RECORD: n_fields 26; compact format; info bits 64
+Record lock, heap no 36 PHYSICAL RECORD: n_fields 26; compact format; info bits 64
+Record lock, heap no 37 PHYSICAL RECORD: n_fields 26; compact format; info bits 64
+Record lock, heap no 38 PHYSICAL RECORD: n_fields 26; compact format; info bits 64
+Record lock, heap no 39 PHYSICAL RECORD: n_fields 26; compact format; info bits 64
+Record lock, heap no 40 PHYSICAL RECORD: n_fields 26; compact format; info bits 64
+Record lock, heap no 41 PHYSICAL RECORD: n_fields 26; compact format; info bits 64
+Record lock, heap no 42 PHYSICAL RECORD: n_fields 26; compact format; info bits 64
+Record lock, heap no 43 PHYSICAL RECORD: n_fields 26; compact format; info bits 64
+Record lock, heap no 44 PHYSICAL RECORD: n_fields 26; compact format; info bits 64
+Record lock, heap no 45 PHYSICAL RECORD: n_fields 26; compact format; info bits 64
+Record lock, heap no 47 PHYSICAL RECORD: n_fields 26; compact format; info bits 64
+Record lock, heap no 48 PHYSICAL RECORD: n_fields 26; compact format; info bits 64
+Record lock, heap no 49 PHYSICAL RECORD: n_fields 26; compact format; info bits 64
+Record lock, heap no 51 PHYSICAL RECORD: n_fields 26; compact format; info bits 64
+ 3: len 20; hex 646c70726f62654d303120202020202020202020; asc dlprobeM01          ;;
+*** (2) WAITING FOR THIS LOCK TO BE GRANTED:
+RECORD LOCKS space id 23 page no 4 n bits 128 index PRIMARY of table `mall_management_sql`.`user` trx id 4847062 lock_mode X locks rec but not gap waiting
+Record lock, heap no 59 PHYSICAL RECORD: n_fields 21; compact format; info bits 64
+ 0: len 20; hex 5f5f646c70726f62655f5f202020202020202020; asc __dlprobe__         ;;
+ 5: len 20; hex 646c70726f62654d303120202020202020202020; asc dlprobeM01          ;;
+------------
+------------
+--------
+--------
+-------------------------------------
+INSERT BUFFER AND ADAPTIVE HASH INDEX
+-------------------------------------
+----------------------
+----------------------
+--------------
+--------------
+----------------------------
