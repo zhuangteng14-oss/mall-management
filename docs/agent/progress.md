@@ -2358,7 +2358,7 @@ DB 级唯一锁探针 `ProbeB6c7Lock` = **PASS 12 / FAIL 0**；接口级 8 条�
 
 **块 7 挂账** ⇒ 逐条见 `tech-debt.md`（commit 9 补登 §块 7 段）：**TD-51**（`AbstractSmokeTest.java` 既有误指族）· **TD-54**（未应用的族）· **TD-58**（计时敏感用例）等；另 `TD-18`（SSE 无角色闸）与本块同源。⚠️ **台账落库边界**（`EventBroadcaster.poll()` 由 **SSE 流线程**驱动 ⇒ **没人开实时日志页就不落库**）不是缺陷、是设计，已写进 `api-contract.md` 附录 H.7。
 
-⚠️ **本笔不 push / 不 merge** —— 块 7 **全部手验通过**后由用户决定（批文明确）。手验清单另见桌面 `块7-commit9-收口-报告.txt`（三列式：操作步骤 → 期望 → 判据）。
+⚠️ **本笔不 push / 不 merge** —— 块 7 **全部手验通过**后由用户决定（批文明确）。手验清单另见 `reports/块7-commit9-收口-报告.txt`（**2026-10-16 顾问裁定 2 归档进仓根 `reports/`；原落桌面**）（三列式：操作步骤 → 期望 → 判据）。
 
 #### 7-B7-续　commit 10 系列 + 收口（**commit 10d**，2026-10-15）
 
@@ -2399,7 +2399,7 @@ DB 级唯一锁探针 `ProbeB6c7Lock` = **PASS 12 / FAIL 0**；接口级 8 条�
 
 **本笔（10d）文档同步面** ⇒ `api-contract.md` 附录 H（补 `/stop` 第 5 条出口 · 三个「丁」入参 · `batchCounts` · 两处引擎配置键 · 坐标/counts 订正）· `tech-debt.md`（TD-60 表补 SSE 异步超时 + 延迟口径排除两条 ✅已修 · 新增 **TD-70** 延迟排除名单是手工白名单 · 新增 **TD-71** JVM `-Xms/-Xmx` 未固定）· 本小节 · `slot-registry.md §二十四` 续段。⚠️ `db-schema.md` / `db-migration.md` **本笔不改**（⑲ 落库时已登，本系列零 DDL ⇒ 无新增登记）。
 
-⚠️ **本笔不 push / 不 merge**（同上：块 7 全部手验通过后由用户决定）。**手验清单**另见桌面 `块7-commit10d-收口-报告.txt`（三列式：操作步骤 → 期望 → 判据；**凡涉及鉴权的一律标「默认 profile」，dev/a3 因 `app.auth.enabled=false` 验不出鉴权**）。
+⚠️ **本笔不 push / 不 merge**（同上：块 7 全部手验通过后由用户决定）。**手验清单**另见 `reports/块7-commit10d-收口-报告.txt`（**2026-10-16 归档进仓根 `reports/`；原落桌面**）（三列式：操作步骤 → 期望 → 判据；**凡涉及鉴权的一律标「默认 profile」，dev/a3 因 `app.auth.enabled=false` 验不出鉴权**）。
 
 ---
 

@@ -4997,7 +4997,7 @@ COALESCE(merchantid,customerid) WHERE EventType IN (那 5 个)` → 复读对照
 ⚠️ **批文另两件前提实测已满足、本笔不重复造**：敏感词库里已有 **11** 条（10 条来自 `.sql:1632` 的 ⑮-8 预置，全 `Source=''`）——**不改写它们的 `Source`**（改了会让撤种子删掉建表文件该保留的基线词）；「有 `customerid` + 未封禁 + 有登录名」的账号已有 **33** 个。
 落库 + 读回证据 `docs/agent/evidence/c3-block7/b7c9-seed-sku.txt`（`DELETE affected=4` / `INSERT affected=4` / 复跑 4/4 幂等 / `BaselineStock` 全 NULL / 中文按 `HEX()` 核未 mojibake / `pickSku` 主靶现为 `SEED-GD-101-9552` 240）。
 
-**9.6 手验清单** ⇒ 落桌面 `块7-commit9-收口-报告.txt`（**用户明令：报告直接丢桌面**），三列式「操作步骤 → 期望 → 判据」，分 〇 前置 / A 攻击模拟器 / B 指标 / C 状态流转 / D 实时日志 / **E 跨线程透传端到端** / F 中文标签 / G MQ 缺席 / H 收尾自检。
+**9.6 手验清单** ⇒ 落桌面 `块7-commit9-收口-报告.txt`（**用户明令：报告直接丢桌面**；⚠️ 2026-10-16 顾问裁定 2：该份连同另 6 份已归档进**仓根 `reports/`**——现址 `reports/块7-commit9-收口-报告.txt`，`reports/` 在 `scripts/refs-scan.sh` 的 SKIP_DIRS 里、不参与扫描），三列式「操作步骤 → 期望 → 判据」，分 〇 前置 / A 攻击模拟器 / B 指标 / C 状态流转 / D 实时日志 / **E 跨线程透传端到端** / F 中文标签 / G MQ 缺席 / H 收尾自检。
 ⚠️ **§E 是本笔专门补的 8c 判据① 端到端**（8c 当时只验到单元 + 日志）：判据是「该批次 `COUNT>0` · `COUNT(DISTINCT BatchId)=1` · `Traces>1` · 时间落演练窗口内」，**不是**「全表都带批次」——`BatchId IS NULL` 是**正常值**（非请求上下文），证据 `docs/agent/evidence/c3-block7/b7c9-e2e-batch.txt`。
 ⚠️ **§〇-5 是本清单最重要的一条前置**：事件台账的落库**由 SSE 流线程驱动**（`EventStreamService:96` → `EventBroadcaster.poll()`；⚠️ **2026-10-15 块 7 commit 10b 重指**：**原 81 行** → **96 行**）⇒ **不打开实时日志页就查不到台账行**；本笔实测对照：不开流当场 **0 行** → 开流后同一批次 **2140 行**且时间戳仍落在演练当时（**落库滞后 ≠ 透传丢了**）。
 
