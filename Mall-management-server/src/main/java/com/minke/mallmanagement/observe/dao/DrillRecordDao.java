@@ -38,11 +38,25 @@ import java.util.Map;
 @Repository
 public class DrillRecordDao {
 
-    /** 共用列清单 —— 列表 / 详情**必须逐字一致**（理由同 {@code AdminAuditDao.COLUMNS}）。 */
+    /**
+     * 共用列清单 —— 列表 / 详情**必须逐字一致**（理由同 {@code AdminAuditDao.COLUMNS}）。
+     *
+     * <p>⚠️ {@code BatchId} 是**块 7 收尾**补进来的（用户 2026-10-15 裁「甲」）：它是
+     * <b>演练回放的入口键</b> —— 回放端点（{@code POST /admin/observe/replay}）按批次读
+     * {@code observed_event}，而在此之前这个值**只在库里、从来没往响应里露过**
+     * （commit 8c 把它写进了本表与 {@code observed_event} 两处，却没有任何一条端点把它读出来）
+     * ⇒ 界面上那个〔回放〕按钮拿不到 `batchId`，功能等于不可达。加在 COLUMNS 里而不是给
+     * {@code AttackController} 新开一条查询：**它的入口就是「记录区那一行」**，字段跟着那一行走。
+     *
+     * <p>⚠️ 顺序：追加在**最后**（{@code CreatedAt} 之后）—— 新字段加在尾部，别插在中间：
+     * 前端表格列顺序跟着这个键序走（{@code DrillRecordServiceTest} 钉住了它）。
+     * ⚠️ 而 {@code Result} **总是**排在最末：{@code DrillRecordService.split()} 会把它从原位置摘下来、
+     * 最后再放回去（见那个方法）⇒ 响应里每行的键序是 {@code […, DurationMs, CreatedAt, BatchId, Result]}。
+     */
     private static final String COLUMNS =
             "Id, OperatorId, OperatorRole, Name, Scenario, TotalRequests, BlockedRequests, "
                     + "FailedRequests, DurationMs, CAST(Result AS CHAR) AS Result, "
-                    + "DATE_FORMAT(created_at, '%Y-%m-%d %H:%i:%s') AS CreatedAt ";
+                    + "DATE_FORMAT(created_at, '%Y-%m-%d %H:%i:%s') AS CreatedAt, BatchId ";
 
     private final JdbcClient jdbcClient;
 

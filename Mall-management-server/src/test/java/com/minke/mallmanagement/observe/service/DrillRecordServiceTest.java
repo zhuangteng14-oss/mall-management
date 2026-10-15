@@ -51,6 +51,8 @@ class DrillRecordServiceTest {
         r.put("DurationMs", 60000L);
         r.put("Result", result);
         r.put("CreatedAt", "2026-10-13 20:00:00");
+        // 块 7 收尾：回放的入口键（用户 2026-10-15 裁「甲」）—— 顺序与 `DrillRecordDao.COLUMNS` 一致（尾部）
+        r.put("BatchId", "b-1");
         return r;
     }
 
@@ -72,10 +74,15 @@ class DrillRecordServiceTest {
         assertTrue(list.get(0).get("Scenario") instanceof Map, "Scenario 必须是对象");
         assertFalse(list.get(0).containsKey("ResultRaw"), "解析成功不该留原串");
         // 列顺序保序（前端表格列顺序靠它稳定）
+        // ⚠️ `BatchId` 在 `CreatedAt` 之后、`Result` 之前：前者是 COLUMNS 的追加位，后者是
+        //    `split()` 把 Result 摘下来最后再放回去的结果（块 7 收尾补 BatchId 时才显出来）。
         assertEquals(List.of("Id", "OperatorId", "OperatorRole", "Name", "Scenario",
                         "TotalRequests", "BlockedRequests", "FailedRequests", "DurationMs",
-                        "CreatedAt", "Result"),
+                        "CreatedAt", "BatchId", "Result"),
                 List.copyOf(list.get(0).keySet()));
+        // ⚠️ 这一个键是**回放能不能用**的全部：没有它，页面那个〔回放〕按钮无从知道该回放哪一批
+        //    （块 7 收尾实测：它此前**没有**出现在任何响应里 —— 库里两处都有这个值）。
+        assertEquals("b-1", list.get(0).get("BatchId"));
         assertEquals(1L, out.get("total"));
         assertEquals(DrillRecordService.DEFAULT_LIMIT, out.get("limit"));
         assertEquals(0, out.get("offset"));

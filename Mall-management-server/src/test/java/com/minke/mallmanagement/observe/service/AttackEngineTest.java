@@ -17,9 +17,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
 
 /**
- * {@link AttackEngine} 的三处**纯函数**（不碰库、不发网络、不起 Spring）：
+ * {@link AttackEngine} 的四处**不碰库、不发网络、不起 Spring** 的面：
  * 分档 {@link AttackEngine#classify} / 参数校验 {@link AttackEngine#parse} /
- * 权重→线程 {@link AttackEngine#threadPlan}（+ 配置 JSON 与场景清单两条边）。
+ * 权重→线程 {@link AttackEngine#threadPlan}（+ 配置 JSON 与场景清单两条边）/ 空闲态 {@link AttackEngine#progress}。
  *
  * <p>⚠️ 为什么只测这三处：其余部分（{@code fireOnce} 的八个分支）**必须真发 HTTP** 才有意义
  * —— 拿假 HttpClient 测「我拼的字符串等于我以为的字符串」是自证，价值接近零。那八个分支的
@@ -391,5 +391,57 @@ class AttackEngineTest {
         assertTrue(b.contains("\"i\":[\"redisDown\"]"), b);
         // 加了这两组键之后仍然塞得进 varchar(500)（8 个场景是最长的一档）
         assertTrue(b.length() <= AttackEngine.SCENARIO_JSON_MAX, "实际长度 " + b.length());
+    }
+
+    // ==================== 四、实时进度（块 7 收尾 · `/attack/status`）====================
+
+    /**
+     * 空闲态：{@code running=false} + **全零**（不是缺键、更不是抛异常）。
+     *
+     * <p>⚠️ 这一条钉的是**轮询的收尾那一拍**：前端 1 秒一次地打，演练跑完的下一拍必然落在
+     * 「没有在跑」上 —— 这里若抛或若返回 {@code null}，面板会把「跑完了」画成一次假报错。
+     */
+    @Test
+    void progressIsAllZeroAndNotRunningWhenIdle() {
+        AttackEngine.Progress p = engine.progress();
+        assertFalse(p.running(), "从没跑过 ⇒ 不在跑");
+        assertEquals("", p.batchId(), "不在跑时批次号是空串（不是 null）");
+        assertEquals(0L, p.elapsedMs());
+        assertEquals(0, p.sent());
+        assertEquals(0, p.completed());
+        assertEquals(0, p.blocked());
+        assertEquals(0, p.failed());
+        assertEquals(0, p.shed());
+        assertEquals(0, p.abandoned());
+    }
+
+    /** 反复取是幂等的、不回填陈旧值：这一次的读数不依赖上一次（字段被摘干净过）。 */
+    @Test
+    void progressIsStableAcrossRepeatedIdleCalls() {
+        AttackEngine.Progress a = engine.progress();
+        AttackEngine.Progress b = engine.progress();
+        assertEquals(a, b, "同一状态下两次读数必须逐字段相同（record 的 equals）");
+        assertFalse(engine.isRunning(), "只读 progress() 不该把 running 翻成 true");
+    }
+
+    /**
+     * 空闲时叫停：返回 {@code false}，且**不留下任何痕迹**（{@code running} 不会被点亮、
+     * {@code progress()} 也不会变成「在跑但零进度」）。
+     *
+     * <p>⚠️ 与上一条合起来钉的是「没在跑」这一支的三个出口（{@code stop} / {@code isRunning} /
+     * {@code progress}）**互相不矛盾** —— 旧版只有前两个，第三个是本笔新加的，
+     * 新加一个出口最容易出的错就是它和前两个说的不是一件事。
+     *
+     * <p>⚠️ <b>「真在跑」那一支本类测不了</b>：要把 {@code liveMeters} 挂上必须走
+     * {@code run()}，而它**真发 HTTP**。拿假 HttpClient 测「我读到的等于我刚写进去的」是自证
+     * （与本文件头那条理由同源）。那一支的判据在**真跑一轮时打一次 {@code /status}**，
+     * 不在单测里。
+     */
+    @Test
+    void stopOnIdleLeavesNoTraceInProgress() {
+        assertFalse(engine.stop(), "没有在跑的轮次 ⇒ stop 如实答 false");
+        assertFalse(engine.isRunning());
+        assertFalse(engine.progress().running(), "叫停失败不该把 progress 说成在跑");
+        assertEquals(0, engine.progress().sent());
     }
 }

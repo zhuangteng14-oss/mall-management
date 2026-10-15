@@ -150,6 +150,28 @@ public class DrillRecordService {
         return attackEngine.stop();
     }
 
+    // ==================== 面 5：实时进度（块 7 收尾）====================
+
+    /**
+     * 正在跑的那一轮的实时读数（{@code POST /admin/observe/attack/status}）。
+     *
+     * <p>⚠️ 与 {@link #stop} 同一条理由：本类只是**转发**（一层薄壳），真正读的是
+     * {@code AttackEngine.progress()} —— 不给 {@code AttackController} 添第四个构造依赖
+     * （本仓在那处登记过「第十九次」地雷，控制器每多一个依赖，{@code AbstractSmokeTest}
+     * 的 {@code @Import} 就得跟着加）。
+     *
+     * <p>⚠️ <b>为什么这个数必须由后端给</b>：{@code /run} 是**同步跑到结束**的，页面在它返回
+     * 之前拿不到任何后端读数 —— 旧版那条进度条因此只能按前端墙钟估（页面注释自己写着
+     * 「没有后端进度可查……装作知道就是编数据」）。本出口把「已发多少条 / 拦下多少条」
+     * 变成**真实读数**，前端不再需要估。
+     *
+     * @return 永不为 {@code null}；没有在跑时 {@code running=false} + 全零（见
+     *         {@code AttackEngine.progress()} 的三条边界）
+     */
+    public AttackEngine.Progress status() {
+        return attackEngine.progress();
+    }
+
     // ==================== 面 3：记录列表（拆字段） ====================
 
     /**

@@ -2,6 +2,7 @@ package com.minke.mallmanagement.observe.controller;
 
 import com.minke.mallmanagement.admin.AuditActions;
 import com.minke.mallmanagement.admin.service.AuditService;
+import com.minke.mallmanagement.observe.service.AttackEngine;
 import com.minke.mallmanagement.observe.service.DrillRecordService;
 import com.minke.mallmanagement.observe.service.ObservedEventCleanupService;
 import com.minke.mallmanagement.shared.web.AuthSession;
@@ -17,11 +18,11 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 
 /**
- * 攻击模拟器的五个出口（块 7 · commit 4 建前三条、commit 8b 加第四条、commit 10 加第五条）：
- * 场景清单 / 跑一轮 / **叫停** / 演练记录 / **清理演练数据**。
+ * 攻击模拟器的**六个**出口（块 7 · commit 4 建前三条、commit 8b 加第四条、commit 10 加第五条、
+ * 块 7 收尾加第六条）：场景清单 / 跑一轮 / **叫停** / 演练记录 / **清理演练数据** / **实时进度**。
  *
  * <h2>【端点口径：全 POST、不加角色闸、不在白名单】</h2>
- * 五条与本批 SSE 三条**逐字同款**（{@code MetricsStreamController} 写了完整理由）：
+ * 六条与本批 SSE 三条**逐字同款**（{@code MetricsStreamController} 写了完整理由）：
  * 管理端读端点在本仓一律 POST；{@code AUTH_WHITELIST} 维持 14 不动（管理端端点没有公开面，
  * 靠 {@code AuthInterceptor} 拦）；不给 {@code /admin/**} 加角色判据（TD-18 —— 加了之后默认 profile
  * 上管理员自己也进不来）。
@@ -176,6 +177,50 @@ public class AttackController {
                 ? "已发出停止令：不再投递新请求，在途请求走 3 秒宽限排空（宽限用尽记 Abandoned）"
                 : "当时没有正在跑的演练（跑完了 / 从没跑过），未做任何事");
         return Result.of(payload);
+    }
+
+    // ==================== 块 7 收尾：实时进度（第六条出口）====================
+
+    /**
+     * [暂停] 面板的**实时读数** —— 让那 6 个数里的「已发 M 条」「完成多少次拦截」变成真数。
+     *
+     * <h2>【⚠️ 为什么必须是一个端点】</h2>
+     * {@code /run} 是**同步跑到结束**的（见类注释），跑完才回 —— 页面在它返回之前拿不到任何后端
+     * 读数。用户 2026-10-14 点名的 6 个数里，「已跑 N 秒」前端能自己按墙钟估（且页面**如实标注**
+     * 了那是估的），但「**已发多少条**」「**完成多少次拦截**」这两条**估不出来** —— 编一个出来就是
+     * 假数据。本出口是它们唯一的真源。
+     *
+     * <h2>【⚠️ 为什么不是 GET】</h2>
+     * 与本域其余五条**同形**（全 {@code POST}，见 {@link #scenarios()} 起的那几条）：
+     * 本仓前端 {@code api/observe.js} 一律走 {@code POST}，混入一条 {@code GET} 只会给
+     * CORS 预检与「按方法找端点」两处各添一个特例。
+     *
+     * <h2>【⚠️ 无入参、无副作用、不写审计】</h2>
+     * 不接收任何参数（没有 runId：{@code AttackEngine} 同一时刻只认真实跑着的那一轮，
+     * 见 {@code run()} 里那条「已有演练在跑」的告警）⇒ **没有可越权的入参面**。只读一个进程内
+     * 快照：不删数据、不改库、不改任何持久状态 ⇒ 与 {@link #stop()} 同一档，**不写审计**。
+     *
+     * @return {@code {"success":true, "Running":bool, "BatchId":"…", "ElapsedMs":n, "Sent":n,
+     *         "Completed":n, "Blocked":n, "Failed":n, "Shed":n, "Abandoned":n}}。
+     *         ⚠️ {@code Running=false} 时其余**全为 0 而不是 {@code null}**（1 秒一次的轮询在演练
+     *         收尾那一拍必然撞上它，缺键会让前端把「跑完了」画成「读数丢了」）。
+     *         ⚠️ 这几个数是**跑的过程中**的近似快照，**不是**最终账 —— 最终数以
+     *         {@link #records} 里那条 {@code drill_record} 为准。
+     */
+    @PostMapping("/status")
+    public Result<Map<String, Object>> status() {
+        AttackEngine.Progress p = drillRecordService.status();
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("Running", p.running());
+        payload.put("BatchId", p.batchId());
+        payload.put("ElapsedMs", p.elapsedMs());
+        payload.put("Sent", p.sent());
+        payload.put("Completed", p.completed());
+        payload.put("Blocked", p.blocked());
+        payload.put("Failed", p.failed());
+        payload.put("Shed", p.shed());
+        payload.put("Abandoned", p.abandoned());
+        return Result.ok(payload);
     }
 
     /**

@@ -1,0 +1,29 @@
+b7 块 7 收尾 · commit 1 ③ 实时进度（`POST /admin/observe/attack/status`）—— 真库 live 实证
+时间：2026-10-15 · 分支 feat/c3-admin-block7 · **profile = dev**（后端 8088，PID 25856）· VM 库 192.168.229.129/mall_management_sql
+探针：`scripts/probes/c1-status-live.sh`（跑法：`bash c1-status-live.sh`）
+本文件 = 探针 stdout（原始输出留 `_work/t-status-live-run.txt` + 帧序列 `_work/t-status-live-frames.txt`，**不入库**）
+
+== [A] 演练进行中 ⇒ `Running=true`，九个数都在动（1 秒一次轮询的真实节奏）==
+{"ElapsedMs":2079, "Running":true, "BatchId":"a387c6e0-10b3-43ad-8d2d-333ada65d74d", "Sent":290,  "Completed":285,  "Blocked":155, "Failed":0, "Shed":0, "Abandoned":0}
+{"ElapsedMs":3660, "Running":true, "BatchId":"a387c6e0-10b3-43ad-8d2d-333ada65d74d", "Sent":509,  "Completed":503,  "Blocked":276, "Failed":0, "Shed":0, "Abandoned":0}
+{"ElapsedMs":5230, "Running":true, "BatchId":"a387c6e0-10b3-43ad-8d2d-333ada65d74d", "Sent":722,  "Completed":722,  "Blocked":396, "Failed":0, "Shed":0, "Abandoned":0}
+{"ElapsedMs":6816, "Running":true, "BatchId":"a387c6e0-10b3-43ad-8d2d-333ada65d74d", "Sent":941,  "Completed":941,  "Blocked":516, "Failed":0, "Shed":0, "Abandoned":0}
+{"ElapsedMs":8406, "Running":true, "BatchId":"a387c6e0-10b3-43ad-8d2d-333ada65d74d", "Sent":1134, "Completed":1134, "Blocked":615, "Failed":0, "Shed":0, "Abandoned":0}
+{"ElapsedMs":9975, "Running":true, "BatchId":"a387c6e0-10b3-43ad-8d2d-333ada65d74d", "Sent":1322, "Completed":1322, "Blocked":662, "Failed":0, "Shed":0, "Abandoned":0}
+{"ElapsedMs":11557,"Running":true, "BatchId":"a387c6e0-10b3-43ad-8d2d-333ada65d74d", "Sent":1512, "Completed":1512, "Blocked":710, "Failed":0, "Shed":0, "Abandoned":0}
+⇒ 读数单调、`BatchId` 全程同一串（= 演练记录那一行的 BatchId）；`Running=true` 分支真出现过。
+
+== [B] `/run` 返回之后的一拍 ⇒ `Running=false`，其余**全为 0 而不是 null** ==
+{"ElapsedMs":0, "Running":false, "BatchId":"", "Sent":0, "Completed":0, "Blocked":0, "Failed":0, "Shed":0, "Abandoned":0}
+⇒ 这正是契约里那条：「跑完那一拍必然撞上它，缺键会让前端把『跑完了』画成『读数丢了』」。
+   实测九键齐全（`BatchId` 是空串、不是缺键）。
+
+== [C] 同一次的最终账（`/run` 响应，截断）—— 与上面过程值对照 ==
+{"Id":40, "Name":"statusprobe", "TotalRequests":1707, "BlockedRequests":758, "FailedRequests":0,
+ "ShedRequests":0, "AbandonedRequests":0, "DurationMs":13259, ...}
+⇒ 过程值最后一拍 `Sent=1512` / `Blocked=710`，最终账 `TotalRequests=1707` / `BlockedRequests=758`
+   —— **过程值是近似快照、最终账看记录行**，`/status` 的 javadoc 就这么写的，实测吻合。
+
+== 结论 ==
+idle 与真·running **两个分支都走到**（不是只测了空表）；九个数齐全；`Running=false` 时不缺键。
+⚠️ 本笔**不 push / 不 merge**；手验按批文推迟到 commit 4 之后统一一轮。

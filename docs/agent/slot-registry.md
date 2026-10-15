@@ -5090,4 +5090,63 @@ COALESCE(merchantid,customerid) WHERE EventType IN (那 5 个)` → 复读对照
 3. **`/attack/stop` 是 10c 新增的，但 `api-contract.md` 附录 H 当时没收它** ⇒ 本笔（10d）补登第 5 条出口。⚠️ 与 8b 时「附录 H 只有 4 条」的口径不同，这里说的漏是**10c 之后**发生的。
 4. **`AttackController.java:100-102` 的陈旧注释** ⇒ 原写「上限 **500**、硬顶 **512**」，与 `4da212a` 抬到 **4000** 的 `MAX_CONCURRENCY` 不符 ⇒ 本笔**净 0 行**订正（避免造漂移）。**10c 抬上限时漏改了这处注释**。
 5. **10d 本笔不 push / 不 merge** —— 块 7 全部手验通过后由用户决定。
-6. **⚠️ 一处待归置** ⇒ `docs/agent/context-packs/块7-*.txt` **3 份未跟踪**（10d 时点又新增）—— 若入库会给引用图注入噪声对；建议归置到 `_work/`（同 57e19b7 收口报告 §戊 的建议，**未做**）。
+6. **⚠️ 一处待归置** ⇒ `docs/agent/context-packs/块7-*.txt` **3 份未跟踪**（10d 时点又新增）—— 若入库会给引用图注入噪声对；建议归置到 `_work/`（同 57e19b7 收口报告 §戊 的建议，**未做**）。⏹ **已归置**：块 7 收尾 commit 1 前的那笔 chore `4d75eec` 把 3 份 **入库**（改判为「被已入库文件引用 ⇒ 换机可取证」）—— 本条据此关闭。
+
+---
+
+## 二十五、块 7 **收尾**系列（用户 2026-10-15 重排期批文；**4 笔 commit**）
+
+> ⚠️ **这不是块 8** —— 是块 7 与块 8 之间插入的一段（块 7 欠账收尾 + **D 段「防护加固」**）。
+> 分支继续用 `feat/c3-admin-block7`。⚠️ **手验压成一轮**（commit 4 之后），与块 7 前 21 笔「逐笔验」口径不同。
+
+### 25-0　四笔的总账（批文原序）
+
+| 笔 | 内容 | 状态 |
+|---|---|---|
+| **1** | 块 7 **收尾**（演示完整化 ① 回放 / ② 模拟日常 / ③ 实时进度 + ⑤ 3 txt 入库 + ⑥ D pack + ⑦ 文档补 + ⑧ refs 重指；④ 三块预览**登记不做**） | ⏳ **本笔** |
+| 2 | **D 段后端防护**（事件环第 9 类 + 熔断 / 限流 / 重试 / 分池 + 单测） | ⏸ 未开工 |
+| 3 | **D 段边界 + 演示联动**（SSE 保护 / MQ 幂等 + DLQ / 大表 LIMIT / 脱敏 / 攻击模拟器 + 攻防联动；⚠️ 多进程实验**已移出**） | ⏸ 未开工 |
+| 4 | **收口 + 块 8 前置**（文档统一补 + refs 重指 + **手验清单（块 7 + D 段合并）** + 假数据 + 块 8 前置清单） | ⏸ 未开工 |
+
+⚠️ D 段的**唯一方案来源**是用户批文本身；其**规划文档**（行号实测 + 八项现状 + 七条前提更正 + A 档清单）落在
+`context-packs/c3-block-D-hardening.md`（本笔 ⑥）。
+
+### 25-1　commit 1 的落码面（**本笔**）
+
+**新增**
+- 后端：`observe/controller/ReplayController.java`（`@RequestMapping("/admin/observe")` @ `:42`，方法 `@PostMapping("/replay")` @ `:64`）· `observe/service/ReplayService.java`（`DEFAULT_LIMIT=5000` / `MAX_LIMIT=50000`）。
+- 测试：`observe/service/ReplayServiceTest.java`。
+- 前端：`api/demo-stream.js`（「模拟日常」假数据源，纯前端）· `components/observe/DemoModeToggle.vue`（右上角「正常 / 模拟日常」，根类 `.a-dm`）。
+- 稿：`docs/agent/context-packs/c3-block-D-hardening.md`（**规划，不写代码**）。
+- 探针 ×5 + 截图 ×3：`c1-replay-live.sh` · `c1-status-live.sh` · `demo-stream-check.mjs` · `esm-src-loader.mjs` · `probe-b7c1-demo-mode.mjs` · `out-b7c1-demo-{metrics,timeline,logs}.png`。
+- 证据 ×3：`docs/agent/evidence/c3-block7/b7w-{replay-live,status-live,demo-probe}.txt`。
+
+**修改**
+- 后端：`AttackController.java`（**+ 第六条 `@PostMapping("/status")`** @ `:210`）· `DrillRecordDao.java`（`COLUMNS` 尾加 `BatchId`；键序 `[…, DurationMs, CreatedAt, BatchId, Result]`）· `DrillRecordService.java`（`Progress` 快照）· `AttackEngine.java`（进度读数）· `ObservedEventDao.java`（回放那条 `WHERE BatchId = ? ORDER BY OccurredAt ASC, Id ASC LIMIT ?` @ `:142`）。
+- 测试：`AttackEngineTest` · `DrillRecordServiceTest` · `smoke/AbstractSmokeTest`（**+25 行**，⚠️ **TD-66 族**：指向它的行号会漂）。
+- 前端：三页接开关（`AttackConsole.vue` / `EventLog.vue` / `MetricsPanel.vue` / `OrderFlow.vue`）· `api/endpoints.js`（`observe.attackStatus` @ `:437` · `observe.replay` @ `:449`，总数 **142 → 143**）· `api/observe.js`（`attackStatus()` @ `:395` · `replay(batchId, limit)` @ `:420`）。
+- 文档：`api-contract.md` 附录 H（**H.1 五→六出口 + 全表重指** · **新增 H.8 回放** · H.0 两个计数 · H 引言）· `tech-debt.md`（**TD-72 / TD-73**）· `progress.md`（`#### 7-B7-收尾`）· 本文件 **§二十五**。
+
+**本笔规模**（`git diff --cached --stat` 实测）
+- **35 文件 / +2999 / −42**（含 3 张 png · 5 个探针 · 3 份证据）。
+- 后端 11 文件：`ReplayService` **+121** · `AttackEngine` **+114** · `ReplayController` **+74** · `ObservedEventDao` **+59** · `AttackController` **+48/−3** · `DrillRecordService` **+22** · `DrillRecordDao` **+16/−2**；测试 `ReplayServiceTest` **+192** · `AttackEngineTest` **+54** · `AbstractSmokeTest` **+15** · `DrillRecordServiceTest` **+8**。
+- 前端 8 文件：`demo-stream.js` **+494** · `AttackConsole.vue` **+432** · `DemoModeToggle.vue` **+112** · `observe.js` **+61** · `endpoints.js` **+24** · 三页各 +14~18。
+- 文档 5 文件：D pack **+373** · 本文件 **+53** · `progress.md` **+44** · `api-contract.md` **+35/−9** · `tech-debt.md` **+22**。
+- **测试：498 passed / 0 failed / 0 errors / 26 skipped**（`./mvnw -B -o test`，`EXIT=0`；基线 485 ⇒ **+13**）。
+
+**零漂移手法**
+- ⚠️ **`AttackController` 是本笔唯一一处「行内插入」** ⇒ `/status`(:210) 插在 `/stop`(:170) 与 `/records` 之间，**把 `/records` 从 188 顶到 233、`/cleanup` 从 236 顶到 281（各 +44 行）**；另有一处 +1（**新增 import** `observe.service.AttackEngine`，给 `AttackEngine.Progress` 用）落在 `@RequestMapping` 与前三条之前。⇒ 附录 H.1 **全表重指**。
+- ⚠️ **重指记录**这次按 §24-11 的教训写：旧值一律写「**原 N 行**」，**不**写成 `` `:N` ``（避免重指记录自己往引用集合里注入陈旧 token）。
+- 其余全部**尾追加**（新方法 / 新段 / 新文件）或**同行替换**（净 0 行）。
+
+### 25-2　本笔的事实更正（三处，逐条）
+
+1. **附录 H.1 标题「攻击模拟器五出口」→「六出口」** ⇒ ⑤③ 之后 `/status` 是真端点（`AttackController:210`）。⚠️ 这与 §24-13 第 **1** 条（「**没有** `/attack/status` 这个端点」）**不矛盾** —— 那条是 **commit 10 系列的时点陈述**，按本仓口径**保留原样**（见 `progress.md` `#### 7-B7-收尾` 的 ③ 顺带登记）。
+2. **端点总数**：后端 method-level **142 → 144**（实测 `grep -rhE "^\s*@(Post|Get|Put|Delete)Mapping" --include=*Controller.java … | wc -l`）· `endpoints.js` **141 → 143**（实测 141 行 + 2 处同行两条）。⚠️ 该文件头注是**逐笔就地同步**的（③ 落码时同步到 142，回放那条同步到 143）—— 本笔只登记，**不另动**。
+3. **`/replay` 不在 `/admin/observe/attack/*` 之下** ⇒ 路径挂在 `/admin/observe`（根），后端是**新建的 `ReplayController`**，**不是** `AttackController` 的第七条。理由两半：① 它读的是**事件台账** `observed_event`，不是**演练记录** `drill_record`；② 另一条候选路（再开一条 SSE 推回放）要多一条常驻流 + 回答「流断了怎么办」。
+
+### 25-3　未还项 / 待裁（本笔）
+
+1. **④ 三块小型预览 —— 留 TODO、本笔不做**（批文给定分支：「调研 agent 结果已回 → 一并做；没回 → 留 TODO · 形态不锁」）。登记落在 `progress.md` `#### 7-B7-收尾`（**唯一落点**）；⚠️ **不落 `selection-status.md §8`**（编号空间与 PR 号同形）。两条未决前提（(a) 三条流怎么接 · (b) 「暂停」口径）见那一节。
+2. **手验压成一轮** ⇒ 块 7 + D 段合并一份三列式清单，由 **commit 4** 出；⚠️ 凡涉鉴权的标「**默认 profile**」（dev / a3 两档 `app.auth.enabled=false`，验不出鉴权）。
+3. **本笔不 push / 不 merge**。

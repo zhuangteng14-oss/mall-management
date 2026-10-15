@@ -1,0 +1,43 @@
+b7 块 7 收尾 · commit 1 ① 回放（`POST /admin/observe/replay`）—— 真库 live 实证
+时间：2026-10-15 · 分支 feat/c3-admin-block7 · **profile = dev**（后端 8088，PID 25856）· VM 库 192.168.229.129/mall_management_sql
+探针：`scripts/probes/c1-replay-live.sh`（跑法：`bash c1-replay-live.sh 6`，参数 = 演练秒数）
+本文件 = 探针 stdout 摘录（原始输出留在 `_work/t-replay-run.txt`；大体积响应体 `_work/t-replay-full.json`、`_work/t-replay-lim.json` 等 4 份，**不入库**）
+
+== ① `batchId` 空白 ⇒ 400（不是 200 + success:false）==
+HTTP=400 {"msg":"batchId 必填：回放的是**某一次**演练（批次 UUID 见演练记录那一行的 BatchId）","success":false}
+
+== ② 不认识的批次 ⇒ 200 + list 空 + total 0（不是 404）==
+HTTP=200 {"total":0,"success":true,"limit":5000,"batchId":"00000000-0000-0000-0000-000000000000","list":[]}
+
+== ③ 要真的读得到（前置：先开一条事件流 = 扮演「当时开着日志页」，再跑一轮演练）==
+开流：8 秒里收到 6 帧（帧间隔 1000ms，1 秒/拍）
+跑完：batchId=6d0b45c6-91a6-41cd-9744-5af48ed78fd7
+回放：HTTP=200 success=True total=2766 limit=5000 rows=2766
+  first: Id=544466 Kind=identity  OccurredAt=2026-10-15 20:09:10.394
+  last : Id=547097 Kind=cache     OccurredAt=2026-10-15 20:09:21.056
+⇒ ⚠️ **这一条是「不开流就没数据」的直接对照**：台账的 `poll()` 由 SSE 流线程驱动
+   （`EventBroadcaster`，见 `api-contract.md#api-h-7`）⇒ 没有日志页在看，跑一轮演练**一行都不落**。
+   页面上那句「回放数据来自「当时开着日志页的演练」」就是照实说这件事。
+
+== ③b 排序两条都要 ==
+OccurredAt 升序：True
+(OccurredAt, Id) 升序：True          ← 同毫秒内靠第二列定序（少了它顺序不确定）
+行内键（9 个，无多无少）：['Id','Kind','Severity','Title','ObjectType','ObjectId','TraceId','BatchId','OccurredAt']
+
+== ④ `limit` 截断时 `total` 仍是整批 ==
+rows=5 total=2766 limit=5
+
+== ⑤ `limit` 非整数 ⇒ 400 ==
+HTTP=400
+
+== [编码注] 探针 stdout 里的中文是乱码，**不是数据坏了** ==
+上面的 ①② 等 JSON 里中文正常（因为那几行是 ASCII 兜着），但 `③b` 的行内容在**终端**里显示成
+`"Title": "���ݷ���"` —— 那是 **Git Bash(GBK) 控制台渲染 UTF-8 字节**的产物（本仓已知环境问题）。
+按码点复核（读 `_work/t-replay-full.json`，Python `encoding='utf-8'`）：
+  identity 行 Title 码点 = ['0x8eab','0x4efd','0x653e','0x884c'] = 「身份放行」✓
+  lock     行 Title 码点 = ['0x53d6','0x9501','0x6210','0x529f'] = 「取锁成功」✓
+⇒ 库里的中文是**正确码点**；乱码只发生在**本地控制台**这一层，响应体字节无误。
+
+== 结论 ==
+5 条判据全绿（① 400 · ② 空批次 200 · ③ 真读得到 + 排序两列 · ④ limit 不改 total · ⑤ 非整数 400）。
+⚠️ 本笔**不 push / 不 merge**；手验按批文推迟到 commit 4 之后统一一轮。

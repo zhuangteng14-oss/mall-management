@@ -15,6 +15,7 @@
         <span>第 <b>{{ seq }}</b> 拍 · 每秒 1 拍</span>
         <span class="a-tz-off">{{ lastTickAt }}</span>
       </div>
+      <DemoModeToggle />
     </header>
 
     <!-- ⚠️ 断线条的判据是 `lost`、**不是** `errMsg`（块 7 · commit 10c）：
@@ -292,8 +293,12 @@
 
 <script setup>
 /* eslint-disable no-undef */ /* 理由见 `ui/KpiCard.vue` 同款注释（eslint-plugin-vue 8.7.1 缺宏环境） */
-import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { openOrderStream } from '../../../api/observe'
+// 演示模式（块 7 收尾 ②）：`DemoModeToggle` 摆开关，`demo` 是被 `watch` 的那个状态，
+// `openDemoStream` 是与 `openOrderStream` **同形**的假流 —— 见 `connect()` 里那处三元式。
+import { demo, openDemoStream } from '../../../api/demo-stream'
+import DemoModeToggle from '../../../components/observe/DemoModeToggle.vue'
 import KpiCard from '../../../components/ui/KpiCard.vue'
 import DonutChart from '../../../components/charts/DonutChart.vue'
 import Pager from '../../../components/Pager.vue'
@@ -774,7 +779,10 @@ function connect() {
   phase.value = 'connecting'
   // ⚠️ `openOrderStream` 从 commit 10c 起是**带自动重连**的那一层（`onEnd` → `onLost`）：
   //    `onLost` **每次**断开都报，含「服务端正常收尾」那一格 —— 这是本笔要治的那一格。
-  stream = openOrderStream({
+  // ⚠️ 演示模式（块 7 收尾 ②）：**只换数据源这一处**，三个回调两边共用。
+  //    ⚠️ 演示流回的 `batchId` 一律 `null` ⇒ 本页那条「本批次单数」小字**不出现**
+  //    （演示不是演练 —— 理由写在 `api/demo-stream.js` 文件头），别当成漏字段。
+  const handlers = {
     onOpen() {
       phase.value = 'live'
       lost.value = null
@@ -787,7 +795,8 @@ function connect() {
       // ⚠️ `errMsg` 只装**真错误**：它同时是「还没收到第一拍」那个加载闸的判据（见 `first`）。
       errMsg.value = s.err ? ((s.err && s.err.message) || '连接中断') : ''
     },
-  })
+  }
+  stream = demo.on ? openDemoStream('orders', handlers) : openOrderStream(handlers)
 }
 
 function closeStream() {
@@ -806,6 +815,8 @@ function closeStream() {
 }
 
 onMounted(connect)
+// ⚠️ 切数据源（`正常` ⇄ `模拟日常`）⇒ 立刻重连（`connect()` 会先 `closeStream()`）。
+watch(() => demo.on, connect)
 onBeforeUnmount(closeStream)
 </script>
 

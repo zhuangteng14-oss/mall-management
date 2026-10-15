@@ -423,6 +423,8 @@ public class AttackEngine {
         final AtomicInteger failed = new AtomicInteger();
         final AtomicInteger shed = new AtomicInteger();
         final AtomicInteger abandoned = new AtomicInteger();
+        /** 已**投递**出去（含仍在途）—— 与 {@link #total}（已收口）不是一回事，见 {@link #sent()}。 */
+        final AtomicInteger sent = new AtomicInteger();
 
         void add(Outcome o) {
             if (o == Outcome.ABANDONED) {
@@ -437,9 +439,26 @@ public class AttackEngine {
             }
         }
 
-        /** 背压弃投一次（这一拍**没发出去**，理由见类注释）。 */
+        /**
+         * 背压弃投一次（这一拍**没发出去**，理由见类注释）。
+         *
+         * <p>⚠️ 它**不计 {@link #total}**，也**不计 {@link #sent}** ——「没发出去」与
+         * 「发出去了但失败」是两件事，混进任何一边都是撒谎。
+         */
         void shed() {
             shed.incrementAndGet();
+        }
+
+        /**
+         * 真投递出去了一条（在 {@link #dispatch} 里 {@code send} 返回之后、挂完成钩子之前 +1）。
+         *
+         * <p>⚠️ <b>它 ≠ {@link #total}</b>：{@code total} 是「**已收口**」（拿到响应或异常，
+         * 计数已落），{@code sent} 是「**已投递**」= 已收口 + 此刻仍在途。给 [暂停] 面板的
+         * 「已发 M 条」用的是后者 —— 用 {@code total} 会少报在途那一批（压测档下在途几百条，
+         * 读数会明显落后于事实）。
+         */
+        void sent() {
+            sent.incrementAndGet();
         }
 
         int passed() {
@@ -622,6 +641,26 @@ public class AttackEngine {
     /** [暂停] 的令旗。{@link #run} 起跑前清掉，派发循环每一拍读一次。 */
     private volatile boolean stopRequested;
 
+    // ==================== 面 5：实时进度（`POST /admin/observe/attack/status`）====================
+
+    /**
+     * 正在跑的那一轮的**计数位数组**（{@link #progress} 读它）。
+     *
+     * <p>⚠️ <b>为什么要把局部变量挂成字段</b>：{@code meters} 原本是 {@link #runOnce} 的局部量，
+     * 只在跑完时随 {@link DrillRun} 一次性交出去 —— 于是「跑的过程中」全仓没有任何读得到它的地方
+     * （这正是 [暂停] 面板当初只能画一条**前端按墙钟估**的进度条的原因）。挂成 {@code volatile}
+     * 字段之后，{@link #progress} 才有一个合法的读点。
+     *
+     * <p>⚠️ <b>它指向的是「活对象」而不是快照</b>：读出来的数每一拍都在变，这是要的；代价是
+     * 读到的是**某一瞬间的近似值**（各项分别 get，不构成原子快照）。给界面看够用，别拿它做对账。
+     * {@code null} = 此刻没有在跑的轮次（与 {@link #isRunning} 同口径，但在「run 的 finally 与
+     * running.set(false) 之间」这一瞬间两者会不一致 —— 见 {@link #progress} 的判据说明）。
+     */
+    private volatile Meter[] liveMeters;
+
+    /** 正在跑的那一轮的**起跑墙钟**（ms）—— {@link #progress} 算「已跑 N 秒」用。 */
+    private volatile long liveStartedMs;
+
     public AttackEngine(DrillTargetDao drillTargetDao, L2HealthProbe l2HealthProbe,
                         ObjectMapper objectMapper) {
         this.drillTargetDao = drillTargetDao;
@@ -676,6 +715,11 @@ public class AttackEngine {
         } finally {
             running.set(false);
             stopRequested = false;
+            // ⚠️ 收尾必须把实时读数**摘掉**：不摘的话 `/attack/status` 会一直回报上一轮的终值，
+            //    而界面读到的 `running` 却是 false —— 一个「没在跑但已发 8000 条」的自相矛盾。
+            //    落在 finally 里（而不是 runOnce 末尾）：runOnce 抛异常时同样要摘。
+            liveMeters = null;
+            liveStartedMs = 0L;
         }
     }
 
@@ -705,6 +749,63 @@ public class AttackEngine {
         return running.get();
     }
 
+    /**
+     * 正在跑的那一轮的**实时读数**（块 7 收尾 · [暂停] 面板的 6 个数之一、二）。
+     *
+     * <h2>【口径】</h2>
+     * <ul>
+     *   <li>{@code elapsedMs} —— 从**起跑**算起的墙钟毫秒，不是 CPU 时间。</li>
+     *   <li>{@code sent} —— 已**投递**（含仍在途）。⚠️ 与 {@code completed} 不是一回事，
+     *       见 {@link Meter#sent()}。口径：**发了多少条**。</li>
+     *   <li>{@code completed} —— 已**收口**（{@code total}：拿到响应或异常的都算）。</li>
+     *   <li>{@code blocked} —— 其中被判「拦下」的（403/业务拒绝等）<b>这就是「完成多少次拦截」</b>。</li>
+     *   <li>{@code shed} —— 背压弃投（**没发出去**，既不算 sent 也不算 failed）；
+     *       {@code abandoned} —— 宽限用尽被取消的在途（**不**算 failed）。</li>
+     * </ul>
+     *
+     * <h2>【⚠️ 三个必须写明的边界】</h2>
+     * <ol>
+     *   <li><b>没有在跑时返回 {@code running=false} + 全零</b>，不抛异常 —— 调用方（1 秒一次的
+     *       轮询）在演练收尾那一拍必然撞上这个状态，抛异常等于给面板制造一次假报错。</li>
+     *   <li><b>{@code running=true} 但计数位还没挂上</b>（起跑到 {@code meters} 建好之间只有几毫秒）
+     *       ⇒ 照实返回零，<b>不</b>编造。同理，收尾那一瞬间 {@code running} 已 false 而计数位还在
+     *       —— 那时返回的是 {@code running=false}，读数归零；<b>最终数看 {@code drill_record}</b>，
+     *       本方法只管「跑的过程中」。</li>
+     *   <li><b>不记录、不落库、不写审计</b>：纯只读快照，与 {@code /stop} 同一档（不删数据、不改
+     *       任何持久状态）。</li>
+     * </ol>
+     *
+     * @return 永不为 {@code null}
+     */
+    public Progress progress() {
+        Meter[] meters = liveMeters;
+        if (meters == null) {
+            return new Progress(false, "", 0L, 0, 0, 0, 0, 0, 0);
+        }
+        long started = liveStartedMs;
+        long elapsed = started <= 0L ? 0L : Math.max(0L, System.currentTimeMillis() - started);
+        return new Progress(true, currentBatch, elapsed, sum(meters, 5), sum(meters, 0),
+                sum(meters, 1), sum(meters, 2), sum(meters, 3), sum(meters, 4));
+    }
+
+    /**
+     * {@link #progress} 的返回值（只读快照）。
+     *
+     * @param running   此刻是否真有一轮在跑
+     * @param batchId   本轮批次号（与 {@code drill_record.BatchId} / {@code observed_event.BatchId}
+     *                  同一串）；{@code running=false} 时是空串
+     * @param elapsedMs 已跑毫秒
+     * @param sent      已**投递**条数（含在途）
+     * @param completed 已**收口**条数
+     * @param blocked   其中被拦下的条数（= 「完成多少次拦截」）
+     * @param failed    其中请求失败的条数
+     * @param shed      背压弃投条数（没发出去）
+     * @param abandoned 宽限用尽被取消的条数（不算失败）
+     */
+    public record Progress(boolean running, String batchId, long elapsedMs, int sent, int completed,
+                           int blocked, int failed, int shed, int abandoned) {
+    }
+
     /** 真活儿（{@link #run} 的正文）。⚠️ 状态开关不在这里摆 —— 那一层要保证 {@code finally} 一定跑到。 */
     private DrillRun runOnce(Config cfg, String baseUrl) {
         long startedNanos = System.nanoTime();
@@ -724,6 +825,12 @@ public class AttackEngine {
         }
         ConcurrentLinkedQueue<String> orderIds = new ConcurrentLinkedQueue<>();
         ReqLog reqLog = new ReqLog();
+
+        // 块 7 收尾 · [暂停] 面板：把计数位挂出去，`/attack/status` 从此刻起读得到。
+        // ⚠️ 起点取「计数位建好」而不是「方法开头」—— 差的是解析目标 / 建 meter 的那几毫秒，
+        //    而这几个数是要和「已发 M 条」放在一起算平均 QPS 的，起点必须与 sent 的起点同源。
+        liveMeters = meters;
+        liveStartedMs = System.currentTimeMillis();
 
         int stockBefore = measureStock(target.main().code(), -1);
         Integer baseline = readBaseline(target.main().code());
@@ -892,6 +999,10 @@ public class AttackEngine {
                 slots.release();              // 发都没发出去 ⇒ 许可必须还回去，否则并发上限自己缩水
                 throw e;
             }
+            // ⚠️ 计数点就在这儿：**send 返回之后、钩子挂上之前** —— 此刻这条请求确实出去了，
+            //    但结果还没落。放钩子里会退化成 `total`（少报在途），放 send 之前会多报
+            //    （send 抛异常时那条根本没出去）。
+            meter.sent();
             // ⚠️ 顺序不能反：**先入集合、后挂钩子**。钩子里会 remove，反过来的话「已完成的 future」
             //    会在 remove 之后才被 add，那条请求就永远留在在途集合里（drain 会白等到宽限用尽）。
             inFlight.add(f);
@@ -1586,7 +1697,8 @@ public class AttackEngine {
                 case 1 -> m.blocked.get();
                 case 2 -> m.failed.get();
                 case 3 -> m.shed.get();
-                default -> m.abandoned.get();
+                case 5 -> m.sent.get();          // ⚠️ 5 是**后加**的（/attack/status 的「已发」）——
+                default -> m.abandoned.get();    //    0..4 的映射一个没动，既有三处调用点读数不变
             };
         }
         return sum;

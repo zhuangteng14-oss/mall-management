@@ -8,9 +8,11 @@ import org.springframework.stereotype.Repository;
 import java.sql.Timestamp;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 
 /**
- * {@code observed_event} 的**写入出口**（块 7 · commit 8c）—— 全仓唯一往这张表 INSERT 的地方。
+ * {@code observed_event} 的**写入出口**（块 7 · commit 8c）+ **回放的读出口**（块 7 收尾）——
+ * 全仓唯一往这张表 INSERT 的地方，也是唯一按批次把它读回来的地方（见 {@link #selectByBatch}）。
  *
  * <p>范式照 {@link ObservedEventCleanupDao}（同域、同批）：{@code @Repository} + 构造器收
  * {@code JdbcTemplate}（让 {@code @WebMvcTest} 切片里既有的 {@code @MockitoBean JdbcTemplate}
@@ -52,6 +54,20 @@ public class ObservedEventDao {
 
     /** 每行的 8 个占位符（顺序即下面的 {@code addRow} —— 两处必须一起改）。 */
     private static final String ROW_PLACEHOLDERS = "(?, ?, ?, ?, ?, ?, ?, ?)";
+
+    /**
+     * 回放要读的列清单（块 7 收尾 · 演练回放）。
+     *
+     * <p>⚠️ <b>{@code OccurredAt} 用 {@code CAST(… AS CHAR)} 而不是本域惯用的
+     * {@code DATE_FORMAT(OccurredAt, '%Y-%m-%d %H:%i:%s')}（{@code DrillRecordDao.COLUMNS} 那份）
+     * —— 差别就是**毫秒**：回放要按原时间戳撒点，秒级会把同一秒里的事件压成一坨。
+     * 列是 {@code datetime(3)} ⇒ {@code CAST} 按列精度出 3 位小数（{@code 2026-10-15 11:30:22.123}），
+     * 与 {@code DATE_FORMAT} 一样是**无时区文本**（库内 UTC，前端按 {@code AuditPage.vue#toLocal}
+     * 那条「末尾补 Z」的口径解析）⇒ 前端用的解析函数一个字都不用改。
+     */
+    private static final String COLUMNS =
+            "Id, Kind, Severity, Title, ObjectType, ObjectId, TraceId, BatchId, "
+                    + "CAST(OccurredAt AS CHAR) AS OccurredAt ";
 
     private final JdbcClient jdbcClient;
 
@@ -96,6 +112,48 @@ public class ObservedEventDao {
                         + values)
                 .params(params)
                 .update();
+    }
+
+    // ==================== 读：回放（块 7 收尾 · 演练回放）====================
+
+    /**
+     * 按批次读事件（**演练回放**的读出口）—— 按发生时刻**升序**，同一个毫秒内按 {@code Id} 升序。
+     *
+     * <p>⚠️ 「按 {@code OccurredAt} 升序」是回放的**语义前提**，不是顺手排一下：前端要按这个顺序
+     * 把事件按原时间戳撒回去，顺序错了等于把当时发生的事重排了一遍。同一个毫秒内的先后
+     * （演练压满时一秒几百条，必然撞上）只有 {@code Id}（自增 = 入库顺序）能作判据 ⇒
+     * <b>{@code ORDER BY OccurredAt, Id}</b> 两列都要，少了第二列同一毫秒内的顺序就不确定
+     * （MySQL 不保证稳定序，翻页/重跑都可能换个排法）。
+     *
+     * <p>⚠️ {@code LIMIT} 由调用方（{@code ReplayService}）收好再传进来：本类不判断「多少条算合适」
+     * —— 那是策略，不是 SQL。
+     *
+     * <p>⚠️ 走 {@code idx_observed_event_batch (BatchId)}（⑲-1 的第四个索引，它的唯一归属就是
+     * 「按批次取回一条演练的全部事件」）⇒ 别给这条查询再加条件把它变成索引失效的形状
+     * （例如 {@code DATE(BatchId)}；本表还有 {@code idx_observed_event_time} 给「按时刻」那条路）。
+     *
+     * @param batchId 批次 UUID（**非空**；调用方已判空，本类不做「空值 = 查全部」的兜底 ——
+     *                那会把一次误传参数变成「把整张表读出来」）
+     * @param limit   最多读多少行（&gt; 0；调用方已收进区间）
+     * @return 行（列见 {@link #COLUMNS}）；没有该批次 ⇒ 空表，**不是** {@code null}
+     */
+    public List<Map<String, Object>> selectByBatch(String batchId, int limit) {
+        return jdbcClient.sql("SELECT " + COLUMNS + "FROM mall_management_sql.observed_event "
+                        + "WHERE BatchId = ? ORDER BY OccurredAt ASC, Id ASC LIMIT ?")
+                .params(batchId, limit)
+                .query().listOfRows();
+    }
+
+    /**
+     * 该批次**一共有多少条**（回放要如实说「放的是不是全部」—— 见 {@code ReplayService} 的
+     * 「为什么多这一条 COUNT」）。
+     *
+     * <p>⚠️ 与 {@link #selectByBatch} 同走 {@code idx_observed_event_batch}；代价是每次回放多一次
+     * 索引计数 —— 换来的是前端能写出「共 N 条，已放前 M 条」而不是含糊地播完就停。
+     */
+    public long countByBatch(String batchId) {
+        return jdbcClient.sql("SELECT COUNT(*) FROM mall_management_sql.observed_event WHERE BatchId = ?")
+                .param(batchId).query(Long.class).single();
     }
 
     /** 按列宽截断；{@code null} 原样回去（这几列的 NULL 语义是「没有值」，不是空串）。 */

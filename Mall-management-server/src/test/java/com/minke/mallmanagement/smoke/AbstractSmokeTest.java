@@ -33,9 +33,11 @@ import com.minke.mallmanagement.observe.service.EventStreamService;
 import com.minke.mallmanagement.observe.service.AttackEngine;
 import com.minke.mallmanagement.observe.service.DrillRecordService;
 import com.minke.mallmanagement.observe.service.ObservedEventCleanupService;
+import com.minke.mallmanagement.observe.service.ReplayService;
 import com.minke.mallmanagement.observe.dao.DrillTargetDao;
 import com.minke.mallmanagement.observe.dao.DrillRecordDao;
 import com.minke.mallmanagement.observe.dao.ObservedEventCleanupDao;
+import com.minke.mallmanagement.observe.dao.ObservedEventDao;
 import com.minke.mallmanagement.shared.cache.L2HealthProbe;
 import com.minke.mallmanagement.shared.cache.MallCacheMetrics;
 import com.minke.mallmanagement.shared.lock.MallLockMetrics;
@@ -396,7 +398,19 @@ import static org.mockito.Mockito.when;
         //    @Scheduled —— 同 `ShippingTrackAdvanceJob` / `StatsAggregateJob` / `CouponExpiryJob`
         //    那三处的处置（切片里没有调度器：@EnableScheduling 挂在
         //    `MerchantDowngradeSchedulingConfig`、不属 web 组件）。它是 @Scheduled 的第 6 个实例。
-        ObservedEventCleanupDao.class, ObservedEventCleanupService.class})
+        ObservedEventCleanupDao.class, ObservedEventCleanupService.class,
+        // C3 块 7 收尾〈演练回放〉（2026-10-15）：**一个**新 Controller（`ReplayController`）
+        // + 一个 @Service（`ReplayService`）+ 一个 @Dao（`ObservedEventDao`）——
+        // **第二十次同一处地雷**（@WebMvcTest 无参会加载全部 @Controller，新控制器一进来，
+        // 切片上下文就会因为「找不到 ReplayService」而**启动失败**，同前十九笔）。
+        // ⚠️ 与上一笔同形（新 Controller 吃新 bean）⇒ 判据仍是那句：
+        //    「本笔有没有新 @Service/@Dao」，不是「有没有新 Controller」。
+        // ⚠️ 依赖链：`ReplayService` → `ObservedEventDao`（本行，只吃 `JdbcTemplate` ⇒
+        //    落回下面那个 @MockitoBean，**SQL 仍不出切片**）+ 无 `@Value`（两个常量都是
+        //    `public static final`，没有配置项要喂）。`ReplayController` 只吃 `ReplayService`。
+        // ⚠️ `ObservedEventDao` 是**本笔第一次**进这个清单（8c 那笔只登记了它的兄弟
+        //    `ObservedEventCleanupDao` —— 写类一次、读类一次，两者不是同一个 bean）。
+        ObservedEventDao.class, ReplayService.class})
 public abstract class AbstractSmokeTest {
 
     @Autowired

@@ -735,6 +735,7 @@
 ## 附录 H：C3 块 7〈可观测域〉契约增补（2026-10-13/14） {#api-app-h}
 
 > **块 7 = 一个新域（可观测域）+ 8 条端点**：`/admin/observe/attack/*` **5 条**（commit 4 前三条 + commit 8b 第四条 `cleanup` + commit 10c 第五条 `stop`）+ **三条 SSE**（`/admin/observe/{metrics,orders,events}/stream`，commit 3）。**全部 `POST`**、全部**不加角色闸**、全部**不在 `AUTH_WHITELIST`**。
+> ⚠️ **2026-10-15「块 7 收尾」commit 1 再追加 2 条 ⇒ 本域共 10 条**：`/attack/status`（第六条出口，见 **H.1**）+ `/admin/observe/replay`（回放，见 **H.8**）。两条与上面 8 条**同口径**（`POST` / 不加角色闸 / 不在白名单）。⚠️ 上面那句「+ 8 条」是**块 7 主体**的口径，**不要**改成 10 —— 本附录同时挂着主体与收尾两笔的账，逐笔读。
 > 逐条坐标 = 该方法的 `@PostMapping` 所在行（**本文件口径**，与 `db-schema.md#db-top` 相反）。
 > 实现落在**一个后端包** `observe/`（`controller` / `service` / `dao` / `metrics` / `mq` / `job` 六层）。
 > ⚠️ **与附录 C–G 的关键差别**：本域是**观测面** —— 它不改任何业务端点的入参 / 返回，对业务域的改动**只有两处**（出站头 `X-Drill-Batch`、台账表 `observed_event`），见 **H.6** / **H.7**。
@@ -743,24 +744,31 @@
 
 | 口径 | 定义 | 块 7 前 | 块 7 后（HEAD） | 出处 |
 |---|---|---|---|---|
-| **后端 method-level** | 全仓 `*Controller.java` 中 `^\s*@(Post\|Get\|Put\|Delete)Mapping` 行数（**不含**类级 `@RequestMapping`） | **134** | **142**（+8） | 2026-10-15 实测：`grep -rhE "^\s*@(Post\|Get\|Put\|Delete)Mapping" --include=*Controller.java … \| wc -l` ⇒ 142（原记 141 = +7，是 **commit 10c 的 `/attack/stop` 落地前**的读数；该端点补上后 +8） |
+| **后端 method-level** | 全仓 `*Controller.java` 中 `^\s*@(Post\|Get\|Put\|Delete)Mapping` 行数（**不含**类级 `@RequestMapping`） | **134** | **144**（+10） | 2026-10-15 实测：`grep -rhE "^\s*@(Post\|Get\|Put\|Delete)Mapping" --include=*Controller.java … \| wc -l` ⇒ **144**（原记 141 = +7，是 **commit 10c 的 `/attack/stop` 落地前**的读数；该端点补上后 +8 → 142；**块 7 收尾 commit 1** 再 +2（`/attack/status` · `/admin/observe/replay`）⇒ 144） |
 | **本文件 §2 的「36 个」** | 只数 5 个核心 Controller（`/user` / `/message` / `/goods` / `/order` / `/health`） | 36 | **36（一字未变）** | §2 标题 |
-| **前端 `endpoints.js`** | `key: '/path'` 条目数（含 2 处**同行两条**） | 133 | **141** | 该文件头注记账链（… → 133 → **141**）：块 7 commit 3 的 3 条 SSE + commit 4 的 3 条 + commit 8b 的 1 条 + commit 10c 的 1 条（`attackStop`）= 8 条，**全落 `observe` 组**；实测 `grep -cE "^[[:space:]]*[A-Za-z0-9_]+:[[:space:]]*'/"` = **139 行**、+2 处同行两条 = 141 |
+| **前端 `endpoints.js`** | `key: '/path'` 条目数（含 2 处**同行两条**） | 133 | **143** | 该文件头注记账链（… → 133 → 141 → **143**）：块 7 commit 3 的 3 条 SSE + commit 4 的 3 条 + commit 8b 的 1 条 + commit 10c 的 1 条（`attackStop`）= 8 条，**块 7 收尾**再 +2（`observe.attackStatus` · `observe.replay`），**全落 `observe` 组**；实测 `grep -cE "^[[:space:]]*[A-Za-z0-9_]+:[[:space:]]*'/"` = **141 行**、+2 处同行两条 = 143 |
 
 ⚠️ **块 7 的 8 条全部落在 §2 与 §3 的 5 个 Controller 之外** ⇒ §2 的「共 36 个」**不需要改**；本附录就是那 8 条的契约面。
 ⚠️ **`observe` 域不进 §2 的清单**（同附录 C/D/E/F/G 的手法：零漂移，正文表不插入）—— 域标题只在**本附录**里出现。
 
-### H.1 新域 `/admin/observe/attack/*` —— 攻击模拟器五出口 {#api-h-1}
+### H.1 新域 `/admin/observe/attack/*` —— 攻击模拟器**六**出口 {#api-h-1}
 
-`AttackController.java`（`@RequestMapping("/admin/observe/attack")` @ `:66`）—— 返回一律 `Result<Map<String,Object>>`（`/run`、`/records` 走 `ResponseEntity` 显式构造 4xx）。
+`AttackController.java`（`@RequestMapping("/admin/observe/attack")` @ `:67`）—— 返回一律 `Result<Map<String,Object>>`（`/run`、`/records` 走 `ResponseEntity` 显式构造 4xx）。
+
+> ⚠️ **2026-10-15 块 7 收尾 commit 1 重指**：标题原为「**五**出口」；本表坐标**逐条更新**。
+> 三处漂移**原因不同**，故幅度不同（旧值一律注为「**原 N 行**」）：
+> ① `@RequestMapping` 与 `/scenarios`、`/run`、`/stop` = **记录值比现值小 1 行**（现值 = 原值 + 1）——
+>     多出的那 1 行是**新增的 import**（`observe.service.AttackEngine`，给 `AttackEngine.Progress` 用）；
+> ② `/records`、`/cleanup` = 在 ① 的基础上**再 +44 行** —— 那是**新增的 `/status`** 顶出来的。
 
 | 路径 | 入参（全部 `required=false`，**一律 `String`**） | 返回要点 | 身份 | 坐标 |
 |---|---|---|---|---|
-| `/scenarios` | **无** | 8 个预置场景（`key` / 中文名 / 同时演示的防护 / 需要的人工动作 / 默认权重） | 无 | `:91` |
-| `/run` | **共 7 个**（全部可选）：`name`（缺省「自定义」，> 64 字符按列宽截断）· `concurrency`（缺省 **100**、上限 **4000** —— 含义已收紧成「**在途上限**」，不再等于线程数）· `durationSeconds`（缺省 **60**、上限 **600**）· `targetQps`（缺省 **0** = **不限速**；「档位 120 / 400 / 拉满」的载体，见下）· `scenarios`（**JSON 数组串**）· `protections`（**JSON 数组串**，缺省 = **全开**）· `injections`（**JSON 数组串**，缺省 = **全关**） | 跑完一轮 ⇒ `Id` / `Name` / `TotalRequests` / `BlockedRequests` / `FailedRequests` / `DurationMs` / `Result` | 会话（**只记谁点的**，不转发凭据） | `:123` |
-| `/stop` | **无** | `success` / `stopped`（**如实**：没在跑就是 `false` 并说清「没有在跑的演练」）/ `summary` | 无（**不写审计**，理由见下） | `:169` |
-| `/records` | `limit`（缺省 **20**、上限 **200**）· `offset`（负数归 0） | 时间倒序记录列表；行内 `Result` 长文本已**拆成字段**（解析失败 ⇒ 落 `ResultRaw` + `ResultParseError`，不静默） | 无 | `:188` |
-| `/cleanup` | **无**（清什么由**后端**按标记判，不让前端挑范围） | `success` / `deleted`（**只含真删了行的表**）/ `total`（各行数之和）/ `summary`（一句话，同一句进审计行） | 识别口径（`AuthSession.identify`），认不出记 NULL | `:236` |
+| `/scenarios` | **无** | 8 个预置场景（`key` / 中文名 / 同时演示的防护 / 需要的人工动作 / 默认权重） | 无 | `:92`（原 91） |
+| `/run` | **共 7 个**（全部可选）：`name`（缺省「自定义」，> 64 字符按列宽截断）· `concurrency`（缺省 **100**、上限 **4000** —— 含义已收紧成「**在途上限**」，不再等于线程数）· `durationSeconds`（缺省 **60**、上限 **600**）· `targetQps`（缺省 **0** = **不限速**；「档位 120 / 400 / 拉满」的载体，见下）· `scenarios`（**JSON 数组串**）· `protections`（**JSON 数组串**，缺省 = **全开**）· `injections`（**JSON 数组串**，缺省 = **全关**） | 跑完一轮 ⇒ `Id` / `Name` / `TotalRequests` / `BlockedRequests` / `FailedRequests` / `DurationMs` / `Result` | 会话（**只记谁点的**，不转发凭据） | `:124`（原 123） |
+| `/stop` | **无** | `success` / `stopped`（**如实**：没在跑就是 `false` 并说清「没有在跑的演练」）/ `summary` | 无（**不写审计**，理由见下） | `:170`（原 169） |
+| `/status` | **无** | **块 7 收尾 commit 1 第六条**：进程内快照 ⇒ `Running` / `BatchId` / `ElapsedMs` / `Sent` / `Completed` / `Blocked` / `Failed` / `Shed` / `Abandoned`。⚠️ `Running=false` 时其余**全为 0 而不是 `null`**（1 秒轮询在收尾那一拍必然撞上它，缺键会让前端把「跑完了」画成「读数丢了」）。⚠️ 是**过程近似值**，**最终账**看 `/records` 那条 `drill_record`。不写审计（与 `/stop` 同档：只读进程内状态） | 无（**不写审计**） | `:210` |
+| `/records` | `limit`（缺省 **20**、上限 **200**）· `offset`（负数归 0） | 时间倒序记录列表；行内 `Result` 长文本已**拆成字段**（解析失败 ⇒ 落 `ResultRaw` + `ResultParseError`，不静默）。⚠️ **每行新增 `BatchId`**（块 7 收尾 commit 1，用户 2026-10-15 裁「甲」）—— 界面上的〔回放〕按钮拿它当入参；键序 `[…, DurationMs, CreatedAt, BatchId, Result]` | 无 | `:233`（原 188） |
+| `/cleanup` | **无**（清什么由**后端**按标记判，不让前端挑范围） | `success` / `deleted`（**只含真删了行的表**）/ `total`（各行数之和）/ `summary`（一句话，同一句进审计行） | 识别口径（`AuthSession.identify`），认不出记 NULL | `:281`（原 236） |
 
 ⚠️ **`/stop`（块 7 · commit 10c 追加）是五出口里的第五个，也是最轻的一个** —— 它**只翻一个进程内的标志位**（引擎侧：停止派发新请求，在途请求走 **3 秒宽限**排空，宽限用尽记 `Abandoned`），**不删数据、不改库、不改任何持久状态**。三条口径：
 - **不写审计**（与 `/cleanup` 相反）：审计记的是「谁动了数据」，而本端点没动任何数据 ⇒ 代价如实登记 —— **「谁叫停的」只有引擎侧一行 INFO**。
@@ -872,3 +880,22 @@
 ⚠️ **MQ 缺席**：`mall.observe.mq.warn-interval-ms`（缺省 **300000** ms = 5 分钟）—— 每次重连失败距上次 WARN 超阈值即打一条 `[EVENT]` WARN（翻转时另有一条，双保险）；MQ 不在时**事件仍上屏**（走内存环），页面顶上的点变黄。
 
 ⚠️ **本文件（`api-contract.md`）的正文 §2 / §3 / §5 矩阵**本笔**未重测、未插入** —— 8 条新端点全部落在附录 H；正文坐标重填归「文档漂移清理笔」（同附录 E.7 的口径）。
+
+### H.8 新端点 `POST /admin/observe/replay` —— 演练回放（块 7 收尾 commit 1） {#api-h-8}
+
+`ReplayController.java`（`@RequestMapping("/admin/observe")` @ `:42`，方法 `@PostMapping("/replay")` @ `:64`）—— 块 7 收尾 commit 1 新增；**用户 2026-10-15 在「甲（新端点）/ 乙（塞进现有面）」之间裁「甲」**。
+
+| 项 | 口径 |
+|---|---|
+| 路径 | `POST /admin/observe/replay` —— ⚠️ **挂在 `/admin/observe`（根）**，**不是** `/admin/observe/attack/replay`：后端是**新建的 `ReplayController`**，不是 `AttackController` 的第七条。理由（两半）：① 它读的是**事件台账** `observed_event`，不是**演练记录** `drill_record`；② 另一条候选路是「再开一条 SSE 推回放」，那要多一条常驻流 + 回答「流断了怎么办」—— 改成一次性 JSON + 前端自己撒点，两个问题都不存在 |
+| 入参 | `batchId`（**必填**；就是演练记录那一行的 `BatchId`，与 `observed_event.BatchId` **同一串值**）· `limit`（可选，缺省 **5000**、上限 **50000**；空白 / 0 / 负数 ⇒ 缺省，超上限收进上限，**非整数 ⇒ 400**） |
+| 返回 | `{success, batchId, list:[…], total, limit}`。⚠️ `total` 是该批次**一共有多少条**（**不是**返回了几条）⇒ 前端才写得出「共 N 条，本次回放前 M 条」 |
+| 排序 | `ORDER BY OccurredAt ASC, Id ASC`（`ObservedEventDao:142`）—— **两列都要**：少了第二列，同一毫秒内的顺序不确定 |
+| 空批次 | 批次不存在 / 已被清理 job 删掉 ⇒ `list` 空表 + `total=0`，**仍然是 200**（「这个批次没有事件」是一个正常答案，不是错误） |
+| 身份 / 闸 | **不加角色闸**、**不在 `AUTH_WHITELIST`**（靠 `AuthInterceptor` 拦）、**不写审计**（只读） |
+| 与 H.1 各条的相同处 | 全 `POST`、`@RequestParam`（**不用** `@RequestBody`）、入参非法显式构 `ResponseEntity.badRequest()`（**不抛异常** —— `GlobalExceptionHandler` 的类级白名单不覆盖本类，抛出去会变成默认错误页） |
+
+**前端**：`api/endpoints.js` 的 `observe.replay` @ `:449` → `api/observe.js` 的 `replay(batchId, limit)` @ `:420`；唯一调用方是 `AttackConsole.vue` 演练记录那一行的〔回放〕钮。
+
+⚠️ **播法由前端定**：拿到 JSON 后**按 `OccurredAt` 严格按原时间戳撒点** —— 不是一次性刷出来，也不是按数组下标均匀撒。
+⚠️ **UI 上明说这句**：**「回放数据来自「当时开着日志页的演练」」** —— 因为台账的已知边界（见 **H.7** 那条：`poll()` 由 SSE 流线程驱动、**没人打开日志页就不落库**）⇒ 回放**只能**放得出「当时有人在看」的批次。这句是**如实告知**，不是免责声明。

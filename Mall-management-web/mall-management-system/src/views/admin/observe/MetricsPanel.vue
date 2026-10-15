@@ -23,6 +23,7 @@
         <span>第 <b>{{ seq }}</b> 拍 · 窗口 {{ WINDOW }} 秒</span>
         <span class="a-tz-off">{{ lastTickAt }}</span>
       </div>
+      <DemoModeToggle />
     </header>
 
     <!-- ⚠️ 断线条的判据是 `lost`、**不是** `errMsg`（块 7 · commit 10c）：
@@ -184,8 +185,12 @@
 -->
 
 <script setup>
-import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { openMetricsStream } from '../../../api/observe'
+// 演示模式（块 7 收尾 ②）：`DemoModeToggle` 摆开关，`demo` 是被 `watch` 的那个状态，
+// `openDemoStream` 是与 `openMetricsStream` **同形**的假流 —— 见 `connect()` 里那处三元式。
+import { demo, openDemoStream } from '../../../api/demo-stream'
+import DemoModeToggle from '../../../components/observe/DemoModeToggle.vue'
 import KpiCard from '../../../components/ui/KpiCard.vue'
 import LineChart from '../../../components/charts/LineChart.vue'
 import BarChart from '../../../components/charts/BarChart.vue'
@@ -440,7 +445,10 @@ function connect() {
   //    ⚠️ 这一句下面的注释在 commit 10c 被**改判**：`onEnd(null)`（服务端正常收尾）以前
   //    「只置 stopped、不给红条」，现在**要给** —— 不给的话，面板上的 KPI 会静静停在上一次
   //    连接的那一拍，用户看不出任何异常（用户 2026-10-14 批文对这一格的用词是「静默陈旧」）。
-  stream = openMetricsStream({
+  // ⚠️ 演示模式（块 7 收尾 ②）：**只换数据源这一处**，上面那三个回调两边共用 ——
+  //    `openDemoStream` 与 `openMetricsStream` 同形（收同一组 handlers、回同一个 `close()`）。
+  //    `onLost` 在演示流上**永远不触发**（它没有连接可断）⇒ 切到演示后那条断线条自己消失。
+  const handlers = {
     onOpen() {
       phase.value = 'live'
       lost.value = null
@@ -453,7 +461,8 @@ function connect() {
       // ⚠️ `errMsg` 只装**真错误**：它同时是「还没收到第一拍」那个加载闸的判据（见 `first`）。
       errMsg.value = s.err ? ((s.err && s.err.message) || '连接中断') : ''
     },
-  })
+  }
+  stream = demo.on ? openDemoStream('metrics', handlers) : openMetricsStream(handlers)
 }
 
 function closeStream() {
@@ -468,6 +477,9 @@ function closeStream() {
 }
 
 onMounted(connect)
+// ⚠️ 切数据源（`正常` ⇄ `模拟日常`）⇒ 立刻重连。`connect()` 自己会先 `closeStream()`，
+//    两条旧流（真流的重连层 / 演示流的定时器）都断得干净，不必在这里各断一遍。
+watch(() => demo.on, connect)
 onBeforeUnmount(closeStream)
 </script>
 

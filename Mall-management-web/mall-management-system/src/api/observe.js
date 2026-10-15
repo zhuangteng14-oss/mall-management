@@ -1,13 +1,18 @@
 // src/api/observe.js —— 可观测面板的客户端（块 7 commit 3 的 SSE + commit 4 的三个普通 POST
 // + commit 8b 的清场 + commit 10c 的暂停与三条流的自动重连）。
 //
-// 八条端点（**全在** `endpoints.js` 里，本文件一个后端路径字面量都不出现 —— 那条判据可 grep 自动化）：
+// 十条端点（**全在** `endpoints.js` 里，本文件一个后端路径字面量都不出现 —— 那条判据可 grep 自动化）：
 //   metrics → 指标面板（KPI / 锁 / 防护 / 库存水位）          ┐
 //   orders  → 状态流转页（五态计数 / 最近订单 / 本拍流转）      ├ 三条 **SSE 流**（commit 3；
 //   events  → 实时日志页（8 类归一化事件流）                  ┘ commit 10c 起**自带自动重连**）
 //   attackScenarios / attackRun / attackRecords → 攻击模拟器（commit 4）—— 三条**普通 POST**
 //   attackCleanup → 清场（commit 8b）—— 同样**普通 POST**、**无入参**，但它是**破坏性**的（后端真 DELETE）
 //   attackStop    → 暂停一轮（commit 10c）—— 同样**普通 POST**、**无入参**，**非**破坏性（只置令旗）
+//   attackStatus  → 实时读数（块 7 收尾）—— 同样**普通 POST**、**无入参**、**只读**；⚠️ 它是唯一
+//                   一条**要被反复打**的（攻击页在演练期间 1 秒一发）⇒ 超时用短的那一档
+//   replay        → 演练回放（块 7 收尾）—— 普通 POST、**只读**、有入参（`batchId` + `limit`）；
+//                   ⚠️ 唯一一条**不属于 `AttackController`** 的（路径在 `/admin/observe` 根，
+//                   后端是 `ReplayController` —— 它读的是事件台账，不是演练记录）
 //
 // ⚠️ **不用浏览器原生 `EventSource`**（只针对上面三条流）。两条独立的理由，任一条都足够：
 //   ① 它**不能带自定义请求头**，而本仓的鉴权票走 `Authorization: Bearer`（默认 profile 上
@@ -21,8 +26,9 @@
 //   `event:` / `id:` / `retry:` 三个字段后端**不写** ⇒ 本文件也不认（写了反成误导）。
 //   解析仍按 SSE 规范最小形态做：可有多行 `data:`（用 `\n` 连接）、容忍 `\r\n`。
 //
-// ⚠️ 攻击那三条**走的不是流**（`http.post` + 表单串，见文件尾那节）：它们的响应是**一次性的
-//   JSON**，没有「拍」的概念 —— 别为了统一而把它们也塞进 `openStream`。
+// ⚠️ 攻击那五条**走的不是流**（`http.post` + 表单串，见文件尾那节）：它们的响应是**一次性的
+//   JSON**，没有「拍」的概念 —— 别为了统一而把它们也塞进 `openStream`（`attackStatus` 虽然是
+//   「1 秒一拍地读」，但那**不是流**：每次都是独立的一次请求-响应，没有常驻连接可断）。
 
 import { http, streamPost } from './http'
 import { endpoints } from './endpoints'
@@ -364,6 +370,58 @@ export function runAttack(p) {
 export function stopAttack() {
   // body 传空串：本仓 POST 一律带 urlencoded 头（同 `attackScenarios()`），后端不读 body。
   return postJson(endpoints.observe.attackStop, '')
+}
+
+/**
+ * 正在跑的那一轮的**实时读数**（块 7 收尾 · 辅助条的 6 个数里那两个真数）。
+ *
+ * @returns {Promise<{success:boolean, Running:boolean, BatchId:string, ElapsedMs:number,
+ *          Sent:number, Completed:number, Blocked:number, Failed:number, Shed:number,
+ *          Abandoned:number}>}
+ *          ⚠️ **键是大驼峰**（与其他五条出口一致），不是 `running` / `sent`。
+ *          ⚠️ `Running=false` 时其余**全为 0 而不是 `null`** —— 演练收尾那一拍必然撞上它，
+ *          调用方按「0」处理即可，别把缺值当成读数丢了。
+ *
+ * ⚠️ **只读**：不删数据、不改库、不写审计（与 `stopAttack` 同一档）—— 但它**不是幂等写入**，
+ *    是「打一次读一次」，调用方（1 秒轮询）不必关心重复调用。
+ * ⚠️ **`Sent` ≠ `Completed`**：`Sent` = 已**投递**（含此刻仍在途），`Completed` = 已**收口**。
+ *    辅助条上那个「已发 M 条」用 **`Sent`** —— 用 `Completed` 会少报在途那一批
+ *    （压测档下在途几百条，读数会明显落后于事实）。
+ * ⚠️ 这几个数是**跑的过程中**的近似快照（各项分别取，不构成原子快照），**不是最终账** ——
+ *    最终数以 `attackRecords()` 里那条 `drill_record` 为准。给界面看够用，别拿它对账。
+ * ⚠️ 超时用短的那一档（`http.post` 默认 10 秒）：这条**立刻回**，它不等演练跑完 ——
+ *    与 `runAttack` 恰好相反。调用方要**自己停轮询**（`running` 落下 / 组件卸载）。
+ */
+export function attackStatus() {
+  return postJson(endpoints.observe.attackStatus, '')
+}
+
+/**
+ * **演练回放**：把一个批次当时记下来的事件读回来（块 7 收尾）。
+ *
+ * @param {string} batchId 批次 UUID（**必填**），就是 `attackRecords()` 每行里的 `BatchId`
+ * @param {number} [limit] 最多几条（缺省由**后端**给 5000 —— 本层**不**重设缺省，
+ *        免得两处各有一个 5000；不传就是不传，让后端那个数说了算）
+ * @returns {Promise<{success:boolean, batchId:string, list:Array, total:number, limit:number}>}
+ *          ⚠️ 键名**故意不统一**：`list`/`total`/`limit` 小写（照 `attackRecords` 的信封），
+ *          `batchId` 驼峰（它是「值」，与每行的 `BatchId` 同一个东西，见 `ReplayService`）。
+ *          ⚠️ `total` 是**整批**条数、不是 `list.length` —— 两者不等时页面上**必须**提一句
+ *          「共 N 条，本次放的是前 M 条」，否则一次被 limit 截断的回放会被画成完整回放。
+ *          ⚠️ 批次不存在 / 已被清理任务删掉 ⇒ `list` 空 + `total=0`，**仍是成功**（不是错误）。
+ *
+ * ⚠️ **它不是攻击那几条的同类**（虽然挨着写在一起）：路径在 `/admin/observe/replay`、
+ *    后端是另一个控制器（`ReplayController`）—— 回放读的是**事件台账**，不是**演练记录**。
+ * ⚠️ **只读**、不必二次确认；但它读到的数据**有留存期**：攻击批次 3 天、日常 30 天之后
+ *    被清理任务删掉就回放不到了（用户 2026-10-15 的口径：超期回放不到 = 接受，
+ *    **页面上要明说留存期**，别让人以为「回放不到」是坏了）。
+ * ⚠️ 超时用短的那一档（`http.post` 默认 10 秒）：这条不像 `attackRun` 那样等演练跑完 ——
+ *    它就是一次几千行的 SELECT。⚠️ 但 `list` 可能有几千条 ⇒ **别在渲染里同步遍历它**。
+ */
+export function replay(batchId, limit) {
+  // ⚠️ 走 `q()` 拼串（不是 `URLSearchParams` 就地拼）：与同域其余几条同路，
+  //    顺带把「undefined / null / 空串一律不传」这条既有口径接过来 ——
+  //    `limit` 不传时后端看到的就是「没给」，它才会用自己的缺省。
+  return postJson(endpoints.observe.replay, q({ batchId, limit }))
 }
 
 /**
