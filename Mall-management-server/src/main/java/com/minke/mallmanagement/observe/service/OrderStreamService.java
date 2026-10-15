@@ -122,6 +122,7 @@ public class OrderStreamService {
             row.put("to", e.to());
             row.put("result", e.result());
             row.put("ts", e.epochMilli());
+            row.put("batchId", e.batchId());
             moves.add(row);
         }
         return moves;

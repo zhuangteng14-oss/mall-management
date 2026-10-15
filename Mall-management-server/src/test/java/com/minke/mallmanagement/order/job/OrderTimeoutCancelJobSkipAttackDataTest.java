@@ -209,8 +209,14 @@ class OrderTimeoutCancelJobSkipAttackDataTest {
             return 1;
         });
 
+        // ⚠️ 第 12 参 = BatchId（commit 10 新增）。这里**必须给非空值**，不能图省事传 null：
+        //    null 会让 Spring 的 StatementCreatorUtils 走 setNull 分支，而那条分支要去问
+        //    `ps.getConnection().getMetaData()` 才能定 SQL 类型 —— 本用例的 PreparedStatement
+        //    是替身，getConnection() 回 null ⇒ 直接把测试打成 NPE（与断言无关的驱动元数据）。
+        //    同一坑见 `OrderAddSourceColumnSmokeTest` 类注释「所有入参都传非空值」那一段。
+        //    本用例只关心 Source 位，批次号取什么都行，但它**不能是 null**。
         new OrderDao(jdbcTemplate).insertOrder(new OrderDao.OrderRow(
-                "ORDER-WRITE-1", "CUST-1", "MERCH-1", 5f, 1, "可乐", "", 0, 0, 0, source));
+                "ORDER-WRITE-1", "CUST-1", "MERCH-1", 5f, 1, "可乐", "", 0, 0, 0, source, "BATCH-WRITE-1"));
 
         ArgumentCaptor<String> bound = ArgumentCaptor.forClass(String.class);
         verify(statement).setString(eq(11), bound.capture());   // `Source` 是列清单第 11 列 ⇒ 第 11 个 ?

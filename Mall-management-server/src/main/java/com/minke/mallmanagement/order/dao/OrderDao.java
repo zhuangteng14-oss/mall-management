@@ -88,7 +88,7 @@ public class OrderDao {
      * <p>⚠️ <b>C3 块 7 · 边界补笔（2026-10-14）又加了 {@code `Source`}</b>：位置上它排在
      * {@code ReceiveIf} 之后、{@code CreateTime} **之前**（不是文件尾）—— 因为 {@code CreateTime}
      * 是 VALUES 里唯一写死 {@code NOW()} 的列、本就不占参数位，把 {@code Source} 排在它前面，
-     * 「列序 = 参数序 = {@link OrderRow} 分量序」这条线性对应才不被一个非参列打断。
+     * 「列序 = 参数序 = {@link OrderRow} 分量序」这条线性对应才不被一个非参列打断。⚠️ C3 块 7 · commit 10（2026-10-15）再加 {@code BatchId}：同款排在 {@code Source} 之后、{@code CreateTime} 之前；⚠️ 它的口径与 {@code Source} **相反**（列是 {@code varchar(36) DEFAULT NULL} ⇒ 不归一成空串、日常单落 {@code null}），归一路径与列宽截断见 {@link #clipBatchId}。
      * <p>⚠️ <b>落库前**归一**：{@code null} / 纯空白 ⇒ {@code ""}</b>（列是
      * {@code NOT NULL DEFAULT ''}）—— 口径与 {@code CommentDao.insertComment} 的 {@code Source}
      * **逐字同源**（那里也先 trim、空则落空串）。⚠️ 归一放在**这里**而不是调用方：本列是
@@ -100,12 +100,12 @@ public class OrderDao {
      */
     public int insertOrder(OrderRow r) {
         String sql = "INSERT INTO mall_management_sql.order " +
-                "(OrderId, CustomerId, MerchantId, Price, Quantity, ProductInformation, Images, PayIf, DeliveryIf, ReceiveIf, `Source`, CreateTime) " +
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())";
+                "(OrderId, CustomerId, MerchantId, Price, Quantity, ProductInformation, Images, PayIf, DeliveryIf, ReceiveIf, `Source`, BatchId, CreateTime) " +
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())";
         return jdbcClient.sql(sql)
                 .params(r.orderId(), r.customerId(), r.merchantId(), r.price(), r.quantity(),
                         r.productInformation(), r.images(),
-                        r.payIf(), r.deliveryIf(), r.receiveIf(), normaliseSource(r.source()))
+                        r.payIf(), r.deliveryIf(), r.receiveIf(), normaliseSource(r.source()), clipBatchId(r.batchId()))
                 .update();
     }
 
@@ -121,14 +121,14 @@ public class OrderDao {
     }
 
     /**
-     * 下单入参的载体（11 个位置参数，用 record 免掉一个 11 参方法签名）。嵌套在此，不另立文件。
+     * 下单入参的载体（12 个位置参数，用 record 免掉一个 12 参方法签名）。嵌套在此，不另立文件。
      *
      * <p>⚠️ 分量顺序 = {@link #insertOrder} 的列顺序（{@code Quantity} 在 {@code price} 之后、
-     * {@code source} 在 {@code receiveIf} 之后）。
+     * {@code source} 在 {@code receiveIf} 之后、{@code batchId} 在 {@code source} 之后）。
      */
     public record OrderRow(String orderId, String customerId, String merchantId, float price, int quantity,
                            String productInformation, String images,
-                           int payIf, int deliveryIf, int receiveIf, String source) {
+                           int payIf, int deliveryIf, int receiveIf, String source, String batchId) {
     }
 
     // ==================== 写：订单明细（可视化段 commit 0） ====================
@@ -539,7 +539,7 @@ public class OrderDao {
      * 标一条单「**本单的 {@code goods_sku} 库存真扣成过**」（{@code StockDeducted = 1}）——
      * 订单**超时取消**时决定要不要回补库存的**唯一判据**（C3 块 7 · TD-36 的第四条腿）。
      *
-     * <p>⚠️ <b>为什么不是 {@code insertOrder} 列清单里的第 12 列、而是建单之后再 UPDATE 一句</b>：
+     * <p>⚠️ <b>为什么不是 {@code insertOrder} 列清单里的第 13 列、而是建单之后再 UPDATE 一句</b>：
      * INSERT 发生在 {@code addLocked} 里「订单落库」那一刻，而「扣成没扣成」要等
      * {@code deductStocks} 跑完才知道 ⇒ <b>INSERT 那一刻这个值还不存在</b>。两条路：
      * （a）先扣后建单（值就能随 INSERT 一起落库）；（b）先建单后扣、再补这一句。
@@ -570,5 +570,60 @@ public class OrderDao {
         return jdbcClient.sql("SELECT StockDeducted FROM mall_management_sql.`order` "
                         + "WHERE OrderId = ? LIMIT 1")
                 .param(orderId).query(Integer.class).optional().orElse(0);
+    }
+
+    // ==================== 写 / 读：演练批次号（C3 块 7 · commit 10 · Q3 路线 i）====================
+    //
+    // ⚠️ 两个新成员**刻意追加在文件尾**（不是插在 insertOrder 旁边）：全仓大量
+    // 「文件:行号」互引，插在中间会让其后每一处引用集体偏移。本仓既有纪律是
+    // 「新增代码追加在最大被引用行之后」——这两个成员在上面的 `selectStockDeducted` 之后。
+
+    /** 列宽上限 —— 与 ⑲-3 的 DDL（{@code varchar(36)}）以及 {@code ObservedEventDao.BATCH_ID_MAX} 对齐，两处一起改。 */
+    private static final int BATCH_ID_MAX = 36;
+
+    /**
+     * {@code BatchId} 的归一：**只截断、不补空**（与 {@link #normaliseSource} **相反**）。
+     *
+     * <h2>【为什么不像 {@code Source} 那样「空 ⇒ 空串」】</h2>
+     * 列是 {@code varchar(36) DEFAULT NULL} ⇒ 「没有批次」在语义上就是 {@code null}，
+     * 与「批次是个空串」不是一回事。日常请求（不带 {@code X-Drill-Batch} 头）正是前者
+     * （{@code TraceIdFilter.currentBatch()} 此时回 {@code null}）⇒ 本方法对 {@code null} 原样放行。
+     *
+     * <h2>【为什么要截断】</h2>
+     * 值的来源是请求头 {@code X-Drill-Batch}，它的白名单是 {@code [A-Za-z0-9_-]{8,64}}
+     * （{@code TraceIdFilter.ACCEPTED}）—— <b>最长 64，比列宽 36 长</b>。
+     * MySQL 严格模式下超长是**报错**（不是静默截断）⇒ 会把整条下单打死。故此处按列宽截断。
+     * <p>⚠️ 与 {@code ObservedEventDao.clip} 是**同一手法**（那里也用 36）：
+     * 「列宽是本层的责任，不是调用方的」这条口径同源。截断会悄无声息丢尾巴，这是取舍。
+     */
+    private static String clipBatchId(String batchId) {
+        return batchId == null || batchId.length() <= BATCH_ID_MAX
+                ? batchId : batchId.substring(0, BATCH_ID_MAX);
+    }
+
+    /**
+     * 按**演练批次**的五态计数 —— 状态流转页「本批次」口径的唯一输入（C3 块 7 · commit 10。
+     * 设计出处见 {@code 块7-commit10-阶段一续-后端改动面.txt} §3.4「路线 i」）。
+     *
+     * <p>与 {@link #countOrderStates} **同形**（判据链逐条相同），只多一句 {@code WHERE BatchId = ?}
+     * ⇒ 那两个方法里「{@code CancelledAt} 必须最先判」的理由在这里**同样成立**，三处必须一起改。
+     *
+     * <p>⚠️ <b>只能数到 commit 10 之后落的单</b>：{@code order.BatchId} 这列在 Migration ⑲-3
+     * 就建好了，但**写入链路是 commit 10 才接的** —— 此前它恒为 {@code NULL}
+     * （见 {@code db-schema.md §16.2}）⇒ 存量单永远不进任何批次，这是**预期**不是缺陷。
+     *
+     * <p>⚠️ <b>批次号必须来自服务端</b>（{@code TraceIdFilter.currentBatch()} 读的 MDC），
+     * 不得由任何调用方或客户端显式传入 —— 否则谁都能按别人的批次号查库。
+     */
+    public Map<String, Object> countOrderStatesByBatch(String batchId) {
+        String sql = "SELECT "
+                + "COALESCE(SUM(CASE WHEN CancelledAt IS NOT NULL THEN 1 ELSE 0 END), 0) AS cancelled, "
+                + "COALESCE(SUM(CASE WHEN CancelledAt IS NULL AND ReceiveIf = 1 THEN 1 ELSE 0 END), 0) AS completed, "
+                + "COALESCE(SUM(CASE WHEN CancelledAt IS NULL AND ReceiveIf = 0 AND DeliveryIf = 1 THEN 1 ELSE 0 END), 0) AS waitReceive, "
+                + "COALESCE(SUM(CASE WHEN CancelledAt IS NULL AND ReceiveIf = 0 AND DeliveryIf = 0 AND PayIf = 1 THEN 1 ELSE 0 END), 0) AS waitShip, "
+                + "COALESCE(SUM(CASE WHEN CancelledAt IS NULL AND ReceiveIf = 0 AND DeliveryIf = 0 AND PayIf = 0 THEN 1 ELSE 0 END), 0) AS waitPay, "
+                + "COUNT(*) AS total "
+                + "FROM mall_management_sql.`order` WHERE BatchId = ?";
+        return jdbcClient.sql(sql).param(batchId).query().listOfRows().stream().findFirst().orElse(Map.of());
     }
 }

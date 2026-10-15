@@ -687,7 +687,7 @@ public class OrderService {
         try {
             int rows = orderDao.insertOrder(new OrderDao.OrderRow(
                     OrderId, CustomerId, MerchantId, payPrice, Quantity, ProductInformation, Images,
-                    PayIf, DeliveryIf, ReceiveIf, Source));
+                    PayIf, DeliveryIf, ReceiveIf, Source, com.minke.mallmanagement.shared.web.TraceIdFilter.currentBatch()));   // 块 7 · commit 10：批次号**只从 MDC 取**（头通道 `X-Drill-Batch`，白名单 `[A-Za-z0-9_-]{8,64}`，日常请求为 null）；本方法**没有** batchId 形参 ⇒ 请求体/参数传不进来，影响面限于本次请求自己写的行。写全限定名而非 import，理由同 {@code StockMetrics#event}（保本文件 `:688` 的引用不下移）
             if (rows > 0) {
                 result.put("success", true);
                 result.put("msg", "订单添加成功");

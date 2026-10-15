@@ -100,8 +100,11 @@
         >
           <span class="a-of-id">#{{ r.orderId }}</span>
 
-          <!-- 4 节点进度条：`step` 由后端算好（0–4）⇒ 前端不重推一遍状态链（两处判据已经够多了）。 -->
-          <span class="a-of-track" :class="{ 'is-dead': r.cancelled }" aria-hidden="true">
+          <!-- 4 节点进度条：`step` 由后端算好（0–4）⇒ 前端不重推一遍状态链（两处判据已经够多了）。
+               ⚠️ `is-live`（「—」流动）的判据就两条：**没取消** 且 **没走完**（step < 4）。
+                  已取消的单已经退出流程、已完成的单已经走完 —— 这两种还在流动是假信号
+                  （commit 7 那版是两个都没判，所以任何单看着都是死的，见 `<style>` 里 `.a-of-seg` 注释）。 -->
+          <span class="a-of-track" :class="{ 'is-dead': r.cancelled, 'is-live': !r.cancelled && r.step < 4 }" aria-hidden="true">
             <template v-for="(n, i) in 4" :key="n">
               <i v-if="i > 0" class="a-of-seg" :class="{ on: r.step > i }"></i>
               <i class="a-of-node" :class="{ on: r.step >= n, now: r.step === n }"></i>
@@ -131,7 +134,11 @@
          SVG 的 `<rect>`/`<line>` 二十行就画完了，且主题色直接吃 CSS 变量。
          「走过的边亮绿」= 本拍 `moves` 里出现过的 `from>to`，亮 1.2 秒后自动熄（见 `flash()`）。 -->
     <h2 class="a-h2">
-      状态机 <span class="a-h2n">被本拍流转走过的边，短时高亮 · 落到哪个节点，哪个脉冲</span>
+      状态机
+      <span class="a-h2n">
+        被本拍流转走过的边，短时高亮（每秒最多 {{ FLASH_HZ_MAX }} 次）· 落到哪个节点，哪个脉冲 ·
+        框内角标 = <b>全表</b>多少单，框下小字 = <b>本批次</b>经过多少次
+      </span>
     </h2>
     <div class="a-card a-of-fsm">
       <svg class="a-of-svg" viewBox="0 0 640 232" role="img" aria-label="订单状态机：待付款 → 待发货 → 待收货 → 已完成，以及待付款/待发货 → 已取消">
@@ -168,6 +175,12 @@
           />
         </g>
 
+        <!-- 每个节点**两行数**，口径不同、分行标清（Q3 裁定）：
+             · 框内右上角标 = **全表**口径（帧里 `counts` 现成，`OrderDao.countOrderStates()` 无时间窗）
+               ⇒ 演练时会显示 11558 这种总量，它说「库里此刻这个态有多少单」。
+             · 框下小字 = **本批次**口径（帧里 `moves[].batchId` 与当前批次相符的、落到本节点的**次数**）
+               ⇒ 它说「这次演练把多少条流转推进了这个节点」。没有批次号时画 `—`，
+               不画 `+0`（「没有演练在跑」和「演练跑了但一次没到」是两件事）。 -->
         <g class="a-of-nodes">
           <g
             v-for="n in FSM_NODES" :key="n.key"
@@ -175,6 +188,14 @@
           >
             <rect :x="n.cx - 50" :y="n.cy - 22" width="100" height="44" rx="10" class="a-of-box" :class="'is-' + n.key" />
             <text :x="n.cx" :y="n.cy + 5" text-anchor="middle" class="a-of-box-t" :class="'is-' + n.key">{{ n.label }}</text>
+            <text
+              :x="n.cx + 40" :y="n.cy - 11"
+              text-anchor="end" class="a-of-box-n"
+            >{{ fmtInt(num(counts[n.key])) }}</text>
+            <text
+              :x="n.cx" :y="n.cy + 34"
+              text-anchor="middle" class="a-of-box-b"
+            >{{ batchText(n.key) }}</text>
           </g>
         </g>
       </svg>
@@ -182,6 +203,9 @@
         ⚠️ 已知边界（后端口径，不是本页漏画）：**超时取消不进流转流** ——
         `OrderTimeoutCancelJob` 只写 `CancelledAt`、不走状态机 ⇒ 取消那两条边**永远不亮**，
         取消量只能从上面「已取消」计数卡的跳变看出（见后端 `OrderStreamService` 类注释）。
+        <template v-if="currentBatch">
+          当前批次：<code>{{ currentBatch }}</code>。
+        </template>
       </p>
     </div>
 
@@ -206,17 +230,26 @@
             <span class="a-of-tl-t">{{ hms(openedRow.createdAt) }}</span>
             <span class="a-of-tl-d">创建订单（待付款）</span>
           </li>
-          <li v-for="(m, i) in openedMoves" :key="i" class="a-of-tl-i">
+          <li v-for="(m, i) in openedSteps" :key="i" class="a-of-tl-i">
             <span class="a-of-tl-t">{{ hms(m.ts) }}</span>
             <span class="a-of-tl-d">
-              {{ stateLabel(m.from) }} → <b>{{ stateLabel(m.to) }}</b>
+              {{ moveStateLabel(m.from) }} → <b>{{ moveStateLabel(m.to) }}</b>
             </span>
           </li>
         </ol>
 
         <p class="a-of-tl-note">
+          <!-- ⚠️ 三条**互斥**分支，顺序即优先级（写成一包 `v-if/v-else-if/v-else`，
+               不是三条并列的 `v-if` —— 并列会让「只捕获到建档」时同时命中一、两条，
+               于是同一段话里既说「还没捕获到」又说「捕获到 N 次」，自相矛盾）。
+               ⚠️ 「建档」那一步（`from` 为空的 create）**不进上面那个列表**：本段第一行
+               「创建订单（待付款）」就是它，再列一遍等于每张单多一行废话
+               （演练下 100% 的流转都是建档，见 `块7-commit10-阶段一核实.txt` §3b 实测 4670/4670）。 -->
           <template v-if="!openedMoves.length">
             本会话还没捕获到这张单的流转 —— 它可能在本页打开之前就走完了（本页不查历史，见组件头注释）。
+          </template>
+          <template v-else-if="!openedSteps.length">
+            捕获到 {{ openedMoves.length }} 次流转，**全部是建档** —— 已由上面第一行「创建订单（待付款）」表达，不重复列。
           </template>
           <template v-else>
             时间线只含**本页打开之后**捕获到的流转；更早的那几步不在流里，故不显示。
@@ -297,6 +330,107 @@ const MAIN_EDGES = [
 /** 取消两条腿的边 id（几何在模板里写死，这里只留判据用的常量）。 */
 const CANCEL_FROM_PAY = 'waitPay>cancelled'
 const CANCEL_FROM_SHIP = 'waitShip>cancelled'
+/** 本页**画出来了的**全部 5 条边 —— 用来判「这条边图上有吗」，见 `absorbMoves` 的守卫。 */
+const KNOWN_EDGES = new Set([...MAIN_EDGES.map((e) => e.id), CANCEL_FROM_PAY, CANCEL_FROM_SHIP])
+
+/* ── 后端 `OrderState` ↔ 本页五态：**唯一**的一层翻译（C3 块 7 · commit 10 补）────────────
+   ⚠️ 为什么需要它：后端 `moves[].from` / `moves[].to` 是 **OrderState 枚举名**
+      （`order/model/OrderState.java:44-72`），而本页的节点 key / 边 id 是 **DB 派生五态**
+      （上面 `FSM_NODES` / `MAIN_EDGES`）—— 两套名字**没有一个对得上**
+      （`CREATED ≠ waitPay`、`COMPLETED ≠ completed`，连大小写都不同）。
+      ⇒ commit 7 那版 `flash(activeEdges, `${from}>${to}`)` 在 `MAIN_EDGES` 里永远查不到，
+      `pulseNodes` 拿到的枚举名也不在 `FSM_NODES` 的 key 集合里，**两条路都亮不了**：
+      机制件（`flash` / `FLASH_MS` / `.is-pulse` / `@keyframes`）全都在，断的是喂数据这一层
+      （实测见 `块7-commit10-阶段一核实.txt` §3b「原因二」）。
+
+   ⚠️ **这张表是按后端那条判据链推出来的，不是按名字猜的** ——
+      每个枚举名后的三元组出自 `OrderState` 常量自己的 `(payIf, deliveryIf, receiveIf)`
+      （同文件 `:44-72`），再逐条套 `OrderDao.countOrderStates` 的判据链
+      （取消 → `ReceiveIf=1` 已完成 → `DeliveryIf=1` 待收货 → `PayIf=1` 待发货 → 其余待付款）。
+
+   ⚠️ **三个 `ILLEGAL_*` 不另立一态**：库上这五态是**从三个布尔位派生**的，它根本不认识
+      「非法」这个概念 ⇒ 按各自三元组落回既有五态（`(0,1,0)`→待收货、`(0,0,1)`/`(0,1,1)`→已完成）。
+      照名字把它们标成「非法」，本页就会长出一个后端不存在的第六态。
+
+   ⚠️ 后端若改了这套枚举或那条链，**这张表必须跟着改** —— 两处是同一件事的两个镜像。 */
+const STATE_KEY_OF_ORDER_STATE = {
+  CREATED: 'waitPay',                             // (0,0,0)
+  PAID: 'waitShip',                               // (1,0,0)
+  SHIPPED: 'waitReceive',                         // (1,1,0)
+  RECEIVED_NODELIVERY: 'completed',               // (1,0,1) —— ReceiveIf=1，链上先于「已发货」判
+  COMPLETED: 'completed',                         // (1,1,1)
+  ILLEGAL_DELIVERED_UNPAID: 'waitReceive',        // (0,1,0)
+  ILLEGAL_RECEIVED_UNPAID: 'completed',           // (0,0,1)
+  ILLEGAL_DELIVERED_RECEIVED_UNPAID: 'completed', // (0,1,1)
+}
+
+/**
+ * `moves[].from` / `moves[].to` → 本页五态 key。**两套词汇都收**：
+ *   ① `OrderState` 枚举名（`CREATED` / `PAID` / …）—— 真后端现在发的就是这一套（上面那张表）；
+ *   ② 五态 key 本身（`waitPay` / `waitShip` / …）—— 已经是本页的词汇，原样放行。
+ * 认不出来（后端新增了枚举、或值本身是 `null`）回 `''`。
+ *
+ * ⚠️ 为什么收第二套：本页的 mock 探针（`scripts/probes/probe-b7c7-order-flow.mjs`）按五态 key
+ * 造帧，而真后端按枚举名发 —— 两套都收，这一层才对「上游用哪套词汇」不敏感；
+ * 将来后端哪天归一成五态 key，本页**不用改**。
+ *
+ * ⚠️ 认不出来回 `''`，而不是「原样返回入参」：宁可这一笔不高亮，也不要把一个本页没有的 key
+ * 塞进 `pulseNodes` / `activeEdges` —— 那样图上一个像素都不会变（`FSM_NODES` 里查不到），
+ * 却让「为什么没亮」从「表里少了这一条」变成「什么都看不出来」。
+ */
+const stateKeyOf = (v) => {
+  if (!v) return ''
+  return STATE_KEY_OF_ORDER_STATE[v] || (STATE_LABEL[v] ? v : '')
+}
+
+/** 时间线一步显示什么：枚举名 → 五态中文。⚠️ 认不出来时**原样显示**（不画成 `—`）——
+ *  那是「本页不认识它」，不是「这里没有状态」；原样显示至少能让人看见后端发来了什么。 */
+const moveStateLabel = (enumName) => {
+  const k = stateKeyOf(enumName)
+  return k ? STATE_LABEL[k] : (enumName ? String(enumName) : '—')
+}
+
+/* ── 高亮节流（《块 7 参考》§3.3 / Q4 裁定）──────────────────────────────────────
+   ⚠️ 为什么必须节流：演练下**同一对节点**每秒会被推 200+ 次
+      （实测 4670 条 moves / 20 秒，`块7-commit10-阶段一核实.txt` §3b），
+      而 `flash()` 每次都会把那个 1.2 秒的定时器**重开一遍**
+      ⇒ 观感是「从连上起一直是绿的」，根本看不到「亮一下再熄」。
+      限到每秒 `FLASH_HZ_MAX` 次后，人眼仍看成连续闪动，但熄灭看得见了。
+
+   ⚠️ **节流只作用于「视觉高亮」，不作用于「计数」** —— 框下小字走的是另一条路
+      （逐条累加，不经过这里）⇒ 节流**不丢信息**，只是不让动画糊成一片。 */
+const FLASH_HZ_MAX = 4
+/** key → 上次真亮起来的时刻（`performance.now()`）。⚠️ 与三个 Set 一样，卸页时随组件丢掉。 */
+const lastFlashAt = new Map()
+
+/**
+ * 节流版 {@link flash}：同一个 key 每 `1000 / FLASH_HZ_MAX` 毫秒最多亮一次。
+ *
+ * <p>⚠️ 被节流掉的那次**不补**（不排队、不延时）—— 高亮说的是「**刚才**动过」，
+ * 补一次延迟的闪烁反而是在说假话。
+ */
+function flashThrottled(setRef, key) {
+  const now = performance.now()
+  if (now - (lastFlashAt.get(key) || -Infinity) < 1000 / FLASH_HZ_MAX) return
+  lastFlashAt.set(key, now)
+  flash(setRef, key)
+}
+
+/* ── 「本批次」口径（Q4 的框下小字）────────────────────────────────────────────────
+   ⚠️ 与上面的 `counts` 是**两个口径**，页面上分行标清（见模板状态机那一段）：
+      · `counts`        = 库里此刻每态多少**单**（后端聚合，无时间窗）
+      · `batchNodeHits` = 本页看到的、属于**当前批次**的流转，落到各节点的**次数**（前端累加）
+
+   ⚠️ 是「次数」不是「单数」：本计数**不去重** —— 同一张单的同一对 (from,to) 被推两次就记两次。
+      它回答的是「这个节点被经过了多少次」，与卡片的「多少单」不同名、不同义，故也不同数。 */
+const currentBatch = ref('')
+const batchNodeHits = reactive({ waitPay: 0, waitShip: 0, waitReceive: 0, completed: 0, cancelled: 0 })
+
+/** 框下那行小字。⚠️ 没有批次号时画 `—`，**不画 `+0`**：
+ *  「没有演练在跑」和「演练跑了但这个节点一次没到」是两件事，用同一个数表示会读错。 */
+function batchText(key) {
+  return currentBatch.value ? `本批次 +${fmtInt(num(batchNodeHits[key]))}` : '本批次 —'
+}
 
 /* ── 页面状态 ───────────────────────────────────────────────────────────────── */
 const phase = ref('connecting')            // connecting | live | stopped
@@ -427,6 +561,12 @@ const listRows = computed(() => orderIds.value.map((id) => ordersById.get(id)).f
 const pageRows = computed(() => listRows.value.slice(offset.value, offset.value + pageSize.value))
 const openedRow = computed(() => (openedId.value ? ordersById.get(openedId.value) || null : null))
 const openedMoves = computed(() => (openedId.value ? movesById.get(openedId.value) || [] : []))
+/** 时间线实际渲染的步数：**去掉建档那一步**（`action=create`、`from` 为空）。
+ *  ⚠️ 为什么去掉：上面第一行「创建订单（待付款）」就是它 —— 演练下 100% 的流转都是建档
+ *  （`块7-commit10-阶段一核实.txt` §3b 实测 4670/4670），不去掉就是每张单都多一行废话。
+ *  判据用 `from` 空不空，而不是 `action === 'create'`：后者是英文 code，且本页**刻意不存** `action`
+ *  （`movesById` 的注释里写了理由 —— `from → to` 已经把这一步说全了）。 */
+const openedSteps = computed(() => openedMoves.value.filter((m) => stateKeyOf(m.from) !== ''))
 
 function onPage({ limit, offset: off }) {
   pageSize.value = limit
@@ -484,20 +624,52 @@ function absorbOrders(rows) {
   orderIds.value = kept
 }
 
-/** 收一拍的 `moves`：① 累积进时间线 ② 点亮状态机图上对应的边与节点。 */
+/**
+ * 收一拍的 `moves`：① 学批次号 ② 累积进时间线 ③ 点亮状态机图上对应的边与节点。
+ *
+ * ⚠️ **三条判据的口径各不相同，别合并**：
+ *   · **批次号**取「最近见到的那个非空值」，**不取第一帧的** —— 本页可能是挂在上一轮演练的
+ *     尾巴上连进来的，那第一帧带的是**上一批**的号；取最新的那条能自愈。
+ *     换批次时框下小字**清零**，「本批次」才名副其实。
+ *   · **节点脉冲**的判据是「`to` 认得出来」—— **建档（`from` 为空）也脉冲**。
+ *     这正是 commit 7 那一版漏掉的一半：演练产生的流转 **100% 是建档**
+ *     （`action=create`、`from=null`），老守卫 `if (m.from && m.to)` 把它们全挡在门外
+ *     ⇒ 一次脉冲都不会发（实测见 `块7-commit10-阶段一核实.txt` §3b「原因一」）。
+ *   · **边高亮**要求两端都认得出来、**且这条边本页画了**（`KNOWN_EDGES`）——
+ *     后端状态机里有些流转本页没画边（如 `(1,0,1)` 未发货即收货：`CREATED → COMPLETED`
+ *     一步跨过去），那种只脉冲落点、不亮边。
+ */
 function absorbMoves(moves) {
   for (const m of moves) {
+    // ① 批次号：先学（这一步与「这一单认不认得出来」无关，故放在最前面）。
+    const batch = m.batchId === null || m.batchId === undefined ? '' : String(m.batchId)
+    if (batch && batch !== currentBatch.value) {
+      currentBatch.value = batch
+      // 换批次 ⇒ 框下小字清零。⚠️ 不清就是把两轮演练的次数加在一起，那已经不是「本批次」。
+      STATES.forEach((s) => { batchNodeHits[s.key] = 0 })
+    }
+
     const id = m.orderId === null || m.orderId === undefined ? '' : String(m.orderId)
     if (!id) continue
+
+    // ② 时间线
     const arr = movesById.get(id) || []
     arr.push({ from: m.from, to: m.to, ts: num(m.ts) })
     // 时间线不该无限长（同一张单被反复推同一拍）：同 (from,to,ts) 只留一条。
     const dedup = arr.filter((x, i) => i === arr.findIndex((y) => y.from === x.from && y.to === x.to && y.ts === x.ts))
     movesById.set(id, dedup)
 
-    if (m.from && m.to) {
-      flash(activeEdges, `${m.from}>${m.to}`)
-      flash(pulseNodes, m.to)
+    // ③ 图上高亮（枚举名 → 五态 key 之后才谈得上「查得到」）
+    const toKey = stateKeyOf(m.to)
+    if (!toKey) continue
+    // ⚠️ 这里**再比一次** `batch === currentBatch` 不是多余：一帧里可能同时夹着上一批的尾巴与
+    //    本批的头（① 刚把 currentBatch 改成新值），照单全收就会把上一批的次数算进「本批次」。
+    if (batch && batch === currentBatch.value) batchNodeHits[toKey] += 1
+    flashThrottled(pulseNodes, toKey)
+    const fromKey = stateKeyOf(m.from)
+    if (fromKey) {
+      const edgeId = `${fromKey}>${toKey}`
+      if (KNOWN_EDGES.has(edgeId)) flashThrottled(activeEdges, edgeId)
     }
   }
 }
@@ -573,6 +745,8 @@ function closeStream() {
   }
   timers.forEach((t) => clearTimeout(t))
   timers.clear()
+  // 节流表也清掉：重连后第一笔该立刻亮，不该被上一次连接的残留时刻压住（`flashThrottled` 的判据）。
+  lastFlashAt.clear()
 }
 
 onMounted(connect)
@@ -827,6 +1001,29 @@ onBeforeUnmount(closeStream)
 .a-of-track.is-dead {
   opacity: 0.45;
 }
+/* ── 3a「—」流动（《块 7 参考》§3.1 的稿）──────────────────────────────────────────
+   ⚠️ 这一段是**纯 DOM 不是 SVG**（4 个 `<i class="a-of-node">` + 3 个 `<i class="a-of-seg">`），
+      没有 `stroke-dasharray` / `stroke-dashoffset` 可改 —— 核实时给的那条「SVG 虚线推移」改法
+      在本段**无处可施**。等价手法 = 拿虚线渐变当底 + 平移底图（`background-position` 动画），
+      观感就是「虚线在往前走」。
+   ⚠️ 只给 `.on`（已经走过的那几段）上虚线：没走过的段保持实心灰线，读作「还没到」；
+      若整条都流动，就分不出走到哪了。
+   ⚠️ 只在 `.is-live` 的行走动画（判据见模板 `a-of-track` 那两行）：
+      取消的单已退出流程、step === 4 的单已走完 —— 这两种还在流动是**假信号**。
+   ⚠️ 周期必须与 `background-position` 的位移量一致（都是 12px），否则动画会在帧之间跳一下。 */
+@keyframes a-of-seg-flow {
+  from { background-position: 0 0; }
+  to { background-position: -12px 0; }
+}
+.a-of-track.is-live .a-of-seg.on {
+  background-color: transparent;
+  background-image: repeating-linear-gradient(
+    90deg,
+    var(--success) 0 6px,
+    transparent 6px 12px
+  );
+  animation: a-of-seg-flow 0.9s linear infinite;
+}
 
 /* ── 状态标签（色点即字色；与环图扇区色同一批变量）────────────────────────────── */
 .a-of-st {
@@ -875,6 +1072,23 @@ onBeforeUnmount(closeStream)
 .a-of-box-t.is-waitReceive { fill: var(--c6); }
 .a-of-box-t.is-completed { fill: var(--c3); }
 .a-of-box-t.is-cancelled { fill: var(--ink-3); }
+/* 框内右上角：**全表**口径的数（库里此刻这个态有多少单）。
+   ⚠️ 中性色，**不用**节点自己的语义色 —— 同框里框边 + 标题已经上了两次这个色，
+   第三个再上就糊成一片，而它本来就只是「背景信息」，比标题低一档才对。
+   ⚠️ 走 tabular-nums：数位变化时不该把宽度撑得一跳一跳。 */
+.a-of-box-n {
+  font-size: 11px;
+  fill: var(--ink-3);
+  font-variant-numeric: tabular-nums;
+}
+/* 框下：**本批次**口径的小字（这次演练把多少条流转推进了这个节点）。
+   ⚠️ 与角标同为中性色、同字号，靠**位置**（框内 vs 框下）区分两个口径，不靠颜色 ——
+   用颜色区分会让「两个口径」看起来像「两种状态」，那是另一回事。 */
+.a-of-box-b {
+  font-size: 11px;
+  fill: var(--ink-3);
+  font-variant-numeric: tabular-nums;
+}
 /* 节点脉冲：本拍有流转落到它身上时，外圈呼吸一下。 */
 .a-of-nodes .is-pulse .a-of-box {
   animation: a-of-node-glow 1.2s ease-out 2;
@@ -887,6 +1101,11 @@ onBeforeUnmount(closeStream)
 @media (prefers-reduced-motion: reduce) {
   .a-of-node.now,
   .a-of-nodes .is-pulse .a-of-box {
+    animation: none;
+  }
+  /* 3a 的「—」流动也关掉 —— ⚠️ 只关 animation、**不关虚线本身**：
+     虚线是「这一段走过了」的静态标识，关掉它等于顺手把状态也擦了。 */
+  .a-of-track.is-live .a-of-seg.on {
     animation: none;
   }
   .a-of-node,
