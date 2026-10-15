@@ -34,9 +34,9 @@ import java.util.concurrent.atomic.LongAccumulator;
  * 事件流（{@code MallLockMetrics.recentEvents()}）是**公开**通道，且每条 acquire 事件都带
  * {@code key}（业务键）⇒ 场景可以**只数自己那把 key 的事件**。这一点在 A3 那种
  * 「场景与真实流量共处一个进程」的环境里是刚需：计数器是全局的，会把 A3 的订单流量一起数进来；
- * 事件流按 key 过滤后天然不串味。代价是容量有界（512 槽、覆盖即淘汰）——
+ * 事件流按 key 过滤后天然不串味。代价是容量有界（2048 槽、覆盖即淘汰）——
  * 场景的「并发度 × 每线程事件数」必须远小于容量（两把锁的最坏情况是 4 条/线程），
- * 故 {@link Params#threads()} 上限设为 {@link #MAX_THREADS}（32 ⇒ 最坏 128 条，留 4 倍余量）。
+ * 故 {@link Params#threads()} 上限设为 {@link #MAX_THREADS}（32 ⇒ 最坏 128 条，留 16 倍余量）。
  *
  * <h2>【场景状态用进程内计数，不写 Redis】</h2>
  * 除了「锁本身在 Redis 里」这件事，场景不往 Redis 写任何东西。额外好处：
@@ -76,8 +76,8 @@ import java.util.concurrent.atomic.LongAccumulator;
 public class LockSceneService {
 
     /**
-     * 线程数上限。不是性能考虑，是**事件环容量**（512）的安全边界：
-     * 死锁场景每线程最坏 4 条 acquire 事件，32 × 4 = 128 ⇒ 留 4 倍余量，
+     * 线程数上限。不是性能考虑，是**事件环容量**（2048）的安全边界：
+     * 死锁场景每线程最坏 4 条 acquire 事件，32 × 4 = 128 ⇒ 留 16 倍余量，
      * 不会把自己的事件挤出环形缓冲（挤出 ⇒ 计数偏小 ⇒ 场景给出假结论）。
      */
     static final int MAX_THREADS = 32;

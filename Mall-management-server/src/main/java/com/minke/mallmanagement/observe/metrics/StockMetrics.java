@@ -12,12 +12,12 @@ import java.util.concurrent.atomic.AtomicLong;
  *
  * <p>《块 7 参考》§4.5 五套新事件环之一（StockMetrics —— 库存扣减 / 释放 / 不足），
  * 与 {@code MallCacheMetrics} / {@code MallLockMetrics} / {@code MallOrderStateMetrics} 同款：
- * <b>512 槽事件环</b> + 计数，两条通道在<b>同一调用点</b>一起发。
+ * <b>2048 槽事件环</b> + 计数，两条通道在<b>同一调用点</b>一起发。
  *
  * <h2>【与既有三环的关系：结构照抄，事件环<b>不共用</b>】</h2>
  * 三条理由同 {@code MallLockMetrics} 类注释（那是全仓唯一出处，本文不重抄）：
  * 抽共享环要动已被单测钉死并发语义的 {@code MallCacheMetrics}、要引入事件接口、而事件类型本就
- * 每域不同（共享只能共享机制）。代价是五份 512 槽数组，换的是 C1 与 B2 一个字不动。
+ * 每域不同（共享只能共享机制）。代价是五份 2048 槽数组，换的是 C1 与 B2 一个字不动。
  *
  * <h2>【命名规范】</h2>
  * 沿用 {@code MallCacheMetrics} 类注释立的规范：前缀 {@code mall.}、<b>基数铁律</b>
@@ -75,8 +75,8 @@ public class StockMetrics {
     static final String DEDUCT = "mall.stock.deduct";
     static final String RELEASE = "mall.stock.release";
 
-    /** 事件流容量：2 的幂（定位用位与，不用取模）。与既有三环同值 —— 512 条约等于满负荷下数百毫秒的窗口。 */
-    private static final int EVENT_CAPACITY = 512;
+    /** 事件流容量：2 的幂（定位用位与，不用取模）。与既有三环同值 —— 2048 条 ≈ 每秒千条量级下 2 秒的窗口。 */
+    private static final int EVENT_CAPACITY = 2048;
     private static final int EVENT_MASK = EVENT_CAPACITY - 1;
 
     private final MeterRegistry registry;

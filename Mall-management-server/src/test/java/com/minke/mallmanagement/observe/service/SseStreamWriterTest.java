@@ -3,11 +3,14 @@ package com.minke.mallmanagement.observe.service;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBody;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -71,7 +74,7 @@ class SseStreamWriterTest {
         SseStreamWriter writer = new SseStreamWriter(MAPPER, 0, 0);
         ByteArrayOutputStream out = new ByteArrayOutputStream();
 
-        assertThatCode(() -> writer.stream("test", tick -> {
+        assertThatCode(() -> writer.stream("test", () -> tick -> {
             if (tick >= 2) {
                 throw new IllegalStateException("故意：第 2 拍起炸");
             }
@@ -91,7 +94,7 @@ class SseStreamWriterTest {
         SseStreamWriter writer = new SseStreamWriter(MAPPER, -1, -1);
         ByteArrayOutputStream out = new ByteArrayOutputStream();
 
-        assertThatCode(() -> writer.stream("test", tick -> {
+        assertThatCode(() -> writer.stream("test", () -> tick -> {
             if (tick >= 2) {
                 throw new IllegalStateException("停");
             }
@@ -101,6 +104,36 @@ class SseStreamWriterTest {
         assertThat(out.toString(StandardCharsets.UTF_8))
                 .as("负数 max-ticks 是「无限」而不是「零帧」").isEqualTo(
                         "data: {\"seq\":0}\n\ndata: {\"seq\":1}\n\n");
+    }
+
+    @Test
+    @DisplayName("丙（块 7 · commit 10）：帧源工厂**每条连接各调一次** —— 同一个响应体写两遍，第二次仍从第 0 拍起")
+    void frameSourceIsCreatedPerConnection() throws IOException {
+        SseStreamWriter writer = new SseStreamWriter(MAPPER, 0, 2);
+        List<String> factoryCalls = new ArrayList<>();
+
+        StreamingResponseBody body = writer.stream("test", () -> {
+            factoryCalls.add("get()");
+            // ⚠️ 这一份帧源**自己的**状态：每连接一份。若工厂只被调一次、帧源被复用，
+            //    第二遍写出来的 `own` 会接着第一遍的数往下走（0,1 → 2,3）—— 那就是状态串了。
+            long[] mine = {0L};
+            return tick -> {
+                Map<String, Object> frame = new LinkedHashMap<>();
+                frame.put("seq", tick);
+                frame.put("own", mine[0]++);
+                return frame;
+            };
+        });
+
+        ByteArrayOutputStream first = new ByteArrayOutputStream();
+        ByteArrayOutputStream second = new ByteArrayOutputStream();
+        body.writeTo(first);      // 第 1 条连接
+        body.writeTo(second);     // 第 2 条连接
+
+        assertThat(factoryCalls).as("写了两遍 = 两条连接 ⇒ 工厂被调两次").hasSize(2);
+        assertThat(second.toString(StandardCharsets.UTF_8)).as("两次的字节完全一样（各从 0 起）")
+                .isEqualTo(first.toString(StandardCharsets.UTF_8))
+                .isEqualTo("data: {\"seq\":0,\"own\":0}\n\ndata: {\"seq\":1,\"own\":1}\n\n");
     }
 
     // ================= 工具 =================
@@ -116,7 +149,9 @@ class SseStreamWriterTest {
 
     private static String run(SseStreamWriter writer, SseStreamWriter.FrameSource source) throws IOException {
         ByteArrayOutputStream out = new ByteArrayOutputStream();
-        writer.stream("test", source).writeTo(out);
+        // ⚠️ 传的是**工厂**（块 7 · commit 10 的「丙」）：这里给一份「每次现同一个人」的工厂，
+        //    够本文件用 —— 它测的是线格式，不测「每连接一份」（那条在下面的独立用例里）。
+        writer.stream("test", () -> source).writeTo(out);
         return out.toString(StandardCharsets.UTF_8);
     }
 

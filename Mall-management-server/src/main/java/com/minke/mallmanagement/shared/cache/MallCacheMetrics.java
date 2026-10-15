@@ -111,8 +111,8 @@ public class MallCacheMetrics {
     static final String L2_PROBE_DURATION = "mall.cache.l2.probe.duration";
     static final String L2_TRANSITIONS = "mall.cache.l2.transitions";
 
-    /** 事件流容量：2 的幂（定位用位与，不用取模）。512 条约等于满负荷下数百毫秒的窗口。 */
-    private static final int EVENT_CAPACITY = 512;
+    /** 事件流容量：2 的幂（定位用位与，不用取模）。2048 条 ≈ 每秒千条量级下 2 秒的窗口。 */
+    private static final int EVENT_CAPACITY = 2048;
     private static final int EVENT_MASK = EVENT_CAPACITY - 1;
 
     private final MeterRegistry registry;

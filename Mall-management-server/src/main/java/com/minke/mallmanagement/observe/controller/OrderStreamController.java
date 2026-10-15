@@ -1,5 +1,6 @@
 package com.minke.mallmanagement.observe.controller;
 
+import com.minke.mallmanagement.observe.service.AttackEngine;
 import com.minke.mallmanagement.observe.service.OrderStreamService;
 import com.minke.mallmanagement.observe.service.SseStreamWriter;
 import jakarta.servlet.http.HttpServletResponse;
@@ -23,15 +24,25 @@ import org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBo
 public class OrderStreamController {
 
     private final OrderStreamService orders;
+    private final AttackEngine attackEngine;
     private final SseStreamWriter writer;
 
-    public OrderStreamController(OrderStreamService orders, SseStreamWriter writer) {
+    public OrderStreamController(OrderStreamService orders, AttackEngine attackEngine,
+                                 SseStreamWriter writer) {
         this.orders = orders;
+        this.attackEngine = attackEngine;
         this.writer = writer;
     }
 
     /**
-     * 订单流：五态计数 + 最近订单（含进度步数）+ 本拍流转。
+     * 订单流：五态计数 + 最近订单（含进度步数）+ 本拍流转 + 本批次五态计数。
+     *
+     * <p>⚠️ <b>帧源是**工厂**，不是一份共享的</b>（块 7 · commit 10 的「丙」）：本方法被调一次
+     * 只登记一条连接，真正的帧源在 {@link SseStreamWriter#stream} 里**由那条连接自己**建
+     * （每条连接一份游标，理由见那两个类注释）。
+     *
+     * <p>⚠️ <b>批次号用 {@code Supplier} 现问，而不是在这里取一次值</b>：演示的常见次序是
+     * 「先开着页面、再点开始」，在这里取的话这一整条连接会永远停在「没有批次」。
      *
      * <p>⚠️ {@code Content-Type} 必须手动设（{@code produces} 管不了 {@code StreamingResponseBody}
      * 的响应头）—— 理由与实测见 {@link MetricsStreamController#stream}。
@@ -40,6 +51,6 @@ public class OrderStreamController {
     public StreamingResponseBody stream(HttpServletResponse response) {
         response.setContentType(MediaType.TEXT_EVENT_STREAM_VALUE);
         response.setHeader("Cache-Control", "no-cache");
-        return writer.stream("orders", orders::frame);
+        return writer.stream("orders", () -> orders.newFrameSource(attackEngine::currentBatch));
     }
 }

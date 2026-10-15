@@ -13,7 +13,7 @@ import java.util.concurrent.atomic.AtomicLong;
  *
  * <p>《块 7 参考》§4.5 五套新事件环之一（SensitiveMetrics —— 敏感词打码 / 拒收），
  * 与 {@code MallCacheMetrics} / {@code MallLockMetrics} / {@code MallOrderStateMetrics} 同款：
- * <b>512 槽事件环</b> + 计数，两条通道在<b>同一调用点</b>一起发。抽环与否的论证同
+ * <b>2048 槽事件环</b> + 计数，两条通道在<b>同一调用点</b>一起发。抽环与否的论证同
  * {@link StockMetrics} 类注释；「只有一个 kind ⇒ 事件里不设 kind 字段」的理由同
  * {@link AuditMetrics} 类注释（都不重抄）。
  *
@@ -63,7 +63,7 @@ public class SensitiveMetrics {
     static final String CHECKS = "mall.sensitive.checks";
 
     /** 事件流容量：2 的幂（定位用位与，不用取模）。与既有三环同值。 */
-    private static final int EVENT_CAPACITY = 512;
+    private static final int EVENT_CAPACITY = 2048;
     private static final int EVENT_MASK = EVENT_CAPACITY - 1;
 
     private final MeterRegistry registry;

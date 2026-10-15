@@ -1093,4 +1093,27 @@ public class AttackEngine {
         }
         return s.length() <= max ? s : s.substring(0, max - 1) + "…";
     }
+
+    /**
+     * 当前（最近一次发起的）演练批次号；没有在跑的演练时是**空串**。
+     *
+     * <p><b>为什么要有这个只读出口（块 7 · commit 10 · Q3 路线 i）</b>：状态流转页要显示
+     * 「本批次」的五态计数，而批次号**只在服务端当场生成**（{@link #run} 里的
+     * {@code UUID.randomUUID()}），页面上没有任何别的途径知道它 ——
+     * {@code ORDER BY CreateTime DESC LIMIT 1} 查订单表在演练中会变成自己制造的慢查询
+     * （每秒一次全表排序），而 {@code drill_record} 那一行是**跑完之后**才插的
+     * （见 {@link DrillRecordService}），跑的过程中读它永远是上一轮。
+     *
+     * <p>⚠️ 语义边界（与 {@link #currentBatch} 同一条，**不许当成「本轮有效」来读**）：
+     * <ul>
+     *   <li>它是「**最近一次发起**的批次」，不是「正在跑的批次」—— 一轮跑完后本方法**照样**答
+     *       刚才那个批次号（不自动清空）。原因是清空时机需要一个「跑完了」的钩子，而演示要的是
+     *       「停下来之后还能看着刚才那批的数字回味」——所以刻意不回空。</li>
+     *   <li>没跑过任何一轮时答空串 ⇒ 调用方按空串处理（页面的口径是「没有批次画 {@code —}」）。</li>
+     *   <li>两轮**并发**发起时是后发起那轮的批次（同 {@link #currentToken} 登记过的代价）。</li>
+     * </ul>
+     */
+    public String currentBatch() {
+        return currentBatch;
+    }
 }

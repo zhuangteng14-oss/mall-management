@@ -207,34 +207,39 @@ class EventBroadcasterTest {
     // ================= 覆盖边界 =================
 
     @Test
-    @DisplayName("⚠️ 一拍内超出容量：源环自己只留最近 512 条，合并环照抄该语义（丢的是最早的）")
+    @DisplayName("⚠️ 一拍内超出容量：源环自己只留最近 2048 条，合并环照抄该语义（丢的是最早的）")
     void mergesWhateverTheSourceRingStillHolds() {
-        int total = 600;
-        for (int i = 0; i < total; i++) {
+        // ⚠️ 数值与各环的 EVENT_CAPACITY 同值（块 7 · commit 10 裁决 2：512 → 2048）。
+        //    改容量时这条会红在「并入的不是 2048」上 —— 那正是我们要的那声提醒。
+        int capacity = 2048;
+        int extra = 88;
+        for (int i = 0; i < capacity + extra; i++) {
             stock.deduct(SKU, 1, StockMetrics.Deduct.OK);
         }
 
-        assertThat(broadcaster.poll()).as("并入的是**源环还剩的** 512 条，不是 600").isEqualTo(512);
+        assertThat(broadcaster.poll()).as("并入的是**源环还剩的** %d 条，不是全部", capacity).isEqualTo(capacity);
         List<ObservedEvent> merged = broadcaster.since(-1);
-        assertThat(merged).hasSize(512);
-        assertThat(merged.get(0).detail()).as("最早的那 88 条已被源环覆盖（这是源环的语义，不另设口径）")
-                .endsWith("src=stock#88");
-        assertThat(merged.get(511).detail()).endsWith("src=stock#599");
+        assertThat(merged).hasSize(capacity);
+        assertThat(merged.get(0).detail()).as("最早的那 %d 条已被源环覆盖（这是源环的语义，不另设口径）", extra)
+                .endsWith("src=stock#" + extra);
+        assertThat(merged.get(capacity - 1).detail()).endsWith("src=stock#" + (capacity + extra - 1));
     }
 
     @Test
-    @DisplayName("合并环自身写满后覆盖最旧：since(-1) 仍只有 512 条 —— 不报错、也不补历史")
-    void mergeRingIsBoundedAt512() {
-        for (int i = 0; i < 512 + 88; i++) {
+    @DisplayName("合并环自身写满后覆盖最旧：since(-1) 仍只有 2048 条 —— 不报错、也不补历史")
+    void mergeRingIsBoundedAtCapacity() {
+        int capacity = 2048;
+        int extra = 88;
+        for (int i = 0; i < capacity + extra; i++) {
             stock.deduct(SKU, 1, StockMetrics.Deduct.OK);
             broadcaster.poll();          // 逐条推进，确保每条都真进了合并环
         }
 
         List<ObservedEvent> merged = broadcaster.since(-1);
-        assertThat(merged).as("容量有界：只剩最近 512 条").hasSize(512);
-        assertThat(merged.get(0).seq()).as("最旧的那条是第 88 个（合并环的 seq 坐标系）").isEqualTo(88L);
-        assertThat(merged.get(511).seq()).isEqualTo(599L);
-        assertThat(broadcaster.since(87L)).as("被覆盖掉的区间：不报错也不补（覆盖即淘汰）").hasSize(512);
+        assertThat(merged).as("容量有界：只剩最近 %d 条", capacity).hasSize(capacity);
+        assertThat(merged.get(0).seq()).as("最旧的那条是第 %d 个（合并环的 seq 坐标系）", extra).isEqualTo(extra);
+        assertThat(merged.get(capacity - 1).seq()).isEqualTo(capacity + extra - 1L);
+        assertThat(broadcaster.since(extra - 1L)).as("被覆盖掉的区间：不报错也不补（覆盖即淘汰）").hasSize(capacity);
     }
 
     // ================= 工具 =================

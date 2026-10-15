@@ -15,7 +15,7 @@ import java.util.function.IntSupplier;
  * 订单状态机观测 —— 状态子系统唯一的埋点出口（Micrometer 指标 + 有界事件流）。
  *
  * <h2>【与 MallCacheMetrics / MallLockMetrics 的关系：第三份拷贝，本笔刻意不抽】</h2>
- * 这是仓库里第三份「计数 + 512 槽事件环」。B2 已经论证过不抽共享环的三条理由
+ * 这是仓库里第三份「计数 + 2048 槽事件环」。B2 已经论证过不抽共享环的三条理由
  * （{@code MallLockMetrics} 类注释）：抽环要动已被单测钉死并发语义的既有类、B2 的边界是
  * 「只增不改」、事件记录类型本就不同。那三条**在这里依然成立，但收益已经变小** ——
  * 判据是「抽环的收益是否压过改三个已合并类的代价」，第三份时还是「不」，**第四份时应重估**。
@@ -86,8 +86,8 @@ import java.util.function.IntSupplier;
  * 不新增 {@code kind} 是为了让 {@code OrderStateEvent}（9 字段的 record）**一个字段都不用改**
  * —— 为一个新事件加一个 kind 值，却仍要复用 shape/key 两个字段，不值得动 record。
  * <b>成功的落库不发事件</b>（只计数）：一次转移会产生「transition + async」两条事件，
- * 512 槽在满负荷下只覆盖约 4 秒；把成功的 async 也记进去会砍半。而「顺序」对成功落库没有
- * 增量信息 —— 时间线表自己带 {@code At}。失败与丢弃**必须**发事件，因为那时「哪一单」才是关键。
+ * 把成功的 async 也记进去会砍半，而「顺序」对成功落库没有增量信息 —— 时间线表自己带 {@code At}。
+ * 失败与丢弃**必须**发事件，因为那时「哪一单」才是关键（容量 512 → 2048 后，这一条更不在于省槽位）。
  *
  * <h2>【热路径代价】</h2>
  * 与 C1 / B2 同量级：registry 按 Meter.Id 查表 + LongAdder 自增 + 一次数组赋值 + 一个小对象。
@@ -110,7 +110,7 @@ public class MallOrderStateMetrics {
     static final String ASYNC_DURATION = "mall.order.state.async.duration";
 
     /** 事件流容量：2 的幂（定位用位与，不用取模）。同 C1 / B2。 */
-    private static final int EVENT_CAPACITY = 512;
+    private static final int EVENT_CAPACITY = 2048;
     private static final int EVENT_MASK = EVENT_CAPACITY - 1;
 
     private final MeterRegistry registry;

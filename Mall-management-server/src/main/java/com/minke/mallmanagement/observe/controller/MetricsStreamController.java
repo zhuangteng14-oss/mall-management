@@ -27,8 +27,8 @@ import org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBo
  *
  * <h2>【断连】</h2>
  * 客户端关页面 / 刷新 ⇒ 写已关闭的输出流抛 IOException ⇒ {@link SseStreamWriter} 的 catch
- * 收工（不重试、不刷 WARN）。服务端**没有**独立的「连接表」要清理：本类的状态全在
- * {@link MetricsSnapshotService}（单例、无连接态）。
+ * 收工（不重试、不刷 WARN）。服务端**没有**独立的「连接表」要清理：每条连接的差分状态都在它自己
+ * 那份帧源里（{@link MetricsSnapshotService#newFrameSource} 现建，流一结束就没人再引用它）。
  */
 @RestController
 @RequestMapping("/admin/observe/metrics")
@@ -58,6 +58,6 @@ public class MetricsStreamController {
     public StreamingResponseBody stream(HttpServletResponse response) {
         response.setContentType(MediaType.TEXT_EVENT_STREAM_VALUE);
         response.setHeader("Cache-Control", "no-cache");
-        return writer.stream("metrics", snapshots::frame);
+        return writer.stream("metrics", snapshots::newFrameSource);
     }
 }

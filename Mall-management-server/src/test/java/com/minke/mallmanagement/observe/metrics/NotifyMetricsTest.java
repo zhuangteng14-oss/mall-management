@@ -57,9 +57,9 @@ class NotifyMetricsTest {
     }
 
     @Test
-    @DisplayName("事件环：写满即覆盖最旧、seq 单调；容量有界（512）")
+    @DisplayName("事件环：写满即覆盖最旧、seq 单调；容量有界（2048，块 7 · commit 10 裁决 2）")
     void eventRingOverwritesOldestAndKeepsSequenceMonotonic() {
-        int capacity = 512;
+        int capacity = 2048;
         int extra = 24;
         for (int i = 0; i < capacity + extra; i++) {
             metrics.sent(TO_TYPE, EVENT_TYPE, KEY);

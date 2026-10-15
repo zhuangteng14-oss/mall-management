@@ -8,7 +8,6 @@ import io.micrometer.core.instrument.Timer;
 import io.micrometer.core.instrument.distribution.ValueAtPercentile;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 import java.util.ArrayList;
@@ -24,7 +23,8 @@ import java.util.concurrent.TimeUnit;
  *
  * <h2>【为什么必须差分：Micrometer 的计数器只增不减，而面板要的是「此刻的速率」】</h2>
  * {@code http.server.requests} 是自进程启动以来的累计；QPS、错误率、命中率都只能由
- * **相邻两拍之差**得到。本类因此持有上一拍的读数（{@link #lastCounts}）与上一拍的时刻。
+ * **相邻两拍之差**得到。本类因此持有上一拍的读数（{@link Session} 里的 {@code lastCounts}）
+ * 与上一拍的时刻。
  * <ul>
  *   <li><b>首帧一律记 0</b>（{@code primed}）：那时没有「上一拍」可比 —— 把累计值当本拍
  *       会画出一根假的尖峰（进程跑了三天 ⇒ 首屏 QPS「几十万」）。</li>
@@ -33,6 +33,15 @@ import java.util.concurrent.TimeUnit;
  *   <li>QPS / 速率的分母用 {@code System.nanoTime} 的**实差**（不是配置里的 1000ms）：
  *       节拍会抖，用配置值算出来的速率会跟着假抖。</li>
  * </ul>
+ *
+ * <h2>【每连接一份（块 7 · commit 10 的「丙」）】</h2>
+ * 本类是单例，但**差分状态不是**：{@link #newFrameSource()} 每条连接现建一份 {@link Session}，
+ * 上一拍读数（{@code lastCounts}）、上一拍时刻、{@code primed} 三个状态**都装在会话里**。
+ * <p>⚠️ 为什么非这样不可：读差分量**有副作用**（{@code lastCounts.put} 会把读数吃掉），
+ * 两条连接共用一份状态时，**先算的那条会把后算的那条的数据吃光** —— 后开的那条页面看到的
+ * 是一屏 0（QPS 0、命中 0、防护 0）。改前用一个半拍窗口（{@code FramePacer}）把产帧压成
+ * 「每半拍至多一次」来绕，代价是相位差小于半拍的两条流内容会重复；commit 10 换成每连接一份后，
+ * 那个窗口**连同它的类一起删了**（{@code FramePacer.java} / {@code FramePacerTest.java} 已不存在）。
  *
  * <h2>【⚠️ 指标名在这里是字面量 —— 这是一处**已知的重复口径**】</h2>
  * 各埋点类里的指标名常量（{@code MallCacheMetrics.L1_REQUESTS} 等）是**包私有**的，
@@ -115,118 +124,239 @@ public class MetricsSnapshotService {
     private final MeterRegistry registry;
     private final GoodsDao goodsDao;
 
-    /** 上一拍各计数器的读数；键 = 指标名 + tags（见 {@link #key}）。 */
-    private final Map<String, Double> lastCounts = new HashMap<>();
-    private long lastNanos;
-    /** 是否已经有过完整的一拍：首帧所有差分量记 0（理由见类注释）。 */
-    private boolean primed;
-
-    /** 一拍只算一次（理由见 {@link #frame} 与 {@link FramePacer}）。 */
-    private final FramePacer pacer;
-
-    public MetricsSnapshotService(MeterRegistry registry, GoodsDao goodsDao,
-                                  @Value("${mall.observe.sse.interval-ms:1000}") long intervalMs) {
+    public MetricsSnapshotService(MeterRegistry registry, GoodsDao goodsDao) {
         this.registry = registry;
         this.goodsDao = goodsDao;
-        this.pacer = new FramePacer(intervalMs);
+    }
+
+    /** 现建一份「这条连接自己的」帧源（见类注释「每连接一份」）。 */
+    public SseStreamWriter.FrameSource newFrameSource() {
+        return new Session();
     }
 
     /**
-     * 产一拍。**在流线程上被调用**（{@code SseStreamWriter.FrameSource}），故整体 {@code synchronized}：
-     * 同一实例可能被多条流共用（页面开两次），差分状态不能交错。
-     *
-     * <p>⚠️ <b>同一拍只算一次</b>（{@link FramePacer}）：若距上一次产帧不足**半个节拍**，
-     * 直接把上一拍的内容换个 {@code seq} / {@code ts} 交回去。不这么做的话，「两个页面同时开」
-     * 会让**后调用的那条流**看到全 0 的差分量（计数器已被前一条流「读走」了）——
-     * 那是页面看起来像坏了、而其实在工作的假故障。
-     *
-     * @param tick 第几拍（从 0 起）；原样回填到帧里，页面据此丢弃过期帧
+     * 一条连接的全部可变状态，外加**四段要读差分的产帧逻辑**（{@code requests} / {@code cache} /
+     * {@code locks} / {@code protections} —— 它们都要调 {@link #delta}，故只能和状态待在一起）。
+     * 其余各段（{@code gauges} / {@code stock} / {@code health} 与小工具）**无状态**，留在外层由会话调用。
      */
-    public synchronized Map<String, Object> frame(long tick) {
-        long nowNanos = System.nanoTime();
-        if (pacer.reusable(nowNanos)) {
-            return pacer.reuse(tick);
+    private final class Session implements SseStreamWriter.FrameSource {
+
+        /** 上一拍各计数器的读数；键 = 指标名 + tags（见 {@link #key}）。 */
+        private final Map<String, Double> lastCounts = new HashMap<>();
+
+        private long lastNanos;
+
+        /** 是否已经有过完整的一拍：首帧所有差分量记 0（理由见类注释）。 */
+        private boolean primed;
+
+        /**
+         * 产一拍（**在流线程上被调用**，每条连接自己的那条）。
+         *
+         * <p>⚠️ 本方法**不需要** {@code synchronized}：状态不共享（见类注释「每连接一份」）。
+         * 改前它是 {@code synchronized} 的 —— 那正是「状态被多条流共用」的症状。
+         *
+         * @param tick 第几拍（从 0 起）；原样回填到帧里，页面据此丢弃过期帧
+         */
+        @Override
+        public Map<String, Object> frame(long tick) {
+            long nowNanos = System.nanoTime();
+            double seconds = lastNanos == 0L ? 0.0 : (nowNanos - lastNanos) / 1_000_000_000.0;
+
+            Map<String, Object> requests = requests(seconds);
+            Map<String, Object> cache = cache();
+            Map<String, Object> gauges = gauges();
+            List<Map<String, Object>> locks = locks();
+            List<Map<String, Object>> protections = protections(cache, locks);
+            Map<String, Object> stock = stock();
+
+            primed = true;
+            lastNanos = nowNanos;
+
+            Map<String, Object> frame = new LinkedHashMap<>();
+            frame.put("seq", tick);
+            frame.put("ts", System.currentTimeMillis());
+            frame.put("intervalMs", Math.round(seconds * 1000.0));
+            frame.put("health", health(requests, cache, gauges, stock));
+            frame.put("requests", requests);
+            frame.put("cache", cache);
+            frame.put("gauges", gauges);
+            frame.put("locks", locks);
+            frame.put("protections", protections);
+            frame.put("stock", stock);
+            return frame;
         }
-        double seconds = lastNanos == 0L ? 0.0 : (nowNanos - lastNanos) / 1_000_000_000.0;
 
-        Map<String, Object> requests = requests(seconds);
-        Map<String, Object> cache = cache();
-        Map<String, Object> gauges = gauges();
-        List<Map<String, Object>> locks = locks();
-        List<Map<String, Object>> protections = protections(cache, locks);
-        Map<String, Object> stock = stock();
+        /**
+         * 差分：把累计值换成「本拍增量」。
+         *
+         * @param k       稳定键（同名指标的不同 tag 组合必须分开记，否则会互相抵消）
+         * @param current 本拍读到的累计值
+         */
+        private double delta(String k, double current) {
+            Double prev = lastCounts.put(k, current);
+            if (!primed) {
+                return 0.0;
+            }
+            if (prev == null) {
+                return current;
+            }
+            // 计数器只会增；出现负数只能是进程内 meter 被重建（本仓不会），兜到 0 而不是画一根倒吸的线。
+            return Math.max(0.0, current - prev);
+        }
 
-        primed = true;
-        lastNanos = nowNanos;
-
-        Map<String, Object> frame = new LinkedHashMap<>();
-        frame.put("seq", tick);
-        frame.put("ts", System.currentTimeMillis());
-        frame.put("intervalMs", Math.round(seconds * 1000.0));
-        frame.put("health", health(requests, cache, gauges, stock));
-        frame.put("requests", requests);
-        frame.put("cache", cache);
-        frame.put("gauges", gauges);
-        frame.put("locks", locks);
-        frame.put("protections", protections);
-        frame.put("stock", stock);
-        pacer.remember(frame, nowNanos);
-        return frame;
-    }
-
-    // ==================== 各段 ====================
-
-    /** HTTP 段：本拍请求数 / 速率 / 错误率 / 延迟（均值 + 分位）。 */
-    private Map<String, Object> requests(double seconds) {
-        double count = 0.0;
-        double errors5xx = 0.0;
-        double errors4xx = 0.0;
-        // 延迟那一路**只收**能当「一次请求的处理时长」看的序列（见 isLatencyTimer）；
-        // 计数那一路是**全量** —— SSE 也是真请求，只是它的耗时不是延迟。
-        double latencyCount = 0.0;
-        double latencyMs = 0.0;
-        for (Timer t : registry.find(HTTP).timers()) {
-            double c = t.count();
-            count += c;
-            String status = t.getId().getTag("status");
-            if (status != null && status.length() >= 1) {
-                if (status.startsWith("5")) {
-                    errors5xx += c;
-                } else if (status.startsWith("4")) {
-                    errors4xx += c;
+        /** HTTP 段：本拍请求数 / 速率 / 错误率 / 延迟（均值 + 分位）。 */
+        private Map<String, Object> requests(double seconds) {
+            double count = 0.0;
+            double errors5xx = 0.0;
+            double errors4xx = 0.0;
+            // 延迟那一路**只收**能当「一次请求的处理时长」看的序列（见 isLatencyTimer）；
+            // 计数那一路是**全量** —— SSE 也是真请求，只是它的耗时不是延迟。
+            double latencyCount = 0.0;
+            double latencyMs = 0.0;
+            for (Timer t : registry.find(HTTP).timers()) {
+                double c = t.count();
+                count += c;
+                String status = t.getId().getTag("status");
+                if (status != null && status.length() >= 1) {
+                    if (status.startsWith("5")) {
+                        errors5xx += c;
+                    } else if (status.startsWith("4")) {
+                        errors4xx += c;
+                    }
+                }
+                if (isLatencyTimer(t)) {
+                    latencyCount += c;
+                    latencyMs += t.totalTime(TimeUnit.MILLISECONDS);
                 }
             }
-            if (isLatencyTimer(t)) {
-                latencyCount += c;
-                latencyMs += t.totalTime(TimeUnit.MILLISECONDS);
-            }
+
+            double dCount = delta(key(HTTP, "count"), count);
+            double dLatencyCount = delta(key(HTTP, "latencyCount"), latencyCount);
+            double dLatencyMs = delta(key(HTTP, "latencyMs"), latencyMs);
+            double d5xx = delta(key(HTTP, "5xx"), errors5xx);
+            double d4xx = delta(key(HTTP, "4xx"), errors4xx);
+            // ⚠️ 本拍**有没有**「能当延迟看的」样本：没有就一律留空（null）。
+            //    两条理由：① 均值 / 分位在 0 样本上无从谈起 —— 报 0 会被页面画成「快到 0 ms」的假好；
+            //    ② 只在**这一拍真的发生过这类请求**时，Micrometer 那个衰减窗口才代表当下，
+            //       否则它报的是上一个窗口里的陈迹（本笔要修的正是这个 —— 见 isLatencyTimer）。
+            boolean hasLatency = dLatencyCount > 0;
+
+            Map<String, Object> out = new LinkedHashMap<>();
+            out.put("count", (long) dCount);
+            out.put("qps", seconds <= 0 ? 0.0 : round(dCount / seconds));
+            out.put("errors5xx", (long) d5xx);
+            out.put("errors4xx", (long) d4xx);
+            out.put("errorRate", ratio(d5xx, dCount));
+            out.put("clientErrorRate", ratio(d4xx, dCount));
+            out.put("meanMs", hasLatency ? round(dLatencyMs / dLatencyCount) : null);
+            out.put("p95Ms", hasLatency ? percentile(0.95) : null);
+            out.put("p99Ms", hasLatency ? percentile(0.99) : null);
+            // max 是 Micrometer 的衰减窗口最大值（默认 2 分钟），**不是**本拍最大 —— 字段名照实写明。
+            out.put("maxMs", hasLatency ? maxMs() : null);
+            return out;
         }
 
-        double dCount = delta(key(HTTP, "count"), count);
-        double dLatencyCount = delta(key(HTTP, "latencyCount"), latencyCount);
-        double dLatencyMs = delta(key(HTTP, "latencyMs"), latencyMs);
-        double d5xx = delta(key(HTTP, "5xx"), errors5xx);
-        double d4xx = delta(key(HTTP, "4xx"), errors4xx);
-        // ⚠️ 本拍**有没有**「能当延迟看的」样本：没有就一律留空（null）。
-        //    两条理由：① 均值 / 分位在 0 样本上无从谈起 —— 报 0 会被页面画成「快到 0 ms」的假好；
-        //    ② 只在**这一拍真的发生过这类请求**时，Micrometer 那个衰减窗口才代表当下，
-        //       否则它报的是上一个窗口里的陈迹（本笔要修的正是这个 —— 见 isLatencyTimer）。
-        boolean hasLatency = dLatencyCount > 0;
+        /** 缓存段：本拍 L1 命中 / 未命中 / 命中率 + L2 降级跳过数。 */
+        private Map<String, Object> cache() {
+            double hit = delta(key(CACHE_L1, "hit"), sum(CACHE_L1, "result", "hit"));
+            double miss = delta(key(CACHE_L1, "miss"), sum(CACHE_L1, "result", "miss"));
+            double degraded = delta(key(CACHE_L2, "degraded"), sum(CACHE_L2, "result", "degraded"));
 
-        Map<String, Object> out = new LinkedHashMap<>();
-        out.put("count", (long) dCount);
-        out.put("qps", seconds <= 0 ? 0.0 : round(dCount / seconds));
-        out.put("errors5xx", (long) d5xx);
-        out.put("errors4xx", (long) d4xx);
-        out.put("errorRate", ratio(d5xx, dCount));
-        out.put("clientErrorRate", ratio(d4xx, dCount));
-        out.put("meanMs", hasLatency ? round(dLatencyMs / dLatencyCount) : null);
-        out.put("p95Ms", hasLatency ? percentile(0.95) : null);
-        out.put("p99Ms", hasLatency ? percentile(0.99) : null);
-        // max 是 Micrometer 的衰减窗口最大值（默认 2 分钟），**不是**本拍最大 —— 字段名照实写明。
-        out.put("maxMs", hasLatency ? maxMs() : null);
-        return out;
+            Map<String, Object> out = new LinkedHashMap<>();
+            out.put("hit", (long) hit);
+            out.put("miss", (long) miss);
+            out.put("hitRate", ratio(hit, hit + miss));
+            out.put("l2Degraded", (long) degraded);
+            return out;
+        }
+
+        /** 锁段：每个锁名一拍一行（页面拿它画「锁名 × 时间」的竞争热力图）。 */
+        private List<Map<String, Object>> locks() {
+            Map<String, Map<String, Object>> byLock = new LinkedHashMap<>();
+            for (Counter c : registry.find(LOCK_ACQUIRES).counters()) {
+                String lock = c.getId().getTag("lock");
+                String result = c.getId().getTag("result");
+                if (lock == null || result == null) {
+                    continue;
+                }
+                Map<String, Object> row = byLock.computeIfAbsent(lock, k -> {
+                    Map<String, Object> r = new LinkedHashMap<>();
+                    r.put("lock", k);
+                    r.put("acquires", 0L);
+                    r.put("acquired", 0L);
+                    r.put("timeouts", 0L);
+                    r.put("degraded", 0L);
+                    r.put("errors", 0L);
+                    r.put("waitMeanMs", null);
+                    return r;
+                });
+                double d = delta(key(LOCK_ACQUIRES, lock + "|" + result), c.count());
+                bump(row, "acquires", d);
+                switch (result) {
+                    case "acquired":
+                        bump(row, "acquired", d);
+                        break;
+                    case "timeout":
+                        bump(row, "timeouts", d);
+                        break;
+                    case "degraded":
+                        bump(row, "degraded", d);
+                        break;
+                    default:
+                        bump(row, "errors", d);
+                        break;
+                }
+            }
+            for (Timer t : registry.find(LOCK_WAIT).timers()) {
+                String lock = t.getId().getTag("lock");
+                if (lock == null) {
+                    continue;
+                }
+                double dCount = delta(key(LOCK_WAIT, lock + "|count"), t.count());
+                double dMs = delta(key(LOCK_WAIT, lock + "|totalMs"), t.totalTime(TimeUnit.MILLISECONDS));
+                Map<String, Object> row = byLock.computeIfAbsent(lock, k -> {
+                    Map<String, Object> r = new LinkedHashMap<>();
+                    r.put("lock", k);
+                    r.put("acquires", 0L);
+                    r.put("acquired", 0L);
+                    r.put("timeouts", 0L);
+                    r.put("degraded", 0L);
+                    r.put("errors", 0L);
+                    r.put("waitMeanMs", null);
+                    return r;
+                });
+                row.put("waitMeanMs", dCount <= 0 ? null : round(dMs / dCount));
+            }
+            return new ArrayList<>(byLock.values());
+        }
+
+        /** 8 类防护命中（本拍增量）。前 4 类来自既有三块，后 4 类来自本块四环。 */
+        private List<Map<String, Object>> protections(Map<String, Object> cache,
+                                                      List<Map<String, Object>> locks) {
+            long lockTimeout = 0L;
+            for (Map<String, Object> row : locks) {
+                lockTimeout += (Long) row.get("timeouts");
+            }
+            List<Map<String, Object>> out = new ArrayList<>();
+            out.add(protection("cacheHit", "缓存命中", (Long) cache.get("hit")));
+            out.add(protection("lockTimeout", "锁等待超时", lockTimeout));
+            out.add(protection("orderRejected", "订单流转被拒",
+                    delta(key(ORDER_TRANSITIONS, "rejected"), sum(ORDER_TRANSITIONS, "result", "rejected"))));
+            out.add(protection("stockInsufficient", "库存不足（防超卖）",
+                    delta(key(STOCK_DEDUCT, "insufficient"), sum(STOCK_DEDUCT, "result", "insufficient"))));
+            out.add(protection("auditFailed", "审计写入失败",
+                    delta(key(AUDIT_WRITES, "failed"), sum(AUDIT_WRITES, "result", "failed"))));
+            out.add(protection("notifyFailed", "通知发送失败",
+                    delta(key(NOTIFY_SENDS, "failed"), sum(NOTIFY_SENDS, "result", "failed"))));
+            out.add(protection("sensitiveHit", "敏感词拦下",
+                    delta(key(SENSITIVE_CHECKS, "all"), sumAll(SENSITIVE_CHECKS))));
+            out.add(protection("identityRejected", "身份拒绝",
+                    delta(key(IDENTITY_CHECKS, "rejected"), sum(IDENTITY_CHECKS, "result", "rejected"))));
+            return out;
+        }
     }
+
+    // ==================== 无状态各段（会话调它们，它们不认识连接） ====================
 
     /**
      * 这条时间序列的耗时**能不能当延迟看**。
@@ -254,110 +384,11 @@ public class MetricsSnapshotService {
         return uri == null || !uri.endsWith(SSE_URI_SUFFIX);
     }
 
-    /** 缓存段：本拍 L1 命中 / 未命中 / 命中率 + L2 降级跳过数。 */
-    private Map<String, Object> cache() {
-        double hit = delta(key(CACHE_L1, "hit"), sum(CACHE_L1, "result", "hit"));
-        double miss = delta(key(CACHE_L1, "miss"), sum(CACHE_L1, "result", "miss"));
-        double degraded = delta(key(CACHE_L2, "degraded"), sum(CACHE_L2, "result", "degraded"));
-
-        Map<String, Object> out = new LinkedHashMap<>();
-        out.put("hit", (long) hit);
-        out.put("miss", (long) miss);
-        out.put("hitRate", ratio(hit, hit + miss));
-        out.put("l2Degraded", (long) degraded);
-        return out;
-    }
-
     /** 两个 0/1 状态通道（可能为 null：gauge 还没被绑定时 Micrometer 里根本没有这个 meter）。 */
     private Map<String, Object> gauges() {
         Map<String, Object> out = new LinkedHashMap<>();
         out.put("l2Up", gauge(CACHE_L2_UP));
         out.put("lockUp", gauge(LOCK_UP));
-        return out;
-    }
-
-    /** 锁段：每个锁名一拍一行（页面拿它画「锁名 × 时间」的竞争热力图）。 */
-    private List<Map<String, Object>> locks() {
-        Map<String, Map<String, Object>> byLock = new LinkedHashMap<>();
-        for (Counter c : registry.find(LOCK_ACQUIRES).counters()) {
-            String lock = c.getId().getTag("lock");
-            String result = c.getId().getTag("result");
-            if (lock == null || result == null) {
-                continue;
-            }
-            Map<String, Object> row = byLock.computeIfAbsent(lock, k -> {
-                Map<String, Object> r = new LinkedHashMap<>();
-                r.put("lock", k);
-                r.put("acquires", 0L);
-                r.put("acquired", 0L);
-                r.put("timeouts", 0L);
-                r.put("degraded", 0L);
-                r.put("errors", 0L);
-                r.put("waitMeanMs", null);
-                return r;
-            });
-            double d = delta(key(LOCK_ACQUIRES, lock + "|" + result), c.count());
-            bump(row, "acquires", d);
-            switch (result) {
-                case "acquired":
-                    bump(row, "acquired", d);
-                    break;
-                case "timeout":
-                    bump(row, "timeouts", d);
-                    break;
-                case "degraded":
-                    bump(row, "degraded", d);
-                    break;
-                default:
-                    bump(row, "errors", d);
-                    break;
-            }
-        }
-        for (Timer t : registry.find(LOCK_WAIT).timers()) {
-            String lock = t.getId().getTag("lock");
-            if (lock == null) {
-                continue;
-            }
-            double dCount = delta(key(LOCK_WAIT, lock + "|count"), t.count());
-            double dMs = delta(key(LOCK_WAIT, lock + "|totalMs"), t.totalTime(TimeUnit.MILLISECONDS));
-            Map<String, Object> row = byLock.computeIfAbsent(lock, k -> {
-                Map<String, Object> r = new LinkedHashMap<>();
-                r.put("lock", k);
-                r.put("acquires", 0L);
-                r.put("acquired", 0L);
-                r.put("timeouts", 0L);
-                r.put("degraded", 0L);
-                r.put("errors", 0L);
-                r.put("waitMeanMs", null);
-                return r;
-            });
-            row.put("waitMeanMs", dCount <= 0 ? null : round(dMs / dCount));
-        }
-        return new ArrayList<>(byLock.values());
-    }
-
-    /** 8 类防护命中（本拍增量）。前 4 类来自既有三块，后 4 类来自本块四环。 */
-    private List<Map<String, Object>> protections(Map<String, Object> cache,
-                                                  List<Map<String, Object>> locks) {
-        long lockTimeout = 0L;
-        for (Map<String, Object> row : locks) {
-            lockTimeout += (Long) row.get("timeouts");
-        }
-        List<Map<String, Object>> out = new ArrayList<>();
-        out.add(protection("cacheHit", "缓存命中", (Long) cache.get("hit")));
-        out.add(protection("lockTimeout", "锁等待超时", lockTimeout));
-        out.add(protection("orderRejected", "订单流转被拒",
-                delta(key(ORDER_TRANSITIONS, "rejected"), sum(ORDER_TRANSITIONS, "result", "rejected"))));
-        out.add(protection("stockInsufficient", "库存不足（防超卖）",
-                delta(key(STOCK_DEDUCT, "insufficient"), sum(STOCK_DEDUCT, "result", "insufficient"))));
-        out.add(protection("auditFailed", "审计写入失败",
-                delta(key(AUDIT_WRITES, "failed"), sum(AUDIT_WRITES, "result", "failed"))));
-        out.add(protection("notifyFailed", "通知发送失败",
-                delta(key(NOTIFY_SENDS, "failed"), sum(NOTIFY_SENDS, "result", "failed"))));
-        out.add(protection("sensitiveHit", "敏感词拦下",
-                delta(key(SENSITIVE_CHECKS, "all"), sumAll(SENSITIVE_CHECKS))));
-        out.add(protection("identityRejected", "身份拒绝",
-                delta(key(IDENTITY_CHECKS, "rejected"), sum(IDENTITY_CHECKS, "result", "rejected"))));
         return out;
     }
 
@@ -443,24 +474,6 @@ public class MetricsSnapshotService {
     }
 
     // ==================== 小工具 ====================
-
-    /**
-     * 差分：把累计值换成「本拍增量」。
-     *
-     * @param k       稳定键（同名指标的不同 tag 组合必须分开记，否则会互相抵消）
-     * @param current 本拍读到的累计值
-     */
-    private double delta(String k, double current) {
-        Double prev = lastCounts.put(k, current);
-        if (!primed) {
-            return 0.0;
-        }
-        if (prev == null) {
-            return current;
-        }
-        // 计数器只会增；出现负数只能是进程内 meter 被重建（本仓不会），兜到 0 而不是画一根倒吸的线。
-        return Math.max(0.0, current - prev);
-    }
 
     private static String key(String name, String suffix) {
         return name + "@" + suffix;

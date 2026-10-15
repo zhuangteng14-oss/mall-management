@@ -11,7 +11,7 @@ import com.minke.mallmanagement.observe.service.EventBroadcaster.ObservedEvent;
  * <ol>
  *   <li><b>调点在热路径上</b>：唯一调点是 {@code EventBroadcaster#add}（跑在 <b>SSE 流线程</b>上）。
  *       把 MQ 的类型直接写进那一行，意味着「换掉传输方式要改一个已被单测钉死的事件环」——
- *       而那一环的语义（512 槽覆盖式、seq 自校验）与「往哪儿发」毫无关系；</li>
+ *       而那一环的语义（覆盖式环形缓冲、seq 自校验）与「往哪儿发」毫无关系；</li>
  *   <li><b>切片要能起</b>：{@code @WebMvcTest} 把 {@code EventBroadcaster} 当真 bean 拉进切片
  *       （见 {@code AbstractSmokeTest}），而切片里**没有** AMQP 的任何基础设施。有一个接口，
  *       切片只需要补一个 {@code @MockitoBean EventPublisher}（一个，不是一套）。</li>

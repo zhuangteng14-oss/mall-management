@@ -15,9 +15,9 @@ import org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBo
  * <p>动词选 {@code POST}、不加角色闸、不在白名单 —— 三条口径与
  * {@link MetricsStreamController} **逐条相同**（那里写了完整理由，本文不重抄）。
  *
- * <p>⚠️ <b>本流读的是八环合并后的公共流</b>（{@code EventBroadcaster}）—— 它的「一拍只算一次」
- * 语义对本流尤其重要：日志页开着的时候，攻击模拟器页并不读事件（它只发流量），
- * 但**同一个页面的两次刷新**会短暂重叠 ⇒ 没有那层保护就会有一条流看着像死机。
+ * <p>⚠️ <b>本流读的是八环合并后的公共流</b>（{@code EventBroadcaster}）—— 环是**共享**的，
+ * 但**读它的游标不是**：每条连接一份（块 7 · commit 10 的「丙」）⇒ 两条流各读各的、互不吃数据。
+ * 改前共用一份游标，两条连接各只看到一半（实测交集 420 条，见 {@link SseStreamWriter#stream}）。
  */
 @RestController
 @RequestMapping("/admin/observe/events")
@@ -41,6 +41,6 @@ public class EventStreamController {
     public StreamingResponseBody stream(HttpServletResponse response) {
         response.setContentType(MediaType.TEXT_EVENT_STREAM_VALUE);
         response.setHeader("Cache-Control", "no-cache");
-        return writer.stream("events", events::frame);
+        return writer.stream("events", events::newFrameSource);
     }
 }

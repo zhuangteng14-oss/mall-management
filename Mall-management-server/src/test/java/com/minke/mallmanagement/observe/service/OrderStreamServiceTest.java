@@ -14,7 +14,10 @@ import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
@@ -32,14 +35,19 @@ import static org.mockito.Mockito.when;
  * <p>{@code OrderDao} 用替身（{@code mock}）：本文件不碰 MySQL，也不验证 SQL 文本 ——
  * SQL 那侧的 CASE 链与这里的判据链**必须一起改**，这条约束写在
  * {@link OrderDao#countOrderStates()} 的注释里（两处互为「改一处要改两处」的提醒）。
- * 会话按 {@code interval-ms = 0} 建（{@link FramePacer} 窗口 0 ⇒ 每次调用都真算，
- * 不会被「半拍复用」搅乱断言）。
+ *
+ * <p>⚠️ 块 7 · commit 10 起 {@link OrderStreamService} 是**工厂**：帧源（会话）才持有环游标，
+ * 由 {@link OrderStreamService#newFrameSource} 每连接现建 ⇒ 本文件所有断言打在**同一份会话**上
+ * （一条测试 = 一条连接），另有用例专门验「两条连接各读各的」。
  */
 class OrderStreamServiceTest {
 
     private final OrderDao orderDao = mock(OrderDao.class);
     private final MallOrderStateMetrics orderMetrics = new MallOrderStateMetrics(new SimpleMeterRegistry());
-    private final OrderStreamService service = new OrderStreamService(orderDao, orderMetrics, 0);
+    private final OrderStreamService service = new OrderStreamService(orderDao, orderMetrics);
+
+    /** 本用例的那一条连接（块 7 · commit 10 起帧源由工厂**每连接现建**，见类注释）。 */
+    private final SseStreamWriter.FrameSource frames = service.newFrameSource(() -> "");
 
     // ================= 五态判据链 =================
 
@@ -92,7 +100,7 @@ class OrderStreamServiceTest {
                 row("O-1", 1, 1, 1, null),
                 row("O-2", 0, 0, 0, "2026-10-13 09:00:00")));
 
-        Map<String, Object> frame = service.frame(0);
+        Map<String, Object> frame = frames.frame(0);
 
         assertThat(frame).containsEntry("seq", 0L).containsEntry("moveCount", 0);
         assertThat(frame.get("counts")).as("计数是库里的权威口径，原样透传（不在服务端重算）")
@@ -122,7 +130,7 @@ class OrderStreamServiceTest {
         orderMetrics.birthRejected("non_initial", "O-3");
         orderMetrics.timelineWrite(false, "O-4");
 
-        Map<String, Object> frame = service.frame(0);
+        Map<String, Object> frame = frames.frame(0);
 
         @SuppressWarnings("unchecked")
         List<Map<String, Object>> moves = (List<Map<String, Object>>) frame.get("moves");
@@ -141,8 +149,8 @@ class OrderStreamServiceTest {
         orderMetrics.transition(OrderAction.PAY, "waitPay", "waitShip",
                 MallOrderStateMetrics.Result.APPLIED, "O-1");
 
-        assertThat(movesOf(service.frame(0))).as("第一拍看见它动了").hasSize(1);
-        assertThat(movesOf(service.frame(1))).as("第二拍同一批事件不再重复报").isEmpty();
+        assertThat(movesOf(frames.frame(0))).as("第一拍看见它动了").hasSize(1);
+        assertThat(movesOf(frames.frame(1))).as("第二拍同一批事件不再重复报").isEmpty();
     }
 
     @Test
@@ -153,12 +161,59 @@ class OrderStreamServiceTest {
         when(orderDao.countOrderStates()).thenReturn(after);
         when(orderDao.selectRecentOrders(anyInt())).thenReturn(List.of(row("O-9", 0, 0, 0, "2026-10-13 11:00:00")));
 
-        Map<String, Object> frame = service.frame(0);
+        Map<String, Object> frame = frames.frame(0);
 
         assertThat(movesOf(frame)).as("取消不经状态机 ⇒ 不发流转事件，本页也就没有它的 move").isEmpty();
         @SuppressWarnings("unchecked")
         Map<String, Object> counts = (Map<String, Object>) frame.get("counts");
         assertThat(counts.get("cancelled")).as("但计数里看得见").isEqualTo(1L);
+    }
+
+    @Test
+    @DisplayName("丙（块 7 · commit 10）：两条连接各持一份环游标 —— 同一批流转两条流**都**看得见")
+    void twoSessionsEachSeeTheSameMoves() {
+        when(orderDao.countOrderStates()).thenReturn(Map.of());
+        when(orderDao.selectRecentOrders(anyInt())).thenReturn(List.of());
+        SseStreamWriter.FrameSource other = service.newFrameSource(() -> "");
+        orderMetrics.transition(OrderAction.PAY, "waitPay", "waitShip",
+                MallOrderStateMetrics.Result.APPLIED, "O-1");
+
+        assertThat(movesOf(frames.frame(0))).as("先开的那条看见它动了").hasSize(1);
+        assertThat(movesOf(other.frame(0))).as("后开的那条**也**看得见。改前共用一份游标时，"
+                + "先算的那条会把这条 move 读走，后开的那条页面看着像死机").hasSize(1);
+    }
+
+    // ================= 本批次五态计数（块 7 · commit 10 · Q3 路线 i）=================
+
+    @Test
+    @DisplayName("没有批次号 ⇒ batchCounts 是 null，**不是**一份全 0（「没批次」与「本批次一单没有」是两件事）")
+    void batchCountsIsNullWithoutABatch() {
+        when(orderDao.countOrderStates()).thenReturn(Map.of());
+        when(orderDao.selectRecentOrders(anyInt())).thenReturn(List.of());
+
+        assertThat(frames.frame(0)).containsEntry("batchCounts", null);
+        verify(orderDao, never()).countOrderStatesByBatch(anyString());
+    }
+
+    @Test
+    @DisplayName("有批次号 ⇒ batchCounts 取库里的本批次聚合；且批次号是**每拍现问**（先开页面、后点开始也对）")
+    void batchCountsFollowsTheLiveBatchId() {
+        when(orderDao.countOrderStates()).thenReturn(Map.of());
+        when(orderDao.selectRecentOrders(anyInt())).thenReturn(List.of());
+        Map<String, Object> byBatch = new LinkedHashMap<>();
+        byBatch.put("waitPay", 7L);
+        when(orderDao.countOrderStatesByBatch("batch-live")).thenReturn(byBatch);
+
+        // ⚠️ 故意用一个**可变的**供应者：批次号在会话建好**之后**才出现（演示的真实次序 ——
+        //    页面先开着，演练是后来才点的开始）。构造期取一次值的写法在这里会永远读到空串。
+        String[] live = {""};
+        SseStreamWriter.FrameSource session = service.newFrameSource(() -> live[0]);
+
+        assertThat(session.frame(0)).as("还没点开始 ⇒ 没有本批次").containsEntry("batchCounts", null);
+
+        live[0] = "batch-live";
+        assertThat(session.frame(1)).as("点了开始 ⇒ 同一份会话下一拍就拿到本批次口径")
+                .containsEntry("batchCounts", byBatch);
     }
 
     // ================= 工具 =================

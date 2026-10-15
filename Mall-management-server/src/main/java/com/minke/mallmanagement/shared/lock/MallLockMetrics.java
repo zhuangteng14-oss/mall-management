@@ -20,7 +20,7 @@ import java.util.function.BooleanSupplier;
  * ② 抽环必然要改 C1 已合并的 MallCacheMetrics 的既有行（B2 的边界是「只增不改」）；
  * ③ 事件类型本就不同 —— {@code MallCacheEvent} 的 kind 取值表是缓存专用、本类是锁专用，
  *    共享只能共享机制、共享不了记录类型，收益进一步缩小。
- * 代价是两份 512 槽数组（各约 4KB 引用），换的是 C1 一个字不动。
+ * 代价是两份 2048 槽数组（各约 16KB 引用），换的是 C1 一个字不动。
  *
  * 【命名规范】沿用 C1 在 MallCacheMetrics 类注释里立的规范（那是全仓唯一出处）：
  * 前缀 {@code mall.}、**基数铁律**（tag 只用有界取值、业务键绝不进 tag）、
@@ -73,8 +73,8 @@ public class MallLockMetrics {
     static final String HOLDS = "mall.lock.holds";
     static final String UP = "mall.lock.up";
 
-    /** 事件流容量：2 的幂（定位用位与，不用取模）。同 C1 —— 512 条约等于满负荷下数百毫秒的窗口。 */
-    private static final int EVENT_CAPACITY = 512;
+    /** 事件流容量：2 的幂（定位用位与，不用取模）。同 C1 —— 2048 条 ≈ 每秒千条量级下 2 秒的窗口。 */
+    private static final int EVENT_CAPACITY = 2048;
     private static final int EVENT_MASK = EVENT_CAPACITY - 1;
 
     private final MeterRegistry registry;

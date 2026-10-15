@@ -206,6 +206,10 @@
         <template v-if="currentBatch">
           当前批次：<code>{{ currentBatch }}</code>。
         </template>
+        <template v-if="batchCountsRows">
+          <br />本批次单数（后端 `batchCounts`，**单数**口径，与上面小字的**次数**口径不同）：
+          <template v-for="(r, i) in batchCountsRows" :key="r.key">{{ i ? ' · ' : '' }}{{ r.label }} {{ fmtInt(r.n) }}</template>。
+        </template>
       </p>
     </div>
 
@@ -426,11 +430,26 @@ function flashThrottled(setRef, key) {
 const currentBatch = ref('')
 const batchNodeHits = reactive({ waitPay: 0, waitShip: 0, waitReceive: 0, completed: 0, cancelled: 0 })
 
+/** 帧里的 `batchCounts`（块 7 · commit 10 · 10b 接通后端）：**本批次**各态多少**单** ——
+ *  `OrderDao.countOrderStatesByBatch` 的聚合值，权威口径。`null` = 当前没有批次号（后端回 null，不回 0）。
+ *
+ *  ⚠️ 它与 `batchNodeHits` **不是同一个量**，所以这两行**不是「同一事实的两处来源」**（核对两遍不算重复）：
+ *      · `batchCounts`  = 本批次落的**单**此刻在库里各在哪个态（**去重**；含本页没看见的流转）
+ *      · `batchNodeHits` = 本页看见的流转**次数**（**不去重**；只含本页开着的时候发生的）
+ *  演练里两者会**不同数**：一张单「建档」时它在 `waitPay` 上是 1 单 / 1 次，随后付款，
+ *  **单数**离开 `waitPay` 而**次数**留在那里（历史次数不会减少）。页面分行标清，不合并。 */
+const batchCounts = ref(null)
+
 /** 框下那行小字。⚠️ 没有批次号时画 `—`，**不画 `+0`**：
  *  「没有演练在跑」和「演练跑了但这个节点一次没到」是两件事，用同一个数表示会读错。 */
 function batchText(key) {
   return currentBatch.value ? `本批次 +${fmtInt(num(batchNodeHits[key]))}` : '本批次 —'
 }
+
+/** 框外那行「本批次单数」的数字行（五态全列，没批次时为 `null` ⇒ 模板整行不画）。 */
+const batchCountsRows = computed(() => (batchCounts.value
+  ? STATES.map((s) => ({ key: s.key, label: s.label, n: num(batchCounts.value[s.key]) }))
+  : null))
 
 /* ── 页面状态 ───────────────────────────────────────────────────────────────── */
 const phase = ref('connecting')            // connecting | live | stopped
@@ -711,6 +730,8 @@ function onFrame(f) {
   seq.value = num(f.seq)
   ts.value = num(f.ts) || Date.now()
   counts.value = f.counts || {}
+  // 本批次口径：后端没有批次号时回 `null`（不是回一份全 0）⇒ 原样透传，由模板决定画不画。
+  batchCounts.value = f.batchCounts || null
 
   absorbOrders(Array.isArray(f.orders) ? f.orders : [])
   absorbMoves(Array.isArray(f.moves) ? f.moves : [])

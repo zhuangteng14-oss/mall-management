@@ -11,6 +11,7 @@ import java.io.IOException;
 import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.Map;
+import java.util.function.Supplier;
 import java.util.regex.Pattern;
 
 /**
@@ -74,6 +75,10 @@ public class SseStreamWriter {
      * （本块三个实现的读法都是「读内存里的环 + 至多一次短查询」，见各自类注释）。
      * 实现抛异常 = 这条流就此结束（不重试、不吞成空帧）—— 与「出错也要让页面看见」
      * 相比，本块的取舍是**宁可断流**：半死的流会让页面显示一份看起来正常的旧数据。
+     *
+     * <p>⚠️ <b>实现里可以、也应该放「这条连接自己的状态」</b>（游标 / 差分的上一拍读数）：
+     * {@link #stream} 拿到的是**工厂**，每条连接现建一份 ⇒ 实例内的字段天然是「每连接一份」。
+     * 三个产帧服务的写法见各自类注释的「每连接一份」一节。
      */
     @FunctionalInterface
     public interface FrameSource {
@@ -93,13 +98,26 @@ public class SseStreamWriter {
     }
 
     /**
-     * 把 {@code source} 包成一条可持续写出的响应体。
+     * 把 {@code frames} 包成一条可持续写出的响应体。
+     *
+     * <p>⚠️ <b>入参是<u>工厂</u>而不是帧源本身</b>（块 7 · commit 10 的「丙」）：本方法在
+     * **这条连接自己的异步线程上**现调一次工厂、现建一份帧源。所以「帧源里存着游标 / 上一拍读数」
+     * 这种写法在这里是**对的** —— 状态天然按连接隔离。
+     *
+     * <p>⚠️ <b>为什么不能传一份共享的帧源</b>（改前的样子，那时还配了一个 {@code FramePacer}
+     * 把产帧压成「每半拍至多一次」）：差分量的读法**有副作用**（把计数器的读数读走、把环游标推着走），
+     * 两条连接共用一份帧源时，**先算的那条会把后算的那条的数据吃掉** ⇒ 后开的那条看着像死机。
+     * 实测（2026-10-14，同一轮演练 + 两条连接）：事件 A 独有 7168 条 · B 独有 6657 条 ·
+     * **交集只有 420 条** —— 两条流各看了一半。
      *
      * @param tag    仅用于日志（哪条流断了），不要放业务数据
-     * @param source 逐拍产帧
+     * @param frames 逐拍产帧的**工厂**：每条连接各调一次
      */
-    public StreamingResponseBody stream(String tag, FrameSource source) {
+    public StreamingResponseBody stream(String tag, Supplier<FrameSource> frames) {
         return out -> {
+            // ⚠️ 建在这里（lambda 内、每条连接各一次），不是建在 `stream(...)` 那一行上：
+            //    调用方若把本方法返回的响应体缓存起来复用，状态也不会跨连接串。
+            FrameSource source = frames.get();
             long tick = 0;
             try {
                 while (maxTicks <= 0 || tick < maxTicks) {

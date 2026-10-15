@@ -29,8 +29,10 @@ import static org.mockito.Mockito.when;
  *       是两件事，页面要分开显示）。</li>
  * </ol>
  *
- * <p>{@code GoodsDao} 用替身（本文件不碰 MySQL）。{@code interval-ms = 0}
- * ⇒ {@link FramePacer} 窗口 0 ⇒ 每次 {@code frame()} 都真算（不被半拍复用搅乱断言）。
+ * <p>{@code GoodsDao} 用替身（本文件不碰 MySQL）。⚠️ 块 7 · commit 10 起
+ * {@link MetricsSnapshotService} 是**工厂**：差分状态（上一拍读数）在**会话**里，
+ * 由 {@link MetricsSnapshotService#newFrameSource()} 每连接现建 ⇒ 本文件所有断言打在
+ * **同一份会话**上（一条测试 = 一条连接），另有一例专验「两条连接各差分各的」。
  *
  * <p>⚠️ 本文件**不**验健康度阈值的数值（那是「演示口径、待裁」，见类注释）——
  * 只验「断流 / 不断流」与「留空 / 不留空」这两类**结构**差异。
@@ -41,7 +43,10 @@ class MetricsSnapshotServiceTest {
 
     private final SimpleMeterRegistry registry = new SimpleMeterRegistry();
     private final GoodsDao goodsDao = mock(GoodsDao.class);
-    private final MetricsSnapshotService service = new MetricsSnapshotService(registry, goodsDao, 0);
+    private final MetricsSnapshotService service = new MetricsSnapshotService(registry, goodsDao);
+
+    /** 本用例的那一条连接（差分状态就装在它里面）。 */
+    private final SseStreamWriter.FrameSource frames = service.newFrameSource();
 
     @Test
     @DisplayName("首帧所有差分量记 0：累计值不当本拍用；命中率因分母为 0 而**留空**（不是 0%）")
@@ -50,7 +55,7 @@ class MetricsSnapshotServiceTest {
         registry.counter(L1, "result", "miss").increment(2);
         when(goodsDao.selectStockLevels(anyInt())).thenReturn(List.of());
 
-        Map<String, Object> frame = service.frame(0);
+        Map<String, Object> frame = frames.frame(0);
 
         assertThat(cacheOf(frame)).containsEntry("hit", 0L).containsEntry("miss", 0L);
         assertThat(cacheOf(frame).get("hitRate")).as("没有请求 ⇒ null（不是 0.0 —— 两者页面显示不同）").isNull();
@@ -67,10 +72,10 @@ class MetricsSnapshotServiceTest {
         when(goodsDao.selectStockLevels(anyInt())).thenReturn(List.of());
         registry.counter(L1, "result", "hit").increment(5);
         registry.counter(L1, "result", "miss").increment(2);
-        service.frame(0);
+        frames.frame(0);
 
         registry.counter(L1, "result", "hit").increment(3);
-        Map<String, Object> frame = service.frame(1);
+        Map<String, Object> frame = frames.frame(1);
 
         assertThat(cacheOf(frame)).as("本拍只命中 3 次（不是累计 8 次）")
                 .containsEntry("hit", 3L).containsEntry("miss", 0L).containsEntry("hitRate", 1.0);
@@ -80,10 +85,10 @@ class MetricsSnapshotServiceTest {
     @DisplayName("中途新出现的计数器：**它现在的值就是本拍增量**（不当作「没有上一拍」而丢掉）")
     void newlyAppearingCounterCountsAsItsCurrentValue() {
         when(goodsDao.selectStockLevels(anyInt())).thenReturn(List.of());
-        service.frame(0);                                  // 先拍一次，进 primed 状态
+        frames.frame(0);                                  // 先拍一次，进 primed 状态
 
         registry.counter("mall.audit.writes", "result", "failed").increment(4);
-        Map<String, Object> frame = service.frame(1);
+        Map<String, Object> frame = frames.frame(1);
 
         assertThat(protectionOf(frame, "auditFailed")).as("新计数器第一见 ≠ 没有增量").isEqualTo(4L);
         assertThat(protectionOf(frame, "cacheHit")).as("同类里没新值的照旧 0").isZero();
@@ -94,7 +99,7 @@ class MetricsSnapshotServiceTest {
     void protectionsAreAlwaysTheSameEightRows() {
         when(goodsDao.selectStockLevels(anyInt())).thenReturn(List.of());
 
-        Map<String, Object> frame = service.frame(0);
+        Map<String, Object> frame = frames.frame(0);
 
         assertThat(rowsOf(frame, "protections")).extracting(r -> r.get("tag")).containsExactly(
                 "cacheHit", "lockTimeout", "orderRejected", "stockInsufficient",
@@ -110,7 +115,7 @@ class MetricsSnapshotServiceTest {
                 stockRow("SKU-1", "苹果", "500g", 4, 20),
                 stockRow("SKU-2", "香蕉", "1kg", 3, null)));
 
-        Map<String, Object> frame = service.frame(0);
+        Map<String, Object> frame = frames.frame(0);
 
         assertThat(stockOf(frame)).containsEntry("available", true);
         List<Map<String, Object>> rows = rowsOf(stockOf(frame), "rows");
@@ -127,7 +132,7 @@ class MetricsSnapshotServiceTest {
     void stockFailureIsExplicitNotSilent() {
         when(goodsDao.selectStockLevels(anyInt())).thenThrow(new IllegalStateException("db down"));
 
-        Map<String, Object> frame = service.frame(0);
+        Map<String, Object> frame = frames.frame(0);
 
         assertThat(stockOf(frame)).as("显式标注不可用，而不是把上一拍的值当新的").containsEntry("available", false);
         assertThat(rowsOf(stockOf(frame), "rows")).isEmpty();
@@ -147,10 +152,10 @@ class MetricsSnapshotServiceTest {
         Timer stream = Timer.builder("http.server.requests")
                 .tags("uri", "/admin/observe/metrics/stream", "status", "200")
                 .register(registry);
-        service.frame(0);                                  // 先拍一次，进 primed 状态
+        frames.frame(0);                                  // 先拍一次，进 primed 状态
 
         stream.record(26_843, TimeUnit.MILLISECONDS);      // 客户端挂了 26.8 秒才断开
-        Map<String, Object> frame = service.frame(1);
+        Map<String, Object> frame = frames.frame(1);
 
         assertThat(requestsOf(frame)).as("SSE 也是真请求 ⇒ 计数那一路照记").containsEntry("count", 1L);
         assertThat((Double) requestsOf(frame).get("qps"))
@@ -173,12 +178,12 @@ class MetricsSnapshotServiceTest {
         Timer stream = Timer.builder("http.server.requests")
                 .tags("uri", "/admin/observe/events/stream", "status", "200")
                 .register(registry);
-        service.frame(0);
+        frames.frame(0);
 
         business.record(40, TimeUnit.MILLISECONDS);
         business.record(60, TimeUnit.MILLISECONDS);
         stream.record(26_843, TimeUnit.MILLISECONDS);
-        Map<String, Object> frame = service.frame(1);
+        Map<String, Object> frame = frames.frame(1);
 
         assertThat(requestsOf(frame)).as("两条都算进计数（SSE 的请求数是真的）").containsEntry("count", 3L);
         Double p99 = (Double) requestsOf(frame).get("p99Ms");
@@ -195,14 +200,31 @@ class MetricsSnapshotServiceTest {
                 .tags("uri", "/order/orderAdd", "status", "200")
                 .publishPercentiles(0.5, 0.95, 0.99)
                 .register(registry);
-        service.frame(0);
+        frames.frame(0);
 
         business.record(1_500, TimeUnit.MILLISECONDS);     // 一条真·慢请求（> 1000 ms 阈值）
-        Map<String, Object> frame = service.frame(1);
+        Map<String, Object> frame = frames.frame(1);
 
         assertThat(healthOf(frame)).as("业务请求真的慢了 ⇒ 该红").containsEntry("level", "error");
         assertThat((List<?>) healthOf(frame).get("reasons")).as("理由要说得出来是 P99")
                 .anySatisfy(r -> assertThat(String.valueOf(r)).contains("P99"));
+    }
+
+    // ================= 每连接一份（块 7 · commit 10 的「丙」）=================
+
+    @Test
+    @DisplayName("丙：两条连接各差分各的 —— 后开的那条不会拿到一屏 0（先算的那条把读数吃走了）")
+    void twoSessionsEachDiffAgainstTheirOwnPrevious() {
+        when(goodsDao.selectStockLevels(anyInt())).thenReturn(List.of());
+        SseStreamWriter.FrameSource other = service.newFrameSource();
+        registry.counter(L1, "result", "hit").increment(4);
+        frames.frame(0);                 // 先开的那条：首帧记 0（没有上一拍）
+        other.frame(0);                  // 后开的：它自己也是首帧 ⇒ 同样记 0
+
+        registry.counter(L1, "result", "hit").increment(6);
+        assertThat(cacheOf(frames.frame(1))).as("先开的那条：本拍 +6").containsEntry("hit", 6L);
+        assertThat(cacheOf(other.frame(1))).as("后开的那条：**也是 +6**。共用一份差分状态时，"
+                + "这里会是 0（读数已被前一条读走）—— 页面看起来像铁死了").containsEntry("hit", 6L);
     }
 
     // ================= 工具 =================

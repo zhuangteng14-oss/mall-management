@@ -3,13 +3,13 @@ package com.minke.mallmanagement.observe.service;
 import com.minke.mallmanagement.order.dao.OrderDao;
 import com.minke.mallmanagement.order.metrics.MallOrderStateMetrics;
 import com.minke.mallmanagement.order.metrics.MallOrderStateMetrics.OrderStateEvent;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.function.Supplier;
 
 /**
  * 状态流转页（{@code POST /admin/observe/orders/stream}）一拍一帧的产地 —— 五态计数 + 最近订单
@@ -46,11 +46,15 @@ import java.util.Map;
  * </pre>
  * SQL 那一侧（{@link OrderDao#countOrderStates()}）用 CASE 表达同一条链，顺序逐条对齐。
  *
- * <h2>【一拍只算一次】</h2>
- * 同 {@link MetricsSnapshotService}：两个页面（或刷新时的旧连接）同时读时，**同一拍共用一份结果**
- * （在 {@link #frame} 里按半拍窗口复用），否则后调用的那条会看到「本拍什么都没发生」。
- * 代价：相位差小于半拍的两次读会拿到内容相同、只有 {@code seq}/{@code ts} 不同的两帧
- * （页面按 {@code seq} 幂等处理）。
+ * <h2>【每连接一份】</h2>
+ * 本类是单例，但**帧源不是**：{@link #newFrameSource} 每条连接现建一份 {@link Session}，
+ * 环游标（{@code lastEventSeq}）与差分状态**都装在会话里**。理由：读差分量是**有副作用**的
+ * （把环游标往前推），两条连接共用一份状态时先算的那条会把后算的那条的数据吃掉 ——
+ * 页面看起来像死机。改前用一个半拍窗口把产帧压成「每半拍至多一次」来绕这个坑（代价是两条流
+ * 相位差小于半拍时内容会重复），commit 10 换成每连接一份游标后那个窗口**连同它的类一起删了**。
+ *
+ * <p>⇒ 会话里的 {@code frame} **不需要** {@code synchronized}：它只被自己那条连接的流线程调用，
+ * 状态不共享（{@link OrderDao} / 环本身各自并发安全，见它们自己的注释）。
  */
 @Component
 public class OrderStreamService {
@@ -61,71 +65,101 @@ public class OrderStreamService {
     private final OrderDao orderDao;
     private final MallOrderStateMetrics orderMetrics;
 
-    /** 订单状态环「已读到哪」的游标；-1 = 还没读过（空环的 seq 从 0 起）。 */
-    private long lastEventSeq = -1L;
-
-    /** 一拍只算一次（理由见类注释最后一节与 {@link FramePacer}）。 */
-    private final FramePacer pacer;
-
-    public OrderStreamService(OrderDao orderDao,
-                              MallOrderStateMetrics orderMetrics,
-                              @Value("${mall.observe.sse.interval-ms:1000}") long intervalMs) {
+    public OrderStreamService(OrderDao orderDao, MallOrderStateMetrics orderMetrics) {
         this.orderDao = orderDao;
         this.orderMetrics = orderMetrics;
-        this.pacer = new FramePacer(intervalMs);
     }
 
     /**
-     * 产一拍（**在流线程上被调用**）。
+     * 现建一份「这条连接自己的」帧源。
      *
-     * @param tick 第几拍（从 0 起），原样回填
+     * @param batch 本次演练的批次号（每次产帧现问一次；空白 = 没有在跑的演练）。
+     *              ⚠️ 现问、不当成构造期的固定值：演示时常常**先开着页面、再点开始**，
+     *              构造期取一次会让这一整条连接永远停在「没有批次」。
      */
-    public synchronized Map<String, Object> frame(long tick) {
-        long now = System.nanoTime();
-        if (pacer.reusable(now)) {
-            return pacer.reuse(tick);
-        }
-
-        Map<String, Object> counts = orderDao.countOrderStates();
-        List<Map<String, Object>> orders = new ArrayList<>();
-        for (Map<String, Object> raw : orderDao.selectRecentOrders(RECENT_LIMIT)) {
-            orders.add(orderRow(raw));
-        }
-        List<Map<String, Object>> moves = drainMoves();
-
-        Map<String, Object> frame = new LinkedHashMap<>();
-        frame.put("seq", tick);
-        frame.put("ts", System.currentTimeMillis());
-        frame.put("counts", counts);
-        frame.put("orders", orders);
-        frame.put("moves", moves);
-        frame.put("moveCount", moves.size());
-        pacer.remember(frame, now);
-        return frame;
+    public SseStreamWriter.FrameSource newFrameSource(Supplier<String> batch) {
+        return new Session(batch);
     }
 
-    /** 本拍新发生的流转（{@code kind=transition}；illegal / async 属日志页，不进本页）。 */
-    private List<Map<String, Object>> drainMoves() {
-        List<Map<String, Object>> moves = new ArrayList<>();
-        for (OrderStateEvent e : orderMetrics.recentEvents()) {
-            if (e.seq() <= lastEventSeq) {
-                continue;
-            }
-            lastEventSeq = e.seq();
-            if (!"transition".equals(e.kind())) {
-                continue;
-            }
-            Map<String, Object> row = new LinkedHashMap<>();
-            row.put("orderId", e.key());
-            row.put("action", e.action());
-            row.put("from", e.from());
-            row.put("to", e.to());
-            row.put("result", e.result());
-            row.put("ts", e.epochMilli());
-            row.put("batchId", e.batchId());
-            moves.add(row);
+    /** 一条连接的全部可变状态（见类注释「每连接一份」）。 */
+    private final class Session implements SseStreamWriter.FrameSource {
+
+        /** 本批次号（空白 = 无）。 */
+        private final Supplier<String> batch;
+
+        /** 订单状态环「已读到哪」的游标；-1 = 还没读过（空环的 seq 从 0 起）。 */
+        private long lastEventSeq = -1L;
+
+        private Session(Supplier<String> batch) {
+            this.batch = batch;
         }
-        return moves;
+
+        /**
+         * 产一拍（**在流线程上被调用**，每条连接自己的那条）。
+         *
+         * @param tick 第几拍（从 0 起），原样回填
+         */
+        @Override
+        public Map<String, Object> frame(long tick) {
+            Map<String, Object> counts = orderDao.countOrderStates();
+            List<Map<String, Object>> orders = new ArrayList<>();
+            for (Map<String, Object> raw : orderDao.selectRecentOrders(RECENT_LIMIT)) {
+                orders.add(orderRow(raw));
+            }
+            List<Map<String, Object>> moves = drainMoves();
+
+            Map<String, Object> frame = new LinkedHashMap<>();
+            frame.put("seq", tick);
+            frame.put("ts", System.currentTimeMillis());
+            frame.put("counts", counts);
+            frame.put("orders", orders);
+            frame.put("moves", moves);
+            frame.put("moveCount", moves.size());
+            frame.put("batchCounts", batchCounts());
+            return frame;
+        }
+
+        /**
+         * **本批次**的五态计数（块 7 · commit 10 · Q3 路线 i）—— 与 {@code counts}（全表）**并列**，
+         * 口径互不覆盖：框内角标说全库，这一份说「这次演练落下的那批单现在各在哪个态」。
+         *
+         * <p>⚠️ <b>没有批次号 ⇒ 回 {@code null}，不回 0</b>：页面的口径是「没有批次画 {@code —}」，
+         * 而 {@code 0} 会被读成「本批次一单都没有」。两者在演示里长得完全不一样。
+         *
+         * <p>⚠️ 代价如实记：这是**每拍一条短查询**（{@code WHERE BatchId = ?} 走 {@code BatchId} 索引）。
+         * 连接数是「几个页面」而不是「几个请求」⇒ 这条查询的频次 = 打开的页面数 / 秒，可控。
+         */
+        private Map<String, Object> batchCounts() {
+            String id = batch == null ? null : batch.get();
+            if (id == null || id.isBlank()) {
+                return null;
+            }
+            return orderDao.countOrderStatesByBatch(id);
+        }
+
+        /** 本拍新发生的流转（{@code kind=transition}；illegal / async 属日志页，不进本页）。 */
+        private List<Map<String, Object>> drainMoves() {
+            List<Map<String, Object>> moves = new ArrayList<>();
+            for (OrderStateEvent e : orderMetrics.recentEvents()) {
+                if (e.seq() <= lastEventSeq) {
+                    continue;
+                }
+                lastEventSeq = e.seq();
+                if (!"transition".equals(e.kind())) {
+                    continue;
+                }
+                Map<String, Object> row = new LinkedHashMap<>();
+                row.put("orderId", e.key());
+                row.put("action", e.action());
+                row.put("from", e.from());
+                row.put("to", e.to());
+                row.put("result", e.result());
+                row.put("ts", e.epochMilli());
+                row.put("batchId", e.batchId());
+                moves.add(row);
+            }
+            return moves;
+        }
     }
 
     /** 一行订单 → 页面要的形状（状态 + 进度步数）。 */

@@ -29,7 +29,7 @@ import java.util.concurrent.atomic.AtomicLong;
  * 供 {@code POST /admin/observe/events/stream}（实时日志页）读。
  *
  * <h2>【为什么需要这一层：八个环各自「有界且会被覆盖」，而读的人只想要一条时间线】</h2>
- * 每个环都是 512 槽的**覆盖式**环形缓冲，读法只有「读最近一屏」。实时日志页要的是
+ * 每个环都是 2048 槽的**覆盖式**环形缓冲，读法只有「读最近一屏」。实时日志页要的是
  * 「**这一拍新发生的**」，于是需要一个「按源记住读到哪了」的游标 —— 那就是本类。
  * ⚠️ <b>本类不重写任何环、不改变它们的语义</b>：只读 {@code recentEvents()}（各环公开的
  * 只读快照），且**只过滤、不加工**业务字段（例外：下面「派生字段」一节）。
@@ -52,15 +52,25 @@ import java.util.concurrent.atomic.AtomicLong;
  *       本环回答「**发生了什么**」，把每一次未命中都染成黄/红会让整屏都是警告色。
  *       想读「防护拦了多少」请走指标（那是 {@link MetricsSnapshotService} 的活）。</li>
  *   <li><b>游标 + 合并环</b>：每个源记一个「已并入的最大 seq」（初始 -1 = 空环）；
- *       {@link #poll()} 把八环里更新的条目按源顺序并入本类的 512 槽环，
+ *       {@link #poll()} 把八环里更新的条目按源顺序并入本类的 2048 槽环，
  *       {@link #since(long)} 让调用方按「我上次读到哪」取增量。</li>
  * </ol>
  *
- * <h2>【⚠️ 边界：一拍内超过 512 条会丢——而且**丢的是最早的**，不是最新的】</h2>
- * 源环自己就是覆盖式的：一拍内某源写了 600 条，它的 {@code recentEvents()} 只答得出最后 512 条。
- * 本类**照抄**这个语义（合并环同样是 512 槽覆盖式，与八环同值），不另设统计口径。
- * 依据：@调度器/攻击引擎把每秒事件数打到 512 以上时，**逐条读已经不是正确的读法**
+ * <h2>【⚠️ 边界：一拍内超过 2048 条会丢——而且**丢的是最早的**，不是最新的】</h2>
+ * 源环自己就是覆盖式的：一拍内某源写了 3000 条，它的 {@code recentEvents()} 只答得出最后 2048 条。
+ * 本类**照抄**这个语义（合并环同样是 2048 槽覆盖式，与八环同值），不另设统计口径。
+ * 依据：@调度器/攻击引擎把每秒事件数打到 2048 以上时，**逐条读已经不是正确的读法**
  * （那要看 {@code mall.*} 的计数），日志页要的是**可读的过程**，不是完整审计流水。
+ *
+ * <p><b>拒收策略（块 7 · commit 10 · 裁决 2：容量 512 → 2048 + 环满监控）</b>：
+ * 「丢最老的」不变（覆盖式环不阻塞生产方、不报错、不重试 —— 这条**刻意不改**：本类是热路径上的
+ * 只读旁路，让它去背压业务线程会把观测变成故障源）。改的是**丢了要说**：两个丢失口各记各的数
+ * —— 源环 → 合并环 记成全局累计 {@link #droppedIngest()}，合并环 → 连接 随那次读返回
+ * （{@link Batch#dropped()}），由实时日志页上屏成帧里的 {@code dropped} / {@code droppedTotal}。
+ * 为什么两个口的口径不同，见类末「环满记账」一节。
+ * <p>容量取 2048 而不是更大的理由：它是**这一拍的缓冲**，不是流水账 —— 攻击引擎满档时每秒数千条，
+ * 再大的环也只是把「丢的时间点」往后挪；真正的取舍是让日志页在**满档下仍然可读**，
+ * 而「丢了多少」由计数如实交代（堆内存换算见提交说明，2048 槽 × 8 环的引用成本可忽略）。
  *
  * <h2>【派生字段：{@code seq} 是本类的，不是源的】</h2>
  * {@link ObservedEvent#seq()} 是**合并环自己的**单调序号（页面的「取增量」用它），
@@ -77,7 +87,7 @@ import java.util.concurrent.atomic.AtomicLong;
  *
  * <h2>【热路径代价】</h2>
  * {@link #poll()} 是**被流线程每秒调一次**的（不是在业务线程上）：八次
- * {@code recentEvents()}（各 ≤512 条、无锁）+ 一次 {@code synchronized}。
+ * {@code recentEvents()}（各 ≤2048 条、无锁）+ 一次 {@code synchronized}（+ 环满时两个计数自增）。
  * 业务侧（下单、扣库存……）**从不**调本类 ⇒ 本类不在任何临界区里。
  *
  * <h2>【块 7 · commit 8c：事件台账的出口，以及它的**已知边界**】</h2>
@@ -93,8 +103,8 @@ import java.util.concurrent.atomic.AtomicLong;
 @Component
 public class EventBroadcaster {
 
-    /** 合并环容量：与八个源环同值（512 = 2 的幂，位与定位；语义与取舍见类注释最后一节）。 */
-    private static final int EVENT_CAPACITY = 512;
+    /** 合并环容量：与八个源环同值（2048 = 2 的幂，位与定位；语义与取舍见类注释最后一节）。 */
+    private static final int EVENT_CAPACITY = 2048;
     private static final int EVENT_MASK = EVENT_CAPACITY - 1;
 
     /** 事件类别 —— 与《块 7 参考》§4.2 的八类一一对应（顺序 = 页面图例顺序）。 */
@@ -212,9 +222,9 @@ public class EventBroadcaster {
      * 把八个源环里**还没并入过**的事件并进合并环。由流线程每秒调一次。
      *
      * @return 本次并入的条数（页面「每秒事件速率」用的就是这个数 —— 它是**新增**而不是累计）。
-     *         ⚠️ **冷启动那一拍会偏大**：八个环各自可能已经攒了一屏（≤512 × 8），首拍一并并入。
+     *         ⚠️ **冷启动那一拍会偏大**：八个环各自可能已经攒了一屏（≤2048 × 8），首拍一并并入。
      *         这是**真实发生的事**（那一拍确实读到了这么多），不修正、不封顶 —— 页面按 60 秒窗口
-     *         显示，尖峰自己会滚出去；`since(-1)` 也只取合并环留得下的最后 512 条。
+     *         显示，尖峰自己会滚出去；`since(-1)` 也只取合并环留得下的最后 2048 条。
      */
     public synchronized int poll() {
         long before = cursor.get();
@@ -230,15 +240,31 @@ public class EventBroadcaster {
     }
 
     /**
-     * 取 {@code afterSeq} **之后**的所有事件（按 seq 升序）。
+     * 一次增量读的结果：这一批事件 + **这次读丢了多少条**（原因见 {@link #sinceWithLoss}）。
+     *
+     * <p>⚠️ {@code dropped} 是**调用方这次询问**造成的丢失，不是全局数：两条连接各问各的，
+     * 各自只看到自己跟丢的那部分（游标每连接一份，见类注释「每连接一份」）。
+     */
+    public record Batch(List<ObservedEvent> events, long dropped) {
+    }
+
+    /**
+     * 取 {@code afterSeq} **之后**的所有事件（按 seq 升序），连同这次读的丢失数。
      *
      * @param afterSeq 调用方上次读到的 seq；首次读给 {@code -1}（或任何 &lt; 0 的值）= 要一屏全量
-     * @return 未被覆盖的部分；被覆盖掉的**不报错也不补**（覆盖即淘汰，同源环）
+     * @return 未被覆盖的部分 + 被覆盖掉的条数；被覆盖掉的**不报错也不补**（覆盖即淘汰，同源环），
+     *         但**会如实报数**（这就是本类的「拒收策略」里「丢了要说」的那一半）
      */
-    public synchronized List<ObservedEvent> since(long afterSeq) {
+    public synchronized Batch sinceWithLoss(long afterSeq) {
         long next = cursor.get();
         long oldest = Math.max(0L, next - EVENT_CAPACITY);
         long from = Math.max(oldest, afterSeq + 1);
+        // ⚠️ 调用方上次读到 afterSeq，而环里最老的只剩 oldest ⇒ [afterSeq+1, oldest) 那一截
+        //    已经被覆盖，永远补不回来。**问一次只算一次**：调用方拿到帧后会把游标推到
+        //    latestSeq()（越过缺口），下一次问的 from 已经 ≥ oldest，不会重复计。
+        // ⚠️ afterSeq < 0 是**首帧一屏**（新开的连接要一屏全量），那是本类的语义而不是丢失，
+        //    不计 —— 否则每开一个页面都会凭空记下 2048 条「丢失」。
+        long dropped = afterSeq < 0L ? 0L : Math.max(0L, oldest - (afterSeq + 1L));
         List<ObservedEvent> snapshot = new ArrayList<>((int) Math.max(0L, next - from));
         for (long seq = from; seq < next; seq++) {
             ObservedEvent candidate = events[(int) (seq & EVENT_MASK)];
@@ -247,7 +273,15 @@ public class EventBroadcaster {
                 snapshot.add(candidate);
             }
         }
-        return snapshot;
+        return new Batch(snapshot, dropped);
+    }
+
+    /**
+     * 只看事件的那一份（{@link #sinceWithLoss} 的薄壳）。留着它是因为**大多数调用方不关心丢失数**
+     * —— 只有实时日志页把它上屏；测试与其余读法用它即可，读的是同一段临界区（结果逐条相同）。
+     */
+    public synchronized List<ObservedEvent> since(long afterSeq) {
+        return sinceWithLoss(afterSeq).events();
     }
 
     /** 合并环当前的「下一个 seq」减一；没有事件时返回 -1（与 {@link #since} 的入参同一坐标系）。 */
@@ -258,98 +292,146 @@ public class EventBroadcaster {
     // ==================== 并入：每个源一段，游标推进写在各自的段里 ====================
 
     private void ingestCache() {
-        long last = sourceSeq[Kind.CACHE.ordinal()];
+        long previous = sourceSeq[Kind.CACHE.ordinal()];
+        long last = previous;
+        long first = -1L;
         for (MallCacheEvent e : cacheMetrics.recentEvents()) {
+            if (first < 0L) {
+                first = e.seq();
+            }
             if (e.seq() <= last) {
                 continue;
             }
             add(e.epochMilli(), Kind.CACHE, fromCache(e), e.key(), e.seq(), "cache", str(e.key()), e.traceId(), e.batchId());
             last = e.seq();
         }
+        droppedIngest += missed(previous, first);
         sourceSeq[Kind.CACHE.ordinal()] = last;
     }
 
     private void ingestLock() {
-        long last = sourceSeq[Kind.LOCK.ordinal()];
+        long previous = sourceSeq[Kind.LOCK.ordinal()];
+        long last = previous;
+        long first = -1L;
         for (MallLockEvent e : lockMetrics.recentEvents()) {
+            if (first < 0L) {
+                first = e.seq();
+            }
             if (e.seq() <= last) {
                 continue;
             }
             add(e.epochMilli(), Kind.LOCK, fromLock(e), e.key(), e.seq(), "lock", str(e.key()), e.traceId(), e.batchId());
             last = e.seq();
         }
+        droppedIngest += missed(previous, first);
         sourceSeq[Kind.LOCK.ordinal()] = last;
     }
 
     private void ingestOrder() {
-        long last = sourceSeq[Kind.ORDER.ordinal()];
+        long previous = sourceSeq[Kind.ORDER.ordinal()];
+        long last = previous;
+        long first = -1L;
         for (OrderStateEvent e : orderMetrics.recentEvents()) {
+            if (first < 0L) {
+                first = e.seq();
+            }
             if (e.seq() <= last) {
                 continue;
             }
             add(e.epochMilli(), Kind.ORDER, fromOrder(e), e.key(), e.seq(), "order", str(e.key()), e.traceId(), e.batchId());
             last = e.seq();
         }
+        droppedIngest += missed(previous, first);
         sourceSeq[Kind.ORDER.ordinal()] = last;
     }
 
     private void ingestStock() {
-        long last = sourceSeq[Kind.STOCK.ordinal()];
+        long previous = sourceSeq[Kind.STOCK.ordinal()];
+        long last = previous;
+        long first = -1L;
         for (StockEvent e : stockMetrics.recentEvents()) {
+            if (first < 0L) {
+                first = e.seq();
+            }
             if (e.seq() <= last) {
                 continue;
             }
             add(e.epochMilli(), Kind.STOCK, fromStock(e), e.skuCode(), e.seq(), "sku", str(e.skuCode()), e.traceId(), e.batchId());
             last = e.seq();
         }
+        droppedIngest += missed(previous, first);
         sourceSeq[Kind.STOCK.ordinal()] = last;
     }
 
     private void ingestAudit() {
-        long last = sourceSeq[Kind.AUDIT.ordinal()];
+        long previous = sourceSeq[Kind.AUDIT.ordinal()];
+        long last = previous;
+        long first = -1L;
         for (AuditEvent e : auditMetrics.recentEvents()) {
+            if (first < 0L) {
+                first = e.seq();
+            }
             if (e.seq() <= last) {
                 continue;
             }
             add(e.epochMilli(), Kind.AUDIT, fromAudit(e), e.actor(), e.seq(), str(e.targetType()), str(e.targetId()), e.traceId(), e.batchId());
             last = e.seq();
         }
+        droppedIngest += missed(previous, first);
         sourceSeq[Kind.AUDIT.ordinal()] = last;
     }
 
     private void ingestNotify() {
-        long last = sourceSeq[Kind.NOTIFY.ordinal()];
+        long previous = sourceSeq[Kind.NOTIFY.ordinal()];
+        long last = previous;
+        long first = -1L;
         for (NotifyEvent e : notifyMetrics.recentEvents()) {
+            if (first < 0L) {
+                first = e.seq();
+            }
             if (e.seq() <= last) {
                 continue;
             }
             add(e.epochMilli(), Kind.NOTIFY, fromNotify(e), e.key(), e.seq(), "notify", str(e.key()), e.traceId(), e.batchId());
             last = e.seq();
         }
+        droppedIngest += missed(previous, first);
         sourceSeq[Kind.NOTIFY.ordinal()] = last;
     }
 
     private void ingestSensitive() {
-        long last = sourceSeq[Kind.SENSITIVE.ordinal()];
+        long previous = sourceSeq[Kind.SENSITIVE.ordinal()];
+        long last = previous;
+        long first = -1L;
         for (SensitiveEvent e : sensitiveMetrics.recentEvents()) {
+            if (first < 0L) {
+                first = e.seq();
+            }
             if (e.seq() <= last) {
                 continue;
             }
             add(e.epochMilli(), Kind.SENSITIVE, fromSensitive(e), e.scene(), e.seq(), "sensitive", str(e.words()), e.traceId(), e.batchId());
             last = e.seq();
         }
+        droppedIngest += missed(previous, first);
         sourceSeq[Kind.SENSITIVE.ordinal()] = last;
     }
 
     private void ingestIdentity() {
-        long last = sourceSeq[Kind.IDENTITY.ordinal()];
+        long previous = sourceSeq[Kind.IDENTITY.ordinal()];
+        long last = previous;
+        long first = -1L;
         for (IdentityEvent e : identityMetrics.recentEvents()) {
+            if (first < 0L) {
+                first = e.seq();
+            }
             if (e.seq() <= last) {
                 continue;
             }
             add(e.epochMilli(), Kind.IDENTITY, fromIdentity(e), e.subject(), e.seq(), "identity", str(e.path()), e.traceId(), e.batchId());
             last = e.seq();
         }
+        droppedIngest += missed(previous, first);
         sourceSeq[Kind.IDENTITY.ordinal()] = last;
     }
 
@@ -584,5 +666,57 @@ public class EventBroadcaster {
      * 不写 {@code "null"} 字面量）；否则转成字符串。 */
     private static String str(Object value) {
         return value == null ? null : String.valueOf(value);
+    }
+
+    // ==================== 环满记账（块 7 · commit 10 · 裁决 2） ====================
+    //
+    // 【为什么要记账】覆盖式环的**拒收策略就是「丢最老的」**（不阻塞生产方、不报错、不重试）。
+    // 这是本类一直以来的语义（见类注释「边界」一节），但**丢了而不说**会让页面看起来一切正常
+    // —— 而「看起来正常」正是本块最不想要的那种失效。所以：丢可以，但**要留下数**。
+    //
+    // 【丢失只可能发生在两个消费口，两个口各记各的 —— 且**口径不同**】
+    //   ① 源环 → 合并环（在八个 ingestXxx 里）：源环一拍写了 3000 条，它的 recentEvents()
+    //      只答得出最后 2048 条 ⇒ 中间那截就没了。**这是全进程的现象**（八个源环是单例、
+    //      与谁在观看无关）⇒ 记成**全局累计** {@link #droppedIngest()}。
+    //   ② 合并环 → 调用方（在 {@link #sinceWithLoss} 里）：调用方上次读到 afterSeq，再读时
+    //      那一截已经被后来的事件覆盖。**这是「每连接一份」的现象**（游标本身就每连接一份）
+    //      ⇒ 不作为全局数返回，而是**随那一次读一起返回**（{@link Batch#dropped()}），
+    //      由调用方自己累计成「我这条流丢了多少」。理由：做成全局数就得回答「这条连接丢的
+    //      算不算那条连接头上」，而那个问题没有正确答案 —— 各自算各自的，谁也不欠谁。
+    //   起点（业务侧写进源环）**不记**：源环的 add 是「写进环形数组」，写进去就一定在环里待过，
+    //   它的丢失只会在 ① 处被看见。记起点会让同一条事件被记两次。
+    //
+    // 【语义】{@code droppedIngest} 是「本进程起来之后」的累计（重启归零，同合并环里的 seq）。
+    // ⚠️ 它**不区分是被谁丢的**，也不代表日志页在丢：源环溢出时页面的连接可能正好没问题
+    //    （或者压根没人开页面）。要看「我这条流跟丢了没有」，读帧里的 {@code dropped} /
+    //    {@code droppedTotal}（来自 ②），不要把这两个数当同一个东西。
+
+    /** 源环 → 合并环 一路丢掉的累计条数（八个源环合计，全进程口径，见上面那段注释 ①）。 */
+    private long droppedIngest;
+
+    /**
+     * 「源环的窗口 [previous, 现在] 与本次读到的窗口之间，隔了多少条」。
+     *
+     * <p>读法：{@code previous} = 上次并入到的源 seq；{@code firstAvailable} = 本次
+     * {@code recentEvents()} 里**最老**的那条的 seq（空环给 -1）。两者之间的缺口
+     * = {@code firstAvailable - previous - 1}。环没被覆盖时 {@code firstAvailable == previous + 1}
+     * ⇒ 差 0。首拍（{@code previous == -1}，环里可能已攒了一屏）按同一个式子算，
+     * 那次「丢」是**冷启动前**发生的（本类还没开始并），如实计入而不是抹掉。
+     */
+    private static long missed(long previous, long firstAvailable) {
+        if (firstAvailable < 0L) {
+            return 0L;   // 环是空的：什么也没读到，谈不上丢
+        }
+        return Math.max(0L, firstAvailable - previous - 1L);
+    }
+
+    /**
+     * 源环 → 合并环 一路丢掉的累计条数（见类末「环满记账」一节 ①，口径说明也在那里）。
+     *
+     * <p>⚠️ 必须 {@code synchronized}：它写在 {@link #poll()} 的那个临界区里，而读的人
+     * （流线程）在临界区外。
+     */
+    public synchronized long droppedIngest() {
+        return droppedIngest;
     }
 }
