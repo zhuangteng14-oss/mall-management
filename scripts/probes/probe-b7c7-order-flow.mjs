@@ -134,6 +134,13 @@ await b.send('Page.addScriptToEvaluateOnNewDocument', {
 //    只写 `innerText` 会在状态机那几句上炸 `Cannot read properties of undefined`（第一版实测）。
 const TEXT = (sel) => `[...document.querySelectorAll('${sel}')].map(e => (e.innerText ?? e.textContent ?? '').trim())`
 
+// ⚠️ `.a-of-id` **自 ab6f71d（块 7 收口 · 中文标签层）起带一个 `#` 前缀** —— 页面显示的是 `#ORD-002`。
+//    本探针写在 033d62a（commit 7），那时 DOM 里还没有 `#` ⇒ 下面 ⑤ / ⑧-闪行 / ⑩ 这几条**从 ab6f71d
+//    起就一直是红的**（`git log -S` 定过位：前缀是 ab6f71d 引入的，与 commit 10 无关）。
+//    就地剥掉这个装饰前缀，而不是把 `#` 抄进每一条期望值里 —— 抄进去等于把「显示上怎么写」升格成契约，
+//    下次谁再调一次样式，探针又跟着红一遍。
+const TEXT_ID = (sel) => `[...document.querySelectorAll('${sel}')].map(e => (e.innerText ?? e.textContent ?? '').trim().replace(/^#/, ''))`
+
 try {
   // ── 导航 + 轮询到挂载（首次访问会触发 webpack 按需编译，故用轮询而不是固定 sleep）──
   await b.send('Page.navigate', { url: `${BASE}/${ROUTE}` })
@@ -177,7 +184,7 @@ try {
   ok('④ 环图中心 = 订单总数 186', String(center).trim() === '186', center)
 
   // ── ⑤ 列表 4 行（新单 ORD-004 排最前）──────────────────────────────────────
-  const ids = await b.evalJS(TEXT('.a-of-row .a-of-id'))
+  const ids = await b.evalJS(TEXT_ID('.a-of-row .a-of-id'))
   ok('⑤ 列表 4 行，新单 ORD-004 插到最前',
     JSON.stringify(ids) === JSON.stringify(['ORD-004', 'ORD-001', 'ORD-002', 'ORD-003']), ids)
 
@@ -194,7 +201,7 @@ try {
   // ── ⑧ 实时跳动：节点脉冲 + 行闪 ────────────────────────────────────────────
   const pulse = await b.evalJS(TEXT('.a-of-nodes .is-pulse .a-of-box-t'))
   ok('⑧ 脉冲的是「待收货」节点', JSON.stringify(pulse) === JSON.stringify(['待收货']), pulse)
-  const jumps = await b.evalJS(TEXT('.a-of-row.is-jump .a-of-id'))
+  const jumps = await b.evalJS(TEXT_ID('.a-of-row.is-jump .a-of-id'))
   ok('⑧ 闪的是 ORD-002（它这一拍从待发货跳到待收货）', JSON.stringify(jumps) === JSON.stringify(['ORD-002']), jumps)
 
   // ── ⑨ 状态机 5 节点 ───────────────────────────────────────────────────────
@@ -207,14 +214,14 @@ try {
 
   // ── ⑩ 点 ORD-002 → 时间线弹层 ──────────────────────────────────────────────
   await b.evalJS(`(() => {
-    const row = [...document.querySelectorAll('.a-of-row')].find(r => r.querySelector('.a-of-id').innerText.trim() === 'ORD-002')
+    const row = [...document.querySelectorAll('.a-of-row')].find(r => r.querySelector('.a-of-id').innerText.trim().replace(/^#/, '') === 'ORD-002')
     row.click(); return true
   })()`)
   await sleep(300)
   const modalOpen = await b.evalJS(`!!document.querySelector('.a-of-modal')`)
   ok('⑩ 点一行弹出时间线弹层', modalOpen === true)
   const modalId = await b.evalJS(`(document.querySelector('.a-of-modal-hd .a-of-id') || {}).innerText || ''`)
-  ok('⑩ 弹层标题 = ORD-002', String(modalId).trim() === 'ORD-002', modalId)
+  ok('⑩ 弹层标题 = ORD-002', String(modalId).trim().replace(/^#/, '') === 'ORD-002', modalId)
   const tl = await b.evalJS(`[...document.querySelectorAll('.a-of-tl-i')].map(e => e.innerText.replace(/\\s+/g,' ').trim())`)
   ok('⑩ 时间线 2 项：创建 + 本会话捕获的「待发货 → 待收货」',
     tl.length === 2 && tl[0].includes('创建') && tl[1].includes('待发货') && tl[1].includes('待收货'), tl)
