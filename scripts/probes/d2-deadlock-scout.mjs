@@ -12,12 +12,27 @@
  *         （最后那条 goods 只在「DowngradeState='frozen' 且 FreezeUntil 未过」时才走到 ——
  *           见 MerchantApplicationService.restoreIfFrozenWithinWindow；实测未冻结时用不发生）
  *   B（快起手）POST /admin/accounts/downgrade/relist   username=__dlprobe__
- *       → MerchantDowngradeService.relist（@Transactional，:267/:268）
+ *       → MerchantDowngradeService.relist
  *         写序：**goods** → **user**
  *   ⇒ {goods, user} 两表**反向**。两个事务同时持着对方要的那把，即构成环。
- *   ⚠️ 两条写序都是从源码静态读出来的，不是猜的；`goods` / `user` 两张表在库上
- *      **只有 PRIMARY KEY**（`goods` 无 MerchantId 索引、`user` 无 merchantid 索引）
- *      ⇒ 两条 UPDATE 都是**全表扫描 + 全表加锁**，争用窗口因此不依赖运气。
+ *   ⚠️ 两条写序都是从源码静态读出来的，不是猜的。
+ *
+ *   ⚠️ **锁范围（2026-10-15 阶段 2b 订正了两处，两处都是实测推翻推断）**：
+ *      · `goods` 侧：`relistAllByMerchant` 那条 UPDATE 原先**无索引可走** ⇒ 全表扫 + 把扫到的
+ *        每一行都加 X 锁（INNODB STATUS 里该事务持 **49 row lock(s)**）。阶段 2b 落了
+ *        `idx_goods_merchant (MerchantId)`（Migration ⑳）之后，它只锁命中行
+ *        —— 但**环没拆**（成因是访问顺序相反，与锁几行无关）：加索引后重跑仍是 48/48 轮。
+ *      · `user` 侧：原先记的是「两表都只有主键、都全表扫」，**这一条是推断且是错的**。
+ *        `UPDATE user ... WHERE username = ?` 走的是 **PRIMARY**（`user` 的主键**就是** `username`）
+ *        ⇒ 它本来就只锁 1 行。**49 行锁全部来自 `goods` 侧**。
+ *      ⇒ 所以 `user.merchantid` 的同类索引至今**没加**（裁定「留实测后再定」，实测说不必）。
+ *
+ *   ⚠️ **阶段 2b 之后跑本探针，判据怎么读**（变了，别照旧读）：
+ *      · 判据 ①（1213 增量）**照旧非零** —— 死锁仍然发生（环还在）；
+ *      · 判据 ③（HTTP 5xx）**应该为 0** —— `relist` 现在有死锁重试（`RetryTemplate` 在外、
+ *        事务在内，最多 3 次尝试），每次都兜住。⇒ **退出码仍是 0**（① 非零即可）。
+ *      2026-10-15 实测：1213 增量 141、5xx **0**、`retry_success` 计数 **141**（逐一对上）。
+ *      三份对照与因果闭合见 docs/agent/evidence/c3-block7/d2-deadlock-scout-with-retry.txt。
  *
  * 【为什么每轮打 K 个 B】A 要过约 5 条语句才碰 user 行，B 第 2 条语句就锁 goods。
  *   K 个 B 排队在 goods 上 ⇒ goods 被连续持有一段时间；A 拿到 user 行后在 goods 上排队，
@@ -32,7 +47,8 @@
  * 【判据（三条，任一条非零即「真死了」）】
  *   ① MySQL error 1213（ER_LOCK_DEADLOCK）在 performance_schema 里的计数增量
  *   ② SHOW ENGINE INNODB STATUS 的 LATEST DETECTED DEADLOCK 段换成**本场景**（含 user/goods/merchant_application）
- *   ③ HTTP 5xx（实测：Spring 把 MySQL 1213 翻成 **CannotAcquireLockException**，
+ *   ③ HTTP 5xx（⚠️ **阶段 2b 起这条应为 0** —— 重试兜住了；见下面那段。原先它和 ① 同量级：
+ *      139 次 1213 ⇔ 139 次 5xx，一一对应。实测：Spring 把 MySQL 1213 翻成 **CannotAcquireLockException**，
  *      root cause `MySQLTransactionRollbackException: Deadlock found when trying to
  *      get lock`；**不是** DeadlockLoserDataAccessException —— 后者在本仓 167 条现场里 0 次）
  *

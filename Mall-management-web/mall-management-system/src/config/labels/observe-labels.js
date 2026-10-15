@@ -283,31 +283,34 @@ export const PROTECTION_LABEL = {
 }
 
 /**
- * **本段没有真闸**的两枚 —— 面板必须把它们画成**不可开关**（标灰 + tooltip）。D 段 · commit 2。
+ * **本段没有真闸**的那一枚 —— 面板必须把它画成**不可开关**（标灰 + tooltip）。
  *
- * ⚠️ 这是后端 `protect/ProtectionGate` 的**镜像**，三处逐字对应、缺一不可：
- *    `WIRED_KEYS = List.of("rateLimit","circuitBreak","poolIsolation")`（真有闸的三个）
- *    与 `TD_ONLY_KEY = "retry"` / `RECORD_ONLY_KEY = "degrade"`（各自一个）。
+ * ⚠️ 这是后端 `protect/ProtectionGate` 的**镜像**，逐字对应、缺一不可：
+ *    `WIRED_KEYS = List.of("rateLimit","circuitBreak","retry","poolIsolation")`（真有闸的四个）
+ *    与 `RECORD_ONLY_KEY = "degrade"`（那一枚）。
  *    后端那份是**判据的唯一出处**（`ProtectionGate.wired(key)` 可断言）；前端这份只用于
  *    「开跑之前就把话说明白」——那一刻没有结果可读。
  *
- * ⚠️ 【口径：本段是 **3 键接闸 + 1 键登记 TD + 1 键记录位**】
- *    写成「4 键已接闸」或「5 键里 4 键已接闸」都是错的（用户 2026-10-15 逐字纠正过）。
- *    两枚关掉的原因**不同**，所以 tooltip 是两句话，不是一句话：
+ * ⚠️ 【口径：本段是 **4 键接闸 + 1 键记录位**（2026-10-15 · D 段 · 阶段 2b 起）】
+ *    阶段 2b 之前是「3 键接闸 + 1 键登记 TD + 1 键记录位」，`retry` 只在 TD-74 挂了个名。
+ *    **用户 2026-10-15 逐字纠正过「4 键已接闸」这种写法** —— 那时它确实是错的（真的只有 3 键）；
+ *    当天在拿到死锁实测（48/48 轮复现、149 次 `ER_LOCK_DEADLOCK`）之后裁定**接闸 3 → 4**，
+ *    `retry` 落进 `MerchantDowngradeService.relist` 的重试策略，这句话才第一次成为事实。
+ *    ⇒ 现在**只剩一枚**关掉，理由只有一句：
  *      · `degrade` 不是「没实现」，是**系统本来就没有这一层**（缓存 L2 回落 / 锁 fail-open /
- *        MQ 缺席 / 审计 fail-open 都是固有行为，不由这个开关管）⇒ 它是**记录位**；
- *      · `retry` 是**本段不落码**：落点与触发条件都已定（TD-74），等实测证据。
+ *        MQ 缺席 / 审计 fail-open 都是固有行为，不由这个开关管）⇒ 它是**记录位**。
+ *    ⚠️ `retry` 那一枚**已经从这份清单里移出**：它现在**能拨且有事发生**，
+ *    留在清单里会被面板画成标灰 = 一个「能拨却什么都不发生」的死控件 —— 用户明令禁止。
  *
  * ⚠️ 【为什么是「标灰 + tooltip」而不是「藏起来」】藏起来会让「面板上少了一枚」与
  *    「这一笔忘了做」读起来一样；画成一个**能拨但什么也不发生**的开关则是**死控件**——
  *    用户明令禁止。标灰 + 说清理由，是唯一既不骗人也不留白的那一种。
  */
-export const PROTECTIONS_NOT_WIRED = ['degrade', 'retry']
+export const PROTECTIONS_NOT_WIRED = ['degrade']
 
-/** `PROTECTIONS_NOT_WIRED` 里每个 key 的 tooltip（两枚的理由不同，逐枚给）。 */
+/** `PROTECTIONS_NOT_WIRED` 里每个 key 的 tooltip（哪一枚标灰、为什么，都从这里读）。 */
 export const PROTECTION_NOT_WIRED_TIP = {
   degrade: '记录位，不可开关，系统固有 fail-open 设计',
-  retry: '本段不落码：只登记 TD-74（有死锁实测证据后再落 GoodsService 三处写方法，本段一行重试代码都没有）',
 }
 
 /**
@@ -368,7 +371,7 @@ export function protectionWired(key) {
   return !PROTECTIONS_NOT_WIRED.includes(key)
 }
 
-/** 取「没真闸」那两枚的 tooltip（认不出回落空串 —— 有闸的开关不该有提示，空串即「不显示」）。 */
+/** 取「没真闸」那些枚的 tooltip（认不出回落空串 —— 有闸的开关不该有提示，空串即「不显示」）。 */
 export function protectionNotWiredTip(key) {
   return Object.prototype.hasOwnProperty.call(PROTECTION_NOT_WIRED_TIP, key)
     ? PROTECTION_NOT_WIRED_TIP[key]

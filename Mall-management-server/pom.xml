@@ -186,6 +186,18 @@
             <artifactId>resilience4j-spring-boot3</artifactId>
             <version>2.3.0</version>
         </dependency>
+
+        <!-- 死锁重试（D 段 · 阶段 2b · A 档 A5）：MerchantDowngradeService.relist 用编程式
+             RetryTemplate 兜住 MySQL 1213（不是注解 @Retryable —— 理由见那处 relist 的 javadoc：
+             重试要接 ProtectionGate 的 retry 开关，编译期注解读不到运行时开关）。
+             ⚠️ 版本由 Boot 3.4.5 的 spring-boot-dependencies 给（2026-10-15 实测：该 pom 里
+             grep spring-retry 有 dependencyManagement 命中），不写 version。
+             ⚠️ 追加在依赖段末尾是刻意的：pom.xml 被全仓以 file:行号 互引，插在中间会让其后
+             所有引用集体偏移（同上面 amqp / aop / resilience4j 那一族的处置）。 -->
+        <dependency>
+            <groupId>org.springframework.retry</groupId>
+            <artifactId>spring-retry</artifactId>
+        </dependency>
     </dependencies>
 
     <build>

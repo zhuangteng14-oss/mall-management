@@ -107,13 +107,16 @@
 
       <!-- ── ③c 防护 / 注入开关（丁 · commit 10c；D 段 · commit 2 起分化）────────────
            ⚠️ 【D 段起：这五枚**不再一样**，逐档说清】后端 `ProtectionGate` 的口径是
-              **3 键接闸（限流 / 熔断 / 分池）+ 1 键登记 TD（重试）+ 1 键记录位（降级）**：
-                · 有闸的三枚（限流 / 熔断 / 分池）—— **拨了真的改读数**，这就是 D 段的演示点；
-                · `retry` / `degrade` 两枚 —— 面板上**标灰 + 不可开关 + tooltip 说理由**
-                  （理由见 `PROTECTIONS_NOT_WIRED` / `PROTECTION_NOT_WIRED_TIP`，两枚不同）。
+              **4 键接闸（限流 / 熔断 / 重试 / 分池）+ 1 键记录位（降级）**
+              （2026-10-15 · 阶段 2b 起。此前是「3 键接闸 + 1 键登记 TD（重试）+ 1 键记录位」，
+              阶段 2b 把死锁重试真的落进了 `MerchantDowngradeService.relist`）：
+                · 有闸的四枚 —— **拨了真的改读数**，这就是 D 段的演示点
+                  （`retry` 那一枚演的是「同一个死锁：开着答 200、关着答 500」）；
+                · `degrade` 一枚 —— 面板上**标灰 + 不可开关 + tooltip 说理由**
+                  （理由见 `PROTECTIONS_NOT_WIRED` / `PROTECTION_NOT_WIRED_TIP`）。
               ⚠️ **禁止死控件**（用户 2026-10-15 逐字）：能点但无效果的开关一律不允许 ⇒
-              两枚一律 `disabled`（不是「拨得动但标未接通」——那是注入那组的处置，
-              那组**真的会进引擎并写进记录**，这两枚不会改变任何读数，形状不同就该长得不同）。
+              这一枚一律 `disabled`（不是「拨得动但标未接通」——那是注入那组的处置，
+              那组**真的会进引擎并写进记录**，这一枚不会改变任何读数，形状不同就该长得不同）。
            ⚠️ 五枚都照旧进 `drill_record`（后端 `AttackEngine.buildScenarioJson` 写进 `Result.Engine`）
               ⇒ 「这一轮到底是按哪套开关跑的」事后可复现仍是它们的价值之一。
            ⚠️ 缺省 = 防护**全开** / 注入**全关**（后端白名单：表外的 key 一律 400，不静默忽略）。
@@ -121,7 +124,7 @@
               「收了但没实现」如实列进结果的 `Engine.InjectionsNotWired`（见 `INJECTIONS_NOT_WIRED`）。 -->
       <h3 class="a-sub">
         防护开关
-        <span class="a-subn">默认全开 · 限流 / 熔断 / 分池已接闸，改读数；重试与降级不可开关</span>
+        <span class="a-subn">默认全开 · 限流 / 熔断 / 重试 / 分池已接闸，改读数；降级不可开关</span>
       </h3>
       <div class="a-switches">
         <button
@@ -507,9 +510,9 @@
   【commit 10c 给本页加的三样东西（丁 · 开关面板）】
     · **压力档位**（120 / 400 / 拉满）—— 值就是 `targetQps`；与「总并发数」是两把各管各的旋钮，
       见 `TIERS` 的注释（「拉满」给的是**不限速**，854 是本机实测的参考量级，不是设出来的目标）；
-    · **5 个防护开关 + 3 个注入开关** —— 防护那组自 **D 段 commit 2** 起**三键真生效**（限流 /
-      熔断 / 分池），另两枚（`retry` 见 TD-74 / `degrade` 只作记录位）**画成不可开关** ⇒ 拨得动的
-      那些会改读数、拨不动的那两枚不下发；两组都进 `drill_record` ⇒ 「这一轮按哪套开关跑的」事后可复现；
+    · **5 个防护开关 + 3 个注入开关** —— 防护那组自 **D 段 commit 2** 起有真闸、**阶段 2b 起四键**
+      （限流 / 熔断 / 重试 / 分池真生效），只剩 `degrade`（记录位）**画成不可开关** ⇒ 拨得动的
+      那些会改读数、拨不动的那一枚不下发；两组都进 `drill_record` ⇒ 「这一轮按哪套开关跑的」事后可复现；
     · **`[暂停]`** —— 走 `/attack/stop`，语义是「**停止派发 + 排空在途**」而不是掐断：本轮不再发
       新请求，在途那批走 3 秒宽限，等 `/run` 的**同一个** await 几秒内拿到结果
       （`Engine.Stopped=true`）⇒ 本页不换通路、不加超时。
@@ -672,7 +675,7 @@ function setWeight(key, v) {
 const wired = (key) => !INJECTIONS_NOT_WIRED.includes(key)
 
 /**
- * `retry` / `degrade` 两枚**有没有真闸** —— 判据取自 `PROTECTIONS_NOT_WIRED`（后端
+ * 防护开关**有没有真闸**（阶段 2b 起只剩 `degrade` 这一枚）—— 判据取自 `PROTECTIONS_NOT_WIRED`（后端
  * `ProtectionGate.WIRED_KEYS` 的镜像，见 `observe-labels.js` 那张表）。页面**不自己判断**
  * 哪几枚没接闸（那是后端事实，前端写第二遍迟早对不上）。⚠️ 与 `wired(k)` 是**两个不同的判据**，
  * 别合并：那个说的是「这一路**注入**接通了没有」，这个说的是「这枚**防护开关**接了闸没有」。
@@ -680,7 +683,7 @@ const wired = (key) => !INJECTIONS_NOT_WIRED.includes(key)
 const protectionOn = (key) => protectionWired(key)
 
 /** 拨一枚防护开关。写法与 `EventLog.vue#toggleKind` 同款（`new Set(旧)` → 整体替换）。
- *  ⚠️ 没接闸的两枚**直接不响应**（按钮已经是 `disabled`，这里再兜一道）：这条守卫是
+ *  ⚠️ 没接闸的那些枚**直接不响应**（按钮已经是 `disabled`，这里再兜一道）：这条守卫是
  *  「禁止死控件」的**落点** —— 让它在代码里**不可能**被拨动，而不是只在模板上画灰
  *  （模板一改就会漏，比如将来有人把它挪进一个 `v-if` 分支里）。 */
 function toggleProtection(key) {
@@ -1534,11 +1537,11 @@ onBeforeUnmount(() => {
   border-radius: var(--r1);
   padding: 0 var(--s1);
 }
-/* 「不可开关」的那两枚防护开关（D 段 · commit 2：`retry` = 本段不落码只登记 TD，
-   `degrade` = 记录位）—— **标灰 + 虚线边 + 中性色角标**。
+/* 「不可开关」的那一枚防护开关（D 段 · commit 2 立案、阶段 2b 起只剩
+   `degrade` = 记录位 —— `retry` 已接闸、不再是这一类）—— **标灰 + 虚线边 + 中性色角标**。
    ⚠️ 与上面 `.a-sw.is-na`（注入的「未接通」）**不是同一件事**，故另起两条类名，不共用：
    那个说的是「接通了没有」（**拨得动**，拨动会进记录）；这个说的是「**能不能拨**」（不可开关）。
-   共用一条会让两枚防护开关看起来「也能拨」，而它们的模板 `disabled` 是常开的。 */
+   共用一条会让防护开关看起来「也能拨」，而它们的模板 `disabled` 是常开的。 */
 .a-sw.is-locked {
   border-style: dashed;
   background: transparent;

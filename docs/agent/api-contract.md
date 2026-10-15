@@ -796,10 +796,10 @@
 | 入参 | 形状 | 缺省 | 语义 | 实现状态 |
 |---|---|---|---|---|
 | `targetQps` | 数值串 | `0` = **不限速** | 目标 QPS（`AttackEngine.Pacer` 按它节流，`AttackEngine:390`） | ✅ 已实现 |
-| `protections` | JSON 数组串 | **全开**（`rateLimit` / `circuitBreak` / `degrade` / `retry` / `poolIsolation`） | 面板上「防护开/关」的载体 | ✅ **已接闸**（**3 键 + 1 键 TD + 1 键记录位** —— 见 `#api-i-3`；后两枚在面板上**不可开关**；入参口径见 `AttackController:111`） |
+| `protections` | JSON 数组串 | **全开**（`rateLimit` / `circuitBreak` / `degrade` / `retry` / `poolIsolation`） | 面板上「防护开/关」的载体 | ✅ **已接闸**（**4 键 + 1 键记录位**，阶段 2b 起 —— 见 `#api-i-3`；只剩 `degrade` 在面板上**不可开关**；入参口径见 `AttackController:111`） |
 | `injections` | JSON 数组串 | **全关**（`redisDown` / `mqDown` / `dbSlow`） | 故障注入开关 | ⚠️ 只有 `redisDown` **真接通**（`AttackController:112`） |
 
-⇒ `protections` **现在真的会改读数**：勾中的开着、没勾的一律关掉，跑完复位全开（`DrillRecordService` 的 `finally`）。⚠️ 但**不是五枚都有闸** —— `retry`（本段不落码，TD-74）与 `degrade`（记录位）**拨了也没有对应行为**，故面板把它们画成不可开关（见 `#api-i-4`）。`injections` 里仍只有 `redisDown` 会真起作用。这一条是**如实登记**，别读成「五枚全接通了」。
+⇒ `protections` **现在真的会改读数**：勾中的开着、没勾的一律关掉，跑完复位全开（`DrillRecordService` 的 `finally`）。⚠️ 但**不是五枚都有闸** —— 只有 `degrade`（记录位）**拨了也没有对应行为**，故面板把它画成不可开关（见 `#api-i-4`）；「五枚全有闸」这句话**本段仍不成立**。`injections` 里仍只有 `redisDown` 会真起作用。这一条是**如实登记**。
 ⚠️ **`targetQps` 与 `concurrency` 测的不是同一件事**：前者是**发射速率**（每秒发多少个），后者是**同时在途上限**（`permits = min(concurrency, in-flight-cap)`）。「档位 120 / 400 / 拉满」调的是前者。
 
 ⚠️ **五条端点一律 `@RequestParam`（+ 一个 JSON 串参数），不用 `@RequestBody`** —— 三条理由任一条都成立：① 全仓管理端写端点**全部**收 `@RequestParam`、前端一律 `URLSearchParams`（`http.js#buildInit` 把 POST 钉成 urlencoded）；② 否则**前端发不出去**（`http.post` 没有自定义头的口子 ⇒ JSON body 到不了 `@RequestBody`）；③ 「勾选 + 权重」这种嵌套结构沿用 `orderAdd` 的既有先例（一个 JSON **数组串**参数，同 `Items`）。
@@ -932,36 +932,36 @@
 | 项 | 口径 |
 |---|---|
 | 在哪儿 | SSE 帧 `counts` 里多一个键 `protection`（**8 → 9**）；`EventLog.vue` 的过滤类自动多一格（`v-for="k in KINDS"`） |
-| 记什么 | **防护层自己做了什么**：限流拦下 / 熔断开路 / 熔断半开 / 熔断恢复 / 池挤出 |
-| 指标 | `mall.protection.events{protection=…, result=…}` —— `protection` 五值、`result` 五档（`blocked` / `opened` / `half_open` / `closed` / `shed`），**两列都有界**；⚠️ `scope` 与 `detail` **绝不进 tag**（`detail` 是自由文本，含路径与异常类名） |
+| 记什么 | **防护层自己做了什么**：限流拦下 / 熔断开路 / 熔断半开 / 熔断恢复 / 池挤出 / **死锁重试成功 · 重试又失败**（后两档阶段 2b 起） |
+| 指标 | `mall.protection.events{protection=…, result=…}` —— `protection` 五值、`result` **七**档（`blocked` / `opened` / `half_open` / `closed` / `shed` / `retry_success` / `retry_failed`），**两列都有界**；⚠️ `scope` 与 `detail` **绝不进 tag**（`detail` 是自由文本，含路径与异常类名） |
 | 明说不埋的 | **不埋「放行了多少」** —— 那是「到达量 − 拦下量」的派生量，到达量由 `http.server.requests` 回答（规范第 6 条：可派生的值不重复埋点） |
-| 三处写入点 | `InboundRateLimitInterceptor`（429）· `ProtectionMetricsBinder`（订阅 `CircuitBreaker` 的状态事件流）· `ObservePoolConfig` 的拒绝策略（池挤出） |
+| 四处写入点 | `InboundRateLimitInterceptor`（429）· `ProtectionMetricsBinder`（订阅 `CircuitBreaker` 的状态事件流）· `ObservePoolConfig` 的拒绝策略（池挤出）· `MerchantDowngradeService` 的重试回调（`retry_success` / `retry_failed`，阶段 2b 起 —— 分母刻意只算「真重试过」的那些次） |
 | ⚠️ 半开恢复**为什么有记录** | 因为它挂在 `getEventPublisher()` 上，而不是散在调用点上的日志 —— 三档翻转（打开 / 半开 / 恢复）**不是业务代码触发的**，可能由 r4j 自己的线程在**没有任何请求**时完成 |
 
-### I.3 `protections` 入参：从「只记录」变成「真生效」（**3 键 + 1 键 TD + 1 键记录位**） {#api-i-3}
+### I.3 `protections` 入参：从「只记录」变成「真生效」（**4 键 + 1 键记录位**，阶段 2b 起） {#api-i-3}
 
 | key | 本段状态 | 闸在哪 | 关掉它的后果 |
 |---|---|---|---|
 | `rateLimit` | ✅ 接闸 | 入站限流（I.1，200 QPS） | 没有闸：整站按后端能力吃满 |
 | `circuitBreak` | ✅ 接闸 | 关键下游熔断（I.5） | 没有熔断：MySQL 慢/挂时请求照打下去 |
 | `poolIsolation` | ✅ 接闸 | 观测池分池（有界 ↔ **无界**） | 回到无界池：观测面的任务不再被挤 |
-| `retry` | ❌ **不落码** | 无 | **没有后果** —— 本段一行重试代码都没有（登记 **TD-74**） |
+| `retry` | ✅ **接闸**（阶段 2b 起） | 死锁重试（`MerchantDowngradeService.relist`，最多 3 次尝试 / 退避 40ms 起 ×2 封顶 200ms） | 一次死锁即抛 —— 同一探针 48 轮实测：**有重试 5xx = 0，无重试 5xx = 139**（死锁本身照旧在发生，只是每次都兜住）。⚠️ 原判「本段不落码」已被实测推翻，见 `tech-debt.md` 的〈TD-74 订正〉 |
 | `degrade` | ➖ **只记录** | 无（系统固有 fail-open） | **没有后果** —— 缓存 L2 回落 / 锁 fail-open / MQ 缺席 / 审计 fail-open 本来就存在，不由这个开关管 |
 
-⚠️ **口径**：本段是 **3 键接闸 + 1 键登记 TD + 1 键记录位**。**不许**写成「4 键已接闸」或「5 键里 4 键已接闸」。
+⚠️ **口径（2026-10-15 · 阶段 2b 起）**：本段是 **4 键接闸 + 1 键记录位**。**不许**写成「5 键已接闸」。⚠️ 本条在 commit 2 那一刻写的是「3 键接闸 + 1 键登记 TD + 1 键记录位」并**明令不许**写「4 键已接闸」—— 那句当时是对的，`retry` 那时确实没有一行代码；阶段 2b 拿到死锁实测后**裁定接闸 3 → 4**，口径随之翻转。判据的唯一代码出处仍是 `ProtectionGate.WIRED_KEYS`。
 ⚠️ **写入时机**：`DrillRecordService` 在 `attackEngine.run(...)` **之前**写入、在 `finally` 里复位成**全开** —— 不复位就等于「这一轮把限流关掉」这件事越过那一轮留在进程里。
 ⚠️ **缺省口径的唯一换算点**：入参缺省是**全开**，而 `ProtectionGate.apply(null)` 的语义是**全关** ⇒ `DrillRecordService` 是这两者之间**唯一**的换算处（`protections == null ? ProtectionGate.KEYS : protections`）。
 
-### I.4 面板：两枚**不可开关**（不是死控件，也不是藏起来） {#api-i-4}
+### I.4 面板：**一枚**不可开关（不是死控件，也不是藏起来） {#api-i-4}
 
 | 项 | 口径 |
 |---|---|
-| 哪两枚 | `retry`（重试）/ `degrade`（降级）—— 判据来源 `ProtectionGate.WIRED_KEYS` 的镜像 `PROTECTIONS_NOT_WIRED` |
+| 哪一枚 | `degrade`（降级）—— 判据来源 `ProtectionGate.WIRED_KEYS` 的镜像 `PROTECTIONS_NOT_WIRED`。⚠️ 阶段 2b 前这里是**两枚**（`retry` / `degrade`）；`retry` 接闸后**必须移出**，否则那一枚会变成一个「能拨却什么都不发生」的死控件 |
 | 画法 | **标灰**（`opacity .7`、虚线边、`cursor: default`）+ `disabled` + `aria-disabled="true"` + 一枚**可见的**「不可开关」角标 |
-| 说明 | `title`（tooltip）**逐枚不同**：`degrade` = 「记录位，不可开关，系统固有 fail-open 设计」；`retry` = 「本段不落码：只登记 TD-74（…）」 |
+| 说明 | `title`（tooltip）**逐族不同**：不可开关的那一枚 = 「记录位，不可开关，系统固有 fail-open 设计」；接闸的那些 = 「…（点一下拨动）—— **已接闸，读数会变**」 |
 | ⚠️ 为什么不是「藏起来」 | 藏起来会让「面板上少了一枚」与「这一笔忘了做」读起来一样 |
 | ⚠️ 为什么不能是「能拨但没效果」 | 用户 2026-10-15 明令：**禁止死控件**。⇒ 模板 `disabled` + JS 里 `toggleProtection` 的守卫**两道都要有**（只画灰的话，模板一改就漏） |
-| 证据 | 探针 `scripts/probes/probe-d2-locked-switches.mjs`（21 项，含「抠掉 `disabled` 再点仍不变」）+ 截图 `docs/agent/evidence/c3-block7/d2-protection-switches.png` |
+| 证据 | 探针 `scripts/probes/probe-d2-locked-switches.mjs`（20 项，含「抠掉 `disabled` 再点仍不变」+「阶段 2b 新接闸的 `retry` 点一下**状态真变**」的对照）+ 截图 `docs/agent/evidence/c3-block7/d2-protection-switches-after-2b.png`（输出 `d2-locked-switches-after-2b.txt`；commit 2 那份 21 项的证据保留不动） |
 
 ### I.5 熔断：两个实例，**只挂 MySQL 这一条下游** {#api-i-5}
 

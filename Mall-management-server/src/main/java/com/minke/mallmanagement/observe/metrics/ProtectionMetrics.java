@@ -24,27 +24,29 @@ import java.util.concurrent.atomic.AtomicLong;
  * <h2>【命名规范】</h2>
  * 前缀 {@code mall.}；<b>基数铁律</b>：进 tag 的只有两个<b>有界</b>取值 ——
  * {@code protection}（五个 key，见 {@code ProtectionGate.KEYS}）与 {@code result}（本类
- * {@link Result} 的五档）。⚠️ {@code scope} 与 {@code detail} <b>绝不进 tag</b>：
+ * {@link Result} 的七档）。⚠️ {@code scope} 与 {@code detail} <b>绝不进 tag</b>：
  * 前者虽然有界（闸名 / 下游名），但它是「这类事件发生在哪」的说明，放事件里够用；
  * 后者是自由文本（含业务键、异常类名），基数无界 —— 放进 tag 就是把指标基数交给运行时。
  *
  * <h2>【指标清单】</h2>
  * <pre>
  * mall.protection.events{protection=rateLimit|circuitBreak|degrade|retry|poolIsolation,
- *                        result=blocked|opened|half_open|closed|shed}
- *        防护层的一次**处置**（拦下 / 状态翻转 / 挤出）。五档互斥且完备：
+ *                        result=blocked|opened|half_open|closed|shed|retry_success|retry_failed}
+ *        防护层的一次**处置**（拦下 / 状态翻转 / 挤出 / 重试）。七档互斥且完备：
  *        blocked   = 闸把请求挡在门外（入站限流 429 / 熔断开路拒绝）
  *        opened    = 熔断进入打开态（错误率越线）
  *        half_open = 熔断经等待期后进入半开态（放 5 个试探）
  *        closed    = 熔断试探通过、恢复关闭
  *        shed      = 线程池满，任务被挤出（不排队、直接拒）
+ *        retry_success = 死锁受害者重试**成功**（第 2 次及以后的尝试把链路走通）
+ *        retry_failed  = 死锁受害者重试**又失败**（还会再试，或已是最后一次）
  * </pre>
  * ⚠️ <b>不埋「放行了多少」</b>：那是「到达量 − 拦下量」的派生量，而到达量由
  * {@code http.server.requests} 自己回答（规范第 6 条：可派生的值不重复埋点）。
  *
  * <h2>【事件语法】</h2>
  * <pre>
- *   result=blocked|opened|half_open|closed|shed   key=防护开关key   scope=闸/下游名   明细=自由文本
+ *   result=blocked|opened|half_open|closed|shed|retry_success|retry_failed   key=防护开关key   scope=闸/下游名   明细=自由文本
  * </pre>
  *
  * <h2>【本环的写入点】</h2>
@@ -106,6 +108,23 @@ public class ProtectionMetrics {
         event(result.tag, key, scope, detail);
     }
 
+    /**
+     * 一次<b>重试</b>（D 段 · 阶段 2b 新增）—— 死锁受害者侧的「再试一遍」这一步动作本身。
+     *
+     * <p>⚠️ <b>与 {@link #blocked} / {@link #shed} 分开记</b>：那两档是「闸按规则处置了请求」，
+     * 本档是「闸放行了、但链路自己摔了一跤又爬起来」—— 合成一档会让「限流挡了多少」
+     * 与「死锁赔了多少」读出同一个数。
+     *
+     * <p>⚠️ {@code detail} 里写 {@code action=retry attempt=N}：{@code action=retry} 与
+     * {@code key=retry} 同义（防护开关 key 就是这一维），刻意**不加**一个与之并行的字段 ——
+     * 那会造出第二个同义维度，两者一旦不同步就没人说得清哪个算数。
+     *
+     * @param result 只能是 {@link Result#RETRY_SUCCESS} 或 {@link Result#RETRY_FAILED}
+     */
+    public void retry(Result result, String key, String scope, String detail) {
+        event(result.tag, key, scope, detail);
+    }
+
     // ================= 事件流 =================
 
     /**
@@ -144,7 +163,7 @@ public class ProtectionMetrics {
      *
      * @param seq        单调序号（缓冲被覆盖后靠它自校验与排序）
      * @param epochMilli 墙钟时间戳 —— 事件是给人看的过程记录，故用墙钟而非 nanoTime
-     * @param result     {@link Result} 的五档之一
+     * @param result     {@link Result} 的七档之一
      * @param key        防护开关 key（{@code ProtectionGate.KEYS} 之一，有界）
      * @param scope      闸 / 下游名（{@code inbound} / {@code mysql} / {@code redis} / {@code mq} / {@code pool}）
      * @param detail     人话明细；可能含路径与异常类名，故只进事件流、不进 tag
@@ -168,7 +187,11 @@ public class ProtectionMetrics {
         /** 熔断试探通过、恢复关闭。 */
         CLOSED("closed"),
         /** 线程池满，任务被挤出（不排队、直接拒）。 */
-        SHED("shed");
+        SHED("shed"),
+        /** 死锁受害者重试**成功**（第 2 次及以后的尝试把链路走通）。 */
+        RETRY_SUCCESS("retry_success"),
+        /** 死锁受害者重试**又失败**（还会再试，或已是最后一次尝试）。 */
+        RETRY_FAILED("retry_failed");
 
         final String tag;
 

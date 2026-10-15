@@ -1,12 +1,17 @@
 // probe-d2-locked-switches.mjs —— D 段 · commit 2〈防护开关的面板落地〉实测。
+// ⚠️ **阶段 2b 起口径变了**：`retry` 从「登记 TD」改成「接闸」（死锁重试落进
+//    `MerchantDowngradeService.relist`）⇒ 面板上**可拨的那组由三枚变四枚**，
+//    `is-locked` 那组**只剩 `degrade` 一枚**。本探针已随之改断言（本文件末次跑出的
+//    证据是 `d2-locked-switches-after-2b.txt`；commit 2 那一份 `d2-locked-switches.txt`
+//    是**当时的实测**，保留不动、不是过时错误）。
 //
 // 跑法：① `npm run serve`（8080）② `node scripts/probes/probe-d2-locked-switches.mjs`
 // 依赖：`docs/美化/_cdp.mjs`（headless Edge + CDP）。**后端全部 mock**（本探针不碰真后端）。
 //
 // 验的是用户 2026-10-15 裁定的那两句：
-//   ①「degrade 只记录；UI 若必须展示 ⇒ **标灰 + tooltip**」—— 降级 / 重试两枚必须标灰，
-//      而且**说清为什么**（两枚的理由不同：一个是「记录位」，一个是「本段不落码，只登记 TD-74」）。
-//   ②「**禁止死控件：能点但无效果的开关一律不允许**」—— 两枚必须拨不动，
+//   ①「degrade 只记录；UI 若必须展示 ⇒ **标灰 + tooltip**」—— `degrade` 那一枚必须标灰，
+//      而且**说清为什么**（阶段 2b 起只有它一个理由：「记录位」）。
+//   ②「**禁止死控件：能点但无效果的开关一律不允许**」—— 它必须拨不动，
 //      且**不只是靠模板上的 `disabled`**：JS 里那道路由守卫也得真的拦住
 //      （抠掉 `disabled` 再点，状态仍不许变）。
 //
@@ -21,7 +26,7 @@ import { open, sleep, report } from '../../docs/美化/_cdp.mjs'
 const BASE = 'http://localhost:8080'
 const ROUTE = '#/admin/observe/attack-sim'
 const EVIDENCE = 'C:/Users/86159/Desktop/软件工程/期末项目/docs/agent/evidence/c3-block7/'
-const SHOT = `${EVIDENCE}d2-protection-switches.png`
+const SHOT = `${EVIDENCE}d2-protection-switches-after-2b.png`
 
 const CORS = [
   { name: 'Access-Control-Allow-Origin', value: 'http://localhost:8080' },
@@ -30,17 +35,17 @@ const CORS = [
   { name: 'Access-Control-Allow-Methods', value: 'GET,POST,OPTIONS' },
 ]
 
-/** 文案表（**逐字抄** `observe-labels.js` 的 `PROTECTION_NOT_WIRED_TIP`；漂了就红）。 */
+/** 文案表（**逐字抄** `observe-labels.js` 的 `PROTECTION_NOT_WIRED_TIP`；漂了就红）。
+ *  ⚠️ 阶段 2b 起 `retry` 已接闸 ⇒ 它**不该有** tooltip（有闸的开关有提示反而误导）。 */
 const EXPECTED = {
   labels: ['限流', '熔断', '降级', '重试', '分池'],
-  locked: ['降级', '重试'],
+  locked: ['降级'],
   tip: {
     降级: '记录位，不可开关，系统固有 fail-open 设计',
-    重试: '本段不落码：只登记 TD-74（有死锁实测证据后再落 GoodsService 三处写方法，本段一行重试代码都没有）',
   },
 }
 
-const R = report('D 段 · commit 2 防护开关面板（mock 后端）')
+const R = report('D 段 · commit 2 防护开关面板（mock 后端）——  阶段 2b 口径：4 键有闸 / 1 键记录位')
 let TOTAL = 0
 const ok = (label, cond, got) => { TOTAL++; R.ok(label, cond, got) }
 
@@ -108,15 +113,15 @@ try {
     sw.map((s) => s.label).join('/'))
   ok('① 缺省全开（一枚都不带 is-off）', sw.every((s) => !s.off), sw.filter((s) => s.off).map((s) => s.label))
 
-  // ── ② 标灰：只有降级 / 重试两枚 ────────────────────────────────────────────
+  // ── ② 标灰：只剩降级一枚（阶段 2b 起 retry 已接闸）──────────────────────────
   const lockedLabels = sw.filter((s) => s.locked).map((s) => s.label)
-  ok('② 标灰的**恰好**是降级 / 重试两枚', JSON.stringify(lockedLabels) === JSON.stringify(EXPECTED.locked),
+  ok('② 标灰的**恰好**是降级那一枚', JSON.stringify(lockedLabels) === JSON.stringify(EXPECTED.locked),
     lockedLabels.join('/'))
-  ok('② 接通的三枚**没有**被误标灰', JSON.stringify(sw.filter((s) => !s.locked).map((s) => s.label))
-    === JSON.stringify(['限流', '熔断', '分池']), sw.filter((s) => s.locked).length)
-  ok('② 两枚 locked 的 `cursor` 不是 pointer（看着也不像能点）',
+  ok('② 接闸的四枚**没有**被误标灰', JSON.stringify(sw.filter((s) => !s.locked).map((s) => s.label))
+    === JSON.stringify(['限流', '熔断', '重试', '分池']), sw.filter((s) => s.locked).length)
+  ok('② locked 的那些枚 `cursor` 不是 pointer（看着也不像能点）',
     sw.filter((s) => s.locked).every((s) => s.cursor !== 'pointer'), sw.map((s) => `${s.label}=${s.cursor}`).join(' '))
-  ok('② 两枚 locked 的 `opacity` < 1（真的压暗了）',
+  ok('② locked 的那些枚 `opacity` < 1（真的压暗了）',
     sw.filter((s) => s.locked).every((s) => Number(s.opacity) < 1), sw.filter((s) => s.locked).map((s) => s.opacity))
 
   // ── ③ tooltip：逐字 ───────────────────────────────────────────────────────
@@ -126,21 +131,24 @@ try {
   }
   ok('③ 「记录位，不可开关，系统固有 fail-open 设计」这句在（裁定逐字要求）',
     String(sw.find((s) => s.label === '降级')?.title || '').includes('记录位，不可开关，系统固有 fail-open 设计'))
-  ok('③ 重试那枚点了 TD-74（不是空话「暂未实现」）',
-    String(sw.find((s) => s.label === '重试')?.title || '').includes('TD-74'))
+  // ⚠️ 有闸的那些枚**也有** tooltip，只是换了另一族说法（「已接闸，读数会变」）；
+  //    这里要证的不是「没有 title」，而是「**不再**用『不可开关』那一族文案」。
+  const retryTip = String(sw.find((s) => s.label === '重试')?.title || '')
+  ok('③ 重试那枚改用「已接闸，读数会变」那一族 tooltip（阶段 2b 起它有真闸）',
+    /已接闸，读数会变$/.test(retryTip) && !retryTip.includes('不可开关'), retryTip)
 
   // ── ④ 可见的说明：`不可开关` 角标（跟随截图，不依赖浮层）────────────────────
-  ok('④ 两枚 locked 各有一枚可见的「不可开关」角标',
+  ok('④ locked 的那些枚各有一枚可见的「不可开关」角标',
     sw.filter((s) => s.locked).every((s) => s.badge === '不可开关'), sw.map((s) => `${s.label}:${s.badge}`).join(' '))
-  ok('④ 接通的三枚**没有**这个角标', sw.filter((s) => !s.locked).every((s) => s.badge === null))
+  ok('④ 接闸的四枚**没有**这个角标', sw.filter((s) => !s.locked).every((s) => s.badge === null))
 
   // ── ⑤ 死控件禁令：拨不动（两层都要拦）─────────────────────────────────────
   const before = JSON.stringify(await b.evalJS(SNAPSHOT))
 
   // ⑤-1 模板层：disabled + aria-disabled 都在
-  ok('⑤ 两枚 locked 带 `disabled` 属性',
+  ok('⑤ locked 的那些枚带 `disabled` 属性',
     sw.filter((s) => s.locked).every((s) => s.disabled), sw.map((s) => `${s.label}:${s.disabled}`).join(' '))
-  ok('⑤ 两枚 locked 带 `aria-disabled="true"`（读屏也知道它不可用）',
+  ok('⑤ locked 的那些枚带 `aria-disabled="true"`（读屏也知道它不可用）',
     sw.filter((s) => s.locked).every((s) => s.ariaDisabled === 'true'),
     sw.filter((s) => s.locked).map((s) => s.ariaDisabled).join(' '))
 
@@ -166,21 +174,23 @@ try {
   ok('⑤ 抠掉 `disabled` 再点「降级」⇒ 状态**没变**（JS 守卫真的在拦，不只是模板画灰）',
     guardHeld.before === guardHeld.after, JSON.stringify(guardHeld))
 
-  // ⑤-3 对照：接通的那枚**拨得动**（证明守卫没有把五枚一起挡掉，也证明「等一拍」这一步有效）
+  // ⑤-3 对照：**阶段 2b 新接闸的那枚（`retry`）拨得动** —— 证明守卫只挡没闸的那些，
+  //      也证明 ⑤-2 的「没变」不是读早了；顺带钉住「`retry` 这一枚不再是死控件」。
   const wiredToggled = await b.evalJS(`(async () => {
     const row = document.querySelectorAll('.a-switches')[0]
-    const el = row.querySelectorAll('.a-sw')[0]           // 第 1 枚 = rateLimit
+    const el = row.querySelectorAll('.a-sw')[3]           // 第 4 枚 = retry（阶段 2b 起有闸）
+    const wasLocked = el.classList.contains('is-locked')
     const before = el.classList.contains('is-off')
     el.click()
     ${afterTick}
     const after = el.classList.contains('is-off')
-    return { before, after }
+    return { wasLocked, before, after }
   })()`)
-  ok('⑤ 对照：接通的那枚点一下**状态变了**（守卫只挡没接通的两枚；也证明 ⑤-2 的「没变」不是读早了）',
-    wiredToggled.before !== wiredToggled.after, JSON.stringify(wiredToggled))
+  ok('⑤ 对照：阶段 2b 新接闸的 `retry` 点一下**状态真的变了**（守卫只挡没闸的那些；也证明 ⑤-2 的「没变」不是读早了）',
+    wiredToggled.before !== wiredToggled.after && !wiredToggled.wasLocked, JSON.stringify(wiredToggled))
 
   const after = JSON.stringify(await b.evalJS(SNAPSHOT))
-  ok('⑤ 点完之后：被拨动的只有接通那枚，两枚 locked 与其余状态原样',
+  ok('⑤ 点完之后：被拨动的只有接通那些枚，locked 的那一枚与其余状态原样',
     after !== before, '（快照确实变了 = 上一条的拨动生效）')
 
   // ── ⑥ 截图（那一排开关；`不可开关` 角标在图上）───────────────────────────

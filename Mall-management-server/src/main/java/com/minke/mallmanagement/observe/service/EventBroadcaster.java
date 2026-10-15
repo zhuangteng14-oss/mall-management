@@ -695,8 +695,14 @@ public class EventBroadcaster {
             case "shed":
                 title = "线程池挤出（未排队）";
                 break;
+            case "retry_success":
+                title = "死锁重试成功";
+                break;
+            case "retry_failed":
+                title = "死锁重试失败";
+                break;
             default:
-                // 五档是**枚举给定的有界集**，真出现第六种值只可能是「有人加了 result 却忘了改这里」
+                // 七档是**枚举给定的有界集**，真出现第八种值只可能是「有人加了 result 却忘了改这里」
                 // —— 那就照实显示，不猜一个好看的标题（与各标签表「认不出就不翻译」同源）。
                 title = "防护处置：" + result;
                 break;
@@ -724,13 +730,14 @@ public class EventBroadcaster {
             case "skipped_degraded":
             case "insufficient":
             case "lease_lost":
-            // ↓ D 段第九环（防护）的四档：闸拦下了 / 闸自己翻转了 —— 都属于「系统偏离了常规路径」。
-            //   ⚠️ 第五档 closed（熔断恢复关闭）**不在这里**，它落进下面的 default = info：
+            // ↓ D 段第九环（防护）的这几档：闸拦下了 / 闸自己翻转了 / 重试又失败了 ——
+            //   ⚠️ closed（熔断恢复关闭）与 retry_success（重试成功）**不在这里**：
             //   那是恢复，不是故障（理由写在类注释第 2 件里）。
             case "blocked":
             case "opened":
             case "half_open":
             case "shed":
+            case "retry_failed":
                 return Severity.WARN.tag;
             default:
                 return Severity.INFO.tag;

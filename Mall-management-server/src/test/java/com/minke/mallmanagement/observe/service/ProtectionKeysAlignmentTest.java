@@ -40,13 +40,13 @@ class ProtectionKeysAlignmentTest {
     }
 
     @Test
-    @DisplayName("接闸的三个 / TD 一个 / 记录位一个 —— 三个 key 都**在**演练白名单里（不在的话拨不到）")
+    @DisplayName("接闸的四个 / 记录位一个 —— 四个 key 都**在**演练白名单里（不在的话拨不到）")
     void everyWiredKeyIsAlsoAcceptedByTheDrillWhitelist() {
         assertThat(AttackEngine.PROTECTION_KEYS)
-                .as("真有闸的三个必须拨得到；拨不到 = 演示现场按不动")
+                .as("真有闸的四个必须拨得到；拨不到 = 演示现场按不动")
                 .containsAll(ProtectionGate.WIRED_KEYS)
-                .as("两枚没有闸的也必须在白名单里：它们要能「如实回答自己没生效」，"
-                        + "从表里删掉会让前端现有的两枚开关变成 400")
-                .contains(ProtectionGate.TD_ONLY_KEY, ProtectionGate.RECORD_ONLY_KEY);
+                .as("那枚没有闸的也必须在白名单里：它要能「如实回答自己没生效」，"
+                        + "从表里删掉会让前端现有的那枚开关变成 400")
+                .contains(ProtectionGate.RECORD_ONLY_KEY);
     }
 }

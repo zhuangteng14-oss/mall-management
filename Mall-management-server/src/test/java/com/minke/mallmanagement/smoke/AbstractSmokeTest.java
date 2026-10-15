@@ -429,7 +429,27 @@ import static org.mockito.Mockito.when;
         //    `ObjectProvider` ⇒ 切片里取不到就空转（理由写在两个类的类注释里）；
         //    第三个是普通 `@Configuration`（切片不扫，与 `RabbitObserveConfig` 同款）⇒ 它不进切片，
         //    **也正因如此切片里不需要 `CircuitBreakerRegistry`**。三处都不登记是有意的，别「补齐」。
-        ProtectionGate.class, ProtectionMetrics.class})
+        ProtectionGate.class, ProtectionMetrics.class,
+        // C3 块 7 · D 段 · 阶段 2b〈死锁重试〉（2026-10-15）：**零新 Controller / 零新 Service**，
+        // 但 `MerchantDowngradeService`（块 2 就在上面那份清单里）的构造器多了三个形参 ⇒
+        // **第二十二次同一处地雷**，形状还是「既有 bean 多吃一个 bean」（同上面 D 段 commit 2 那笔）。
+        // ⚠️ 两个新依赖是 `ProtectionGate` / `ProtectionMetrics` —— **上面那一笔已经登记过了**，
+        //    本笔不重复。第三个是 `PlatformTransactionManager`：`@WebMvcTest` 切片**不含**
+        //    `DataSourceTransactionManagerAutoConfiguration`（它不在 WebMvcTest 的自动配置白名单里）
+        //    ⇒ 切片里**没有**任何事务管理器 bean ⇒ 不补就是整片上下文起不来。
+        // ⚠️ 报错形状（真漏了的话）：**143 errors**、全部落在 `smoke` 包，首个报错是
+        //    `ApplicationContext failure threshold (1) exceeded: skipping repeated attempt to load context`，
+        //    真正的原因埋在更早那次加载里（`NoSuchBeanDefinitionException: PlatformTransactionManager`）
+        //    —— 「threshold exceeded」是次生现象，别照着它查。2026-10-15 实测。
+        // ⚠️ 这道替身只解**构造期依赖**：`new TransactionTemplate(txManager)` 在构造器里就要一个非 null
+        //    对象。替身的 `getTransaction` 默认回 null ⇒ **别在 smoke 里调 `relist`**（那会 NPE）。
+        //    切片里也没人调它 —— smoke 打的是 Controller 的分支与响应文案。
+        //    另：切片里 `@Transactional` 仍是 **no-op**（`TransactionAutoConfiguration` 同样不在
+        //    白名单 ⇒ 压根没有 `TransactionInterceptor`）⇒ 本替身**不会**让事务在此切片里「真的生效」，
+        //    与上面 `MerchantApplicationService` / `GoodsAuditService` 两处 ⚠️ 记的性质一致。
+        //    真事务语义归 `RelistDeadlockRetryTest`（替身计数）与 A3 / 手验的职责。
+        //    只加注释、不加类 ⇒ 上面那一行不动。
+        })
 public abstract class AbstractSmokeTest {
 
     @Autowired
@@ -609,6 +629,32 @@ public abstract class AbstractSmokeTest {
     //    （`OrderStateExecutor.submit` 与 `LockSceneService.ThreadRecorder` 里的 `ObserveContext`）。
     @MockitoBean
     protected com.minke.mallmanagement.observe.mq.EventPublisher eventPublisher;
+
+    /**
+     * 事务管理器替身（C3 块 7 · D 段 · 阶段 2b，2026-10-15）。
+     *
+     * <p><b>为什么切片里必须有一个</b>：{@code MerchantDowngradeService} 是本基类用 {@code @Import}
+     * 拉进来的真 bean（块 2 起就在那份清单里），阶段 2b 给它的构造器加了一个
+     * {@code PlatformTransactionManager} 形参（用来 {@code new TransactionTemplate(txManager)}）。
+     * 而 {@code @WebMvcTest} 切片<b>不含</b> {@code DataSourceTransactionManagerAutoConfiguration}
+     * ⇒ 切片里一个事务管理器都没有 ⇒ 上下文加载期直接起不来。
+     *
+     * <p>⚠️ <b>代价写在这里</b>：替身的 {@code getTransaction} 默认回 {@code null}
+     * ⇒ <b>别在 smoke 里调 {@code relist}</b>（那会 NPE）。切片里也没人调它。
+     * 「重试与事务的调用形状」的验证在 {@code RelistDeadlockRetryTest}（那个类的
+     * {@code CountingTxManager} 是计数替身，不是这台）。
+     *
+     * <p>⚠️ 它<b>不会</b>让 {@code @Transactional} 在此切片里真的生效：
+     * {@code TransactionAutoConfiguration} 同样不在 WebMvcTest 的自动配置白名单里
+     * ⇒ 压根没有 {@code TransactionInterceptor} 织进来（与上面 import 块里
+     * {@code MerchantApplicationService} / {@code GoodsAuditService} 两处 ⚠️ 记的性质一致）。
+     *
+     * <p>⚠️ 与上面 {@code eventPublisher} 同一条处置：写**全限定名**不加 import —— 本文件被
+     * {@code defect-survey.md} / {@code project-map.md} / {@code progress.md} 按「文件:行号」引用，
+     * 加一行 import 会让那些引用集体下移（详见上面那一处的注释）。
+     */
+    @MockitoBean
+    protected org.springframework.transaction.PlatformTransactionManager platformTransactionManager;
 
     /**
      * 锁替身的行为：**直接执行 action**（不做任何互斥、不碰 Redis）。

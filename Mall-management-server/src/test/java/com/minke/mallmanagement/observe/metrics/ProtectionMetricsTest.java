@@ -13,7 +13,7 @@ import java.util.List;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * 第 9 类事件环（{@link ProtectionMetrics}）的语义实测 —— 五档 result 各自记什么、
+ * 第 9 类事件环（{@link ProtectionMetrics}）的语义实测 —— 七档 result 各自记什么、
  * 两条通道（计数 + 事件）是不是真的在同一调用点一起发、基数铁律（谁进 tag 谁不进）。
  *
  * <p>不起 Spring、不起 MySQL、不起任何闸（同 {@code StockMetricsTest} 的姿势）。
@@ -30,33 +30,41 @@ class ProtectionMetricsTest {
     // ================= 两条通道同点发 =================
 
     @Test
-    @DisplayName("五档 result 各自计数、各自入环（计数与事件在同一调用点一起发）")
+    @DisplayName("七档 result 各自计数、各自入环（计数与事件在同一调用点一起发）")
     void everyResultIsCountedAndRecorded() {
         metrics.blocked("rateLimit", "inbound", "path=/goods/goodsSelectHome");
         metrics.state(Result.OPENED, "circuitBreak", "mysql", "circuitBreaker=mallMysqlWrite CLOSED → OPEN");
         metrics.state(Result.HALF_OPEN, "circuitBreak", "mysql", "OPEN → HALF_OPEN");
         metrics.state(Result.CLOSED, "circuitBreak", "mysql", "HALF_OPEN → CLOSED");
         metrics.shed("poolIsolation", "pool", "pool=observe-stream active=32");
+        // 阶段 2b 新增的两档（死锁受害者重试的两种结局）—— 走的是**另一个**入口
+        // `retry(...)` 而不是 `state(...)`：它记的不是「闸的状态翻转」，是「一次重试尝试的结果」。
+        metrics.retry(Result.RETRY_SUCCESS, "retry", "relist", "action=retry attempt=2 result=success");
+        metrics.retry(Result.RETRY_FAILED, "retry", "relist", "action=retry attempt=2 result=deadlock");
 
         assertThat(count("blocked")).isEqualTo(1.0);
         assertThat(count("opened")).isEqualTo(1.0);
         assertThat(count("half_open")).isEqualTo(1.0);
         assertThat(count("closed")).isEqualTo(1.0);
         assertThat(count("shed")).isEqualTo(1.0);
+        assertThat(count("retry_success")).isEqualTo(1.0);
+        assertThat(count("retry_failed")).isEqualTo(1.0);
 
         List<ProtectionEvent> events = metrics.recentEvents();
         assertThat(events).extracting(ProtectionEvent::result)
-                .containsExactly("blocked", "opened", "half_open", "closed", "shed");
+                .containsExactly("blocked", "opened", "half_open", "closed", "shed",
+                        "retry_success", "retry_failed");
         assertThat(events).extracting(ProtectionEvent::key)
-                .containsExactly("rateLimit", "circuitBreak", "circuitBreak", "circuitBreak", "poolIsolation");
+                .containsExactly("rateLimit", "circuitBreak", "circuitBreak", "circuitBreak", "poolIsolation",
+                        "retry", "retry");
         assertThat(events).extracting(ProtectionEvent::scope)
-                .containsExactly("inbound", "mysql", "mysql", "mysql", "pool");
+                .containsExactly("inbound", "mysql", "mysql", "mysql", "pool", "relist", "relist");
         assertThat(events).allSatisfy(e -> assertThat(e.epochMilli()).isPositive());
     }
 
     /**
      * ⚠️ 这条钉的是**基数铁律**：进 tag 的只有 {@code protection}（五个 key）与 {@code result}
-     * （五档），两列都是**有界**的。{@code scope} 与 {@code detail} 进了事件、**不进 tag** ——
+     * （七档），两列都是**有界**的。{@code scope} 与 {@code detail} 进了事件、**不进 tag** ——
      * {@code detail} 是自由文本（含路径、熔断器名、异常类名……），放 tag 就是把指标基数交给运行时：
      * 每个不同的路径一个时间序列，Prometheus 那边会先爆。
      */

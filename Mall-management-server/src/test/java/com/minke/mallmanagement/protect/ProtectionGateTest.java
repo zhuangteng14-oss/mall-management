@@ -11,7 +11,8 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /**
  * {@link ProtectionGate} 的语义实测 —— 五个 key 的**声明序**、写入 / 复位、以及本段最要紧的那条
- * 口径：**3 键接闸 + 1 键登记 TD + 1 键记录位**（`WIRED_KEYS` / `TD_ONLY_KEY` / `RECORD_ONLY_KEY`）。
+ * 口径：**4 键接闸 + 1 键记录位**（`WIRED_KEYS` / `RECORD_ONLY_KEY`；2026-10-15 阶段 2b 之前
+ * 是「3 键接闸 + 1 键登记 TD + 1 键记录位」，`retry` 从 TD 那档挪进了接闸那档）。
  *
  * <p>⚠️ 本文件**不起 Spring、不起任何闸**：门就是一个进程内的五个布尔位（那份实现在类注释里
  * 逐条解释了为什么不兜底、为什么读点在热路径上还敢抛）。
@@ -34,33 +35,34 @@ class ProtectionGateTest {
     }
 
     /**
-     * ⚠️ 这条是本笔**口径**的代码化：「本段实际是 3 键接闸 + 1 键 TD + 1 键记录位」。
+     * ⚠️ 这条是本笔**口径**的代码化：「本段实际是 4 键接闸 + 1 键记录位」。
      * 用户 2026-10-15 逐字纠正过两种错写法（「4 键已接闸」/「5 键里 4 键已接闸」）——
+     * 那时真的是 3 键接闸，第 4 个（{@code retry}）只在 TD 那档挂了个名。当天裁定**接闸 3 → 4**
+     * 之后，那句话才第一次成为事实。
      * 把口径写成断言，是为了让**后来改代码的人**在把某个键从 `WIRED_KEYS` 挪走时，
      * 必须同时改一个会红的测试，而不是只改一行没人读的注释。
      */
     @Test
-    @DisplayName("口径：接闸的正好三个、TD-only 一个、record-only 一个，两两不交且并集 = KEYS")
-    void wiringIsThreePlusOnePlusOne() {
-        assertThat(ProtectionGate.WIRED_KEYS).containsExactly("rateLimit", "circuitBreak", "poolIsolation");
-        assertThat(ProtectionGate.TD_ONLY_KEY).isEqualTo("retry");
+    @DisplayName("口径：接闸的正好四个、record-only 一个，两两不交且并集 = KEYS")
+    void wiringIsFourPlusOne() {
+        assertThat(ProtectionGate.WIRED_KEYS)
+                .containsExactly("rateLimit", "circuitBreak", "retry", "poolIsolation");
         assertThat(ProtectionGate.RECORD_ONLY_KEY).isEqualTo("degrade");
 
-        assertThat(ProtectionGate.WIRED_KEYS).as("接闸的三个里不能混进另外两个")
-                .doesNotContain(ProtectionGate.TD_ONLY_KEY, ProtectionGate.RECORD_ONLY_KEY);
-        assertThat(ProtectionGate.KEYS).as("三个 + 两个 = 全部五个，一个不漏一个不多")
+        assertThat(ProtectionGate.WIRED_KEYS).as("接闸的四个里不能混进记录位那个")
+                .doesNotContain(ProtectionGate.RECORD_ONLY_KEY);
+        assertThat(ProtectionGate.KEYS).as("四个 + 一个 = 全部五个，一个不漏一个不多")
                 .containsExactlyInAnyOrderElementsOf(
-                        concat(ProtectionGate.WIRED_KEYS,
-                                List.of(ProtectionGate.TD_ONLY_KEY, ProtectionGate.RECORD_ONLY_KEY)));
+                        concat(ProtectionGate.WIRED_KEYS, List.of(ProtectionGate.RECORD_ONLY_KEY)));
     }
 
     @Test
-    @DisplayName("wired(key)：只有三个真返回 true —— 前端据此标灰（死控件的判据来源）")
-    void wiredIsTrueOnlyForTheThree() {
+    @DisplayName("wired(key)：只有四个真返回 true —— 前端据此标灰（死控件的判据来源）")
+    void wiredIsTrueOnlyForTheFour() {
         assertThat(ProtectionGate.wired("rateLimit")).isTrue();
         assertThat(ProtectionGate.wired("circuitBreak")).isTrue();
+        assertThat(ProtectionGate.wired("retry")).as("阶段 2b 起接闸：relist 的重试读它").isTrue();
         assertThat(ProtectionGate.wired("poolIsolation")).isTrue();
-        assertThat(ProtectionGate.wired("retry")).as("本段不落码（TD-74）").isFalse();
         assertThat(ProtectionGate.wired("degrade")).as("记录位，系统固有 fail-open").isFalse();
     }
 

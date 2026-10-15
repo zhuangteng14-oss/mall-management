@@ -306,8 +306,10 @@ class EventBroadcasterTest {
         notify.sent("email", "order.created", "C-1");
         sensitive.masked("comment", 0, 20, null);
         identity.passed("C-1", "/order/orderReceive");
-        // 第 9 环取 closed（熔断恢复关闭）而不是 blocked：它是防护环五档里**唯一**落 info 的一档，
-        // 于是这条共用夹具不会把 severity 规则表那几条断言搅乱（那几条按档位分组断言标题）。
+        // 第 9 环取 closed（熔断恢复关闭）而不是 blocked：它是防护环里**落 info 的那一档**
+        // （⚠️ 阶段 2b 起落 info 的有两档，另一档是 retry_success —— 这里取 closed 是因为它
+        //   属于熔断三态那一族、不引入新标题分组），于是这条共用夹具不会把 severity 规则表
+        //   那几条断言搅乱（那几条按档位分组断言标题）。
         protection.state(Result.CLOSED, "circuitBreak", "mysql", "circuitBreaker=mallMysqlWrite HALF_OPEN → CLOSED");
     }
 

@@ -2449,7 +2449,7 @@ DB 级唯一锁探针 `ProbeB6c7Lock` = **PASS 12 / FAIL 0**；接口级 8 条�
 
 **这一段做什么** ⇒ 把上一小节 ⑥ 那份 D 段 pack 里「五个防护开关」的**前三项接成真闸**，并按用户
 2026-10-15 的补充裁定收口。⚠️ **口径的唯一代码出处是 `ProtectionGate.WIRED_KEYS`**（不是本文件、不是报告）——
-**不许**写成「4 键已接闸」或「5 键里 4 键已接闸」。
+**不许**写成「4 键已接闸」或「5 键里 4 键已接闸」。（⚠️ **这句是 commit 2 那一刻的规则，2026-10-15 阶段 2b 已把它翻转** —— 现行口径是「**4 键接闸 + 1 键记录位**」〔`retry` 接上了〕，落码面与判据见本节末〈**7-B7-D2b**〉。）
 
 **裁定落实表（七条，逐条给落点）**
 
@@ -2459,7 +2459,7 @@ DB 级唯一锁探针 `ProbeB6c7Lock` = **PASS 12 / FAIL 0**；接口级 8 条�
 | ② 熔断：包**关键 DAO / 服务 / 下游**（**禁入站层**、**禁只挂订单 / 支付**） | `GoodsService` **5 处** + `OrderService.orderAdd` **1 处**（跨域、读写分开两个实例） | `CircuitBreakerWiringTest`（4 条，逐方法钉） |
 | ② 阈值：错误率 **50%** / **30s** 窗口 / 半开 **30s 后放 5 个** / **必须设最小请求数** / 半开恢复要有记录 | `application.properties` 的 `resilience4j.circuitbreaker.configs.default.*`（最小请求数 **20**）· `ProtectionMetricsBinder`（订阅 `getEventPublisher()`） | `ProtectionThresholdsTest`（4 条逐值）· `ProtectionMetricsBinderTest`（5 条，真熔断器的三档翻转 + 被拦） |
 | ③ 限流：入站统一闸 **200 QPS**、白名单（健康检查 / 静态资源 / 探针 / error 页）、超限 **429** | `InboundRateLimitInterceptor` + `ProtectConfig`（挂 `/**`，`HIGHEST_PRECEDENCE`） | `InboundRateLimitInterceptorTest`（7 条）· 运行期探针 `probe-d2-inbound-gate.mjs`（**320 发 = 200 放行 + 120×429**） |
-| ④ 重试：**本笔不落码，只登记 TD** | `tech-debt.md` **TD-74**（触发条件 / 落点 / 不得挂哪两处 / 落地前先做并发压测） | 文档；代码侧仅 `ProtectionGate.wired("retry") == false` |
+| ④ 重试：**本笔不落码，只登记 TD**（⚠️ **2026-10-15 阶段 2b 已落码并关闭 TD-74** —— 见本节末〈**7-B7-D2b**〉） | `tech-debt.md` **TD-74**（触发条件 / 落点 / 不得挂哪两处 / 落地前先做并发压测） | 文档；代码侧仅 `ProtectionGate.wired("retry") == false` |
 | ⑤ 线程池分池 | `ObservePoolConfig`（core 8 / max 32 / queue 64，满则 SHED + 503；关掉 ⇒ 无界） | `ProtectionThresholdsTest`（三个数有限）· 启动日志 |
 | **degrade**：只记录；UI 若必展示 ⇒ **标灰 + tooltip**；**禁死控件** | `observe-labels.js` 的 `PROTECTIONS_NOT_WIRED` / `PROTECTION_NOT_WIRED_TIP` + `AttackConsole.vue`（`is-locked` + `disabled` + `aria-disabled` + 「不可开关」角标 + `toggleProtection` 的 JS 守卫） | 探针 `probe-d2-locked-switches.mjs`（**21/21**，含「抠掉 `disabled` 再点仍不变」）+ 截图 `evidence/c3-block7/d2-protection-switches.png` |
 
@@ -2485,7 +2485,7 @@ DB 级唯一锁探针 `ProbeB6c7Lock` = **PASS 12 / FAIL 0**；接口级 8 条�
 4. **`@CircuitBreaker` 的切面 order = `2147483643`**（= `Integer.MAX_VALUE - 4`，2026-10-15 从 `resilience4j-spring6-2.3.0.jar` 常量池读出）< 事务切面 `MAX` ⇒ **熔断天然在事务之外**（开路时连事务都不开）。这条是**取值实测**，不是「应该在外层」。
 5. **`--c9` 早就存在**（`assets/tokens.css` 浅色 `:201` / admin `:301`，两套主题同值）⇒ 第 9 类直接用 `var(--c9)`，**本笔没动 `tokens.css`**（动了会让那两处引用漂移）。
 
-**⚠️ 本笔给 D 段/块 8 留的两条新账** ⇒ `tech-debt.md` **TD-74**（重试：触发条件是「先有死锁实测」，落点 = `GoodsService` 三处写方法；⚠️ **不得挂 `OrderService`**（订单链刻意禁 `@Transactional`）、**不得拿 `DistributedLockService` 当重试**（那是锁等待）；未来落地注意 AOP 同类自调用无效 + 重试必须在事务之外 + 落地前先做并发压测）· **TD-75**（熔断**只挂 MySQL** 两个实例：Redis / MQ 已有手写熔断，再叠 r4j 是重复造）。
+**⚠️ 本笔给 D 段/块 8 留的两条新账** ⇒ `tech-debt.md` **TD-74**（重试：触发条件是「先有死锁实测」，落点 = ~~`GoodsService` 三处写方法~~ **⚠️ 该落点已被实测推翻**，真落点 = `MerchantDowngradeService.relist`（本段末〈**7-B7-D2b**〉与 TD-74 订正表）；⚠️ **不得挂 `OrderService`**（订单链刻意禁 `@Transactional`）、**不得拿 `DistributedLockService` 当重试**（那是锁等待）；未来落地注意 AOP 同类自调用无效 + 重试必须在事务之外 + 落地前先做并发压测）· **TD-75**（熔断**只挂 MySQL** 两个实例：Redis / MQ 已有手写熔断，再叠 r4j 是重复造）。
 
 **测试** ⇒ 基线 **498** → 本笔 **541 passed / 0 failed / 0 errors / 26 skipped**（**+43**；新增 7 个测试类：`ProtectionGateTest` 9 · `ProtectionKeysAlignmentTest` 2 · `ProtectionMetricsTest` 6 · `InboundRateLimitInterceptorTest` 7 · `ProtectionMetricsBinderTest` 5 · `ProtectionThresholdsTest` 4 · `CircuitBreakerWiringTest` 4，其余为既有类扩条）。
 
@@ -2505,3 +2505,81 @@ DB 级唯一锁探针 `ProbeB6c7Lock` = **PASS 12 / FAIL 0**；接口级 8 条�
 3. **补 · 第 9 类 `protection` 的两处枚举**：`mall_management_sql.sql:1868`（`ObservedEvent` 的 `Kind` 列注释里那份 8 名清单）
    与 `docs/agent/db-schema.md:942`（同款清单）各补 `protection`（**同行替换、净 0 行**）。⚠️ 数据层另三处
    （`ObservedEventDao` 的 `KIND_MAX` / `clip(e.kind(), …)` / INSERT 列清单）实测**无需改**（列宽 16 ≥ 10，无枚举白名单）。
+
+---
+
+#### 7-B7-D2b. **D 段 · 阶段 2b**〈死锁修复：索引 + 重试〉（2026-10-15）—— 口径：**4 键接闸 + 1 键记录位**
+
+> ⚠️ **本小节是上一小节（7-B7-D2）的续笔，不是重写。** 上一小节里写「3 键接闸 / 本笔不落码 /
+> 落点 = `GoodsService` 三处写方法 / 面板那枚 `retry` 必须不可点」的句子，都是 **commit 2 那一刻的真状态**
+> （史料，保留），本小节只登记**这一笔把它们改成了什么**。⚠️ **判据永远读 `ProtectionGate.WIRED_KEYS`**，
+> 不读本文件：`WIRED_KEYS` 由 3 个键变 4 个键（`rateLimit` / `circuitBreak` / **`retry`** / `poolIsolation`），
+> 记录位仍是 `degrade`（不变式 `WIRED_KEYS ∪ {RECORD_ONLY_KEY} = KEYS`、两者不交，**没变、反而更强**）。
+
+**这一段做什么** ⇒ 落**顾问 2026-10-15 裁定**里的「一 死锁修复（阶段 2b，独立一笔）」，两条治则各给落点：
+
+| 治则 | 裁定原文要点 | 本笔落点 |
+|---|---|---|
+| **治因（丙）** | 加索引（A 档 DDL）—— `goods.MerchantId` 二级索引**拍定要加**；`user.merchantid` **留 agent 实测后再定**；目标「把全表锁 **49 行**压到锁 **1 行**」 | Migration ⑳ `idx_goods_merchant (MerchantId)`（`mall_management_sql.sql` 段⑳ · `db-schema.md §18` · `db-migration.md` 注意 24）。⚠️ `user.merchantid` **实测后决定不加** |
+| **治果（甲）** | 落重试 —— 落点按实证、Spring Retry 2–3 次、**只对死锁类**、`@Retryable` 必须在**事务外层** | `MerchantDowngradeService.relist`（装配 `RetryTemplate`，`RELIST_MAX_ATTEMPTS = 3`、退避 40ms 起 ×2 封顶 200ms、只认 `CannotAcquireLockException`） |
+| **重试可视化（要）** | 重试动作发 `protection` 事件（`action=retry` / `attempt=N` / `result`）；实时日志页可见；加测试钉「多次重试事件同 traceId」 | `ProtectionMetrics.retry(...)` → 第 9 环新增两档 `retry_success` / `retry_failed`（result 由五档变**七档**） |
+
+**⚠️ 本笔的事实更正（四条，全部是实测，不是推断）**
+
+1. **落点由 `GoodsService` 三处写方法 → `MerchantDowngradeService.relist`**（推翻上一小节 `:2488` 与 TD-74 原文）。
+   全仓**唯一**的反向锁序对是 `MerchantApplicationService.audit`（写序 **user→goods**）× `MerchantDowngradeService.relist`
+   （写序 **goods→user**）；`GoodsService` 那三处**不在任何一个环上**。「多表事务 ⇒ 死锁只可能在这类地方」这条**推理链没错**，
+   错的是「本仓的多表事务里恰好有反向对的那一对在哪」。依据 = 死锁侦查的 `LATEST DETECTED DEADLOCK` 段两个事务的 SQL 与持锁/等锁两列。
+2. **那 49 行锁全部来自 `goods` 侧**（推翻「两表都全表扫」这半条）。`goods` 侧 `UPDATE … WHERE MerchantId = ?` 确实无索引可走
+   ⇒ 全表扫 + 对扫到的**每一行**加 X 锁（INNODB STATUS 报 **49 row lock(s)**）；但 `user` 侧 `UPDATE user … WHERE username = ?`
+   走的是 **PRIMARY**（`user` 的主键**就是** `username`）⇒ 本来就只锁 1 行。**这正是裁定「留实测后再定」那个问句的答案：不必加。**
+3. **面板上那枚 `retry` 由「必须不可点」翻转为「能拨且有事发生」** —— 它从 `PROTECTIONS_NOT_WIRED` 移出（该表只剩 `degrade`）。
+   ⚠️ **留在里面反而会造出一个死控件**，正是 commit 2 明令禁止的那一种 ⇒ 三处用户可见文案（`AttackConsole.vue` 副标题 /
+   SFC 文档块 / `observe-labels.js`）**当笔改**，否则页面在说谎（TD-20 那一族）。
+4. **`RetryTemplate` 是「先问 `canRetry`、再执行」的循环** ⇒ 把运行时开关直接短路在 `canRetry` 上，会让「关掉重试」变成
+   「**连第一次都不执行**」（抛 `RetryException`，且它**没有 cause** —— 原始死锁在异常链上就丢了）。修法一行：
+   `if (context.getLastThrowable() == null) return true;`（先无条件放行第一次）。⚠️ **这条本笔早先的注释里写反过**，已按实测改正；
+   另注意 `RetryContext.getRetryCount()` 首次为 **0** ⇒ `attempt = count + 1`。
+
+**落码清单**
+
+| # | 项 | 落点 | 实证 |
+|---|---|---|---|
+| 1 | 治因 · 索引 | `mall_management_sql.sql` 段⑳ `idx_goods_merchant (MerchantId)` | 探针 `scripts/probes/d2-deadlock-scout.mjs` 对比两份；`EXPLAIN` 实测 |
+| 2 | 治果 · 重试 | `MerchantDowngradeService`（300 → **457** 行）—— `RetryTemplate` + `TransactionTemplate` 分两层、每次尝试**各起一个新事务** | `merchant/…/RelistDeadlockRetryTest`（**7 条**，新增文件） |
+| 3 | 重试可视化 | `ProtectionMetrics`（184 → **207** 行；`retry(...)` 入口 + 两档 `Result`）· `ProtectionMetricsTest`（五档扩**七档**） | `ProtectionMetricsTest` · `EventBroadcasterTest` |
+| 4 | 口径落成代码 | `ProtectionGate`（168 → **174** 行；`WIRED_KEYS` 3 → **4** 键） | `ProtectionGateTest` · `ProtectionKeysAlignmentTest` |
+| 5 | 前端口径同步 | `observe-labels.js`（锁定表只剩 `degrade` + tooltip 分族）· `AttackConsole.vue`（副标题 / SFC 文档块 / CSS 注释） | 探针 `probe-d2-locked-switches.mjs`（**20/20**）+ 截图 `evidence/c3-block7/d2-protection-switches-after-2b.png` |
+
+**⚠️ 判据怎么读 —— 这一条最容易读反：结论是「死锁次数不变、5xx 归零」，不是「加了重试所以不死锁了」**
+
+【三份对照：同一探针、同一场景、同一台 VM 库】
+
+| 轮次文件（`docs/agent/evidence/c3-block7/`） | `goods` 索引 | `relist` 重试 | 1213 增量 | A 侧失败 | **HTTP 5xx** |
+|---|:--:|:--:|---:|---:|---:|
+| `d2-deadlock-scout-48x4.txt` | 无 | 无 | **149** | 0 | **139** |
+| `d2-deadlock-scout-after-index.txt` | 有 | 无 | **139** | 0 | **139** |
+| `d2-deadlock-scout-with-retry.txt` | 有 | 有 | **141** | 0 | **0** |
+
+- **第一行 → 第二行：索引确实生效，但 5xx 一个都没少**（139 → 139）。锁粒度已从「持 **49 row lock(s)**」压到
+  「持 `index idx_goods_merchant` 上的**单条** record lock」（两侧 `HOLDS` / `WAITING` 都落在该索引的单条上）；
+  **可环没拆掉** —— 环的成因是**两个事务访问顺序相反**，与各自锁住几行无关 ⇒ 缩锁范围只能减少牵连面。
+  ⚠️ **把它读成「索引没用」是读反了**；把它读成「索引能替代重试」也是读反了。
+- **第二行 → 第三行：加**重试**之后 5xx = 0**，而 1213 增量是 **141**（与上一份的 139 同量级）⇒ **死锁照旧在发生，
+  只是每一次都被第 2 次尝试兜住**。
+- **因果闭合的那一环**（光看 `5xx = 0` 还不够 —— 它还能被「异常被别处 catch 吞了」「端点压根没被打到」解释掉）：
+  探针跑完**立刻读同进程 actuator** ⇒ `mall.protection.events{result=retry_success}` = **141**，与 1213 增量**逐一对上**；
+  `result=retry_failed` **0 条**（⇒ 没有一次用满 3 次尝试）。
+
+**⚠️ 口径翻转的连锁（本笔最隐蔽的风险）** ⇒ 落码后全仓还有一批注释 / 用户可见文案写着「`retry` 不落码 / 三键接闸」，
+已按 D pack B1 逐字「**必须当笔改**」全部同步：`AttackController` · `AttackEngine`（含**用户可见的** `Engine.Notes` 回显文案）·
+`application.properties` 开关注释 · `api-contract.md`（九处，**全部同行替换**）· `tech-debt.md`（TD-74 状态行 + 订正表）· 探针断言。
+⚠️ `api-contract.md` 原文那句「**不许**写成「4 键已接闸」」现在**必须反过来** —— 已改写为「不许写成「5 键已接闸」」**并注明它当时是对的**。
+
+**测试** ⇒ **548 passed / 0 failed / 0 errors / 26 skipped**（基线 **541** ⇒ 本笔 **+7**，全部来自新增的 `RelistDeadlockRetryTest`；
+`ProtectionMetricsTest` / `EventBroadcasterTest` / `ProtectionGateTest` 等为**既有类扩条**，计入原条数）。
+⚠️ `RelistDeadlockRetryTest` 里两条**结构钉**是刻意的：① 反射断言 `relist` 上**没有** `@Transactional`（有人加回去 ⇒ 重试退化成
+「在已回滚的事务里重试」）；② 用计数替身 `CountingTxManager` 断言**每次尝试各起一个新事务**。
+
+**⚠️ 本笔不 push / 不 merge**；**手验**按批文仍推迟到 **commit 4 之后**统一一轮。⚠️ **dev / a3 两个 profile 都是
+`app.auth.enabled=false`** ⇒ 手验绿 ≠ 默认 profile 绿（每次手验前重复这一句）。

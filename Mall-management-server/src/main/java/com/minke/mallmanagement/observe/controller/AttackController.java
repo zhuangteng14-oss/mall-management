@@ -108,7 +108,7 @@ public class AttackController {
      *                        缺省 = 全 8 个场景按各自的缺省权重
      * @param protections     防护开关（丁），JSON 数组串：缺省 = 全开
      *                        （{@code rateLimit / circuitBreak / degrade / retry / poolIsolation}）。
-     *                        ⚠️ D 段 commit 2 起**真生效**：{@code rateLimit} / {@code circuitBreak} / {@code poolIsolation} 三键接闸；{@code retry} 只登记 TD-74、{@code degrade} 只作记录位（面板上不可开关）
+     *                        ⚠️ D 段 commit 2 起**真生效**，**阶段 2b 起是四键**：{@code rateLimit} / {@code circuitBreak} / {@code retry} / {@code poolIsolation} 接闸；{@code degrade} 只作记录位（面板上不可开关）
      * @param injections      注入开关（丁），JSON 数组串：缺省 = 全关
      *                        （{@code redisDown / mqDown / dbSlow}）。⚠️ 只有 {@code redisDown} 真接通
      *

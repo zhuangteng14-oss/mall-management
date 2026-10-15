@@ -16,31 +16,39 @@ import java.util.concurrent.atomic.AtomicLong;
  * 由演练（{@code /admin/observe/attack/run} 的 {@code protections} 入参）在**开跑那一刻**整体写入，
  * 演练结束时复位成默认值。
  *
- * <h2>【本段开关的真实口径：3 键接闸 + 1 键登记 TD + 1 键记录位。**不许**写成「4 键已接闸」】</h2>
+ * <h2>【本段开关的真实口径：4 键接闸 + 1 键记录位】</h2>
  * <pre>
  *   key             本段状态      闸在哪                        读它的地方
  *   ──────────────  ───────────  ────────────────────────────  ────────────────────────────
  *   rateLimit       接闸          入站限流闸（200 QPS + 白名单） InboundRateLimitInterceptor
  *   circuitBreak    接闸          关键下游熔断（2 个实例）        @CircuitBreaker(mallMysqlRead/mallMysqlWrite)
  *   poolIsolation   接闸          观测池分池（有界 ↔ 无界）       ObservePoolConfig
- *   retry           **不落码**    无（登记 TD-74）               无 —— 本段一行重试代码都没有
+ *   retry           接闸          死锁重试（relist，最多 3 次尝试）  MerchantDowngradeService 的 GatedRetryPolicy
  *   degrade         只记录        无（系统固有 fail-open）       无 —— 只回给前端做展示
  * </pre>
  * ⚠️ 这张表是**本条口径的唯一出处**（报告里那张「裁定落实表」与它逐行对应）。
- * {@link #WIRED_KEYS} / {@link #TD_ONLY_KEY} / {@link #RECORD_ONLY_KEY} 把它落成了代码，
+ * {@link #WIRED_KEYS} / {@link #RECORD_ONLY_KEY} 把它落成了代码，
  * 于是「哪几个键真的有闸」这件事**可以断言**（{@code ProtectionGateTest}），不靠文档自觉。
  *
- * <h2>【为什么 retry 与 degrade 也留在这五个位里，而不是从表里删掉】</h2>
- * 三件事把这两个键钉在这里：
+ * <h2>【retry 从「登记 TD」改成「接闸」的经过（2026-10-15，D 段 · 阶段 2b）】</h2>
+ * 本类此前写的是「3 键接闸 + 1 键登记 TD（{@code TD_ONLY_KEY = "retry"}）+ 1 键记录位」。
+ * 用户 2026-10-15 在拿到死锁实测（48/48 轮复现、149 次 {@code ER_LOCK_DEADLOCK}）之后裁定
+ * **接闸 3 → 4**：{@code retry} 现在真有闸 —— {@code MerchantDowngradeService.relist} 的重试
+ * 读本开关（关掉 ⇒ 一次失败即抛、不再试）。⇒ {@code TD_ONLY_KEY} 常量随之删除、
+ * {@link #WIRED_KEYS} 由 3 个键变 4 个键。
+ * ⚠️ **不变式本身没变、反而更强了**：WIRED_KEYS ∪ {RECORD_ONLY_KEY} = KEYS，且两者不交
+ * （4 + 1 = 5）。这正是当初把口径落成常量的用意 —— 挪动一个键必须同时改一条会红的测试。
+ *
+ * <h2>【为什么 degrade 还留在这五个位里，而不是从表里删掉】</h2>
+ * 三件事把这一枚钉在这里：
  * <ol>
- *   <li><b>它们是演练入参的白名单</b>：{@code AttackEngine.PROTECTION_KEYS} 认这五个 key，
- *       拨了不认识的 key 当场 400。删掉两个 ⇒ 前端现有的两枚开关会变成 400。</li>
- *   <li><b>它们要能「如实回答自己没生效」</b>：{@link #wired(String)} 为 {@code false} 的键，
+ *   <li><b>它是演练入参的白名单</b>：{@code AttackEngine.PROTECTION_KEYS} 认这五个 key，
+ *       拨了不认识的 key 当场 400。删掉它 ⇒ 前端现有的那一枚开关会变成 400。</li>
+ *   <li><b>它要能「如实回答自己没生效」</b>：{@link #wired(String)} 为 {@code false} 的键，
  *       面板必须画成**不可开关**（标灰 + tooltip），而不是画成一个能拨却什么也不发生的死控件。</li>
- *   <li><b>它们不是「没实现」，是「本段不落码」</b>：{@code retry} 有明确的落点与触发条件
- *       （TD-74：有死锁实测证据后再动 {@code GoodsService} 那三处写方法）；{@code degrade}
- *       对应的行为**本来就存在**（缓存 L2 回落 / 锁 fail-open / MQ 缺席 / 审计 fail-open），
- *       只是不由这个开关管 —— 所以它的 UI 文案必须是「记录位」，不是「待实现」。</li>
+ *   <li><b>它不是「没实现」，是「不由这个开关管」</b>：{@code degrade} 对应的行为**本来就存在**
+ *       （缓存 L2 回落 / 锁 fail-open / MQ 缺席 / 审计 fail-open），只是不由这个开关管 ——
+ *       所以它的 UI 文案必须是「记录位」，不是「待实现」。</li>
  * </ol>
  *
  * <h2>【默认值 = 全开，以及「为什么演练结束必须复位」】</h2>
@@ -69,11 +77,9 @@ public class ProtectionGate {
     public static final List<String> KEYS = List.of(
             "rateLimit", "circuitBreak", "degrade", "retry", "poolIsolation");
 
-    /** 本段**真的接了闸**的三个 key（口径表见类注释）。 */
-    public static final List<String> WIRED_KEYS = List.of("rateLimit", "circuitBreak", "poolIsolation");
-
-    /** 本段**不落码、只登记 TD** 的 key（TD-74）。 */
-    public static final String TD_ONLY_KEY = "retry";
+    /** 本段**真的接了闸**的四个 key（口径表见类注释）。 */
+    public static final List<String> WIRED_KEYS = List.of(
+            "rateLimit", "circuitBreak", "retry", "poolIsolation");
 
     /** 本段**只记录、不接闸**的 key（系统固有 fail-open 设计，不由开关管）。 */
     public static final String RECORD_ONLY_KEY = "degrade";
@@ -137,7 +143,7 @@ public class ProtectionGate {
     /**
      * 这个 key **在本段有没有真闸**（口径表见类注释）。
      *
-     * <p>给前端与报告用：{@code false} 的两个键（{@code retry} / {@code degrade}）面板上必须
+     * <p>给前端与报告用：{@code false} 的那个键（{@code degrade}）面板上必须
      * 画成不可开关 —— <b>能点但没效果的开关一律不允许</b>（用户 2026-10-15 裁定逐字）。
      */
     public static boolean wired(String key) {

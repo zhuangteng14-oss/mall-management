@@ -4,7 +4,7 @@
 > ⚠️ **本段不是 8 块之一** —— 块表（块 1–8）里没有它。它是**块 7 与块 8 之间**插入的一段加固，
 > 由用户 2026-10-15 的**重排期批文**定名「**D 段**」；它没有独立分支，工作继续落在
 > `feat/c3-admin-block7` 上（块 7 收尾 commit 1 之后接着 commit 2/3/4）。
-> ⚠️ **状态（2026-10-15 更新）：规划文档；①②③⑤⑥ 已由 D 段 commit 2 落码**（④ 重试只登记 **TD-74**、`degrade` 只作**记录位**；边界四项与演示联动归 commit 3）—— 批文 ⑥ 逐字：「D 段 pack（规划，**不写代码**）出
+> ⚠️ **状态（2026-10-15 更新）：规划文档；①②③⑤⑥ 已由 D 段 commit 2 落码**（④ 重试**原**只登记 **TD-74** —— ⚠️ **2026-10-15 阶段 2b 已把它落码并关闭 TD-74**，接闸口径由「**3 键接闸 + 1 键登记 TD + 1 键记录位**」变为「**4 键接闸 + 1 键记录位**」〔`retry` 接上〕，详见尾部〈阶段 2b 追加〉；`degrade` 仍只作**记录位**；边界四项与演示联动归 commit 3）—— 批文 ⑥ 逐字：「D 段 pack（规划，**不写代码**）出
 > `docs/agent/context-packs/c3-block-D-hardening.md` · 行号实测」。本 pack 即该产物。
 > ⚠️ **「现状」全是快照**：取点 = `4d75eec`（块 7 收尾 commit 1 落码前的 HEAD）+ 本笔工作区实测。
 > 行号随代码增删会漂 ⇒ 回指旧行号按「取点当时实测」理解。**引用活文档一律写 `文件.md#锚点`；
@@ -165,10 +165,10 @@ static final List<String> PROTECTION_KEYS =
 1. `AttackEngine.java:325`（类注释）**原话**：「⚠️ **本笔只负责把它们「收下来、记进演练记录、打进日志」，
    一条防护逻辑都不实现** …… 硬边界 A 逐字是「加固（扩池 / 扩线程 / 优化慢 SQL）与补救
    （限流 / 熔断 / 降级 / 重试）**都在 D 段**」」—— ⚠️ **commit 2 已改**（`:325-328` 现址不变，见尾部〈落地登记〉）。
-2. `AttackEngine.java:1652`（回显文案）**原话**：「Protections 五个开关本笔**只记录不实现**（防护在 D 段）」—— ⚠️ **commit 2 已改**（现为「五枚里三枚真生效…」，同占 `:1652-1653`）。
-3. 前端 `AttackConsole.vue:124`（原「默认全开 · 本笔只记录、不改读数（接闸在 D 段）」）与 `:134` —— ⚠️ **两处均已由 commit 2 改**（`:124` 的新文案 + `:134` 的 `:aria-disabled` 守卫；**别再按原话 grep**）。
+2. `AttackEngine.java:1652`（回显文案）**原话**：「Protections 五个开关本笔**只记录不实现**（防护在 D 段）」—— ⚠️ **commit 2 已改**（现为「五枚里三枚真生效…」，同占 `:1652-1653`；⚠️ **阶段 2b 又改成「四枚真生效 / `degrade` 只作记录位」**，仍占 `:1652-1653`）。
+3. 前端 `AttackConsole.vue:127`（原 **124** 行；原文「默认全开 · 本笔只记录、不改读数（接闸在 D 段）」）与 `:137`（原 **134** 行）—— ⚠️ **两处均已由 commit 2 改**（新文案 + `:aria-disabled` 守卫；**别再按原话 grep**）。⚠️ **阶段 2b 又整体 +3**（该文件上方副标题块净插 3 行，故原 124 / 134 行为现 127 / 137 行）；**阶段 2b 把副标题再改成**「限流 / 熔断 / 重试 / 分池已接闸，改读数；降级不可开关」。
 4. 契约侧另有：`api-contract.md#api-h-1` 的载体表注（原「两者都先落成契约面 …… 语义落地归 D 段
-   —— 这一条是**如实登记**」）—— ⚠️ **commit 2 已同笔改**（改为「✅ 已接闸（3 键 + 1 键 TD + 1 键记录位）」
+   —— 这一条是**如实登记**」）—— ⚠️ **commit 2 已同笔改**（改为「✅ 已接闸（3 键 + 1 键 TD + 1 键记录位）」（⚠️ **阶段 2b 起再改为「4 键 + 1 键记录位」**）
    + 附录 `#api-i-3` 指针）；原引的**快照行号**（`AttackController:110`）随之删去，不再需要重指。
 
 ⚠️ **`degrade`（降级）在本仓已有半个实体**：`Mall-management-server` 里有一族「降级」行为
@@ -263,8 +263,8 @@ static final List<String> PROTECTION_KEYS =
 
 ## B 档 / C 档（自裁，报备 —— 不落硬线，可落码）{#pack-c3-block-d-hardening-b}
 
-- **B1** 五个防护开关键**在页面上的可见后果**：接闸后，`AttackConsole.vue:124` 那句
-  「本笔只记录、不改读数（接闸在 D 段）」必须**当笔改**（否则页面在说谎 —— TD-20 那一族）—— ✅ commit 2 已改。
+- **B1** 五个防护开关键**在页面上的可见后果**：接闸后，`AttackConsole.vue:127` 那句
+  「本笔只记录、不改读数（接闸在 D 段）」必须**当笔改**（否则页面在说谎 —— TD-20 那一族）—— ✅ commit 2 已改；⚠️ **阶段 2b 又改一次**（`retry` 接闸 ⇒ 副标题现为「限流 / 熔断 / 重试 / 分池已接闸，改读数；降级不可开关」）——**同一条纪律，同笔改**。
 - **B2** 熔断 / 限流的**参数键名**：照本仓惯例走 `mall.*` + `@Value` 默认值（先例：
   `mall.observe.sse.interval-ms`、`mall.drill.engine.in-flight-cap:512`）⇒ 若只是默认值、不落 properties，不算 A 档。
 - **B3** 单元测试**照既有分层写**：纯逻辑进 `*Test`（不起 Spring），需要真 bean 的进切片
@@ -293,7 +293,7 @@ static final List<String> PROTECTION_KEYS =
      OccurredAt, created_at, updated_at`（`mall_management_sql.sql:1866-1883`）—— **没有 `Seq`**，
      也没有任何唯一键（只有 `PRIMARY KEY(Id)` + 4 个普通索引）。
    - 内存里**确实有**一个 `seq`，但它**不能**当幂等键：`ObservedEvent.seq` 是**合并环游标**
-     （`EventBroadcaster.java:767` `cursor.getAndIncrement()`；record 定义 `:194-196`）——
+     （`EventBroadcaster.java:774` `cursor.getAndIncrement()`〔原 **767** 行〕；record 定义 `:194-196` 未动）——
      进程内单调、**重启归零、跨实例不可比、且 2048 回绕**。
      它能安全使用的地方只有一个：**同一条消息字节被重投**时那个数**不变**（这正是幂等需要的那半）。
    - ⇒ 口径二选一（**待裁**）：**(甲)** 加列 `Seq` + `UNIQUE (TraceId, Seq)`（A 档：新字段 + 新 DDL）；
@@ -384,9 +384,9 @@ static final List<String> PROTECTION_KEYS =
 | ⑤ 第 9 类事件环 | 枚举 `EventBroadcaster.java:132-142`（第 9 项 `PROTECTION`）· 新源环 `observe/metrics/ProtectionMetrics.java` · 并入段 `ingestProtection` `:474-495`（`poll()` 里的调用 `:274`） |
 | ⑤ 落库 | `ObservedEventDao` **一行没改**（`KIND_MAX = 16` ≥ `"protection"` 的 10 字符，另两处与 kind 取值无关） |
 | ⑤ 数据 / 文档 | `mall_management_sql.sql:1868` 与 `db-schema.md` §16-1 的 8 名清单**各补上 `protection`**（同行替换，净 0 行） |
-| ⑥ 五键 | `AttackEngine.PROTECTION_KEYS` **未动**（只读）；接闸口径 = **3 键接闸 + 1 键登记 TD-74 + 1 键记录位**，判据落在新建的 `protect/ProtectionGate`（`KEYS` / `WIRED_KEYS`） |
-| ⑥ 面板 | 三枚可拨；`retry` / `degrade` **标灰 + `disabled` + `aria-disabled` + 逐枚 tooltip**（禁止死控件） |
-| ⑦ 重试 | **未落码** —— 只登记 **TD-74**（本笔没有 `@Retry` / retry 依赖） |
+| ⑥ 五键 | `AttackEngine.PROTECTION_KEYS` **未动**（只读）；接闸口径 = **3 键接闸 + 1 键登记 TD-74 + 1 键记录位**（⚠️ **阶段 2b 起 = 4 键接闸 + 1 键记录位**，`WIRED_KEYS` 3 → 4），判据落在新建的 `protect/ProtectionGate`（`KEYS` / `WIRED_KEYS`） |
+| ⑥ 面板 | 三枚可拨（⚠️ **阶段 2b 起四枚可拨**）；`retry` / `degrade` **标灰 + `disabled` + `aria-disabled` + 逐枚 tooltip**（禁止死控件）—— ⚠️ `retry` 已移出该组，现只剩 `degrade` |
+| ⑦ 重试 | **未落码** —— 只登记 **TD-74**（本笔没有 `@Retry` / retry 依赖）⚠️ **阶段 2b 已落码**（`MerchantDowngradeService.relist` 的编程式 `RetryTemplate`，**不是** `@Retryable`；见 `tech-debt.md#td-74-correction`） |
 | ⑧ 熔断 | `mallMysqlRead` / `mallMysqlWrite` 两个实例；Redis / MQ 不加（手写熔断已在，登记 **TD-75**） |
 | ⑨ 3「帧读数要反映防护」 | **未做** ⇒ 帧里的 `protections` 读数仍是 8 条（见下「未还项」） |
 
@@ -443,13 +443,13 @@ LOST∩NEW 逐条可指认，本节以下给的就是它们的旧 → 新）· *
 
 | 文件 | 旧话 | 现话 |
 |---|---|---|
-| `AttackEngine.java:160`（§八 标题） | 「本笔只收下、只记录，不实现」 | 「D 段 commit 2 起：三键真生效 / 一登记 TD / 一记录位」 |
-| `AttackEngine.java:163-164` | 「本笔一条防护逻辑都不实现」 | 「本类一条防护逻辑都不实现 …… 真闸在 D 段 commit 2 落地」 |
-| `AttackEngine.java:320`（分节横幅） | 「本笔只收下、只记录」 | 「本类只收下、只记录；真闸在 `ProtectionGate`」 |
-| `AttackEngine.java:325-328`（`PROTECTION_KEYS` 类注释） | 「本笔只负责把它们收下来 …… 一条防护逻辑都不实现」 | 「本类只负责收下来 …… 口径 3 键接闸 + 1 键登记 TD + 1 键记录位」 |
-| `AttackEngine.java:1652-1653`（`/attack/run` 响应里的 `Engine.Notes`） | 「Protections 五个开关本笔只记录不实现（防护在 D 段）」 | 「五枚里三枚真生效 …… `retry` 只登记 TD-74、`degrade` 只作记录位 ⇒ 面板上不可开关」 |
-| `AttackController.java:111`（`@param protections`） | 「本笔只记录不实现（防护逻辑在 D 段）」 | 「D 段 commit 2 起真生效：三键接闸；`retry` 只登记 TD-74、`degrade` 只作记录位」 |
-| `AttackConsole.vue:510-512`（SFC 文档块） | 「5 个防护开关 …… 本笔只收下、只记录、不实现」 | 「防护那组自 D 段 commit 2 起三键真生效 …… 另两枚画成不可开关」 |
+| `AttackEngine.java:160`（§八 标题） | 「本笔只收下、只记录，不实现」 | 「D 段 commit 2 起：三键真生效 / 一登记 TD / 一记录位」—— ⚠️ **阶段 2b 再改**：「D 段 commit 2 起三键、**阶段 2b 起四键真生效** / 一记录位」（`:160` 现址不变） |
+| `AttackEngine.java:163-164` | 「本笔一条防护逻辑都不实现」 | 「本类一条防护逻辑都不实现 …… 真闸在 D 段 commit 2 落地」—— ⚠️ **阶段 2b 再改**：句尾补「`retry` 于阶段 2b 接上，口径是 **4 键接闸 + 1 键记录位**」（`:163-164` 现址不变） |
+| `AttackEngine.java:320`（分节横幅） | 「本笔只收下、只记录」 | 「本类只收下、只记录；真闸在 `ProtectionGate`」（⚠️ **阶段 2b 未动**：它没写死键数，**不需要改**） |
+| `AttackEngine.java:325-328`（`PROTECTION_KEYS` 类注释） | 「本笔只负责把它们收下来 …… 一条防护逻辑都不实现」 | 「本类只负责收下来 …… 口径 3 键接闸 + 1 键登记 TD + 1 键记录位」—— ⚠️ **阶段 2b 再改**（现落在 `:327-328`）：「接闸口径自阶段 2b 起是 **4 键接闸 + 1 键记录位** …… **别读成「五枚都接上了」**」 |
+| `AttackEngine.java:1652-1653`（`/attack/run` 响应里的 `Engine.Notes`） | 「Protections 五个开关本笔只记录不实现（防护在 D 段）」 | 「五枚里三枚真生效 …… `retry` 只登记 TD-74、`degrade` 只作记录位 ⇒ 面板上不可开关」—— ⚠️ **阶段 2b 再改**（**用户可见的回显文案**，`:1652-1653` 现址不变）：「五枚里**四枚真生效**（`rateLimit` / `circuitBreak` / **`retry`** / `poolIsolation`，阶段 2b）；`degrade` 只作记录位」 |
+| `AttackController.java:111`（`@param protections`） | 「本笔只记录不实现（防护逻辑在 D 段）」 | 「D 段 commit 2 起真生效：三键接闸；`retry` 只登记 TD-74、`degrade` 只作记录位」—— ⚠️ **阶段 2b 再改**（`:111` 现址不变）：**四键**（`rateLimit` / `circuitBreak` / `retry` / `poolIsolation`） |
+| `AttackConsole.vue:513-515`（SFC 文档块；原 **510-512** 行） | 「5 个防护开关 …… 本笔只收下、只记录、不实现」 | 「防护那组自 D 段 commit 2 起三键真生效 …… 另两枚画成不可开关」—— ⚠️ **阶段 2b 再改**：「自 **D 段 commit 2** 起有真闸、**阶段 2b 起四键**（限流 / 熔断 / 重试 / 分池真生效），只剩 `degrade`（记录位）画成不可开关」 |
 | 本 pack `:17`（一句话定位） | 「五个开关**今天只记录不实现**」 | 「**在取点当天**只记录不实现」 |
 | 本 pack `:164-169`（三处原话） | 三条原话 + 「D 段做完要逐处改」 | 原文保留为**原话**，各条后面标「**commit 2 已改**」 |
 | 本 pack `:266-267`（B1） | 「必须当笔改」 | 同上，尾注「✅ commit 2 已改」 |
@@ -464,5 +464,71 @@ LOST∩NEW 逐条可指认，本节以下给的就是它们的旧 → 新）· *
    的 `protections(...)` 仍返回**8 条**防护命中（`cacheHit` / `lockTimeout` / … / `identityRejected`），
    本笔新增的防护动作**只**从帧的 `counts`（第 9 键 `protection`）与 `mall.protection.events` 指标回答。
    ⇒ 归 **commit 3**（攻防联动那笔要在页面上给出「改读数」的可见后果）。
-2. **`retry`** 见 `tech-debt.md` **TD-74**；**Redis / MQ 不加熔断**的理由见 **TD-75**。
+2. **`retry`** 见 `tech-debt.md` **TD-74**（⚠️ **2026-10-15 阶段 2b 已落码并关闭**，订正表见该文件的 `#td-74-correction` 锚点）；**Redis / MQ 不加熔断**的理由见 **TD-75**。
 3. §⑧ 的四条（SSE 连接保护 / MQ 幂等与 DLQ / 无上限列表 / 脱敏）**本笔一条没动** ⇒ 归 commit 3。
+
+---
+
+## 阶段 2b 追加（2026-10-15）—— **口径：3 键接闸 → 4 键接闸 + 1 键记录位** {#pack-c3-block-d-hardening-s2b}
+
+> ⚠️ **本节是上面 commit 2 登记（〈落地登记〉/〈未还项〉）的续笔，不重写它。** 上面凡是写
+> 「`retry` 只登记 TD-74 / 三枚可拨 / 3 键接闸」的句子，都是 **commit 2 那一刻的真状态**（保留）；
+> 本节只登记**这一笔把它们改成了什么**。
+> ⚠️ **判据永远读 `ProtectionGate.WIRED_KEYS`**（`KEYS` 5 个 / `WIRED_KEYS` **4** 个 / 记录位 `degrade` 1 个）。
+
+**这一段做什么** ⇒ 落顾问 2026-10-15 裁定「一 死锁修复（阶段 2b，独立一笔）」的**
+
+| 治则 | 落点 |
+|---|---|
+| **治因（丙）** 加索引 | Migration ⑳ `goods` 上的 `idx_goods_merchant (MerchantId)`（`mall_management_sql.sql` 段⑳ · `db-schema.md §18` · `db-migration.md` 注意 24）。⚠️ `user.merchantid` 的同类索引 **实测后决定不加** —— `user` 侧那条 `UPDATE … WHERE username = ?` 走的是 **PRIMARY**（`user` 主键**就是** `username`），本来就只锁 1 行；INNODB STATUS 里那 **49 row lock(s)** 全部来自 `goods` 侧 |
+| **治果（甲）** 落重试 | `MerchantDowngradeService.relist` —— 装配**编程式** `RetryTemplate`（`RELIST_MAX_ATTEMPTS = 3`、退避 40ms 起 ×2 封顶 200ms、只认 `CannotAcquireLockException`），**不是**注解 `@Retryable`（要读运行时开关） |
+| **可视化（要）** | `ProtectionMetrics.retry(...)` → 第 9 环新增两档 `retry_success` / `retry_failed`（`result` 五档 → **七档**） |
+
+**⚠️ 判据怎么读 —— 这一条最容易读反 ⇒ 结论是「死锁次数不变、`5xx` 归零」**
+
+| 轮次文件（`docs/agent/evidence/c3-block7/`） | `goods` 索引 | `relist` 重试 | 1213 增量 | **HTTP 5xx** |
+|---|:--:|:--:|---:|---:|
+| `d2-deadlock-scout-48x4.txt` | 无 | 无 | 149 | **139** |
+| `d2-deadlock-scout-after-index.txt` | 有 | 无 | 139 | **139** |
+| `d2-deadlock-scout-with-retry.txt` | 有 | 有 | 141 | **0** |
+
+- **索引确实生效，但 5xx 一个都没少**（139 → 139）：锁粒度由「持 49 row lock(s)」压到「持 `idx_goods_merchant`
+  上的**单条** record lock」；**可环没拆掉** —— 环的成因是**两个事务访问顺序相反**（`MerchantApplicationService.audit`
+  写序 user→goods × `MerchantDowngradeService.relist` 写序 goods→user），与各自锁住几行无关。
+  ⚠️ **既别读成「索引没用」，也别读成「索引能替代重试」。**
+- **加**重试**之后 5xx = 0**，而 1213 增量 141 与上一份 139 同量级 ⇒ **死锁照旧在发生，只是每次都被第 2 次尝试兜住**。
+  因果闭合的那一环：探针跑完立刻读同进程 actuator ⇒ `mall.protection.events{result=retry_success}` = **141**（与 1213 增量逐一对上）、
+  `result=retry_failed` **0 条**（没有一次用满 3 次尝试）。
+
+**⚠️ 落点被实测推翻的那一条（与上面 commit 2 登记相反）**：TD-74 原判落点 = `GoodsService` 的**三处写方法**；
+实测真落点 = `MerchantDowngradeService.relist` —— 全仓**唯一**的反向锁序对在上面那一对，
+`GoodsService` 那三处**不在任何一个环上**（它们是多表写入，但**没有**任何一个事务按相反顺序碰同一对表）。
+⇒ 「多表事务 ⇒ 死锁只可能在这类地方」这条**推理链没错**，错的是「本仓的多表事务里恰好有反向对的那一对在哪」。
+
+**⚠️ 本笔的 code 行号重指（同行替换、净 0 行；只列本 pack 内被顶偏的）**
+
+| 引用处 | 旧（写「原 N 行」不写 token） | 新 | 成因 |
+|---|---|---|---|
+| 本 pack 原 169 行（三处原话 · 第 3 条） | `AttackConsole.vue` 原 **124** / 原 **134** 行 | **`AttackConsole.vue:127`** / **`:137`** | 该文件上方副标题块净插 3 行 |
+| 本 pack 原 266 行（B1） | `AttackConsole.vue` 原 **124** 行 | **`AttackConsole.vue:127`** | 同上 |
+| 本 pack 原 296 行（§⑧ 幂等键那一段） | `EventBroadcaster.java` 原 **767** 行 | **`EventBroadcaster.java:774`** | 该文件净增 7 行（第 9 环并入段 + `poll()` 调用） |
+| 本 pack 原 452 行（失真原文表 · 末行） | `AttackConsole.vue` 原 **510-512** 行 | **`AttackConsole.vue:513-515`** | 同上副标题块 +3 行 |
+
+⚠️ **旧值一律写「原 N 行」、不写 `` `文件:N` ``** —— 重指记录本身也是一条引用，写成 token 会往引用集合里
+注入一个**指向旧位置**的陈旧 token（本仓 §26-3 记过这条坑）。
+
+⚠️ 本 pack 自身声明「引用代码写 `文件:行号`（快照，漂了不追）」—— 这里之所以**追**，是因为本节正在改同批引用，
+**不追会留下一条自相矛盾的指路**；**其余未触及的快照行号一律不追**（那是纪律，不是遗漏）。
+
+**未还项（本笔新增，别当成做完了）**
+
+1. **帧读数第 9 条仍未做**（同上面〈未还项〉第 1 条）⇒ 仍归 **commit 3**。
+2. **重试的次数与退避是实验值**（3 次 / 40ms 起 / ×2 / 封顶 200ms）：若下游延迟或 `goods` 数据量显著变化，
+   应重跑 `scripts/probes/d2-deadlock-scout.mjs` 复核（判据 = `HTTP 5xx` 应为 **0**）。
+
+⚠️ **顺带核实掉的一条（别再照旧说法去加启动参数）**：曾有一条说法是「`ObserveMetricsConfig` 构造注入 +
+定义 `MeterFilter` ⇒ 循环依赖、`a3` / `dev` **整台起不来**，要加 `--spring.main.allow-circular-references=true`」。
+**2026-10-15 实测该环已自断** —— 那个 `@Bean` 方法已改成 **`static`**（理由逐字写在 `ObserveMetricsConfig`
+类注释里：静态 `@Bean` 不需要实例化配置类 ⇒ 环自断）。本笔的 dev 启动**没有**加任何
+`allow-circular-references`，后端正常起来并跑完 48 轮死锁侦查（`_work/d2/boot-2b.sh` 头部逐字记着「**刻意不带**」）。
+⇒ **那条旧说法已过期**。

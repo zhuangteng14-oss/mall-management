@@ -975,7 +975,32 @@
 | 正确落点 | `GoodsService` 的**三处写方法**：`goodsAdd`（`GoodsService.java:155`）/ `goodsDe`（`:372`）/ `goodsUp`（`:422`）—— 它们是「多表写入 + `@Transactional`」的组合（`goods` 与 `productsales`，一次写两处）⇒ **死锁只可能产生在这类地方**（纯单表写不会与谁互等）。⚠️ 「落这三处」是**用户 2026-10-15 的裁定**，不是「全仓唯一的多表事务」—— `@Transactional` 在全仓 20 个文件里都有，别把本条读成排他性结论。 |
 | ⚠️ 不得挂哪两处 | ① **不得挂 `OrderService`**：订单链**刻意**禁 `@Transactional`（`orderAdd` 那一族的注释逐字写着为什么 —— 订单状态机靠 CAS + 锁，不用数据库事务回滚）。挂重试会让「一次调用 = 多次 CAS」，与那套设计直接冲突。② **不得拿 `DistributedLockService` 当重试**：那个 cooldown 窗口是「**锁等待**」的重试（抢不到锁就等一会儿再抢），处理的是**并发**；死锁是**已经拿到锁的两个事务互相等**，锁服务看不见它，也解不了它。两件事的判据、落点、退避策略都不同 —— 混为一谈会写出「抢不到锁就重跑整个事务」这种把死锁变成活锁的东西。 |
 | 落地时要注意的三条 | ① **AOP 同类自调用无效**：`@Retry` 与 `@Transactional` 同款，`this.xxx()` 调用不经过代理 ⇒ 重试注解必须挂在**被外部调用**的那一层（本仓的形态就是 `GoodsController` → `GoodsService` 的公开方法，天然满足 —— 但别把被重试的片段再往下抽一层私有方法，那样注解会静默失效）。② **顺序**：重试必须在**事务之外**（每次重试要开一个新事务，否则重试的是同一个已 rollback-only 的事务，重试 N 次仍全败）。本仓的切面 order 实测值（`@CircuitBreaker` = `Integer.MAX_VALUE-4` < 事务切面 = `MAX`）决定「熔断在事务外」；加 `@Retry` 时要**同样实测**它落在哪一层，别照抄。③ **落地前先做实验**：并发压商品写接口（两个事务反向更新同两行）造出真死锁，量出「退避多久 / 试几次」能过 —— 那两个数是**实验值**，不是拍脑袋的缺省值。 |
-| 状态 | ⏸ **登记（2026-10-15，D 段 commit 2 · 用户裁定「本笔不落码，只登记」）**。⚠️ 面板上那枚 `retry` 开关**必须**是不可点的（死控件明令禁止），文案见 `observe-labels.js` 的 `PROTECTION_NOT_WIRED_TIP`。 |
+| 状态 | ✅ **已落码并关闭（2026-10-15 · 阶段 2b）** —— 触发条件已由实测满足、落点经实测订正，逐条见下面〈**TD-74 订正**〉。⚠️ 表里那句「本段不落码 / 面板那枚必须不可点」**只对 D 段 commit 2 那一刻成立**，现已被推翻（`retry` 现在**能拨且有事发生**）。 |
+
+### TD-74 订正（2026-10-15 · D 段 · 阶段 2b）{#td-74-correction} —— 触发条件已满足 ⇒ 已落码；落点与「锁侧」各有一处**实测推翻预判**
+
+> 上面那张表是 commit 2 的登记原文（保留不动）。本节把其中**三条推断**换成**实测**结果。
+> ⚠️ 本节**刻意不写「文件:行号」**（除可点的路径外）：本文件处在 refs 扫描根 `docs/` 内，
+> 写进去的行号会被反向抄成一条新的引用；要定位请用**符号名**。
+
+| 原判（commit 2） | 实测（阶段 2b） | 依据 |
+|---|---|---|
+| 触发条件「先有一份**可复现**的死锁证据」**没满足** ⇒ 不落码 | ✅ **已满足**：48 轮 ×（1×A + 4×B），`ER_LOCK_DEADLOCK` 增量 **149**、且 `SHOW ENGINE INNODB STATUS` 的 `LATEST DETECTED DEADLOCK` 段逐字命中本场景（同时含 `user` / `goods` / `merchant_application` 三表） | `docs/agent/evidence/c3-block7/d2-deadlock-scout-48x4.txt` |
+| 落点 = `GoodsService` 的**三处写方法**（`goodsAdd` / `goodsDe` / `goodsUp`） | ⚠️ **订正：落点 = `MerchantDowngradeService.relist`**。全仓**唯一**的反向锁序对是 `MerchantApplicationService.audit`（写序 **user→goods**）× `MerchantDowngradeService.relist`（写序 **goods→user**）；`GoodsService` 那三处**不在任何一个环上** —— 它们是多表写入，但**没有**任何一个事务按相反顺序碰同一对表。⇒ 「多表事务 ⇒ 死锁只可能产生在这类地方」这条**推理链本身是对的**，错的是「本仓的多表事务里恰好有反向对的那一对在哪」 | 同一份证据的 `LATEST DETECTED DEADLOCK` 段（两个事务的 SQL 与持锁/等锁两列） |
+| 「两表都只有主键、两条 UPDATE 都全表扫描」 | ⚠️ **订正（半条）**：`goods` 侧那条 `UPDATE ... WHERE MerchantId = ?` **确实**无索引可走 ⇒ 全表扫 + 对扫到的**每一行**加 X 锁，INNODB STATUS 报该事务持 **49 row lock(s)**；但 **`user` 侧不是** —— `UPDATE user ... WHERE username = ?` 走的是 **PRIMARY**（`user` 的主键**就是** `username`），它本来就只锁 1 行。⇒ 那 49 行锁**全部来自 `goods` 侧** | `EXPLAIN` 实测 + 同一份 INNODB STATUS |
+| 落地注意三条（AOP 自调用无效 / 重试必须在事务外 / 次数与退避必须是实验值） | ✅ 三条都成立，且**第一条在本项目被换了一种形式踩到**：本笔没用注解 `@Retryable`（要读运行时开关），而是装配 `RetryTemplate`。⚠️ 实测发现 `RetryTemplate` 是「**先问 `canRetry`、再执行**」的循环 ⇒ 把开关直接短路在 `canRetry` 上，会让「关掉重试」变成「**连第一次都不执行**」（表现为抛 `RetryException("Exception in retry")`，且它**没有 cause** —— 原始死锁在异常链上就丢了）。修法一行：`if (context.getLastThrowable() == null) return true;`（先无条件放行第一次） | `RelistDeadlockRetryTest` 7 条全绿 |
+| 「重试必须在事务之外（每次重试一个新事务）」 | ✅ 落地形态：`relist` **不挂** `@Transactional`，事务由内层 `TransactionTemplate` 开 ⇒ 每次尝试都是一个新事务。写了两条**结构钉**：① 反射断言 `relist` 上没有 `@Transactional`（有人加回去 ⇒ 重试退化成「在已回滚的事务里重试」）；② 每次尝试各起一个事务（计数替身 `CountingTxManager`） | `RelistDeadlockRetryTest` |
+| 面板上那枚 `retry` **必须**不可点（死控件禁令） | ⚠️ **翻转**：它现在**能拨且有事发生**（关掉 ⇒ 一次失败即抛、不再试）⇒ 必须从 `PROTECTIONS_NOT_WIRED` 移出、画成**可拨**。⚠️ 留在那份清单里**反而会造出一个死控件** —— 正是用户在 `commit 2` 明令禁止的那一种 | `ProtectionGate.WIRED_KEYS`（4 键）/ `observe-labels.js` 的 `PROTECTIONS_NOT_WIRED`（只剩 `degrade`） |
+| 「不得挂 `OrderService`」/「不得拿 `DistributedLockService` 当重试」 | ✅ 两条都遵守：重试只落在 `MerchantDowngradeService` 这一个类上，与订单链和锁服务都无关 | 同上 |
+
+**结果（判据怎么读 —— 这一条最容易读反）**：落完索引**再**落重试之后重跑同一探针 48 轮 ⇒ **HTTP 5xx 由 139 → 0**，而 `ER_LOCK_DEADLOCK` 增量仍是 **141**（与「只加索引、没重试」那次的 139 同量级）⇒
+**结论是「死锁次数不变、5xx 归零」，不是「加了重试所以不死锁了」**。
+
+**因果闭合的那一环**（光看 `5xx=0` 还不够 —— 它还能被「异常被别处吞了」解释掉）：探针跑完立刻读**同进程** actuator ⇒ `mall.protection.events{result=retry_success}` = **141**，与 1213 增量**逐一对上**；`result=retry_failed` **0 条**（说明没有一次用满 3 次尝试）。三份对照表与原始输出见 `docs/agent/evidence/c3-block7/d2-deadlock-scout-with-retry.txt`。
+
+**索引那一条要单独说清**：`goods` 的 `MerchantId` 二级索引（Migration ⑳）治的是**争用窗口的宽度**（49 row lock → 单条 record lock），**它不替代重试、也拆不掉环** —— 环的成因是**两个事务访问顺序相反**，与「各自锁住几行」无关：**只加索引那一次，5xx 仍然一个都没少**（139 → 139）。`user.merchantid` 的同类索引**不加**（实测该侧本来就只锁 1 行，裁定「留实测后再定」的答案就是「不必」）。
+
+**状态**：✅ **TD-74 关闭（2026-10-15 · 阶段 2b）**。留一条**常态约束**：重试的「3 次 / 40ms 起 / ×2 / 封顶 200ms」是**实验值**，若将来下游延迟或 `goods` 数据量显著变化，应重跑 `scripts/probes/d2-deadlock-scout.mjs` 复核（判据③ `HTTP 5xx` 应为 0）。
 
 ## TD-75 熔断**只挂 MySQL 两个实例**：Redis / MQ **已有手写熔断** ⇒ 不再叠一层 resilience4j
 

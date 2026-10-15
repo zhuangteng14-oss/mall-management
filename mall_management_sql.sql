@@ -1916,3 +1916,44 @@ SET @s := (SELECT IF(COUNT(*) = 0,
   FROM information_schema.COLUMNS
   WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'admin_audit' AND COLUMN_NAME = 'BatchId');
 PREPARE _p FROM @s; EXECUTE _p; DEALLOCATE PREPARE _p;
+
+-- ============================================================
+-- Migration: 块 7〈D 段 · 死锁治因〉—— `goods` 加 1 个索引（不建表、不加列）
+--            Date: 2026-10-15
+-- 依据：用户 2026-10-15 裁定「丙 + 甲」（接 f0697eb 死锁侦查报告）——
+--       丙 = 加索引治因（A 档 DDL；用户拍定 `goods.MerchantId` 要加）。
+-- 范围：**只加索引**；不改列、不删行、不改既有数据（规则 v2：向后兼容）。
+-- 幂等：走 `information_schema.STATISTICS` 守卫 + `PREPARE/EXECUTE`（照本文件 ⑭ 先例）。
+-- 索引（1）：goods.MerchantId
+--   ⚠️ **为什么要（实测，不是推断）**：2026-10-15 死锁侦查（探针
+--      `scripts/probes/d2-deadlock-scout.mjs`，48 轮 ×(1+4) **48/48 轮复现**、共 149 次
+--      `ER_LOCK_DEADLOCK`）证明：`relistAllByMerchant` 那条
+--      `UPDATE goods SET ShelfState = 1, DelistedAt = NULL WHERE MerchantId = ?`
+--      在 REPEATABLE-READ 下**无索引可走** ⇒ 全表扫描，并把扫到的**每一行**都加 X 锁
+--      —— `SHOW ENGINE INNODB STATUS` 里该事务持 **49 row lock(s)**（全表 + supremum），
+--      且一直持到事务结束 ⇒ 与 `MerchantApplicationService.audit`（写序 user→goods）
+--      构成反向锁序环。加了本索引，该 UPDATE 只锁命中行 ⇒ 「锁 49 行」压到「锁 1 行」。
+--   ⚠️ **本索引治的是「争用窗口的宽度」，不替代重试**（甲）：窗口变窄 ≠ 窗口消失。
+--      丙 / 甲 是同一次裁定里的两条，落点与理由见 `docs/agent/tech-debt.md` 的 TD-74。
+--   ⚠️ **为什么是普通索引不是 UNIQUE**：`MerchantId` 天然一对多（一个商家多件商品），
+--      建 UNIQUE 直接失败。理由同 ⑭。
+--   ⚠️ **为什么不动 `:54` 的 `CREATE TABLE goods`**：在本文件中段插一行会让其后**所有**行号
+--      集体 +1，而本文件被外部 `文件:行号` 引用众多（口径见 `docs/agent/db-schema.md` 行首）
+--      ⇒ 照 ⑭ 先例走**文件末追加的迁移块**：全量重导与增量升级两条路都覆盖到。
+--   ℹ️ 顺带收益（读路径）：`db-schema.md` 已登记 `GoodsCacheService:146` 的
+--      `goods WHERE MerchantId = ?` 与 `priceByTriple` 此前也是全表扫，本索引一并覆盖。
+--   ℹ️ `user.merchantid` 的同类索引**本次不加**：用户裁定「留 agent 实测后再定」
+--      —— 先落本索引、重跑侦查看还剩多少死锁，再决定要不要第二枚。
+-- ⚠️ P3 门禁：本次**不新增表** ⇒ `ConcurrencyRunner.java` 的 KNOWN_TABLES / 期望表数不动；
+--    但**非主键索引计数 +1** ⇒ `docs/agent/db-schema.md` 的实测值需同步（73 → 74）。
+-- 回滚（逻辑废弃，执行前须人工确认）：
+--       ALTER TABLE `goods` DROP INDEX `idx_goods_merchant`;
+-- ============================================================
+
+-- ---- ⑳ `goods` 加索引 `idx_goods_merchant`（死锁治因：把全表锁压成行锁）----
+SET @s := (SELECT IF(COUNT(*) = 0,
+  'ALTER TABLE `goods` ADD INDEX `idx_goods_merchant` (`MerchantId`)',
+  'DO 0')
+  FROM information_schema.STATISTICS
+  WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'goods' AND INDEX_NAME = 'idx_goods_merchant');
+PREPARE _p FROM @s; EXECUTE _p; DEALLOCATE PREPARE _p;

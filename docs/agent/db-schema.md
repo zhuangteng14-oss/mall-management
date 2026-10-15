@@ -43,12 +43,12 @@
 
 ## 2. 索引现状 {#db-2}
 
-**17 张表中 9 张有二级索引（共 20 个）**：`message` 2 个（`idx_from_to`、`idx_create_time`）、`order_state_transition` 1 个（`idx_order_state_transition_order`）、**`order` 1 个（`uk_order_orderId`，UNIQUE）**、**`goodstype` 2 个（`idx_goodstype_parent_sort` 普通 + `uk_goodstype_parent_name` UNIQUE，2026-10-10 #7 换代：原 `uk_goodstype_GoodType` 已删）**、**`admin_audit` 3 个**（批 A，非唯一）、**`notification` 3 个**（I2，非唯一）、**`merchant_application` 3 个**（块 2，非唯一）、**`goods_audit` 3 个**（块 3，非唯一）、**`template` 2 个（`uk_template_type_name` UNIQUE + `idx_template_type_enabled_sort` 普通，#8 新增）**。其余 **8 张表除主键外无任何索引**；全库**除主键外 3 个 UNIQUE**（`uk_order_orderId`，2026-09-30 S1a `:236-245`；**`uk_goodstype_parent_name`，2026-10-10 #7 `:455`〔换代自 `uk_goodstype_GoodType`〕**；**`uk_template_type_name`，2026-10-10 #8 `:567`**〔#8 前是 `uk_notification_template_key`，2026-10-09 I2 `:344`，**该表已删**〕；完整基线见 §7）。⚠️ **本行原写「共 16 个」是既有少算**（枚举里列了 `goods_template` / `goods_audit` 却漏进总数：2+1+1+2+3+3+1+3 = 16 少了块 3 两张表的 4 个）—— 本次按 **2026-10-10 实测**（VM 库 `information_schema.STATISTICS`，`INDEX_NAME <> 'PRIMARY'`）改为 **20**；⚠️ 与 #8 **无关**（#8 索引净增 0：−`goods_template` 1 − `notification_template` 1 + `template` 2）。⚠️ **可视化段（2026-10-11）净增 7 个索引 / 3 个非主键 UNIQUE**（`order_item` +3〔1 UNIQUE〕、`stats_daily` +2〔1 UNIQUE〕、`goods_sku` +2〔1 UNIQUE〕）⇒ 按 VM 库 `information_schema` 实测：**非主键索引 23 → 30、非主键 UNIQUE 4 → 7**（逐列见文件末 **§13.7**）。⚠️ 本段行首的「**17 张表**中 9 张有二级索引（共 **20** 个）」是 **17 张表口径**的旧实测（未含 `cart` 的 2 个与 `order_shipping_track` 的 1 个），**与 30 不矛盾也不相等** —— 引用总数时以 §13.7 的实测值 30 为准，本段只用于看「哪几列缺索引」。已知高频查询列缺索引：
+**17 张表中 9 张有二级索引（共 20 个）**：`message` 2 个（`idx_from_to`、`idx_create_time`）、`order_state_transition` 1 个（`idx_order_state_transition_order`）、**`order` 1 个（`uk_order_orderId`，UNIQUE）**、**`goodstype` 2 个（`idx_goodstype_parent_sort` 普通 + `uk_goodstype_parent_name` UNIQUE，2026-10-10 #7 换代：原 `uk_goodstype_GoodType` 已删）**、**`admin_audit` 3 个**（批 A，非唯一）、**`notification` 3 个**（I2，非唯一）、**`merchant_application` 3 个**（块 2，非唯一）、**`goods_audit` 3 个**（块 3，非唯一）、**`template` 2 个（`uk_template_type_name` UNIQUE + `idx_template_type_enabled_sort` 普通，#8 新增）**。其余 **8 张表除主键外无任何索引**；全库**除主键外 3 个 UNIQUE**（`uk_order_orderId`，2026-09-30 S1a `:236-245`；**`uk_goodstype_parent_name`，2026-10-10 #7 `:455`〔换代自 `uk_goodstype_GoodType`〕**；**`uk_template_type_name`，2026-10-10 #8 `:567`**〔#8 前是 `uk_notification_template_key`，2026-10-09 I2 `:344`，**该表已删**〕；完整基线见 §7）。⚠️ **本行原写「共 16 个」是既有少算**（枚举里列了 `goods_template` / `goods_audit` 却漏进总数：2+1+1+2+3+3+1+3 = 16 少了块 3 两张表的 4 个）—— 本次按 **2026-10-10 实测**（VM 库 `information_schema.STATISTICS`，`INDEX_NAME <> 'PRIMARY'`）改为 **20**；⚠️ 与 #8 **无关**（#8 索引净增 0：−`goods_template` 1 − `notification_template` 1 + `template` 2）。⚠️ **可视化段（2026-10-11）净增 7 个索引 / 3 个非主键 UNIQUE**（`order_item` +3〔1 UNIQUE〕、`stats_daily` +2〔1 UNIQUE〕、`goods_sku` +2〔1 UNIQUE〕）⇒ 按 VM 库 `information_schema` 实测：**非主键索引 23 → 30、非主键 UNIQUE 4 → 7**（逐列见文件末 **§13.7**）。⚠️ 本段行首的「**17 张表**中 9 张有二级索引（共 **20** 个）」是 **17 张表口径**的旧实测（未含 `cart` 的 2 个与 `order_shipping_track` 的 1 个），**与 30 不矛盾也不相等** —— 引用总数时以 **§18.2 的实测值 74** 为准（那一节的判据档位栏写了口径与日期；§13.7 的 30 是可视化段那个时点的值，已被后续各段覆盖），本段只用于看「哪几列缺索引」。已知高频查询列缺索引：
 
 | 查询位置 | SQL 条件 | 涉及表 | 现况 |
 |---|---|---|---|
 | `GoodsCacheService:81` | `login WHERE id = ?` | `login` | `Id` 无索引；`goodsSelectHome` 中对每个商品执行一次（读路径 B1 已搬到该 Service；原记 `G:188`） |
-| `GoodsCacheService:146` | `goods WHERE MerchantId = ?` | `goods` | `MerchantId` 无索引（读路径 B1 已搬到该 Service；原记 `G:160`） |
+| `GoodsCacheService:146` | `goods WHERE MerchantId = ?` | `goods` | ✅ **已消除（2026-10-15 段 ⑳）** —— `goods` 现有 `idx_goods_merchant (MerchantId)`（`.sql:1953-1959`，非 UNIQUE）。**原状**：`MerchantId` 无索引（读路径 B1 已搬到该 Service；原记 `G:160`）。⚠️ 本索引是为**死锁治因**加的（`relistAllByMerchant` 那条 UPDATE 全表扫 + 锁 49 行，`.sql:1928-1935`），**读路径只是顺带收益** —— 别把它读成「为了读性能加的」。详见 §18 |
 | `OrderDao:117` | `order WHERE CustomerId = ?` | `order` | `CustomerId` 无索引（原记 `G:507`，再前 `G:434`；2026-10-02 随订单端点迁至 `OrderDao`） |
 | `OrderDao:124` | `order WHERE MerchantId = ?` | `order` | `MerchantId` 无索引（原记 `G:525`，再前 `G:452`；同上） |
 | `UserCacheService:81` | `user WHERE customerid = ? OR merchantid = ?` | `user` | 两列均无索引；且 `OR` 无法走单列索引（`userSelect` 读路径已搬到该 Service；原记 `M:331`）。⚠️ HEAD 中**同形 SQL 共 3 处**：另有 `FriendCacheService:151`（`friendList` 的逐行 enrich）与 `MessageDao.selectUserPublicInfo:174`（SQL 定义行；调用者 `MessageService.getUserInfoById:497`，私有辅助 —— 原记 `M:378`，三层第四笔 `8ed5fc1` 后已下沉，`MessageController` 内**已无 SQL**） |
@@ -1077,4 +1077,62 @@
 ⚠️ **落库证据（第一手复核）**：⑰ 于 **2026-10-13** 落 VM 库（**33/33 语句 OK**、复跑 **33/33 OK** 无 1060）、⑱ 与 ⑲ 于 **2026-10-14** 由同一次 `ApplyMigration`（marker `库存治理补完`，**21 条语句**）落库（**21/21 OK**、复跑 21/21 OK）—— 逐条见 `db-migration.md` 注意 21 / 22 / 23，原文落在 `_work/b7c8b-verify.txt`。⑱ 落地时的只读复核顺带确认 `order.StockDeducted` = `tinyint(1)` / NOT NULL / DEFAULT 0。
 ⚠️ **回滚**：`drill_record` 是新表 ⇒ 按注意 6 = 「**保留表 + 停止写入**」（`DROP TABLE` 只在本地库重建时用）；8 个加列按注意 1 = **逻辑废弃**（保留列 + 停用写入，**不得** `DROP COLUMN`）；两个基线列的合规「废用」动作恰是 `UPDATE … SET BaselineStock = NULL`（它本来就是 NULL 语义）。段头 `:1711-1714` / `:1818-1821` 的 `ROLLBACK` 注释逐条写了这些语句并标注「**执行前须人工确认**」。
 ⚠️ **`drill_record` 刻意不进文件头（`:21` 起）的 `DROP TABLE IF EXISTS` 基线清单**（同 `cart` / `order_item` / `stats_daily` / `observed_event`：它是**业务数据**不是种子）⇒ **整份重导不清空演练记录**；表结构变更必须写独立 Migration。
+
+---
+
+## 18. 附录：C3 块 7 · D 段 · 阶段 2b〈死锁治因〉的库变更（2026-10-15） {#db-18}
+
+### 18.1 `goods` 加索引 `idx_goods_merchant (MerchantId)`（⑳-1，`.sql:1920-1951` 段头 / `:1953-1959` 本体） {#db-18-1}
+
+**一句话**：给 `goods.MerchantId` 加一个**非唯一**二级索引，把全仓唯一那条反向锁序环里的
+受害者侧写操作从「全表扫 + 锁 49 行」压到「只锁命中行」。
+
+⚠️ **直接动因是实测，不是「该加个索引」这种推断**（`.sql:1928-1935` 逐字）：
+`relistAllByMerchant` 那条
+`UPDATE goods SET ShelfState = 1, DelistedAt = NULL WHERE MerchantId = ?`
+在 REPEATABLE-READ 下**无索引可走** ⇒ 全表扫描、把扫到的每一行都加 X 锁 ⇒
+`SHOW ENGINE INNODB STATUS` 里该事务持 **49 row lock(s)**（全表 + supremum），且一直持到事务结束。
+它与 `MerchantApplicationService.audit`（写序 **user→goods**）方向相反（本方是 **goods→user**）
+⇒ 构成环。探针 `scripts/probes/d2-deadlock-scout.mjs` 48 轮 ×(1+4) **48/48 轮复现**、共 149 次
+`ER_LOCK_DEADLOCK`（原始证据见 `docs/agent/evidence/c3-block7/d2-deadlock-scout-48x4.txt`）。
+
+⚠️ **本索引治的是「争用窗口的宽度」，不替代重试**（`.sql:1936-1937` 逐字）：窗口变窄 ≠ 窗口消失。
+**加索引之后实测仍 48/48 轮复现**（1213 由 149 → **139**，5xx = 139）——
+`HOLDS THE LOCK(S)` 与 `WAITING FOR THIS LOCK` 两侧确实都已落在本索引的**单条** record lock 上
+（锁粒度到了），但**环没拆掉**：环的成因是**访问顺序相反**，与锁住几行无关。
+⇒ 同一次裁定里的「甲」（`MerchantDowngradeService.relist` 落重试）是**必需项**，不是可选项。
+第二份证据见 `docs/agent/evidence/c3-block7/d2-deadlock-scout-after-index.txt`。
+
+- **非 UNIQUE 是有意的**：`MerchantId` 天然一对多（一个商家多件商品），建 UNIQUE 直接失败（同 ⑭）。
+- **不动 `:54` 的 `CREATE TABLE goods`**：在本文件中段插一行会让其后**所有**行号集体 +1，
+  而本文件被外部 `文件:行号` 引用众多 ⇒ 照 ⑭ 先例走**文件末追加的迁移块**（全量重导与增量升级两条路都覆盖）。
+- **顺带收益（读路径）**：§2 表里 `GoodsCacheService:146` 的 `goods WHERE MerchantId = ?`
+  与 `priceByTriple` 的回源此前也是全表扫，本索引一并覆盖 —— 该行已随之改注（见 §2）。
+  ⚠️ `priceByTriple` 那条是**三元组**（`MerchantId + GoodName + ProductCode`），
+  本索引只覆盖它的**第一列前缀**，不构成完整覆盖 ⇒ 那一行**不改注**。
+- **`user.merchantid` 的同类索引本次不加**：用户裁定「留 agent 实测后再定」（`.sql:1945-1946`）。
+  实测支持不加：那条 `UPDATE user ... WHERE username = ?` 走的是 **PRIMARY**
+  （`user` 的主键**就是** `username`）⇒ 它本来就只锁 1 行；**49 行锁全部来自 `goods` 侧**。
+  ⚠️ 这条订正了 `tech-debt.md` TD-74 早期措辞里「`goods` 与 `user` 都只有主键、该 UPDATE 全表扫描」
+  的说法 —— 那是**推断**，`EXPLAIN` 实测把它推翻了（见 TD-74 的订正段）。
+
+### 18.2 段 ⑳ 对基线的净变化 {#db-18-2}
+
+| 基线 | ⑳ 之后（= 本附录终点） | 判据档位 |
+|---|---|---|
+| 表数 | **38（不变）** —— 本段**不建表** | 可复核（VM 库 `information_schema.TABLES` 实测 = **38**，2026-10-15） |
+| 加列 | **0** —— 本段**不改列** | 可复核（`.sql:1925` 段头「范围」逐字：只加索引） |
+| 非主键索引 | **73 → 74**（+1：`goods.idx_goods_merchant`，**非 UNIQUE**） | 可复核（VM 库 `information_schema`，口径 = `COUNT(DISTINCT 表.索引名)` 且 `INDEX_NAME <> 'PRIMARY'`，2026-10-15 实测） |
+| 非主键 UNIQUE | **19（不变）** | 可复核（同上口径；本索引 `NON_UNIQUE=1` 已逐列验过） |
+| A3 P3 门禁 | **一处不改** —— 不新增表 ⇒ `KNOWN_TABLES` / 期望表数不动（`.sql:1947-1948` 逐字） | 可复核（`ConcurrencyRunner.java`） |
+| 行首 `CREATE TABLE` | **仍 40** —— ⑳ 不建表 | ⚠️ 与 §16 的「块 7 三段合计 40」是**同一个数**，不是两次相加 |
+
+⚠️ **落库证据（第一手复核）**：⑳ 于 **2026-10-15** 落 VM 库 —— `ApplyMigration` 两次跑各 **4/4 `OK`**、
+复跑无 1060（幂等守卫生效）；只读复核确认 `idx_goods_merchant` 存在（`SEQ_IN_INDEX=1`、`NON_UNIQUE=1`），
+并逐项对上「38 表 / 非主键索引 74 / 非主键 UNIQUE 19」。
+⚠️ **回滚**：本段是**加索引**（不是加列、不是加表）⇒ 三种既有处置里最直接的一种 ——
+`ALTER TABLE \`goods\` DROP INDEX \`idx_goods_merchant\`;`（`.sql:1949-1950` 段头的 `ROLLBACK` 注释逐字写了它，
+并标注「**执行前须人工确认**」）。⚠️ 删索引**不会**回滚任何数据（它只影响查询计划与锁范围），
+但会把这条死锁的争用窗口**放回 49 行宽** ⇒ 回滚须连同「重试还开着」一起评估。
+
 

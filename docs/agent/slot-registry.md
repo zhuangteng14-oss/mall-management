@@ -5240,3 +5240,107 @@ COALESCE(merchantid,customerid) WHERE EventType IN (那 5 个)` → 复读对照
 3. §⑧ 四条边界（SSE 连接保护 / MQ 幂等与 DLQ / 无上限列表 / 脱敏）**本笔一条没动** ⇒ 归 commit 3。
 4. **手验**仍压到 **commit 4 之后**统一一轮；⚠️ dev / a3 两档 `app.auth.enabled=false` ⇒ 手验绿 ≠ 默认 profile 绿。
 5. **本笔不 push / 不 merge / 不开 PR。**
+
+---
+
+## 二十七、D 段 · 阶段 2b〈死锁修复：索引 + 重试〉（2026-10-15；**本笔已落码**）
+
+> ⚠️ **口径的唯一代码出处仍是 `ProtectionGate.WIRED_KEYS`** —— 本笔把它由 **3 个键变 4 个键**：
+> **4 键接闸（`rateLimit` / `circuitBreak` / **`retry`** / `poolIsolation`）+ 1 键记录位（`degrade`）**。
+> **不许**写成「5 键已接闸」。⚠️ 上一节（§26）开头那句「**不许**写成「4 键已接闸」」**是 commit 2 那一刻的真规则**，
+> 本笔起**翻转**（§26 原文一律保留不动）—— 判据永远读常量，不读任何一节。
+
+### 27-0　落码面（新增 1 测试文件 / 2 证据 txt / 1 截图；修改 24 文件）
+
+**新增 · 测试（1 文件 / 285 行）**：`merchant/service/RelistDeadlockRetryTest`（**7 条**）。⚠️ 其中两条是**结构钉**，
+刻意为之：① 反射断言 `relist` 上**没有** `@Transactional`（有人加回去 ⇒ 重试退化成「在已回滚的事务里重试」）；
+② 计数替身 `CountingTxManager` 断言**每次尝试各起一个新事务**。
+
+**新增 · 证据**（`docs/agent/evidence/c3-block7/`）：`d2-deadlock-scout-after-index.txt` ·
+`d2-deadlock-scout-with-retry.txt` · `d2-locked-switches-after-2b.txt` · `d2-protection-switches-after-2b.png`。
+
+**修改 · 后端（7 文件）**
+
+| 文件 | 增删（净） | 关键坐标 |
+|---|---|---|
+| `merchant/service/MerchantDowngradeService.java` | +167 / −10（300 → **457** 行） | `RELIST_MAX_ATTEMPTS = 3` · 编程式 `RetryTemplate` 装配 · 开关短路落在 `canRetry` 的**第二问**（`getLastThrowable() == null` 先无条件放行第一次）· `attempt = ctx.getRetryCount() + 1` |
+| `observe/metrics/ProtectionMetrics.java` | +29 / −6（184 → **207** 行） | 新增 `retry(...)` 入口 + 两档 `RETRY_SUCCESS` / `RETRY_FAILED`（`result` 五档 → **七档**） |
+| `protect/ProtectionGate.java` | +24 / −18（168 → **174** 行） | `WIRED_KEYS` **3 → 4 键**；`TD_ONLY_KEY = "retry"` **删除**，记录位只剩 `degrade` |
+| `observe/service/EventBroadcaster.java` | +10 / −3 | ⚠️ **净增 7 行 ⇒ 该文件其后行号整体 +7**（见 27-3） |
+| `observe/service/AttackEngine.java` | +6 / −6 | **全部同行替换、净 0 行**；含 `Engine.Notes` 那句**用户可见的回显文案** |
+| `observe/controller/AttackController.java` | +1 / −1 | `@param protections` 的存活文案（净 0 行） |
+| `resources/application.properties` | +4 / −4 | 开关注释段（净 0 行） |
+
+**修改 · 前端（2 文件）**：`config/labels/observe-labels.js`（+16 / −13；`PROTECTIONS_NOT_WIRED` 只剩 `degrade`）·
+`views/admin/observe/AttackConsole.vue`（+18 / −15；⚠️ 副标题块**净插 3 行** ⇒ 该文件自副标题起行号 +3）。
+
+**修改 · 数据 / 文档（7）**：`mall_management_sql.sql`（+41；段⑳ Migration `idx_goods_merchant`）·
+`db-schema.md`（+60 / −2；§18）· `db-migration.md`（+11；注意 24）· `tech-debt.md`（+26 / −1；TD-74 状态行 + 〈TD-74 订正〉）·
+`api-contract.md`（+12 / −12，**九处全部同行替换**）· `progress.md`（+81 / −3 = 3 处同行替换 + 尾部纯插 78 行）·
+`context-packs/c3-block-D-hardening.md`（+81 / −18 = 全部同行替换 + 尾部纯插 63 行）。
+
+**修改 · 探针（2）**：`scripts/probes/d2-deadlock-scout.mjs`（+21 / −5；加「索引后 / 重试后」两档对照与判据）·
+`scripts/probes/probe-d2-locked-switches.mjs`（+36 / −26；口径 3 键 → 4 键，**实测 20 项 / 0 失败 / exit 0**）。
+
+**修改 · 依赖（1）**：`pom.xml`（+12；+`spring-retry`）。
+
+### 27-1　判据（**这一条最容易读反** ⇒ 结论 = 「死锁次数不变、5xx 归零」）
+
+| 轮次文件（`docs/agent/evidence/c3-block7/`） | `goods` 索引 | `relist` 重试 | 1213 增量 | **HTTP 5xx** |
+|---|:--:|:--:|---:|---:|
+| `d2-deadlock-scout-48x4.txt` | 无 | 无 | 149 | **139** |
+| `d2-deadlock-scout-after-index.txt` | 有 | 无 | 139 | **139** |
+| `d2-deadlock-scout-with-retry.txt` | 有 | 有 | 141 | **0** |
+
+- **索引确实生效，但 5xx 一个都没少**（139 → 139）：锁粒度由「持 **49 row lock(s)**」压到「持 `idx_goods_merchant`
+  上的**单条** record lock」。⚠️ **既别读成「索引没用」，也别读成「索引能替代重试」。**
+- **加**重试**之后 5xx = 0**，而 1213 增量 141 与上一份 139 **同量级** ⇒ 死锁照旧发生，只是每次都被第 2 次尝试兜住。
+- **因果闭合的那一环**（光看 `5xx = 0` 不够 —— 它还能被「异常被别处吞了」「端点压根没被打到」解释掉）：
+  探针跑完**立刻读同进程 actuator** ⇒ `mall.protection.events{result=retry_success}` = **141**（与 1213 增量**逐一对上**）、
+  `result=retry_failed` **0 条**（没有一次用满 3 次尝试）。
+
+### 27-2　被实测推翻的两条预判（与 §26 / TD-74 原文相反）
+
+1. **落点**：TD-74 原判 = `GoodsService` 三处写方法 ⇒ 实测真落点 = **`MerchantDowngradeService.relist`**。
+   全仓**唯一**的反向锁序对 = `MerchantApplicationService.audit`（写序 **user→goods**）× `relist`（写序 **goods→user**）；
+   `GoodsService` 那三处**不在任何一个环上**。⇒ 「多表事务 ⇒ 死锁只可能在这类地方」这条**推理链没错**，
+   错的是「本仓的多表事务里恰好有反向对的那一对在哪」。
+2. **锁侧**：原判「两表都只有主键、两条 UPDATE 都全表扫描」 ⇒ 实测**只有 `goods` 侧**全表扫（那 49 行锁**全部**来自它）；
+   `user` 侧 `UPDATE user … WHERE username = ?` 走的是 **PRIMARY**（`user` 的主键**就是** `username`），本就只锁 1 行。
+   ⇒ 裁定「`user.merchantid` 留实测后再定」的答案 = **不必加**。
+
+### 27-3　refs 处置（本笔）
+
+⚠️ 本笔**新增的文档文本里不含 `文件:行号` token**（progress.md 新增区实测 **0 条**；pack 新增区只有指向**当前**值的 4 条），
+**旧值一律写「原 N 行」** —— 避免重指记录自己往引用集合注入陈旧 token（同 §26-3 第 2 点的坑）。
+
+**本笔把行号**顶偏**的四个源文件**（其后所有 inbound 引用整体偏移，逐条见下）：
+
+| 被顶偏的文件 | 偏移 | 成因 |
+|---|---|---|
+| `merchant/service/MerchantDowngradeService.java` | 300 → 457 行（**+157**） | 重试整段新增 |
+| `observe/metrics/ProtectionMetrics.java` | 184 → 207 行（**+23**） | 新增 `retry(...)` 入口与两档枚举 |
+| `protect/ProtectionGate.java` | 168 → 174 行（**+6**） | `WIRED_KEYS` 扩键 + 注释 |
+| `observe/service/EventBroadcaster.java` | **+7** | 第 9 环并入段 + `poll()` 调用 |
+| `views/admin/observe/AttackConsole.vue` | 副标题起 **+3** | 副标题块净插 3 行 |
+
+**已就地重指（同行替换、净 0 行）**：`docs/agent/context-packs/c3-block-D-hardening.md` **4 处**
+（原 169 / 266 / 296 / 452 行各自把旧值换成现址，逐条列在该文件尾部〈**阶段 2b 追加**〉的〈code 行号重指〉表）。
+**只登记、不重指**：本文件中 §26 及其前各节、`progress.md` 前部、各块 pack 与 evidence 中引上述文件的**快照行号** ——
+按 pack 自身声明的「引用代码写 `文件:行号`（快照，漂了不追）」与「史料不追」两条纪律，**一律不动**
+（它们指的是**取点当时**的真值，改了等于篡改史料）。⚠️ **判据与量化结果见本笔收笔报告与只读复核产物**（不落 `docs/`）。
+
+### 27-4　未还项（本笔）
+
+1. **帧读数第 9 条仍未做**（§⑨ 第 1 条「指标帧要反映防护」）—— `MetricsSnapshotService.protections(...)` 仍返回 **8 条** ⇒ 同 §26-4 第 1 条，**仍归 commit 3**。
+2. **重试的次数与退避是**实验值**（3 次 / 40ms 起 / ×2 / 封顶 200ms）**：下游延迟或 `goods` 数据量显著变化时应重跑 `scripts/probes/d2-deadlock-scout.mjs`（判据 = `HTTP 5xx` 应为 **0**）。
+3. **`retry` 的可视化只做到「事件 + 指标」**：右侧统计的 KPI「重试成功率」与「多次重试事件同 traceId」的测试钉 —— ⚠️ **本笔只在后端侧落了两档 result 与 `attempt=N`**；**前端 KPI 那一格归 commit 3**（与帧读数同一笔）。
+4. **手验**仍压到 **commit 4 之后**统一一轮；⚠️ dev / a3 两档 `app.auth.enabled=false` ⇒ 手验绿 ≠ 默认 profile 绿。
+5. **本笔不 push / 不 merge / 不开 PR。**
+
+### 27-5　顺带核实掉的一条（**别再照旧说法加启动参数**）
+
+曾有一条说法：「`ObserveMetricsConfig` 构造注入 + 定义 `MeterFilter` ⇒ 循环依赖、`a3` / `dev` **整台起不来**，
+要加 `--spring.main.allow-circular-references=true`」。**2026-10-15 实测该环已自断** —— 那个 `@Bean` 方法已改成
+**`static`**（提交 `5b971f1`，理由逐字写在该类注释里）。本笔的 dev 启动**没有**加任何该参数，后端正常起来并跑完 48 轮死锁侦查
+（`_work/d2/boot-2b.sh` 头部逐字记着「**刻意不带**」）。⚠️ `tech-debt.md` 对应那一行本就记作「✅ **已修**」—— **过期的只是这条口头说法**。

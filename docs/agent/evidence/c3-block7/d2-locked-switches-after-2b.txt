@@ -1,0 +1,39 @@
+=== 证据：阶段 2b 之后重跑「防护开关面板」探针（口径由 3 键接闸变 4 键）===
+项目：C3 块 7 · D 段 · 阶段 2b —— retry 由「登记 TD」改为「接闸」
+日期：2026-10-15
+命令：node scripts/probes/probe-d2-locked-switches.mjs
+前端：npm run serve（localhost:8080）；后端**全部 mock**（本探针不碰真后端，见其头部）
+
+⚠️ 与 commit 2 那一份（d2-locked-switches.txt，21 项 / 0 失败）的差别，逐条只有三件事：
+  ① 「标灰 + disabled + aria-disabled + 不可开关角标」那一组**由两枚变一枚** —— 只剩 degrade；
+  ② 重试那枚改用**另一族** tooltip（「已接闸，读数会变」），不再指向 TD-74；
+  ③ ⑤-3 的对照**换成点 retry**（本笔新接闸的那一枚）—— 这一条同时钉住
+     「retry 不再是死控件」与「⑤-2 的『没变』不是读早了」。
+  两份**都是当场实测**：旧那份不是「过时的错误」，是本笔落码**之前**的真状态。
+
+⚠️ 本文件**刻意不写「文件:行号」**：docs/ 是 refs 扫描根之一，写进去的旧行号会被反向抄成新的漂移条目。
+
+以下为探针原始输出（未删改）：
+--------------------------------------------------------------------------------
+OK   ① 无 console.error / unhandledrejection  → []
+OK   ① 五枚防护开关都在（数量）  → 5
+OK   ① 中文名与顺序 = PROTECTIONS 声明序  → "限流/熔断/降级/重试/分池"
+OK   ① 缺省全开（一枚都不带 is-off）  → []
+OK   ② 标灰的**恰好**是降级那一枚  → "降级"
+OK   ② 接闸的四枚**没有**被误标灰  → 1
+OK   ② locked 的那些枚 `cursor` 不是 pointer（看着也不像能点）  → "限流=pointer 熔断=pointer 降级=default 重试=pointer 分池=pointer"
+OK   ② locked 的那些枚 `opacity` < 1（真的压暗了）  → ["0.7"]
+OK   ③ 降级 的 title 逐字 = 文案表原话  → "降级：记录位，不可开关，系统固有 fail-open 设计"
+OK   ③ 「记录位，不可开关，系统固有 fail-open 设计」这句在（裁定逐字要求）
+OK   ③ 重试那枚改用「已接闸，读数会变」那一族 tooltip（阶段 2b 起它有真闸）  → "重试：已开（点一下拨动）—— 已接闸，读数会变"
+OK   ④ locked 的那些枚各有一枚可见的「不可开关」角标  → "限流:null 熔断:null 降级:不可开关 重试:null 分池:null"
+OK   ④ 接闸的四枚**没有**这个角标
+OK   ⑤ locked 的那些枚带 `disabled` 属性  → "限流:false 熔断:false 降级:true 重试:false 分池:false"
+OK   ⑤ locked 的那些枚带 `aria-disabled="true"`（读屏也知道它不可用）  → "true"
+OK   ⑤ 抠掉 `disabled` 再点「降级」⇒ 状态**没变**（JS 守卫真的在拦，不只是模板画灰）  → "{\"wasDisabled\":true,\"before\":false,\"after\":false}"
+OK   ⑤ 对照：阶段 2b 新接闸的 `retry` 点一下**状态真的变了**（守卫只挡没闸的那些；也证明 ⑤-2 的「没变」不是读早了）  → "{\"wasLocked\":false,\"before\":false,\"after\":true}"
+OK   ⑤ 点完之后：被拨动的只有接通那些枚，locked 的那一枚与其余状态原样  → "（快照确实变了 = 上一条的拨动生效）"
+OK   ⑥ 截图已落盘（含五枚开关的那一排）  → "C:/Users/86159/Desktop/软件工程/期末项目/docs/agent/evidence/c3-block7/d2-protection-switches-after-2b.png"
+OK   ① 全程无 console.error（收尾复核）
+
+D 段 · commit 2 防护开关面板（mock 后端）——  阶段 2b 口径：4 键有闸 / 1 键记录位: 20 项 / 0 失败
