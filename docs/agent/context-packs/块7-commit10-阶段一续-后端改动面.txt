@@ -1,0 +1,383 @@
+块 7 · commit 10（攻击模拟器 v2 + 演示体验返工）· 阶段一续 · Q1-Q3 只读核实
+=====================================================================
+生成时间：2026-10-15
+范围：只读（本轮仍未改动任何代码；git 工作区干净、HEAD = ab6f71d）
+方法：AttackEngine / AttackController / DrillRecordService 精读 + 全 main 树
+      BatchId 写入链路 grep + db-schema §16.2 交叉核对
+
+=====================================================================
+〇、三条一句话结论
+=====================================================================
+Q1  现状是「N 条线程满速死循环」，**完全没有节流**；实测 20 线程 = 约 500 QPS。
+    改成「目标 QPS + 持续时长」= 加一个**每线程节拍器**，后端约 60 行。
+    ⚠️ 但 120 QPS 远低于现能力 ⇒ **大概率「不会崩」**，这点要先说清。
+
+Q2  三方案里**选甲**（只读端点 + 轮询），但有更省的一招：
+    把「本轮进度」直接放 `AttackEngine`（它本来就是 @Component 单例、
+    已经有 `volatile currentBatch` / `currentToken` 这种「本轮状态」字段的先例）
+    ⇒ **零新文件、零新构造依赖、零 DDL**。
+
+Q3  ⚠️ **重大发现**：`order.BatchId` 这一列**存在但没有任何写入点**
+    （⑲-3 加了列，8c 只接了 `observed_event` 那条线）。
+    ⇒ 用户列的 8 个候选指标里 **6 个零后端改动**就能做，
+      只有「五态分布变化」需要先补 `order.BatchId` 写入链路。
+
+=====================================================================
+一、Q1 核实 · 攻击引擎的并发模型
+=====================================================================
+
+【1.1 现状：逐行读出来的模型】
+
+入口：AttackController#run (:114-132) → DrillRecordService#run (:81-112)
+      → AttackEngine#run (:364-418) → runPhase (:421-471)
+
+runPhase 的做法（:424-456）：
+  ① List<String> plan = threadPlan(chosen, concurrency);   ← 排 N 条线程
+  ② long deadline = now + seconds;
+  ③ for (String key : plan) { new Thread(...).start(); }     ← N 条守护线程
+  ④ 每条线程的循环体（:441-445）：
+        do {
+            meter.add(fireOnce(key, target, baseUrl, seq.getAndIncrement(), ...));
+        } while (!oneshot && System.nanoTime() < deadline && !interrupted);
+
+⇒ **模型 = 「N 条线程各自满速死循环，跑到截止时刻」**。
+   · **没有任何节流器 / 令牌桶 / sleep / RateLimiter**（全文件 grep 无 parkNanos/sleep/Timer）。
+   · 所以「并发数」是**唯一**的速率旋钮，实际 QPS = Σ(1 / 单请求耗时)，**不可控**。
+   · `threadPlan` (:848-888) 把 concurrency 按权重分给场景（每场景保底 1 条线程）。
+
+【1.2 实测吞吐（本次两轮攻击的第一手数字）】
+   · 第 1 轮 probe3b：20 并发 × 25 秒 ⇒ TotalRequests 10057 ⇒ **约 402 QPS**
+   · 第 2 轮 p3b    ：20 并发 × 20 秒 ⇒ TotalRequests 10138 ⇒ **约 507 QPS**
+   · ⇒ 单线程能力约 **20-25 QPS**（单请求约 40-50 ms，引擎与后端同机）。
+   · 缺省 concurrency = 100 ⇒ 缺省一轮 60 秒约 **5 万请求量级**
+     （这是外推，不是实测 —— 标注为「推断」档）。
+
+【1.3 ⚠️ 必须先说清的一件事：120 QPS 打不崩】
+   用户口径是「按 120qps 打入，连着打 60 秒（会不会崩？）」。
+   实测单线程 20-25 QPS ⇒ **6 条线程就能打满 120 QPS**（现引擎缺省 100 条）。
+   ⇒ 按当前后端能力，**120 QPS × 60 秒 = 7200 请求，几乎不可能崩**。
+   建议在演示口径上如实处理，别让「跑完了、没崩」被读成「引擎没使劲」：
+   · 结果里报**实际达成的 QPS**（total / duration），而不是只报目标值；
+   · 演示时可以给一档「压测上限」区间（如 120 / 400 / 800），让「崩不崩」变成
+     一条**看得见的曲线**，而不是单点。
+   （这一条是演示设计的建议，不是必须做的事 —— 请用户定。）
+
+【1.4 改成「目标 QPS + 持续时长」的方案】
+
+设计口径（推荐）：
+  · 新入参 `targetQps`（可选）。给了 ⇒ 启用节拍器；不给 ⇒ **保持现状**（满速）。
+  · 节拍器放在**每条线程内部**，速率 = targetQps / plan.size()
+    ⇒ 权重仍然保真（线程数就是按权重分的），不用另写按权重放行的逻辑。
+  · 用 `LockSupport.parkNanos` + **漂移补偿**（记 t0 与已发条数，睡到
+    t0 + k × period），不用 `Thread.sleep` 逐次累加（会漂）。
+    参考写法约 20 行。
+  · ⚠️ **实际 QPS 可能达不到目标**：`fireOnce` 是**同步阻塞**调用，线程数不够时
+    抢不到槽。⇒ **必须在结果里如实报「实际 QPS」**，不能声称打满了。
+  · 线程数怎么定：保留 `concurrency` 作为「并发上限」；给了 targetQps 而没给
+    concurrency ⇒ 自动 = clamp(ceil(targetQps / 10), 场景数, 500)
+    （10 是保守的单线程 QPS 假设，宁可多开线程让它被节拍器压住，
+     也不要少开导致打不满 —— 多开是安全方向）。
+
+改动面（Q1）：
+
+| 文件 | 改什么 | 估行数 |
+|---|---|---|
+| `AttackEngine.java` | `Config` record +1 字段；`parse` 加 targetQps 解析与上下限；`run` 传参；`runPhase` 加节拍器（含 1 个私有方法）；`buildResult` 加 ActualQps / TargetQps | **约 60 行** |
+| `AttackController.java` | `/run` 加 `@RequestParam targetQps` + javadoc | 约 5 行 |
+| `DrillRecordService.java` | `run` 加形参 + `body.put("targetQps", ...)` | 约 4 行 |
+| `api/observe.js` | `runAttack` 的 `q({...})` 加 targetQps | 约 2 行 |
+| `AttackConsole.vue` | 编排区：并发滑杆 → 目标 QPS + 持续时长 | 约 40 行 |
+| `AttackEngineTest.java` | 节拍器单测（速率上下界 / 漂移 / 权重保真） | 约 90 行 |
+
+**DDL：0**。targetQps / actualQps 塞进 `Result` JSON 即可（`Result` 是长文本列，
+本仓既有做法），**不必给 `drill_record` 加列**。
+⚠️ 若坚持要按列存 ⇒ 要 Migration ⑳ + `DrillRecordDao.COLUMNS` + INSERT
+（多 3 个文件、多 1 段 DDL）。**建议不存列。**
+
+【1.5 /attack/run 现有入参（核实清单③的答案）】
+  现状 4 个（全部 `@RequestParam`、全部 String、全部 `required=false`）：
+    name / concurrency / durationSeconds / scenarios
+  ⇒ **没有 QPS**。要新增 `targetQps`（A 档）。
+  校验口径沿用 `clampInt`（缺省 / 上下限 / 非整数一律 400），别在参数绑定阶段抛。
+
+=====================================================================
+二、Q2 核实 · 攻击进度面板（6 个实时数）
+=====================================================================
+
+【2.1 三个方案对比】
+
+甲 · 只读端点 + 前端轮询（用户倾向）
+   · 新增 `POST /admin/observe/attack/status`
+   · 不动流结构；攻击页本来就低频；本仓管理端已有 5 秒轮询未读数的先例
+   · 不新增服务端常驻线程（SSE 每条流占一条异步线程）
+
+乙 · 挂到 metrics SSE 流
+   · 要改 `MetricsSnapshotService` 让它**感知攻击引擎**
+   · 这是**反向依赖**（metrics 包 → attack service），且会让「指标面板」
+     这个独立页面多出攻击相关字段（耦合两个不相干的页面）
+   · **不推荐**
+
+丙 · 单独一条 attack SSE 流
+   · 要新增 Controller + 复用 `SseStreamWriter` / `FramePacer`
+   · 比甲多一条常驻线程、多一套流生命周期管理，收益只是「不用轮询」
+   · 只有「要亚秒级实时」时才划算 —— 攻击进度是**秒级**信息，不需要
+
+【2.2 ⇒ 选甲，但用更省的一种实现】
+
+⚠️ 不要去新建 `AttackRunRegistry` 之类的组件。理由：
+  `AttackEngine` **本来就是 `@Component` 单例**（:133 上方），而且**已经有**
+  「本轮状态放在实例字段上」的先例：
+    · `private volatile String currentToken = "";`（:340 附近）
+    · `private volatile String currentBatch = "";`（:342 附近）
+  两者都登记了同一条代价（「一次点一个开始」，并发点两次会串）。
+
+⇒ 把「本轮进度」直接放 `AttackEngine`：
+  · 新增一个 `private volatile Meter[] currentMeters;` + 一个 `volatile` 的开始时刻/批次
+  · `run()` 开头赋引用、`finally` 里置 null
+  · 新增 `public Map<String,Object> progress()`
+  · **关键**：`Meter` 的字段是 `AtomicInteger`（:273-275）⇒ **读的时候现读就是实时的**，
+    **不需要任何更新循环 / 定时任务 / 快照线程**。这是本方案最省的地方。
+
+⚠️ 路由**不要**让 `AttackController` 直接注入 `AttackEngine`：
+  Controller 现在的构造器是 `(DrillRecordService, ObservedEventCleanupService, AuditService)`
+  （:81-87），加一个构造参数会牵动 `AbstractSmokeTest` 的 `@Import`
+  （本仓已发生十九次的同一处地雷，`AttackController` 类注释 :72-75 自己写着）。
+  ⇒ 让 `DrillRecordService` 转发（它已经注入 `attackEngine`，:96）：
+     Controller 加一个 `/status` 方法调 `drillRecordService.attackStatus()`，
+     **构造器一个参数都不动** ⇒ 装配零风险。
+
+【2.3 6 个实时数的数据源】
+
+| # | 用户要的数 | 数据源 | 后端要不要改 |
+|---|---|---|---|
+| 1 | 已跑 N 秒 | 前端（点开始那一刻起算） | **不用** |
+| 2 | 已发送 M 条 | `Meter.total` 求和（AtomicInteger 现读） | 暴露即可 |
+| 3 | 平均 QPS | 前端算 = M / N | **不用** |
+| 4 | 暂停按钮 | 前端（停渲染，请求照跑） | **不用** |
+| 5 | 完成多少次拦截 | `Meter.blocked` 求和 | 暴露即可 |
+| 6 | 锁等待（实时波动） | metrics 流的 `locks[].timeouts` | **不用**（前端已在攒 60 拍窗口） |
+
+⇒ **后端只需暴露 2 与 5**（外加 running / batchId / 各场景分档），全在 `Meter` 里现成。
+
+【2.4 「暂停」的语义（用户已知）】
+  · 暂停 = 前端停止渲染 + 停止进度条推进；**请求照跑**
+  · 同步请求（`/attack/run` 阻塞几十秒，`AttackController` 类注释 :45-50）无法中途停
+  · 页面**必须明说**：「暂停仅影响显示，攻击仍在继续」
+  · ⚠️ 连带一条：暂停期间**别停轮询** —— 否则恢复后进度会跳一大段。
+    正确做法是「停渲染、继续轮询、恢复时用最新值继续」。
+
+【2.5 改动面（Q2）】
+
+| 文件 | 改什么 | 估行数 |
+|---|---|---|
+| `AttackEngine.java` | `volatile Meter[] currentMeters` + 开始时刻/批次字段 + `run` 里注册/注销 + `public Map progress()` | **约 40 行** |
+| `AttackController.java` | 新增 `@PostMapping("/status")`（调 `drillRecordService.attackStatus()`，**构造器不动**） | 约 15 行 |
+| `DrillRecordService.java` | 新增 `attackStatus()` 转发 | 约 8 行 |
+| `endpoints.js` | observe 组 +1 条 `attackStatus` | 1 行 |
+| `api/observe.js` | 新增 `attackStatus()` | 约 10 行 |
+| `AttackConsole.vue` | 进度面板 6 个数 + 轮询（含 pause 状态机） | 约 130 行 |
+| `AttackEngineTest.java` | `progress()` 单测（跑前 null / 跑中递增 / 跑后清空） | 约 50 行 |
+
+**新文件：0**。**新构造依赖：0**。**DDL：0**。
+
+=====================================================================
+三、Q3 核实 · 状态机多点指标（不要全表口径）
+=====================================================================
+
+【3.1 ⚠️ 重大发现：order.BatchId 是「列在、写入没接」】
+
+  · `db-schema.md §16.2` 登记了四处加列（⑲-2..⑲-5）：
+      ⑲-2 drill_record.BatchId / ⑲-3 **order.BatchId** /
+      ⑲-4 comment.BatchId / ⑲-5 admin_audit.BatchId
+    另加 `observed_event.BatchId`。四处皆 `varchar(36) DEFAULT NULL`。
+  · 但**全 main 树 grep `BatchId`**，`order` 包下**只有一个命中** ——
+    `MallOrderStateMetrics.java:262`，那是**事件环**的 batchId（进 `observed_event`），
+    **不是** `order` 表的列。
+  · `OrderDao.insertOrder` 的列清单（`OrderDao.java:102-104`）逐字是：
+      (OrderId, CustomerId, MerchantId, Price, Quantity, ProductInformation,
+       Images, PayIf, DeliveryIf, ReceiveIf, `Source`, CreateTime)
+    ⇒ **没有 BatchId**。
+  · ⇒ **`order.BatchId` 至今恒为 NULL**（列建了、写入方是 8c 时留的「基础设施先行」，
+    而 8c 只接了 `observed_event` 那条线）。
+
+  ⚠️ 这条直接决定 Q3 的方案选择：**「按 batchId 查 order」这条路现在走不通**。
+
+【3.2 用户列的 8 个候选指标 · 逐条数据源】
+
+| # | 指标 | 数据源 | 后端改动 |
+|---|---|---|---|
+| 1 | 本批次新增单数 | 引擎侧 `AtomicInteger` 计数器（新增 1 个） | 约 10 行 |
+| 2 | 每秒新增单数 | 前端派生（Δ/Δt） | **0** |
+| 3 | 本批次拦截数 | `Meter.blocked` 求和（已有，:274） | 暴露即可 |
+| 4 | 本批次失败数 | `Meter.failed` 求和（已有，:275） | 暴露即可 |
+| 5 | **五态分布变化（本批次）** | ⚠️ 需要 `order.BatchId` —— **现在查不到**（见 3.1） | 见 3.4 |
+| 6 | 库存变化（本批次扣了多少） | `Result.Stock.Deducted`（跑完）+ metrics 流 `stock` 段（实时） | **0** |
+| 7 | 锁等待峰值 / 均值 | metrics 流 `locks[].timeouts`（前端已在攒 60 拍） | **0** |
+| 8 | 状态流转速度（每秒 transition） | orders 流的 `moveCount` / `moves` 长度 | **0** |
+
+⇒ **8 个里 6 个零后端改动**；第 1 个是 10 行的计数器；**只有第 5 个需要补链路**。
+
+【3.3 ⇒ 选丙（Q2 的 status 端点一次带回 Q3 的统计）】
+
+  理由：
+  · Q2 已经要暴露 `Meter`，把 #1/#3/#4 一起带回来是**顺手**的事（同一个方法）。
+  · #2/#6/#7/#8 全在前端已有的三条流里，前端自己算 —— **不需要端点多带**。
+  · 甲（引擎自己算、只写进 drill_record）的缺点用户已经点出：**跑的过程中看不到**；
+    而 Q2 的端点正好补上这一点 ⇒ 「甲 + Q2 端点」= 丙。
+  · 乙（新增 batch-stats 端点按 batchId 查库）在 3.1 的前提下**要先补写入链路**，
+    而且**演练进行中反而读不到**（`observed_event` 落库还依赖「日志流开着」，
+    见 TD-61；`order.BatchId` 更是全 NULL）⇒ 现在是**最贵的方案**。
+
+【3.4 「五态分布变化」的两个选择（需用户裁决）】
+
+  路线 i · **补 `order.BatchId` 写入链路**（让 ⑲-3 那列真正活起来）
+     · `/order/orderAdd` 读 `TraceIdFilter.currentBatch()`（MDC 里**已经有**，8c 接好了）
+     · `OrderRequest` 加字段 / `OrderService` 传参 / `OrderDao.insertOrder` 加一列
+     · 再写一个 `SELECT SUM(CASE...) … WHERE BatchId = ?`（照 `countOrderStates` :502-512 同形）
+     · **估 4 个文件 / 约 60 行 + 1 个 DAO 方法 / 约 20 行**
+     · ⚠️ 副作用：`orderAdd` 的入参面多一个「不可信来源」的字段 ——
+       但 **BatchId 不能由客户端传**，必须**只**从 MDC 读（否则谁都能伪造批次号）。
+       这条要写进注释。
+
+  路线 ii · **退一步，不做「五态批次口径」**
+     · 用引擎侧计数代替（#1 新增单数 + #3 拦截 + #4 失败）
+     · 五态只在**全表**口径显示（现状），但**加一行小字说明**「这是全库口径」
+     · 省掉 4 个文件的改动
+
+  ⇒ 我的建议：**路线 ii**。理由：用户的真实诉求是「**看得出累加效果**」，
+     而 #1/#2/#3/#4 已经给了「本次演练新增了多少」这个最直观的累加感；
+     五态批次分布要付 4 个文件 + 一条「客户端不可传」的安全约束，
+     收益（多一个分布图）小于成本。**但这条要用户拍。**
+
+【3.5 改动面（Q3）】
+  路线 ii：**0 行**（全含在 Q2 的 status 端点里，加 1 个计数器约 10 行）
+  路线 i ：额外 4 个文件 / 约 80 行 + 单测
+
+=====================================================================
+四、Q4 核实 · 边高亮节流 + 小字实时计数
+=====================================================================
+
+【4.1 ⚠️ 一个必须知道的前提：orders 流的 moves 里没有 batchId】
+  `OrderStreamService.drainMoves()`（:108-128）逐字 put 的键是：
+    orderId / action / from / to / result / ts
+  ⇒ **没有 batchId**。而帧顶层也没有。
+  含义：「本批次经过 N 次」**在 orders 流里没有批次号可筛** —— 前端拿到了 moves，
+  但分不出「这条是这次演练的」还是「日常流量的」。
+
+  好消息：**修它只要 1 行**。
+  `OrderStateEvent` record 里**已经有** `batchId` 字段
+  （`MallOrderStateMetrics.java:283-285`，第 11 个分量），
+  在 `drainMoves` 的 `row.put(...)` 里加一行：
+      row.put("batchId", e.batchId());
+  ⇒ 前端就能做「只看本批次的流转计数」。**零 DDL、零新端点。**
+
+【4.2 节流 + 小字计数的口径（用户要的「双管齐下」）】
+  · 节流：每秒最多 N 次 flash（N = 3-5）。实现 = 记每个 key 的上次 flash 时刻，
+    距上次 < 1000/N 毫秒就跳过。约 10 行。
+    ⚠️ **节流只作用于「视觉高亮」，不作用于「计数」** —— 计数走另一条路（见下），
+       所以节流**不会丢信息**（这正是用户担心的「显示不过关」的点，答案是：不会）。
+  · 小字实时计数：每个节点下方一行小字「本批次经过 N 次」，数字随帧跳动。
+    数据源 = moves 里 `batchId === 当前批次 && to === 该节点` 的累计计数。
+  · 节点角标（原「每状态多少单」）：保留全表总数（帧里 `counts` 现成），
+    **另加**一行小字「本批次 +N」。两行并存，口径各自标清。
+
+【4.3 改动面（Q4）】
+
+| 文件 | 改什么 | 估行数 |
+|---|---|---|
+| `OrderStreamService.java` | `drainMoves` +1 行（透出 batchId） | **1 行** |
+| `OrderFlow.vue` | 节流（~10）+ 小字计数（~25）+ 节点角标两行（~20）+ 映射表/守卫（见 3b） | 见下 |
+
+=====================================================================
+五、件 3b 修订后的改动面（含 Q3/Q4）
+=====================================================================
+
+`OrderFlow.vue` 单文件：
+  · 3a 「—」流动（`.a-of-seg` 渐变 + background-position 动画，仅活跃单） ~35 行
+  · 3b-① 守卫条件放行 create（from=null 用它自己的路径）               ~10 行
+  · 3b-② **OrderState ↔ 五态映射表**（CREATED/PAID/SHIPPED/
+          RECEIVED_NODELIVERY/COMPLETED → waitPay/waitShip/…）        ~25 行
+  · 3b-③ 边高亮节流                                                    ~10 行
+  · 4-② 节点小字「本批次经过 N 次」+ 角标两行口径                      ~45 行
+  · 3b-④ 帧消费加 `moves[].batchId`                                    ~5 行
+  ⇒ **合计约 130-160 行**（比第一轮估的 120-180 略降，因为节流比「动画队列」简单）
+
+  前端 + 后端合计：`OrderStreamService.java` **1 行** + `OrderFlow.vue` ~150 行
+
+=====================================================================
+六、A 档合并清单（新端点 / 新字段 / 新入参 / 新文件）
+=====================================================================
+
+【新增端点】1 条
+  `POST /admin/observe/attack/status`  →  {running, batchId, elapsedMs, sent,
+                                            blocked, failed, created, byScenario[]}
+  ⚠️ 无入参（「当前这一轮」只有一轮，本仓口径 = 一次点一个开始）
+  ⚠️ 挂在 `AttackController`，**构造器不动**（经 DrillRecordService 转发）
+  ⇒ endpoints.js 140 → **141** 条
+
+【新增入参】1 个
+  `/attack/run` 的 `targetQps`（`@RequestParam` + `clampInt` 校验）
+
+【新增字段】2 处
+  · orders 流 `moves[]` 加 `batchId`（`OrderStreamService.drainMoves` +1 行）
+  · `/attack/run` 响应 `Result` 加 `TargetQps` / `ActualQps`（**进 JSON，不加列**）
+
+【新增文件】**0 个**
+  （进度状态放 `AttackEngine` 自身 —— 它已是 @Component 单例，
+    已有 `volatile currentBatch` / `currentToken` 的先例）
+
+【新增构造依赖】**0 个**（这是刻意设计的结果，见 2.2）
+
+【新增 DDL】**0 条**
+  理由：进度在内存（AtomicInteger 现读）、targetQps/actualQps 进 Result JSON、
+        moves 的 batchId 来自已有的 `OrderStateEvent`
+  ⚠️ **例外**：若 Q3 选**路线 i**（五态批次口径）⇒ 不是加 DDL，
+     而是**补 `order.BatchId` 的写入链路**（列 ⑲-3 早就有了，4 个文件）
+
+【可选 A 档】
+  `order.BatchId` 写入链路（`OrderRequest` / `OrderService` / `OrderDao.insertOrder`
+  / `orderAdd` 的 MDC 读取）—— **仅当 Q3 选路线 i**
+
+=====================================================================
+七、修订后的笔划分 + 估时
+=====================================================================
+
+commit 10a · 状态流转（OrderFlow.vue ~150 行 + OrderStreamService 1 行）
+  3a 流动 + 3b 映射表/守卫 + 边高亮节流 + 节点小字与角标（Q3 路线 ii + Q4）
+  **估 0.5-1 天**（后端只 1 行）
+
+commit 10b · 日志控制台化（EventLog.vue ~800 行）
+  5 区 + 8 处实时动画 + 批次过滤（用现成 batchId）
+  **估 1.5 天**（零后端）
+
+commit 10c · 攻击引擎 v2 + 进度面板 + 三块预览（前后端）
+  · 引擎：targetQps + 每线程节拍器 + 实际 QPS 如实报（Q1，~60 行）
+  · 进度暴露：`/attack/status` + `progress()`（Q2+Q3，~65 行）
+  · 攻击页：QPS/时长编排区 + 6 数进度面板 + 辅助条 + 三块预览（件 1，~470 行）
+  · 单测：节拍器 + progress（~140 行）
+  **估 2-3 天**
+
+commit 10d · 收口（文档 + 手验清单 + 零漂移）
+  含 api-contract 附录 I（新端点/新入参/新字段）、db-schema（无 DDL ⇒ 只登记
+  「order.BatchId 列在、写入未接」这条事实）、tech-debt（节拍器上限 / 实际 QPS 缺口）
+  **估 0.5 天**
+
+**合计 4.5-6 天**（与用户估的一致）
+
+=====================================================================
+八、需要用户裁决的三件事（Q1-Q3 续）
+=====================================================================
+R1 · 120 QPS 打不崩（实测单线程 20-25 QPS，6 条线程就打满）。
+     演示口径怎么办：(a) 就报 120 QPS + 实际达成值；
+                   (b) 再加一档压测上限（400/800）让「崩不崩」成曲线。
+R2 · Q3 第 5 条「五态分布变化」：
+     (i) 补 order.BatchId 写入链路（4 文件 ~80 行）；
+     (ii) 不做，用引擎侧计数代替 + 小字标注全表口径（**建议**）。
+R3 · 攻击页三块预览的流数：三条流各连（不动后端，**建议**）还是新增聚合流。
+
+=====================================================================
+九、上一轮实测的可复核产物（本轮新增未跑，沿用）
+=====================================================================
+  _work/p3b-orders.sse / p3b-events.sse / p3b-attack.json
+  _work/p3b-analyze.py / p3b-probe.sh
+  Q1 的吞吐数字（402 / 507 QPS）即由 p3b-attack.json 的 TotalRequests ÷ DurationMs 算出。
