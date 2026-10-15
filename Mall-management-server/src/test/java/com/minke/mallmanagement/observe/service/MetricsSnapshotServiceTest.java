@@ -192,6 +192,62 @@ class MetricsSnapshotServiceTest {
         assertThat(healthOf(frame)).as("P99 未越过 1000 ms 阈值 ⇒ 不该有那个红").containsEntry("level", "ok");
     }
 
+    // ================= 演练控制端点不参与延迟（commit 10c-2） =================
+
+    @Test
+    @DisplayName("⚠️ 演练启动端点不计延迟：`/attack/run` 挂满整场演练的 121 秒不进分位（探针 max=136417ms 的来源）")
+    void drillRunLongDurationDoesNotPolluteLatency() {
+        when(goodsDao.selectStockLevels(anyInt())).thenReturn(List.of());
+        Timer business = Timer.builder("http.server.requests")
+                .tags("uri", "/order/orderAdd", "status", "200")
+                .publishPercentiles(0.5, 0.95, 0.99)
+                .register(registry);
+        Timer drill = Timer.builder("http.server.requests")
+                .tags("uri", "/admin/observe/attack/run", "status", "200")
+                .publishPercentiles(0.5, 0.95, 0.99)      // ⚠️ 生产里它**有**分位直方图
+                .register(registry);
+        frames.frame(0);
+
+        business.record(40, TimeUnit.MILLISECONDS);
+        business.record(60, TimeUnit.MILLISECONDS);
+        drill.record(121_000, TimeUnit.MILLISECONDS);     // 同步请求：整场演练跑完才返回
+        Map<String, Object> frame = frames.frame(1);
+
+        assertThat(requestsOf(frame)).as("它也是真请求 ⇒ 计数那一路照记").containsEntry("count", 3L);
+        Double p99 = (Double) requestsOf(frame).get("p99Ms");
+        assertThat(p99).as("有业务样本 ⇒ 报真值（不是 null）").isNotNull();
+        assertThat(p99).as("只由业务请求算：~60 ms，不是演练那 121 秒（实测探针读到 120,259 ms）")
+                .isLessThan(1000.0);
+        // ⚠️ 只钉 p99 是不够的（探针那条数也是 p99，但它另有 max 一路）：本用例同时钉 mean/max，
+        //    因为**这三条是同一条放行谓词算出来的**，任何一个漏了都说明谓词没盖住。
+        //    实测：不钉 mean/max 的话，把排除条件撤掉这一条**照样绿**（drill 没开分位时不进直方图）。
+        assertThat((Double) requestsOf(frame).get("meanMs"))
+                .as("均值只摊 40/60 —— 不剔就是 (40+60+121000)/3 ≈ 40,367").isLessThan(1000.0);
+        assertThat((Double) requestsOf(frame).get("maxMs"))
+                .as("max 是各 timer 的最大值 —— 不剔就是那 121 秒").isLessThan(1000.0);
+        assertThat(healthOf(frame))
+                .as("不剔的话**每按一次「开始演练」就点亮一次 P99 红** —— 那是观测页最该冷静的时刻")
+                .containsEntry("level", "ok");
+    }
+
+    @Test
+    @DisplayName("⚠️ 边界：`/attack/stop` 是毫秒级真请求，**照算**延迟（判据是全等，不是 `/attack/*` 前缀）")
+    void drillStopStillCountsAsLatency() {
+        when(goodsDao.selectStockLevels(anyInt())).thenReturn(List.of());
+        Timer stop = Timer.builder("http.server.requests")
+                .tags("uri", "/admin/observe/attack/stop", "status", "200")
+                .publishPercentiles(0.5, 0.95, 0.99)
+                .register(registry);
+        frames.frame(0);
+
+        stop.record(900, TimeUnit.MILLISECONDS);
+        Map<String, Object> frame = frames.frame(1);
+
+        assertThat(requestsOf(frame)).containsEntry("count", 1L);
+        assertThat((Double) requestsOf(frame).get("p99Ms"))
+                .as("900 ms 是它的**真**耗时 —— 拿前缀一刀切会把它悄悄丢掉").isNotNull();
+    }
+
     @Test
     @DisplayName("⚠️ 反向对照：真慢的**业务**请求仍然点亮 P99 红（改动不是把红线改死，是让它认对对象）")
     void genuinelySlowBusinessRequestStillTurnsP99Red() {

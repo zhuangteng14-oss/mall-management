@@ -107,6 +107,8 @@ public class MetricsSnapshotService {
      * P99 超过它（ms）= 健康度红（同上；1s 是本仓最慢那条链路的实测上限，见 {@code http.js} 的超时注释）。
      * ⚠️ 参评的 P99 **已剔除 SSE 长连接**（见 {@link #isLatencyTimer}）—— 不剔的话这里会被
      * 三条观测流的「连接存活时长」天天点亮（2026-10-14 实测：P99 26,843 ms 的红就是这么来的）。
+     * ⚠️ 同样已剔除**演练控制的启动端点**（{@link #DRILL_RUN_URI}，2026-10-15 实测：它跑满整场
+     * 演练，不剔的话**每按一次「开始演练」就点亮一次这个红**，而那恰恰是观测页最该冷静的时候）。
      */
     private static final double P99_MS_ERROR = 1000.0;
 
@@ -117,6 +119,24 @@ public class MetricsSnapshotService {
      * 排除的实测依据见 {@link #isLatencyTimer}。
      */
     private static final String SSE_URI_SUFFIX = "/stream";
+
+    /**
+     * 另一条「耗时不算延迟」的 uri —— **演练控制**的启动端点（块 7 · commit 10c-2）。
+     *
+     * <p>⚠️ 与上面那条**不是同一类，故另起常量、各写各的理由**（别合并成一个前缀）：它不是长连接，
+     * 是一条**同步**请求 —— {@code AttackController} 要等整场演练跑完才返回，一挂就是
+     * {@code durationSeconds} 秒（`AttackEngine.MAX_DURATION_SECONDS` = 600）。
+     *
+     * <p>实测（2026-10-15，阶段 2 第二轮梯子）：它把自己 120 秒的存活时长写进了这个指标的 MAX 与
+     * 末帧 p99 ⇒ 探针读到 {@code max=136417ms}、{@code p99Ms=120259ms}，**那两条全是这一条请求**，
+     * 真接口一点都不慢。不剔掉，引用这两个数的人会得到一个凭空多两位的结论。
+     *
+     * <p>⚠️ 判据是**全等**、不是前缀：{@code /admin/observe/attack/stop} 是一条毫秒级的真请求，
+     * 它的耗时是**真样本**，拿 {@code /admin/observe/attack/*} 一刀切会把它悄悄丢掉。
+     * 边界由 {@code MetricsSnapshotServiceTest} 钉住（同 {@code TraceLogTest} 那条
+     * 「{@code /stream} 判后缀、不判包含」的用例一个用意）。
+     */
+    private static final String DRILL_RUN_URI = "/admin/observe/attack/run";
 
     /** 库存水位一次最多列多少条（面板一屏够看；不做分页 —— 这是「水位条」不是「库存管理页」）。 */
     private static final int STOCK_LIMIT = 20;
@@ -378,10 +398,18 @@ public class MetricsSnapshotService {
      *
      * <p>⚠️ 后缀判据不是本处新发明的口径 —— {@code shared/web/TraceLog} 早就有
      * {@code SKIP_SUFFIX = "/stream"}`，两处**同一个字面量、同一个理由**（别各写各的）。
+     *
+     * <p>⚠️ <b>还排除「演练控制」的启动端点</b>（{@link #DRILL_RUN_URI}，块 7 · commit 10c-2）：
+     * 它不是长连接，是一条**同步**请求，挂满整场演练才返回（上限 600 秒）—— 排除的理由与 SSE 同类
+     * （「耗时 = 这次请求占用了多久」≠「接口多慢」），但**机制、字面量都不同**，故各是一个常量。
+     * 判据是全等而非前缀，理由见该常量的注释。
      */
     private static boolean isLatencyTimer(Timer t) {
         String uri = t.getId().getTag("uri");
-        return uri == null || !uri.endsWith(SSE_URI_SUFFIX);
+        if (uri == null) {
+            return true;
+        }
+        return !uri.endsWith(SSE_URI_SUFFIX) && !DRILL_RUN_URI.equals(uri);
     }
 
     /** 两个 0/1 状态通道（可能为 null：gauge 还没被绑定时 Micrometer 里根本没有这个 meter）。 */
