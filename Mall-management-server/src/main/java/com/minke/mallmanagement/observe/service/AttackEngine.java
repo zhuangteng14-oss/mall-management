@@ -176,8 +176,19 @@ public class AttackEngine {
     /** 总并发缺省值（《块7参考》§1.2 的界面缺省 = 100 并发 / 60 秒）。 */
     public static final int DEFAULT_CONCURRENCY = 100;
     public static final int DEFAULT_DURATION_SECONDS = 60;
-    /** 并发上限。⚠️ 每个线程 = 一条真连接（HTTP/1.1 复用有上限）⇒ 无上限等于给了个「一键打挂自己」的按钮。 */
-    public static final int MAX_CONCURRENCY = 500;
+    /**
+     * 并发上限。⚠️ 甲（commit 10c）之后它**不再是线程数** —— 派发线程恒为 {@value #WORKER_THREADS} 条
+     * （见 {@code runPhase} 的 {@code threadPlan}），这个数现在管的是**在途请求上限**（同处的 {@code permits}）。
+     * 原注释「每个线程 = 一条真连接」对甲之前的同步引擎成立；甲把线程数与在途量解耦之后，
+     * 仍然成立的只有半句：**在途越大，越逼近服务端自己的物理顶**（那正是 10c-1/10c-2 要测的）。
+     *
+     * <p>2026-10-15（块 7 · commit 10c-2）由 <b>500</b> 抬到 <b>4000</b>：瓶颈定位要逐档提在途去找
+     * 「服务端封顶」那一档，500 会把实验卡在半路（`permits = min(concurrency, in-flight-cap)`，
+     * 500 以内 in-flight-cap 那个 512 硬顶根本不生效）。⚠️ 这是**提引擎的发射能力**，
+     * **不是加固后端**（硬边界 A：连接池 / Tomcat 线程 / 慢 SQL 一律不动）。
+     * ⚠️ 它同时是「一键打挂自己」的那道闸 —— 抬到 4000 是**明知而为**：演示要的就是能把它打疼。
+     */
+    public static final int MAX_CONCURRENCY = 4000;
     public static final int MAX_DURATION_SECONDS = 600;
     /** 单条权重上限（只用来防报文把权重写成天文数字；与线程数分配无关）。 */
     static final int MAX_WEIGHT = 1000;

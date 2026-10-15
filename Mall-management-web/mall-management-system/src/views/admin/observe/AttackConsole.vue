@@ -459,7 +459,9 @@ import { roleLabel } from '../../../config/labels/user-labels'
 // ⚠️ 前端**不重复实现**那套 clamp（抄第二遍迟早与后端走岔），这里只在**发请求前**把用户
 //    填的空 / 小数 / 越界值收成一个「像样的数」，真判据仍然后端说了算（它回 400 就照 400 显示）。
 const CONC_MIN = 1
-const CONC_MAX = 500
+// 2026-10-15（块 7 · commit 10c-2）：500 → 4000，跟上后端 MAX_CONCURRENCY ——
+// 提在途量是瓶颈定位/演示线的一环，页面若还卡在 500，那条线在界面上就走不到头。
+const CONC_MAX = 4000
 const CONC_DEFAULT = 100
 const DUR_MIN = 1
 const DUR_MAX = 600

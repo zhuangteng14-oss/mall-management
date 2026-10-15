@@ -122,11 +122,11 @@ class AttackEngineTest {
         // scenarios 不是数组
         assertThrows(IllegalArgumentException.class,
                 () -> AttackEngine.parse(Map.of("scenarios", "seckill")));
-        // 并发数越界（0 / 501）
+        // 并发数越界（0 / 4001）—— 上限 2026-10-15 由 500 抬到 4000（10c-2 提在途量做瓶颈定位）
         assertThrows(IllegalArgumentException.class,
                 () -> AttackEngine.parse(Map.of("concurrency", 0)));
         assertThrows(IllegalArgumentException.class,
-                () -> AttackEngine.parse(Map.of("concurrency", 501)));
+                () -> AttackEngine.parse(Map.of("concurrency", 4001)));
         // 持续秒数越界
         assertThrows(IllegalArgumentException.class,
                 () -> AttackEngine.parse(Map.of("durationSeconds", 601)));
