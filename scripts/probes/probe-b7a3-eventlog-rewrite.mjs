@@ -1,0 +1,1186 @@
+// probe-b7a3-eventlog-rewrite.mjs —— 块 7 · 3a.3 第 ⑥ 步〈日志页重做成三栏驾驶舱〉的实测。
+//
+// 跑法：① `npm run serve`（8080）② `node scripts/probes/probe-b7a3-eventlog-rewrite.mjs`
+// 依赖：`docs/美化/_cdp.mjs`（headless Edge + CDP）。
+//
+// ⚠️ 与 `probe-b7c8-event-log.mjs` 的关系：那支探针断言的是**重做前的 DOM**
+//   （`.a-el-kind` 图例 / `.a-el-row` 两行卡片 / `Pager` 分页器）—— 这次重做把那些**全换了**，
+//   所以那支探针现在必然红。本支是它的**替代**，不是补充。旧那支留档不删（对照物）。
+//
+// ⚠️ 自接管 `Fetch` 拦截，不用 `_cdp.mjs` 的 `mock`（同 `probe-b7c5` / `probe-b7c7` / `probe-b7c8`）。
+// ⚠️ `Fetch.fulfillRequest` 只能给一整块 body ⇒ 两拍拼一个 body 一起回；前端 `openStream` 会切帧。
+// ⚠️ 帧形状必须与后端 `EventStreamService.frame()` 对齐（10 个键，含 `mq`）。
+//
+// 查十五件事：
+//   ① 挂载 / 无 console.error / POST 到 stream
+//   ② **六区齐**（① 状态条 ② 过滤栏 ③ 事件流 ④ 实时统计 ⑤ 链路展开 ⑥ 开关栏）
+//   ③ ② 九类行清单：标签逐字 + 每类一枚 **lucide svg**（不再是内联 path 数组）
+//   ④ **分页器没了**：158 条全在 DOM 里（旧版每页 100）
+//   ⑤ ③ 是**时间正序**（tail -f 方向：首行时刻 < 末行时刻）—— 与旧版「最新在最上」相反
+//   ⑥ **树形前导符**：一组包起来了（组头 + 成员缩进 3ch + 末行收口），且末组子行左槽是空格不是 `│`
+//   ⑦ ④ Top-N 三档在 + 换档会重排
+//   ⑧ ⑤ 抽屉**默认塌着**，点 ③ 里带 traceId 的行才拉起，链里含「请求结束 · 总耗时 42 ms」
+//   ⑨ 没有 traceId 的行不带 role=button
+//   ⑩ ⑧ 处 `data-anim` 落点都在
+//   ⑪ 窗口形态：**整页不滚**，滚动只发生在 ③ 内部
+//   ⑫ ① 的数据源计数**常驻**（模拟日常没开时也有「已放 N / 500 条」）
+//   ⑬ ② 的类计数 = 本页**窗口内累计**（= 158，而不是帧里本拍 counts 的那些小数字）
+//   ⑭ ⑥ 开关栏：`degrade` 画成不可开关（后端 PROTECTIONS_NOT_WIRED 的镜像）
+//   ⑮ 色板锁定：取到的是 admin 主题的计算色（不是线框灰阶）
+//   ⑯–㉒ 数据源分段（真流 ⇄ 模拟日常）· 导出三格式 · 时间范围 · 窄视口 1280 · 设施 3 类置灰
+//   ㉓ **第 ⑦ 步**（视觉与呈现，用户 2026-10-16 的裁定）：滚动条 ≤8px + 轨道透明（CSSOM **与放大图**）
+//      · 折线图两排小字（峰值/当前/−60s/now，且不画轴线）· ④ 横条对比度 ≥3:1 · ②④ 图标
+//      · 折行几何（2 行上限 / 续行 2ch / hover 展开，**注入一段长文本**才量得到）· 树形前缀两段 + 提亮
+//      · 对象可点与 `objectId` 一致 · ⑤ 链里每条事件的中英文两层。
+//      ⚠️ 本段**必须在 ⑯ 之前**（⑯ 会把数据源切到「模拟日常」，那之后量不到真流那 161 行）。
+import fs from 'node:fs'
+import { open, sleep, report } from '../../docs/美化/_cdp.mjs'
+
+// ⚠️ **必须是 `admin.html`**：本仓双入口（`vue.config.js:16-28`），管理端挂在 `admin.html`
+//   （`title` = 「管理端 · Mall Management」），商城/商家挂在 `index.html`。
+//   打到 `index.html` 上不会 404（路由表是共用的、组件也挂了），但**外壳不是 `AdminShell`**，
+//   于是量到的是别家布局 + `data-theme` 缺失（`null`）—— 本次实测踩过，见下 ⑮ 的注释。
+const BASE = 'http://localhost:8080/admin.html'
+const ROUTE = '#/admin/observe/logs'
+const WORK = 'C:/Users/86159/Desktop/软件工程/期末项目/_work/3a3/'
+
+const R = report('块 7 · 3a.3 第 ⑥ 步 日志页重做（三栏驾驶舱 · mock 后端 SSE）')
+let TOTAL = 0
+/** 按 CSS 选择器的盒子裁一张**放大图**（scale 倍），只落 `_work/3a3/`。
+ *  ⚠️ 为什么要它：探针的能量在「规则接上了没有」（CSSOM），而**肉眼看到的**是渲染出来那一格。
+ *    7px 滚动条、`└─` 的颗粒度、续行那 2ch 的缩进 —— 这些都只有放大图能验。
+ *  ⚠️ clip 只吃整数且必须在视口内（`captureBeyondViewport: false`），所以先 clamp。 */
+const zoomShot = async (sel, file, { 宽 = 0, 高 = 240, 左 = 0, 右缘 = false, scale = 6 } = {}) => {
+  const box = await b.evalJS(`(() => {
+    const e = document.querySelector(${JSON.stringify(sel)})
+    if (!e) return null
+    const r = e.getBoundingClientRect()
+    return { left: r.left, top: r.top, right: r.right, width: r.width, height: r.height }
+  })()`)
+  if (!box) return null
+  const w = 宽 || Math.round(box.width)
+  const x = Math.max(0, Math.round(右缘 ? box.right - w : box.left + 左))
+  const y = Math.max(0, Math.round(box.top))
+  const hh = Math.min(高, Math.round(box.height), 1100 - y)
+  if (hh <= 2) return null
+  const r = await b.send('Page.captureScreenshot', { format: 'png', clip: { x, y, width: w, height: hh, scale } })
+  fs.writeFileSync(file, Buffer.from(r.data, 'base64'))
+  return { x, y, w, hh, scale }
+}
+const ok = (label, cond, got) => { TOTAL++; R.ok(label, cond, got) }
+
+// ⚠️ 起点必须**贴着现在**（上一版写死 1750000000000 = 2025-06-13，本轮不能再用）：
+//   ① 的「时间范围」默认是**近 5 分**，写死的旧时刻会被那条窗口整批滤掉 ⇒ 页面空的、断言全红。
+//   取「20 秒前」：BULK（T+0…T+1050）与 PERKIND（T+5000…T+5036）都落在近 5 分内，
+//   而 ⑳ 那条自定义判据要用 **T+3000 当刀口**把这两批精确切开。
+const T = Date.now() - 20000
+const TRACE = 'trace0001'
+
+/** 九类「有意思的」事件（一条一类）—— 与 FRAME2 的 8 条**同属一次请求**，
+ *  ⇒ 它们会连续、且 `traces` 里有这条记录 ⇒ 满足包组条件，③ 里会长成一组树。
+ *  ⚠️ ts 按 i 递减：全部晚于 BULK，且收拍内按 ts 倒序排 ⇒ 卡片顺序 = KINDS 声明序。 */
+const PERKIND = [
+  ['cache', '缓存命中（L1）', 'cache=goodstype result=hit key=all', 'goodsType:all'],
+  ['lock', '取锁成功（order:create）', 'key=order:create result=acquired', 'order:create/O-1'],
+  ['order', '状态流转 waitPay → waitShip', 'orderId=O-1 from=waitPay to=waitShip', 'O-1'],
+  ['stock', '库存扣减', 'sku=SKU-0001 qty=1 result=ok', 'SKU-0001'],
+  ['audit', '审计写入', 'action=goods.delete actor=C-1', 'M-1:P-1'],
+  ['notify', '通知发送', 'type=email event=order.paid', 'C-1'],
+  ['sensitive', '敏感词拒收', 'scene=评论 hit=9 total=20 result=rejected', '傻逼,滚'],
+  ['identity', '身份拒绝', 'subject=C-1 reason=令牌过期 result=rejected', 'C-1'],
+  ['protection', '限流拦截', 'key=rateLimit result=blocked', 'rateLimit'],
+].map(([kind, title, detail, objectId], i) => ({
+  seq: 1000 + i,
+  ts: T + 5000 + (8 - i) * 4,
+  kind,
+  severity: kind === 'sensitive' || kind === 'identity' || kind === 'protection' ? 'warn' : 'info',
+  title, detail, key: objectId, objectType: kind, objectId,
+  traceId: TRACE,
+}))
+
+/** 批量事件（第 1 拍），把条数撑过旧版的一页（100）。**没有 traceId** —— 专门用来验「不可点」。 */
+const BULK = Array.from({ length: 150 }, (_, i) => ({
+  seq: i,
+  ts: T + i * 7,
+  kind: ['cache', 'lock', 'order', 'stock', 'audit', 'notify', 'sensitive', 'identity', 'protection'][i % 9],
+  severity: i % 11 === 0 ? 'error' : (i % 5 === 0 ? 'warn' : 'info'),
+  title: `批量事件 ${i}`,
+  detail: `idx=${i} src=bulk#${i}`,
+  key: `K-${i}`,
+  objectType: 'bulk',
+  objectId: `B-${i}`,
+  traceId: null,
+}))
+
+const FRAME1 = {
+  seq: 1, ts: T + 1000, cursor: 149, count: 150, rate: 12.5, mq: false,
+  counts: { cache: 17, lock: 17, order: 17, stock: 17, audit: 17, notify: 17, sensitive: 16, identity: 16, protection: 16 },
+  severity: { info: 118, warn: 29, error: 3 },
+  events: BULK, traces: [],
+}
+const FRAME2 = {
+  seq: 2, ts: T + 2000, cursor: 159, count: 9, rate: 8.0, mq: false,
+  counts: { cache: 1, lock: 1, order: 1, stock: 1, audit: 1, notify: 1, sensitive: 1, identity: 1, protection: 1 },
+  severity: { info: 6, warn: 3, error: 0 },
+  events: PERKIND,
+  traces: [{
+    seq: 0, traceId: TRACE, method: 'POST', path: '/goods/goodsUp',
+    status: 200, startMs: T + 4990, endMs: T + 5032, ms: 42,
+  }],
+}
+
+const SSE_BODY = [FRAME1, FRAME2].map((f) => `data: ${JSON.stringify(f)}\n\n`).join('')
+
+const CORS = [
+  { name: 'Access-Control-Allow-Origin', value: 'http://localhost:8080' },
+  { name: 'Access-Control-Allow-Credentials', value: 'true' },
+  { name: 'Access-Control-Allow-Headers', value: 'Authorization, Content-Type' },
+  { name: 'Access-Control-Allow-Methods', value: 'GET,POST,OPTIONS' },
+]
+
+const seen = []
+const b = await open({ w: 1440, h: 1100 })
+
+await b.send('Fetch.enable', { patterns: [{ urlPattern: '*8088*' }] })
+b.ws.on('message', (raw) => {
+  const m = JSON.parse(raw)
+  if (m.method !== 'Fetch.requestPaused') return
+  const { requestId, request } = m.params
+  seen.push({ url: request.url, method: request.method })
+  const answer = () => {
+    if (request.method === 'OPTIONS') {
+      b.send('Fetch.fulfillRequest', { requestId, responseCode: 200, responseHeaders: CORS, body: '' }).catch(() => {})
+      return
+    }
+    const isStream = request.url.includes('/admin/observe/events/stream')
+    const body = isStream ? SSE_BODY : JSON.stringify({ success: true })
+    b.send('Fetch.fulfillRequest', {
+      requestId, responseCode: 200,
+      responseHeaders: [...CORS, { name: 'Content-Type', value: isStream ? 'text/event-stream' : 'application/json' }],
+      body: Buffer.from(body).toString('base64'),
+    }).catch(() => {})
+  }
+  setTimeout(answer, 1200)
+})
+
+await b.send('Page.addScriptToEvaluateOnNewDocument', {
+  source: `(() => {
+    try {
+      sessionStorage.setItem('loginUsername', 'ops_duan')
+      sessionStorage.setItem('customerid', 'qa7PmpUojO')
+      sessionStorage.setItem('role', '3')
+    } catch (e) {}
+    window.__errs = []
+    const oe = console.error.bind(console)
+    console.error = (...a) => { try { window.__errs.push(a.map(String).join(' ')) } catch (e) {} ; oe(...a) }
+    window.addEventListener('unhandledrejection', (e) => { try { window.__errs.push('unhandledrejection: ' + e.reason) } catch (x) {} })
+  })()`,
+})
+
+const TEXT = (sel) => `[...document.querySelectorAll('${sel}')].map(e => (e.innerText ?? e.textContent ?? '').trim())`
+/** 元素自身的方框（不含后代）—— 量行高/缩进用。 */
+const BOX = (sel) => `(() => { const e = document.querySelector('${sel}'); if (!e) return null; const r = e.getBoundingClientRect(); return { l: Math.round(r.left), w: Math.round(r.width), h: Math.round(r.height) } })()`
+/** `datetime-local` 的取值串（**本地时区、秒级**）—— 页面上的 `toLocalInput` 是同一条口径。
+ *  ⚠️ 不能用 `toISOString()`：那是 UTC，喂进去会整体偏一个时区（东八区偏 −8h）。 */
+const p2 = (n) => String(n).padStart(2, '0')
+const localInput = (ms) => {
+  const d = new Date(ms)
+  return `${d.getFullYear()}-${p2(d.getMonth() + 1)}-${p2(d.getDate())}`
+    + `T${p2(d.getHours())}:${p2(d.getMinutes())}:${p2(d.getSeconds())}`
+}
+
+try {
+  await b.send('Page.navigate', { url: `${BASE}/${ROUTE}` })
+  let mounted = false
+  for (let i = 0; i < 120; i++) {
+    mounted = await b.evalJS(`!!document.querySelector('.ev-frame')`).catch(() => false)
+    if (mounted) break
+    await sleep(250)
+  }
+  ok('① 页面挂载（.ev-frame 出现）', mounted === true)
+  await sleep(2200)
+  await sleep(600)
+
+  const body = await b.evalJS('document.body.innerText')
+  const errs = await b.evalJS('(window.__errs || [])')
+  ok('① 无 console.error / unhandledrejection', errs.length === 0, errs.slice(0, 3))
+  const streamReq = seen.find((r) => r.url.includes('/admin/observe/events/stream'))
+  ok('① 打的是 POST /admin/observe/events/stream',
+    !!streamReq && streamReq.method === 'POST', streamReq ? streamReq.method : '(没打到流)')
+  const elText = await b.evalJS(`(document.querySelector('.a-el') || {}).innerText || ''`)
+  ok('① 渲染文本里没有 markdown 星号', !String(elText).includes('**'))
+
+  // ── ② 六区齐 ──────────────────────────────────────────────────────────────
+  const regions = await b.evalJS(`(() => {
+    const q = (s) => !!document.querySelector(s)
+    return { s1: q('.ev-status'), s2: q('.ev-rail'), s3: q('.ev-col'), s4: q('.ev-live'), s5: q('.ev-drawer'), s6: q('.ev-switch') }
+  })()`)
+  ok('② 六区齐（① 状态条 / ② 过滤栏 / ③ 事件流 / ④ 实时统计 / ⑤ 链路展开 / ⑥ 开关栏）',
+    Object.values(regions).every(Boolean), regions)
+
+  // ── ③ 九类行清单 + lucide svg 图标 ─────────────────────────────────────────
+  // ⚠️ 必须排掉 `.is-fac` 那 3 行（裁定 D 加进来的设施类），否则「九类」会数成 12 条。
+  const kindLabels = await b.evalJS(TEXT('.ev-rail .rows .row:not(.all):not(.is-fac) .k'))
+  ok('③ ② 的九类行清单标签逐字 = 缓存/锁/订单/库存/审计/通知/敏感词/身份/防护',
+    JSON.stringify(kindLabels) === JSON.stringify(['缓存', '锁', '订单', '库存', '审计', '通知', '敏感词', '身份', '防护']), kindLabels)
+  const lucideN = await b.evalJS(`[...document.querySelectorAll('.log-line .ic svg')].length`)
+  const iconN = await b.evalJS(`[...document.querySelectorAll('.log-line .ic')].length`)
+  const reqmarkN = await b.evalJS(`[...document.querySelectorAll('.log-line .ic .reqmark')].length`)
+  // ⚠️ 组头/组尾那两行的图标格画的是 `.reqmark`（一条短横线），**不是** lucide svg ——「请求开始/结束」
+  //    在原版 9 类图标里没有对应项，硬套一个 Lucide 图标反而是编。故断言要减去它们。
+  ok('③ ③ 里的类图标走 @lucide/vue（除 2 条请求行外，每格一个 <svg>）',
+    iconN > 0 && lucideN === iconN - reqmarkN && reqmarkN === 2, { 图标格: iconN, svg: lucideN, 请求行占位: reqmarkN })
+  const kindColors = await b.evalJS(`[...document.querySelectorAll('.log-line .ic svg')].slice(0, 9).map(e => getComputedStyle(e).color)`)
+  ok('③ 类色互不相同（前 9 枚取到 ≥5 个不同计算色）',
+    new Set(kindColors).size >= 5, new Set(kindColors).size)
+
+  // ── ④ 分页器没了 ──────────────────────────────────────────────────────────
+  // 事件 159 条（BULK 150 + PERKIND 9），DOM 里另有组头/组尾 2 行 ⇒ 161 行 `.log-line`。
+  const rowN = await b.evalJS(`document.querySelectorAll('.log-line').length`)
+  ok('④ **分页器已删**：159 条事件全在 DOM 里（旧版每页 100）', rowN === 161, { 行: rowN, 期望: '159 事件 + 2 请求行' })
+  ok('④ 页面里没有分页控件，也没有「下一页」字样',
+    (await b.evalJS(`document.querySelectorAll('.ev-frame .pager, .ev-frame .a-pager').length`)) === 0
+    && !String(body).includes('下一页'))
+
+  // ── ④b 每一格都真有内容（本轮实拍抓到：类列整列空的）─────────────────────────
+  // ⚠️ 这三条是**看图**抓出来的洞：`makeRow` 漏了 `md` ⇒ 渲染后 40px 的类列全空，
+  //    而 `eslint` 与「无 console.error」都报绿。凡「字段有名字、模板有插槽」的组合都要这样钉。
+  const cellTexts = await b.evalJS(`(() => {
+    const r = document.querySelector('.log-line:not(.req)')
+    return { md: r.querySelector('.md').textContent.trim(), ms: r.querySelector('.ms').textContent.trim(), tm: r.querySelector('.tm').textContent.trim(), lv: r.querySelector('.lv').textContent.trim() }
+  })()`)
+  ok('④b ③ 每行的**类列**非空且是九类中文之一',
+    ['缓存', '锁', '订单', '库存', '审计', '通知', '敏感词', '身份', '防护'].includes(cellTexts.md), cellTexts.md)
+  ok('④b ③ 每行的时刻 / 等级 / 消息三格都非空',
+    /^\d{2}:\d{2}:\d{2}\.\d{3}$/.test(cellTexts.tm) && ['INFO', 'WARN', 'ERROR'].includes(cellTexts.lv) && cellTexts.ms.length > 0, cellTexts)
+  const reqMd = await b.evalJS(`(document.querySelector('.log-line.req .md') || {}).textContent`)
+  ok('④b 请求行的类列 = 「请求」', String(reqMd).trim() === '请求', reqMd)
+  // ⚠️ 折线：2 拍数据时 `sparkPts` 非空 ⇒ svg 必须真有高、polyline 必须有点
+  const spark = await b.evalJS(`(() => {
+    const svg = document.querySelector('.ev-spark svg')
+    const pl = document.querySelector('.ev-spark polyline')
+    const r = svg.getBoundingClientRect()
+    return { h: Math.round(r.height), w: Math.round(r.width), pts: pl ? (pl.getAttribute('points') || '').split(' ').filter(Boolean).length : 0 }
+  })()`)
+  ok('④b 顶部速率折线真画出来了（svg 有高 + polyline ≥2 个点）',
+    spark.h >= 10 && spark.w > 100 && spark.pts >= 2, spark)
+  // ⚠️ ④ 的类计数横条：最大值那一类的 fill 必须**占满轨道**（本轮实拍曾疑似只有 1/3）
+  const bar = await b.evalJS(`(() => {
+    const b0 = document.querySelector('.ev-bars .ev-bar')
+    const t = b0.querySelector('.track')
+    const f = b0.querySelector('.fill')
+    return { nm: b0.querySelector('.nm').textContent.trim(), track: Math.round(t.getBoundingClientRect().width), fill: Math.round(f.getBoundingClientRect().width) }
+  })()`)
+  ok('④b ④ 类计数横条按最大值成比例（首条 = 最大值 ⇒ fill 占满轨道）',
+    bar.track > 80 && Math.abs(bar.fill - bar.track) <= 2, bar)
+
+  // ── ⑤ 时间正序（tail -f 方向）─────────────────────────────────────────────
+  const times = await b.evalJS(`[...document.querySelectorAll('.log-line .tm')].map(e => e.textContent.trim())`)
+  ok('⑤ ③ 是**时间正序**（tail -f：首行时刻 ≤ 末行时刻，与旧版「最新在最上」相反）',
+    times.length > 1 && times[0] <= times[times.length - 1], [times[0], times[times.length - 1]])
+
+  // ── ⑥ 树形前导符 ──────────────────────────────────────────────────────────
+  // ⚠️ **别量 `.pre` 的左沿**：前导符的「缩进」不是把 `.pre` 右推（它永远贴在行左沿），
+  //   而是**列宽**——`--pc` 逐行写 `calc(层级×3ch + 2ch + 8px)`，把**时刻列**推右 3ch。
+  //    量 `.pre` 会得到「组头和成员左沿相同」并被误判成「没缩进」（本次实测踩过）。
+  const reqN = await b.evalJS(`document.querySelectorAll('.log-line.req').length`)
+  ok('⑥ 包了一组（组头「请求开始」+ 收口「请求结束」= 2 条 .req）', reqN === 2, reqN)
+  const tree = await b.evalJS(`(() => {
+    const rows = [...document.querySelectorAll('.log-line')]
+    const headI = rows.findIndex(e => e.classList.contains('req') && (e.querySelector('.ms b') || {}).textContent === '请求开始')
+    if (headI < 0) return null
+    const g = (e) => ({ pre: e.querySelector('.pre').textContent, tmX: Math.round(e.querySelector('.tm').getBoundingClientRect().left) })
+    return { head: g(rows[headI]), c1: g(rows[headI + 1]), c2: g(rows[headI + 2]), last: g(rows[rows.length - 1]) }
+  })()`)
+  ok('⑥ 组头是顶层条目 ⇒ 前导符 `├─` 或 `└─`', tree && ['├─', '└─'].includes(tree.head.pre), tree && tree.head.pre)
+  ok('⑥ 成员行的**时刻列**比组头右移 3ch（≈10–32px）—— 缩进落在列宽上',
+    tree && (tree.c1.tmX - tree.head.tmX) > 10 && (tree.c1.tmX - tree.head.tmX) < 32,
+    tree && { 组头时刻列: tree.head.tmX, 成员: tree.c1.tmX, 差: tree.c1.tmX - tree.head.tmX })
+  ok('⑥ 两个成员行的缩进一致（同一层）',
+    tree && tree.c1.tmX === tree.c2.tmX, tree && [tree.c1.tmX, tree.c2.tmX])
+  ok('⑥ 本窗最后一组 ⇒ 组头是 `└─`、成员左槽是**空格**（不是 `│`）',
+    tree && tree.head.pre === '└─' && tree.c1.pre.startsWith('   '),
+    tree && { 组头: tree.head.pre, 成员: tree.c1.pre })
+  ok('⑥ 组尾（窗口最后一行）是 `   └─`', tree && tree.last.pre === '   └─', tree && tree.last.pre)
+
+  // ── ⑥ 树形**实拍**（把 ③ 滚到底再裁）─────────────────────────────────────────────
+  // ⚠️ 为什么单开这一张：本探针此前那两张实拍（`-stream` / 无后缀）都停在列表**顶部**，
+  //    而组在**窗口末尾**（两拍数据才有 9 条同 trace）⇒ **证据里从来没有出现过一棵树**。
+  //    用户 2026-10-16 的意见「截图里所有行看起来是平的，树形没生效」说的就是那两张图 ——
+  //    先有「能看见树」的实拍，才谈得上判断树形到底立不立得住。
+  await b.evalJS(`(() => { const l = document.querySelector('.ev-list'); l.scrollTop = l.scrollHeight; return l.scrollTop })()`)
+  await sleep(600)
+  const groupBox = await b.evalJS(`(() => {
+    const el = [...document.querySelectorAll('.log-line')].find(r => r.classList.contains('req'))
+    if (!el) return null
+    const r = el.getBoundingClientRect()
+    return { top: Math.round(r.top), h: Math.round(r.height) }
+  })()`)
+  ok('⑥ 树形实拍：③ 滚到底后组头在视口内（否则截图还是拍不到树）',
+    !!groupBox && groupBox.top >= 0 && groupBox.top < 1100, groupBox)
+  await b.shot(`${WORK}out-b7a3-eventlog-tree.png`)
+
+  // ── ⑦ ④ Top-N 三档 ───────────────────────────────────────────────────────
+  const tabs = await b.evalJS(TEXT('.ev-top .tb'))
+  ok('⑦ ④ Top-N 三档 = 对象/慢请求/错误', JSON.stringify(tabs) === JSON.stringify(['对象', '慢请求', '错误']), tabs)
+  const topObj = await b.evalJS(TEXT('.ev-top .tr1 .nm'))
+  ok('⑦ 对象榜有行（B-* 那批批量事件的对象）', topObj.length > 0, topObj.slice(0, 3))
+  await b.evalJS(`[...document.querySelectorAll('.ev-top .tb')].find(e => e.textContent.includes('慢请求')).click()`)
+  await sleep(300)
+  const topSlow = await b.evalJS(TEXT('.ev-top .tr1 .nm'))
+  ok('⑦ 换到「慢请求」档 ⇒ 列表重排（内容换成请求路径）',
+    topSlow.length > 0 && topSlow[0].includes('/goods/goodsUp'), topSlow.slice(0, 3))
+  await b.evalJS(`[...document.querySelectorAll('.ev-top .tb')].find(e => e.textContent.includes('对象')).click()`)
+  await sleep(200)
+
+  // ── ⑧ ⑤ 抽屉：默认塌着，点行才拉起 ────────────────────────────────────────
+  const beforeOpen = await b.evalJS(`document.querySelectorAll('.ev-drawer .chain').length`)
+  ok('⑧ ⑤ 默认塌着（没有 .chain）', beforeOpen === 0, beforeOpen)
+  const openable = await b.evalJS(`document.querySelectorAll('.log-line[role="button"]').length`)
+  ok('⑧ ③ 里带 traceId 的行可点（有 role=button）', openable > 0, openable)
+  await b.evalJS(`document.querySelector('.log-line[role="button"]').click()`)
+  await sleep(400)
+  const chain = await b.evalJS(TEXT('.ev-drawer .chain .chain-i .d'))
+  ok('⑧ 点一行 ⇒ ⑤ 拉起，链里含「请求开始」与「请求结束 · 总耗时 42 ms」',
+    chain.some((t) => t.includes('请求开始')) && chain.some((t) => t.includes('总耗时 42 ms')), chain.slice(0, 3).concat(['…', chain[chain.length - 1]]))
+  ok('⑧ 链里中间节点 = 同 trace 的事件（≥2 条）', chain.length >= 4, chain.length)
+  // ⚠️ 同 trace 整组微染（动效落点 6）
+  const selN = await b.evalJS(`document.querySelectorAll('.log-line.sel').length`)
+  ok('⑧ 同 trace **整组**微染（.sel 行数 = 那一组的行数，> 1）', selN > 1, selN)
+  ok('⑨ 没有 traceId 的行**不可点**（不带 role=button）',
+    (await b.evalJS(`[...document.querySelectorAll('.log-line')].filter(e => !e.hasAttribute('role')).length`)) > 0)
+
+  // ── ⑩ 八处 data-anim 落点 ─────────────────────────────────────────────────
+  const anims = await b.evalJS(`[...document.querySelectorAll('[data-anim]')].map(e => e.getAttribute('data-anim'))`)
+  const want = ['3', '4,7', '6', '8', '9', '10', '12']
+  const flat = anims.join(',').split(',')
+  ok('⑩ 8 处动效落点都在（data-anim 3 / 4,7 / 6 / 8 / 9 / 10 / 12）',
+    want.every((w) => w.split(',').every((x) => flat.includes(x))), anims)
+
+  // ── ⑪ 窗口形态：整页不滚，③ 内部滚 ────────────────────────────────────────
+  const layout = await b.evalJS(`(() => {
+    const de = document.documentElement
+    const list = document.querySelector('#ev-list')
+    const frame = document.querySelector('.ev-frame')
+    const fr = frame.getBoundingClientRect()
+    const ae = document.querySelector('.a-el')
+    const ar = ae.getBoundingClientRect()
+    const main = document.querySelector('.a-main')
+    return {
+      pageScroll: de.scrollHeight - de.clientHeight,
+      listScroll: list ? list.scrollHeight - list.clientHeight : -1,
+      frameH: Math.round(fr.height),
+      frameTop: Math.round(fr.top),
+      frameBottom: Math.round(fr.bottom),
+      aelH: Math.round(ar.height),
+      aelTop: Math.round(ar.top),
+      aelCssH: getComputedStyle(ae).height,
+      mainH: main ? Math.round(main.getBoundingClientRect().height) : -1,
+      mainDisplay: main ? getComputedStyle(main).display : '?',
+      winH: window.innerHeight,
+    }
+  })()`)
+  ok('⑪ **整页不滚**（documentElement 无溢出，≤ 2px 容差）', Math.abs(layout.pageScroll) <= 2, layout)
+  ok('⑪ ③ 内部可滚（scrollHeight > clientHeight）', layout.listScroll > 0, layout.listScroll)
+  ok('⑪ 外框**装在一屏内**（底边不超出视口，≤ 2px 容差）', layout.frameBottom <= layout.winH + 2, { 底: layout.frameBottom, 视口: layout.winH })
+
+  // ── ⑫ ① 数据源计数常驻 ────────────────────────────────────────────────────
+  ok('⑫ ① 有「数据源」分段控件', String(body).includes('数据源'))
+  ok('⑫ 「已放 N / 500 条」**常驻**（模拟日常没开时也在，含「未开」字样）',
+    String(body).includes('/ 500 条') && String(body).includes('未开'), String(body).match(/已放[^）]*/)?.[0])
+
+  // ── ⑬ ② 的类计数 = 窗口内累计 ─────────────────────────────────────────────
+  const railNums = await b.evalJS(TEXT('.ev-rail .rows .row:not(.all) .c'))
+  const sum = railNums.reduce((a, s) => a + Number(String(s).replace(/[^\d]/g, '') || 0), 0)
+  ok('⑬ ② 九类计数合计 = 窗口内 159 条（**不是**帧里本拍 counts 的 9）', sum === 159, { 合计: sum, 分项: railNums })
+  const allN = await b.evalJS(`(document.querySelector('.ev-rail .row.all .c') || {}).textContent || ''`)
+  ok('⑬ 「全部」行 = 159', Number(String(allN).replace(/[^\d]/g, '')) === 159, allN)
+
+  // ── ⑭ ⑥ 开关栏：degrade 不可开关 ──────────────────────────────────────────
+  const dead = await b.evalJS(TEXT('.ev-switch .sw2.dead'))
+  ok('⑭ ⑥ 开关栏把 `degrade`（降级）画成不可开关', dead.some((t) => t.includes('降级') && t.includes('不可开关')), dead)
+  const inj = await b.evalJS(TEXT('.ev-switch .sw2'))
+  ok('⑭ ⑥ 注入那三枚在（Redis 断开 / MQ 断开 / 慢 SQL）',
+    ['Redis 断开', 'MQ 断开', '慢 SQL'].every((k) => inj.some((t) => t.includes(k))), inj)
+
+  // ── ⑮ 色板锁定 = admin 主题 ───────────────────────────────────────────────
+  const theme = await b.evalJS(`document.documentElement.getAttribute('data-theme')`)
+  const inkColor = await b.evalJS(`getComputedStyle(document.querySelector('.ev-frame')).color`)
+  const brandInk = await b.evalJS(`getComputedStyle(document.documentElement).getPropertyValue('--brand-ink').trim()`)
+  // ⚠️ 这一条同时是「入口打对了没」的哨兵：打到 `index.html`（商城入口）时
+  //    `data-theme` 是 **null**、`--brand-ink` 是浅色的 `#275e4e` —— 本次实测踩过。
+  ok('⑮ 色板 = admin 主题（html[data-theme="admin"]，不是线框灰阶 / 浅色商城档）',
+    theme === 'admin' && inkColor !== 'rgb(34, 34, 34)', { theme, 文字色: inkColor, brandInk })
+
+  // ── ⑰ skill 台账（落地后重过：frontend-design 三查 / taste C1·C2·C5 / 色板）──────────
+  const skin = await b.evalJS(`(() => {
+    const all = [...document.querySelectorAll('.a-el *')]
+    const shadows = new Set(), radii = new Set()
+    for (const e of all) {
+      const s = getComputedStyle(e)
+      if (s.boxShadow && s.boxShadow !== 'none') shadows.add(s.boxShadow)
+      radii.add(s.borderTopLeftRadius)
+    }
+    return { shadows: [...shadows], radii: [...radii].sort() }
+  })()`)
+  ok('⑰ frontend-design ②：全页 **0 处阴影**（发丝线替代阴影，同 tokens 口径）',
+    skin.shadows.length === 0, skin.shadows)
+  ok('⑰ frontend-design ②：圆角只取 token 档（0 / 4 / 8 / 10px，无自造值）',
+    skin.radii.every((r) => ['0px', '4px', '8px', '10px', '50%'].includes(r)), skin.radii)
+  // C5：四边框 + 与邻居有间隙 + 同构兄弟 ≥3 ⇒ 卡网格（控件除外 —— 判据同 `_work/3a3/tastecheck-台账.md` §三）
+  // ⚠️ **判据本轮修过一次（用户 2026-10-16 执行清单第 2 项：C5 判据漏洞二选一）**。
+  //    旧版把**所有子元素**拿去算「同构签名」⇒ ⑥ 开关组里那枚 `.lab` 标签（无边框）把签名
+  //    打散成两个值，于是那 5 枚 `.sw2` **根本没被看见**，判据报「OK」—— 那不是「它没问题」，
+  //    是「它没查」（同 [[checker-ok-means-only-what-it-checks]]）。
+  //    现在：签名只取**有边框的兄弟**（`four`），`.lab` 再也挡不住 → 它必须被**显式登记**成例外。
+  //    配套加了下面的**阳性对照**：先证明判据仍看得见那组，再声明它是已登记的控件组。
+  const c5 = await b.evalJS(`(() => {
+    try {
+      const cz = (e) => { const s = getComputedStyle(e); return [s.borderTopWidth, s.borderRightWidth, s.borderBottomWidth, s.borderLeftWidth].join(' ') }
+      const CTRL = new Set(['BUTTON', 'INPUT', 'SELECT'])
+      const hits = []
+      for (const p of document.querySelectorAll('.ev-frame *')) {
+        const kids = [...p.children]
+        if (kids.length < 3) continue
+        const four = kids.filter((k) => cz(k) === '1px 1px 1px 1px')
+        const gap = parseFloat(getComputedStyle(p).gap) || 0
+        if (four.length < 3 || gap < 2) continue
+        const sig = new Set(four.map((k) => cz(k) + '|' + k.tagName))
+        if (sig.size !== 1) continue
+        // 控件组的两种长相：整组都是原生控件，或组里有一枚「.lab」组名标签（⑥ 开关栏那种）。
+        // ⚠️ 这里**不能**写反引号：整段是 b.evalJS 的模板字符串，一个反引号就把模板提前闭合，
+        //    后面全变成「源码里的可执行 JS」，报错长成 TypeError: "<整段源码>" is not a function
+        //    —— 指向的却是**注释行**，看不出来是标点问题（同 [[probe-measure-is-a-template-literal]]）。
+        const ctrl = kids.every((k) => CTRL.has(k.tagName)) || kids.some((k) => k.classList.contains('lab'))
+        hits.push({ parent: String(p.className), n: four.length, gap, 控件: ctrl, 组名: (kids.find((k) => k.classList.contains('lab')) || {}).textContent || '' })
+      }
+      return { hits }
+    } catch (e) { return { err: String((e && e.stack) || e) } }
+  })()`)
+  // ⚠️ 先确认判据这段**自己没炸**：`.ev-frame *` 里有 SVG（lucide 图标），`className` 在 SVG 上
+  //    是 `SVGAnimatedString` 而不是字符串 —— 直接放进返回值会让 CDP 序列化失败、整轮静默中止
+  //    （上一版踩过：46 项之后突然「探针自身没抛异常 = FAIL」）。已改 `String()` + try/catch 兜住。
+  ok('⑰ taste C5 判据自身可执行（SVG 的 className 已归一化，序列化不炸）', !c5.err, c5.err || 'ok')
+  const c5h = c5.hits || []
+  // ⚠️ **阳性对照**：先证明修完的判据**仍看得见** ⑥ 的那组开关（5 枚 `.sw2`，同构、有边框、有间隙）。
+  //    没有这一条，「非控件命中 = 0」既可能是「真没有」，也可能是「判据又瞎了」—— 两者不可分。
+  ok('⑰ taste C5 阳性对照：修完的判据**仍看得见** ⑥ 开关栏那组（≥3 枚同构带框的 `.sw2`）',
+    c5h.some((h) => String(h.parent).includes('grp') && h.n >= 3), c5h)
+  ok('⑰ taste C5：`.ev-frame` 内没有「四边框 + 有间隙 + 同构」的 ≥3 **数据卡**网格（命中项全是已登记的控件组）',
+    c5h.length > 0 && c5h.every((h) => h.控件), c5h)
+  // C1：相邻区块不共用构图 —— 六区两两相邻，各区的「子元素骨架」签名互不相同
+  const c1 = await b.evalJS(`(() => {
+    const zones = [...document.querySelectorAll('.ev-frame > *')]
+    const sig = (e) => [...e.children].map((k) => k.tagName + '.' + String(k.className).split(' ')[0]).join('>')
+    const pairs = []
+    for (let i = 0; i + 1 < zones.length; i++) pairs.push([zones[i].className, zones[i + 1].className, sig(zones[i]) === sig(zones[i + 1])])
+    return { n: zones.length, same: pairs.filter((p) => p[2]) }
+  })()`)
+  // ⚠️ 量的是 `.ev-frame` 的**顶层条带**（① / 条件块 / .ev-body / ⑤ / ⑥ = 5 条），
+  //    不是「六区」—— ②③④ 是 `.ev-body` 的**内部**三列，不在这条链上。
+  ok('⑰ taste C1：外框的顶层条带两两相邻，无一对共用构图（探针打印同构对）',
+    c1.n >= 5 && c1.same.length === 0, { 条带: c1.n, 相邻对: c1.n - 1, 同构对: c1.same })
+
+  // 真流状态下的实拍（⑤ 拉起、有起止）—— 与下面演示模式那张对照
+  await b.shot(`${WORK}out-b7a3-eventlog-stream.png`)
+
+  // ── ⑰b ① 第二排：一行 + 不溢出（裁定 A 落地后新加的两条）───────────────────────
+  // ⚠️ `.ev-status` 是 `flex: 0 0 auto`（窗口形态），`.r2` 一换行就从 `.ev-body` 嘴里抢高度；
+  //    三枚控件 + 「自定义」的起止两栏最容易顶到边。溢出必须量 `scrollWidth` 才看得见 ——
+  //    组件里写了 `overflow: hidden`，光看高度与截图都发现不了「右边被切掉」。
+  const r2box = () => b.evalJS(`(() => {
+    const e = document.querySelector('.ev-status .r2')
+    const hs = [...e.children].map(k => Math.round(k.getBoundingClientRect().height))
+    const w = [...e.children].map(k => ({ c: String(k.className).split(' ')[0], w: Math.round(k.getBoundingClientRect().width), t: (k.textContent || '').trim().slice(0, 10) }))
+    return { scroll: Math.round(e.scrollWidth), client: Math.round(e.clientWidth), h: Math.round(e.getBoundingClientRect().height), maxKid: Math.max.apply(null, hs), n: hs.length, w: w }
+  })()`)
+  const r2a = await r2box()
+  ok('⑰b ① 第二排是**一行**（没换行 ⇒ 行高 = 最高的那个子元素）', r2a.h <= r2a.maxKid + 4, r2a)
+  ok('⑰b ① 第二排**不溢出**（三枚控件 + 拍/MQ 都在可用宽内）', r2a.scroll <= r2a.client + 2, r2a)
+
+  // ══ 裁定 A · ① 第二排的三枚控件（三个都必须是真功能，不是换了个说法的占位）════════
+
+  // ── ⑱ 密度：22 ⇄ 28px ────────────────────────────────────────────────────────
+  // 量的是**行盒**（不是 CSS 变量）：变量写对了但没接上（选择器没命中）照样量不出差别。
+  // ⚠️ 载荷里带**盒模型解剖**（`ln` / `flow` / 首个 `.ic` 的高度与 `line-height`）：
+  //    第 ⑦ 步把数据行从栅格改成「一行自然流」之后，紧凑态一度量到 25px（≠22）——
+  //    这种「只差 3px」的红，没有解剖就只能靠猜。带上它，红的时候一眼看出是谁撑高的。
+  const rowH = () => b.evalJS(`(() => {
+    const r = document.querySelector('.log-line')
+    const q = (s) => { const e = r.querySelector(s); return e ? Math.round(e.getBoundingClientRect().height) : null }
+    const cs = getComputedStyle(r)
+    return {
+      line: Math.round(r.getBoundingClientRect().height),
+      head: Math.round(document.querySelector('.log-head').getBoundingClientRect().height),
+      盒: {
+        行内边距: cs.paddingTop + '/' + cs.paddingBottom,
+        行lineHeight: cs.lineHeight,
+        ln: q('.ln'), flow: q('.flow'), pre: q('.pre'), tm: q('.tm'), ic: q('.ic'), md: q('.md'), ms: q('.ms'),
+        icVAlign: getComputedStyle(r.querySelector('.ic')).verticalAlign,
+      },
+    }
+  })()`)
+  if (process.env.DBG) {
+    const boxDump = await b.evalJS('(() => {' +
+      'const line = document.querySelector(".log-line");' +
+      'const ln = line.querySelector(".ln");' +
+      'const H = (e) => { const r = e.getBoundingClientRect(); return { h: +r.height.toFixed(2), top: +r.top.toFixed(2) } };' +
+      'const kids = [...ln.querySelectorAll("*")].map((e) => { const cs = getComputedStyle(e);' +
+      ' const c = (e.className && e.className.baseVal !== undefined) ? e.className.baseVal : (e.className || e.tagName);' +
+      ' return { c, dis: cs.display, va: cs.verticalAlign, lh: cs.lineHeight, fs: cs.fontSize, pad: cs.padding, bor: cs.borderTopWidth + "/" + cs.borderBottomWidth + "/" + cs.borderBottomStyle, ...H(e) } });' +
+      'const lcs = getComputedStyle(ln);' +
+      'return { line: H(line), ln: { ...H(ln), lh: lcs.lineHeight, fs: lcs.fontSize, maxH: lcs.maxHeight, pad: lcs.paddingTop + "/" + lcs.paddingBottom }, minH: getComputedStyle(line).minHeight, kids }' +
+      '})()')
+    console.log('\n=== DBG .ln 盒解剖 ===')
+    console.log(JSON.stringify(boxDump, null, 1))
+    const probeH = () => b.evalJS('+document.querySelector(".log-line .ln").getBoundingClientRect().height.toFixed(2)')
+    console.log('现状 .ln =', await probeH())
+    const cands = [
+      ['A 前缀列 vertical-align:middle', '.log-line .pre, .log-line .tm, .log-line .ic, .log-line .lv, .log-line .md { vertical-align: middle !important }'],
+      ['B 前缀列 line-height:1', '.log-line .pre, .log-line .tm, .log-line .ic, .log-line .lv, .log-line .md { line-height: 1 !important }'],
+      ['C A+B', '.log-line .pre, .log-line .tm, .log-line .ic, .log-line .lv, .log-line .md { vertical-align: middle !important; line-height: 1 !important }'],
+    ]
+    for (const [nm, css] of cands) {
+      await b.evalJS('(() => { let s = document.getElementById("dbgfix"); if (!s) { s = document.createElement("style"); s.id = "dbgfix"; document.head.appendChild(s) } s.textContent = ' + JSON.stringify(css) + ' })()')
+      await sleep(250)
+      console.log(nm, '=> .ln =', await probeH())
+    }
+    await b.evalJS('(() => { const s = document.getElementById("dbgfix"); if (s) s.remove() })()')
+    await sleep(150)
+    console.log('=== DBG END ===\n')
+  }
+  const clickSeg = (t) => b.evalJS(`[...document.querySelectorAll('.ev-status .seg .chip')].find(e => e.textContent.trim() === '${t}').click()`)
+  const h1 = await rowH()
+  ok('⑱ 密度「紧凑」（默认）⇒ 行高 22px', h1.line === 22, h1)
+  await clickSeg('舒适')
+  await sleep(300)
+  const h2 = await rowH()
+  ok('⑱ 密度「舒适」⇒ 行高 28px（切了真的会变）', h2.line === 28, h2)
+  ok('⑱ 表头与数据行**同高**（同一条栅格的两段，不是只改行不改表头）',
+    h1.head === h1.line && h2.head === h2.line, { 紧凑: h1, 舒适: h2 })
+  await clickSeg('紧凑')
+  await sleep(300)
+
+  // ── ⑲ 导出：CSV / JSON / ndjson 三档各验内容 ─────────────────────────────────
+  // ⚠️ 拦 `URL.createObjectURL` 把 Blob 留下来读文本 —— 这是**唯一**能把「点了导出」变成
+  //    「导出内容对不对」的办法（headless 里真落盘的位置不稳定，不可当判据）。
+  //    顺带把 `revokeObjectURL` 变空函数：不拦的话读完就撤了，读不到。
+  await b.evalJS(`(() => {
+    window.__blobs = []
+    const orig = URL.createObjectURL.bind(URL)
+    URL.createObjectURL = (blob) => { window.__blobs.push(blob); return orig(blob) }
+    URL.revokeObjectURL = () => {}
+    return true
+  })()`)
+  // ⚠️ **必须读 `arrayBuffer()` 看原始三字节，不能用 `Blob.text()`**：`Blob.text()` 走的是
+  //    Encoding 规范的「UTF-8 decode」，它会**吃掉开头的 BOM**（`ignoreBOM` 默认 false）。
+  //    本轮实测踩过：代码里 BOM 明明在，`.charCodeAt(0)` 量到 115（'s'）⇒ 差点把对的判成错的。
+  const lastBlob = `(async () => {
+    const x = window.__blobs[window.__blobs.length - 1]
+    if (!x) return null
+    const u8 = new Uint8Array(await x.arrayBuffer())
+    return { head: [u8[0], u8[1], u8[2]], bytes: u8.length, text: new TextDecoder('utf-8').decode(u8) }
+  })()`
+
+  await clickSeg('CSV')
+  await sleep(400)
+  const csvB = (await b.evalJS(lastBlob)) || { head: [], text: '' }
+  const csv = String(csvB.text)
+  const csvLines = csv.split('\r\n').filter(Boolean)
+  ok('⑲ 导出 CSV：**字节**以 BOM 开头（EF BB BF）—— Windows 的 Excel 才不会把中文按 GBK 解成乱码',
+    csvB.head[0] === 0xef && csvB.head[1] === 0xbb && csvB.head[2] === 0xbf,
+    { 前三字节: csvB.head, 期望: [0xef, 0xbb, 0xbf], 字节数: csvB.bytes })
+  ok('⑲ 导出 CSV：表头 13 列（= 事件 10 字段 + 时刻/类/源 三列）+ 159 行数据',
+    csvLines[0].split(',').length === 13 && csvLines.length === 160,
+    { 列: csvLines[0].split(',').length, 行: csvLines.length, 头: csvLines[0] })
+
+  await clickSeg('JSON')
+  await sleep(400)
+  const jsonTxt = String(((await b.evalJS(lastBlob)) || {}).text || '')
+  let jsonParse = null
+  try { jsonParse = JSON.parse(jsonTxt) } catch (e) { jsonParse = null }
+  ok('⑲ 导出 JSON：能被 JSON.parse，159 条，字段名 = 帧里的原名（且带 source）',
+    Array.isArray(jsonParse) && jsonParse.length === 159
+    && 'source' in jsonParse[0] && 'objectId' in jsonParse[0] && 'traceId' in jsonParse[0],
+    { 条数: Array.isArray(jsonParse) ? jsonParse.length : '(parse 失败)', 样例键: jsonParse ? Object.keys(jsonParse[0]) : null })
+
+  await clickSeg('ndjson')
+  await sleep(400)
+  const ndTxt = String(((await b.evalJS(lastBlob)) || {}).text || '')
+  const ndLines = ndTxt.split('\n').filter(Boolean)
+  let ndBad = 0
+  for (const l of ndLines) { try { JSON.parse(l) } catch (e) { ndBad++ } }
+  ok('⑲ 导出 ndjson：一行一条、每行都是合法 JSON、条数与列表一致',
+    ndLines.length === 159 && ndBad === 0, { 行: ndLines.length, 坏行: ndBad })
+
+  const note = await b.evalJS(`(document.querySelector('.ev-status .seg .hint') || {}).textContent || ''`)
+  ok('⑲ 导出后页面自报「刚刚导出 N 条 → 文件名」（下载被浏览器拦掉时，这是用户唯一的线索）',
+    /刚刚导出\s*159\s*条/.test(note), note)
+  const r2b = await r2box()
+  ok('⑲ 导出提示出现后 ① 第二排**仍然不溢出**（这条提示不能把拍/MQ 挤出屏幕）',
+    r2b.scroll <= r2b.client + 2, r2b)
+
+  // ── ⑳ 时间范围：自定义刀口切在 T+3000 ⇒ 只剩第 2 拍那 9 条 ────────────────────
+  const rowN0 = await b.evalJS(`document.querySelectorAll('.log-line').length`)
+  ok('⑳ 「近 5 分」：两拍（150 + 9）全在范围内 ⇒ 161 行', rowN0 === 161, rowN0)
+  await clickSeg('自定义')
+  await sleep(300)
+  const dtVals = await b.evalJS(`[...document.querySelectorAll('.ev-status .seg .dt')].map(e => e.value)`)
+  ok('⑳ 切「自定义」⇒ 起止两个 datetime-local 出现，且**已预填**当前窗口（不是两个空框）',
+    dtVals.length === 2 && dtVals[0].length === 19 && dtVals[1].length === 19, dtVals)
+  // ⚠️ 这是 ① 第二排**最宽**的状态：三枚控件 + 起止两栏 + 拍/MQ。组件里 `.r2` 是
+  //    `flex-wrap: nowrap` + `overflow: hidden` ⇒ 溢出不会换行，只会**静默切掉最右边的
+  //    拍/MQ**（那是真数据，不是提示）—— 所以必须在最宽的这一态量，不能只在默认态量。
+  // ⚠️ 那条导出小字 **10 秒后自己消失**（组件里的设计）⇒ 不能靠时序碰运气撞上它。
+  //    这里**主动再导一次**，把「提示 + 自定义两栏同时在场」这个最宽的一态钉成确定态。
+  await clickSeg('ndjson')
+  await sleep(300)
+  const r2c = await r2box()
+  ok('⑳ 切「自定义」后 ① 第二排**仍然不溢出**（起止两栏 + 导出提示都不许把拍/MQ 挤出屏幕）',
+    r2c.scroll <= r2c.client + 2, r2c)
+  // ⚠️ 「不溢出」有两种达成方式：① 压缩垫底的那几个；② **把 `.tz` 直接切掉**（上一版就是这样，
+  //    而且 `overflow: hidden` 让它**一声不响**）。所以必须另有一条把 `.tz` 钉在框内 ——
+  //    只量 `scrollWidth` 的话，② 也能让这一条变绿。同「校验器报 OK ≠ 没问题」。
+  const tzIn = () => b.evalJS(`(() => {
+    const e = document.querySelector('.ev-status .r2'), t = document.querySelector('.ev-status .tz')
+    const h = document.querySelector('.ev-status .seg .hint')
+    const er = e.getBoundingClientRect(), tr = t.getBoundingClientRect()
+    return { 右溢: Math.round(tr.right - er.right), tz宽: Math.round(tr.width), 提示宽: h ? Math.round(h.getBoundingClientRect().width) : null }
+  })()`)
+  const tz1 = await tzIn()
+  ok('⑳ 自定义态下 `.tz` **整块留在框内**（右边缘不越过 `.r2`）—— 拍数/MQ 是真数据，不能拿它换',
+    tz1.右溢 <= 0, tz1)
+  ok('⑳ 自定义态下那条导出小字**是被压小了、不是被删了**（240px 上限没占满 = 它让了位）',
+    tz1.提示宽 !== null && tz1.提示宽 < 240, tz1)
+
+  // ── ⑳b 窄视口（1280）仍要活 ───────────────────────────────────────────────────
+  // ⚠️ 只在 1440 一档绿**不给背书**：`.r2` 的可用宽跟着视口走，而「自定义 + 导出提示同时在」
+  //    是最宽的一态。压到 1280（可用 ≈ 958px）跑同一组判据，才算把压缩链验过。
+  await b.send('Emulation.setDeviceMetricsOverride', { width: 1280, height: 1100, deviceScaleFactor: 1, mobile: false })
+  await sleep(500)
+  const r2n = await r2box()
+  const tzn = await tzIn()
+  ok('⑳b 窄视口 1280：① 第二排仍不溢出（三枚控件都还在框内）',
+    r2n.scroll <= r2n.client + 2, r2n)
+  ok('⑳b 窄视口 1280：`.tz` 仍整块在框内（压缩链按「hint → dt → 兜底」的顺序吃掉了压力）',
+    tzn.右溢 <= 0, tzn)
+  await b.send('Emulation.setDeviceMetricsOverride', { width: 1440, height: 1100, deviceScaleFactor: 1, mobile: false })
+  await sleep(500)
+  const r2back = await r2box()
+  ok('⑳b 视口还原 1440（后面的断言与截图按原尺寸走）',
+    r2back.client > r2n.client && r2back.scroll <= r2back.client + 2, { 窄: r2n.client, 还原: r2back.client })
+  const cutISO = localInput(T + 3000)
+  await b.evalJS(`(() => {
+    const i = document.querySelectorAll('.ev-status .seg .dt')[0]
+    i.value = '${cutISO}'
+    i.dispatchEvent(new Event('input', { bubbles: true }))
+    return i.value
+  })()`)
+  await sleep(350)
+  const rowN1 = await b.evalJS(`document.querySelectorAll('.log-line').length`)
+  ok('⑳ 刀口 = T+3000 ⇒ 只剩第 2 拍那 9 条（+ 组头组尾 2 行 = 11）',
+    rowN1 === 11, { 行: rowN1, 刀口: cutISO })
+  const allAfterCut = await b.evalJS(`(document.querySelector('.ev-rail .row.all .c') || {}).textContent || ''`)
+  ok('⑳ ② 的「全部」也跟着变（9 条）—— 时间范围是**全局**口径，不是只切 ③ 的列表',
+    Number(String(allAfterCut).replace(/[^\d]/g, '')) === 9, allAfterCut)
+  await clickSeg('近 5 分')
+  await sleep(350)
+  ok('⑳ 切回「近 5 分」⇒ 161 行原样回来（时间范围是可逆的，不是一次性的）',
+    (await b.evalJS(`document.querySelectorAll('.log-line').length`)) === 161)
+
+  // ── ㉑ 裁定 C：5 条全文在 `title` 里 ─────────────────────────────────────────
+  const covTitle = await b.evalJS(`(() => { const e = document.querySelector('.ev-rail .sub'); return e ? (e.getAttribute('title') || '') : '' })()`)
+  const covParas = covTitle.split('\n')
+  ok('㉑ ② 栏底小字的 `title` = 「覆盖与边界」5 条**全文**（5 段，且含只在原文里出现的关键词）',
+    covParas.length === 5 && covTitle.includes('severityOf') && covTitle.includes('OBJECT_FIELD_LABEL') && covTitle.includes('512'),
+    { 段数: covParas.length, 字数: covTitle.length, 首段: covParas[0].slice(0, 24) })
+  const bodyNow = String(await b.evalJS('document.body.innerText'))
+  ok('㉑ 页面里那行小字**自报**「已压缩 + 悬停看全文」（不是把 5 条悄悄压掉）',
+    bodyNow.includes('覆盖与边界') && bodyNow.includes('悬停看全文'))
+
+  // ── ㉒ 裁定 D：② / ④ 各多一组「设施 3 类」，置灰、不可点 ───────────────────────
+  const facRail = await b.evalJS(`[...document.querySelectorAll('.ev-rail .rows .row.is-fac')].map(e => ({
+    k: e.querySelector('.k').textContent.trim(), c: e.querySelector('.c').textContent.trim(), dis: e.disabled,
+  }))`)
+  ok('㉒ ② 的设施 3 类 = 慢 SQL / MQ / 调度，全部 `disabled`、计数写 `—`（不是 0）',
+    facRail.length === 3
+    && JSON.stringify(facRail.map((x) => x.k)) === JSON.stringify(['慢 SQL', 'MQ', '调度'])
+    && facRail.every((x) => x.dis === true && x.c === '—'), facRail)
+  ok('㉒ ② 的业务 9 类**仍是 9 行**（那 3 行是加出来的，没有把真图例顶掉）',
+    (await b.evalJS(`document.querySelectorAll('.ev-rail .rows .row:not(.all):not(.is-fac)').length`)) === 9)
+  ok('㉒ ④ 的横条里也有那 3 类（置灰、恒空）',
+    (await b.evalJS(`document.querySelectorAll('.ev-bars .ev-bar.is-fac').length`)) === 3)
+  // ⚠️ 点了没副作用 —— 这一条**没有**独立的阳性对照：「计数会变」这件事由 ⑳ 证明过
+  //    （同一枚 `.row.all` 的读数在时间范围切换时确实会变）⇒ 这里「不变」是有信息的。
+  const allBefore = await b.evalJS(`(document.querySelector('.ev-rail .row.all .c') || {}).textContent`)
+  await b.evalJS(`(() => { const e = document.querySelector('.ev-rail .row.is-fac'); if (e) e.click(); return true })()`)
+  await sleep(250)
+  const allAfter = await b.evalJS(`(document.querySelector('.ev-rail .row.all .c') || {}).textContent`)
+  ok('㉒ 点那 3 行**什么也不发生**（`disabled` 真挡住了，不是「点了没反应」靠运气）',
+    allBefore === allAfter && (await b.evalJS(`document.querySelectorAll('.log-line').length`)) === 161,
+    { 前: allBefore, 后: allAfter })
+
+  // ══ ㉓ 第 ⑦ 步（用户 2026-10-16：滚动条 / 折线标签 / 对比度 / 图标 / 人话化 / 折行 / 树形 / 对象可点）══
+  // ⚠️ 这一段**必须在 ⑯ 之前**：⑯ 结尾会把数据源切到「模拟日常」，之后再量 ③ 的行就是演示流那批，
+  //    而本段的判据全都要在**真流那 161 行**上量（图标、树形、对象可点都得有内容才量得出来）。
+  //
+  // ⚠️ 先把 ⑤ 打开：㉓1 要量 `.chain` 的滚动条、㉓8 要量链里每条的技术行 —— 两个都要求抽屉里
+  //    真的挂着一条链。不主动开的话，本段就悄悄依赖「⑧ 点过的那一行还没被别处关掉」，
+  //    那种依赖一旦断掉，红的是「找不到 .chain」而不是它想验的东西。
+  //   ⚠️ 点哪一行有讲究：`openTrace()` 对**已经打开的那一行**是**收起**（`if (openedTrace === tid)
+  //      drawerOpen = !drawerOpen`）。盲点「第一条带 traceId 的行」，若它正好就是 ⑧ 打开过的那条，
+  //      这一下把抽屉**关掉**了 —— 于是 ㉓1 量到 `.chain` 不存在、㉓8 量到 0 条链，红的是
+  //      「找不到元素」而不是它们想验的东西。这里挑一条 `.sel`（= 当前打开的那条）**以外**的行。
+  const openDrawer = () => b.evalJS(`(() => {
+    if (document.querySelector('.chain')) return 'already'
+    const cand = document.querySelector('.log-line[role="button"]:not(.sel)')
+      || document.querySelector('.log-line[role="button"]')
+    if (!cand) return 'none'
+    cand.click()
+    return 'clicked'
+  })()`)
+  const drawerTry = await openDrawer()
+  await sleep(400)
+  if (!(await b.evalJS(`!!document.querySelector('.chain')`))) {
+    await openDrawer()               // 兜底：万一上面那一下仍是收起，再点一下
+    await sleep(400)
+  }
+  ok('㉓ 起点：⑤ 抽屉里真的挂着一条链（㉓1 要量 `.chain` 的滚动条、㉓8 要量链里每条的技术行）',
+    await b.evalJS(`!!document.querySelector('.chain')`), drawerTry)
+
+  // ── ㉓1 滚动条：宽度 ≤8px、轨道不抢戏、滑块是真色（读的是 CSSOM 里的**规则**，不是渲染结果）
+  //   ⚠️ 为什么不用 `offsetWidth - clientWidth`：headless 下不可靠（经典 headless 恒 0，
+  //      `--headless=new` 才给 15）—— 那个量的是**渲染出来的**滚动条，本段的判据是「我们写的规则」。
+  //      ⚠️ 代价要说清：这一条**不能**证明「屏幕上真的变窄了」，只能证明「规则接上了」。
+  //      「肉眼确实变窄」由 `out-b7a3-eventlog*.png` 那几张图承担（人看）。
+  const sb = await b.evalJS(`(() => {
+    const out = {}
+    for (const sel of ['.ev-list', '.ev-rail .rows', '.ev-live', '.chain']) {
+      const el = document.querySelector(sel)
+      if (!el) { out[sel] = null; continue }
+      const cs = getComputedStyle(el, '::-webkit-scrollbar')
+      const ct = getComputedStyle(el, '::-webkit-scrollbar-track')
+      const ch = getComputedStyle(el, '::-webkit-scrollbar-thumb')
+      out[sel] = { w: cs.width, h: cs.height, track: ct.backgroundColor, thumb: ch.backgroundColor }
+    }
+    return out
+  })()`)
+  const sbList = sb['.ev-list']
+  ok('㉓1 ③ 列表的滚动条**规则**接上了：宽 ≤ 8px（不是 15px）',
+    !!sbList && parseFloat(sbList.w) > 0 && parseFloat(sbList.w) <= 8, sbList)
+  ok('㉓1 轨道**几乎不可见**（transparent，不是浅灰块）',
+    !!sbList && /rgba\(0, 0, 0, 0\)|transparent/.test(sbList.track), sbList && sbList.track)
+  ok('㉓1 滑块**是真色**（不是 transparent —— 否则根本看不见滚动条在哪）',
+    !!sbList && !/rgba\(0, 0, 0, 0\)/.test(sbList.thumb), sbList && sbList.thumb)
+  ok('㉓1 四个滚动容器（② 栏 / ③ 列表 / ④ 栏 / ⑤ 链）都接上了同一条规则',
+    Object.values(sb).every((v) => v && v.w === sbList.w), sb)
+  // 放大图：③ 的**右缘**（滚动条那一格）+ ② 栏右缘 —— 上面那三条只证明「规则接上了」，
+  // 「屏幕上真的只是一条细线」由这两张图承担（人看）。滑块要可见 ⇒ 先把列表滚到底。
+  await b.evalJS(`(() => { const el = document.querySelector('.ev-list'); el.scrollTop = el.scrollHeight; return el.scrollTop })()`)
+  await sleep(300)
+  const sbShot1 = await zoomShot('.ev-list', `${WORK}zoom-b7a3-scrollbar-list.png`, { 宽: 16, 高: 260, 右缘: true, scale: 8 })
+  const sbShot2 = await zoomShot('.ev-rail .rows', `${WORK}zoom-b7a3-scrollbar-rail.png`, { 宽: 16, 高: 260, 右缘: true, scale: 8 })
+  ok('㉓1 两张滚动条放大图都裁出来了（③ 列表右缘 / ② 栏右缘）',
+    !!sbShot1 && !!sbShot2, { 列表: sbShot1, 栏: sbShot2 })
+
+  // ── ㉓2 折线图：图内小字标签在，且**没有**轴线 / 刻度线（用户的判据是「标量级与范围，不要坐标轴」）
+  const sparkLb = await b.evalJS(`(() => {
+    const s = document.querySelector('.ev-spark')
+    if (!s) return null
+    return {
+      ax: [...s.querySelectorAll('.ax span')].map(e => e.textContent.trim()),
+      折线数: s.querySelectorAll('polyline').length,
+      线数: s.querySelectorAll('line').length,
+      路径数: s.querySelectorAll('path').length,
+      标签色: getComputedStyle(s.querySelector('.ax')).color,
+    }
+  })()`)
+  ok('㉓2 折线图有**两排**图内小字（量级 + 时间范围）', !!sparkLb && sparkLb.ax.length === 4, sparkLb && sparkLb.ax)
+  ok('㉓2 y 轴标了「峰值 X/s」与「当前 Y/s」（量级）',
+    !!sparkLb && sparkLb.ax.some(t => /^峰值 \d/.test(t)) && sparkLb.ax.some(t => /^当前 \d/.test(t)), sparkLb && sparkLb.ax)
+  ok('㉓2 x 轴标了时间范围（−60s / now）',
+    !!sparkLb && sparkLb.ax.includes('−60s') && sparkLb.ax.includes('now'), sparkLb && sparkLb.ax)
+  ok('㉓2 **不画坐标轴**：图里只有那一条折线，没有任何 <line> / <path>（轴线、刻度线都没画）',
+    !!sparkLb && sparkLb.折线数 === 1 && sparkLb.线数 === 0 && sparkLb.路径数 === 0, sparkLb)
+
+  // ── ㉓3 横条对比度：前景 / 背景 ≥ 3:1（用户给的线）。⚠️ 从**计算色**算 WCAG 比，不手抄色值
+  const contrast = await b.evalJS(`(() => {
+    const lum = (c) => {
+      const m = c.match(/\\d+/g).map(Number)
+      const f = (v) => { const s = v / 255; return s <= 0.03928 ? s / 12.92 : Math.pow((s + 0.055) / 1.055, 2.4) }
+      return 0.2126 * f(m[0]) + 0.7152 * f(m[1]) + 0.0722 * f(m[2])
+    }
+    const ratio = (a, bb) => { const [x, y] = [lum(a), lum(bb)].sort((p, q) => q - p); return (x + 0.05) / (y + 0.05) }
+    const one = (bar) => {
+      const f = getComputedStyle(bar.querySelector('.fill')).backgroundColor
+      const t = getComputedStyle(bar.querySelector('.track')).backgroundColor
+      return { 填: f, 轨: t, 比: Number(ratio(f, t).toFixed(2)) }
+    }
+    const kindBars = [...document.querySelectorAll('.ev-bars:not(.sev) .ev-bar:not(.is-fac)')]
+    const sevBars = [...document.querySelectorAll('.ev-bars.sev .ev-bar')]
+    return { 类: kindBars.map(one), 严重度: sevBars.map(one) }
+  })()`)
+  ok('㉓3 ④ 类计数九条的前景/背景对比 **全部 ≥ 3:1**（原来 1.05:1，等于看不见）',
+    contrast.类.length === 9 && contrast.类.every(x => x.比 >= 3), contrast.类)
+  ok('㉓3 ④ 严重度三条的对比也 ≥ 3:1（本来是好的，这条是防回退）',
+    contrast.严重度.length === 3 && contrast.严重度.every(x => x.比 >= 3), contrast.严重度)
+
+  // ── ㉓4 图标四处：② 九类 / ④ 类计数九条 / ④ 严重度三条（③ 事件流本来就有，见 ⑧）
+  const icons = await b.evalJS(`(() => {
+    const sig = (el) => { const s = el.querySelector('svg'); return s ? s.innerHTML : null }
+    const rail = [...document.querySelectorAll('.ev-rail .rows .row:not(.all):not(.is-fac)')]
+    const kindBars = [...document.querySelectorAll('.ev-bars:not(.sev) .ev-bar:not(.is-fac)')]
+    const sevBars = [...document.querySelectorAll('.ev-bars.sev .ev-bar')]
+    return {
+      railN: rail.length, railIc: rail.filter(r => r.querySelector('.ic svg')).length,
+      railSig: new Set(rail.map(r => sig(r.querySelector('.ic')))).size,
+      kindIc: kindBars.filter(x => x.querySelector('.nm svg')).length,
+      sevIc: sevBars.filter(x => x.querySelector('.nm svg')).length,
+      sevSig: new Set(sevBars.map(x => sig(x.querySelector('.nm')))).size,
+    }
+  })()`)
+  ok('㉓4 ② 过滤栏九类**每类前都有图标**', icons.railN === 9 && icons.railIc === 9, icons)
+  ok('㉓4 ② 九类的图标**两两不同**（9 个不同签名 —— 全用同一个等于没按类分）',
+    icons.railSig === 9, icons)
+  ok('㉓4 ④ 类计数九条都有图标', icons.kindIc === 9, icons)
+  ok('㉓4 ④ 严重度三条都有图标，且两两不同', icons.sevIc === 3 && icons.sevSig === 3, icons)
+
+  // ── ㉓5 折行：2 行上限 + 技术字段默认藏、**真 hover** 才出（不是只查 CSS 规则在不在）
+  const lnCap = await b.evalJS(`(() => {
+    const ln = document.querySelector('.log-line .ln')
+    if (!ln) return null
+    const cs = getComputedStyle(ln)
+    const lh = parseFloat(getComputedStyle(document.querySelector('.log-line')).lineHeight)
+    const dt = document.querySelector('.log-line .ms .dt')
+    return {
+      maxH: cs.maxHeight, 行lineHeight: lh, 两行: Math.round(lh * 2),
+      maxHpx: Math.round(parseFloat(cs.maxHeight)),
+      dtDisplay: dt ? getComputedStyle(dt).display : '(没有 .dt)',
+      省略号: cs.textOverflow,
+    }
+  })()`)
+  ok('㉓5 `.ln` 的 2 行上限 = 2 × 行高（不是 `-webkit-line-clamp`，那个自带 23px 高）',
+    !!lnCap && lnCap.maxHpx === lnCap.两行, lnCap)
+  ok('㉓5 技术字段（`.dt`）**默认不显示**（预览层只留中文人话）',
+    !!lnCap && lnCap.dtDisplay === 'none', lnCap && lnCap.dtDisplay)
+  ok('㉓5 **没有** `text-overflow: ellipsis`（用户：「不截断，删掉它」）',
+    !!lnCap && lnCap.省略号 === 'clip', lnCap && lnCap.省略号)
+  // 真 hover：把鼠标**移到**某一行上（`Input.dispatchMouseEvent`），再读 —— 只查规则不算数。
+  //   ⚠️ 挑行要挑**在视口里**的：③ 是内部滚动容器、且会自动滚到底，DOM 里第一条 `.log-line`
+  //      往往已经滚到屏幕上方之外 —— 那种行的 `getBoundingClientRect()` 算出的 y 是负数，
+  //      `moveTo` 过去鼠标并不在那行上（`matches(':hover')` 恒 0，红的是「hover 没生效」的假象）。
+  //      这里用 `elementFromPoint` 反查：只认「鼠标真能压到那一行」的行。
+  const rowBox = await b.evalJS(`(() => {
+    for (const e of document.querySelectorAll('.log-line')) {
+      if (!e.querySelector('.ms .dt')) continue
+      const x = e.getBoundingClientRect()
+      if (x.top < 0 || x.bottom > innerHeight) continue
+      const cx = Math.round(Math.max(1, x.left + 40)), cy = Math.round(x.top + x.height / 2)
+      const hit = document.elementFromPoint(cx, cy)
+      if (!hit || !e.contains(hit)) continue
+      return { x: cx, y: cy }
+    }
+    return null
+  })()`)
+  if (rowBox) await b.moveTo(rowBox.x, rowBox.y)
+  await sleep(250)
+  if (rowBox && !(await b.evalJS(`!!document.querySelector('.log-line:hover')`))) {
+    await b.moveTo(rowBox.x + 1, rowBox.y)   // 兜底：有些 headless 要第二下才把 hover 状态派下来
+    await sleep(250)
+  }
+  const hovered = await b.evalJS(`(() => {
+    const rs = [...document.querySelectorAll('.log-line')]
+    const on = rs.filter(r => r.matches(':hover'))
+    if (!on.length) return { hover: 0 }
+    const dt = on[0].querySelector('.ms .dt')
+    return { hover: on.length, dtDisplay: dt ? getComputedStyle(dt).display : null, 文本: (dt || {}).textContent || null }
+  })()`)
+  ok('㉓5 **真 hover 到那一行 ⇒ 技术字段显示出来**（`display: none → inline`，鼠标事件实测）',
+    hovered.hover > 0 && hovered.dtDisplay === 'inline', hovered)
+  await b.evalJS(`document.querySelector('.ev-list').dispatchEvent(new MouseEvent('mouseleave'))`)
+
+  // ── ㉓5b 折行的**几何**：续行缩进 2ch、最多 2 行、hover 展开（用户规则三 / 四）
+  //   ⚠️ 为什么要**注入一段长文本**：这套 mock 数据里最长的标题也就 20 来字，在 1440 宽下
+  //      **一行就装得下** ⇒ 不注入就量不到折行（量不到 ≠ 折行对了）。注入的只是**一个 `.ms b`
+  //      的文本**、且只在本段内存在（量完立刻还原），量的是 CSS 的折行几何，不是编数据。
+  //      ⚠️ 注入的是**树内行**（`is-tree`）：用户规则四专门要求「树内行折行时续行不带前导符」。
+  //   ⚠️ 判据用 `Range.getClientRects()` 逐**行盒**读：`rects[0]` = 首行那一行盒、
+  //      `rects[1]` = 续行行盒。**不能拿 `rects[0].left` 当基准** —— 首行那一行的左端被前导符、
+  //      时刻、图标这些行内元素推到了右边（实测 732px），拿它减续行会得出负数。基准取
+  //      「这一行文本流的**首行起点**」= `.ln` 盒左缘 + `padding-left` + `text-indent`（见代码里的注释）。
+  //   ⚠️ 量之前先把鼠标**移开**（移到页面角落）：行上有 `:hover` 时 `max-height: none` 生效、
+  //      2 行上限**解除** —— 那时量到的 `clientHeight` 是「展开后」的高度，永远等于 `scrollHeight`，
+  //      于是「夹在 2 行」这条判据会**假绿**（上一版就是鼠标正停在同一行上，量到 55 = 未夹）。
+  await b.moveTo(4, 4)
+  await sleep(250)
+  const wrapInfo = await b.evalJS(`(() => {
+    if (document.querySelector('.log-line:hover')) return { 出错: '量之前鼠标仍压在行上 —— 2 行上限被 hover 解除了' }
+    const inView = (e) => { const x = e.getBoundingClientRect(); return x.top >= 0 && x.bottom <= innerHeight }
+    const all = [...document.querySelectorAll('.log-line')]
+    // 优先挑**树内行**：用户规则四专门要求「树内行折行时续行不带前导符」。
+    const row = all.find(e => e.classList.contains('is-tree') && inView(e)) || all.find(inView)
+    if (!row) return { 出错: '视口里没有可量的行' }
+    const bt = row.querySelector('.ms b')
+    const before = bt.textContent
+    bt.dataset.wrapOrig = before
+    bt.textContent = before + '（' + '这一条消息故意写得很长，用来量折行的几何：续行挂在小缩进上、不是对齐消息列，也不该再画一遍前导符'.repeat(2) + '）'
+    const ln = row.querySelector('.ln')
+    const lnCS = getComputedStyle(ln)
+    const rowCS = getComputedStyle(row)
+    const lh = parseFloat(rowCS.lineHeight)
+    // 「首行起点」= 这一行**文本流第一行从哪儿起笔** —— 用 .ln 自己的盒 + 它自己的缩进值算，
+    // 不写死任何数字：border 左缘 + padding-left + text-indent（悬挂缩进那对值互相抵掉时
+    // 就等于 border 左缘）。续行缩进量的是「相对**这个起点**」，因为首行那一行的左端被前导符、
+    // 时刻这些**行内元素**推到了右边（首行文字实际从 732 起），拿首行文字当基准会量成负数。
+    const 首行起点 = ln.getBoundingClientRect().left + parseFloat(lnCS.paddingLeft) + parseFloat(lnCS.textIndent)
+    // 量的只是 b 元素（消息本体）的行盒，不掺对象胶囊 / 技术字段
+    const rg = document.createRange(); rg.selectNodeContents(bt)
+    const rects = [...rg.getClientRects()].filter((x) => x.width > 1)
+    // 前缀会不会跟着折行：.pre 是**行内块**，一行里只会有一个；再量它自己的盒高 ——
+    // 高 = 一行行高 ⇒ 它没被折成两行（若续行又画一遍 └─，这个盒子会变成两行高）。
+    const preEl = row.querySelector('.pre')
+    // 1 个 ch 的实测宽（用**这一行自己的 font**量，不是拍脑袋 8px）
+    const probe = document.createElement('span')
+    probe.textContent = '0000'
+    probe.style.cssText = 'position:absolute;visibility:hidden;white-space:pre;font:' + rowCS.font
+    document.body.appendChild(probe)
+    const ch = probe.getBoundingClientRect().width / 4
+    probe.remove()
+    return {
+      lnH: ln.clientHeight, lnScroll: ln.scrollHeight, lh, 两行: Math.round(lh * 2),
+      行数: rects.length,
+      首行左: Math.round(rects[0].left), 续行左: Math.round(rects[1].left),
+      续行缩进: +(rects[1].left - 首行起点).toFixed(1),
+      续行绝对左: Math.round(rects[1].left), 首行起点: Math.round(首行起点),
+      消息列相对行左: Math.round(rects[0].left - row.getBoundingClientRect().left),
+      ch: +ch.toFixed(2), 前缀元素数: row.querySelectorAll('.pre').length,
+      前缀盒高: Math.round(preEl.getBoundingClientRect().height),
+      树内行: row.classList.contains('is-tree'),
+      首行前缀: row.querySelector('.pre').textContent,
+    }
+  })()`)
+  ok('㉓5b 长消息**真的折起来了**（≥3 行，才量得到「最多 2 行」这条上限）',
+    !!wrapInfo && wrapInfo.行数 >= 3, wrapInfo)
+  ok('㉓5b 折行被夹在 **2 行**（`clientHeight` = 2 × 行高，第 3 行起看不见）',
+    !!wrapInfo && wrapInfo.lnH === wrapInfo.两行 && wrapInfo.lnScroll > wrapInfo.lnH, wrapInfo)
+  ok('㉓5b 续行缩进 ≈ **2ch**（用户规则三：「2-3 字符就够」；基准是**这一行文本流的首行起点**）',
+    !!wrapInfo && wrapInfo.续行缩进 >= wrapInfo.ch * 1.8 && wrapInfo.续行缩进 <= wrapInfo.ch * 3.2,
+    wrapInfo && { 续行缩进: wrapInfo.续行缩进, ch: wrapInfo.ch, 上下限: [+(wrapInfo.ch * 1.8).toFixed(1), +(wrapInfo.ch * 3.2).toFixed(1)] })
+  ok('㉓5b 续行起点**落在首行起点的右侧、首行文字的左侧**（既缩进了一点点，又没退到消息列）',
+    !!wrapInfo && wrapInfo.续行绝对左 > wrapInfo.首行起点 && wrapInfo.续行绝对左 < wrapInfo.首行左,
+    wrapInfo && { 首行起点: wrapInfo.首行起点, 续行绝对左: wrapInfo.续行绝对左, 首行文字左: wrapInfo.首行左 })
+  ok('㉓5b 续行**不对齐消息列**（对齐消息列 = 用户说的「预留大段空白」）',
+    !!wrapInfo && wrapInfo.续行缩进 < wrapInfo.消息列相对行左 / 2, wrapInfo && { 续行缩进: wrapInfo.续行缩进, 消息列相对行左: wrapInfo.消息列相对行左 })
+  ok('㉓5b 折了多行，前缀**仍然只有一份、且只有一行高**（⇒ 续行没有第二遍 `└─`）',
+    !!wrapInfo && wrapInfo.前缀元素数 === 1 && wrapInfo.前缀盒高 <= wrapInfo.lh + 1,
+    wrapInfo && { 前缀元素数: wrapInfo.前缀元素数, 前缀盒高: wrapInfo.前缀盒高, 行高: wrapInfo.lh, 行数: wrapInfo.行数, 树内行: wrapInfo.树内行 })
+  await b.shot(`${WORK}out-b7a3-eventlog-wrap.png`)
+  // ⚠️ 先把注入的那一行滚进视口：`.ev-list` 是内部滚动容器，`getBoundingClientRect().top`
+  //    为负时裁图会从容器**上缘**开始（裁到别的行）—— 那是「图上没有那一行」，不是「没折行」。
+  await b.evalJS(`(() => {
+    const r = document.querySelector('.log-line:has(.ms b[data-wrap-orig])')
+    if (r) r.scrollIntoView({ block: 'center' })
+    return !!r
+  })()`)
+  await sleep(300)
+  const wrapShot = await zoomShot('.log-line:has(.ms b[data-wrap-orig])', `${WORK}zoom-b7a3-wrap.png`, { 宽: 660, 高: 90, scale: 2 })
+  ok('㉓5b 折行的放大图裁出来了（看续行那 2ch 的缩进与第 3 行被夹掉）', !!wrapShot, wrapShot)
+  // hover 那一行 ⇒ 上限解除（用户规则三：「hover 展开全文」）—— 同一行、真鼠标事件。
+  const wrapBox = await b.evalJS(`(() => {
+    const r = [...document.querySelectorAll('.log-line')].find(e => e.querySelector('.ms b').dataset.wrapOrig !== undefined)
+    if (!r) return null
+    const x = r.getBoundingClientRect()
+    return { x: Math.round(x.left + 40), y: Math.round(x.top + 12) }
+  })()`)
+  if (wrapBox) await b.moveTo(wrapBox.x, wrapBox.y)
+  await sleep(300)
+  const wrapHover = await b.evalJS(`(() => {
+    const r = [...document.querySelectorAll('.log-line')].find(e => e.querySelector('.ms b').dataset.wrapOrig !== undefined)
+    if (!r || !r.matches(':hover')) return null
+    const ln = r.querySelector('.ln')
+    return { lnH: ln.clientHeight, lnScroll: ln.scrollHeight, 展开: ln.clientHeight >= ln.scrollHeight }
+  })()`)
+  ok('㉓5b hover 那一行 ⇒ **2 行上限解除**（`clientHeight` 追平 `scrollHeight`，全文露出来）',
+    !!wrapHover && wrapHover.展开, wrapHover)
+  await b.shot(`${WORK}out-b7a3-eventlog-wrap-hover.png`)
+  // 还原注入的文本（后面 ⑯ 还要在真流数据上断言，不许带着这段假消息走）
+  await b.evalJS(`(() => {
+    for (const b of document.querySelectorAll('.ms b[data-wrap-orig]')) { b.textContent = b.dataset.wrapOrig; delete b.dataset.wrapOrig }
+    return document.querySelectorAll('.ms b[data-wrap-orig]').length
+  })()`)
+  await b.evalJS(`document.querySelector('.ev-list').dispatchEvent(new MouseEvent('mouseleave'))`)
+  await sleep(200)
+
+  // ── ㉓6 树形：前缀拆两段 + 树形行提亮（用户裁定 B 甲：**画法**问题，不是判据问题）
+  const treeShape = await b.evalJS(`(() => {
+    const rows = [...document.querySelectorAll('.log-line')]
+    const per = (r) => {
+      const p = r.querySelector('.pre')
+      const rl = p.querySelector('.rl'), gl = p.querySelector('.gl')
+      return {
+        两段: !!rl && !!gl, pre: p.textContent,
+        gl色: gl ? getComputedStyle(gl).color : null,
+        rl色: rl ? getComputedStyle(rl).color : null,
+        tree: r.classList.contains('is-tree'),
+      }
+    }
+    const all = rows.map(per)
+    const treeRows = all.filter(x => x.tree)
+    const flatRows = all.filter(x => !x.tree)
+    return {
+      总数: all.length, 两段数: all.filter(x => x.两段).length,
+      树形数: treeRows.length, 平铺数: flatRows.length,
+      树形gl色: [...new Set(treeRows.map(x => x.gl色))],
+      平铺gl色: [...new Set(flatRows.map(x => x.gl色))],
+      样例: all.filter(x => x.tree).slice(0, 3),
+    }
+  })()`)
+  ok('㉓6 每行的前导符都**拆成了两段**（`rl` 脚手架 / `gl` 分叉）', treeShape.两段数 === treeShape.总数, treeShape)
+  ok('㉓6 **树形行确实存在**（不是「树形没触发」：③ 里有 `is-tree` 的行）',
+    treeShape.树形数 > 0, treeShape)
+  ok('㉓6 树形行的分叉色与平铺行**不同**（提亮生效 —— 全同色就等于没提亮）',
+    treeShape.树形gl色.every(c => !treeShape.平铺gl色.includes(c)), treeShape)
+  const treeShot = await zoomShot('.ev-list', `${WORK}zoom-b7a3-prefix.png`, { 宽: 200, 高: 300, 左: 0, scale: 3 })
+  ok('㉓6 前导符列的放大图裁出来了（`├─` / `└─` / 竖向脚手架 一起看）', !!treeShot, treeShot)
+
+  // ── ㉓7 对象可点：**没有 objectId 的对象不许画成可点**（原模板把 `.p` 硬编码，这是回归判据）
+  const obClick = await b.evalJS(`(() => {
+    const obs = [...document.querySelectorAll('.log-line .ms .ob')]
+    return {
+      n: obs.length,
+      带下划线: obs.filter(e => e.classList.contains('p')).length,
+      无下划线: obs.filter(e => !e.classList.contains('p')).length,
+      有title: obs.filter(e => e.getAttribute('title')).length,
+      无title: obs.filter(e => !e.getAttribute('title')).length,
+    }
+  })()`)
+  ok('㉓7 可点提示（`.p` + `title`）**与「有没有 objectId」一致**：有则都有、无则都无',
+    obClick.带下划线 === obClick.有title && obClick.无下划线 === obClick.无title, obClick)
+  ok('㉓7 对象列**确实画出了**可点的那些（不是一条都没有）', obClick.带下划线 > 0, obClick)
+
+  // ── ㉓8 ⑤ 详情层：中英文**两层都在**（用户：「⚠️ 两个都不能省」）
+  //   ⚠️ 判据要**排除不是事件的那两行**：链首 / 链尾是 `is-ends`（「请求开始」「请求结束 · 总耗时 42 ms」），
+  //      它们来自 **trace 记录**（method / path / ms），帧里**没有**事件字段 —— 给它们硬凑一行
+  //      `kind=… severity=…` 就是编字段。所以判据写「链里**每一条事件**都有技术行」，`is-ends` / `is-miss` 不算。
+  //   ⚠️ 载荷里的「人话」要把嵌套的 `.tech` 抠掉再读：`.tech` 在 `.d` **里面**，
+  //      直接读 `d.textContent` 会把技术行也算进人话（看上去像「人话里混着 kind=」，其实没那回事）。
+  const readChain = () => b.evalJS(`(() => {
+    const items = [...document.querySelectorAll('.chain .chain-i')]
+    const evs = items.filter(i => !i.classList.contains('is-ends') && !i.classList.contains('is-miss'))
+    const withTech = evs.filter(i => i.querySelector('.tech'))
+    const dText = (i) => {
+      const d = i.querySelector('.d')
+      if (!d) return ''
+      const c = d.cloneNode(true)
+      const t = c.querySelector('.tech'); if (t) t.remove()
+      return c.textContent.replace(/\s+/g, ' ').trim().slice(0, 40)
+    }
+    return {
+      链里条数: items.length, 事件条数: evs.length, 非事件条数: items.length - evs.length,
+      带技术行: withTech.length,
+      样例: withTech.slice(0, 2).map(i => ({
+        人话: dText(i),
+        技术: (i.querySelector('.tech') || {}).textContent,
+      })),
+      技术行色: withTech.length ? getComputedStyle(withTech[0].querySelector('.tech')).color : null,
+      技术行字体: withTech.length ? getComputedStyle(withTech[0].querySelector('.tech')).fontFamily.split(',')[0] : null,
+    }
+  })()`)
+  let chainTwo = await readChain()
+  if (chainTwo.事件条数 === 0) {
+    // 兜底：万一抽屉停在一条「没有事件、也没有收尾记录」的请求上（链里只有 `is-miss`），
+    // 换一条带 traceId 的行再看一次 —— 否则红的是「这条链恰好是空的」，不是「两层没做」。
+    await b.evalJS(`(() => {
+      const c = document.querySelector('.log-line[role="button"]:not(.sel)')
+      if (c) c.click()
+      return true
+    })()`)
+    await sleep(400)
+    chainTwo = await readChain()
+  }
+  ok('㉓8 ⑤ 链里**每一条事件**都带技术字段那一行（中英文两层，不是只留中文）',
+    chainTwo.事件条数 > 0 && chainTwo.带技术行 === chainTwo.事件条数, chainTwo)
+  ok('㉓8 链首/链尾那两行**不是事件**（请求开始 / 请求结束来自 trace 记录）⇒ 不该有技术行',
+    chainTwo.非事件条数 === 2, chainTwo)
+  ok('㉓8 那行技术字段里带 `kind=` 与 `severity=`（帧里的原名，可拿去 grep）',
+    chainTwo.样例.length > 0 && chainTwo.样例.every(s => /kind=/.test(s.技术) && /severity=/.test(s.技术)), chainTwo.样例)
+
+  // ══ 裁定 B · 切源 = 隔离，不是清空 + 易漏项① 演示下 ⑤ 起止恒空 ══════════════════
+  // `api/demo-stream.js:364` 逐字：「演示不造请求链路（日志页那张抽屉留空，不去编一条假的调用链）」
+  // ⇒ 演示帧的 `traces` **恒为 `[]`**；而事件行 75% 带 `traceId`（`:298`）
+  // ⇒ 演示下：**行可点、链可开、但「请求开始/结束」两行必然缺席**。
+  //
+  // ⚠️ 上一版这一段必须「离页再回」才能量：那时切源**不清窗口**，列表里仍留着切换前真流的
+  //    159 条 ⇒ 直接断言量到的是混在一起的两套数据（本次实测踩过）。**裁定 B 之后不用了** ——
+  //    两套数据按 `source` 分桶，切源当场就隔离干净。这一段同时就是 B 的验收。
+  const nBefore = await b.evalJS(`document.querySelectorAll('.log-line').length`)
+  ok('⑯ 切换前：真流源有 161 行、其中一组包起来（2 条 .req）',
+    nBefore === 161 && (await b.evalJS(`document.querySelectorAll('.log-line.req').length`)) === 2, nBefore)
+  await b.evalJS(`(() => {
+    const btn = [...document.querySelectorAll('button')].find(e => e.textContent.trim() === '模拟日常')
+    if (btn) btn.click()
+    return !!btn
+  })()`)
+  await sleep(4500)      // 演示流是定时器驱动的，等它吐几拍
+  const demoOn = await b.evalJS(`(() => {
+    const x = [...document.querySelectorAll('button')].find(e => e.textContent.trim() === '模拟日常')
+    return x ? /on|active|is-on/.test(x.className) : null
+  })()`)
+  ok('⑯ 切到「模拟日常」（数据源分段控件）', demoOn === true, demoOn)
+  const demoCnt = await b.evalJS(`(document.body.innerText.match(/已放[\\s\\S]{0,24}/) || [''])[0]`)
+  ok('⑯ ① 的「已放 N / 500 条」在演示模式下继续常驻（且 N > 0）',
+    /已放/.test(demoCnt), demoCnt)
+  const demoRows = await b.evalJS(`document.querySelectorAll('.log-line').length`)
+  const demoReq = await b.evalJS(`document.querySelectorAll('.log-line.req').length`)
+  ok('⑯ 演示流确实在推（③ 有行）', demoRows > 0, demoRows)
+  // ⚠️ **裁定 B 的主判据**：演示下**不许**再出现真流那批事件（它们只存在于另一个桶里）。
+  //    直接按内容找，比数行数准 —— 「批量事件 N」是 mock 里真流独有的标题。
+  const demoHasNormal = await b.evalJS(`document.querySelector('.ev-list').textContent.includes('批量事件')`)
+  ok('⑯ **切源 = 隔离**：演示模式下一条真流事件都不显示（列表里找不到「批量事件」）',
+    demoHasNormal === false && demoReq === 0, { 有真流残留: demoHasNormal, req: demoReq })
+  const demoOpenable = await b.evalJS(`document.querySelectorAll('.log-line[role="button"]').length`)
+  ok('⑯ 演示下的行**仍然可点**（事件带 traceId）', demoOpenable > 0, demoOpenable)
+  if (demoOpenable > 0) {
+    await b.evalJS(`document.querySelector('.log-line[role="button"]').click()`)
+    await sleep(400)
+    const dchain = await b.evalJS(TEXT('.ev-drawer .chain .chain-i .d'))
+    ok('⑯ ⑤ 抽屉**打得开**（链里是这一次请求的事件）', dchain.length > 0, dchain.slice(0, 2))
+    ok('⑯ **易漏项①实测成立**：⑤ 里出现「起止还没到」的空态，且**没有**「请求开始 / 请求结束」两行',
+      dchain.some((t) => t.includes('起止') && t.includes('还没到'))
+      && !dchain.some((t) => t.includes('请求开始') || t.includes('总耗时')),
+      dchain.slice(-2))
+  }
+  // 实拍仍在**演示模式**下拍（与 `-stream.png` 那张真流对照）—— 顺序与上一版一致。
+  await b.shot(`${WORK}out-b7a3-eventlog.png`)
+  await b.shot(`${WORK}out-b7a3-eventlog-full.png`)
+
+  // ⚠️ **裁定 B 的反向判据**：切回「正常」⇒ 切换前那个窗口**原样还在**。
+  //    「不丢数据」是 B 的三个好处之一，不验这一条就等于只做了「隔离」没做「不丢」。
+  await b.evalJS(`(() => {
+    const btn = [...document.querySelectorAll('button')].find(e => e.textContent.trim() === '正常')
+    if (btn) btn.click()
+    return !!btn
+  })()`)
+  await sleep(2000)
+  const nBack = await b.evalJS(`document.querySelectorAll('.log-line').length`)
+  const backHasBulk = await b.evalJS(`document.querySelector('.ev-list').textContent.includes('批量事件')`)
+  ok('⑯ **切源不丢数据**：切回「正常」⇒ 之前的 161 行原样回来（切来切去不丢窗口）',
+    nBack === nBefore && backHasBulk === true, { 切前: nBefore, 切回后: nBack, 有真流: backHasBulk })
+} catch (e) {
+  TOTAL++
+  // ⚠️ 原始堆栈**直印 stdout**，不走 `R.ok`：`R.ok` 的 got 会被截到 500 字，
+  //    而「模板字符串被反引号提前闭合」那种报错，正文 = 整段源码 ⇒ 截断后只剩源码前几行、
+  //    真正的 `is not a function` 落在第 500 字之后，看报告只会以为「探针炸了」而找不到原因。
+  console.log('\n=== RAW STACK ===')
+  console.log(String((e && e.stack) || e))
+  console.log('=== /RAW ===')
+  R.ok('探针自身没抛异常', false, String(e && e.stack ? e.stack.split('\n').slice(0, 4).join(' | ') : e))
+} finally {
+  const errs2 = await b.evalJS('(window.__errs || [])').catch(() => [])
+  ok('全流程收尾：仍无 console.error / unhandledrejection', (errs2 || []).length === 0, (errs2 || []).slice(0, 5))
+  const bad = R.dump()
+  console.log(`\n截图：${WORK}out-b7a3-eventlog.png`)
+  console.log(`共 ${TOTAL} 项断言。`)
+  await b.close()
+  process.exit(bad === 0 ? 0 : 1)
+}
