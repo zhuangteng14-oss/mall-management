@@ -84,7 +84,7 @@ D 段要的是**它的下半场** ——「关掉防护 + 注入故障 ⇒ 崩�
 | **唯一自建池**：订单状态异步出口 | `order/model/OrderStateExecutor.java:79`（字段）· `:100`（`new ThreadPoolExecutor`）· `:203`（自定义丢弃策略） | 显式 `ThreadPoolExecutor` + `ArrayBlockingQueue`（`:99`）+ 核心/最大/队列全**可配**（`:90-93` 读 `app.order.state.async.*`） |
 | 就地的临时池（锁场景演示） | `shared/lock/LockSceneService.java:181` | `Executors.newFixedThreadPool(tasks.size(), recorder)`，**用完即关**（`:426 shutdownAndDetectLeak`） |
 | 常驻探测线程（MQ 发布侧） | `observe/mq/RabbitEventPublisher.java:140`（起）· `:157`（daemon）· `:165`（interrupt） | `new Thread`，**不是池** |
-| 攻击引擎派发线程 | `observe/service/AttackEngine.java:960`【3a.1 重指，原 930】 | 每个派发键 `new Thread`，线程数 = `WORKER_THREADS`（`:226`【原 215】 = 32）；**不是池** |
+| 攻击引擎派发线程 | `observe/service/AttackEngine.java:964`【3a.1 重指，原 930】 | 每个派发键 `new Thread`，线程数 = `WORKER_THREADS`（`:226`【原 215】 = 32）；**不是池** |
 | **Tomcat 工作线程** | **未配置** —— 三个 `application*.properties` 里**没有任何** `server.tomcat.*` | 吃 Spring Boot 默认（200）；只在注释里被引用（`AttackEngine.java:155`（3a.1 **未动**）/ `:199` / `:647`【后两处 3a.1 重指，原 188 / 621】） |
 | **Rabbit 消费并发** | **未配置** —— 无 `spring.rabbitmq.listener.*`；工厂也**没有** `setConcurrentConsumers` | 吃容器默认（**单**消费者线程），见 `RabbitObserveConfig.java:206-221` |
 
@@ -115,7 +115,7 @@ D 段要的是**它的下半场** ——「关掉防护 + 注入故障 ⇒ 崩�
 - **已有的应用层重试**：`ObservedEventConsumer.java:94` `MAX_ATTEMPTS = 3`（`:96` 注释「批文点名 3」）、
   递增退避 `:98`、失败 ⇒ **整批逐条 `basicNack(requeue=false)`** ⇒ 由队列属性送进 DLQ（`:174-178`）。
 - **缺的两件**（批文 ② 的点）：
-  1. **幂等键** —— 今天**没有**：`insertBatch` 直接 INSERT（`ObservedEventDao.java:110-112`），
+  1. **幂等键** —— 今天**没有**：`insertBatch` 直接 INSERT（`ObservedEventDao.java:125-128`），
      **表上无唯一键**（`mall_management_sql.sql:1866-1883` 只有 `PRIMARY KEY(Id)` + 4 个普通索引）。
   2. **DLQ 的出口** —— 今天**没有任何**查看/重投/计数面：既无端点、也无指标；
      `ObservedEventConsumer.java:171-173` 的告警只说「DLQ 里躺着等人查」，而「怎么查」本仓没写。
@@ -130,14 +130,14 @@ D 段要的是**它的下半场** ——「关掉防护 + 注入故障 ⇒ 崩�
 
 ### ⑤ 事件类 —— 8 类的位置，加第 9 类要动 **19 处** {#pack-c3-block-d-hardening-s11}
 
-**唯一出处**：`observe/service/EventBroadcaster.java:132-140` 的 `enum Kind`
+**唯一出处**：`observe/service/EventBroadcaster.java:134-142` 的 `enum Kind`
 （`CACHE` / `LOCK` / `ORDER` / `STOCK` / `AUDIT` / `NOTIFY` / `SENSITIVE` / `IDENTITY`，
-每项带 `tag` + `label`，`:144-147`）。实测**正是这 8 个**（第 9 类 `PROTECTION` 见尾部〈落地登记〉）。
+每项带 `tag` + `label`，`:146-149`）。实测**正是这 8 个**（第 9 类 `PROTECTION` 见尾部〈落地登记〉）。
 
 | 层 | 要动的地方（实测坐标） |
 |---|---|
-| 后端枚举 | `EventBroadcaster.java:132-140`（加项）· `:199-206`（源 metrics 字段）· `:233-253`（构造器形参）· `:264-276`（`poll()` 里加调用）· **新增一个 `ingestXxx` + 源环**（既有 8 段 `:330-471`，每段末都有 `droppedIngest += missed(...)`；第 9 段 `ingestProtection` 在 `:474-495`） |
-| 后端落库 | `ObservedEventDao.java:47`（`KIND_MAX = 16`）· `:99`（`params.add(clip(e.kind(), KIND_MAX))`）· INSERT 列清单 `:110-112` —— ⚠️ 三处**都不需要改**（`KIND_MAX` 16 ≥ `"protection"` 的 10 字符，其余两处与 kind 取值无关） |
+| 后端枚举 | `EventBroadcaster.java:134-142`（加项）· `:219-226`（源 metrics 字段）· `:253-273`（构造器形参）· `:284-296`（`poll()` 里加调用）· **新增一个 `ingestXxx` + 源环**（既有 8 段 `:350-492`，每段末都有 `droppedIngest += missed(...)`；第 9 段 `ingestProtection` 在 `:494-515`） |
+| 后端落库 | `ObservedEventDao.java:52`（`KIND_MAX = 16`）· `:107`（`params.add(clip(e.kind(), KIND_MAX))`）· INSERT 列清单 `:125-128` —— ⚠️ 三处**都不需要改**（`KIND_MAX` 16 ≥ `"protection"` 的 10 字符，其余两处与 kind 取值无关） |
 | 数据 / 文档 | `mall_management_sql.sql:1868`（列注释里**写死**了 8 个名）· `db-schema.md#db-16-1`（同一句 8 名清单）—— 两处均已由 commit 2 补上 `protection`（同行替换） |
 | 前端 | `config/labels/observe-labels.js`：`KINDS`（`:27`）· `KIND_LABEL`（`:37-47`）· `KIND_COLOR`（`:63-73`）· `KIND_ICON`（`:98-135`）· `OBJECT_FIELD_LABEL`（`:168-180`）。⚠️ 色 token **已存在**（`assets/tokens.css:201` / `:301` 的 `--c9: #ec4899`）⇒ **不用新增** |
 | 测试 / 探针 | `EventBroadcasterTest.java:68`（`containsExactly` 9 个 tag）· `EventStreamServiceTest.java:81` · `smoke/ObserveStreamSmokeTest.java:69` · `scripts/probes/probe-b7c8-event-log.mjs:69`（`[…'identity'][i % 8]`）—— ⚠️ **后两处实测不必改**：前者用 `contains(...)` 子集断言（枚举多一项**不会红**，与本节所写不同，已实测定正）；后者只是从 8 个名字里轮流取，多一类**不影响它跑** |
@@ -157,7 +157,7 @@ static final List<String> PROTECTION_KEYS =
   开关不再走 `/attack/run` 的报文，白名单校验搬去了 `AttackSwitchConfig.update`（未知键 ⇒ 400，
   文案随之改为「本仓认这五个：…」）。⚠️ **本条是「重指时发现根本没有落点」的那一类**，不是漏改。
 - ~~回显：原 1635 行 `engine.put("Protections", cfg.protections())`~~
-  ⇒ **现址 `AttackEngine.java:1652`**【3a.1 重指，原 1635 行】（内容不变，只是随上方净增 17 行下移）。
+  ⇒ **现址 `AttackEngine.java:1656`**【3a.1 重指，原 1635 行】（内容不变，只是随上方净增 17 行下移）。
 - ~~落进演练记录：`DrillRecordService.java:109`（`decodeKeys(protections, "protections")` —— commit 2 起先收进局部量 `onProtections`，再由 `ProtectionGate` 消费）~~
   ⇒ **该行已随形参删除**；3a.1 的重指落点是 `DrillRecordService.java:249`（那句「给两个开关解码用的 `decodeKeys` 从本类删掉了」，**原 109**），
   解码逻辑现址 = `AttackSwitchConfig.updateFromJson`。
@@ -170,7 +170,7 @@ static final List<String> PROTECTION_KEYS =
 1. `AttackEngine.java:336`（类注释）**原话**：「⚠️ **本笔只负责把它们「收下来、记进演练记录、打进日志」，
    一条防护逻辑都不实现** …… 硬边界 A 逐字是「加固（扩池 / 扩线程 / 优化慢 SQL）与补救
    （限流 / 熔断 / 降级 / 重试）**都在 D 段**」」—— ⚠️ **commit 2 已改**（`:336-339`【3a.1 重指，原 325-328】现址，见尾部〈落地登记〉）。
-2. `AttackEngine.java:1669`（回显文案）**原话**：「Protections 五个开关本笔**只记录不实现**（防护在 D 段）」—— ⚠️ **commit 2 已改**（现为「五枚里三枚真生效…」，同占 `:1669-1670`【3a.1 重指，原 1652-1653】；⚠️ **阶段 2b 又改成「四枚真生效 / `degrade` 只作记录位」**，仍占 `:1669-1670`）。
+2. `AttackEngine.java:1673`（回显文案）**原话**：「Protections 五个开关本笔**只记录不实现**（防护在 D 段）」—— ⚠️ **commit 2 已改**（现为「五枚里三枚真生效…」，同占 `:1673-1674`【3a.1 重指，原 1652-1653】；⚠️ **阶段 2b 又改成「四枚真生效 / `degrade` 只作记录位」**，仍占 `:1673-1674`）。
 3. 前端 `AttackConsole.vue:127`（原 **124** 行；原文「默认全开 · 本笔只记录、不改读数（接闸在 D 段）」）与 `:137`（原 **134** 行）—— ⚠️ **两处均已由 commit 2 改**（新文案 + `:aria-disabled` 守卫；**别再按原话 grep**）。⚠️ **阶段 2b 又整体 +3**（该文件上方副标题块净插 3 行，故原 124 / 134 行为现 127 / 137 行）；**阶段 2b 把副标题再改成**「限流 / 熔断 / 重试 / 分池已接闸，改读数；降级不可开关」。
 4. 契约侧另有：`api-contract.md#api-h-1` 的载体表注（原「两者都先落成契约面 …… 语义落地归 D 段
    —— 这一条是**如实登记**」）—— ⚠️ **commit 2 已同笔改**（改为「✅ 已接闸（3 键 + 1 键 TD + 1 键记录位）」（⚠️ **阶段 2b 起再改为「4 键 + 1 键记录位」**）
@@ -191,7 +191,7 @@ static final List<String> PROTECTION_KEYS =
 - 「死锁」在本仓**今天的形状**是 `LockSceneService` 里的一个**演示场景**
   （`SceneKind.DEADLOCK`，`LockSceneService.java:100-108`），不是线上会自然发生的那条路。
 - 锁**取锁超时一律 fail-open、无重试**：`DistributedLockService.java:270-273`（`if (!held) { … return action.get(); }`）。
-- 订单关键路径**无重试**：`OrderService.java:379`（`ORDER_ADD`）/ `:1179` / `:1198` / `:1235` 四个
+- 订单关键路径**无重试**：`OrderService.java:379`（`ORDER_ADD`）/ `:1189` / `:1208` / `:1245` 四个
   `runLocked` 调用点，正文里没有重试循环。
 
 ⚠️ ⇒ 批文 ④「Spring Retry 只对**死锁类**异常 2–3 次」落地时，**要先回答两个问题**（本 pack 无法单方面定）：
@@ -205,7 +205,7 @@ static final List<String> PROTECTION_KEYS =
 **(a) `limit` 夹取：多数端点**已经**有（不是「全都没有」）**
 
 - 现成范式：**默认 100 / 上限 500** 的 `normalizeLimit` 已在至少 20 处生效
-  （`AuditService:157-161` · `UserGovernanceService:110-114` · `ReportService:489-493` ·
+  （`AuditService:160-164` · `UserGovernanceService:110-114` · `ReportService:489-493` ·
   `SubsidyService:381-385` · `CouponService:862-867` · `SeckillService:596-600` …）；
   攻击记录是 **默认 20 / 上限 200**（`DrillRecordService.java:202-204`【3a.1 重指，原 213-215】，常量 `:53-54`【原 38-39】）；
   回放是 **默认 5000 / 上限 50000**（`ReplayService.java:115-119`）。
@@ -298,14 +298,14 @@ static final List<String> PROTECTION_KEYS =
      OccurredAt, created_at, updated_at`（`mall_management_sql.sql:1866-1883`）—— **没有 `Seq`**，
      也没有任何唯一键（只有 `PRIMARY KEY(Id)` + 4 个普通索引）。
    - 内存里**确实有**一个 `seq`，但它**不能**当幂等键：`ObservedEvent.seq` 是**合并环游标**
-     （`EventBroadcaster.java:774` `cursor.getAndIncrement()`〔原 **767** 行〕；record 定义 `:194-196` 未动）——
+     （`EventBroadcaster.java:884` `cursor.getAndIncrement()`〔原 **767** 行〕；record 定义 `:212-216`（⚠️ 本笔给 record 加了 `actorId` / `actorRole` / `durationUs` / `fields` 四个分量，不再是「未动」））——
      进程内单调、**重启归零、跨实例不可比、且 2048 回绕**。
      它能安全使用的地方只有一个：**同一条消息字节被重投**时那个数**不变**（这正是幂等需要的那半）。
    - ⇒ 口径二选一（**待裁**）：**(甲)** 加列 `Seq` + `UNIQUE (TraceId, Seq)`（A 档：新字段 + 新 DDL）；
      **(乙)** 不加列，用 `(TraceId, OccurredAt, Kind, Title)` 之类做唯一键（**弱**：同毫秒同 trace 的
      两条同类同题事件会被当重复**丢掉**）。
    - ⚠️ 不论甲乙，`(TraceId, …)` 对**无 traceId 的事件恒不生效**：`TraceId` 可为 `NULL`
-     （定时任务 / SSE 流线程上产生的事件，`EventBroadcaster.java:186-188` 逐字），
+     （定时任务 / SSE 流线程上产生的事件，`EventBroadcaster.java:188-190` 逐字），
      而 MySQL 的 UNIQUE **不把两个 `NULL` 当相等** ⇒ 「那批事件**天生**去不了重」。这一条必须写进验收口径。
 3. **「数据脱敏（手机号 / 邮箱 / 地址）」—— 靶子变了。**
    手机号与收货地址**在本仓不存在**（见 §⑧(b)）；真实靶子是 `user.email` / `user.address` /
@@ -318,7 +318,7 @@ static final List<String> PROTECTION_KEYS =
    要么把这一项改回正值（**等于撤 10b 的一部分**）。**两条路都不能偷偷做**，属待裁。
 5. **「线程池分池（订单 / 事件 / SSE / MQ）」—— 四个里只有「订单」今天真的是池。**
    事件环并入跑在 **SSE 流线程**上（`EventBroadcaster.add` 只由 `poll()` 调，
-   `poll()` 由流线程驱动 ⇒ **没人开日志页，事件就不落库**，`EventBroadcaster.java:221` 逐字）；
+   `poll()` 由流线程驱动 ⇒ **没人开日志页，事件就不落库**，`EventBroadcaster.java:241` 逐字）；
    SSE 的推流线程是**容器的异步线程**；MQ 是**监听容器线程**（今天单并发）。
    ⇒ 「分池」在 SSE / MQ 两处其实是「**新建池或限并发**」，与「订单池（已存在）」不是同一种活。
 
@@ -386,7 +386,7 @@ static final List<String> PROTECTION_KEYS =
 
 | pack 里说要动的 | 实际 |
 |---|---|
-| ⑤ 第 9 类事件环 | 枚举 `EventBroadcaster.java:132-142`（第 9 项 `PROTECTION`）· 新源环 `observe/metrics/ProtectionMetrics.java` · 并入段 `ingestProtection` `:474-495`（`poll()` 里的调用 `:274`） |
+| ⑤ 第 9 类事件环 | 枚举 `EventBroadcaster.java:134-144`（第 9 项 `PROTECTION`）· 新源环 `observe/metrics/ProtectionMetrics.java` · 并入段 `ingestProtection` `:494-515`（`poll()` 里的调用 `:294`） |
 | ⑤ 落库 | `ObservedEventDao` **一行没改**（`KIND_MAX = 16` ≥ `"protection"` 的 10 字符，另两处与 kind 取值无关） |
 | ⑤ 数据 / 文档 | `mall_management_sql.sql:1868` 与 `db-schema.md` §16-1 的 8 名清单**各补上 `protection`**（同行替换，净 0 行） |
 | ⑥ 五键 | `AttackEngine.PROTECTION_KEYS` **未动**（只读）；接闸口径 = **3 键接闸 + 1 键登记 TD-74 + 1 键记录位**（⚠️ **阶段 2b 起 = 4 键接闸 + 1 键记录位**，`WIRED_KEYS` 3 → 4），判据落在新建的 `protect/ProtectionGate`（`KEYS` / `WIRED_KEYS`） |
@@ -516,7 +516,7 @@ LOST∩NEW 逐条可指认，本节以下给的就是它们的旧 → 新）· *
 |---|---|---|---|
 | 本 pack 原 169 行（三处原话 · 第 3 条） | `AttackConsole.vue` 原 **124** / 原 **134** 行 | **`AttackConsole.vue:127`** / **`:137`** | 该文件上方副标题块净插 3 行 |
 | 本 pack 原 266 行（B1） | `AttackConsole.vue` 原 **124** 行 | **`AttackConsole.vue:127`** | 同上 |
-| 本 pack 原 296 行（§⑧ 幂等键那一段） | `EventBroadcaster.java` 原 **767** 行 | **`EventBroadcaster.java:774`** | 该文件净增 7 行（第 9 环并入段 + `poll()` 调用） |
+| 本 pack 原 296 行（§⑧ 幂等键那一段） | `EventBroadcaster.java` 原 **767** 行 | **`EventBroadcaster.java:884`** | 该文件净增 7 行（第 9 环并入段 + `poll()` 调用） |
 | 本 pack 原 452 行（失真原文表 · 末行） | `AttackConsole.vue` 原 **510-512** 行 | **`AttackConsole.vue:513-515`** | 同上副标题块 +3 行 |
 
 ⚠️ **旧值一律写「原 N 行」、不写 `` `文件:N` ``** —— 重指记录本身也是一条引用，写成 token 会往引用集合里

@@ -31,7 +31,7 @@ C3 全部写操作的**横切底座**，两块各管一半：
 - `docs/agent/c3-modules.md:325-336` —— §10 路线修订（本块 = 8 块路线里的第 1 块；§七 旧批次表已作废）。
 
 ### 已落的代码 —— 审计半边（读它就是读**现成的形状**） {#pack-c3-block-1-infra-s6}
-- `Mall-management-server/src/main/java/com/minke/mallmanagement/admin/service/AuditService.java:42-154`
+- `Mall-management-server/src/main/java/com/minke/mallmanagement/admin/service/AuditService.java:42-157`
   —— `record(...)`（`:73`）的签名 + **fail-open 契约**（`:81-84` catch 一切、只打 `ERROR ... AUDIT`，
   **不让审计失败翻业务**）。上限常量 `DEFAULT_LIMIT=100`（`:47`）/ `MAX_LIMIT=500`（`:50`）。
 - `.../admin/dao/AdminAuditDao.java:34-170` —— 表列 + `insert`（`:61`）/ `selectAudits`（`:80`）/
@@ -58,7 +58,7 @@ C3 全部写操作的**横切底座**，两块各管一半：
   （正文留在域表 `notification` 上，靠 `batchId` 一 join 就到 —— 审计做**索引**，正文留域表）。
 
 ### 权限面（块 1 的另一半地基） {#pack-c3-block-1-infra-s8}
-- `.../shared/web/IdentityGuard.java:71-80` —— `requireSelfOrAdmin` 的三档判据。
+- `.../shared/web/IdentityGuard.java:104-115` —— `requireSelfOrAdmin` 的三档判据。
   ⚠️ `:36-49` 是「**解析不出身份 = 放行**」的理由 —— 最容易被误读成漏洞的一条。
 - `.../shared/web/AuthSession.java:77-134` —— `ROLE_ADMIN=3`（`:77`）/ `Identity`（`:84`）/
   `identify`（`:105`）/ `authorize`（`:128`）。**识别口径 vs 授权口径**是本块的关键区分（cookie 来的 `role=3` 只被识别、不被授权）。
@@ -68,7 +68,7 @@ C3 全部写操作的**横切底座**，两块各管一半：
   「身份识别例外」表（**与白名单不是一回事**）。
 
 ### 先例：往日志表写，全仓只有一处 —— 照它 {#pack-c3-block-1-infra-log-precedent}
-- `.../order/model/OrderTimelineWriter.java:23-137` —— **永不抛 / fail-soft / 「允许丢，不许静默」**、
+- `.../order/model/OrderTimelineWriter.java:23-141` —— **永不抛 / fail-soft / 「允许丢，不许静默」**、
   WARN **只在状态翻转时**打一行、`TABLE`+`INSERT_SQL`+`PARAM_COUNT`（`:59`、`:68`、`:72`）由测试钉住。
   ⚠️ 这是全仓「往日志表写」的**唯一先例**，`AuditService` 就是照它写的；**系统通知的写入路径也要照它**。
 

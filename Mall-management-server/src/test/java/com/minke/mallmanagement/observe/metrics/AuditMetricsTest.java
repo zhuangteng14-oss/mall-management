@@ -27,8 +27,8 @@ class AuditMetricsTest {
     @Test
     @DisplayName("written / failed 两路各自计数；failed 带原因、written 不带")
     void bothOutcomesAreRecorded() {
-        metrics.written(ACTOR, ACTION, "goods", "M0001:P0001");
-        metrics.failed(ACTOR, ACTION, "connection reset", "goods", "M0001:P0001");
+        metrics.written(ACTOR, ACTION, "goods", "M0001:P0001", 1_500L);
+        metrics.failed(ACTOR, ACTION, "connection reset", "goods", "M0001:P0001", 2_000_000L);
 
         assertThat(count("written")).isEqualTo(1.0);
         assertThat(count("failed")).isEqualTo(1.0);
@@ -43,13 +43,19 @@ class AuditMetricsTest {
         assertThat(events).extracting(AuditEvent::targetType).containsExactly("goods", "goods");
         assertThat(events).extracting(AuditEvent::targetId).containsExactly("M0001:P0001", "M0001:P0001");
         assertThat(events.get(0).traceId()).as("不在请求线程上 ⇒ traceId 为 null").isNull();
+        // 块 7 · 阶段 3a.3 新增：写入耗时（纳秒入参 → 微秒落进事件）与发起者身份
+        assertThat(events).extracting(AuditEvent::durationUs)
+                .as("纳秒→微秒：1500ns→1µs、2000000ns→2000µs").containsExactly(1L, 2_000L);
+        assertThat(events.get(0).actorRole()).as("无 MDC ⇒ actorRole 为 null").isNull();
+        assertThat(events.get(0).actorId())
+                .as("本环的 actorId 复用**显式传入**的 actor（§0.3），不是 MDC 取值 ⇒ 有值").isEqualTo(ACTOR);
     }
 
     @Test
     @DisplayName("基数铁律：actor / action 都不进 tag —— 两个不同的动作共用一个时间序列")
     void actorAndActionNeverBecomeTags() {
-        metrics.written("U0001", "admin.order.cancel", "order", "O0001");
-        metrics.written("U0002", "admin.goods.audit", "goods", "M0002:P0002");
+        metrics.written("U0001", "admin.order.cancel", "order", "O0001", 1_500L);
+        metrics.written("U0002", "admin.goods.audit", "goods", "M0002:P0002", 1_500L);
 
         assertThat(count("written")).as("两条不同的 (actor, action) 落在同一条计数上").isEqualTo(2.0);
         assertThat(registry.find(AuditMetrics.WRITES).counters())
@@ -65,7 +71,7 @@ class AuditMetricsTest {
         int capacity = 2048;
         int extra = 40;
         for (int i = 0; i < capacity + extra; i++) {
-            metrics.written(ACTOR, ACTION, "goods", "M0001:P0001");
+            metrics.written(ACTOR, ACTION, "goods", "M0001:P0001", 1_500L);
         }
 
         List<AuditEvent> events = metrics.recentEvents();

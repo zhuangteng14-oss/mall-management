@@ -28,8 +28,8 @@ class NotifyMetricsTest {
     @Test
     @DisplayName("sent / failed 两路各自计数；failed 带原因、sent 不带")
     void bothOutcomesAreRecorded() {
-        metrics.sent(TO_TYPE, EVENT_TYPE, KEY);
-        metrics.failed(TO_TYPE, EVENT_TYPE, KEY, "收件人不存在");
+        metrics.sent(TO_TYPE, EVENT_TYPE, KEY, 1_500L);
+        metrics.failed(TO_TYPE, EVENT_TYPE, KEY, "收件人不存在", 2_000_000L);
 
         assertThat(count("sent")).isEqualTo(1.0);
         assertThat(count("failed")).isEqualTo(1.0);
@@ -41,13 +41,18 @@ class NotifyMetricsTest {
         assertThat(events).extracting(NotifyEvent::key).containsExactly(KEY, KEY);
         assertThat(events.get(0).reason()).isNull();
         assertThat(events.get(1).reason()).isEqualTo("收件人不存在");
+        // 块 7 · 阶段 3a.3 新增：发送耗时（纳秒入参 → 微秒落进事件）与发起者身份
+        assertThat(events).extracting(NotifyEvent::durationUs)
+                .as("纳秒→微秒：1500ns→1µs、2000000ns→2000µs").containsExactly(1L, 2_000L);
+        assertThat(events.get(0).actorId()).as("无 MDC ⇒ actorId 为 null").isNull();
+        assertThat(events.get(0).actorRole()).as("无 MDC ⇒ actorRole 为 null").isNull();
     }
 
     @Test
     @DisplayName("基数铁律：收件人业务号不进 tag —— 两个不同收件人共用一个时间序列")
     void recipientKeyNeverBecomesATag() {
-        metrics.sent(TO_TYPE, EVENT_TYPE, "U0001");
-        metrics.sent(TO_TYPE, EVENT_TYPE, "U0002");
+        metrics.sent(TO_TYPE, EVENT_TYPE, "U0001", 1_500L);
+        metrics.sent(TO_TYPE, EVENT_TYPE, "U0002", 1_500L);
 
         assertThat(count("sent")).as("两个不同的收件人落在同一条计数上").isEqualTo(2.0);
         assertThat(registry.find(NotifyMetrics.SENDS).counters())
@@ -62,7 +67,7 @@ class NotifyMetricsTest {
         int capacity = 2048;
         int extra = 24;
         for (int i = 0; i < capacity + extra; i++) {
-            metrics.sent(TO_TYPE, EVENT_TYPE, KEY);
+            metrics.sent(TO_TYPE, EVENT_TYPE, KEY, 1_500L);
         }
 
         List<NotifyEvent> events = metrics.recentEvents();

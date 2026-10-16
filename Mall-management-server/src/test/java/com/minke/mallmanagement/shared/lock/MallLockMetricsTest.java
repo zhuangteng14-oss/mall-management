@@ -67,6 +67,14 @@ class MallLockMetricsTest {
         assertThat(wait.count()).as("4 次尝试里只有 2 次真碰了网络").isEqualTo(2L);
         assertThat(wait.max(TimeUnit.MILLISECONDS))
                 .as("MAX 回答「争用最坏等了多久」—— 取的是 timeout 那次 5000ms").isEqualTo(5000.0);
+
+        // 块 7 · 阶段 3a.3 新增：耗时（纳秒入参 → 微秒落进事件）与发起者身份。
+        // ⚠️ DEGRADED 那一路传的是 0L，但落进事件的是 **null**（「压根没尝试」不是「等了 0 秒」）
+        List<MallLockEvent> events = metrics.recentEvents();
+        assertThat(events.get(0).durationUs()).as("纳秒→微秒：3000000ns→3000µs").isEqualTo(3_000L);
+        assertThat(events.get(2).durationUs()).as("DEGRADED 没尝试 ⇒ null（0L 落成 null，不是 0）").isNull();
+        assertThat(events.get(0).actorId()).as("无 MDC ⇒ actorId 为 null").isNull();
+        assertThat(events.get(0).actorRole()).as("无 MDC ⇒ actorRole 为 null").isNull();
     }
 
     @Test

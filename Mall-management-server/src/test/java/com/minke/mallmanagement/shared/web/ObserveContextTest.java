@@ -98,7 +98,7 @@ class ObserveContextTest {
         AtomicReference<String> afterBatch = new AtomicReference<>();
         runOnAnotherThread(() -> {
             // 这条线程「本来就是别人的」：带着另一个请求的号
-            TraceIdFilter.bind("trace-previous", "batch-previous");
+            TraceIdFilter.bind("trace-previous", "batch-previous", null, null);
             ctx.run(() -> { /* 干点活；这一段的上下文由 ctx 负责 */ });
             afterTrace.set(TraceIdFilter.current());
             afterBatch.set(TraceIdFilter.currentBatch());
@@ -133,7 +133,7 @@ class ObserveContextTest {
         AtomicReference<String> afterTrace = new AtomicReference<>("(没跑到)");
         AtomicReference<Throwable> thrown = new AtomicReference<>();
         runOnAnotherThread(() -> {
-            TraceIdFilter.bind("trace-previous", null);
+            TraceIdFilter.bind("trace-previous", null, null, null);
             try {
                 ctx.run(() -> {
                     throw new IllegalStateException("业务体自己炸了");
@@ -161,7 +161,7 @@ class ObserveContextTest {
         AtomicReference<String> insideTrace = new AtomicReference<>("(没跑到)");
         AtomicReference<String> afterTrace = new AtomicReference<>("(没跑到)");
         runOnAnotherThread(() -> {
-            TraceIdFilter.bind("trace-someone-else", "batch-someone-else");
+            TraceIdFilter.bind("trace-someone-else", "batch-someone-else", null, null);
             ctx.run(() -> insideTrace.set(TraceIdFilter.current()));
             afterTrace.set(TraceIdFilter.current());
         });

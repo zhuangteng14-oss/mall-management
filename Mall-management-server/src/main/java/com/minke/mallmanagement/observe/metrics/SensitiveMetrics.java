@@ -86,9 +86,9 @@ public class SensitiveMetrics {
      *              以前只记「命中几个」，实时日志页答不出「命中了什么」这个最该看的数。
      *              ⚠️ 只进事件流，绝不进 tag（它是**词表内容**，基数无界且可能含攻击者构造的长串）
      */
-    public void masked(String scene, int hit, int total, String words) {
+    public void masked(String scene, int hit, int total, String words, long durationNanos) {
         registry.counter(CHECKS, "result", Result.MASKED.tag).increment();
-        event(Result.MASKED.tag, scene, hit, total, words);
+        event(Result.MASKED.tag, scene, hit, total, words, durationNanos);
     }
 
     /**
@@ -96,10 +96,13 @@ public class SensitiveMetrics {
      *
      * @param scene 安检场景（只进事件流，理由同 {@link #masked}）
      * @param words ／同 {@link #masked}
+     * @param durationNanos 墙钟（块 7 · 阶段 3a.3 新增）：<b>从 {@code SensitiveWordService.filter}
+     *                   入口到处置判定完成</b>。⚠️ 口径**含**读词库（若 {@code filter} 内部走 DB 读词表），
+     *                   不是「纯匹配耗时」—— 见 {@code SensitiveWordService} 的落地说明
      */
-    public void rejected(String scene, int hit, int total, String words) {
+    public void rejected(String scene, int hit, int total, String words, long durationNanos) {
         registry.counter(CHECKS, "result", Result.REJECTED.tag).increment();
-        event(Result.REJECTED.tag, scene, hit, total, words);
+        event(Result.REJECTED.tag, scene, hit, total, words, durationNanos);
     }
 
     // ================= 事件流 =================
@@ -124,12 +127,14 @@ public class SensitiveMetrics {
     }
 
     /** 追加一条事件。{@code scene} 只在事件里以字符串形式出现 —— tag 里绝不能有它。 */
-    private void event(String result, String scene, int hit, int total, String words) {
+    private void event(String result, String scene, int hit, int total, String words, Long durationNanos) {
         long seq = eventCursor.getAndIncrement();
         events[(int) (seq & EVENT_MASK)] = new SensitiveEvent(
                 seq, System.currentTimeMillis(), result,
                 scene == null ? null : String.valueOf(scene), hit, total, words,
-                TraceIdFilter.current(), TraceIdFilter.currentBatch());
+                TraceIdFilter.current(), TraceIdFilter.currentBatch(),
+                TraceIdFilter.currentActorId(), TraceIdFilter.currentActorRole(),
+                durationNanos == null ? null : durationNanos / 1000);
     }
 
     /**
@@ -145,9 +150,14 @@ public class SensitiveMetrics {
      * @param traceId    产生本条事件的那次请求的号（块 7 · commit 8 新增）；不在请求线程上时为 null
      * @param batchId    产生本条事件的那次请求**所属的演练批次**（块 7 · commit 8c，来自
      *                   {@code X-Drill-Batch} 头）；日常流量为 {@code null}。同 {@code traceId} 现读
+     * @param actorId    发起那次请求的业务号（块 7 · 阶段 3a.3 新增）；无身份时为 null
+     * @param actorRole  发起者的角色号（块 7 · 阶段 3a.3 新增）；无身份时为 null
+     * @param durationUs 判定耗时（**微秒**，块 7 · 阶段 3a.3 新增，含读词库）；{@code null} = 没测到
      */
     public record SensitiveEvent(long seq, long epochMilli, String result,
-                                 String scene, int hit, int total, String words, String traceId, String batchId) {
+                                 String scene, int hit, int total, String words, String traceId, String batchId,
+                                 String actorId, Integer actorRole, Long durationUs)
+            implements com.minke.mallmanagement.observe.metrics.Sourced {
     }
 
     /** {@code mall.sensitive.checks} 的 result 取值。tag 字段避免每次调用拼字符串。 */

@@ -131,6 +131,10 @@ public class TwoLevelCache implements Cache {
         //   ran=true, loadedHere=true  → 真正发起了回落 DB 的加载（loads）
         boolean[] mappingRan = {false};
 
+        // 块 7 · 阶段 3a.3：计时包住整次 l1.get —— mapping 没跑时它就是「等 leader 的时长」；
+        // 跑了时它含 leader 自己的加载（那一档不用于 singleflight，见下）。nanoTime 一对约 25ns，
+        // 而这条路径本就已经是缓存未命中、要查库，代价可忽略。
+        long startedNanos = System.nanoTime();
         Object mapped = l1.get(key, k -> {
             mappingRan[0] = true;
             ValueWrapper fromL2 = l2Get(k);
@@ -138,13 +142,16 @@ public class TwoLevelCache implements Cache {
                 return fromL2;
             }
             loadedHere[0] = true;
-            // 在 loader **被调用前**计数：失败那次同样打了 DB，对 DB 的压力一样大
-            metrics.loadedFromDb(name, k);
+            // 计数挪到 loader **返回之后**（块 7 · 阶段 3a.3）：为的是能记下「查库多久」。
+            // 意图不变（失败那次同样打了 DB、一样要计入 DB 压力），故用 finally 兜住异常路径。
+            long loadStarted = System.nanoTime();
             try {
                 return new SimpleValueWrapper(valueLoader.call());
             } catch (Exception e) {
                 // 抛出去 → Caffeine 不写入任何条目，异常原样上抛给调用方
                 throw new ValueRetrievalException(k, valueLoader, e);
+            } finally {
+                metrics.loadedFromDb(name, k, System.nanoTime() - loadStarted);
             }
         });
 
@@ -152,7 +159,7 @@ public class TwoLevelCache implements Cache {
         if (loadedHere[0]) {
             l2Put(key, wrapper.get());
         } else if (!mappingRan[0]) {
-            metrics.singleflightMerged(name, key);
+            metrics.singleflightMerged(name, key, System.nanoTime() - startedNanos);
         }
         return (T) wrapper.get();
     }
@@ -190,10 +197,13 @@ public class TwoLevelCache implements Cache {
     //    且探测者本人也走降级路径 —— 见 L2HealthProbe.isL2UsableNow() 的注释。
 
     private ValueWrapper l1Get(Object key) {
+        // 块 7 · 阶段 3a.3：L1 也计时（纳秒级，见 MallCacheMetrics#l1Request 的 @param —— 按量级看）
+        long startedNanos = System.nanoTime();
         // L1 里存的必然是 ValueWrapper（见类注释），故强转安全
         ValueWrapper wrapper = (ValueWrapper) l1.getIfPresent(key);
+        long elapsed = System.nanoTime() - startedNanos;
         // L1 的读只此一处，两条读路径都经过它 ⇒ hit+miss 即 L1 收到的全部读请求数
-        metrics.l1Request(name, key, wrapper != null);
+        metrics.l1Request(name, key, wrapper != null, elapsed);
         return wrapper;
     }
 
@@ -202,18 +212,22 @@ public class TwoLevelCache implements Cache {
             return null;   // 装配期就没有 L2：配置事实、非请求事件，故不计数（见 MallCacheMetrics）
         }
         if (!probe.isL2UsableNow()) {
-            // 冷却中（或本线程刚探完）：视作 L2 未命中 —— 与「Redis 连不上」同一条降级路径
-            metrics.l2Request(name, key, L2Result.DEGRADED);
+            // 冷却中（或本线程刚探完）：视作 L2 未命中 —— 与「Redis 连不上」同一条降级路径。
+            // 耗时传 null：本行没碰网络；本线程若恰好抢到探测权、在上面那次同步 PING 里花了 233ms，
+            // 那段记在 probe 事件上（见 MallCacheMetrics#l2Request），不是丢失。
+            metrics.l2Request(name, key, L2Result.DEGRADED, null);
             return null;
         }
+        long startedNanos = System.nanoTime();
         try {
             ValueWrapper wrapper = l2.get(key);
+            long elapsed = System.nanoTime() - startedNanos;
             probe.markOk();
-            metrics.l2Request(name, key, wrapper != null ? L2Result.HIT : L2Result.MISS);
+            metrics.l2Request(name, key, wrapper != null ? L2Result.HIT : L2Result.MISS, elapsed);
             return wrapper;
         } catch (DataAccessException e) {
             probe.markFailed(e);
-            metrics.l2Request(name, key, L2Result.ERROR);
+            metrics.l2Request(name, key, L2Result.ERROR, System.nanoTime() - startedNanos);
             return null;
         }
     }
@@ -240,16 +254,19 @@ public class TwoLevelCache implements Cache {
         if (!probe.isL2UsableNow()) {
             // 冷却中：跳过失效。L2 里可能因此留下一个旧值，但：
             //   (a) 这段时间本就没在读 L2，(b) L2 TTL（a3 为 5m）是陈旧上界的兜底
-            metrics.evicted(name, false, EvictResult.SKIPPED_DEGRADED, key);
+            // 耗时传 null：没碰 L2（「没发生」，不是「很快」）
+            metrics.evicted(name, false, EvictResult.SKIPPED_DEGRADED, key, null);
             return;
         }
+        long startedNanos = System.nanoTime();
         try {
             l2.evict(key);
+            long elapsed = System.nanoTime() - startedNanos;
             probe.markOk();
-            metrics.evicted(name, false, EvictResult.EVICTED, key);
+            metrics.evicted(name, false, EvictResult.EVICTED, key, elapsed);
         } catch (DataAccessException e) {
             probe.markFailed(e);
-            metrics.evicted(name, false, EvictResult.ERROR, key);
+            metrics.evicted(name, false, EvictResult.ERROR, key, System.nanoTime() - startedNanos);
         }
     }
 
@@ -258,17 +275,19 @@ public class TwoLevelCache implements Cache {
             return;
         }
         if (!probe.isL2UsableNow()) {
-            // 冷却中：跳过整片失效（同上，L2 TTL 兜底）
-            metrics.evicted(name, true, EvictResult.SKIPPED_DEGRADED, null);
+            // 冷却中：跳过整片失效（同上，L2 TTL 兜底）；耗时传 null（没碰 L2）
+            metrics.evicted(name, true, EvictResult.SKIPPED_DEGRADED, null, null);
             return;
         }
+        long startedNanos = System.nanoTime();
         try {
             l2.clear();
+            long elapsed = System.nanoTime() - startedNanos;
             probe.markOk();
-            metrics.evicted(name, true, EvictResult.EVICTED, null);
+            metrics.evicted(name, true, EvictResult.EVICTED, null, elapsed);
         } catch (DataAccessException e) {
             probe.markFailed(e);
-            metrics.evicted(name, true, EvictResult.ERROR, null);
+            metrics.evicted(name, true, EvictResult.ERROR, null, System.nanoTime() - startedNanos);
         }
     }
 }

@@ -72,14 +72,20 @@ public final class IdentityGuard {
     }
 
     /** 记一次判据结果并**原样返回它** —— 「记录的值」与「返回的值」永远是同一次计算的结果
-     *  （分两处写判据迟早在某一边漂）。未装配 ⇒ 只返回，其余行为逐字不变。 */
-    private static boolean recordAndReturn(boolean allowed, String subject, HttpServletRequest request) {
+     *  （分两处写判据迟早在某一边漂）。未装配 ⇒ 只返回，其余行为逐字不变。
+     *
+     * @param durationNanos 判据的墙钟（块 7 · 阶段 3a.3 新增）。⚠️ <b>必须由调用方传进来</b>：
+     *      本类是**静态无状态工具**，若在这里 new 一个 startNanos 的静态字段，并发调用会互相串号
+     *      （判据本身是无状态的，观测不能把它变成有状态）。调用方各持一个局部变量 ⇒ 天然线程安全
+     */
+    private static boolean recordAndReturn(boolean allowed, String subject, HttpServletRequest request,
+                                           long durationNanos) {
         IdentityMetrics m = metrics;
         if (m != null) {
             if (allowed) {
-                m.passed(subject, request.getRequestURI());
+                m.passed(subject, request.getRequestURI(), durationNanos);
             } else {
-                m.rejected(subject, "入参指向他人且调用者不是管理员", request.getRequestURI());
+                m.rejected(subject, "入参指向他人且调用者不是管理员", request.getRequestURI(), durationNanos);
             }
         }
         return allowed;
@@ -96,14 +102,16 @@ public final class IdentityGuard {
      *                商品浏览面的商户）**不能**传进来 —— 判它会误伤正常业务。
      */
     public static boolean requireSelfOrAdmin(HttpServletRequest request, String paramId) {
+        // 块 7 · 阶段 3a.3：耗时起 = 本方法入口（含 identify 一次内存查表）。本入口不碰 DB ⇒ 纳秒~微秒级
+        long startedNanos = System.nanoTime();
         AuthSession.Identity identity = AuthSession.identify(request);
         if (identity == null) {
-            return recordAndReturn(true, paramId, request);   // 见类注释「为什么解析不出身份 = 放行」
+            return recordAndReturn(true, paramId, request, System.nanoTime() - startedNanos);   // 见类注释「为什么解析不出身份 = 放行」
         }
         if (paramId == null || paramId.equals(identity.userId())) {
-            return recordAndReturn(true, paramId, request);   // 第 1 档
+            return recordAndReturn(true, paramId, request, System.nanoTime() - startedNanos);   // 第 1 档
         }
-        return recordAndReturn(identity.role() != null && identity.role() == AuthSession.ROLE_ADMIN, paramId, request);   // 第 2 / 3 档
+        return recordAndReturn(identity.role() != null && identity.role() == AuthSession.ROLE_ADMIN, paramId, request, System.nanoTime() - startedNanos);   // 第 2 / 3 档
     }
 
     /**
@@ -130,20 +138,24 @@ public final class IdentityGuard {
      */
     public static boolean requireSelfOrAdminByUsername(HttpServletRequest request, String username,
                                                        UserStateLookup lookup) {
+        // 块 7 · 阶段 3a.3：耗时起 = 本方法入口。⚠️ 与 requireSelfOrAdmin **不同**：走到最后一行时
+        // 含一次 DB 读（lookup.usernameOf）；提前返回的那几档只查了内存 ⇒ 同一条事件上的
+        // durationUs 因此可能差好几个量级，读页面时别把两档混着看（已记在 IdentityMetrics.rejected 上）
+        long startedNanos = System.nanoTime();
         AuthSession.Identity identity = AuthSession.identify(request);
         if (identity == null) {
-            return recordAndReturn(true, username, request);   // 见类注释「为什么解析不出身份 = 放行」
+            return recordAndReturn(true, username, request, System.nanoTime() - startedNanos);   // 见类注释「为什么解析不出身份 = 放行」
         }
         if (username == null) {
-            return recordAndReturn(true, username, request);   // 没传参：不是本类该拦的（缺参由 Service 报）
+            return recordAndReturn(true, username, request, System.nanoTime() - startedNanos);   // 没传参：不是本类该拦的（缺参由 Service 报）
         }
         if (identity.role() != null && identity.role() == AuthSession.ROLE_ADMIN) {
-            return recordAndReturn(true, username, request);   // 第 2 档
+            return recordAndReturn(true, username, request, System.nanoTime() - startedNanos);   // 第 2 档
         }
         if (lookup == null) {
-            return recordAndReturn(true, username, request);   // 切片里取不到探针 ⇒ 判不出来 ⇒ 放行（同上 ③）
+            return recordAndReturn(true, username, request, System.nanoTime() - startedNanos);   // 切片里取不到探针 ⇒ 判不出来 ⇒ 放行（同上 ③）
         }
-        return recordAndReturn(username.equals(lookup.usernameOf(identity.userId(), identity.role())), username, request);   // 第 1 档
+        return recordAndReturn(username.equals(lookup.usernameOf(identity.userId(), identity.role())), username, request, System.nanoTime() - startedNanos);   // 第 1 档
     }
 
     /**

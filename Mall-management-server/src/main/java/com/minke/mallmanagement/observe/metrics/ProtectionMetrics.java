@@ -82,9 +82,12 @@ public class ProtectionMetrics {
      * @param key    防护开关 key（有界，进 tag）—— 「是哪个开关的闸」
      * @param scope  闸 / 下游名（只进事件流）—— 「拦在哪一段」，如 {@code inbound} / {@code mysql}
      * @param detail 人话明细（只进事件流，绝不进 tag）：被拦的路径 / 熔断器名 / 当时的错误率……
+     * @param durationNanos 墙钟（块 7 · 阶段 3a.3 新增）；**只有入站限流这一路有值**
+     *                   （{@code InboundRateLimitInterceptor} 从拦截入口量到 {@code acquirePermission()} 返回）。
+     *                   熔断开路那一路（{@code ProtectionMetricsBinder}）是**瞬时回调**、没有自然起止 ⇒ 传 {@code null}
      */
-    public void blocked(String key, String scope, String detail) {
-        event(Result.BLOCKED.tag, key, scope, detail);
+    public void blocked(String key, String scope, String detail, Long durationNanos) {
+        event(Result.BLOCKED.tag, key, scope, detail, durationNanos);
     }
 
     /**
@@ -95,7 +98,8 @@ public class ProtectionMetrics {
      * 合成一档会让「阈值定得太松」与「池子开得太小」两种病读出同一个数。
      */
     public void shed(String key, String scope, String detail) {
-        event(Result.SHED.tag, key, scope, detail);
+        // 不记耗时（块 7 · 阶段 3a.3 定）：池拒绝是**瞬时回调**（任务被当场弹回），没有起止 ⇒ 恒 null
+        event(Result.SHED.tag, key, scope, detail, null);
     }
 
     /**
@@ -105,7 +109,8 @@ public class ProtectionMetrics {
      *               免得「opend」这种拼错变成一条谁也不认识的 tag（它不会报错，只会让图例少一格）
      */
     public void state(Result result, String key, String scope, String detail) {
-        event(result.tag, key, scope, detail);
+        // 不记耗时（同 shed）：熔断状态翻转是瞬时事实，没有起止
+        event(result.tag, key, scope, detail, null);
     }
 
     /**
@@ -122,7 +127,9 @@ public class ProtectionMetrics {
      * @param result 只能是 {@link Result#RETRY_SUCCESS} 或 {@link Result#RETRY_FAILED}
      */
     public void retry(Result result, String key, String scope, String detail) {
-        event(result.tag, key, scope, detail);
+        // 不记耗时（块 7 · 阶段 3a.3 定）：本档要的自然量是「两次尝试的间隔」，而现有代码只有 attempt 计数、
+        // 没有任何时刻差 ⇒ 要新增计时才行。**已知缺口**，如实记 —— 别把恒 null 当成「间隔为 0」
+        event(result.tag, key, scope, detail, null);
     }
 
     // ================= 事件流 =================
@@ -147,7 +154,7 @@ public class ProtectionMetrics {
     }
 
     /** 追加一条事件：先计数、后入环（两条通道同点发，与既有八环同款）。 */
-    private void event(String result, String key, String scope, String detail) {
+    private void event(String result, String key, String scope, String detail, Long durationNanos) {
         registry.counter(EVENTS, "protection", key == null ? "-" : key, "result", result).increment();
         long seq = eventCursor.getAndIncrement();
         events[(int) (seq & EVENT_MASK)] = new ProtectionEvent(
@@ -155,7 +162,9 @@ public class ProtectionMetrics {
                 key == null ? null : String.valueOf(key),
                 scope == null ? null : String.valueOf(scope),
                 detail,
-                TraceIdFilter.current(), TraceIdFilter.currentBatch());
+                TraceIdFilter.current(), TraceIdFilter.currentBatch(),
+                TraceIdFilter.currentActorId(), TraceIdFilter.currentActorRole(),
+                durationNanos == null ? null : durationNanos / 1000);
     }
 
     /**
@@ -171,9 +180,15 @@ public class ProtectionMetrics {
      *                   仍可有值，而线程池挤出可能无值）时为 null
      * @param batchId    产生本条事件的那次请求**所属的演练批次**（来自 {@code X-Drill-Batch} 头）；
      *                   日常流量为 {@code null}。同 {@code traceId} 现读
+     * @param actorId    发起那次请求的业务号（块 7 · 阶段 3a.3 新增）；无身份时为 null
+     * @param actorRole  发起者的角色号（块 7 · 阶段 3a.3 新增）；无身份时为 null
+     * @param durationUs 拦截耗时（**微秒**，块 7 · 阶段 3a.3 新增）；**只有限流被拒那一档有值**
+     *                   （见 {@link #blocked}）；熔断 / 池 / 重试三档恒 null（瞬时回调，无起止）
      */
     public record ProtectionEvent(long seq, long epochMilli, String result,
-                                  String key, String scope, String detail, String traceId, String batchId) {
+                                  String key, String scope, String detail, String traceId, String batchId,
+                                  String actorId, Integer actorRole, Long durationUs)
+            implements com.minke.mallmanagement.observe.metrics.Sourced {
     }
 
     /** {@code mall.protection.events} 的 result 取值。tag 字段避免每次调用拼字符串。 */

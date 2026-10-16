@@ -77,17 +77,17 @@ class EventBroadcasterTest {
     @Test
     @DisplayName("since(afterSeq) 只给**之后**的：读走的不再重复给")
     void sinceReturnsOnlyNewerThanTheCursor() {
-        stock.deduct(SKU, 1, StockMetrics.Deduct.OK);
-        stock.deduct(SKU, 1, StockMetrics.Deduct.OK);
-        stock.deduct(SKU, 1, StockMetrics.Deduct.OK);
+        stock.deduct(SKU, 1, StockMetrics.Deduct.OK, 1_500L);
+        stock.deduct(SKU, 1, StockMetrics.Deduct.OK, 1_500L);
+        stock.deduct(SKU, 1, StockMetrics.Deduct.OK, 1_500L);
         broadcaster.poll();
 
         assertThat(broadcaster.since(-1)).as("首次读（-1）= 要一屏全量").hasSize(3);
         assertThat(broadcaster.since(0L)).as("读到 0 之后：还剩 2 条").hasSize(2);
         assertThat(broadcaster.since(2L)).as("读到最新：0 条").isEmpty();
 
-        stock.deduct(SKU, 1, StockMetrics.Deduct.INSUFFICIENT);
-        stock.deduct(SKU, 1, StockMetrics.Deduct.ERROR);
+        stock.deduct(SKU, 1, StockMetrics.Deduct.INSUFFICIENT, 1_500L);
+        stock.deduct(SKU, 1, StockMetrics.Deduct.ERROR, 1_500L);
         broadcaster.poll();
 
         assertThat(broadcaster.since(2L)).extracting(ObservedEvent::seq)
@@ -108,19 +108,19 @@ class EventBroadcasterTest {
     @Test
     @DisplayName("severity 规则表：error ← result=error；warn ← 被挡/被拒/超时/降级/不足；其余 info")
     void severityFollowsTheOneRuleTable() {
-        stock.deduct(SKU, 1, StockMetrics.Deduct.INSUFFICIENT);      // warn
-        stock.release(SKU, 1, StockMetrics.Release.ERROR);           // error
-        stock.release(SKU, 1, StockMetrics.Release.MISSING);         // info（「什么也没发生」）
-        audit.written("C-1", "goods.add", "goods", "M-1:P-1");       // info
-        audit.failed("C-1", "goods.add", "db down", "goods", "M-1:P-1");  // warn
-        notify.sent("email", "order.paid", "C-1");                   // info
-        notify.failed("email", "order.paid", "C-1", "smtp 550");     // warn
-        sensitive.masked("comment", 1, 20, "傻逼");                   // info
-        sensitive.rejected("comment", 9, 10, "滚");                   // warn
-        identity.passed("C-1", "/goods/goodsUp");                    // info
-        identity.rejected("C-1", "令牌过期", "/goods/goodsUp");        // warn
+        stock.deduct(SKU, 1, StockMetrics.Deduct.INSUFFICIENT, 1_500L);      // warn
+        stock.release(SKU, 1, StockMetrics.Release.ERROR, 1_500L);           // error
+        stock.release(SKU, 1, StockMetrics.Release.MISSING, 1_500L);         // info（「什么也没发生」）
+        audit.written("C-1", "goods.add", "goods", "M-1:P-1", 1_500L);       // info
+        audit.failed("C-1", "goods.add", "db down", "goods", "M-1:P-1", 1_500L);  // warn
+        notify.sent("email", "order.paid", "C-1", 1_500L);                   // info
+        notify.failed("email", "order.paid", "C-1", "smtp 550", 1_500L);     // warn
+        sensitive.masked("comment", 1, 20, "傻逼", 1_500L);                   // info
+        sensitive.rejected("comment", 9, 10, "滚", 1_500L);                   // warn
+        identity.passed("C-1", "/goods/goodsUp", 1_500L);                    // info
+        identity.rejected("C-1", "令牌过期", "/goods/goodsUp", 1_500L);        // warn
         lock.acquire("order:create", "O-9", MallLockMetrics.Outcome.TIMEOUT, 3_000_000L);  // warn（fail-open）
-        cache.l1Request("goods", "k1", false);                       // info（miss 刻意不染黄）
+        cache.l1Request("goods", "k1", false, 1_500L);                       // info（miss 刻意不染黄）
 
         broadcaster.poll();
 
@@ -141,9 +141,9 @@ class EventBroadcasterTest {
     @Test
     @DisplayName("订单流转：applied → info、rejected → warn、error → error")
     void orderTransitionSeverity() {
-        order.transition(OrderAction.PAY, "waitPay", "waitShip", MallOrderStateMetrics.Result.APPLIED, "O-1");
-        order.transition(OrderAction.PAY, "waitPay", null, MallOrderStateMetrics.Result.REJECTED, "O-1");
-        order.transition(OrderAction.PAY, "waitPay", null, MallOrderStateMetrics.Result.ERROR, "O-1");
+        order.transition(OrderAction.PAY, "waitPay", "waitShip", MallOrderStateMetrics.Result.APPLIED, "O-1", 1_500L);
+        order.transition(OrderAction.PAY, "waitPay", null, MallOrderStateMetrics.Result.REJECTED, "O-1", 1_500L);
+        order.transition(OrderAction.PAY, "waitPay", null, MallOrderStateMetrics.Result.ERROR, "O-1", 1_500L);
         broadcaster.poll();
 
         assertThat(severityOfAll()).containsExactly("info", "warn", "error");
@@ -156,8 +156,8 @@ class EventBroadcasterTest {
     @Test
     @DisplayName("业务键透传 + detail 尾部带 src=环名#源seq（排查时能定位回原环）")
     void keyIsPassedThroughAndDetailCarriesTheSourceRing() {
-        stock.deduct(SKU, 3, StockMetrics.Deduct.OK);
-        stock.deduct(SKU, 4, StockMetrics.Deduct.INSUFFICIENT);
+        stock.deduct(SKU, 3, StockMetrics.Deduct.OK, 1_500L);
+        stock.deduct(SKU, 4, StockMetrics.Deduct.INSUFFICIENT, 1_500L);
 
         broadcaster.poll();
         List<ObservedEvent> events = broadcaster.since(-1);
@@ -169,6 +169,14 @@ class EventBroadcasterTest {
                 .as("detail 里既有业务字段，也有「这条来自哪个环的第几号」").contains("sku=" + SKU)
                 .contains("qty=3").contains("result=ok").endsWith("src=stock#0");
         assertThat(events.get(1).detail()).contains("qty=4").endsWith("src=stock#1");
+        // 块 7 · 阶段 3a.3：结构化明细 fields 与 detail **同源**（在同一个 Emit 里一起构造）。
+        //   pin 住「detail 里 result= 后面那段」与 fields 里的 result 是同一个值 ——
+        //   两处分别构造必然漂移，那正是本仓反复吃的亏（见 EventBroadcaster.Emit 的 javadoc）。
+        assertThat(events.get(0).fields()).as("stock 的 deduct 构造了结构化明细（不是 null）").isNotNull();
+        String detail0 = events.get(0).detail();
+        String resultAfterEq = detail0.substring(detail0.indexOf("result=") + "result=".length()).split(" ")[0];
+        assertThat(events.get(0).fields().get("result")).as("fields.result 与 detail 里 result= 那段同源")
+                .isEqualTo(resultAfterEq);
         assertThat(events).extracting(ObservedEvent::epochMilli).as("墙钟时刻原样透传（源环记的就是墙钟）")
                 .allSatisfy(ts -> assertThat(ts).isPositive());
     }
@@ -220,8 +228,8 @@ class EventBroadcasterTest {
     void protectionRingIsTranslatedPerGate() {
         // 两条 blocked 的 key 不同 —— 标题必须跟着分岔：两者都是 warn，但排障方向相反
         // （限流查流量、熔断查下游）。合并成一个标题就等于把两条线索糊成一条。
-        protection.blocked("rateLimit", "inbound", "path=/goods/goodsSelectHome 每 1s 放 200 条，这一拍没有余量");
-        protection.blocked("circuitBreak", "mysql", "circuitBreaker=mallMysqlWrite 已打开：本次调用未执行");
+        protection.blocked("rateLimit", "inbound", "path=/goods/goodsSelectHome 每 1s 放 200 条，这一拍没有余量", null);
+        protection.blocked("circuitBreak", "mysql", "circuitBreaker=mallMysqlWrite 已打开：本次调用未执行", null);
         protection.state(Result.OPENED, "circuitBreak", "mysql", "circuitBreaker=mallMysqlWrite CLOSED → OPEN 失败率=62.5%");
         protection.state(Result.HALF_OPEN, "circuitBreak", "mysql", "circuitBreaker=mallMysqlWrite OPEN → HALF_OPEN");
         protection.state(Result.CLOSED, "circuitBreak", "mysql", "circuitBreaker=mallMysqlWrite HALF_OPEN → CLOSED");
@@ -248,7 +256,7 @@ class EventBroadcasterTest {
     @Test
     @DisplayName("防护环的第一条 blocked 的 key 认不出时：**不硬套**某个闸名，照实写 key")
     void protectionBlockedWithUnknownGateDoesNotGuess() {
-        protection.blocked("degrade", "somewhere", "一个本段不该出现的 key");
+        protection.blocked("degrade", "somewhere", "一个本段不该出现的 key", null);
         broadcaster.poll();
 
         assertThat(titlesOf(Severity.WARN)).as("不写「入站限流拦下」也不写「熔断开路拒绝」—— 两者都是猜")
@@ -266,7 +274,7 @@ class EventBroadcasterTest {
         int capacity = 2048;
         int extra = 88;
         for (int i = 0; i < capacity + extra; i++) {
-            stock.deduct(SKU, 1, StockMetrics.Deduct.OK);
+            stock.deduct(SKU, 1, StockMetrics.Deduct.OK, 1_500L);
         }
 
         assertThat(broadcaster.poll()).as("并入的是**源环还剩的** %d 条，不是全部", capacity).isEqualTo(capacity);
@@ -283,7 +291,7 @@ class EventBroadcasterTest {
         int capacity = 2048;
         int extra = 88;
         for (int i = 0; i < capacity + extra; i++) {
-            stock.deduct(SKU, 1, StockMetrics.Deduct.OK);
+            stock.deduct(SKU, 1, StockMetrics.Deduct.OK, 1_500L);
             broadcaster.poll();          // 逐条推进，确保每条都真进了合并环
         }
 
@@ -298,14 +306,14 @@ class EventBroadcasterTest {
 
     /** 九个环各发一条（值都取「成功路径」，故本用例只关心**类序**）。 */
     private void emitOneOfEach() {
-        cache.l1Request("goods", "k1", true);
+        cache.l1Request("goods", "k1", true, 1_500L);
         lock.acquire("order:create", "O-1", MallLockMetrics.Outcome.ACQUIRED, 1_000_000L);
-        order.transition(OrderAction.CREATE, "none", "waitPay", MallOrderStateMetrics.Result.APPLIED, "O-1");
-        stock.deduct(SKU, 1, StockMetrics.Deduct.OK);
-        audit.written("C-1", "order.add", "order", "O-1");
-        notify.sent("email", "order.created", "C-1");
-        sensitive.masked("comment", 0, 20, null);
-        identity.passed("C-1", "/order/orderReceive");
+        order.transition(OrderAction.CREATE, "none", "waitPay", MallOrderStateMetrics.Result.APPLIED, "O-1", 1_500L);
+        stock.deduct(SKU, 1, StockMetrics.Deduct.OK, 1_500L);
+        audit.written("C-1", "order.add", "order", "O-1", 1_500L);
+        notify.sent("email", "order.created", "C-1", 1_500L);
+        sensitive.masked("comment", 0, 20, null, 1_500L);
+        identity.passed("C-1", "/order/orderReceive", 1_500L);
         // 第 9 环取 closed（熔断恢复关闭）而不是 blocked：它是防护环里**落 info 的那一档**
         // （⚠️ 阶段 2b 起落 info 的有两档，另一档是 retry_success —— 这里取 closed 是因为它
         //   属于熔断三态那一族、不引入新标题分组），于是这条共用夹具不会把 severity 规则表

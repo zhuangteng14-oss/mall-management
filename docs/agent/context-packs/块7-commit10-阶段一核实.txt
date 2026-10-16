@@ -77,7 +77,7 @@
       toState = stateMachine.stateName(payIf, deliveryIf, receiveIf)
       → metrics.transition(action, fromState, toState, ...)
       → MallOrderStateMetrics.event(...) → 进 SSE 的 moves
-      （OrderTransitionRecorder.java:107-112；MallOrderStateMetrics.java:146-149）
+      （OrderTransitionRecorder.java:113-118；MallOrderStateMetrics.java:150-154）
     实测到的 "to":"CREATED" 正是 stateName(0,0,0) 的返回值。
   · 前端 MAIN_EDGES 的 id 用的是 **DB 派生五态 code**：
       waitPay>waitShip / waitShip>waitReceive / waitReceive>completed

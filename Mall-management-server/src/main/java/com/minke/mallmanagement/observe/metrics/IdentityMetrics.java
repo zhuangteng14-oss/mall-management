@@ -86,10 +86,11 @@ public class IdentityMetrics {
      * @param path    被校验的那个**请求路径**（块 7 · commit 8 新增）—— 一次鉴权闸判的是「这个端点」，
      *                只有业务号看不出判的是哪个端点；实时日志页要用它标出「这条身份事件挡在哪」。
      *                拿不到请求时传 null（切片 / 非 web 调用）
+     * @param durationNanos 墙钟（块 7 · 阶段 3a.3 新增）：从判据入口到发事件之前；口径差异见 {@link #rejected}
      */
-    public void passed(String subject, String path) {
+    public void passed(String subject, String path, long durationNanos) {
         registry.counter(CHECKS, "result", Result.PASSED.tag).increment();
-        event(Result.PASSED.tag, subject, null, path);
+        event(Result.PASSED.tag, subject, null, path, durationNanos);
     }
 
     /**
@@ -97,10 +98,14 @@ public class IdentityMetrics {
      *
      * @param reason 拒绝原因（简短文本，由发起校验的那一处给）。只进事件流 —— 自由文本、基数无界
      * @param path   ／同 {@link #passed}
+     * @param durationNanos 墙钟（块 7 · 阶段 3a.3 新增）：<b>从判据入口到发事件之前</b>。
+     *                   ⚠️ 两个入口量到的东西**不同**：{@code requireSelfOrAdmin} 只查内存，
+     *                   {@code requireSelfOrAdminByUsername} 含一次 DB 读（按用户名查 id）——
+     *                   同一条事件上分不出是哪一个，见 {@code IdentityGuard} 的落地说明
      */
-    public void rejected(String subject, String reason, String path) {
+    public void rejected(String subject, String reason, String path, long durationNanos) {
         registry.counter(CHECKS, "result", Result.REJECTED.tag).increment();
-        event(Result.REJECTED.tag, subject, reason, path);
+        event(Result.REJECTED.tag, subject, reason, path, durationNanos);
     }
 
     // ================= 事件流 =================
@@ -125,13 +130,15 @@ public class IdentityMetrics {
     }
 
     /** 追加一条事件。{@code subject} / {@code reason} 只在事件里以字符串形式出现 —— tag 里绝不能有它们。 */
-    private void event(String result, String subject, String reason, String path) {
+    private void event(String result, String subject, String reason, String path, Long durationNanos) {
         long seq = eventCursor.getAndIncrement();
         events[(int) (seq & EVENT_MASK)] = new IdentityEvent(
                 seq, System.currentTimeMillis(), result,
                 subject == null ? null : String.valueOf(subject), reason,
                 path == null ? null : String.valueOf(path),
-                TraceIdFilter.current(), TraceIdFilter.currentBatch());
+                TraceIdFilter.current(), TraceIdFilter.currentBatch(),
+                TraceIdFilter.currentActorId(), TraceIdFilter.currentActorRole(),
+                durationNanos == null ? null : durationNanos / 1000);
     }
 
     /**
@@ -146,9 +153,16 @@ public class IdentityMetrics {
      * @param traceId    产生本条事件的那次请求的号（块 7 · commit 8 新增）；不在请求线程上时为 null
      * @param batchId    产生本条事件的那次请求**所属的演练批次**（块 7 · commit 8c，来自
      *                   {@code X-Drill-Batch} 头）；日常流量为 {@code null}。同 {@code traceId} 现读
+     * @param actorId    发起那次请求的业务号（块 7 · 阶段 3a.3 新增）；无身份时为 null。
+     *                   ⚠️ 它与 {@code subject}（**被校验**的业务号）通常相同但**不是一回事**：
+     *                   拒绝路径上二者会不同（例如 A 想看 B 的单子：actorId=A，subject=B）
+     * @param actorRole  发起者的角色号（块 7 · 阶段 3a.3 新增）；无身份时为 null
+     * @param durationUs 校验耗时（**微秒**，块 7 · 阶段 3a.3 新增）；{@code null} = 没测到
      */
     public record IdentityEvent(long seq, long epochMilli, String result,
-                                String subject, String reason, String path, String traceId, String batchId) {
+                                String subject, String reason, String path, String traceId, String batchId,
+                                String actorId, Integer actorRole, Long durationUs)
+            implements com.minke.mallmanagement.observe.metrics.Sourced {
     }
 
     /** {@code mall.identity.checks} 的 result 取值。tag 字段避免每次调用拼字符串。 */

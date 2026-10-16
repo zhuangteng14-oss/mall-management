@@ -32,7 +32,7 @@ class ProtectionMetricsTest {
     @Test
     @DisplayName("七档 result 各自计数、各自入环（计数与事件在同一调用点一起发）")
     void everyResultIsCountedAndRecorded() {
-        metrics.blocked("rateLimit", "inbound", "path=/goods/goodsSelectHome");
+        metrics.blocked("rateLimit", "inbound", "path=/goods/goodsSelectHome", 1_500L);
         metrics.state(Result.OPENED, "circuitBreak", "mysql", "circuitBreaker=mallMysqlWrite CLOSED → OPEN");
         metrics.state(Result.HALF_OPEN, "circuitBreak", "mysql", "OPEN → HALF_OPEN");
         metrics.state(Result.CLOSED, "circuitBreak", "mysql", "HALF_OPEN → CLOSED");
@@ -60,6 +60,12 @@ class ProtectionMetricsTest {
         assertThat(events).extracting(ProtectionEvent::scope)
                 .containsExactly("inbound", "mysql", "mysql", "mysql", "pool", "relist", "relist");
         assertThat(events).allSatisfy(e -> assertThat(e.epochMilli()).isPositive());
+        // 块 7 · 阶段 3a.3 新增：拦截耗时（纳秒入参 → 微秒落进事件）与发起者身份。
+        // 只有 blocked（入站限流）这一档有值；熔断翻转 / 池挤出 / 重试都是瞬时回调 ⇒ null
+        assertThat(events.get(0).durationUs()).as("纳秒→微秒：1500ns→1µs").isEqualTo(1L);
+        assertThat(events.get(1).durationUs()).as("熔断翻转是瞬时回调 ⇒ null（没测到，不是 0）").isNull();
+        assertThat(events.get(0).actorId()).as("无 MDC ⇒ actorId 为 null").isNull();
+        assertThat(events.get(0).actorRole()).as("无 MDC ⇒ actorRole 为 null").isNull();
     }
 
     /**
@@ -71,8 +77,8 @@ class ProtectionMetricsTest {
     @Test
     @DisplayName("基数铁律：detail 里的自由文本**不进 tag**（两条不同 detail 落进同一个时间序列）")
     void freeTextDetailNeverBecomesATag() {
-        metrics.blocked("rateLimit", "inbound", "path=/goods/goodsSelectHome");
-        metrics.blocked("rateLimit", "inbound", "path=/order/orderReceive");
+        metrics.blocked("rateLimit", "inbound", "path=/goods/goodsSelectHome", null);
+        metrics.blocked("rateLimit", "inbound", "path=/order/orderReceive", null);
 
         // 两条事件的 detail 不同，但计数只有一个序列、值 2 ⇒ detail 没进 tag
         assertThat(count("blocked")).as("同一个 (protection, result) 两个不同 detail ⇒ 仍是一条序列").isEqualTo(2.0);
@@ -86,9 +92,9 @@ class ProtectionMetricsTest {
     @Test
     @DisplayName("key 进 tag：不同 key 是不同序列（页面按 key 数「哪道闸拦得多」靠它）")
     void keyIsATag() {
-        metrics.blocked("rateLimit", "inbound", "d1");
-        metrics.blocked("rateLimit", "inbound", "d2");
-        metrics.blocked("circuitBreak", "mysql", "d3");
+        metrics.blocked("rateLimit", "inbound", "d1", null);
+        metrics.blocked("rateLimit", "inbound", "d2", null);
+        metrics.blocked("circuitBreak", "mysql", "d3", null);
 
         assertThat(registry.find(ProtectionMetrics.EVENTS).tag("protection", "rateLimit")
                 .tag("result", "blocked").counter().count()).isEqualTo(2.0);
@@ -110,7 +116,7 @@ class ProtectionMetricsTest {
         MDC.put(TraceIdFilter.MDC_KEY, "trace0009");
         MDC.put(TraceIdFilter.MDC_BATCH_KEY, "batch-9");
         try {
-            metrics.blocked("rateLimit", "inbound", "在请求线程上");
+            metrics.blocked("rateLimit", "inbound", "在请求线程上", null);
         } finally {
             MDC.remove(TraceIdFilter.MDC_KEY);
             MDC.remove(TraceIdFilter.MDC_BATCH_KEY);

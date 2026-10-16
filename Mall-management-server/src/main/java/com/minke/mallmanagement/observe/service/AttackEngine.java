@@ -953,7 +953,11 @@ public class AttackEngine {
         // 块 7 · commit 8c：把 (traceId, batchId) 绑到演练自己的线程上。⚠️ 这里绑的是
         // **批次的来源**那一侧：本线程是「发请求的人」，服务端那一侧靠请求头
         // （X-Drill-Batch，见 send）自己收 —— 两条路都要走，缺一条就有一半事件不带号。
-        ObserveContext ctx = new ObserveContext(TraceIdFilter.current(), currentBatch);
+        // 块 7 · 阶段 3a.3：四元构造体的后两元是 actorId / actorRole，这里**传 null** ——
+        // ⚠️ 这不是漏了：本线程是**演练引擎自己**（客户端那一侧），它不是一个登录用户，
+        // 硬填成「点开始的那位管理员」会把「引擎发的事件」记成「管理员做的事」。
+        // 演练真正打出来的**服务端**事件带的是那些请求自己的身份（见 TraceIdFilter）。
+        ObserveContext ctx = new ObserveContext(TraceIdFilter.current(), currentBatch, null, null);
         for (String key : plan) {
             // ⚠️ 守护线程：演练是「可被进程关闭打断」的长动作。非守护线程会让一次演练把 JVM 的
             //    关闭拖到整整 durationSeconds 之后（容器刷下去时最难受）。

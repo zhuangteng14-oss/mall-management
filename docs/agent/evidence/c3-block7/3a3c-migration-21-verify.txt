@@ -1,0 +1,88 @@
+═══════════════════════════════════════════════════════════════════════
+块 7 · 阶段 3a.3 —— 迁移 ㉑ 落库只读复核（第一手实测）
+日期：2026-10-16   工具：_work/ApplyMigration.java + _work/Sql.java（只读）
+凭据：_work/b6-c7-db-env.sh 剥壳取，未打印未落盘
+═══════════════════════════════════════════════════════════════════════
+
+── 1. 全库表数（期望 38：㉑ 是加列、不建表 ⇒ 不变）──
+tables_n
+38
+-- rows: 1
+
+── 2. 全库非主键索引数（期望 74：㉑ 不加索引 ⇒ 不变）──
+nonpk_index_n
+74
+-- rows: 1
+
+── 3. 全库非主键 UNIQUE 数（期望 19：不变）──
+nonpk_unique_n
+19
+-- rows: 1
+
+── 4. observed_event 全部列（期望 14 列 = 原 11 + 新 3；三新列在中段 BatchId 之后）──
+pos	COLUMN_NAME	COLUMN_TYPE	IS_NULLABLE	char_max	COLUMN_COMMENT
+1	Id	bigint	NO	null	自增主键
+2	Kind	varchar(16)	NO	16	事件所属环：cache / lock / order / stock / audit / notify / sensitive / identity（对齐前端 KIND_LABEL）
+3	Severity	varchar(16)	NO	16	严重度：info / warn / error（对齐前端 SEVERITY_LABEL）
+4	Title	varchar(255)	NO	255	事件标题（一句话，含业务键时由后端截断）
+5	ObjectType	varchar(32)	YES	32	对象类型（审计=TargetType / 敏感词=命中的词 / 身份=请求路径 等）；无则 NULL
+6	ObjectId	varchar(128)	YES	128	对象标识（与 ObjectType 成对；对齐 ObservedEvent.objectId）
+7	TraceId	varchar(64)	YES	64	本次请求的 traceId（TraceIdFilter 发号；抽屉链路按它归组）
+8	BatchId	varchar(36)	YES	36	演练批次 UUID（8c 由 X-Drill-Batch 头注入）；NULL = 不属于任何演练批次
+9	ActorId	varchar(50)	YES	50	发起那次请求的业务号（会话里的 customerid/merchantid，口径同 admin_audit.ActorId）；NULL = 无身份：闸关着（app.auth.enabled=false）或事件产生在非请求线程上（线程池/定时任务/SSE 流线程）
+10	ActorRole	int	YES	null	发起者的角色号（取自 login.Role：1 客户 / 2 商家 / 3 管理员；口径同 admin_audit.ActorRole）；与 ActorId 同生共死
+11	DurationUs	bigint	YES	null	本条事件主体的耗时，单位**微秒**（不是毫秒：L1 缓存命中是纳秒级）；NULL = 没测到 / 不适用，两者在页面上意思不同，逐环口径见各 *Metrics 类的 event(...)
+12	OccurredAt	datetime(3)	NO	null	事件发生时刻（毫秒精度，对齐 ObservedEvent.ts）
+13	created_at	datetime	NO	null	行落库时刻（agent.md 数据库管理规则 8）
+14	updated_at	datetime	NO	null	行更新时刻
+-- rows: 14
+
+── 5. observed_event 列数（期望 14）──
+col_n
+14
+-- rows: 1
+
+── 6. observed_event 索引（期望 6 行 = PRIMARY + 4 个非唯一索引，其中 kind_time 是两列复合 ⇒ 占 2 行；㉑ 不动索引）──
+INDEX_NAME	NON_UNIQUE	SEQ_IN_INDEX	COLUMN_NAME
+idx_observed_event_batch	1	1	BatchId
+idx_observed_event_kind_time	1	1	Kind
+idx_observed_event_kind_time	1	2	OccurredAt
+idx_observed_event_time	1	1	OccurredAt
+idx_observed_event_trace	1	1	TraceId
+PRIMARY	0	1	Id
+-- rows: 6
+
+── 7. observed_event 行数（㉑ 是纯 DDL，不改数据）──
+   ⚠️ 实测**非 0** —— 8c 接的 MQ 消费者已经在写这张表（开发/演练跑过），
+      这批**存量行**的三个新列一律 NULL（迁移只加列、不回填），这是预期形态不是缺陷。
+rows_n
+38618
+-- rows: 1
+
+── 8. 反面对照：这三列在迁移前是不存在的 —— 用 information_schema 时间无关的口径复核
+      『㉑ 的守卫确实按列名判存在』（本条只列三列的存在性，期望 3 行）──
+COLUMN_NAME	DATA_TYPE	IS_NULLABLE	COLUMN_DEFAULT
+ActorId	varchar	YES	null
+ActorRole	int	YES	null
+DurationUs	bigint	YES	null
+-- rows: 3
+
+── 9. 口径对齐：admin_audit 的同名两列（㉑ 的 COMMENT 声称「与 admin_audit 逐字相同」，本条把两边并排打出来，供逐列比对）──
+tbl	COLUMN_NAME	COLUMN_TYPE	IS_NULLABLE
+admin_audit	ActorId	varchar(50)	YES
+observed_event	ActorId	varchar(50)	YES
+admin_audit	ActorRole	int	YES
+observed_event	ActorRole	int	YES
+-- rows: 4
+
+── 10. 存量行里三个新列的非空计数（本次复核时新代码还没跑过 ⇒ 期望全 0）──
+       ⚠️ 这是「迁移只加列、不回填」的正面证据；等 dev 后端用新代码重跑后这三个数会开始涨。
+rows_total	actor_id_notnull	actor_role_notnull	duration_us_notnull
+38618	0	0	0
+-- rows: 1
+
+── 11. 反面对照（阳性质控）：同一张表的**老列** BatchId 的非空计数 ——
+       它必须**不是** 0（演练写过），否则说明上面第 10 条读的是空表、那个 0 无意义。
+batch_id_notnull	trace_id_notnull
+32309	37836
+-- rows: 1

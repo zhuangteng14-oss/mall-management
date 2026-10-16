@@ -110,7 +110,11 @@ public class MallLockMetrics {
         if (result == Outcome.ACQUIRED || result == Outcome.TIMEOUT) {
             registry.timer(WAIT, "lock", lock).record(waitNanos, TimeUnit.NANOSECONDS);
         }
-        event(lock, "acquire", result.tag, bizKey);
+        // 块 7 · 阶段 3a.3：耗时**已经算好**（DistributedLockService 的 startNanos/elapsed），带出来即可。
+        // ⚠️ DEGRADED 那一路的 0L 不是「等了 0 秒」，是「在 startNanos 之前就返回了、压根没尝试」
+        //    ⇒ 落成 null（`没测过`），别落成 0（`测出来是 0`）。见 Sourced#durationUs()
+        event(lock, "acquire", result.tag, bizKey,
+                result == Outcome.DEGRADED ? null : waitNanos);
     }
 
     /**
@@ -123,7 +127,9 @@ public class MallLockMetrics {
      */
     public void hold(String lock, String bizKey, Hold result) {
         registry.counter(HOLDS, "lock", lock, "result", result.tag).increment();
-        event(lock, "hold", result.tag, bizKey);
+        // 不记耗时（块 7 · 阶段 3a.3 定）：释放动作本身没有有意义的起止 —— lease_lost 连网络都没碰，
+        // released 的 unlock 往返也不是「业务等了多久」。这一档的 durationUs 恒为 null，是**判定**不是缺口
+        event(lock, "hold", result.tag, bizKey, null);
     }
 
     /**
@@ -134,7 +140,8 @@ public class MallLockMetrics {
      * 读出，另起一个计数器属规范第 6 条禁止的重复埋点。
      */
     public void transition(boolean up) {
-        event(null, "transition", up ? "healthy" : "degraded", null);
+        // 不记耗时（同 hold）：翻转是「瞬时事实」，没有起止
+        event(null, "transition", up ? "healthy" : "degraded", null, null);
     }
 
     /**
@@ -180,12 +187,22 @@ public class MallLockMetrics {
     /**
      * 追加一条事件。{@code key} 只在事件里以字符串形式出现 —— key 可以是任意业务键，
      * 但 tag 里绝不能有它（基数无界）。
+     *
+     * <p>⚠️ 块 7 · 阶段 3a.3 起 {@code durationNanos} 是**必填**（**故意不给重载**）——
+     * 本仓栽过「有重载 ⇒ 新调用点顺手用了短的那个 ⇒ 耗时静默丢失」。{@code null} 与 {@code 0}
+     * 在页面上意思完全不同，见 {@code Sourced#durationUs()}。
+     *
+     * @param durationNanos 本条事件自身的墙钟（纳秒）；{@code null} = 本档没有有意义的起止
+     *                      （hold / transition，见各自方法上的理由）
      */
-    private void event(String lock, String kind, String result, Object key) {
+    private void event(String lock, String kind, String result, Object key, Long durationNanos) {
         long seq = eventCursor.getAndIncrement();
         events[(int) (seq & EVENT_MASK)] = new MallLockEvent(
                 seq, System.currentTimeMillis(), lock, kind, result,
-                key == null ? null : String.valueOf(key), com.minke.mallmanagement.shared.web.TraceIdFilter.current(), com.minke.mallmanagement.shared.web.TraceIdFilter.currentBatch());   // 块 7 · commit 8/8c：写全限定名而非 import，理由同 {@code MallCacheMetrics#event}（保本文件 `:71`/`:72`/`:74` 的引用不下移）
+                key == null ? null : String.valueOf(key), com.minke.mallmanagement.shared.web.TraceIdFilter.current(), com.minke.mallmanagement.shared.web.TraceIdFilter.currentBatch(),
+                com.minke.mallmanagement.shared.web.TraceIdFilter.currentActorId(),
+                com.minke.mallmanagement.shared.web.TraceIdFilter.currentActorRole(),
+                durationNanos == null ? null : durationNanos / 1000);   // 块 7 · commit 8/8c：写全限定名而非 import，理由同 {@code MallCacheMetrics#event}（保本文件 `:71`/`:72`/`:74` 的引用不下移）
     }
 
     /**
@@ -200,9 +217,15 @@ public class MallLockMetrics {
      * @param traceId    产生本条事件的那次请求的号（块 7 · commit 8 新增）；不在请求线程上时为 null
      * @param batchId    产生本条事件的那次请求**所属的演练批次**（块 7 · commit 8c，来自
      *                   {@code X-Drill-Batch} 头）；日常流量为 {@code null}。同 {@code traceId} 现读
+     * @param actorId    发起那次请求的业务号（块 7 · 阶段 3a.3 新增）；无身份时为 null
+     * @param actorRole  发起者的角色号（块 7 · 阶段 3a.3 新增，1 客户 / 2 商家 / 3 管理员）；无身份时为 null
+     * @param durationUs 取锁耗时（**微秒**，块 7 · 阶段 3a.3 新增）；{@code null} = 本档没测
+     *                   （DEGRADED 没尝试 / hold / transition）—— 与 acquire 的 acquired|timeout|error 有值
      */
     public record MallLockEvent(long seq, long epochMilli, String lock, String kind,
-                                String result, String key, String traceId, String batchId) {
+                                String result, String key, String traceId, String batchId,
+                                String actorId, Integer actorRole, Long durationUs)
+            implements com.minke.mallmanagement.observe.metrics.Sourced {
     }
 
     /** {@code mall.lock.acquires} 的 result 取值。tag 字段避免每次调用拼字符串。 */

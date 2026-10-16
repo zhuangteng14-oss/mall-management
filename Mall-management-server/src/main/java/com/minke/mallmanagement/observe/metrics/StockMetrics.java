@@ -98,10 +98,13 @@ public class StockMetrics {
      * @param skuCode 业务键（{@code goods_sku.SkuCode}）。⚠️ 只进<b>事件流</b>，绝不进 tag（基数无界）
      * @param qty     本次要扣的数量（{@code ok} 时是真扣掉的量）
      * @param result  CAS 三态之一，见类注释「指标清单」
+     * @param durationNanos 墙钟（块 7 · 阶段 3a.3 新增）：{@code OrderService.deductStocks} 里
+     *                <b>紧包那一行 {@code goodsDao.deductStock(...)}</b>（不是整个多 sku 循环）——
+     *                口径见该类注释
      */
-    public void deduct(String skuCode, int qty, Deduct result) {
+    public void deduct(String skuCode, int qty, Deduct result, long durationNanos) {
         registry.counter(DEDUCT, "result", result.tag).increment();
-        event("deduct", result.tag, skuCode, qty);
+        event("deduct", result.tag, skuCode, qty, durationNanos);
     }
 
     /**
@@ -110,10 +113,13 @@ public class StockMetrics {
      * @param skuCode 业务键（只进事件流，理由同 {@link #deduct}）
      * @param qty     本次要回补的数量
      * @param result  三态之一，见类注释「指标清单」
+     * @param durationNanos 墙钟（块 7 · 阶段 3a.3 新增）：{@code OrderTimeoutCancelJob.releaseStock}
+     *                里紧包 {@code goodsDao.releaseStock(...)}。⚠️ 定时任务线程 ⇒ actor 为 null，
+     *                但耗时照记（那是「回补花了多久」，与身份无关）
      */
-    public void release(String skuCode, int qty, Release result) {
+    public void release(String skuCode, int qty, Release result, long durationNanos) {
         registry.counter(RELEASE, "result", result.tag).increment();
-        event("release", result.tag, skuCode, qty);
+        event("release", result.tag, skuCode, qty, durationNanos);
     }
 
     // ================= 事件流 =================
@@ -145,11 +151,14 @@ public class StockMetrics {
      * 追加一条事件。{@code skuCode} 只在事件里以字符串形式出现 —— 它可以是任意业务键，
      * 但 tag 里绝不能有它（基数无界）。
      */
-    private void event(String kind, String result, String skuCode, int qty) {
+    private void event(String kind, String result, String skuCode, int qty, Long durationNanos) {
         long seq = eventCursor.getAndIncrement();
         events[(int) (seq & EVENT_MASK)] = new StockEvent(
                 seq, System.currentTimeMillis(), kind, result,
-                skuCode == null ? null : String.valueOf(skuCode), qty, com.minke.mallmanagement.shared.web.TraceIdFilter.current(), com.minke.mallmanagement.shared.web.TraceIdFilter.currentBatch());   // 块 7 · commit 8/8c：写全限定名而非 import，理由同 {@code MallCacheMetrics#event}（保本文件 `:75` 的引用不下移）
+                skuCode == null ? null : String.valueOf(skuCode), qty, com.minke.mallmanagement.shared.web.TraceIdFilter.current(), com.minke.mallmanagement.shared.web.TraceIdFilter.currentBatch(),
+                com.minke.mallmanagement.shared.web.TraceIdFilter.currentActorId(),
+                com.minke.mallmanagement.shared.web.TraceIdFilter.currentActorRole(),
+                durationNanos == null ? null : durationNanos / 1000);   // 块 7 · commit 8/8c：写全限定名而非 import，理由同 {@code MallCacheMetrics#event}（保本文件 `:75` 的引用不下移）
     }
 
     /**
@@ -164,9 +173,15 @@ public class StockMetrics {
      * @param traceId    产生本条事件的那次请求的号（块 7 · commit 8 新增）；不在请求线程上时为 null
      * @param batchId    产生本条事件的那次请求**所属的演练批次**（块 7 · commit 8c，来自
      *                   {@code X-Drill-Batch} 头）；日常流量为 {@code null}。同 {@code traceId} 现读
+     * @param actorId    发起那次请求的业务号（块 7 · 阶段 3a.3 新增）；无身份时为 null
+     *                   （{@code release} 走定时任务线程 ⇒ 这一档恒 null，见 {@link #release}）
+     * @param actorRole  发起者的角色号（块 7 · 阶段 3a.3 新增）；无身份时为 null
+     * @param durationUs 扣减 / 回补的耗时（**微秒**，块 7 · 阶段 3a.3 新增，紧包那一条 SQL）；{@code null} = 没测到
      */
     public record StockEvent(long seq, long epochMilli, String kind, String result,
-                             String skuCode, int qty, String traceId, String batchId) {
+                             String skuCode, int qty, String traceId, String batchId,
+                             String actorId, Integer actorRole, Long durationUs)
+            implements com.minke.mallmanagement.observe.metrics.Sourced {
     }
 
     /** {@code mall.stock.deduct} 的 result 取值。tag 字段避免每次调用拼字符串。 */

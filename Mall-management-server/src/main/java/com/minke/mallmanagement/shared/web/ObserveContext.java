@@ -3,8 +3,8 @@ package com.minke.mallmanagement.shared.web;
 import java.util.function.Supplier;
 
 /**
- * 一对请求级上下文的**搬运件**（块 7 · commit 8c）—— 把 {@code (traceId, batchId)} 从一个线程
- * 带到另一个线程。
+ * 一组请求级上下文的**搬运件**（块 7 · commit 8c 建立；阶段 3a.3 从两个扩到四个）——
+ * 把 {@code (traceId, batchId, actorId, actorRole)} 从一个线程带到另一个线程。
  *
  * <h2>【它解决什么：MDC 不跨线程】</h2>
  * 两个号都住在 SLF4J 的 {@link org.slf4j.MDC} 里（写入点唯一，见 {@link TraceIdFilter}），
@@ -32,19 +32,25 @@ import java.util.function.Supplier;
  * ⚠️ {@link #run} / {@link #call} 跑完会**还原成本线程原来的值**（不是粗暴清空）：同一池线程
  * 被复用、且它本来就属于另一个上下文时，清空会把别人的号抹掉。
  *
- * <h2>【本类不生成任何号】</h2>
- * 号只有两个来源：{@link TraceIdFilter#pick}（traceId，外来或自生成）与
- * {@code AttackEngine}（batchId，一轮演练一个 UUID）。本类只是把它们搬过去 ——
+ * <h2>【本类不生成任何值】</h2>
+ * 四个字段各只有一处来源：{@link TraceIdFilter#pick}（traceId，外来或自生成）・
+ * {@code AttackEngine}（batchId，一轮演练一个 UUID）・{@link AuthSession#identify}
+ * （actorId / actorRole，请求线程上解析一次）。本类只是把它们搬过去 ——
  * 所以它能被纯单测（{@code ObserveContextTest}：不碰 Spring、不碰 HTTP）。
  */
-public record ObserveContext(String traceId, String batchId) {
+public record ObserveContext(String traceId, String batchId, String actorId, Integer actorRole) {
 
     /**
-     * 在**当前线程**上取一份快照。不在请求线程上时两个字段都是 {@code null}（快照仍然合法 ——
+     * 在**当前线程**上取一份快照。不在请求线程上时四个字段都是 {@code null}（快照仍然合法 ——
      * 「没有上下文」也是一种上下文，{@link #run} 照样能用它把子线程还原成「没有」）。
+     *
+     * <p>⚠️ 后两个（{@code actorId} / {@code actorRole}）是块 7 · 阶段 3a.3 补的：不补的话，
+     * 三处派生线程上记出的事件会**有 traceId 却没有 actor**（同一件事的两个属性分家），
+     * 页面上表现为「这条事件知道是哪次请求、却不知道是谁」。四件一起搬是有意的。
      */
     public static ObserveContext capture() {
-        return new ObserveContext(TraceIdFilter.current(), TraceIdFilter.currentBatch());
+        return new ObserveContext(TraceIdFilter.current(), TraceIdFilter.currentBatch(),
+                TraceIdFilter.currentActorId(), TraceIdFilter.currentActorRole());
     }
 
     /**
@@ -77,6 +83,6 @@ public record ObserveContext(String traceId, String batchId) {
 
     /** 把给定上下文写进本线程的 MDC。⚠️ 转手即走 {@link TraceIdFilter#bind} —— 本类不碰 MDC。 */
     private static void bind(ObserveContext c) {
-        TraceIdFilter.bind(c.traceId(), c.batchId());
+        TraceIdFilter.bind(c.traceId(), c.batchId(), c.actorId(), c.actorRole());
     }
 }

@@ -23,7 +23,9 @@ import org.springframework.stereotype.Component;
 
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.atomic.AtomicLong;
 
 /**
@@ -190,10 +192,28 @@ public class EventBroadcaster {
      *                   {@code null} = 不属于任何演练批次（日常流量）。
      *                   ⚠️ 取值点与 {@code traceId} 逐字相同（源环记录那一刻现读 MDC），
      *                   原因也相同 —— 并入时读不到。它落进 {@code observed_event.BatchId}
+     * @param actorId    <b>发起那次请求的业务号</b>（块 7 · 阶段 3a.3 新增）—— 「<b>谁</b>做的」。
+     *                   {@code null} = 无身份：闸关着（{@code app.auth.enabled=false}）、
+     *                   或这条事件产生在**非请求线程**上（线程池 / 定时任务 / SSE 流线程）。
+     *                   ⚠️ 与 {@code traceId} 一样由**源环在记录那一刻**现读 MDC，不是并入时取的。
+     *                   ⚠️ 审计环是唯一一个「{@code actorId} 另有来源」的环（取审计行的
+     *                   {@code Actor} 列，见 {@code AuditMetrics.AuditEvent#actorId}）
+     * @param actorRole  发起者的**角色号**（块 7 · 阶段 3a.3 新增）；与 {@code actorId} 同生共死
+     *                   （要么都有、要么都 {@code null}）。页面把这一对拼成 {@code actor} 对象
+     * @param durationUs 本条事件主体的耗时（**微秒**，块 7 · 阶段 3a.3 新增）；{@code null} =
+     *                   没测到 / 不适用（各环口径不同，逐环写在各 {@code *Metrics#event} 的 javadoc 里）。
+     *                   ⚠️ 单位是微秒不是毫秒：L1 命中这类操作是**纳秒级**，毫秒永远显示 0
+     * @param fields     <b>结构化明细</b>（块 7 · 阶段 3a.3 新增）：把 {@code detail} 里那些
+     *                   {@code k=v} 拆成一张表，供前端拼自然语言句子（{@code sentence()}）用。
+     *                   ⚠️ 与 {@code detail} <b>同源</b>（在同一个 {@link Emit} 里一起构造）
+     *                   —— 分两处构造必然漂移，那正是本仓反复吃的亏。
+     *                   ⚠️ 可空：没构造出结构化字段时为 {@code null}（前端须按「拿 detail 兜底」处理）
      */
     public record ObservedEvent(long seq, long epochMilli, String kind, String severity,
                                 String title, String detail, String key,
-                                String objectType, String objectId, String traceId, String batchId) {
+                                String objectType, String objectId, String traceId, String batchId,
+                                String actorId, Integer actorRole, Long durationUs,
+                                Map<String, Object> fields) {
     }
 
     private final MallCacheMetrics cacheMetrics;
@@ -338,7 +358,7 @@ public class EventBroadcaster {
             if (e.seq() <= last) {
                 continue;
             }
-            add(e.epochMilli(), Kind.CACHE, fromCache(e), e.key(), e.seq(), "cache", str(e.key()), e.traceId(), e.batchId());
+            add(e, Kind.CACHE, fromCache(e), e.key(), e.seq(), "cache", str(e.key()));
             last = e.seq();
         }
         droppedIngest += missed(previous, first);
@@ -356,7 +376,7 @@ public class EventBroadcaster {
             if (e.seq() <= last) {
                 continue;
             }
-            add(e.epochMilli(), Kind.LOCK, fromLock(e), e.key(), e.seq(), "lock", str(e.key()), e.traceId(), e.batchId());
+            add(e, Kind.LOCK, fromLock(e), e.key(), e.seq(), "lock", str(e.key()));
             last = e.seq();
         }
         droppedIngest += missed(previous, first);
@@ -374,7 +394,7 @@ public class EventBroadcaster {
             if (e.seq() <= last) {
                 continue;
             }
-            add(e.epochMilli(), Kind.ORDER, fromOrder(e), e.key(), e.seq(), "order", str(e.key()), e.traceId(), e.batchId());
+            add(e, Kind.ORDER, fromOrder(e), e.key(), e.seq(), "order", str(e.key()));
             last = e.seq();
         }
         droppedIngest += missed(previous, first);
@@ -392,7 +412,7 @@ public class EventBroadcaster {
             if (e.seq() <= last) {
                 continue;
             }
-            add(e.epochMilli(), Kind.STOCK, fromStock(e), e.skuCode(), e.seq(), "sku", str(e.skuCode()), e.traceId(), e.batchId());
+            add(e, Kind.STOCK, fromStock(e), e.skuCode(), e.seq(), "sku", str(e.skuCode()));
             last = e.seq();
         }
         droppedIngest += missed(previous, first);
@@ -410,7 +430,7 @@ public class EventBroadcaster {
             if (e.seq() <= last) {
                 continue;
             }
-            add(e.epochMilli(), Kind.AUDIT, fromAudit(e), e.actor(), e.seq(), str(e.targetType()), str(e.targetId()), e.traceId(), e.batchId());
+            add(e, Kind.AUDIT, fromAudit(e), e.actor(), e.seq(), str(e.targetType()), str(e.targetId()));
             last = e.seq();
         }
         droppedIngest += missed(previous, first);
@@ -428,7 +448,7 @@ public class EventBroadcaster {
             if (e.seq() <= last) {
                 continue;
             }
-            add(e.epochMilli(), Kind.NOTIFY, fromNotify(e), e.key(), e.seq(), "notify", str(e.key()), e.traceId(), e.batchId());
+            add(e, Kind.NOTIFY, fromNotify(e), e.key(), e.seq(), "notify", str(e.key()));
             last = e.seq();
         }
         droppedIngest += missed(previous, first);
@@ -446,7 +466,7 @@ public class EventBroadcaster {
             if (e.seq() <= last) {
                 continue;
             }
-            add(e.epochMilli(), Kind.SENSITIVE, fromSensitive(e), e.scene(), e.seq(), "sensitive", str(e.words()), e.traceId(), e.batchId());
+            add(e, Kind.SENSITIVE, fromSensitive(e), e.scene(), e.seq(), "sensitive", str(e.words()));
             last = e.seq();
         }
         droppedIngest += missed(previous, first);
@@ -464,7 +484,7 @@ public class EventBroadcaster {
             if (e.seq() <= last) {
                 continue;
             }
-            add(e.epochMilli(), Kind.IDENTITY, fromIdentity(e), e.subject(), e.seq(), "identity", str(e.path()), e.traceId(), e.batchId());
+            add(e, Kind.IDENTITY, fromIdentity(e), e.subject(), e.seq(), "identity", str(e.path()));
             last = e.seq();
         }
         droppedIngest += missed(previous, first);
@@ -486,18 +506,39 @@ public class EventBroadcaster {
             //    不是「被拦的那个业务键」—— 防护事件没有业务键。页面「涉及对象」那一列因此显示
             //    「防护开关名」，这是刻意的：它回答「哪道闸动了」，而不是「谁被拦了」
             //    （后者要看同拍里业务侧的 429/503 记录）。
-            add(e.epochMilli(), Kind.PROTECTION, fromProtection(e), e.key(), e.seq(),
-                    "protection", str(e.key()), e.traceId(), e.batchId());
+            add(e, Kind.PROTECTION, fromProtection(e), e.key(), e.seq(),
+                    "protection", str(e.key()));
             last = e.seq();
         }
         droppedIngest += missed(previous, first);
         sourceSeq[Kind.PROTECTION.ordinal()] = last;
     }
 
-    // ==================== 翻译：源事件 → (severity, title, detail) ====================
+    // ==================== 翻译：源事件 → Emit(severity, title, detail, fields) ====================
+
+    /**
+     * 一条**翻译好**的事件：给页面看的那三个字符串 + 给结构化消费方的字段表
+     * （块 7 · 阶段 3a.3 新增）。
+     *
+     * <h2>【为什么把 {@code fields} 和 {@code detail} 放在同一个对象里】</h2>
+     * 它们说的是**同一批事实**的两种呈现：{@code detail} 是给人一眼扫的 {@code k=v} 串，
+     * {@code fields} 是给前端拼自然语言句子的表。若分两个方法各构造一遍，改了一个忘了另一个
+     * 就会漂移 —— 而「同一事实两处实现、迟早在某一条分支上不一致」正是本仓反复吃的亏
+     * （见 {@code MallCacheMetrics} 类注释立的第 6 条规范）。故它们**只能**在同一个
+     * {@code Emit} 构造里一起产生。
+     *
+     * @param severity 三档之一（{@link Severity#tag}）
+     * @param title    卡片第一行（中文短标题）
+     * @param detail   卡片第二行；最终会被 {@link #add} 追加 {@code src=环名#源seq}
+     * @param fields   结构化明细；{@code null} = 这一环没构造（前端须回落到 {@code detail}）。
+     *                 ⚠️ 允许值本身为 {@code null}（与 {@code key} 同口径：缺就记 null，
+     *                 不写 {@code "-"} 也不写 {@code "null"} 字面量）
+     */
+    private record Emit(String severity, String title, String detail, Map<String, Object> fields) {
+    }
 
     /** 缓存环：kind ∈ {l1, l2, load, singleflight, evict, probe, transition}（取值表在 {@code MallCacheMetrics} 类注释）。 */
-    private static String[] fromCache(MallCacheEvent e) {
+    private static Emit fromCache(MallCacheEvent e) {
         String result = String.valueOf(e.result());
         switch (String.valueOf(e.kind())) {
             case "l1":
@@ -509,9 +550,9 @@ public class EventBroadcaster {
                     case "miss":
                         return hit("L2 未命中", result, e.cache(), e.key());
                     case "degraded":
-                        return new String[]{Severity.WARN.tag, "L2 降级跳过", cacheDetail(e, result)};
+                        return cacheEmit(e, Severity.WARN.tag, "L2 降级跳过", result);
                     default:
-                        return new String[]{severityOf(result), "L2 读取失败", cacheDetail(e, result)};
+                        return cacheEmit(e, severityOf(result), "L2 读取失败", result);
                 }
             case "load":
                 return hit("回源查库", result, e.cache(), e.key());
@@ -522,74 +563,93 @@ public class EventBroadcaster {
                     case "evicted":
                         return hit("缓存失效", result, e.cache(), e.key());
                     case "skipped_degraded":
-                        return new String[]{Severity.WARN.tag, "缓存失效被跳过（降级窗口）", cacheDetail(e, result)};
+                        return cacheEmit(e, Severity.WARN.tag, "缓存失效被跳过（降级窗口）", result);
                     default:
-                        return new String[]{severityOf(result), "缓存失效失败", cacheDetail(e, result)};
+                        return cacheEmit(e, severityOf(result), "缓存失效失败", result);
                 }
             case "probe":
                 return "ok".equals(result)
-                        ? new String[]{Severity.INFO.tag, "L2 探活成功", cacheDetail(e, result)}
-                        : new String[]{Severity.WARN.tag, "L2 探活失败", cacheDetail(e, result)};
+                        ? cacheEmit(e, Severity.INFO.tag, "L2 探活成功", result)
+                        : cacheEmit(e, Severity.WARN.tag, "L2 探活失败", result);
             default:
                 // kind=transition：healthy / degraded（L2 可用性**真实翻转**时才有）
                 return "healthy".equals(result)
-                        ? new String[]{Severity.INFO.tag, "L2 可用性恢复", cacheDetail(e, result)}
-                        : new String[]{Severity.WARN.tag, "L2 进入降级窗口", cacheDetail(e, result)};
+                        ? cacheEmit(e, Severity.INFO.tag, "L2 可用性恢复", result)
+                        : cacheEmit(e, Severity.WARN.tag, "L2 进入降级窗口", result);
         }
     }
 
     /** 锁环：kind ∈ {acquire, hold, transition}（取值表在 {@code MallLockMetrics} 类注释）。 */
-    private static String[] fromLock(MallLockEvent e) {
+    private static Emit fromLock(MallLockEvent e) {
         String result = String.valueOf(e.result());
         switch (String.valueOf(e.kind())) {
             case "acquire":
                 switch (result) {
                     case "acquired":
-                        return new String[]{Severity.INFO.tag, "取锁成功", lockDetail(e, result)};
+                        return lockEmit(e, Severity.INFO.tag, "取锁成功", result);
                     case "timeout":
                         // fail-open 直行：不是错误，是「互斥没生效」的降级 —— 页面必须看得见。
-                        return new String[]{Severity.WARN.tag, "取锁超时（fail-open 直行）", lockDetail(e, result)};
+                        return lockEmit(e, Severity.WARN.tag, "取锁超时（fail-open 直行）", result);
                     case "degraded":
-                        return new String[]{Severity.WARN.tag, "取锁被跳过（降级窗口）", lockDetail(e, result)};
+                        return lockEmit(e, Severity.WARN.tag, "取锁被跳过（降级窗口）", result);
                     default:
-                        return new String[]{severityOf(result), "取锁异常", lockDetail(e, result)};
+                        return lockEmit(e, severityOf(result), "取锁异常", result);
                 }
             case "hold":
                 switch (result) {
                     case "released":
-                        return new String[]{Severity.INFO.tag, "释放锁", lockDetail(e, result)};
+                        return lockEmit(e, Severity.INFO.tag, "释放锁", result);
                     case "lease_lost":
-                        return new String[]{Severity.WARN.tag, "租约丢失（临界区可能重叠）", lockDetail(e, result)};
+                        return lockEmit(e, Severity.WARN.tag, "租约丢失（临界区可能重叠）", result);
                     default:
-                        return new String[]{severityOf(result), "释放锁异常", lockDetail(e, result)};
+                        return lockEmit(e, severityOf(result), "释放锁异常", result);
                 }
             default:
                 return "healthy".equals(result)
-                        ? new String[]{Severity.INFO.tag, "锁可用性恢复", lockDetail(e, result)}
-                        : new String[]{Severity.WARN.tag, "锁进入降级窗口", lockDetail(e, result)};
+                        ? lockEmit(e, Severity.INFO.tag, "锁可用性恢复", result)
+                        : lockEmit(e, Severity.WARN.tag, "锁进入降级窗口", result);
         }
     }
 
     /** 订单状态环：kind ∈ {transition, illegal, async}（取值表在 {@code MallOrderStateMetrics} 类注释）。 */
-    private static String[] fromOrder(OrderStateEvent e) {
+    private static Emit fromOrder(OrderStateEvent e) {
         String result = String.valueOf(e.result());
         switch (String.valueOf(e.kind())) {
-            case "transition":
+            case "transition": {
                 String title = "状态流转 " + e.from() + " → " + e.to();
-                return new String[]{severityOf(result), title,
+                Map<String, Object> fields = new LinkedHashMap<>();
+                fields.put("action", e.action());
+                fields.put("result", result);
+                fields.put("from", e.from());
+                fields.put("to", e.to());
+                fields.put("order", e.key());
+                return new Emit(severityOf(result), title,
                         "action=" + e.action() + " result=" + result + " order#"
-                                + (e.key() == null ? "-" : e.key())};
-            case "illegal":
+                                + (e.key() == null ? "-" : e.key()), fields);
+            }
+            case "illegal": {
                 // 两种来源：真观测到非法态（result=null）与出生闸拦下（result=rejected）
-                return "rejected".equals(result)
-                        ? new String[]{Severity.WARN.tag, "出生闸拦下非法态",
-                                "三位=" + e.shape() + " order#" + (e.key() == null ? "-" : e.key())}
-                        : new String[]{Severity.WARN.tag, "观测到非法状态",
-                                "三位=" + e.shape() + " order#" + (e.key() == null ? "-" : e.key())};
-            default:
+                boolean atBirth = "rejected".equals(result);
+                Map<String, Object> fields = new LinkedHashMap<>();
+                fields.put("shape", e.shape());
+                fields.put("order", e.key());
+                // ⚠️ 出生闸那一支多带一个「这是入口拦下的」标记：真观测到非法态时
+                //    {@code e.result()} 是 null，而 {@code String.valueOf(null)} 会得到字面量
+                //    "null" —— 那个字符串绝不能进 fields（页面上会显示成一个叫 null 的结果）。
+                //    故这里放的是**判出来的布尔**，不是 result 原样
+                fields.put("atBirth", atBirth);
+                return new Emit(Severity.WARN.tag, atBirth ? "出生闸拦下非法态" : "观测到非法状态",
+                        "三位=" + e.shape() + " order#" + (e.key() == null ? "-" : e.key()), fields);
+            }
+            default: {
                 String reason = e.shape() == null ? "" : " reason=" + e.shape();
-                return new String[]{severityOf(result), "异步流转" + asyncSuffix(result),
-                        "result=" + result + reason + " order#" + (e.key() == null ? "-" : e.key())};
+                Map<String, Object> fields = new LinkedHashMap<>();
+                fields.put("result", result);
+                fields.put("reason", e.shape());
+                fields.put("order", e.key());
+                return new Emit(severityOf(result), "异步流转" + asyncSuffix(result),
+                        "result=" + result + reason + " order#" + (e.key() == null ? "-" : e.key()), fields);
+            }
         }
     }
 
@@ -605,7 +665,7 @@ public class EventBroadcaster {
     }
 
     /** 库存环：kind ∈ {deduct, release}（取值表在 {@code StockMetrics} 类注释）。 */
-    private static String[] fromStock(StockEvent e) {
+    private static Emit fromStock(StockEvent e) {
         String result = String.valueOf(e.result());
         boolean deduct = "deduct".equals(e.kind());
         String title;
@@ -623,38 +683,58 @@ public class EventBroadcaster {
                 title = deduct ? "库存扣减失败" : "库存释放失败";
                 break;
         }
-        return new String[]{severityOf(result), title,
-                "kind=" + e.kind() + " sku=" + e.skuCode() + " qty=" + e.qty() + " result=" + result};
+        Map<String, Object> fields = new LinkedHashMap<>();
+        fields.put("kind", e.kind());
+        fields.put("sku", e.skuCode());
+        fields.put("qty", e.qty());
+        fields.put("result", result);
+        return new Emit(severityOf(result), title,
+                "kind=" + e.kind() + " sku=" + e.skuCode() + " qty=" + e.qty() + " result=" + result, fields);
     }
 
-    private static String[] fromAudit(AuditEvent e) {
+    private static Emit fromAudit(AuditEvent e) {
         boolean ok = "written".equals(String.valueOf(e.result()));
         String detail = "actor=" + e.actor() + " action=" + e.action()
                 + (e.reason() == null ? "" : " reason=" + e.reason());
-        return new String[]{ok ? Severity.INFO.tag : Severity.WARN.tag,
-                ok ? "审计写入" : "审计写入失败", detail};
+        Map<String, Object> fields = new LinkedHashMap<>();
+        fields.put("actor", e.actor());
+        fields.put("action", e.action());
+        fields.put("reason", e.reason());
+        return new Emit(ok ? Severity.INFO.tag : Severity.WARN.tag,
+                ok ? "审计写入" : "审计写入失败", detail, fields);
     }
 
-    private static String[] fromNotify(NotifyEvent e) {
+    private static Emit fromNotify(NotifyEvent e) {
         boolean ok = "sent".equals(String.valueOf(e.result()));
         String detail = "to=" + e.toType() + " event=" + e.eventType()
                 + (e.reason() == null ? "" : " reason=" + e.reason());
-        return new String[]{ok ? Severity.INFO.tag : Severity.WARN.tag,
-                ok ? "通知发送" : "通知发送失败", detail};
+        Map<String, Object> fields = new LinkedHashMap<>();
+        fields.put("to", e.toType());
+        fields.put("event", e.eventType());
+        fields.put("reason", e.reason());
+        return new Emit(ok ? Severity.INFO.tag : Severity.WARN.tag,
+                ok ? "通知发送" : "通知发送失败", detail, fields);
     }
 
-    private static String[] fromSensitive(SensitiveEvent e) {
+    private static Emit fromSensitive(SensitiveEvent e) {
         boolean masked = "masked".equals(String.valueOf(e.result()));
         String detail = "scene=" + e.scene() + " hit=" + e.hit() + "/" + e.total();
-        return new String[]{masked ? Severity.INFO.tag : Severity.WARN.tag,
-                masked ? "敏感词打码" : "敏感词拒收", detail};
+        Map<String, Object> fields = new LinkedHashMap<>();
+        fields.put("scene", e.scene());
+        fields.put("hit", e.hit());
+        fields.put("total", e.total());
+        return new Emit(masked ? Severity.INFO.tag : Severity.WARN.tag,
+                masked ? "敏感词打码" : "敏感词拒收", detail, fields);
     }
 
-    private static String[] fromIdentity(IdentityEvent e) {
+    private static Emit fromIdentity(IdentityEvent e) {
         boolean passed = "passed".equals(String.valueOf(e.result()));
         String detail = "subject=" + e.subject() + (e.reason() == null ? "" : " reason=" + e.reason());
-        return new String[]{passed ? Severity.INFO.tag : Severity.WARN.tag,
-                passed ? "身份放行" : "身份拒绝", detail};
+        Map<String, Object> fields = new LinkedHashMap<>();
+        fields.put("subject", e.subject());
+        fields.put("reason", e.reason());
+        return new Emit(passed ? Severity.INFO.tag : Severity.WARN.tag,
+                passed ? "身份放行" : "身份拒绝", detail, fields);
     }
 
     /**
@@ -665,7 +745,7 @@ public class EventBroadcaster {
      * 入站限流与熔断开路，而这两者的排障方向相反（前者查流量、后者查下游），挤成同一个标题
      * 会让人读错方向。severity 仍走 {@link #severityOf} 那唯一一处规则（四档都是 warn）。
      */
-    private static String[] fromProtection(ProtectionEvent e) {
+    private static Emit fromProtection(ProtectionEvent e) {
         String result = String.valueOf(e.result());
         String key = e.key() == null ? "-" : e.key();
         String detail = "protection=" + key + " scope=" + (e.scope() == null ? "-" : e.scope())
@@ -707,14 +787,19 @@ public class EventBroadcaster {
                 title = "防护处置：" + result;
                 break;
         }
-        return new String[]{severityOf(result), title, detail};
+        Map<String, Object> fields = new LinkedHashMap<>();
+        fields.put("protection", e.key());
+        fields.put("scope", e.scope());
+        fields.put("extra", e.detail());
+        return new Emit(severityOf(result), title, detail, fields);
     }
 
     // ==================== 小工具 ====================
 
     /** 命中类事件（缓存命中 / 回源 / 单飞）：一律 info。 */
-    private static String[] hit(String title, String result, String cache, String key) {
-        return new String[]{Severity.INFO.tag, title, cacheAspect(result, cache, key)};
+    private static Emit hit(String title, String result, String cache, String key) {
+        return new Emit(Severity.INFO.tag, title, cacheAspect(result, cache, key),
+                cacheFields(result, cache, key));
     }
 
     /** 严重度规则（**唯一出处**，见类注释第 2 件）。 */
@@ -744,8 +829,10 @@ public class EventBroadcaster {
         }
     }
 
-    private static String cacheDetail(MallCacheEvent e, String result) {
-        return cacheAspect(result, e.cache(), e.key());
+    /** 非命中口径的缓存事件（降级 / 失败 / 探活）：severity 与标题由调用方给定。 */
+    private static Emit cacheEmit(MallCacheEvent e, String severity, String title, String result) {
+        return new Emit(severity, title, cacheAspect(result, e.cache(), e.key()),
+                cacheFields(result, e.cache(), e.key()));
     }
 
     private static String cacheAspect(String result, String cache, String key) {
@@ -753,28 +840,54 @@ public class EventBroadcaster {
                 + " key=" + (key == null ? "-" : key);
     }
 
-    private static String lockDetail(MallLockEvent e, String result) {
-        return "lock=" + (e.lock() == null ? "-" : e.lock()) + " result=" + result
-                + " key=" + (e.key() == null ? "-" : e.key());
+    /** {@link #cacheAspect} 的**同一批事实**的结构化形态 —— 两者必须在同一个 {@link Emit} 里一起产生。 */
+    private static Map<String, Object> cacheFields(String result, String cache, String key) {
+        Map<String, Object> fields = new LinkedHashMap<>();
+        fields.put("cache", cache);
+        fields.put("result", result);
+        fields.put("key", key);
+        return fields;
+    }
+
+    private static Emit lockEmit(MallLockEvent e, String severity, String title, String result) {
+        return new Emit(severity, title,
+                "lock=" + (e.lock() == null ? "-" : e.lock()) + " result=" + result
+                        + " key=" + (e.key() == null ? "-" : e.key()),
+                lockFields(e, result));
+    }
+
+    private static Map<String, Object> lockFields(MallLockEvent e, String result) {
+        Map<String, Object> fields = new LinkedHashMap<>();
+        fields.put("lock", e.lock());
+        fields.put("result", result);
+        fields.put("key", e.key());
+        return fields;
     }
 
     /** 并入一条：分配合并环 seq 并覆盖式写入（写者只做两件事，读者靠 seq 自校验）。
      *
+     * @param src     源事件本身（块 7 · 阶段 3a.3 起改收接口）—— 它带来 {@code epochMilli} /
+     *                {@code traceId} / {@code batchId} / {@code actorId} / {@code actorRole} /
+     *                {@code durationUs} 六样，**都必须是源环在记录那一刻取好的**
+     *                （并入跑在 SSE 流线程上，那里 MDC 是空的，现读会全变 null）。
+     *                ⚠️ 走 {@code Sourced} 接口而不是逐个传形参：九个环的「谁/何时/多久」
+     *                口径以后要一起变，只改这里一处即可（形状见 {@code observe.metrics.Sourced}）
      * @param srcSeq 源环的 seq —— 只进 {@code detail} 尾部（形如 {@code src=stock#128}），
-     *               供排查时定位回原环；⚠️ **不是** {@link ObservedEvent#seq()}（那个是本环的）
+     *               供排查时定位回原环；⚠️ **不是** {@link ObservedEvent#seq()}（那个是本环的）。
+     *               它不进 {@code fields}（那一列给前端拼句子用，源环序号是排查用的）
      * @param objectType 被操作对象的**类型**（块 7 · commit 8 新增）—— 九个 {@code ingestXxx}
      *                   在调用点逐环给定；取值口径见 {@link ObservedEvent#objectType()}
      * @param objectId   被操作对象的**标识**（同上）；取值口径见 {@link ObservedEvent#objectId()}
-     * @param traceId    产生本条事件的那次请求的号（同上）；不在请求线程上时为 {@code null}
-     * @param batchId    产生本条事件的请求所属的演练批次（块 7 · commit 8c，同上）；
-     *                   不属于任何批次时为 {@code null}
      */
-    private void add(long epochMilli, Kind kind, String[] triple, String key, long srcSeq,
-                     String objectType, String objectId, String traceId, String batchId) {
+    private void add(com.minke.mallmanagement.observe.metrics.Sourced src, Kind kind, Emit emit,
+                     String key, long srcSeq, String objectType, String objectId) {
         long seq = cursor.getAndIncrement();
         ObservedEvent event = new ObservedEvent(
-                seq, epochMilli, kind.tag, triple[0], triple[1], triple[2] + " src=" + kind.tag + "#" + srcSeq,
-                key == null ? null : String.valueOf(key), objectType, objectId, traceId, batchId);
+                seq, src.epochMilli(), kind.tag, emit.severity(), emit.title(),
+                emit.detail() + " src=" + kind.tag + "#" + srcSeq,
+                key == null ? null : String.valueOf(key), objectType, objectId,
+                src.traceId(), src.batchId(), src.actorId(), src.actorRole(), src.durationUs(),
+                emit.fields());
         events[(int) (seq & EVENT_MASK)] = event;
         // 块 7 · commit 8c：并入合并环 = 「这条事件已经成形」的那一刻，发布台账就走这里。
         // ⚠️ 发布方**不抛**（fail-soft，见 EventPublisher）—— 台账落不了库不该让日志页断流。

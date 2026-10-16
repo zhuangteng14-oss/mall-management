@@ -231,6 +231,11 @@ public class SensitiveWordService {
      * @param text 待检正文（{@code null} / 空白 ⇒ 直接回「无命中」）
      */
     public Map<String, Object> filter(String text) {
+        // 块 7 · 阶段 3a.3：耗时起 = **方法入口**，止 = 下面 disposed 那行。⚠️ 口径**含读词库**：
+        // sortedWords() 每次都会打一次 DB（selectAllWords），它通常才是这段耗时的主项。
+        // 方案的 §2 把这条留成「待读全文再定」——读完全文，定成「含」（那才是调用方实际付的代价）。
+        // 三个早退分支（空白 / 空词库 / 零命中）不发事件 ⇒ 它们不计耗时，也不会在页面上出现。
+        long startedNanos = System.nanoTime();
         Map<String, Object> result = new HashMap<>();
         result.put("rejected", false);
         result.put("masked", text);
@@ -279,9 +284,9 @@ public class SensitiveWordService {
         // `hit / total` 就等于被拿去比阈值的那个命中率；场景现值只有一个（唯一调用点 =
         // `CommentService.add` 发表前）。
         if (Boolean.TRUE.equals(result.get("rejected"))) {
-            sensitiveMetrics.rejected("评论", hit, text.length(), joinWords(hitWords));
+            sensitiveMetrics.rejected("评论", hit, text.length(), joinWords(hitWords), System.nanoTime() - startedNanos);
         } else {
-            sensitiveMetrics.masked("评论", hit, text.length(), joinWords(hitWords));
+            sensitiveMetrics.masked("评论", hit, text.length(), joinWords(hitWords), System.nanoTime() - startedNanos);
         }
         return result;
     }

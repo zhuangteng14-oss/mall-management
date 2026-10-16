@@ -26,8 +26,8 @@ class IdentityMetricsTest {
     @Test
     @DisplayName("passed / rejected **两路都记**（要有分母才看得出拒绝率），rejected 带原因")
     void bothOutcomesAreRecorded() {
-        metrics.passed(SUBJECT, "/goods/goodsUp");
-        metrics.rejected(SUBJECT, "封禁用户", "/goods/goodsUp");
+        metrics.passed(SUBJECT, "/goods/goodsUp", 1_500L);
+        metrics.rejected(SUBJECT, "封禁用户", "/goods/goodsUp", 2_000_000L);
 
         assertThat(count("passed")).isEqualTo(1.0);
         assertThat(count("rejected")).isEqualTo(1.0);
@@ -41,13 +41,18 @@ class IdentityMetricsTest {
         assertThat(events).extracting(IdentityEvent::path)
                 .containsExactly("/goods/goodsUp", "/goods/goodsUp");
         assertThat(events.get(0).traceId()).as("不在请求线程上 ⇒ traceId 为 null").isNull();
+        // 块 7 · 阶段 3a.3 新增：校验耗时（纳秒入参 → 微秒落进事件）与发起者身份
+        assertThat(events).extracting(IdentityEvent::durationUs)
+                .as("纳秒→微秒：1500ns→1µs、2000000ns→2000µs").containsExactly(1L, 2_000L);
+        assertThat(events.get(0).actorId()).as("无 MDC ⇒ actorId 为 null").isNull();
+        assertThat(events.get(0).actorRole()).as("无 MDC ⇒ actorRole 为 null").isNull();
     }
 
     @Test
     @DisplayName("不埋「拒绝率」：它是 rejected / (passed + rejected) 的派生量（规范第 6 条）")
     void rejectionRateIsNotItsOwnCounter() {
-        metrics.passed(SUBJECT, "/order/orderReceive");
-        metrics.rejected(SUBJECT, "令牌无效", "/order/orderReceive");
+        metrics.passed(SUBJECT, "/order/orderReceive", 1_500L);
+        metrics.rejected(SUBJECT, "令牌无效", "/order/orderReceive", 1_500L);
 
         assertThat(registry.find(IdentityMetrics.CHECKS).counters())
                 .as("本指标下只有两路计数，没有第三个「率」").hasSize(2);
@@ -57,8 +62,8 @@ class IdentityMetricsTest {
     @Test
     @DisplayName("基数铁律：业务号与原因文本都不进 tag —— 两个不同主体共用一个时间序列")
     void subjectAndReasonNeverBecomeTags() {
-        metrics.rejected("U0001", "封禁用户", "/goods/goodsUp");
-        metrics.rejected("U0002", "令牌无效", "/order/orderReceive");
+        metrics.rejected("U0001", "封禁用户", "/goods/goodsUp", 1_500L);
+        metrics.rejected("U0002", "令牌无效", "/order/orderReceive", 1_500L);
 
         assertThat(count("rejected")).as("两个不同的主体 + 两条不同的原因落在同一条计数上").isEqualTo(2.0);
         assertThat(registry.find(IdentityMetrics.CHECKS).counters())
@@ -73,7 +78,7 @@ class IdentityMetricsTest {
         int capacity = 2048;
         int extra = 8;
         for (int i = 0; i < capacity + extra; i++) {
-            metrics.passed(SUBJECT, "/goods/goodsUp");
+            metrics.passed(SUBJECT, "/goods/goodsUp", 1_500L);
         }
 
         List<IdentityEvent> events = metrics.recentEvents();

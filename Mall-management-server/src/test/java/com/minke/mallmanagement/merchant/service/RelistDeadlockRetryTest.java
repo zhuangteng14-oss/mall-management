@@ -94,12 +94,12 @@ class RelistDeadlockRetryTest {
         service = new MerchantDowngradeService(userGovernanceDao, goodsShelfDao, userCacheService,
                 gate, metrics, txManager);
         // 事件里的 traceId 取自 MDC（本类唯一的写入点是 TraceIdFilter）—— 用例 2 靠它。
-        TraceIdFilter.bind(TRACE, null);
+        TraceIdFilter.bind(TRACE, null, null, null);
     }
 
     @AfterEach
     void tearDown() {
-        TraceIdFilter.bind(null, null);
+        TraceIdFilter.bind(null, null, null, null);
         registry.close();
     }
 

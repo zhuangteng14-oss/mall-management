@@ -61,7 +61,7 @@ import static org.junit.jupiter.api.Assertions.assertAll;
  * 的<b>代理</b>，但不能拉起应用自己的 {@code CacheConfig}（它要 Redis，而 Backend CI job 没有）。
  * 折中是 {@code @EnableCaching} + {@code ConcurrentMapCacheManager} —— 代理路径与生产同源，
  * 只有 L1/L2 两层存储换成内存实现。二者在本类关心的那条上行为一致：
- * <b>载荷抛异常时不写入条目</b>（{@code TwoLevelCache:145-148} 的 {@code ValueRetrievalException}
+ * <b>载荷抛异常时不写入条目</b>（{@code TwoLevelCache:150-152} 的 {@code ValueRetrievalException}
  * 与 {@code ConcurrentMapCache.get(k, Callable)} 的 {@code computeIfAbsent} 是同一个约定）。
  */
 @ExtendWith(SpringExtension.class)

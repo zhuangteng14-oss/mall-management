@@ -2670,9 +2670,9 @@ find Mall-management-web/mall-management-system/src -name "CustomerPage.vue"
   1. `user` 表两行的业务号**互斥**（商家行 `customerid` 为 NULL、客户行 `merchantid` 为 NULL）；
   2. `LoginPage.vue` 旧代码**只写不清**（`/user/me` 答不出对面的号就整段 `if` 跳过）⇒ 换账户后**上一家的业务号留在 sessionStorage 里**；
   3. 而**买家 id 链** `resolveBuyerId()` **优先取 `customerid`**（`api/auth.js:123-125`）⇒ 商家账号查历史订单时，**入参带的是上一位客户的 id**，票却是商家的；
-  4. 服务端 `IdentityGuard.requireSelfOrAdmin`（`IdentityGuard.java:71-80`）判「票里的 userId ≠ 入参 id 且非管理员」⇒ **403**。
+  4. 服务端 `IdentityGuard.requireSelfOrAdmin`（`IdentityGuard.java:104-115`）判「票里的 userId ≠ 入参 id 且非管理员」⇒ **403**。
 - ✅ **复现（`美化/dtop4/acct.log`，改前）**：走用户报的那串 —— 商家 → 客户 → 商家后，③ 的 sessionStorage 里 **`customerid: C5001` 残留**；④ 历史购买记录页 ⇒ **弹窗「请求出错（HTTP 403）」**、`rows: 0`、空态「暂无历史订单」；服务端收到 `{"paramId":"C5001","tokenUser":"M9001","role":"2","status":403}`。
-  ⚠️ **401 / 403 的取证口径**：那支探针的 mock **按后端真规则答**（照 `IdentityGuard.java:71-80` 逐档实现），**前端侧的存储序列是真浏览器真值**（sessionStorage 原生读写）—— 是「按真规则复现」，不是打在真 8088 上的抓包。
+  ⚠️ **401 / 403 的取证口径**：那支探针的 mock **按后端真规则答**（照 `IdentityGuard.java:104-115` 逐档实现），**前端侧的存储序列是真浏览器真值**（sessionStorage 原生读写）—— 是「按真规则复现」，不是打在真 8088 上的抓包。
 - **修**（两处，都在出口而不是在消费方 —— 消费方有 `HistoricalOrders` / `OrderCenter` 等多条）：
   - `api/auth.js` 新增 `clearCustomerId()`（`:172-182`，与 `clearMerchantId` **逐字同形**：`removeItem` + `dropRestored()`）—— 它正是 `clear()` 的旧注释里欠的那「另一笔」（该注释已同行改写为「那个出口已补出来 = 下方 `clearCustomerId`；**本处仍不改**」，行为一字未动）。
   - `LoginPage.vue` 登录成功分支：`if (userData.merchantid) { setMerchantId(...); clearCustomerId(); }` / `if (userData.customerid) { setCustomerId(...); clearMerchantId(); }` —— **各清对面那一个号**（两行同行改写）。
@@ -2779,7 +2779,7 @@ find Mall-management-web/mall-management-system/src -name "CustomerPage.vue"
 - **after = `scripts/refs-after-s10.txt`**（**码改完、本节写入前**）：**3180 行 / 1809 个 token 类型** ⇒ 净 **+3 / +3**。
 - **token 类型丢失 0** ✅（`comm -23` 空，实测）—— 同 8-9 / 9-9 的判据：比 **token 集合**，不比原始产物。
 - **行级 12 行差 / 只有 1 类**：`api/auth.js:174 → :186`（**同一 token、宿主自身位移**）—— `clearCustomerId` 的 12 行插在该注释**上方** ⇒ 该注释在自己的文件里下移 12 行。**已核**：全仓**没有**任何地方引 `api/auth.js:174`（`grep` 零命中）⇒ 无人被带偏。
-- **新增 5 个 token 类型**（5 − 1 = 净 +4）：`IdentityGuard.java:71-80`（`probe-acct.mjs:2` 引，逐行核过 = `requireSelfOrAdmin` 整个方法体）、`api/auth.js:123-125`（`LoginPage.vue:311` 引，核过 = `resolveBuyerId()`）、`slot-registry.md:2332`（`router/index.js:378` 引，核过 = §八-1 A1 的正文行）；另 1 个是**重指**产的 `:186-189`（替掉 `:174-177`，见上）。
+- **新增 5 个 token 类型**（5 − 1 = 净 +4）：`IdentityGuard.java:104-115`（`probe-acct.mjs:2` 引，逐行核过 = `requireSelfOrAdmin` 整个方法体）、`api/auth.js:123-125`（`LoginPage.vue:311` 引，核过 = `resolveBuyerId()`）、`slot-registry.md:2332`（`router/index.js:378` 引，核过 = §八-1 A1 的正文行）；另 1 个是**重指**产的 `:186-189`（替掉 `:174-177`，见上）。
 - ⚠️ **重指一条（§9-2 里的裸续引）**：`:174-177` → **`:186-189`**（同一段「与「点退出」的现行清法故意不同…这是**有意**的」注释，随 `clearCustomerId` 下移 12 行）⇒ 已在原地注明「由 `:174-177` 重指为 `:186-189`」（同行改写、净零）。
 - **位移安全表**（口径：`git diff -U0` 逐 hunk 累加（`newCount − oldCount`）到「全仓最大被引行」为止；**累计位移 = 0 即该行以上未动**）：
 
@@ -4032,10 +4032,10 @@ C 档＝完全自裁）；**按用户要求做，不按稿做**（与 `c3-module
 
 #### Bug 1　`/admin/inbox` → 「加载系统通知失败（HTTP 403）」—— **真因：管理端带着「别人的票」**
 
-- **403 只可能出自一处**：`IdentityGuard.forbidden()`（`IdentityGuard.java:136`；判据本体 `:73-82`）。
+- **403 只可能出自一处**：`IdentityGuard.forbidden()`（`IdentityGuard.java:173`；判据本体 `:104-115`）。
   它的三个前置全被反推出来：`identity != null`、`role != 3`、`userId != '*'`。⇒ **用户的两个猜测都不成立**：
   ① 「`authorize` 对 cookie 管理员折 null ⇒ Guard 解不出身份」—— **解不出身份走 fail-open，返回 `true`，永不会 403**
-  （**代码在 `IdentityGuard.java:75-76`**，`null ⇒ return true`；这条契约写在类注释 `:54-56`
+  （**代码在 `IdentityGuard.java:108-109`**，`null ⇒ return true`；这条契约写在类注释 `:54-56`
   「谁把这一行改成『null ⇒ 403』…那不是修 bug，是换了一套契约」，smoke/A3 依赖它）；② 就算折 null，折的是**拦截器那一层**，
   产物是 **401**（`AuthInterceptor.writeNotLoggedIn`），不是 403，而且那条路**根本没走到**。
 - **真因链（每一环都实测/亲读）**：`main.js` 认领 `localStorage` 的「最近登录」指针
@@ -5122,7 +5122,7 @@ COALESCE(merchantid,customerid) WHERE EventType IN (那 5 个)` → 复读对照
 - 证据 ×3：`docs/agent/evidence/c3-block7/b7w-{replay-live,status-live,demo-probe}.txt`。
 
 **修改**
-- 后端：`AttackController.java`（**+ 第六条 `@PostMapping("/status")`** @ `:210`）· `DrillRecordDao.java`（`COLUMNS` 尾加 `BatchId`；键序 `[…, DurationMs, CreatedAt, BatchId, Result]`）· `DrillRecordService.java`（`Progress` 快照）· `AttackEngine.java`（进度读数）· `ObservedEventDao.java`（回放那条 `WHERE BatchId = ? ORDER BY OccurredAt ASC, Id ASC LIMIT ?` @ `:142`）。
+- 后端：`AttackController.java`（**+ 第六条 `@PostMapping("/status")`** @ `:210`）· `DrillRecordDao.java`（`COLUMNS` 尾加 `BatchId`；键序 `[…, DurationMs, CreatedAt, BatchId, Result]`）· `DrillRecordService.java`（`Progress` 快照）· `AttackEngine.java`（进度读数）· `ObservedEventDao.java`（回放那条 `WHERE BatchId = ? ORDER BY OccurredAt ASC, Id ASC LIMIT ?` @ `:158`）。
 - 测试：`AttackEngineTest` · `DrillRecordServiceTest` · `smoke/AbstractSmokeTest`（**+25 行**，⚠️ **TD-66 族**：指向它的行号会漂）。
 - 前端：三页接开关（`AttackConsole.vue` / `EventLog.vue` / `MetricsPanel.vue` / `OrderFlow.vue`）· `api/endpoints.js`（`observe.attackStatus` @ `:437` · `observe.replay` @ `:449`，总数 **142 → 143**）· `api/observe.js`（`attackStatus()` @ `:395` · `replay(batchId, limit)` @ `:420`）。
 - 文档：`api-contract.md` 附录 H（**H.1 五→六出口 + 全表重指** · **新增 H.8 回放** · H.0 两个计数 · H 引言）· `tech-debt.md`（**TD-72 / TD-73**）· `progress.md`（`#### 7-B7-收尾`）· 本文件 **§二十五**。

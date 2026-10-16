@@ -78,10 +78,12 @@ public class NotifyMetrics {
      * @param toType    收件人类型（与 {@code NotificationService.send} 的第三个形参同口径）
      * @param eventType 通知类型（{@code NotificationEvents} 里的常量）
      * @param key       收件人业务号（{@code toId}）。⚠️ 只进事件流，绝不进 tag（基数无界）
+     * @param durationNanos 墙钟（块 7 · 阶段 3a.3 新增）：<b>从 {@code NotificationService.send}
+     *                   入口到通知行入库</b>（含组装），见该类注释
      */
-    public void sent(String toType, String eventType, String key) {
+    public void sent(String toType, String eventType, String key, long durationNanos) {
         registry.counter(SENDS, "result", Result.SENT.tag).increment();
-        event(Result.SENT.tag, toType, eventType, key, null);
+        event(Result.SENT.tag, toType, eventType, key, null, durationNanos);
     }
 
     /**
@@ -91,10 +93,11 @@ public class NotifyMetrics {
      * 「失败率」这个数<b>只有</b>从本环读得到，别处没有。
      *
      * @param reason 失败原因（异常摘要 / 落库失败说明）。只进事件流 —— 自由文本、基数无界
+     * @param durationNanos 墙钟（块 7 · 阶段 3a.3 新增）；失败路径止于 catch（「到抛出为止」）
      */
-    public void failed(String toType, String eventType, String key, String reason) {
+    public void failed(String toType, String eventType, String key, String reason, long durationNanos) {
         registry.counter(SENDS, "result", Result.FAILED.tag).increment();
-        event(Result.FAILED.tag, toType, eventType, key, reason);
+        event(Result.FAILED.tag, toType, eventType, key, reason, durationNanos);
     }
 
     // ================= 事件流 =================
@@ -119,14 +122,17 @@ public class NotifyMetrics {
     }
 
     /** 追加一条事件。{@code key} / {@code reason} 只在事件里以字符串形式出现 —— tag 里绝不能有它们。 */
-    private void event(String result, String toType, String eventType, String key, String reason) {
+    private void event(String result, String toType, String eventType, String key, String reason,
+                       Long durationNanos) {
         long seq = eventCursor.getAndIncrement();
         events[(int) (seq & EVENT_MASK)] = new NotifyEvent(
                 seq, System.currentTimeMillis(), result,
                 toType == null ? null : String.valueOf(toType),
                 eventType == null ? null : String.valueOf(eventType),
                 key == null ? null : String.valueOf(key), reason,
-                TraceIdFilter.current(), TraceIdFilter.currentBatch());
+                TraceIdFilter.current(), TraceIdFilter.currentBatch(),
+                TraceIdFilter.currentActorId(), TraceIdFilter.currentActorRole(),
+                durationNanos == null ? null : durationNanos / 1000);
     }
 
     /**
@@ -142,9 +148,14 @@ public class NotifyMetrics {
      * @param traceId    产生本条事件的那次请求的号（块 7 · commit 8 新增）；不在请求线程上时为 null
      * @param batchId    产生本条事件的那次请求**所属的演练批次**（块 7 · commit 8c，来自
      *                   {@code X-Drill-Batch} 头）；日常流量为 {@code null}。同 {@code traceId} 现读
+     * @param actorId    发起那次请求的业务号（块 7 · 阶段 3a.3 新增）；无身份时为 null
+     * @param actorRole  发起者的角色号（块 7 · 阶段 3a.3 新增）；无身份时为 null
+     * @param durationUs 发送耗时（**微秒**，块 7 · 阶段 3a.3 新增）；{@code null} = 没测到
      */
     public record NotifyEvent(long seq, long epochMilli, String result, String toType,
-                              String eventType, String key, String reason, String traceId, String batchId) {
+                              String eventType, String key, String reason, String traceId, String batchId,
+                              String actorId, Integer actorRole, Long durationUs)
+            implements com.minke.mallmanagement.observe.metrics.Sourced {
     }
 
     /** {@code mall.notify.sends} 的 result 取值。tag 字段避免每次调用拼字符串。 */

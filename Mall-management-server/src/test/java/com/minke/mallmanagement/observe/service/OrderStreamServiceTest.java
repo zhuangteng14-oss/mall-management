@@ -125,10 +125,10 @@ class OrderStreamServiceTest {
         when(orderDao.selectRecentOrders(anyInt())).thenReturn(List.of());
 
         orderMetrics.transition(OrderAction.PAY, "waitPay", "waitShip",
-                MallOrderStateMetrics.Result.APPLIED, "O-1");
-        orderMetrics.illegal("010", "O-2");
-        orderMetrics.birthRejected("non_initial", "O-3");
-        orderMetrics.timelineWrite(false, "O-4");
+                MallOrderStateMetrics.Result.APPLIED, "O-1", 1_500L);
+        orderMetrics.illegal("010", "O-2", 1_500L);
+        orderMetrics.birthRejected("non_initial", "O-3", 1_500L);
+        orderMetrics.timelineWrite(false, "O-4", null);
 
         Map<String, Object> frame = frames.frame(0);
 
@@ -147,7 +147,7 @@ class OrderStreamServiceTest {
         when(orderDao.countOrderStates()).thenReturn(Map.of());
         when(orderDao.selectRecentOrders(anyInt())).thenReturn(List.of());
         orderMetrics.transition(OrderAction.PAY, "waitPay", "waitShip",
-                MallOrderStateMetrics.Result.APPLIED, "O-1");
+                MallOrderStateMetrics.Result.APPLIED, "O-1", 1_500L);
 
         assertThat(movesOf(frames.frame(0))).as("第一拍看见它动了").hasSize(1);
         assertThat(movesOf(frames.frame(1))).as("第二拍同一批事件不再重复报").isEmpty();
@@ -176,7 +176,7 @@ class OrderStreamServiceTest {
         when(orderDao.selectRecentOrders(anyInt())).thenReturn(List.of());
         SseStreamWriter.FrameSource other = service.newFrameSource(() -> "");
         orderMetrics.transition(OrderAction.PAY, "waitPay", "waitShip",
-                MallOrderStateMetrics.Result.APPLIED, "O-1");
+                MallOrderStateMetrics.Result.APPLIED, "O-1", 1_500L);
 
         assertThat(movesOf(frames.frame(0))).as("先开的那条看见它动了").hasSize(1);
         assertThat(movesOf(other.frame(0))).as("后开的那条**也**看得见。改前共用一份游标时，"

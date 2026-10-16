@@ -28,7 +28,7 @@
 > | `:214` | `GoodsController:106-107,282-283` | `GoodsService:96-117`（`goodsAdd` 上传段，`file.isEmpty()` 早退在 `:101`）/ `:265-281`（`goodsUp` 上传段，判据 `file != null && !file.isEmpty()` 在 `:268`） |
 > | `:19`（判断 3） | 「**111 例绿**」 | **136 例**（2026-10-02 三层第三笔后实测，= 真 `@Test` 注解数；19 个测试类）。⚠️ 口径：裸 `grep -c '@Test'` 会因 `@TestPropertySource`（3 处）与注释里的字面 `@Test`（`AbstractSmokeTest:69`）多计 3 → 得 139，**不能用**。同源订正见 `project-map.md:101` 与 `three-layers.md §H.3`（`:259`） |
 > | `:36`（病 B+E 合成链） | `GoodsCacheService:211-219`（`queryForMap` 多行即抛）+ `:186-198`（把失败也当值缓存） | ✅ **该环已修**（A 批 `88a14e4`），现址 `GoodsCacheService.priceByTriple`（`:243-264`）：**0 行 → `null`** 在 `:250-253`（业务事实，仍被负缓存）、**多行 → 显式抛** `IncorrectResultSizeDataAccessException` 在 `:255-261`（`queryForList` 自己不为多行抛，故显式构造）。⚠️ 四环里的第 1/2 环（collation 大小写不敏感 + 三元组无唯一约束）**仍在** ⇒「失败本身」仍在，只关掉了「失败被固化到 TTL」 |
-> | `:115`-`:117`（观测层） | `L2HealthProbe.java:154-177` / `TwoLevelCache.java:220-233` / 回填竞态「已登记于 `cache-layer.md#pack-cache-layer-evict` 与 `:448③`」 | → `L2HealthProbe.markOk:155-162` 与 `markFailed:169-178`（两处各自的 check-then-act，原记跨两方法的 `:154-177` 边界不准）；→ `TwoLevelCache.l2Put:221-234`；→ 竞态登记现址 **`cache-layer.md#pack-cache-layer-evict`**（§10 调用点判据第 1 条：「并发读会把旧值回填进已清的空片」）与 **`:451③`**（§11「`loginAdd` 的 evict 发生在事务提交之前」）—— 两处均已用 `git show 148e77b` 逐行核对（旧 `:371` / `:448③` 即此两句） |
+> | `:115`-`:117`（观测层） | `L2HealthProbe.java:154-177` / `TwoLevelCache.java:234-247` / 回填竞态「已登记于 `cache-layer.md#pack-cache-layer-evict` 与 `:448③`」 | → `L2HealthProbe.markOk:155-162` 与 `markFailed:169-178`（两处各自的 check-then-act，原记跨两方法的 `:154-177` 边界不准）；→ `TwoLevelCache.l2Put:221-234`；→ 竞态登记现址 **`cache-layer.md#pack-cache-layer-evict`**（§10 调用点判据第 1 条：「并发读会把旧值回填进已清的空片」）与 **`:451③`**（§11「`loginAdd` 的 evict 发生在事务提交之前」）—— 两处均已用 `git show 148e77b` 逐行核对（旧 `:371` / `:448③` 即此两句） |
 > | `:159`（§五） | TD-04「写 3 处、实为 **4**」/ TD-06「实为 `U:205/G:119/G:289`」/ TD-07「实为 `G:110-116/U:196-203`」 | TD-04 现值 **5**（见上表 `:51` 行）；TD-06 商品侧现址 `GoodsService:120` / `:283`（用户域：原 `UserController:205` / `:59` → 现 `UserService.updateAvatar:266` / `UserController.loginAdd:63`）；TD-07 商品侧现址 `GoodsService:110-117` / `:273-281`，两处 `msg` 均为「**商品图片保存失败**」（`:115` / `:279`），用户域对应处现址 `UserService.updateAvatar:257-264` |
 > | `:166`（§五） | 「3 处手写 `getConnection()`」 | **实为 2 处调用 + 1 处注释**：`L2HealthProbe:203`、`L2ProbeConfig:201` 是真调用（均 try-with-resources），`L2ProbeConfig:134` 是**注释里**的字面 `getConnection()`。故该条「与 Hikari `leakDetectionThreshold=0` 无关」的结论不变，但**「3 处」是数错的** |
 > | `:175`（§六） | `ConcurrencyRunner.java:340`（`--reset-db` 空实现） | **`:339`**（`case "--reset-db": o.resetDb = true;`；用法说明串在 `:181`）。⚠️ 另注：用法串本身写的是「DROP **11** 张 —— 12 张中除 `order_state_transition` 外」 |
@@ -166,7 +166,7 @@
 |---|---|---|---|
 | **时间线链正确性依赖锁可用，而锁刻意 fail-open** | `OrderTransitionRecorder.java:24-31` + B2 fail-open | `(1,0,0)` 上 **deliver × receive** 两个不同动作可**同时提交**（各要另一位为 0，互不冲突；pay × dly 则因 `PayIf` 互斥不可能双成功）。锁不可用时读回发生在两次提交之后 ⇒ `from` 错、**链断**。A3 的 C-2 断言过 `链断=0`，但**只在 Redis 可用时测得** | 亲读 + 推断 |
 | `L2HealthProbe.down` 是 check-then-act | `L2HealthProbe.java:154-177` | 普通 `volatile boolean`，并发失败会**都记一次**，与注释「计数天然只在翻转时 +1」矛盾。`L2HealthProbeConcurrencyTest` **只断言 `pingCount`，不覆盖此项** | 亲读 |
-| `l2Put` 冷却路径**不记任何指标** | `TwoLevelCache.java:220-233` | `l2Get`(DEGRADED)/`l2Evict`/`l2Clear` 都记，唯 `l2Put` 静默返回 ⇒ 指标口径有缺口 | 亲读 |
+| `l2Put` 冷却路径**不记任何指标** | `TwoLevelCache.java:234-247` | `l2Get`(DEGRADED)/`l2Evict`/`l2Clear` 都记，唯 `l2Put` 静默返回 ⇒ 指标口径有缺口 | 亲读 |
 | `get()` 命中 L2 后**无条件**回填 L1；`evict()` 是 L1 先 L2 后 | `TwoLevelCache.java:89-94,173-176` | 拓宽了已知的 L2→L1 回填竞态窗口（原登记见 `cache-layer.md#pack-cache-layer-evict`、`:448③`） | 亲读 |
 | `OrderTimelineWriter.java:50-51` 点名的索引与 DDL 不一致 | 同左 | 注释指向的索引名与建表语句不符 | 亲读 |
 | 启动日志打 `queue.size()` 而非 `queueCapacity` | `OrderStateExecutor` | 启动期读数无意义 | 亲读 |
@@ -209,7 +209,7 @@
 
 ## 五、已登记的补强（不是新缺陷，但有新证据加宽）
 
-- **L2→L1 回填竞态**：已登记于 `cache-layer.md#pack-cache-layer-evict` 与 `cache-layer.md#pack-cache-layer-11③`。新增的是**范围**：`get()` 无条件回填（`TwoLevelCache.java:89-94`）+ `evict()` L1 先 L2 后（`:173-176`），窗口比原「清空片」的框法更宽。
+- **L2→L1 回填竞态**：已登记于 `cache-layer.md#pack-cache-layer-evict` 与 `cache-layer.md#pack-cache-layer-11③`。新增的是**范围**：`get()` 无条件回填（`TwoLevelCache.java:89-94`）+ `evict()` L1 先 L2 后（`:180-183`），窗口比原「清空片」的框法更宽。
 - **文档锚点漂移**：新增**三个独立证人** —— TD-04（写 3 处 `@CrossOrigin`，实为 **4**）、TD-06（写 `U:192/G:111/G:300`，实为 `U:205/G:119/G:289`，且**遗漏 `U:59`**）、TD-07（写 `G:102-108/U:187-190`，实为 `G:110-116/U:196-203`）。**建议：锚点从行号改为符号名。**（其余 TD 未逐条复核，不排除同类。）
 - `db-schema.md` 的 `.sql` 行号引用**经全量验算，无漂移**（真实行号口径 —— 该文件 CRLF 会让 `tr` 之类的读取把行号翻倍，易被误判为漂移）。
 - 「`recentEvents()` 无调用方」的说法**过宽**：`MallLockMetrics.recentEvents()` 在生产路径有调用（`LockSceneService:358,401`）。
@@ -274,7 +274,7 @@
 
 ## 九、本次两处自我更正（留档，防再犯）
 
-1. **`FromState` 取自 UPDATE **之后**，是精确反推，不是近似。** 曾推断「先读三位、再 UPDATE、并发下 from 记错」——**证伪**。`OrderTransitionRecorder.java:98` 读回在 UPDATE 之后；`:111` 由新态反推旧态（`from ≡ to 清本位`）；前提两半都被钉住：守卫约束本位（`OrderStateMachine.java:228-229`，测试 `everyGuardRequiresItsOwnBitToBeZero`）+ `setClause()` 结构性只吐一列（`:130-133`）且整串由 golden copy 钉死。**但风险没消失，只是挪到了「锁必须可用」上**（见病 F）。
+1. **`FromState` 取自 UPDATE **之后**，是精确反推，不是近似。** 曾推断「先读三位、再 UPDATE、并发下 from 记错」——**证伪**。`OrderTransitionRecorder.java:102` 读回在 UPDATE 之后；`:117` 由新态反推旧态（`from ≡ to 清本位`）；前提两半都被钉住：守卫约束本位（`OrderStateMachine.java:228-229`，测试 `everyGuardRequiresItsOwnBitToBeZero`）+ `setClause()` 结构性只吐一列（`:130-133`）且整串由 golden copy 钉死。**但风险没消失，只是挪到了「锁必须可用」上**（见病 F）。
 2. **「没有任何测试打过同单并发不同动作」——证伪。** `ConcurrencyRunner.java:1523` 的 c7 就是 40 线程 pay×dly 抢同一单（`:1481` `A-S4a-7`）。**但**：pay×dly 因 `PayIf` 互斥而**不可能双成功**（是守卫 + InnoDB 行锁保证的，**不是**分布式锁），真正的漏洞组合是 `(1,0,0)` 上的 deliver×receive，**A3 无此组合**。
 
 ---

@@ -191,7 +191,7 @@ runPhase 的做法（:424-456）：
       ⑲-4 comment.BatchId / ⑲-5 admin_audit.BatchId
     另加 `observed_event.BatchId`。四处皆 `varchar(36) DEFAULT NULL`。
   · 但**全 main 树 grep `BatchId`**，`order` 包下**只有一个命中** ——
-    `MallOrderStateMetrics.java:262`，那是**事件环**的 batchId（进 `observed_event`），
+    `MallOrderStateMetrics.java:290`，那是**事件环**的 batchId（进 `observed_event`），
     **不是** `order` 表的列。
   · `OrderDao.insertOrder` 的列清单（`OrderDao.java:102-104`）逐字是：
       (OrderId, CustomerId, MerchantId, Price, Quantity, ProductInformation,
@@ -266,7 +266,7 @@ runPhase 的做法（:424-456）：
 
   好消息：**修它只要 1 行**。
   `OrderStateEvent` record 里**已经有** `batchId` 字段
-  （`MallOrderStateMetrics.java:283-285`，第 11 个分量），
+  （`MallOrderStateMetrics.java:322-326`，第 11 个分量），
   在 `drainMoves` 的 `row.put(...)` 里加一行：
       row.put("batchId", e.batchId());
   ⇒ 前端就能做「只看本批次的流转计数」。**零 DDL、零新端点。**

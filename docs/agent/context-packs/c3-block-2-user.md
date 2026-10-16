@@ -39,9 +39,9 @@
   `user.audit.passed`（`:62`）/ `user.audit.rejected`（`:64`）/ `user.banned`（`:67`）/ `user.unbanned`（`:70`）/
   `merchant.audit.passed`（`:73`）/ `merchant.audit.rejected`（`:76`）。
   ⚠️ 已核实：`send` **不校验白名单**（类注释 `:19-24`）⇒ 要新 code 时**只加常量**，不动表、不动 `send`。
-- `.../admin/service/AuditService.java:73-86` —— `record(AuthSession.Identity actor, String action, String targetType, String targetId, Object before, Object after)：void`，**fail-open**（catch 一切、只打 `ERROR ... AUDIT`）。`actor` 用 `AuthSession.identify(request)` 取 —— **认不出身份 = `ActorId` / `ActorRole` 双 NULL**。
+- `.../admin/service/AuditService.java:73-89` —— `record(AuthSession.Identity actor, String action, String targetType, String targetId, Object before, Object after)：void`，**fail-open**（catch 一切、只打 `ERROR ... AUDIT`）。`actor` 用 `AuthSession.identify(request)` 取 —— **认不出身份 = `ActorId` / `ActorRole` 双 NULL**。
 - `.../admin/AuditActions.java:27-79` —— 动作 tag 常量，**块 1 时只有 2 条**（`:35` / `:51`），**块 2 加到 9 条**（新增 `:56-77`）。⚠️ 类注释 `:19-26` 明写「其余写端点**随各自那一笔挂**」⇒ **本块每个写端点都在这里加一条**（见「要新建」）。
-- `.../shared/web/IdentityGuard.java:73-82` —— `requireSelfOrAdmin(request, paramId)`：自己 / 管理员 / **解析不出身份** → 放行，否则 403。⚠️ 必须在方法体**第一行**调（`:66`）。
+- `.../shared/web/IdentityGuard.java:104-115` —— `requireSelfOrAdmin(request, paramId)`：自己 / 管理员 / **解析不出身份** → 放行，否则 403。⚠️ 必须在方法体**第一行**调（`:97`）。
 - `.../shared/web/Result.java:64-133` —— `of(...)` / `ok(...)` / `fail(...)`；**禁 `putAll`**（`ResultByteEquivalenceTest` 钉着）。
 - `.../shared/web/GlobalExceptionHandler.java:83` —— ⚠️ `@RestControllerAdvice(assignableTypes = {MessageController, GoodsController})` —— **新 Controller 不在白名单里** ⇒ 新端点**一个参数约束都不要加**（`@NotBlank` 等会逃逸成 400 空体；类级 `@Validated` 会撞 CGLIB 断言族）。
 

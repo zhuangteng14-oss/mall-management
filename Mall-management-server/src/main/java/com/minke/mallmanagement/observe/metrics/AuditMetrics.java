@@ -85,10 +85,12 @@ public class AuditMetrics {
      * @param targetType 被改对象类型（块 7 · commit 8 新增）—— {@link AuditService#record} 本来就收它，
      *                   以前只是没往事件里带；实时日志页要用它标出「这条审计动的是谁」
      * @param targetId   被改对象标识（同上）
+     * @param durationNanos 这次写入的墙钟（块 7 · 阶段 3a.3 新增）：<b>从 {@code AuditService.record}
+     *                   入口到审计行 INSERT 发出</b>（含取会话与组装），见该类注释
      */
-    public void written(String actor, String action, String targetType, String targetId) {
+    public void written(String actor, String action, String targetType, String targetId, long durationNanos) {
         registry.counter(WRITES, "result", Result.WRITTEN.tag).increment();
-        event(Result.WRITTEN.tag, actor, action, null, targetType, targetId);
+        event(Result.WRITTEN.tag, actor, action, null, targetType, targetId, durationNanos);
     }
 
     /**
@@ -96,10 +98,13 @@ public class AuditMetrics {
      *
      * @param reason 失败原因（异常摘要）。⚠️ 只进事件流 —— 它是自由文本，基数无界
      * @param targetType ／{@code targetId} 同 {@link #written}
+     * @param durationNanos 墙钟（块 7 · 阶段 3a.3 新增）；失败路径止于 catch，
+     *                   即「到抛出为止」的墙钟 —— 失败也要有数，否则「慢到超时」看不见
      */
-    public void failed(String actor, String action, String reason, String targetType, String targetId) {
+    public void failed(String actor, String action, String reason, String targetType, String targetId,
+                       long durationNanos) {
         registry.counter(WRITES, "result", Result.FAILED.tag).increment();
-        event(Result.FAILED.tag, actor, action, reason, targetType, targetId);
+        event(Result.FAILED.tag, actor, action, reason, targetType, targetId, durationNanos);
     }
 
     // ================= 事件流 =================
@@ -125,7 +130,7 @@ public class AuditMetrics {
 
     /** 追加一条事件。{@code actor} / {@code reason} 只在事件里以字符串形式出现 —— tag 里绝不能有它们。 */
     private void event(String result, String actor, String action, String reason,
-                       String targetType, String targetId) {
+                       String targetType, String targetId, Long durationNanos) {
         long seq = eventCursor.getAndIncrement();
         events[(int) (seq & EVENT_MASK)] = new AuditEvent(
                 seq, System.currentTimeMillis(), result,
@@ -133,16 +138,22 @@ public class AuditMetrics {
                 action == null ? null : String.valueOf(action), reason,
                 targetType == null ? null : String.valueOf(targetType),
                 targetId == null ? null : String.valueOf(targetId),
-                TraceIdFilter.current(), TraceIdFilter.currentBatch());
+                TraceIdFilter.current(), TraceIdFilter.currentBatch(),
+                TraceIdFilter.currentActorRole(),
+                durationNanos == null ? null : durationNanos / 1000);
     }
 
     /**
      * 一条审计事件。
      *
+     * ⚠️ <b>本环的「谁」复用既有 {@code actor} 分量</b>（块 7 · 阶段 3a.3 §0.3）：它不是本笔新增的，
+     * 只是补上了 {@code actorRole}。为对上 {@code Sourced} 的公共面，本 record 显式实现了
+     * {@link #actorId()} 转发给 {@code actor} —— 两个名字指同一个值，别当成两个字段。
+     *
      * @param seq        单调序号（缓冲被覆盖后靠它自校验与排序）
      * @param epochMilli 墙钟时间戳 —— 事件是给人看的过程记录，故用墙钟而非 nanoTime
      * @param result     written | failed
-     * @param actor      谁写的（业务号，会话取值）
+     * @param actor      谁写的（业务号，会话取值）；对 {@code Sourced} 而言它就是 {@code actorId}
      * @param action     动作名
      * @param reason     失败原因；{@code written} 时为 null
      * @param targetType 被改对象类型（块 7 · commit 8 新增；{@code audit} 表的 {@code TargetType} 同源）
@@ -152,10 +163,23 @@ public class AuditMetrics {
      * @param batchId    产生本条事件的那次请求**所属的演练批次**（块 7 · commit 8c，来自
      *                   {@code X-Drill-Batch} 头）；日常流量为 {@code null}（「不属于任何批次」）。
      *                   ⚠️ 与 {@code traceId} 同一处、同一刻现读 —— 理由逐字相同
+     * @param actorRole  发起者的角色号（块 7 · 阶段 3a.3 新增）；无身份时为 null。
+     *                   ⚠️ 口径与 {@code actor} **不同**：{@code actor} 由调用方显式传入（可伪造的风险
+     *                   由 {@code AuditService} 取会话值来避免），{@code actorRole} 是本环现读 MDC
+     *                   —— 两者在「重放/伪造 actor 入参」时可能对不上，这是**已知的**，如实记
+     * @param durationUs 写入耗时（**微秒**，块 7 · 阶段 3a.3 新增）；{@code null} = 没测到
      */
     public record AuditEvent(long seq, long epochMilli, String result,
                              String actor, String action, String reason,
-                             String targetType, String targetId, String traceId, String batchId) {
+                             String targetType, String targetId, String traceId, String batchId,
+                             Integer actorRole, Long durationUs)
+            implements com.minke.mallmanagement.observe.metrics.Sourced {
+
+        /** {@code Sourced} 的公共面要求 {@code actorId()}；本环的值就叫 {@code actor}（§0.3），故转发。 */
+        @Override
+        public String actorId() {
+            return actor;
+        }
     }
 
     /** {@code mall.audit.writes} 的 result 取值。tag 字段避免每次调用拼字符串。 */

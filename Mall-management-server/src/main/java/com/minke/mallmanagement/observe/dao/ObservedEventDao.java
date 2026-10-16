@@ -17,15 +17,20 @@ import java.util.Map;
  * <p>范式照 {@link ObservedEventCleanupDao}（同域、同批）：{@code @Repository} + 构造器收
  * {@code JdbcTemplate}（让 {@code @WebMvcTest} 切片里既有的 {@code @MockitoBean JdbcTemplate}
  * 继续喂给本类）+ 语句以 Java 字符串内联；表名带 {@code mall_management_sql.} 前缀。
- * 建表在 {@code mall_management_sql.sql} 的 Migration ⑲-1（11 列，4 个非空之外的都允许 NULL）。
+ * 建表在 {@code mall_management_sql.sql} 的 Migration ⑲-1（12 列，4 个非空之外的都允许 NULL）；
+ * 块 7 · 阶段 3a.3 由迁移 ㉑ 追加了 {@code ActorId / ActorRole / DurationUs} 三列。
  *
- * <h2>【⚠️ 只落 8 列：{@code detail} 与 {@code key} 两个字段**没有列可落**】</h2>
- * 传进来的 {@link ObservedEvent} 有 11 个分量，本表只有 8 个能接
- * （{@code Kind / Severity / Title / ObjectType / ObjectId / TraceId / BatchId / OccurredAt}）。
- * 缺的两列是<b>刻意缺的</b>（见 ⑲-1 的列清单）：
- * {@code detail} 是给人读的一行过程串（含 {@code src=环名#seq}，只对<b>当下那一拍</b>有意义，
- * 事后读它反而会被误导）；{@code key} 的业务标识已经在 {@code ObjectId} 里。
- * ⇒ 别给本表加这两列然后在这里补两个 {@code ?} —— 那会让台账变成日志页的副本。
+ * <h2>【⚠️ 只落 11 列：{@code detail} / {@code fields} 与 {@code key} 三个字段**没有列可落**】</h2>
+ * 传进来的 {@link ObservedEvent} 有 15 个分量，本表接 11 个
+ * （{@code Kind / Severity / Title / ObjectType / ObjectId / TraceId / BatchId / ActorId /
+ * ActorRole / DurationUs / OccurredAt}）。
+ * 缺的三列是<b>刻意缺的</b>（见 ⑲-1 与 ㉑ 的列清单），口径是「<b>有界标量进列，无界自由文本不进</b>」：
+ * {@code detail} 是给人读的一行过程串、{@code fields} 是它的结构化孪生（含 {@code src=环名#seq}，
+ * 只对<b>当下那一拍</b>有意义，事后读它反而会被误导）；{@code key} 的业务标识已经在 {@code ObjectId} 里。
+ * ⇒ 别给本表加这三列然后在这里补三个 {@code ?} —— 那会让台账变成日志页的副本。
+ * <p>⚠️ <b>2026-10-16（块 7 · 阶段 3a.3）加了 {@code ActorId / ActorRole / DurationUs} 三列</b>
+ * —— 它们**不是**上面那条口径的例外，恰恰是它的正面例子：三个都是<b>有界标量</b>
+ * （业务号 + 角色号 + 微秒整数），能被索引、能被聚合、跨时间含义不变。
  *
  * <h2>【⚠️ 截断：列宽是本类的责任，不是调用方的】</h2>
  * {@code Title varchar(255)} / {@code ObjectId varchar(128)} / {@code ObjectType varchar(32)} …
@@ -37,7 +42,7 @@ import java.util.Map;
  * <h2>【批写：一条多行 INSERT】</h2>
  * 消费者的批（{@link com.minke.mallmanagement.observe.mq.ObservedEventConsumer}）一次最多
  * {@code BATCH_SIZE} 条（50），拼成一条多行 INSERT —— 一次往返落一批。
- * ⚠️ 批很大时这条语句会很长，但 50 × 8 个占位符在 MySQL 的包上限与占位符上限面前都很小
+ * ⚠️ 批很大时这条语句会很长，但 50 × 11 个占位符在 MySQL 的包上限与占位符上限面前都很小
  * （{@code max_allowed_packet} 默认 64MB、预处理语句占位符上限 65535）。
  */
 @Repository
@@ -51,9 +56,11 @@ public class ObservedEventDao {
     private static final int OBJECT_ID_MAX = 128;
     private static final int TRACE_ID_MAX = 64;
     private static final int BATCH_ID_MAX = 36;
+    /** 块 7 · 阶段 3a.3（㉑）：与 {@code admin_audit.ActorId} 同宽 —— 两处的 `ActorId` 是同一个东西。 */
+    private static final int ACTOR_ID_MAX = 50;
 
-    /** 每行的 8 个占位符（顺序即下面的 {@code addRow} —— 两处必须一起改）。 */
-    private static final String ROW_PLACEHOLDERS = "(?, ?, ?, ?, ?, ?, ?, ?)";
+    /** 每行的 **11** 个占位符（顺序即下面 {@link #insertBatch} 里的 {@code params.add} —— 两处必须一起改）。 */
+    private static final String ROW_PLACEHOLDERS = "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
 
     /**
      * 回放要读的列清单（块 7 收尾 · 演练回放）。
@@ -67,6 +74,7 @@ public class ObservedEventDao {
      */
     private static final String COLUMNS =
             "Id, Kind, Severity, Title, ObjectType, ObjectId, TraceId, BatchId, "
+                    + "ActorId, ActorRole, DurationUs, "
                     + "CAST(OccurredAt AS CHAR) AS OccurredAt ";
 
     private final JdbcClient jdbcClient;
@@ -90,7 +98,7 @@ public class ObservedEventDao {
             return 0;
         }
         StringBuilder values = new StringBuilder(events.size() * ROW_PLACEHOLDERS.length());
-        List<Object> params = new ArrayList<>(events.size() * 8);
+        List<Object> params = new ArrayList<>(events.size() * 11);
         for (ObservedEvent e : events) {
             if (values.length() > 0) {
                 values.append(", ");
@@ -103,12 +111,20 @@ public class ObservedEventDao {
             params.add(clip(e.objectId(), OBJECT_ID_MAX));
             params.add(clip(e.traceId(), TRACE_ID_MAX));
             params.add(clip(e.batchId(), BATCH_ID_MAX));
+            // 块 7 · 阶段 3a.3（㉑）：谁 / 什么角色 / 多久。⚠️ 三个都**不截断之外不做转换**
+            // —— actorRole 是 Integer、durationUs 是 Long，直接把可空的包装类型交给 JDBC
+            // （null 落 NULL，这是本表这三列的正常取值：定时任务没有身份、瞬时事件没有耗时）。
+            // ⚠️ actorId 要截断：它的来源不受控（会话里的业务号），而列宽 50 是硬约束。
+            params.add(clip(e.actorId(), ACTOR_ID_MAX));
+            params.add(e.actorRole());
+            params.add(e.durationUs());
             // OccurredAt 是 datetime(3)：用 Timestamp 让它走 JDBC 的时间类型绑定，
             // 不用字符串（字符串会带上连接串的时区解释，是另一条更隐蔽的错路）。
             params.add(new Timestamp(e.epochMilli()));
         }
         return jdbcClient.sql("INSERT INTO mall_management_sql.observed_event "
-                        + "(Kind, Severity, Title, ObjectType, ObjectId, TraceId, BatchId, OccurredAt) VALUES "
+                        + "(Kind, Severity, Title, ObjectType, ObjectId, TraceId, BatchId, "
+                        + "ActorId, ActorRole, DurationUs, OccurredAt) VALUES "
                         + values)
                 .params(params)
                 .update();

@@ -260,7 +260,7 @@ class MallCacheMetricsTest {
     void eventRingOverwritesOldestAndKeepsSequenceMonotonic() {
         int capacity = 2048;
         for (int i = 0; i < capacity + 88; i++) {
-            metrics.l1Request(CACHE, "k" + i, true);
+            metrics.l1Request(CACHE, "k" + i, true, 1_500L);
         }
 
         List<MallCacheMetrics.MallCacheEvent> events = metrics.recentEvents();
@@ -273,6 +273,10 @@ class MallCacheMetricsTest {
             assertThat(e.kind()).isEqualTo("l1");
             assertThat(e.result()).isEqualTo("hit");
             assertThat(e.epochMilli()).isPositive();
+            // 块 7 · 阶段 3a.3 新增：本条事件的耗时（纳秒入参 → 微秒落进事件）与发起者身份
+            assertThat(e.durationUs()).as("纳秒→微秒：1500ns→1µs").isEqualTo(1L);
+            assertThat(e.actorId()).as("无 MDC ⇒ actorId 为 null").isNull();
+            assertThat(e.actorRole()).as("无 MDC ⇒ actorRole 为 null").isNull();
         });
         assertThat(count(MallCacheMetrics.L1_REQUESTS, "cache", CACHE, "result", "hit"))
                 .as("计数通道与事件通道同源：同一次调用点两边都记").isEqualTo((double) (capacity + 88));
@@ -310,7 +314,7 @@ class MallCacheMetricsTest {
                     try {
                         start.await();
                         for (int i = 0; i < perThread; i++) {
-                            metrics.l1Request(CACHE, key, true);
+                            metrics.l1Request(CACHE, key, true, 1_500L);
                         }
                     } catch (InterruptedException e) {
                         Thread.currentThread().interrupt();

@@ -53,7 +53,7 @@ import java.util.function.BooleanSupplier;
  * mall.cache.loads{cache}
  *        发起「回落 DB 加载」的次数 = 唯一真穿透点（@Cacheable sync=true 的核心数字）。
  *        无 result tag：来源只有 DB 一个，单值 tag 是给未来预留、不是已发生的事实。
- *        ⚠️ 记的是「发起」而非「成功」：失败那次同样打了 DB，对 DB 的压力一样大。
+ *        ⚠️ 不区分成败（失败那次同样打了 DB）；块 7 · 阶段 3a.3 起记在 loader **返回后**，为的是能带回源耗时。
  * mall.cache.singleflight{cache}
  *        被别的线程的加载合并掉的次数（Caffeine 单飞的 follower 侧）。同样无 result tag。
  *        与 loads 互补：leader 进 loads、follower 进这里，两者不重不漏。
@@ -141,39 +141,72 @@ public class MallCacheMetrics {
      * L1 读结果。hit=false 即 miss。
      * 两条读路径（{@code get(key)} 与 {@code get(key, loader)}）都经由 {@code l1Get} 落到这里，
      * 故 {@code hit+miss} 就是 L1 收到的全部读请求数。
+     *
+     * @param durationNanos L1 读的墙钟（块 7 · 阶段 3a.3 新增）。⚠️ 它是**纳秒级**的
+     *                      （Caffeine 本地查表约 0.2~1 µs），且**含**两次 {@code System.nanoTime()}
+     *                      自身的开销 —— 读这个数时按**量级**看，别抠小数点后两位。这也正是本笔
+     *                      用微秒而非毫秒记 duration 的原因：毫秒下这一档**恒为 0**（假事实）
      */
-    public void l1Request(String cache, Object key, boolean hit) {
+    public void l1Request(String cache, Object key, boolean hit, long durationNanos) {
         registry.counter(L1_REQUESTS, "cache", cache, "result", hit ? "hit" : "miss").increment();
-        event(cache, "l1", hit ? "hit" : "miss", key);
+        event(cache, "l1", hit ? "hit" : "miss", key, durationNanos);
     }
 
-    /** L2 读结果。四路语义见类注释的指标清单（degraded 与 miss 的区别是前者没碰网络）。 */
-    public void l2Request(String cache, Object key, L2Result result) {
+    /**
+     * L2 读结果。四路语义见类注释的指标清单（degraded 与 miss 的区别是前者没碰网络）。
+     *
+     * @param durationNanos 这次 L2 读的墙钟（块 7 · 阶段 3a.3 新增）；{@code DEGRADED} 传 {@code null}。
+     *                      ⚠️ <b>{@code null} 不等于「没花钱」</b>：冷却窗口内本线程若恰好抢到探测权，
+     *                      会在 {@code probe.isL2UsableNow()} 里**同步 PING 一次**（不可达时约 233ms）
+     *                      —— 那段发生在别处、这里量不到，但它**记在 probe 事件上**（见 {@link #probe}），
+     *                      不是丢失，只是不挂在这条事件上。故本参数用 {@code Long} 而非 {@code long}
+     */
+    public void l2Request(String cache, Object key, L2Result result, Long durationNanos) {
         registry.counter(L2_REQUESTS, "cache", cache, "result", result.tag).increment();
-        event(cache, "l2", result.tag, key);
+        event(cache, "l2", result.tag, key, durationNanos);
     }
 
-    /** 发起一次回落 DB 的加载（唯一真穿透点）。在 loader 被调用前计数，见类注释。 */
-    public void loadedFromDb(String cache, Object key) {
+    /**
+     * 一次回落 DB 的加载（唯一真穿透点）。
+     *
+     * <p>⚠️ <b>计数时机（块 7 · 阶段 3a.3 改了，如实记）</b>：原来记在 loader <b>被调用前</b>，
+     * 现在改成 loader <b>返回后</b> —— 为的是能拿到「查库多久」。计数意图（DB 压力：失败那次同样
+     * 打了 DB）不变：调用点用 {@code try/finally}，异常路径照样计数，总量与时机在并发下无实质差异。
+     *
+     * @param durationNanos 这次回源的墙钟（块 7 · 阶段 3a.3 新增）—— 从 loader 被调用到它返回
+     *                      （或抛出）。「查库多久」在这里第一次变得可读
+     */
+    public void loadedFromDb(String cache, Object key, long durationNanos) {
         registry.counter(LOADS, "cache", cache).increment();
-        event(cache, "load", null, key);
+        event(cache, "load", null, key, durationNanos);
     }
 
-    /** 本次读被别的线程的加载合并（Caffeine 单飞的 follower 侧）。 */
-    public void singleflightMerged(String cache, Object key) {
+    /**
+     * 本次读被别的线程的加载合并（Caffeine 单飞的 follower 侧）。
+     *
+     * <p>⚠️ 本上报点**不含 L1 命中**：调用方（{@code TwoLevelCache#get(key, loader)}）先在
+     * {@code l1Get} 查过 L1、命中就早返回了，进到这里只剩「被别的线程的加载合并」这一种情形。
+     *
+     * @param durationNanos follower **等 leader 把这次加载做完**的墙钟（块 7 · 阶段 3a.3 新增）——
+     *                      这正是单飞省下来的那段时间。与 {@link #loadedFromDb} 的耗时同源不同量：
+     *                      leader 那边记「查库多久」，follower 这边记「等了多久」
+     */
+    public void singleflightMerged(String cache, Object key, long durationNanos) {
         registry.counter(SINGLEFLIGHT, "cache", cache).increment();
-        event(cache, "singleflight", null, key);
+        event(cache, "singleflight", null, key, durationNanos);
     }
 
     /**
      * 一次失效的结果。
      *
-     * @param allEntries true = {@code clear()}/{@code @CacheEvict(allEntries=true)}；false = 单键
+     * @param allEntries    true = {@code clear()}/{@code @CacheEvict(allEntries=true)}；false = 单键
+     * @param durationNanos 这次失效的墙钟（块 7 · 阶段 3a.3 新增）；{@code SKIPPED_DEGRADED} 传 {@code null}
+     *                      —— 冷却窗口内跳过，根本没碰 L2（「没发生」不是「很快」）
      */
-    public void evicted(String cache, boolean allEntries, EvictResult result, Object key) {
+    public void evicted(String cache, boolean allEntries, EvictResult result, Object key, Long durationNanos) {
         registry.counter(EVICTS, "cache", cache, "kind", allEntries ? "all" : "key",
                 "result", result.tag).increment();
-        event(cache, "evict", result.tag, allEntries ? null : key);
+        event(cache, "evict", result.tag, allEntries ? null : key, durationNanos);
     }
 
     /**
@@ -205,12 +238,14 @@ public class MallCacheMetrics {
      *
      * @param ok            PING 是否成功
      * @param durationNanos 本次探测墙钟 —— 与 L2HealthProbe 类注释记的实测值同源，
-     *                      可直接用本指标复核（稳态约 233ms、进程内首次 0.5~0.8s）
+     *                      可直接用本指标复核（稳态约 233ms、进程内首次 0.5~0.8s）。
+     *                      ⚠️ 块 7 · 阶段 3a.3 起这个值**同时进事件**（原来只进 timer）——
+     *                      DEGRADED 那次「同步 PING」的钱就记在这条 probe 事件上，见 {@link #l2Request}
      */
     public void probe(boolean ok, long durationNanos) {
         registry.counter(L2_PROBES, "result", ok ? "ok" : "failed").increment();
         registry.timer(L2_PROBE_DURATION).record(durationNanos, TimeUnit.NANOSECONDS);
-        event(null, "probe", ok ? "ok" : "failed", null);
+        event(null, "probe", ok ? "ok" : "failed", null, durationNanos);
     }
 
     /** 健康 → 降级（真实翻转）。 */
@@ -262,18 +297,31 @@ public class MallCacheMetrics {
 
     private void transition(String to) {
         registry.counter(L2_TRANSITIONS, "to", to).increment();
-        event(null, "transition", to, null);
+        // 不记耗时：翻正是「瞬时事实」，没有起止（与 evict 的 SKIPPED 同款，见 event 的 javadoc）
+        event(null, "transition", to, null, null);
     }
 
     /**
      * 追加一条事件。{@code key} 只在事件里以字符串形式出现 —— key 可以是任意对象，
      * 但 tag 里绝不能有它（基数无界）。
+     *
+     * <p>⚠️ 块 7 · 阶段 3a.3 起 {@code durationNanos} 是**必填**（**故意不给重载**）——
+     * 本仓栽过「有重载 ⇒ 新调用点顺手用了短的那个 ⇒ 耗时静默丢失」。于是每个调用点都必须
+     * 明写「这一档量不出来（{@code null}）」还是「量出来了（值）」；{@code null} 与 {@code 0}
+     * 在页面上意思完全不同（见 {@code Sourced#durationUs()}）。
+     *
+     * @param durationNanos 本条事件自身的墙钟（纳秒）；{@code null} = 量不出来。
+     *                      ⚠️ 值为 {@code null} 的情形都是**有理由的**，不是漏了：
+     *                      evict 被降级跳过 / 翻转（瞬时事实，根本没有起止）
      */
-    private void event(String cache, String kind, String result, Object key) {
+    private void event(String cache, String kind, String result, Object key, Long durationNanos) {
         long seq = eventCursor.getAndIncrement();
         events[(int) (seq & EVENT_MASK)] = new MallCacheEvent(
                 seq, System.currentTimeMillis(), cache, kind, result,
-                key == null ? null : String.valueOf(key), com.minke.mallmanagement.shared.web.TraceIdFilter.current(), com.minke.mallmanagement.shared.web.TraceIdFilter.currentBatch());   // 块 7 · commit 8/8c：写全限定名而非 import —— 本文件 `:65`/`:102-103`/`:109` 那批「文件:行号」引用不能因加一行 import 而下移
+                key == null ? null : String.valueOf(key), com.minke.mallmanagement.shared.web.TraceIdFilter.current(), com.minke.mallmanagement.shared.web.TraceIdFilter.currentBatch(),
+                com.minke.mallmanagement.shared.web.TraceIdFilter.currentActorId(),
+                com.minke.mallmanagement.shared.web.TraceIdFilter.currentActorRole(),
+                durationNanos == null ? null : durationNanos / 1000);   // 块 7 · commit 8/8c：写全限定名而非 import —— 本文件 `:65`/`:102-103`/`:109` 那批「文件:行号」引用不能因加一行 import 而下移
     }
 
     /**
@@ -289,9 +337,15 @@ public class MallCacheMetrics {
      * @param traceId    产生本条事件的那次请求的号（块 7 · commit 8 新增）；不在请求线程上时为 null
      * @param batchId    产生本条事件的那次请求**所属的演练批次**（块 7 · commit 8c，来自
      *                   {@code X-Drill-Batch} 头）；日常流量为 {@code null}。同 {@code traceId} 现读
+     * @param actorId    发起那次请求的业务号（块 7 · 阶段 3a.3 新增）；无身份时为 null
+     * @param actorRole  发起者的角色号（块 7 · 阶段 3a.3 新增，1 客户 / 2 商家 / 3 管理员）；无身份时为 null
+     * @param durationUs 本条事件的耗时（**微秒**，块 7 · 阶段 3a.3 新增）；{@code null} = 量不出来。
+     *                   ⚠️ 由纳秒入参除以 1000 得来 —— 微秒而非毫秒，因为最便宜的一档是纳秒级的
      */
     public record MallCacheEvent(long seq, long epochMilli, String cache, String kind,
-                                 String result, String key, String traceId, String batchId) {
+                                 String result, String key, String traceId, String batchId,
+                                 String actorId, Integer actorRole, Long durationUs)
+            implements com.minke.mallmanagement.observe.metrics.Sourced {
     }
 
     /** {@code mall.cache.l2.requests} 的 result 取值。tag 字段避免每次调用拼字符串。 */

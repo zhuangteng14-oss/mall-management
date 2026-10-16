@@ -259,15 +259,19 @@ public class OrderTimeoutCancelJob {
                 // 空 code / 非正数量 = 这行明细没装可回补的量（同 deductStocks 的跳过口径）。
                 continue;
             }
+            // 块 7 · 阶段 3a.3：耗时紧包那一行回补 SQL（与 deductStocks 同一口径 (a)）。
+            // ⚠️ 声明在 try 外：catch 里也要用（编译期作用域）；本任务跑在定时线程 ⇒ actor 为 null，耗时照记
+            long releaseStartedNanos = System.nanoTime();
             try {
                 int rows = goodsDao.releaseStock(skuCode, qty);
+                long releaseNanos = System.nanoTime() - releaseStartedNanos;
                 // 块 7 · 观测（commit 2）：与 OrderService.deductStocks 对称，两条通道同一调用点一起发。
                 // 0 行记 MISSING（该码在 goods_sku 里没有行 ⇒ 无处可放），**不是** ERROR ——
                 // 非矩阵商品本来就没有 goods_sku 行，这类明细每单都会走到这里。
                 stockMetrics.release(skuCode, qty,
-                        rows == 1 ? Release.OK : Release.MISSING);
+                        rows == 1 ? Release.OK : Release.MISSING, releaseNanos);
             } catch (Exception e) {
-                stockMetrics.release(skuCode, qty, Release.ERROR);
+                stockMetrics.release(skuCode, qty, Release.ERROR, System.nanoTime() - releaseStartedNanos);
                 log.warn("超时释放：订单 {} 的 SKU {} 回补失败（跳过该条）：{}", orderId, skuCode, e.toString());
             }
         }

@@ -77,7 +77,7 @@ public class ProtectionMetricsBinder {
                     + " 慢调用率=" + breaker.getMetrics().getSlowCallRate() + "%");
         });
         breaker.getEventPublisher().onCallNotPermitted(event -> metrics.blocked("circuitBreak", scope,
-                "circuitBreaker=" + breaker.getName() + " 已打开：本次调用未执行（不占连接、不开事务）"));
+                "circuitBreaker=" + breaker.getName() + " 已打开：本次调用未执行（不占连接、不开事务）", null));   // 块 7 · 3a.3：末参 = 耗时，熔断这一路是瞬时回调、没有起止 ⇒ null
     }
 
     /** 熔断的三档 → 本环的 result 三档；其余档返回 {@code null} = 不记。 */

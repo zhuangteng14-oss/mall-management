@@ -120,16 +120,20 @@ public class OrderTimelineWriter {
      */
     public void write(String orderId, OrderAction action, String fromState, String toState,
                       long occurredAtMillis) {
+        // 块 7 · 阶段 3a.3：耗时紧包那一行 INSERT（方案 §2 的 order·timelineWrite 口径）。
+        // ⚠️ 声明在 try 外：catch 里也要用（编译期作用域）。⚠️ 已知局限：timelineWrite 的耗时
+        // **只在失败事件上看得见**（ok 那一路只计数、刻意不发事件，见 MallOrderStateMetrics）
+        long startedNanos = System.nanoTime();
         try {
             jdbcTemplate.update(INSERT_SQL, orderId, action.tag(), fromState, toState,
                     toUtcText(occurredAtMillis));
-            metrics.timelineWrite(true, orderId);
+            metrics.timelineWrite(true, orderId, System.nanoTime() - startedNanos);
             markOk();
         } catch (Exception e) {
             // ⚠️ catch Exception 而不是 DataAccessException：时间线**必须 total catch**
             // （同 DistributedLockService 对锁异常的处理）—— 任何落库失败都不该让异步线程带着
             // 异常退出，那会同时丢掉计数、丢掉事件、丢掉 WARN。
-            metrics.timelineWrite(false, orderId);
+            metrics.timelineWrite(false, orderId, System.nanoTime() - startedNanos);
             markFailed(e, orderId);
         }
     }

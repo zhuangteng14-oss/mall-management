@@ -1957,3 +1957,50 @@ SET @s := (SELECT IF(COUNT(*) = 0,
   FROM information_schema.STATISTICS
   WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'goods' AND INDEX_NAME = 'idx_goods_merchant');
 PREPARE _p FROM @s; EXECUTE _p; DEALLOCATE PREPARE _p;
+
+-- ============================================================
+-- Migration: C3 块7 · 阶段 3a.3 日志页字段补齐  Date: 2026-10-16
+-- 依据：块 7 阶段 3a.3 施工清单（后端 D 块「帧/台账加字段」）+ 用户裁定的量纲（durationUs 取微秒）。
+-- 用途：`observed_event` 台账补三列 —— 「**谁**做的」与「**花了多久**」。
+--       · `ActorId` / `ActorRole`：发起那次请求的业务号与角色号，口径与 `admin_audit` 的两列**逐字相同**
+--         （会话里存的就是业务号 customerid/merchantid，不是登录名）；
+--       · `DurationUs`：本条事件主体的耗时，单位是**微秒**。
+--         ⚠️ 为什么不是毫秒：L1 缓存命中是**纳秒级**（实测 0.2~1 µs），毫秒列对它永远是 0
+--         —— 「整数毫秒看不出本地缓存」正是用户裁定用微秒的理由。
+-- ⚠️ **为什么只加这三列，不给 `detail` / `fields` 加列**：口径是「**有界标量进列，无界自由文本不进**」。
+--    `detail` 与 `fields` 说的是**同一批事实**（一个是给人读的 k=v 串、一个是给前端拼句子的表），
+--    内容无界、且都含 `src=环名#源seq`（那东西只对**当下那一拍**有意义，事后读反而误导）。
+--    ⇒ 台账不加这两列，理由与 ⑲-1 里「detail / key 刻意不落库」**逐字同源**。
+--    而新增的这三列全是**有界标量**（业务号 varchar(50) / 角色号 int / 微秒 bigint）⇒ 进列。
+-- ⚠️ **回放（`selectByBatch`）会多带这三列**，前端按需读；既有 8 列的**名字与顺序一个字没动**。
+-- ⚠️ P3 门禁：本次**不新增表、不新增索引** ⇒ `ConcurrencyRunner.java` 的 KNOWN_TABLES / 期望表数、
+--    `db-schema.md` 的非主键索引计数**都不动**；但**列数变了** ⇒ `db-schema.md` 里 observed_event
+--    的列数需同步（8 业务列 → 11 业务列）。
+-- 回滚（逻辑废弃，执行前须人工确认；**不 DROP 数据**，只停用）：
+--       ALTER TABLE `observed_event` DROP COLUMN `ActorId`;    -- 须人工确认
+--       ALTER TABLE `observed_event` DROP COLUMN `ActorRole`;  -- 须人工确认
+--       ALTER TABLE `observed_event` DROP COLUMN `DurationUs`; -- 须人工确认
+-- ============================================================
+
+-- ---- ㉑ `observed_event` 加三列（谁 / 什么角色 / 多久）----
+-- ⚠️ 逐列三条独立语句、各自判存在：一条失败不该让另外两条也不落（与 ⑲-2…⑲-5 的四条同款）。
+SET @s := (SELECT IF(COUNT(*) = 0,
+  'ALTER TABLE `observed_event` ADD COLUMN `ActorId` varchar(50) DEFAULT NULL COMMENT ''发起那次请求的业务号（会话里的 customerid/merchantid，口径同 admin_audit.ActorId）；NULL = 无身份：闸关着（app.auth.enabled=false）或事件产生在非请求线程上（线程池/定时任务/SSE 流线程）'' AFTER `BatchId`',
+  'DO 0')
+  FROM information_schema.COLUMNS
+  WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'observed_event' AND COLUMN_NAME = 'ActorId');
+PREPARE _p FROM @s; EXECUTE _p; DEALLOCATE PREPARE _p;
+
+SET @s := (SELECT IF(COUNT(*) = 0,
+  'ALTER TABLE `observed_event` ADD COLUMN `ActorRole` int DEFAULT NULL COMMENT ''发起者的角色号（取自 login.Role：1 客户 / 2 商家 / 3 管理员；口径同 admin_audit.ActorRole）；与 ActorId 同生共死'' AFTER `ActorId`',
+  'DO 0')
+  FROM information_schema.COLUMNS
+  WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'observed_event' AND COLUMN_NAME = 'ActorRole');
+PREPARE _p FROM @s; EXECUTE _p; DEALLOCATE PREPARE _p;
+
+SET @s := (SELECT IF(COUNT(*) = 0,
+  'ALTER TABLE `observed_event` ADD COLUMN `DurationUs` bigint DEFAULT NULL COMMENT ''本条事件主体的耗时，单位**微秒**（不是毫秒：L1 缓存命中是纳秒级）；NULL = 没测到 / 不适用，两者在页面上意思不同，逐环口径见各 *Metrics 类的 event(...)'' AFTER `ActorRole`',
+  'DO 0')
+  FROM information_schema.COLUMNS
+  WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'observed_event' AND COLUMN_NAME = 'DurationUs');
+PREPARE _p FROM @s; EXECUTE _p; DEALLOCATE PREPARE _p;

@@ -694,6 +694,10 @@ public class OrderService {
             }
         }
 
+        // 块 7 · 阶段 3a.3：耗时紧包这一行 INSERT。CREATE **不是 CAS**（无守卫、无前态）⇒
+        // 测的是 insertOrder 本身，与其余动作的 CAS 并列成同一个「落库耗时」（口径见
+        // OrderTransitionRecorder#created）。⚠️ catch 那一路不调 created（只回滚券/秒杀）⇒ 用不到它
+        long createStartedNanos = System.nanoTime();
         try {
             int rows = orderDao.insertOrder(new OrderDao.OrderRow(
                     OrderId, CustomerId, MerchantId, payPrice, Quantity, ProductInformation, Images,
@@ -703,7 +707,8 @@ public class OrderService {
                 result.put("msg", "订单添加成功");
                 // B3：只在**真的插进去之后**观测出生。放在这里而不是方法开头，是因为
                 // 「订单已存在」那条早退分支并没有产生一个新状态，不该记成一次出生。
-                orderTransitionRecorder.created(OrderId, PayIf, DeliveryIf, ReceiveIf);
+                orderTransitionRecorder.created(OrderId, PayIf, DeliveryIf, ReceiveIf,
+                        System.nanoTime() - createStartedNanos);
                 // 可视化段 commit 0：订单明细（商品维度统计的数据源）。
                 // ⚠️ 排在「订单已落库」这个结论**之后**、且自己 fail-open（见 writeItems）——
                 //    明细的成败**不改变**本方法的返回值，否则调用方会把「订单其实落了」
@@ -1047,8 +1052,13 @@ public class OrderService {
             if (s.code() == null || s.code().isBlank() || s.qty() < 1) {
                 continue;
             }
+            // 块 7 · 阶段 3a.3：耗时**紧包那一行 CAS**（口径 (a)）—— 不含循环外的组装，也不含
+            // 多 sku 循环。选 (a) 而非 (b)：多 sku 订单下 (b) 会把 N 次写库摊成一个数，而事件是
+            // **逐 sku** 发的，两者对不上。⚠️ 计时变量必须声明在 try **外**：catch 里也要用（编译期作用域）
+            long deductStartedNanos = System.nanoTime();
             try {
                 int rows = goodsDao.deductStock(clip(s.code(), 40), s.qty());
+                long deductNanos = System.nanoTime() - deductStartedNanos;
                 // 块 7 · 观测（commit 2）：**两条通道在同一调用点**发（计数 + 事件流）——
                 // 与既有三环同款。0 行记 INSUFFICIENT 而**不是** ERROR：CAS 没命中是正常分支
                 // （库存不足 / 非矩阵商品无行，见上面的 javadoc），记成错误会让告警误报。
@@ -1057,13 +1067,13 @@ public class OrderService {
                 //    指标口径是既有契约，本笔不动；返回值的语义是「这批库存**被动过**吗」，
                 //    只要有一行命中就成立 —— {@code SkuCode} 不是唯一键，理论上一条明细可以命中多行。
                 stockMetrics.deduct(s.code(), s.qty(),
-                        rows == 1 ? Deduct.OK : Deduct.INSUFFICIENT);
+                        rows == 1 ? Deduct.OK : Deduct.INSUFFICIENT, deductNanos);
                 if (rows > 0) {
                     anyDeducted = true;
                 }
             } catch (Exception e) {
                 // 异常这一路也埋点：否则「扣减根本没发出去」在指标上与「一次都没下单」无法区分。
-                stockMetrics.deduct(s.code(), s.qty(), Deduct.ERROR);
+                stockMetrics.deduct(s.code(), s.qty(), Deduct.ERROR, System.nanoTime() - deductStartedNanos);
                 log.warn("订单明细 {} 的库存扣减失败（跳过该条，不动订单结论）：{}", s.code(), e.toString());
             }
         }
@@ -1325,8 +1335,13 @@ public class OrderService {
         // SQL 由状态机生成，与 B2 之前硬编码的字面量逐字符相同 ——
         // 由 OrderStateMachineTest.updateSqlIsByteForByteTheLegacyLiteral 钉死。
         String sql = orderStateMachine.updateSql(action);
+        // 块 7 · 阶段 3a.3：耗时**从 CAS 前到 CAS 后**（裁定 ⑤「测真 CAS 前到后」）。⚠️ 声明在
+        // try **外**：catch 里也要用（编译期作用域）。⚠️ 本段仍在订单锁的临界区内 ⇒ 这个数含
+        // **持锁等待 + 真 UPDATE 往返**，不是纯 SQL 耗时（口径见 MallOrderStateMetrics#transition）
+        long casStartedNanos = System.nanoTime();
         try {
             int rows = orderDao.casUpdate(sql, orderId);
+            long casNanos = System.nanoTime() - casStartedNanos;
             if (rows > 0) {
                 result.put("success", true);
                 result.put("msg", okMsg);
@@ -1334,18 +1349,19 @@ public class OrderService {
                 //    （TradeNo / PaidAt / ExpressCompany / …，见 OrderStateMachine.detailUpdateSql）。
                 //    CAS 的 golden 串一字未动；非原子性由订单锁消除竞态。
                 writeDetails(action, orderId, detailParams);
-                orderTransitionRecorder.applied(action, orderId);
+                orderTransitionRecorder.applied(action, orderId, casNanos);
             } else {
                 result.put("success", false);
                 result.put("msg", noRowsMsg);
                 // 守卫没命中：重复流转 / 单不存在。**既有行为**，本笔不新增任何拒绝文案。
-                orderTransitionRecorder.rejected(action, orderId);
+                orderTransitionRecorder.rejected(action, orderId, casNanos);
             }
         } catch (Exception e) {
             e.printStackTrace();
             result.put("success", false);
             result.put("msg", "数据库错误：" + e.getMessage());
-            orderTransitionRecorder.errored(action, orderId);
+            // 异常路径：量的是「卡了多久才失败」，故现算（casNanos 那一行没执行到）
+            orderTransitionRecorder.errored(action, orderId, System.nanoTime() - casStartedNanos);
         }
         return result;
     }

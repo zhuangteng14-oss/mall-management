@@ -142,10 +142,15 @@ public class MallOrderStateMetrics {
      * @param result   applied / rejected / error，三路互斥且完备
      * @param orderId  业务键。⚠️ 只进**事件流**的 key 字段，绝不进 tag（基数无界）；
      *                 记它是因为事件流要回答的正是「**哪一单**卡在哪个状态」
+     * @param durationNanos 墙钟（块 7 · 阶段 3a.3 新增）：{@code OrderService} 里
+     *                 <b>{@code orderDao.casUpdate(...)} 之前到之后</b>（裁定 ⑤）。
+     *                 ⚠️ 该段<b>在订单锁的临界区内</b> ⇒ 这个数含**持锁等待 + 真 UPDATE 往返**，
+     *                 不是纯 SQL 耗时；两者在页面上不分开（分开需要另一次埋点，且分不出「等锁」的归属）
      */
-    public void transition(OrderAction action, String fromName, String toName, Result result, String orderId) {
+    public void transition(OrderAction action, String fromName, String toName, Result result, String orderId,
+                           long durationNanos) {
         registry.counter(TRANSITIONS, "action", action.tag(), "result", result.tag).increment();
-        event("transition", action.tag(), fromName, toName, result.tag, null, orderId);
+        event("transition", action.tag(), fromName, toName, result.tag, null, orderId, durationNanos);
     }
 
     /**
@@ -157,10 +162,15 @@ public class MallOrderStateMetrics {
      * 它记的是「已经落库的非法态」，与 {@link #birthRejected} 记的「在门口被挡下的」是两回事。
      *
      * @param shape 三位串（{@code 010} / {@code 001} / {@code 011}）或 {@code non_binary}
+     * @param durationNanos 墙钟（块 7 · 阶段 3a.3 新增）：<b>分类那一步</b>本身 ——
+     *                 {@code OrderTransitionRecorder.recordIllegalIfAny} 里起表于
+     *                 {@code stateMachine.illegalShape(...)} 之前、止于其后。
+     *                 ⚠️ 它是<b>纯内存位运算</b>（亚微秒级），落在页面上多半显示成 &lt;1000µs
+     *                 那一档 —— 这不是没测到，是它真的这么快；两个入口（读回后 / 出生时）同一个含义
      */
-    public void illegal(String shape, String orderId) {
+    public void illegal(String shape, String orderId, long durationNanos) {
         registry.counter(ILLEGAL, "shape", shape).increment();
-        event("illegal", null, null, null, null, shape, orderId);
+        event("illegal", null, null, null, null, shape, orderId, durationNanos);
     }
 
     /**
@@ -183,20 +193,35 @@ public class MallOrderStateMetrics {
      *
      * @param shape   归一后的形状（5 值封闭枚举，见上）
      * @param orderId 业务键。⚠️ 只进**事件流**的 {@code key}，**绝不进 tag**（基数无界）
+     * @param durationNanos 墙钟（块 7 · 阶段 3a.3 新增）：{@code OrderTransitionRecorder.rejectedAtBirth}
+     *                 的<b>方法入口 → 发本事件之前</b>。⚠️ 它**含那一行 WARN 的格式化与输出** ——
+     *                 被拒路径上这行日志本就是拦截动作的一部分，剔除它反而要额外取样；
+     *                 通过路径不发事件、不付这个代价（同 protection 环「只在被拒样本有耗时」的精神）
      */
-    public void birthRejected(String shape, String orderId) {
+    public void birthRejected(String shape, String orderId, long durationNanos) {
         registry.counter(BIRTH_REJECTED, "shape", shape).increment();
-        event("illegal", null, null, null, "rejected", shape, orderId);
+        event("illegal", null, null, null, "rejected", shape, orderId, durationNanos);
     }
 
     /**
      * 时间线落库的结果。{@code ok} 只计数不发事件（理由见类注释的热路径段），
      * {@code error} 计数 + 发事件 —— 丢一条时间线是**要能追到哪一单**的事。
+     *
+     * @param durationNanos 那次 INSERT 的墙钟（块 7 · 阶段 3a.3 新增）。
+     *                 ⚠️ <b>本参数是 {@code Long} 不是 {@code long}</b>，与 {@link #transition}
+     *                 那一组不同 —— 因为 {@code false} 有**两个来源**，含义不一样：
+     *                 <ul>
+     *                   <li>{@code OrderTimelineWriter.write} 的 catch：INSERT **真跑过**、抛了 ⇒
+     *                       耗时照传（记的是「白花了多久」）；</li>
+     *                   <li>{@code OrderTransitionRecorder.applied} 的读回失败分支：三位读不回来
+     *                       ⇒ 根本没有 from/to 可写、INSERT <b>一次都没发生过</b> ⇒ 传 {@code null}。
+     *                       这里 {@code null} 不是「测不到」而是「没发生」，两者在页面上意思完全不同</li>
+     *                 </ul>
      */
-    public void timelineWrite(boolean ok, String orderId) {
+    public void timelineWrite(boolean ok, String orderId, Long durationNanos) {
         registry.counter(TIMELINE_WRITES, "result", ok ? "ok" : "error").increment();
         if (!ok) {
-            event("async", null, null, null, "error", null, orderId);
+            event("async", null, null, null, "error", null, orderId, durationNanos);
         }
     }
 
@@ -207,7 +232,10 @@ public class MallOrderStateMetrics {
      */
     public void asyncRejected(RejectReason reason, String orderId) {
         registry.counter(ASYNC_REJECTED, "reason", reason.tag).increment();
-        event("async", null, null, null, "rejected", reason.tag, orderId);
+        // 耗时恒 null（块 7 · 阶段 3a.3）：被拒的语义是「这个任务**根本没跑**」——
+        // 没有可测的执行段（线程池的拒绝发生在提交处，纳秒级且不是任务本身的耗时），
+        // 与 protection 环「熔断/池/重试恒 null」同一条处置
+        event("async", null, null, null, "rejected", reason.tag, orderId, null);
     }
 
     /** 异步任务本身的执行墙钟。 */
@@ -255,11 +283,14 @@ public class MallOrderStateMetrics {
     }
 
     private void event(String kind, String action, String from, String to,
-                       String result, String shape, String key) {
+                       String result, String shape, String key, Long durationNanos) {
         long seq = eventCursor.getAndIncrement();
         events[(int) (seq & EVENT_MASK)] = new OrderStateEvent(
                 seq, System.currentTimeMillis(), kind, action, from, to, result, shape,
-                key == null ? null : String.valueOf(key), com.minke.mallmanagement.shared.web.TraceIdFilter.current(), com.minke.mallmanagement.shared.web.TraceIdFilter.currentBatch());   // 块 7 · commit 8/8c：写全限定名而非 import，理由同 {@code MallCacheMetrics#event}（保本文件 `:3` 与 `:104` 的引用不下移）
+                key == null ? null : String.valueOf(key), com.minke.mallmanagement.shared.web.TraceIdFilter.current(), com.minke.mallmanagement.shared.web.TraceIdFilter.currentBatch(),
+                com.minke.mallmanagement.shared.web.TraceIdFilter.currentActorId(),
+                com.minke.mallmanagement.shared.web.TraceIdFilter.currentActorRole(),
+                durationNanos == null ? null : durationNanos / 1000);   // 块 7 · commit 8/8c：写全限定名而非 import，理由同 {@code MallCacheMetrics#event}（保本文件 `:3` 与 `:104` 的引用不下移）。⚠️ durationNanos 是**纳秒**、落进 record 的是**微秒**
     }
 
     /**
@@ -279,10 +310,20 @@ public class MallOrderStateMetrics {
      * @param traceId    产生本条事件的那次请求的号（块 7 · commit 8 新增）；不在请求线程上时为 null
      * @param batchId    产生本条事件的那次请求**所属的演练批次**（块 7 · commit 8c，来自
      *                   {@code X-Drill-Batch} 头）；日常流量为 {@code null}。同 {@code traceId} 现读
+     * @param actorId    发起那次请求的业务号（块 7 · 阶段 3a.3 新增）；无身份时为 null。
+     *                   ⚠️ {@code kind=async} 这一路**恒 null**（它在 {@code OrderStateExecutor}
+     *                   的线程池线程上跑，MDC 不带身份 —— 见 {@code ObserveContext} 的派生线程传播）
+     * @param actorRole  发起者的角色号（块 7 · 阶段 3a.3 新增）；无身份时为 null
+     * @param durationUs 本条事件主体的耗时（**微秒**，块 7 · 阶段 3a.3 新增）；
+     *                   口径逐 kind 不同：{@code transition} = CAS 前到后（**含持锁等待**）、
+     *                   {@code illegal} = 三位到手到判完形状（纯内存）、{@code async/error} =
+     *                   那次 INSERT 的墙钟（读回失败那一路为 null）；{@code async/rejected} 恒 null
      */
     public record OrderStateEvent(long seq, long epochMilli, String kind, String action,
                                   String from, String to, String result, String shape, String key,
-                                  String traceId, String batchId) {
+                                  String traceId, String batchId, String actorId, Integer actorRole,
+                                  Long durationUs)
+            implements com.minke.mallmanagement.observe.metrics.Sourced {
     }
 
     /** {@code mall.order.state.transitions} 的 result 取值。tag 字段避免每次调用拼字符串。 */

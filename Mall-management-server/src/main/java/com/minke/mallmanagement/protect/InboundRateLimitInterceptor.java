@@ -117,13 +117,19 @@ public class InboundRateLimitInterceptor implements HandlerInterceptor {
         //    本仓把它配成 **0**（见 `ProtectConfig`）⇒ 等价于「不等、当场答」，正是本闸要的。
         //    ⚠️ 换句话说：**「不排队」这件事由 timeoutDuration=0 保证，不由方法名保证**。
         //    谁要是哪天把那个 0 改成非 0，这里就会开始让 Tomcat 工作线程睡在闸上。
+        // 块 7 · 阶段 3a.3：耗时起 = **闸口处**（不是 preHandle 入口）。⚠️ 方案写的是「拦截入口」，
+        // 这里收窄到闸口，两条理由：① 通过路径**不发事件** ⇒ 把 t0 提到方法入口等于给全量请求
+        // 白付一次 nanoTime；② 方法入口那几行含 exempt(path) 的 AntPathMatcher 匹配（微秒级、
+        // 与「闸拦了多久」无关），包进来只会稀释这个数。量的是**取令牌这一步**（timeoutDuration=0 ⇒ 当场答）
+        long startedNanos = System.nanoTime();
         if (limiter.acquirePermission()) {
             return true;
         }
         if (metrics != null) {
             metrics.blocked("rateLimit", "inbound",
                     "method=" + request.getMethod() + " path=" + path
-                            + " limiter=" + limiter.getName() + " limitForPeriod=" + limiter.getRateLimiterConfig().getLimitForPeriod());
+                            + " limiter=" + limiter.getName() + " limitForPeriod=" + limiter.getRateLimiterConfig().getLimitForPeriod(),
+                    System.nanoTime() - startedNanos);
         }
         writeTooManyRequests(response, limiter.getRateLimiterConfig().getLimitForPeriod(),
                 limiter.getRateLimiterConfig().getLimitRefreshPeriod().toSeconds());

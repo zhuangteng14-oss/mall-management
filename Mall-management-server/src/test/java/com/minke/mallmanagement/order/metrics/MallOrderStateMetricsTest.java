@@ -51,9 +51,9 @@ class MallOrderStateMetricsTest {
     @Test
     @DisplayName("transitions 三路各自计数，且事件流里带着行动作与前后态")
     void transitionOutcomesAreRecordedOnBothChannels() {
-        metrics.transition(OrderAction.PAY, "CREATED", "PAID", Result.APPLIED, ORDER);
-        metrics.transition(OrderAction.PAY, "PAID", null, Result.REJECTED, ORDER);
-        metrics.transition(OrderAction.DELIVER, "PAID", null, Result.ERROR, ORDER);
+        metrics.transition(OrderAction.PAY, "CREATED", "PAID", Result.APPLIED, ORDER, 1_500L);
+        metrics.transition(OrderAction.PAY, "PAID", null, Result.REJECTED, ORDER, 2_000_000L);
+        metrics.transition(OrderAction.DELIVER, "PAID", null, Result.ERROR, ORDER, 1_500L);
 
         assertThat(count(MallOrderStateMetrics.TRANSITIONS, "action", "pay", "result", "applied")).isEqualTo(1.0);
         assertThat(count(MallOrderStateMetrics.TRANSITIONS, "action", "pay", "result", "rejected")).isEqualTo(1.0);
@@ -65,13 +65,18 @@ class MallOrderStateMetricsTest {
         assertThat(metrics.recentEvents().get(0).from()).isEqualTo("CREATED");
         assertThat(metrics.recentEvents().get(0).to()).as("只有 applied 才有「转移后」").isEqualTo("PAID");
         assertThat(metrics.recentEvents().get(1).to()).as("被拒绝时没有后态").isNull();
+        // 块 7 · 阶段 3a.3 新增：本条事件主体的耗时（纳秒入参 → 微秒落进事件）与发起者身份
+        assertThat(metrics.recentEvents()).extracting(OrderStateEvent::durationUs)
+                .as("纳秒→微秒：1500ns→1µs、2000000ns→2000µs").containsExactly(1L, 2_000L, 1L);
+        assertThat(metrics.recentEvents().get(0).actorId()).as("无 MDC ⇒ actorId 为 null").isNull();
+        assertThat(metrics.recentEvents().get(0).actorRole()).as("无 MDC ⇒ actorRole 为 null").isNull();
     }
 
     @Test
     @DisplayName("业务键只进事件流、绝不进 tag（基数铁律）：两次不同订单的转移共用一个时间序列")
     void businessKeyNeverBecomesATag() {
-        metrics.transition(OrderAction.PAY, "CREATED", "PAID", Result.APPLIED, "ORDER-1");
-        metrics.transition(OrderAction.PAY, "CREATED", "PAID", Result.APPLIED, "ORDER-2");
+        metrics.transition(OrderAction.PAY, "CREATED", "PAID", Result.APPLIED, "ORDER-1", 1_500L);
+        metrics.transition(OrderAction.PAY, "CREATED", "PAID", Result.APPLIED, "ORDER-2", 1_500L);
 
         assertThat(count(MallOrderStateMetrics.TRANSITIONS, "action", "pay", "result", "applied"))
                 .as("两个不同的订单落在同一条计数上").isEqualTo(2.0);
@@ -87,7 +92,7 @@ class MallOrderStateMetricsTest {
         for (OrderAction action : new OrderAction[]{OrderAction.CREATE, OrderAction.PAY,
                 OrderAction.DELIVER, OrderAction.RECEIVE}) {
             for (Result r : Result.values()) {
-                metrics.transition(action, "X", "Y", r, ORDER);
+                metrics.transition(action, "X", "Y", r, ORDER, 1_500L);
             }
         }
         assertThat(registry.find(MallOrderStateMetrics.TRANSITIONS).counters())
@@ -100,10 +105,10 @@ class MallOrderStateMetricsTest {
     @Test
     @DisplayName("illegal：四种 shape 各自计数，事件里带订单号（TD-17 的探测器）")
     void illegalShapesAreRecorded() {
-        metrics.illegal("010", ORDER);
-        metrics.illegal("001", ORDER);
-        metrics.illegal("011", ORDER);
-        metrics.illegal("non_binary", ORDER);
+        metrics.illegal("010", ORDER, 1_500L);
+        metrics.illegal("001", ORDER, 1_500L);
+        metrics.illegal("011", ORDER, 1_500L);
+        metrics.illegal("non_binary", ORDER, 1_500L);
 
         assertThat(count(MallOrderStateMetrics.ILLEGAL, "shape", "010")).isEqualTo(1.0);
         assertThat(count(MallOrderStateMetrics.ILLEGAL, "shape", "011")).isEqualTo(1.0);
@@ -125,11 +130,11 @@ class MallOrderStateMetricsTest {
     @Test
     @DisplayName("birth.rejected：5 个 shape 各自计数，事件流带订单号 —— C3 的「今日拦截 N 次」读的就是这两条通道")
     void birthRejectionsAreRecordedOnBothChannels() {
-        metrics.birthRejected("010", "ORDER-1");
-        metrics.birthRejected("001", "ORDER-2");
-        metrics.birthRejected("011", "ORDER-3");
-        metrics.birthRejected("non_binary", "ORDER-4");
-        metrics.birthRejected(OrderStateMachine.NON_INITIAL, "ORDER-5");
+        metrics.birthRejected("010", "ORDER-1", 1_500L);
+        metrics.birthRejected("001", "ORDER-2", 1_500L);
+        metrics.birthRejected("011", "ORDER-3", 1_500L);
+        metrics.birthRejected("non_binary", "ORDER-4", 1_500L);
+        metrics.birthRejected(OrderStateMachine.NON_INITIAL, "ORDER-5", 1_500L);
 
         assertThat(count(MallOrderStateMetrics.BIRTH_REJECTED, "shape", "010")).isEqualTo(1.0);
         assertThat(count(MallOrderStateMetrics.BIRTH_REJECTED, "shape", "001")).isEqualTo(1.0);
@@ -155,8 +160,8 @@ class MallOrderStateMetricsTest {
     @Test
     @DisplayName("⚠️ birth.rejected 与 illegal 是两条**独立**序列：一个是「在门口挡下的」，一个是「已经落库的」")
     void birthRejectedAndIllegalAreTwoIndependentSeries() {
-        metrics.illegal("010", ORDER);           // C#6 后 API 路径不可达，但存量脏数据仍可能触发
-        metrics.birthRejected("010", ORDER);
+        metrics.illegal("010", ORDER, 1_500L);           // C#6 后 API 路径不可达，但存量脏数据仍可能触发
+        metrics.birthRejected("010", ORDER, 1_500L);
 
         assertThat(count(MallOrderStateMetrics.ILLEGAL, "shape", "010"))
                 .as("落库之后观测到的非法态（过去时）").isEqualTo(1.0);
@@ -171,8 +176,8 @@ class MallOrderStateMetricsTest {
     @Test
     @DisplayName("⚠️ 事件流里 kind=illegal 的两行靠 result 区分 —— 不新增 kind 是为了不动 OrderStateEvent 的 9 个字段")
     void illegalKindCarriesTwoMeaningsDistinguishedByResult() {
-        metrics.illegal("010", ORDER);           // 落库后观测：没有 result
-        metrics.birthRejected("010", ORDER);     // 出生闸拦下：result == rejected
+        metrics.illegal("010", ORDER, 1_500L);           // 落库后观测：没有 result
+        metrics.birthRejected("010", ORDER, 1_500L);     // 出生闸拦下：result == rejected
 
         List<OrderStateEvent> events = metrics.recentEvents();
         assertThat(events).hasSize(2);
@@ -189,9 +194,9 @@ class MallOrderStateMetricsTest {
     @Test
     @DisplayName("timeline.writes：ok 只计数**不发事件**，error 两条通道都发 —— 失败才需要追到哪一单")
     void timelineWriteOnlyEmitsAnEventOnFailure() {
-        metrics.timelineWrite(true, ORDER);
-        metrics.timelineWrite(true, ORDER);
-        metrics.timelineWrite(false, ORDER);
+        metrics.timelineWrite(true, ORDER, null);
+        metrics.timelineWrite(true, ORDER, null);
+        metrics.timelineWrite(false, ORDER, null);
 
         assertThat(count(MallOrderStateMetrics.TIMELINE_WRITES, "result", "ok")).isEqualTo(2.0);
         assertThat(count(MallOrderStateMetrics.TIMELINE_WRITES, "result", "error")).isEqualTo(1.0);
@@ -253,7 +258,7 @@ class MallOrderStateMetricsTest {
     @Test
     @DisplayName("不埋 async.submitted：它在 timeline.enabled=true 时恒等于 transitions{applied}（规范第 6 条）")
     void submittedIsDeliberatelyNotASeparateMeter() {
-        metrics.transition(OrderAction.PAY, "CREATED", "PAID", Result.APPLIED, ORDER);
+        metrics.transition(OrderAction.PAY, "CREATED", "PAID", Result.APPLIED, ORDER, 1_500L);
 
         assertThat(registry.find("mall.order.state.async.submitted").counters())
                 .as("可派生值不重复埋点 —— 该等式由启动期打印的 timeline.enabled 生效值保证可判定")
@@ -267,7 +272,7 @@ class MallOrderStateMetricsTest {
     void eventRingOverwritesOldestAndKeepsSequenceMonotonic() {
         int capacity = 2048;
         for (int i = 0; i < capacity + 88; i++) {
-            metrics.transition(OrderAction.PAY, "CREATED", "PAID", Result.APPLIED, ORDER);
+            metrics.transition(OrderAction.PAY, "CREATED", "PAID", Result.APPLIED, ORDER, 1_500L);
         }
 
         List<OrderStateEvent> events = metrics.recentEvents();
@@ -300,7 +305,7 @@ class MallOrderStateMetricsTest {
                         start.await();
                         for (int i = 0; i < perThread; i++) {
                             metrics.transition(OrderAction.RECEIVE, "SHIPPED", "COMPLETED",
-                                    Result.APPLIED, key);
+                                    Result.APPLIED, key, 1_500L);
                         }
                     } catch (InterruptedException e) {
                         Thread.currentThread().interrupt();

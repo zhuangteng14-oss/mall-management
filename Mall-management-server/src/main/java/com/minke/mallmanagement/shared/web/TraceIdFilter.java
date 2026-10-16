@@ -82,6 +82,25 @@ public class TraceIdFilter extends OncePerRequestFilter {
     public static final String MDC_BATCH_KEY = "batchId";
 
     /**
+     * 「谁」的 MDC 键名（块 7 · 阶段 3a.3 新增）—— 发起这次请求的**业务号**。
+     *
+     * <p>与 traceId / batchId 同款：写在本 filter 里，各事件环在**记录那一刻**现读。
+     * ⚠️ 本键**不进 {@code logback-spring.xml} 的 pattern**（那是 traceId 的专属位置）——
+     * 它只服务事件环的归属，不是给人读日志行用的。
+     */
+    public static final String MDC_ACTOR_ID_KEY = "actorId";
+
+    /**
+     * 「谁」的**角色号** MDC 键名（块 7 · 阶段 3a.3 新增）。
+     *
+     * <p>⚠️ MDC 的值只能是 {@code String}（它是 {@code Map<String, String>}）⇒ 角色存的是
+     * **十进制串**（{@code "1"} / {@code "2"} / {@code "3"}），读回时由 {@link #currentActorRole()}
+     * 解析成 {@code Integer}。别在别处直接 {@code MDC.get} 这个键然后当整数用 —— 那会得到一个
+     * 「看着像数字的字符串」，在 {@code ==} 比较里静默走错分支。
+     */
+    public static final String MDC_ACTOR_ROLE_KEY = "actorRole";
+
+    /**
      * 可接受的外来 id 形状。⚠️ 上限 64 与 {@code UUID} 的 36 不同：36 是**我们生成**的长度
      * （与 8b 的 {@code trace_id varchar(36)} 对齐），64 是**接受外来**的宽容度（别家的 id 可能更长）。
      * 两者不必相等——写短了会拒掉合法上游，写长了才需要担心列宽。
@@ -120,18 +139,58 @@ public class TraceIdFilter extends OncePerRequestFilter {
     }
 
     /**
-     * 把一对 {@code (traceId, batchId)} 绑到**当前线程**的 MDC 上（块 7 · commit 8c）。
+     * 当前请求的**发起者业务号**（块 7 · 阶段 3a.3 新增）；不在请求线程上、或这次请求没有身份
+     * （未登录 / 闸关着 / 白名单面）时返回 {@code null}。
+     *
+     * <p>取值口径与 {@link #current()} / {@link #currentBatch()} **完全同款**（同一个 MDC、
+     * 同一个「必须在记录那一刻读」的纪律）：九个事件环在请求线程上记事件，而并入合并环跑在
+     * SSE 流线程上 —— 那时 MDC 是空的。
+     *
+     * <p>⚠️ {@code null} 是**正常值**，且比 traceId 的 null 更常见：它是「这条事件没有可归属的操作人」
+     * （定时任务 / 演练线程 / 匿名请求），不是缺失。现在没有列依赖它，但页面要靠它显示「谁做的」。
+     */
+    public static String currentActorId() {
+        return MDC.get(MDC_ACTOR_ID_KEY);
+    }
+
+    /**
+     * 当前请求发起者的**角色号**（块 7 · 阶段 3a.3 新增）；无身份时返回 {@code null}。
+     *
+     * <p>⚠️ 解析失败一律答 {@code null}（**不抛**）：这个值只用来在页面上着色，
+     * 一个读不懂的串不值得让一条事件记录失败 —— 与 traceId / batchId 的
+     * 「不合法就静默丢弃」同一条纪律。
+     */
+    public static Integer currentActorRole() {
+        String raw = MDC.get(MDC_ACTOR_ROLE_KEY);
+        if (raw == null) {
+            return null;
+        }
+        try {
+            return Integer.valueOf(raw);
+        } catch (NumberFormatException e) {
+            return null;
+        }
+    }
+
+    /**
+     * 把一组请求级上下文 {@code (traceId, batchId, actorId, actorRole)} 绑到**当前线程**的 MDC 上
+     * （块 7 · commit 8c 建立；阶段 3a.3 补上后两个）。
      *
      * <p>存在的理由是跨线程：{@link com.minke.mallmanagement.shared.web.ObserveContext}
-     * 在**请求线程**上捕获这一对，到**另一个线程**上再绑一次，于是那条线程上记出的事件照样带号。
+     * 在**请求线程**上捕获这一组，到**另一个线程**上再绑一次，于是那条线程上记出的事件照样带号。
      * ⚠️ 本类仍是 MDC 的**唯一写入点** —— 搬运件只持有值，不碰 MDC。
      *
      * <p>值为 {@code null} 的键会被 **移除**（不是写成空串）：这样「还原成一个没有上下文的线程」
      * 与「本来就没有上下文」是同一种状态，池线程被复用时的残留也就无从谈起。
+     *
+     * @param actorRole 角色号；{@code null} ⇒ 移除该键。⚠️ 内部按十进制串写入（见
+     *                  {@link #MDC_ACTOR_ROLE_KEY}）
      */
-    public static void bind(String traceId, String batchId) {
+    public static void bind(String traceId, String batchId, String actorId, Integer actorRole) {
         put(MDC_KEY, traceId);
         put(MDC_BATCH_KEY, batchId);
+        put(MDC_ACTOR_ID_KEY, actorId);
+        put(MDC_ACTOR_ROLE_KEY, actorRole == null ? null : String.valueOf(actorRole));
     }
 
     private static void put(String key, String value) {
@@ -152,6 +211,19 @@ public class TraceIdFilter extends OncePerRequestFilter {
         if (batchId != null) {
             MDC.put(MDC_BATCH_KEY, batchId);
         }
+        // 块 7 · 阶段 3a.3：「谁」与 traceId / batchId **同一处、同一刻**写进 MDC ——
+        // 九个事件环在**记录那一刻**现读（理由见 currentActorId 的 javadoc）。
+        // ⚠️ 取**识别**口径（AuthSession.identify）：它是纯静态、AuthTokenStore 是内存表（不查库）
+        //    ⇒ 每个请求多这一次解析的代价可忽略。⚠️ 闸关着时本类**照样**要解身份（这是刻意的）：
+        //    若改由 AuthInterceptor 记，app.auth.enabled=false（本机 dev / a3 两个 profile 都是 false）
+        //    时那个闸直接放行、根本不解身份 ⇒ actor 会恒为 null。
+        AuthSession.Identity actor = AuthSession.identify(request);
+        if (actor != null) {
+            MDC.put(MDC_ACTOR_ID_KEY, actor.userId());
+            if (actor.role() != null) {
+                MDC.put(MDC_ACTOR_ROLE_KEY, String.valueOf(actor.role()));
+            }
+        }
         // 先设头再放行：即使后面被 AuthInterceptor 拒了（401），响应上也带着号 —— 这正是排查时最需要的那个场景。
         response.setHeader(HEADER, traceId);
         try {
@@ -164,8 +236,12 @@ public class TraceIdFilter extends OncePerRequestFilter {
             // ⚠️ 必须清：Tomcat 的工作线程是**复用**的，不清就会把上一个请求的号带进下一个请求的日志。
             // batchId 同理 —— 且它更危险：漏清会让**一次演练之后的全部日常请求**（复用同一条工作线程的）
             // 被标成那次演练的批次，于是「精准批次」变成「把整个下午都算进去」。
+            // actorId / actorRole（3a.3）同款：漏清会让下一个复用该线程的**匿名**请求顶着
+            // 上一个用户的身份记事件 —— 页面上表现为「别人的操作挂到了他名下」，且事后分不出来。
             MDC.remove(MDC_KEY);
             MDC.remove(MDC_BATCH_KEY);
+            MDC.remove(MDC_ACTOR_ID_KEY);
+            MDC.remove(MDC_ACTOR_ROLE_KEY);
         }
     }
 

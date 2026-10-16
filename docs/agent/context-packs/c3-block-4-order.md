@@ -48,10 +48,10 @@
 - ⚠️ **`.../notification/NotificationEvents.java:87-93` —— 本块的两条 code 块 1 已预留，直接引用**：
   `:90` `ORDER_INTERVENED = "order.intervened"`（管理员介入订单）/ `:93` `ORDER_NOTICE = "order.notice"`（订单通知相关方）。**本块不新增 code。**
   ⚠️ `send` **不校验白名单**（`:19-24`）⇒ 引用已有 code 不动表、不动 `send`。
-- `.../admin/service/AuditService.java:73-86` —— `record(actor, action, targetType, targetId, before, after)：void`，**fail-open**（catch 一切、只打 `ERROR ... AUDIT`）。`actor` 用 `AuthSession.identify(request)`。
+- `.../admin/service/AuditService.java:73-89` —— `record(actor, action, targetType, targetId, before, after)：void`，**fail-open**（catch 一切、只打 `ERROR ... AUDIT`）。`actor` 用 `AuthSession.identify(request)`。
   ⚠️ **`TargetId` 是 NOT NULL**（`mall_management_sql.sql:282`）—— 块 3 就是在这里把创建类动作的留痕 **100% 丢光**（TD-20）。本块的 `ORDER_*` 留痕**一律传 `OrderId`**（订单业务标识串）。
 - `.../admin/AuditActions.java:53` —— **块 2 加的 7 条**，这是本块加常量的**行文范式**；`:140` `TEMPLATE_CREATE` 是**文件尾**（块 3 加）⇒ 本块新常量**继续追加在文件尾**（零漂移）。
-- `.../shared/web/IdentityGuard.java:73-82` —— `requireSelfOrAdmin(request, paramId)`：自己 / 管理员 / **解析不出身份** → 放行，否则 403。⚠️ 必须在方法体**第一行**调。
+- `.../shared/web/IdentityGuard.java:104-115` —— `requireSelfOrAdmin(request, paramId)`：自己 / 管理员 / **解析不出身份** → 放行，否则 403。⚠️ 必须在方法体**第一行**调。
 - `.../shared/web/Result.java:64-133` —— `of(...)` / `ok(...)` / `fail(...)`；**禁 `putAll`**。
 - `.../shared/web/GlobalExceptionHandler.java:83` —— ⚠️ `@RestControllerAdvice(assignableTypes = {...})`：**新 Controller 不在白名单里** ⇒ 新端点**一个参数约束都不要加**（`@NotBlank` 等会逃逸成 400 空体；类级 `@Validated` 会撞 CGLIB 断言族）。
 - `.../smoke/AbstractSmokeTest.java:156` —— `@Import({OrderStateMachine, OrderService, OrderDao, ...})` 真 bean 名单：⚠️ **块 1/块 2/块 3 三次踩同一颗雷**（漏 import ⇒ 整个 `@WebMvcTest` 切片起不来）⇒ 本块新 Controller 的依赖 bean **必须同步加进这里**；`:304` `@MockitoBean OrderTransitionRecorder` 是订单域既有 mock 口。

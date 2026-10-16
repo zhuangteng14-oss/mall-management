@@ -173,7 +173,38 @@ public class EventStreamService {
         // 块 7 · commit 8c：演练批次（日常流量为 null）。页面的 traceId 抽屉按它把
         // 「一次演练里的全部事件」与日常流量分开 —— 只读展示，不参与筛选。
         row.put("batchId", e.batchId());
+        // 块 7 · 阶段 3a.3 新增三键（帧 11 → 14）。⚠️ 三者的口径都在 ObservedEvent 的 javadoc 里：
+        //   actor      「**谁**做的」—— 拼成 {id, role} 对象；无身份时**整个 actor 为 null**
+        //              （不是 {id:null,role:null}：那是「有一个身份，但它的两个字段都空」，
+        //               与「根本没有身份」在页面上是两句话，不能混）
+        //   durationUs 本条事件主体的耗时（微秒）；null = 没测到 / 不适用（逐环口径见各 Metrics 类）
+        //   fields     结构化明细（与 detail 同源）；null 时前端回落到 detail
+        // ⚠️ 顺序刻意排在这里（batchId 之后）：前 11 个键的名字与顺序一个字没动 ——
+        //    既有前端与探针按位置或按名读都照旧
+        row.put("actor", actorMap(e.actorId(), e.actorRole()));
+        row.put("durationUs", e.durationUs());
+        row.put("fields", e.fields());
         return row;
+    }
+
+    /**
+     * {@code actor} 的**现状**：{@code {id, role}}，没有身份时返回 {@code null}。
+     *
+     * <p>⚠️ 为什么是对象而不是两个平铺的键（块 7 · 阶段 3a.3 裁定 ②）：这两个值**同生共死**
+     * —— 要么都有要么都没有。平铺成 {@code actorId} / {@code actorRole} 时，「两个都是 null」
+     * 与「忘了填」在页面上长得一模一样，而对象形态下 {@code actor === null} 是一个可判定的
+     * 事实（前端一句 {@code e.actor ? ... : '系统'} 就够）。
+     *
+     * <p>⚠️ {@code role} 是**角色号**（{@code Integer}），不是角色名 —— 名字由前端查表。
+     */
+    private static Map<String, Object> actorMap(String actorId, Integer actorRole) {
+        if (actorId == null && actorRole == null) {
+            return null;
+        }
+        Map<String, Object> actor = new LinkedHashMap<>();
+        actor.put("id", actorId);
+        actor.put("role", actorRole);
+        return actor;
     }
 
     /** 一条「请求的起止」—— 实时日志页的 traceId 抽屉拿它算总耗时、画链路骨架。 */

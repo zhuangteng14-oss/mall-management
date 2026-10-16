@@ -77,6 +77,9 @@ public class AuditService {
      */
     public void record(AuthSession.Identity actor, String action, String targetType, String targetId,
                        Object before, Object after) {
+        // 块 7 · 阶段 3a.3：耗时起 = **方法入口**（不是 INSERT 之前）—— 口径是「进 method 到写库完」，
+        // 含取会话与两次 toJson 组装。写在 try 之外，故失败路径也能算到 catch 那一刻。
+        long startedNanos = System.nanoTime();
         try {
             auditDao.insert(
                     actor == null ? null : actor.userId(),
@@ -85,12 +88,12 @@ public class AuditService {
                     toJson(before), toJson(after));
             // 块 7 · 观测（commit 2b）：走到这里 = 那条 INSERT 真的发出去了。actor 取**会话**
             //（与上面几行同源），失败率这个数只有本环读得到 —— 本方法吞异常。
-            auditMetrics.written(actor == null ? null : actor.userId(), action, targetType, targetId);   // 块 7 · commit 8：本行多带两个入参（同行改，未增删行）—— targetType / targetId 本就在本方法入参里，以前只是没往事件流带
+            auditMetrics.written(actor == null ? null : actor.userId(), action, targetType, targetId, System.nanoTime() - startedNanos);   // 块 7 · commit 8/3a.3：本行多带入参（同行改，未增删行）—— 后四个此前只是没往事件流带 / 没测过
         } catch (Exception e) {
             // fail-open：业务已经成功了，不能让审计把它翻成失败。见类注释「为什么吞异常」。
             log.error("审计写入失败（AUDIT）：action={} targetType={} targetId={} —— 业务操作已完成，本行丢失",
                     action, targetType, targetId, e);
-            auditMetrics.failed(actor == null ? null : actor.userId(), action, e.toString(), targetType, targetId);   // 块 7 · commit 8：同上（同行改）
+            auditMetrics.failed(actor == null ? null : actor.userId(), action, e.toString(), targetType, targetId, System.nanoTime() - startedNanos);   // 块 7 · commit 8/3a.3：同上（同行改）
         }
     }
 
