@@ -1,0 +1,191 @@
+/* ══════════════════════════════════════════════════════════════════════════════
+   _struct-wire-ev.css —— 3a.3（日志页结构重做）**甲 / 丙**两版草图的公共样式
+
+   与 `_struct-wire.css` 同一套口径：全篇灰阶、**不含**任何品牌 token（墨/釉/朱砂/运营橙
+   一个都没用）、不含圆角档、不含阴影、**不含 transition / animation**。
+   这不是设计稿 —— 画上颜色眼睛就会去比「哪个好看」，而这次要判的只有构图。
+
+   ⚠️ 与真页面**刻意一致**的两个数值（否则宽度比较不成立）：
+     · `.side` 宽 232px  = 真壳 `.a-side` 的 `flex: 0 0 232px`
+     · `.main` padding 32 = 真壳 `.a-main` 的 `padding: var(--s6)`
+     ⇒ 1440 视口下主区可用 = 1440 − 232 − 64 − 滚动条。**滚动条宽实测，不写常数**
+        （同一台机器上经典 headless 量到 0、`--headless=new` 量到 15）。
+
+   ⚠️ 「数据源」那一排（正常 / 模拟日常）在**两版里都在页头右上**，且「已放 N / 500 条」
+      两版都**常驻**（不是开着才显示）—— 这是用户 2026-10-16 点名的「重做时最容易漏的次要件」。
+   ══════════════════════════════════════════════════════════════════════════════ */
+
+/* ⚠️ 本文件**不含** `@import`：两版 HTML 各自 `<link>` 两份样式
+   （`_struct-wire.css` 在前、本文件在后）—— 显式、可查，不靠 import 的求值顺序。 */
+
+/* ⚠️ 两个间距都取**真仓的令牌梯子**（`tokens.css`：4/8/12/16/24/32/48/64），不另造数：
+     区块之间 = `--s7` 48px ；区块内部 = `--s3` 12px。
+   为什么区块间距取到 48（而不是 20 / 24 / 32）：真页面 `.a-status` 的 gap 是 `--s5` **24px**
+   （状态条那一排读数之间的横向间隔），而状态条**在本笔里原样保留** ⇒ 页面上的「区内间距」
+   至少是 24px；C3 取 20 会**倒挂**、取 24 会**持平** —— 3a.2b 的指标页就栽在同一个坑上
+   （当时实测 19 < 26）。
+   32 曾一度看着够了，但探针按「盒间空白 + 两侧内边距」量出来的是 **40px**：状态条最右那块
+   `.tz` 带 `border-left` 与 `padding-left:16`，与它左边那个读数之间的**视觉白带**是
+   24 + 16 = 40。这不是假红，是**真数**。
+   ⇒ 不靠改口径（去掉那 16px 内边距）来救，直接把区块间距再抬一档到 48px：
+   这样**两种口径**（只算 gap 的 24 / 算白带的 40）下 C3 都严格成立，报告里也不用靠解释口径撑着。
+   ⚠️ C3 的原话**不区分横竖**，所以这里两个轴都要求 —— 探针两轴都量，见 3a3-struct-shots。 */
+:root {
+  --gap-block: 48px;   /* = --s7：区块与区块之间 */
+  --gap-in: 12px;      /* = --s3：区块内部 */
+}
+
+/* ── ① 顶部状态条 ─────────────────────────────────────────────────────────────
+   与指标页「状态带」同源的形态：一排读数 + 右侧拍序片。**两版相同**（本版不动它）。 */
+.ev-status {
+  display: flex; flex-wrap: wrap; align-items: stretch; gap: 24px;
+  border: 1px solid var(--l); padding: 12px 14px; margin: 0 0 var(--gap-block);
+}
+.ev-status .cell { display: flex; flex-direction: column; min-width: 104px; }
+.ev-status .cell b { font-family: var(--mono); font-size: 20px; font-weight: 600; line-height: 1.15; }
+.ev-status .cell span { font-size: 11px; color: var(--tm); }
+.ev-status .tz {
+  display: flex; flex-direction: column; gap: 3px; justify-content: center;
+  border-left: 1px solid var(--l2); padding-left: 16px;
+  font: 11px/1.6 var(--mono); color: var(--tm);
+}
+.ev-status .tz b { color: var(--t); }
+.ev-status .mqdot { display: inline-block; width: 8px; height: 8px; background: #6a6a6a; margin-right: 4px; }
+.ev-status .mqdot.off { background: #fff; border: 1px solid var(--l); }
+
+/* ↑ 数据源（正常 / 模拟日常）—— **两版都在这里**，且计数常驻 */
+.ev-src { margin-left: auto; align-self: center; display: flex; flex-direction: column; gap: 5px; align-items: flex-end; }
+.ev-seg { display: inline-flex; border: 1px solid var(--l); }
+.ev-seg span { padding: 4px 12px; font-size: 12px; color: var(--tm); }
+.ev-seg span.on { background: var(--f2); color: var(--t); font-weight: 600; }
+.ev-src .cnt { font: 11px/1.4 var(--mono); color: var(--ts); }
+
+/* ── 区块标题（真页面 `.a-h2` 的位置）──────────────────────────────────────── */
+.ev-h2 { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; margin: 0 0 8px; }
+.ev-h2 b { font-size: 13px; font-weight: 600; }
+.ev-h2 .n { font: 11px/1.4 var(--mono); color: var(--tm); }
+
+.ev-block { border: 1px solid var(--l); padding: 10px; }
+
+/* ── ② 过滤栏（两版都是竖排清单；差别只在它**占多高**）───────────────────── */
+.ev-rail { border: 1px solid var(--l); padding: 0; }
+.ev-rail .row {
+  display: flex; align-items: center; gap: 8px;
+  padding: 6px 10px; border-bottom: 1px solid var(--l2); font-size: 12px;
+}
+.ev-rail .row:last-child { border-bottom: 0; }
+.ev-rail .row .k { flex: 1 1 auto; color: var(--t); }
+.ev-rail .row .c { font: 11px/1 var(--mono); color: var(--tm); font-variant-numeric: tabular-nums; }
+.ev-rail .row.off { color: var(--ts); }
+.ev-rail .row.all { background: var(--f); font-weight: 600; }
+.ev-rail .sub { padding: 6px 10px 2px; font: 10px/1.4 var(--mono); color: var(--ts); border-top: 1px solid var(--l2); }
+.ev-rail .sev { display: flex; gap: 6px; padding: 4px 10px 8px; flex-wrap: wrap; }
+.ev-rail .sev span { border: 1px solid var(--l2); padding: 2px 7px; font: 11px/1.5 var(--mono); color: var(--tm); }
+.ev-rail .sw { background: var(--f2); border: 1px solid var(--l2); width: 15px; height: 15px; flex: 0 0 auto; }
+.ev-rail .sw.off { background: #fff; }
+.ev-rail .foot { padding: 8px 10px; border-top: 1px solid var(--l); text-align: center; font-size: 11px; color: var(--tm); }
+
+/* ── ③ 事件流：卡片 ────────────────────────────────────────────────────────── */
+.ev-list { display: flex; flex-direction: column; }
+.ev-card {
+  display: grid; grid-template-columns: 3px 16px 44px 84px minmax(0, 1fr) auto;
+  gap: 8px; align-items: baseline;
+  padding: 6px 10px; border-bottom: 1px solid var(--l2); font-size: 12px;
+}
+.ev-card:last-child { border-bottom: 0; }
+.ev-card .bar { align-self: stretch; background: var(--f2); grid-row: 1; }
+.ev-card .ic { width: 14px; height: 14px; border: 1px solid var(--l); align-self: center; }
+.ev-card .sev { font: 10px/1.5 var(--mono); color: var(--tm); }
+.ev-card .tm { font: 10px/1.6 var(--mono); color: var(--ts); font-variant-numeric: tabular-nums; }
+.ev-card .main { min-width: 0; }
+.ev-card .main b { font-weight: 600; }
+.ev-card .main .kd,
+.ev-card .main .ob { font: 10px/1.5 var(--mono); color: var(--tm); margin-left: 6px; }
+.ev-card .main .dt { display: block; font: 10px/1.6 var(--mono); color: var(--ts); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ev-card .tr { font: 10px/1.6 var(--mono); color: var(--ts); }
+.ev-card .tr.none { color: var(--ts); font-style: normal; text-decoration: line-through; }
+
+/* 窄栏变体：**甲**的中区被左右两栏夹到 ≈590px ⇒ 卡片要收着写（结构主张不变，只减列：
+   去掉严重度那一列与最右的 traceId 一列，时间戳收到 84px）。 */
+.ev-card.narrow { grid-template-columns: 3px 16px 44px minmax(0, 1fr); }
+.ev-card.narrow .sev,
+.ev-card.narrow .tr { display: none; }
+
+/* ── ④ 实时统计：横条（严重度分布 / 9 类计数）────────────────────────────── */
+.ev-bars { display: flex; flex-direction: column; gap: 6px; }
+.ev-bar { display: grid; grid-template-columns: 62px minmax(0, 1fr) 46px; gap: 8px; align-items: center; font-size: 11px; }
+.ev-bar .nm { color: var(--tm); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ev-bar .track { background: var(--f); height: 9px; }
+.ev-bar .fill { background: #cfcfcf; height: 9px; }
+.ev-bar .num { font: 11px/1.3 var(--mono); color: var(--tm); text-align: right; font-variant-numeric: tabular-nums; }
+
+/* ④ 的读数小块（甲：右栏底部；丙：并进仪表带右侧）*/
+.ev-read { display: flex; flex-wrap: wrap; gap: 8px 18px; border-top: 1px solid var(--l2); padding-top: 8px; font-size: 11px; }
+.ev-read i { display: block; font: 16px/1.2 var(--mono); font-style: normal; font-weight: 600; color: var(--t); }
+.ev-read span { color: var(--tm); }
+
+/* ── 速率折线（tail -f 的「心跳图」）───────────────────────────────────────── */
+.ev-spark { border: 1px solid var(--l); background: #fafafa; padding: 4px 0 0; }
+.ev-spark svg { display: block; width: 100%; }
+.ev-spark .cap { font: 10px/1.6 var(--mono); color: var(--ts); padding: 0 8px 4px; }
+
+/* ── ⑤ 链路展开 ────────────────────────────────────────────────────────────── */
+.ev-drawer { border: 1px solid var(--l); }
+.ev-drawer .hd {
+  display: flex; align-items: center; gap: 10px; padding: 8px 10px;
+  border-bottom: 1px solid var(--l2); font-size: 12px;
+}
+.ev-drawer .hd .mono { font-family: var(--mono); font-size: 11px; color: var(--tm); }
+.ev-drawer .hd .st { border: 1px solid var(--l); padding: 1px 6px; font: 10px/1.5 var(--mono); }
+.ev-chain { margin: 0; padding: 8px 10px 8px 34px; font-size: 12px; }
+.ev-chain li { padding: 2px 0; }
+.ev-chain .tm { font: 10px/1.6 var(--mono); color: var(--ts); margin-right: 8px; font-variant-numeric: tabular-nums; }
+.ev-chain .ends { color: var(--t); font-weight: 600; }
+.ev-chain .miss { color: var(--ts); }
+.ev-drawer .note { border-top: 1px solid var(--l2); padding: 8px 10px; font: 10px/1.7 var(--mono); color: var(--ts); }
+
+/* ── ⑥ 开关栏（3a.6 乙案的防护 / 注入开关；本页只占位，不接行为）──────────── */
+.ev-switch { border: 1px solid var(--l); padding: 8px 10px; }
+.ev-switch .grp { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 3px 0; font-size: 11px; }
+.ev-switch .grp > .lab { width: 52px; color: var(--tm); font-family: var(--mono); }
+.ev-switch .sw2 { border: 1px solid var(--l2); background: var(--f2); padding: 2px 8px; font: 11px/1.5 var(--mono); color: var(--t); }
+.ev-switch .sw2.off { background: #fff; color: var(--ts); }
+.ev-switch .sw2.dead { border-style: dashed; color: var(--ts); background: #fff; }
+
+/* ── 布局：甲（三栏驾驶舱）───────────────────────────────────────────────── */
+.ev-jia .mid { display: grid; grid-template-columns: 220px minmax(0, 1fr) 300px; gap: var(--gap-block); align-items: start; }
+.ev-jia .col3 { display: flex; flex-direction: column; gap: var(--gap-in); }
+.ev-jia .live > .ev-bars { margin-bottom: var(--gap-in); }
+
+/* ── 布局：丙（上下分区）─────────────────────────────────────────────────── */
+.ev-bing .mid { display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: var(--gap-block); align-items: stretch; }
+.ev-bing .righter { display: flex; flex-direction: column; gap: var(--gap-block); min-width: 0; }
+.ev-bing .band { display: grid; grid-template-columns: minmax(0, 1fr) 268px 216px; gap: var(--gap-in); border: 1px solid var(--l); padding: 10px; }
+.ev-bing .band .cell { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.ev-bing .band .cell + .cell { border-left: 1px solid var(--l2); padding-left: var(--gap-in); }
+.ev-bing .band .ttl { font: 10px/1.4 var(--mono); color: var(--ts); }
+
+/* ── 间距 / 全宽块 ───────────────────────────────────────────────────────── */
+.ev-full { margin-top: var(--gap-block); }
+
+/* 顶层的条件块（断线条）走**区块级**间距：`_struct-wire.css` 里 `.slot` 是 8px 的区内间距，
+   那个值只适合「块内部的提示条」。顶层这条是 ① 与 ③ 之间的一个区块 ⇒ 必须同档。
+   （相邻兄弟的 margin 会折叠 ⇒ 取 max，正好是 --gap-block，不会翻倍。）*/
+.slot.top { margin: var(--gap-block) 0; }
+
+/* ── 结构判据条（每版页脚；**不是**页面的一部分，是给验收看的）───────────── */
+.judge { border-top: 1px solid var(--l); margin-top: 28px; padding-top: 10px; font-size: 11px; line-height: 1.8; color: var(--ts); }
+.judge b { color: var(--tm); }
+.judge code { font-family: var(--mono); }
+.judge ul { margin: 4px 0 0; padding-left: 18px; }
+.judge .anim { font-family: var(--mono); }
+
+/* 动效落点标记（**只做标记、不做动效**）：画成一个不显眼的角标，
+   便于「8 处落点在不在这版里」一眼可数、也便于探针按 selectors 取。 */
+[data-anim] { position: relative; }
+[data-anim]::after {
+  content: attr(data-anim-lbl);
+  position: absolute; right: 0; top: 0;
+  font: 9px/1.4 var(--mono); color: #fff; background: #b0b0b0; padding: 0 3px;
+  pointer-events: none;
+}

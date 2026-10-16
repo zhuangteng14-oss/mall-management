@@ -1,0 +1,41 @@
+=== 3a.3 日志页结构草图：整页截图 + 结构断言 ===
+跑法：node scripts/probes/probe-b7a3-struct-shots.mjs
+底座：docs/美化/_cdp.mjs（headless Edge + CDP，--headless=new，1440×900，file:// 直开，不起 server / 不起后端）
+版本：3a3-甲-三栏驾驶舱.html / 3a3-丙-上下分区.html
+
+    3a3-甲-三栏驾驶舱.html  页高 7367px · 主区 1129px（视口 1440 / 客户区 1425 / 滚动条 15）
+      块宽：status 1129 · flash 1129 · rail 220 · stream 513 · live 300 · drawer 1129 · switch 1129
+      区间距：v48 v148 v148 v148 v6132.078125 v6423.078125 v48 v48 v48 v6032.078125 v6323.078125 h48 h609 v5567.078125 v5858.078125 h48 v48 v339 v5816.390625 v6107.390625 v48
+      区内距前 5：h40@ev-status (#3) h40@ev-card narrow (#3) h40@ev-card narrow (#3) h40@ev-card narrow (#3) h40@ev-card narrow (#3)
+    3a3-丙-上下分区.html  页高 7459px · 主区 1129px（视口 1440 / 客户区 1425 / 滚动条 15）
+      块宽：status 1129 · flash 1129 · rail 220 · band 861 · stream 861 · drawer 1129 · switch 1129
+      区间距：v48 v148 v148 v434.5 v6223.6875 v6514.6875 v48 v48 v334.5 v6123.6875 v6414.6875 h48 h48 v48 v339 v48 v5837.1875 v6128.1875 v48 v339 v48
+      区内距前 5：h40@ev-status (#3) h40@ev-card (#4) h40@ev-card (#5) h40@ev-card (#4) h40@ev-card (#5)
+OK   3a3-甲-三栏驾驶舱.html · DATA 已加载  → "object"
+OK   3a3-甲-三栏驾驶舱.html · 9 类 / 3 严重度  → "9 类 / 3 档"
+OK   3a3-甲-三栏驾驶舱.html · 数据源切换在场（正常 / 模拟日常）  → "正常 模拟日常 已放 0 / 500 条（模拟日常未开）"
+OK   3a3-甲-三栏驾驶舱.html · 「已放 N / 500 条」常驻  → "正常 模拟日常 已放 0 / 500 条（模拟日常未开）"
+OK   3a3-甲-三栏驾驶舱.html · 区块数 = 7  → "drawer,flash,live,rail,status,stream,switch"
+OK   3a3-甲-三栏驾驶舱.html · 动效落点恰好 8 处、编号 1–8 各一次  → "1,2,3,4,5,6,7,8"
+OK   3a3-甲-三栏驾驶舱.html · C3 区间距 > 区内距（两轴）  → "区间距最小 48px vs 区内距最大 40px（竖 22 @ col3 (#1) / 横 40 @ ev-status (#3)）"
+OK   3a3-甲-三栏驾驶舱.html · C1 相邻区块不同构（8 对相邻）  → "status|flash flash|rail flash|stream flash|live rail|stream stream|live stream|drawer drawer|switch"
+OK   3a3-甲-三栏驾驶舱.html · 主区宽 == clientW − 232 − 2×pad（模型，不写常数）  → "1129 vs 1129"
+OK   3a3-甲-三栏驾驶舱.html · 易漏项 1：⑤ 写明「起止只来自 traces ⇒ 模拟日常下恒空」  → "⚠️ 中间 4 条 = 本页窗口内带这个 traceId 的事件（按墙钟升序）。"
+OK   3a3-甲-三栏驾驶舱.html · 易漏项 2：③ 写明「被淘汰的 seq 要从 seenSeq 摘掉」  → "底部哨兵 · 自动滚到底：卡片数超过 200 就从顶部淘汰最老的（被淘汰的 se"
+OK   3a3-甲-三栏驾驶舱.html · 易漏项 3：图例写明「本页窗口内累计／不用帧里 counts」  → "严重度 · 类计数 = 本页窗口内累计（帧里的 counts 是「本拍」的，不用它）"
+OK   3a3-甲-三栏驾驶舱.png 落盘  → "549775B"
+OK   3a3-丙-上下分区.html · DATA 已加载  → "object"
+OK   3a3-丙-上下分区.html · 9 类 / 3 严重度  → "9 类 / 3 档"
+OK   3a3-丙-上下分区.html · 数据源切换在场（正常 / 模拟日常）  → "正常 模拟日常 已放 0 / 500 条（模拟日常未开）"
+OK   3a3-丙-上下分区.html · 「已放 N / 500 条」常驻  → "正常 模拟日常 已放 0 / 500 条（模拟日常未开）"
+OK   3a3-丙-上下分区.html · 区块数 = 7  → "band,drawer,flash,rail,status,stream,switch"
+OK   3a3-丙-上下分区.html · 动效落点恰好 8 处、编号 1–8 各一次  → "1,2,3,4,5,6,7,8"
+OK   3a3-丙-上下分区.html · C3 区间距 > 区内距（两轴）  → "区间距最小 48px vs 区内距最大 40px（竖 16 @ ev-rail (#12) / 横 40 @ ev-status (#3)）"
+OK   3a3-丙-上下分区.html · C1 相邻区块不同构（9 对相邻）  → "status|flash flash|rail flash|band rail|band rail|stream rail|drawer band|stream stream|drawer drawer|switch"
+OK   3a3-丙-上下分区.html · 主区宽 == clientW − 232 − 2×pad（模型，不写常数）  → "1129 vs 1129"
+OK   3a3-丙-上下分区.html · 易漏项 1：⑤ 写明「起止只来自 traces ⇒ 模拟日常下恒空」  → "⚠️ 中间 4 条 = 本页窗口内带这个 traceId 的事件（按墙钟升序）。"
+OK   3a3-丙-上下分区.html · 易漏项 2：③ 写明「被淘汰的 seq 要从 seenSeq 摘掉」  → "底部哨兵 · 自动滚到底：卡片数超过 200 就从顶部淘汰最老的（被淘汰的 se"
+OK   3a3-丙-上下分区.html · 易漏项 3：图例写明「本页窗口内累计／不用帧里 counts」  → "严重度 · 类计数 = 本页窗口内累计（帧里的 counts 是「本拍」的，不用它） · 数字在右侧仪表带"
+OK   3a3-丙-上下分区.png 落盘  → "598446B"
+
+3a3 日志页结构草图（甲 / 丙）: 26 项 / 0 失败
