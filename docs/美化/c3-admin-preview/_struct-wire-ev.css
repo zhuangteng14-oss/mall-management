@@ -6,7 +6,9 @@
    这不是设计稿 —— 画上颜色眼睛就会去比「哪个好看」，而这次要判的只有构图。
 
    ⚠️⚠️ 本文件覆盖 `_struct-wire.css` 的**外壳高度模型**（本文件在其后加载）：
-   用户 2026-10-16 裁定 —— **整页 = 一屏，内容在窗口内滚，不许「事件越多页面越长」**。
+   用户 2026-10-16 裁定 —— **页高定死在 132vh（不随数据变），内容在窗口内滚**。
+   「不随数据变」这一半没动：数据再多也不改页高（探针注入 200 行前后实测）；改的只是
+   那个**定值**：从 100vh（= 视口高，六区贴满一屏）改成 132vh（留出 60–80px 余量）。
    这是覆盖而不是改共用文件，S1/S3 那两张草图（页面随内容伸长的老形态）不受影响。
 
      真页面的闭合方式（不需要动 AdminShell.vue）：`.a-main` 只声明 `padding: var(--s6)`，
@@ -29,7 +31,7 @@
 
 :root {
   --wire-head-h: 40px;   /* 顶部一行标题 */
-  --wire-foot-h: 26px;   /* 页脚判据条（折叠态）—— 它在 100vh 之内，所以整页仍不滚 */
+  --wire-foot-h: 26px;   /* 页脚判据条（折叠态）—— 它在 132vh 之内（页高不含数据，含它）*/
   --gap-in: 12px;        /* = --s3：区块内部 */
 }
 
@@ -37,12 +39,17 @@
    不用去数 DOM。对照 txt 线框图里手写的 ①②③④⑤⑥。 */
 .idx { font: 11px/1.4 var(--mono); color: var(--tm); border: 1px solid var(--l2); padding: 0 4px; white-space: nowrap; }
 
-/* ══ 一、窗口化：整页 = 视口高，超出的部分在窗口**内部**滚 ═══════════════════ */
+/* ══ 一、窗口化：整页高出视口**约三分之一**，高出来的那截留给「留白」═══
+   ⚠️ 这一条 2026-10-16 由用户改判：原口径是「整页 = 视口高（100vh）」，现改为
+   **132vh** —— 1440×900 下 = 1188px，离「不许超过的 1.4×900 = 1260」还差 72px
+   （用户要 60–80px 余量，别贴边）。
+   ⚠️ 后果是**整页会滚 ~288px**（③ 与 ⑤⑥ 之间要滚一次才看得全）—— 这是**批准过的取舍**，
+   不是回归：留白换来的是一屏之内六区的呼吸，不再是「贴满一屏」。 */
 body {
   display: flex;
   flex-direction: column;
-  height: 100vh;         /* ← 「页面高度恒定 = 视口高」 */
-  overflow-y: auto;      /* 只在**视口太小、外壳 min-height 顶住**时才出现整页滚动 */
+  height: 132vh;         /* ← 1440×900 ⇒ 1188px（上限 1260，余量 72px）*/
+  overflow-y: auto;      /* 高出来的 288px 在**整页**上滚 */
 }
 .wire-head {
   flex: 0 0 var(--wire-head-h);
@@ -61,7 +68,7 @@ body {
 .px { flex: 1 1 auto; min-width: 0; min-height: 0; max-width: none; display: flex; }
 #app { flex: 1 1 auto; min-width: 0; min-height: 0; display: flex; }
 
-/* 页脚：判据条。**在 100vh 之内**，所以折叠时不增加页高（整页依旧不滚）。 */
+/* 页脚：判据条。**在 132vh 之内**（`.shell` flex:1 会自己让出这一条的高度）⇒ 折叠时不增页高。 */
 .wire-foot { flex: 0 0 auto; border-top: 1px solid var(--l); background: var(--f); font-size: 11px; }
 .wire-foot > summary { padding: 5px 16px; cursor: pointer; color: var(--tm); }
 .wire-foot[open] > summary { border-bottom: 1px solid var(--l2); }
@@ -90,19 +97,59 @@ body {
 .ev-fix { flex: 0 0 auto; }
 .ev-pane { flex: 1 1 auto; min-height: 0; overflow-y: auto; }
 
-/* ══ 三、① 状态条（两版相同；一行读数 ＋ 右上数据源）═══════════════════════ */
-.ev-status { flex: 0 0 auto; display: flex; align-items: center; gap: 20px; padding: 5px 12px; }
+/* ══ 三、① 状态条（两版相同；**两排**：读数一排 ＋ 控件一排）═══════════════════
+   ⚠️ 2026-10-16 改判：原来是一排（读数 + 右上数据源挤在一起）。现在读数的**右端**
+   接上「错误率」与 mini 三色条（就近），控件退到第二排左端、第二排右端留 tz/MQ。
+   ⇒ ① 从 ~44px 涨到 ~76–84px。这一条是**页高改 132vh 的原因之一**。 */
+.ev-status { flex: 0 0 auto; display: flex; flex-direction: column; gap: 2px; padding: 4px 12px 4px; }
+/* ⚠️ 间距 14 不是 18：18 的时候第一排的**总宽超了可用宽 ~40px**，flex 只能压缩各格 ⇒
+   「窗口内事件（上限 1,000）」这类 10px 小字**默默折成两行**，① 从 ~43px 涨到 56px
+   （格高 50 而读数只有 35 就是折行的痕迹）。实测调完 14 后不再折。 */
+.ev-status .r1, .ev-status .r2 { display: flex; align-items: center; gap: 14px; min-width: 0; }
+.ev-status .r1 { min-height: 34px; }
+.ev-status .r2 { min-height: 22px; }
 .ev-status .cell { display: flex; flex-direction: column; min-width: 96px; }
 .ev-status .cell b { font-family: var(--mono); font-size: 17px; font-weight: 600; line-height: 1.15; }
 .ev-status .cell span { font-size: 10px; color: var(--tm); }
+/* ── 错误率格子 + 联动 L2（错误率 > 0 ⇒ 脉冲 + 变红；草图里只有灰阶）──────────
+   ⚠️ 本窗 warn/error 全 0 ⇒ 错误率 0.0%、`.alert` **天然不可达**。
+      「不注入 = L2 永远不可达 = 假绿」是用户点名的：验收**必须先注入** warn/error。
+      草图里「变红」用**加粗 + 双下划线**表达（灰阶纪律：这一版不许上红）；真页面是红。 */
+.ev-status .cell.err { min-width: 84px; }
+.ev-status .cell.err b { display: flex; align-items: baseline; gap: 1px; }
+.ev-status .cell.err b i { font-size: 11px; font-style: normal; color: var(--tm); }
+.ev-status .cell.err.alert { border-bottom: 2px solid #111; margin-bottom: -2px; }
+.ev-status .cell.err.alert b { font-weight: 800; }
+.ev-status .cell.err.alert b i { color: var(--t); }
+/* ── 严重度 mini 三色条（落点 9）：与错误率**紧邻**（就近）──────────────────
+   灰阶下的三档：信息 = 浅灰、警告 = 中灰、错误 = 深灰（**不是**黄/红 —— 这一版不上色）。
+   三段按条数分宽度（`flex:n 0 auto`），点某一段 = 联动 L1。 */
+.ev-status .sevmini {
+  display: inline-flex; flex: 0 1 190px; height: 14px; min-width: 110px;
+  border: 1px solid var(--l2); background: #fff; align-self: center;
+}
+.ev-status .sevmini i { height: 100%; cursor: pointer; }
+.ev-status .sevmini i.s0 { background: #dcdcdc; }
+.ev-status .sevmini i.s1 { background: #9a9a9a; }
+.ev-status .sevmini i.s2 { background: #4a4a4a; }
+/* 选中态：底部一条实线（不改变高度 —— 高度一变 ① 就变高，整页会跳）*/
+.ev-status .sevmini i.pick { box-shadow: inset 0 -4px 0 #111; }
 .ev-status .tz {
   display: flex; flex-direction: column; gap: 1px; justify-content: center;
   border-left: 1px solid var(--l2); padding-left: 14px;
   font: 10px/1.5 var(--mono); color: var(--tm);
 }
+.ev-status .tz > span { white-space: nowrap; }
 .ev-status .tz b { color: var(--t); }
 .ev-status .mqdot { display: inline-block; width: 7px; height: 7px; background: #6a6a6a; margin-right: 4px; }
 .ev-status .mqdot.off { background: #fff; border: 1px solid var(--l); }
+/* 第二排的控件组：**只有控件、没有读数** —— 读数全在第一排，眼睛不用来回跳 */
+.ev-status .grp { display: inline-flex; align-items: center; gap: 6px; }
+.ev-status .grp > .lab { font: 10px/1.5 var(--mono); color: var(--tm); }
+.ev-status .chip { border: 1px solid var(--l2); padding: 0 6px; font: 10px/1.6 var(--mono); color: var(--tm); background: #fff; }
+.ev-status .note { font: 10px/1.5 var(--mono); color: var(--ts); }
+.ev-status .tz { margin-left: auto; }
+.ev-seg.sm span { padding: 2px 7px; }
 
 /* ↑ 数据源（正常 / 模拟日常）—— **两版都在窗口右上角**，且计数常驻 */
 .ev-src { margin-left: auto; align-self: center; display: flex; flex-direction: column; gap: 3px; align-items: flex-end; }
@@ -130,6 +177,24 @@ body {
 /* ══ 四、② 过滤栏（竖排清单；甲给数字、丙只留类名）═════════════════════════ */
 .ev-rail { display: flex; flex-direction: column; min-height: 0; }
 .ev-rail .rl { flex: 0 0 auto; padding: 5px 10px; border-bottom: 1px solid var(--l); font-size: 11px; color: var(--tm); }
+/* ── 控件区（**这一轮从 2 项涨到 4 项**：搜索 / 源 / 批次+≥WARN / 对象）───────
+   ⚠️ 搜索框与对象框画成**矩形**、不是 `<input>`：草图的纪律（不上真控件）——
+      画成 input 就等于在截图上许了一个「可以打字」的假承诺。
+   ⚠️ 「源」在这里是 **2 项**（事件流 / 演练轮询）；慢 SQL / MQ / 调度 是**类**，
+      它们在下面的行清单里（与既有 9 类同构）。 */
+.ev-rail .ctl { flex: 0 0 auto; display: flex; flex-direction: column; gap: 3px; padding: 5px 10px 6px; border-bottom: 1px solid var(--l); }
+.ev-rail .ctl .ln { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.ev-rail .ctl .lab { font: 10px/1.5 var(--mono); color: var(--tm); flex: 0 0 30px; }
+.ev-rail .ctl .box {
+  flex: 1 1 auto; min-width: 0; font: 10px/1.6 var(--mono); color: var(--ts);
+  border: 1px solid var(--l2); background: #fff; padding: 0 6px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.ev-rail .ctl .chip, .ev-rail .row .chip {
+  border: 1px solid var(--l2); padding: 0 6px; font: 10px/1.6 var(--mono);
+  color: var(--tm); background: #fff; white-space: nowrap;
+}
+.ev-rail .ctl .chip.on { background: var(--f2); color: var(--t); font-weight: 600; }
 .ev-rail .rows { flex: 1 1 auto; min-height: 0; overflow-y: auto; }
 .ev-rail .row {
   display: flex; align-items: center; gap: 8px;
@@ -139,13 +204,22 @@ body {
 .ev-rail .row .c { font: 11px/1 var(--mono); color: var(--tm); font-variant-numeric: tabular-nums; }
 .ev-rail .row.off { color: var(--ts); }
 .ev-rail .row.all { background: var(--f); font-weight: 600; }
+/* ── 组名行（「设施 3 类」）—— **不是**可勾的行：不许有开关，也不吃点击 ─────── */
+.ev-rail .row.gh {
+  padding: 3px 10px; background: #f7f7f7; font: 10px/1.5 var(--mono);
+  color: var(--ts); border-bottom: 1px solid var(--l2);
+}
 .ev-rail .sw { background: var(--f2); border: 1px solid var(--l2); width: 13px; height: 13px; flex: 0 0 auto; }
 .ev-rail .sw.off { background: #fff; }
+/* 被筛选**排除**的类行也变淡（.sw.off 同时用于「本窗 0 条」与「未选中」两件事）*/
+.ev-rail .row[data-f="kind"]:has(.sw.off) .k { color: var(--ts); }
 /* 脚注/严重度/全部打开：**钉在栏底**（不随行清单滚）—— 口径必须一直看得见 */
 .ev-rail .sub { flex: 0 0 auto; padding: 5px 10px 2px; font: 10px/1.45 var(--mono); color: var(--ts); border-top: 1px solid var(--l2); }
 .ev-rail .sev { flex: 0 0 auto; display: flex; gap: 6px; padding: 3px 10px 5px; flex-wrap: wrap; }
-.ev-rail .sev span { border: 1px solid var(--l2); padding: 1px 6px; font: 10px/1.5 var(--mono); color: var(--tm); }
-.ev-rail .foot { flex: 0 0 auto; padding: 5px 10px; border-top: 1px solid var(--l); text-align: center; font-size: 11px; color: var(--tm); }
+.ev-rail .sev span { border: 1px solid var(--l2); padding: 1px 6px; font: 10px/1.5 var(--mono); color: var(--tm); cursor: pointer; }
+.ev-rail .sev span.on { background: var(--f2); color: var(--t); font-weight: 700; }
+.ev-rail .foot { flex: 0 0 auto; padding: 5px 10px; border-top: 1px solid var(--l); text-align: center; font-size: 11px; color: var(--tm); cursor: pointer; }
+.ev-rail .foot:hover { background: var(--f2); color: var(--t); }
 
 /* ══ 五、③ 事件流：控制台行（真页面里那一长条；这里**只有它内部滚**）═════════
    ⚠️ 这一轮卡片改成了**行**，是用户 2026-10-16 的逐条裁定：每条一行、删掉复选框 /
@@ -158,24 +232,40 @@ body {
   flex: 0 0 auto; padding: 3px 10px 4px; border-bottom: 1px solid var(--l2);
   font: 10px/1.5 var(--mono); color: var(--ts);
 }
-/* 列名行与数据行**共用同一个栅格** ⇒ 「三列定宽」是量得出来的，不是画出来的 */
+/* 列名行与数据行**共用同一个栅格** ⇒ 「后面的列定宽」是量得出来的，不是画出来的。
+   ⚠️ **首列不再是常数**：前导符列宽 = 层级 × 3 字符 + 分叉 2 字符（`--pc`，由页面按
+      本行的树深逐个算出来），**后面的时刻/等级/类列跟着右移** —— 这是用户
+      2026-10-16 裁定的 tree 形态（缩进 = 层级）。`ch` 跟着等宽字体走，不写死 px。
+   代价（写进报告）：时刻列不再**全局**对齐 —— 同一层级内部仍然对齐，跨层级差 3 字符。 */
 .log-head, .log-line {
   display: grid;
-  grid-template-columns: 34px 84px 14px 34px 40px minmax(0, 1fr);
+  grid-template-columns: var(--pc, calc(2ch + 8px)) 84px 14px 34px 40px minmax(0, 1fr);
   gap: 0 8px;
   align-items: center;
   font: 11px/1.45 var(--mono);
 }
 .log-head { padding: 1px 8px 2px; border-bottom: 1px solid var(--l2); font-size: 10px; color: var(--ts); }
 .log-head .ms { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.log-line { padding: 1px 8px; cursor: default; }
+/* ⚠️ `position: relative` 只为了给行内浮层（`.acts`）当定位父 —— 它**不进栅格**
+   （绝对定位的孩子不参与 `grid-template-columns`，所以 6 列这件事没被改）。 */
+.log-line { padding: 1px 8px; cursor: default; position: relative; }
 /* 行间 gap = 0、**不加行边框**：前导符与 hover 已经给足了行感
    （docker logs / journalctl 也没有行线；要行线就说，一行 CSS 的事） */
 .log-line:hover { background: #f2f2f2; }
+/* ── 联动 L3（可选档，已加）：悬停 ①/④ 的某一档 ⇒ ③ 里**同档的行**短暂高亮 ─────
+   ⚠️ 用 `:where()` 把这一层的特异性**压成 0**，规则实际等于 `.log-line.lv-*`（= 2 个类）。
+      不这么写的话（`#ev-list.hl-w …` 带 id）它会**永远盖过**下面的 `.sel` ——
+      选中态就再也不显形了。压成 0 之后同分、**靠文档顺序**判胜负 ⇒
+      这些规则必须写在 `.sel` **前面**（就是这里），`.sel` 才压得住它。 */
+:where(.hl-i) .log-line.lv-i { background: #f7f7f7; }
+:where(.hl-w) .log-line.lv-w { background: #efefef; }
+:where(.hl-e) .log-line.lv-e { background: #e9e9e9; }
 /* 点某行 ⇒ 同 trace **整组**背景微染：只改背景，不加边框、不加色块 */
 .log-line.sel { background: #e6e6e6; }
 .log-line.sel:hover { background: #dedede; }
-/* 前导符：等宽、顶格 2 字 / 组内 5 字（`│  ├─`）——`white-space:pre` 保住空格 */
+/* 前导符：等宽、**按层级缩进**（0 层 2 字 / 1 层 5 字 / 2 层 8 字……）。
+   `white-space: pre` 保住空格 —— 没有它，`│  ├─` 里的两个空格会被折成一个，
+   竖线与分叉就贴在了一起（这一版必须看得见层级，见页面里的 decorate()）。 */
 .log-line .pre { color: var(--ts); white-space: pre; }
 .log-line .tm { color: var(--ts); font-variant-numeric: tabular-nums; white-space: nowrap; }
 .log-line .ic { display: flex; align-items: center; justify-content: center; color: var(--tm); }
@@ -204,6 +294,39 @@ body {
 .log-line .ms .dt { color: var(--ts); flex: 0 15 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* traceId **併在消息行尾**（不再单占一列）：`flex:0 0 auto` ⇒ 永远不会被省略号吃掉 */
 .log-line .ms .tr { color: var(--ts); flex: 0 0 auto; white-space: nowrap; }
+/* ── 可点对象（落点 ③ 的第三种交互：点对象 ⇒ 对象筛选）─────────────────────
+   ⚠️ 可点**必须能看出来**，但这一版不许加 border（探针有一条：事件流内任何后代都不许有
+      非透明底色的窄色块、不许有 `border-left`）⇒ 用**虚线下划线**表达「可点」，
+      既没底色也没边框。真页面换成手型光标 + hover 下划线即可。 */
+.log-line .ms .ob.p { text-decoration: underline dotted; text-underline-offset: 2px; cursor: pointer; }
+.log-line .ms .ob.p:hover { color: var(--t); text-decoration-style: solid; }
+/* ── 行内四键（复制本行 / 只看这条 trace / 展开 / 暂停跟随）───────────────
+   ⚠️ **绝对定位、不占栅格列**（用户裁定）：占了列就不是 6 列了。
+   代价（写进报告）：浮出来时压在行尾 traceId 上，行尾那一小块被盖住。
+   ⚠️ 四键**不许有 border**（同上：探针的窄色块判据）：靠底色 + 间隔区分。 */
+.log-line .acts {
+  position: absolute; right: 6px; top: 50%; transform: translateY(-50%);
+  display: none; align-items: center; gap: 2px;
+  background: #fff; padding: 0 2px; z-index: 1;
+}
+.log-line:hover .acts { display: inline-flex; }
+.log-line .acts i {
+  font: 10px/1.5 var(--mono); font-style: normal; color: var(--tm);
+  background: var(--f2); padding: 0 5px; cursor: pointer; white-space: nowrap;
+}
+.log-line .acts i:hover { background: #e2e2e2; color: var(--t); }
+/* ── 上下文展开行（落点 11）：插在本行下面的一行原始字段 ────────────────────
+   ⚠️ 它必须**长得不像一条事件**（不然「每行一条事件」的读法就乱了）：用整行浅底 + 等宽键值。*/
+.log-line.xp {
+  display: block; background: #fafafa; border-top: 1px solid var(--l2); border-bottom: 1px solid var(--l2);
+  /* 左内距跟着**父行**的前导列宽走（`--pc` 由 toggleXp 抄自父行）：明细摊开时
+     不跳到最左边，仍缩在父行的层级下 */
+  padding: 2px 8px 3px calc(8px + var(--pc, calc(2ch + 8px))); cursor: pointer;
+}
+.log-line.xp .xr { display: flex; flex-wrap: wrap; gap: 3px 14px; font: 10px/1.5 var(--mono); color: var(--ts); }
+.log-line.xp .lab { color: var(--tm); }
+.log-line.xp .kv b { font-weight: 600; color: var(--t); }
+.log-line.xp .mono { white-space: pre; }
 
 /* ⚠️ 滚动条改窄（用户：原来 ~15px 太抢戏）：6–8px、轨道透明、滑块淡灰。
    ⚠️ **刻意不写 `scrollbar-width` / `scrollbar-color`**：Chrome ≥121 里这两个
@@ -240,7 +363,39 @@ body {
 .ev-bar .track { background: var(--f); height: 6px; }
 .ev-bar .fill { background: #cfcfcf; height: 6px; }
 .ev-bar .num { font: 11px/1.3 var(--mono); color: var(--tm); text-align: right; font-variant-numeric: tabular-nums; }
+/* ── 严重度三条：**同时是联动 L1 与 L3 的入口**（点 ⇒ 过滤、悬停 ⇒ ③ 高亮）──────
+   ⚠️ 选中态用 `outline`（不走 border/height）—— 走 border 会让这一条高 2px，
+      「点一下整块高度变了」在上一轮踩过；outline 不占布局。 */
+.ev-bars.sev .ev-bar { cursor: pointer; }
+.ev-bars.sev .ev-bar.pick .nm { color: var(--t); font-weight: 700; }
+.ev-bars.sev .ev-bar.pick .track { outline: 1px solid #111; }
+.ev-bars.sev .ev-bar.pick .fill { background: #9a9a9a; }
+/* 类清单里那条组名分隔（业务 9 / 设施 3）—— 与 ② 的 `.row.gh` 是同一件事的两种形态 */
+.ev-bar.sep, .ev-bars .sep {
+  display: block; margin: 2px 0 1px; padding-top: 3px; border-top: 1px dashed var(--l2);
+  font: 10px/1.5 var(--mono); color: var(--ts);
+}
 .ev-read { display: flex; flex-wrap: wrap; gap: 4px 16px; border-top: 1px solid var(--l2); margin-top: 6px; padding-top: 6px; font-size: 11px; }
+/* ── ④ Top-N 榜（落点 12）：三档可切（对象 / 慢请求 / 错误）───────────────────
+   ⚠️ 错误档本窗**恒空**（error 0 条）⇒ 画的是**空态文案**，不是假数据。 */
+.ev-top { display: flex; flex-direction: column; gap: 3px; }
+.ev-top .tabs { display: inline-flex; gap: 4px; }
+.ev-top .tb {
+  font: 10px/1.6 var(--mono); color: var(--tm); background: #fff;
+  border: 1px solid var(--l2); padding: 0 7px; cursor: pointer;
+}
+.ev-top .tb.on { background: var(--f2); color: var(--t); font-weight: 700; }
+.ev-top .lst { display: flex; flex-direction: column; gap: 1px; }
+.ev-top .tr1 {
+  display: grid; grid-template-columns: minmax(0, 1fr) 68px 34px; gap: 6px;
+  font: 10px/1.6 var(--mono); color: var(--tm);
+}
+.ev-top .tr1 .nm { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--t); }
+.ev-top .tr1 .v { text-align: right; font-variant-numeric: tabular-nums; }
+.ev-top .empty { font: 10px/1.5 var(--mono); color: var(--ts); background: var(--f); padding: 3px 6px; }
+.ev-top .cap { font: 10px/1.4 var(--mono); color: var(--ts); }
+/* ④ 的小标题（甲：右栏里 Top-N 与类计数各占一段）*/
+.ev-sub { font: 10px/1.5 var(--mono); color: var(--tm); padding-bottom: 3px; margin-top: 2px; }
 /* ④ 的体：甲 是右栏里可滚的一块（窗口矮时读数不被切掉） */
 .ev-live-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 7px 10px 8px; }
 .ev-read i { display: block; font: 15px/1.2 var(--mono); font-style: normal; font-weight: 600; color: var(--t); }
@@ -270,6 +425,23 @@ body {
 .ev-drawer .hd .pv { flex: 1 1 auto; min-width: 0; font: 10px/1.5 var(--mono); color: var(--ts);
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ev-drawer .note { padding: 0 12px 5px; font: 10px/1.5 var(--mono); color: var(--ts); }
+/* ── ⑤ 的「关联跳转」行（落点 13）───────────────────────────────────────────
+   ⚠️ **一行定死**（`flex-wrap: nowrap` + 各段自己省略）：⑤ 一变高，③ 就被压矮、
+      整页底部跟着跳 —— 「点一下取消选中，③ 的可视高从 296 变 321」就是这条踩出来的。
+      两个状态（有跳转 / 取不到）都只有一行 ⇒ 页高不随选中变。 */
+.ev-drawer .jr {
+  display: flex; align-items: center; gap: 8px; flex-wrap: nowrap; overflow: hidden;
+  padding: 0 12px 5px; font: 10px/1.5 var(--mono); color: var(--ts);
+}
+.ev-drawer .jr > * { flex: 0 0 auto; }
+.ev-drawer .jr .lab { color: var(--tm); }
+.ev-drawer .jr .jm {
+  border: 1px solid var(--l2); background: #fff; padding: 0 6px; color: var(--t);
+  flex: 0 0 auto; max-width: 240px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.ev-drawer .jr .jm:hover { background: var(--f2); }
+.ev-drawer .jr .jm.dead { border-style: dashed; color: var(--ts); background: #fff; }
+.ev-drawer .jr .hint { color: var(--ts); flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* ══ 八、⑥ 开关栏（3a.6 乙案的防护 / 注入开关；本页只占位，不接行为）═══════ */
 .ev-switch { flex: 0 0 auto; display: flex; align-items: center; gap: 14px; flex-wrap: wrap; padding: 5px 12px; font-size: 11px; }
@@ -285,13 +457,33 @@ body {
 .ev-bing .righter { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
 /* 右列里：仪表带**定高**，事件流吃掉剩下的高（它才是会无限长的那个） */
 .ev-bing .righter > .ev-col { flex: 1 1 auto; }
+/* ⚠️ 四格（2026-10-16 起）：速率 / 类计数 / 严重度+读数 / Top-N。
+   格宽实测可调，别按视觉猜 —— 探针量的是「每格内容有没被切」（`scrollHeight > clientHeight`）。*/
 .ev-bing .band {
-  flex: 0 0 auto; display: grid; grid-template-columns: minmax(0, 1fr) 268px 216px; border-bottom: 1px solid var(--l);
+  flex: 0 0 auto; display: grid;
+  grid-template-columns: minmax(0, 1fr) 236px 214px 232px;
+  border-bottom: 1px solid var(--l);
 }
 .ev-bing .band .cell { display: flex; flex-direction: column; gap: 2px; min-width: 0; padding: 4px 10px 5px; }
 .ev-bing .band .cell + .cell { border-left: 1px solid var(--l2); }
 .ev-bing .band .ttl { font: 10px/1.4 var(--mono); color: var(--ts); }
 .ev-bing .band .ev-spark { border-bottom: 0; }
+/* 仪表带里那几块（类计数 12 条 / 严重度 3 条 / Top-N）要比 ④ 的右栏**更紧**：
+   带子只有一屏高的十分之一多，条一松就要把 ③ 压矮。
+   ⚠️ 实测（不是估）：`.ev-bar` 的行高是**被 `line-height` 顶着的**，不是被 5px 的条顶着的 ——
+   12 条 × 15px = 180px，带子就直接 240px（吃掉 ③ 五行的量）。压 `line-height` 才真见效。 */
+.ev-bing .band .ev-bars { gap: 0; }
+.ev-bing .band .ev-bar { grid-template-columns: 62px minmax(0, 1fr) 40px; gap: 6px; font-size: 9px; }
+.ev-bing .band .ev-bar .nm { line-height: 1.2; }
+.ev-bing .band .ev-bar .num { font-size: 9px; line-height: 1.2; }
+.ev-bing .band .ev-bar .track, .ev-bing .band .ev-bar .fill { height: 5px; }
+.ev-bing .band .ev-bars .sep { margin: 1px 0; padding-top: 2px; line-height: 1.3; }
+.ev-bing .band .ev-read { gap: 2px 10px; margin-top: 3px; padding-top: 3px; font-size: 10px; }
+.ev-bing .band .ev-read i { font-size: 12px; }
+.ev-bing .band .ev-top { gap: 1px; }
+.ev-bing .band .ev-top .tb { line-height: 1.4; }
+.ev-bing .band .ev-top .tr1 { grid-template-columns: minmax(0, 1fr) 62px 30px; line-height: 1.35; }
+.ev-bing .band .ev-top .cap { line-height: 1.3; }
 
 /* ── 判据列表（只在页脚 `<details>` 里，**不是页面的一部分**）───────────── */
 .judge { font-size: 11px; line-height: 1.75; color: var(--ts); }

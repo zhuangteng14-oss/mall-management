@@ -1,0 +1,120 @@
+
+=== 甲 · 页宽 1129px · 外框高 1005 · 区块 7 个（= [data-blk] 六区）===
+  [status] header.ev-status  h=83
+        构图: flex | none | column :: div.r1 > div.r2
+        内距 4px: div.ev-src
+        内距 4px: span.tz
+        内距 2px: header.ev-status
+  [flash] div.ev-cond  h=25
+        构图: flex | none | row :: code > b
+  [rail] div.ev-rail  h=746
+        构图: flex | none | column :: div.rl > div.ctl > div.rows > div.sub > div.sev > div.foot
+        内距 116px: div.ev-rail
+        内距 9px: div.rows
+        内距 9px: div.rows
+  [stream] div.ev-col  h=746
+        构图: flex | none | column :: div.ev-spark > div.ev-fix.ev-h2 > div.ev-fix.log-note > div.ev-fix.log-head > div.ev-list.ev-pane
+        内距 8px: div.ev-fix.ev-h2
+        内距 6px: div.ev-col
+        内距 4px: div.ev-col
+  [live] div.ev-col  h=746
+        构图: flex | none | column :: div.ev-fix.ev-h2 > div.ev-live-body
+        内距 21px: div.ev-read
+        内距 13px: div.ev-col
+        内距 13px: div.ev-live-body
+  [drawer] div.ev-drawer  h=86
+        构图: block | none | row :: div.hd > div.jr > div.note
+        内距 5px: div.ev-drawer
+        内距 5px: div.ev-drawer
+  [switch] div.ev-switch  h=62
+        构图: flex | none | row :: b > div.grp > div.grp > span.n
+        内距 14px: div.ev-switch
+  相邻对(C1): 10 对 —— status|flash flash|rail flash|stream flash|live rail|stream rail|drawer stream|live stream|drawer live|drawer drawer|switch
+  等列网格(C2): 无
+  重复兄弟组(C5) 候选 16 组：
+    [卡·候审] div.r1 > 4 × div.cell（自身布局子元素 2 · 容器在数据白名单里）
+    [卡·候审] div.r2 > 3 × span.grp（自身布局子元素 2 · 容器在数据白名单里）
+    [卡·候审] div.ctl > 4 × span.ln（自身布局子元素 2 · 容器在数据白名单里）
+    [卡·候审] div.rows > 4 × div.row（自身布局子元素 3 · 容器在数据白名单里）
+    [卡·候审] div.rows > 8 × div.off.row（自身布局子元素 3 · 容器在数据白名单里）
+    [非卡·标签] div.sev > 3 × span（自身布局子元素 0）
+    [非卡·标签] span.ctrl > 3 × button（自身布局子元素 0）
+    [卡·候审] div.ev-list.ev-pane > 171 × div.log-line.lv-i（自身布局子元素 6 · 容器在数据白名单里）
+    [卡·候审] div.ev-list.ev-pane > 23 × div.log-line.req（自身布局子元素 6 · 容器在数据白名单里）
+    [卡·候审] div.ev-list.ev-pane > 4 × div.log-line.lv-i.sel（自身布局子元素 6 · 容器在数据白名单里）
+    [非卡·标签] div.ev-live-body > 4 × div.ev-sub（自身布局子元素 0）
+    [卡·候审] div.lst > 5 × div.tr1（自身布局子元素 3 · 容器在数据白名单里）
+    [卡·候审] div.ev-bars > 12 × div.ev-bar（自身布局子元素 3 · 容器在数据白名单里）
+    [卡·候审] div.ev-bars.sev > 3 × div.ev-bar（自身布局子元素 3 · 容器在数据白名单里）
+    [卡·候审] div.ev-read > 5 × span（自身布局子元素 1 · 容器在数据白名单里）
+    [非卡·标签] div.grp > 4 × span.sw2（自身布局子元素 0）
+  最大空白带(C6): 0px
+  C3 不适用 —— 六区之间是 1px 分隔线不是空白带（窗口形态里「区块间距」没有对应物）
+  C4 不适用 —— 单栏营销页的左线规则；两栏管理端 + 右对齐数字格天然 ≥3 条
+
+=== 丙 · 页宽 1129px · 外框高 1005 · 区块 7 个（= [data-blk] 六区）===
+  [status] header.ev-status  h=83
+        构图: flex | none | column :: div.r1 > div.r2
+        内距 4px: div.ev-src
+        内距 4px: span.tz
+        内距 2px: header.ev-status
+  [flash] div.ev-cond  h=25
+        构图: flex | none | row :: code > b
+  [rail] div.ev-rail  h=746
+        构图: flex | none | column :: div.rl > div.ctl > div.rows > div.sub > div.sev > div.foot
+        内距 102px: div.ev-rail
+        内距 9px: div.rows
+        内距 9px: div.rows
+  [band] div.band  h=174
+        构图: grid | 225px 236px 214px 232px | row :: div.cell > div.cell > div.cell > div.cell
+        内距 17px: div.ev-read
+        内距 9px: div.cell
+        内距 2px: div.cell
+  [stream] div.ev-col  h=572
+        构图: flex | none | column :: div.ev-fix.ev-h2 > div.ev-fix.log-note > div.ev-fix.log-head > div.ev-list.ev-pane
+        内距 4px: div.ev-col
+        内距 2px: div.ev-list.ev-pane
+        内距 2px: div.ev-list.ev-pane
+  [drawer] div.ev-drawer  h=86
+        构图: block | none | row :: div.hd > div.jr > div.note
+        内距 5px: div.ev-drawer
+        内距 5px: div.ev-drawer
+  [switch] div.ev-switch  h=62
+        构图: flex | none | row :: b > div.grp > div.grp > span.n
+        内距 14px: div.ev-switch
+  相邻对(C1): 9 对 —— status|flash flash|rail flash|band rail|band rail|stream rail|drawer band|stream stream|drawer drawer|switch
+  等列网格(C2): 无
+  重复兄弟组(C5) 候选 16 组：
+    [卡·候审] div.r1 > 4 × div.cell（自身布局子元素 2 · 容器在数据白名单里）
+    [卡·候审] div.r2 > 3 × span.grp（自身布局子元素 2 · 容器在数据白名单里）
+    [卡·候审] div.ctl > 4 × span.ln（自身布局子元素 2 · 容器在数据白名单里）
+    [卡·候审] div.rows > 4 × div.row（自身布局子元素 2 · 容器在数据白名单里）
+    [卡·候审] div.rows > 8 × div.off.row（自身布局子元素 2 · 容器在数据白名单里）
+    [非卡·标签] div.sev > 3 × span（自身布局子元素 0）
+    [卡·候审] div.band > 4 × div.cell（自身布局子元素 2 · 容器在数据白名单里）
+    [卡·候审] div.ev-bars > 12 × div.ev-bar（自身布局子元素 3 · 容器在数据白名单里）
+    [卡·候审] div.ev-bars.sev > 3 × div.ev-bar（自身布局子元素 3 · 容器在数据白名单里）
+    [卡·候审] div.ev-read > 5 × span（自身布局子元素 1 · 容器在数据白名单里）
+    [卡·候审] div.lst > 5 × div.tr1（自身布局子元素 3 · 容器在数据白名单里）
+    [非卡·标签] span.ctrl > 3 × button（自身布局子元素 0）
+    [卡·候审] div.ev-list.ev-pane > 171 × div.log-line.lv-i（自身布局子元素 6 · 容器在数据白名单里）
+    [卡·候审] div.ev-list.ev-pane > 23 × div.log-line.req（自身布局子元素 6 · 容器在数据白名单里）
+    [卡·候审] div.ev-list.ev-pane > 4 × div.log-line.lv-i.sel（自身布局子元素 6 · 容器在数据白名单里）
+    [非卡·标签] div.grp > 4 × span.sw2（自身布局子元素 0）
+  最大空白带(C6): 0px
+  C3 不适用 —— 六区之间是 1px 分隔线不是空白带（窗口形态里「区块间距」没有对应物）
+  C4 不适用 —— 单栏营销页的左线规则；两栏管理端 + 右对齐数字格天然 ≥3 条
+OK   甲 · 区块 = 六区 + 条件块 flash（C1/C7 才有对象可量，不是空过）  → "7 个"
+OK   甲 · C1 相邻区块不共用构图（10 对相邻）  → "status|flash flash|rail flash|stream flash|live rail|stream rail|drawer stream|live stream|drawer live|drawer drawer|switch"
+OK   甲 · C2 无「≥3 等列 + ≥3 同构子元素」的网格  → "本页无等列网格"
+OK   甲 · C6 无近空屏（最大空白带 < 300px）  → "0px"
+OK   甲 · C7 首块之后没有回到同一构图  → "0 个"
+OK   甲 · C5 候选全摆出来（**真命中与否由台账逐条裁决，探针不下判**）  → "卡·候审 12 组：div.r1>4×div.cell / div.r2>3×span.grp / div.ctl>4×span.ln / div.rows>4×div.row / div.rows>8×div.off.row / div.ev-list.ev-pane>171×div.log-line.lv-i / div.ev-list.ev-pane>23×div.log-line.req / div.ev-list.ev-pane>4×div.log-line.lv-i.sel / div.lst>5×div.tr1 / div.ev-bars>12×div.ev-bar / div.ev-bars.sev>3×div.ev-bar / div.ev-read>5×span｜非卡·标签 4 组（div.sev span.ctrl div.ev-live-body div.grp）"
+OK   丙 · 区块 = 六区 + 条件块 flash（C1/C7 才有对象可量，不是空过）  → "7 个"
+OK   丙 · C1 相邻区块不共用构图（9 对相邻）  → "status|flash flash|rail flash|band rail|band rail|stream rail|drawer band|stream stream|drawer drawer|switch"
+OK   丙 · C2 无「≥3 等列 + ≥3 同构子元素」的网格  → "本页无等列网格"
+OK   丙 · C6 无近空屏（最大空白带 < 300px）  → "0px"
+OK   丙 · C7 首块之后没有回到同一构图  → "0 个"
+OK   丙 · C5 候选全摆出来（**真命中与否由台账逐条裁决，探针不下判**）  → "卡·候审 13 组：div.r1>4×div.cell / div.r2>3×span.grp / div.ctl>4×span.ln / div.rows>4×div.row / div.rows>8×div.off.row / div.band>4×div.cell / div.ev-bars>12×div.ev-bar / div.ev-bars.sev>3×div.ev-bar / div.ev-read>5×span / div.lst>5×div.tr1 / div.ev-list.ev-pane>171×div.log-line.lv-i / div.ev-list.ev-pane>23×div.log-line.req / div.ev-list.ev-pane>4×div.log-line.lv-i.sel｜非卡·标签 3 组（div.sev span.ctrl div.grp）"
+
+3a3 tastecheck（结构子集）: 12 项 / 0 失败

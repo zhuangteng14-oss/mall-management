@@ -254,7 +254,96 @@ for (let i = 0; i < chrono.length; i++) {
     used.add(e.seq)
   }
 }
-/* 前导符：顶层 ├─／└─；组内子行 │  ├─ / │  └─；组首顶格（同 txt 里的树） */
+/* ── 时刻列：**同拍内按时刻「组级」稳定排序**（用户 2026-10-16 裁定「乙」）────────
+   口径逐条照裁定：只在**同一拍内**排 · 同 ts 保环序（稳定排序）· **跨拍顺序一字不动** ·
+   后端 `EventBroadcaster` 的合并环口径（同拍内是环序、不是时刻序）一字不动。
+   ③ 的说明里补了那句：「同拍内按时刻局部排，跨拍按环序」。
+
+   ⚠️ 排序的**单位是「组」不是「行」** —— 这是量出来的，不是口味：
+     · 行级排序（同拍内逐行排）能把逆序修成 0，但会**打散 29 个组、牵动 174 行**：
+       组内相邻行本来就时刻递增（实测组内逆序 0 处），28 处同拍逆序**全部**来自
+       「上一组的尾行 vs 下一组的组首」这种**并发重叠**（如 tr388 的结束行 17:53:26.174
+       排在 tr389 的组首 17:53:26.171 之后）—— 要修它只能把**别的 trace 的行插进本组中间**，
+       与已裁定的「同 trace 用前导符归组」（`├─` / `│  ├─` / `│  └─`）直接冲突，
+       `└─` 会闭在一个不属于它的位置上。
+     · 组级排序（同一拍内按**组首行**的时刻排、同 ts 保环序）保住了组：
+       实测 28 处同拍逆序里修掉 5 处（组首 vs 组首那种）、位移 10 / 865 个 block 槽位。
+     ⇒ 落地形态 = **组级稳定排序**。修不掉的那 23 处是并发重叠的固有代价，
+       **如实记账、不假装修掉了**（报告里写清「逆序 0」与「组不碎」不能两全）。
+   ⚠️ 跨拍的 block（实测 1 个：组的成员被「顺延」到组首之后、拍号不齐）**不参与排序**，
+     它当一道隔断，把它前后两段各自排序 —— 跨拍重排正是被禁的那件事。 */
+const tsNum = (s) => {
+  const m = /(\d+):(\d+):(\d+)\.(\d+)/.exec(s)
+  return m ? ((+m[1]) * 3600 + (+m[2]) * 60 + (+m[3])) * 1000 + (+m[4]) : 0
+}
+const blocks = []
+for (let i = 0; i < rows.length; i++) {
+  const g = rows[i].gid
+  if (!blocks.length || g < 0 || blocks[blocks.length - 1].gid !== g) blocks.push({ gid: g, from: i, to: i, t: rows[i].t })
+  else blocks[blocks.length - 1].to = i
+}
+let blockMoved = 0, blockFirstMoved = -1, blockBarrier = 0
+const blockBarrierInfo = []
+{
+  const pick = []
+  let run = [], runT = null
+  const flushRun = () => {
+    if (run.length > 1) {
+      run = run
+        .map((k, j) => ({ k: k, j: j, ts: tsNum(rows[blocks[k].from].ts) }))
+        .sort((x, y) => (x.ts - y.ts) || (x.j - y.j))       // 同 ts 保环序 ⇒ 稳定排序
+        .map((x) => x.k)
+    }
+    run.forEach((k) => pick.push(k))
+    run = []; runT = null
+  }
+  /* 「同一拍内」的判据是**整组都在同一拍**，不是「首行尾行同拍」（实测踩过：有个组的拍号是
+     [5,6,5] —— 首尾同号、中间跳了一拍，只比首尾会把跨拍的组当成本拍内、排错位）。 */
+  const oneTick = (b) => { const t = rows[b.from].t; for (let i = b.from + 1; i <= b.to; i++) if (rows[i].t !== t) return false; return true }
+  blocks.forEach((b, k) => {
+    if (!oneTick(b)) {                                                       // 跨拍组：隔断，原地不动
+      flushRun(); pick.push(k); blockBarrier++
+      const ts = []; for (let i = b.from; i <= b.to; i++) ts.push(rows[i].t)
+      blockBarrierInfo.push('组#' + b.gid + '（行 ' + b.from + '–' + b.to + '，拍号 ' + ts.join(',') + '）')
+      return
+    }
+    if (runT !== null && b.t !== runT) flushRun()
+    runT = b.t
+    run.push(k)
+  })
+  flushRun()
+  pick.forEach((k, j) => { if (k !== j) { blockMoved++; if (blockFirstMoved < 0) blockFirstMoved = j } })
+  const out = []
+  pick.forEach((k) => { for (let i = blocks[k].from; i <= blocks[k].to; i++) out.push(rows[i]) })
+  rows.splice(0, rows.length, ...out)
+}
+/* 判据要用的三个数（**现算**，不写死：换了抓帧这三条就变）：同拍内行级逆序 / 跨拍逆序 /
+   行级排序会打散多少组 —— 让「组级排序保住了组」这句话有数可对。 */
+let invInTick = 0, invCross = 0
+for (let i = 1; i < rows.length; i++) {
+  if (tsNum(rows[i].ts) >= tsNum(rows[i - 1].ts)) continue
+  if (rows[i].t === rows[i - 1].t) invInTick++; else invCross++
+}
+let brokenGroups = 0, brokenRows = 0
+{
+  const pos = new Map()                       // 行号 → 若按「同拍内逐行稳定排序」它会在第几位
+  const byT = {}
+  rows.forEach((r, i) => { (byT[r.t] = byT[r.t] || []).push(i) })
+  Object.keys(byT).forEach((t) => {
+    const arr = byT[t].map((i, j) => ({ i: i, j: j, ts: tsNum(rows[i].ts) }))
+      .sort((x, y) => (x.ts - y.ts) || (x.j - y.j))
+    arr.forEach((x, j) => pos.set(x.i, j))
+  })
+  blocks.forEach((b) => {
+    if (b.gid < 0 || b.to === b.from) return
+    for (let i = b.from + 1; i <= b.to; i++) {
+      if (pos.get(i) !== pos.get(i - 1) + 1) { brokenGroups++; brokenRows += b.to - b.from + 1; break }
+    }
+  })
+}
+/* 前导符：顶层 ├─／└─；组内子行 │  ├─ / │  └─；组首顶格（同 txt 里的树）
+   ⚠️ 这一步**排在排序之后**：组的首末行可能换了位置（末行该是 `└─`），
+      排序先做、前导符后算，才不会把 `└─` 留在一条不再收尾的行上。 */
 rows.forEach((r, i) => {
   const lastRow = i === rows.length - 1
   const g = r.gid
@@ -297,6 +386,58 @@ const stats = {
   droppedTotal: num(last.droppedTotal), demoFed: 0,
 }
 
+/* ── 设施 3 类（用户 2026-10-16 裁定的「补齐 3 个后端面」）──────────────────────
+   ⚠️ 它们是**类**、不是「源」—— 与既有 9 类**同构**、走同一条筛选路径（裁定原话：
+      「慢 SQL / MQ / 调度 → 变成『类』」）。所以它们进 `kinds`，不出现在「源」里。
+   ⚠️ 本窗 **0 条是实话**：那 3 个后端面还没落地（A 档：`SlowSqlListener` 事件化 /
+      MQ 的 publish·consume·DLQ 事件化 / 7 个 `@Scheduled` 入口各包一层记录器）⇒
+      数据里当然还没有它们。与既有 9 类里那 5 个 0 条的类**同样对待**：
+      **如实显示 0，不补数、也不置灰**（置灰等于说「它本来就不该有数」，那是假话）。
+   ⚠️ `KINDS`（来自真页面 `observe-labels.js`）**不动**：那 3 类还没写进真页面，
+      草图这一侧先把「类清单分两组」的结构画出来，落地在 A 档与 `observe-labels.js` 一起加。 */
+const FAC_KINDS = [
+  { k: 'slow_sql', label: '慢 SQL', n: 0, grp: 'fac' },
+  { k: 'mq', label: 'MQ', n: 0, grp: 'fac' },
+  { k: 'scheduler', label: '调度', n: 0, grp: 'fac' },
+]
+/* 「源」缩成 2 项（同一裁定）：事件流 + 演练轮询。 */
+const SOURCES = [
+  { k: 'events', label: '事件流', n: events.length, on: true },
+  { k: 'drill', label: '演练轮询', n: 0, on: true },
+]
+
+/* ── ① / ④ 的读数：错误率与延迟分位（**都由本窗真数据现算**）───────────────────
+   ⚠️ 本窗实测：P50 2 · P95 62 · P99 76 ms（n=212，最大 79）—— 分布**不是一条直线**，
+      所以「画不出趋势线」这句话**不成立，不许写**（本轮之前草稿里写过「耗时全是 200 ms」，
+      那是把 traces 记录的 **HTTP 状态码 200** 当成了耗时，实测当场证伪）。
+      ④ 只给**读数**的理由是：这一轮裁定的是「Top-N 榜 + 错误率 / P99 读数」，
+      趋势线不在裁定范围内 —— 不是因为它画不出来。 */
+const sevAgg = { info: bySev.info || 0, warn: bySev.warn || 0, error: bySev.error || 0, total: events.length }
+const latMs = TRACE_REC.filter(Boolean).map((r) => r[2]).sort((a, b) => a - b)
+const qtl = (p) => (latMs.length ? latMs[Math.min(latMs.length - 1, Math.floor(p * latMs.length))] : 0)
+const lat = {
+  n: latMs.length, p50: qtl(0.5), p95: qtl(0.95), p99: qtl(0.99),
+  max: latMs.length ? latMs[latMs.length - 1] : 0,
+  flat: latMs.length > 1 && latMs.every((v) => v === latMs[0]),
+}
+
+/* ── ④ Top-N 榜（三档可切：对象 / 慢请求 / 错误）──────────────────────────────
+   ⚠️ 错误榜本窗**恒空**（error 0 条）—— 空态是这一块要说的话之一，**不塞假数据**。 */
+const tally = (arr) => { const m = new Map(); arr.forEach((x) => m.set(x, (m.get(x) || 0) + 1)); return m }
+const topObj = [...tally(events.map(objText).filter(Boolean)).entries()]
+  .sort((a, b) => (b[1] - a[1]) || String(a[0]).localeCompare(String(b[0]))).slice(0, 5)
+const byPath = new Map()
+TRACE_REC.forEach((r) => {
+  if (!r) return
+  const key = r[0] + ' ' + r[1]
+  const cur = byPath.get(key) || { ms: 0, n: 0 }
+  byPath.set(key, { ms: Math.max(cur.ms, r[2]), n: cur.n + 1 })
+})
+const topSlow = [...byPath.entries()]
+  .sort((a, b) => (b[1].ms - a[1].ms) || (b[1].n - a[1].n)).slice(0, 5)
+  .map(([key, v]) => [key, v.ms, v.n])
+const topErr = chrono.filter((e) => e.severity === 'error').slice(0, 5).map((e) => [e.title, hmsms(e.ts)])
+
 /* ── 判定条（两版各一份；数字全部现算，不写死）────────────────────────────── */
 const j = (a) => JSON.stringify(a)
 const pct = (n, d) => (d ? Math.round((n / d) * 1000) / 10 : 0) + '%'
@@ -306,11 +447,14 @@ const sevTxt = SEVERITIES.map((s) => SEVERITY_LABEL[s] + ' ' + (bySev[s] || 0)).
 const head =
   '<b>结构判据（本页不是设计稿，是拿来比构图的）</b>' +
   '<ul>' +
-  '<li><b>〇 窗口化</b>（这一轮的最高优先判据，来自你 2026-10-16 的两次裁定）：整页 = <b>一屏</b> —— ' +
-  ' ① … ⑥ 六区全落在首个视口内、不用滚动；内容区是一个<b>大外框</b>（区与区之间只用一条 1px 分隔线，' +
-  ' 不留空白带）；<b>事件流在框内自己滚</b>，页面高度 = 视口高度、<b>不随数据增长</b>。' +
-  ' 最后一条不是靠说的：探针往事件流里<b>临时塞 200 张卡</b>再比三个数 —— 文档高不变、事件流可视高不变、' +
-  ' 事件流的 scrollHeight 变大；只量「有没有滚动条」是不够的（页面自己滚起来也有滚动条）。</li>' +
+  '<li><b>〇 窗口化（本轮的页高口径已改）</b>：整页高度是<b>一个定值</b>（= 视口 × 1.32，1440×900 下 ' +
+  ' <b>1188px</b>），内容再多也<b>不涨</b>；六区全落在<b>页内</b>，区与区只用一条 1px 分隔线、不留空白带；' +
+  ' <b>事件流在框内自己滚</b>。' +
+  ' ⚠️ 上一轮的口径是「六区全落在<b>首个视口</b>内、整页不滚」；本轮你裁定<b>页高留 60–80px 余量</b>' +
+  '（上限是视口 × 1.4 = 1260px，取 1188px ⇒ 留 <b>72px</b>），代价是 <b>⑤⑥ 要往下滚一次才看得到</b> ——' +
+  ' 这是<b>批准过的</b>取舍，不是回归。' +
+  ' 「不随数据长」这条不是靠说的：探针往事件流里<b>临时塞 200 行</b>再比三个数 —— 文档高不变、' +
+  ' 事件流可视高不变、事件流的 scrollHeight 变大；只量「有没有滚动条」是不够的（页面自己滚起来也有滚动条）。</li>' +
   '<li><b>③ 事件流 = 控制台行</b>（你 2026-10-16 逐条裁定的主改，本笔的核心）：' +
   ' 每条<b>一行</b>（不是卡片、不是两行）；<b>无复选框、无左侧竖线、无右侧独立列</b> —— traceId 併进 msg 行尾；' +
   ' 等级用<b>文字</b> INFO / WARN / ERROR（不是色块；本窗 error 0 条 ⇒ 只有 INFO 看得见）；' +
@@ -322,6 +466,41 @@ const head =
   ' 高频追加按 60ms 合成一次动画；手动滚即打断、滚回底部 8px 内自动恢复。' +
   ' ⚠️ 这里有两处是<b>本版改法</b>不是现状：真页面是「新的在上 + <code>pageRows</code> 分页表」且每条两行；' +
   ' 本版改成时间正序、从底部追加、每条一行、DOM 只留最近 <code>' + ROW_MAX + '</code> 行。</li>' +
+  '<li><b>③ 时刻列：同拍内按时刻局部排，跨拍按环序</b>（你 2026-10-16 裁定「乙」）。' +
+  ' 口径三条：只在<b>同一拍内</b>排 · <b>同 ts 保环序</b>（稳定排序）· <b>跨拍顺序一字不动</b>；' +
+  ' 后端 <code>EventBroadcaster</code> 的合并环口径（同拍内是<b>环序</b>、不是时刻序）也一字不动。' +
+  ' ⚠️ 排序的<b>单位是「组」不是「行」</b>，这是量出来的：行级排序能把逆序修成 0，' +
+  ' 但会<b>打散 29 个组、牵动 174 行</b>（组内本来就递增，逆序全来自「上一组的尾行 vs 下一组的组首」' +
+  ' 这种<b>并发重叠</b>）⇒ 与「同 trace 用前导符归组」直接冲突。' +
+  ' 落地为<b>组级稳定排序</b>：实测修掉 5 处、位移 ' + blockMoved + ' / ' + blocks.length +
+  ' 个组槽位，剩下的 23 处是并发重叠的固有代价，<b>如实记账、不假装修掉了</b>。</li>' +
+  '<li><b>③ 行内三种交互（不占列）</b>：hover 整行时浮出「复制本行 / 只看这条 trace / 暂停跟随」三键' +
+  '（<b>绝对定位</b>，不占栅格列 —— 占了列就不是 6 列了）；<b>对象可点</b>（点对象 ⇒ 把它填进 ② 的对象筛选并真过滤）；' +
+  ' 点行内「展开」⇒ 在<b>本行下面插一行</b>原始字段（插行期间锁住自动跟随，再点收起）。' +
+  ' ⚠️ 展开行跟着 ③ 内部滚、<b>不动页高</b>（探针实测）。</li>' +
+  '<li><b>① 两排 + 就近（你裁定「不合，但要就近」）</b>：上排读数（健康灯 / 事件 / 速率 / 链路 / <b>错误率</b> / P99 / ' +
+  ' 严重度 mini 三色条），下排控件（时间范围 / 导出 CSV·JSON / 密度两档 / MQ 状态点），数据源仍在<b>页头右上</b>、' +
+  ' 「已放 N / 500 条」常驻。错误率与严重度分布<b>物理相邻</b>（同排紧挨着）—— 这是那句「可以有个联动」的落点：' +
+  ' 调一下距离，L1/L2 的视线路径就是短的。</li>' +
+  '<li><b>② 类清单分两组（业务 9 + 设施 3）+ 「源」缩成 2 项</b>：同一套筛选路径、只多一条 1px 分组线 ——' +
+  ' 慢 SQL / MQ / 调度是<b>类</b>、不是源（你的裁定）。丙 版 ② <b>去掉了计数列</b>（数字只在右栏出现一次，' +
+  ' 不留「—」占位）。⚠️ 设施 3 类本窗 <b>0 条是实话</b>（那 3 个面还没落地，见下一条）——' +
+  ' 与既有 9 类里那 5 个 0 条的类<b>同样对待</b>：如实显示 0，<b>不补数、也不置灰</b></li>' +
+  '<li><b>④ 加了 Top-N 榜与两个读数</b>：榜三档可切（对象 / 慢请求 / 错误，<b>错误榜恒空</b>，空态写明）；' +
+  ' 读数给出错误率与 P50/P95/P99（本窗实测 P50 ' + lat.p50 + ' / P95 ' + lat.p95 + ' / P99 ' + lat.p99 +
+  ' ms，n=' + lat.n + '）—— 这一轮裁的就是「榜 + 读数」，<b>趋势线不在裁定范围内</b>（不是画不出来）。' +
+  ' 联动三档：<b>L1 必做</b>（点三色条某档 ⇒ 勾 ② 并过滤 ③）、<b>L2 必做</b>（错误率 &gt; 0 ⇒ 脉冲 + 变红）、' +
+  ' <b>L3 可选做了</b>（悬停某档 ⇒ ③ 里该档的行短暂高亮）。' +
+  ' ⚠️ 本窗 warn/error <b>都是 0</b> ⇒ L1/L2 <b>天然不可达</b>：探针先<b>注入</b>一条 error 再量，' +
+  ' 不注入就是假绿（你点名的验收前提）。</li>' +
+  '<li><b>⑤ 加了「关联跳转」行</b>（64 → 88px）：从选中号的 traces 记录里取路径推断跳转目标' +
+  '（订单 / 商品 / 用户），取不到就写「没有 traces 记录 ⇒ 跳转目标取不到」。' +
+  ' ⚠️ ⑤ <b>有选中 / 没选中两种状态下高度相同</b>（探针实测）—— ⑤ 一变高，③ 就被压矮、页底就跳。</li>' +
+  '<li><b>设施 3 类背后要补 3 个后端面（A 档，本轮只画结构）</b>：<code>SlowSqlListener</code> 加环形缓冲 + 事件化' +
+  '（现在是 <code>log.warn</code> 一行）· MQ 的 publish / consume / DLQ 事件化 · 7 个 <code>@Scheduled</code> 入口各包一层记录器。' +
+  ' 两条口径照你的裁定：慢 SQL <b>同模板 5 秒去重 + 每秒封顶 20 条</b>；调度<b>只在有动作 / 失败时记</b>（不是每轮都记，' +
+  ' 那两个 15s 的 job 每轮一条就是恒定噪声）。⚠️ 与此同批登记为「升 A 档要处理的前提」：' +
+  ' A1 后端聚合端点（本轮仍走前端合并）、A5 后端时序保证、A6 解开单例 <code>sentSeq</code> / <code>FramePacer</code>。</li>' +
   '<li><b>C1 相邻区块不同构</b>：① 一排读数 ／ ② 竖排清单 ／ ③ 滚动日志行 ／ ④ 横条＋读数 ／ ⑤ 有序链 ／ ⑥ 开关排' +
   ' —— 六块六种形态，没有两块共用布局。⚠️ 窗口化之后区块<b>直接相接</b>（间距 0，只隔一条分隔线），' +
   ' 于是「相接就算相邻」——这一轮实测 甲 <b>10 对</b>／丙 <b>9 对</b>相邻。' +
@@ -339,11 +518,14 @@ const head =
   '<li><b>各区宽度</b>：<b>实数由探针在 1440 视口量</b>（主区可用宽 = 客户区宽 − 壳侧栏 232 − 主区左右各 32；' +
   ' 滚动条宽实测，不写常数）。⚠️ 这一轮整页不再滚 ⇒ <b>页面级滚动条可能根本不存在</b>（实测 0px），' +
   ' 滚动条改由<b>事件流自己</b>吃掉 —— 宽度账因此与上一轮不同，这正是不许写常数的原因。</li>' +
-  '<li><b>8 处动效落点</b>：页面上带 <code>[data-anim]</code> 角标的元素即为落点，逐个数得出 8 个。' +
-  ' 其中 1（新行从底部进）/ 2（旧内容上移）/ 5（error 闪红）落在<b>同一个列表容器</b>上，' +
+  '<li><b>13 处动效落点</b>：页面上带 <code>[data-anim]</code> 角标的元素即为落点，逐个数得出 13 个。' +
+  ' 其中 1（新行从底部进）/ 2（旧内容上移）/ 5（error 闪红）/ 11（上下文展开）落在<b>同一个列表容器</b>上，' +
   ' 4（计数滚动）/ 7（图例闪）落在<b>同一个数字</b>上 —— 合成逗号列表是刻意的，拆成两个元素反而是假结构。' +
-  ' 6（同号高亮）的<b>效果</b>落在 ③ 的行上（微染）、<b>触发</b>在 ⑤，标记留在 ⑤ 那一处 —— ' +
-  ' 一元素一标号，这样「数一数是不是 8 个」才数得清。</li>' +
+  ' 6（同号高亮）的<b>效果</b>落在 ③ 的行上（微染）、<b>触发</b>在 ⑤，标记留在 ⑤ 那一处。' +
+  ' ⚠️ 上一轮是 8 处，本轮加了 5 处、全部来自你这次的裁定：' +
+  ' 9（联动 L1：点严重度档 ⇒ 勾上 ② 的档位并<b>真过滤</b> ③）、10（联动 L2：错误率 &gt; 0 ⇒ 读数脉冲两次 + 变红）、' +
+  ' 11（上下文展开）、12（④ 榜单切档重排）、13（⑤ 关联跳转）。' +
+  ' 一元素一标号，这样「数一数是不是 13 个」才数得清。</li>' +
   '<li><b>三样易漏项</b>：⑤ 的「起止两行只来自 traces ⇒ 模拟日常下恒空」写在 ⑤ 的注里；' +
   ' ③ 的「淘汰卡片时要<b>把它的 seq 也从 seenSeq 摘掉</b>」（现页面 <code>EventLog.vue</code> 里真有这行）' +
   ' 写在 ③ 的表头；「图例 9 类、数字是<b>本页窗口内累计</b>不是帧里 counts」写在 ② 的脚注与 ④ 的标题里。</li>' +
@@ -360,9 +542,10 @@ const head =
     ' 条</b>、页面窗口 <b>' + (bySev.warn || 0) + ' 条</b> ——' +
     '缓存一类占了大头，稀有的类会被 <b>1000 条</b>的封顶<b>挤出窗口</b>，页面上从此看不见。' +
     '（如实显示，<b>不补数</b>；这是本步发现的真问题，处置留给你裁。）</li>' +
-  '<li>9 类里页面窗口<b>有量 </b>' + present.length + ' 类、<b>0 条 </b>' + absent.length + ' 类：' +
+  '<li>业务 9 类里页面窗口<b>有量 </b>' + present.length + ' 类、<b>0 条 </b>' + absent.length + ' 类：' +
     (absent.length ? absent.map((k) => KIND_LABEL[k]).join(' · ') + ' —— 是负载没走到那几条路径、' +
-      '还是那几环没接通，本步<b>不下结论</b>。' : '（无 0 条的类）') + '</li>' +
+      '还是那几环没接通，本步<b>不下结论</b>。' : '（无 0 条的类）') +
+    '（设施 3 类整类为 0，原因不同：那 3 个后端面还没落地）</li>' +
   '<li>严重度（页面窗口）：' + sevTxt + ' ⇒ <b>error 0 条</b>，「error 卡片闪红」这一处本窗没有可演示的卡片（落点在，见 ③）。</li>' +
   '</ul>'
 
@@ -370,15 +553,18 @@ const judgeJia = head +
   '<b>这一版（甲 · 三栏驾驶舱）的结构主张</b><ul>' +
   '<li>左「选」／中「看」／右「量」，一栏一句话说得清。</li>' +
   '<li>折线是<b>中区顶部的一条横幅</b>（③ 的一部分），不另立一栏。</li>' +
-  '<li>9 类计数在 <b>② 过滤栏行尾</b>（图例兼筛选，数字就在开关旁边）。</li>' +
-  '<li>代价：中区被左右两栏夹住 ⇒ 卡片用<b>窄列版</b>（隐去严重度列与 traceId 列）。</li>' +
+  '<li>12 类计数在 <b>② 过滤栏行尾</b>（图例兼筛选，数字就在开关旁边），并按<b>业务 9 / 设施 3</b> 分组。</li>' +
+  '<li>④ 右栏自上而下：<b>Top-N 榜</b>（对象 / 慢请求 / 错误 三档可切）→ 12 类计数 → 严重度分布 → 读数。</li>' +
+  '<li>代价：中区被左右两栏夹住 ⇒ 消息列是三版里最窄的（明细先让位、traceId 永不收缩）。</li>' +
   '</ul>'
 const judgeBing = head +
   '<b>这一版（丙 · 上下分区）的结构主张</b><ul>' +
   '<li>上半「仪表带」看数、下半「事件流」看流，各自拿满宽。</li>' +
-  '<li>仪表带里三格<b>不同宽、不同形态</b>：折线（最宽）／ 9 类计数条 ／ 严重度分布＋读数。</li>' +
-  '<li>9 类计数<b>只出现在仪表带</b>；② 过滤栏因此只留类名与开关状态（避免同一份数字在屏幕上出现两次）。</li>' +
-  '<li>收益：中区<b>最宽</b>，卡片用满列（时间戳到毫秒、traceId 可见），tail -f 最舒服。</li>' +
+  '<li>仪表带四格<b>不同宽、不同形态</b>：折线（最宽）／ 12 类计数条 ／ 严重度分布＋读数 ／ Top-N 榜。</li>' +
+  '<li>12 类计数<b>只出现在仪表带</b>；② 过滤栏因此只留类名与开关状态 —— <b>连计数列都没有</b>' +
+  ' <b>（不是画个「—」占位）</b>。<b>同一份数字不在屏幕上出现两次</b>（「严重度 mini 三色条」是<b>比例条</b>，' +
+  ' 不是数字，那是 ① 与 ④ 相就近的联动落点，不算重复计数）。</li>' +
+  '<li>收益：消息列<b>最宽</b>（时间戳到毫秒、traceId 可见），tail -f 最舒服。</li>' +
   '</ul>'
 const judge = { jia: judgeJia, bing: judgeBing }
 
@@ -394,8 +580,23 @@ B.push('  clock: ' + J(clock) + ',')
 B.push('  rowMax: ' + ROW_MAX + ',')
 B.push('  stats: ' + J(stats) + ',')
 B.push('  rate: ' + J(rate) + ',')
-B.push('  kinds: ' + J(KINDS.map((k) => ({ k: k, label: KIND_LABEL[k], n: byKind[k] || 0 }))) + ',')
+/* 类清单分两组：业务 9（下标 0–8，**行的 `k` 就是这套下标、不许动**）+ 设施 3（下标 9–11）。 */
+B.push('  /* 类：业务 9（grp=biz，行里的 k 用这套下标）＋ 设施 3（grp=fac，本窗 0 条）*/')
+B.push('  kinds: ' + J(KINDS.map((k) => ({ k: k, label: KIND_LABEL[k], n: byKind[k] || 0, grp: 'biz' }))
+  .concat(FAC_KINDS)) + ',')
+B.push('  /* 「源」= 2 项（裁定：慢 SQL / MQ / 调度 归入「类」，不单列成源）*/')
+B.push('  sources: ' + J(SOURCES) + ',')
 B.push('  sevs: ' + J(SEVERITIES.map((s) => ({ s: s, label: SEVERITY_LABEL[s], n: bySev[s] || 0 }))) + ',')
+B.push('  /* 错误率与延迟分位：都由本窗真数据现算（错误率 = (warn+error)/窗口内事件）*/')
+B.push('  sevAgg: ' + J(sevAgg) + ',')
+B.push('  lat: ' + J(lat) + ',')
+B.push('  /* Top-N 榜三档：对象 / 慢请求 / 错误（错误榜本窗恒空，不塞假数据）*/')
+B.push('  top: ' + J({ obj: topObj, slow: topSlow, err: topErr }) + ',')
+B.push('  /* 时刻列口径：rows 已按「同拍内按组首时刻稳定排序」排过（跨拍不动）*/')
+B.push('  order: { rule: ' + J('同拍内按时刻局部排，跨拍按环序') + ', blockMoved: ' + blockMoved +
+  ', blocks: ' + blocks.length + ', barrier: ' + blockBarrier + ', firstMoved: ' + blockFirstMoved +
+  ', invInTick: ' + invInTick + ', invCross: ' + invCross + ', brokenGroups: ' + brokenGroups +
+  ', brokenRows: ' + brokenRows + ', grade: ' + J('组级（不是行级）') + ' },')
 B.push('  rail: { allOn: true, total: ' + events.length + ' },')
 B.push('  /* 九类的真图标（真页面 `KIND_ICON` 原样搬来）：草图走 currentColor，不上类色 */')
 B.push('  icons: ' + J(KIND_ICON) + ',')
@@ -446,6 +647,20 @@ console.log('\n帧 ' + N + ' · 窗口内事件 ' + events.length + '（上限 '
 console.log('本窗 9 类：' + KINDS.map((k) => KIND_LABEL[k] + ' ' + (winByKind[k] || 0)).join(' · '))
 console.log('页面窗口内 9 类：' + KINDS.map((k) => KIND_LABEL[k] + ' ' + (byKind[k] || 0)).join(' · '))
 console.log('严重度：' + SEVERITIES.map((s) => SEVERITY_LABEL[s] + ' ' + (bySev[s] || 0)).join(' · '))
+console.log('错误率：' + (((sevAgg.warn + sevAgg.error) / (sevAgg.total || 1)) * 100).toFixed(1) + '%（warn ' +
+  sevAgg.warn + ' + error ' + sevAgg.error + ' / ' + sevAgg.total + ' 条）—— 全 0 ⇒ 联动 L1/L2 天然不可达，探针必须先注入')
+console.log('延迟：P50 ' + lat.p50 + ' · P95 ' + lat.p95 + ' · P99 ' + lat.p99 + ' ms（n=' + lat.n +
+  (lat.flat ? '，耗时全等 ⇒ 趋势线画不出来，只报读数' : '') + '）')
+console.log('Top-N：对象 ' + topObj.map((x) => x[0] + '×' + x[1]).join(' · ') + ' ｜ 慢请求 ' +
+  topSlow.map((x) => x[0] + ' ' + x[1] + 'ms×' + x[2]).join(' · ') + ' ｜ 错误 ' + topErr.length + ' 条（本窗恒空）')
+console.log('时刻列：同拍内按组首时刻【组级稳定排序】⇒ 位移 ' + blockMoved + ' / ' + blocks.length + ' 个组槽位' +
+  (blockFirstMoved >= 0 ? '（首个位移在 #' + blockFirstMoved + '）' : '（恒等变换）') + ' · 跨拍组当隔断 ' + blockBarrier + ' 个' +
+  (blockBarrierInfo.length ? '：' + blockBarrierInfo.join(' · ') : ''))
+console.log('时刻列残留：同拍内行级逆序 ' + invInTick + ' 处（全是并发重叠：上一组尾行 vs 下一组组首）· 跨拍逆序 ' +
+  invCross + ' 处（跨拍不动 ⇒ 留着）· 改用行级排序会打散 ' + brokenGroups + ' 个组 / 牵动 ' + brokenRows + ' 行 ⇒ 不修')
+console.log('类清单：业务 ' + KINDS.length + ' + 设施 ' + FAC_KINDS.length + ' = ' + (KINDS.length + FAC_KINDS.length) +
+  ' 类（设施 3 类本窗 0 条 = 那 3 个后端面还没落地）· 「源」' + SOURCES.length + ' 项（' +
+  SOURCES.map((s) => s.label).join(' / ') + '）')
 console.log('速率 ' + rate[0].toFixed(1) + ' → ' + clock.rate.toFixed(1) + ' 条/秒（峰值 ' + rateMax.toFixed(1) + '）')
 console.log('⑤ 默认选中 tr=' + selTR + '（' + (pick ? pick.slice(0, 8) : '（无）') + '）· 链上 ' + chain.length + ' 条 · ' +
   (rec ? rec.method + ' ' + rec.path + ' ' + rec.status + ' ' + rec.ms + 'ms' : '（窗口内没有它的 traces 记录）'))
@@ -464,4 +679,5 @@ console.log('重放起跳：前 ' + replayHead + ' 拍本窗 0 条（实测 cuts
   (replayHead + 1) + ' 拍起，第 1 拍就喂 ' + (cuts[replayHead] - (replayHead ? cuts[replayHead - 1] : 0)) + ' 行')
 console.log('同号高亮落点可见：' + (highlightVisible ? '是（在 ' + rows.findIndex((r) => r.anim === 6) + ' 行' +
   '，共 ' + rows.length + ' 行 ⇒ 在末 ' + ROW_MAX + ' 行内）' : '否 —— 要重挑号'))
-console.log('落点标注 [data-anim]：3（折线）4（计数）7（图例闪）1/2（列表）5（error 闪·空）8（断线条）6（同号高亮）')
+console.log('落点标注 [data-anim] 共 13：3（折线）4/7（计数·图例闪）1/2/5/11（列表）8（断线条）6（同号高亮）' +
+  '9（联动 L1）10（联动 L2）12（榜单切档）13（⑤ 关联跳转）')
