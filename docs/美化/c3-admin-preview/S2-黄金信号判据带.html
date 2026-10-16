@@ -1,0 +1,164 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>S2 · 黄金信号判据带 + 证据梯 · 结构草图</title>
+<link rel="stylesheet" href="./_struct-wire.css">
+<style>
+/* ── S2 专有：第 0 层信号带 + 8/12 : 4/12 证据梯 ───────────────────────────── */
+.s2-grid { grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); align-items: start; }
+
+/* 第 0 层 · 判据带：**重组**了状态带 —— 官方四信号（Latency/Traffic/Errors/Saturation）
+   原本散在两处（Errors 在状态带、其余三个在 KPI 行），这里合到一行。 */
+.band {
+  display: flex; flex-wrap: wrap; align-items: stretch; gap: 0;
+  border: 1px solid var(--l); margin-bottom: 10px;
+}
+.band > .seg { flex: 0 0 auto; padding: 10px 14px; border-right: 1px solid var(--l2); display: flex; flex-direction: column; justify-content: center; }
+.band > .seg:last-child { border-right: 0; }
+.band .hv b { font-size: 15px; font-weight: 600; }
+.band .sig .en { font: 10px/1.4 var(--mono); color: var(--ts); letter-spacing: .04em; }
+.band .sig b { font-family: var(--mono); font-size: 20px; font-weight: 600; line-height: 1.15; }
+.band .sig u { text-decoration: none; font: 11px/1.3 var(--mono); color: var(--tm); margin-left: 3px; }
+.band .sig span.cn { font-size: 11px; color: var(--tm); }
+.band .sig.err b { font-size: 17px; }        /* 5xx / 4xx 两个值并排，收一档 */
+/* ⚠️ `display: block` 是必须的，不是随手写的：`.band > .seg` 在 line 17 设了
+   `display: flex; flex-direction: column` ⇒ 段内每一段连续文本、每个 `<b>`、每个 `<br>`
+   都会各自变成一个 flex item 纵向码放（「已连接 · 第」/「6」/「拍」各占一行，共 6 行）。
+   这不是文本折行，所以 `white-space: nowrap` 挡不住它 —— 得先把 meta 变回普通行内流。 */
+.band .meta { display: block; margin-left: auto; font: 11px/1.6 var(--mono); color: var(--tm); white-space: nowrap; }
+.band-note { font: 11px/1.6 var(--mono); color: var(--tm); margin: -4px 0 10px; }
+
+/* 证据梯：第 1 层（时间栈）/ 第 2 层（实体栏）各有一枚层号 */
+.lv { display: flex; align-items: baseline; gap: 8px; margin: 0 0 8px; }
+.lv .no { border: 1px solid var(--l); padding: 0 5px; font: 11px/1.6 var(--mono); color: var(--tm); }
+.lv b { font-size: 13px; }
+.lv .n { font: 11px/1.4 var(--mono); color: var(--tm); }
+.sec-h { margin: 14px 0 8px; font-size: 12px; font-weight: 600; border-bottom: 1px solid var(--l2); padding-bottom: 4px; }
+.sec-h span { font-weight: 400; color: var(--tm); font-size: 11px; }
+.rail-kpi { display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 8px; border: 1px dashed var(--dash); padding: 8px 10px; }
+.rail-kpi .k { font-size: 11px; color: var(--tm); }
+.rail-kpi .v { font-family: var(--mono); font-size: 20px; font-weight: 600; }
+.rail-kpi .v u { text-decoration: none; font-size: 11px; font-weight: 400; color: var(--tm); margin-left: 3px; }
+.rail-kpi .d { font: 11px/1.4 var(--mono); color: var(--tm); }
+</style>
+</head>
+<body>
+
+<div class="wire-head">
+  <h1>S2 ·「黄金信号判据带 + 证据梯」— 第 0 层按官方四信号重组</h1>
+  <p><b>这是结构草图，不是设计稿。</b>全篇灰阶线框：无品牌色、无圆角档、无阴影、无过渡与动效。视觉留到第三步。</p>
+  <p>数据是真的：<code>_work/3a2b/snapshot.json</code>（2026-10-16 从真运行页面抓的快照），每个数字逐字抄。快照那刻页面里只有 <b>7 拍</b>。</p>
+  <p class="ruling">
+    <span>开关A · 容器 max-width 1280</span><span>开关B · **本版用到**（状态带改为信号带新变体）</span>
+    <span>开关C · 接受只有 K1/K3 有微条</span><span>开关D · 共享游标</span>
+  </p>
+</div>
+
+<div class="shell">
+  <aside class="side">
+    <div class="brand">管理端 · Mall Management</div>
+    <div class="dom">概览</div><div class="sub">经营数据</div>
+    <div class="dom">通知收件箱</div>
+    <div class="dom">业务域</div>
+    <div class="sub">用户与商家治理</div><div class="sub">商品与类目治理</div>
+    <div class="sub">订单治理</div><div class="sub">营销运营</div>
+    <div class="sub">消息与内容治理</div><div class="sub">系统通知</div>
+    <div class="dom">可观测域</div>
+    <div class="sub">攻击模拟器</div><div class="sub on">指标面板</div>
+    <div class="sub">状态流转</div><div class="sub">实时日志</div><div class="sub">权限与审计</div>
+    <div class="foot">外壳示意 · 三版相同（232px）</div>
+  </aside>
+
+  <div class="col">
+    <div class="top"><span>管理端 / <b>指标面板</b></span><span class="who">ops_duan · 退出</span></div>
+    <div class="main"><div class="px">
+
+      <!-- ══ 第 0 层 · 判据带：官方四信号合到一行 ══════════════════════════
+           四信号出处：Grafana 官方文档「Four Golden Signals」（引 Google SRE handbook）——
+           Latency / Traffic / Errors / Saturation，「只能测四个就测这四个」。
+           本页四个**全有**，但原本散在两处（Errors 在状态带、另三个在 KPI 行）。 -->
+      <div class="band">
+        <div class="seg hv"><b>● 健康</b><span class="cn" style="font-size:11px;color:var(--tm)">后端裁定</span></div>
+        <div class="seg sig"><span class="en">TRAFFIC</span><b>23.0<u>次/秒</u></b><span class="cn">= QPS</span></div>
+        <div class="seg sig"><span class="en">LATENCY</span><b>24<u>ms</u></b><span class="cn">= P99 延迟</span></div>
+        <div class="seg sig err"><span class="en">ERRORS</span><b>1.2%<u>/ 0.0%</u></b><span class="cn">= 5xx / 4xx</span></div>
+        <div class="seg sig"><span class="en">SATURATION</span><b>2<u>次</u></b><span class="cn">= 锁等待</span></div>
+        <div class="seg meta">已连接 · 第 <b>6</b> 拍<br>窗口 60 秒 · 16:45:09<br>数据源：正常（后端真流）</div>
+      </div>
+      <div class="band-note">⇡ 上一行是<strong>重组后的状态带</strong>：Traffic / Latency 原来在 KPI 行、Errors 原来在这一带里、Saturation 原来也在 KPI 行 —— 现在「是否 OK」在一行内可判。</div>
+
+      <div class="slot hit">判据（后端 health.reasons）：<b>L1 命中率 60.0%</b>　<span style="color:var(--ts)">— 健康态也可能非空（后端填的是正面理由）</span></div>
+      <div class="slot">［条件块 · 断流条］<code>v-if="lost"</code>　当前未触发</div>
+
+      <div class="grid s2-grid">
+
+        <!-- ══ 第 1 层 · 时间栈（8/12）════════════════════════════════════ -->
+        <div>
+          <div class="lv"><span class="no">第 1 层</span><b>证据 · 在往哪走</b><span class="n">三张时序图共享一根 x 轴</span></div>
+          <div class="axis-group">
+            <div class="h2 first"><b>QPS · 滚动 60 秒</b><span class="n">每秒 1 点 · 新点从右进</span></div>
+            <div class="chart" data-h="200"><span class="tag">占位 · 面积图（主）</span></div>
+            <div class="h2"><b>缓存命中率 · 滚动 60 秒</b><span class="n">无请求的拍点留空（不断线连成 0）</span></div>
+            <div class="chart" data-h="170"><span class="tag">占位 · 折线（第 1 点为空 → 起点断开）</span></div>
+            <div class="h2"><b>锁竞争热力图</b><span class="n">行 = 锁名 · 列 = 最近 60 拍</span></div>
+            <div class="chart" data-h="190"><span class="tag">占位 · 热力（3 锁名 × 7 拍）</span></div>
+            <div class="axis-note">⇡ 三张图共用<strong>同一根 x 轴</strong>（真页面里就是同一个 <code>xLabels</code> 数组）—— 整组只在最底画一次刻度。</div>
+          </div>
+        </div>
+
+        <!-- ══ 第 2 层 · 实体栏（4/12）════════════════════════════════════ -->
+        <div>
+          <div class="lv"><span class="no">第 2 层</span><b>实体 · 什么在吃资源</b><span class="n">无时间维</span></div>
+
+          <div class="sec-h">缓存读数　<span>（四信号之外的一项；它与下面的防护命中同族）</span></div>
+          <div class="rail-kpi" id="k-hit"></div>
+
+          <div class="sec-h">防护命中 · 8 类　<span>本拍增量 · 纵向柱 → 横向条</span></div>
+          <div class="stack" id="prot" style="gap:5px"></div>
+
+          <div class="sec-h">库存水位　<span>唯一一次真查询 · 会独立失败</span></div>
+          <div class="stack" id="stock" style="gap:8px"></div>
+        </div>
+
+      </div>
+
+      <div class="foot-note">
+        <b>S2 的布局模式</b>：纵向<strong>三段</strong>，每段内部形态互不相同 —— 第 0 层是「带」（横贯），第 1 / 2 层是「左右两栏」。<br>
+        <b>信息层级</b>：三层靠<strong>形态差异</strong>区分，不靠字号；对应「现在好不好（带）→ 在往哪走（梯上）→ 什么在吃资源（梯下）」。<br>
+        <b>为什么这样排</b>：官方 Four Golden Signals 说「只能测四个就测这四个」。本页四个全有，却散在两处 —— 重排它们<strong>零新增数据成本</strong>，只是把同类项合到一起（Grafana 官方原话：看板应当「reduce cognitive load」「Will they get lost?」）。<br>
+        <b>改动幅度</b>：三版里<strong>最大</strong> —— 动了四页共用的状态带；原来那 4 张 KPI 卡被拆散重组（Traffic / Latency 进带、Saturation 进带、Errors 本就该在带里）。<br>
+        <b>代价（要你点头的那一条）</b>：状态带是<strong>四页共用</strong>写法（指标 / 日志 / 状态 / 攻击页）。在这里重组它 ⇒ 要么<strong>四页分叉</strong>（本页一套、其余三页另一套），要么把 <code>a-status</code> 做成带「信号变体」的组件。这是<strong>开关 B</strong> 的正面用处，也是它的代价。<br>
+        <b>宽度实测</b>（探针量的，不是算的）：1440 视口下 <code>.side</code> 232 + <code>.main</code> padding 32×2 + 经典滚动条 <b>15</b> ⇒ <b>主区可用 1129px</b>（不溢出时才是 1144px）；<code>max-width: 1280</code> 在 1440 下达不到，需视口 ≥ 1472px。本页 8/12 : 4/12 是在 1129 下分的。<br>
+        <b>4/12 栏的额外代价</b>：右栏只有 <b>371px</b> —— 库存行的三列 <code>1fr 160px 96px</code> 是照真页面全宽 1129px 定的，搬进来第一列只剩 91px、SKU 折成两行（实测）。草图里换 <code>1fr 76px 70px</code> 顶住，真页面要另定断点。<br>
+        <b>数据限度</b>：快照那刻只有 7 拍，x 轴是 7 个点 —— 判结构够用，<strong>别拿它估密度</strong>。
+      </div>
+
+    </div></div>
+  </div>
+</div>
+
+<script src="./_struct-wire.js"></script>
+<script>
+(function () {
+  var D = WF.DATA
+  WF.chart(document.querySelectorAll('.chart')[0], 'qps',  { h: 200, xAxis: false })
+  WF.chart(document.querySelectorAll('.chart')[1], 'hit',  { h: 170, xAxis: false })
+  WF.chart(document.querySelectorAll('.chart')[2], 'heat', { h: 190, xAxis: true })
+
+  /* 缓存命中率：不在四信号里，但四信号之外还得有个家 —— 摆在与它同族的「缓存/防护」区 */
+  var hit = D.kpis.filter(function (k) { return k.key === 'hit' })[0]
+  var hk = document.getElementById('k-hit')
+  hk.innerHTML = '<div><div class="k"></div><div class="v"></div><div class="d"></div></div><span class="sp"></span>'
+  hk.querySelector('.k').textContent = hit.label
+  hk.querySelector('.v').innerHTML = hit.value + '<u>' + hit.unit + '</u>'
+  hk.querySelector('.d').textContent = hit.delta + ' ' + hit.dl
+  WF.spark(hk.querySelector('.sp'), 'hit', 96, 24)
+
+  WF.hbar(document.getElementById('prot'),
+    D.prot.labels.map(function (l, i) { return { label: l, value: D.prot.values[i] } }), 5, '')
+  WF.stock(document.getElementById('stock'), true)   /* true = 窄栏变体（本页在 4/12 栏里）*/
+})()
+</script>
+</body>
+</html>

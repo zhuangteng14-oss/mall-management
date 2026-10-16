@@ -1,0 +1,220 @@
+/* ══════════════════════════════════════════════════════════════════════════════
+   _struct-wire.css —— 3a.2b（结构重做）三版结构草图的**共用线框原语**
+
+   这是什么：S1 / S2 / S3 三版**纯结构**草图的公共样式。
+   它不是设计稿、不是主题 —— 全篇只有灰阶，**不含**任何品牌 token（墨/釉/朱砂/运营橙
+   一个都没用）、不含圆角档、不含阴影、不含过渡与动效。色板锁定留到「第三步」才谈。
+
+   为什么是灰的：本次出的是**结构方案**，目的是让你比较「东西摆在哪、谁主谁次」。
+   一旦画上品牌色，眼睛就会去比「哪个好看」，而这次要判的恰恰不是那个。
+
+   ⚠️ 两处**刻意与真页面一致**的数值（否则宽度比较不成立）：
+     · `.side` 宽 232px   = 真壳 `.a-side` 的 `flex: 0 0 232px`（AdminShell.vue:130）
+     · `.main` padding 32 = 真壳 `.a-main` 的 `padding: var(--s6)`（AdminShell.vue:300）
+     ⇒ 1440 视口下主区可用 = 1440 − 232 − 64 = **1144px**。
+        所以 `max-width: 1280`（开关 A 的裁定值）在 1440 视口下**达不到**，
+        只有视口 ≥ 1472px 才生效。这条写进了每版页脚。
+
+   ⚠️ 一处**刻意与真页面不一致**：真页面的图表是 ECharts 画在 canvas 上的；这里用内联 SVG
+   画**灰阶示意图**（形状与真数据一致，样式一概不画）。这不是「重画一张好看的图」，
+   是让「三张图共用一根 x 轴」这类**结构主张**在静态图上看得见。
+   ══════════════════════════════════════════════════════════════════════════════ */
+
+:root {
+  --l: #b9b9b9;      /* 线框主边线 */
+  --l2: #d8d8d8;     /* 次级分隔线 */
+  --f: #f3f3f3;      /* 占位填充 */
+  --f2: #e6e6e6;     /* 占位填充（深一档） */
+  --t: #222;         /* 正文 */
+  --tm: #767676;     /* 说明文字 */
+  --ts: #9a9a9a;     /* 最弱：脚注 */
+  --dash: #c9c9c9;   /* 条件块 / 占位区虚线 */
+  --mono: ui-monospace, Menlo, Consolas, "Courier New", monospace;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: #fff;
+  color: var(--t);
+  font: 13px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", sans-serif;
+}
+
+/* ── 顶部的「这是什么」说明条（每版都有，三版相同）────────────────────────── */
+.wire-head {
+  border-bottom: 1px solid var(--l);
+  background: var(--f);
+  padding: 10px 16px;
+}
+.wire-head h1 { margin: 0 0 4px; font-size: 15px; }
+.wire-head p { margin: 2px 0; font-size: 12px; color: var(--tm); }
+.wire-head code { font-family: var(--mono); font-size: 11px; color: var(--t); }
+
+/* ── 外壳（示意；三版相同。/ 宽度数值同真壳）──────────────────────────────── */
+.shell { display: flex; min-height: 100vh; align-items: stretch; }
+.side {
+  flex: 0 0 232px;
+  border-right: 1px solid var(--l);
+  padding: 12px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.side .brand {
+  border: 1px dashed var(--dash);
+  padding: 8px 8px;
+  font-size: 12px;
+  color: var(--tm);
+  margin-bottom: 8px;
+}
+.side .dom { padding: 6px 8px; font-size: 12px; color: var(--tm); }
+.side .sub { padding: 4px 8px 4px 20px; font-size: 12px; color: var(--ts); }
+.side .sub.on { color: var(--t); font-weight: 600; }
+.side .foot { margin-top: auto; border-top: 1px solid var(--l2); padding: 8px; font-size: 11px; color: var(--ts); }
+
+.col { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; }
+.top {
+  height: 52px;
+  border-bottom: 1px solid var(--l);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 0 16px;
+  font-size: 12px;
+  color: var(--tm);
+}
+.top .who { margin-left: auto; }
+.main { padding: 32px; }          /* ← 同真壳 `.a-main` */
+.px { max-width: 1280px; }        /* ← 开关 A 的裁定值 */
+
+/* ── 线框原语 ─────────────────────────────────────────────────────────────── */
+.box { border: 1px solid var(--l); padding: 10px; }
+.box.dashed { border-style: dashed; border-color: var(--dash); }
+
+/* 区块标题（真页面 `.a-h2` 的位置）。⚠️ 这里**不加下边框** —— 下边框在真页面里
+   是「一条装饰线」，而本次要判的正是「哪些结构装置该留」，先不替你预设。 */
+.h2 { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; margin: 18px 0 8px; }
+.h2.first { margin-top: 0; }
+.h2 b { font-size: 14px; font-weight: 600; }
+.h2 .n { font: 11px/1.4 var(--mono); color: var(--tm); }
+
+/* 条件块（断流条 / 判据列表）—— 虚线 + 明写「条件」。当前快照里断流条未触发。 */
+.slot {
+  border: 1px dashed var(--dash);
+  padding: 7px 10px;
+  margin: 8px 0;
+  font-size: 12px;
+  color: var(--tm);
+}
+.slot.hit { border-style: solid; border-color: var(--l); color: var(--t); }
+
+/* 图表占位框 */
+.chart {
+  position: relative;
+  background: #fafafa;
+  border: 1px dashed var(--dash);
+  overflow: hidden;
+}
+.chart svg { display: block; width: 100%; }
+.chart .tag {
+  position: absolute;
+  left: 6px; top: 5px;
+  font: 10px/1.3 var(--mono);
+  color: var(--tm);
+  background: #fff;      /* 热力图的行名变体把签挤到了**绘图区顶部第一行上**（yOff 6）；
+                            7 拍时那格恰好空着，真页面 60 拍时会被数据压住 ⇒ 给白底 */
+  padding: 0 4px;
+  pointer-events: none;
+}
+.chart .tag.right { left: auto; right: 6px; }
+
+/* 热力图的「行 = 锁名」——行名**贴在行上**（早先放在图下方一行，读不出「行 = 锁名」）。
+   左列固定宽 + 右列 SVG；行名等分列高，上下留出与 SVG 一致的 pt/pb（由 JS 写 inline）。*/
+.heat-wrap { display: grid; grid-template-columns: 62px 1fr; align-items: stretch; }
+.heat-labels { display: flex; flex-direction: column; }
+.heat-labels > span {
+  flex: 1 1 0;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  padding-right: 6px;
+  font: 10px/1.2 var(--mono);
+  color: var(--tm);
+  white-space: nowrap;
+  overflow: hidden;
+}
+/* 「共享 x 轴」的结构标记：把若干张图括成一组，只在组底画一次刻度 */
+.axis-group { border-left: 3px solid var(--f2); padding-left: 10px; margin-left: -13px; }
+.axis-note {
+  font: 11px/1.4 var(--mono);
+  color: var(--tm);
+  border-top: 1px dashed var(--dash);
+  padding-top: 4px;
+  margin-top: 4px;
+}
+
+/* 小读数（KPI 的**简化**画法：只留 标签/大数字/单位/环比 —— 卡的框线、圆角、
+   图标一概不画，因为那些正是本次要判「留不留」的东西）。
+   ⚠️ 真页面 `.kpi-d` 是 delta 与 hint **二选一**（KpiCard.vue:18-24），下面同理。 */
+.kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; }
+.kpis.four { grid-template-columns: repeat(4, 1fr); }
+.kpi { border: 1px dashed var(--dash); padding: 8px 10px; }
+.kpi .k { font-size: 11px; color: var(--tm); }
+.kpi .v { font-family: var(--mono); font-size: 20px; font-weight: 600; line-height: 1.2; }
+.kpi .v u { text-decoration: none; font-size: 11px; font-weight: 400; color: var(--tm); margin-left: 3px; }
+.kpi .d { font: 11px/1.4 var(--mono); color: var(--tm); }
+
+/* 横向条（防护命中 8 类 / 库存水位） */
+.hbar { display: grid; grid-template-columns: 108px 1fr auto; gap: 8px; align-items: center; font-size: 11px; }
+.hbar .name { color: var(--tm); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hbar .track { background: var(--f); height: 9px; }
+.hbar .fill { background: #cfcfcf; height: 9px; }   /* 与轨道拉开一档，免得 0 值与有值看着一样 */
+.hbar .num { font-family: var(--mono); font-variant-numeric: tabular-nums; color: var(--tm); }
+.stock-row { display: grid; grid-template-columns: 1fr 160px 96px; gap: 12px; align-items: center; }
+.stock-row .nm { font-size: 12px; }
+.stock-row .sk { font: 11px/1.3 var(--mono); color: var(--ts); }
+.stock-row .track { background: var(--f); height: 8px; }
+.stock-row .fill { background: #cfcfcf; height: 8px; }
+.stock-row .num { text-align: right; font: 11px/1.3 var(--mono); font-variant-numeric: tabular-nums; }
+.stock-row .num s { text-decoration: none; color: var(--ts); }
+/* 窄栏变体（S1/S2 的侧栏）：三列的比例是按**真页面全宽 1129px** 定的
+   （1fr 849 + 160 + 96），搬进 4/12 的栏里第一列只剩 91–100px，
+   商品 SKU「asdsad · 珍珠白 / S」被挤成两行。结构主张（名 | 条 | 数）不变，只收紧列宽。 */
+.stock-row.narrow { grid-template-columns: minmax(0,1fr) 76px 70px; gap: 8px; }
+.stock-row.narrow .sk { white-space: nowrap; }
+
+/* 分组/两栏通用 */
+.grid { display: grid; gap: 16px; }
+.g-2-1 { grid-template-columns: 2fr 1fr; }      /* 8/12 : 4/12 */
+.g-3 {
+  grid-template-columns: 1fr 1fr 1fr;
+}
+.stack { display: flex; flex-direction: column; gap: 10px; }
+
+/* 泳道（S3）：左侧一条竖标签条 */
+.lane { display: grid; grid-template-columns: 132px 1fr; gap: 14px; border-top: 1px solid var(--l); padding: 14px 0; }
+.lane > .lane-label { border-right: 1px solid var(--l2); padding-right: 12px; }
+.lane .q { font-size: 13px; font-weight: 600; }
+.lane .en { font: 10px/1.4 var(--mono); color: var(--ts); margin-top: 4px; }
+
+/* 脚注（每版页脚，三版各写各的） */
+.foot-note {
+  border-top: 1px solid var(--l);
+  margin-top: 28px;
+  padding-top: 10px;
+  font-size: 11px;
+  line-height: 1.7;
+  color: var(--ts);
+}
+.foot-note b { color: var(--tm); }
+.foot-note code { font-family: var(--mono); }
+
+/* 开关裁决展示条 */
+.ruling { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0 0; }
+.ruling span {
+  border: 1px solid var(--l2);
+  padding: 2px 7px;
+  font: 11px/1.5 var(--mono);
+  color: var(--tm);
+}
