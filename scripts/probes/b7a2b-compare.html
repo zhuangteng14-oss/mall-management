@@ -1,0 +1,79 @@
+<!doctype html>
+<!--
+  甲/乙对照页（3a.2b）：把逐块裁下来的图**上下并排**（上 = 甲版 = 现状，下 = 乙版），
+  再由 probe 截图成一张 `docs/美化/c3-admin-preview/指标页-甲乙对照.png` 给人看。
+
+  ⚠️ 这里**没有**用 CSS 拼图或图像库：纯粹是 `<img>` 并排 ⇒ 两侧都是**原图字节**，
+     页面本身不引入差（对照图自己不能成为差异源）。
+  ⚠️⚠️ `img { max-width: none }` 是**判据级**的一行，别加回 `max-width: 100%`：
+     裁切图是 2×（2240 宽），而截图视口只有 1440 ⇒ `max-width:100%` 会把它们缩到 0.63×，
+     2× 的 1px 高光边 / symbolSize 6→4 这种差**正好被重采样糊掉**（本笔实测踩到：
+     第一版对照图里乙版 QPS 的轴标签几乎看不见，误以为是「标签没了」）。
+     ⇒ 截图视口必须 ≥ 2324（2240 + 标签列 44 + 间隙 8 + 两侧留白 32），由 shot-compare 传。
+-->
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>指标页 · 甲/乙对照</title>
+<style>
+  :root { color-scheme: dark; }
+  body {
+    margin: 0; padding: 16px 16px 24px;
+    background: #101828; color: #e8ecf3;
+    font: 13px/1.5 "Microsoft YaHei", sans-serif;
+  }
+  h1 { font-size: 15px; margin: 0 0 4px; font-weight: 600; }
+  h1 small { color: #7b8aa3; font-weight: 400; font-size: 12px; }
+  section { margin-top: 18px; }
+  h2 { font-size: 13px; margin: 0 0 6px; font-weight: 600; color: #a3aec2; }
+  h2 b { color: #5b90ff; }
+  .pair { display: grid; grid-template-columns: 1fr; gap: 4px; }
+  .row { display: grid; grid-template-columns: 44px 1fr; align-items: start; gap: 8px; }
+  .tag { font-size: 12px; color: #7b8aa3; padding-top: 2px; }
+  img { display: block; max-width: none; border: 1px solid #2b394f; border-radius: 4px; }
+</style>
+</head>
+<body>
+  <h1>指标页 · 甲/乙对照 <small>（上 = 甲版 = 现状快照 · 下 = 乙版 = 维度 3/4/6/7）</small></h1>
+
+  <section>
+    <h2>① 4 张 KPI 卡 —— <b>维度 3</b>（去描边 / 卡底渐变 / 顶边 1px 高光）+ <b>维度 4</b>（小数部降一档 + 环比行状态色竖条）</h2>
+    <div class="pair">
+      <div class="row"><span class="tag">甲</span><img src="./out-b7a2b-real-crop-kpi.png" alt="甲版 KPI 卡"></div>
+      <div class="row"><span class="tag">乙</span><img src="./out-b7a2b-yi-crop-kpi.png" alt="乙版 KPI 卡"></div>
+    </div>
+  </section>
+
+  <section>
+    <h2>② QPS 面积图 —— <b>维度 6</b>（网格虚线 + 类目轴轴线去掉 + 折线拐点 6→4）</h2>
+    <div class="pair">
+      <div class="row"><span class="tag">甲</span><img src="./out-b7a2b-real-crop-qps.png" alt="甲版 QPS 图"></div>
+      <div class="row"><span class="tag">乙</span><img src="./out-b7a2b-yi-crop-qps.png" alt="乙版 QPS 图"></div>
+    </div>
+  </section>
+
+  <section>
+    <h2>③ 缓存命中率折线 —— <b>维度 6</b>（同上；这张是单序列、看得更清）</h2>
+    <div class="pair">
+      <div class="row"><span class="tag">甲</span><img src="./out-b7a2b-real-crop-hit.png" alt="甲版命中率图"></div>
+      <div class="row"><span class="tag">乙</span><img src="./out-b7a2b-yi-crop-hit.png" alt="乙版命中率图"></div>
+    </div>
+  </section>
+
+  <section>
+    <h2>④ 锁竞争热力图 —— <b>维度 6</b>（网格虚线；这块画布对字体到位时机敏感，见报告 §核对）</h2>
+    <div class="pair">
+      <div class="row"><span class="tag">甲</span><img src="./out-b7a2b-real-crop-heat.png" alt="甲版热力图"></div>
+      <div class="row"><span class="tag">乙</span><img src="./out-b7a2b-yi-crop-heat.png" alt="乙版热力图"></div>
+    </div>
+  </section>
+
+  <section>
+    <h2>⑤ 防护命中柱状图 —— <b>维度 6</b>（网格虚线；y 轴刻度是 3a.2 修好的那一档）</h2>
+    <div class="pair">
+      <div class="row"><span class="tag">甲</span><img src="./out-b7a2b-real-crop-bar.png" alt="甲版柱状图"></div>
+      <div class="row"><span class="tag">乙</span><img src="./out-b7a2b-yi-crop-bar.png" alt="乙版柱状图"></div>
+    </div>
+  </section>
+</body>
+</html>
