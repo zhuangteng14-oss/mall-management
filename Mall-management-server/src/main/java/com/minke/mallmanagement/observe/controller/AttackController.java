@@ -3,12 +3,14 @@ package com.minke.mallmanagement.observe.controller;
 import com.minke.mallmanagement.admin.AuditActions;
 import com.minke.mallmanagement.admin.service.AuditService;
 import com.minke.mallmanagement.observe.service.AttackEngine;
+import com.minke.mallmanagement.observe.service.AttackSwitchConfig;
 import com.minke.mallmanagement.observe.service.DrillRecordService;
 import com.minke.mallmanagement.observe.service.ObservedEventCleanupService;
 import com.minke.mallmanagement.shared.web.AuthSession;
 import com.minke.mallmanagement.shared.web.Result;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -18,14 +20,29 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 
 /**
- * 攻击模拟器的**六个**出口（块 7 · commit 4 建前三条、commit 8b 加第四条、commit 10 加第五条、
- * 块 7 收尾加第六条）：场景清单 / 跑一轮 / **叫停** / 演练记录 / **清理演练数据** / **实时进度**。
+ * 攻击模拟器的**八个**出口（块 7 · commit 4 建前三条、commit 8b 加第四条、commit 10 加第五条、
+ * 块 7 收尾加第六条、**3a.1 加第七条与第八条 = 开关配置**）：场景清单 / 跑一轮 / **叫停** /
+ * 演练记录 / **清理演练数据** / **实时进度** / **读开关配置** / **写开关配置**。
  *
- * <h2>【端点口径：全 POST、不加角色闸、不在白名单】</h2>
- * 六条与本批 SSE 三条**逐字同款**（{@code MetricsStreamController} 写了完整理由）：
- * 管理端读端点在本仓一律 POST；{@code AUTH_WHITELIST} 维持 14 不动（管理端端点没有公开面，
- * 靠 {@code AuthInterceptor} 拦）；不给 {@code /admin/**} 加角色判据（TD-18 —— 加了之后默认 profile
- * 上管理员自己也进不来）。
+ * <h2>【端点口径：不加角色闸、不在白名单】</h2>
+ * 八条与本批 SSE 三条**逐字同款**（{@code MetricsStreamController} 写了完整理由）：
+ * {@code AUTH_WHITELIST} 维持 14 不动（管理端端点没有公开面，靠 {@code AuthInterceptor} 拦）；
+ * 不给 {@code /admin/**} 加角色判据（TD-18 —— 加了之后默认 profile 上管理员自己也进不来）。
+ *
+ * <h2>【⚠️ 3a.1 的第八条是本域第一条 {@code GET}：破例的代价明写在明处】</h2>
+ * 旧版这条注释写的是「管理端读端点在本仓一律 POST」，六条也确实**全 POST**。{@code GET /config}
+ * 是**破例**的那一条（用户 2026-10-16 裁定：加 {@code /config} 的 POST + GET）。
+ * 两件真实代价，都当场处理掉、不留推论：
+ * <ol>
+ *   <li><b>读一条 GET 会被浏览器按 HTTP 语义缓存</b>（POST 从来不会）—— 而这条端点恰恰是
+ *       「拨了开关之后要立刻读到新值」的读法之一。⇒ 响应**显式**带
+ *       {@code Cache-Control: no-store}（见 {@link #config()}），不靠「本仓没有中间缓存」这种
+ *       需要额外证明的前提。</li>
+ *   <li><b>本域自此有两种 HTTP 方法</b>，前端「按方法找端点」多一个形状 —— 这一条**认下**，
+ *       换到的是「读用 GET、写用 POST」在代码里一眼分得开（{@code http.get} 已存在，
+ *       见 {@code http.js}）。</li>
+ * </ol>
+ * ⚠️ 其余七条**一条都没动**：{@code /run} 仍收 {@code @RequestParam}、仍然 POST。
  *
  * <h2>【入参一律 {@code @RequestParam}（+ 一个 JSON 串参数），不用 {@code @RequestBody}】</h2>
  * 三条理由，任一条都足够：
@@ -80,12 +97,23 @@ public class AttackController {
     /** 审计（块 7 · commit 8b 新增的本类**第三个**依赖）—— 清理是破坏性动作，必须留痕。 */
     private final AuditService auditService;
 
+    /**
+     * 攻击开关的**共享配置**（3a.1 新增的本类**第四个**依赖）。
+     * ⚠️ 它一进构造器，{@code AbstractSmokeTest} 的 {@code @Import} 就必须跟着加
+     * （{@code AttackSwitchConfig} 是 {@code @Component}、切片不扫）—— 这是本仓**第二十三次**
+     * 同一处地雷（{@code AttackController} 多一个依赖 + {@code AttackEngine} 也多一个，
+     * 两个都是「既有 bean 多吃一个 bean」，形状同 D 段 commit 2 那笔）。
+     */
+    private final AttackSwitchConfig switchConfig;
+
     public AttackController(DrillRecordService drillRecordService,
                             ObservedEventCleanupService cleanupService,
-                            AuditService auditService) {
+                            AuditService auditService,
+                            AttackSwitchConfig switchConfig) {
         this.drillRecordService = drillRecordService;
         this.cleanupService = cleanupService;
         this.auditService = auditService;
+        this.switchConfig = switchConfig;
     }
 
     /** 8 个预置场景（key / 中文名 / 同时演示的防护 / 需要的人工动作 / 默认权重）。无入参。 */
@@ -106,11 +134,9 @@ public class AttackController {
      * @param scenarios       勾选与权重，JSON 数组串：
      *                        {@code [{"key":"seckill","weight":80},{"key":"cacheCold","weight":20}]}。
      *                        缺省 = 全 8 个场景按各自的缺省权重
-     * @param protections     防护开关（丁），JSON 数组串：缺省 = 全开
-     *                        （{@code rateLimit / circuitBreak / degrade / retry / poolIsolation}）。
-     *                        ⚠️ D 段 commit 2 起**真生效**，**阶段 2b 起是四键**：{@code rateLimit} / {@code circuitBreak} / {@code retry} / {@code poolIsolation} 接闸；{@code degrade} 只作记录位（面板上不可开关）
-     * @param injections      注入开关（丁），JSON 数组串：缺省 = 全关
-     *                        （{@code redisDown / mqDown / dbSlow}）。⚠️ 只有 {@code redisDown} 真接通
+     * @param protections     ⚠️ **已搬走**：3a.1 起它属于共享配置（{@code /attack/config}），
+     *                        本端点**只用来拒收** —— 给了（非空白）就 400 并指路，不静默忽略
+     * @param injections      ⚠️ 同上（{@code /attack/config}）
      *
      * <p>⚠️ 身份**取会话**（{@code AuthSession.identify}）：记进 {@code drill_record.OperatorId} /
      * {@code OperatorRole} 的是**谁点的这一下**（认不出 ⇒ {@code ""} / {@code 0}，
@@ -131,10 +157,17 @@ public class AttackController {
             @RequestParam(value = "protections", required = false) String protections,
             @RequestParam(value = "injections", required = false) String injections,
             HttpServletRequest request) {
+        // ⚠️ 3a.1（乙案）：这两个入参**只用来拒收**，不再往下传（形参留着是为了能**当场**说
+        //    「你该去哪儿改」，而不是让 Spring 把它们悄悄丢掉 —— 静默丢弃的表现是「开关拨了没反应」）。
+        //    ⚠️ 判据是「**给了**」而不是「给了非空数组」：`[]` 在这里也是一个必须被拒的值
+        //    （它表达的是「这一轮一个防护都不开」，而这句话现在属于 /config）。
+        if (given(protections) || given(injections)) {
+            return ResponseEntity.badRequest().body(Result.fail(AttackSwitchConfig.PARAMS_MOVED));
+        }
         AuthSession.Identity who = AuthSession.identify(request);
         try {
             Map<String, Object> payload = drillRecordService.run(name, concurrency, durationSeconds,
-                    targetQps, scenarios, protections, injections,
+                    targetQps, scenarios,
                     who == null || who.userId() == null ? "" : who.userId(),
                     who == null || who.role() == null ? 0 : who.role(),
                     baseUrlOf(request));
@@ -142,6 +175,97 @@ public class AttackController {
         } catch (IllegalArgumentException e) {
             return ResponseEntity.badRequest().body(Result.fail(e.getMessage()));
         }
+    }
+
+    // ==================== 3a.1（乙案）：开关配置（第七条 / 第八条出口）====================
+
+    /**
+     * 写开关配置 —— 防护 5 键 / 注入 3 键，**进程内一份**（{@code AttackSwitchConfig}）。
+     *
+     * <h2>【为什么要有这一条：甲案的开关只活在一次请求里】</h2>
+     * 甲案把两个开关挂在 {@code /run} 的入参上 ⇒ 另一个页面（实时日志页）既看不到、也改不了；
+     * 想在某一轮中间改一个开关，只能重发一次 {@code /run}（而那会再跑一轮）。本端点把它变成
+     * **共享配置**：两个页面读的是同一份、写的是同一份，日志页在演练**跑的过程中**也能改，
+     * 且改动对**正在跑的那一轮**立即生效（闸逐发请求读、阶段 B 判据实时读）。
+     *
+     * <h2>【写入语义：{@code null} / 空白 = 不动它，{@code []} = 关光】</h2>
+     * 两个参数都是可选的，**没给的那一项不动**（日志页只拨一枚防护开关时，不必把注入那一行
+     * 也发过来）。而 {@code []} 是一个**有意义的值**：「一个防护都不开」是演示要用的对照轮 ——
+     * 与「没给」必须分开（甲案那条口径逐字保留，见 {@code AttackSwitchConfig} 类注释）。
+     *
+     * <h2>【⚠️ 跑完不复位，所以这条端点必须与 [恢复默认] 配套出现】</h2>
+     * 用户 2026-10-16 裁定：共享配置在一轮演练结束后**不复位**（重启才回默认）。⇒ 拨了忘了拨回来
+     * 会**留在进程里**，而真实流量的防护闸读的正是这些位。兜底有三条（{@code AttackSwitchConfig}
+     * 类注释第二节目）：响应里的 {@code IsDefault} 让「当前不是默认」**可读**；两页据此常驻提示 +
+     * 一键恢复默认（前端落地在 3a.6）；本端点在配置非默认时记一行 **WARN**。
+     *
+     * <h2>【⚠️ 不写审计：与 {@code /stop} 同一档，代价如实登记】</h2>
+     * 它只翻进程内的几个布尔位：不删数据、不改库、不留持久状态 ⇒ 与 {@code /cleanup}
+     * （删真行、不可撤销、必须留痕）不是一档。代价明写：**「谁把限流关掉的」在本笔只有日志**
+     * （{@code AttackSwitchConfig.update} 那行 WARN 不含操作者 —— 控制器这一层根本没把
+     * {@code AuthSession.identify} 的结果传下去）。将来若要追责，得先给本端点加审计动作常量。
+     *
+     * @return {@code {Protections:[…], Injections:[…], IsDefault:bool, Version:n, Catalog:{…}}}
+     *         —— **写入后的**那份快照（不写回来让调用方再读一次：两个页面都会紧接着重绘）
+     *         ⚠️ 形状与 {@link #readConfig()} **逐字相同**（同一份 {@code view(...)}）：
+     *         轮询那条读到的与写回来的要是两种形状，前端就得写两套解析
+     */
+    @PostMapping("/config")
+    public ResponseEntity<Object> updateConfig(
+            @RequestParam(value = "protections", required = false) String protections,
+            @RequestParam(value = "injections", required = false) String injections) {
+        try {
+            return ResponseEntity.ok(Result.of(
+                    view(switchConfig.updateFromJson(protections, injections))));
+        } catch (IllegalArgumentException e) {
+            // 形状错（不是 JSON 数组串）/ key 不认识 ⇒ 400（与本类其余参数校验同一条口径）
+            return ResponseEntity.badRequest().body(Result.fail(e.getMessage()));
+        }
+    }
+
+    /**
+     * 读开关配置（第八条出口，**本域第一条 {@code GET}** —— 破例的理由见类注释）。
+     *
+     * <h2>【为什么需要一个「读」】</h2>
+     * 乙案里两个页面都是**消费者**：攻击页开场要知道「现在的开关是什么」（不再是自己那份缺省），
+     * 日志页要能显示、能一键恢复默认。没有这条读，页面只能各自编一份缺省值 —— 那正是甲案
+     * 的老毛病（页面上显示的与实际生效的不是同一件事）。
+     *
+     * <h2>【⚠️ 无副作用、不写审计】（与 {@code /status} 同一档）</h2>
+     * 只读一个进程内快照。
+     *
+     * <h2>【⚠️ ⚠️ {@code Cache-Control: no-store} 不是装饰】</h2>
+     * 这是本域唯一的 GET ⇒ 它会被浏览器按 HTTP 语义**缓存**，而 POST 从来不会。这条端点读的是
+     * 「刚刚拨完的那份配置」，缓存一份旧的就是「拨了没反应」的另一种演法。Spring 对本响应不带
+     * 任何缓存头 ⇒ 是否命中启发式缓存**取决于浏览器**，不能靠「大概不会」⇒ 显式禁掉。
+     *
+     * @return {@code {Protections:[…], Injections:[…], IsDefault:bool, Version:n, Catalog:{…}}}
+     *         —— {@code Protections} / {@code Injections} 只列**开着的**键（「缺省 = 全开」这件事
+     *         已经落成具体清单，读的人不必再知道缺省规则）；{@code IsDefault} 给「⚠️ 当前非默认
+     *         配置」那条常驻提示用；{@code Version} 让轮询方判断「这份和我上次看到的是不是同一份」；
+     *         {@code Catalog} 的每个键带 {@code Wired} —— {@code false} 的那几枚面板上**不可开关**
+     */
+    @GetMapping("/config")
+    public ResponseEntity<Object> readConfig() {
+        return ResponseEntity.ok()
+                .header("Cache-Control", "no-store")
+                .body(Result.of(view(switchConfig.state())));
+    }
+
+    /** 两个出口共用的响应形状（见 {@link #updateConfig()} 的 {@code @return} 那条 ⚠️）。 */
+    private Map<String, Object> view(AttackSwitchConfig.State st) {
+        Map<String, Object> m = new LinkedHashMap<>();
+        m.put("Protections", st.protections());
+        m.put("Injections", st.injections());
+        m.put("IsDefault", st.isDefault());
+        m.put("Version", st.version());
+        m.put("Catalog", switchConfig.catalog());
+        return m;
+    }
+
+    /** 这个表单参数**给了没**（空串按「没给」处理 —— 表单控件不发空值，同 {@code decodeScenarios}）。 */
+    private static boolean given(String raw) {
+        return raw != null && !raw.isBlank();
     }
 
     // ==================== 块 7 · commit 10：叫停（第五条出口）====================

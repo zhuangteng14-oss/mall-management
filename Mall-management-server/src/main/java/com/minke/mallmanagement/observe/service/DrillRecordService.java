@@ -3,7 +3,6 @@ package com.minke.mallmanagement.observe.service;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.minke.mallmanagement.observe.dao.DrillRecordDao;
-import com.minke.mallmanagement.protect.ProtectionGate;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
@@ -25,6 +24,22 @@ import java.util.Map;
  * ⚠️ <b>发流量、汇总、判定「拦下 / 失败」全在 {@link AttackEngine} 里</b>，本类不含任何请求逻辑
  * —— 分开的理由是前者可以纯单测（不碰库、不起 Spring），后者只做「编排 + 落库 + 反序列化」。
  *
+ * <h2>【⚠️ 3a.1（乙案）起：本类<b>不再碰</b>防护 / 注入开关】</h2>
+ * D 段 commit 2 ~ 阶段 2b 期间，本类握着 {@code ProtectionGate} 并被写进两个注释里当**唯一写点**
+ * （{@link #run} 开跑前 {@code apply}、收尾 {@code finally} 里 {@code resetToDefault}）。乙案把
+ * 开关提成共享配置之后，那两处一起删掉了：
+ * <ul>
+ *   <li>{@code protections} / {@code injections} 两个形参、它们进报文的 {@code body.put}、
+ *       以及给它们解码用的 {@code decodeKeys} —— 全部删除（解码搬去
+ *       {@code AttackSwitchConfig.updateFromJson}，语义一字未改）；</li>
+ *   <li>{@code gate.apply(...)} 与 {@code finally} 里的 {@code gate.resetToDefault()} —— 删除。
+ *       ⇒ **跑完不复位**（用户 2026-10-16 裁定）：配置是共享的、长期的，复位它等于把日志页
+ *       刚拨好的开关又拨回去。⚠️ 代价（「上一轮把限流关掉」越过那一轮留在进程里）改由
+ *       {@code AttackSwitchConfig} 的 {@code IsDefault} + 两页常驻提示 + 一键恢复默认接住。</li>
+ * </ul>
+ * ⚠️ {@code ProtectionGate.resetToDefault()} **方法本身留着** —— 「一键恢复默认」按钮要调它
+ * （调用者现在是 {@code AttackSwitchConfig}）。删的是本类收尾那次**自动**调用，不是那个方法。
+ *
  * <h2>【{@code Result} 为什么必须拆字段（方案 §1.5 逐字）】</h2>
  * 方案原文：「后端解析后分内容给前端用于显示。**不是为了展示原始长文本，是为了分字段显示**」。
  * ⇒ 列表端点**不回** {@code Result} 原文（不回 = 前端不可能顺手把它 dump 到页面上）。
@@ -42,19 +57,11 @@ public class DrillRecordService {
     private final AttackEngine attackEngine;
     private final ObjectMapper objectMapper;
 
-    /**
-     * 防护开关的运行时状态（D 段 · commit 2）。⚠️ 它是本类**唯一**的写点：
-     * {@link #run} 开跑前写、收尾（{@code finally}）复位。理由见那里的注释与
-     * {@code ProtectionGate} 类注释末节。
-     */
-    private final ProtectionGate gate;
-
     public DrillRecordService(DrillRecordDao drillRecordDao, AttackEngine attackEngine,
-                              ObjectMapper objectMapper, ProtectionGate gate) {
+                              ObjectMapper objectMapper) {
         this.drillRecordDao = drillRecordDao;
         this.attackEngine = attackEngine;
         this.objectMapper = objectMapper;
-        this.gate = gate;
     }
 
     // ==================== 面 1：场景清单 ====================
@@ -85,16 +92,15 @@ public class DrillRecordService {
      * @param durationSeconds 持续秒数（同上）
      * @param targetQps       目标 QPS（甲；空白 ⇒ {@code 0} = 不限速 = 加这个参数之前的行为）
      * @param scenarios       勾选与权重的 JSON 数组串，见 {@link #decodeScenarios}；空白 ⇒ 全 8 个场景
-     * @param protections     防护开关的 JSON 数组串（丁）；空白 ⇒ 全开（面板缺省）
-     * @param injections      注入开关的 JSON 数组串（丁）；空白 ⇒ 全关
      * @param operatorId      发起者业务号（**取会话**，认不出则 {@code ""}）
      * @param operatorRole    1/2/3（认不出则 {@code 0}）
      * @param baseUrl         打哪个地址（由 {@code AttackController} 从**当前请求**推出来，见那里的说明）
+     *                        ⚠️ 3a.1 起**没有** {@code protections} / {@code injections} 两个形参了
+     *                        —— 开关是共享配置，见类注释那节
      */
     public Map<String, Object> run(String name, String concurrency, String durationSeconds,
-                                   String targetQps, String scenarios, String protections,
-                                   String injections, String operatorId, Integer operatorRole,
-                                   String baseUrl) {
+                                   String targetQps, String scenarios, String operatorId,
+                                   Integer operatorRole, String baseUrl) {
         // ⚠️ 汇成一个报文交给引擎：引擎的 `parse` 是**唯一的校验出口**（单测钉住的就是它），
         //    本类只负责把「表单串」翻译成它认的报文形状（数值保持字符串 —— clampInt 两种都吃，
         //    让它去说「必须是整数」那句话，而不是在 Spring 的参数绑定阶段抛一个形状不同的异常）。
@@ -104,32 +110,15 @@ public class DrillRecordService {
         body.put("durationSeconds", durationSeconds);
         body.put("targetQps", targetQps);
         body.put("scenarios", decodeScenarios(scenarios));
-        // 丁的两个开关与 `scenarios` **同一种传输形状**（JSON 数组串 ⇒ 结构）—— 理由同
-        // decodeScenarios：自造分隔符要么错位、要么得再造一套转义规则。
-        List<String> onProtections = decodeKeys(protections, "protections");
-        body.put("protections", onProtections);
-        body.put("injections", decodeKeys(injections, "injections"));
 
         // ⚠️ 这里**不**转发调用者的 Authorization / Cookie：引擎自己铸票，转发发起人（管理员）的凭据
         //    会让身份守卫走管理员豁免（场景 7 的 403 永远出不来）、转发 Cookie 更会让「故意不带票」
         //    的那一路被会话悄悄认成已登录。理由全文在 `AttackEngine` 类注释第二节。
         //
-        // ── D 段（commit 2）：防护门在**引擎开跑之前**写入，在**这一轮收尾之后**复位 ──
-        // ⚠️ 顺序不能反：闸读的是 `ProtectionGate` 的运行时位，而这一轮的第一发请求在
-        //    `attackEngine.run` 内部就发出去了 —— 写入放在 run 之后等于本轮全程读的是**上一轮的**开关。
-        // ⚠️ 缺省（`protections` 没给 ⇒ 解码得 null）在这一层必须翻成「全开」：面板缺省就是全开，
-        //    而 `apply(null)` 的语义是「全关」（它按「勾了哪些」写，null = 一个都没勾）。
-        //    两个 null 含义相反，这里是**唯一**的换算点；不换算的后果是「不传这个参数 ⇒ 把防护全关了」，
-        //    恰是最坏的那种默认值。
-        // ⚠️ 复位必须放 `finally`：`run` 会抛（参数非法、下游全挂、被叫停……），
-        //    不复位就等于「上一轮把限流关掉」越过那一轮留在进程里（逐字理由见 ProtectionGate 类注释）。
-        AttackEngine.DrillRun run;
-        gate.apply(onProtections == null ? ProtectionGate.KEYS : onProtections);
-        try {
-            run = attackEngine.run(body, baseUrl);
-        } finally {
-            gate.resetToDefault();
-        }
+        // ⚠️ 3a.1（乙案）：本类**不再写防护门** —— D 段那段「开跑前 apply、finally resetToDefault」
+        //    整个删掉了（见类注释那一节）。开关是共享配置，写点只有 POST /attack/config 一处，
+        //    且**跑完不复位**（用户 2026-10-16 裁定）。
+        AttackEngine.DrillRun run = attackEngine.run(body, baseUrl);
 
         Map<String, Object> ok = new HashMap<>();
         ok.put("success", true);
@@ -257,27 +246,9 @@ public class DrillRecordService {
         }
     }
 
-    /**
-     * 开关参数（**JSON 数组串**）→ 字符串列表。空白 ⇒ {@code null}（= 没给 ⇒ 引擎用缺省）。
-     *
-     * <p>⚠️ 与 {@link #decodeScenarios} 同一条口径：解析失败**直接抛**（400），不回落。
-     * 回落成「全部开关按缺省」等于替调用者做了另一个决定，而结果页上会显示一套他没勾的开关
-     * —— 那不是降级，是失真（同 {@code OrderService.parseExplicitItems} 那边的取舍差异）。
-     *
-     * <p>⚠️ 「没给」与「给了 {@code []}」是**两件事**：前者是缺省（防护全开 / 注入全关），
-     * 后者是「这一轮一个都不开」这个有意义的状态。空串按「没给」处理（表单控件不发空值）。
-     */
-    private List<String> decodeKeys(String raw, String what) {
-        if (raw == null || raw.isBlank()) {
-            return null;
-        }
-        try {
-            return objectMapper.readValue(raw, new TypeReference<List<String>>() { });
-        } catch (Exception e) {
-            throw new IllegalArgumentException(
-                    what + " 必须是 JSON 字符串数组，如 [\"redisDown\"]");
-        }
-    }
+    // ⚠️ 3a.1（乙案）：给两个开关解码用的 `decodeKeys` 从本类删掉了（它的调用者随形参一起消失）。
+    //    搬运去向 = `AttackSwitchConfig.updateFromJson`（同包），那三句注释（不回落 / 空串 = 没给 /
+    //    「没给」与「给了 []」是两件事）一并搬了过去 —— 语义一字未改，只是换了个人持有。
 
     /**
      * 字符串参数 → 整数。空白 ⇒ {@code fallback}（= 没给）；**不是整数 ⇒ 抛**（控制器转 400）。

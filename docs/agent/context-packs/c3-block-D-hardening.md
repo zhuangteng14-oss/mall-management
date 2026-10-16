@@ -14,7 +14,7 @@
 
 把块 7 造出来的「攻击模拟器」从**只会打分**变成**真的挨了打还会接住**：块 7 已经能让后端被打
 （8 个预置场景 + 自定义权重、真发并发流量、真把库压出计数），但**被打了之后没有任何补救** ——
-限流、熔断、降级、重试、分池五个开关**在取点当天只记录不实现**（`AttackEngine.java:325` 起那段类注释、
+限流、熔断、降级、重试、分池五个开关**在取点当天只记录不实现**（`AttackEngine.java:336` 起那段类注释【3a.1 重指，原 325】、
 `:1652` 起那句回显文案）。D 段做的就是把那五个名字**接上真闸**，外加四件「边界」活
 （SSE 连接保护 / MQ 幂等与 DLQ 出口 / 无上限列表 / 敏感字段输出），最后收口出一份**块 7 + D 段合并**的手验清单。
 
@@ -42,7 +42,7 @@ D 段要的是**它的下半场** ——「关掉防护 + 注入故障 ⇒ 崩�
 | # | 边界 | 逐字口径 | 为什么（写在明处的理由） |
 |---|---|---|---|
 | 1 | **只加「补救」，不加「加固」** | 限流 / 熔断 / 降级 / 重试 / 分池 = 补救；扩池 / 扩线程 / 优化慢 SQL = 加固 | 演示需要一条**有上坡的曲线**。后端被顺手加固了，`拉满饱和` 就压不出来 |
-| 2 | **不动 HikariCP / 不动 Tomcat 线程 / 不优化慢 SQL** | 与 10b/10c 的「边界 A」**同一条**（`AttackEngine.java:188` 那句回显： 「**不是加固后端**（硬边界 A：连接池 / Tomcat 线程 / 慢 SQL 一律不动）」） | 后端慢的地方照旧慢 —— 那是 10c-1「瓶颈定位」的**观察对象**，不是待修项 |
+| 2 | **不动 HikariCP / 不动 Tomcat 线程 / 不优化慢 SQL** | 与 10b/10c 的「边界 A」**同一条**（`AttackEngine.java:199` 那句回显【3a.1 重指，原 188】： 「**不是加固后端**（硬边界 A：连接池 / Tomcat 线程 / 慢 SQL 一律不动）」） | 后端慢的地方照旧慢 —— 那是 10c-1「瓶颈定位」的**观察对象**，不是待修项 |
 | 3 | **保留瓶颈** | 瓶颈是演示的**触发源** | 同上：把触发源修掉，攻防联动就没戏可演 |
 | 4 | **不改既有响应的语义** | 唯一例外 = ③④ 两项（见下），且**必须先裁** | 本仓向后兼容是硬线；脱敏与「默认 100」都会改**用户看得见的行为** |
 
@@ -84,8 +84,8 @@ D 段要的是**它的下半场** ——「关掉防护 + 注入故障 ⇒ 崩�
 | **唯一自建池**：订单状态异步出口 | `order/model/OrderStateExecutor.java:79`（字段）· `:100`（`new ThreadPoolExecutor`）· `:203`（自定义丢弃策略） | 显式 `ThreadPoolExecutor` + `ArrayBlockingQueue`（`:99`）+ 核心/最大/队列全**可配**（`:90-93` 读 `app.order.state.async.*`） |
 | 就地的临时池（锁场景演示） | `shared/lock/LockSceneService.java:181` | `Executors.newFixedThreadPool(tasks.size(), recorder)`，**用完即关**（`:426 shutdownAndDetectLeak`） |
 | 常驻探测线程（MQ 发布侧） | `observe/mq/RabbitEventPublisher.java:140`（起）· `:157`（daemon）· `:165`（interrupt） | `new Thread`，**不是池** |
-| 攻击引擎派发线程 | `observe/service/AttackEngine.java:930` | 每个派发键 `new Thread`，线程数 = `WORKER_THREADS`（`:215` = 32）；**不是池** |
-| **Tomcat 工作线程** | **未配置** —— 三个 `application*.properties` 里**没有任何** `server.tomcat.*` | 吃 Spring Boot 默认（200）；只在注释里被引用（`AttackEngine.java:155` / `:188` / `:621`） |
+| 攻击引擎派发线程 | `observe/service/AttackEngine.java:960`【3a.1 重指，原 930】 | 每个派发键 `new Thread`，线程数 = `WORKER_THREADS`（`:226`【原 215】 = 32）；**不是池** |
+| **Tomcat 工作线程** | **未配置** —— 三个 `application*.properties` 里**没有任何** `server.tomcat.*` | 吃 Spring Boot 默认（200）；只在注释里被引用（`AttackEngine.java:155`（3a.1 **未动**）/ `:199` / `:647`【后两处 3a.1 重指，原 188 / 621】） |
 | **Rabbit 消费并发** | **未配置** —— 无 `spring.rabbitmq.listener.*`；工厂也**没有** `setConcurrentConsumers` | 吃容器默认（**单**消费者线程），见 `RabbitObserveConfig.java:206-221` |
 
 ⚠️ **`@Async` / `@EnableAsync` 全仓零命中**（只在注释里出现：`OrderStateExecutor.java:25,28,32`、
@@ -147,29 +147,34 @@ D 段要的是**它的下半场** ——「关掉防护 + 注入故障 ⇒ 崩�
 
 ### ⑥ 防护 5 键 —— 三处「只记录不实现」的原话 {#pack-c3-block-d-hardening-s12}
 
-**5 个键的定义与校验（唯一出处）**：`observe/service/AttackEngine.java:330-331`
+**5 个键的定义与校验（唯一出处）**：`observe/service/AttackEngine.java:341-342`【3a.1 重指，原 330-331】
 ```java
 static final List<String> PROTECTION_KEYS =
         List.of("rateLimit", "circuitBreak", "degrade", "retry", "poolIsolation");
 ```
-- 校验：`parseKeys(...)` `AttackEngine.java:1495-1510`（`:1509` 未知键 ⇒ `IllegalArgumentException`
-  ⇒ 控制器侧 400）；调用点 `:1480-1481`。
-- 回显：`AttackEngine.java:1635` `engine.put("Protections", cfg.protections())`。
-- 落进演练记录：`DrillRecordService.java:109`（`decodeKeys(protections, "protections")` —— commit 2 起先收进局部量 `onProtections`，再由 `ProtectionGate` 消费）。
+- 校验：⚠️ **3a.1（乙案）起这个入口没了** —— `AttackEngine.parseKeys(...)`（**原 1495-1510 行**，其中
+  原 1509 行是未知键 ⇒ `IllegalArgumentException`、调用点原 1480-1481 行）**整个方法已删除**：
+  开关不再走 `/attack/run` 的报文，白名单校验搬去了 `AttackSwitchConfig.update`（未知键 ⇒ 400，
+  文案随之改为「本仓认这五个：…」）。⚠️ **本条是「重指时发现根本没有落点」的那一类**，不是漏改。
+- ~~回显：原 1635 行 `engine.put("Protections", cfg.protections())`~~
+  ⇒ **现址 `AttackEngine.java:1652`**【3a.1 重指，原 1635 行】（内容不变，只是随上方净增 17 行下移）。
+- ~~落进演练记录：`DrillRecordService.java:109`（`decodeKeys(protections, "protections")` —— commit 2 起先收进局部量 `onProtections`，再由 `ProtectionGate` 消费）~~
+  ⇒ **该行已随形参删除**；3a.1 的重指落点是 `DrillRecordService.java:249`（那句「给两个开关解码用的 `decodeKeys` 从本类删掉了」，**原 109**），
+  解码逻辑现址 = `AttackSwitchConfig.updateFromJson`。
 - 前端开关面板：`views/admin/observe/AttackConsole.vue` —— 模板 `:122-145`（`v-for="k in PROTECTIONS"` `:128`）·
   状态 `:624`（`ref(new Set(PROTECTIONS))`，**默认全开**）· 拨动 `:674-692` · 提交 `:1005`。
 - 中文标签：`config/labels/observe-labels.js:274`（`PROTECTIONS`）· `:277-283`（`PROTECTION_LABEL`：
   限流 / 熔断 / 降级 / 重试 / 分池）· `:360-364`（`protectionLabel`）。
 
 **三处「只记录不实现」的原话**（D 段做完要**逐处改**，改的时候别只改一处）：
-1. `AttackEngine.java:325`（类注释）**原话**：「⚠️ **本笔只负责把它们「收下来、记进演练记录、打进日志」，
+1. `AttackEngine.java:336`（类注释）**原话**：「⚠️ **本笔只负责把它们「收下来、记进演练记录、打进日志」，
    一条防护逻辑都不实现** …… 硬边界 A 逐字是「加固（扩池 / 扩线程 / 优化慢 SQL）与补救
-   （限流 / 熔断 / 降级 / 重试）**都在 D 段**」」—— ⚠️ **commit 2 已改**（`:325-328` 现址不变，见尾部〈落地登记〉）。
-2. `AttackEngine.java:1652`（回显文案）**原话**：「Protections 五个开关本笔**只记录不实现**（防护在 D 段）」—— ⚠️ **commit 2 已改**（现为「五枚里三枚真生效…」，同占 `:1652-1653`；⚠️ **阶段 2b 又改成「四枚真生效 / `degrade` 只作记录位」**，仍占 `:1652-1653`）。
+   （限流 / 熔断 / 降级 / 重试）**都在 D 段**」」—— ⚠️ **commit 2 已改**（`:336-339`【3a.1 重指，原 325-328】现址，见尾部〈落地登记〉）。
+2. `AttackEngine.java:1669`（回显文案）**原话**：「Protections 五个开关本笔**只记录不实现**（防护在 D 段）」—— ⚠️ **commit 2 已改**（现为「五枚里三枚真生效…」，同占 `:1669-1670`【3a.1 重指，原 1652-1653】；⚠️ **阶段 2b 又改成「四枚真生效 / `degrade` 只作记录位」**，仍占 `:1669-1670`）。
 3. 前端 `AttackConsole.vue:127`（原 **124** 行；原文「默认全开 · 本笔只记录、不改读数（接闸在 D 段）」）与 `:137`（原 **134** 行）—— ⚠️ **两处均已由 commit 2 改**（新文案 + `:aria-disabled` 守卫；**别再按原话 grep**）。⚠️ **阶段 2b 又整体 +3**（该文件上方副标题块净插 3 行，故原 124 / 134 行为现 127 / 137 行）；**阶段 2b 把副标题再改成**「限流 / 熔断 / 重试 / 分池已接闸，改读数；降级不可开关」。
 4. 契约侧另有：`api-contract.md#api-h-1` 的载体表注（原「两者都先落成契约面 …… 语义落地归 D 段
    —— 这一条是**如实登记**」）—— ⚠️ **commit 2 已同笔改**（改为「✅ 已接闸（3 键 + 1 键 TD + 1 键记录位）」（⚠️ **阶段 2b 起再改为「4 键 + 1 键记录位」**）
-   + 附录 `#api-i-3` 指针）；原引的**快照行号**（`AttackController:110`）随之删去，不再需要重指。
+   + 附录 `#api-i-3` 指针）；原引的**快照行号**（`AttackController:137`【3a.1 重指，原 110】）随之删去，不再需要重指。
 
 ⚠️ **`degrade`（降级）在本仓已有半个实体**：`Mall-management-server` 里有一族「降级」行为
 （缓存 L1/L2 回落、锁取超时 fail-open、MQ 缺席只 WARN、审计 fail-open）—— 它们**不是**由一个开关管的。
@@ -202,7 +207,7 @@ static final List<String> PROTECTION_KEYS =
 - 现成范式：**默认 100 / 上限 500** 的 `normalizeLimit` 已在至少 20 处生效
   （`AuditService:157-161` · `UserGovernanceService:110-114` · `ReportService:489-493` ·
   `SubsidyService:381-385` · `CouponService:862-867` · `SeckillService:596-600` …）；
-  攻击记录是 **默认 20 / 上限 200**（`DrillRecordService.java:213-215`，常量 `:38-39`）；
+  攻击记录是 **默认 20 / 上限 200**（`DrillRecordService.java:202-204`【3a.1 重指，原 213-215】，常量 `:53-54`【原 38-39】）；
   回放是 **默认 5000 / 上限 50000**（`ReplayService.java:115-119`）。
 - **真正无上限的列表**（实测逐条 —— 这些才是批文 ③ 的靶子）：
 
@@ -359,7 +364,7 @@ static final List<String> PROTECTION_KEYS =
 | 3 | **A4 DLQ 出口形态**：自建只读端点 / 走 RabbitMQ management / 只加指标？ | 批文 ②（自带「若有」） |
 | 4 | **A6 LIMIT 名单**：一刀切 100，还是「只对时间序列表打默认、按业务键收窄的除外」？ | 批文 ③；会影响聊天记录、调度器扫描 |
 | 5 | **A7 空闲超时的层**：SSE 自己实现 / 改 `spring.mvc.async.request-timeout=-1`（= 部分撤 10b）？ | 批文 ①；与 10b 冲突 |
-| 6 | **`degrade` 开关管什么**：今天一族降级行为**都不由开关管**（缓存回落 / 锁 fail-open / MQ 缺席 / 审计 fail-open） | 批文 ②；`AttackEngine.java:325` |
+| 6 | **`degrade` 开关管什么**：今天一族降级行为**都不由开关管**（缓存回落 / 锁 fail-open / MQ 缺席 / 审计 fail-open） | 批文 ②；`AttackEngine.java:336`【3a.1 重指，原 325】 |
 | 7 | **重试挂哪一层、针对哪个真实死锁**：今天全仓零死锁处理，没有实测证据说死锁发生在哪几个 SQL | 批文 ④ |
 | 8 | **既有挂账接手范围**：`TD-18`（管理员铸票路径缺失）与 `TD-64`（块 7 的破坏性 / 长连端点**没有角色闸**）的「处理时机」都写着 **D 段** —— 要不要在本段结清？（`TD-64` 的破坏面是**真 DELETE**） | `tech-debt.md` TD-18 / TD-64；`TD-71`（JVM `-Xms/-Xmx`）归 commit 4 ⑤ |
 
@@ -443,12 +448,12 @@ LOST∩NEW 逐条可指认，本节以下给的就是它们的旧 → 新）· *
 
 | 文件 | 旧话 | 现话 |
 |---|---|---|
-| `AttackEngine.java:160`（§八 标题） | 「本笔只收下、只记录，不实现」 | 「D 段 commit 2 起：三键真生效 / 一登记 TD / 一记录位」—— ⚠️ **阶段 2b 再改**：「D 段 commit 2 起三键、**阶段 2b 起四键真生效** / 一记录位」（`:160` 现址不变） |
-| `AttackEngine.java:163-164` | 「本笔一条防护逻辑都不实现」 | 「本类一条防护逻辑都不实现 …… 真闸在 D 段 commit 2 落地」—— ⚠️ **阶段 2b 再改**：句尾补「`retry` 于阶段 2b 接上，口径是 **4 键接闸 + 1 键记录位**」（`:163-164` 现址不变） |
-| `AttackEngine.java:320`（分节横幅） | 「本笔只收下、只记录」 | 「本类只收下、只记录；真闸在 `ProtectionGate`」（⚠️ **阶段 2b 未动**：它没写死键数，**不需要改**） |
-| `AttackEngine.java:325-328`（`PROTECTION_KEYS` 类注释） | 「本笔只负责把它们收下来 …… 一条防护逻辑都不实现」 | 「本类只负责收下来 …… 口径 3 键接闸 + 1 键登记 TD + 1 键记录位」—— ⚠️ **阶段 2b 再改**（现落在 `:327-328`）：「接闸口径自阶段 2b 起是 **4 键接闸 + 1 键记录位** …… **别读成「五枚都接上了」**」 |
-| `AttackEngine.java:1652-1653`（`/attack/run` 响应里的 `Engine.Notes`） | 「Protections 五个开关本笔只记录不实现（防护在 D 段）」 | 「五枚里三枚真生效 …… `retry` 只登记 TD-74、`degrade` 只作记录位 ⇒ 面板上不可开关」—— ⚠️ **阶段 2b 再改**（**用户可见的回显文案**，`:1652-1653` 现址不变）：「五枚里**四枚真生效**（`rateLimit` / `circuitBreak` / **`retry`** / `poolIsolation`，阶段 2b）；`degrade` 只作记录位」 |
-| `AttackController.java:111`（`@param protections`） | 「本笔只记录不实现（防护逻辑在 D 段）」 | 「D 段 commit 2 起真生效：三键接闸；`retry` 只登记 TD-74、`degrade` 只作记录位」—— ⚠️ **阶段 2b 再改**（`:111` 现址不变）：**四键**（`rateLimit` / `circuitBreak` / `retry` / `poolIsolation`） |
+| `AttackEngine.java:160`（§八 标题） | 「本笔只收下、只记录，不实现」 | 「D 段 commit 2 起：三键真生效 / 一登记 TD / 一记录位」—— ⚠️ **阶段 2b 再改**：「D 段 commit 2 起三键、**阶段 2b 起四键真生效** / 一记录位」（`:160` 现址不变）；⚠️ **3a.1（乙案）第三次改**（**仍占 `:160`**）：标题变成「3a.1 起 = **共享配置**，不再是 `{@code /run}` 的入参」 |
+| `AttackEngine.java:174-175`【3a.1 重指，原 163-164】 | 「本笔一条防护逻辑都不实现」 | 「本类一条防护逻辑都不实现 …… 真闸在 D 段 commit 2 落地」—— ⚠️ **阶段 2b 再改**：句尾补「`retry` 于阶段 2b 接上，口径是 **4 键接闸 + 1 键记录位**」（**3a.1 该句逐字保留**，只随上方“八、丁”那节改写而下移 11 行） |
+| `AttackEngine.java:331`（分节横幅）【3a.1 重指，原 320】 | 「本笔只收下、只记录」 | 「本类只收下、只记录；真闸在 `ProtectionGate`」（⚠️ **阶段 2b 未动**：它没写死键数，**不需要改**；3a.1 同样只下移 11 行、文字未动） |
+| `AttackEngine.java:336-339`（`PROTECTION_KEYS` 类注释）【3a.1 重指，原 325-328】 | 「本笔只负责把它们收下来 …… 一条防护逻辑都不实现」 | 「本类只负责收下来 …… 口径 3 键接闸 + 1 键登记 TD + 1 键记录位」—— ⚠️ **阶段 2b 再改**（现落在 `:338-339`）：「接闸口径自阶段 2b 起是 **4 键接闸 + 1 键记录位** …… **别读成「五枚都接上了」**」（3a.1 只下移 11 行、文字未动） |
+| `AttackEngine.java:1669-1670`（`/attack/run` 响应里的 `Engine.Notes`）【3a.1 重指，原 1652-1653】 | 「Protections 五个开关本笔只记录不实现（防护在 D 段）」 | 「五枚里三枚真生效 …… `retry` 只登记 TD-74、`degrade` 只作记录位 ⇒ 面板上不可开关」—— ⚠️ **阶段 2b 再改**（**用户可见的回显文案**）：「五枚里**四枚真生效**（`rateLimit` / `circuitBreak` / **`retry`** / `poolIsolation`，阶段 2b）；`degrade` 只作记录位」。⚠️ **3a.1 第四次改**（**仍占 `:1669-1670`**）：原句逐字保留，另**追加**一条 `Notes` 说明「这两项是**起跑那一刻**的快照，跑的过程中改 `/attack/config` 对本轮立即生效但不改这两项」 |
+| `AttackController.java:137`（`@param protections`）【3a.1 重指，原 111】 | 「本笔只记录不实现（防护逻辑在 D 段）」 | 「D 段 commit 2 起真生效：三键接闸；`retry` 只登记 TD-74、`degrade` 只作记录位」—— ⚠️ **阶段 2b 再改**：**四键**（`rateLimit` / `circuitBreak` / `retry` / `poolIsolation`）。⚠️ **3a.1 第五次改**（**现址 `:137-138`**）：整段改成「⚠️ **已搬走**：3a.1 起它属于共享配置（`/attack/config`），本端点**只用来拒收**」—— 那两句讲「四键真生效」的话随之作废（**键数与生效口径没变，变的是它住在哪里**） |
 | `AttackConsole.vue:513-515`（SFC 文档块；原 **510-512** 行） | 「5 个防护开关 …… 本笔只收下、只记录、不实现」 | 「防护那组自 D 段 commit 2 起三键真生效 …… 另两枚画成不可开关」—— ⚠️ **阶段 2b 再改**：「自 **D 段 commit 2** 起有真闸、**阶段 2b 起四键**（限流 / 熔断 / 重试 / 分池真生效），只剩 `degrade`（记录位）画成不可开关」 |
 | 本 pack `:17`（一句话定位） | 「五个开关**今天只记录不实现**」 | 「**在取点当天**只记录不实现」 |
 | 本 pack `:164-169`（三处原话） | 三条原话 + 「D 段做完要逐处改」 | 原文保留为**原话**，各条后面标「**commit 2 已改**」 |

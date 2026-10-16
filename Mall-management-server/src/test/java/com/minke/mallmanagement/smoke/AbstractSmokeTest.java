@@ -33,6 +33,7 @@ import com.minke.mallmanagement.observe.service.MetricsSnapshotService;
 import com.minke.mallmanagement.observe.service.OrderStreamService;
 import com.minke.mallmanagement.observe.service.EventStreamService;
 import com.minke.mallmanagement.observe.service.AttackEngine;
+import com.minke.mallmanagement.observe.service.AttackSwitchConfig;
 import com.minke.mallmanagement.observe.service.DrillRecordService;
 import com.minke.mallmanagement.observe.service.ObservedEventCleanupService;
 import com.minke.mallmanagement.observe.service.ReplayService;
@@ -449,6 +450,18 @@ import static org.mockito.Mockito.when;
         //    与上面 `MerchantApplicationService` / `GoodsAuditService` 两处 ⚠️ 记的性质一致。
         //    真事务语义归 `RelistDeadlockRetryTest`（替身计数）与 A3 / 手验的职责。
         //    只加注释、不加类 ⇒ 上面那一行不动。
+        // C3 块 7 · 阶段 3a.1〈乙案切换〉（2026-10-16）：**零新 Controller**，但 `AttackController`
+        // 与 `AttackEngine` 两个**既有** bean 的构造器各多了一个形参 ⇒ **第二十三次同一处地雷**
+        // （形状 = 「既有 bean 多吃一个 bean」，同上面那两笔：最隐蔽的一种，报错指向的是老 bean）。
+        // ⚠️ 这个类**不能省**：它是 `@Component`（切片不扫），而上面那个形参就是它 —— 少了它
+        //    整片切片上下文在加载期起不来，报错链是 `attackController → AttackSwitchConfig`。
+        // ⚠️ 依赖链：`AttackSwitchConfig` → `ProtectionGate`（本清单上面那一行，已登记）+
+        //    `ObjectMapper`（切片里本来就有 —— Jackson 的自动配置在 WebMvcTest 白名单里）。
+        //    ⇒ 只补它一个类，**不补**任何替身；`@MockitoBean` 那一摞一个不动。
+        // ⚠️ 它带**状态**（注入开关那几个位、{@code version}），但切片是**每类一份上下文**、
+        //    且 smoke 打的是 Controller 的响应文案：那份状态在切片里从不被写（没人点 [开始]）⇒
+        //    用例之间没有可观察的串扰。**真演练**的配置语义归 `AttackSwitchConfigTest`。
+        AttackSwitchConfig.class,
         })
 public abstract class AbstractSmokeTest {
 

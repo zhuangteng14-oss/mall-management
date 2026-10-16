@@ -5077,7 +5077,7 @@ COALESCE(merchantid,customerid) WHERE EventType IN (那 5 个)` → 复读对照
 
 ### 24-12　零漂移 + refs（本系列，逐笔）
 
-- **通用手法** ⇒ 新代码**一律尾追加**、订正走**同行替换**（净 0 行）；**唯一例外**是 10d 本笔对 `AttackController.java:100-102` 的改（`concurrency` 上限 **500 → 4000**），也是**行数不变**。
+- **通用手法** ⇒ 新代码**一律尾追加**、订正走**同行替换**（净 0 行）；**唯一例外**是 10d 本笔对 `AttackController.java:128-130`【3a.1 重指，原 100-102】的改（`concurrency` 上限 **500 → 4000**），也是**行数不变**。
 - **10 收口 `57e19b7`（本系列唯一一次 refs 全跑）** ⇒ `./scripts/refs-scan.sh` → `_work/b10c-refs-final.txt`：配对比 **LOST = 4**（**全是本笔这 4 处有意重指**）/ **NEW = 62** = 4 重指落点 + 1 真·新引用（`OrderFlow.vue:346` → `OrderState.java:44-72`）+ **57 来自 11 份未跟踪的 context-packs**。**裸 token 归零**。⚠️ **判据仍是「真 LOST = 0」**，不是某个计数（同 24-9）。
 - **`21bae15`** ⇒ LOST = **0**；22 条 NEW 全部来自三个未跟踪的 `docs/agent/context-packs/*.txt`（与改动无关）。
 - ⚠️ **本系列自身产生的漂移集中在未跟踪的时点稿里** —— `docs/agent/context-packs/` 是**核实时点的记录，不应重指**（`_work/b10c-target-drift.py` 的 27 条 `!!` 里 21 条是它；⚠️ 该工具**只覆盖「本次改动过 ∩ 被行号引用」的 23 文件 / 97 区间**，且**重指过的会继续标 `!!`**——正确判据是「新落点那一行确实是它宣称的构造」，这一步**人读**）。
@@ -5088,7 +5088,7 @@ COALESCE(merchantid,customerid) WHERE EventType IN (那 5 个)` → 复读对照
 1. **⚠️ 没有 `/attack/status` 这个端点**（用户 10d 清单点名要写进 `api-contract.md`）—— 实测五条映射是 `/scenarios` `/run` `/stop` `/records` `/cleanup`，**无 `status`**。同 A-3 那一类**前提不符**。⇒ 附录 H 写的是**真实存在的五条**。
 2. **⚠️ 种子基线是 190 行、不是「~12 行」**（用户 10d §二预期）—— `order` 清场实测：**12,268 → 190**（删 12,078 条 `SIM-%`）。订正预期，**非缺陷**。
 3. **`/attack/stop` 是 10c 新增的，但 `api-contract.md` 附录 H 当时没收它** ⇒ 本笔（10d）补登第 5 条出口。⚠️ 与 8b 时「附录 H 只有 4 条」的口径不同，这里说的漏是**10c 之后**发生的。
-4. **`AttackController.java:100-102` 的陈旧注释** ⇒ 原写「上限 **500**、硬顶 **512**」，与 `4da212a` 抬到 **4000** 的 `MAX_CONCURRENCY` 不符 ⇒ 本笔**净 0 行**订正（避免造漂移）。**10c 抬上限时漏改了这处注释**。
+4. **`AttackController.java:128-130`【3a.1 重指，原 100-102】的陈旧注释** ⇒ 原写「上限 **500**、硬顶 **512**」，与 `4da212a` 抬到 **4000** 的 `MAX_CONCURRENCY` 不符 ⇒ 本笔**净 0 行**订正（避免造漂移）。**10c 抬上限时漏改了这处注释**。
 5. **10d 本笔不 push / 不 merge** —— 块 7 全部手验通过后由用户决定。
 6. **⚠️ 一处待归置** ⇒ `docs/agent/context-packs/块7-*.txt` **3 份未跟踪**（10d 时点又新增）—— 若入库会给引用图注入噪声对；建议归置到 `_work/`（同 57e19b7 收口报告 §戊 的建议，**未做**）。⏹ **已归置**：块 7 收尾 commit 1 前的那笔 chore `4d75eec` 把 3 份 **入库**（改判为「被已入库文件引用 ⇒ 换机可取证」）—— 本条据此关闭。
 
@@ -5141,7 +5141,7 @@ COALESCE(merchantid,customerid) WHERE EventType IN (那 5 个)` → 复读对照
 
 ### 25-2　本笔的事实更正（三处，逐条）
 
-1. **附录 H.1 标题「攻击模拟器五出口」→「六出口」** ⇒ ⑤③ 之后 `/status` 是真端点（`AttackController:210`）。⚠️ 这与 §24-13 第 **1** 条（「**没有** `/attack/status` 这个端点」）**不矛盾** —— 那条是 **commit 10 系列的时点陈述**，按本仓口径**保留原样**（见 `progress.md` `#### 7-B7-收尾` 的 ③ 顺带登记）。
+1. **附录 H.1 标题「攻击模拟器五出口」→「六出口」** ⇒ ⑤③ 之后 `/status` 是真端点（`AttackController:334`【3a.1 重指，原 210】；⚠️ 3a.1 起该标题再变「**八**出口」）。⚠️ 这与 §24-13 第 **1** 条（「**没有** `/attack/status` 这个端点」）**不矛盾** —— 那条是 **commit 10 系列的时点陈述**，按本仓口径**保留原样**（见 `progress.md` `#### 7-B7-收尾` 的 ③ 顺带登记）。
 2. **端点总数**：后端 method-level **142 → 144**（实测 `grep -rhE "^\s*@(Post|Get|Put|Delete)Mapping" --include=*Controller.java … | wc -l`）· `endpoints.js` **141 → 143**（实测 141 行 + 2 处同行两条）。⚠️ 该文件头注是**逐笔就地同步**的（③ 落码时同步到 142，回放那条同步到 143）—— 本笔只登记，**不另动**。
 3. **`/replay` 不在 `/admin/observe/attack/*` 之下** ⇒ 路径挂在 `/admin/observe`（根），后端是**新建的 `ReplayController`**，**不是** `AttackController` 的第七条。理由两半：① 它读的是**事件台账** `observed_event`，不是**演练记录** `drill_record`；② 另一条候选路（再开一条 SSE 推回放）要多一条常驻流 + 回答「流断了怎么办」。
 
@@ -5231,7 +5231,7 @@ COALESCE(merchantid,customerid) WHERE EventType IN (那 5 个)` → 复读对照
    被引的 159-161 未动，口径与 pack〈落地登记〉「只登记、不改」一致。
    ⚠️ 扫描器**看不见**的 6 条「无主裸续引」（`observe-labels.js` 五处 + 原 `:315-319`）为**手工**逐条重指并已在 pack 登记。
 4. **补回 1 条**：`api-contract.md:799` 的 `protections` 属实行改写时把旧引（`AttackController` 的原 110 行）一并去掉了 ⇒ 补回
-   `AttackController:111`（**同一行内**加，净 0 行），与本表 `injections` 行的 `AttackController:112` 同形。
+   `AttackController:137`【3a.1 重指，原 111】（**同一行内**加，净 0 行），与本表 `injections` 行的 `AttackController:139`【原 112】同形。
 
 ### 26-4　未还项（本笔）
 

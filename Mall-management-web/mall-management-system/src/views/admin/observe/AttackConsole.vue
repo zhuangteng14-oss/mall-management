@@ -1001,12 +1001,13 @@ async function fire(name, chosen) {
       durationSeconds: secs,
       targetQps: tier.value,
       scenarios: chosen,
-      // ⚠️ 两组开关**一律显式传**（不靠后端那句「缺省 = 防护全开／注入全关」）：丁要的可复现性
-      //    是「这一轮到底是按**哪一套**开关跑的」，显式传出去的才是页面上这一份。
-      //    ⚠️ 空数组 ≠ 没给 —— 全关时传的是 `[]`，后端照收（那正是「一个都不开」）；
-      //    **不传**才是「缺省 = 全开」。⇒ `api/observe.js#runAttack` 对数组一律 `JSON.stringify`。
-      protections: PROTECTIONS.filter((k) => protections.value.has(k)),
-      injections: INJECTIONS.filter((k) => injections.value.has(k)),
+      // ⚠️ 3a.1（乙案）：两组开关**不再随这一轮发出** —— 它们是共享配置，由
+      //    `GET/POST /admin/observe/attack/config` 读写；引擎开跑时**自己**去读那一份。
+      //    ⇒ 这里刻意**什么都不传**：传了后端会直接 400 并指路（不静默忽略）。
+      //    ⚠️ **别**为了「让页面上的开关生效」在这里顺手 POST 一次配置 —— 那会把日志页
+      //    刚拨的开关覆盖回去，乙案的唯一目的（过程中能改、两页共读共写）就白做了。
+      //    ⚠️ 于是本页顶部那两组控件在 3a.1→3a.6 之间是**死控件**（拨了不影响任何东西，
+      //    也不再被读），等 3a.6 接上配置面；窗口登记见本笔收笔报告。
     })
     // 甲：这一轮有没有被叫停过、有没有背压弃投 / 取消。后两个数是 `DrillRecordService.run()`
     // 在**响应根上**单列出来的（`ShedRequests` / `AbandonedRequests`），**不并进「失败」那一档**

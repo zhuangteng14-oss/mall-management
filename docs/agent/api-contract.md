@@ -751,24 +751,37 @@
 ⚠️ **块 7 的 8 条全部落在 §2 与 §3 的 5 个 Controller 之外** ⇒ §2 的「共 36 个」**不需要改**；本附录就是那 8 条的契约面。
 ⚠️ **`observe` 域不进 §2 的清单**（同附录 C/D/E/F/G 的手法：零漂移，正文表不插入）—— 域标题只在**本附录**里出现。
 
-### H.1 新域 `/admin/observe/attack/*` —— 攻击模拟器**六**出口 {#api-h-1}
+### H.1 新域 `/admin/observe/attack/*` —— 攻击模拟器**八**出口 {#api-h-1}
 
-`AttackController.java`（`@RequestMapping("/admin/observe/attack")` @ `:67`）—— 返回一律 `Result<Map<String,Object>>`（`/run`、`/records` 走 `ResponseEntity` 显式构造 4xx）。
+`AttackController.java`（`@RequestMapping("/admin/observe/attack")` @ `:84`）—— 返回一律 `Result<Map<String,Object>>`（`/run`、`/records` 走 `ResponseEntity` 显式构造 4xx）。
 
 > ⚠️ **2026-10-15 块 7 收尾 commit 1 重指**：标题原为「**五**出口」；本表坐标**逐条更新**。
 > 三处漂移**原因不同**，故幅度不同（旧值一律注为「**原 N 行**」）：
 > ① `@RequestMapping` 与 `/scenarios`、`/run`、`/stop` = **记录值比现值小 1 行**（现值 = 原值 + 1）——
 >     多出的那 1 行是**新增的 import**（`observe.service.AttackEngine`，给 `AttackEngine.Progress` 用）；
 > ② `/records`、`/cleanup` = 在 ① 的基础上**再 +44 行** —— 那是**新增的 `/status`** 顶出来的。
+>
+> ⚠️ **2026-10-16 阶段 3a.1（乙案）第二次重指**：标题「**六**出口」⇒ **「八」出口**
+> （新增 `POST /config` 与 `GET /config` 两条，见下表的 `/config` 两行）；本表坐标**逐条更新**。
+> 三处漂移**幅度不同**（旧值一律注为「**原 N 行**」）：
+> ① `@RequestMapping` = **+17**（原 67）—— 顶出来的是类注释新增的「八个出口」一节；
+> ② `/scenarios` = **+28**（原 92）、`/run` = **+26**（原 124）—— 在 ① 之上再加 import 与
+>     `@param protections` / `@param injections` 两处说明改写后的净增；
+> ③ `/stop` ~ `/cleanup` **四条** = **+124**（原 170 / 210 / 233 / 281）—— 在 ② 之上再顶出
+>     **两条新端点**（`/config` 的 `POST` + `GET`，含各自的注释与 `view` / `given` 两个私有工具）。
 
 | 路径 | 入参（全部 `required=false`，**一律 `String`**） | 返回要点 | 身份 | 坐标 |
 |---|---|---|---|---|
-| `/scenarios` | **无** | 8 个预置场景（`key` / 中文名 / 同时演示的防护 / 需要的人工动作 / 默认权重） | 无 | `:92`（原 91） |
-| `/run` | **共 7 个**（全部可选）：`name`（缺省「自定义」，> 64 字符按列宽截断）· `concurrency`（缺省 **100**、上限 **4000** —— 含义已收紧成「**在途上限**」，不再等于线程数）· `durationSeconds`（缺省 **60**、上限 **600**）· `targetQps`（缺省 **0** = **不限速**；「档位 120 / 400 / 拉满」的载体，见下）· `scenarios`（**JSON 数组串**）· `protections`（**JSON 数组串**，缺省 = **全开**）· `injections`（**JSON 数组串**，缺省 = **全关**） | 跑完一轮 ⇒ `Id` / `Name` / `TotalRequests` / `BlockedRequests` / `FailedRequests` / `DurationMs` / `Result` | 会话（**只记谁点的**，不转发凭据） | `:124`（原 123） |
-| `/stop` | **无** | `success` / `stopped`（**如实**：没在跑就是 `false` 并说清「没有在跑的演练」）/ `summary` | 无（**不写审计**，理由见下） | `:170`（原 169） |
-| `/status` | **无** | **块 7 收尾 commit 1 第六条**：进程内快照 ⇒ `Running` / `BatchId` / `ElapsedMs` / `Sent` / `Completed` / `Blocked` / `Failed` / `Shed` / `Abandoned`。⚠️ `Running=false` 时其余**全为 0 而不是 `null`**（1 秒轮询在收尾那一拍必然撞上它，缺键会让前端把「跑完了」画成「读数丢了」）。⚠️ 是**过程近似值**，**最终账**看 `/records` 那条 `drill_record`。不写审计（与 `/stop` 同档：只读进程内状态） | 无（**不写审计**） | `:210` |
-| `/records` | `limit`（缺省 **20**、上限 **200**）· `offset`（负数归 0） | 时间倒序记录列表；行内 `Result` 长文本已**拆成字段**（解析失败 ⇒ 落 `ResultRaw` + `ResultParseError`，不静默）。⚠️ **每行新增 `BatchId`**（块 7 收尾 commit 1，用户 2026-10-15 裁「甲」）—— 界面上的〔回放〕按钮拿它当入参；键序 `[…, DurationMs, CreatedAt, BatchId, Result]` | 无 | `:233`（原 188） |
-| `/cleanup` | **无**（清什么由**后端**按标记判，不让前端挑范围） | `success` / `deleted`（**只含真删了行的表**）/ `total`（各行数之和）/ `summary`（一句话，同一句进审计行） | 识别口径（`AuthSession.identify`），认不出记 NULL | `:281`（原 236） |
+| `/scenarios` | **无** | 8 个预置场景（`key` / 中文名 / 同时演示的防护 / 需要的人工动作 / 默认权重） | 无 | `:120`（原 92） |
+| `/run` | **共 5 个**（全部可选）：`name`（缺省「自定义」，> 64 字符按列宽截断）· `concurrency`（缺省 **100**、上限 **4000** —— 含义已收紧成「**在途上限**」，不再等于线程数）· `durationSeconds`（缺省 **60**、上限 **600**）· `targetQps`（缺省 **0** = **不限速**；「档位 120 / 400 / 拉满」的载体，见下）· `scenarios`（**JSON 数组串**）。⚠️ **3a.1（乙案）起 `protections` / `injections` 不再是入参** —— 形参还留着，但**只用来拒收**：给了（非空白）就 **400 + 指路 `/attack/config`**，不静默忽略 | 跑完一轮 ⇒ `Id` / `Name` / `TotalRequests` / `BlockedRequests` / `FailedRequests` / `DurationMs` / `Result` | 会话（**只记谁点的**，不转发凭据） | `:150`（原 124） |
+| `/config`（`POST`） | **2 个**（都可选，都是 **JSON 数组串**）：`protections`（缺省 = **不动这一项**）· `injections`（同上）。⚠️ 语义：`null`/空白 = **不改这一项**、`[]` = **关光这一项**（两者相反，别混） | 改完回**整份快照**：`Protections` / `Injections` / `IsDefault` / `Version` / `Catalog` | 无（**不写审计**：改的是进程内开关，不动任何数据） | `:213` |
+| `/config`（`GET`） | **无** | 同上那份快照（**只读，且不写 `Version`**） | 无 | `:248` |
+| `/stop` | **无** | `success` / `stopped`（**如实**：没在跑就是 `false` 并说清「没有在跑的演练」）/ `summary` | 无（**不写审计**，理由见下） | `:294`（原 170） |
+| `/status` | **无** | **块 7 收尾 commit 1 第六条**：进程内快照 ⇒ `Running` / `BatchId` / `ElapsedMs` / `Sent` / `Completed` / `Blocked` / `Failed` / `Shed` / `Abandoned`。⚠️ `Running=false` 时其余**全为 0 而不是 `null`**（1 秒轮询在收尾那一拍必然撞上它，缺键会让前端把「跑完了」画成「读数丢了」）。⚠️ 是**过程近似值**，**最终账**看 `/records` 那条 `drill_record`。不写审计（与 `/stop` 同档：只读进程内状态） | 无（**不写审计**） | `:334`（原 210） |
+| `/records` | `limit`（缺省 **20**、上限 **200**）· `offset`（负数归 0） | 时间倒序记录列表；行内 `Result` 长文本已**拆成字段**（解析失败 ⇒ 落 `ResultRaw` + `ResultParseError`，不静默）。⚠️ **每行新增 `BatchId`**（块 7 收尾 commit 1，用户 2026-10-15 裁「甲」）—— 界面上的〔回放〕按钮拿它当入参；键序 `[…, DurationMs, CreatedAt, BatchId, Result]` | 无 | `:357`（原 233） |
+| `/cleanup` | **无**（清什么由**后端**按标记判，不让前端挑范围） | `success` / `deleted`（**只含真删了行的表**）/ `total`（各行数之和）/ `summary`（一句话，同一句进审计行） | 识别口径（`AuthSession.identify`），认不出记 NULL | `:405`（原 281） |
+
+⚠️ **`/config` 的 `GET` 是本域**唯一**一条非 `POST`**（用户 2026-10-16 裁定：读配置用 `GET` 更符合直觉）。它与其余七条的两条已知差异**如实登记**：① 它是**可缓存**的动词 ⇒ 响应显式带 `Cache-Control: no-store`（不靠「反正没有中间缓存」这种没验过的前提）；② 本域的动词从此有两种。其余七条一字未动。
 
 ⚠️ **`/stop`（块 7 · commit 10c 追加）是五出口里的第五个，也是最轻的一个** —— 它**只翻一个进程内的标志位**（引擎侧：停止派发新请求，在途请求走 **3 秒宽限**排空，宽限用尽记 `Abandoned`），**不删数据、不改库、不改任何持久状态**。三条口径：
 - **不写审计**（与 `/cleanup` 相反）：审计记的是「谁动了数据」，而本端点没动任何数据 ⇒ 代价如实登记 —— **「谁叫停的」只有引擎侧一行 INFO**。
@@ -791,18 +804,19 @@
 
 （合计 **100**；缺省 = 全 8 个按上表权重。）
 
-⚠️ **commit 10c 新增的三个「丁」入参（只在 `/run` 上）—— ⚠️ D 段 commit 2 起 `protections` 真生效了，`injections` 仍只接通一路**：
+⚠️ **commit 10c 新增的三个「丁」入参 —— ⚠️ 3a.1（乙案）起只剩 `targetQps` 还挂在 `/run` 上，另两个搬去了 `/config`**：
 
 | 入参 | 形状 | 缺省 | 语义 | 实现状态 |
 |---|---|---|---|---|
-| `targetQps` | 数值串 | `0` = **不限速** | 目标 QPS（`AttackEngine.Pacer` 按它节流，`AttackEngine:390`） | ✅ 已实现 |
-| `protections` | JSON 数组串 | **全开**（`rateLimit` / `circuitBreak` / `degrade` / `retry` / `poolIsolation`） | 面板上「防护开/关」的载体 | ✅ **已接闸**（**4 键 + 1 键记录位**，阶段 2b 起 —— 见 `#api-i-3`；只剩 `degrade` 在面板上**不可开关**；入参口径见 `AttackController:111`） |
-| `injections` | JSON 数组串 | **全关**（`redisDown` / `mqDown` / `dbSlow`） | 故障注入开关 | ⚠️ 只有 `redisDown` **真接通**（`AttackController:112`） |
+| `targetQps` | 数值串 | `0` = **不限速** | 目标 QPS（`AttackEngine.Pacer` 按它节流，`AttackEngine:401`） | ✅ 已实现（**仍在 `/run` 上** —— 它描述的是「这一轮怎么发」） |
+| `protections` | ~~JSON 数组串~~ ⇒ **`/config` 的入参** | **全开**（`rateLimit` / `circuitBreak` / `degrade` / `retry` / `poolIsolation`） | 面板上「防护开/关」的载体 | ✅ **已接闸**（**4 键 + 1 键记录位**，阶段 2b 起 —— 见 `#api-i-3`；只剩 `degrade` 在面板上**不可开关**）。⚠️ **3a.1 起它是共享配置**：`/run` 见到它就 **400 + 指路**（`AttackController:137`），读写走 `POST` / `GET /config` |
+| `injections` | ~~JSON 数组串~~ ⇒ **`/config` 的入参** | **全关**（`redisDown` / `mqDown` / `dbSlow`） | 故障注入开关 | ⚠️ 只有 `redisDown` **真接通**（`AttackController:139`）。⚠️ 同上：3a.1 起走 `/config` |
 
-⇒ `protections` **现在真的会改读数**：勾中的开着、没勾的一律关掉，跑完复位全开（`DrillRecordService` 的 `finally`）。⚠️ 但**不是五枚都有闸** —— 只有 `degrade`（记录位）**拨了也没有对应行为**，故面板把它画成不可开关（见 `#api-i-4`）；「五枚全有闸」这句话**本段仍不成立**。`injections` 里仍只有 `redisDown` 会真起作用。这一条是**如实登记**。
+⇒ `protections` **真的会改读数**：开着的生效、关掉的那几枚不生效。⚠️ 但**不是五枚都有闸** —— 只有 `degrade`（记录位）**拨了也没有对应行为**，故面板把它画成不可开关（见 `#api-i-4`）；「五枚全有闸」这句话**本段仍不成立**。`injections` 里仍只有 `redisDown` 会真起作用。这一条是**如实登记**。
+⚠️ **3a.1（乙案）改掉的是「这两组开关住在哪里」，不是「它们生效吗」**：改动前甲案把它们挂在 `/run` 的入参上（开关只存在于**一次请求**里 —— 另一个页面看不到也改不了，想改只能重发 `/run`，而那会**再跑一轮**）；乙案提到 `/config` 这个**进程内共享配置**上，两个页面读同一份、写同一份。**跑完不复位**（用户 2026-10-16 裁定，见 `#api-i-3` 末两节）。
 ⚠️ **`targetQps` 与 `concurrency` 测的不是同一件事**：前者是**发射速率**（每秒发多少个），后者是**同时在途上限**（`permits = min(concurrency, in-flight-cap)`）。「档位 120 / 400 / 拉满」调的是前者。
 
-⚠️ **五条端点一律 `@RequestParam`（+ 一个 JSON 串参数），不用 `@RequestBody`** —— 三条理由任一条都成立：① 全仓管理端写端点**全部**收 `@RequestParam`、前端一律 `URLSearchParams`（`http.js#buildInit` 把 POST 钉成 urlencoded）；② 否则**前端发不出去**（`http.post` 没有自定义头的口子 ⇒ JSON body 到不了 `@RequestBody`）；③ 「勾选 + 权重」这种嵌套结构沿用 `orderAdd` 的既有先例（一个 JSON **数组串**参数，同 `Items`）。
+⚠️ **八条端点的入参一律 `@RequestParam`（+ 一个 JSON 串参数），不用 `@RequestBody`** —— 三条理由任一条都成立：① 全仓管理端写端点**全部**收 `@RequestParam`、前端一律 `URLSearchParams`（`http.js#buildInit` 把 POST 钉成 urlencoded）；② 否则**前端发不出去**（`http.post` 没有自定义头的口子 ⇒ JSON body 到不了 `@RequestBody`）；③ 「勾选 + 权重」这种嵌套结构沿用 `orderAdd` 的既有先例（一个 JSON **数组串**参数，同 `Items`）。
 ⚠️ **数值参数也收 `String`**（不是 `Integer`）：交给 `AttackEngine.parse` 的 `clampInt` 校验并给**统一形状**的 400（`Result.fail`）。声明成 `Integer` 的话，「abc」会在 Spring 参数绑定阶段抛 `MethodArgumentTypeMismatchException`，而 `GlobalExceptionHandler` 的类级白名单只覆盖 Message / Goods ⇒ 那会变成默认错误页。
 ⚠️ **参数非法走 4xx，不是 200 + `success:false`** —— 全仓口径是「**业务**失败 200，入参**形状**失败 400」；权重写成负数 / 场景 key 不认识 / 并发数越界都是后者。用 `ResponseEntity` 显式构造、**不抛异常**（同上那条白名单）。
 ⚠️ **`/run` 会阻塞到演练跑完（几十秒）** —— 引擎同步跑完才回（这样「跑完就能看到数字」，不需要轮询 + 状态机）。代价写在明处：**调用方必须给这条请求一个远大于默认值的超时**（`http.post` 的默认 10s 会把 60 秒的演练当场掐断）—— 前端在 `api/observe.js#runAttack` 里带了 `timeout`。这也是**不**选「异步起任务 + 轮询」的理由：那要多一个「跑到哪一步了」的状态面，而本仓没有任务表。
@@ -834,7 +848,7 @@
 |---|---|---|
 | `mall.observe.sse.interval-ms` | `1000` | **每条连接**的发帧间隔（`SseStreamWriter` 循环里的 `Thread.sleep`；块 7 · commit 10b 的「每连接一份帧源」之后，不再有「同一拍内多次请求复用同一帧」那层） |
 | `mall.observe.sse.max-ticks` | `0`（= 不停） | 只用于测试的「跑 N 拍即收」口子 |
-| `mall.drill.engine.in-flight-cap` | `512` | **在途请求上限的硬顶**（`AttackEngine:608`）：`permits = min(concurrency, in-flight-cap)` ⇒ 只有 `concurrency > 512` 时它才成为真约束（块 7 · commit 10c-2 把 `concurrency` 上限抬到 4000，正是为了让它可被触及）。⚠️ **本键在任何 `.properties` 里都不存在** —— 它靠运行时 CLI 覆盖（`--mall.drill.engine.in-flight-cap=4096`），不进仓、不是 A 档 |
+| `mall.drill.engine.in-flight-cap` | `512` | **在途请求上限的硬顶**（`AttackEngine:653`【3a.1 重指；⚠️ 原文写的旧行号（608）在改动前就**已经指错了** —— 那一行是「`TraceIdFilter` 收进 MDC」那句，真 `@Value` 当时在 627；差值来自 D 段 / 阶段 2b 的净插入未重指】）：`permits = min(concurrency, in-flight-cap)` ⇒ 只有 `concurrency > 512` 时它才成为真约束（块 7 · commit 10c-2 把 `concurrency` 上限抬到 4000，正是为了让它可被触及）。⚠️ **本键在任何 `.properties` 里都不存在** —— 它靠运行时 CLI 覆盖（`--mall.drill.engine.in-flight-cap=4096`），不进仓、不是 A 档 |
 | `mall.drill.engine.shed-wait-ms` | `50` | 拿不到 permit 时的**等待上限**；等不到就记 `Shed`（**背压**，不计入失败、也不计入 Blocked） |
 
 ⚠️ **合并环容量 2048 不是可配项**：它是 `EventBroadcaster.EVENT_CAPACITY` 常量（块 7 · commit 10 · 裁决 2 由 512 抬到 2048，理由与「丢的是最早的」的边界见该类注释）。改它要改代码，不是改配置。
@@ -846,7 +860,7 @@
 | 文件 | 增补 | 备注 |
 |---|---|---|
 | `src/api/endpoints.js` | `observe` 组 **8 条**（3 条 SSE + 5 条攻击出口，后者含 `cleanup`），**全非 view 抽取** | 头注「现为 N 条」**133 → 141**；**单列一组、追加在对象尾**，不插行。⚠️ `attackStop`（commit 10c）在 `:426`，是**追加在组尾**的第五条攻击出口 |
-| `src/api/observe.js` | **新建**：3 个流开启器（`openMetricsStream` `:31` / `openOrderStream` `:36` / `openEventStream` `:41`）+ 5 个攻击出口（`attackScenarios` `:297` / `runAttack` `:331` / `stopAttack` `:364` / `attackRecords` `:380` / `cleanupAttack` `:410`） | ⚠️ **两条路不同**：三条 SSE 走自写的 `fetch` + `ReadableStream` 解析；五条攻击出口走 `http.post`（表单串）。⚠️ `runAttack` **必须显式传长 timeout**。⚠️ **commit 10c 追加两件**：`stopAttack()`（非破坏、无参）与 `openResilientStream(path, …)` `:86` —— 后者是三条 SSE 的**断线重连**包装（指数退避 + `onLost`）；`openStream` `:155` 仍是**不带重连**的底层 |
+| `src/api/observe.js` | **新建**：3 个流开启器（`openMetricsStream` `:31` / `openOrderStream` `:36` / `openEventStream` `:41`）+ 5 个攻击出口（`attackScenarios` `:297` / `runAttack` `:331` / `stopAttack` `:364` / `attackRecords` `:380` / `cleanupAttack` `:410`） | ⚠️ **两条路不同**：三条 SSE 走自写的 `fetch` + `ReadableStream` 解析；五条攻击出口走 `http.post`（表单串）。⚠️ `runAttack` **必须显式传长 timeout**。⚠️ **commit 10c 追加两件**：`stopAttack()`（非破坏、无参）与 `openResilientStream(path, …)` `:86` —— 后者是三条 SSE 的**断线重连**包装（指数退避 + `onLost`）；`openStream` `:155` 仍是**不带重连**的底层。<br>⚠️ **3a.1（乙案）**：`runAttack` 里 `protections` / `injections` **两行已删**（不再是 `/run` 的入参 ⇒ 本文件也**不再**有对应封装函数；两个页面的开关栏一起做，排 3a.6）。⚠️ 本行其余坐标是**块 7 主体时点**的读数（`runAttack` 现址 `:332`、`replay` 现址 `:416`），与现值有漂移，**按现值读**别照抄本行 |
 | `src/views/admin/observe/AttackConsole.vue` | 新建，攻击模拟器页（8 卡片 / 一键跑 / 自定义编排 / 演练记录 / **清场**） | ⚠️ 清场按钮走**两段式确认**（`armed` 态，第一次点只上膛、第二次才发请求），先例是 `OrderPage.vue` 的 `armed` 模式 |
 | `src/views/admin/observe/MetricsPanel.vue` · `OrderFlow.vue` · `EventLog.vue` | 新建，指标面板 / 状态流转 / 实时日志 | 三页各开一条流 |
 | `src/config/labels/` | **新建目录**（照 `config/notify-events.js` 惯例）：`observe-labels.js` / `report-labels.js` / `audit-labels.js` / `order-labels.js` / `user-labels.js` | **块 7 commit 9 的中文标签层**：英文 code → 中文；**兜底 = 认不出回 code 原文**（用 `hasOwnProperty` 判，不是 `TBL[k] \|\| k`） |
@@ -895,7 +909,7 @@
 | 身份 / 闸 | **不加角色闸**、**不在 `AUTH_WHITELIST`**（靠 `AuthInterceptor` 拦）、**不写审计**（只读） |
 | 与 H.1 各条的相同处 | 全 `POST`、`@RequestParam`（**不用** `@RequestBody`）、入参非法显式构 `ResponseEntity.badRequest()`（**不抛异常** —— `GlobalExceptionHandler` 的类级白名单不覆盖本类，抛出去会变成默认错误页） |
 
-**前端**：`api/endpoints.js` 的 `observe.replay` @ `:449` → `api/observe.js` 的 `replay(batchId, limit)` @ `:420`；唯一调用方是 `AttackConsole.vue` 演练记录那一行的〔回放〕钮。
+**前端**：`api/endpoints.js` 的 `observe.replay` @ `:449` → `api/observe.js` 的 `replay(batchId, limit)` @ `:416`（原 420 —— 3a.1 从 `runAttack` 里摘掉两行入参，其上方的 JSDoc 净减 5 行、函数体净增 1 行 ⇒ 这条随之下移到位）；唯一调用方是 `AttackConsole.vue` 演练记录那一行的〔回放〕钮。
 
 ⚠️ **播法由前端定**：拿到 JSON 后**按 `OccurredAt` 严格按原时间戳撒点** —— 不是一次性刷出来，也不是按数组下标均匀撒。
 ⚠️ **UI 上明说这句**：**「回放数据来自「当时开着日志页的演练」」** —— 因为台账的已知边界（见 **H.7** 那条：`poll()` 由 SSE 流线程驱动、**没人打开日志页就不落库**）⇒ 回放**只能**放得出「当时有人在看」的批次。这句是**如实告知**，不是免责声明。
@@ -938,7 +952,7 @@
 | 四处写入点 | `InboundRateLimitInterceptor`（429）· `ProtectionMetricsBinder`（订阅 `CircuitBreaker` 的状态事件流）· `ObservePoolConfig` 的拒绝策略（池挤出）· `MerchantDowngradeService` 的重试回调（`retry_success` / `retry_failed`，阶段 2b 起 —— 分母刻意只算「真重试过」的那些次） |
 | ⚠️ 半开恢复**为什么有记录** | 因为它挂在 `getEventPublisher()` 上，而不是散在调用点上的日志 —— 三档翻转（打开 / 半开 / 恢复）**不是业务代码触发的**，可能由 r4j 自己的线程在**没有任何请求**时完成 |
 
-### I.3 `protections` 入参：从「只记录」变成「真生效」（**4 键 + 1 键记录位**，阶段 2b 起） {#api-i-3}
+### I.3 `protections` 开关：从「只记录」变成「真生效」（**4 键 + 1 键记录位**，阶段 2b 起；⚠️ 3a.1 起是**共享配置**，不再是 `/run` 入参） {#api-i-3}
 
 | key | 本段状态 | 闸在哪 | 关掉它的后果 |
 |---|---|---|---|
@@ -949,8 +963,10 @@
 | `degrade` | ➖ **只记录** | 无（系统固有 fail-open） | **没有后果** —— 缓存 L2 回落 / 锁 fail-open / MQ 缺席 / 审计 fail-open 本来就存在，不由这个开关管 |
 
 ⚠️ **口径（2026-10-15 · 阶段 2b 起）**：本段是 **4 键接闸 + 1 键记录位**。**不许**写成「5 键已接闸」。⚠️ 本条在 commit 2 那一刻写的是「3 键接闸 + 1 键登记 TD + 1 键记录位」并**明令不许**写「4 键已接闸」—— 那句当时是对的，`retry` 那时确实没有一行代码；阶段 2b 拿到死锁实测后**裁定接闸 3 → 4**，口径随之翻转。判据的唯一代码出处仍是 `ProtectionGate.WIRED_KEYS`。
-⚠️ **写入时机**：`DrillRecordService` 在 `attackEngine.run(...)` **之前**写入、在 `finally` 里复位成**全开** —— 不复位就等于「这一轮把限流关掉」这件事越过那一轮留在进程里。
-⚠️ **缺省口径的唯一换算点**：入参缺省是**全开**，而 `ProtectionGate.apply(null)` 的语义是**全关** ⇒ `DrillRecordService` 是这两者之间**唯一**的换算处（`protections == null ? ProtectionGate.KEYS : protections`）。
+⚠️ **写入时机（⚠️ 3a.1 起改写，旧文见下条）**：写点**只有** `POST /admin/observe/attack/config` 一处；演练开跑**不写**、跑完也**不复位**（用户 2026-10-16 裁定）。⚠️ 未列出的键一律**关掉**（`ProtectionGate.apply` 的语义是「按勾了哪些写」，不是「只打开勾了的」—— 后者会让上一轮的残留永远消不掉）。
+⚠️ **「不复位」的代价与兜底**：不复位等于「上一轮把限流关掉」这件事**越过那一轮留在进程里**，而真实流量读的正是这些位。故兜底三条**必须同时成立**：`GET /config` 的 `IsDefault` 让「当前不是默认」**可读**；两个页面（攻击页 + 日志页）据此**常驻**「⚠ 当前非默认配置」提示 + 一键 [恢复默认]；`AttackSwitchConfig.update` 在非默认时记一行 **WARN**。⚠️ 兜底的边界如实写：它把「静默」变成「可见」，但**不阻止**有人拨完不管 —— **重启进程是唯一的自动恢复点**。
+⚠️ **~~写入时机（甲案，已废）~~**：3a.1 之前由 `DrillRecordService` 在 `attackEngine.run(...)` **之前**写入、在 `finally` 里复位成**全开**。那段**整段删除** —— 保留此句只为让后来的人查得到翻转（`AttackSwitchConfig` 类注释里也记了同一处）。⚠️ `ProtectionGate.resetToDefault()` **方法本身留着**（新调用者是 `AttackSwitchConfig`），删的是演练收尾那次**自动**调用。
+⚠️ **缺省口径的唯一换算点（3a.1 起搬到 `AttackSwitchConfig`）**：配置面的缺省是**全开**，而 `ProtectionGate.apply(null)` 的语义是**全关** ⇒ 换算收在 `AttackSwitchConfig.update` 一处（`protections == null` = **不动这一项**，与「给了 `[]` = 关光」是两件事）。3a.1 之前这个换算在 `DrillRecordService`（`protections == null ? ProtectionGate.KEYS : protections`）。
 
 ### I.4 面板：**一枚**不可开关（不是死控件，也不是藏起来） {#api-i-4}
 

@@ -2,6 +2,7 @@ package com.minke.mallmanagement.observe.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.minke.mallmanagement.observe.dao.DrillTargetDao;
+import com.minke.mallmanagement.protect.ProtectionGate;
 import com.minke.mallmanagement.shared.cache.L2HealthProbe;
 import org.junit.jupiter.api.Test;
 
@@ -28,8 +29,16 @@ import static org.mockito.Mockito.mock;
  */
 class AttackEngineTest {
 
+    /**
+     * 开关配置用**真件**（3a.1 乙案）：它是无依赖、无 I/O 的一份进程内状态，而本类的开关用例
+     * 要测的恰恰是「引擎从它读到的是什么」——换成替身就把要测的东西替掉了。
+     * ⚠️ 防护那 5 个位真值在 {@link ProtectionGate}（本类不复制，见 {@code AttackSwitchConfig} 类注释）。
+     */
+    private final ProtectionGate gate = new ProtectionGate();
+    private final AttackSwitchConfig switchConfig = new AttackSwitchConfig(gate, new ObjectMapper());
+
     private final AttackEngine engine = new AttackEngine(
-            mock(DrillTargetDao.class), mock(L2HealthProbe.class), new ObjectMapper());
+            mock(DrillTargetDao.class), mock(L2HealthProbe.class), new ObjectMapper(), switchConfig);
 
     // ==================== 一、分档（口径见 AttackEngine 类注释三）====================
 
@@ -81,7 +90,7 @@ class AttackEngineTest {
     /** 空报文 = 全 8 个场景按缺省权重、并发 100 / 时长 60、名字「自定义」。 */
     @Test
     void emptyBodyFallsBackToAllEightScenarios() {
-        AttackEngine.Config cfg = AttackEngine.parse(Map.of());
+        AttackEngine.Config cfg = engine.parse(Map.of());
         assertEquals(100, cfg.concurrency());
         assertEquals(60, cfg.durationSeconds());
         assertEquals("自定义", cfg.name());
@@ -93,7 +102,7 @@ class AttackEngineTest {
     /** 勾选与权重按报文走；权重为 0 的场景**等于没勾**（不是「跑 0 个线程」）。 */
     @Test
     void zerosAreTreatedAsNotSelected() {
-        AttackEngine.Config cfg = AttackEngine.parse(Map.of("scenarios", List.of(
+        AttackEngine.Config cfg = engine.parse(Map.of("scenarios", List.of(
                 Map.of("key", "seckill", "weight", 80),
                 Map.of("key", "cacheCold", "weight", 0))));
         assertEquals(1, cfg.chosen().size());
@@ -103,7 +112,7 @@ class AttackEngineTest {
     /** 同一个 key 写两次 ⇒ 取后者（不许变成两份流量）。 */
     @Test
     void duplicateKeysKeepTheLastOne() {
-        AttackEngine.Config cfg = AttackEngine.parse(Map.of("scenarios", List.of(
+        AttackEngine.Config cfg = engine.parse(Map.of("scenarios", List.of(
                 Map.of("key", "seckill", "weight", 10),
                 Map.of("key", "seckill", "weight", 30))));
         assertEquals(1, cfg.chosen().size());
@@ -114,34 +123,40 @@ class AttackEngineTest {
     @Test
     void rejectsInvalidInput() {
         // 未知 key
-        assertThrows(IllegalArgumentException.class, () -> AttackEngine.parse(
+        assertThrows(IllegalArgumentException.class, () -> engine.parse(
                 Map.of("scenarios", List.of(Map.of("key", "nope", "weight", 10)))));
         // 全 0 权重 = 没勾任何场景
-        assertThrows(IllegalArgumentException.class, () -> AttackEngine.parse(
+        assertThrows(IllegalArgumentException.class, () -> engine.parse(
                 Map.of("scenarios", List.of(Map.of("key", "seckill", "weight", 0)))));
         // scenarios 不是数组
         assertThrows(IllegalArgumentException.class,
-                () -> AttackEngine.parse(Map.of("scenarios", "seckill")));
+                () -> engine.parse(Map.of("scenarios", "seckill")));
         // 并发数越界（0 / 4001）—— 上限 2026-10-15 由 500 抬到 4000（10c-2 提在途量做瓶颈定位）
         assertThrows(IllegalArgumentException.class,
-                () -> AttackEngine.parse(Map.of("concurrency", 0)));
+                () -> engine.parse(Map.of("concurrency", 0)));
         assertThrows(IllegalArgumentException.class,
-                () -> AttackEngine.parse(Map.of("concurrency", 4001)));
+                () -> engine.parse(Map.of("concurrency", 4001)));
         // 持续秒数越界
         assertThrows(IllegalArgumentException.class,
-                () -> AttackEngine.parse(Map.of("durationSeconds", 601)));
+                () -> engine.parse(Map.of("durationSeconds", 601)));
+        // 目标 QPS 越界（负数 / 天文数字）—— 3a.1 起从「开关」那组用例搬来这里（那组已随乙案删掉，
+        // 但这条**与开关无关**，是报文数值校验，不能跟着一起丢）
+        assertThrows(IllegalArgumentException.class, () -> engine.parse(
+                Map.of("targetQps", -1)));
+        assertThrows(IllegalArgumentException.class, () -> engine.parse(
+                Map.of("targetQps", AttackEngine.MAX_TARGET_QPS + 1)));
         // 权重是负数
-        assertThrows(IllegalArgumentException.class, () -> AttackEngine.parse(
+        assertThrows(IllegalArgumentException.class, () -> engine.parse(
                 Map.of("scenarios", List.of(Map.of("key", "seckill", "weight", -1)))));
         // ⚠️「每个勾选的场景都要有流量」⇒ 并发数不够分就直接拒，不悄悄少跑几个
-        assertThrows(IllegalArgumentException.class, () -> AttackEngine.parse(
+        assertThrows(IllegalArgumentException.class, () -> engine.parse(
                 Map.of("concurrency", 2)));
     }
 
     /** 名字超 64 字符按列宽截断（`drill_record.Name` 是 varchar(64)）。 */
     @Test
     void longNameIsTruncatedToColumnWidth() {
-        AttackEngine.Config cfg = AttackEngine.parse(Map.of("name", "场".repeat(100)));
+        AttackEngine.Config cfg = engine.parse(Map.of("name", "场".repeat(100)));
         assertEquals(AttackEngine.NAME_MAX, cfg.name().length());
     }
 
@@ -203,7 +218,7 @@ class AttackEngineTest {
     /** 配置 JSON 必须落在 {@code varchar(500)} 之内（勾满 8 个场景是最长的一档）。 */
     @Test
     void scenarioJsonFitsTheColumn() {
-        String json = AttackEngine.buildScenarioJson(AttackEngine.parse(Map.of()));
+        String json = AttackEngine.buildScenarioJson(engine.parse(Map.of()));
         assertTrue(json.length() <= AttackEngine.SCENARIO_JSON_MAX, "实际长度 " + json.length());
         for (String key : List.of("seckill", "orderBurst", "repeatSubmit", "unpaidTimeout",
                 "cacheCold", "redisDown", "bannedUser", "sensitiveWord")) {
@@ -242,7 +257,7 @@ class AttackEngineTest {
             items.add(Map.of("key", key, "weight", 1));
         }
         body.put("scenarios", items);
-        AttackEngine.Config cfg = AttackEngine.parse(body);
+        AttackEngine.Config cfg = engine.parse(body);
         assertEquals(8, cfg.chosen().size());
         List<String> plan = AttackEngine.threadPlan(cfg.chosen(), 10);
         assertEquals(10, plan.size());
@@ -334,59 +349,73 @@ class AttackEngineTest {
         assertEquals(AttackEngine.REQ_LOG_CAPACITY, log.snapshot().size(), "快照封顶在环容量");
     }
 
-    // ==================== 七、丁：开关（收下、校验、序列化）====================
+    // ==================== 七、丁：开关（乙案 —— 读共享配置 + 拒收旧入参）====================
 
-    /** 缺省：防护**全开**（5 个）、注入**全关**（0 个）—— 用户 2026-10-14 定稿的面板缺省。 */
+    /**
+     * 引擎的开关**不再来自报文**，而是来自共享配置（{@code AttackSwitchConfig}）。
+     *
+     * <p>⚠️ 本用例钉的是**接线的方向**：改了配置面 ⇒ 引擎下一次 {@code parse} 读到的是新的那份。
+     * 缺省是「防护全开（5 个）、注入全关（0 个）」—— 用户 2026-10-14 定稿的面板缺省，
+     * 而 3a.1 起那个缺省的真值在 {@code AttackSwitchConfig} / {@code ProtectionGate} 里。
+     */
     @Test
-    void switchesDefaultToAllProtectionsOnAndAllInjectionsOff() {
-        AttackEngine.Config cfg = AttackEngine.parse(Map.of());
-        assertEquals(AttackEngine.PROTECTION_KEYS, cfg.protections());
-        assertEquals(5, cfg.protections().size());
-        assertTrue(cfg.injections().isEmpty());
-        assertEquals(0, cfg.targetQps(), "缺省不限速 = 加 targetQps 之前的行为");
+    void switchesComeFromTheSharedConfigNotFromTheBody() {
+        AttackEngine.Config before = engine.parse(Map.of());
+        assertEquals(AttackEngine.PROTECTION_KEYS, before.protections());
+        assertEquals(5, before.protections().size());
+        assertTrue(before.injections().isEmpty());
+        assertEquals(0, before.targetQps(), "缺省不限速 = 加 targetQps 之前的行为");
+
+        // ⚠️ 写配置面（模拟「日志页拨了一枚开关」）⇒ 引擎起跑那一刻的快照跟着变
+        switchConfig.update(List.of("rateLimit"), List.of("redisDown"));
+        AttackEngine.Config after = engine.parse(Map.of());
+        assertEquals(List.of("rateLimit"), after.protections());
+        assertEquals(List.of("redisDown"), after.injections());
+
+        // 关光也是一个**有意义的状态**（对照轮），且与「没给」在配置面上是两件事：
+        // 这里 `[]` 是整体替换该项 ⇒ 落到 Config 上就是空清单。
+        switchConfig.update(List.of(), null);
+        assertTrue(engine.parse(Map.of()).protections().isEmpty(), "显式空清单 = 一个都不开（对照轮）");
+        assertEquals(List.of("redisDown"), engine.parse(Map.of()).injections(), "null = 不动注入那一项");
     }
 
-    /** ⚠️「没给」与「给了空数组」是两件事：后者是「这一轮一个防护都不开」这个**有意义的状态**。 */
+    /**
+     * ⚠️ 报文里若仍带 {@code protections} / {@code injections}，**拒收并指路**，不静默忽略。
+     *
+     * <p>为什么必须拒：静默忽略的表现是「我拨了开关、怎么没反应」—— 调用方以为改了这一轮的开关，
+     * 而实际改的是一个**没人读的字符串**。这条契约在两层各守一次（{@code AttackController} 守
+     * HTTP 参数面、这里守报文契约），本用例钉的是后者 —— 少了它，程序化调用方（测试 / 将来的 job）
+     * 就能悄悄塞进来两个死键。
+     */
     @Test
-    void emptySwitchListIsNotTheSameAsMissing() {
-        AttackEngine.Config cfg = AttackEngine.parse(
-                Map.of("protections", List.of(), "injections", List.of("redisDown")));
-        assertTrue(cfg.protections().isEmpty(), "显式空数组 = 一个都不开（对照轮）");
-        assertEquals(List.of("redisDown"), cfg.injections());
-    }
+    void oldSwitchParamsAreRejectedNotIgnored() {
+        IllegalArgumentException byProtections = assertThrows(IllegalArgumentException.class,
+                () -> engine.parse(Map.of("protections", List.of("rateLimit"))));
+        assertEquals(AttackSwitchConfig.PARAMS_MOVED, byProtections.getMessage(),
+                "拒收必须**指路**（消息就是那份共享文案），而不是一句「不认识这个键」");
 
-    /** 开关的 key 也校验：不认识就抛（形状错误 ⇒ 控制器 400，与场景 key 同一条口径）。 */
-    @Test
-    void rejectsUnknownSwitchKeys() {
-        assertThrows(IllegalArgumentException.class, () -> AttackEngine.parse(
-                Map.of("protections", List.of("rateLimit", "限流"))));
-        assertThrows(IllegalArgumentException.class, () -> AttackEngine.parse(
-                Map.of("injections", List.of("mqDown", "dbDown"))));
-        // 传输形状错（不是数组）同样抛
-        assertThrows(IllegalArgumentException.class, () -> AttackEngine.parse(
-                Map.of("protections", "rateLimit,retry")));
-        // 目标 QPS 越界（负数 / 天文数字）
-        assertThrows(IllegalArgumentException.class, () -> AttackEngine.parse(
-                Map.of("targetQps", -1)));
-        assertThrows(IllegalArgumentException.class, () -> AttackEngine.parse(
-                Map.of("targetQps", AttackEngine.MAX_TARGET_QPS + 1)));
-        // 重复勾同一个开关不是两份
-        assertEquals(List.of("retry"), AttackEngine.parse(
-                Map.of("protections", List.of("retry", "retry"))).protections());
+        assertThrows(IllegalArgumentException.class,
+                () -> engine.parse(Map.of("injections", List.of("redisDown"))));
+        // 空数组同样拒（形状对 ≠ 合法：这两个键**整个**已经从报文契约里退出去了）
+        assertThrows(IllegalArgumentException.class,
+                () -> engine.parse(Map.of("protections", List.of())));
+        // 拒的是**这两个键**，不是整个报文：其余字段照常解析
+        assertEquals("压测", engine.parse(Map.of("name", "压测")).name());
     }
 
     /** 配置 JSON 带上甲/丁的键（可复现性）：{@code q} 只在限速时出现，{@code p}/{@code i} 恒在。 */
     @Test
     void scenarioJsonCarriesSwitchesAndOnlyCarriesQpsWhenLimited() {
-        AttackEngine.Config unlimited = AttackEngine.parse(Map.of());
+        AttackEngine.Config unlimited = engine.parse(Map.of());
         String a = AttackEngine.buildScenarioJson(unlimited);
         assertFalse(a.contains("\"q\""), "拉满档不写 q（缺省，省字符）");
         assertTrue(a.contains("\"p\":[\"rateLimit\",\"circuitBreak\",\"degrade\",\"retry\","
                 + "\"poolIsolation\"]"), "防护全开要写全：" + a);
         assertTrue(a.contains("\"i\":[]"), "注入默认全关：" + a);
 
-        String b = AttackEngine.buildScenarioJson(AttackEngine.parse(
-                Map.of("targetQps", 400, "injections", List.of("redisDown"))));
+        // ⚠️ 3a.1 起开关从**配置面**拨（不再是报文里那两个键）⇒ 这里先写配置再序列化
+        switchConfig.update(null, List.of("redisDown"));
+        String b = AttackEngine.buildScenarioJson(engine.parse(Map.of("targetQps", 400)));
         assertTrue(b.contains("\"q\":400"), b);
         assertTrue(b.contains("\"i\":[\"redisDown\"]"), b);
         // 加了这两组键之后仍然塞得进 varchar(500)（8 个场景是最长的一档）

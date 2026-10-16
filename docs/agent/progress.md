@@ -2383,7 +2383,7 @@ DB 级唯一锁探针 `ProbeB6c7Lock` = **PASS 12 / FAIL 0**；接口级 8 条�
 | **34** | （**本笔 · 收口**） | 10-15 | **commit 10d · 收口** —— 文档统一补（api-contract / tech-debt / progress / slot-registry）+ 手验清单 + 假数据清场 + refs 重指 |
 
 **端点变更（本系列）** ⇒ `/attack/run` 新增 **3 个入参** `targetQps` / `protections` / `injections`（丁：只记录不实现）；新增**第 5 条出口** `POST /admin/observe/attack/stop`；响应新增 **`Engine` 块**（真实生效配置回显）与帧字段 **`batchId` / `batchCounts` / `dropped` / `droppedTotal` / `droppedIngest`**。⚠️ **没有** `/attack/status` 这个端点（实测五条映射 = `/scenarios` `/run` `/stop` `/records` `/cleanup`）。
-**配置（本系列）** ⇒ `spring.mvc.async.request-timeout=-1`（`application.properties:228`，10b 追加）；引擎两键 `mall.drill.engine.in-flight-cap:512` / `mall.drill.engine.shed-wait-ms:50` **只在 `@Value` 默认值里**（`AttackEngine:608` / `:612`），**未落 properties**；`4da212a` 加的那行 `management.metrics.distribution.percentiles[...]` 已由 `c495997` **撤回**。
+**配置（本系列）** ⇒ `spring.mvc.async.request-timeout=-1`（`application.properties:228`，10b 追加）；引擎两键 `mall.drill.engine.in-flight-cap:512` / `mall.drill.engine.shed-wait-ms:50` **只在 `@Value` 默认值里**（`AttackEngine:653` / `:657`【3a.1 重指；⚠️ 原文写的两个旧行号（608 / 612）是**陈旧值** —— 实测改动前那两行就已不在 `@Value` 上（`608` 是「`TraceIdFilter` 收进 MDC」那句），差值 −19 来自 D 段/阶段 2b 的净插入未重指】），**未落 properties**；`4da212a` 加的那行 `management.metrics.distribution.percentiles[...]` 已由 `c495997` **撤回**。
 
 ⚠️ **边界 A 两笔都写明**：10b / 10c 只抬高**引擎与观测侧自己的能力**，连接池 / Tomcat 线程 / 慢 SQL **一律不动** —— 后端慢的地方照旧慢，那是 10c-1（瓶颈定位）的观察对象。
 ⚠️ **一处自我更正（41e0a5e 报文内）**：10c 第一版报文写「`AttackConsole.vue` 的档位/开关面板/[暂停]**一行未动**」——读漏了批文（批文 §九 的切分明写 10c 含「开关面板/档位/`/attack/stop`」）。amend 后补上该块，文件数 / 行数 / 报文随之更正。
@@ -2395,7 +2395,7 @@ DB 级唯一锁探针 `ProbeB6c7Lock` = **PASS 12 / FAIL 0**；接口级 8 条�
 **A3 门禁** ⇒ 本系列**无表结构变更**（零 DDL）⇒ P3 门禁计数（`KNOWN_TABLES` 27 / 期望表数 38）**不变**。
 
 ⚠️ **零漂移（各笔逐文件核过）** ⇒ 通用做法：新代码**一律尾追加**、订正走**同行替换**（净 0 行）—— 全仓大量「文件:行号」互引，插在中间会让其后每一处引用集体偏移。本系列自身产生的漂移主要在**未跟踪**的 `docs/agent/context-packs/` 时点稿里（**不应重指**）；活文档（progress / slot-registry / db-schema / tech-debt / api-contract）零漂移 —— 逐条见 `slot-registry.md` **24-10**。
-⚠️ **一处刻意用净 0 行的修正（10d 本笔）** ⇒ `AttackController.java:100-102` 的 `concurrency` 说明原写「上限 **500**、硬顶 **512**」，与 `AttackEngine.MAX_CONCURRENCY = 4000`（`4da212a` 抬的）**不符** ⇒ 就地改成「上限 **4000**」+「引擎侧 `in-flight-cap`，缺省 512」，**行数不变**（避免造漂移）。
+⚠️ **一处刻意用净 0 行的修正（10d 本笔）** ⇒ `AttackController.java:128-130` 的 `concurrency` 说明【3a.1 重指，原 100-102】原写「上限 **500**、硬顶 **512**」，与 `AttackEngine.MAX_CONCURRENCY = 4000`（`4da212a` 抬的）**不符** ⇒ 就地改成「上限 **4000**」+「引擎侧 `in-flight-cap`，缺省 512」，**行数不变**（避免造漂移）。
 
 **本笔（10d）文档同步面** ⇒ `api-contract.md` 附录 H（补 `/stop` 第 5 条出口 · 三个「丁」入参 · `batchCounts` · 两处引擎配置键 · 坐标/counts 订正）· `tech-debt.md`（TD-60 表补 SSE 异步超时 + 延迟口径排除两条 ✅已修 · 新增 **TD-70** 延迟排除名单是手工白名单 · 新增 **TD-71** JVM `-Xms/-Xmx` 未固定）· 本小节 · `slot-registry.md §二十四` 续段。⚠️ `db-schema.md` / `db-migration.md` **本笔不改**（⑲ 落库时已登，本系列零 DDL ⇒ 无新增登记）。
 
@@ -2417,12 +2417,12 @@ DB 级唯一锁探针 `ProbeB6c7Lock` = **PASS 12 / FAIL 0**；接口级 8 条�
   - ⚠️ **这条与一次改判反向**：该文件头写着「攻击页 = 只做编排 + 跑 + 演练记录；**三面板已独立成页**（2026-10-13 改判，不塞进攻击页）」⇒ 件 1 相当于**部分改回**。做之前得先裁决「改回多少」（三块都要？还是只留一格？）。
 - **两条未决前提（都不是本笔能单方面定的）**
   1. **结构决定**：稿假设「三块共用**一条主 SSE**，前端拆字段分发」—— **本仓不存在「一条主 SSE」**。是**三条独立端点**（`endpoints.js:393-395`），各自一条 HTTP 连接、**各自一条服务端异步线程**。⇒ 落地只有两条路：(a) 攻击页**各连自己那条**（三块 = 三条流）—— **零后端改动**，代价 = 攻击页开着时服务端**多 3 条常驻线程**，且 events 那条会**与日志页耦合**；(b) 后端**新增一条聚合流** —— 要动后端。稿里**建议 (a)**，但明写这属「**结构决定，需要用户/顾问定**」。
-  2. **「暂停」口径**：原稿列的两个缺口里，「**已发 8000**」**已被本系列 ③ 消解** —— `POST /admin/observe/attack/status` 现在给 `Sent` / `Completed` / `Blocked` / `Failed` / `Shed` / `Abandoned`（`AttackController:210-224`）⇒ 预览要的「已发 M 条 / 完成多少次拦截」**有真源了**（不再是「估不出来、也不许编」）。**仍未定的只剩「暂停」**：`/attack/run` 是**同步**跑到结束的，**无法中途暂停**；可选口径 = 「只停渲染、连接不断」（并如实上屏说明「请求照跑」）。
+  2. **「暂停」口径**：原稿列的两个缺口里，「**已发 8000**」**已被本系列 ③ 消解** —— `POST /admin/observe/attack/status` 现在给 `Sent` / `Completed` / `Blocked` / `Failed` / `Shed` / `Abandoned`（`AttackController:334-348`【3a.1 重指，原 210-224】）⇒ 预览要的「已发 M 条 / 完成多少次拦截」**有真源了**（不再是「估不出来、也不许编」）。**仍未定的只剩「暂停」**：`/attack/run` 是**同步**跑到结束的，**无法中途暂停**；可选口径 = 「只停渲染、连接不断」（并如实上屏说明「请求照跑」）。
 - **改动面估算（稿）** ⇒ `AttackConsole.vue` 约 **+350 ~ +500 行**（3 条流 + 3 个复用组件 + 布局 + 辅助条）。
 - **落点与形态** ⇒ **形态不锁**（整块做 / 拆笔做皆可）。⚠️ **不落 `selection-status.md §8`** —— 同 §5 既有那条理由（§8 的编号空间 `#1..#33` 与 PR 号**同形**）。**本段是它的唯一落点。**
 - ⚠️ **为什么这条登记落在文件尾、不插进 §5 中间** ⇒ 全仓大量「文件:行号」互引，**插段会让其后所有引用集体偏移**。实测：**外来**引用（`progress.md:` 带前缀）最大 **`:1921`**（`c3-block-3-goods.md:78`），**文内自指**最大 **`:2398`**；插在 §5 内（该段在 `:190` 起、`## 6.` 在 `:1729` 前）会同时动这两批的**绝大多数**。⇒ 按本仓通例**尾追加**，**净零漂移**。
 
-**③ 顺带登记一条「历史陈述保持原样」（不是订正，是记账）** ⇒ 上一小节（`#### 7-B7-续`）末尾写「⚠️ **没有** `/attack/status` 这个端点（实测五条映射 = `/scenarios` `/run` `/stop` `/records` `/cleanup`）」—— 那是 **commit 10 系列的时点事实**（当时确实没有）。本系列 **③ 之后已有**（`AttackController:210`，现为**六条**映射）。⚠️ 那句是**历史陈述**（描述 10 系列当时的实测），按本仓口径**保留原样、不改写**，只在此登记，免得后来人把「历史陈述」当成「现在时」。配套：`endpoints.js` 头注释的端点总数已在 ③ 落码时就地同步（③ 时 **142** 条 → ① 回放落码后再 **143** 条，见 `endpoints.js:437` / `:449` 两行与头注释），本笔不另动。
+**③ 顺带登记一条「历史陈述保持原样」（不是订正，是记账）** ⇒ 上一小节（`#### 7-B7-续`）末尾写「⚠️ **没有** `/attack/status` 这个端点（实测五条映射 = `/scenarios` `/run` `/stop` `/records` `/cleanup`）」—— 那是 **commit 10 系列的时点事实**（当时确实没有）。本系列 **③ 之后已有**（`AttackController:334`【3a.1 重指，原 210】，现为**八条**映射）。⚠️ 那句是**历史陈述**（描述 10 系列当时的实测），按本仓口径**保留原样、不改写**，只在此登记，免得后来人把「历史陈述」当成「现在时」。配套：`endpoints.js` 头注释的端点总数已在 ③ 落码时就地同步（③ 时 **142** 条 → ① 回放落码后再 **143** 条，见 `endpoints.js:437` / `:449` 两行与头注释），本笔不另动。
 
 ⚠️ **本笔（commit 1）不 push / 不 merge**；**手验**按批文推迟到 **commit 4 之后**统一一轮（清单由 commit 4 出）。
 

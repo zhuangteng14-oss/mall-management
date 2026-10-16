@@ -157,11 +157,22 @@ import java.util.concurrent.atomic.AtomicLong;
  * ⚠️ 因此登记一条**行为变更**：{@code concurrency} 这个入参的含义从「线程数」收紧成
  * 「在途上限（且不超过 {@link #inFlightCap}）」—— 同一个 500 并发不再意味着 500 条线程。
  *
- * <h2>【八、丁：防护 / 注入开关（D 段 commit 2 起三键、阶段 2b 起四键真生效 / 一记录位）】</h2>
- * {@code /attack/run} 新增两个入参（{@code protections} / {@code injections}），它们成为
- * {@code drill_record.Scenario} 的一部分 ⇒「这一轮是按哪套开关跑的」**可复现**。
- * ⚠️ 但<b>本类一条防护逻辑都不实现</b>：{@code protections} 五个开关在本类只读、只记、只打日志，
- * 真闸在 D 段 commit 2 落地、{@code retry} 于阶段 2b 接上，口径是 **4 键接闸 + 1 键记录位**（见 {@code ProtectionGate}）。
+ * <h2>【八、丁：防护 / 注入开关（3a.1 起 = 共享配置，不再是 {@code /run} 的入参）】</h2>
+ * 块 7 收尾 ~ 阶段 2b 期间，两个开关是 {@code /attack/run} 的**入参**（{@code protections} /
+ * {@code injections} 两个 JSON 数组串）。**3a.1（乙案）把它们搬到一个独立的配置面**：
+ * {@code POST} / {@code GET} {@code /admin/observe/attack/config}，进程内**一份**，攻击模拟器页与
+ * 实时日志页共读共写（实现 = {@link AttackSwitchConfig}）。⚠️ ⇒ <b>本类不再收这两个入参</b>：
+ * 报文里还带着它们时直接抛（控制器 400）并指路 {@code /config}，**不静默忽略**
+ * —— 静默忽略的表现是「开关拨了没反应」，本仓最不想留的那一类。
+ * <p>本类与那两个开关的交集只剩三处，都是**读**：
+ * <ol>
+ *   <li>{@link #parse} 在**起跑那一刻**取一次 {@code switchConfig.state()} 快照、落进 {@link Config}
+ *       ⇒ {@code drill_record.Scenario} 里那句「这一轮是按哪套开关跑的」**仍然可复现**；</li>
+ *   <li>阶段 B 的注入判据**实时**读 {@code switchConfig}（见 {@code runOnce} 里那段）；</li>
+ *   <li>{@code Result.Engine} 回显的是**上面那一份快照**（起跑那一刻），**不是**运行期间的实时值。</li>
+ * </ol>
+ * ⚠️ 但<b>本类一条防护逻辑都不实现</b>：{@code protections} 五个开关的真闸在 {@code ProtectionGate}
+ * （D 段 commit 2 落地、{@code retry} 于阶段 2b 接上，口径 = **4 键接闸 + 1 键记录位**）。
  * 三个注入里**只有 {@link #INJECTION_REDIS_DOWN} 真接通**（复用 {@code L2HealthProbe} 那套现成原语，
  * 见类注释四）；{@code mqDown} / {@code dbSlow} 收得下、记得住，但没有任何实现
  * —— 结果里会把它们列进 {@code NotWired}，免得看数字的人以为它们生效了。
@@ -385,13 +396,17 @@ public class AttackEngine {
     }
 
     /**
-     * 一轮演练的入参配置（{@link #parse} 的产物）。
+     * 一轮演练的**这一轮**的配置（{@link #parse} 的产物）。
      *
      * @param targetQps    目标 QPS，{@code 0} = 不限速（见 {@link Pacer}）。⚠️ 它**不是**在途上限
      *                     —— 在途由 {@code concurrency}（且不超过 {@link #inFlightCap}）管，
      *                     两个旋钮各管一件事：一个管「每秒发几条」，一个管「同时挂着几条」。
-     * @param protections  防护开关（丁，默认全开）—— **本笔只记录**
-     * @param injections   注入开关（丁，默认全关）—— 只有 redisDown 真接通
+     * @param protections  防护开关**在起跑那一刻**的快照（3a.1 前是入参，现在是
+     *                     {@link AttackSwitchConfig} 的读）—— 只用于落进
+     *                     {@code drill_record.Scenario} 与 {@code Result.Engine} 的**可复现性**；
+     *                     ⚠️ 它**不是**这一轮实际读到的值（闸按共享配置**逐发请求**读）
+     * @param injections   注入开关**在起跑那一刻**的快照（同上）。阶段 B 的判据**不**读它
+     *                     —— 那里实时读 {@link AttackSwitchConfig}（见 {@code runOnce}）
      */
     record Config(String name, int concurrency, int durationSeconds, int targetQps,
                   List<Chosen> chosen, List<String> protections, List<String> injections) {
@@ -581,6 +596,17 @@ public class AttackEngine {
     private final ObjectMapper objectMapper;
 
     /**
+     * 攻击演练的**共享开关配置**（3a.1 乙案）。本类只**读**它，两处：
+     * <ol>
+     *   <li>{@link #parse} 起跑那一刻取一次快照（落进 {@link Config}，只为可复现性）；</li>
+     *   <li>{@code runOnce} 阶段 B 的注入判据 —— 那里是**实时**读，拨动对正在跑的那一轮生效。</li>
+     * </ol>
+     * ⚠️ 本类**不写**它：唯一的写点是 {@code AttackSwitchConfig} 自己（{@code POST /attack/config}），
+     * 与「跑完不复位」那条裁定配套（见 {@link AttackSwitchConfig} 类注释）。
+     */
+    private final AttackSwitchConfig switchConfig;
+
+    /**
      * 真发 HTTP 的客户端。**一个实例复用全程**：{@code HttpClient} 不可变且线程安全、自带连接池；
      * 每轮新建会白白丢掉连接池（100 线程 × 每请求一次 TCP 握手）。
      */
@@ -662,10 +688,11 @@ public class AttackEngine {
     private volatile long liveStartedMs;
 
     public AttackEngine(DrillTargetDao drillTargetDao, L2HealthProbe l2HealthProbe,
-                        ObjectMapper objectMapper) {
+                        ObjectMapper objectMapper, AttackSwitchConfig switchConfig) {
         this.drillTargetDao = drillTargetDao;
         this.l2HealthProbe = l2HealthProbe;
         this.objectMapper = objectMapper;
+        this.switchConfig = switchConfig;
     }
 
     // ==================== 面 1：场景清单 ====================
@@ -695,8 +722,9 @@ public class AttackEngine {
      * 只能靠 {@code finally}，而把整段几十秒的流程塞进一个 {@code try} 里会让那个方法没法读。
      *
      * @param body    前端报文（{@code name} / {@code concurrency} / {@code durationSeconds} /
-     *                {@code targetQps} / {@code scenarios:[{key,weight}]} /
-     *                {@code protections:[key]} / {@code injections:[key]}）；
+     *                {@code targetQps} / {@code scenarios:[{key,weight}]}）；
+     *                ⚠️ 3a.1 起**没有** {@code protections} / {@code injections} 两个键了
+     *                （它们搬去 {@code /attack/config}）—— 报文中若仍带着 ⇒ 抛 400 并指路。
      *                非法一律抛 {@link IllegalArgumentException}
      * @param baseUrl 打哪儿（由控制器从当前请求推出）
      */
@@ -852,9 +880,11 @@ public class AttackEngine {
 
         // ---- 阶段 B：redisDown 单独跑（注入 → 压 → 恢复）----
         // ⚠️ 触发条件由「勾了 redisDown 场景」**扩成 OR**（丁）：勾了场景 **或** 打开了 redisDown
-        //    注入开关。这是本笔的一处**行为变更**，登记在这里 —— 旧口径下「只注入了、没勾场景」
+        //    注入开关。这是丁的一处**行为变更**，登记在这里 —— 旧口径下「只注入了、没勾场景」
         //    是跑不出阶段 B 的，而开关面板让「只注入」成了一个能表达的组合。
-        boolean byInjection = cfg.injections().contains(INJECTION_REDIS_DOWN);
+        // ⚠️ 3a.1 起它是**实时读**（不再读 cfg 的起跑快照）：阶段 A 跑完之后才求值 ⇒
+        //    阶段 A 期间在日志页拨开 redisDown，本轮就注入（这正是乙案「过程中能改」的落点之一）。
+        boolean byInjection = switchConfig.injections().contains(INJECTION_REDIS_DOWN);
         Map<String, Object> redisDownInfo = new LinkedHashMap<>();
         redisDownInfo.put("Ran", false);
         redisDownInfo.put("ByInjection", byInjection);
@@ -1420,15 +1450,29 @@ public class AttackEngine {
 
     /**
      * 报文 → 配置。**所有非法输入在这里抛 {@link IllegalArgumentException}**（控制器转 400）。
-     * ⚠️ 校验口径（缺省 / 上下限 / 勾选为空 / 未知开关）写在一处，别拿「前端已经拦过」当理由省掉
+     * ⚠️ 校验口径（缺省 / 上下限 / 勾选为空）写在一处，别拿「前端已经拦过」当理由省掉
      * —— 端点是可以被 curl 直接打的。
      *
      * <p>报文键：{@code name} / {@code concurrency} / {@code durationSeconds} / {@code targetQps}
-     * （甲）/ {@code scenarios:[{key,weight}]} / {@code protections:[key]} / {@code injections:[key]}
-     * （丁，后两个是数组**结构** —— 传输层的 JSON 串在 {@code DrillRecordService} 里先解成结构）。
+     * （甲）/ {@code scenarios:[{key,weight}]}。
+     * ⚠️ <b>3a.1 起 {@code protections} / {@code injections} 不是报文键了</b>：它们是共享配置
+     * （{@code /attack/config}）⇒ 报文里还带着它们时**抛**，不静默忽略（见方法体第一段）。
+     *
+     * <p>⚠️ 它**不是**纯函数（3a.1 起）：末尾要读一次 {@link AttackSwitchConfig#state()} 取
+     * 「起跑那一刻的快照」。这是有意的 —— 快照的时点必须与「这一轮的起点」同一个地方，
+     * 而 {@link #run} 的第一句就是这个方法。
      */
-    static Config parse(Map<String, Object> body) {
+    Config parse(Map<String, Object> body) {
         Map<String, Object> b = body == null ? Map.of() : body;
+        // ⚠️ 甲案的两个入参在这里**拒收**（乙案 = 配置面，见类注释八）：
+        //    ① 不静默忽略 —— 静默忽略的表现是「拨了开关没反应」，而调用方会以为改了这一轮；
+        //    ② 消息里**指路** —— 它是能被 curl 直接打的端点，报错要能照着改。
+        //    ⚠️ 控制器那一层也拦（同一条文案，见 AttackSwitchConfig.PARAMS_MOVED）：这里守的是
+        //    **报文契约**，那里守的是 **HTTP 参数面**，两层都留着 —— 少了这一层，程序化的调用方
+        //    （测试、将来的 job）就能悄悄塞进来两个没人读的键。
+        if (b.get("protections") != null || b.get("injections") != null) {
+            throw new IllegalArgumentException(AttackSwitchConfig.PARAMS_MOVED);
+        }
         String name = truncate(str(b.get("name")), NAME_MAX);
         if (name.isEmpty()) {
             name = "自定义";
@@ -1476,45 +1520,15 @@ public class AttackEngine {
             throw new IllegalArgumentException("并发数至少要等于勾选的场景数（勾了 " + chosen.size()
                     + " 个，并发数 " + concurrency + "）");
         }
-        // 丁的两个开关：缺省 = 防护全开 / 注入全关（用户 2026-10-14 定稿的面板缺省）。
-        List<String> protections = parseKeys(b.get("protections"), PROTECTION_KEYS,
-                PROTECTION_KEYS, "protections");
-        List<String> injections = parseKeys(b.get("injections"), INJECTION_KEYS,
-                List.of(), "injections");
-        return new Config(name, concurrency, duration, targetQps, chosen, protections, injections);
-    }
-
-    /**
-     * 开关列表校验：{@code null}（= 没给）⇒ {@code fallback}；给了就逐项认 key，
-     * <b>不认识就抛</b>（形状错误 ⇒ 控制器 400，与本类其余校验同一条口径）。
-     *
-     * <p>⚠️ 为什么「没给」与「给了空数组」必须分开：前者是缺省（防护全开 / 注入全关），
-     * 后者是一个**有意义的状态**（「这一轮一个防护都不开」）—— 把两者并成一个，
-     * 演示「无防护对照轮」就表达不出来了。
-     */
-    static List<String> parseKeys(Object raw, List<String> allowed, List<String> fallback,
-                                  String what) {
-        if (raw == null) {
-            return fallback;
-        }
-        if (!(raw instanceof List<?> list)) {
-            throw new IllegalArgumentException(what + " 必须是字符串数组");
-        }
-        List<String> out = new ArrayList<>();
-        for (Object item : list) {
-            String key = str(item).trim();
-            if (key.isEmpty()) {
-                continue;
-            }
-            if (!allowed.contains(key)) {
-                throw new IllegalArgumentException(what + " 里有未知的开关：" + key
-                        + "（可选：" + String.join(" / ", allowed) + "）");
-            }
-            if (!out.contains(key)) {                 // 去重保序（同一个开关勾两次不是两份）
-                out.add(key);
-            }
-        }
-        return out;
+        // 丁的两个开关（3a.1 乙案）：**起跑那一刻的快照**，只落进 Config 供可复现性用。
+        // ⚠️ 别把它当成「这一轮实际读到的值」：防护的闸按共享配置**逐发请求**读、阶段 B 的注入
+        //    判据实时读（见 runOnce）—— 跑起来之后拨动开关，改的是后者，不改这份快照。
+        // ⚠️ 快照**必须**在这里取（而不是在 runOnce 里）：run() 的第一句就是本方法，
+        //    这里就是「起跑那一刻」；晚取一次就会把「解析目标 / 建 meter」那几毫秒算进来
+        //    （同 liveStartedMs 那条「起点必须与 sent 的起点同源」的顾虑）。
+        AttackSwitchConfig.State sw = switchConfig.state();
+        return new Config(name, concurrency, duration, targetQps, chosen,
+                sw.protections(), sw.injections());
     }
 
     /**
@@ -1631,7 +1645,10 @@ public class AttackEngine {
         engine.put("Shed", shed);
         engine.put("Abandoned", abandoned);
         engine.put("Stopped", stopped);
-        // 丁：开关原样回显（这一轮到底是按哪套开关跑的）—— 「收了但不实现」也要明说
+        // 丁：开关回显（这一轮到底是按哪套开关跑的）—— 「收了但不实现」也要明说。
+        // ⚠️ 3a.1 起这两项是**起跑那一刻的快照**（cfg 是 parse 时取的，见 parse 末段），
+        //    **不是**运行期间实际读到的值：乙案允许跑的过程中改配置，那时闸与注入判据读的是新值，
+        //    而这里仍然写着起跑时的旧值。两件事都如实记着，别把这一份当证据用。
         engine.put("Protections", cfg.protections());
         engine.put("Injections", cfg.injections());
         engine.put("InjectionsNotWired", INJECTIONS_NOT_WIRED.stream()
@@ -1650,7 +1667,10 @@ public class AttackEngine {
                 "Abandoned = 收尾宽限 " + GRACE_SECONDS + "s 用尽后被**取消**的在途请求。"
                         + "同样不并入任何一档：那条请求可能已经在服务端跑完了，只是响应没等到",
                 "Protections 五枚里**四枚真生效**（rateLimit / circuitBreak / retry / poolIsolation，阶段 2b）；"
-                        + "degrade 只作记录位 ⇒ 面板上不可开关；Injections 里只有 redisDown 真接通"));
+                        + "degrade 只作记录位 ⇒ 面板上不可开关；Injections 里只有 redisDown 真接通",
+                "Protections / Injections 是**起跑那一刻**的快照（共享配置，3a.1 乙案）。"
+                        + "跑的过程中改 /attack/config 对**本轮立即生效**（闸逐发请求读、阶段 B 判据实时读）"
+                        + "，但**不改这两项** —— 它们是「开跑时是什么配置」，不是「跑的时候读到了什么」"));
         out.put("Engine", engine);
 
         List<String> notes = new ArrayList<>();

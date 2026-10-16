@@ -2,11 +2,9 @@ package com.minke.mallmanagement.observe.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.minke.mallmanagement.observe.dao.DrillRecordDao;
-import com.minke.mallmanagement.protect.ProtectionGate;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
-import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -38,11 +36,10 @@ class DrillRecordServiceTest {
     private final DrillRecordDao dao = mock(DrillRecordDao.class);
     private final AttackEngine engine = mock(AttackEngine.class);
     /**
-     * 防护门用**真件**（D 段 · commit 2）：它没有依赖、没有 I/O（就是一个进程内的五个布尔位），
-     * 而本类要测的恰恰是「写入与复位的**时机**」—— 换成替身就把它要测的东西替掉了。
+     * ⚠️ 3a.1（乙案）起本类**不再持防护门**（D 段那两个「写入 / 复位的**时机**」用例随之删除，
+     * 见下面「二·补」那节的说明）。
      */
-    private final ProtectionGate gate = new ProtectionGate();
-    private final DrillRecordService service = new DrillRecordService(dao, engine, new ObjectMapper(), gate);
+    private final DrillRecordService service = new DrillRecordService(dao, engine, new ObjectMapper());
 
     /** 一行 {@code drill_record}（列名与**顺序**都与 {@code DrillRecordDao.COLUMNS} 一致）。 */
     private static Map<String, Object> row(String result, String scenario) {
@@ -145,7 +142,7 @@ class DrillRecordServiceTest {
         when(dao.insert(anyString(), anyInt(), anyString(), anyString(), anyInt(), anyInt(), anyInt(),
                 anyLong(), anyString(), anyString())).thenReturn(7L);
 
-        Map<String, Object> out = service.run("自定义", null, null, null, null, null, null, "c-1", 1,
+        Map<String, Object> out = service.run("自定义", null, null, null, null, "c-1", 1,
                 "http://localhost:8088");
 
         assertEquals(7L, out.get("Id"));
@@ -168,8 +165,8 @@ class DrillRecordServiceTest {
      * 本类负责把它解成结构再交给引擎（{@code AttackEngine.parse} 只认结构），数值参数**保持字符串**
      * —— 「必须是整数」那句话由引擎的 {@code clampInt} 说（那里是唯一校验出口）。
      *
-     * <p>丁的两个开关与它**同一种传输形状**（也不在服务层校验 key —— 那份白名单在引擎里），
-     * 故一并钉在这里。
+     * <p>⚠️ 3a.1（乙案）起丁的两个开关**不再走这条路**：它们的传输形状（JSON 数组串 → 结构）
+     * 搬去了 {@code AttackSwitchConfig.updateFromJson}，本类一个字都不碰（见类注释那节）。
      */
     @Test
     void decodesScenariosJsonStringBeforeHandingToTheEngine() {
@@ -178,10 +175,10 @@ class DrillRecordServiceTest {
 
         service.run("压测", "200", "30", "400",
                 "[{\"key\":\"seckill\",\"weight\":80},{\"key\":\"cacheCold\",\"weight\":20}]",
-                "[\"rateLimit\",\"retry\"]", "[\"redisDown\"]", "c-1", 1, "http://localhost:8088");
+                "c-1", 1, "http://localhost:8088");
 
         // 空白 scenarios = 没勾 = **null**（引擎按全 8 个场景跑），不是空数组（空数组是「一个都没勾」⇒ 抛）
-        service.run(null, null, null, null, "  ", "  ", null, "c-1", 1, "http://localhost:8088");
+        service.run(null, null, null, null, "  ", "c-1", 1, "http://localhost:8088");
 
         @SuppressWarnings("unchecked")
         ArgumentCaptor<Map<String, Object>> captor = ArgumentCaptor.forClass(Map.class);
@@ -196,74 +193,49 @@ class DrillRecordServiceTest {
         assertEquals(2, scenarios.size());
         assertEquals("seckill", scenarios.get(0).get("key"));
         assertEquals(80, scenarios.get(0).get("weight"));
-        assertEquals(List.of("rateLimit", "retry"), body.get("protections"));
-        assertEquals(List.of("redisDown"), body.get("injections"));
         assertNull(captor.getAllValues().get(1).get("scenarios"));
-        // ⚠️ 空白 = **没给**（引擎用缺省：防护全开 / 注入全关）；给了 `[]` 才是「一个都不开」
-        assertNull(captor.getAllValues().get(1).get("protections"));
-        assertNull(captor.getAllValues().get(1).get("injections"));
 
         // ⚠️ 串不是 JSON 数组 ⇒ 抛（400）。**不**回落到「全 8 个场景」：那会让页面显示一串没人勾的场景
         assertThrows(IllegalArgumentException.class, () -> service.run(null, null, null, null,
-                "seckill", null, null, "c-1", 1, "http://localhost:8088"));
-        // ⚠️ 开关串形状错同样**抛**（不回落成缺省：那会让结果页显示一套没人勾的开关）
-        assertThrows(IllegalArgumentException.class, () -> service.run(null, null, null, null, null,
-                "rateLimit", null, "c-1", 1, "http://localhost:8088"));
-    }
-
-    // ==================== 二·补、D 段：防护门的写入时机与复位 ====================
-
-    /**
-     * ⚠️ 本用例测的是**时机**，不是「值传对了」：
-     * <ol>
-     *   <li>写入必须发生在 {@code engine.run} <b>之前</b> —— 判据是「引擎跑的那一刻读门，读到的是本轮的」；</li>
-     *   <li>复位必须发生在 {@code finally} —— 判据是「引擎<b>抛了</b>，门也回到全开」。</li>
-     * </ol>
-     * 第 2 条故意让引擎抛：复位写在外面（try 之后）的实现会在这里留下 4 个关着的键，
-     * 而那正是「上一轮的开关越过那一轮留在进程里」这个故障的**最小复现**。
-     */
-    @Test
-    void appliesGateBeforeRunningAndResetsItEvenWhenTheEngineThrows() {
-        List<Boolean> atRunTime = new ArrayList<>();
-        when(engine.run(any(), any())).thenAnswer(invocation -> {
-            for (String key : ProtectionGate.KEYS) {
-                atRunTime.add(gate.isOn(key));
-            }
-            throw new IllegalStateException("引擎在半路炸了");
-        });
-
-        assertThrows(IllegalStateException.class, () -> service.run("压测", null, null, null, null,
-                "[\"rateLimit\"]", null, "c-1", 1, "http://localhost:8088"));
-
-        assertEquals(List.of(true, false, false, false, false), atRunTime,
-                "引擎跑的那一刻：只有 rateLimit 开着（其余四个被写入成 false）");
-        assertTrue(gate.snapshot().values().stream().allMatch(Boolean::booleanValue),
-                "引擎抛了也必须复位成全开");
+                "seckill", "c-1", 1, "http://localhost:8088"));
     }
 
     /**
-     * ⚠️ {@code protections} **不传**（表单没给）时：{@code decodeKeys} 答 {@code null}，
-     * 而 {@code apply(null)} 的语义是「**全关**」（它按「勾了哪些」写）。
-     * 两个 null 含义相反 ⇒ 服务层必须把它翻成「全开」，否则「不传这个参数」会静默地把防护全关掉
-     * —— 那恰好是最坏的一种默认值。本用例钉住这个换算。
+     * ⚠️ 报文里**不许**再出现那两个开关键 —— 它们是引擎明确拒收的（{@code AttackEngine.parse}
+     * 见到就抛 {@code PARAMS_MOVED}）。本用例是这条契约在**服务层**的哨兵：谁把
+     * {@code body.put("protections", ...)} 加回来，这里立刻红，而不是等到某次真演练被引擎拒掉。
+     *
+     * <p>⚠️ 本类测不到的那一半（如实登记）：{@code AttackEngine} 是替身，所以「引擎收到这个报文会
+     * 不会抛」不在本类的证明范围内 —— 那是 {@code AttackEngineTest.oldSwitchParamsAreRejectedNotIgnored}
+     * 的活。两条合起来才是完整的。
      */
     @Test
-    void missingProtectionsMeansAllOnNotAllOff() {
-        List<Boolean> atRunTime = new ArrayList<>();
-        when(engine.run(any(), any())).thenAnswer(invocation -> {
-            for (String key : ProtectionGate.KEYS) {
-                atRunTime.add(gate.isOn(key));
-            }
-            return new AttackEngine.DrillRun("压测", "{}", 0, 0, 0, 0, 0, 0L, Map.of(), "batch-8c");
-        });
-        when(dao.insert(anyString(), anyInt(), anyString(), anyString(), anyInt(), anyInt(), anyInt(),
-                anyLong(), anyString(), anyString())).thenReturn(1L);
+    void runHandsTheEngineABodyWithoutTheSwitchKeys() {
+        when(engine.run(any(), any())).thenReturn(new AttackEngine.DrillRun("压测", "{}", 0, 0, 0, 0, 0,
+                0L, Map.of(), "batch-8c"));
 
-        service.run("压测", null, null, null, null, null, null, "c-1", 1, "http://localhost:8088");
+        service.run("压测", null, null, null, null, "c-1", 1, "http://localhost:8088");
 
-        assertEquals(List.of(true, true, true, true, true), atRunTime,
-                "没给 protections = 面板缺省 = 全开（不是「全关」）");
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<Map<String, Object>> captor = ArgumentCaptor.forClass(Map.class);
+        verify(engine).run(captor.capture(), eq("http://localhost:8088"));
+        Map<String, Object> body = captor.getValue();
+        assertFalse(body.containsKey("protections"), "开关不再是报文的一部分（乙案）：" + body.keySet());
+        assertFalse(body.containsKey("injections"), "开关不再是报文的一部分（乙案）：" + body.keySet());
     }
+
+    // ==================== 二·补、3a.1：那两个「时机」用例去哪了 ====================
+    //
+    // D 段（commit 2）在这里还钉过两条：`appliesGateBeforeRunningAndResetsItEvenWhenTheEngineThrows`
+    // 与 `missingProtectionsMeansAllOnNotAllOff`。它们测的是「写入必须早于 engine.run」「复位必须
+    // 落在 finally」以及「没给 protections ⇒ 全开」。3a.1（乙案）之后这三件事**都不在本类的职责里**：
+    //   · 本类不再持 ProtectionGate、不再收那两个形参、也不再 apply/reset（见类注释那节）；
+    //   · 「没给 = 全开」这条换算搬去了 AttackSwitchConfig（缺省 = KEYS 全开）；
+    //   · 「跑完不复位」是**新裁定**（用户 2026-10-16）—— 于是「复位时机」这个被测对象本身没了。
+    // ⇒ 两条用例整体删除，**不是**因为不再需要，而是因为它们要测的东西已经不在这个类里。
+    //    一个必须如实说的后果：**「跑完不复位」在本类里没有替代用例**。它的哨兵只能是
+    //    AttackSwitchConfigTest（配置面自己不自动复位）+ 一次真演练（阶段 4 手验）——
+    //    因为「谁调了 resetToDefault」在替身引擎下根本观察不到。
 
     /** [暂停]：一层转发（令旗在引擎里）—— 后端只要如实把引擎答的 true/false 返回去。 */
     @Test

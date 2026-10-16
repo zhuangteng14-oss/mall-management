@@ -317,14 +317,9 @@ export function attackScenarios() {
  *        **真实上限**，不是我们设的一个数 ⇒ 不许把 0 当「没填」而省略。上限 100000。
  * @param {Array<{key:string,weight:number}>} [p.scenarios] 勾选与权重；**不传 = 全 8 个场景**
  *        ⚠️ 权重为 0 的场景**等于没勾**（后端会剔除），别用 0 表达「跑一下试试」。
- * @param {string[]} [p.protections]   五条防护开关（`rateLimit` / `circuitBreak` / `degrade` /
- *        `retry` / `poolIsolation`）。**不传 = 全开**、传 `[]` = **全关**（两者不同，别混）。
- *        ⚠️ 后端**只收下、只记录、只回显**，**不实现任何防护逻辑** —— 那是 D 段（硬边界 A），
- *        本笔只把开关位与字段留出来。⇒ 拨动它**不会**改变这一轮的读数。
- * @param {string[]} [p.injections]    三个故障注入（`redisDown` / `mqDown` / `dbSlow`）。
- *        **不传 = 全关**。⚠️ 只有 `redisDown` 真的接了线（演练里会真的把 L2 标成不可用 5 秒）；
- *        `mqDown` / `dbSlow` 后端**未接通**，响应里会如实列在 `Engine.InjectionsNotWired`
- *        ⇒ 界面必须把这两个画成「未接通」，别让它们看起来能拨。
+ *        ⚠️ 3a.1（乙案）起两个开关**不再是本函数的入参** —— 它们是**共享配置**，读写在
+ *        `GET` / `POST /admin/observe/attack/config` 那条端点上（本文件**还没有**对应的封装函数：
+ *        两个页面的开关栏一起做，排在 3a.6）。后端见到这两个键会**直接 400 并指路**（不静默忽略）。
  * @returns {Promise<{success:boolean, Id:number, Name:string, TotalRequests:number,
  *          BlockedRequests:number, FailedRequests:number, ShedRequests:number,
  *          AbandonedRequests:number, DurationMs:number, Result:object}>}
@@ -344,12 +339,13 @@ export function runAttack(p) {
     durationSeconds: o.durationSeconds,
     targetQps: o.targetQps,
     // ⚠️ 数组 → JSON 串（后端只认这个；传对象或裸串会 400）。
-    //    ⚠️ 三个数组字段都是这个形状：**空数组与缺省在后端是两件事**
-    //    （`[]` = 全关 / 全没有，缺省 = 防护全开、注入全关），故这里**不**把 `[]` 滤掉 ——
-    //    `q()` 只滤 `''`/`null`/`undefined`，`JSON.stringify([])` 是 `'[]'`，会照原样发出去。
+    //    ⚠️ **空数组与缺省在后端是两件事**（`[]` = 一个都没勾 ⇒ 400；缺省 = 全 8 个场景），
+    //    故这里**不**把 `[]` 滤掉 —— `q()` 只滤 `''`/`null`/`undefined`，
+    //    `JSON.stringify([])` 是 `'[]'`，会照原样发出去（让后端去说那句话）。
+    //    ⚠️ 3a.1（乙案）：`protections` / `injections` 两行**已从这里删除** —— 它们是共享配置，
+    //    不再是本端点的入参（后端见到就 400，见本函数 JSDoc）。⚠️ **别**为了兼容在调用处
+    //    「顺手同步一次」那两个值：那会把日志页刚拨的开关覆盖回去，乙案就白做了。
     scenarios: Array.isArray(o.scenarios) ? JSON.stringify(o.scenarios) : o.scenarios,
-    protections: Array.isArray(o.protections) ? JSON.stringify(o.protections) : o.protections,
-    injections: Array.isArray(o.injections) ? JSON.stringify(o.injections) : o.injections,
   }), { timeout: seconds * 1000 + RUN_GRACE_MS })
 }
 
