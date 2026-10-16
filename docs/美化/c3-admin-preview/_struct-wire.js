@@ -105,7 +105,7 @@
      ⚠️ 上一版的 bug（本笔修的就是它）：热力图的行名走一个 **62px 的 HTML 左列**，
      而它的 SVG 只占剩下的宽度、内部 `pl` 又是 4 ⇒ 它的绘图区左沿在 **66px 处**，
      折线图却在 **30/600 的 viewBox 位置**。两者都「看起来」有个左边距，**但从没对齐过** ——
-     而 S1/S2 的脚注当时正写着「三张图共用同一根 x 轴」。60 拍下这个 36px 的错位比 7 拍更显眼。
+     而 S1（与后来删掉的 S2）的脚注当时正写着「三张图共用同一根 x 轴」。60 拍下这个 36px 的错位比 7 拍更显眼。
 
      修法：把行名槽改为**叠在 SVG 上的绝对定位条**，宽度 = PAD_L/VBW（= 11%），
      SVG 仍然占满容器 ⇒ 左沿恒在 PAD_L/VBW 处，与折线图逐像素相同。
@@ -385,7 +385,7 @@
         return { data: DATA.wait.series[i], stroke: i === 0 ? G.line : G.line2, dashed: i === 1 }
       }),
     })
-    /* ── 上一版就有的三种形态（S2 与对照用；`qps`/`hit` 是**单序列**画法）────── */
+    /* ── 上一版就有的三种形态（保留以备对照；`qps`/`hit` 是**单序列**画法）────── */
     else if (kind === 'qps') lineChart(host, { h: o.h || 200, data: DATA.qps, area: true, xAxis: !!o.xAxis })
     else if (kind === 'hit') lineChart(host, { h: o.h || 170, data: DATA.hit, yMin: 0, yMax: 100, xAxis: !!o.xAxis })
     else if (kind === 'heat') heatChart(host, { h: o.h || 190, rows: DATA.lockNames, x: DATA.x, cells: DATA.heat, max: DATA.heatMax, xAxis: !!o.xAxis })

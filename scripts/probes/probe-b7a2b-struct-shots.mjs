@@ -40,12 +40,10 @@ const ROOT = 'C:/Users/86159/Desktop/软件工程/期末项目'
 const DIR = path.join(ROOT, 'docs', '美化', 'c3-admin-preview')
 const { open, sleep, report } = await import(pathToFileURL(path.join(ROOT, 'docs', '美化', '_cdp.mjs')).href)
 
-/* ⚠️ S2 **不在**这份清单里：用户裁定「S1 优于 S2」后 S2 标了废弃、**不再更新**
-   （裁定落在 `S2-黄金信号判据带.html` 自己的页头里，见 commit b1284a5）。
-   它的 HTML 还在，但它引的同一份 `_struct-wire.js` 已经换成本窗真数据 ——
-   于是它自己的脚注（「快照那刻只有 7 拍」）与它画出来的东西**互相矛盾**。
-   那是**已知的不一致**，不是本探针要修的：把它放进 VARIANTS 只会得到一堆红断言，
-   而那堆红断言说的不是「S1/S3 坏了」。要恢复 S2 的断言，先决定它的去留。 */
+/* ⚠️ S2 **已删除**（2026-10-16 · 用户裁定）：先「标废弃」（commit b1284a5）、后整份删除。
+   它引的同一份 `_struct-wire.js` 换成本窗真数据后，它自己的脚注（「快照那刻只有 7 拍」）
+   与它画出来的东西**互相矛盾** —— 修它 = 重启一个已废弃的版本，不修 = 留一处矛盾，故删。
+   ⇒ 本清单只剩 S1 / S3 两版。 */
 /* `filled` = 页面脚本里**由 JS 填值**的那些 id。它们初始都是占位符 `—`，脚本跑完才会变。
    ⚠️ 为什么要单列这一条：图数是靠 `.chart` **有尺寸**判的，而「图有了」不代表**脚本跑完了** ——
    脚本后半段一抛（比如某个 id 不存在），后面的填值全废，但图早就画好了 ⇒ 只查图数会全绿。
@@ -71,7 +69,7 @@ const r = report('3a2b 结构草图')
 console.log('=== 3a.2b 结构草图：整页截图 + 结构断言 ===')
 console.log('跑法：node scripts/probes/probe-b7a2b-struct-shots.mjs')
 console.log('底座：' + 'docs/美化/_cdp.mjs（headless Edge + CDP，--headless=new，' + VIEW_W + '×' + VIEW_H + '，file:// 直开，不起 server / 不起后端）')
-console.log('版本：' + VARIANTS.map((v) => v.file).join(' / ') + '（S2 已按用户裁定废弃，不在断言清单内 —— 见脚本头注释）')
+console.log('版本：' + VARIANTS.map((v) => v.file).join(' / ') + '（S2 已按用户裁定删除，见脚本头注释）')
 console.log('')
 
 const b = await open({ w: VIEW_W, h: VIEW_H, headed: false })

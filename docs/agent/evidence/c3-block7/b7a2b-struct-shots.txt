@@ -1,7 +1,7 @@
 === 3a.2b 结构草图：整页截图 + 结构断言 ===
 跑法：node scripts/probes/probe-b7a2b-struct-shots.mjs
 底座：docs/美化/_cdp.mjs（headless Edge + CDP，--headless=new，1440×900，file:// 直开，不起 server / 不起后端）
-版本：S1-时间栈实体栏.html / S3-三问句泳道.html（S2 已按用户裁定废弃，不在断言清单内 —— 见脚本头注释）
+版本：S1-时间栈实体栏.html / S3-三问句泳道.html（S2 已按用户裁定删除，见脚本头注释）
 
      S1-时间栈实体栏.html 页高 2019px · 主区宽 1129px（视口 1440 / 客户区 1425 / 滚动条 15）
        图0 容器 731px · 作图区 638.4px

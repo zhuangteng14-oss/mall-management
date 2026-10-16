@@ -1,7 +1,7 @@
 /* ══════════════════════════════════════════════════════════════════════════════
-   _struct-wire.css —— 3a.2b（结构重做）三版结构草图的**共用线框原语**
+   _struct-wire.css —— 3a.2b（结构重做）两版结构草图的**共用线框原语**
 
-   这是什么：S1 / S2 / S3 三版**纯结构**草图的公共样式。
+   这是什么：S1 / S3 两版**纯结构**草图的公共样式（S2 已删，见脚本头注释）。
    它不是设计稿、不是主题 —— 全篇只有灰阶，**不含**任何品牌 token（墨/釉/朱砂/运营橙
    一个都没用）、不含圆角档、不含阴影、不含过渡与动效。色板锁定留到「第三步」才谈。
 
@@ -192,7 +192,7 @@ body {
 .stock-row .fill { background: #cfcfcf; height: 8px; }
 .stock-row .num { text-align: right; font: 11px/1.3 var(--mono); font-variant-numeric: tabular-nums; }
 .stock-row .num s { text-decoration: none; color: var(--ts); }
-/* 窄栏变体（S1/S2 的侧栏）：三列的比例是按**真页面全宽 1129px** 定的
+/* 窄栏变体（S1 的侧栏）：三列的比例是按**真页面全宽 1129px** 定的
    （1fr 849 + 160 + 96），搬进 4/12 的栏里第一列只剩 91–100px，
    商品 SKU「asdsad · 珍珠白 / S」被挤成两行。结构主张（名 | 条 | 数）不变，只收紧列宽。 */
 .stock-row.narrow { grid-template-columns: minmax(0,1fr) 76px 70px; gap: 8px; }
