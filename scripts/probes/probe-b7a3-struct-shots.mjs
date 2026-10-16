@@ -5,24 +5,34 @@
    底座：`docs/美化/_cdp.mjs`（headless Edge + CDP）—— **不起 dev server、不起后端**：
    两个 HTML 除了两份 CSS / 一份 JS 之外是自包含的（真数据烘在 `_struct-wire-ev.js` 里）。
 
-   ── 五条判据怎么量（每条都要能复核）──────────────────────────────────────
-   ① C1 相邻区块不同构 —— 给每个**顶层区块**（渲染时打的 `[data-blk]`）算一枚**结构指纹**
-      （标签 + display + 主轴方向 + **去重后的后代标签集**），再取「相邻对」（某一轴上间距 ≤ 40px
-      且另一轴上有重叠），断言每对指纹都不同。
-      ⚠️ 指纹里必须带**后代标签集**：只用「标签+display+子元素个数」时，⑤ 链路抽屉与 ⑥ 开关栏
-      会双双算成 `div|block|-|3` 而被判同构 —— 那是**指纹太弱**，不是页面同构。
-   ② C3 区块间距 > 区块内间距 —— **两个轴都量**（C3 的原话不区分横竖）：
-      · 区间距 = 两块之间**真正的空白带**（`next.top − prev.bottom`，取重叠轴那一侧）；
-      · 区内距 = 块内相邻两项的**空白**（盒间空隙 + 前一项的下内边距 + 后一项的上内边距）；
-      断言 min(区间距) > max(区内距)。⚠️ 只按「盒子相接 ⇒ 间距 0」量区内距会**假绿**
-      （列表卡片之间有 6+6 的内边距，看着是白的，盒子却挨着）。
-   ③ 各区宽度实测 —— 量每块的 `getBoundingClientRect().width`，并与「主区可用宽」对账。
-      主区宽**不写常数**：`clientWidth − 侧栏 232 − 主区左右 padding×2`（滚动条宽随 headless 模式变）。
-   ④ 8 处动效落点 —— 数 `[data-anim]` 的角标，要求**恰好 8 个且编号 1–8 各一次**。
-      ⚠️ 落点在 ≠ 有数据可演：5（error 闪红）本窗 error 0 条，页面上如实标了「无可演示的卡片」。
-   ⑤ 三样易漏项 —— 按**文本**查在不在：⑤ 的「起止只来自 traces ⇒ 模拟日常下恒空」、
-      ③ 的「只淘汰卡片、被丢的 seq 要从 seenSeq 摘掉」、图例的「本页窗口内累计、不是帧里 counts」。
+   ── 判据怎么量（用户 2026-10-16 第二轮裁定之后的口径）────────────────────
+   〇 窗口化（这一轮的新判据，**优先级最高**）
+      · **六区全部落在首个视口内**（每区 rect 的 top ≥ 0 且 bottom ≤ innerHeight）
+        —— 这就是「打开预览 → 不滚 → 能看完 5 区 + 第 6 区」的可复核形式。
+      · **页面高度不随数据变**：往 `.ev-list` 里**临时塞 200 张卡片**，前后比三个数 ——
+        文档高**不变**、`.ev-list` 的 clientHeight **不变**、`.ev-list` 的 scrollHeight **变大**。
+        这三条同时成立才叫「事件流内部滚、页面不跟着长」；只量「有没有滚动条」是不够的
+        （页面自己滚起来也会有滚动条）。
+      · **主区（`.px`）不被撑高**：scrollHeight == clientHeight。
+      · **整页就是一屏**：标题条 + 外壳 + 页脚 = innerHeight（页脚是折叠的 `<details>`，
+        在 100vh **之内**，所以它不破坏这一条）。
+      · **一个大外框包住六区**：`.ev-frame` 的 DOM 子树含六区，且几何上包含六区。
+   ① C1 相邻区块不同构 —— 每个顶层区块算一枚**结构指纹**（标签 + display + 主轴方向 +
+      **直接子元素标签计数** + 后代标签集），相邻对（某一轴相接或间距 ≤ 4px、另一轴有重叠）
+      指纹必须两两不同。
+      ⚠️ 窗口化之后区块**直接相接**（间距 0，只隔一条分隔线）⇒ 相邻对变多，这条比上一轮更严。
+   ② 8 处动效落点 —— 数 `[data-anim]` 的角标，要求**恰好 8 个且编号 1–8 各一次**。
+      落点在 ≠ 有数据可演：5（error 闪红）本窗 error 0 条，页面上如实标了。
+   ③ 各区宽度实测 —— 与「主区可用宽」对账。主区宽**不写常数**：
+      `clientWidth − 侧栏 232 − 主区左右 padding×2`（滚动条宽随 headless 模式变；这一轮
+      整页不再滚 ⇒ 页面级滚动条可能**不存在**，宽度账因此与上一轮不同，这正是不写常数的原因）。
+   ④ 三样易漏项 —— 按**文本**查在不在：⑤ 的「起止只来自 traces ⇒ 模拟日常下恒空」、
+      ③ 的「被淘汰的 seq 要从 seenSeq 摘掉」、图例的「本页窗口内累计、不是帧里 counts」。
       外加硬约束 5：「数据源（正常 / 模拟日常）」两版都在，且「已放 N / 500 条」**常驻**。
+
+   ⚠️ **本探针上一轮跑过的 C3（区块间距 > 区块内间距）已撤**：窗口化之后区与区之间是
+    **一条 1px 分隔线**、不是空白带，「间距」这个量在窗口形态里没有意义 —— 分组由**外框**
+   表达，不由留白表达。撤掉而不是改数，理由写在交付报告里。
    ══════════════════════════════════════════════════════════════════════════════ */
 import path from 'node:path'
 import fs from 'node:fs'
@@ -32,15 +42,21 @@ const ROOT = 'C:/Users/86159/Desktop/软件工程/期末项目'
 const DIR = path.join(ROOT, 'docs', '美化', 'c3-admin-preview')
 const { open, report } = await import(pathToFileURL(path.join(ROOT, 'docs', '美化', '_cdp.mjs')).href)
 
+/* 六区（对照 txt 线框图的 ①…⑥）—— 甲 / 丙 的第 ④ 区宿主不同：甲是右栏、丙是仪表带。 */
+const REG_JIA = [['status', '①'], ['rail', '②'], ['stream', '③'], ['live', '④'], ['drawer', '⑤'], ['switch', '⑥']]
+const REG_BING = [['status', '①'], ['rail', '②'], ['stream', '③'], ['band', '④'], ['drawer', '⑤'], ['switch', '⑥']]
 const VARIANTS = [
-  { file: '3a3-甲-三栏驾驶舱.html', png: '3a3-甲-三栏驾驶舱.png', blks: ['status', 'flash', 'rail', 'stream', 'live', 'drawer', 'switch'] },
-  { file: '3a3-丙-上下分区.html', png: '3a3-丙-上下分区.png', blks: ['status', 'flash', 'rail', 'band', 'stream', 'drawer', 'switch'] },
+  { file: '3a3-甲-三栏驾驶舱.html', png: '3a3-甲-三栏驾驶舱.png', regions: REG_JIA },
+  { file: '3a3-丙-上下分区.html', png: '3a3-丙-上下分区.png', regions: REG_BING },
 ]
+const ALL_BLKS = ['status', 'flash', 'rail', 'stream', 'live', 'band', 'drawer', 'switch']
 
 const VIEW_W = 1440
 const VIEW_H = 900
-const r = report('3a3 日志页结构草图（甲 / 丙）')
-console.log('=== 3a.3 日志页结构草图：整页截图 + 结构断言 ===')
+const INJECT_N = 200       /* 临时塞进事件流的卡片数（证伪「事件越多页面越长」） */
+
+const r = report('3a3 日志页结构草图（甲 / 丙 · 窗口化后）')
+console.log('=== 3a.3 日志页结构草图：窗口化 + 整页截图 + 结构断言 ===')
 console.log('跑法：node scripts/probes/probe-b7a3-struct-shots.mjs')
 console.log('底座：docs/美化/_cdp.mjs（headless Edge + CDP，--headless=new，' + VIEW_W + '×' + VIEW_H +
   '，file:// 直开，不起 server / 不起后端）')
@@ -60,8 +76,7 @@ const MEASURE = `(function () {
     var axis = cs.display === 'grid' ? cs.gridTemplateColumns
       : (cs.display.indexOf('flex') >= 0 ? cs.flexDirection : '-')
     /* 直接子元素的标签计数（如 div:14）—— 指纹里**必须**有这一项：
-       只用「标签集」时，② 过滤栏（14 行 div）与 ③ 事件流（4 个 div 容器）会双双算成
-       {div,span,b} 而被判同构 —— 那是**指纹太弱**，不是页面同构（本探针第一跑就这么红的）。 */
+       只用「标签集」时两个不同区块会双双算成同一枚指纹而被判同构 —— 那是**指纹太弱**。 */
     var cnt = {}, kids = [].slice.call(e.children)
     for (var i = 0; i < kids.length; i++) {
       var t = kids[i].tagName.toLowerCase(); cnt[t] = (cnt[t] || 0) + 1
@@ -69,102 +84,47 @@ const MEASURE = `(function () {
     var childSig = Object.keys(cnt).sort().map(function (t) { return t + ':' + cnt[t] }).join(',')
     return e.tagName.toLowerCase() + '|' + cs.display + '|' + axis + '|' + childSig + '|' + tags(e).join(',')
   }
+
+  var frame = document.querySelector('.ev-frame')
+  var fr = frame ? rect(frame) : null
   var blocks = [].slice.call(document.querySelectorAll('[data-blk]')).filter(vis)
-  /* ⚠️ 几何量存**原值**、只在打印时取整：先 round 再作差会把 32px 的间距算成 31px
-     （本探针第一跑就报了 31 —— 那不是页面的问题，是我自己把子像素吃掉了）。 */
+  /* 几何量存**原值**、只在打印时取整：先 round 再作差会把 1px 的差吃掉。 */
   var info = blocks.map(function (e) {
     var c = rect(e)
-    return { blk: e.getAttribute('data-blk'), sig: sig(e), el: e,
-      x: c.left, y: c.top, w: c.width, h: c.height }
+    var inFrame = !!(frame && frame.contains(e) &&
+      c.left >= fr.left - 0.5 && c.top >= fr.top - 0.5 &&
+      c.right <= fr.right + 0.5 && c.bottom <= fr.bottom + 0.5)
+    return { blk: e.getAttribute('data-blk'), sig: sig(e), txt: (e.innerText || '').replace(/\\s+/g, ' ').slice(0, 60),
+      x: c.left, y: c.top, w: c.width, h: c.height, right: c.right, bottom: c.bottom, inFrame: inFrame }
   })
   var infoShow = info.map(function (x) {
-    return { blk: x.blk, sig: x.sig, x: Math.round(x.x), y: Math.round(x.y),
-      w: Math.round(x.w), h: Math.round(x.h) }
+    return { blk: x.blk, sig: x.sig, txt: x.txt, x: Math.round(x.x), y: Math.round(x.y),
+      w: Math.round(x.w), h: Math.round(x.h), bottom: Math.round(x.bottom), inFrame: x.inFrame }
   })
 
-  /* ── ① 区间距 / 相邻对 ─────────────────────────────────────────────── */
-  var H_OVER = 1, V_OVER = 1     // 「另一轴上有重叠」的最小重叠像素
+  /* ── 相邻对（窗口化之后：相接 = 间距 0，只隔一条分隔线）────────────── */
+  var ADJ = 4
   var pairs = []
   for (var i = 0; i < info.length; i++) {
     for (var j = i + 1; j < info.length; j++) {
       var a = info[i], b = info[j]
       if (a.blk === b.blk) continue
-      var ovX = Math.min(a.x + a.w, b.x + b.w) - Math.max(a.x, b.x)
-      var ovY = Math.min(a.y + a.h, b.y + b.h) - Math.max(a.y, b.y)
-      var gapV = Math.max(a.y - (b.y + b.h), b.y - (a.y + a.h))
-      var gapH = Math.max(a.x - (b.x + b.w), b.x - (a.x + a.w))
+      var ovX = Math.min(a.right, b.right) - Math.max(a.x, b.x)
+      var ovY = Math.min(a.bottom, b.bottom) - Math.max(a.y, b.y)
+      var gapV = Math.max(a.y - b.bottom, b.y - a.bottom)
+      var gapH = Math.max(a.x - b.right, b.x - a.right)
       var rec = null
-      if (ovX > H_OVER && gapV >= 0) rec = { axis: 'v', gap: gapV, pair: a.blk + '|' + b.blk }
-      else if (ovY > V_OVER && gapH >= 0) rec = { axis: 'h', gap: gapH, pair: a.blk + '|' + b.blk }
+      if (ovX > 1 && gapV >= 0) rec = { axis: 'v', gap: gapV, pair: a.blk + '|' + b.blk }
+      else if (ovY > 1 && gapH >= 0) rec = { axis: 'h', gap: gapH, pair: a.blk + '|' + b.blk }
       if (!rec) continue
       rec.a = a.blk; rec.b = b.blk
-      /* 相邻 = 间距 ≤ 48px（区块间距就是 48） */
-      if (rec.gap <= 48 + 0.5) rec.adjacent = true
+      if (rec.gap <= ADJ) rec.adjacent = true
       pairs.push(rec)
     }
   }
   var adj = pairs.filter(function (p) { return p.adjacent })
-  var interGaps = pairs.map(function (p) { return p.gap })
 
-  /* ── ② 区内距（块内相邻两项的空白）──────────────────────────────────── */
-  var intra = { v: 0, h: 0, vAt: '', hAt: '', list: [] }
-  /* 留一份最大的几对，供报告复核「这个 22px 到底是哪两个东西之间」*/
-  function pick(list, axis, gap, at) {
-    list.push({ axis: axis, gap: Math.round(gap * 10) / 10, at: at })
-    if (list.length > 40) {
-      list.sort(function (x, y) { return y.gap - x.gap })
-      list.length = 12
-    }
-  }
-  blocks.forEach(function (root) {
-    var all = [root].concat([].slice.call(root.querySelectorAll('*')))
-    for (var i = 0; i < all.length; i++) {
-      var p = all[i]
-      var kids = [].slice.call(p.children).filter(vis)
-      if (kids.length < 2) continue
-      /* ⚠️ 「间距」不等于「两块之间的空白」：被 margin-left:auto 或 justify-content:space-*
-         顶开的两个元素之间可以隔着几百像素，那是**对齐**不是**节奏**。
-         本探针第一跑把状态条里 .ev-src（margin-left:auto）与 .tz 之间的 265.9px 当成了
-         「区内间距」，于是 C3 假红 —— 判据错，不是页面错。这里逐对排除。 */
-      /* ⚠️ 认「撑开的空白」不能查 computedStyle 的 marginLeft === 'auto'：flex 项的自动外边距
-         在布局后会被解析成**已用值**（这里读回来是 265.9px，不是 'auto'）—— 本探针第一跑就是
-         栽在这上面（判据看着写了、其实一行都没生效）。改成和**容器声明的 gap** 比：
-         某一侧的 margin 大于 gap，那就是撑开的（对齐），不是节奏。
-         gap 读不到（block 布局是 'normal' ⇒ NaN）时按 0 算，此时任何 0 边距都算「紧挨」。
-         ⚠️⚠️ 还有一类**同源的假红**：内联级盒子（b / span 这类）之间的水平距离是**文本流动**
-         （中间隔着正文），那不是作者声明的排布节奏。甲第二跑报的「横 210 @ note」就是 .note
-         里两个 <b> 中间那 210px 的说明文字 —— 判据错，不是页面错。这里把内联级盒子整对跳过。 */
-      var pc = getComputedStyle(p)
-      var gapH = parseFloat(pc.columnGap) || 0
-      var gapV = parseFloat(pc.rowGap) || 0
-      for (var k = 1; k < kids.length; k++) {
-        var A = kids[k - 1], B = kids[k]
-        var ca = getComputedStyle(A), cb = getComputedStyle(B)
-        if (ca.display.indexOf('inline') === 0 || cb.display.indexOf('inline') === 0) continue
-        var ra = rect(A), rb = rect(B)
-        var pd = parseFloat(ca.paddingBottom) || 0, pu = parseFloat(cb.paddingTop) || 0
-        var pr = parseFloat(ca.paddingRight) || 0, pl = parseFloat(cb.paddingLeft) || 0
-        var mB = parseFloat(ca.marginBottom) || 0, mT = parseFloat(cb.marginTop) || 0
-        var mR = parseFloat(ca.marginRight) || 0, mL = parseFloat(cb.marginLeft) || 0
-        var at = (p.getAttribute('class') || p.tagName.toLowerCase()) + ' (#' + k + ')'
-        /* 竖向：B 在 A 下面 */
-        if (rb.top >= ra.bottom - 0.5 && mB <= gapV + 0.5 && mT <= gapV + 0.5) {
-          var gv = (rb.top - ra.bottom) + pd + pu
-          pick(intra.list, 'v', gv, at)
-          if (gv > intra.v) { intra.v = gv; intra.vAt = at }
-        }
-        /* 横向：B 在 A 右边 */
-        if (rb.left >= ra.right - 0.5 && mR <= gapH + 0.5 && mL <= gapH + 0.5) {
-          var gh = (rb.left - ra.right) + pr + pl
-          pick(intra.list, 'h', gh, at)
-          if (gh > intra.h) { intra.h = gh; intra.hAt = at }
-        }
-      }
-    }
-  })
-
-  /* ── ④ 动效落点 ────────────────────────────────────────────────────── */
-  /* 落点标注是逗号列表（4 与 7 本来就落在同一个数字上）⇒ 拆开、去重、排序 */
+  /* ── 动效落点（逗号列表拆开去重）──────────────────────────────────── */
   var anims = []
   ;[].slice.call(document.querySelectorAll('[data-anim]')).forEach(function (e) {
     e.getAttribute('data-anim').split(',').forEach(function (a) {
@@ -173,25 +133,53 @@ const MEASURE = `(function () {
   })
   anims.sort()
 
-  var txt = document.body.innerText || ''
+  /* ── 〇 注入实验：事件流里**再塞 200 张卡**，看页高动不动 ──────────────
+     这是「事件越多页面越长」这条病的**直接证伪**：文档高与列表可视高必须**一模一样**，
+     而列表的 scrollHeight 必须**变大**（说明它自己扛住了）。量完立刻清理。 */
+  var list = document.querySelector('.ev-list')
   var px = document.querySelector('.px')
+  function snap() {
+    return { page: document.documentElement.scrollHeight, docH: document.body.scrollHeight,
+      listC: list.clientHeight, listS: list.scrollHeight }
+  }
+  var before = snap()
+  var proto = list.firstElementChild
+  for (var q = 0; q < ` + INJECT_N + `; q++) {
+    var c2 = proto.cloneNode(true)
+    c2.removeAttribute('data-anim')       /* 别把落点角标也复制一份，否则「恰好 8 处」当场失真 */
+    var inner = c2.querySelectorAll('[data-anim]')
+    for (var z = 0; z < inner.length; z++) inner[z].removeAttribute('data-anim')
+    list.appendChild(c2)
+  }
+  var after = snap()
+  for (var q2 = 0; q2 < ` + INJECT_N + `; q2++) list.removeChild(list.lastElementChild)
+  var afterClean = snap()
+
+  var txt = document.body.innerText || ''
+  var notes = [].slice.call(document.querySelectorAll('.ev-h2 .n, .ev-rail .sub, .ev-drawer .note, .ev-cond, .band .ttl, .ev-switch .n'))
+    .map(function (e) { return e.innerText }).join(' | ')
+  var head = document.querySelector('.wire-head'), shell = document.querySelector('.shell'), foot = document.querySelector('.wire-foot')
   return JSON.stringify({
     d: typeof DATA, kinds: DATA && DATA.kinds.length, sevs: DATA && DATA.sevs.length,
-    info: infoShow, pairs: pairs, adj: adj, interMin: Math.min.apply(null, interGaps),
-    intra: intra, anims: anims,
+    info: infoShow, pairs: pairs, adj: adj, anims: anims,
+    frame: fr ? { x: Math.round(fr.left), y: Math.round(fr.top), w: Math.round(fr.width), h: Math.round(fr.height),
+      right: Math.round(fr.right), bottom: Math.round(fr.bottom),
+      bw: getComputedStyle(frame).borderTopWidth } : null,
+    inject: { before: before, after: after, clean: afterClean, n: ` + INJECT_N + `,
+      pageSame: before.page === after.page, listSame: before.listC === after.listC,
+      grew: after.listS > before.listS + ` + INJECT_N + ` },
+    listC: list.clientHeight, listS: list.scrollHeight,
+    pxC: px.clientHeight, pxS: px.scrollHeight,
     src: (document.querySelector('.ev-src') || {}).innerText || '',
-    railRows: document.querySelectorAll('.ev-rail .row').length,
+    notes: notes,
+    headH: head ? Math.round(rect(head).height) : -1,
+    shellH: shell ? Math.round(rect(shell).height) : -1,
+    footH: foot ? Math.round(rect(foot).height) : -1,
     cards: document.querySelectorAll('.ev-card').length,
-    drawerNote: (document.querySelector('.ev-drawer .note') || {}).innerText || '',
-    sentinel: [].slice.call(document.querySelectorAll('.ev-block .slot')).map(function (e) { return e.innerText }).join(' '),
-    railFoot: (document.querySelector('.ev-rail .sub') || {}).innerText || '',
-    /* ⚠️ 取**全部** .ttl，不是第一个：仪表带里第一格是「每秒事件速率」，
-       第一跑只取了它，于是丙版「9 类计数（本页窗口内累计）」那句话根本没被查到。 */
-    bandNote: [].slice.call(document.querySelectorAll('.band .ttl')).map(function (e) { return e.innerText }).join(' | '),
-    streamH2: (document.querySelector('.ev-block .ev-h2') || {}).innerText || '',
     contentW: px ? Math.round(rect(px).width) : -1,
     clientW: document.documentElement.clientWidth,
     innerW: window.innerWidth,
+    innerH: window.innerHeight,
     sideW: Math.round(rect(document.querySelector('.side')).width),
     padL: getComputedStyle(document.querySelector('.main')).paddingLeft,
     pageH: document.documentElement.scrollHeight,
@@ -211,27 +199,55 @@ for (const v of VARIANTS) {
   r.ok(v.file + ' · DATA 已加载', st.d === 'object', st.d)
   r.ok(v.file + ' · 9 类 / 3 严重度', st.kinds === 9 && st.sevs === 3, st.kinds + ' 类 / ' + st.sevs + ' 档')
 
+  /* ══ 〇 窗口化（本轮的核心判据）══════════════════════════════════════════ */
+  const by = {}
+  st.info.forEach((x) => { by[x.blk] = x })
+  const missing = v.regions.filter(([k]) => !by[k]).map(([k]) => k)
+  r.ok(v.file + ' · 六区齐全（' + v.regions.map(([, n]) => n).join('') + '）', missing.length === 0,
+    missing.length ? '缺 ' + missing.join(',') : Object.keys(by).join(','))
+
+  const offScreen = v.regions.filter(([k]) => by[k] && (by[k].y < -0.5 || by[k].bottom > st.innerH + 0.5))
+    .map(([k, n]) => n + ' ' + by[k].y + '→' + by[k].bottom + '（视口 ' + st.innerH + '）')
+  r.ok(v.file + ' · 〇 六区全在首屏内（不用滚动）', offScreen.length === 0, offScreen.length ? offScreen.join(' · ') : '全部 ≤ ' + st.innerH + 'px')
+
+  const noIdx = v.regions.filter(([k, n]) => by[k] && by[k].txt.indexOf(n) < 0).map(([k, n]) => n + '@' + k)
+  r.ok(v.file + ' · 〇 六区各自带区号标签（可用眼睛数）', noIdx.length === 0, noIdx.length ? noIdx.join(' ') : '①…⑥ 都在')
+
+  r.ok(v.file + ' · 〇 一个大外框包住六区（DOM 子树 + 几何包含）',
+    !!st.frame && st.frame.bw === '1px' && v.regions.every(([k]) => by[k] && by[k].inFrame),
+    st.frame ? ('框 ' + st.frame.w + '×' + st.frame.h + ' · 边线 ' + st.frame.bw + ' · 六区 inFrame=' +
+      v.regions.filter(([k]) => by[k] && by[k].inFrame).length + '/6') : 'NO FRAME')
+
+  r.ok(v.file + ' · 〇 整页就是一屏（标题 + 外壳 + 页脚 = 视口高）',
+    Math.abs(st.headH + st.shellH + st.footH - st.innerH) <= 1,
+    st.headH + ' + ' + st.shellH + ' + ' + st.footH + ' vs ' + st.innerH)
+  r.ok(v.file + ' · 〇 文档高 == 视口高（整页不滚）', Math.abs(st.pageH - st.innerH) <= 1,
+    st.pageH + ' vs ' + st.innerH + '（页面级滚动条 ' + (st.innerW - st.clientW) + 'px）')
+  r.ok(v.file + ' · 〇 主区不被撑高（.px scrollHeight == clientHeight）', st.pxS <= st.pxC + 1,
+    st.pxS + ' vs ' + st.pxC)
+
+  r.ok(v.file + ' · 〇 事件流有内部滚动条（内容超出可视区）', st.listS > st.listC + 1,
+    'scrollHeight ' + st.listS + ' > clientHeight ' + st.listC)
+  r.ok(v.file + ' · 〇 塞 ' + st.inject.n + ' 张卡：页高不变、列表可视高不变、内部滚变长',
+    st.inject.pageSame && st.inject.listSame && st.inject.grew,
+    '页高 ' + st.inject.before.page + '→' + st.inject.after.page + '（' + (st.inject.pageSame ? '不变' : '**变了**') + '）· ' +
+    '列表可视 ' + st.inject.before.listC + '→' + st.inject.after.listC + '（' + (st.inject.listSame ? '不变' : '**变了**') + '）· ' +
+    '列表内部 ' + st.inject.before.listS + '→' + st.inject.after.listS + '（' + (st.inject.grew ? '变长' : '**没变长**') + '）· ' +
+    '清理后回到 ' + st.inject.clean.page + '/' + st.inject.clean.listS)
+
+  /* ══ 其余判据 ════════════════════════════════════════════════════════════ */
   /* 硬约束 5：数据源切换两版都在，且计数常驻 */
   r.ok(v.file + ' · 数据源切换在场（正常 / 模拟日常）', st.txtHasDemo && st.src.indexOf('正常') >= 0, st.src.replace(/\n/g, ' '))
   r.ok(v.file + ' · 「已放 N / 500 条」常驻', st.txtHasCap500 && st.src.indexOf('已放') >= 0,
     st.src.indexOf('已放') >= 0 ? st.src.replace(/\n/g, ' ') : '没找到「已放」')
 
-  /* 区块数（渲染时打的 [data-blk]） */
   const got = st.info.map((x) => x.blk).sort().join(',')
-  r.ok(v.file + ' · 区块数 = ' + v.blks.length, got === v.blks.slice().sort().join(','), got)
+  r.ok(v.file + ' · 区块数 = 7（六区 + 条件块）',
+    v.regions.length === 6 && got === ALL_BLKS.filter((k) => got.indexOf(k) >= 0).sort().join(','), got)
 
-  /* ④ 8 处动效落点 */
-  const want = '1,2,3,4,5,6,7,8'
-  r.ok(v.file + ' · 动效落点恰好 8 处、编号 1–8 各一次', st.anims.join(',') === want, st.anims.join(','))
+  r.ok(v.file + ' · 8 处动效落点恰好 8 个、编号 1–8 各一次', st.anims.join(',') === '1,2,3,4,5,6,7,8', st.anims.join(','))
 
-  /* ② C3 */
-  const rd1 = (x) => Math.round(x * 10) / 10
-  const intraMax = Math.max(st.intra.v, st.intra.h)
-  r.ok(v.file + ' · C3 区间距 > 区内距（两轴）', st.interMin > intraMax,
-    '区间距最小 ' + st.interMin + 'px vs 区内距最大 ' + rd1(intraMax) +
-    'px（竖 ' + rd1(st.intra.v) + ' @ ' + st.intra.vAt + ' / 横 ' + rd1(st.intra.h) + ' @ ' + st.intra.hAt + '）')
-
-  /* ① C1 相邻区块不同构 */
+  /* ① C1 相邻不同构 */
   const same = st.adj.filter((p) => {
     const A = st.info.find((x) => x.blk === p.a), B = st.info.find((x) => x.blk === p.b)
     return A.sig === B.sig
@@ -239,27 +255,26 @@ for (const v of VARIANTS) {
   r.ok(v.file + ' · C1 相邻区块不同构（' + st.adj.length + ' 对相邻）', same.length === 0,
     same.length ? JSON.stringify(same.map((p) => p.pair)) : st.adj.map((p) => p.pair).join(' '))
 
-  /* ③ 宽度 */
+  /* ③ 宽度：与模型对账，不写常数 */
   const expectW = st.clientW - st.sideW - parseFloat(st.padL) * 2
   r.ok(v.file + ' · 主区宽 == clientW − 232 − 2×pad（模型，不写常数）',
     Math.abs(st.contentW - expectW) <= 1, st.contentW + ' vs ' + expectW)
 
-  /* ⑤ 三样易漏项 + 图例口径 */
+  /* ④ 三样易漏项 */
   r.ok(v.file + ' · 易漏项 1：⑤ 写明「起止只来自 traces ⇒ 模拟日常下恒空」',
-    st.drawerNote.indexOf('traces') >= 0 && st.drawerNote.indexOf('模拟日常') >= 0,
-    st.drawerNote.slice(0, 40) || '（空）')
+    st.notes.indexOf('traces') >= 0 && st.notes.indexOf('模拟日常') >= 0,
+    (st.notes.match(/[^|]*traces[^|]*/) || ['（空）'])[0].trim().slice(0, 60))
   r.ok(v.file + ' · 易漏项 2：③ 写明「被淘汰的 seq 要从 seenSeq 摘掉」',
-    st.sentinel.indexOf('seenSeq') >= 0, st.sentinel.slice(0, 40) || '（空）')
+    st.notes.indexOf('seenSeq') >= 0, (st.notes.match(/[^|]*seenSeq[^|]*/) || ['（空）'])[0].trim().slice(0, 60))
   r.ok(v.file + ' · 易漏项 3：图例写明「本页窗口内累计／不用帧里 counts」',
-    (st.railFoot + st.streamH2 + st.bandNote).indexOf('窗口内累计') >= 0,
-    st.railFoot || st.bandNote)
+    st.notes.indexOf('窗口内累计') >= 0, (st.notes.match(/[^|]*窗口内累计[^|]*/) || ['（空）'])[0].trim().slice(0, 60))
 
-  console.log('    ' + v.file + '  页高 ' + st.pageH + 'px · 主区 ' + st.contentW +
-    'px（视口 ' + st.innerW + ' / 客户区 ' + st.clientW + ' / 滚动条 ' + (st.innerW - st.clientW) + '）')
-  console.log('      块宽：' + st.info.map((x) => x.blk + ' ' + x.w).join(' · '))
-  console.log('      区间距：' + st.pairs.map((p) => p.axis + p.gap).join(' '))
-  const topIn = st.intra.list.slice().sort((a, b) => b.gap - a.gap).slice(0, 5)
-  console.log('      区内距前 5：' + topIn.map((x) => x.axis + rd1(x.gap) + '@' + x.at).join(' '))
+  console.log('    ' + v.file + '  文档高 ' + st.pageH + 'px · 视口 ' + st.innerH + ' · 客户区宽 ' +
+    st.clientW + '（页面级滚动条 ' + (st.innerW - st.clientW) + 'px）· 主区 ' + st.contentW + 'px')
+  console.log('      块高：' + st.info.map((x) => x.blk + ' ' + x.h + '（y' + x.y + '→' + x.bottom + '）').join(' · '))
+  console.log('      事件流：可视 ' + st.listC + ' · 内部 ' + st.listS + ' · 卡片 ' + st.cards + ' 张 · 注入 ' +
+    st.inject.n + ' 张后 ' + st.inject.before.listS + '→' + st.inject.after.listS)
+  console.log('      相邻对：' + st.adj.map((p) => p.pair).join(' '))
 
   const out = path.join(DIR, v.png)
   await b.shotFull(out)

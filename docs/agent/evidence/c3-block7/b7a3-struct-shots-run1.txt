@@ -1,0 +1,57 @@
+=== 3a.3 日志页结构草图：窗口化 + 整页截图 + 结构断言 ===
+跑法：node scripts/probes/probe-b7a3-struct-shots.mjs
+底座：docs/美化/_cdp.mjs（headless Edge + CDP，--headless=new，1440×900，file:// 直开，不起 server / 不起后端）
+版本：3a3-甲-三栏驾驶舱.html / 3a3-丙-上下分区.html
+
+    3a3-甲-三栏驾驶舱.html  文档高 900px · 视口 900 · 客户区宽 1440（页面级滚动条 0px）· 主区 1144px
+      块高：status 57（y125→182） · flash 26（y182→208） · rail 480（y209→689） · stream 480（y209→689） · live 480（y209→689） · drawer 89（y689→778） · switch 62（y778→840）
+      事件流：可视 338 · 内部 1299 · 卡片 50 张 · 注入 200 张后 1299→6499
+      相邻对：status|flash flash|rail flash|stream flash|live rail|stream rail|drawer stream|live stream|drawer live|drawer drawer|switch
+    3a3-丙-上下分区.html  文档高 900px · 视口 900 · 客户区宽 1440（页面级滚动条 0px）· 主区 1144px
+      块高：status 57（y125→182） · flash 26（y182→208） · rail 480（y209→689） · band 199（y209→407） · stream 282（y407→689） · drawer 89（y689→778） · switch 62（y778→840）
+      事件流：可视 213 · 内部 1299 · 卡片 50 张 · 注入 200 张后 1299→6499
+      相邻对：status|flash flash|rail flash|band rail|band rail|stream rail|drawer band|stream stream|drawer drawer|switch
+OK   3a3-甲-三栏驾驶舱.html · DATA 已加载  → "object"
+OK   3a3-甲-三栏驾驶舱.html · 9 类 / 3 严重度  → "9 类 / 3 档"
+OK   3a3-甲-三栏驾驶舱.html · 六区齐全（①②③④⑤⑥）  → "status,flash,rail,stream,live,drawer,switch"
+OK   3a3-甲-三栏驾驶舱.html · 〇 六区全在首屏内（不用滚动）  → "全部 ≤ 900px"
+OK   3a3-甲-三栏驾驶舱.html · 〇 六区各自带区号标签（可用眼睛数）  → "①…⑥ 都在"
+OK   3a3-甲-三栏驾驶舱.html · 〇 一个大外框包住六区（DOM 子树 + 几何包含）  → "框 1144×717 · 边线 1px · 六区 inFrame=6/6"
+OK   3a3-甲-三栏驾驶舱.html · 〇 整页就是一屏（标题 + 外壳 + 页脚 = 视口高）  → "40 + 833 + 28 vs 900"
+OK   3a3-甲-三栏驾驶舱.html · 〇 文档高 == 视口高（整页不滚）  → "900 vs 900（页面级滚动条 0px）"
+OK   3a3-甲-三栏驾驶舱.html · 〇 主区不被撑高（.px scrollHeight == clientHeight）  → "717 vs 717"
+OK   3a3-甲-三栏驾驶舱.html · 〇 事件流有内部滚动条（内容超出可视区）  → "scrollHeight 1299 > clientHeight 338"
+OK   3a3-甲-三栏驾驶舱.html · 〇 塞 200 张卡：页高不变、列表可视高不变、内部滚变长  → "页高 900→900（不变）· 列表可视 338→338（不变）· 列表内部 1299→6499（变长）· 清理后回到 900/1299"
+OK   3a3-甲-三栏驾驶舱.html · 数据源切换在场（正常 / 模拟日常）  → "正常 模拟日常 已放 0 / 500 条（模拟日常未开）"
+OK   3a3-甲-三栏驾驶舱.html · 「已放 N / 500 条」常驻  → "正常 模拟日常 已放 0 / 500 条（模拟日常未开）"
+OK   3a3-甲-三栏驾驶舱.html · 区块数 = 7（六区 + 条件块）  → "drawer,flash,live,rail,status,stream,switch"
+OK   3a3-甲-三栏驾驶舱.html · 8 处动效落点恰好 8 个、编号 1–8 各一次  → "1,2,3,4,5,6,7,8"
+OK   3a3-甲-三栏驾驶舱.html · C1 相邻区块不同构（10 对相邻）  → "status|flash flash|rail flash|stream flash|live rail|stream rail|drawer stream|live stream|drawer live|drawer drawer|switch"
+OK   3a3-甲-三栏驾驶舱.html · 主区宽 == clientW − 232 − 2×pad（模型，不写常数）  → "1144 vs 1144"
+OK   3a3-甲-三栏驾驶舱.html · 易漏项 1：⑤ 写明「起止只来自 traces ⇒ 模拟日常下恒空」  → "⚠️ 起止两行只来自帧里的 traces、不来自事件 ⇒ 「模拟日常」下 traces 恒为空，那两行会显示「这一次请求"
+OK   3a3-甲-三栏驾驶舱.html · 易漏项 2：③ 写明「被淘汰的 seq 要从 seenSeq 摘掉」  → "窗口内 1,000 条（= EVENT_CAP 现值）· 草图只画真抓的最近 50 条 · 本版改法：去分页、改卡片流、"
+OK   3a3-甲-三栏驾驶舱.html · 易漏项 3：图例写明「本页窗口内累计／不用帧里 counts」  → "严重度 · 类计数 = 本页窗口内累计（帧里的 counts 是「本拍」的，不用它）"
+OK   3a3-甲-三栏驾驶舱.png 落盘  → "175136B"
+OK   3a3-丙-上下分区.html · DATA 已加载  → "object"
+OK   3a3-丙-上下分区.html · 9 类 / 3 严重度  → "9 类 / 3 档"
+OK   3a3-丙-上下分区.html · 六区齐全（①②③④⑤⑥）  → "status,flash,rail,band,stream,drawer,switch"
+OK   3a3-丙-上下分区.html · 〇 六区全在首屏内（不用滚动）  → "全部 ≤ 900px"
+OK   3a3-丙-上下分区.html · 〇 六区各自带区号标签（可用眼睛数）  → "①…⑥ 都在"
+OK   3a3-丙-上下分区.html · 〇 一个大外框包住六区（DOM 子树 + 几何包含）  → "框 1144×717 · 边线 1px · 六区 inFrame=6/6"
+OK   3a3-丙-上下分区.html · 〇 整页就是一屏（标题 + 外壳 + 页脚 = 视口高）  → "40 + 833 + 28 vs 900"
+OK   3a3-丙-上下分区.html · 〇 文档高 == 视口高（整页不滚）  → "900 vs 900（页面级滚动条 0px）"
+OK   3a3-丙-上下分区.html · 〇 主区不被撑高（.px scrollHeight == clientHeight）  → "717 vs 717"
+OK   3a3-丙-上下分区.html · 〇 事件流有内部滚动条（内容超出可视区）  → "scrollHeight 1299 > clientHeight 213"
+OK   3a3-丙-上下分区.html · 〇 塞 200 张卡：页高不变、列表可视高不变、内部滚变长  → "页高 900→900（不变）· 列表可视 213→213（不变）· 列表内部 1299→6499（变长）· 清理后回到 900/1299"
+OK   3a3-丙-上下分区.html · 数据源切换在场（正常 / 模拟日常）  → "正常 模拟日常 已放 0 / 500 条（模拟日常未开）"
+OK   3a3-丙-上下分区.html · 「已放 N / 500 条」常驻  → "正常 模拟日常 已放 0 / 500 条（模拟日常未开）"
+OK   3a3-丙-上下分区.html · 区块数 = 7（六区 + 条件块）  → "band,drawer,flash,rail,status,stream,switch"
+OK   3a3-丙-上下分区.html · 8 处动效落点恰好 8 个、编号 1–8 各一次  → "1,2,3,4,5,6,7,8"
+OK   3a3-丙-上下分区.html · C1 相邻区块不同构（9 对相邻）  → "status|flash flash|rail flash|band rail|band rail|stream rail|drawer band|stream stream|drawer drawer|switch"
+OK   3a3-丙-上下分区.html · 主区宽 == clientW − 232 − 2×pad（模型，不写常数）  → "1144 vs 1144"
+OK   3a3-丙-上下分区.html · 易漏项 1：⑤ 写明「起止只来自 traces ⇒ 模拟日常下恒空」  → "⚠️ 起止两行只来自帧里的 traces、不来自事件 ⇒ 「模拟日常」下 traces 恒为空，那两行会显示「这一次请求"
+OK   3a3-丙-上下分区.html · 易漏项 2：③ 写明「被淘汰的 seq 要从 seenSeq 摘掉」  → "窗口内 1,000 条（= EVENT_CAP 现值）· 草图只画真抓的最近 50 条 · 本版改法：去分页、改卡片流、"
+OK   3a3-丙-上下分区.html · 易漏项 3：图例写明「本页窗口内累计／不用帧里 counts」  → "严重度 · 类计数 = 本页窗口内累计（帧里的 counts 是「本拍」的，不用它） · 数字在右侧仪表带"
+OK   3a3-丙-上下分区.png 落盘  → "161876B"
+
+3a3 日志页结构草图（甲 / 丙 · 窗口化后）: 42 项 / 0 失败

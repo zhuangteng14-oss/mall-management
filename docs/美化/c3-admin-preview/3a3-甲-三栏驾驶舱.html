@@ -9,17 +9,9 @@
 <body>
 
 <div class="wire-head">
-  <h1>3a.3 日志页 · <b>甲 —— 三栏驾驶舱</b>（左「选」／中「看」／右「量」）</h1>
-  <p><b>这是结构草图，不是设计稿。</b>全篇灰阶线框：无品牌色（墨／釉／朱砂／运营橙一个没用）、无圆角档、无阴影、<b>无过渡与动效</b>。视觉与动效留到第 6 步。</p>
-  <p>数据是真的：<code>_work/3a3/frames-events.ndjson</code>（2026-10-16 对 dev 后端真跑一场负载，从 <code>POST /admin/observe/events/stream</code> 上逐字抓的 <b>60 拍 · 3152 条事件 · 2507 条链路</b>）。页面里每个数字由 <code>scripts/probes/probe-b7a3-wire-data.mjs</code> 从帧里按<b>页面自己的收帧口径</b>重放生成。</p>
-  <p><b>「模拟日常」在哪：</b>页头<b>右上角</b>「数据源：正常 / 模拟日常」那一排 —— 两版都在，且「已放 N / 500 条」<b>常驻</b>（不是开着才显示）。这是重做时最容易漏的次要件，故在此明写。</p>
-  <p class="ruling">
-    <span>裁决A · 图与文本并存（折线 + 9 类计数 + 严重度横条）</span>
-    <span>裁决B · 图标换 lucide · 按 9 类</span>
-    <span>裁决C · 8 处动效落点</span>
-    <span>确认② · 数据源留页头右上 + 计数常驻</span>
-    <span>本版 · 折线 = 中区顶部横幅</span>
-  </p>
+  <h1>3a.3 日志页 · <b>甲 —— 三栏驾驶舱</b></h1>
+  <span class="hint">结构草图：灰线框（无品牌色／圆角／阴影／动效）· 真数据（60 拍 · 3152 条）·
+    一屏装下六区、事件流<b>内部</b>滚 · 「模拟日常」在窗口右上角，且「已放 N / 500 条」常驻</span>
 </div>
 
 <div class="shell">
@@ -39,12 +31,14 @@
 
   <div class="col">
     <div class="top"><span>管理端 / <b>实时日志</b></span><span class="who">ops_duan · 退出</span></div>
-    <div class="main"><div class="px">
-      <div id="app"></div>
-      <div id="judge" class="judge"></div>
-    </div></div>
+    <div class="main"><div class="px"><div id="app"></div></div></div>
   </div>
 </div>
+
+<details class="wire-foot">
+  <summary>结构判据与实测（点开看 · 折起来只有一行，所以整页仍是一屏；判据本体也在交付报告里）</summary>
+  <div class="body judge" id="judge"></div>
+</details>
 
 <script src="./_struct-wire-ev.js"></script>
 <script>render('jia')</script>

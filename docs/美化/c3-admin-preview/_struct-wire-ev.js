@@ -91,8 +91,8 @@ var DATA = {
     status: 200, ms: 9,
     start: "17:53:31.616", end: "17:53:31.625",
     chain: [{"ts":"17:53:31.616","kindLabel":"缓存","title":"L1 未命中","obj":"键 B7CAPS-sgu0g-215"},{"ts":"17:53:31.616","kindLabel":"身份","title":"身份放行","obj":"请求路径 /goods/goodsSelect"},{"ts":"17:53:31.619","kindLabel":"缓存","title":"L2 未命中","obj":"键 B7CAPS-sgu0g-215"},{"ts":"17:53:31.619","kindLabel":"缓存","title":"回源查库","obj":"键 B7CAPS-sgu0g-215"}] },
-  judge: { jia: "<b>结构判据（本页不是设计稿，是拿来比构图的）</b><ul><li><b>C1 相邻区块不同构</b>：① 一排读数 ／ ② 竖排清单 ／ ③ 滚动卡片 ／ ④ 横条＋读数 ／ ⑤ 有序链 ／ ⑥ 开关排 —— 六块六种形态，没有两块共用布局。</li><li><b>C3 区块间距 &gt; 区块内间距</b>：区块之间 <code>--gap-block</code> = <b>48px</b>（= <code>--s7</code>）， 区块内部 <code>--gap-in</code> = <b>12px</b>（= <code>--s3</code>）。 <b>两轴都要成立</b>（C3 原话不区分横竖）：状态条本笔原样保留 ⇒ 它内部那排读数之间的 <code>--s5</code> 24px 是页面里绕不开的区内间距，取 20 会倒挂、取 24 会持平（3a.2b 指标页就栽在 19 &lt; 26）。 曾取 32px，但探针按「盒间空白 + 两侧内边距」量出来是 <b>40px</b>：状态条最右那块 <code>.tz</code> 带 <code>border-left</code> 与 <code>padding-left:16</code>，与它左边那个读数之间的视觉白带是 24 + 16 = 40。 那不是判据错，是<b>真数</b> ⇒ 不去掉那 16px 内边距来凑，直接把区块间距再抬一档到 48px， 这样<b>两种口径</b>（只算 gap 的 24 / 算白带的 40）下都严格成立。 这是<b>设计值</b>；实数由探针两轴各量一遍，不在文字里下结论。</li><li><b>各区宽度</b>：<b>实数由探针在 1440 视口量</b>（主区可用宽 = 视口 − 壳侧栏 232 − 主区左右各 32 − 滚动条； 滚动条宽实测，不写常数）。</li><li><b>8 处动效落点</b>：页面上带 <code>[data-anim]</code> 角标的元素即为落点，逐个数得出 8 个。</li><li><b>三样易漏项</b>：⑤ 的「起止两行只来自 traces ⇒ 模拟日常下恒空」写在 ⑤ 的注里； ③ 的「只留 200 条、被淘汰的 seq 要从 seenSeq 摘掉」写在底部哨兵那条里； 「图例 9 类、数字是<b>本页窗口内累计</b>不是帧里 counts」写在 ② 的脚注与 ④ 的标题里。</li></ul><b>本窗实测（真帧 60 拍 · 抓帧期间共 3152 条事件 · 0 条被覆盖丢失）</b><ul><li>抓帧期间（整窗）：缓存 2138 · 锁 370 · 订单 185 · 库存 0 · 审计 0 · 通知 0 · 敏感词 0 · 身份 401 · 防护 58</li><li>页面窗口内（最近 1000 条 · <b>图例读的就是这一行</b>）：缓存 655 · 锁 143 · 订单 72 · 库存 0 · 审计 0 · 通知 0 · 敏感词 0 · 身份 130 · 防护 0</li><li><b>两者对不上的地方就是这页的结构性后果</b>：防护整窗 <b>58 条</b>、页面窗口 <b>0 条</b>；警告整窗 <b>112 条</b>、页面窗口 <b>0 条</b> ——缓存一类占了大头，稀有的类会被 <b>1000 条</b>的封顶<b>挤出窗口</b>，页面上从此看不见。（如实显示，<b>不补数</b>；这是本步发现的真问题，处置留给你裁。）</li><li>9 类里页面窗口<b>有量 </b>4 类、<b>0 条 </b>5 类：库存 · 审计 · 通知 · 敏感词 · 防护 —— 是负载没走到那几条路径、还是那几环没接通，本步<b>不下结论</b>。</li><li>严重度（页面窗口）：信息 1000 · 警告 0 · 错误 0 ⇒ <b>error 0 条</b>，「error 卡片闪红」这一处本窗没有可演示的卡片（落点在，见 ③）。</li></ul><b>这一版（甲 · 三栏驾驶舱）的结构主张</b><ul><li>左「选」／中「看」／右「量」，一栏一句话说得清。</li><li>折线是<b>中区顶部的一条横幅</b>（③ 的一部分），不另立一栏。</li><li>9 类计数在 <b>② 过滤栏行尾</b>（图例兼筛选，数字就在开关旁边）。</li><li>代价：中区被左右两栏夹住 ⇒ 卡片用<b>窄列版</b>（隐去严重度列与 traceId 列）。</li></ul>",
-    bing: "<b>结构判据（本页不是设计稿，是拿来比构图的）</b><ul><li><b>C1 相邻区块不同构</b>：① 一排读数 ／ ② 竖排清单 ／ ③ 滚动卡片 ／ ④ 横条＋读数 ／ ⑤ 有序链 ／ ⑥ 开关排 —— 六块六种形态，没有两块共用布局。</li><li><b>C3 区块间距 &gt; 区块内间距</b>：区块之间 <code>--gap-block</code> = <b>48px</b>（= <code>--s7</code>）， 区块内部 <code>--gap-in</code> = <b>12px</b>（= <code>--s3</code>）。 <b>两轴都要成立</b>（C3 原话不区分横竖）：状态条本笔原样保留 ⇒ 它内部那排读数之间的 <code>--s5</code> 24px 是页面里绕不开的区内间距，取 20 会倒挂、取 24 会持平（3a.2b 指标页就栽在 19 &lt; 26）。 曾取 32px，但探针按「盒间空白 + 两侧内边距」量出来是 <b>40px</b>：状态条最右那块 <code>.tz</code> 带 <code>border-left</code> 与 <code>padding-left:16</code>，与它左边那个读数之间的视觉白带是 24 + 16 = 40。 那不是判据错，是<b>真数</b> ⇒ 不去掉那 16px 内边距来凑，直接把区块间距再抬一档到 48px， 这样<b>两种口径</b>（只算 gap 的 24 / 算白带的 40）下都严格成立。 这是<b>设计值</b>；实数由探针两轴各量一遍，不在文字里下结论。</li><li><b>各区宽度</b>：<b>实数由探针在 1440 视口量</b>（主区可用宽 = 视口 − 壳侧栏 232 − 主区左右各 32 − 滚动条； 滚动条宽实测，不写常数）。</li><li><b>8 处动效落点</b>：页面上带 <code>[data-anim]</code> 角标的元素即为落点，逐个数得出 8 个。</li><li><b>三样易漏项</b>：⑤ 的「起止两行只来自 traces ⇒ 模拟日常下恒空」写在 ⑤ 的注里； ③ 的「只留 200 条、被淘汰的 seq 要从 seenSeq 摘掉」写在底部哨兵那条里； 「图例 9 类、数字是<b>本页窗口内累计</b>不是帧里 counts」写在 ② 的脚注与 ④ 的标题里。</li></ul><b>本窗实测（真帧 60 拍 · 抓帧期间共 3152 条事件 · 0 条被覆盖丢失）</b><ul><li>抓帧期间（整窗）：缓存 2138 · 锁 370 · 订单 185 · 库存 0 · 审计 0 · 通知 0 · 敏感词 0 · 身份 401 · 防护 58</li><li>页面窗口内（最近 1000 条 · <b>图例读的就是这一行</b>）：缓存 655 · 锁 143 · 订单 72 · 库存 0 · 审计 0 · 通知 0 · 敏感词 0 · 身份 130 · 防护 0</li><li><b>两者对不上的地方就是这页的结构性后果</b>：防护整窗 <b>58 条</b>、页面窗口 <b>0 条</b>；警告整窗 <b>112 条</b>、页面窗口 <b>0 条</b> ——缓存一类占了大头，稀有的类会被 <b>1000 条</b>的封顶<b>挤出窗口</b>，页面上从此看不见。（如实显示，<b>不补数</b>；这是本步发现的真问题，处置留给你裁。）</li><li>9 类里页面窗口<b>有量 </b>4 类、<b>0 条 </b>5 类：库存 · 审计 · 通知 · 敏感词 · 防护 —— 是负载没走到那几条路径、还是那几环没接通，本步<b>不下结论</b>。</li><li>严重度（页面窗口）：信息 1000 · 警告 0 · 错误 0 ⇒ <b>error 0 条</b>，「error 卡片闪红」这一处本窗没有可演示的卡片（落点在，见 ③）。</li></ul><b>这一版（丙 · 上下分区）的结构主张</b><ul><li>上半「仪表带」看数、下半「事件流」看流，各自拿满宽。</li><li>仪表带里三格<b>不同宽、不同形态</b>：折线（最宽）／ 9 类计数条 ／ 严重度分布＋读数。</li><li>9 类计数<b>只出现在仪表带</b>；② 过滤栏因此只留类名与开关状态（避免同一份数字在屏幕上出现两次）。</li><li>收益：中区<b>最宽</b>，卡片用满列（时间戳到毫秒、traceId 可见），tail -f 最舒服。</li></ul>" }
+  judge: { jia: "<b>结构判据（本页不是设计稿，是拿来比构图的）</b><ul><li><b>〇 窗口化</b>（这一轮的最高优先判据，来自你 2026-10-16 的两次裁定）：整页 = <b>一屏</b> ——  ① … ⑥ 六区全落在首个视口内、不用滚动；内容区是一个<b>大外框</b>（区与区之间只用一条 1px 分隔线， 不留空白带）；<b>事件流在框内自己滚</b>，页面高度 = 视口高度、<b>不随数据增长</b>。 最后一条不是靠说的：探针往事件流里<b>临时塞 200 张卡</b>再比三个数 —— 文档高不变、事件流可视高不变、 事件流的 scrollHeight 变大；只量「有没有滚动条」是不够的（页面自己滚起来也有滚动条）。</li><li><b>C1 相邻区块不同构</b>：① 一排读数 ／ ② 竖排清单 ／ ③ 滚动卡片 ／ ④ 横条＋读数 ／ ⑤ 有序链 ／ ⑥ 开关排 —— 六块六种形态，没有两块共用布局。⚠️ 窗口化之后区块<b>直接相接</b>（间距 0，只隔一条分隔线）， 于是「相接就算相邻」——这一轮实测 甲 <b>10 对</b>／丙 <b>9 对</b>相邻。 ⚠️ 上一轮是几对<b>没有取证</b>（旧版草图的 DOM 与这版不同，旧判据量不到同一件事）， 所以这里<b>不写「从 N 对升到」</b>，只讲为什么更严：相接的每一对都要查，容不下「隔远一点就不算邻居」。 指纹里还必须含<b>直接子元素标签计数</b>， 只用「标签集」时两块不同构的区块会双双算出同一枚指纹而被误判同构。</li><li><b>C3 区块间距 &gt; 区块内间距 —— 本轮撤掉</b>。它有它成立的前提：上一轮区块之间是 <code>--gap-block</code> 的<b>空白带</b>，所以「区块之间留白 &gt; 区块之内留白」是一句关于<b>分组</b>的话。 窗口化之后分组由<b>外框</b>表达、区与区之间是一条 <code>1px</code> 分隔线而不是空白， 「间距」这个量在窗口形态里没有对应物 —— 判据不是变松了，是<b>前提没了</b>。 撤掉而不是把 48px 改小凑一个数，是因为留着它只会得到一条永真或永假的断言。 （上一轮为它抬过一次 <code>--gap-block</code> 32→48：探针按「盒间空白 + 两侧内边距」量出来是 40px， 而按只算 gap 的口径是 24px。那个 40 是<b>真数</b>，不是量错 —— 记在这里，免得下次有人以为它被量错了。）</li><li><b>各区宽度</b>：<b>实数由探针在 1440 视口量</b>（主区可用宽 = 客户区宽 − 壳侧栏 232 − 主区左右各 32； 滚动条宽实测，不写常数）。⚠️ 这一轮整页不再滚 ⇒ <b>页面级滚动条可能根本不存在</b>（实测 0px）， 滚动条改由<b>事件流自己</b>吃掉 —— 宽度账因此与上一轮不同，这正是不许写常数的原因。</li><li><b>8 处动效落点</b>：页面上带 <code>[data-anim]</code> 角标的元素即为落点，逐个数得出 8 个。 其中 1（新卡滑入）/ 2（老卡出屏）/ 5（error 闪红）落在<b>同一个列表容器</b>上， 4（计数滚动）/ 7（图例闪）落在<b>同一个数字</b>上 —— 合成逗号列表是刻意的，拆成两个元素反而是假结构。</li><li><b>三样易漏项</b>：⑤ 的「起止两行只来自 traces ⇒ 模拟日常下恒空」写在 ⑤ 的注里； ③ 的「淘汰卡片时要<b>把它的 seq 也从 seenSeq 摘掉</b>」（现页面 <code>EventLog.vue</code> 里真有这行） 写在 ③ 的表头；「图例 9 类、数字是<b>本页窗口内累计</b>不是帧里 counts」写在 ② 的脚注与 ④ 的标题里。</li></ul><b>本窗实测（真帧 60 拍 · 抓帧期间共 3152 条事件 · 0 条被覆盖丢失）</b><ul><li>抓帧期间（整窗）：缓存 2138 · 锁 370 · 订单 185 · 库存 0 · 审计 0 · 通知 0 · 敏感词 0 · 身份 401 · 防护 58</li><li>页面窗口内（最近 1000 条 · <b>图例读的就是这一行</b>）：缓存 655 · 锁 143 · 订单 72 · 库存 0 · 审计 0 · 通知 0 · 敏感词 0 · 身份 130 · 防护 0</li><li><b>两者对不上的地方就是这页的结构性后果</b>：防护整窗 <b>58 条</b>、页面窗口 <b>0 条</b>；警告整窗 <b>112 条</b>、页面窗口 <b>0 条</b> ——缓存一类占了大头，稀有的类会被 <b>1000 条</b>的封顶<b>挤出窗口</b>，页面上从此看不见。（如实显示，<b>不补数</b>；这是本步发现的真问题，处置留给你裁。）</li><li>9 类里页面窗口<b>有量 </b>4 类、<b>0 条 </b>5 类：库存 · 审计 · 通知 · 敏感词 · 防护 —— 是负载没走到那几条路径、还是那几环没接通，本步<b>不下结论</b>。</li><li>严重度（页面窗口）：信息 1000 · 警告 0 · 错误 0 ⇒ <b>error 0 条</b>，「error 卡片闪红」这一处本窗没有可演示的卡片（落点在，见 ③）。</li></ul><b>这一版（甲 · 三栏驾驶舱）的结构主张</b><ul><li>左「选」／中「看」／右「量」，一栏一句话说得清。</li><li>折线是<b>中区顶部的一条横幅</b>（③ 的一部分），不另立一栏。</li><li>9 类计数在 <b>② 过滤栏行尾</b>（图例兼筛选，数字就在开关旁边）。</li><li>代价：中区被左右两栏夹住 ⇒ 卡片用<b>窄列版</b>（隐去严重度列与 traceId 列）。</li></ul>",
+    bing: "<b>结构判据（本页不是设计稿，是拿来比构图的）</b><ul><li><b>〇 窗口化</b>（这一轮的最高优先判据，来自你 2026-10-16 的两次裁定）：整页 = <b>一屏</b> ——  ① … ⑥ 六区全落在首个视口内、不用滚动；内容区是一个<b>大外框</b>（区与区之间只用一条 1px 分隔线， 不留空白带）；<b>事件流在框内自己滚</b>，页面高度 = 视口高度、<b>不随数据增长</b>。 最后一条不是靠说的：探针往事件流里<b>临时塞 200 张卡</b>再比三个数 —— 文档高不变、事件流可视高不变、 事件流的 scrollHeight 变大；只量「有没有滚动条」是不够的（页面自己滚起来也有滚动条）。</li><li><b>C1 相邻区块不同构</b>：① 一排读数 ／ ② 竖排清单 ／ ③ 滚动卡片 ／ ④ 横条＋读数 ／ ⑤ 有序链 ／ ⑥ 开关排 —— 六块六种形态，没有两块共用布局。⚠️ 窗口化之后区块<b>直接相接</b>（间距 0，只隔一条分隔线）， 于是「相接就算相邻」——这一轮实测 甲 <b>10 对</b>／丙 <b>9 对</b>相邻。 ⚠️ 上一轮是几对<b>没有取证</b>（旧版草图的 DOM 与这版不同，旧判据量不到同一件事）， 所以这里<b>不写「从 N 对升到」</b>，只讲为什么更严：相接的每一对都要查，容不下「隔远一点就不算邻居」。 指纹里还必须含<b>直接子元素标签计数</b>， 只用「标签集」时两块不同构的区块会双双算出同一枚指纹而被误判同构。</li><li><b>C3 区块间距 &gt; 区块内间距 —— 本轮撤掉</b>。它有它成立的前提：上一轮区块之间是 <code>--gap-block</code> 的<b>空白带</b>，所以「区块之间留白 &gt; 区块之内留白」是一句关于<b>分组</b>的话。 窗口化之后分组由<b>外框</b>表达、区与区之间是一条 <code>1px</code> 分隔线而不是空白， 「间距」这个量在窗口形态里没有对应物 —— 判据不是变松了，是<b>前提没了</b>。 撤掉而不是把 48px 改小凑一个数，是因为留着它只会得到一条永真或永假的断言。 （上一轮为它抬过一次 <code>--gap-block</code> 32→48：探针按「盒间空白 + 两侧内边距」量出来是 40px， 而按只算 gap 的口径是 24px。那个 40 是<b>真数</b>，不是量错 —— 记在这里，免得下次有人以为它被量错了。）</li><li><b>各区宽度</b>：<b>实数由探针在 1440 视口量</b>（主区可用宽 = 客户区宽 − 壳侧栏 232 − 主区左右各 32； 滚动条宽实测，不写常数）。⚠️ 这一轮整页不再滚 ⇒ <b>页面级滚动条可能根本不存在</b>（实测 0px）， 滚动条改由<b>事件流自己</b>吃掉 —— 宽度账因此与上一轮不同，这正是不许写常数的原因。</li><li><b>8 处动效落点</b>：页面上带 <code>[data-anim]</code> 角标的元素即为落点，逐个数得出 8 个。 其中 1（新卡滑入）/ 2（老卡出屏）/ 5（error 闪红）落在<b>同一个列表容器</b>上， 4（计数滚动）/ 7（图例闪）落在<b>同一个数字</b>上 —— 合成逗号列表是刻意的，拆成两个元素反而是假结构。</li><li><b>三样易漏项</b>：⑤ 的「起止两行只来自 traces ⇒ 模拟日常下恒空」写在 ⑤ 的注里； ③ 的「淘汰卡片时要<b>把它的 seq 也从 seenSeq 摘掉</b>」（现页面 <code>EventLog.vue</code> 里真有这行） 写在 ③ 的表头；「图例 9 类、数字是<b>本页窗口内累计</b>不是帧里 counts」写在 ② 的脚注与 ④ 的标题里。</li></ul><b>本窗实测（真帧 60 拍 · 抓帧期间共 3152 条事件 · 0 条被覆盖丢失）</b><ul><li>抓帧期间（整窗）：缓存 2138 · 锁 370 · 订单 185 · 库存 0 · 审计 0 · 通知 0 · 敏感词 0 · 身份 401 · 防护 58</li><li>页面窗口内（最近 1000 条 · <b>图例读的就是这一行</b>）：缓存 655 · 锁 143 · 订单 72 · 库存 0 · 审计 0 · 通知 0 · 敏感词 0 · 身份 130 · 防护 0</li><li><b>两者对不上的地方就是这页的结构性后果</b>：防护整窗 <b>58 条</b>、页面窗口 <b>0 条</b>；警告整窗 <b>112 条</b>、页面窗口 <b>0 条</b> ——缓存一类占了大头，稀有的类会被 <b>1000 条</b>的封顶<b>挤出窗口</b>，页面上从此看不见。（如实显示，<b>不补数</b>；这是本步发现的真问题，处置留给你裁。）</li><li>9 类里页面窗口<b>有量 </b>4 类、<b>0 条 </b>5 类：库存 · 审计 · 通知 · 敏感词 · 防护 —— 是负载没走到那几条路径、还是那几环没接通，本步<b>不下结论</b>。</li><li>严重度（页面窗口）：信息 1000 · 警告 0 · 错误 0 ⇒ <b>error 0 条</b>，「error 卡片闪红」这一处本窗没有可演示的卡片（落点在，见 ③）。</li></ul><b>这一版（丙 · 上下分区）的结构主张</b><ul><li>上半「仪表带」看数、下半「事件流」看流，各自拿满宽。</li><li>仪表带里三格<b>不同宽、不同形态</b>：折线（最宽）／ 9 类计数条 ／ 严重度分布＋读数。</li><li>9 类计数<b>只出现在仪表带</b>；② 过滤栏因此只留类名与开关状态（避免同一份数字在屏幕上出现两次）。</li><li>收益：中区<b>最宽</b>，卡片用满列（时间戳到毫秒、traceId 可见），tail -f 最舒服。</li></ul>" }
 }
 /* @@EV-DATA:END 勿手改 @@ */
 
@@ -108,6 +108,7 @@ var shortId = function (s) { return s ? String(s).slice(0, 8) : '无' }
 function statusBar() {
   var s = DATA.stats, c = DATA.clock
   return '<header class="ev-status" data-blk="status">' +
+    '<span class="idx">① 状态条</span>' +
     '<div class="cell"><b>' + num(s.events) + '</b><span>窗口内事件（最多 ' + num(s.cap) + ' 条）</span></div>' +
     '<div class="cell"><b>' + c.rate.toFixed(1) + '</b><span>本拍速率（条/秒）</span></div>' +
     '<div class="cell"><b>' + num(s.traces) + '</b><span>窗口内请求链路（最多 ' + num(s.traceCap) + ' 次）</span></div>' +
@@ -127,9 +128,12 @@ function statusBar() {
 /* ── 条件块：断线条（判据是 `lost`，不是 `errMsg`）────────────────────────────
    本窗**未触发**（后端跑满 60 拍自己正常收尾，但那是抓帧脚本主动结束，不是页面断线）
    ⇒ 画成虚线「条件块」。⚠️ 它在结构上**必须留位置**：没有它，「数字静静停住」就没人说。 */
+/* ⚠️ 窗口化之后它是外框里的**一条细带**（不是浮在区块之间的空条）：未触发时真页面里
+   用 `v-if` **不占位**，这里画出来只为了给动效落点 8 一个家 —— 所以左缘留虚线、并写明这件事。 */
 function flashSlot() {
-  return '<div class="slot top" data-blk="flash" data-anim="8" data-anim-lbl="动8">' +
-    '条件块 · 断线条（判据 <code>lost</code>）：本窗未触发。出现时本行脉冲一次，右侧带「立即重连」。' +
+  return '<div class="ev-cond" data-blk="flash" data-anim="8" data-anim-lbl="动8">' +
+    '条件块 · 断线条（判据 <code>lost</code>）：本窗未触发；真页面未触发时本行<b>不占位</b>。' +
+    '出现时本行脉冲一次，右侧带「立即重连」。' +
     '</div>'
 }
 
@@ -139,15 +143,19 @@ function flashSlot() {
    它俩本来就是同一个数字上的两个效果（位数滚动 + 变化时闪一下），拆成两个元素反而是假结构。
    ⇒ 标注写成逗号列表 `data-anim="4,7"`，探针按逗号拆。 */
 function rail(counts) {
-  var h = '<div class="ev-rail" data-blk="rail"' +
-    (counts ? ' data-anim="4,7" data-anim-lbl="动4·7"' : '') + '>'
+  var h = '<div class="ev-rail" data-blk="rail">'
+  h += '<div class="rl"><span class="idx">②</span> 过滤栏（图例兼筛选）</div>'
+  /* ⚠️ 只有**行清单**滚（`.rows`）；口径 / 严重度 / 「全部打开」钉在栏底不滚 ——
+     窗口化之后栏只有 ~500px 高，口径要是跟着滚走了，图例就变成了没有出处的数字。 */
+  h += '<div class="rows"' + (counts ? ' data-anim="4,7" data-anim-lbl="动4·7"' : '') + '>'
   h += '<div class="row all"><span class="sw' + (DATA.rail.allOn ? '' : ' off') + '"></span>' +
        '<span class="k">全部</span><span class="c">' + num(DATA.rail.total) + '</span></div>'
   DATA.kinds.forEach(function (k) {
     h += '<div class="row' + (k.n ? '' : ' off') + '">' +
       '<span class="sw"></span><span class="k">' + esc(k.label) + '</span>' +
-      '<span class="c"' + (counts ? '' : ' data-hidden="1"') + '>' + (counts ? num(k.n) : '—') + '</span></div>'
+      '<span class="c">' + (counts ? num(k.n) : '—') + '</span></div>'
   })
+  h += '</div>'
   /* ⚠️ 口径必须写在这里（图例旁边），不是写在别处：图例数字是**本页自己攒的窗口内累计**，
      帧里那个 `counts` 是「本拍」的 —— 拿它当图例数字，每次静默的一拍上会全体归零。
      3a.2b 的 S1/S3 就是漏了这一条（把「单序列」当成唯一的口径问题）。 */
@@ -175,24 +183,23 @@ function card(ev, narrow) {
     '<span class="tr' + (ev.trace ? '' : ' none') + '">' + esc(ev.trace ? shortId(ev.trace) : '无）') + '</span>' +
   '</div>'
 }
-/* blk = true 时把「区块」标记打在这一层（丙：③ 自成一块）；
-   甲 的 ③ 是 `.col3`（折线横幅 + 列表同属一块），标记打在外层 ⇒ 这里不重复打。 */
-function stream(narrow, blk) {
-  var h = '<div class="ev-block"' + (blk ? ' data-blk="stream"' : '') + '>'
-  h += '<div class="ev-h2"><b>事件流</b><span class="n">' +
-       '窗口内 ' + num(DATA.stats.events) + ' 条 · <b>无分页</b> · 自动滚到底 · 只留最近 200 条（卡片，不是 seq）· ' +
-       '点一条看「这一次请求的完整链路」（没有 traceId 的不给点）</span></div>'
-  /* 动效落点 1（新卡片顶部滑入）/ 2（老的滚出）落在**列表容器**上 */
-  h += '<div class="ev-list" data-anim="1" data-anim-lbl="动1">'
+/* ③ 的**体**：固定的一行口径（不滚）＋ 可滚的卡片列表。
+   ⚠️ 窗口化之后这里**不再有自己的边框**（外框与列分隔线已经在 `.ev-frame` / `.ev-col` 上），
+   行内也不再有那两条说明条 —— 它们被折进上面那一行小字，否则一屏装不下。
+   ⚠️ 动效落点 1（新卡片顶部滑入）/ 2（老的滚出）落在**列表容器**上；
+   5（error 卡片闪红）落在列表里的**某张卡**上（是它的子元素）⇒ 三处一并标在容器上。 */
+function stream(narrow) {
+  /* ⚠️ 措辞纪律：「无分页 / 卡片流 / DOM 只留 200 张」是**本版的改法**，不是现页面的事实 ——
+     现页面是 `pageRows` 分页表（真页面里读得到）。草图必须把「现状」与「主张」分开写，
+     否则这张图会被当成「已经改成这样了」。卡片数也只画了真抓的那几条，一并写明。 */
+  var h = '<div class="ev-h2 ev-fix"><b><span class="idx">③</span> 事件流</b><span class="n">' +
+       '窗口内 ' + num(DATA.stats.events) + ' 条（= <code>EVENT_CAP</code> 现值）· 草图只画真抓的最近 ' +
+       DATA.cards.length + ' 条 · ' +
+       '<b>本版改法</b>：去分页、改卡片流、自动滚到底、DOM 只留最近 200 张（现页面是 <code>pageRows</code> 分页表）· ' +
+       '淘汰卡片时要<b>把它的 seq 也从 seenSeq 摘掉</b>，否则新事件会被误判成重复、页面看着不动 · ' +
+       'error <b>0 条</b> ⇒ 「闪红」本窗无卡可演示</span></div>'
+  h += '<div class="ev-list ev-pane" data-anim="1,2,5" data-anim-lbl="动1·2·5">'
   DATA.cards.forEach(function (e) { h += card(e, narrow) })
-  h += '</div>'
-  /* 动效落点 2：底部哨兵（滚到这里就淘汰最老的一张） */
-  h += '<div class="slot" data-anim="2" data-anim-lbl="动2">' +
-       '底部哨兵 · 自动滚到底：卡片数超过 200 就从顶部淘汰最老的（<b>被淘汰的 seq 也要从 seenSeq 摘掉</b>，' +
-       '否则新事件会被误判成重复、页面看着不动）</div>'
-  /* 动效落点 5：error 卡片闪红 —— 本窗 error 0 条，落点在、可演示的卡片不在 */
-  h += '<div class="slot" data-anim="5" data-anim-lbl="动5">' +
-       '动效落点 · error 卡片闪红：本窗 <b>error 0 条</b>（严重度只有 info / warn）⇒ 这一处本窗没有可演示的卡片</div>'
   return h + '</div>'
 }
 
@@ -204,7 +211,7 @@ function spark() {
     var y = 100 - (v / mx) * 92
     return x.toFixed(2) + ',' + y.toFixed(2)
   }).join(' ')
-  var svg = '<svg viewBox="0 0 100 100" preserveAspectRatio="none" height="78" role="img" aria-label="每秒事件速率折线">' +
+  var svg = '<svg viewBox="0 0 100 100" preserveAspectRatio="none" height="38" role="img" aria-label="每秒事件速率折线">' +
     '<rect x="0" y="0" width="100" height="100" fill="none" stroke="#e2e2e2" stroke-width="0.4"/>' +
     '<polyline points="' + pts + '" fill="none" stroke="#7a7a7a" stroke-width="0.9" vector-effect="non-scaling-stroke"/>' +
     '</svg>'
@@ -247,27 +254,26 @@ function readout() {
   '</div>'
 }
 
-/* ── ⑤ 链路展开 ────────────────────────────────────────────────────────────── */
+/* ── ⑤ 链路展开（**塌成一条**，同 txt 线框图：默认 48px，点一下才拉起）────────
+   窗口化之后它不能再默认展开 —— 一整条链竖向排开就要 150px，六区一屏就装不下。
+   链的内容改成**行内预览**（起点 ▸ 中间各跳 ▸ 终点），既保留「这是一条链」的结构主张，
+   又只占一行。展开后的样子见 `.note` 那句。 */
 function drawer() {
   var d = DATA.drawer
-  var h = '<div class="ev-drawer" data-blk="drawer">'
-  h += '<div class="hd"><b>链路展开</b>' +
-    '<span class="mono">默认塌成一条 48px：最近 trace ' + esc(shortId(d.traceId)) + ' · ' +
-    d.chain.length + ' 事件 · 点一下拉起</span>' +
+  var h = '<div class="ev-drawer" data-blk="drawer" data-anim="6" data-anim-lbl="动6">'
+  h += '<div class="hd"><b><span class="idx">⑤</span> 链路展开</b>' +
+    '<span class="mono">默认塌成一条：最近 trace ' + esc(shortId(d.traceId)) + ' · 链上 ' +
+    d.chain.length + ' 条 · 点一下拉起</span>' +
     '<span class="st">' + d.status + '</span>' +
-    '<span class="mono">' + esc(d.method) + ' ' + esc(d.path) + ' · 总耗时 <b>' + d.ms + ' ms</b></span></div>'
-  h += '<ol class="ev-chain">'
-  h += '<li class="ends"><span class="tm">' + esc(d.start) + '</span>请求开始（' + esc(d.method) + ' ' + esc(d.path) + '）</li>'
-  d.chain.forEach(function (e) {
-    h += '<li><span class="tm">' + esc(e.ts) + '</span><b>' + esc(e.kindLabel) + '</b> · ' +
-      esc(e.title) + (e.obj ? '（' + esc(e.obj) + '）' : '') + '</li>'
-  })
-  h += '<li class="ends"><span class="tm">' + esc(d.end) + '</span>请求结束 · 总耗时 <b>' + d.ms + ' ms</b></li>'
-  h += '</ol>'
+    '<span class="mono">' + esc(d.method) + ' ' + esc(d.path) + ' · 总耗时 <b>' + d.ms + ' ms</b></span>' +
+    '<span class="pv">' + esc(d.start) + ' 请求开始 ▸ ' +
+      d.chain.map(function (e) { return esc(e.title) }).join(' ▸ ') +
+      ' ▸ ' + esc(d.end) + ' 请求结束</span></div>'
   /* ⚠️ 易漏项 1：起止两行**只来自帧的 traces**，不来自事件 ⇒ 演示模式下 traces 恒空 */
-  h += '<div class="note">⚠️ 中间 ' + d.chain.length + ' 条 = 本页窗口内带这个 traceId 的事件（按墙钟升序）。' +
-    '起止两行<b>只来自帧里的 traces、不来自事件</b> ⇒ <b>「模拟日常」下 traces 恒为空</b>，' +
-    '那两行会显示「这一次请求的起止还没到」。<b>不许因为它空就把 ⑤ 删掉</b> —— 空态也是这一块要说的内容。</div>'
+  h += '<div class="note">⚠️ 起止两行<b>只来自帧里的 traces、不来自事件</b> ⇒ <b>「模拟日常」下 traces 恒为空</b>，' +
+    '那两行会显示「这一次请求的起止还没到」；<b>不许因为它空就把 ⑤ 删掉</b> —— 空态也是这一块要说的内容。' +
+    '中间 ' + d.chain.length + ' 条 = 本页窗口内带这个 traceId 的事件（按墙钟升序）；' +
+    '拉起后 ③ 里同号卡片高亮（动效落点 6）。</div>'
   return h + '</div>'
 }
 
@@ -282,51 +288,57 @@ function switchBar() {
     })
     return s + '</div>'
   }
+  /* 窗口化：压成**一行**（标题 + 两组开关 + 一行小字）。原来那个两行标题在这里放不下。 */
   return '<div class="ev-switch" data-blk="switch">' +
-    '<div class="ev-h2"><b>开关栏</b><span class="n">3a.6 乙案引入 · 本页只占位（本轮不接行为）· ' +
-    '不可开关的键 = 后端 WIRED 清单里没有它</span></div>' +
-    grp('防护闸', P) + grp('注入', I) +
+    '<b><span class="idx">⑥</span> 开关栏</b>' + grp('防护闸', P) + grp('注入', I) +
+    '<span class="n">3a.6 乙案引入 · 本页只占位（本轮不接行为）· 虚线 = 后端 WIRED 清单里没有它</span>' +
   '</div>'
 }
 
-/* ── 两版装配 ─────────────────────────────────────────────────────────────── */
+/* ── 两版装配 ───────────────────────────────────────────────────────────────
+   两版的**外壳完全相同**：`.ev-frame`（一个大框）> ① / 条件块 / `.ev-body` / ⑤ / ⑥。
+   差别只在 `.ev-body` 里：甲 三列（②③④），丙 两列（②｜右列：④ 仪表带 + ③ 事件流）。
+   ⚠️ 中段是**唯一伸缩的一行**（`.ev-body { flex:1 }`），它一伸一缩，整页高不变。 */
 function renderJia() {
-  return '<section class="ev-jia">' +
+  return '<section class="ev-jia"><div class="ev-frame">' +
     statusBar() + flashSlot() +
-    '<div class="mid">' +
+    '<div class="ev-body">' +
       rail(true) +
-      '<div class="col3" data-blk="stream">' + spark() + stream(true) + '</div>' +
-      '<div class="live" data-blk="live"><div class="ev-h2"><b>实时统计</b><span class="n">严重度分布（横条）</span></div>' +
-        '<div class="ev-block">' + sevBars() + '<div style="height:var(--gap-in)"></div>' + readout() + '</div></div>' +
+      '<div class="ev-col" data-blk="stream">' + spark() + stream(true) + '</div>' +
+      '<div class="ev-col" data-blk="live">' +
+        '<div class="ev-h2 ev-fix"><b><span class="idx">④</span> 实时统计</b>' +
+          '<span class="n">严重度分布（横条）</span></div>' +
+        '<div class="ev-live-body">' + sevBars() + readout() + '</div>' +
+      '</div>' +
     '</div>' +
-    '<div class="ev-full">' + drawer() + '</div>' +
-    '<div class="ev-full">' + switchBar() + '</div>' +
-  '</section>'
+    drawer() + switchBar() +
+  '</div></section>'
 }
 function renderBing() {
-  return '<section class="ev-bing">' +
+  return '<section class="ev-bing"><div class="ev-frame">' +
     statusBar() + flashSlot() +
-    '<div class="mid">' +
+    '<div class="ev-body">' +
       rail(false) +
       '<div class="righter">' +
         '<div class="band" data-blk="band">' +
-          '<div class="cell"><span class="ttl">每秒事件速率</span>' + spark() + '</div>' +
+          '<div class="cell"><span class="ttl"><span class="idx">④</span> 仪表带 · 每秒事件速率</span>' + spark() + '</div>' +
           '<div class="cell"><span class="ttl">9 类计数（本页窗口内累计）</span>' + kindBars() + '</div>' +
           '<div class="cell"><span class="ttl">严重度分布</span>' + sevBars() + readout() + '</div>' +
         '</div>' +
-        stream(false, true) +
+        '<div class="ev-col" data-blk="stream">' + stream(false) + '</div>' +
       '</div>' +
     '</div>' +
-    '<div class="ev-full">' + drawer() + '</div>' +
-    '<div class="ev-full">' + switchBar() + '</div>' +
-  '</section>'
+    drawer() + switchBar() +
+  '</div></section>'
 }
 
 function render(variant) {
   if (!DATA) { document.body.insertAdjacentHTML('afterbegin', '<p style="padding:16px">DATA 未生成</p>'); return }
   document.getElementById('app').innerHTML = (variant === 'bing' ? renderBing() : renderJia())
-  /* 判定条：给验收看的（不是页面的一部分）。两版各一份，数字由数据脚本现算。 */
-  document.getElementById('judge').innerHTML = DATA.judge[variant === 'bing' ? 'bing' : 'jia']
+  /* 判据列表进页脚 `<details>`（**在 100vh 之内**，折叠时只有一行高 ⇒ 整页仍不滚）。
+     它**不是页面的一部分**，是给验收看的；数字由数据脚本现算。 */
+  var f = document.getElementById('judge')
+  if (f) f.innerHTML = DATA.judge[variant === 'bing' ? 'bing' : 'jia']
 }
 
 window.render = render
