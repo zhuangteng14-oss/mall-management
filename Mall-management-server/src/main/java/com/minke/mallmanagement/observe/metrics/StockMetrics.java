@@ -101,10 +101,14 @@ public class StockMetrics {
      * @param durationNanos 墙钟（块 7 · 阶段 3a.3 新增）：{@code OrderService.deductStocks} 里
      *                <b>紧包那一行 {@code goodsDao.deductStock(...)}</b>（不是整个多 sku 循环）——
      *                口径见该类注释
+     * @param remaining <b>扣减那一刻该 SKU 的剩余件数</b>（块 7 · 阶段 3a.3 第二步新增）；
+     *                取数点与三类 {@code null} 见 {@link StockEvent#remaining()} 的完整口径。
+     *                ⚠️ 本形参**追加在末尾**是刻意的：既有四个形参的相对位置一个不动
+     *                （与帧侧「前 11 个键的名字与顺序一个字没动」同一纪律）。
      */
-    public void deduct(String skuCode, int qty, Deduct result, long durationNanos) {
+    public void deduct(String skuCode, int qty, Deduct result, long durationNanos, Integer remaining) {
         registry.counter(DEDUCT, "result", result.tag).increment();
-        event("deduct", result.tag, skuCode, qty, durationNanos);
+        event("deduct", result.tag, skuCode, qty, durationNanos, remaining);
     }
 
     /**
@@ -116,10 +120,15 @@ public class StockMetrics {
      * @param durationNanos 墙钟（块 7 · 阶段 3a.3 新增）：{@code OrderTimeoutCancelJob.releaseStock}
      *                里紧包 {@code goodsDao.releaseStock(...)}。⚠️ 定时任务线程 ⇒ actor 为 null，
      *                但耗时照记（那是「回补花了多久」，与身份无关）
+     *                <p>⚠️ 本方法**刻意不带** {@code remaining}（块 7 · 阶段 3a.3 第二步的裁定）：
+     *                剩下的那一刻有没有剩多少，对「回补」这件事没有语义（回补是**无条件加回**
+     *                已扣掉的量，见 {@code GoodsDao#releaseStock}）⇒ 释放档的
+     *                {@link StockEvent#remaining()} 恒为 {@code null}。这是**判定不做**，
+     *                不是漏了 —— 要补也是补在扣减一侧（那条路才是「还剩多少」要被追问的地方）。
      */
     public void release(String skuCode, int qty, Release result, long durationNanos) {
         registry.counter(RELEASE, "result", result.tag).increment();
-        event("release", result.tag, skuCode, qty, durationNanos);
+        event("release", result.tag, skuCode, qty, durationNanos, null);
     }
 
     // ================= 事件流 =================
@@ -151,14 +160,19 @@ public class StockMetrics {
      * 追加一条事件。{@code skuCode} 只在事件里以字符串形式出现 —— 它可以是任意业务键，
      * 但 tag 里绝不能有它（基数无界）。
      */
-    private void event(String kind, String result, String skuCode, int qty, Long durationNanos) {
+    private void event(String kind, String result, String skuCode, int qty, Long durationNanos,
+                       Integer remaining) {
         long seq = eventCursor.getAndIncrement();
         events[(int) (seq & EVENT_MASK)] = new StockEvent(
                 seq, System.currentTimeMillis(), kind, result,
                 skuCode == null ? null : String.valueOf(skuCode), qty, com.minke.mallmanagement.shared.web.TraceIdFilter.current(), com.minke.mallmanagement.shared.web.TraceIdFilter.currentBatch(),
                 com.minke.mallmanagement.shared.web.TraceIdFilter.currentActorId(),
                 com.minke.mallmanagement.shared.web.TraceIdFilter.currentActorRole(),
-                durationNanos == null ? null : durationNanos / 1000);   // 块 7 · commit 8/8c：写全限定名而非 import，理由同 {@code MallCacheMetrics#event}（保本文件 `:75` 的引用不下移）
+                durationNanos == null ? null : durationNanos / 1000,   // 块 7 · commit 8/8c：写全限定名而非 import，理由同 {@code MallCacheMetrics#event}（保本文件 `:75` 的引用不下移）
+                // 块 7 · 阶段 3a.3 第二步：**原样透传**调用点读到的当时剩余 ——
+                // ⚠️ 本类**不做任何兜底**（不查库、不猜）：读不到就是 {@code null}，
+                // 理由见 {@link StockEvent#remaining()}（「当时」这个口径只有调用点拿得到）。
+                remaining);
     }
 
     /**
@@ -177,10 +191,30 @@ public class StockMetrics {
      *                   （{@code release} 走定时任务线程 ⇒ 这一档恒 null，见 {@link #release}）
      * @param actorRole  发起者的角色号（块 7 · 阶段 3a.3 新增）；无身份时为 null
      * @param durationUs 扣减 / 回补的耗时（**微秒**，块 7 · 阶段 3a.3 新增，紧包那一条 SQL）；{@code null} = 没测到
+     * @param remaining  <b>扣减那一刻该 SKU 的剩余件数</b>（块 7 · 阶段 3a.3 第二步新增）。
+     *                   <p><b>为什么必须是「当时」：</b>要回答的是「这一拍扣的时候还剩多少」——
+     *                   事后拿 {@code SkuCode} 回查 {@code goods_sku} 得到的是**此刻**的库存，
+     *                   中间可能又卖出几十件；两个值在页面上是两句不同的话（「扣完还剩 99」
+     *                   vs「现在还剩 3」）。⇒ 取数点只能钉在**扣减那一行 SQL 之后**，
+     *                   由 {@code OrderService.deductStocks} 现读现传（本类只透传，不回查）。
+     *                   <p><b>哪些档有值：</b>{@code deduct} 的 {@code ok} 与 {@code insufficient}
+     *                   两档都有（前者答「扣完剩多少」、后者答「还剩多少所以扣不动」）；
+     *                   {@code release} 恒为 {@code null}（见 {@link #release}，那是判定不做）。
+     *                   <p><b>三类 {@code null}（都不是「用了兜底值」）：</b>
+     *                   ① <b>读剩余的 SELECT 自己失败了</b> —— 调用点用内层 {@code try/catch}
+     *                   把它与扣减本身隔开，<b>刻意不把「一次成功的 CAS」记成 {@code error}</b>；
+     *                   ② 扣减那一支抛异常（{@code error} 档）—— UPDATE 到底生效没有都不知道，
+     *                   剩余更无从谈起；③ {@code release}。
+     *                   <p>⚠️ <b>并发边界（如实登记，不是缺陷）：</b>它是「CAS 语句跑完**紧接着
+     *                   读到**的值」，不是与那次 UPDATE 同一把锁下的快照 —— 同一 SKU 被并发的
+     *                   两个请求同时扣时，先跑完的那个读到的也可能是后跑完的那个值。
+     *                   要做成精确快照得开事务 + {@code FOR UPDATE}（或 {@code SELECT ... FOR UPDATE}
+     *                   把扣减也包进去），代价是给**下单主链路**加锁 —— 为一个给页面看的数
+     *                   不值得，故取「读已提交下的现读现记」并在这里写明。
      */
     public record StockEvent(long seq, long epochMilli, String kind, String result,
                              String skuCode, int qty, String traceId, String batchId,
-                             String actorId, Integer actorRole, Long durationUs)
+                             String actorId, Integer actorRole, Long durationUs, Integer remaining)
             implements com.minke.mallmanagement.observe.metrics.Sourced {
     }
 

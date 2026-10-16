@@ -831,7 +831,7 @@
 |---|---|---|---|
 | `POST /admin/observe/metrics/stream` | `MetricsStreamController.java` @ `:34`（方法 `:57`） | `seq` · `ts` · `intervalMs` · `health` · `requests` · `cache` · `gauges` · `locks` · `protections` · `stock` | **否**（全读 micrometer 注册表） |
 | `POST /admin/observe/orders/stream` | `OrderStreamController.java` @ `:23`（方法 `:50`） | `seq` · `ts` · `counts` · `orders` · `moves` · `moveCount` · **`batchCounts`**（块 7 · commit 10 新增） | **是**（每拍 2~3 次只读查询：五态计数聚合 + 最近订单 + **本批次**五态计数） |
-| `POST /admin/observe/events/stream` | `EventStreamController.java` @ `:23`（方法 `:40`） | `seq` · `ts` · `cursor` · `count` · `rate` · `counts`（按 9 类）· `severity`（按严重度）· `events`（本拍增量；每条 **14 键** —— 块 7 · 阶段 3a.3 起多了 `actor` / `durationUs` / `fields`）· `traces`（本拍走完的请求）· `mq`（MQ 桥接状态）· `dropped` · `droppedTotal` · `droppedIngest`（三者口径不同，见 `EventStreamService#frame`） | **否**（读内存合并环 + `TraceLog`） |
+| `POST /admin/observe/events/stream` | `EventStreamController.java` @ `:23`（方法 `:40`） | `seq` · `ts` · `cursor` · `count` · `rate` · `counts`（按 9 类）· `severity`（按严重度）· `events`（本拍增量；每条 **15 键** —— 块 7 · 阶段 3a.3 第一步多了 `actor` / `durationUs` / `fields`，**第二步再增一键** `remaining`）· `traces`（本拍走完的请求）· `mq`（MQ 桥接状态）· `dropped` · `droppedTotal` · `droppedIngest`（三者口径不同，见 `EventStreamService#frame`） | **否**（读内存合并环 + `TraceLog`） |
 
 ⚠️ **读端点为什么是 `POST`**：SSE 的惯例是 `GET`（`EventSource` 只支持 GET），本仓选 `POST`，理由与 `AdminStatsController` 那两条读端点**同一条** —— 管理端的读端点**全部**是 POST，单为这三条开一个 GET 面会让「读端点的动词」在本仓出现两种。前端**不**用 `EventSource`（它不能带 `Authorization` 头），改用 `fetch` + `ReadableStream` 自己解析 ⇒ POST 不构成任何实现障碍。
 ⚠️ **`Content-Type` 必须在方法体里手动设** —— `@PostMapping(produces=…)` **不会**替 `StreamingResponseBody` 写上响应头（`produces` 只在基于消息转换器的返回路径上被消费，而 `StreamingResponseBody` 走异步返回路径；实测取证：不加那一行时响应头只有 `Cache-Control`，见 `ObserveStreamSmokeTest` 对媒体类型的断言）。两条都留着：`produces` 管**路由与 Accept 协商**，那一行管**真实响应头**。
@@ -892,7 +892,10 @@
 ⚠️ **⚠️ 台账的已知边界（逐字摘自 `EventBroadcaster` 类注释）**：`poll()` 由 **SSE 流线程**每秒驱动，唯一调用点是 `EventStreamService:96`（**events 流**；⚠️ **2026-10-15 块 7 commit 10b 重指**：**原 81 行** → **96 行**；且该调用点此后落在**每连接一份**的帧源里（丙）⇒ **每秒调用次数 = 打开页面数**，不再恒为 1；「没人看就不落库」的结论不变）⇒ **没有人打开实时日志页时，合并环不动、也就没有事件落库**。台账是「**观看时的过程记录**」，不是「无人值守的全量审计流水」。
 ⚠️ **保留期 job**：`ObservedEventCleanupJob` @ `:63`，`@Scheduled(fixedDelayString = "${mall.observe.cleanup.fixed-delay-ms:3600000}")`（缺省 1 小时）；两条保留期 —— 攻击批次行 `mall.observe.cleanup.attack-retention-days`（缺省 **3** 天）、日常事件行 `…normal-retention-days`（缺省 **30** 天）。⚠️ 总闸 `mall.observe.cleanup.job.enabled`（dev / a3 关着）+ `@EnableScheduling` 的**载体类**另受 `mall.downgrade.job.enabled` 管（见 `tech-debt.md`）。
 ⚠️ **MQ 缺席**：`mall.observe.mq.warn-interval-ms`（缺省 **300000** ms = 5 分钟）—— 每次重连失败距上次 WARN 超阈值即打一条 `[EVENT]` WARN（翻转时另有一条，双保险）；MQ 不在时**事件仍上屏**（走内存环），页面顶上的点变黄。
-⚠️ **台账本笔（块 7 · 阶段 3a.3）多了三列** `ActorId` / `ActorRole` / `DurationUs`（㉑-1..㉑-3，DDL 与实测见 `db-schema.md` §19）—— 三列都是**有界标量**。⚠️ 帧里那个 `fields`（结构化明细）**刻意不进台账**（口径「**有界标量进列，无界自由文本不进**」）⇒ **回放（H.8）拿得到「谁 / 多久」，拿不到 `fields` 的那些 kv**；这一点在回放页上要如实说给用户，别让人以为「回放缺了字段」。
+⚠️ **台账本笔（块 7 · 阶段 3a.3）多了三列** `ActorId` / `ActorRole` / `DurationUs`（㉑-1..㉑-3，DDL 与实测见 `db-schema.md` §19）—— 三列都是**有界标量**。
+⚠️ **⚠️ 2026-10-17 口径修订（阶段 3a.3 第二步）：这条以前写着「帧里那个 `fields` **刻意不进台账**」⇒「回放拿不到 `fields` 的那些 kv」—— 那一半被用户裁定推翻了，本文件如实改口。** 原话：「加（不然会缺失当时的数据流程，没办法朔源性找寻病因，那这个回放的作用就降低了）」。⇒ `observed_event` 再加两列：`FieldsJson json`（帧里 `fields` 的**落库副本**）与 `RemainingStock int`（扣减**那一刻**的剩余件数，㉒-1..㉒-2，DDL 与实测见 `db-schema.md` §20）。**回放（H.8）现在拿得到「谁 / 多久」，也拿得到「当时剩多少 / 当时那批 kv」。**
+⚠️ **被推翻的只有 `fields` 这一半**：`detail` 与 `key` **仍不进列**，判据「有界标量进列，无界自由文本不进」**没被推翻**（是它对该字段的适用结论改了，不是判据作废）。⇒ 回放里**仍然**没有 `detail` 那行过程串，别把「修订了一半」读成「口径全废」。
+⚠️ **给前端的两条提醒**（写在 `ObservedEventDao` 的 `COLUMNS` javadoc 与 `.sql` 段头）：① `FieldsJson` 从 JDBC 出来是**字符串**（JSON 文本）—— 要当对象用得先 `JSON.parse`，**别**指望哪一层替你解析；② `RemainingStock` **只有库存环的扣减档有值**，其余（含**释放档**）一律 `NULL` —— 那是设计（释放一侧刻意不取数），不是漏写。
 
 ⚠️ **本文件（`api-contract.md`）的正文 §2 / §3 / §5 矩阵**本笔**未重测、未插入** —— 8 条新端点全部落在附录 H；正文坐标重填归「文档漂移清理笔」（同附录 E.7 的口径）。
 
@@ -905,7 +908,7 @@
 | 路径 | `POST /admin/observe/replay` —— ⚠️ **挂在 `/admin/observe`（根）**，**不是** `/admin/observe/attack/replay`：后端是**新建的 `ReplayController`**，不是 `AttackController` 的第七条。理由（两半）：① 它读的是**事件台账** `observed_event`，不是**演练记录** `drill_record`；② 另一条候选路是「再开一条 SSE 推回放」，那要多一条常驻流 + 回答「流断了怎么办」—— 改成一次性 JSON + 前端自己撒点，两个问题都不存在 |
 | 入参 | `batchId`（**必填**；就是演练记录那一行的 `BatchId`，与 `observed_event.BatchId` **同一串值**）· `limit`（可选，缺省 **5000**、上限 **50000**；空白 / 0 / 负数 ⇒ 缺省，超上限收进上限，**非整数 ⇒ 400**） |
 | 返回 | `{success, batchId, list:[…], total, limit}`。⚠️ `total` 是该批次**一共有多少条**（**不是**返回了几条）⇒ 前端才写得出「共 N 条，本次回放前 M 条」 |
-| 排序 | `ORDER BY OccurredAt ASC, Id ASC`（`ObservedEventDao:158`）—— **两列都要**：少了第二列，同一毫秒内的顺序不确定 |
+| 排序 | `ORDER BY OccurredAt ASC, Id ASC`（`ObservedEventDao:232` —— ⚠️ **2026-10-17 块 7 · 阶段 3a.3 第二步重指**：**原 158 行**；本笔在类注释、`COLUMNS` 与 Insert 侧增改，`selectByBatch` 随之**下移 74 行**。⚠️ 这是一条**裸形**引用（不带 `.java`），本仓的引用扫描器收不到它 ⇒ **靠人工重指**，别以为扫描报了 0 漂移就等于它是对的）—— **两列都要**：少了第二列，同一毫秒内的顺序不确定 |
 | 空批次 | 批次不存在 / 已被清理 job 删掉 ⇒ `list` 空表 + `total=0`，**仍然是 200**（「这个批次没有事件」是一个正常答案，不是错误） |
 | 身份 / 闸 | **不加角色闸**、**不在 `AUTH_WHITELIST`**（靠 `AuthInterceptor` 拦）、**不写审计**（只读） |
 | 与 H.1 各条的相同处 | 全 `POST`、`@RequestParam`（**不用** `@RequestBody`）、入参非法显式构 `ResponseEntity.badRequest()`（**不抛异常** —— `GlobalExceptionHandler` 的类级白名单不覆盖本类，抛出去会变成默认错误页） |

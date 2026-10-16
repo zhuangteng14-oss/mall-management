@@ -203,6 +203,14 @@ public class EventBroadcaster {
      * @param durationUs 本条事件主体的耗时（**微秒**，块 7 · 阶段 3a.3 新增）；{@code null} =
      *                   没测到 / 不适用（各环口径不同，逐环写在各 {@code *Metrics#event} 的 javadoc 里）。
      *                   ⚠️ 单位是微秒不是毫秒：L1 命中这类操作是**纳秒级**，毫秒永远显示 0
+     * @param remaining  <b>扣减那一刻该 SKU 的剩余件数</b>（块 7 · 阶段 3a.3 第二步新增）。
+     *                   ⚠️ 九个环里<b>只有库存环的扣减档</b>有这个量，其余八环恒为 {@code null}
+     *                   —— 那是**判定**不是遗漏：它和 {@code key} / {@code objectType} /
+     *                   {@code objectId} 是同一类东西（「各环自己的业务字段」，
+     *                   见 {@code Sourced} 类注释里那段「刻意不声明 key()」的裁定），
+     *                   故由 {@code ingestStock} 在调用点给定，**不进**九环公共面。
+     *                   ⚠️ 取数点、三类 {@code null}、并发边界都在
+     *                   {@code StockMetrics.StockEvent#remaining()} 的 javadoc 里（唯一出处，别处不重抄）。
      * @param fields     <b>结构化明细</b>（块 7 · 阶段 3a.3 新增）：把 {@code detail} 里那些
      *                   {@code k=v} 拆成一张表，供前端拼自然语言句子（{@code sentence()}）用。
      *                   ⚠️ 与 {@code detail} <b>同源</b>（在同一个 {@link Emit} 里一起构造）
@@ -213,7 +221,7 @@ public class EventBroadcaster {
                                 String title, String detail, String key,
                                 String objectType, String objectId, String traceId, String batchId,
                                 String actorId, Integer actorRole, Long durationUs,
-                                Map<String, Object> fields) {
+                                Integer remaining, Map<String, Object> fields) {
     }
 
     private final MallCacheMetrics cacheMetrics;
@@ -358,7 +366,7 @@ public class EventBroadcaster {
             if (e.seq() <= last) {
                 continue;
             }
-            add(e, Kind.CACHE, fromCache(e), e.key(), e.seq(), "cache", str(e.key()));
+            add(e, Kind.CACHE, fromCache(e), e.key(), e.seq(), "cache", str(e.key()), /* remaining */ null);
             last = e.seq();
         }
         droppedIngest += missed(previous, first);
@@ -376,7 +384,7 @@ public class EventBroadcaster {
             if (e.seq() <= last) {
                 continue;
             }
-            add(e, Kind.LOCK, fromLock(e), e.key(), e.seq(), "lock", str(e.key()));
+            add(e, Kind.LOCK, fromLock(e), e.key(), e.seq(), "lock", str(e.key()), /* remaining */ null);
             last = e.seq();
         }
         droppedIngest += missed(previous, first);
@@ -394,7 +402,7 @@ public class EventBroadcaster {
             if (e.seq() <= last) {
                 continue;
             }
-            add(e, Kind.ORDER, fromOrder(e), e.key(), e.seq(), "order", str(e.key()));
+            add(e, Kind.ORDER, fromOrder(e), e.key(), e.seq(), "order", str(e.key()), /* remaining */ null);
             last = e.seq();
         }
         droppedIngest += missed(previous, first);
@@ -412,7 +420,9 @@ public class EventBroadcaster {
             if (e.seq() <= last) {
                 continue;
             }
-            add(e, Kind.STOCK, fromStock(e), e.skuCode(), e.seq(), "sku", str(e.skuCode()));
+            // ⚠️ 九个调用点里**唯一**传真值的一个：本环的扣减档带「当时剩余」，
+            //    释放档为 null（见 StockMetrics.StockEvent#remaining()）。
+            add(e, Kind.STOCK, fromStock(e), e.skuCode(), e.seq(), "sku", str(e.skuCode()), e.remaining());
             last = e.seq();
         }
         droppedIngest += missed(previous, first);
@@ -430,7 +440,7 @@ public class EventBroadcaster {
             if (e.seq() <= last) {
                 continue;
             }
-            add(e, Kind.AUDIT, fromAudit(e), e.actor(), e.seq(), str(e.targetType()), str(e.targetId()));
+            add(e, Kind.AUDIT, fromAudit(e), e.actor(), e.seq(), str(e.targetType()), str(e.targetId()), /* remaining */ null);
             last = e.seq();
         }
         droppedIngest += missed(previous, first);
@@ -448,7 +458,7 @@ public class EventBroadcaster {
             if (e.seq() <= last) {
                 continue;
             }
-            add(e, Kind.NOTIFY, fromNotify(e), e.key(), e.seq(), "notify", str(e.key()));
+            add(e, Kind.NOTIFY, fromNotify(e), e.key(), e.seq(), "notify", str(e.key()), /* remaining */ null);
             last = e.seq();
         }
         droppedIngest += missed(previous, first);
@@ -466,7 +476,7 @@ public class EventBroadcaster {
             if (e.seq() <= last) {
                 continue;
             }
-            add(e, Kind.SENSITIVE, fromSensitive(e), e.scene(), e.seq(), "sensitive", str(e.words()));
+            add(e, Kind.SENSITIVE, fromSensitive(e), e.scene(), e.seq(), "sensitive", str(e.words()), /* remaining */ null);
             last = e.seq();
         }
         droppedIngest += missed(previous, first);
@@ -484,7 +494,7 @@ public class EventBroadcaster {
             if (e.seq() <= last) {
                 continue;
             }
-            add(e, Kind.IDENTITY, fromIdentity(e), e.subject(), e.seq(), "identity", str(e.path()));
+            add(e, Kind.IDENTITY, fromIdentity(e), e.subject(), e.seq(), "identity", str(e.path()), /* remaining */ null);
             last = e.seq();
         }
         droppedIngest += missed(previous, first);
@@ -507,7 +517,7 @@ public class EventBroadcaster {
             //    「防护开关名」，这是刻意的：它回答「哪道闸动了」，而不是「谁被拦了」
             //    （后者要看同拍里业务侧的 429/503 记录）。
             add(e, Kind.PROTECTION, fromProtection(e), e.key(), e.seq(),
-                    "protection", str(e.key()));
+                    "protection", str(e.key()), /* remaining */ null);
             last = e.seq();
         }
         droppedIngest += missed(previous, first);
@@ -878,16 +888,24 @@ public class EventBroadcaster {
      * @param objectType 被操作对象的**类型**（块 7 · commit 8 新增）—— 九个 {@code ingestXxx}
      *                   在调用点逐环给定；取值口径见 {@link ObservedEvent#objectType()}
      * @param objectId   被操作对象的**标识**（同上）；取值口径见 {@link ObservedEvent#objectId()}
+     * @param remaining  **扣减那一刻该 SKU 的剩余件数**（块 7 · 阶段 3a.3 第二步新增）——
+     *                   与上面两个一样在调用点**逐环给定**。⚠️ 九个调用点里**八个恒传
+     *                   {@code null}**：只有库存环的**扣减档**有这个量，其余七环与库存环的
+     *                   释放档**没有「剩余」可传**（那是判定，不是漏传 —— 完整理由见
+     *                   {@link ObservedEvent#remaining()}）。正因为「八个 null 一个值」这种
+     *                   形状最容易被后来的读者当成噪音而顺手填错，八个点上都带了一句
+     *                   行内标记 {@code remaining}，把那个裸 {@code null} 的归属写在它自己旁边。
      */
     private void add(com.minke.mallmanagement.observe.metrics.Sourced src, Kind kind, Emit emit,
-                     String key, long srcSeq, String objectType, String objectId) {
+                     String key, long srcSeq, String objectType, String objectId,
+                     Integer remaining) {
         long seq = cursor.getAndIncrement();
         ObservedEvent event = new ObservedEvent(
                 seq, src.epochMilli(), kind.tag, emit.severity(), emit.title(),
                 emit.detail() + " src=" + kind.tag + "#" + srcSeq,
                 key == null ? null : String.valueOf(key), objectType, objectId,
                 src.traceId(), src.batchId(), src.actorId(), src.actorRole(), src.durationUs(),
-                emit.fields());
+                remaining, emit.fields());
         events[(int) (seq & EVENT_MASK)] = event;
         // 块 7 · commit 8c：并入合并环 = 「这条事件已经成形」的那一刻，发布台账就走这里。
         // ⚠️ 发布方**不抛**（fail-soft，见 EventPublisher）—— 台账落不了库不该让日志页断流。

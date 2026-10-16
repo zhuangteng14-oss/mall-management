@@ -34,9 +34,9 @@ class StockMetricsTest {
     @Test
     @DisplayName("deduct 三路各自计数，且事件与计数在同一调用点一起发")
     void deductOutcomesAreRecorded() {
-        metrics.deduct(SKU, 2, Deduct.OK, 1_500L);
-        metrics.deduct(SKU, 2, Deduct.INSUFFICIENT, 2_000_000L);
-        metrics.deduct(SKU, 2, Deduct.ERROR, 1_500L);
+        metrics.deduct(SKU, 2, Deduct.OK, 1_500L, 98);
+        metrics.deduct(SKU, 2, Deduct.INSUFFICIENT, 2_000_000L, 1);
+        metrics.deduct(SKU, 2, Deduct.ERROR, 1_500L, null);
 
         assertThat(count(StockMetrics.DEDUCT, "ok")).isEqualTo(1.0);
         assertThat(count(StockMetrics.DEDUCT, "insufficient")).isEqualTo(1.0);
@@ -53,12 +53,16 @@ class StockMetricsTest {
                 .as("纳秒→微秒：1500ns→1µs、2000000ns→2000µs").containsExactly(1L, 2_000L, 1L);
         assertThat(events.get(0).actorId()).as("无 MDC ⇒ actorId 为 null").isNull();
         assertThat(events.get(0).actorRole()).as("无 MDC ⇒ actorRole 为 null").isNull();
+        // 块 7 · 阶段 3a.3 第二步新增：**当时剩余**原样透传（本类不查库、不兜底 —— 见 StockEvent#remaining）
+        assertThat(events).extracting(StockEvent::remaining)
+                .as("ok=98 / insufficient=1（扣不动时还剩多少）/ error=null（UPDATE 生效没有都不知道）")
+                .containsExactly(98, 1, null);
     }
 
     @Test
     @DisplayName("⚠️ CAS 0 行记 insufficient、**不是** error —— 判成失败会让告警误报（A 档第 4 条）")
     void zeroRowsIsNotAnError() {
-        metrics.deduct(SKU, 1, Deduct.INSUFFICIENT, 1_500L);
+        metrics.deduct(SKU, 1, Deduct.INSUFFICIENT, 1_500L, 0);
 
         assertThat(count(StockMetrics.DEDUCT, "insufficient")).isEqualTo(1.0);
         assertThat(count(StockMetrics.DEDUCT, "error"))
@@ -94,8 +98,8 @@ class StockMetricsTest {
     @Test
     @DisplayName("业务键只进事件流、绝不进 tag（基数铁律）：两个不同 SKU 共用一个时间序列")
     void skuCodeNeverBecomesATag() {
-        metrics.deduct("SKU-0001", 1, Deduct.OK, 1_500L);
-        metrics.deduct("SKU-0002", 1, Deduct.OK, 1_500L);
+        metrics.deduct("SKU-0001", 1, Deduct.OK, 1_500L, null);
+        metrics.deduct("SKU-0002", 1, Deduct.OK, 1_500L, null);
 
         assertThat(count(StockMetrics.DEDUCT, "ok")).as("两个不同的码落在同一条计数上").isEqualTo(2.0);
         assertThat(registry.find(StockMetrics.DEDUCT).counters())
@@ -112,7 +116,7 @@ class StockMetricsTest {
         int capacity = 2048;
         int extra = 88;
         for (int i = 0; i < capacity + extra; i++) {
-            metrics.deduct(SKU, 1, Deduct.OK, 1_500L);
+            metrics.deduct(SKU, 1, Deduct.OK, 1_500L, null);
         }
 
         List<StockEvent> events = metrics.recentEvents();

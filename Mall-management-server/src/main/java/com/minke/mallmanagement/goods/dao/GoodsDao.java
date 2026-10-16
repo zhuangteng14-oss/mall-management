@@ -461,4 +461,32 @@ public class GoodsDao {
                 + "FROM mall_management_sql.goods_sku ORDER BY Stock ASC, Id ASC LIMIT ?";
         return jdbcClient.sql(sql).param(limit).query().listOfRows();
     }
+
+    /**
+     * 某个 {@code SkuCode} 的**当前**库存 —— 给「**扣完那一刻还剩多少**」取数
+     * （块 7 · 阶段 3a.3 第二步，唯一调用方 {@code OrderService#deductStocks} 的 {@code stockRemaining}）。
+     *
+     * <p>⚠️ <b>本方法答的是「此刻剩多少」，不是「扣减那一刻剩多少」</b>：后者只能由调用方在
+     * <b>扣减那一行 SQL 之后紧接着</b>调本方法取得（口径全文见
+     * {@code StockMetrics.StockEvent#remaining()}）。本方法自身**没有时间语义** ——
+     * 别拿它事后回填一条历史事件：那会往台账里写下一个**当时并不成立**的事实。
+     *
+     * <p>⚠️ {@code null} = 该码在 {@code goods_sku} 里**没有行**（非矩阵商品：订单链路装的是
+     * {@code order_item.ProductCode}，只有矩阵商品才与 {@code SkuCode} 相等 ⇒ 与
+     * {@link #deductStock} 第二条边界同源）。那是**正常分支** ⇒ 用 {@code optional().orElse(null)}
+     * 而**不是** {@code single()}（后者查无此行会抛，把「正常查无」变成异常 ——
+     * 调用方那一层最怕的正是「把正常分支记成 error」）。
+     *
+     * <p>⚠️ <b>{@code SkuCode} 不是唯一键</b>（本表唯一键是 {@code (GoodsId, AxisName)}，见 ④ 段 DDL），
+     * 而 {@link #deductStock} 的 CAS 一次**可能命中多行**。同码多行时「剩余」本来就没有唯一答案，
+     * 本方法不假装有：取 {@code Id} 最小那一行的值。{@code ORDER BY} 是必须的 ——
+     * 光一个 {@code LIMIT 1} 由哪一行胜出**不确定**，同一份数据两次查可以给出不同的数
+     * （本仓在「不确定序」上栽过：{@code ObservedEventDao#selectByBatch} 的
+     * {@code ORDER BY OccurredAt, Id} 是同一条理由）。
+     */
+    public Integer selectStockBySku(String skuCode) {
+        String sql = "SELECT Stock FROM mall_management_sql.goods_sku "
+                + "WHERE SkuCode = ? ORDER BY Id ASC LIMIT 1";
+        return jdbcClient.sql(sql).param(skuCode).query(Integer.class).optional().orElse(null);
+    }
 }

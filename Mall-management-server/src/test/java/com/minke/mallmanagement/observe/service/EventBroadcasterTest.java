@@ -77,17 +77,17 @@ class EventBroadcasterTest {
     @Test
     @DisplayName("since(afterSeq) 只给**之后**的：读走的不再重复给")
     void sinceReturnsOnlyNewerThanTheCursor() {
-        stock.deduct(SKU, 1, StockMetrics.Deduct.OK, 1_500L);
-        stock.deduct(SKU, 1, StockMetrics.Deduct.OK, 1_500L);
-        stock.deduct(SKU, 1, StockMetrics.Deduct.OK, 1_500L);
+        stock.deduct(SKU, 1, StockMetrics.Deduct.OK, 1_500L, null);
+        stock.deduct(SKU, 1, StockMetrics.Deduct.OK, 1_500L, null);
+        stock.deduct(SKU, 1, StockMetrics.Deduct.OK, 1_500L, null);
         broadcaster.poll();
 
         assertThat(broadcaster.since(-1)).as("首次读（-1）= 要一屏全量").hasSize(3);
         assertThat(broadcaster.since(0L)).as("读到 0 之后：还剩 2 条").hasSize(2);
         assertThat(broadcaster.since(2L)).as("读到最新：0 条").isEmpty();
 
-        stock.deduct(SKU, 1, StockMetrics.Deduct.INSUFFICIENT, 1_500L);
-        stock.deduct(SKU, 1, StockMetrics.Deduct.ERROR, 1_500L);
+        stock.deduct(SKU, 1, StockMetrics.Deduct.INSUFFICIENT, 1_500L, null);
+        stock.deduct(SKU, 1, StockMetrics.Deduct.ERROR, 1_500L, null);
         broadcaster.poll();
 
         assertThat(broadcaster.since(2L)).extracting(ObservedEvent::seq)
@@ -108,7 +108,7 @@ class EventBroadcasterTest {
     @Test
     @DisplayName("severity 规则表：error ← result=error；warn ← 被挡/被拒/超时/降级/不足；其余 info")
     void severityFollowsTheOneRuleTable() {
-        stock.deduct(SKU, 1, StockMetrics.Deduct.INSUFFICIENT, 1_500L);      // warn
+        stock.deduct(SKU, 1, StockMetrics.Deduct.INSUFFICIENT, 1_500L, null);      // warn
         stock.release(SKU, 1, StockMetrics.Release.ERROR, 1_500L);           // error
         stock.release(SKU, 1, StockMetrics.Release.MISSING, 1_500L);         // info（「什么也没发生」）
         audit.written("C-1", "goods.add", "goods", "M-1:P-1", 1_500L);       // info
@@ -156,8 +156,8 @@ class EventBroadcasterTest {
     @Test
     @DisplayName("业务键透传 + detail 尾部带 src=环名#源seq（排查时能定位回原环）")
     void keyIsPassedThroughAndDetailCarriesTheSourceRing() {
-        stock.deduct(SKU, 3, StockMetrics.Deduct.OK, 1_500L);
-        stock.deduct(SKU, 4, StockMetrics.Deduct.INSUFFICIENT, 1_500L);
+        stock.deduct(SKU, 3, StockMetrics.Deduct.OK, 1_500L, 97);
+        stock.deduct(SKU, 4, StockMetrics.Deduct.INSUFFICIENT, 1_500L, 1);
 
         broadcaster.poll();
         List<ObservedEvent> events = broadcaster.since(-1);
@@ -179,6 +179,12 @@ class EventBroadcasterTest {
                 .isEqualTo(resultAfterEq);
         assertThat(events).extracting(ObservedEvent::epochMilli).as("墙钟时刻原样透传（源环记的就是墙钟）")
                 .allSatisfy(ts -> assertThat(ts).isPositive());
+        // 块 7 · 阶段 3a.3 第二步：**当时剩余**从源环一路带到合并环（StockEvent.remaining → ObservedEvent.remaining）。
+        //   ⚠️ 这条断言是**正向**的（传了值、值真的过来了）—— 只钉「release 时为 null」那一半的写法
+        //   零判别力：把 add(...) 里那个形参写死成 null，只有这一句会红（见 TD 里「负向一半不构成判据」）。
+        assertThat(events).extracting(ObservedEvent::remaining)
+                .as("扣档 97 / 不足档 1 原样带出（其余八环恒 null，见 ObservedEvent#remaining 的裁定）")
+                .containsExactly(97, 1);
     }
 
     @Test
@@ -274,7 +280,7 @@ class EventBroadcasterTest {
         int capacity = 2048;
         int extra = 88;
         for (int i = 0; i < capacity + extra; i++) {
-            stock.deduct(SKU, 1, StockMetrics.Deduct.OK, 1_500L);
+            stock.deduct(SKU, 1, StockMetrics.Deduct.OK, 1_500L, null);
         }
 
         assertThat(broadcaster.poll()).as("并入的是**源环还剩的** %d 条，不是全部", capacity).isEqualTo(capacity);
@@ -291,7 +297,7 @@ class EventBroadcasterTest {
         int capacity = 2048;
         int extra = 88;
         for (int i = 0; i < capacity + extra; i++) {
-            stock.deduct(SKU, 1, StockMetrics.Deduct.OK, 1_500L);
+            stock.deduct(SKU, 1, StockMetrics.Deduct.OK, 1_500L, null);
             broadcaster.poll();          // 逐条推进，确保每条都真进了合并环
         }
 
@@ -309,7 +315,7 @@ class EventBroadcasterTest {
         cache.l1Request("goods", "k1", true, 1_500L);
         lock.acquire("order:create", "O-1", MallLockMetrics.Outcome.ACQUIRED, 1_000_000L);
         order.transition(OrderAction.CREATE, "none", "waitPay", MallOrderStateMetrics.Result.APPLIED, "O-1", 1_500L);
-        stock.deduct(SKU, 1, StockMetrics.Deduct.OK, 1_500L);
+        stock.deduct(SKU, 1, StockMetrics.Deduct.OK, 1_500L, null);
         audit.written("C-1", "order.add", "order", "O-1", 1_500L);
         notify.sent("email", "order.created", "C-1", 1_500L);
         sensitive.masked("comment", 0, 20, null, 1_500L);

@@ -173,16 +173,23 @@ public class EventStreamService {
         // 块 7 · commit 8c：演练批次（日常流量为 null）。页面的 traceId 抽屉按它把
         // 「一次演练里的全部事件」与日常流量分开 —— 只读展示，不参与筛选。
         row.put("batchId", e.batchId());
-        // 块 7 · 阶段 3a.3 新增三键（帧 11 → 14）。⚠️ 三者的口径都在 ObservedEvent 的 javadoc 里：
+        // 块 7 · 阶段 3a.3 新增三键（帧 11 → 14）+ 第二步再增一键（帧 14 → 15）。
+        // ⚠️ 四者的口径都在 ObservedEvent 的 javadoc 里：
         //   actor      「**谁**做的」—— 拼成 {id, role} 对象；无身份时**整个 actor 为 null**
         //              （不是 {id:null,role:null}：那是「有一个身份，但它的两个字段都空」，
         //               与「根本没有身份」在页面上是两句话，不能混）
         //   durationUs 本条事件主体的耗时（微秒）；null = 没测到 / 不适用（逐环口径见各 Metrics 类）
+        //   remaining  扣减那一刻该 SKU 的剩余（件，块 7 · 阶段 3a.3 第二步新增）——
+        //              **只有库存环的扣减档**有值，其余八环与库存环的释放档恒为 null
+        //              （口径与三类 null 见 StockMetrics.StockEvent#remaining()）
         //   fields     结构化明细（与 detail 同源）；null 时前端回落到 detail
         // ⚠️ 顺序刻意排在这里（batchId 之后）：前 11 个键的名字与顺序一个字没动 ——
-        //    既有前端与探针按位置或按名读都照旧
+        //    既有前端与探针按位置或按名读都照旧；本步新增的 remaining 也排在**末尾那三键
+        //    之前**（即 actor / durationUs 之后、fields 之前）：fields 是那只「袋子」，
+        //    让它继续待在最后一位（袋子一挪，靠位置读它的调用方就全错位了）。
         row.put("actor", actorMap(e.actorId(), e.actorRole()));
         row.put("durationUs", e.durationUs());
+        row.put("remaining", e.remaining());
         row.put("fields", e.fields());
         return row;
     }

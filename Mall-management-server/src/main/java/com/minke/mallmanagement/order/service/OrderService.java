@@ -1057,8 +1057,20 @@ public class OrderService {
             // **逐 sku** 发的，两者对不上。⚠️ 计时变量必须声明在 try **外**：catch 里也要用（编译期作用域）
             long deductStartedNanos = System.nanoTime();
             try {
-                int rows = goodsDao.deductStock(clip(s.code(), 40), s.qty());
+                // 块 7 · 阶段 3a.3 第二步：**先算好落库用的那一串**，两处共用同一个值 ——
+                // ⚠️ 下面那条 SELECT 必须用它（列宽 40 是 `goods_sku.SkuCode` 的硬约束，
+                //    超长的码落库时已被截断 ⇒ 拿未截断的原串去查必定查无此行，静默给出 null 剩余）。
+                String sku = clip(s.code(), 40);
+                int rows = goodsDao.deductStock(sku, s.qty());
                 long deductNanos = System.nanoTime() - deductStartedNanos;
+                // 块 7 · 阶段 3a.3 第二步：**扣完那一刻的剩余**（口径全文见
+                // `StockMetrics.StockEvent#remaining()`）——必须在 CAS **之后**读、而在
+                // 发事件**之前**读，中间不夹别的事。⚠️ 它**不进 deductNanos 的计时窗**：
+                // 计时口径（a）钉的是「紧包那一行 CAS」那一条 SQL，加进来会把两个操作的
+                // 耗时摊成一个数（本仓「一个数说两件事」的老毛病）。
+                // ⚠️ 读它与扣减**失败也要能分开**：stockRemaining 自己吞异常 ⇒ 读不到只是
+                //    少一个展示字段，**绝不把一次成功的 CAS 记成 error**（那是反向误报）。
+                Integer remaining = stockRemaining(sku);
                 // 块 7 · 观测（commit 2）：**两条通道在同一调用点**发（计数 + 事件流）——
                 // 与既有三环同款。0 行记 INSUFFICIENT 而**不是** ERROR：CAS 没命中是正常分支
                 // （库存不足 / 非矩阵商品无行，见上面的 javadoc），记成错误会让告警误报。
@@ -1066,18 +1078,49 @@ public class OrderService {
                 // ⚠️ 埋点判据与下面的返回值判据**刻意不同**（{@code rows == 1} vs {@code rows > 0}）：
                 //    指标口径是既有契约，本笔不动；返回值的语义是「这批库存**被动过**吗」，
                 //    只要有一行命中就成立 —— {@code SkuCode} 不是唯一键，理论上一条明细可以命中多行。
+                // ⚠️ 事件里的 skuCode 仍用**未截断**的 {@code s.code()}（既有口径，本笔不动）：
+                //    展示串要还原商家填的原值，而查库用的才是截断后的那一串。
                 stockMetrics.deduct(s.code(), s.qty(),
-                        rows == 1 ? Deduct.OK : Deduct.INSUFFICIENT, deductNanos);
+                        rows == 1 ? Deduct.OK : Deduct.INSUFFICIENT, deductNanos, remaining);
                 if (rows > 0) {
                     anyDeducted = true;
                 }
             } catch (Exception e) {
                 // 异常这一路也埋点：否则「扣减根本没发出去」在指标上与「一次都没下单」无法区分。
-                stockMetrics.deduct(s.code(), s.qty(), Deduct.ERROR, System.nanoTime() - deductStartedNanos);
+                // ⚠️ remaining 传 null：UPDATE 到底生效没有都不知道，剩余更无从谈起（口径 ②）。
+                stockMetrics.deduct(s.code(), s.qty(), Deduct.ERROR, System.nanoTime() - deductStartedNanos, null);
                 log.warn("订单明细 {} 的库存扣减失败（跳过该条，不动订单结论）：{}", s.code(), e.toString());
             }
         }
         return anyDeducted;
+    }
+
+    /**
+     * 读某个 SKU 的**当前**库存，**任何失败都吞掉并返回 {@code null}**（块 7 · 阶段 3a.3 第二步）。
+     * **fail-soft，与 {@link #markStockDeducted} 同款**。
+     *
+     * <p>⚠️ <b>为什么必须单独一层 try</b>：这是「给事件补一个展示字段」，而它下面紧邻的是
+     * {@link GoodsDao#deductStock} 的 {@code catch (Exception e)} —— 那条路会把异常记成
+     * {@code Deduct.ERROR}（一个用来告警的取值）。若本方法的异常漏到那一层，就会发生
+     * <b>「库存已经真的扣成了，事件却报 error」</b> 的反向误报：告警响了、人去查、发现账是对的。
+     * 为一个展示字段造出一次假告警，代价远大于这个字段本身。
+     *
+     * <p>⚠️ 返回值语义：{@code null} = 读不到（DAO 抛异常 / 该 {@code SkuCode} 在
+     * {@code goods_sku} 里没有行 —— 非矩阵商品属这一档，是**正常**）。两种成因不区分：
+     * 对「页面上这一格有没有数」而言它们是同一件事，且区分它们要靠把异常分类，
+     * 那会引出本类不该有的耦合。
+     *
+     * @param skuCode <b>已经截断到列宽</b>的那一串（调用方 {@link #deductStocks} 算好的
+     *                —— 拿未截断的原串来查，长码会静默查无此行）
+     */
+    private Integer stockRemaining(String skuCode) {
+        try {
+            return goodsDao.selectStockBySku(skuCode);
+        } catch (Exception e) {
+            log.warn("订单明细 {} 的剩余库存读取失败（只影响这一条事件的 remaining，扣减结论不受影响）：{}",
+                    skuCode, e.toString());
+            return null;
+        }
     }
 
     /**

@@ -1,0 +1,160 @@
+═══════════════════════════════════════════════════════════════════════
+块 7 · 阶段 3a.3 第二步 —— 迁移 ㉒ 落库只读复核（第一手实测）
+日期：2026-10-17   工具：_work/ApplyMigration.java + _work/Sql.java（只读）
+凭据：_work/b6-c7-db-env.sh 剥壳取，未打印未落盘
+═══════════════════════════════════════════════════════════════════════
+
+── 1. 全库表数（期望 38：㉒ 是加列、不建表 ⇒ 不变）──
+tables_n
+38
+-- rows: 1
+
+── 2. 全库非主键索引数（期望 74：㉒ 不加索引 ⇒ 不变）──
+nonpk_index_n
+74
+-- rows: 1
+
+── 3. 全库非主键 UNIQUE 数（期望 19：不变）──
+nonpk_unique_n
+19
+-- rows: 1
+
+── 4. observed_event 全部列（期望 16 列 = ⑲-1 的 11 + ㉑ 的 3 + ㉒ 的 2）──
+       ⚠️ 新两列应落在 DurationUs 之后、OccurredAt 之前（AFTER 链）⇒ ORDINAL 12 / 13。
+pos	COLUMN_NAME	COLUMN_TYPE	IS_NULLABLE	char_max
+1	Id	bigint	NO	null
+2	Kind	varchar(16)	NO	16
+3	Severity	varchar(16)	NO	16
+4	Title	varchar(255)	NO	255
+5	ObjectType	varchar(32)	YES	32
+6	ObjectId	varchar(128)	YES	128
+7	TraceId	varchar(64)	YES	64
+8	BatchId	varchar(36)	YES	36
+9	ActorId	varchar(50)	YES	50
+10	ActorRole	int	YES	null
+11	DurationUs	bigint	YES	null
+12	RemainingStock	int	YES	null
+13	FieldsJson	json	YES	null
+14	OccurredAt	datetime(3)	NO	null
+15	created_at	datetime	NO	null
+16	updated_at	datetime	NO	null
+-- rows: 16
+
+── 5. observed_event 列数（期望 16）──
+col_n
+16
+-- rows: 1
+
+── 6. 新两列的类型 / 可空 / 默认（期望 RemainingStock = int / YES / NULL，FieldsJson = json / YES / NULL）──
+COLUMN_NAME	DATA_TYPE	COLUMN_TYPE	IS_NULLABLE	COLUMN_DEFAULT	DATETIME_PRECISION
+FieldsJson	json	json	YES	null	null
+RemainingStock	int	int	YES	null	null
+-- rows: 2
+
+── 7. 新两列的中文列注释**实读**（Windows/GBK 环境下的乱码检查；注释里的裁定原话要能读出来）──
+COLUMN_NAME	COLUMN_COMMENT
+FieldsJson	事件的结构化明细（帧里那个 fields 的落库副本），让回放页与实时页讲同一件事；⚠️ 口径修订：㉑ 段头「fields 不进列」被用户 2026-10-17 裁定推翻（不加则回放缺当时的数据流程、无法溯源），detail/key 仍不进列；⚠️ 本列不截断（截断=非法 JSON=整批进死信）
+RemainingStock	扣减**那一刻**该 SKU 的剩余件数（int，单位=件）；⚠️ 是「当时」不是「此刻」—— 事后回查 goods_sku 拿到的是现在的值；NULL = 读剩余的 SELECT 失败 / 扣减抛异常（error 档）/ 本行是释放档（口径全文见 StockMetrics.StockEvent#remaining）
+-- rows: 2
+
+── 8. observed_event 索引（期望 6 行 = PRIMARY + 4 个非唯一索引，kind_time 是两列复合 ⇒ 占 2 行；㉒ 不动索引）──
+INDEX_NAME	NON_UNIQUE	SEQ_IN_INDEX	COLUMN_NAME
+idx_observed_event_batch	1	1	BatchId
+idx_observed_event_kind_time	1	1	Kind
+idx_observed_event_kind_time	1	2	OccurredAt
+idx_observed_event_time	1	1	OccurredAt
+idx_observed_event_trace	1	1	TraceId
+PRIMARY	0	1	Id
+-- rows: 6
+
+── 9. 顺带对照：㉑ 的三列仍在（㉒ 只在其后追加，不该动它们）──
+COLUMN_NAME	COLUMN_TYPE	IS_NULLABLE	pos
+ActorId	varchar(50)	YES	9
+ActorRole	int	YES	10
+DurationUs	bigint	YES	11
+-- rows: 3
+
+── 10. 行数 + 存量行里新两列的非空计数（迁移只加列、不回填）──
+       ⚠️ 读法：本条若读在「新代码的后端还没写过」之前 ⇒ 期望全 0；
+          若读在之后 ⇒ 有值也是正常的（那时新写入方已经在落这两列）。
+          所以「非 0 还是 0」**不单独构成判据**，判据是第 11 条的阳性质控 + 第 12 条的真实回读。
+rows_total	remaining_notnull	fields_json_notnull
+38626	1	5
+-- rows: 1
+
+── 11. 反面对照（阳性质控）：同一张表的**老列** BatchId / TraceId 的非空计数 ——
+       它们必须**不是** 0（演练与真实流量写过），否则说明上面那条读的是空表、那个 0 无意义。
+batch_id_notnull	trace_id_notnull
+32309	37844
+-- rows: 1
+
+── 12. 真实回读：最近 5 条**扣减档**事件的两列原文（这是本迁移唯一有说服力的判据 ——
+       列存在只是「MySQL 收下了」，能读到**当时剩余**与**明细 JSON** 才是「写进来了」）──
+Id	Kind	Title	ObjectId	RemainingStock	FieldsJson
+553152	stock	库存扣减	SEED-GD-104-7045	59	{"qty": 1, "sku": "SEED-GD-104-7045", "kind": "deduct", "result": "ok"}
+547624	stock	库存释放	SEED-GD-103-5196	null	null
+547623	stock	库存释放	SEED-GD-103-5196	null	null
+547622	stock	库存释放	SEED-GD-103-5196	null	null
+547621	stock	库存释放	SEED-GD-103-5196	null	null
+-- rows: 5
+== 产物 → docs/agent/evidence/c3-block7/3a3c-migration-22-verify.txt ==
+
+═══════════════════════════════════════════════════════════════════════
+附录（手写，非脚本输出）：上面第 12 条那两列是**怎么**被写进去的
+═══════════════════════════════════════════════════════════════════════
+上面 1–11 条只能证明「MySQL 收下了这两列」（DDL 层）；第 12 条能读到真值，是因为
+中间跑了一次**真实的链路**。把这条链路的每一环记在这里，便于复核：
+
+  ① 后端重启为**新代码**（`./mvnw spring-boot:run -Dspring-boot.run.profiles=dev`，
+     PID 23424，`Started MallManagementApplication in 8.156 seconds`）。
+     旧进程（PID 31868，00:38 启的）已按端口强杀 —— 它跑的是**第一步**的类，
+     没有 RemainingStock / FieldsJson 的携带代码 ⇒ **不重启则第 12 条永远是 null**。
+     ⚠️ 口令从 `_work/mq-pass` 读进环境变量注入（**未回显**）；不注入 = RabbitMQ
+     ACCESS_REFUSED = 整台起不来（第一次重启就栽在这里，日志在 `_work/3a3/backend-boot-live2.txt`）。
+  ② 发一单真实请求（HTTP 200，`{"msg":"订单添加成功","success":true}`）：
+     `POST http://localhost:8088/order/orderAdd`
+     参数：`CustomerId=B7CAPC-sgu0g` / `MerchantId=B7CAPM-sgu0g` /
+     `OrderId=PROBE3A3B-20261017-01`（**每次要换**：撞唯一键会走「订单已存在」早退分支，
+     根本不扣）/ `Price=1` / `Quantity=1` / `PayIf` `DeliveryIf` `ReceiveIf` = 0 /
+     `Items=[{"code":"SEED-GD-104-7045","name":"probe","price":1,"qty":1}]`。
+     ⚠️ 明细刻意走**显式 `Items`**（JSON）而不是 `ProductInformation` 回落口径 —— 前者的
+     `code` 是逐字给定的；后者靠反推，验证时不该把两件事混在一起。
+     ⚠️ 参数值全 ASCII：Windows/GBK 下 curl 传中文会变乱码（本仓记过这个坑）。
+  ③ 扣减真的发生了：`goods_sku` 里 `SEED-GD-104-7045` 的 `Stock` 由 **60 → 59**。
+  ④ 事件经 `StockMetrics.deduct(...)` → 广播器 → 发布方 → RabbitMQ → 消费者 →
+     台账落库，**1 秒内**可读；第 12 条那个 `Id = 553152` 就是它。
+     `RemainingStock = 59` 与第 ③ 步的读回值**一致** ⇒ 「当时剩余」取的是**扣完之后**的值，
+     不是扣之前、也不是事后回查的当前值。
+     `FieldsJson` 被 MySQL 的 `json` 列**接受并读回**（读回来还是 JSON 对象，不是字符串）
+     ⇒ 落进去的是合法 JSON，`ObservedEventDao` 那段序列化是对的。
+  ⑤ ⚠️ **一分钟后它会变**（复核时务必知道这条，否则会以为记录写错了）：
+     本单没有支付，**超时取消 job** 于 01:12:54 把它回补了 ⇒ 现在再读 `goods_sku` 是 **60**
+     （不是 59）。第 ③ 步的 59 是**当时**的快照。这条回补本身也是**正面证据**：
+     回补那次事件（`Id = 553153`，title=库存释放）的 `RemainingStock` 是 **null**，
+     与 `StockMetrics#release` 的「释放档刻意不取数」**逐字对上** —— 这不是单测里的声明，
+     是库里读出来的事实。同一批 6 行还顺带证明了 `FieldsJson` 在**别的环**也落
+     （lock / order / identity 三环各有一条，见下）。
+
+  ⚠️ 本附录与上面第 1–11 条**不是**同一时刻：第 1–11 条跑在两列已非空**之后**，所以
+     第 10 条那个「新列非空计数」读到的**不是 0**（当时 `remaining = 1` / `fields = 5`，
+     本条复核时已涨到 **1 / 6**）。**判据不靠第 10 条**，靠第 11 条的阳性质控 + 第 12 条的真实回读。
+     下面这 6 行就是当时带 `FieldsJson` 的全部行（同一次请求产生，除最后一行是回补）：
+
+  Id	  Kind	    Title	              RemainingStock	 FieldsJson
+  553153  stock	   库存释放	            null          {"qty": 1, "sku": "SEED-GD-104-7045", "kind": "release", "result": "ok"}
+  553152  stock	   库存扣减	            59            {"qty": 1, "sku": "SEED-GD-104-7045", "kind": "deduct", "result": "ok"}
+  553151  lock	   释放锁	            null          {"key": "PROBE3A3B-20261017-01", "lock": "order-add", "result": "released"}
+  553150  order	   状态流转 null → CREATED   null          {"to": "CREATED", "from": null, "order": "PROBE3A3B-20261017-01", "action": "create", "result": "applied"}
+  553149  lock	   取锁成功	            null          {"key": "PROBE3A3B-20261017-01", "lock": "order-add", "result": "acquired"}
+  553148  identity 身份放行	            null          {"reason": null, "subject": "B7CAPC-sgu0g"}
+
+  （⚠️ 上面这张表是手抄的，原样输出见本节末尾的复跑命令；`remaining` 只有库存**扣减档**有值，
+   其余五行 null 是设计如此，不是漏写。）
+
+  ── 复跑命令（只读；凭据从 `_work/b6-c7-db-env.sh` 剥壳取，未打印）──
+  bash _work/3a3/verify-22.sh
+  # 附录这两条单独跑：
+  #   . _work/b6-c7-db-env.sh >/dev/null 2>&1
+  #   java -cp $HOME/.m2/.../mysql-connector-j-8.0.31.jar _work/Sql.java \
+  #        "SELECT Id, Kind, Title, RemainingStock, FieldsJson, OccurredAt FROM observed_event WHERE FieldsJson IS NOT NULL ORDER BY Id DESC"
+  #   java -cp ... _work/Sql.java "SELECT SkuCode, Stock FROM goods_sku WHERE SkuCode = 'SEED-GD-104-7045'"

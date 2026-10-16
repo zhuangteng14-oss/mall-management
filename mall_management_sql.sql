@@ -2004,3 +2004,52 @@ SET @s := (SELECT IF(COUNT(*) = 0,
   FROM information_schema.COLUMNS
   WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'observed_event' AND COLUMN_NAME = 'DurationUs');
 PREPARE _p FROM @s; EXECUTE _p; DEALLOCATE PREPARE _p;
+
+-- ============================================================
+-- Migration: C3 块7 · 阶段 3a.3 第二步 日志页字段补齐（续）  Date: 2026-10-17
+-- 依据：用户 2026-10-17 的两条裁定（「剩余库存」+「fields 进台账」）与「合并成一笔后端补丁」的建议。
+-- 用途：`observed_event` 台账再补两列 —— 「**当时还剩多少**」与「**当时的结构化明细**」。
+--       · `RemainingStock` int：扣减那一刻该 SKU 的剩余件数（**有界标量**，能被索引/聚合）。
+--         ⚠️ 是「**当时**」不是「此刻」：事后拿 `SkuCode` 回查 `goods_sku` 拿到的是现在的库存，
+--         中间可能又卖出几十件 ⇒ 取值点只能钉在**扣减那一行 SQL 之后**（`OrderService.deductStocks`），
+--         由业务侧现读现传，metrics 类只透传。
+--         `NULL` = 三类（都不是「用了兜底值」）：读剩余的 SELECT 自己失败 / 扣减抛异常（error 档）/
+--         本行是**释放档**（释放一侧刻意不取数，见 `StockMetrics#release`）。
+--         ⚠️ 列名取名词 `RemainingStock`（台账是平表，叫 `Remaining` 太含糊）；
+--         帧里在库存语境下叫 `remaining`（帧键名与列名不必逐字相同，既有 `durationUs`/`DurationUs`
+--         也是这样一对）。
+--       · `FieldsJson` json：事件的结构化明细（帧里那个 `fields` 的落库副本）。
+--         ⚠️ **口径修订（如实记录，不偷偷改）**：㉑ 的段头逐字写着「不给 `detail` / `fields` 加列」，
+--         理由是「有界标量进列，无界自由文本不进」。用户 2026-10-17 裁定**推翻其中的 `fields` 这一半**，
+--         原话：「加（不然会缺失当时的数据流程，没办法朔源性找寻病因，那这个回放的作用就降低了）」。
+--         `detail` 与 `key` **仍不进列**（那一半口径不变）。取舍与代价写在 `ObservedEventDao` 类注释里。
+--         ⚠️ 这一列**绝不截断**：截断一段 JSON 得到的是**非法 JSON**，`json` 列在严格模式下会
+--         **整条拒绝** ⇒ 那不是「少一截」而是「整批进死信」（比其它列的截断取舍严酷得多）。
+-- ⚠️ **回放（`selectByBatch`）会多带这两列**，既有列的名字与顺序一个字没动。给前端两条提醒：
+--    · `FieldsJson` 从 JDBC 出来是**字符串**（JSON 文本），前端要用它得先 `JSON.parse`；
+--    · `RemainingStock` 只有库存环的**扣减档**有值，其余为 `NULL`。
+-- ⚠️ P3 门禁：本次**不新增表、不新增索引** ⇒ `ConcurrencyRunner.java` 的 KNOWN_TABLES / 期望表数、
+--    `db-schema.md` 的非主键索引计数**都不动**；但**列数变了** ⇒ `db-schema.md` 里 observed_event
+--    的**物理列数**需同步（14 → 16；其中 `insertBatch` 写的那一段 11 → 13）。
+-- 回滚（逻辑废弃，执行前须人工确认；**不 DROP 数据**，只停用）：
+--       ALTER TABLE `observed_event` DROP COLUMN `RemainingStock`;  -- 须人工确认
+--       ALTER TABLE `observed_event` DROP COLUMN `FieldsJson`;      -- 须人工确认
+-- ============================================================
+
+-- ---- ㉒ `observed_event` 加两列（当时剩余 / 结构化明细）----
+-- ⚠️ 逐列两条独立语句、各自判存在：一条失败不该让另一条也不落（与 ⑲-2…⑲-5、㉑ 的三条同款）。
+-- ⚠️ 顺序：`RemainingStock` 接在 `DurationUs` 之后、`FieldsJson` 接在 `RemainingStock` 之后
+--    —— 与 `ObservedEventDao` 的 ROW_PLACEHOLDERS / `params.add` 顺序**逐位对齐**（三处必须一起改）。
+SET @s := (SELECT IF(COUNT(*) = 0,
+  'ALTER TABLE `observed_event` ADD COLUMN `RemainingStock` int DEFAULT NULL COMMENT ''扣减**那一刻**该 SKU 的剩余件数（int，单位=件）；⚠️ 是「当时」不是「此刻」—— 事后回查 goods_sku 拿到的是现在的值；NULL = 读剩余的 SELECT 失败 / 扣减抛异常（error 档）/ 本行是释放档（口径全文见 StockMetrics.StockEvent#remaining）'' AFTER `DurationUs`',
+  'DO 0')
+  FROM information_schema.COLUMNS
+  WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'observed_event' AND COLUMN_NAME = 'RemainingStock');
+PREPARE _p FROM @s; EXECUTE _p; DEALLOCATE PREPARE _p;
+
+SET @s := (SELECT IF(COUNT(*) = 0,
+  'ALTER TABLE `observed_event` ADD COLUMN `FieldsJson` json DEFAULT NULL COMMENT ''事件的结构化明细（帧里那个 fields 的落库副本），让回放页与实时页讲同一件事；⚠️ 口径修订：㉑ 段头「fields 不进列」被用户 2026-10-17 裁定推翻（不加则回放缺当时的数据流程、无法溯源），detail/key 仍不进列；⚠️ 本列不截断（截断=非法 JSON=整批进死信）'' AFTER `RemainingStock`',
+  'DO 0')
+  FROM information_schema.COLUMNS
+  WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'observed_event' AND COLUMN_NAME = 'FieldsJson');
+PREPARE _p FROM @s; EXECUTE _p; DEALLOCATE PREPARE _p;
