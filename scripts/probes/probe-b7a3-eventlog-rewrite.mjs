@@ -33,6 +33,11 @@
 //      · 折行几何（2 行上限 / 续行 2ch / hover 展开，**注入一段长文本**才量得到）· 树形前缀两段 + 提亮
 //      · 对象可点与 `objectId` 一致 · ⑤ 链里每条事件的中英文两层。
 //      ⚠️ 本段**必须在 ⑯ 之前**（⑯ 会把数据源切到「模拟日常」，那之后量不到真流那 161 行）。
+//   ㉔ **3a.3 前端 4 块**（用户 2026-10-17 放行）：A `sentence()` 自然流拼接器（逐 kind 从句 +
+//      括号里的 trace 短号 / 耗时 / **剩余 N**；`fields` 优先、回落 `detail`；缺槽位整段不出现）
+//      · B 色系（键/值/值·最次要/可点四档，对的是 **admin 主题的计算色**）· C `api-labels.js`
+//      146 条 + 兜底 + 三个取用口 · D 图标与文字 **6–8px**（② 类清单 / ② 严重度 / ④ 两排 / ⑤ 链）。
+//      ⚠️ 同样**必须在 ⑯ 之前**（理由同上）。CSV 表头 13 → 16 列那一条挂在 ⑲ 里。
 import fs from 'node:fs'
 import { open, sleep, report } from '../../docs/美化/_cdp.mjs'
 
@@ -78,24 +83,104 @@ const TRACE = 'trace0001'
 
 /** 九类「有意思的」事件（一条一类）—— 与 FRAME2 的 8 条**同属一次请求**，
  *  ⇒ 它们会连续、且 `traces` 里有这条记录 ⇒ 满足包组条件，③ 里会长成一组树。
- *  ⚠️ ts 按 i 递减：全部晚于 BULK，且收拍内按 ts 倒序排 ⇒ 卡片顺序 = KINDS 声明序。 */
+ *  ⚠️ ts 按 i 递减：全部晚于 BULK，且收拍内按 ts 倒序排 ⇒ 卡片顺序 = KINDS 声明序。
+ *
+ *  ⚠️ 3a.3 起这九条**补上了 `fields` 等五个新键**（帧 11 → 15 键），原因是 A 块 `sentence()`
+ *     的**首选**路径就是读 `fields`：不补的话本段所有句子断言走的都是回落路径，
+ *     「优先读 fields」那一半判据等于没测（同「负向一半不算判据」）。
+ *     五个新键的形状逐条对齐后端 `EventBroadcaster` 的 `Emit`（九个环各一套，别混）。
+ *  ⚠️ 三条**故意**造出来当对照，缺一条就有一半判据是空的：
+ *     · `cache` 的 `fields.cache` 与 `detail` 里的区名**不一致** ⇒ 才判得出「谁优先」；
+ *     · `notify` **只给 detail、不给 fields** ⇒ 才是真的在测回落分支；
+ *     · `protection` 的 `scope` **33 字符**（≥ 前端 `VALUE_MINOR_LEN = 16`）⇒ 才判得出
+ *       「长值降一档」（配一条短的 `email` 作对照，证明是**按长度**分档、不是「全给 v3」）。 */
 const PERKIND = [
-  ['cache', '缓存命中（L1）', 'cache=goodstype result=hit key=all', 'goodsType:all'],
-  ['lock', '取锁成功（order:create）', 'key=order:create result=acquired', 'order:create/O-1'],
-  ['order', '状态流转 waitPay → waitShip', 'orderId=O-1 from=waitPay to=waitShip', 'O-1'],
-  ['stock', '库存扣减', 'sku=SKU-0001 qty=1 result=ok', 'SKU-0001'],
-  ['audit', '审计写入', 'action=goods.delete actor=C-1', 'M-1:P-1'],
-  ['notify', '通知发送', 'type=email event=order.paid', 'C-1'],
-  ['sensitive', '敏感词拒收', 'scene=评论 hit=9 total=20 result=rejected', '傻逼,滚'],
-  ['identity', '身份拒绝', 'subject=C-1 reason=令牌过期 result=rejected', 'C-1'],
-  ['protection', '限流拦截', 'key=rateLimit result=blocked', 'rateLimit'],
-].map(([kind, title, detail, objectId], i) => ({
+  {
+    kind: 'cache', title: '缓存命中（L1）',
+    detail: 'cache=goodstype result=hit key=all', objectId: 'goodsType:all',
+    fields: { cache: 'goodsHome', result: 'hit', key: 'all', src: 'cache#7' },
+  },
+  {
+    kind: 'lock', title: '取锁成功（order:pay）',
+    detail: 'lock=order-pay result=acquired key=order:pay/O-1', objectId: 'order:pay/O-1',
+    // ⚠️ 锁名必须是 `DistributedLockService.LockName` 那**五把**之一（`order-pay`），
+    //    写 `order:create` 这种不存在的值只会走兜底、测不到 `LOCK_LABEL` 那一步。
+    fields: { lock: 'order-pay', result: 'acquired', key: 'order:pay/O-1', src: 'lock#4' },
+  },
+  {
+    kind: 'order', title: '状态流转 CREATED → PAID',
+    detail: 'action=pay result=ok order#O-1', objectId: 'O-1',
+    // ⚠️ from/to 用 `OrderState` 的**枚举名**（后端 `stateName()` 的返回值）—— 与真实
+    //    vocabulary 对齐；`waitPay` 那套是 `ORDER_FLOW_STATE_LABEL`，是**另一张表**。
+    fields: { action: 'pay', result: 'ok', from: 'CREATED', to: 'PAID', order: 'O-1', src: 'order#2' },
+    durationUs: 12400,
+  },
+  {
+    kind: 'stock', title: '库存扣减',
+    detail: 'kind=deduct sku=SKU-0001 qty=1 result=ok', objectId: 'SKU-0001',
+    fields: { kind: 'deduct', sku: 'SKU-0001', qty: '1', result: 'ok', src: 'stock#9' },
+    // ⚠️ 「剩余 N」—— 这是 3a.3 第二步才进帧的那一列（九个调用点里只有扣减档有值）
+    //    ⇒ 用户点名要它出现在句子里，本段由它一处提供。
+    remaining: 7,
+  },
+  {
+    kind: 'audit', title: '审计写入',
+    detail: 'actor=C-9 action=goods.delete reason=违规下架', objectId: 'M-1:P-1',
+    fields: { actor: 'C-9', action: 'goods.delete', reason: '违规下架', src: 'audit#3' },
+  },
+  {
+    kind: 'notify', title: '通知发送',
+    detail: 'to=email event=order.paid reason=下单成功',
+    // ⚠️ **本条是两重对照**，两处都不是随手写的：
+    //    ① `fields: null`（显式）⇒ 走 `parseDetail(e.detail)` 的**回落路径**；
+    //    ② `objectId: ''` ⇒ 页面在「对象列」上该做的是**根本不画**（`objText()` 对空 id 返回
+    //       空串，模板 `v-if="r.obj"` 挡掉），而不是画一个点不动/点了没反应的假链接。
+    //       没有这条负面对照，㉓7 那条「有则都有、无则都无」就是**空真**（159 === 159，两侧都 0）。
+    objectId: '',
+    fields: null,
+  },
+  {
+    kind: 'sensitive', title: '敏感词拒收',
+    detail: 'scene=评论 hit=9/20 result=rejected', objectId: '傻逼,滚',
+    fields: { scene: '评论', hit: 9, total: 20, src: 'sensitive#1' },
+    // ⚠️ 亚毫秒那档（<1000 µs）：句子该写 `850 µs` 而不是四舍五入成 `1 ms`（或 `0 ms`）。
+    durationUs: 850,
+  },
+  {
+    kind: 'identity', title: '身份拒绝',
+    detail: 'subject=C-1 reason=令牌过期 result=rejected', objectId: 'C-1',
+    fields: { subject: 'C-1', reason: '令牌过期', src: 'identity#5' },
+  },
+  {
+    kind: 'protection', title: '限流拦截',
+    detail: 'protection=rateLimit scope=/admin/observe/attack/run result=blocked', objectId: 'rateLimit',
+    fields: {
+      protection: 'rateLimit',
+      scope: '/admin/observe/attack/run 全路径限流窗口',
+      extra: 'qps=20', src: 'protection#2',
+    },
+    actor: { id: 'C-9', role: 3 },
+    batchId: 'b-7a3-#12',
+  },
+].map((x, i) => ({
   seq: 1000 + i,
   ts: T + 5000 + (8 - i) * 4,
-  kind,
-  severity: kind === 'sensitive' || kind === 'identity' || kind === 'protection' ? 'warn' : 'info',
-  title, detail, key: objectId, objectType: kind, objectId,
+  kind: x.kind,
+  severity: x.kind === 'sensitive' || x.kind === 'identity' || x.kind === 'protection' ? 'warn' : 'info',
+  title: x.title,
+  detail: x.detail,
+  key: x.objectId,
+  objectType: x.objectType || x.kind,
+  objectId: x.objectId,
   traceId: TRACE,
+  // ⚠️ 3a.3 第二步起的五个新键。`undefined` 会被 `JSON.stringify` 丢掉（= 帧里没有这一键，
+  //    与旧后端同形）；`fields: null` 那一条是**显式**要它缺席，两者在 `absorbEvents` 里
+  //    落到同一个结果（`null`），但写出来的意图不同 —— 别把 `null` 那条改成 `undefined`。
+  batchId: x.batchId,
+  actor: x.actor,
+  durationUs: x.durationUs,
+  remaining: x.remaining,
+  fields: x.fields,
 }))
 
 /** 批量事件（第 1 拍），把条数撑过旧版的一页（100）。**没有 traceId** —— 专门用来验「不可点」。 */
@@ -180,6 +265,23 @@ await b.send('Page.addScriptToEvaluateOnNewDocument', {
 const TEXT = (sel) => `[...document.querySelectorAll('${sel}')].map(e => (e.innerText ?? e.textContent ?? '').trim())`
 /** 元素自身的方框（不含后代）—— 量行高/缩进用。 */
 const BOX = (sel) => `(() => { const e = document.querySelector('${sel}'); if (!e) return null; const r = e.getBoundingClientRect(); return { l: Math.round(r.left), w: Math.round(r.width), h: Math.round(r.height) } })()`
+/** 按 CSV 规则拆一行（引号包裹 / `""` 转义 / 引号内的逗号）。
+ *  ⚠️ 不能用 `split(',')`：本段 mock 里 `sensitive` 那条的 `objectId` = `傻逼,滚`（带逗号），
+ *     导出侧按 CSV 规则加了引号 ⇒ 朴素拆分把它数成两格，「每行 16 格」会**假红**。 */
+const csvSplit = (line) => {
+  const out = []
+  let cur = ''
+  let q = false
+  for (let i = 0; i < line.length; i++) {
+    const c = line[i]
+    if (q) {
+      if (c === '"') { if (line[i + 1] === '"') { cur += '"'; i++ } else q = false } else cur += c
+    } else if (c === '"') q = true
+    else if (c === ',') { out.push(cur); cur = '' } else cur += c
+  }
+  out.push(cur)
+  return out
+}
 /** `datetime-local` 的取值串（**本地时区、秒级**）—— 页面上的 `toLocalInput` 是同一条口径。
  *  ⚠️ 不能用 `toISOString()`：那是 UTC，喂进去会整体偏一个时区（东八区偏 −8h）。 */
 const p2 = (n) => String(n).padStart(2, '0')
@@ -590,9 +692,32 @@ try {
   ok('⑲ 导出 CSV：**字节**以 BOM 开头（EF BB BF）—— Windows 的 Excel 才不会把中文按 GBK 解成乱码',
     csvB.head[0] === 0xef && csvB.head[1] === 0xbb && csvB.head[2] === 0xbf,
     { 前三字节: csvB.head, 期望: [0xef, 0xbb, 0xbf], 字节数: csvB.bytes })
-  ok('⑲ 导出 CSV：表头 13 列（= 事件 10 字段 + 时刻/类/源 三列）+ 159 行数据',
-    csvLines[0].split(',').length === 13 && csvLines.length === 160,
-    { 列: csvLines[0].split(',').length, 行: csvLines.length, 头: csvLines[0] })
+  const csvHead = csvSplit(csvLines[0])
+  ok('⑲ 导出 CSV：表头 **16 列**（3a.3 帧 11→15 键，其中 3 个并进 CSV：`actorId` / `actorRole` / `remaining`）+ 159 行数据',
+    csvHead.length === 16 && csvLines.length === 160,
+    { 列: csvHead.length, 行: csvLines.length, 头: csvLines[0] })
+  // ⚠️ 每行**逐行拆格**必须用 `csvSplit()`，不能用 `split(',')`：本段 mock 里
+  //    `sensitive` 那条的 `objectId` 是 `傻逼,滚`（带逗号）⇒ 导出侧按 CSV 规则加了引号，
+  //    朴素 `split(',')` 会把它数成两格，「每行 16 格」就假红（错的结论）。
+  const csvRows = csvLines.slice(1)
+  ok('⑲ 导出 CSV：新增那三列**在表头里逐字可见**，且**每一行都是 16 格**（不是只有表头加宽了）',
+    ['actorId', 'actorRole', 'remaining'].every((h) => csvHead.includes(h))
+    && csvRows.length === 159 && csvRows.every((l) => csvSplit(l).length === 16),
+    { 尾四列: csvHead.slice(-4), 行数: csvRows.length, 各行列数: [...new Set(csvRows.map((l) => csvSplit(l).length))] })
+  // 值也对账（列名 → 下标，不写死数字）：`protection` 那条是本段唯一带 `actor` 的，`stock` 那条唯一带 `remaining`。
+  const colOf = (name) => csvHead.indexOf(name)
+  const cellOf = (row) => csvSplit(row)
+  const rowOfTitle = (t) => csvRows.map(cellOf).find((c) => c[colOf('title')] === t)
+  const protRow = rowOfTitle('限流拦截')
+  const stockRow = rowOfTitle('库存扣减')
+  ok('⑲ 导出 CSV：`actorId` / `actorRole` 两列**真的有值**（`protection` 那条 = `C-9` / `3`），无身份的行留白',
+    !!protRow && protRow[colOf('actorId')] === 'C-9' && protRow[colOf('actorRole')] === '3'
+    && !!stockRow && stockRow[colOf('actorId')] === '',
+    { 有身份: protRow && [protRow[colOf('actorId')], protRow[colOf('actorRole')]], 无身份: stockRow && stockRow[colOf('actorId')] })
+  ok('⑲ 导出 CSV：`remaining` 列**真的有值**（`库存扣减` 那条 = `7`），其余行留白（不是满列 0）',
+    !!stockRow && stockRow[colOf('remaining')] === '7'
+    && csvRows.filter((l) => cellOf(l)[colOf('remaining')] === '7').length === 1,
+    { 该行: stockRow && stockRow[colOf('remaining')], 全表非空条数: csvRows.filter((l) => cellOf(l)[colOf('remaining')] !== '').length })
 
   await clickSeg('JSON')
   await sleep(400)
@@ -603,15 +728,42 @@ try {
     Array.isArray(jsonParse) && jsonParse.length === 159
     && 'source' in jsonParse[0] && 'objectId' in jsonParse[0] && 'traceId' in jsonParse[0],
     { 条数: Array.isArray(jsonParse) ? jsonParse.length : '(parse 失败)', 样例键: jsonParse ? Object.keys(jsonParse[0]) : null })
+  // ⚠️ 机器那两档是「帧里的原名全带」⇒ 15 键 + `source` = **16 键**，含 CSV 刻意排除的
+  //    `batchId` / `durationUs` / `fields`（排除理由见 `EventLog.vue` 的 `EXPORT_HEAD` 上方）。
+  const jKeys = jsonParse && jsonParse.length ? Object.keys(jsonParse[0]) : []
+  ok('⑲ 导出 JSON：**16 个键**（15 键 + `source`），五个新键全在（含 CSV 排除的那三个）',
+    jKeys.length === 16 && ['batchId', 'actor', 'durationUs', 'remaining', 'fields'].every((k) => k in jsonParse[0]),
+    { 键数: jKeys.length, 键: jKeys })
+  const jProt = (jsonParse || []).find((x) => x.title === '限流拦截')
+  const jStock = (jsonParse || []).find((x) => x.title === '库存扣减')
+  const jNoti = (jsonParse || []).find((x) => x.title === '通知发送')
+  ok('⑲ 导出 JSON：`actor` 保持**帧里的对象形状**（`{id,role}`），没有身份的行是 `null` 而不是 `{}`',
+    !!jProt && JSON.stringify(jProt.actor) === JSON.stringify({ id: 'C-9', role: 3 })
+    && !!jStock && jStock.actor === null,
+    { 有身份: jProt && jProt.actor, 无身份: jStock && jStock.actor })
+  ok('⑲ 导出 JSON：`remaining` 只有那一条有值（`7`），其余是 `null`；`durationUs` / `batchId` 也在',
+    !!jStock && jStock.remaining === 7 && !!jProt && jProt.remaining === null
+    && !!jProt && jProt.durationUs === null && jProt.batchId === 'b-7a3-#12',
+    { stock: jStock && jStock.remaining, prot: jProt && { remaining: jProt.remaining, durationUs: jProt.durationUs, batchId: jProt.batchId } })
+  ok('⑲ 导出 JSON：`fields` 是**原样那袋**（`notify` 那条显式 `null` ⇒ 回落路径才有意义）',
+    !!jNoti && jNoti.fields === null && !!jProt && !!jProt.fields && jProt.fields.scope === '/admin/observe/attack/run 全路径限流窗口',
+    { notify: jNoti && jNoti.fields, protection: jProt && jProt.fields })
 
   await clickSeg('ndjson')
   await sleep(400)
   const ndTxt = String(((await b.evalJS(lastBlob)) || {}).text || '')
   const ndLines = ndTxt.split('\n').filter(Boolean)
   let ndBad = 0
-  for (const l of ndLines) { try { JSON.parse(l) } catch (e) { ndBad++ } }
+  let ndObjs = []
+  for (const l of ndLines) { try { ndObjs.push(JSON.parse(l)) } catch (e) { ndBad++ } }
   ok('⑲ 导出 ndjson：一行一条、每行都是合法 JSON、条数与列表一致',
     ndLines.length === 159 && ndBad === 0, { 行: ndLines.length, 坏行: ndBad })
+  // ⚠️ ndjson 与 JSON 是**同一份 `exportRaw`**（组件里两个分支共用）⇒ 这里不再逐键复述，
+  //    只钉一条「两档同源」：同一批对象序列化出来，键集必然一样（不同源就会在这一条上分叉）。
+  const ndKeys = ndObjs.length ? Object.keys(ndObjs[0]) : []
+  ok('⑲ 导出 ndjson：键集与 JSON 档**逐字相同**（两档同源，不是各写一套字段列表）',
+    ndKeys.length === 16 && jKeys.length === 16 && ndKeys.join(',') === jKeys.join(','),
+    { ndjson: ndKeys.length, json: jKeys.length })
 
   const note = await b.evalJS(`(document.querySelector('.ev-status .seg .hint') || {}).textContent || ''`)
   ok('⑲ 导出后页面自报「刚刚导出 N 条 → 文件名」（下载被浏览器拦掉时，这是用户唯一的线索）',
@@ -1054,6 +1206,8 @@ try {
       无title: obs.filter(e => !e.getAttribute('title')).length,
     }
   })()`)
+  // ⚠️ 「无则都无」那半**在本段是空真**（两侧都是 0）—— 真正的负面对照在 ㉔5：mock 里
+  //    `notify` 那条 `objectId` 为空，页面应当**根本不画**对象列 ⇒ 见 ㉔5 那条断言。
   ok('㉓7 可点提示（`.p` + `title`）**与「有没有 objectId」一致**：有则都有、无则都无',
     obClick.带下划线 === obClick.有title && obClick.无下划线 === obClick.无title, obClick)
   ok('㉓7 对象列**确实画出了**可点的那些（不是一条都没有）', obClick.带下划线 > 0, obClick)
@@ -1073,7 +1227,11 @@ try {
       if (!d) return ''
       const c = d.cloneNode(true)
       const t = c.querySelector('.tech'); if (t) t.remove()
-      return c.textContent.replace(/\s+/g, ' ').trim().slice(0, 40)
+      // ⚠️ 反斜杠要写两个。这一整段是**模板字符串**，在它里面单个 \s 会被求值成裸的字母 s
+      //    （模板串的非法转义落回原字符）⇒ 页面里拿到的是 /s+/g，只替掉字母 s。
+      //    上一版这里就是单反斜杠（当时没有断言依赖它，所以一直没露头）。
+      // ⚠️ 这段注释里**不能出现反引号**：整段是模板字符串，一个反引号就把它提前闭合了。
+      return c.textContent.replace(/\\s+/g, ' ').trim().slice(0, 40)
     }
     return {
       链里条数: items.length, 事件条数: evs.length, 非事件条数: items.length - evs.length,
@@ -1104,6 +1262,348 @@ try {
     chainTwo.非事件条数 === 2, chainTwo)
   ok('㉓8 那行技术字段里带 `kind=` 与 `severity=`（帧里的原名，可拿去 grep）',
     chainTwo.样例.length > 0 && chainTwo.样例.every(s => /kind=/.test(s.技术) && /severity=/.test(s.技术)), chainTwo.样例)
+
+  // ══ ㉔ 3a.3 前端 4 块（A 句子 · B 色系 · C 端点标签 · D 图标间距；用户 2026-10-17 放行）════
+  // ⚠️ 与 ㉓ 同一条约束：**必须在 ⑯ 之前** —— ⑯ 结尾把数据源切到「模拟日常」，而本段的判据
+  //    全都要在**真流那 161 行**上量（句子/短号/对象可点都得有从帧里来的字段才量得出来）。
+  // ⚠️ 量的是**渲染出来的 DOM**，不是去 import 组件里的 `sentence()` 直接调：后者只证明
+  //    「函数写得对」，前者才是「用户看见了那句话」（同「校验器报 OK ≠ 没问题」）。
+  //    唯一的例外是 ㉔1 —— C 块是一张**模块级表**，页面上只有两个消费点，表本身只能直接读。
+  // ⚠️ 先把鼠标挪开：下面几条要量**默认态**（hover 会解除 2 行上限、并把 `.dt` 显出来）。
+  await b.moveTo(4, 4)
+  await sleep(250)
+
+  // ── ㉔1 C 块：`api-labels.js` 这张表本身（条数 / 键形 / 兜底 / 三个取用口）
+  // ⚠️ 不能直接 `import('.../api-labels.js')`：那个目录的 `package.json` 没有 `"type":"module"`
+  //    ⇒ Node 按 **CJS** 解析 `.js`，见到 `export` 直接抛 SyntaxError（本轮实测踩过，
+  //    报错停在文件第 43 行 `export const API_ENDPOINTS`）。浏览器里它是 webpack 编的 ESM，
+  //    与 Node 的判定无关 ⇒ 这里把**同一份源码文本**用 `data:` URL 当模块喂进去。
+  const apiSrc = fs.readFileSync(new URL('../../Mall-management-web/mall-management-system/src/config/labels/api-labels.js', import.meta.url), 'utf8')
+  const api = await import('data:text/javascript;charset=utf-8,' + encodeURIComponent(apiSrc))
+  const apiKeys = Object.keys(api.API_ENDPOINTS)
+  ok('㉔1 `api-labels.js`：**146 条**（= 全仓 `*Controller.java` 的方法级 `@(Post|Get|Put|Delete)Mapping` 数），且无重复键',
+    api.API_ENDPOINT_COUNT === 146 && apiKeys.length === 146,
+    { 自报: api.API_ENDPOINT_COUNT, 真实键数: apiKeys.length })
+  ok('㉔1 每条键都是 `METHOD /path` 形（**带方法是刻意的**：同路径两条方法要能分开）',
+    apiKeys.every((k) => /^(POST|GET|PUT|DELETE) \//.test(k)),
+    apiKeys.filter((k) => !/^(POST|GET|PUT|DELETE) \//.test(k)))
+  ok('㉔1 **同路径两条方法真的都登记了**（`/admin/observe/attack/config` 的 POST 写配置与 GET 读配置各一条）',
+    apiKeys.includes('POST /admin/observe/attack/config') && apiKeys.includes('GET /admin/observe/attack/config'),
+    apiKeys.filter((k) => k.includes('/admin/observe/attack/config')))
+  ok('㉔1 认得出：query / 尾斜杠 / 大小写都归一到同一条中文名',
+    api.apiLabel('POST', '/goods/goodsUp?t=1') === '修改商品'
+    && api.apiLabel('post', '/goods/goodsUp/') === '修改商品'
+    && api.apiLabel('POST', '/goods/goodsUp') === '修改商品',
+    [api.apiLabel('POST', '/goods/goodsUp?t=1'), api.apiLabel('post', '/goods/goodsUp/')])
+  ok('㉔1 兜底：认不出 ⇒ **回落原值**（不是空串、不是「未知接口」）；两者皆空 ⇒ 空串（调用方据此跳槽位）',
+    api.apiLabel('POST', '/no-such-endpoint') === 'POST /no-such-endpoint'
+    && api.apiLabel('', '') === '' && api.apiLabel(null, undefined) === '',
+    [api.apiLabel('POST', '/no-such-endpoint'), api.apiLabel('', '')])
+  ok('㉔1 锁名（5 把）/ 缓存区名（8 个）：取值**有界**，认得出给中文、认不出回落原值、空 ⇒ 空串',
+    Object.keys(api.LOCK_LABEL).length === 5 && Object.keys(api.CACHE_AREA_LABEL).length === 8
+    && api.lockLabel('order-pay') === '支付' && api.lockLabel('nope') === 'nope' && api.lockLabel(null) === ''
+    && api.cacheAreaLabel('goodstype') === '商品类型' && api.cacheAreaLabel('nope') === 'nope' && api.cacheAreaLabel('') === '',
+    { 锁: Object.keys(api.LOCK_LABEL), 区: Object.keys(api.CACHE_AREA_LABEL) })
+
+  // ── ㉔2 A 块：句子形态。逐 kind 从 DOM 里读**渲染出来的分段**（类名 = 色档，见 ㉔6）
+  //   ⚠️ 读法：`<b>` 后面那两段（`.se-mid` 从句 / `.se-ctx` 括号）里各是一个个 `<span class="se-*">`。
+  //      这里把每段的 `{色档, 文本}` 都取出来 —— 既验「句子拼对了」，也验「分色落在该落的段上」。
+  const readRow = (title) => b.evalJS(`(() => {
+    const row = [...document.querySelectorAll('.log-line')].find(r => {
+      const b = r.querySelector('.ms b')
+      return b && b.textContent === ${JSON.stringify(title)}
+    })
+    if (!row) return null
+    const seg = (sel) => [...row.querySelectorAll(sel + ' > span')].map(s => ({ c: s.className.replace('se-', ''), t: s.textContent }))
+    const mid = seg('.se-mid')
+    const ctx = seg('.se-ctx')
+    return {
+      title: row.querySelector('.ms b').textContent,
+      mid, ctx,
+      mid文本: mid.map(s => s.t).join(''),
+      ctx文本: ctx.map(s => s.t).join(''),
+      有mid: !!row.querySelector('.se-mid'),
+      有ctx: !!row.querySelector('.se-ctx'),
+      对象: (row.querySelector('.ms .ob') || {}).textContent || null,
+      可点: !!row.querySelector('.ms .ob.p'),
+      短号: [...row.querySelectorAll('.se-ctx .se-a')].map(s => s.textContent),
+    }
+  })()`)
+  const TITLES = ['缓存命中（L1）', '取锁成功（order:pay）', '状态流转 CREATED → PAID', '库存扣减',
+    '审计写入', '通知发送', '敏感词拒收', '身份拒绝', '限流拦截', '批量事件 0']
+  const rows = {}
+  for (const t of TITLES) rows[t] = await readRow(t)
+  const gotRow = (t) => rows[t] && (rows[t].mid文本 + ' ｜ ' + rows[t].ctx文本)
+  ok('㉔2 起点：十条参照行（九类各一条 + 一条批量）全在 ③ 里按标题找得到',
+    TITLES.every((t) => !!rows[t]), TITLES.filter((t) => !rows[t]))
+
+  ok('㉔2 `cache`：从句补**区名的中文**，且取的是 `fields.cache`（`goodsHome` → 「首页商品」）'
+    + ' —— 不是 detail 里的 `goodstype`（两条故意不一致，这是唯一能证明「谁优先」的办法）',
+    !!rows['缓存命中（L1）'] && rows['缓存命中（L1）'].mid文本 === '首页商品',
+    gotRow('缓存命中（L1）'))
+  ok('㉔2 `lock`：从句补**锁名**（`order-pay` → 「支付」）—— 对象列装的是业务键，锁名是 title 没说出口的那半',
+    !!rows['取锁成功（order:pay）'] && rows['取锁成功（order:pay）'].mid文本 === '支付',
+    gotRow('取锁成功（order:pay）'))
+  ok('㉔2 `order`（流转）：从句把 `from → to` 的**枚举名翻成中文**（`CREATED → PAID` → 「待付款 → 已付款（待发货）」）',
+    !!rows['状态流转 CREATED → PAID'] && rows['状态流转 CREATED → PAID'].mid文本 === '待付款 → 已付款（待发货）',
+    gotRow('状态流转 CREATED → PAID'))
+  ok('㉔2 `stock`：从句补**件数**（「1 件」）',
+    !!rows['库存扣减'] && rows['库存扣减'].mid文本 === '1 件', gotRow('库存扣减'))
+  ok('㉔2 **title 念过的不再念**：`sensitive` 那条从句为空（落点/命中档/result 都在 title 里）⇒ 整段 `.se-mid` 都不出现',
+    !!rows['敏感词拒收'] && rows['敏感词拒收'].有mid === false, gotRow('敏感词拒收'))
+
+  // ── ㉔3 A 块：括号里那串（环境项 · trace 短号 · 耗时）+ **剩余 N**
+  ok('㉔3 **「剩余 N」进句子了**（3a.3 第二步才进帧的那一列；九个调用点里只有扣减档有值）',
+    !!rows['库存扣减'] && /剩余\s*7\s*件/.test(rows['库存扣减'].ctx文本), gotRow('库存扣减'))
+  ok('㉔3 括号尾带 `trace` + **8 位短号**；事件自身没耗时就退到**请求级**那一格，且标签换成「请求耗时」',
+    !!rows['缓存命中（L1）'] && /trace trace000/.test(rows['缓存命中（L1）'].ctx文本)
+    && /请求耗时 42 ms/.test(rows['缓存命中（L1）'].ctx文本), gotRow('缓存命中（L1）'))
+  ok('㉔3 **耗时两档分开写**：事件自带 `durationUs=12400` ⇒ 「耗时 12 ms」；`850` ⇒ 「耗时 850 µs」'
+    + '（亚毫秒不四舍五入成 `0 ms`，那会把「很快」写成「没花时间」）',
+    !!rows['状态流转 CREATED → PAID'] && /耗时 12 ms/.test(rows['状态流转 CREATED → PAID'].ctx文本)
+    && !!rows['敏感词拒收'] && /耗时 850 µs/.test(rows['敏感词拒收'].ctx文本)
+    && !/请求耗时/.test(rows['敏感词拒收'].ctx文本),
+    { order: gotRow('状态流转 CREATED → PAID'), sensitive: gotRow('敏感词拒收') })
+  ok('㉔3 **回落分支真的走到了**：`notify` 那条没有 `fields` ⇒ 从 `detail` 抠出渠道/事件/原因三格',
+    !!rows['通知发送'] && /渠道 email/.test(rows['通知发送'].ctx文本)
+    && /事件 order\.paid/.test(rows['通知发送'].ctx文本) && /原因 下单成功/.test(rows['通知发送'].ctx文本),
+    gotRow('通知发送'))
+  ok('㉔3 `fields` 里的**数字**（`hit:9` / `total:20`）拼出来仍是 `9/20`（不是 `9/20undefined`）',
+    !!rows['敏感词拒收'] && /命中 9\/20/.test(rows['敏感词拒收'].ctx文本), gotRow('敏感词拒收'))
+  ok('㉔3 `audit` 三格都翻中文：操作者 `C-9` / 动作 `goods.delete` → 「商家删除商品」/ 原因原样',
+    !!rows['审计写入'] && /操作者 C-9/.test(rows['审计写入'].ctx文本)
+    && /动作 商家删除商品/.test(rows['审计写入'].ctx文本), gotRow('审计写入'))
+  ok('㉔3 `identity` 两格：主体 + 原因',
+    !!rows['身份拒绝'] && /主体 C-1/.test(rows['身份拒绝'].ctx文本)
+    && /原因 令牌过期/.test(rows['身份拒绝'].ctx文本), gotRow('身份拒绝'))
+  ok('㉔3 `protection` 两格：范围（长值）+ 详情',
+    !!rows['限流拦截'] && /范围 \/admin\/observe\/attack\/run/.test(rows['限流拦截'].ctx文本)
+    && /详情 qps=20/.test(rows['限流拦截'].ctx文本), gotRow('限流拦截'))
+
+  // ── ㉔4 A 块：**缺槽位跳过**（不写占位符）—— 这条要按「整页扫」，不能只看那十条
+  const slots = await b.evalJS(`(() => {
+    const joinSeg = (sel) => [...document.querySelectorAll(sel)].map(s => s.textContent).join('\\n')
+    const segText = joinSeg('.log-line .ms .se-mid span') + '\\n' + joinSeg('.log-line .ms .se-ctx span')
+    const emptyParen = []
+    for (const e of document.querySelectorAll('.log-line .ms')) {
+      const c = e.cloneNode(true)
+      const d = c.querySelector('.dt'); if (d) d.remove()      // 技术层不算人话
+      if (/[（(]\\s*[）)]/.test(c.textContent)) emptyParen.push(c.textContent.trim().slice(0, 40))
+    }
+    return {
+      占位符: ['undefined', 'null', 'NaN'].filter(w => segText.includes(w)),
+      空括号: emptyParen,
+      从句段数: document.querySelectorAll('.log-line .ms .se-mid').length,
+      括号段数: document.querySelectorAll('.log-line .ms .se-ctx').length,
+      批量那条: (() => {
+        const r = [...document.querySelectorAll('.log-line')].find(x => {
+          const b = x.querySelector('.ms b'); return b && b.textContent === '批量事件 0'
+        })
+        if (!r) return null
+        return { 有从句: !!r.querySelector('.se-mid'), 有括号: !!r.querySelector('.se-ctx'), 有技术层: !!r.querySelector('.dt') }
+      })(),
+    }
+  })()`)
+  ok('㉔4 全页扫一遍：从句/括号里**一个占位符都没有**（没有 `undefined` / `null` / `NaN`），也没有**空括号**',
+    slots.占位符.length === 0 && slots.空括号.length === 0, slots)
+  ok('㉔4 **缺槽位 = 整段不出现**（不是画一对空括号）：从句恰好 **5** 段、括号恰好 **10** 段'
+    + '（事件那 9 条里 4 条有从句、9 条有括号；另加组头 1 段从句、组尾 1 段括号 —— 见 `makeRow` 三分支）',
+    slots.从句段数 === 5 && slots.括号段数 === 10, { 从句: slots.从句段数, 括号: slots.括号段数 })
+  ok('㉔4 没有 traceId 的批量行（150 条里的一条）：**从句与括号都不在**，技术层照旧（`display:none` 收着）',
+    !!slots.批量那条 && slots.批量那条.有从句 === false && slots.批量那条.有括号 === false
+    && slots.批量那条.有技术层 === true, slots.批量那条)
+
+  // ── ㉔5 B 块：色系。⚠️ 对的是**计算色**，token 也从 CSS 里现取 —— 不手抄任何十六进制
+  const colors = await b.evalJS(`(() => {
+    const tok = (n) => {
+      const d = document.createElement('span')
+      d.style.color = 'var(' + n + ')'
+      document.body.appendChild(d)
+      const c = getComputedStyle(d).color
+      d.remove()
+      return c
+    }
+    const pick = (sel) => { const e = document.querySelector(sel); return e ? getComputedStyle(e).color : null }
+    return {
+      主题: document.documentElement.getAttribute('data-theme'),
+      令牌: { ink: tok('--ink'), ink2: tok('--ink-2'), ink3: tok('--ink-3'), brandInk: tok('--brand-ink') },
+      取到: {
+        k: pick('.log-line .ms .se-k'), v: pick('.log-line .ms .se-v'), v3: pick('.log-line .ms .se-v3'),
+        x: pick('.log-line .ms .se-x'), a: pick('.log-line .ms .se-a'),
+        对象可点: pick('.log-line .ms .ob.p'),
+      },
+    }
+  })()`)
+  ok('㉔5 色板确实锁在 **admin 主题**上（`data-theme` 哨兵 —— 打到 `index.html` 上会量到别家的 token）',
+    colors.主题 === 'admin', colors.主题)
+  ok('㉔5 键 → `--ink`；值 → `--ink-2`；值·最次要 → `--ink-3`；连接词 `·` → `--ink-3`（全部读的是计算色）',
+    colors.取到.k === colors.令牌.ink && colors.取到.v === colors.令牌.ink2
+    && colors.取到.v3 === colors.令牌.ink3 && colors.取到.x === colors.令牌.ink3,
+    { 取到: colors.取到, 令牌: colors.令牌 })
+  const deco = await b.evalJS(`(() => {
+    const a = document.querySelector('.log-line .ms .se-a')
+    const o = document.querySelector('.log-line .ms .ob.p')
+    const g = (e) => (e ? { line: getComputedStyle(e).textDecorationLine, style: getComputedStyle(e).textDecorationStyle, cursor: getComputedStyle(e).cursor } : null)
+    return { 短号: g(a), 对象: g(o) }
+  })()`)
+  ok('㉔5 可点那两处（trace 短号 `.se-a` / 对象 `.ob.p`）→ `--brand-ink` + **点状下划线**',
+    colors.取到.a === colors.令牌.brandInk && colors.取到.对象可点 === colors.令牌.brandInk
+    && !!deco.短号 && deco.短号.line === 'underline' && deco.短号.style === 'dotted'
+    && !!deco.对象 && deco.对象.line === 'underline' && deco.对象.style === 'dotted',
+    { 色: { 短号: colors.取到.a, 对象: colors.取到.对象可点, 品牌: colors.令牌.brandInk }, 线: deco })
+  ok('㉔5 四档色**两两不同**（若全同，「分档」就是假的）',
+    new Set([colors.取到.k, colors.取到.v, colors.取到.v3, colors.取到.a]).size === 4,
+    [colors.取到.k, colors.取到.v, colors.取到.v3, colors.取到.a])
+  // ⚠️ 这一条是「分档按**长度**现算」的对照：长值（33 字符的 scope）与短值（5 字符的 email）
+  //    落在**不同**的档上才说明规则是活的；若实现改成「全给 v3」或写死白名单，本条会红。
+  const lenClass = await b.evalJS(`(() => {
+    const rowOf = (title) => [...document.querySelectorAll('.log-line')].find(x => {
+      const b = x.querySelector('.ms b')
+      return b && b.textContent === title
+    })
+    const spanOf = (title, pred) => {
+      const r = rowOf(title)
+      if (!r) return null
+      const s = [...r.querySelectorAll('.se-ctx span')].find((z) => pred(z.textContent))
+      return s ? { 文本: s.textContent, 档: s.className.replace('se-', ''), 长度: s.textContent.length } : null
+    }
+    return {
+      长: spanOf('限流拦截', (t) => t.indexOf('/admin/observe/attack/run') === 0),
+      短: spanOf('通知发送', (t) => t === 'email'),
+    }
+  })()`)
+  ok('㉔5 「值·最次要」是**现按长度算**的、不是写死的白名单：长 `scope`（33 字符）落 `se-v3`，短 `email`（5 字符）落 `se-v`',
+    !!lenClass.长 && lenClass.长.档 === 'v3' && lenClass.长.长度 >= 16
+    && !!lenClass.短 && lenClass.短.档 === 'v' && lenClass.短.长度 < 16, lenClass)
+  // ⚠️ 「可点不许骗人」的**负面对照**在这一条里：`notify` 那条没有 `objectId`，页面对它的正确
+  //    行为是**根本不画对象列**（`objText()` 对空 id 返回空串、模板 `v-if="r.obj"` 挡掉）。
+  //    ⇒「画了却不可点」的对象数应当为 **0**。
+  //    ⚠️ 这一条是 ㉓7 那条「有则都有、无则都无」的**非空真前提**：没有它，㉓7 两侧都是 0、
+  //       换成「永远挂 `.p`」的实现也照样绿（同「负向一半不算判据」）。
+  const obMix = await b.evalJS(`(() => {
+    const obs = [...document.querySelectorAll('.log-line .ms .ob')]
+    const rows = [...document.querySelectorAll('.log-line')]
+    const noOb = rows.filter(r => r.querySelector('.ms b') && !r.querySelector('.ms .ob'))
+    return {
+      画出的对象: obs.length,
+      可点的: obs.filter(e => e.classList.contains('p')).length,
+      画了但不可点: obs.filter(e => !e.classList.contains('p')).length,
+      没有对象列的标题: noOb.map(r => r.querySelector('.ms b').textContent),
+    }
+  })()`)
+  ok('㉔5 负面对照：`objectId` 为空的那条（`通知发送`）**根本不画对象列**、'
+    + '组头/组尾也不画 ⇒ 「画了却不可点」的对象数 = **0**',
+    obMix.画了但不可点 === 0 && obMix.画出的对象 === obMix.可点的
+    && obMix.没有对象列的标题.includes('通知发送')
+    && obMix.没有对象列的标题.includes('请求开始') && obMix.没有对象列的标题.includes('请求结束'),
+    obMix)
+
+  // ── ㉔6 B 块「可点不许骗人」：新加的那一格（trace 短号）**必须与真实可点同源**
+  const ck = await b.evalJS(`(() => {
+    const rows = [...document.querySelectorAll('.log-line')]
+    const shortEls = [...document.querySelectorAll('.log-line .ms .se-ctx .se-a')]
+    const obEls = [...document.querySelectorAll('.log-line .ms .ob')]
+    return {
+      行数: rows.length,
+      可点行: rows.filter(r => r.getAttribute('role') === 'button').length,
+      带短号行: rows.filter(r => r.querySelector('.se-ctx .se-a')).length,
+      短号数: shortEls.length,
+      短号文本: [...new Set(shortEls.map(e => e.textContent))],
+      短号在括号里: shortEls.every(e => !!e.closest('.se-ctx')),
+      短号在可点行里: shortEls.every(e => e.closest('.log-line').getAttribute('role') === 'button'),
+      对象可点: obEls.filter(e => e.classList.contains('p')).length,
+      对象总数: obEls.length,
+      对象带title: obEls.filter(e => e.getAttribute('title')).length,
+    }
+  })()`)
+  // ⚠️ 可点行是 **11** 行（9 条事件 + 组头/组尾那 2 行 `is-ends`），而短号只有 **9** 条 —— 组头
+  //    组尾不是事件（它们来自 `traces` 记录、压根不走 `sentence()`）⇒ 判据不能写成两者相等。
+  ok('㉔6 trace 短号只落在**事件行**上（9 条），且**每一条都落在真可点的行里**（`role="button"`）'
+    + '—— 画了那根点状下划线就一定能点开',
+    ck.带短号行 === 9 && ck.短号数 === 9 && ck.短号在可点行里 === true && ck.可点行 > ck.带短号行,
+    { 可点行: ck.可点行, 带短号行: ck.带短号行, 短号数: ck.短号数, 行数: ck.行数 })
+  ok('㉔6 短号文本 = `traceId` 的**前 8 位**，且只出现在括号段里（不散落到别处）',
+    ck.短号文本.length === 1 && ck.短号文本[0] === TRACE.slice(0, 8) && ck.短号在括号里 === true, ck.短号文本)
+  ok('㉔6 对象列那一条回归判据照旧：`.p` 与 `title` **与「有没有 objectId」一致**'
+    + '（画出来的 158 个全可点、全带 `title`；没有 id 的那条**不画**、所以两边都不计）',
+    ck.对象可点 === ck.对象带title && ck.对象可点 === ck.对象总数 && ck.对象可点 === 158,
+    { 可点: ck.对象可点, 带title: ck.对象带title, 总数: ck.对象总数 })
+
+  // ── ㉔7 A/B 块：原 `traceShort` 那一格（`.tr`）**已删**，短号改为默认可见
+  const trGone = await b.evalJS(`(() => {
+    const e = document.querySelector('.log-line .ms .se-ctx .se-a')
+    const cs = e ? getComputedStyle(e) : null
+    const r = e ? e.getBoundingClientRect() : null
+    return {
+      旧格子数: document.querySelectorAll('.log-line .tr').length,
+      样例类名: e ? e.className : null,
+      短号display: cs ? cs.display : null,
+      短号宽: r ? Math.round(r.width * 10) / 10 : null,
+      该行hover: e ? e.closest('.log-line').matches(':hover') : null,
+      技术层display: (() => { const d = document.querySelector('.log-line .ms .dt'); return d ? getComputedStyle(d).display : null })(),
+    }
+  })()`)
+  ok('㉔7 原 `traceShort` 那一格（`.tr`）**已删**（同一条事实不留两份：短号搬进了括号里）',
+    trGone.旧格子数 === 0, trGone.旧格子数)
+  ok('㉔7 短号**默认就可见**（不 hover 也是 `inline` 且有实测宽度）—— 搬进括号的意义就在这里',
+    trGone.短号display !== 'none' && trGone.短号宽 > 8 && trGone.该行hover === false, trGone)
+  ok('㉔7 对照：技术层 `.dt` 仍是**默认收起**（人话常显、机器那串 hover 才出 —— 两层口径没被这次改动带偏）',
+    trGone.技术层display === 'none', trGone.技术层display)
+
+  // ── ㉔8 D 块：图标与文字之间 **6–8px**（用户给的线）。⚠️ 量**几何距离**，不是查 `gap` 声明
+  //   ⚠️ 为什么要量几何：`gap` 声明在不在 ≠ 屏幕上真隔了那么远（弹性盒里插进匿名文本项、
+  //      或者图标自带 `margin`，都会让声明的数字失真）。五处都是 `--s2` = 8px。
+  const gapProbe = (iconSel, nextSel, 谁) => b.evalJS(`(() => {
+    const r1 = (x) => Math.round(x * 10) / 10
+    const ic = document.querySelector(${JSON.stringify(iconSel)})
+    if (!ic) return { 谁: ${JSON.stringify(谁)}, 出错: '图标不在' }
+    const ir = ic.getBoundingClientRect()
+    const nx = ${nextSel === null ? 'null' : `document.querySelector(${JSON.stringify(nextSel)})`}
+    if (nx) {
+      const nr = nx.getBoundingClientRect()
+      return { 谁: ${JSON.stringify(谁)}, 图标右缘: r1(ir.right), 文字左缘: r1(nr.left), 间距: r1(nr.left - ir.right) }
+    }
+    let n = ic.nextSibling
+    let t = null
+    while (n && !t) { if (n.nodeType === 3 && n.textContent.trim() !== '') t = n; else n = n.nextSibling }
+    if (!t) return { 谁: ${JSON.stringify(谁)}, 出错: '图标后面没有文字' }
+    const rg = document.createRange()
+    rg.selectNodeContents(t)
+    const rects = [...rg.getClientRects()].filter((x) => x.width > 1)
+    if (!rects.length) return { 谁: ${JSON.stringify(谁)}, 出错: '量不到文字盒子' }
+    const tl = Math.min(...rects.map((x) => x.left))
+    return { 谁: ${JSON.stringify(谁)}, 图标右缘: r1(ir.right), 文字左缘: r1(tl), 间距: r1(tl - ir.right) }
+  })()`)
+  const gaps = []
+  gaps.push(await gapProbe('.ev-rail .rows .row:not(.all):not(.is-fac) .ic svg', '.ev-rail .rows .row:not(.all):not(.is-fac) .k', '② 类清单（图标 → 类名）'))
+  gaps.push(await gapProbe('.ev-rail .sevchip .dot', null, '② 栏底严重度开关（圆点 → 等级文字）'))
+  gaps.push(await gapProbe('.ev-bars:not(.sev) .ev-bar:not(.is-fac) .nm svg', null, '④ 类计数九条（图标 → 类名）'))
+  gaps.push(await gapProbe('.ev-bars.sev .ev-bar .nm svg', null, '④ 严重度三条（图标 → 等级文字）'))
+  gaps.push(await gapProbe('.chain-i:not(.is-ends):not(.is-miss) .d .d-hd svg', '.chain-i:not(.is-ends):not(.is-miss) .d .d-hd b', '⑤ 链里（图标 → 类名）'))
+  const gapOK = (g) => !!g && typeof g.间距 === 'number' && g.间距 >= 6 && g.间距 <= 8
+  ok('㉔8 五处「图标 + 文字」的**实测间距都在 6–8px**（② 类清单 / ② 严重度 / ④ 类计数 / ④ 严重度 / ⑤ 链）',
+    gaps.every(gapOK), gaps)
+  ok('㉔8 那五处**不是同一个元素量了五遍**（五条都拿到了数、且都有各自的「谁」标签）',
+    gaps.length === 5 && gaps.every((g) => typeof g.谁 === 'string'), gaps.map((g) => g.谁))
+  await zoomShot('.ev-rail .rows', `${WORK}zoom-3a3-d-rail.png`, { 宽: 210, 高: 120, scale: 5 })
+  await zoomShot('.ev-bars', `${WORK}zoom-3a3-d-bars.png`, { 宽: 300, 高: 150, scale: 5 })
+
+  // ── ㉔9 C 块：`apiLabel()` 在页面上的消费点 —— ⑤ 链首那行（另一处是 ③ 组头行）
+  const headLine = await b.evalJS(`(() => {
+    const e = document.querySelector('.chain-i.is-ends .d')
+    return e ? e.textContent.replace(/\\s+/g, ' ').trim() : null
+  })()`)
+  ok('㉔9 ⑤ 链首 = 「请求开始（修改商品 · POST /goods/goodsUp）」—— 认得出就给「中文名 + 原标题」两段',
+    typeof headLine === 'string' && headLine.includes('请求开始')
+    && headLine.includes('修改商品') && headLine.includes('POST /goods/goodsUp'), headLine)
+  // ③ 的组头行：`POST /goods/goodsUp` 那一组，标题该是中文名（认不出才会回落原路径）
+  const groupHead = await b.evalJS(`(() => {
+    const r = [...document.querySelectorAll('.log-line')].find(x => (x.querySelector('.ms') || {}).textContent
+      && x.querySelector('.ms').textContent.includes('请求开始'))
+    return r ? r.querySelector('.ms').textContent.replace(/\\s+/g, ' ').trim().slice(0, 60) : null
+  })()`)
+  ok('㉔9 ③ 的组头行也带中文名（`startLabel()` 的第二个消费点；认不出时会回落成裸路径）',
+    typeof groupHead === 'string' && groupHead.includes('修改商品'), groupHead)
 
   // ══ 裁定 B · 切源 = 隔离，不是清空 + 易漏项① 演示下 ⑤ 起止恒空 ══════════════════
   // `api/demo-stream.js:364` 逐字：「演示不造请求链路（日志页那张抽屉留空，不去编一条假的调用链）」

@@ -277,6 +277,10 @@
                 <span class="md">{{ r.md }}</span>
                 <span class="ms">
                   <b>{{ r.title }}</b>
+                  <!-- A 块「自然流」：从句接在标题后（`sentence()` 按 kind 分派产出分段 token）。
+                       ⚠️ 整段 `v-if` = **缺槽位就不出现**（空数组 ⇒ 连那个 8px 的外距都不占）。 -->
+                  <span v-if="r.mid.length" class="se-mid"><!--
+                    --><span v-for="(s, i) in r.mid" :key="'m' + i" :class="'se-' + s.c">{{ s.t }}</span></span>
                   <!-- 方案 D 甲「对象可点」：有 `objectId` 才画成可点（下划线 + 品牌色 + pointer），
                        点一下把 ② 的「对象」框填上 ⇒ ③ 只剩这个对象的日志。没有 id 的对象**不给**
                        可点的样子（画了就是骗人）。 -->
@@ -287,8 +291,11 @@
                     :title="r.objId ? '点一下 ⇒ 只看这个对象的日志（会填进 ② 的「对象」框）' : ''"
                     @click.stop="r.objId && (objFilter = r.objId)"
                   >{{ r.obj }}</span>
+                  <!-- 括号 = 上下文（`sentence()` 的 `ctx`：环境项 · trace 短号 · 耗时）。
+                       ⚠️ 空数组 ⇒ **整对括号都不画**（不是画一对空括号）。 -->
+                  <span v-if="r.ctx.length" class="se-ctx"><!--
+                    -->（<span v-for="(s, i) in r.ctx" :key="'c' + i" :class="'se-' + s.c">{{ s.t }}</span>）</span>
                   <span class="dt">{{ r.detail }}</span>
-                  <span v-if="r.traceShort" class="tr">{{ r.traceShort }}</span>
                 </span>
               </span></span>
             </li>
@@ -328,8 +335,10 @@
           <div class="ev-sub">类计数 · 业务 {{ KINDS.length }} 类 + 设施 {{ FACILITY_KINDS.length }} 类（范围内累计）</div>
           <div class="ev-bars">
             <div v-for="k in KINDS" :key="k" class="ev-bar" :title="`${kindLabel(k)} ${sessionByKind[k] || 0} 条`">
-              <!-- 用户 2026-10-16「④ 类计数 9 类：无 → 每类前加图标」（与 ② 同一套 `KIND_ICON`）。 -->
-              <span class="nm"><component :is="KIND_ICON[k]" class="ev-ic s" /> {{ kindLabel(k) }}</span>
+              <!-- 用户 2026-10-16「④ 类计数 9 类：无 → 每类前加图标」（与 ② 同一套 `KIND_ICON`）。
+                   ⚠️ D 块：图标与文字之间原来是**一个空格**（12px 字号下 ≈3px），达不到 6–8px
+                   ⇒ 删掉那个空格、改由 `.nm` 的 `gap` 定间距（间距从此是 CSS 里量得出来的一格）。 -->
+              <span class="nm"><component :is="KIND_ICON[k]" class="ev-ic s" />{{ kindLabel(k) }}</span>
               <span class="track"><span class="fill" :style="{ width: barW(sessionByKind[k] || 0, kindMax) }"></span></span>
               <span class="num">{{ fmtInt(sessionByKind[k] || 0) }}</span>
             </div>
@@ -358,8 +367,10 @@
             >
               <!-- 用户 2026-10-16「④ 严重度分布：info / warn / error 各加图标」（映射见 `SEV_ICON`）。
                    ⚠️ 类计数那三条用的是**类**的图标，这三条用的是**严重度**的图标 —— 两个维度各自的
-                     一套，同一个事件可能同时出现在「缓存」和「error」两个条上，图标不该一样。 -->
-              <span class="nm"><component :is="SEV_ICON[s]" class="ev-ic s" /> {{ severityLabel(s) }}</span>
+                     一套，同一个事件可能同时出现在「缓存」和「error」两个条上，图标不该一样。
+                   ⚠️ D 块：图标后那个空格与上面类计数那条**同款**，一起删（间距交给 `.ev-bar .nm`
+                     的 `gap`）—— 只删一处会让 ④ 的两排横条间距不同档。 -->
+              <span class="nm"><component :is="SEV_ICON[s]" class="ev-ic s" />{{ severityLabel(s) }}</span>
               <span class="track"><span class="fill" :style="{ width: barW(sessionBySev[s] || 0, sevMax), background: severityColor(s) }"></span></span>
               <span class="num">{{ fmtInt(sessionBySev[s] || 0) }}</span>
             </button>
@@ -397,7 +408,7 @@
         <ol v-if="openedTrace && drawerOpen" class="chain">
           <li v-if="openedTraceRec" class="chain-i is-ends">
             <span class="tm">{{ hmsms(openedTraceRec.startMs) }}</span>
-            <span class="d">请求开始（{{ openedTraceRec.method }} {{ openedTraceRec.path }}）</span>
+            <span class="d">请求开始（{{ startLabel(openedTraceRec) }}）</span>
           </li>
           <li v-else class="chain-i is-miss">
             <span class="tm">—</span>
@@ -406,7 +417,9 @@
           <li v-for="e in openedEvents" :key="e.seq" class="chain-i">
             <span class="tm">{{ hmsms(e.ts) }}</span>
             <span class="d">
-              <component :is="KIND_ICON[e.kind]" class="ev-ic s" /> <b>{{ kindLabel(e.kind) }}</b> · {{ e.title }}<template v-if="objText(e)">（{{ objText(e) }}）</template>
+              <!-- D 块：图标↔文字 8px 的落点之一。⚠️ 原来这里是**一个空格**（15px 字号下 ≈4px），
+                   达不到 6–8px；改成行内弹性盒 + `gap` ⇒ 间距是**量得出来的**一格，不是字体度量。 -->
+              <span class="d-hd"><component :is="KIND_ICON[e.kind]" class="ev-ic s" /><b>{{ kindLabel(e.kind) }}</b></span> · {{ e.title }}<template v-if="objText(e)">（{{ objText(e) }}）</template>
               <!-- 第二层：**技术字段原文**（用户 2026-10-16「打开详细 ⇒ 中英文都要 · 两个都不能省」）。
                    ③ 的预览层只给中文人话，这一层把帧里的原名补齐 —— 中文方便看，英文方便和后端确认。 -->
               <code class="tech">{{ techLine(e) }}</code>
@@ -527,7 +540,8 @@
      · ③ 数据行从**栅格**改成**一行自然流**（`.ln` 折行容器 + `.flow` 行内流）：栅格里折行只发生在
        格子内部，`1fr` 那格一折就撑高整行、前五格却不缩进 —— 做不出「续行缩进、不带前导符」。
        列宽用等值的 inline-block 宽度 + 8px `margin-right` 复刻原 `gap` ⇒ 与表头的列**逐像素对齐不变**。
-     · 技术字段（`.dt` / `.tr`）默认 `display: none`，**hover / 键盘聚焦**整行才 `inline`；
+     · 技术字段（`.dt`）默认 `display: none`，**hover / 键盘聚焦**整行才 `inline`；
+       ⚠️ 3a.3 起 `traceShort` 那一格（`.tr`）**删了** —— trace 短号搬进句子的括号里常显。
        用行内展开而不是原生 tooltip（tooltip 会盖住刚要看的那几行、鼠标一动就没）。
      · ⑤ 详情层**中英文都要**（用户：「两个都不能省」）：人话一行 + `techLine()` 的技术字段一行。
 
@@ -599,7 +613,14 @@ import {
   INJECTIONS, injectionLabel, INJECTIONS_NOT_WIRED,
 } from '../../../config/labels/observe-labels'
 // commit 9：审计那一类的 `objectType` 是英文域前缀（`goods` / `comment_image`…）⇒ 复用审计域那张表。
-import { targetTypeLabel } from '../../../config/labels/audit-labels'
+import { targetTypeLabel, auditActionLabel } from '../../../config/labels/audit-labels'
+// 3a.3 · C 块：订单动作 / 状态两张表本来就在（`OrderFlow.vue` 在用）——本页拼句子时也用它们。
+import { orderActionLabel, orderStateLabel } from '../../../config/labels/order-labels'
+// 3a.3 · C 块新增的**端点表**：本页只有一个消费点（⑤ 链首「请求开始」那行的中文短名），
+// 但它必须与其余五张表同处 `config/labels/`（那是本仓「code → 中文」的唯一落点）。
+// ⚠️ 锁名 / 缓存区名两张也在那个文件里：本页**不直接引**它们的表，只走 `lockLabel` / `cacheAreaLabel`
+//    两个访问器 —— 表是给人维护的，页面只认访问器（认不出回落原值的兜底就在访问器里）。
+import { apiLabel, lockLabel, cacheAreaLabel } from '../../../config/labels/api-labels'
 
 /** 本页自己累积的事件上限。⚠️ 必须有：SSE 每秒推若干条，不封顶跑一晚上就是几万条。 */
 const EVENT_CAP = 1000
@@ -798,6 +819,196 @@ function techLine(e) {
   if (e.traceId) parts.push(`traceId=${e.traceId}`)
   return parts.join(' · ')
 }
+
+/* ── ③ 的消息：**自然流拼接**（用户 2026-10-17 放行的 A 块）────────────────────────
+   语法 = `{标题} {自然流从句} {对象}（{上下文} · trace · 请求耗时）`。
+   ⚠️ **缺槽位就少一段，不写占位符** —— 句子里出现「—」「undefined」「null」比少说一句更糟：
+      前者会被读成「这一格的值是空」，而真相是「这件事压根没有这个量」。
+   ⚠️ **先读 `fields`，读不到再回落解析 `detail`**：`fields` 是后端 3a.3 起给前端拼句子用的
+      结构化表（`EventBroadcaster.Emit` 的第四个参数），`detail` 是它的**人读孪生**
+      （两者在同一个 `Emit` 构造里一起产生，形状见各类 `…Aspect` 方法）。
+      回落只在「帧里没带 fields」（旧后端 / 演示帧）时走 —— 抠不出来就**跳过那一段**，不猜。
+   ⚠️ 从句补的是「title 与对象列**没说的事实**」，所以：
+      缓存补的是**区名**（title 只说 L1/L2、对象列只有键）、锁补的是**锁名**
+      （对象列装的是业务键）、库存补的是**件数**、订单补的是**状态的中文**。
+      title 已经念过的一律不再念（命中/未命中、from→to 的原值、result 的各档）。 */
+
+/** 分段 token 的**色档**（CSS 在 `.log-line .ms .se-*`，一把锁在 admin 主题的 `tokens.css`）：
+ *  `k` 键（`--ink`）/ `v` 值（`--ink-2`）/ `v3` 值·最次要（`--ink-3`）/
+ *  `a` 可点（`--brand-ink` + 点状下划线）/ `x` 中性连接词（`--ink-3`）。 */
+const TK = (t) => ({ t: String(t), c: 'k' })
+const TV = (t) => ({ t: String(t), c: 'v' })
+const TA = (t) => ({ t: String(t), c: 'a' })
+const TX = (t) => ({ t: String(t), c: 'x' })
+/** 「值·最次要」那档的**判据是长度**（≥ 16 字符）：短值一眼可读，长值会把整对括号撑成主角
+ *  —— 用户给的那档例子正是「长缓存键」。长度是**现算的**，不是给某几个键写死的白名单。 */
+const VALUE_MINOR_LEN = 16
+const TVx = (t) => ({ t: String(t), c: String(t).length >= VALUE_MINOR_LEN ? 'v3' : 'v' })
+/** 「键 值」一对（中间一个空格）。 */
+const KV = (label, value) => [TK(label), TX(' '), TVx(value)]
+
+/** 从 `detail` 里**尽力**抠出 `k=v` 对（回落路径专用）。
+ *  ⚠️ 只能尽力：这套 `detail` 是**人读串**、形状逐类不同 —— `order#O-1` 那种不带等号、
+ *     敏感词把两个量塞进一个 token（`hit=9/20`）、防护的 `extra` 可以带空格。
+ *     抠不出来的一律**跳过**（`fld()` 会当它不存在），不猜、不填占位符。 */
+function parseDetail(detail) {
+  const m = {}
+  if (!detail) return m
+  for (const tok of String(detail).split(/\s+/)) {
+    if (!tok) continue
+    const hash = /^([A-Za-z_]\w*)#(.+)$/.exec(tok)
+    if (hash) { m[hash[1]] = hash[2]; continue }
+    const eq = /^([^\s=]+)=(.*)$/.exec(tok)
+    if (!eq) continue
+    if (eq[1] === 'hit' && eq[2].includes('/')) { const [h, t] = eq[2].split('/'); m.hit = h; m.total = t; continue }
+    if (eq[2] === '') continue
+    m[eq[1]] = eq[2]
+  }
+  return m
+}
+
+/** 取一个字段：`fields` **优先**，回落 `detail` 解析出来的那份。
+ *  取不到（缺 / 空串 / 字面量 `null`）⇒ `undefined`，调用方据此**跳过那个槽位**。 */
+function fld(e, key, parsed) {
+  const f = e.fields
+  if (f && typeof f === 'object' && Object.prototype.hasOwnProperty.call(f, key)) {
+    const v = f[key]
+    return v === null || v === undefined || v === '' ? undefined : v
+  }
+  const v = parsed[key]
+  return v === undefined || v === '' || v === 'null' ? undefined : v
+}
+
+/**
+ * 一条事件的**自然流句子**（分段 token，模板逐段渲染成 `<span class="se-…">`）。
+ *
+ * @param e 帧里那条事件（本页 `absorbEvents` 抄下来的形状）
+ * @param rec 这一条 traceId 的**收尾记录**（`recFor()` 取；查不到 ⇒ `null`）。
+ *            ⚠️ 只用来兜「事件自己没有耗时、但这次请求有」的那一格 —— 别的槽位都不用请求级数据。
+ * @returns {{mid: Array, ctx: Array}} `mid` = 从句（接在标题后、对象前）；`ctx` = 括号里那串。
+ *          两个都可能是**空数组**（= 那一段整个不出现）。
+ */
+function sentence(e, rec) {
+  const parsed = parseDetail(e.detail)
+  const g = (k) => fld(e, k, parsed)
+  const mid = []
+  const ctx = []
+  /** 往括号里追加一个「键 值」对；值取不到就**不加**（连分隔符也不加）。 */
+  const kv = (label, value) => {
+    if (value === undefined || value === null || value === '') return
+    if (ctx.length) ctx.push(TX(' · '))
+    for (const t of KV(label, value)) ctx.push(t)
+  }
+
+  // ── 从句（按 kind 分派；子类型不在这里判 —— 那些差异都在 title 里，判了就是重复）──
+  switch (e.kind) {
+    case 'cache': {
+      const area = g('cache')
+      if (area !== undefined) mid.push(TV(cacheAreaLabel(area)))
+      break
+    }
+    case 'lock': {
+      const lk = g('lock')
+      if (lk !== undefined) mid.push(TV(lockLabel(lk)))
+      break
+    }
+    case 'stock': {
+      const qty = g('qty')
+      if (qty !== undefined) mid.push(TV(`${qty} 件`))
+      // ⚠️ 「剩余 N」是 3a.3 第二步才进帧的（`ObservedEvent.remaining`，只有扣减档有）
+      //    ⇒ 这一格**以前恒缺**，现在有值了就必须出现在句子里（用户点名的）。
+      // ⚠️ **它不在 `fields` 里** —— 是帧的**顶层键**（后端 `EventBroadcaster.add(...)` 把它当
+      //    第 7 个实参单独传，见 `:425` 那行的 `e.remaining()`），九个调用点里只有扣减档非 null。
+      //    ⇒ 必须直接读事件本身。走 `g()`（= `fields` 优先、回落 detail）在这一格上**两条路都空**：
+      //    `detail` 里也从不写它 ⇒ 那样写会**永远取不到**（本轮探针实测踩过：假数据把它塞进
+      //    `fields` 才绿，而真实帧的形状不是那样 —— 探针那侧是对的，代码这侧才是错的）。
+      const rem = e.remaining
+      if (rem !== null && rem !== undefined) kv('剩余', `${rem} 件`)
+      break
+    }
+    case 'order': {
+      // 两种子类型靠**认得出的字段**分派，不靠猜 title 的文字：
+      //   transition 带 from/to（且只有它带）；illegal 带 shape；async 带 reason。
+      const from = g('from')
+      const to = g('to')
+      if (from !== undefined && to !== undefined) {
+        // ⚠️ from/to 是 `OrderState` 的**枚举名**（后端 `stateName()` 的返回值）⇒ 走
+        //    `orderStateLabel`（那张表认的就是枚举名）；认不出回落原值，不硬套。
+        //    ⚠️ 真实数据里 `rejected` / `error` 那两路 from/to **就是 null**（守卫没命中 /
+        //    UPDATE 抛异常，压根没有「从哪里到哪里」）⇒ 这一格会**如实缺席**。
+        mid.push(TV(`${orderStateLabel(from)} → ${orderStateLabel(to)}`))
+      }
+      const act = g('action')
+      if (act !== undefined) kv('动作', orderActionLabel(act))
+      kv('三位', g('shape'))
+      kv('原因', g('reason'))
+      break
+    }
+    case 'audit': {
+      kv('操作者', g('actor'))
+      const act = g('action')
+      if (act !== undefined) kv('动作', auditActionLabel(act))
+      kv('原因', g('reason'))
+      break
+    }
+    case 'notify':
+      kv('渠道', g('to'))
+      kv('事件', g('event'))
+      kv('原因', g('reason'))
+      break
+    case 'sensitive': {
+      kv('场景', g('scene'))
+      const hit = g('hit')
+      const total = g('total')
+      if (hit !== undefined && total !== undefined) kv('命中', `${hit}/${total}`)
+      break
+    }
+    case 'identity':
+      kv('主体', g('subject'))
+      kv('原因', g('reason'))
+      break
+    case 'protection':
+      kv('范围', g('scope'))
+      kv('详情', g('extra'))
+      break
+    default:
+      // 认不出的 kind（后端加了第 10 类而这里没跟）：**不加从句、不加上下文**，
+      // 标题 + 对象列照常显示 —— 少说一句，但不编。
+      break
+  }
+
+  // ── 括号的尾巴：trace 短号 + 耗时（两样都没有 ⇒ 整对括号不出现）────────────────
+  if (e.traceId) {
+    if (ctx.length) ctx.push(TX(' · '))
+    // 短号画成**可点**的样式（`se-a`）。⚠️ 它不做「点了不许骗人」的例外：这一格只在
+    // `traceId` 非空时存在，而行本身也正是靠 `traceId` 才可点（模板里的 `role`/`tabindex`）
+    // ⇒ 这一格的可点提示与真实行为**同源**，不会出现「画了下划线却打不开」。
+    for (const t of [TK('trace'), TX(' '), TA(String(e.traceId).slice(0, 8))]) ctx.push(t)
+  }
+  const us = num(e.durationUs)
+  if (e.durationUs !== null && e.durationUs !== undefined && us > 0) {
+    // ⚠️ 帧里这个数是**微秒**（TD-81：只有部分环有值）⇒ 亚毫秒的照实写 µs，
+    //    不四舍五入成 `0 ms`（那会把「很快」写成「没花时间」）。
+    if (ctx.length) ctx.push(TX(' · '))
+    for (const t of [TK('耗时'), TX(' '), TV(us >= 1000 ? `${Math.round(us / 1000)} ms` : `${us} µs`)]) ctx.push(t)
+  } else if (rec && num(rec.ms) > 0) {
+    // 事件自己没带耗时、但这次请求有收尾记录 ⇒ 报**请求级**的，并且**标签也换成「请求耗时」**
+    // —— 两个数的口径不同（一个是这条事件，一个是整次请求），共用一个词就是让读者读错。
+    if (ctx.length) ctx.push(TX(' · '))
+    for (const t of [TK('请求耗时'), TX(' '), TV(`${num(rec.ms)} ms`)]) ctx.push(t)
+  }
+  return { mid, ctx }
+}
+
+/** ⑤ 链首那行括号里的写法（`请求开始（<中文名> · POST /goods/goodsUp）`）。
+ *  ⚠️ `apiLabel()` **认不出时回落原值** ⇒ 直接拼会得到「POST /x · POST /x」这种重复
+ *     ⇒ 这里先比一次：认出来了才写两段（中文名 + 原标题），没认出来只留原标题。 */
+function startLabel(rec) {
+  if (!rec) return ''
+  const raw = `${rec.method} ${rec.path}`
+  const zh = apiLabel(rec.method, rec.path)
+  return zh === raw ? raw : `${zh} · ${raw}`
+}
 /** ⑤ 上那枚状态码的色：2xx 中性、4xx 黄、5xx 红。⚠️ 只影响那一个 chip。 */
 function statusClass(status) {
   const s = num(status)
@@ -840,17 +1051,33 @@ function setRange(v) {
 
 /* ── ① 导出（裁定 A：前端生成文件下载，不经后端）────────────────────────────── */
 /** 导出列 = 事件的**全部 10 个字段**（`ObservedEvent` 扩到 10 字段那一次的口径）逐字保留，
- *  外加本页打的 `source` 标记。`ts` 与「时刻」两列都给：前者是帧里的原值（可对齐、可复算），
- *  后者是给人看的 —— 只留一个都会让某一种用法变难。 */
-const EXPORT_HEAD = ['seq', 'ts', '时刻', 'severity', 'kind', '类', 'title', 'detail', 'key', 'objectType', 'objectId', 'traceId', 'source']
+ *  外加本页打的 `source` 标记。
+ *  ⚠️ 3a.3 起帧扩到 **15 键**，CSV **只并进 3 列**（`actorId` / `actorRole` / `remaining`），
+ *     另外两个**刻意不并**，逐条理由写在这里（少一条都会让后人以为是漏了）：
+ *       · `batchId` —— 它是**传输批次**（演练批次号），不是这条事件的事实；同一批次的几百条
+ *         会把这列填成一个常数，加进来只会把表撑宽。
+ *       · `durationUs` —— 只有部分环有值（TD-81「有时带 µs」是长期口径），而且 CSV 里
+ *         `detail` 已经带着这一条的全部原始串；要按耗时筛就走 JSON/ndjson 那两档。
+ *       · `fields` —— 嵌套对象，塞进 CSV 会破坏「一行一条」的表形（要么变成一坨转义 JSON、
+ *         要么得摊平成不定数列）。它的正经回放口是台账的 json 列与 JSON/ndjson 两档。
+ *  ⚠️ `actor` 在帧里是 `{id, role}` **对象或 null**（无身份时整个为 null）⇒ CSV 摊成两列，
+ *     两个都空就是「这条没有身份」，**不写占位符**（同「缺槽位跳过」的口径）。
+ *  `ts` 与「时刻」两列都给：前者是帧里的原值（可对齐、可复算），后者是给人看的 ——
+ *  只留一个都会让某一种用法变难。 */
+const EXPORT_HEAD = ['seq', 'ts', '时刻', 'severity', 'kind', '类', 'title', 'detail', 'key', 'objectType', 'objectId', 'traceId', 'actorId', 'actorRole', 'remaining', 'source']
 const exportCells = (e) => [
   e.seq, e.ts, hmsms(e.ts), e.severity, e.kind, kindLabel(e.kind),
-  e.title, e.detail, e.key, e.objectType, e.objectId, e.traceId, e.source,
+  e.title, e.detail, e.key, e.objectType, e.objectId, e.traceId,
+  e.actor ? e.actor.id : '', e.actor ? e.actor.role : '', e.remaining === null ? '' : e.remaining,
+  e.source,
 ]
-/** 机器那两档（JSON / ndjson）用**帧里的原名**，不掺任何本页加工的列。 */
+/** 机器那两档（JSON / ndjson）用**帧里的原名**，不掺任何本页加工的列 ——
+ *  故 15 键里新加的**五个全带**（含 CSV 排除掉的 `batchId` / `durationUs` / `fields`）。 */
 const exportRaw = (e) => ({
   seq: e.seq, ts: e.ts, kind: e.kind, severity: e.severity, title: e.title, detail: e.detail,
-  key: e.key, objectType: e.objectType, objectId: e.objectId, traceId: e.traceId, source: e.source,
+  key: e.key, objectType: e.objectType, objectId: e.objectId, traceId: e.traceId,
+  batchId: e.batchId, actor: e.actor, durationUs: e.durationUs, remaining: e.remaining, fields: e.fields,
+  source: e.source,
 })
 const csvCell = (v) => {
   const s = v === null || v === undefined ? '' : String(v)
@@ -1101,8 +1328,8 @@ function buildStream(list) {
 
 /** ③ 两层的呈现规则（用户 2026-10-16「中英文分两层」）：
  *    · 预览层（默认）= **中文人话**：`title`（后端已给人话）+ `对象`（中文标签 + 值）。
- *    · 技术字段（`detail` 里的 `src=… / result=… / lock=… / action=…`、以及 `traceShort`）
- *      = **默认不显示，hover / 键盘聚焦那一行才展开**（CSS 里 `.dt` / `.tr` 的 `display`）。
+ *    · 技术字段（`detail` 里的 `src=… / result=… / lock=… / action=…`）
+ *      = **默认不显示，hover / 键盘聚焦那一行才展开**（CSS 里 `.dt` 的 `display`）。
  *  ⚠️ 用**行内展开**而不是原生 `title` tooltip：tooltip 会盖住刚要看的那几行，且鼠标一动就没，
  *    没法逐字读。行内展开就长在行下面（正是用户那条「续行」形态），可读、可选中、可复制。
  *  ⚠️ 「点开 ⑤」那一层**中英文都要**（两个都不能省）—— 见 ⑤ 里每条的双层渲染。 */
@@ -1120,12 +1347,15 @@ function makeRow(mk, rail, gl, depth) {
   }
   if (mk.ev) {
     const e = mk.ev
+    // ⚠️ `recFor()` 取的是**当前源**那条收尾记录（按源隔离，见 `tracesById` 的注释）——
+    //    句子里那一格「请求耗时」只有它给得出。取不到就传 null，`sentence()` 会跳过那一格。
+    const sent = sentence(e, recFor(e.traceId))
     return Object.assign(base, {
       key: `e-${e.seq}`, kind: e.kind, color: kindColor(e.kind), sevColor: severityColor(e.severity),
       t: hmsms(e.ts), lv: { info: 'INFO', warn: 'WARN', error: 'ERROR' }[e.severity] || '',
       md: kindLabel(e.kind),
       title: e.title, detail: e.detail, obj: objText(e), objId: String(e.objectId || ''),
-      traceShort: e.traceId ? e.traceId.slice(0, 8) : '',
+      mid: sent.mid, ctx: sent.ctx,
       cls: `lv-${e.severity.slice(0, 1)}`,
     })
   }
@@ -1133,14 +1363,21 @@ function makeRow(mk, rail, gl, depth) {
     return Object.assign(base, {
       key: `t-${mk.tid}`, kind: '__req', color: 'var(--ink-3)', sevColor: 'var(--ink-3)',
       t: hmsms(mk.rec.endMs), lv: '', md: '请求', title: '请求结束', detail: `总耗时 ${mk.rec.ms} ms`, obj: '', objId: '',
-      traceShort: '', cls: 'req',
+      // ⚠️ 这一行**不是事件**（它来自 `traces` 记录）⇒ 没有 `fields`、没有 kind、没有从句。
+      //    括号里只放它真正有的那一个数：总耗时（原来它藏在 `.dt` 里、要 hover 才看得见，
+      //    而 ⑤ 抽屉默认是塌着的 ⇒ 那个数实际上哪儿都没显示）。
+      mid: [], ctx: [TK('总耗时'), TX(' '), TV(`${mk.rec.ms} ms`)], cls: 'req',
     })
   }
-  // 组头
+  // 组头：括号里不重复路径（`.dt` 里本来就有原样的一行）—— 只把**看得懂的中文名**补在标题后
+  // （C 块的 `apiLabel()` 在本页的消费点之一；⑤ 链首那行是另一个，见 `startLabel()`）。
+  const headRaw = `${mk.rec.method} ${mk.rec.path}`
+  const headZh = apiLabel(mk.rec.method, mk.rec.path)
   return Object.assign(base, {
     key: `h-${mk.tid}`, kind: '__req', color: 'var(--ink-3)', sevColor: 'var(--ink-3)',
-    t: hmsms(mk.rec.startMs), lv: '', md: '请求', title: '请求开始', detail: `${mk.rec.method} ${mk.rec.path}`,
-    obj: '', objId: '', traceShort: '', cls: 'req',
+    t: hmsms(mk.rec.startMs), lv: '', md: '请求', title: '请求开始', detail: headRaw,
+    obj: '', objId: '',
+    mid: headZh === headRaw ? [] : [TV(headZh)], ctx: [], cls: 'req',
   })
 }
 
@@ -1252,6 +1489,28 @@ function absorbEvents(batch, src) {
       objectType: raw.objectType,
       objectId: raw.objectId,
       traceId: raw.traceId === null || raw.traceId === undefined ? '' : String(raw.traceId),
+      // ── 3a.3 起帧多出来的 5 个键（帧现共 15 键）。⚠️ 从前这里**只抄 10 个**，
+      //    多出来的五个被**静默丢掉**（页面看不出任何异常，只是拼句子时永远少那几样）。
+      //    抄进来之后它们才可能出现在：③ 的句子里（actor/remaining 之外的走 fields）、
+      //    ⑤ 与导出三档。
+      // ⚠️ `batchId` 只进导出（JSON/ndjson），**不进任何显示层** —— 它是传输批次不是事件事实。
+      batchId: raw.batchId === null || raw.batchId === undefined ? null : String(raw.batchId),
+      // ⚠️ `actor` 在帧里是 `{id, role}` **对象或 null**（无身份时整个为 null，不是一个空对象）
+      //    ⇒ 这里照抄这个形状：`null` 就是 `null`，不造 `{id:null, role:null}`（造了会让
+      //    「有没有身份」这个判断在页面上永远为真）。`role` 是**角色号**（1 客户 / 2 商家 / 3 管理员）。
+      actor: raw.actor && typeof raw.actor === 'object'
+        ? {
+          id: raw.actor.id === null || raw.actor.id === undefined ? null : String(raw.actor.id),
+          role: raw.actor.role === null || raw.actor.role === undefined ? null : num(raw.actor.role),
+        }
+        : null,
+      durationUs: raw.durationUs === null || raw.durationUs === undefined ? null : num(raw.durationUs),
+      // ⚠️ 只有**库存环的扣减档**有值（后端九个调用点里八个恒传 null）⇒ 这里的 null 是
+      //    「这件事没有这个量」，不是「没测到」（同 `remaining()` 的注释口径）。
+      remaining: raw.remaining === null || raw.remaining === undefined ? null : num(raw.remaining),
+      // ⚠️ `fields` 是「袋子」，形状逐类不同（九个环各一套，见 `EventBroadcaster` 的 `Emit`）
+      //    ⇒ 本页**原样存**、不在这里做任何归一化：拼句子时才按 kind 取值，取不到就跳过。
+      fields: raw.fields && typeof raw.fields === 'object' ? raw.fields : null,
       // ⚠️ 源标记（裁定 B）：写进来的那一刻就定死，之后**永不改** ——
       //    切源只换显示、不动这一位，所以切回来还是同一批对象、同一份顺序。
       source: src,
@@ -1901,7 +2160,10 @@ onBeforeUnmount(() => {
 .ev-rail .sevchip {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  /* D 块（用户 2026-10-17「图标 + 等级文字 6–8px」）：**4px → 8px**。
+     ⚠️ 这一处就是那句里的「等级文字」—— ② 栏底那三枚严重度开关（圆点 + 信息/警告/错误）。
+     同一栏里类清单那九行早就是 `gap: var(--s2)`（8px），两处现在同一档。 */
+  gap: var(--s2);
   font: inherit;
   font-size: var(--fs-xs);
   color: var(--ink);
@@ -2012,7 +2274,7 @@ onBeforeUnmount(() => {
   text-indent: -2ch;
 }
 /* hover（或键盘聚焦）⇒ **展开全文**：既解除 2 行上限，也把技术字段那一层显示出来
-   （`.dt` / `.tr` 见下）。两条规则必须同进同出，否则会出现「展开了但技术字段还没有」的半开态。 */
+   （`.dt` 见下）。两条规则必须同进同出，否则会出现「展开了但技术字段还没有」的半开态。 */
 .log-line:hover .ln,
 .log-line:focus-visible .ln,
 .log-line:focus-within .ln {
@@ -2225,38 +2487,56 @@ onBeforeUnmount(() => {
   color: var(--ink-2);
 }
 .log-line .ms .ob.p {
+  /* ⚠️ B 块「可点 ⇒ `--brand-ink` + 点状下划线」：**默认态就是品牌色**（原来是 `--ink-2`，
+     只有 hover 才变蓝）—— 可点提示若不常显，用户在列表里根本发现不了它能点。
+     ⚠️ 「可点不许骗人」由模板把住（`:class="{ p: !!r.objId }"`）：没有 id 的对象连 `.p`
+     都不会挂上 ⇒ 这一条规则**碰不到**它，画不出一个点不动的下划线。 */
+  color: var(--brand-ink);
   text-decoration: underline dotted;
   text-underline-offset: 2px;
   cursor: pointer;
 }
 .log-line .ms .ob.p:hover {
-  color: var(--brand-ink);
+  /* hover 只把点线换成实线（颜色已经是品牌色，再改色就没有第二档了）。 */
   text-decoration-style: solid;
 }
-/* ── 第二层：技术字段（`detail` 里的 src=/result=/lock=/action=、以及 traceShort）──
+/* ── B 块：句子的**分段着色**（键 / 值 / 值·最次要 / 可点），全部取 admin 主题的 token ──
+   用户 2026-10-17 给的色系：键 → `--ink` · 值 → `--ink-2` · 值·最次要（长缓存键）→ `--ink-3`
+   · 可点（对象 / trace 短号）→ `--brand-ink` + 点状下划线。
+   ⚠️ 类名由 `sentence()` 产的 token 里那个 `c` 直接拼出来（`'se-' + s.c`）⇒ 这里加一档
+     就必须在 `sentence()` 的色档常量里也加一个，两处是**同一张表的两半**。 */
+.log-line .ms .se-k { color: var(--ink); }
+.log-line .ms .se-v { color: var(--ink-2); }
+.log-line .ms .se-v3 { color: var(--ink-3); }
+.log-line .ms .se-x { color: var(--ink-3); }
+.log-line .ms .se-a {
+  color: var(--brand-ink);
+  text-decoration: underline dotted;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+/* 从句与括号各占一段、与前面那段的间距 = `--s2`（8px，与 `.ob` 同一档）。
+   ⚠️ 必须显式给：模板里这些 `<span>` 之间的空白是**换行**，Vue 的空白压缩会把它删掉
+     （同 `.ob` 那条按语的成因）⇒ 不给外距就会贴在一起。 */
+.log-line .ms .se-mid,
+.log-line .ms .se-ctx {
+  margin-left: var(--s2);
+}
+/* ── 第二层：技术字段（`detail` 那一串原始 `k=v`）──────────────────────────────
    用户 2026-10-16：「预览层默认显示中文人话 · 技术字段 hover 才显」＋「hover 展开全文」。
+   ⚠️ 3a.3 起 **`traceShort` 那一格（原 `.tr`）删掉了** —— trace 短号搬进了 A 块那对括号里
+     （默认就可见、可点色），同一条事实不留两份；`.dt` 照旧只做「原始串」那一层。
    ⚠️ 用 `display: none → inline` 而不是 `opacity/color`：藏起来时要真的不占位置，
      否则折行的断点会按「包含技术字段」算，默认态的行就白折了一道（2 行额度浪费掉）。 */
-.log-line .ms .dt,
-.log-line .ms .tr {
+.log-line .ms .dt {
   display: none;
   color: var(--ink-3);
+  margin-left: var(--s2);
 }
 .log-line:hover .ms .dt,
 .log-line:focus-visible .ms .dt,
-.log-line:focus-within .ms .dt,
-.log-line:hover .ms .tr,
-.log-line:focus-visible .ms .tr,
-.log-line:focus-within .ms .tr {
+.log-line:focus-within .ms .dt {
   display: inline;
-}
-.log-line .ms .dt {
-  margin-left: var(--s2);
-}
-.log-line .ms .tr {
-  margin-left: var(--s2);
-  flex: 0 0 auto;
-  white-space: nowrap;
 }
 .ev-empty {
   font-size: var(--fs-sm);
@@ -2359,6 +2639,12 @@ button.ev-bar {
   cursor: pointer;
 }
 .ev-bar .nm {
+  /* D 块（用户 2026-10-17）：图标与文字之间 6–8px。⚠️ 原来靠模板里**一个空格**
+     （12px 字号下 ≈3px）—— 那是**字体度量**，换字体就变，量也量不准；
+     改成弹性盒 + `gap` 之后间距是 CSS 里的一格，探针能直接量到。 */
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
   font-size: var(--fs-xs);
   color: var(--ink-2);
   overflow: hidden;
@@ -2514,6 +2800,14 @@ button.ev-bar {
 .chain-i .d b {
   color: var(--ink);
   font-weight: var(--fw-semi);
+}
+/* D 块「同类检查」的第三处：⑤ 链里那枚类图标与类名之间原来也是**一个空格**（15px 字号下
+   ≈4px）。⚠️ 只包住「图标 + 类名」这一小段（`.d` 里后面还有中文人话与 `display:block`
+   的技术行）—— 整条 `.d` 改成弹性盒会把那两段也拉成一行。 */
+.chain-i .d .d-hd {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s2);
 }
 .chain-i.is-ends .d b {
   color: var(--brand-ink);
