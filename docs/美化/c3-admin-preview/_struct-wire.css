@@ -130,9 +130,12 @@ body {
 .chart .tag.right { left: auto; right: 6px; }
 
 /* 热力图的「行 = 锁名」——行名**贴在行上**（早先放在图下方一行，读不出「行 = 锁名」）。
-   左列固定宽 + 右列 SVG；行名等分列高，上下留出与 SVG 一致的 pt/pb（由 JS 写 inline）。*/
-.heat-wrap { display: grid; grid-template-columns: 62px 1fr; align-items: stretch; }
-.heat-labels { display: flex; flex-direction: column; }
+   ⚠️ 行名条**叠在 SVG 上**（绝对定位），不是同级的 flex 左列。
+   同级左列会**把 SVG 挤窄**，于是「同一列」在两张图上是两个像素 x —— 共享 x 轴就是假的。
+   改成叠层后 SVG 占满容器宽，行名条只占左边距那一槽（宽度由 JS 写成 PAD_L/VBW）。
+   行名等分列高，上下留出与 SVG 一致的 pt/pb（由 JS 写 inline）。*/
+.heat-wrap { position: relative; }
+.heat-labels { position: absolute; left: 0; top: 0; bottom: 0; display: flex; flex-direction: column; }
 .heat-labels > span {
   flex: 1 1 0;
   display: flex;
@@ -144,6 +147,17 @@ body {
   white-space: nowrap;
   overflow: hidden;
 }
+
+/* 依赖状态点（l2Up / lockUp）：**常量**，画成点，不画成线 */
+.dots { display: flex; flex-wrap: wrap; gap: 16px; align-items: center; }
+.dots .dot { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; color: var(--t); }
+.dots .dot i { width: 8px; height: 8px; background: #6a6a6a; display: inline-block; }
+.dots .dot.off i { background: #fff; border: 1px solid var(--l); }
+.dots .dot code { font: 10px/1 var(--mono); color: var(--tm); }
+.dots-note { font: 10px/1.5 var(--mono); color: var(--ts); margin-top: 4px; }
+/* 图自己的注（口径 / 缺失 / 上限这类）——贴在**该图下面**，跟着图走，不跟着区块走 */
+.cnote { font: 10px/1.6 var(--mono); color: var(--ts); margin: 4px 0 0; }
+
 /* 「共享 x 轴」的结构标记：把若干张图括成一组，只在组底画一次刻度 */
 .axis-group { border-left: 3px solid var(--f2); padding-left: 10px; margin-left: -13px; }
 .axis-note {

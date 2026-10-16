@@ -29,7 +29,7 @@
 <div class="wire-head">
   <h1>S3 ·「三问句泳道」— 按「问句」分层，不按「图类型」分层</h1>
   <p><b>这是结构草图，不是设计稿。</b>全篇灰阶线框：无品牌色、无圆角档、无阴影、无过渡与动效。视觉留到第三步。</p>
-  <p>数据是真的：<code>_work/3a2b/snapshot.json</code>（2026-10-16 从真运行页面抓的快照），每个数字逐字抄。快照那刻页面里只有 <b>7 拍</b>。</p>
+  <p>数据是真的：<code>_work/3a2b/frames.ndjson</code>（2026-10-16 对 dev 后端真跑一场负载，从 SSE 流上逐字抓的 <b>60 拍</b>），每个数字由 <code>scripts/probes/probe-b7a2b-wire-data.mjs</code> 从帧里生成。</p>
   <p class="ruling">
     <span>开关A · 容器 max-width 1280</span><span>开关B · **本版不需要**（状态带内容原样）</span>
     <span>开关C · 接受只有 K1/K3 有微条</span><span>开关D · 共享游标</span>
@@ -60,18 +60,26 @@
         <div class="lane-label">
           <div class="q">现在好不好？</div>
           <div class="en">IS IT OK?</div>
-          <div class="en" style="margin-top:2px">＝ 原状态带<br>（内容一字未改）</div>
+          <div class="en" style="margin-top:2px">状态带**内容**一字未改<br>（值随数据）</div>
         </div>
         <div>
           <div class="readout">
-            <div class="cell hv"><b>● 健康</b><span>健康度（后端算）</span></div>
-            <div class="cell"><b>1.2%</b><span>5xx 占比（本拍）</span></div>
-            <div class="cell"><b>0.0%</b><span>4xx 占比（本拍）</span></div>
-            <div class="tz">已连接 · 第 <b>6</b> 拍 · 窗口 60 秒 · 16:45:09</div>
-            <div class="tz" style="margin-left:0">数据源：正常（后端真流）</div>
+            <div class="cell hv"><b>● <span id="st-health">—</span></b><span>健康度（后端算）</span></div>
+            <div class="cell"><b id="st-5xx">—</b><span>5xx 占比（本拍）</span></div>
+            <div class="cell"><b id="st-4xx">—</b><span>4xx 占比（本拍）</span></div>
+            <div class="tz" id="st-tz1">—</div>
+            <div class="tz" style="margin-left:0" id="st-tz2">—</div>
           </div>
-          <div class="slot hit" style="margin:8px 0 0">判据（后端 health.reasons）：<b>L1 命中率 60.0%</b>　<span style="color:var(--ts)">— 健康态也可能非空</span></div>
+          <div class="slot hit" style="margin:8px 0 0">判据（后端 health.reasons）：<b id="st-reasons">—</b>　<span style="color:var(--ts)">— 健康态也可能非空</span></div>
           <div class="slot" style="margin:8px 0 0">［条件块 · 断流条］<code>v-if="lost"</code>　当前未触发</div>
+
+          <!-- ⚠️ 下面这一块是**新增**的，不属于状态带 —— 状态带本身仍是原样。 -->
+          <div class="mini-h" style="margin:12px 0 0">平均延迟 <span>· 60 秒 · 逐拍均值（本次补）</span></div>
+          <div class="chart" data-h="150"><span class="tag">折线 · 本拍无延迟样本 ⇒ 断开</span></div>
+          <div class="cnote" id="n-mean"></div>
+
+          <div class="mini-h" style="margin:12px 0 0">依赖状态 <span>· l2Up / lockUp · 常量不是趋势（本次补）</span></div>
+          <div id="deps"></div>
         </div>
       </div>
 
@@ -85,23 +93,29 @@
         <div>
           <div class="lane3">
             <div>
-              <div class="mini-h">QPS <span>· 60 秒</span></div>
-              <div class="chart" data-h="180"><span class="tag">占位 · 面积</span></div>
+              <div class="mini-h">QPS <span>· 成功 + 4xx 堆叠</span></div>
+              <div class="chart" data-h="180"><span class="tag">堆叠柱 × 2 段</span></div>
             </div>
             <div>
-              <div class="mini-h">缓存命中率 <span>· 60 秒</span></div>
-              <div class="chart" data-h="180"><span class="tag">占位 · 折线</span></div>
+              <div class="mini-h">缓存命中率 <span>· 柱 + 虚线</span></div>
+              <div class="chart" data-h="180"><span class="tag">计数柱 + 命中率虚线</span></div>
             </div>
             <div>
               <div class="mini-h">锁竞争热力 <span>· 锁名 × 60 拍</span></div>
-              <div class="chart" data-h="180"><span class="tag">占位 · 热力</span></div>
+              <div class="chart" data-h="180"><span class="tag">热力 · 2 行 × 60 拍</span></div>
             </div>
           </div>
+          <div class="cnote" id="n-qps"></div>
           <div class="lane-note">
-            ⇡ 三张图<strong>等宽、同拍数</strong>（真页面里就是同一个 <code>xLabels</code> 数组）⇒ x 刻度在三张之间<strong>竖向对齐</strong>，共享同一时间基；
-            鼠标移动时三图游标同响应（开关 D ＝ 共享游标，零新增注册）。<br>
-            ⚠️ <strong>本版最紧的一处</strong>：主区可用 1129px − 泳道标签 132px − 间距 ⇒ 每张图只有 <strong>≈318px</strong>。
-            热力图的 3 个锁名在这一宽下要横排、命中率的 y 轴刻度要收窄，否则会挤。
+            ⇡ 三张图<strong>等宽 + 逐拍格距相同</strong>（本页实测：<b id="w-mini">—</b>、格距 <b id="w-pitch3">—</b>；
+            探针独立复核：容器差 0px、作图区差 0px、格距差 0.00px）
+            ⇒ 同一拍在三张里落在<strong>各自的同一相对位置</strong>，鼠标移动时三图游标<strong>同拍</strong>响应（开关 D ＝ 共享游标，零新增注册）。<br>
+            ⚠️ 这<strong>不是</strong>「三张共享一根 x 轴」（那是 S1 的做法：上下叠、左右沿逐像素相同，探针量到 0px 偏差）。
+            并排图各自有轴，第 i 拍本来就是三个不同的页面 x —— 本版量的判据是<strong>等宽 + 等格距</strong>，别把两句读成一句。<br>
+            ⚠️ <strong>本版最紧的一处</strong>：主区可用 1129px − 泳道标签 132px − 两处间距 ⇒ 每张图只有上面那个宽。
+            热力图的 <strong>2 个</strong>锁名在这一宽下要横排、命中率的 y 轴刻度要收窄，否则会挤。<br>
+            ⚠️ <strong>热力在这一宽下已经压到 2 行 × 60 列</strong>，格距只有 <b id="w-cell">—</b> —— 它还是「看得出有没有」的量级，
+            但已经<strong>看不出「哪一拍多深」</strong>了。这一条是 S3 的结构代价，不是画错了（见页脚「代价 ③」）。
           </div>
         </div>
       </div>
@@ -111,7 +125,7 @@
         <div class="lane-label">
           <div class="q">什么在吃资源？</div>
           <div class="en">WHAT IS CONSUMING?</div>
-          <div class="en" style="margin-top:2px">无时间维<br>本拍快照</div>
+          <div class="en" style="margin-top:2px">上面两块无时间维<br>（本拍快照）<br>锁等待另有 60 拍</div>
         </div>
         <div>
           <div class="lane2col">
@@ -124,6 +138,11 @@
               <div class="stack" id="stock" style="gap:8px"></div>
             </div>
           </div>
+          <!-- ⚠️ 锁等待是**有时间维**的（60 拍折线），所以它不塞进上面那两栏 —— 单起一行、占满泳道宽。
+               塞进 2 栏会只剩 ≈318px，两条线 + 60 点的「断开」语义在那个宽下就看不见了。 -->
+          <div class="mini-h" style="margin:16px 0 0">锁等待 <span>· 60 秒 · 每把锁一条（本次补，后端 <code>locks[].waitMeanMs</code>）</span></div>
+          <div class="chart" data-h="150"><span class="tag">折线 × 2 · 无等待的拍断开（不是 0）</span></div>
+          <div class="cnote" id="n-wait"></div>
         </div>
       </div>
 
@@ -132,11 +151,16 @@
         <b>信息层级</b>：按<strong>问句</strong>分层，不按图类型分层 —— 「现在好不好 → 在往哪走 → 什么在吃资源」。每条泳道自带一句问句当标题，读者不用猜这块是干嘛的。<br>
         <b>三泳道共用构图 —— 用户裁定「接受，不动」（2026-10-16）</b>：本版三条泳道骨架完全相同，撞 taste-skill（<code>design-taste-frontend</code>）§6.3 的 <code>Neighbouring sections must not share a layout.</code>——<strong>明知故犯，落在这里备案</strong>。理由：该 skill 原文第 3 行自己写着 <code>Not for dashboards or app ends.</code>，拿它判管理面板本就要选择性适用；而本版立意就是「三泳道 = 三问句」，动了就不是 S3 了。<br>
         <b>为什么这样排</b>：Grafana 官方原话「a dashboard should <strong>answer a question</strong>」+「logical progression … general to specific」。三条泳道的内部形态<strong>天然不同</strong>（带 / 并排 / 两栏），所以它不像「一叠等宽卡片」。<br>
-        <b>改动幅度</b>：大 —— 取消了「一图一行、各自全宽」的堆叠，改为同层并排 + 共享时间基。<br>
-        <b>与 S1/S2 的关键差别</b>：<strong>本版不需要用到开关 B</strong> —— 泳道 1 的内容就是状态带原样（一字未改），只是外面套了一个问句标签 ⇒ 四页不会因此分叉。<br>
-        <b>代价</b>：① 泳道 2 三图并排每张仅 <strong>≈318px</strong>（见上），要么接受这个宽度，要么把热力图放回独占一行；② 每张图原来那行长的 <code>.a-h2n</code> 说明在横排下会挤爆，文案要压到 10 字内。<br>
+        <b>与 S1/S2 的关键差别</b>：<strong>本版不需要用到开关 B</strong> —— 泳道 1 里的<strong>状态带本身仍是原样</strong>（四页共用写法，内容一字未改，只是值随数据），新增的「平均延迟」「依赖状态」是<strong>另外的块</strong>，不并进状态带 ⇒ 四页不会因此分叉。<br>
+        <b>序列来源</b>（「原始有」/「本次补」）：<br>
+        　· 泳道 1 平均延迟 —— <b>本次补</b>（<code>requests.meanMs</code> 读了不用）；<b>标题写「平均延迟」不写「P99 延迟」</b>（P95/P99/max 是衰减窗口分位、不是本拍，见 TD-77）<br>
+        　· 泳道 1 依赖状态 —— <b>本次补</b>（<code>gauges.l2Up</code> / <code>lockUp</code> 读了不用）；恒 1 ⇒ 画点不画线<br>
+        　· 泳道 2 QPS —— 成功段 ⊂ 原始；<b>4xx 段 ＝ 本次补</b>；缓存命中率 —— 命中率线「原始有」，<b>命中/未命中计数柱 ＝ 本次补</b>；锁竞争热力 —— 「原始有，原样不动」<br>
+        　· 泳道 3 锁等待 —— <b>本次补</b>（<code>locks[].waitMeanMs</code> 读了不用）；防护命中 / 库存水位 —— 「原始有，原样不动」<br>
+        <b>改动幅度</b>：大 —— 取消了「一图一行、各自全宽」的堆叠，改为同层并排 + 共享时间基；<b>图由 3 张变 5 张</b>（泳道 1 加延迟、泳道 3 加锁等待），QPS 由面积线变两段堆叠、命中率由单折线变双轴。<br>
+        <b>代价</b>：① 泳道 2 三图并排每张仅 <b id="w-mini2">—</b>（见上），要么接受这个宽度，要么把热力图放回独占一行；② 每张图原来那行长的 <code>.a-h2n</code> 说明在横排下会挤爆，文案要压到 10 字内；③ <strong>热力在泳道 2 的宽度下格子只剩 <b id="w-cell2">—</b></strong> —— 「有没有」还看得见，「哪一拍多深」已经看不出（0 值那档本来就只是最浅底，所以本窗全 0 时这块是一整片均匀浅灰）；④ <strong>泳道 3 里锁等待是唯一有时间维的东西</strong>，塞进原来的两栏会只剩泳道 2 那个宽度 ⇒ 它**单起一行占满泳道宽**，泳道 3 的标签因此从「无时间维 · 本拍快照」改成「上面两块无时间维（本拍快照）· 锁等待另有 60 拍」。<br>
         <b>宽度实测</b>（探针量的，不是算的）：1440 视口下 <code>.side</code> 232 + <code>.main</code> padding 32×2 + 经典滚动条 <b>15</b> ⇒ <b>主区可用 1129px</b>（不溢出时才是 1144px）；<code>max-width: 1280</code> 在 1440 下达不到，需视口 ≥ 1472px。本版对宽度最敏感。<br>
-        <b>数据限度</b>：快照那刻只有 7 拍，x 轴是 7 个点 —— 判结构够用，<strong>别拿它估密度</strong>。
+        <b>数据限度</b>：本窗 <b>60 拍</b>、且是一场<b>健康窗口</b> —— 无 5xx、无锁超时、<code>health.level</code> 60 拍恒 <code>ok</code>。锁只有 <b>2 把</b>（<code>order-add</code> / <code>order-pay</code>）。<strong>别拿这一窗去估「系统在各种负载下的样子」</strong>。
       </div>
 
     </div></div>
@@ -147,14 +171,54 @@
 <script>
 (function () {
   var D = WF.DATA
-  /* 并排 ⇒ 三张各自画 x 轴（等宽同拍数，刻度自然竖向对齐）*/
-  WF.chart(document.querySelectorAll('.chart')[0], 'qps',  { h: 180, xAxis: true })
-  WF.chart(document.querySelectorAll('.chart')[1], 'hit',  { h: 180, xAxis: true })
-  WF.chart(document.querySelectorAll('.chart')[2], 'heat', { h: 180, xAxis: true })
+  var q = document.querySelectorAll('.chart')
+  /* 各图**各自**画 x 轴：泳道 2 的三张是等宽并排 ⇒ 同一拍在三张里落在各自的同一相对位置
+     （共享游标才同步）。⚠️ 这不是「三张共享一根 x 轴」—— 那是 S1 的写法（叠图、左右沿逐像素
+     相同）。并排图各有自己的轴，第 i 拍本来就是三个不同的页面 x，别把两句话读成一句。*/
+  WF.chart(q[0], 'mean',     { h: 150, xAxis: true })   /* 泳道 1 */
+  WF.chart(q[1], 'qpsStack', { h: 180, xAxis: true })   /* 泳道 2 三张 */
+  WF.chart(q[2], 'hitBars',  { h: 180, xAxis: true })
+  WF.chart(q[3], 'heat',     { h: 180, xAxis: true })
+  WF.chart(q[4], 'wait',     { h: 150, xAxis: true })   /* 泳道 3 */
 
+  var t = function (id, s) { var e = document.getElementById(id); if (e) e.textContent = s }
+
+  /* 状态带：**内容**一字未改（值随数据）*/
+  t('st-health', D.header.health)
+  t('st-5xx', D.header.err5xx)
+  t('st-4xx', D.header.err4xx)
+  t('st-tz1', D.header.phase + ' · 第 ' + D.header.seq + ' 拍 · 窗口 ' + D.header.win + ' 秒 · ' + D.header.tick)
+  t('st-tz2', '数据源：' + D.header.source)
+  t('st-reasons', D.reasons.length ? D.reasons.join('；') : '（本拍为空）')
+
+  t('n-qps', '5xx 段：' + D.notes.qps5xx + '　｜　4xx 段：' + D.notes.qps4xx)
+  t('n-mean', D.notes.p99)
+  t('n-wait', D.wait.names.map(function (n, i) {
+    var nz = D.wait.series[i].filter(function (v) { return v !== null && v !== undefined }).length
+    return (i === 0 ? '实线' : '虚线') + ' = ' + n + '（' + nz + '/' + D.x.length + ' 拍有等待）'
+  }).join('　·　'))
+
+  WF.dots(document.getElementById('deps'))
   WF.hbar(document.getElementById('prot'),
-    D.prot.labels.map(function (l, i) { return { label: l, value: D.prot.values[i] } }), 5, '')
+    D.prot.labels.map(function (l, i) { return { label: l, value: D.prot.values[i] } }), D.prot.max, '')
   WF.stock(document.getElementById('stock'))
+
+  /* 宽度实测（探针会独立再量一遍）*/
+  var miniW = q[1].querySelector('svg').getBoundingClientRect().width
+  var miniPlot = q[1].querySelector('.plot-edge').getBoundingClientRect().width
+  t('w-mini', Math.round(miniW) + 'px（作图区 ' + Math.round(miniPlot) + 'px）')
+  t('w-mini2', Math.round(miniW) + 'px')
+  t('w-pitch3', (miniPlot / (D.x.length - 1)).toFixed(2) + 'px')
+  /* 热力的格子：**量热力图自己那张**（q[3]），不借兄弟图的宽 —— 两张同宽是结论、不是前提。
+     格距 = 作图区宽 ÷ 59 拍；净色块 = (iw/(cols−1) − 2) 单位 × 缩放 —— 2 是 heatChart 给每格
+     留的 1 单位白描边 ×2 侧，所以「格距」与「看得见的色块」差着这 2 个单位，两个数都得报。*/
+  var heatPlot = q[3].querySelector('.plot-edge').getBoundingClientRect().width
+  var iw = WF.VBW - WF.PAD_L - WF.PAD_R
+  var sc = heatPlot / iw
+  var pitchU = iw / (D.x.length - 1)
+  var pitchPx = (pitchU * sc).toFixed(1)
+  t('w-cell', pitchPx + 'px（净色块 ' + ((pitchU - 2) * sc).toFixed(1) + 'px）')
+  t('w-cell2', pitchPx + 'px（净色块 ' + ((pitchU - 2) * sc).toFixed(1) + 'px）')
 })()
 </script>
 </body>

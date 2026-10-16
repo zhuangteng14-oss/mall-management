@@ -1,0 +1,66 @@
+=== 3a.2b 字段覆盖核查：60 帧 ===
+
+字段                             非空帧     非零帧  / 总  判定
+requests.count                  60      59  / 60  🟡 部分有值（59/60）· 待裁
+requests.qps                    60      59  / 60  🟡 部分有值（59/60）· 待裁
+requests.errors5xx              60       0  / 60  ⛔ 有值但全零 · 不上图
+requests.errors4xx              60      20  / 60  🟡 部分有值（20/60）· 待裁
+requests.errorRate              59       0  / 60  ⛔ 有值但全零 · 不上图
+requests.clientErrorRate        59      20  / 60  🟡 部分有值（20/60）· 待裁
+requests.meanMs                 59      59  / 60  🟡 部分有值（59/60）· 待裁
+requests.p95Ms                  59      59  / 60  🟡 部分有值（59/60）· 待裁
+requests.p99Ms                  59      59  / 60  🟡 部分有值（59/60）· 待裁
+requests.maxMs                  59      59  / 60  🟡 部分有值（59/60）· 待裁
+cache.hit                       60      59  / 60  🟡 部分有值（59/60）· 待裁
+cache.miss                      60      34  / 60  🟡 部分有值（34/60）· 待裁
+cache.hitRate                   59      59  / 60  🟡 部分有值（59/60）· 待裁
+cache.l2Degraded                60       0  / 60  ⛔ 有值但全零 · 不上图
+gauges.l2Up                     60      60  / 60  ✅ 可用
+gauges.lockUp                   60      60  / 60  ✅ 可用
+health.level                    60      60  / 60  ✅ 可用
+locks[]acquires                 60      17  / 60  🟡 部分有值（17/60）· 待裁
+locks[]acquired                 60      17  / 60  🟡 部分有值（17/60）· 待裁
+locks[]timeouts                 60       0  / 60  ⛔ 有值但全零 · 不上图
+locks[]degraded                 60       0  / 60  ⛔ 有值但全零 · 不上图
+locks[]errors                   60       0  / 60  ⛔ 有值但全零 · 不上图
+locks[]waitMeanMs               60      17  / 60  🟡 部分有值（17/60）· 待裁
+protections[].value             60      59  / 60  🟡 部分有值（59/60）· 待裁
+
+--- 逐锁明细（整个窗口的合计）---
+锁名                              出现帧  acquires  timeouts  waitMeanAvg     等待帧
+order-pay                        60       108         0          2.0       9
+order-add                        60        96         0          1.7       8
+
+--- 逐防护明细（整个窗口）---
+tag                 label                 出现帧    非零帧      合计    max
+cacheHit            缓存命中                   60     59    1224     23
+lockTimeout         锁等待超时                  60      0       0      0
+orderRejected       订单流转被拒                 60      0       0      0
+stockInsufficient   库存不足（防超卖）              60      0       0      0
+auditFailed         审计写入失败                 60      0       0      0
+notifyFailed        通知发送失败                 60      0       0      0
+sensitiveHit        敏感词拦下                  60      0       0      0
+identityRejected    身份拒绝                   60      0       0      0
+
+--- 候选序列量级（第二关：幅度够不够）---
+字段                          有值帧    非零帧        min        p50        p95        max
+requests.count               60     59          0         37         52         54
+requests.qps                 60     59          0     36.575     51.175     53.751
+requests.errors5xx           60      0          0          0          0          0
+requests.errors4xx           60     20          0          0          4          4
+requests.errorRate           59      0          0          0          0          0
+requests.clientErrorRate     59     20          0          0     0.1050     0.1180
+requests.meanMs              59     59      1.217      2.023     15.883     18.008
+requests.p95Ms               59     59     57.672     78.643     78.643     78.643
+requests.p99Ms               59     59     59.769     82.838     82.838     82.838
+requests.maxMs               59     59     60.698     82.157     82.157     82.157
+cache.hit                    60     59          0         21         23         23
+cache.miss                   60     34          0          2          8          9
+cache.hitRate                59     59     0.6900     0.9130          1          1
+cache.l2Degraded             60      0          0          0          0          0
+locks[]acquires              60     17          0          0         12         12
+locks[]waitMeanMs            60     17          0          0      2.568      3.419
+protections[].value          60     59          0         21         23         23
+
+合计：24 项 · 可用 3 · 待裁 15 · 拦下 6
+拦下：requests.errors5xx、requests.errorRate、cache.l2Degraded、locks[]timeouts、locks[]degraded、locks[]errors

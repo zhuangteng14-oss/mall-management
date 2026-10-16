@@ -37,7 +37,7 @@
 <div class="wire-head">
   <h1>S1 ·「时间栈 + 实体栏」— 按数据本性两分栏</h1>
   <p><b>这是结构草图，不是设计稿。</b>全篇灰阶线框：无品牌色（墨/釉/朱砂/运营橙一个没用）、无圆角档、无阴影、无过渡与动效。视觉留到第三步。</p>
-  <p>数据是真的：<code>_work/3a2b/snapshot.json</code>（2026-10-16 从真运行页面抓的快照），每个数字逐字抄。快照那刻页面里只有 <b>7 拍</b>。</p>
+  <p>数据是真的：<code>_work/3a2b/frames.ndjson</code>（2026-10-16 对 dev 后端真跑一场负载，从 SSE 流上逐字抓的 <b>60 拍</b>），每个数字由 <code>scripts/probes/probe-b7a2b-wire-data.mjs</code> 从帧里生成。</p>
   <p class="ruling">
     <span>开关A · 容器 max-width 1280</span><span>开关B · 允许本页改状态带新变体（本版没改）</span>
     <span>开关C · 接受只有 K1/K3 有微条</span><span>开关D · 共享游标</span>
@@ -63,17 +63,17 @@
     <div class="top"><span>管理端 / <b>指标面板</b></span><span class="who">ops_duan · 退出</span></div>
     <div class="main"><div class="px">
 
-      <!-- ── 状态带：**原样横贯**，不动四页共用写法 ────────────────────────── -->
+      <!-- ── 状态带：**原样横贯**，不动四页共用写法（值随 DATA，结构一字未改）──── -->
       <div class="status">
-        <div class="cell hv"><b>● 健康</b><span>健康度（后端算）</span></div>
-        <div class="cell"><b>1.2%</b><span>5xx 占比（本拍）</span></div>
-        <div class="cell"><b>0.0%</b><span>4xx 占比（本拍）</span></div>
-        <div class="tz">已连接 · 第 <b>6</b> 拍 · 窗口 60 秒 · 16:45:09</div>
-        <div class="tz" style="margin-left:0">数据源：正常（后端真流）</div>
+        <div class="cell hv"><b>● <span id="st-health">—</span></b><span>健康度（后端算）</span></div>
+        <div class="cell"><b id="st-5xx">—</b><span>5xx 占比（本拍）</span></div>
+        <div class="cell"><b id="st-4xx">—</b><span>4xx 占比（本拍）</span></div>
+        <div class="tz" id="st-tz1">—</div>
+        <div class="tz" style="margin-left:0" id="st-tz2">—</div>
       </div>
 
-      <!-- ── 判据列表（条件块；快照里**有**值）────────────────────────────── -->
-      <div class="slot hit">判据（后端 health.reasons）：<b>L1 命中率 60.0%</b>　<span style="color:var(--ts)">— 健康态也可能是非空：后端填的是正面理由</span></div>
+      <!-- ── 判据列表（条件块；本窗**有**值）──────────────────────────────── -->
+      <div class="slot hit">判据（后端 health.reasons）：<b id="st-reasons">—</b>　<span style="color:var(--ts)">— 健康态也可能是非空：后端填的是正面理由</span></div>
 
       <!-- ── 断流条（条件块；快照里**未触发** —— 这里只标出它的位置）──────── -->
       <div class="slot">［条件块 · 断流条］<code>v-if="lost"</code>　当前未触发 —— 触发时占满整行、在状态带正下方</div>
@@ -82,22 +82,36 @@
 
         <!-- ══ 左：时间栈（2/3）══════════════════════════════════════════ -->
         <div class="axis-group">
-          <div class="h2 first"><b>QPS · 滚动 60 秒</b><span class="n">每秒 1 点 · 新点从右进、旧点从左出</span></div>
-          <div class="chart" data-h="200"><span class="tag">占位 · 面积图（主）</span></div>
+          <div class="h2 first"><b>QPS · 堆叠（成功 + 4xx）</b><span class="n">每秒 1 拍 · 新点从右进、旧点从左出</span></div>
+          <div class="chart" data-h="200"><span class="tag">堆叠柱 · 本拍请求数 ÷ 拍长</span></div>
+          <div class="cnote" id="n-qps"></div>
 
-          <div class="h2"><b>缓存命中率 · 滚动 60 秒</b><span class="n">本拍无请求的拍点留空（不断线连成 0）</span></div>
-          <div class="chart" data-h="170"><span class="tag">占位 · 折线（第 1 点为空 → 起点断开）</span></div>
+          <div class="h2"><b>缓存命中率 · 滚动 60 秒</b><span class="n">柱 = 命中/未命中计数（左轴）· 虚线 = 命中率 %（右轴 0–100）</span></div>
+          <div class="chart" data-h="170"><span class="tag">堆叠柱 + 折线 · 本拍无请求的拍点留空</span></div>
+
+          <div class="h2"><b>平均延迟</b><span class="n">逐拍均值 · 纵轴从 0 起（不截断）</span></div>
+          <div class="chart" data-h="160"><span class="tag">折线 · 本拍无延迟样本 ⇒ 断开</span></div>
+          <div class="cnote" id="n-mean"></div>
+
+          <div class="h2"><b>锁等待</b><span class="n">每把锁一条 · 无等待的拍断开（不是 0）</span></div>
+          <div class="chart" data-h="160"><span class="tag">折线 × 2 · waitMeanMs</span></div>
+          <div class="cnote" id="n-wait"></div>
 
           <div class="h2"><b>锁竞争热力图</b><span class="n">行 = 锁名 · 列 = 最近 60 拍 · 越深 = 本拍超时越多</span></div>
-          <div class="chart" data-h="190"><span class="tag">占位 · 热力（3 锁名 × 7 拍）</span></div>
+          <div class="chart" data-h="190"><span class="tag">热力 · 锁名 × 60 拍</span></div>
+          <div class="cnote" id="n-heat"></div>
 
-          <div class="axis-note">⇡ 上面三张图共用<strong>同一根 x 轴</strong>（真页面里就是同一个 <code>xLabels</code> 数组，不是「可以加联动」）——整组只在最底画一次刻度。</div>
+          <div class="axis-note">⇡ 上面 <b>五张图</b>共用<strong>同一根 x 轴</strong>（真页面里就是同一个 <code>xLabels</code> 数组，不是「可以加联动」）——整组只在最底画一次刻度。<br>
+            ⚠️ 「对齐」是<strong>几何上量过的</strong>：五张图的 SVG 都占满容器宽、共用同一套左右内边距，探针量每张图画出来的绘图区底边（<code>.plot-edge</code>）左右沿逐像素相同（不是靠着「看起来都有个左边距」）。</div>
         </div>
 
         <!-- ══ 右：实体栏（380px）════════════════════════════════════════ -->
         <div>
           <div class="sec-h">本拍指标　<span class="n" style="font-weight:400;color:var(--tm)">（4 张读数 ＝ 原 KPI 行，改为竖排）</span></div>
           <div class="rail-kpis" id="rail-kpis"></div>
+
+          <div class="sec-h">依赖状态　<span class="n" style="font-weight:400;color:var(--tm)">l2Up / lockUp · 常量，不是趋势</span></div>
+          <div id="deps"></div>
 
           <div class="sec-h">防护命中 · 8 类　<span class="n" style="font-weight:400;color:var(--tm)">本拍增量 · 纵向柱 → 横向条</span></div>
           <div class="stack" id="prot" style="gap:5px"></div>
@@ -109,13 +123,21 @@
       </div>
 
       <div class="foot-note">
-        <b>S1 的布局模式</b>：主从两栏 —— 左 2/3 是「时间域」（三张时序图共享一根 x 轴），右 380px 是「实体域」（当期读数 + 无时间维的两项）。<br>
+        <b>S1 的布局模式</b>：主从两栏 —— 左 2/3 是「时间域」（<b>五张</b>时序图共享一根 x 轴），右 380px 是「实体域」（当期读数 + 依赖状态点 + 无时间维的两项）。<br>
+        <b>序列来源</b>（「原始有」＝ 原页面本来就读这条字段；「本次补」＝ 后端一直在推、原页面**读了不用**）：<br>
+        　· QPS 堆叠 —— 成功段 ⊂ 原始；<b>4xx 段 ＝ 本次补</b>（原页面只画一条总面积线，<code>requests.errors4xx</code> 读了不用）<br>
+        　· 缓存命中率 —— 命中率线「原始有」；<b>命中 / 未命中计数柱 ＝ 本次补</b>（<code>cache.hit</code> / <code>cache.miss</code> 读了不用）<br>
+        　· 平均延迟 —— <b>本次补</b>（<code>requests.meanMs</code> 读了不用）。<b>标题写「平均延迟」不写「P99 延迟」</b>：逐拍真值只有均值这一条，P95/P99/max 是 Micrometer 衰减窗口分位、**不是本拍**（见 TD-77）<br>
+        　· 锁等待 —— <b>本次补</b>（<code>locks[].waitMeanMs</code> 读了不用）<br>
+        　· 锁竞争热力 —— <b>原始有，原样不动</b>（口径仍是 <code>locks[].timeouts</code>）<br>
+        　· 依赖状态点 —— <b>本次补</b>（<code>gauges.l2Up</code> / <code>gauges.lockUp</code> 读了不用）；本窗恒 1 ⇒ <b>画点不画线</b><br>
         <b>信息层级</b>：唯一「主」＝ 左侧时间栈；「次」＝ 右栏当期读数；「末」＝ 右栏实体条。层级靠<strong>尺寸差与分组</strong>建立，不再靠每张图顶上的标题。<br>
-        <b>为什么这样排</b>：本页唯一公共维度是 60 拍时间轴（代码事实：<code>xLabels</code> 被三张图共用），让时间域当主视觉是<strong>按数据本性排</strong>，不是按图类型排。<br>
-        <b>改动幅度</b>：大 —— 一列变两栏；KPI 由横排改右栏竖排；三张图由「各自全宽」变「同一栈共享轴」。<br>
-        <b>代价</b>：① 380px 下 <code>KpiCard</code> 的 <code>--kpi-chars</code> / <code>container-type: inline-size</code> 算式要重验；② 库存条的三列宽（真页面 <code>1fr 160px 96px</code> 是按全宽 1129 定的）在 380px 栏里第一列只剩 100px，SKU 被挤成两行 —— 草图里用窄栏变体 <code>1fr 76px 70px</code> 顶住了，真页面要另定断点；③ 三图共享轴要改共享组件（<code>LineChart</code> / <code>HeatmapChart</code> 目前都没有「隐藏 x 轴」的 prop）。<br>
-        <b>宽度实测</b>（探针量的，不是算的）：1440 视口下 <code>.side</code> 232 + <code>.main</code> padding 32×2（同真壳 <code>AdminShell.vue:130/300</code>）+ 经典滚动条 <b>15</b> ⇒ <b>主区可用 1129px</b>（页面不溢出时才是 1144px）。所以 <code>max-width: 1280</code>（开关 A 的裁定值）在 1440 视口下<strong>达不到</strong> —— 要视口 ≥ 1472px 才生效；本页右栏 380px 是在 1129 下量的。<br>
-        <b>数据限度</b>：快照那刻只有 7 拍，x 轴是 7 个点 —— 判结构够用，<strong>别拿它估密度</strong>。
+        <b>为什么这样排</b>：本页唯一公共维度是 60 拍时间轴（代码事实：<code>xLabels</code> 被这几张图共用），让时间域当主视觉是<strong>按数据本性排</strong>，不是按图类型排。<br>
+        <b>改动幅度</b>：大 —— 一列变两栏；KPI 由横排改右栏竖排；<b>三张图变五张</b>、由「各自全宽」变「同一栈共享轴」；QPS 由面积线变两段堆叠；命中率由单折线变双轴（计数柱 + 命中率虚线）。<br>
+        <b>代价</b>：① 380px 下 <code>KpiCard</code> 的 <code>--kpi-chars</code> / <code>container-type: inline-size</code> 算式要重验；② 库存条的三列宽（真页面 <code>1fr 160px 96px</code> 是按全宽 1129 定的）在 380px 栏里第一列只剩 100px，SKU 被挤成两行 —— 草图里用窄栏变体 <code>1fr 76px 70px</code> 顶住了，真页面要另定断点；③ 五图共享轴要改共享组件（<code>LineChart</code> / <code>HeatmapChart</code> 目前都没有「隐藏 x 轴」的 prop）；④ <strong>左列变长</strong>（五图 ≈ 880px + 五条标题），右栏（4 读数 + 状态点 + 8 条防护 + 8 行库存）跟不上 ⇒ 两栏底端落差比三图时更大。<br>
+        <b>宽度实测</b>（探针量的，不是算的）：1440 视口下 <code>.side</code> 232 + <code>.main</code> padding 32×2（同真壳 <code>AdminShell.vue:130/300</code>）+ 经典滚动条 <b>15</b> ⇒ <b>主区可用 1129px</b>（页面不溢出时才是 1144px）。所以 <code>max-width: 1280</code>（开关 A 的裁定值）在 1440 视口下<strong>达不到</strong> —— 要视口 ≥ 1472px 才生效；本页右栏 380px 是在 1129 下量的。左栏五张图的可用宽见下面那条实测行。<br>
+        <b>新图落位与宽度</b>：两张新图并入左栏栈（<b>3 → 5</b>），宽度 <b id="w-metric">—</b>；60 点折线每点间距 <b id="w-pitch">—</b>。宽度够（见下面「宽度实测」那条的同一把尺）。<br>
+        <b>数据限度</b>：本窗 <b>60 拍</b>、且是一场<b>健康窗口</b> —— 无 5xx、无锁超时、<code>health.level</code> 60 拍恒 <code>ok</code>。锁只有 <b>2 把</b>（<code>order-add</code> / <code>order-pay</code>），所以热力图是 2 行。**别拿这一窗去估「系统在各种负载下的样子」**。
       </div>
 
     </div></div>
@@ -126,10 +148,33 @@
 <script>
 (function () {
   var D = WF.DATA
-  /* 三张时序图：QPS / 命中率**不画 x 刻度**，热力图画 —— 这就是「共享轴」的落点 */
-  WF.chart(document.querySelectorAll('.chart')[0], 'qps',  { h: 200, xAxis: false })
-  WF.chart(document.querySelectorAll('.chart')[1], 'hit',  { h: 170, xAxis: false })
-  WF.chart(document.querySelectorAll('.chart')[2], 'heat', { h: 190, xAxis: true })
+  /* 五张时序图共享一根 x 轴：QPS/命中率/延迟/锁等待**不画 x 刻度**，只有最底的热力画
+     —— 这就是「共享轴」的落点（每张图都画绘图区底边，但刻度只画一次）。 */
+  var q = document.querySelectorAll('.chart')
+  WF.chart(q[0], 'qpsStack', { h: 200, xAxis: false })
+  WF.chart(q[1], 'hitBars',  { h: 170, xAxis: false })
+  WF.chart(q[2], 'mean',     { h: 160, xAxis: false })
+  WF.chart(q[3], 'wait',     { h: 160, xAxis: false })
+  WF.chart(q[4], 'heat',     { h: 190, xAxis: true })
+
+  var t = function (id, s) { var e = document.getElementById(id); if (e) e.textContent = s }
+
+  /* 状态带：**值**随数据，**结构**一字未改（四页共用的写法原样）*/
+  t('st-health', D.header.health)
+  t('st-5xx', D.header.err5xx)
+  t('st-4xx', D.header.err4xx)
+  t('st-tz1', D.header.phase + ' · 第 ' + D.header.seq + ' 拍 · 窗口 ' + D.header.win + ' 秒 · ' + D.header.tick)
+  t('st-tz2', '数据源：' + D.header.source)
+  t('st-reasons', D.reasons.length ? D.reasons.join('；') : '（本拍为空 —— 后端只在有命中率时补正面理由）')
+
+  /* 图头注：数字全部来自 DATA.notes（由本轮窗口现算），页面上不写死 */
+  t('n-qps', '5xx 段：' + D.notes.qps5xx + '　｜　4xx 段：' + D.notes.qps4xx)
+  t('n-mean', D.notes.p99)
+  t('n-wait', D.wait.names.map(function (n, i) {
+    var nz = D.wait.series[i].filter(function (v) { return v !== null && v !== undefined }).length
+    return (i === 0 ? '实线' : '虚线') + ' = ' + n + '（' + nz + '/' + D.x.length + ' 拍有等待）'
+  }).join('　·　'))
+  t('n-heat', D.notes.heat + '　行 = ' + D.lockNames.join(' / '))
 
   /* 右栏 4 张读数：有序列的挂微条，没序列的明写「无序列」（开关 C 的可见后果）*/
   var rail = document.getElementById('rail-kpis')
@@ -141,9 +186,18 @@
     if (k.series) WF.spark(d.querySelector('.sp'), k.series, 96, 24)
   })
 
-  /* 防护命中：纵向柱 → 横向条（8 类，本拍增量）*/
+  /* 依赖状态点：常量，画成点不画成线 */
+  WF.dots(document.getElementById('deps'))
+
+  /* 宽度实测：量的是**画出来的**绘图区（与探针量的是同一个元素，但两边各自独立算）*/
+  var svgW = q[0].querySelector('svg').getBoundingClientRect().width
+  var peW = q[0].querySelector('.plot-edge').getBoundingClientRect().width
+  t('w-metric', Math.round(svgW) + 'px（作图区 ' + Math.round(peW) + 'px）')
+  t('w-pitch', (peW / (D.x.length - 1)).toFixed(1) + 'px')
+
+  /* 防护命中：纵向柱 → 横向条（8 类，本拍增量）。上限取**本拍最大值**，不写死 */
   WF.hbar(document.getElementById('prot'),
-    D.prot.labels.map(function (l, i) { return { label: l, value: D.prot.values[i] } }), 5, '')
+    D.prot.labels.map(function (l, i) { return { label: l, value: D.prot.values[i] } }), D.prot.max, '')
 
   WF.stock(document.getElementById('stock'), true)   /* true = 窄栏变体（本页在右侧 380px 栏里）*/
 })()
