@@ -21,6 +21,7 @@
  */
 import fs from 'node:fs'
 import { createHash } from 'node:crypto'
+import { pathToFileURL } from 'node:url'
 
 const ROOT = 'C:/Users/86159/Desktop/软件工程/期末项目/'
 const IN = ROOT + '_work/3a3/frames-events.ndjson'
@@ -28,9 +29,32 @@ const WIRE = ROOT + 'docs/美化/c3-admin-preview/_struct-wire-ev.js'
 const BEGIN = '/* @@EV-DATA:BEGIN'
 const END = '/* @@EV-DATA:END'
 
+/* ── 标签 / 颜色 / 图标：**现从真页面的那张表里读**，不在本文件手抄一份 ──────────
+   理由：手抄 = 迟早漂（改了真页面没人记得改草图）。九类图标（`KIND_ICON`）就是真页面 ③ 行首
+   画的那九枚，这里原样搬进草图。
+   ⚠️ 不能直接 `import` 它：那边是 CJS 包（`package.json` 没有 `type: module`），`.js` 会被当
+       CommonJS 解析，`export` 当场报语法错。改用「读源码 → 剥掉每行开头的 `export ` →
+       在函数里求值」——对一个**没有任何 import、没有副作用**的纯表模块，这个变换是安全的，
+       而且它保证拿到的是**此刻仓里的那一份**。先断言它确实没有 import，再动手。 */
+const LABELS_PATH = ROOT + 'Mall-management-web/mall-management-system/src/config/labels/observe-labels.js'
+const LABELS_SRC = fs.readFileSync(LABELS_PATH, 'utf8')
+if (/^[ \t]*import[ {*]/m.test(LABELS_SRC)) {
+  console.error('⛔ observe-labels.js 里出现了 import —— 这个「剥 export 再求值」的取法就不成立了')
+  process.exit(1)
+}
+const LABELS = new Function(
+  LABELS_SRC.replace(/^[ \t]*export[ \t]+/gm, '') +
+  '\nreturn { KINDS: KINDS, KIND_LABEL: KIND_LABEL, KIND_ICON: KIND_ICON,' +
+  ' OBJECT_FIELD_LABEL: OBJECT_FIELD_LABEL, SEVERITIES: SEVERITIES, SEVERITY_LABEL: SEVERITY_LABEL }')()
+
 /* 与页面逐字同源的两个上限 */
 const EVENT_CAP = 1000
 const TRACE_CAP = 300
+/* ⚠️ 这个 **不是**真页面的常数，是**本版主张**：真页面那一列是分页表、一页 100 条（`PAGE_DEFAULT`），
+   没有「DOM 里留多少行」这回事。本版去掉分页、改成 tail -f ⇒ 得自己给 DOM 封顶，
+   取 200 行（比一屏多得多，往回翻十几屏都还在）。它不是给人看的数字，是防止
+   长会话把 DOM 拖垮的那个上限。 */
+const ROW_MAX = 200
 
 const F = fs.readFileSync(IN, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l))
 const N = F.length
@@ -42,17 +66,17 @@ const hmsms = (ts) => { const d = new Date(Number(ts)); return hms(ts) + '.' + S
 const num = (v) => { const n = Number(v); return Number.isFinite(n) ? n : 0 }
 
 /* ── 收帧重放 ──────────────────────────────────────────────────────────────── */
-const KINDS = ['cache', 'lock', 'order', 'stock', 'audit', 'notify', 'sensitive', 'identity', 'protection']
-const KIND_LABEL = {
-  cache: '缓存', lock: '锁', order: '订单', stock: '库存', audit: '审计',
-  notify: '通知', sensitive: '敏感词', identity: '身份', protection: '防护',
-}
-const SEVERITIES = ['info', 'warn', 'error']
-const SEVERITY_LABEL = { info: '信息', warn: '警告', error: '错误' }
-/* 对象列的说明词 —— 与 config/labels/observe-labels.js 的 OBJECT_FIELD_LABEL 同源 */
-const OBJECT_FIELD_LABEL = {
-  cache: '键', lock: '锁键', order: '订单', stock: 'SKU', audit: '对象',
-  notify: '收件人', sensitive: '命中的词', identity: '请求路径', protection: '防护开关',
+/* 四张表都来自真页面（见上方 import）。这里只留一个**断言**：九类同序同集，
+   否则下面所有按下标算的东西（图标、类色、图例序）会静默错位。 */
+const KINDS = LABELS.KINDS
+const KIND_LABEL = LABELS.KIND_LABEL
+const SEVERITIES = LABELS.SEVERITIES
+const SEVERITY_LABEL = LABELS.SEVERITY_LABEL
+const OBJECT_FIELD_LABEL = LABELS.OBJECT_FIELD_LABEL
+const KIND_ICON = LABELS.KIND_ICON
+if (KINDS.join(',') !== 'cache,lock,order,stock,audit,notify,sensitive,identity,protection') {
+  console.error('⛔ KINDS 与草图预期的九类/顺序不一致：' + KINDS.join(','))
+  process.exit(1)
 }
 
 const seenSeq = new Set()
@@ -65,7 +89,9 @@ const traceSeen = new Set()
 const winByKind = {}, winBySev = {}
 let winEvents = 0
 
+let tickNo = -1
 for (const f of F) {
+  tickNo++
   const batch = Array.isArray(f.events) ? f.events : []
   for (const raw of batch) {
     winEvents++
@@ -83,6 +109,8 @@ for (const f of F) {
       title: raw.title, detail: raw.detail, key: raw.key,
       objectType: raw.objectType, objectId: raw.objectId,
       traceId: raw.traceId === null || raw.traceId === undefined ? '' : String(raw.traceId),
+      /* 这条事件原本属于哪一拍 —— ③ 的「▶ 重放」按真帧的每拍条数推进，不另编节奏 */
+      tick: tickNo,
     })
   }
   if (fresh.length) {
@@ -162,17 +190,99 @@ if (!pick) pick = (traceList[0] && traceList[0].traceId) || ''
 const rec = tracesById.get(pick) || null
 const chain = events.filter((e) => e.traceId === pick).slice().sort((a, b) => a.ts - b.ts || a.seq - b.seq)
 
-/* ── 卡片：窗口内最近的 24 条（页面是「新的在上」）───────────────────────── */
-const CARDS = CARD_N
-const cards = events.slice(0, CARDS).map((e, i) => ({
-  seq: e.seq, ts: hmsms(e.ts), kind: e.kind, kindLabel: KIND_LABEL[e.kind] || e.kind,
-  sevLabel: SEVERITY_LABEL[e.severity] || e.severity, title: e.title, detail: e.detail,
-  obj: objText(e), trace: e.traceId,
-  /* 动效落点 6：抽屉打开时，同 traceId 的卡片高亮 —— 标在**第一条**同号卡片上 */
-  anim: e.traceId === pick && chain.length && e.seq === chain[chain.length - 1].seq ? 6 : 0,
-}))
-/* 抽屉要的那条如果不在最近 24 条里，卡片上就演示不了「同号高亮」——如实报出来 */
-const highlightVisible = cards.some((c) => c.anim === 6)
+/* ── ③ 日志行（本版改法：时间正序、一行一条、前导符归组）─────────────────────
+   ⚠️ 和真页面有**两处不同**，是主张不是现状：真页面是「新的在上 + 分页表」（`pageRows`），
+      这里改成**时间正序 + 从底部追加**（tail -f）；真页面每条是**两行**（标题/类/对象一行 +
+      明细一行，外加左色条与右侧 traceId 列），这里每条**一行**。
+   ⚠️ 归组规则 —— 为什么不是「每个 trace 都补一对请求起止」：
+      本窗 1000 条事件里有 **581 个不同 traceId**，其中单条事件的占多数；真帧 60 拍累计看，
+      1938 个 trace 里 **1476 个只有 1 条事件**。若每个 trace 都补「请求开始/请求结束」，
+      请求行会占到屏幕一半 —— 日志就不再是日志。
+      ⇒ **只有「事件数 ≥ 2 且拿到 traces 记录」的 trace 才包成一个 req 组**；单条事件的 trace
+        走顶格行（traceId 在行尾看得见）。这一条也是 ⑤ 那句「起止两行只来自 traces」的直接后果：
+        traces 里没有它 ⇒ 组不起来，只能顶格。 */
+const chrono = events.slice().reverse()          // events 是「新的在前」⇒ 反转成正序
+const posOf = new Map()
+chrono.forEach((e, i) => posOf.set(e.seq, i))
+const byTrace = new Map()
+for (const e of chrono) {
+  if (!e.traceId) continue
+  if (!byTrace.has(e.traceId)) byTrace.set(e.traceId, [])
+  byTrace.get(e.traceId).push(e)
+}
+/* traceId → 展示用的 8 位前缀下标（行尾那截号）；FULL 与 IX 同下标，供 ⑤ 反查 traces 记录 */
+const TRACE_IX = []
+const TRACE_FULL = []
+const traceIx = new Map()
+const trOf = (id) => {
+  if (!id) return -1
+  if (!traceIx.has(id)) {
+    traceIx.set(id, TRACE_IX.length)
+    TRACE_IX.push(id.slice(0, 8))
+    TRACE_FULL.push(id)
+  }
+  return traceIx.get(id)
+}
+const rows = []            // [pre, ts, lv, k, title, obj, detail, tr, t, gid, anim]
+const used = new Set()
+let nGroups = 0, nGroupRows = 0, nonContig = 0
+const groupable = (e) => e.traceId && (byTrace.get(e.traceId) || []).length >= 2 && tracesById.has(e.traceId)
+for (let i = 0; i < chrono.length; i++) {
+  const e = chrono[i]
+  if (used.has(e.seq)) continue
+  const mk = (pre, ts, lv, k, title, obj, detail, tr, t, gid, anim) =>
+    rows.push({ pre: pre, ts: ts, lv: lv, k: k, title: title, obj: obj, detail: detail, tr: tr, t: t, gid: gid, anim: anim || 0 })
+  if (groupable(e)) {
+    const members = byTrace.get(e.traceId).slice()
+    const rec0 = tracesById.get(e.traceId)
+    const first = posOf.get(members[0].seq), lastp = posOf.get(members[members.length - 1].seq)
+    if (lastp - first !== members.length - 1) nonContig++
+    const gid = ++nGroups
+    /* 落点 6：抽屉那条号的第一行 —— 打开 ⑤ 时整组微染，标在组首 */
+    const anim = e.traceId === pick ? 6 : 0
+    mk('', hmsms(rec0.startMs), '', -1, '请求开始 ' + rec0.method + ' ' + rec0.path, '', '', trOf(e.traceId), e.tick, gid, anim)
+    for (const m of members) {
+      mk('', hmsms(m.ts), m.severity.charAt(0), KINDS.indexOf(m.kind), m.title, objText(m), m.detail, trOf(m.traceId), m.tick, gid, 0)
+      used.add(m.seq)
+      nGroupRows++
+    }
+    mk('', hmsms(rec0.endMs), '', -1, '请求结束 · 总耗时 ' + rec0.ms + ' ms', '', '', trOf(e.traceId), e.tick, gid, 0)
+    nGroupRows += 2
+  } else {
+    mk('', hmsms(e.ts), e.severity.charAt(0), KINDS.indexOf(e.kind), e.title, objText(e), e.detail, trOf(e.traceId), e.tick, -1,
+      e.traceId === pick ? 6 : 0)
+    used.add(e.seq)
+  }
+}
+/* 前导符：顶层 ├─／└─；组内子行 │  ├─ / │  └─；组首顶格（同 txt 里的树） */
+rows.forEach((r, i) => {
+  const lastRow = i === rows.length - 1
+  const g = r.gid
+  const gFirst = g > 0 && (i === 0 || rows[i - 1].gid !== g)
+  const gLast = g > 0 && (i === rows.length - 1 || rows[i + 1].gid !== g)
+  if (g < 0 || gFirst) r.pre = lastRow ? '└─' : '├─'
+  else r.pre = '│  ' + (gLast ? '└─' : '├─')
+})
+/* 行数怎么涨：1000 条事件 → 组把 ≥2 条的那些包起来，每组多出「起 / 止」两行 */
+const highlightVisible = rows.some((r) => r.anim === 6)
+
+/* traceId → traces 记录，按行里那个下标对齐（[方法, 路径, 耗时 ms, 状态, 起, 止]，没有记录的填 null）。
+   ⑤ 点某一行时用它补「请求开始 / 请求结束 · 总耗时」。
+   ⚠️ **查不到是常态**：traces 窗口 300 条 ≪ 事件窗口 1000 条，老 trace 早被挤出 traces 表 ——
+      这不是数据的毛病，是「⑤ 的起止两行只来自 traces」那条口径的直接后果，页面上要明说。 */
+const TRACE_REC = TRACE_FULL.map((id) => {
+  const r = tracesById.get(id)
+  return r ? [r.method, r.path, r.ms, r.status, hmsms(r.startMs), hmsms(r.endMs)] : null
+})
+const nRecCovered = TRACE_REC.filter(Boolean).length
+/* 末 ROW_MAX 行（= 草图上真正画出来的那些）里包了多少组 —— 判「点某条能不能染出一整组」够不够看 */
+let tailGroups = 0
+{
+  const seen = new Set()
+  for (const r of rows.slice(-ROW_MAX)) if (r.gid > 0 && !seen.has(r.gid)) { seen.add(r.gid); tailGroups++ }
+}
+const anim6Row = rows.findIndex((r) => r.anim === 6)
+const selTR = anim6Row >= 0 ? rows[anim6Row].tr : -1
 
 /* ── 速率 ─────────────────────────────────────────────────────────────────── */
 const rate = F.map((f) => num(f.rate))
@@ -201,7 +311,18 @@ const head =
   ' 不留空白带）；<b>事件流在框内自己滚</b>，页面高度 = 视口高度、<b>不随数据增长</b>。' +
   ' 最后一条不是靠说的：探针往事件流里<b>临时塞 200 张卡</b>再比三个数 —— 文档高不变、事件流可视高不变、' +
   ' 事件流的 scrollHeight 变大；只量「有没有滚动条」是不够的（页面自己滚起来也有滚动条）。</li>' +
-  '<li><b>C1 相邻区块不同构</b>：① 一排读数 ／ ② 竖排清单 ／ ③ 滚动卡片 ／ ④ 横条＋读数 ／ ⑤ 有序链 ／ ⑥ 开关排' +
+  '<li><b>③ 事件流 = 控制台行</b>（你 2026-10-16 逐条裁定的主改，本笔的核心）：' +
+  ' 每条<b>一行</b>（不是卡片、不是两行）；<b>无复选框、无左侧竖线、无右侧独立列</b> —— traceId 併进 msg 行尾；' +
+  ' 等级用<b>文字</b> INFO / WARN / ERROR（不是色块；本窗 error 0 条 ⇒ 只有 INFO 看得见）；' +
+  ' 时刻 / 等级 / 类名三列<b>定宽</b>、msg 吃掉剩下的宽；行间 <code>gap = 0</code>，hover 整行变色。' +
+  ' 同 trace 用<b>前导符</b>归组（<code>├─</code> / <code>│  ├─</code> / <code>│  └─</code> / <code>└─</code>，' +
+  ' 等宽、占 2–3 字），点某行 ⇒ <b>同 trace 整组背景微染</b>（只改背景，不加边框、不加色块）。' +
+  ' 滚动条 <b>6–8px</b>（宽度由探针实测，不写常数）。新事件<b>从底部进、旧内容平滑上移</b>：' +
+  ' <code>cubic-out</code> 的 rAF 插值 <code>scrollTop</code>、<b>不用 top/height</b>（那会 reflow 掉帧）；' +
+  ' 高频追加按 60ms 合成一次动画；手动滚即打断、滚回底部 8px 内自动恢复。' +
+  ' ⚠️ 这里有两处是<b>本版改法</b>不是现状：真页面是「新的在上 + <code>pageRows</code> 分页表」且每条两行；' +
+  ' 本版改成时间正序、从底部追加、每条一行、DOM 只留最近 <code>' + ROW_MAX + '</code> 行。</li>' +
+  '<li><b>C1 相邻区块不同构</b>：① 一排读数 ／ ② 竖排清单 ／ ③ 滚动日志行 ／ ④ 横条＋读数 ／ ⑤ 有序链 ／ ⑥ 开关排' +
   ' —— 六块六种形态，没有两块共用布局。⚠️ 窗口化之后区块<b>直接相接</b>（间距 0，只隔一条分隔线），' +
   ' 于是「相接就算相邻」——这一轮实测 甲 <b>10 对</b>／丙 <b>9 对</b>相邻。' +
   ' ⚠️ 上一轮是几对<b>没有取证</b>（旧版草图的 DOM 与这版不同，旧判据量不到同一件事），' +
@@ -219,8 +340,10 @@ const head =
   ' 滚动条宽实测，不写常数）。⚠️ 这一轮整页不再滚 ⇒ <b>页面级滚动条可能根本不存在</b>（实测 0px），' +
   ' 滚动条改由<b>事件流自己</b>吃掉 —— 宽度账因此与上一轮不同，这正是不许写常数的原因。</li>' +
   '<li><b>8 处动效落点</b>：页面上带 <code>[data-anim]</code> 角标的元素即为落点，逐个数得出 8 个。' +
-  ' 其中 1（新卡滑入）/ 2（老卡出屏）/ 5（error 闪红）落在<b>同一个列表容器</b>上，' +
-  ' 4（计数滚动）/ 7（图例闪）落在<b>同一个数字</b>上 —— 合成逗号列表是刻意的，拆成两个元素反而是假结构。</li>' +
+  ' 其中 1（新行从底部进）/ 2（旧内容上移）/ 5（error 闪红）落在<b>同一个列表容器</b>上，' +
+  ' 4（计数滚动）/ 7（图例闪）落在<b>同一个数字</b>上 —— 合成逗号列表是刻意的，拆成两个元素反而是假结构。' +
+  ' 6（同号高亮）的<b>效果</b>落在 ③ 的行上（微染）、<b>触发</b>在 ⑤，标记留在 ⑤ 那一处 —— ' +
+  ' 一元素一标号，这样「数一数是不是 8 个」才数得清。</li>' +
   '<li><b>三样易漏项</b>：⑤ 的「起止两行只来自 traces ⇒ 模拟日常下恒空」写在 ⑤ 的注里；' +
   ' ③ 的「淘汰卡片时要<b>把它的 seq 也从 seenSeq 摘掉</b>」（现页面 <code>EventLog.vue</code> 里真有这行）' +
   ' 写在 ③ 的表头；「图例 9 类、数字是<b>本页窗口内累计</b>不是帧里 counts」写在 ② 的脚注与 ④ 的标题里。</li>' +
@@ -268,19 +391,39 @@ B.push('  /* 来源：' + J(N + ' 拍事件帧 · ' + hms(F[0].ts) + '–' + hms
 B.push('  meta: { ticks: ' + N + ', winEvents: ' + winEvents + ', capturedOn: ' + J('2026-10-16') + ',')
 B.push('    note: ' + J('窗口内累计按页面口径（absorbEvents/absorbTraces 重放），不是帧里本拍的 counts') + ' },')
 B.push('  clock: ' + J(clock) + ',')
+B.push('  rowMax: ' + ROW_MAX + ',')
 B.push('  stats: ' + J(stats) + ',')
 B.push('  rate: ' + J(rate) + ',')
 B.push('  kinds: ' + J(KINDS.map((k) => ({ k: k, label: KIND_LABEL[k], n: byKind[k] || 0 }))) + ',')
 B.push('  sevs: ' + J(SEVERITIES.map((s) => ({ s: s, label: SEVERITY_LABEL[s], n: bySev[s] || 0 }))) + ',')
 B.push('  rail: { allOn: true, total: ' + events.length + ' },')
-B.push('  cards: [')
-cards.forEach((c, i) => B.push('    ' + J(c) + (i < cards.length - 1 ? ',' : '')))
+B.push('  /* 九类的真图标（真页面 `KIND_ICON` 原样搬来）：草图走 currentColor，不上类色 */')
+B.push('  icons: ' + J(KIND_ICON) + ',')
+B.push('  /* 行里那截 traceId 的 8 位前缀表（行里只存下标，省一半字符） */')
+B.push('  trIdx: ' + J(TRACE_IX) + ',')
+B.push('  /* 紧随 trIdx 下标的 traces 记录：[方法, 路径, 耗时ms, 状态, 起, 止]；null = 这一号在本窗查不到记录 */')
+B.push('  trRec: ' + J(TRACE_REC) + ',')
+B.push('  /* 落点 6 标在第几行（⑤ 默认选中的那一号所在组的第一行） */')
+B.push('  anim6: ' + anim6Row + ',')
+B.push('  sel: { tr: ' + selTR + ', traceId: ' + J(pick) + ' },')
+/* 重放的切段点：cuts[t] = 「拍序 ≤ t」的行数 ⇒ 重放第 t 拍 append rows[at : cuts[t]]，
+   每拍喂进去的条数就是真帧那一拍的条数（⚠️ 「顺延」的组会把成员提前带过来，
+   所以段边界取的是「≤ 本拍」的前缀，段内顺序仍按行清单，总行数逐拍对齐）。 */
+const cuts = []
+for (let t = 0; t < N; t++) cuts.push(rows.filter((r) => r.t <= t).length)
+B.push('  /* 重放切段：cuts[t] = 「拍序 ≤ t」的行数（每拍喂真帧那一拍的条数）*/')
+B.push('  cuts: ' + J(cuts) + ',')
+/* ⚠️ 本窗**前 38 拍真的一拍 0 条**（采集开始时应用还没热起来）—— 实测过，不是推断。
+   重放若老实从第 0 拍起，点一下 ▶ 要空等 38 秒才见第一行；所以重放从
+   「第一拍有事件」处起跳，并把这件事写在 ③ 的说明里（不含糊其辞）。 */
+const replayHead = cuts.findIndex((c) => c > 0)
+B.push('  /* 重放起跳拍：前 ' + replayHead + ' 拍本窗 0 条 ⇒ 从第 ' + (replayHead + 1) + ' 拍起喂 */')
+B.push('  replayHead: ' + replayHead + ',')
+B.push('  /* ③ 的行清单：[前导符, 时刻, 严重度(i/w/e), 类下标(-1=req), 标题, 对象, 明细, trace下标, 拍序] */')
+B.push('  rows: [')
+rows.forEach((r, i) => B.push('    ' + J([r.pre, r.ts, r.lv, r.k, r.title, r.obj, r.detail, r.tr, r.t]) +
+  (i < rows.length - 1 ? ',' : '')))
 B.push('  ],')
-B.push('  drawer: {')
-B.push('    traceId: ' + J(pick) + ', method: ' + J(rec ? rec.method : '') + ', path: ' + J(rec ? rec.path : '') + ',')
-B.push('    status: ' + (rec ? rec.status : 0) + ', ms: ' + (rec ? rec.ms : 0) + ',')
-B.push('    start: ' + J(rec ? hmsms(rec.startMs) : '—') + ', end: ' + J(rec ? hmsms(rec.endMs) : '—') + ',')
-B.push('    chain: ' + J(chain.map((e) => ({ ts: hmsms(e.ts), kindLabel: KIND_LABEL[e.kind] || e.kind, title: e.title, obj: objText(e) }))) + ' },')
 B.push('  judge: { jia: ' + J(judge.jia) + ',')
 B.push('    bing: ' + J(judge.bing) + ' }')
 B.push('}')
@@ -304,7 +447,21 @@ console.log('本窗 9 类：' + KINDS.map((k) => KIND_LABEL[k] + ' ' + (winByKin
 console.log('页面窗口内 9 类：' + KINDS.map((k) => KIND_LABEL[k] + ' ' + (byKind[k] || 0)).join(' · '))
 console.log('严重度：' + SEVERITIES.map((s) => SEVERITY_LABEL[s] + ' ' + (bySev[s] || 0)).join(' · '))
 console.log('速率 ' + rate[0].toFixed(1) + ' → ' + clock.rate.toFixed(1) + ' 条/秒（峰值 ' + rateMax.toFixed(1) + '）')
-console.log('抽屉 traceId ' + (pick ? pick.slice(0, 8) : '（无）') + ' · 链上 ' + chain.length + ' 条 · ' +
+console.log('⑤ 默认选中 tr=' + selTR + '（' + (pick ? pick.slice(0, 8) : '（无）') + '）· 链上 ' + chain.length + ' 条 · ' +
   (rec ? rec.method + ' ' + rec.path + ' ' + rec.status + ' ' + rec.ms + 'ms' : '（窗口内没有它的 traces 记录）'))
-console.log('卡片 ' + cards.length + ' 条 · 同号高亮落点可见：' + (highlightVisible ? '是' : '否（那条不在最近 ' + CARDS + ' 条里）'))
+console.log('日志行 ' + rows.length + ' 行 = 事件 ' + events.length + ' 行 + 组内起止/子行多出的 ' +
+  (rows.length - events.length) + ' 行（包了 ' + nGroups + ' 组）')
+console.log('归组口径：事件数 ≥2 且 traces 里有记录才包 ⇒ 单条事件的 trace 走顶格行')
+console.log('traces 记录覆盖：' + TRACE_IX.length + ' 个号里 ' + nRecCovered + ' 个查得到（traces 窗口 ' + TRACE_CAP +
+  ' ≪ 事件窗口 ' + EVENT_CAP + ' ⇒ 老号查不到，⑤ 会自己说明）')
+console.log('末 ' + ROW_MAX + ' 行（草图上真正画出来的）里画出了 ' + tailGroups +
+  ' 组 ⇒ 点组内行染一整组、点顶格行只染它自己那一行（不是漏染）')
+console.log('行数账：整窗 1938 个 trace 里 1476 个只有 1 条事件 —— 若每个都包起止，请求行会占屏幕一半')
+console.log('顺延：' + nonContig + ' 组的成员原本不连续（它们被并到组首，中间的行走到了后面）')
+console.log('重放切段：cuts 长度 ' + cuts.length + ' · 末拍累计 ' + cuts[cuts.length - 1] + '（应 = 行清单 ' +
+  rows.length + '）· 每拍最多 ' + Math.max.apply(null, cuts.map((c, i) => c - (i ? cuts[i - 1] : 0))) + ' 行')
+console.log('重放起跳：前 ' + replayHead + ' 拍本窗 0 条（实测 cuts[0..' + (replayHead - 1) + '] 全 0）⇒ 重放从第 ' +
+  (replayHead + 1) + ' 拍起，第 1 拍就喂 ' + (cuts[replayHead] - (replayHead ? cuts[replayHead - 1] : 0)) + ' 行')
+console.log('同号高亮落点可见：' + (highlightVisible ? '是（在 ' + rows.findIndex((r) => r.anim === 6) + ' 行' +
+  '，共 ' + rows.length + ' 行 ⇒ 在末 ' + ROW_MAX + ' 行内）' : '否 —— 要重挑号'))
 console.log('落点标注 [data-anim]：3（折线）4（计数）7（图例闪）1/2（列表）5（error 闪·空）8（断线条）6（同号高亮）')
