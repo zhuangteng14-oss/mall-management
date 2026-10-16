@@ -130,6 +130,7 @@
       <div class="foot-note">
         <b>S3 的布局模式</b>：三条横<strong>泳道</strong>，无分栏；每条泳道自己决定内部的排法（泳道 1 是读数带、泳道 2 是三图并排、泳道 3 是两栏）。<br>
         <b>信息层级</b>：按<strong>问句</strong>分层，不按图类型分层 —— 「现在好不好 → 在往哪走 → 什么在吃资源」。每条泳道自带一句问句当标题，读者不用猜这块是干嘛的。<br>
+        <b>三泳道共用构图 —— 用户裁定「接受，不动」（2026-10-16）</b>：本版三条泳道骨架完全相同，撞 taste-skill（<code>design-taste-frontend</code>）§6.3 的 <code>Neighbouring sections must not share a layout.</code>——<strong>明知故犯，落在这里备案</strong>。理由：该 skill 原文第 3 行自己写着 <code>Not for dashboards or app ends.</code>，拿它判管理面板本就要选择性适用；而本版立意就是「三泳道 = 三问句」，动了就不是 S3 了。<br>
         <b>为什么这样排</b>：Grafana 官方原话「a dashboard should <strong>answer a question</strong>」+「logical progression … general to specific」。三条泳道的内部形态<strong>天然不同</strong>（带 / 并排 / 两栏），所以它不像「一叠等宽卡片」。<br>
         <b>改动幅度</b>：大 —— 取消了「一图一行、各自全宽」的堆叠，改为同层并排 + 共享时间基。<br>
         <b>与 S1/S2 的关键差别</b>：<strong>本版不需要用到开关 B</strong> —— 泳道 1 的内容就是状态带原样（一字未改），只是外面套了一个问句标签 ⇒ 四页不会因此分叉。<br>
