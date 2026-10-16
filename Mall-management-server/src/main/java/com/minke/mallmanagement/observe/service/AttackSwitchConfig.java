@@ -77,6 +77,24 @@ import java.util.concurrent.atomic.AtomicLong;
  * 这也是「拨完忘了拨回来」的最终恢复手段。证据链上它的代价是：审计/演练记录里查不到
  * 「某一刻的配置」这件历史事实 —— 记录里只有**每一轮起跑那一刻**的快照
  * （{@code drill_record.Result.Engine.Protections}），轮与轮之间的拨动不留痕。
+ *
+ * <h2>【调用点不变量 —— 台账条目（用户 2026-10-16 裁定「(b) 静态不变量 —— 写进台账」）】</h2>
+ * 上面那条「跑完不复位」的口径，在测试里只被守住了两半的一半：{@code AttackSwitchConfigTest}
+ * 守的是「配置面**自己不**自动复位」（**自我属性**），{@code smoke/AttackConfigNoResetSmokeTest}
+ * 守的是「跑一轮之后**逐字不变**」（**流程属性**）。两半都盖不到的第三种失效是
+ * **「多了一个写回调用点」**（例如将来给日志页加个定时复位、或在某条冷路径上顺手写回）——
+ * 它未必让任何一条现有用例变红，所以只能靠一条**可 grep 的静态不变量**兜：
+ * <ul>
+ *   <li>{@link #updateFromJson} 的调用点 —— **只允许**
+ *       {@code com.minke.mallmanagement.observe.controller.AttackController}
+ *       （{@code POST /admin/observe/attack/config}）；</li>
+ *   <li>{@link #update} 的调用点 —— {@code main} 里应**为 0**（现在只被测试直调）；</li>
+ *   <li>{@link #resetToDefault()} 的调用点 —— {@code main} 里应**为 0**
+ *       （本方法**留着**，调用者是 3a.6 的「恢复默认」按钮，尚未接线）；</li>
+ *   <li>{@link ProtectionGate#resetToDefault()} 的调用点 —— **只允许本类**（代理，不是第二份真值）。</li>
+ * </ul>
+ * ⚠️ 它钉的是**调用点数量**、不是行为（所以它是台账条目、不是测试）。复核命令与逐行对账见
+ * {@code docs/agent/api-contract.md} §I.3 末「调用点不变量 · 台账条目」。
  */
 @Component
 public class AttackSwitchConfig {

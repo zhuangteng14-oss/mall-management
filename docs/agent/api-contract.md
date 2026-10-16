@@ -967,6 +967,25 @@
 ⚠️ **「不复位」的代价与兜底**：不复位等于「上一轮把限流关掉」这件事**越过那一轮留在进程里**，而真实流量读的正是这些位。故兜底三条**必须同时成立**：`GET /config` 的 `IsDefault` 让「当前不是默认」**可读**；两个页面（攻击页 + 日志页）据此**常驻**「⚠ 当前非默认配置」提示 + 一键 [恢复默认]；`AttackSwitchConfig.update` 在非默认时记一行 **WARN**。⚠️ 兜底的边界如实写：它把「静默」变成「可见」，但**不阻止**有人拨完不管 —— **重启进程是唯一的自动恢复点**。
 ⚠️ **~~写入时机（甲案，已废）~~**：3a.1 之前由 `DrillRecordService` 在 `attackEngine.run(...)` **之前**写入、在 `finally` 里复位成**全开**。那段**整段删除** —— 保留此句只为让后来的人查得到翻转（`AttackSwitchConfig` 类注释里也记了同一处）。⚠️ `ProtectionGate.resetToDefault()` **方法本身留着**（新调用者是 `AttackSwitchConfig`），删的是演练收尾那次**自动**调用。
 ⚠️ **缺省口径的唯一换算点（3a.1 起搬到 `AttackSwitchConfig`）**：配置面的缺省是**全开**，而 `ProtectionGate.apply(null)` 的语义是**全关** ⇒ 换算收在 `AttackSwitchConfig.update` 一处（`protections == null` = **不动这一项**，与「给了 `[]` = 关光」是两件事）。3a.1 之前这个换算在 `DrillRecordService`（`protections == null ? ProtectionGate.KEYS : protections`）。
+⚠️ **【调用点不变量 · 台账条目】**（用户 2026-10-16 裁定「(b) 静态不变量 —— 写进台账」）：上面「写点**只有** `POST /config` 一处」这句话**不能只靠测试守**。测试守住的是另外两个属性 —— `AttackSwitchConfigTest` 守「配置面**自己不**自动复位」（**自我属性**）、`smoke/AttackConfigNoResetSmokeTest` 守「跑一轮之后**逐字不变**」（**流程属性**）；两者都**盖不住**第三种失效：**多出一个写回调用点**（例如将来给日志页加个定时复位、或在某条冷路径上顺手写回）—— 它可能一条现有用例都不红。⇒ 补一条**可 grep 的静态不变量**，判据是**调用点数量**不是行为：
+
+| 写方法 | `src/main` 里允许的调用点 | 2026-10-16 实测 |
+|---|---|---|
+| `AttackSwitchConfig.updateFromJson` | **只允许** `AttackController`（`POST /config`） | 1 处 |
+| `AttackSwitchConfig.update(List,List)` | **无**（现在只被测试直调） | 0 处 |
+| `AttackSwitchConfig.resetToDefault()` | **无** —— 方法**留着**给 3a.6 的 [恢复默认]，尚未接线 | 0 处 |
+| `ProtectionGate.resetToDefault()` | **只允许** `AttackSwitchConfig`（代理，不是第二份真值） | 1 处 |
+
+复核命令（**每笔收笔前跑一次**；判据是「条数与身份」，行号会随编辑漂移）：
+```
+grep -rn "updateFromJson(\|\.resetToDefault(" --include=*.java Mall-management-server/src/main
+```
+⚠️ 它现在输出**恰好 5 行**，逐行身份必须就是这 5 条 —— **多出任何一条都要停下来查**：
+① `observe/controller/AttackController.java` 里 `view(switchConfig.updateFromJson(...))` = **唯一的真调用点**（表第 1 行）；
+② `observe/service/AttackSwitchConfig.java` 里 `public State updateFromJson(...)` = 方法**定义**，不是调用点；
+③ 同文件里 `gate.resetToDefault()` = **代理调用**（表第 4 行）；
+④⑤ `observe/service/DrillRecordService.java` 的两行 javadoc = **注释文本**（写的是**已删除**的那次收尾调用、以及「方法留着」的说明），**不是调用点**。
+⚠️ 三条判据互补：**自我属性**（配置面）、**流程属性**（跑一轮）、**调用点数量**（本条）。任何一格的现状变了，都要回到本表改，别只在测试里加断言。
 
 ### I.4 面板：**一枚**不可开关（不是死控件，也不是藏起来） {#api-i-4}
 
