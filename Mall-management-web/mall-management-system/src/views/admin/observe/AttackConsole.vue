@@ -117,11 +117,11 @@
               ⚠️ **禁止死控件**（用户 2026-10-15 逐字）：能点但无效果的开关一律不允许 ⇒
               这一枚一律 `disabled`（不是「拨得动但标未接通」——那是注入那组的处置，
               那组**真的会进引擎并写进记录**，这一枚不会改变任何读数，形状不同就该长得不同）。
-           ⚠️ 五枚都照旧进 `drill_record`（后端 `AttackEngine.buildScenarioJson` 写进 `Result.Engine`）
-              ⇒ 「这一轮到底是按哪套开关跑的」事后可复现仍是它们的价值之一。
+           ⚠️ 五枚都照旧进 `drill_record`（后端 `AttackEngine.buildScenarioJson` 写进 `Result.Engine`）⇒ 「这一轮到底是按哪套开关跑的」事后可复现仍是它们的价值之一。
            ⚠️ 缺省 = 防护**全开** / 注入**全关**（后端白名单：表外的 key 一律 400，不静默忽略）。
-           ⚠️ 注入里 `mqDown` / `dbSlow` **未接通**：拨得动、进记录，但读数不变 —— 后端把这种
-              「收了但没实现」如实列进结果的 `Engine.InjectionsNotWired`（见 `INJECTIONS_NOT_WIRED`）。 -->
+           ⚠️ 注入里 `mqDown` / `dbSlow` **未接通**：拨得动、进记录，但读数不变 —— 「收了但没实现」如实列进结果的 `Engine.InjectionsNotWired`（见 `INJECTIONS_NOT_WIRED`）。 -->
+      <!-- ⚠️【3a.1 → 3a.6 临时窗口】下一行的 `<p>` 就是窗口开关：**提示在 = 窗口开、提示没 = 窗口关**（3a.6 接上配置面时删掉它即可）。 -->
+      <p class="a-window-note">⚠️ 本区暂不可用（配置面已就绪，页面接线在 3a.6）</p>
       <h3 class="a-sub">
         防护开关
         <span class="a-subn">默认全开 · 限流 / 熔断 / 重试 / 分池已接闸，改读数；降级不可开关</span>
@@ -1828,7 +1828,7 @@ onBeforeUnmount(() => {
   opacity: 0.85;
   margin-left: var(--s2);
 }
-.a-kv {
+.a-kv, .a-window-note {  /* ⚠️ 后者 = 3a.1→3a.6 的**临时**提示（开关控件组尚未接上配置面）；3a.6 删掉模板那行 `<p>` 后本类无引用 */
   font-size: var(--fs-xs);
   color: var(--ink-2);
   line-height: 1.9;
