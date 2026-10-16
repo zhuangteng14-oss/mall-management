@@ -88,7 +88,7 @@
 
 ### 现状：可复用件（**「三件齐」要用的可视化件** —— 可视化段 2026-10-11 落） {#pack-c3-block-5-marketing-viz}
 
-- **图表** `.../src/components/charts/` —— `BaseChart.vue`(191 行，底座：init / setOption / resize / **三态浮层** / dispose) + `{Line,Bar,Pie,Donut,Heatmap}Chart.vue` + `chartTokens.js`(157 行，颜色**现读 CSS 变量**) + `echarts.js`(44 行，**唯一 `echarts.use(...)` 注册点**)。
+- **图表** `.../src/components/charts/` —— `BaseChart.vue`(195 行，底座：init / setOption / resize / **三态浮层** / dispose) + `{Line,Bar,Pie,Donut,Heatmap}Chart.vue` + `chartTokens.js`(145 行，颜色**现读 CSS 变量**；3a.2 起只管**取值与参数**) + `theme.js`(153 行，**图表面唯一取值点**，样式键都在这里) + `echarts.js`(52 行，**唯一 `echarts.use(...)` 注册点**)。
 - **指标卡** `.../src/components/ui/KpiCard.vue`(197 行) —— 大数字 + 环比（`value` 收**已格式化字符串**、`delta` 收**带符号百分数**）。
 - **图标** `.../src/components/ui/IconGlyph.vue`(63 行) + `glyphs.js`(67 行) —— 字形图标 **19 枚**（`marketing:'✦'` 在 `:52`）；**不引 icon 库**。
 - **口径文档** `docs/美化/看板规范.md` —— 五条硬规矩（颜色只从 token 现读 / 三态是不透明浮层 / 数字格式化归调用方 / 热力图 `max` 显式给 / 图标用字形）。

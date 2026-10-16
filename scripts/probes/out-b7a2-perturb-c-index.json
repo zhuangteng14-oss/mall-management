@@ -1,0 +1,793 @@
+{
+ "tag": "perturb-c",
+ "entry": "index.html",
+ "stable": true,
+ "canvases": [
+  {
+   "w": 1086,
+   "h": 220,
+   "ink": 72186,
+   "hash": 1589891961
+  },
+  {
+   "w": 1086,
+   "h": 220,
+   "ink": 7803,
+   "hash": 2559047811
+  },
+  {
+   "w": 1086,
+   "h": 260,
+   "ink": 175655,
+   "hash": 3785775017
+  },
+  {
+   "w": 1086,
+   "h": 240,
+   "ink": 18960,
+   "hash": 189838597
+  }
+ ],
+ "options": [
+  {
+   "color": [
+    "#2f6fed",
+    "#f16400",
+    "#00a64a",
+    "#c98000",
+    "#a855f7",
+    "#009eb8",
+    "#ef4444",
+    "#65a000",
+    "#ec4899",
+    "#009ad1"
+   ],
+   "textStyle": {
+    "fontFamily": "'Noto Sans SC Variable', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
+    "fontSize": 11,
+    "fontStyle": "normal",
+    "fontWeight": "normal"
+   },
+   "backgroundColor": "transparent",
+   "legend": [
+    {
+     "show": false,
+     "left": "center",
+     "itemWidth": 25,
+     "itemHeight": 14,
+     "itemGap": 10,
+     "textStyle": {
+      "color": "#333"
+     }
+    }
+   ],
+   "tooltip": [
+    {
+     "trigger": "axis",
+     "backgroundColor": "#1b1e20",
+     "borderColor": "#1b1e20",
+     "borderWidth": 1,
+     "padding": [
+      8,
+      11
+     ],
+     "textStyle": {
+      "color": "#ffffff",
+      "fontSize": 11
+     },
+     "axisPointer": {
+      "type": "line",
+      "lineStyle": {
+       "color": "#d0d6d9",
+       "width": 1,
+       "type": "dashed"
+      }
+     }
+    }
+   ],
+   "xAxis": [
+    {
+     "type": "category",
+     "boundaryGap": false,
+     "axisLine": {
+      "lineStyle": {
+       "color": "#d0d6d9",
+       "width": 1,
+       "type": "solid"
+      },
+      "show": true,
+      "onZero": true,
+      "onZeroAxisIndex": null,
+      "symbol": [
+       "none",
+       "none"
+      ],
+      "symbolSize": [
+       10,
+       15
+      ]
+     },
+     "axisTick": {
+      "show": false,
+      "alignWithLabel": false,
+      "interval": "auto",
+      "inside": false,
+      "length": 5,
+      "lineStyle": {
+       "width": 1
+      }
+     },
+     "axisLabel": {
+      "color": "#63696d",
+      "interval": "auto",
+      "show": true,
+      "inside": false,
+      "rotate": 0,
+      "showMinLabel": null,
+      "showMaxLabel": null,
+      "margin": 8,
+      "fontSize": 12
+     },
+     "splitArea": {
+      "show": false,
+      "areaStyle": {
+       "color": [
+        "rgba(250,250,250,0.2)",
+        "rgba(210,219,238,0.2)"
+       ]
+      }
+     }
+    }
+   ],
+   "yAxis": [
+    {
+     "type": "value",
+     "axisLine": {
+      "show": false,
+      "onZero": true,
+      "onZeroAxisIndex": null,
+      "lineStyle": {
+       "color": "#6E7079",
+       "width": 1,
+       "type": "solid"
+      },
+      "symbol": [
+       "none",
+       "none"
+      ],
+      "symbolSize": [
+       10,
+       15
+      ]
+     },
+     "axisTick": {
+      "show": false,
+      "inside": false,
+      "length": 5,
+      "lineStyle": {
+       "width": 1
+      }
+     },
+     "axisLabel": {
+      "color": "#63696d",
+      "formatter": "",
+      "show": true,
+      "inside": false,
+      "rotate": 0,
+      "showMinLabel": null,
+      "showMaxLabel": null,
+      "margin": 8,
+      "fontSize": 12
+     },
+     "splitLine": {
+      "show": true,
+      "lineStyle": {
+       "color": "#e6ebef",
+       "type": "solid",
+       "width": 1
+      }
+     }
+    }
+   ],
+   "visualMap": [],
+   "series": [
+    {
+     "type": "line",
+     "name": "QPS",
+     "itemStyle": {
+      "color": "#2f6fed"
+     },
+     "lineStyle": {
+      "width": 2,
+      "color": "#2f6fed",
+      "type": "solid"
+     },
+     "label": {
+      "position": "top"
+     },
+     "emphasis": {
+      "scale": true,
+      "label": {}
+     },
+     "symbol": "circle",
+     "symbolSize": 6,
+     "dataLen": 3,
+     "dataHash": 1741143257
+    }
+   ]
+  },
+  {
+   "color": [
+    "#2f6fed",
+    "#f16400",
+    "#00a64a",
+    "#c98000",
+    "#a855f7",
+    "#009eb8",
+    "#ef4444",
+    "#65a000",
+    "#ec4899",
+    "#009ad1"
+   ],
+   "textStyle": {
+    "fontFamily": "'Noto Sans SC Variable', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
+    "fontSize": 11,
+    "fontStyle": "normal",
+    "fontWeight": "normal"
+   },
+   "backgroundColor": "transparent",
+   "legend": [
+    {
+     "show": false,
+     "left": "center",
+     "itemWidth": 25,
+     "itemHeight": 14,
+     "itemGap": 10,
+     "textStyle": {
+      "color": "#333"
+     }
+    }
+   ],
+   "tooltip": [
+    {
+     "trigger": "axis",
+     "backgroundColor": "#1b1e20",
+     "borderColor": "#1b1e20",
+     "borderWidth": 1,
+     "padding": [
+      8,
+      11
+     ],
+     "textStyle": {
+      "color": "#ffffff",
+      "fontSize": 11
+     },
+     "axisPointer": {
+      "type": "line",
+      "lineStyle": {
+       "color": "#d0d6d9",
+       "width": 1,
+       "type": "dashed"
+      }
+     }
+    }
+   ],
+   "xAxis": [
+    {
+     "type": "category",
+     "boundaryGap": false,
+     "axisLine": {
+      "lineStyle": {
+       "color": "#d0d6d9",
+       "width": 1,
+       "type": "solid"
+      },
+      "show": true,
+      "onZero": true,
+      "onZeroAxisIndex": null,
+      "symbol": [
+       "none",
+       "none"
+      ],
+      "symbolSize": [
+       10,
+       15
+      ]
+     },
+     "axisTick": {
+      "show": false,
+      "alignWithLabel": false,
+      "interval": "auto",
+      "inside": false,
+      "length": 5,
+      "lineStyle": {
+       "width": 1
+      }
+     },
+     "axisLabel": {
+      "color": "#63696d",
+      "interval": "auto",
+      "show": true,
+      "inside": false,
+      "rotate": 0,
+      "showMinLabel": null,
+      "showMaxLabel": null,
+      "margin": 8,
+      "fontSize": 12
+     },
+     "splitArea": {
+      "show": false,
+      "areaStyle": {
+       "color": [
+        "rgba(250,250,250,0.2)",
+        "rgba(210,219,238,0.2)"
+       ]
+      }
+     }
+    }
+   ],
+   "yAxis": [
+    {
+     "type": "value",
+     "axisLine": {
+      "show": false,
+      "onZero": true,
+      "onZeroAxisIndex": null,
+      "lineStyle": {
+       "color": "#6E7079",
+       "width": 1,
+       "type": "solid"
+      },
+      "symbol": [
+       "none",
+       "none"
+      ],
+      "symbolSize": [
+       10,
+       15
+      ]
+     },
+     "axisTick": {
+      "show": false,
+      "inside": false,
+      "length": 5,
+      "lineStyle": {
+       "width": 1
+      }
+     },
+     "axisLabel": {
+      "color": "#63696d",
+      "formatter": "",
+      "show": true,
+      "inside": false,
+      "rotate": 0,
+      "showMinLabel": null,
+      "showMaxLabel": null,
+      "margin": 8,
+      "fontSize": 12
+     },
+     "splitLine": {
+      "show": true,
+      "lineStyle": {
+       "color": "#e6ebef",
+       "type": "solid",
+       "width": 1
+      }
+     }
+    }
+   ],
+   "visualMap": [],
+   "series": [
+    {
+     "type": "line",
+     "name": "命中率",
+     "itemStyle": {
+      "color": "#2f6fed"
+     },
+     "lineStyle": {
+      "width": 2,
+      "color": "#2f6fed",
+      "type": "solid"
+     },
+     "label": {
+      "position": "top"
+     },
+     "emphasis": {
+      "scale": true,
+      "label": {}
+     },
+     "symbol": "circle",
+     "symbolSize": 6,
+     "dataLen": 3,
+     "dataHash": 2143641058
+    }
+   ]
+  },
+  {
+   "color": [
+    "#2f6fed",
+    "#f16400",
+    "#00a64a",
+    "#c98000",
+    "#a855f7",
+    "#009eb8",
+    "#ef4444",
+    "#65a000",
+    "#ec4899",
+    "#009ad1"
+   ],
+   "textStyle": {
+    "fontFamily": "'Noto Sans SC Variable', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
+    "fontSize": 11,
+    "fontStyle": "normal",
+    "fontWeight": "normal"
+   },
+   "backgroundColor": "transparent",
+   "legend": [],
+   "tooltip": [
+    {
+     "trigger": "item",
+     "backgroundColor": "#1b1e20",
+     "borderColor": "#1b1e20",
+     "borderWidth": 1,
+     "padding": [
+      8,
+      11
+     ],
+     "textStyle": {
+      "color": "#ffffff",
+      "fontSize": 11
+     },
+     "axisPointer": {
+      "type": "line"
+     }
+    }
+   ],
+   "xAxis": [
+    {
+     "type": "category",
+     "boundaryGap": true,
+     "axisLine": {
+      "lineStyle": {
+       "color": "#d0d6d9",
+       "width": 1,
+       "type": "solid"
+      },
+      "show": true,
+      "onZero": true,
+      "onZeroAxisIndex": null,
+      "symbol": [
+       "none",
+       "none"
+      ],
+      "symbolSize": [
+       10,
+       15
+      ]
+     },
+     "axisTick": {
+      "show": false,
+      "alignWithLabel": false,
+      "interval": "auto",
+      "inside": false,
+      "length": 5,
+      "lineStyle": {
+       "width": 1
+      }
+     },
+     "axisLabel": {
+      "color": "#63696d",
+      "interval": "auto",
+      "show": true,
+      "inside": false,
+      "rotate": 0,
+      "showMinLabel": null,
+      "showMaxLabel": null,
+      "margin": 8,
+      "fontSize": 12
+     },
+     "splitArea": {
+      "show": true,
+      "areaStyle": {
+       "color": [
+        "rgba(250,250,250,0.2)",
+        "rgba(210,219,238,0.2)"
+       ]
+      }
+     }
+    }
+   ],
+   "yAxis": [
+    {
+     "type": "category",
+     "axisLine": {
+      "lineStyle": {
+       "color": "#d0d6d9",
+       "width": 1,
+       "type": "solid"
+      },
+      "show": true,
+      "onZero": true,
+      "onZeroAxisIndex": null,
+      "symbol": [
+       "none",
+       "none"
+      ],
+      "symbolSize": [
+       10,
+       15
+      ]
+     },
+     "axisTick": {
+      "show": false,
+      "alignWithLabel": false,
+      "interval": "auto",
+      "inside": false,
+      "length": 5,
+      "lineStyle": {
+       "width": 1
+      }
+     },
+     "axisLabel": {
+      "color": "#63696d",
+      "interval": "auto",
+      "show": true,
+      "inside": false,
+      "rotate": 0,
+      "showMinLabel": null,
+      "showMaxLabel": null,
+      "margin": 8,
+      "fontSize": 12,
+      "formatter": ""
+     },
+     "splitLine": {
+      "show": false,
+      "lineStyle": {
+       "color": [
+        "#E0E6F1"
+       ],
+       "width": 1,
+       "type": "solid"
+      }
+     }
+    }
+   ],
+   "visualMap": [
+    {
+     "textStyle": {
+      "color": "#4c5155",
+      "fontSize": 11
+     },
+     "inRange": {
+      "color": [
+       "#eef3fe",
+       "#2f6fed"
+      ]
+     },
+     "min": 0,
+     "max": 2,
+     "calculable": true,
+     "orient": "horizontal"
+    }
+   ],
+   "series": [
+    {
+     "type": "heatmap",
+     "name": "超时数",
+     "itemStyle": {
+      "borderColor": "#ffffff",
+      "borderWidth": 2
+     },
+     "label": {
+      "show": false
+     },
+     "emphasis": {
+      "itemStyle": {
+       "borderColor": "#1b1e20",
+       "borderWidth": 2
+      },
+      "label": {
+       "show": false
+      }
+     },
+     "dataLen": 4,
+     "dataHash": 1734026887
+    }
+   ]
+  },
+  {
+   "color": [
+    "#2f6fed",
+    "#f16400",
+    "#00a64a",
+    "#c98000",
+    "#a855f7",
+    "#009eb8",
+    "#ef4444",
+    "#65a000",
+    "#ec4899",
+    "#009ad1"
+   ],
+   "textStyle": {
+    "fontFamily": "'Noto Sans SC Variable', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
+    "fontSize": 11,
+    "fontStyle": "normal",
+    "fontWeight": "normal"
+   },
+   "backgroundColor": "transparent",
+   "legend": [
+    {
+     "show": false,
+     "left": "center",
+     "itemWidth": 25,
+     "itemHeight": 14,
+     "itemGap": 10,
+     "textStyle": {
+      "color": "#333"
+     }
+    }
+   ],
+   "tooltip": [
+    {
+     "trigger": "axis",
+     "backgroundColor": "#1b1e20",
+     "borderColor": "#1b1e20",
+     "borderWidth": 1,
+     "padding": [
+      8,
+      11
+     ],
+     "textStyle": {
+      "color": "#ffffff",
+      "fontSize": 11
+     },
+     "axisPointer": {
+      "type": "line",
+      "lineStyle": {
+       "color": "#d0d6d9",
+       "width": 1,
+       "type": "dashed"
+      }
+     }
+    }
+   ],
+   "xAxis": [
+    {
+     "type": "category",
+     "boundaryGap": true,
+     "axisLine": {
+      "lineStyle": {
+       "color": "#d0d6d9",
+       "width": 1,
+       "type": "solid"
+      },
+      "show": true,
+      "onZero": true,
+      "onZeroAxisIndex": null,
+      "symbol": [
+       "none",
+       "none"
+      ],
+      "symbolSize": [
+       10,
+       15
+      ]
+     },
+     "axisTick": {
+      "show": false,
+      "alignWithLabel": false,
+      "interval": "auto",
+      "inside": false,
+      "length": 5,
+      "lineStyle": {
+       "width": 1
+      }
+     },
+     "axisLabel": {
+      "color": "#63696d",
+      "interval": "auto",
+      "show": true,
+      "inside": false,
+      "rotate": 0,
+      "showMinLabel": null,
+      "showMaxLabel": null,
+      "margin": 8,
+      "fontSize": 12
+     },
+     "splitArea": {
+      "show": false,
+      "areaStyle": {
+       "color": [
+        "rgba(250,250,250,0.2)",
+        "rgba(210,219,238,0.2)"
+       ]
+      }
+     }
+    }
+   ],
+   "yAxis": [
+    {
+     "type": "value",
+     "axisLine": {
+      "show": false,
+      "onZero": true,
+      "onZeroAxisIndex": null,
+      "lineStyle": {
+       "color": "#6E7079",
+       "width": 1,
+       "type": "solid"
+      },
+      "symbol": [
+       "none",
+       "none"
+      ],
+      "symbolSize": [
+       10,
+       15
+      ]
+     },
+     "axisTick": {
+      "show": false,
+      "inside": false,
+      "length": 5,
+      "lineStyle": {
+       "width": 1
+      }
+     },
+     "axisLabel": {
+      "color": "#63696d",
+      "formatter": "",
+      "show": true,
+      "inside": false,
+      "rotate": 0,
+      "showMinLabel": null,
+      "showMaxLabel": null,
+      "margin": 8,
+      "fontSize": 12
+     },
+     "splitLine": {
+      "show": true,
+      "lineStyle": {
+       "color": "#e6ebef",
+       "type": "solid",
+       "width": 1
+      }
+     }
+    }
+   ],
+   "visualMap": [],
+   "series": [
+    {
+     "type": "bar",
+     "name": "本拍命中",
+     "itemStyle": {
+      "color": "#2f6fed",
+      "borderRadius": [
+       2,
+       2,
+       0,
+       0
+      ]
+     },
+     "label": {},
+     "emphasis": {
+      "label": {}
+     },
+     "dataLen": 8,
+     "dataHash": 1816387357
+    }
+   ]
+  }
+ ],
+ "diag": {
+  "hook": "object",
+  "attrNodes": 4,
+  "rootClasses": [
+   "bc-canvas",
+   "bc-canvas",
+   "bc-canvas",
+   "bc-canvas"
+  ],
+  "fetched": 4
+ }
+}

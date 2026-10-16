@@ -15,7 +15,7 @@
 import { computed } from 'vue'
 import BaseChart from './BaseChart.vue'
 import {
-  chartTokens, baseOption, axisTooltip, legendStyle, categoryAxis, valueAxis,
+  chartTokens, TOOLTIP_AXIS, LEGEND_SHOWN, LEGEND_HIDDEN, categoryAxis, valueAxis,
 } from './chartTokens'
 
 const props = defineProps({
@@ -55,22 +55,20 @@ function truncate(label) {
 const option = computed(() => {
   const t = chartTokens()
 
-  const cat = categoryAxis(t, props.categories, {
+  const cat = categoryAxis(props.categories, {
     boundaryGap: true,
     // 横向柱的类目是「商品名」这类长文本 ⇒ 让位给标签，且只在横向时截断。
-    ...(props.horizontal
-      ? { axisLabel: { color: t.axisLabel, formatter: truncate } }
-      : {}),
+    // ⚠️ 只覆盖 `formatter`：标签**颜色**由主题给（覆盖它 = 以后改主题时这里不跟着动）。
+    ...(props.horizontal ? { axisLabel: { formatter: truncate } } : {}),
   })
-  const val = valueAxis(t, { formatter: props.valueFormatter })
+  const val = valueAxis({ formatter: props.valueFormatter })
 
   return {
-    ...baseOption(t),
     grid: props.horizontal
       ? { left: 8, right: 32, top: 18, bottom: props.showLegend ? 44 : 26, containLabel: true }
       : { left: 56, right: 24, top: 18, bottom: props.showLegend ? 44 : 26 },
-    tooltip: axisTooltip(t),
-    legend: props.showLegend ? legendStyle(t) : { show: false },
+    tooltip: TOOLTIP_AXIS,
+    legend: props.showLegend ? LEGEND_SHOWN : LEGEND_HIDDEN,
     // 横向柱 = 轴对调，其余全同。
     xAxis: props.horizontal ? val : cat,
     yAxis: props.horizontal ? cat : val,

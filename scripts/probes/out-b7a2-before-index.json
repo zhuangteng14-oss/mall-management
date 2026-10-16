@@ -1,0 +1,43 @@
+{
+ "tag": "before",
+ "entry": "index.html",
+ "stable": true,
+ "canvases": [
+  {
+   "w": 1086,
+   "h": 220,
+   "ink": 72471,
+   "hash": 2820074082
+  },
+  {
+   "w": 1086,
+   "h": 220,
+   "ink": 8644,
+   "hash": 703242252
+  },
+  {
+   "w": 1086,
+   "h": 260,
+   "ink": 165663,
+   "hash": 2968175083
+  },
+  {
+   "w": 1086,
+   "h": 240,
+   "ink": 18960,
+   "hash": 189838597
+  }
+ ],
+ "options": null,
+ "diag": {
+  "hook": "undefined",
+  "attrNodes": 4,
+  "rootClasses": [
+   "bc-canvas",
+   "bc-canvas",
+   "bc-canvas",
+   "bc-canvas"
+  ],
+  "fetched": 0
+ }
+}

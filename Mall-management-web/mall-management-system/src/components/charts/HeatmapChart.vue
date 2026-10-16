@@ -14,7 +14,7 @@
 /* eslint-disable no-undef */ /* 理由见 `BaseChart.vue` 同款注释（eslint-plugin-vue 8.7.1 缺宏环境） */
 import { computed } from 'vue'
 import BaseChart from './BaseChart.vue'
-import { chartTokens, baseOption, itemTooltip, mixHex } from './chartTokens'
+import { chartTokens, categoryAxis, mixHex, TOOLTIP_ITEM } from './chartTokens'
 
 const props = defineProps({
   /** x 轴类目（如 24 个小时）。必填。 */
@@ -65,19 +65,13 @@ const resolvedMax = computed(() => {
 
 const option = computed(() => {
   const t = chartTokens()
-  const axisCommon = {
-    type: 'category',
-    splitArea: { show: true },
-    axisLine: { lineStyle: { color: t.axisLine } },
-    axisTick: { show: false },
-    axisLabel: { color: t.axisLabel },
-  }
+  /** 热力图的两条轴都是类目轴，且都要 `splitArea`（格子底纹）；灰阶与标签色由主题给。 */
+  const axisOf = (labels) => categoryAxis(labels, { splitArea: { show: true } })
   return {
-    ...baseOption(t),
     grid: { left: 64, right: 24, top: 12, bottom: 56, containLabel: true },
-    tooltip: itemTooltip(t),
-    xAxis: { ...axisCommon, data: props.xLabels },
-    yAxis: { ...axisCommon, data: props.yLabels },
+    tooltip: TOOLTIP_ITEM,
+    xAxis: axisOf(props.xLabels),
+    yAxis: axisOf(props.yLabels),
     visualMap: {
       min: 0,
       max: resolvedMax.value, // 见上方 resolvedMax 注释：**绝不能是 `undefined`**
@@ -87,21 +81,14 @@ const option = computed(() => {
       bottom: 0,
       itemWidth: 12,
       itemHeight: 90,
-      textStyle: { color: t.ink2, fontSize: 11 },
+      // 字色字号走主题的 `visualMap`；`calculable` / 位置 / 尺寸是本图特有的布局参数。
       // ⚠️ 色阶**起点取当前主题的底色**（浅色=白、暗色=`--surface`），不是写死白或写死黑 ——
       //    写死白的话暗色主题下低值格子会变成一片白斑。`mixHex` 就是干这个的。
       inRange: { color: [mixHex(t.surface, t.series[0], 0.08), t.series[0]] },
     },
     series: [
-      {
-        name: props.valueName,
-        type: 'heatmap',
-        data: props.data,
-        label: { show: false },
-        // 格子之间用底色描边隔开（同饼图：不描白，暗色下会成亮框）。
-        itemStyle: { borderColor: t.surface, borderWidth: 2 },
-        emphasis: { itemStyle: { borderColor: t.ink, borderWidth: 2 } },
-      },
+      // 格子的描边 / 悬停描边 / 不画标签：都在主题的 `heatmap` 里。
+      { name: props.valueName, type: 'heatmap', data: props.data },
     ],
   }
 })

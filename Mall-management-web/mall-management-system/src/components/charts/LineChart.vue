@@ -16,7 +16,7 @@ import { computed } from 'vue'
 import BaseChart from './BaseChart.vue'
 import echarts from './echarts'
 import {
-  chartTokens, baseOption, axisTooltip, legendStyle, categoryAxis, valueAxis,
+  chartTokens, TOOLTIP_AXIS, LEGEND_SHOWN, LEGEND_HIDDEN, categoryAxis, valueAxis,
 } from './chartTokens'
 
 const props = defineProps({
@@ -70,22 +70,21 @@ const option = computed(() => {
   //    理由见它）也能一眼对上；右轴的 splitLine 关掉，避免与左轴网格线叠成双线。
   const rightIdx = props.series.findIndex((s) => s.axis === 'right')
   return {
-    ...baseOption(t),
     grid: { left: 56, right: dual.value ? 56 : 24, top: 18, bottom: props.showLegend ? 44 : 26 },
-    tooltip: axisTooltip(t),
-    legend: props.showLegend ? legendStyle(t) : { show: false },
-    xAxis: categoryAxis(t, props.categories, { boundaryGap: false }),
+    tooltip: TOOLTIP_AXIS,
+    legend: props.showLegend ? LEGEND_SHOWN : LEGEND_HIDDEN,
+    xAxis: categoryAxis(props.categories, { boundaryGap: false }),
     yAxis: dual.value
       ? [
-          valueAxis(t, {
+          valueAxis({
             min: props.yMin, max: props.yMax, formatter: props.yFormatter,
             color: seriesColor(t, 0),
           }),
-          valueAxis(t, {
+          valueAxis({
             formatter: props.y2Formatter, color: seriesColor(t, rightIdx), splitLine: false,
           }),
         ]
-      : valueAxis(t, { min: props.yMin, max: props.yMax, formatter: props.yFormatter }),
+      : valueAxis({ min: props.yMin, max: props.yMax, formatter: props.yFormatter }),
     series: props.series.map((s, i) => {
       const color = seriesColor(t, i)
       return {
@@ -94,10 +93,9 @@ const option = computed(() => {
         type: 'line',
         data: s.data,
         smooth: props.smooth,
-        symbol: 'circle',
-        symbolSize: 6,
         showSymbol: longest <= props.symbolLimit,
-        lineStyle: { width: 2, color, type: s.dashed ? [4, 3] : 'solid' },
+        // 线宽 / 数据点形状与大小在主题的 `line` 里；这里只写**本序列特有**的（色、虚线）。
+        lineStyle: { color, type: s.dashed ? [4, 3] : 'solid' },
         itemStyle: { color },
         // ⚠️ 面积渐变靠色值**后缀拼 alpha**（`'55'` / `'00'`）⇒ 要求 token 是 6 位 hex。
         //    本仓 `--c1`-`--c10` 两套主题都是 6 位 hex（见 `tokens.css`）⇒ 成立。

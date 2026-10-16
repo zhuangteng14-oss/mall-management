@@ -23,7 +23,7 @@
 /* eslint-disable no-undef */ /* 理由见 `BaseChart.vue` 同款注释（eslint-plugin-vue 8.7.1 缺宏环境） */
 import { computed } from 'vue'
 import BaseChart from './BaseChart.vue'
-import { chartTokens, baseOption, itemTooltip, legendStyle } from './chartTokens'
+import { TOOLTIP_ITEM, LEGEND_SHOWN, LEGEND_HIDDEN } from './chartTokens'
 
 const props = defineProps({
   /** 扇区：`[{ name, value }]`。必填。 */
@@ -51,19 +51,16 @@ const showCenter = computed(
 )
 
 const option = computed(() => {
-  const t = chartTokens()
   return {
-    ...baseOption(t),
-    tooltip: itemTooltip(t),
-    legend: props.showLegend ? legendStyle(t) : { show: false },
+    tooltip: TOOLTIP_ITEM,
+    legend: props.showLegend ? LEGEND_SHOWN : LEGEND_HIDDEN,
     series: [
       {
         type: 'pie',
         radius: [props.innerRatio, props.outerRatio],
         center: ['50%', props.showLegend ? '45%' : '50%'],
-        itemStyle: { borderColor: t.surface, borderWidth: 2 },
-        label: { color: t.ink2, fontSize: 11, formatter: '{b} {d}%' },
-        labelLine: { lineStyle: { color: t.axisLine } },
+        // 扇区底色描边 / 标签字色字号 / 引导线全在主题的 `pie` 里；这里只留 formatter。
+        label: { formatter: '{b} {d}%' },
         // 洞里放大字 ⇒ 关掉 ECharts 的高亮放大，否则 hover 时扇区会盖住那组数。
         emphasis: { scale: false },
         data: props.data,

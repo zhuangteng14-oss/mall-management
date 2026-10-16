@@ -41,4 +41,12 @@ echarts.use([
 //    在这里补一行即可 —— 别在页面里 `import 'echarts/components'` 整个拿进来。
 // ⚠️ 同样**不注册** `UniversalTransition` / `LabelLayout`：看板是静态图，不做图表间联动动画。
 
+// ⚠️ **仅开发/探针用的出口**（3a.2）：把 echarts 挂到 `window`，让页面探针能
+//    `__echarts.getInstanceByDom(el).getOption()` 逐键核对**实际生效**的 option。
+//    为什么非要有它：主题是「**option > 主题 > 内置默认**」三级合并的结果，
+//    **只读源码看不出最后生效的是什么** —— 而 3a.2 这件事的全部风险就是「主题写了、
+//    但被 option 覆盖了 / 没被合并进去」，那种失败**不报错、也不改变观感**（因为观感本来就
+//    是 option 给的），只能靠读合并结果发现。生产构建里这一行不执行（同 `IconGlyph.vue` 的口径）。
+if (process.env.NODE_ENV !== 'production') window.__echarts = echarts
+
 export default echarts

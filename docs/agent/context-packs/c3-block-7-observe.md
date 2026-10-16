@@ -69,18 +69,19 @@
   ⚠️ **块 7 的 6 个新端点一条都不进白名单**（判据 = 「公开面」，管理端端点没有公开面）⇒
   靠 `AuthInterceptor`（注册在 `/**`）拦。**白名单维持 14，不动。**
 
-### 现状：图表层 —— **ECharts 已在，第二层是自研薄封装**（块 7 只往下写） {#pack-c3-block-7-observe-s7}
+### 现状：图表层 —— **ECharts 已在，第二层是自研薄封装**（块 7 只往下写）<br>⚠️ 下表**行数与导出名已按 3a.2 主题笔（2026-10-16）刷新过一次**（原先那份是开工前快照）；`theme.js` 那一行是**新文件** {#pack-c3-block-7-observe-s7}
 
 | 文件 | 行数 | 状态 |
 |---|---|---|
-| `src/components/charts/echarts.js` | 44 | **唯一** `echarts.use(...)` 处；已注册 Line/Bar/Pie/Heatmap + Grid/Tooltip/Legend/VisualMap/AxisPointer + CanvasRenderer；**刻意不注册** TitleComponent / UniversalTransition / LabelLayout |
-| `src/components/charts/BaseChart.vue` | 191 | 底座：生命周期 + `ResizeObserver` + **三态浮层**（error > loading > empty，canvas **恒挂载**、状态是**不透明浮层**不是 `v-if`） |
-| `src/components/charts/chartTokens.js` | 157 | 全部色值 / 字号令牌；`baseOption` / `axisTooltip` / `legendStyle` / `categoryAxis` / `valueAxis` / `mixHex` |
-| `LineChart.vue` | 117 | 折线（props：`categories` `series` `height` `smooth` `showLegend` `yFormatter` `yMin` `yMax` `symbolLimit`）⚠️ **无 `area` 属性** |
-| `BarChart.vue` | 94 | 柱状（`horizontal` `stacked` `valueFormatter` `maxBarWidth` `labelTruncate`） |
-| `PieChart.vue` | 72 | 饼图 |
-| `DonutChart.vue` | 106 | 环图（`centerValue` `centerTitle` `innerRatio` `outerRatio`） |
-| `HeatmapChart.vue` | 108 | 热力图 —— **零调用点，现成空白位**；块 7 首次启用（指标面板「锁竞争热力图」） |
+| `src/components/charts/echarts.js` | 52 | **唯一** `echarts.use(...)` 处；已注册 Line/Bar/Pie/Heatmap + Grid/Tooltip/Legend/VisualMap/AxisPointer + CanvasRenderer；**刻意不注册** TitleComponent / UniversalTransition / LabelLayout；`NODE_ENV !== 'production'` 时挂 `window.__echarts`（**探针出口**，3a.2 加） |
+| `src/components/charts/BaseChart.vue` | 195 | 底座：生命周期 + `ResizeObserver` + **三态浮层**（error > loading > empty，canvas **恒挂载**、状态是**不透明浮层**不是 `v-if`）；`init` 第二个入参 = 主题名（3a.2 起不是 `null`） |
+| `src/components/charts/theme.js` | 153 | **图表面唯一的取值点**（3a.2）：`buildTheme(t)` / `registerChartTheme()` / `CHART_THEME`。承载「整站一个样」的键（色板兜底 / 文字档 / 轴与分割线 / tooltip / 图例 / `line`·`pie`·`heatmap`·`visualMap` 的默认）。⚠️ 合并序 **option > 主题 > 内置默认** ⇒ 主题只在 option 没写到的键上生效；**主题不能声明组件**（`legend`/`tooltip` 必须出现在 option 里）。3a.2b 的甲/乙差异面就落在这里 |
+| `src/components/charts/chartTokens.js` | 145 | **只剩取值与参数**：色值现读 CSS 变量的 `chartTokens()` + `TEXT_SIZE` + `TOOLTIP_AXIS`/`TOOLTIP_ITEM` + `LEGEND_SHOWN`/`LEGEND_HIDDEN` + `categoryAxis(data,opts)`/`valueAxis(opts)`/`mixHex`。⚠️ `baseOption`/`axisTooltip`/`legendStyle` 已**删除**（样式搬进了 `theme.js`） |
+| `LineChart.vue` | 115 | 折线（props：`categories` `series` `height` `smooth` `showLegend` `yFormatter` `yMin` `yMax` `symbolLimit`）⚠️ **无 `area` 属性** |
+| `BarChart.vue` | 92 | 柱状（`horizontal` `stacked` `valueFormatter` `maxBarWidth` `labelTruncate`） |
+| `PieChart.vue` | 68 | 饼图 |
+| `DonutChart.vue` | 103 | 环图（`centerValue` `centerTitle` `innerRatio` `outerRatio`） |
+| `HeatmapChart.vue` | 95 | 热力图 —— 指标面板「锁竞争热力图」是它的调用点（`MetricsPanel.vue:113`） |
 
 - `package.json:13` `echarts ^5.6.0`（实装 5.6.0）；`@lucide/vue ^1.55.0`。
 - **现有用法**：9 页 / **24 实例**（Line 6 · Bar 9 · Donut 8 · Pie 1 · Heatmap 0）。

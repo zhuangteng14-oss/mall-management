@@ -36,6 +36,7 @@
 /* eslint-disable no-undef */
 import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import echarts from './echarts'
+import { registerChartTheme } from './theme'
 
 const props = defineProps({
   /** 完整的 ECharts option。五个具体图各自算好传进来；本组件不碰它的内容。必填。 */
@@ -82,7 +83,10 @@ function onWinResize() {
 onMounted(async () => {
   await nextTick()
   if (!chartEl.value) return
-  chart = echarts.init(chartEl.value, null, { renderer: 'canvas' })
+  // ⚠️ 第二个入参 = **主题名**（3a.2 起不再是 `null`）。`registerChartTheme()` 幂等地注册并返回
+  //    主题名；必须**在 `init` 之前**调 —— 主题要现读 CSS 变量，而 `onMounted` 时 `<link>`
+  //    已生效（见 `theme.js` 的注册时机注释）。
+  chart = echarts.init(chartEl.value, registerChartTheme(), { renderer: 'canvas' })
   render()
   // ⚠️ 用 `ResizeObserver` 而不是只监听 `window.resize`：本仓两个壳（`AppShell` / `AdminShell`）
   // 都有可折叠的侧栏/菜单，容器宽度会在窗口尺寸不变时变化 —— 只听 window 的话那些场景图会缺一块。
