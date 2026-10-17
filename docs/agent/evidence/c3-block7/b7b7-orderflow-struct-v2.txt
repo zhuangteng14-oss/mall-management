@@ -1,0 +1,39 @@
+=== 3b.7 状态流转页两版结构草图：整页截图 + 结构断言 ===
+跑法：node scripts/probes/probe-b7b7-orderflow-struct-shots.mjs
+
+     3b7-甲-漏斗流转.html 页高 2857px · 主区宽 1129px（视口 1440 / 客户区 1425 / 滚动条 15）
+     3b7-乙-非对称双栏.html 页高 2387px · 主区宽 1129px（视口 1440 / 客户区 1425 / 滚动条 15）
+     左右栏 734 / 367px · 流 10 行 / 可视高 360px
+OK   3b7-甲-漏斗流转.html · 页面挂载
+OK   3b7-甲-漏斗流转.html · C2 无等宽等高卡片（.kpi = 0，.box = 0）  → "kpi=0 box=0"
+OK   3b7-甲-漏斗流转.html · C3 区块间距 > 块内间距（28 vs 12）  → "block=28px step=null head=12px"
+OK   3b7-甲-漏斗流转.html · C4 主区宽 == clientW − 侧栏 − 2×padding  → "1129 vs 1129"
+OK   3b7-甲-漏斗流转.html · 无横向溢出  → "scrollW=1425 clientW=1425"
+OK   3b7-甲-漏斗流转.html · 主装置 SVG 已画出且尺寸非零  → {"w":1107,"h":402}
+OK   3b7-甲-漏斗流转.html · 耗时直方图：3 组共 17 个桶  → "bars=17"
+OK   3b7-甲-漏斗流转.html · 超时积压：2 个不等宽预警舱  → "bays=2"
+OK   3b7-甲-漏斗流转.html · 抽屉：打开态 + sort 条 + Top 5 行  → "drawer=true sort=true rows=5"
+OK   3b7-甲-漏斗流转.html · C1 顶层相邻区块不同构  → "6 块互不相同"
+OK   3b7-甲-漏斗流转.html · 灰阶：无品牌色（R=G=B）  → "0 个彩色声明"
+OK   3b7-甲-漏斗流转.html · 无圆角 / 无阴影 / 无动效  → "radius=0 shadow=0 motion=0"
+OK   3b7-甲-漏斗流转.html · SVG 文本不越出 viewBox  → "0 条"
+OK   3b7-甲-漏斗流转.png 落盘  → "301662B"
+OK   3b7-乙-非对称双栏.html · 页面挂载
+OK   3b7-乙-非对称双栏.html · C2 无等宽等高卡片（.kpi = 0，.box = 0）  → "kpi=0 box=0"
+OK   3b7-乙-非对称双栏.html · C3 区块间距 > 块内间距（28 vs 12）  → "block=28px step=12px head=12px"
+OK   3b7-乙-非对称双栏.html · C4 主区宽 == clientW − 侧栏 − 2×padding  → "1129 vs 1129"
+OK   3b7-乙-非对称双栏.html · 无横向溢出  → "scrollW=1425 clientW=1425"
+OK   3b7-乙-非对称双栏.html · 8/4 非对称分割（左/右 ≈ 2，gap 28）  → {"left":734,"right":367,"gap":"28px"}
+OK   3b7-乙-非对称双栏.html · 实时流是内部滚动（overflow auto 且内容多于一屏）  → {"h":360,"overflow":"auto","rows":10}
+OK   3b7-乙-非对称双栏.html · 耗时直方图：3 组共 17 个横向桶  → "rows=17"
+OK   3b7-乙-非对称双栏.html · 超时积压：2 条全宽预警带  → "rows=2"
+OK   3b7-乙-非对称双栏.html · 抽屉：打开态 + sort 条 + 4 步时间轴  → "drawer=true sort=true steps=4"
+OK   3b7-乙-非对称双栏.html · C1 顶层相邻区块不同构  → "4 块互不相同"
+OK   3b7-乙-非对称双栏.html · C1 左栏内相邻区块不同构  → "div.of-ladder | div.of-ladder-cap | p.cnote"
+OK   3b7-乙-非对称双栏.html · C1 右栏内相邻区块不同构  → "div.of-ring | div.of-stream-wrap"
+OK   3b7-乙-非对称双栏.html · 灰阶：无品牌色（R=G=B）  → "0 个彩色声明"
+OK   3b7-乙-非对称双栏.html · 无圆角 / 无阴影 / 无动效  → "radius=0 shadow=0 motion=0"
+OK   3b7-乙-非对称双栏.html · SVG 文本不越出 viewBox  → "0 条"
+OK   3b7-乙-非对称双栏.png 落盘  → "288500B"
+
+3b7 状态流转页结构草图: 31 项 / 0 失败

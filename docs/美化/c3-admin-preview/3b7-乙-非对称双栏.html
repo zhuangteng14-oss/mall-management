@@ -2,12 +2,12 @@
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8">
-<title>3b.7 状态流转 · 乙 —— 非对称双栏（LAYOUT）· 结构草图</title>
+<title>3b.7 状态流转 · 乙 —— 非对称双栏（LAYOUT）· 结构草图 v2</title>
 <link rel="stylesheet" href="./_struct-wire.css">
 <style>
 /* ══════════════════════════════════════════════════════════════════════════════
    本页只新增 layout 原语：栅格 / 间距 / 对齐 / 线宽。
-   不新增品牌色、不写圆角、不写阴影、不写过渡与动效；灰阶只取 _struct-wire.css 的变量。
+   不写品牌色、字号档之外的装饰、圆角、阴影、过渡与动效；灰阶只取变量。
    ══════════════════════════════════════════════════════════════════════════════ */
 .of-page { --gap-block: 28px; --gap-in: 12px; }
 
@@ -30,106 +30,164 @@
 .of-toggle span { padding: 1px 8px; color: var(--tm); }
 .of-toggle .on { color: var(--t); font-weight: 600; border-right: 1px solid var(--l); }
 
-/* ② 非对称分割：左 8 / 右 4（区块级 28px 间距 > 块内 12px） */
-.of-split { display: grid; grid-template-columns: 8fr 4fr; gap: var(--gap-block); margin-top: var(--gap-block); }
 .of-block { margin-top: var(--gap-block); }
-.of-split .h2.first, .of-block > .h2:first-child { margin-top: 0; }
 
-/* 左：纵向阶梯（每一级 = 名称/累计数 + 条 + 转化/耗时） */
-.of-chain { border-top: 1px solid var(--l); }
-.of-step { display: grid; grid-template-columns: 22px 1fr; }
-.of-rail { border-left: 1px solid var(--l); margin-left: 7px; position: relative; }
-.of-step:last-child .of-rail { border-left-style: dashed; }
-.of-dot { position: absolute; left: -6px; top: 20px; width: 11px; height: 11px; background: #fff; border: 1px solid var(--t); }
-.of-step-body {
-  display: grid;
-  grid-template-columns: 150px minmax(0, 1fr) 190px;
-  gap: var(--gap-in);
-  align-items: center;
-  padding: 12px 0;
-  border-bottom: 1px solid var(--l2);
-}
-.of-step-head .of-stage { display: block; color: var(--tm); }
-.of-step-head .of-count { display: block; font-family: var(--mono); font-weight: 600; font-size: 24px; line-height: 1.2; }
-.of-track { background: var(--f); height: 18px; }
-.of-track span { display: block; height: 100%; background: #cfcfcf; }
-.of-step-meta { display: flex; flex-direction: column; gap: 2px; color: var(--tm); }
-.of-step-meta b { color: var(--t); font-weight: 600; }
-.of-step-meta .of-dur { font-family: var(--mono); }
-.of-chain-foot {
-  display: flex;
-  align-items: baseline;
-  gap: 10px;
-  padding: 8px 0 0 34px;
-  color: var(--tm);
-}
-.of-chain-foot b { font-family: var(--mono); color: var(--t); font-weight: 600; }
+/* ② 8/4 非对称双栏 */
+.of-split { display: grid; grid-template-columns: 2fr 1fr; gap: var(--gap-block); align-items: start; }
+.of-left, .of-right { min-width: 0; }
+.of-right { display: flex; flex-direction: column; gap: var(--gap-block); }
 
-/* 左：取消总账（默认收起的一行 details） */
-.of-fold { border: 1px dashed var(--dash); margin-top: var(--gap-block); }
-.of-fold > summary { padding: 7px 10px; color: var(--t); }
-.of-fold > summary .of-meta { color: var(--ts); margin-left: 8px; }
-.of-fold-line { padding: 8px 10px; border-top: 1px dashed var(--dash); color: var(--tm); }
+/* 纵向阶梯 + 桑基带 */
+.of-ladder { display: grid; grid-template-columns: 92px 1fr; gap: var(--gap-in); border: 1px solid var(--l); padding: 10px; }
+.of-taper { display: block; width: 92px; height: auto; }
+.of-taper .band { fill: var(--f); stroke: var(--l2); stroke-width: 1; }
+.of-taper .axis { stroke: var(--tm); stroke-width: 1; fill: none; }
+.of-taper .br { stroke: var(--t); stroke-width: 1.2; stroke-dasharray: 5 4; fill: none; }
+.of-taper .st { fill: #fff; stroke: var(--t); stroke-width: 2; }
+.of-taper .st.zero { stroke: var(--l); stroke-dasharray: 3 2; }
+.of-taper text { font-family: var(--mono); fill: var(--t); }
+.of-taper .n { font-size: 10px; font-weight: 600; }
+.of-taper .n.zero { fill: var(--ts); }
+.of-taper .cap { font-size: 9px; fill: var(--ts); }
+.of-taper .fl { fill: var(--ts); }
 
-/* 右：辅助环图 + 图例 */
-.of-ring { display: grid; grid-template-columns: 150px minmax(0, 1fr); gap: var(--gap-in); align-items: center; }
-.of-ring-svg { display: block; width: 100%; height: auto; }
-.of-ring-svg text { font-family: var(--mono); fill: var(--t); }
-.of-ring-svg .of-ring-v { font-size: 22px; font-weight: 600; }
-.of-ring-svg .of-ring-k { font-size: 10px; fill: var(--tm); }
-.of-legend { list-style: none; margin: 0; padding: 0; }
-.of-legend li {
-  display: grid;
-  grid-template-columns: 14px minmax(0, 1fr) 34px 46px;
-  gap: 6px;
-  align-items: center;
-  padding: 4px 0;
-  border-bottom: 1px solid var(--l2);
-}
-.of-legend li:last-child { border-bottom: 0; }
-.of-legend i { width: 9px; height: 9px; display: block; }
-.of-legend .zero { background: #fff; border: 1px dashed var(--l); }
-.of-legend .cnt { font-family: var(--mono); text-align: right; }
-.of-legend .pct { font-family: var(--mono); color: var(--tm); text-align: right; }
+.of-steps { display: flex; flex-direction: column; }
+.of-step { padding: 8px 0 9px; border-bottom: 1px solid var(--l2); }
+.of-step:last-child { border-bottom: 0; }
+.of-step-main { display: grid; grid-template-columns: 96px 44px 1fr 192px; gap: var(--gap-in); align-items: center; }
+.of-stage { font-weight: 600; }
+.of-count { font-family: var(--mono); font-weight: 600; text-align: right; }
+.of-track { height: 10px; border: 1px solid var(--l2); background: #fff; }
+.of-track i { display: block; height: 100%; background: #dcdcdc; border-right: 1px solid var(--l2); }
+.of-track.zero i { width: 2px; background: var(--l); }
+.of-meta { color: var(--tm); font-family: var(--mono); text-align: right; white-space: nowrap; }
+.of-warn { margin: 5px 0 0 116px; border: 1px dashed var(--l); padding: 2px 8px; color: var(--tm); font-family: var(--mono); }
+.of-warn.hit { border-style: solid; border-color: var(--tm); color: var(--t); font-weight: 600; }
+.of-step.cancel { border-top: 1px dashed var(--tm); margin-top: 4px; padding-top: 9px; }
+.of-step.cancel .of-track i { background: #ececec; }
+.of-ladder-cap { display: flex; justify-content: space-between; color: var(--ts); padding: 5px 2px 0; }
 
-/* 右：实时订单流（内部滚动） */
-.of-stream {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  max-height: 340px;
-  overflow: auto;
-  border-top: 1px solid var(--l);
-}
+/* 右栏环图 */
+.of-ring { border: 1px solid var(--l); padding: 10px; }
+.of-ring-body { display: grid; grid-template-columns: 132px 1fr; gap: var(--gap-in); align-items: center; }
+.of-ring svg { display: block; width: 132px; height: 132px; }
+.of-ring .seg { fill: none; stroke-width: 22; }
+.of-ring .s1 { stroke: #8e8e8e; }
+.of-ring .s2 { stroke: #5c5c5c; }
+.of-ring .s3 { stroke: #b9b9b9; }
+.of-ring .s4 { stroke: #dcdcdc; }
+.of-ring .ct { fill: var(--t); font-family: var(--mono); font-size: 16px; font-weight: 600; }
+.of-ring .cl { fill: var(--ts); font-family: var(--mono); font-size: 9px; }
+.of-legend { min-width: 0; }
+.of-leg { display: grid; grid-template-columns: 12px 1fr auto; gap: 6px; align-items: center; padding: 3px 0; border-bottom: 1px solid var(--l2); }
+.of-leg:last-child { border-bottom: 0; }
+.of-leg .sw { width: 12px; height: 8px; border: 1px solid var(--l2); }
+.of-leg .nm { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.of-leg .vv { font-family: var(--mono); color: var(--tm); }
+.of-leg .vv b { color: var(--t); }
+.of-leg .warnmark { color: var(--t); font-family: var(--mono); }
+
+/* SSE 实时流（右栏，内部滚动） */
+.of-stream-wrap { border: 1px solid var(--l); }
+.of-ticker { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 6px 9px; border-bottom: 1px solid var(--l2); color: var(--tm); }
+.of-ticker .of-chip { border: 1px solid var(--l); padding: 0 6px; color: var(--t); }
+.of-slot { padding: 6px 9px; border-bottom: 1px dashed var(--tm); color: var(--ts); background: var(--f); }
+.of-slot b { color: var(--t); font-family: var(--mono); }
+.of-stream { max-height: 360px; overflow-y: auto; }
 .of-stream-row {
   display: grid;
-  grid-template-columns: 72px minmax(0, 1fr) auto;
+  grid-template-columns: 86px 1fr auto;
   gap: 8px;
-  align-items: start;
-  padding: 6px 0;
+  align-items: center;
+  padding: 6px 9px;
   border-bottom: 1px solid var(--l2);
 }
-.of-prog i {
-  display: inline-block;
-  width: 5px;
-  height: 5px;
-  margin-right: 2px;
-  border: 1px solid var(--l);
-  vertical-align: middle;
-}
-.of-prog i.on { background: #6a6a6a; border-color: #6a6a6a; }
-.of-prog b { display: block; margin-top: 2px; color: var(--tm); font-weight: 400; }
+.of-stream-row:last-child { border-bottom: 0; }
+.of-mini { display: block; width: 84px; height: 12px; }
+.of-mini line { stroke: var(--l); stroke-width: 1; }
+.of-mini rect { fill: #fff; stroke: var(--tm); stroke-width: 1; }
+.of-mini rect.on { fill: var(--t); }
+.of-mini rect.x { stroke: var(--ts); }
+.of-mini rect.next { fill: #fff; stroke: var(--t); stroke-dasharray: 2 1; }
 .of-oid { font-family: var(--mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.of-oid em { display: block; font-family: inherit; font-style: normal; color: var(--ts); overflow: hidden; text-overflow: ellipsis; }
-.of-amt { font-family: var(--mono); }
+.of-oid em { display: block; font-style: normal; color: var(--ts); }
+.of-hop { font-family: var(--mono); color: var(--tm); white-space: nowrap; }
+
+/* ③ 耗时分布（横向桶） + 超时预警（两条全宽预警带） */
+.of-hist3 { display: grid; grid-template-columns: repeat(3, 1fr); border: 1px solid var(--l); }
+.of-hist-grp { padding: 10px; border-left: 1px solid var(--l2); min-width: 0; }
+.of-hist-grp:first-child { border-left: 0; }
+.of-hist-h { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; padding-bottom: 6px; border-bottom: 1px solid var(--l2); }
+.of-hist-h b { font-size: 13px; }
+.of-hist-h span { color: var(--ts); }
+.of-hrow { display: grid; grid-template-columns: 62px 1fr 34px; gap: 7px; align-items: center; padding: 3px 0; }
+.of-hrow span { color: var(--tm); font-family: var(--mono); }
+.of-hrow i { height: 8px; background: #dcdcdc; border: 1px solid var(--l2); display: block; }
+.of-hrow em { font-family: var(--mono); color: var(--t); font-style: normal; text-align: right; }
+.of-hist-foot { color: var(--ts); padding-top: 5px; }
+
+.of-warnstrip { border: 1px solid var(--l); border-top: 0; }
+.of-warnrow { display: grid; grid-template-columns: 118px 220px 1fr 88px; gap: var(--gap-in); align-items: start; padding: 9px 10px; border-top: 1px solid var(--l2); }
+.of-warnrow:first-child { border-top: 0; }
+.of-warnhead b { font-size: 14px; }
+.of-warnhead .n { display: block; font-family: var(--mono); font-size: 24px; font-weight: 600; line-height: 1.1; }
+.of-warnhead .k { display: block; color: var(--ts); }
+.of-warnage .of-age-row { display: grid; grid-template-columns: 58px 1fr 30px; gap: 6px; align-items: center; padding: 2px 0; }
+.of-warnage .of-age-row span { color: var(--tm); font-family: var(--mono); }
+.of-warnage .of-age-row i { height: 7px; background: #dcdcdc; border: 1px solid var(--l2); display: block; }
+.of-warnage .of-age-row em { font-family: var(--mono); color: var(--t); font-style: normal; text-align: right; }
+.of-warntop .th { color: var(--ts); padding-bottom: 3px; }
+.of-warntop .tr { display: grid; grid-template-columns: 18px 1fr auto; gap: 2px 6px; padding: 2px 0; }
+.of-warntop .tr .rk { grid-row: 1 / 3; color: var(--ts); font-family: var(--mono); }
+.of-warntop .tr .oid { font-family: var(--mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.of-warntop .tr .age { font-family: var(--mono); font-weight: 600; text-align: right; }
+.of-warntop .tr .prod { grid-column: 2 / 4; color: var(--ts); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.of-open { border: 1px solid var(--l); padding: 0 8px; color: var(--t); text-align: center; white-space: nowrap; }
+
+/* ④ 链路抽屉：7/5 两栏 + 全宽原始事件带 */
+.of-drawer { border: 1px solid var(--l); }
+.of-drawer-bar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 7px 10px; border-bottom: 1px solid var(--l); background: var(--f); }
+.of-grip { width: 36px; height: 3px; background: var(--l); display: inline-block; }
+.of-tabs { display: inline-flex; border: 1px solid var(--l); }
+.of-tabs span { padding: 1px 8px; color: var(--tm); border-right: 1px solid var(--l2); }
+.of-tabs span:last-child { border-right: 0; }
+.of-tabs .on { color: var(--t); font-weight: 600; }
+.of-drawer-bar .of-close { margin-left: auto; border: 1px solid var(--l); padding: 0 7px; color: var(--t); }
+.of-sort { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 5px 10px; border-bottom: 1px solid var(--l2); color: var(--tm); background: var(--f); }
+.of-sort b { color: var(--t); }
+.of-sort .chip { border: 1px solid var(--l); padding: 0 7px; color: var(--t); }
+.of-drawer-body { display: grid; grid-template-columns: 7fr 5fr; }
+.of-pane { padding: 10px; min-width: 0; }
+.of-pane + .of-pane { border-left: 1px solid var(--l2); }
+.of-pane-h { color: var(--ts); padding-bottom: 6px; border-bottom: 1px solid var(--l2); margin-bottom: 6px; }
+.of-backlog-row { display: grid; grid-template-columns: 18px 1fr auto; gap: 4px 8px; padding: 5px 0; border-bottom: 1px solid var(--l2); }
+.of-backlog-row:last-child { border-bottom: 0; }
+.of-backlog-row .rk { grid-row: 1 / 3; color: var(--ts); font-family: var(--mono); align-self: center; }
+.of-backlog-row .oid { font-family: var(--mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.of-backlog-row .prod { color: var(--ts); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.of-backlog-row .age { font-family: var(--mono); font-weight: 600; text-align: right; grid-row: 1 / 3; align-self: center; }
+.of-timeline { display: grid; grid-template-columns: repeat(4, 1fr); border-top: 1px solid var(--tm); margin-top: 6px; }
+.of-tstep { padding: 7px 6px 4px; border-left: 1px solid var(--l2); position: relative; }
+.of-tstep:first-child { border-left: 0; }
+.of-tstep .dot { display: block; width: 7px; height: 7px; border: 1px solid var(--t); background: var(--t); margin-bottom: 4px; }
+.of-tstep.pending .dot { background: #fff; border-style: dashed; }
+.of-tstep .nm { font-weight: 600; }
+.of-tstep.pending .nm { color: var(--ts); font-weight: 400; }
+.of-tstep .at { display: block; font-family: var(--mono); color: var(--tm); }
+.of-tstep.pending .at { color: var(--ts); }
+.of-tstep .dt { display: block; font-family: var(--mono); color: var(--ts); }
+.of-raw { grid-column: 1 / -1; border-top: 1px solid var(--l2); padding: 8px 10px; display: flex; gap: 14px; flex-wrap: wrap; color: var(--ts); }
+.of-raw b { color: var(--tm); }
+.of-raw code { font-family: var(--mono); color: var(--tm); }
 </style>
 </head>
 <body>
 
 <div class="wire-head">
-  <h1>3b.7 状态流转 · <b>乙 —— 非对称双栏（LAYOUT）</b></h1>
-  <span class="hint">结构草图：灰线框（无品牌色／圆角／阴影／动效）· 真库快照（2026-10-17 19:11）·
-    保留辅助环图，但降到右栏；左 8 栏是带转化率与平均耗时的主链阶梯，右 4 栏是五态占比 + 实时订单滚动流</span>
+  <h1>3b.7 状态流转 · <b>乙 —— 非对称双栏（LAYOUT 布局）</b></h1>
+  <span class="hint">结构草图 v2：灰线框（无品牌色／圆角／阴影／动效）· 真库快照（2026-10-17 19:25）·
+    左 8 栏 = 纵向桑基带 + 积压阶梯 + 预警；右 4 栏 = 五态环图 + SSE 流轨；
+    耗时分布横向铺开；任意节点/预警行打开链路抽屉</span>
 </div>
 
 <div class="shell">
@@ -156,180 +214,325 @@
         <div class="of-figure" style="grid-column: span 3">
           <span class="k">订单总数（五态之和）</span>
           <span class="v">256</span>
-          <span class="d">已取消 35 · 13.7%</span>
+          <span class="d">当前积压：89 + 24 · 终态：108 + 35</span>
         </div>
         <div class="of-live" style="grid-column: span 5">
           <span class="of-chip">已连接</span>
-          <span>第 6 拍 · 每秒 1 拍 · 19:11:01</span>
-          <span>本会话捕获流转 <b style="font-family:var(--mono)">0</b></span>
+          <span>第 6 拍 · 每秒 1 拍 · 19:25:01</span>
+          <span>本拍流转 <b style="font-family:var(--mono)">0</b> · 流入 0 / 流出 0</span>
+          <span style="border:1px solid var(--l);padding:0 7px">回放</span>
         </div>
         <div class="of-src" style="grid-column: span 4">
+          <span>节点预警 <b style="font-family:var(--mono);color:var(--t)">2</b> / 4</span>
           <span>数据源</span>
           <span class="of-toggle"><span class="on">正常</span><span>模拟日常</span></span>
           <span>后端真流</span>
         </div>
       </section>
 
-      <!-- ② 左右非对称：左 8 主链 / 右 4 辅助 -->
-      <section class="of-split">
+      <!-- ② 8/4：左 = 状态阶梯；右 = 环图 + 流轨 -->
+      <section class="of-block" aria-label="状态机与实时流">
+        <div class="of-split">
+          <div class="of-left">
+            <div class="h2">
+              <b>状态机 · 纵向桑基带与积压阶梯</b>
+              <span class="n">带宽 = 累计到达 · 条长 = 当前积压 · 节点旁 = 超时预警 · 点行 = 链路抽屉（sort=age_desc）</span>
+            </div>
 
-        <!-- 左：主链阶梯 -->
-        <div class="of-left" aria-label="主链阶梯">
-          <div class="h2 first">
-            <b>主链路 · 纵向阶梯</b>
-            <span class="n">条长 = 累计到达（相对创建） · 每级右列 = 相邻转化 / 相对创建 / 平均耗时</span>
+            <div class="of-ladder">
+              <svg class="of-taper" viewBox="0 0 92 470" role="img"
+                   aria-label="纵向桑基带：累计到达从 256 收到 108；当前积压为待付款 0、待发货 89、待收货 24、已完成 108；已取消 35 从支付段剥离。">
+                <polygon class="band" points="14,50 78,50 73.5,160 62.5,280 59.5,400 32.5,400 29.5,280 18.5,160"></polygon>
+                <line class="axis" x1="46" y1="24" x2="46" y2="434"></line>
+                <path class="fl" d="M41,98 L46,108 L51,98 Z"></path>
+                <path class="fl" d="M41,212 L46,222 L51,212 Z"></path>
+                <path class="fl" d="M41,330 L46,340 L51,330 Z"></path>
+                <text class="cap" x="46" y="18" text-anchor="middle">SSE ↓</text>
+                <text class="cap" x="46" y="446" text-anchor="middle">出口</text>
+
+                <circle class="st zero" cx="46" cy="50" r="7"></circle>
+                <text class="n zero" x="46" y="53" text-anchor="middle">0</text>
+                <circle class="st" cx="46" cy="160" r="14"></circle>
+                <text class="n" x="46" y="164" text-anchor="middle">89</text>
+                <circle class="st" cx="46" cy="280" r="9"></circle>
+                <text class="n" x="46" y="283" text-anchor="middle">24</text>
+                <circle class="st" cx="46" cy="400" r="15"></circle>
+                <text class="n" x="46" y="404" text-anchor="middle">108</text>
+
+                <path class="br" d="M60,80 L84,80 L84,446"></path>
+                <circle class="st" cx="84" cy="446" r="7"></circle>
+                <text class="n" x="84" y="449" text-anchor="middle">35</text>
+              </svg>
+
+              <div class="of-steps">
+                <div class="of-step">
+                  <div class="of-step-main">
+                    <span class="of-stage">待付款 ↘</span><span class="of-count">0</span>
+                    <div class="of-track zero"><i></i></div>
+                    <div class="of-meta">累计 256 · 100% · —</div>
+                  </div>
+                  <div class="of-warn">超 60s 未付 0</div>
+                </div>
+
+                <div class="of-step">
+                  <div class="of-step-main">
+                    <span class="of-stage">待发货 ↘</span><span class="of-count">89</span>
+                    <div class="of-track"><i style="width:82.4%"></i></div>
+                    <div class="of-meta">累计 221 · 86.3% · 均耗 28m</div>
+                  </div>
+                  <div class="of-warn hit">⚠ 超 24h 未发 89 · &gt;7d 18 · 30d+ 13</div>
+                </div>
+
+                <div class="of-step">
+                  <div class="of-step-main">
+                    <span class="of-stage">待收货 ↘</span><span class="of-count">24</span>
+                    <div class="of-track"><i style="width:22.2%"></i></div>
+                    <div class="of-meta">累计 132 · 51.6% · 均耗 18h53m</div>
+                  </div>
+                  <div class="of-warn hit">⚠ 超 48h 未收 24 · 全部 &gt;7d · &gt;14d 17</div>
+                </div>
+
+                <div class="of-step">
+                  <div class="of-step-main">
+                    <span class="of-stage">已完成 ↘</span><span class="of-count">108</span>
+                    <div class="of-track"><i style="width:100%"></i></div>
+                    <div class="of-meta">累计 108 · 42.2% · 均耗 60h35m</div>
+                  </div>
+                  <div class="of-warn">终态 · 无超时</div>
+                </div>
+
+                <div class="of-step cancel">
+                  <div class="of-step-main">
+                    <span class="of-stage">已取消 ↘</span><span class="of-count">35</span>
+                    <div class="of-track"><i style="width:32.4%"></i></div>
+                    <div class="of-meta">13.7% · 终态 · 支线</div>
+                  </div>
+                  <div class="of-warn">超时/主动取消 · 时间戳口径不一致，不分阶段归因</div>
+                </div>
+              </div>
+            </div>
+            <div class="of-ladder-cap"><span>上：SSE 流入</span><span>带宽 = 累计到达（256→221→132→108）</span><span>下：完成出口</span></div>
+            <p class="cnote">左列桑基带只编码「累计到达」，右侧横条只编码「当前积压」；两者同向但不同量，避免把漏斗当成库存。</p>
           </div>
 
-          <div class="of-chain">
-            <div class="of-step">
-              <div class="of-rail"><span class="of-dot"></span></div>
-              <div class="of-step-body">
-                <div class="of-step-head"><span class="of-stage">创建</span><span class="of-count">256</span></div>
-                <div class="of-track"><span style="width:100%"></span></div>
-                <div class="of-step-meta"><span>相对创建 100.0%</span><span class="of-dur">起点</span></div>
+          <div class="of-right">
+            <div class="of-ring">
+              <div class="h2"><b>五态占比 · 辅图</b><span class="n">环只做总账；动态看左梯</span></div>
+              <div class="of-ring-body">
+                <svg viewBox="0 0 160 160" role="img" aria-label="五态占比环：待发货 34.8%，待收货 9.4%，已完成 42.2%，已取消 13.7%。">
+                  <g transform="rotate(-90 80 80)">
+                    <circle class="seg s4" cx="80" cy="80" r="62" stroke-dasharray="53.26 336.30" stroke-dashoffset="0"></circle>
+                    <circle class="seg s3" cx="80" cy="80" r="62" stroke-dasharray="164.34 225.22" stroke-dashoffset="-53.26"></circle>
+                    <circle class="seg s2" cx="80" cy="80" r="62" stroke-dasharray="36.52 353.04" stroke-dashoffset="-217.60"></circle>
+                    <circle class="seg s1" cx="80" cy="80" r="62" stroke-dasharray="135.43 254.13" stroke-dashoffset="-254.12"></circle>
+                  </g>
+                  <text class="ct" x="80" y="78" text-anchor="middle">256</text>
+                  <text class="cl" x="80" y="92" text-anchor="middle">五态之和</text>
+                </svg>
+                <div class="of-legend">
+                  <div class="of-leg"><span class="sw" style="background:#8e8e8e"></span><span class="nm">待发货 <span class="warnmark">⚠</span></span><span class="vv"><b>89</b> · 34.8%</span></div>
+                  <div class="of-leg"><span class="sw" style="background:#5c5c5c"></span><span class="nm">待收货 <span class="warnmark">⚠</span></span><span class="vv"><b>24</b> · 9.4%</span></div>
+                  <div class="of-leg"><span class="sw" style="background:#b9b9b9"></span><span class="nm">已完成</span><span class="vv"><b>108</b> · 42.2%</span></div>
+                  <div class="of-leg"><span class="sw" style="background:#dcdcdc"></span><span class="nm">已取消</span><span class="vv"><b>35</b> · 13.7%</span></div>
+                  <div class="of-leg"><span class="sw" style="background:#fff"></span><span class="nm">待付款</span><span class="vv"><b>0</b> · 0%</span></div>
+                </div>
               </div>
             </div>
 
-            <div class="of-step">
-              <div class="of-rail"><span class="of-dot"></span></div>
-              <div class="of-step-body">
-                <div class="of-step-head"><span class="of-stage">支付</span><span class="of-count">221</span></div>
-                <div class="of-track"><span style="width:86.3%"></span></div>
-                <div class="of-step-meta"><span>上一段转化 <b>86.3%</b></span><span>相对创建 86.3%</span><span class="of-dur">均耗 28 分</span></div>
+            <div class="of-stream-wrap">
+              <div class="h2"><b>SSE 实时流轨</b><span class="n">本拍 0 · 窗口 20 单（待发货 19 / 已取消 1）</span></div>
+              <div class="of-ticker">
+                <span class="of-chip">已连接</span>
+                <span>流入 0 · 流出 0</span>
+                <span style="margin-left:auto">历史样例：<code style="font-family:var(--mono);color:var(--t)">CREATED→PAID</code> 10-16 17:53</span>
               </div>
-            </div>
-
-            <div class="of-step">
-              <div class="of-rail"><span class="of-dot"></span></div>
-              <div class="of-step-body">
-                <div class="of-step-head"><span class="of-stage">发货</span><span class="of-count">132</span></div>
-                <div class="of-track"><span style="width:51.6%"></span></div>
-                <div class="of-step-meta"><span>上一段转化 <b>59.7%</b></span><span>相对创建 51.6%</span><span class="of-dur">均耗 18 小时 53 分</span></div>
+              <div class="of-slot">本拍流入 <b>0</b> · 新事件插入位（按 from→to 落到对应节点）</div>
+              <div class="of-stream" aria-label="实时流轨">
+                <div class="of-stream-row">
+                  <svg class="of-mini" viewBox="0 0 84 12"><line x1="3" y1="6" x2="81" y2="6"></line><rect class="on" x="0" y="3" width="6" height="6"></rect><rect class="on" x="26" y="3" width="6" height="6"></rect><rect x="52" y="3" width="6" height="6"></rect><rect class="next" x="78" y="3" width="6" height="6"></rect></svg>
+                  <span class="of-oid">B7CAP-sgu0g-r9-9<em>B7CAP-PI · 1d9h</em></span><span class="of-hop">→ 待收货</span>
+                </div>
+                <div class="of-stream-row">
+                  <svg class="of-mini" viewBox="0 0 84 12"><line x1="3" y1="6" x2="81" y2="6"></line><rect class="on" x="0" y="3" width="6" height="6"></rect><rect class="on" x="26" y="3" width="6" height="6"></rect><rect x="52" y="3" width="6" height="6"></rect><rect class="next" x="78" y="3" width="6" height="6"></rect></svg>
+                  <span class="of-oid">B7CAP-sgu0g-r9-8<em>B7CAP-PI · 1d9h</em></span><span class="of-hop">→ 待收货</span>
+                </div>
+                <div class="of-stream-row">
+                  <svg class="of-mini" viewBox="0 0 84 12"><line x1="3" y1="6" x2="81" y2="6"></line><rect class="on" x="0" y="3" width="6" height="6"></rect><rect class="on" x="26" y="3" width="6" height="6"></rect><rect x="52" y="3" width="6" height="6"></rect><rect class="next" x="78" y="3" width="6" height="6"></rect></svg>
+                  <span class="of-oid">B7CAP-sgu0g-r9-7<em>B7CAP-PI · 1d9h</em></span><span class="of-hop">→ 待收货</span>
+                </div>
+                <div class="of-stream-row">
+                  <svg class="of-mini" viewBox="0 0 84 12"><line x1="3" y1="6" x2="81" y2="6"></line><rect class="on" x="0" y="3" width="6" height="6"></rect><rect class="on" x="26" y="3" width="6" height="6"></rect><rect x="52" y="3" width="6" height="6"></rect><rect class="next" x="78" y="3" width="6" height="6"></rect></svg>
+                  <span class="of-oid">B7CAP-sgu0g-r9-6<em>B7CAP-PI · 1d9h</em></span><span class="of-hop">→ 待收货</span>
+                </div>
+                <div class="of-stream-row">
+                  <svg class="of-mini" viewBox="0 0 84 12"><line x1="3" y1="6" x2="81" y2="6"></line><rect class="on" x="0" y="3" width="6" height="6"></rect><rect class="on" x="26" y="3" width="6" height="6"></rect><rect x="52" y="3" width="6" height="6"></rect><rect class="next" x="78" y="3" width="6" height="6"></rect></svg>
+                  <span class="of-oid">B7CAP-sgu0g-r9-5<em>B7CAP-PI · 1d9h</em></span><span class="of-hop">→ 待收货</span>
+                </div>
+                <div class="of-stream-row">
+                  <svg class="of-mini" viewBox="0 0 84 12"><line x1="3" y1="6" x2="81" y2="6"></line><rect class="on" x="0" y="3" width="6" height="6"></rect><rect class="on" x="26" y="3" width="6" height="6"></rect><rect x="52" y="3" width="6" height="6"></rect><rect class="next" x="78" y="3" width="6" height="6"></rect></svg>
+                  <span class="of-oid">B7CAP-sgu0g-r9-4<em>B7CAP-PI · 1d9h</em></span><span class="of-hop">→ 待收货</span>
+                </div>
+                <div class="of-stream-row">
+                  <svg class="of-mini" viewBox="0 0 84 12"><line x1="3" y1="6" x2="81" y2="6"></line><rect class="on" x="0" y="3" width="6" height="6"></rect><rect class="on" x="26" y="3" width="6" height="6"></rect><rect x="52" y="3" width="6" height="6"></rect><rect class="next" x="78" y="3" width="6" height="6"></rect></svg>
+                  <span class="of-oid">B7CAP-sgu0g-r9-3<em>B7CAP-PI · 1d9h</em></span><span class="of-hop">→ 待收货</span>
+                </div>
+                <div class="of-stream-row">
+                  <svg class="of-mini" viewBox="0 0 84 12"><line x1="3" y1="6" x2="81" y2="6"></line><rect class="on" x="0" y="3" width="6" height="6"></rect><rect class="on" x="26" y="3" width="6" height="6"></rect><rect x="52" y="3" width="6" height="6"></rect><rect class="next" x="78" y="3" width="6" height="6"></rect></svg>
+                  <span class="of-oid">B7CAP-sgu0g-r9-2<em>B7CAP-PI · 1d9h</em></span><span class="of-hop">→ 待收货</span>
+                </div>
+                <div class="of-stream-row">
+                  <svg class="of-mini" viewBox="0 0 84 12"><line x1="3" y1="6" x2="81" y2="6"></line><rect class="on" x="0" y="3" width="6" height="6"></rect><rect class="on" x="26" y="3" width="6" height="6"></rect><rect x="52" y="3" width="6" height="6"></rect><rect class="next" x="78" y="3" width="6" height="6"></rect></svg>
+                  <span class="of-oid">B7CAP-sgu0g-r9-1<em>B7CAP-PI · 1d9h</em></span><span class="of-hop">→ 待收货</span>
+                </div>
+                <div class="of-stream-row">
+                  <svg class="of-mini" viewBox="0 0 84 12"><line x1="3" y1="6" x2="81" y2="6"></line><rect class="x" x="0" y="3" width="6" height="6"></rect><rect class="x" x="26" y="3" width="6" height="6"></rect><rect class="x" x="52" y="3" width="6" height="6"></rect><rect class="x" x="78" y="3" width="6" height="6"></rect></svg>
+                  <span class="of-oid">PROBE3A3B-20261017-01<em>probe · 1d1h · 支线</em></span><span class="of-hop">终态</span>
+                </div>
               </div>
-            </div>
-
-            <div class="of-step">
-              <div class="of-rail"><span class="of-dot"></span></div>
-              <div class="of-step-body">
-                <div class="of-step-head"><span class="of-stage">收货</span><span class="of-count">108</span></div>
-                <div class="of-track"><span style="width:42.2%"></span></div>
-                <div class="of-step-meta"><span>上一段转化 <b>81.8%</b></span><span>相对创建 42.2%</span><span class="of-dur">均耗 60 小时 35 分</span></div>
-              </div>
+              <p class="cnote" style="padding:6px 9px;margin:0">轨道点 = 当前节点；虚线方块 = 下一跳；`→` 是待流转方向，不是已发生事件。本窗被压测单占满，页面不隐藏。</p>
             </div>
           </div>
+        </div>
+      </section>
 
-          <div class="of-chain-foot">
-            <span>全链路均耗</span><b>79 小时 57 分</b>
-            <span>（n=102，仅用时间戳齐全的已完成单）</span>
-          </div>
-
-          <!-- 取消：一行总账，默认收起 -->
-          <details class="of-fold">
-            <summary><b>已取消 35</b><span class="of-meta">13.7% · 默认收起</span></summary>
-            <div class="of-fold-line">
-              取消是旁路终态，不进入主链阶梯。按阶段归因取不到：35 张取消单 PaidAt 全空、其中 13 张 ShippedAt 非空（时间戳口径不一致）⇒ 这里只给总账。
-            </div>
-          </details>
+      <!-- ③ 耗时分布（横向桶） + 超时积压（两条全宽预警带） -->
+      <section class="of-block" aria-label="耗时分布与超时积压">
+        <div class="h2">
+          <b>耗时分布 × 超时积压</b>
+          <span class="n">上：横轴 = 计数、纵轴 = 时间桶（横向分布，与左梯的纵向流向成轴向对比）· 下：两条全宽预警带 · 桶是结构，不是颜色装饰</span>
         </div>
 
-        <!-- 右：辅助环图 + 实时流 -->
-        <aside class="of-right" aria-label="辅助列">
-          <div class="h2 first">
-            <b>五态占比</b>
-            <span class="n">辅助图 · 同一口径 counts</span>
+        <div class="of-hist3">
+          <div class="of-hist-grp">
+            <div class="of-hist-h"><b>付款</b><span>CreateTime → PaidAt · n=215</span></div>
+            <div class="of-hrow"><span>0-5m</span><i style="width:100%"></i><em>78</em></div>
+            <div class="of-hrow"><span>5-15m</span><i style="width:19.2%"></i><em>15</em></div>
+            <div class="of-hrow"><span>15-60m</span><i style="width:98.7%"></i><em>77</em></div>
+            <div class="of-hrow"><span>1-6h</span><i style="width:57.7%"></i><em>45</em></div>
+            <div class="of-hrow"><span>6-24h</span><i style="width:2px"></i><em>0</em></div>
+            <div class="of-hrow"><span>24h+</span><i style="width:2px"></i><em>0</em></div>
+            <div class="of-hist-foot">组内归一 · 最大桶 78</div>
           </div>
 
-          <div class="of-ring">
-            <svg class="of-ring-svg" viewBox="0 0 200 200" role="img"
-                 aria-label="五态占比环图：待付款 0，待发货 89（34.8%），待收货 24（9.4%），已完成 108（42.2%），已取消 35（13.7%）。">
-              <g transform="rotate(-90 100 100)" fill="none" stroke-width="22">
-                <circle cx="100" cy="100" r="62" stroke="#ececec"></circle>
-                <circle cx="100" cy="100" r="62" stroke="#6f6f6f" stroke-dasharray="135.43 254.13" stroke-dashoffset="0"></circle>
-                <circle cx="100" cy="100" r="62" stroke="#9a9a9a" stroke-dasharray="36.52 353.04" stroke-dashoffset="-135.43"></circle>
-                <circle cx="100" cy="100" r="62" stroke="#c2c2c2" stroke-dasharray="164.34 225.22" stroke-dashoffset="-171.95"></circle>
-                <circle cx="100" cy="100" r="62" stroke="#dedede" stroke-dasharray="53.26 336.30" stroke-dashoffset="-336.29"></circle>
-              </g>
-              <text class="of-ring-v" x="100" y="96" text-anchor="middle">256</text>
-              <text class="of-ring-k" x="100" y="116" text-anchor="middle">订单总数</text>
-            </svg>
-
-            <ul class="of-legend">
-              <li><i class="zero"></i><span>待付款</span><span class="cnt">0</span><span class="pct">0.0%</span></li>
-              <li><i style="background:#6f6f6f"></i><span>待发货</span><span class="cnt">89</span><span class="pct">34.8%</span></li>
-              <li><i style="background:#9a9a9a"></i><span>待收货</span><span class="cnt">24</span><span class="pct">9.4%</span></li>
-              <li><i style="background:#c2c2c2"></i><span>已完成</span><span class="cnt">108</span><span class="pct">42.2%</span></li>
-              <li><i style="background:#dedede"></i><span>已取消</span><span class="cnt">35</span><span class="pct">13.7%</span></li>
-            </ul>
+          <div class="of-hist-grp">
+            <div class="of-hist-h"><b>发货</b><span>PaidAt → ShippedAt · n=126</span></div>
+            <div class="of-hrow"><span>0-1h</span><i style="width:2px"></i><em>0</em></div>
+            <div class="of-hrow"><span>1-6h</span><i style="width:30%"></i><em>18</em></div>
+            <div class="of-hrow"><span>6-24h</span><i style="width:100%"></i><em>60</em></div>
+            <div class="of-hrow"><span>1-3d</span><i style="width:80%"></i><em>48</em></div>
+            <div class="of-hrow"><span>3-7d</span><i style="width:2px"></i><em>0</em></div>
+            <div class="of-hrow"><span>7d+</span><i style="width:2px"></i><em>0</em></div>
+            <div class="of-hist-foot">组内归一 · 最大桶 60；13 张取消单无 PaidAt，未入样</div>
           </div>
 
-          <div class="of-block" aria-label="实时订单流">
-            <div class="h2">
-              <b>实时订单流</b>
-              <span class="n">最近 20 单 · 框内滚动 · 本拍流转 0</span>
+          <div class="of-hist-grp">
+            <div class="of-hist-h"><b>收货</b><span>ShippedAt → ReceivedAt · n=102</span></div>
+            <div class="of-hrow"><span>0-6h</span><i style="width:2px"></i><em>0</em></div>
+            <div class="of-hrow"><span>6-24h</span><i style="width:38.6%"></i><em>17</em></div>
+            <div class="of-hrow"><span>1-3d</span><i style="width:100%"></i><em>44</em></div>
+            <div class="of-hrow"><span>3-7d</span><i style="width:93.2%"></i><em>41</em></div>
+            <div class="of-hrow"><span>7d+</span><i style="width:2px"></i><em>0</em></div>
+            <div class="of-hist-foot">组内归一 · 最大桶 44；无 6h 内样本</div>
+          </div>
+        </div>
+
+        <div class="of-warnstrip">
+          <div class="of-warnrow">
+            <div class="of-warnhead"><b>待发货</b><span class="n">89</span><span class="k">超 24h 未发 · 100%</span></div>
+            <div class="of-warnage">
+              <div class="of-age-row"><span>1–3d</span><i style="width:100%"></i><em>65</em></div>
+              <div class="of-age-row"><span>3–7d</span><i style="width:9.2%"></i><em>6</em></div>
+              <div class="of-age-row"><span>7–14d</span><i style="width:4.6%"></i><em>3</em></div>
+              <div class="of-age-row"><span>14–30d</span><i style="width:3.1%"></i><em>2</em></div>
+              <div class="of-age-row"><span>30d+</span><i style="width:20%"></i><em>13</em></div>
             </div>
-            <ol class="of-stream">
-              <li class="of-stream-row">
-                <span class="of-prog"><i></i><i></i><i></i><i></i><b>已取消</b></span>
-                <span class="of-oid">PROBE3A3B-20261017-01<em>probe</em></span>
-                <span class="of-amt">¥1.00</span>
-              </li>
-              <li class="of-stream-row">
-                <span class="of-prog"><i class="on"></i><i class="on"></i><i></i><i></i><b>待发货</b></span>
-                <span class="of-oid">STLL57875548<em>oppo12:asdsad</em></span>
-                <span class="of-amt">¥1888.00</span>
-              </li>
-              <li class="of-stream-row">
-                <span class="of-prog"><i class="on"></i><i class="on"></i><i></i><i></i><b>待发货</b></span>
-                <span class="of-oid">ULQZ69803866<em>智能手环 5 代 血氧版:GD-107-0959</em></span>
-                <span class="of-amt">¥249.00</span>
-              </li>
-              <li class="of-stream-row">
-                <span class="of-prog"><i class="on"></i><i class="on"></i><i></i><i></i><b>待发货</b></span>
-                <span class="of-oid">EJTW166070062935<em>智能手环 5 代 血氧版:GD-107-0959</em></span>
-                <span class="of-amt">¥219.00</span>
-              </li>
-              <li class="of-stream-row">
-                <span class="of-prog"><i class="on"></i><i class="on"></i><i></i><i></i><b>待发货</b></span>
-                <span class="of-oid">LATH16195115<em>oppo12:asdsad；oppo12:sad</em></span>
-                <span class="of-amt">¥3776.00</span>
-              </li>
-              <li class="of-stream-row">
-                <span class="of-prog"><i class="on"></i><i class="on"></i><i></i><i></i><b>待发货</b></span>
-                <span class="of-oid">OPDL69977898<em>静音无线鼠标 双模:GD-109-4C80</em></span>
-                <span class="of-amt">¥178.00</span>
-              </li>
-              <li class="of-stream-row">
-                <span class="of-prog"><i class="on"></i><i class="on"></i><i></i><i></i><b>待发货</b></span>
-                <span class="of-oid">XPEM63624472<em>加厚收纳箱 60L 两件套:GD-216-221</em></span>
-                <span class="of-amt">¥178.00</span>
-              </li>
-              <li class="of-stream-row">
-                <span class="of-prog"><i class="on"></i><i class="on"></i><i class="on"></i><i></i><b>待收货</b></span>
-                <span class="of-oid">ZKTO71032739<em>潮汕手打牛肉丸 500g:GD-436-D2B0</em></span>
-                <span class="of-amt">¥90.00</span>
-              </li>
-              <li class="of-stream-row">
-                <span class="of-prog"><i class="on"></i><i class="on"></i><i class="on"></i><i></i><b>待收货</b></span>
-                <span class="of-oid">AFCT73104679<em>羊毛混纺围巾 格纹:GD-325-F89E</em></span>
-                <span class="of-amt">¥149.00</span>
-              </li>
-              <li class="of-stream-row">
-                <span class="of-prog"><i class="on"></i><i class="on"></i><i></i><i></i><b>待发货</b></span>
-                <span class="of-oid">B7CAP-sgu0g-r9-9<em>B7CAP-PI</em></span>
-                <span class="of-amt">¥1.50</span>
-              </li>
-            </ol>
-            <p class="cnote">新帧到达后整行替换；滚动只发生在这个框内，页高不变。取消单不点亮任何进度节点（step = 0）。</p>
+            <div class="of-warntop">
+              <div class="th">停留最久 Top 3（点行 = 抽屉）</div>
+              <div class="tr"><span class="rk">1</span><span class="oid">GOWW80602762</span><span class="age">53.0d</span><span class="prod">山核桃仁 罐装 260g:GD-434-4D09</span></div>
+              <div class="tr"><span class="rk">2</span><span class="oid">JXZQ66006744</span><span class="age">52.3d</span><span class="prod">新疆和田枣 特级 1kg:GD-431-7BA7</span></div>
+              <div class="tr"><span class="rk">3</span><span class="oid">GXLT17964511</span><span class="age">47.9d</span><span class="prod">可调节哑铃 20kg 一对:GD-538-380F</span></div>
+            </div>
+            <span class="of-open">打开 89 单 →</span>
           </div>
-        </aside>
 
+          <div class="of-warnrow">
+            <div class="of-warnhead"><b>待收货</b><span class="n">24</span><span class="k">超 48h 未收 · 100%</span></div>
+            <div class="of-warnage">
+              <div class="of-age-row"><span>7–14d</span><i style="width:77.8%"></i><em>7</em></div>
+              <div class="of-age-row"><span>14–30d</span><i style="width:100%"></i><em>9</em></div>
+              <div class="of-age-row"><span>30d+</span><i style="width:88.9%"></i><em>8</em></div>
+            </div>
+            <div class="of-warntop">
+              <div class="th">停留最久 Top 3（点行 = 抽屉）</div>
+              <div class="tr"><span class="rk">1</span><span class="oid">ILMH17697325</span><span class="age">50.8d</span><span class="prod">云感记忆枕 护颈款:GD-220-2681</span></div>
+              <div class="tr"><span class="rk">2</span><span class="oid">BNGK37272921</span><span class="age">49.3d</span><span class="prod">折叠登山杖 两支装:GD-542-9A2A</span></div>
+              <div class="tr"><span class="rk">3</span><span class="oid">AEZK50252960</span><span class="age">43.8d</span><span class="prod">潮汕手打牛肉丸 500g:GD-436-D2B0</span></div>
+            </div>
+            <span class="of-open">打开 24 单 →</span>
+          </div>
+        </div>
+      </section>
+
+      <!-- ④ 链路抽屉（打开态） -->
+      <section class="of-block" aria-label="链路抽屉">
+        <div class="h2">
+          <b>链路抽屉 · 待发货（89）</b>
+          <span class="n">从右滑入、覆盖右栏；草图就地展开 · 默认 sort=age_desc + 仅超时 · 积压列表 / 横向时间轴 / 原始事件带</span>
+        </div>
+
+        <div class="of-drawer">
+          <div class="of-drawer-bar">
+            <span class="of-grip"></span>
+            <b>链路抽屉</b>
+            <span style="color:var(--tm)">待发货 · 89 单积压 · 最老 53.0 天</span>
+            <span class="of-tabs"><span class="on">积压订单 89</span><span>时间轴</span><span>原始事件</span></span>
+            <span class="of-close">×</span>
+          </div>
+
+          <div class="of-sort">
+            <span>排序：<b>停留时长倒序 ▼</b></span>
+            <span class="chip">仅超时 89</span>
+            <span>Top 5 / 89</span>
+            <span style="margin-left:auto">入口带参：<b>状态=待发货 · sort=age_desc</b></span>
+          </div>
+
+          <div class="of-drawer-body">
+            <div class="of-pane">
+              <div class="of-pane-h">积压订单 · 最慢 Top 5（按停留时长倒序）</div>
+              <div class="of-backlog-row"><span class="rk">1</span><span class="oid">GOWW80602762</span><span class="age">53.0d</span><span class="prod">山核桃仁 罐装 260g:GD-434-4D09</span></div>
+              <div class="of-backlog-row"><span class="rk">2</span><span class="oid">JXZQ66006744</span><span class="age">52.3d</span><span class="prod">新疆和田枣 特级 1kg:GD-431-7BA7</span></div>
+              <div class="of-backlog-row"><span class="rk">3</span><span class="oid">GXLT17964511</span><span class="age">47.9d</span><span class="prod">可调节哑铃 20kg 一对:GD-538-380F</span></div>
+              <div class="of-backlog-row"><span class="rk">4</span><span class="oid">XAXF96068145</span><span class="age">44.8d</span><span class="prod">可调节哑铃 20kg 一对 + 护膝:GD-538/5…</span></div>
+              <div class="of-backlog-row"><span class="rk">5</span><span class="oid">ZCMD90996965</span><span class="age">40.1d</span><span class="prod">香薰蜡烛 雪松木质调:GD-215-3F6B</span></div>
+              <p class="cnote">列表在抽屉内滚动，首批 20 条；点行 → 右侧时间轴切到该单。</p>
+            </div>
+
+            <div class="of-pane">
+              <div class="of-pane-h">时间轴 · GOWW80602762（选中行）</div>
+              <div class="of-timeline">
+                <div class="of-tstep"><span class="dot"></span><span class="nm">创建</span><span class="at">08-25 18:34</span><span class="dt">起点</span></div>
+                <div class="of-tstep"><span class="dot"></span><span class="nm">支付</span><span class="at">08-25 18:55</span><span class="dt">+20m28s</span></div>
+                <div class="of-tstep pending"><span class="dot"></span><span class="nm">发货</span><span class="at">未发生</span><span class="dt">已等 53d0h</span></div>
+                <div class="of-tstep pending"><span class="dot"></span><span class="nm">收货</span><span class="at">未发生</span><span class="dt">依赖发货</span></div>
+              </div>
+              <p class="cnote">只读 PaidAt / ShippedAt / ReceivedAt / CancelledAt；缺失环节显示为虚线待办，不补时间。</p>
+            </div>
+
+            <div class="of-raw">
+              <b>原始事件 · observed_event</b>
+              <span>0 条 · 该单早于观测上线，回放不可用</span>
+              <span>字段：<code>traceId / seq / action / from / to / result / occurredAt</code></span>
+              <span style="margin-left:auto">新单应有 CREATED → PAID → SHIPPED → RECEIVED；结构占位，不自造记录</span>
+            </div>
+          </div>
+        </div>
       </section>
 
       <div class="foot-note">
-        <b>本版结构主张</b>：8/4 非对称 —— 左边一条纵向阶梯把「量、转化、耗时」压在同一列节奏上；右边只留辅助环图 + 滚动流，
-        不再让图表与主链抢宽度。<br>
-        <b>代价</b>：右栏较窄，订单流只能两行一行（单号/商品 + 金额）；环图在取消极端占比时会接近满环 —— 因此它被降为辅助图，数量与占比在图例里逐行兜底。<br>
-        <b>不画的东西</b>：品牌色、字号档、圆角、阴影、动效；这些留到选定方案后的主题落地。
+        <b>本版结构主张（LAYOUT 布局）</b>：不改「总账 + 流」的阅读顺序，改的是组织方式——左 8 栏把状态机立起来（纵向桑基带 + 积压横条 + 预警），
+        右 4 栏放辅图与实时流轨；耗时分布横向铺在下方，与纵向阶梯形成轴向对比；链路抽屉从右侧展开，7/5 两栏 + 全宽原始事件带。<br>
+        <b>业务灵魂落点</b>：状态机与节点预警在 ② 左；SSE 流轨在 ② 右；耗时直方图在 ③ 上；超时积压与 Top 3 在 ③ 下；下钻抽屉在 ④。<br>
+        <b>代价</b>：右栏窄，实时流每行只能显示「轨道点 + 单号 + 下一跳」，商品名与金额降级；抽屉覆盖右栏后，流轨暂时不可见。
       </div>
 
     </div></div></div>
@@ -337,33 +540,53 @@
 </div>
 
 <details class="wire-foot">
-  <summary>结构判据与实测（点开看 · 判据本体也在交付报告里）</summary>
+  <summary>结构判据与实测（点开看 · 业务灵魂落点 + taste-skill 四条命中台账）</summary>
   <div class="body judge">
-    <b>结构判据（本页不是设计稿，是拿来比构图的）</b>
+    <b>一、业务灵魂放在哪里了</b>
     <ul>
-      <li><b>C1 相邻区块不同构</b>：① 读数带（三组横排）／② 左主链（纵向 4 级阶梯：名称+数 / 条 / 转化+耗时）／③ 左取消总账（单行 details）／④ 右辅助图（环 + 图例列）／⑤ 右实时流（单列滚动行）。4 对相邻，没有两块共用同一套直接子元素结构；左右两栏本身就是不同构的两块。</li>
-      <li><b>C2 不是卡片网格</b>：全页 0 个等宽等高卡片。五态不是 5 张 KPI 卡，而是右栏 5 行图例 + 环图；主链也不是卡片，是一条连续的纵向轨道。</li>
-      <li><b>C3 区块间距 &gt; 内部间距</b>：左右栏间距与区块之间 28px（<span style="font-family:var(--mono)">--gap-block</span>），块内 12px（<span style="font-family:var(--mono)">--gap-in</span>）；阶梯每级内 12px，行内边距 12px。</li>
-      <li><b>C4 一套网格与边距</b>：主区 padding 32px、12 栏栅格；本页的分割就是 8/4（2:1），块间距 28、内距 12，与甲版同一把尺。</li>
-      <li><b>大胆装置</b>：不对称分割本身是主结构 —— 左 8 栏一条连续阶梯（条长编码量、右列编码转化与耗时），右 4 栏把环图降级为辅助；主链不再与图表共用一张卡网格。</li>
-      <li><b>取消压力态（结构检查）</b>：取消 99.6% 时，环图会接近一整圈 —— 这正是把环图降到辅助图的原因；主链仍按「到达量」逐级缩短，阶梯的 4 级与数字不会消失。是否把取消从环里拆成独立读数，留给主题阶段裁定。</li>
+      <li><b>状态机（② 左）</b>：纵向桑基带编码累计到达（256 → 221 → 132 → 108），右侧横条编码当前积压（0 / 89 / 24 / 108），取消 35 作为唯一支线从支付段剥离。节点名后的「↘」是抽屉入口。</li>
+      <li><b>超时预警（② 左 + ③ 下）</b>：每个节点下常驻预警条；待发货 89 单全部超 24h（&gt;7d 18、30d+ 13），待收货 24 单全部超 48h（且全部 &gt;7d、&gt;14d 17）；待付款阈值 60s，当前 0；完成/取消为终态。</li>
+      <li><b>耗时直方图（③ 上）</b>：三组横向桶，横轴 = 计数、纵轴 = 时间桶；付款双峰 0–5m/15–60m（78/77），发货集中 6–24h/1–3d（60/48），收货集中 1–3d/3–7d（44/41）。与 ② 左的纵向流向形成轴向对比。</li>
+      <li><b>积压预警（③ 下）</b>：两条全宽预警带，不是卡片；每带 = 大数 + 阈值 + 账龄分桶 + 最慢 Top 3 + 打开入口。待发货 30d+ 有 13 单（比 3–30d 的 11 单还多）；待收货最年轻的一单也已 &gt;7d。</li>
+      <li><b>SSE 实时流（② 右）</b>：ticker + 插入位 + 10 行轨道；每行 = 四点轨道（当前节点实心、下一跳虚线框）+ 单号 + 「→ 下一跳」。本拍 moves=0，插入位明确写「流入 0」；历史样例标为回放源，不冒充实时。</li>
+      <li><b>下钻抽屉（④）</b>：从右滑入，覆盖右栏；默认 sort=age_desc + 仅超时；左 7 = 最慢 Top 5，右 5 = 横向时间轴，底部全宽 = 原始事件带（0 条与原因）。</li>
     </ul>
-    <b>数据与口径（2026-10-17 19:11 真库实测）</b>
+
+    <b>二、taste-skill 四条（逐条命中，不跑机器门禁）</b>
     <ul>
-      <li>总数 256；五态：待付款 0 / 待发货 89 / 待收货 24 / 已完成 108 / 已取消 35（与 <span style="font-family:var(--mono)">countOrderStates()</span> 同一条判据链）。</li>
-      <li>累计到达：创建 256 → 支付 221（86.3%）→ 发货 132（51.6%）→ 收货 108（42.2%）；相邻段转化 86.3% / 59.7% / 81.8%。</li>
-      <li>平均耗时（仅用时间戳齐全的样本）：付款 28.2 分（n=215）、发货 1133.3 分（n=139）、收货 3634.8 分（n=102）、全链路 4796.7 分（n=102）。</li>
-      <li><b>⚠️ 与需求原话的差异</b>：原话说「目前 99.6% 已取消」；本机此刻实测取消 35/256 = <b>13.7%</b>（live 探针与 SQL 两路一致）。可能是另一时刻/另一份数据的快照；本版按 99.6% 做了结构压力检查，不按 13.7% 调结构。</li>
-      <li><b>缺字段</b>：帧里没有转化率与平均耗时。转化率可由 <span style="font-family:var(--mono)">counts</span> 前端推导；平均耗时需后端在同一帧新增（PaidAt / ShippedAt / ReceivedAt 列已经存在，SQL 可聚合）。草图上的耗时是直接查库的实测值，落地前必须进帧。</li>
-      <li><b>取消归因不可得</b>：35 张取消单 PaidAt 全空、13 张 ShippedAt 非空，时间戳口径不一致 ⇒ 只给总账。</li>
-      <li>实时流样例来自真库：8 条历史订单 + 1 条 B7CAP 压测单 + 1 条 PROBE 单（最新且已取消，用来验证 step=0 的形态）。</li>
-      <li>本会话捕获流转 0：这一窗确实没有 transition 事件，不是断流。</li>
+      <li><b>1. 相邻区块不得共用布局</b>：① 读数带 = 三组横排；② 8/4 双栏（左纵向阶梯 + 右环/流）；③ 上部 3 栏横向直方图 + 下部 2 条全宽预警带；④ 7/5 抽屉 + 全宽原始事件带。3 对相邻，逐对形态不同。</li>
+      <li><b>2. 不是卡片网格</b>：全页 0 个等宽等高卡片（.kpi = 0）；阶梯是行、预警带是行、直方图是行，环图只有一个且是辅图；没有「三列图标卡」。</li>
+      <li><b>3. 区块间距 &gt; 内部间距</b>：区块之间 28px；块内 12px；阶梯行距 8–9px；流轨行距 6px。分组靠边框与留白层级，不靠卡片。</li>
+      <li><b>4. 一套统一的网格与边距</b>：主区 padding 32px、12 栏栅格；② 的 8/4 = 2fr/1fr + 28px gap；③ 的 3 栏与 ④ 的 7/5 都取同一 12px 内间距；无独立边距体系。</li>
     </ul>
-    <b>与当前页面的关系</b>
+
+    <b>三、stitch-design（只谈 layout / content / structure）</b>
     <ul>
-      <li>保留：环形图（缩小并降为右栏辅助）、五态计数（改成图例行）、实时订单列表（改成右栏滚动流）、数据源三档（正常 / 模拟日常 / 后端真流）、订单时间线抽屉入口。</li>
-      <li>移除：五张等宽 KPI 卡、环图与 KPI 卡并排的等高布局、列表的独立分页条（滚动流取代分页）。</li>
-      <li>新增（需后端补字段）：每段平均耗时；左右栏的 8/4 比例固定，不随数据变化。</li>
+      <li>无品牌色、圆角、阴影、过渡/动画；所有颜色只取灰阶变量。</li>
+      <li>版本维度：本页是 <b>LAYOUT 布局</b> —— 保留环图与「左主右辅」的阅读顺序，但把状态机立成纵向桑基带，把耗时分布改为横向桶，把抽屉改为右侧 7/5 展开。</li>
+      <li><b>直方图的桶是结构</b>：6/6/5 个桶的边界（0-5m、5-15m、15-60m、1-6h、6-24h、24h+ …）是后端口径，不是视觉分组；条的深浅不编码维度，只有长度编码计数。</li>
+    </ul>
+
+    <b>四、frontend-design：大胆装置与反 AI 感</b>
+    <ul>
+      <li><b>一处大胆结构</b>：左栏的纵向桑基带 + 积压阶梯。带宽编码累计到达、横条编码当前积压、预警条挂在每一级下方；同一个纵向轴把「漏斗」「库存」「预警」三种量串起来，替代「环图 + KPI 卡」。</li>
+      <li><b>轴向对比</b>：主视觉纵向（桑基带/阶梯），耗时分布横向（桶在纵轴、条在横轴），实时流是点状轨道；三种图不共用坐标系。</li>
+      <li><b>反 AI 感</b>：没有等宽卡片阵列、没有居中大标题 + 三列图标、没有圆角/阴影；右栏宽度只有左栏一半，信息密度按重要性分配，而不是平均分栏。</li>
+    </ul>
+
+    <b>五、数据与口径（2026-10-17 19:25 真库）</b>
+    <ul>
+      <li>总数 256；五态：待付款 0 / 待发货 89 / 待收货 24 / 已完成 108 / 已取消 35（与 countOrderStates() 同一条判据链）。</li>
+      <li>累计到达：创建 256 → 支付 221（86.3%）→ 发货 132（51.6%）→ 收货 108（42.2%）；段上转化 86.3% / 59.7% / 81.8%。</li>
+      <li><b>耗时直方图（实测）</b>：付款 78/15/77/45/0/0（n=215）；发货 0/18/60/48/0/0（n=126）；收货 0/17/44/41/0（n=102）。发货 n=126 而不是 139：13 张取消单有 ShippedAt 但 PaidAt 为空。</li>
+      <li><b>超时积压分桶（实测）</b>：待发货 89 = 65/6/3/2/13（1–3d / 3–7d / 7–14d / 14–30d / 30d+）；待收货 24 = 7/9/8（7–14d / 14–30d / 30d+）。</li>
+      <li>积压最老 5 单：GOWW80602762（53.0d）、JXZQ66006744（52.3d）、GXLT17964511（47.9d）、XAXF96068145（44.8d）、ZCMD90996965（40.1d）；待收货 Top 3：ILMH17697325（50.8d）、BNGK37272921（49.3d）、AEZK50252960（43.8d）。</li>
+      <li><b>时钟口径</b>：DB 会话为 UTC（SYSTEM），本地为 Asia/Shanghai；账龄与分桶按 NOW() + 8h 计算。不校正会少 8 小时，跨桶边界时静默挪桶。</li>
+      <li>平均耗时（仅时间戳齐全样本）：付款 28.2 分（n=215）、发货 1133.3 分（n=139，含 13 张无 PaidAt 的取消单，故与直方图 n=126 不同口径）、收货 3634.8 分（n=102）、全链路 4796.7 分（n=102）。</li>
+      <li>窗口 = 最近 20 单：待发货 19 / 已取消 1 / 其余 0；本拍 moves = 0，故流轨只显示当前位置与下一跳，不伪造流转。</li>
+      <li><b>⚠️ 与需求原话的差异</b>：原话称「99.6% 已取消」；本机此刻实测 35/256 = 13.7%（SQL 与 live 探针两路一致）。本版按 99.6% 做结构压力检查：取消在支线与环图的 13.7% 段，主线桑基带/阶梯/预警不依赖取消占比。</li>
+      <li><b>缺字段</b>：帧里没有转化率、均耗、直方图桶、账龄分桶、Top N；转化率可由 counts 推导，其余需后端补（时间戳已有，可聚合）。建议同帧新增每段 <code>bins</code>、每态 <code>aging</code>、<code>slowest</code>。</li>
+      <li><b>取消归因不可得</b>：35 张取消单 PaidAt 全空、13 张 ShippedAt 非空（时间戳口径不一致）⇒ 只画总账支线，不按阶段切分。</li>
     </ul>
   </div>
 </details>

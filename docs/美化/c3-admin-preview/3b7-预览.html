@@ -20,16 +20,16 @@ iframe { display: block; width: 100%; height: 980px; border: 0; background: #fff
 <body>
 
 <h1>3b.7 状态流转页 · 两版结构草图对照</h1>
-<p>两份都是纯 HTML 线框（灰阶、无品牌色/圆角/阴影/动效），数据为 2026-10-17 19:11 真库快照。选一版后，再谈主题与 Vue 落地。</p>
+<p>两份都是纯 HTML 线框（灰阶、无品牌色/圆角/阴影/动效），数据为 2026-10-17 19:25 真库快照。v2 增加：状态机积压气泡 + 超时预警、耗时分布直方图、超时积压 Top 3、链路抽屉（积压订单 + 时间轴 + 原始事件）、SSE 轨道流。选一版后，再谈主题与 Vue 落地。</p>
 
 <div class="cell">
-  <div class="hd"><b>甲 · 漏斗流转（REIMAGINE）</b><span>去掉环形图；主线 = 不对称漏斗/支线；转化率与耗时嵌在线上；取消折叠</span><a href="3b7-甲-漏斗流转.html" target="_blank">单独打开 ↗</a></div>
-  <iframe src="3b7-甲-漏斗流转.html" loading="lazy" title="甲 · 漏斗流转"></iframe>
+  <div class="hd"><b>甲 · 漏斗流转（REIMAGINE）</b><span>横向管道 + 积压气泡 + 预警牌；纵向耗时直方图；不等宽超时积压舱；5 栏 SSE 轨道；底部三栏抽屉</span><a href="3b7-甲-漏斗流转.html" target="_blank">单独打开 ↗</a></div>
+  <iframe src="3b7-甲-漏斗流转.html" loading="lazy" title="甲 · 漏斗流转" style="height:2000px"></iframe>
 </div>
 
 <div class="cell">
-  <div class="hd"><b>乙 · 非对称双栏（LAYOUT）</b><span>保留辅助环图；左 8 主链阶梯、右 4 五态占比 + 实时订单滚动流</span><a href="3b7-乙-非对称双栏.html" target="_blank">单独打开 ↗</a></div>
-  <iframe src="3b7-乙-非对称双栏.html" loading="lazy" title="乙 · 非对称双栏"></iframe>
+  <div class="hd"><b>乙 · 非对称双栏（LAYOUT）</b><span>左 8 = 纵向桑基带 + 积压阶梯 + 预警；右 4 = 环图 + SSE 轨道流；横向耗时直方图；全宽预警带；右侧 7/5 抽屉</span><a href="3b7-乙-非对称双栏.html" target="_blank">单独打开 ↗</a></div>
+  <iframe src="3b7-乙-非对称双栏.html" loading="lazy" title="乙 · 非对称双栏" style="height:2200px"></iframe>
 </div>
 
 </body>

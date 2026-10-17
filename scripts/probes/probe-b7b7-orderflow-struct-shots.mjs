@@ -116,8 +116,16 @@ for (const v of VARIANTS) {
         })()
       } : null,
       blockGap: secondBlock ? getComputedStyle(secondBlock).marginTop : null,
-      innerStepGap: document.querySelector('.of-step-body') ? getComputedStyle(document.querySelector('.of-step-body')).columnGap : null,
-      foldGap: document.querySelector('.of-fold-body') ? getComputedStyle(document.querySelector('.of-fold-body')).columnGap : null,
+      innerStepGap: document.querySelector('.of-step-main') ? getComputedStyle(document.querySelector('.of-step-main')).columnGap : null,
+      headGap: document.querySelector('.of-head') ? getComputedStyle(document.querySelector('.of-head')).columnGap : null,
+      histBars: document.querySelectorAll('.of-hbar').length,
+      histRows: document.querySelectorAll('.of-hrow').length,
+      warnBays: document.querySelectorAll('.of-bay').length,
+      warnRows: document.querySelectorAll('.of-warnrow').length,
+      drawer: !!document.querySelector('.of-drawer'),
+      sort: !!document.querySelector('.of-sort'),
+      backlogRows: document.querySelectorAll('.of-backlog-row').length,
+      timelineSteps: document.querySelectorAll('.of-tstep').length,
       topSigs: topSigs,
       leftInner: inner('.of-left'),
       rightInner: inner('.of-right'),
@@ -138,19 +146,27 @@ for (const v of VARIANTS) {
   ok('C2 无等宽等高卡片（.kpi = 0，.box = 0）', st.kpi === 0 && st.boxes === 0, 'kpi=' + st.kpi + ' box=' + st.boxes)
   ok('C3 区块间距 > 块内间距（28 vs 12）', parseFloat(st.blockGap) === 28 &&
     (!st.innerStepGap || parseFloat(st.innerStepGap) === 12) &&
-    (!st.foldGap || parseFloat(st.foldGap) === 12),
-    'block=' + st.blockGap + ' step=' + st.innerStepGap + ' fold=' + st.foldGap)
+    (!st.headGap || parseFloat(st.headGap) === 12),
+    'block=' + st.blockGap + ' step=' + st.innerStepGap + ' head=' + st.headGap)
   const expectW = st.clientW - st.sideW - st.mainPadL * 2
   ok('C4 主区宽 == clientW − 侧栏 − 2×padding', Math.abs(st.contentW - expectW) <= 1, st.contentW + ' vs ' + expectW)
   ok('无横向溢出', st.scrollW <= st.clientW, 'scrollW=' + st.scrollW + ' clientW=' + st.clientW)
 
   if (v.kind === 'jia') {
     ok('主装置 SVG 已画出且尺寸非零', !!st.device && st.device.w > 800 && st.device.h > 200, st.device)
+    ok('耗时直方图：3 组共 17 个桶', st.histBars === 17, 'bars=' + st.histBars)
+    ok('超时积压：2 个不等宽预警舱', st.warnBays === 2, 'bays=' + st.warnBays)
+    ok('抽屉：打开态 + sort 条 + Top 5 行', st.drawer && st.sort && st.backlogRows === 5,
+      'drawer=' + st.drawer + ' sort=' + st.sort + ' rows=' + st.backlogRows)
   } else {
     ok('8/4 非对称分割（左/右 ≈ 2，gap 28）', !!st.split && st.split.ratio.gap === '28px' &&
       Math.abs(st.split.ratio.left / st.split.ratio.right - 2) < 0.08, st.split && st.split.ratio)
     ok('实时流是内部滚动（overflow auto 且内容多于一屏）', !!st.stream && st.stream.overflow === 'auto' &&
       st.stream.rows >= 8, st.stream)
+    ok('耗时直方图：3 组共 17 个横向桶', st.histRows === 17, 'rows=' + st.histRows)
+    ok('超时积压：2 条全宽预警带', st.warnRows === 2, 'rows=' + st.warnRows)
+    ok('抽屉：打开态 + sort 条 + 4 步时间轴', st.drawer && st.sort && st.timelineSteps === 4,
+      'drawer=' + st.drawer + ' sort=' + st.sort + ' steps=' + st.timelineSteps)
   }
 
   /* C1：相邻区块直接子元素指纹两两不同 */
