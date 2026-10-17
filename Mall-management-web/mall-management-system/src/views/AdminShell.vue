@@ -67,7 +67,7 @@
      两处旧名**已废**，别再改回去。
 -->
 <script setup>
-import { computed } from 'vue'
+import { computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ADMIN_SIDEBAR } from '../config/admin-nav'
 import { getUsername, getRole, clearCredentials, clearToken } from '../api/auth'
@@ -113,6 +113,16 @@ const exit = () => {
   router.push('/login')
   http.post(endpoints.user.logout, null, { allowUnauthorized: true }).catch(() => {}).finally(() => clearToken())
 }
+
+// 预取：管理端首屏之后，空闲时先把「实时日志」页的模块**求值**掉。
+// ⚠️ 只求值、不渲染：路由仍然懒加载。省掉的是首航日志页那一下 EvaluateScript ——
+//    2026-10-17 实测：切到日志页的 130ms Long Task 里约 46ms 是它（chunk 求值），
+//    剩下的大头是首帧 Layout。求值摊到空闲帧后，切页那一下不再背这笔。
+// ⚠️ 用 `requestIdleCallback`：不能把它塞进首屏那一帧；没有这个 API 的浏览器退化为 1.5s 后。
+onMounted(() => {
+  const idle = window.requestIdleCallback || ((fn) => setTimeout(fn, 1500))
+  idle(() => { import('./admin/observe/EventLog.vue') })
+})
 </script>
 
 <style scoped>

@@ -301,7 +301,7 @@
 
 <script setup>
 /* eslint-disable no-undef */ /* 理由见 `BaseChart.vue` 同款注释（eslint-plugin-vue 8.7.1 缺宏环境） */
-import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
+import { computed, onActivated, onBeforeUnmount, onDeactivated, onMounted, reactive, ref, watch } from 'vue'
 import {
   AlertCircle, AlertOctagon, AlertTriangle, Bell, Clipboard, Database,
   Droplets, Info, Lock, Package, Server, Shield, ShieldCheck, ShoppingCart,
@@ -367,6 +367,8 @@ const errMsg = ref('')
 const lost = ref(null)
 const latest = ref(null)              // 最近一帧的非数字派生量（health / protections / stock）
 const rows = ref([])                  // 滚动窗口：每拍一条
+/** KeepAlive 是否在屏上：失活时**只收数据、不画**（ECharts / KPI 补间全部暂停）。 */
+const pageActive = ref(true)
 const stockQuery = ref('')
 const stockFilter = ref('all')
 
@@ -876,14 +878,16 @@ function onFrame(f) {
   }
 
   applyLatest(f)
-  animateStock((f.stock && f.stock.rows) || [])
-  if (num(f.intervalMs) > 0) {
-    tweenTo({
-      qps: row.qps,
-      mean: row.meanMs === null ? 0 : row.meanMs,
-      hitRate: row.hitRate === null ? 0 : row.hitRate,
-      lockWait: row.lockTimeouts,
-    })
+  if (pageActive.value) {
+    animateStock((f.stock && f.stock.rows) || [])
+    if (num(f.intervalMs) > 0) {
+      tweenTo({
+        qps: row.qps,
+        mean: row.meanMs === null ? 0 : row.meanMs,
+        hitRate: row.hitRate === null ? 0 : row.hitRate,
+        lockWait: row.lockTimeouts,
+      })
+    }
   }
 }
 
@@ -957,6 +961,27 @@ function closeStream() {
 }
 
 onMounted(connect)
+// ⚠️ KeepAlive 失活 ≠ 卸载：流继续收（切回来不重置），但**画面全部停住** ——
+//    ECharts 的 `setOption` 由 `BaseChart.vue` 的 onDeactivated 门控，这里停的是页面自己的
+//    KPI / 库存补间（它们每帧改 reactive 值，会连带触发五张图的 option 重算）。
+onDeactivated(() => {
+  pageActive.value = false
+  if (rafId) { cancelAnimationFrame(rafId); rafId = 0 }
+  if (stockRaf) { cancelAnimationFrame(stockRaf); stockRaf = 0 }
+})
+onActivated(() => {
+  pageActive.value = true
+  const lastRow = rows.value[rows.value.length - 1]
+  if (lastRow) {
+    animateStock((latest.value && latest.value.stock && latest.value.stock.rows) || [])
+    tweenTo({
+      qps: lastRow.qps,
+      mean: lastRow.meanMs === null ? 0 : lastRow.meanMs,
+      hitRate: lastRow.hitRate === null ? 0 : lastRow.hitRate,
+      lockWait: lastRow.lockTimeouts,
+    })
+  }
+})
 // 切数据源 = 换一套世界：窗口必须清空（否则真流历史会混进演示画面），然后再连。
 // ⚠️ 路由切换**不会**走到这里 —— 本组件由 `AdminShell.vue` 的 KeepAlive 缓存，
 //    切到日志页再回来时流与窗口都原样还在（用户 2026-10-17 报的「切页从 0 开始」）。

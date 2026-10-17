@@ -620,7 +620,7 @@
 
 <script setup>
 /* eslint-disable no-undef */ /* 理由见 `ui/KpiCard.vue` 同款注释（eslint-plugin-vue 8.7.1 缺宏环境） */
-import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
+import { computed, nextTick, onActivated, onBeforeUnmount, onDeactivated, onMounted, reactive, ref, watch } from 'vue'
 import {
   Database, Lock, ShoppingCart, Package, Clipboard, Bell, AlertTriangle, Shield, ShieldCheck,
   Info, AlertCircle, AlertOctagon,
@@ -815,6 +815,7 @@ const seenSeq = new Set()
 const tracesById = reactive(new Map())
 /** 自动滚到底：用户手动往上滚就关掉，滚回底部再打开（见 `onScroll`）。 */
 let autoBottom = true
+const pageActive = ref(true)   // KeepAlive 失活 ⇒ 暂停 UI 刷新（数据照收，见 onFrame / 门控 watch）
 
 /* ── 小工具（本页自备：与 `OrderFlow.vue` 的口径同源，不抽公共模块）────────────── */
 const num = (v) => {
@@ -1311,7 +1312,7 @@ const streamRows = computed(() => buildStream(filtered.value.slice().reverse()))
    · 行数 ≤ `VIRTUAL_MIN` 时全量渲染 —— 小数据量下窗口化没有收益，整表可见本身就是判据。 */
 const rowH = new Map()          // key → 实测行高（px）；key 稳定 ⇒ 跨重渲染保留
 const vStart = ref(0)
-const vEnd = ref(VIRTUAL_MIN + OVERSCAN * 2)
+const vEnd = ref(40)   // ⚠️ 首帧只铺 40 行（不是 200）：首次进页铺满 200 行时，仅 Layout 就实测 >100ms
 let winRaf = 0
 
 const virtualOn = computed(() => streamRows.value.length > VIRTUAL_MIN)
@@ -1350,7 +1351,7 @@ function updateWindow() {
   const top = el.scrollTop
   const bottom = top + (el.clientHeight || 1)
   const s = Math.max(0, rowAtY(off, n, top) - OVERSCAN)
-  const e = Math.min(n, rowAtY(off, n, bottom) + OVERSCAN + 1)
+  const e = Math.min(n, rowAtY(off, n, bottom) + OVERSCAN + 1, s + VIRTUAL_MIN)   // 硬上限 200 行 DOM
   if (s !== vStart.value) vStart.value = s
   if (e !== vEnd.value) vEnd.value = e
 }
@@ -1382,7 +1383,7 @@ function scheduleWindow() {
     nextTick(measureRows)
   })
 }
-watch(streamRows, () => nextTick(() => {
+watch(() => (pageActive.value ? streamRows.value : null), () => nextTick(() => {
   if (autoBottom) scrollBottom()
   updateWindow()
   scheduleWindow()
@@ -1753,7 +1754,7 @@ function onFrame(f, src) {
   W[src].series = W[src].series.concat([num(f.rate)]).slice(-RATE_CAP)
   // ③ 自动到底：等 DOM 铺完再滚，不然滚的是旧高度。
   // ⚠️ 只在**当前源**的帧上滚：另一条流的帧回来时不该动现在这一屏的滚动位置。
-  if (src === cur.value) nextTick(scrollBottom)
+  if (src === cur.value && pageActive.value) nextTick(scrollBottom)
 }
 
 function connect() {
@@ -1793,18 +1794,17 @@ function closeStream() {
   }
 }
 
-/** 每秒推一次「现在」（`近 5 分` / `近 30 分` 的滑动窗口靠它）。 */
-let tickTimer = null
+let tickTimer = null   // 每秒推一次 nowMs：近 5 分 / 近 30 分的滑动窗口靠它
 onMounted(() => {
   connect()
   tickTimer = setInterval(() => { nowMs.value = Date.now() }, 1000)
 })
-// ⚠️ 切数据源（`正常` ⇄ `模拟日常`）⇒ 立刻重连（`connect()` 会先 `closeStream()`）。
-//    ⚠️ **切源 = 隔离，不是清空**（用户 2026-10-16 裁定 B）：`W.normal` / `W.demo` 两桶
-//    各自留着、谁也不动，显示层只取 `cur` 那一桶 ⇒ 切回来原样还在。
-//    ⚠️ 那条按 `seq` 去重的集合 `seenSeq` 仍然**跨源共用**（它不封顶，两桶各留一份没有意义）⇒
-//    **两套 seq 必须不重叠**，这条由演示世界保证（它的 `evSeq` 从一个高位起，
-//    见 `api/demo-stream.js` 的 `newWorld`）。
+// ⚠️ 切数据源（`正常` ⇄ `模拟日常`）⇒ 立刻重连；**切源 = 隔离不是清空**（两桶各留、显示只取 `cur`）。
+//    去重集合 `seenSeq` 跨源共用（不封顶）；两套 seq 必须不重叠，由 demo-stream 的高位 `evSeq` 保证。
+onDeactivated(() => { pageActive.value = false; clearInterval(tickTimer); tickTimer = null })
+onActivated(() => {
+  pageActive.value = true; nowMs.value = Date.now(); clearInterval(tickTimer); tickTimer = setInterval(() => { nowMs.value = Date.now() }, 1000); nextTick(() => { if (autoBottom) scrollBottom(); updateWindow(); scheduleWindow() })
+})
 watch(() => demo.on, connect)
 // ⚠️ 切源要**关掉抽屉**：`openedTrace` 指向的是另一桶里的某一组，留着会把「上一源的链路」
 //    挂在「这一源的列表」旁边。关掉是 UI 状态、不是数据 —— 两桶的数据一行没动。

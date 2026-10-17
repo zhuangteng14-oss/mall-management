@@ -419,18 +419,18 @@
         <p class="a-kv">
           批次 <code class="a-tag">{{ replay.batchId }}</code> ·
           <template v-if="replay.loading">正在读台账…</template>
-          <template v-else-if="!replay.rows.length">这一批没有事件（total = 0）：该批早于常驻落库修复、或已被清理 —— 重跑一段演练再回放</template>
+          <template v-else-if="!replay.count">这一批没有事件（total = 0）：该批早于常驻落库修复、或已被清理 —— 重跑一段演练再回放</template>
           <template v-else>
-            共 <b>{{ num(replay.total) }}</b> 条，本次载入 <b>{{ replay.rows.length }}</b> 条
+            共 <b>{{ num(replay.total) }}</b> 条，本次载入 <b>{{ replay.count }}</b> 条
             <template v-if="replayTruncated">（已达上限 <b>{{ num(replay.limit) }}</b>，只放了前这些条）</template>
-            · 原时长 <b>{{ (replaySpanMs / 1000).toFixed(1) }}</b> 秒
+            · 原时长 <b>{{ (replaySpanMs / 1000).toFixed(1) }}</b> 秒 · 回放 <b>{{ (replayPlayMs / 1000).toFixed(1) }}</b> 秒（{{ replayPace }}）
           </template>
         </p>
 
         <!-- 回放状态条（用户 2026-10-17）：进度 X/Y + 进度条 + 退出回放。
              ⚠️ 放在**顶部**（面板一打开就看得到），不跟下面的统计行混在一起。 -->
         <div
-          v-if="replay.rows.length"
+          v-if="replay.count"
           class="a-rp-live"
           :class="{ 'is-done': replay.done, 'is-paused': replay.paused && !replay.done }"
         >
@@ -438,7 +438,7 @@
             <template v-if="replay.done">回放结束</template>
             <template v-else-if="replay.paused">已暂停</template>
             <template v-else>正在回放</template>
-            （进度 <b>{{ replay.cursor }}</b> / {{ replay.rows.length }}）
+            （进度 <b>{{ replay.cursor }}</b> / {{ replay.count }}）
           </span>
           <div class="a-rp-live-bar" role="progressbar" :aria-valuenow="replayPct" aria-valuemin="0" aria-valuemax="100">
             <i :style="{ width: replayPct + '%' }"></i>
@@ -449,17 +449,17 @@
           <button type="button" class="a-btn" @click="closeReplay"><IconGlyph name="no" />退出回放</button>
         </div>
 
-        <div v-if="replay.rows.length" class="a-rp-bar">
+        <div v-if="replay.count" class="a-rp-bar">
           <span class="a-rp-stat">
-            已放 <b>{{ replay.cursor }}</b> / {{ replay.rows.length }} 条 ·
+            已放 <b>{{ replay.cursor }}</b> / {{ replay.count }} 条 ·
             回放时钟 <b>{{ replay.clock }}</b> ·
-            走过 <b>{{ (replay.elapsedMs / 1000).toFixed(1) }}</b> 秒 / 原 {{ (replaySpanMs / 1000).toFixed(1) }} 秒
+            回放进度 <b>{{ (replay.elapsedMs / 1000).toFixed(1) }}</b> 秒 / <b>{{ (replayPlayMs / 1000).toFixed(1) }}</b> 秒（原始时间轴 {{ (replaySpanMs / 1000).toFixed(1) }} 秒）
             <template v-if="replay.done">· <b>放完了</b></template>
             <template v-else-if="replay.paused">· 已暂停</template>
           </span>
         </div>
 
-        <p v-if="replay.rows.length" class="a-note">
+        <p v-if="replay.count" class="a-note">
           屏上最多留最近 <b>{{ REPLAY_KEEP }}</b> 条（只影响画面：撒点是一条不漏的）。
         </p>
 
@@ -1191,11 +1191,19 @@ function toggle(r) {
 
 // ── 回放（块 7 收尾 · 读 `observed_event` 按 batchId 播）────────────────────────
 //
-// 【播放模型：一拍一查，不是「为每条事件排一个 setTimeout」】
-// 一个批次实测有 **2749** 条事件（那次 6 秒的探针），一次演练最多几千条 ⇒ 逐条 `setTimeout`
-// 会同时挂着几千个定时器（还要挂几分钟）。改成一个 **40 毫秒的节拍**：每拍把「原时间偏移已经
-// 到了」的事件一次性撒出来。代价是撒点粒度 40ms（同一拍里的若干条会一起出现），
-// 收益是定时器只有一个、暂停/继续只是「记下已放多久」。
+// 【播放模型：原始时间戳的「差值」决定节奏，rAF 逐帧吐】
+// 一个批次动辄几千条：一次性 `list.concat(all)` 就是「一键全显」，逐条 `setTimeout` 又会同时
+// 挂几千个定时器。这里的做法是：
+//   ① 全量数据只放在**非响应式**的 `replayData`（不进 Vue 的响应式图，模板只读 `played`）；
+//   ② 每条先算「相对第一条的原始偏移 `off`」，再乘一个**统一缩放** `scale` 得到 `at`；
+//   ③ `requestAnimationFrame` 每帧把 `at <= 已走虚拟时间` 的事件**最多吐 3 条**推进
+//      `replay.played` —— 间距仍是原时间差的等比例版本，只是被拉长/压缩到可看的时长。
+//
+// 【缩放怎么定】
+//   `playMs = min(60s, max(原跨度, count / 3 / 60 × 1000))`
+//   · 稀疏批次（原跨度本来就长）⇒ 等速或加速，不人为拖慢；
+//   · 密集批次（5000 条挤在 1 秒）⇒ 按每帧 3 条能放完的最短时长拉长（约 28 秒），
+//     原本挤在 1 秒里的相对次序与间隔仍按比例保留，但不会再「瞬间铺满」。
 //
 // 【为什么偏移是「相对第一条」而不是绝对时刻】
 // 台账里的 `OccurredAt` 是**当时**的时刻，播的时候当然不能再等那个绝对时刻（那是过去）。
@@ -1205,17 +1213,11 @@ function toggle(r) {
 // 台账由 `EventBroadcaster.poll()` 驱动、`add()` 旁路发布 → MQ → `observed_event`。
 // ⚠️ 2026-10-17 起 poll() 由 `EventPersistPoller`（常驻守护线程）驱动，**不再依赖谁开着日志页**；
 //    在那之前（TD-61）没人看的那一段不落库 —— 旧批次 total=0 是那个原因，不是回放坏了。
-const REPLAY_TICK_MS = 40
-/**
- * 每一拍**最多**撒多少条（用户 2026-10-17 报「回放变成一键全显」）。
- * ⚠️ 原来的循环是「把所有 `off <= now` 的一次性撒完」—— 真批次实测 5000 条 / 原时长 8.7 秒，
- *    相当于 575 条/秒 ⇒ 200 条的画面上限在 0.6 秒内就填满，看起来就是「一股脑全出来」。
- *    现在每拍最多 3 条（≈75 条/秒），画面是逐批长出来的；代价是播放比原始时间轴慢，
- *    这是「看得见」与「严格等速」之间的取舍（进度条 X/Y 会如实说明放到哪了）。
- */
-const REPLAY_MAX_PER_TICK = 3
-/** 屏上最多留多少条（**只影响渲染**：撒点一条不漏，滚动窗口之外的不再画）。 */
-const REPLAY_KEEP = 200
+const REPLAY_MAX_MS = 60000
+/** 每帧最多吐几条（60fps × 3 ≈ 180 条/秒；这是「看得清」与「放得完」的折中）。 */
+const REPLAY_MAX_PER_FRAME = 3
+/** 屏上最多留多少条（**只影响渲染**：光标仍按全量推进，撒点一条不漏）。 */
+const REPLAY_KEEP = 400
 
 const replay = reactive({
   open: false,
@@ -1224,7 +1226,12 @@ const replay = reactive({
   batchId: '',
   total: 0,
   limit: 0,
-  rows: [],
+  /** 本次载入的条数（**数字**，不是大数组 —— 全量在 `replayData` 里）。 */
+  count: 0,
+  /** 原始跨度 / 回放时长 / 缩放比（scale>1 = 慢放，<1 = 加速）。 */
+  spanMs: 0,
+  playMs: 0,
+  scale: 1,
   played: [],
   cursor: 0,
   paused: false,
@@ -1232,10 +1239,12 @@ const replay = reactive({
   clock: '',
   elapsedMs: 0,
 })
-let replayTimer = null
-/** 本段（未暂停的那一段）起点墙钟 —— 暂停时与 `replayOffset` 一起重新对齐。 */
+/** 全量台账（**非响应式**）：只被 `replayFrame` 按游标读，不参与 Vue 的依赖追踪。 */
+let replayData = []
+let replayRaf = 0
+/** 本段（未暂停的那一段）起点 `performance.now()` —— 暂停时与 `replayOffset` 一起重新对齐。 */
 let replayBase = 0
-/** 此前各段已经走过的原时间偏移（毫秒）。 */
+/** 此前各段已经走过的**回放虚拟时间**（毫秒）。 */
 let replayOffset = 0
 
 /**
@@ -1258,11 +1267,18 @@ function clockOf(ms) {
 }
 
 /** 本批事件的原时间跨度（毫秒）—— 面板上「原时长 X 秒」的分母。 */
-const replaySpanMs = computed(() =>
-  replay.rows.length ? replay.rows[replay.rows.length - 1].off : 0)
+const replaySpanMs = computed(() => replay.spanMs)
+/** 回放时长（缩放后的墙钟时长）。 */
+const replayPlayMs = computed(() => replay.playMs)
+/** 人话的缩放说明（>1× = 慢放；<1× = 加速）。 */
+const replayPace = computed(() => {
+  const s = Number(replay.scale) || 1
+  if (!replay.spanMs || Math.abs(s - 1) < 0.05) return '等速'
+  return s > 1 ? `慢放 ${s.toFixed(1)}×` : `加速 ${(1 / s).toFixed(1)}×`
+})
 /** 回放进度（按**条数**，不是时间）：`已放 / 载入`，给顶部状态条和进度条用。 */
 const replayPct = computed(() =>
-  replay.rows.length ? Math.min(100, Math.round((replay.cursor / replay.rows.length) * 100)) : 0)
+  replay.count ? Math.min(100, Math.round((replay.cursor / replay.count) * 100)) : 0)
 
 /**
  * **是不是被 `limit` 截断了**。
@@ -1272,36 +1288,42 @@ const replayPct = computed(() =>
  * 会把「排空尾巴」误报成「被截断了」。
  */
 const replayTruncated = computed(() =>
-  replay.rows.length > 0 && replay.limit > 0 && replay.rows.length >= replay.limit
-    && replay.total > replay.rows.length)
+  replay.count > 0 && replay.limit > 0 && replay.count >= replay.limit
+    && replay.total > replay.count)
 
-/** `setInterval` 的裸回调里抛异常只会进 console、下一拍照旧 —— 包一层，至少把现场留全。 */
-function guardedTick() {
+/** rAF 裸回调里抛异常只会进 console、下一帧照旧 —— 包一层，至少把现场留全并停表。 */
+function guardedFrame(now) {
   try {
-    replayTick()
+    replayFrame(now)
   } catch (e) {
-    console.error('[replay] tick failed', e, { cursor: replay.cursor, rows: replay.rows.length })
-    stopReplayTimer()
+    console.error('[replay] frame failed', e, { cursor: replay.cursor, count: replay.count })
+    stopReplayRaf()
+    replay.paused = true
   }
 }
 
-function stopReplayTimer() {
-  if (replayTimer) {
-    clearInterval(replayTimer)
-    replayTimer = null
+function stopReplayRaf() {
+  if (replayRaf) {
+    cancelAnimationFrame(replayRaf)
+    replayRaf = 0
   }
 }
 
-/** 一拍：把「原时间偏移已到」的事件**限量**撒出来（一拍至多 `REPLAY_MAX_PER_TICK` 条）。 */
-function replayTick() {
-  const now = replayOffset + (Date.now() - replayBase)
+/**
+ * 一帧：把「回放虚拟时间已到」的事件**限量**推进 `played`（每帧至多 `REPLAY_MAX_PER_FRAME` 条）。
+ * ⚠️ 只追加到 `replay.played`（≤ `REPLAY_KEEP`），**绝不**碰 `replayData` 本身。
+ */
+function replayFrame(now) {
+  replayRaf = 0
+  if (replay.paused || replay.done) return
+  const virtual = replayOffset + Math.max(0, now - replayBase)
   let emitted = 0
   while (
-    emitted < REPLAY_MAX_PER_TICK &&
-    replay.cursor < replay.rows.length &&
-    replay.rows[replay.cursor].off <= now
+    emitted < REPLAY_MAX_PER_FRAME &&
+    replay.cursor < replayData.length &&
+    replayData[replay.cursor].at <= virtual
   ) {
-    const e = replay.rows[replay.cursor]
+    const e = replayData[replay.cursor]
     replay.cursor += 1
     emitted += 1
     replay.played.push({ ...e, clock: clockOf(epochOf(e.OccurredAt)) })
@@ -1309,17 +1331,19 @@ function replayTick() {
   if (replay.played.length > REPLAY_KEEP) {
     replay.played.splice(0, replay.played.length - REPLAY_KEEP)
   }
-  // ⚠️ 回放时钟跟**已放出来的最后一条**走，不跟墙钟走：限量之后墙钟会跑到画面前面
-  //    （40ms 一拍只放 3 条，原时间轴却一直在走），拿墙钟画时钟就会出现「时钟 8 秒、
-  //    画面还停在 2 秒」的自相矛盾。没有放出任何一条时（两批之间有空档）才用墙钟。
-  const last = replay.rows[replay.cursor - 1]
-  const playhead = last ? last.off : now
-  replay.elapsedMs = playhead
-  replay.clock = replay.rows.length ? clockOf(epochOf(replay.rows[0].OccurredAt) + playhead) : ''
-  if (replay.cursor >= replay.rows.length) {
+  // 回放时钟跟**已放出来的最后一条**走，不跟墙钟走：缩放/限量之后墙钟会跑到画面前面，
+  // 拿墙钟画时钟就会出现「时钟 20 秒、画面还停在 8 秒」的自相矛盾。
+  const last = replayData[replay.cursor - 1]
+  replay.elapsedMs = Math.min(virtual, replay.playMs)
+  replay.clock = last
+    ? clockOf(epochOf(last.OccurredAt))
+    : (replayData.length ? clockOf(epochOf(replayData[0].OccurredAt)) : '')
+  if (replay.cursor >= replayData.length) {
     replay.done = true
-    stopReplayTimer()
+    replay.elapsedMs = replay.playMs
+    return
   }
+  replayRaf = requestAnimationFrame(guardedFrame)
 }
 
 /**
@@ -1333,12 +1357,16 @@ function replayTick() {
 async function startReplay(r) {
   const batchId = r && r.BatchId
   if (!batchId) return
-  stopReplayTimer()
+  stopReplayRaf()
   replay.open = true
   replay.loading = true
   replay.err = ''
   replay.batchId = batchId
-  replay.rows = []
+  replay.count = 0
+  replay.spanMs = 0
+  replay.playMs = 0
+  replay.scale = 1
+  replayData = []
   replay.played = []
   replay.cursor = 0
   replay.paused = false
@@ -1349,21 +1377,34 @@ async function startReplay(r) {
   replay.limit = 0
   try {
     const data = await replayEvents(batchId)
-    const rows = (data && data.list) || []
-    // ⚠️ 偏移在**装载时**算一次（逐拍再解析 date 字符串是把解析放进热路径）
+    const rows = ((data && data.list) || []).slice()
+      .sort((a, b) => epochOf(a.OccurredAt) - epochOf(b.OccurredAt))
+    // ⚠️ 偏移与缩放比在**装载时**算一次（逐帧再解析 date 字符串是把解析放进热路径）
     const t0 = rows.length ? epochOf(rows[0].OccurredAt) : 0
-    replay.rows = rows.map((e, i) => ({ ...e, key: `${e.Id}-${i}`, off: Math.max(0, epochOf(e.OccurredAt) - t0) }))
+    const span = rows.length ? Math.max(0, epochOf(rows[rows.length - 1].OccurredAt) - t0) : 0
+    // 每帧 3 条能放完的最短时长；原跨度更长就按原速（或原速的加速版，封顶 60 秒）。
+    const floorByCap = (rows.length * 1000) / (REPLAY_MAX_PER_FRAME * 60)
+    const playMs = rows.length ? Math.min(REPLAY_MAX_MS, Math.max(span, floorByCap)) : 0
+    const scale = span > 0 ? playMs / span : 1
+    // ⚠️ 全量只进**普通数组**；模板从头到尾只看 `replay.count` 与 `replay.played`。
+    replayData = rows.map((e, i) => {
+      const off = Math.max(0, epochOf(e.OccurredAt) - t0)
+      return { ...e, key: `${e.Id}-${i}`, off, at: off * scale }
+    })
+    replay.count = replayData.length
+    replay.spanMs = span
+    replay.playMs = playMs
+    replay.scale = scale
     replay.total = Number(data && data.total) || 0
     replay.limit = Number(data && data.limit) || 0
     replay.loading = false
-    if (!replay.rows.length) {
+    if (!replay.count) {
       replay.done = true
       return
     }
-    replayBase = Date.now()
+    replayBase = performance.now()
     replayOffset = 0
-    replayTimer = setInterval(guardedTick, REPLAY_TICK_MS)
-    replayTick()
+    replayRaf = requestAnimationFrame(guardedFrame)
   } catch (e) {
     replay.loading = false
     replay.err = errText(e)
@@ -1375,23 +1416,27 @@ function toggleReplayPause() {
   if (replay.done || replay.loading) return
   if (replay.paused) {
     replay.paused = false
-    replayBase = Date.now()
-    replayTimer = setInterval(guardedTick, REPLAY_TICK_MS)
+    replayBase = performance.now()
+    replayRaf = requestAnimationFrame(guardedFrame)
   } else {
     replay.paused = true
-    replayOffset += Date.now() - replayBase
-    stopReplayTimer()
+    replayOffset += Math.max(0, performance.now() - replayBase)
+    stopReplayRaf()
   }
 }
 
 /** 停播并收起面板（把装载的那几千条一起放掉 —— 收起就是不看）。 */
 function closeReplay() {
-  stopReplayTimer()
+  stopReplayRaf()
   replay.open = false
   replay.loading = false
   replay.err = ''
   replay.batchId = ''
-  replay.rows = []
+  replayData = []
+  replay.count = 0
+  replay.spanMs = 0
+  replay.playMs = 0
+  replay.scale = 1
   replay.played = []
   replay.cursor = 0
   replay.paused = false
@@ -1467,13 +1512,13 @@ onMounted(() => {
   watch([weights, concurrency, durationSeconds, tier, protections, injections], persistForm, { deep: true })
 })
 
-// ⚠️ 页面切走要停掉本地的计时器 —— 它只是一个 `setInterval`，不停就一直在给一个没人看的
-//    组件写 `elapsedMs`（演练本身在后端照常跑完、照常落库，本页只是不再等它）。
+// ⚠️ 页面切走要停掉本地的计时器 —— 不停就一直在给一个没人看的组件写状态
+//    （演练本身在后端照常跑完、照常落库，本页只是不再等它）。
 // 🔴 三条都要停：那条 1 秒轮询更贵 —— 它不停就是**切走之后还在往后端打请求**（每条都要过鉴权）；
-//    回放那个 40ms 节拍不停则会在后台空转着给一个没人看的组件写 `played`。
+//    回放的 rAF 不停则会在后台空转着给一个没人看的组件写 `played`。
 onBeforeUnmount(() => {
   stopStatusPolling()
-  stopReplayTimer()
+  stopReplayRaf()
   if (timer) {
     clearInterval(timer)
     timer = null
