@@ -408,8 +408,8 @@
       </h2>
 
       <p class="a-rp-say">
-        ⚠️ 回放数据来自<b>「当时开着日志页的演练」</b>：没人开着日志页的那一段**没有落库**，
-        放不出来。时刻是<b>当时</b>的发生时刻（不是现在）。台账保留 <b>3</b> 天（攻击批次）/
+        ⚠️ 回放读的是<b>落库的事件台账</b>（2026-10-17 起后台常驻落库，<b>不再要求当时开着日志页</b>），
+        时刻是<b>当时</b>的发生时刻（不是现在）。台账保留 <b>3</b> 天（攻击批次）/
         <b>30</b> 天（日常事件），超期被清理任务删掉就<b>回放不到</b> —— 那是正常，不是坏了。
       </p>
 
@@ -419,7 +419,7 @@
         <p class="a-kv">
           批次 <code class="a-tag">{{ replay.batchId }}</code> ·
           <template v-if="replay.loading">正在读台账…</template>
-          <template v-else-if="!replay.rows.length">这一批没有事件（没开着日志页 / 已被清理）</template>
+          <template v-else-if="!replay.rows.length">这一批没有事件（total = 0）：该批早于常驻落库修复、或已被清理 —— 重跑一段演练再回放</template>
           <template v-else>
             共 <b>{{ num(replay.total) }}</b> 条，本次载入 <b>{{ replay.rows.length }}</b> 条
             <template v-if="replayTruncated">（已达上限 <b>{{ num(replay.limit) }}</b>，只放了前这些条）</template>
@@ -1202,9 +1202,9 @@ function toggle(r) {
 // ⇒ 取「相对本批第一条的毫秒偏移」，用墙钟把这个偏移重走一遍。
 //
 // 【口径：放的就是当时那条流推过的那些条】
-// 台账由 `EventBroadcaster.poll()` 驱动，而那条流是「谁开着日志页谁在拉」
-// ⇒ **当时没人开着日志页的那一段，事件不会落库**（TD-61 一族，块 7 期间实测过）。
-// 故面板上那句「回放数据来自「当时开着日志页的演练」」不是免责声明，是这个数据源的准确描述。
+// 台账由 `EventBroadcaster.poll()` 驱动、`add()` 旁路发布 → MQ → `observed_event`。
+// ⚠️ 2026-10-17 起 poll() 由 `EventPersistPoller`（常驻守护线程）驱动，**不再依赖谁开着日志页**；
+//    在那之前（TD-61）没人看的那一段不落库 —— 旧批次 total=0 是那个原因，不是回放坏了。
 const REPLAY_TICK_MS = 40
 /**
  * 每一拍**最多**撒多少条（用户 2026-10-17 报「回放变成一键全显」）。
@@ -1274,6 +1274,16 @@ const replayPct = computed(() =>
 const replayTruncated = computed(() =>
   replay.rows.length > 0 && replay.limit > 0 && replay.rows.length >= replay.limit
     && replay.total > replay.rows.length)
+
+/** `setInterval` 的裸回调里抛异常只会进 console、下一拍照旧 —— 包一层，至少把现场留全。 */
+function guardedTick() {
+  try {
+    replayTick()
+  } catch (e) {
+    console.error('[replay] tick failed', e, { cursor: replay.cursor, rows: replay.rows.length })
+    stopReplayTimer()
+  }
+}
 
 function stopReplayTimer() {
   if (replayTimer) {
@@ -1352,7 +1362,7 @@ async function startReplay(r) {
     }
     replayBase = Date.now()
     replayOffset = 0
-    replayTimer = setInterval(replayTick, REPLAY_TICK_MS)
+    replayTimer = setInterval(guardedTick, REPLAY_TICK_MS)
     replayTick()
   } catch (e) {
     replay.loading = false
@@ -1366,7 +1376,7 @@ function toggleReplayPause() {
   if (replay.paused) {
     replay.paused = false
     replayBase = Date.now()
-    replayTimer = setInterval(replayTick, REPLAY_TICK_MS)
+    replayTimer = setInterval(guardedTick, REPLAY_TICK_MS)
   } else {
     replay.paused = true
     replayOffset += Date.now() - replayBase

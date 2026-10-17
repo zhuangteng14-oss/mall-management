@@ -693,7 +693,7 @@ const TOP_TAB = [['obj', '对象'], ['slow', '慢请求'], ['err', '错误']]
 /** ① 第二排的三枚控件（用户 2026-10-16 裁定 A：**现在就补、不留 TD**，是三个真功能不是占位）。 */
 
 /** 时间范围：只改 `WINDOW` 一个量 ⇒ ③ 的列表、① 的读数、② 的计数、④ 的榜**全部**跟着重算。 */
-const RANGES = [['5m', '近 5 分'], ['30m', '近 30 分'], ['custom', '自定义']]
+const RANGES = [['all', '全部'], ['5m', '近 5 分'], ['30m', '近 30 分'], ['custom', '自定义']]   // ⚠️ 缺省 all（2026-10-17）：首帧=后端合并环快照，缺省 5m 会把几小时前的行全滤掉 ⇒ 页面看着「一条都没有」
 const RANGE_MS = { '5m': 5 * 60 * 1000, '30m': 30 * 60 * 1000 }
 /** 导出：**前端生成文件下载，不经后端**。三档 = 给人看的（CSV）/ 给程序看的（JSON）/ 原始帧形状（ndjson）。 */
 const EXPORTS = [
@@ -760,8 +760,8 @@ const errMsg = ref('')
  * 而「服务端正常收尾」那一格 `errMsg` 是空的 —— 断线条必须覆盖它（见模板里那条注释）。
  */
 const lost = ref(null)
-/** ① 的时间范围（裁定 A）：`5m` / `30m` / `custom`。 */
-const range = ref('5m')
+/** ① 的时间范围（裁定 A）：`all` / `5m` / `30m` / `custom`。缺省 `all` —— 见 `rangeBounds` 上方注释。 */
+const range = ref('all')
 /** 「自定义」的起止 —— 存 `datetime-local` 的字符串（本地时区，`step="1"` ⇒ 秒级）。 */
 const customFrom = ref('')
 const customTo = ref('')
@@ -1196,11 +1196,11 @@ const lastTickAt = computed(() => (ts.value ? hmsms(ts.value) : '—'))
 const isAllOn = computed(() => activeKinds.value.size === KINDS.length && activeSevs.value.size === SEVERITIES.length)
 
 /* ── ① 时间范围（裁定 A）⇒「范围内」是 ②③④ 的统一口径 ──────────────────────── */
-/** 当前时间范围的 `[from, to]`（毫秒，闭区间）。`null` = **不过滤**（自定义两栏都空）。 */
+/** 当前时间范围的 `[from, to]`（毫秒，闭区间）。`null` = **不过滤**（`all` 或自定义两栏都空）。 */
 const rangeBounds = computed(() => {
+  if (range.value === 'all') return null
   if (range.value === 'custom') {
-    const f = parseLocal(customFrom.value)
-    const t = parseLocal(customTo.value)
+    const f = parseLocal(customFrom.value); const t = parseLocal(customTo.value)
     if (f === null && t === null) return null
     return { from: f === null ? -Infinity : f, to: t === null ? Infinity : t }
   }
@@ -3096,3 +3096,11 @@ button.ev-bar {
   }
 }
 </style>
+
+<script>
+// ⚠️ 这个名字是 `AdminShell.vue` 里 `<keep-alive include="MetricsPanel,EventLog">` 的锚点。
+//    为什么不用文件名自动推断：本仓的 Vue 是 **3.2.13**，按文件名推 `__name` 是 3.2.34 才有的。
+//    ⇒ 名字写在这里，**别删**；改名必须两处一起改（否则 KeepAlive 静默不生效，
+//    表现就是用户报过的「切走再回来日志流断开、窗口清零」）。
+export default { name: 'EventLog' }
+</script>

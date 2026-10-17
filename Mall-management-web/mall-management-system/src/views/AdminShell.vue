@@ -40,7 +40,7 @@
       </header>
 
       <main class="a-main">
-        <router-view />
+        <router-view v-slot="{ Component }"><keep-alive include="MetricsPanel,EventLog"><component :is="Component" /></keep-alive></router-view>
       </main>
     </div>
   </div>
@@ -55,9 +55,9 @@
         `ADMIN_NAV` 再传进来（多一层纯粹为对称而设的间接）。
      ② **不消费 `meta.layout`** —— 那是商城「内容区外壳 div 的类名随路由走」的机制
         （`AppShell.vue:127`），管理端只有一种布局，收了就等于把类名表抄一遍。
-     ③ **不带 `KeepAlive`** —— 商城那份只缓存 `HomeTab` / `GoodsSelect` 两个 tab（理由写在
-        `AppShell.vue:92-101`）。管理端**一格业务页都还没有**，没有东西值得缓存；
-        将来真有带轮询的页时，**别顺手加**：缓存 = 离开后后台继续轮询（同那条注释的警告）。
+     ③ **只缓存 `MetricsPanel` / `EventLog`**（2026-10-17 起）—— 这两页的数据在 SSE 流里，
+        组件销毁 = 流断、窗口清零（实测指标页切回日志再回来从 0 开始）；缓存 = 离开后流继续开着，
+        是**有意**的。故用 `include` 精确列出，**别**改成无 include 的全缓存（其他页可能有自己的轮询）。
 
   ⚠️ **第一笔那个「顶栏直接摆三个 tab」的形状已被第二笔取代** —— 概览 / 业务域 / 可观测域 改住
      `config/admin-nav.js` 的 `ADMIN_SIDEBAR`（单一事实源），本文件只渲染。`slot-registry.md:3056`

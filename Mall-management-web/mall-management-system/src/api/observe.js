@@ -1,7 +1,7 @@
 // src/api/observe.js —— 可观测面板的客户端（块 7 commit 3 的 SSE + commit 4 的三个普通 POST
 // + commit 8b 的清场 + commit 10c 的暂停与三条流的自动重连）。
 //
-// 十条端点（**全在** `endpoints.js` 里，本文件一个后端路径字面量都不出现 —— 那条判据可 grep 自动化）：
+// 十一条端点（**全在** `endpoints.js` 里，本文件一个后端路径字面量都不出现 —— 那条判据可 grep 自动化）：
 //   metrics → 指标面板（KPI / 锁 / 防护 / 库存水位）          ┐
 //   orders  → 状态流转页（五态计数 / 最近订单 / 本拍流转）      ├ 三条 **SSE 流**（commit 3；
 //   events  → 实时日志页（8 类归一化事件流）                  ┘ commit 10c 起**自带自动重连**）
@@ -13,6 +13,8 @@
 //   replay        → 演练回放（块 7 收尾）—— 普通 POST、**只读**、有入参（`batchId` + `limit`）；
 //                   ⚠️ 唯一一条**不属于 `AttackController`** 的（路径在 `/admin/observe` 根，
 //                   后端是 `ReplayController` —— 它读的是事件台账，不是演练记录）
+//   metricsHistory → 指标首屏历史（2026-10-17）—— 普通 POST、**只读**、可选 `limit`；
+//                   一次回最近 60 拍已算好的帧（与流帧同形），页面挂载时先铺满再接着消费流
 //
 // ⚠️ **不用浏览器原生 `EventSource`**（只针对上面三条流）。两条独立的理由，任一条都足够：
 //   ① 它**不能带自定义请求头**，而本仓的鉴权票走 `Authorization: Bearer`（默认 profile 上
@@ -464,4 +466,27 @@ export function attackRecords(p) {
 export function cleanupAttack() {
   // body 传空串：本仓 POST 一律带 urlencoded 头（同 `attackScenarios()`），后端不读 body。
   return postJson(endpoints.observe.attackCleanup, '')
+}
+
+// ==================== 指标页首屏历史（块 7 · 2026-10-17）====================
+//
+// ⚠️ **为什么要它**：`/metrics/stream` 的首帧是差分预热拍（全 0），页面一进入必然从 0 起；
+//   切走再回来（组件销毁）也一样。用户 2026-10-17 报的那句「指标页数据从 0 开始走」就是它。
+//   ⇒ 挂载时先读最近 60 拍铺满图表，再接着消费 SSE 的实时增量。
+//
+// ⚠️ **它是「一次性 JSON」，不是流**（与上面三条 SSE 的区别）⇒ 走 `http.post`，
+//   别套 `openStream`：这条**立刻回**，没有「拍」也没有重连语义。
+
+/**
+ * 指标页最近 N 拍（升序）。
+ *
+ * @param {number} [limit] 最多几拍；**不传 = 后端窗口里全部**（缺省 60）。
+ *        服务刚重启时窗口还没攒满，返回的 `size` 小于 `limit` 是**正常**的。
+ * @returns {Promise<{success:boolean, list:Array, size:number}>}
+ *          `list` 里每一帧与 SSE 帧**逐字同形**（`seq` / `ts` / `intervalMs` / `requests` /
+ *          `cache` / `gauges` / `locks` / `protections` / `stock`）⇒ 调用方直接复用 `onFrame`
+ *          的处理路径即可，**不要**写第二套解析。
+ */
+export function metricsHistory(limit) {
+  return postJson(endpoints.observe.metricsHistory, q({ limit }))
 }

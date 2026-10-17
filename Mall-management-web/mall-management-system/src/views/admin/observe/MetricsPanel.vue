@@ -306,7 +306,7 @@ import {
   AlertCircle, AlertOctagon, AlertTriangle, Bell, Clipboard, Database,
   Droplets, Info, Lock, Package, Server, Shield, ShieldCheck, ShoppingCart,
 } from '@lucide/vue'
-import { openMetricsStream } from '../../../api/observe'
+import { metricsHistory, openMetricsStream } from '../../../api/observe'
 import { demo, openDemoStream } from '../../../api/demo-stream'
 import { KIND_COLOR } from '../../../config/labels/observe-labels'
 import DemoModeToggle from '../../../components/observe/DemoModeToggle.vue'
@@ -797,10 +797,14 @@ function tweenTo(next) {
 }
 
 /* ── 收帧 ─────────────────────────────────────────────────────────────────── */
-function onFrame(f) {
+/**
+ * 一帧（流帧或历史帧，形状逐字相同）→ 窗口里的一行。
+ * ⚠️ 抽出来是因为**首屏历史**（`loadHistory`）与 SSE 必须走同一条解析：
+ *    两份实现迟早在某个派生量上漂（那正是本仓反复吃的亏）。
+ */
+function toRow(f) {
   const req = f.requests || {}
   const cache = f.cache || {}
-  const gauge = f.gauges || {}
   const intervalMs = num(f.intervalMs) || 1000
   const intervalSec = Math.max(0.001, intervalMs / 1000)
   const locks = Array.isArray(f.locks) ? f.locks : []
@@ -823,7 +827,7 @@ function onFrame(f) {
 
   const count = num(req.count)
   const qps = req.qps === null || req.qps === undefined ? count / intervalSec : num(req.qps)
-  const row = {
+  return {
     ts: num(f.ts) || Date.now(),
     seq: num(f.seq),
     intervalSec,
@@ -840,9 +844,13 @@ function onFrame(f) {
     locks: lockMap,
     lockTimeouts,
   }
-  rows.value.push(row)
-  if (rows.value.length > WINDOW) rows.value.shift()
+}
 
+/** 「最近一帧」那组非时间序列的派生量（KPI 卡 / 健康度 / 库存 / 防护）。 */
+function applyLatest(f) {
+  const req = f.requests || {}
+  const cache = f.cache || {}
+  const gauge = f.gauges || {}
   latest.value = {
     seq: num(f.seq),
     ts: num(f.ts) || Date.now(),
@@ -855,14 +863,58 @@ function onFrame(f) {
     lockUp: gauge.lockUp === undefined ? null : gauge.lockUp,
     l2Degraded: cache.l2Degraded === undefined ? null : cache.l2Degraded,
   }
+}
 
+function onFrame(f) {
+  const row = toRow(f)
+  // ⚠️ 每条连接的**首帧是差分预热拍**（`intervalMs=0`、全部差分量 0，见
+  //    `MetricsSnapshotService.Session#frame`）：把它画进窗口会在首屏历史之后插一根
+  //    假的 0 尖峰。跳过这一行，下一拍就是真增量（上一拍读数已被这一帧记住）。
+  if (num(f.intervalMs) > 0) {
+    rows.value.push(row)
+    if (rows.value.length > WINDOW) rows.value.shift()
+  }
+
+  applyLatest(f)
   animateStock((f.stock && f.stock.rows) || [])
-  tweenTo({
-    qps: row.qps,
-    mean: row.meanMs === null ? 0 : row.meanMs,
-    hitRate: row.hitRate === null ? 0 : row.hitRate,
-    lockWait: row.lockTimeouts,
-  })
+  if (num(f.intervalMs) > 0) {
+    tweenTo({
+      qps: row.qps,
+      mean: row.meanMs === null ? 0 : row.meanMs,
+      hitRate: row.hitRate === null ? 0 : row.hitRate,
+      lockWait: row.lockTimeouts,
+    })
+  }
+}
+
+/**
+ * 首屏历史（块 7 · 2026-10-17 新增）：拿服务端最近 60 拍已算好的帧，铺到实时帧**前面**。
+ *
+ * ⚠️ 只在「正常」源加载；切到模拟日常时历史必须清掉（否则真流历史会混进演示画面）。
+ * ⚠️ 只填**比现有第一行更早**的那一段：历史请求与 SSE 首帧是并发发出的，回来的顺序不定；
+ *    用 `ts` 截断就不会把同一拍画两次。请求失败**不报错**：历史是增强项，实时流照常。
+ */
+let historyToken = 0
+async function loadHistory() {
+  const token = ++historyToken
+  try {
+    const data = await metricsHistory(WINDOW)
+    // 期间用户切了数据源 / 又发了一次历史请求 ⇒ 这次结果作废。
+    if (token !== historyToken || demo.on) return
+    const list = (data && data.list) || []
+    // 预热拍（intervalMs=0）不是真实的一拍 —— 与 `onFrame` 同一条过滤。
+    const hist = list.filter((f) => num(f.intervalMs) > 0).map(toRow)
+    if (!hist.length) return
+    const cutoff = rows.value.length ? rows.value[0].ts : Infinity
+    const older = hist.filter((r) => r.ts < cutoff)
+    if (older.length) rows.value = older.concat(rows.value).slice(-WINDOW)
+    // 实时帧还没到时，用历史最后一拍兜住 KPI / 健康 / 库存（已有实时值则不动）。
+    if (!latest.value) applyLatest(list[list.length - 1])
+  } catch (e) {
+    // 历史读失败不改变页面状态：SSE 照常推，页面上只是少了首屏的那 60 拍。
+    // ⚠️ 但要在 console 留一条 —— 否则「为什么首屏还是 0」只能靠猜。
+    console.warn('[metrics] 首屏历史读取失败（实时流不受影响）：', e && (e.message || e))
+  }
 }
 
 /* ── 连接 ─────────────────────────────────────────────────────────────────── */
@@ -884,6 +936,9 @@ function connect() {
       errMsg.value = s.err ? ((s.err && s.err.message) || '连接中断') : ''
     },
   }
+  // 正常源：先把服务端最近 60 拍铺上（首屏不再是 0），再接着收 SSE 增量。
+  // ⚠️ 历史与流**并发**发出：谁先回来都不会画重（见 `loadHistory` 里的 `ts` 截断）。
+  if (!demo.on) loadHistory()
   stream = demo.on ? openDemoStream('metrics', handlers) : openMetricsStream(handlers)
 }
 function closeStream() {
@@ -902,7 +957,15 @@ function closeStream() {
 }
 
 onMounted(connect)
-watch(() => demo.on, connect)
+// 切数据源 = 换一套世界：窗口必须清空（否则真流历史会混进演示画面），然后再连。
+// ⚠️ 路由切换**不会**走到这里 —— 本组件由 `AdminShell.vue` 的 KeepAlive 缓存，
+//    切到日志页再回来时流与窗口都原样还在（用户 2026-10-17 报的「切页从 0 开始」）。
+watch(() => demo.on, () => {
+  historyToken += 1
+  rows.value = []
+  latest.value = null
+  connect()
+})
 onBeforeUnmount(closeStream)
 </script>
 
@@ -1511,3 +1574,11 @@ onBeforeUnmount(closeStream)
   .mp-stock-list { height: 260px; overflow-y: auto; }
 }
 </style>
+
+<script>
+// ⚠️ 这个名字是 `AdminShell.vue` 里 `<keep-alive include="MetricsPanel,EventLog">` 的锚点。
+//    为什么不用文件名自动推断：本仓的 Vue 是 **3.2.13**，按文件名推 `__name` 是 3.2.34 才有的。
+//    ⇒ 名字写在这里，**别删**；改名必须两处一起改（否则 KeepAlive 静默不生效，
+//    表现就是用户报过的「切到日志页再回来，指标又从 0 开始」）。
+export default { name: 'MetricsPanel' }
+</script>
