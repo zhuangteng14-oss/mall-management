@@ -184,7 +184,7 @@
         </tr>
       </thead>
       <tbody>
-        <tr v-for="r in days" :key="r.StatDate">
+        <tr v-for="r in pageDays" :key="r.StatDate">
           <td class="mono">{{ r.StatDate }}</td>
           <td class="num">{{ fmtInt(r.Orders) }}</td>
           <td class="num">{{ fmtMoney(r.Gmv) }}</td>
@@ -204,6 +204,18 @@
         </tr>
       </tfoot>
     </table>
+    <!-- 块 7 收尾 · P1：标准分页（默认每页 20）。合计行（`tfoot`）画的是**整段**合计，
+         不是当前页合计 —— 故它不随翻页变。 -->
+    <Pager
+      v-if="days.length"
+      :total="days.length"
+      :limit="pageLimit"
+      :offset="pageOffset"
+      :sizes="[20, 50, 100]"
+      unit="天"
+      label="逐日明细"
+      @change="onDaysPage"
+    />
   </section>
 </template>
 
@@ -230,7 +242,7 @@ import { computed, onMounted, reactive, ref } from 'vue'
 import { adminStats, adminStatsRebuild } from '../../api/stats'
 import LineChart from '../../components/charts/LineChart.vue'
 import BarChart from '../../components/charts/BarChart.vue'
-import KpiCard from '../../components/ui/KpiCard.vue'; import IconGlyph from '../../components/ui/IconGlyph.vue'   // ⚠️ 两条 import **同行**（2026-10-11 补图标那一笔）—— 合并到既有行 = 不新增行号漂移
+import KpiCard from '../../components/ui/KpiCard.vue'; import IconGlyph from '../../components/ui/IconGlyph.vue'; import Pager from '../../components/Pager.vue'   // ⚠️ 两条 import **同行**（2026-10-11 补图标那一笔）—— 合并到既有行 = 不新增行号漂移
 
 /** 快捷档。⚠️ `days: null` = 「全部」= **不发任何日期参数**（后端退化成「不设谓词」），
  *  与 `days = 一个很大的数` **不等价** —— 后者会去编一个从今天往回数 N 天的区间。 */
@@ -245,6 +257,20 @@ const loading = ref(false)
 const rebuilding = ref(false)
 const builtRows = ref(0)
 const days = ref([])
+// 块 7 收尾 · P1：逐日明细前端分页（默认每页 20）。区间本身是日期有界的，
+// 这里只切数组、不再请求；`total` 用整段行数，合计行仍按整段算。
+const pageLimit = ref(20)
+const pageOffset = ref(0)
+const pageDays = computed(() => {
+  const total = days.value.length
+  const maxOffset = Math.max(0, Math.ceil(total / pageLimit.value) - 1) * pageLimit.value
+  const off = Math.min(Math.max(0, pageOffset.value), maxOffset)
+  return days.value.slice(off, off + pageLimit.value)
+})
+function onDaysPage({ limit, offset }) {
+  pageLimit.value = limit
+  pageOffset.value = offset
+}
 const totals = ref({})
 const merchants = ref([])
 const prevTotals = ref(null)
@@ -353,6 +379,7 @@ async function load() {
     }
     builtRows.value = Number(data.builtRows || 0)
     days.value = Array.isArray(data.days) ? data.days : []
+    pageOffset.value = 0   // 换区间 / 重建后回第一页
     totals.value = data.totals || {}
     merchants.value = Array.isArray(data.merchants) ? data.merchants : []
     prevTotals.value = data.prevTotals || null

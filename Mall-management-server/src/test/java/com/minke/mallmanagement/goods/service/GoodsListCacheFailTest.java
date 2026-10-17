@@ -152,13 +152,13 @@ class GoodsListCacheFailTest {
         jdbc.toThrow = boom;
 
         assertAll(
-                () -> assertThatThrownBy(() -> service.listHome()).isSameAs(boom),
+                () -> assertThatThrownBy(() -> service.listHome(24, 0, null)).isSameAs(boom),
                 () -> assertThat(jdbc.calls).isEqualTo(1),
-                () -> assertThatThrownBy(() -> service.listHome()).isSameAs(boom),
+                () -> assertThatThrownBy(() -> service.listHome(24, 0, null)).isSameAs(boom),
                 // 改前：外层 catch 把失败吞成 {success:false,msg:"查询失败"} 并缓存到 'all'，
                 //       于是 TTL 内**所有**客户端首页请求都拿到「查询失败」—— 库修好了也不恢复。
                 () -> assertThat(jdbc.calls).as("失败不得固化到 TTL").isEqualTo(2),
-                () -> assertThat(cache(HOME).get("all")).isNull());
+                () -> assertThat(cache(HOME).get("page-v4:24:0:")).isNull());
     }
 
     // ===================== 二、阳性对照：成功路径仍然缓存 =====================
@@ -192,9 +192,9 @@ class GoodsListCacheFailTest {
         jdbc.userNameMissing = true; // login 里没有 id = 'M1' 的行
 
         @SuppressWarnings("unchecked")
-        List<Map<String, Object>> list = (List<Map<String, Object>>) service.listHome().get("list");
+        List<Map<String, Object>> list = (List<Map<String, Object>>) service.listHome(24, 0, null).get("list");
 
-        assertThat(service.listHome().get("success")).isEqualTo(true);
+        assertThat(service.listHome(24, 0, null).get("success")).isEqualTo(true);
         assertThat(list).hasSize(1);
         // 收窄 catch 时最容易误伤的就是这条：它是**业务事实**（商家无对应行），不是失败。
         assertThat(list.get(0).get("UserName")).isEqualTo("");
@@ -213,17 +213,17 @@ class GoodsListCacheFailTest {
         // 这是本笔**有意引入**的行为变更：改前被 catch (Exception) 吞成 "". 钉住它，
         // 免得将来有人把「静默降级」当作正确行为「修回去」。
         assertAll(
-                () -> assertThatThrownBy(() -> service.listHome())
+                () -> assertThatThrownBy(() -> service.listHome(24, 0, null))
                         .isInstanceOf(IncorrectResultSizeDataAccessException.class)
                         .hasMessageContaining("expected 1")
                         .hasMessageContaining("actual 2"),
                 () -> assertThat(jdbc.calls).isEqualTo(1),
                 () -> assertThat(jdbc.innerCalls).isEqualTo(1),
 
-                () -> assertThatThrownBy(() -> service.listHome())
+                () -> assertThatThrownBy(() -> service.listHome(24, 0, null))
                         .isInstanceOf(IncorrectResultSizeDataAccessException.class),
                 () -> assertThat(jdbc.calls).as("数据异常不得固化到 TTL").isEqualTo(2),
-                () -> assertThat(cache(HOME).get("all")).isNull());
+                () -> assertThat(cache(HOME).get("page-v4:24:0:")).isNull());
     }
 
     // ===================== 工具 =====================

@@ -212,8 +212,12 @@ public class GoodsController {
     //这是一个接口（用于返回商品对应的所有信息）
     // 方法体与缓存注解在 GoodsCacheService.listHome()；本笔再上移一层（纯委托）。
     @PostMapping("/goodsSelectHome")
-    public Result<Map<String, Object>> goodsSelectHome() {
-        return Result.of(goodsService.goodsSelectHome());
+    public Result<Map<String, Object>> goodsSelectHome(
+            @RequestParam(value = "limit", required = false) Integer limit,
+            @RequestParam(value = "offset", required = false) Integer offset,
+            @RequestParam(value = "MerchantId", required = false) String MerchantId
+    ) {
+        return Result.of(goodsService.goodsSelectHome(limit, offset, MerchantId));
     }
 
     // 这是一个接口（用于下架商品）
@@ -384,8 +388,12 @@ public class GoodsController {
     // 动态 SQL 的构造随之下沉 GoodsDao.searchByKeyword()。
     // ⚠️ 该 SQL 的两个已知问题（逐字 LIKE 拼串 + 无 schema 前缀）**本笔不修** —— 见 GoodsDao。
     @PostMapping("/productSearch")
-    public Result<Map<String, Object>> productSearch(String keyword) {
-        return Result.of(goodsService.productSearch(keyword));
+    public Result<Map<String, Object>> productSearch(
+            String keyword,
+            @RequestParam(value = "limit", required = false) Integer limit,
+            @RequestParam(value = "offset", required = false) Integer offset
+    ) {
+        return Result.of(goodsService.productSearch(keyword, limit, offset));
     }
 
     // ═══ C3 块 3 新增：二级类目筛选 ═══
@@ -397,9 +405,11 @@ public class GoodsController {
     @PostMapping("/categoryGoods")
     public Result<Map<String, Object>> categoryGoods(
             @RequestParam("TypeId") Integer TypeId,
-            @RequestParam(value = "keyword", required = false) String keyword
+            @RequestParam(value = "keyword", required = false) String keyword,
+            @RequestParam(value = "limit", required = false) Integer limit,
+            @RequestParam(value = "offset", required = false) Integer offset
     ) {
-        return Result.of(goodsService.categoryGoods(TypeId, keyword));
+        return Result.of(goodsService.categoryGoods(TypeId, keyword, limit, offset));
     }
 
     // ═══ C3 块 3 新增：商家查自己的提审历史 / 状态 ═══

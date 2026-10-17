@@ -254,12 +254,18 @@ public class GoodsDao {
      * <p>⚠️ {@code keyword} 必须非空 —— 三层的 null 归一（{@code keyword == null ⇒ ""}）
      * 留在 {@code GoodsService}，那是入参规则不是 SQL。
      */
-    public List<Map<String, Object>> searchByKeyword(String keyword) {
+    public List<Map<String, Object>> searchByKeyword(String keyword, int limit, int offset) {
         String[] keys = keyword.trim().split("");
         StringBuilder nameSql = new StringBuilder();
+        java.util.List<Object> args = new java.util.ArrayList<>();
+        args.add(keyword.trim());
         for (String s : keys) {
             if (!s.isEmpty()) {
-                nameSql.append(" OR g.GoodName LIKE '%").append(s).append("%' ");
+                // ⚠️ 块 7 收尾：逐字符 LIKE 从**字符串拼接**改成**绑定参数**（既有缺陷结清）。
+                //    原写法把用户输入直接拼进 SQL：单引号会造语法错误（500），`%` / `_` 会当通配符
+                //    放大成全表。现在字符是参数，`%` / `_` / `\` 另做转义 ⇒ 它们只匹配字面量。
+                nameSql.append(" OR g.GoodName LIKE CONCAT('%', ?, '%') ESCAPE '\\\\' ");
+                args.add(likeEscape(s));
             }
         }
 
@@ -277,9 +283,18 @@ public class GoodsDao {
                 "FROM goods g WHERE 1=1 " +
                 "AND g.ShelfState = 1 AND g.DeletedAt IS NULL " +
                 "AND (g.GoodType = ? " +
-                nameSql + ")";
+                nameSql + ") " +
+                // ⚠️ 分页要求确定性排序：无 ORDER BY 的 LIMIT/OFFSET 在 InnoDB 里可能重复/漏行。
+                "ORDER BY g.Id DESC LIMIT ? OFFSET ?";
 
-        return jdbcClient.sql(sql).param(keyword.trim()).query().listOfRows();
+        args.add(limit);
+        args.add(offset);
+        return jdbcClient.sql(sql).params(args.toArray()).query().listOfRows();
+    }
+
+    /** LIKE 参数里的通配符转义（`\` → `\\`，`%` / `_` 加反斜杠），配合 SQL 的 `ESCAPE '\\'`。 */
+    private static String likeEscape(String s) {
+        return s.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_");
     }
 
     // ==================== 读：审计快照（C3 批 A 新增，追加在类尾） ====================
@@ -328,17 +343,17 @@ public class GoodsDao {
      * （单引号注入 / {@code %} 未转义，见 {@link #searchByKeyword} 的 ⚠️）。{@code keyword}
      * 空 ⇒ 不加这一条谓词。
      */
-    public List<Map<String, Object>> selectByTypeId(Integer TypeId, String keyword) {
+    public List<Map<String, Object>> selectByTypeId(Integer TypeId, String keyword, int limit, int offset) {
         boolean filtered = keyword != null && !keyword.trim().isEmpty();
         String sql = "SELECT * FROM mall_management_sql.goods "
                 + "WHERE TypeId = ? AND ShelfState = 1 AND DeletedAt IS NULL "
                 + (filtered ? "AND GoodName LIKE CONCAT('%', ?, '%') " : "")
-                + "ORDER BY Id DESC";
+                + "ORDER BY Id DESC LIMIT ? OFFSET ?";
         JdbcClient.StatementSpec spec = jdbcClient.sql(sql).param(TypeId);
         if (filtered) {
             spec = spec.param(keyword.trim());
         }
-        return spec.query().listOfRows();
+        return spec.params(limit, offset).query().listOfRows();
     }
 
     /**

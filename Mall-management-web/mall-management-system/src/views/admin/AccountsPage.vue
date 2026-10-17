@@ -126,21 +126,15 @@
     <template v-else-if="tab === 'users'">
     <h2 class="a-h2">用户治理 <span class="a-h2n">封禁只标 `user` 行、不动 `login`（封禁是状态，不是删除）</span></h2>
 
-    <form class="a-filters" @submit.prevent="loadUsers">
+    <form class="a-filters" @submit.prevent="searchUsers">
       <label class="a-f">
         <span>关键字</span>
         <input
           v-model.trim="uf.keyword"
           type="text"
           placeholder="用户名 / 客户号 / 商家号"
-          @keyup.enter="loadUsers"
+          @keyup.enter="searchUsers"
         />
-      </label>
-      <label class="a-f a-f-narrow">
-        <span>上限</span>
-        <select v-model.number="uf.limit" @change="loadUsers">
-          <option v-for="n in [50, 100, 200, 500]" :key="n" :value="n">{{ n }}</option>
-        </select>
       </label>
       <div class="a-f-actions">
         <button type="submit" class="a-btn a-btn-on" :disabled="loadingUsers">
@@ -248,9 +242,17 @@
       </li>
     </ol>
     <p v-else-if="!loadingUsers" class="a-empty">没有命中任何用户。</p>
-    <p v-if="usersTruncated" class="a-note">
-      已截断：按上限 <b>{{ usersLimit }}</b> 条显示，共命中 <b>{{ usersTotal }}</b> 条 —— 收窄关键字，或把上限调大。
-    </p>
+    <!-- 块 7 收尾 · P1：用户列表改标准分页（默认每页 20），由后端 `total` 驱动。 -->
+    <Pager
+      :total="usersTotal"
+      :limit="uf.limit"
+      :offset="uf.offset"
+      :sizes="[20, 50, 100]"
+      unit="行"
+      label="用户治理"
+      :disabled="loadingUsers"
+      @change="onUsersPage"
+    />
 
     </template>
 
@@ -416,6 +418,7 @@ import {
 // ⚠️ 这两条读的是**公共读** `/template/list`（`TemplatePicker` 内部走 `api/template.js`），
 //    与 `api/accounts.js` 无关 —— 模板不是「账号域」的东西，它是全站共用的资源。
 import TemplatePicker from '../../components/TemplatePicker.vue'
+import Pager from '../../components/Pager.vue'
 // 图表（可视化段 commit 3）—— 本页只用「用户增长」折线 + 「封禁分布」环图两张。
 import LineChart from '../../components/charts/LineChart.vue'
 import DonutChart from '../../components/charts/DonutChart.vue'; import IconGlyph from '../../components/ui/IconGlyph.vue'   // ⚠️ 两条 import **同行**（2026-10-11 补图标那一笔）—— 为**净零行数**：本文件被 `progress.md:1935` / `slot-registry.md:4023` 按行号钉住（`:207`，指那条被有意删掉的 ⑤ 块注释）
@@ -582,10 +585,10 @@ async function reject(r) {
 }
 
 // ── ③ 用户治理 ───────────────────────────────────────────────────────────────
-const uf = reactive({ keyword: '', limit: 100 })
+const uf = reactive({ keyword: '', limit: 20, offset: 0 })   // 块 7 收尾 · P1：标准分页，默认每页 20
 const users = ref([])
 const usersTotal = ref(0)
-const usersLimit = ref(100)
+const usersLimit = ref(20)
 const loadingUsers = ref(false)
 const banReasons = reactive({})
 /** 正在被处理的那个账号（防重复点）。`null` = 空闲。 */
@@ -718,7 +721,7 @@ const banMix = computed(() => {
 async function loadUsers() {
   loadingUsers.value = true
   try {
-    const data = await accountsUsers({ keyword: uf.keyword, limit: uf.limit })
+    const data = await accountsUsers({ keyword: uf.keyword, limit: uf.limit, offset: uf.offset })
     if (!data || !data.success) {
       users.value = []
       say('bad', (data && data.msg) || '用户列表加载失败')
@@ -727,6 +730,8 @@ async function loadUsers() {
     users.value = Array.isArray(data.list) ? data.list : []
     usersTotal.value = Number(data.total) || 0
     usersLimit.value = data.limit == null ? uf.limit : data.limit
+    if (data.limit != null) uf.limit = Number(data.limit)   // 后端回显的生效上限（防 pageSize=99999）
+    if (data.offset != null) uf.offset = Number(data.offset)
   } catch (e) {
     users.value = []
     usersTotal.value = 0
@@ -739,7 +744,21 @@ async function loadUsers() {
 
 function resetUsers() {
   uf.keyword = ''
-  uf.limit = 100
+  uf.limit = 20
+  uf.offset = 0
+  loadUsers()
+}
+
+/** 关键字一变就从第一页看起（留着旧 offset 会落到空页）。 */
+function searchUsers() {
+  uf.offset = 0
+  loadUsers()
+}
+
+/** `Pager.vue` 回调：翻页 / 改每页条数都走这一处。 */
+function onUsersPage({ limit, offset }) {
+  uf.limit = limit
+  uf.offset = offset
   loadUsers()
 }
 

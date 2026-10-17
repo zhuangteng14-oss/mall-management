@@ -548,9 +548,9 @@
         </div>
       </div>
 
-      <!-- ── 三、推荐区（猜你喜欢）——**真功能**（`goods.goodsSelectHome` ⇒ `goodsWithUser`）──
+      <!-- ── 三、推荐区（猜你喜欢）——**真功能**（`goods.goodsSelectHome` ⇒ `recFeed`）──
            ⚠️ 稿的 4 张卡是 mock（声谷 Lite / 空气传导 / 数据线 / 蓝牙音箱），本区**有真数据**
-              ⇒ 落真卡：`goodsWithUser` 取前 4 条（与稿的 4 栏栅格对齐）。
+              ⇒ 落真卡。块 7 收尾 · P1 起改为真分页 + 下拉加载更多（每页 24；栅格仍是 4 栏）。
            ⚠️ 卡在 **C3 块 5 · B 组续笔（2026-10-12）收成公共组件** `components/ProductCard.vue`
               （本页 / 主页 / 店铺主页**三处共用**）—— 本区改前那份手写卡（1/1 图、整值价、
               4 个 query 参数）随之作废。组件与**主页**那一枚是同一份结构，差异只有本区不传
@@ -567,9 +567,18 @@
            ⚠️ 未抽组件前，本区与店铺主页的「像不像」靠手写对齐；收成一件之后由**结构**保证。 -->
       <section class="reco">
         <h2 title="真功能：现有端点 goods.goodsSelectHome，本区不需要新端点">猜你喜欢</h2>
-        <p v-if="recommendGoods.length === 0" class="none">暂无推荐</p>
+        <p v-if="recommendGoods.length === 0 && !recLoading" class="none">暂无推荐</p>
         <div v-else class="cards">
-          <ProductCard v-for="goods in recommendGoods.slice(0, 4)" :key="goods.Id" :goods="goods" />
+          <ProductCard v-for="goods in recommendGoods" :key="goods.Id" :goods="goods" />
+        </div>
+        <!-- 块 7 收尾 · P1：本区由「只取前 4 条」改为真分页 + 下拉加载更多（每页 24）。 -->
+        <div v-if="recommendGoods.length" ref="recSentinel" class="reco-more"
+             :class="{ 'reco-more--loading': recLoading, 'reco-more--done': recDone }"
+             @click="!recDone && recRetry">
+          <span v-if="recLoading">正在加载更多…</span>
+          <span v-else-if="recErrMsg">加载失败，点击重试</span>
+          <span v-else-if="recDone">已经到底了</span>
+          <span v-else>下拉加载更多</span>
         </div>
       </section>
     </div>
@@ -659,7 +668,7 @@ import { ref, onMounted, computed, watch, onBeforeUnmount } from 'vue'   // ⚠�
 import { useRoute, useRouter } from 'vue-router'
 import { http, handleApiError } from '../api/http'
 import { endpoints } from '../api/endpoints'; import { orderAdd, cartAdd } from '../api/order'   // ⚠️ C3 块 4：**同行追加**（不新增行 —— 本文件 `:794`/`:803` 被 `slot-registry.md:1994-1995` 按行号引（〈Bug 1〉本笔 +19 行前为 `:775`/`:784`），此处加行会顶漂它们）。两个函数就是原先那两串 `URLSearchParams` + `http.post` + `res.json()` 的收口
-import CashierDialog from '../components/CashierDialog.vue'; import ProductCard from '../components/ProductCard.vue'; import ReportDialog from '../components/ReportDialog.vue'; import { sharedList } from '../config/goods-flags'   // ⚠️ **同行追加** `sharedList`（C3 块 5 ·〈Bug 2/3〉落码，2026-10-12）：本页只用它算「猜你喜欢」（见 `:522` 那条按语）。本行已有一条「本笔确实新增了一行」的记账（2026-10-10 Bug 1），**这一笔不再加行** —— 本文件下面 `:571` / `:638` / `:794` / `:1032` / `:1330` 等处被文档按行号钉着   // ⚠️ 2026-10-10（Bug 1）：收银台与「我的订单」**共用同一个组件** —— 本行**确实**新增了一行；本笔在 `ProductPage.vue` 净 +19 行（`git diff` 实测：模板 `:412` 起 +5、import +1、`handlePay` 段 +13）⇒ 下面两处 `:775`/`:784` 漂到 `:794`/`:803`，随本笔一并重指（见 `slot-registry.md:1994-1995`）
+import CashierDialog from '../components/CashierDialog.vue'; import ProductCard from '../components/ProductCard.vue'; import ReportDialog from '../components/ReportDialog.vue'; import { sharedList } from '../config/goods-flags'; import { useInfiniteList } from '../composables/useInfiniteList'   // ⚠️ **同行追加** `sharedList`（C3 块 5 ·〈Bug 2/3〉落码，2026-10-12）：本页只用它算「猜你喜欢」（见 `:522` 那条按语）。本行已有一条「本笔确实新增了一行」的记账（2026-10-10 Bug 1），**这一笔不再加行** —— 本文件下面 `:571` / `:638` / `:794` / `:1032` / `:1330` 等处被文档按行号钉着   // ⚠️ 2026-10-10（Bug 1）：收银台与「我的订单」**共用同一个组件** —— 本行**确实**新增了一行；本笔在 `ProductPage.vue` 净 +19 行（`git diff` 实测：模板 `:412` 起 +5、import +1、`handlePay` 段 +13）⇒ 下面两处 `:775`/`:784` 漂到 `:794`/`:803`，随本笔一并重指（见 `slot-registry.md:1994-1995`）
 import { getMerchantId, getCustomerId, getUsername, isLoggedIn, getRole } from '../api/auth'; import IconGlyph from '../components/ui/IconGlyph.vue'; import { coupons, claim, subsidyGoods, seckillLive } from '../api/marketing'; import { couponName } from '../config/coupon-format'; import { useCouponPick } from '../composables/useCouponPick'; import { list as commentList, add as commentAdd, remove as commentRemove, accept as commentAccept, like as commentLike, myOrders as commentOrders } from '../api/comment'; import DonutChart from '../components/charts/DonutChart.vue'   // ⚠️ **块 6 整改 commit 2〈问答漏项补齐〉同行追加** `DonutChart`（§4.2「左圆比例图」，与 `views/admin/AccountsPage.vue` 的「封禁分布」同款）—— **不新增行**，故本行行号不动。⚠️ **整改 commit 4〈举报〉曾同行追加** `reportAdd`（`/report/add`；本页的「举报 / 提删」弹窗，§4.4 与 §4.2 的商家提删走同一条）—— **2026-10-13 撤出**：举报弹窗抽成 `components/ReportDialog.vue` 后本页不再自己发 `/report/add`，该 import 随弹窗搬进组件（本行仍**不新增行**）。⚠️ 六条 import **同行**（第 6 条 `../api/comment` 的六个别名：块 6 · commit 1「评论」+ commit 2「问答」的 `accept`，2026-10-12 —— 别名是必需的，`list`/`add` 这种裸名在本文件里跟 `allItems` 那些局部名撞脸，读不出是谁的）（第 5 条 `useCouponPick`：块 5 · commit 5 续笔「立即购买」也能用券，2026-10-12；与 `ShoppingCart.vue` 共用同一处，不抄第二份）（第 2、3 条：2026-10-11 补图标笔 + C3 块 5 · commit 1；第 4 条 `couponName`：块 5 · A 组 · A7 后半；`getUsername`：块 5 券口径改登录名，2026-10-12）—— 合并到既有行 = 不新增行号漂移（本文件 `:794`/`:803` 被 `slot-registry.md:1994-1995` 按行号引，上面 `:424` 那条注释记过同一件事）。⚠️ **块 5 · commit 1 仍整体 +90 行**（模板 +17 / `<script setup>` 尾 +70 / `<style>` +3）⇒ `slot-registry.md:1994` 引的 `:794` 漂 **`:881`**、`:1995` 引的 `:803` 漂 **`:890`**（两值均为 `grep -n` 实测，见 `_work/b5-repoint.md`）。⚠️ **块 6 · commit 1 又整体 +N 行**、**commit 2（问答）再 +M 行**，漂移台账见 `_work/b6-commit1-repoint.md` 与 `_work/b6-commit2-repoint.md`（收口 commit 逐处重指）。
 
 const route = useRoute()
@@ -698,7 +707,33 @@ const discountRate = computed(() => {
   const r = Math.round((p / o) * 10 * 100) / 100
   return Number.isInteger(r) ? String(Math.trunc(r)) : String(r)   // ⚠️ **原写 `Math.rint(r)`**（C3 块 5〈折扣〉落码时的口误）—— `Math.rint` 是 **Java 的**，JS 的 `Math` 上没有这个函数 ⇒ 一求值就 `TypeError: Math.rint is not a function`，**整支 render 函数抛出** ⇒ 本页停在「上一次成功的渲染」上（`allItems` 还空着的那一帧）⇒ 用户看到的就是**标题在（它来自 `route.query.GoodName`）、价格只剩 `¥`、型号空、图空**。⚠️ 它**只在 `discountRate` 被求值时**才炸，而模板只在 `hasDiscount` 为真时读它 ⇒ **全库 43 件在架商品里只有 2 件（有划线价的）中招**，另外 41 件照常 —— 这正是它藏了一整轮的原因。判据改成 `Number.isInteger`（`v === Math.rint(v)` 的原意就是「v 是整数」）。2026-10-12 修，同行替换、不新增行。
 })
-const goodsWithUser = ref([]); const recommendGoods = computed(() => sharedList(goodsWithUser.value))   // ⚠️ **同行追加**（C3 块 5 ·〈Bug 1/2〉落码，2026-10-12）：「猜你喜欢」真正渲染的那一份 = `goodsWithUser` 过一遍 `sharedList`（**去重 + 滤已售完**，共享面，与主页 / 搜索页 / 店铺页猜你喜欢同源，判据全在 `config/goods-flags.js`）。⚠️ **不能直接换掉 `goodsWithUser` 本身** —— 它还有第二个消费方：`loadAllItems` 里 `goodsWithUser.value.find(...)`（`:565`）要按 `MerchantId + GoodName` 取**当前这件**的 `UserName`；换掉它，已售完那件商品的详情页会**丢掉店名**（拿一个 2 行的改动换一个新 bug）。⇒ 只另开一支给模板用。⚠️ 同行追加 = 不新增行号（本文件多处被按行号引）
+// ── 块 7 收尾 · P1：`goodsSelectHome` 已改为真分页 ──────────────────────────
+// 本页原先靠「拉全量再 find」拿两样东西：① 当前商品的店名（`UserName`）；② 猜你喜欢。
+// 端点分页后**当前商品不一定落在第一页** ⇒ 店名单独按 `MerchantId` 取一小页来 find；
+// 猜你喜欢改成 `useInfiniteList`（滚到底再要一页，与首页同一份实现）。
+const sellerUserName = ref('')
+// 当前这件商品的整行（`Detail` / `Spec` / `AfterSale` / 服务承诺位都从它读）。
+// 端点分页后不能再去「全量列表」里 find ⇒ 由按 `MerchantId` 取的那一页兜住。
+const currentGood = ref(null)
+const REC_PAGE_SIZE = 24
+const recFeed = useInfiniteList(async (offset, limit) => {
+  const res = await http.post(endpoints.goods.goodsSelectHome,
+    new URLSearchParams({ limit: String(limit), offset: String(offset) }))
+  const data = await res.json()
+  if (!data.success) throw new Error(data.msg || '请求失败')
+  return { rows: data.list || [] }
+}, REC_PAGE_SIZE)
+// 推荐位**不推当前这件**：按「商家 + 品名」滤掉（与 `loadAllItems` 认货的判据同一条）。
+const recommendGoods = computed(() => sharedList(recFeed.items.value).filter(
+  (g) => !(String(g.MerchantId) === String(sellerId) && g.GoodName === goodName)
+))
+const recSentinel = recFeed.sentinel
+const recLoading = recFeed.loading
+const recDone = recFeed.done
+const recErrMsg = recFeed.errMsg
+const recRetry = recFeed.retry
+// 旧注释（2026-10-12）说「`goodsWithUser` 不能被 `sharedList` 换掉，因为 `loadAllItems` 还要
+// 靠它 find 店名」—— 那个约束随本笔一起消失：店名改由 `sellerUserName` 单独承载（见上）。
 
 const start = ref(0)
 const showImages = computed(() => allItems.value.slice(start.value, start.value + 3))
@@ -710,12 +745,28 @@ const scroll = (d) => {
   start.value = Math.max(0, Math.min(m, start.value + d))
 }
 
-// 加载商家信息
+// 加载商家信息（店名）+ 猜你喜欢第一页
 const loadGoodsWithUser = async () => {
   try {
-    const res = await http.post(endpoints.goods.goodsSelectHome)
-    const data = await res.json()
-    if (data.success) goodsWithUser.value = data.list
+    const tasks = [recFeed.loadNext()]
+    // 店名：按 `MerchantId` 取一页（上限 100）来 find，不依赖「当前商品在全量第一页」。
+    if (sellerId) {
+      tasks.push(http.post(endpoints.goods.goodsSelectHome,
+        new URLSearchParams({ MerchantId: String(sellerId), limit: '100', offset: '0' }))
+        .then((r) => r.json())
+        .then((d) => {
+          if (!d.success) return
+          const hit = (d.list || []).find(
+            (item) => String(item.MerchantId) === String(sellerId) && item.GoodName === goodName
+          )
+          if (hit) {
+            currentGood.value = hit
+            sellerUserName.value = hit.UserName
+          }
+        }))
+    }
+    await Promise.all(tasks)
+    if (recFeed.errMsg.value) handleApiError(new Error(recFeed.errMsg.value), '获取商家名失败：')
   } catch (e) {
     handleApiError(e, '获取商家名失败：')
   }
@@ -741,10 +792,7 @@ const loadAllItems = async () => {
         })
       }
     }
-    const matchGood = goodsWithUser.value.find(
-      (item) => item.MerchantId === sellerId && item.GoodName === goodName
-    )
-    if (matchGood) items.forEach((it) => { it.UserName = matchGood.UserName })
+    if (sellerUserName.value) items.forEach((it) => { it.UserName = sellerUserName.value })
     allItems.value = items
   } catch (e) {
     handleApiError(e, '请求失败')
@@ -1138,7 +1186,7 @@ const loadSubsidy = async () => {
 }
 onMounted(loadSubsidy)
 
-/* 2026-10-10〈模板表通用化〉三段快照文本（`goods.Detail` / `Spec` / `AfterSale`）—— 全部写在**同一物理行**（新增行会顶漂下面 `slot-registry.md:1994-1995` 引的 `:794`/`:803`）。⚠️ 取值**从 `route.query` 现取**、不用 setup 期解构的 `sellerId`/`goodName`（`:433-434` 是普通 `const`，同路径只换 query 时组件被复用、它们**不更新**，理由同 `openPopup` 那条）。 */ const detailText = computed(() => { const q = route.query; const g = goodsWithUser.value.find((x) => x.MerchantId === q.MerchantId && x.GoodName === q.GoodName); return (g && g.Detail) || '' }); const specText = computed(() => { const q = route.query; const g = goodsWithUser.value.find((x) => x.MerchantId === q.MerchantId && x.GoodName === q.GoodName); return (g && g.Spec) || '' }); const afterSaleText = computed(() => { const q = route.query; const g = goodsWithUser.value.find((x) => x.MerchantId === q.MerchantId && x.GoodName === q.GoodName); return (g && g.AfterSale) || '' }); /* `Spec` 的行内 `键=值` 约定：一行一条，`=` 只切**第一处**（值里允许再有 `=`）；没有 `=` 的行**整行进 `.v`、`.k` 留空**，而不是丢掉它。 */ const specRows = computed(() => specText.value.split('\n').map((s) => s.trim()).filter((s) => s !== '').map((s) => { const i = s.indexOf('='); return i < 0 ? { k: '', v: s } : { k: s.slice(0, i).trim(), v: s.slice(i + 1).trim() } })); const promiseLabels = computed(() => { const q = route.query; const g = goodsWithUser.value.find((x) => x.MerchantId === q.MerchantId && x.GoodName === q.GoodName); const ALL = ['正品保障', '7 天无理由', '极速退款', '运费险']; const KEYS = ['PromiseGenuine', 'PromiseReturn7', 'PromiseFastRefund', 'PromiseFreightIns']; if (!g) return ALL; if (!KEYS.some((k) => g[k] !== undefined && g[k] !== null)) return ALL; return ALL.filter((_, i) => Number(g[KEYS[i]])) }); const mergeSkus = async (baseItems) => { try { const rs = await http.post(endpoints.goods.skuList, `MerchantId=${sellerId}&GoodName=${goodName}`); const ds = await rs.json(); const skus = (ds && ds.success && ds.list) || []; if (!skus.length) return baseItems; const img = baseItems.length ? baseItems[0].goodImg : ''; const merged = skus.map((s) => ({ productCode: String(s.SkuCode || ''), price: s.Price, goodImg: img })).filter((s) => s.productCode); return merged.length ? merged : baseItems } catch (e) { return baseItems } }; const isLogin = computed(() => isLoggedIn()); const activeTab = ref('desc')   // 结构二次调整（2026-10-07）：Tab 条当前面，UI 展示状态（不计功能量）；⚠️ **同行追加、不新增行** —— 上面那条「新增行落在最大被引行之后」的约束在本笔**不成立**（`slot-registry.md:1994-1995` 引的 `:794`/`:803` 都在下面），新增行会顶漂它们。
+/* 2026-10-10〈模板表通用化〉三段快照文本（`goods.Detail` / `Spec` / `AfterSale`）—— 全部写在**同一物理行**（新增行会顶漂下面 `slot-registry.md:1994-1995` 引的 `:794`/`:803`）。⚠️ 取值**从 `route.query` 现取**、不用 setup 期解构的 `sellerId`/`goodName`（`:433-434` 是普通 `const`，同路径只换 query 时组件被复用、它们**不更新**，理由同 `openPopup` 那条）。 */ const detailText = computed(() => { const g = currentGood.value; return (g && g.Detail) || '' }); const specText = computed(() => { const g = currentGood.value; return (g && g.Spec) || '' }); const afterSaleText = computed(() => { const g = currentGood.value; return (g && g.AfterSale) || '' }); /* `Spec` 的行内 `键=值` 约定：一行一条，`=` 只切**第一处**（值里允许再有 `=`）；没有 `=` 的行**整行进 `.v`、`.k` 留空**，而不是丢掉它。 */ const specRows = computed(() => specText.value.split('\n').map((s) => s.trim()).filter((s) => s !== '').map((s) => { const i = s.indexOf('='); return i < 0 ? { k: '', v: s } : { k: s.slice(0, i).trim(), v: s.slice(i + 1).trim() } })); const promiseLabels = computed(() => { const g = currentGood.value; const ALL = ['正品保障', '7 天无理由', '极速退款', '运费险']; const KEYS = ['PromiseGenuine', 'PromiseReturn7', 'PromiseFastRefund', 'PromiseFreightIns']; if (!g) return ALL; if (!KEYS.some((k) => g[k] !== undefined && g[k] !== null)) return ALL; return ALL.filter((_, i) => Number(g[KEYS[i]])) }); const mergeSkus = async (baseItems) => { try { const rs = await http.post(endpoints.goods.skuList, `MerchantId=${sellerId}&GoodName=${goodName}`); const ds = await rs.json(); const skus = (ds && ds.success && ds.list) || []; if (!skus.length) return baseItems; const img = baseItems.length ? baseItems[0].goodImg : ''; const merged = skus.map((s) => ({ productCode: String(s.SkuCode || ''), price: s.Price, goodImg: img })).filter((s) => s.productCode); return merged.length ? merged : baseItems } catch (e) { return baseItems } }; const isLogin = computed(() => isLoggedIn()); const activeTab = ref('desc')   // 结构二次调整（2026-10-07）：Tab 条当前面，UI 展示状态（不计功能量）；⚠️ **同行追加、不新增行** —— 上面那条「新增行落在最大被引行之后」的约束在本笔**不成立**（`slot-registry.md:1994-1995` 引的 `:794`/`:803` 都在下面），新增行会顶漂它们。
 
 // ── 块 5〈秒杀〉：当前型号的秒杀价（C3 块 5 · commit 4，2026-10-12）─────────────────────
 // 本段落在 `<script setup>` 的**最末**（上面那行物理长行之后）：本文件的行号被
@@ -1998,6 +2046,20 @@ button { background: none; border: 0; cursor: pointer; }
    不是卡的一部分 ⇒ 留在本页。⚠️ 搬走的那一份里 `.pr` 带着 `font-family: var(--font-display)`
    （楷体数字）—— 统一到主页那一套后**不再用**，价格随主页走同一款数字（登记为偏离）。 */
 .cards { margin-top: var(--s5); display: grid; grid-template-columns: repeat(4, 1fr); gap: var(--s5); }
+/* 下拉加载更多（块 7 收尾 · P1）：渐变条 + 加载中转圈；到底后淡出但仍占位，
+   避免列表末尾跳动。与 `HomePage.vue` / `GoodsSelect.vue` 的 `.rec-more` / `.list-more` 同形。 */
+.reco-more { position: relative; margin-top: var(--s5); padding: var(--s4) 0 var(--s2);
+             text-align: center; font-size: var(--fs-xs); color: var(--ink-3); cursor: pointer;
+             transition: opacity .24s ease; }
+.reco-more::before { content: ''; position: absolute; left: 0; right: 0; top: calc(-1 * var(--s5));
+                     height: var(--s5); pointer-events: none;
+                     background: linear-gradient(to bottom, transparent, var(--bg)); }
+.reco-more--done { opacity: 0; cursor: default; }
+.reco-more--loading::after { content: ''; display: inline-block; width: 12px; height: 12px;
+                             margin-left: var(--s2); vertical-align: -1px; border-radius: 50%;
+                             border: 2px solid var(--line-2); border-top-color: var(--ink-3);
+                             animation: reco-spin .8s linear infinite; }
+@keyframes reco-spin { to { transform: rotate(360deg); } }
 
 /* ── 付款确认弹窗（稿 `dlg2`）────────────────────────────────────────────
    ⚠️ 居中用子元素 `margin:auto`，**不用** `align-items:center` —— 后者在内容比视口高时

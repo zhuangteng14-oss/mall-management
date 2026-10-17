@@ -49,10 +49,11 @@ async function post(path, body) {
 /**
  * 用户列表（封禁的排前面，同序再按 `username` 升序 —— 后端 `UserGovernanceDao.selectUsers`）。
  *
- * @param {{keyword?:string, limit?:number}} params
+ * @param {{keyword?:string, limit?:number, offset?:number}} params
  *        `keyword` 命中 `username` / `customerid` / `merchantid` 三列的**包含**匹配（模糊）；
- *        `limit` 缺省 100、上限 500（后端夹取，回显在 `limit` 里）。
- * @returns {Promise<{success:boolean, list:Array, total:number, limit:number}>}
+ *        `limit` 缺省 100、上限 500（后端夹取，回显在 `limit` 里）；`offset` 负数归 0。
+ *        ⚠️ 块 7 收尾 · P1 起管理页默认 `limit=20` + `offset` 翻页（后端真 `LIMIT ? OFFSET ?`）。
+ * @returns {Promise<{success:boolean, list:Array, total:number, limit:number, offset:number}>}
  *          ⚠️ `total` 是**同一筛选条件下**的总数（与 `list` 同源），不是全表数。
  *          ⚠️ 行里**包含管理员自己**（`selectUsers` 不筛 `usertype`）—— 但封禁对管理员**无效**
  *          （`AuthInterceptor.isBanned` 对 `role=3` 豁免），见 `AuthInterceptor` 第 ⑤ 档。

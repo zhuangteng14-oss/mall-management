@@ -240,12 +240,6 @@
     </h2>
 
     <form class="a-filters" @submit.prevent="loadRecords">
-      <label class="a-f a-f-narrow">
-        <span>上限</span>
-        <select v-model.number="f.limit" :disabled="running" @change="loadRecords">
-          <option v-for="n in [10, 20, 50, 100, 200]" :key="n" :value="n">{{ n }}</option>
-        </select>
-      </label>
       <div class="a-f-actions">
         <button type="submit" class="a-btn" :disabled="loadingRecords">
           <IconGlyph name="ok" />{{ loadingRecords ? '载入中…' : '刷新' }}
@@ -254,9 +248,6 @@
     </form>
 
     <p v-if="recErr" class="a-err">{{ recErr }}</p>
-    <p v-else-if="truncated" class="a-note">
-      已截断：按上限 <b>{{ recLimit }}</b> 条显示，共命中 <b>{{ total }}</b> 条 —— 把上限调大。
-    </p>
 
     <ol v-if="records.length" class="a-stream">
       <li v-for="r in records" :key="r.Id" class="a-ev" :class="{ on: openId === r.Id }">
@@ -395,6 +386,18 @@
     </ol>
     <p v-else-if="!loadingRecords && !recErr" class="a-empty">还没有任何演练记录。</p>
 
+    <!-- 块 7 收尾 · P1：标准分页（默认每页 20，可选 10/20/50/100），由后端 `total` 驱动。 -->
+    <Pager
+      :total="total"
+      :limit="f.limit"
+      :offset="f.offset"
+      :sizes="[10, 20, 50, 100]"
+      unit="条"
+      label="演练记录"
+      :disabled="loadingRecords"
+      @change="onRecordsPage"
+    />
+
     <!-- ── ⑤ 清场（破坏性 · commit 9 补上 8b 遗留的按钮）─────────────────────────
          ⚠️ 本页**唯一**会真删数据的动作，也是**唯一**两段式确认的按钮（同 `OrderPage.vue`
             的 `armed`）：第一次点只上膛（按钮转危险色 + 页顶一行提示），第二次点才发请求。
@@ -488,6 +491,7 @@ import { attackRecords, attackScenarios, attackStatus, cleanupAttack, runAttack,
 import { replaySession, startReplaySession } from '../../../api/replay-session'
 import WeightSlider from '../../../components/observe/WeightSlider.vue'
 import IconGlyph from '../../../components/ui/IconGlyph.vue'
+import Pager from '../../../components/Pager.vue'
 // commit 9 收敛：场景 key → 中文（`config/labels/observe-labels.js` 的 `SCENARIO_LABEL`）+ 角色码 → 中文。
 // ⚠️ commit 10c 起本页还吃两张新表：`PROTECTIONS`/`PROTECTION_LABEL`（五个防护开关）与
 //    `INJECTIONS`/`INJECTION_LABEL`（三个注入）—— 连同声明序一起去 `labels/` 取，本页**不写死**
@@ -651,10 +655,9 @@ function persistForm() {
 
 const records = ref([])
 const total = ref(0)
-const recLimit = ref(20)
 const loadingRecords = ref(false)
 const recErr = ref('')
-const f = reactive({ limit: 20 })
+const f = reactive({ limit: 20, offset: 0 })   // 块 7 收尾 · P1：标准分页（默认每页 20）
 const openId = ref(null)
 
 // ── 清场（破坏性 · commit 9 补上 8b 遗留的按钮）──────────────────────────────
@@ -873,11 +876,12 @@ async function loadRecords() {
   loadingRecords.value = true
   recErr.value = ''
   try {
-    const data = await attackRecords({ limit: f.limit, offset: 0 })
+    const data = await attackRecords({ limit: f.limit, offset: f.offset })
     records.value = (data && data.list) || []
     total.value = data && data.total != null ? Number(data.total) : 0
     // ⚠️ 用**后端回显**的生效上限（请求 9999 会被夹到 200），同 `AuditPage.vue` 的处置。
-    recLimit.value = data && data.limit != null ? Number(data.limit) : f.limit
+    if (data && data.limit != null) f.limit = Number(data.limit)
+    if (data && data.offset != null) f.offset = Number(data.offset)
   } catch (e) {
     records.value = []
     total.value = 0
@@ -887,7 +891,12 @@ async function loadRecords() {
   }
 }
 
-const truncated = computed(() => total.value > records.value.length)
+/** `Pager.vue` 的回调：它只报 `{limit, offset}`，发请求仍由本页做。 */
+function onRecordsPage({ limit, offset }) {
+  f.limit = limit
+  f.offset = offset
+  loadRecords()
+}
 
 // ── 清场（破坏性 · 见 `api/observe.js#cleanupAttack` 的三条 ⚠️）──────────────
 /**

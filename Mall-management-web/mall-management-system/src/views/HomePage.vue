@@ -248,9 +248,27 @@
           <h2>为你推荐</h2>
           <button type="button" class="more" @click="searchByType('')" title="查看全部商品 —— 接通搜索页（2026-10-12 用户裁定 #6；不带关键词进 GoodsSelect）">查看全部</button>
         </div>
-        <p v-if="goodsList.length === 0" class="empty-tip">暂无商品</p>
+        <p v-if="homeErrMsg" class="empty-tip">
+          商品加载失败：{{ homeErrMsg }}
+          <button type="button" class="more" @click="retryHome">重试</button>
+        </p>
+        <p v-else-if="goodsList.length === 0 && !homeLoading" class="empty-tip">暂无商品</p>
         <div v-else class="grid">
           <ProductCard v-for="goods in goodsList" :key="goods.Id" :goods="goods" :before-nav="onCardNav" />
+        </div>
+        <!-- 无限滚动哨兵 + 底部渐变（块 7 收尾 · P1）。哨兵本身留在文档流里（高度很小），
+             `useInfiniteList` 靠 IntersectionObserver 观察它；渐变是「还有下一页」的视觉提示。 -->
+        <div
+          v-if="goodsList.length"
+          ref="homeSentinel"
+          class="rec-more"
+          :class="{ 'rec-more--loading': homeLoading, 'rec-more--done': homeDone }"
+          @click="!homeDone && retryHome"
+        >
+          <span v-if="homeLoading">正在加载更多…</span>
+          <span v-else-if="homeErrMsg">加载失败，滚动或点击重试</span>
+          <span v-else-if="homeDone">已经到底了</span>
+          <span v-else>下拉加载更多</span>
         </div>
       </section>
 
@@ -294,7 +312,8 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
+import { useInfiniteList } from '../composables/useInfiniteList'
 import { http, handleApiError } from '../api/http'
 import { endpoints } from '../api/endpoints'; import { getUsername } from '../api/auth'; import { coupons, claim, claimBatch, seckillLive } from '../api/marketing'; import { truthy, couponFace, couponName, couponLine } from '../config/coupon-format'; import ProductCard from '../components/ProductCard.vue'; import { sharedList } from '../config/goods-flags'   // ⚠️ 本条 import **同行**（C3 块 5 · commit 1，2026-10-11；同日「券的信息架构重排」又加两处；〈Bug 2/3〉落码 2026-10-12 再加 `sharedList` 一处）—— 本文件 `:119` / `:242` / `:262` 等多处被按行号引，**能省一行就省一行**（同 `ProductPage.vue:426` 那条的做法）。⚠️ `myCoupons` 已随右栏券包一并**删掉**，格式化三件套改从 `config/coupon-format.js` 取（主页与券包弹窗**共享**，见那个文件头）。⚠️ **A 组 · A7 后半**（2026-10-12）：券卡原先只有「金额 / 门槛 / NEW」三样，用户点名**缺券名 + 券类型** ⇒ 追加 `couponName`（券名）与 `couponLine`（类型·门槛合成一行，内部拿 `couponCond` 拼），仍从同一份 `coupon-format.js` 取。⚠️ `couponCond` 随之**从本页 import 里去掉**（券包弹窗仍直接用）；本页若还要裸用它，`eslint no-unused-vars` 会当场红。⚠️ **2026-10-12〈Bug 2/3〉又加一处** `sharedList`（`config/goods-flags.js` = 商品列表侧共用判据的唯一定义处）—— 本页只用它算「为你推荐」那一格，见 `:333` 那条按语
 
@@ -325,16 +344,36 @@ let timer = null
 // ⚠️ 此处原有「是否登录」的**唯一**判据 `const isLogin = computed(() => isLoggedIn())`（鉴权笔的落点），
 //   2026-10-06 随改判 2 删除（本页已无匿名分支）；保留本行占位，使 `main.js:21` 的 `HomePage.vue:119` 不悬空。
 
+// 块 7 收尾 · P1：首页「为你推荐」改为**真分页 + 无限滚动**（每次 24 条）。
+// ⚠️ 轮播图不再吃全量：只取第一页的前 5 张 —— 它是图的轮换、不是商品列表，
+//    分页后拿 24 张已经足够，拿全部反而会让指示点排成一片。
+const HOME_PAGE_SIZE = 24
+const homeFeed = useInfiniteList(async (offset, limit) => {
+  const res = await http.post(endpoints.goods.goodsSelectHome,
+    new URLSearchParams({ limit: String(limit), offset: String(offset) }))
+  const data = await res.json()
+  if (!data.success) throw new Error(data.msg || '请求失败')
+  const rows = data.list || []
+  if (offset === 0) homeImgList.value = rows.slice(0, 5)
+  return { rows }
+}, HOME_PAGE_SIZE)
+// 模板里用顶层 ref（`<script setup>` 会自动解包），`.value` 只留在 script 里。
+const homeSentinel = homeFeed.sentinel
+const homeLoading = homeFeed.loading
+const homeDone = homeFeed.done
+const homeErrMsg = homeFeed.errMsg
+const retryHome = homeFeed.retry
+watch(homeFeed.items, (rows) => {
+  // 共享面那一份 = **去重 + 滤已售完**（判据唯一定义处：`config/goods-flags.js`）。
+  // ⚠️ 每追加一页都对**累积列表**重算一次：同码两行可能被分到两页（页按 Id DESC 切），
+  //    只在单页内去重会漏掉跨页的那一组。
+  goodsList.value = sharedList(rows)
+})
+
 const getHomeImgAndGoods = async () => {
-  try {
-    const res = await http.post(endpoints.goods.goodsSelectHome)
-    const data = await res.json()
-    if (data.success) {
-      goodsList.value = sharedList(data.list)   // ⚠️ ②（C3 块 5 ·〈Bug 1/2〉落码，2026-10-12）：共享面那一份 = **去重 + 滤已售完**，走 `config/goods-flags.js` 的 `sharedList`（判据只有那一个定义处：为什么键含 `MerchantId`、为什么留 `MIN(Id)`、哪几个面走这一支 …… 全写在那个模块头注）。用户裁定：已售完只在自己店铺页显示。⚠️ **只换这一条**：下一行 `homeImgList`（首屏轮播）**照旧吃全量** —— 它是**图**的轮换、不是商品列表，图上既不画名也不画价、也不带跳转，把一件货从轮播里摘掉只会让图少一张，说不了「已售完」这件事。⚠️ 同行追加 = 不新增行号（本页 `:116` / `:119` / `:242` 等多处被按行号引）
-      homeImgList.value = data.list
-    }
-  } catch (e) {
-    handleApiError(e, '请求失败')
+  await homeFeed.loadNext()
+  if (homeFeed.errMsg.value) {
+    handleApiError(new Error(homeFeed.errMsg.value), '请求失败')
   }
 }
 
@@ -1249,6 +1288,60 @@ button {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
   gap: var(--s4);
+}
+/* ── 无限滚动（块 7 收尾 · P1）────────────────────────────────────────────────
+   ① 新卡淡入：ProductCard 是子组件，scoped 选择器命中不了它内部；但**根节点**带本页的
+      scoped 属性 ⇒ `.grid > *` 选中的正是每张卡的根。新节点插入时动画自然重跑，
+      已在 DOM 里的旧卡不会重播（元素没换）。
+   ② 底部渐变：`rec-more` 的 `::before` 是一条只朝上淡出的遮罩，传达「下面还有」；
+      `done` 后淡出（不再暗示还有内容）。 */
+.grid > * {
+  animation: rec-in 0.32s ease both;
+}
+@keyframes rec-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: none; }
+}
+.rec-more {
+  position: relative;
+  margin-top: var(--s5);
+  padding-top: var(--s6);
+  text-align: center;
+  font-size: var(--fs-xs);
+  color: var(--ink-3);
+  cursor: default;
+}
+.rec-more::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: calc(-1 * var(--s8));
+  height: var(--s8);
+  pointer-events: none;
+  background: linear-gradient(to top, var(--bg) 20%, transparent);
+  transition: opacity 0.3s ease;
+}
+.rec-more--done::before {
+  opacity: 0;
+}
+.rec-more--loading {
+  color: var(--brand-ink);
+}
+.rec-more--loading::after {
+  content: '';
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  margin-left: var(--s2);
+  border: 2px solid var(--brand-soft);
+  border-top-color: var(--brand-ink);
+  border-radius: 50%;
+  vertical-align: -1px;
+  animation: rec-spin 0.8s linear infinite;
+}
+@keyframes rec-spin {
+  to { transform: rotate(360deg); }
 }
 
 /* 商品卡样式（`.card` / `.card-img` / `.card-tx` / `.card-name` / `.card-foot` / `.card-price` /

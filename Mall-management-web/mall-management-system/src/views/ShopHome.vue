@@ -184,8 +184,8 @@
         </div>
 
         <!-- 三-b · 全部：商品网格（**新品靠前**）+ 分类 chip ─────────────────────────
-             ⚠️ **不按 `MerchantId` 再请求一次**：`goodsSelectHome` 一次拉全量、前端过滤 ——
-                与主页 / 详情页同一个端点、同一手法（零后端改动，见 `loadShop`）。
+             ⚠️ 块 7 收尾 · P1 起**按 `MerchantId` 向服务端要本店商品**（`limit=100`）：
+                `goodsSelectHome` 已改成真分页，不能再「拉全量再前端过滤」（见 `loadShop`）。
              ⚠️ 分类 chip **本店有 ≥2 个类目才画**：本笔从改前的「> 1 类」放宽过、
                 又**收窄回 ≥2** —— 因为 Tab 里已经有一个叫「全部」的东西，本店只有一类时
                 chip 行会画成「全部 5 | 电子用品 5」，**两个名字、同一个集合**，纯冗余。
@@ -256,8 +256,8 @@
       <!-- ── 四 · 猜你喜欢（别家同类的）—— **不随 tab 切，且必须在页面最底** ──────────
            ⚠️ 用户给了「不管切哪个 tab 都显示（或至少默认在『全部』下方）」两条路，本笔取**前者**
               —— 硬约束是「必须在页面最底」，一直显示最不可能违反它。
-           数据 = 全量 `goodsSelectHome` 里 `MerchantId !== 本店` **且** `GoodType === 本店主类目`
-           的，取 4 条（**全宽铺开**：4 列铺满 `.wrap` 的 1180px）。
+           数据 = `goodsSelectHome` 的**第一页**（24 条）里 `MerchantId !== 本店` **且**
+           `GoodType === 本店主类目` 的，取 4 条（**全宽铺开**：4 列铺满 `.wrap` 的 1180px）。
            ⚠️ 这是全页**唯一**取别家数据的地方，也是「逛完这家还有别家」的出口；一条都取不到
               （本店主类目全站独一份 / 本店一件商品都没有）⇒ **占位**，不静默消失。 -->
       <section v-if="topTab === 'shop'" class="blk">
@@ -679,20 +679,37 @@ const loadShop = async () => {
   state.value = 'loading'
   errMsg.value = ''
   try {
-    const [res] = await Promise.all([
-      http.post(endpoints.goods.goodsSelectHome),
+    // 块 7 收尾 · P1：`goodsSelectHome` 已改为真分页，**不能再拉全量再前端过滤**。
+    // 本页要两组数据，分两发：
+    //   ① 本店商品 —— 服务端按 `MerchantId` 过滤（上限 100；超过的商家本页只展示前 100，
+    //      登记在《长列表接口盘点报告》，真正修法是给本页接无限滚动）；
+    //   ② 别家商品 —— 第一页 24 条，只用于「猜你喜欢」取 4 条（推荐位本来就不需要全量）。
+    // 原注释那句「不按 MerchantId 再请求一次」从此作废：那条做法建立在「端点是全量」之上。
+    const [ownRes, otherRes] = await Promise.all([
+      http.post(endpoints.goods.goodsSelectHome,
+        new URLSearchParams({ MerchantId: shopId, limit: '100', offset: '0' })),
+      http.post(endpoints.goods.goodsSelectHome,
+        new URLSearchParams({ limit: '24', offset: '0' })),
       loadProfile(),
       loadShopCoupons()
     ])
-    const data = await res.json()
+    const data = await ownRes.json()
     if (!data.success) {
       state.value = 'error'
       errMsg.value = '店铺信息没取到：' + (data.msg || '服务端没有返回店铺商品')
       return
     }
-    const all = data.list || []
-    allGoods.value = all
-    goods.value = dedupeGoods(all.filter((g) => String(g.MerchantId) === shopId))   // ⚠️ 〈Bug 1〉落码（2026-10-12）：本店网格也**同码去重**（判据 = `MerchantId|ProductCode`，留 `Id` 最小 —— 与详情页同一条）。理由：本店 `dRD3gqtbFr` 的 `GD-101-9552` 在库里两行（`Id` 76 / 120，同名同价），不去重则**同一件货在店铺页画两张卡**、且两张都点进同一个详情页（详情页只认 `Id` 最小那一行）。⚠️ **只去重、不过滤已售完**：本页三个 tab 是「自己店铺页」，用户 ② 裁定要**显示**已售完（灰态 + 红斜标由 `ProductCard` 画）。⚠️ `totalSold` / `hotGoods` / `newKeys` 仍然各自调 `dedupeGoods`（对本已是去重的列表是幂等的）—— 不靠「上游已经去过重」这种隐式前提。
+    // ⚠️ `allGoods` 的语义随之收窄成「**别家**商品页」：`recommend` 本来就会再滤一次
+    //    `MerchantId !== shopId`（多滤一次无害），而本店网格只吃 `data.list`。
+    let others = []
+    try {
+      const od = await otherRes.json()
+      if (od.success) others = od.list || []
+    } catch (e) {
+      others = []   // 推荐位是锦上添花：它失败不该把整页打成 error
+    }
+    allGoods.value = others
+    goods.value = dedupeGoods(data.list || [])   // ⚠️ 〈Bug 1〉落码（2026-10-12）：本店网格也**同码去重**（判据 = `MerchantId|ProductCode`，留 `Id` 最小 —— 与详情页同一条）。⚠️ **只去重、不过滤已售完**：本页三个 tab 是「自己店铺页」，用户 ② 裁定要**显示**已售完（灰态 + 红斜标由 `ProductCard` 画）。服务端已按 `MerchantId` 过滤，故不再需要客户端 `filter`。
     state.value = 'ready'
     await readFollowState()
   } catch (e) {

@@ -94,8 +94,14 @@ public class GoodsCacheService {
     //    IsSubsidy 三列（营销态，见下面 SQL 的注释）。三个键并存 ⇒ 命中哪个看运气，
     //    而老键里**没有这三列** ⇒ 页面会**静默**地少标签 / 不过滤已售完（看起来像前端 bug）。
     //    别改回去，理由见本方法 javadoc「缓存体是响应形状的快照」那一段。
-    @Cacheable(cacheNames = "goodsHome", key = "'all-v3'", sync = true)
-    public Map<String, Object> listHome() {
+    // ⚠️ key 从 'all-v3' 升到 'page-v4:<limit>:<offset>:<merchantId>'（块 7 收尾 · P1 分页）：
+    //    响应从「全量一份」变成「一页一份」，键必须跟着分片 —— 否则第一页会被当成全量缓存命中，
+    //    第二页拿到的还是第一页（且键空间只有 1 个，翻页永远看不到新数据）。
+    //    无商家过滤时该段为空串（`page-v4:24:0:`），与有商家过滤的键不会撞。
+    @Cacheable(cacheNames = "goodsHome",
+            key = "'page-v4:' + #limit + ':' + #offset + ':' + (#merchantId == null ? '' : #merchantId)",
+            sync = true)
+    public Map<String, Object> listHome(int limit, int offset, String merchantId) {
         Map<String, Object> result = new HashMap<>();
 
         // 1. 先查所有商品
@@ -113,6 +119,15 @@ public class GoodsCacheService {
         //    「已售完要显示」的店铺页 ⇒ 服务端筛不了，筛与不筛由消费侧决定。
         //    ⚠️ 全表扫的代价：三个 EXISTS 各自走子查（seckill_activity / subsidy_goods+subsidy_rule），
         //    两张表当前都是个位行数；缓存把这笔摊薄成每 TTL 一次，与 `SoldQty` 那条同款（掩盖而非修复）。
+        // ⚠️ 块 7 收尾 · P1：本端点不再是「一次给全量」，而是**真·数据库分页**
+        //    （`LIMIT ? OFFSET ?` + 确定性排序）。三处必读：
+        //    ① 排序必须写死（`g.Id DESC`）：没有 ORDER BY 的 LIMIT/OFFSET 在 InnoDB 里
+        //       不保证稳定，翻页时同一行可能重复或漏掉。
+        //    ② 可选的 MerchantId 过滤是给**店铺页**用的：它在旧实现里拿全量再前端过滤，
+        //       分页后那样做会让「本店商品少于第一页」的店直接空白 ⇒ 过滤必须下沉到 SQL。
+        //    ③ 本方法**不回 total**：首页/猜你喜欢用「本页是否满 limit」判断还有没有下一页，
+        //       省掉每页一次 COUNT；需要总数的列表（管理端）走各自的既有端点（它们本来就有 total）。
+        boolean byMerchant = merchantId != null && !merchantId.isBlank();
         String sql = "SELECT g.*, COALESCE(s.SoldQty, 0) AS SoldQty, "
                 + MarketingGoodsFlags.existsIsSeckill("g") + " AS IsSeckill, "
                 + MarketingGoodsFlags.existsIsSoldOut("g") + " AS IsSoldOut, "
@@ -121,8 +136,12 @@ public class GoodsCacheService {
                 + "LEFT JOIN (SELECT ProductCode, CAST(SUM(Quantity) AS SIGNED) AS SoldQty "
                 + "FROM mall_management_sql.order_item WHERE ProductCode <> '' "
                 + "GROUP BY ProductCode) s ON s.ProductCode = g.ProductCode "
-                + "WHERE g.ShelfState = 1 AND g.DeletedAt IS NULL";
-        List<Map<String, Object>> goodsList = jdbcTemplate.queryForList(sql);
+                + "WHERE g.ShelfState = 1 AND g.DeletedAt IS NULL "
+                + (byMerchant ? "AND g.MerchantId = ? " : "")
+                + "ORDER BY g.Id DESC LIMIT ? OFFSET ?";
+        List<Map<String, Object>> goodsList = byMerchant
+                ? jdbcTemplate.queryForList(sql, merchantId, limit, offset)
+                : jdbcTemplate.queryForList(sql, limit, offset);
 
         // 2. 循环根据商品里的 MerchantId 查 login 表的 UserName
         for (Map<String, Object> goods : goodsList) {
@@ -153,6 +172,10 @@ public class GoodsCacheService {
 
         result.put("success", true);
         result.put("list", goodsList);
+        // 分页元信息：调用方据此判断「还有没有下一页」（`list.size() == limit`）与做诊断，
+        // **不回 total**（理由见上面 SQL 段的 ③）。
+        result.put("limit", limit);
+        result.put("offset", offset);
         return result;
     }
 
@@ -196,8 +219,14 @@ public class GoodsCacheService {
     @Cacheable(cacheNames = "goodsByMerchant", key = "#MerchantId", sync = true)
     public Map<String, Object> listByMerchant(String MerchantId) {
         Map<String, Object> result = new HashMap<>();
+        // ⚠️ 块 7 收尾 · P1 安全兜底：加**硬上限**（不再无界）。商家端「我的商品」是
+        //    前端分页（与待审申请并表后按 20 条/页切），故服务端只需保证单次响应有界。
+        //    200 的取值：远大于一页 20，又挡住异常账户把整张 goods 拉出来。
+        //    ⚠️ 超 200 件商品的商家会在本端点被截断 —— 已知边界，真正修法是给本端点补
+        //    offset + total（需要同时改前端并表逻辑），登记在《长列表接口盘点报告》。
         String sql = "SELECT * FROM mall_management_sql.goods "
-                + "WHERE MerchantId = ? AND ShelfState = 1 AND DeletedAt IS NULL";
+                + "WHERE MerchantId = ? AND ShelfState = 1 AND DeletedAt IS NULL "
+                + "ORDER BY Id DESC LIMIT 200";
         List<Map<String, Object>> list = jdbcTemplate.queryForList(sql, MerchantId);
         result.put("success", true);
         result.put("list", list);
