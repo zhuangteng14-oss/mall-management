@@ -1,5 +1,6 @@
 package com.minke.mallmanagement.shared.web;
 
+import java.util.concurrent.Callable;
 import java.util.function.Supplier;
 
 /**
@@ -76,6 +77,27 @@ public record ObserveContext(String traceId, String batchId, String actorId, Int
         bind(this);
         try {
             return body.get();
+        } finally {
+            bind(previous);
+        }
+    }
+
+    /**
+     * 同 {@link #call(Supplier)}，给 {@link Callable}（可抛受检异常的提交任务）。
+     *
+     * <p>⚠️ 块 7 收尾补，<b>刻意不叫 {@code call}</b>：`Supplier` 与 `Callable` 两个重载会让
+     * 所有既有的 `context.call(() -> …)` 调用点变成「二义调用」（实测 `ObserveContextTest`
+     * 第 78 行当场编译失败）。换一个名字 = 既有调用点零改动。
+     *
+     * <p>⚠️ 为什么不直接 catch 所有异常再包 `RuntimeException`：那会把
+     * {@code ExecutionException} 的语义在池边界上改掉（调用方拿到的 cause 层级不同）。
+     * 这里**原样上抛**。
+     */
+    public <T> T callChecked(Callable<T> body) throws Exception {
+        ObserveContext previous = capture();
+        bind(this);
+        try {
+            return body.call();
         } finally {
             bind(previous);
         }

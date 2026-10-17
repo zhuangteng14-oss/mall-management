@@ -2,8 +2,12 @@ package com.minke.mallmanagement.observe.mq;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.minke.mallmanagement.observe.dao.ObservedEventDao;
+import com.minke.mallmanagement.observe.service.EventBroadcaster;
 import com.minke.mallmanagement.observe.service.EventBroadcaster.ObservedEvent;
+import com.minke.mallmanagement.shared.web.ObserveContext;
+import com.minke.mallmanagement.shared.web.TraceIdFilter;
 import com.rabbitmq.client.Channel;
+import io.micrometer.core.instrument.MeterRegistry;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.amqp.core.Message;
@@ -15,7 +19,12 @@ import org.springframework.stereotype.Component;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.Set;
 
 /**
  * 事件台账的**消费者**（块 7 · commit 8c）—— 把 {@link RabbitObserveConfig#QUEUE} 里的一批事件
@@ -93,6 +102,14 @@ public class ObservedEventConsumer {
     /** 落库失败的重试次数（批文点名 3）。用完仍失败 ⇒ 整批转 DLQ。 */
     static final int MAX_ATTEMPTS = 3;
 
+    /**
+     * 死信计数指标（A4 · 块 7 收尾）。指标面板顶部读它，单位=条、累计。
+     * ⚠️ 与 {@link EventBroadcaster#deadLetterCount()} 是同一件事的两个读口：
+     * 计数器给指标帧（本类在 MQ 配置存在时才注册，指标帧不能依赖本 bean），
+     * broadcaster 的计数给测试与排障。两处都在**同一行**递增（见 {@link #reportDeadLetters}）。
+     */
+    static final String DEAD_LETTER_METER = "mall.observe.dead.letters";
+
     /** 重试退避（递增：200ms / 400ms）。⚠️ 这会把消费者线程**睡住** —— 单并发下同一队列
      *  的下一批因此被推迟，这是「宁可慢、不要丢」的取舍（同期消息在 prefetch 里等着，不会丢）。 */
     private static final long RETRY_BACKOFF_MS = 200L;
@@ -100,12 +117,17 @@ public class ObservedEventConsumer {
     private final ObservedEventDao observedEventDao;
     private final StringRedisTemplate redis;
     private final ObjectMapper objectMapper;
+    private final EventBroadcaster broadcaster;
+    private final MeterRegistry registry;
 
     public ObservedEventConsumer(ObservedEventDao observedEventDao, StringRedisTemplate redis,
-                                 ObjectMapper objectMapper) {
+                                 ObjectMapper objectMapper, EventBroadcaster broadcaster,
+                                 MeterRegistry registry) {
         this.observedEventDao = observedEventDao;
         this.redis = redis;
         this.objectMapper = objectMapper;
+        this.broadcaster = broadcaster;
+        this.registry = registry;
     }
 
     /**
@@ -117,33 +139,46 @@ public class ObservedEventConsumer {
     @RabbitListener(queues = RabbitObserveConfig.QUEUE,
             containerFactory = "observeListenerContainerFactory")
     public void onBatch(List<Message> messages, Channel channel) throws IOException {
-        List<ObservedEvent> events = new ArrayList<>(messages.size());
-        List<String> bodies = new ArrayList<>(messages.size());
-        List<Message> okMessages = new ArrayList<>(messages.size());
-        for (Message message : messages) {
-            String body = new String(message.getBody(), StandardCharsets.UTF_8);
-            try {
-                events.add(objectMapper.readValue(body, ObservedEvent.class));
-                bodies.add(body);
-                okMessages.add(message);
-            } catch (Exception e) {
-                // 解不开的消息**单独**送死信：它不可能是「重试就能好」的（重试解的还是同一串字节），
-                // 留在队列里只会无限重投。同时它不该连累同一批里其余那些好事件。
-                log.warn("[EVENT] 消息不是合法的事件 JSON ⇒ 单条转 DLQ：cause={} body={}",
-                        e.toString(), abbreviate(body));
-                channel.basicNack(message.getMessageProperties().getDeliveryTag(), false, false);
+        // ⚠️ 消费线程是**复用**的（simple listener 的并发从 2 起、最多 8）：本方法里的日志必须
+        //    带着「这一批」的 traceId，结束时还原成进来时的上下文 —— 否则下一条消息顶着一批的号。
+        //    一批最多 50 条、可能来自不同的 traceId ⇒ 日志统一挂**第一个非空 traceId**，
+        //    并在帧的 fields.traces 里如实记「本批涉及几个 traceId」（不假装整批同号）。
+        ObserveContext previous = ObserveContext.capture();
+        try {
+            List<ObservedEvent> events = new ArrayList<>(messages.size());
+            List<String> bodies = new ArrayList<>(messages.size());
+            List<Message> okMessages = new ArrayList<>(messages.size());
+            for (Message message : messages) {
+                String body = new String(message.getBody(), StandardCharsets.UTF_8);
+                try {
+                    events.add(objectMapper.readValue(body, ObservedEvent.class));
+                    bodies.add(body);
+                    okMessages.add(message);
+                } catch (Exception e) {
+                    // 解不开的消息**单独**送死信：它不可能是「重试就能好」的（重试解的还是同一串字节），
+                    // 留在队列里只会无限重投。同时它不该连累同一批里其余那些好事件。
+                    log.warn("[EVENT] 消息不是合法的事件 JSON ⇒ 单条转 DLQ：cause={} body={}",
+                            e.toString(), abbreviate(body));
+                    channel.basicNack(message.getMessageProperties().getDeliveryTag(), false, false);
+                    reportDeadLetters(null, 1, e, "消息不是合法的事件 JSON");
+                }
             }
-        }
-        if (events.isEmpty()) {
-            return;
-        }
+            if (events.isEmpty()) {
+                return;
+            }
 
-        if (!insertWithRetry(events, okMessages, channel)) {
-            return;     // 已经各自 NACK 过（转 DLQ），此处不再 ACK
+            // 绑定本批（日志口径）；finally 里还原，避免污染复用线程。
+            TraceIdFilter.bind(firstTraceId(events), null, null, null);
+
+            if (!insertWithRetry(events, okMessages, channel)) {
+                return;     // 已经各自 NACK 过（转 DLQ），此处不再 ACK
+            }
+            pushToRedis(bodies);
+            // multiple=true：一次确认这一批（批 ACK）。⚠️ 理由与「为什么不会误伤」见类注释。
+            channel.basicAck(okMessages.get(okMessages.size() - 1).getMessageProperties().getDeliveryTag(), true);
+        } finally {
+            TraceIdFilter.bind(previous.traceId(), previous.batchId(), previous.actorId(), previous.actorRole());
         }
-        pushToRedis(bodies);
-        // multiple=true：一次确认这一批（批 ACK）。⚠️ 理由与「为什么不会误伤」见类注释。
-        channel.basicAck(okMessages.get(okMessages.size() - 1).getMessageProperties().getDeliveryTag(), true);
     }
 
     /**
@@ -171,12 +206,91 @@ public class ObservedEventConsumer {
         log.warn("[EVENT] 落库连续 {} 次失败 ⇒ 整批 {} 条转 DLQ（{}）：队列里已留不住它们，"
                 + "DLQ 里躺着等人查 —— 别把它当成「已经处理过了」", MAX_ATTEMPTS, okMessages.size(),
                 RabbitObserveConfig.DLQ);
+        // A4（块 7 收尾）：重试彻底失败 = 这条链路的「最终异常」。在 NACK 之前先把死信这件事
+        // 送进合并环（实时日志页的 ERROR + 链路抽屉 + 指标面板的死信数），否则它只存在于 broker
+        // 的一个队列里，页面看上去一切正常。
+        reportDeadLetters(events, okMessages.size(), last, "落库连续 " + MAX_ATTEMPTS + " 次失败");
         for (Message message : okMessages) {
             // 逐条 NACK（multiple=false）：multiple=true 会连带这一批**之外**的 tag，
             // 而那些早已被上一次 ACK/NACK 消化掉了 ⇒ 对已确认的 tag 再操作是通道级错误。
             channel.basicNack(message.getMessageProperties().getDeliveryTag(), false, false);
         }
         return false;
+    }
+
+    /**
+     * 死信上报（A4）：一条 ERROR 事件进合并环 + 指标计数器累加。
+     *
+     * <p>两条路都 fail-soft：上报/计数失败不能反过来改变 NACK 的结果（死信已经在 broker 里了，
+     * 页面少一条说明是「少一条说明」，不是「转运失败」）。
+     *
+     * @param events 失败的那批事件（可空：非法 JSON 的那条没有解析结果）
+     * @param count  本次进入死信的条数
+     * @param last   最后一次异常（可空）
+     * @param stage  失败阶段的人话（「落库连续 3 次失败」/「消息不是合法的事件 JSON」）
+     */
+    private void reportDeadLetters(List<ObservedEvent> events, int count, Exception last, String stage) {
+        if (count <= 0) {
+            return;
+        }
+        String traceId = firstTraceId(events);
+        Set<String> traceIds = new LinkedHashSet<>();
+        if (events != null) {
+            for (ObservedEvent e : events) {
+                if (e.traceId() != null && !e.traceId().isEmpty()) {
+                    traceIds.add(e.traceId());
+                }
+            }
+        }
+        String exClass = last == null ? "-" : last.getClass().getName();
+        String exMsg = rootMessage(last);
+        Map<String, Object> fields = new LinkedHashMap<>();
+        fields.put("stage", stage);
+        fields.put("count", count);
+        fields.put("exception", exClass);
+        fields.put("error", exMsg);
+        fields.put("traces", traceIds.size());
+        // 原始 traceId 已在事件记录的 traceId 字段里；fields 里再放一份，链路抽屉不读记录也能看到。
+        fields.put("traceId", traceId);
+        try {
+            broadcaster.emitDeadLetter(traceId,
+                    "stage=" + stage + " count=" + count + " exception=" + exClass + " error=" + exMsg,
+                    fields);
+        } catch (RuntimeException e) {
+            log.warn("[EVENT] 死信事件上报失败（不影响 DLQ 转运）：{}", e.toString());
+        }
+        try {
+            registry.counter(DEAD_LETTER_METER).increment(count);
+        } catch (RuntimeException e) {
+            log.warn("[EVENT] 死信计数失败：{}", e.toString());
+        }
+    }
+
+    /** 批内第一个非空 traceId（日志与死信事件的归属口径）。 */
+    private static String firstTraceId(List<ObservedEvent> events) {
+        if (events == null) {
+            return null;
+        }
+        for (ObservedEvent e : events) {
+            String traceId = e.traceId();
+            if (traceId != null && !traceId.isEmpty()) {
+                return traceId;
+            }
+        }
+        return null;
+    }
+
+    /** 根因的 message（异常链走到最里层；「最终异常」的人话就是它）。 */
+    private static String rootMessage(Throwable e) {
+        if (e == null) {
+            return "-";
+        }
+        Throwable cur = e;
+        while (cur.getCause() != null && cur.getCause() != cur) {
+            cur = cur.getCause();
+        }
+        String msg = cur.getMessage();
+        return msg == null ? cur.getClass().getName() : msg;
     }
 
     /**

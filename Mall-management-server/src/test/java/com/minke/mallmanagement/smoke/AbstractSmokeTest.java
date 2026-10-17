@@ -30,6 +30,7 @@ import com.minke.mallmanagement.protect.ProtectionGate;
 import com.minke.mallmanagement.observe.service.SseStreamWriter;
 import com.minke.mallmanagement.observe.service.EventBroadcaster;
 import com.minke.mallmanagement.observe.service.MetricsSnapshotService;
+import com.minke.mallmanagement.observe.service.MetricsHistoryService;
 import com.minke.mallmanagement.observe.service.OrderStreamService;
 import com.minke.mallmanagement.observe.service.EventStreamService;
 import com.minke.mallmanagement.observe.service.AttackEngine;
@@ -360,6 +361,9 @@ import static org.mockito.Mockito.when;
         //    （理由见那个文件；否则 `ObserveStreamSmokeTest` 会对着一条永不结束的流等下去）。
         SseStreamWriter.class, EventBroadcaster.class,
         MetricsSnapshotService.class, OrderStreamService.class, EventStreamService.class,
+        // 块 7 收尾：`MetricsHistoryController`（3a.4 首屏历史）吃 `MetricsHistoryService`；
+        // 它是 `@WebMvcTest` 自动扫进来的 @Controller，本清单不登记 ⇒ 切片上下文启动失败。
+        MetricsHistoryService.class,
         MallCacheMetrics.class, MallLockMetrics.class, MallOrderStateMetrics.class,
         AuditMetrics.class, NotifyMetrics.class, SensitiveMetrics.class, IdentityMetrics.class,
         // C3 块 7 · commit 4〈攻击引擎 + 演练记录〉（2026-10-14）：**一个**新 Controller

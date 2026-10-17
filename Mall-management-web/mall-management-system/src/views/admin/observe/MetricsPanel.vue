@@ -22,6 +22,11 @@
         <b>{{ clientErrRate === null ? '—' : (clientErrRate * 100).toFixed(1) + '%' }}</b>
         <span>4xx 占比（本拍）</span>
       </div>
+      <!-- A4（块 7 收尾）：MQ 消费重试彻底失败、落 DLQ 的累计条数 + 本拍增量。 -->
+      <div class="a-stat">
+        <b :class="{ 'a-bad': dlqTotal > 0 }">{{ dlqTotal === null ? '—' : fmtInt(dlqTotal) }}</b>
+        <span>死信数量（累计 · 本拍 +{{ fmtInt((latest && latest.dlq && latest.dlq.delta) || 0) }}）</span>
+      </div>
       <div class="a-tz">
         <span class="a-chip-utc">{{ phaseText }}</span>
         <span>第 <b>{{ seq }}</b> 拍 · 窗口 {{ WINDOW }} 秒</span>
@@ -620,6 +625,8 @@ const latestRow = computed(() => (rows.value.length ? rows.value[rows.value.leng
 const meanNow = computed(() => (latestRow.value ? latestRow.value.meanMs : null))
 const hitRateNow = computed(() => (latestRow.value ? latestRow.value.hitRate : null))
 const p99Now = computed(() => (latestRow.value ? latestRow.value.p99 : null))
+/** A4：死信累计（进程启动以来）。`latest` 为空时显示 `—`，不显示假的 0。 */
+const dlqTotal = computed(() => (latest.value && latest.value.dlq ? num(latest.value.dlq.total) : null))
 
 const shown = reactive({ qps: 0, mean: 0, hitRate: 0, lockWait: 0 })
 
@@ -1180,6 +1187,9 @@ function applyLatest(f) {
     l2Up: gauge.l2Up === undefined ? null : gauge.l2Up,
     lockUp: gauge.lockUp === undefined ? null : gauge.lockUp,
     l2Degraded: cache.l2Degraded === undefined ? null : cache.l2Degraded,
+    // A4（块 7 收尾）：死信计数由后端 `MetricsSnapshotService.dlq()` 汇总
+    // （`mall.observe.dead.letters` 计数器 ⇒ `{total, delta}`）。旧后端没有这个键 ⇒ 显示 0。
+    dlq: f.dlq || { total: 0, delta: 0 },
   }
 }
 

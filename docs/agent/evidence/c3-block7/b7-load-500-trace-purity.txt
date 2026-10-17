@@ -1,0 +1,57 @@
+块 7 收尾 · 500 并发压测 —— traceId 纯净度（日志按 traceId 归组不串线）
+================================================================
+前提      ：同目录 b7-load-500-status.txt（runId=b7load-182259，200 条放行 + 250 条限流，
+            0 个 5xx、0 个传输错误）
+时间      ：2026-10-17 18:23:3x（落库与复核均在压测之后）
+复核工具  ：_work/B7TraceCheck.java（只读；本轮新增）
+命令      ：
+  java -cp <mysql-connector-j-8.0.33.jar> _work/B7TraceCheck.java <url> <user> <pass> b7load-182259
+  （凭据从环境变量传入，不落盘、不回显）
+
+判据
+  每条请求的唯一商品码后缀 == 它唯一 X-Trace-Id 的后缀（-NNNN）。
+  台账里同一 TraceId 下的事件，ObjectId（= 缓存键 v2::B7PROBE::B7 probe good::<code>）
+  只允许出现**它自己**的码；出现任何别的码 = 串线。
+
+输出（原文）
+  ROWS=750 DISTINCT_TRACE=250 NULL_TRACE=0
+  TRACES_WITH_EVENTS=250
+  TRACES_WITH_NULL_OBJECTID=0
+  TRACES_WITH_FOREIGN_CODE=0
+  DUP_TRACE_SEQ_GROUPS=0
+  EVENTS_PER_TRACE={3=250}
+  KINDS={cache=250}
+  SAMPLE b7load-182259-trace-0000 rows=3 objectIds=[v2::B7PROBE::B7 probe good::b7load-182259-0000]
+  SAMPLE b7load-182259-trace-0125 rows=3 objectIds=[v2::B7PROBE::B7 probe good::b7load-182259-0125]
+  SAMPLE b7load-182259-trace-0249 rows=3 objectIds=[v2::B7PROBE::B7 probe good::b7load-182259-0249]
+
+判读
+  1. 放行的 250 条请求各自落 3 条 cache 事件，合计 750 行；250 个 TraceId 全部有事件，
+     没有一行 TraceId 为空 —— 每条请求的事件都挂在**自己的** traceId 下。
+  2. TRACES_WITH_FOREIGN_CODE = 0：没有任何一条 trace 的事件指向别人的商品码 ⇒
+     32 派发线程 / SSE / MQ 消费者链路上没有出现"A 请求的日志记到 B 的 traceId"。
+  3. DUP_TRACE_SEQ_GROUPS = 0：A3 的 UNIQUE(TraceId, Seq) 在压测下没有被撞破。
+  4. 250 条 429 没有事件是**预期**：限流在业务入口之前拒绝，本就不产生缓存事件；
+     它们同样没有 5xx（见状态分布证据）。
+
+注：核对的是同一次压测的时间窗口（TraceId 前缀 b7load-182259），
+    不是"全表没有别的 trace"——台账里其他行是历史事件，与本轮无关。
+
+最终代码复跑（2026-10-17 18:43，runId=b7load-final-1842）
+  前提：同目录状态证据的"最终代码复跑"段（500 条：400×200 / 100×429，0 个 5xx）。
+  输出（原文）
+    ROWS=1200 DISTINCT_TRACE=400 NULL_TRACE=0
+    TRACES_WITH_EVENTS=400
+    TRACES_WITH_NULL_OBJECTID=0
+    TRACES_WITH_FOREIGN_CODE=0
+    DUP_TRACE_SEQ_GROUPS=0
+    EVENTS_PER_TRACE={3=400}
+    KINDS={cache=400}
+    SAMPLE b7load-final-1842-trace-0000 rows=3 objectIds=[v2::B7PROBE::B7 probe good::b7load-final-1842-0000]
+    SAMPLE b7load-final-1842-trace-0300 rows=3 objectIds=[...::b7load-final-1842-0300]
+    SAMPLE b7load-final-1842-trace-0499 rows=3 objectIds=[...::b7load-final-1842-0499]
+  判读：放行的 400 条请求各落 3 条事件，400 个 trace 全部有事件、零外来码、
+        零空 TraceId、零重复 (TraceId, Seq) ⇒ 收尾改动之后 traceId 仍不串线。
+  命令备注：本机 javac 默认 GBK，需 `-encoding UTF-8`；运行时用
+        `-cp "_work/b7-classes/*"`（把 checker 与驱动都打进该目录的 jar，
+        避免 MSYS 把 `;` 分隔的 classpath 拆坏）。

@@ -357,6 +357,51 @@ public class EventBroadcaster {
         return cursor.get() - 1;
     }
 
+    // ==================== A4：死信事件（块 7 收尾 · 2026-10-17） ====================
+
+    /**
+     * 本进程累计收到的死信条数（{@code ObservedEventConsumer} 重试耗尽后按**批内条数**加）。
+     *
+     * <p>⚠️ 它是**累计**（重启归零），不是 DLQ 队列深度：读队列深度要连 broker，
+     * 而这里要的是「本次运行期间有多少条证据没落库」这个页面可读的数。
+     */
+    private final AtomicLong deadLetterCount = new AtomicLong();
+
+    /**
+     * 发一条**ERROR 级**的防护事件，把「一批事件落库失败、已转死信」这件事送进合并环
+     * （因此实时日志页、链路抽屉、指标面板都能看到），并累加死信计数。
+     *
+     * <p>为什么由 {@code EventBroadcaster} 提供入口，而不是让消费者自己拼一个
+     * {@link ObservedEvent}：合并环的 seq 分配与「先入环、后发布」的顺序只在这里维护
+     * （见 {@link #add} 的注释）。消费者从外面 new 一条会绕过 seq 分配 ⇒ 页面游标错位。
+     *
+     * <p>⚠️ 本方法**不抛**：死信上报失败不能反过来把消费者的 NACK/ACK 流程打断
+     * （fail-soft 与 {@link EventPublisher#publish} 同口径）。
+     *
+     * @param traceId 原始事件的 traceId（整批取第一个非空；一批可能跨多个 traceId，
+     *                所以 {@code fields.traces} 里另记「本批涉及的 traceId 个数」）
+     * @param detail  人话明细（异常类名 + 错误信息 + 条数）
+     * @param fields  结构化明细（供链路抽屉展开）
+     * @return 本条死信事件的累计序号（从 1 起）
+     */
+    public synchronized long emitDeadLetter(String traceId, String detail, Map<String, Object> fields) {
+        long n = deadLetterCount.incrementAndGet();
+        long seq = cursor.getAndIncrement();
+        Map<String, Object> f = fields == null ? new LinkedHashMap<>() : new LinkedHashMap<>(fields);
+        ObservedEvent event = new ObservedEvent(
+                seq, System.currentTimeMillis(), Kind.PROTECTION.tag, Severity.ERROR.tag,
+                "事件落库失败 ⇒ 转死信", detail + " src=dlq#" + n,
+                null, "dlq", null, traceId, null, null, null, null, null, f);
+        events[(int) (seq & EVENT_MASK)] = event;
+        eventPublisher.publish(event);
+        return n;
+    }
+
+    /** 本进程累计死信条数（见 {@link #emitDeadLetter}）。 */
+    public long deadLetterCount() {
+        return deadLetterCount.get();
+    }
+
     // ==================== 并入：每个源一段，游标推进写在各自的段里 ====================
 
     private void ingestCache() {

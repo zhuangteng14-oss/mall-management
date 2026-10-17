@@ -207,41 +207,55 @@ public class TraceIdFilter extends OncePerRequestFilter {
         String traceId = pick(request.getHeader(HEADER));
         String batchId = pickBatch(request.getHeader(BATCH_HEADER));
         long startMs = System.currentTimeMillis();
-        MDC.put(MDC_KEY, traceId);
-        if (batchId != null) {
-            MDC.put(MDC_BATCH_KEY, batchId);
-        }
-        // 块 7 · 阶段 3a.3：「谁」与 traceId / batchId **同一处、同一刻**写进 MDC ——
-        // 九个事件环在**记录那一刻**现读（理由见 currentActorId 的 javadoc）。
-        // ⚠️ 取**识别**口径（AuthSession.identify）：它是纯静态、AuthTokenStore 是内存表（不查库）
-        //    ⇒ 每个请求多这一次解析的代价可忽略。⚠️ 闸关着时本类**照样**要解身份（这是刻意的）：
-        //    若改由 AuthInterceptor 记，app.auth.enabled=false（本机 dev / a3 两个 profile 都是 false）
-        //    时那个闸直接放行、根本不解身份 ⇒ actor 会恒为 null。
-        AuthSession.Identity actor = AuthSession.identify(request);
-        if (actor != null) {
-            MDC.put(MDC_ACTOR_ID_KEY, actor.userId());
-            if (actor.role() != null) {
-                MDC.put(MDC_ACTOR_ROLE_KEY, String.valueOf(actor.role()));
-            }
-        }
-        // 先设头再放行：即使后面被 AuthInterceptor 拒了（401），响应上也带着号 —— 这正是排查时最需要的那个场景。
-        response.setHeader(HEADER, traceId);
+        // ⚠️ 清理必须覆盖「本方法做的每一件事」——因此 try 从第一处 MDC 写入之前开始：
+        // 旧写法把 pick/pickBatch/MDC.put/AuthSession.identify/setHeader 全留在 try 之外，
+        // 其中任何一步抛异常，finally 里的四个 remove 都不会执行，Tomcat 复用该工作线程的
+        // **下一个请求**就会继承 batchId / actorId / actorRole（traceId 会被覆盖，另外三个不会）。
+        // 实证：3a 压测期间 dispatcherServlet 打出过 traceId 为空、却带着上一个请求残留上下文的日志行。
         try {
-            chain.doFilter(request, response);
-        } finally {
-            // 块 7 · commit 8：把「这一趟跑了多久」记进台账。前端抽屉的「总耗时 xx ms」与链路两端
-            //（请求开始 / 请求结束）都出自这一行 —— 事件本身推不出「请求何时结束」。
-            TraceLog.record(traceId, request.getMethod(), request.getRequestURI(), response.getStatus(),
-                    startMs, System.currentTimeMillis());
-            // ⚠️ 必须清：Tomcat 的工作线程是**复用**的，不清就会把上一个请求的号带进下一个请求的日志。
-            // batchId 同理 —— 且它更危险：漏清会让**一次演练之后的全部日常请求**（复用同一条工作线程的）
-            // 被标成那次演练的批次，于是「精准批次」变成「把整个下午都算进去」。
-            // actorId / actorRole（3a.3）同款：漏清会让下一个复用该线程的**匿名**请求顶着
-            // 上一个用户的身份记事件 —— 页面上表现为「别人的操作挂到了他名下」，且事后分不出来。
-            MDC.remove(MDC_KEY);
+            // 先清三个「按需写入」的键：即便上一个请求因为异常漏清，这里也不允许它跨请求存活。
+            // traceId 紧接着无条件覆盖；三个可选键没值时必须移除，而不是「保持原样」。
             MDC.remove(MDC_BATCH_KEY);
             MDC.remove(MDC_ACTOR_ID_KEY);
             MDC.remove(MDC_ACTOR_ROLE_KEY);
+            MDC.put(MDC_KEY, traceId);
+            if (batchId != null) {
+                MDC.put(MDC_BATCH_KEY, batchId);
+            }
+            // 块 7 · 阶段 3a.3：「谁」与 traceId / batchId **同一处、同一刻**写进 MDC ——
+            // 九个事件环在**记录那一刻**现读（理由见 currentActorId 的 javadoc）。
+            // ⚠️ 取**识别**口径（AuthSession.identify）：它是纯静态、AuthTokenStore 是内存表（不查库）
+            //    ⇒ 每个请求多这一次解析的代价可忽略。⚠️ 闸关着时本类**照样**要解身份（这是刻意的）：
+            //    若改由 AuthInterceptor 记，app.auth.enabled=false（本机 dev / a3 两个 profile 都是 false）
+            //    时那个闸直接放行、根本不解身份 ⇒ actor 会恒为 null。
+            AuthSession.Identity actor = AuthSession.identify(request);
+            if (actor != null) {
+                MDC.put(MDC_ACTOR_ID_KEY, actor.userId());
+                if (actor.role() != null) {
+                    MDC.put(MDC_ACTOR_ROLE_KEY, String.valueOf(actor.role()));
+                }
+            }
+            // 先设头再放行：即使后面被 AuthInterceptor 拒了（401），响应上也带着号 —— 这正是排查时最需要的那个场景。
+            response.setHeader(HEADER, traceId);
+            chain.doFilter(request, response);
+        } finally {
+            // 清理本身也要防「记台账抛异常」把 remove 跳过：record 包一层 try/finally。
+            try {
+                // 块 7 · commit 8：把「这一趟跑了多久」记进台账。前端抽屉的「总耗时 xx ms」与链路两端
+                //（请求开始 / 请求结束）都出自这一行 —— 事件本身推不出「请求何时结束」。
+                TraceLog.record(traceId, request.getMethod(), request.getRequestURI(), response.getStatus(),
+                        startMs, System.currentTimeMillis());
+            } finally {
+                // ⚠️ 必须清：Tomcat 的工作线程是**复用**的，不清就会把上一个请求的号带进下一个请求的日志。
+                // batchId 同理 —— 且它更危险：漏清会让**一次演练之后的全部日常请求**（复用同一条工作线程的）
+                // 被标成那次演练的批次，于是「精准批次」变成「把整个下午都算进去」。
+                // actorId / actorRole（3a.3）同款：漏清会让下一个复用该线程的**匿名**请求顶着
+                // 上一个用户的身份记事件 —— 页面上表现为「别人的操作挂到了他名下」，且事后分不出来。
+                MDC.remove(MDC_KEY);
+                MDC.remove(MDC_BATCH_KEY);
+                MDC.remove(MDC_ACTOR_ID_KEY);
+                MDC.remove(MDC_ACTOR_ROLE_KEY);
+            }
         }
     }
 

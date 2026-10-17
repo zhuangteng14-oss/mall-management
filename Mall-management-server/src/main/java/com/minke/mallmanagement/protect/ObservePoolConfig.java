@@ -1,6 +1,7 @@
 package com.minke.mallmanagement.protect;
 
 import com.minke.mallmanagement.observe.metrics.ProtectionMetrics;
+import com.minke.mallmanagement.shared.web.ObserveContext;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.ObjectProvider;
@@ -156,24 +157,46 @@ public class ObservePoolConfig implements WebMvcConfigurer {
             return dedicated;
         }
 
+        /**
+         * 把任务包一层 {@link ObserveContext} 搬运：**提交方线程**（通常是 Tomcat 请求线程）
+         * 捕获 (traceId, batchId, actorId, actorRole)，在池线程上绑定、任务结束还原。
+         *
+         * <p>⚠️ 这是 P0「traceId 串线」修复的第二半（第一半在 {@code TraceIdFilter}）：
+         * 池线程是**建一次用多次**的，不绑不还原就会出现「A 请求的流线程日志顶着 B 请求的号」。
+         * 用仓库既有的 {@link ObserveContext}（显式搬运、finally 还原）而不是 InheritableThreadLocal
+         * —— 理由见该类注释（池线程只会继承创建那一刻的上下文，带错号比不带更糟）。
+         *
+         * <p>⚠️ 捕获必须发生在 {@code execute/submit} **被调用的那一刻**（提交方线程）；
+         * 若挪到池线程里再 capture，读到的是该线程上一次任务残留的上下文。
+         */
+        private Runnable wrap(Runnable task) {
+            ObserveContext context = ObserveContext.capture();
+            return () -> context.run(task);
+        }
+
+        private <T> Callable<T> wrap(Callable<T> task) {
+            ObserveContext context = ObserveContext.capture();
+            return () -> context.callChecked(task);
+        }
+
         @Override
         public void execute(Runnable task) {
-            pick().execute(task);
+            pick().execute(wrap(task));
         }
 
         @Override
         public void execute(Runnable task, long startTimeout) {
-            pick().execute(task, startTimeout);
+            pick().execute(wrap(task), startTimeout);
         }
 
         @Override
         public Future<?> submit(Runnable task) {
-            return pick().submit(task);
+            return pick().submit(wrap(task));
         }
 
         @Override
         public <T> Future<T> submit(Callable<T> task) {
-            return pick().submit(task);
+            return pick().submit(wrap(task));
         }
     }
 

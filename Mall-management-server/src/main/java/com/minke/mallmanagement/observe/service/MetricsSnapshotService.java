@@ -203,6 +203,9 @@ public class MetricsSnapshotService {
             frame.put("locks", locks);
             frame.put("protections", protections);
             frame.put("stock", stock);
+            // A4（块 7 收尾）：死信数量。total 是进程累计，delta 是本拍增量 ——
+            // 页面顶部两个都要（累计看规模，增量看「刚刚有没有在丢」）。
+            frame.put("dlq", dlq());
             return frame;
         }
 
@@ -348,6 +351,24 @@ public class MetricsSnapshotService {
                 row.put("waitMeanMs", dCount <= 0 ? null : round(dMs / dCount));
             }
             return new ArrayList<>(byLock.values());
+        }
+
+        /**
+         * 死信（A4）：{@code total} 累计、{@code delta} 本拍增量。
+         *
+         * <p>⚠️ 计数器由 {@code ObservedEventConsumer} 在「重试耗尽、转 DLQ」那一刻加
+         * （指标名 {@code mall.observe.dead.letters}）。MQ 未配置时没有消费者 ⇒ 恒 0，
+         * 这是**如实**的：没有消费者就没有死信，不是「读不到」。
+         */
+        private Map<String, Object> dlq() {
+            double total = 0.0;
+            for (Counter counter : registry.find("mall.observe.dead.letters").counters()) {
+                total += counter.count();
+            }
+            Map<String, Object> row = new LinkedHashMap<>();
+            row.put("total", (long) total);
+            row.put("delta", (long) delta("dlq.total", total));
+            return row;
         }
 
         /** 8 类防护命中（本拍增量）。前 4 类来自既有三块，后 4 类来自本块四环。 */
