@@ -2,6 +2,7 @@ package com.minke.mallmanagement.admin.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.minke.mallmanagement.admin.dao.AdminAuditDao;
+import com.minke.mallmanagement.observe.metrics.AuditMetrics;
 import com.minke.mallmanagement.shared.web.AuthSession;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -52,9 +53,13 @@ public class AuditService {
     private final AdminAuditDao auditDao;
     private final ObjectMapper objectMapper;
 
-    public AuditService(AdminAuditDao auditDao, ObjectMapper objectMapper) {
+    /** 观测出口（块 7 · commit 2b）—— 只读的一个计数器 + 一条环形事件，见 {@link AuditMetrics}。 */
+    private final AuditMetrics auditMetrics;
+
+    public AuditService(AdminAuditDao auditDao, ObjectMapper objectMapper, AuditMetrics auditMetrics) {
         this.auditDao = auditDao;
         this.objectMapper = objectMapper;
+        this.auditMetrics = auditMetrics;
     }
 
     // ==================== 写 ====================
@@ -72,16 +77,23 @@ public class AuditService {
      */
     public void record(AuthSession.Identity actor, String action, String targetType, String targetId,
                        Object before, Object after) {
+        // 块 7 · 阶段 3a.3：耗时起 = **方法入口**（不是 INSERT 之前）—— 口径是「进 method 到写库完」，
+        // 含取会话与两次 toJson 组装。写在 try 之外，故失败路径也能算到 catch 那一刻。
+        long startedNanos = System.nanoTime();
         try {
             auditDao.insert(
                     actor == null ? null : actor.userId(),
                     actor == null ? null : actor.role(),
-                    action, targetType, targetId,
+                    action, targetType, truncateTargetId(targetId),
                     toJson(before), toJson(after));
+            // 块 7 · 观测（commit 2b）：走到这里 = 那条 INSERT 真的发出去了。actor 取**会话**
+            //（与上面几行同源），失败率这个数只有本环读得到 —— 本方法吞异常。
+            auditMetrics.written(actor == null ? null : actor.userId(), action, targetType, truncateTargetId(targetId), System.nanoTime() - startedNanos);   // 块 7 · commit 8/3a.3：本行多带入参（同行改，未增删行）—— 后四个此前只是没往事件流带 / 没测过
         } catch (Exception e) {
             // fail-open：业务已经成功了，不能让审计把它翻成失败。见类注释「为什么吞异常」。
             log.error("审计写入失败（AUDIT）：action={} targetType={} targetId={} —— 业务操作已完成，本行丢失",
                     action, targetType, targetId, e);
+            auditMetrics.failed(actor == null ? null : actor.userId(), action, e.toString(), targetType, targetId, System.nanoTime() - startedNanos);   // 块 7 · commit 8/3a.3：同上（同行改）
         }
     }
 
@@ -150,5 +162,21 @@ public class AuditService {
             return DEFAULT_LIMIT;
         }
         return Math.min(limit, MAX_LIMIT);
+    }
+
+    /**
+     * 审计表的 {@code TargetId} 是 {@code varchar(128)}；超出会让**整条审计行**丢
+     * （{@code Data too long for column 'TargetId'}），而 {@link #record} 是 fail-open 的
+     * ⇒ 业务侧只看到一条 ERROR 日志。
+     *
+     * <p>⚠️ <b>实测（2026-10-17 18:31:17，块 7 收尾清场）</b>：清理汇总 130+ 字符 ⇒ 那条
+     * 「删了 893634 行」的审计行**没落库**。故在写入前截到列宽（以 {@code …} 结尾），
+     * 正常长度的 targetId 一字不动 —— 完整的明细本来就在 {@code AfterJson} 里。
+     */
+    private static String truncateTargetId(String targetId) {
+        if (targetId == null || targetId.length() <= 128) {
+            return targetId;
+        }
+        return targetId.substring(0, 127) + "…";
     }
 }

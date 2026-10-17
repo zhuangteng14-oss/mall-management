@@ -1,0 +1,73 @@
+/* ══════════════════════════════════════════════════════════════════════════════════
+   乙版差量 · 样式（维度 3 / 4 / 7 的 CSS 那一半）—— **只有这一块**是甲/乙的样式差异。
+   甲版 = 快照原样，不引入本文件。
+   落地位置：维度 3 落 `KpiCard.vue` 的 `<style scoped>`；维度 4 落 `KpiCard.vue`（配合
+   `#value` 插槽）；维度 7 落 `KpiCard.vue` 的进场类。**都不需要新 token。**
+   ⚠️ 色值一律走现有 token（用户裁决：色板不动）。
+   ══════════════════════════════════════════════════════════════════════════════════ */
+
+/* ══ 乙版差量 · 维度 3：KPI 卡的层次（甲版 = 四边 1px 发丝线 + 平涂 --surface）══════════
+   做法：**去掉四边描边**（layout 不动：仍留 1px 透明边），换成
+   ① 卡底自上而下的一丝渐变（受光感）② 顶边 1px 高光（用伪元素画，两端淡出）
+   ⚠️ 留白**不动** —— 2026-10-11 用户裁决 ⑥ 把 padding/gap 照稿收过一档（145px→105px），
+      乙版再加回去等于推翻 ⑥，故不碰。
+   ⚠️ 圆角**不动** —— `--r3`(10px) 是本仓圆角尺度的上限，要更大得新造 token（用户已裁不新造）。
+   ⚠️ 阴影**不引入** —— 本仓刻意没有 `--shadow`（用发丝线表达层次，见 `tokens.css` 注）。
+   ⚠️⚠️ **选择器上那个 `html[data-theme="admin"]` 前缀是预览页专用 shim**：`KpiCard.vue` 的样式是
+      `scoped`（编译成 `.kpi[data-v-xxxx]`，比裸 `.kpi` 高一档）⇒ 只写 `.kpi` 会被它压掉。
+      本笔**实测踩到过**（第一版差量里「去描边 / 卡底渐变」两条静默失效，`getComputedStyle` 读回来
+      才发现：`border-color` 仍是 `--line`、`background-image` 仍是 `none`）。
+      ⇒ 结论写在这儿：**落地时这两条必须是「改 `KpiCard.vue` 里对应的既有规则」**，不是往下叠加；
+        到时候**不要照抄这个前缀**（真有同优先级冲突，办法是改原规则，不是加前缀）。 */
+html[data-theme="admin"] .kpi {
+  position: relative;                    /* 给 ::before 定位（甲版没有它） */
+  border-color: transparent;             /* 1px 边仍在 ⇒ 尺寸/基线不变 */
+  background: linear-gradient(180deg, var(--surface-2), var(--surface) 46%);
+}
+.kpi::before {
+  content: '';
+  position: absolute; inset: 0 0 auto 0; height: 1px;
+  border-radius: var(--r3) var(--r3) 0 0;  /* 跟着卡片圆角走，别在角上露直角 */
+  background: linear-gradient(90deg, transparent, var(--line-2) 16%, var(--line-2) 84%, transparent);
+}
+html[data-theme="admin"] .kpi-k {
+  color: var(--ink-2);                   /* 甲：--ink-3（三档里最淡的一档） */
+}
+.kpi-k {
+  letter-spacing: .04em;                 /* 标签是「说明」，字距松一点 = 让位给数字 */
+}
+
+/* ══ 乙版差量 · 维度 4：数字分档（甲版 = 整串同号同色）══════════════════════════════
+   `.n-int` / `.n-dec` 两个 span 由运行时切开（落地时由 `#value` 插槽的调用方给）。
+   ⚠️ 用 `em` 不用 `px`：`.kpi-n` 的字号是 `clamp(…cqw…)` **按卡宽现算**的，
+      分档必须跟着它缩放，写死 px 会在窄卡上把小数部顶出卡外（⑤「数字越位」的教训）。 */
+.kpi-n .n-dec {
+  font-size: .78em;
+  font-weight: 500;
+  color: var(--ink-2);
+  letter-spacing: 0;                     /* 继承的 -.02em 在更小的字上会显得挤 */
+}
+/* 环比行左侧的状态色竖条：让「涨/跌」一眼可扫（现在只有箭头+颜色两个线索，都在行内）。 */
+.kpi-d {
+  position: relative;
+  padding-left: var(--s2);
+}
+.kpi-d::before {
+  content: '';
+  position: absolute; left: 0; top: .28em; bottom: .28em; width: 2px;
+  border-radius: 1px;
+  background: var(--ink-3);
+}
+.kpi-d--good::before { background: var(--success); }
+.kpi-d--bad::before { background: var(--danger); }
+.kpi-d--flat::before { background: var(--ink-3); }
+
+/* ══ 乙版差量 · 维度 7：4 张 KPI 卡依次 40ms 淡入 + 上移 4px（甲版：无进场）═══════════
+   ⚠️ 只有 `html.pv-motion` 在场时卡片才先藏起来（那个类由运行时按 `prefers-reduced-motion`
+      决定加不加）⇒ **脚本挂了 / 用户关了动效，卡片也不会留在不可见状态**。 */
+html.pv-motion .kpi {
+  opacity: 0;
+  transform: translateY(4px);
+  transition: opacity .35s ease, transform .35s ease;
+}
+html.pv-motion .kpi.is-in { opacity: 1; transform: none; }

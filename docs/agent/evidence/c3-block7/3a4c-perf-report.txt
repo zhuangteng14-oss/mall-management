@@ -1,0 +1,292 @@
+块 7 · 3a.4c 性能与回放逐帧 —— CDP 验收证据（真实后端 8088 + 真实前端 8080，无 mock）
+生成时间：2026-10-17T05:49:23.972Z
+浏览器：headless Edge（--headless=new），窗口 1440×900，路由入口 admin.html
+
+一、切页性能（指标页静止 3 秒 + 指标→日志→指标，只统计切页窗口）
+  · 指标页静止 3 秒：Long Task(>50ms) = 0，最大 = 0 ms
+  · 切页窗口：时长 5771 ms，rAF 帧数 335，平均 FPS 58.0
+  · Long Task(>50ms) = 1，最大 = 89 ms，>100ms = 0  ← 判据要求 0
+  · 各 Long Task: [{"d": 89, "t": 3059}]
+  · CDP Performance Trace：11782 事件 / 5506 个 X 事件；本版 Edge 不产出 RunTask（runTaskEvents=0）
+    最大单事件 28.5 ms；>10ms 聚合：[{"name": "v8.callFunction", "n": 6, "totalMs": 82.1, "maxMs": 19.4}, {"name": "Layout", "n": 3, "totalMs": 65.5, "maxMs": 28.5}, {"name": "FireAnimationFrame", "n": 5, "totalMs": 62.8, "maxMs": 14}, {"name": "FunctionCall", "n": 4, "totalMs": 57.4, "maxMs": 19.4}, {"name": "EventDispatch", "n": 1, "totalMs": 19.4, "maxMs": 19.4}]
+  · 日志页 DOM（内存 2048 条）：.log-line = 19，li = 21，范围内 = 2048；滚到顶部后 .log-line = 18 / li = 20
+  · 节点总数：日志页 1127；对照：回放 T2.0 时 3507
+
+二、回放逐帧（点击回放后每 500ms 采样；批次 b6903f31-b744-4293-ba76-8d3ba01b80d8）
+  采样时刻       屏上行数     cursor   total    DOM 节点  
+  T+0.5s     123      123      3892     1568    
+  T+1.0s     228      228      3892     2303    
+  T+1.5s     311      311      3892     2884    
+  T+2.0s     400      416      3892     3507    
+  · 屏上行数严格递增 = 是；第一秒未铺满（123 / 3892）
+  · 屏上 cap = 400 条（只影响画面）；cursor 继续推进到 416 / 3892
+
+三、判据（探针断言）
+  [OK] trace-no-single-event-over-100ms  {"maxSingleEventMs": 28.5}
+  [OK] switch-no-long-task-over-100ms  {"longTasksOver100": 0, "maxLongTask": 89, "top": [{"d": 89, "t": 3059}]}
+  [OK] switch-fps-healthy  {"fps": 58, "durationMs": 5771}
+  [OK] logs-dom-under-200  {"rendered": 19, "li": 21, "events": 2048, "ranged": 2048}
+  [OK] logs-dom-under-200-after-scroll  {"rendered": 18, "renderedLi": 20, "nodes": 1280}
+  [OK] logs-window-keeps-data  {"events": 2048, "ranged": 2048}
+  [OK] replay-dom-grows-gradually  {"ticks": [{"at": 500, "rows": 123, "cursor": 123, "total": 3892}, {"at": 1000, "rows": 228, "cursor": 228, "total": 3892}, {"at": 1500, "rows": 311, "cursor": 311, "total": 3892}, {"at": 2000, "rows": 400, "cursor": 416, "total": 3892}]}
+
+四、截图（同目录）
+  · 3a4c-perf-logs-cap.png
+  · 3a4c-perf-metrics-return.png
+  · 3a4c-replay-t0.5.png
+  · 3a4c-replay-t1.0.png
+  · 3a4c-replay-t1.5.png
+  · 3a4c-replay-t2.0.png
+
+五、原始 JSON
+{
+  "at": "2026-10-17T05:49:23.972Z",
+  "checks": {
+    "trace-no-single-event-over-100ms": {
+      "ok": true,
+      "detail": {
+        "maxSingleEventMs": 28.5
+      }
+    },
+    "switch-no-long-task-over-100ms": {
+      "ok": true,
+      "detail": {
+        "longTasksOver100": 0,
+        "maxLongTask": 89,
+        "top": [
+          {
+            "d": 89,
+            "t": 3059
+          }
+        ]
+      }
+    },
+    "switch-fps-healthy": {
+      "ok": true,
+      "detail": {
+        "fps": 58,
+        "durationMs": 5771
+      }
+    },
+    "logs-dom-under-200": {
+      "ok": true,
+      "detail": {
+        "rendered": 19,
+        "li": 21,
+        "events": 2048,
+        "ranged": 2048
+      }
+    },
+    "logs-dom-under-200-after-scroll": {
+      "ok": true,
+      "detail": {
+        "rendered": 18,
+        "renderedLi": 20,
+        "nodes": 1280
+      }
+    },
+    "logs-window-keeps-data": {
+      "ok": true,
+      "detail": {
+        "events": 2048,
+        "ranged": 2048
+      }
+    },
+    "replay-dom-grows-gradually": {
+      "ok": true,
+      "detail": {
+        "ticks": [
+          {
+            "at": 500,
+            "rows": 123,
+            "cursor": 123,
+            "total": 3892
+          },
+          {
+            "at": 1000,
+            "rows": 228,
+            "cursor": 228,
+            "total": 3892
+          },
+          {
+            "at": 1500,
+            "rows": 311,
+            "cursor": 311,
+            "total": 3892
+          },
+          {
+            "at": 2000,
+            "rows": 400,
+            "cursor": 416,
+            "total": 3892
+          }
+        ]
+      }
+    }
+  },
+  "samples": {
+    "preTraffic": [
+      {
+        "path": "/goods/goodsSelectHome",
+        "status": 405
+      },
+      {
+        "path": "/goods/productSearch?keyword=a",
+        "status": 405
+      },
+      {
+        "path": "/goods/goodstype",
+        "status": 200
+      }
+    ],
+    "drill": {
+      "status": 200,
+      "ok": true,
+      "id": 63,
+      "total": 1200
+    },
+    "metricsSettled": {
+      "theme": "admin",
+      "hash": "#/admin/observe/metrics",
+      "seq": 8,
+      "charts": 5
+    },
+    "metricsIdle": {
+      "longTasks": 0,
+      "maxLongTask": 0,
+      "lt": []
+    },
+    "logDom": {
+      "rendered": 19,
+      "renderedLi": 21,
+      "events": 2048,
+      "ranged": 2048,
+      "nodes": 1127,
+      "range": "已连接 2,048 范围内事件（上限 1000） 0.0 本拍速率（条/秒） 256 范围内链路（上限 300） 17.1 % 错误率 warn+error 1"
+    },
+    "logDomTop": {
+      "rendered": 18,
+      "renderedLi": 20,
+      "nodes": 1280
+    },
+    "switchPerf": {
+      "durationMs": 5771,
+      "frames": 335,
+      "fps": 58,
+      "longTasks": 1,
+      "maxLongTask": 89,
+      "longTasksOver100": 0,
+      "lt": [
+        {
+          "d": 89,
+          "t": 3059
+        }
+      ],
+      "seq": 17
+    },
+    "trace": {
+      "events": 11782,
+      "xEvents": 5506,
+      "mainTid": 16648,
+      "runTaskEvents": 0,
+      "maxSingleEventMs": 28.5,
+      "over10ms": [
+        {
+          "name": "v8.callFunction",
+          "n": 6,
+          "totalMs": 82.1,
+          "maxMs": 19.4
+        },
+        {
+          "name": "Layout",
+          "n": 3,
+          "totalMs": 65.5,
+          "maxMs": 28.5
+        },
+        {
+          "name": "FireAnimationFrame",
+          "n": 5,
+          "totalMs": 62.8,
+          "maxMs": 14
+        },
+        {
+          "name": "FunctionCall",
+          "n": 4,
+          "totalMs": 57.4,
+          "maxMs": 19.4
+        },
+        {
+          "name": "EventDispatch",
+          "n": 1,
+          "totalMs": 19.4,
+          "maxMs": 19.4
+        }
+      ]
+    },
+    "batchId": "b6903f31-b744-4293-ba76-8d3ba01b80d8",
+    "replayClick": {
+      "ok": true,
+      "expanded": true
+    },
+    "playClicked": {
+      "ok": true
+    },
+    "replayTicks": [
+      {
+        "rows": 123,
+        "cursor": 123,
+        "total": 3892,
+        "nodes": 1568,
+        "txt": "正在回放 （进度 123 / 3892）",
+        "atMs": 500
+      },
+      {
+        "rows": 228,
+        "cursor": 228,
+        "total": 3892,
+        "nodes": 2303,
+        "txt": "正在回放 （进度 228 / 3892）",
+        "atMs": 1000
+      },
+      {
+        "rows": 311,
+        "cursor": 311,
+        "total": 3892,
+        "nodes": 2884,
+        "txt": "正在回放 （进度 311 / 3892）",
+        "atMs": 1500
+      },
+      {
+        "rows": 400,
+        "cursor": 416,
+        "total": 3892,
+        "nodes": 3507,
+        "txt": "正在回放 （进度 416 / 3892）",
+        "atMs": 2000
+      }
+    ],
+    "replayDom": [
+      {
+        "at": 500,
+        "rows": 123,
+        "nodes": 1568
+      },
+      {
+        "at": 1000,
+        "rows": 228,
+        "nodes": 2303
+      },
+      {
+        "at": 1500,
+        "rows": 311,
+        "nodes": 2884
+      },
+      {
+        "at": 2000,
+        "rows": 400,
+        "nodes": 3507
+      }
+    ]
+  },
+  "fail": []
+}

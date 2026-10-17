@@ -83,11 +83,13 @@ class OrderAddStateGuardSmokeTest extends AbstractSmokeTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.success").value(true))
                 .andExpect(jsonPath("$.msg").value("订单添加成功"));
-        // ⚠️ **可视化段 commit 0 起这里是 2 次（改前 1 次）**，如实订正、不是放松：本夹具的
-        //    `ProductInformation`（`可乐:SMOKE-PC-1`）**恰有一段且带 `:`** ⇒ 命中回落口径，
-        //    除订单那次 INSERT 外多写一行 `order_item`。次数仍是**精确值**（1 或 3 都会红）。
-        //    ⚠️ 明细口径的完整判据在 `OrderAddItemsSmokeTest`；本类**仍只钉出生状态闸**。
-        verify(jdbcTemplate, times(2)).update(any(PreparedStatementCreator.class));
+        // ⚠️ **块 7 commit 2d（2026-10-14）起这里是 4 次**（2d 之前 3 次 / commit 0 时 2 次 / 更早 1 次），
+        //    如实订正、不是放松：本夹具 `ProductInformation`（`可乐:SMOKE-PC-1`）恰一段且带 `:` ⇒
+        //    命中回落口径，除订单那次 INSERT 外多写一行 `order_item`；块 7 又对该明细**下单即扣**一行
+        //    `goods_sku.Stock`（TD-36），commit 2d 再补一句**整单一次**的 `order.StockDeducted = 1`
+        //    （判据 = 这批扣减至少命中一行；切片里替身恒回 1 ⇒ 恰多一次）。
+        //    次数仍是**精确值**（3 或 5 都会红）。⚠️ 明细/扣减判据在 `OrderAddItemsSmokeTest`，本类只钉状态闸。
+        verify(jdbcTemplate, times(4)).update(any(PreparedStatementCreator.class));
         // 放行路径不许记「拦截」—— 否则 birth.rejected 会把放行的请求也算进去
         verify(orderTransitionRecorder, never()).rejectedAtBirth(anyInt(), anyInt(), anyInt(), any());
     }

@@ -171,8 +171,12 @@ export function catalogCategories() {
  * @returns {Promise<{success:boolean, list:Array}>} 每行含 `MerchantId` / `GoodName` /
  *          `ProductCode` / `Price` / `GoodImg` / `UserName`（商家名，查不到为空串）
  */
-export function catalogVisibleGoods() {
-  return post(endpoints.goods.goodsSelectHome, null)
+export function catalogVisibleGoods(params) {
+  // 块 7 收尾 · P1：`goodsSelectHome` 已改为真分页（缺省 24、上限 100）。
+  // 违规处置是「从在架商品里挑一件」的下拉，**必须请求上限** —— 不传就只能看到前 24 件，
+  // 排在后面的商品会静默地从候选里消失。>100 件的场景登记在《长列表接口盘点报告》
+  // （真正修法是给这个下拉接关键字搜索或无限滚动）。
+  return post(endpoints.goods.goodsSelectHome, q({ limit: 100, offset: 0, ...params }))
 }
 
 /** 提审单列表。`status` 可空 ⇒ 全部；传 `'pending'` 即待审。 */

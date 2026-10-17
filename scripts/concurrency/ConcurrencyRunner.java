@@ -1094,6 +1094,33 @@ public class ConcurrencyRunner {
         return n;
     }
 
+    /**
+     * 等入站限流（{@code InboundRateLimitInterceptor}：每 1 秒放行 200 条）翻到新一拍再发请求。
+     *
+     * <p>为什么必须等：限流是**固定刷新窗口**，一个 burst 是 20~40 条同栅栏齐发。若整批
+     * 落在窗口尾部、余量不足，会**整批**收到 429「请求过于频繁」——不是部分失败。
+     * CI run 39057108728 的 A-S4a-4：{@code succ=0} 符合期望，但 20 条业务 msg 一条都
+     * 没命中，而相邻的 A-S4a-1/-2/-3 全绿；同一轮 B2 的 loginAdd 实测到 3 条 429。
+     * ⇒ 最合理的解释是这一批落在窗口尾部被整批打回（**是推断，非该批响应的实测**；
+     * 本笔新增的 {@code codes=} 会在复发时直接打出状态码分布）。同理，C 组紧跟 S4b 的
+     * 120 QPS 负载后会撞上尚未刷新的桶 —— 那一条有直接证据（A-C6-1 的 6 条探针全 429）。
+     *
+     * <p>1.2s &gt; {@code REFRESH_PERIOD=1s} ⇒ 一定跨过刷新点；等待期间没有请求
+     * ⇒ 起跑时是满桶 200，足够一个 burst。
+     */
+    static void freshLimitWindow() throws InterruptedException {
+        Thread.sleep(1200);
+    }
+
+    /** 一批响应的 HTTP 状态分布（如 {@code {200=20}} / {@code {429=20}}）——把「业务拒绝」与「被限流」分开。 */
+    static String codeHist(List<Call> cs) {
+        Map<Integer, Integer> m = new LinkedHashMap<>();
+        for (Call c : cs) {
+            m.merge(c.r.code, 1, Integer::sum);
+        }
+        return m.toString();
+    }
+
     static int count5xx(List<Call> cs) {
         int n = 0;
         for (Call c : cs) {
@@ -1597,6 +1624,9 @@ public class ConcurrencyRunner {
         Map<String, String> idOf = new LinkedHashMap<>();
         StringBuilder preStates = new StringBuilder();
         boolean preBuilt = true;
+        // S4a 紧跟在 S3（10 单 × 20 线程 = 200 请求）之后；先等一拍，别让 setup 的
+        // 9 条写请求撞上 S3 尾部的空桶（症状会是 A-S4a-0「前置态没建成」）。
+        freshLimitWindow();
         for (int k = 0; k < keys.length; k++) {
             String id = ns() + "-S4a" + keys[k];
             idOf.put(keys[k], id);
@@ -1652,27 +1682,37 @@ public class ConcurrencyRunner {
         String dlyMsg = "订单不存在或未付款或已发货/已收货";
         String rcvMsg = "订单未付款或已收货";
 
+        // c1 可以不等：它和 setup 共用同一拍（9 + 20 = 29 ≪ 200）。c2 起每个 burst 前等一拍，
+        // 否则整批可能落在窗口尾部，被 429 整批打回（见 freshLimitWindow 的注释）。
         List<Call> c1 = burst(20, i -> call("dly-U", send(HTTP, o.baseUrl + "/order/orderDeliveryIfUp", form("orderId", idOf.get("U")))));
-        settle(a1, countSuccess(c1) == 0 && countMsg(c1, dlyMsg) == 20, "succ=" + countSuccess(c1) + " msg 命中=" + countMsg(c1, dlyMsg));
+        settle(a1, countSuccess(c1) == 0 && countMsg(c1, dlyMsg) == 20,
+                "succ=" + countSuccess(c1) + " msg 命中=" + countMsg(c1, dlyMsg) + " codes=" + codeHist(c1));
 
+        freshLimitWindow();
         List<Call> c2 = burst(20, i -> call("dly-P", send(HTTP, o.baseUrl + "/order/orderDeliveryIfUp", form("orderId", idOf.get("P")))));
-        settle(a2, countSuccess(c2) == 1, "succ=" + countSuccess(c2));
+        settle(a2, countSuccess(c2) == 1, "succ=" + countSuccess(c2) + " codes=" + codeHist(c2));
 
+        freshLimitWindow();
         List<Call> c3 = burst(20, i -> call("dly-PDR", send(HTTP, o.baseUrl + "/order/orderDeliveryIfUp", form("orderId", idOf.get("PDR")))));
-        settle(a3, countSuccess(c3) == 0, "succ=" + countSuccess(c3));
+        settle(a3, countSuccess(c3) == 0, "succ=" + countSuccess(c3) + " codes=" + codeHist(c3));
 
+        freshLimitWindow();
         List<Call> c4 = burst(20, i -> call("rcv-U", send(HTTP, o.baseUrl + "/order/orderReceiveIfUp", form("orderId", idOf.get("U")))));
-        settle(a4, countSuccess(c4) == 0 && countMsg(c4, rcvMsg) == 20, "succ=" + countSuccess(c4) + " msg 命中=" + countMsg(c4, rcvMsg));
+        settle(a4, countSuccess(c4) == 0 && countMsg(c4, rcvMsg) == 20,
+                "succ=" + countSuccess(c4) + " msg 命中=" + countMsg(c4, rcvMsg) + " codes=" + codeHist(c4));
 
+        freshLimitWindow();
         List<Call> c5 = burst(20, i -> call("rcv-PR", send(HTTP, o.baseUrl + "/order/orderReceiveIfUp", form("orderId", idOf.get("PR")))));
-        settle(a5, countSuccess(c5) == 0, "succ=" + countSuccess(c5));
+        settle(a5, countSuccess(c5) == 0, "succ=" + countSuccess(c5) + " codes=" + codeHist(c5));
 
+        freshLimitWindow();
         List<Call> c6 = burst(20, i -> call("rcv-PD", send(HTTP, o.baseUrl + "/order/orderReceiveIfUp", form("orderId", idOf.get("PD")))));
-        settle(a6, countSuccess(c6) == 1, "succ=" + countSuccess(c6));
+        settle(a6, countSuccess(c6) == 1, "succ=" + countSuccess(c6) + " codes=" + codeHist(c6));
 
         // A-S4a-7：同一未付款单上 pay 与 delivery 同时释放。delivery 的 WHERE 要求 PayIf=1，
         // 故它最多在 pay 提交之后成功一次；不变式 NOT(DeliveryIf=1 AND PayIf=0) 是此项的真正判据。
         String raceId = ns() + "-S4aRACE";
+        freshLimitWindow();
         Resp rr = send(HTTP, o.baseUrl + "/order/orderAdd", orderForm(raceId, 0, 0, 0));
         final Map<String, String> payF = form("orderId", raceId);
         List<Call> c7 = burst(40, i -> call(i % 2 == 0 ? "pay-race" : "dly-race",
@@ -1887,6 +1927,7 @@ public class ConcurrencyRunner {
      * 退出码却是 0」的组合。
      */
     static void c(Opt o) throws InterruptedException {
+        freshLimitWindow();   // CI 39056399205：C/A-C6 探针 6/6 被入站限流打成 429
         String lock0 = lockCounters(o);
         Ass a1 = ass("C-1", "时间线行数 == 四端点 success 之和（各端点 success 另与状态机预测值比对）", true);
         Ass a2 = ass("C-2", "时间线可重放：首行 from=NONE、逐行首尾相接、末行 to == order 表现值", true);
@@ -2644,7 +2685,7 @@ public class ConcurrencyRunner {
             // C3 块 4（2026-10-10）cart（1 张）、C3 块 4 补丁（2026-10-10）order_shipping_track（1 张）、可视化段 commit 0（2026-10-11）order_item（1 张）、可视化段 commit 2（2026-10-11）stats_daily（1 张）、可视化段 commit 3 补丁（2026-10-11）goods_sku（1 张）
             // —— 十一张同在 mall_management_sql.sql 末尾的 Migration 块、人工落盘（见 db-schema.md「表数量：29」）。
             // ⚠️ 就地改造那笔把 notification_template 物理删了、goods_template 物理删了、新增 template ⇒ 7 → 6。
-            // ⚠️ 块 4 新增 cart ⇒ 6 → 7、块 4 补丁（2026-10-10）新增 order_shipping_track ⇒ 7 → 8、可视化段 commit 0 新增 order_item ⇒ 8 → 9、可视化段 commit 2 新增 stats_daily ⇒ 9 → 10、可视化段 commit 3 补丁（2026-10-11）新增 goods_sku ⇒ 10 → 11、C3 块 5（2026-10-11）新增 coupon / coupon_grant / subsidy_rule / subsidy_goods / seckill_invitation / seckill_application / seckill_activity ⇒ 11 → 18、C3 块 5 B 组（2026-10-12）新增 shop_follow ⇒ 18 → 19、C3 块 6（2026-10-12）新增 comment / comment_mention / comment_image / comment_like / report / sensitive_word ⇒ 19 → 25
+            // ⚠️ 块 4 新增 cart ⇒ 6 → 7、块 4 补丁（2026-10-10）新增 order_shipping_track ⇒ 7 → 8、可视化段 commit 0 新增 order_item ⇒ 8 → 9、可视化段 commit 2 新增 stats_daily ⇒ 9 → 10、可视化段 commit 3 补丁（2026-10-11）新增 goods_sku ⇒ 10 → 11、C3 块 5（2026-10-11）新增 coupon / coupon_grant / subsidy_rule / subsidy_goods / seckill_invitation / seckill_application / seckill_activity ⇒ 11 → 18、C3 块 5 B 组（2026-10-12）新增 shop_follow ⇒ 18 → 19、C3 块 6（2026-10-12）新增 comment / comment_mention / comment_image / comment_like / report / sensitive_word ⇒ 19 → 25、C3 块 7（2026-10-13）新增 drill_record ⇒ 25 → 26、C3 块 7 commit 8b（2026-10-14）新增 observed_event ⇒ 26 → 27
             //    （**本清单、KNOWN_TABLES、上面那句表数说明、下面 P3 的 PASS 文案串 —— 四处同改**；少改一处 A3 的 P3 必红 ——
             //    而 concurrency job 是 continue-on-error，红在 job 颜色上看不出来，只能读 artifact 的 gates.count）。
             // 刻意不写死总数：运行器与那份 SQL 是两笔改动，谁先落都要能跑。但**多出来的每一张都必须点过名**
@@ -2660,14 +2701,14 @@ public class ConcurrencyRunner {
                   + "AND LOWER(table_name) IN ('order_state_transition','admin_audit','notification',"
                   + "'merchant_application','goods_audit','template','cart','order_shipping_track','order_item','stats_daily','goods_sku',"
                   + "'coupon','coupon_grant','subsidy_rule','subsidy_goods','seckill_invitation','seckill_application','seckill_activity','shop_follow',"
-                  + "'comment','comment_mention','comment_image','comment_like','report','sensitive_word')");
-            final int KNOWN_TABLES = 25;   // = 上面 IN 清单的长度（加表时**四处同改**，见上方注释块）
+                  + "'comment','comment_mention','comment_image','comment_like','report','sensitive_word','drill_record','observed_event')");
+            final int KNOWN_TABLES = 27;   // = 上面 IN 清单的长度（加表时**四处同改**，见上方注释块）
             boolean p3 = tables == 11 + known && known == KNOWN_TABLES;
             pre.put("P3", (p3 ? "PASS" : "FAIL") + " 表数=" + tables + "；已知追加表 order_state_transition /"
                     + " admin_audit / notification / merchant_application /"
                     + " goods_audit / template / cart / order_shipping_track / order_item / stats_daily / goods_sku /"
                     + " coupon / coupon_grant / subsidy_rule / subsidy_goods / seckill_invitation / seckill_application / seckill_activity / shop_follow /"
-                    + " comment / comment_mention / comment_image / comment_like / report / sensitive_word 在 " + known + "/" + KNOWN_TABLES
+                    + " comment / comment_mention / comment_image / comment_like / report / sensitive_word / drill_record / observed_event 在 " + known + "/" + KNOWN_TABLES
                     + " 张（期望表数 = 11 + " + KNOWN_TABLES + " = " + (11 + KNOWN_TABLES) + "）");
 
             // P4 种子计数：确认是刚导入过的干净实例，而非被上一轮污染过的库

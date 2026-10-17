@@ -1,0 +1,28 @@
+块 7 · 状态流转页重构 —— 回归与构建验证
+生成时间：2026-10-17 22:00（晚于最后一次代码编辑 21:51:42）
+
+一、后端针对性测试（./mvnw -Dtest=OrderStreamServiceTest,OrderTimeoutCancelJobSkipAttackDataTest,AttackEngineTest test）
+  OrderStreamServiceTest                 Tests run: 12, Failures: 0, Errors: 0, Skipped: 0
+  OrderTimeoutCancelJobSkipAttackDataTest Tests run: 9,  Failures: 0, Errors: 0, Skipped: 0
+  AttackEngineTest                        Tests run: 29, Failures: 0, Errors: 0, Skipped: 0
+  合计 50 项 / 0 失败（计时见 target/surefire-reports 同名 .txt，均为本轮时间戳）
+
+二、前端（Mall-management-web/mall-management-system）
+  npm run lint   → LINT_EXIT=0（DONE  No lint errors found!）
+  npm run build  → BUILD_EXIT=0（Build complete，2026-10-17T14:00:05Z；
+                   仅 2 条既有 asset size limit 警告：vendor/common 包体积，非本次改动引入）
+  完整输出：b7-orderflow-rework-lint-build.txt
+
+三、真后端验收探针（scripts/probes/probe-b7-orderflow-rework-evidence.mjs）
+  结果：37 项 / 0 失败
+  完整逐项输出：b7-orderflow-rework-probe.txt
+  逐拍原始样本：b7-orderflow-rework-samples.json
+  关键数字：
+    默认全量：total=18413（cancelled=13945 / completed=2031 / waitReceive=499 / waitShip=1437 / waitPay=501）
+    压测：24.4s、2216 请求、0 失败；本会话捕获 0→1979（600ms 最大步进 208），14 种计数组合
+    流轨：22 帧拍到粒子；去向包含「待发货 / 待收货 / 已完成」
+    刷新：捕获数 2252→恢复 2252，liveTail 10→10，重连 seq=1 后继续增长
+    开关打开：total 19521→221、cancelled 13945→0，其余在途/完成态保留
+    99% 单态：donutMinAngle 0→10°，DonutChart series.minAngle=10，4 个非零扇区仍可见
+    抽屉：订单号搜索收敛到 1、商品名搜索命中、唯一深蓝高亮、待收货时间线 4 步（3 亮 1 灰）、
+          当前节点 =「发货 → 待收货」

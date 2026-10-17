@@ -118,6 +118,25 @@ public class AuthInterceptor implements HandlerInterceptor {
      */
     public static final String BODY_NOT_LOGGED_IN = "{\"success\":false,\"msg\":\"未登录\"}";
 
+    /**
+     * 已登录但角色不够时的 403 响应体（TD-64 · 块 7 收尾）。与 401 一样是手写 JSON ——
+     * 拦截器在 Controller 之前返回，{@code Result} 序列化不经过这条链路。
+     */
+    public static final String BODY_FORBIDDEN = "{\"success\":false,\"msg\":\"需要管理员权限\"}";
+
+    /**
+     * 只允许管理员（{@code login.Role=3}）调用的路径（TD-64 · 块 7 收尾）。
+     *
+     * <p>⚠️ 只在**总开关开着**时生效（{@code app.auth.enabled=true}）：dev / a3 两个 profile
+     * 关着闸，本表整段跳过 —— 这是既有语义，不是新漏洞（那两个 profile 本来就是本机调试面）。
+     *
+     * <p>为什么在拦截器里做而不是在 Controller 里逐个判：这是「路径前缀 + 身份」的判据，
+     * 与 401 同一层；放进 Controller 会让每个危险端点各抄一遍，两处一旦漂移就没人说得清。
+     * 目前唯一一条是清场（真 {@code DELETE}、不可逆）。将来新增破坏性端点应登记到这里。
+     */
+    private static final List<String> ADMIN_ONLY_PATHS = List.of(
+            "/admin/observe/attack/cleanup");
+
     private static final AntPathMatcher MATCHER = new AntPathMatcher();
 
     /** 总开关的取值（{@code app.auth.enabled}）。由 {@link WebAuthConfig} 在构造期读入。 */
@@ -186,6 +205,12 @@ public class AuthInterceptor implements HandlerInterceptor {
             //    ⇒ 前端 401 出口把他踢回登录页，登录那一步再由 loginSelect 答 4 告诉他为什么。
             if (isBanned(identity)) {
                 writeNotLoggedIn(response);
+                return false;
+            }
+            // ⑥ 角色闸（TD-64 · 块 7 收尾）：只对 ADMIN_ONLY_PATHS 生效。
+            //    未登录在上面 ③ 已经 401；走到这里说明身份有效但没有管理员角色 ⇒ 403。
+            if (isAdminOnly(uri) && !isAdmin(identity)) {
+                writeForbidden(response);
                 return false;
             }
             return true;
@@ -269,5 +294,31 @@ public class AuthInterceptor implements HandlerInterceptor {
         response.setContentType("application/json;charset=UTF-8");
         response.setCharacterEncoding("UTF-8");
         response.getWriter().write(BODY_NOT_LOGGED_IN);
+    }
+
+    /** 写 403（已登录、角色不够）。编码口径同 {@link #writeNotLoggedIn}。 */
+    private void writeForbidden(HttpServletResponse response) throws IOException {
+        response.setStatus(HttpServletResponse.SC_FORBIDDEN);
+        response.setContentType("application/json;charset=UTF-8");
+        response.setCharacterEncoding("UTF-8");
+        response.getWriter().write(BODY_FORBIDDEN);
+    }
+
+    /** 路径是否只允许管理员（见 {@link #ADMIN_ONLY_PATHS}）。 */
+    private boolean isAdminOnly(String uri) {
+        if (uri == null) {
+            return false;
+        }
+        for (String pattern : ADMIN_ONLY_PATHS) {
+            if (MATCHER.match(pattern, uri)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** 管理员判据：角色号必须显式等于 {@link AuthSession#ROLE_ADMIN}（{@code null} 不算）。 */
+    private static boolean isAdmin(AuthSession.Identity identity) {
+        return identity.role() != null && identity.role() == AuthSession.ROLE_ADMIN;
     }
 }

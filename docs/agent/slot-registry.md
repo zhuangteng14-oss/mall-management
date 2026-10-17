@@ -2670,9 +2670,9 @@ find Mall-management-web/mall-management-system/src -name "CustomerPage.vue"
   1. `user` 表两行的业务号**互斥**（商家行 `customerid` 为 NULL、客户行 `merchantid` 为 NULL）；
   2. `LoginPage.vue` 旧代码**只写不清**（`/user/me` 答不出对面的号就整段 `if` 跳过）⇒ 换账户后**上一家的业务号留在 sessionStorage 里**；
   3. 而**买家 id 链** `resolveBuyerId()` **优先取 `customerid`**（`api/auth.js:123-125`）⇒ 商家账号查历史订单时，**入参带的是上一位客户的 id**，票却是商家的；
-  4. 服务端 `IdentityGuard.requireSelfOrAdmin`（`IdentityGuard.java:71-80`）判「票里的 userId ≠ 入参 id 且非管理员」⇒ **403**。
+  4. 服务端 `IdentityGuard.requireSelfOrAdmin`（`IdentityGuard.java:104-115`）判「票里的 userId ≠ 入参 id 且非管理员」⇒ **403**。
 - ✅ **复现（`美化/dtop4/acct.log`，改前）**：走用户报的那串 —— 商家 → 客户 → 商家后，③ 的 sessionStorage 里 **`customerid: C5001` 残留**；④ 历史购买记录页 ⇒ **弹窗「请求出错（HTTP 403）」**、`rows: 0`、空态「暂无历史订单」；服务端收到 `{"paramId":"C5001","tokenUser":"M9001","role":"2","status":403}`。
-  ⚠️ **401 / 403 的取证口径**：那支探针的 mock **按后端真规则答**（照 `IdentityGuard.java:71-80` 逐档实现），**前端侧的存储序列是真浏览器真值**（sessionStorage 原生读写）—— 是「按真规则复现」，不是打在真 8088 上的抓包。
+  ⚠️ **401 / 403 的取证口径**：那支探针的 mock **按后端真规则答**（照 `IdentityGuard.java:104-115` 逐档实现），**前端侧的存储序列是真浏览器真值**（sessionStorage 原生读写）—— 是「按真规则复现」，不是打在真 8088 上的抓包。
 - **修**（两处，都在出口而不是在消费方 —— 消费方有 `HistoricalOrders` / `OrderCenter` 等多条）：
   - `api/auth.js` 新增 `clearCustomerId()`（`:172-182`，与 `clearMerchantId` **逐字同形**：`removeItem` + `dropRestored()`）—— 它正是 `clear()` 的旧注释里欠的那「另一笔」（该注释已同行改写为「那个出口已补出来 = 下方 `clearCustomerId`；**本处仍不改**」，行为一字未动）。
   - `LoginPage.vue` 登录成功分支：`if (userData.merchantid) { setMerchantId(...); clearCustomerId(); }` / `if (userData.customerid) { setCustomerId(...); clearMerchantId(); }` —— **各清对面那一个号**（两行同行改写）。
@@ -2779,7 +2779,7 @@ find Mall-management-web/mall-management-system/src -name "CustomerPage.vue"
 - **after = `scripts/refs-after-s10.txt`**（**码改完、本节写入前**）：**3180 行 / 1809 个 token 类型** ⇒ 净 **+3 / +3**。
 - **token 类型丢失 0** ✅（`comm -23` 空，实测）—— 同 8-9 / 9-9 的判据：比 **token 集合**，不比原始产物。
 - **行级 12 行差 / 只有 1 类**：`api/auth.js:174 → :186`（**同一 token、宿主自身位移**）—— `clearCustomerId` 的 12 行插在该注释**上方** ⇒ 该注释在自己的文件里下移 12 行。**已核**：全仓**没有**任何地方引 `api/auth.js:174`（`grep` 零命中）⇒ 无人被带偏。
-- **新增 5 个 token 类型**（5 − 1 = 净 +4）：`IdentityGuard.java:71-80`（`probe-acct.mjs:2` 引，逐行核过 = `requireSelfOrAdmin` 整个方法体）、`api/auth.js:123-125`（`LoginPage.vue:311` 引，核过 = `resolveBuyerId()`）、`slot-registry.md:2332`（`router/index.js:378` 引，核过 = §八-1 A1 的正文行）；另 1 个是**重指**产的 `:186-189`（替掉 `:174-177`，见上）。
+- **新增 5 个 token 类型**（5 − 1 = 净 +4）：`IdentityGuard.java:104-115`（`probe-acct.mjs:2` 引，逐行核过 = `requireSelfOrAdmin` 整个方法体）、`api/auth.js:123-125`（`LoginPage.vue:311` 引，核过 = `resolveBuyerId()`）、`slot-registry.md:2332`（`router/index.js:378` 引，核过 = §八-1 A1 的正文行）；另 1 个是**重指**产的 `:186-189`（替掉 `:174-177`，见上）。
 - ⚠️ **重指一条（§9-2 里的裸续引）**：`:174-177` → **`:186-189`**（同一段「与「点退出」的现行清法故意不同…这是**有意**的」注释，随 `clearCustomerId` 下移 12 行）⇒ 已在原地注明「由 `:174-177` 重指为 `:186-189`」（同行改写、净零）。
 - **位移安全表**（口径：`git diff -U0` 逐 hunk 累加（`newCount − oldCount`）到「全仓最大被引行」为止；**累计位移 = 0 即该行以上未动**）：
 
@@ -4032,10 +4032,10 @@ C 档＝完全自裁）；**按用户要求做，不按稿做**（与 `c3-module
 
 #### Bug 1　`/admin/inbox` → 「加载系统通知失败（HTTP 403）」—— **真因：管理端带着「别人的票」**
 
-- **403 只可能出自一处**：`IdentityGuard.forbidden()`（`IdentityGuard.java:136`；判据本体 `:73-82`）。
+- **403 只可能出自一处**：`IdentityGuard.forbidden()`（`IdentityGuard.java:173`；判据本体 `:104-115`）。
   它的三个前置全被反推出来：`identity != null`、`role != 3`、`userId != '*'`。⇒ **用户的两个猜测都不成立**：
   ① 「`authorize` 对 cookie 管理员折 null ⇒ Guard 解不出身份」—— **解不出身份走 fail-open，返回 `true`，永不会 403**
-  （**代码在 `IdentityGuard.java:75-76`**，`null ⇒ return true`；这条契约写在类注释 `:54-56`
+  （**代码在 `IdentityGuard.java:108-109`**，`null ⇒ return true`；这条契约写在类注释 `:54-56`
   「谁把这一行改成『null ⇒ 403』…那不是修 bug，是换了一套契约」，smoke/A3 依赖它）；② 就算折 null，折的是**拦截器那一层**，
   产物是 **401**（`AuthInterceptor.writeNotLoggedIn`），不是 403，而且那条路**根本没走到**。
 - **真因链（每一环都实测/亲读）**：`main.js` 认领 `localStorage` 的「最近登录」指针
@@ -4885,3 +4885,462 @@ COALESCE(merchantid,customerid) WHERE EventType IN (那 5 个)` → 复读对照
 ⇒ 面上教训（**校验器与被测端共用同一口径 ⇒ 假绿**）登记 **TD-59**，并已给探针加**反向控制**。
 
 **⑦ 验收（agent 最小收验，⚠️ 非用户手验）** ⇒ 后端 `./mvnw -B test` = `Tests run: 309 / Failures 0 / Errors 0 / Skipped 26` + `BUILD SUCCESS`（17:13，**TD-58 那条本轮未红**）；前端 `build` = `DONE`（`Hash 8d3685921932c375`、`Time 94680ms`，① 甲案之后重跑）、`npx eslint src` = **exit 0**；`probe-b6c3-mention.py` = **EXIT 0**（A1–A4 / B1 绿，B2 与段 N 全 0）。重造场景证据 `b6-commit3-mention.txt` §七/§八。
+
+## 二十四、C3 块 7〈可观测域 4 项 + 库存治理 2 项〉（2026-10-13/14；**收口条：24-1 已列前 20 笔，本笔（commit 9）收口**）
+
+> 本节**追加在文件尾**（同 §19 / §20 / §21 / §22 / §23 的先例）。叙事版见 `progress.md §7-B7`；本节只记**本文件关心的那一面**：槽位改判 / 文件 / 行号 / 零漂移手法 / 门禁 / 偏差。
+> ⚠️ ~~**本节是「开段」不是「收口条」**：块 7 的**范围 / 建表 / 后端 / 前端 / 门禁 / DoD / 挂账总表归 commit 9**；本笔（**commit 8b**）只把**这一笔**的面记下来。**前 16 笔的逐条槽位一律不发**~~ ⇒ **已兑现**：本节由 **commit 8b 开段**、**commit 9 收口** —— 24-1 的提交切分表已补全到 **20 笔**，收口专章接在 **24-6 起**。
+> 命名沿用「§二十X」的段号形制，本节点编号写作 **24-X**（§二十三 用的是 `23-X`）。
+
+### 24-1　提交切分（分支 `feat/c3-admin-block7`，基点 `c2efb81` = PR #91 合并点）
+
+块内至今 **20 笔**（`git log --oneline c2efb81..HEAD` 实测，12 字短哈希）；**commit 8b 是第 18 笔**、**本笔（commit 9 · 收口）是第 21 笔**（下表按时间正序 = 旧到新）：
+
+| 组 | 笔 | 内容 |
+|---|---|---|
+| 方案 | `195edc9` | **pack —— 块 7〈可观测域 4 项 + 库存治理 2 项〉方案原文入库** |
+| 建表 | `b1ffc6e` | **commit 0 —— 建 `drill_record` + 演示基线列 2 + 块 6 六表补 `Source`（Migration ⑰）+ P3 门禁 25→26 / 36→37** |
+| 库存 | `b1477cc` | commit 1 库存治理 —— CAS 扣减 + 下单即扣 + 超时释放（TD-36 / TD-38） |
+| 事件环 | `46cf986` | commit 2 五套新事件环 —— Stock / Audit / Notify / Sensitive / Identity（`observe/metrics`） |
+| 补挂 | `ede4493` | commit 3 三条 SSE 观测端点 + 事件广播器（`StreamingResponseBody` / 1s 一拍 / 512 槽） |
+| 补观测点 | `a1d2a9c` | commit 2b 四环改真观测点 —— 审计 / 通知 / 敏感词 / 身份各在原写入点补一行发事件 |
+| 攻击引擎 | `5c823eb` | commit 4 攻击引擎 —— 八场景真压测 + 演练记录落库 + 三条端点 + 前端薄封装 |
+| 库存续 | `96232eb` | commit 2c+2d —— 秒杀扣减接线（TD-38 兑现）+ 超时释放条件化（库存偏账根治） |
+| 边界补笔 ① ② | `b201437` | ① 评论写入链路补齐 `Source` + ② 超时取消 job 跳过演练带标记的行 |
+| 边界补笔 | `776306a` | `order.Source` 写入通道（`/order/orderAdd` 可选 `Source` + 攻击引擎下单带 `attack`） |
+| 页 · 攻击 | `2181d07` | commit 5 攻击模拟器页 —— 八场景一键 + 权重编排 + 演练记录（前端薄封装落地） |
+| 断环 | `5b971f1` | commit 5b 断循环依赖 —— `ObserveMetricsConfig` 的 `MeterFilter` 改 `static`（一个词，环自断） |
+| 页 · 指标 | `20df0a8` | commit 6 指标面板 + `Pager.vue` —— 7 项图表落地（`HeatmapChart` 首次启用） |
+| 后端 traceId | `b6619c5` | commit 6b 后端 traceId —— `TraceIdFilter` + logback 轮转 + 慢 SQL 告警（`datasource-proxy`） |
+| 页 · 流转 | `033d62a` | commit 7 状态流转页 `OrderFlow.vue` —— 5 图落地（五态计数 + 环图 + 进度条列表 + 状态机 + 时间线） |
+| 页 · 日志 | `b773bf3` | commit 8 实时日志页 `EventLog.vue` —— 8 类事件卡片流 + traceId 链路抽屉（后端补 Object/Trace 三列 + 帧补 `traces` + 补挂 2 处审计） |
+| 杂活 | `358c00d` | **chore 归置未跟踪残留** —— 三份收笔报告入库 + 攻击模拟器探针（`.mjs` + `.png`）（**单独一笔**，不混进 8b 的功能改动） |
+| **台账 + 清理** | `b1215f3` | **commit 8b —— 事件台账 `observed_event` + 清理 job + 清场端点（Migration ⑲）+ 修 `DrillTargetDao` + 补 `TraceLog` 单测** |
+| 指标修 | `136b27c` | commit 8b2 指标 P99 剔除 SSE 长连接 + 无样本留空（**P99 26.8 秒的误红**） |
+| 事件出口 | `2047f41` | commit 8c 事件出口 —— MQ 发布/消费 + 批次跨线程透传 + MQ 缺席上屏接通 |
+| **收口** | （**本笔**） | **commit 9 —— 文档统一补（附录 H / §17 / §7-B7 / §二十四 / #40）+ 中文标签层 + 清场按钮 + 演示种子 + 手验清单 + 重指** |
+
+### 24-2　commit 8b〈事件台账 + 清理〉（`b1215f3`；**开段那一笔，原文保留**）
+
+**库变更（迁移 ⑲）** ⇒ `mall_management_sql.sql:1832-1918`：段头 `:1832-1863` · **⑲-1 建表 `observed_event`** `:1865-1887`（**11 列 + 4 个非唯一索引**）· **⑲-2..⑲-5 四表加列 `BatchId varchar(36) DEFAULT NULL`**（`drill_record` `:1888` / `order` `:1896` / `comment` `:1904` / `admin_audit` `:1912`，逐列一个 `information_schema` 守卫 + `PREPARE/EXECUTE`，不写循环）。
+⇒ 表数 **37 → 38**、行首 `CREATE TABLE` **38 → 40**、非主键索引 **69 → 73**、非主键 UNIQUE **19 不变**、`.sql` **1918 行 / LF 1918 / CR 1918 / 裸 CR 0**（磁盘 CRLF）。**全库实测**（2026-10-14，`information_schema`，`_work/b7c8b-verify.txt`）：**表 38 / 非主键索引 73 / UNIQUE 19**；`observed_event` **11 列 / 4 索引 / 0 行**。
+逐列定义见 `db-schema.md §16`、登记见 `db-migration.md` **#40** + 注意 **22**（「⏳ 待落库」改「✅ 已落库（实测）」）+ 注意 **23**、落库证据 = **21/21 OK ×2**（marker ⑱+⑲ 一次跑完 ⇒ 幂等确证）。
+⚠️ **批文的「5 张表加 `BatchId`」与实测不符**：库里**早有**该列的是 **3 张**（`notification` / `goods_audit` / `merchant_application`，皆 `NOT NULL`）⇒ 本段**只加缺的 4 张**（皆 `NULL` —— 「不属于任何演练批次」是**没有值**）。已就地更正登记。
+
+**后端** ⇒ 新建 `observe/{dao,service,job}` 三件：`ObservedEventCleanupDao`（200 行）· `ObservedEventCleanupService`（121 行）· `ObservedEventCleanupJob`（71 行，第 **7** 个 `@Scheduled` 实例）· `AttackController` 第 **4** 个出口 `POST /admin/observe/attack/cleanup`（`:189`）· 审计常量 `AuditActions.OBSERVE_ATTACK_CLEANUP`（`:329`，**44 → 45 条**，追加文件尾）。
+⚠️ **两种谓词 OR**（用户 2026-10-14 批文判据）：`OrderId LIKE 'SIM-%'` **OR** `Source='attack'`；`drill_record` **两种谓词都排除**（它是「演练这件事本身」的记录）。
+⚠️ **两档保留期** ⇒ 攻击批次 **3 天** / 日常 **30 天**，按 `BatchId IS NULL` 分档、按 **`OccurredAt`** 算、**一条语句两档 OR**（拆两条会产生「一条成一条败」的中间态）。**本笔恒删 0 行是设计**（写入方 = 8c 的 MQ consumer）。**job 管表，端点管业务**（业务行只人工触发删）。
+⚠️ **修 `DrillTargetDao` 的 `u.id`**：`user` 表主键是 `username char(20)`、**没有 `id` 列** ⇒ 原 SQL 在真库上必 500。
+
+**测试** ⇒ 新建 `observe/dao/ObservedEventCleanupDaoTest`（**5 例**，替身 `JdbcTemplate` 钉两种谓词 / 两档 OR / 子表优先 / `drill_record` 排除）· `shared/web/TraceLogTest`（**8 例**，`record`/`since` 的**起止两列各有独立断言**）。
+⚠️ **本笔实测逮到一条「会随机红的绿测试」** ⇒ `containsExactlyEntriesOf(Map.of(...))` 是**逐位比较**、而 `Map.of` 迭代序不保证 ⇒ 同一份代码两次运行可一绿一红（首次整仓跑红在「same elements but not in the same order, at index 0」）。已改 **`containsExactlyInAnyOrderEntriesOf`**。
+
+**前端** ⇒ `api/endpoints.js` 头注 **139 → 140**（**同行替换**）+ `observe` 组尾追加 `attackCleanup`（`:407` 起 +11 行）· `api/observe.js` 端点封装 **6 → 7**（+ `cleanupAttack()`）。
+⚠️ **本笔只到 API 层** —— 攻击模拟器页上那枚「清场」按钮**不在本笔范围**（**commit 9 已补上**，见 **24-7**）。⚠️ 它是本表**第一条破坏性端点**，调用点必须**二次确认 + 回显 `summary`**。
+
+**A3 门禁（P3 一次 +1，四处同改）** ⇒ IN 清单加 `'observed_event'` · `KNOWN_TABLES` **26 → 27** · 期望表数 **37 → 38** · PASS 文案串同改。⚠️ `concurrency` job 是 `continue-on-error` ⇒ **只能读 artifact 的 `gates.count`**（同 §23-7 的教训）。
+
+### 24-3　零漂移（**本笔逐文件核过**）
+
+- **净零 / 未漂**：`AuditActions.java` 的 +22 行**全在文件尾**（既有常量行号一个不挪；唯一改动 = `:25` 的**同行替换** 44 → 45）· `endpoints.js` `:7` 同行替换 + `:407` 起追加（**最大被引 `:58` 未漂**）· `ConcurrencyRunner.java` 三处**同行替换、净 0 行** · `db-schema.md` `:8` / `:15` 同行替换 + 文件尾 §16（既有引用 `:5` / `:91` / `:205` / `:732` 未漂）· `db-migration.md` **入向引用实测 = 0** · `api/observe.js` / `AttackController.java` / `DrillTargetDao.java` / 三处 properties / `.sql`（尾追加）**入向 `文件:行号` 引用实测 = 0**。
+- ⚠️ **一处真漂移（只登记、本笔不重指）**：`AbstractSmokeTest.java` 本笔 **+25 行**（import 块 **+2** / `@Import` 尾部登记注释 **+23**）⇒ 指向它的外部行号集体下移 —— `progress.md:411` 引的 `AbstractSmokeTest.java:45` 现实为 **`:47`**；context-packs 里那 4 处（`:137` / `:137-146` / `:156` / `:163-206`）**在块 2–6 期间就已被 `@Import` 扩容甩到 `:376` 起**，属**既有误指族**（TD-51），不在本笔范围。
+- ⚠️ **切片地雷（批文点名要盯）**：`AbstractSmokeTest` 是 `@WebMvcTest` ⇒ 新增 `@Service`/`@Dao` 必须同步进 `@Import`（历次 77 / 237 / 132 errors）。本笔**新增三个 `@Component`**（`ObservedEventCleanupDao` / `Service` / `Job`）⇒ **`@Import` 是必须动作**，已加（这正是 +25 行的来源）；**本笔未复现 errors 地雷**。
+
+### 24-4　文档同步（本笔四处 + 一处更正）
+
+四处同改齐：`db-schema.md §16`（新建）· `db-migration.md`（注意 22 改口 + 注意 23 + `#40`）· `progress.md §7-B7`（**开段**）· 本文件 **§二十四**（**开段**）；外加 `ConcurrencyRunner` 的 `KNOWN_TABLES` **27**。
+⚠️ **一处命名假设更正**：`api-contract.md` **没有「附录 H」**（其附录**到 G 为止** = 块 6 的内容域，`grep observe` = 0）⇒ `db-migration.md` 注意 21 那句是**前瞻指针**；块 7 的**可观测域端点 7 条**的契约（附录 H）**本笔不新建**，归 **commit 9** ⇒ **commit 9 已落**（见 **24-6**）。
+
+### 24-5　报备偏差（落码 ≠ 方案原文处，逐条）
+
+1. **cleanup 挂审计属超批文追加**：批文没要求把清场动作写进 `admin_audit`，但它是**破坏性端点** ⇒ 按本仓「管理端写动作必挂审计」的既有口径补挂（`OBSERVE_ATTACK_CLEANUP`）。
+2. **批文「5 张表加列」实测更正**：见 24-2，实为**加 4 张**（另 3 张早有）。
+3. **两条谓词 OR 是本笔的自裁**（批文只给判据「清完这两种谓词的数据全消失」）：只按一种会漏 —— 评论链路只有 `Source`、单号链路只有前缀。
+4. **`observed_event` 的写入留 8c**（用户裁决）：本笔表空、恒删 0 行 ⇒ **「保留期真的按天数删对行」这件事本笔只有单测能证**，真库证据要等 8c 之后。别把「本笔跑绿」当「保留期验过」。
+5. **§二十四 / §7-B7 为「开段」**：前 16 笔的逐条槽位**本笔不发**，归 commit 9 —— 既满足批文的「4 文档同步」，也不越权代登未核的笔 ⇒ **commit 9 已补齐**（24-1 的 20 笔表 + `progress.md §7-B7` 的收口条）。
+
+---
+
+### 24-6　commit 9〈块 7 收口〉—— 文档统一补 + 中文标签层 + 清场按钮 + 演示种子 + 手验清单
+
+**六件**（用户 2026-10-14《开工 commit 9》批文：9.1–9.6），逐条落点如下。
+
+**9.1 文档统一补（前 18 笔欠账）** ⇒ 四处活文档 + 一处登记表：
+
+| 落点 | 内容 | 手法 |
+|---|---|---|
+| `api-contract.md` **附录 H** | 可观测域 **7** 条端点契约（H.0 三个端点总数口径 · H.1 攻击四出口 + 8 场景表 · H.2 三条 SSE · H.3 帧节流项 · H.4 前端封装 · H.5 白名单零改动 · H.6 `X-Drill-Batch` 跨线程契约面 · H.7 台账边界） | **尾追加**（既有引用不动） |
+| `db-schema.md` **§17** | 块 7 的 ⑰ / ⑱ 两段（§16 只登了 ⑲）—— `drill_record` 12 列 · 两个演示基线列 · 块 6 六表 `Source` · `order.StockDeducted` | **尾追加** + §16 头部两处**同行订正**（「归 commit 9」→ 已落） |
+| `progress.md §7-B7` | 收口条 + 前 **20** 笔逐笔登记 | 标题 / 引言**同行订正** + 尾追加 |
+| `slot-registry.md §二十四` | 本节（24-1 补全 20 笔 + 24-6..24-9） | 表内**同行订正** + 尾追加 |
+| `db-migration.md` | 登记表补 **#40**（⑲）+ **#39 的状态列由「⏳ 待落库」改「✅ 已落」**（注意 22 那句改口当时**漏了登记表这一行**） | 表内**新增 1 行** + 同行订正 |
+
+⚠️ **`db-migration.md` 登记表 #39 的状态列是本笔补的** —— commit 8b 改了注意 22 的正文（`:253` 那句），但**表格里的状态列仍是「⏳ 待落库」**；批文点名的「`:253` 改口」在 8b 就已做，**真正漏的是这一行**。
+⚠️ **`db-migration.md` 新增 1 行 ⇒ 该文件 `:50` 之后的行号集体 +1**（token 值一字未变）—— 这是本笔**唯一**的中段插入，已按「引用者自身位移 = 成对 LOST/NEW」的口径核过（见 **24-9**）。
+
+**9.2 中文标签层（新目录 `src/config/labels/`，五个文件）** ⇒ 照 `config/notify-events.js` 惯例（`export const` 映射表 + `export function` 取值函数）：`observe-labels.js`（由 `config/observe-labels.js` **移动**而来，见下 ⚠️）· `audit-labels.js` · `order-labels.js` · `report-labels.js` · `user-labels.js`。
+⚠️ **兜底是硬要求**：映射表里没有的 code ⇒ **原样显示 code**；实现用 `Object.prototype.hasOwnProperty.call(TBL, k)` 判定，**不是** `TBL[k] || k`（后者会把 `constructor` / `toString` 这类**原型链键**渲染成函数体）。
+⚠️ **`<option>` 的 `:value` 仍是 code**（**不改后端契约**，只换显示文本）。
+⚠️ **三类字段分治**：① 枚举 code → 纯中文；② 业务号 → 中文前缀 + 原值（`商品:#123`）；③ 数值 → 中文单位。
+⚠️ **最容易抄错的一处**：举报单的中档是 `handled`（已处理）、评论图的中档是 `approved`（已通过）—— **两张表两键同名而中档不同名**（`report-labels.js` vs `observe-labels.js`），已写进手验清单 §F 与桌面诊断档 `块7-中文标签诊断清单.txt`。
+⚠️ **`observe-labels.js` 从 `src/config/` 移到 `src/config/labels/`** ⇒ 该文件**自身第 51 行**的 2 条 token 的**引用者路径**变了（行号未变）—— refs-scan 会记成「同 token、引用者路径不同」，属**搬家**不属漂移。
+
+**9.3 清场按钮（8b 遗留的「API 层有、页面没有」）** ⇒ `AttackConsole.vue` 新增第 **⑤ 区**：两段式确认（`armedClean` 第一次点**只上膛**、按钮转 `.a-btn-danger` + 页顶 flash 条，第二次才发请求）+ 回显后端 `summary` + 清完自动 `loadRecords()`。
+⚠️ **批文说「照 `AccountsPage` 的二次确认风格」—— 该页 `grep confirm|再点|armed` 实测 0 命中，它没有二次确认**；本仓真先例是 **`OrderPage.vue` 的 `armed` 模式**（`OrderPage.vue:636` 起），`.a-btn-danger` 是两页共用的**危险色按钮**样式（三处同值）。⇒ 本笔照 **OrderPage 的流程** + **AccountsPage 的配色**，**照实登记这条前提不符**。
+⚠️ **清场按钮不动 `drill_record`**（后端语义：清的是「演练污染出来的业务数据」，不是「演练这件事的记录」）⇒ 手验时**别把遗留的 `drill_record` 行当成没清干净**。
+
+**9.4 重指（refs-scan）** ⇒ before/after 逐条核，见 **24-9**。
+
+**9.5 演示种子（`scripts/seed-demo-gen.mjs` + `seed-demo.sql`）** ⇒ 新增可演练 SKU **4 件**（`SkuCode = 'SEED-…'`、`Stock = 240/180/120/60`）。
+⚠️ **批文「若干 SKU 带**基线库存**」按后端语义**不能那样做****：`BaselineStock` **不是种子**，是「人工四步」的载体（`UPDATE BaselineStock = Stock` → 演示 → `Stock = BaselineStock` → `BaselineStock = NULL`），库里 **NULL = 未处于演示中**；预置非 NULL 会让引擎把「上一轮的基线」当成这一轮的、「扣了多少」当场变**假读数** ⇒ 种子里**刻意留 NULL**。
+⚠️ **`goods_sku` 没有 `Source` 列**（Migration ⑰-2 只加了 `BaselineStock`）⇒ 批文说的「演示数据带 `Source='seed'`」在这一段**不适用**，改用**码前缀** `SkuCode LIKE 'SEED-%'` 作撤销判据（`.sql` 的 ① 段最前，**必须排在 `goods` 删除之前**）。
+⚠️ **批文另两件前提实测已满足、本笔不重复造**：敏感词库里已有 **11** 条（10 条来自 `.sql:1632` 的 ⑮-8 预置，全 `Source=''`）——**不改写它们的 `Source`**（改了会让撤种子删掉建表文件该保留的基线词）；「有 `customerid` + 未封禁 + 有登录名」的账号已有 **33** 个。
+落库 + 读回证据 `docs/agent/evidence/c3-block7/b7c9-seed-sku.txt`（`DELETE affected=4` / `INSERT affected=4` / 复跑 4/4 幂等 / `BaselineStock` 全 NULL / 中文按 `HEX()` 核未 mojibake / `pickSku` 主靶现为 `SEED-GD-101-9552` 240）。
+
+**9.6 手验清单** ⇒ 落桌面 `块7-commit9-收口-报告.txt`（**用户明令：报告直接丢桌面**；⚠️ 2026-10-16 顾问裁定 2：该份连同另 6 份已归档进**仓根 `reports/`**——现址 `reports/块7-commit9-收口-报告.txt`，`reports/` 在 `scripts/refs-scan.sh` 的 SKIP_DIRS 里、不参与扫描），三列式「操作步骤 → 期望 → 判据」，分 〇 前置 / A 攻击模拟器 / B 指标 / C 状态流转 / D 实时日志 / **E 跨线程透传端到端** / F 中文标签 / G MQ 缺席 / H 收尾自检。
+⚠️ **§E 是本笔专门补的 8c 判据① 端到端**（8c 当时只验到单元 + 日志）：判据是「该批次 `COUNT>0` · `COUNT(DISTINCT BatchId)=1` · `Traces>1` · 时间落演练窗口内」，**不是**「全表都带批次」——`BatchId IS NULL` 是**正常值**（非请求上下文），证据 `docs/agent/evidence/c3-block7/b7c9-e2e-batch.txt`。
+⚠️ **§〇-5 是本清单最重要的一条前置**：事件台账的落库**由 SSE 流线程驱动**（`EventStreamService:96` → `EventBroadcaster.poll()`；⚠️ **2026-10-15 块 7 commit 10b 重指**：**原 81 行** → **96 行**）⇒ **不打开实时日志页就查不到台账行**；本笔实测对照：不开流当场 **0 行** → 开流后同一批次 **2140 行**且时间戳仍落在演练当时（**落库滞后 ≠ 透传丢了**）。
+
+### 24-7　commit 9 的前端落点（含 9.3 清场按钮详录）
+
+| 文件 | 改动 | 零漂移手法 |
+|---|---|---|
+| `views/admin/observe/AttackConsole.vue` | import 行**合并** `cleanupAttack`；新增 `armedClean` / `cleaning` 两态 + `doCleanup()`；模板新增第 **⑤ 区**「清场」；样式新增 `.a-btn-danger`（三行，插在 `.a-btn:disabled` 之前） | 该文件**入向 `文件:行号` 引用实测 = 0** ⇒ 可自由加行（本笔 +约 55 行） |
+| `views/admin/observe/EventLog.vue` / `OrderFlow.vue` / `views/admin/ModerationPage.vue` / `views/admin/AuditPage.vue` / `views/admin/OrderPage.vue` / `views/NotifyInbox.vue` | 接入中文标签层（**import 合并到既有 import 行**；模板/逻辑的映射调用**同行替换**） | 已按「增行只加在被引行**之下**」核过；见 24-9 的逐文件位移表 |
+| `config/labels/*.js`（5 个） | **新目录**（`observe-labels.js` 由 `config/` **移动**进来，其余 4 个新建） | 新文件；`config/observe-labels.js` 的旧路径引用（若有）按搬迁处理 |
+| `api/endpoints.js` | `:407-410` 那段注释**同行替换**（补「页面按钮是 commit 9 补的」） | **净 0 行** |
+
+⚠️ **清场按钮为什么是两段式而不是 `confirm()`**：本仓 `eslintConfig.env` **没有 `browser`** ⇒ 管理页里 `window.confirm` / `alert` 会踩 `no-undef`；且即便能过 lint，「原生弹窗在自动化探针里点不到」会让这条**不可撤销**的动作变成验不了的代码。⇒ 走 `armed` 态（第一次点**只上膛**、页面自己画确认），与 `OrderPage.vue:636` 起的先例一致。
+⚠️ **`IconGlyph` 用 `name="no"`**：`components/ui/glyphs.js` 里**没有** `trash` 字形（照搬别的名字会渲染成空）。
+⚠️ **`doCleanup` 必须回显后端 `summary`**（形如「共 N 行（comment 1 / order 3 / …）」）—— 只回「已清场」三个字，用户就无从知道**到底删了什么**；这是本表第一条**真 DELETE** 端点，回显即护栏。
+
+### 24-8　门禁 / DoD（本笔实测）
+
+🧪 **后端** ⇒ `./mvnw -B -o **clean** test`：`Tests run: 471, Failures: 0, Errors: 0, Skipped: 26` + `BUILD SUCCESS`（`Total time: 44.189 s`，`2026-10-14T23:17:19+08:00`，日志 `_work/b7c9-mvn-test.log:5126` / `:5129` / `:5131`）。
+⚠️ **471 与 commit 8c 那次同数** —— 本笔（commit 9）**不含后端代码改动**（文档 + 前端 + 种子），故测试数**不应**变化；若它变了，先怀疑是不是混进了别的改动。⚠️ **`clean` 不能省**（增量编译复用陈旧 test class，同 §7-B6 判据）；本笔是 `clean test`，**不存在 surefire 残留**（残留问题见 `tech-debt.md`）。
+🧪 **前端** ⇒ `npm run lint` + `npm run build` 见下方「本笔实测」行（日志 `_work/b7c9-npm-lint.log` / `_work/b7c9-npm-build.log`）。
+
+**A3 门禁** ⇒ 本笔**不动** `ConcurrencyRunner`（表数仍 **38** / `KNOWN_TABLES` 仍 **27**，由 commit 8b 落定）。⚠️ `concurrency` job 是 `continue-on-error` ⇒ **只能读 artifact 的 `gates.count`，不能读 job 颜色**（同 §23-7 的教训）。
+
+### 24-9　零漂移（本笔逐文件核过）
+
+- **中段插入只有一处**：`db-migration.md` 登记表新增 **#40** 一行 ⇒ 该文件 `:50` 之后的自身 token 行号集体 **+1**（**token 值一字未变**）。⚠️ 该文件的**入向** `文件:行号` 引用**实测 = 0**（commit 8b 已核过，本笔复核仍为 0）⇒ 只影响它自己那 200 余条自指，按「引用者自身位移 = 成对 LOST/NEW」口径核（见下 ⚠️）。
+- **纯尾追加（既有引用零影响）**：`api-contract.md` 附录 H · `db-schema.md §17` · `progress.md §7-B7` 的收口条 · 本文件 §二十四 的 24-6..24-9。
+- **同行订正（净 0 行）**：`db-schema.md` `:8` / `:933`（§16 头部两处）· `progress.md §7-B7` 标题 + 引言 · 本文件 §二十四 标题 + 引言 + 24-1 引言 + 24-2 标题 + 末尾两处 · `db-migration.md` 登记表 **#39 的状态列** · `api/endpoints.js:407-410`。
+- ⚠️ **`slot-registry.md` 的入向 `文件:行号` 引用**（`context-packs` ×6 · `progress.md` ×2 · `router/index.js` ×1，**全部指向 `:4192` 之前**）**一处不受影响** —— 本笔对 §二十四（`:4889` 起）的改动**全在该点之后**，且其中无一处是「行内插入」（只有尾追加 + 同行替换）。
+- ⚠️ **本笔新增的 `文件:行号` 引用**（附录 H / §17 / 本节的正文里）会**抬高** after 计数 —— 计数是**移动靶**，**终止条件是「真 LOST = 0」，不是某个计数**（同 §7-B6 的判据）。
+
+**✅ refs-scan 复核实测（2026-10-14，**最后一次编辑之后**跑）** ⇒ before `_work/b7c9-refs-before.txt` **4904 条** / after `_work/b7c9-refs-after.txt` **4930 条**；按 **「(引用者, token)」对**归一后 **before 3856 对 / after 3881 对**（比对脚本与逐条台账在 `_work/b7c9-refs-diff.*`，**按护栏不进 `docs/`**）。
+- **真 LOST = 2 对，且 2 对全部由 `observe-labels.js` 搬家解释**：同一份文件的两条 token（一条是裸行号、一条是 CSS 引用），**行号同为 51、内容一字未变**，只是**引用者路径**由 `config/` 变成 `config/labels/` ⇒ 旧路径那对报 LOST、新路径那对报 NEW，**成对相抵**。**扣掉搬家 = 真丢失 0。**
+- **新增 27 对全部可解释**：2 对 = 上述搬家的 NEW 侧；其余 25 对**全是本笔新写入的正文**（`api-contract.md` 附录 H 的 2 条 · `db-migration.md` 新 `#40` 行的 4 条 · `db-schema.md §17` 的 7 条 · `slot-registry.md` 本节的 6 条 · `tech-debt.md` TD-60..68 的 6 条）。**没有一条落在「既有文件被本笔改动」上**。
+- ⚠️ **判据口径**：`LOST` 里那 2 条与 `NEW` 里那 2 条**必须逐条配对**（同 token、同行号、仅路径前缀不同）才算「搬家」；**只数 `LOST` 的条数会误判成「漂了 2 处」**（同 §7-B6 的「成对伪报」教训）。
+
+### 24-10　报备偏差（commit 9，逐条）
+
+1. **批文 9.3 的前提不符**：`AccountsPage` **没有**二次确认（`grep` 0 命中）⇒ 本笔照的是 `OrderPage` 的 `armed` 流程 + `AccountsPage` 的**配色**。已如实登记（见 24-7）。
+2. **批文 9.5 的前提不符**：① `BaselineStock` **刻意不预置**（它是人工四步的载体）；② `goods_sku` **没有 `Source` 列** ⇒ 那一段改用码前缀 `SEED-%`；③ 敏感词库里已有 11 条，**不重复预置、也不改写它们的 `Source`**；④ 「若干用户有 login + user 行」库里已满足（33 个）。
+3. **批文点名的「`db-migration.md:253` 改口」在 commit 8b 就已做**；本笔真正补的是**登记表 #39 的状态列**（那一行当时漏了）。**这是「照批文找行号」会漏掉一处的情形**：行号给的是注意段，而漏的在表格里。
+4. **`drill_record` 里留了本笔两次收口验证的行**（`Name = b7c9-e2e` / `b7c9-e2e2`）—— 清场按钮**不动** `drill_record`，它们会一直在；手验清单 §H-2 已写明**别当成没清干净**。
+5. **§二十四 24-1 原写「自上而下 = 新到旧」与表内实际顺序（旧到新）相反**，已就地更正（表本身未动，只改这半句）。
+6. **本笔不 push / 不 merge** —— 块 7 全部手验通过后由用户决定（批文明确）。
+
+---
+
+### 24-11　commit 10 系列 + 收口（**commit 10d**，2026-10-15）—— 块 7 第 **22** 笔起
+
+**提交切分（11 笔，`git log --reverse 50439fa..21bae15` 实测；commit 9 = 第 21 笔，故本段起于第 22 笔）**
+
+| 笔 | 短哈希 | 内容 |
+|---|---|---|
+| 22 | `50439fa` | **chore 修探针陈旧期望** —— `.a-of-id` 的 `#` 前缀（`ab6f71d` 引入，与 10 无关 ⇒ **单独一笔**） |
+| 23 | `3022dad` | **commit 10a 演练批次号链路** —— `order.BatchId` 写入 + 帧带 `batchId` + `countOrderStatesByBatch` |
+| 24 | `1b5afcb` | **commit 10b 观测流三改** —— 每连接一份帧源（丙）+ 事件环 **512→2048** 与环满记账 + `spring.mvc.async.request-timeout=-1` |
+| 25 | `41e0a5e` | **commit 10c 攻击引擎 v2** —— 甲异步引擎 + 丁开关面板/档位 + `/attack/stop` + 前端重连 |
+| 26 | `57e19b7` | **docs 10 收口** —— refs 重指 4 处 + 512→2048 文档同步 6 处 + 两处既有陈旧登记（零 Java / 零前端，**+9/−9**） |
+| 27 | `4da212a` | **feat 10c-2 前置** —— `MAX_CONCURRENCY` **500→4000** + `AttackConsole.vue` `CONC_MAX` + 一行为 http P99 开分位 |
+| 28 | `ef178da` | **feat 清场谓词扩三条 OR** —— 种子 SKU 库存 + 清场审计行纳入清理（`ObservedEventCleanupDao` 第 ③ 段） |
+| 29 | `1c42f30` | **docs** `selection-status.md:98` 的 8192 计划记为**已裁**（维持 2048） |
+| 30 | `d74f9e3` | **docs 登记 TD-69** —— 保留期 Job 把演练副产物当「日常」多留 30 天（仅追加 EOF，+11/−0） |
+| 31 | `c495997` | **chore 撤 `4da212a` 多加的配置**（**15 行**）—— 分位早由 `ObserveMetricsConfig` 给 |
+| 32 | `21bae15` | **fix 延迟口径排除演练启动端点** —— `/attack/run` 全等排除（`DRILL_RUN_URI`） |
+| 33 | `071c2cc` | **chore 订正 `AttackController` 陈旧注释** —— concurrency 上限 500 → 4000（**净 0 行**；**单独一笔**） |
+| **34** | （**本笔 · 收口**） | **commit 10d · 收口** —— 文档统一补 + 手验清单 + 假数据清场 + refs 重指 |
+
+**本文件关心的那一面（逐笔的槽位 / 文件 / 行号）**
+
+- **10a `3022dad`** ⇒ `OrderDao` 两个成员**尾追加**（在上面的 `selectStockDeducted` 之后）· `OrderRow` 加第 **12** 分量 · `OrderFlow.vue` **+237 行**。⚠️ 该文件有 **4 处行号引用目标侧漂移**，**全部落在未跟踪的 `docs/agent/context-packs/`** ⇒ 活文档零漂移。
+- **10b `1b5afcb`** ⇒ 三个产帧服务改**工厂**（`newFrameSource()`）· `FramePacer` **删除** · **九处**容量常量同步 **512→2048**（八源环 + `EventBroadcaster` 合并环）· 帧新增 `dropped`/`droppedTotal`/`droppedIngest` · `properties` **尾追加 `:203-228`**（配置行在 **`:228`**）。
+- **10c `41e0a5e`** ⇒ `AttackEngine.java` **+824 行** / `AttackConsole.vue` **+342 行**（本块单笔位移最大的一笔）· `endpoints.js` 加 `attackStop`（第 **141** 条）· `api/observe.js` 加 `openResilientStream` / `stopAttack()`。⇒ 这两处大位移的 refs 重指**推到收口笔**（见 24-12）。
+- **10 收口 `57e19b7`** ⇒ 重指 **4 处**：`EventStreamService` **81 → 96 行**（10b 的「每连接一份」在这段之上插 15 行；已核 `:96` 即 `broadcaster.poll()`，「唯一调用点」仍成立，但**每秒调用次数 = 打开页面数**）· `MallOrderStateMetrics` **88 → 113 行**（`:113` = `private static final int EVENT_CAPACITY = 2048;`；88 在 `ab6f71d` 就已错，顺手订正）。⚠️ **自我更正**：第一版注把新值写成 `` `:96` ``（**带冒号**）⇒ 扫描立刻报出两条**无主裸 token**（「重指记录自己会造陈旧 token」的形态）⇒ 改成「**96 行**」后裸 token 归零。
+- **`4da212a` → `c495997`** ⇒ 前者在 `properties` 尾加「1 空行 + 13 行注释 + 1 行分位配置」= **15 行**；后者**整体撤掉**，验收 = `git diff 4da212a^ -- <该文件>` **输出为空**（逐字节一致）。⚠️ 撤的理由之一：actuator 的 `/actuator/metrics/<timer>` **结构上不吐分位数**（Micrometer 只报 COUNT/TOTAL_TIME/MAX），那段注释把人引向走不通的路。
+- **`21bae15`** ⇒ `MetricsSnapshotService` 加常量 `DRILL_RUN_URI`（`:139`）+ `isLatencyTimer`（`:407-413`）加一支 **全等**排除（**非** `/attack/*` 前缀 —— `/stop` 是毫秒级真请求，照算）· `MetricsSnapshotServiceTest` **+2 例**。
+
+### 24-12　零漂移 + refs（本系列，逐笔）
+
+- **通用手法** ⇒ 新代码**一律尾追加**、订正走**同行替换**（净 0 行）；**唯一例外**是 10d 本笔对 `AttackController.java:128-130`【3a.1 重指，原 100-102】的改（`concurrency` 上限 **500 → 4000**），也是**行数不变**。
+- **10 收口 `57e19b7`（本系列唯一一次 refs 全跑）** ⇒ `./scripts/refs-scan.sh` → `_work/b10c-refs-final.txt`：配对比 **LOST = 4**（**全是本笔这 4 处有意重指**）/ **NEW = 62** = 4 重指落点 + 1 真·新引用（`OrderFlow.vue:346` → `OrderState.java:44-72`）+ **57 来自 11 份未跟踪的 context-packs**。**裸 token 归零**。⚠️ **判据仍是「真 LOST = 0」**，不是某个计数（同 24-9）。
+- **`21bae15`** ⇒ LOST = **0**；22 条 NEW 全部来自三个未跟踪的 `docs/agent/context-packs/*.txt`（与改动无关）。
+- ⚠️ **本系列自身产生的漂移集中在未跟踪的时点稿里** —— `docs/agent/context-packs/` 是**核实时点的记录，不应重指**（`_work/b10c-target-drift.py` 的 27 条 `!!` 里 21 条是它；⚠️ 该工具**只覆盖「本次改动过 ∩ 被行号引用」的 23 文件 / 97 区间**，且**重指过的会继续标 `!!`**——正确判据是「新落点那一行确实是它宣称的构造」，这一步**人读**）。
+- ⚠️ **本文件尾部追加零影响** ⇒ §二十四 的入向 `文件:行号` 引用（`context-packs` ×6 · `progress.md` ×2 · `router/index.js` ×1）**全部指向 `:4192` 之前**，本节追加在该点之后（同 24-9 的结论）。
+
+### 24-13　报备偏差 / 待裁（commit 10 系列 + 10d，逐条）
+
+1. **⚠️ 没有 `/attack/status` 这个端点**（用户 10d 清单点名要写进 `api-contract.md`）—— 实测五条映射是 `/scenarios` `/run` `/stop` `/records` `/cleanup`，**无 `status`**。同 A-3 那一类**前提不符**。⇒ 附录 H 写的是**真实存在的五条**。
+2. **⚠️ 种子基线是 190 行、不是「~12 行」**（用户 10d §二预期）—— `order` 清场实测：**12,268 → 190**（删 12,078 条 `SIM-%`）。订正预期，**非缺陷**。
+3. **`/attack/stop` 是 10c 新增的，但 `api-contract.md` 附录 H 当时没收它** ⇒ 本笔（10d）补登第 5 条出口。⚠️ 与 8b 时「附录 H 只有 4 条」的口径不同，这里说的漏是**10c 之后**发生的。
+4. **`AttackController.java:128-130`【3a.1 重指，原 100-102】的陈旧注释** ⇒ 原写「上限 **500**、硬顶 **512**」，与 `4da212a` 抬到 **4000** 的 `MAX_CONCURRENCY` 不符 ⇒ 本笔**净 0 行**订正（避免造漂移）。**10c 抬上限时漏改了这处注释**。
+5. **10d 本笔不 push / 不 merge** —— 块 7 全部手验通过后由用户决定。
+6. **⚠️ 一处待归置** ⇒ `docs/agent/context-packs/块7-*.txt` **3 份未跟踪**（10d 时点又新增）—— 若入库会给引用图注入噪声对；建议归置到 `_work/`（同 57e19b7 收口报告 §戊 的建议，**未做**）。⏹ **已归置**：块 7 收尾 commit 1 前的那笔 chore `4d75eec` 把 3 份 **入库**（改判为「被已入库文件引用 ⇒ 换机可取证」）—— 本条据此关闭。
+
+---
+
+## 二十五、块 7 **收尾**系列（用户 2026-10-15 重排期批文；**4 笔 commit**）
+
+> ⚠️ **这不是块 8** —— 是块 7 与块 8 之间插入的一段（块 7 欠账收尾 + **D 段「防护加固」**）。
+> 分支继续用 `feat/c3-admin-block7`。⚠️ **手验压成一轮**（commit 4 之后），与块 7 前 21 笔「逐笔验」口径不同。
+
+### 25-0　四笔的总账（批文原序）
+
+| 笔 | 内容 | 状态 |
+|---|---|---|
+| **1** | 块 7 **收尾**（演示完整化 ① 回放 / ② 模拟日常 / ③ 实时进度 + ⑤ 3 txt 入库 + ⑥ D pack + ⑦ 文档补 + ⑧ refs 重指；④ 三块预览**登记不做**） | ⏳ **本笔** |
+| 2 | **D 段后端防护**（事件环第 9 类 + 熔断 / 限流 / 重试 / 分池 + 单测） | ⏸ 未开工 |
+| 3 | **D 段边界 + 演示联动**（SSE 保护 / MQ 幂等 + DLQ / 大表 LIMIT / 脱敏 / 攻击模拟器 + 攻防联动；⚠️ 多进程实验**已移出**） | ⏸ 未开工 |
+| 4 | **收口 + 块 8 前置**（文档统一补 + refs 重指 + **手验清单（块 7 + D 段合并）** + 假数据 + 块 8 前置清单） | ⏸ 未开工 |
+
+⚠️ D 段的**唯一方案来源**是用户批文本身；其**规划文档**（行号实测 + 八项现状 + 七条前提更正 + A 档清单）落在
+`context-packs/c3-block-D-hardening.md`（本笔 ⑥）。
+
+### 25-1　commit 1 的落码面（**本笔**）
+
+**新增**
+- 后端：`observe/controller/ReplayController.java`（`@RequestMapping("/admin/observe")` @ `:42`，方法 `@PostMapping("/replay")` @ `:64`）· `observe/service/ReplayService.java`（`DEFAULT_LIMIT=5000` / `MAX_LIMIT=50000`）。
+- 测试：`observe/service/ReplayServiceTest.java`。
+- 前端：`api/demo-stream.js`（「模拟日常」假数据源，纯前端）· `components/observe/DemoModeToggle.vue`（右上角「正常 / 模拟日常」，根类 `.a-dm`）。
+- 稿：`docs/agent/context-packs/c3-block-D-hardening.md`（**规划，不写代码**）。
+- 探针 ×5 + 截图 ×3：`c1-replay-live.sh` · `c1-status-live.sh` · `demo-stream-check.mjs` · `esm-src-loader.mjs` · `probe-b7c1-demo-mode.mjs` · `out-b7c1-demo-{metrics,timeline,logs}.png`。
+- 证据 ×3：`docs/agent/evidence/c3-block7/b7w-{replay-live,status-live,demo-probe}.txt`。
+
+**修改**
+- 后端：`AttackController.java`（**+ 第六条 `@PostMapping("/status")`** @ `:210`）· `DrillRecordDao.java`（`COLUMNS` 尾加 `BatchId`；键序 `[…, DurationMs, CreatedAt, BatchId, Result]`）· `DrillRecordService.java`（`Progress` 快照）· `AttackEngine.java`（进度读数）· `ObservedEventDao.java`（回放那条 `WHERE BatchId = ? ORDER BY OccurredAt ASC, Id ASC LIMIT ?` @ `:158`）。
+- 测试：`AttackEngineTest` · `DrillRecordServiceTest` · `smoke/AbstractSmokeTest`（**+25 行**，⚠️ **TD-66 族**：指向它的行号会漂）。
+- 前端：三页接开关（`AttackConsole.vue` / `EventLog.vue` / `MetricsPanel.vue` / `OrderFlow.vue`）· `api/endpoints.js`（`observe.attackStatus` @ `:437` · `observe.replay` @ `:449`，总数 **142 → 143**）· `api/observe.js`（`attackStatus()` @ `:395` · `replay(batchId, limit)` @ `:420`）。
+- 文档：`api-contract.md` 附录 H（**H.1 五→六出口 + 全表重指** · **新增 H.8 回放** · H.0 两个计数 · H 引言）· `tech-debt.md`（**TD-72 / TD-73**）· `progress.md`（`#### 7-B7-收尾`）· 本文件 **§二十五**。
+
+**本笔规模**（`git diff --cached --stat` 实测）
+- **35 文件 / +2999 / −42**（含 3 张 png · 5 个探针 · 3 份证据）。
+- 后端 11 文件：`ReplayService` **+121** · `AttackEngine` **+114** · `ReplayController` **+74** · `ObservedEventDao` **+59** · `AttackController` **+48/−3** · `DrillRecordService` **+22** · `DrillRecordDao` **+16/−2**；测试 `ReplayServiceTest` **+192** · `AttackEngineTest` **+54** · `AbstractSmokeTest` **+15** · `DrillRecordServiceTest` **+8**。
+- 前端 8 文件：`demo-stream.js` **+494** · `AttackConsole.vue` **+432** · `DemoModeToggle.vue` **+112** · `observe.js` **+61** · `endpoints.js` **+24** · 三页各 +14~18。
+- 文档 5 文件：D pack **+373** · 本文件 **+53** · `progress.md` **+44** · `api-contract.md` **+35/−9** · `tech-debt.md` **+22**。
+- **测试：498 passed / 0 failed / 0 errors / 26 skipped**（`./mvnw -B -o test`，`EXIT=0`；基线 485 ⇒ **+13**）。
+
+**零漂移手法**
+- ⚠️ **`AttackController` 是本笔唯一一处「行内插入」** ⇒ `/status`(:210) 插在 `/stop`(:170) 与 `/records` 之间，**把 `/records` 从 188 顶到 233、`/cleanup` 从 236 顶到 281（各 +44 行）**；另有一处 +1（**新增 import** `observe.service.AttackEngine`，给 `AttackEngine.Progress` 用）落在 `@RequestMapping` 与前三条之前。⇒ 附录 H.1 **全表重指**。
+- ⚠️ **重指记录**这次按 §24-11 的教训写：旧值一律写「**原 N 行**」，**不**写成 `` `:N` ``（避免重指记录自己往引用集合里注入陈旧 token）。
+- 其余全部**尾追加**（新方法 / 新段 / 新文件）或**同行替换**（净 0 行）。
+
+### 25-2　本笔的事实更正（三处，逐条）
+
+1. **附录 H.1 标题「攻击模拟器五出口」→「六出口」** ⇒ ⑤③ 之后 `/status` 是真端点（`AttackController:334`【3a.1 重指，原 210】；⚠️ 3a.1 起该标题再变「**八**出口」）。⚠️ 这与 §24-13 第 **1** 条（「**没有** `/attack/status` 这个端点」）**不矛盾** —— 那条是 **commit 10 系列的时点陈述**，按本仓口径**保留原样**（见 `progress.md` `#### 7-B7-收尾` 的 ③ 顺带登记）。
+2. **端点总数**：后端 method-level **142 → 144**（实测 `grep -rhE "^\s*@(Post|Get|Put|Delete)Mapping" --include=*Controller.java … | wc -l`）· `endpoints.js` **141 → 143**（实测 141 行 + 2 处同行两条）。⚠️ 该文件头注是**逐笔就地同步**的（③ 落码时同步到 142，回放那条同步到 143）—— 本笔只登记，**不另动**。
+3. **`/replay` 不在 `/admin/observe/attack/*` 之下** ⇒ 路径挂在 `/admin/observe`（根），后端是**新建的 `ReplayController`**，**不是** `AttackController` 的第七条。理由两半：① 它读的是**事件台账** `observed_event`，不是**演练记录** `drill_record`；② 另一条候选路（再开一条 SSE 推回放）要多一条常驻流 + 回答「流断了怎么办」。
+
+### 25-3　未还项 / 待裁（本笔）
+
+1. **④ 三块小型预览 —— 留 TODO、本笔不做**（批文给定分支：「调研 agent 结果已回 → 一并做；没回 → 留 TODO · 形态不锁」）。登记落在 `progress.md` `#### 7-B7-收尾`（**唯一落点**）；⚠️ **不落 `selection-status.md §8`**（编号空间与 PR 号同形）。两条未决前提（(a) 三条流怎么接 · (b) 「暂停」口径）见那一节。
+2. **手验压成一轮** ⇒ 块 7 + D 段合并一份三列式清单，由 **commit 4** 出；⚠️ 凡涉鉴权的标「**默认 profile**」（dev / a3 两档 `app.auth.enabled=false`，验不出鉴权）。
+3. **本笔不 push / 不 merge**。
+
+---
+
+## 二十六、D 段 · commit 2〈后端防护接闸〉（2026-10-15；**本笔已落码**）
+
+> ⚠️ **口径的唯一代码出处是 `ProtectionGate.WIRED_KEYS`**（不是本文件、不是收笔报告）：
+> **3 键接闸（`rateLimit` / `circuitBreak` / `poolIsolation`）+ 1 键登记 TD（`retry` ⇒ TD-74）
+> + 1 键记录位（`degrade`）**。**不许**写成「4 键已接闸」或「5 键里 4 键已接闸」。
+
+### 26-0　落码面（新增 13 源文件 + 探针 3 + 证据 4；修改 20 文件）
+
+**新增 · 后端主代码（6 文件 / 919 行）**
+
+| 文件 | 行数 | 关键坐标 |
+|---|---|---|
+| `protect/ProtectionGate.java` | 168 | `KEYS`:69 · `WIRED_KEYS`:73 · `TD_ONLY_KEY="retry"`:76 · `RECORD_ONLY_KEY="degrade"`:79 · `wired(key)`:143 · `snapshot()`:148 |
+| `protect/InboundRateLimitInterceptor.java` | 169 | 类:72 · `EXEMPT_PATHS`（六条）:75-81 |
+| `protect/ProtectConfig.java` | 107 | 挂 `/**` + `HIGHEST_PRECEDENCE` · `TIMEOUT=ZERO`（**不排队靠它，不靠方法名**） |
+| `protect/ProtectionMetricsBinder.java` | 111 | 订阅 `getEventPublisher()` ⇒ 开路 / 半开 / 恢复都留痕 |
+| `protect/ObservePoolConfig.java` | 180 | `GatedExecutor`（core 8 / max 32 / queue 64，满则 SHED + 503） |
+| `observe/metrics/ProtectionMetrics.java` | 184 | `mall.protection.events{protection,result}` |
+
+**新增 · 测试（7 文件 / 879 行）**：`protect/ProtectionGateTest`(145) · `protect/InboundRateLimitInterceptorTest`(166) ·
+`protect/ProtectionMetricsBinderTest`(135) · `protect/ProtectionThresholdsTest`(115) · `protect/CircuitBreakerWiringTest`(115) ·
+`observe/metrics/ProtectionMetricsTest`(151) · `observe/service/ProtectionKeysAlignmentTest`(52)。
+
+**新增 · 探针 / 证据**：`scripts/probes/probe-d2-{inbound-gate,locked-switches,protection-keys-alignment}.mjs` ·
+`docs/agent/evidence/c3-block7/d2-{inbound-gate,locked-switches,keys-alignment}.txt` + `d2-protection-switches.png`。
+
+**修改 · 后端**：`pom.xml`（+`spring-boot-starter-aop` + `resilience4j-spring-boot3:2.3.0`，**版本必须显式写**）·
+`application.properties`（熔断六项 + MQ 消费池）· `GoodsService`（**5 处** `@CircuitBreaker`）· `OrderService.orderAdd`（1 处）·
+`EventBroadcaster`（`Kind`@:132 加 `PROTECTION`@:142 + `ingestProtection()`@:474-495，`poll()` 调用@:274）·
+`DrillRecordService`（`gate.apply(...)`@:127 在 `run` 之前、`resetToDefault()`@:131 在 `finally`）·
+`AttackEngine`（`PROTECTION_KEYS`@:330）· `AttackController`（`:111` 入参口径注释）。**前端**：`observe-labels.js` · `AttackConsole.vue`。
+
+**规模**：`git diff --stat` 未暂存 **20 文件 / +863 / −116**，另加 13 源文件 + 3 探针 + 4 证据。**测试**：基线 **498 ⇒ 541 passed / 0 failed / 0 errors / 26 skipped**（**+43**）。
+
+### 26-1　五枚开关的落点（逐枚，不是「都接上了」）
+
+| key | 本笔状态 | 落点 | 面板 |
+|---|---|---|---|
+| `rateLimit` | ✅ **接闸** | `InboundRateLimitInterceptor`（200 QPS，白名单六条，超限 429） | 可拨 |
+| `circuitBreak` | ✅ **接闸** | `GoodsService` 5 处 + `OrderService.orderAdd`（错误率 50% / 30s / 最小请求 20 / 半开 30s 放 5） | 可拨 |
+| `poolIsolation` | ✅ **接闸** | `ObservePoolConfig`（关掉 ⇒ 无界；开 ⇒ 有界 + 满则 503） | 可拨 |
+| `retry` | ⏸ **只登记 TD-74** | 一行重试代码都没有 | **不可开关** |
+| `degrade` | ⏸ **只作记录位** | 无落点（系统固有 fail-open） | **不可开关** |
+
+**两枚不可开关的 UI 处置（禁死控件 ⇒ 四处一起做）**：`observe-labels.js` 的 `PROTECTIONS_NOT_WIRED`:305 与
+`PROTECTION_NOT_WIRED_TIP`:308（**逐枚** tooltip：`degrade` = 裁定原话「记录位，不可开关，系统固有 fail-open 设计」；
+`retry` = 指向 TD-74）· `AttackConsole.vue` 的 `is-locked`:132 + `disabled`:138 + `aria-disabled`:134 + 「不可开关」角标:143 +
+`toggleProtection` 的 JS 守卫:686。**实证**：`d2-locked-switches.txt`（**21 项 / 0 失败**，含「抠掉 `disabled` 再点仍不变」
+与「接通的那枚点一下**状态真变**」的对照）。
+
+### 26-2　第 9 类 `protection` 的落点（后端 + 前端 + 数据层）
+
+- **后端**：`EventBroadcaster.Kind.PROTECTION`:142（`KIND` 序第 9）· 源环 `ingestProtection()`:474-495 · `ProtectionMetrics`。
+- **前端 labels 五处**（`observe-labels.js`，**各同行替换、净 0 行**）：`KINDS`:27 · `KIND_LABEL`:46（「防护」）·
+  `KIND_COLOR`:72（`var(--c9)`，**没动 `tokens.css`**）· `KIND_ICON`:131 · `OBJECT_FIELD_LABEL`:179（「防护开关」）。
+  ⚠️ `EventLog.vue` **零改动**（`v-for="k in KINDS"` 自动多一格）。
+- **数据层两处枚举**：`mall_management_sql.sql`:1868 与 `docs/agent/db-schema.md`:942（`Kind` 列注释的 8 名清单各补
+  `protection`，**同行替换、净 0 行**）。⚠️ `ObservedEventDao` 三处（`KIND_MAX` / `clip` / INSERT 列清单）实测**无需改**。
+- **测试**：`EventStreamServiceTest:81` 的 `containsOnlyKeys(9 个)` 钉帧；⚠️ `smoke/ObserveStreamSmokeTest:69` 是
+  `contains` **子集**断言 ⇒ 加第 9 类**不会红**（也**不看**第 9 键）。
+
+### 26-3　refs 处置（本笔三类判据，逐条可复核）
+
+1. **重指 34 条**（甲类 · 本笔顶偏、原值当时准确）：**D pack 自身 33 条**（其〈行号重指表〉内逐条可核；
+   其中 `refs-diff.mjs` 的 LOST∩NEW **可指认 22 条**、**扫描器看不见 11 条**为手工重指）+ **`api-contract.md`
+   第 799 行 1 条**（见下第 4 点），全部**同行替换**、净 0 行；⚠️ 旧值一律写「**原 N 行**」不写 `` `:N` ``
+   （避免重指记录自己往引用集合注入陈旧 token）。
+2. **订正 2 条**（乙类 · 本笔顶偏、原值当时即偏）：`EventBroadcaster.java` 的**原 652 行** ⇒ **`:767`**、**原 176-182 行**
+   ⇒ **`:221`**（取点当天真值 654 / 188，**偏差被放大到 113 / 43 行** ⇒ 按实测真值订正，理由落在 pack〈落地登记〉）。
+3. **只登记 39 条**（丙类 · 本笔没让它们更差 / 引用者本身是**漂移账或史料**）：`refs-diff.mjs` 实测「**两侧一字未动、
+   而目标行被本笔移动**」共 **39 条**，逐条判读后**一条都不重指**，三类理由：**史料类 20 条** —— 引用者自己就是「旧引用账 /
+   重指记录」（`tech-debt.md` 的原 762 / 889 行 · 本文件六处 · `progress.md` 三处 · b6 重指记录 · 两份旧收笔/核实 txt）
+   —— 改了等于**篡改史料**；**他块 pack 18 条** —— **本笔之前就已陈旧**（例：`AbstractSmokeTest.java` 的原 137 行那批
+   指的是 `@Import` 真 bean 名单，而该注解在 HEAD 已到 **203**；`GoodsService.java` 的原 475-478 / 310-341 行在 HEAD 是空行）；
+   **本笔 pack 1 条** —— `c3-block-D-hardening.md:77` 引的 `pom.xml` 原 159-162 行，而 pom 是**纯尾插**（`@@ -161,0 +162,27 @@`），
+   被引的 159-161 未动，口径与 pack〈落地登记〉「只登记、不改」一致。
+   ⚠️ 扫描器**看不见**的 6 条「无主裸续引」（`observe-labels.js` 五处 + 原 `:315-319`）为**手工**逐条重指并已在 pack 登记。
+4. **补回 1 条**：`api-contract.md:799` 的 `protections` 属实行改写时把旧引（`AttackController` 的原 110 行）一并去掉了 ⇒ 补回
+   `AttackController:137`【3a.1 重指，原 111】（**同一行内**加，净 0 行），与本表 `injections` 行的 `AttackController:139`【原 112】同形。
+
+### 26-4　未还项（本笔）
+
+1. **帧读数第 9 条**（§⑨ 第 1 条「指标帧要反映防护」）**没做** —— `MetricsSnapshotService.protections(...)` 仍返回 **8 条**，本笔新增的防护动作只从帧 `counts` 第 9 键与 `mall.protection.events` 回答 ⇒ **归 commit 3**。
+2. **`retry` 见 TD-74**（触发条件 = 先有死锁实测；落点 = `GoodsService` 三处写方法；**不得挂 `OrderService`**）；**Redis / MQ 不加熔断**见 TD-75。
+3. §⑧ 四条边界（SSE 连接保护 / MQ 幂等与 DLQ / 无上限列表 / 脱敏）**本笔一条没动** ⇒ 归 commit 3。
+4. **手验**仍压到 **commit 4 之后**统一一轮；⚠️ dev / a3 两档 `app.auth.enabled=false` ⇒ 手验绿 ≠ 默认 profile 绿。
+5. **本笔不 push / 不 merge / 不开 PR。**
+
+---
+
+## 二十七、D 段 · 阶段 2b〈死锁修复：索引 + 重试〉（2026-10-15；**本笔已落码**）
+
+> ⚠️ **口径的唯一代码出处仍是 `ProtectionGate.WIRED_KEYS`** —— 本笔把它由 **3 个键变 4 个键**：
+> **4 键接闸（`rateLimit` / `circuitBreak` / **`retry`** / `poolIsolation`）+ 1 键记录位（`degrade`）**。
+> **不许**写成「5 键已接闸」。⚠️ 上一节（§26）开头那句「**不许**写成「4 键已接闸」」**是 commit 2 那一刻的真规则**，
+> 本笔起**翻转**（§26 原文一律保留不动）—— 判据永远读常量，不读任何一节。
+
+### 27-0　落码面（新增 1 测试文件 / 2 证据 txt / 1 截图；修改 24 文件）
+
+**新增 · 测试（1 文件 / 285 行）**：`merchant/service/RelistDeadlockRetryTest`（**7 条**）。⚠️ 其中两条是**结构钉**，
+刻意为之：① 反射断言 `relist` 上**没有** `@Transactional`（有人加回去 ⇒ 重试退化成「在已回滚的事务里重试」）；
+② 计数替身 `CountingTxManager` 断言**每次尝试各起一个新事务**。
+
+**新增 · 证据**（`docs/agent/evidence/c3-block7/`）：`d2-deadlock-scout-after-index.txt` ·
+`d2-deadlock-scout-with-retry.txt` · `d2-locked-switches-after-2b.txt` · `d2-protection-switches-after-2b.png`。
+
+**修改 · 后端（7 文件）**
+
+| 文件 | 增删（净） | 关键坐标 |
+|---|---|---|
+| `merchant/service/MerchantDowngradeService.java` | +167 / −10（300 → **457** 行） | `RELIST_MAX_ATTEMPTS = 3` · 编程式 `RetryTemplate` 装配 · 开关短路落在 `canRetry` 的**第二问**（`getLastThrowable() == null` 先无条件放行第一次）· `attempt = ctx.getRetryCount() + 1` |
+| `observe/metrics/ProtectionMetrics.java` | +29 / −6（184 → **207** 行） | 新增 `retry(...)` 入口 + 两档 `RETRY_SUCCESS` / `RETRY_FAILED`（`result` 五档 → **七档**） |
+| `protect/ProtectionGate.java` | +24 / −18（168 → **174** 行） | `WIRED_KEYS` **3 → 4 键**；`TD_ONLY_KEY = "retry"` **删除**，记录位只剩 `degrade` |
+| `observe/service/EventBroadcaster.java` | +10 / −3 | ⚠️ **净增 7 行 ⇒ 该文件其后行号整体 +7**（见 27-3） |
+| `observe/service/AttackEngine.java` | +6 / −6 | **全部同行替换、净 0 行**；含 `Engine.Notes` 那句**用户可见的回显文案** |
+| `observe/controller/AttackController.java` | +1 / −1 | `@param protections` 的存活文案（净 0 行） |
+| `resources/application.properties` | +4 / −4 | 开关注释段（净 0 行） |
+
+**修改 · 前端（2 文件）**：`config/labels/observe-labels.js`（+16 / −13；`PROTECTIONS_NOT_WIRED` 只剩 `degrade`）·
+`views/admin/observe/AttackConsole.vue`（+18 / −15；⚠️ 副标题块**净插 3 行** ⇒ 该文件自副标题起行号 +3）。
+
+**修改 · 数据 / 文档（7）**：`mall_management_sql.sql`（+41；段⑳ Migration `idx_goods_merchant`）·
+`db-schema.md`（+60 / −2；§18）· `db-migration.md`（+11；注意 24）· `tech-debt.md`（+26 / −1；TD-74 状态行 + 〈TD-74 订正〉）·
+`api-contract.md`（+12 / −12，**九处全部同行替换**）· `progress.md`（+81 / −3 = 3 处同行替换 + 尾部纯插 78 行）·
+`context-packs/c3-block-D-hardening.md`（+81 / −18 = 全部同行替换 + 尾部纯插 63 行）。
+
+**修改 · 探针（2）**：`scripts/probes/d2-deadlock-scout.mjs`（+21 / −5；加「索引后 / 重试后」两档对照与判据）·
+`scripts/probes/probe-d2-locked-switches.mjs`（+36 / −26；口径 3 键 → 4 键，**实测 20 项 / 0 失败 / exit 0**）。
+
+**修改 · 依赖（1）**：`pom.xml`（+12；+`spring-retry`）。
+
+### 27-1　判据（**这一条最容易读反** ⇒ 结论 = 「死锁次数不变、5xx 归零」）
+
+| 轮次文件（`docs/agent/evidence/c3-block7/`） | `goods` 索引 | `relist` 重试 | 1213 增量 | **HTTP 5xx** |
+|---|:--:|:--:|---:|---:|
+| `d2-deadlock-scout-48x4.txt` | 无 | 无 | 149 | **139** |
+| `d2-deadlock-scout-after-index.txt` | 有 | 无 | 139 | **139** |
+| `d2-deadlock-scout-with-retry.txt` | 有 | 有 | 141 | **0** |
+
+- **索引确实生效，但 5xx 一个都没少**（139 → 139）：锁粒度由「持 **49 row lock(s)**」压到「持 `idx_goods_merchant`
+  上的**单条** record lock」。⚠️ **既别读成「索引没用」，也别读成「索引能替代重试」。**
+- **加**重试**之后 5xx = 0**，而 1213 增量 141 与上一份 139 **同量级** ⇒ 死锁照旧发生，只是每次都被第 2 次尝试兜住。
+- **因果闭合的那一环**（光看 `5xx = 0` 不够 —— 它还能被「异常被别处吞了」「端点压根没被打到」解释掉）：
+  探针跑完**立刻读同进程 actuator** ⇒ `mall.protection.events{result=retry_success}` = **141**（与 1213 增量**逐一对上**）、
+  `result=retry_failed` **0 条**（没有一次用满 3 次尝试）。
+
+### 27-2　被实测推翻的两条预判（与 §26 / TD-74 原文相反）
+
+1. **落点**：TD-74 原判 = `GoodsService` 三处写方法 ⇒ 实测真落点 = **`MerchantDowngradeService.relist`**。
+   全仓**唯一**的反向锁序对 = `MerchantApplicationService.audit`（写序 **user→goods**）× `relist`（写序 **goods→user**）；
+   `GoodsService` 那三处**不在任何一个环上**。⇒ 「多表事务 ⇒ 死锁只可能在这类地方」这条**推理链没错**，
+   错的是「本仓的多表事务里恰好有反向对的那一对在哪」。
+2. **锁侧**：原判「两表都只有主键、两条 UPDATE 都全表扫描」 ⇒ 实测**只有 `goods` 侧**全表扫（那 49 行锁**全部**来自它）；
+   `user` 侧 `UPDATE user … WHERE username = ?` 走的是 **PRIMARY**（`user` 的主键**就是** `username`），本就只锁 1 行。
+   ⇒ 裁定「`user.merchantid` 留实测后再定」的答案 = **不必加**。
+
+### 27-3　refs 处置（本笔）
+
+⚠️ 本笔**新增的文档文本里不含 `文件:行号` token**（progress.md 新增区实测 **0 条**；pack 新增区只有指向**当前**值的 4 条），
+**旧值一律写「原 N 行」** —— 避免重指记录自己往引用集合注入陈旧 token（同 §26-3 第 2 点的坑）。
+
+**本笔把行号**顶偏**的四个源文件**（其后所有 inbound 引用整体偏移，逐条见下）：
+
+| 被顶偏的文件 | 偏移 | 成因 |
+|---|---|---|
+| `merchant/service/MerchantDowngradeService.java` | 300 → 457 行（**+157**） | 重试整段新增 |
+| `observe/metrics/ProtectionMetrics.java` | 184 → 207 行（**+23**） | 新增 `retry(...)` 入口与两档枚举 |
+| `protect/ProtectionGate.java` | 168 → 174 行（**+6**） | `WIRED_KEYS` 扩键 + 注释 |
+| `observe/service/EventBroadcaster.java` | **+7** | 第 9 环并入段 + `poll()` 调用 |
+| `views/admin/observe/AttackConsole.vue` | 副标题起 **+3** | 副标题块净插 3 行 |
+
+**已就地重指（同行替换、净 0 行）**：`docs/agent/context-packs/c3-block-D-hardening.md` **4 处**
+（原 169 / 266 / 296 / 452 行各自把旧值换成现址，逐条列在该文件尾部〈**阶段 2b 追加**〉的〈code 行号重指〉表）。
+**只登记、不重指**：本文件中 §26 及其前各节、`progress.md` 前部、各块 pack 与 evidence 中引上述文件的**快照行号** ——
+按 pack 自身声明的「引用代码写 `文件:行号`（快照，漂了不追）」与「史料不追」两条纪律，**一律不动**
+（它们指的是**取点当时**的真值，改了等于篡改史料）。⚠️ **判据与量化结果见本笔收笔报告与只读复核产物**（不落 `docs/`）。
+
+### 27-4　未还项（本笔）
+
+1. **帧读数第 9 条仍未做**（§⑨ 第 1 条「指标帧要反映防护」）—— `MetricsSnapshotService.protections(...)` 仍返回 **8 条** ⇒ 同 §26-4 第 1 条，**仍归 commit 3**。
+2. **重试的次数与退避是**实验值**（3 次 / 40ms 起 / ×2 / 封顶 200ms）**：下游延迟或 `goods` 数据量显著变化时应重跑 `scripts/probes/d2-deadlock-scout.mjs`（判据 = `HTTP 5xx` 应为 **0**）。
+3. **`retry` 的可视化只做到「事件 + 指标」**：右侧统计的 KPI「重试成功率」与「多次重试事件同 traceId」的测试钉 —— ⚠️ **本笔只在后端侧落了两档 result 与 `attempt=N`**；**前端 KPI 那一格归 commit 3**（与帧读数同一笔）。
+4. **手验**仍压到 **commit 4 之后**统一一轮；⚠️ dev / a3 两档 `app.auth.enabled=false` ⇒ 手验绿 ≠ 默认 profile 绿。
+5. **本笔不 push / 不 merge / 不开 PR。**
+
+### 27-5　顺带核实掉的一条（**别再照旧说法加启动参数**）
+
+曾有一条说法：「`ObserveMetricsConfig` 构造注入 + 定义 `MeterFilter` ⇒ 循环依赖、`a3` / `dev` **整台起不来**，
+要加 `--spring.main.allow-circular-references=true`」。**2026-10-15 实测该环已自断** —— 那个 `@Bean` 方法已改成
+**`static`**（提交 `5b971f1`，理由逐字写在该类注释里）。本笔的 dev 启动**没有**加任何该参数，后端正常起来并跑完 48 轮死锁侦查
+（`_work/d2/boot-2b.sh` 头部逐字记着「**刻意不带**」）。⚠️ `tech-debt.md` 对应那一行本就记作「✅ **已修**」—— **过期的只是这条口头说法**。

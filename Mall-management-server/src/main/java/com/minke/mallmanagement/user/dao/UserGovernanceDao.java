@@ -148,21 +148,22 @@ public class UserGovernanceDao {
      * 用户列表（管理员用）。{@code keyword} 非空时按 {@code username} / {@code customerid} /
      * {@code merchantid} 模糊匹配（三种都试，管理员常只记得其中一种）。
      */
-    public List<Map<String, Object>> selectUsers(String keyword, int limit) {
+    public List<Map<String, Object>> selectUsers(String keyword, int limit, int offset) {
         StringBuilder sql = new StringBuilder("SELECT ").append(USER_COLUMNS)
                 .append(USER_FROM).append("WHERE 1 = 1 ");
         if (!isBlank(keyword)) {
             // ⚠️ 三个列名都带 `u.` —— `username` 与 `login.UserName` 同名，不限定即 1052。
             sql.append("AND (u.username LIKE ? OR u.customerid LIKE ? OR u.merchantid LIKE ?) ");
         }
-        sql.append("ORDER BY banned DESC, username ASC LIMIT ?");
+        // ⚠️ 排序必须确定性（banned, username 已唯一到账号粒度）—— LIMIT/OFFSET 翻页依赖它。
+        sql.append("ORDER BY banned DESC, username ASC LIMIT ? OFFSET ?");
 
         JdbcClient.StatementSpec spec = jdbcClient.sql(sql.toString());
         if (!isBlank(keyword)) {
             String like = "%" + keyword + "%";
             spec = spec.params(like, like, like);
         }
-        return spec.param(limit).query().listOfRows();
+        return spec.params(limit, offset).query().listOfRows();
     }
 
     /** 单账号整行（封禁/解封/降级的审计 {@code before}/{@code after} 快照用）。查不到 ⇒ {@code null}。 */

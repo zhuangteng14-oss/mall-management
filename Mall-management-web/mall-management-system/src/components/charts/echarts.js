@@ -13,13 +13,15 @@
  * 而这恰好是 `npm run build` 的产物体积能看出来、代码里看不出来的那种退化）。
  */
 import * as echarts from 'echarts/core'
-import { LineChart, BarChart, PieChart, HeatmapChart } from 'echarts/charts'
+import { LineChart, BarChart, PieChart, HeatmapChart, GaugeChart } from 'echarts/charts'
 import {
   GridComponent,        // 折线 / 柱 / 热力图都要直角坐标系网格
   TooltipComponent,     // 三端看板全都开 tooltip
   LegendComponent,      // 多序列图例
   VisualMapComponent,   // HeatmapChart 必需（色阶图例就是它）
   AxisPointerComponent, // tooltip 的 trigger:'axis' 靠它画指示线
+  MarkPointComponent,   // 时间栈的峰值 / 谷值数字标注（3a.4）
+  MarkLineComponent,    // 耗时直方图的「平均耗时」虚线辅助线（2026-10-17）
 } from 'echarts/components'
 import { CanvasRenderer } from 'echarts/renderers'
 
@@ -28,11 +30,14 @@ echarts.use([
   BarChart,
   PieChart,
   HeatmapChart,
+  GaugeChart,
   GridComponent,
   TooltipComponent,
   LegendComponent,
   VisualMapComponent,
   AxisPointerComponent,
+  MarkPointComponent,
+  MarkLineComponent,
   CanvasRenderer,
 ])
 
@@ -40,5 +45,13 @@ echarts.use([
 //    （见《看板规范》§2）⇒ 图表自己再画一个 title 会与卡头重复。将来要在图内标标题时，
 //    在这里补一行即可 —— 别在页面里 `import 'echarts/components'` 整个拿进来。
 // ⚠️ 同样**不注册** `UniversalTransition` / `LabelLayout`：看板是静态图，不做图表间联动动画。
+
+// ⚠️ **仅开发/探针用的出口**（3a.2）：把 echarts 挂到 `window`，让页面探针能
+//    `__echarts.getInstanceByDom(el).getOption()` 逐键核对**实际生效**的 option。
+//    为什么非要有它：主题是「**option > 主题 > 内置默认**」三级合并的结果，
+//    **只读源码看不出最后生效的是什么** —— 而 3a.2 这件事的全部风险就是「主题写了、
+//    但被 option 覆盖了 / 没被合并进去」，那种失败**不报错、也不改变观感**（因为观感本来就
+//    是 option 给的），只能靠读合并结果发现。生产构建里这一行不执行（同 `IconGlyph.vue` 的口径）。
+if (process.env.NODE_ENV !== 'production') window.__echarts = echarts
 
 export default echarts

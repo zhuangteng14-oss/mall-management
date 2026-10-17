@@ -1,0 +1,70 @@
+OK   ① 页面挂载（正文 > 400 字）  → 1398
+OK   ① 面包屑含「指标面板」
+OK   ① 页面上没有裸露的 Markdown 星号  → false
+OK   ① 无 console.error / unhandledrejection  → []
+OK   ② 五张图都在（`.mp-chart` × 5 / `.bc` × 5）  → {"chartSections":5,"bc":5}
+OK   ② 五个 canvas 都真画了  → 5
+OK   ② 没有空态/加载态浮层  → 0
+OK   ③ 五个 ECharts 实例都取到 option  → [true,true,true,true,true]
+OK   ③ 五图绘图区同几何：left=64 / right=56  → [{"l":64,"r":56},{"l":64,"r":56},{"l":64,"r":56},{"l":64,"r":56},{"l":64,"r":56}]
+OK   ③ 前四张隐藏 x 轴、最底热力图画刻度  → [false,false,false,false,true]
+OK   ③ 五图 x 类目逐字相同（同一根轴）  → [["16:45:06","16:45:07"],["16:45:06","16:45:07"],["16:45:06","16:45:07"],["16:45:06","16:45:07"],["16:45:06","16:45:07"]]
+OK   ③ 五图 boundaryGap=true（柱心/折线点/热力格中心对齐）  → [true,true,true,true,true]
+OK   ③ 五图 y 轴都在  → [[{"show":true}],[{"min":"0","max":null,"show":true},{"min":"0","max":"100","show":true}],[{"min":"0","max":null,"show":true}],[{"min":"0","max":null,"show":true}],[{"show":true}]]
+OK   ④ 五图都开 tooltip（前四张轴触发 / 热力图格触发）  → [[{"show":true,"trigger":"axis"}],[{"show":true,"trigger":"axis"}],[{"show":true,"trigger":"axis"}],[{"show":true,"trigger":"axis"}],[{"show":true,"trigger":"item"}]]
+OK   ④ QPS tooltip 报「次/秒」和本拍请求数  → "16:45:07\n成功 8.5 次/秒\n4xx 1.0 次/秒 · 5xx 3.0 次/秒\n本拍请求 25 次"
+OK   ④ 命中率 tooltip 报命中 / 未命中 / %  → "16:45:07\n命中 10 · 未命中 10\n命中率 60.0%"
+OK   ④ 平均延迟 tooltip 报 ms  → "16:45:04\n平均延迟 2.1 ms"
+OK   ④ 锁等待 tooltip 报锁名 + ms + 超时  → "16:45:06\ngoods_sku 1.2 ms（超时 0 次）\norder_no 6.0 ms（超时 3 次）"
+OK   ⑦ 热力图 tooltip =「锁名 · 第 N 拍 · 超时 N 次」+ 取锁明细  → "goods_sku · 第 2 拍（16:45:04） · 超时 0 次\n取锁 40 · 成功 40 · 降级 0 · 错误 0"
+OK   ⑤ QPS 图有峰/谷数字标注  → [0,0,2]
+OK   ⑤ 命中率图有峰/谷数字标注  → [0,0,2]
+OK   ⑤ 平均延迟图有峰/谷数字标注  → [2]
+OK   ⑤ 锁等待图有峰/谷数字标注  → [2,0]
+OK   ⑤ 标注文字是「峰 / 谷 / 持平」+ 数值  → ["峰 25.0 次/秒","谷 0.0 次/秒","峰 60.0%","谷 40.0%","峰 4 ms","谷 2 ms","峰 order_no 6.0 ms","谷 goods_sku 1.2 ms"]
+OK   ⑨ 平均延迟序列 = `meanMs`（[null,2.1,3,4,3.4]），P99 没有混进时间轴  → [null,2.1,3,4,3.4]
+OK   ⑨ K2 卡上 P99 只作次要小字（21.5 → 22 ms）
+OK   ⑥ 平均延迟面积渐变存在
+OK   ⑦ 热力图色阶图例 = 超时多 / 超时少，且两档色值不同  → {"max":3,"calculable":true,"text":["超时多","超时少"],"colors":["#d1dffb","#2f6fed"]}
+OK   ⑦ 热力图有格子数据（8 格：4 拍 × 2 锁）  → 8
+OK   ⑥ QPS 三色都离背景足够远  → [["#00a64a",325],["#c98000",290],["#ef4444",265]]
+OK   ⑧ 四张卡 = QPS / 平均延迟 / 缓存命中率 / 锁等待次数  → ["QPS","平均延迟","缓存命中率","锁等待次数"]
+OK   ⑧ 值取最后一拍 = 12.5 / 3 / 60.0 / 2  → ["12.5","3","60.0","2"]
+OK   ⑧ 单位 = 次/秒 / ms / % / 次  → ["次/秒","ms","%","次"]
+OK   ⑧ 微条只挂在 K1 / K3 两张卡上（K2/K4 写「无序列」）  → 2
+OK   ⑩ mock 流投完后显示「已断开」  → "已断开"
+OK   ⑩ 正常收尾不画红条  → 0
+OK   ⑩ 健康度大字 = 后端 label「注意」+ warn 配色  → {"t":"注意","c":"a-hv a-hv--warn"}
+OK   ⑩ 状态条 = 健康度 / 5xx 1.2% / 4xx 0.4%  → ["注意","1.2%","0.4%"]
+OK   ⑩ 判据条渲染后端原话  → ["5xx 占比 1.2%（> 1%）"]
+OK   ⑩ 严重度分布 = ok 3 / warn 1 / error 1（按 health.level 数拍）  → ["3","1","1"]
+OK   ⑪ 设施 3 类都在 = 正常 / 正常 / 正常  → ["正常","正常","正常"]
+OK   ⑪ 防护 8 类逐行渲染  → 8
+OK   ⑪ 8 个防护图标各带颜色（≥ 7 种不同色）  → ["rgb(47, 111, 237)","rgb(241, 100, 0)","rgb(0, 166, 74)","rgb(201, 128, 0)","rgb(168, 85, 247)","rgb(0, 158, 184)","rgb(239, 68, 68)","rgb(101, 160, 0)"]
+OK   ⑪ 图标与文字间距 8px  → "8px"
+OK   ⑪ 第 9 类图标（库存水位水滴）有颜色  → "rgb(201, 128, 0)"
+OK   ⑫ 15 条库存都渲染  → 15
+OK   ⑫ 库存区固定 220px 且内部滚动（scrollHeight > clientHeight）  → {"h":220,"sh":937,"ch":220,"oy":"auto"}
+OK   ⑫ 状态标签 = 充足 / 偏低 / 缺货 / 未测  → ["充足","偏低","缺货","未测","缺货","充足"]
+OK   ⑫ 水位条档位 = is-ok / is-low / is-low / is-unknown  → ["is-ok","is-low","is-low","is-unknown"]
+OK   ⑫ 无基线那行基线显示 `—`（不是 0）  → "50/ —"
+OK   ⑫ 滚动条按 thin（≤8px 档）  → "thin"
+OK   ⑫ 搜索「气泡水」只剩 1 条  → 1
+OK   ⑫ 筛选「缺货」= 2 条且标签全为缺货  → ["缺货","缺货"]
+OK   ⑫ 页面上写明搜索范围仅限最低库存 20 条
+OK   ⑫ 滚到底时库存列表完整落在可视区内（右栏高度计入 scrollHeight）  → {"bodyTop":-64.15625,"bodyBottom":868,"listTop":634.84375,"listBottom":854.84375}
+OK   ⑬ 库存条宽随 rAF 从 0 推进到目标（80ms 时宽 < 800ms 时宽）  → {"w1":15.7,"w2":34.2}
+OK   ⑬ 演示模式自报「假数据 · 不入库」  → "假数据 · 不入库 · 已放 8 / 500 条 （放完就安静，不是断线）"
+OK   ⑭ 页高 ≤ 1.4×900=1260px（实测 140vh−124px）  → {"h":1136,"bodyScroll":1205,"bodyClient":942,"rail":380}
+OK   ⑭ 主体内部滚动（内容高于可视区）  → {"h":1136,"bodyScroll":1205,"bodyClient":942,"rail":380}
+OK   ⑭ 右栏 380px  → 380
+OK   ⑭ 字号只有 12 / 15 / 19 三档  → ["12px","15px","19px"]
+OK   ⑮ 切走后不再发起新的指标流请求（close 停掉了重连）  → {"reqBefore":2,"reqAfter":2,"cancels":0}
+OK   全流程收尾：切走之后无新增 console.error / unhandledrejection  → "total=0 base=0"
+
+块 7 · 3a.4 指标面板（S1 时间栈 + 实体栏 · mock 后端）: 63 项 / 0 失败
+
+截图：
+  C:/Users/86159/Desktop/软件工程/期末项目/scripts/probes/out-b7c6-metrics-panel-top.png
+  C:/Users/86159/Desktop/软件工程/期末项目/scripts/probes/out-b7c6-metrics-panel-bottom.png
+共 63 项断言。

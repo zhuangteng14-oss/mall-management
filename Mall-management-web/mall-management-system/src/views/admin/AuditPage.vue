@@ -29,14 +29,14 @@
         <span>动作</span>
         <select v-model="f.action" @change="load">
           <option value="">全部</option>
-          <option v-for="a in facets.actions" :key="a" :value="a">{{ a }}</option>
+          <option v-for="a in facets.actions" :key="a" :value="a">{{ auditActionLabel(a) }}</option>
         </select>
       </label>
       <label class="a-f">
         <span>对象类型</span>
         <select v-model="f.targetType" @change="load">
           <option value="">全部</option>
-          <option v-for="t in facets.targetTypes" :key="t" :value="t">{{ t }}</option>
+          <option v-for="t in facets.targetTypes" :key="t" :value="t">{{ targetTypeLabel(t) }}</option>
         </select>
       </label>
       <label class="a-f">
@@ -128,12 +128,12 @@
           <span class="a-ev-hue" :style="{ background: hue(r.Action) }"></span>
           <span class="a-ev-main">
             <span class="a-ev-l1">
-              <code class="a-tag">{{ r.Action }}</code>
-              <span class="a-ev-target">{{ r.TargetType }} · {{ r.TargetId }}</span>
+              <code class="a-tag" :title="r.Action">{{ auditActionLabel(r.Action) }}</code>
+              <span class="a-ev-target">{{ targetTypeLabel(r.TargetType) }} · #{{ r.TargetId }}</span>
             </span>
             <span class="a-ev-l2">
               <span class="a-who-chip">{{ r.ActorId || '（认不出身份）' }}</span>
-              <span class="a-dim">角色 {{ r.ActorRole == null ? '—' : r.ActorRole }}</span>
+              <span class="a-dim">角色 {{ roleLabel(r.ActorRole) }}</span>
             </span>
           </span>
           <span class="a-ev-time">
@@ -214,7 +214,7 @@ import { computed, onMounted, reactive, ref } from 'vue'
 import { auditDetail, auditFacets, auditList } from '../../api/admin'
 import LineChart from '../../components/charts/LineChart.vue'
 // 2026-10-11 复合图整改新增：趋势折线管「什么时候有事」，下面那张分组柱管「多的是哪类事」。
-import BarChart from '../../components/charts/BarChart.vue'; import IconGlyph from '../../components/ui/IconGlyph.vue'   // ⚠️ 两条 import **同行**（2026-10-11 补图标那一笔）—— 合并到既有行 = 不新增行号漂移（本页 `:72-75`/`:125-184`/`:441-469` 被 `c3-block-2-user.md:76-77`、`c3-block-3-goods.md:106`、`c3-block-4-order.md:112` 引 —— **原 82-141 / 301-329 行**，C1 那几笔已推过一次、2026-10-11 收口按 refs-scan 再推一次）
+import BarChart from '../../components/charts/BarChart.vue'; import IconGlyph from '../../components/ui/IconGlyph.vue'; import { auditActionLabel, targetTypeLabel, TARGET_TYPE_LABEL } from '../../config/labels/audit-labels'; import { roleLabel } from '../../config/labels/user-labels'   // ⚠️ 这几条 import **同行**（2026-10-11 补图标那一笔起、commit 9 又加了两条标签层）—— 合并到既有行 = 不新增行号漂移（本页 `:72-75`/`:125-184`/`:441-469` 被 `c3-block-2-user.md:76-77`、`c3-block-3-goods.md:106`、`c3-block-4-order.md:112` 引 —— **原 82-141 / 301-329 行**，C1 那几笔已推过一次、2026-10-11 收口按 refs-scan 再推一次）
 
 // ── 时区换算（两个方向必须对称，否则「筛出来的」和「显示出来的」对不上）──────────
 const pad = (n) => String(n).padStart(2, '0')
@@ -373,19 +373,19 @@ const trend = computed(() => {
 })
 
 // ── 动作类型分布（可视化段 commit 3；2026-10-11 复合图整改新增）────────────────────
-/** 动作域中文名。键 = `Action` 的第一段（`goods.update` → `goods`）。 */
+/** 动作域中文名 —— 取值取自 `config/labels/audit-labels.js` 的 `TARGET_TYPE_LABEL`（中文表唯一出处）。 */
 const DOMAIN_LABEL = {
-  order: '订单',
-  goods: '商品',
-  goodstype: '类目',
-  merchant: '商家',
-  user: '用户',
-  template: '模板',
-  goods_template: '模板', // 与 `template` 同归一类：对读者是同一件事（改模板）
-  notification: '通知',
+  order: TARGET_TYPE_LABEL.order,
+  goods: TARGET_TYPE_LABEL.goods,
+  goodstype: TARGET_TYPE_LABEL.goodstype,
+  merchant: TARGET_TYPE_LABEL.merchant,
+  user: TARGET_TYPE_LABEL.user,
+  template: TARGET_TYPE_LABEL.template,
+  goods_template: TARGET_TYPE_LABEL.goods_template, // 与 `template` 同归一类：对读者是同一件事（改模板）
+  notification: TARGET_TYPE_LABEL.notification,
 }
-/** `ActorRole` 中文名（取自 `login.Role`：1 客户 / 2 商家 / 3 管理员）。 */
-const ROLE_LABEL = { 1: '客户', 2: '商家', 3: '管理员' }
+/** `ActorRole` 中文名 —— 值取自 `config/labels/user-labels.js` 的 `roleLabel()`（唯一出处）；本页留这层映射壳只为把认不出的码并成「未识别」（`roleLabel` 自己的兜底是回码原文，那一侧是对的）。 */
+const ROLE_LABEL = { 1: roleLabel(1), 2: roleLabel(2), 3: roleLabel(3) }
 /** 图例的固定画序 —— 管理员在前（本页是管理端审计），「未识别」垫底。 */
 const ROLE_ORDER = ['管理员', '商家', '客户', '未识别']
 

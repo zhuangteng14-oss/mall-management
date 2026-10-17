@@ -1,0 +1,96 @@
+块 7 追加需求 · 第一步诊断 —— 管理端「英文 code 上屏」清单
+生成时间：2026-10-14 13:40（本地时间）
+扫描范围：src/views/admin/ + src/views/merchant/ + src/components/
+状态：**只诊断，未动任何代码**（按口径：清单报用户过目后再落地）
+
+════════════════════════════════════════════════════════════════
+一、清单（文件:行号 | 域 | 当前显示 | 建议中文）
+════════════════════════════════════════════════════════════════
+
+【审核】views/admin/ModerationPage.vue —— 最集中的一页（约 13 处）
+:145  | 审核 | <option value="goods">goods（商品）</option>            | 商品
+:146  | 审核 | <option value="user">user（用户）</option>              | 用户
+:156  | 审核 | <option value="review">review（评价）</option>          | 评价
+:157  | 审核 | <option value="question">question（提问）</option>      | 提问
+:158  | 审核 | <option value="">不筛（评价 + 提问）</option>           | 不筛（评价 + 提问）—— 本就中文，去掉英文即可
+:164  | 审核 | <option value="new">new（最新）</option>                | 最新
+:165  | 审核 | <option value="hot">hot（最热）</option>                | 最热
+:320  | 审核 | <option value="question">question（提问）</option>      | 提问
+:321  | 审核 | <option value="answer">answer（回答）</option>          | 回答
+:408  | 审核 | <option value="goods">goods（商品）</option>            | 商品
+:409  | 审核 | <option value="user">user（用户）</option>              | 用户
+:563  | 审核 | <option v-for=IMAGE_STATUSES>{{ s.label }}（{{ s.key }}） | 只留 {{ s.label }}（去掉括号里的 pending/approved/rejected）
+:663  | 审核 | <option value="pending">pending（待处理）</option>      | 待处理
+:664  | 审核 | <option value="handled">handled（已处理）</option>      | 已处理
+:665  | 审核 | <option value="rejected">rejected（已驳回）</option>    | 已驳回
+:688  | 审核 | {{ r.Status }}（举报状态徽章：pending/handled/rejected）| 待处理 / 已处理 / 已驳回
+       |      | ⚠️ 同页 :1063 statusLabel 只覆盖 pending/approved/rejected，**缺 handled** ⇒ 要补一条
+:869  | 审核 | 对象 {{ m.TargetType }} / {{ m.TargetId }}              | TargetType 码 → 中文对象类型
+
+【审计】views/admin/AuditPage.vue（约 5 处）
+:32   | 审计 | <option v-for="a in facets.actions">{{ a }}</option>    | 动作码（goods.update 等）→ 中文（可按「-」拆两段）
+:39   | 审计 | <option v-for="t in facets.targetTypes">{{ t }}</option>| 对象类型码 → 商品 / 用户 …
+:131  | 审计 | <code class="a-tag">{{ r.Action }}</code>               | 中文动作名
+:132  | 审计 | {{ r.TargetType }} · {{ r.TargetId }}                   | 中文对象类型 · 原值
+:136  | 审计 | 角色 {{ r.ActorRole }}（1/2/3 数字）                    | 客户 / 商家 / 管理员
+       |      | ⚠️ 同页 :388 已有 ROLE_LABEL 映射，**此处漏用**（现成映射没接上）
+       |      | ⚠️ 同页 :377 已有 DOMAIN_LABEL 只覆盖首段
+
+【订单】views/admin/OrderPage.vue（3 处）
+:256  | 订单 | <span class="a-tag">{{ dash(e.Action) }}</span>         | pay/deliver/receive → 付款 / 发货 / 收货
+       |      | ⚠️ 同页 :619 已有 ACT_LABEL，**此处漏用**
+:257  | 订单 | {{ dash(e.FromState) }} → {{ dash(e.ToState) }}         | 未付款 / 已付款 / 已发货 / 已完成 / 异常
+:276  | 订单 | <span class="a-tag">{{ dash(t.Status) }}</span>         | in_transit → 运输中（同行 t.Description 已是中文）
+
+【商品】views/admin/CatalogPage.vue（4 处）
+:326  | 商品 | <option value="goods.detail">详情（goods.detail）</option> | 详情
+:327  | 商品 | <option value="goods.spec">规格（goods.spec）</option>     | 规格
+:328  | 商品 | <option value="goods.afterSale">售后（goods.afterSale）</option> | 售后
+:329  | 商品 | <option value="goods.reject">驳回理由（goods.reject）</option>   | 驳回理由
+       |      | （ProductCode 类商品编码**不建议汉化**，属编码不属枚举）
+
+【通知】views/admin/NotifyPage.vue（2 处）
+:43   | 通知 | <option value="customer">customer（客户）</option>      | 客户
+:44   | 通知 | <option value="merchant">merchant（商家）</option>      | 商家
+       |      | （同页 :282 已引 notify-events.js 的中文映射，是**已汉化**的样板）
+
+【可观测】views/admin/observe/AttackConsole.vue（本笔新页，2 处）
+:181  | 可观测 | <code v-for="x in cfgOf(r).s">{{ x.k }}={{ x.w }}%</code> | 场景短键 seckill/orderBurst/… → 秒杀抢购 / 订单并发 / …
+:149  | 可观测 | 角色 {{ r.OperatorRole }}（数字）                        | 客户 / 商家 / 管理员
+
+【未列为违规（对照，避免误改）】
+· AccountsPage :57-59 / CatalogPage :61-63 / MarketingPage :61,79-80,152-153 / OrderPage :71-75
+  的 <option> 显示文本**已经是中文**（:value 才是 code）—— 不动。
+· MarketingPage 多处已用三元式/映射表翻中文（:210,455,668,670 + NOM/INV/APP/STAGE/SRC_LABELS）。
+· AccountsPage :209 的 u.usertype 在库里**存的就是中文**（客户/商家/管理员）—— 不是英文，不算违规。
+· components/ 整个目录**没有 <option>**，也没有直接渲染英文枚举的徽章。
+
+════════════════════════════════════════════════════════════════
+二、已有映射惯例（落地时照它，别另起一套）
+════════════════════════════════════════════════════════════════
+样板：src/config/notify-events.js（876 行）
+  · EVENT_LABELS —— { code: '中文' }，32 条
+  · EVENT_OPTIONS —— **有序数组** [{code,label}]，专给下拉用（不依赖对象键序）
+  · eventLabel(code) —— code → 中文
+  · isKnownEvent(code) —— 布尔
+  · 兜底：**认不出就原样回 code**，绝不渲染空白；判据用 hasOwnProperty（防 constructor/toString
+    这类原型链键被渲染成函数）
+引用者：NotifyPage.vue:282 · ModerationPage.vue:965 · views/NotifyInbox.vue:104
+
+近亲惯例：config/coupon-format.js（同款「不许空白」兜底）；各页内建的局部映射表
+  AuditPage :377 DOMAIN_LABEL / :388 ROLE_LABEL；MarketingPage :886,1041-1044；
+  ModerationPage :1051 KIND_LABELS / :1054 REASON_LABELS / :1063 statusLabel；
+  OrderPage :619 ACT_LABEL；merchant/SeckillApplyPage :164 STATUS；SeckillPage :135 STAGE_LABELS
+
+⚠️ src/config/labels/ **目前不存在**。src/config/ 现有 6 个文件：
+  admin-nav.js · coupon-format.js · goods-flags.js · nav.js · notify-events.js · product-link.js
+
+════════════════════════════════════════════════════════════════
+三、规模
+════════════════════════════════════════════════════════════════
+· 「界面上直接渲染英文 code」的**页面 6 个**：ModerationPage(13) · AuditPage(5) ·
+  CatalogPage(4) · OrderPage(3) · NotifyPage(2) · observe/AttackConsole(2) ≈ **29 处**
+· 另有 2 处「已有中文映射却漏用」（AuditPage:136 角色 / OrderPage:256 动作）——
+  这两条**不是缺中文，是接线漏了**，成本最低、收益最直接。
+· 若把「代码里的英文枚举字面量」也算上，规模大得多（Marketing/Order/Accounts/Catalog/
+  Moderation/SeckillApply 都有），但那类**不上屏**，不在本诉求内。

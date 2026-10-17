@@ -1,0 +1,43 @@
+b7 commit 9 (块 7 收口) · 9.5 假数据种子 —— 落库 + 读回实证
+时间：2026-10-14 · 分支 feat/c3-admin-block7 · VM 库 192.168.229.129/mall_management_sql
+落库语句来源：seed-demo.sql 的 ⓪-b / ①(goods_sku 那一行) / ⑤-b 三段（生成器 scripts/seed-demo-gen.mjs）
+落库方式：_work/SqlFile.java（一条连接顺序执行，凭据只从环境变量读、不打印）
+临时截取文件：_work/b7c9-seed-sku.sql（用完即弃）
+
+== [A] 落库执行（本文件记录这一次；⚠️ 此前另有一次人工执行，故 DELETE 的 affected=4 不是 0）==
+?? [1] SELECT CONCAT('seed BaselineStock  ', COUNT(*), '/1 ') AS `seed_precheck_baseline` FROM in ?
+   (resultset)
+?? [2] DELETE FROM `goods_sku` WHERE `SkuCode` LIKE 'SEED-%'
+   affected=4
+?? [3] INSERT INTO `goods_sku` (`GoodsId`,`MerchantId`,`GoodName`,`AxisName`,`Price`,`Stock`,`SkuCode`,`Sor ?
+   affected=4
+-- ? 3 ?
+
+== [B] 落库执行（复跑，幂等确证）==
+   affected=4
+   affected=4
+
+== [C] 读回：4 行 + BaselineStock 必须为 NULL + 中文按 HEX 校验（E9BB98E8AEA4E8A784E6A0BC = 默认规格）==
+Id	GoodsId	MerchantId	Stock	SkuCode	BaselineStock	NL	AxisHex
+21	76	dRD3gqtbFr	240	SEED-GD-101-9552	null	12	E9BB98E8AEA4E8A784E6A0BC
+22	77	nlzzGB4vgV	180	SEED-GD-102-AF27	null	16	E9BB98E8AEA4E8A784E6A0BC
+23	78	yERU17koBc	120	SEED-GD-103-5196	null	19	E9BB98E8AEA4E8A784E6A0BC
+24	79	dRD3gqtbFr	60	SEED-GD-104-7045	null	12	E9BB98E8AEA4E8A784E6A0BC
+-- rows: 4
+
+== [D] DrillTargetDao.pickSku 复算：主靶现在是谁（应取 Stock DESC 第一名 = 种子那件 240）==
+SkuCode	Stock
+SEED-GD-101-9552	240
+SEED-GD-102-AF27	180
+SEED-GD-103-5196	120
+-- rows: 3
+
+== [E] 另外两件前提的现状（9.5 只补了 SKU 一段，这两件库里已有）==
+-- pickCustomer 候选数（有 customerid、未封禁、且有登录名）：
+CustWithLogin
+33
+-- rows: 1
+-- sensitive_word 行数 / Source 取值分布（10 词来自 mall_management_sql.sql:1632，非本种子）：
+Words	SrcEmpty	SrcSeed	MaxLen
+11	11	0	4
+-- rows: 1

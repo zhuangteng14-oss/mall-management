@@ -36,6 +36,10 @@ scripts/concurrency/classpath.txt
 # A3 run.sh 的编译产物目录（javac -encoding UTF-8 两步编译的输出）
 .a3-out/
 
+# 录屏原始帧（* -frames/，如 b7r-frames、b7r-cancel-frames、drag-frames）
+# GIF 是交付物、进仓；帧可由对应 probe-*.mjs 重新生成，不入库
+**/*-frames/
+
 # 「文件:行号」互引扫描器的产物
 # 脚本 scripts/refs-scan.sh 进仓（可复跑）；before/after 是每次运行的快照，不入库
 scripts/refs-before.txt

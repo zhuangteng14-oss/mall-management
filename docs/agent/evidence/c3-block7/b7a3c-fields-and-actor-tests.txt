@@ -1,0 +1,79 @@
+块 7 · 阶段 3a.3（#42 后端字段补齐）—— 测试证据
+================================================================================
+日期：2026-10-17
+笔名：3a3c（后端字段补齐：事件帧 actor / durationUs / fields + 台账三列 ActorId / ActorRole / DurationUs）
+
+⚠️ 本文件**刻意不写任何「文件:行号」**（扫描根含 docs，写进去会被 refs 扫描器当成新引用
+   收进 after 侧，凭空造出 token）⇒ 要定位请用**类名 / 符号名**。
+
+【一、全量测试：清空 target 后重跑】
+  命令（工作目录 = Mall-management-server）：
+      rm -rf target/classes target/test-classes target/maven-status target/surefire-reports
+      ./mvnw -B -o test
+  产物：_work/3a3/full-test-final.txt（586206 字节）
+
+  汇总行（逐字）：
+      [WARNING] Tests run: 557, Failures: 0, Errors: 0, Skipped: 26
+      [INFO] BUILD SUCCESS
+      EXIT=0
+
+  基线对比（**两侧同口径**：测试注解 @Test / @ParameterizedTest / @RepeatedTest 计数）：
+      本笔开工基线 = HEAD（e1dc20d）      = 556
+      本笔工作区（含本笔唯一新增用例）    = 557   ⇒ 净 +1，与实测 Tests run 自洽
+      脚本：git grep -h -E "@(Test|ParameterizedTest|RepeatedTest)" <rev> -- Mall-management-server/src/test | wc -l
+      （rev 取 HEAD 与工作区各跑一次；HEAD = 556、工作区 = 557）
+
+  ⚠️ **更正一条旧口径**：早先各稿里写的「基线 548」**不是本笔的开工基线**。
+      逐提交实测：548 对应 cfe2948（2026-10-16，D 段 · 阶段 2b 死锁修复），
+      其后 d614b4b / 3eeeba8（3a.1 补笔）→ 555、e1dc20d（3a.3 第 ⑥ 步）→ 556。
+      ⇒ 548 → 556 的那 8 条**属于更早几笔**，与本笔无关；本笔只 +1。
+      再往上数没意义，这里只把「本笔 +1」钉死。
+
+  Skipped = 26：与本笔之前两跑一致（未增未减）。
+
+  清理的必要性（本仓栽过）：surefire 的 .txt 报告**不被 maven 清理**，不删会把上一次运行
+  的计数累加进来（历史上曾把 209 误算成 217/8）。本次四个目录都在跑之前删掉了。
+
+【二、本笔新增用例及其判别力（突变对照）】
+  类：com.minke.mallmanagement.observe.service.EventStreamServiceTest
+  新用例：actorTravelsFromMdcIntoTheFrameAsAnObject
+  为什么补：
+      该类的既有用例 eventsCarryEverythingTheCardNeeds 只钉住了「**没有身份 ⇒ actor 整个为
+      null**」这一半；而裁定 ②（actor 用 {id, role} **对象**、不是平铺两键）的形状本身，
+      **正向那一半此前无任何用例覆盖** —— 也就是说，把 actorMap 写成恒返回 null，
+      整套测试**照样全绿**。这是一条「无判别力」的缺口，本笔补掉。
+
+  突变对照（实测）：
+      手术：把 EventStreamService 的 actorMap 里
+                if (actorId == null && actorRole == null) {
+            改成
+                if (true) {   // MUTATION
+      结果：Tests run: 9, Failures: 1 —— **恰** actorTravelsFromMdcIntoTheFrameAsAnObject 转红，
+            其余 8 条仍绿。
+      还原：cp 备份回原文件后，git diff --stat 复核回到 +31，与突变前一致（还原干净）。
+
+  该用例的断言（两条）：
+      ① 帧里 events[0].actor == {id: "C-42", role: 2}   —— 形状断言（对象 vs 平铺两键）
+      ② 帧里 events[0].durationUs == 1L                  —— 量纲断言（1500 ns 入参 → 1 µs 进帧）
+  过程提示：用例用 TraceIdFilter.bind 装身份、finally 里 bind(null,null,null,null) 清掉
+      （MDC 是线程级静态，JUnit 默认同线程跑下一个用例，漏清会漏给别的用例）。
+
+【三、断言未削弱（全仓核过）】
+  核法：对 Mall-management-server/src/test 全量 diff，逐条看有没有「删除断言 / 放宽断言」。
+  结果：**无一删除、无一放宽**。唯一一处「改了断言所在行」的是 OrderTransitionRecorderTest 的
+      applied(PAY, ORDER) → applied(PAY, ORDER, 1_500L) —— 纯签名更新（耗时入参必填），
+      断言语义不变。
+
+  三处具名断言经**人工读源码**确认为真断言（不是自证）：
+      · EventStreamServiceTest 的 containsOnlyKeys（14 键，帧字段一个不多一个不少）
+      · EventStreamServiceTest 的 actor isNull()（无身份那一半）
+      · EventBroadcasterTest 的 fields.result 与 detail 里 result= 那段**逐字比对**
+        （两处分别构造必然漂移 —— 本仓反复吃过的亏，故专门钉住）
+
+【四、本笔的口径（不是测试项，但决定「怎么读测试」）】
+  · 台账 observed_event 本笔 +3 列（ActorId / ActorRole / DurationUs）—— 有界标量，进列。
+  · 帧里的 fields（结构化明细 Map）**刻意不进台账** —— 口径「有界标量进列，无界自由文本不进」。
+    ⇒ 回放（H.8）拿得到「谁 / 多久」，**拿不到** fields 的那些 kv；这一点要在回放页如实说，
+      别让人以为「回放缺了字段」。
+  · 量纲 = **微秒**（durationUs = durationNanos / 1000）。这是对原话的**偏离**，用户已裁定
+    「偏离对」：L1 缓存命中实测 0.2~1 µs，用毫秒列对它永远是 0。

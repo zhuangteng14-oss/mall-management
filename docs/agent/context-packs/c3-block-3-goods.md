@@ -50,9 +50,9 @@
   `GOODS_VIOLATION_REMOVED = "goods.violation.removed"`（`:85`，注释「违规商品下架 / 删除」）。
   ⚠️ **缺口**：没有「提审 → 触达管理员」这一条（对照块 2 补的 `MERCHANT_APPLY_SUBMITTED`，`:112`）⇒ 本块**建议加一条** `goods.apply.submitted`（B 档，只加常量）。
   ⚠️ `send` **不校验白名单**（`:19-24`）⇒ 加 code 不动表、不动 `send`。
-- `.../admin/service/AuditService.java:73-86` —— `record(actor, action, targetType, targetId, before, after)：void`，**fail-open**（catch 一切、只打 `ERROR ... AUDIT`）。`actor` 用 `AuthSession.identify(request)`。
+- `.../admin/service/AuditService.java:73-89` —— `record(actor, action, targetType, targetId, before, after)：void`，**fail-open**（catch 一切、只打 `ERROR ... AUDIT`）。`actor` 用 `AuthSession.identify(request)`。
 - `.../admin/AuditActions.java:35` —— `GOODS_UPDATE = "goods.update"`（批次 A 的样板钩子，**已存在**）；`:53-77` —— 块 2 加的 7 条，**这是本块加常量的行文范式**；`:19-26` —— 「其余写端点随各自那一笔挂」的口径。
-- `.../shared/web/IdentityGuard.java:73-82` —— `requireSelfOrAdmin(request, paramId)`：自己 / 管理员 / **解析不出身份** → 放行，否则 403。⚠️ 必须在方法体**第一行**调。
+- `.../shared/web/IdentityGuard.java:104-115` —— `requireSelfOrAdmin(request, paramId)`：自己 / 管理员 / **解析不出身份** → 放行，否则 403。⚠️ 必须在方法体**第一行**调。
 - `.../shared/web/Result.java:64-133` —— `of(...)` / `ok(...)` / `fail(...)`；**禁 `putAll`**。
 - `.../shared/web/GlobalExceptionHandler.java:83` —— ⚠️ `@RestControllerAdvice(assignableTypes = {MessageController, GoodsController})` —— **新 Controller 不在白名单里** ⇒ 新端点**一个参数约束都不要加**（`@NotBlank` 等会逃逸成 400 空体；类级 `@Validated` 会撞 CGLIB 断言族）。
 - `.../smoke/AbstractSmokeTest.java:137` —— `@Import({...})` 真 bean 名单：⚠️ **块 1/块 2 两次踩同一颗雷**（漏 import ⇒ 整个 `@WebMvcTest` 切片起不来，77 / 237 errors）⇒ 本块新 Controller 的依赖 bean **必须同步加进这里**。

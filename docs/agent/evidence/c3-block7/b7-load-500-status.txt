@@ -1,0 +1,48 @@
+块 7 收尾 · 500 并发压测 —— HTTP 状态分布（"假 500 归零"）
+================================================================
+时间      ：2026-10-17 18:22:59 – 18:23:08（Asia/Shanghai）
+环境      ：dev profile · 真后端 PID 24084 · http://127.0.0.1:8088（无 mock）
+探针      ：scripts/probes/probe-b7-finish-load.mjs（本轮新增）
+命令      ：
+  PROBE_BASE=http://127.0.0.1:8088 node scripts/probes/probe-b7-finish-load.mjs 500 b7load-182259
+
+请求形状
+  500 条同时派发（批 50 + 批间 3 ms；在途请求数百条），每条：
+    POST /goods/productCodePrice
+    MerchantId=B7PROBE  GoodName="B7 probe good"  ProductCode=b7load-182259-NNNN（唯一）
+    X-Trace-Id: b7load-182259-trace-NNNN（唯一）
+  同时开一条 /admin/observe/events/stream，让本轮事件按既有边界（有人看日志页才落库）进环 → MQ → 台账。
+
+探针输出（原文）
+  SUMMARY {"runId":"b7load-182259","concurrency":500,"wallMs":452,
+           "statuses":{"200":250,"429":250},"server5xx":0,"transportErrors":0,
+           "failedSamples":[]}
+
+判读
+  1. 500 条请求**全部**拿到 HTTP 响应：200 × 250、429 × 250。
+     - 429 是 ProtectionGate 限流器的正常出口（防护在工作），不是错误。
+     - 被放行的 250 条走完了缓存 + DB 全链路。
+  2. server5xx = 0：没有任何 5xx。假 500（幂等/熔断/死锁等本该 500 的技术异常）归零。
+  3. transportErrors = 0：没有客户端侧断连/超时。
+  4. 同窗口 Tomcat 只记了 2 条 ERROR（18:23:07.991 / .995，线程 o-8088-exec-448）：
+     java.io.IOException「你的主机中的软件中止了一个已建立的连接」
+     stack：SseStreamWriter.writeFrame → lambda$stream$2
+     成因是**探针收尾主动 abort 事件流**（客户端断开），发生在 SSE 写帧路径上，
+     不在 /goods 请求链上；500 条压测请求没有产生任何 ERROR / 5xx。
+
+附：两次早期尝试的说明（不掩盖）
+  run1（b7load-181942）16 条、run3（b7load-182220）11 条 transportErrors，
+  cause = ECONNREFUSED 127.0.0.1:8088——服务端一直在监听，是 500 条 SYN 同时砸到
+  Windows accept 队列瞬时打满导致的**内核拒连**，不是应用错误。改为批间 3 ms 派发后
+  本轮 0 条。探针注释里记录了这条，避免把它误算进"假 500"。
+
+最终代码复跑（2026-10-17 18:42，全部收尾改动之后）
+  环境：dev profile · 重启后的真后端 PID 42416（18:40:23 启动）· 8088
+  命令：node scripts/probes/probe-b7-finish-load.mjs 500 b7load-final-1842
+  输出：SUMMARY {"runId":"b7load-final-1842","concurrency":500,"wallMs":693,
+        "statuses":{"200":400,"429":100},"server5xx":0,"transportErrors":0,
+        "failedSamples":[]}
+  判读：仍为 0 个 5xx、0 条传输错误；200/429 的分配随调度时序变化
+        （限流窗口内被放行的条数不同），不影响"假 500 归零"的判据。
+        本窗口后端日志 **0 条 ERROR**（SSE 主动 abort 未再触发 Tomcat 重抛）。
+  产物：_work/b7-load-probe-b7load-final-1842.json

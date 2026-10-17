@@ -1,0 +1,26 @@
+<!doctype html>
+<!--
+  4× 放大镜（3a.2b）：2× 的裁切图里「顶边 1px 高光」实在看不清 ⇒ 再放 4 倍、只取**左上角**
+  那一小块（含第一个 KPI 卡的上边缘），甲/乙上下并排。
+  ⚠️ `image-rendering: pixelated` —— 不能让它插值，否则「1px 的线」会被平滑成一片雾，
+     看起来像「有线」或「没线」都不可信。这里要的是**原像素**。
+-->
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<style>
+  body { margin: 0; background: #101828; color: #a3aec2; font: 12px/1.4 "Microsoft YaHei", sans-serif; }
+  .row { position: relative; width: 1000px; height: 132px; overflow: hidden; border-bottom: 1px solid #2b394f; }
+  .row span { position: absolute; left: 6px; top: 4px; z-index: 2; color: #5b90ff; font-weight: 600; }
+  .row img {
+    position: absolute; left: 0; top: 22px;
+    transform: scale(4); transform-origin: 0 0;
+    image-rendering: pixelated;
+  }
+</style>
+</head>
+<body>
+  <div class="row"><span>甲（现状）</span><img src="./out-b7a2b-real-crop-kpi.png"></div>
+  <div class="row"><span>乙（维度 3/4）</span><img src="./out-b7a2b-yi-crop-kpi.png"></div>
+</body>
+</html>

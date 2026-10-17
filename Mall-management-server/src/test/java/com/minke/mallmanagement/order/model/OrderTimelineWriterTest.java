@@ -121,7 +121,7 @@ class OrderTimelineWriterTest {
 
         assertThat(count("result", "ok")).isEqualTo(1.0);
         assertThat(metrics.recentEvents())
-                .as("512 槽在满负荷下只覆盖约 4 秒，成功落库不占位")
+                .as("事件环容量有限（2048 槽），成功落库不占位")
                 .isEmpty();
     }
 

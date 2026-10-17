@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>3a.3 甲 · 三栏驾驶舱 · 日志页结构草图</title>
+<link rel="stylesheet" href="./_struct-wire.css">
+<link rel="stylesheet" href="./_struct-wire-ev.css">
+</head>
+<body>
+
+<div class="wire-head">
+  <h1>3a.3 日志页 · <b>甲 —— 三栏驾驶舱</b></h1>
+  <span class="hint">结构草图：灰线框（无品牌色／圆角／阴影／动效）· 真数据（60 拍 · 3152 条）·
+    一屏装下六区、事件流<b>内部</b>滚 · 「模拟日常」在窗口右上角，且「已放 N / 500 条」常驻</span>
+</div>
+
+<div class="shell">
+  <aside class="side">
+    <div class="brand">管理端 · Mall Management</div>
+    <div class="dom">概览</div><div class="sub">经营数据</div>
+    <div class="dom">通知收件箱</div>
+    <div class="dom">业务域</div>
+    <div class="sub">用户与商家治理</div><div class="sub">商品与类目治理</div>
+    <div class="sub">订单治理</div><div class="sub">营销运营</div>
+    <div class="sub">消息与内容治理</div><div class="sub">系统通知</div>
+    <div class="dom">可观测域</div>
+    <div class="sub">攻击模拟器</div><div class="sub">指标面板</div>
+    <div class="sub">状态流转</div><div class="sub on">实时日志</div><div class="sub">权限与审计</div>
+    <div class="foot">外壳示意 · 两版相同（232px）</div>
+  </aside>
+
+  <div class="col">
+    <div class="top"><span>管理端 / <b>实时日志</b></span><span class="who">ops_duan · 退出</span></div>
+    <div class="main"><div class="px"><div id="app"></div></div></div>
+  </div>
+</div>
+
+<details class="wire-foot">
+  <summary>结构判据与实测（点开看 · 折起来只有一行，所以整页仍是一屏；判据本体也在交付报告里）</summary>
+  <div class="body judge" id="judge"></div>
+</details>
+
+<script src="./_struct-wire-ev.js"></script>
+<script>render('jia')</script>
+</body>
+</html>

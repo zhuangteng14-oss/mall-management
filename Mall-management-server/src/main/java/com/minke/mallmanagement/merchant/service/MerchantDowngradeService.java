@@ -2,12 +2,22 @@ package com.minke.mallmanagement.merchant.service;
 
 import com.minke.mallmanagement.goods.dao.GoodsShelfDao;
 import com.minke.mallmanagement.merchant.DowngradeStates;
+import com.minke.mallmanagement.observe.metrics.ProtectionMetrics;
+import com.minke.mallmanagement.protect.ProtectionGate;
 import com.minke.mallmanagement.user.dao.UserGovernanceDao;
 import com.minke.mallmanagement.user.service.UserCacheService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.dao.CannotAcquireLockException;
+import org.springframework.retry.RetryCallback;
+import org.springframework.retry.RetryContext;
+import org.springframework.retry.RetryPolicy;
+import org.springframework.retry.backoff.ExponentialBackOffPolicy;
+import org.springframework.retry.policy.SimpleRetryPolicy;
+import org.springframework.retry.support.RetryTemplate;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import java.time.LocalDateTime;
 import java.util.ArrayList;
@@ -58,16 +68,40 @@ public class MerchantDowngradeService {
     private static final int ROLE_CUSTOMER = 1;
     private static final int ROLE_MERCHANT = 2;
 
+    /** 重试对应的防护开关 key（{@code ProtectionGate.KEYS} 之一；D 段 · 阶段 2b 起已接闸）。 */
+    private static final String RETRY_KEY = "retry";
+
+    /** 重试事件的 {@code scope} —— 「重试发生在哪一段」，即本落点。 */
+    private static final String RELIST_SCOPE = "relist";
+
+    /** 最多尝试次数（**含**第一次）。用户 2026-10-15 裁定「Spring Retry 2-3 次」⇒ 取 3。 */
+    private static final int RELIST_MAX_ATTEMPTS = 3;
+
     private final UserGovernanceDao userGovernanceDao;
     private final GoodsShelfDao goodsShelfDao;
     private final UserCacheService userCacheService;
+    private final ProtectionGate protectionGate;
+    private final ProtectionMetrics protectionMetrics;
+
+    /** 事务边界：**显式**开，理由见 {@link #relist} 的「重试在事务外层」。 */
+    private final TransactionTemplate transactionTemplate;
+
+    /** {@link #relist} 的重试模板（只对死锁类重试，见 {@link #buildRelistRetry()}）。 */
+    private final RetryTemplate relistRetry;
 
     public MerchantDowngradeService(UserGovernanceDao userGovernanceDao,
                                     GoodsShelfDao goodsShelfDao,
-                                    UserCacheService userCacheService) {
+                                    UserCacheService userCacheService,
+                                    ProtectionGate protectionGate,
+                                    ProtectionMetrics protectionMetrics,
+                                    PlatformTransactionManager transactionManager) {
         this.userGovernanceDao = userGovernanceDao;
         this.goodsShelfDao = goodsShelfDao;
         this.userCacheService = userCacheService;
+        this.protectionGate = protectionGate;
+        this.protectionMetrics = protectionMetrics;
+        this.transactionTemplate = new TransactionTemplate(transactionManager);
+        this.relistRetry = buildRelistRetry();
     }
 
     // ==================== 阶段 ①：发起 ====================
@@ -256,6 +290,7 @@ public class MerchantDowngradeService {
     // ==================== 阶段 ⑤：人工确认重新上架 ====================
 
     /**
+    /**
      * 管理员**人工确认**恢复上架（阶段 ⑤）。⚠️ 它**只重新上架商品**：
      * 账号身份在「30 天后重新申请通过」那一步已经由
      * {@link MerchantApplicationService#audit} 升回商家了（那一步是 human-in-the-loop 的确认点），
@@ -263,8 +298,29 @@ public class MerchantDowngradeService {
      *
      * <p>若账号当前**不在**商家态（{@code login.Role != 2}），本方法仍只上架商品、不改身份
      * —— 「改身份」永远只由审核路径做，避免出现「绕过审核直接变商家」的第二条路。
+     *
+     * <h2>【D 段 · 阶段 2b（甲）：死锁重试 —— 本方法是全仓唯一那条反向锁序环的受害者侧】</h2>
+     * 2026-10-15 实测：本方法（写序 goods→user）与 {@link MerchantApplicationService#audit}
+     * （写序 user→goods）**反向**，并发时 MySQL 报 {@code ER_LOCK_DEADLOCK}（48 轮 ×5 请求
+     * **48/48 轮复现**、共 149 次；167 条 Spring 异常全落在 relist 这一侧）。
+     * 已加 {@code goods.MerchantId} 索引把锁范围从 49 行压到 1 行（**丙**），但**环没拆掉**
+     * —— 加索引后重跑仍 48/48 轮、139 次。环的成因是**访问顺序相反**，与锁住几行无关，
+     * 故这里补**治果**：重试（**甲**）。
+     *
+     * <p>⚠️ <b>为什么不用 {@code @Retryable} 注解</b>（用户原话是「Spring Retry 2-3 次」）：
+     * 注解是**编译期**的，而本轮要把重试接进 {@code ProtectionGate} 的 {@code retry} 开关 ——
+     * 开关关掉时必须**一次都不重试**（演练要演的就是「不重试就 500」这组对照）。
+     * 运行时才定的开关，只有编程式 {@code RetryTemplate} 读得到。
+     *
+     * <p>⚠️ <b>「重试必须在事务外层」是**结构性**保证，不是靠切面 order</b>：本方法上**没有**
+     * {@code @Transactional}，事务由内层 {@code transactionTemplate} 显式开 ——
+     * {@code RetryTemplate}（外层）与 {@code TransactionTemplate}（内层）分属两层、调的是不同对象，
+     * 顺序不可能反。反过来（注解 retry + 注解 tx 同方法）要靠 advisor order 契约成立，
+     * 那是「配置对了才对」，不是「结构上不可能错」。
+     *
+     * <p>⚠️ 两个早退分支（缺参数 / 查无商家号）**在重试之外**：它们属于「输入不对」，
+     * 重试一万次也还是不对。
      */
-    @Transactional
     public Map<String, Object> relist(String targetUsername) {
         Map<String, Object> result = new HashMap<>();
         if (isBlank(targetUsername)) {
@@ -278,16 +334,118 @@ public class MerchantDowngradeService {
             result.put("msg", "该账号没有商家号（从未入驻）");
             return result;
         }
-        int relisted = goodsShelfDao.relistAllByMerchant(merchantId);
-        userGovernanceDao.clearDowngrade(targetUsername);
-        userCacheService.evictPublic(merchantId);
-
-        result.put("success", true);
-        result.put("username", targetUsername);
-        result.put("relisted", relisted);
-        return result;
+        RetryCallback<Map<String, Object>, CannotAcquireLockException> once =
+                ctx -> relistOnce(targetUsername, merchantId, ctx);
+        return relistRetry.execute(once);
     }
 
+    /**
+     * 一次尝试：显式开一个事务做完三条写操作，并**就本次尝试**发一条 {@code protection} 事件。
+     *
+     * <p>⚠️ 只有**第 2 次及以后**的尝试才发事件：第 1 次不是「重试」，把它算进去会把
+     * 「重试成功率」的分母从「重试过的次数」污染成「调用过的次数」。
+     *
+     * @param ctx 当前重试上下文；{@code getRetryCount()} 是**已重试次数**（首次尝试时为 0），
+     *            故本次的 {@code attempt = 它 + 1}
+     * @throws CannotAcquireLockException 本次尝试撞上死锁 —— 刻意不吞，交给外层重试
+     */
+    private Map<String, Object> relistOnce(String targetUsername, String merchantId, RetryContext ctx) {
+        int attempt = ctx.getRetryCount() + 1;
+        try {
+            Map<String, Object> done = transactionTemplate.execute(status -> {
+                int relisted = goodsShelfDao.relistAllByMerchant(merchantId);
+                userGovernanceDao.clearDowngrade(targetUsername);
+                userCacheService.evictPublic(merchantId);
+
+                Map<String, Object> inner = new HashMap<>();
+                inner.put("success", true);
+                inner.put("username", targetUsername);
+                inner.put("relisted", relisted);
+                return inner;
+            });
+            if (attempt > 1) {
+                protectionMetrics.retry(ProtectionMetrics.Result.RETRY_SUCCESS, RETRY_KEY, RELIST_SCOPE,
+                        "action=retry attempt=" + attempt + " result=success", null);
+            }
+            return done;
+        } catch (CannotAcquireLockException e) {
+            if (attempt > 1) {
+                protectionMetrics.retry(ProtectionMetrics.Result.RETRY_FAILED, RETRY_KEY, RELIST_SCOPE,
+                        "action=retry attempt=" + attempt + " result=deadlock",
+                        "死锁重试失败：第 " + attempt + " 次尝试仍撞上死锁");
+            }
+            throw e;
+        }
+    }
+
+    /**
+     * 建 {@link #relist} 用的重试模板：**只对死锁类**重试、最多
+     * {@value #RELIST_MAX_ATTEMPTS} 次尝试、退避 40ms 起 ×2（上限 200ms）。
+     *
+     * <p>⚠️ 只把 {@link CannotAcquireLockException} 放进 map：其余异常（参数错 / 查无此商家 /
+     * 连接断了）**一次都不重试** —— 重试它们只会把「确定的失败」拖成「慢一点的确定失败」。
+     * ⚠️ 为什么认它而不是 {@code DeadlockLoserDataAccessException}：本仓 2026-10-15 的 167 条
+     * 死锁现场里后者出现 **0 次**、前者 167 次（MySQL 1213 经 connector 翻成
+     * {@code MySQLTransactionRollbackException}，再被 Spring 翻成它）。
+     */
+    private RetryTemplate buildRelistRetry() {
+        RetryTemplate template = new RetryTemplate();
+        template.setRetryPolicy(new GatedRetryPolicy(new SimpleRetryPolicy(
+                RELIST_MAX_ATTEMPTS, Map.of(CannotAcquireLockException.class, true))));
+        ExponentialBackOffPolicy backOff = new ExponentialBackOffPolicy();
+        backOff.setInitialInterval(40L);
+        backOff.setMultiplier(2.0);
+        backOff.setMaxInterval(200L);
+        template.setBackOffPolicy(backOff);
+        return template;
+    }
+
+    /**
+     * 「{@code retry}」开关的门：把 {@link ProtectionGate} 接进重试策略（阶段 2b 的「接闸」）。
+     *
+     * <p>只包一层 {@link RetryPolicy#canRetry(RetryContext)}：开关**关掉** ⇒ 第一次失败之后
+     * 不再重试（**不是**「连第一次都不执行」，那一条有个实测过的坑，见 {@link #canRetry}）。
+     * 这正是演练要演的那组对照：同一个死锁，开关开着答 200、关着答 500。
+     *
+     * <p>⚠️ 开关是**每个 key 一个进程内布尔位**，读它只是查表 —— 不会因读不到而阻塞业务线程。
+     */
+    private final class GatedRetryPolicy implements RetryPolicy {
+
+        private final RetryPolicy delegate;
+
+        private GatedRetryPolicy(RetryPolicy delegate) {
+            this.delegate = delegate;
+        }
+
+        @Override
+        public boolean canRetry(RetryContext context) {
+            // ⚠️ **第一次尝试无条件放行**（2026-10-15 实测，别删这一段判空）：
+            //    RetryTemplate 是「**先问 canRetry、再执行**」的循环，不是「先执行、失败后再问」。
+            //    把开关直接短路在 canRetry 上 ⇒ 开关关掉时循环体一次都不进 ⇒ 业务方法**压根没跑**
+            //    （实测表现为抛 RetryException("Exception in retry")，且它**没有 cause** ——
+            //    原始死锁在异常链上就丢了，页面上只剩一句「Exception in retry」）。
+            //    开关管的是**重试**（第 2 次及以后），故只在「已经失败过一次」之后才看它。
+            if (context.getLastThrowable() == null) {
+                return true;
+            }
+            return protectionGate.isOn(RETRY_KEY) && delegate.canRetry(context);
+        }
+
+        @Override
+        public RetryContext open(RetryContext parent) {
+            return delegate.open(parent);
+        }
+
+        @Override
+        public void close(RetryContext context) {
+            delegate.close(context);
+        }
+
+        @Override
+        public void registerThrowable(RetryContext context, Throwable throwable) {
+            delegate.registerThrowable(context, throwable);
+        }
+    }
     // ==================== 内部 ====================
 
     private static String str(Object v) {

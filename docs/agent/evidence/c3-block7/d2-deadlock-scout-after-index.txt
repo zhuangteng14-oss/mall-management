@@ -1,0 +1,177 @@
+=== 证据：加 `goods.MerchantId` 索引之后，重跑死锁侦查 48 轮 ===
+项目：C3 块 7 · D 段 · 阶段 2b（丙 = 加索引治因）
+日期：2026-10-15
+命令：ROUNDS=48 KB=4 node scripts/probes/d2-deadlock-scout.mjs
+后端：dev profile / localhost:8088 / PID 23128 —— **未含重试**（f0697eb 之后未改任何 Java）
+DB  ：VM 192.168.229.129 / mall_management_sql（已落 Migration ⑳ `idx_goods_merchant (MerchantId)`）
+
+对照组 = 同目录 d2-deadlock-scout-48x4.txt（加索引**之前**：48/48 轮、149 次 1213、A 侧 0 失败）。
+
+本次结果：48/48 轮**仍**出现死锁、1213 增量 **139**（前 149）、HTTP 5xx = **139**、A 侧仍 0 失败。
+
+⇒ **读法（别读成「索引没用」）**：
+  · 索引**确实生效**，锁粒度从「锁 49 行」降到「锁 1 行」—— 本次 INNODB STATUS 段里
+    `HOLDS THE LOCK(S)` 与 `WAITING FOR THIS LOCK TO BE GRANTED` 两侧都落在
+    `index idx_goods_merchant` 的**单条** record lock 上（基线那份是 `49 row lock(s)`）。
+  · 但死锁**未消除**：环的成因是**两个事务访问顺序相反**（audit = user→goods，
+    relist = goods→user），与各自锁住几行无关 ⇒ 缩锁范围只能减少牵连面，不能拆环。
+  · ⇒ 顾问裁定第 4 条的两支里，本次落在「**若还有少量死锁**」这一支：
+    **甲（重试）不是可选项，是必需项**。下一步在 `relist` 落重试，
+    期望判据 = HTTP 5xx 由 139 → 0（DB 层仍可能产生 1213，但不再冒泡成 500）。
+
+以下为探针原始输出（未删改）：
+--------------------------------------------------------------------------------
+===== 0 · 前置 =====
+后端 http://localhost:8088/actuator/health → 200
+===== 1 · 夹具 =====
+账号=__dlprobe__ 商家号=dlprobeM01 申请Id=35  goods 行数≈45（全表扫描的代价就在这个数上）
+===== 2 · 基线 =====
+ER_LOCK_DEADLOCK=173  ER_LOCK_WAIT_TIMEOUT=0
+INNODB STATUS 现有死锁段（历史/对照）:  | ------------------------ | 2026-10-15 14:32:26 124825805833920 | *** (1) TRANSACTION:
+===== 3 · 开压：48 轮 × (1×A + 4×B)，错开量扫 0..7.7ms（12 档 × 0.7ms） =====
+  ★ 轮 1（错开 0ms）出现死锁，累计 1213 = 1
+  轮  1/48 错开= 0ms  A=200 approved-restored  B=[200,200,500,200]  1213增量=1
+  轮  2/48 错开= 1ms  A=200 approved-restored  B=[500,500,500,200]  1213增量=4
+  轮  3/48 错开= 1ms  A=200 approved-restored  B=[500,200,500,200]  1213增量=6
+  轮  4/48 错开= 2ms  A=200 approved-restored  B=[500,500,500,200]  1213增量=9
+  轮  5/48 错开= 3ms  A=200 approved-restored  B=[500,500,500,200]  1213增量=12
+  轮  6/48 错开= 4ms  A=200 approved-restored  B=[200,500,500,500]  1213增量=15
+  轮  7/48 错开= 4ms  A=200 approved-restored  B=[200,200,200,500]  1213增量=16
+  轮  8/48 错开= 5ms  A=200 approved-restored  B=[500,200,500,500]  1213增量=19
+  轮  9/48 错开= 6ms  A=200 approved-restored  B=[200,200,200,500]  1213增量=20
+  轮 10/48 错开= 6ms  A=200 approved-restored  B=[200,500,500,500]  1213增量=23
+  轮 11/48 错开= 7ms  A=200 approved-restored  B=[200,500,500,500]  1213增量=26
+  轮 12/48 错开= 8ms  A=200 approved-restored  B=[200,500,500,500]  1213增量=29
+  轮 13/48 错开= 0ms  A=200 approved-restored  B=[500,500,500,200]  1213增量=32
+  轮 14/48 错开= 1ms  A=200 approved-restored  B=[500,500,500,200]  1213增量=35
+  轮 15/48 错开= 1ms  A=200 approved-restored  B=[500,500,500,200]  1213增量=38
+  轮 16/48 错开= 2ms  A=200 approved-restored  B=[500,500,500,200]  1213增量=41
+  轮 17/48 错开= 3ms  A=200 approved-restored  B=[500,500,500,200]  1213增量=44
+  轮 18/48 错开= 4ms  A=200 approved-restored  B=[200,500,500,500]  1213增量=47
+  轮 19/48 错开= 4ms  A=200 approved-restored  B=[500,200,500,500]  1213增量=50
+  轮 20/48 错开= 5ms  A=200 approved-restored  B=[500,500,200,500]  1213增量=53
+  轮 21/48 错开= 6ms  A=200 approved-restored  B=[500,500,500,500]  1213增量=57
+  轮 22/48 错开= 6ms  A=200 approved-restored  B=[500,200,500,500]  1213增量=60
+  轮 23/48 错开= 7ms  A=200 approved-restored  B=[500,200,500,500]  1213增量=63
+  轮 24/48 错开= 8ms  A=200 approved-restored  B=[500,200,500,500]  1213增量=66
+  轮 25/48 错开= 0ms  A=200 approved-restored  B=[200,500,500,500]  1213增量=69
+  轮 26/48 错开= 1ms  A=200 approved-restored  B=[200,500,500,500]  1213增量=72
+  轮 27/48 错开= 1ms  A=200 approved-restored  B=[500,500,500,500]  1213增量=76
+  轮 28/48 错开= 2ms  A=200 approved-restored  B=[500,500,200,500]  1213增量=79
+  轮 29/48 错开= 3ms  A=200 approved-restored  B=[500,500,500,200]  1213增量=82
+  轮 30/48 错开= 4ms  A=200 approved-restored  B=[500,500,500,500]  1213增量=86
+  轮 31/48 错开= 4ms  A=200 approved-restored  B=[500,500,200,500]  1213增量=89
+  轮 32/48 错开= 5ms  A=200 approved-restored  B=[500,200,200,500]  1213增量=91
+  轮 33/48 错开= 6ms  A=200 approved-restored  B=[500,500,500,200]  1213增量=94
+  轮 34/48 错开= 6ms  A=200 approved-restored  B=[500,500,500,200]  1213增量=97
+  轮 35/48 错开= 7ms  A=200 approved-restored  B=[500,500,500,500]  1213增量=101
+  轮 36/48 错开= 8ms  A=200 approved-restored  B=[200,500,500,500]  1213增量=104
+  轮 37/48 错开= 0ms  A=200 approved-restored  B=[200,500,500,500]  1213增量=107
+  轮 38/48 错开= 1ms  A=200 approved-restored  B=[200,500,200,500]  1213增量=109
+  轮 39/48 错开= 1ms  A=200 approved-restored  B=[200,500,500,500]  1213增量=112
+  轮 40/48 错开= 2ms  A=200 approved-restored  B=[500,500,500,200]  1213增量=115
+  轮 41/48 错开= 3ms  A=200 approved-restored  B=[500,500,500,500]  1213增量=119
+  轮 42/48 错开= 4ms  A=200 approved-restored  B=[500,500,200,500]  1213增量=122
+  轮 43/48 错开= 4ms  A=200 approved-restored  B=[500,500,200,500]  1213增量=125
+  轮 44/48 错开= 5ms  A=200 approved-restored  B=[500,500,500,500]  1213增量=129
+  轮 45/48 错开= 6ms  A=200 approved-restored  B=[200,500,500,500]  1213增量=132
+  轮 46/48 错开= 6ms  A=200 approved-restored  B=[200,500,500,500]  1213增量=135
+  轮 47/48 错开= 7ms  A=200 approved-restored  B=[200,500,500,500]  1213增量=138
+  轮 48/48 错开= 8ms  A=200 approved-restored  B=[200,200,500,200]  1213增量=139
+===== 4 · 结果 =====
+ER_LOCK_DEADLOCK: 173 → 312   （增量 139）
+ER_LOCK_WAIT_TIMEOUT: 0 → 0   （增量 0）
+HTTP 5xx 次数=139
+A 走完整链（outcome=approved-restored，即真碰到 goods）的次数=48；只到 approved（未碰 goods）=0
+首次死锁出现在第 1 轮
+===== 5 · INNODB STATUS 的死锁段（含锁序）=====
+LATEST DETECTED DEADLOCK
+------------------------
+2026-10-15 15:24:06 124825805833920
+*** (1) TRANSACTION:
+TRANSACTION 4848479, ACTIVE 0 sec starting index read
+mysql tables in use 1, locked 1
+LOCK WAIT 6 lock struct(s), heap size 1128, 4 row lock(s)
+MySQL thread id 758, OS thread handle 124825710249664, query id 6142783 192.168.229.1 test updating
+UPDATE `user` SET DowngradeState = 'none', ScheduledDowngradeAt = NULL, DowngradeReason = NULL,     FrozenAt = NULL, FreezeUntil = NULL WHERE username = '__dlprobe__'
+
+*** (1) HOLDS THE LOCK(S):
+RECORD LOCKS space id 16 page no 5 n bits 120 index idx_goods_merchant of table `mall_management_sql`.`goods` trx id 4848479 lock_mode X
+Record lock, heap no 48 PHYSICAL RECORD: n_fields 2; compact format; info bits 0
+ 0: len 20; hex 646c70726f62654d303120202020202020202020; asc dlprobeM01          ;;
+ 1: len 4; hex 80000080; asc     ;;
+
+
+*** (1) WAITING FOR THIS LOCK TO BE GRANTED:
+RECORD LOCKS space id 23 page no 4 n bits 128 index PRIMARY of table `mall_management_sql`.`user` trx id 4848479 lock_mode X locks rec but not gap waiting
+Record lock, heap no 55 PHYSICAL RECORD: n_fields 21; compact format; info bits 64
+ 0: len 20; hex 5f5f646c70726f62655f5f202020202020202020; asc __dlprobe__         ;;
+ 1: len 6; hex 00000049fb5a; asc    I Z;;
+ 2: len 7; hex 02000001360151; asc     6 Q;;
+ 3: len 20; hex e59586e5aeb62020202020202020202020202020; asc                     ;;
+ 4: len 20; hex 646c70726f626543303120202020202020202020; asc dlprobeC01          ;;
+ 5: len 20; hex 646c70726f62654d303120202020202020202020; asc dlprobeM01          ;;
+ 6: len 20; hex e794b72020202020202020202020202020202020; asc                     ;;
+ 7: len 4; hex 80000014; asc     ;;
+ 8: SQL NULL;
+ 9: SQL NULL;
+ 10: SQL NULL;
+ 11: len 1; hex 80; asc  ;;
+ 12: SQL NULL;
+ 13: SQL NULL;
+ 14: len 4; hex 6e6f6e65; asc none;;
+ 15: SQL NULL;
+ 16: SQL NULL;
+ 17: SQL NULL;
+ 18: SQL NULL;
+ 19: len 0; hex ; asc ;;
+ 20: len 4; hex 80000000; asc     ;;
+
+
+*** (2) TRANSACTION:
+TRANSACTION 4848478, ACTIVE 0 sec starting index read
+mysql tables in use 1, locked 1
+LOCK WAIT 8 lock struct(s), heap size 1128, 4 row lock(s), undo log entries 1
+MySQL thread id 757, OS thread handle 124825716586176, query id 6142789 192.168.229.1 test updating
+UPDATE goods SET ShelfState = 1, DelistedAt = NULL WHERE MerchantId = 'dlprobeM01'
+
+*** (2) HOLDS THE LOCK(S):
+RECORD LOCKS space id 23 page no 4 n bits 128 index PRIMARY of table `mall_management_sql`.`user` trx id 4848478 lock_mode X locks rec but not gap
+Record lock, heap no 55 PHYSICAL RECORD: n_fields 21; compact format; info bits 64
+ 0: len 20; hex 5f5f646c70726f62655f5f202020202020202020; asc __dlprobe__         ;;
+ 1: len 6; hex 00000049fb5a; asc    I Z;;
+ 2: len 7; hex 02000001360151; asc     6 Q;;
+ 3: len 20; hex e59586e5aeb62020202020202020202020202020; asc                     ;;
+ 4: len 20; hex 646c70726f626543303120202020202020202020; asc dlprobeC01          ;;
+ 5: len 20; hex 646c70726f62654d303120202020202020202020; asc dlprobeM01          ;;
+ 6: len 20; hex e794b72020202020202020202020202020202020; asc                     ;;
+ 7: len 4; hex 80000014; asc     ;;
+ 8: SQL NULL;
+ 9: SQL NULL;
+ 10: SQL NULL;
+ 11: len 1; hex 80; asc  ;;
+ 12: SQL NULL;
+ 13: SQL NULL;
+ 14: len 4; hex 6e6f6e65; asc none;;
+ 15: SQL NULL;
+ 16: SQL NULL;
+ 17: SQL NULL;
+ 18: SQL NULL;
+ 19: len 0; hex ; asc ;;
+ 20: len 4; hex 80000000; asc     ;;
+
+
+*** (2) WAITING FOR THIS LOCK TO BE GRANTED:
+RECORD LOCKS space id 16 page no 5 n bits 120 index idx_goods_merchant of table `mall_management_sql`.`goods` trx id 4848478 lock_mode X waiting
+Record lock, heap no 48 PHYSICAL RECORD: n_fields 2; compact format; info bits 0
+ 0: len 20; hex 646c70726f62654d303120202020202020202020; asc dlprobeM01          ;;
+ 1: len 4; hex 80000080; asc     ;;
+
+*** WE ROLL BACK TRANSACTION (1)
+------------
+TRANSACTIONS
+------------
+Trx id counter 4848486
+Purge don
+===== 6 · 收尾 =====
+夹具已删（user / login / merchant_application / goods 各删探针行）；INNODB STATUS 是服务器内存里的历史，不会被本探针清掉。

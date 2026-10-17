@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>3b.7 状态流转页 · 两版结构草图对照</title>
+<style>
+/* 预览页只做容器：灰阶、无品牌色、无圆角阴影动效 */
+* { box-sizing: border-box; }
+body { margin: 0; background: #fff; color: #222; font: 13px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", sans-serif; padding: 16px; }
+h1 { margin: 0 0 4px; font-size: 16px; font-weight: 600; }
+p { margin: 2px 0 12px; color: #767676; font-size: 12px; }
+.cell { border: 1px solid #b9b9b9; margin-top: 16px; }
+.hd { display: flex; align-items: baseline; gap: 10px; padding: 8px 11px; border-bottom: 1px solid #b9b9b9; background: #f3f3f3; }
+.hd b { font-size: 13px; }
+.hd span { color: #767676; font-size: 12px; }
+.hd a { margin-left: auto; font-size: 12px; color: #222; }
+iframe { display: block; width: 100%; height: 980px; border: 0; background: #fff; }
+</style>
+</head>
+<body>
+
+<h1>3b.7 状态流转页 · 两版结构草图对照</h1>
+<p>两份都是纯 HTML 线框（灰阶、无品牌色/圆角/阴影/动效），数据为 2026-10-17 19:25 真库快照。v2 增加：状态机积压气泡 + 超时预警、耗时分布直方图、超时积压 Top 3、链路抽屉（积压订单 + 时间轴 + 原始事件）、SSE 轨道流。选一版后，再谈主题与 Vue 落地。</p>
+
+<div class="cell">
+  <div class="hd"><b>甲 · 漏斗流转（REIMAGINE）</b><span>横向管道 + 积压气泡 + 预警牌；纵向耗时直方图；不等宽超时积压舱；5 栏 SSE 轨道；底部三栏抽屉</span><a href="3b7-甲-漏斗流转.html" target="_blank">单独打开 ↗</a></div>
+  <iframe src="3b7-甲-漏斗流转.html" loading="lazy" title="甲 · 漏斗流转" style="height:2000px"></iframe>
+</div>
+
+<div class="cell">
+  <div class="hd"><b>乙 · 非对称双栏（LAYOUT）</b><span>左 8 = 纵向桑基带 + 积压阶梯 + 预警；右 4 = 环图 + SSE 轨道流；横向耗时直方图；全宽预警带；右侧 7/5 抽屉</span><a href="3b7-乙-非对称双栏.html" target="_blank">单独打开 ↗</a></div>
+  <iframe src="3b7-乙-非对称双栏.html" loading="lazy" title="乙 · 非对称双栏" style="height:2200px"></iframe>
+</div>
+
+</body>
+</html>

@@ -2,6 +2,7 @@ package com.minke.mallmanagement.goods.service;
 
 import com.minke.mallmanagement.goods.dao.GoodsDao;
 import com.minke.mallmanagement.shared.upload.UploadStorage;
+import io.github.resilience4j.circuitbreaker.annotation.CircuitBreaker;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -136,6 +137,20 @@ public class GoodsService {
      * 本方法保留 {@link Transactional}（覆盖「落盘 + 写提审单」），catch 内仍须
      * {@link #markRollbackOnlyIfActive()}。
      */
+    // ==================== D 段 · commit 2：熔断（本类 5 处，读 2 / 写 3）====================
+    //
+    // 下面是本仓**唯一**一条「看见 MySQL 状态」的防线。三条口径写在明处：
+    //  ① 分读 / 写两个实例（`mallMysqlRead` / `mallMysqlWrite`）：演练灌的是读，而写要保住 ——
+    //     「读被熔断打开时写仍能过」是可演示的收益，合成一个实例就没了。
+    //  ② ⚠️ **不能挂 Controller**：本仓有结构断言钉死「Controller 不得被 AOP 代理」
+    //     （`MallManagementApplicationTests#goodsControllerIsNotAopProxied`），而且裁定也明禁
+    //     「把熔断挂到入站层」。这两条指向同一件事：熔断必须挂在**能看见下游**的那一层。
+    //  ③ ⚠️ 注解**写在 `@Transactional` 上面**只是可读性；真正的先后由切面 order 决定，而它是
+    //     **实测**过的：CircuitBreakerAspect 默认 order 2147483643（MAX-4）< 事务切面的 MAX
+    //     ⇒ 熔断在外、事务在内，**开路时连事务都不会开**。别把这一行当成「顺序由书写决定」。
+    // 参数（错误率 50% / 30s 窗口 / 半开 30s 放 5 个 / 最小请求数 20 / 慢调用 1s）全在
+    // `application.properties` 的 `resilience4j.circuitbreaker.configs.default.*`，不在本类。
+    @CircuitBreaker(name = "mallMysqlWrite")
     @Transactional
     public Map<String, Object> goodsAdd(
             String MerchantId,
@@ -233,14 +248,46 @@ public class GoodsService {
         }
     }
 
-    /** 客户端首页商品列表。**委托 + 响应组装** —— 注解与 {@code SELECT *} 都在 {@link GoodsCacheService#listHome}。 */
-    public Map<String, Object> goodsSelectHome() {
+    /** 商城端列表的默认页大小（首页 / 猜你喜欢）—— 取 24：4 列栅格整 6 行，避免末行只挂 1 张卡。 */
+    public static final int DEFAULT_PAGE_SIZE = 24;
+
+    /** 商城端列表的**硬上限**（安全兜底：`limit=99999` 一律夹到 100）。 */
+    public static final int MAX_PAGE_SIZE = 100;
+
+    /**
+     * 客户端首页商品列表。**委托 + 响应组装** —— 注解与 {@code SELECT *} 都在 {@link GoodsCacheService#listHome}。
+     *
+     * <p>⚠️ 块 7 收尾 · P1：本端点从「一次给全量」改为**真分页**。
+     * {@code limit} 缺省 24、上限 100（{@link #normalizePageSize}）；{@code offset} 缺省 0。
+     * {@code merchantId} 可选：店铺页按本店过滤时必须传 —— 分页后不能再「拉全量再前端过滤」，
+     * 否则本店商品不在第一页时整页空白。
+     */
+    @CircuitBreaker(name = "mallMysqlRead")
+    public Map<String, Object> goodsSelectHome(Integer limit, Integer offset, String merchantId) {
         try {
-            return goodsCacheService.listHome();
+            return goodsCacheService.listHome(normalizePageSize(limit), normalizeOffset(offset),
+                    isBlank(merchantId) ? null : merchantId.trim());
         } catch (Exception e) {
             e.printStackTrace();
             return cacheFailureMarker("查询失败");
         }
+    }
+
+    /** 页大小归一：缺省 {@link #DEFAULT_PAGE_SIZE}，负 / 0 同缺省，超上限夹到 {@link #MAX_PAGE_SIZE}。 */
+    public static int normalizePageSize(Integer limit) {
+        if (limit == null || limit <= 0) {
+            return DEFAULT_PAGE_SIZE;
+        }
+        return Math.min(limit, MAX_PAGE_SIZE);
+    }
+
+    /** 偏移归一：缺省 / 负数一律 0（`LIMIT ? OFFSET ?` 不接受负偏移）。 */
+    public static int normalizeOffset(Integer offset) {
+        return offset == null || offset < 0 ? 0 : offset;
+    }
+
+    private static boolean isBlank(String s) {
+        return s == null || s.trim().isEmpty();
     }
 
     /**
@@ -351,6 +398,7 @@ public class GoodsService {
      * {@link Transactional}；DB 块的 catch 内**必须**调 {@link #markRollbackOnlyIfActive()}，
      * 否则「删了 goods、没删 productsales」会留在库里。
      */
+    @CircuitBreaker(name = "mallMysqlWrite")
     @Transactional
     public Map<String, Object> goodsDe(
             String MerchantId,
@@ -400,6 +448,7 @@ public class GoodsService {
      * {@link Transactional}；DB 块的 catch 内**必须**调 {@link #markRollbackOnlyIfActive()}，
      * 否则「改了 goods 名、没改 productsales 名」会留在库里（两表名不一致）。
      */
+    @CircuitBreaker(name = "mallMysqlWrite")
     @Transactional
     public Map<String, Object> goodsUp(
             String MerchantId,
@@ -468,15 +517,20 @@ public class GoodsService {
      * <p>⚠️ {@code keyword == null ⇒ ""} 这条归一**留在本类**：它是入参规则，不是 SQL
      * （DAO 侧要求非空）。原方法体就是这么分的。
      */
-    public Map<String, Object> productSearch(String keyword) {
+    @CircuitBreaker(name = "mallMysqlRead")
+    public Map<String, Object> productSearch(String keyword, Integer limit, Integer offset) {
         Map<String, Object> result = new HashMap<>();
         try {
             if (keyword == null) keyword = "";
+            int size = normalizePageSize(limit);
+            int skip = normalizeOffset(offset);
 
-            List<Map<String, Object>> goodsList = goodsDao.searchByKeyword(keyword);
+            List<Map<String, Object>> goodsList = goodsDao.searchByKeyword(keyword, size, skip);
 
             result.put("success", true);
             result.put("list", goodsList);
+            result.put("limit", size);
+            result.put("offset", skip);
         } catch (Exception e) {
             result.put("success", false);
             result.put("msg", "搜索失败");
@@ -493,7 +547,7 @@ public class GoodsService {
      * <p>⚠️ <b>不经缓存</b>（同 {@link #productSearch}）：键空间是 {@code TypeId × keyword}，
      * keyword 无界 ⇒ 缓存键会随任意输入膨胀。SQL 在 {@link GoodsDao#selectByTypeId}。
      */
-    public Map<String, Object> categoryGoods(Integer TypeId, String keyword) {
+    public Map<String, Object> categoryGoods(Integer TypeId, String keyword, Integer limit, Integer offset) {
         Map<String, Object> result = new HashMap<>();
         if (TypeId == null) {
             result.put("success", false);
@@ -501,8 +555,12 @@ public class GoodsService {
             return result;
         }
         try {
+            int size = normalizePageSize(limit);
+            int skip = normalizeOffset(offset);
             result.put("success", true);
-            result.put("list", goodsDao.selectByTypeId(TypeId, keyword));
+            result.put("list", goodsDao.selectByTypeId(TypeId, keyword, size, skip));
+            result.put("limit", size);
+            result.put("offset", skip);
         } catch (Exception e) {
             e.printStackTrace();
             result.put("success", false);

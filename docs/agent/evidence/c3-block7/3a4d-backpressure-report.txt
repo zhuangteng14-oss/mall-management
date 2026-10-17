@@ -1,0 +1,864 @@
+{
+  "at": "2026-10-17T06:26:59.998Z",
+  "checks": {
+    "hysteresis-on-above-200": {
+      "ok": true,
+      "detail": {
+        "rows": 201,
+        "virtual": true,
+        "dom": 23
+      }
+    },
+    "hysteresis-holds-at-200-boundary": {
+      "ok": true,
+      "detail": {
+        "rows": 200,
+        "virtual": true,
+        "dom": 23
+      }
+    },
+    "hysteresis-off-only-when-small": {
+      "ok": true,
+      "detail": {
+        "rows": 99,
+        "virtual": false,
+        "dom": 99
+      }
+    },
+    "hysteresis-no-long-task": {
+      "ok": true,
+      "detail": {
+        "longTasks": []
+      }
+    },
+    "agg-500-to-1": {
+      "ok": true,
+      "detail": {
+        "before": 501,
+        "after": 2,
+        "aggRows": 1,
+        "plainRows": 1,
+        "aggCount": [
+          500
+        ],
+        "plainTitles": [
+          "锁等待超时"
+        ],
+        "domRows": 2,
+        "chips": [
+          "× 500"
+        ]
+      }
+    },
+    "agg-keeps-single-low-frequency": {
+      "ok": true,
+      "detail": [
+        "锁等待超时"
+      ]
+    },
+    "pause-freezes-view": {
+      "ok": true,
+      "detail": {
+        "ok": true,
+        "before": {
+          "events": 75,
+          "newest": 125457,
+          "raw": 0,
+          "paused": false,
+          "autoBottom": true,
+          "label": "暂停"
+        },
+        "during": {
+          "events": 75,
+          "newest": 125457,
+          "raw": 1882,
+          "paused": true,
+          "autoBottom": true,
+          "label": "继续"
+        },
+        "after": {
+          "events": 91,
+          "newest": 127840,
+          "raw": 0,
+          "paused": false,
+          "autoBottom": true,
+          "label": "暂停"
+        }
+      }
+    },
+    "pause-keeps-buffering": {
+      "ok": true,
+      "detail": {
+        "events": 75,
+        "newest": 125457,
+        "raw": 1882,
+        "paused": true,
+        "autoBottom": true,
+        "label": "继续"
+      }
+    },
+    "resume-flushes-buffer": {
+      "ok": true,
+      "detail": {
+        "events": 91,
+        "newest": 127840,
+        "raw": 0,
+        "paused": false,
+        "autoBottom": true,
+        "label": "暂停"
+      }
+    },
+    "scroll-up-freezes-view": {
+      "ok": true,
+      "detail": {
+        "before": {
+          "events": 91,
+          "newest": 127840,
+          "raw": 0,
+          "autoBottom": true,
+          "paused": false,
+          "label": "暂停"
+        },
+        "during": {
+          "events": 91,
+          "newest": 127840,
+          "raw": 760,
+          "autoBottom": false,
+          "paused": false,
+          "label": "回到底部"
+        },
+        "after": {
+          "events": 105,
+          "newest": 129450,
+          "raw": 0,
+          "autoBottom": true,
+          "paused": false,
+          "label": "暂停"
+        },
+        "scrollHeight": 3864,
+        "clientHeight": 430
+      }
+    },
+    "scroll-up-keeps-buffering": {
+      "ok": true,
+      "detail": {
+        "events": 91,
+        "newest": 127840,
+        "raw": 760,
+        "autoBottom": false,
+        "paused": false,
+        "label": "回到底部"
+      }
+    },
+    "scroll-back-resumes": {
+      "ok": true,
+      "detail": {
+        "events": 105,
+        "newest": 129450,
+        "raw": 0,
+        "autoBottom": true,
+        "paused": false,
+        "label": "暂停"
+      }
+    },
+    "live-no-long-task-over-50ms": {
+      "ok": true,
+      "detail": {
+        "longTasksOver50": 0,
+        "maxLongTask": 0,
+        "lt": []
+      }
+    },
+    "live-fps-healthy": {
+      "ok": true,
+      "detail": {
+        "fps": 59.8
+      }
+    },
+    "live-view-capped-200": {
+      "ok": true,
+      "detail": {
+        "events": 68
+      }
+    },
+    "live-dom-capped-200": {
+      "ok": true,
+      "detail": {
+        "domRows": 70
+      }
+    },
+    "live-receiving-real-frames": {
+      "ok": true,
+      "detail": {
+        "firstRaw": 4144,
+        "lastRaw": 7964,
+        "firstFlushes": 4,
+        "lastFlushes": 9
+      }
+    },
+    "live-aggregation-active": {
+      "ok": true,
+      "detail": {
+        "raw": 7964,
+        "view": 68,
+        "aggregated": 7896,
+        "lastRaw": 1019,
+        "lastView": 7
+      }
+    },
+    "live-has-agg-chip": {
+      "ok": true,
+      "detail": {
+        "chips": 59
+      }
+    },
+    "live-has-plain-row": {
+      "ok": true,
+      "detail": {
+        "plainRows": 9,
+        "plainTitles": [
+          "入站限流拦下",
+          "入站限流拦下",
+          "入站限流拦下",
+          "入站限流拦下",
+          "入站限流拦下",
+          "入站限流拦下",
+          "库存扣减",
+          "入站限流拦下"
+        ],
+        "plainBusinessRows": 1,
+        "chips": 59
+      }
+    },
+    "live-rate-limit-not-flooding": {
+      "ok": true,
+      "detail": {
+        "rateLimitRows": 9,
+        "text": "├─14:26:08.657 WARN防护入站限流拦下× 3防护开关 rateLimit范围 inbound附加信息 入站限流触发：该秒内拦下 78 次请求（示例 method=POST path=/order/orderAdd，limitForPeriod=200）原因 入站限流：未取得令牌（limitForPeriod=200）来源 protection#783"
+      }
+    },
+    "live-rate-limit-is-second-summary": {
+      "ok": true,
+      "detail": [
+        {
+          "at": 1000,
+          "rows": 4,
+          "text": "├─14:26:08.657 WARN防护入站限流拦下× 3防护开关 rateLimit范围 inbound附加信息 入站限流触发：该秒内拦下 78 次请求（示例 method=POST path=/order/orderAdd，limitForPeriod=200）原因 入站限流：未取得令牌（limitForPeriod=200）来源 protection#783"
+        },
+        {
+          "at": 2000,
+          "rows": 5,
+          "text": "├─14:26:08.657 WARN防护入站限流拦下× 3防护开关 rateLimit范围 inbound附加信息 入站限流触发：该秒内拦下 78 次请求（示例 method=POST path=/order/orderAdd，limitForPeriod=200）原因 入站限流：未取得令牌（limitForPeriod=200）来源 protection#783"
+        },
+        {
+          "at": 3000,
+          "rows": 6,
+          "text": "├─14:26:08.657 WARN防护入站限流拦下× 3防护开关 rateLimit范围 inbound附加信息 入站限流触发：该秒内拦下 78 次请求（示例 method=POST path=/order/orderAdd，limitForPeriod=200）原因 入站限流：未取得令牌（limitForPeriod=200）来源 protection#783"
+        },
+        {
+          "at": 4000,
+          "rows": 7,
+          "text": "├─14:26:08.657 WARN防护入站限流拦下× 3防护开关 rateLimit范围 inbound附加信息 入站限流触发：该秒内拦下 78 次请求（示例 method=POST path=/order/orderAdd，limitForPeriod=200）原因 入站限流：未取得令牌（limitForPeriod=200）来源 protection#783"
+        },
+        {
+          "at": 5000,
+          "rows": 8,
+          "text": "├─14:26:08.657 WARN防护入站限流拦下× 3防护开关 rateLimit范围 inbound附加信息 入站限流触发：该秒内拦下 78 次请求（示例 method=POST path=/order/orderAdd，limitForPeriod=200）原因 入站限流：未取得令牌（limitForPeriod=200）来源 protection#783"
+        },
+        {
+          "at": 6000,
+          "rows": 9,
+          "text": "├─14:26:08.657 WARN防护入站限流拦下× 3防护开关 rateLimit范围 inbound附加信息 入站限流触发：该秒内拦下 78 次请求（示例 method=POST path=/order/orderAdd，limitForPeriod=200）原因 入站限流：未取得令牌（limitForPeriod=200）来源 protection#783"
+        }
+      ]
+    },
+    "live-timestamps-sorted": {
+      "ok": true,
+      "detail": [
+        {
+          "at": 1000,
+          "first": "14:26:07.886",
+          "last": "14:27:25.841",
+          "sorted": true
+        },
+        {
+          "at": 2000,
+          "first": "14:26:07.886",
+          "last": "14:27:26.833",
+          "sorted": true
+        },
+        {
+          "at": 3000,
+          "first": "14:26:07.886",
+          "last": "14:27:27.861",
+          "sorted": true
+        },
+        {
+          "at": 4000,
+          "first": "14:26:07.886",
+          "last": "14:27:28.872",
+          "sorted": true
+        },
+        {
+          "at": 5000,
+          "first": "14:26:07.886",
+          "last": "14:27:29.878",
+          "sorted": true
+        },
+        {
+          "at": 6000,
+          "first": "14:26:07.886",
+          "last": "14:27:30.886",
+          "sorted": true
+        }
+      ]
+    },
+    "live-drill-really-800qps": {
+      "ok": true,
+      "detail": {
+        "avgQps": 777.7,
+        "total": 15806,
+        "durationMs": 20323
+      }
+    }
+  },
+  "samples": {
+    "idleFps": 62,
+    "renderSweep": [
+      {
+        "n": 50,
+        "ticks": [
+          {
+            "syncMs": 0.1,
+            "flushMs": 8.6,
+            "layoutMs": 0,
+            "totalMs": 8.7
+          },
+          {
+            "syncMs": 0.2,
+            "flushMs": 9.2,
+            "layoutMs": 0,
+            "totalMs": 9.4
+          },
+          {
+            "syncMs": 0.1,
+            "flushMs": 11,
+            "layoutMs": 0,
+            "totalMs": 11.1
+          },
+          {
+            "syncMs": 0.1,
+            "flushMs": 13.4,
+            "layoutMs": 0,
+            "totalMs": 13.5
+          },
+          {
+            "syncMs": 0.2,
+            "flushMs": 15.6,
+            "layoutMs": 0,
+            "totalMs": 15.8
+          },
+          {
+            "syncMs": 0.2,
+            "flushMs": 15.7,
+            "layoutMs": 0,
+            "totalMs": 15.9
+          },
+          {
+            "syncMs": 0.3,
+            "flushMs": 15.6,
+            "layoutMs": 0,
+            "totalMs": 15.9
+          },
+          {
+            "syncMs": 0.2,
+            "flushMs": 15.3,
+            "layoutMs": 0,
+            "totalMs": 15.5
+          },
+          {
+            "syncMs": 0.6,
+            "flushMs": 20.8,
+            "layoutMs": 0,
+            "totalMs": 21.4
+          },
+          {
+            "syncMs": 0.2,
+            "flushMs": 17.3,
+            "layoutMs": 0,
+            "totalMs": 17.5
+          }
+        ],
+        "maxTickMs": 21.4,
+        "avgTickMs": 14.5,
+        "frames": 64,
+        "durationMs": 1063,
+        "fps": 60.2,
+        "longTasks": [],
+        "longTasksOver50": 0,
+        "domRows": 200,
+        "eventsLen": 200
+      },
+      {
+        "n": 100,
+        "ticks": [
+          {
+            "syncMs": 0.1,
+            "flushMs": 13.4,
+            "layoutMs": 0,
+            "totalMs": 13.5
+          },
+          {
+            "syncMs": 0,
+            "flushMs": 17.4,
+            "layoutMs": 0,
+            "totalMs": 17.4
+          },
+          {
+            "syncMs": 0.2,
+            "flushMs": 19.1,
+            "layoutMs": 0,
+            "totalMs": 19.3
+          },
+          {
+            "syncMs": 0.2,
+            "flushMs": 19.6,
+            "layoutMs": 0,
+            "totalMs": 19.8
+          },
+          {
+            "syncMs": 0.2,
+            "flushMs": 20.3,
+            "layoutMs": 0,
+            "totalMs": 20.5
+          },
+          {
+            "syncMs": 0.1,
+            "flushMs": 20.1,
+            "layoutMs": 0,
+            "totalMs": 20.2
+          },
+          {
+            "syncMs": 0.5,
+            "flushMs": 25.1,
+            "layoutMs": 0,
+            "totalMs": 25.6
+          },
+          {
+            "syncMs": 0.4,
+            "flushMs": 20.6,
+            "layoutMs": 0,
+            "totalMs": 21
+          },
+          {
+            "syncMs": 0.4,
+            "flushMs": 19.4,
+            "layoutMs": 0,
+            "totalMs": 19.8
+          },
+          {
+            "syncMs": 0.3,
+            "flushMs": 26.2,
+            "layoutMs": 0,
+            "totalMs": 26.5
+          }
+        ],
+        "maxTickMs": 26.5,
+        "avgTickMs": 20.4,
+        "frames": 66,
+        "durationMs": 1100,
+        "fps": 60,
+        "longTasks": [],
+        "longTasksOver50": 0,
+        "domRows": 200,
+        "eventsLen": 200
+      },
+      {
+        "n": 200,
+        "ticks": [
+          {
+            "syncMs": 0.1,
+            "flushMs": 23,
+            "layoutMs": 0,
+            "totalMs": 23.1
+          },
+          {
+            "syncMs": 0.5,
+            "flushMs": 32.1,
+            "layoutMs": 0,
+            "totalMs": 32.6
+          },
+          {
+            "syncMs": 0.9,
+            "flushMs": 30.8,
+            "layoutMs": 0,
+            "totalMs": 31.7
+          },
+          {
+            "syncMs": 0.4,
+            "flushMs": 28.8,
+            "layoutMs": 0,
+            "totalMs": 29.2
+          },
+          {
+            "syncMs": 0.4,
+            "flushMs": 30.2,
+            "layoutMs": 0,
+            "totalMs": 30.6
+          },
+          {
+            "syncMs": 0.2,
+            "flushMs": 26.7,
+            "layoutMs": 0,
+            "totalMs": 26.9
+          },
+          {
+            "syncMs": 0.2,
+            "flushMs": 25.5,
+            "layoutMs": 0,
+            "totalMs": 25.7
+          },
+          {
+            "syncMs": 0.1,
+            "flushMs": 25.1,
+            "layoutMs": 0,
+            "totalMs": 25.2
+          },
+          {
+            "syncMs": 0.1,
+            "flushMs": 27.3,
+            "layoutMs": 0,
+            "totalMs": 27.4
+          },
+          {
+            "syncMs": 0.3,
+            "flushMs": 29.6,
+            "layoutMs": 0,
+            "totalMs": 29.9
+          }
+        ],
+        "maxTickMs": 32.6,
+        "avgTickMs": 28.2,
+        "frames": 66,
+        "durationMs": 1151,
+        "fps": 57.4,
+        "longTasks": [],
+        "longTasksOver50": 0,
+        "domRows": 200,
+        "eventsLen": 200
+      }
+    ],
+    "maxSafeRenderPerTick": 200,
+    "virtualHysteresis": {
+      "at201": {
+        "rows": 201,
+        "virtual": true,
+        "dom": 23
+      },
+      "at200": {
+        "rows": 200,
+        "virtual": true,
+        "dom": 23
+      },
+      "at99": {
+        "rows": 99,
+        "virtual": false,
+        "dom": 99
+      },
+      "longTasks": [],
+      "longTasksOver50": 0
+    },
+    "aggUnit": {
+      "before": 501,
+      "after": 2,
+      "aggRows": 1,
+      "plainRows": 1,
+      "aggCount": [
+        500
+      ],
+      "plainTitles": [
+        "锁等待超时"
+      ],
+      "domRows": 2,
+      "chips": [
+        "× 500"
+      ]
+    },
+    "configBefore": [
+      "rateLimit",
+      "circuitBreak",
+      "degrade",
+      "retry",
+      "poolIsolation"
+    ],
+    "liveTicks": [
+      {
+        "atMs": 1000,
+        "events": 29,
+        "ranged": 29,
+        "domRows": 29,
+        "chips": 26,
+        "plainRows": 3,
+        "plainBusinessRows": 0,
+        "plainTitles": [
+          "入站限流拦下",
+          "入站限流拦下",
+          "入站限流拦下"
+        ],
+        "eventRows": 29,
+        "rateLimitRows": 4,
+        "rateLimitText": "├─14:26:08.657 WARN防护入站限流拦下× 3防护开关 rateLimit范围 inbound附加信息 入站限流触发：该秒内拦下 78 次请求（示例 method=POST path=/order/orderAdd，limitForPeriod=200）原因 入站限流：未取得令牌（limitForPeriod=200）来源 protection#783",
+        "tmFirst": "14:26:07.886",
+        "tmLast": "14:27:25.841",
+        "tmSorted": true,
+        "paused": false,
+        "stats": {
+          "flushes": 4,
+          "raw": 4144,
+          "view": 29,
+          "lastRaw": 719,
+          "lastView": 7,
+          "aggregated": 4115
+        }
+      },
+      {
+        "atMs": 2000,
+        "events": 37,
+        "ranged": 37,
+        "domRows": 37,
+        "chips": 33,
+        "plainRows": 4,
+        "plainBusinessRows": 0,
+        "plainTitles": [
+          "入站限流拦下",
+          "入站限流拦下",
+          "入站限流拦下",
+          "入站限流拦下"
+        ],
+        "eventRows": 37,
+        "rateLimitRows": 5,
+        "rateLimitText": "├─14:26:08.657 WARN防护入站限流拦下× 3防护开关 rateLimit范围 inbound附加信息 入站限流触发：该秒内拦下 78 次请求（示例 method=POST path=/order/orderAdd，limitForPeriod=200）原因 入站限流：未取得令牌（limitForPeriod=200）来源 protection#783",
+        "tmFirst": "14:26:07.886",
+        "tmLast": "14:27:26.833",
+        "tmSorted": true,
+        "paused": false,
+        "stats": {
+          "flushes": 5,
+          "raw": 4871,
+          "view": 37,
+          "lastRaw": 727,
+          "lastView": 8,
+          "aggregated": 4834
+        }
+      },
+      {
+        "atMs": 3000,
+        "events": 45,
+        "ranged": 45,
+        "domRows": 45,
+        "chips": 40,
+        "plainRows": 5,
+        "plainBusinessRows": 0,
+        "plainTitles": [
+          "入站限流拦下",
+          "入站限流拦下",
+          "入站限流拦下",
+          "入站限流拦下",
+          "入站限流拦下"
+        ],
+        "eventRows": 45,
+        "rateLimitRows": 6,
+        "rateLimitText": "├─14:26:08.657 WARN防护入站限流拦下× 3防护开关 rateLimit范围 inbound附加信息 入站限流触发：该秒内拦下 78 次请求（示例 method=POST path=/order/orderAdd，limitForPeriod=200）原因 入站限流：未取得令牌（limitForPeriod=200）来源 protection#783",
+        "tmFirst": "14:26:07.886",
+        "tmLast": "14:27:27.861",
+        "tmSorted": true,
+        "paused": false,
+        "stats": {
+          "flushes": 6,
+          "raw": 5506,
+          "view": 45,
+          "lastRaw": 635,
+          "lastView": 8,
+          "aggregated": 5461
+        }
+      },
+      {
+        "atMs": 4000,
+        "events": 53,
+        "ranged": 53,
+        "domRows": 55,
+        "chips": 47,
+        "plainRows": 6,
+        "plainBusinessRows": 0,
+        "plainTitles": [
+          "入站限流拦下",
+          "入站限流拦下",
+          "入站限流拦下",
+          "入站限流拦下",
+          "入站限流拦下",
+          "入站限流拦下"
+        ],
+        "eventRows": 53,
+        "rateLimitRows": 7,
+        "rateLimitText": "├─14:26:08.657 WARN防护入站限流拦下× 3防护开关 rateLimit范围 inbound附加信息 入站限流触发：该秒内拦下 78 次请求（示例 method=POST path=/order/orderAdd，limitForPeriod=200）原因 入站限流：未取得令牌（limitForPeriod=200）来源 protection#783",
+        "tmFirst": "14:26:07.886",
+        "tmLast": "14:27:28.872",
+        "tmSorted": true,
+        "paused": false,
+        "stats": {
+          "flushes": 7,
+          "raw": 6246,
+          "view": 53,
+          "lastRaw": 740,
+          "lastView": 8,
+          "aggregated": 6193
+        }
+      },
+      {
+        "atMs": 5000,
+        "events": 61,
+        "ranged": 61,
+        "domRows": 65,
+        "chips": 53,
+        "plainRows": 8,
+        "plainBusinessRows": 1,
+        "plainTitles": [
+          "入站限流拦下",
+          "入站限流拦下",
+          "入站限流拦下",
+          "入站限流拦下",
+          "入站限流拦下",
+          "入站限流拦下",
+          "库存扣减",
+          "入站限流拦下"
+        ],
+        "eventRows": 61,
+        "rateLimitRows": 8,
+        "rateLimitText": "├─14:26:08.657 WARN防护入站限流拦下× 3防护开关 rateLimit范围 inbound附加信息 入站限流触发：该秒内拦下 78 次请求（示例 method=POST path=/order/orderAdd，limitForPeriod=200）原因 入站限流：未取得令牌（limitForPeriod=200）来源 protection#783",
+        "tmFirst": "14:26:07.886",
+        "tmLast": "14:27:29.878",
+        "tmSorted": true,
+        "paused": false,
+        "stats": {
+          "flushes": 8,
+          "raw": 6945,
+          "view": 61,
+          "lastRaw": 699,
+          "lastView": 8,
+          "aggregated": 6884
+        }
+      },
+      {
+        "atMs": 6000,
+        "events": 68,
+        "ranged": 68,
+        "domRows": 70,
+        "chips": 59,
+        "plainRows": 9,
+        "plainBusinessRows": 1,
+        "plainTitles": [
+          "入站限流拦下",
+          "入站限流拦下",
+          "入站限流拦下",
+          "入站限流拦下",
+          "入站限流拦下",
+          "入站限流拦下",
+          "库存扣减",
+          "入站限流拦下"
+        ],
+        "eventRows": 68,
+        "rateLimitRows": 9,
+        "rateLimitText": "├─14:26:08.657 WARN防护入站限流拦下× 3防护开关 rateLimit范围 inbound附加信息 入站限流触发：该秒内拦下 78 次请求（示例 method=POST path=/order/orderAdd，limitForPeriod=200）原因 入站限流：未取得令牌（limitForPeriod=200）来源 protection#783",
+        "tmFirst": "14:26:07.886",
+        "tmLast": "14:27:30.886",
+        "tmSorted": true,
+        "paused": false,
+        "stats": {
+          "flushes": 9,
+          "raw": 7964,
+          "view": 68,
+          "lastRaw": 1019,
+          "lastView": 7,
+          "aggregated": 7896
+        }
+      }
+    ],
+    "livePerf": {
+      "durationMs": 6176,
+      "frames": 369,
+      "fps": 59.8,
+      "longTasks": 0,
+      "longTasksOver50": 0,
+      "maxLongTask": 0,
+      "lt": []
+    },
+    "freeze": {
+      "ok": true,
+      "before": {
+        "events": 75,
+        "newest": 125457,
+        "raw": 0,
+        "paused": false,
+        "autoBottom": true,
+        "label": "暂停"
+      },
+      "during": {
+        "events": 75,
+        "newest": 125457,
+        "raw": 1882,
+        "paused": true,
+        "autoBottom": true,
+        "label": "继续"
+      },
+      "after": {
+        "events": 91,
+        "newest": 127840,
+        "raw": 0,
+        "paused": false,
+        "autoBottom": true,
+        "label": "暂停"
+      }
+    },
+    "scrollFreeze": {
+      "before": {
+        "events": 91,
+        "newest": 127840,
+        "raw": 0,
+        "autoBottom": true,
+        "paused": false,
+        "label": "暂停"
+      },
+      "during": {
+        "events": 91,
+        "newest": 127840,
+        "raw": 760,
+        "autoBottom": false,
+        "paused": false,
+        "label": "回到底部"
+      },
+      "after": {
+        "events": 105,
+        "newest": 129450,
+        "raw": 0,
+        "autoBottom": true,
+        "paused": false,
+        "label": "暂停"
+      },
+      "scrollHeight": 3864,
+      "clientHeight": 430
+    },
+    "drill": {
+      "status": 200,
+      "ok": true,
+      "id": 78,
+      "total": 15806,
+      "blocked": 13234,
+      "failed": 0,
+      "shed": 123,
+      "durationMs": 20323,
+      "raw": "{\"FailedRequests\":0,\"DurationMs\":20323,\"success\":true,\"ShedRequests\":123,\"AbandonedRequests\":0,\"TotalRequests\":15806,\"BlockedRequests\":13234,\"Id\":78,\"Name\":\"probe-800qps-20261017\",\"Result\":{\"Scenarios\":[{\"Key\":\"seckill\",\"Name\":\"秒杀抢购\",\"Protections\":\"库存扣减 + CAS + 唯一索引 + 锁\",\"Requests\":3457,\"Passed\":942,\"Blocked\":2515,\"Failed\":0,\"Shed\":27,\"Abandoned\":0},{\"Key\":\"orderBurst\",\"Name\":\"订单并发\",\"Protections\":"
+    },
+    "avgQps": 777.7
+  },
+  "fail": []
+}

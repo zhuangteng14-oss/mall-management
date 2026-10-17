@@ -73,9 +73,10 @@ public class AdminAccountsController {
     @PostMapping("/users")
     public Result<Map<String, Object>> users(
             @RequestParam(value = "keyword", required = false) String keyword,
-            @RequestParam(value = "limit", required = false) Integer limit
+            @RequestParam(value = "limit", required = false) Integer limit,
+            @RequestParam(value = "offset", required = false) Integer offset
     ) {
-        return Result.of(governanceService.listUsers(keyword, limit));
+        return Result.of(governanceService.listUsers(keyword, limit, offset));
     }
 
     /** 封禁（理由必填）。 */

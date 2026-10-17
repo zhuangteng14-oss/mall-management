@@ -20,6 +20,33 @@ import com.minke.mallmanagement.goods.service.GoodsService;
 import com.minke.mallmanagement.goods.service.GoodsTypeCacheService;
 import com.minke.mallmanagement.template.dao.TemplateDao;
 import com.minke.mallmanagement.template.service.TemplateService;
+import com.minke.mallmanagement.observe.metrics.StockMetrics;
+import com.minke.mallmanagement.observe.metrics.AuditMetrics;
+import com.minke.mallmanagement.observe.metrics.NotifyMetrics;
+import com.minke.mallmanagement.observe.metrics.SensitiveMetrics;
+import com.minke.mallmanagement.observe.metrics.IdentityMetrics;
+import com.minke.mallmanagement.observe.metrics.ProtectionMetrics;
+import com.minke.mallmanagement.protect.ProtectionGate;
+import com.minke.mallmanagement.observe.service.SseStreamWriter;
+import com.minke.mallmanagement.observe.service.EventBroadcaster;
+import com.minke.mallmanagement.observe.service.MetricsSnapshotService;
+import com.minke.mallmanagement.observe.service.MetricsHistoryService;
+import com.minke.mallmanagement.observe.service.OrderStreamService;
+import com.minke.mallmanagement.observe.service.EventStreamService;
+import com.minke.mallmanagement.observe.service.OrderInsightService;
+import com.minke.mallmanagement.observe.service.AttackEngine;
+import com.minke.mallmanagement.observe.service.AttackSwitchConfig;
+import com.minke.mallmanagement.observe.service.DrillRecordService;
+import com.minke.mallmanagement.observe.service.ObservedEventCleanupService;
+import com.minke.mallmanagement.observe.service.ReplayService;
+import com.minke.mallmanagement.observe.dao.DrillTargetDao;
+import com.minke.mallmanagement.observe.dao.DrillRecordDao;
+import com.minke.mallmanagement.observe.dao.ObservedEventCleanupDao;
+import com.minke.mallmanagement.observe.dao.ObservedEventDao;
+import com.minke.mallmanagement.shared.cache.L2HealthProbe;
+import com.minke.mallmanagement.shared.cache.MallCacheMetrics;
+import com.minke.mallmanagement.shared.lock.MallLockMetrics;
+import com.minke.mallmanagement.order.metrics.MallOrderStateMetrics;
 import com.minke.mallmanagement.order.dao.OrderDao;
 import com.minke.mallmanagement.order.service.OrderService;
 import com.minke.mallmanagement.order.model.OrderStateMachine;
@@ -57,6 +84,7 @@ import com.minke.mallmanagement.comment.dao.SensitiveWordDao;
 import com.minke.mallmanagement.comment.service.CommentService;
 import com.minke.mallmanagement.comment.service.ReportService;
 import com.minke.mallmanagement.comment.service.SensitiveWordService;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
@@ -296,7 +324,154 @@ import static org.mockito.Mockito.when;
         //    **`CommentService` 自己也起不来**，会把 `CommentSmokeTest` 一起拖红。
         // ⚠️ 本笔还给 `CommentDao` 加了「扫老评论」那两个方法（`selectContentsContaining` /
         //    `updateContent`），**不新增 bean** ⇒ 这里没有第二条要登记的。
-        SensitiveWordDao.class, SensitiveWordService.class})
+        SensitiveWordDao.class, SensitiveWordService.class,
+        // C3 块 7 · commit 2〈5 套新事件环〉（2026-10-13）：**本笔零新 Controller、零新 @Service**
+        // —— 地雷形状与〈折扣〉那一笔相同（没有新端点），但成因是「**既有** bean 的构造器多了一个形参」：
+        // `OrderService`（上面已 @Import 的真 bean）本笔新增库存环 `StockMetrics`
+        // （`observe/metrics/StockMetrics.java`，写入点见该类注释）—— 它一缺席，整个切片上下文
+        // 同样在加载期**启动失败**（`NoSuchBeanDefinitionException: StockMetrics`，同前十五笔同一处地雷）。
+        // ⚠️ **刻意不 @Import 其余四环**（`AuditMetrics` / `NotifyMetrics` / `SensitiveMetrics` /
+        //    `IdentityMetrics`）：本笔没有任何 bean 吃它们（写入点 = 下一笔的攻击引擎）⇒ 照
+        //    `MallCacheMetrics` / `MallOrderStateMetrics` 的既有处置 —— 切片只登记**被吃到**的埋点 bean。
+        // ⚠️ `StockMetrics` 只吃 `MeterRegistry`—— 但 `@WebMvcTest` 切片**不加载** micrometer 的
+        //    自动配置（2026-10-13 实测：`No qualifying bean of type 'io.micrometer.core.instrument.MeterRegistry'`，
+        //    报错链正是 `adminOrderController → AdminOrderService → OrderService → StockMetrics`）
+        //    ⇒ 这里补一个 `SimpleMeterRegistry`（micrometer 自带的内存实现：无外部依赖、无生命周期）
+        //    喂它。**不给 `StockMetrics` 开「切片里可为空」的口子** —— 那会把埋点语义改掉，
+        //    与「不得降级」相悖；补一个内存实现则连「计数真的在跑」都顺带留住了。
+        // ⚠️ 既有三环（缓存 / 锁 / 订单）**不需要**这一行：它们从未进过本切片（清单里没有任何
+        //    bean 吃它们）⇒ **本笔是第一次有切片内的 bean 依赖埋点出口**。
+        StockMetrics.class, SimpleMeterRegistry.class,
+        // C3 块 7 · commit 3〈3 个 SSE 端点 + 事件广播器〉（2026-10-13）：**三个**新 Controller
+        // （`MetricsStreamController` / `OrderStreamController` / `EventStreamController`）
+        // + 四个新 bean（`SseStreamWriter` / `EventBroadcaster` / 三个产帧服务）
+        // —— **第十七次同一处地雷**（@WebMvcTest 无参会加载全部 @Controller，新控制器一进来，
+        // 切片上下文就会因为「找不到 MetricsSnapshotService」而**启动失败**，同前十六笔）。
+        // ⚠️ 本笔与〈5 套新事件环〉那一笔的差别：那一笔是「既有 bean 多了个形参」，本笔是
+        //    「新 bean 被新 Controller 吃」——**形状回到最普通的第 1 种**，但**数量是历笔最多**：
+        //    事件广播器一个人吃**八个环**，故这里第一次把**既有三环**
+        //    （`MallCacheMetrics` / `MallLockMetrics` / `MallOrderStateMetrics`）也拉进切片
+        //    （此前它们的处置是「切片里没有任何 bean 吃它们 ⇒ 不登记」，见上一笔那条注释）。
+        // ⚠️ 四个新环（`AuditMetrics` / `NotifyMetrics` / `SensitiveMetrics` / `IdentityMetrics`）
+        //    本笔**必须**一并进来：它们是 `EventBroadcaster` 的构造器形参 ⇒
+        //    「上一笔刻意不 @Import」在**本笔作废**（那时没人吃它们，现在广播器吃）。
+        // ⚠️ `MetricsSnapshotService` 还吃 `GoodsDao`（上面已登记）；
+        //    `OrderStreamService` 还吃 `OrderDao`（上面已登记）⇒ 这两个不必重复登记。
+        // ⚠️ 三个产帧服务与 `SseStreamWriter` 都收 `@Value("${mall.observe.sse.*}")` ——
+        //    两个属性都带默认值（1000 / 0），但 `application-smoke.properties` 把 **max-ticks 钉成 1**
+        //    （理由见那个文件；否则 `ObserveStreamSmokeTest` 会对着一条永不结束的流等下去）。
+        SseStreamWriter.class, EventBroadcaster.class,
+        MetricsSnapshotService.class, OrderStreamService.class, EventStreamService.class,
+        // 块 7 收尾：`MetricsHistoryController`（3a.4 首屏历史）吃 `MetricsHistoryService`；
+        // 它是 `@WebMvcTest` 自动扫进来的 @Controller，本清单不登记 ⇒ 切片上下文启动失败。
+        MetricsHistoryService.class,
+        // 状态流转页高保真（0b5f91e）：`OrderStreamController` 多吃了 `OrderInsightService`——
+        // **第二十四次同一处地雷**（形状 = 老 Controller 多吃 bean，最隐蔽的一种）。
+        // 依赖链：`OrderInsightService` → `OrderDao`（上面已登记）⇒ 只补它一个类。
+        OrderInsightService.class,
+        MallCacheMetrics.class, MallLockMetrics.class, MallOrderStateMetrics.class,
+        AuditMetrics.class, NotifyMetrics.class, SensitiveMetrics.class, IdentityMetrics.class,
+        // C3 块 7 · commit 4〈攻击引擎 + 演练记录〉（2026-10-14）：**一个**新 Controller
+        // （`AttackController`）+ 两个 @Service（`AttackEngine` / `DrillRecordService`）
+        // + 两个 @Dao（`DrillTargetDao` / `DrillRecordDao`）——
+        // **第十八次同一处地雷**（@WebMvcTest 无参会加载全部 @Controller，新控制器一进来，
+        // 切片上下文就会因为「找不到 DrillRecordService」而**启动失败**，同前十七笔）。
+        // ⚠️ 2026-10-14 实测的形状：全量 402 例里 **132 errors**，全部落在本包 ——
+        //    报错链正是 `attackController → DrillRecordService`（与块 1 那次 237/77 同形）。
+        // ⚠️ 依赖链：`DrillRecordService` → `DrillRecordDao`（本行）+ `AttackEngine`（本行）
+        //    + `ObjectMapper`（`@WebMvcTest` 含 JacksonAutoConfiguration，**不需要**登记）；
+        //    `AttackEngine` → `DrillTargetDao`（本行）+ `L2HealthProbe`（**下面的替身**）
+        //    + `ObjectMapper`；两个类都没有 `@Value`（无配置项要喂）。
+        // ⚠️ 两个 DAO 只吃 `JdbcTemplate` ⇒ 落回下面那个 @MockitoBean，**SQL 仍不出切片**。
+        // ⚠️ **本基类第一处「不能 @Import 真 bean」的依赖**：`L2HealthProbe` 由
+        //    `L2ProbeConfig` 生产，而它要一个 `RedisConnectionFactory` —— `@WebMvcTest` 切片
+        //    没有 Redis 自动配置 ⇒ 真 bean 根本构造不出来。故照 `DistributedLockService`
+        //    那条既有处置（同为 Redis 依赖）用 `@MockitoBean`，见下面那个字段的注释。
+        DrillRecordDao.class, DrillTargetDao.class, AttackEngine.class, DrillRecordService.class,
+        // C3 块 7 · commit 8b〈事件台账 + 清理〉（2026-10-14）：**没有**新 Controller（既有
+        // `AttackController` 多吃了两个构造器形参），但多了两个新 bean
+        // （`ObservedEventCleanupService` / `ObservedEventCleanupDao`）——
+        // **第十九次同一处地雷**（@WebMvcTest 无参会加载全部 @Controller，`AttackController`
+        // 一多要一个 `ObservedEventCleanupService`，切片上下文就会因为「找不到它」而
+        // **启动失败**，同前十八笔）。
+        // ⚠️ 与上一笔（commit 4）的差别值得记一笔：**那一笔是「新 Controller 吃新 bean」，
+        //    本笔是「老 Controller 多吃一个 bean」** —— 形状更隐蔽（不新增 Controller 就
+        //    不会有人想到去看这个清单），后果一模一样（整片起不来，且报错指向的是
+        //    `attackController` 而不是新类）。⇒ **判据不是「本笔有没有新 Controller」，
+        //    是「本笔有没有新 @Service/@Dao」**。
+        // ⚠️ 本笔**没有**对应的实测 errors 数：改这个清单时就手改，未先跑一次红——
+        //    一旦真漏了，形状与 commit 4 的 132 errors 同款（全批量、全落本包）。
+        // ⚠️ 依赖链：`ObservedEventCleanupService` → `ObservedEventCleanupDao`（同一行）
+        //    + 两个 `@Value`（`mall.observe.cleanup.*`，两个都带默认值 ⇒ 切片不喂也能起）；
+        //    `ObservedEventCleanupDao` 只吃 `JdbcTemplate` ⇒ 落回下面那个 @MockitoBean，
+        //    **SQL 仍不出切片**。`AttackController` 的第三个新形参 `AuditService` 在
+        //    块 1 就已登记，**不重复**。
+        // ⚠️ **刻意不 @Import `ObservedEventCleanupJob`**：它是 @Component（切片不扫）且是
+        //    @Scheduled —— 同 `ShippingTrackAdvanceJob` / `StatsAggregateJob` / `CouponExpiryJob`
+        //    那三处的处置（切片里没有调度器：@EnableScheduling 挂在
+        //    `MerchantDowngradeSchedulingConfig`、不属 web 组件）。它是 @Scheduled 的第 6 个实例。
+        ObservedEventCleanupDao.class, ObservedEventCleanupService.class,
+        // C3 块 7 收尾〈演练回放〉（2026-10-15）：**一个**新 Controller（`ReplayController`）
+        // + 一个 @Service（`ReplayService`）+ 一个 @Dao（`ObservedEventDao`）——
+        // **第二十次同一处地雷**（@WebMvcTest 无参会加载全部 @Controller，新控制器一进来，
+        // 切片上下文就会因为「找不到 ReplayService」而**启动失败**，同前十九笔）。
+        // ⚠️ 与上一笔同形（新 Controller 吃新 bean）⇒ 判据仍是那句：
+        //    「本笔有没有新 @Service/@Dao」，不是「有没有新 Controller」。
+        // ⚠️ 依赖链：`ReplayService` → `ObservedEventDao`（本行，只吃 `JdbcTemplate` ⇒
+        //    落回下面那个 @MockitoBean，**SQL 仍不出切片**）+ 无 `@Value`（两个常量都是
+        //    `public static final`，没有配置项要喂）。`ReplayController` 只吃 `ReplayService`。
+        // ⚠️ `ObservedEventDao` 是**本笔第一次**进这个清单（8c 那笔只登记了它的兄弟
+        //    `ObservedEventCleanupDao` —— 写类一次、读类一次，两者不是同一个 bean）。
+        ObservedEventDao.class, ReplayService.class,
+        // C3 块 7 · D 段 commit 2〈D 段后端防护〉（2026-10-15）：**零新 Controller**，但有两个
+        // **既有** bean 的构造器各多了一个形参 ⇒ **第二十一次同一处地雷**，形状与〈5 套新事件环〉
+        // 那笔逐字相同（「既有 bean 多吃一个 bean」，最隐蔽的那一种）。
+        // ⚠️ 报错形状（真漏了的话）：整片切片上下文在加载期起不来，报错链会指向**老 bean**
+        //    （`drillRecordService → ProtectionGate` / `eventBroadcaster → ProtectionMetrics`），
+        //    而不是指向本笔新加的两个类 —— 与 8b 那笔的坑同一个（判据见那里那句：
+        //    「本笔有没有新 @Service/@Dao」，本笔两个都不算 @Service，是 @Component 环与状态位）。
+        // ⚠️ `ProtectionGate` 是 `@Component`（切片不扫），`DrillRecordService` 的构造器现在收它；
+        //    `ProtectionMetrics` 是第 9 类事件环，`EventBroadcaster` 的构造器现在收它。
+        //    两个都只吃 `MeterRegistry` / 无参 ⇒ `SimpleMeterRegistry` 上面已登记（那一笔的注释解释了
+        //    为什么切片必须补一个内存实现），这里**不重复**。
+        // ⚠️ **刻意不 @Import `ProtectConfig` / `ObservePoolConfig` / `ProtectionMetricsBinder`**：
+        //    前两个是 `WebMvcConfigurer`（**切片本来就会扫到**，不需要登记），且它们全部依赖走
+        //    `ObjectProvider` ⇒ 切片里取不到就空转（理由写在两个类的类注释里）；
+        //    第三个是普通 `@Configuration`（切片不扫，与 `RabbitObserveConfig` 同款）⇒ 它不进切片，
+        //    **也正因如此切片里不需要 `CircuitBreakerRegistry`**。三处都不登记是有意的，别「补齐」。
+        ProtectionGate.class, ProtectionMetrics.class,
+        // C3 块 7 · D 段 · 阶段 2b〈死锁重试〉（2026-10-15）：**零新 Controller / 零新 Service**，
+        // 但 `MerchantDowngradeService`（块 2 就在上面那份清单里）的构造器多了三个形参 ⇒
+        // **第二十二次同一处地雷**，形状还是「既有 bean 多吃一个 bean」（同上面 D 段 commit 2 那笔）。
+        // ⚠️ 两个新依赖是 `ProtectionGate` / `ProtectionMetrics` —— **上面那一笔已经登记过了**，
+        //    本笔不重复。第三个是 `PlatformTransactionManager`：`@WebMvcTest` 切片**不含**
+        //    `DataSourceTransactionManagerAutoConfiguration`（它不在 WebMvcTest 的自动配置白名单里）
+        //    ⇒ 切片里**没有**任何事务管理器 bean ⇒ 不补就是整片上下文起不来。
+        // ⚠️ 报错形状（真漏了的话）：**143 errors**、全部落在 `smoke` 包，首个报错是
+        //    `ApplicationContext failure threshold (1) exceeded: skipping repeated attempt to load context`，
+        //    真正的原因埋在更早那次加载里（`NoSuchBeanDefinitionException: PlatformTransactionManager`）
+        //    —— 「threshold exceeded」是次生现象，别照着它查。2026-10-15 实测。
+        // ⚠️ 这道替身只解**构造期依赖**：`new TransactionTemplate(txManager)` 在构造器里就要一个非 null
+        //    对象。替身的 `getTransaction` 默认回 null ⇒ **别在 smoke 里调 `relist`**（那会 NPE）。
+        //    切片里也没人调它 —— smoke 打的是 Controller 的分支与响应文案。
+        //    另：切片里 `@Transactional` 仍是 **no-op**（`TransactionAutoConfiguration` 同样不在
+        //    白名单 ⇒ 压根没有 `TransactionInterceptor`）⇒ 本替身**不会**让事务在此切片里「真的生效」，
+        //    与上面 `MerchantApplicationService` / `GoodsAuditService` 两处 ⚠️ 记的性质一致。
+        //    真事务语义归 `RelistDeadlockRetryTest`（替身计数）与 A3 / 手验的职责。
+        //    只加注释、不加类 ⇒ 上面那一行不动。
+        // C3 块 7 · 阶段 3a.1〈乙案切换〉（2026-10-16）：**零新 Controller**，但 `AttackController`
+        // 与 `AttackEngine` 两个**既有** bean 的构造器各多了一个形参 ⇒ **第二十三次同一处地雷**
+        // （形状 = 「既有 bean 多吃一个 bean」，同上面那两笔：最隐蔽的一种，报错指向的是老 bean）。
+        // ⚠️ 这个类**不能省**：它是 `@Component`（切片不扫），而上面那个形参就是它 —— 少了它
+        //    整片切片上下文在加载期起不来，报错链是 `attackController → AttackSwitchConfig`。
+        // ⚠️ 依赖链：`AttackSwitchConfig` → `ProtectionGate`（本清单上面那一行，已登记）+
+        //    `ObjectMapper`（切片里本来就有 —— Jackson 的自动配置在 WebMvcTest 白名单里）。
+        //    ⇒ 只补它一个类，**不补**任何替身；`@MockitoBean` 那一摞一个不动。
+        // ⚠️ 它带**状态**（注入开关那几个位、{@code version}），但切片是**每类一份上下文**、
+        //    且 smoke 打的是 Controller 的响应文案：那份状态在切片里从不被写（没人点 [开始]）⇒
+        //    用例之间没有可观察的串扰。**真演练**的配置语义归 `AttackSwitchConfigTest`。
+        AttackSwitchConfig.class,
+        })
 public abstract class AbstractSmokeTest {
 
     @Autowired
@@ -426,6 +601,82 @@ public abstract class AbstractSmokeTest {
      */
     @MockitoBean
     protected OrderTransitionRecorder orderTransitionRecorder;
+
+    /**
+     * 同一类问题，第七次遇到，但**形状与前六次不同**：块 7 commit 4 的 {@code AttackEngine}
+     * （上面 {@code @Import} 的真 bean）要一个 {@code L2HealthProbe}（场景 6 `redisDown`
+     * 靠它真注入一次 L2 故障）。
+     *
+     * <p>⚠️ **本基类第一处「连真 bean 都进不来」的依赖**：`L2HealthProbe` 由
+     * {@code L2ProbeConfig}（@Configuration）生产，构造它要一个 {@code RedisConnectionFactory}
+     * —— `@WebMvcTest` 切片没有 Redis 自动配置、也没有任何 bean 提供那个工厂
+     * ⇒ 真 bean 在**上下文加载期**就会失败。故**不能**照 DAO 那条范式 @Import 真 bean，
+     * 只能给替身（与 {@code DistributedLockService} 那条既有处置同因：Redis 依赖）。
+     *
+     * <p>⚠️ **代价写在这里**：替身的方法全部空转，{@code isHealthy()} 默认回 `false`
+     * ⇒ 切片里的 `redisDown` 场景**注入不了故障**。这不影响任何用例 —— 本基类的**零个**
+     * 子类打 `/admin/observe/attack/*`（三个端点只由块 7 commit 5 的攻击模拟器页调用），
+     * 这个替身只承担「让切片上下文起得来」一件事。演练本身的判据在**默认 profile 的实跑**
+     * （见 {@code AttackEngine} 类注释末节），不在这里。
+     *
+     * <p>⚠️ 而「谁在切片里会问它」这个问题是**空的**：切片内没有任何 bean 读它
+     * （唯一的读方是 `TwoLevelCache`，它由 `CacheConfig` 造 —— 而 `CacheConfig` 是
+     * @Configuration，不属 web 组件、不进本切片）。⇒ 替身的默认值不会渗进任何断言。
+     */
+    @MockitoBean
+    protected L2HealthProbe l2HealthProbe;
+
+    /**
+     * 同一类问题，第八次遇到，形状与第七次同族：块 7 commit 8c 给事件台账加了出口，
+     * {@code @Import} 里的两个真 bean（{@code EventBroadcaster} 与 {@code EventStreamService}）
+     * 各要一个 {@code EventPublisher}。
+     *
+     * <p>⚠️ **为什么不能照 DAO 那条范式 @Import 真 bean**：真实现 {@code RabbitEventPublisher}
+     * 要一个 {@code RabbitTemplate} —— {@code @WebMvcTest} 切片没有 AMQP 自动配置
+     * （{@code spring-boot-starter-amqp} 也在，但切片只装 web 组件，{@code RabbitObserveConfig}
+     * 是 {@code @Configuration}、不进切片）⇒ 上下文加载期就会失败。故只能给替身。
+     *
+     * <p>⚠️ **一个替身，不是两个**：接口上的 {@code connected()} 把原本计划的 {@code MqPresence}
+     * 折了进来（页面那个黄点读的就是它）⇒ 两个 bean 吃的是同一个类型、同一个替身。
+     *
+     * <p>⚠️ **代价写在这里**：替身的方法全部空转 —— {@code publish(...)} 什么也不做（事件不发往
+     * 任何队列）、{@code connected()} 默认回 {@code false}（帧里的 {@code mq} 恒假）。
+     * 这不影响任何用例：本基类的子类打的是各域列表 / 操作端点，**零个**断言读帧里的 {@code mq}
+     * 键（实时日志页那一屏的验证在 A3 / 手验）。发出去的语义验证在 {@code EventBroadcasterTest}
+     * （替身 + 捕获）与 {@code EventStreamServiceTest}（{@code connected()} 两个取值各测一次）。
+     */
+    // ⚠️ 这里写**全限定名**而不是加 import：本文件被 `defect-survey.md` / `project-map.md` /
+    //    `progress.md` 按「文件:行号」引用（`:43-45` / `:47` / `:69` / `:153`），全都在 import 块
+    //    之后 ⇒ 加一行 import 会让它们集体下移。本笔的做法与本批另外两处同款
+    //    （`OrderStateExecutor.submit` 与 `LockSceneService.ThreadRecorder` 里的 `ObserveContext`）。
+    @MockitoBean
+    protected com.minke.mallmanagement.observe.mq.EventPublisher eventPublisher;
+
+    /**
+     * 事务管理器替身（C3 块 7 · D 段 · 阶段 2b，2026-10-15）。
+     *
+     * <p><b>为什么切片里必须有一个</b>：{@code MerchantDowngradeService} 是本基类用 {@code @Import}
+     * 拉进来的真 bean（块 2 起就在那份清单里），阶段 2b 给它的构造器加了一个
+     * {@code PlatformTransactionManager} 形参（用来 {@code new TransactionTemplate(txManager)}）。
+     * 而 {@code @WebMvcTest} 切片<b>不含</b> {@code DataSourceTransactionManagerAutoConfiguration}
+     * ⇒ 切片里一个事务管理器都没有 ⇒ 上下文加载期直接起不来。
+     *
+     * <p>⚠️ <b>代价写在这里</b>：替身的 {@code getTransaction} 默认回 {@code null}
+     * ⇒ <b>别在 smoke 里调 {@code relist}</b>（那会 NPE）。切片里也没人调它。
+     * 「重试与事务的调用形状」的验证在 {@code RelistDeadlockRetryTest}（那个类的
+     * {@code CountingTxManager} 是计数替身，不是这台）。
+     *
+     * <p>⚠️ 它<b>不会</b>让 {@code @Transactional} 在此切片里真的生效：
+     * {@code TransactionAutoConfiguration} 同样不在 WebMvcTest 的自动配置白名单里
+     * ⇒ 压根没有 {@code TransactionInterceptor} 织进来（与上面 import 块里
+     * {@code MerchantApplicationService} / {@code GoodsAuditService} 两处 ⚠️ 记的性质一致）。
+     *
+     * <p>⚠️ 与上面 {@code eventPublisher} 同一条处置：写**全限定名**不加 import —— 本文件被
+     * {@code defect-survey.md} / {@code project-map.md} / {@code progress.md} 按「文件:行号」引用，
+     * 加一行 import 会让那些引用集体下移（详见上面那一处的注释）。
+     */
+    @MockitoBean
+    protected org.springframework.transaction.PlatformTransactionManager platformTransactionManager;
 
     /**
      * 锁替身的行为：**直接执行 action**（不做任何互斥、不碰 Redis）。

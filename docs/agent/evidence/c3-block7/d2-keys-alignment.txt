@@ -1,0 +1,16 @@
+三方防护 key 对照（D 段 · commit 2）
+========================================================================
+· 后端 · 演练入参白名单
+    Mall-management-server/src/main/java/com/minke/mallmanagement/observe/service/AttackEngine.java:330
+    [rateLimit, circuitBreak, degrade, retry, poolIsolation]
+· 后端 · 门的声明序
+    Mall-management-server/src/main/java/com/minke/mallmanagement/protect/ProtectionGate.java:69
+    [rateLimit, circuitBreak, degrade, retry, poolIsolation]
+· 前端 · 面板的声明序
+    Mall-management-web/mall-management-system/src/config/labels/observe-labels.js:274
+    [rateLimit, circuitBreak, degrade, retry, poolIsolation]
+========================================================================
+✓ 后端 · 门的声明序：与「后端 · 演练入参白名单」逐字同序
+✓ 前端 · 面板的声明序：与「后端 · 演练入参白名单」逐字同序
+========================================================================
+结论：三份逐字同序 ✓

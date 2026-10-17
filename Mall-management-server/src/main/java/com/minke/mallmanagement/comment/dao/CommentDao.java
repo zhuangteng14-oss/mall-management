@@ -112,17 +112,28 @@ public class CommentDao {
      * —— 不显式写，免得列清单与 {@code mall_management_sql.sql} 的 DDL 两处漂开。
      * {@code IsMerchantFirst} 显式传入：它由**同一楼层里有没有别的商家回复**决定，
      * 不是列默认值能表达的（见 {@link #countMerchantFirstUnder}）。
+     *
+     * <p>⚠️ <b>{@code source}（C3 块 7 · commit B · 2026-10-14 新增，加在<b>末尾</b>）</b>：
+     * 写 {@code comment.Source} 列（Migration ⑰-4 加的，{@code varchar(16) NOT NULL DEFAULT ''}）。
+     * <b>空 / 空串 ⇒ 与加它之前逐字节同行为</b>（写 {@code ''}，与列默认值同一个值）——
+     * 本域**既有的全部调用点都不传它**，它们的行照旧是「存量或真实业务写入」那一档。
+     * <p>⚠️ <b>为什么 {@code null} 要归一成 {@code ''} 而不是原样绑</b>：该列是
+     * {@code NOT NULL}，绑 {@code null} 在 MySQL 严格模式下直接 1064/1048，而不是落一个默认值
+     * —— 「不传」的语义是「空来源」，不是「让库替我决定」。
+     * <p>⚠️ <b>截断在调用方做</b>（{@code CommentService.add} 的 16 字符闸），本方法只归一化 ——
+     * 免得「这一列多长」这件事在 DAO 与 Service 两处各写一遍（同 {@code MAX_CONTENT} 的口径）。
      */
     public int insertComment(String targetType, String targetId, Long parentId, Long replyToId, String kind,
                              String authorId, int authorRole, boolean anonymous, int rating, String content,
-                             String productCode, boolean merchantFirst) {
+                             String productCode, boolean merchantFirst, String source) {
         String sql = "INSERT INTO `comment` "
                 + "(`TargetType`, `TargetId`, `ParentId`, `ReplyToId`, `Kind`, `AuthorId`, `AuthorRole`, "
-                + "`IsAnonymous`, `Rating`, `Content`, `ProductCode`, `IsMerchantFirst`) "
-                + "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+                + "`IsAnonymous`, `Rating`, `Content`, `ProductCode`, `IsMerchantFirst`, `Source`) "
+                + "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
         return jdbcClient.sql(sql)
                 .params(targetType, targetId, parentId, replyToId, kind, authorId, authorRole,
-                        anonymous ? 1 : 0, rating, content, productCode, merchantFirst ? 1 : 0)
+                        anonymous ? 1 : 0, rating, content, productCode, merchantFirst ? 1 : 0,
+                        source == null || source.isBlank() ? "" : source.trim())
                 .update();
     }
 

@@ -1,0 +1,383 @@
+{
+  "at": "2026-10-17T14:48:35.217Z",
+  "checks": {
+    "admin-shell-sentinel": {
+      "ok": true,
+      "detail": "admin"
+    },
+    "replay-entry-enabled": {
+      "ok": true,
+      "detail": [
+        {
+          "i": 0,
+          "disabled": false,
+          "text": "✓回放"
+        }
+      ]
+    },
+    "replay-session-active": {
+      "ok": true,
+      "detail": {
+        "hash": "#/admin/observe/logs",
+        "banner": true
+      }
+    },
+    "replay-can-pause": {
+      "ok": true,
+      "detail": "已暂停"
+    },
+    "flow-replay-view": {
+      "ok": true,
+      "detail": {
+        "banner": true,
+        "hero": true,
+        "kpis": 5,
+        "ladder": 5,
+        "hist": 3,
+        "replayBadges": 5,
+        "canvases": 5,
+        "cursor": "846"
+      }
+    },
+    "flow-real-charts": {
+      "ok": true,
+      "detail": {
+        "banner": true,
+        "hero": true,
+        "kpis": 5,
+        "ladder": 5,
+        "hist": 3,
+        "replayBadges": 5,
+        "canvases": 5,
+        "cursor": "846"
+      }
+    },
+    "flow-canvas-not-blank": {
+      "ok": true,
+      "detail": [
+        {
+          "w": 783,
+          "h": 250,
+          "nz": 18223,
+          "ratio": 0.09309,
+          "colors": 120,
+          "sum": 3264678469
+        },
+        {
+          "w": 266,
+          "h": 196,
+          "nz": 7540,
+          "ratio": 0.14462,
+          "colors": 54,
+          "sum": 609116202
+        },
+        {
+          "w": 342,
+          "h": 226,
+          "nz": 3488,
+          "ratio": 0.04513,
+          "colors": 12,
+          "sum": 1460382335
+        },
+        {
+          "w": 342,
+          "h": 226,
+          "nz": 3323,
+          "ratio": 0.04299,
+          "colors": 11,
+          "sum": 663837879
+        },
+        {
+          "w": 342,
+          "h": 226,
+          "nz": 3139,
+          "ratio": 0.04061,
+          "colors": 10,
+          "sum": 2620879201
+        }
+      ]
+    },
+    "flow-canvas-redraws": {
+      "ok": true,
+      "detail": {
+        "f1": [
+          3264678469,
+          609116202,
+          1460382335,
+          663837879,
+          2620879201
+        ],
+        "f2": [
+          697677857,
+          3519152332,
+          2937589321,
+          663837879,
+          2620879201
+        ]
+      }
+    },
+    "flow-clock-advances": {
+      "ok": true,
+      "detail": {
+        "fc1": "846",
+        "fc2": "1,455"
+      }
+    },
+    "metrics-replay-view": {
+      "ok": true,
+      "detail": {
+        "banner": true,
+        "replayHeader": true,
+        "note": true,
+        "replayBadges": 3,
+        "charts": 4,
+        "canvases": 3,
+        "cursor": "1,966"
+      }
+    },
+    "metrics-real-charts": {
+      "ok": true,
+      "detail": {
+        "banner": true,
+        "replayHeader": true,
+        "note": true,
+        "replayBadges": 3,
+        "charts": 4,
+        "canvases": 3,
+        "cursor": "1,966"
+      }
+    },
+    "metrics-canvas-not-blank": {
+      "ok": true,
+      "detail": [
+        {
+          "w": 713,
+          "h": 200,
+          "nz": 8746,
+          "ratio": 0.06133,
+          "colors": 40,
+          "sum": 3147878195
+        },
+        {
+          "w": 713,
+          "h": 160,
+          "nz": 9056,
+          "ratio": 0.07938,
+          "colors": 40,
+          "sum": 310713487
+        },
+        {
+          "w": 713,
+          "h": 160,
+          "nz": 12318,
+          "ratio": 0.10798,
+          "colors": 83,
+          "sum": 292056673
+        }
+      ]
+    },
+    "metrics-canvas-redraws": {
+      "ok": true,
+      "detail": {
+        "m1": [
+          3147878195,
+          310713487,
+          292056673
+        ],
+        "m2": [
+          1178023379,
+          772208925,
+          1438307139
+        ]
+      }
+    },
+    "metrics-clock-advances": {
+      "ok": true,
+      "detail": {
+        "cur1": "1,966",
+        "cur2": "2,598"
+      }
+    }
+  },
+  "samples": {
+    "run": {
+      "status": 200,
+      "name": "probe-replay-fidelity-20261017",
+      "ok": true
+    },
+    "expanded": true,
+    "replayButtons": [
+      {
+        "i": 0,
+        "disabled": false,
+        "text": "✓回放"
+      }
+    ],
+    "bannerActive": true,
+    "flowDom": {
+      "banner": true,
+      "hero": true,
+      "kpis": 5,
+      "ladder": 5,
+      "hist": 3,
+      "replayBadges": 5,
+      "canvases": 5,
+      "cursor": "846"
+    },
+    "flowCanvas1": [
+      {
+        "w": 783,
+        "h": 250,
+        "nz": 18223,
+        "ratio": 0.09309,
+        "colors": 120,
+        "sum": 3264678469
+      },
+      {
+        "w": 266,
+        "h": 196,
+        "nz": 7540,
+        "ratio": 0.14462,
+        "colors": 54,
+        "sum": 609116202
+      },
+      {
+        "w": 342,
+        "h": 226,
+        "nz": 3488,
+        "ratio": 0.04513,
+        "colors": 12,
+        "sum": 1460382335
+      },
+      {
+        "w": 342,
+        "h": 226,
+        "nz": 3323,
+        "ratio": 0.04299,
+        "colors": 11,
+        "sum": 663837879
+      },
+      {
+        "w": 342,
+        "h": 226,
+        "nz": 3139,
+        "ratio": 0.04061,
+        "colors": 10,
+        "sum": 2620879201
+      }
+    ],
+    "flowCanvas2": [
+      {
+        "w": 783,
+        "h": 250,
+        "nz": 29574,
+        "ratio": 0.15108,
+        "colors": 92,
+        "sum": 697677857
+      },
+      {
+        "w": 266,
+        "h": 196,
+        "nz": 7554,
+        "ratio": 0.14489,
+        "colors": 56,
+        "sum": 3519152332
+      },
+      {
+        "w": 342,
+        "h": 226,
+        "nz": 11739,
+        "ratio": 0.15188,
+        "colors": 35,
+        "sum": 2937589321
+      },
+      {
+        "w": 342,
+        "h": 226,
+        "nz": 3323,
+        "ratio": 0.04299,
+        "colors": 11,
+        "sum": 663837879
+      },
+      {
+        "w": 342,
+        "h": 226,
+        "nz": 3139,
+        "ratio": 0.04061,
+        "colors": 10,
+        "sum": 2620879201
+      }
+    ],
+    "flowCursor": {
+      "fc1": "846",
+      "fc2": "1,455"
+    },
+    "metricsDom": {
+      "banner": true,
+      "replayHeader": true,
+      "note": true,
+      "replayBadges": 3,
+      "charts": 4,
+      "canvases": 3,
+      "cursor": "1,966"
+    },
+    "metricsCanvas1": [
+      {
+        "w": 713,
+        "h": 200,
+        "nz": 8746,
+        "ratio": 0.06133,
+        "colors": 40,
+        "sum": 3147878195
+      },
+      {
+        "w": 713,
+        "h": 160,
+        "nz": 9056,
+        "ratio": 0.07938,
+        "colors": 40,
+        "sum": 310713487
+      },
+      {
+        "w": 713,
+        "h": 160,
+        "nz": 12318,
+        "ratio": 0.10798,
+        "colors": 83,
+        "sum": 292056673
+      }
+    ],
+    "metricsCanvas2": [
+      {
+        "w": 713,
+        "h": 200,
+        "nz": 10697,
+        "ratio": 0.07501,
+        "colors": 51,
+        "sum": 1178023379
+      },
+      {
+        "w": 713,
+        "h": 160,
+        "nz": 10471,
+        "ratio": 0.09179,
+        "colors": 39,
+        "sum": 772208925
+      },
+      {
+        "w": 713,
+        "h": 160,
+        "nz": 15305,
+        "ratio": 0.13416,
+        "colors": 87,
+        "sum": 1438307139
+      }
+    ],
+    "metricsCursor": {
+      "cur1": "1,966",
+      "cur2": "2,598"
+    }
+  },
+  "ok": true,
+  "fail": []
+}

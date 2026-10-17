@@ -1684,3 +1684,415 @@ SET @s := (SELECT IF(COUNT(*) = 0,
   FROM information_schema.STATISTICS
   WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'comment' AND INDEX_NAME = 'uk_comment_review_once');
 PREPARE _p FROM @s; EXECUTE _p; DEALLOCATE PREPARE _p;
+
+-- ============================================================
+-- Migration: 块 7〈可观测域 + 库存治理〉—— 1 张新表 + 8 列
+--            Date: 2026-10-13
+-- 依据：用户 2026-10-13《块 7 参考》v1.0 定稿（§1.5 演练记录 / §九 A 档 1–2）+《两个问题批复》。
+--       pack 见 docs/agent/context-packs/c3-block-7-observe.md。
+-- 范围：**只加表 + 只加列**；不改既有列、不删行、不改既有数据（规则 v2：向后兼容）。
+-- 幂等：加表走 `CREATE TABLE IF NOT EXISTS`（照本文件 ⑮-1 先例）；加列走
+--       `information_schema` 守卫 + `PREPARE/EXECUTE`（照本文件 ⑬ 先例）。重复执行第二遍起空操作。
+-- 表（1）：drill_record —— 攻击演练记录（场景 / 请求数 / 拦截数 / 长文本结果）。
+-- 列（8）—— **两组，语义不同**：
+--   ① **演示「基线列」**（不是 Source）—— `goods_sku.BaselineStock` / `seckill_activity.BaselineSoldStock`。
+--      ⚠️ 为什么不给这两张表加 Source：行**不是**攻击创建的，只是**数值被改**
+--      （Add Source 的判据是「这一行是谁写进来的」）⇒ 加 Source 属语义错位。
+--      基线列用法（演示前 / 演示后各一条 UPDATE，跑十次攻击也能一键还原）：
+--        · 演示前：UPDATE goods_sku SET BaselineStock = Stock WHERE BaselineStock IS NULL;
+--        · 演示后：UPDATE goods_sku SET Stock = BaselineStock;
+--        · 收尾：  UPDATE goods_sku SET BaselineStock = NULL;
+--        （seckill_activity 同款，列名 BaselineSoldStock）。NULL = 未处于演示中。
+--   ② **块 6 六表补 `Source`** —— comment / comment_image / comment_like / comment_mention / report / sensitive_word。
+--      ⚠️ 块 5 可视化段已给 11 张表加过 Source（本文件 :1102-1218），**块 6 六表当时未加** ⇒ 本块补齐。
+--      用途：攻击场景 8（敏感词攻击）会写 comment / sensitive_word ⇒ 需按 Source='attack' 与真实数据区分。
+--      ⚠️ 本列 COMMENT 比块 5 那 11 张**多一段 `attack=`**（那批加列时还没有攻击模拟器）—— 刻意如此。
+-- ⚠️ P3 门禁：新增 1 张表 ⇒ `ConcurrencyRunner.java` 的 KNOWN_TABLES 25 → 26、期望表数 36 → 37（**四处同改**）。
+-- 回滚（逻辑废弃，执行前须人工确认；**不 DROP 旧表/旧列**，只停用）：
+--       UPDATE `goods_sku`        SET `BaselineStock` = NULL;
+--       UPDATE `seckill_activity` SET `BaselineSoldStock` = NULL;
+--       DROP TABLE IF EXISTS `drill_record`;
+-- ============================================================
+
+-- ---- ⑰-1 攻击演练记录（每次「跑攻击」落一行；`Result` 长文本由后端拆字段给前端）----
+CREATE TABLE IF NOT EXISTS `drill_record` (
+  `Id`              bigint NOT NULL AUTO_INCREMENT COMMENT '自增主键',
+  `OperatorId`      varchar(40) NOT NULL DEFAULT '' COMMENT '发起演练者业务号（对齐 user.customerid / user.merchantid，**不是**登录名）',
+  `OperatorRole`    tinyint NOT NULL DEFAULT 0 COMMENT '1=用户 / 2=商家 / 3=管理员',
+  `Name`            varchar(64) NOT NULL DEFAULT '' COMMENT '场景名（预置 8 场景之一）或「自定义」',
+  `Scenario`        varchar(500) NOT NULL DEFAULT '' COMMENT '场景配置 JSON（8 场景勾选 + 各自权重 + 总并发 + 持续秒数）',
+  `TotalRequests`   int NOT NULL DEFAULT 0 COMMENT '本轮总请求数',
+  `BlockedRequests` int NOT NULL DEFAULT 0 COMMENT '被防护拦下数',
+  `FailedRequests`  int NOT NULL DEFAULT 0 COMMENT '真失败数（5xx 等）',
+  `DurationMs`      bigint NOT NULL DEFAULT 0 COMMENT '本轮耗时（毫秒）',
+  `Result`          mediumtext COMMENT '长文本结果（后端解析后分字段给前端显示 —— 不是让前端展示原始长文）',
+  `created_at`      datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '行落库时刻（agent.md 数据库管理规则 8）',
+  `updated_at`      datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '行更新时刻',
+  PRIMARY KEY (`Id`),
+  KEY `idx_drill_created` (`created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='攻击演练记录（块 7 可观测域）';
+
+-- ---- ⑰-2 `goods_sku` 加列 `BaselineStock`（演示基线：攻击前库存快照，演示后一行 UPDATE 还原）----
+SET @s := (SELECT IF(COUNT(*) = 0,
+  'ALTER TABLE `goods_sku` ADD COLUMN `BaselineStock` int DEFAULT NULL COMMENT ''演示基线库存（块 7）：演示前 = Stock，演示后一行 UPDATE 还原；NULL = 未处于演示中''',
+  'DO 0')
+  FROM information_schema.COLUMNS
+  WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'goods_sku' AND COLUMN_NAME = 'BaselineStock');
+PREPARE _p FROM @s; EXECUTE _p; DEALLOCATE PREPARE _p;
+
+-- ---- ⑰-3 `seckill_activity` 加列 `BaselineSoldStock`（同 ⑰-2，秒杀侧）----
+SET @s := (SELECT IF(COUNT(*) = 0,
+  'ALTER TABLE `seckill_activity` ADD COLUMN `BaselineSoldStock` int DEFAULT NULL COMMENT ''演示基线已售（块 7）：演示前 = SoldStock，演示后一行 UPDATE 还原；NULL = 未处于演示中''',
+  'DO 0')
+  FROM information_schema.COLUMNS
+  WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'seckill_activity' AND COLUMN_NAME = 'BaselineSoldStock');
+PREPARE _p FROM @s; EXECUTE _p; DEALLOCATE PREPARE _p;
+
+-- ---- ⑰-4 `comment` 加列 `Source`（块 6 六表补齐；攻击场景 8 会写本表）----
+SET @s := (SELECT IF(COUNT(*) = 0,
+  'ALTER TABLE `comment` ADD COLUMN `Source` varchar(16) NOT NULL DEFAULT '''' COMMENT ''数据来源：seed=演示种子（seed-demo.sql 写入）/ attack=攻击模拟器写入 / 空=存量或真实业务写入''',
+  'DO 0')
+  FROM information_schema.COLUMNS
+  WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'comment' AND COLUMN_NAME = 'Source');
+PREPARE _p FROM @s; EXECUTE _p; DEALLOCATE PREPARE _p;
+
+-- ---- ⑰-5 `comment_image` 加列 `Source`（块 6 六表补齐）----
+SET @s := (SELECT IF(COUNT(*) = 0,
+  'ALTER TABLE `comment_image` ADD COLUMN `Source` varchar(16) NOT NULL DEFAULT '''' COMMENT ''数据来源：seed=演示种子（seed-demo.sql 写入）/ attack=攻击模拟器写入 / 空=存量或真实业务写入''',
+  'DO 0')
+  FROM information_schema.COLUMNS
+  WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'comment_image' AND COLUMN_NAME = 'Source');
+PREPARE _p FROM @s; EXECUTE _p; DEALLOCATE PREPARE _p;
+
+-- ---- ⑰-6 `comment_like` 加列 `Source`（块 6 六表补齐）----
+SET @s := (SELECT IF(COUNT(*) = 0,
+  'ALTER TABLE `comment_like` ADD COLUMN `Source` varchar(16) NOT NULL DEFAULT '''' COMMENT ''数据来源：seed=演示种子（seed-demo.sql 写入）/ attack=攻击模拟器写入 / 空=存量或真实业务写入''',
+  'DO 0')
+  FROM information_schema.COLUMNS
+  WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'comment_like' AND COLUMN_NAME = 'Source');
+PREPARE _p FROM @s; EXECUTE _p; DEALLOCATE PREPARE _p;
+
+-- ---- ⑰-7 `comment_mention` 加列 `Source`（块 6 六表补齐）----
+SET @s := (SELECT IF(COUNT(*) = 0,
+  'ALTER TABLE `comment_mention` ADD COLUMN `Source` varchar(16) NOT NULL DEFAULT '''' COMMENT ''数据来源：seed=演示种子（seed-demo.sql 写入）/ attack=攻击模拟器写入 / 空=存量或真实业务写入''',
+  'DO 0')
+  FROM information_schema.COLUMNS
+  WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'comment_mention' AND COLUMN_NAME = 'Source');
+PREPARE _p FROM @s; EXECUTE _p; DEALLOCATE PREPARE _p;
+
+-- ---- ⑰-8 `report` 加列 `Source`（块 6 六表补齐）----
+SET @s := (SELECT IF(COUNT(*) = 0,
+  'ALTER TABLE `report` ADD COLUMN `Source` varchar(16) NOT NULL DEFAULT '''' COMMENT ''数据来源：seed=演示种子（seed-demo.sql 写入）/ attack=攻击模拟器写入 / 空=存量或真实业务写入''',
+  'DO 0')
+  FROM information_schema.COLUMNS
+  WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'report' AND COLUMN_NAME = 'Source');
+PREPARE _p FROM @s; EXECUTE _p; DEALLOCATE PREPARE _p;
+
+-- ---- ⑰-9 `sensitive_word` 加列 `Source`（块 6 六表补齐；攻击场景 8 会写本表）----
+SET @s := (SELECT IF(COUNT(*) = 0,
+  'ALTER TABLE `sensitive_word` ADD COLUMN `Source` varchar(16) NOT NULL DEFAULT '''' COMMENT ''数据来源：seed=演示种子（seed-demo.sql 写入）/ attack=攻击模拟器写入 / 空=存量或真实业务写入''',
+  'DO 0')
+  FROM information_schema.COLUMNS
+  WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'sensitive_word' AND COLUMN_NAME = 'Source');
+PREPARE _p FROM @s; EXECUTE _p; DEALLOCATE PREPARE _p;
+-- ============================================================
+-- Migration: 块 7〈库存治理补完〉—— 1 列（超时释放条件化）
+--            Date: 2026-10-14
+-- 依据：用户 2026-10-13《块 7 参考》§5.2 B5 丙 / §5.3 C5 甲 + 用户 2026-10-14 本批批复
+--       （「2d · 超时释放条件化 —— 已批」）。pack 见 docs/agent/context-packs/c3-block-7-observe.md。
+-- 范围：**只加列**；不改既有列、不删行、**不做任何回填**（规则 v2：向后兼容）。
+-- 幂等：`information_schema` 守卫 + `PREPARE/EXECUTE`（照本文件 ⑬ / ⑰ 先例）。重复执行第二遍起空操作。
+-- 列（1）：`order.StockDeducted` —— 「本单的 goods_sku 库存**真扣成过**」的唯一载体。
+--   ⚠️ 为什么需要它：块 7 commit 1 起「下单即扣」，但 0 行**不挡单**（库存不足 / 非矩阵商品
+--      没有 goods_sku 行 —— 见 OrderService.deductStocks 的 javadoc）⇒ 单落库 ≠ 库存被动过。
+--      超时取消若无条件回补，就会给「当初一行也没扣成」的单**凭空补出一份库存**。
+--      commit 2d 把这条事实落成一列：下单时 CAS 真扣成 ≥1 行 ⇒ =1，否则 =0；
+--      超时释放**先读这一列、只有 1 才回补**（OrderTimeoutCancelJob.releaseStock）。
+--   ⚠️ **不回填**（用户 2026-10-14 明批）：默认 0 = 「没扣过」。2d 之前落的单大多数确实没走过
+--      「下单即扣」，无从回判 ⇒ 一律不回补，正是要的口径（宁可不补也不虚增）。
+--   ⚠️ 精度到**单**不到**行**：混合单（一行真扣成、一行当时库存不足）只要有一行扣成过就整单回补；
+--      根治要把标记下沉到 `order_item` 粒度（新列 + 新契约）—— 本笔不做。
+--   ⚠️ 写入点：OrderService.markStockDeducted（落库后一句幂等 UPDATE，
+--      `WHERE OrderId=? AND StockDeducted=0`）；读取点：OrderDao.selectStockDeducted。
+-- ⚠️ **本笔不改表数**（37 不变）⇒ ConcurrencyRunner 的 KNOWN_TABLES / 期望表数**不动**。
+-- 回滚（逻辑废弃，执行前须人工确认；**不 DROP 列**，只停用）：
+--       UPDATE `order` SET `StockDeducted` = 0;
+--       —— 退回 2d 之前的口径「超时释放无条件回补」（等价于把这一列恒置 0）。
+--       ⚠️ 列本身保留（agent.md 数据库规则：只允许追加，回滚 = 逻辑废弃，不 DROP COLUMN）。
+-- ============================================================
+
+-- ---- ⑱-1 `order` 加列 `StockDeducted`（本单库存真扣成过的标记；超时释放的前置判据）----
+SET @s := (SELECT IF(COUNT(*) = 0,
+  'ALTER TABLE `order` ADD COLUMN `StockDeducted` tinyint(1) NOT NULL DEFAULT 0 COMMENT ''本单库存真扣成过（块 7 commit 2d）：1=下单时 CAS 命中并动了 goods_sku.Stock / 0=没动过（库存不足、非矩阵商品无 sku 行、或 2d 之前的存量单）；超时释放只有 =1 才回补''',
+  'DO 0')
+  FROM information_schema.COLUMNS
+  WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'order' AND COLUMN_NAME = 'StockDeducted');
+PREPARE _p FROM @s; EXECUTE _p; DEALLOCATE PREPARE _p;
+
+-- ============================================================
+-- Migration: 块 7〈可观测域〉commit 8b —— 1 张新表 + 4 列
+--            Date: 2026-10-14
+-- 依据：用户 2026-10-14 批文《【commit 8 已核 —— 通过。开工 commit 8b】》。
+--       pack 见 docs/agent/context-packs/c3-block-7-observe.md（本笔不在 pack §十二 的 9 笔里，是加笔）。
+-- 范围：**只加表 + 只加列**；不改既有列、不删行、不改既有数据（规则 v2：向后兼容）。
+-- 幂等：加表走 `CREATE TABLE IF NOT EXISTS`（照本文件 ⑮-1 / ⑰-1 先例）；加列走
+--       `information_schema` 守卫 + `PREPARE/EXECUTE`（照本文件 ⑬ / ⑰ 先例）。重复执行第二遍起空操作。
+-- 表（1）：`observed_event` —— 八环事件的**落库台账**（今天它们只在进程内存的 512 槽环里，重启即失）。
+--   ⚠️ **本笔只建表，不接写入**：写入方 = 8c 的 RabbitMQ consumer（用户 2026-10-14 裁决
+--      「8b 只建表 + 清理，写入留 8c」）。⇒ 实时日志页那句「MQ 未连接，事件不落库」在本笔
+--      **仍然是真话**，8c 接通后才需要改。
+-- 列（4）：`drill_record` / `order` / `comment` / `admin_audit` 各加
+--   `BatchId varchar(36) NULL` —— 「这一行是哪一次演练写进来的」的载体（8c 由 `X-Drill-Batch` 头注入）。
+--   ⚠️ **批文原文列的是 5 张表**（含 `notification`）；实测 `notification.BatchId` **块 1 · I2 就有**
+--      （`varchar(36) NOT NULL`，语义 = 一次投递的批次 UUID）⇒ 本段只加 **4 张**，`notification` 一字不动。
+--      ⚠️ 两处语义**相容但不同源**：`notification` 那一列是「一次群发的扇出批次」，本段的四列是
+--      「一次演练的批次」；攻击演练发通知时把演练批次借写进 `notification.BatchId` 是可行的
+--      （两者同为 varchar(36) 的批次号），但**接线点必须写清是借用**，8c 处理。
+--   ⚠️ 为什么是 `NULL` 而不是本仓 `Source` 那种 `NOT NULL DEFAULT ''`：`Source` 的空串是一个
+--      **有意义的取值**（「存量或真实业务写入」）；而 BatchId 的空态是「这一行不属于任何演练批次」
+--      —— 那是**没有值**。写空串会给清理谓词 `BatchId IS NOT NULL` 添一个假的「批次」。
+--   ⚠️ **四张表只加列、不改任何业务代码**（本轮没有任何写入方）⇒ 属「加列」而非「改契约语义」。
+-- ⚠️ P3 门禁：新增 1 张表 ⇒ `ConcurrencyRunner.java` 的 KNOWN_TABLES 26 → 27、期望表数 37 → 38（**四处同改**）。
+-- 回滚（逻辑废弃，执行前须人工确认；**不 DROP 旧列**，只停用）：
+--       DROP TABLE IF EXISTS `observed_event`;
+--       ALTER TABLE `drill_record` DROP COLUMN `BatchId`;   -- 须人工确认
+--       ALTER TABLE `order`        DROP COLUMN `BatchId`;   -- 须人工确认
+--       ALTER TABLE `comment`      DROP COLUMN `BatchId`;   -- 须人工确认
+--       ALTER TABLE `admin_audit`  DROP COLUMN `BatchId`;   -- 须人工确认
+--       ⚠️ 新表按规则 v2 的回滚是「保留表 + 停止写入」，上头的 DROP TABLE 只在本地库重建时用。
+-- ============================================================
+
+-- ---- ⑲-1 八环事件落库台账（写入方 = 8c 的 MQ consumer；本笔只建表）----
+CREATE TABLE IF NOT EXISTS `observed_event` (
+  `Id`          bigint NOT NULL AUTO_INCREMENT COMMENT '自增主键',
+  `Kind`        varchar(16) NOT NULL COMMENT '事件所属环：cache / lock / order / stock / audit / notify / sensitive / identity / protection（对齐前端 KIND_LABEL；第 9 类 `protection` 由 D 段 commit 2 加，2026-10-15）',
+  `Severity`    varchar(16) NOT NULL DEFAULT 'info' COMMENT '严重度：info / warn / error（对齐前端 SEVERITY_LABEL）',
+  `Title`       varchar(255) NOT NULL DEFAULT '' COMMENT '事件标题（一句话，含业务键时由后端截断）',
+  `ObjectType`  varchar(32) DEFAULT NULL COMMENT '对象类型（审计=TargetType / 敏感词=命中的词 / 身份=请求路径 等）；无则 NULL',
+  `ObjectId`    varchar(128) DEFAULT NULL COMMENT '对象标识（与 ObjectType 成对；对齐 ObservedEvent.objectId）',
+  `TraceId`     varchar(64) DEFAULT NULL COMMENT '本次请求的 traceId（TraceIdFilter 发号；抽屉链路按它归组）',
+  `BatchId`     varchar(36) DEFAULT NULL COMMENT '演练批次 UUID（8c 由 X-Drill-Batch 头注入）；NULL = 不属于任何演练批次',
+  `OccurredAt`  datetime(3) NOT NULL COMMENT '事件发生时刻（毫秒精度，对齐 ObservedEvent.ts）',
+  `created_at`  datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '行落库时刻（agent.md 数据库管理规则 8）',
+  `updated_at`  datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '行更新时刻',
+  PRIMARY KEY (`Id`),
+  KEY `idx_observed_event_kind_time` (`Kind`,`OccurredAt`),
+  KEY `idx_observed_event_time`      (`OccurredAt`),
+  KEY `idx_observed_event_trace`     (`TraceId`),
+  KEY `idx_observed_event_batch`     (`BatchId`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='八环事件落库台账（块 7 commit 8b；写入方 = 8c 的 MQ consumer）';
+-- ⚠️ 四个索引各有唯一归属，别减：① `(Kind,OccurredAt)` = 日志页按类过滤 + 按时刻排（前列等值 ⇒ 后列有序，
+--    反向扫即满足 ORDER BY OccurredAt DESC，不 filesort）；② `(OccurredAt)` = 保留期扫描（清理 job 的主查询）；
+--    ③ `(TraceId)` = 抽屉「这一次请求的完整链路」按 traceId 取整组；④ `(BatchId)` = 按演练批次一次性清理。
+
+-- ---- ⑲-2 `drill_record` 加列 `BatchId`（本行是哪一次演练产生的）----
+SET @s := (SELECT IF(COUNT(*) = 0,
+  'ALTER TABLE `drill_record` ADD COLUMN `BatchId` varchar(36) DEFAULT NULL COMMENT ''演练批次 UUID（块 7 commit 8b）：一次「跑攻击」一个；NULL = 存量行或不是演练产生的''',
+  'DO 0')
+  FROM information_schema.COLUMNS
+  WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'drill_record' AND COLUMN_NAME = 'BatchId');
+PREPARE _p FROM @s; EXECUTE _p; DEALLOCATE PREPARE _p;
+
+-- ---- ⑲-3 `order` 加列 `BatchId`（攻击演练下的单；按批清理的载体）----
+SET @s := (SELECT IF(COUNT(*) = 0,
+  'ALTER TABLE `order` ADD COLUMN `BatchId` varchar(36) DEFAULT NULL COMMENT ''演练批次 UUID（块 7 commit 8b）：8c 由 X-Drill-Batch 头注入；NULL = 非演练写入''',
+  'DO 0')
+  FROM information_schema.COLUMNS
+  WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'order' AND COLUMN_NAME = 'BatchId');
+PREPARE _p FROM @s; EXECUTE _p; DEALLOCATE PREPARE _p;
+
+-- ---- ⑲-4 `comment` 加列 `BatchId`（攻击场景 8 的评论；按批清理的载体）----
+SET @s := (SELECT IF(COUNT(*) = 0,
+  'ALTER TABLE `comment` ADD COLUMN `BatchId` varchar(36) DEFAULT NULL COMMENT ''演练批次 UUID（块 7 commit 8b）：8c 由 X-Drill-Batch 头注入；NULL = 非演练写入''',
+  'DO 0')
+  FROM information_schema.COLUMNS
+  WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'comment' AND COLUMN_NAME = 'BatchId');
+PREPARE _p FROM @s; EXECUTE _p; DEALLOCATE PREPARE _p;
+
+-- ---- ⑲-5 `admin_audit` 加列 `BatchId`（演练产生的审计行；按批清理的载体）----
+SET @s := (SELECT IF(COUNT(*) = 0,
+  'ALTER TABLE `admin_audit` ADD COLUMN `BatchId` varchar(36) DEFAULT NULL COMMENT ''演练批次 UUID（块 7 commit 8b）：8c 由 X-Drill-Batch 头注入；NULL = 非演练写入''',
+  'DO 0')
+  FROM information_schema.COLUMNS
+  WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'admin_audit' AND COLUMN_NAME = 'BatchId');
+PREPARE _p FROM @s; EXECUTE _p; DEALLOCATE PREPARE _p;
+
+-- ============================================================
+-- Migration: 块 7〈D 段 · 死锁治因〉—— `goods` 加 1 个索引（不建表、不加列）
+--            Date: 2026-10-15
+-- 依据：用户 2026-10-15 裁定「丙 + 甲」（接 f0697eb 死锁侦查报告）——
+--       丙 = 加索引治因（A 档 DDL；用户拍定 `goods.MerchantId` 要加）。
+-- 范围：**只加索引**；不改列、不删行、不改既有数据（规则 v2：向后兼容）。
+-- 幂等：走 `information_schema.STATISTICS` 守卫 + `PREPARE/EXECUTE`（照本文件 ⑭ 先例）。
+-- 索引（1）：goods.MerchantId
+--   ⚠️ **为什么要（实测，不是推断）**：2026-10-15 死锁侦查（探针
+--      `scripts/probes/d2-deadlock-scout.mjs`，48 轮 ×(1+4) **48/48 轮复现**、共 149 次
+--      `ER_LOCK_DEADLOCK`）证明：`relistAllByMerchant` 那条
+--      `UPDATE goods SET ShelfState = 1, DelistedAt = NULL WHERE MerchantId = ?`
+--      在 REPEATABLE-READ 下**无索引可走** ⇒ 全表扫描，并把扫到的**每一行**都加 X 锁
+--      —— `SHOW ENGINE INNODB STATUS` 里该事务持 **49 row lock(s)**（全表 + supremum），
+--      且一直持到事务结束 ⇒ 与 `MerchantApplicationService.audit`（写序 user→goods）
+--      构成反向锁序环。加了本索引，该 UPDATE 只锁命中行 ⇒ 「锁 49 行」压到「锁 1 行」。
+--   ⚠️ **本索引治的是「争用窗口的宽度」，不替代重试**（甲）：窗口变窄 ≠ 窗口消失。⚠️ **此索引不拆 audit × relist 那条环，只缩小 goods 侧锁粒度。环的兜底是 MerchantDowngradeService.relist 的重试。**（防后人看到「死锁问题 + 有索引」以为索引治好了 ⇒ 把重试删掉、500 立刻回来。）
+--      丙 / 甲 是同一次裁定里的两条，落点与理由见 `docs/agent/tech-debt.md` 的 TD-74。
+--   ⚠️ **为什么是普通索引不是 UNIQUE**：`MerchantId` 天然一对多（一个商家多件商品），
+--      建 UNIQUE 直接失败。理由同 ⑭。
+--   ⚠️ **为什么不动 `:54` 的 `CREATE TABLE goods`**：在本文件中段插一行会让其后**所有**行号
+--      集体 +1，而本文件被外部 `文件:行号` 引用众多（口径见 `docs/agent/db-schema.md` 行首）
+--      ⇒ 照 ⑭ 先例走**文件末追加的迁移块**：全量重导与增量升级两条路都覆盖到。
+--   ℹ️ 顺带收益（读路径）：`db-schema.md` 已登记 `GoodsCacheService:146` 的
+--      `goods WHERE MerchantId = ?` 与 `priceByTriple` 此前也是全表扫，本索引一并覆盖。
+--   ℹ️ `user.merchantid` 的同类索引**本次不加**：用户裁定「留 agent 实测后再定」
+--      —— 先落本索引、重跑侦查看还剩多少死锁，再决定要不要第二枚。
+-- ⚠️ P3 门禁：本次**不新增表** ⇒ `ConcurrencyRunner.java` 的 KNOWN_TABLES / 期望表数不动；
+--    但**非主键索引计数 +1** ⇒ `docs/agent/db-schema.md` 的实测值需同步（73 → 74）。
+-- 回滚（逻辑废弃，执行前须人工确认）：
+--       ALTER TABLE `goods` DROP INDEX `idx_goods_merchant`;
+-- ============================================================
+
+-- ---- ⑳ `goods` 加索引 `idx_goods_merchant`（死锁治因：把全表锁压成行锁）----
+SET @s := (SELECT IF(COUNT(*) = 0,
+  'ALTER TABLE `goods` ADD INDEX `idx_goods_merchant` (`MerchantId`)',
+  'DO 0')
+  FROM information_schema.STATISTICS
+  WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'goods' AND INDEX_NAME = 'idx_goods_merchant');
+PREPARE _p FROM @s; EXECUTE _p; DEALLOCATE PREPARE _p;
+
+-- ============================================================
+-- Migration: C3 块7 · 阶段 3a.3 日志页字段补齐  Date: 2026-10-16
+-- 依据：块 7 阶段 3a.3 施工清单（后端 D 块「帧/台账加字段」）+ 用户裁定的量纲（durationUs 取微秒）。
+-- 用途：`observed_event` 台账补三列 —— 「**谁**做的」与「**花了多久**」。
+--       · `ActorId` / `ActorRole`：发起那次请求的业务号与角色号，口径与 `admin_audit` 的两列**逐字相同**
+--         （会话里存的就是业务号 customerid/merchantid，不是登录名）；
+--       · `DurationUs`：本条事件主体的耗时，单位是**微秒**。
+--         ⚠️ 为什么不是毫秒：L1 缓存命中是**纳秒级**（实测 0.2~1 µs），毫秒列对它永远是 0
+--         —— 「整数毫秒看不出本地缓存」正是用户裁定用微秒的理由。
+-- ⚠️ **为什么只加这三列，不给 `detail` / `fields` 加列**：口径是「**有界标量进列，无界自由文本不进**」。
+--    `detail` 与 `fields` 说的是**同一批事实**（一个是给人读的 k=v 串、一个是给前端拼句子的表），
+--    内容无界、且都含 `src=环名#源seq`（那东西只对**当下那一拍**有意义，事后读反而误导）。
+--    ⇒ 台账不加这两列，理由与 ⑲-1 里「detail / key 刻意不落库」**逐字同源**。
+--    而新增的这三列全是**有界标量**（业务号 varchar(50) / 角色号 int / 微秒 bigint）⇒ 进列。
+-- ⚠️ **回放（`selectByBatch`）会多带这三列**，前端按需读；既有 8 列的**名字与顺序一个字没动**。
+-- ⚠️ P3 门禁：本次**不新增表、不新增索引** ⇒ `ConcurrencyRunner.java` 的 KNOWN_TABLES / 期望表数、
+--    `db-schema.md` 的非主键索引计数**都不动**；但**列数变了** ⇒ `db-schema.md` 里 observed_event
+--    的列数需同步（8 业务列 → 11 业务列）。
+-- 回滚（逻辑废弃，执行前须人工确认；**不 DROP 数据**，只停用）：
+--       ALTER TABLE `observed_event` DROP COLUMN `ActorId`;    -- 须人工确认
+--       ALTER TABLE `observed_event` DROP COLUMN `ActorRole`;  -- 须人工确认
+--       ALTER TABLE `observed_event` DROP COLUMN `DurationUs`; -- 须人工确认
+-- ============================================================
+
+-- ---- ㉑ `observed_event` 加三列（谁 / 什么角色 / 多久）----
+-- ⚠️ 逐列三条独立语句、各自判存在：一条失败不该让另外两条也不落（与 ⑲-2…⑲-5 的四条同款）。
+SET @s := (SELECT IF(COUNT(*) = 0,
+  'ALTER TABLE `observed_event` ADD COLUMN `ActorId` varchar(50) DEFAULT NULL COMMENT ''发起那次请求的业务号（会话里的 customerid/merchantid，口径同 admin_audit.ActorId）；NULL = 无身份：闸关着（app.auth.enabled=false）或事件产生在非请求线程上（线程池/定时任务/SSE 流线程）'' AFTER `BatchId`',
+  'DO 0')
+  FROM information_schema.COLUMNS
+  WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'observed_event' AND COLUMN_NAME = 'ActorId');
+PREPARE _p FROM @s; EXECUTE _p; DEALLOCATE PREPARE _p;
+
+SET @s := (SELECT IF(COUNT(*) = 0,
+  'ALTER TABLE `observed_event` ADD COLUMN `ActorRole` int DEFAULT NULL COMMENT ''发起者的角色号（取自 login.Role：1 客户 / 2 商家 / 3 管理员；口径同 admin_audit.ActorRole）；与 ActorId 同生共死'' AFTER `ActorId`',
+  'DO 0')
+  FROM information_schema.COLUMNS
+  WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'observed_event' AND COLUMN_NAME = 'ActorRole');
+PREPARE _p FROM @s; EXECUTE _p; DEALLOCATE PREPARE _p;
+
+SET @s := (SELECT IF(COUNT(*) = 0,
+  'ALTER TABLE `observed_event` ADD COLUMN `DurationUs` bigint DEFAULT NULL COMMENT ''本条事件主体的耗时，单位**微秒**（不是毫秒：L1 缓存命中是纳秒级）；NULL = 没测到 / 不适用，两者在页面上意思不同，逐环口径见各 *Metrics 类的 event(...)'' AFTER `ActorRole`',
+  'DO 0')
+  FROM information_schema.COLUMNS
+  WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'observed_event' AND COLUMN_NAME = 'DurationUs');
+PREPARE _p FROM @s; EXECUTE _p; DEALLOCATE PREPARE _p;
+
+-- ============================================================
+-- Migration: C3 块7 · 阶段 3a.3 第二步 日志页字段补齐（续）  Date: 2026-10-17
+-- 依据：用户 2026-10-17 的两条裁定（「剩余库存」+「fields 进台账」）与「合并成一笔后端补丁」的建议。
+-- 用途：`observed_event` 台账再补两列 —— 「**当时还剩多少**」与「**当时的结构化明细**」。
+--       · `RemainingStock` int：扣减那一刻该 SKU 的剩余件数（**有界标量**，能被索引/聚合）。
+--         ⚠️ 是「**当时**」不是「此刻」：事后拿 `SkuCode` 回查 `goods_sku` 拿到的是现在的库存，
+--         中间可能又卖出几十件 ⇒ 取值点只能钉在**扣减那一行 SQL 之后**（`OrderService.deductStocks`），
+--         由业务侧现读现传，metrics 类只透传。
+--         `NULL` = 三类（都不是「用了兜底值」）：读剩余的 SELECT 自己失败 / 扣减抛异常（error 档）/
+--         本行是**释放档**（释放一侧刻意不取数，见 `StockMetrics#release`）。
+--         ⚠️ 列名取名词 `RemainingStock`（台账是平表，叫 `Remaining` 太含糊）；
+--         帧里在库存语境下叫 `remaining`（帧键名与列名不必逐字相同，既有 `durationUs`/`DurationUs`
+--         也是这样一对）。
+--       · `FieldsJson` json：事件的结构化明细（帧里那个 `fields` 的落库副本）。
+--         ⚠️ **口径修订（如实记录，不偷偷改）**：㉑ 的段头逐字写着「不给 `detail` / `fields` 加列」，
+--         理由是「有界标量进列，无界自由文本不进」。用户 2026-10-17 裁定**推翻其中的 `fields` 这一半**，
+--         原话：「加（不然会缺失当时的数据流程，没办法朔源性找寻病因，那这个回放的作用就降低了）」。
+--         `detail` 与 `key` **仍不进列**（那一半口径不变）。取舍与代价写在 `ObservedEventDao` 类注释里。
+--         ⚠️ 这一列**绝不截断**：截断一段 JSON 得到的是**非法 JSON**，`json` 列在严格模式下会
+--         **整条拒绝** ⇒ 那不是「少一截」而是「整批进死信」（比其它列的截断取舍严酷得多）。
+-- ⚠️ **回放（`selectByBatch`）会多带这两列**，既有列的名字与顺序一个字没动。给前端两条提醒：
+--    · `FieldsJson` 从 JDBC 出来是**字符串**（JSON 文本），前端要用它得先 `JSON.parse`；
+--    · `RemainingStock` 只有库存环的**扣减档**有值，其余为 `NULL`。
+-- ⚠️ P3 门禁：本次**不新增表、不新增索引** ⇒ `ConcurrencyRunner.java` 的 KNOWN_TABLES / 期望表数、
+--    `db-schema.md` 的非主键索引计数**都不动**；但**列数变了** ⇒ `db-schema.md` 里 observed_event
+--    的**物理列数**需同步（14 → 16；其中 `insertBatch` 写的那一段 11 → 13）。
+-- 回滚（逻辑废弃，执行前须人工确认；**不 DROP 数据**，只停用）：
+--       ALTER TABLE `observed_event` DROP COLUMN `RemainingStock`;  -- 须人工确认
+--       ALTER TABLE `observed_event` DROP COLUMN `FieldsJson`;      -- 须人工确认
+-- ============================================================
+
+-- ---- ㉒ `observed_event` 加两列（当时剩余 / 结构化明细）----
+-- ⚠️ 逐列两条独立语句、各自判存在：一条失败不该让另一条也不落（与 ⑲-2…⑲-5、㉑ 的三条同款）。
+-- ⚠️ 顺序：`RemainingStock` 接在 `DurationUs` 之后、`FieldsJson` 接在 `RemainingStock` 之后
+--    —— 与 `ObservedEventDao` 的 ROW_PLACEHOLDERS / `params.add` 顺序**逐位对齐**（三处必须一起改）。
+SET @s := (SELECT IF(COUNT(*) = 0,
+  'ALTER TABLE `observed_event` ADD COLUMN `RemainingStock` int DEFAULT NULL COMMENT ''扣减**那一刻**该 SKU 的剩余件数（int，单位=件）；⚠️ 是「当时」不是「此刻」—— 事后回查 goods_sku 拿到的是现在的值；NULL = 读剩余的 SELECT 失败 / 扣减抛异常（error 档）/ 本行是释放档（口径全文见 StockMetrics.StockEvent#remaining）'' AFTER `DurationUs`',
+  'DO 0')
+  FROM information_schema.COLUMNS
+  WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'observed_event' AND COLUMN_NAME = 'RemainingStock');
+PREPARE _p FROM @s; EXECUTE _p; DEALLOCATE PREPARE _p;
+
+SET @s := (SELECT IF(COUNT(*) = 0,
+  'ALTER TABLE `observed_event` ADD COLUMN `FieldsJson` json DEFAULT NULL COMMENT ''事件的结构化明细（帧里那个 fields 的落库副本），让回放页与实时页讲同一件事；⚠️ 口径修订：㉑ 段头「fields 不进列」被用户 2026-10-17 裁定推翻（不加则回放缺当时的数据流程、无法溯源），detail/key 仍不进列；⚠️ 本列不截断（截断=非法 JSON=整批进死信）'' AFTER `RemainingStock`',
+  'DO 0')
+  FROM information_schema.COLUMNS
+  WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'observed_event' AND COLUMN_NAME = 'FieldsJson');
+PREPARE _p FROM @s; EXECUTE _p; DEALLOCATE PREPARE _p;
+
+-- ============================================================
+-- ㉓ 块 7 收尾 · A3（2026-10-17）：observed_event 幂等键
+--
+-- 【为什么】MQ 消费链路的重投（3 次落库重试 + broker 重新投递 + 未来多实例）会让同一条
+--   事件被写两次。此前台账没有任何非主键唯一约束，D 段 A3 一直悬着未决。
+--   用户 2026-10-17 裁定走**甲方案**：新增 `Seq` 列，与 `TraceId` 组成 UNIQUE。
+--
+-- 【Seq 是什么】`EventBroadcaster` 合并环的**进程内单调序号**（`ObservedEvent.seq()`），
+--   不是 DB 自增、也不落库（这是本次新增的第一列）。同一条消息被重投时消息体里的 Seq 不变
+--   ⇒ UNIQUE(TraceId, Seq) 能识别出「重复」。
+--
+-- 【无 TraceId 的事件】定时任务 / SSE 流线程产生的事件在内存环里 TraceId 为 NULL
+--   （页面如实显示「不是某次请求」）。MySQL 的 UNIQUE 不把多个 NULL 视为相等 ⇒ 这类行
+--   天生去不了重。处置：`RabbitEventPublisher#send` 在**发布那一刻**补一个 UUID，
+--   于是台账里的 TraceId 恒非空；内存环与页面仍保持 null（两处口径不同是刻意的，见该类注释）。
+--
+-- 【写入语义】`ObservedEventDao#insertBatch` 改成
+--   `ON DUPLICATE KEY UPDATE Id = Id`：只把唯一键冲突变成 no-op，其它错误照旧抛出
+--   （消费者重试→DLQ）。不要改成 INSERT IGNORE —— 它会把数据截断等错误也静默成 0 行。
+--
+-- 【存量行】Seq 为 NULL ⇒ 唯一索引允许（多个 NULL 不相等）；新行必定非空。
+--   回滚（逻辑废弃，执行前须人工确认；不 DROP 数据）：
+--       ALTER TABLE `observed_event` DROP INDEX `uk_observed_event_trace_seq`;  -- 须人工确认
+--       -- Seq 列保留（追加列不回删；停用即可）
+-- ============================================================
+
+-- ---- ㉓-1 `observed_event` 加 `Seq`（插在 Id 之后，与 ObservedEventDao 的列序一致）----
+SET @s := (SELECT IF(COUNT(*) = 0,
+  'ALTER TABLE `observed_event` ADD COLUMN `Seq` bigint DEFAULT NULL COMMENT ''A3 幂等键的一半：EventBroadcaster 合并环的进程内序号（非 DB 自增）。与 TraceId 组成 UNIQUE；重投消息的 Seq 不变 ⇒ 可去重。存量行为 NULL'' AFTER `Id`',
+  'DO 0')
+  FROM information_schema.COLUMNS
+  WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'observed_event' AND COLUMN_NAME = 'Seq');
+PREPARE _p FROM @s; EXECUTE _p; DEALLOCATE PREPARE _p;
+
+-- ---- ㉓-2 UNIQUE(TraceId, Seq) ----
+SET @s := (SELECT IF(COUNT(*) = 0,
+  'ALTER TABLE `observed_event` ADD UNIQUE INDEX `uk_observed_event_trace_seq` (`TraceId`, `Seq`)',
+  'DO 0')
+  FROM information_schema.STATISTICS
+  WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'observed_event'
+    AND INDEX_NAME = 'uk_observed_event_trace_seq');
+PREPARE _p FROM @s; EXECUTE _p; DEALLOCATE PREPARE _p;

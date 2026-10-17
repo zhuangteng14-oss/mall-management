@@ -1,0 +1,71 @@
+================================================================================
+块 7 · 3a.4 指标页重做（S1 时间栈 + 实体栏）—— 证据汇总
+生成：2026-10-17 12:17（+0800）
+================================================================================
+
+【一、落地面】
+- 结构：左栏五图共享一根 x 轴（QPS / 命中率 / 平均延迟 / 锁等待 / 锁竞争热力图），
+  右栏 380px 实体栏（K1–K4 卡片、3 类设施、严重度分布、8 类防护、库存水位）。
+- 页高：`.a-mp` = calc(140vh − 124px)，1440×900 视口实测 1136px（上限 1260px）；
+  内部滚动容器 `.mp-body`（与网格容器 `.mp-grid` 分离，右栏 overflow 计入滚动高度）。
+- 图表：五图同几何 grid.left=64 / grid.right=56；前四图隐藏 x 轴，最底热力图统一画刻度；
+  五图 boundaryGap=true；tooltip 全部可用；前四图带峰/谷 markPoint 数字标注；
+  平均延迟面积渐变；热力图色阶两端 [低, 高]、tooltip「锁名 · 第 N 拍 · 超时 N 次」。
+- 库存水位：固定 220px 内部滚动；搜索（SKU 名 / 编码 / 规格）+ 五档筛选
+  （全部 / 充足 / 偏低 / 缺货 / 未测）；无基线时灰斜纹 + `—`；条宽由 rAF 600ms 推进。
+- 数据：只消费既有 SSE 真帧字段；P99（衰减窗口，TD-77）只作卡片次要小字，
+  未进入时间轴；K2 = meanMs。未新增数据源、未编造真数据。
+- 演示数据源 `api/demo-stream.js` 的指标帧已补齐为与真帧同形（intervalMs / 4xx/5xx /
+  meanMs / p95/p99/max / cache hit/miss/l2Degraded / locks 明细 / 8 类 protections /
+  stock 12 行），页面仍显式标注「模拟日常」。
+
+【二、静态检查与渲染实测】（产物时间戳均晚于最后一次代码编辑 12:05）
+- `npm run lint`：DONE No lint errors found（见 b7c10-metrics-lint-build.txt）。
+- `npm run build`：DONE Build complete，Hash 82f7edd546919617（同上文件）。
+- 探针 `node scripts/probes/probe-b7c6-metrics-panel.mjs`：
+  63 项 / 0 失败（见 b7c10-metrics-probe.txt，生成于 12:11）。
+  断言覆盖：五图 canvas / 共享轴几何 / 前四图隐藏 x 轴 / boundaryGap / tooltip 文案
+  （ms、次/秒、%、超时 N 次）/ markPoint / 面积渐变 / 热力图色阶与格数 / KPI 与 0.3s
+  滚动收敛 / K2 用 meanMs 且 P99 未混入 / 健康度与严重度分布 / 3 类设施 + 8 类防护图标
+  颜色与 8px 间距 / 库存 15 行、220px 内滚、搜索与筛选 / 水流动画窗口推进 /
+  页高 1136px、右栏 380px、字号仅 12/15/19 / 正常收尾不画红色断线横幅 /
+  卸载后不再发起指标流请求。
+
+【三、真后端实拍】（dev profile · 8088 · 前端 serve 8080 · 无任何请求 mock）
+- 改前真帧：b7c10-metrics-real-prebaseline.txt（6 拍；stock.rows 的 baseline 全为 null，
+  即真库未设演示基线时的诚实状态）。
+- 演示基线（用户批准：执行 ①，截图后务必执行 ④）：
+  · 执行 ① `UPDATE goods_sku SET BaselineStock = Stock WHERE BaselineStock IS NULL`
+    → affected: 8；8 行 BaselineStock 与 Stock 一致。
+  · 此时真帧：b7c10-metrics-real-baseline.txt（6 拍；stock>0 行 ratio=1.0，
+    stock=0 行 ratio=null）。
+  · 实拍：b7c10-metrics-real-top.png / b7c10-metrics-real-bottom.png
+    （12:11；页面「数据源」为「正常 / 后端真流」，未开模拟；8 条库存：
+    0/0 缺货 ×2、60/60、100/100 ×3、120/120、180/180、240/240 → 充足）。
+  · 实测：pageH=1136、右栏 380、`.mp-body` scrollHeight=1271 / clientHeight=999、
+    库存列表 220px 且滚到底后完整可见。
+  · 真帧里「锁等待 / 锁竞争热力图」显示空态「窗口内没有任何锁活动」——
+    这是真后端当时没有锁活动的诚实空态，不是渲染缺失。
+  · 执行 ④ `UPDATE goods_sku SET BaselineStock = NULL` → affected: 8；
+    8/8 行 BaselineStock 全 NULL，Stock 未变动（0/60/100/100/100/120/180/240）。
+  · 还原后真帧：b7c10-metrics-real-after-restore.txt（4 拍；32 个 baseline 全 null）。
+  · 全过程的 SQL 回读见 b7c10-metrics-stock-baseline.txt。
+
+【四、refs 收口】
+- 扫描器：`scripts/refs-scan.sh`；before = `git worktree add --detach HEAD`
+  的独立工作树（避免把工作区改动带进 before），after = 当前工作区。
+- 比对口径：(引用者文件, token) 对，忽略引用者自身行号。
+- 结果：LOST 5 / NEW 4，全部为预期变化：
+  · 4 对 = 活文档里指向本次被改文件的旧行号重指（热力图调用点、演示 reasons、
+    演示 protections 区间）；
+  · 1 条 LOST = 重写后的 MetricsPanel 不再引用的旧 token（StatsPage.vue 区间），
+    代码本身已删除该引用，属正常消失。
+- 明细只落 `_work/3a4/refs-diff-3a4b.txt`（按纪律不进 docs，避免旧行号被反向抄成新引用）。
+- 另：历史证据 `b7w-demo-probe.txt` 里有一条指向 `demo-stream.js` 某行的旧记录；
+  核对该行在 HEAD 时已不是 protections 行（历史证词，非本次改动造成），
+  作为历史证据保留、不改写。为避免旧行号被扫描器反向抄成新引用，本汇总不复写该行号。
+
+【五、边界与未做】
+- 未 push、未 merge、未开 PR。
+- 未新增后端数据源、未改真帧顶层键、未把 P99 画进时间轴。
+- 库存演示基线只临时改 `BaselineStock` 一列，已按 ④ 全量还原；`Stock` 未改。

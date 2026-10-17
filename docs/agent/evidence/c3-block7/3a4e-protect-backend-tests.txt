@@ -1,0 +1,8 @@
+# 2026-10-17 15:58:18 +0800 backend tests (dev profile not needed; pure unit)
+# ./mvnw -Dtest=EventBroadcasterTest,EventStreamServiceTest test
+[INFO] Running com.minke.mallmanagement.observe.service.EventBroadcasterTest
+[INFO] Tests run: 13, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 9.381 s -- in com.minke.mallmanagement.observe.service.EventBroadcasterTest
+[INFO] Running com.minke.mallmanagement.observe.service.EventStreamServiceTest
+[INFO] Tests run: 10, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.402 s -- in com.minke.mallmanagement.observe.service.EventStreamServiceTest
+[INFO] Tests run: 23, Failures: 0, Errors: 0, Skipped: 0
+[INFO] BUILD SUCCESS

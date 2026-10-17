@@ -79,7 +79,7 @@
 `/shop/{follow,unfollow,followState}` 三个端点的方法体第一行都是
 `IdentityGuard.requireSelfOrAdmin(request, CustomerId)`，**但在 a3 profile 下这一格测不出来**：
 
-`IdentityGuard.java:73-82` 的判据是「解析不出身份 ⇒ **放行**」，而 a3 钉
+`IdentityGuard.java:104-115` 的判据是「解析不出身份 ⇒ **放行**」，而 a3 钉
 `app.auth.enabled=false`（启动日志实测 `登录闸装配（AUTH）… app.auth.enabled=false`
 ⇒ `AuthSession.identify()` 恒为 `null`）⇒ **传别人的 `CustomerId` 在 a3 下同样放行**。
 这不是本笔的缺陷，是 `IdentityGuard` 的既有设计（同一条纪律见该类注释「为什么解析不出身份 = 放行」，

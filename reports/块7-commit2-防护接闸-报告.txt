@@ -1,0 +1,230 @@
+================================================================================
+块 7 · D 段 · commit 2〈后端防护接闸〉—— 收笔报告
+分支 feat/c3-admin-block7 · 2026-10-15 · ⚠️ 未 push / 未 merge / 未开 PR
+依据：用户 2026-10-15 补充裁定（① 第 9 类事件环 / ② 熔断 / ③ 限流 / ④ 重试只登记 TD /
+      ⑤ 线程池分池 / ⑥ 单元测试）
+================================================================================
+
+一、口径（一句话）
+--------------------------------------------------------------------------------
+  3 键接闸（rateLimit / circuitBreak / poolIsolation）
++ 1 键登记 TD（retry ⇒ TD-74）
++ 1 键记录位（degrade）
+
+⚠️ 口径的**唯一代码出处**是 protect/ProtectionGate.WIRED_KEYS（`KEYS`:69 · `WIRED_KEYS`:73 ·
+   `TD_ONLY_KEY="retry"`:76 · `RECORD_ONLY_KEY="degrade"`:79）—— 不是本报告、不是任何文档。
+⚠️ **不许**读/写成「4 键已接闸」或「5 键里 4 键已接闸」。
+
+二、裁定落实表（项 | 裁定 | 落点文件 / 类 | 证据）
+--------------------------------------------------------------------------------
+① 第 9 类事件环 `protection`
+   裁定：枚举 + 源环 + 落库 + 前端 5 处 labels + 测试；攻击页加「防护」过滤类
+   落点：EventBroadcaster.Kind.PROTECTION（EventBroadcaster.java:142，Kind 序第 9）
+         · 新源环 observe/metrics/ProtectionMetrics.java（新文件 184 行）
+         · EventBroadcaster.ingestProtection():474-495，poll() 里的调用 :274
+         · 前端 labels 五处（observe-labels.js）：KINDS:27 / KIND_LABEL:46 / KIND_COLOR:72 /
+           KIND_ICON:131 / OBJECT_FIELD_LABEL:179
+         · EventLog.vue **零改动**（v-for="k in KINDS" 自动多一格 ⇒ 攻击页/事件页两处过滤类同源）
+   证据：ProtectionMetricsTest(6 条) · EventBroadcasterTest / EventStreamServiceTest 已扩
+         （后者 :81 用 containsOnlyKeys(9 个) 钉帧的 9 键）
+   ⚠️ 订正：smoke/ObserveStreamSmokeTest:69 是 contains(...) **子集**断言 ⇒ 本笔不必改
+      （D pack 原判「要改」有误，已订正）；代价如实记：切片层因此**不看**第 9 键。
+
+② 熔断（Resilience4j；包关键 DAO / 服务 / 下游；**禁入站层**、**禁只挂订单 / 支付**）
+   落点：GoodsService **5 处**（:153 goodsAdd 写 / :252 goodsSelectHome 读 / :370 goodsDe 写 /
+         :420 goodsUp 写 / :489 productSearch 读）+ OrderService.orderAdd **1 处**（:334 写）
+         ⇒ 两个实例按「读 / 写」分开：`mallMysqlRead` / `mallMysqlWrite`
+   阈值（application.properties 的 resilience4j.circuitbreaker.configs.default.*）：
+         失败率 50% · sliding-window TIME_BASED 30（单位**秒**）· **最小请求数 20** ·
+         半开放行 5 个 · open 后等 30s（wait-duration-in-open-state=30s）· 自动 open→half-open 开
+         另：慢调用 1s 起算、慢调用率 50% 也算失败（本仓下游多 fail-soft，只看异常率会看不出「被打满」）；
+         IllegalArgumentException 不计入熔断（入参错≠下游故障）
+   证据：CircuitBreakerWiringTest(4 条，逐方法钉) · ProtectionMetricsBinderTest(5 条，真熔断器三档翻转)
+         · ProtectionThresholdsTest(4 条，逐值)
+
+③ 限流（入站统一闸 200 QPS）
+   落点：protect/InboundRateLimitInterceptor.java（HandlerInterceptor）+ protect/ProtectConfig.java
+        ⚠️ 选**拦截器不是 Filter**：Filter 会进 @WebMvcTest 切片、而本闸有 3 个构造依赖 ⇒
+           做成 Filter 会让全部 10 个切片一起启动失败（本仓被咬过：237 测试 / 77 errors、132 errors）
+   证据：InboundRateLimitInterceptorTest(7 条) · 运行期探针 320 发 = **200 放行 + 120×429**
+         （docs/agent/evidence/c3-block7/d2-inbound-gate.txt）
+
+④ 重试：**本笔不落码**，只登记 tech-debt.md **TD-74**（细节见 §六）
+
+⑤ 线程池分池
+   落点：protect/ObservePoolConfig.java（core 8 / max 32 / queue 64；满则**当场拒 + 记 SHED**，
+        那条流开不起来 ⇒ Spring 转 503，如实而不是「开起来了但没数据」）
+   证据：ProtectionThresholdsTest（三个数有限）· 启动日志（池名 + 1/8/32/64 一行）
+
+⑥ 单元测试：新增 7 个测试类（见 §九）
+
+三、限流：挂哪个类 / 匹配哪些路径 / 白名单是什么
+--------------------------------------------------------------------------------
+· 挂哪个类：protect/InboundRateLimitInterceptor（HandlerInterceptor），由 protect/ProtectConfig
+  以 WebMvcConfigurer.addInterceptors 注册 —— **挂 `/**`**，order = Ordered.HIGHEST_PRECEDENCE
+  （排在 AuthInterceptor 之前：先挡量、再谈身份）。
+  限流器：RateLimiter 实例名 `inboundGate`；LIMIT_FOR_PERIOD=200 / REFRESH_PERIOD=1s ⇒ 200 QPS；
+  **TIMEOUT = Duration.ZERO**（不排队；⚠️ 2.3.0 的接口里**没有** tryAcquirePermission()，靠这个
+  常量而非方法名保证「立即判定」，改大就红 —— 已写成常量 + 断言）。
+· 白名单（EXEMPT_PATHS，六条，静态常量、唯一出处）：
+    /health/**        运维探针（a3/dev 才有 HealthController）
+    /actuator/**      Boot health / metrics（application.properties:124 暴露的两个）
+    /error            容器未处理异常的 ERROR dispatch 落点（拦它 = 出错再叠一层 429）
+    /img/**           商品图与头像（ImgPath.java:109 注册的唯一静态前缀）
+    /favicon.ico      浏览器自动请求、不对应任何业务动作
+    /admin/observe/** **观测与控制面** —— ⚠️ 本笔唯一超出裁定枚举的一条，理由：面板那枚〔暂停〕
+                      打的是 /admin/observe/attack/stop，闸满档时它会和演练自己的流量抢同一桶
+                      令牌 ⇒「演示现场按不动停止按钮」。防护面掐断控制面是本段最不该出的事故。
+                      ⚠️ 这条不放宽任何业务面：八条业务端点、演练要打的目标路径一条都没进。
+· 超限：429 + 体形状与 Result.fail 同形（{"success":false,"msg":"请求过于频繁：入站限流每 1 秒
+  放行 200 条，这一拍没有余量，请稍后重试"}）—— 手写 JSON（少一个构造依赖），带 charset=UTF-8。
+· 已知缺口（如实记）：① 拦截器不覆盖「没匹配到 handler」的请求（404 那一路进不了 preHandle ⇒
+  拿不存在路径刷量不拦不计数）② SSE 异步分发会让 preHandle 重入 ⇒ 一条流占两个令牌（本笔不消特例，
+  200/s 下不可见）。
+
+四、熔断：包哪些下游 / 最小请求数 / 半开策略
+--------------------------------------------------------------------------------
+· 包哪些下游：**只有 MySQL**，两个实例（`mallMysqlRead` 读 / `mallMysqlWrite` 写），落点见 §二②。
+  ⚠️ Redis / MQ **不加** r4j 熔断：那两条本仓已各有一处手写熔断（RabbitEventPublisher 的 connected
+  闸 + 探测线程；DistributedLockService 的 cooldown 窗口），再叠一层是重复造 ⇒ 登记 **TD-75**。
+  ⚠️ 不挂在入站层（那是 §三的限流的活）；也不允许只挂订单 / 支付（用户裁定逐字禁止）。
+· 最小请求数：**20**（minimum-number-of-calls）—— 没有它，低流量时一次偶发超时就能把熔断打开
+  （误熔断）。
+· 半开策略：open 后 **30s** 进 half-open（automatic-transition 开）⇒ 放 **5 个**探路请求
+  （permitted-number-of-calls-in-half-open-state=5）⇒ 达标闭合、否则再 open。
+  **半开 / 开路 / 恢复都有记录**：ProtectionMetricsBinder 订阅 getEventPublisher()，把状态翻转
+  记进第 9 类事件环 `protection` 与 `mall.protection.events{protection,result}`（不写日志了事）。
+· 切面顺序（实测取值，不是声明）：@CircuitBreaker 切面 order = 2147483643（= Integer.MAX_VALUE-4，
+  从 resilience4j-spring6-2.3.0.jar 常量池读出）< 事务切面 ⇒ **熔断在外、事务在内**：开路时连事务
+  都不开（不占连接、不回滚）。
+
+五、degrade：页面文案怎么改、是否标灰
+--------------------------------------------------------------------------------
+· 是否标灰：**是**（标灰 + 不可开关 —— 禁死控件）。
+· 怎么改（三处一起，缺一条就是死控件）：
+  1) 文案表：observe-labels.js 的 PROTECTIONS_NOT_WIRED:305 = ['degrade','retry'] 与
+     PROTECTION_NOT_WIRED_TIP:308（**逐枚** tooltip）
+  2) 逐枚 tooltip（探针逐字比对过）：
+     · 降级：`降级：记录位，不可开关，系统固有 fail-open 设计`（用户裁定逐字要求的那句）
+     · 重试：`重试：本段不落码：只登记 TD-74（有死锁实测证据后再落 GoodsService 三处写方法，
+             本段一行重试代码都没有）`
+  3) 面板：AttackConsole.vue 的 is-locked:132 + disabled:138 + aria-disabled:134 + 「不可开关」角标:143
+     + toggleProtection 的 JS 守卫:686（**不只是模板画灰**）；副标题 :124 同步为
+     「默认全开 · 限流 / 熔断 / 分池已接闸，改读数；重试与降级不可开关」
+· 证据：探针 docs/agent/evidence/c3-block7/d2-locked-switches.txt（**21 项 / 0 失败**），包含
+  「抠掉 disabled 再点 ⇒ 状态没变」（证明 JS 守卫真在拦）与「接通的那枚点一下状态真变」（对照，
+  同时证明前一条不是「读早了」）；截图 d2-protection-switches.png。
+
+六、TD 编号 / 触发条件 / 落点 / 代价（重试 = ④，本笔只登记不落码）
+--------------------------------------------------------------------------------
+· 编号：tech-debt.md **TD-74**（重试）· **TD-75**（Redis / MQ 不加熔断的理由）
+· 触发条件：**先有「哪几个 SQL 会死锁、且有可复现场景」的实测** —— 没有实测就不落码（本笔一行
+  重试代码都没有；仓库里也没有 @Retry / retry 依赖）。
+· 落点：**GoodsService 三处写方法** —— goodsAdd（GoodsService.java:155）/ goodsDe（:372）/
+  goodsUp（:422）（它们是「goods 与 productsales 一次写两处 + @Transactional」的组合）。
+  ⚠️ **不得挂 OrderService**（订单链刻意禁 @Transactional）；⚠️ **不得拿 DistributedLockService
+  当重试**（那是「锁等待」，不是「死锁重试」）。
+· 代价 / 未来落地注意：① AOP **同类自调用无效**（必须跨 bean 调用）② 重试必须在**事务之外**
+  ③ 落地前先做「并发压商品写接口」的实验。⚠️ 「落这三处」是**用户裁定**，不是「全仓唯一的多表
+  事务」—— @Transactional 在全仓 20 个文件里都有。
+
+七、第 9 类 `protection` 的落点清单（含数据层两处枚举）
+--------------------------------------------------------------------------------
+· 后端：EventBroadcaster.Kind.PROTECTION:142 · ingestProtection():474-495 · ProtectionMetrics
+· 前端 labels 五处（见 §二①）· EventLog.vue 零改动
+· **数据层两处枚举**：mall_management_sql.sql:1868 与 docs/agent/db-schema.md:942 的 8 名清单
+  各补 `protection`（同行替换、净 0 行）
+· 数据层另三处实测**无需改**：ObservedEventDao 的 KIND_MAX=16（≥ "protection" 的 10 字符）/
+  clip(e.kind(), …) / INSERT 列清单
+
+八、refs 登记表（本笔重指 34 · 订正 2 · 只登记 39+2；逐条给真值）
+--------------------------------------------------------------------------------
+【8.1 重指 34 条 —— 本笔顶偏、原值当时准确（同行替换、净 0 行）】
+  (a) D pack（docs/agent/context-packs/c3-block-D-hardening.md）**33 条**：
+      扫描器可指认 22 条（refs-diff.mjs 的 LOST∩NEW）：
+        :133/:139 EventBroadcaster.java 枚举 111-119 → 132-140
+        :135          同族 tag/label            121-124 → 144-147
+        :139          源 metrics 字段           173-180 → 199-206
+        :139          构造器形参                200-218 → 233-253
+        :139          poll() 里加调用           229-240 → 264-276
+        :139          既有 8 段 ingestXxx       294-435 → 330-471
+        :143          EventBroadcasterTest.java  63 → 68；EventStreamServiceTest.java 78 → 81
+        :158          DrillRecordService.java   100 → 109
+        :161          observe-labels.js:257 → 274；:260-266 → 277-283
+        :169/:266     AttackConsole.vue         119 → 124；:129 → 134
+        :189          OrderService.java 四个 runLocked  369/1169/1188/1225 → 379/1179/1198/1235
+        :205          DrillRecordService.java 187-189 → 213-215；:37-38 → 38-39
+        :296          record ObservedEvent       168-170 → 194-196
+        :303          @param traceId 那句        160-162 → 186-188
+      扫描器**看不见** 11 条（同行只有裸续引、没有「有名 token」，refs-scan.sh 按无主裸续引丢弃
+      ⇒ 手工重指；这也是一条已登记的教训）：observe-labels.js 五处 24/34-43/56-65/90-122/154-163
+      → 27/37-47/63-73/98-135/168-180 与 :315-319 → 360-364（共 6）· AttackConsole.vue 五处
+      117-136/123/613/663-669/982 → 122-145/128/624/674-692/1005（共 5）
+  (b) docs/agent/api-contract.md **1 条**：:799 的 `protections` 行属实行改写时把旧引
+      （AttackController 的原 110 行）一并删掉了 ⇒ 补回 AttackController:111（同行内加、净 0 行）
+
+【8.2 订正 2 条 —— 本笔顶偏，但原值在取点当天即偏 ⇒ 按实测真值改】
+        EventBroadcaster.java 的原 652 行（所述 = cursor.getAndIncrement()）取点当天真值为 **654**
+        ⇒ 现址 **767**（偏差被本笔从 2 行放大到 113 行）
+        EventBroadcaster.java 的原 176-182 行（所述 =「poll() 由流线程驱动…」那句）真值为 **188**
+        ⇒ 现址 **221**（放大到 43 行）
+
+【8.3 只登记、不重指 39 条（refs-diff.mjs 实测「两侧一字未动、而目标行被本笔移动」）】
+  三类判据，逐类列全：
+  (甲) 史料类 20 条 —— 引用者自己就是「旧引用账 / 重指记录」，改了等于篡改史料：
+    docs/agent/archive/块7-边界补笔-order.Source写入通道-收笔报告.txt:102 → OrderService.java:339（现址 349）
+    docs/agent/context-packs/块7-commit10-阶段一核实.txt:211 → AttackConsole.vue:322-330（现址 331）
+    docs/agent/evidence/c3-block6/b6-c7-repoint-final.txt:115 → AbstractSmokeTest.java:143（现址 145）
+    docs/agent/progress.md:248 → OrderService.java:61（62）· :411 → AbstractSmokeTest.java:45（47）
+                                 · :2309 → AbstractSmokeTest.java:45（47）
+    docs/agent/slot-registry.md:1885 → OrderService.java:102（103）· :1893 → OrderService.java:235（236）
+      · :1894 → OrderService.java:78（79）· :1928 → OrderService.java:235（236）与 :78（79）
+      · :2000 → OrderService.java:102（103）· :4198 → AbstractSmokeTest.java:143（145）
+      · :4449 → AbstractSmokeTest.java:45（47）与 OrderService.java:61（62）
+      · :4946 → AbstractSmokeTest.java:45（47）
+    docs/agent/tech-debt.md:762 → OrderService.java:339（349）/ :95（96）/ :119（120）
+                            · :889 → AbstractSmokeTest.java:45（47）
+  (乙) 他块 context-pack 18 条 —— **本笔之前就已陈旧**（例：那批引的是 @Import 真 bean 名单，
+       而该注解在 HEAD 已到 203 行；GoodsService 的 475-478 / 310-341 在 HEAD 是空行）：
+    c3-block-1-infra.md:49 → GoodsService.java:475-478（494）
+    c3-block-2-user.md:146/:178 → AbstractSmokeTest.java:137-146（139）
+    c3-block-3-goods.md:58/:202/:236 → AbstractSmokeTest.java:137（139）· :64 → GoodsService.java:135-136（136）
+      · :65/:170 → GoodsService.java:310-341（326）
+    c3-block-4-order.md:57/:180/:213 → AbstractSmokeTest.java:156（158）· :30 → OrderService.java:205（206）
+      · :68 → OrderService.java:177（178）· :69 → OrderService.java:456（466）
+    c3-block-5-marketing.md:60/:171/:212 → AbstractSmokeTest.java:163-206（165）
+  (丙) 本笔自己的 pack 1 条 —— c3-block-D-hardening.md:77 引的 pom.xml:159-162：
+       pom 本笔是**纯尾插**（@@ -161,0 +162,27 @@）⇒ 被引的 159-161 **没有移动**，
+       口径与 pack〈落地登记〉「只登记、不改」一致
+  ⚠️ 另有 pack 内 pom 两条按同一口径只登记：:76 引的 pom 原 150-159（真值 149-157）· :77 引的
+     原 159-162（真值 158-161）—— 依据：agent.md「代码引用是快照，漂了不追」+ 同批 8 个文件同处置。
+
+九、测试与规模
+--------------------------------------------------------------------------------
+· 测试：基线 **498** ⇒ 本笔 **541 passed / 0 failed / 0 errors / 26 skipped**（**+43**，./mvnw -B -o test，
+  EXIT=0；全量日志 _work/d2/full-test.log）。新增 7 个测试类：ProtectionGateTest 9 ·
+  ProtectionKeysAlignmentTest 2 · ProtectionMetricsTest 6 · InboundRateLimitInterceptorTest 7 ·
+  ProtectionMetricsBinderTest 5 · ProtectionThresholdsTest 4 · CircuitBreakerWiringTest 4。
+· 规模：修改 **21 文件 / +959 / −116**（git diff --stat）；新增 **13 源文件**（主 6 / 919 行、测试 7 /
+  879 行）+ **3 探针** + **4 证据**（3 txt + 1 png）。
+· 探针（scripts/probes/）：probe-d2-inbound-gate.mjs（320 发 = 200+120×429，且 mall.protection.events
+  增量恰 120）· probe-d2-locked-switches.mjs（21/21）· probe-d2-protection-keys-alignment.mjs
+  （三方 key 表同序 + **含突变对照**：打乱前端表 ⇒ 退出码 1，还原后 md5 一致）。
+· 三方 key 表同序：后端两份由 ProtectionKeysAlignmentTest 钉；前端第三份**跨语言** ⇒ 只能探针守。
+
+十、未还项（如实登记，别当成做完了）
+--------------------------------------------------------------------------------
+1. **帧读数第 9 条**（§⑨ 第 1 条「指标帧要反映防护」）**没做** —— MetricsSnapshotService 的
+   protections(...) 仍返回 8 条防护命中；本笔新增的防护动作只从帧 counts 第 9 键与
+   mall.protection.events 回答 ⇒ **归 commit 3**。
+2. **retry** 见 TD-74（§六）；**Redis / MQ 不加熔断**见 TD-75。
+3. §⑧ 四条边界（SSE 连接保护 / MQ 幂等与 DLQ / 无上限列表 / 脱敏）**本笔一条没动** ⇒ 归 commit 3。
+4. **手验**按批文仍压到 **commit 4 之后**统一一轮；⚠️ **dev / a3 两个 profile 都是
+   app.auth.enabled=false** ⇒ 手验绿 ≠ 默认 profile 绿（凡涉鉴权的项必须标「默认 profile」）。
+5. 本笔**不 push / 不 merge / 不开 PR**。
+
+本笔的事实更正（五处，均为实测而非推断，详见 progress.md `#### 7-B7-D2.`）：
+  ① RateLimiter 2.3.0 没有 tryAcquirePermission() ② AntPathMatcher 的 /** 匹配零段
+  ③ ThreadPoolTaskExecutor 非 bean 时必须显式 initialize() 且线程默认非守护
+  ④ @CircuitBreaker 切面 order = 2147483643（熔断天然在事务之外）⑤ --c9 早就存在（没动 tokens.css）
+================================================================================

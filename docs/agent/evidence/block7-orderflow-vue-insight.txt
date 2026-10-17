@@ -1,0 +1,22 @@
+# 块7 · 状态流转页 /admin/observe/orders/insight 实测（2026-10-17）
+抓取时刻（本机 +08:00）: 2026-10-17 20:26:45
+说明: DB 时间列按 UTC 存储；trend 标签与 from/to 已转 Asia/Shanghai 展示。
+
+counts: {"cancelled": 194, "completed": 108, "total": 415, "waitPay": 0, "waitReceive": 24, "waitShip": 89}
+trend: 10-16 20:00 -> 10-17 20:00, anchored=False, points=25
+  waitPay    last=0 min=0 max=0
+  waitShip   last=89 min=89 max=89
+  waitReceive last=24 min=24 max=24
+
+durations.pay: samples=215 avgMinutes=28.2 maxMinutes=88 bins=[('0–5分', 78), ('5–15分', 15), ('15–60分', 77), ('1–6小时', 45), ('6–24小时', 0), ('24小时+', 0)]
+durations.ship: samples=126 avgMinutes=1133.3 maxMinutes=2393 bins=[('0–1小时', 0), ('1–6小时', 18), ('6–24小时', 60), ('1–3天', 48), ('3–7天', 0), ('7天+', 0)]
+durations.receive: samples=102 avgMinutes=3634.8 maxMinutes=7129 bins=[('0–6小时', 0), ('6–24小时', 17), ('1–3天', 44), ('3–7天', 41), ('7天+', 0)]
+
+aging.waitShip: total=89 timeout=89 avgHours=181 maxHours=1265
+aging.waitReceive: total=24 timeout=24 avgHours=571 maxHours=1212
+
+health: {"activeCount": 113, "avgDwellHours": 376.0, "backlogShare": 27.2, "grade": "危险", "score": 11, "timeoutCount": 113, "timeoutRate": 100.0}
+slowest top3:
+  #GOWW80602762 state=waitShip dwellSeconds=4555897 timeout=True
+  #JXZQ66006744 state=waitShip dwellSeconds=4494859 timeout=True
+  #ILMH17697325 state=waitReceive dwellSeconds=4363700 timeout=True

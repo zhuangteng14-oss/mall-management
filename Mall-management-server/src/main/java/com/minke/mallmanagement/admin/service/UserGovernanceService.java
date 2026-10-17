@@ -33,14 +33,16 @@ public class UserGovernanceService {
         this.userGovernanceDao = userGovernanceDao;
     }
 
-    /** 用户列表（{@code keyword} 可空）。 */
-    public Map<String, Object> listUsers(String keyword, Integer limit) {
+    /** 用户列表（{@code keyword} 可空；块 7 收尾 · P1 起支持 {@code offset} 真分页）。 */
+    public Map<String, Object> listUsers(String keyword, Integer limit, Integer offset) {
         int effective = normalizeLimit(limit);
+        int skip = offset == null || offset < 0 ? 0 : offset;
         Map<String, Object> result = new HashMap<>();
         result.put("success", true);
-        result.put("list", userGovernanceDao.selectUsers(keyword, effective));
+        result.put("list", userGovernanceDao.selectUsers(keyword, effective, skip));
         result.put("total", userGovernanceDao.countUsers(keyword));
         result.put("limit", effective);
+        result.put("offset", skip);
         return result;
     }
 

@@ -212,8 +212,12 @@ public class GoodsController {
     //这是一个接口（用于返回商品对应的所有信息）
     // 方法体与缓存注解在 GoodsCacheService.listHome()；本笔再上移一层（纯委托）。
     @PostMapping("/goodsSelectHome")
-    public Result<Map<String, Object>> goodsSelectHome() {
-        return Result.of(goodsService.goodsSelectHome());
+    public Result<Map<String, Object>> goodsSelectHome(
+            @RequestParam(value = "limit", required = false) Integer limit,
+            @RequestParam(value = "offset", required = false) Integer offset,
+            @RequestParam(value = "MerchantId", required = false) String MerchantId
+    ) {
+        return Result.of(goodsService.goodsSelectHome(limit, offset, MerchantId));
     }
 
     // 这是一个接口（用于下架商品）
@@ -230,7 +234,20 @@ public class GoodsController {
         if (!IdentityGuard.requireSelfOrAdmin(request, MerchantId)) {
             return IdentityGuard.forbidden();
         }
-        return ResponseEntity.ok(Result.of(goodsService.goodsDe(MerchantId, GoodName, ProductCode)));
+        // ═══ 块 7 · commit 8：跨域补挂的**审计漏挂**（本端点是块 1 就有的，当时只给 goodsUp 挂了样板）═══
+        // 形状同 goodsUp 四步，但**顺序是本条的关键**：两条真 DELETE 一走，行就从表里没了
+        // ⇒ 快照**必须**在业务之前取，否则「改前」恒为空数组（同 AdminCatalogController 那两条
+        //   违规处置的写法，它们也是先 snapshot 后动作）。
+        // ⚠️ 快照谓词借的是 selectGoodsForAudit(MerchantId, ProductCode)（**不含 GoodName**，
+        //    比 deleteGoods 的三元组宽）。这是本仓**既有**口径：违规下架 / 违规删除两条端点
+        //    同样拿这条读去对三元组动作 —— 本笔随大流，未顺手改它。
+        List<Map<String, Object>> before = goodsService.snapshotGoodsForAudit(MerchantId, ProductCode);
+        Map<String, Object> deleted = goodsService.goodsDe(MerchantId, GoodName, ProductCode);
+        if (Boolean.TRUE.equals(deleted.get("success"))) {
+            auditService.record(AuthSession.identify(request), AuditActions.GOODS_DELETE, "goods",
+                    MerchantId + ":" + ProductCode, before, null);
+        }
+        return ResponseEntity.ok(Result.of(deleted));
     }
 
     //这是一个接口（用于根据商品的不同型号切换显示对应的价格）
@@ -371,8 +388,12 @@ public class GoodsController {
     // 动态 SQL 的构造随之下沉 GoodsDao.searchByKeyword()。
     // ⚠️ 该 SQL 的两个已知问题（逐字 LIKE 拼串 + 无 schema 前缀）**本笔不修** —— 见 GoodsDao。
     @PostMapping("/productSearch")
-    public Result<Map<String, Object>> productSearch(String keyword) {
-        return Result.of(goodsService.productSearch(keyword));
+    public Result<Map<String, Object>> productSearch(
+            String keyword,
+            @RequestParam(value = "limit", required = false) Integer limit,
+            @RequestParam(value = "offset", required = false) Integer offset
+    ) {
+        return Result.of(goodsService.productSearch(keyword, limit, offset));
     }
 
     // ═══ C3 块 3 新增：二级类目筛选 ═══
@@ -384,9 +405,11 @@ public class GoodsController {
     @PostMapping("/categoryGoods")
     public Result<Map<String, Object>> categoryGoods(
             @RequestParam("TypeId") Integer TypeId,
-            @RequestParam(value = "keyword", required = false) String keyword
+            @RequestParam(value = "keyword", required = false) String keyword,
+            @RequestParam(value = "limit", required = false) Integer limit,
+            @RequestParam(value = "offset", required = false) Integer offset
     ) {
-        return Result.of(goodsService.categoryGoods(TypeId, keyword));
+        return Result.of(goodsService.categoryGoods(TypeId, keyword, limit, offset));
     }
 
     // ═══ C3 块 3 新增：商家查自己的提审历史 / 状态 ═══

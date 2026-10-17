@@ -126,7 +126,7 @@
               <!-- ⚠️ 行级点击**保留既有真事件**（原卡片墙是 `@click="openModal(item)"` 打在整卡上）⇒ 表体照落
                    同一事件；「操作」列那格用 `@click.stop` 拦住冒泡，免得【编辑】触发两次 `openModal`。⚠️ C3 块 3
                    起加**前置判据**：只有 `onshelf` 行可点（待审 / 驳回行在 `goods` 表里压根不存在，取不到规格）。 -->
-              <tr v-for="item in visibleList" :key="item.state + ':' + item.goodName" @click="item.state === 'onshelf' && openModal(item)">
+              <tr v-for="item in pageRows" :key="item.state + ':' + item.goodName" @click="item.state === 'onshelf' && openModal(item)">
                 <td class="c-ck">
                   <!-- 稿外死控件（稿 `:529` 的行内模板）：稿里带 `title` ⇒ 逐字取稿 -->
                   <button
@@ -185,16 +185,17 @@
 
       <!-- 预留位 ④（稿 `:414`）—— 块级。内部 3 枚页码钮是稿外死控件（稿里只有 `disabled`）。
            ⚠️ 稿 `.sum` 写死「共 8 件」⇒ 落**真条数**，与页头同一口径。 -->
-      <div
-        class="pager"
-        data-slot="预留 · 分页（动现有代码 3 处）"
-        title="待 C3〈商品〉——goodsSelect 的 SELECT * 无 LIMIT、无分页参数（GoodsDao:187 逐字写明）：GoodsCacheService.java + GoodsController.java + GoodsUp.vue = 3 处"
-      >
-        <span class="sum">共 {{ visibleList.length }} 件</span>
-        <button type="button" class="on" disabled title="待 C3〈商品〉——goodsSelect 无 LIMIT，分页要改缓存层 + 控制器（3 处，占位档）">1</button>
-        <button type="button" disabled title="同上">2</button>
-        <button type="button" disabled title="同上">下一页</button>
-      </div>
+      <!-- 块 7 收尾 · P1：原「预留 · 分页（动现有代码 3 处）」占位档已兑现 ——
+           `goodsSelect` 后端硬夹 200 行（`GoodsCacheService.java:227-229`），本页按合并后的行做前端分页（默认每页 20）。 -->
+      <Pager
+        :total="visibleList.length"
+        :limit="pageLimit"
+        :offset="pageOffset"
+        :sizes="[20, 50, 100]"
+        unit="件"
+        label="商品"
+        @change="onPageChange"
+      />
     </template>
 
     <!-- ── 按名称精确下架（稿 `.sec` `:260-272` / 模板 `:422-431`）────────────────────
@@ -330,7 +331,7 @@
 import { ref, computed, onMounted } from 'vue'
 import { http, handleApiError, assetOf } from '../api/http'
 import { endpoints } from '../api/endpoints'; import { subsidyGoods, seckillLive } from '../api/marketing'   // ⚠️ 同样**同行**（同上一条手法）：本文件被 `api-contract.md` 与 `slot-registry.md` 按行号钉住 ⇒ 合并到既有行 = 零漂移
-import { getMerchantId, isLoggedIn } from '../api/auth'; import IconGlyph from '../components/ui/IconGlyph.vue'   // ⚠️ 两条 import **同行**（2026-10-11 补图标那一笔）—— 合并到既有行 = 不新增行号漂移（`api-contract.md` 按 `GoodsUp.vue:170/215/275/327` 钉住本文件）
+import { getMerchantId, isLoggedIn } from '../api/auth'; import IconGlyph from '../components/ui/IconGlyph.vue'; import Pager from '../components/Pager.vue'   // ⚠️ 两条 import **同行**（2026-10-11 补图标那一笔）—— 合并到既有行 = 不新增行号漂移（`api-contract.md` 按 `GoodsUp.vue:170/215/275/327` 钉住本文件）
 
 const goodsList = ref([])
 const userInfo = ref({})
@@ -618,7 +619,7 @@ const appsList = ref([])
 // （不点【查询】就按上一次的快照筛；两个对象同时换，避免「改一个字段即时生效」的不一致观感）
 const flt = ref({ name: '', code: '', state: '', type: '' })
 const applied = ref({ name: '', code: '', state: '', type: '' })
-const applyFlt = () => { applied.value = { ...flt.value } }
+const applyFlt = () => { applied.value = { ...flt.value }; pageOffset.value = 0 }   // 换筛选 ⇒ 回第一页
 
 // 状态三态的唯一文案表（`rows[].state` 的取值）= 值；下拉与状态列**共用**它，避免两处写法飘
 const STATE_TEXT = { onshelf: '已上架', pending: '待审', rejected: '已驳回' }
@@ -669,6 +670,24 @@ const visibleList = computed(() => {
 
 // 在架条数：页头「共 N 件上架中」只说**在架**（待审 / 驳回不是「上架中」）
 const onshelfCount = computed(() => rows.value.filter((r) => r.state === 'onshelf').length)
+
+// ── 分页（块 7 收尾 · P1）───────────────────────────────────────────────────
+// `goodsSelect` 本身已由后端硬夹到 200 行（`GoodsCacheService.listByMerchant`），这里在
+// **已取回的合并行**上前端分页：默认每页 20，标准分页器（`components/Pager.vue`）。
+// ⚠️ 它分的是「上架 ∪ 待审/驳回」的合并结果（`visibleList`），不是服务端的一页 —— 因为本表
+//    本来就要并两个来源。>200 件的商家登记在《长列表接口盘点报告》，真正修法是后端真分页。
+const pageLimit = ref(20)
+const pageOffset = ref(0)
+const pageRows = computed(() => {
+  const total = visibleList.value.length
+  const maxOffset = Math.max(0, Math.ceil(total / pageLimit.value) - 1) * pageLimit.value
+  const off = Math.min(Math.max(0, pageOffset.value), maxOffset)
+  return visibleList.value.slice(off, off + pageLimit.value)
+})
+function onPageChange({ limit, offset }) {
+  pageLimit.value = limit
+  pageOffset.value = offset
+}
 
 // 提审历史（待审 / 驳回的来源）。⚠️ `MerchantId` 是「调用者自己」⇒ 后端过 `IdentityGuard`。
 const getMyApplications = async () => {

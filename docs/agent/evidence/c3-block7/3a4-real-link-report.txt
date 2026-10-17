@@ -1,0 +1,384 @@
+{
+  "at": "2026-10-17T05:21:49.411Z",
+  "checks": {
+    "admin-entry-theme": {
+      "ok": true,
+      "detail": {
+        "theme": "admin",
+        "title": "管理端 · Mall Management"
+      }
+    },
+    "logs-not-blank-on-entry": {
+      "ok": true,
+      "detail": {
+        "rows": 20,
+        "ranged": 2048,
+        "emptyText": null,
+        "state": {
+          "events": 2048,
+          "ranged": 2048,
+          "seq": 6
+        }
+      }
+    },
+    "logs-default-range-all": {
+      "ok": true,
+      "detail": {
+        "status": "已连接 2,048 范围内事件（上限 1000） 0.0 本拍速率（条/秒） 256 范围内链路（上限 300） 17.6 % 错误率 warn+error 157ms P99 耗时（n=256） 数据源 正常 模拟日常 后端真流 已放 0 / 500 条（模拟日常未开） 时间范围 全部 近 5 分 近 30 分 自定义 导出 CSV JSON ndjson 密度 紧凑 舒适 第 6 拍 · 每秒 1 拍 · 13:21:59.341 MQ 已连接"
+      }
+    },
+    "logs-live-growth": {
+      "ok": true,
+      "detail": {
+        "fresh": 1000,
+        "total": 1000,
+        "newestTs": 1792214527447,
+        "cut": 1792214520152,
+        "ranged": 1000,
+        "seq": 14
+      }
+    },
+    "metrics-first-screen-history": {
+      "ok": true,
+      "detail": {
+        "seq": 4,
+        "rows": 60,
+        "tz": "已连接 第 4 拍 · 窗口 60 秒 13:22:14"
+      }
+    },
+    "metrics-survives-route-switch": {
+      "ok": true,
+      "detail": {
+        "seqBefore": 4,
+        "seqAfter": 11,
+        "rowsBefore": 60,
+        "rowsAfter": 60
+      }
+    },
+    "replay-persisted-without-viewer": {
+      "ok": true,
+      "detail": {
+        "batchId": "ce2c6382-bb68-4d32-bc8c-a630fdf550d6",
+        "total": 4932,
+        "list": 4932,
+        "drillOk": true
+      }
+    },
+    "replay-gradual": {
+      "ok": true,
+      "detail": {
+        "startedAt": {
+          "t": 600,
+          "live": "正在回放 （进度 35 / 5000）",
+          "played": 35,
+          "cursor": 35,
+          "total": 5000
+        },
+        "later": {
+          "t": 4200,
+          "live": "正在回放 （进度 332 / 5000）",
+          "played": 200,
+          "cursor": 332,
+          "total": 5000
+        }
+      }
+    }
+  },
+  "samples": {
+    "preTraffic": [
+      {
+        "path": "/goods/goodsSelectHome",
+        "status": 405
+      },
+      {
+        "path": "/goods/productSearch?keyword=a",
+        "status": 405
+      },
+      {
+        "path": "/goods/goodstype",
+        "status": 200
+      }
+    ],
+    "logEntry": {
+      "theme": "admin",
+      "title": "管理端 · Mall Management",
+      "hash": "#/admin/observe/logs",
+      "log": {
+        "status": "已连接 2,048 范围内事件（上限 1000） 0.0 本拍速率（条/秒） 256 范围内链路（上限 300） 17.6 % 错误率 warn+error 157ms P99 耗时（n=256） 数据源 正常 模拟日常 后端真流 已放 0 / 500 条（模拟日常未开） 时间范围 全部 近 5 分 近 30 分 自定义 导出 CSV JSON ndjson 密度 紧凑 舒适 第 6 拍 · 每秒 1 拍 · 13:21:59.341 MQ 已连接",
+        "ranged": 2048,
+        "rows": 20,
+        "emptyText": null,
+        "rangeChip": null,
+        "state": {
+          "events": 2048,
+          "ranged": 2048,
+          "seq": 6
+        }
+      },
+      "metrics": {
+        "seq": null,
+        "tz": null,
+        "charts": 0,
+        "state": null
+      },
+      "replay": {
+        "live": null,
+        "bar": null,
+        "played": 0,
+        "empty": null
+      }
+    },
+    "traffic": [
+      {
+        "path": "/goods/goodsSelectHome",
+        "status": 405
+      },
+      {
+        "path": "/goods/productSearch?keyword=a",
+        "status": 405
+      },
+      {
+        "path": "/goods/goodstype",
+        "status": 200
+      },
+      {
+        "path": "/goods/goodsSelectHome",
+        "status": 405
+      },
+      {
+        "path": "/goods/productSearch?keyword=a",
+        "status": 405
+      },
+      {
+        "path": "/goods/goodstype",
+        "status": 200
+      },
+      {
+        "path": "/goods/goodsSelectHome",
+        "status": 405
+      },
+      {
+        "path": "/goods/productSearch?keyword=a",
+        "status": 405
+      },
+      {
+        "path": "/goods/goodstype",
+        "status": 200
+      },
+      {
+        "path": "/goods/goodsSelectHome",
+        "status": 405
+      },
+      {
+        "path": "/goods/productSearch?keyword=a",
+        "status": 405
+      },
+      {
+        "path": "/goods/goodstype",
+        "status": 200
+      }
+    ],
+    "liveDrill": {
+      "status": 200,
+      "ok": true,
+      "id": 55,
+      "total": 683
+    },
+    "logAfterTraffic": {
+      "theme": "admin",
+      "title": "管理端 · Mall Management",
+      "hash": "#/admin/observe/logs",
+      "log": {
+        "status": "已连接 1,000 范围内事件（上限 1000） 0.0 本拍速率（条/秒） 300 范围内链路（上限 300） 7.6 % 错误率 warn+error 241ms P99 耗时（n=300） 数据源 正常 模拟日常 后端真流 已放 0 / 500 条（模拟日常未开） 时间范围 全部 近 5 分 近 30 分 自定义 导出 CSV JSON ndjson 密度 紧凑 舒适 第 14 拍 · 每秒 1 拍 · 13:22:10.032 MQ 已连接",
+        "ranged": 1000,
+        "rows": 20,
+        "emptyText": null,
+        "rangeChip": null,
+        "state": {
+          "events": 1000,
+          "ranged": 1000,
+          "seq": 14
+        }
+      },
+      "metrics": {
+        "seq": null,
+        "tz": null,
+        "charts": 0,
+        "state": null
+      },
+      "replay": {
+        "live": null,
+        "bar": null,
+        "played": 0,
+        "empty": null
+      }
+    },
+    "logFreshRows": {
+      "total": 1000,
+      "fresh": 1000,
+      "newestTs": 1792214527447,
+      "cut": 1792214520152
+    },
+    "metricsFirst": {
+      "theme": "admin",
+      "title": "管理端 · Mall Management",
+      "hash": "#/admin/observe/metrics",
+      "log": {
+        "status": null,
+        "ranged": null,
+        "rows": 0,
+        "emptyText": null,
+        "rangeChip": null,
+        "state": null
+      },
+      "metrics": {
+        "seq": 4,
+        "tz": "已连接 第 4 拍 · 窗口 60 秒 13:22:14",
+        "charts": 5,
+        "state": {
+          "rows": 60,
+          "seq": 4
+        }
+      },
+      "replay": {
+        "live": null,
+        "bar": null,
+        "played": 0,
+        "empty": null
+      }
+    },
+    "metricsAfterRoundTrip": {
+      "theme": "admin",
+      "title": "管理端 · Mall Management",
+      "hash": "#/admin/observe/metrics",
+      "log": {
+        "status": null,
+        "ranged": null,
+        "rows": 0,
+        "emptyText": null,
+        "rangeChip": null,
+        "state": null
+      },
+      "metrics": {
+        "seq": 11,
+        "tz": "已连接 第 11 拍 · 窗口 60 秒 13:22:21",
+        "charts": 5,
+        "state": {
+          "rows": 60,
+          "seq": 11
+        }
+      },
+      "replay": {
+        "live": null,
+        "bar": null,
+        "played": 0,
+        "empty": null
+      }
+    },
+    "drill": {
+      "status": 200,
+      "ok": true,
+      "id": 56,
+      "total": 1556
+    },
+    "records": {
+      "status": 200,
+      "count": 20,
+      "newest": {
+        "Id": 56,
+        "BatchId": "ce2c6382-bb68-4d32-bc8c-a630fdf550d6",
+        "Name": "probe-persist-20261017",
+        "CreatedAt": "2026-10-17 05:22:29"
+      }
+    },
+    "replayApi": {
+      "status": 200,
+      "success": true,
+      "total": 4932,
+      "list": 4932,
+      "firstKind": "identity",
+      "firstAt": "2026-10-17 13:22:22.383"
+    },
+    "replayClick": {
+      "ok": true,
+      "expanded": true,
+      "text": "probe-persist-20261017 总 1556 · 拦下 782 · 失败 0 （认不出身份） 角色 0 耗时 8.2 s 2026-10-17 13:22:29 库内 2026-10-17 05:22:29 ▸"
+    },
+    "playClicked": {
+      "ok": true
+    },
+    "replayTicks": [
+      {
+        "t": 600,
+        "live": "正在回放 （进度 35 / 5000）",
+        "played": 35,
+        "cursor": 35,
+        "total": 5000
+      },
+      {
+        "t": 1000,
+        "live": "正在回放 （进度 86 / 5000）",
+        "played": 86,
+        "cursor": 86,
+        "total": 5000
+      },
+      {
+        "t": 1400,
+        "live": "正在回放 （进度 116 / 5000）",
+        "played": 116,
+        "cursor": 116,
+        "total": 5000
+      },
+      {
+        "t": 1800,
+        "live": "正在回放 （进度 146 / 5000）",
+        "played": 146,
+        "cursor": 146,
+        "total": 5000
+      },
+      {
+        "t": 2200,
+        "live": "正在回放 （进度 179 / 5000）",
+        "played": 179,
+        "cursor": 179,
+        "total": 5000
+      },
+      {
+        "t": 2600,
+        "live": "正在回放 （进度 209 / 5000）",
+        "played": 200,
+        "cursor": 209,
+        "total": 5000
+      },
+      {
+        "t": 3000,
+        "live": "正在回放 （进度 239 / 5000）",
+        "played": 200,
+        "cursor": 239,
+        "total": 5000
+      },
+      {
+        "t": 3400,
+        "live": "正在回放 （进度 269 / 5000）",
+        "played": 200,
+        "cursor": 269,
+        "total": 5000
+      },
+      {
+        "t": 3800,
+        "live": "正在回放 （进度 299 / 5000）",
+        "played": 200,
+        "cursor": 299,
+        "total": 5000
+      },
+      {
+        "t": 4200,
+        "live": "正在回放 （进度 332 / 5000）",
+        "played": 200,
+        "cursor": 332,
+        "total": 5000
+      }
+    ]
+  },
+  "fail": []
+}

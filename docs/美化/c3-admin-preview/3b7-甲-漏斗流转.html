@@ -1,0 +1,638 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>3b.7 状态流转 · 甲 —— 漏斗流转（REIMAGINE）· 结构草图 v2</title>
+<link rel="stylesheet" href="./_struct-wire.css">
+<style>
+/* ══════════════════════════════════════════════════════════════════════════════
+   本页只新增 layout 原语：栅格 / 间距 / 对齐 / 线宽。
+   不新增品牌色、不写圆角、不写阴影、不写过渡与动效；灰阶只取 _struct-wire.css 的变量。
+   ══════════════════════════════════════════════════════════════════════════════ */
+.of-page { --gap-block: 28px; --gap-in: 12px; }
+
+/* ① 读数带 */
+.of-head {
+  display: grid;
+  grid-template-columns: repeat(12, 1fr);
+  gap: var(--gap-in);
+  align-items: end;
+  padding-bottom: var(--gap-in);
+  border-bottom: 1px solid var(--l);
+}
+.of-figure .k { display: block; color: var(--tm); }
+.of-figure .v { font-family: var(--mono); font-weight: 600; font-size: 28px; line-height: 1.1; }
+.of-figure .d { display: block; color: var(--ts); }
+.of-live { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; color: var(--tm); }
+.of-chip { border: 1px solid var(--l); padding: 1px 7px; color: var(--t); }
+.of-src { display: flex; align-items: center; gap: 8px; justify-content: flex-end; flex-wrap: wrap; color: var(--tm); }
+.of-toggle { display: inline-flex; border: 1px solid var(--l); }
+.of-toggle span { padding: 1px 8px; color: var(--tm); }
+.of-toggle .on { color: var(--t); font-weight: 600; border-right: 1px solid var(--l); }
+
+/* 区块之间 28px，块内 12px */
+.of-block { margin-top: var(--gap-block); }
+
+/* ② 状态机装置：一张 SVG 占满整行 */
+.of-device { border: 1px solid var(--l); background: #fafafa; padding: 8px 10px 4px; }
+.of-svg { display: block; width: 100%; height: auto; }
+.of-svg .pipe { fill: var(--f); stroke: var(--l2); stroke-width: 1; }
+.of-svg .mainline { stroke: var(--tm); stroke-width: 1; fill: none; }
+.of-svg .branch { stroke: var(--t); stroke-width: 1.2; stroke-dasharray: 5 4; fill: none; }
+.of-svg .inlet { stroke: var(--tm); stroke-width: 1.2; stroke-dasharray: 4 3; fill: none; }
+.of-svg .station { fill: #fff; stroke: var(--t); stroke-width: 2; }
+.of-svg .station.zero { stroke: var(--l); stroke-dasharray: 3 2; }
+.of-svg .bubble-v { font-family: var(--mono); font-size: 11px; font-weight: 600; fill: var(--t); }
+.of-svg .bubble-v.zero { fill: var(--ts); }
+.of-svg .warn { fill: #fff; stroke: var(--tm); stroke-width: 1; stroke-dasharray: 4 3; }
+.of-svg .warn.hit { stroke: var(--t); stroke-dasharray: none; }
+.of-svg text { font-family: var(--mono); fill: var(--t); }
+.of-svg .nm { font-size: 13px; font-weight: 600; }
+.of-svg .cum { font-size: 10px; fill: var(--tm); }
+.of-svg .seg { font-size: 11px; }
+.of-svg .dur { font-size: 10px; fill: var(--tm); }
+.of-svg .warn-t { font-size: 10px; fill: var(--tm); }
+.of-svg .warn-t.hit { fill: var(--t); }
+.of-svg .flow { fill: var(--ts); }
+.of-svg .note { font-size: 10px; fill: var(--ts); }
+
+/* ③ SSE 实时光带 */
+.of-ticker {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 7px 10px;
+  border: 1px solid var(--l);
+  color: var(--tm);
+}
+.of-ticker .of-hist { margin-left: auto; color: var(--ts); }
+.of-ticker .of-hist code { font-family: var(--mono); color: var(--t); }
+.of-ticker .of-act { border: 1px solid var(--l); padding: 0 7px; color: var(--t); }
+
+.of-trackline {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid var(--l);
+  border-top: 0;
+  padding: 5px 10px;
+  color: var(--tm);
+  flex-wrap: wrap;
+}
+.of-trackline i { font-style: normal; color: var(--ts); }
+.of-trackline .on { color: var(--t); font-weight: 600; }
+
+.of-railboard { display: grid; grid-template-columns: repeat(5, 1fr); border: 1px solid var(--l); border-top: 0; }
+.of-lane { padding: 9px 10px; border-left: 1px solid var(--l2); min-height: 132px; }
+.of-lane:first-child { border-left: 0; }
+.of-lane-h { display: flex; align-items: baseline; gap: 7px; flex-wrap: wrap; padding-bottom: 6px; border-bottom: 1px solid var(--l2); }
+.of-lane-h b { font-size: 13px; }
+.of-lane-h .g { font-family: var(--mono); color: var(--tm); }
+.of-lane-h .w { font-family: var(--mono); color: var(--t); }
+.of-lane-h .w.off { color: var(--ts); }
+.of-lane-empty { color: var(--ts); padding-top: 10px; }
+.of-ticket { padding: 6px 0; border-bottom: 1px solid var(--l2); }
+.of-ticket:last-child { border-bottom: 0; }
+.of-ticket .oid { display: block; font-family: var(--mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.of-ticket .prod { display: block; color: var(--ts); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.of-ticket .hop { display: block; color: var(--tm); font-family: var(--mono); }
+
+/* ③ 耗时直方图：纵向分布，与横向管道形成轴向对比 */
+.of-hist { display: grid; grid-template-columns: 1.15fr 1.15fr 1fr; border: 1px solid var(--l); }
+.of-hist-seg { padding: 10px; border-left: 1px solid var(--l2); min-width: 0; }
+.of-hist-seg:first-child { border-left: 0; }
+.of-hist-h { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; padding-bottom: 6px; border-bottom: 1px solid var(--l2); }
+.of-hist-h b { font-size: 13px; }
+.of-hist-h span { color: var(--ts); }
+.of-hist-bars { display: flex; align-items: flex-end; gap: 6px; height: 150px; border-bottom: 1px solid var(--t); padding-top: 4px; }
+.of-hbar { flex: 1; height: 100%; display: flex; flex-direction: column; justify-content: flex-end; align-items: center; min-width: 0; }
+.of-hbar span { font-family: var(--mono); color: var(--tm); margin-bottom: 2px; }
+.of-hbar i { display: block; width: 100%; background: #ececec; border: 1px solid var(--l2); border-bottom: 0; }
+.of-hist-x { display: flex; gap: 6px; padding-top: 4px; }
+.of-hist-x em { flex: 1; text-align: center; font-style: normal; color: var(--ts); overflow: hidden; white-space: nowrap; }
+
+/* ④ 超时积压：不等宽两舱 */
+.of-warnbay { display: grid; grid-template-columns: 7fr 5fr; border: 1px solid var(--l); }
+.of-bay { padding: 10px; min-width: 0; }
+.of-bay + .of-bay { border-left: 1px solid var(--l); }
+.of-bay-h { display: flex; align-items: baseline; gap: 9px; flex-wrap: wrap; padding-bottom: 7px; border-bottom: 1px solid var(--l2); }
+.of-bay-h b { font-size: 15px; }
+.of-bay-n { font-family: var(--mono); font-size: 24px; font-weight: 600; }
+.of-bay-k { color: var(--tm); }
+.of-bay-open { margin-left: auto; border: 1px solid var(--l); padding: 0 8px; color: var(--t); white-space: nowrap; }
+.of-bay-grid { display: grid; grid-template-columns: 1fr 1.1fr; gap: var(--gap-in); padding-top: 8px; }
+.of-age-row { display: grid; grid-template-columns: 58px 1fr 30px; gap: 6px; align-items: center; padding: 3px 0; }
+.of-age-row span { color: var(--tm); font-family: var(--mono); }
+.of-age-row i { height: 8px; background: #dcdcdc; border: 1px solid var(--l2); display: block; }
+.of-age-row em { font-family: var(--mono); color: var(--t); font-style: normal; text-align: right; }
+.of-top-h { color: var(--ts); padding-bottom: 4px; border-bottom: 1px solid var(--l2); }
+.of-top-row {
+  display: grid;
+  grid-template-columns: 18px 1fr auto;
+  gap: 2px 6px;
+  padding: 4px 0;
+  border-bottom: 1px solid var(--l2);
+}
+.of-top-row:last-child { border-bottom: 0; }
+.of-top-row .rk { grid-row: 1 / 3; color: var(--ts); font-family: var(--mono); }
+.of-top-row .oid { font-family: var(--mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.of-top-row .age { font-family: var(--mono); font-weight: 600; text-align: right; }
+.of-top-row .prod { grid-column: 2 / 4; color: var(--ts); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* ⑥ 链路抽屉：底部打开态 */
+.of-drawer { border: 1px solid var(--l); }
+.of-drawer-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 7px 10px;
+  border-bottom: 1px solid var(--l);
+  background: var(--f);
+}
+.of-grip { width: 36px; height: 3px; background: var(--l); display: inline-block; }
+.of-tabs { display: inline-flex; border: 1px solid var(--l); margin-left: 4px; }
+.of-tabs span { padding: 1px 8px; color: var(--tm); }
+.of-tabs .on { color: var(--t); font-weight: 600; border-right: 1px solid var(--l); }
+.of-tabs span:not(.on) { border-right: 1px solid var(--l2); }
+.of-tabs span:last-child { border-right: 0; }
+.of-drawer-bar .of-close { margin-left: auto; border: 1px solid var(--l); padding: 0 7px; color: var(--t); }
+.of-drawer-body { display: grid; grid-template-columns: 4fr 5fr 3fr; }
+.of-pane { padding: 10px; border-left: 1px solid var(--l2); min-width: 0; }
+.of-pane:first-child { border-left: 0; }
+.of-pane-h { color: var(--ts); padding-bottom: 6px; border-bottom: 1px solid var(--l2); margin-bottom: 6px; }
+.of-sort {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 5px 10px;
+  border-bottom: 1px solid var(--l2);
+  color: var(--tm);
+  background: var(--f);
+}
+.of-sort b { color: var(--t); }
+.of-sort .chip { border: 1px solid var(--l); padding: 0 7px; color: var(--t); }
+.of-backlog-row {
+  display: grid;
+  grid-template-columns: 18px 1fr auto;
+  gap: 4px 8px;
+  padding: 5px 0;
+  border-bottom: 1px solid var(--l2);
+}
+.of-backlog-row:last-child { border-bottom: 0; }
+.of-backlog-row .rk { grid-row: 1 / 3; color: var(--ts); font-family: var(--mono); align-self: center; }
+.of-backlog-row .oid { font-family: var(--mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.of-backlog-row .prod { color: var(--ts); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; grid-column: 2 / 3; }
+.of-backlog-row .age { font-family: var(--mono); color: var(--t); text-align: right; grid-row: 1 / 3; align-self: center; }
+.of-backlog-row .age.hit { color: var(--t); font-weight: 600; }
+.of-time { list-style: none; margin: 0; padding: 0; }
+.of-time li { display: grid; grid-template-columns: 76px 1fr auto; gap: 8px; padding: 6px 0; border-bottom: 1px solid var(--l2); }
+.of-time li:last-child { border-bottom: 0; }
+.of-time .step { font-weight: 600; }
+.of-time .at { font-family: var(--mono); color: var(--tm); }
+.of-time .dt { font-family: var(--mono); color: var(--ts); text-align: right; }
+.of-time li.pending .step, .of-time li.pending .at { color: var(--ts); font-weight: 400; }
+.of-raw-empty { color: var(--tm); padding: 6px 0; }
+.of-raw-fields { color: var(--ts); font-family: var(--mono); line-height: 1.7; }
+</style>
+</head>
+<body>
+
+<div class="wire-head">
+  <h1>3b.7 状态流转 · <b>甲 —— 漏斗流转（REIMAGINE 重构）</b></h1>
+  <span class="hint">结构草图 v2：灰线框（无品牌色／圆角／阴影／动效）· 真库快照（2026-10-17 19:25）·
+    状态机 = <b>管道 + 积压气泡 + 超时预警牌</b>；SSE 实时流按当前节点挂轨；
+    点任一节点/段打开<b>链路抽屉</b>（积压订单 + 时间轴 + 原始事件）</span>
+</div>
+
+<div class="shell">
+  <aside class="side">
+    <div class="brand">管理端 · Mall Management</div>
+    <div class="dom">概览</div><div class="sub">经营数据</div>
+    <div class="dom">通知收件箱</div>
+    <div class="dom">业务域</div>
+    <div class="sub">用户与商家治理</div><div class="sub">商品与类目治理</div>
+    <div class="sub">订单治理</div><div class="sub">营销运营</div>
+    <div class="sub">消息与内容治理</div><div class="sub">系统通知</div>
+    <div class="dom">可观测域</div>
+    <div class="sub">攻击模拟器</div><div class="sub">指标面板</div>
+    <div class="sub on">状态流转</div><div class="sub">实时日志</div><div class="sub">权限与审计</div>
+    <div class="foot">外壳示意 · 两版相同（232px）</div>
+  </aside>
+
+  <div class="col">
+    <div class="top"><span>管理端 / <b>状态流转</b></span><span class="who">ops_duan · 退出</span></div>
+    <div class="main"><div class="px"><div id="app" class="of-page">
+
+      <!-- ① 读数带 -->
+      <section class="of-head" aria-label="页头读数">
+        <div class="of-figure" style="grid-column: span 3">
+          <span class="k">订单总数（五态之和）</span>
+          <span class="v">256</span>
+          <span class="d">当前积压：89 + 24 · 终态：108 + 35</span>
+        </div>
+        <div class="of-live" style="grid-column: span 5">
+          <span class="of-chip">已连接</span>
+          <span>第 6 拍 · 每秒 1 拍 · 19:25:01</span>
+          <span>本拍流转 <b style="font-family:var(--mono)">0</b> · 流入 0 / 流出 0</span>
+          <span class="of-act" style="border:1px solid var(--l);padding:0 7px">回放</span>
+        </div>
+        <div class="of-src" style="grid-column: span 4">
+          <span>节点预警 <b style="font-family:var(--mono);color:var(--t)">2</b> / 4</span>
+          <span>数据源</span>
+          <span class="of-toggle"><span class="on">正常</span><span>模拟日常</span></span>
+          <span>后端真流</span>
+        </div>
+      </section>
+
+      <!-- ② 状态机：管道 + 积压气泡 + 预警牌 -->
+      <section class="of-block" aria-label="状态机">
+        <div class="h2">
+          <b>状态机 · 积压气泡与管道</b>
+          <span class="n">气泡面积 = 当前积压（√ 缩放） · 管道粗细 = 累计到达 · 段上 = 转化率 · 段下 = 平均耗时 · 点节点/段 = 链路抽屉</span>
+        </div>
+
+        <div class="of-device">
+          <svg class="of-svg" viewBox="0 0 1128 410" role="img"
+               aria-label="订单状态机：待付款积压 0、待发货 89、待收货 24、已完成 108；已取消 35 为支线。待发货超 24 小时 89 单、其中超 7 天 17 单；待收货超 48 小时 24 单、其中超 14 天 16 单。">
+            <!-- 管道：粗细 = 累计到达（256 → 221 → 132 → 108） -->
+            <polygon class="pipe" points="80,172 250,176 590,185 930,188 930,212 590,215 250,224 80,228"></polygon>
+            <line class="mainline" x1="64" y1="200" x2="980" y2="200"></line>
+            <path class="flow" d="M160,194 L170,200 L160,206 Z"></path>
+            <path class="flow" d="M415,194 L425,200 L415,206 Z"></path>
+            <path class="flow" d="M755,194 L765,200 L755,206 Z"></path>
+
+            <!-- SSE 入口 / 终态出口 -->
+            <path class="inlet" d="M20,200 L64,200"></path>
+            <path class="flow" d="M64,194 L74,200 L64,206 Z"></path>
+            <text class="note" x="20" y="188">SSE 流入</text>
+            <path class="inlet" d="M946,200 L1004,200"></path>
+            <path class="flow" d="M1004,194 L1014,200 L1004,206 Z"></path>
+            <text class="note" x="1006" y="188">终态出口</text>
+
+            <!-- 节点：气泡面积 = 当前积压 -->
+            <circle class="station zero" cx="80" cy="200" r="8"></circle>
+            <text class="bubble-v zero" x="80" y="204" text-anchor="middle">0</text>
+            <circle class="station" cx="250" cy="200" r="18"></circle>
+            <text class="bubble-v" x="250" y="204" text-anchor="middle">89</text>
+            <circle class="station" cx="590" cy="200" r="12"></circle>
+            <text class="bubble-v" x="590" y="204" text-anchor="middle">24</text>
+            <circle class="station" cx="930" cy="200" r="19"></circle>
+            <text class="bubble-v" x="930" y="204" text-anchor="middle">108</text>
+
+            <!-- 段上：转化率 / 段下：均耗 -->
+            <text class="seg" x="165" y="140" text-anchor="middle">支付转化 86.3%</text>
+            <text class="dur" x="165" y="160" text-anchor="middle">均耗 28 分</text>
+            <text class="seg" x="420" y="140" text-anchor="middle">发货转化 59.7%</text>
+            <text class="dur" x="420" y="160" text-anchor="middle">均耗 18h53m</text>
+            <text class="seg" x="760" y="140" text-anchor="middle">收货转化 81.8%</text>
+            <text class="dur" x="760" y="160" text-anchor="middle">均耗 60h35m</text>
+
+            <!-- 节点名 / 累计到达 / 抽屉入口 -->
+            <text class="nm" x="80" y="252" text-anchor="middle">待付款 ↘</text>
+            <text class="cum" x="80" y="268" text-anchor="middle">累计 256 · 100%</text>
+            <text class="nm" x="250" y="252" text-anchor="middle">待发货 ↘</text>
+            <text class="cum" x="250" y="268" text-anchor="middle">累计 221 · 86.3%</text>
+            <text class="nm" x="590" y="252" text-anchor="middle">待收货 ↘</text>
+            <text class="cum" x="590" y="268" text-anchor="middle">累计 132 · 51.6%</text>
+            <text class="nm" x="930" y="252" text-anchor="middle">已完成 ↘</text>
+            <text class="cum" x="930" y="268" text-anchor="middle">累计 108 · 42.2%</text>
+
+            <!-- 超时预警牌：节点旁常驻，不藏在 tooltip -->
+            <rect class="warn" x="18" y="282" width="124" height="28"></rect>
+            <text class="warn-t" x="80" y="300" text-anchor="middle">超 60s 未付 0</text>
+            <rect class="warn hit" x="146" y="282" width="208" height="28"></rect>
+            <text class="warn-t hit" x="250" y="300" text-anchor="middle">⚠ 超 24h 未发 89 · &gt;7d 18</text>
+            <rect class="warn hit" x="486" y="282" width="208" height="28"></rect>
+            <text class="warn-t hit" x="590" y="300" text-anchor="middle">⚠ 超 48h 未收 24 · &gt;14d 17</text>
+            <rect class="warn" x="856" y="282" width="148" height="28"></rect>
+            <text class="warn-t" x="930" y="300" text-anchor="middle">终态 · 无超时</text>
+
+            <!-- 已取消支线 -->
+            <circle class="flow" cx="150" cy="200" r="3"></circle>
+            <path class="branch" d="M150,200 L150,345 L802,345"></path>
+            <path class="flow" d="M490,339 L500,345 L490,351 Z"></path>
+            <text class="seg" x="500" y="338" text-anchor="middle">cancel · 超时/主动</text>
+            <circle class="station" cx="820" cy="345" r="14"></circle>
+            <text class="bubble-v" x="820" y="349" text-anchor="middle">35</text>
+            <text class="nm" x="820" y="374" text-anchor="middle">已取消 ↘</text>
+            <text class="cum" x="820" y="390" text-anchor="middle">13.7% · 终态 · 归因见台账</text>
+          </svg>
+        </div>
+
+        <p class="cnote">
+          读法：管道从 256 收到 108，是「累计到达」的漏斗；气泡大小是「此刻还卡在这里」的积压量
+          —— 两者不是一回事，故叠在同一装置上。预警牌的阈值：待付款 60s（dev 配置），
+          待发货 24h，待收货 48h；括号里的 &gt;7d / &gt;14d 是同一批积压里更老的子集。
+        </p>
+        <p class="cnote">
+          真实数据（2026-10-17 19:25）：待发货 89 单全部超 24h（其中 24 单超 72h、18 单超 7d、13 单超 30d）；
+          待收货 24 单全部超 48h（且全部超 7d，其中 17 单超 14d、8 单超 30d）。这不是演示阈值打错，是库里的存量单确实很老。
+        </p>
+      </section>
+
+      <!-- ③ 耗时分布：纵向直方图（与横向管道形成轴向对比） -->
+      <section class="of-block" aria-label="耗时分布直方图">
+        <div class="h2">
+          <b>耗时分布 · 分段直方图</b>
+          <span class="n">横轴 = 时间桶 · 纵轴 = 订单数（三组共用 0–78 标尺）· n = 两个时间戳都齐全的样本 · 桶是结构，不是颜色装饰</span>
+        </div>
+
+        <div class="of-hist">
+          <div class="of-hist-seg">
+            <div class="of-hist-h"><b>付款</b><span>创建 → 支付 · n=215</span></div>
+            <div class="of-hist-bars">
+              <div class="of-hbar"><span>78</span><i style="height:120px"></i></div>
+              <div class="of-hbar"><span>15</span><i style="height:23px"></i></div>
+              <div class="of-hbar"><span>77</span><i style="height:118px"></i></div>
+              <div class="of-hbar"><span>45</span><i style="height:69px"></i></div>
+              <div class="of-hbar"><span>0</span><i style="height:0"></i></div>
+              <div class="of-hbar"><span>0</span><i style="height:0"></i></div>
+            </div>
+            <div class="of-hist-x"><em>0-5m</em><em>5-15m</em><em>15-60m</em><em>1-6h</em><em>6-24h</em><em>24h+</em></div>
+            <p class="cnote">双峰：0–5 分（78）与 15–60 分（77）；没有 6h 以上样本。</p>
+          </div>
+
+          <div class="of-hist-seg">
+            <div class="of-hist-h"><b>发货</b><span>支付 → 发货 · n=126</span></div>
+            <div class="of-hist-bars">
+              <div class="of-hbar"><span>0</span><i style="height:0"></i></div>
+              <div class="of-hbar"><span>18</span><i style="height:28px"></i></div>
+              <div class="of-hbar"><span>60</span><i style="height:92px"></i></div>
+              <div class="of-hbar"><span>48</span><i style="height:74px"></i></div>
+              <div class="of-hbar"><span>0</span><i style="height:0"></i></div>
+              <div class="of-hbar"><span>0</span><i style="height:0"></i></div>
+            </div>
+            <div class="of-hist-x"><em>0-1h</em><em>1-6h</em><em>6-24h</em><em>1-3d</em><em>3-7d</em><em>7d+</em></div>
+            <p class="cnote">集中在 6–24h（60）与 1–3d（48）；注意 n=126，另有 13 张取消单有 ShippedAt 但无 PaidAt，无法算该段。</p>
+          </div>
+
+          <div class="of-hist-seg">
+            <div class="of-hist-h"><b>收货</b><span>发货 → 收货 · n=102</span></div>
+            <div class="of-hist-bars">
+              <div class="of-hbar"><span>0</span><i style="height:0"></i></div>
+              <div class="of-hbar"><span>17</span><i style="height:26px"></i></div>
+              <div class="of-hbar"><span>44</span><i style="height:68px"></i></div>
+              <div class="of-hbar"><span>41</span><i style="height:63px"></i></div>
+              <div class="of-hbar"><span>0</span><i style="height:0"></i></div>
+            </div>
+            <div class="of-hist-x"><em>0-6h</em><em>6-24h</em><em>1-3d</em><em>3-7d</em><em>7d+</em></div>
+            <p class="cnote">没有 6h 内收货样本；主体落在 1–3d（44）与 3–7d（41）。</p>
+          </div>
+        </div>
+
+        <p class="cnote">
+          桶定义（后端待补）：付款 = TIMESTAMPDIFF(MINUTE, CreateTime, PaidAt)；发货 = TIMESTAMPDIFF(MINUTE, PaidAt, ShippedAt)；
+          收货 = TIMESTAMPDIFF(MINUTE, ShippedAt, ReceivedAt)。上图为 2026-10-17 真库实测；
+          帧里现在没有这些桶，落地时要么加字段（每段 bins 数组），要么单独聚合端点 —— 不要让前端逐单拉全量。
+        </p>
+      </section>
+
+      <!-- ④ 超时积压：两块不等宽的预警舱 -->
+      <section class="of-block" aria-label="超时积压">
+        <div class="h2">
+          <b>超时积压 · 危险单</b>
+          <span class="n">待发货 &gt;24h / 待收货 &gt;48h · 两舱并置但按积压量不等宽（89 vs 24）· 点 Top 行 = 抽屉并带筛选</span>
+        </div>
+
+        <div class="of-warnbay">
+          <div class="of-bay">
+            <div class="of-bay-h">
+              <b>待发货</b><span class="of-bay-n">89</span>
+              <span class="of-bay-k">超 24h 未发 · 占该态 100%</span>
+              <span class="of-bay-open">打开 89 单 →</span>
+            </div>
+            <div class="of-bay-grid">
+              <div class="of-age">
+                <div class="of-age-row"><span>1–3d</span><i style="width:100%"></i><em>65</em></div>
+                <div class="of-age-row"><span>3–7d</span><i style="width:9.2%"></i><em>6</em></div>
+                <div class="of-age-row"><span>7–14d</span><i style="width:4.6%"></i><em>3</em></div>
+                <div class="of-age-row"><span>14–30d</span><i style="width:3.1%"></i><em>2</em></div>
+                <div class="of-age-row"><span>30d+</span><i style="width:20%"></i><em>13</em></div>
+              </div>
+              <div class="of-top">
+                <div class="of-top-h">停留最久 Top 3</div>
+                <div class="of-top-row"><span class="rk">1</span><span class="oid">GOWW80602762</span><span class="age">53.0d</span><span class="prod">山核桃仁 罐装 260g:GD-434-4D09</span></div>
+                <div class="of-top-row"><span class="rk">2</span><span class="oid">JXZQ66006744</span><span class="age">52.3d</span><span class="prod">新疆和田枣 特级 1kg:GD-431-7BA7</span></div>
+                <div class="of-top-row"><span class="rk">3</span><span class="oid">GXLT17964511</span><span class="age">47.9d</span><span class="prod">可调节哑铃 20kg 一对:GD-538-380F</span></div>
+              </div>
+            </div>
+          </div>
+
+          <div class="of-bay">
+            <div class="of-bay-h">
+              <b>待收货</b><span class="of-bay-n">24</span>
+              <span class="of-bay-k">超 48h 未收 · 占该态 100%</span>
+              <span class="of-bay-open">打开 24 单 →</span>
+            </div>
+            <div class="of-bay-grid">
+              <div class="of-age">
+                <div class="of-age-row"><span>7–14d</span><i style="width:77.8%"></i><em>7</em></div>
+                <div class="of-age-row"><span>14–30d</span><i style="width:100%"></i><em>9</em></div>
+                <div class="of-age-row"><span>30d+</span><i style="width:88.9%"></i><em>8</em></div>
+              </div>
+              <div class="of-top">
+                <div class="of-top-h">停留最久 Top 3</div>
+                <div class="of-top-row"><span class="rk">1</span><span class="oid">ILMH17697325</span><span class="age">50.8d</span><span class="prod">云感记忆枕 护颈款:GD-220-2681</span></div>
+                <div class="of-top-row"><span class="rk">2</span><span class="oid">BNGK37272921</span><span class="age">49.3d</span><span class="prod">折叠登山杖 两支装:GD-542-9A2A</span></div>
+                <div class="of-top-row"><span class="rk">3</span><span class="oid">AEZK50252960</span><span class="age">43.8d</span><span class="prod">潮汕手打牛肉丸 500g:GD-436-D2B0</span></div>
+              </div>
+            </div>
+            <p class="cnote">最年轻的一单也已超 7d；24 单全部落在 7d 以上。</p>
+          </div>
+        </div>
+      </section>
+
+      <!-- ⑤ SSE 实时流轨 -->
+      <section class="of-block" aria-label="SSE 实时流轨">
+        <div class="h2">
+          <b>SSE 实时流轨 · 在途单按当前节点挂轨</b>
+          <span class="n">本拍 0 条流转 · 每秒 1 拍 · 窗口 = 最近 20 单（待发货 19 / 已取消 1）· 点轨道行 = 同单时间轴</span>
+        </div>
+
+        <div class="of-ticker">
+          <span class="of-chip">已连接</span>
+          <span>流入 0 · 流出 0 · 本会话累计 0</span>
+          <span class="of-hist">历史样例（observed_event · 回放源，不是本拍实时）：
+            <code>B7CAP-sgu0g-r9-11</code> CREATED → PAID · 10-16 17:53:27</span>
+          <span class="of-act">回放</span>
+        </div>
+
+        <div class="of-trackline" aria-label="轨道方向">
+          <span>SSE 流入</span><i>→</i>
+          <span>待付款</span><i>→</i>
+          <span>待发货</span><i>→</i>
+          <span>待收货</span><i>→</i>
+          <span>已完成</span><i>→</i>
+          <span>终态出口</span>
+          <span style="margin-left:auto;color:var(--ts)">支线：待付款/支付段 → 已取消</span>
+        </div>
+
+        <div class="of-railboard">
+          <div class="of-lane">
+            <div class="of-lane-h"><b>待付款</b><span class="g">全局 0</span><span class="w off">窗内 0</span></div>
+            <div class="of-lane-empty">本窗 0 单</div>
+          </div>
+
+          <div class="of-lane">
+            <div class="of-lane-h"><b>待发货</b><span class="g">全局 89</span><span class="w">窗内 19</span></div>
+            <div class="of-ticket"><span class="oid">B7CAP-sgu0g-r9-9</span><span class="prod">B7CAP-PI · 1d9h</span><span class="hop">→ 待收货</span></div>
+            <div class="of-ticket"><span class="oid">B7CAP-sgu0g-r9-8</span><span class="prod">B7CAP-PI · 1d9h</span><span class="hop">→ 待收货</span></div>
+            <div class="of-ticket"><span class="oid">B7CAP-sgu0g-r9-7</span><span class="prod">B7CAP-PI · 1d9h</span><span class="hop">→ 待收货</span></div>
+            <div class="of-ticket"><span class="oid">B7CAP-sgu0g-r9-6</span><span class="prod">B7CAP-PI · 1d9h</span><span class="hop">→ 待收货</span></div>
+            <div class="of-ticket"><span class="oid">B7CAP-sgu0g-r9-5</span><span class="prod">B7CAP-PI · 1d9h</span><span class="hop">→ 待收货</span></div>
+            <div class="of-ticket"><span class="oid">B7CAP-sgu0g-r9-4</span><span class="prod">B7CAP-PI · 1d9h</span><span class="hop">→ 待收货</span></div>
+            <div class="of-ticket" style="color:var(--ts)">显示 6 / 19 ↓</div>
+          </div>
+
+          <div class="of-lane">
+            <div class="of-lane-h"><b>待收货</b><span class="g">全局 24</span><span class="w off">窗内 0</span></div>
+            <div class="of-lane-empty">本窗 0 单</div>
+          </div>
+
+          <div class="of-lane">
+            <div class="of-lane-h"><b>已完成</b><span class="g">全局 108</span><span class="w off">窗内 0</span></div>
+            <div class="of-lane-empty">本窗 0 单</div>
+          </div>
+
+          <div class="of-lane">
+            <div class="of-lane-h"><b>已取消</b><span class="g">全局 35</span><span class="w">窗内 1</span></div>
+            <div class="of-ticket"><span class="oid">PROBE3A3B-20261017-01</span><span class="prod">probe · 1d1h · 支线</span><span class="hop">终态</span></div>
+          </div>
+        </div>
+
+        <p class="cnote">
+          轨道读法：每行 = 一张在途单的「当前节点 + 下一跳」；`→` 是待流转方向，不是已经发生的事件。
+          本窗被压测单占满（B7CAP ×19），页面不隐藏；窗口口径与上方全库五态不同，差异本身就是可观测信息。
+          真实「已发生」的 from→to 只在 ticker 的回放样例或本拍 moves 里出现 —— 本拍 moves = 0。
+        </p>
+      </section>
+
+      <!-- ⑥ 链路抽屉（打开态） -->
+      <section class="of-block" aria-label="链路抽屉">
+        <div class="h2">
+          <b>链路抽屉 · 待发货（89）</b>
+          <span class="n">点击任一节点/段或超时积压 Top 行后从底部展开，覆盖下层内容·这里是打开态；默认按停留时长倒序，首批 20 条</span>
+        </div>
+
+        <div class="of-drawer">
+          <div class="of-drawer-bar">
+            <span class="of-grip"></span>
+            <b>链路抽屉</b>
+            <span style="color:var(--tm)">待发货 · 89 单积压 · 最老 53.0 天</span>
+            <span class="of-tabs"><span class="on">积压订单 89</span><span>时间轴</span><span>原始事件</span></span>
+            <span class="of-close">×</span>
+          </div>
+
+          <div class="of-sort">
+            <span>排序：<b>停留时长倒序 ▼</b></span>
+            <span class="chip">仅超时 89</span>
+            <span>Top 5 / 89</span>
+            <span style="margin-left:auto">入口带参：<b>状态=待发货 · sort=age_desc</b></span>
+          </div>
+
+          <div class="of-drawer-body">
+            <div class="of-pane">
+              <div class="of-pane-h">积压订单 · 最慢 Top 5（按停留时长倒序）</div>
+              <div class="of-backlog-row"><span class="rk">1</span><span class="oid">GOWW80602762</span><span class="age hit">53.0d</span><span class="prod">山核桃仁 罐装 260g:GD-434-4D09</span></div>
+              <div class="of-backlog-row"><span class="rk">2</span><span class="oid">JXZQ66006744</span><span class="age hit">52.3d</span><span class="prod">新疆和田枣 特级 1kg:GD-431-7BA7</span></div>
+              <div class="of-backlog-row"><span class="rk">3</span><span class="oid">GXLT17964511</span><span class="age hit">47.9d</span><span class="prod">可调节哑铃 20kg 一对:GD-538-380F</span></div>
+              <div class="of-backlog-row"><span class="rk">4</span><span class="oid">XAXF96068145</span><span class="age hit">44.8d</span><span class="prod">可调节哑铃 20kg 一对 + 护膝:GD-538/5…</span></div>
+              <div class="of-backlog-row"><span class="rk">5</span><span class="oid">ZCMD90996965</span><span class="age hit">40.1d</span><span class="prod">香薰蜡烛 雪松木质调:GD-215-3F6B</span></div>
+              <p class="cnote">点行 → 右侧时间轴切到该单；列表本身在抽屉内滚动，首批 20 条。</p>
+            </div>
+
+            <div class="of-pane">
+              <div class="of-pane-h">时间轴 · GOWW80602762（选中行）</div>
+              <ol class="of-time">
+                <li><span class="step">创建</span><span class="at">2026-08-25 18:34:40</span><span class="dt">起点</span></li>
+                <li><span class="step">支付</span><span class="at">2026-08-25 18:55:08</span><span class="dt">+20m28s</span></li>
+                <li class="pending"><span class="step">发货</span><span class="at">未发生</span><span class="dt">已等 53d0h</span></li>
+                <li class="pending"><span class="step">收货</span><span class="at">未发生</span><span class="dt">依赖发货</span></li>
+              </ol>
+              <p class="cnote">时间轴只读 order 的 PaidAt / ShippedAt / ReceivedAt / CancelledAt；缺失的环节显示为虚线待办，不补时间。</p>
+            </div>
+
+            <div class="of-pane">
+              <div class="of-pane-h">原始事件 · observed_event</div>
+              <div class="of-raw-empty">0 条 · 该单早于观测上线；回放不可用。</div>
+              <div class="of-raw-fields">
+                traceId<br>seq<br>action / from / to<br>result<br>occurredAt
+              </div>
+              <p class="cnote">新单会有 CREATED / PAID / SHIPPED / RECEIVED 事件；这里是结构占位，不自造记录。</p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <div class="foot-note">
+        <b>本版结构主张（REIMAGINE 重构）</b>：状态机不是折线图，而是一根「有体积的管道」——管道粗细是累计到达，
+        节点气泡是当前积压，预警牌挂在节点旁，取消是唯一支线；SSE 在途单按当前节点挂在轨道上，点节点或行进入链路抽屉。<br>
+        <b>业务灵魂落点</b>：状态机与节点预警在 ②；耗时直方图在 ③（纵向分布，与横向管道成轴向对比）；
+        超时积压与 Top 3 在 ④（不等宽两舱）；实时流联动在 ⑤；下钻抽屉在 ⑥（积压订单 + 时间轴 + 原始事件，默认按停留时长倒序）。<br>
+        <b>代价</b>：信息密度高，首屏同时看到管道、预警、流轨；最近订单不再是一张平表，不能按列排序（排序交给抽屉里的积压列表）。
+      </div>
+
+    </div></div></div>
+  </div>
+</div>
+
+<details class="wire-foot">
+  <summary>结构判据与实测（点开看 · 业务灵魂落点 + taste-skill 四条命中台账）</summary>
+  <div class="body judge">
+    <b>一、业务灵魂放在哪里了</b>
+    <ul>
+      <li><b>状态机与预警（② 状态机装置）</b>：管道粗细 = 累计到达（256 → 221 → 132 → 108）；节点气泡面积 = 当前积压（√ 缩放：0 / 89 / 24 / 108）；每个节点下方常驻一块预警牌，不是 tooltip。取消是独立支线（35，13.7%），不从主线假装流逝。</li>
+      <li><b>超时预警（实测）</b>：待付款 0（60s 阈值）；待发货 89 单全部超 24h，其中 24 单超 72h、18 单超 7d、13 单超 30d；待收货 24 单全部超 48h 且全部超 7d，其中 17 单超 14d、8 单超 30d；已完成/已取消为终态。</li>
+      <li><b>耗时分布直方图（③）</b>：三组纵向灰阶柱共用 0–78 的纵轴，横轴是时间桶：付款 6 桶（n=215）、发货 6 桶（n=126）、收货 5 桶（n=102）。桶的边界与计数都是结构的一部分，不是装饰：付款双峰 0–5m/15–60m，发货集中在 6–24h/1–3d，收货集中在 1–3d/3–7d。与 ② 的横向管道形成「横向流动 × 纵向分布」的轴向对比。</li>
+      <li><b>超时积压（④）</b>：待发货 89 / 待收货 24 两块预警舱按积压量做成不等宽（7:5）；每舱内是「阈值 + 停留时长分桶 + 最慢 Top 3」，不是一张只有总数的卡片。待发货的 30d+ 有 13 单（比 3–30d 的总和还多）；待收货最年轻的一单也已 >7d。</li>
+      <li><b>SSE 实时流（⑤ 流轨）</b>：顶部 ticker 给出连接、拍号、流入/流出、本拍 moves；轨道线明确「SSE 流入 → 五个节点 → 终态出口」；在途单按当前节点挂在 5 条轨道上，每行有「当前节点 + 下一跳」箭头。窗口 = 最近 20 单，实测待发货 19 / 已取消 1 / 其余 0；不隐藏压测单占满窗口这一事实。</li>
+      <li><b>下钻抽屉（⑥）</b>：点任一节点/段、超时积压 Top 行或轨道行 → 底部抽屉；默认带参「状态 + sort=age_desc + 仅超时」，列表按停留时长倒序并标 Top 1–5；三栏 = 积压订单、订单时间轴（GOWW80602762 的真实时间戳）、原始事件（observed_event，空态写明 0 条与原因）。节点名后的「↘」是抽屉入口标记。</li>
+      <li><b>实时感的边界</b>：本拍 moves = 0（真实现状），所以 ticker 只放一条 observed_event 历史样例并明确标注「回放源，不是本拍实时」；不编造 from→to。</li>
+    </ul>
+
+    <b>二、taste-skill 四条（逐条命中，不跑机器门禁）</b>
+    <ul>
+      <li><b>1. 相邻区块不得共用布局</b>：① 读数带 = 三组横排；② 状态机 = 单张 SVG 管道；③ 直方图 = 三组纵向柱 + 桶轴；④ 超时积压 = 7:5 两舱（每舱 = 计数 + 横向年龄条 + Top 3）；⑤ 流轨 = ticker + 轨道线 + 5 栏票据轨道；⑥ 抽屉 = 顶栏 + sort 条 + 4/5/3 三栏。5 对相邻，逐对形态不同；没有两块共用同一套直接子元素结构。</li>
+      <li><b>2. 不是卡片网格</b>：全页 0 个等宽等高卡片（.kpi = 0）。五态是气泡 + 轨道栏 + 图例行，不是 5 张卡；票据是带下边线的行，不是盒子。</li>
+      <li><b>3. 区块间距 &gt; 内部间距</b>：区块之间 28px（--gap-block）；块内 12px（--gap-in）；流轨的 ticker/轨道线/轨道板之间用 0 边框相接，内部票据行距 6px——分组靠外框而不是留白。</li>
+      <li><b>4. 一套统一的网格与边距</b>：主区 padding 32px、12 栏栅格；本页的所有块都落在同一 .px 内；抽屉三栏是 4/5/3，流轨五栏是等分 5 栏，间距都取 12px 的倍数。</li>
+    </ul>
+
+    <b>三、stitch-design（只谈 layout / content / structure）</b>
+    <ul>
+      <li>本页没有品牌色、字号档、圆角、阴影、过渡或动画；颜色只取线框库灰阶。</li>
+      <li>版本维度：本页是 <b>REIMAGINE 重构</b> —— 不保留环形图，不保留五张 KPI 卡，把状态机、流轨、抽屉重新组织成一根管道 + 一条轨道。</li>
+      <li>表达的是结构：谁大谁小（气泡/管道）、谁和谁相邻（预警牌贴节点）、从哪里进入哪里退出（SSE 入口/终态出口/取消支线）、点哪里下钻（↘）。</li>
+      <li><b>直方图的桶是结构</b>：6/6/5 个桶的边界（0-5m、5-15m、15-60m、1-6h、6-24h、24h+ …）是后端口径的一部分，不是视觉分组；柱高只编码计数，颜色不编码任何维度。</li>
+    </ul>
+
+    <b>四、frontend-design：大胆装置与反 AI 感</b>
+    <ul>
+      <li><b>一处大胆结构</b>：管道 + 气泡 + 支线的复合装置。横向管道编码累计到达，竖向气泡编码当前积压，预警牌贴着节点，取消从主管道剥离 —— 三种量共用一件装置，替代「圆环 + 卡片 + 折线」的常规仪表盘。</li>
+      <li><b>轴向对比</b>：主视觉是横向流动（管道 + 轨道），耗时分布是纵向柱（③）；一个回答「单子往哪走」，一个回答「在哪一段停得久」。两者不共用坐标系，避免所有图都长成同一种横条。</li>
+      <li><b>反 AI 感</b>：没有等宽卡片阵列、没有居中大标题 + 三列图标、没有圆角卡片 + 阴影；不对称（气泡大小、支线、5 栏轨道）由数据决定，不由模板决定。</li>
+    </ul>
+
+    <b>五、数据与口径（2026-10-17 19:25 真库）</b>
+    <ul>
+      <li>总数 256；五态：待付款 0 / 待发货 89 / 待收货 24 / 已完成 108 / 已取消 35（与 countOrderStates() 同一条判据链）。</li>
+      <li>累计到达：创建 256 → 支付 221（86.3%）→ 发货 132（51.6%）→ 收货 108（42.2%）；段上转化 86.3% / 59.7% / 81.8%。</li>
+      <li>平均耗时（仅用时间戳齐全的样本）：付款 28.2 分（n=215）、发货 1133.3 分（n=139）、收货 3634.8 分（n=102）、全链路 4796.7 分（n=102）。</li>
+      <li>预警阈值：待付款 60s（application-dev.properties 的 mall.order.cancel.timeout-ms 演示值）；待发货 24h、待收货 48h 是本轮草图的监控口径，不是后端已有配置 —— 落地前要裁定是否进配置。</li>
+      <li><b>耗时直方图（实测）</b>：付款 0-5m 78 / 5-15m 15 / 15-60m 77 / 1-6h 45 / 6-24h 0 / 24h+ 0（n=215）；发货 0-1h 0 / 1-6h 18 / 6-24h 60 / 1-3d 48 / 3-7d 0 / 7d+ 0（n=126）；收货 0-6h 0 / 6-24h 17 / 1-3d 44 / 3-7d 41 / 7d+ 0（n=102）。</li>
+      <li><b>超时积压分桶（实测）</b>：待发货 89 = 1–3d 65 / 3–7d 6 / 7–14d 3 / 14–30d 2 / 30d+ 13；待收货 24 = 7–14d 7 / 14–30d 9 / 30d+ 8（2–7d 已为 0，最年轻一单也 &gt;7d）。</li>
+      <li>积压最老 5 单：GOWW80602762（53.0d）、JXZQ66006744（52.3d）、GXLT17964511（47.9d）、XAXF96068145（44.8d）、ZCMD90996965（40.1d）；待收货 Top 3：ILMH17697325（50.8d）、BNGK37272921（49.3d）、AEZK50252960（43.8d）。</li>
+      <li><b>时钟口径</b>：DB 会话是 UTC（SYSTEM），本地是 Asia/Shanghai；分桶与账龄均按 NOW() + 8h 计算。若不校正，账龄会少 8 小时，跨桶边界时会静默挪桶。</li>
+      <li>时间轴样例：GOWW80602762 创建 08-25 18:34:40 → 支付 18:55:08（+20m28s）→ 发货/收货未发生；observed_event 该单 0 条。</li>
+      <li><b>⚠️ 与需求原话的差异</b>：原话说「目前 99.6% 已取消」；本机此刻实测取消 35/256 = 13.7%（live 探针与 SQL 两路一致）。本版按 99.6% 做了结构压力检查：取消只在支线与终态，主线管道/气泡/预警不依赖取消占比。</li>
+      <li><b>缺字段</b>：帧里没有转化率、平均耗时、直方图桶、积压账龄与 Top N；转化率可由 counts 推导，其余需后端补（PaidAt / ShippedAt / ReceivedAt 已有，可聚合）。建议在同一帧新增每段 <code>bins</code>（边界 + 计数）、每态 <code>aging</code>（桶 + 计数）与 <code>slowest</code>（前 N 单的 id / 账龄 / 时间戳），前端不要逐单拉全量算。发货段 n=126 而不是 139：13 张取消单有 ShippedAt 但 PaidAt 为空，算不出 PaidAt→ShippedAt。</li>
+      <li><b>取消归因不可得</b>：35 张取消单 PaidAt 全空、13 张 ShippedAt 非空（时间戳口径不一致）⇒ 只画总账支线，不按阶段切分。</li>
+    </ul>
+  </div>
+</details>
+
+</body>
+</html>

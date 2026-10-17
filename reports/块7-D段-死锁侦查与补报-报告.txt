@@ -1,0 +1,302 @@
+═══════════════════════════════════════════════════════════════════════════
+块 7 · D 段 —— 死锁侦查实测 + 三条补报
+生成时间：2026-10-15
+本笔 commit：f0697eb（探针 + 阳性对照 + 5 份原始证据；7 文件 / 658 行 / 全是新增）
+profile：dev（**不是 a3** —— a3 下调度器总闸关着，与真实并发不同）
+本文件不含任何凭据（口令原串在全部证据文件里 0 次，已逐个核过）。
+═══════════════════════════════════════════════════════════════════════════
+
+
+【一】死锁侦查实测（顾问追加 · 任务 1 / 任务 2）
+───────────────────────────────────────────────────────────────────────────
+
+■ 1.0 结论一句话 ─────────────────────────────────────────────────────────
+
+真死了。用**产品自己的两个真实端点**并发压，48 轮 ×(1×A + 4×B) = **48/48 轮全中**，
+共 **149 次** ER_LOCK_DEADLOCK。
+没有用裸 SQL 造环；没有先落重试再补实验；没有在 a3 下做。
+
+
+■ 1.1 哪两个端点、为什么是这两个（不是拍脑袋挑的）──────────────────────
+
+A（慢起手）= POST /admin/accounts/application/audit   参数 id=<申请Id>&approve=true
+     → MerchantApplicationService.audit（@Transactional）→ promote(...)
+     写序：merchant_application → **user** → login → merchantimage → **user** → **goods**
+     （最后那条 goods 只在「DowngradeState='frozen' 且 FreezeUntil 未过」时才走到）
+
+B（快起手）= POST /admin/accounts/downgrade/relist     参数 username=<同一账号>
+     → MerchantDowngradeService.relist（@Transactional）
+     写序：**goods** → **user**
+
+⇒ {user, goods} 两张表 **反向**。这条环要成立，只需要「两个事务同时持着对方要的那把」。
+
+
+■ 1.2 为什么全仓只有这一对（顾问给的候选范围我走完了）──────────────────
+
+| 候选 | 实测写序 | 能不能成环 |
+| GoodsService.goodsAdd | 只写 `goods_audit` 一张表 | 单表，不可能 |
+| GoodsService.goodsDe  | goods → productsales（同序） | 无反向对，不能 |
+| GoodsService.goodsUp  | goods → productsales（同序） | 无反向对，不能 |
+| OrderService.orderAdd | 同序 | 不能 |
+| MerchantDowngradeService.applyFreeze | login → goods → user | **不能**（见下）|
+
+· 全仓**没有**第二条 productsales → goods 的路径 ⇒ GoodsService 无反向对。
+· `applyFreeze`（定时到期的自动降级）**不是 @Transactional** —— 类注释明写
+  「逐条自动提交 + 末位翻状态」。每条语句各自一个事务 ⇒ 持锁不跨语句 ⇒
+  **结构性构不成环**（这一点我专门找了，怕漏掉「不需要人操作就能撞上」的路径）。
+· `cancel` / `schedule` 同样是单语句，同理。
+
+⇒ 全仓唯一反向锁序对 = `audit`(user→goods) × `relist`(goods→user)。
+
+
+■ 1.3 压了多少次 / 重现率 ───────────────────────────────────────────────
+
+| 规模 | 轮数 | 每轮并发 | 出死锁的轮数 | 1213 增量 | relist 侧失败 |
+| 48 × KB=4 | 48 | 1×A + 4×B | **48/48 = 100%** | **149** | 149/192 = 77.6% |
+| 36 × KB=1（第一遍） | 36 | 1×A + 1×B | 10/36 = 27.8% | 10 | 10/36 |
+| 36 × KB=1（第二遍） | 36 | 1×A + 1×B |  4/36 = 11.1% |  4 |  4/36 |
+| KB=1 两遍合计 | 72 | | 14/72 = 19.4% | 14 | |
+
+⚠️ **单点数字不可复现，按分布给**：KB=1 两遍跑出 10/36 与 4/36（差 2.5 倍）。
+   第一遍 36/36 轮 A 都走到了 goods 那一腿；第二遍只有 31/36 走到
+   —— 那 5 轮是 B 先跑完赢了（A 读到 DowngradeState 已是 'none'），
+   **天然不可能成环**。所以「KB=1 的重现率」本身带一个上界。
+
+· 错开量 0 / 1 / 2 / 3 / 4 / 5 / 6 / 7 / 8 ms **每一档都中**（KB=4 下每档 4/4 或 8/8）
+  ⇒ 不是「只有某个精确时序才中」。
+· `ER_LOCK_WAIT_TIMEOUT` 全程 **0** ⇒ 是**真死锁**（被立刻判出），不是锁等待超时。
+· 失败**全在 relist 一侧**：A 侧 48/48 全部 `outcome=approved-restored`、0 次 5xx。
+  KB=4 的 149 次失败里，B 占 149、A 占 0。
+
+
+■ 1.4 死锁在 InnoDB 里的锁序（SHOW ENGINE INNODB STATUS 原文摘要）───────
+
+LATEST DETECTED DEADLOCK
+*** (1) TRANSACTION:              trx 4847059
+    UPDATE goods SET ShelfState = 1, DelistedAt = NULL WHERE MerchantId = 'dlprobeM01'
+  *** (1) HOLDS THE LOCK(S):
+      RECORD LOCKS index PRIMARY of table `mall_management_sql`.`user` lock_mode X locks rec but not gap
+        0: ... asc __dlprobe__          ← 持有 user 的这行
+  *** (1) WAITING FOR THIS LOCK TO BE GRANTED:
+      RECORD LOCKS index PRIMARY of table `mall_management_sql`.`goods` lock_mode X waiting
+
+*** (2) TRANSACTION:              trx 4847062
+    UPDATE `user` SET DowngradeState = 'none', ScheduledDowngradeAt = NULL, ... WHERE username = '__dlprobe__'
+  *** (2) HOLDS THE LOCK(S):
+      RECORD LOCKS index PRIMARY of table `mall_management_sql`.`goods` lock_mode X
+        49 row lock(s)（含 heap no 1 = supremum）
+  *** (2) WAITING FOR THIS LOCK TO BE GRANTED:
+      RECORD LOCKS index PRIMARY of table `mall_management_sql`.`user` lock_mode X locks rec but not gap waiting
+        0: ... asc __dlprobe__          ← 等的也是 user 的这行
+
+⇒ 教科书式环：T1 持 user 等 goods；T2 持 goods 等 user。
+（全段见 docs/agent/evidence/c3-block7/d2-deadlock-innodb-status.txt）
+
+
+■ 1.5 为什么窗口这么宽（是机制，不是运气）──────────────────────────────
+
+`goods` 表（`mall_management_sql.sql:54`）**只有 PRIMARY KEY (`Id`)**，没有 MerchantId 索引；
+`user` 表（`:182`）只有 PRIMARY KEY (username)，没有 merchantid 索引。
+REPEATABLE-READ 下 `UPDATE ... WHERE MerchantId = ?` 会**扫描全表并把扫到的每一行都加 X 锁**。
+INNODB STATUS 里 T2 持有 **49 行**（`goods` 表约 45 行 + supremum）就是这条的直接证据。
+⇒ 这条环的成立不依赖毫秒级巧合，靠的是「一条不命中索引的 UPDATE 锁住了整张表、
+   并且一直持有到事务结束」。
+
+
+■ 1.6 Spring 侧现场（异常类型：请注意与你给的两个名字的区别）──────────
+
+以下是应用日志里的实测，不是推断：
+
+· 167 条 `org.springframework.dao.CannotAcquireLockException`
+· root cause：`com.mysql.cj.jdbc.exceptions.MySQLTransactionRollbackException:
+              Deadlock found when trying to get lock; try restarting transaction`
+· **`DeadlockLoserDataAccessException` = 0 条**。
+  你给的判据是「出现 DeadlockLoserDataAccessException 或 CannotAcquireLockException」，
+  落在**后者**。原因是 MySQL 1213 经 `SQLExceptionsMapping` 翻译成
+  `MySQLTransactionRollbackException`，再被 Spring 翻成 `CannotAcquireLockException`。
+· 被回滚的 SQL **只有一条、167 次全同**：
+      UPDATE `user` SET DowngradeState = 'none', ScheduledDowngradeAt = NULL,
+        DowngradeReason = NULL, FrozenAt = NULL, FreezeUntil = NULL WHERE username = ?
+· 调用栈（4 帧，行号我已逐个核过）：
+      UserGovernanceDao.clearDowngrade(UserGovernanceDao.java:256)
+      MerchantDowngradeService.relist(MerchantDowngradeService.java:282)
+      AdminAccountsController.relistDowngrade(AdminAccountsController.java:220)
+      TraceIdFilter.doFilterInternal(TraceIdFilter.java:158)
+
+（全段见 docs/agent/evidence/c3-block7/d2-deadlock-spring-exception.txt）
+
+
+■ 1.7 最小复现步骤 ───────────────────────────────────────────────────────
+
+前置：dev profile 起一台后端（**不要 a3**）。探针自己在开发库里造夹具、跑完自动删。
+
+    node scripts/probes/d2-deadlock-scout.mjs                     # 默认 48 轮 × (1×A + 4×B)
+    ROUNDS=8 KB=1 node scripts/probes/d2-deadlock-scout.mjs       # 最小：每轮只各发一发
+    node scripts/probes/d2-deadlock-scout.mjs --cleanup            # 只清夹具
+    # 退出码 0 = 至少死了一次；1 = 一轮都没死
+
+夹具等价于走完「降级排定 → 到期执行 → 商家重新申请」三步，探针用 SQL 直接置成那个态：
+    user:                DowngradeState='frozen', FreezeUntil=NOW()+10d
+    merchant_application: Status='pending'（同一账号）
+    goods:               该商家名下一行，ShelfState=0
+每轮复位后，同一瞬间发 A×1 + B×K。
+
+**阳性对照**（证明「判据是活的」，不是业务结论）：
+    bash scripts/probes/d2-deadlock-control.sh
+两个会话在 `goodstype` 上反序 `SELECT ... FOR UPDATE`（**只读锁 + ROLLBACK，不写任何一列**），
+跑出 `ERROR 1213 (40001)` + 计数器 0→1 + INNODB STATUS 出现死锁段。
+⚠️ 这个脚本**不是**顾问禁止的「为了能让重试做而人为构造假死锁」——
+它一次数据都不写，只用来排除「本实验的 0 会不会其实是检测链坏了」这一类失败模式。
+
+
+■ 1.8 诚实性声明（别让上面读起来比实际更强）────────────────────────────
+
+1. **两条并发动作都是真实端点、真实业务逻辑**；没有用裸 SQL 造环。
+2. 但**夹具状态是 SQL 直接置的**（等价于走完三步业务，但那三步本身没在这次实验里跑）。
+3. **该环要求同一个账号**：`user` 是主键行锁，不同账号不撞。
+   即触发条件 = **同一商家的两条管理动作在毫秒级内并发**。
+4. **KB 只放大窗口、不是开关**：KB=1（最小场景）实测 14/72 也中。
+5. 「全仓唯一反向锁序对」是**静态读源码**得出的，不是穷举证明
+   —— 我穷举的范围是「带 @Transactional 的多表写路径」（真实注解 13 处）。
+6. A 从不失败、B 必失败这个**不对称**是实测到的（149:0），我没有进一步深挖
+   InnoDB 的受害者选择判据；这不影响结论（无论谁是受害者，都是一条合法管理请求拿到 500、活儿白丢）。
+
+
+【二】任务 3：重试怎么落 —— 需要你先拍板（**落点对不上**）
+───────────────────────────────────────────────────────────────────────────
+
+你的落点：`GoodsService` 三处写方法（Spring Retry 2–3 次）。
+实测到的死锁点：**MerchantApplicationService.audit × MerchantDowngradeService.relist**。
+
+这个落差不是「我没找到落点」，是「**原落点本身不是死锁发生地**」：
+· `GoodsService.goodsAdd` 只写 `goods_audit` 一张表；
+· `goodsDe` / `goodsUp` 是 goods → productsales **同序**。
+⇒ GoodsService 三处写方法在这条环里**一次都没出现**。
+
+我**没有落任何重试代码**（你明令「不要先落重试再补实验」，且落点需你定）。请裁定：
+
+  甲、按**实测落点**给 `MerchantDowngradeService.relist` 加 Spring Retry。
+      理由：死锁受害者**就是它**（167/167 全落在它这条 SQL 上）；而且它天然幂等
+      ——两条写语句（`relistAllByMerchant` 置 ShelfState=1/DelistedAt=NULL；
+      `clearDowngrade` 置 none）重复执行结果相同，重试安全。
+      注意事项：`@Retryable` 必须包在**事务外面**才有效（事务已回滚才能重开），
+      落点方法自己同时带 `@Retryable` + `@Transactional` 时切面顺序要先实测。
+
+  乙、按 **TD-74 原落点**给 `GoodsService` 三处加。
+      代价：那三处实测不会死锁 ⇒ 属于「按单子落，不按证据落」，重试永远不触发，
+      等于加了个不动的装饰。**不建议**。
+
+  丙、不动重试，先**消除争用窗口**：给 `goods.MerchantId` 加二级索引
+      （必要时 `user.merchantid` 同理）。把「全表锁 49 行」压到「锁 1 行」——
+      这不是重试，是治因。代价：动 DDL（**A 档 ⇒ 要你批**）。
+
+  丁、先不动代码，只更新 TD-74 的理由（实测已复现，触发条件这一条可以结了）。
+
+我的建议：**丙 + 甲**。丙治因（窗口从「全表」缩到「一行」，大概率直接压掉这条环），
+甲治果（万一还撞上，让受害者自己重试一次，而不是把 500 甩给管理员）。
+
+
+【三】补报 ①：线程池分池 —— 四枚里三枚 commit 2 已落，没有一枚留给 commit 3
+───────────────────────────────────────────────────────────────────────────
+
+裁定原文是四个池（订单池 / 事件池 / SSE 池 / MQ 池），上次报告只写了 `ObservePoolConfig` 一个。
+
+| 裁定里的池 | 在本仓是什么 | 归属 |
+| 订单池 | `order/model/OrderStateExecutor.java`（显式 ThreadPoolExecutor） | **既有**（`01df702` 就存在），**commit 2 一行没碰** |
+| 事件池 | 与 SSE 池**是同一个池** —— `EventBroadcaster.poll()` 由 **SSE 流线程**驱动 | commit 2（`protect/ObservePoolConfig.java`，新建 180 行） |
+| SSE 池 | 同上 | 同上 |
+| MQ 消费池 | `application.properties:281-282` concurrency=2 / max-concurrency=8 | commit 2（这两行是 commit 2 的 `+`） |
+
+你问的三种可能，答案是第四种：
+**不是**「并入 OrderStateExecutor 就等于落了」—— `OrderStateExecutor` **本来就存在**，
+它是「不动的那一枚」；commit 2 对 `OrderService.java` 的唯一改动是加了 `@CircuitBreaker`
+和一段注释（+10 行），与订单池无关。
+「事件池 / SSE 池」在**实现上是一个池**这一点，仓里有明文：`EventBroadcaster.java:113`
+「`poll()` 由 **SSE 流线程**驱动」。
+
+观测池参数实测（`ObservePoolConfig.java:71-73`）：
+    CORE_POOL_SIZE = 8 · MAX_POOL_SIZE = 32 · QUEUE_CAPACITY = 64（满则当场拒 + 记 SHED）
+
+
+【四】补报 ②：+43 的完整清单（上次报告 §九 的清单是错的）
+───────────────────────────────────────────────────────────────────────────
+
+口径 = commit 2 自己的 diff（`git show 4df799a --stat -- src/test`）+ 逐类 `@Test` 计数
+（`7365de5` → `4df799a`）：
+
+**新增 7 个测试类 = 39 条**
+    ProtectionGateTest               10
+    ProtectionMetricsTest             6
+    ProtectionMetricsBinderTest       6
+    InboundRateLimitInterceptorTest   7
+    ProtectionThresholdsTest          4
+    CircuitBreakerWiringTest          4
+    ProtectionKeysAlignmentTest       2
+    ─────────────────────────────────────
+    小计                             39
+
+**扩增 2 个既有类 = +4 条**
+    DrillRecordServiceTest            7 → 9    (+2)
+    EventBroadcasterTest             10 → 12   (+2)
+
+**改了但没增条数**
+    EventStreamServiceTest            8 → 8    （只改了一处断言 containsOnlyKeys(9)）
+    AbstractSmokeTest                 改 21 行（helper，无 @Test）
+
+39 + 2 + 2 = **43** = 541 − 498 ✓
+
+**上次报告 §九（第 205–207 行）那两处错、一处漏**：
+· `ProtectionGateTest` 记成 **9**（真值 **10**）
+· `ProtectionMetricsBinderTest` 记成 **5**（真值 **6**；§九第 42 行也重复了 5）
+· **完全没提** `DrillRecordServiceTest +2` / `EventBroadcasterTest +2`
+⇒ 那份清单的 7 类加总 37，差额 6 = 2（记错的）+ 4（漏掉的两个扩增类）。
+
+本报告为准。**我没有回头改那份旧报告** —— 那会静默改写一份已交付件。
+
+
+【五】补报 ③：/attack/config · 开关留痕 · drill_record 加列
+───────────────────────────────────────────────────────────────────────────
+
+| 你问的 | 答案 |
+| `/attack/config` 端点做了吗 | **不存在，也不该存在** —— 它是被否的乙案。全仓 grep "attack/config" = **0 处** |
+| 开关状态现在传给后端了吗 | **传了**，走**甲案**：`AttackConsole.vue:1005-1006` 把 `protections` / `injections` 放进 `POST /attack/run` 的 body |
+| 后端接了之后去哪 | `DrillRecordService.run`（`:95-96` 入参 → `:109-111` decodeKeys → `:127` `gate.apply` → `:131` finally `gate.resetToDefault()`） |
+| 留痕落在哪 | **既有的 `drill_record.Scenario` 列**，不加列：`AttackEngine.buildScenarioJson`（`:1717-1738`）里写 `"p":[…]`（protections）/ `"i":[…]`（injections） |
+| `drill_record` 加列了吗 | **没加、也不需要加**。commit 2 对 DDL 的唯一改动是给 `observed_event.Kind` 的**注释**补第 9 类 `protection`（`mall_management_sql.sql` 与 `docs/agent/db-schema.md` 各改 1 行），**一个列都没加**。唯一新列 `BatchId` 是 **commit 1** 的（四张表只加列、不改业务代码） |
+
+⇒ 这一笔属于「**做了但报告没写全**」的是 3 项（甲案传参 / gate.apply / Scenario 留痕），
+**没有一项留给 commit 3**。乙案（独立端点）是被否方案，本就不该存在。
+
+
+【六】本笔交了什么 / 没交什么
+───────────────────────────────────────────────────────────────────────────
+
+交：
+· commit **f0697eb**「test(block7): D 段死锁侦查 —— 探针 + 阳性对照 + 5 份原始证据」
+· 7 文件 / 658 行（全是新增；无一行改动既有源码）
+· refs before/after：**5159 → 5163**（+4，全部来自新增证据文件里的调用栈行号；
+  **无 LOST、无 MOVED**；+4 已逐条核过指对了地方）
+· 测试：**未重跑** —— 本笔未改任何 Java / 前端源码；上一笔基线
+  541 passed / 0 failed / 0 errors / 26 skipped
+· 证据 5 份，落 `docs/agent/evidence/c3-block7/`：
+    d2-deadlock-scout-48x4.txt        48 轮原始输出（含每轮错开量 / 状态码 / 1213 增量）
+    d2-deadlock-scout-kb1.txt         36 轮 × KB=1 原始输出
+    d2-deadlock-innodb-status.txt     锁序骨架（hex 载荷已略，可读字段保留）
+    d2-deadlock-spring-exception.txt  Spring 侧现场 + 异常类型 + 调用栈
+    d2-deadlock-control.txt           阳性对照（证明判据是活的）
+· 探针两句三思后订正的注释（都按实测）：
+    ③「1213 翻成 DeadlockLoserDataAccessException」→ 实测是 **CannotAcquireLockException**
+    「K 太小 ⇒ A 走不到 goods 那一腿」→ 实测 KB=1 有 67/72 轮照样走到了
+
+没交：
+· **任何重试代码**（等你拍板落点）
+· **任何 DDL**（二级索引那条是建议，A 档，要你先批）
+· 没 push / 没 merge / 没开 PR
+
+
+【七】要你回答的两个问题
+───────────────────────────────────────────────────────────────────────────
+
+1. 重试落点选 **甲 / 乙 / 丙 / 丁**？（我建议 **丙 + 甲**）
+2. `goods.MerchantId` 二级索引要不要做？（A 档 DDL）
+═══════════════════════════════════════════════════════════════════════════

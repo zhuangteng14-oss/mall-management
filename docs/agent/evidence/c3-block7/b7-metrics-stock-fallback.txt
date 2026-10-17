@@ -1,0 +1,69 @@
+块 7 收尾 · 指标页「库存水位」黄条消除与基线缺失兜底
+================================================================
+日期      ：2026-10-17 19:05（Asia/Shanghai）
+页面      ：管理端 → 可观测域 → 指标面板（admin.html#/admin/observe/metrics）
+环境      ：真 dev server 8080（PID 31684）+ 真后端 8088（dev profile，PID 42416）
+            DB = 192.168.229.129:3306/mall_management_sql（真库，无 mock、未开模拟日常）
+探针      ：scripts/probes/b7-metrics-stock-shot.mjs（本轮新增；只读页面 + 截图）
+凭据      ：只从环境变量 PROBE_ADMIN_PWD 读取（本地 `_work/admin-pass`，先 tr -d '\r\n'）；
+            脚本与证据里没有口令字面量
+命令      ：
+  PROBE_ADMIN_PWD="$(tr -d '\r\n' < _work/admin-pass)" \
+    node scripts/probes/b7-metrics-stock-shot.mjs b7-metrics-before
+  （改代码后同命令，前缀换成 b7-metrics-after）
+
+修复前（截图：b7-metrics-before-stock.png、b7-metrics-before-full.png）
+  hasWarn = true
+  warnText = "真库当前没有 BaselineStock，水位百分比不可算；先按演示基线步骤打基线才会出现深浅。"
+  rowCount = 8；8 行的 BaselineStock 全为 null
+  行状态：缺货 ×2（条宽 2%）、未测 ×6（条宽 100%，灰斜纹）
+  行分母全部显示 "—"；tooltip 一律是「没有 BaselineStock，算不出水位」
+
+修复后（截图：b7-metrics-after-stock.png、b7-metrics-after-full.png）
+  hasWarn = false（顶部黄条已不存在）
+  stockNote = "仅在最低库存 20 条内搜索 / 筛选 · 基线缺失，按当前库存最高值 237 兜底（*）"
+  rowCount = 8；分母显示 "237*"（* = 本批当前库存最高值兜底）
+  行状态与条宽（截图 b7-metrics-after-stock.png 同一拍；库存随真实流量从 229 涨到 237）：
+    0 / 237*    缺货   2%       （0 库存仍判「缺货」，不被兜底成「充足」）
+    0 / 237*    缺货   2%
+    60 / 237*   偏低   24.4%
+    100 / 237*  偏低   40.7%
+    100 / 237*  偏低   40.7%
+    120 / 237*  充足   48.9%
+    177 / 237*  充足   72.1%
+    237 / 237*  充足   96.6%
+  （条宽取自同一次探针的 style.width；截图时补间动画尚未完全落位，
+    故 237 行显示 96.6% 而非 100%，不影响「按兜底分母计算」的判据。）
+  tooltip 例："基线缺失，按当前库存最高值 237 兜底 · 库存 60 / 237 · 水位 25.3%"
+
+判据（每条都指向页面可复核的事实）
+  1. 顶部黄色告警条不再出现（hasWarn=false）——「没有 BaselineStock」不再是页面级故障。
+  2. 每一行的分母都是数字（不再是「—」），并带 `*` 标明这是兜底值；
+     工具栏在同一处说明兜底口径，不需要用户猜。
+  3. 条宽不再是一排 100% 灰斜纹：有真实相对长短，颜色随「缺货/偏低/充足」变化。
+  4. 0 库存仍优先判「缺货」（2%），兜底不会把空库存洗成健康。
+  5. 有真 BaselineStock 的行不受影响：`r.ratio` 有值时代码直接使用它，
+     兜底只在 `baseline === null/undefined` 时生效（MetricsPanel.vue 的 stockStatus/barWidth/stockTitle）。
+  6. 兜底分母取「本拍返回的 20 条里当前库存的最大值」，不是「每行拿自己当分母」
+     —— 后者会画出永远 100% 的假水位条（GoodsDao.selectStockLevels 的既有注释已警告过）。
+
+实现位置
+  Mall-management-web/mall-management-system/src/views/admin/observe/MetricsPanel.vue
+    - 删除 v-if="stockAllUnknown" 的黄色告警块（原 :268-270）
+    - 新增 stockFallbackMax / stockFallbackAny / stockFallback() / effectiveBaseline() / effectiveRatio()
+    - stockStatus()：ratio 缺失时改用兜底比例，不再一律「未测」
+    - barWidth()：分母走 effectiveBaseline()，不再在缺基线时硬画 100%
+    - stockTitle()：显式写明「基线缺失，按当前库存最高值 N 兜底」
+    - 工具栏 note：显示兜底分母与 `*` 图例
+
+范围说明
+  - 后端 ratioOf() 未改：`ratio=null` 仍如实表示「库存/基线缺一」；
+    兜底是**展示口径**，不写回接口契约，避免把推算值伪装成真基线。
+  - 本页其余 A4 死信计数改动不属于本笔（见指标页死信提交）。
+
+构建复核（修复后、提交前）
+  命令：npm run build（Mall-management-web/mall-management-system）
+  结果：EXIT=0 · DONE Build complete · Hash f2df2f6e12a74c87 · 25.3 s
+  时间：2026-10-17 19:07:27（Asia/Shanghai）
+  eslint：npx eslint src/views/admin/observe/MetricsPanel.vue ⇒ 无报错（仅 browserslist 数据陈旧提示）
+  证据晚于代码：探针 after 截图在最后一次编辑之后重跑；构建在截图之后执行。

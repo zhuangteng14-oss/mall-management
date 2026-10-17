@@ -286,6 +286,40 @@ const goodsRows = PRODUCTS.map(([name, typeId, price], i) => {
   }
 })
 
+/* ==================== 构建：可演练 SKU（块 7 攻击模拟器） ====================
+ *
+ * 【为什么这一段必须有】块 7 的攻击模拟器「一键跑」要求库里**先有靶子**：一件
+ * `Stock > 0` + `SkuCode <> ''` + 父商品在架未删 + 商家未冻结的 SKU（判据逐条见
+ * `DrillTargetDao.pickSku` 的类注释；挑不到就抛 4xx，不静默空跑）。
+ * ⚠️ 这段之前**两个种子文件都不写 `goods_sku`** ⇒ VM 库里那两行（`dddddd` / `aaaaaa`）
+ *    是开发过程中手敲进去的 ⇒ 换一台库重导**演示就起不来**。本段补上这个缺口。
+ *
+ * 【为什么 `SkuCode` 带 `SEED-` 前缀】`goods_sku` **没有** `Source` 列 —— Migration ⑰-2
+ * 只给它加了 `BaselineStock`（见 `db-migration.md` 注意 21 的 ⑰-2 行；`db-schema.md`
+ * §13.6 的 `Source` 11 表清单里也没有它）⇒ 撤种子**不能**用 `Source='seed'` 这把钥匙，
+ * 改用**码前缀**（`DELETE FROM goods_sku WHERE SkuCode LIKE 'SEED-%'`）—— 前缀就是这个
+ * 列的「来源标记」替身，本文件头与产物里都写明了这条唯一的例外。
+ *
+ * 【为什么**不**写 `BaselineStock`】它**不是种子**，是「人工四步」的载体（`AttackEngine`
+ * 的备注逐字：演示前 `UPDATE goods_sku SET BaselineStock = Stock` → 演示后
+ * `UPDATE goods_sku SET Stock = BaselineStock` → 收尾 `SET BaselineStock = NULL`）。
+ * 库里 `NULL` = **未处于演示中**；种子预置一个非 NULL 的值会让引擎把「上一轮演示的基线」
+ * 当成这一轮的，`Result.Stock.Baseline` 当场变成假读数 ⇒ **列不出现在 INSERT 里**（走默认 NULL）。
+ */
+const SKU_STOCK = [240, 180, 120, 60] // 递减：引擎按 `Stock DESC` 挑主靶 ⇒ 主靶恒为第一件
+const skuRows = goodsRows
+  .filter((g) => g.shelf === 1) // 父商品必须**在架**，否则 pickSku 的 JOIN 直接把它筛掉
+  .slice(0, SKU_STOCK.length)
+  .map((g, i) => ({
+    goodsCode: g.code,
+    merchantId: g.merchantId,
+    goodName: g.name,
+    price: g.price,
+    axis: '默认规格',
+    stock: SKU_STOCK[i],
+    code: `SEED-${g.code}`
+  }))
+
 /* ==================== 构建：订单 ==================== */
 
 const dayStart = (k) => k * 86400 // 第 k 天 00:00 距今天 00:00 的秒数
@@ -740,6 +774,8 @@ w(`--      ⚠️ \`stats_daily\` **不在本文件里**：它的行由 \`StatsS
 w(`--         那次 rebuild 会先 deleteAll 再从 \`order\` 重算 ⇒ 手写进去的会被抹掉。`)
 w(`--`)
 w(`-- 【幂等】每次执行先按 \`Source = 'seed'\` **先子后父**删掉上一次的种子行，再整批插入。`)
+w(`--   ⚠️ 唯一例外：\`goods_sku\`（⑤-b 段）**没有 \`Source\` 列** ⇒ 那一条按码前缀撤`)
+w(`--      （\`SkuCode LIKE 'SEED-%'\`，见 ① 段）。`)
 w(`--   存量数据（\`Source = ''\`）一行不删、一行不改 —— 唯一的例外是下面那段`)
 w(`--   \`login.CreateTime\` 补值，它带 \`WHERE CreateTime IS NULL\` 守卫，同样可重复执行。`)
 w(`--   撤种子：\`DELETE FROM \`order_item\` WHERE Source='seed'\` …（照本文件删除段的顺序即可）`)
@@ -770,7 +806,19 @@ w(` WHERE TABLE_SCHEMA = DATABASE() AND COLUMN_NAME = 'Source'`)
 w(`   AND TABLE_NAME IN ('login','user','goods','goods_audit','order','order_item','cart',`)
 w(`                      'notification','admin_audit','merchant_application','stats_daily');`)
 w(``)
+w(`-- ---- ⓪-b 前置检查（块 7 攻击模拟器）：\`goods_sku.BaselineStock\` 列（期望 1/1）----`)
+w(`-- ⚠️ 这一段**只是报个数**，缺列不会中止本文件（⑤-b 的 INSERT 不写那一列）—— 它缺的是`)
+w(`--    \`AttackEngine\` 读演示基线那一步：那种情况下 \`Result.Stock.Baseline\` 恒为 null，`)
+w(`--    秒杀场景的「演示前 / 演示后」两个读数仍在，只是**没有基线可比**。`)
+w(`SELECT CONCAT('seed 前置检查：BaselineStock 列 ', COUNT(*), '/1 张表就位') AS \`seed_precheck_baseline\``)
+w(`  FROM information_schema.COLUMNS`)
+w(` WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'goods_sku' AND COLUMN_NAME = 'BaselineStock';`)
+w(``)
 w(`-- ---- ① 清上一次的种子行（**先子后父**；存量行 Source='' 一律不动）----`)
+w(`-- ⚠️ **唯一一条不走 \`Source\` 的删除**：\`goods_sku\` 没有那一列（Migration ⑰-2 只加了`)
+w(`--    \`BaselineStock\`）⇒ 按**码前缀**撤。它必须排在 \`goods\` 之前 —— \`GoodsId\` 是软引用，`)
+w(`--    父商品先没了就找不到该删哪些 SKU 了（反过来说：删完 SKU 再删商品，不留悬空行）。`)
+w(`DELETE FROM \`goods_sku\`           WHERE \`SkuCode\` LIKE 'SEED-%';`)
 w(`DELETE FROM \`order_item\`           WHERE \`Source\` = 'seed';`)
 w(`DELETE FROM \`order\`                WHERE \`Source\` = 'seed';`)
 w(`DELETE FROM \`cart\`                 WHERE \`Source\` = 'seed';`)
@@ -829,6 +877,32 @@ w(
     .map(
       (g) =>
         `  (${q(g.merchantId)}, ${q(g.name)}, ${n(g.price)}, ${q(g.img)}, ${q(CAT[g.typeId])}, ${q(g.code)}, 0, ${g.shelf}, ${g.typeId}, 'seed')`
+    )
+    .join(',\n') + ';'
+)
+w(``)
+
+/* ---- ⑤-b goods_sku（块 7 攻击模拟器演示用）---- */
+w(`-- ---- ⑤-b \`goods_sku\`：${skuRows.length} 件可演练 SKU（块 7 攻击模拟器「一键跑」的靶子）----`)
+w(`-- 【为什么要有这一段】引擎开跑前从库里挑靶子（\`DrillTargetDao.pickSku\`），判据四条：`)
+w(`--   \`Stock > 0\` · \`SkuCode <> ''\` · 父 \`goods\` 在架未删 · 商家未冻结。挑不到就抛 4xx`)
+w(`--   （「库里挑不到可演练的商品：…演示种子数据导入了吗？」）⇒ 一台**新导的库**必须能供上。`)
+w(`-- 【\`GoodsId\` 为什么用子查询】\`goods.Id\` 是自增、运行时才知道（同 ⑥ 的 \`GoodsId\` 手法）。`)
+w(`-- 【为什么不写 \`BaselineStock\`】**它不是种子**，是「人工四步」的载体（\`AttackEngine\` 备注）：`)
+w(`--   演示前 \`UPDATE goods_sku SET BaselineStock = Stock WHERE SkuCode = '<靶子>';\``)
+w(`--   演示后 \`UPDATE goods_sku SET Stock = BaselineStock WHERE SkuCode = '<靶子>';\``)
+w(`--   收尾   \`UPDATE goods_sku SET BaselineStock = NULL WHERE SkuCode = '<靶子>';\``)
+w(`--   库里 \`NULL\` = **未处于演示中** ⇒ 本段走列默认（NULL），别预置 —— 预置会让引擎把`)
+w(`--   上一轮的基线当成这一轮的（\`Result.Stock.Baseline\` 变假读数）。`)
+w(`-- 【\`SEED-\` 前缀的用途】\`goods_sku\` **没有** \`Source\` 列 ⇒ 撤这一段的种子按前缀（见 ① 段）：`)
+w(`--   \`DELETE FROM \`goods_sku\` WHERE \`SkuCode\` LIKE 'SEED-%';\` —— 前缀是「来源标记」的替身。`)
+w(`INSERT INTO \`goods_sku\` (\`GoodsId\`,\`MerchantId\`,\`GoodName\`,\`AxisName\`,\`Price\`,\`Stock\`,\`SkuCode\`,\`Sort\`) VALUES`)
+w(
+  skuRows
+    .map(
+      (s) =>
+        `  ((SELECT \`Id\` FROM \`goods\` WHERE \`ProductCode\` = ${q(s.goodsCode)} LIMIT 1), ` +
+        `${q(s.merchantId)}, ${q(s.goodName)}, ${q(s.axis)}, ${n(s.price)}, ${n(s.stock)}, ${q(s.code)}, 0)`
     )
     .join(',\n') + ';'
 )
@@ -989,7 +1063,9 @@ w(`-- 或管理端「经营数据 → 立即全量重建」。重建会先清空
 w(`-- 全量重算 ⇒ 看板的 GMV / 成单数 / 买家数与你刚灌的订单一一对应。`)
 w(``)
 w(`-- ---- 自检（可选，跑完看一眼）----`)
+w(`-- ⚠️ \`goods_sku\` 那一行按**码前缀**数（它没有 \`Source\` 列，见 ① 段与 ⑤-b 段）。`)
 w(`SELECT 'login' AS \`table\`, COUNT(*) AS \`seed_rows\` FROM \`login\` WHERE \`Source\`='seed'`)
+w(`UNION ALL SELECT 'goods_sku', COUNT(*) FROM \`goods_sku\` WHERE \`SkuCode\` LIKE 'SEED-%'`)
 Object.keys(stat)
   .filter((t) => t !== 'login')
   .forEach((t) => {

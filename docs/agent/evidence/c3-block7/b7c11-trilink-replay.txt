@@ -1,0 +1,141 @@
+全链路联动回放（日志 + 指标 + 状态流转）三页实测证据
+日期：2026-10-17
+环境：真后端 8088（profile=dev）+ 真前端 8080（npm run serve）+ 真 MySQL 台账；未启用「模拟日常」，无 mock、无请求拦截。
+探针：scripts/probes/probe-b7c11-trilink-replay.mjs（CDP，headless，1440×900）
+      登录口令从 PROBE_ADMIN_PWD 环境变量读（本地值在 _work/admin-pass，未入库）。
+采样：DOM 每 20–25ms 读一次；截图 1440×900。
+证据晚于代码：最后一次产品代码编辑 AttackConsole.vue 15:14:07，全部截图产出 15:21:03–15:21:38（CST）。
+
+────────────────────────────────────────────────────────────────────────
+0. 证据批次是怎么来的（不是造的假数据）
+────────────────────────────────────────────────────────────────────────
+批次名：trilink-evidence
+drill_record.Id = 81
+BatchId = 1c5e7b66-b007-44c4-a526-c238b1cb1444
+
+构造方式（全部走真实链路）：
+  ① 真演练：POST http://localhost:8088/admin/observe/attack/run
+     name=trilink-evidence, concurrency=10, durationSeconds=12, targetQps=6,
+     scenarios=[{"key":"orderBurst","weight":100}]
+     → 产生 285 笔真实订单（orderBurst），台账里有 CREATED 建档事件。
+  ② 真订单操作：用真实接口并带 `X-Drill-Batch: 1c5e…1444` 头（TraceIdFilter.currentBatch() 读取），
+     把本批次订单实际推过状态机：
+       /order/orderPayIfUp        ×6   CREATED → PAID
+       /order/orderDeliveryIfUp   ×3   PAID    → SHIPPED
+       /order/orderReceiveIfUp    ×2   SHIPPED → COMPLETED
+     这些是 SIM- 前缀的真实订单，DB 行状态已随之改变。
+
+台账（observed_event）实测计数（只读 SQL，_work/trilink-ledger-counts.txt）：
+  kind=order,  from/to 有值 → 296 条 = 285 + 6 + 3 + 2
+    (null→CREATED, applied) 285
+    (CREATED→PAID, applied)   6
+    (PAID→SHIPPED, applied)   3
+    (SHIPPED→COMPLETED, applied) 2
+  kind=order,  from/to 为空 → 143 条 warn（下单被拦截，不进状态机）
+  其余：identity 587 / lock 592 / stock 285 / audit 5 / notify 5 / protection 1+6 / 合计 1920
+  severity=error 条数 = 0（所以指标页「错误事件占比」恒为 0.0 是**如实**，不是图表没跑；
+  本批另有 6 条 protection/warn「熔断开路拒绝（未执行）」，与 drill_record.FailedRequests=6
+  数量一致 —— 按标题与数量对照，未做逐条关联）
+  时间跨度：2026-10-17 15:09:04.623 ~ 15:09:44.060（39 秒，与页面「时间跨度 39 秒」一致）
+
+回放数据接口（实测 200）：GET /admin/observe/replay?batchId=…&limit=… → total=1920。
+
+────────────────────────────────────────────────────────────────────────
+① 日志页：逐条流出，且没有 ×N
+────────────────────────────────────────────────────────────────────────
+截图：
+  b7c11-trilink-log-1.png    回放开始（进度 201 / 1,920；列表已有 200 行；播放中）
+  b7c11-trilink-log-2.png    回放中
+  b7c11-trilink-log-done.png 放完（进度 1,920 / 1,920；已放完）
+
+25ms 采样 103 个点（_work/trilink-probe-log-samples.json）：
+  firstProg = 1, lastProg = 1920
+  distinctProgress = 30（进度只增不减；同一进度会被多个采样点重复读到，故 distinct < samples）
+  DOM 行数：min 1 / max 200（200 是 EventLog 虚拟滚动的 DOM 硬上限 VIRTUAL_MIN，
+    数据侧 EVENT_CAP 也是 200；本批播放侧每帧上限另由横幅标注为 50 条）
+  aggMax = 0          ← `.agg-chip`（×N 徽标）在整个回放期间从未出现
+  xNCount = 0         ← 对 #ev-list 全部行文本正则 /×\s*\d+/ 的匹配数为 0
+  states = ["播放中", "已放完"]
+结论：日志是**一条一条**按回放时钟吐出的；全程零合并、零 ×N。
+
+────────────────────────────────────────────────────────────────────────
+② 指标页：图表在动态跳，不是白板
+────────────────────────────────────────────────────────────────────────
+截图：
+  b7c11-trilink-metrics-1.png 第一次暂停（QPS 柱图已有多拍）
+  b7c11-trilink-metrics-2.png 第三次暂停（进度 1,866 / 1,920，已暂停；柱图 24 拍）
+  b7c11-trilink-metrics-done.png 放完（回放时钟 23:09:44.060*，指标拍 40 个）
+
+25ms 采样 200 个点（_work/trilink-probe-metrics-samples.json）：
+  distinctBands = 19        状态条读数出现过 19 种组合
+  distinctKindBars = 18     类别分布（锁/订单/库存/身份/防护）出现过 18 种数值组合
+  distinctTicks = 134       右侧「回放本拍」读数出现过 134 种文本
+  warnSeen = true           醒目提示一直在：「回放指标由事件台账推算，非 HTTP 原始指标。…」
+  canvases = 3              QPS 堆叠柱 / 错误率折线 / 延迟折线 三块 canvas 全部挂载
+
+状态条读数实样例（先后）：
+  129.0 QPS / 0.0 错误 / 28ms P99
+  158.0 QPS / 0.0 错误 / 25ms P99
+  166.0 QPS / 0.0 错误 / 23ms P99
+  159.0 QPS / 0.0 错误 / 23ms P99
+  162.0 QPS / 0.0 错误 / 20ms P99
+  …（尾部空档）
+  12.0 QPS / 0.0 错误 / 14ms P99
+  41.2 QPS / 0.0 错误 / 16ms P99
+记录级聚合快照（右栏）：记录总量 576 请求 · 拦截 285 · 失败 6 · 耗时 12.2 秒；
+  回放时钟 23:09:44.060；指标拍 40 个（滚动保留最近 600）。
+
+诚实说明（避免把「真实空档」误读成卡死）：
+  23:09:20 → 23:09:29 这 9 秒日志时间里台账没有事件 ⇒ 进度停在 1,866，
+  该拍 QPS=0.0、P99 显示「—」（无 DurationUs 样本时画断点，不是 0）。
+  同段回放时钟仍在推进（23:09:20.130 → 23:09:29.296），随后 1,866 → 1,920 继续走完，
+  说明是**事件空档**，不是渲染停摆。
+  （* 页面显示的是浏览器本地时区；台账原值 15:09:44.060 UTC=+0，对应本地 +8 的 23:09:44。）
+
+────────────────────────────────────────────────────────────────────────
+③ 状态页：角标会加会减，框下小字只增
+────────────────────────────────────────────────────────────────────────
+截图：
+  b7c11-trilink-state-run1.png  进度 241 / 1,920：待付款 34，其余 0；下方「本批次 +34」
+  b7c11-trilink-state-run2/3/4.png  逐段放
+  b7c11-trilink-state-paused.png
+  b7c11-trilink-state-done.png  进度 1,920 / 1,920：待付款 279 / 待发货 3 / 待收货 1 / 已完成 2 / 已取消 0
+                                下方：+285 / +6 / +3 / +2 / +0
+
+20ms 采样 277 个点（_work/trilink-probe-state-samples.json）：
+  distinctBadgeVectors = 60
+  待付款轨迹（statesSeen[0] 去重）：1→2→8→13→…→278→281→285→284→282→279
+     前段只加（建档 +285），后段出现 −1/−2/−3/−4/−6（付款离场）⇒ **会加也会减**
+  待发货：0→1→3→6→5→4；待收货：0→1→2→3；已完成：0→2
+     即：付款进入待发货、发货进入待收货、收货进入已完成，每一笔都同时体现为「前一态 −1、后一态 +1」
+  框下小字（distinctHitVectors 60，抽查首尾）：
+    "本批次 +1/0/0/0/0" … "本批次 +285/+2/0/0/0" … "本批次 +285/+6/+3/+2/+0"
+      ⇒ 只增不减
+  最近流转列表（回放流转明细）：recentMax = 30（上限 30 条，持续增长到打满）
+  状态机连线高亮：edgeOnMax = 2
+  顶部汇总：「回放已见订单（当前各态合计）」由 38 涨到 285；
+           「回放已捕获流转（只增）」由 38 涨到 296
+
+与台账对账（前端最终值 = SQL 计数）：
+  待付款 279 = 285 建档 − 6 付款
+  待发货   3 = 6 付款 − 3 发货
+  待收货   1 = 3 发货 − 2 收货
+  已完成   2 = 2 收货
+  已取消   0
+  流转总数 296 = 285 + 6 + 3 + 2（与 observed_event 的 order/from-to 计数完全相等）
+
+────────────────────────────────────────────────────────────────────────
+④ 构建与静态检查
+────────────────────────────────────────────────────────────────────────
+npx eslint（replay-metrics.js / replay-session.js / ReplayBanner.vue / AttackConsole.vue /
+           EventLog.vue / MetricsPanel.vue / OrderFlow.vue）→ 0 error 0 warning
+npm run build → DONE Build complete（2026-10-17T07:18:43Z，Time 85057ms）
+
+────────────────────────────────────────────────────────────────────────
+⑤ 本轮修掉的一个真实回归（导致「点回放没反应」）
+────────────────────────────────────────────────────────────────────────
+现象：探针点「回放」后 hash 已跳到 #/admin/observe/logs，但页面不渲染、进度不动；
+      console 捕获 `ReferenceError: stopReplayRaf is not defined`（AttackConsole.vue onBeforeUnmount）。
+根因：rAF 时钟迁到 api/replay-session.js 后，旧组件卸载钩子里仍留着一句 stopReplayRaf()；
+      切页时 beforeUnmount 抛错，把整条路由导航打断。回放数据接口本身正常（页面内直接 fetch 得 200 / total=1920）。
+修复：删除悬空调用并更新注释（AttackConsole.vue，15:14:07）。修复后本文件全部证据由探针重新产出。

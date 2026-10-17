@@ -1,0 +1,319 @@
+块 7 · commit 10（可观测演示体验返工）· 阶段一核实报告
+=========================================================
+生成时间：2026-10-15
+范围：只读核实（本次未改动任何代码；git 工作区仍为 commit ab6f71d 的干净态）
+方法：三页全文精读 + 后端三条 SSE 帧字段调研 + 一轮真实攻击实测抓帧
+
+---------------------------------------------------------
+0. 一句话结论
+---------------------------------------------------------
+三件都在，但都没做到设计稿。其中【件 3·状态机动画】有两处硬缺陷，
+叠加后导致**在任何真实数据下都不会动** —— 用户看到的「全程一点没变化」
+是必然结果，不是偶发。件 2 / 件 1 的差距是「整个交互形态与稿不同」，
+且**两者的数据面在后端已经齐备，不需要动后端**。
+
+---------------------------------------------------------
+1. 件 3 · 状态流转两处动画
+---------------------------------------------------------
+
+【3a 订单行进度条的「—」不流动】
+
+现状
+  · 进度条是**纯 DOM，不是 SVG**：<span class="a-of-track"> 里 4 个
+    <i class="a-of-node">（节点）+ 3 个 <i class="a-of-seg">（就是「—」）。
+    （OrderFlow.vue 模板 :104-109）
+  · .a-of-seg { flex:1; height:2px; background: var(--line-2) }
+    .a-of-seg.on { background: var(--success) }
+    （OrderFlow.vue:795-802）—— **只有颜色切换，没有任何 animation / transition**。
+
+为什么不符
+  · 稿要「—」流动（虚线推移），现在是静态实线靠变色表示已走过。
+  · 核实清单④的答案：**是 CSS/DOM，不是 SVG** ⇒ 用户原话给的两条改法里
+    「SVG 虚线 stroke-dashoffset」这条不适用（没有 SVG 可改）；
+    要么给 .a-of-seg 加 repeating-linear-gradient + background-position 动画，
+    要么把这一段整体改成 SVG 虚线。
+
+「只在活跃订单上流动」怎么落地（现成判据）
+  · 模板里已经有 r.cancelled（且已有 .is-dead 类把整条压暗）
+  · r.step（0..4）：补一条「step === 4（已完成）也不流动」即可。
+
+【3b 状态机图全程不动 —— 已实测坐实，两个互相独立的原因】
+
+实测方法（按用户要求做了一次真跑）
+  · 起一轮真实攻击：orderBurst 100%，20 并发 20 秒（AttackEngine 真跑）。
+  · 同时用 curl 挂住两条 SSE 流抓帧：
+      /admin/observe/orders/stream  → 683 KB / 28 帧
+      /admin/observe/events/stream  → 1.7 MB / 18 帧
+  · 产物：_work/p3b-orders.sse、_work/p3b-events.sse、
+          _work/p3b-attack.json、_work/p3b-analyze.py（均在 gitignore 的 _work/）
+
+实测结果（orders 流）
+  · moves **有**数据 —— 28 帧里 17 帧非空，共 **4670 条**
+    （moveCount 峰值 344）。⇒ 驱动源（SSE order 流的 moves）是**接上的**，
+    不是「没接到」。
+  · 但 4670 条**逐条统计**的结果是：
+        from 取值分布   = {None: 4670}        ← 100% 为 null
+        to   取值分布   = {CREATED: 4670}     ← 100% 同一个值
+        action 分布     = {create: 4670}
+        result 分布     = {applied: 4670}
+        唯一 (from,to) 组合 = [(None, 'CREATED')]   ← 只有一种
+    样本：{"orderId":"SIM-BURST-12187-763","action":"create","from":null,
+           "to":"CREATED","result":"applied","ts":1791994213554}
+
+原因一 · 守卫条件把建档挡在门外
+  · OrderFlow.vue:498 是：
+        if (m.from && m.to) {
+          flash(activeEdges, `${m.from}>${m.to}`)
+          flash(pulseNodes, m.to)
+        }
+  · from 为 null ⇒ 整个 flash **被跳过**。攻击演练产生的流转 100% 是建档
+    （action=create、from=null），所以**一次边高亮、一次节点脉冲都不会发**。
+
+原因二 · 前后端命名空间错配（就算 from 非 null 也白搭）
+  · 后端 moves.from/to 用的是 **OrderState 枚举名**：
+      CREATED / PAID / SHIPPED / RECEIVED_NODELIVERY / ILLEGAL_* …
+      （order/model/OrderState.java:44-72）
+    生成路径可复核：OrderTransitionRecorder.applied() 里
+      toState = stateMachine.stateName(payIf, deliveryIf, receiveIf)
+      → metrics.transition(action, fromState, toState, ...)
+      → MallOrderStateMetrics.event(...) → 进 SSE 的 moves
+      （OrderTransitionRecorder.java:113-118；MallOrderStateMetrics.java:150-154）
+    实测到的 "to":"CREATED" 正是 stateName(0,0,0) 的返回值。
+  · 前端 MAIN_EDGES 的 id 用的是 **DB 派生五态 code**：
+      waitPay>waitShip / waitShip>waitReceive / waitReceive>completed
+      （OrderFlow.vue:292-296），节点 key 同理（:284-290）
+      取消两条：waitPay>cancelled / waitShip>cancelled（:298-299）
+  · 两套名字**没有一个对得上**：
+      CREATED ≠ waitPay · PAID ≠ waitShip · SHIPPED ≠ waitReceive
+      COMPLETED ≠ completed（大小写也不同）
+  · ⇒ 即便演示时人工点一次「付款」，拼出的 ${from}>${to} = "CREATED>PAID"
+    在 MAIN_EDGES 里查不到；pulseNodes 拿到 "PAID"，也不在 FSM_NODES 的
+    key 集合里。**两条路都亮不了。**
+
+结论
+  · commit 7 报告里「走过的边亮绿 1.2 秒、落到的节点脉冲」这句，
+    在两条路径上都不成立：建档被守卫挡掉、真流转被命名空间挡掉。
+  · 动画的**机制件全都在**（flash() :355、FLASH_MS = 1200 :269、
+    .is-pulse / @keyframes a-of-node-glow :882、a-of-node-pulse :822），
+    **是把数据喂进去的那一层断了**。这也解释了为什么「看起来像是做了、
+    跑起来一点不动」—— 代码读起来是对的，只有实测才露馅。
+
+改动面估算（3a + 3b 合计）
+  · OrderFlow.vue 单文件，约 **120 ~ 180 行**
+      - 新增 OrderState ↔ 五态的映射表                    ~20 行
+      - 改 absorbMoves（守卫条件 + 映射）                  ~15 行
+      - .a-of-seg 流动 CSS                                ~15 行
+      - 节点角标（每状态多少单）模板 + 样式                 ~40 行
+      - 若改为 SVG 虚线：模板 :104-109 那段重写            ~25 行
+  · 后端：**不用改**（moves 已在推 from/to/action/result/ts）
+
+不确定点（3）
+  ① 「节点角标 = 每状态多少单」可以直接吃帧里的 counts
+     （cancelled/completed/waitReceive/waitShip/waitPay/total，实测帧里都有），
+     不用新后端。但它是**全表**口径（OrderDao.countOrderStates() 无时间窗）
+     —— 演练时会显示 11558 这种总量，不是「本批次」。要不要改成本批次口径
+     = 需要新的后端查询；本笔不动后端的话，只能显示全表。
+  ② 「边高亮 1.2 秒」在高频演练下会被**反复重置**（4670 条 moves / 20 秒
+     ⇒ 每秒 200+ 次 flash 同一 key），实际观感是「常量高亮」，
+     看不到「1.2 秒后熄灭」。要好看得改成按批次节流或用动画队列。
+     这是设计口径问题，需要定。
+  ③ 取消那两条边**永远不亮** —— 后端 OrderTimeoutCancelJob 只写 CancelledAt、
+     不走状态机、不产生 transition 事件（OrderStreamService.java:32-37 有这条
+     边界注释）。**这一条前端修不了**，要修得动后端。
+
+---------------------------------------------------------
+2. 件 2 · 实时日志控制台化
+---------------------------------------------------------
+
+现状（逐条对用户核实清单）
+  ① 滚动逻辑：**新的在前（整批前插）+ 分页**，**没有自动滚动**，
+     **没有 tail -f**。absorbEvents 里
+       fresh.sort((a,b) => b.ts - a.ts || b.seq - a.seq)
+     然后 events.value = fresh.concat(events.value.slice(...))。
+     排序方向与稿**相反**（稿要滚到底，实现在顶上堆）。
+  ② 右侧实时统计：**没有**。文件头明写「本页不用 ECharts」
+     「本笔没有新引图表、没有复用 BaseChart」
+     （理由：8 类/严重度的分布是 MetricsPanel 的活，同屏再画一遍不多信息）。
+     全页只有顶部三个数 + 8 类图例兼筛选。
+  ③ 批次过滤：**没有**。但 —— **帧里有 batchId，前端没读**：
+     事件字段全集 = batchId, detail, key, kind, objectId, objectType,
+                    seq, severity, title, traceId, ts
+     实测 4516 条事件里 **4096 条（90.7%）带非空 batchId**。
+     EventLog.vue 全页只从帧顶层读了 f.rate（:486）和 f.mq（:489），
+     events 的 9 个字段里**不含 batchId**。
+     ⇒ 「只看演练批次 #xxxx」**纯前端可做，零后端改动**。本件最省力的一处。
+  ④ 身份事件淹没：**没有聚合/折叠**。实测（orderBurst 场景 20 秒）kind 分布：
+       identity 3584（79.4%）/ stock 459 / lock 265 / order 208
+     用户说的「263 条」是更早一次观测；本次实测比例更高，坐实该现象。
+  ⑤ 帧字段够不够算派生值：**够，而且比需要的还多**。
+     帧顶层实测键 = count, counts, cursor, events, mq, rate, seq, severity,
+                    traces, ts
+       · 8 类占比环图   → counts 就是按 kind 的本拍计数（8 个键齐全）
+       · 严重度堆叠条   → severity（info/warn/error 三键）
+       · 速率折线/滚动  → rate（已有）
+       · 热点对象 Top5  → 事件行有 objectType/objectId，前端聚合即可
+       · 链路/慢请求榜  → traces[] 有 method/path/status/startMs/endMs/ms
+     而 EventLog.vue 现在是**自己从客户端那个 1000 条上限的列表里现算**
+     kind/severity 计数（:356 / :361）—— 用的是**被截断过的客户端缓冲**，
+     不是后端的权威本拍数。
+     ⇒ **件 2 数据面零后端改动**，全部前端可做。
+
+为什么与稿不符
+  · 稿是「控制台（tail -f + 5 区 + 8 处实时动画）」，
+    实现是「自上而下倒序卡片流 + 分页」—— 连排序方向都相反。
+  · 稿里的「暂停按钮 / 密度两档 / 导出 CSV、JSON / 搜索框 / 对象过滤」
+    **一个都没有**。
+
+改动面估算
+  · EventLog.vue 是**重写级**（现 1000 行 → 5 区布局），约 **+700 ~ +900 行**：
+      - 顶部状态条 80px（健康度大字 + 5 KPI 数字滚动 + QPS 迷你面积图
+        + 严重度堆叠条 + 事件速率 + 暂停）                ~150 行
+      - 左侧过滤栏 200px（全部/8 类勾选/只看批次/只错误/对象/搜索） ~120 行
+      - 事件流 60%（等宽、时间戳对齐、自动滚到底、滑入 + 1.5 秒高亮、
+        密度两档、导出）                                  ~150 行
+      - 右侧实时统计 25%（类型占比环图 + 速率折线 + 严重度堆叠
+        + 热点 Top5 + 关键指标 + 锁竞争热力图）            ~200 行
+      - 底部链路展开（traceId + 耗时 + 批次 + 该 trace 全部事件
+        + 「筛选同一链路」）                               ~100 行
+  · 可复用的现成件
+      - KpiCard.vue（有 delta / trend）
+      - LineChart.vue（area:true 已有，MetricsPanel 在用）
+      - DonutChart.vue / PieChart.vue / BarChart.vue / HeatmapChart.vue
+      - MetricsPanel.vue 的 rAF 数字滚动（tweenTo / TWEEN_MS = 300）
+        可直接照抄口径
+  · 图标 @lucide/vue **已在 package.json（^1.55.0）且 node_modules 里装着**
+    （dist/cjs/lucide-vue.js），本仓已有两处在用（ShopHome.vue:296、
+    UserInfoPage.vue:450）⇒ **零新依赖**。
+    用户点名的 8 个图标（database / lock / shopping-cart / package /
+    clipboard / bell / alert-triangle / shield）需逐个核名。
+  · 后端：**零改动**（batchId / counts / severity / rate 全在帧里）。
+
+不确定点（2）
+  ① **两条 events 流并存会耦合**：EventStreamService.sentSeq 是**单例字段**
+     （:55），frame() 是 synchronized（:75）；两条流共享 sentSeq，也共享
+     同一个 FramePacer。机制上后一条流会走 pacer.reuse() 拿到**前一条流
+     刚产的那一帧**（含同一批 events），所以事件**不会系统性丢失**，
+     但两条流的「本拍」是同一拍、帧号互串。
+     ⇒ 件 1 若在攻击页也开一条 events 流（做日志迷你块），
+       **必须实测**「攻击页 + 日志页同开，两边事件条数是否一致」。
+       建议在 10c 落地时用探针验一次，别拍脑袋。
+  ② 稿里「暂停」在 SSE 语义下 = 客户端停止 append（服务端照推），
+     **不是**真的暂停采集。且 EventBroadcaster.poll() 只由流线程驱动
+     ⇒ 如果为了「暂停」把流关掉，**台账就不落库了**
+     （tech-debt TD-61 那条）。要定口径：暂停 = 只停渲染、连接不断。
+
+---------------------------------------------------------
+3. 件 1 · 攻击页下方三块小型预览
+---------------------------------------------------------
+
+现状
+  · 攻击页下方**只有** ④ 演练记录 + ⑤ 清场，**没有任何预览**。
+  · 本页 import 里**一个图表都没有**（AttackConsole.vue:322-330，只有
+    WeightSlider / IconGlyph / api.observe / 两个标签表）。
+    （这条有历史：文件头写着「攻击页 = 只做编排 + 跑 + 演练记录；
+      三面板已独立成页（D2 后期改判），不塞进攻击页」——
+      那条改判是 2026-10-13 做的，本件相当于部分改回。）
+  · 核实清单②：/attack/run 是**同步**（AttackController.java:114-132，
+    阻塞到跑完；类注释 :45-50 明写「几十秒」）。前端 runAttack 内置
+    durationSeconds*1000 + 60s 超时。
+  · 核实清单③：进度条**有**，但是**纯估算**（pct = min(96,
+    elapsed/expected*100)）。**「已发 8000」没有**（后端无此面）；
+    **「暂停」没有**。
+  · 核实清单⑤：三块的字段**都够**（metrics 全套见上；orders 帧的
+    counts/orders/moves 见件 3；events 帧见件 2）。
+
+⚠️ 前提更正（一条，重要）
+  · 稿里「三块共用主 SSE，前端拆字段分发」—— **本仓不存在「一条主 SSE」**。
+    是**三条独立端点**：
+      /admin/observe/metrics/stream
+      /admin/observe/orders/stream
+      /admin/observe/events/stream
+    （endpoints.js:392-395），各自一条 HTTP 连接、各自一条服务端异步线程。
+  · ⇒ 落地只有两个选择：
+      (a) 攻击页**各连自己那条**（三块 = 三条流）
+          —— 零后端改动；代价是攻击页开着时服务端多 3 条常驻线程，
+             且（见件 2 不确定点①）events 那条会和日志页耦合
+      (b) 后端**新增一条聚合流** —— 要动后端
+  · 建议 (a)（本笔不动后端），但这是**结构决定，需要用户/顾问定**。
+
+改动面估算
+  · AttackConsole.vue：三块预览 + 辅助条，约 **+350 ~ +500 行**
+    （引入 3 条流 + 3 个复用组件 + 布局 + 辅助条）
+  · 「已发」数字：**后端没有这个面**（无进度/暂停/取消端点、无任务表，
+    类注释 :48-50 明说不做）⇒ 要么改成「已跑时长」（前端有），
+    要么动后端加计数。**不能凭空写一个数字**（违反本仓
+    「不声称知道进度」的口径，AttackConsole.vue 里已有这条注释）。
+  · 「暂停」：同步请求**无法中途暂停**。可选口径：暂停 = 前端停止渲染
+    + 停止进度条推进（**请求照跑**），并如实上屏说明。
+
+不确定点（1）
+  ① 「已发 8000」这个数**后端一个都没有**。
+     但 AttackEngine 里其实**已经有** Meter 三计数器
+     （AttackEngine.java:272-289），只是**只在 run 返回时汇总、过程中不暴露**
+     ⇒ 加一个只读端点、或让 metrics 流带一段，是可行的小改动。
+     请裁决走哪条：(i) 改稿（改成「已跑 N 秒 / 预计剩余」）+ 前端
+                  (ii) 加后端计数器（本笔扩到后端）
+
+---------------------------------------------------------
+4. 数据充足度评估（用户追加要求）
+---------------------------------------------------------
+
+A. 有数据、前端就能加的（不用动后端）
+  1. 事件帧的 counts（8 类本拍）/ severity（3 档本拍）/ cursor
+     （合并环进度）/ batchId（批次标签）—— **四个字段现在都在帧里被白白丢掉**。
+  2. 事件帧的 mq（MQ 连通，已用）。
+  3. traces[]（method/path/status/startMs/endMs/ms）⇒ 底部链路展开
+     之外还能做**慢请求榜**（现在只做了 traceId 抽屉）。
+  4. 订单帧的 counts + total ⇒ 状态机节点角标（3b 要的）现成。
+  5. 指标帧的 protections[]（8 类防护本拍增量）⇒ 攻击页迷你防护条现成。
+  6. 三条帧都带 seq / ts ⇒ 可做「数据新鲜度」指示。
+
+B. 必须动后端才有（建议本笔不做、挂账）
+  1. 演练批次口径的五态计数（现在 counts 是全表）。
+  2. 攻击「已发请求数 / 进度」实时面。
+  3. 取消边的事件（job 不走状态机）。
+  4. 服务端按 kind / batch 筛选（现在没有；但前端筛够用）。
+  5. events 流的 sentSeq 改成每连接独立（若要多流并存不耦合）。
+
+---------------------------------------------------------
+5. 实测副作用（必须交代）
+---------------------------------------------------------
+
+为核实件 3 跑了**两轮真实攻击**（这是用户点名要的实测）：
+  · 第 1 轮 probe3b（seckill 40% + orderBurst 60%，20 并发 25 秒）：
+    10057 请求 / Blocked 3758 / 库存 SEED-GD-101-9552 **240 → 0**
+  · 第 2 轮 p3b（orderBurst 100%，20 并发 20 秒）：
+    10138 请求 / Blocked 5069 / 库存 SEED-GD-103-5196 **120 → 0**
+  · 两条 drill_record（Id 7、8）+ 约 1.15 万条 SIM-BURST-* 订单行落库
+    （实测 orders 帧末 counts：total 11558）
+⇒ **演示种子库存被打光两件**，跑演示前要重放 seed-demo.sql；
+   SIM- 脏数据可用页面上那枚**清场按钮**（或 attackCleanup 端点）清掉。
+   **本次未自行清场**（破坏性动作，且用户尚未手验）。
+
+产物清单（都在 gitignore 的 _work/ 下，不影响 git 状态）
+  _work/p3b-orders.sse    683 KB / 28 帧
+  _work/p3b-events.sse    1.7 MB / 18 帧
+  _work/p3b-attack.json   两轮中第 2 轮的完整 Result
+  _work/p3b-analyze.py    分析脚本（可重跑复核上面每个数字）
+  _work/p3b-probe.sh      抓帧脚本
+
+---------------------------------------------------------
+6. 建议的 10a ~ 10d（按核实结果修订）
+---------------------------------------------------------
+  10a 状态流转（OrderFlow.vue 单文件，~150 行）
+      3a 虚线流动 + 3b **命名空间映射表**（这是要害）+ 节点角标
+      + 边高亮的节流口径。                        估 0.5 天（不用碰后端）
+  10b 日志控制台化（EventLog.vue 重写，~800 行）
+      5 区 + 8 处实时动画 + 批次过滤（用现成 batchId）。  估 1.5 天
+  10c 攻击页三块预览 + 辅助条（AttackConsole.vue，~450 行）
+      **需先定**「三条流 vs 聚合流」与「已发/暂停」的口径。 估 1 天（定口径后）
+  10d 收口：文档 + 手验清单 + 零漂移。                     估 0.5 天
+  合计 **3.5 天**
+
+---------------------------------------------------------
+7. 需要用户裁决的四件事
+---------------------------------------------------------
+  Q1 件 1 三块预览：三条流各连（不动后端）还是新增聚合流（动后端）？
+  Q2 件 1「已发 8000 / 暂停」：改稿，还是加后端计数器？
+  Q3 件 3b 节点角标：接受全表口径，还是加后端按批次算？
+  Q4 件 3b 边高亮：1.2 秒在演练下会变「常量高亮」，改成节流还是保持原口径？

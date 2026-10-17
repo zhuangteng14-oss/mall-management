@@ -84,26 +84,51 @@ public class OrderDao {
      * <p>⚠️ <b>C3 块 4（A2 甲）在此加了 {@code Quantity}</b>：列位**紧跟 {@code Price}**
      * （单价旁边就是数量），参数位同理 —— 两处都加在**同一相对位置**，这是「列序 = 参数序」
      * 这条纪律在加列时唯一安全的做法（加在末尾也能跑，但下次谁按语义插列就错位了）。
+     *
+     * <p>⚠️ <b>C3 块 7 · 边界补笔（2026-10-14）又加了 {@code `Source`}</b>：位置上它排在
+     * {@code ReceiveIf} 之后、{@code CreateTime} **之前**（不是文件尾）—— 因为 {@code CreateTime}
+     * 是 VALUES 里唯一写死 {@code NOW()} 的列、本就不占参数位，把 {@code Source} 排在它前面，
+     * 「列序 = 参数序 = {@link OrderRow} 分量序」这条线性对应才不被一个非参列打断。⚠️ C3 块 7 · commit 10（2026-10-15）再加 {@code BatchId}：同款排在 {@code Source} 之后、{@code CreateTime} 之前；⚠️ 它的口径与 {@code Source} **相反**（列是 {@code varchar(36) DEFAULT NULL} ⇒ 不归一成空串、日常单落 {@code null}），归一路径与列宽截断见 {@link #clipBatchId}。
+     * <p>⚠️ <b>落库前**归一**：{@code null} / 纯空白 ⇒ {@code ""}</b>（列是
+     * {@code NOT NULL DEFAULT ''}）—— 口径与 {@code CommentDao.insertComment} 的 {@code Source}
+     * **逐字同源**（那里也先 trim、空则落空串）。⚠️ 归一放在**这里**而不是调用方：本列是
+     * 「写入方自己声明的标记」，任何调用方（含将来的）都不该因为传了个 null 就撞 NOT NULL。
+     * <p>⚠️ 反引号是**刻意**加的（本仓既有 INSERT 通篇不加引号）：{@code SOURCE} 在 MySQL 8 里
+     * 是非保留关键字，加引号「无论如何都安全」，且与 {@link #selectUnpaidExpired} 的投影、
+     * 以及全仓 DDL / 探针 SQL 的写法一致。⚠️ 表名 {@code mall_management_sql.order} 仍**不加**引号
+     * —— 那是既有形态，理由见类注释（跟随点号的词按标识符解析，保留字也无需引号），本笔不动。
      */
     public int insertOrder(OrderRow r) {
         String sql = "INSERT INTO mall_management_sql.order " +
-                "(OrderId, CustomerId, MerchantId, Price, Quantity, ProductInformation, Images, PayIf, DeliveryIf, ReceiveIf, CreateTime) " +
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())";
+                "(OrderId, CustomerId, MerchantId, Price, Quantity, ProductInformation, Images, PayIf, DeliveryIf, ReceiveIf, `Source`, BatchId, CreateTime) " +
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())";
         return jdbcClient.sql(sql)
                 .params(r.orderId(), r.customerId(), r.merchantId(), r.price(), r.quantity(),
                         r.productInformation(), r.images(),
-                        r.payIf(), r.deliveryIf(), r.receiveIf())
+                        r.payIf(), r.deliveryIf(), r.receiveIf(), normaliseSource(r.source()), clipBatchId(r.batchId()))
                 .update();
     }
 
     /**
-     * 下单入参的载体（10 个位置参数，用 record 免掉一个 10 参方法签名）。嵌套在此，不另立文件。
+     * {@code Source} 的归一：{@code null} / 纯空白 ⇒ {@code ""}，其余 {@code trim()} 后原样。
      *
-     * <p>⚠️ 分量顺序 = {@link #insertOrder} 的列顺序（{@code Quantity} 在 {@code price} 之后）。
+     * <p>⚠️ 与 {@code CommentDao.insertComment} 里那句三元是**同一口径的两份实现**（两个域各自持有，
+     * 刻意不抽公共工具）：列都是 {@code varchar(16) NOT NULL DEFAULT ''}，都不截断（超长由
+     * 各自的 Service 层**拒**，见 {@code OrderService.MAX_SOURCE}）。
+     */
+    private static String normaliseSource(String source) {
+        return source == null || source.isBlank() ? "" : source.trim();
+    }
+
+    /**
+     * 下单入参的载体（12 个位置参数，用 record 免掉一个 12 参方法签名）。嵌套在此，不另立文件。
+     *
+     * <p>⚠️ 分量顺序 = {@link #insertOrder} 的列顺序（{@code Quantity} 在 {@code price} 之后、
+     * {@code source} 在 {@code receiveIf} 之后、{@code batchId} 在 {@code source} 之后）。
      */
     public record OrderRow(String orderId, String customerId, String merchantId, float price, int quantity,
                            String productInformation, String images,
-                           int payIf, int deliveryIf, int receiveIf) {
+                           int payIf, int deliveryIf, int receiveIf, String source, String batchId) {
     }
 
     // ==================== 写：订单明细（可视化段 commit 0） ====================
@@ -321,9 +346,24 @@ public class OrderDao {
      *
      * <p>{@code CancelledAt IS NULL} 这条不只是「跳过已取消的」—— 它同时是**幂等**的来源：
      * 取消过的单不会再进候选集。
+     *
+     * <p>⚠️ <b>投影从「只有 {@code OrderId}」扩到「{@code OrderId} + {@code Source}」</b>
+     * （C3 块 7 · commit B，2026-10-14）：{@code Source} 是「演练数据标记」（块 5 可视化段给 11 张表
+     * 加的那一列，{@code mall_management_sql.sql:1167}）⇒ 它是 {@code skip-attack-data} 那条谓词
+     * 两个判据之一。
+     * <p>⚠️ <b>该列的写入通道已由「边界补笔」（2026-10-14）补齐</b>：{@code insertOrder} 现在写它、
+     * {@code /order/orderAdd} 有可选 {@code Source} 入参、{@code AttackEngine} 下演练单时传
+     * {@code 'attack'} ⇒ 本投影取到的 {@code Source} **不再恒为空串**（commit B 时它还没有写入方，
+     * 谓词里 {@code Source='attack'} 那一半匹配不到行）。
+     * <p>⚠️ <b>筛子**刻意留在 Java 侧**（{@link com.minke.mallmanagement.order.job.OrderTimeoutCancelJob}
+     * 的 {@code isAttackData}），不在本 SQL 里</b>：那个开关是**运行时配置**（{@code @Value} 读
+     * properties），进 WHERE 就得两条 SQL 各写一遍阈值比较 —— 而阈值比较是本方法唯一容易写错的东西
+     * （见上一段 ⚠️）。多带一列几乎不要钱（{@code varchar(16)} × 候选条数），一条谓词只写一处。
+     * <p>⚠️ 本方法**不认识**演练业务串前缀 —— 「{@code SIM-}」这个字面量在
+     * {@code AttackEngine}（演练域）与 {@code OrderTimeoutCancelJob}（本域）各一份，理由写在后者。
      */
     public List<Map<String, Object>> selectUnpaidExpired(long timeoutSeconds) {
-        String sql = "SELECT OrderId FROM mall_management_sql.`order` "
+        String sql = "SELECT OrderId, `Source` FROM mall_management_sql.`order` "
                 + "WHERE PayIf = 0 AND CancelledAt IS NULL "
                 + "AND CreateTime < DATE_FORMAT(DATE_SUB(NOW(), INTERVAL " + timeoutSeconds + " SECOND), '%Y-%m-%d %H:%i:%s')";
         return jdbcClient.sql(sql).query().listOfRows();
@@ -411,5 +451,345 @@ public class OrderDao {
                         + "WHERE s.MerchantId = ? AND g.OriginalPrice > 0 AND s.SkuCode IN (" + in + ")")
                 .params(byGoodsParams).query(String.class).list());
         return hit;
+    }
+
+    // ==================== 读：某单的「商品码 + 数量」（C3 块 7 · 超时释放库存的输入）====================
+
+    /**
+     * 读一张单的「{@code ProductCode} + {@code Quantity}」两列 —— 订单**超时取消**时把库存按码
+     * 加回去的**唯一输入**（C3 块 7 · TD-36 的释放腿，调用方 = {@code OrderTimeoutCancelJob}）。
+     *
+     * <p>⚠️ <b>只取这两列</b>：释放的判据是 {@code goods_sku.SkuCode}、只关心数量；单价 / 名 /
+     * 小计 / 时刻都不参与 —— 多取一列就多一处将来会漂的快照（同 {@code writeItems} 只记成交事实）。
+     *
+     * <p>⚠️ <b>两种「空结果」都不必调用方另外兜</b>：
+     * <ul>
+     *   <li>该单**没有明细行**（存量单 / {@code resolveItems} 解析为空）⇒ 返回**空表**
+     *       ⇒ 调用方一行不动（同 {@code writeItems} 的 fail-open）；</li>
+     *   <li>明细的 {@code ProductCode} 是**空串**（解析不出商品编码时）⇒ 行照常返回，
+     *       但拿它去查 {@code goods_sku} 必然 0 行 ⇒ 天然 no-op。调用方**不需要**先滤空串。</li>
+     * </ul>
+     */
+    public List<Map<String, Object>> selectItemStocksByOrder(String orderId) {
+        return jdbcClient.sql("SELECT ProductCode, Quantity FROM mall_management_sql.`order_item` "
+                        + "WHERE OrderId = ?")
+                .param(orderId).query().listOfRows();
+    }
+
+    // ==================== 读：五态计数 + 最近订单（C3 块 7 · 状态流转页的两条读）====================
+
+    /**
+     * 全表按**五态**计数 —— 状态流转页顶部那排计数卡的唯一输入（C3 块 7 · commit 3）。
+     *
+     * <p>判据链**逐条**与 {@code OrderStreamService.stateOf} 对齐（那里也写了一份，两处必须一起改）：
+     * <pre>
+     *   CancelledAt 非空                                    → cancelled
+     *   CancelledAt IS NULL AND ReceiveIf = 1               → completed
+     *   CancelledAt IS NULL AND ReceiveIf = 0 AND DeliveryIf = 1 → waitReceive
+     *   CancelledAt IS NULL AND ReceiveIf = 0 AND DeliveryIf = 0 AND PayIf = 1 → waitShip
+     *   其余（三位全 0 且未取消）                              → waitPay
+     * </pre>
+     * ⚠️ <b>{@code CancelledAt} 必须最先判</b>：取消的单三位仍是 {@code (0,0,0)}，
+     * 与「未付款」**完全相同**（见 {@code OrderTimeoutCancelJob} 类注释）——
+     * 先判三位就会把取消的单算进「待付款」。
+     *
+     * <p>⚠️ 数值型列（{@code PayIf} 等）统一用 {@code = 1} 判「是」：与
+     * {@code AdminOrderDao.selectMonitor} 的既有写法一致（不写 {@code COALESCE}，
+     * 也不假设它们非空 —— {@code NULL} 落进「否则」分支，与 Java 侧 {@code isOne()} 同）。
+     *
+     * <p>外层的 {@code COALESCE} 是给**空表**兜底：没有行的表只应回 5 个 0。
+     */
+    public Map<String, Object> countOrderStates() {
+        return countOrderStates(false);
+    }
+
+    /**
+     * 五态计数的**可选口径版**（2026-10-17，状态流转页「剔除已取消 / 仅看真实数据」开关）。
+     *
+     * <p>{@code healthyOnly=true} ⇒ 扫描范围先按 {@link OrderDataScope#HEALTHY_SCOPE_SQL}
+     * 收窄：排除演练数据（{@code SIM-%} 前缀 **OR** {@code Source='attack'}）**且**排除已取消单。
+     * 判据链本身**一字不动**：过滤发生在扫描范围，不参与五态判定 —— 两件事不能混
+     * （把过滤写进 CASE 会让每条分支都多一个条件，三处镜像更难对齐）。
+     *
+     * <p>⚠️ 谓词只有 {@link OrderDataScope} 一处定义：超时取消 job、状态流转页、清场端点
+     * 用**同一条**口径。前端不给这个开关传值时用无参重载（全量）。
+     */
+    public Map<String, Object> countOrderStates(boolean healthyOnly) {
+        String sql = "SELECT "
+                + "COALESCE(SUM(CASE WHEN CancelledAt IS NOT NULL THEN 1 ELSE 0 END), 0) AS cancelled, "
+                + "COALESCE(SUM(CASE WHEN CancelledAt IS NULL AND ReceiveIf = 1 THEN 1 ELSE 0 END), 0) AS completed, "
+                + "COALESCE(SUM(CASE WHEN CancelledAt IS NULL AND ReceiveIf = 0 AND DeliveryIf = 1 THEN 1 ELSE 0 END), 0) AS waitReceive, "
+                + "COALESCE(SUM(CASE WHEN CancelledAt IS NULL AND ReceiveIf = 0 AND DeliveryIf = 0 AND PayIf = 1 THEN 1 ELSE 0 END), 0) AS waitShip, "
+                + "COALESCE(SUM(CASE WHEN CancelledAt IS NULL AND ReceiveIf = 0 AND DeliveryIf = 0 AND PayIf = 0 THEN 1 ELSE 0 END), 0) AS waitPay, "
+                + "COUNT(*) AS total "
+                + "FROM mall_management_sql.`order`"
+                + (healthyOnly ? " WHERE " + OrderDataScope.HEALTHY_SCOPE_SQL : "");
+        return jdbcClient.sql(sql).query().listOfRows().stream().findFirst().orElse(Map.of());
+    }
+
+    /**
+     * 最近 {@code limit} 张单 —— 状态流转页「实时订单列表」的唯一输入（C3 块 7 · commit 3）。
+     *
+     * <p>排序用 {@code CreateTime DESC, OrderId DESC}：{@code CreateTime} 是字符串列
+     * （ISO 式零填充，同 {@code selectOrders} 的既有口径），同秒下单时靠 OrderId 保证**顺序稳定**
+     * （否则同一拍两次读可能给出不同的行序，页面上的列表会无理由地抖）。
+     *
+     * <p>只取页面要展示的列：{@code ProductInformation} 是列表上的商品名，
+     * {@code Price} / {@code Quantity} 是金额与件数；状态由 {@code PayIf/DeliveryIf/ReceiveIf}
+     * + {@code CancelledAt} 现算（**不取** {@code SettlementDate} 等本页用不到的列）。
+     *
+     * <p>⚠️ {@code limit} 由调用方给（{@code OrderStreamService.RECENT_LIMIT} = 20），
+     * 本方法**不再夹**一个上限：这里是「页面要几行就给几行」的读，与
+     * {@code AdminOrderService} 那套分页截断（{@code clampLimit}）不是一回事。
+     */
+    public List<Map<String, Object>> selectRecentOrders(int limit) {
+        return selectRecentOrders(limit, false);
+    }
+
+    /**
+     * 最近 {@code limit} 张单的**可选口径版**（2026-10-17，状态流转页「剔除已取消 / 仅看真实数据」）。
+     *
+     * <p>{@code healthyOnly=true} ⇒ 与 {@link #countOrderStates(boolean)} 用**同一条**
+     * {@link OrderDataScope#HEALTHY_SCOPE_SQL}：趋势、耗时、账龄、健康度、明细若各走一套过滤，
+     * 同一张图上的分母与点会互相打架。
+     */
+    public List<Map<String, Object>> selectRecentOrders(int limit, boolean healthyOnly) {
+        String sql = "SELECT OrderId, CustomerId, MerchantId, Price, Quantity, ProductInformation, "
+                + "PayIf, DeliveryIf, ReceiveIf, CancelledAt, CreateTime, PaidAt, ShippedAt, ReceivedAt "
+                + "FROM mall_management_sql.`order`"
+                + (healthyOnly ? " WHERE " + OrderDataScope.HEALTHY_SCOPE_SQL : "")
+                + " ORDER BY CreateTime DESC, OrderId DESC LIMIT ?";
+        return jdbcClient.sql(sql).param(limit).query().listOfRows();
+    }
+
+    // ==================== 写 / 读：本单库存「真扣成过」标记（C3 块 7 · commit 2d · Migration ⑱）====================
+
+    /**
+     * 标一条单「**本单的 {@code goods_sku} 库存真扣成过**」（{@code StockDeducted = 1}）——
+     * 订单**超时取消**时决定要不要回补库存的**唯一判据**（C3 块 7 · TD-36 的第四条腿）。
+     *
+     * <p>⚠️ <b>为什么不是 {@code insertOrder} 列清单里的第 13 列、而是建单之后再 UPDATE 一句</b>：
+     * INSERT 发生在 {@code addLocked} 里「订单落库」那一刻，而「扣成没扣成」要等
+     * {@code deductStocks} 跑完才知道 ⇒ <b>INSERT 那一刻这个值还不存在</b>。两条路：
+     * （a）先扣后建单（值就能随 INSERT 一起落库）；（b）先建单后扣、再补这一句。
+     * 取 (b)：块 7 commit 1 已把「下单即扣」**排在落库与明细之后**（那条顺序有自己的理由 ——
+     * 明细与扣减吃同一批 specs、且都不许改订单结论），本笔**不动那个顺序**，
+     * 代价是每张真扣过库存的单多一句单行 UPDATE（{@code PRIMARY} 之外无索引，按 OrderId 走全表扫，
+     * 演示库量级可忽略）。
+     *
+     * <p>⚠️ {@code AND StockDeducted = 0} 让本方法**幂等**（同 {@code cancelIfUnpaid} 的写法）：
+     * 已经是 1 就回 {@code 0}，调用方不必先读、也不必判重。
+     */
+    public int markStockDeducted(String orderId) {
+        String sql = "UPDATE mall_management_sql.`order` SET StockDeducted = 1 "
+                + "WHERE OrderId = ? AND StockDeducted = 0";
+        return jdbcClient.sql(sql).param(orderId).update();
+    }
+
+    /**
+     * 读一条单的 {@code StockDeducted}（{@code 0} / {@code 1}）—— 超时释放的前置判据
+     * （唯一调用方 {@code OrderTimeoutCancelJob#releaseStock}）。
+     *
+     * <p>⚠️ <b>查无此行 ⇒ 回 {@code 0}</b>（=「没扣过」，与列默认值同义）：那单要么不存在、
+     * 要么是本列加列之前的**存量单** —— 两种都**不该回补**（存量单的库存本来就没动过，
+     * 回补就是凭空加库存，正是 2d 要堵的那个偏账）。故这里**不抛**「找不到订单」：
+     * 调用方要的就是一个「要不要回补」的判据。
+     */
+    public int selectStockDeducted(String orderId) {
+        return jdbcClient.sql("SELECT StockDeducted FROM mall_management_sql.`order` "
+                        + "WHERE OrderId = ? LIMIT 1")
+                .param(orderId).query(Integer.class).optional().orElse(0);
+    }
+
+    // ==================== 写 / 读：演练批次号（C3 块 7 · commit 10 · Q3 路线 i）====================
+    //
+    // ⚠️ 两个新成员**刻意追加在文件尾**（不是插在 insertOrder 旁边）：全仓大量
+    // 「文件:行号」互引，插在中间会让其后每一处引用集体偏移。本仓既有纪律是
+    // 「新增代码追加在最大被引用行之后」——这两个成员在上面的 `selectStockDeducted` 之后。
+
+    /** 列宽上限 —— 与 ⑲-3 的 DDL（{@code varchar(36)}）以及 {@code ObservedEventDao.BATCH_ID_MAX} 对齐，两处一起改。 */
+    private static final int BATCH_ID_MAX = 36;
+
+    /**
+     * {@code BatchId} 的归一：**只截断、不补空**（与 {@link #normaliseSource} **相反**）。
+     *
+     * <h2>【为什么不像 {@code Source} 那样「空 ⇒ 空串」】</h2>
+     * 列是 {@code varchar(36) DEFAULT NULL} ⇒ 「没有批次」在语义上就是 {@code null}，
+     * 与「批次是个空串」不是一回事。日常请求（不带 {@code X-Drill-Batch} 头）正是前者
+     * （{@code TraceIdFilter.currentBatch()} 此时回 {@code null}）⇒ 本方法对 {@code null} 原样放行。
+     *
+     * <h2>【为什么要截断】</h2>
+     * 值的来源是请求头 {@code X-Drill-Batch}，它的白名单是 {@code [A-Za-z0-9_-]{8,64}}
+     * （{@code TraceIdFilter.ACCEPTED}）—— <b>最长 64，比列宽 36 长</b>。
+     * MySQL 严格模式下超长是**报错**（不是静默截断）⇒ 会把整条下单打死。故此处按列宽截断。
+     * <p>⚠️ 与 {@code ObservedEventDao.clip} 是**同一手法**（那里也用 36）：
+     * 「列宽是本层的责任，不是调用方的」这条口径同源。截断会悄无声息丢尾巴，这是取舍。
+     */
+    private static String clipBatchId(String batchId) {
+        return batchId == null || batchId.length() <= BATCH_ID_MAX
+                ? batchId : batchId.substring(0, BATCH_ID_MAX);
+    }
+
+    /**
+     * 按**演练批次**的五态计数 —— 状态流转页「本批次」口径的唯一输入（C3 块 7 · commit 10。
+     * 设计出处见 {@code 块7-commit10-阶段一续-后端改动面.txt} §3.4「路线 i」）。
+     *
+     * <p>与 {@link #countOrderStates} **同形**（判据链逐条相同），只多一句 {@code WHERE BatchId = ?}
+     * ⇒ 那两个方法里「{@code CancelledAt} 必须最先判」的理由在这里**同样成立**，三处必须一起改。
+     *
+     * <p>⚠️ <b>只能数到 commit 10 之后落的单</b>：{@code order.BatchId} 这列在 Migration ⑲-3
+     * 就建好了，但**写入链路是 commit 10 才接的** —— 此前它恒为 {@code NULL}
+     * （见 {@code db-schema.md §16.2}）⇒ 存量单永远不进任何批次，这是**预期**不是缺陷。
+     *
+     * <p>⚠️ <b>批次号必须来自服务端</b>（{@code TraceIdFilter.currentBatch()} 读的 MDC），
+     * 不得由任何调用方或客户端显式传入 —— 否则谁都能按别人的批次号查库。
+     */
+    public Map<String, Object> countOrderStatesByBatch(String batchId) {
+        String sql = "SELECT "
+                + "COALESCE(SUM(CASE WHEN CancelledAt IS NOT NULL THEN 1 ELSE 0 END), 0) AS cancelled, "
+                + "COALESCE(SUM(CASE WHEN CancelledAt IS NULL AND ReceiveIf = 1 THEN 1 ELSE 0 END), 0) AS completed, "
+                + "COALESCE(SUM(CASE WHEN CancelledAt IS NULL AND ReceiveIf = 0 AND DeliveryIf = 1 THEN 1 ELSE 0 END), 0) AS waitReceive, "
+                + "COALESCE(SUM(CASE WHEN CancelledAt IS NULL AND ReceiveIf = 0 AND DeliveryIf = 0 AND PayIf = 1 THEN 1 ELSE 0 END), 0) AS waitShip, "
+                + "COALESCE(SUM(CASE WHEN CancelledAt IS NULL AND ReceiveIf = 0 AND DeliveryIf = 0 AND PayIf = 0 THEN 1 ELSE 0 END), 0) AS waitPay, "
+                + "COUNT(*) AS total "
+                + "FROM mall_management_sql.`order` WHERE BatchId = ?";
+        return jdbcClient.sql(sql).param(batchId).query().listOfRows().stream().findFirst().orElse(Map.of());
+    }
+
+    // ==================== 读：全局流转明细的服务端分页（2026-10-17 · 用户 P0）====================
+    //
+    // 背景：此前状态流转页的明细表吃的是 insight 端点的「最近 1000 行」，前端再按状态**本地过滤**
+    // ⇒ 顶部 Tab 是全库真实 COUNT（几万），表却只有 1000 行的子集；点「待发货 2271」自然空表。
+    // 用户明令：「绝对不能在前端拿全部最新 1000 条去自己过滤」。故计数与取行都下沉到这里，
+    // 且**两处共用同一个 Where 片段**（pageWhere）—— 分页脚的 total 与行集不可能各说各话。
+
+    /** 待发货超时阈值（小时）。**与 {@code OrderStreamService.timeoutHoursOf} 共用这一份值**，防两处漂移。 */
+    public static final int WAIT_SHIP_TIMEOUT_HOURS = 24;
+
+    /** 待收货超时阈值（小时）。同上。 */
+    public static final int WAIT_RECEIVE_TIMEOUT_HOURS = 48;
+
+    /**
+     * 某筛选下的**真实总行数**（分页脚与「全部 N」的唯一来源）。
+     *
+     * <p>⚠️ {@code status} 为空白 = 全部；未知状态 ⇒ {@code 1 = 0}（返回 0，不抛错）。
+     * {@code timeout=true} 时只数「待发货 &gt; 24h / 待收货 &gt; 48h」的预警行。
+     */
+    public int countOrderPage(boolean healthyOnly, String status, boolean timeout) {
+        String sql = "SELECT COUNT(*) FROM mall_management_sql.`order`" + pageWhere(healthyOnly, status, timeout);
+        Integer n = jdbcClient.sql(sql).query(Integer.class).single();
+        return n == null ? 0 : n;
+    }
+
+    /**
+     * 某筛选下的一页明细。排序与 {@link #selectRecentOrders(int, boolean)} **逐字相同**
+     * （{@code CreateTime DESC, OrderId DESC}）⇒ 翻页时同一行不会在页间漂移。
+     *
+     * <p>⚠️ 只接受**已消毒**的 {@code offset >= 0} / {@code limit >= 1}（服务的职责在
+     * {@code OrderStreamService.detail}，这里不再夹一遍 —— 夹两次会让两层的上限各说各话）。
+     */
+    public List<Map<String, Object>> selectOrderPage(boolean healthyOnly, String status, boolean timeout,
+                                                     int offset, int limit) {
+        String sql = "SELECT OrderId, CustomerId, MerchantId, Price, Quantity, ProductInformation, "
+                + "PayIf, DeliveryIf, ReceiveIf, CancelledAt, CreateTime, PaidAt, ShippedAt, ReceivedAt "
+                + "FROM mall_management_sql.`order`" + pageWhere(healthyOnly, status, timeout)
+                + " ORDER BY CreateTime DESC, OrderId DESC LIMIT ? OFFSET ?";
+        return jdbcClient.sql(sql).param(limit).param(offset).query().listOfRows();
+    }
+
+    /**
+     * 三个过滤维度的**唯一**拼装点：健康口径 → 状态 → 超时。
+     *
+     * <p>⚠️ 顺序不是随意的：先收窄扫描范围（健康口径），再叠状态与超时；
+     * 每段都加括号，避免 {@code OR} 把健康口径短路掉。
+     *
+     * <p>⚠️ 状态未知或「超时口径不适用于该状态」（待付款 / 已完成 / 已取消）⇒ 直接
+     * {@code 1 = 0}。这不是保守，是**如实**：那几态本来就没有 24/48h 预警的定义。
+     */
+    private static String pageWhere(boolean healthyOnly, String status, boolean timeout) {
+        String safeStatus = status == null ? "" : status.trim();
+        String state = stateCondition(safeStatus);
+        if (state != null && "1 = 0".equals(state)) {
+            return " WHERE 1 = 0";
+        }
+        String timeoutCond = null;
+        if (timeout) {
+            timeoutCond = timeoutCondition(safeStatus);
+            if (timeoutCond == null) {
+                return " WHERE 1 = 0";
+            }
+        }
+        StringBuilder where = new StringBuilder(" WHERE 1 = 1");
+        if (healthyOnly) {
+            where.append(" AND (").append(OrderDataScope.HEALTHY_SCOPE_SQL).append(")");
+        }
+        if (state != null) {
+            where.append(" AND (").append(state).append(")");
+        }
+        if (timeoutCond != null) {
+            where.append(" AND (").append(timeoutCond).append(")");
+        }
+        return where.toString();
+    }
+
+    /**
+     * 五态判据的 **SQL 镜像** —— 与 {@link #countOrderStates(boolean)} 的 CASE 链逐条对齐，
+     * 也与 {@code OrderStreamService.stateOf} 对齐（三处一起改）。
+     *
+     * @return {@code null} = 不加状态过滤（空串）；{@code 1 = 0} = 未知状态
+     */
+    private static String stateCondition(String status) {
+        if (status.isEmpty()) {
+            return null;
+        }
+        switch (status) {
+            case "waitPay":
+                return "CancelledAt IS NULL AND ReceiveIf = 0 AND DeliveryIf = 0 AND PayIf = 0";
+            case "waitShip":
+                return "CancelledAt IS NULL AND ReceiveIf = 0 AND DeliveryIf = 0 AND PayIf = 1";
+            case "waitReceive":
+                return "CancelledAt IS NULL AND ReceiveIf = 0 AND DeliveryIf = 1";
+            case "completed":
+                return "CancelledAt IS NULL AND ReceiveIf = 1";
+            case "cancelled":
+                return "CancelledAt IS NOT NULL";
+            default:
+                return "1 = 0";
+        }
+    }
+
+    /**
+     * 超时预警判据（只有待发货 / 待收货两态有定义）。
+     *
+     * <p>⚠️ 时刻全部由**库时钟**算（与 {@code OrderTimeoutCancelJob} 同一纪律）：
+     * {@code DATE_FORMAT} 把时间列压成 {@code yyyy-MM-dd HH:mm:ss} 文本再比，避免
+     * {@code serverTimezone} 在 JDBC 层掺进一次折算。
+     *
+     * <p>停留起点与 {@code OrderStreamService.stateSince} 对齐：待发货从 {@code PaidAt}（缺失回
+     * {@code CreateTime}），待收货从 {@code ShippedAt}（缺失依次回 {@code PaidAt} / {@code CreateTime}）。
+     *
+     * @return {@code null} = 该状态下没有超时口径
+     */
+    private static String timeoutCondition(String status) {
+        String shipSince = "COALESCE(DATE_FORMAT(PaidAt, '%Y-%m-%d %H:%i:%s'), CreateTime)";
+        String shipTimeout = shipSince + " < DATE_FORMAT(DATE_SUB(NOW(), INTERVAL "
+                + WAIT_SHIP_TIMEOUT_HOURS + " HOUR), '%Y-%m-%d %H:%i:%s')";
+        String receiveSince = "COALESCE(DATE_FORMAT(ShippedAt, '%Y-%m-%d %H:%i:%s'), "
+                + "DATE_FORMAT(PaidAt, '%Y-%m-%d %H:%i:%s'), CreateTime)";
+        String receiveTimeout = receiveSince + " < DATE_FORMAT(DATE_SUB(NOW(), INTERVAL "
+                + WAIT_RECEIVE_TIMEOUT_HOURS + " HOUR), '%Y-%m-%d %H:%i:%s')";
+        switch (status) {
+            case "":
+                // 全部：两态各自的「状态判据 AND 自己的超时判据」再取并 —— 不能只取超时半句，
+                // 否则待收货的 48h 判据会把待发货的行也捞进来（反之亦然）。
+                return "((" + stateCondition("waitShip") + ") AND (" + shipTimeout + "))"
+                        + " OR ((" + stateCondition("waitReceive") + ") AND (" + receiveTimeout + "))";
+            case "waitShip":
+                return shipTimeout;
+            case "waitReceive":
+                return receiveTimeout;
+            default:
+                return null;
+        }
     }
 }

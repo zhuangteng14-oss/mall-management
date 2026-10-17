@@ -110,7 +110,7 @@
 
             <div class="g-row-f">
               <span class="g-dim">Id <code>{{ row.Id }}</code></span>
-              <span class="g-dim">对象 {{ row.TargetType }} / <code>{{ row.TargetId }}</code></span>
+              <span class="g-dim">对象 {{ targetTypeLabel(row.TargetType) }} / <code>#{{ row.TargetId }}</code></span>
               <span class="g-dim">赞 {{ row.LikeCount }} · 踩 {{ row.DislikeCount }}</span>
               <span class="g-grow"></span>
               <button type="button" class="g-link" @click="jumpToObject(row)">看该对象评论</button>
@@ -373,7 +373,7 @@
 
             <div class="g-row-f">
               <span class="g-dim">Id <code>{{ row.Id }}</code></span>
-              <span class="g-dim">对象 {{ row.TargetType }} / <code>{{ row.TargetId }}</code></span>
+              <span class="g-dim">对象 {{ targetTypeLabel(row.TargetType) }} / <code>#{{ row.TargetId }}</code></span>
               <span v-if="row.AcceptedReplyId" class="g-dim">已采纳 <code>{{ row.AcceptedReplyId }}</code></span>
               <span class="g-grow"></span>
               <button type="button" class="g-link" @click="jumpToObject(row)">看该对象问答</button>
@@ -560,7 +560,7 @@
         <label class="g-f">
           <span>状态</span>
           <select v-model="is.status" @change="loadImages">
-            <option v-for="s in IMAGE_STATUSES" :key="s.key" :value="s.key">{{ s.label }}（{{ s.key }}）</option>
+            <option v-for="s in IMAGE_STATUSES" :key="s.key" :value="s.key">{{ s.label }}</option>
           </select>
         </label>
         <label class="g-f g-f-narrow">
@@ -593,7 +593,7 @@
             </span>
             <span class="g-dim">Id <code>{{ r.Id }}</code> · 评论 <code>{{ r.CommentId }}</code></span>
             <span class="g-dim">作者 {{ r.AuthorId || '（已抹）' }}</span>
-            <span class="g-dim">对象 {{ r.TargetType }} / <code>{{ r.TargetId }}</code></span>
+            <span class="g-dim">对象 {{ targetTypeLabel(r.TargetType) }} / <code>#{{ r.TargetId }}</code></span>
             <span class="g-dim">{{ toLocal(r.CreatedAt) }}</span>
             <p class="g-shot-body">{{ r.CommentContent }}</p>
           </div>
@@ -660,9 +660,9 @@
           <span>状态</span>
           <select v-model="rs.status" @change="loadReports">
             <option value="">全部</option>
-            <option value="pending">pending（待处理）</option>
-            <option value="handled">handled（已处理）</option>
-            <option value="rejected">rejected（已驳回）</option>
+            <option value="pending">待处理</option>
+            <option value="handled">已处理</option>
+            <option value="rejected">已驳回</option>
           </select>
         </label>
         <label class="g-f g-f-narrow">
@@ -685,7 +685,7 @@
       <ol v-if="re.rows.length" class="g-list">
         <li v-for="r in re.rows" :key="r.Id" class="g-row">
           <div class="g-row-h">
-            <span class="g-tag" :class="reportTagClass(r.Status)">{{ r.Status }}</span>
+            <span class="g-tag" :class="reportTagClass(r.Status)" :title="r.Status">{{ reportStatusLabel(r.Status) }}</span>
             <span class="g-kind">{{ reasonLabel(r.Reason) }}</span>
             <b class="g-target">{{ targetSummary(r) }}</b>
             <span class="g-grow"></span>
@@ -699,7 +699,7 @@
 
           <div class="g-row-f">
             <span class="g-dim">单号 <code>{{ r.Id }}</code></span>
-            <span class="g-dim">举报人 <b>{{ r.ReporterId || '（空）' }}</b>（{{ r.ReporterRole }}）</span>
+            <span class="g-dim">举报人 <b>{{ r.ReporterId || '（空）' }}</b>（{{ roleLabel(r.ReporterRole) }}）</span>
             <span v-if="r.HandlerId" class="g-dim">处理人 <code>{{ r.HandlerId }}</code></span>
             <span class="g-grow"></span>
             <button type="button" class="g-link" @click="jumpToObject(r)">看该对象评论</button>
@@ -868,7 +868,7 @@
             <span class="g-ev-l2">{{ m.Content }}</span>
             <span class="g-ev-l3 g-dim">
               Id <code>{{ m.Id }}</code>
-              <template v-if="m.TargetType"> · 对象 {{ m.TargetType }} / <code>{{ m.TargetId }}</code></template>
+              <template v-if="m.TargetType"> · 对象 {{ targetTypeLabel(m.TargetType) }} / <code>#{{ m.TargetId }}</code></template>
             </span>
           </span>
           <span class="g-ev-time">
@@ -965,6 +965,10 @@ import { notifyList, notifyRead, notifyReadAll } from '../../api/notify'
 import { EVENT_OPTIONS, eventLabel, isKnownEvent } from '../../config/notify-events'
 import DonutChart from '../../components/charts/DonutChart.vue'
 import BarChart from '../../components/charts/BarChart.vue'; import IconGlyph from '../../components/ui/IconGlyph.vue'
+// commit 9 标签层：对象类型（审计域那张表）· 举报单状态 · 评论图状态 · 角色码。
+import { targetTypeLabel } from '../../config/labels/audit-labels'
+import { reportStatusLabel, imageStatusLabel } from '../../config/labels/report-labels'
+import { roleLabel } from '../../config/labels/user-labels'
 
 /**
  * ⚠️ 本页**曾经**在这里放了一个 `TIMEOUT_MINUTES = 30` 常量 + 一个 `isOverdue(row)` 判据
@@ -991,9 +995,9 @@ const TABS = [
 
 /** 图片三态 —— 顺序即图表与列表的展示顺序。`cap` 用来拼 `counts` 里的键名（`imagePending`…）。 */
 const IMAGE_STATUSES = [
-  { key: 'pending', label: '待审', cap: 'Pending' },
-  { key: 'approved', label: '已通过', cap: 'Approved' },
-  { key: 'rejected', label: '已驳回', cap: 'Rejected' },
+  { key: 'pending', label: imageStatusLabel('pending'), cap: 'Pending' },
+  { key: 'approved', label: imageStatusLabel('approved'), cap: 'Approved' },
+  { key: 'rejected', label: imageStatusLabel('rejected'), cap: 'Rejected' },
 ]
 
 // ── 小工具 ───────────────────────────────────────────────────────────────────
@@ -1060,8 +1064,8 @@ function stars(n) {
   return '★'.repeat(v) + '☆'.repeat(5 - v)
 }
 
-const statusLabel = (s) =>
-  ({ pending: '待审', approved: '已通过', rejected: '已驳回' }[s] || String(s == null ? '' : s))
+const statusLabel = (s) => imageStatusLabel(s)
+// ⚠️ 直接转发到 `config/labels/report-labels.js` 的同一张表（commit 9 收敛）—— 本页不再留第二份中文。
 
 function statusTagClass(s) {
   return s === 'approved' ? 'g-tag-ok' : s === 'rejected' ? 'g-tag-danger' : 'g-tag-warn'

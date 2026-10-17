@@ -15,7 +15,7 @@ import java.util.function.IntSupplier;
  * 订单状态机观测 —— 状态子系统唯一的埋点出口（Micrometer 指标 + 有界事件流）。
  *
  * <h2>【与 MallCacheMetrics / MallLockMetrics 的关系：第三份拷贝，本笔刻意不抽】</h2>
- * 这是仓库里第三份「计数 + 512 槽事件环」。B2 已经论证过不抽共享环的三条理由
+ * 这是仓库里第三份「计数 + 2048 槽事件环」。B2 已经论证过不抽共享环的三条理由
  * （{@code MallLockMetrics} 类注释）：抽环要动已被单测钉死并发语义的既有类、B2 的边界是
  * 「只增不改」、事件记录类型本就不同。那三条**在这里依然成立，但收益已经变小** ——
  * 判据是「抽环的收益是否压过改三个已合并类的代价」，第三份时还是「不」，**第四份时应重估**。
@@ -28,8 +28,10 @@ import java.util.function.IntSupplier;
  *
  * <h2>【指标清单】</h2>
  * <pre>
- * mall.order.state.transitions{action=create|pay|deliver|receive, result=applied|rejected|error}
- *        一次**状态转移尝试**的结果，两维都是封闭枚举（4 × 3 = 最多 12 条时间序列）：
+ * mall.order.state.transitions{action=create|pay|deliver|receive|cancel, result=applied|rejected|error}
+ *        一次**状态转移尝试**的结果，两维都是封闭枚举（5 × 3 = 最多 15 条时间序列）：
+ *        ⚠️ {@code action=cancel} 只有 {@code applied} 一档（2026-10-17 新增）：超时取消任务
+ *        一轮批量取消的**汇总**（{@link #cancelBatch}），每轮至多一条、条数进计数器的增量。
  *        applied  = 守卫命中、确实改了库（rows &gt; 0）；
  *        rejected = 守卫没命中（rows == 0）—— 重复流转 / 单不存在，都是**既有行为**，
  *                   本笔不新增任何拒绝文案；
@@ -86,8 +88,8 @@ import java.util.function.IntSupplier;
  * 不新增 {@code kind} 是为了让 {@code OrderStateEvent}（9 字段的 record）**一个字段都不用改**
  * —— 为一个新事件加一个 kind 值，却仍要复用 shape/key 两个字段，不值得动 record。
  * <b>成功的落库不发事件</b>（只计数）：一次转移会产生「transition + async」两条事件，
- * 512 槽在满负荷下只覆盖约 4 秒；把成功的 async 也记进去会砍半。而「顺序」对成功落库没有
- * 增量信息 —— 时间线表自己带 {@code At}。失败与丢弃**必须**发事件，因为那时「哪一单」才是关键。
+ * 把成功的 async 也记进去会砍半，而「顺序」对成功落库没有增量信息 —— 时间线表自己带 {@code At}。
+ * 失败与丢弃**必须**发事件，因为那时「哪一单」才是关键（容量 512 → 2048 后，这一条更不在于省槽位）。
  *
  * <h2>【热路径代价】</h2>
  * 与 C1 / B2 同量级：registry 按 Meter.Id 查表 + LongAdder 自增 + 一次数组赋值 + 一个小对象。
@@ -110,7 +112,7 @@ public class MallOrderStateMetrics {
     static final String ASYNC_DURATION = "mall.order.state.async.duration";
 
     /** 事件流容量：2 的幂（定位用位与，不用取模）。同 C1 / B2。 */
-    private static final int EVENT_CAPACITY = 512;
+    private static final int EVENT_CAPACITY = 2048;
     private static final int EVENT_MASK = EVENT_CAPACITY - 1;
 
     private final MeterRegistry registry;
@@ -142,10 +144,19 @@ public class MallOrderStateMetrics {
      * @param result   applied / rejected / error，三路互斥且完备
      * @param orderId  业务键。⚠️ 只进**事件流**的 key 字段，绝不进 tag（基数无界）；
      *                 记它是因为事件流要回答的正是「**哪一单**卡在哪个状态」
+     * @param durationNanos 墙钟（块 7 · 阶段 3a.3 新增）：{@code OrderService} 里
+     *                 <b>{@code orderDao.casUpdate(...)} 之前到之后</b>（裁定 ⑤）。
+     *                 ⚠️ 该段<b>在订单锁的临界区内</b> ⇒ 这个数含**持锁等待 + 真 UPDATE 往返**，
+     *                 不是纯 SQL 耗时；两者在页面上不分开（分开需要另一次埋点，且分不出「等锁」的归属）
+     * @param reason   失败 / 拒绝的人话原因（块 7 · 阶段 3a.3 后续新增）；applied 传 {@code null}。
+     *                 ⚠️ 与 {@code shape} 分工：{@code shape} 是**三位形状 / async 的 queue_full|shutdown**，
+     *                 本参数只补 transition 的 rejected / error 与 timelineWrite 的失败 ——
+     *                 同一事实不写两遍。只进 {@code fields.reason}，绝不进 tag
      */
-    public void transition(OrderAction action, String fromName, String toName, Result result, String orderId) {
+    public void transition(OrderAction action, String fromName, String toName, Result result, String orderId,
+                           long durationNanos, String reason) {
         registry.counter(TRANSITIONS, "action", action.tag(), "result", result.tag).increment();
-        event("transition", action.tag(), fromName, toName, result.tag, null, orderId);
+        event("transition", action.tag(), fromName, toName, result.tag, null, orderId, durationNanos, reason, 0);
     }
 
     /**
@@ -157,10 +168,16 @@ public class MallOrderStateMetrics {
      * 它记的是「已经落库的非法态」，与 {@link #birthRejected} 记的「在门口被挡下的」是两回事。
      *
      * @param shape 三位串（{@code 010} / {@code 001} / {@code 011}）或 {@code non_binary}
+     * @param durationNanos 墙钟（块 7 · 阶段 3a.3 新增）：<b>分类那一步</b>本身 ——
+     *                 {@code OrderTransitionRecorder.recordIllegalIfAny} 里起表于
+     *                 {@code stateMachine.illegalShape(...)} 之前、止于其后。
+     *                 ⚠️ 它是<b>纯内存位运算</b>（亚微秒级），落在页面上多半显示成 &lt;1000µs
+     *                 那一档 —— 这不是没测到，是它真的这么快；两个入口（读回后 / 出生时）同一个含义
      */
-    public void illegal(String shape, String orderId) {
+    public void illegal(String shape, String orderId, long durationNanos) {
         registry.counter(ILLEGAL, "shape", shape).increment();
-        event("illegal", null, null, null, null, shape, orderId);
+        // 原因由 shape 表达（三位形状就是原因）⇒ reason 传 null，不重复写同一事实
+        event("illegal", null, null, null, null, shape, orderId, durationNanos, null, 0);
     }
 
     /**
@@ -183,20 +200,38 @@ public class MallOrderStateMetrics {
      *
      * @param shape   归一后的形状（5 值封闭枚举，见上）
      * @param orderId 业务键。⚠️ 只进**事件流**的 {@code key}，**绝不进 tag**（基数无界）
+     * @param durationNanos 墙钟（块 7 · 阶段 3a.3 新增）：{@code OrderTransitionRecorder.rejectedAtBirth}
+     *                 的<b>方法入口 → 发本事件之前</b>。⚠️ 它**含那一行 WARN 的格式化与输出** ——
+     *                 被拒路径上这行日志本就是拦截动作的一部分，剔除它反而要额外取样；
+     *                 通过路径不发事件、不付这个代价（同 protection 环「只在被拒样本有耗时」的精神）
      */
-    public void birthRejected(String shape, String orderId) {
+    public void birthRejected(String shape, String orderId, long durationNanos) {
         registry.counter(BIRTH_REJECTED, "shape", shape).increment();
-        event("illegal", null, null, null, "rejected", shape, orderId);
+        // 同上：shape 就是原因，reason 传 null
+        event("illegal", null, null, null, "rejected", shape, orderId, durationNanos, null, 0);
     }
 
     /**
      * 时间线落库的结果。{@code ok} 只计数不发事件（理由见类注释的热路径段），
      * {@code error} 计数 + 发事件 —— 丢一条时间线是**要能追到哪一单**的事。
+     *
+     * @param durationNanos 那次 INSERT 的墙钟（块 7 · 阶段 3a.3 新增）。
+     *                 ⚠️ <b>本参数是 {@code Long} 不是 {@code long}</b>，与 {@link #transition}
+     *                 那一组不同 —— 因为 {@code false} 有**两个来源**，含义不一样：
+     *                 <ul>
+     *                   <li>{@code OrderTimelineWriter.write} 的 catch：INSERT **真跑过**、抛了 ⇒
+     *                       耗时照传（记的是「白花了多久」）；</li>
+     *                   <li>{@code OrderTransitionRecorder.applied} 的读回失败分支：三位读不回来
+     *                       ⇒ 根本没有 from/to 可写、INSERT <b>一次都没发生过</b> ⇒ 传 {@code null}。
+     *                       这里 {@code null} 不是「测不到」而是「没发生」，两者在页面上意思完全不同</li>
+     *                 </ul>
+     * @param reason  失败的人话原因（块 7 · 阶段 3a.3 后续新增）；{@code ok} 传 {@code null}。
+     *                只进事件 record → {@code fields.reason}
      */
-    public void timelineWrite(boolean ok, String orderId) {
+    public void timelineWrite(boolean ok, String orderId, Long durationNanos, String reason) {
         registry.counter(TIMELINE_WRITES, "result", ok ? "ok" : "error").increment();
         if (!ok) {
-            event("async", null, null, null, "error", null, orderId);
+            event("async", null, null, null, "error", null, orderId, durationNanos, reason, 0);
         }
     }
 
@@ -207,12 +242,46 @@ public class MallOrderStateMetrics {
      */
     public void asyncRejected(RejectReason reason, String orderId) {
         registry.counter(ASYNC_REJECTED, "reason", reason.tag).increment();
-        event("async", null, null, null, "rejected", reason.tag, orderId);
+        // 耗时恒 null（块 7 · 阶段 3a.3）：被拒的语义是「这个任务**根本没跑**」——
+        // 没有可测的执行段（线程池的拒绝发生在提交处，纳秒级且不是任务本身的耗时），
+        // 与 protection 环「熔断/池/重试恒 null」同一条处置
+        // 原因由 shape（queue_full / shutdown）表达 ⇒ 新加的 reason 形参传 null，不重复
+        event("async", null, null, null, "rejected", reason.tag, orderId, null, null, 0);
     }
 
     /** 异步任务本身的执行墙钟。 */
     public void asyncDuration(long nanos) {
         registry.timer(ASYNC_DURATION).record(nanos, TimeUnit.NANOSECONDS);
+    }
+
+    /**
+     * <b>批量取消的汇总事件</b>（2026-10-17 新增）。超时取消任务一轮可能取消几百上千单，
+     * 逐单发事件会挤爆 2048 容量的环形缓冲、也让 SSE 每帧背几万条；但**一条都不发**
+     * 又会让前端「已取消数字涨、流轨却死气沉沉」。折中是：**每轮至多一条**，
+     * 条数放在 {@link OrderStateEvent#count()}。
+     *
+     * <p>语义边界（刻意收窄）：
+     * <ul>
+     *   <li>{@code action=cancel} 是本事件流里的**第五个**动作取值，只为汇总而设；</li>
+     *   <li>{@code result} 恒 {@code applied} —— 每单是否真取消由 CAS 决定，进不了这里的计数；</li>
+     *   <li>{@code key}/{@code traceId}/{@code batchId} 均为 null：跨多单、无单一业务键，
+     *       前端必须把它当**批次**而不是某一单；</li>
+     *   <li>{@code fromName} 由调用方给（超时任务的候选一律是 {@code PayIf=0} ⇒ 传 {@code CREATED}），
+     *       {@code to} 恒 {@code CANCELLED}。不为了「看起来对称」去伪造 waitShip 的取消。</li>
+     * </ul>
+     *
+     * <p>计数器 {@code transitions{action=cancel,result=applied}} 按**单数**累加，
+     * 与事件流「一条事件带 count」不冲突：前者是可求和的速率，后者是可回放的批次记录。
+     *
+     * @param count    本轮 CAS 成功取消的单数；{@code <= 0} 直接返回，不发空事件
+     * @param fromName 取消前状态名（超时任务恒 {@code "CREATED"}）
+     */
+    public void cancelBatch(int count, String fromName) {
+        if (count <= 0) {
+            return;
+        }
+        registry.counter(TRANSITIONS, "action", "cancel", "result", "applied").increment(count);
+        event("transition", "cancel", fromName, "CANCELLED", "applied", null, null, null, null, count);
     }
 
     /**
@@ -255,11 +324,17 @@ public class MallOrderStateMetrics {
     }
 
     private void event(String kind, String action, String from, String to,
-                       String result, String shape, String key) {
+                       String result, String shape, String key, Long durationNanos, String reason,
+                       int count) {
         long seq = eventCursor.getAndIncrement();
         events[(int) (seq & EVENT_MASK)] = new OrderStateEvent(
                 seq, System.currentTimeMillis(), kind, action, from, to, result, shape,
-                key == null ? null : String.valueOf(key));
+                key == null ? null : String.valueOf(key), com.minke.mallmanagement.shared.web.TraceIdFilter.current(), com.minke.mallmanagement.shared.web.TraceIdFilter.currentBatch(),
+                com.minke.mallmanagement.shared.web.TraceIdFilter.currentActorId(),
+                com.minke.mallmanagement.shared.web.TraceIdFilter.currentActorRole(),
+                durationNanos == null ? null : durationNanos / 1000,   // 块 7 · commit 8/8c：写全限定名而非 import，理由同 {@code MallCacheMetrics#event}（保本文件 `:3` 与 `:104` 的引用不下移）。⚠️ durationNanos 是**纳秒**、落进 record 的是**微秒**
+                reason == null ? null : com.minke.mallmanagement.shared.text.EventReason.clip(reason),
+                count);   // 2026-10-17：只有 cancelBatch 的汇总事件 > 0；逐单事件恒 0
     }
 
     /**
@@ -276,9 +351,30 @@ public class MallOrderStateMetrics {
      * @param result     transition 的结果 / async 的结果（ok|error|rejected）；illegal 为 null
      * @param shape      illegal 的三位串或 non_binary；async 被拒时放 reason；其余 null
      * @param key        涉及的业务键（订单号）
+     * @param traceId    产生本条事件的那次请求的号（块 7 · commit 8 新增）；不在请求线程上时为 null
+     * @param batchId    产生本条事件的那次请求**所属的演练批次**（块 7 · commit 8c，来自
+     *                   {@code X-Drill-Batch} 头）；日常流量为 {@code null}。同 {@code traceId} 现读
+     * @param actorId    发起那次请求的业务号（块 7 · 阶段 3a.3 新增）；无身份时为 null。
+     *                   ⚠️ {@code kind=async} 这一路**恒 null**（它在 {@code OrderStateExecutor}
+     *                   的线程池线程上跑，MDC 不带身份 —— 见 {@code ObserveContext} 的派生线程传播）
+     * @param actorRole  发起者的角色号（块 7 · 阶段 3a.3 新增）；无身份时为 null
+     * @param durationUs 本条事件主体的耗时（**微秒**，块 7 · 阶段 3a.3 新增）；
+     *                   口径逐 kind 不同：{@code transition} = CAS 前到后（**含持锁等待**）、
+     *                   {@code illegal} = 三位到手到判完形状（纯内存）、{@code async/error} =
+     *                   那次 INSERT 的墙钟（读回失败那一路为 null）；{@code async/rejected} 恒 null
+     * @param reason     失败 / 拒绝的人话原因（块 7 · 阶段 3a.3 后续新增）。
+     *                   <b>只补</b> {@code transition} 的 rejected / error 与 {@code async/error}；
+     *                   {@code illegal} / 出生闸 / async 被拒的「原因」仍由 {@code shape} 表达
+     *                   （{@code 010} 或 {@code queue_full|shutdown}）—— 同一事实不写两遍
+     * @param count      本条事件代表的**订单数**（2026-10-17 新增）：逐单事件恒 {@code 0}，
+     *                   只有 {@link #cancelBatch} 的汇总事件 &gt; 0。读事件的人据此区分
+     *                   「一条 = 一单」与「一条 = 一批」；前端 QPS 也必须按它加权
      */
     public record OrderStateEvent(long seq, long epochMilli, String kind, String action,
-                                  String from, String to, String result, String shape, String key) {
+                                  String from, String to, String result, String shape, String key,
+                                  String traceId, String batchId, String actorId, Integer actorRole,
+                                  Long durationUs, String reason, int count)
+            implements com.minke.mallmanagement.observe.metrics.Sourced {
     }
 
     /** {@code mall.order.state.transitions} 的 result 取值。tag 字段避免每次调用拼字符串。 */

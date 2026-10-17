@@ -254,12 +254,18 @@ public class GoodsDao {
      * <p>⚠️ {@code keyword} 必须非空 —— 三层的 null 归一（{@code keyword == null ⇒ ""}）
      * 留在 {@code GoodsService}，那是入参规则不是 SQL。
      */
-    public List<Map<String, Object>> searchByKeyword(String keyword) {
+    public List<Map<String, Object>> searchByKeyword(String keyword, int limit, int offset) {
         String[] keys = keyword.trim().split("");
         StringBuilder nameSql = new StringBuilder();
+        java.util.List<Object> args = new java.util.ArrayList<>();
+        args.add(keyword.trim());
         for (String s : keys) {
             if (!s.isEmpty()) {
-                nameSql.append(" OR g.GoodName LIKE '%").append(s).append("%' ");
+                // ⚠️ 块 7 收尾：逐字符 LIKE 从**字符串拼接**改成**绑定参数**（既有缺陷结清）。
+                //    原写法把用户输入直接拼进 SQL：单引号会造语法错误（500），`%` / `_` 会当通配符
+                //    放大成全表。现在字符是参数，`%` / `_` / `\` 另做转义 ⇒ 它们只匹配字面量。
+                nameSql.append(" OR g.GoodName LIKE CONCAT('%', ?, '%') ESCAPE '\\\\' ");
+                args.add(likeEscape(s));
             }
         }
 
@@ -277,9 +283,18 @@ public class GoodsDao {
                 "FROM goods g WHERE 1=1 " +
                 "AND g.ShelfState = 1 AND g.DeletedAt IS NULL " +
                 "AND (g.GoodType = ? " +
-                nameSql + ")";
+                nameSql + ") " +
+                // ⚠️ 分页要求确定性排序：无 ORDER BY 的 LIMIT/OFFSET 在 InnoDB 里可能重复/漏行。
+                "ORDER BY g.Id DESC LIMIT ? OFFSET ?";
 
-        return jdbcClient.sql(sql).param(keyword.trim()).query().listOfRows();
+        args.add(limit);
+        args.add(offset);
+        return jdbcClient.sql(sql).params(args.toArray()).query().listOfRows();
+    }
+
+    /** LIKE 参数里的通配符转义（`\` → `\\`，`%` / `_` 加反斜杠），配合 SQL 的 `ESCAPE '\\'`。 */
+    private static String likeEscape(String s) {
+        return s.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_");
     }
 
     // ==================== 读：审计快照（C3 批 A 新增，追加在类尾） ====================
@@ -328,17 +343,17 @@ public class GoodsDao {
      * （单引号注入 / {@code %} 未转义，见 {@link #searchByKeyword} 的 ⚠️）。{@code keyword}
      * 空 ⇒ 不加这一条谓词。
      */
-    public List<Map<String, Object>> selectByTypeId(Integer TypeId, String keyword) {
+    public List<Map<String, Object>> selectByTypeId(Integer TypeId, String keyword, int limit, int offset) {
         boolean filtered = keyword != null && !keyword.trim().isEmpty();
         String sql = "SELECT * FROM mall_management_sql.goods "
                 + "WHERE TypeId = ? AND ShelfState = 1 AND DeletedAt IS NULL "
                 + (filtered ? "AND GoodName LIKE CONCAT('%', ?, '%') " : "")
-                + "ORDER BY Id DESC";
+                + "ORDER BY Id DESC LIMIT ? OFFSET ?";
         JdbcClient.StatementSpec spec = jdbcClient.sql(sql).param(TypeId);
         if (filtered) {
             spec = spec.param(keyword.trim());
         }
-        return spec.query().listOfRows();
+        return spec.params(limit, offset).query().listOfRows();
     }
 
     /**
@@ -386,5 +401,107 @@ public class GoodsDao {
         String sql = "UPDATE mall_management_sql.goods SET DeletedAt = ? "
                 + "WHERE MerchantId=? AND GoodName=? AND ProductCode=? AND DeletedAt IS NULL";
         return jdbcClient.sql(sql).params(deletedAt, MerchantId, GoodName, ProductCode).update();
+    }
+
+    // ==================== 写：多规格库存的扣减 / 释放（C3 块 7 · 库存治理 TD-36 的落地）====================
+
+    /**
+     * <b>CAS 扣减</b>一条多规格的库存，返回**影响行数**（C3 块 7 · 库存治理 TD-36）。
+     *
+     * <p>语句逐字照《块 7 参考》§5.1，与订单状态机同款：<b>把判据写进 {@code WHERE}、由数据库一把定胜负</b>，
+     * 不先 {@code SELECT} 再 {@code UPDATE}（那样两个并发请求会读到同一个旧值）。
+     *
+     * <p>⚠️ <b>{@code rows == 0} 是正常分支、不是错误</b>（同 {@code OrderDao.casUpdate} 的口径）。
+     * 它由两种**完全不同的**原因产生，调用方必须都按「什么也没发生」处理：
+     * <ol>
+     *   <li><b>库存不足</b>（{@code Stock < n}）—— 防超卖命中，这是本方法的**主要目的**；</li>
+     *   <li><b>该 {@code SkuCode} 没有行</b> —— 即 <b>非矩阵商品</b>。订单链路装的是
+     *       {@code order_item.ProductCode} / {@code OrderService.ItemSpec.code()}，而
+     *       {@code goods_sku.SkuCode} 只在**矩阵商品**下与之相等（加购时把 {@code SkuCode}
+     *       作为 {@code ProductCode} 上报）⇒ 非矩阵商品**必然查无此行**。</li>
+     * </ol>
+     * ⚠️ <b>两种 0 行都不得被调用方判成「订单失败」</b> —— 那样会让调用方重复下单，
+     * 与 {@code OrderService.writeItems} 的 fail-open 是同一条理由。
+     */
+    public int deductStock(String skuCode, int n) {
+        String sql = "UPDATE mall_management_sql.goods_sku SET Stock = Stock - ? "
+                + "WHERE SkuCode = ? AND Stock >= ?";
+        return jdbcClient.sql(sql).params(n, skuCode, n).update();
+    }
+
+    /**
+     * <b>释放（回补）</b>一条多规格的库存 —— 订单**超时取消**时把下单时扣掉的量加回去
+     * （C3 块 7 · TD-36 的第三条腿，C5 甲：复用 {@code OrderTimeoutCancelJob}，不新加 job）。
+     *
+     * <p>⚠️ <b>前置判据不在本方法里，在调用方</b>（块 7 · commit 2d 补，2026-10-14）：本方法只管
+     * 「按码加回 {@code n}」；「这单当初到底扣成了没有」已记进 {@code order.StockDeducted}
+     * （Migration ⑱），由 {@code OrderTimeoutCancelJob.releaseStock} **先读它、只有 1 才调本方法**。
+     * 非矩阵商品查无此行 ⇒ {@code 0} 行 = no-op（与 {@link #deductStock} 的第二条边界同源）。
+     *
+     * <p>⚠️ <b>历史边界（2d 之前）—— 留档，别按它理解现在的行为</b>：那时本方法是**无条件加回**
+     * ⇒ 「下单时因库存不足扣减 0 行、单照样落库」的那种单，超时取消会**凭空补出一份库存**（虚增）。
+     * <p>⚠️ <b>2d 之后的精度到「单」不到「行」</b>：一单里既有真扣成的行、又有 0 行的行（混合单）
+     * 时，{@code StockDeducted = 1} ⇒ 拿 0 行的那几行明细仍会被回补。这是**已知取舍**，
+     * 不是疏漏 —— 要根治得把判据下沉到 {@code order_item} 粒度，那是**新列 + 新契约**，须另批。
+     * 块 7 的演示另有 {@code goods_sku.BaselineStock}（Migration ⑰-2）一键复位兜底。
+     */
+    public int releaseStock(String skuCode, int n) {
+        String sql = "UPDATE mall_management_sql.goods_sku SET Stock = Stock + ? WHERE SkuCode = ?";
+        return jdbcClient.sql(sql).params(n, skuCode).update();
+    }
+
+    // ==================== 读：库存水位（C3 块 7 · 指标面板的「库存水位进度条」）====================
+
+    /**
+     * 最靠前的 {@code limit} 条多规格库存 —— 指标面板「库存水位」段的**唯一**输入
+     * （C3 块 7 · commit 3，调用方 {@code MetricsSnapshotService#stock}）。
+     *
+     * <p><b>排序 = 水位低的先出</b>（{@code Stock ASC}，同值按 {@code Id} 保证稳定）——
+     * 这块面板要回答的是「**哪些快没了**」，按 Id 排会先给出一屏水位健康、看不出问题的行。
+     *
+     * <p>⚠️ <b>只读、不改任何行</b>：与同段落的 {@link #deductStock} / {@link #releaseStock}
+     * 是两回事（那两个是写）。本方法不参与库存治理，它只是把现状读出来给人看。
+     *
+     * <p>⚠️ {@code BaselineStock} 可以是 {@code NULL}（Migration ⑰-2 加的列，演示前才
+     * {@code UPDATE … SET BaselineStock = Stock}）：它为 {@code NULL} 时调用方
+     * 把「水位占比」那一格留空 —— 本方法不替它算（{@code Stock / NULL} 没有意义，
+     * 用 {@code Stock} 自己当分母会画出「永远 100%」的假水位条）。
+     *
+     * <p>⚠️ <b>不含 {@code goods} 表</b>：商品名就在 {@code goods_sku.GoodName} 里
+     * （加购时写入，见 {@code selectSkusByMerchantGoodName} 的既有读法）⇒ 不做 join
+     * ——多一个 join 就多一处将来会漂的口径。
+     */
+    public java.util.List<Map<String, Object>> selectStockLevels(int limit) {
+        String sql = "SELECT SkuCode, GoodName, AxisName, Stock, BaselineStock "
+                + "FROM mall_management_sql.goods_sku ORDER BY Stock ASC, Id ASC LIMIT ?";
+        return jdbcClient.sql(sql).param(limit).query().listOfRows();
+    }
+
+    /**
+     * 某个 {@code SkuCode} 的**当前**库存 —— 给「**扣完那一刻还剩多少**」取数
+     * （块 7 · 阶段 3a.3 第二步，唯一调用方 {@code OrderService#deductStocks} 的 {@code stockRemaining}）。
+     *
+     * <p>⚠️ <b>本方法答的是「此刻剩多少」，不是「扣减那一刻剩多少」</b>：后者只能由调用方在
+     * <b>扣减那一行 SQL 之后紧接着</b>调本方法取得（口径全文见
+     * {@code StockMetrics.StockEvent#remaining()}）。本方法自身**没有时间语义** ——
+     * 别拿它事后回填一条历史事件：那会往台账里写下一个**当时并不成立**的事实。
+     *
+     * <p>⚠️ {@code null} = 该码在 {@code goods_sku} 里**没有行**（非矩阵商品：订单链路装的是
+     * {@code order_item.ProductCode}，只有矩阵商品才与 {@code SkuCode} 相等 ⇒ 与
+     * {@link #deductStock} 第二条边界同源）。那是**正常分支** ⇒ 用 {@code optional().orElse(null)}
+     * 而**不是** {@code single()}（后者查无此行会抛，把「正常查无」变成异常 ——
+     * 调用方那一层最怕的正是「把正常分支记成 error」）。
+     *
+     * <p>⚠️ <b>{@code SkuCode} 不是唯一键</b>（本表唯一键是 {@code (GoodsId, AxisName)}，见 ④ 段 DDL），
+     * 而 {@link #deductStock} 的 CAS 一次**可能命中多行**。同码多行时「剩余」本来就没有唯一答案，
+     * 本方法不假装有：取 {@code Id} 最小那一行的值。{@code ORDER BY} 是必须的 ——
+     * 光一个 {@code LIMIT 1} 由哪一行胜出**不确定**，同一份数据两次查可以给出不同的数
+     * （本仓在「不确定序」上栽过：{@code ObservedEventDao#selectByBatch} 的
+     * {@code ORDER BY OccurredAt, Id} 是同一条理由）。
+     */
+    public Integer selectStockBySku(String skuCode) {
+        String sql = "SELECT Stock FROM mall_management_sql.goods_sku "
+                + "WHERE SkuCode = ? ORDER BY Id ASC LIMIT 1";
+        return jdbcClient.sql(sql).param(skuCode).query(Integer.class).optional().orElse(null);
     }
 }

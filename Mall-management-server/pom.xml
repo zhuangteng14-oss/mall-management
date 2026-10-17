@@ -128,6 +128,76 @@
             <artifactId>redisson</artifactId>
             <version>3.46.0</version>
         </dependency>
+
+        <!-- 慢 SQL 观测（C3 块 7 · commit 6b · 批文 Q4「丁」）：给 DataSource 包一层，按耗时打 WARN。
+             装配点 shared/sql/SlowSqlConfig.java；为什么自己写 listener 而不用库自带的
+             logSlowQueryBySlf4j（会丢 traceId + 每条查询排一个定时任务）见 SlowSqlListener 类注释。
+
+             ⚠️ 版本为什么是 1.11.0，而不是「当时最新」的 1.11.1：本机 Maven 走 aliyun 镜像
+             （~/.m2/settings.xml 的 mirrorOf=central），而该镜像**没收录** 1.11.1 ——
+             2026-10-14 实测该 jar 在 aliyun 上 404、1.11.0 为 200；同一时刻 Central 直连两版都在。
+             取「本机能装到 且 CI 也能装到」的交集 ⇒ 1.11.0。
+             ⚠️ 别只看 aliyun 的 maven-metadata.xml：它写的 <release> 是 1.11.1（**元数据比产物新**），
+             照它写版本号会得到一个装不上的依赖。
+             复核：curl -sI https://maven.aliyun.com/repository/public/net/ttddyy/datasource-proxy/1.11.0/datasource-proxy-1.11.0.jar -->
+        <dependency>
+            <groupId>net.ttddyy</groupId>
+            <artifactId>datasource-proxy</artifactId>
+            <version>1.11.0</version>
+        </dependency>
+
+        <!-- 消息队列（C3 块 7 · commit 8c）：观测事件台账的异步出口。
+             ⚠️ 只引 starter，不单独引 spring-rabbit —— starter 负责装配 RabbitTemplate 与
+             SimpleRabbitListenerContainerFactory（后者按 application-*.properties 生效）；
+             拓扑（exchange / queue / DLQ）与两处 Jackson2JsonMessageConverter 见
+             observe/mq/RabbitObserveConfig.java 的类注释。
+             ⚠️ a3 profile 刻意 **不配** spring.rabbitmq.*：连不上只 WARN 降级（MQ 缺席不算故障，
+             见 RabbitEventPublisher 类注释）；CI 由 ci.yml 的 services 里 rabbitmq:3-management 顶上。
+             ⚠️ 追加在依赖段末尾是刻意的：pom.xml 被全仓以 file:行号 互引（`:40` / `:51` / `:72` /
+             `:82-85` / `:117-121` 等），插在中间会让其后所有引用集体偏移。 -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-amqp</artifactId>
+        </dependency>
+
+        <!-- AOP 织入面（D 段 · commit 2 · A 档 A1）：熔断注解 @CircuitBreaker 要生效，必须有人
+             把代理织出来。⚠️ 显式写出来而不是指望 resilience4j-spring-boot3 传递带入 ——
+             传递依赖一被上游改 POM 就会静默消失，而那时熔断会**安静地不生效**
+             （注解在、代理不在，编译测试全绿），是本段最不想留的那种失效。
+             版本由 Boot 的 dependencyManagement 给，不写 version。 -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-aop</artifactId>
+        </dependency>
+
+        <!-- 限流 + 熔断（D 段 · commit 2 · A 档 A1）：只引 starter，局部类（ProtectionGate /
+             InboundRateLimitFilter / ProtectionMetrics）都在本仓，见 protect/ 包。
+             ⚠️ 版本必须**显式写**：Boot 3.4.5 的 spring-boot-dependencies 里
+             **没有** resilience4j 的 dependencyManagement（2026-10-15 实测：该 pom 内
+             grep resilience4j 零命中）⇒ 不写 version 会当场解析失败，不是「取最新」。
+             ⚠️ 版本为什么是 2.3.0 而不是当时最新的 2.4.0（依据可复核）：resilience4j 2.3.0
+             对的是 Spring Boot 3.4 线、2.4.0 对的是 3.5 线，而本仓 parent 是 3.4.5
+             （pom.xml:7-8）；跨线取新会引一个只被 3.5 验证过的 starter。
+             复核：curl -sI https://repo1.maven.org/maven2/io/github/resilience4j/resilience4j-spring-boot3/2.3.0/resilience4j-spring-boot3-2.3.0.jar
+             ⚠️ 追加在依赖段末尾是刻意的：pom.xml 被全仓以 file:行号 互引，插在中间会让其后
+             所有引用集体偏移（同上面 amqp 那一族的处置）。 -->
+        <dependency>
+            <groupId>io.github.resilience4j</groupId>
+            <artifactId>resilience4j-spring-boot3</artifactId>
+            <version>2.3.0</version>
+        </dependency>
+
+        <!-- 死锁重试（D 段 · 阶段 2b · A 档 A5）：MerchantDowngradeService.relist 用编程式
+             RetryTemplate 兜住 MySQL 1213（不是注解 @Retryable —— 理由见那处 relist 的 javadoc：
+             重试要接 ProtectionGate 的 retry 开关，编译期注解读不到运行时开关）。
+             ⚠️ 版本由 Boot 3.4.5 的 spring-boot-dependencies 给（2026-10-15 实测：该 pom 里
+             grep spring-retry 有 dependencyManagement 命中），不写 version。
+             ⚠️ 追加在依赖段末尾是刻意的：pom.xml 被全仓以 file:行号 互引，插在中间会让其后
+             所有引用集体偏移（同上面 amqp / aop / resilience4j 那一族的处置）。 -->
+        <dependency>
+            <groupId>org.springframework.retry</groupId>
+            <artifactId>spring-retry</artifactId>
+        </dependency>
     </dependencies>
 
     <build>

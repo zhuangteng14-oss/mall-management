@@ -1,0 +1,139 @@
+package com.minke.mallmanagement.observe.dao;
+
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.core.simple.JdbcClient;
+import org.springframework.jdbc.support.GeneratedKeyHolder;
+import org.springframework.jdbc.support.KeyHolder;
+import org.springframework.stereotype.Repository;
+
+import java.util.List;
+import java.util.Map;
+
+/**
+ * 可观测域的**内联 SQL 唯一出口**（块 7 · commit 4）—— 只碰一张表 {@code drill_record}
+ * （建表在 {@code mall_management_sql.sql} 的 Migration ⑰-1，12 列；commit 8c 的 ⑲-2 再加
+ * {@code BatchId} ⇒ 现 **13 列**）。
+ *
+ * <p>范式照 {@link com.minke.mallmanagement.admin.dao.AdminAuditDao}：{@code @Repository} +
+ * 构造器**收 {@code JdbcTemplate} 而不是 {@code JdbcClient}**（让 {@code @WebMvcTest} 切片里既有的
+ * {@code @MockitoBean JdbcTemplate} 继续喂给本类）+ 语句以 Java 字符串内联。不用 MyBatis、无 mapper XML。
+ *
+ * <h2>【表名带 {@code mall_management_sql.} 前缀 —— 跟随块 7 这一批的新 SQL】</h2>
+ * 本仓这条口径**本来就不统一**（块 7 commit 1 新增的两条走 {@code GoodsDao} / {@code OrderDao}
+ * 的带前缀写法，而 {@code SeckillDao} 的同批不加前缀 —— 见 {@code GoodsDao.deductStock} 与
+ * {@code SeckillDao.deductSoldStock}）。本类取**带前缀**：与同批、同域、刚刚写下的
+ * {@code OrderDao.selectItemStocksByOrder} 逐字同款。⚠️ 这条不统一是**既有**的（TD-13），
+ * 本笔不借机改别的文件 —— 只在自己的新文件里选一边，并写在这里让人下次不用猜。
+ *
+ * <h2>【{@code Result} 列为什么要 {@code CAST(… AS CHAR)}】</h2>
+ * {@code Result} 是 {@code mediumtext}，本不需要 CAST；但读出来的 {@code Map} 会被 Jackson
+ * 直接序列化给前端，**列类型万一被改成 {@code json}** 就会退化成 base64（同
+ * {@code AdminAuditDao} 那两列踩过的坑）⇒ 这里显式钉成字符串，让读出的形状与列类型无关。
+ * 代价是一次转换，收益是「将来改列类型不会静默改变响应体」。
+ *
+ * <h2>【本表是 append-only 的】</h2>
+ * 只写不改不删（{@code Id} 自增、会话记录）⇒ 本类只有一条 INSERT 与三条读（列表 / 计数 / 单条）。
+ * 清理属运维动作（{@code DELETE … WHERE created_at < ?}），**不给端点**。
+ */
+@Repository
+public class DrillRecordDao {
+
+    /**
+     * 共用列清单 —— 列表 / 详情**必须逐字一致**（理由同 {@code AdminAuditDao.COLUMNS}）。
+     *
+     * <p>⚠️ {@code BatchId} 是**块 7 收尾**补进来的（用户 2026-10-15 裁「甲」）：它是
+     * <b>演练回放的入口键</b> —— 回放端点（{@code POST /admin/observe/replay}）按批次读
+     * {@code observed_event}，而在此之前这个值**只在库里、从来没往响应里露过**
+     * （commit 8c 把它写进了本表与 {@code observed_event} 两处，却没有任何一条端点把它读出来）
+     * ⇒ 界面上那个〔回放〕按钮拿不到 `batchId`，功能等于不可达。加在 COLUMNS 里而不是给
+     * {@code AttackController} 新开一条查询：**它的入口就是「记录区那一行」**，字段跟着那一行走。
+     *
+     * <p>⚠️ 顺序：追加在**最后**（{@code CreatedAt} 之后）—— 新字段加在尾部，别插在中间：
+     * 前端表格列顺序跟着这个键序走（{@code DrillRecordServiceTest} 钉住了它）。
+     * ⚠️ 而 {@code Result} **总是**排在最末：{@code DrillRecordService.split()} 会把它从原位置摘下来、
+     * 最后再放回去（见那个方法）⇒ 响应里每行的键序是
+     * {@code […, DurationMs, CreatedAt, BatchId, EventCount, HasData, Result]}。
+     * <p>⚠️ {@code EventCount}（2026-10-18）同样追加在尾部：它是**派生列**（子查询），
+     * 不该插在业务列中间；{@code HasData} 由服务层紧随其后生成。
+     */
+    private static final String COLUMNS =
+            "r.Id, r.OperatorId, r.OperatorRole, r.Name, r.Scenario, r.TotalRequests, r.BlockedRequests, "
+                    + "r.FailedRequests, r.DurationMs, CAST(r.Result AS CHAR) AS Result, "
+                    + "DATE_FORMAT(r.created_at, '%Y-%m-%d %H:%i:%s') AS CreatedAt, r.BatchId, "
+                    // 2026-10-18：批次**是否还有台账**。observed_event 有保留期清理（攻击批次 3 天），
+                    // 而 drill_record 不参与那次清理 ⇒ 过期批次的记录还在、事件已删空，下拉框会给出
+                    // 一个点进去 0/0 的「幽灵批次」。这一列让列表能把它们标出来（服务层转成 HasData）。
+                    // ⚠️ 子查询走 `idx_observed_event_batch`（Migration ⑲-1），每行一次索引 COUNT。
+                    + "(SELECT COUNT(*) FROM mall_management_sql.observed_event e "
+                    + " WHERE e.BatchId = r.BatchId) AS EventCount ";
+
+    private final JdbcClient jdbcClient;
+
+    public DrillRecordDao(JdbcTemplate jdbcTemplate) {
+        this.jdbcClient = JdbcClient.create(jdbcTemplate);
+    }
+
+    // ==================== 写：唯一入口 ====================
+
+    /**
+     * 追加一行演练记录。**本表只有这一条写语句**。
+     *
+     * <p>⚠️ 调用方（{@code DrillRecordService}）负责把结构化结果**序列化成 JSON 文本**再传进来
+     * —— 本类不引 Jackson（同 {@code AdminAuditDao.insert} 的分工）。
+     *
+     * @param scenario  场景配置 JSON（勾选 + 权重 + 总并发 + 持续秒数）
+     * @param result    长文本结果 JSON（后端解析后分字段给前端，不是让前端展示原文）
+     * @param batchId   这一次演练的**批次 UUID**（块 7 · commit 8c 新增；列由 Migration ⑲-2 加）。
+     *                  它是 {@code observed_event.BatchId} 的**同一串值**（引擎在一轮开始时生成、
+     *                  同时写进两边）⇒ 「这一轮演练污染出来的事件」与「这一轮演练这一行记录」
+     *                  靠它对得上。⚠️ 存量行是 {@code NULL}（不是空串）：空串会被清理谓词读成
+     *                  「属于一个叫空的批次」。
+     * @return **新行的 {@code Id}**（不是受影响行数）
+     *
+     * <p>⚠️ <b>为什么这里不走本仓惯用的 {@code SELECT LAST_INSERT_ID()}</b>
+     * （{@code SensitiveWordDao.lastInsertId} 那一支）：那个写法**只在 {@code @Transactional}
+     * 里可信**（两条语句可能落在不同连接上，于是读到别人的自增值），而本方法的调用场景是
+     * 「一次演练跑完（数十秒）之后落一行」—— 为了取个 Id 把事务开在演练前后是不划算的。
+     * 改用 JDBC 的**自增键回传**（{@link org.springframework.jdbc.support.GeneratedKeyHolder}）：
+     * 一条语句同时拿到「插了几行」与「新行的 Id」，与事务无关。
+     * <p>⚠️ {@code JdbcClient} 的 {@code StatementSpec} <b>没有</b> {@code update(Class<T>)} 这个
+     * 重载（本仓版本实测如此）—— 别照 {@code query(Class)} 的形状想当然写。
+     */
+    public long insert(String operatorId, Integer operatorRole, String name, String scenario,
+                       int totalRequests, int blockedRequests, int failedRequests, long durationMs,
+                       String result, String batchId) {
+        String sql = "INSERT INTO mall_management_sql.drill_record "
+                + "(OperatorId, OperatorRole, Name, Scenario, TotalRequests, BlockedRequests, "
+                + "FailedRequests, DurationMs, Result, BatchId) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+        KeyHolder keys = new GeneratedKeyHolder();
+        jdbcClient.sql(sql)
+                .params(operatorId, operatorRole, name, scenario, totalRequests, blockedRequests,
+                        failedRequests, durationMs, result, batchId)
+                .update(keys);
+        Number key = keys.getKey();
+        return key == null ? 0L : key.longValue();
+    }
+
+    // ==================== 读：列表 / 详情 ====================
+
+    /** 按时间倒序列演练记录（{@code Id} 兜底：同一秒内的多行顺序稳定、可复算）。 */
+    public List<Map<String, Object>> selectRecords(int limit, int offset) {
+        return jdbcClient.sql("SELECT " + COLUMNS + "FROM mall_management_sql.drill_record r "
+                        + "ORDER BY r.created_at DESC, r.Id DESC LIMIT ? OFFSET ?")
+                .params(limit, offset).query().listOfRows();
+    }
+
+    /** 总行数（前端分页要用；不埋点：它是行数不是事件）。 */
+    public long countRecords() {
+        return jdbcClient.sql("SELECT COUNT(*) FROM mall_management_sql.drill_record")
+                .query(Long.class).single();
+    }
+
+    /** 单条演练记录（详情用；{@code Result} 已 CAST 成字符串）。没这一行 ⇒ {@code null}。 */
+    public Map<String, Object> selectRecordById(long id) {
+        List<Map<String, Object>> rows = jdbcClient.sql(
+                        "SELECT " + COLUMNS + "FROM mall_management_sql.drill_record r WHERE r.Id = ?")
+                .param(id).query().listOfRows();
+        return rows.isEmpty() ? null : rows.get(0);
+    }
+}

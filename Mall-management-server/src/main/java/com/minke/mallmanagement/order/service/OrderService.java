@@ -19,9 +19,15 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ThreadLocalRandom;
+import com.minke.mallmanagement.goods.dao.GoodsDao;
+import io.github.resilience4j.circuitbreaker.annotation.CircuitBreaker;
 import com.minke.mallmanagement.marketing.coupon.service.CouponService;
+import com.minke.mallmanagement.marketing.seckill.dao.SeckillDao;
 import com.minke.mallmanagement.notification.NotificationEvents;
 import com.minke.mallmanagement.notification.service.NotificationService;
+import com.minke.mallmanagement.observe.metrics.ProtectionMetrics;
+import com.minke.mallmanagement.observe.metrics.StockMetrics;
+import com.minke.mallmanagement.observe.metrics.StockMetrics.Deduct;
 import com.minke.mallmanagement.order.model.OrderAction;
 import com.minke.mallmanagement.order.dao.OrderDao;
 import com.minke.mallmanagement.order.dao.ShippingTrackDao;
@@ -188,6 +194,55 @@ public class OrderService {
      */
     private final CouponService couponService;
 
+    /**
+     * 商品域的库存出口（C3 块 7 · 库存治理 TD-36 新增）。下单即扣走 {@link GoodsDao#deductStock}、
+     * 超时取消回补走 `OrderTimeoutCancelJob` 侧的 {@link GoodsDao#releaseStock}。
+     *
+     * <p>⚠️ <b>直接注入</b>（不是 {@code ObjectProvider}）：{@code GoodsDao} 早在三层第二笔就进了
+     * {@code AbstractSmokeTest} 的 {@code @Import}（是真 bean）⇒ 切片里取得到，同
+     * {@link #notificationService} / {@link #couponService} 那条论证。
+     * <p>⚠️ 依赖方向是「订单 → 商品」，**不是**反过来：商品域对订单域一无所知
+     * （{@code GoodsDao} 只认 {@code skuCode + n} 两个值）⇒ 没有环。
+     */
+    private final GoodsDao goodsDao;
+
+    /**
+     * 秒杀域的活动出口（C3 块 7 · commit 2c 新增，2026-10-14）。可选入参 {@code ActivityId} 非空时：
+     * 先 {@link SeckillDao#selectActivityByActivityId} 把业务串换成自增 {@code Id}，
+     * 再 {@link SeckillDao#deductSoldStock} 抢名额（CAS）；建单失败时用
+     * {@link SeckillDao#releaseSoldStock} 把名额退回去。
+     *
+     * <p>⚠️ <b>直接注入</b>（不是 {@code ObjectProvider}）：{@code SeckillDao} 早在块 5 commit 1
+     * 就进了 {@code AbstractSmokeTest} 的 {@code @Import}（是真 bean）⇒ 切片里取得到，同
+     * {@link #notificationService} / {@link #couponService} / {@link #goodsDao} 那条论证。
+     * <p>⚠️ 依赖方向是「订单 → 秒杀」，**不是**反过来：秒杀域对订单域一无所知
+     * （{@code SeckillDao} 只认 {@code activityId + id + n} 三个值）⇒ 没有环。
+     */
+    private final SeckillDao seckillDao;
+
+    /**
+     * 库存面的观测出口（C3 块 7 · 可观测域新增，{@code observe/metrics/StockMetrics.java}）。
+     * 下单即扣的每条明细各记一次 —— 扣没扣到、扣了几件。
+     *
+     * <p>⚠️ <b>只记事实、不定结论</b>：{@link StockMetrics#deduct} 的入参是<b>枚举</b>（不是 throwable），
+     * DAO 的异常在上面的 {@link #deductStocks} 里先被接住 ⇒ 埋点不会改变 {@code orderAdd} 的返回值，
+     * 也不会把异常从方法里带出去。这与既有三环（缓存 / 锁 / 订单）的口径一致。
+     * <p>⚠️ 依赖方向是「订单 → 观测」，而观测域<b>对订单域一无所知</b>（{@code StockMetrics}
+     * 只认 {@code skuCode + qty + 枚举} 三个值）⇒ 没有环。
+     */
+    private final StockMetrics stockMetrics;
+
+    /**
+     * 防护面的观测出口（块 7 · 2026-10-17 用户口径新增）。
+     *
+     * <p>只用于一处：{@link #addLocked} 里幂等查重挡下「同一 OrderId 的重复提交」时，
+     * 发一条 {@code blocked("duplicateSubmit", ...)} —— 这属于<b>防护层成功防御</b>，
+     * 事件严重度是 PROTECT（紫），<b>不进业务失败率</b>。
+     *
+     * <p>⚠️ 与 {@link #stockMetrics} 同一条依赖方向（订单 → 观测），观测域对订单域一无所知 ⇒ 无环。
+     */
+    private final ProtectionMetrics protectionMetrics;
+
     private static final Logger log = LoggerFactory.getLogger(OrderService.class);
 
     /** 支付流水号的日期段格式（{@code PAY} + {@code yyyyMMdd} + 6 位随机）。 */
@@ -201,7 +256,11 @@ public class OrderService {
                         NotificationService notificationService,
                         ShippingTrackDao shippingTrackDao,
                         ObjectMapper objectMapper,
-                        CouponService couponService) {
+                        CouponService couponService,
+                        GoodsDao goodsDao,
+                        SeckillDao seckillDao,
+                        StockMetrics stockMetrics,
+                        ProtectionMetrics protectionMetrics) {
         this.orderDao = orderDao;
         this.lockService = lockService;
         this.orderStateMachine = orderStateMachine;
@@ -211,6 +270,10 @@ public class OrderService {
         this.shippingTrackDao = shippingTrackDao;
         this.objectMapper = objectMapper;
         this.couponService = couponService;
+        this.goodsDao = goodsDao;
+        this.seckillDao = seckillDao;
+        this.stockMetrics = stockMetrics;
+        this.protectionMetrics = protectionMetrics;
     }
 
     // ==================== 下单 ====================
@@ -252,7 +315,37 @@ public class OrderService {
      * {@code Items} 的理由：既有 11 个形参的相对顺序一字不动）。空 / 缺省 ⇒ 与加它之前**逐字节同行为**
      * （老前端不发它、结算页面没选券时也不发）。非空 ⇒ 走 {@link #addLocked} 的用券段：
      * 先校验、再核销，最后把 <b>折后价</b>写进 {@code order.Price}（那时入参 {@code Price} 是**原价**）。
+     *
+     * <p>⚠️ <b>C3 块 7 · commit 2c 又在<b>末尾</b>加了 {@code ActivityId}</b>（同 {@code Quantity} /
+     * {@code Items} / {@code CouponId} 的理由：既有 12 个形参的相对顺序一字不动）。
+     * 空 / 缺省 ⇒ 与加它之前**逐字节同行为**（不读活动表、不碰名额）。非空 ⇒ 走
+     * {@link #addLocked} 的**秒杀段**：抢名额（CAS），抢不到 ⇒ <b>整单不落</b>
+     * —— 那是本类唯一一条 fail-closed 的下单路径，理由见秒杀段内注释。
+     * <p>⚠️ <b>它是「本单是秒杀单」的唯一声明</b>：{@code order} / {@code order_item} 都没有活动列，
+     * {@code ProductInformation} / {@code Items} 也不带活动信息 ⇒ 不传就等于「不是秒杀单」，
+     * 服务端**不猜**（猜错的方向是「普通单被当成秒杀单、白白吃掉一个名额」，比漏扣更坏）。
+     *
+     * <p>⚠️ <b>C3 块 7 · 边界补笔（2026-10-14）又在<b>末尾</b>加了 {@code Source}</b>（同
+     * {@code Quantity} / {@code Items} / {@code CouponId} / {@code ActivityId} 的理由：既有 13 个
+     * 形参的相对顺序一字不动）。它是**可选的写入来源标记**、落 {@code order.Source} 列
+     * （块 5 可视化段给 11 张表加的那一列），让演练写入的行**在库里可辨认**：
+     * 不传 / 空白 ⇒ {@code insertOrder} 归一成 {@code ""}，与加它之前**逐字节同行为**；
+     * 传 ⇒ 原样落库（{@code AttackEngine} 下演练单时传 {@code 'attack'}）。
+     * <p>⚠️ <b>超长**拒**而不是截断</b>（判据 = {@link #MAX_SOURCE}，见 {@link #sourceRejection}）：
+     * 它和 {@code /comment/add} 的 {@code Source} 是**同一口径**，理由也同一句 ——
+     * 悄悄截断会让 {@code attack} 悄悄变成别的东西而**不报错**（标错来源比没有来源坏）。
+     * <p>⚠️ <b>{@code Source} 不是身份声明、不参与鉴权</b>：谁能下单仍**只看**
+     * {@code IdentityGuard}，本参数的存在理由**唯一**是让行可辨认（同 {@code /comment/add} 的那句）。
      */
+    // ⚠️ 【D 段 · commit 2：这里加的是**熔断**，不是事务 —— 两者不相干，别读混】
+    //    本类「不得加 @Transactional」那条禁令（类注释与 addLocked 的 javadoc 各写了一遍）
+    //    **一字不动、依然有效**：熔断是「下游已经不行了就先别发请求」，
+    //    而事务是「这一段要么全成要么全不成」，前者不碰后者的语义。
+    //    ⚠️ 而且两者在 AOP 层的先后是**实测**的：CircuitBreakerAspect 的 order 是 2147483643
+    //    < 事务切面的 Integer.MAX_VALUE ⇒ 熔断在外。本类没有事务切面，这条对本类无影响，
+    //    写在这里是因为「订单链上一出现注解」最容易被读成「禁令破了个口子」。
+    //    落点跨域的理由（为什么不能只挂订单/支付）见 `GoodsService` 里那段同款注释。
+    @CircuitBreaker(name = "mallMysqlWrite")
     public Map<String, Object> orderAdd(
             String CustomerId,
             String MerchantId,
@@ -265,7 +358,9 @@ public class OrderService {
             int ReceiveIf,
             int Quantity,
             String Items,
-            String CouponId
+            String CouponId,
+            String ActivityId,
+            String Source
     ) {
         // B#1：价格闸。放在锁外 —— 一是让非法请求不耗 Redis、不污染锁指标；二是让 addLocked
         // 的临界区保持逐字不动（B2 / D#1 的登记处就在那儿）。
@@ -288,9 +383,16 @@ public class OrderService {
         if (frozen != null) {
             return frozen;
         }
+        // 边界补笔：Source 闸。**排在三闸之后**、{@code runLocked} **之前** ——
+        // 位置理由与前三条同款（非法请求不取锁、不触库），且排在**最后**，
+        // 不扰动「价格 vs 状态 vs 冻结」那三条已发布契约的措辞与顺序（与 C3 块 2 的冻结闸同一条纪律）。
+        Map<String, Object> badSource = sourceRejection(Source);
+        if (badSource != null) {
+            return badSource;
+        }
         return lockService.runLocked(LockName.ORDER_ADD, OrderId, () -> addLocked(
                 CustomerId, MerchantId, OrderId, Price, ProductInformation, Images,
-                PayIf, DeliveryIf, ReceiveIf, Quantity, Items, CouponId));
+                PayIf, DeliveryIf, ReceiveIf, Quantity, Items, CouponId, ActivityId, Source));
     }
 
     /**
@@ -439,8 +541,52 @@ public class OrderService {
     }
 
     /**
+     * {@code order.Source} 列是 {@code varchar(16)}（块 5 可视化段给 11 张表加的那一列，
+     * {@code mall_management_sql.sql:1167}）。C3 块 7 · 边界补笔起由 {@code /order/orderAdd}
+     * 的**可选**入参写入 —— 与 {@code CommentService.MAX_SOURCE} 是**同一个数、同一句话**
+     * （两处各自持有，刻意不抽公共常量：一个是订单域、一个是内容域）。
+     */
+    private static final int MAX_SOURCE = 16;
+
+    /**
+     * {@code Source} 闸。**可接受 ⇒ {@code null}；超长 ⇒ 既有形状的失败响应**。
+     *
+     * <p>判据是**正面形式**：{@code 拒 ⟺ 非空白 && trim().length() > MAX_SOURCE}。
+     * 空白 / {@code null} 一律**放行** —— 它们是「不标来源」，由 {@code OrderDao.insertOrder}
+     * 归一成 {@code ""}（与列默认值同一个值），不是错误。
+     *
+     * <h2>【为什么是「拒」不是「截断」】</h2>
+     * 与 {@code CommentService} 的 {@code Source} 那条**逐字同源**：本列是写入方自己声明的标记，
+     * 悄悄截断会让一个 17 字符的标记**静默变成**它的前 16 个字符、且**不报错** ——
+     * 标错来源比没有来源坏。故宁可拒。
+     *
+     * <h2>【为什么在锁外、且排在三闸之后】</h2>
+     * 同 {@link #priceRejection} / {@link #freezeRejection}：非法请求不取锁、不触库。
+     * ⚠️ 排在**最后**是为了不动「价格 → 状态 → 冻结」那三条已发布契约的措辞与顺序。
+     */
+    private Map<String, Object> sourceRejection(String source) {
+        if (source == null || source.isBlank() || source.trim().length() <= MAX_SOURCE) {
+            return null;
+        }
+        Map<String, Object> result = new HashMap<>();
+        result.put("success", false);
+        result.put("msg", "Source 最多 " + MAX_SOURCE + " 字符");
+        return result;
+    }
+
+    /**
      * {@code orderAdd} 的临界区。**原方法体逐字未动**（B2 的边界：只加一层锁，不动既有分支），
      * 仅在开头**插入**了查重；本笔只把两条 SQL 换成 {@link OrderDao} 调用。
+     *
+     * <p>⚠️ <b>块 7 在本临界区内加了三段</b>（都是**追加**，既有分支逐字未动）：
+     * commit 1 的「下单即扣库存」（{@link #deductStocks}）、commit 2c 的「秒杀段」、
+     * commit 2d 的「扣减成功标记」（{@code OrderDao.markStockDeducted}）。
+     * 三段的相对顺序**不是随意的**：秒杀段排在 INSERT 之前（抢不到就不建单）、
+     * 扣减段与标记排在 INSERT 之后（`order_item` 与 `goods_sku` 是同一批 specs 的两个落点）。
+     *
+     * <p>⚠️ <b>边界补笔（2026-10-14）的 {@code Source} 不是第四段</b>：它**没有分支**，只是从
+     * 形参一路透传到 {@link OrderDao.OrderRow}（超长那条闸在 {@code addLocked} **之前**，
+     * 见 {@code sourceRejection}）⇒ 这里的临界区**依旧只多了那三段的语义**，既有分支逐字未动。
      *
      * <p>⚠️ 本方法**不得**加 {@code @Transactional} —— 理由见类注释的两条（锁外事务 / 跨 bean 调用）。
      * 一句话：事务的提交发生在方法返回**之后**，而锁在 {@code runLocked} 的 {@code finally} 里、
@@ -451,7 +597,7 @@ public class OrderService {
     private Map<String, Object> addLocked(
             String CustomerId, String MerchantId, String OrderId, float Price,
             String ProductInformation, String Images, int PayIf, int DeliveryIf, int ReceiveIf, int Quantity,
-            String Items, String CouponId) {
+            String Items, String CouponId, String ActivityId, String Source) {
         Map<String, Object> result = new HashMap<>();
         // ⚠️ 临界区内先查后插 —— 这一段是 B2 对「同一 OrderId 落库 2 行」的真修复（A-S2a-1）：
         //    · 只有锁：并发变串行，但每个请求照旧裸 INSERT ⇒ 仍插 20 行；
@@ -461,6 +607,13 @@ public class OrderService {
         try {
             int sameOrderId = orderDao.countByOrderId(OrderId);
             if (sameOrderId > 0) {
+                // 块 7 · 2026-10-17 用户最终口径：这是**防护层成功防御**（同一 OrderId 的重复
+                // 提交被幂等查重挡下，业务只执行了一次）⇒ 事件必须是 PROTECT（紫），
+                // 不能算进「业务失败率」。埋点放在早退**之前**，只记事实、不改返回值。
+                String oid = OrderId == null ? "" : OrderId;
+                protectionMetrics.blocked("duplicateSubmit", "order",
+                        "orderId=" + (oid.length() > 64 ? oid.substring(0, 64) + "…" : oid) + " 已存在",
+                        null, "幂等查重命中：同一 OrderId 重复提交");
                 result.put("success", false);
                 result.put("msg", "订单已存在，请勿重复提交");
                 return result;
@@ -513,16 +666,70 @@ public class OrderService {
         // 这里再兜一层：金额为负的订单在 `order.Price` 的语义里没有解释）。
         float payPrice = (float) Math.max(0d, Price - discount);
 
+        // ── 秒杀段（C3 块 7 · commit 2c，2026-10-14）────────────────────────────────────
+        // 位置是**刻意**的，三条理由（前两条与上面用券段逐字同源）：
+        //  ① 排在**查重 / 用券之后**：那两条该走的早退还走它们自己的文案，不先动活动名额；
+        //  ② 排在 **INSERT 之前**：名额没抢到 ⇒ **一张单一都不建** ——「超卖被拦住」只有排在
+        //     这里才成立（排到 insertOrder 之后就只能写「先超卖、再补救」）；
+        //  ③ 排在**临界区内**（锁 key = 本 OrderId）：同一单的重复提交在这里串行；
+        //     跨单的抢名额竞态由 CAS 自己挡（与锁无关，同用券段的 CAS）。
+        // ⚠️ 与 goods_sku 侧的 {@link #deductStocks} **刻意相反**：那边 0 行是 **fail-open**
+        //    （非矩阵商品没有 goods_sku 行 ⇒ 0 行是常态，判失败会让调用方重复下单）；
+        //    本段 0 行是 **fail-closed** —— 走到这里就说明调用方**显式声明**了「这是一张秒杀单」，
+        //    名额没抢到 ⇒ 这单不该成立。这是本类唯一一条 fail-closed 的下单路径。
+        // ⚠️ **不传 ActivityId ⇒ 这一整段一次库读都不发**（逐字节同加它之前的行为）。
+        long seckillId = -1L;
+        int seckillQty = 0;
+        String seckillReject = null;
+        if (ActivityId != null && !ActivityId.isBlank()) {
+            // 件数口径 = **本单声明的总件数**（`order.Quantity`，与 resolveItems 的 `Math.max(1, Quantity)` 同源）：
+            // 活动挂的是**一个 GoodsId**、名额也按「件」计，订单级没有第二个「件数」可言。
+            seckillQty = Math.max(1, Quantity);
+            try {
+                Map<String, Object> activity = seckillDao.selectActivityByActivityId(ActivityId.trim());
+                if (activity == null) {
+                    // 业务串打错 / 活动行被删 —— 同样**不建单**：宁可给一句明确的拒绝，
+                    // 也不给一张「名义上是秒杀单、其实没占名额」的单（那会同时骗过人和统计）。
+                    seckillReject = "秒杀活动不存在";
+                } else {
+                    seckillId = ((Number) activity.get("Id")).longValue();
+                    if (seckillDao.deductSoldStock(seckillId, seckillQty) == 0) {
+                        seckillId = -1L;   // 没抢到名额 ⇒ 下面没有补偿腿要跑
+                        seckillReject = "秒杀活动已售完";
+                    }
+                }
+            } catch (Exception e) {
+                // 读活动表 / 抢名额抛异常 ⇒ **不放行**（fail-closed，与用券段「查不出来就不放行」同款）。
+                // ⚠️ 这一支**刻意不留补偿腿**：异常时「名额到底动了没有」**未知**，
+                //    退一次可能把没加上的减掉（SQL 里 `AND SoldStock >= :n` 只能防负、防不了错）——
+                //    宁可留一行带 ActivityId 的 WARN 让偏账可查，也不做一次猜的写。
+                seckillId = -1L;
+                seckillReject = "秒杀活动校验失败，请稍后重试";
+                log.warn("订单 {} 的秒杀段异常（不建单；名额是否已动未知，故不补偿）：activityId={} {}",
+                        OrderId, ActivityId, e.toString());
+            }
+            if (seckillReject != null) {
+                result.put("success", false);
+                result.put("msg", seckillReject);
+                return result;
+            }
+        }
+
+        // 块 7 · 阶段 3a.3：耗时紧包这一行 INSERT。CREATE **不是 CAS**（无守卫、无前态）⇒
+        // 测的是 insertOrder 本身，与其余动作的 CAS 并列成同一个「落库耗时」（口径见
+        // OrderTransitionRecorder#created）。⚠️ catch 那一路不调 created（只回滚券/秒杀）⇒ 用不到它
+        long createStartedNanos = System.nanoTime();
         try {
             int rows = orderDao.insertOrder(new OrderDao.OrderRow(
                     OrderId, CustomerId, MerchantId, payPrice, Quantity, ProductInformation, Images,
-                    PayIf, DeliveryIf, ReceiveIf));
+                    PayIf, DeliveryIf, ReceiveIf, Source, com.minke.mallmanagement.shared.web.TraceIdFilter.currentBatch()));   // 块 7 · commit 10：批次号**只从 MDC 取**（头通道 `X-Drill-Batch`，白名单 `[A-Za-z0-9_-]{8,64}`，日常请求为 null）；本方法**没有** batchId 形参 ⇒ 请求体/参数传不进来，影响面限于本次请求自己写的行。写全限定名而非 import，理由同 {@code StockMetrics#event}（保本文件 `:688` 的引用不下移）
             if (rows > 0) {
                 result.put("success", true);
                 result.put("msg", "订单添加成功");
                 // B3：只在**真的插进去之后**观测出生。放在这里而不是方法开头，是因为
                 // 「订单已存在」那条早退分支并没有产生一个新状态，不该记成一次出生。
-                orderTransitionRecorder.created(OrderId, PayIf, DeliveryIf, ReceiveIf);
+                orderTransitionRecorder.created(OrderId, PayIf, DeliveryIf, ReceiveIf,
+                        System.nanoTime() - createStartedNanos);
                 // 可视化段 commit 0：订单明细（商品维度统计的数据源）。
                 // ⚠️ 排在「订单已落库」这个结论**之后**、且自己 fail-open（见 writeItems）——
                 //    明细的成败**不改变**本方法的返回值，否则调用方会把「订单其实落了」
@@ -530,7 +737,20 @@ public class OrderService {
                 // ⚠️ 传的仍是**原价** `Price`：`resolveItems` 的回落口径要拿它反推单价
                 //    （`一单多品` 时 `Price / Quantity`），传折后价会把单价一起算错 ——
                 //    明细记的是「卖了哪几件、各卖多少钱」，与实付金额是两回事。
-                writeItems(OrderId, MerchantId, resolveItems(Items, ProductInformation, Price, Quantity));
+                List<ItemSpec> itemSpecs = resolveItems(Items, ProductInformation, Price, Quantity);
+                writeItems(OrderId, MerchantId, itemSpecs);
+                // 块 7 · 库存治理（TD-36）：**下单即扣**（《块 7 参考》§5.2 B5 丙的第一拍）。
+                // ⚠️ 排在「订单已落库 + 明细已写」之后、吃**同一批 itemSpecs** ——
+                //    扣谁、扣多少，与「这单卖了什么」本来就是同一个事实，不另解析一次。
+                // ⚠️ 与 writeItems 同款 **fail-open**：扣减 0 行（库存不足 / 非矩阵商品无
+                //    goods_sku 行）都不改本方法的返回值 —— 判成失败会让调用方重复下单。
+                // 块 7 · commit 2d：把「这批扣减**真的动过库存**」记下来（{@code order.StockDeducted}，
+                // Migration ⑱）—— 超时释放的前置判据**只有这一列**。
+                // ⚠️ fail-soft：标记写不进去**不改订单结论**（订单已落库是既成事实，改成失败会让
+                //    调用方重复下单），代价是那单超时取消时**不回补**（偏账方向选「少还一件」，不选「虚增」）。
+                if (deductStocks(itemSpecs)) {
+                    markStockDeducted(OrderId);
+                }
                 if (discount > 0d) {
                     // 只读给调用方（Controller 的留痕 / 前端回显）；**不是**契约的一部分 ——
                     // 不选券的老请求永远不会看到这两个键（`Result.of` 逐条 put）。
@@ -541,12 +761,14 @@ public class OrderService {
                 result.put("success", false);
                 result.put("msg", "订单添加失败");
                 releaseCoupon(couponAccount, CouponId, OrderId, discount);
+                releaseSeckill(seckillId, seckillQty, OrderId);
             }
         } catch (Exception e) {
             e.printStackTrace();
             result.put("success", false);
             result.put("msg", "数据库错误：" + e.getMessage());
             releaseCoupon(couponAccount, CouponId, OrderId, discount);
+            releaseSeckill(seckillId, seckillQty, OrderId);
         }
         return result;
     }
@@ -807,6 +1029,181 @@ public class OrderService {
         }
     }
 
+    /**
+     * <b>下单即扣库存</b>（C3 块 7 · 库存治理 TD-36 的**第一拍**，《块 7 参考》§5.2 B5 丙）。
+     *
+     * <p>按 {@link ItemSpec#code()} 逐条 CAS 扣 {@code goods_sku.Stock}
+     * （{@link GoodsDao#deductStock}）。与 {@link #writeItems} **吃同一批 specs**：扣谁、扣多少，
+     * 与「这单卖了什么」是同一个事实。
+     *
+     * <p>⚠️ <b>「0 行」不是失败</b> —— 两种 0 行都**不挡单**、**不改 {@code orderAdd} 的返回值**：
+     * <ol>
+     *   <li><b>库存不足</b>（防超卖命中）—— 本方法的主要目的；</li>
+     *   <li><b>非矩阵商品根本没有 {@code goods_sku} 行</b> —— 订单装的是 {@code ProductCode}，
+     *       只有矩阵商品的 {@code SkuCode} 才与之相等。这是本次核对新增的边界
+     *       （用户 2026-10-13 批的 A 档 4 第二条）。</li>
+     * </ol>
+     * 把 0 行判成失败会让调用方**重复下单** —— 与 {@link #writeItems} 把明细失败吞掉是同一条理由。
+     *
+     * <p>⚠️ <b>单条失败只记 WARN、继续下一条</b>：一条 SKU 的意外不该吞掉整单其它 SKU 的扣减
+     * （与 {@code writeItems} 的「整批 fail-open」略不同 —— 那里是批量 INSERT、这里逐条独立）。
+     *
+     * <p>⚠️ {@code code} 空 / {@code qty < 1} 的明细**直接跳过**：{@code resolveItems} 已把缺失的
+     * {@code qty} 规整成 1，这里只管显式给了 0 / 负数的情况 —— 那种行不该去「加库存」。
+     *
+     * <p>⚠️ <b>本方法在订单锁的临界区内</b>（调用方 = {@link #addLocked}）⇒ 与
+     * {@code OrderDao.insertOrder} 同一条禁令：不得加 {@code @Transactional}
+     * （{@code DistributedLockServiceTest.orderChainIsNotTransactional} 有结构断言兜底）。
+     *
+     * <p>⚠️ <b>本方法同时是库存环（{@code StockMetrics}）唯一的写入点之一</b>（块 7 · commit 2）：
+     * 每条明细各记一次 {@code mall.stock.deduct} + 一条事件（另一处在 {@code OrderTimeoutCancelJob}
+     * 的 {@code mall.stock.release}）。埋点是**观察者**：入参只有枚举、异常那一支也先接住再记，
+     * 故「记不记」不影响本方法的控制流。
+     *
+     * <p>⚠️ <b>返回值（块 7 · commit 2d 新增）</b>：{@code true} = 这批扣减里**至少有一条真的
+     * 动过库存**（CAS 命中 ≥1 行）。调用方 {@link #addLocked} 拿它当 {@code order.StockDeducted}
+     * 的唯一判据 —— 超时释放靠那一列决定「该不该回补」。注意它与上面埋点用的 {@code rows == 1}
+     * **刻意不是同一个判据**，理由见方法内注释（{@code SkuCode} 非唯一键）。
+     *
+     * @return 是否至少有一条明细真的扣成了库存
+     */
+    private boolean deductStocks(List<ItemSpec> specs) {
+        boolean anyDeducted = false;
+        for (ItemSpec s : specs) {
+            if (s.code() == null || s.code().isBlank() || s.qty() < 1) {
+                continue;
+            }
+            // 块 7 · 阶段 3a.3：耗时**紧包那一行 CAS**（口径 (a)）—— 不含循环外的组装，也不含
+            // 多 sku 循环。选 (a) 而非 (b)：多 sku 订单下 (b) 会把 N 次写库摊成一个数，而事件是
+            // **逐 sku** 发的，两者对不上。⚠️ 计时变量必须声明在 try **外**：catch 里也要用（编译期作用域）
+            long deductStartedNanos = System.nanoTime();
+            try {
+                // 块 7 · 阶段 3a.3 第二步：**先算好落库用的那一串**，两处共用同一个值 ——
+                // ⚠️ 下面那条 SELECT 必须用它（列宽 40 是 `goods_sku.SkuCode` 的硬约束，
+                //    超长的码落库时已被截断 ⇒ 拿未截断的原串去查必定查无此行，静默给出 null 剩余）。
+                String sku = clip(s.code(), 40);
+                int rows = goodsDao.deductStock(sku, s.qty());
+                long deductNanos = System.nanoTime() - deductStartedNanos;
+                // 块 7 · 阶段 3a.3 第二步：**扣完那一刻的剩余**（口径全文见
+                // `StockMetrics.StockEvent#remaining()`）——必须在 CAS **之后**读、而在
+                // 发事件**之前**读，中间不夹别的事。⚠️ 它**不进 deductNanos 的计时窗**：
+                // 计时口径（a）钉的是「紧包那一行 CAS」那一条 SQL，加进来会把两个操作的
+                // 耗时摊成一个数（本仓「一个数说两件事」的老毛病）。
+                // ⚠️ 读它与扣减**失败也要能分开**：stockRemaining 自己吞异常 ⇒ 读不到只是
+                //    少一个展示字段，**绝不把一次成功的 CAS 记成 error**（那是反向误报）。
+                Integer remaining = stockRemaining(sku);
+                // 块 7 · 观测（commit 2）：**两条通道在同一调用点**发（计数 + 事件流）——
+                // 与既有三环同款。0 行记 INSUFFICIENT 而**不是** ERROR：CAS 没命中是正常分支
+                // （库存不足 / 非矩阵商品无行，见上面的 javadoc），记成错误会让告警误报。
+                //
+                // ⚠️ 埋点判据与下面的返回值判据**刻意不同**（{@code rows == 1} vs {@code rows > 0}）：
+                //    指标口径是既有契约，本笔不动；返回值的语义是「这批库存**被动过**吗」，
+                //    只要有一行命中就成立 —— {@code SkuCode} 不是唯一键，理论上一条明细可以命中多行。
+                // ⚠️ 事件里的 skuCode 仍用**未截断**的 {@code s.code()}（既有口径，本笔不动）：
+                //    展示串要还原商家填的原值，而查库用的才是截断后的那一串。
+                // 块 7 · 阶段 3a.3 后续：失败原因（人话）——`result` 只回答「哪一档」，
+                // 这里回答「为什么」。insufficient 的两种成因（库存不足 / 无 SKU 行）就靠它分开。
+                // ⚠️ remaining 为 null 时**不猜**是哪一种：stockRemaining 刻意 fail-soft，
+                //    文案如实并列两种可能（新增一次查询只为分辨文案不值得）。
+                String deductReason = null;
+                if (rows == 0) {
+                    deductReason = remaining == null
+                            ? "防超卖拦截：扣减未命中（库存不足或 goods_sku 无此 SKU，需 " + s.qty() + " 件）"
+                            : "防超卖拦截：库存不足（需 " + s.qty() + " 件，剩余 " + remaining + " 件）";
+                } else if (rows > 1) {
+                    deductReason = "扣减异常：影响行数为 " + rows + "（SkuCode 可能非唯一）";
+                }
+                stockMetrics.deduct(s.code(), s.qty(),
+                        rows == 1 ? Deduct.OK : Deduct.INSUFFICIENT, deductNanos, remaining, deductReason);
+                if (rows > 0) {
+                    anyDeducted = true;
+                }
+            } catch (Exception e) {
+                // 异常这一路也埋点：否则「扣减根本没发出去」在指标上与「一次都没下单」无法区分。
+                // ⚠️ remaining 传 null：UPDATE 到底生效没有都不知道，剩余更无从谈起（口径 ②）。
+                stockMetrics.deduct(s.code(), s.qty(), Deduct.ERROR, System.nanoTime() - deductStartedNanos, null,
+                        com.minke.mallmanagement.shared.text.EventReason.of("库存扣减失败", e));
+                log.warn("订单明细 {} 的库存扣减失败（跳过该条，不动订单结论）：{}", s.code(), e.toString());
+            }
+        }
+        return anyDeducted;
+    }
+
+    /**
+     * 读某个 SKU 的**当前**库存，**任何失败都吞掉并返回 {@code null}**（块 7 · 阶段 3a.3 第二步）。
+     * **fail-soft，与 {@link #markStockDeducted} 同款**。
+     *
+     * <p>⚠️ <b>为什么必须单独一层 try</b>：这是「给事件补一个展示字段」，而它下面紧邻的是
+     * {@link GoodsDao#deductStock} 的 {@code catch (Exception e)} —— 那条路会把异常记成
+     * {@code Deduct.ERROR}（一个用来告警的取值）。若本方法的异常漏到那一层，就会发生
+     * <b>「库存已经真的扣成了，事件却报 error」</b> 的反向误报：告警响了、人去查、发现账是对的。
+     * 为一个展示字段造出一次假告警，代价远大于这个字段本身。
+     *
+     * <p>⚠️ 返回值语义：{@code null} = 读不到（DAO 抛异常 / 该 {@code SkuCode} 在
+     * {@code goods_sku} 里没有行 —— 非矩阵商品属这一档，是**正常**）。两种成因不区分：
+     * 对「页面上这一格有没有数」而言它们是同一件事，且区分它们要靠把异常分类，
+     * 那会引出本类不该有的耦合。
+     *
+     * @param skuCode <b>已经截断到列宽</b>的那一串（调用方 {@link #deductStocks} 算好的
+     *                —— 拿未截断的原串来查，长码会静默查无此行）
+     */
+    private Integer stockRemaining(String skuCode) {
+        try {
+            return goodsDao.selectStockBySku(skuCode);
+        } catch (Exception e) {
+            log.warn("订单明细 {} 的剩余库存读取失败（只影响这一条事件的 remaining，扣减结论不受影响）：{}",
+                    skuCode, e.toString());
+            return null;
+        }
+    }
+
+    /**
+     * 把「本单库存真扣成过」落到 {@code order.StockDeducted = 1}（Migration ⑱）。**fail-soft**。
+     *
+     * <p>⚠️ 写失败**不改订单结论**（订单已落库是既成事实）：记一行 WARN 就往下走。代价是那单
+     * 超时取消时不会回补库存 —— 偏账方向刻意选「少还一件」而不是「无中生有补一件」
+     * （{@code OrderTimeoutCancelJob} 的前置判据读这一列，读不到 = 没扣过 = 不回补）。
+     */
+    private void markStockDeducted(String orderId) {
+        try {
+            int rows = orderDao.markStockDeducted(orderId);
+            if (rows == 0) {
+                // `AND StockDeducted = 0` 下的 0 行只有两种可能：订单行不见了，或已被标记过（幂等命中）。
+                // 前者意味着「扣了库存但订单没了」—— 值得一行 WARN。
+                log.warn("订单 {} 的库存扣减标记未写入（订单行不存在或已标记过）：库存已动，超时取消时可能不回补", orderId);
+            }
+        } catch (Exception e) {
+            log.warn("订单 {} 的库存扣减标记写入失败（订单照常成立；该单超时取消时不会回补库存）：{}", orderId, e.toString());
+        }
+    }
+
+    /**
+     * 建单失败时把秒杀名额退回（{@link #addLocked} 秒杀段的补偿腿）。**fail-soft**。
+     *
+     * <p>⚠️ 与券补偿同款：秒杀名额是**先扣后建单**，建单失败不退 ⇒ 一个名额被**永久吞掉**
+     * （活动少卖一件，且账面上「已售」比真实成交多）。
+     *
+     * <p>⚠️ {@code seckillId <= 0} 直接 return —— 没走到扣减那一步（活动不存在 / 已售完 /
+     * 校验异常 / 本单压根没带 {@code ActivityId}）时都不该退，退了就是**凭空加库存**。
+     *
+     * <p>⚠️ 退失败不改返回值，只记 WARN（同 {@link #releaseCoupon}）——
+     * {@code seckill_activity.SoldStock} 与真实成交的差额是**可查**的痕迹。
+     */
+    private void releaseSeckill(long seckillId, int qty, String orderId) {
+        if (seckillId <= 0L || qty < 1) {
+            return;
+        }
+        try {
+            if (seckillDao.releaseSoldStock(seckillId, qty) == 0) {
+                log.warn("订单未建成，但秒杀名额退回未命中任何行（名额可能已被并发改动）：seckillId={} qty={} order={}",
+                        seckillId, qty, orderId);
+            }
+        } catch (Exception e) {
+            log.warn("订单未建成，且秒杀名额退回失败（需人工核对）：seckillId={} qty={} order={} —— {}",
+                    seckillId, qty, orderId, e.toString());
+        }
+    }
+
     /** 去空白；空串一律规整成 {@code null}（「没给」与「给了个空值」在明细里是同一件事）。 */
     private static String trimmed(Object v) {
         if (v == null) {
@@ -1015,8 +1412,13 @@ public class OrderService {
         // SQL 由状态机生成，与 B2 之前硬编码的字面量逐字符相同 ——
         // 由 OrderStateMachineTest.updateSqlIsByteForByteTheLegacyLiteral 钉死。
         String sql = orderStateMachine.updateSql(action);
+        // 块 7 · 阶段 3a.3：耗时**从 CAS 前到 CAS 后**（裁定 ⑤「测真 CAS 前到后」）。⚠️ 声明在
+        // try **外**：catch 里也要用（编译期作用域）。⚠️ 本段仍在订单锁的临界区内 ⇒ 这个数含
+        // **持锁等待 + 真 UPDATE 往返**，不是纯 SQL 耗时（口径见 MallOrderStateMetrics#transition）
+        long casStartedNanos = System.nanoTime();
         try {
             int rows = orderDao.casUpdate(sql, orderId);
+            long casNanos = System.nanoTime() - casStartedNanos;
             if (rows > 0) {
                 result.put("success", true);
                 result.put("msg", okMsg);
@@ -1024,18 +1426,21 @@ public class OrderService {
                 //    （TradeNo / PaidAt / ExpressCompany / …，见 OrderStateMachine.detailUpdateSql）。
                 //    CAS 的 golden 串一字未动；非原子性由订单锁消除竞态。
                 writeDetails(action, orderId, detailParams);
-                orderTransitionRecorder.applied(action, orderId);
+                orderTransitionRecorder.applied(action, orderId, casNanos);
             } else {
                 result.put("success", false);
                 result.put("msg", noRowsMsg);
                 // 守卫没命中：重复流转 / 单不存在。**既有行为**，本笔不新增任何拒绝文案。
-                orderTransitionRecorder.rejected(action, orderId);
+                // 原因直接复用响应文案（noRowsMsg）—— 页面看到的拒绝理由与接口返回的是同一句
+                orderTransitionRecorder.rejected(action, orderId, casNanos, noRowsMsg);
             }
         } catch (Exception e) {
             e.printStackTrace();
             result.put("success", false);
             result.put("msg", "数据库错误：" + e.getMessage());
-            orderTransitionRecorder.errored(action, orderId);
+            // 异常路径：量的是「卡了多久才失败」，故现算（casNanos 那一行没执行到）
+            orderTransitionRecorder.errored(action, orderId, System.nanoTime() - casStartedNanos,
+                    com.minke.mallmanagement.shared.text.EventReason.of("数据库错误", e));
         }
         return result;
     }

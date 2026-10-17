@@ -253,8 +253,8 @@
               <ol v-else class="a-tl">
                 <li v-for="(e, i) in detail.timeline" :key="i">
                   <span class="a-mono a-dim">{{ toLocal(e.OccurredAt) }}</span>
-                  <span class="a-tag">{{ dash(e.Action) }}</span>
-                  <span class="a-mono">{{ dash(e.FromState) }} → {{ dash(e.ToState) }}</span>
+                  <span class="a-tag" :title="dash(e.Action)">{{ orderActionLabel(dash(e.Action)) }}</span>
+                  <span class="a-mono" :title="`${dash(e.FromState)} → ${dash(e.ToState)}`">{{ orderStateLabel(dash(e.FromState)) }} → {{ orderStateLabel(dash(e.ToState)) }}</span>
                 </li>
               </ol>
               <!-- ⚠️ 第二条线 = **模拟物流**（`order_shipping_track`），与上一条**并列不合并**：
@@ -273,7 +273,7 @@
               <ol v-else class="a-tl">
                 <li v-for="(t, i) in detail.shippingTrack" :key="i">
                   <span class="a-mono a-dim">{{ toLocal(t.TrackedAt) }}</span>
-                  <span class="a-tag">{{ dash(t.Status) }}</span>
+                  <span class="a-tag" :title="dash(t.Status)">{{ shippingStatusLabel(dash(t.Status)) }}</span>
                   <span>{{ dash(t.Description) }}</span>
                 </li>
               </ol>
@@ -336,7 +336,7 @@ import { orderAdminList, orderAdminDetail, orderAdminMonitor, orderAdminInterven
 // GMV·成单数双轴折线 / 发货时效柱。⚠️ 状态分布原先是环图、GMV 原先是单系列折线，
 // 整改后 DonutChart 本页不再用 ⇒ **import 同步删掉**（留着就是 `no-unused-vars`）。
 import LineChart from '../../components/charts/LineChart.vue'
-import BarChart from '../../components/charts/BarChart.vue'; import IconGlyph from '../../components/ui/IconGlyph.vue'   // ⚠️ 两条 import **同行**（2026-10-11 补图标那一笔）—— 合并到既有行 = 不新增行号漂移（本文件被 `slot-registry.md:4551` 引 `:192`，C1 那几笔已经推过一次，别再推第二次）
+import BarChart from '../../components/charts/BarChart.vue'; import IconGlyph from '../../components/ui/IconGlyph.vue'; import { orderActionLabel, orderStateLabel, shippingStatusLabel } from '../../config/labels/order-labels'   // ⚠️ 几条 import **同行**（2026-10-11 补图标那一笔起、commit 9 又加了一条标签层）—— 合并到既有行 = 不新增行号漂移（本文件被 `slot-registry.md:4551` 引 `:192`，C1 那几笔已经推过一次，别再推第二次）
 
 // ── 时区口径（照 `AccountsPage.vue`，逐字同源）──────────────────────────────
 const tzLabel = computed(() => {

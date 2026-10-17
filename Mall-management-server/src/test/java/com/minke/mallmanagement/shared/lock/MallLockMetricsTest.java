@@ -50,10 +50,13 @@ class MallLockMetricsTest {
     @Test
     @DisplayName("acquires 四路各自计数，且 wait.duration 只在**真碰过网络**的两路记录（degraded 记 0 会把「没尝试」混进「等了 0 秒」）")
     void acquireOutcomesAreRecordedAndTimerSkipsDegraded() {
-        metrics.acquire(LOCK, BIZ, Outcome.ACQUIRED, TimeUnit.MILLISECONDS.toNanos(3));
-        metrics.acquire(LOCK, BIZ, Outcome.TIMEOUT, TimeUnit.MILLISECONDS.toNanos(5000));
-        metrics.acquire(LOCK, BIZ, Outcome.DEGRADED, 0L);
-        metrics.acquire(LOCK, BIZ, Outcome.ERROR, TimeUnit.MILLISECONDS.toNanos(1000));
+        metrics.acquire(LOCK, BIZ, Outcome.ACQUIRED, TimeUnit.MILLISECONDS.toNanos(3), null);
+        metrics.acquire(LOCK, BIZ, Outcome.TIMEOUT, TimeUnit.MILLISECONDS.toNanos(5000),
+                "取锁超时：等待 5000 ms 未获得");
+        metrics.acquire(LOCK, BIZ, Outcome.DEGRADED, 0L,
+                "锁客户端不可用：降级冷却期内跳过取锁");
+        metrics.acquire(LOCK, BIZ, Outcome.ERROR, TimeUnit.MILLISECONDS.toNanos(1000),
+                "取锁异常：IllegalStateException：db down");
 
         assertThat(count(MallLockMetrics.ACQUIRES, "lock", LOCK, "result", "acquired")).isEqualTo(1.0);
         assertThat(count(MallLockMetrics.ACQUIRES, "lock", LOCK, "result", "timeout")).isEqualTo(1.0);
@@ -67,13 +70,27 @@ class MallLockMetricsTest {
         assertThat(wait.count()).as("4 次尝试里只有 2 次真碰了网络").isEqualTo(2L);
         assertThat(wait.max(TimeUnit.MILLISECONDS))
                 .as("MAX 回答「争用最坏等了多久」—— 取的是 timeout 那次 5000ms").isEqualTo(5000.0);
+
+        // 块 7 · 阶段 3a.3 新增：耗时（纳秒入参 → 微秒落进事件）与发起者身份。
+        // ⚠️ DEGRADED 那一路传的是 0L，但落进事件的是 **null**（「压根没尝试」不是「等了 0 秒」）
+        List<MallLockEvent> events = metrics.recentEvents();
+        assertThat(events.get(0).durationUs()).as("纳秒→微秒：3000000ns→3000µs").isEqualTo(3_000L);
+        assertThat(events.get(2).durationUs()).as("DEGRADED 没尝试 ⇒ null（0L 落成 null，不是 0）").isNull();
+        assertThat(events.get(0).actorId()).as("无 MDC ⇒ actorId 为 null").isNull();
+        assertThat(events.get(0).actorRole()).as("无 MDC ⇒ actorRole 为 null").isNull();
+        // 块 7 · 阶段 3a.3 后续新增：失败/降级档的人话原因；acquired 为 null
+        assertThat(events).extracting(MallLockEvent::reason)
+                .containsExactly(null,
+                        "取锁超时：等待 5000 ms 未获得",
+                        "锁客户端不可用：降级冷却期内跳过取锁",
+                        "取锁异常：IllegalStateException：db down");
     }
 
     @Test
     @DisplayName("业务键只进事件流、绝不进 tag（基数铁律）：两次不同 bizKey 的尝试共用一个时间序列")
     void businessKeyNeverBecomesATag() {
-        metrics.acquire(LOCK, "ORDER-1", Outcome.ACQUIRED, 0L);
-        metrics.acquire(LOCK, "ORDER-2", Outcome.ACQUIRED, 0L);
+        metrics.acquire(LOCK, "ORDER-1", Outcome.ACQUIRED, 0L, null);
+        metrics.acquire(LOCK, "ORDER-2", Outcome.ACQUIRED, 0L, null);
 
         assertThat(count(MallLockMetrics.ACQUIRES, "lock", LOCK, "result", "acquired"))
                 .as("两个不同的业务键落在同一条计数上").isEqualTo(2.0);
@@ -88,14 +105,17 @@ class MallLockMetricsTest {
     @Test
     @DisplayName("holds 三路：released / lease_lost / error，都带业务键")
     void holdOutcomesAreRecorded() {
-        metrics.hold(LOCK, BIZ, Hold.RELEASED);
-        metrics.hold(LOCK, BIZ, Hold.LEASE_LOST);
-        metrics.hold(LOCK, BIZ, Hold.ERROR);
+        metrics.hold(LOCK, BIZ, Hold.RELEASED, null);
+        metrics.hold(LOCK, BIZ, Hold.LEASE_LOST, "租约已丢失：临界区可能与他人重叠");
+        metrics.hold(LOCK, BIZ, Hold.ERROR, "释放锁失败：IllegalStateException：db down");
 
         assertThat(count(MallLockMetrics.HOLDS, "lock", LOCK, "result", "released")).isEqualTo(1.0);
         assertThat(count(MallLockMetrics.HOLDS, "lock", LOCK, "result", "lease_lost")).isEqualTo(1.0);
         assertThat(count(MallLockMetrics.HOLDS, "lock", LOCK, "result", "error")).isEqualTo(1.0);
         assertThat(metrics.recentEvents()).extracting(MallLockEvent::kind).containsOnly("hold");
+        assertThat(metrics.recentEvents()).extracting(MallLockEvent::reason)
+                .containsExactly(null, "租约已丢失：临界区可能与他人重叠",
+                        "释放锁失败：IllegalStateException：db down");
     }
 
     // ================= up =================
@@ -118,9 +138,9 @@ class MallLockMetricsTest {
     @Test
     @DisplayName("事件流：写满即覆盖最旧、seq 单调；两条通道在同一调用点一起发")
     void eventRingOverwritesOldestAndKeepsSequenceMonotonic() {
-        int capacity = 512;
+        int capacity = 2048;
         for (int i = 0; i < capacity + 88; i++) {
-            metrics.acquire(LOCK, BIZ, Outcome.ACQUIRED, 1_000_000L);
+            metrics.acquire(LOCK, BIZ, Outcome.ACQUIRED, 1_000_000L, null);
         }
 
         List<MallLockEvent> events = metrics.recentEvents();
@@ -135,17 +155,20 @@ class MallLockMetricsTest {
             assertThat(e.epochMilli()).isPositive();
         });
         assertThat(count(MallLockMetrics.ACQUIRES, "lock", LOCK, "result", "acquired"))
-                .as("计数通道与事件通道同源：600 次调用 = 计数 600").isEqualTo(600.0);
+                .as("计数通道与事件通道同源：同一次调用点两边都记").isEqualTo((double) (capacity + 88));
     }
 
     @Test
     @DisplayName("transition 只发事件、不发计数器（翻转次数由 up 状态通道 + 事件流共同表达，规范第 6 条）")
     void transitionEmitsEventWithoutItsOwnCounter() {
-        metrics.transition(false);
-        metrics.transition(true);
+        metrics.transition(false, "锁进入降级：Redis 不可达");
+        metrics.transition(true, null);
 
         assertThat(metrics.recentEvents()).extracting(MallLockEvent::kind).containsExactly("transition", "transition");
         assertThat(metrics.recentEvents()).extracting(MallLockEvent::result).containsExactly("degraded", "healthy");
+        assertThat(metrics.recentEvents()).extracting(MallLockEvent::reason)
+                .as("降级带原因；恢复（healthy）为 null")
+                .containsExactly("锁进入降级：Redis 不可达", null);
         assertThat(metrics.recentEvents()).allSatisfy(e -> {
             assertThat(e.lock()).as("可用性是全局事实（客户端全应用一份）⇒ 无 lock 维度").isNull();
             assertThat(e.key()).isNull();
@@ -158,7 +181,7 @@ class MallLockMetricsTest {
     @DisplayName("并发追加：快照里的 seq 严格递增且不重复（写者只做数组赋值，读者靠 seq 自校验）")
     void concurrentAppendsKeepSnapshotCoherent() throws Exception {
         int threads = 4;
-        int perThread = 300;   // 4 × 300 = 1200 > 容量 512 ⇒ 必然发生覆盖
+        int perThread = 600;   // 4 × 600 = 2400 > 容量 2048 ⇒ 必然发生覆盖
         ExecutorService pool = Executors.newFixedThreadPool(threads);
         CountDownLatch start = new CountDownLatch(1);
         CountDownLatch done = new CountDownLatch(threads);
@@ -169,7 +192,7 @@ class MallLockMetricsTest {
                     try {
                         start.await();
                         for (int i = 0; i < perThread; i++) {
-                            metrics.hold(LOCK, key, Hold.RELEASED);
+                            metrics.hold(LOCK, key, Hold.RELEASED, null);
                         }
                     } catch (InterruptedException e) {
                         Thread.currentThread().interrupt();
@@ -190,7 +213,7 @@ class MallLockMetricsTest {
         Set<Long> unique = new HashSet<>(seqs);
         assertThat(seqs).as("seq 严格递增（读者按 seq 自校验后不应出现错位）").isSorted();
         assertThat(unique).as("同一条事件不该在快照里出现两次").hasSameSizeAs(seqs);
-        assertThat(snapshot).as("容量有界").hasSizeLessThanOrEqualTo(512);
+        assertThat(snapshot).as("容量有界").hasSizeLessThanOrEqualTo(2048);
     }
 
     // ================= 工具 =================

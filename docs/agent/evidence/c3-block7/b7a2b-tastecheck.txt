@@ -1,0 +1,75 @@
+
+=== S1 · 页宽 1129px · 区块 4 个（已剔除 .foot-note）===
+  [0] div.status  h=39  gap前=—  内距Top0
+        构图: flex | none | row :: div.cell.hv > div.cell > div.cell > div.tz > div.tz
+        内距 0px: div.cell.hv 里 b → span
+        内距 0px: div.cell 里 b → span
+        内距 0px: div.cell 里 b → span
+  [1] div.hit.slot  h=16  gap前=32  内距Top0
+        构图: （无布局子元素 → 非构图块，不参与 C1）
+  [2] div.slot  h=12  gap前=29  内距Top0
+        构图: （无布局子元素 → 非构图块，不参与 C1）
+  [3] div.grid.s1-grid  h=809  gap前=19  内距Top26
+        构图: grid | 733px 380px | row :: div.axis-group > div
+        内距 26px: div.rail-kpis 里 div.kpi → div.kpi
+        内距 26px: div.rail-kpis 里 div.kpi → div.kpi
+        内距 26px: div.rail-kpis 里 div.kpi → div.kpi
+        内距 19px: div.axis-group 里 div.chart → div.h2
+        内距 19px: div.axis-group 里 div.chart → div.h2
+  等列网格(C2): 无
+  重复兄弟组(C5):
+    [候选·卡]   div.axis-group > 3 × div.chart  (自身布局子元素 2)
+    [豁免·数据行] div.heat-labels > 3 × span  (自身布局子元素 0)
+    [非卡·标签] div > 3 × div.sec-h  (自身布局子元素 0)
+    [候选·卡]   div.rail-kpis > 4 × div.kpi  (自身布局子元素 4)
+    [豁免·数据行] div.stack > 8 × div.hbar  (自身布局子元素 3)
+    [豁免·数据行] div.stack > 3 × div.narrow.stock-row  (自身布局子元素 3)
+  文本左边线(C4): {"264":3,"265":3,"271":2,"279":2,"358":1,"377":1,"399":2,"420":1,"519":2,"837":1,"1013":14,"1024":4,"1224":1,"1387":8}
+  最大空白带(C6): 28px @y=1167
+     C4 不适用（单栏营销页规则，本页是两栏管理端）。承载 ≥3 个文本的边线 5 条: 264(3) , 265(3) , 1013(14) , 1024(4) , 1387(8) ；另有 9 条单例边线（图上的绝对定位小签 / 右对齐数字格）
+
+=== S3 · 页宽 1129px · 区块 3 个（已剔除 .foot-note）===
+  [0] div.lane  h=145  gap前=—  内距Top29
+        构图: grid | 132px 983px | row :: div.lane-label > div
+        内距 29px: div 里 div.hit.slot → div.slot
+        内距 28px: div 里 div.readout → div.hit.slot
+        内距 4px: div.lane-label 里 div.q → div.en
+        内距 2px: div.lane-label 里 div.en → div.en
+        内距 0px: div.cell.hv 里 b → span
+  [1] div.lane  h=249  gap前=29  内距Top10
+        构图: grid | 132px 983px | row :: div.lane-label > div
+        内距 10px: div 里 div.lane3 → div.lane-note
+        内距 8px: div 里 div.mini-h → div.chart
+        内距 8px: div 里 div.mini-h → div.chart
+        内距 8px: div 里 div.mini-h → div.chart
+        内距 4px: div.lane-label 里 div.q → div.en
+  [2] div.lane  h=191  gap前=29  内距Top8
+        构图: grid | 132px 983px | row :: div.lane-label > div
+        内距 8px: div.stack 里 div.stock-row → div.stock-row
+        内距 8px: div.stack 里 div.stock-row → div.stock-row
+        内距 7px: div 里 div.mini-h → div.stack
+        内距 7px: div 里 div.mini-h → div.stack
+        内距 5px: div.stack 里 div.hbar → div.hbar
+  等列网格(C2): [{"at":"div.lane3","cols":3,"sameKids":3}]
+  重复兄弟组(C5):
+    [候选·卡]   div.lane3 > 3 × div  (自身布局子元素 2)
+    [豁免·数据行] div.heat-labels > 3 × span  (自身布局子元素 0)
+    [豁免·数据行] div.stack > 8 × div.hbar  (自身布局子元素 3)
+    [豁免·数据行] div.stack > 3 × div.stock-row  (自身布局子元素 3)
+  文本左边线(C4): {"264":6,"410":8,"417":1,"423":2,"537":2,"651":2,"749":1,"885":8,"912":6,"1076":3,"1226":1,"1322":1}
+  最大空白带(C6): 28px @y=855
+     C4 不适用（单栏营销页规则，本页是两栏管理端）。承载 ≥3 个文本的边线 5 条: 264(6) , 410(8) , 885(8) , 912(6) , 1076(3) ；另有 7 条单例边线（图上的绝对定位小签 / 右对齐数字格）
+OK   S1 C1 相邻区块不共用构图  → "参与比较的构图块 2 个，无相邻同构"
+OK   S1 C2 无「≥3 等列 + ≥3 同构子元素」的网格  → "本页无等列网格"
+FAIL S1 C3 区块间距 > 区块内间距  → "最小区块间距 19 vs 最大内部间距 26"
+FAIL S1 C5 无「一排完全相同的卡」  → "div.axis-group > 3×div.chart / div.rail-kpis > 4×div.kpi"
+OK   S1 C6 无近空屏（最大空白带 < 300px）  → "28px"
+OK   S1 C7 首块之后未回到同一构图  → "首块 div.status 之后同构图 0 个"
+FAIL S3 C1 相邻区块不共用构图  → "div.lane ≈ div.lane / div.lane ≈ div.lane"
+FAIL S3 C2 无「≥3 等列 + ≥3 同构子元素」的网格  → "[{\"at\":\"div.lane3\",\"cols\":3,\"sameKids\":3}]"
+FAIL S3 C3 区块间距 > 区块内间距  → "最小区块间距 29 vs 最大内部间距 29"
+FAIL S3 C5 无「一排完全相同的卡」  → "div.lane3 > 3×div"
+OK   S3 C6 无近空屏（最大空白带 < 300px）  → "28px"
+FAIL S3 C7 首块之后未回到同一构图  → "首块 div.lane 之后同构图 2 个"
+
+3a2b tastecheck（结构子集）: 12 项 / 7 失败

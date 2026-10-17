@@ -1,6 +1,6 @@
 // src/api/http.js —— 前端 API 层「传输层」唯一出口
 //
-// 职责边界（只做三件事）：
+// 职责边界（只做三件事 + 一条**不设超时**的长连接出口 —— 见文件尾 `streamPost`，块 7 commit 3 加）：
 //   ① 拼装请求：base URL 前缀 / Content-Type / body 形态 / **凭据**（cookie 用 `credentials: 'include'`、token 用 `Authorization` 头 —— 都在 `buildInit`）
 //   ② 判定传输层结果：超时 / 非 2xx（→ 抛类型化错误）
 //   ③ **401 出口**（鉴权笔 4）：清本地登录态 + 触发**已注册**的跳转。
@@ -151,11 +151,11 @@ function buildInit(method, body) {
   return init
 }
 
-async function request(path, { method = 'GET', body, timeout, allowUnauthorized = false } = {}) {
+async function request(path, { method = 'GET', body, timeout, noTimeout = false, allowUnauthorized = false } = {}) {
   const url = urlOf(path)
-  const ms = timeout || (body instanceof FormData ? UPLOAD_TIMEOUT : DEFAULT_TIMEOUT)
+  const ms = noTimeout ? 0 : (timeout || (body instanceof FormData ? UPLOAD_TIMEOUT : DEFAULT_TIMEOUT))   // ⚠️ noTimeout 见文件尾 streamPost（SSE 长连接不能有超时）；ms === 0 = 不装表
   const controller = new AbortController()
-  const timer = setTimeout(() => controller.abort(), ms)
+  const timer = ms > 0 ? setTimeout(() => controller.abort(), ms) : null   // ⚠️ ms === 0 时 setTimeout(...,0) 会立刻 abort ⇒ 必须判 > 0，不是「照设一遍」
   try {
     const res = await fetch(url, { ...buildInit(method, body), signal: controller.signal })
 
@@ -227,4 +227,31 @@ export function handleApiError(e, msg) {
   if (e instanceof HttpError) {
     alert(`${label}（HTTP ${e.status}）`)
   }
+}
+
+/**
+ * 长连接 POST（块 7 commit 3）—— 三条 SSE 观测端点（`/admin/observe/{metrics,orders,events}/stream`）的传输入口。
+ * ⚠️ 路径里的花括号只是**写法**（三个端点），别在该处写星号 —— `*` 紧跟 `/` 会**提前闭合本注释块**
+ *（同一条坑在块 7 的 `SseStreamWriter.java` 类注释里也踩过一次，那次是 Java 的 `{@code ...}`）。
+ *
+ * <h2>【为什么不直接用 `post`】</h2>
+ * `post` 一律带 `DEFAULT_TIMEOUT = 10000`（`AbortController` 到点即 abort）——
+ * 那对**一次请求一次响应**是对的，对**一条要开几分钟的 SSE 流**是致命的：
+ * 第 10 秒整条流被自己掐断，页面看起来像「看了 10 秒就不动了」。
+ * 本函数用 `noTimeout: true` 走同一条 `request`，故**其余行为逐字相同**：
+ * `urlOf` 拼基址、`buildInit` 带 cookie 与 `Authorization: Bearer`、非 2xx 抛
+ * `HttpError` / 401 触发鉴权出口（这三条对观测端点同样必要 —— 未登录时不该得到一条静默的死流）。
+ *
+ * <h2>【为什么放在本文件，而不是在 `api/observe.js` 里自己 `fetch`】</h2>
+ * 本仓有一条**可 grep 的验收判据**：`grep -rn "fetch(" src/` **只**命中本文件
+ * （见 `buildInit` 上方那段 2026-10-05 的注释）。SSE 的传输**也是传输**
+ * ⇒ 它归本层，帧的解析（`text/event-stream` 协议）归调用方 `api/observe.js`。
+ * 本函数因此**不碰 body**、**不解析** —— 交回**未解析的 `Response`**，与 `request` 同口径。
+ *
+ * <h2>【怎么停】</h2>
+ * 调用方 `reader.cancel()`（或 `res.body.cancel()`）即可：读端取消 ⇒ 浏览器关连接 ⇒
+ * 服务端写已关闭的输出流抛 IOException ⇒ `SseStreamWriter` 的 catch 正常收工（**不用** abort signal）。
+ */
+export function streamPost(path, body) {
+  return request(path, { method: 'POST', body, noTimeout: true })
 }

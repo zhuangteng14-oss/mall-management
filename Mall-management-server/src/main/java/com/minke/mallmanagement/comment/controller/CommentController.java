@@ -191,6 +191,13 @@ public class CommentController {
             @RequestParam(value = "Rating", required = false) String Rating,
             @RequestParam(value = "Anonymous", required = false) String Anonymous,
             @RequestParam(value = "ProductCode", required = false) String ProductCode,
+            // C3 块 7 · commit B（2026-10-14）：可选的**写入来源标记**，写进 `comment.Source`
+            // （Migration ⑰-4 那一列，varchar(16)）。⚠️ 加在**末尾**（同 CouponId / ActivityId 的先例：
+            // 既有 10 个形参一名不动、一位不挪）。
+            // ⚠️ `required = false` 是硬要求：本域既有调用点**一条都不发它** ⇒ 与加它之前逐字节同行为。
+            // ⚠️ 它**不是身份声明、不参与鉴权**（谁能发评论仍看 IdentityGuard）；
+            //    它存在的唯一理由是让「演练写入的行」在库里可辨认（攻击引擎传 `attack`）。
+            @RequestParam(value = "Source", required = false, defaultValue = "") String Source,
             HttpServletRequest request
     ) {
         if (!IdentityGuard.requireSelfOrAdminByUsername(request, Account,
@@ -198,7 +205,8 @@ public class CommentController {
             return IdentityGuard.forbidden();
         }
         return ResponseEntity.ok(Result.of(commentService.add(Account, TargetType, TargetId,
-                ParentId, ReplyToId, Kind, Content, Rating, Anonymous, ProductCode, filesOf(request))));
+                ParentId, ReplyToId, Kind, Content, Rating, Anonymous, ProductCode, filesOf(request),
+                Source)));
     }
 
     /**
@@ -217,7 +225,19 @@ public class CommentController {
         if (Id == null) {
             return ResponseEntity.ok(Result.fail("缺少参数：Id"));
         }
-        return ResponseEntity.ok(Result.of(commentService.delete(Id.longValue(), Account, isAdmin(request))));
+        // ═══ 块 7 · commit 8：跨域补挂的**审计漏挂**（本端点是块 6 建的，当时漏了）═══
+        // 形状照 {@code GoodsController.goodsUp} 的四步（改前快照 → 业务 → 判成功 → 记账），
+        // 只去掉「改前快照」那一步：软删的改前态要再读一次 comment 表才拿得到，本笔不做
+        // （见 AuditActions.COMMENT_DELETE 的注释）。⚠️ 只记 success=true —— 「评论不存在」/
+        // 「只能删自己的」等 fail 分支一行未改库，没有「删」可记。
+        // ⚠️ actor 取**识别**口径（AuthSession.identify），同 adminList / imageReview：
+        //    cookie 登录的管理员不该被记成匿名。
+        Map<String, Object> deleted = commentService.delete(Id.longValue(), Account, isAdmin(request));
+        if (Boolean.TRUE.equals(deleted.get("success"))) {
+            auditService.record(AuthSession.identify(request), AuditActions.COMMENT_DELETE, "comment",
+                    String.valueOf(Id), null, deleted);
+        }
+        return ResponseEntity.ok(Result.of(deleted));
     }
 
     /**

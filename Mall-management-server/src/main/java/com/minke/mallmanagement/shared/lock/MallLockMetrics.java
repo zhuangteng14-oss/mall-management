@@ -20,7 +20,7 @@ import java.util.function.BooleanSupplier;
  * ② 抽环必然要改 C1 已合并的 MallCacheMetrics 的既有行（B2 的边界是「只增不改」）；
  * ③ 事件类型本就不同 —— {@code MallCacheEvent} 的 kind 取值表是缓存专用、本类是锁专用，
  *    共享只能共享机制、共享不了记录类型，收益进一步缩小。
- * 代价是两份 512 槽数组（各约 4KB 引用），换的是 C1 一个字不动。
+ * 代价是两份 2048 槽数组（各约 16KB 引用），换的是 C1 一个字不动。
  *
  * 【命名规范】沿用 C1 在 MallCacheMetrics 类注释里立的规范（那是全仓唯一出处）：
  * 前缀 {@code mall.}、**基数铁律**（tag 只用有界取值、业务键绝不进 tag）、
@@ -73,8 +73,8 @@ public class MallLockMetrics {
     static final String HOLDS = "mall.lock.holds";
     static final String UP = "mall.lock.up";
 
-    /** 事件流容量：2 的幂（定位用位与，不用取模）。同 C1 —— 512 条约等于满负荷下数百毫秒的窗口。 */
-    private static final int EVENT_CAPACITY = 512;
+    /** 事件流容量：2 的幂（定位用位与，不用取模）。同 C1 —— 2048 条 ≈ 每秒千条量级下 2 秒的窗口。 */
+    private static final int EVENT_CAPACITY = 2048;
     private static final int EVENT_MASK = EVENT_CAPACITY - 1;
 
     private final MeterRegistry registry;
@@ -104,13 +104,19 @@ public class MallLockMetrics {
      *                  记它是因为事件流要回答的正是「**哪一单**在争用/撞上了基础设施事件」
      * @param waitNanos 本次取锁的墙钟；只有 acquired / timeout 两路会真的记进 Timer
      *                  （degraded 没碰网络，记 0 会把「没尝试」混进「等了 0 秒」）
+     * @param reason    失败 / 降级 / 超时的人话原因（块 7 · 阶段 3a.3 后续新增）；
+     *                  acquired 传 {@code null}。只进事件 record → {@code fields.reason}
      */
-    public void acquire(String lock, String bizKey, Outcome result, long waitNanos) {
+    public void acquire(String lock, String bizKey, Outcome result, long waitNanos, String reason) {
         registry.counter(ACQUIRES, "lock", lock, "result", result.tag).increment();
         if (result == Outcome.ACQUIRED || result == Outcome.TIMEOUT) {
             registry.timer(WAIT, "lock", lock).record(waitNanos, TimeUnit.NANOSECONDS);
         }
-        event(lock, "acquire", result.tag, bizKey);
+        // 块 7 · 阶段 3a.3：耗时**已经算好**（DistributedLockService 的 startNanos/elapsed），带出来即可。
+        // ⚠️ DEGRADED 那一路的 0L 不是「等了 0 秒」，是「在 startNanos 之前就返回了、压根没尝试」
+        //    ⇒ 落成 null（`没测过`），别落成 0（`测出来是 0`）。见 Sourced#durationUs()
+        event(lock, "acquire", result.tag, bizKey,
+                result == Outcome.DEGRADED ? null : waitNanos, reason);
     }
 
     /**
@@ -120,10 +126,14 @@ public class MallLockMetrics {
      * 「故障期间不逐次记录」的处理一致。
      *
      * @param bizKey 业务键（只进事件流，理由同 {@link #acquire}）
+     * @param reason 失败 / 租约丢失的人话原因（块 7 · 阶段 3a.3 后续新增）；
+     *               released 传 {@code null}。只进事件 record → {@code fields.reason}
      */
-    public void hold(String lock, String bizKey, Hold result) {
+    public void hold(String lock, String bizKey, Hold result, String reason) {
         registry.counter(HOLDS, "lock", lock, "result", result.tag).increment();
-        event(lock, "hold", result.tag, bizKey);
+        // 不记耗时（块 7 · 阶段 3a.3 定）：释放动作本身没有有意义的起止 —— lease_lost 连网络都没碰，
+        // released 的 unlock 往返也不是「业务等了多久」。这一档的 durationUs 恒为 null，是**判定**不是缺口
+        event(lock, "hold", result.tag, bizKey, null, reason);
     }
 
     /**
@@ -132,9 +142,12 @@ public class MallLockMetrics {
      *
      * 只发事件、不记计数器：翻转次数可由 {@code mall.lock.up} 这个 0/1 状态通道配合事件流
      * 读出，另起一个计数器属规范第 6 条禁止的重复埋点。
+     *
+     * @param reason 转为降级时的人话原因（块 7 · 阶段 3a.3 后续新增）；恢复传 {@code null}
      */
-    public void transition(boolean up) {
-        event(null, "transition", up ? "healthy" : "degraded", null);
+    public void transition(boolean up, String reason) {
+        // 不记耗时（同 hold）：翻转是「瞬时事实」，没有起止
+        event(null, "transition", up ? "healthy" : "degraded", null, null, reason);
     }
 
     /**
@@ -180,12 +193,26 @@ public class MallLockMetrics {
     /**
      * 追加一条事件。{@code key} 只在事件里以字符串形式出现 —— key 可以是任意业务键，
      * 但 tag 里绝不能有它（基数无界）。
+     *
+     * <p>⚠️ 块 7 · 阶段 3a.3 起 {@code durationNanos} 是**必填**（**故意不给重载**）——
+     * 本仓栽过「有重载 ⇒ 新调用点顺手用了短的那个 ⇒ 耗时静默丢失」。{@code null} 与 {@code 0}
+     * 在页面上意思完全不同，见 {@code Sourced#durationUs()}。
+     *
+     * @param durationNanos 本条事件自身的墙钟（纳秒）；{@code null} = 本档没有有意义的起止
+     *                      （hold / transition，见各自方法上的理由）
+     * @param reason        失败 / 降级 / 超时 / 租约丢失的人话原因（块 7 · 阶段 3a.3 后续新增）；
+     *                      {@code null} = 本档没有原因。写 record 前统一 {@code EventReason.clip} 兜底
      */
-    private void event(String lock, String kind, String result, Object key) {
+    private void event(String lock, String kind, String result, Object key, Long durationNanos,
+                       String reason) {
         long seq = eventCursor.getAndIncrement();
         events[(int) (seq & EVENT_MASK)] = new MallLockEvent(
                 seq, System.currentTimeMillis(), lock, kind, result,
-                key == null ? null : String.valueOf(key));
+                key == null ? null : String.valueOf(key), com.minke.mallmanagement.shared.web.TraceIdFilter.current(), com.minke.mallmanagement.shared.web.TraceIdFilter.currentBatch(),
+                com.minke.mallmanagement.shared.web.TraceIdFilter.currentActorId(),
+                com.minke.mallmanagement.shared.web.TraceIdFilter.currentActorRole(),
+                durationNanos == null ? null : durationNanos / 1000,   // 块 7 · commit 8/8c：写全限定名而非 import，理由同 {@code MallCacheMetrics#event}（保本文件 `:71`/`:72`/`:74` 的引用不下移）
+                reason == null ? null : com.minke.mallmanagement.shared.text.EventReason.clip(reason));
     }
 
     /**
@@ -197,9 +224,20 @@ public class MallLockMetrics {
      * @param kind       acquire | hold | transition
      * @param result     该 kind 下的结果
      * @param key        涉及的业务键；翻转为 null
+     * @param traceId    产生本条事件的那次请求的号（块 7 · commit 8 新增）；不在请求线程上时为 null
+     * @param batchId    产生本条事件的那次请求**所属的演练批次**（块 7 · commit 8c，来自
+     *                   {@code X-Drill-Batch} 头）；日常流量为 {@code null}。同 {@code traceId} 现读
+     * @param actorId    发起那次请求的业务号（块 7 · 阶段 3a.3 新增）；无身份时为 null
+     * @param actorRole  发起者的角色号（块 7 · 阶段 3a.3 新增，1 客户 / 2 商家 / 3 管理员）；无身份时为 null
+     * @param durationUs 取锁耗时（**微秒**，块 7 · 阶段 3a.3 新增）；{@code null} = 本档没测
+     *                   （DEGRADED 没尝试 / hold / transition）—— 与 acquire 的 acquired|timeout|error 有值
+     * @param reason     失败 / 降级 / 超时 / 租约丢失的人话原因（块 7 · 阶段 3a.3 后续新增）；
+     *                   {@code null} = 本档没有原因（accepted / released / 恢复）
      */
     public record MallLockEvent(long seq, long epochMilli, String lock, String kind,
-                                String result, String key) {
+                                String result, String key, String traceId, String batchId,
+                                String actorId, Integer actorRole, Long durationUs, String reason)
+            implements com.minke.mallmanagement.observe.metrics.Sourced {
     }
 
     /** {@code mall.lock.acquires} 的 result 取值。tag 字段避免每次调用拼字符串。 */

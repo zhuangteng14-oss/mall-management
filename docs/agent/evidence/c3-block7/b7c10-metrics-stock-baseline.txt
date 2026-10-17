@@ -1,0 +1,45 @@
+== 3a.4 库存水位演示基线（用户批准：执行 ①，截图后执行 ④）==
+2026-10-17 12:09:13
+
+== 改前 ==
+total	baseline_null
+8	8
+-- rows: 1
+
+== ① UPDATE goods_sku SET BaselineStock = Stock WHERE BaselineStock IS NULL ==
+-- affected: 8
+
+== ① 之后 ==
+SkuCode	Stock	BaselineStock
+asdsad	0	0
+sadasd	0	0
+SEED-GD-104-7045	60	60
+aaaaaa	100	100
+dddddd	100	100
+SEED-GD-103-5196	120	120
+SEED-GD-102-AF27	180	180
+SEED-GD-101-9552	240	240
+-- rows: 8
+
+== ④ 还原（用户批准：截图后务必执行 ④ BaselineStock = NULL）==
+2026-10-17 12:11:38
+
+== ④ 之前 ==
+total	baseline_null	baseline_set
+8	0	8
+-- rows: 1
+
+== ④ UPDATE goods_sku SET BaselineStock = NULL ==
+-- affected: 8
+
+== ④ 之后（应为 8/8 全 NULL，Stock 未动）==
+SkuCode	Stock	BaselineStock
+asdsad	0	null
+sadasd	0	null
+SEED-GD-104-7045	60	null
+aaaaaa	100	null
+dddddd	100	null
+SEED-GD-103-5196	120	null
+SEED-GD-102-AF27	180	null
+SEED-GD-101-9552	240	null
+-- rows: 8

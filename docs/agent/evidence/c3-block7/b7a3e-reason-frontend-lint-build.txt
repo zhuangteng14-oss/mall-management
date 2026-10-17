@@ -1,0 +1,225 @@
+=== npm run lint ===
+
+> mall-management-system@0.1.0 lint
+> vue-cli-service lint
+
+Browserslist: browsers data (caniuse-lite) is 6 months old. Please run:
+  npx update-browserslist-db@latest
+  Why you should do it regularly: https://github.com/browserslist/update-db#readme
+ DONE  No lint errors found!
+
+=== npm run build ===
+
+> mall-management-system@0.1.0 build
+> vue-cli-service build
+
+Browserslist: browsers data (caniuse-lite) is 6 months old. Please run:
+  npx update-browserslist-db@latest
+  Why you should do it regularly: https://github.com/browserslist/update-db#readme
+All browser targets in the browserslist configuration have supported ES module.
+Therefore we don't build two separate bundles for differential loading.
+
+
+-  Building for production...
+Browserslist: browsers data (caniuse-lite) is 6 months old. Please run:
+  npx update-browserslist-db@latest
+  Why you should do it regularly: https://github.com/browserslist/update-db#readme
+Browserslist: browsers data (caniuse-lite) is 6 months old. Please run:
+  npx update-browserslist-db@latest
+  Why you should do it regularly: https://github.com/browserslist/update-db#readme
+Browserslist: browsers data (caniuse-lite) is 6 months old. Please run:
+  npx update-browserslist-db@latest
+  Why you should do it regularly: https://github.com/browserslist/update-db#readme
+Browserslist: browsers data (caniuse-lite) is 6 months old. Please run:
+  npx update-browserslist-db@latest
+  Why you should do it regularly: https://github.com/browserslist/update-db#readme
+Browserslist: browsers data (caniuse-lite) is 6 months old. Please run:
+  npx update-browserslist-db@latest
+  Why you should do it regularly: https://github.com/browserslist/update-db#readme
+Browserslist: browsers data (caniuse-lite) is 6 months old. Please run:
+  npx update-browserslist-db@latest
+  Why you should do it regularly: https://github.com/browserslist/update-db#readme
+Browserslist: browsers data (caniuse-lite) is 6 months old. Please run:
+  npx update-browserslist-db@latest
+  Why you should do it regularly: https://github.com/browserslist/update-db#readme
+Browserslist: browsers data (caniuse-lite) is 6 months old. Please run:
+  npx update-browserslist-db@latest
+  Why you should do it regularly: https://github.com/browserslist/update-db#readme
+Browserslist: browsers data (caniuse-lite) is 6 months old. Please run:
+  npx update-browserslist-db@latest
+  Why you should do it regularly: https://github.com/browserslist/update-db#readme
+Browserslist: browsers data (caniuse-lite) is 6 months old. Please run:
+  npx update-browserslist-db@latest
+  Why you should do it regularly: https://github.com/browserslist/update-db#readme
+Browserslist: browsers data (caniuse-lite) is 6 months old. Please run:
+  npx update-browserslist-db@latest
+  Why you should do it regularly: https://github.com/browserslist/update-db#readme
+Browserslist: browsers data (caniuse-lite) is 6 months old. Please run:
+  npx update-browserslist-db@latest
+  Why you should do it regularly: https://github.com/browserslist/update-db#readme
+Browserslist: browsers data (caniuse-lite) is 6 months old. Please run:
+  npx update-browserslist-db@latest
+  Why you should do it regularly: https://github.com/browserslist/update-db#readme
+Browserslist: browsers data (caniuse-lite) is 6 months old. Please run:
+  npx update-browserslist-db@latest
+  Why you should do it regularly: https://github.com/browserslist/update-db#readme
+Browserslist: browsers data (caniuse-lite) is 6 months old. Please run:
+  npx update-browserslist-db@latest
+  Why you should do it regularly: https://github.com/browserslist/update-db#readme
+Browserslist: browsers data (caniuse-lite) is 6 months old. Please run:
+  npx update-browserslist-db@latest
+  Why you should do it regularly: https://github.com/browserslist/update-db#readme
+Browserslist: browsers data (caniuse-lite) is 6 months old. Please run:
+  npx update-browserslist-db@latest
+  Why you should do it regularly: https://github.com/browserslist/update-db#readme
+Browserslist: browsers data (caniuse-lite) is 6 months old. Please run:
+  npx update-browserslist-db@latest
+  Why you should do it regularly: https://github.com/browserslist/update-db#readme
+Browserslist: browsers data (caniuse-lite) is 6 months old. Please run:
+  npx update-browserslist-db@latest
+  Why you should do it regularly: https://github.com/browserslist/update-db#readme
+Browserslist: browsers data (caniuse-lite) is 6 months old. Please run:
+  npx update-browserslist-db@latest
+  Why you should do it regularly: https://github.com/browserslist/update-db#readme
+Browserslist: browsers data (caniuse-lite) is 6 months old. Please run:
+  npx update-browserslist-db@latest
+  Why you should do it regularly: https://github.com/browserslist/update-db#readme
+Browserslist: browsers data (caniuse-lite) is 6 months old. Please run:
+  npx update-browserslist-db@latest
+  Why you should do it regularly: https://github.com/browserslist/update-db#readme
+Browserslist: browsers data (caniuse-lite) is 6 months old. Please run:
+  npx update-browserslist-db@latest
+  Why you should do it regularly: https://github.com/browserslist/update-db#readme
+Browserslist: browsers data (caniuse-lite) is 6 months old. Please run:
+  npx update-browserslist-db@latest
+  Why you should do it regularly: https://github.com/browserslist/update-db#readme
+Browserslist: browsers data (caniuse-lite) is 6 months old. Please run:
+  npx update-browserslist-db@latest
+  Why you should do it regularly: https://github.com/browserslist/update-db#readme
+Browserslist: browsers data (caniuse-lite) is 6 months old. Please run:
+  npx update-browserslist-db@latest
+  Why you should do it regularly: https://github.com/browserslist/update-db#readme
+Browserslist: browsers data (caniuse-lite) is 6 months old. Please run:
+  npx update-browserslist-db@latest
+  Why you should do it regularly: https://github.com/browserslist/update-db#readme
+Browserslist: browsers data (caniuse-lite) is 6 months old. Please run:
+  npx update-browserslist-db@latest
+  Why you should do it regularly: https://github.com/browserslist/update-db#readme
+Browserslist: browsers data (caniuse-lite) is 6 months old. Please run:
+  npx update-browserslist-db@latest
+  Why you should do it regularly: https://github.com/browserslist/update-db#readme
+Browserslist: browsers data (caniuse-lite) is 6 months old. Please run:
+  npx update-browserslist-db@latest
+  Why you should do it regularly: https://github.com/browserslist/update-db#readme
+Browserslist: browsers data (caniuse-lite) is 6 months old. Please run:
+  npx update-browserslist-db@latest
+  Why you should do it regularly: https://github.com/browserslist/update-db#readme
+Browserslist: browsers data (caniuse-lite) is 6 months old. Please run:
+  npx update-browserslist-db@latest
+  Why you should do it regularly: https://github.com/browserslist/update-db#readme
+Browserslist: browsers data (caniuse-lite) is 6 months old. Please run:
+  npx update-browserslist-db@latest
+  Why you should do it regularly: https://github.com/browserslist/update-db#readme
+Browserslist: browsers data (caniuse-lite) is 6 months old. Please run:
+  npx update-browserslist-db@latest
+  Why you should do it regularly: https://github.com/browserslist/update-db#readme
+Browserslist: browsers data (caniuse-lite) is 6 months old. Please run:
+  npx update-browserslist-db@latest
+  Why you should do it regularly: https://github.com/browserslist/update-db#readme
+Browserslist: browsers data (caniuse-lite) is 6 months old. Please run:
+  npx update-browserslist-db@latest
+  Why you should do it regularly: https://github.com/browserslist/update-db#readme
+Browserslist: browsers data (caniuse-lite) is 6 months old. Please run:
+  npx update-browserslist-db@latest
+  Why you should do it regularly: https://github.com/browserslist/update-db#readme
+Browserslist: browsers data (caniuse-lite) is 6 months old. Please run:
+  npx update-browserslist-db@latest
+  Why you should do it regularly: https://github.com/browserslist/update-db#readme
+ WARNING  Compiled with 2 warnings11:26:51
+
+ warning  
+
+asset size limit: The following asset(s) exceed the recommended size limit (244 KiB).
+This can impact web performance.
+Assets: 
+  js/chunk-vendors.31715639.js (760 KiB)
+  css/chunk-common.a10d77db.css (329 KiB)
+  js/chunk-common.33367ddf.js (256 KiB)
+
+ warning  
+
+entrypoint size limit: The following entrypoint(s) combined asset size exceeds the recommended limit (244 KiB). This can impact web performance.
+Entrypoints:
+  index (1.32 MiB)
+      js/chunk-vendors.31715639.js
+      css/chunk-common.a10d77db.css
+      js/chunk-common.33367ddf.js
+      js/index.5fa6ce12.js
+  admin (1.33 MiB)
+      js/chunk-vendors.31715639.js
+      css/chunk-common.a10d77db.css
+      js/chunk-common.33367ddf.js
+      css/admin.a6ea99af.css
+      js/admin.3648ac71.js
+
+
+  File                                  Size               Gzipped
+
+  dist\js\chunk-vendors.31715639.js     760.14 KiB         252.48 KiB
+  dist\js\chunk-common.33367ddf.js      256.31 KiB         74.83 KiB
+  dist\js\671.96f0e3d6.js               62.04 KiB          16.79 KiB
+  dist\js\304.5e0f7abd.js               52.84 KiB          18.60 KiB
+  dist\js\873.efb304a6.js               51.40 KiB          13.71 KiB
+  dist\js\85.2ba81ca3.js                38.11 KiB          11.29 KiB
+  dist\js\632.eb6d8e32.js               31.27 KiB          10.74 KiB
+  dist\js\320.771631a3.js               27.96 KiB          9.18 KiB
+  dist\js\352.e0ca3c6f.js               26.18 KiB          9.09 KiB
+  dist\js\41.077607a0.js                25.56 KiB          8.82 KiB
+  dist\js\442.1c3c75f8.js               21.20 KiB          7.99 KiB
+  dist\js\401.a919a0c9.js               18.82 KiB          6.57 KiB
+  dist\js\990.e8d36b6f.js               18.58 KiB          6.35 KiB
+  dist\js\776.850f5f5e.js               18.25 KiB          6.64 KiB
+  dist\js\138.74f2f351.js               15.26 KiB          5.70 KiB
+  dist\js\711.a0370980.js               12.20 KiB          5.17 KiB
+  dist\js\665.2a5f897c.js               10.62 KiB          4.24 KiB
+  dist\js\admin.3648ac71.js             10.60 KiB          4.57 KiB
+  dist\js\index.5fa6ce12.js             10.30 KiB          4.36 KiB
+  dist\js\615.3385ffb3.js               9.02 KiB           3.68 KiB
+  dist\js\15.d102feea.js                7.89 KiB           3.18 KiB
+  dist\js\965.1410b2a2.js               6.50 KiB           2.93 KiB
+  dist\js\945.20d6ad82.js               6.31 KiB           2.73 KiB
+  dist\js\740.6ea0f75b.js               6.05 KiB           2.19 KiB
+  dist\js\636.326a6bf2.js               5.49 KiB           2.54 KiB
+  dist\js\113.6317b938.js               3.96 KiB           1.71 KiB
+  dist\js\316.418c9eae.js               3.73 KiB           1.74 KiB
+  dist\js\196.0348c292.js               2.79 KiB           1.36 KiB
+  dist\css\chunk-common.a10d77db.css    329.48 KiB         83.71 KiB
+  dist\css\304.5091ffb8.css             21.39 KiB          3.39 KiB
+  dist\css\41.cdc2ad82.css              16.32 KiB          2.86 KiB
+  dist\css\632.74f2556e.css             13.12 KiB          2.12 KiB
+  dist\css\442.9b3a870f.css             12.03 KiB          2.47 KiB
+  dist\css\671.2157d021.css             11.25 KiB          1.98 KiB
+  dist\css\138.59f66eba.css             10.53 KiB          2.14 KiB
+  dist\css\873.945b00fc.css             8.06 KiB           1.60 KiB
+  dist\css\85.d359b663.css              7.30 KiB           1.40 KiB
+  dist\css\352.0e3a9702.css             6.99 KiB           1.35 KiB
+  dist\css\990.6bacdae7.css             6.81 KiB           1.53 KiB
+  dist\css\320.ba5b8bb5.css             6.72 KiB           1.33 KiB
+  dist\css\776.6eb668e0.css             6.43 KiB           1.22 KiB
+  dist\css\665.55aca926.css             6.38 KiB           1.41 KiB
+  dist\css\401.8c000fdb.css             6.30 KiB           1.30 KiB
+  dist\css\615.f7cd49ee.css             5.42 KiB           1.26 KiB
+  dist\css\636.22e33a99.css             4.66 KiB           1.15 KiB
+  dist\css\15.0c45be8a.css              4.09 KiB           0.91 KiB
+  dist\css\945.f6511b75.css             3.91 KiB           0.93 KiB
+  dist\css\113.07bcc0db.css             2.87 KiB           0.71 KiB
+  dist\css\316.2513ac8c.css             1.39 KiB           0.42 KiB
+  dist\css\196.c2e10a83.css             1.27 KiB           0.39 KiB
+  dist\css\admin.a6ea99af.css           0.69 KiB           0.34 KiB
+
+  Images and other types of assets omitted.
+  Build at: 2026-10-17T03:26:51.544Z - Hash: bd74d705ec0ff693 - Time: 29328ms
+
+ DONE  Build complete. The dist directory is ready to be deployed.
+ INFO  Check out deployment instructions at https://cli.vuejs.org/guide/deployment.html
+       

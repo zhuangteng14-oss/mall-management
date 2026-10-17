@@ -40,7 +40,9 @@
       </header>
 
       <main class="a-main">
-        <router-view />
+        <!-- ⚠️ `include` 按**组件 name** 匹配（不是路由名/文件名）：`OrderFlow` 的 name 显式写在
+             它自己的第二个 `<script>` 里（Vue 3.2.13 不从文件名推断）。 -->
+        <router-view v-slot="{ Component }"><keep-alive include="MetricsPanel,EventLog,OrderFlow"><component :is="Component" /></keep-alive></router-view>
       </main>
     </div>
   </div>
@@ -55,9 +57,9 @@
         `ADMIN_NAV` 再传进来（多一层纯粹为对称而设的间接）。
      ② **不消费 `meta.layout`** —— 那是商城「内容区外壳 div 的类名随路由走」的机制
         （`AppShell.vue:127`），管理端只有一种布局，收了就等于把类名表抄一遍。
-     ③ **不带 `KeepAlive`** —— 商城那份只缓存 `HomeTab` / `GoodsSelect` 两个 tab（理由写在
-        `AppShell.vue:92-101`）。管理端**一格业务页都还没有**，没有东西值得缓存；
-        将来真有带轮询的页时，**别顺手加**：缓存 = 离开后后台继续轮询（同那条注释的警告）。
+     ③ **只缓存 `MetricsPanel` / `EventLog`**（2026-10-17 起）—— 这两页的数据在 SSE 流里，
+        组件销毁 = 流断、窗口清零（实测指标页切回日志再回来从 0 开始）；缓存 = 离开后流继续开着，
+        是**有意**的。故用 `include` 精确列出，**别**改成无 include 的全缓存（其他页可能有自己的轮询）。
 
   ⚠️ **第一笔那个「顶栏直接摆三个 tab」的形状已被第二笔取代** —— 概览 / 业务域 / 可观测域 改住
      `config/admin-nav.js` 的 `ADMIN_SIDEBAR`（单一事实源），本文件只渲染。`slot-registry.md:3056`
@@ -67,7 +69,7 @@
      两处旧名**已废**，别再改回去。
 -->
 <script setup>
-import { computed } from 'vue'
+import { computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ADMIN_SIDEBAR } from '../config/admin-nav'
 import { getUsername, getRole, clearCredentials, clearToken } from '../api/auth'
@@ -113,6 +115,16 @@ const exit = () => {
   router.push('/login')
   http.post(endpoints.user.logout, null, { allowUnauthorized: true }).catch(() => {}).finally(() => clearToken())
 }
+
+// 预取：管理端首屏之后，空闲时先把「实时日志」页的模块**求值**掉。
+// ⚠️ 只求值、不渲染：路由仍然懒加载。省掉的是首航日志页那一下 EvaluateScript ——
+//    2026-10-17 实测：切到日志页的 130ms Long Task 里约 46ms 是它（chunk 求值），
+//    剩下的大头是首帧 Layout。求值摊到空闲帧后，切页那一下不再背这笔。
+// ⚠️ 用 `requestIdleCallback`：不能把它塞进首屏那一帧；没有这个 API 的浏览器退化为 1.5s 后。
+onMounted(() => {
+  const idle = window.requestIdleCallback || ((fn) => setTimeout(fn, 1500))
+  idle(() => { import('./admin/observe/EventLog.vue') })
+})
 </script>
 
 <style scoped>

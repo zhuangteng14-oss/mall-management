@@ -64,7 +64,7 @@ class OrderTransitionRecorderTest {
     @DisplayName("命中：从读回的三位精确推出前后态（from ≡ to 清本位），两条通道 + 时间线都已落")
     void appliedDerivesFromAndToFromTheReadBackBits() {
         jdbc.bits(1, 0, 0);          // PAY 之后
-        recorder.applied(PAY, ORDER);
+        recorder.applied(PAY, ORDER, 1_500L);
 
         assertThat(count(TRANSITIONS, "action", "pay", "result", "applied")).isEqualTo(1.0);
 
@@ -86,7 +86,7 @@ class OrderTransitionRecorderTest {
     @DisplayName("接受货：从 (1,0,1) 反推回 PAID 而不是 SHIPPED（未发货即收货这条支路）")
     void appliedHandlesReceiveWithoutDelivery() {
         jdbc.bits(1, 0, 1);
-        recorder.applied(RECEIVE, ORDER);
+        recorder.applied(RECEIVE, ORDER, 1_500L);
 
         assertThat(writer.rows.get(0).from())
                 .as("后端确放行「未发货即收货」—— 不是 SHIPPED")
@@ -98,7 +98,7 @@ class OrderTransitionRecorderTest {
     @DisplayName("伪造行被 PAY 洗白：时间线如实记为「从非法态来」，不粉饰")
     void appliedRecordsTheForgedPredecessorAsIs() {
         jdbc.bits(1, 1, 0);          // 伪造 (0,1,0) 被 PAY 推成 (1,1,0)
-        recorder.applied(PAY, ORDER);
+        recorder.applied(PAY, ORDER, 1_500L);
 
         assertThat(writer.rows.get(0).from()).isEqualTo("ILLEGAL_DELIVERED_UNPAID");
         assertThat(writer.rows.get(0).to()).isEqualTo("SHIPPED");
@@ -125,7 +125,7 @@ class OrderTransitionRecorderTest {
     @DisplayName("转移后的检测抓的是**越界取值**（数据损坏），记为 non_binary")
     void appliedFlagsOutOfRangeBitsAsNonBinary() {
         jdbc.bits(1, 2, 0);          // 越界的 DeliveryIf
-        recorder.applied(DELIVER, ORDER);
+        recorder.applied(DELIVER, ORDER, 1_500L);
 
         assertThat(count(ILLEGAL, "shape", "non_binary")).isEqualTo(1.0);
         assertThat(registry.find(ILLEGAL).counters())
@@ -143,7 +143,7 @@ class OrderTransitionRecorderTest {
     void appliedWhenReadBackFailsRecordsLostTimelineAndNeverThrows() {
         jdbc.toThrow = new IllegalStateException("模拟库连不上");
 
-        assertThatCode(() -> recorder.applied(PAY, ORDER))
+        assertThatCode(() -> recorder.applied(PAY, ORDER, 1_500L))
                 .as("转移本身已经成功了，观测失败不该把一次成功的转移变成一次 5xx")
                 .doesNotThrowAnyException();
 
@@ -171,7 +171,7 @@ class OrderTransitionRecorderTest {
     @DisplayName("读回的 Map 里缺列 ⇒ 判**不知道**，不是判 0（0 是合法位值，会把它洗成「未付款」）")
     void missingColumnsAreTreatedAsUnknownNotAsZero() {
         jdbc.row = Map.of();          // 一个列都没有
-        recorder.applied(PAY, ORDER);
+        recorder.applied(PAY, ORDER, 1_500L);
 
         assertThat(writer.rows.get(0).to())
                 .as("若把取不到的位当成 0，这里会算出 (1,0,0)=PAID —— 一个看起来挺合理的错答案")
@@ -185,11 +185,14 @@ class OrderTransitionRecorderTest {
     @Test
     @DisplayName("守卫没命中：只记 rejected，**不写时间线、不投递**（没有「转移后」可言）")
     void rejectedRecordsOnlyTheOutcome() {
-        recorder.rejected(PAY, ORDER);
+        recorder.rejected(PAY, ORDER, 1_500L, "订单不存在或已付款");
 
         assertThat(count(TRANSITIONS, "action", "pay", "result", "rejected")).isEqualTo(1.0);
         assertThat(metrics.recentEvents()).hasSize(1);
         assertThat(metrics.recentEvents().get(0).to()).isNull();
+        assertThat(metrics.recentEvents().get(0).reason())
+                .as("复用既有 noRowsMsg —— 与日志里的那句话同源，不另编一份")
+                .isEqualTo("订单不存在或已付款");
         assertThat(writer.rows).isEmpty();
         assertThat(executor.submitted).isEmpty();
         assertThat(jdbc.queries).as("被拒绝的路径一次都不用读回三位").hasValue(0);
@@ -198,9 +201,13 @@ class OrderTransitionRecorderTest {
     @Test
     @DisplayName("UPDATE 抛异常：只记 error，同样不碰时间线")
     void erroredRecordsOnlyTheOutcome() {
-        recorder.errored(DELIVER, ORDER);
+        recorder.errored(DELIVER, ORDER, 1_500L,
+                "数据库错误：IllegalStateException：db down");
 
         assertThat(count(TRANSITIONS, "action", "deliver", "result", "error")).isEqualTo(1.0);
+        assertThat(metrics.recentEvents().get(0).reason())
+                .as("error 档带异常摘要（类名 + message，不拼 SQL）")
+                .isEqualTo("数据库错误：IllegalStateException：db down");
         assertThat(writer.rows).isEmpty();
         assertThat(executor.submitted).isEmpty();
     }
@@ -210,7 +217,7 @@ class OrderTransitionRecorderTest {
     @Test
     @DisplayName("下单即付款（(1,0,0)）是合法出生：记 CREATE + 时间线，前态为占位名")
     void createdRecordsBirthWithTheNoPreviousStatePlaceholder() {
-        recorder.created(ORDER, 1, 0, 0);
+        recorder.created(ORDER, 1, 0, 0, 1_500L);
 
         assertThat(count(TRANSITIONS, "action", "create", "result", "applied")).isEqualTo(1.0);
         assertThat(metrics.recentEvents().get(0).kind()).isEqualTo("transition");
@@ -247,7 +254,7 @@ class OrderTransitionRecorderTest {
     @Test
     @DisplayName("⚠️ 伪造出生（(0,1,0)）落库后仍被记形状 —— 但该支路已不在 API 路径上（见 javadoc）")
     void createdWithForgedBitsRecordsTheShape() {
-        recorder.created(ORDER, 0, 1, 0);
+        recorder.created(ORDER, 0, 1, 0, 1_500L);
 
         assertThat(count(TRANSITIONS, "action", "create", "result", "applied"))
                 .as("本方法**自己没有变** —— 它照旧只观测、不拦截")
@@ -260,7 +267,7 @@ class OrderTransitionRecorderTest {
     @Test
     @DisplayName("越界出生（orderAdd 收 int，连 2 都收）：形状归一为 non_binary，状态名 UNCLASSIFIED")
     void createdWithOutOfRangeBitsRecordsNonBinary() {
-        recorder.created(ORDER, 2, 0, 0);
+        recorder.created(ORDER, 2, 0, 0, 1_500L);
 
         assertThat(count(ILLEGAL, "shape", "non_binary")).isEqualTo(1.0);
         assertThat(registry.find(ILLEGAL).counters()).hasSize(1);
@@ -273,11 +280,11 @@ class OrderTransitionRecorderTest {
         for (int p = 0; p <= 1; p++) {
             for (int d = 0; d <= 1; d++) {
                 for (int r = 0; r <= 1; r++) {
-                    recorder.created("ORDER-" + p + d + r, p, d, r);
+                    recorder.created("ORDER-" + p + d + r, p, d, r, 1_500L);
                 }
             }
         }
-        recorder.created("ORDER-OOR", 5, 5, 5);
+        recorder.created("ORDER-OOR", 5, 5, 5, 1_500L);
 
         assertThat(registry.find(ILLEGAL).counters())
                 .as("3 个非法组合 + non_binary —— 基数铁律的可执行形式（否则 tag 会随客户端传什么都涨）")
@@ -297,8 +304,8 @@ class OrderTransitionRecorderTest {
                 jdbc, new OrderStateMachine(), metrics, executor, writer, false);
         jdbc.bits(1, 0, 0);
 
-        off.applied(PAY, ORDER);
-        off.created(ORDER, 0, 1, 0);
+        off.applied(PAY, ORDER, 1_500L);
+        off.created(ORDER, 0, 1, 0, 1_500L);
 
         assertThat(executor.submitted)
                 .as("关掉开关就一条都不投 —— 「投递数 ≡ transitions{applied}」正是靠它才只在开启时成立")

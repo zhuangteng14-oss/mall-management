@@ -1,0 +1,125 @@
+块 7 · 边界补笔〈order.Source 写入通道〉收笔报告
+生成时间：2026-10-14（本地时间）
+本笔提交（**本地提交：未 push、未 merge、未开 PR** —— 推与合并按口径由您执行）：
+  · commit = 776306a  边界补笔 —— /order/orderAdd 可选 Source + 攻击引擎下单带 attack
+分支：feat/c3-admin-block7（HEAD = 776306a，工作区**干净**）
+
+================================================================
+一、一句话
+================================================================
+您裁决「今晚补、不留到明天」的那条边界**补完了**：`/order/orderAdd` 加可选 `Source` 入参、
+`OrderDao.insertOrder` 写 `order.Source` 列、攻击引擎的四个下单场景传 `'attack'` ⇒ commit B
+当时登记为「将来真落了这一列就自动生效」的挂钩，现在**真的生效了**（② 的谓词两半都有数据可命中）。
+10 处改动落在 7 个文件 + 1 个新测试文件，共 8 文件 / +413 −29；测试 421 → **429 run 全绿**，
+lint / build exit 0。
+
+================================================================
+二、交付清单
+================================================================
+  order/controller/OrderController.java   orderAdd 末尾 +可选 Source（required=false）
+  order/service/OrderService.java         orderAdd 末尾 +Source；MAX_SOURCE=16 + sourceRejection（超长**拒**）
+  order/dao/OrderDao.java                 insertOrder 列清单 +`Source`（排在 CreateTime 之前）；
+                                          OrderRow +第 11 分量；normaliseSource（null/空白 ⇒ ''）；
+                                          selectUnpaidExpired 投影 `Source` 加反引号（同行替换）
+  observe/service/AttackEngine.java       orderForm(...) +Source=attack（四个下单场景共用这一个构造器）；
+                                          §五 javadoc 边界段重写；Result.Notes 清理口径补 order.Source
+  order/job/OrderTimeoutCancelJob.java    类 javadoc 的边界段重写（「无写入方」⇒「已补齐」）
+  cart/service/CartService.java           末位同行追加 `, ""`（购物车既不是秒杀单、也不是演练写入）
+  测试：**新建** smoke/OrderAddSourceColumnSmokeTest（7 例）
+        扩 order/job/OrderTimeoutCancelJobSkipAttackDataTest（+1 例，现 9 例）
+
+⚠️ **数据库零变更**：`order.Source` 列**早已落库**（块 5 · 登记表 #15，`.sql:1167`）
+   ⇒ 不加 Migration、**不改表数（仍 37）**、`db-migration.md` **不动**（本批那个硬例外这次不触发）。
+
+================================================================
+三、逐条对照（您的 5 条口径 → 落地）
+================================================================
+1. /order/orderAdd 加可选 Source（required=false）：**加在末尾**（既有 13 个形参一名不动、一位不挪）；
+   不传 ⇒ 落空串 / 传 ⇒ 写 order.Source；**现有调用点一行不动**
+   （唯一另一处调用方 CartService 只是**同行**补了个 `, ""`，连行号都不变）。
+2. OrderService.orderAdd 透传 Source：形参 → addLocked → new OrderRow(...) 末位，**无分支**。
+3. OrderDao.insertOrder 列清单加 `Source`；null / 空白归一成 `''`；**超长拒**（MAX_SOURCE=16，
+   文案「Source 最多 16 字符」）、**不许截断**。⚠️ 归一在 DAO（数据形态）、拒绝在 Service（入参合法性）
+   —— 与 /comment/add 的 Source **口径逐字同源**。
+4. 攻击引擎调 /order/orderAdd 时传 Source='attack'：**场景 1/2/3/4 全部走同一个 `orderForm(...)`**
+   ⇒ 只加一处即四个场景齐备（不在各分支里各加一遍）。
+5. ② 谓词的 Source='attack' 那一半**保持不动**（一个字没改，skip-attack-data 默认仍 false）。
+
+拼装/接口口径未变：管理端仍是 `@RequestParam` + 表单；业务失败仍是 200 + {success:false,msg}。
+
+================================================================
+四、收验（我跑过的 / 我没跑的）—— 口径：手验由您本人跑
+================================================================
+跑过的（末轮就在本提交树的工作区上）：
+  ./mvnw -o test                      → 429 run / 0 fail / 0 error / 26 skip / BUILD SUCCESS
+                                        （+8 = 7 切片 + 1 job；26 skip 与改动前**同集合**）
+  npx vue-cli-service lint --no-fix   → exit 0「No lint errors found!」
+  npx vue-cli-service build           → exit 0（Hash: ed8bafd408a8d889）
+  ⚠️ 本笔**零前端改动**，lint/build 是为「全绿三连」口径重跑的。
+  ⚠️ 跑 lint / build 的正确目录是 Mall-management-web/mall-management-system/（真 app 在那）。
+
+没跑的（按口径，判据在您手里）：
+  ✗ **本笔的任何手验**。特别提醒 ② 那条真库判据（60 秒后取消 / 60 秒后仍在）**必须用默认 profile**
+    手验：a3 下 `app.auth.enabled=false`，且 `@EnableScheduling` 总闸挂在 `mall.downgrade.job.enabled` 上。
+  ✗ 没有 push / merge / 开 PR；✗ 没开 commit 5（前端页面那笔）。
+
+测试写的是哪四档（您点名的四档全覆盖）：不传 ⇒ `''` / 传 `'attack'` ⇒ `'attack'` /
+空白 ⇒ `''` / 超长 ⇒ **拒**（另补：恰 16 字符 ⇒ 放行，边界不许少放一格）。
+⚠️ 这四档走的是**整条链路**（Controller → Service → DAO → JDBC），不是只测 DAO 那一句：
+  测试从 JDBC 收口把订单 INSERT 的 SQL 与绑到 Source 位的值**读回来**断言
+  （SQL 原文、11 个占位符、`Source` 排在 CreateTime 之前、第 11 个 `?` 上绑的值）。
+② 那条扩的用例是**接缝**：用真 OrderDao 读回「库里那一列会是什么」，再喂给 job 的谓词，
+  订单号**不带 SIM- 前缀** ⇒ 命中只可能来自 Source 那一半。
+
+================================================================
+五、这一笔**消除**的那条登记边界（commit B 报告§五 第 1 条）
+================================================================
+commit B 当时登记：order.Source 列在，但**没有任何写入点写 'attack'** ⇒ 谓词里 Source='attack'
+那一半**匹配不到行**；要补就得改**已发布**的 /order/orderAdd 契约 —— 当时未做，且**您当场推翻了
+那个裁决**（明令今晚补）。本笔补齐后：
+  · 谓词两半（`SIM-` 前缀 / `Source='attack'`）**都有真实数据可命中**；
+  · 两条标记**都保留**（不是二选一）：前缀扛「人肉看得见 / LIKE 'SIM-%' 一把清」，
+    列扛「结构化可查」——前缀是自由文本，`SIM-` 恰好出现在正文中段就会误命中，列不会。
+  · 新加的 Source 入参**不是身份声明、不参与鉴权**：谁能下单仍只看 IdentityGuard。
+
+================================================================
+六、行号漂移（供 commit 9 收口 refs-scan 用，本批不在笔内重指）
+================================================================
+逐文件净增量（`git show HEAD:<f> | wc -l` 与工作区实测对差）+ 插入点（`git diff -U0` hunk 头，原行号）：
+
+  文件                                          净增   插入点（原行号）
+  cart/service/CartService.java                  0     :240 **同行替换**（唯一零漂移的改动）
+  observe/service/AttackEngine.java             +17     :87 后+1；:109 后+3；:573 替换+后+5；:587 后+7；:890 替换；:892 后+1
+  order/controller/OrderController.java         +10     :125 后+10；:135 同行替换
+  order/dao/OrderDao.java                       +29     :86 后+13；:90/:95 替换；:100 替换+后+11；:102 替换+后+1；:106 替换；:328 后+4；:337 同行替换
+  order/job/OrderTimeoutCancelJob.java           +3     :77 段 5 行 → 8 行
+  order/service/OrderService.java               +58     :311 后+12；:326 替换+后+1；:348 后+7；:351 替换；:498 后+34；:508 后+4；:518 替换；:632 替换
+  .../OrderTimeoutCancelJobSkipAttackDataTest   +52     :7 后+3；:9 后+2；:14 后+1；:15 后+1；:167 后+45
+  smoke/OrderAddSourceColumnSmokeTest.java     +215     新文件
+
+**实测核过、一位不动的（都在首个插入点之前）**：
+  · OrderService.java：:61 :78 :95 :102 :119 :177 :183 :186 :205 :235（全部 ≤ 311）⇒ **不动**。
+    ⚠️ 会动的只有 2 条：tech-debt.md:762 的 `OrderService.java:339` ⇒ **:352**（+13）；
+       c3-block-4-order.md:69 的 `:456` ⇒ **:476**（+20）。
+  · OrderController.java：:50 :70 :85 :95 :105（全部 ≤ 125）⇒ **不动**。
+    ⚠️ 会动 4 条：:156⇒**:166** · :158⇒**:168** · :227⇒**:237** · :245⇒**:255**（各 +10）。
+    ⚠️ api-contract.md 反复钉的「/order/orderAdd = `:95`」**不受影响**（:95 是 @PostMapping 那行）。
+  · OrderDao.java：:125⇒**:150** · :133⇒**:158** · :138⇒**:163** · :146⇒**:171**（各 +25）。
+    ⚠️ OrderCenter.vue:131 引的是 `:146 / :149` 这一对 ⇒ **:171 / :174**（:149 不带文件名，同 +25）。
+  · CartService.java / AttackEngine.java / OrderTimeoutCancelJob.java：后两个 grep **0 命中**；
+    CartService.java:160 在同行替换点之前 ⇒ 不动。
+
+⚠️ **`api-contract.md` 正文 `:125` 给 /order/orderAdd 列的入参清单现在少了可选 `Source`**
+   （连同块 4 起陆续加的可选参数，一并留给 commit 9）。按本批口径（commit 1–8 以代码为主、
+   收口 commit 9 统一处理文档）本笔**不动**，在此**显式登记**。
+
+================================================================
+七、工作区状态 / 明确没做的事
+================================================================
+  · git status --short 为空（本笔已提交，无残留改动）。
+  · 提交卫生：`git commit -F` 传文件（未用 heredoc）、`git add` **逐个具体文件**（未用 -A）、
+    提交前对**全部暂存文件 + 提交信息**跑了「连续重复行」扫描、提交后对**已落库的提交信息**
+    再扫一遍 ⇒ **0 命中**；提交信息里无任何明文凭据样式。
+  · 没做：开 commit 5（前端页面）、push、merge、开 PR、跑手验、改任何库、动表数。
+  · 本报告为**收笔报告**，只落桌面 txt；过程产物（提交信息稿、三绿日志）在 _work/
+    （提交信息稿 = _work/c7-commitC-msg.txt；日志 = _work/logs/c7-commitC-{tests-targeted,test-full,lint,build}.log）。

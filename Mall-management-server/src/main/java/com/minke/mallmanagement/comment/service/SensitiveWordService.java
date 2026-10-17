@@ -2,14 +2,17 @@ package com.minke.mallmanagement.comment.service;
 
 import com.minke.mallmanagement.comment.dao.CommentDao;
 import com.minke.mallmanagement.comment.dao.SensitiveWordDao;
+import com.minke.mallmanagement.observe.metrics.SensitiveMetrics;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * 敏感词域的服务层（C3 块 6 · 整改 commit 5）—— <b>词表维护 + 命中判定 + 历史评论扫描</b>。
@@ -81,9 +84,14 @@ public class SensitiveWordService {
     private final SensitiveWordDao sensitiveWordDao;
     private final CommentDao commentDao;
 
-    public SensitiveWordService(SensitiveWordDao sensitiveWordDao, CommentDao commentDao) {
+    /** 观测出口（块 7 · commit 2b）—— 「拦住了多少」只有本环读得到（拒收那条早退不抛异常）。 */
+    private final SensitiveMetrics sensitiveMetrics;
+
+    public SensitiveWordService(SensitiveWordDao sensitiveWordDao, CommentDao commentDao,
+                                SensitiveMetrics sensitiveMetrics) {
         this.sensitiveWordDao = sensitiveWordDao;
         this.commentDao = commentDao;
+        this.sensitiveMetrics = sensitiveMetrics;
     }
 
     // ==================== 读：词表（管理端） ====================
@@ -223,6 +231,11 @@ public class SensitiveWordService {
      * @param text 待检正文（{@code null} / 空白 ⇒ 直接回「无命中」）
      */
     public Map<String, Object> filter(String text) {
+        // 块 7 · 阶段 3a.3：耗时起 = **方法入口**，止 = 下面 disposed 那行。⚠️ 口径**含读词库**：
+        // sortedWords() 每次都会打一次 DB（selectAllWords），它通常才是这段耗时的主项。
+        // 方案的 §2 把这条留成「待读全文再定」——读完全文，定成「含」（那才是调用方实际付的代价）。
+        // 三个早退分支（空白 / 空词库 / 零命中）不发事件 ⇒ 它们不计耗时，也不会在页面上出现。
+        long startedNanos = System.nanoTime();
         Map<String, Object> result = new HashMap<>();
         result.put("rejected", false);
         result.put("masked", text);
@@ -237,6 +250,9 @@ public class SensitiveWordService {
         }
 
         StringBuilder sb = new StringBuilder(text.length());
+        // 块 7 · commit 8：命中的**词**（去重 + 插入序）。以前只往事件流报「命中几个」，页面答不出
+        // 「命中了什么」—— 而那恰恰是看敏感词环时最该看的一个数。⚠️ 只进事件流，绝不进 tag。
+        Set<String> hitWords = new LinkedHashSet<>();
         int hit = 0;
         int i = 0;
         while (i < text.length()) {
@@ -246,6 +262,7 @@ public class SensitiveWordService {
                 i++;
             } else {
                 sb.append(MASK);
+                hitWords.add(matched);
                 hit += matched.length();
                 i += matched.length();
             }
@@ -261,6 +278,19 @@ public class SensitiveWordService {
         result.put("hitRatio", ratio);
         if (ratio >= REJECT_RATIO) {
             result.put("rejected", true);
+        }
+        // 块 7 · 观测（commit 2b）：只记**真被处置的** —— 干净文本在上面三处早退里压根到不了这行
+        //（与 commit 2 建环时的口径一致）。total 取**正文字符数** = 本类 ratio 的分母 ⇒ 事件里的
+        // `hit / total` 就等于被拿去比阈值的那个命中率；场景现值只有一个（唯一调用点 =
+        // `CommentService.add` 发表前）。
+        if (Boolean.TRUE.equals(result.get("rejected"))) {
+            // 块 7 · 阶段 3a.3 后续：拒收的人话原因 —— 命中比例与阈值（不写命中的词，
+            // 词已经在 words 形参里；reason 只回答「为什么拒」）
+            sensitiveMetrics.rejected("评论", hit, text.length(), joinWords(hitWords), System.nanoTime() - startedNanos,
+                    "敏感词拒收：命中比例 " + Math.round(ratio * 100) + "% ≥ "
+                            + Math.round(REJECT_RATIO * 100) + "%（命中 " + hit + "/" + text.length() + "）");
+        } else {
+            sensitiveMetrics.masked("评论", hit, text.length(), joinWords(hitWords), System.nanoTime() - startedNanos);
         }
         return result;
     }
@@ -352,6 +382,20 @@ public class SensitiveWordService {
     private static String str(Object o) {
         return o == null ? null : String.valueOf(o);
     }
+
+    /** 命中的词拼成一行事件字段（块 7 · commit 8）。去重已由调用方的 {@link LinkedHashSet} 做掉，
+     *  这里只管**限长** —— 词表里可以有很长的条目，而事件流是给页面看的，不该被它撑爆一条记录。
+     *  一个都没命中 ⇒ 回 {@code null}（事件里「没有命中的词」与「命中的词是空串」不该长得一样）。 */
+    private static String joinWords(Set<String> hitWords) {
+        if (hitWords.isEmpty()) {
+            return null;
+        }
+        String joined = String.join(",", hitWords);
+        return joined.length() <= MAX_WORDS_CHARS ? joined : joined.substring(0, MAX_WORDS_CHARS) + "…";
+    }
+
+    /** 命中词字段的长度上限（字符）。够看清「命中了什么」，又不至于让一条事件变成几百字。 */
+    private static final int MAX_WORDS_CHARS = 200;
 
     private static boolean isBlank(String s) {
         return s == null || s.isBlank();

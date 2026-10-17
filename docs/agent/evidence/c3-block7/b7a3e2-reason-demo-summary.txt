@@ -1,0 +1,86 @@
+块 7 · 3a.3 后续（reason）· 演示数据源补原因 · 证据小结
+================================================================================
+日期：2026-10-17
+分支：feat/c3-admin-block7
+性质：对 d9e6f0e（six rings reason）的缺陷修复 —— 只改演示假帧，不改后端 / 前端渲染。
+
+一、用户实报
+--------------------------------------------------------------------------------
+点开 ③ 里一条 WARN「敏感词命中，已拦截」：⑤ 只有
+  类型(kind) · 级别(severity)=warn · 来源环(src)
+没有「原因 (reason)」这一段，整段 .tech 全灰。
+
+二、排查结论（三项逐一）
+--------------------------------------------------------------------------------
+1. 后端：不是后端漏传。
+   - 真后端 sensitive 拒收路径：SensitiveWordService 拼
+     「敏感词拒收：命中比例 X% ≥ 40%（命中 h/t）」→ SensitiveMetrics.rejected(..., reason)
+     → EventBroadcaster.fromSensitive 调 putReason ⇒ fields.reason 有值。
+   - 现场 SSE 直接抓帧（curl -sN --max-time 8）：
+     {"kind":"sensitive","severity":"warn","title":"敏感词拒收",
+      "fields":{...,"reason":"敏感词拒收：命中比例 100% ≥ 40%（命中 6/6）"}}
+   - 关键分叉：用户看到的标题是「敏感词命中，已拦截」；该标题**只存在于**
+     Mall-management-web/mall-management-system/src/api/demo-stream.js，
+     真后端标题是「敏感词拒收」⇒ 那条事件来自「模拟日常」，不是真流。
+
+2. 前端：不是渲染漏字段。
+   - EventLog.vue 的 techSegments(e) 遍历 fields 全部非空键，reason 会生成
+     {text:'原因（reason）= …', key:'reason'}；⑤ 模板逐段渲染并保留「 · 」分隔。
+   - 现网实测（真后端 + 演示两条路径）reason 段都出现，且是普通 <span>，不新增节点。
+
+3. 高亮：CSS 本身有效，未命中只因缺数据。
+   - .chain-i .d .tech .is-warn { color: var(--warning) } 实测计算色
+     rgb(245, 158, 11)；.is-error = --danger rgb(248, 113, 113)。
+   - 之前全灰是因为 reason 段根本不存在，没有可着色的段。
+
+三、修复（仅前端演示数据源）
+--------------------------------------------------------------------------------
+文件：Mall-management-web/mall-management-system/src/api/demo-stream.js
+- KIND_CONTENT 里所有 WARN / ERROR 档补 reason：
+    缓存预热超时、锁等待超时、死锁回滚重试、超卖拦截、库存水位偏低、
+    库存不足、敏感词命中已拦截（rejected）。
+- buildBody 的 cache / lock / stock / sensitive 分支用 dropUndef 写入
+  fields.reason；info 档仍不写该键（与后端 putReason「非空才写」同口径）。
+- 敏感词假帧的 hit / total 与 40% 拒收阈值对齐，reason 里的比例可直接复核。
+- 不新增顶层帧键；reason 只进 fields。
+
+四、验证（原始输出见同目录其余四个 .txt）
+--------------------------------------------------------------------------------
+A. 主探针（mock SSE，headless Edge）：
+   194 项 / 0 失败（原 192 + 新增 2 项演示原因断言）
+   新增断言 1：所有 WARN / ERROR 演示行第一层都带「原因」；实测
+              44 行 / 7 条警告错误 / 缺原因 0。
+   新增断言 2：点开警告行，⑤ 出现「原因（reason）= …」；实测
+              reason 类 = is-warn、色 = rgb(245,158,11)=--warning、
+              其余段 = rgb(123,138,163)=--ink-3、.d-reason = 0。
+B. 虚拟滚动探针：23 项 / 0 失败。
+C. 前端 lint：DONE No lint errors found!；build：DONE Build complete.（EXIT=0）。
+D. 真后端手验（dev profile，8088）：
+   现场 POST /sensitive/add + /comment/add 触发拒收；
+   页面出现「敏感词拒收」；③ 第一层 2 条 WARN / 缺原因 0；
+   ⑤ reason 文本「原因（reason）= 敏感词拒收：命中比例 100% ≥ 40%（命中 6/6）」，
+   类 is-warn、色 rgb(245,158,11)、其余段 --ink-3、.d-reason=0。
+   截图：_work/3a3/manual-real-sensitive-reason.png（11:42:26）
+E. 模拟日常手验：
+   按用户复现路径点开「敏感词命中，已拦截」；
+   页面 35 行、7 条警告错误、缺原因 0；
+   ⑤ reason 文本「原因（reason）= 敏感词拒收：命中比例 50% ≥ 40%（命中 59/118）」，
+   类 is-warn、色 rgb(245,158,11)、其余段 --ink-3、.d-reason=0。
+   截图：_work/3a3/manual-demo-sensitive-reason.png（11:42:30）
+F. 时间先后：源代码最后修改 11:39:37（demo-stream.js）/ 11:40:44（探针）；
+   两档手验截图 11:42:26 / 11:42:30；证据文件晚于上述全部。
+
+五、refs 收口
+--------------------------------------------------------------------------------
+before = HEAD worktree（d9e6f0e），after = 最终工作区。
+before / after 均 600 文件 / 5227 条；阳性对照恰好 1 对 LOST+NEW。
+最终 3 对有意重指（demo-stream.js 增行后行偏移）：
+  context-packs/c3-block-D-hardening.md 的 protections 区间引用；
+  tech-debt.md 的两条演示态判据引用。
+具体旧号 / 新号只落 _work/3a3/refs-收口-b7a3e2.txt（不进 docs）。
+未配对 0；归档 / 既有证据快照里的历史行号未动。
+
+六、边界
+--------------------------------------------------------------------------------
+- 演示事件仍不落库；本次只补「原因」文本，不改变演示数据源的其他形状。
+- 未 push / 未 merge / 未开 PR。

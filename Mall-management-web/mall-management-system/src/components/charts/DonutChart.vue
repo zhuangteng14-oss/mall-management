@@ -10,6 +10,8 @@
       :empty="!hasData"
       :error="error"
       :empty-text="emptyText"
+      :empty-overlay="emptyOverlay"
+      :is-replay="isReplay"
       @retry="emit('retry')"
     />
     <div v-if="showCenter" class="dc-center">
@@ -23,7 +25,7 @@
 /* eslint-disable no-undef */ /* 理由见 `BaseChart.vue` 同款注释（eslint-plugin-vue 8.7.1 缺宏环境） */
 import { computed } from 'vue'
 import BaseChart from './BaseChart.vue'
-import { chartTokens, baseOption, itemTooltip, legendStyle } from './chartTokens'
+import { TOOLTIP_ITEM, LEGEND_SHOWN, LEGEND_HIDDEN } from './chartTokens'
 
 const props = defineProps({
   /** 扇区：`[{ name, value }]`。必填。 */
@@ -36,10 +38,20 @@ const props = defineProps({
   /** 内圈占比（`'58%'` 这种）。越大小洞越大 —— 洞里要放两行字时别低于 55%。 */
   innerRatio: { type: String, default: '58%' },
   outerRatio: { type: String, default: '78%' },
+  /**
+   * 最小扇区角度（度）。`0` = 按真实占比画（缺省）。
+   * ⚠️ 只在「某一态压到 95%+」时由调用方传非 0：否则正常分布会被它夸大。
+   * ECharts 会把超出 360° 的部分按比例收回来，所以它保证的是**可见性**，不是精确占比。
+   */
+  minAngle: { type: Number, default: 0 },
   showLegend: { type: Boolean, default: true },
   loading: { type: Boolean, default: false },
   error: { type: String, default: '' },
   emptyText: { type: String, default: '区间内暂无数据' },
+  /** 空态时保留坐标轴/网格线（环图一般不用，回放视图需要时再开）。 */
+  emptyOverlay: { type: Boolean, default: false },
+  /** 回放角标：数据来自回放帧而非 SSE。 */
+  isReplay: { type: Boolean, default: false },
 })
 
 const emit = defineEmits(['retry'])
@@ -51,19 +63,22 @@ const showCenter = computed(
 )
 
 const option = computed(() => {
-  const t = chartTokens()
   return {
-    ...baseOption(t),
-    tooltip: itemTooltip(t),
-    legend: props.showLegend ? legendStyle(t) : { show: false },
+    // 计数每秒在变：让扇区滑到新角度，而不是整块重画。
+    animationDuration: 500,
+    animationDurationUpdate: 650,
+    animationEasingUpdate: 'cubicOut',
+    tooltip: TOOLTIP_ITEM,
+    legend: props.showLegend ? LEGEND_SHOWN : LEGEND_HIDDEN,
     series: [
       {
         type: 'pie',
         radius: [props.innerRatio, props.outerRatio],
+        // 小扇区保底角度：99% 一态时，其余态仍有可见弧长（见 prop 注释）。
+        minAngle: props.minAngle,
         center: ['50%', props.showLegend ? '45%' : '50%'],
-        itemStyle: { borderColor: t.surface, borderWidth: 2 },
-        label: { color: t.ink2, fontSize: 11, formatter: '{b} {d}%' },
-        labelLine: { lineStyle: { color: t.axisLine } },
+        // 扇区底色描边 / 标签字色字号 / 引导线全在主题的 `pie` 里；这里只留 formatter。
+        label: { formatter: '{b} {d}%' },
         // 洞里放大字 ⇒ 关掉 ECharts 的高亮放大，否则 hover 时扇区会盖住那组数。
         emphasis: { scale: false },
         data: props.data,

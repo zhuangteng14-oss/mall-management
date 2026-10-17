@@ -1,0 +1,102 @@
+=== 块 7 · 状态流转页 P0 三条硬口径 · 真后端实测证据 ===
+采集时间：2026-10-17 23:31–23:33（+08）
+分支：feat/c3-admin-block7     HEAD：b410ecc（证据产生时代码尚未提交，工作区 18 个改动文件）
+入口：http://localhost:8080/admin.html#/admin/observe/timeline
+环境：后端 dev profile / 8088（PID 38932，23:25:53 启动，Tomcat 8088 / 8.75s）
+      前端 dev server / 8080
+      库：192.168.229.129:3306/mall_management_sql（VM，UTC 存储、页面 +8）
+证据晚于最后一次代码编辑：
+      OrderFlow.vue 最后编辑 23:23:41；本证据截图 23:31:06–23:32:30，逻辑上晚于代码。
+
+--- 一、探针命令 ---
+node scripts/probes/probe-b7x-detail-rail.mjs        （源码在仓内，可复跑）
+产物：
+  docs/agent/evidence/c3-block7/b7x-idle-rail.png        无流转时的暗色拓扑轨道
+  docs/agent/evidence/c3-block7/b7x-waitship-page.png    待发货 2,603 单 / 第 2 页 / 共 131 页
+  docs/agent/evidence/c3-block7/b7x-cancel-ladder.png    取消 +39、取消流入 7.8/s、批量取消汇总行
+  docs/agent/evidence/c3-block7/b7x-cancel-lane.png      取消支线亮起 + 大号瀑布粒子下落
+
+--- 二、探针输出（原文，23 项 / 0 失败） ---
+OK   ① 页面挂载
+OK   ① 真流活着且逐拍推进  → "已连接 / seq=4"
+OK   ② 静态轨道在：主链 3 段拓扑线都在  → {"tracks":3,"onTracks":0,"trackAnim":["none","none","none"],"trackOpacity":[0.45,0.45,0.45],"dotAnim":["none","none","none","none","none"],"liveNodes":0,"cancelOn":0,"cancelAnim":["none","none"],"particles":0}
+OK   ② 没有任何一段被点亮（无真实流转 ⇒ 不亮）  → 0
+OK   ② 轨道**没有动画**（暗灰待命，不是一直在跑）  → {"anim":["none","none","none"],"opacity":[0.45,0.45,0.45]}
+OK   ② 节点雷达不转、取消支线不亮、没有粒子  → {"dotAnim":["none","none","none","none","none"],"liveNodes":0,"cancelOn":0,"particles":0}
+OK   ① 待发货 KPI 有真实大数（不是 0，也不是被截断的 1000）  → 2603
+OK   ① 点「待发货」后表头总数 = 该态真实 COUNT（≥ 4 位数）  → "待发货 · 2,603 单 · 最新在前 · 点行看链路"
+OK   ① 分页脚总数 = 同一个数（不是本页 20 条）  → "2,603 vs 待发货 · 2,603 单 · 最新在前 · 点行看链路"
+OK   ① 表格每行都是「待发货」（status 进了 SQL 的 WHERE）  → {"rows":20,"states":["待发货","待发货","待发货"]}
+OK   ① 表内订单号未被截断（空间足够时完整显示）  → [false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false]
+OK   ① 第 2 页换了行、仍是待发货（服务端 offset 真的生效）  → {"rows":20,"active":"2","first":"#SIM-SECKILL-6502-595"}
+OK   ③ 40 张未付款单全部落库（orderAdd success=true）  → {"created":40,"failures":[]}
+OK   ③ 首张已付款（普通 move 的原料）  → {"msg":"付款成功","tradeNo":"PAY20261017341372","success":true}
+OK   ③ 普通流转进了流轨（waitPay → waitShip，轨道亮起）  → {"row":"23:31:11 #P0CANCEL-20261017153111-00 待付款 → 待发货","maxTrackOn":1}
+OK   ③ 流轨里的订单号完整显示（不再被固定宽度截成 #SIM-BU…）  → {"id":"#P0CANCEL-20261017153111-00","clipped":false}
+OK   ③ 取消支线真的亮起（waitPay>cancelled 下落路径）  → {"cancelOn":1,"anim":["a-of-cancel-dash-fec5c042"]}
+OK   ③ 大号瀑布粒子出现（汇总事件 ⇒ 不是一颗小光点）  → {"particles":3,"big":3}
+OK   ③ 取消流入 QPS 真实跳动（不是 0/s）  → "占全表 78.2%\n取消流入 7.8/s\n点此筛选已取消"
+OK   ③ 流轨出现「批量取消 N 单」汇总行（orderId 为 null 的汇总事件在页面上有具名落点）  → "23:32:30 批量取消 39 单 待付款 → 已取消"
+OK   ③ 左侧「已取消」数字实时 +39（付款那张没被取消）  → {"before":33419,"after":33458}
+OK   ③ 待付款归零（40 张里 1 张付款、39 张取消）  → "↻ 待付款 0 占 0.0%"
+OK   ④ 无 console.error / unhandledrejection  → []
+
+块 7 · P0 服务端分页 / 静态流轨 / 超时取消汇总（真后端 8088）: 23 项 / 0 失败
+
+（第一轮 4 条 FAIL 全是**探针自身**的判据写错，产品侧无一条红：
+  1) 主链 4 节点 = 3 段线，断言写成了 5（5 是五态计数）；
+  2) .a-h2n 在页面里不止一处，选择器抓到了直方图说明；
+  3) 轨道高亮只亮 FLASH_MS=1200ms，第一轮在付款后 2.5s 才读，已熄灭；
+  4) 同上。
+  修正探针后复跑 23/23 全绿；两轮原始输出在 _work/b7x-probe-run1.txt / run2.txt。）
+
+--- 三、库内证据（探针造的 40 单） ---
+SQL（只读，凭据来自 _work/b6-c7-db-env.sh，不落明文）：
+  SELECT COUNT(*) total,
+         SUM(CASE WHEN CancelledAt IS NOT NULL THEN 1 ELSE 0 END) cancelled,
+         SUM(CASE WHEN CancelledAt IS NULL AND PayIf=1 THEN 1 ELSE 0 END) paid
+  FROM mall_management_sql.`order` WHERE OrderId LIKE 'P0CANCEL-20261017153111-%'
+结果：
+  total  cancelled  paid
+  40     39         1
+逐行（前 6，UTC 存储）：
+  P0CANCEL-20261017153111-00   PayIf=1  CancelledAt=null           ← 已付款，未取消
+  P0CANCEL-20261017153111-01   PayIf=0  CancelledAt=2026-10-17 15:32:29.983
+  P0CANCEL-20261017153111-02   PayIf=0  15:32:29.990
+  P0CANCEL-20261017153111-03   PayIf=0  15:32:29.996
+  P0CANCEL-20261017153111-04   PayIf=0  15:32:30.008
+  P0CANCEL-20261017153111-05   PayIf=0  15:32:30.014
+⇒ 上面这 6 行的 CancelledAt 落在 15:32:29.983–15:32:30.014（31ms 内，同一轮扫描），
+  与页面 23:32:30（+8 后）的「批量取消 39 单」对得上；付款那张不在汇总里（CAS 只数真取消）。
+  这 39 行不是逐单 SSE，而是一条 count=39 的汇总 move —— QPS 按权重算得 39/5=7.8/s。
+
+清理：截图与上面查询完成后，已按 P0CANCEL-% 精确删除 order_item / `order` 两处
+  探针数据（affected 40），库回到 baseline：
+  total 42730 / cancelled 33419 / completed 5276 / waitReceive 1432 / waitShip 2603 / waitPay 0
+
+--- 四、库 vs /insight vs /detail（清理后重新取，三者同口径） ---
+state        DB        insight   detail.total  verdict
+waitPay      0         0         0             OK
+waitShip     2603      2603      2603          OK
+waitReceive  1432      1432      1432          OK
+completed    5276      5276      5276          OK
+cancelled    33419     33419     33419         OK
+
+page2(waitShip, offset=40, limit=20): total=2603 rows=20 states=waitShip OK
+
+⇒ 「顶部 Tab 数字 / 表头总数 / 分页脚 / 实际行」四者来自同一条 WHERE：
+   /insight 的 counts 是权威 COUNT，/detail 的 total 是同一谓词的 COUNT，rows 是 LIMIT/OFFSET 切片。
+   前端不再拉「最新 1000 条」自己过滤。
+
+--- 五、截图里看什么 ---
+b7x-idle-rail.png：三段主链拓扑线是**暗灰虚线**，节点下的雷达环不转；右侧写着
+  「暂无实时流转」；阶梯每个节点都是「流入 0/s · 流出 0/s」。
+b7x-waitship-page.png：点「待发货」后表头「待发货 · 2,603 单」，分页脚「共 2,603 单」，
+  当前第 2 页（共 131 页），20 行全部是待发货，订单号完整显示。
+b7x-cancel-ladder.png：已取消 33,442（补间中，终值 33,458）带 +23 跳变；取消节点
+  「取消流入 7.8/s」；流轨顶端「批量取消 39 单 待付款 → 已取消」。
+b7x-cancel-lane.png：waitPay → cancelled 的橙色虚线支线亮起，大号粒子正落向「已取消」
+  节点；同一帧里普通流转 #P0CANCEL-...-00（待付款 → 待发货）完整显示。
+
+注：b7x-waitship-page.png 是在造数**之前**拍的（2,603）；之后为了验证普通 move 付掉一张，
+  截图中的阶梯一度显示 2,604 —— 这是探针造的那一张，不是统计口径漂移。

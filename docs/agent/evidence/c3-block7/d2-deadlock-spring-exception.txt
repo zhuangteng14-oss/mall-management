@@ -1,0 +1,18 @@
+# Spring 侧现场：被回滚的那条 SQL 与异常类型（取自 dev 后端 boot.log 的一段）
+# 采集时刻：2026-10-15 22:12，48 轮 × KB=4 扫描期间
+# 全量计数（同一次扫描）：CannotAcquireLockException = 167 行；DeadlockLoserDataAccessException = 0 行
+# 被回滚的 SQL **只有一条**（167 次全同）：UPDATE `user` SET DowngradeState = 'none', ... WHERE username = ?
+
+2026-10-15 22:12:21.708 ERROR 23128 --- [io-8088-exec-75] [] o.a.c.c.C.[.[.[/].[dispatcherServlet]    : Servlet.service() for servlet [dispatcherServlet] in context with path [] threw exception [Request processing failed: org.springframework.dao.CannotAcquireLockException: PreparedStatementCallback; SQL [UPDATE `user` SET DowngradeState = 'none', ScheduledDowngradeAt = NULL, DowngradeReason = NULL,     FrozenAt = NULL, FreezeUntil = NULL WHERE username = ?]; Deadlock found when trying to get lock; try restarting transaction] with root cause
+
+com.mysql.cj.jdbc.exceptions.MySQLTransactionRollbackException: Deadlock found when trying to get lock; try restarting transaction
+	at com.minke.mallmanagement.user.dao.UserGovernanceDao.clearDowngrade(UserGovernanceDao.java:256)
+	at com.minke.mallmanagement.user.dao.UserGovernanceDao$$SpringCGLIB$$0.clearDowngrade(<generated>)
+	at com.minke.mallmanagement.merchant.service.MerchantDowngradeService.relist(MerchantDowngradeService.java:282)
+	at com.minke.mallmanagement.merchant.service.MerchantDowngradeService$$SpringCGLIB$$0.relist(<generated>)
+	at com.minke.mallmanagement.admin.controller.AdminAccountsController.relistDowngrade(AdminAccountsController.java:220)
+	at com.minke.mallmanagement.shared.web.TraceIdFilter.doFilterInternal(TraceIdFilter.java:230)
+
+2026-10-15 22:12:21.708 ERROR 23128 --- [o-8088-exec-200] [] o.a.c.c.C.[.[.[/].[dispatcherServlet]    : Servlet.service() for servlet [dispatcherServlet] in context with path [] threw exception [Request processing failed: org.springframework.dao.CannotAcquireLockException: PreparedStatementCallback; SQL [UPDATE `user` SET DowngradeState = 'none', ScheduledDowngradeAt = NULL, DowngradeReason = NULL,     FrozenAt = NULL, FreezeUntil = NULL WHERE username = ?]; Deadlock found when trying to get lock; try restarting transaction] with root cause
+
+com.mysql.cj.jdbc.exceptions.MySQLTransactionRollbackException: Deadlock found when trying to get lock; try restarting transaction

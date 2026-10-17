@@ -1,0 +1,104 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  C3 块 7 · commit 6b —— 日志基线（traceId + 轮转）。
+
+  【为什么这个文件此前不存在】
+  在此之前全仓没有任何 logback 配置：Boot 用它自带的 base.xml（只往控制台按固定格式打）。
+  本笔第一次覆盖它，原因只有一个：要让 `%X{traceId}` 出现在**每一行**上（见 TraceIdFilter）。
+  ⚠️ 覆盖的代价写在这里，免得下次有人问「日志格式怎么变了」：Boot 的默认 pattern 里那个
+  `${LOG_CORRELATION_PATTERN:-}` 槽位（用于 OpenTelemetry 之类的关联 id）本文件没有保留 ——
+  本仓不引 OTel，留着它只会是一个永远为空的占位。
+
+  【为什么自己声明 conversionRule，而不是 <include> Boot 的 defaults.xml 】
+  因为那条路有一个**静默失效**的坑：defaults.xml 里是
+      <property name="CONSOLE_LOG_PATTERN" value="${CONSOLE_LOG_PATTERN:-<Boot 默认>}"/>
+  属性一旦被设过，后面再写一次同名的 `${CONSOLE_LOG_PATTERN:-…}` 就会解析成**已解析的那个值**，
+  于是「我在后面补个 traceId」这件事**不报错、也不生效**——正是本仓最忌讳的形态。
+  自声明 3 条规则（clr / wEx）换来的是：pattern 里有什么，就是最终打印出来的什么，无需推演。
+
+  【属性从哪来】
+  `<property name="X" value="${X:-默认}"/>` 只读**已存在的属性**（Boot 的 LoggingSystemProperties
+  在 logback 配置解析**之前**就把 PID / LOG_DATEFORMAT_PATTERN / CONSOLE_LOG_CHARSET 等设成了
+  系统属性）。所以：外部用 `logging.pattern.console` / `LOG_DIR` 环境变量显式指定时**听外部的**，
+  没指定才落到本文件的默认 —— 这是「不把默认值焊死」的标准做法。
+
+  ⚠️ 由此带来一条**已知的不一致**（如实记，不假装解决）：外部若用 `logging.pattern.console`
+  覆盖，那一份 pattern 里**不会**自动带上 traceId（我们无法改别人的字符串）。本仓没有任何地方
+  设它，故今日不会发生；写在这里是给将来那个人一个提醒。
+-->
+<configuration>
+
+    <!-- 只声明本文件用到的那两条（照 Boot 的 class 名，非自造）：clr = 上色，wEx = 异常栈的空白规整 -->
+    <conversionRule conversionWord="clr" class="org.springframework.boot.logging.logback.ColorConverter"/>
+    <conversionRule conversionWord="wEx" class="org.springframework.boot.logging.logback.ExtendedWhitespaceThrowableProxyConverter"/>
+
+    <!-- 日志目录：默认 `logs/`（相对工作目录）。⚠️ 根 .gitignore 已有 `logs/` 与 `**/*.log`（第 26 / 11 行），
+         故本目录不会误提交 —— 本笔**不需要**动 .gitignore（已核）。 -->
+    <property name="LOG_DIR" value="${LOG_DIR:-logs}"/>
+
+    <!-- 控制台 pattern —— 逐字照 Boot 默认形态，只在 `[%15.15t]` 之后插了一个 `[%X{traceId:-}]`。
+         `:-` 是「取不到就空着」：非请求线程（启动期、调度任务）打日志时 MDC 里没有 traceId，
+         那时这一格是 `[]` 而不是 `null` 或报错。 -->
+    <property name="CONSOLE_LOG_PATTERN"
+              value="${CONSOLE_LOG_PATTERN:-%clr(%d{${LOG_DATEFORMAT_PATTERN:-yyyy-MM-dd HH:mm:ss.SSS}}){faint} %clr(${LOG_LEVEL_PATTERN:-%5p}){} %clr(${PID:-}){magenta} %clr(--- [%15.15t]){faint} %clr([%X{traceId:-}]){cyan} %clr(%-40.40logger{39}){cyan} %clr(:){faint} %m%n${LOG_EXCEPTION_CONVERSION_WORD:-%wEx}}"/>
+
+    <!-- 文件 pattern：与上面同一处插入位置，只是去掉颜色（文件里留着 ANSI 转义码只会碍事）。 -->
+    <property name="FILE_LOG_PATTERN"
+              value="${FILE_LOG_PATTERN:-%d{${LOG_DATEFORMAT_PATTERN:-yyyy-MM-dd HH:mm:ss.SSS}} ${LOG_LEVEL_PATTERN:-%5p} ${PID:-} --- [%t] [%X{traceId:-}] %-40.40logger{39} : %m%n${LOG_EXCEPTION_CONVERSION_WORD:-%wEx}}"/>
+
+    <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
+        <encoder>
+            <pattern>${CONSOLE_LOG_PATTERN}</pattern>
+            <charset>${CONSOLE_LOG_CHARSET:-UTF-8}</charset>
+        </encoder>
+    </appender>
+
+    <!-- ══════════════════════════════════════════════════════════════════════════════
+         文件 appender + 轮转（丙）：**按天 + 按大小**双闸，且总量封顶。
+         ⚠️ 三闸缺一不可，理由各不同：
+           · maxFileSize  = 单文件上限 —— 一次刷屏式的异常爆发不会写出一个 8GB 的文件；
+           · maxHistory   = 保留天数   —— 磁盘不会因为「跑了一个月没清」而满；
+           · totalSizeCap = 总量上限   —— 上面两条都满足、但流量翻倍时，还有一个兜底。
+         压缩（`.gz`）：日志是文本，压缩比很高，代价可以忽略。
+
+         ⚠️ 文件名是**固定**的（不随端口/实例变）⇒ 同一台机上若同时起两个实例而又不指定 LOG_DIR，
+         两个进程会写同一个文件、互相截断。这不是推测：验本笔时起过一个 8099 临时实例，就撞上了。
+         要并存就各自给 `LOG_DIR=logs/8099`（本文件支持该变量）。CI 只起一个实例，不受影响。
+         ══════════════════════════════════════════════════════════════════════════════ -->
+    <appender name="FILE" class="ch.qos.logback.core.rolling.RollingFileAppender">
+        <file>${LOG_DIR}/mall-management.log</file>
+        <encoder>
+            <pattern>${FILE_LOG_PATTERN}</pattern>
+            <charset>${FILE_LOG_CHARSET:-UTF-8}</charset>
+        </encoder>
+        <rollingPolicy class="ch.qos.logback.core.rolling.SizeAndTimeBasedRollingPolicy">
+            <fileNamePattern>${LOG_DIR}/mall-management.%d{yyyy-MM-dd}.%i.log.gz</fileNamePattern>
+            <maxFileSize>10MB</maxFileSize>
+            <maxHistory>7</maxHistory>
+            <totalSizeCap>200MB</totalSizeCap>
+        </rollingPolicy>
+    </appender>
+
+    <!-- 第三方包只留在 WARN 及以上：datasource-proxy 在 DEBUG 下会逐条打 SQL，那是「想看才开」的档位，
+         不该成为默认噪声（要开就在自己的 profile 里加一行 `logging.level.net.ttddyy.dsproxy=DEBUG`）。 -->
+    <logger name="net.ttddyy.dsproxy" level="WARN"/>
+
+    <!-- ⚠️ 测试（`@ActiveProfiles("smoke")`）**只挂控制台**：跑一次 `mvn test` 会起十几次上下文，
+         每次都往工程里落一个文件，既没人看又让「日志目录里有什么」这件事失去意义。
+         非 smoke 才挂 FILE。
+         ⚠️ 坦白一句：`MallManagementApplicationTests`（`@SpringBootTest`，**不带** smoke）仍会落盘，
+         产物在 `logs/`（已 gitignore）。要彻底不落盘得判「是否在测试里」，logback 判不了 —— 如实记。 -->
+    <springProfile name="!smoke">
+        <root level="INFO">
+            <appender-ref ref="CONSOLE"/>
+            <appender-ref ref="FILE"/>
+        </root>
+    </springProfile>
+
+    <springProfile name="smoke">
+        <root level="INFO">
+            <appender-ref ref="CONSOLE"/>
+        </root>
+    </springProfile>
+
+</configuration>

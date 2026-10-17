@@ -6,6 +6,7 @@
     :empty="!hasData"
     :error="error"
     :empty-text="emptyText"
+    :is-replay="isReplay"
     @retry="emit('retry')"
   />
 </template>
@@ -14,7 +15,7 @@
 /* eslint-disable no-undef */ /* 理由见 `BaseChart.vue` 同款注释（eslint-plugin-vue 8.7.1 缺宏环境） */
 import { computed } from 'vue'
 import BaseChart from './BaseChart.vue'
-import { chartTokens, baseOption, itemTooltip, mixHex } from './chartTokens'
+import { chartTokens, categoryAxis, mixHex, TOOLTIP_ITEM } from './chartTokens'
 
 const props = defineProps({
   /** x 轴类目（如 24 个小时）。必填。 */
@@ -28,9 +29,22 @@ const props = defineProps({
   max: { type: Number, default: null },
   /** tooltip / 色阶上的量名（如 `'订单数'`）。 */
   valueName: { type: String, default: '值' },
+  /** 色阶两端的文字：`[高值, 低值]`（ECharts `visualMap.text` 的顺序）。 */
+  legendText: { type: Array, default: () => ['多', '少'] },
+  /** x 轴标签间隔（0 = 全显示）。60 拍时传 9 即每 10 拍一个刻度，避免挤成一团。 */
+  xLabelInterval: { type: Number, default: 0 },
+  /** 绘图区内边距。五图共用同一套左右值才能「共享一根 x 轴」。 */
+  gridLeft: { type: Number, default: 64 },
+  gridRight: { type: Number, default: 24 },
+  /** tooltip 自定义 formatter（如「锁名 · 第 N 拍 · 超时 N 次」）。 */
+  tooltipFormatter: { type: Function, default: null },
+  /** 首帧是否开补间动画（时间栈每拍重建时关掉）。 */
+  animation: { type: Boolean, default: true },
   loading: { type: Boolean, default: false },
   error: { type: String, default: '' },
   emptyText: { type: String, default: '区间内暂无数据' },
+  /** 回放角标：数据由回放帧推算，不是实时 SSE。 */
+  isReplay: { type: Boolean, default: false },
 })
 
 const emit = defineEmits(['retry'])
@@ -65,19 +79,27 @@ const resolvedMax = computed(() => {
 
 const option = computed(() => {
   const t = chartTokens()
-  const axisCommon = {
-    type: 'category',
-    splitArea: { show: true },
-    axisLine: { lineStyle: { color: t.axisLine } },
-    axisTick: { show: false },
-    axisLabel: { color: t.axisLabel },
-  }
+  /**
+   * 热力图的两条轴都是类目轴，且都要 `splitArea`（格子底纹）；灰阶与标签色由主题给。
+   *
+   * ⚠️ 不再用 `containLabel:true`：那会让绘图区左边界随 y 标签宽度浮动，五张图就无法
+   * 共用同一根 x 轴。改为固定 `gridLeft` + y 标签截断。
+   */
+  const axisOf = (labels, extra = {}) => categoryAxis(labels, {
+    splitArea: { show: true }, ...extra,
+  })
   return {
-    ...baseOption(t),
-    grid: { left: 64, right: 24, top: 12, bottom: 56, containLabel: true },
-    tooltip: itemTooltip(t),
-    xAxis: { ...axisCommon, data: props.xLabels },
-    yAxis: { ...axisCommon, data: props.yLabels },
+    animation: props.animation,
+    grid: { left: props.gridLeft, right: props.gridRight, top: 12, bottom: 56 },
+    tooltip: props.tooltipFormatter
+      ? { ...TOOLTIP_ITEM, formatter: props.tooltipFormatter }
+      : TOOLTIP_ITEM,
+    xAxis: axisOf(props.xLabels, {
+      axisLabel: { interval: props.xLabelInterval },
+    }),
+    yAxis: axisOf(props.yLabels, {
+      axisLabel: { width: Math.max(28, props.gridLeft - 8), overflow: 'truncate' },
+    }),
     visualMap: {
       min: 0,
       max: resolvedMax.value, // 见上方 resolvedMax 注释：**绝不能是 `undefined`**
@@ -87,21 +109,17 @@ const option = computed(() => {
       bottom: 0,
       itemWidth: 12,
       itemHeight: 90,
-      textStyle: { color: t.ink2, fontSize: 11 },
+      text: props.legendText,
+      // 字色字号走主题的 `visualMap`；`calculable` / 位置 / 尺寸是本图特有的布局参数。
       // ⚠️ 色阶**起点取当前主题的底色**（浅色=白、暗色=`--surface`），不是写死白或写死黑 ——
       //    写死白的话暗色主题下低值格子会变成一片白斑。`mixHex` 就是干这个的。
-      inRange: { color: [mixHex(t.surface, t.series[0], 0.08), t.series[0]] },
+      //    3a.4：起点从 0.08 提到 0.22 —— 0.08 在 `--surface:#172032` 上几乎看不见，
+      //    「低值浅、高值深」的梯度读不出来。
+      inRange: { color: [mixHex(t.surface, t.series[0], 0.22), t.series[0]] },
     },
     series: [
-      {
-        name: props.valueName,
-        type: 'heatmap',
-        data: props.data,
-        label: { show: false },
-        // 格子之间用底色描边隔开（同饼图：不描白，暗色下会成亮框）。
-        itemStyle: { borderColor: t.surface, borderWidth: 2 },
-        emphasis: { itemStyle: { borderColor: t.ink, borderWidth: 2 } },
-      },
+      // 格子的描边 / 悬停描边 / 不画标签：都在主题的 `heatmap` 里。
+      { name: props.valueName, type: 'heatmap', data: props.data },
     ],
   }
 })

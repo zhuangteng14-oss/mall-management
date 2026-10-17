@@ -1,0 +1,79 @@
+b7 块 7 收尾 · commit 1 ② 「模拟日常」（演示模式）—— 离线 + 页面 两级实证
+时间：2026-10-15 · 分支 feat/c3-admin-block7 · 页面探针跑在 **dev server 8080**（PID 13900）+ 后端 8088（被探针**拦截**，不真发）
+探针两件（都在 `scripts/probes/`）：
+  A) `demo-stream-check.mjs` —— **离线**判据（不起浏览器、不起后端，直接把 `api/demo-stream.js` 拿进 node 跑）
+  B) `probe-b7c1-demo-mode.mjs` —— **页面级**判据（headless Edge + CDP，三页各一遍）
+本文件 = 两次 stdout 摘录（原始输出留 `_work/t-demo-offline.txt`、`_work/t-demo-page.txt`，**不入库**）
+
+================================================================================
+[A] 离线判据 —— 26 项 / 0 失败（`node scripts/probes/demo-stream-check.mjs`，EXIT=0）
+================================================================================
+PASS ② 总量恰好投满 DEMO_TOTAL —— total=500
+PASS ① 每拍都在 5–20 之间 —— min=5 max=19
+PASS ① 分布有偏（均值 < 12.5 的均匀值） —— 均值=10.00 拍数=50
+PASS ② 放完后继续推帧且 n=0 —— 空拍=351
+PASS ② demo.emitted 停在 DEMO_TOTAL —— emitted=500
+PASS ⑤ 八类都出现 —— cache:156 order:111 audit:64 lock:55 stock:43 notify:36 sensitive:21 identity:14
+PASS ⑤ 最高的两类合计过半 —— 前二=53.4%
+PASS ⑤ info 占八成以上 —— info=444 warn=53 error=3
+PASS ③ 事件行带 batchId=null（演示不是演练）
+PASS ③ 严重度的值都在三档内
+PASS ③ events 帧键 —— events,mq,rate,seq,traces,ts
+PASS ③ events 帧 mq=false（演示事件不落库，黄条说的是实话）
+PASS ③ events 帧 traces 为空数组
+PASS ③ orders 帧键 —— batchCounts,counts,moves,orders,seq,ts
+PASS ③ orders 帧 batchCounts=null（无批次）
+PASS ③ counts 含五态 + total —— cancelled,completed,total,waitPay,waitReceive,waitShip
+PASS ③ move 行键 —— batchId,from,orderId,to,ts
+PASS ③ move.from 是枚举名或空串 —— /CREATED/PAID/SHIPPED
+PASS ③ order 行键 —— amount,cancelled,createdAt,customerId,merchantId,orderId,product,quantity,state,step
+PASS ③ order.state 是五态 key
+PASS ③ metrics 帧键 —— cache,gauges,health,locks,protections,requests,seq,stock,ts
+PASS ③ requests 键 —— clientErrorRate,count,errorRate,p99Ms,qps
+PASS ③ health 自带「模拟日常」自报 —— 模拟日常（假数据，不入库）· L1 命中率 90.6%
+PASS ③ protections 五条且带 label
+PASS ③ stock 三行且 ratio ∈ [0,1]
+PASS ④ 同一场演示逐帧一致（时刻除外）
+全部通过
+⇒ 三条硬口径（频率 5–20/拍 · 总量恰好 500 · 分布有偏）与三页帧形状（与后端三条流**逐键对齐**）都成立；
+  ⚠️ `protections 五条` 是**前端假造**的（`demo-stream.js:422`）—— 与 D 段「防护接真闸」的关系见 `tech-debt.md` TD-73。
+
+================================================================================
+[B] 页面级判据 —— 27 项 / 0 失败（`node scripts/probes/probe-b7c1-demo-mode.mjs`，EXIT=0）
+================================================================================
+每页 9 项（metrics / timeline / logs 三页同构）：
+OK metrics ① 页面挂载后确实打过后端（说明这页本来是要连的） → 4
+OK metrics ② 开关在（正常 / 模拟日常） → ["正常","模拟日常"]
+OK metrics ② 点得到「模拟日常」 → "ok"
+OK metrics ③ 演示模式下**零**后端请求 → []
+OK metrics ④ 帧在走（已放数在涨） → ["…已放 8 / 500 条…","…已放 32 / 500 条…"]
+OK metrics ⑤ KPI 有数且不为「—」 → ["17.0","60","92.3","0"]
+OK metrics ⑤ 健康度判据自报「模拟日常」 → "模拟日常（假数据，不入库）· L1 命中率 92.3%"
+OK metrics ⑥ 拨回「正常」后请求重新出现 → 3
+OK metrics ① 全程无 console.error → []
+OK timeline ① 页面挂载后确实打过后端 → 6
+OK timeline ②/② 开关在 + 点得到 → ["正常","模拟日常"] / "ok"
+OK timeline ③ 演示模式下**零**后端请求 → []
+OK timeline ④ 帧在走 → ["…已放 8 / 500 条…","…已放 29 / 500 条…"]
+OK timeline ⑤ 五态计数卡有数 → ["19","12","7","43","8"]
+OK timeline ⑤ 演示无批次 ⇒「本批次单数」不出现 → false
+OK timeline ⑥ 拨回「正常」后请求重新出现 → 3
+OK timeline ① 全程无 console.error → []
+OK logs ① 页面挂载后确实打过后端 → 6
+OK logs ②/② 开关在 + 点得到 → ["正常","模拟日常"] / "ok"
+OK logs ③ 演示模式下**零**后端请求 → []
+OK logs ④ 帧在走 → ["…已放 8 / 500 条…","…已放 31 / 500 条…"]
+OK logs ⑤ 事件行渲染出来了 → 31
+OK logs ⑤ MQ 条照实显示「未连接」 → "MQ 未连接"
+OK logs ⑥ 拨回「正常」后请求重新出现 → 3
+OK logs ① 全程无 console.error → []
+块 7 收尾 ② 模拟日常（三页 · 真 dev server + 拦截计数）: 27 项 / 0 失败
+
+⇒ 关键判据是 **③ 与 ⑥ 成对**：③「演示模式下零后端请求」是**数出来的**（探针的 Fetch 拦截表长度不变），
+  ⑥「拨回正常后请求重新出现」是它的**反向对照**（否则「零请求」也可能只是探针压根没拦到东西）。
+
+截图（本笔入库 3 张，与既有 23 张同级）：
+  scripts/probes/out-b7c1-demo-metrics.png · out-b7c1-demo-timeline.png · out-b7c1-demo-logs.png
+
+== 结论 ==
+离线 26/26 + 页面 27/27 全绿。⚠️ 本笔**不 push / 不 merge**；手验按批文推迟到 commit 4 之后统一一轮。

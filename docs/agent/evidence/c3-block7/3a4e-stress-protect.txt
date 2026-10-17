@@ -1,0 +1,256 @@
+{
+  "at": "2026-10-17T07:55:27.435Z",
+  "checks": {
+    "protect-hundreds": {
+      "ok": true,
+      "detail": {
+        "protect": 571,
+        "n": 2088
+      }
+    },
+    "raw-total-consistent": {
+      "ok": true,
+      "detail": {
+        "n": 2088,
+        "sum": 2088
+      }
+    },
+    "fail-excludes-protect": {
+      "ok": true,
+      "detail": {
+        "failRate": "10.6",
+        "expected": "10.6",
+        "formula": "(warn 222 + error 0) / 2088",
+        "dom": "10.6 %"
+      }
+    },
+    "protect-rate-from-raw": {
+      "ok": true,
+      "detail": {
+        "protectRate": "27.3",
+        "expected": "27.3",
+        "dom": "防护拦截率 (protect) 27.3%"
+      }
+    },
+    "error-share-low": {
+      "ok": true,
+      "detail": {
+        "error": 0,
+        "n": 2088
+      }
+    },
+    "left-right-severity-same": {
+      "ok": true,
+      "detail": {
+        "left": [
+          "信息 1,295",
+          "防护 571",
+          "警告 222",
+          "错误 0"
+        ],
+        "right": [
+          "信息 1,295",
+          "防护 571",
+          "警告 222",
+          "错误 0"
+        ]
+      }
+    },
+    "purple-segment-visible": {
+      "ok": true,
+      "detail": {
+        "bg": "rgb(192, 132, 252)",
+        "w": 22.15625,
+        "minW": "4px",
+        "grow": "571"
+      }
+    },
+    "purple-segment-min4": {
+      "ok": true,
+      "detail": {
+        "bg": "rgb(192, 132, 252)",
+        "w": 22.15625,
+        "minW": "4px",
+        "grow": "571"
+      }
+    },
+    "health-green": {
+      "ok": true,
+      "detail": {
+        "healthClass": "a-hv a-hv--ok",
+        "healthText": "健康",
+        "reasons": []
+      }
+    },
+    "metrics-replay-active": {
+      "ok": true,
+      "detail": {
+        "clicked": {
+          "ok": true,
+          "record": "probe-protect-20261017 总 17518 · 拦下 15306 · 失败 0 （认不出身份） 角色 0 耗时 21.9 s 2026-10-17 15:55:17 库内 2026-10-17 07:55:17 ▾ 总请求"
+        },
+        "failStat": "11.8% 防护拦截率 (protect) 26.3% 业务失败率 (fail)",
+        "failTitle": "",
+        "failBig": "11.8%",
+        "protSmall": "防护拦截率 (protect) 26.3%",
+        "chartTitles": [
+          "业务失败率 vs 防护拦截率"
+        ],
+        "protWording": "回放指标由事件台账推算，非 HTTP 原始指标。 QPS = 该秒日志时间内吐出的事件条数（不是后端 `http.server.requests` 的请求量）； 没有 4xx/5xx 拆分，也没有缓存命中 / 锁等待字段。延迟只统计带 `DurationUs` 的事件， 无样本时画断点而不是 0。业务失败率 =（警告 + 错误）÷ 本拍事件数， 防护拦截（protect）单列，不计入失败率，也不参与健康度判定。",
+        "replayActive": true
+      }
+    },
+    "metrics-fail-stat-present": {
+      "ok": true,
+      "detail": {
+        "clicked": {
+          "ok": true,
+          "record": "probe-protect-20261017 总 17518 · 拦下 15306 · 失败 0 （认不出身份） 角色 0 耗时 21.9 s 2026-10-17 15:55:17 库内 2026-10-17 07:55:17 ▾ 总请求"
+        },
+        "failStat": "11.8% 防护拦截率 (protect) 26.3% 业务失败率 (fail)",
+        "failTitle": "",
+        "failBig": "11.8%",
+        "protSmall": "防护拦截率 (protect) 26.3%",
+        "chartTitles": [
+          "业务失败率 vs 防护拦截率"
+        ],
+        "protWording": "回放指标由事件台账推算，非 HTTP 原始指标。 QPS = 该秒日志时间内吐出的事件条数（不是后端 `http.server.requests` 的请求量）； 没有 4xx/5xx 拆分，也没有缓存命中 / 锁等待字段。延迟只统计带 `DurationUs` 的事件， 无样本时画断点而不是 0。业务失败率 =（警告 + 错误）÷ 本拍事件数， 防护拦截（protect）单列，不计入失败率，也不参与健康度判定。",
+        "replayActive": true
+      }
+    },
+    "metrics-chart-title": {
+      "ok": true,
+      "detail": [
+        "业务失败率 vs 防护拦截率"
+      ]
+    },
+    "metrics-protect-not-in-fail-wording": {
+      "ok": true,
+      "detail": {
+        "clicked": {
+          "ok": true,
+          "record": "probe-protect-20261017 总 17518 · 拦下 15306 · 失败 0 （认不出身份） 角色 0 耗时 21.9 s 2026-10-17 15:55:17 库内 2026-10-17 07:55:17 ▾ 总请求"
+        },
+        "failStat": "11.8% 防护拦截率 (protect) 26.3% 业务失败率 (fail)",
+        "failTitle": "",
+        "failBig": "11.8%",
+        "protSmall": "防护拦截率 (protect) 26.3%",
+        "chartTitles": [
+          "业务失败率 vs 防护拦截率"
+        ],
+        "protWording": "回放指标由事件台账推算，非 HTTP 原始指标。 QPS = 该秒日志时间内吐出的事件条数（不是后端 `http.server.requests` 的请求量）； 没有 4xx/5xx 拆分，也没有缓存命中 / 锁等待字段。延迟只统计带 `DurationUs` 的事件， 无样本时画断点而不是 0。业务失败率 =（警告 + 错误）÷ 本拍事件数， 防护拦截（protect）单列，不计入失败率，也不参与健康度判定。",
+        "replayActive": true
+      }
+    }
+  },
+  "samples": {
+    "configBefore": [
+      "rateLimit",
+      "circuitBreak",
+      "degrade",
+      "retry",
+      "poolIsolation"
+    ],
+    "accumulated": {
+      "n": 2088,
+      "sev": {
+        "protect": 571,
+        "warn": 222,
+        "info": 1295
+      },
+      "kind": {
+        "protection": 9,
+        "sensitive": 442,
+        "identity": 1637
+      }
+    },
+    "logSnapshot": {
+      "n": 2088,
+      "sum": 2088,
+      "sev": {
+        "protect": 571,
+        "warn": 222,
+        "info": 1295
+      },
+      "kind": {
+        "protection": 9,
+        "sensitive": 442,
+        "identity": 1637
+      },
+      "left": [
+        "信息 1,295",
+        "防护 571",
+        "警告 222",
+        "错误 0"
+      ],
+      "right": [
+        "信息 1,295",
+        "防护 571",
+        "警告 222",
+        "错误 0"
+      ],
+      "failRate": "10.6",
+      "protectRate": "27.3",
+      "domFail": "10.6 %",
+      "domProt": "防护拦截率 (protect) 27.3%",
+      "expectedFail": "10.6",
+      "expectedProtect": "27.3",
+      "mini": [
+        {
+          "bg": "rgb(56, 189, 248)",
+          "w": 50.234375,
+          "minW": "4px",
+          "grow": "1295"
+        },
+        {
+          "bg": "rgb(192, 132, 252)",
+          "w": 22.15625,
+          "minW": "4px",
+          "grow": "571"
+        },
+        {
+          "bg": "rgb(245, 158, 11)",
+          "w": 8.609375,
+          "minW": "4px",
+          "grow": "222"
+        },
+        {
+          "bg": "rgb(248, 113, 113)",
+          "w": 0,
+          "minW": "0px",
+          "grow": "0"
+        }
+      ],
+      "displayedRows": 5,
+      "aggChips": [
+        "× 23",
+        "× 23",
+        "× 100",
+        "× 53"
+      ]
+    },
+    "metrics": {
+      "healthClass": "a-hv a-hv--ok",
+      "healthText": "健康",
+      "reasons": [],
+      "statusText": "健康 健康度（后端算） 0.0% 5xx 占比（本拍） 83.8% 4xx 占比（本拍） 已连接 第 9 拍 · 窗口 60 秒 15:55:47 数据源 正常 模拟日常 后端真流"
+    },
+    "metricsReplay": {
+      "clicked": {
+        "ok": true,
+        "record": "probe-protect-20261017 总 17518 · 拦下 15306 · 失败 0 （认不出身份） 角色 0 耗时 21.9 s 2026-10-17 15:55:17 库内 2026-10-17 07:55:17 ▾ 总请求"
+      },
+      "failStat": "11.8% 防护拦截率 (protect) 26.3% 业务失败率 (fail)",
+      "failTitle": "",
+      "failBig": "11.8%",
+      "protSmall": "防护拦截率 (protect) 26.3%",
+      "chartTitles": [
+        "业务失败率 vs 防护拦截率"
+      ],
+      "protWording": "回放指标由事件台账推算，非 HTTP 原始指标。 QPS = 该秒日志时间内吐出的事件条数（不是后端 `http.server.requests` 的请求量）； 没有 4xx/5xx 拆分，也没有缓存命中 / 锁等待字段。延迟只统计带 `DurationUs` 的事件， 无样本时画断点而不是 0。业务失败率 =（警告 + 错误）÷ 本拍事件数， 防护拦截（protect）单列，不计入失败率，也不参与健康度判定。",
+      "replayActive": true
+    }
+  },
+  "ok": true,
+  "fail": []
+}

@@ -34,9 +34,9 @@ import java.util.concurrent.atomic.LongAccumulator;
  * 事件流（{@code MallLockMetrics.recentEvents()}）是**公开**通道，且每条 acquire 事件都带
  * {@code key}（业务键）⇒ 场景可以**只数自己那把 key 的事件**。这一点在 A3 那种
  * 「场景与真实流量共处一个进程」的环境里是刚需：计数器是全局的，会把 A3 的订单流量一起数进来；
- * 事件流按 key 过滤后天然不串味。代价是容量有界（512 槽、覆盖即淘汰）——
+ * 事件流按 key 过滤后天然不串味。代价是容量有界（2048 槽、覆盖即淘汰）——
  * 场景的「并发度 × 每线程事件数」必须远小于容量（两把锁的最坏情况是 4 条/线程），
- * 故 {@link Params#threads()} 上限设为 {@link #MAX_THREADS}（32 ⇒ 最坏 128 条，留 4 倍余量）。
+ * 故 {@link Params#threads()} 上限设为 {@link #MAX_THREADS}（32 ⇒ 最坏 128 条，留 16 倍余量）。
  *
  * <h2>【场景状态用进程内计数，不写 Redis】</h2>
  * 除了「锁本身在 Redis 里」这件事，场景不往 Redis 写任何东西。额外好处：
@@ -76,8 +76,8 @@ import java.util.concurrent.atomic.LongAccumulator;
 public class LockSceneService {
 
     /**
-     * 线程数上限。不是性能考虑，是**事件环容量**（512）的安全边界：
-     * 死锁场景每线程最坏 4 条 acquire 事件，32 × 4 = 128 ⇒ 留 4 倍余量，
+     * 线程数上限。不是性能考虑，是**事件环容量**（2048）的安全边界：
+     * 死锁场景每线程最坏 4 条 acquire 事件，32 × 4 = 128 ⇒ 留 16 倍余量，
      * 不会把自己的事件挤出环形缓冲（挤出 ⇒ 计数偏小 ⇒ 场景给出假结论）。
      */
     static final int MAX_THREADS = 32;
@@ -460,9 +460,28 @@ public class LockSceneService {
         private final AtomicInteger seq = new AtomicInteger();
         private final List<Thread> created = new CopyOnWriteArrayList<>();
 
+        /**
+         * 块 7 · commit 8c：取一次**本线程**（= 调用 {@link #run} 的那条线程，请求线程）的
+         * (traceId, batchId) 快照，供下面每条新建线程绑上。
+         *
+         * <p>⚠️ 为什么捕获点在这里、而不是在投递任务的地方：本对象**在请求线程上被构造**
+         * （{@code run} 里的 {@code new ThreadRecorder()}），而线程是在它之后才建的 —— 字段初始化
+         * 发生在构造期 ⇒ 拿到的正是请求线程的上下文。⚠️ 为什么绑定发生在**建线程**而不是
+         * **投递任务**：{@code ThreadPoolExecutor} 交给 {@code ThreadFactory} 的那个 {@code r}
+         * 是**工作线程的循环体**（不是某一个任务），绑它 = 这条线程接下来跑的全部任务都在上下文里；
+         * 而本池每次 {@code run} 现建现销毁 ⇒ 它的生命周期恰好等于一次场景。
+         * ⚠️ 于是有一个**已知边界**：泄漏判定为真（线程没能终止）时，那条线程上的上下文也不会被还原
+         * —— 但那正是「场景已经出问题」的状态，`anyThreadLeaked=true` 已经把它报出来了。
+         */
+        private final com.minke.mallmanagement.shared.web.ObserveContext ctx =
+                com.minke.mallmanagement.shared.web.ObserveContext.capture();
+
         @Override
         public Thread newThread(Runnable r) {
-            Thread thread = new Thread(r, "lock-scene-" + seq.incrementAndGet());
+            // 块 7 · commit 8c：包一层把上下文绑到工作线程上（理由见上面那个字段）。
+            // ⚠️ 写全限定名而非 import：本文件 `:358` 被 defect-survey.md 按「文件:行号」引用，
+            // 加一行 import 会让它下移。
+            Thread thread = new Thread(() -> ctx.run(r), "lock-scene-" + seq.incrementAndGet());
             thread.setDaemon(true);
             created.add(thread);
             return thread;

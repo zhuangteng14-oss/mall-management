@@ -88,7 +88,9 @@
                 <button class="sort" disabled title="价格降序 —— 同上，4 处，**超档**">价格 ↓</button>
                 <button class="sort" disabled title="有货优先 —— 动现有代码 5 处（goods 表**无库存列**：mall_management_sql.sql + GoodsDao + GoodsService + GoodsController + GoodsSelect.vue），**超档**">有货</button>
               </div>
-              <span class="right">共 {{ shownList.length }} 件</span>
+              <!-- ⚠️ 「已加载」不是「共」：分页后本页不知道总数（端点不回 total），
+                   写「共」会把当前已加载数说成全量。 -->
+              <span class="right">已加载 {{ shownList.length }} 件</span>
             </div>
             <div class="trow">
               <div class="tgroup">
@@ -123,19 +125,22 @@
             <ProductCard v-for="goods in shownList" :key="goods.Id" :goods="goods" :before-nav="saveState" from="search" />
           </div>
 
-          <nav
-            class="pager"
-            data-slot="预留 · 分页（动现有代码 4 处 · 超档）"
-            title="待 C3〈搜索〉——无 LIMIT / COUNT：GoodsDao.java（SQL 加 LIMIT + 一条 count）+ GoodsService.java + GoodsController.java + GoodsSelect.vue = 4 处，**超档**，因清单点名而画出。页码为示意。"
+          <!-- 无限滚动哨兵（块 7 收尾 · P1）：原来的 7 枚 disabled 页码是稿的占位（无分页端点），
+               现在后端 `LIMIT ? OFFSET ?` 已落地、本页改为加载更多 ⇒ 占位退场、换成真控件。
+               ⚠️ 不换成分页器：搜索/类目是「浏览型」列表，无限滚动与首页同一交互；
+                  管理端表格才用 `components/Pager.vue`（那种面板有明确的总数与页码语义）。 -->
+          <div
+            v-if="shownList.length"
+            ref="feedSentinel"
+            class="list-more"
+            :class="{ 'list-more--loading': feedLoading, 'list-more--done': feedDone }"
+            @click="!feedDone && feed.retry()"
           >
-            <button class="pg" disabled title="无分页端点">首页</button>
-            <button class="pg" disabled title="无分页端点">上一页</button>
-            <button class="pg on" disabled title="无分页端点">1</button>
-            <button class="pg" disabled title="无分页端点">2</button>
-            <button class="pg" disabled title="无分页端点">3</button>
-            <button class="pg" disabled title="无分页端点">下一页</button>
-            <button class="pg" disabled title="无分页端点">末页</button>
-          </nav>
+            <span v-if="feedLoading">正在加载更多…</span>
+            <span v-else-if="feedErrMsg">加载失败，点击重试</span>
+            <span v-else-if="feedDone">已经到底了</span>
+            <span v-else>下拉加载更多</span>
+          </div>
         </template>
       </div>
     </div>
@@ -145,6 +150,7 @@
 <script setup>
 import { ref, computed, onMounted, watch } from 'vue'
 import { useRoute } from 'vue-router'   // ⚠️ `useRouter` 随 `toGoodsDetail` 一起退役（卡片换公共组件后本页没有 `router.push` 了，只剩 `route`：`watch(route.query.kw)` / `onMounted(route.query.back)`）
+import { useInfiniteList } from '../composables/useInfiniteList'
 import { http, handleApiError, urlOf } from '../api/http'
 import { endpoints } from '../api/endpoints'; import ProductCard from '../components/ProductCard.vue'; import { sharedList } from '../config/goods-flags'   // ⚠️ 两条 import **同行**（C3 块 5 ·〈Bug 2/3〉落码，2026-10-12）—— 合并到既有行 = 不新增行号漂移（同下面 `:151` 那条的做法）。`ProductCard` = 本页卡片改用的公共组件（⑤「4 处复用」的第 2 处）；`sharedList` = **共享面列表的唯一定义处**（去重 + 滤已售完），本页与主页 / 两处「猜你喜欢」同源
 import { isLoggedIn } from '../api/auth'; import { subsidyGoods } from '../api/marketing'   // ⚠️ 两条 import **同行**（2026-10-12 国补筛选那一笔）—— 合并到既有行 = 不新增行号漂移（同 `ShoppingCart.vue:146` 那条的做法）
@@ -168,36 +174,62 @@ const saveState = () => {
   sessionStorage.setItem('SEARCH_RESULTS', JSON.stringify(goodsList.value))
 }
 
+// ── 无限滚动（块 7 收尾 · P1）：搜索 / 类目 / 全部商品三条链共用一台控制器 ──────────
+// 三条链的后端都已支持 `limit + offset`（`productSearch` / `categoryGoods` / `goodsSelectHome`），
+// 每页 24 条。`mode` 是**下一次请求**的筛选条件 —— 切换筛选时先改 mode 再 reset，
+// 旧代际的在途响应会被 `useInfiniteList` 丢弃（否则旧关键词的第二页会拼进新结果）。
+const PAGE_SIZE = 24
+let mode = { kind: 'home' }
+const feed = useInfiniteList(async (offset, limit) => {
+  let url
+  let body
+  if (mode.kind === 'search') {
+    url = urlOf(endpoints.goods.productSearch)
+    body = new URLSearchParams({ keyword: mode.kw, limit: String(limit), offset: String(offset) })
+  } else if (mode.kind === 'category') {
+    url = urlOf(endpoints.goodsB3.categoryGoods)
+    body = new URLSearchParams({ TypeId: String(mode.typeId), limit: String(limit), offset: String(offset) })
+    if (mode.kw) body.set('keyword', mode.kw)
+  } else {
+    url = urlOf(endpoints.goods.goodsSelectHome)
+    body = new URLSearchParams({ limit: String(limit), offset: String(offset) })
+  }
+  const res = await http.post(url, body)
+  const data = await res.json()
+  if (!data.success) throw new Error(data.msg || '请求失败')
+  return { rows: data.list || [] }
+}, PAGE_SIZE)
+// 累积结果直接落到页面既有的 `goodsList`（`shownList` / `saveState` 两个消费方不用改）。
+watch(feed.items, (rows) => { goodsList.value = rows })
+const feedSentinel = feed.sentinel
+const feedLoading = feed.loading
+const feedDone = feed.done
+const feedErrMsg = feed.errMsg
+
 // 从 sessionStorage 加载搜索状态
 const loadState = () => {
   const keyword = sessionStorage.getItem('SEARCH_KEYWORD')
   const results = sessionStorage.getItem('SEARCH_RESULTS')
   if (keyword !== null) searchKeyword.value = keyword
-  if (results) goodsList.value = JSON.parse(results)
+  if (results) {
+    // ⚠️ 恢复的是「上次已加载的那些行」，不是分页游标：直接标 done，避免哨兵立刻
+    //    再要第一页、把同一批行追加一遍。用户想继续看，重新搜索即可。
+    feed.reset()
+    feed.items.value = JSON.parse(results)
+    feed.done.value = true
+  }
 }
 
 // 执行搜索：根据关键词是否为空调用不同接口
 const doSearch = async () => {
   const kw = searchKeyword.value.trim()
-  try {
-    let url, body;
-    if (kw === '') {
-      // 空搜索：调用获取全部商品接口
-      url = urlOf(endpoints.goods.goodsSelectHome)
-      body = ''  // 该接口可能不需要参数，如果必须可传 'action=getAll' 等，根据后端调整
-    } else {
-      // 有关键词：调用搜索接口
-      url = urlOf(endpoints.goods.productSearch)
-      body = `keyword=${encodeURIComponent(kw)}`
-    }
-    const res = await http.post(url, body)
-    const data = await res.json()
-    if (data.success) {
-      goodsList.value = data.list || []
-      saveState()
-    }
-  } catch (e) {
-    handleApiError(e, '请求失败')
+  mode = kw === '' ? { kind: 'home' } : { kind: 'search', kw }
+  feed.reset()
+  await feed.loadNext()
+  if (feed.errMsg.value) {
+    handleApiError(new Error(feed.errMsg.value), '请求失败')
+  } else {
+    saveState()
   }
 }
 
@@ -302,21 +334,14 @@ const loadCats = async () => {
 // ⚠️ 两条都**不**碰 `searchKeyword`、也**不**调 `saveState()` —— 搜索缓存（`SEARCH_KEYWORD` /
 //    `SEARCH_RESULTS`）的语义是「**搜索框**那一次搜索」，类目浏览不该往里塞（否则返回时会串味）。
 const loadByType = async () => {
-  try {
-    let url, body
-    if (activeType.value === null) {
-      url = urlOf(endpoints.goods.goodsSelectHome)
-      body = ''
-    } else {
-      url = urlOf(endpoints.goodsB3.categoryGoods)
-      body = `TypeId=${encodeURIComponent(activeType.value)}`
-    }
-    const res = await http.post(url, body)
-    const data = await res.json()
-    if (data.success) goodsList.value = data.list || []
-  } catch (e) {
-    handleApiError(e, '请求失败')
-  }
+  // ⚠️ 不带搜索词：两条链互不干扰（点树不清搜索框、点搜索不重置树）—— 原实现就是
+  //    `TypeId=` 一条，别在这里「顺手」把 searchKeyword 拼进去。
+  mode = activeType.value === null
+    ? { kind: 'home' }
+    : { kind: 'category', typeId: activeType.value }
+  feed.reset()
+  await feed.loadNext()
+  if (feed.errMsg.value) handleApiError(new Error(feed.errMsg.value), '请求失败')
 }
 
 onMounted(loadCats)
@@ -703,39 +728,55 @@ li.open > .lv1 {
   margin-bottom: var(--s3);
 }
 
-/* ── 分页（预留位 · C3〈搜索〉）：发丝线文字按钮 ────────────────────────────────
-   ⚠️ 当前页用 `--brand-tint` 底（与左树选中项、排序选中项同一条规则）；hover 仍留在
-   `--surface-2` —— **hover 是瞬时反馈、当前页是状态**，两者不该同色。 */
-.pager {
-  margin-top: var(--s8);
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  gap: var(--s2);
+/* ── 加载更多（块 7 收尾 · P1；取代原稿的 7 枚 disabled 页码占位）──────────────
+   底部渐变 = 「下面还有」的提示；`done` 后淡出。新插入的卡从下方淡入（`.grid > *`
+   —— ProductCard 是子组件，但它的**根节点**带本页 scoped 属性，所以选得中）。 */
+.grid > * {
+  animation: gs-in 0.32s ease both;
 }
-.pg {
-  min-width: 40px;
-  height: 36px;
-  padding: 0 var(--s3);
-  border-radius: var(--r2);
-  color: var(--ink-2);
-  font-size: var(--fs-sm);
-  font-variant-numeric: tabular-nums;
+@keyframes gs-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: none; }
 }
-.pg:hover {
-  background: var(--surface-2);
-}
-.pg.on {
-  color: var(--brand-ink);
-  font-weight: var(--fw-semi);
-  background: var(--brand-tint);
-}
-.pg[disabled] {
+.list-more {
+  position: relative;
+  margin-top: var(--s6);
+  padding-top: var(--s6);
+  text-align: center;
+  font-size: var(--fs-xs);
   color: var(--ink-3);
-  cursor: not-allowed;
 }
-.pg[disabled]:hover {
-  background: none;
+.list-more::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: calc(-1 * var(--s8));
+  height: var(--s8);
+  pointer-events: none;
+  background: linear-gradient(to top, var(--bg) 20%, transparent);
+  transition: opacity 0.3s ease;
+}
+.list-more--done::before {
+  opacity: 0;
+}
+.list-more--loading {
+  color: var(--brand-ink);
+}
+.list-more--loading::after {
+  content: '';
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  margin-left: var(--s2);
+  border: 2px solid var(--brand-soft);
+  border-top-color: var(--brand-ink);
+  border-radius: 50%;
+  vertical-align: -1px;
+  animation: gs-spin 0.8s linear infinite;
+}
+@keyframes gs-spin {
+  to { transform: rotate(360deg); }
 }
 
 /* 1080：分类树**改横排**，主区吃满整宽。

@@ -1,0 +1,21 @@
+已写回 C:/Users/86159/Desktop/软件工程/期末项目/docs/美化/c3-admin-preview/_struct-wire.js
+幂等：写前 f808dd8667b0 · 写后 f808dd8667b0 ✓ 未改动
+帧数 60 · 锁名 [order-pay, order-add] · 库存 8 行 · 判据 1 条
+
+序列                   非零帧 / 60
+qps                   59 / 60
+qpsOk                 59 / 60
+qps4xx                20 / 60
+qps5xx                 0 / 60
+hit                   59 / 60
+hitN                  59 / 60
+missN                 34 / 60
+meanMs                59 / 60
+p99                   59 / 60
+heat(格子)               0 / 60
+lockWaitArr            0 / 60
+wait[order-pay]        9 / 60
+wait[order-add]        8 / 60
+
+注：QPS 43.7次/秒 17.2% · P99 延迟 83ms 10.7% · 缓存命中率 100.0% 11.9% · 锁等待次数 0次（无箭头·分母0）
+图头数：4xx 峰值占比 11.8% · 整窗均值 2.3%

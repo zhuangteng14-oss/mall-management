@@ -1,0 +1,15 @@
+LOGIN #/admin
+FAIL_STATE {"hasRecover":true,"recoverText":"演练环境可能已被压测打空（种子 SKU 库存为 0 / 父商品下架 / 商家冻结）。 清场只删数据、删不回库存 —— 点右边复位后会自动重跑上一轮参数。 ✓一键重置演练商品库存","flash":"演练没跑起来：库里挑不到可演练的商品（探针注入，用于验证复位入口）","btn":"✓一键重置演练商品库存"}
+SHOT2_DOM {"flash":"演练环境已复位：共 13 行（goods_sku 4 / goods 4 / user 3 / seckill_activity 2）；正在","hasRecover":false}
+NET [{"url":"reset","status":200},{"url":"status","status":200},{"url":"run","status":500}]
+FLASHES ["演练没跑起来：库里挑不到可演练的商品（探针注入，用于验证复位入口）","演练环境已复位：共 13 行（goods_sku 4 / goods 4 / user 3 / seckill_activity 2）；正在用上一轮参数重跑…","演练没跑起来：库里挑不到可演练的商品（探针注入，用于验证复位入口）"]
+OK   场景清单已渲染  → "⚡秒杀抢购库存扣减 + CAS + 唯一索引 + 锁缺省权重 15%"
+OK   已点击预置场景
+OK   失败后出现复位横幅  → "演练环境可能已被压测打空（种子 SKU 库存为 0 / 父商品下架 / 商家冻结）。 清场只删数据、删不回库存 —— 点"
+OK   错误提示是「演练没跑起来」  → "演练没跑起来：库里挑不到可演练的商品（探针注入，用于验证复位入口）"
+OK   按钮文案 = 一键重置演练商品库存  → "✓一键重置演练商品库存"
+OK   复位成功提示来自真后端  → "演练环境已复位：共 13 行（goods_sku 4 / goods 4 / user 3 / seckill_activity 2）；正在用上一轮参数重跑…"
+OK   复位后自动重跑上一轮（/run 再次被调用）  → {"retried":1,"runAttempts":2}
+
+任务A 复位入口: 7 项 / 0 失败
+VERDICT {"okFlash":true,"retried":1}

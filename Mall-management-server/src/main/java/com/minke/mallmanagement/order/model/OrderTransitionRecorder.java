@@ -88,8 +88,12 @@ public class OrderTransitionRecorder {
      * <p>读回失败时：仍记 {@code applied}（转移确实成功了），但**没有** {@code from}/{@code to}
      * 可记，时间线这一条补不回来 —— 按已有的「允许丢，不许静默」口径记一笔
      * {@code timeline.writes{result=error}}，不新造指标。
+     *
+     * @param durationNanos 那次 CAS 的墙钟（块 7 · 阶段 3a.3 新增）。⚠️ **必须由调用方传进来**：
+     *                 UPDATE 在 {@code OrderService.casTransition} 里，本类看不到它 ——
+     *                 与 {@code AuditService} 的耗时同一条处置（就地取样、随调用链往下传）
      */
-    public void applied(OrderAction action, String orderId) {
+    public void applied(OrderAction action, String orderId, long durationNanos) {
         long occurredAt = System.currentTimeMillis();
         int payIf;
         int deliveryIf;
@@ -102,14 +106,17 @@ public class OrderTransitionRecorder {
         } catch (Exception e) {
             log.warn("转移已生效但三位读不回，这条时间线补不回来（B3）：订单 {} 动作 {}，原因：{}",
                     orderId, action.tag(), e.toString());
-            metrics.transition(action, null, null, Result.APPLIED, orderId);
-            metrics.timelineWrite(false, orderId);
+            metrics.transition(action, null, null, Result.APPLIED, orderId, durationNanos, null);
+            // ⚠️ 耗时传 null 不是「测不到」而是「**没发生**」：三位读不回来 ⇒ 没有 from/to 可写，
+            //    这次 INSERT 一次都没跑过。区别于 OrderTimelineWriter 那条真抛了异常的路
+            metrics.timelineWrite(false, orderId, null,
+                    com.minke.mallmanagement.shared.text.EventReason.of("状态读回失败", e));
             return;
         }
 
         String toState = stateMachine.stateName(payIf, deliveryIf, receiveIf);
         String fromState = stateMachine.previousStateName(action, payIf, deliveryIf, receiveIf);
-        metrics.transition(action, fromState, toState, Result.APPLIED, orderId);
+        metrics.transition(action, fromState, toState, Result.APPLIED, orderId, durationNanos, null);
 
         // 读回的三位若是伪造/越界的，这里会分类出形状 —— 与下单口那次检测同一个口径，
         // 只是这次发生在**转移之后**：PAY 能把伪造态洗成合法态，所以两处都得看。
@@ -123,14 +130,26 @@ public class OrderTransitionRecorder {
      *
      * <p>都是**既有行为** —— 本笔不新增任何拒绝文案，只把结果记下来。
      * 这是 {@code A-S3-2}（20 并发支付里恰好 19 个返回逐字「订单不存在或已付款」）能保持绿的前提。
+     *
+     * @param durationNanos 那次 CAS 的墙钟（块 7 · 阶段 3a.3 新增）；理由同 {@link #applied}。
+     *                 ⚠️ 0 行那一路**也真的跑了一次 UPDATE**（谓词没命中），故照记，不是 null
+     * @param reason 拒绝的人话原因（块 7 · 阶段 3a.3 后续新增）：直接复用调用方的响应文案
+     *               （{@code noRowsMsg}，「订单不存在或已付款」等），不另造一份
      */
-    public void rejected(OrderAction action, String orderId) {
-        metrics.transition(action, null, null, Result.REJECTED, orderId);
+    public void rejected(OrderAction action, String orderId, long durationNanos, String reason) {
+        metrics.transition(action, null, null, Result.REJECTED, orderId, durationNanos, reason);
     }
 
-    /** UPDATE 抛异常（库连不上等）。响应体的文案由 Controller 决定，本类只记结果。 */
-    public void errored(OrderAction action, String orderId) {
-        metrics.transition(action, null, null, Result.ERROR, orderId);
+    /**
+     * UPDATE 抛异常（库连不上等）。响应体的文案由 Controller 决定，本类只记结果。
+     *
+     * @param durationNanos 从起表到**抛出来**那一刻的墙钟（块 7 · 阶段 3a.3 新增）——
+     *                 异常路径上这个数就是「卡了多久才失败」，超时排查最先看它
+     * @param reason 失败的人话原因（块 7 · 阶段 3a.3 后续新增）：由调用方用
+     *               {@code EventReason.of("数据库错误", e)} 生成，本类不重复拼异常文本
+     */
+    public void errored(OrderAction action, String orderId, long durationNanos, String reason) {
+        metrics.transition(action, null, null, Result.ERROR, orderId, durationNanos, reason);
     }
 
     /**
@@ -148,11 +167,16 @@ public class OrderTransitionRecorder {
      * 而 {@code recordIllegalIfAny} 这条支路从此**在 API 路径上不可达**（留着给存量脏数据兜底）。
      * ⚠️ 顺带订正原文的计数：C#6 落地前实测，受影响的是 A3 的 S4a **3 条**（不是全部 8 条）
      * 与 **C 组**（{@code C_BITS} 八组合出生），已在同笔一并改造。
+     *
+     * @param durationNanos 那次出生 INSERT 的墙钟（块 7 · 阶段 3a.3 新增）。⚠️ 由
+     *                 {@code OrderService.orderAdd} 传进来 —— CREATE <b>不是 CAS</b>（没有守卫、
+     *                 没有前态），它测的是 {@code orderDao.insertOrder(...)} 那一行。
+     *                 口径与其余动作的 CAS 并列成同一个「落库耗时」，只是语句不同
      */
-    public void created(String orderId, int payIf, int deliveryIf, int receiveIf) {
+    public void created(String orderId, int payIf, int deliveryIf, int receiveIf, long durationNanos) {
         long occurredAt = System.currentTimeMillis();
         String toState = stateMachine.stateName(payIf, deliveryIf, receiveIf);
-        metrics.transition(OrderAction.CREATE, null, toState, Result.APPLIED, orderId);
+        metrics.transition(OrderAction.CREATE, null, toState, Result.APPLIED, orderId, durationNanos, null);
         recordIllegalIfAny(orderId, payIf, deliveryIf, receiveIf);
 
         submitTimeline(orderId, OrderAction.CREATE, OrderStateMachine.NO_PREVIOUS_STATE, toState, occurredAt);
@@ -174,9 +198,12 @@ public class OrderTransitionRecorder {
     }
 
     private void recordIllegalIfAny(String orderId, int payIf, int deliveryIf, int receiveIf) {
+        // 块 7 · 阶段 3a.3：耗时只量**分类那一步**（纯内存位运算，亚微秒）——
+        // 起点取在这里而不是调用方，是为了让「读回后」和「出生时」两个入口同一个含义
+        long startedNanos = System.nanoTime();
         String shape = stateMachine.illegalShape(payIf, deliveryIf, receiveIf);
         if (shape != null) {
-            metrics.illegal(shape, orderId);
+            metrics.illegal(shape, orderId, System.nanoTime() - startedNanos);
         }
     }
 
@@ -214,6 +241,10 @@ public class OrderTransitionRecorder {
      * 这条 WARN 一旦出现，含义是「闸与观测漂移了」，该去看代码，不是去看指标。
      */
     public void rejectedAtBirth(int payIf, int deliveryIf, int receiveIf, String orderId) {
+        // 块 7 · 阶段 3a.3：耗时 = 本方法入口 → 发事件之前。⚠️ 含那一行 WARN 的格式化与输出 ——
+        // 被拒路径上这行日志本就是拦截动作的一部分（它是「闸拦了」唯一的直接证据），
+        // 剔除它反而不诚实地把这个数说得比实际便宜（理由见 MallOrderStateMetrics#birthRejected）
+        long startedNanos = System.nanoTime();
         String shape = stateMachine.rejectionShape(payIf, deliveryIf, receiveIf);
         if (shape == null) {
             // 契约违约：闸放行了，却叫我来记一笔拦截。见 javadoc —— 不计数，只把它喊出来。
@@ -223,7 +254,7 @@ public class OrderTransitionRecorder {
         }
         log.warn("下单出生闸拦截（C#6）：PayIf={} DeliveryIf={} ReceiveIf={} shape={} 订单={}",
                 payIf, deliveryIf, receiveIf, shape, orderId);
-        metrics.birthRejected(shape, orderId);
+        metrics.birthRejected(shape, orderId, System.nanoTime() - startedNanos);
     }
 
     /**

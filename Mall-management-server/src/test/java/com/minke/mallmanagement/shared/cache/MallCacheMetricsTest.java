@@ -258,9 +258,9 @@ class MallCacheMetricsTest {
     @Test
     @DisplayName("事件流：写满即覆盖最旧、seq 单调；两条通道在同一调用点一起发")
     void eventRingOverwritesOldestAndKeepsSequenceMonotonic() {
-        int capacity = 512;
+        int capacity = 2048;
         for (int i = 0; i < capacity + 88; i++) {
-            metrics.l1Request(CACHE, "k" + i, true);
+            metrics.l1Request(CACHE, "k" + i, true, 1_500L);
         }
 
         List<MallCacheMetrics.MallCacheEvent> events = metrics.recentEvents();
@@ -273,9 +273,13 @@ class MallCacheMetricsTest {
             assertThat(e.kind()).isEqualTo("l1");
             assertThat(e.result()).isEqualTo("hit");
             assertThat(e.epochMilli()).isPositive();
+            // 块 7 · 阶段 3a.3 新增：本条事件的耗时（纳秒入参 → 微秒落进事件）与发起者身份
+            assertThat(e.durationUs()).as("纳秒→微秒：1500ns→1µs").isEqualTo(1L);
+            assertThat(e.actorId()).as("无 MDC ⇒ actorId 为 null").isNull();
+            assertThat(e.actorRole()).as("无 MDC ⇒ actorRole 为 null").isNull();
         });
         assertThat(count(MallCacheMetrics.L1_REQUESTS, "cache", CACHE, "result", "hit"))
-                .as("计数通道与事件通道同源：调用 600 次 = 计数 600").isEqualTo(600.0);
+                .as("计数通道与事件通道同源：同一次调用点两边都记").isEqualTo((double) (capacity + 88));
     }
 
     @Test
@@ -299,7 +303,7 @@ class MallCacheMetricsTest {
     @DisplayName("并发追加：快照里的 seq 严格递增且不重复（写者只做数组赋值，读者靠 seq 自校验）")
     void concurrentAppendsKeepSnapshotCoherent() throws Exception {
         int threads = 4;
-        int perThread = 300;   // 4 × 300 = 1200 > 容量 512 ⇒ 必然发生覆盖
+        int perThread = 600;   // 4 × 600 = 2400 > 容量 2048 ⇒ 必然发生覆盖
         ExecutorService pool = Executors.newFixedThreadPool(threads);
         CountDownLatch start = new CountDownLatch(1);
         CountDownLatch done = new CountDownLatch(threads);
@@ -310,7 +314,7 @@ class MallCacheMetricsTest {
                     try {
                         start.await();
                         for (int i = 0; i < perThread; i++) {
-                            metrics.l1Request(CACHE, key, true);
+                            metrics.l1Request(CACHE, key, true, 1_500L);
                         }
                     } catch (InterruptedException e) {
                         Thread.currentThread().interrupt();
@@ -331,7 +335,7 @@ class MallCacheMetricsTest {
         Set<Long> unique = new HashSet<>(seqs);
         assertThat(seqs).as("seq 严格递增（读者按 seq 自校验后不应出现错位）").isSorted();
         assertThat(unique).as("同一条事件不该在快照里出现两次").hasSameSizeAs(seqs);
-        assertThat(snapshot).as("容量有界").hasSizeLessThanOrEqualTo(512);
+        assertThat(snapshot).as("容量有界").hasSizeLessThanOrEqualTo(2048);
     }
 
     // ================= 工具 =================

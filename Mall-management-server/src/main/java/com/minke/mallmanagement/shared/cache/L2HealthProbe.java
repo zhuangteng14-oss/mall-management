@@ -173,7 +173,9 @@ public class L2HealthProbe implements DisposableBean {
             log.warn("L2(Redis) 不可达，全部两级缓存降级为「仅 L1 + 直接回落 DB」；"
                     + "故障期间不再逐次记录，每 {}s 才由单个请求探测一次。原因：{}",
                     cooldown.toSeconds(), cause.toString());
-            metrics.degraded();   // 同上：只在真实翻转时计数，故障期间的每次失败不再重复记
+            // 同上：只在真实翻转时计数，故障期间的每次失败不再重复记。
+            // 块 7 · 阶段 3a.3 后续：带上触发翻转的那次异常（reason 只进事件，不进 tag）
+            metrics.degraded(com.minke.mallmanagement.shared.text.EventReason.of("L2 不可达", cause));
         }
     }
 
@@ -203,12 +205,13 @@ public class L2HealthProbe implements DisposableBean {
         try (RedisConnection connection = probeConnectionFactory.getConnection()) {
             connection.ping();
             markOk();
-            metrics.probe(true, System.nanoTime() - startedAtNanos);
+            metrics.probe(true, System.nanoTime() - startedAtNanos, null);
         } catch (Exception e) {
             markFailed(e);
             // 计数与计时都记「探测」这个动作本身：探测失败时调用方走的是同一个降级路径
             // （补 3），故失败那次的耗时同样是真代价（上限 = 探测超时）
-            metrics.probe(false, System.nanoTime() - startedAtNanos);
+            metrics.probe(false, System.nanoTime() - startedAtNanos,
+                    com.minke.mallmanagement.shared.text.EventReason.of("L2 探活失败", e));
         }
     }
 }

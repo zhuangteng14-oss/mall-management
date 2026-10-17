@@ -1,0 +1,128 @@
+块 7 · 2026-10-17 「过滤条件 × 聚合」导致列表空 —— 复现、根因与修复
+========================================================================
+
+环境
+- 后端：真服务 8088，dev profile（app.auth.enabled=false）
+- 前端：真 dev server 8080，未开「模拟日常」
+- 浏览器：headless Edge（CDP），1440×900
+- 探针：scripts/probes/c3b7-filter-agg-empty.mjs
+- 截图：3a4g-filter-agg-before.png / 3a4g-filter-agg-after.png
+
+
+一、复现（修复前，2026-10-17 16:33）
+-----------------------------------
+造数（全部走真后端，不 mock）：
+  1) seckill 200 QPS × 12s 打空库存 ⇒ 大量 WARN「库存不足（未扣，防超卖命中）」；
+  2) 临时关掉 rateLimit，cacheCold 600 QPS × 6s 灌 INFO，把 WARN 全部挤出
+     W.events 的 200 条展示窗口（RAW 原始台账仍保留）；
+  3) 冻结视图 → 勾选「同类合并（聚合）」→ 点「≥ WARN」。
+
+实测状态：
+  rawWindow（统计口径，RAW 8192）: n=8185
+      info 7651 / protect 316 / warn 218
+  W.events（展示窗口 200）      : n=200，全部 info
+  filtered（旧实现从 W.events 过滤）: 0
+  streamRows                    : 0
+  DOM 行数                      : 0
+  空状态                        : 显示「当前筛选下一条也没有。点 ② 的「全部打开」还原。」
+
+⇒ 左下角「警告 218」、列表一条也没有 —— 与用户截图一致。
+   截图：3a4g-filter-agg-before.png
+
+
+二、根因（三处，缺一不可）
+-------------------------
+1) 统计与列表不同源（主因）
+   统计一直读 RAW（压缩前、上限 8192）；③ 列表的筛选链却从 W.events（上限 200）
+   出发。WARN 一旦被后续 INFO 挤出 200 条窗口，列表按 ≥WARN 过滤必然得到 0 条，
+   与统计面板的数字无关。用户要求的顺序（先筛 RAW → 再聚合 → 再窗口化）此前
+   从未落在这条链上。
+
+2) computed 引用不更新（隐藏原因）
+   改造过程中 `ranged` 直接返回 RAW 的普通数组。RAW 是原地追加、非响应式；
+   每次重算返回**同一个数组引用**，Vue 的 computed 认为值没变，不会通知下游
+   `filtered` / 列表。表现是 rawWindow 已更新、列表永远停在首帧的空数组。
+   修法：`ranged` 每次返回新数组（展示链改用单趟扫描 RAW，见下）。
+
+3) 虚拟滚动游标残留（用户指出的索引问题）
+   筛选把行数从几百缩到几十时，vStart 仍是按旧行数算的值；`slice(旧起点, 旧终点)`
+   会切出空数组。实测把 vStart 推到 9999 时旧实现会得到 0 行。
+   修法：
+   · 筛选条件（类 / 严重度 / ≥WARN / 对象 / 搜索 / 时间范围 / 聚合开关）一变，
+     同步把 vStart 归零、vEnd 置 40；下一帧（rAF）把 scrollTop 拉回 0 并重算窗口；
+   · vRows / updateWindow 在切取前把游标夹到 [0, n-1]，即便某一帧还没重算，
+     非空列表也至少切得到一行；
+   · 程序性 scrollTop=0 产生的那次 scroll 事件用一次性标记吞掉，避免被 onScroll
+     误判成「用户上滚」而进入 frozen（那会让列表停止并入新事件）。
+
+
+三、修复（EventLog.vue）
+------------------------
+1) 筛选链改为单趟扫描 RAW：
+   for (const e of RAW[cur].events) { 时间范围 → 类 → 严重度 → ≥WARN → 对象 → 搜索 }
+   ⇒ 返回新的 filtered 数组；不再先复制 ranged 再 filter。
+2) streamRows 的固定顺序：
+   filtered（RAW 原始行）→ 聚合（开关开启时）→ 排序（时间正序）→ vRows 窗口化。
+   聚合关闭时，从筛完的 RAW 里按 ts/seq 取最新 200 条逐条显示（数据侧上限）；
+   聚合开启时一行代表 N 条，不截断 —— 列表可覆盖整本 RAW，与统计同源同量。
+3) 空状态判据改为 filteredRaw 是否为空：
+   · 本会话有原始事件、筛选后 0 条 ⇒「当前筛选下一条也没有」；
+   · 真一条原始事件都没有 ⇒「本会话还没收到任何事件」。
+   （旧实现用 events.length 判，时间范围把行全排掉时会误报。）
+4) aggregateEvents 不再为每个成员维护 seqs 数组：聚合行不进 W.events，
+   该数组已无消费方；每拍为几千条事件 push seq 只是白付分配成本，已删除。
+   forgetSeqs 相应简化为「删除单条 seq」。
+
+
+四、修复后验收（2026-10-17 16:43，探针 exit 0，9/9 判据通过）
+------------------------------------------------------------
+同一造数路径，点「≥ WARN」后：
+  rawWindow: n=8192，info 7383 / protect 399 / warn 410
+  W.events : n=200，全部 info（前提成立：WARN 确实已被挤出展示窗口）
+  filtered : n=809（warn 410 + protect 399），info = 0
+  streamRows: 5 条聚合行
+  DOM 行数  : 5，空状态不可见
+  实际行（节选）:
+    熔断开路拒绝（未执行）× 399
+    库存不足（未扣，防超卖命中）× 410
+  截图：3a4g-filter-agg-after.png（左「警告 410」与列表 WARN 行同时可见）
+
+虚拟滚动回归（同一探针阶段 ④）：
+  强制 virtualOn，vStart=9999 / vEnd=10039（远越界）
+    ⇒ vRows=1、DOM=1（夹取生效，不空白）
+  随后把 ≥WARN 改回「全部」（筛选变化）
+    ⇒ vStart=0、vEnd=22、scrollTop=0、DOM=22、空状态 false
+
+全部判据：
+  warn-exists-in-raw                 ok
+  warn-absent-from-display-window    ok
+  filter-keeps-raw-warn              ok
+  stream-rows-not-empty              ok
+  dom-rows-rendered                  ok
+  empty-state-hidden                 ok
+  virtual-cursor-in-range            ok
+  stale-cursor-clamped-not-blank     ok
+  cursor-reset-on-filter-change      ok
+
+
+五、性能回归（临时探针，_work/perf-raw-filter.mjs，未提交）
+-----------------------------------------------------------
+800 QPS × 12s（bannedUser 50% / sensitiveWord 50%），页面实时收帧：
+  RAW 约 5,950 条时，单次重算（rawVer 变化 → streamRows 求值）中位数：
+    仅 rawWindow（改造前就有的统计）      1.8 ms
+    仅 filtered（RAW 单趟筛选）           3.4 ms
+    filtered + 聚合 + streamRows（全链）  6.5 ms（max 9.6 ms）
+  全链比改造前多约 3–4 ms/帧（改造前列表只扫 200 条展示窗口）。
+  同场 rAF 实测：766 帧 / 13.43 s ≈ 57.0 fps；Long Task(>50ms) 11 次，
+  最大 77 ms（该形态在此前 800 QPS 证据中同样存在大帧；本轮未把它归因于本改动，
+  但如实记录）。
+  ⇒ 功能正确性优先；若后续对 800 QPS 帧率有更严判据，可再做列表重算节流/增量聚合。
+
+
+六、质量门
+----------
+- 前端 ESLint（EventLog.vue）：exit 0
+- 探针：exit 0，9/9 判据 ok
+- 证据文件与截图 mtime 均晚于最后一次代码编辑
+- 未改动 api/demo-stream.js 接口；「模拟日常」入口保留
+- 未 push、未开 PR

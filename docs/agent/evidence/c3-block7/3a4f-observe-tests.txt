@@ -1,0 +1,24 @@
+块 7 · 可观测域后端测试（2026-10-17 22:55）
+====================================================
+
+命令（Mall-management-server/）：
+  ./mvnw -Dtest='EventBroadcasterTest,*MetricsTest,EventStreamServiceTest,OrderStreamServiceTest,AttackEngineTest,AttackSwitchConfigTest,ReplayServiceTest' test
+
+结果：exit=0
+  19 个测试类 / 155 条用例 / Failures 0 / Errors 0 / Skipped 0
+
+（按 target/surefire-reports/*.txt 的 mtime 过滤本次运行，排除上次残留报告）
+
+本次随分级标准重构同步修正的一处旧断言：
+  EventStreamServiceTest#firstFrameCarriesEverythingAlreadyInTheRings
+  旧口径：insufficient = warn（业务失败）
+  新口径：insufficient = protect（库存不足属防超卖主动拦截，紫），audit.failed = warn
+  → 断言改为 info=1 / protect=1 / warn=1 / error=0
+
+用例清单与条数：
+  AuditServiceMetricsTest 4, SensitiveWordServiceMetricsTest 3, NotificationServiceMetricsTest 2,
+  AuditMetricsTest 3, IdentityMetricsTest 4, NotifyMetricsTest 3, ProtectionMetricsTest 6,
+  SensitiveMetricsTest 4, StockMetricsTest 6, AttackEngineTest 29, AttackSwitchConfigTest 9,
+  EventBroadcasterTest 15, EventStreamServiceTest 10, OrderStreamServiceTest 12,
+  ReplayServiceTest 10, MallOrderStateMetricsTest 14, MallCacheMetricsTest 10,
+  MallLockMetricsTest 7, IdentityGuardMetricsTest 4

@@ -166,7 +166,7 @@ class LockSceneServiceTest {
         assertThatThrownBy(() -> scene.run(SceneKind.WAIT, "k", new Params(0, 0)))
                 .isInstanceOf(IllegalArgumentException.class);
         assertThatThrownBy(() -> scene.run(SceneKind.WAIT, "k", new Params(LockSceneService.MAX_THREADS + 1, 0)))
-                .as("上界不是性能考虑，是 512 槽事件环的安全边界").isInstanceOf(IllegalArgumentException.class);
+                .as("上界不是性能考虑，是事件环容量（2048 槽）的安全边界").isInstanceOf(IllegalArgumentException.class);
         assertThatThrownBy(() -> scene.run(SceneKind.WAIT, "k", new Params(1, -1)))
                 .isInstanceOf(IllegalArgumentException.class);
         assertThatThrownBy(() -> scene.run(SceneKind.DEADLOCK, "k", Params.of(3, Duration.ZERO)))

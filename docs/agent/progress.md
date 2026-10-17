@@ -2276,3 +2276,310 @@ DB 级唯一锁探针 `ProbeB6c7Lock` = **PASS 12 / FAIL 0**；接口级 8 条�
 🧪 **本轮最小收验（⚠️ 非用户手验）** ⇒ 后端 `./mvnw -B test` = `Tests run: 309 / Failures 0 / Errors 0 / Skipped 26` + `BUILD SUCCESS`（`Total time: 01:05 min`，2026-10-13 17:13；TD-58 那条计时敏感用例本轮**未红**）；
 前端 `build` = `DONE`（`Hash 8d3685921932c375`、`Time 94680ms`、exit 0，**① 甲案之后**重跑）、`npx eslint src` = **exit 0**（同轮重跑）；
 探针 `probe-b6c3-mention.py` = **EXIT 0**（A1–A4 / B1 全绿、B2 与段 N 全 0）。
+
+### 7-B7. C3 块 7〈可观测域 4 项 + 库存治理 2 项〉（2026-10-13/14；**收口条：前 20 笔逐笔登记见本节末尾，本小节由 commit 8b 开段、commit 9 收口**）
+
+> 分支 `feat/c3-admin-block7`（切自 **`c2efb81`** = PR #91 合并点，即块 6 收口之后）。块内已提交 **16 笔**（`195edc9` pack + `b1ffc6e` commit 0 … `b773bf3` commit 8），本笔（**commit 8b**）是**第 17 笔**。
+> ⚠️ ~~**本小节是「开段」，不是收口条**：块 7 的范围 / 建表 / 后端 / 前端 / 门禁 / DoD / 挂账**总表归 commit 9**；本笔只把 commit 8b 这一笔的面记下来~~ ⇒ **已兑现**：本小节由 **commit 8b 开段**、**commit 9 收口**（下面「8b 那一笔的面」保留原文，收口总表 + 前 20 笔逐笔登记接在本小节末尾）。
+> ⚠️ 块 7 已入库的三份收笔报告在 `docs/agent/archive/`：〈2c+2d 与新发展两项〉·〈commit 4 攻击引擎〉·〈边界补笔 `order.Source` 写入通道〉（**本笔的「未跟踪残留归置」一笔入库**，见下）。
+
+**本笔 = commit 8b〈事件台账 + 清理〉**（2026-10-14，用户批文《commit 8 已核 —— 通过。开工 commit 8b》）⇒ 主体三件（**新表 + 清理 job + 清场端点**）+ 四项收尾（修 `DrillTargetDao` 的 `u.id` / 补 `TraceLog` 单测 / 未跟踪残留归置 / `db-migration.md` 的「⏳ 待落库」改口）。
+
+**库变更（Migration 段 ⑲）** ⇒ `.sql:1832-1918`：⑲-1 建表 `observed_event`（**11 列 + 4 个非唯一索引**）· ⑲-2..⑲-5 四表加 `BatchId varchar(36) DEFAULT NULL`（`drill_record` / `order` / `comment` / `admin_audit`）。
+**实测（可复核）** ⇒ 表数 **37 → 38** · 行首 `CREATE TABLE` **38 → 40** · 非主键索引 **69 → 73** · 非主键 UNIQUE **19 不变** · `.sql` **1918 行 / LF 1918 / CR 1918 / 裸 CR 0** · `observed_event` **11 列 / 4 索引 / 0 行**。落库 **21/21 OK ×2**（`marker = 库存治理补完` ⇒ ⑱ + ⑲ 一次跑完，幂等确证），只读复核 `_work/b7c8b-verify.txt`；详见 `db-migration.md` 注意 23 + `db-schema.md §16`。
+⚠️ **批文的「5 张表加 `BatchId`」与实测不符**：库里**早有**该列的是 **3 张**（`notification` / `goods_audit` / `merchant_application`，皆 `NOT NULL`）⇒ 本段**只加缺的 4 张**（皆 `NULL`，因为「不属于任何演练批次」是**没有值**）。已就地更正登记。
+
+**后端** ⇒ 新建 `observe/{dao,service,job}` 三件（`ObservedEventCleanupDao` / `ObservedEventCleanupService` / `ObservedEventCleanupJob`）· `AttackController` 第 **4** 个出口 `POST /admin/observe/attack/cleanup` · 审计常量 `AuditActions.OBSERVE_ATTACK_CLEANUP`（**44 → 45 条**，追加文件尾）。
+⚠️ **清理按两种谓词 OR**（用户 2026-10-14 批文原文的判据）：`OrderId LIKE 'SIM-%'` **OR** `Source='attack'` —— 只按一种会漏（评论链路只有 `Source`、单号链路只有前缀）。`drill_record` **两种谓词都排除**（它是「演练这件事本身」的记录，语义与「演练污染出来的数据」相反）。
+⚠️ **两档保留期** ⇒ 攻击批次 **3 天** / 日常 **30 天**，按 `BatchId IS NULL` 分档、按 **`OccurredAt`** 算（不是 `created_at`）。⚠️ **本笔不接写入**（写入方 = **8c 的 RabbitMQ consumer**）⇒ 表空、每轮删 **0 行** —— 这是保留期基础设施**提前就位**，不是缺陷（理由逐字写在 `ObservedEventCleanupJob` 类注释）。
+⚠️ **它把 `@Scheduled` 实例加到第 7 个**（`grep -rn '@Scheduled' …/main/java` 实测既有 **6** 处）—— 而调度器**总闸**仍挂在别人的类上（`MerchantDowngradeSchedulingConfig`，被 `mall.downgrade.job.enabled` 关着）⇒ **a3 下它本来就不醒**；本笔另把它自己的开关在 **dev = `true` / a3 = `false` / smoke = `false`** 三处登记齐（同族第七处坦白）。
+⚠️ **修 `DrillTargetDao` 的 `u.id`（批文待裁 1）** ⇒ `user` 表主键是 `username char(20)`、**没有 `id` 列** ⇒ 原 SQL 在真库上必 500（攻击引擎选目标用户时踩到）。判据 = 攻击引擎在 **dev + VM 库**上真跑起来、**8 场景能打**。
+⚠️ **补 `TraceLog` 单测（批文点名要补）** ⇒ `shared/web/TraceLogTest.java`（**8 例**）：起止两列**各有独立断言**（`ms = end − start` 在 `start == end` 时也等于 0 ⇒ 推不出来），另记一条实测事实 —— `latestSeq()` = **最后一条的 seq**，与 `since()` 同坐标系。SQL 侧另补 `observe/dao/ObservedEventCleanupDaoTest`（**5 例**，替身 `JdbcTemplate` 钉两种谓词 / 两档 OR / 子表优先 / `drill_record` 排除）。
+
+**前端** ⇒ `endpoints.js` 头注 **139 → 140**（**同行替换**）+ `observe` 组尾追加 `attackCleanup`（`:407` 起 +11 行）· `api/observe.js` **六条 → 七条**（导出 `cleanupAttack()`）。
+⚠️ **本笔只到 API 层**：攻击模拟器页上那枚「清场」按钮**不在本笔范围**（别照着注释以为页面已经有了）。
+⚠️ **调用点必须二次确认 + 回显 `summary`** —— 它是本表**第一条破坏性端点**（后端真 DELETE、没有撤销、没有中间态）。
+
+**A3 门禁（P3 一次 +1，四处同改）** ⇒ IN 清单加 `'observed_event'` · `KNOWN_TABLES` **26 → 27** · 期望表数 **37 → 38** · PASS 文案串同改。⚠️ `concurrency` job 是 `continue-on-error` ⇒ **只能读 artifact 的 `gates.count`，不能读 job 颜色**（同 §7-B6 的教训）。
+
+🧪 **DoD（本笔实测）** ⇒ `./mvnw -B -o **clean** test`：`Tests run: 459, Failures: 0, Errors: 0, Skipped: 26` + `BUILD SUCCESS`（`Total time: 47.537 s`，2026-10-14T19:21:12+08:00，日志 `_work/b7c8b-mvn-test.log`；块 6 收口时点是 **309** ⇒ 差额来自块 7 各笔累计新增，其中 observe 包 **14 类 / 86 例**）。`clean` 不能省（增量编译会复用陈旧 test class，同 §7-B6 的判据）。
+⚠️ **整仓跑逮到一条「会随机红的绿测试」（本笔实测）** ⇒ `ObservedEventCleanupDaoTest` 第一版用 `containsExactlyEntriesOf(Map.of("order_item",3,"order",6))` —— **`Map.of` 的迭代序不保证**，而那个断言是**逐位比较**的 ⇒ 同一份代码两次运行可以一次绿一次红（首次整仓跑红在「same elements but not in the same order, at index 0」）。已改 `containsExactlyInAnyOrderEntriesOf`。**教训**：断言 map 内容一律用 any-order 版；「单跑绿」不能替代整仓跑。
+
+⚠️ **零漂移（本笔逐文件核过）** ⇒ `AuditActions.java` 的 +22 行**全在文件尾**（既有常量行号一个不挪；唯一改动是 `:25` 的**同行替换** 44 → 45）· `endpoints.js` `:7` 同行替换 + `:407` 起追加（**最大被引 `:58` 未漂**）· `db-schema.md` `:8` / `:15` 同行替换 + 文件尾 §16（既有引用 `:5` / `:91` / `:205` / `:732` 未漂）· `ConcurrencyRunner.java` 三处**同行替换、净 0 行** · `db-migration.md` **入向引用实测 = 0**（改动只在末条注意 23 内）· `api/observe.js` / `AttackController.java` / `DrillTargetDao.java` / 三处 properties / `mall_management_sql.sql`（尾追加）**入向 `文件:行号` 引用实测 = 0**。
+⚠️ **一处真漂移（只登记、本笔不重指）**：`AbstractSmokeTest.java` 本笔 **+25 行**（import 块 **+2** / `@Import` 尾部登记注释 **+23**）⇒ 指向它的外部行号集体下移 —— `progress.md:411` 引的 `AbstractSmokeTest.java:45` 现实为 **`:47`**；context-packs 里那 4 处（`:137` / `:137-146` / `:156` / `:163-206`）**在块 2–6 期间就已被 `@Import` 扩容甩到 `:376` 起**，属**既有误指族**（TD-51），不在本笔范围。
+
+**文档（本笔同步）** ⇒ `db-migration.md` 注意 **23**（登记 **#40**）+ 注意 **22** 的「⏳ 待落库」改「✅ 已落库（实测）」· `db-schema.md` 尾追加 **§16** + 头部两处**同行订正**（表数量行 / 行尾 CRLF 计数行）· 本文件 **§7-B7**（开段）· `slot-registry.md` **§二十四**（开段）。
+⚠️ **一处命名假设更正**：`api-contract.md` **没有「附录 H」**（其附录**到 G 为止** = 块 6 的内容域）⇒ `db-migration.md` 注意 21 那句是**前瞻指针**；块 7 的端点契约（可观测域 **7** 条）**本笔不新建**，归 **commit 9**。
+
+**未跟踪残留（另起一笔 chore，不混进 8b 的功能改动）** ⇒ 入库 `docs/agent/archive/` 三份 txt + `scripts/probes/probe-b7c5-attack-console.mjs` 与它的 `out-b7c5-attack-console.png`（探针是资产，照 commit 3–8 惯例入库）。
+
+#### 7-B7-收口　块 7 总表（**commit 9**，2026-10-14；**本小节至此由「开段」转「收口」**）
+
+**范围（批文一，原样 6 项）** ⇒ 可观测域 4 项：**① 攻击模拟器 · ② 指标面板 · ③ 状态流转 · ④ 实时日志**；库存治理 2 项：**⑤ 库存扣成标记（CAS + 下单即扣 + 超时释放）· ⑥ 事件出口（MQ 发布/消费 + 批次跨线程透传）**。批外补笔 4 处（`order.Source` 写入通道 · 边界补笔 · 通知号域 · 演示种子）。
+
+**提交切分（块内 **20 笔**，`git log --reverse c2efb81..HEAD` 实测；**commit 9 = 第 21 笔**）**
+
+| # | 短哈希 | 时点 | 一笔是什么 |
+|---|---|---|---|
+| 1 | `195edc9` | 10-13 21:52 | pack（可观测域 4 项 + 库存治理 2 项）+ 方案原文入库 |
+| 2 | `b1ffc6e` | 10-13 22:16 | **commit 0** 建表 `drill_record` + 演示基线列 2 + 块 6 六表补 `Source`（Migration ⑰）+ P3 门禁 25→26 / 36→37 |
+| 3 | `b1477cc` | 10-13 22:34 | **commit 1** 库存治理 —— CAS 扣减 + 下单即扣 + 超时释放（TD-36 / TD-38） |
+| 4 | `46cf986` | 10-13 22:42 | **commit 2** 五套新事件环（Stock / Audit / Notify / Sensitive / Identity） |
+| 5 | `ede4493` | 10-13 23:10 | **commit 3** 三条 SSE 观测端点 + 事件广播器（`StreamingResponseBody` / 1s 一拍 / 512 槽） |
+| 6 | `a1d2a9c` | 10-13 23:39 | **commit 2b** 四环改真观测点（审计/通知/敏感词/身份各在原写入点补发事件） |
+| 7 | `5c823eb` | 10-14 00:07 | **commit 4** 攻击引擎 —— 八场景真压测 + 演练记录落库 + 三条端点 + 前端薄封装 |
+| 8 | `96232eb` | 10-14 00:42 | **commit 2c+2d** 秒杀扣减接线（TD-38 兑现）+ 超时释放条件化（库存偏账根治） |
+| 9 | `b201437` | 10-14 01:03 | **① 评论写入链路补齐 `Source` + ② 超时取消 job 跳过演练带标记的行** |
+| 10 | `776306a` | 10-14 01:19 | 边界补笔 —— `order.Source` 写入通道（`/order/orderAdd` 可选 `Source` + 攻击引擎下单带 `attack`） |
+| 11 | `2181d07` | 10-14 13:14 | **commit 5** 攻击模拟器页 —— 八场景一键 + 权重编排 + 演练记录 |
+| 12 | `5b971f1` | 10-14 13:34 | **commit 5b** 断循环依赖 —— `ObserveMetricsConfig` 的 `MeterFilter` 改 `static`（一个词，环自断） |
+| 13 | `20df0a8` | 10-14 16:52 | **commit 6** 指标面板 + `Pager.vue` —— 7 项图表（`HeatmapChart` 首次启用） |
+| 14 | `b6619c5` | 10-14 17:21 | **commit 6b** 后端 traceId —— `TraceIdFilter` + logback 轮转 + 慢 SQL 告警（datasource-proxy） |
+| 15 | `033d62a` | 10-14 17:46 | **commit 7** 状态流转页 `OrderFlow.vue` —— 5 图（五态计数 + 环图 + 进度条列表 + 状态机 + 时间线） |
+| 16 | `b773bf3` | 10-14 18:39 | **commit 8** 实时日志页 `EventLog.vue` —— 8 类事件卡片流 + traceId 链路抽屉 |
+| 17 | `358c00d` | 10-14 19:31 | **chore** 归置未跟踪残留（三份收笔报告入库 + 攻击模拟器探针 mjs + png） |
+| 18 | `b1215f3` | 10-14 19:32 | **commit 8b** 事件台账 + 清理 —— `observed_event` 建表 + 保留期 job + 清场端点（Migration ⑲） |
+| 19 | `136b27c` | 10-14 19:55 | **commit 8b2** 指标 P99 剔除 SSE 长连接 + 无样本留空（P99 26.8 秒的误红） |
+| 20 | `2047f41` | 10-14 22:38 | **commit 8c** 事件出口 —— MQ 发布/消费 + 批次跨线程透传 + MQ 缺席上屏接通 |
+| **21** | （**本笔**） | 10-14 | **commit 9 · 收口** —— 文档统一补 + 中文标签层 + 清场按钮 + 演示种子 + 手验清单 |
+
+⚠️ **早先那版「16 笔 / 本笔是第 17 笔」的记账漏了两笔**（`358c00d` chore 与 `136b27c` 8b2）—— 它们各自是独立提交，**计入块内笔数**；更正后 = **20 笔**。
+
+**库变更汇总（Migration ⑰ ⑱ ⑲ 三段，全落 VM 库）** ⇒ 表数 **36 → 38**（+`drill_record` +`observed_event`）· 行首 `CREATE TABLE` **37 → 40** · 非主键索引 **69 → 73** · 非主键 UNIQUE **19 不变** · 加列：⑰ 六表 `Source` + 两表演示基线列（`goods_sku.BaselineStock` / `seckill_activity.BaselineSoldStock`）+ ⑱ `order.StockDeducted` + ⑲ 四表 `BatchId` —— 全库**有 `Source` 的表 = 17 张**（`goods_sku` / `seckill_activity` **不在**其中）。逐项见 `db-schema.md §16`（commit 8b 登）与 **§17**（commit 9 补登 ⑰ / ⑱）+ `db-migration.md` 登记 **#39 / #40**。
+
+**后端汇总** ⇒ `observe` 包 **14 类 / 86 例**（commit 8b 时点）· 新增端点 **7** 条（攻击 4 + SSE 3）· `AuditActions` **44 → 45** · `@Scheduled` **6 → 7** 处（总闸仍挂在别人的类上，a3 下整台不醒）· `TraceIdFilter` 新增（`X-Trace-Id` / `X-Drill-Batch` 双头 + MDC 双键）· RabbitMQ 发布/消费（`ObservedEventConsumer`，含 5 分钟周期 WARN）。
+**前端汇总** ⇒ 新增页面 4（`AttackConsole` / `MetricsPanel` / `OrderFlow` / `EventLog`）· 新增通用件 2（`Pager.vue` / `HeatmapChart` 首次启用）· `endpoints.js` **133 → 140**（头注同数）· `api/observe.js` **7 条** · **中文标签层 5 文件**（`src/config/labels/`，commit 9 建）。
+
+**A3 门禁** ⇒ P3 一次 +1：IN 清单加 `'observed_event'` · `KNOWN_TABLES` **26 → 27** · 期望表数 **37 → 38**（同一笔四处同改）。⚠️ `concurrency` job 是 `continue-on-error` ⇒ **只能读 artifact 的 `gates.count`，不能读 job 颜色**（同 §7-B6 教训）。
+
+🧪 **DoD（commit 9 实测，2026-10-14T23:17:19+08:00）** ⇒ 后端 `./mvnw -B -o **clean** test` = `Tests run: **471**, Failures: 0, Errors: 0, Skipped: 26` + `BUILD SUCCESS`（`44.189 s`，日志 `_work/b7c9-mvn-test.log:5126` / `:5129` / `:5131`）。⚠️ **471 与 commit 8c 同数**（commit 9 不含后端代码改动）。前端 `npm run lint` = **`DONE No lint errors found!` / exit 0**（`_work/b7c9-npm-lint.log`）+ `npm run build` = **`DONE Build complete.` / exit 0**（Hash `2790b6a641b00e77`、`25872ms`，`_work/b7c9-npm-build.log`）。`clean` **不能省**（增量编译复用陈旧 test class）。
+
+⚠️ **零漂移（commit 9 逐文件核过）** ⇒ 详见 `slot-registry.md` **24-9**（中段插入仅 `db-migration.md` 表格 +1 行且该文件入向引用 = 0 · 其余全为尾追加 + 同行替换 · `slot-registry.md` 自身入向引用全指向 `:4192` 之前）。**refs-scan before/after 逐条核对**的结论同表。
+
+**块 7 挂账** ⇒ 逐条见 `tech-debt.md`（commit 9 补登 §块 7 段）：**TD-51**（`AbstractSmokeTest.java` 既有误指族）· **TD-54**（未应用的族）· **TD-58**（计时敏感用例）等；另 `TD-18`（SSE 无角色闸）与本块同源。⚠️ **台账落库边界**（`EventBroadcaster.poll()` 由 **SSE 流线程**驱动 ⇒ **没人开实时日志页就不落库**）不是缺陷、是设计，已写进 `api-contract.md` 附录 H.7。
+
+⚠️ **本笔不 push / 不 merge** —— 块 7 **全部手验通过**后由用户决定（批文明确）。手验清单另见 `reports/块7-commit9-收口-报告.txt`（**2026-10-16 顾问裁定 2 归档进仓根 `reports/`；原落桌面**）（三列式：操作步骤 → 期望 → 判据）。
+
+#### 7-B7-续　commit 10 系列 + 收口（**commit 10d**，2026-10-15）
+
+**这一段做什么** ⇒ 块 7 的**第 22 笔起**（接上面 20 笔 + commit 9 之后）。三条功能主线：**① 演练批次号链路（10a）· ② 观测流三改（10b）· ③ 攻击引擎 v2（10c）**；其余是收口与订正（10 收口 · 10c-2 前置 + 三笔订正 · 撤 4da212a 冗余配置 · 延迟口径排除）。**本系列零 DDL**（`git log 57e19b7..HEAD --name-only` 实测无 `.sql` 变更）—— 库变更仍到 **⑲** 为止。
+
+**提交切分（本系列 11 笔，`git log --reverse 50439fa..21bae15` 实测；commit 9 = 块内第 21 笔，故本段起于第 22 笔）**
+
+| # | 短哈希 | 时点 | 一笔是什么 |
+|---|---|---|---|
+| 22 | `50439fa` | 10-15 14:58 | **chore** 修探针陈旧期望 —— `.a-of-id` 的 `#` 前缀（ab6f71d 引入，与 10 无关，故单作杂活一笔） |
+| 23 | `3022dad` | 10-15 14:58 | **commit 10a** 演练批次号链路 —— `order.BatchId` 写入 + 帧带 `batchId` + 本批次五态计数（`countOrderStatesByBatch`） |
+| 24 | `1b5afcb` | 10-15 15:23 | **commit 10b** 观测流三改 —— **每连接一份帧源（丙）** + 事件环 **512→2048** 与环满记账（`dropped`/`droppedTotal`/`droppedIngest`）+ **`spring.mvc.async.request-timeout=-1`** |
+| 25 | `41e0a5e` | 10-15 15:59 | **commit 10c** 攻击引擎 v2 —— **甲异步引擎**（`sendAsync` + 32 派发线程 + 在途许可 + `Pacer` 令牌桶）+ **丁开关面板/档位** + **`/attack/stop`** + 前端 **指数退避重连** |
+| 26 | `57e19b7` | 10-15 16:24 | **docs** 10 收口 —— refs 重指 4 处（`EventStreamService:81→:96` 等）+ 512→2048 口径同步 6 处 + 两处既有陈旧登记（零 Java / 零前端，+9/−9） |
+| 27 | `4da212a` | 10-15 16:56 | **feat** 10c-2 前置 —— 引擎并发上限 **500→4000**（+ `AttackConsole.vue` `CONC_MAX`）+ 加一行为 http P99 开分位 |
+| 28 | `ef178da` | 10-15 16:56 | **feat** 清场谓词扩到**三条 OR** —— 种子 SKU 库存（`SEED-%`）+ 清场审计行（`ObjectType='attack'`）纳入清理 |
+| 29 | `1c42f30` | 10-15 16:56 | **docs** `selection-status.md:98` 的 8192 计划记为**已裁**（维持 2048，原计划撤销） |
+| 30 | `d74f9e3` | 10-15 16:57 | **docs** 登记 **TD-69** —— 保留期 Job 把演练副产物当「日常」多留 30 天（+11/−0，仅追加 EOF） |
+| 31 | `c495997` | 10-15 | **chore** 撤 `4da212a` 多加的那段配置（**15 行**）—— 分位早由 `ObserveMetricsConfig` 给，配置本就多余 |
+| 32 | `21bae15` | 10-15 | **fix** 延迟口径排除**演练启动端点** —— `/attack/run` 挂满整场演练的时长不算接口延迟（`DRILL_RUN_URI` 全等排除） |
+| 33 | `071c2cc` | 10-15 | **chore** 订正 `AttackController` 陈旧注释 —— concurrency 上限 500 → 4000（**净 0 行**；**单独一笔**，不混进下面那笔） |
+| **34** | （**本笔 · 收口**） | 10-15 | **commit 10d · 收口** —— 文档统一补（api-contract / tech-debt / progress / slot-registry）+ 手验清单 + 假数据清场 + refs 重指 |
+
+**端点变更（本系列）** ⇒ `/attack/run` 新增 **3 个入参** `targetQps` / `protections` / `injections`（丁：只记录不实现）；新增**第 5 条出口** `POST /admin/observe/attack/stop`；响应新增 **`Engine` 块**（真实生效配置回显）与帧字段 **`batchId` / `batchCounts` / `dropped` / `droppedTotal` / `droppedIngest`**。⚠️ **没有** `/attack/status` 这个端点（实测五条映射 = `/scenarios` `/run` `/stop` `/records` `/cleanup`）。
+**配置（本系列）** ⇒ `spring.mvc.async.request-timeout=-1`（`application.properties:228`，10b 追加）；引擎两键 `mall.drill.engine.in-flight-cap:512` / `mall.drill.engine.shed-wait-ms:50` **只在 `@Value` 默认值里**（`AttackEngine:653` / `:657`【3a.1 重指；⚠️ 原文写的两个旧行号（608 / 612）是**陈旧值** —— 实测改动前那两行就已不在 `@Value` 上（`608` 是「`TraceIdFilter` 收进 MDC」那句），差值 −19 来自 D 段/阶段 2b 的净插入未重指】），**未落 properties**；`4da212a` 加的那行 `management.metrics.distribution.percentiles[...]` 已由 `c495997` **撤回**。
+
+⚠️ **边界 A 两笔都写明**：10b / 10c 只抬高**引擎与观测侧自己的能力**，连接池 / Tomcat 线程 / 慢 SQL **一律不动** —— 后端慢的地方照旧慢，那是 10c-1（瓶颈定位）的观察对象。
+⚠️ **一处自我更正（41e0a5e 报文内）**：10c 第一版报文写「`AttackConsole.vue` 的档位/开关面板/[暂停]**一行未动**」——读漏了批文（批文 §九 的切分明写 10c 含「开关面板/档位/`/attack/stop`」）。amend 后补上该块，文件数 / 行数 / 报文随之更正。
+⚠️ **一处过程坑（41e0a5e 实测）**：首次整仓跑红 `limitedPacerHandsOutSpacedSlots`，查明是**测试自己的判据**问题（1ms 窗口与 `invokedynamic` 引导 + 类加载**同量级**，第二格常被吃掉退化成 0）⇒ 间隔改**秒级**后 3/3 绿。**裸 JVM 里试不出来**（冷态窗口 0.53–0.90ms，8 次全绿），探针留 `_work/b10c-pacer-probe.java`。
+⚠️ **一处自我更正（57e19b7 报文内）**：第一版重指注把新值写成 `` `:96` ``（**带冒号**）⇒ 扫描立刻报出两条**无主裸 token**（正是「重指记录自己会造陈旧 token」那条纪律的形态）；改成「**96 行**」后裸 token 归零。
+
+🧪 **DoD（本系列各笔实测，逐笔见各提交信息）** ⇒ 基线 **483**（10c）→ **485**（10d 前，`21bae15` 新增 2 条用例：`drillRunLongDurationDoesNotPolluteLatency` / `drillStopStillCountsAsLatency`）。⚠️ 10c 报文的 483 与 10b 的 473 差 10 = 10c 新增的 10 条用例，与 Maven 汇总一致；10a 的 472 按 surefire **时间戳**过滤后汇总（避免把上轮残留报告算进来）。**块 7 收口（commit 9）= 471** ⇒ 本系列累计 +14。
+
+**A3 门禁** ⇒ 本系列**无表结构变更**（零 DDL）⇒ P3 门禁计数（`KNOWN_TABLES` 27 / 期望表数 38）**不变**。
+
+⚠️ **零漂移（各笔逐文件核过）** ⇒ 通用做法：新代码**一律尾追加**、订正走**同行替换**（净 0 行）—— 全仓大量「文件:行号」互引，插在中间会让其后每一处引用集体偏移。本系列自身产生的漂移主要在**未跟踪**的 `docs/agent/context-packs/` 时点稿里（**不应重指**）；活文档（progress / slot-registry / db-schema / tech-debt / api-contract）零漂移 —— 逐条见 `slot-registry.md` **24-10**。
+⚠️ **一处刻意用净 0 行的修正（10d 本笔）** ⇒ `AttackController.java:128-130` 的 `concurrency` 说明【3a.1 重指，原 100-102】原写「上限 **500**、硬顶 **512**」，与 `AttackEngine.MAX_CONCURRENCY = 4000`（`4da212a` 抬的）**不符** ⇒ 就地改成「上限 **4000**」+「引擎侧 `in-flight-cap`，缺省 512」，**行数不变**（避免造漂移）。
+
+**本笔（10d）文档同步面** ⇒ `api-contract.md` 附录 H（补 `/stop` 第 5 条出口 · 三个「丁」入参 · `batchCounts` · 两处引擎配置键 · 坐标/counts 订正）· `tech-debt.md`（TD-60 表补 SSE 异步超时 + 延迟口径排除两条 ✅已修 · 新增 **TD-70** 延迟排除名单是手工白名单 · 新增 **TD-71** JVM `-Xms/-Xmx` 未固定）· 本小节 · `slot-registry.md §二十四` 续段。⚠️ `db-schema.md` / `db-migration.md` **本笔不改**（⑲ 落库时已登，本系列零 DDL ⇒ 无新增登记）。
+
+⚠️ **本笔不 push / 不 merge**（同上：块 7 全部手验通过后由用户决定）。**手验清单**另见 `reports/块7-commit10d-收口-报告.txt`（**2026-10-16 归档进仓根 `reports/`；原落桌面**）（三列式：操作步骤 → 期望 → 判据；**凡涉及鉴权的一律标「默认 profile」，dev/a3 因 `app.auth.enabled=false` 验不出鉴权**）。
+
+---
+
+#### 7-B7-收尾. 块 7 **收尾**系列（**commit 1**，2026-10-15）—— 本小节由 commit 1 **开段**；⚠️ 本笔唯一的**未还项（④）在此登记**
+
+**这一段做什么** ⇒ 块 7 的**演示完整化 + D 段前置**，按用户批文拆 **4 笔 commit**（**commit 1** 块 7 收尾 / **commit 2** D 段后端防护 / **commit 3** D 段边界 + 演示联动 / **commit 4** 收口 + 块 8 前置）。⚠️ **手验压成一轮**（**commit 4 之后**跑，不再逐笔验）—— 与块 7 前 21 笔「逐笔验」的口径**不同**，这是批文指定的。
+
+**commit 1 的八项**（批文原序）⇒ ① 回放（读 `observed_event` 按 `batchId` 播，**严格按原时间戳**）· ② 模拟日常（演示模式，**纯前端假数据**）· ③ 进度 6 数补全（新增 `POST /admin/observe/attack/status`）· ④ **三块小型预览（本笔未做 ⇒ 见下）** · ⑤ 3 份 txt 入库 · ⑥ D 段 pack（**规划文档，不写代码**）· ⑦ 文档补（api-contract / tech-debt / progress / slot-registry）· ⑧ refs 重指（**放最后一笔**）。
+
+**⚠️ ④ 三块小型预览 —— 留 TODO，本笔不做（本条就是登记本身）**
+
+- **批文**：「④ 三块小型预览 · 若调研 agent 结果已回 → 一并做 · **没回 → 留 TODO，登记 · 形态不锁**」+「⚠️ 三块预览若调研未回 → 留 TODO 登记，**不阻塞**」。
+- **事实**：那份**界面调研 agent 的结果自本笔开工至 commit 1 收尾都未回** ⇒ 按批文**不做**、只登记。⚠️ 这不是「忘了做」，是**批文给定的分支**。
+- **它是什么**（出处：`docs/agent/context-packs/块7-commit10-阶段一核实.txt:206-248`「3. 件 1 · 攻击页下方三块小型预览」）⇒ 稿要在 `AttackConsole.vue` **下方**加**三块小型预览**（指标 / 订单 / 日志各一格）。**现状核实**：该页下方**只有** ④ 演练记录 + ⑤ 清场，**没有任何预览**；本页 import 里**一个图表都没有**。
+  - ⚠️ **这条与一次改判反向**：该文件头写着「攻击页 = 只做编排 + 跑 + 演练记录；**三面板已独立成页**（2026-10-13 改判，不塞进攻击页）」⇒ 件 1 相当于**部分改回**。做之前得先裁决「改回多少」（三块都要？还是只留一格？）。
+- **两条未决前提（都不是本笔能单方面定的）**
+  1. **结构决定**：稿假设「三块共用**一条主 SSE**，前端拆字段分发」—— **本仓不存在「一条主 SSE」**。是**三条独立端点**（`endpoints.js:393-395`），各自一条 HTTP 连接、**各自一条服务端异步线程**。⇒ 落地只有两条路：(a) 攻击页**各连自己那条**（三块 = 三条流）—— **零后端改动**，代价 = 攻击页开着时服务端**多 3 条常驻线程**，且 events 那条会**与日志页耦合**；(b) 后端**新增一条聚合流** —— 要动后端。稿里**建议 (a)**，但明写这属「**结构决定，需要用户/顾问定**」。
+  2. **「暂停」口径**：原稿列的两个缺口里，「**已发 8000**」**已被本系列 ③ 消解** —— `POST /admin/observe/attack/status` 现在给 `Sent` / `Completed` / `Blocked` / `Failed` / `Shed` / `Abandoned`（`AttackController:334-348`【3a.1 重指，原 210-224】）⇒ 预览要的「已发 M 条 / 完成多少次拦截」**有真源了**（不再是「估不出来、也不许编」）。**仍未定的只剩「暂停」**：`/attack/run` 是**同步**跑到结束的，**无法中途暂停**；可选口径 = 「只停渲染、连接不断」（并如实上屏说明「请求照跑」）。
+- **改动面估算（稿）** ⇒ `AttackConsole.vue` 约 **+350 ~ +500 行**（3 条流 + 3 个复用组件 + 布局 + 辅助条）。
+- **落点与形态** ⇒ **形态不锁**（整块做 / 拆笔做皆可）。⚠️ **不落 `selection-status.md §8`** —— 同 §5 既有那条理由（§8 的编号空间 `#1..#33` 与 PR 号**同形**）。**本段是它的唯一落点。**
+- ⚠️ **为什么这条登记落在文件尾、不插进 §5 中间** ⇒ 全仓大量「文件:行号」互引，**插段会让其后所有引用集体偏移**。实测：**外来**引用（`progress.md:` 带前缀）最大 **`:1921`**（`c3-block-3-goods.md:78`），**文内自指**最大 **`:2398`**；插在 §5 内（该段在 `:190` 起、`## 6.` 在 `:1729` 前）会同时动这两批的**绝大多数**。⇒ 按本仓通例**尾追加**，**净零漂移**。
+
+**③ 顺带登记一条「历史陈述保持原样」（不是订正，是记账）** ⇒ 上一小节（`#### 7-B7-续`）末尾写「⚠️ **没有** `/attack/status` 这个端点（实测五条映射 = `/scenarios` `/run` `/stop` `/records` `/cleanup`）」—— 那是 **commit 10 系列的时点事实**（当时确实没有）。本系列 **③ 之后已有**（`AttackController:334`【3a.1 重指，原 210】，现为**八条**映射）。⚠️ 那句是**历史陈述**（描述 10 系列当时的实测），按本仓口径**保留原样、不改写**，只在此登记，免得后来人把「历史陈述」当成「现在时」。配套：`endpoints.js` 头注释的端点总数已在 ③ 落码时就地同步（③ 时 **142** 条 → ① 回放落码后再 **143** 条，见 `endpoints.js:437` / `:449` 两行与头注释），本笔不另动。
+
+⚠️ **本笔（commit 1）不 push / 不 merge**；**手验**按批文推迟到 **commit 4 之后**统一一轮（清单由 commit 4 出）。
+
+**commit 1 落码清单（八项逐项）**
+
+| # | 项 | 落点 | 实证 |
+|---|---|---|---|
+| ① | **回放** | `ReplayController`（`/admin/observe/replay`）+ `ReplayService`（缺省 5000 / 上限 50000）+ `ObservedEventDao.selectByBatch`（`ORDER BY OccurredAt ASC, Id ASC`）+ `ReplayServiceTest` + `AttackConsole.vue` 记录行〔回放〕钮 + CSS | `evidence/c3-block7/b7w-replay-live.txt`（5 判据全绿）· 契约 `api-contract.md#api-h-8` |
+| ② | **模拟日常** | `api/demo-stream.js`（纯前端假数据源）+ `components/observe/DemoModeToggle.vue` + 三页数据源切换（指标 / 时间线 / 日志） | `evidence/c3-block7/b7w-demo-probe.txt`（**离线 26/26 + 页面 27/27**） |
+| ③ | **实时进度** | `AttackController` 第六条 `POST /status`（九键）+ `DrillRecordService.Progress` + 前端 1 秒轮询 + `AttackConsole.vue` 辅助条 + 记录行新增 `BatchId` | `evidence/c3-block7/b7w-status-live.txt`（idle 与 running **两分支都走到**） |
+| ④ | **三块预览** | **不做**（登记见上） | —— |
+| ⑤ | 3 份 txt 入库 | chore `4d75eec`（**先 chore 后功能**，两笔 add 都列具体路径） | `git log` |
+| ⑥ | **D 段 pack** | `docs/agent/context-packs/c3-block-D-hardening.md`（**规划，不写代码**；行号实测 + 八项现状 + **七条前提更正** + A 档 7 项 + 待裁 8 条） | 锚点检查：**悬空引用 0 条** |
+| ⑦ | 文档补 | `api-contract.md`（H.1 五→**六**出口 + 全表重指 · **新 H.8** · H.0 两计数）· `tech-debt.md`（**TD-72 / TD-73**）· 本小节 · `slot-registry.md §二十五` | 本次 |
+| ⑧ | refs 重指 | **最后一笔**（本笔插了很多行：本段、四页模板/脚本、`demo-stream.js`、`DemoModeToggle.vue`、两个新后端类） | 见收尾报告 |
+
+**⚠️ 本笔的事实更正（三处）** ⇒ ① 附录 H.1 标题「五出口」→「**六**出口」，六条坐标**全表重指**（`/records` 原 188 → **233**、`/cleanup` 原 236 → **281**，各 **+44** 行；前四条另有 +1，是类注释区增行）；② 端点总数：后端 method-level **142 → 144**、`endpoints.js` **141 → 143**（实测）；③ **`/replay` 不在 `/attack/*` 之下** —— 挂 `/admin/observe`（根）、后端是**新建的 `ReplayController`**（理由两半：读的是事件台账不是演练记录；另一条候选路要多一条常驻 SSE）。
+
+**⚠️ 本笔给 D 段留的两条新账** ⇒ `tech-debt.md` **TD-72**（回放空批次面：事件行 3 天保留期 vs 记录行**不**删 ⇒ 旧批次点〔回放〕得空表）· **TD-73**（「模拟日常」假数据只在这两处留痕：日志页 MQ 点「未连接」+ 指标页健康度自报；且它的 `protections` 是**前端假造**的 ⇒ D 段防护接真闸后，**「开/关防护」的对照在演示模式下走不出来**，只能在正常模式接后端真跑）。
+
+**⚠️ 本笔未还项：只有 ④ 一条**（三块小型预览）—— 其余七项均已落码/落稿。**总账**：本笔使块 7 的 API 面从 8 条 → **10 条**（+`/attack/status` +`/admin/observe/replay`），并把这四条系列的后三笔（D 段）钉在一份**可查证的规划文档**上。
+
+#### 7-B7-D2. **D 段 · commit 2**〈后端防护接闸〉（2026-10-15）—— 口径：**3 键接闸 + 1 键登记 TD + 1 键记录位**
+
+**这一段做什么** ⇒ 把上一小节 ⑥ 那份 D 段 pack 里「五个防护开关」的**前三项接成真闸**，并按用户
+2026-10-15 的补充裁定收口。⚠️ **口径的唯一代码出处是 `ProtectionGate.WIRED_KEYS`**（不是本文件、不是报告）——
+**不许**写成「4 键已接闸」或「5 键里 4 键已接闸」。（⚠️ **这句是 commit 2 那一刻的规则，2026-10-15 阶段 2b 已把它翻转** —— 现行口径是「**4 键接闸 + 1 键记录位**」〔`retry` 接上了〕，落码面与判据见本节末〈**7-B7-D2b**〉。）
+
+**裁定落实表（七条，逐条给落点）**
+
+| 裁定 | 落点 | 证据 |
+|---|---|---|
+| ① 第 9 类事件环 `protection`（枚举 + 源环 + 落库 + 前端 5 处 labels + 测试） | `EventBroadcaster.Kind.PROTECTION` · `observe/metrics/ProtectionMetrics` · `observe-labels.js`（5 张表各 +1）· `EventLog.vue`（**零改动**：`v-for="k in KINDS"` 自动多一格） | `ProtectionMetricsTest`（6 条）· `EventBroadcasterTest` / `EventStreamServiceTest` 已扩 |
+| ② 熔断：包**关键 DAO / 服务 / 下游**（**禁入站层**、**禁只挂订单 / 支付**） | `GoodsService` **5 处** + `OrderService.orderAdd` **1 处**（跨域、读写分开两个实例） | `CircuitBreakerWiringTest`（4 条，逐方法钉） |
+| ② 阈值：错误率 **50%** / **30s** 窗口 / 半开 **30s 后放 5 个** / **必须设最小请求数** / 半开恢复要有记录 | `application.properties` 的 `resilience4j.circuitbreaker.configs.default.*`（最小请求数 **20**）· `ProtectionMetricsBinder`（订阅 `getEventPublisher()`） | `ProtectionThresholdsTest`（4 条逐值）· `ProtectionMetricsBinderTest`（5 条，真熔断器的三档翻转 + 被拦） |
+| ③ 限流：入站统一闸 **200 QPS**、白名单（健康检查 / 静态资源 / 探针 / error 页）、超限 **429** | `InboundRateLimitInterceptor` + `ProtectConfig`（挂 `/**`，`HIGHEST_PRECEDENCE`） | `InboundRateLimitInterceptorTest`（7 条）· 运行期探针 `probe-d2-inbound-gate.mjs`（**320 发 = 200 放行 + 120×429**） |
+| ④ 重试：**本笔不落码，只登记 TD**（⚠️ **2026-10-15 阶段 2b 已落码并关闭 TD-74** —— 见本节末〈**7-B7-D2b**〉） | `tech-debt.md` **TD-74**（触发条件 / 落点 / 不得挂哪两处 / 落地前先做并发压测） | 文档；代码侧仅 `ProtectionGate.wired("retry") == false` |
+| ⑤ 线程池分池 | `ObservePoolConfig`（core 8 / max 32 / queue 64，满则 SHED + 503；关掉 ⇒ 无界） | `ProtectionThresholdsTest`（三个数有限）· 启动日志 |
+| **degrade**：只记录；UI 若必展示 ⇒ **标灰 + tooltip**；**禁死控件** | `observe-labels.js` 的 `PROTECTIONS_NOT_WIRED` / `PROTECTION_NOT_WIRED_TIP` + `AttackConsole.vue`（`is-locked` + `disabled` + `aria-disabled` + 「不可开关」角标 + `toggleProtection` 的 JS 守卫） | 探针 `probe-d2-locked-switches.mjs`（**21/21**，含「抠掉 `disabled` 再点仍不变」）+ 截图 `evidence/c3-block7/d2-protection-switches.png` |
+
+**落码清单**
+
+| # | 项 | 落点 | 实证 |
+|---|---|---|---|
+| 1 | 依赖与配置 | `pom.xml`（+`spring-boot-starter-aop` + `resilience4j-spring-boot3:2.3.0`）· `application.properties`（熔断六项 + MQ 消费池 2/8） | `ProtectionThresholdsTest` |
+| 2 | 防护开关的运行时状态 | `protect/ProtectionGate`（五个布尔位 + `apply` / `resetToDefault` / `wired`） | `ProtectionGateTest`（9 条）· `ProtectionKeysAlignmentTest`（2 条） |
+| 3 | 入站限流闸 | `protect/InboundRateLimitInterceptor`（**拦截器，不是 Filter** —— `Filter` 是切片地雷）· `protect/ProtectConfig` | 见上 |
+| 4 | 熔断挂载 + 状态记录 | `GoodsService` / `OrderService` 的 6 处注解 · `protect/ProtectionMetricsBinder` | 见上 |
+| 5 | 观测池分池 | `protect/ObservePoolConfig`（`GatedExecutor` 每次 `execute` 现读开关） | `ProtectionThresholdsTest` |
+| 6 | 第 9 类事件环 | `observe/metrics/ProtectionMetrics` · `EventBroadcaster`（`Kind` + 源环 + `ingestProtection`） | `ProtectionMetricsTest` |
+| 7 | 演练侧接线 | `DrillRecordService`（**run 之前**写入、**`finally` 复位**；缺省全开的**唯一换算点**） | `DrillRecordServiceTest`（2 条新增） |
+| 8 | 前端 | `observe-labels.js`（9 类 + 两枚锁定表）· `AttackConsole.vue`（标灰 + 两枚 tooltip + CSS 两条类名） | 探针 21/21 + 截图 |
+| 9 | 三方 key 表同序 | 后端两份由 `ProtectionKeysAlignmentTest` 钉；**前端第三份跨语言** ⇒ 探针 `probe-d2-protection-keys-alignment.mjs`（**含突变对照**：打乱前端表 ⇒ 退出码 1，还原后 md5 一致） | `_work/d2/keys-alignment.txt` |
+
+**⚠️ 本笔的事实更正（五处，都是实测，不是推断）**
+
+1. **`RateLimiter` 2.3.0 没有 `tryAcquirePermission()`** —— `javap` 实测接口里只有 `acquirePermission()` / `acquirePermission(int)` / `reservePermission()` / `reservePermission(int)` / `drainPermissions()`。本仓用 `acquirePermission()`，而**「不排队」由 `timeoutDuration = 0` 保证，不由方法名保证**（已写成 `ProtectConfig.TIMEOUT` 常量 + 断言，改大就红）。
+2. **`AntPathMatcher` 的 `/**` 匹配零个或多个路径段** ⇒ `/health/**` 也匹配裸的 `/health`、`/admin/observe/**` 也匹配 `/admin/observe`（本仓没有后一个端点，实际影响为零）。⚠️ 按「`/**` 至少要一段」去推白名单边界会推错。
+3. **`ThreadPoolTaskExecutor` 不是 bean 时必须显式 `initialize()`**（`afterPropertiesSet()` 只对 bean 生效），且其线程**默认非守护** ⇒ 不 `setDaemon(true)` 会吊住 JVM、卡住后端重启脚本。
+4. **`@CircuitBreaker` 的切面 order = `2147483643`**（= `Integer.MAX_VALUE - 4`，2026-10-15 从 `resilience4j-spring6-2.3.0.jar` 常量池读出）< 事务切面 `MAX` ⇒ **熔断天然在事务之外**（开路时连事务都不开）。这条是**取值实测**，不是「应该在外层」。
+5. **`--c9` 早就存在**（`assets/tokens.css` 浅色 `:201` / admin `:301`，两套主题同值）⇒ 第 9 类直接用 `var(--c9)`，**本笔没动 `tokens.css`**（动了会让那两处引用漂移）。
+
+**⚠️ 本笔给 D 段/块 8 留的两条新账** ⇒ `tech-debt.md` **TD-74**（重试：触发条件是「先有死锁实测」，落点 = ~~`GoodsService` 三处写方法~~ **⚠️ 该落点已被实测推翻**，真落点 = `MerchantDowngradeService.relist`（本段末〈**7-B7-D2b**〉与 TD-74 订正表）；⚠️ **不得挂 `OrderService`**（订单链刻意禁 `@Transactional`）、**不得拿 `DistributedLockService` 当重试**（那是锁等待）；未来落地注意 AOP 同类自调用无效 + 重试必须在事务之外 + 落地前先做并发压测）· **TD-75**（熔断**只挂 MySQL** 两个实例：Redis / MQ 已有手写熔断，再叠 r4j 是重复造）。
+
+**测试** ⇒ 基线 **498** → 本笔 **541 passed / 0 failed / 0 errors / 26 skipped**（**+43**；新增 7 个测试类：`ProtectionGateTest` 9 · `ProtectionKeysAlignmentTest` 2 · `ProtectionMetricsTest` 6 · `InboundRateLimitInterceptorTest` 7 · `ProtectionMetricsBinderTest` 5 · `ProtectionThresholdsTest` 4 · `CircuitBreakerWiringTest` 4，其余为既有类扩条）。
+
+**⚠️ 本笔不 push / 不 merge**；**手验**按批文仍推迟到 **commit 4 之后**统一一轮。⚠️ **dev / a3 两个 profile 都是 `app.auth.enabled=false`** ⇒ 手验绿 ≠ 默认 profile 绿。
+
+**补登（收口时追加，三条；与 D pack 尾部〈未还项〉逐条对齐）**
+
+1. **未还项 · 帧读数第 9 条 ⇒ 归 commit 3**：`MetricsSnapshotService` 的 `protections(...)` 仍返回**8 条**防护命中
+   （`cacheHit` / … / `identityRejected`），本笔新增的防护动作**只**从帧 `counts` 的第 9 键 `protection` 与
+   `mall.protection.events` 指标回答 —— 即 §⑨ 第 1 条要的「指标帧反映防护」**没做**。原文与三条未还项见
+   `context-packs/c3-block-D-hardening.md` 尾部〈未还项〉。
+2. **订正 · 「加类要一起改」的两处实测不必改**（pack 原判 → 以实测为准）：① `smoke/ObserveStreamSmokeTest.java:69`
+   是 `contains(...)` **子集**断言（只证「原有 8 键一个不少」）⇒ 加第 9 类**不会红**；⚠️ 代价是**切片层不看第 9 键**，
+   帧里真有它由 `observe/service/EventStreamServiceTest.java:82` 的 `containsOnlyKeys(9 个)` 与探针守。
+   ② `scripts/probes/probe-b7c8-event-log.mjs:69` 只是 `['cache',…,'identity'][i % 8]` **轮流取**（不校验枚举完整性）。
+   ⇒ 两文件本笔**未动**。
+3. **补 · 第 9 类 `protection` 的两处枚举**：`mall_management_sql.sql:1868`（`ObservedEvent` 的 `Kind` 列注释里那份 8 名清单）
+   与 `docs/agent/db-schema.md:942`（同款清单）各补 `protection`（**同行替换、净 0 行**）。⚠️ 数据层另三处
+   （`ObservedEventDao` 的 `KIND_MAX` / `clip(e.kind(), …)` / INSERT 列清单）实测**无需改**（列宽 16 ≥ 10，无枚举白名单）。
+
+---
+
+#### 7-B7-D2b. **D 段 · 阶段 2b**〈死锁修复：索引 + 重试〉（2026-10-15）—— 口径：**4 键接闸 + 1 键记录位**
+
+> ⚠️ **本小节是上一小节（7-B7-D2）的续笔，不是重写。** 上一小节里写「3 键接闸 / 本笔不落码 /
+> 落点 = `GoodsService` 三处写方法 / 面板那枚 `retry` 必须不可点」的句子，都是 **commit 2 那一刻的真状态**
+> （史料，保留），本小节只登记**这一笔把它们改成了什么**。⚠️ **判据永远读 `ProtectionGate.WIRED_KEYS`**，
+> 不读本文件：`WIRED_KEYS` 由 3 个键变 4 个键（`rateLimit` / `circuitBreak` / **`retry`** / `poolIsolation`），
+> 记录位仍是 `degrade`（不变式 `WIRED_KEYS ∪ {RECORD_ONLY_KEY} = KEYS`、两者不交，**没变、反而更强**）。
+
+**这一段做什么** ⇒ 落**顾问 2026-10-15 裁定**里的「一 死锁修复（阶段 2b，独立一笔）」，两条治则各给落点：
+
+| 治则 | 裁定原文要点 | 本笔落点 |
+|---|---|---|
+| **治因（丙）** | 加索引（A 档 DDL）—— `goods.MerchantId` 二级索引**拍定要加**；`user.merchantid` **留 agent 实测后再定**；目标「把全表锁 **49 行**压到锁 **1 行**」 | Migration ⑳ `idx_goods_merchant (MerchantId)`（`mall_management_sql.sql` 段⑳ · `db-schema.md §18` · `db-migration.md` 注意 24）。⚠️ `user.merchantid` **实测后决定不加** |
+| **治果（甲）** | 落重试 —— 落点按实证、Spring Retry 2–3 次、**只对死锁类**、`@Retryable` 必须在**事务外层** | `MerchantDowngradeService.relist`（装配 `RetryTemplate`，`RELIST_MAX_ATTEMPTS = 3`、退避 40ms 起 ×2 封顶 200ms、只认 `CannotAcquireLockException`） |
+| **重试可视化（要）** | 重试动作发 `protection` 事件（`action=retry` / `attempt=N` / `result`）；实时日志页可见；加测试钉「多次重试事件同 traceId」 | `ProtectionMetrics.retry(...)` → 第 9 环新增两档 `retry_success` / `retry_failed`（result 由五档变**七档**） |
+
+**⚠️ 本笔的事实更正（四条，全部是实测，不是推断）**
+
+1. **落点由 `GoodsService` 三处写方法 → `MerchantDowngradeService.relist`**（推翻上一小节 `:2488` 与 TD-74 原文）。
+   全仓**唯一**的反向锁序对是 `MerchantApplicationService.audit`（写序 **user→goods**）× `MerchantDowngradeService.relist`
+   （写序 **goods→user**）；`GoodsService` 那三处**不在任何一个环上**。「多表事务 ⇒ 死锁只可能在这类地方」这条**推理链没错**，
+   错的是「本仓的多表事务里恰好有反向对的那一对在哪」。依据 = 死锁侦查的 `LATEST DETECTED DEADLOCK` 段两个事务的 SQL 与持锁/等锁两列。
+2. **那 49 行锁全部来自 `goods` 侧**（推翻「两表都全表扫」这半条）。`goods` 侧 `UPDATE … WHERE MerchantId = ?` 确实无索引可走
+   ⇒ 全表扫 + 对扫到的**每一行**加 X 锁（INNODB STATUS 报 **49 row lock(s)**）；但 `user` 侧 `UPDATE user … WHERE username = ?`
+   走的是 **PRIMARY**（`user` 的主键**就是** `username`）⇒ 本来就只锁 1 行。**这正是裁定「留实测后再定」那个问句的答案：不必加。**
+3. **面板上那枚 `retry` 由「必须不可点」翻转为「能拨且有事发生」** —— 它从 `PROTECTIONS_NOT_WIRED` 移出（该表只剩 `degrade`）。
+   ⚠️ **留在里面反而会造出一个死控件**，正是 commit 2 明令禁止的那一种 ⇒ 三处用户可见文案（`AttackConsole.vue` 副标题 /
+   SFC 文档块 / `observe-labels.js`）**当笔改**，否则页面在说谎（TD-20 那一族）。
+4. **`RetryTemplate` 是「先问 `canRetry`、再执行」的循环** ⇒ 把运行时开关直接短路在 `canRetry` 上，会让「关掉重试」变成
+   「**连第一次都不执行**」（抛 `RetryException`，且它**没有 cause** —— 原始死锁在异常链上就丢了）。修法一行：
+   `if (context.getLastThrowable() == null) return true;`（先无条件放行第一次）。⚠️ **这条本笔早先的注释里写反过**，已按实测改正；
+   另注意 `RetryContext.getRetryCount()` 首次为 **0** ⇒ `attempt = count + 1`。
+
+**落码清单**
+
+| # | 项 | 落点 | 实证 |
+|---|---|---|---|
+| 1 | 治因 · 索引 | `mall_management_sql.sql` 段⑳ `idx_goods_merchant (MerchantId)` | 探针 `scripts/probes/d2-deadlock-scout.mjs` 对比两份；`EXPLAIN` 实测 |
+| 2 | 治果 · 重试 | `MerchantDowngradeService`（300 → **457** 行）—— `RetryTemplate` + `TransactionTemplate` 分两层、每次尝试**各起一个新事务** | `merchant/…/RelistDeadlockRetryTest`（**7 条**，新增文件） |
+| 3 | 重试可视化 | `ProtectionMetrics`（184 → **207** 行；`retry(...)` 入口 + 两档 `Result`）· `ProtectionMetricsTest`（五档扩**七档**） | `ProtectionMetricsTest` · `EventBroadcasterTest` |
+| 4 | 口径落成代码 | `ProtectionGate`（168 → **174** 行；`WIRED_KEYS` 3 → **4** 键） | `ProtectionGateTest` · `ProtectionKeysAlignmentTest` |
+| 5 | 前端口径同步 | `observe-labels.js`（锁定表只剩 `degrade` + tooltip 分族）· `AttackConsole.vue`（副标题 / SFC 文档块 / CSS 注释） | 探针 `probe-d2-locked-switches.mjs`（**20/20**）+ 截图 `evidence/c3-block7/d2-protection-switches-after-2b.png` |
+
+**⚠️ 判据怎么读 —— 这一条最容易读反：结论是「死锁次数不变、5xx 归零」，不是「加了重试所以不死锁了」**
+
+【三份对照：同一探针、同一场景、同一台 VM 库】
+
+| 轮次文件（`docs/agent/evidence/c3-block7/`） | `goods` 索引 | `relist` 重试 | 1213 增量 | A 侧失败 | **HTTP 5xx** |
+|---|:--:|:--:|---:|---:|---:|
+| `d2-deadlock-scout-48x4.txt` | 无 | 无 | **149** | 0 | **139** |
+| `d2-deadlock-scout-after-index.txt` | 有 | 无 | **139** | 0 | **139** |
+| `d2-deadlock-scout-with-retry.txt` | 有 | 有 | **141** | 0 | **0** |
+
+- **第一行 → 第二行：索引确实生效，但 5xx 一个都没少**（139 → 139）。锁粒度已从「持 **49 row lock(s)**」压到
+  「持 `index idx_goods_merchant` 上的**单条** record lock」（两侧 `HOLDS` / `WAITING` 都落在该索引的单条上）；
+  **可环没拆掉** —— 环的成因是**两个事务访问顺序相反**，与各自锁住几行无关 ⇒ 缩锁范围只能减少牵连面。
+  ⚠️ **把它读成「索引没用」是读反了**；把它读成「索引能替代重试」也是读反了。
+- **第二行 → 第三行：加**重试**之后 5xx = 0**，而 1213 增量是 **141**（与上一份的 139 同量级）⇒ **死锁照旧在发生，
+  只是每一次都被第 2 次尝试兜住**。
+- **因果闭合的那一环**（光看 `5xx = 0` 还不够 —— 它还能被「异常被别处 catch 吞了」「端点压根没被打到」解释掉）：
+  探针跑完**立刻读同进程 actuator** ⇒ `mall.protection.events{result=retry_success}` = **141**，与 1213 增量**逐一对上**；
+  `result=retry_failed` **0 条**（⇒ 没有一次用满 3 次尝试）。
+
+**⚠️ 口径翻转的连锁（本笔最隐蔽的风险）** ⇒ 落码后全仓还有一批注释 / 用户可见文案写着「`retry` 不落码 / 三键接闸」，
+已按 D pack B1 逐字「**必须当笔改**」全部同步：`AttackController` · `AttackEngine`（含**用户可见的** `Engine.Notes` 回显文案）·
+`application.properties` 开关注释 · `api-contract.md`（九处，**全部同行替换**）· `tech-debt.md`（TD-74 状态行 + 订正表）· 探针断言。
+⚠️ `api-contract.md` 原文那句「**不许**写成「4 键已接闸」」现在**必须反过来** —— 已改写为「不许写成「5 键已接闸」」**并注明它当时是对的**。
+
+**测试** ⇒ **548 passed / 0 failed / 0 errors / 26 skipped**（基线 **541** ⇒ 本笔 **+7**，全部来自新增的 `RelistDeadlockRetryTest`；
+`ProtectionMetricsTest` / `EventBroadcasterTest` / `ProtectionGateTest` 等为**既有类扩条**，计入原条数）。
+⚠️ `RelistDeadlockRetryTest` 里两条**结构钉**是刻意的：① 反射断言 `relist` 上**没有** `@Transactional`（有人加回去 ⇒ 重试退化成
+「在已回滚的事务里重试」）；② 用计数替身 `CountingTxManager` 断言**每次尝试各起一个新事务**。
+
+**⚠️ 本笔不 push / 不 merge**；**手验**按批文仍推迟到 **commit 4 之后**统一一轮。⚠️ **dev / a3 两个 profile 都是
+`app.auth.enabled=false`** ⇒ 手验绿 ≠ 默认 profile 绿（每次手验前重复这一句）。
