@@ -1,0 +1,372 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>3b.7 状态流转 · 乙 —— 非对称双栏（LAYOUT）· 结构草图</title>
+<link rel="stylesheet" href="./_struct-wire.css">
+<style>
+/* ══════════════════════════════════════════════════════════════════════════════
+   本页只新增 layout 原语：栅格 / 间距 / 对齐 / 线宽。
+   不新增品牌色、不写圆角、不写阴影、不写过渡与动效；灰阶只取 _struct-wire.css 的变量。
+   ══════════════════════════════════════════════════════════════════════════════ */
+.of-page { --gap-block: 28px; --gap-in: 12px; }
+
+/* ① 读数带 */
+.of-head {
+  display: grid;
+  grid-template-columns: repeat(12, 1fr);
+  gap: var(--gap-in);
+  align-items: end;
+  padding-bottom: var(--gap-in);
+  border-bottom: 1px solid var(--l);
+}
+.of-figure .k { display: block; color: var(--tm); }
+.of-figure .v { font-family: var(--mono); font-weight: 600; font-size: 28px; line-height: 1.1; }
+.of-figure .d { display: block; color: var(--ts); }
+.of-live { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; color: var(--tm); }
+.of-chip { border: 1px solid var(--l); padding: 1px 7px; color: var(--t); }
+.of-src { display: flex; align-items: center; gap: 8px; justify-content: flex-end; flex-wrap: wrap; color: var(--tm); }
+.of-toggle { display: inline-flex; border: 1px solid var(--l); }
+.of-toggle span { padding: 1px 8px; color: var(--tm); }
+.of-toggle .on { color: var(--t); font-weight: 600; border-right: 1px solid var(--l); }
+
+/* ② 非对称分割：左 8 / 右 4（区块级 28px 间距 > 块内 12px） */
+.of-split { display: grid; grid-template-columns: 8fr 4fr; gap: var(--gap-block); margin-top: var(--gap-block); }
+.of-block { margin-top: var(--gap-block); }
+.of-split .h2.first, .of-block > .h2:first-child { margin-top: 0; }
+
+/* 左：纵向阶梯（每一级 = 名称/累计数 + 条 + 转化/耗时） */
+.of-chain { border-top: 1px solid var(--l); }
+.of-step { display: grid; grid-template-columns: 22px 1fr; }
+.of-rail { border-left: 1px solid var(--l); margin-left: 7px; position: relative; }
+.of-step:last-child .of-rail { border-left-style: dashed; }
+.of-dot { position: absolute; left: -6px; top: 20px; width: 11px; height: 11px; background: #fff; border: 1px solid var(--t); }
+.of-step-body {
+  display: grid;
+  grid-template-columns: 150px minmax(0, 1fr) 190px;
+  gap: var(--gap-in);
+  align-items: center;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--l2);
+}
+.of-step-head .of-stage { display: block; color: var(--tm); }
+.of-step-head .of-count { display: block; font-family: var(--mono); font-weight: 600; font-size: 24px; line-height: 1.2; }
+.of-track { background: var(--f); height: 18px; }
+.of-track span { display: block; height: 100%; background: #cfcfcf; }
+.of-step-meta { display: flex; flex-direction: column; gap: 2px; color: var(--tm); }
+.of-step-meta b { color: var(--t); font-weight: 600; }
+.of-step-meta .of-dur { font-family: var(--mono); }
+.of-chain-foot {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 8px 0 0 34px;
+  color: var(--tm);
+}
+.of-chain-foot b { font-family: var(--mono); color: var(--t); font-weight: 600; }
+
+/* 左：取消总账（默认收起的一行 details） */
+.of-fold { border: 1px dashed var(--dash); margin-top: var(--gap-block); }
+.of-fold > summary { padding: 7px 10px; color: var(--t); }
+.of-fold > summary .of-meta { color: var(--ts); margin-left: 8px; }
+.of-fold-line { padding: 8px 10px; border-top: 1px dashed var(--dash); color: var(--tm); }
+
+/* 右：辅助环图 + 图例 */
+.of-ring { display: grid; grid-template-columns: 150px minmax(0, 1fr); gap: var(--gap-in); align-items: center; }
+.of-ring-svg { display: block; width: 100%; height: auto; }
+.of-ring-svg text { font-family: var(--mono); fill: var(--t); }
+.of-ring-svg .of-ring-v { font-size: 22px; font-weight: 600; }
+.of-ring-svg .of-ring-k { font-size: 10px; fill: var(--tm); }
+.of-legend { list-style: none; margin: 0; padding: 0; }
+.of-legend li {
+  display: grid;
+  grid-template-columns: 14px minmax(0, 1fr) 34px 46px;
+  gap: 6px;
+  align-items: center;
+  padding: 4px 0;
+  border-bottom: 1px solid var(--l2);
+}
+.of-legend li:last-child { border-bottom: 0; }
+.of-legend i { width: 9px; height: 9px; display: block; }
+.of-legend .zero { background: #fff; border: 1px dashed var(--l); }
+.of-legend .cnt { font-family: var(--mono); text-align: right; }
+.of-legend .pct { font-family: var(--mono); color: var(--tm); text-align: right; }
+
+/* 右：实时订单流（内部滚动） */
+.of-stream {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 340px;
+  overflow: auto;
+  border-top: 1px solid var(--l);
+}
+.of-stream-row {
+  display: grid;
+  grid-template-columns: 72px minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: start;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--l2);
+}
+.of-prog i {
+  display: inline-block;
+  width: 5px;
+  height: 5px;
+  margin-right: 2px;
+  border: 1px solid var(--l);
+  vertical-align: middle;
+}
+.of-prog i.on { background: #6a6a6a; border-color: #6a6a6a; }
+.of-prog b { display: block; margin-top: 2px; color: var(--tm); font-weight: 400; }
+.of-oid { font-family: var(--mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.of-oid em { display: block; font-family: inherit; font-style: normal; color: var(--ts); overflow: hidden; text-overflow: ellipsis; }
+.of-amt { font-family: var(--mono); }
+</style>
+</head>
+<body>
+
+<div class="wire-head">
+  <h1>3b.7 状态流转 · <b>乙 —— 非对称双栏（LAYOUT）</b></h1>
+  <span class="hint">结构草图：灰线框（无品牌色／圆角／阴影／动效）· 真库快照（2026-10-17 19:11）·
+    保留辅助环图，但降到右栏；左 8 栏是带转化率与平均耗时的主链阶梯，右 4 栏是五态占比 + 实时订单滚动流</span>
+</div>
+
+<div class="shell">
+  <aside class="side">
+    <div class="brand">管理端 · Mall Management</div>
+    <div class="dom">概览</div><div class="sub">经营数据</div>
+    <div class="dom">通知收件箱</div>
+    <div class="dom">业务域</div>
+    <div class="sub">用户与商家治理</div><div class="sub">商品与类目治理</div>
+    <div class="sub">订单治理</div><div class="sub">营销运营</div>
+    <div class="sub">消息与内容治理</div><div class="sub">系统通知</div>
+    <div class="dom">可观测域</div>
+    <div class="sub">攻击模拟器</div><div class="sub">指标面板</div>
+    <div class="sub on">状态流转</div><div class="sub">实时日志</div><div class="sub">权限与审计</div>
+    <div class="foot">外壳示意 · 两版相同（232px）</div>
+  </aside>
+
+  <div class="col">
+    <div class="top"><span>管理端 / <b>状态流转</b></span><span class="who">ops_duan · 退出</span></div>
+    <div class="main"><div class="px"><div id="app" class="of-page">
+
+      <!-- ① 读数带 -->
+      <section class="of-head" aria-label="页头读数">
+        <div class="of-figure" style="grid-column: span 3">
+          <span class="k">订单总数（五态之和）</span>
+          <span class="v">256</span>
+          <span class="d">已取消 35 · 13.7%</span>
+        </div>
+        <div class="of-live" style="grid-column: span 5">
+          <span class="of-chip">已连接</span>
+          <span>第 6 拍 · 每秒 1 拍 · 19:11:01</span>
+          <span>本会话捕获流转 <b style="font-family:var(--mono)">0</b></span>
+        </div>
+        <div class="of-src" style="grid-column: span 4">
+          <span>数据源</span>
+          <span class="of-toggle"><span class="on">正常</span><span>模拟日常</span></span>
+          <span>后端真流</span>
+        </div>
+      </section>
+
+      <!-- ② 左右非对称：左 8 主链 / 右 4 辅助 -->
+      <section class="of-split">
+
+        <!-- 左：主链阶梯 -->
+        <div class="of-left" aria-label="主链阶梯">
+          <div class="h2 first">
+            <b>主链路 · 纵向阶梯</b>
+            <span class="n">条长 = 累计到达（相对创建） · 每级右列 = 相邻转化 / 相对创建 / 平均耗时</span>
+          </div>
+
+          <div class="of-chain">
+            <div class="of-step">
+              <div class="of-rail"><span class="of-dot"></span></div>
+              <div class="of-step-body">
+                <div class="of-step-head"><span class="of-stage">创建</span><span class="of-count">256</span></div>
+                <div class="of-track"><span style="width:100%"></span></div>
+                <div class="of-step-meta"><span>相对创建 100.0%</span><span class="of-dur">起点</span></div>
+              </div>
+            </div>
+
+            <div class="of-step">
+              <div class="of-rail"><span class="of-dot"></span></div>
+              <div class="of-step-body">
+                <div class="of-step-head"><span class="of-stage">支付</span><span class="of-count">221</span></div>
+                <div class="of-track"><span style="width:86.3%"></span></div>
+                <div class="of-step-meta"><span>上一段转化 <b>86.3%</b></span><span>相对创建 86.3%</span><span class="of-dur">均耗 28 分</span></div>
+              </div>
+            </div>
+
+            <div class="of-step">
+              <div class="of-rail"><span class="of-dot"></span></div>
+              <div class="of-step-body">
+                <div class="of-step-head"><span class="of-stage">发货</span><span class="of-count">132</span></div>
+                <div class="of-track"><span style="width:51.6%"></span></div>
+                <div class="of-step-meta"><span>上一段转化 <b>59.7%</b></span><span>相对创建 51.6%</span><span class="of-dur">均耗 18 小时 53 分</span></div>
+              </div>
+            </div>
+
+            <div class="of-step">
+              <div class="of-rail"><span class="of-dot"></span></div>
+              <div class="of-step-body">
+                <div class="of-step-head"><span class="of-stage">收货</span><span class="of-count">108</span></div>
+                <div class="of-track"><span style="width:42.2%"></span></div>
+                <div class="of-step-meta"><span>上一段转化 <b>81.8%</b></span><span>相对创建 42.2%</span><span class="of-dur">均耗 60 小时 35 分</span></div>
+              </div>
+            </div>
+          </div>
+
+          <div class="of-chain-foot">
+            <span>全链路均耗</span><b>79 小时 57 分</b>
+            <span>（n=102，仅用时间戳齐全的已完成单）</span>
+          </div>
+
+          <!-- 取消：一行总账，默认收起 -->
+          <details class="of-fold">
+            <summary><b>已取消 35</b><span class="of-meta">13.7% · 默认收起</span></summary>
+            <div class="of-fold-line">
+              取消是旁路终态，不进入主链阶梯。按阶段归因取不到：35 张取消单 PaidAt 全空、其中 13 张 ShippedAt 非空（时间戳口径不一致）⇒ 这里只给总账。
+            </div>
+          </details>
+        </div>
+
+        <!-- 右：辅助环图 + 实时流 -->
+        <aside class="of-right" aria-label="辅助列">
+          <div class="h2 first">
+            <b>五态占比</b>
+            <span class="n">辅助图 · 同一口径 counts</span>
+          </div>
+
+          <div class="of-ring">
+            <svg class="of-ring-svg" viewBox="0 0 200 200" role="img"
+                 aria-label="五态占比环图：待付款 0，待发货 89（34.8%），待收货 24（9.4%），已完成 108（42.2%），已取消 35（13.7%）。">
+              <g transform="rotate(-90 100 100)" fill="none" stroke-width="22">
+                <circle cx="100" cy="100" r="62" stroke="#ececec"></circle>
+                <circle cx="100" cy="100" r="62" stroke="#6f6f6f" stroke-dasharray="135.43 254.13" stroke-dashoffset="0"></circle>
+                <circle cx="100" cy="100" r="62" stroke="#9a9a9a" stroke-dasharray="36.52 353.04" stroke-dashoffset="-135.43"></circle>
+                <circle cx="100" cy="100" r="62" stroke="#c2c2c2" stroke-dasharray="164.34 225.22" stroke-dashoffset="-171.95"></circle>
+                <circle cx="100" cy="100" r="62" stroke="#dedede" stroke-dasharray="53.26 336.30" stroke-dashoffset="-336.29"></circle>
+              </g>
+              <text class="of-ring-v" x="100" y="96" text-anchor="middle">256</text>
+              <text class="of-ring-k" x="100" y="116" text-anchor="middle">订单总数</text>
+            </svg>
+
+            <ul class="of-legend">
+              <li><i class="zero"></i><span>待付款</span><span class="cnt">0</span><span class="pct">0.0%</span></li>
+              <li><i style="background:#6f6f6f"></i><span>待发货</span><span class="cnt">89</span><span class="pct">34.8%</span></li>
+              <li><i style="background:#9a9a9a"></i><span>待收货</span><span class="cnt">24</span><span class="pct">9.4%</span></li>
+              <li><i style="background:#c2c2c2"></i><span>已完成</span><span class="cnt">108</span><span class="pct">42.2%</span></li>
+              <li><i style="background:#dedede"></i><span>已取消</span><span class="cnt">35</span><span class="pct">13.7%</span></li>
+            </ul>
+          </div>
+
+          <div class="of-block" aria-label="实时订单流">
+            <div class="h2">
+              <b>实时订单流</b>
+              <span class="n">最近 20 单 · 框内滚动 · 本拍流转 0</span>
+            </div>
+            <ol class="of-stream">
+              <li class="of-stream-row">
+                <span class="of-prog"><i></i><i></i><i></i><i></i><b>已取消</b></span>
+                <span class="of-oid">PROBE3A3B-20261017-01<em>probe</em></span>
+                <span class="of-amt">¥1.00</span>
+              </li>
+              <li class="of-stream-row">
+                <span class="of-prog"><i class="on"></i><i class="on"></i><i></i><i></i><b>待发货</b></span>
+                <span class="of-oid">STLL57875548<em>oppo12:asdsad</em></span>
+                <span class="of-amt">¥1888.00</span>
+              </li>
+              <li class="of-stream-row">
+                <span class="of-prog"><i class="on"></i><i class="on"></i><i></i><i></i><b>待发货</b></span>
+                <span class="of-oid">ULQZ69803866<em>智能手环 5 代 血氧版:GD-107-0959</em></span>
+                <span class="of-amt">¥249.00</span>
+              </li>
+              <li class="of-stream-row">
+                <span class="of-prog"><i class="on"></i><i class="on"></i><i></i><i></i><b>待发货</b></span>
+                <span class="of-oid">EJTW166070062935<em>智能手环 5 代 血氧版:GD-107-0959</em></span>
+                <span class="of-amt">¥219.00</span>
+              </li>
+              <li class="of-stream-row">
+                <span class="of-prog"><i class="on"></i><i class="on"></i><i></i><i></i><b>待发货</b></span>
+                <span class="of-oid">LATH16195115<em>oppo12:asdsad；oppo12:sad</em></span>
+                <span class="of-amt">¥3776.00</span>
+              </li>
+              <li class="of-stream-row">
+                <span class="of-prog"><i class="on"></i><i class="on"></i><i></i><i></i><b>待发货</b></span>
+                <span class="of-oid">OPDL69977898<em>静音无线鼠标 双模:GD-109-4C80</em></span>
+                <span class="of-amt">¥178.00</span>
+              </li>
+              <li class="of-stream-row">
+                <span class="of-prog"><i class="on"></i><i class="on"></i><i></i><i></i><b>待发货</b></span>
+                <span class="of-oid">XPEM63624472<em>加厚收纳箱 60L 两件套:GD-216-221</em></span>
+                <span class="of-amt">¥178.00</span>
+              </li>
+              <li class="of-stream-row">
+                <span class="of-prog"><i class="on"></i><i class="on"></i><i class="on"></i><i></i><b>待收货</b></span>
+                <span class="of-oid">ZKTO71032739<em>潮汕手打牛肉丸 500g:GD-436-D2B0</em></span>
+                <span class="of-amt">¥90.00</span>
+              </li>
+              <li class="of-stream-row">
+                <span class="of-prog"><i class="on"></i><i class="on"></i><i class="on"></i><i></i><b>待收货</b></span>
+                <span class="of-oid">AFCT73104679<em>羊毛混纺围巾 格纹:GD-325-F89E</em></span>
+                <span class="of-amt">¥149.00</span>
+              </li>
+              <li class="of-stream-row">
+                <span class="of-prog"><i class="on"></i><i class="on"></i><i></i><i></i><b>待发货</b></span>
+                <span class="of-oid">B7CAP-sgu0g-r9-9<em>B7CAP-PI</em></span>
+                <span class="of-amt">¥1.50</span>
+              </li>
+            </ol>
+            <p class="cnote">新帧到达后整行替换；滚动只发生在这个框内，页高不变。取消单不点亮任何进度节点（step = 0）。</p>
+          </div>
+        </aside>
+
+      </section>
+
+      <div class="foot-note">
+        <b>本版结构主张</b>：8/4 非对称 —— 左边一条纵向阶梯把「量、转化、耗时」压在同一列节奏上；右边只留辅助环图 + 滚动流，
+        不再让图表与主链抢宽度。<br>
+        <b>代价</b>：右栏较窄，订单流只能两行一行（单号/商品 + 金额）；环图在取消极端占比时会接近满环 —— 因此它被降为辅助图，数量与占比在图例里逐行兜底。<br>
+        <b>不画的东西</b>：品牌色、字号档、圆角、阴影、动效；这些留到选定方案后的主题落地。
+      </div>
+
+    </div></div></div>
+  </div>
+</div>
+
+<details class="wire-foot">
+  <summary>结构判据与实测（点开看 · 判据本体也在交付报告里）</summary>
+  <div class="body judge">
+    <b>结构判据（本页不是设计稿，是拿来比构图的）</b>
+    <ul>
+      <li><b>C1 相邻区块不同构</b>：① 读数带（三组横排）／② 左主链（纵向 4 级阶梯：名称+数 / 条 / 转化+耗时）／③ 左取消总账（单行 details）／④ 右辅助图（环 + 图例列）／⑤ 右实时流（单列滚动行）。4 对相邻，没有两块共用同一套直接子元素结构；左右两栏本身就是不同构的两块。</li>
+      <li><b>C2 不是卡片网格</b>：全页 0 个等宽等高卡片。五态不是 5 张 KPI 卡，而是右栏 5 行图例 + 环图；主链也不是卡片，是一条连续的纵向轨道。</li>
+      <li><b>C3 区块间距 &gt; 内部间距</b>：左右栏间距与区块之间 28px（<span style="font-family:var(--mono)">--gap-block</span>），块内 12px（<span style="font-family:var(--mono)">--gap-in</span>）；阶梯每级内 12px，行内边距 12px。</li>
+      <li><b>C4 一套网格与边距</b>：主区 padding 32px、12 栏栅格；本页的分割就是 8/4（2:1），块间距 28、内距 12，与甲版同一把尺。</li>
+      <li><b>大胆装置</b>：不对称分割本身是主结构 —— 左 8 栏一条连续阶梯（条长编码量、右列编码转化与耗时），右 4 栏把环图降级为辅助；主链不再与图表共用一张卡网格。</li>
+      <li><b>取消压力态（结构检查）</b>：取消 99.6% 时，环图会接近一整圈 —— 这正是把环图降到辅助图的原因；主链仍按「到达量」逐级缩短，阶梯的 4 级与数字不会消失。是否把取消从环里拆成独立读数，留给主题阶段裁定。</li>
+    </ul>
+    <b>数据与口径（2026-10-17 19:11 真库实测）</b>
+    <ul>
+      <li>总数 256；五态：待付款 0 / 待发货 89 / 待收货 24 / 已完成 108 / 已取消 35（与 <span style="font-family:var(--mono)">countOrderStates()</span> 同一条判据链）。</li>
+      <li>累计到达：创建 256 → 支付 221（86.3%）→ 发货 132（51.6%）→ 收货 108（42.2%）；相邻段转化 86.3% / 59.7% / 81.8%。</li>
+      <li>平均耗时（仅用时间戳齐全的样本）：付款 28.2 分（n=215）、发货 1133.3 分（n=139）、收货 3634.8 分（n=102）、全链路 4796.7 分（n=102）。</li>
+      <li><b>⚠️ 与需求原话的差异</b>：原话说「目前 99.6% 已取消」；本机此刻实测取消 35/256 = <b>13.7%</b>（live 探针与 SQL 两路一致）。可能是另一时刻/另一份数据的快照；本版按 99.6% 做了结构压力检查，不按 13.7% 调结构。</li>
+      <li><b>缺字段</b>：帧里没有转化率与平均耗时。转化率可由 <span style="font-family:var(--mono)">counts</span> 前端推导；平均耗时需后端在同一帧新增（PaidAt / ShippedAt / ReceivedAt 列已经存在，SQL 可聚合）。草图上的耗时是直接查库的实测值，落地前必须进帧。</li>
+      <li><b>取消归因不可得</b>：35 张取消单 PaidAt 全空、13 张 ShippedAt 非空，时间戳口径不一致 ⇒ 只给总账。</li>
+      <li>实时流样例来自真库：8 条历史订单 + 1 条 B7CAP 压测单 + 1 条 PROBE 单（最新且已取消，用来验证 step=0 的形态）。</li>
+      <li>本会话捕获流转 0：这一窗确实没有 transition 事件，不是断流。</li>
+    </ul>
+    <b>与当前页面的关系</b>
+    <ul>
+      <li>保留：环形图（缩小并降为右栏辅助）、五态计数（改成图例行）、实时订单列表（改成右栏滚动流）、数据源三档（正常 / 模拟日常 / 后端真流）、订单时间线抽屉入口。</li>
+      <li>移除：五张等宽 KPI 卡、环图与 KPI 卡并排的等高布局、列表的独立分页条（滚动流取代分页）。</li>
+      <li>新增（需后端补字段）：每段平均耗时；左右栏的 8/4 比例固定，不随数据变化。</li>
+    </ul>
+  </div>
+</details>
+
+</body>
+</html>
