@@ -1,0 +1,123 @@
+{
+  "at": "2026-10-17T14:53:28.099Z",
+  "checks": {
+    "admin-shell-sentinel": {
+      "ok": true
+    },
+    "single-frame-accounts-all": {
+      "ok": true,
+      "detail": {
+        "via": "synthetic",
+        "capturedDelta": 3000,
+        "recentMoves": 121,
+        "laneParticles": 4,
+        "cancelParticles": 4,
+        "domParticles": 4,
+        "domCancel": 4,
+        "elapsedMs": 4
+      }
+    },
+    "single-frame-render-sampled": {
+      "ok": true,
+      "detail": {
+        "via": "synthetic",
+        "capturedDelta": 3000,
+        "recentMoves": 121,
+        "laneParticles": 4,
+        "cancelParticles": 4,
+        "domParticles": 4,
+        "domCancel": 4,
+        "elapsedMs": 4
+      }
+    },
+    "single-frame-under-50ms": {
+      "ok": true,
+      "detail": {
+        "via": "synthetic",
+        "capturedDelta": 3000,
+        "recentMoves": 121,
+        "laneParticles": 4,
+        "cancelParticles": 4,
+        "domParticles": 4,
+        "domCancel": 4,
+        "elapsedMs": 4
+      }
+    },
+    "burst-accounts-all": {
+      "ok": true,
+      "detail": {
+        "delta": 20000
+      }
+    },
+    "burst-no-long-task": {
+      "ok": true,
+      "detail": []
+    },
+    "burst-per-frame-under-50ms": {
+      "ok": true,
+      "detail": [
+        3.9,
+        4.7,
+        10.1,
+        5.2,
+        5.2,
+        5.4,
+        5.1,
+        5.2,
+        5.6,
+        5.3
+      ]
+    },
+    "burst-dom-particles-capped": {
+      "ok": true,
+      "detail": 18
+    },
+    "burst-lane-particles-fly": {
+      "ok": true,
+      "detail": 18
+    }
+  },
+  "samples": {
+    "base": {
+      "captured": 0,
+      "counts": {
+        "waitPay": 0,
+        "waitShip": 2154,
+        "waitReceive": 1142,
+        "completed": 4244,
+        "cancelled": 25342
+      }
+    },
+    "single3000": {
+      "via": "synthetic",
+      "capturedDelta": 3000,
+      "recentMoves": 121,
+      "laneParticles": 4,
+      "cancelParticles": 4,
+      "domParticles": 4,
+      "domCancel": 4,
+      "elapsedMs": 4
+    },
+    "burst10x2000": {
+      "capturedDelta": 20000,
+      "perFrameMs": [
+        3.9,
+        4.7,
+        10.1,
+        5.2,
+        5.2,
+        5.4,
+        5.1,
+        5.2,
+        5.6,
+        5.3
+      ],
+      "maxPerFrameMs": 10.1,
+      "longTasks": [],
+      "longTaskOver50": 0,
+      "maxDomParticles": 18
+    }
+  },
+  "ok": true,
+  "fail": []
+}

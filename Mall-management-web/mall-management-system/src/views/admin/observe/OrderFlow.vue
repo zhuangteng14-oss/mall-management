@@ -85,6 +85,7 @@
           :show-legend="true"
           :grid-right="44"
           :loading="insightLoading && !insight"
+          empty-overlay
           empty-text="还没有可用于重建趋势的时间戳"
         />
       </section>
@@ -228,10 +229,23 @@
           <span>流出 <b>{{ qpsText(totalQpsOut) }}</b></span>
           <span class="a-of-mono">{{ lastTickAt }}</span>
         </div>
-        <!-- 主链粒子轨道：SSE move = 一颗从 from 飞向 to 的发光粒子；
-             轨道本身是虚线路线，不是一排死点。cancel 支线不在这条轨道上。 -->
+        <!-- 主链粒子轨道：SSE move = 一颗从左向右飞向 to 的发光粒子；
+             轨道虚线本身也向右流动（见 `a-of-lane-dash`）。
+             取消 = 支线：从待付款/待发货向下弧线落到「已取消」，与主链同时动。 -->
         <div class="a-of-lane" aria-hidden="true">
           <i class="a-of-lane-track"></i>
+          <svg class="a-of-cancel-links" viewBox="0 0 100 100" preserveAspectRatio="none">
+            <path
+              d="M10,24 C 42,58 70,64 90,82"
+              :class="{ on: pulseNodes.has('cancelled') }"
+              vector-effect="non-scaling-stroke"
+            />
+            <path
+              d="M37,24 C 55,54 74,66 90,82"
+              :class="{ on: pulseNodes.has('cancelled') }"
+              vector-effect="non-scaling-stroke"
+            />
+          </svg>
           <span
             v-for="(n, i) in FLOW_NODES"
             :key="n.key"
@@ -244,6 +258,15 @@
             <em>{{ fmtInt(counts[n.key]) }}</em>
           </span>
           <span
+            class="a-of-lane-node a-of-lane-cancel"
+            :class="{ 'is-live': pulseNodes.has('cancelled') }"
+            :style="{ left: LANE_POS[3] + '%' }"
+          >
+            <i class="a-of-lane-dot" :style="{ background: stateColor('cancelled') }"></i>
+            <b>已取消</b>
+            <em>{{ fmtInt(counts.cancelled) }}</em>
+          </span>
+          <span
             v-for="p in laneParticles"
             :key="p.id"
             class="a-of-particle-wrap"
@@ -251,6 +274,13 @@
           >
             <i class="a-of-particle"></i>
           </span>
+          <i
+            v-for="p in cancelParticles"
+            :key="p.id"
+            class="a-of-cancel-particle"
+            :class="'from-' + p.from"
+            :style="{ '--pcolor': stateColor('cancelled') }"
+          ></i>
         </div>
         <ul v-if="streamRows.length" class="a-of-stream-list">
           <li v-for="m in streamRows" :key="m.orderId + '-' + m.ts" class="a-of-stream-i">
@@ -448,104 +478,173 @@
       </header>
       <p class="a-of-rp-note">
         <b>回放 1:1，不做同类合并。</b>
-        框内角标 = 回放时钟此刻各态订单数（会加会减）；框下小字 = 本批次经过次数（只增）。
-        状态高亮按回放节奏亮灭，不是实时流的 4Hz 节流。退出回放后恢复实时。
+        下面全部是实时页同一套高保真组件（折线 / 环形 / 阶梯 / 直方图），只是数据源换成
+        `replaySession.stateChanges` 与回放时钟 —— 不再是另一套「简陋方块」。
+        角标 = 回放时钟此刻各态订单数（会加会减）；阶梯小字 = 本批次经过次数（只增）。
       </p>
     </template>
 
-    <!-- 回放分支沿用旧状态机图（实时分支的主视觉已换成上面的积压阶梯 + 趋势）。 -->
     <template v-if="replaySession.active">
-    <!-- ══ ④ 状态机图（4 主节点 + 取消）═══════════════════════════════════════════
-         ⚠️ 手写 SVG 而**不是** ECharts 的 `graph` 系列：本仓 `components/charts/` 里没有 graph 封装，
-         为了这一张图去引一个新图表类型（连带它的布局算法与主题参数）不划算 —— 5 个节点 5 条边，
-         SVG 的 `<rect>`/`<line>` 二十行就画完了，且主题色直接吃 CSS 变量。
-         「走过的边亮绿」= 本拍 `moves` 里出现过的 `from>to`，亮 1.2 秒后自动熄（见 `flash()`）。 -->
+    <!-- ══ ④ 回放主视觉：与实时页同源的高保真组件 ═══════════════════════════════
+         ⚠️ 2026-10-17 用户裁定：回放**必须复用真实图表组件**，不能另画一套方块。
+         所有图表接 `is-replay`（角标）+ 回放数据（replayCounts / stateChanges 推算），
+         不绑定 SSE；随回放时钟逐条重绘。 -->
+    <div class="a-of-kpis">
+      <div v-for="s in STATES" :key="s.key" class="a-of-kpi is-static">
+        <KpiCard
+          :label="s.label"
+          glyph="flow"
+          :value="fmtInt(replayCounts[s.key])"
+          :hint="`回放此刻 · 经过 ${fmtInt(batchNodeHits[s.key] || 0)} 次`"
+        />
+      </div>
+    </div>
+
+    <div class="a-of-hero">
+      <section class="a-card a-of-trend">
+        <header class="a-of-chd">
+          <div>
+            <h2 class="a-of-ct">回放时钟 · 积压趋势</h2>
+            <p class="a-of-cs">X 轴 = 台账原时间窗（{{ replayTrendSpanText }}）· 线随回放逐格长出 · 24 格刻度始终保留</p>
+          </div>
+          <span class="a-of-live">回放中</span>
+        </header>
+        <LineChart
+          :categories="replayTrendCategories"
+          :series="replayTrendSeries"
+          height="250px"
+          :smooth="false"
+          :show-legend="true"
+          :grid-right="44"
+          is-replay
+          empty-overlay
+          empty-text="回放尚未产生可绘制的积压样本"
+        />
+      </section>
+
+      <section class="a-card a-of-health">
+        <header class="a-of-chd">
+          <h2 class="a-of-ct">回放此刻 · 流转分布</h2>
+          <span class="a-of-cs">随回放逐条重建</span>
+        </header>
+        <DonutChart
+          :data="replayDonutData"
+          :min-angle="replayDonutMinAngle"
+          height="196px"
+          :show-legend="false"
+          inner-ratio="46%"
+          outer-ratio="60%"
+          :center-value="fmtInt(replayOrderTotal)"
+          center-title="回放此刻订单"
+          is-replay
+          empty-text="回放尚未产生状态流转"
+        />
+        <p class="a-of-cs">扇区 = 回放时钟此刻五态订单数；中心 = 当前合计。</p>
+      </section>
+    </div>
+
+    <div class="a-of-main">
+      <section class="a-card a-of-flow">
+        <header class="a-of-chd">
+          <div>
+            <h2 class="a-of-ct">状态流转 · 回放阶梯</h2>
+            <p class="a-of-cs">与实时页同一套阶梯与配色 · 条宽 = 回放此刻积压 · 随时钟增减</p>
+          </div>
+          <span class="a-of-cs">判据链：取消 → 已完成 → 待收货 → 待发货 → 待付款</span>
+        </header>
+        <div class="a-of-flow-body">
+          <div class="a-of-ladder">
+            <div
+              v-for="n in replayFlowRows"
+              :key="n.key"
+              class="a-of-step is-static"
+              :class="{ 'is-live': pulseNodes.has(n.key) }"
+            >
+              <span class="a-of-step-top">
+                <span class="a-of-step-name">
+                  <i class="a-of-dot" :style="{ background: stateColor(n.key), color: stateColor(n.key) }"></i>{{ n.label }}
+                </span>
+                <span class="a-of-step-num">
+                  <b class="a-of-step-n" :class="{ 'is-bump': statePulse[n.key] }">{{ fmtInt(n.count) }}</b>
+                </span>
+                <span class="a-of-step-qps">回放经过 {{ fmtInt(n.hits) }} 次</span>
+              </span>
+              <span class="a-of-rail" aria-hidden="true">
+                <i :style="{ width: n.width + '%', background: stateColor(n.key) }"></i>
+              </span>
+              <span class="a-of-step-meta">
+                <span>回放此刻存量</span>
+                <span>{{ n.share }}%</span>
+                <span>{{ n.avgLabel }} {{ minuteText(n.avg) }}</span>
+              </span>
+            </div>
+
+            <div class="a-of-step is-cancel is-static" :class="{ 'is-live': pulseNodes.has('cancelled') }">
+              <span class="a-of-step-top">
+                <span class="a-of-step-name"><i class="a-of-dot" :style="{ background: stateColor('cancelled'), color: stateColor('cancelled') }"></i>已取消（支线）</span>
+                <span class="a-of-step-num">
+                  <b class="a-of-step-n" :class="{ 'is-bump': statePulse.cancelled }">{{ fmtInt(replayCounts.cancelled) }}</b>
+                </span>
+                <span class="a-of-step-qps">回放经过 {{ fmtInt(batchNodeHits.cancelled || 0) }} 次</span>
+              </span>
+              <span class="a-of-rail" aria-hidden="true">
+                <i :style="{ width: replayCancelWidth + '%', background: stateColor('cancelled') }"></i>
+              </span>
+              <span class="a-of-step-meta">
+                <span>退出流程 · 不计入积压</span>
+                <span>占回放此刻 {{ replayCancelShare }}%</span>
+              </span>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="a-card a-of-stream">
+        <header class="a-of-chd">
+          <div>
+            <h2 class="a-of-ct">回放流转 · 逐条经过</h2>
+            <p class="a-of-cs">回放时钟 {{ replayClockText }} · 已捕获 {{ fmtInt(replayMoveCount) }} 条</p>
+          </div>
+          <span class="a-of-live">回放中</span>
+        </header>
+        <div class="a-of-stream-sum">
+          <span>回放进度 <b>{{ fmtInt(replaySession.cursor) }}</b> / {{ fmtInt(replaySession.count) }}</span>
+          <span class="a-of-mono">{{ replaySession.spanMs ? (replaySession.spanMs / 1000).toFixed(1) + 's' : '—' }}</span>
+        </div>
+        <ul v-if="replayRecentMoves.length" class="a-of-stream-list">
+          <li v-for="m in replayRecentMoves.slice(0, 8)" :key="m.seq" class="a-of-stream-i">
+            <span class="a-of-stream-t">{{ hms(m.ts) }}</span>
+            <span class="a-of-id">#{{ m.orderId }}</span>
+            <span class="a-of-stream-d">
+              <template v-if="m.from">{{ moveStateLabel(m.from) }} → </template>
+              <b>{{ moveStateLabel(m.to) }}</b>
+            </span>
+            <span v-if="m.result" class="a-of-rpm-r">{{ m.result }}</span>
+          </li>
+        </ul>
+        <div v-else class="a-of-stream-empty">
+          <i class="a-of-stream-radar" aria-hidden="true"></i>
+          <b>回放尚未产生订单流转</b>
+          <span>时钟仍在推进；本批台账里可能只包含非订单事件。</span>
+        </div>
+      </section>
+    </div>
+
     <h2 class="a-h2">
-      状态机
-      <span v-if="!replaySession.active" class="a-h2n">
-        被本拍流转走过的边，短时高亮（每秒最多 {{ FLASH_HZ_MAX }} 次）· 落到哪个节点，哪个脉冲 ·
-        框内角标 = <b>全表</b>多少单，框下小字 = <b>本批次</b>经过多少次
-      </span>
-      <span v-else class="a-h2n">
-        回放时钟驱动的同一张状态机 · 框内角标 = <b>回放此刻各态订单数</b>（会加会减）·
-        框下小字 = <b>本批次经过次数</b>（只增）· 走过的边按回放节奏亮灭
-      </span>
+      耗时分布
+      <span class="a-h2n">由回放流转的相邻时间戳推算 · X 轴桶与实时页同一边界 · n=0 时保留坐标轴</span>
     </h2>
-    <div class="a-card a-of-fsm">
-      <svg class="a-of-svg" viewBox="0 0 640 232" role="img" aria-label="订单状态机：待付款 → 待发货 → 待收货 → 已完成，以及待付款/待发货 → 已取消">
-        <defs>
-          <marker id="of-arrow" markerWidth="9" markerHeight="9" refX="8" refY="3.2" orient="auto">
-            <path d="M0,0 L8,3.2 L0,6.4 z" fill="var(--line-2)" />
-          </marker>
-          <marker id="of-arrow-hi" markerWidth="9" markerHeight="9" refX="8" refY="3.2" orient="auto">
-            <path d="M0,0 L8,3.2 L0,6.4 z" fill="var(--success)" />
-          </marker>
-        </defs>
-
-        <!-- 主链：待付款 → 待发货 → 待收货 → 已完成（x 中心 80 / 240 / 400 / 560，框宽 100） -->
-        <g class="a-of-edges">
-          <line
-            v-for="e in MAIN_EDGES" :key="e.id"
-            :x1="e.x1" y1="70" :x2="e.x2" y2="70"
-            class="a-of-edge" :class="{ on: activeEdges.has(e.id) }"
-            :marker-end="activeEdges.has(e.id) ? 'url(#of-arrow-hi)' : 'url(#of-arrow)'"
-          />
-        </g>
-
-        <!-- 取消两条腿（折线绕开主链，从框底下去） -->
-        <g class="a-of-edges">
-          <path
-            d="M80 92 L80 130 L240 130 L240 152"
-            class="a-of-edge" :class="{ on: activeEdges.has(CANCEL_FROM_PAY) }"
-            :marker-end="activeEdges.has(CANCEL_FROM_PAY) ? 'url(#of-arrow-hi)' : 'url(#of-arrow)'"
-          />
-          <path
-            d="M240 92 L240 152"
-            class="a-of-edge" :class="{ on: activeEdges.has(CANCEL_FROM_SHIP) }"
-            :marker-end="activeEdges.has(CANCEL_FROM_SHIP) ? 'url(#of-arrow-hi)' : 'url(#of-arrow)'"
-          />
-        </g>
-
-        <!-- 每个节点**两行数**，口径不同、分行标清（Q3 裁定）：
-             · 框内右上角标 = **全表**口径（帧里 `counts` 现成，`OrderDao.countOrderStates()` 无时间窗）
-               ⇒ 演练时会显示 11558 这种总量，它说「库里此刻这个态有多少单」。
-             · 框下小字 = **本批次**口径（帧里 `moves[].batchId` 与当前批次相符的、落到本节点的**次数**）
-               ⇒ 它说「这次演练把多少条流转推进了这个节点」。没有批次号时画 `—`，
-               不画 `+0`（「没有演练在跑」和「演练跑了但一次没到」是两件事）。 -->
-        <g class="a-of-nodes">
-          <g
-            v-for="n in FSM_NODES" :key="n.key"
-            :class="{ 'is-pulse': pulseNodes.has(n.key) }"
-          >
-            <rect :x="n.cx - 50" :y="n.cy - 22" width="100" height="44" rx="10" class="a-of-box" :class="'is-' + n.key" />
-            <text :x="n.cx" :y="n.cy + 5" text-anchor="middle" class="a-of-box-t" :class="'is-' + n.key">{{ n.label }}</text>
-            <text
-              :x="n.cx + 40" :y="n.cy - 11"
-              text-anchor="end" class="a-of-box-n"
-            >{{ fmtInt(num(counts[n.key])) }}</text>
-            <text
-              :x="n.cx" :y="n.cy + 34"
-              text-anchor="middle" class="a-of-box-b"
-            >{{ batchText(n.key) }}</text>
-          </g>
-        </g>
-      </svg>
-      <p class="a-of-fsm-note">
-        ⚠️ 已知边界（后端口径，不是本页漏画）：**超时取消不进流转流** ——
-        `OrderTimeoutCancelJob` 只写 `CancelledAt`、不走状态机 ⇒ 取消那两条边**永远不亮**，
-        取消量只能从上面「已取消」计数卡的跳变看出（见后端 `OrderStreamService` 类注释）。
-        <template v-if="currentBatch">
-          当前批次：<code>{{ currentBatch }}</code>。
-        </template>
-        <template v-if="!replaySession.active && batchCountsRows">
-          <br />本批次单数（后端 `batchCounts`，**单数**口径，与上面小字的**次数**口径不同）：
-          <template v-for="(r, i) in batchCountsRows" :key="r.key">{{ i ? ' · ' : '' }}{{ r.label }} {{ fmtInt(r.n) }}</template>。
-        </template>
-        <template v-else-if="replaySession.active">
-          <br />回放口径：角标由 `replaySession.stateChanges` 逐条重建（建档 +1；之后按重建出的当前位置 −1 / to +1），
-          不是后端 `batchCounts` 的库内聚合；台账里没有的订单不会被凭空补进来。
-        </template>
-      </p>
+    <div class="a-of-hists">
+      <section v-for="g in replayDurationGroups" :key="g.key" class="a-card a-of-hist">
+        <HistogramChart
+          :title="g.title"
+          :bins="g.bins"
+          :avg-minutes="g.avgMinutes"
+          :samples="g.samples"
+          height="226px"
+          is-replay
+        />
+      </section>
     </div>
 
     <!-- ══ 回放流转明细（只读，按原台账时间戳倒序）════════════════════════════════
@@ -763,21 +862,14 @@ const STATES = [
 ]
 const STATE_LABEL = Object.fromEntries(STATES.map((s) => [s.key, s.label]))
 
-/* ── 状态机图的静态几何（写死坐标，不做自动布局 —— 5 个节点，布局算法是负收益）──────── */
-const FSM_NODES = [
-  { key: 'waitPay', label: '待付款', cx: 80, cy: 70 },
-  { key: 'waitShip', label: '待发货', cx: 240, cy: 70 },
-  { key: 'waitReceive', label: '待收货', cx: 400, cy: 70 },
-  { key: 'completed', label: '已完成', cx: 560, cy: 70 },
-  { key: 'cancelled', label: '已取消', cx: 240, cy: 174 },
-]
+/* ── 状态机的边（2026-10-17 回放改用真实图表后，SVG 方块已删除；这里只留判据用的边 id） */
 /** 主链三条边。`id` 就是 `from + '>' + to`，与后端 `moves` 的 `from`/`to` 拼出来的一模一样。 */
 const MAIN_EDGES = [
-  { id: 'waitPay>waitShip', x1: 130, x2: 190 },
-  { id: 'waitShip>waitReceive', x1: 290, x2: 350 },
-  { id: 'waitReceive>completed', x1: 450, x2: 510 },
+  { id: 'waitPay>waitShip' },
+  { id: 'waitShip>waitReceive' },
+  { id: 'waitReceive>completed' },
 ]
-/** 取消两条腿的边 id（几何在模板里写死，这里只留判据用的常量）。 */
+/** 取消两条腿的边 id（回放仍用它们给脉冲 / 轨道分支判定）。 */
 const CANCEL_FROM_PAY = 'waitPay>cancelled'
 const CANCEL_FROM_SHIP = 'waitShip>cancelled'
 /** 本页**画出来了的**全部 5 条边 —— 用来判「这条边图上有吗」，见 `absorbMoves` 的守卫。 */
@@ -786,10 +878,10 @@ const KNOWN_EDGES = new Set([...MAIN_EDGES.map((e) => e.id), CANCEL_FROM_PAY, CA
 /* ── 后端 `OrderState` ↔ 本页五态：**唯一**的一层翻译（C3 块 7 · commit 10 补）────────────
    ⚠️ 为什么需要它：后端 `moves[].from` / `moves[].to` 是 **OrderState 枚举名**
       （`order/model/OrderState.java:44-72`），而本页的节点 key / 边 id 是 **DB 派生五态**
-      （上面 `FSM_NODES` / `MAIN_EDGES`）—— 两套名字**没有一个对得上**
+      （上面 `STATES` / `MAIN_EDGES`）—— 两套名字**没有一个对得上**
       （`CREATED ≠ waitPay`、`COMPLETED ≠ completed`，连大小写都不同）。
       ⇒ commit 7 那版 `flash(activeEdges, `${from}>${to}`)` 在 `MAIN_EDGES` 里永远查不到，
-      `pulseNodes` 拿到的枚举名也不在 `FSM_NODES` 的 key 集合里，**两条路都亮不了**：
+      `pulseNodes` 拿到的枚举名也不在 `STATES` 的 key 集合里，**两条路都亮不了**：
       机制件（`flash` / `FLASH_MS` / `.is-pulse` / `@keyframes`）全都在，断的是喂数据这一层
       （实测见 `块7-commit10-阶段一核实.txt` §3b「原因二」）。
 
@@ -887,17 +979,6 @@ const batchNodeHits = reactive({ waitPay: 0, waitShip: 0, waitReceive: 0, comple
  *  **单数**离开 `waitPay` 而**次数**留在那里（历史次数不会减少）。页面分行标清，不合并。 */
 const batchCounts = ref(null)
 
-/** 框下那行小字。⚠️ 没有批次号时画 `—`，**不画 `+0`**：
- *  「没有演练在跑」和「演练跑了但这个节点一次没到」是两件事，用同一个数表示会读错。 */
-function batchText(key) {
-  return currentBatch.value ? `本批次 +${fmtInt(num(batchNodeHits[key]))}` : '本批次 —'
-}
-
-/** 框外那行「本批次单数」的数字行（五态全列，没批次时为 `null` ⇒ 模板整行不画）。 */
-const batchCountsRows = computed(() => (batchCounts.value
-  ? STATES.map((s) => ({ key: s.key, label: s.label, n: num(batchCounts.value[s.key]) }))
-  : null))
-
 /* ── 页面状态 ───────────────────────────────────────────────────────────────── */
 const phase = ref('connecting')            // connecting | live | stopped
 const errMsg = ref('')
@@ -973,6 +1054,17 @@ const laneParticles = ref([])
 let particleSeq = 0
 const LANE_POS = [10, 37, 64, 91]
 const LANE_INDEX = { waitPay: 0, waitShip: 1, waitReceive: 2, completed: 3 }
+/* 背压（2026-10-17 用户 P0）：压测一帧可能有数千条 moves。
+   · 计数 / 批次 / 累计条数按**全量**算（账不能少）；
+   · DOM 与动画只取**均匀抽样**的 ≤120 条，粒子每帧 ≤8 颗。
+   这样主线程不会被几千次响应式写入 + setTimeout 打爆，流轨仍然「有东西在动」。 */
+const MAX_MOVE_RENDER_PER_FRAME = 120
+const MAX_PARTICLES_PER_FRAME = 8
+const CANCEL_PARTICLES_CAP = 8
+let frameParticleBudget = 0
+let cancelMovesInFrame = 0
+const cancelParticles = ref([])
+let cancelParticleSeq = 0
 
 /* ── 回放态（2026-10-17 全链路联动）─────────────────────────────────────────────
    ⚠️ 与实时态**并行存在**、互不覆盖：回放期间模板走 `v-else` 分支，实时流的
@@ -992,6 +1084,201 @@ const replayClockText = computed(() => {
   const d = new Date(t)
   return `${pad2(d.getHours())}:${pad2(d.getMinutes())}:${pad2(d.getSeconds())}.${String(d.getMilliseconds()).padStart(3, '0')}`
 })
+
+/* ── 回放高保真图表的推算层（2026-10-17 用户裁定：复用真实组件）────────────────────
+   ⚠️ 这里只做「从回放流转推出图表要的形状」，不再另画一套 SVG 方块：
+     · 趋势 = 按日志时间采样的五态存量（每 2 秒日志时间一个样本，最多 240 个）；
+     · 耗时 = 同一订单相邻流转时间戳的差值（付款 / 发货 / 收货三段）；
+     · 环形 / 阶梯 = 直接读 `replayCounts`（逐条重建的当前存量）。
+   X 轴刻度按**整批台账的时间窗**固定切 24 格 —— 回放刚开始线是空的，但轴永远在。 */
+const REPLAY_TREND_SLOT_COUNT = 24
+const REPLAY_TREND_SAMPLE_MS = 2000
+const REPLAY_TREND_CAP = 240
+const REPLAY_DURATION_CAP = 5000
+const replaySamples = ref([])
+let replaySampleAt = 0
+const replayDurations = reactive({ pay: [], ship: [], receive: [] })
+const replayLife = new Map()
+
+/** 回放时间窗的 25 个刻度（含两端）；极端单秒批次也铺满，避免轴塌陷。 */
+const replayTrendSlotTs = computed(() => {
+  const s = num(replaySession.startTs)
+  const e = num(replaySession.endTs)
+  if (!s || !e || e <= s) {
+    const base = s || num(replaySession.clockTs) || Date.now()
+    return Array.from({ length: REPLAY_TREND_SLOT_COUNT + 1 }, (_, i) => base + i * 1000)
+  }
+  const step = (e - s) / REPLAY_TREND_SLOT_COUNT
+  return Array.from({ length: REPLAY_TREND_SLOT_COUNT + 1 }, (_, i) => s + i * step)
+})
+const replayTrendSpanText = computed(() => {
+  const s = num(replaySession.startTs)
+  const e = num(replaySession.endTs)
+  if (!s || !e) return '—'
+  return `${hms(s)} → ${hms(e)}`
+})
+const replayTrendCategories = computed(() => {
+  const span = num(replaySession.endTs) - num(replaySession.startTs)
+  // 跨度超过 6 小时时标签带日期，避免跨天重复成一片 HH:mm
+  if (span > 6 * 3600 * 1000) {
+    return replayTrendSlotTs.value.map((ts) => {
+      const d = new Date(ts)
+      return `${pad2(d.getMonth() + 1)}-${pad2(d.getDate())} ${pad2(d.getHours())}:00`
+    })
+  }
+  return replayTrendSlotTs.value.map((ts) => hms(ts))
+})
+const replayTrendSeries = computed(() => {
+  const tsList = replayTrendSlotTs.value
+  const samples = replaySamples.value
+  const clock = num(replaySession.clockTs)
+  const defs = [
+    { key: 'waitPay', name: '待付款', colorIndex: 4 },
+    { key: 'waitShip', name: '待发货', colorIndex: 1 },
+    { key: 'waitReceive', name: '待收货', colorIndex: 6 },
+  ]
+  return defs.map((d) => {
+    let seen = 0
+    const data = tsList.map((ts) => {
+      while (seen < samples.length && samples[seen].ts <= ts) seen += 1
+      // 回放时钟还没走到 / 还没有样本 ⇒ null：画断点，不拿 0 谎称「积压为 0」
+      if (!clock || ts > clock || seen === 0) return null
+      return num(samples[seen - 1][d.key])
+    })
+    return { name: d.name, data, area: true, colorIndex: d.colorIndex }
+  })
+})
+const replayDonutData = computed(() => {
+  const t = chartTokens()
+  const c = stateColors(t)
+  return STATES.map((s) => ({
+    name: s.label,
+    value: num(replayCounts[s.key]),
+    itemStyle: { color: c[s.key] },
+  }))
+})
+const replayDonutMinAngle = computed(() => {
+  const vals = replayDonutData.value.map((d) => num(d.value)).filter((v) => v > 0)
+  if (vals.length < 2) return 0
+  const sum = vals.reduce((a, b) => a + b, 0)
+  return Math.max(...vals) / sum >= 0.95 ? 10 : 0
+})
+const REPLAY_AVG_KEY = { waitPay: 'pay', waitShip: 'ship', waitReceive: 'receive', completed: 'receive' }
+const REPLAY_AVG_LABEL = { waitPay: '付款均耗', waitShip: '发货均耗', waitReceive: '收货均耗', completed: '全链路' }
+/** 回放阶梯：与实时 `flowRows` 同一形态，只是数据源换成 `replayCounts`。 */
+const replayFlowRows = computed(() => {
+  const max = Math.max(1, ...FLOW_NODES.map((n) => num(replayCounts[n.key])))
+  const tot = replayOrderTotal.value
+  return FLOW_NODES.map((n) => {
+    const count = num(replayCounts[n.key])
+    return {
+      ...n,
+      count,
+      width: Math.max(count ? 4 : 0, (count / max) * 100),
+      hits: num(batchNodeHits[n.key]),
+      share: tot ? ((count / tot) * 100).toFixed(1) : '0.0',
+      avg: replayAvgMinutes(REPLAY_AVG_KEY[n.key]),
+      avgLabel: REPLAY_AVG_LABEL[n.key],
+    }
+  })
+})
+const replayCancelWidth = computed(() => {
+  const max = Math.max(1, ...FLOW_NODES.map((n) => num(replayCounts[n.key])), num(replayCounts.cancelled))
+  return Math.max(num(replayCounts.cancelled) ? 4 : 0, (num(replayCounts.cancelled) / max) * 100)
+})
+const replayCancelShare = computed(() => {
+  const tot = replayOrderTotal.value
+  return tot ? ((num(replayCounts.cancelled) / tot) * 100).toFixed(1) : '0.0'
+})
+function replayAvgMinutes(segment) {
+  const arr = replayDurations[segment] || []
+  if (!arr.length) return 0
+  return Math.round((arr.reduce((a, b) => a + b, 0) / arr.length) * 10) / 10
+}
+/** 与后端 `OrderInsightService#duration` 同一套桶边界 —— 回放与实时的横轴可逐桶对照。 */
+const REPLAY_DURATION_BUCKETS = {
+  pay: {
+    edges: [0, 5, 15, 60, 360, 1440],
+    labels: ['0–5分', '5–15分', '15–60分', '1–6小时', '6–24小时', '24小时+'],
+  },
+  ship: {
+    edges: [0, 60, 360, 1440, 4320, 10080],
+    labels: ['0–1小时', '1–6小时', '6–24小时', '1–3天', '3–7天', '7天+'],
+  },
+  receive: {
+    edges: [0, 360, 1440, 4320, 10080],
+    labels: ['0–6小时', '6–24小时', '1–3天', '3–7天', '7天+'],
+  },
+}
+function replayHistogram(segment) {
+  const { edges, labels } = REPLAY_DURATION_BUCKETS[segment]
+  const arr = replayDurations[segment] || []
+  const counts = labels.map(() => 0)
+  let max = 0
+  for (const minutes of arr) {
+    let idx = 0
+    for (let i = edges.length - 1; i >= 0; i -= 1) {
+      if (minutes >= edges[i]) { idx = i; break }
+    }
+    counts[idx] += 1
+    if (minutes > max) max = minutes
+  }
+  return {
+    bins: labels.map((label, i) => ({
+      label,
+      count: counts[i],
+      fromMinutes: edges[i],
+      toMinutes: i + 1 < edges.length ? edges[i + 1] : Math.max(max, edges[i] * 2),
+    })),
+    samples: arr.length,
+    avgMinutes: replayAvgMinutes(segment),
+  }
+}
+const replayDurationGroups = computed(() => ([
+  { key: 'pay', title: '付款耗时 · 回放推算', ...replayHistogram('pay') },
+  { key: 'ship', title: '发货耗时 · 回放推算', ...replayHistogram('ship') },
+  { key: 'receive', title: '收货耗时 · 回放推算', ...replayHistogram('receive') },
+]))
+
+/** 记一个回放趋势样本（每 2 秒日志时间最多一个）。 */
+function noteReplaySample(force) {
+  const ts = num(replaySession.clockTs)
+  if (!ts) return
+  if (!force && ts - replaySampleAt < REPLAY_TREND_SAMPLE_MS) return
+  replaySampleAt = ts
+  replaySamples.value = [...replaySamples.value, {
+    ts,
+    waitPay: replayCounts.waitPay,
+    waitShip: replayCounts.waitShip,
+    waitReceive: replayCounts.waitReceive,
+    completed: replayCounts.completed,
+  }].slice(-REPLAY_TREND_CAP)
+}
+/** 从相邻流转时间戳推算一段耗时（分钟）。首见即中段（台账被截断）⇒ 该段不补 0 假样本。 */
+function noteReplayLifecycle(m, toKey) {
+  let life = replayLife.get(m.orderId)
+  if (!life) {
+    life = { created: 0, paid: 0, shipped: 0, completed: 0 }
+    replayLife.set(m.orderId, life)
+  }
+  if (!life.created && toKey === 'waitPay') life.created = m.ts
+  if (toKey === 'waitShip' && !life.paid) {
+    life.paid = m.ts
+    if (life.created && m.ts >= life.created) pushReplayDuration('pay', (m.ts - life.created) / 60000)
+  } else if (toKey === 'waitReceive' && !life.shipped) {
+    life.shipped = m.ts
+    if (life.paid && m.ts >= life.paid) pushReplayDuration('ship', (m.ts - life.paid) / 60000)
+  } else if (toKey === 'completed' && !life.completed) {
+    life.completed = m.ts
+    if (life.shipped && m.ts >= life.shipped) pushReplayDuration('receive', (m.ts - life.shipped) / 60000)
+  }
+}
+function pushReplayDuration(segment, minutes) {
+  if (!Number.isFinite(minutes) || minutes < 0) return
+  const arr = replayDurations[segment]
+  arr.push(minutes)
+  if (arr.length > REPLAY_DURATION_CAP) arr.splice(0, arr.length - REPLAY_DURATION_CAP)
+}
 
 let stream = null
 let rafId = 0
@@ -1149,10 +1436,25 @@ const FLOW_NODES = [
 const TREND_COLOR = { waitPay: 4, waitShip: 1, waitReceive: 6 }
 
 const trend = computed(() => insight.value?.trend || { categories: [], series: [], anchoredToLatest: false })
+/**
+ * 趋势兜底刻度：分析面还没回来 / 后端时间戳全空时，仍铺满「最近 24 小时」的整点刻度。
+ * ⚠️ 这是「图表不能变白板」的前端保底：X 轴即使没有一条线，也必须留在画布上。
+ */
+const fallbackTrendCategories = computed(() => {
+  const now = new Date()
+  now.setMinutes(0, 0, 0)
+  const out = []
+  for (let i = 24; i >= 0; i -= 1) {
+    const d = new Date(now.getTime() - i * 3600 * 1000)
+    out.push(`${pad2(d.getHours())}:00`)
+  }
+  return out
+})
 /** 24h 历史桶 + 右侧实时尾点。尾点是本页自己按本拍 counts 采的，不等 insight 的 15 秒刷新。 */
 const trendCategories = computed(() => {
   const base = trend.value.categories || []
-  return base.concat(liveTail.value.map((t) => t.label))
+  const cats = base.concat(liveTail.value.map((t) => t.label))
+  return cats.length ? cats : fallbackTrendCategories.value
 })
 const trendSeries = computed(() => {
   const cats = trendCategories.value
@@ -1185,10 +1487,24 @@ const trendWindowText = computed(() => {
 })
 
 const durations = computed(() => insight.value?.durations || {})
+/** 无分析面时的零样本桶：把边界与标签照常给出 ⇒ 直方图保留坐标轴，只覆盖空态胶囊。 */
+function emptyDurationBins(segment) {
+  const { edges, labels } = REPLAY_DURATION_BUCKETS[segment]
+  return {
+    bins: labels.map((label, i) => ({
+      label,
+      count: 0,
+      fromMinutes: edges[i],
+      toMinutes: i + 1 < edges.length ? edges[i + 1] : edges[i] * 2,
+    })),
+    samples: 0,
+    avgMinutes: 0,
+  }
+}
 const durationGroups = computed(() => ([
-  { key: 'pay', title: '付款耗时 · CreateTime → PaidAt', ...(durations.value.pay || {}) },
-  { key: 'ship', title: '发货耗时 · PaidAt → ShippedAt', ...(durations.value.ship || {}) },
-  { key: 'receive', title: '收货耗时 · ShippedAt → ReceivedAt', ...(durations.value.receive || {}) },
+  { key: 'pay', title: '付款耗时 · CreateTime → PaidAt', ...(durations.value.pay || emptyDurationBins('pay')) },
+  { key: 'ship', title: '发货耗时 · PaidAt → ShippedAt', ...(durations.value.ship || emptyDurationBins('ship')) },
+  { key: 'receive', title: '收货耗时 · ShippedAt → ReceivedAt', ...(durations.value.receive || emptyDurationBins('receive')) },
 ]))
 const slowestRows = computed(() => insight.value?.slowest || [])
 
@@ -1634,7 +1950,13 @@ function absorbOrders(rows) {
  *     一步跨过去），那种只脉冲落点、不亮边。
  */
 function absorbMoves(moves) {
-  for (const m of moves) {
+  if (!moves.length) return
+  // 累计条数按**全量**记（背压只压渲染，不压账）。
+  capturedTotal.value += moves.length
+  // 超过上限时均匀抽样：保留首尾与中段，流轨不会只剩某一批。
+  const step = Math.max(1, Math.ceil(moves.length / MAX_MOVE_RENDER_PER_FRAME))
+  for (let i = 0; i < moves.length; i += 1) {
+    const m = moves[i]
     // ① 批次号：先学（这一步与「这一单认不认得出来」无关，故放在最前面）。
     const batch = m.batchId === null || m.batchId === undefined ? '' : String(m.batchId)
     if (batch && batch !== currentBatch.value) {
@@ -1644,13 +1966,14 @@ function absorbMoves(moves) {
     }
 
     const id = m.orderId === null || m.orderId === undefined ? '' : String(m.orderId)
-    if (!id) continue
 
-    // 「本会话捕获」的累计条数：**每条到达的事件都算一次**，与时间线去重/淘汰无关。
-    capturedTotal.value += 1
+    // ② 计数口径按全量走（批量取消也能触发支线动画）。
+    const toKey = stateKeyOf(m.to)
+    if (toKey && batch && batch === currentBatch.value) batchNodeHits[toKey] += 1
+    if (toKey === 'cancelled') cancelMovesInFrame += 1
 
-    // ② 流轨 / QPS 的滚动窗口（与时间线分开存：流轨要的是「最近 N 条事件」，
-    //    不是「每张单的全部历史」）。
+    // ③ 以下才是 DOM / 动画：抽样执行，防止数千条 move 同帧写爆主线程。
+    if (!id || (i % step !== 0 && i !== moves.length - 1)) continue
     recentMoves.value = [{
       orderId: id,
       from: m.from,
@@ -1658,28 +1981,50 @@ function absorbMoves(moves) {
       ts: num(m.ts) || Date.now(),
     }, ...recentMoves.value].slice(0, RECENT_MOVE_CAP)
 
-    // ③ 时间线
     const arr = movesById.get(id) || []
     arr.push({ from: m.from, to: m.to, ts: num(m.ts) })
     // 时间线不该无限长（同一张单被反复推同一拍）：同 (from,to,ts) 只留一条。
-    const dedup = arr.filter((x, i) => i === arr.findIndex((y) => y.from === x.from && y.to === x.to && y.ts === x.ts))
+    const dedup = arr.filter((x, idx) => idx === arr.findIndex((y) => y.from === x.from && y.to === x.to && y.ts === x.ts))
     movesById.set(id, dedup)
 
-    // ④ 图上高亮（枚举名 → 五态 key 之后才谈得上「查得到」）
-    const toKey = stateKeyOf(m.to)
     if (!toKey) continue
-    // ⚠️ 这里**再比一次** `batch === currentBatch` 不是多余：一帧里可能同时夹着上一批的尾巴与
-    //    本批的头（① 刚把 currentBatch 改成新值），照单全收就会把上一批的次数算进「本批次」。
-    if (batch && batch === currentBatch.value) batchNodeHits[toKey] += 1
     flashThrottled(pulseNodes, toKey)
     const fromKey = stateKeyOf(m.from)
     if (fromKey) {
       const edgeId = `${fromKey}>${toKey}`
       if (KNOWN_EDGES.has(edgeId)) flashThrottled(activeEdges, edgeId)
-      // 主链轨道上的粒子：一跳或跨步都画，从 from 节点滑向 to 节点。
-      spawnLaneParticle(fromKey, toKey, id)
+      // 取消 = 支线（向下）；主链 = 正向粒子。两者各自限流。
+      if (toKey === 'cancelled') spawnCancelParticle(fromKey)
+      else spawnLaneParticle(fromKey, toKey, id)
     }
   }
+}
+
+/**
+ * 取消支线的一颗「下落」粒子：从待付款 / 待发货节点沿曲线落向已取消。
+ * ⚠️ 真实 SSE 的取消大多不进 `moves`（超时任务只写 `CancelledAt`），
+ *    那种情况由 `noteCancelDelta` 按 counts 跳变补画 —— 否则大批取消时流轨看起来是死的。
+ */
+function spawnCancelParticle(fromKey) {
+  if (frameParticleBudget <= 0) return
+  const origin = fromKey === 'waitShip' ? 'waitShip' : 'waitPay'
+  frameParticleBudget -= 1
+  const p = { id: `c${++cancelParticleSeq}`, from: origin }
+  cancelParticles.value = cancelParticles.value.concat(p).slice(-CANCEL_PARTICLES_CAP)
+  const t = setTimeout(() => {
+    timers.delete(t)
+    cancelParticles.value = cancelParticles.value.filter((x) => x.id !== p.id)
+  }, 1600)
+  timers.add(t)
+}
+
+/** counts.cancelled 的跳变 → 补画取消支线（扣掉本帧已由 moves 画过的那些，避免双份）。 */
+function noteCancelDelta(prev, next) {
+  if (!prev) return
+  const d = num(next.cancelled) - num(prev.cancelled) - cancelMovesInFrame
+  if (d <= 0) return
+  const n = Math.min(d, 3)
+  for (let i = 0; i < n; i += 1) spawnCancelParticle(i % 2 ? 'waitPay' : 'waitShip')
 }
 
 /* ── 回放：逐步重建状态机（2026-10-17 全链路联动）────────────────────────────────
@@ -1695,6 +2040,12 @@ function resetReplayState() {
   replayRecentMoves.value = []
   replayMoveCount.value = 0
   replayApplied = 0
+  replaySamples.value = []
+  replaySampleAt = 0
+  replayLife.clear()
+  replayDurations.pay = []
+  replayDurations.ship = []
+  replayDurations.receive = []
   currentBatch.value = ''
   counts.value = {}
   batchCounts.value = null
@@ -1738,6 +2089,7 @@ function applyReplayChange(m, animate) {
     replayCounts[toKey] += 1
   }
   replayOrderState.set(m.orderId, toKey)
+  noteReplayLifecycle(m, toKey)
 
   batchNodeHits[toKey] += 1
   replayMoveCount.value += 1
@@ -1773,6 +2125,8 @@ function syncReplayChanges(animate) {
     applyReplayChange(list[i], animate)
   }
   replayApplied = list.length
+  // 趋势采样跟着回放时钟走（每 2 秒日志时间一个点）；首帧强制落一个起点。
+  noteReplaySample(replaySamples.value.length === 0)
   counts.value = { ...replayCounts, total: replayOrderTotal.value }
 }
 
@@ -1857,6 +2211,9 @@ function spawnLaneParticle(fromKey, toKey, orderId) {
   const a = LANE_INDEX[fromKey]
   const b = LANE_INDEX[toKey]
   if (a === undefined || b === undefined || b <= a) return
+  // 背压：每帧最多 8 颗粒子（同帧几百条 move 时只画前 8 条，其余计数照收）。
+  if (frameParticleBudget <= 0) return
+  frameParticleBudget -= 1
   const p = {
     id: `${orderId}-${++particleSeq}`,
     x1: LANE_POS[a],
@@ -1880,6 +2237,7 @@ function spawnLaneParticle(fromKey, toKey, orderId) {
  */
 function resetMotion(keepTail = false) {
   laneParticles.value = []
+  cancelParticles.value = []
   if (!keepTail) {
     liveTail.value = []
     liveTailAt = 0
@@ -2003,8 +2361,12 @@ function onFrame(f) {
   // 本批次口径：后端没有批次号时回 `null`（不是回一份全 0）⇒ 原样透传，由模板决定画不画。
   batchCounts.value = f.batchCounts || null
 
+  // 每帧重置粒子预算 + 取消计数，背压对「这一帧」生效，不跨帧累积。
+  frameParticleBudget = MAX_PARTICLES_PER_FRAME
+  cancelMovesInFrame = 0
   absorbOrders(Array.isArray(f.orders) ? f.orders : [])
   absorbMoves(Array.isArray(f.moves) ? f.moves : [])
+  noteCancelDelta(prevCounts, counts.value)
   computeQps()
   noteCountDeltas(prevCounts, counts.value)
   sampleLiveTail()
@@ -2660,6 +3022,7 @@ export default { name: 'OrderFlow' }
   .a-of-nodes .is-pulse .a-of-box,
   .a-of-trend::after,
   .a-of-lane-track,
+  .a-of-cancel-particle,
   .a-of-lane-dot::after,
   .a-of-lane-node.is-live .a-of-lane-dot,
   .a-of-dot-sm.now,
@@ -3006,6 +3369,15 @@ export default { name: 'OrderFlow' }
   background: var(--surface-2);
   outline: none;
 }
+/* 回放视图里的阶梯只读：不响应 hover、不显示手型（避免误以为可筛选）。 */
+.a-of-step.is-static,
+.a-of-kpi.is-static {
+  cursor: default;
+}
+.a-of-step.is-static:hover,
+.a-of-kpi.is-static:hover {
+  background: transparent;
+}
 .a-of-step.is-on {
   background: var(--surface-2);
   border-color: var(--c1);
@@ -3165,7 +3537,8 @@ export default { name: 'OrderFlow' }
 /* ── 主链粒子轨道 ─────────────────────────────────────────────────────────── */
 .a-of-lane {
   position: relative;
-  height: 88px;
+  /* 主链在上、取消支线在下：高度必须容得下第二条线（用户 2026-10-17 P0）。 */
+  height: 128px;
   margin: var(--s2) 0 0;
   border-bottom: 1px solid var(--line);
 }
@@ -3182,9 +3555,69 @@ export default { name: 'OrderFlow' }
   );
   animation: a-of-lane-dash 1.2s linear infinite;
 }
+/* 方向 = 正向（左 → 右）：位移必须为正；负值会让点阵向左爬（2026-10-17 用户纠偏）。 */
 @keyframes a-of-lane-dash {
   from { background-position: 0 0; }
-  to { background-position: -10px 0; }
+  to { background-position: 10px 0; }
+}
+/* 取消支线：两条静态虚线弧（待付款 / 待发货 → 已取消），取消发生时变黄亮起。 */
+.a-of-cancel-links {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+.a-of-cancel-links path {
+  fill: none;
+  stroke: var(--line-2);
+  stroke-width: 1;
+  stroke-dasharray: 4 5;
+  opacity: 0.55;
+  transition: stroke 0.2s ease, opacity 0.2s ease;
+}
+.a-of-cancel-links path.on {
+  stroke: var(--warning);
+  opacity: 1;
+}
+/* ⚠️ 选择器必须带 `.a-of-lane`：`.a-of-lane-node` 定义在后面且同为单类选择器，
+   只写 `.a-of-lane-cancel { top: 88px }` 会被它的 `top: 0` 覆盖 ⇒ 取消节点
+   与「已完成」叠在同一位置（2026-10-17 实测）。 */
+.a-of-lane .a-of-lane-cancel {
+  top: 88px;
+}
+.a-of-lane-cancel .a-of-lane-dot::after {
+  animation-duration: 3.2s;
+}
+/* 取消粒子：沿弧线向右下坠落（不是主链的正向直线）。 */
+.a-of-cancel-particle {
+  position: absolute;
+  left: 10%;
+  top: 30px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--pcolor);
+  box-shadow: 0 0 6px var(--pcolor), 0 0 12px var(--warning);
+  pointer-events: none;
+}
+.a-of-cancel-particle.from-waitPay {
+  animation: a-of-cancel-fall-pay 1.5s cubic-bezier(0.3, 0.7, 0.4, 1) forwards;
+}
+.a-of-cancel-particle.from-waitShip {
+  animation: a-of-cancel-fall-ship 1.5s cubic-bezier(0.3, 0.7, 0.4, 1) forwards;
+}
+@keyframes a-of-cancel-fall-pay {
+  0% { left: 10%; top: 30px; opacity: 0; transform: scale(0.4); }
+  12% { opacity: 1; transform: scale(1); }
+  45% { left: 48%; top: 66px; }
+  100% { left: 91%; top: 94px; opacity: 0; transform: scale(0.7); }
+}
+@keyframes a-of-cancel-fall-ship {
+  0% { left: 37%; top: 30px; opacity: 0; transform: scale(0.4); }
+  12% { opacity: 1; transform: scale(1); }
+  45% { left: 62%; top: 64px; }
+  100% { left: 91%; top: 94px; opacity: 0; transform: scale(0.7); }
 }
 .a-of-lane-node {
   position: absolute;

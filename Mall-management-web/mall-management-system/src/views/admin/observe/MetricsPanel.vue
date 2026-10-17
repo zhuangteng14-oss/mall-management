@@ -67,7 +67,7 @@
             height="200px" :show-legend="false" :show-x-axis="false"
             :grid-left="64" :grid-right="56" :grid-top="24" :grid-bottom="14"
             value-formatter="{value}" :tooltip-formatter="qpsTooltip" :animation="false"
-            :loading="first" :error="errMsg" empty-text="还没收到第一拍" @retry="connect"
+            :loading="first" :error="errMsg" empty-text="还没收到第一拍" empty-overlay @retry="connect"
           />
         </section>
 
@@ -89,7 +89,7 @@
             boundary-gap y-min="0" y2-min="0" y2-max="100"
             y-formatter="{value}" y2-formatter="{value}%"
             :tooltip-formatter="hitTooltip" :animation="false"
-            :loading="first" :error="errMsg" empty-text="还没收到第一拍" @retry="connect"
+            :loading="first" :error="errMsg" empty-text="还没收到第一拍" empty-overlay @retry="connect"
           />
         </section>
 
@@ -105,7 +105,7 @@
             :grid-left="64" :grid-right="56" :grid-top="24" :grid-bottom="14"
             boundary-gap y-min="0" y-formatter="{value} ms"
             :tooltip-formatter="meanTooltip" :animation="false"
-            :loading="first" :error="errMsg" empty-text="还没收到第一拍" @retry="connect"
+            :loading="first" :error="errMsg" empty-text="还没收到第一拍" empty-overlay @retry="connect"
           />
         </section>
 
@@ -126,7 +126,7 @@
             :grid-left="64" :grid-right="56" :grid-top="24" :grid-bottom="14"
             boundary-gap y-min="0" y-formatter="{value} ms"
             :tooltip-formatter="waitTooltip" :animation="false"
-            :loading="first" :error="errMsg" empty-text="窗口内没有任何锁活动" @retry="connect"
+            :loading="first" :error="errMsg" empty-text="窗口内没有任何锁活动" empty-overlay @retry="connect"
           />
         </section>
 
@@ -310,11 +310,12 @@
           <b>{{ replayNow ? fmt1(replayNow.qps) : '—' }}</b>
           <span>QPS（事件推算）</span>
         </div>
-        <!-- 业务失败率（左大字）= (warn+error) ÷ 本拍事件数；防护拦截率（右小字，紫）单列。
-             ⚠️ 防空：protect 绝不进 fail 的分子 —— 大拦截量下 fail 必须仍然很低。 -->
+        <!-- 业务失败率（左大字）= **error only** ÷ 本拍事件数；警告率（黄）与防护拦截率（紫）单列。
+             ⚠️ 三口径并排但绝不相加 —— 大拦截量 / 大降级量下 fail 必须仍然很低。 -->
         <div class="a-stat a-stat--fail">
           <div class="rp-fail">
             <b>{{ replayFailText }}<i>%</i></b>
+            <em class="rp-warn">警告率 (warn) {{ replayWarnText }}%</em>
             <em class="rp-prot">防护拦截率 (protect) {{ replayProtectText }}%</em>
           </div>
           <span>业务失败率 (fail)</span>
@@ -334,8 +335,8 @@
         <b>回放指标由事件台账推算，非 HTTP 原始指标。</b>
         QPS = 该秒日志时间内吐出的事件条数（不是后端 `http.server.requests` 的请求量）；
         没有 4xx/5xx 拆分，也没有缓存命中 / 锁等待字段。延迟只统计带 `DurationUs` 的事件，
-        无样本时画断点而不是 0。业务失败率 =（警告 + 错误）÷ 本拍事件数，
-        <b>防护拦截（protect）单列，不计入失败率，也不参与健康度判定。</b>
+        无样本时画断点而不是 0。业务失败率 = <b>错误（error）÷ 本拍事件数</b>；
+        <b>警告（warn）与防护拦截（protect）各自单列，不计入失败率，也不参与健康度判定。</b>
       </p>
 
       <div class="mp-body">
@@ -358,17 +359,19 @@
                 :grid-left="64" :grid-right="56" :grid-top="24" :grid-bottom="14"
                 value-formatter="{value}" :tooltip-formatter="replayQpsTooltip" :animation="false"
                 :loading="!replayRows.length && !replaySession.done"
+                is-replay empty-overlay
                 empty-text="本批台账里还没有可推算的事件" @retry="connect"
               />
             </section>
 
-            <!-- ② 业务失败率（红）vs 防护拦截率（紫）-->
+            <!-- ② 业务失败率（红，只数 error）vs 警告率（黄）vs 防护拦截率（紫）-->
             <section class="mp-chart">
               <div class="mp-chart-h">
-                <h3>业务失败率 vs 防护拦截率</h3>
-                <span class="mp-chart-n">fail = (warn+error) ÷ 本拍事件数 · protect 单列，绝不进 fail 分子</span>
+                <h3>业务失败率 vs 警告率 vs 防护拦截率</h3>
+                <span class="mp-chart-n">fail = error ÷ 本拍事件数 · warn / protect 单列，绝不进 fail 分子</span>
                 <span class="mp-legend" aria-hidden="true">
                   <i class="lg-fail"></i>业务失败率
+                  <i class="lg-warn"></i>警告率
                   <i class="lg-protect"></i>防护拦截率
                 </span>
               </div>
@@ -379,6 +382,7 @@
                 boundary-gap y-min="0" y-max="100" y-formatter="{value}%"
                 :tooltip-formatter="replayFailTooltip" :animation="false"
                 :loading="!replayRows.length && !replaySession.done"
+                is-replay empty-overlay
                 empty-text="本批台账里还没有可推算的事件" @retry="connect"
               />
             </section>
@@ -400,6 +404,7 @@
                 boundary-gap y-min="0" y-formatter="{value} ms"
                 :tooltip-formatter="replayLatencyTooltip" :animation="false"
                 :loading="!replayRows.length && !replaySession.done"
+                is-replay empty-overlay
                 empty-text="本批台账里还没有带 DurationUs 的事件" @retry="connect"
               />
             </section>
@@ -437,8 +442,8 @@
                 <div class="mp-kpi">
                   <span class="mp-kpi-k">业务失败率 (fail)</span>
                   <span class="mp-kpi-v"><b>{{ replayFailText }}</b><em>%</em></span>
-                  <span class="mp-kpi-d">warn+error {{ replayNow ? fmtInt(replayNow.fails) : '—' }} / 事件 {{ replayNow ? fmtInt(replayNow.count) : '—' }}</span>
-                  <span class="mp-kpi-nospark">防护拦截率 (protect) {{ replayProtectText }}%（不计入 fail）</span>
+                  <span class="mp-kpi-d">error {{ replayNow ? fmtInt(replayNow.fails) : '—' }} / 事件 {{ replayNow ? fmtInt(replayNow.count) : '—' }}</span>
+                  <span class="mp-kpi-nospark">警告率 (warn) {{ replayWarnText }}% · 防护拦截率 (protect) {{ replayProtectText }}%（均不计入 fail）</span>
                 </div>
                 <div class="mp-kpi">
                   <span class="mp-kpi-k">P99 延迟</span>
@@ -639,9 +644,13 @@ const shown = reactive({ qps: 0, mean: 0, hitRate: 0, lockWait: 0 })
 const replayRows = computed(() => replaySession.metricTicks.slice(-WINDOW))
 const replayXLabels = computed(() => replayRows.value.map((r) => hms(r.ts)))
 const replayNow = computed(() => (replayRows.value.length ? replayRows.value[replayRows.value.length - 1] : null))
-/** 业务失败率 = (warn+error) ÷ 本拍事件数。⚠️ protect 不在分子里。 */
+/** 业务失败率 = **error only** ÷ 本拍事件数。⚠️ warn / protect 都不在分子里。 */
 const replayFailText = computed(() => (replayNow.value && replayNow.value.failRate !== null
   ? fmt1(replayNow.value.failRate * 100)
+  : '—'))
+/** 警告率 = warn ÷ 本拍事件数（降级 / 重试中，单列展示，不进失败率）。 */
+const replayWarnText = computed(() => (replayNow.value && replayNow.value.warnRate !== null
+  ? fmt1(replayNow.value.warnRate * 100)
   : '—'))
 /** 防护拦截率 = protect ÷ 本拍事件数（只展示，不进 failRate / 健康度）。 */
 const replayProtectText = computed(() => (replayNow.value && replayNow.value.protectRate !== null
@@ -680,6 +689,12 @@ const replayFailSeries = computed(() => [
     data: replayRows.value.map((r) => (r.failRate === null ? null : r.failRate * 100)),
     colorIndex: 7, // --c7 红
     area: true,
+  },
+  {
+    name: '警告率',
+    data: replayRows.value.map((r) => (r.warnRate === null ? null : r.warnRate * 100)),
+    colorIndex: 4, // --c4 黄（降级 / 重试中）
+    dashed: true,
   },
   {
     name: '防护拦截率',
@@ -736,8 +751,9 @@ function replayFailTooltip(params) {
   const r = replayRows.value[i]
   if (!r) return ''
   return `<b>${replayXLabels.value[i]}</b><br/>事件 ${fmtInt(r.count)} 条`
-    + `<br/>warn ${fmtInt(r.warns)} + error ${fmtInt(r.errors)} = fail ${fmtInt(r.fails)}`
+    + `<br/>error ${fmtInt(r.errors)} = fail ${fmtInt(r.fails)}（只数红色）`
     + `<br/>业务失败率 ${r.failRate === null ? '—' : fmt1(r.failRate * 100) + '%'}`
+    + `<br/>warn ${fmtInt(r.warns)} · 警告率 ${r.warnRate === null ? '—' : fmt1(r.warnRate * 100) + '%'}（不计入 fail）`
     + `<br/>防护拦截 ${fmtInt(r.protects)} · protect 率 ${r.protectRate === null ? '—' : fmt1(r.protectRate * 100) + '%'}（不计入 fail）`
 }
 function replayLatencyTooltip(params) {
@@ -749,7 +765,18 @@ function replayLatencyTooltip(params) {
 }
 
 /* ── 共用的 x 轴与各图序列 ────────────────────────────────────────────────── */
-const xLabels = computed(() => rows.value.map((r) => hms(r.ts)))
+/**
+ * 共用 x 轴：有拍时逐拍取时间；**一拍都没有时仍铺满 WINDOW 个秒刻度**。
+ * ⚠️ 这是「图表不能变白板」的最后一道保底：加载/空态浮层是透明胶囊（`empty-overlay`），
+ *    坐标轴与网格线必须始终在画布上，不能因为 rows 为空就整块塌掉。
+ */
+const xLabels = computed(() => {
+  if (rows.value.length) return rows.value.map((r) => hms(r.ts))
+  const now = Date.now()
+  const out = []
+  for (let i = WINDOW - 1; i >= 0; i -= 1) out.push(hms(now - i * 1000))
+  return out
+})
 
 /** `count` / `errors4xx` / `errors5xx` 是每拍计数；堆叠 QPS 统一换算成「每秒」。 */
 const qps4xxSeries = computed(() => rows.value.map((r) => (r.err4xx / r.intervalSec)))
@@ -1971,13 +1998,22 @@ onBeforeUnmount(closeStream)
 .lg-mean { background: var(--c1); }
 .lg-p99 { background: var(--c4); }
 .lg-fail { background: var(--c7); }
+.lg-warn { background: var(--c4); }
 .lg-protect { background: var(--c5); }
-/* 业务失败率（左大字，红）+ 防护拦截率（右小字，紫）—— 两个口径并排但不相加 */
-.a-stat--fail { min-width: 248px; }
+/* 业务失败率（左大字，红）+ 警告率（黄）+ 防护拦截率（紫）—— 三个口径并排但绝不相加 */
+.a-stat--fail { min-width: 300px; }
 .a-stat--fail .rp-fail {
   display: flex;
   align-items: baseline;
   gap: var(--s3);
+  flex-wrap: wrap;
+}
+.a-stat--fail .rp-warn {
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+  font-style: normal;
+  color: var(--warning);
+  white-space: nowrap;
 }
 .a-stat--fail .rp-fail b i {
   font-size: var(--fs-xs);

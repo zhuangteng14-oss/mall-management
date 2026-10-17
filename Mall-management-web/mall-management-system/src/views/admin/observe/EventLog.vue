@@ -36,17 +36,18 @@
             <span>范围内链路（上限 {{ TRACE_CAP }}）</span>
           </div>
           <!-- 业务失败率 —— 与右边那条四色条紧挨着（就近）。⚠️ 动效落点 10 在它身上。
-               ⚠️ 口径（2026-10-17 用户裁定）：分子 = warn + error，**绝不含 protect**；
-                  分母 = 范围内事件数。防护拦截率单独显示在右侧小字，不进 fail 分子。
-                  它是**本页窗口内累计**，不是帧里本拍的 counts。 -->
+               ⚠️ 口径（2026-10-17 用户重构裁定）：分子 = **只有 error**（数据链断裂 / 系统崩溃）；
+                  warn（降级 / 重试中）与 protect（主动拦截）都**不算业务失败**，各自单列。
+                  分母 = 范围内事件数。它是**本页窗口内累计**，不是帧里本拍的 counts。 -->
           <div
             class="cell err"
             :class="{ alert: failBad > 0 }"
             data-anim="10"
-            :title="`业务失败率 = (警告 ${fmtInt(sessionBySev.warn || 0)} + 错误 ${fmtInt(sessionBySev.error || 0)}) ÷ 范围内原始事件 ${fmtInt(rawWindow.n)} 条；防护拦截 ${fmtInt(sessionBySev.protect || 0)} 条不计入`"
+            :title="`业务失败率 = 错误 ${fmtInt(sessionBySev.error || 0)} ÷ 范围内原始事件 ${fmtInt(rawWindow.n)} 条；警告 ${fmtInt(sessionBySev.warn || 0)} 条、防护拦截 ${fmtInt(sessionBySev.protect || 0)} 条单列，均不计入`"
           >
             <div class="errline">
               <b>{{ failRate }}<i>%</i></b>
+              <em class="warn">警告率 (warn) {{ warnRate }}%</em>
               <em class="prot">防护拦截率 (protect) {{ protectRate }}%</em>
             </div>
             <span>业务失败率 (fail)</span>
@@ -1430,11 +1431,16 @@ function barW(v, mx) {
   return `${((v / mx) * 100).toFixed(1)}%`
 }
 
-/** ① 业务失败率 = (warn+error) / **范围内**事件。⚠️ 防护拦截（protect）**不进分子**。 */
-const failBad = computed(() => (sessionBySev.value.warn || 0) + (sessionBySev.value.error || 0))
+/** ① 业务失败率 = **error only** / 范围内事件。⚠️ warn（降级/重试）与 protect（主动拦截）都不进分子。 */
+const failBad = computed(() => sessionBySev.value.error || 0)
 const failRate = computed(() => {
   const total = rawWindow.value.n
   return total ? ((failBad.value / total) * 100).toFixed(1) : '0.0'
+})
+/** 警告率 = warn / 范围内原始事件。黄灯提示，单列展示，不参与业务失败率。 */
+const warnRate = computed(() => {
+  const total = rawWindow.value.n
+  return total ? (((sessionBySev.value.warn || 0) / total) * 100).toFixed(1) : '0.0'
 })
 /** 防护拦截率单独一个口径：protect / 范围内原始事件。它只用于展示，不参与健康度判定。 */
 const protectRate = computed(() => {
@@ -2578,7 +2584,15 @@ onBeforeUnmount(() => {
   align-items: baseline;
   gap: 8px;
 }
-/* 右侧小字：防护拦截率（紫）—— 与左侧红色业务失败率是**两个口径**，颜色也分开 */
+/* 右侧小字：警告率（黄）/ 防护拦截率（紫）—— 三个口径并列但绝不相加 */
+.ev-status .cell.err .warn {
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+  font-style: normal;
+  font-weight: var(--fw-normal);
+  color: var(--warning);
+  white-space: nowrap;
+}
 .ev-status .cell.err .prot {
   font-family: var(--font-mono);
   font-size: var(--fs-xs);

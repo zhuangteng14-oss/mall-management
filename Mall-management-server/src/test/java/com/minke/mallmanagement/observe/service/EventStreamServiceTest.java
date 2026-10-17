@@ -85,9 +85,11 @@ class EventStreamServiceTest {
         @SuppressWarnings("unchecked")
         Map<String, Object> bySeverity = (Map<String, Object>) frame.get("severity");
         assertThat(bySeverity).containsOnlyKeys("info", "protect", "warn", "error");
-        assertThat(bySeverity).as("ok 一条 = info；insufficient 与 failed 各一条 = warn；无 protect / error")
-                .containsEntry("info", 1).containsEntry("protect", 0)
-                .containsEntry("warn", 2).containsEntry("error", 0);
+        // ⚠️ 2026-10-17 分级标准重构：库存不足 = **主动拦截（防超卖）⇒ protect 紫**，
+        //    不再算「业务失败」；audit.failed = 未能达成但系统可提示 ⇒ warn 黄。
+        assertThat(bySeverity).as("ok 一条 = info；insufficient = protect（防超卖拦截）；failed = warn；无 error")
+                .containsEntry("info", 1).containsEntry("protect", 1)
+                .containsEntry("warn", 1).containsEntry("error", 0);
     }
 
     @Test

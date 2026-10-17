@@ -1,10 +1,11 @@
 {
-  "at": "2026-10-17T08:21:56.038Z",
+  "at": "2026-10-17T14:57:36.771Z",
   "checks": {
     "duplicate-submit-protect-visible": {
       "ok": true,
       "detail": [
-        "PROTECT 防护 重复提交拦截（未执行）× 47防护开关 duplicateSubmit范围 or"
+        "PROTECT 防护 入站限流拦下× 5防护开关 rateLimit范围 inbound附加信息 入站",
+        "PROTECT 防护 重复提交拦截（未执行）× 220防护开关 duplicateSubmit范围 o"
       ]
     },
     "duplicate-submit-column-intact": {
@@ -25,10 +26,10 @@
       "detail": {
         "baseline": "改动前同配比：warn 222 / 2088 = 10.6%",
         "now": {
-          "n": 4431,
+          "n": 6244,
           "sev": {
-            "info": 2258,
-            "protect": 2173
+            "info": 3455,
+            "protect": 2789
           },
           "failRate": "0.0"
         }
@@ -162,7 +163,7 @@
     "protect-hundreds": {
       "ok": true,
       "detail": {
-        "protect": 1026,
+        "protect": 999,
         "n": 2048
       }
     },
@@ -176,23 +177,23 @@
     "protect-rate-from-raw": {
       "ok": true,
       "detail": {
-        "protectRate": "50.1",
-        "expected": "50.1",
-        "dom": "防护拦截率 (protect) 50.1%"
+        "protectRate": "48.8",
+        "expected": "48.8",
+        "dom": "防护拦截率 (protect) 48.8%"
       }
     },
     "left-right-severity-same": {
       "ok": true,
       "detail": {
         "left": [
-          "信息 1,022",
-          "防护 1,026",
+          "信息 1,049",
+          "防护 999",
           "警告 0",
           "错误 0"
         ],
         "right": [
-          "信息 1,022",
-          "防护 1,026",
+          "信息 1,049",
+          "防护 999",
           "警告 0",
           "错误 0"
         ]
@@ -200,6 +201,13 @@
     }
   },
   "samples": {
+    "injectionsBefore": [
+      "redisDown"
+    ],
+    "injectionsCleared": {
+      "status": 200,
+      "json": []
+    },
     "protectOnly": {
       "rows": [
         {
@@ -209,15 +217,24 @@
           "mdLeft": 702.78,
           "client": 52,
           "scroll": 52,
-          "title": "重复提交拦截（未执行）× 47防护开关 duplicateSubmit范围 order附加信息 orderId=SIM-REPEAT-25194 已存在原因 幂等查重命中：同一 OrderId 重复提交发起人 uDopHnCeLS（客户）来源 protection#46（trace c949fdfd · 请求耗时 8 ms）"
+          "title": "入站限流拦下× 5防护开关 rateLimit范围 inbound附加信息 入站限流触发：该秒内拦下 600 次请求（示例 method=POST path=/comment/add，limitForPeriod=200）原因 入站限流：未取得令牌（limitForPeriod=200）来源 protection#437"
+        },
+        {
+          "lv": "PROTECT",
+          "md": "防护",
+          "lvRight": 694.78,
+          "mdLeft": 702.78,
+          "client": 52,
+          "scroll": 52,
+          "title": "重复提交拦截（未执行）× 220防护开关 duplicateSubmit范围 order附加信息 orderId=SIM-REPEAT-65937 已存在原因 幂等查重命中：同一 OrderId 重复提交发起人 uDopHnCeLS（客户）来源 protection#528（trace 01e9ada3 · 请求耗时 4 ms）"
         }
       ]
     },
     "phaseABeforeAfter": {
-      "n": 4431,
+      "n": 6244,
       "sev": {
-        "info": 2258,
-        "protect": 2173
+        "info": 3455,
+        "protect": 2789
       },
       "failRate": "0.0"
     },
@@ -231,13 +248,13 @@
     "accumulated": {
       "n": 2048,
       "sev": {
-        "protect": 1026,
-        "info": 1022
+        "protect": 999,
+        "info": 1049
       },
       "kind": {
-        "protection": 8,
-        "sensitive": 488,
-        "identity": 1552
+        "protection": 9,
+        "sensitive": 439,
+        "identity": 1600
       }
     },
     "geometry": {
@@ -252,7 +269,7 @@
           "lvScroll": 52,
           "overflow": "visible",
           "width": "52.3906px",
-          "title": "身份拒绝× 53请求路径 /cart/list主体 uDopHnCeLS-drill-other原因 入参指向他人且调用者不是管理员发起人 uDopHnCeLS"
+          "title": "身份拒绝× 551请求路径 /cart/list主体 uDopHnCeLS-drill-other原因 入参指向他人且调用者不是管理员发起人 uDopHnCeL"
         },
         {
           "lv": "INFO",
@@ -264,7 +281,7 @@
           "lvScroll": 52,
           "overflow": "visible",
           "width": "52.3906px",
-          "title": "身份放行× 98请求路径 /comment/add主体 1111发起人 uDopHnCeLS（客户）来源 identity#3247（trace c43e5c3"
+          "title": "身份放行× 1,049请求路径 /comment/add主体 1111发起人 uDopHnCeLS（客户）来源 identity#24544（trace 0b4"
         },
         {
           "lv": "PROTECT",
@@ -276,7 +293,7 @@
           "lvScroll": 52,
           "overflow": "visible",
           "width": "52.3906px",
-          "title": "敏感词打码× 23命中的词 代开发票场景 评论命中数 4总数 30发起人 uDopHnCeLS（客户）来源 sensitive#1018（trace ad929"
+          "title": "敏感词打码× 221命中的词 代开发票场景 评论命中数 4总数 30发起人 uDopHnCeLS（客户）来源 sensitive#3439（trace fc97"
         },
         {
           "lv": "PROTECT",
@@ -288,7 +305,7 @@
           "lvScroll": 52,
           "overflow": "visible",
           "width": "52.3906px",
-          "title": "敏感词拒收× 25命中的词 代开发票场景 评论命中数 60总数 64原因 敏感词拒收：命中比例 94% ≥ 40%（命中 60/64）发起人 uDopHnCeL"
+          "title": "敏感词拒收× 218命中的词 代开发票场景 评论命中数 60总数 64原因 敏感词拒收：命中比例 94% ≥ 40%（命中 60/64）发起人 uDopHnCe"
         },
         {
           "lv": "PROTECT",
@@ -300,7 +317,7 @@
           "lvScroll": 52,
           "overflow": "visible",
           "width": "52.3906px",
-          "title": "入站限流拦下防护开关 rateLimit范围 inbound附加信息 入站限流触发：该秒内拦下 191 次请求（示例 method=POST path=/com"
+          "title": "入站限流拦下× 9防护开关 rateLimit范围 inbound附加信息 入站限流触发：该秒内拦下 49 次请求（示例 method=POST path=/c"
         }
       ],
       "lefts": [
@@ -331,7 +348,7 @@
         "lvScroll": 52,
         "overflow": "visible",
         "width": "52.3906px",
-        "title": "身份拒绝× 53请求路径 /cart/list主体 uDopHnCeLS-drill-other原因 入参指向他人且调用者不是管理员发起人 uDopHnCeLS"
+        "title": "身份拒绝× 551请求路径 /cart/list主体 uDopHnCeLS-drill-other原因 入参指向他人且调用者不是管理员发起人 uDopHnCeL"
       },
       {
         "lv": "PROTECT",
@@ -343,7 +360,7 @@
         "lvScroll": 52,
         "overflow": "visible",
         "width": "52.3906px",
-        "title": "敏感词打码× 23命中的词 代开发票场景 评论命中数 4总数 30发起人 uDopHnCeLS（客户）来源 sensitive#1018（trace ad929"
+        "title": "敏感词打码× 221命中的词 代开发票场景 评论命中数 4总数 30发起人 uDopHnCeLS（客户）来源 sensitive#3439（trace fc97"
       },
       {
         "lv": "PROTECT",
@@ -355,7 +372,7 @@
         "lvScroll": 52,
         "overflow": "visible",
         "width": "52.3906px",
-        "title": "敏感词拒收× 25命中的词 代开发票场景 评论命中数 60总数 64原因 敏感词拒收：命中比例 94% ≥ 40%（命中 60/64）发起人 uDopHnCeL"
+        "title": "敏感词拒收× 218命中的词 代开发票场景 评论命中数 60总数 64原因 敏感词拒收：命中比例 94% ≥ 40%（命中 60/64）发起人 uDopHnCe"
       },
       {
         "lv": "PROTECT",
@@ -367,7 +384,7 @@
         "lvScroll": 52,
         "overflow": "visible",
         "width": "52.3906px",
-        "title": "入站限流拦下防护开关 rateLimit范围 inbound附加信息 入站限流触发：该秒内拦下 191 次请求（示例 method=POST path=/com"
+        "title": "入站限流拦下× 9防护开关 rateLimit范围 inbound附加信息 入站限流触发：该秒内拦下 49 次请求（示例 method=POST path=/c"
       }
     ],
     "labelFit": {
@@ -404,50 +421,50 @@
       "n": 2048,
       "sum": 2048,
       "sev": {
-        "protect": 1026,
-        "info": 1022
+        "protect": 999,
+        "info": 1049
       },
       "kind": {
-        "protection": 8,
-        "sensitive": 488,
-        "identity": 1552
+        "protection": 9,
+        "sensitive": 439,
+        "identity": 1600
       },
       "left": [
-        "信息 1,022",
-        "防护 1,026",
+        "信息 1,049",
+        "防护 999",
         "警告 0",
         "错误 0"
       ],
       "right": [
-        "信息 1,022",
-        "防护 1,026",
+        "信息 1,049",
+        "防护 999",
         "警告 0",
         "错误 0"
       ],
       "failRate": "0.0",
-      "protectRate": "50.1",
+      "protectRate": "48.8",
       "domFail": "0.0 %",
-      "domProt": "防护拦截率 (protect) 50.1%",
+      "domProt": "防护拦截率 (protect) 48.8%",
       "expectedFail": "0.0",
-      "expectedProtect": "50.1",
+      "expectedProtect": "48.8",
       "rowsText": [
-        "├─16:22:46.026 PROTECT身份身份拒绝× 53请求路径 /cart/list主体 uDopHnCeLS-drill-other原因 入参指向他人且调用者不是管理员发起人 uDopHnCeLS（客户）来源 identity#3242（trace 6ebbf9fe）",
-        "├─16:22:46.058 INFO身份身份放行× 98请求路径 /comment/add主体 1111发起人 uDopHnCeLS（客户）来源 identity#3247（trace c43e5c32 · 耗时 43 ms）",
-        "├─16:22:46.066 PROTECT敏感词敏感词打码× 23命中的词 代开发票场景 评论命中数 4总数 30发起人 uDopHnCeLS（客户）来源 sensitive#1018（trace ad929995 · 耗时 2 ms）",
-        "├─16:22:46.068 PROTECT敏感词敏感词拒收× 25命中的词 代开发票场景 评论命中数 60总数 64原因 敏感词拒收：命中比例 94% ≥ 40%（命中 60/64）发起人 uDopHnCeLS（客户）来源 sensitive#1019（trace c43e5c32 · 耗时 7 ms）",
-        "└─16:22:46.780 PROTECT防护入站限流拦下防护开关 rateLimit范围 inbound附加信息 入站限流触发：该秒内拦下 191 次请求（示例 method=POST path=/comment/add，limitForPeriod=200）原因 入站限流：未取得令牌（limitForPeriod=200）来源 protection#62"
+        "├─22:58:26.919 PROTECT身份身份拒绝× 551请求路径 /cart/list主体 uDopHnCeLS-drill-other原因 入参指向他人且调用者不是管理员发起人 uDopHnCeLS（客户）来源 identity#24541（trace 4abcc555 · 耗时 1 µs）",
+        "├─22:58:26.931 INFO身份身份放行× 1,049请求路径 /comment/add主体 1111发起人 uDopHnCeLS（客户）来源 identity#24544（trace 0b4c2cdb · 耗时 17 ms）",
+        "├─22:58:26.935 PROTECT敏感词敏感词打码× 221命中的词 代开发票场景 评论命中数 4总数 30发起人 uDopHnCeLS（客户）来源 sensitive#3439（trace fc97b500 · 耗时 1 ms）",
+        "├─22:58:26.935 PROTECT敏感词敏感词拒收× 218命中的词 代开发票场景 评论命中数 60总数 64原因 敏感词拒收：命中比例 94% ≥ 40%（命中 60/64）发起人 uDopHnCeLS（客户）来源 sensitive#3440（trace 0b4c2cdb · 耗时 2 ms）",
+        "└─22:58:27.678 PROTECT防护入站限流拦下× 9防护开关 rateLimit范围 inbound附加信息 入站限流触发：该秒内拦下 49 次请求（示例 method=POST path=/cart/list，limitForPeriod=200）原因 入站限流：未取得令牌（limitForPeriod=200）来源 protection#544"
       ]
     },
     "afterShot": {
       "topN": "2,048",
       "chips": [
-        "信息 1,022",
-        "防护 1,026",
+        "信息 1,049",
+        "防护 999",
         "警告 0",
         "错误 0"
       ],
       "fail": "0.0 %",
-      "prot": "防护拦截率 (protect) 50.1%"
+      "prot": "防护拦截率 (protect) 48.8%"
     }
   },
   "ok": true,

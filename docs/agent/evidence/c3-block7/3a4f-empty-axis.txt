@@ -1,0 +1,346 @@
+{
+  "at": "2026-10-17T14:52:13.781Z",
+  "checks": {
+    "mix-metrics-admin": {
+      "ok": true
+    },
+    "metrics-window-forced-empty": {
+      "ok": true,
+      "detail": {
+        "ok": true,
+        "rows": 0
+      }
+    },
+    "metrics-x-axis-60-ticks": {
+      "ok": true,
+      "detail": {
+        "len": 60,
+        "first": "22:51:24",
+        "last": "22:52:23"
+      }
+    },
+    "metrics-chart-axis-kept": {
+      "ok": true,
+      "detail": [
+        {
+          "name": "BarChart",
+          "xLen": 60,
+          "first": "22:51:24",
+          "last": "22:52:23",
+          "series": 3
+        },
+        {
+          "name": "LineChart",
+          "xLen": 60,
+          "first": "22:51:24",
+          "last": "22:52:23",
+          "series": 3
+        },
+        {
+          "name": "LineChart",
+          "xLen": 60,
+          "first": "22:51:24",
+          "last": "22:52:23",
+          "series": 1
+        },
+        {
+          "name": "LineChart",
+          "xLen": 60,
+          "first": "22:51:24",
+          "last": "22:52:23",
+          "series": 0
+        },
+        {
+          "name": "HeatmapChart",
+          "xLen": 60,
+          "first": "22:51:24",
+          "last": "22:52:23",
+          "series": 1
+        }
+      ]
+    },
+    "metrics-canvas-still-drawn": {
+      "ok": true,
+      "detail": [
+        {
+          "w": 713,
+          "h": 200,
+          "ratio": 0
+        },
+        {
+          "w": 713,
+          "h": 170,
+          "ratio": 0.00882
+        },
+        {
+          "w": 713,
+          "h": 160,
+          "ratio": 0
+        },
+        {
+          "w": 713,
+          "h": 160,
+          "ratio": 0
+        },
+        {
+          "w": 713,
+          "h": 190,
+          "ratio": 0.59662
+        }
+      ]
+    },
+    "metrics-empty-pill-transparent": {
+      "ok": true,
+      "detail": {
+        "overlay": true,
+        "text": "还没收到第一拍"
+      }
+    },
+    "flow-insight-forced-empty": {
+      "ok": true,
+      "detail": {
+        "ok": true
+      }
+    },
+    "flow-trend-25-hour-ticks": {
+      "ok": true,
+      "detail": [
+        {
+          "name": "LineChart",
+          "xLen": 25,
+          "first": "22:00",
+          "last": "22:00",
+          "series": 0
+        }
+      ]
+    },
+    "flow-duration-buckets-kept": {
+      "ok": true,
+      "detail": [
+        {
+          "name": "HistogramChart",
+          "xLen": 6,
+          "first": "0–5分",
+          "last": "24小时+",
+          "series": 1
+        },
+        {
+          "name": "HistogramChart",
+          "xLen": 6,
+          "first": "0–1小时",
+          "last": "7天+",
+          "series": 1
+        },
+        {
+          "name": "HistogramChart",
+          "xLen": 5,
+          "first": "0–6小时",
+          "last": "7天+",
+          "series": 1
+        }
+      ]
+    },
+    "flow-canvas-still-drawn": {
+      "ok": true,
+      "detail": [
+        {
+          "w": 783,
+          "h": 250,
+          "ratio": 0.01701
+        },
+        {
+          "w": 266,
+          "h": 168,
+          "ratio": 0.09284
+        },
+        {
+          "w": 217,
+          "h": 196,
+          "ratio": 0.16023
+        },
+        {
+          "w": 342,
+          "h": 226,
+          "ratio": 0.04513
+        },
+        {
+          "w": 342,
+          "h": 226,
+          "ratio": 0.04299
+        },
+        {
+          "w": 342,
+          "h": 226,
+          "ratio": 0.04061
+        }
+      ]
+    },
+    "flow-empty-pill-on-histograms": {
+      "ok": true,
+      "detail": {
+        "n": 3,
+        "texts": [
+          "当前时间段暂无有效耗时样本",
+          "当前时间段暂无有效耗时样本",
+          "当前时间段暂无有效耗时样本"
+        ]
+      }
+    }
+  },
+  "samples": {
+    "forcedMetrics": {
+      "ok": true,
+      "rows": 0
+    },
+    "metricsXLabels": {
+      "len": 60,
+      "first": "22:51:24",
+      "last": "22:52:23"
+    },
+    "metricsOptions": [
+      {
+        "name": "BarChart",
+        "xLen": 60,
+        "first": "22:51:24",
+        "last": "22:52:23",
+        "series": 3
+      },
+      {
+        "name": "LineChart",
+        "xLen": 60,
+        "first": "22:51:24",
+        "last": "22:52:23",
+        "series": 3
+      },
+      {
+        "name": "LineChart",
+        "xLen": 60,
+        "first": "22:51:24",
+        "last": "22:52:23",
+        "series": 1
+      },
+      {
+        "name": "LineChart",
+        "xLen": 60,
+        "first": "22:51:24",
+        "last": "22:52:23",
+        "series": 0
+      },
+      {
+        "name": "HeatmapChart",
+        "xLen": 60,
+        "first": "22:51:24",
+        "last": "22:52:23",
+        "series": 1
+      }
+    ],
+    "metricsPixels": [
+      {
+        "w": 713,
+        "h": 200,
+        "ratio": 0
+      },
+      {
+        "w": 713,
+        "h": 170,
+        "ratio": 0.00882
+      },
+      {
+        "w": 713,
+        "h": 160,
+        "ratio": 0
+      },
+      {
+        "w": 713,
+        "h": 160,
+        "ratio": 0
+      },
+      {
+        "w": 713,
+        "h": 190,
+        "ratio": 0.59662
+      }
+    ],
+    "metricsEmpty": {
+      "overlay": true,
+      "text": "还没收到第一拍"
+    },
+    "forcedFlow": {
+      "ok": true
+    },
+    "trendOptions": [
+      {
+        "name": "LineChart",
+        "xLen": 25,
+        "first": "22:00",
+        "last": "22:00",
+        "series": 0
+      }
+    ],
+    "histOptions": [
+      {
+        "name": "HistogramChart",
+        "xLen": 6,
+        "first": "0–5分",
+        "last": "24小时+",
+        "series": 1
+      },
+      {
+        "name": "HistogramChart",
+        "xLen": 6,
+        "first": "0–1小时",
+        "last": "7天+",
+        "series": 1
+      },
+      {
+        "name": "HistogramChart",
+        "xLen": 5,
+        "first": "0–6小时",
+        "last": "7天+",
+        "series": 1
+      }
+    ],
+    "flowPixels": [
+      {
+        "w": 783,
+        "h": 250,
+        "ratio": 0.01701
+      },
+      {
+        "w": 266,
+        "h": 168,
+        "ratio": 0.09284
+      },
+      {
+        "w": 217,
+        "h": 196,
+        "ratio": 0.16023
+      },
+      {
+        "w": 342,
+        "h": 226,
+        "ratio": 0.04513
+      },
+      {
+        "w": 342,
+        "h": 226,
+        "ratio": 0.04299
+      },
+      {
+        "w": 342,
+        "h": 226,
+        "ratio": 0.04061
+      }
+    ],
+    "flowEmpty": {
+      "n": 3,
+      "texts": [
+        "当前时间段暂无有效耗时样本",
+        "当前时间段暂无有效耗时样本",
+        "当前时间段暂无有效耗时样本"
+      ]
+    }
+  },
+  "ok": true,
+  "fail": []
+}

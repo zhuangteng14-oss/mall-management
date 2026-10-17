@@ -1,0 +1,21 @@
+块 7 · 前端 lint / 生产构建（2026-10-17 22:59，全部改动落定后）
+====================================================
+
+lint：
+  npm --prefix Mall-management-web/mall-management-system run lint
+  exit=0
+  DONE  No lint errors found!
+  （仅提示 caniuse-lite 数据 6 个月未更新，与代码无关）
+
+build：
+  npm --prefix Mall-management-web/mall-management-system run build
+  exit=0
+  DONE  Build complete. The dist directory is ready to be deployed.
+  Build at: 2026-10-17T14:59:21.085Z（本地 22:59:21）
+  Hash: 6bb59a294128c1c5
+  Time: 29568ms
+
+  2 条 warning 均为**既有的体积提示**，不是本次改动引入：
+    asset size limit: chunk-vendors 791 KiB / chunk-common css 334 KiB / chunk-common js 263 KiB
+    entrypoint size limit: index / admin 各 1.37 MiB
+  eslint-webpack-plugin 无报错（本次构建前已确认非陈旧缓存假红）。

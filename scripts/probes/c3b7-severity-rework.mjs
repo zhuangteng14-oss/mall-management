@@ -1,9 +1,11 @@
 // c3b7-severity-rework.mjs —— 块 7 · 2026-10-17「severity 重排」验收探针。
 //
-// 用户最终口径（2026-10-17）：
-//   PROTECT（紫）= 防护层成功防御：入站限流 / 熔断 / 身份拒绝 / 敏感词拒收·打码 / 重复提交拦截
-//   WARN（黄）   = 真正的业务失败：库存不足、重试仍失败、异步流转被拒……
-//   ERROR（红）  = SQL / NPE 等系统故障
+// 用户最终口径（2026-10-17，晚些时候再次收紧）：
+//   PROTECT（紫）= 能解释数据变化原因的主动拦截：入站限流 / 熔断 / 库存不足（防超卖）/
+//                  身份拒绝 / 敏感词拒收·打码 / 重复提交拦截 / 出生闸拦下非法态
+//   WARN（黄）   = 系统能提示、能降级、已重试：L2 降级 / MQ 重试中 / 锁等待超时（已重试）
+//   ERROR（红）  = 只有数据链断裂 / 系统崩溃：SQL / NPE / DLQ / 观测到已落库的非法状态
+//   业务失败率 (fail) = **error only**；warn / protect 各自单列，不进分子。
 //
 // 场景：真后端 8088 + 真前端 8080；bannedUser 40% / sensitiveWord 40% / repeatSubmit 20%，
 //       800 QPS × 20s。三条路径全部只产生 PROTECT：
@@ -49,6 +51,9 @@ async function post(path, body) {
 
 const b = await open({ w: 1440, h: 900 })
 let runP = null
+/** 开跑前的注入开关（收尾还原）。本探针只验「主动拦截 ⇒ PROTECT」，注入必须为 0 ——
+ *  否则 redisDown 的 L2 降级会如实记 WARN（那是正确行为），会把 warn=0 的判据染红。 */
+let inj0 = []
 try {
   await b.send('Page.addScriptToEvaluateOnNewDocument', {
     source: `(() => { try {
@@ -59,6 +64,18 @@ try {
   })
   await b.goto(`${WEB}/admin.html?sev=${Date.now()}#/admin/observe/logs`, 6000)
   await sleep(2500)
+
+  // ── 前提：关掉全部演练注入 ────────────────────────────────────────────────
+  // 上一轮 warn-yellow 探针会开 redisDown；若它跑前本来就开着（= 还原后仍开），
+  // 这里就会带着 L2 降级跑，warn 如实出现 ⇒ 本探针的 warn=0 变成假红。
+  const cfg0 = await (await fetch(API + '/admin/observe/attack/config', { signal: AbortSignal.timeout(8000) })).json()
+  inj0 = (cfg0 && cfg0.Injections) || []
+  out.samples.injectionsBefore = inj0
+  if (inj0.length) {
+    const off = await post('/admin/observe/attack/config',
+      new URLSearchParams({ injections: '[]' }).toString())
+    out.samples.injectionsCleared = { status: off.status, json: off.json && off.json.Injections }
+  }
 
   // ── 阶段 0：重复提交拦截（**先跑**：此刻熔断器刚起、环里还没有海量事件）──────────
   // ⚠️ 速率必须低（10 QPS）：同一 OrderId 的请求在 Redisson 锁上串行，高 QPS 时排队
@@ -373,5 +390,9 @@ try {
 } finally {
   try { await post('/admin/observe/attack/stop', '') } catch (e) { /* 收尾失败不掩盖判据 */ }
   try { await runP } catch (e) { /* 同上 */ }
+  try {
+    await post('/admin/observe/attack/config',
+      new URLSearchParams({ injections: JSON.stringify(inj0 || []) }).toString())
+  } catch (e) { /* 同上 */ }
   await b.close()
 }

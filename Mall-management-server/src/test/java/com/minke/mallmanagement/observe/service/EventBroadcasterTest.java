@@ -108,10 +108,10 @@ class EventBroadcasterTest {
     // ================= severity 规则表 =================
 
     @Test
-    @DisplayName("severity 规则表：error ← result=error；protect ← 身份拒绝/敏感词/重复提交；warn ← 业务被拒/超时/降级/不足；其余 info")
+    @DisplayName("severity 规则表：error ← 数据链断裂；protect ← 防护拦截（含库存不足/出生闸）；warn ← 降级/超时/重试；其余 info")
     void severityFollowsTheOneRuleTable() {
         stock.deduct(SKU, 1, StockMetrics.Deduct.INSUFFICIENT, 1_500L, null,
-                "防超卖拦截：扣减未命中（库存不足或 goods_sku 无此 SKU，需 1 件）");      // warn
+                "防超卖拦截：扣减未命中（库存不足或 goods_sku 无此 SKU，需 1 件）");      // protect
         stock.release(SKU, 1, StockMetrics.Release.ERROR, 1_500L,
                 "库存释放失败：IllegalStateException：db down");           // error
         stock.release(SKU, 1, StockMetrics.Release.MISSING, 1_500L,
@@ -140,19 +140,19 @@ class EventBroadcasterTest {
         //    → identity），故同一拍内跨环的事件在合并环里是按环分组的。上面的发事件顺序
         //    （库存 → 审计 → …… → 锁 → 缓存）与断言里的顺序对不上，是**设计如此**，不是巧合。
         //    页面按 seq 排卡片 ⇒ 它看到的同拍顺序就是这个环序（全局时间序只有墙钟 ts 能还原）。
-        assertThat(titlesOf(Severity.ERROR)).as("只有 result=error 才红").containsExactly("库存释放失败");
-        assertThat(titlesOf(Severity.PROTECT)).as("防护层成功防御（紫）：敏感词 / 身份 / 重复提交，均不算业务失败")
-                .containsExactly("敏感词打码", "敏感词拒收", "身份拒绝", "重复提交拦截（未执行）");
-        assertThat(titlesOf(Severity.WARN)).as("真正的业务失败 / 降级 / 超时 —— 页面配色靠这一档")
-                .containsExactly("取锁超时（fail-open 直行）", "库存不足（未扣，防超卖命中）",
-                        "审计写入失败", "通知发送失败");
+        assertThat(titlesOf(Severity.ERROR)).as("红色只给数据链断裂（库存释放写库失败）").containsExactly("库存释放失败");
+        assertThat(titlesOf(Severity.PROTECT)).as("防护拦截（紫）：库存不足 / 敏感词 / 身份 / 重复提交，均不算业务失败")
+                .containsExactly("库存不足（未扣，防超卖命中）", "敏感词打码", "敏感词拒收",
+                        "身份拒绝", "重复提交拦截（未执行）");
+        assertThat(titlesOf(Severity.WARN)).as("能提示 / 已降级 / 已重试（黄）—— 页面配色靠这一档")
+                .containsExactly("取锁超时（fail-open 直行）", "审计写入失败", "通知发送失败");
         assertThat(titlesOf(Severity.INFO)).as("成功路径 + miss/missing（不看这一档数「拦了多少」）")
                 .containsExactly("L1 未命中", "释放未命中（无该 SKU 行）", "审计写入",
                         "通知发送", "身份放行");
     }
 
     @Test
-    @DisplayName("订单流转：applied → info、rejected → warn、error → error")
+    @DisplayName("订单流转：applied → info、rejected → protect（主动拦截）、error → error（数据链断）")
     void orderTransitionSeverity() {
         order.transition(OrderAction.PAY, "waitPay", "waitShip", MallOrderStateMetrics.Result.APPLIED, "O-1", 1_500L, null);
         order.transition(OrderAction.PAY, "waitPay", null, MallOrderStateMetrics.Result.REJECTED, "O-1", 1_500L,
@@ -161,9 +161,34 @@ class EventBroadcasterTest {
                 "数据库错误：IllegalStateException：db down");
         broadcaster.poll();
 
-        assertThat(severityOfAll()).containsExactly("info", "warn", "error");
+        assertThat(severityOfAll()).containsExactly("info", "protect", "error");
         assertThat(titlesOf(Severity.INFO).get(0)).as("标题带上「从哪到哪」").isEqualTo("状态流转 waitPay → waitShip");
-        assertThat(titlesOf(Severity.WARN).get(0)).as("rejected 时 to 为 null，标题照实写").isEqualTo("状态流转 waitPay → null");
+        assertThat(titlesOf(Severity.PROTECT).get(0)).as("rejected 时 to 为 null，标题照实写").isEqualTo("状态流转 waitPay → null");
+    }
+
+    @Test
+    @DisplayName("非数据链错误落 warn：L2 读失败 / 取锁异常都有回落，不该染红")
+    void recoverableErrorsAreWarnNotError() {
+        cache.l2Request("goods", "k1", MallCacheMetrics.L2Result.ERROR, 1_500L,
+                "L2 读取失败：IllegalStateException：db down");
+        lock.acquire("order:create", "O-1", MallLockMetrics.Outcome.ERROR, 1_000_000L,
+                "取锁异常：IllegalStateException：redis down");
+        broadcaster.poll();
+
+        assertThat(severityOfAll()).as("两者都有回落路径（DB / fail-open）⇒ 黄灯").containsExactly("warn", "warn");
+        assertThat(titlesOf(Severity.ERROR)).as("红色不为可恢复错误留位").isEmpty();
+    }
+
+    @Test
+    @DisplayName("非法态分档：出生闸拦下 → protect（入口防护）；已落库后观测到 → error（一致性被破坏）")
+    void illegalStateSplitsBirthGateFromObservedCorruption() {
+        order.illegal("010", "O-1", 1_000L);          // 真观测到非法态
+        order.birthRejected("101", "O-2", 1_000L);    // 出生闸拦下
+        broadcaster.poll();
+
+        assertThat(severityOfAll()).as("同一 kind 的两条来源，严重度相反").containsExactly("error", "protect");
+        assertThat(titlesOf(Severity.ERROR)).containsExactly("观测到非法状态（数据已损坏）");
+        assertThat(titlesOf(Severity.PROTECT)).containsExactly("出生闸拦下非法态");
     }
 
     // ================= 字段透传 =================

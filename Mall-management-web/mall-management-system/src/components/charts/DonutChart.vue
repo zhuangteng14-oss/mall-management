@@ -10,6 +10,8 @@
       :empty="!hasData"
       :error="error"
       :empty-text="emptyText"
+      :empty-overlay="emptyOverlay"
+      :is-replay="isReplay"
       @retry="emit('retry')"
     />
     <div v-if="showCenter" class="dc-center">
@@ -46,6 +48,10 @@ const props = defineProps({
   loading: { type: Boolean, default: false },
   error: { type: String, default: '' },
   emptyText: { type: String, default: '区间内暂无数据' },
+  /** 空态时保留坐标轴/网格线（环图一般不用，回放视图需要时再开）。 */
+  emptyOverlay: { type: Boolean, default: false },
+  /** 回放角标：数据来自回放帧而非 SSE。 */
+  isReplay: { type: Boolean, default: false },
 })
 
 const emit = defineEmits(['retry'])

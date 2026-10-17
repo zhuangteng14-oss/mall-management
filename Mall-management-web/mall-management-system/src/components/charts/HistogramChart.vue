@@ -12,6 +12,8 @@
       :height="height"
       :empty="!hasData"
       empty-text="当前时间段暂无有效耗时样本"
+      empty-overlay
+      :is-replay="isReplay"
     />
   </div>
 </template>
@@ -32,6 +34,8 @@ const props = defineProps({
   /** 样本数（只用于标题行）。 */
   samples: { type: Number, default: 0 },
   height: { type: String, default: '220px' },
+  /** 回放角标：数据来自回放帧而非 SSE。 */
+  isReplay: { type: Boolean, default: false },
 })
 
 /** 分钟 → 人读文案（与桶标签同一个量纲）。 */

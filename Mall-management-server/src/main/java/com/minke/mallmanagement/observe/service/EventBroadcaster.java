@@ -53,20 +53,24 @@ import java.util.concurrent.atomic.AtomicLong;
  *       是**页面要的**，不是「环里有的」。翻译表逐条写在下面的 {@code fromXxx} 私有方法里。</li>
  *   <li><b>severity 规则（一处定义，九处适用）</b>：
  *       <pre>
- *       error   ← result = error（抛异常 / 真失败）
- *       protect ← 入站限流 / 熔断翻转（blocked / opened / half_open / shed）、身份鉴权拒绝、
- *                 重复提交拦截、敏感词拒收 / 打码
- *                 —— 「防护层主动挡下或改写，业务没有被执行」；页面用紫色，**不计入业务失败率**
- *       warn    ← result ∈ {failed, rejected, timeout, degraded, skipped_degraded,
- *                          insufficient, lease_lost, retry_failed}
- *                 —— 「真的业务失败 / 降级 / 重试仍失败」（如库存不足、超卖拦截、异步流转被拒）
+ *       protect ← 防护层主动挡下 / 能解释数据变化原因的拦截：入站限流、熔断翻转
+ *                 （blocked / opened / half_open / shed）、库存不足（防超卖）、重复提交、
+ *                 敏感词拒收 / 打码、身份鉴权拒绝、出生闸拦下非法态、非法流转被拒
+ *                 —— 页面用紫色；**单列统计，绝不参与业务失败率 / 健康度**
+ *       warn    ← 系统能提示、能降级、已重试：L2 缓存降级 / 读取失败（回落 DB）、
+ *                 锁等待超时（fail-open）、租约丢失、MQ/通知重试中、慢查询警告、
+ *                 result ∈ {failed, timeout, degraded, skipped_degraded, lease_lost, retry_failed}
+ *                 —— 页面用黄色；问题没根治，但数据链没断
+ *       error   ← 只有**数据链断裂 / 系统崩溃**才红：result = error（SQL / 未捕获异常、
+ *                 库存写入失败）、观测到已落库的非法状态（强一致性被破坏）、DLQ
+ *                 —— 页面用红色；业务失败率（fail）**只数这一档**
  *       info    ← 其余（成功路径、以及 miss / missing 这类「什么也没发生」）
  *       </pre>
  *       ⚠️ 它是**展示口径**（页面据此配色），不是契约 —— 改它只影响日志页的颜色，
  *       不影响任何计数。⚠️ {@code miss} / {@code missing} 刻意留在 info：
  *       本环回答「**发生了什么**」，把每一次未命中都染成黄/红会让整屏都是警告色。
  *       ⚠️ 防护拦截（protect）**既不是 warn 也不是 error**：它是系统按预期挡住了请求，
- *       业务失败率（warn+error）与健康度（只看 error / P99）都不含它。
+ *       业务失败率（**只看 error**）与健康度（只看 error / P99）都不含它。
  *       ⚠️ D 段第九环的 {@code closed}（熔断试探通过、恢复关闭）也刻意留在 info：
  *       那是**恢复**，染成黄/红会让「闸刚救回来一次」看起来像又一次故障。</li>
  *   <li><b>游标 + 合并环</b>：每个源记一个「已并入的最大 seq」（初始 -1 = 空环）；
@@ -611,7 +615,8 @@ public class EventBroadcaster {
                     case "degraded":
                         return cacheEmit(e, Severity.WARN.tag, "L2 降级跳过", result);
                     default:
-                        return cacheEmit(e, severityOf(result), "L2 读取失败", result);
+                        // L2 只是加速层：读失败会回落 DB ⇒ 数据链没断，黄灯提示即可。
+                        return cacheEmit(e, Severity.WARN.tag, "L2 读取失败（回落 DB）", result);
                 }
             case "load":
                 return hit("回源查库", result, e.cache(), e.key(), e.reason());
@@ -624,7 +629,8 @@ public class EventBroadcaster {
                     case "skipped_degraded":
                         return cacheEmit(e, Severity.WARN.tag, "缓存失效被跳过（降级窗口）", result);
                     default:
-                        return cacheEmit(e, severityOf(result), "缓存失效失败", result);
+                        // 失效失败不影响读路径（旧值到期自然淘汰）⇒ 黄灯，不是红灯。
+                        return cacheEmit(e, Severity.WARN.tag, "缓存失效失败（等待自然过期）", result);
                 }
             case "probe":
                 return "ok".equals(result)
@@ -652,7 +658,8 @@ public class EventBroadcaster {
                     case "degraded":
                         return lockEmit(e, Severity.WARN.tag, "取锁被跳过（降级窗口）", result);
                     default:
-                        return lockEmit(e, severityOf(result), "取锁异常", result);
+                        // 取锁异常按 fail-open / 降级处理：业务还能直行，数据链没断 ⇒ 黄色。
+                        return lockEmit(e, Severity.WARN.tag, "取锁异常（按降级直行）", result);
                 }
             case "hold":
                 switch (result) {
@@ -661,7 +668,8 @@ public class EventBroadcaster {
                     case "lease_lost":
                         return lockEmit(e, Severity.WARN.tag, "租约丢失（临界区可能重叠）", result);
                     default:
-                        return lockEmit(e, severityOf(result), "释放锁异常", result);
+                        // 释放异常已由租约兜底（到期自动释放）⇒ 黄色告警。
+                        return lockEmit(e, Severity.WARN.tag, "释放锁异常（依赖租约兜底）", result);
                 }
             default:
                 return "healthy".equals(result)
@@ -699,7 +707,9 @@ public class EventBroadcaster {
                 //    "null" —— 那个字符串绝不能进 fields（页面上会显示成一个叫 null 的结果）。
                 //    故这里放的是**判出来的布尔**，不是 result 原样
                 fields.put("atBirth", atBirth);
-                return new Emit(Severity.WARN.tag, atBirth ? "出生闸拦下非法态" : "观测到非法状态",
+                // 出生闸拦下 = 入口防护成功（紫）；已落库后才观测到非法态 = 强一致性被破坏（红）。
+                return new Emit(atBirth ? Severity.PROTECT.tag : Severity.ERROR.tag,
+                        atBirth ? "出生闸拦下非法态" : "观测到非法状态（数据已损坏）",
                         "三位=" + e.shape() + " order#" + (e.key() == null ? "-" : e.key()), fields);
             }
             default: {
@@ -753,7 +763,21 @@ public class EventBroadcaster {
         fields.put("result", result);
         // 块 7 · 阶段 3a.3 后续：超卖拦截 / 扣减失败的具体原因（旧帧没有这个字段 ⇒ 不写键）
         putReason(fields, e.reason());
-        return new Emit(severityOf(result), title,
+        // 库存不足 = 防超卖主动拦截（紫，不算失败）；error = 扣/释放写库真失败（红，数据链断）；
+        // missing / ok 都保持 info（一个「什么也没发生」，一个成功）。
+        String severity;
+        switch (result) {
+            case "insufficient":
+                severity = Severity.PROTECT.tag;
+                break;
+            case "error":
+                severity = Severity.ERROR.tag;
+                break;
+            default:
+                severity = Severity.INFO.tag;
+                break;
+        }
+        return new Emit(severity, title,
                 "kind=" + e.kind() + " sku=" + e.skuCode() + " qty=" + e.qty() + " result=" + result, fields);
     }
 
@@ -881,28 +905,30 @@ public class EventBroadcaster {
 
     /** 严重度规则（**唯一出处**，见类注释第 2 件）。 */
     private static String severityOf(String result) {
-        if ("error".equals(result)) {
-            return Severity.ERROR.tag;
-        }
         switch (result) {
-            case "failed":
-            case "rejected":
-            case "timeout":
-            case "degraded":
-            case "skipped_degraded":
-            case "insufficient":
-            case "lease_lost":
-            // ↓ D 段第九环（防护）里唯一算「真失败」的一档：重试又失败了。
-            //   ⚠️ closed（熔断恢复关闭）与 retry_success（重试成功）**不在这里**：
-            //   那是恢复，不是故障（理由写在类注释第 2 件里）。
-            case "retry_failed":
-                return Severity.WARN.tag;
-            // ↓ 防护层主动挡下 / 闸自己翻转：业务没有被执行，既不算 warn 也不算 error。
+            // 红色只给「数据链断裂 / 谁都兜不住」：真正抛出的硬错误。
+            // ⚠️ 缓存 / 锁的 error 不从这里取（调用方显式落 WARN，因为它们有回落/租约兜底）。
+            case "error":
+                return Severity.ERROR.tag;
+            // 防护层主动挡下 / 拦截能解释数据变化：业务没有执行，紫色。
             case "blocked":
+            case "rejected":
             case "opened":
             case "half_open":
             case "shed":
+            case "insufficient":
                 return Severity.PROTECT.tag;
+            // 系统能提示 / 已降级 / 已重试：问题没根治，但数据链还在，黄色。
+            // ↓ D 段第九环里唯一算「需要关注」的一档：重试又失败了。
+            //   ⚠️ closed（熔断恢复关闭）与 retry_success（重试成功）**不在这里**：
+            //   那是恢复，不是故障（理由写在类注释第 2 件里）。
+            case "failed":
+            case "timeout":
+            case "degraded":
+            case "skipped_degraded":
+            case "lease_lost":
+            case "retry_failed":
+                return Severity.WARN.tag;
             default:
                 return Severity.INFO.tag;
         }

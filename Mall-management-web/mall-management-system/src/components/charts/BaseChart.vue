@@ -7,10 +7,16 @@
        若用 `v-if` 把画布摘掉，`echarts.init` 会拿到 `null`、还得在数据回来时补一次 init
        —— 那就有「init 时机」这个额外状态要维护（典型翻车：切回有数据的 tab 时图是白的）。
        常驻 + 浮层没有这个状态，代价只是浮层要有不透明底。 -->
-  <div ref="rootEl" class="bc" :style="{ height }">
+  <div ref="rootEl" class="bc" :class="{ 'bc--replay': isReplay }" :style="{ height }">
     <div ref="chartEl" class="bc-canvas" />
 
-    <div v-if="state" class="bc-state" :class="'bc-state--' + state">
+    <span v-if="isReplay" class="bc-replay" aria-hidden="true">回放</span>
+
+    <div
+      v-if="state"
+      class="bc-state"
+      :class="['bc-state--' + state, { 'bc-state--overlay': emptyOverlay && state === 'empty' }]"
+    >
       <div v-if="state === 'loading'" class="bc-skel" aria-hidden="true">
         <i style="width: 100%" /><i style="width: 78%" /><i style="width: 56%" />
       </div>
@@ -73,6 +79,11 @@ const props = defineProps({
   error: { type: String, default: '' },
   emptyText: { type: String, default: '区间内暂无数据' },
   retryText: { type: String, default: '重试' },
+  /** 空态浮层改为「透明 + 中央胶囊」：坐标轴 / 网格线仍留在画布上。
+   *  ⚠️ 只对 `empty` 生效；loading / error 仍用不透明底（加载骨架下面没有可看的东西）。 */
+  emptyOverlay: { type: Boolean, default: false },
+  /** 回放模式角标：图表由回放帧驱动而非 SSE。纯展示，不改变数据流。 */
+  isReplay: { type: Boolean, default: false },
 })
 
 const emit = defineEmits(['retry'])
@@ -194,6 +205,34 @@ watch(state, () => {
 .bc-msg {
   font-size: var(--fs-sm);
   color: var(--ink-3);
+}
+/* 空态「优雅覆盖」：不遮坐标轴 / 网格线，只把提示做成中央胶囊。
+   ⚠️ 浮层本身必须 pointer-events:none —— 否则回放/实时图表在空态下无法 hover 坐标轴。 */
+.bc-state--overlay {
+  background: transparent;
+  pointer-events: none;
+}
+.bc-state--overlay .bc-msg {
+  padding: var(--s2) var(--s4);
+  border: 1px dashed var(--line-2);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--surface) 88%, transparent);
+  box-shadow: var(--shadow-1, 0 1px 2px rgba(0, 0, 0, 0.06));
+}
+/* 回放角标：右上角，不占布局、不挡 hover */
+.bc-replay {
+  position: absolute;
+  top: var(--s2);
+  right: var(--s2);
+  z-index: 2;
+  padding: 1px var(--s2);
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+  color: var(--warning-deep);
+  border: 1px solid var(--warning);
+  border-radius: 999px;
+  background: var(--warning-ground);
+  pointer-events: none;
 }
 .bc-state--error .bc-msg {
   color: var(--danger);

@@ -1,0 +1,105 @@
+{
+  "at": "2026-10-17T14:49:38.381Z",
+  "checks": {
+    "admin-shell-sentinel": {
+      "ok": true
+    },
+    "redisdown-injection-on": {
+      "ok": true,
+      "detail": {
+        "status": 200,
+        "json": [
+          "redisDown"
+        ]
+      }
+    },
+    "window-has-data": {
+      "ok": true,
+      "detail": {
+        "n": 5098,
+        "sev": {
+          "info": 4056,
+          "protect": 1001,
+          "warn": 41
+        },
+        "failRate": "0.0",
+        "warnRate": "0.8",
+        "protectRate": "19.6",
+        "domFail": "0.0\n%",
+        "domWarn": "警告率 (warn) 0.8%",
+        "domProt": "防护拦截率 (protect) 19.6%"
+      }
+    },
+    "warn-present": {
+      "ok": true,
+      "detail": {
+        "info": 4056,
+        "protect": 1001,
+        "warn": 41
+      }
+    },
+    "protect-present": {
+      "ok": true,
+      "detail": {
+        "info": 4056,
+        "protect": 1001,
+        "warn": 41
+      }
+    },
+    "error-zero": {
+      "ok": true,
+      "detail": {
+        "info": 4056,
+        "protect": 1001,
+        "warn": 41
+      }
+    },
+    "fail-rate-error-only": {
+      "ok": true,
+      "detail": {
+        "failRate": "0.0",
+        "domFail": "0.0\n%",
+        "formula": "error 0 / 5098"
+      }
+    },
+    "warn-rate-displayed": {
+      "ok": true,
+      "detail": {
+        "warnRate": "0.8",
+        "domWarn": "警告率 (warn) 0.8%",
+        "warn": 41,
+        "n": 5098
+      }
+    }
+  },
+  "samples": {
+    "injectionsBefore": [],
+    "injectionsSet": {
+      "status": 200,
+      "json": [
+        "redisDown"
+      ]
+    },
+    "logSnapshot": {
+      "n": 5098,
+      "sev": {
+        "info": 4056,
+        "protect": 1001,
+        "warn": 41
+      },
+      "failRate": "0.0",
+      "warnRate": "0.8",
+      "protectRate": "19.6",
+      "domFail": "0.0\n%",
+      "domWarn": "警告率 (warn) 0.8%",
+      "domProt": "防护拦截率 (protect) 19.6%"
+    },
+    "afterShot": {
+      "fail": "0.0\n%",
+      "warn": "警告率 (warn) 0.8%",
+      "prot": "防护拦截率 (protect) 19.6%"
+    }
+  },
+  "ok": true,
+  "fail": []
+}
