@@ -2023,6 +2023,88 @@ try {
       && !dchain.some((t) => t.includes('请求开始') || t.includes('总耗时')),
       dchain.slice(-2))
   }
+  // ══ ⑯+ WARN / ERROR 演示帧必须带原因，且 ⑤ 原因段按严重度着色 ══════════════════
+  //   ⚠️ 用户实测反馈：演示里的「敏感词命中，已拦截」点开只有 kind / severity / src，
+  //      没有「原因」这一段，整段 .tech 全灰。根因在 api/demo-stream.js：假帧只写了标题，
+  //      没写 fields.reason（后端真流一直有）。本段钉住两件事：
+  //      ① ③ 第一层：每条 WARN / ERROR 演示行都有「原因」键值对；
+  //      ② ⑤ 详情：点开其中可点的一条，出现「原因（reason）= …」段，且计算色按级别
+  //         落到 --warning（warn）/ --danger（error），其余段仍是中性 --ink-3。
+  //   ⚠️ 演示流是定期间隔吐帧，4.5 秒不一定已经吐到 WARN；这里最多再等 20 秒。
+  const demoWarn = await (async () => {
+    const t0 = Date.now()
+    while (Date.now() - t0 < 20000) {
+      const r = await b.evalJS(`(() => {
+        const titleOf = (r) => { const b = r.querySelector('.ms b'); return b ? b.textContent.trim() : '' }
+        const levelOf = (r) => { const x = r.querySelector('.lv'); return x ? x.textContent.trim() : '' }
+        const pair = (r, k) => {
+          const tf = [...r.querySelectorAll('.ms .dt .tf')].find((f) => {
+            const n = f.querySelector('.tf-k'); return n && n.textContent.trim() === k
+          })
+          return tf ? tf.querySelector('.tf-v').textContent.trim() : null
+        }
+        const rows = [...document.querySelectorAll('.log-line:not(.req)')]
+        const warnErr = rows.filter((r) => /^(WARN|ERROR)$/.test(levelOf(r)))
+        const clickable = warnErr.find((r) => r.getAttribute('role') === 'button')
+        return {
+          总行数: rows.length,
+          警告错误行数: warnErr.length,
+          缺原因: warnErr.filter((r) => !pair(r, '原因')).map(titleOf),
+          样例: warnErr.slice(0, 3).map((r) => ({ 标题: titleOf(r), 级别: levelOf(r), 原因: pair(r, '原因') })),
+          可点警告: clickable ? { 标题: titleOf(clickable), 级别: levelOf(clickable) } : null,
+        }
+      })()`)
+      if (r.警告错误行数 > 0 && r.可点警告) return r
+      await sleep(500)
+    }
+    return null
+  })()
+  ok('⑯+ **所有 WARN / ERROR 演示帧第一层都带「原因」**（缺原因行数为 0，且至少出现一条）',
+    !!demoWarn && demoWarn.警告错误行数 > 0 && demoWarn.缺原因.length === 0, demoWarn)
+  if (demoWarn && demoWarn.可点警告) {
+    await b.evalJS(`(() => {
+      const titleOf = (r) => { const b = r.querySelector('.ms b'); return b ? b.textContent.trim() : '' }
+      const r = [...document.querySelectorAll('.log-line')].find((x) =>
+        titleOf(x) === ${JSON.stringify(demoWarn.可点警告.标题)} && x.getAttribute('role') === 'button')
+      if (r) r.click()
+      return !!r
+    })()`)
+    await sleep(500)
+    const dReason = await b.evalJS(`(() => {
+      const tok = (n) => {
+        const d = document.createElement('span'); d.style.color = 'var(' + n + ')'
+        document.body.appendChild(d); const c = getComputedStyle(d).color; d.remove(); return c
+      }
+      const item = [...document.querySelectorAll('.chain .chain-i')].find((x) => {
+        const c = x.querySelector('.tech')
+        return c && c.textContent.includes('原因（reason）=')
+      })
+      if (!item) return null
+      const code = item.querySelector('.tech')
+      const segs = [...code.children].filter((s, i) => i % 2 === 0)
+      const reason = segs.find((s) => s.textContent.startsWith('原因（reason）='))
+      const others = segs.filter((s) => s !== reason)
+      return {
+        reason文本: reason ? reason.textContent : null,
+        reason类: reason ? reason.className : null,
+        reason色: reason ? getComputedStyle(reason).color : null,
+        其余段色: [...new Set(others.map((s) => getComputedStyle(s).color))],
+        dReason: document.querySelectorAll('.d-reason').length,
+        令牌: { warning: tok('--warning'), danger: tok('--danger'), ink3: tok('--ink-3') },
+      }
+    })()`)
+    const lv = demoWarn.可点警告.级别
+    const wantCls = lv === 'ERROR' ? 'is-error' : 'is-warn'
+    const wantColor = lv === 'ERROR' ? (dReason && dReason.令牌.danger) : (dReason && dReason.令牌.warning)
+    ok('⑯+ **点开 WARN / ERROR 演示行：⑤ 出现「原因（reason）= …」，段色按级别 = --warning / --danger，'
+      + '其余段仍 = --ink-3，且 .d-reason = 0**（用户实报缺原因的那条路径）',
+      !!dReason && !!dReason.reason文本 && dReason.reason类 === wantCls
+      && dReason.reason色 === wantColor
+      && dReason.其余段色.length > 0 && dReason.其余段色.every((c) => c === dReason.令牌.ink3)
+      && dReason.dReason === 0,
+      { 级别: lv, 期望类: wantCls, 期望色: wantColor, ...dReason })
+  }
+
   // 实拍仍在**演示模式**下拍（与 `-stream.png` 那张真流对照）—— 顺序与上一版一致。
   await b.shot(`${WORK}out-b7a3-eventlog.png`)
   await b.shot(`${WORK}out-b7a3-eventlog-full.png`)

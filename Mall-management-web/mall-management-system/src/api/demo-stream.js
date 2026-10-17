@@ -142,6 +142,8 @@ const KIND_WEIGHT = [
         （cache/lock 是 cache|lock/result/key，order 是 action/result/from/to/order，
          stock 是 kind/sku/qty/result，audit 是 actor/action/reason，
          notify 是 to/event/reason，sensitive 是 scene/hit/total，identity 是 subject/reason）；
+      · **warn / error 档必须带 `fields.reason`**（3a.3 后续）：成功放行的 info 档不写这个键
+        （与后端 `EventBroadcaster.putReason` 的「空即无」同口径）；
       · `remaining` 仍是**顶层键**（只有库存扣减档有值，扣得动/扣不动两档），**不塞进 fields**
         —— 真帧就是这么给的（见 `StockMetrics.StockEvent#remaining()`）；
       · `src=环名#源seq` 只在 `detail` 尾部，**不进 fields**（后端 `add()` 的追加位置）。
@@ -183,15 +185,15 @@ const KIND_CONTENT = {
       { w: 20, sev: 'info', title: 'L1 命中', result: 'hit', dur: [1, 8] },
       { w: 10, sev: 'info', title: 'L2 命中', result: 'hit', dur: [80, 400] },
       { w: 5, sev: 'info', title: '未命中，回源数据库', result: 'miss', dur: [300, 1500] },
-      { w: 2, sev: 'warn', title: '缓存预热超时', result: 'timeout', dur: [2000, 8000] },
+      { w: 2, sev: 'warn', title: '缓存预热超时', result: 'timeout', reason: 'L2 降级冷却中：本次未访问 Redis', dur: [2000, 8000] },
     ],
   },
   lock: {
     titles: [
       { w: 18, sev: 'info', title: '获得行锁', result: 'acquired', dur: [20, 300] },
       { w: 6, sev: 'info', title: '锁等待 120ms', result: 'timeout', dur: [120000, 120000] },
-      { w: 2, sev: 'warn', title: '锁等待超时，已放弃', result: 'timeout', dur: [3000000, 5000000] },
-      { w: 1, sev: 'error', title: '死锁，已回滚重试', result: 'error', dur: [1000000, 3000000] },
+      { w: 2, sev: 'warn', title: '锁等待超时，已放弃', result: 'timeout', reason: '取锁超时：等待 5 s 未获得', dur: [3000000, 5000000] },
+      { w: 1, sev: 'error', title: '死锁，已回滚重试', result: 'error', reason: '死锁重试失败：第 3 次尝试仍撞上死锁', dur: [1000000, 3000000] },
     ],
   },
   order: {
@@ -211,7 +213,7 @@ const KIND_CONTENT = {
       { w: 12, sev: 'info', title: '库存扣减', result: 'ok', remaining: [20, 90], dur: [200, 1200] },
       { w: 3, sev: 'warn', title: '库存水位偏低', result: 'ok', remaining: [1, 8], dur: [200, 1200] },
       { w: 2, sev: 'warn', title: '库存不足，已拒绝', result: 'insufficient', remaining: [0, 0], dur: [100, 600] },
-      { w: 1, sev: 'error', title: '超卖拦截', result: 'error', remaining: null, dur: [100, 800] },
+      { w: 1, sev: 'error', title: '超卖拦截', result: 'error', reason: '扣减异常：影响行数为 2（SkuCode 可能非唯一）', remaining: null, dur: [100, 800] },
     ],
   },
   audit: {
@@ -353,19 +355,28 @@ function dropUndef(o) {
  *    `stock` 用 `kind/sku/qty/result`，`audit` 用 `actor/action/reason`，
  *    `notify` 用 `to/event/reason`，`sensitive` 用 `scene/hit/total`，`identity` 用 `subject/reason`。
  *    多一个键或少一个键都会让前端「fields 优先」那条路静默走到回落分支。
+ * ⚠️ 3a.3 后续：warn / error 档额外带 `reason`（失败/降级的人话原因），info 档不写这个键 ——
+ *    与真帧一致，⑤ 的 `.tech` 才有东西可着色。
  */
 function buildBody(w, kind, t) {
   switch (kind) {
     case 'cache': {
       const [area, key] = pickOne(w.rnd, CACHE_AREAS)
-      return { objectType: '', objectId: key, key, fields: { cache: area, result: t.result, key } }
+      return {
+        objectType: '', objectId: key, key,
+        // 成败放行的 info 不写 reason；降级 / 失败档带人话原因（同真帧 fields.reason 的有无口径）。
+        fields: dropUndef({ cache: area, result: t.result, key, reason: t.reason }),
+      }
     }
     case 'lock': {
       const lock = pickOne(w.rnd, LOCK_NAMES)
       const bizKey = lock === 'friend-add'
         ? `friend:add/u-${intBetween(w.rnd, 1001, 1099)}->u-${intBetween(w.rnd, 1001, 1099)}`
         : `${lock}/${orderRef(w)}`
-      return { objectType: '', objectId: bizKey, key: bizKey, fields: { lock, result: t.result, key: bizKey } }
+      return {
+        objectType: '', objectId: bizKey, key: bizKey,
+        fields: dropUndef({ lock, result: t.result, key: bizKey, reason: t.reason }),
+      }
     }
     case 'order': {
       const orderId = orderRef(w)
@@ -379,11 +390,21 @@ function buildBody(w, kind, t) {
     }
     case 'stock': {
       const sku = pickOne(w.rnd, KIND_CONTENT.stock.ids)
+      const qty = intBetween(w.rnd, 1, 3)
+      const remaining = t.remaining ? intBetween(w.rnd, t.remaining[0], t.remaining[1]) : null
+      // warn / error 档必须带原因（3a.3 后续）：低水位与防超卖各说各的事实，
+      // 与真帧 `StockMetrics` 的文案同款；成功档保持 undefined ⇒ 不写这个键。
+      let reason = t.reason
+      if (t.title === '库存水位偏低') {
+        reason = `库存水位偏低：剩余 ${remaining} 件（阈值 10 件）`
+      } else if (t.result === 'insufficient') {
+        reason = `防超卖拦截：库存不足（需 ${qty} 件，剩余 ${remaining} 件）`
+      }
       return {
         objectType: '', objectId: sku, key: sku,
-        fields: { kind: 'deduct', sku, qty: intBetween(w.rnd, 1, 3), result: t.result },
+        fields: dropUndef({ kind: 'deduct', sku, qty, result: t.result, reason }),
         // ⚠️ `remaining` 是**顶层键**（不是 fields 的一格）：只有扣减的 ok / insufficient 两档有值。
-        remaining: t.remaining ? intBetween(w.rnd, t.remaining[0], t.remaining[1]) : null,
+        remaining,
       }
     }
     case 'audit': {
@@ -404,9 +425,21 @@ function buildBody(w, kind, t) {
     }
     case 'sensitive': {
       const words = pickOne(w.rnd, KIND_CONTENT.sensitive.ids)
+      // 真帧里 `hit` 是**命中的字符数**（`SensitiveWordService.filter` 的累加口径），
+      // 所以按比例造：rejected 必须 ≥ 40%，masked 必须 < 40% —— 否则事件与原因自相矛盾。
+      const total = intBetween(w.rnd, 20, 120)
+      const rejected = t.result === 'rejected'
+      const hit = rejected
+        ? Math.max(8, Math.ceil(total * 0.5))
+        : Math.max(2, Math.floor(total * 0.2))
       return {
         objectType: '', objectId: words, key: words,
-        fields: { scene: '评论', hit: intBetween(w.rnd, 1, 3), total: intBetween(w.rnd, 20, 120) },
+        fields: dropUndef({
+          scene: '评论', hit, total,
+          reason: rejected
+            ? `敏感词拒收：命中比例 ${Math.round((hit / total) * 100)}% ≥ 40%（命中 ${hit}/${total}）`
+            : undefined,
+        }),
       }
     }
     case 'identity': {
