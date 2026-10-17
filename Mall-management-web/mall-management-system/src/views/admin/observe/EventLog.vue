@@ -2958,7 +2958,10 @@ onBeforeUnmount(() => {
       探针里「成员比组头右移 22px」那类相对判据全部照旧。`ch` 跟着等宽字体走，不写死 px。 */
 .log-head {
   display: grid;
-  grid-template-columns: var(--pc, calc(2ch + 8px)) 84px 14px 34px 40px minmax(0, 1fr);
+  /* 「等级」列 = 7ch + 2px：PROTECT 是**七个等宽字符**，原来的 34px（≈4.7ch）只够
+     INFO / WARN / ERROR（4~5 字符）⇒ PROTECT 的字形溢出盒子、被后面「类」列压住。
+     `ch` 跟着 `--font-mono` 走，INFO/WARN/ERROR 仍从同一左缘起排 ⇒ 纵向对齐不变。 */
+  grid-template-columns: var(--pc, calc(2ch + 8px)) 84px 14px calc(7ch + 2px) 40px minmax(0, 1fr);
   gap: 0 8px;
   align-items: center;
   font: var(--fs-xs) / 1.45 var(--font-mono);
@@ -3169,7 +3172,12 @@ onBeforeUnmount(() => {
 }
 .log-line .lv {
   display: inline-block;
-  width: 34px;
+  /* 与 `.log-head` 第 4 列**同一表达式**（7ch + 2px）：PROTECT 七字符完整放下，
+     INFO / WARN / ERROR 仍共用同一条左缘与同一条右缘 ⇒ 列对齐不随文案长度漂移。
+     ⚠️ 这是同类问题第二次复发（第一次是 INFO 4 字符时把列定成 34px）：以后再加
+        更长的等级名，先量 `字数 × 1ch` 再改这一处 + 表头那一处，别只调其中一个。 */
+  width: calc(7ch + 2px);
+  overflow: visible;
   margin-right: 8px;
   font-size: var(--fs-xs);
   /* ⚠️ 行内喂的是 `--sevc`，**不是** `--c2`：`--c2` 是色板里的「锁」色，两套变量曾经撞名
