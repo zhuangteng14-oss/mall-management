@@ -137,7 +137,7 @@ class ObservedEventDaoTest {
     // ==================== ① 四处同改：列清单 / 占位符 / params 顺序 ====================
 
     @Test
-    @DisplayName("13 个占位符、列清单、params 顺序**逐位对齐**（durationUs 与 remaining 都是整数，写反了不报错）")
+    @DisplayName("14 个占位符、列清单、params 顺序**逐位对齐**（durationUs 与 remaining 都是整数，写反了不报错）")
     void columnListAndParamsAreAligned() {
         // ⚠️ 两个数刻意取不同的值：写反了在 SQL 层完全合法（都是整数列），只有这条断言会红。
         ObservedEvent e = new ObservedEvent(
@@ -149,17 +149,17 @@ class ObservedEventDaoTest {
 
         assertThat(preparedSql).as("一批 = 一条多行 INSERT（一次往返）").hasSize(1);
         assertThat(preparedSql.get(0))
-                .as("列清单：新两列接在 DurationUs 之后、OccurredAt 之前（与 Migration ㉒ 的 AFTER 链一致）")
-                .contains("(Kind, Severity, Title, ObjectType, ObjectId, TraceId, BatchId, "
+                .as("列清单：块 7 收尾（㉓）的 Seq 在首位；其余列序与 ㉒ 的 AFTER 链一致")
+                .contains("(Seq, Kind, Severity, Title, ObjectType, ObjectId, TraceId, BatchId, "
                         + "ActorId, ActorRole, DurationUs, RemainingStock, FieldsJson, OccurredAt)")
-                .as("一行的 13 个占位符（少一个/多一个由 MySQL 报错，但那时已经跑在运行期了）")
-                .contains("(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
+                .as("一行的 14 个占位符（少一个/多一个由 MySQL 报错，但那时已经跑在运行期了）")
+                .contains("(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
 
         assertThat(preparedBinds.get(0))
-                .as("13 个绑定值，顺序 = 上面那份列清单（第 10/11 位就是本步最容易写反的那一对）")
-                .containsExactly("1=stock", "2=info", "3=库存扣减", "4=sku", "5=SKU-1", "6=trace-1",
-                        "7=batch-1", "8=C-42", "9=2", "10=171", "11=98",
-                        "12={\"qty\":2,\"result\":\"ok\"}", "13=" + new Timestamp(OCCURRED_AT));
+                .as("14 个绑定值，顺序 = 上面那份列清单（第 11/12 位就是本步最容易写反的那一对）")
+                .containsExactly("1=7", "2=stock", "3=info", "4=库存扣减", "5=sku", "6=SKU-1",
+                        "7=trace-1", "8=batch-1", "9=C-42", "10=2", "11=171", "12=98",
+                        "13={\"qty\":2,\"result\":\"ok\"}", "14=" + new Timestamp(OCCURRED_AT));
     }
 
     @Test
@@ -169,16 +169,16 @@ class ObservedEventDaoTest {
 
         assertThat(preparedSql).hasSize(1);
         assertThat(preparedSql.get(0)).as("一个 VALUES 里两组占位符")
-                .contains("VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?), "
-                        + "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
+                .contains("VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?), "
+                        + "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
         // ⚠️ 记下来的标签是 **JDBC 的 1 基参数号**，且在整条语句里**连号**（不是每行从 1 重来）——
-        //    第 2 行的第 11 个参数是整条语句的第 24 个（14 + 10）。第一版按「行内序号」写，
+        //    第 2 行的第 12 个参数是整条语句的第 26 个（14 + 12）。第一版按「行内序号」写，
         //    断言红在 expected "11=20" but was "24=20"：数没错，是我把坐标系搞混了。
-        assertThat(preparedBinds.get(0)).as("两行 × 13 个绑定值").hasSize(26);
-        assertThat(preparedBinds.get(0).get(10)).as("第 1 行的 RemainingStock（参数号 = 下标 + 1）")
-                .isEqualTo("11=10");
-        assertThat(preparedBinds.get(0).get(23)).as("第 2 行的 RemainingStock：下标 23 ⇒ 参数号 24（13 + 11）")
-                .isEqualTo("24=20");
+        assertThat(preparedBinds.get(0)).as("两行 × 14 个绑定值").hasSize(28);
+        assertThat(preparedBinds.get(0).get(11)).as("第 1 行的 RemainingStock（参数号 = 下标 + 1）")
+                .isEqualTo("12=10");
+        assertThat(preparedBinds.get(0).get(25)).as("第 2 行的 RemainingStock：下标 25 ⇒ 参数号 26（14 + 12）")
+                .isEqualTo("26=20");
     }
 
     @Test
@@ -199,14 +199,14 @@ class ObservedEventDaoTest {
                 withFields(null),
                 withFields(new LinkedHashMap<>())));
 
-        // 三行 39 个绑定值；FieldsJson 在每行里是第 12 个 ⇒ 参数号 12 / 25 / 38（连号，见上一条用例）。
+        // 三行 42 个绑定值；FieldsJson 在每行里是第 13 个 ⇒ 参数号 13 / 27 / 41（连号，见上一条用例）。
         List<String> bound = preparedBinds.get(0);
-        assertThat(bound).as("三行 × 13").hasSize(39);
-        assertThat(bound.get(11)).as("第 1 行有明细").isEqualTo("12={\"qty\":2,\"result\":\"ok\"}");
-        assertThat(bound.get(24)).as("第 2 行 fields=null ⇒ 落 NULL（「没有明细」是事实，不是错误）")
-                .isEqualTo("25=null");
-        assertThat(bound.get(37)).as("第 3 行空表同理 —— 不写成 {}（那会被读成「有明细，只是空的」）")
-                .isEqualTo("38=null");
+        assertThat(bound).as("三行 × 14").hasSize(42);
+        assertThat(bound.get(12)).as("第 1 行有明细").isEqualTo("13={\"qty\":2,\"result\":\"ok\"}");
+        assertThat(bound.get(26)).as("第 2 行 fields=null ⇒ 落 NULL（「没有明细」是事实，不是错误）")
+                .isEqualTo("27=null");
+        assertThat(bound.get(40)).as("第 3 行空表同理 —— 不写成 {}（那会被读成「有明细，只是空的」）")
+                .isEqualTo("41=null");
     }
 
     // ==================== ③ 截断：本类的责任 ====================
@@ -225,10 +225,12 @@ class ObservedEventDaoTest {
         dao.insertBatch(List.of(e));
 
         List<String> bound = preparedBinds.get(0);
-        assertThat(bound.get(2)).as("Title varchar(255) ⇒ 截到 255").isEqualTo("3=" + "T".repeat(255));
-        assertThat(bound.get(7)).as("ActorId varchar(50) ⇒ 截到 50").isEqualTo("8=" + "A".repeat(50));
-        assertThat(bound.get(11)).as("FieldsJson 原样整段（截断会造出非法 JSON，json 列会整条拒绝）")
-                .isEqualTo("12={\"extra\":\"" + longExtra + "\"}");
+        assertThat(bound.get(3)).as("Title varchar(255) ⇒ 截到 255（Seq 在首位，Title 是第 4 个参数）")
+                .isEqualTo("4=" + "T".repeat(255));
+        assertThat(bound.get(8)).as("ActorId varchar(50) ⇒ 截到 50（第 9 个参数）")
+                .isEqualTo("9=" + "A".repeat(50));
+        assertThat(bound.get(12)).as("FieldsJson 原样整段（截断会造出非法 JSON，json 列会整条拒绝）")
+                .isEqualTo("13={\"extra\":\"" + longExtra + "\"}");
     }
 
     // ==================== ④ 读侧：回放的列清单 ====================

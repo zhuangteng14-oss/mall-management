@@ -1,0 +1,41 @@
+块 7 收尾 · A3 幂等键（Migration ㉓）落库复核
+================================================================
+时间      ：2026-10-17（迁移落库后、压测前）
+库        ：192.168.229.129:3306 / mall_management_sql（VM，MySQL 8.4.11）· dev profile 同库
+工具      ：_work/ApplyMigration.java（按 marker `#2058` 截段；凭据从 _work/b6-c7-db-env.sh 剥壳、
+            不打印不落盘）+ _work/CheckSeqq.java / _work/Sql.java（只读）
+SQL 段    ：mall_management_sql.sql ㉓（㉓-1 加 `Seq`，㉓-2 加 UNIQUE `uk_observed_event_trace_seq`）
+            落库后 `.sql` 行数 **2055 → 2098**；行尾已归一化为 CRLF（LF 2098 / CR 2098 / 裸 CR 0）
+
+只读复核（原文）
+  COLUMN Seq: type=bigint nullable=YES pos=2 default=null afterId=true
+  COLUMNS total=17
+  INDEX uk_observed_event_trace_seq part=1 col=TraceId nonUnique=0
+  INDEX uk_observed_event_trace_seq part=2 col=Seq nonUnique=0
+  INDEX parts=2
+
+  tables_total=38
+  nonprimary_indexes=75
+  nonprimary_unique=20
+  observed_event_columns=17
+
+  INDEX_NAME                    SEQ_IN_INDEX  COLUMN_NAME  NON_UNIQUE
+  idx_observed_event_batch      1             BatchId      1
+  idx_observed_event_kind_time  1             Kind         1
+  idx_observed_event_kind_time  2             OccurredAt   1
+  idx_observed_event_time       1             OccurredAt   1
+  idx_observed_event_trace      1             TraceId      1
+  PRIMARY                       1             Id           0
+  uk_observed_event_trace_seq   1             TraceId      0
+  uk_observed_event_trace_seq   2             Seq          0
+
+判读
+  1. `Seq` 是 bigint、可空、位于 `Id` 之后（pos=2），与 `ObservedEventDao` 的列序一致；
+     存量行为 NULL（唯一索引允许，多个 NULL 不相等），新行必非空（发布时注入 UUID traceId）。
+  2. `uk_observed_event_trace_seq` 两段 = (TraceId, Seq)，NON_UNIQUE=0。
+     全库非主键索引 74 → 75、非主键 UNIQUE 19 → 20、observed_event 列 16 → 17，
+     与「本段只加 1 列 + 1 个唯一索引」逐项对上；表数仍 38。
+  3. 运行时反证（同目录 b7-load-500-trace-purity.txt）：500 并发下
+     DUP_TRACE_SEQ_GROUPS = 0；重复发布同 (TraceId, Seq) 实测只留 1 行（A3 专项验证，见交接报告）。
+  4. 回滚（逻辑废弃，执行前须人工确认）：DROP INDEX uk_observed_event_trace_seq；
+     `Seq` 列保留、停用写入即可（见 .sql ㉓ 段头注释）。

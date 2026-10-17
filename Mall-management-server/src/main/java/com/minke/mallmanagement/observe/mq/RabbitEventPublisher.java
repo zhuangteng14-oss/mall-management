@@ -11,6 +11,7 @@ import org.springframework.amqp.rabbit.core.RabbitTemplate;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
+import java.util.UUID;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.TimeUnit;
@@ -151,8 +152,13 @@ public class RabbitEventPublisher implements EventPublisher {
     /** 真正发出：只在 {@code observe-mq-publish} 线程上调用（排队顺序 = 事件顺序）。 */
     private void send(ObservedEvent event) {
         try {
+            // A3（块 7 收尾）：幂等键是 (TraceId, Seq)。定时任务 / 流线程产生的事件没有 traceId，
+            // 若原样发布，DB 里会是一批 TraceId=NULL 的行 —— MySQL 的 UNIQUE 不把多个 NULL 当相等
+            // ⇒ 那些行走不了幂等。故**发布那一刻**补一个 UUID（只补消息与台账，不改内存环里的记录：
+            // 页面上的 traceId 仍如实为 null，表示「这条不是某次请求产生的」）。
+            ObservedEvent outbound = event.traceId() == null ? withTraceId(event) : event;
             rabbitTemplate.convertAndSend(RabbitObserveConfig.EXCHANGE, RabbitObserveConfig.ROUTING_KEY,
-                    event,
+                    outbound,
                     message -> {
                         message.getMessageProperties().setDeliveryMode(MessageDeliveryMode.PERSISTENT);
                         return message;
@@ -164,6 +170,13 @@ public class RabbitEventPublisher implements EventPublisher {
             log.warn("[EVENT] 发布失败（事件只留在内存环里，不落库）：seq={} kind={} cause={}",
                     event.seq(), event.kind(), e.toString());
         }
+    }
+
+    /** 复制一条事件并补上 traceId（A3：无 traceId 的事件在发布时自动生成 UUID）。 */
+    private static ObservedEvent withTraceId(ObservedEvent e) {
+        return new ObservedEvent(e.seq(), e.epochMilli(), e.kind(), e.severity(), e.title(), e.detail(),
+                e.key(), e.objectType(), e.objectId(), UUID.randomUUID().toString(), e.batchId(),
+                e.actorId(), e.actorRole(), e.durationUs(), e.remaining(), e.fields());
     }
 
     @Override

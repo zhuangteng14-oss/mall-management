@@ -2053,3 +2053,46 @@ SET @s := (SELECT IF(COUNT(*) = 0,
   FROM information_schema.COLUMNS
   WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'observed_event' AND COLUMN_NAME = 'FieldsJson');
 PREPARE _p FROM @s; EXECUTE _p; DEALLOCATE PREPARE _p;
+
+-- ============================================================
+-- ㉓ 块 7 收尾 · A3（2026-10-17）：observed_event 幂等键
+--
+-- 【为什么】MQ 消费链路的重投（3 次落库重试 + broker 重新投递 + 未来多实例）会让同一条
+--   事件被写两次。此前台账没有任何非主键唯一约束，D 段 A3 一直悬着未决。
+--   用户 2026-10-17 裁定走**甲方案**：新增 `Seq` 列，与 `TraceId` 组成 UNIQUE。
+--
+-- 【Seq 是什么】`EventBroadcaster` 合并环的**进程内单调序号**（`ObservedEvent.seq()`），
+--   不是 DB 自增、也不落库（这是本次新增的第一列）。同一条消息被重投时消息体里的 Seq 不变
+--   ⇒ UNIQUE(TraceId, Seq) 能识别出「重复」。
+--
+-- 【无 TraceId 的事件】定时任务 / SSE 流线程产生的事件在内存环里 TraceId 为 NULL
+--   （页面如实显示「不是某次请求」）。MySQL 的 UNIQUE 不把多个 NULL 视为相等 ⇒ 这类行
+--   天生去不了重。处置：`RabbitEventPublisher#send` 在**发布那一刻**补一个 UUID，
+--   于是台账里的 TraceId 恒非空；内存环与页面仍保持 null（两处口径不同是刻意的，见该类注释）。
+--
+-- 【写入语义】`ObservedEventDao#insertBatch` 改成
+--   `ON DUPLICATE KEY UPDATE Id = Id`：只把唯一键冲突变成 no-op，其它错误照旧抛出
+--   （消费者重试→DLQ）。不要改成 INSERT IGNORE —— 它会把数据截断等错误也静默成 0 行。
+--
+-- 【存量行】Seq 为 NULL ⇒ 唯一索引允许（多个 NULL 不相等）；新行必定非空。
+--   回滚（逻辑废弃，执行前须人工确认；不 DROP 数据）：
+--       ALTER TABLE `observed_event` DROP INDEX `uk_observed_event_trace_seq`;  -- 须人工确认
+--       -- Seq 列保留（追加列不回删；停用即可）
+-- ============================================================
+
+-- ---- ㉓-1 `observed_event` 加 `Seq`（插在 Id 之后，与 ObservedEventDao 的列序一致）----
+SET @s := (SELECT IF(COUNT(*) = 0,
+  'ALTER TABLE `observed_event` ADD COLUMN `Seq` bigint DEFAULT NULL COMMENT ''A3 幂等键的一半：EventBroadcaster 合并环的进程内序号（非 DB 自增）。与 TraceId 组成 UNIQUE；重投消息的 Seq 不变 ⇒ 可去重。存量行为 NULL'' AFTER `Id`',
+  'DO 0')
+  FROM information_schema.COLUMNS
+  WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'observed_event' AND COLUMN_NAME = 'Seq');
+PREPARE _p FROM @s; EXECUTE _p; DEALLOCATE PREPARE _p;
+
+-- ---- ㉓-2 UNIQUE(TraceId, Seq) ----
+SET @s := (SELECT IF(COUNT(*) = 0,
+  'ALTER TABLE `observed_event` ADD UNIQUE INDEX `uk_observed_event_trace_seq` (`TraceId`, `Seq`)',
+  'DO 0')
+  FROM information_schema.STATISTICS
+  WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'observed_event'
+    AND INDEX_NAME = 'uk_observed_event_trace_seq');
+PREPARE _p FROM @s; EXECUTE _p; DEALLOCATE PREPARE _p;

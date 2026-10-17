@@ -112,8 +112,9 @@ public class ObservedEventDao {
     private static final com.fasterxml.jackson.databind.ObjectMapper MAPPER =
             new com.fasterxml.jackson.databind.ObjectMapper();
 
-    /** 每行的 **13** 个占位符（顺序即下面 {@link #insertBatch} 里的 {@code params.add} —— 两处必须一起改）。 */
-    private static final String ROW_PLACEHOLDERS = "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+    /** 每行的 **14** 个占位符（顺序即下面 {@link #insertBatch} 里的 {@code params.add} —— 两处必须一起改）。
+     *  ⚠️ 块 7 收尾（㉓）在首位新增 {@code Seq}（A3 幂等键的另一半，见 {@link #insertBatch}）。 */
+    private static final String ROW_PLACEHOLDERS = "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
 
     /**
      * 回放要读的列清单（块 7 收尾 · 演练回放）。
@@ -162,12 +163,15 @@ public class ObservedEventDao {
             return 0;
         }
         StringBuilder values = new StringBuilder(events.size() * ROW_PLACEHOLDERS.length());
-        List<Object> params = new ArrayList<>(events.size() * 13);
+        List<Object> params = new ArrayList<>(events.size() * 14);
         for (ObservedEvent e : events) {
             if (values.length() > 0) {
                 values.append(", ");
             }
             values.append(ROW_PLACEHOLDERS);
+            // A3（㉓）：Seq 与 TraceId 组成幂等键。⚠️ 它是**合并环的进程内序号**，
+            // 不是 DB 自增；重投的同一条消息带着同一个 seq ⇒ 幂等成立（见下方 ON DUPLICATE KEY UPDATE）。
+            params.add(e.seq());
             params.add(clip(e.kind(), KIND_MAX));
             params.add(clip(e.severity(), SEVERITY_MAX));
             params.add(clip(e.title(), TITLE_MAX));
@@ -197,9 +201,14 @@ public class ObservedEventDao {
             params.add(new Timestamp(e.epochMilli()));
         }
         return jdbcClient.sql("INSERT INTO mall_management_sql.observed_event "
-                        + "(Kind, Severity, Title, ObjectType, ObjectId, TraceId, BatchId, "
+                        + "(Seq, Kind, Severity, Title, ObjectType, ObjectId, TraceId, BatchId, "
                         + "ActorId, ActorRole, DurationUs, RemainingStock, FieldsJson, OccurredAt) VALUES "
-                        + values)
+                        + values
+                        // ⚠️ 只对「唯一键冲突」做 no-op，**不吞其它错误**（数据截断 / 类型错 / 连接断仍然抛，
+                        //    由消费者重试→DLQ；那是 TD-20 的底线）。用 ON DUPLICATE KEY UPDATE 而不是
+                        //    INSERT IGNORE：后者会把非唯一键错误也静默成 0 行。
+                        //    「Id = Id」在 MySQL 里是合法的自赋值，冲突行受影响行数为 0。
+                        + " ON DUPLICATE KEY UPDATE Id = Id")
                 .params(params)
                 .update();
     }
