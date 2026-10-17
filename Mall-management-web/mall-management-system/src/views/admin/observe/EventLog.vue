@@ -245,16 +245,19 @@
             <span></span><span>时刻</span><span></span><span>等级</span><span>类</span><span class="ms">消息（点带 traceId 的行 ⇒ ⑤ 链路展开）</span>
           </div>
 
-          <ul id="ev-list" ref="listEl" class="ev-list" @scroll="onScroll">
+          <ul id="ev-list" ref="listEl" class="ev-list" @scroll.passive="onScroll">
             <li v-if="!streamRows.length" class="ev-empty">
               {{ first ? '还没收到第一拍。' : (events.length ? '当前筛选下一条也没有。点 ② 的「全部打开」还原。' : '本会话还没收到任何事件 —— 这台服务起来之后八个环一直没有写入点被触发。') }}
             </li>
+            <!-- 窗口化渲染的上下空白（高度 = 未渲染行的实测/估算和），用以撑住 scrollHeight。 -->
+            <li v-if="virtualOn" class="vpad" aria-hidden="true" :style="{ height: padTop + 'px' }"></li>
             <li
-              v-for="r in streamRows"
+              v-for="(r, vi) in vRows"
               :key="r.key"
+              :data-vidx="virtualOn ? vStart + vi : undefined"
               class="log-line"
               :class="[r.cls, { 'is-openable': !!r.traceId, sel: r.traceId && r.traceId === openedTrace, 'is-tree': r.tree }]"
-              :style="{ '--pc': r.pc, '--c': r.color, '--c2': r.sevColor }"
+              :style="{ '--pc': r.pc, '--c': r.color, '--sevc': r.sevColor }"
               :data-d="r.d"
               :role="r.traceId ? 'button' : undefined"
               :tabindex="r.traceId ? 0 : undefined"
@@ -309,6 +312,7 @@
                 </span>
               </span></span>
             </li>
+            <li v-if="virtualOn" class="vpad" aria-hidden="true" :style="{ height: padBottom + 'px' }"></li>
           </ul>
         </div>
 
@@ -640,9 +644,16 @@ import { apiLabel, lockLabel, cacheAreaLabel } from '../../../config/labels/api-
 const EVENT_CAP = 1000
 /** 本页自己累积的 `traces`（请求起止）上限。一次请求一行，比事件稀得多。 */
 const TRACE_CAP = 300
-/** ③ 的 DOM 行数上限。⚠️ 与 `EVENT_CAP` 分开：1000 行 DOM 每次追加都要重排，卡；
- *  而滚动窗口之外的行本来看不见 ⇒ 够填满几屏就行。 */
-const ROW_MAX = 200
+/** ③ 的窗口化渲染阈值（用户 2026-10-17 性能微调）：行数 **≤** 这个值 ⇒ 全量渲染
+ *  （小数据量窗口化没有收益，而且整表可见本身就是现有探针的判据）；**超过** ⇒ 只渲染
+ *  视口内 + 上下各 `OVERSCAN` 行，数据侧仍保留最近 `EVENT_CAP`（1000）条。
+ *  ⚠️ 行高不固定（1 行 22/28、2 行 36.78）⇒ 用「估算 + 实测回填」，见 `rowH`。 */
+const VIRTUAL_MIN = 200
+/** 窗口上下各多渲染几行：快速滚动时先有内容，再靠下一帧实测高度修正。 */
+const OVERSCAN = 5
+/** 未实测过的行高估值（px）。取 2 行态 34.78 + 上下 padding 2 ≈ 37 的近似；
+ *  实测回填后会立刻接近真实值。⚠️ 不写死成 `--row-h`：那只代表单行态。 */
+const EST_ROW_H = 36
 /** ① 折线的拍数（本页自攒的速率序列长度）。60 ≈ 一分钟。 */
 const RATE_CAP = 60
 /** ④ Top-N 榜取前几。 */
@@ -1255,11 +1266,102 @@ const filtered = computed(() => {
 })
 
 /**
- * ③ 的行：**时间正序**（tail -f 方向）→ 树形重建 → 封顶 `ROW_MAX`。
+ * ③ 的行：**时间正序**（tail -f 方向）→ 树形重建。
  * ⚠️ `events` 是「新的在前」存的，这里翻过来 —— 列表要「先发生的在最上面」，
  *    与之前的分页表**刻意相反**（那是「最新的在最上面」）。
+ * ⚠️ 数据侧不再截 200 行（`ROW_MAX` 已删）：截断改在 **DOM 侧**做窗口化（见下方
+ *    `VIRTUAL_MIN` / `vRows`）—— 1000 条数据都在，首屏只铺看得见的那几十行。
  */
-const streamRows = computed(() => buildStream(filtered.value.slice(0, ROW_MAX).reverse()))
+const streamRows = computed(() => buildStream(filtered.value.slice().reverse()))
+
+/* ── ③ 窗口化渲染（虚拟滚动）───────────────────────────────────────────────────
+   用户 2026-10-17 性能微调：1000 条数据在内存里，向上翻时掉帧。
+   · 渲染侧只铺「视口 + 上下各 `OVERSCAN` 行」；上下用 `vpad` 空白撑开 scrollHeight。
+   · 行高可变（1 行 / 2 行折行、两档密度）⇒ 不写死固定高：未测过的行给 `EST_ROW_H`，
+     渲染后用 `.ln` 的 scrollHeight（夹到 2 行）回填 `rowH`，再重算窗口。
+   · 滚动事件走 `@scroll.passive` + rAF 合帧；**不劫持滚动、不做平滑**
+     （平滑滚动在日志列表里只会带来粘滞感）。
+   · 行数 ≤ `VIRTUAL_MIN` 时全量渲染 —— 小数据量下窗口化没有收益，整表可见本身就是判据。 */
+const rowH = new Map()          // key → 实测行高（px）；key 稳定 ⇒ 跨重渲染保留
+const vStart = ref(0)
+const vEnd = ref(VIRTUAL_MIN + OVERSCAN * 2)
+let winRaf = 0
+
+const virtualOn = computed(() => streamRows.value.length > VIRTUAL_MIN)
+/** 前缀和：`off[i]` = 第 i 行上边缘。每次行数 / 实测高变化重算（≤1000 行，成本可忽略）。 */
+const rowOffsets = computed(() => {
+  const rows = streamRows.value
+  const off = new Array(rows.length + 1)
+  off[0] = 0
+  for (let i = 0; i < rows.length; i++) off[i + 1] = off[i] + (rowH.get(rows[i].key) || EST_ROW_H)
+  return off
+})
+const vRows = computed(() => (virtualOn.value ? streamRows.value.slice(vStart.value, vEnd.value) : streamRows.value))
+const padTop = computed(() => (virtualOn.value ? rowOffsets.value[vStart.value] : 0))
+const padBottom = computed(() => {
+  if (!virtualOn.value) return 0
+  const n = streamRows.value.length
+  return rowOffsets.value[n] - rowOffsets.value[Math.min(vEnd.value, n)]
+})
+
+/** 二分：前缀和里找第一个「上边缘 > y」的行。 */
+function rowAtY(off, n, y) {
+  let lo = 0
+  let hi = n
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1
+    if (off[mid + 1] <= y) lo = mid + 1
+    else hi = mid
+  }
+  return lo
+}
+function updateWindow() {
+  const el = listEl.value
+  if (!el || !virtualOn.value) return
+  const off = rowOffsets.value
+  const n = streamRows.value.length
+  const top = el.scrollTop
+  const bottom = top + (el.clientHeight || 1)
+  const s = Math.max(0, rowAtY(off, n, top) - OVERSCAN)
+  const e = Math.min(n, rowAtY(off, n, bottom) + OVERSCAN + 1)
+  if (s !== vStart.value) vStart.value = s
+  if (e !== vEnd.value) vEnd.value = e
+}
+/** 渲染后回填实测行高。⚠️ 量「夹到 2 行」的高度：hover 展开时 `.ln` 的盒子会变高，
+ *  但 `scrollHeight` 仍是全文高度 ⇒ `Math.min(·, 2 × lineHeight)` 取回默认态行高。 */
+function measureRows() {
+  const el = listEl.value
+  if (!el) return
+  const rows = streamRows.value
+  let changed = false
+  for (const li of el.querySelectorAll('.log-line[data-vidx]')) {
+    const i = Number(li.dataset.vidx)
+    const row = rows[i]
+    const ln = li.querySelector('.ln')
+    if (!row || !ln) continue
+    const lh = parseFloat(getComputedStyle(ln).lineHeight) || 17.4
+    const h = Math.min(ln.scrollHeight, 2 * lh) + 2   // +2 = `.log-line` 上下各 1px padding
+    const prev = rowH.get(row.key)
+    if (prev === undefined || Math.abs(prev - h) > 0.5) { rowH.set(row.key, h); changed = true }
+  }
+  if (changed) updateWindow()
+}
+/** 滚动 / 数据变化后的合帧入口：先按当前 scrollTop 定窗口，等 DOM 铺完再量高度。 */
+function scheduleWindow() {
+  if (winRaf) return
+  winRaf = requestAnimationFrame(() => {
+    winRaf = 0
+    updateWindow()
+    nextTick(measureRows)
+  })
+}
+watch(streamRows, () => nextTick(() => {
+  if (autoBottom) scrollBottom()
+  updateWindow()
+  scheduleWindow()
+}))
+// 密度只改 `.lv` 等格子的 min-height ⇒ 行高变了，旧实测值作废。
+watch(density, () => { rowH.clear(); nextTick(() => { updateWindow(); scheduleWindow() }) })
 
 /* ── 备忘 · 缓存噪声：**本轮刻意不治理**（用户 2026-10-16 裁定丁）────────────────────
    现象：现状下 ③ 常被「缓存命中」刷屏 —— 实测那 200 行里 **76%（152 条）是缓存类**。
@@ -1474,6 +1576,8 @@ function onScroll() {
   const el = listEl.value
   if (!el) return
   autoBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 24
+  // 窗口化：只改「渲染哪一段」，不碰 scrollTop —— 滚动始终由浏览器原生处理。
+  scheduleWindow()
 }
 function scrollBottom() {
   const el = listEl.value
@@ -1653,6 +1757,7 @@ watch(cur, closeTrace)
 onBeforeUnmount(() => {
   closeStream()
   if (tickTimer) clearInterval(tickTimer)
+  if (winRaf) cancelAnimationFrame(winRaf)
   clearTimeout(exportNoteTimer)
 })
 </script>
@@ -2292,6 +2397,9 @@ onBeforeUnmount(() => {
   overflow: hidden;
   padding-left: 2ch;
   text-indent: -2ch;
+  /* 渲染隔离（用户 2026-10-17 性能微调）：单行的重排 / 重绘不扩散到整张表。
+     ⚠️ 与下面的窗口化一起用 —— `contain` 只能把「一行」的代价压小，不能减少行数。 */
+  contain: layout paint style;
 }
 /* hover（或键盘聚焦）⇒ **展开全文**：只解除 2 行上限（收尾批 2 起技术字段已常显，
    这里不再兼职「显不显示」）。纯 CSS，没有 JS 测量 / `is-clip` 类。 */
@@ -2323,6 +2431,16 @@ onBeforeUnmount(() => {
   list-style: none;
   padding: 0;
   margin: 0;
+  /* 告诉合成器这个容器就是滚动主体（用户 2026-10-17 性能微调）。
+     ⚠️ 只写在**滚动容器**上；不要给每行加 `will-change: transform` —— 那是图层爆炸。 */
+  will-change: scroll-position;
+}
+/* 窗口化渲染的上下空白：只撑高度，不画任何东西。 */
+.ev-list .vpad {
+  display: block;
+  margin: 0;
+  padding: 0;
+  pointer-events: none;
 }
 /* ── 滚动条：压窄 + 淡色（用户 2026-10-16「滚动条太厚」）──────────────────────────
    ⚠️ **核实结论：上一轮没落地。** `git log -S "webkit-scrollbar"` 对观察目录为空 ——
@@ -2457,14 +2575,19 @@ onBeforeUnmount(() => {
   width: 34px;
   margin-right: 8px;
   font-size: var(--fs-xs);
-  color: var(--c2, var(--ink-3));
+  /* ⚠️ 行内喂的是 `--sevc`，**不是** `--c2`：`--c2` 是色板里的「锁」色，两套变量曾经撞名
+     ⇒ 锁行的 `--c: var(--c2)` 会解析成该行的严重度色（INFO 青 / WARN 橙 / ERROR 红），
+     同一个「锁」随等级变色。改名后类色与严重度互不干扰（用户 2026-10-17 微调时量出来的）。 */
+  color: var(--sevc, var(--ink-3));
   white-space: nowrap;
 }
 .log-line .md {
   display: inline-block;
   width: 40px;
   margin-right: 8px;
-  color: var(--ink-2);
+  /* 类名与图标**同色**（用户 2026-10-17 微调）：`--c` 由行上的内联样式喂 = `kindColor(kind)`。
+     请求行（`.log-line.req`）在下面单独特判成 `--ink`，不受这条影响。 */
+  color: var(--c, var(--ink-2));
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -2489,6 +2612,11 @@ onBeforeUnmount(() => {
 .log-line .lv,
 .log-line .md {
   line-height: 1;
+  /* ⚠️ `text-indent` **会被继承**：`.ln` 的悬挂缩进 -2ch 会进到每个 inline-block 里，
+     把它们的首行整体左移（实测 -14.4px）—— 于是 `.lv` 的「INFO」压到图标上、
+     `.pre` 的树形前缀和 `.tm` 的时刻也各自左移。五个格子必须逐个归零。
+     （`.md` 在收尾批 2 已经单独归过零；这里统一收口，避免再漏下一格。） */
+  text-indent: 0;
 }
 .log-line.req .md {
   color: var(--ink);

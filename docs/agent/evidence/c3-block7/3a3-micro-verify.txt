@@ -1,0 +1,117 @@
+块 7 · 3a.3 日志页「最后微调」证据（2 个 bug + 1 项性能）
+================================================================================
+日期：2026-10-17
+分支：feat/c3-admin-block7
+基线：HEAD 6e75a69（3a.3 收尾批 2）
+本次改动文件：
+  · Mall-management-web/mall-management-system/src/views/admin/observe/EventLog.vue
+  · scripts/probes/probe-b7a3-eventlog-rewrite.mjs（+2 条断言）
+  · scripts/probes/probe-b7a3-eventlog-virtual.mjs（新增，23 条断言）
+
+--------------------------------------------------------------------------------
+一、③ 事件流「等级」图标与 INFO 重叠（Bug 1）
+--------------------------------------------------------------------------------
+根因（量出来的，不是猜的）：
+  `.ln` 为了树形前缀做了悬挂缩进 `padding-left: 2ch; text-indent: -2ch`
+  （EventLog.vue:2399-2400）。`text-indent` **会被继承**，而 `.pre / .tm /
+  .ic / .lv / .md` 全是 inline-block（自带块容器）⇒ 每个格子里的首行文字都被
+  再左移 2ch ≈ 14.4px，盒子却不动。
+  修复前实测（_work/inspect-3a3-icons-and-md.mjs）：
+    .lv  文本左 628.0 / 格左 642.4 / 差 -14.39px / textIndent "-14.4px"
+  也就是说：`.ic` 的 margin-right 本来就有 8px，「间距」并不缺；缺的是 INFO
+  文字没有从自己的格子左缘起排，被悬挂缩进拽到了图标上 ⇒ 视觉重叠 `🗄INFO`。
+
+修复：
+  五个格子统一 `line-height: 1; text-indent: 0`（EventLog.vue:2609-2620 的组合
+  选择器；`.md` 的 text-indent 在收尾批 2 已单独归零，这里并入同一条规则）。
+  副作用是好的：树形前缀列与时间列的首字也一并归位（此前同样被左移）。
+
+修复后实测：
+  · ③ 图标右缘 634.4 → INFO 文字左缘 642.4 = 间距 8px（用户要求 6-8px）✓
+  · 文本左 642.4 / 格左 642.4 / 差 0 / textIndent "0px" ✓
+  · ②/③/④/⑤ 六处「图标+文字」全部 8px（主探针 ㉔8 一条断言全收）。
+
+--------------------------------------------------------------------------------
+二、③ 事件流「类」列没高亮（Bug 2）
+--------------------------------------------------------------------------------
+修复：
+  `.md` 的 color 由 `var(--ink-2)`（一律中性灰）改为 `var(--c, var(--ink-2))`
+  （EventLog.vue:2584-2590）。`--c` 由行上的内联样式喂，值 = `kindColor(kind)`。
+
+修复后实测（九类，图标色 === 类名色）：
+  缓存 rgb(47,111,237)   锁 rgb(255,106,0)    订单 rgb(34,197,94)
+  库存 rgb(245,158,11)   审计 rgb(168,85,247)  通知 rgb(6,182,212)
+  敏感词 rgb(239,68,68)  身份 rgb(132,204,22)  防护 rgb(236,72,153)
+  认不出的类回落 `--ink-3` 中性灰（不冒充八色之一）。
+
+【附带修掉一个真缺陷 —— 探针读回时量出来的】
+  行内严重度变量原来叫 `--c2`（EventLog.vue 旧行 260），而色板里 `--c2` 正是
+  「锁」的颜色。CSS 自定义属性在**同一个元素**上解析 ⇒ 锁行的
+  `--c: var(--c2)` 吃到的是本行的**严重度色**：INFO 青 #38bdf8 / WARN 橙 /
+  ERROR 红，同一个「锁」随等级变色。
+  修复：行内改名 `--sevc`（EventLog.vue:260），`.lv` 改 `var(--sevc, var(--ink-3))`
+  （EventLog.vue:2581）。
+  实测：锁 = rgb(255,106,0)，且在 info / warn / error 三档下 **同类同色**
+  （主探针 ㉔8 新增反向断言：每类覆盖 3 种等级、颜色只有 1 种）。
+  ⚠️ 这条故意写成「同类同色」而不是「锁 = #ff6a00」：只钉颜色值的话，把实现写死
+  成常量也能全绿；钉「不随等级变」才真正封住撞名这类失效。
+
+--------------------------------------------------------------------------------
+三、滚动性能 —— 窗口化渲染（虚拟滚动）
+--------------------------------------------------------------------------------
+实现（手写，仓里没有 vue-virtual-scroller，也没有引入新依赖）：
+  · 数据侧不动：`events` 仍保留最近 EVENT_CAP = 1000 条。
+  · 渲染侧只铺「视口 + 上下各 OVERSCAN 行」：
+      VIRTUAL_MIN = 200  行数不超过阈值 ⇒ 全量渲染（小数据量窗口化没收益）
+      OVERSCAN    = 5    上下各多渲染 5 行
+      EST_ROW_H   = 36   未实测过的行高估值；测过的行用 `.ln.scrollHeight`
+                         回填（钳到 2 × lineHeight，对应 2 行截断），两档密度切换
+                         时清空重测（EventLog.vue:649-656、1273-1340）
+  · 偏移表 `rowOffsets` 前缀和 + 二分找首个可见行；上下各一个 `.vpad` 空白
+    `<li>` 撑住 scrollHeight（EventLog.vue:253、315；样式见 :2439-2444）。
+  · 滚动监听 `@scroll.passive`（EventLog.vue:248），rAF 合帧，不劫持、不做平滑。
+  · 每行 `.ln` 加 `contain: layout paint style`（EventLog.vue:2402；computed
+    归一化为 `content`）。
+  · 滚动容器 `will-change: scroll-position`；**没有**给整行加
+    `will-change: transform`；**没有** `scroll-behavior: smooth`、没有 rAF 劫持。
+
+1000 条实测（probe-b7a3-eventlog-virtual.mjs，自接管 Fetch 喂一帧 1000 事件）：
+  · 数据侧「本页已收 1,000 条」；DOM 只渲染窗口：
+      初始停底：19 行，idx 981–999，顶占位 35316px，底占位 0
+      滚到顶  ：20 行，idx 0–19，顶占位 0，底占位 35295px
+      滚到中段：25 行，idx 495–519，顶 17818 / 底 17295
+    scrollHeight 36015px、clientHeight 508px（1000 条总高量级）
+  · 滚动帧率（从 70% 处向上连续滚动 2 秒，rAF 帧间隔）：
+      122 帧 · p50 16.7ms · p95 16.7ms · max 16.8ms · >33ms 0 帧（≈60fps）
+    ⚠️ DevTools 的 Rendering → Frame Rendering Stats 是 UI 面板，CDP 没有对应
+    指令；这里量的是同一时段的 rAF 帧间隔分布，作为同一件事的代理量。
+  · contain / passive / 无平滑 / will-change 四条组合判据全绿。
+
+--------------------------------------------------------------------------------
+判据汇总
+--------------------------------------------------------------------------------
+1. 主探针：node scripts/probes/probe-b7a3-eventlog-rewrite.mjs
+   ⇒ 187 项 / 0 失败（含 ③ 间距 8px、INFO 文本左差 0、九类同色、
+      同类不随等级变色、161 行 ≤ 200 不启用窗口化、contain=content 等）
+2. 窗口化探针：node scripts/probes/probe-b7a3-eventlog-virtual.mjs
+   ⇒ 23 项 / 0 失败（1000 条窗口、占位、帧率、contain/passive/无平滑）
+3. eslint src/views/admin/observe/EventLog.vue ⇒ EXIT=0
+4. 两档手验（前端 8080 × 后端 dev 8088）：
+   正常模式 10 行真流；模拟日常 68 行（假帧，含 fields/actor/src/耗时）
+5. refs 收口：
+   · before 用 `git worktree add _work/wt-before-3a3 6e75a69` 取 HEAD 树，
+     扫描产物只落 _work/（不进 docs/）。
+   · 阳性对照先跑：临时文件插一行 ⇒ 恰好 1 对 LOST+NEW（token 未变，仅行号
+     1→2），证明扫描器能看见行号漂移。
+   · before 5217 条 / after 5217 条，(引用者, token) 全量 diff = 0 行。
+   · EventLog.vue 在互引网络里是 0 入站 + 0 出站（文件内没有任何 `文件:行号`
+     写法），所以本次零漂移是真结果，不是「没扫到」。
+   · 临时工作树已 `git worktree remove`。
+
+截图（同目录）：
+  · 3a3-mt-zoom-icon-info.png     —— 6× 放大：图标 → 8px → INFO；类名蓝色
+  · 3a3-mt-handverify-demo.png    —— 模拟日常 68 行：九类颜色 + 锁橙色稳定
+  · 3a3-mt-handverify-normal.png  —— 正常模式真流
+  · 3a3-mt-main-probe.png         —— 主探针全页截图
+  · 3a3-mt-virtual-top.png        —— 1000 条滚到顶：DOM 20 行
+  · 3a3-mt-virtual-bottom.png     —— 1000 条滚到底：DOM 19 行，末行第 1000 条

@@ -1635,11 +1635,85 @@ try {
   gaps.push(await gapProbe('.ev-bars:not(.sev) .ev-bar:not(.is-fac) .nm svg', null, '④ 类计数九条（图标 → 类名）'))
   gaps.push(await gapProbe('.ev-bars.sev .ev-bar .nm svg', null, '④ 严重度三条（图标 → 等级文字）'))
   gaps.push(await gapProbe('.chain-i:not(.is-ends):not(.is-miss) .d .d-hd svg', '.chain-i:not(.is-ends):not(.is-miss) .d .d-hd b', '⑤ 链里（图标 → 类名）'))
+  // 用户 2026-10-17 微调：③ 行内也有「图标 → 等级 INFO」，上一轮漏量了这一处。
+  gaps.push(await gapProbe('.log-line:not(.req) .ic', '.log-line:not(.req) .lv', '③ 事件流（图标 → 等级 INFO）'))
   const gapOK = (g) => !!g && typeof g.间距 === 'number' && g.间距 >= 6 && g.间距 <= 8
-  ok('㉔8 五处「图标 + 文字」的**实测间距都在 6–8px**（② 类清单 / ② 严重度 / ④ 类计数 / ④ 严重度 / ⑤ 链）',
+  ok('㉔8 六处「图标 + 文字」的**实测间距都在 6–8px**（② 两处 / ③ 一处 / ④ 两处 / ⑤ 一处）',
     gaps.every(gapOK), gaps)
-  ok('㉔8 那五处**不是同一个元素量了五遍**（五条都拿到了数、且都有各自的「谁」标签）',
-    gaps.length === 5 && gaps.every((g) => typeof g.谁 === 'string'), gaps.map((g) => g.谁))
+  ok('㉔8 那六处**不是同一个元素量了六遍**（六条都拿到了数、且都有各自的「谁」标签）',
+    gaps.length === 6 && gaps.every((g) => typeof g.谁 === 'string'), gaps.map((g) => g.谁))
+  // ⚠️ 关键回归：盒子上有 8px 间距 ≠ INFO 没压到图标上。`.ln` 的 `text-indent: -2ch` 会被
+  //    inline-block 继承 ⇒ `.lv` 里的文字整体左移（实测 -14.4px），盒子仍停在原地。
+  //    所以这里量的是**文字墨迹**的起点，不是 `.lv` 的盒子左缘。
+  const lvInk = await b.evalJS(`(() => {
+    const lv = document.querySelector('.log-line:not(.req) .lv')
+    if (!lv) return null
+    const box = lv.getBoundingClientRect()
+    const rg = document.createRange()
+    rg.selectNodeContents(lv)
+    const ink = rg.getBoundingClientRect()
+    return { 文本左: +ink.left.toFixed(1), 格左: +box.left.toFixed(1), 差: +(ink.left - box.left).toFixed(1), textIndent: getComputedStyle(lv).textIndent }
+  })()`)
+  ok('㉔8 ③ 的「INFO」从格子左缘起排（text-indent 归零）—— 否则会被悬挂缩进拉到图标上',
+    !!lvInk && Math.abs(lvInk.差) <= 1 && lvInk.textIndent === '0px', lvInk)
+  // 用户 2026-10-17 微调：③ 的类名文字与图标同色。
+  const mdColor = await b.evalJS(`(() => {
+    const rows = [...document.querySelectorAll('.log-line:not(.req)')].filter((r) => r.querySelector('.ic svg') && r.querySelector('.md'))
+    return rows.slice(0, 9).map((r) => ({
+      类: r.querySelector('.md').textContent,
+      图标色: getComputedStyle(r.querySelector('.ic')).color,
+      类名色: getComputedStyle(r.querySelector('.md')).color,
+      c: r.style.getPropertyValue('--c'),
+    }))
+  })()`)
+  ok('㉔8 ③ 类名文字与图标**同色**（缓存蓝 / 订单绿 / 锁黄…都取自行上的 `--c`，不再一律 `--ink-2`）',
+    mdColor.length > 0 && mdColor.every((x) => x.图标色 === x.类名色), mdColor)
+  // 反向半边：类色必须只由「类」决定，**不能随严重度变**。
+  //   ⚠️ 这一条是 2026-10-17 量出来的真缺陷：行内严重度变量原来叫 `--c2`，与色板的「锁」
+  //      同名 ⇒ 锁行的 `--c: var(--c2)` 自己吃自己，INFO 青 / WARN 橙 / ERROR 红。
+  //      「图标色 === 类名色」在两边一起错时是全绿的，所以要单独钉「同类同色」。
+  const kindStable = await b.evalJS(`(() => {
+    const out = {}
+    for (const r of document.querySelectorAll('.log-line:not(.req)')) {
+      const md = r.querySelector('.md')
+      const lv = r.querySelector('.lv')
+      const ic = r.querySelector('.ic')
+      if (!md || !lv || !ic || !ic.querySelector('svg')) continue
+      const k = (md.textContent || '').trim()
+      if (!out[k]) out[k] = []
+      out[k].push({ 等级: (lv.textContent || '').trim(), 色: getComputedStyle(ic).color })
+    }
+    return Object.keys(out).map((k) => ({
+      类: k,
+      等级数: new Set(out[k].map((x) => x.等级)).size,
+      色数: new Set(out[k].map((x) => x.色)).size,
+      色: out[k][0].色,
+    }))
+  })()`)
+  ok('㉔8 同一类名不随等级变色（至少一个类覆盖两种等级，且每类只有一种色）',
+    kindStable.some((x) => x.等级数 >= 2) && kindStable.every((x) => x.色数 === 1), kindStable)
+
+  // ── ㉔11 性能微调（用户 2026-10-17）：渲染隔离 + 小数据量不走窗口化 ───────────────
+  //   ⚠️ 窗口化本身在 `probe-b7a3-eventlog-virtual.mjs` 里用 1000 条专测；
+  //      这里只钉「161 行 ≤ 200 阈值 ⇒ 仍全量渲染」与几条 CSS 默认值，防止把探针的判据基础改掉。
+  const perfCss = await b.evalJS(`(() => {
+    const ln = document.querySelector('.log-line .ln')
+    const list = document.getElementById('ev-list')
+    return {
+      contain: ln ? getComputedStyle(ln).contain : null,
+      vpad: document.querySelectorAll('.ev-list .vpad').length,
+      vidx: document.querySelectorAll('.log-line[data-vidx]').length,
+      rows: document.querySelectorAll('.log-line').length,
+      scrollBehavior: getComputedStyle(list).scrollBehavior,
+      willChange: getComputedStyle(list).willChange,
+    }
+  })()`)
+  ok('㉔11 每行 `.ln` 开了渲染隔离（computed 归一化为 `content` = layout + paint + style）',
+    perfCss.contain === 'content', perfCss.contain)
+  ok('㉔11 161 行 ≤ 阈值 200 ⇒ **不启用**窗口化（无 vpad、无 data-vidx；整表仍在 DOM 里）',
+    perfCss.vpad === 0 && perfCss.vidx === 0 && perfCss.rows === 161, perfCss)
+  ok('㉔11 滚动容器：没有原生平滑滚动 + 有 `will-change: scroll-position`',
+    (perfCss.scrollBehavior || 'auto') === 'auto' && /scroll-position/.test(perfCss.willChange || ''), perfCss)
   await zoomShot('.ev-rail .rows', `${WORK}zoom-3a3-d-rail.png`, { 宽: 210, 高: 120, scale: 5 })
   await zoomShot('.ev-bars', `${WORK}zoom-3a3-d-bars.png`, { 宽: 300, 高: 150, scale: 5 })
 
