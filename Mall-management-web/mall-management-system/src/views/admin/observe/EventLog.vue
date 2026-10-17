@@ -2743,6 +2743,12 @@ onBeforeUnmount(() => {
   display: flex;
   flex-direction: column;
   min-height: 0;
+  /* ⚠️ 2026-10-17 修复「⑤ 链路展开与左栏文字重叠」：抽屉一拉开，`.ev-body` 只剩一半高，
+     而本栏底部的口径 / 严重度 / 「全部打开」是 `flex: 0 0 auto`（压不下去）。栏高 292px
+     时子块合计 361px，`overflow` 默认 `visible` ⇒ 直接画到 ⑤ 的标题与链路上。
+     这里给整栏一个滚动兜底：先保证**不出界**；空间不足时栏内可滚，栏底控件仍够得着。 */
+  overflow-y: auto;
+  overflow-x: hidden;
 }
 .ev-rail .rl {
   flex: 0 0 auto;
@@ -3119,6 +3125,9 @@ onBeforeUnmount(() => {
    ⚠️ 配色不新造：`--line-2`（#3a4a63）当滑块、hover 换 `--ink-3`（#7b8aa3），
       对 `.ev-rail` 的底（`--surface-2` #1f2a3f）约 1.6:1 / 3.2:1 —— 判据是
       「滚动条不该是视觉焦点」，所以**默认态刻意低于 3:1**（那是给文字/图标定的线），hover 才亮起来。 */
+/* ⚠️ `.ev-rail` 也在这里：它是 2026-10-17 新增的**兜底**滚动容器（抽屉拉开、栏高不足时
+   整栏滚动），不配这一条会退化成 Chromium 默认的 15px 粗条，比里面的行清单还显眼。 */
+.ev-rail::-webkit-scrollbar,
 .ev-rail .rows::-webkit-scrollbar,
 .ev-list::-webkit-scrollbar,
 .ev-live::-webkit-scrollbar,
@@ -3126,12 +3135,14 @@ onBeforeUnmount(() => {
   width: 7px;
   height: 7px;
 }
+.ev-rail::-webkit-scrollbar-track,
 .ev-rail .rows::-webkit-scrollbar-track,
 .ev-list::-webkit-scrollbar-track,
 .ev-live::-webkit-scrollbar-track,
 .chain::-webkit-scrollbar-track {
   background: transparent;
 }
+.ev-rail::-webkit-scrollbar-thumb,
 .ev-rail .rows::-webkit-scrollbar-thumb,
 .ev-list::-webkit-scrollbar-thumb,
 .ev-live::-webkit-scrollbar-thumb,
@@ -3139,12 +3150,14 @@ onBeforeUnmount(() => {
   background: var(--line-2);
   border-radius: 4px;
 }
+.ev-rail::-webkit-scrollbar-thumb:hover,
 .ev-rail .rows::-webkit-scrollbar-thumb:hover,
 .ev-list::-webkit-scrollbar-thumb:hover,
 .ev-live::-webkit-scrollbar-thumb:hover,
 .chain::-webkit-scrollbar-thumb:hover {
   background: var(--ink-3);
 }
+.ev-rail::-webkit-scrollbar-corner,
 .ev-rail .rows::-webkit-scrollbar-corner,
 .ev-list::-webkit-scrollbar-corner,
 .ev-live::-webkit-scrollbar-corner,
