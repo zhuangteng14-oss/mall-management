@@ -23,7 +23,7 @@
           <!-- ⚠️ 统计口径（2026-10-17）：这个数是**压缩前的原始事件**再按时间过一遍的结果，
                读 `rawWindow`（原始台账 ≤ RAW_CAP），**不是**展示窗口 `events`（≤ EVENT_CAP）。
                聚合开关只影响 ③ 列表怎么画，这个数勾不勾都一样。 -->
-          <div class="cell" :title="`统计口径：范围内原始事件 ${fmtInt(rawWindow.n)} 条（压缩前，保留最近 ${RAW_CAP} 条）；展示窗口 ${fmtInt(events.length)} 条（上限 ${EVENT_CAP}，同类合并开关只影响列表）`">
+          <div class="cell" :title="`统计口径：范围内原始事件 ${fmtInt(rawWindow.n)} 条（压缩前，保留最近 ${RAW_CAP} 条）；列表与统计同源（先筛选、再聚合、最后窗口化）；实时展示窗口 ${fmtInt(events.length)} 条（上限 ${EVENT_CAP}）`">
             <b>{{ fmtInt(rawWindow.n) }}</b>
             <span>范围内原始事件（上限 {{ RAW_CAP }}）</span>
           </div>
@@ -284,7 +284,7 @@
 
           <ul id="ev-list" ref="listEl" class="ev-list" @scroll.passive="onScroll">
             <li v-if="!streamRows.length" class="ev-empty">
-              {{ first ? '还没收到第一拍。' : (events.length ? '当前筛选下一条也没有。点 ② 的「全部打开」还原。' : '本会话还没收到任何事件 —— 这台服务起来之后八个环一直没有写入点被触发。') }}
+              {{ first ? '还没收到第一拍。' : (hasAnyRaw ? '当前筛选下一条也没有。点 ② 的「全部打开」还原。' : '本会话还没收到任何事件 —— 这台服务起来之后八个环一直没有写入点被触发。') }}
             </li>
             <!-- 窗口化渲染的上下空白（高度 = 未渲染行的实测/估算和），用以撑住 scrollHeight。 -->
             <li v-if="virtualOn" class="vpad" aria-hidden="true" :style="{ height: padTop + 'px' }"></li>
@@ -713,9 +713,10 @@ import { apiLabel, lockLabel, cacheAreaLabel } from '../../../config/labels/api-
 
 /** **展示窗口**上限（2026-10-17 反压改造：1000 → 200；同日统计解耦后语义更明确）。
  *  ⚠️ 必须有：SSE 每秒推若干条，不封顶跑一晚上就是几万条。
- *  ⚠️ 它只限制 `W.events`（③ 列表能显示的行数）：超出的当场丢弃，不进 Vue 的响应式图。
- *     **统计不读它** —— 统计读 `RAW`（≤ `RAW_CAP`，压缩前的原始台账）。
- *     ⇒ 列表最多 200 行，但「范围内原始事件 / 失败率 / 拦截率」可以是几百上千。 */
+ *  ⚠️ 它限制 `W.events`（实时展示窗口，超出的当场丢弃，不进 Vue 的响应式图）。
+ *     **统计和 ③ 列表都不读它** —— 两者都读 `RAW`（≤ `RAW_CAP`，压缩前的原始台账）。
+ *  ⚠️ 聚合关闭时，③ 也从「筛完的 RAW」里按 `ts/seq` 取**最新** 200 条逐条显示
+ *     （纯数据侧上限；DOM 侧再由窗口化收窄）；聚合开启时一行代表 N 条，不截断。 */
 const EVENT_CAP = 200
 
 /** 单次冲刷**安全渲染条数**（2026-10-17 用 `scripts/probes/c3b7-3a4d-backpressure.mjs` 实测）。
@@ -734,7 +735,7 @@ const aggStats = { flushes: 0, raw: 0, view: 0, lastRaw: 0, lastView: 0, aggrega
 const TRACE_CAP = 300
 /** ③ 的窗口化渲染阈值（用户 2026-10-17 性能微调）：行数 **≤** 这个值 ⇒ 全量渲染
  *  （小数据量窗口化没有收益，而且整表可见本身就是现有探针的判据）；**超过** ⇒ 只渲染
- *  视口内 + 上下各 `OVERSCAN` 行，数据侧仍保留最近 `EVENT_CAP`（200）条。
+ *  视口内 + 上下各 `OVERSCAN` 行；数据侧行数由 `streamRows` 决定（聚合开启时可覆盖整本 RAW）。
  *  ⚠️ 行高不固定（1 行 22/28、2 行 36.78）⇒ 用「估算 + 实测回填」，见 `rowH`。 */
 const VIRTUAL_MIN = 200
 /** 窗口上下各多渲染几行：快速滚动时先有内容，再靠下一帧实测高度修正。
@@ -798,7 +799,7 @@ const FACILITY_TIP = '后端面待落地：这一类在 Java 侧一个写入点�
  *  重做成窗口形态时被压掉了散文；现在同时留在 ① 本常量（= ② 栏底那行小字的 `title`）
  *  ② 本文件顶部那段注释 ③ `_work/3a3/日志页-覆盖与边界-全文.md`。 */
 const COVERAGE_FULL = [
-  '① 事件是内存里的、有界且会被覆盖：八个源环各留最近 512 条，合并环再留最近 512 条；本页视图只留最近 200 条（100ms 批量冲刷，冻结时先进缓冲池）。⇒「窗口内」是本页能看到的全部，不是历史总量。',
+  '① 事件是内存里的、有界且会被覆盖：八个源环各留最近 512 条，合并环再留最近 512 条；本页统计台账留最近 8192 条，③ 列表与统计同源（先筛选、再聚合、最后窗口化；聚合关闭时逐条最多 200 行）。⇒「窗口内」是本页能看到的全部，不是历史总量。',
   '② 首帧可能很大：冷启动时八个环可能各自攒了一屏，首帧会把合并环留得下的最后 512 条一次送出（页面按 200 条封顶）。之后每拍只送真正新发生的（正常是个位数）。',
   '③ 规则表在后端：严重度那三档（info / warn / error）由后端 severityOf 一处判定，本页只负责把 tag 画成人话 —— 前端不重推一遍判据。',
   '④ 对象列八类不是同一种东西：锁/缓存/通知取各自的键、订单取订单号、库存取 SKU、审计取对象类型 + #Id、敏感词取命中的词、身份取请求路径（逐类口径见 config/labels/observe-labels.js 的 OBJECT_FIELD_LABEL）。',
@@ -918,6 +919,10 @@ const tracesById = reactive(new Map())
  *  ⚠️ 2026-10-17 起是 `ref`：模板要按它显示「已冻结」并切按钮文案（原先是普通变量，
  *     视图层读不到它的变化）。 */
 const autoBottom = ref(true)
+/** 一次性标记：吞掉「筛选复位把 scrollTop 拉回 0」产生的那次 scroll 事件。
+ *  ⚠️ 不吞的话 `onScroll` 会把它当成「用户上滚」⇒ `autoBottom = false` ⇒ `frozen` 让列表
+ *     停止并入新事件。见 `onScroll` 与筛选 watch（2026-10-17）。 */
+let skipScrollAutoBottom = false
 const pageActive = ref(true)   // KeepAlive 失活 ⇒ 暂停 UI 刷新（数据照收，见 onFrame / 门控 watch）
 
 /* ── 数据缓冲池 + 帧同步冲刷（2026-10-17 · 800 QPS 渲染雪崩的架构级修复）────────────────
@@ -1351,13 +1356,20 @@ const rangeBounds = computed(() => {
   const w = RANGE_MS[range.value]
   return { from: nowMs.value - w, to: Infinity }
 })
-/** ⚠️ **②③④ 全部口径统一挂在 `ranged` 上**，不再直接读 `events`：类计数、严重度、错误率、
- *  Top-N 榜、③ 的列表、读数的「范围内合计」都是同一批行 —— 一处一处各读各的，迟早会算出
- *  「列表里 9 条、图例里 159 条」这种对不上的数（比一个过时的数更难查）。 */
+/** ⚠️ **②③④ 全部口径统一挂在 `ranged` 上**：类计数、严重度、错误率、Top-N 榜、③ 的列表、
+ *  读数的「范围内合计」都是同一批行 —— 一处一处各读各的，迟早会算出「列表里 9 条、图例里
+ *  159 条」这种对不上的数（比一个过时的数更难查）。
+ *  ⚠️ 2026-10-17 用户裁定：数据源必须是 **RAW 原始台账**，不是展示窗口 `events`（≤200 条）。
+ *  统计读 RAW、列表读 `events` 时，WARN 一旦被后来的 INFO 挤出 200 条窗口，点「≥ WARN」就会
+ *  出现「左下角统计警告 199、列表一条也没有」—— 两侧不同源，不是聚合顺序的问题。 */
 const ranged = computed(() => {
+  void rawVer.value
   const b = rangeBounds.value
-  if (!b) return events.value
-  return events.value.filter((e) => e.ts >= b.from && e.ts <= b.to)
+  const all = RAW[cur.value].events
+  // ⚠️ 必须返回**新数组**（`all` 是普通数组、原地追加）：返回值恒为同一个引用时，Vue 的
+  //    computed 缓存会认为「值没变」⇒ 依赖它的 `filtered` / ⑤ 永远停在首帧的空数组上。
+  if (!b) return all.slice()
+  return all.filter((e) => e.ts >= b.from && e.ts <= b.to)
 })
 /** 当前数据源的链路记录，同样按时间范围过（用**收尾时刻**判，一次请求只落一个时刻）。 */
 const rangedTraces = computed(() => {
@@ -1374,10 +1386,9 @@ function recFor(tid) {
 /**
  * **范围内原始事件**的计数（② 的行清单 / ④ 的横条 / ① 的失败率与拦截率 / Top-N 的共同分母）。
  *
- * <p>数据源是 `RAW`（压缩前、未被 200 条展示窗口截断的原始台账），**不是** `ranged`：
- * · `ranged` 来自 `W.events`，最多 200 条，且过去装的是收帧阶段就聚合过的行 ⇒ 几百次拦截只剩个位数；
- * · 左侧「信息 86」与右侧「信息 107」就是两边各自读不同时机的压缩数据造成的 —— 现在**只有这一个**
- *   计数口，左右必然一致；
+ * <p>数据源是 `RAW`（压缩前、未被 200 条展示窗口截断的原始台账）：③ 列表与这里**同一批行**
+ * （`ranged` 也改成读 RAW，见上），但计数仍走这里 —— 一趟同时数完类 / 严重度 / 对象 / 错误，
+ * 而不是让左右两块各扫一遍再对不上；
  * · 聚合开关只影响列表怎么画，不碰这里 ⇒ 勾选/取消勾选，统计数字绝对不变。
  *
  * <p>`rawVer` 是普通数组的版本号：收帧时只 `rawVer.value++`，统计 computed 依赖它重算，
@@ -1402,6 +1413,13 @@ const rawWindow = computed(() => {
     }
   }
   return out
+})
+/** 当前源**本会话是否收到过任何原始事件**。只用于空状态文案：
+ *  有原始事件但筛选后 0 条 ⇒「当前筛选下一条也没有」；真一条都没有 ⇒「本会话还没收到」。
+ *  ⚠️ 不能拿 `events.length` 判：时间范围把行全排掉时它仍非空，会误报成「筛选」问题。 */
+const hasAnyRaw = computed(() => {
+  void rawVer.value
+  return RAW[cur.value].events.length > 0
 })
 /** **范围内**按类计数（② 的行清单 / ④ 的横条）。原始口径，见 `rawWindow`。 */
 const sessionByKind = computed(() => rawWindow.value.byKind)
@@ -1457,36 +1475,46 @@ const sparkMax = computed(() => (rateSeries.value.length ? Math.max(...rateSerie
  *  ⚠️ 取 `rateSeries`（本页自攒的序列）的末项，与折线右端**同一个数**（`sparkPts` 也是按它画的）。 */
 const sparkLast = computed(() => (rateSeries.value.length ? rateSeries.value[rateSeries.value.length - 1] : 0))
 
-/** ②③ 的筛选链：**时间范围** → 类 → 严重度 → ≥WARN → 对象 → 搜索。
- *  ⚠️ 时间范围是**第一道**（它决定「范围内」这个分母），其余都是在这批行里再挑。
+/** ②③ 的筛选链：**RAW 原始台账** → 时间范围 → 类 → 严重度 → ≥WARN → 对象 → 搜索。
+ *  ⚠️ 顺序固定（用户 2026-10-17 裁定）：**先筛原始行，再聚合成行，最后交给窗口化**。
+ *  先聚合再筛选会把「聚合行代表的 N 条成员里有没有命中筛选」这件事丢掉；反过来只走
+ *  200 条展示窗口，会出现「统计有警告、列表空」（见 `ranged` 的注释）。
  *  它同时也是**导出**取的行（见 `exportRows`）⇒ 用户在页面上看见什么就导出什么。 */
 const filtered = computed(() => {
+  void rawVer.value
+  const b = rangeBounds.value
   const query = q.value.trim().toLowerCase()
-  return ranged.value.filter((e) => {
-    if (!activeKinds.value.has(e.kind) || !activeSevs.value.has(e.severity)) return false
-    if (warnUp.value && e.severity === 'info') return false
-    if (objFilter.value && String(e.objectId || '') !== objFilter.value) return false
+  const out = []
+  // 一趟同时过「时间范围 + 全部筛选」：不先复制一份 `ranged` 再 filter —— 800 QPS 下
+  // 每拍都是几千行，省一次整表复制（2026-10-17 实测重算耗时）。
+  for (const e of RAW[cur.value].events) {
+    if (b && (e.ts < b.from || e.ts > b.to)) continue
+    if (!activeKinds.value.has(e.kind) || !activeSevs.value.has(e.severity)) continue
+    if (warnUp.value && e.severity === 'info') continue
+    if (objFilter.value && String(e.objectId || '') !== objFilter.value) continue
     if (query) {
       const hay = `${e.title} ${e.detail} ${e.traceId} ${e.objectId || ''}`.toLowerCase()
-      if (!hay.includes(query)) return false
+      if (!hay.includes(query)) continue
     }
-    return true
-  })
+    out.push(e)
+  }
+  return out
 })
 
 /**
- * ③ 的行：**时间正序**（tail -f 方向）→ 树形重建。
- * ⚠️ `events` 是「新的在前」存的，这里翻过来 —— 列表要「先发生的在最上面」，
- *    与之前的分页表**刻意相反**（那是「最新的在最上面」）。
- * ⚠️ 数据侧不再截 200 行（`ROW_MAX` 已删）：截断改在 **DOM 侧**做窗口化（见下方
- *    `VIRTUAL_MIN` / `vRows`）—— 200 条数据都在，首屏只铺看得见的那几十行。
+ * ③ 的行：**先筛 RAW**（`filtered`）→ **再聚合**（开关）→ **最后窗口化**（`vRows`）。
+ * ⚠️ `ranged` 来自 RAW，顺序不一定是「新的在前」（每拍前插、拍内倒序）⇒ 这里按
+ *    `ts/seq` 统一排成新在前，再翻成时间正序（tail -f 方向）：先发生的在最上面。
+ * ⚠️ 未聚合时按 `EVENT_CAP` 截**最新** 200 条原始行（数据侧上限；DOM 侧再由
+ *    `VIRTUAL_MIN` / `vRows` 二次窗口化）。聚合后一行代表 N 条，行数远小于原始条数，
+ *    不截断 —— 所以勾上聚合时，列表能覆盖整个 RAW 台账，与左侧统计同源同量。
+ * ⚠️ 回放永远不合并：查案要 1:1 还原（横幅上也写着「1:1 不合并」）。
  */
 const streamRows = computed(() => {
-  // 聚合只发生在**显示层**（用户 2026-10-17）：
-  //   勾选 ⇒ 同一 `kind + title` 合并成 `×N` 一行；取消 ⇒ 原始事件逐条（`filtered` 本身来自
-  //   `W.events`，最多 EVENT_CAP=200 条，这就是「DOM 上限 200 行」）。
-  //   ⚠️ 回放永远不合并：查案要 1:1 还原（横幅上也写着「1:1 不合并」）。
-  const list = aggEnabled.value && !replaySession.active ? aggregateEvents(filtered.value) : filtered.value
+  const base = filtered.value
+  const list = aggEnabled.value && !replaySession.active
+    ? aggregateEvents(base)
+    : base.slice().sort((a, b) => b.ts - a.ts || b.seq - a.seq).slice(0, EVENT_CAP)
   return buildStream(list.slice().reverse())
 })
 
@@ -1522,8 +1550,19 @@ const rowOffsets = computed(() => {
   for (let i = 0; i < rows.length; i++) off[i + 1] = off[i] + (rowH.get(rows[i].key) || EST_ROW_H)
   return off
 })
-const vRows = computed(() => (virtualOn.value ? streamRows.value.slice(vStart.value, vEnd.value) : streamRows.value))
-const padTop = computed(() => (virtualOn.value ? rowOffsets.value[vStart.value] : 0))
+/** ⚠️ 切取前**夹到 [0, n]**：筛选一变，行数可能从几千掉到几十，而 `vStart` 还是按旧行数
+ *  算的 —— 直接 `slice(旧起点, 旧终点)` 会切出空数组，页面就只剩空状态（用户 2026-10-17）。
+ *  即使某一帧窗口还没重算，这里也保证「有数据就至少切得到一段」。 */
+const vRows = computed(() => {
+  if (!virtualOn.value) return streamRows.value
+  const n = streamRows.value.length
+  const s = Math.min(Math.max(0, vStart.value), Math.max(0, n - 1))
+  const e = Math.min(Math.max(s + 1, vEnd.value), n)
+  return streamRows.value.slice(s, e)
+})
+const padTop = computed(() => (virtualOn.value
+  ? rowOffsets.value[Math.min(vStart.value, streamRows.value.length)]
+  : 0))
 const padBottom = computed(() => {
   if (!virtualOn.value) return 0
   const n = streamRows.value.length
@@ -1548,7 +1587,9 @@ function updateWindow() {
   const n = streamRows.value.length
   const top = el.scrollTop
   const bottom = top + (el.clientHeight || 1)
-  const s = Math.max(0, rowAtY(off, n, top) - OVERSCAN)
+  // ⚠️ `scrollTop` 可能仍是被浏览器夹过之前的旧值（内容刚缩短的那一帧）⇒ rowAtY 会返回 n。
+  //    起点再夹到 n-1，保证非空列表至少铺一行，不会出现「数据有、DOM 空」的闪帧。
+  const s = Math.max(0, Math.min(Math.max(0, n - 1), rowAtY(off, n, top) - OVERSCAN))
   const e = Math.min(n, rowAtY(off, n, bottom) + OVERSCAN + 1, s + VIRTUAL_MIN)   // 硬上限 200 行 DOM
   if (s !== vStart.value) vStart.value = s
   if (e !== vEnd.value) vEnd.value = e
@@ -1586,6 +1627,31 @@ watch(() => (pageActive.value ? streamRows.value : null), () => nextTick(() => {
   updateWindow()
   scheduleWindow()
 }))
+/** 筛选条件一变：**同步归零窗口游标**，下一帧把滚动位置复位到顶部。
+ *  ⚠️ 游标必须归零：`vStart` 是按旧行数算的，新列表可能只剩几十行 —— 旧起点会切出空数组，
+ *     页面就只剩空状态（用户 2026-10-17：「统计有警告、列表一条也没有」的另一半原因）。
+ *  ⚠️ 程序性 `scrollTop = 0` 会产生一次 scroll 事件；用 `skipScrollAutoBottom` 吞掉它，
+ *     否则 `onScroll` 会把跟尾模式误判成「用户上滚」⇒ `frozen` 停更。
+ *  ⚠️ 定位放在 **rAF** 而不是 `nextTick`：`streamRows` 那个 watch 也在 nextTick 里做
+ *     「数据变了 ⇒ 自动贴底」，两者的 nextTick 先后依赖 watch 注册顺序 —— 实测会被贴底
+ *     覆盖（vStart 又回到末尾）。rAF 在所有微任务（含那些 nextTick）之后执行，顺序确定。 */
+watch(
+  [activeKinds, activeSevs, warnUp, objFilter, q, range, customFrom, customTo, aggEnabled],
+  () => {
+    vStart.value = 0
+    vEnd.value = 40
+    requestAnimationFrame(() => {
+      const el = listEl.value
+      if (!el) return
+      skipScrollAutoBottom = true
+      el.scrollTop = 0
+      updateWindow()
+      scheduleWindow()
+      // 双 rAF：scroll 事件在渲染步骤里先于 rAF 回调派发，两帧后必已处理完。
+      requestAnimationFrame(() => requestAnimationFrame(() => { skipScrollAutoBottom = false }))
+    })
+  },
+)
 // 密度只改 `.lv` 等格子的 min-height ⇒ 行高变了，旧实测值作废。
 watch(density, () => { rowH.clear(); nextTick(() => { updateWindow(); scheduleWindow() }) })
 
@@ -1833,6 +1899,12 @@ function closeTrace() {
 function onScroll() {
   const el = listEl.value
   if (!el) return
+  // 筛选复位造成的程序性滚动：不改变跟尾语义（见 `skipScrollAutoBottom` 的注释）。
+  if (skipScrollAutoBottom && el.scrollTop === 0) {
+    skipScrollAutoBottom = false
+    scheduleWindow()
+    return
+  }
   autoBottom.value = el.scrollHeight - el.scrollTop - el.clientHeight < 24
   // 窗口化：只改「渲染哪一段」，不碰 scrollTop —— 滚动始终由浏览器原生处理。
   scheduleWindow()
@@ -1844,13 +1916,11 @@ function scrollBottom() {
 
 /* ── 收帧 ──────────────────────────────────────────────────────────────────── */
 
-/** 把一拍的 `seq` 集合从去重表里摘掉（聚合行带着整组成员的 seq，见 `aggregateEvents`）。 */
+/** 把一条被展示窗口挤出去的原始事件的 `seq` 从去重表里摘掉。
+ *  ⚠️ 聚合行（`aggregateEvents` 的产物）**不会进** `W.events`，所以这里永远只收到原始行
+ *  —— 旧版那个 `e.seqs` 分支在「聚合移到展示层」之后已经是死代码，2026-10-17 删除。 */
 function forgetSeqs(e) {
-  if (e.seqs) {
-    for (const s of e.seqs) seenSeq.delete(s)
-  } else {
-    seenSeq.delete(e.seq)
-  }
+  seenSeq.delete(e.seq)
 }
 
 /**
@@ -1862,11 +1932,12 @@ function forgetSeqs(e) {
  * <p>分组键 = `kind + title`（「不同类分开」：缓存 / 锁 / 订单 / 库存各自一组，标题也不同组）。
  * 同组 ≥ {@link AGG_MIN_COUNT} 次合并成一条：
  * · 展示用**最新的一条**（`ts` 最大、同刻取 `seq` 最大）的全部上下文；
- * · 附 `aggCount`（UI 上的 `× N` 徽标）与 `seqs`（去重表淘汰时用，见 `forgetSeqs`）；
+ * · 附 `aggCount`（UI 上的 `× N` 徽标）；
  * · `count === 1` 的组**原样保留** —— 低频业务事件（比如某一次锁超时）不会被并掉。
  *
- * <p>⚠️ 聚合发生在**去重之后**，所以每个成员 seq 都已进 `seenSeq`；`seqs` 必须带着它们，
- * 否则聚合行被 200 条窗口挤出去时那些 seq 会永久留在集合里（内存泄漏）。
+ * <p>⚠️ 聚合行只用于渲染、不会进 `W.events`，所以**不维护成员 `seqs`**：旧版那个数组
+ * 是给「聚合行被 200 条窗口挤出去时清去重表」用的，聚合移到展示层后已无消费方；每拍为
+ * 几千条事件各 push 一个 seq 只是白付分配成本（2026-10-17 实测重算耗时）。
  */
 function aggregateEvents(list) {
   const groups = new Map()
@@ -1874,11 +1945,10 @@ function aggregateEvents(list) {
     const k = `${e.kind}\u0000${e.title || ''}`
     let g = groups.get(k)
     if (!g) {
-      g = { latest: e, count: 0, seqs: [] }
+      g = { latest: e, count: 0 }
       groups.set(k, g)
     }
     g.count += 1
-    g.seqs.push(e.seq)
     if (e.ts > g.latest.ts || (e.ts === g.latest.ts && e.seq > g.latest.seq)) g.latest = e
   }
   const out = []
@@ -1891,7 +1961,6 @@ function aggregateEvents(list) {
       ...g.latest,
       agg: true,          // 展示层：行右侧 `× N` 徽标 + 点击进「已折叠」详情
       aggCount: g.count,
-      seqs: g.seqs,       // 淘汰时统一清去重表（见 forgetSeqs）
     })
   }
   out.sort((a, b) => b.ts - a.ts || b.seq - a.seq)
