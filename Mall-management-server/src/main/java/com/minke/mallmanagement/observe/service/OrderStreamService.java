@@ -34,12 +34,21 @@ import java.util.function.Supplier;
  *       过去态没有留痕）。</li>
  * </ol>
  *
- * <h2>【⚠️ 一处已知边界：取消**不进** {@code moves}】</h2>
- * 超时取消（{@code OrderTimeoutCancelJob}）写的是 {@code CancelledAt}，
- * <b>不经过状态机</b>（取消的单三位仍是 {@code (0,0,0)}，见该类注释），故它**不发流转事件**
- * ⇒ 它的发生只能从「五态计数里 cancelled +1」看出来。这是**如实反映**而不是漏记：
- * {@code moves} 的定义就是「状态机的流转」，把非状态机的写库也算进来才是编造。
- * 页面若要「取消也闪一下」，判据得换成「b 帧的 cancelled 数 − a 帧的」，本块不做（页面保持简单）。
+ * <h2>【超时取消：**每轮一条汇总 move**（2026-10-17 修订）】</h2>
+ * 超时取消（{@code OrderTimeoutCancelJob}）写的是 {@code CancelledAt}，不经过状态机
+ * （取消的单三位仍是 {@code (0,0,0)}，见该类注释），原先**完全不发流转事件** ⇒ 页面出现
+ * 「已取消数字在涨、流轨却死气沉沉」的口径矛盾。
+ *
+ * <p>现在的口径分两层：
+ * <ul>
+ *   <li>逐单事件仍**不发**（一轮几千单会挤爆环形缓冲、拖垮 SSE）；</li>
+ *   <li>但每轮结束由 {@code MallOrderStateMetrics.cancelBatch} 发**一条**汇总事件：
+ *       {@code action=cancel, from=CREATED, to=CANCELLED, count=N}。它同样进 {@code moves}，
+ *       {@code orderId=null}。</li>
+ * </ul>
+ * 读 {@code moves} 的一方（前端 QPS / 动画）必须按 {@code count} **加权**：
+ * {@code count=0} 表示普通的一单一事件，{@code count>0} 表示「这一条代表 N 单」。
+ * 只数条数会把这 1000 单读成 1 单 —— 那还是口径矛盾，只是方向反过来。
  *
  * <h2>【{@code stateOf} 与 SQL 的判据链必须一致 —— 两处都写在这里，改一处要改两处】</h2>
  * <pre>
@@ -70,9 +79,54 @@ public class OrderStreamService {
     private final OrderDao orderDao;
     private final MallOrderStateMetrics orderMetrics;
 
+    /** 明细分页一页最多多少条（防手改 URL 把整表拉进内存）。 */
+    private static final int MAX_DETAIL_LIMIT = 200;
+
     public OrderStreamService(OrderDao orderDao, MallOrderStateMetrics orderMetrics) {
         this.orderDao = orderDao;
         this.orderMetrics = orderMetrics;
+    }
+
+    /**
+     * <b>全局流转明细的服务端分页</b>（2026-10-17 新增，用户 P0：
+     * 「绝对不能在前端拿全部最新 1000 条去自己过滤」）。
+     *
+     * <p>同一份 {@code status} 谓词同时喂给 COUNT 与 SELECT（{@link OrderDao#countOrderPage} /
+     * {@link OrderDao#selectOrderPage}），两处判据在 DAO 里是**同一个方法拼出来的** ⇒
+     * 分页脚上的 total 一定等于该筛选下的真实行数，不会出现「Tab 写 2271、表说 0 条」。
+     *
+     * <p>⚠️ {@code offset}/{@code limit} 是**入参消毒**而不是信任客户端：offset 负数归 0，
+     * limit 夹到 {@code [1, 200]}。空状态 = 全部；未知状态由 DAO 翻成 {@code 1 = 0}（返回 0 条，
+     * 不抛错 —— 状态名来自前端 URL，不该把页面打崩）。
+     *
+     * <p>⚠️ 排序与 {@link OrderDao#selectRecentOrders} 同口径（{@code CreateTime DESC, OrderId DESC}），
+     * 翻页时行不会在页间漂移。
+     *
+     * @param healthyOnly 仅看真实数据（排除演练 + 已取消，见 {@code OrderDataScope}）
+     * @param status      waitPay | waitShip | waitReceive | completed | cancelled；空 = 全部
+     * @param timeout     只看超时预警（待发货 &gt; 24h / 待收货 &gt; 48h）
+     */
+    public Map<String, Object> detail(boolean healthyOnly, String status, boolean timeout,
+                                      int offset, int limit) {
+        int safeOffset = Math.max(0, offset);
+        int safeLimit = Math.min(MAX_DETAIL_LIMIT, Math.max(1, limit));
+        String safeStatus = status == null ? "" : status.trim();
+        int total = orderDao.countOrderPage(healthyOnly, safeStatus, timeout);
+        List<Map<String, Object>> rows = new ArrayList<>();
+        if (total > safeOffset) {
+            for (Map<String, Object> raw : orderDao.selectOrderPage(
+                    healthyOnly, safeStatus, timeout, safeOffset, safeLimit)) {
+                rows.add(orderRow(raw));
+            }
+        }
+        Map<String, Object> out = new LinkedHashMap<>();
+        out.put("status", safeStatus);
+        out.put("timeout", timeout);
+        out.put("offset", safeOffset);
+        out.put("limit", safeLimit);
+        out.put("total", total);
+        out.put("rows", rows);
+        return out;
     }
 
     /**
@@ -197,6 +251,9 @@ public class OrderStreamService {
                 row.put("result", e.result());
                 row.put("ts", e.epochMilli());
                 row.put("batchId", e.batchId());
+                // 2026-10-17：普通流转恒 0；超时取消的汇总事件 > 0（一条代表 N 单）。
+                // 前端必须按它加权算 QPS / 动画强度，不能只数 moves 条数。
+                row.put("count", e.count());
                 moves.add(row);
             }
             return moves;
@@ -247,9 +304,14 @@ public class OrderStreamService {
         return row;
     }
 
-    /** 待发货 / 待收货的超时阈值（小时）—— 页面上两条预警带与洞察端点共用这一份。 */
-    static final int WAIT_SHIP_TIMEOUT_HOURS = 24;
-    static final int WAIT_RECEIVE_TIMEOUT_HOURS = 48;
+    /**
+     * 待发货 / 待收货的超时阈值（小时）—— 页面上两条预警带与洞察端点共用这一份。
+     * ⚠️ 2026-10-17 起**值**来自 {@link OrderDao}：明细分页的 SQL 也要用同一条阈值，
+     * 若各写一个字面量，前端高亮「超时」的行会与服务端筛出的行对不上。这里保留同名常量，
+     * 只是为了不动既有引用（{@code timeoutHoursOf} 与单测）。
+     */
+    static final int WAIT_SHIP_TIMEOUT_HOURS = OrderDao.WAIT_SHIP_TIMEOUT_HOURS;
+    static final int WAIT_RECEIVE_TIMEOUT_HOURS = OrderDao.WAIT_RECEIVE_TIMEOUT_HOURS;
 
     /** 库内时间文本是 **UTC**（`@@system_time_zone=UTC`，同 `OrderDao`/`ShippingTrackDao` 的口径）
      *  ⇒ 「现在」必须也取 UTC 再相减；展示层（前端 `hms`/`dt`）再转本机时区。 */

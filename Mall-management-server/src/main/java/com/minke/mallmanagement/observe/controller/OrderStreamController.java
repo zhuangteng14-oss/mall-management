@@ -68,7 +68,7 @@ public class OrderStreamController {
 
     /**
      * 状态流转页的分析面（2026-10-17）—— 24 小时趋势 / 耗时直方图 / 账龄分桶 /
-     * 健康度 / 最慢 Top N / 全局明细。与 {@link #stream} **并列**：流负责「每秒变的那几个数」，
+     * 健康度 / 最慢 Top N。与 {@link #stream} **并列**：流负责「每秒变的那几个数」，
      * 本端点负责「打开页面时要铺满屏的聚合」，低频刷新即可。
      *
      * <p>⚠️ 它**只读**（同 {@link #stream}），但走普通 POST 而不是 SSE：一次性 JSON，
@@ -81,5 +81,26 @@ public class OrderStreamController {
             // 健康口径；实时 SSE 流无论如何都原样显示演练单的流转（流轨要看见它们真的在动）。
             @RequestParam(value = "healthy", defaultValue = "false") boolean healthy) {
         return insight.insight(healthy);
+    }
+
+    /**
+     * <b>全局流转明细的服务端分页</b>（2026-10-17 新增，用户 P0 整改）。
+     *
+     * <p>为什么必须单独一条端点：{@link #insight} 的聚合只读最近 1000 行样本，
+     * 拿它当明细表的数据源会让「顶部 Tab 是全库 COUNT、表只有 1000 行」——
+     * 点「待发货 2271」就空表。这里把 {@code status} 一路传到 SQL 的 {@code WHERE}，
+     * total 与行集**同源同谓词**。
+     *
+     * <p>⚠️ 本端点**只读**、无角色闸，口径与 {@link #stream} / {@link #insight} 相同。
+     * 参数消毒（offset ≥ 0、limit ∈ [1, 200]）在服务层，不在这里 —— 控制器保持薄。
+     */
+    @PostMapping("/detail")
+    public Map<String, Object> detail(
+            @RequestParam(value = "healthy", defaultValue = "false") boolean healthy,
+            @RequestParam(value = "status", defaultValue = "") String status,
+            @RequestParam(value = "timeout", defaultValue = "false") boolean timeout,
+            @RequestParam(value = "offset", defaultValue = "0") int offset,
+            @RequestParam(value = "limit", defaultValue = "20") int limit) {
+        return orders.detail(healthy, status, timeout, offset, limit);
     }
 }

@@ -3,6 +3,7 @@ package com.minke.mallmanagement.order.job;
 import com.minke.mallmanagement.goods.dao.GoodsDao;
 import com.minke.mallmanagement.observe.metrics.StockMetrics;
 import com.minke.mallmanagement.order.dao.OrderDao;
+import com.minke.mallmanagement.order.metrics.MallOrderStateMetrics;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -45,7 +46,8 @@ class OrderTimeoutCancelJobStockGateTest {
     private final OrderDao orderDao = mock(OrderDao.class);
     private final GoodsDao goodsDao = mock(GoodsDao.class);
     private final StockMetrics stockMetrics = mock(StockMetrics.class);
-    private final OrderTimeoutCancelJob job = new OrderTimeoutCancelJob(orderDao, goodsDao, stockMetrics);
+    private final MallOrderStateMetrics orderMetrics = mock(MallOrderStateMetrics.class);
+    private final OrderTimeoutCancelJob job = new OrderTimeoutCancelJob(orderDao, goodsDao, stockMetrics, orderMetrics);
 
     @BeforeEach
     void setUp() {

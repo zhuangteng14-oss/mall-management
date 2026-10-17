@@ -5,6 +5,7 @@ import com.minke.mallmanagement.observe.metrics.StockMetrics;
 import com.minke.mallmanagement.observe.metrics.StockMetrics.Release;
 import com.minke.mallmanagement.order.dao.OrderDao;
 import com.minke.mallmanagement.order.dao.OrderDataScope;
+import com.minke.mallmanagement.order.metrics.MallOrderStateMetrics;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -108,6 +109,20 @@ public class OrderTimeoutCancelJob {
      */
     private final StockMetrics stockMetrics;
 
+    /**
+     * 状态事件流的出口（2026-10-17 新增）：每轮取消结束后发**一条汇总事件**
+     * （{@link MallOrderStateMetrics#cancelBatch}），条数进 {@code count}。
+     *
+     * <p>⚠️ <b>为什么是「每轮一条」而不是逐单发</b>：一轮可能取消上千单，逐单发会挤爆
+     * 2048 容量的环形缓冲、也让 SSE 每帧背几万条；但一条都不发，前端就会看到
+     * 「已取消数字在涨、流轨却没有任何流转」—— 那是**口径矛盾**，不是性能优化。
+     * 汇总事件是两者的折中：可观测性保留，成本 O(1)。
+     *
+     * <p>⚠️ 本类在**定时线程**上跑，不在请求线程上 ⇒ 事件里的 traceId / actor 都是 null，
+     * 这是如实记录（没有那次请求，也没有那个操作者），不是丢字段。
+     */
+    private final MallOrderStateMetrics orderMetrics;
+
     /** 超时阈值（创建后多久未付款即取消）。**演示默认 60 秒**；生产口径 30 分钟改这里。 */
     @Value("${mall.order.cancel.timeout-ms:60000}")
     private long timeoutMs;
@@ -132,10 +147,12 @@ public class OrderTimeoutCancelJob {
     @Value("${mall.order.cancel.skip-attack-data:false}")
     private boolean skipAttackData;
 
-    public OrderTimeoutCancelJob(OrderDao orderDao, GoodsDao goodsDao, StockMetrics stockMetrics) {
+    public OrderTimeoutCancelJob(OrderDao orderDao, GoodsDao goodsDao, StockMetrics stockMetrics,
+                                 MallOrderStateMetrics orderMetrics) {
         this.orderDao = orderDao;
         this.goodsDao = goodsDao;
         this.stockMetrics = stockMetrics;
+        this.orderMetrics = orderMetrics;
     }
 
     /**
@@ -157,6 +174,10 @@ public class OrderTimeoutCancelJob {
             log.warn("超时取消：查候选整轮失败 —— 下一轮重试", e);
             return;
         }
+        // 2026-10-17：本轮**真正**取消成功的单数，循环结束后只发一条汇总事件。
+        // ⚠️ 计数只加在 cancelIfUnpaid == 1 分支 —— CAS 没命中的（他处已取消 / 已付款）不算，
+        //    否则事件里的 count 会比前端看到的已取消增量大。
+        int cancelledThisRound = 0;
         for (Map<String, Object> one : candidates) {
             String orderId = String.valueOf(one.get("OrderId"));
             String source = asString(one.get("Source"));
@@ -172,6 +193,7 @@ public class OrderTimeoutCancelJob {
                     continue;
                 }
                 if (orderDao.cancelIfUnpaid(orderId) == 1) {
+                    cancelledThisRound += 1;
                     log.info("超时取消：订单 {} 超过 {} 秒未付款，已置 CancelledAt", orderId, timeoutSeconds);
                     // 块 7 · 库存治理 TD-36 第三拍：**取消成功**才回补。
                     // ⚠️ 放进这个 try 只是**位置**上顺理成章（取消与回补同属「本单收尾」）；失败隔离
@@ -182,6 +204,12 @@ public class OrderTimeoutCancelJob {
             } catch (Exception e) {
                 log.warn("超时取消：订单 {} 失败（跳过，下一轮重试）：{}", orderId, e.toString());
             }
+        }
+        // 2026-10-17：**一轮一条**汇总事件。候选全是 PayIf=0 ⇒ 唯一来源是 CREATED（待付款），
+        // 不为了「对称」去伪造 waitShip 的取消。0 单时连方法都不调（cancelBatch 自身也会挡，
+        // 这里再挡一层是为了让「没有取消的轮次」在替身测试里可断言为**零交互**）。
+        if (cancelledThisRound > 0) {
+            orderMetrics.cancelBatch(cancelledThisRound, "CREATED");
         }
     }
 

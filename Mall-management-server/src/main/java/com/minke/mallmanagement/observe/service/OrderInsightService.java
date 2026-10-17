@@ -17,7 +17,12 @@ import java.util.Map;
 
 /**
  * 状态流转页的**分析面**（2026-10-17）—— 24 小时积压趋势、耗时直方图、账龄分桶、
- * 健康度输入、最慢 Top N、以及给底部全局明细表用的订单行。
+ * 健康度输入、最慢 Top N。
+ *
+ * <p>⚠️ <b>2026-10-17 起不再返回 {@code orders}（全局明细行）</b>：底部明细表改走
+ * {@code POST /admin/observe/orders/detail} 的服务端分页（真实 COUNT + {@code WHERE status=…}）。
+ * 原先这里塞的是「最近 1000 行」样本，前端再本地过滤 ⇒ 「Tab 写 2271、表说 0 条」。
+ * 聚合仍用这 1000 行样本（趋势/直方图是估算，页面已注明），但**明细不能拿估算当全集**。
  *
  * <h2>【为什么单开一条端点，不塞进 SSE 帧】</h2>
  * 这些量是**聚合**（全表/全窗口），不是「每拍变了多少」。若塞进 1 秒 1 帧：
@@ -96,11 +101,7 @@ public class OrderInsightService {
         out.put("aging", aging);
         out.put("health", health(counts, aging));
         out.put("slowest", slowest(rows));
-        List<Map<String, Object>> orders = new ArrayList<>();
-        for (Life l : rows) {
-            orders.add(OrderStreamService.orderRow(l.raw));
-        }
-        out.put("orders", orders);
+        // 明细行（原 out.put("orders", …)）已迁到 /orders/detail 的服务端分页 —— 见类注释。
         return out;
     }
 

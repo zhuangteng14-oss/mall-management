@@ -655,4 +655,141 @@ public class OrderDao {
                 + "FROM mall_management_sql.`order` WHERE BatchId = ?";
         return jdbcClient.sql(sql).param(batchId).query().listOfRows().stream().findFirst().orElse(Map.of());
     }
+
+    // ==================== 读：全局流转明细的服务端分页（2026-10-17 · 用户 P0）====================
+    //
+    // 背景：此前状态流转页的明细表吃的是 insight 端点的「最近 1000 行」，前端再按状态**本地过滤**
+    // ⇒ 顶部 Tab 是全库真实 COUNT（几万），表却只有 1000 行的子集；点「待发货 2271」自然空表。
+    // 用户明令：「绝对不能在前端拿全部最新 1000 条去自己过滤」。故计数与取行都下沉到这里，
+    // 且**两处共用同一个 Where 片段**（pageWhere）—— 分页脚的 total 与行集不可能各说各话。
+
+    /** 待发货超时阈值（小时）。**与 {@code OrderStreamService.timeoutHoursOf} 共用这一份值**，防两处漂移。 */
+    public static final int WAIT_SHIP_TIMEOUT_HOURS = 24;
+
+    /** 待收货超时阈值（小时）。同上。 */
+    public static final int WAIT_RECEIVE_TIMEOUT_HOURS = 48;
+
+    /**
+     * 某筛选下的**真实总行数**（分页脚与「全部 N」的唯一来源）。
+     *
+     * <p>⚠️ {@code status} 为空白 = 全部；未知状态 ⇒ {@code 1 = 0}（返回 0，不抛错）。
+     * {@code timeout=true} 时只数「待发货 &gt; 24h / 待收货 &gt; 48h」的预警行。
+     */
+    public int countOrderPage(boolean healthyOnly, String status, boolean timeout) {
+        String sql = "SELECT COUNT(*) FROM mall_management_sql.`order`" + pageWhere(healthyOnly, status, timeout);
+        Integer n = jdbcClient.sql(sql).query(Integer.class).single();
+        return n == null ? 0 : n;
+    }
+
+    /**
+     * 某筛选下的一页明细。排序与 {@link #selectRecentOrders(int, boolean)} **逐字相同**
+     * （{@code CreateTime DESC, OrderId DESC}）⇒ 翻页时同一行不会在页间漂移。
+     *
+     * <p>⚠️ 只接受**已消毒**的 {@code offset >= 0} / {@code limit >= 1}（服务的职责在
+     * {@code OrderStreamService.detail}，这里不再夹一遍 —— 夹两次会让两层的上限各说各话）。
+     */
+    public List<Map<String, Object>> selectOrderPage(boolean healthyOnly, String status, boolean timeout,
+                                                     int offset, int limit) {
+        String sql = "SELECT OrderId, CustomerId, MerchantId, Price, Quantity, ProductInformation, "
+                + "PayIf, DeliveryIf, ReceiveIf, CancelledAt, CreateTime, PaidAt, ShippedAt, ReceivedAt "
+                + "FROM mall_management_sql.`order`" + pageWhere(healthyOnly, status, timeout)
+                + " ORDER BY CreateTime DESC, OrderId DESC LIMIT ? OFFSET ?";
+        return jdbcClient.sql(sql).param(limit).param(offset).query().listOfRows();
+    }
+
+    /**
+     * 三个过滤维度的**唯一**拼装点：健康口径 → 状态 → 超时。
+     *
+     * <p>⚠️ 顺序不是随意的：先收窄扫描范围（健康口径），再叠状态与超时；
+     * 每段都加括号，避免 {@code OR} 把健康口径短路掉。
+     *
+     * <p>⚠️ 状态未知或「超时口径不适用于该状态」（待付款 / 已完成 / 已取消）⇒ 直接
+     * {@code 1 = 0}。这不是保守，是**如实**：那几态本来就没有 24/48h 预警的定义。
+     */
+    private static String pageWhere(boolean healthyOnly, String status, boolean timeout) {
+        String safeStatus = status == null ? "" : status.trim();
+        String state = stateCondition(safeStatus);
+        if (state != null && "1 = 0".equals(state)) {
+            return " WHERE 1 = 0";
+        }
+        String timeoutCond = null;
+        if (timeout) {
+            timeoutCond = timeoutCondition(safeStatus);
+            if (timeoutCond == null) {
+                return " WHERE 1 = 0";
+            }
+        }
+        StringBuilder where = new StringBuilder(" WHERE 1 = 1");
+        if (healthyOnly) {
+            where.append(" AND (").append(OrderDataScope.HEALTHY_SCOPE_SQL).append(")");
+        }
+        if (state != null) {
+            where.append(" AND (").append(state).append(")");
+        }
+        if (timeoutCond != null) {
+            where.append(" AND (").append(timeoutCond).append(")");
+        }
+        return where.toString();
+    }
+
+    /**
+     * 五态判据的 **SQL 镜像** —— 与 {@link #countOrderStates(boolean)} 的 CASE 链逐条对齐，
+     * 也与 {@code OrderStreamService.stateOf} 对齐（三处一起改）。
+     *
+     * @return {@code null} = 不加状态过滤（空串）；{@code 1 = 0} = 未知状态
+     */
+    private static String stateCondition(String status) {
+        if (status.isEmpty()) {
+            return null;
+        }
+        switch (status) {
+            case "waitPay":
+                return "CancelledAt IS NULL AND ReceiveIf = 0 AND DeliveryIf = 0 AND PayIf = 0";
+            case "waitShip":
+                return "CancelledAt IS NULL AND ReceiveIf = 0 AND DeliveryIf = 0 AND PayIf = 1";
+            case "waitReceive":
+                return "CancelledAt IS NULL AND ReceiveIf = 0 AND DeliveryIf = 1";
+            case "completed":
+                return "CancelledAt IS NULL AND ReceiveIf = 1";
+            case "cancelled":
+                return "CancelledAt IS NOT NULL";
+            default:
+                return "1 = 0";
+        }
+    }
+
+    /**
+     * 超时预警判据（只有待发货 / 待收货两态有定义）。
+     *
+     * <p>⚠️ 时刻全部由**库时钟**算（与 {@code OrderTimeoutCancelJob} 同一纪律）：
+     * {@code DATE_FORMAT} 把时间列压成 {@code yyyy-MM-dd HH:mm:ss} 文本再比，避免
+     * {@code serverTimezone} 在 JDBC 层掺进一次折算。
+     *
+     * <p>停留起点与 {@code OrderStreamService.stateSince} 对齐：待发货从 {@code PaidAt}（缺失回
+     * {@code CreateTime}），待收货从 {@code ShippedAt}（缺失依次回 {@code PaidAt} / {@code CreateTime}）。
+     *
+     * @return {@code null} = 该状态下没有超时口径
+     */
+    private static String timeoutCondition(String status) {
+        String shipSince = "COALESCE(DATE_FORMAT(PaidAt, '%Y-%m-%d %H:%i:%s'), CreateTime)";
+        String shipTimeout = shipSince + " < DATE_FORMAT(DATE_SUB(NOW(), INTERVAL "
+                + WAIT_SHIP_TIMEOUT_HOURS + " HOUR), '%Y-%m-%d %H:%i:%s')";
+        String receiveSince = "COALESCE(DATE_FORMAT(ShippedAt, '%Y-%m-%d %H:%i:%s'), "
+                + "DATE_FORMAT(PaidAt, '%Y-%m-%d %H:%i:%s'), CreateTime)";
+        String receiveTimeout = receiveSince + " < DATE_FORMAT(DATE_SUB(NOW(), INTERVAL "
+                + WAIT_RECEIVE_TIMEOUT_HOURS + " HOUR), '%Y-%m-%d %H:%i:%s')";
+        switch (status) {
+            case "":
+                // 全部：两态各自的「状态判据 AND 自己的超时判据」再取并 —— 不能只取超时半句，
+                // 否则待收货的 48h 判据会把待发货的行也捞进来（反之亦然）。
+                return "((" + stateCondition("waitShip") + ") AND (" + shipTimeout + "))"
+                        + " OR ((" + stateCondition("waitReceive") + ") AND (" + receiveTimeout + "))";
+            case "waitShip":
+                return shipTimeout;
+            case "waitReceive":
+                return receiveTimeout;
+            default:
+                return null;
+        }
+    }
 }

@@ -459,5 +459,11 @@ export const endpoints = {
     //    与上面的 SSE `orders` 同组不同语义：它是**一次性 JSON**（趋势 / 直方图 / 账龄 /
     //    健康度 / 最慢 Top N / 全局明细），页面挂载时铺满、之后低频刷新 —— 故走 `http.post`。
     ordersInsight: '/admin/observe/orders/insight',
+    // ⚠️ 2026-10-17（用户 P0：明细表数据打架）：**全局流转明细的服务端分页**。
+    //    与 `ordersInsight` 的分别：insight 是「最近 1000 行样本」派生的聚合，明细表**不能**吃它
+    //    （Tab 是全库 COUNT、表是 1000 行子集 ⇒ 点「待发货 2271」空表）。
+    //    本端点把 `status` 传到 SQL 的 WHERE，`total` 与 `rows` 同源同谓词，支持 `offset/limit`。
+    //    入参与后端形参逐字一致；`status` 留空 = 全部。
+    ordersDetail: '/admin/observe/orders/detail',
   },
 }

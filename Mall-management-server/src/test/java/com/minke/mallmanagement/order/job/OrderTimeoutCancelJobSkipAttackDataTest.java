@@ -3,6 +3,7 @@ package com.minke.mallmanagement.order.job;
 import com.minke.mallmanagement.goods.dao.GoodsDao;
 import com.minke.mallmanagement.observe.metrics.StockMetrics;
 import com.minke.mallmanagement.order.dao.OrderDao;
+import com.minke.mallmanagement.order.metrics.MallOrderStateMetrics;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -60,7 +61,8 @@ class OrderTimeoutCancelJobSkipAttackDataTest {
     private final OrderDao orderDao = mock(OrderDao.class);
     private final GoodsDao goodsDao = mock(GoodsDao.class);
     private final StockMetrics stockMetrics = mock(StockMetrics.class);
-    private final OrderTimeoutCancelJob job = new OrderTimeoutCancelJob(orderDao, goodsDao, stockMetrics);
+    private final MallOrderStateMetrics orderMetrics = mock(MallOrderStateMetrics.class);
+    private final OrderTimeoutCancelJob job = new OrderTimeoutCancelJob(orderDao, goodsDao, stockMetrics, orderMetrics);
 
     // ==================== 一、闸关着（缺省）：与加这个开关之前逐字节同行为 ====================
 
@@ -103,6 +105,8 @@ class OrderTimeoutCancelJobSkipAttackDataTest {
         verify(orderDao, never()).cancelIfUnpaid(anyString());
         verify(orderDao, never()).selectStockDeducted(anyString());
         verifyNoInteractions(goodsDao);
+        // 2026-10-17：一轮 0 单取消时**不发空汇总事件** —— 否则流轨会周期性地闪一下「取消 0 单」。
+        verifyNoInteractions(orderMetrics);
     }
 
     @Test
@@ -142,6 +146,33 @@ class OrderTimeoutCancelJobSkipAttackDataTest {
 
         verify(orderDao).cancelIfUnpaid(NORMAL_ORDER);
         verify(orderDao, never()).cancelIfUnpaid(ATTACK_ORDER);
+    }
+
+    // ==================== 三·补：批量取消的汇总事件（2026-10-17）====================
+
+    @Test
+    @DisplayName("一轮取消 2 单 ⇒ **一条**汇总事件 cancelBatch(2, \"CREATED\")（不是逐单两条）")
+    void roundEmitsOneSummaryForAllCancelled() {
+        ReflectionTestUtils.setField(job, "timeoutMs", 60000L);
+        givenCandidates(List.of(row("ORDER-A", ""), row("ORDER-B", "")));
+
+        job.advance();
+
+        // 精确到 (count, fromName)：count 是**本轮 CAS 成功数**，不是候选数、更不是事件条数。
+        verify(orderMetrics).cancelBatch(2, "CREATED");
+    }
+
+    @Test
+    @DisplayName("⚠️ 汇总只数**真取消**的：候选 2 条、CAS 只命中 1 条 ⇒ cancelBatch(1, …)")
+    void summaryCountsOnlyAppliedCancels() {
+        ReflectionTestUtils.setField(job, "timeoutMs", 60000L);
+        givenCandidates(List.of(row("ORDER-A", ""), row("ORDER-B", "")));
+        // A 在扫描与取消之间被别处取消/付款 ⇒ CAS 返回 0（既成事实，不再算一次取消）。
+        when(orderDao.cancelIfUnpaid("ORDER-A")).thenReturn(0);
+
+        job.advance();
+
+        verify(orderMetrics).cancelBatch(1, "CREATED");
     }
 
     // ==================== 四、判据本身：纯函数，边界逐条钉 ====================

@@ -683,18 +683,28 @@ public class EventBroadcaster {
         String result = String.valueOf(e.result());
         switch (String.valueOf(e.kind())) {
             case "transition": {
-                String title = "状态流转 " + e.from() + " → " + e.to();
+                // 2026-10-17：count > 0 是超时取消任务的**汇总事件**（一条代表 N 单）。
+                // 标题与摘要都点明条数 —— 否则日志页会出现一条「状态流转 CREATED → CANCELLED」
+                // 却查不到 order# 的怪行，读日志的人会以为是哪一单丢了业务键。
+                boolean batch = e.count() > 0;
+                String title = batch
+                        ? "批量取消 " + e.count() + " 单（" + e.from() + " → " + e.to() + "）"
+                        : "状态流转 " + e.from() + " → " + e.to();
                 Map<String, Object> fields = new LinkedHashMap<>();
                 fields.put("action", e.action());
                 fields.put("result", result);
                 fields.put("from", e.from());
                 fields.put("to", e.to());
                 fields.put("order", e.key());
+                if (batch) {
+                    fields.put("count", e.count());
+                }
                 // rejected / error 才有值；applied 为 null ⇒ 不写这个键
                 putReason(fields, e.reason());
                 return new Emit(severityOf(result), title,
-                        "action=" + e.action() + " result=" + result + " order#"
-                                + (e.key() == null ? "-" : e.key()), fields);
+                        "action=" + e.action() + " result=" + result
+                                + (batch ? " count=" + e.count() : "")
+                                + " order#" + (e.key() == null ? "-" : e.key()), fields);
             }
             case "illegal": {
                 // 两种来源：真观测到非法态（result=null）与出生闸拦下（result=rejected）

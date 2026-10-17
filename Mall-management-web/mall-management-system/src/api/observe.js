@@ -517,11 +517,37 @@ export function metricsHistory(limit) {
  *        （全量，含压测数据）。
  *        ⚠️ SSE 实时流**不受这个开关影响**（流轨要看见演练单真的在动）。
  * @returns {Promise<{success?:boolean, ts:number, counts:Object, trend:Object,
- *          durations:Object, aging:Object, health:Object, slowest:Array, orders:Array}>}
+ *          durations:Object, aging:Object, health:Object, slowest:Array}>}
  *          `trend.categories` + `trend.series` 直接喂折线图；`durations.{pay,ship,receive}` 各带
- *          `bins/avgMinutes/samples`；`aging.{waitShip,waitReceive}` 各带 `bins/total/timeout`；
- *          `orders` 与 SSE 帧里的订单行**同形**（含 `dwellSeconds` / `timeout` / 时间戳）。
+ *          `bins/avgMinutes/samples`；`aging.{waitShip,waitReceive}` 各带 `bins/total/timeout`。
+ *          ⚠️ 2026-10-17 起**不再返回 `orders`**：明细表改走 `orderDetail` 的服务端分页
+ *          （拿「最近 1000 行」当明细全集正是「Tab 2271、表 0 条」的根因）。
  */
 export function orderInsight(healthy = false) {
   return postJson(endpoints.observe.ordersInsight, q({ healthy: healthy ? 'true' : 'false' }))
+}
+
+/**
+ * 全局流转明细 —— **服务端分页**（2026-10-17，用户 P0）。
+ *
+ * <p>与 `orderInsight` 的分工：那边是聚合（最近 1000 行派生的趋势/直方图），
+ * 这边是明细（真实 COUNT + `WHERE status=…` + `LIMIT offset, limit`）。
+ *
+ * @param {object} [o]
+ * @param {boolean} [o.healthy=false] 仅看真实数据（排除演练 + 已取消，谓词与后端同源）
+ * @param {string} [o.status=''] waitPay | waitShip | waitReceive | completed | cancelled；空 = 全部
+ * @param {boolean} [o.timeout=false] 只看超时预警（待发货 > 24h / 待收货 > 48h）
+ * @param {number} [o.offset=0]
+ * @param {number} [o.limit=20] 后端夹到 [1, 200]
+ * @returns {Promise<{status:string, timeout:boolean, offset:number, limit:number,
+ *          total:number, rows:Array}>} `total` 是**该筛选下的真实行数**，不是本页条数。
+ */
+export function orderDetail({ healthy = false, status = '', timeout = false, offset = 0, limit = 20 } = {}) {
+  return postJson(endpoints.observe.ordersDetail, q({
+    healthy: healthy ? 'true' : 'false',
+    status: status || '',
+    timeout: timeout ? 'true' : 'false',
+    offset,
+    limit,
+  }))
 }

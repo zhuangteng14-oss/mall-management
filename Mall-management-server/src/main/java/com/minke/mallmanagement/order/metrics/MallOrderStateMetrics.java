@@ -28,8 +28,10 @@ import java.util.function.IntSupplier;
  *
  * <h2>【指标清单】</h2>
  * <pre>
- * mall.order.state.transitions{action=create|pay|deliver|receive, result=applied|rejected|error}
- *        一次**状态转移尝试**的结果，两维都是封闭枚举（4 × 3 = 最多 12 条时间序列）：
+ * mall.order.state.transitions{action=create|pay|deliver|receive|cancel, result=applied|rejected|error}
+ *        一次**状态转移尝试**的结果，两维都是封闭枚举（5 × 3 = 最多 15 条时间序列）：
+ *        ⚠️ {@code action=cancel} 只有 {@code applied} 一档（2026-10-17 新增）：超时取消任务
+ *        一轮批量取消的**汇总**（{@link #cancelBatch}），每轮至多一条、条数进计数器的增量。
  *        applied  = 守卫命中、确实改了库（rows &gt; 0）；
  *        rejected = 守卫没命中（rows == 0）—— 重复流转 / 单不存在，都是**既有行为**，
  *                   本笔不新增任何拒绝文案；
@@ -154,7 +156,7 @@ public class MallOrderStateMetrics {
     public void transition(OrderAction action, String fromName, String toName, Result result, String orderId,
                            long durationNanos, String reason) {
         registry.counter(TRANSITIONS, "action", action.tag(), "result", result.tag).increment();
-        event("transition", action.tag(), fromName, toName, result.tag, null, orderId, durationNanos, reason);
+        event("transition", action.tag(), fromName, toName, result.tag, null, orderId, durationNanos, reason, 0);
     }
 
     /**
@@ -175,7 +177,7 @@ public class MallOrderStateMetrics {
     public void illegal(String shape, String orderId, long durationNanos) {
         registry.counter(ILLEGAL, "shape", shape).increment();
         // 原因由 shape 表达（三位形状就是原因）⇒ reason 传 null，不重复写同一事实
-        event("illegal", null, null, null, null, shape, orderId, durationNanos, null);
+        event("illegal", null, null, null, null, shape, orderId, durationNanos, null, 0);
     }
 
     /**
@@ -206,7 +208,7 @@ public class MallOrderStateMetrics {
     public void birthRejected(String shape, String orderId, long durationNanos) {
         registry.counter(BIRTH_REJECTED, "shape", shape).increment();
         // 同上：shape 就是原因，reason 传 null
-        event("illegal", null, null, null, "rejected", shape, orderId, durationNanos, null);
+        event("illegal", null, null, null, "rejected", shape, orderId, durationNanos, null, 0);
     }
 
     /**
@@ -229,7 +231,7 @@ public class MallOrderStateMetrics {
     public void timelineWrite(boolean ok, String orderId, Long durationNanos, String reason) {
         registry.counter(TIMELINE_WRITES, "result", ok ? "ok" : "error").increment();
         if (!ok) {
-            event("async", null, null, null, "error", null, orderId, durationNanos, reason);
+            event("async", null, null, null, "error", null, orderId, durationNanos, reason, 0);
         }
     }
 
@@ -244,12 +246,42 @@ public class MallOrderStateMetrics {
         // 没有可测的执行段（线程池的拒绝发生在提交处，纳秒级且不是任务本身的耗时），
         // 与 protection 环「熔断/池/重试恒 null」同一条处置
         // 原因由 shape（queue_full / shutdown）表达 ⇒ 新加的 reason 形参传 null，不重复
-        event("async", null, null, null, "rejected", reason.tag, orderId, null, null);
+        event("async", null, null, null, "rejected", reason.tag, orderId, null, null, 0);
     }
 
     /** 异步任务本身的执行墙钟。 */
     public void asyncDuration(long nanos) {
         registry.timer(ASYNC_DURATION).record(nanos, TimeUnit.NANOSECONDS);
+    }
+
+    /**
+     * <b>批量取消的汇总事件</b>（2026-10-17 新增）。超时取消任务一轮可能取消几百上千单，
+     * 逐单发事件会挤爆 2048 容量的环形缓冲、也让 SSE 每帧背几万条；但**一条都不发**
+     * 又会让前端「已取消数字涨、流轨却死气沉沉」。折中是：**每轮至多一条**，
+     * 条数放在 {@link OrderStateEvent#count()}。
+     *
+     * <p>语义边界（刻意收窄）：
+     * <ul>
+     *   <li>{@code action=cancel} 是本事件流里的**第五个**动作取值，只为汇总而设；</li>
+     *   <li>{@code result} 恒 {@code applied} —— 每单是否真取消由 CAS 决定，进不了这里的计数；</li>
+     *   <li>{@code key}/{@code traceId}/{@code batchId} 均为 null：跨多单、无单一业务键，
+     *       前端必须把它当**批次**而不是某一单；</li>
+     *   <li>{@code fromName} 由调用方给（超时任务的候选一律是 {@code PayIf=0} ⇒ 传 {@code CREATED}），
+     *       {@code to} 恒 {@code CANCELLED}。不为了「看起来对称」去伪造 waitShip 的取消。</li>
+     * </ul>
+     *
+     * <p>计数器 {@code transitions{action=cancel,result=applied}} 按**单数**累加，
+     * 与事件流「一条事件带 count」不冲突：前者是可求和的速率，后者是可回放的批次记录。
+     *
+     * @param count    本轮 CAS 成功取消的单数；{@code <= 0} 直接返回，不发空事件
+     * @param fromName 取消前状态名（超时任务恒 {@code "CREATED"}）
+     */
+    public void cancelBatch(int count, String fromName) {
+        if (count <= 0) {
+            return;
+        }
+        registry.counter(TRANSITIONS, "action", "cancel", "result", "applied").increment(count);
+        event("transition", "cancel", fromName, "CANCELLED", "applied", null, null, null, null, count);
     }
 
     /**
@@ -292,7 +324,8 @@ public class MallOrderStateMetrics {
     }
 
     private void event(String kind, String action, String from, String to,
-                       String result, String shape, String key, Long durationNanos, String reason) {
+                       String result, String shape, String key, Long durationNanos, String reason,
+                       int count) {
         long seq = eventCursor.getAndIncrement();
         events[(int) (seq & EVENT_MASK)] = new OrderStateEvent(
                 seq, System.currentTimeMillis(), kind, action, from, to, result, shape,
@@ -300,7 +333,8 @@ public class MallOrderStateMetrics {
                 com.minke.mallmanagement.shared.web.TraceIdFilter.currentActorId(),
                 com.minke.mallmanagement.shared.web.TraceIdFilter.currentActorRole(),
                 durationNanos == null ? null : durationNanos / 1000,   // 块 7 · commit 8/8c：写全限定名而非 import，理由同 {@code MallCacheMetrics#event}（保本文件 `:3` 与 `:104` 的引用不下移）。⚠️ durationNanos 是**纳秒**、落进 record 的是**微秒**
-                reason == null ? null : com.minke.mallmanagement.shared.text.EventReason.clip(reason));
+                reason == null ? null : com.minke.mallmanagement.shared.text.EventReason.clip(reason),
+                count);   // 2026-10-17：只有 cancelBatch 的汇总事件 > 0；逐单事件恒 0
     }
 
     /**
@@ -332,11 +366,14 @@ public class MallOrderStateMetrics {
      *                   <b>只补</b> {@code transition} 的 rejected / error 与 {@code async/error}；
      *                   {@code illegal} / 出生闸 / async 被拒的「原因」仍由 {@code shape} 表达
      *                   （{@code 010} 或 {@code queue_full|shutdown}）—— 同一事实不写两遍
+     * @param count      本条事件代表的**订单数**（2026-10-17 新增）：逐单事件恒 {@code 0}，
+     *                   只有 {@link #cancelBatch} 的汇总事件 &gt; 0。读事件的人据此区分
+     *                   「一条 = 一单」与「一条 = 一批」；前端 QPS 也必须按它加权
      */
     public record OrderStateEvent(long seq, long epochMilli, String kind, String action,
                                   String from, String to, String result, String shape, String key,
                                   String traceId, String batchId, String actorId, Integer actorRole,
-                                  Long durationUs, String reason)
+                                  Long durationUs, String reason, int count)
             implements com.minke.mallmanagement.observe.metrics.Sourced {
     }
 

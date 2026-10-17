@@ -154,8 +154,8 @@ class OrderStreamServiceTest {
     }
 
     @Test
-    @DisplayName("⚠️ 取消**不进** moves（超时取消不经过状态机）—— 它的发生只能从 cancelled 计数看出来")
-    void cancelledOrdersNeverAppearInMoves() {
+    @DisplayName("⚠️ **没有汇总事件**的取消不进 moves（取消不经过状态机）—— 2026-10-17 起由 cancelBatch 补")
+    void cancelledWithoutSummaryNeverAppearInMoves() {
         Map<String, Object> after = new LinkedHashMap<>();
         after.put("cancelled", 1L);
         when(orderDao.countOrderStates()).thenReturn(after);
@@ -167,6 +167,24 @@ class OrderStreamServiceTest {
         @SuppressWarnings("unchecked")
         Map<String, Object> counts = (Map<String, Object>) frame.get("counts");
         assertThat(counts.get("cancelled")).as("但计数里看得见").isEqualTo(1L);
+    }
+
+    @Test
+    @DisplayName("超时取消汇总 ⇒ **一条** move：count=N、orderId=null（前端必须按 count 加权，不能数条数）")
+    void timeoutCancelSummaryBecomesOneWeightedMove() {
+        when(orderDao.countOrderStates()).thenReturn(Map.of());
+        when(orderDao.selectRecentOrders(anyInt())).thenReturn(List.of());
+
+        orderMetrics.cancelBatch(1200, "CREATED");
+
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> moves = (List<Map<String, Object>>) frames.frame(0).get("moves");
+        assertThat(moves).as("1200 单也只推一条，不挤爆 SSE").hasSize(1);
+        Map<String, Object> move = moves.get(0);
+        assertThat(move).containsEntry("action", "cancel")
+                .containsEntry("from", "CREATED").containsEntry("to", "CANCELLED")
+                .containsEntry("result", "applied").containsEntry("count", 1200);
+        assertThat(move.get("orderId")).as("跨多单、无单一业务键 ⇒ 必须是 null，不能伪造一个").isNull();
     }
 
     @Test
@@ -224,6 +242,40 @@ class OrderStreamServiceTest {
         assertThat(rows).extracting(o -> o.get("orderId")).containsExactly("O-REAL");
         assertThat(movesOf(frame)).as("演练单的流转仍要在流轨里看得见")
                 .extracting(m -> m.get("orderId")).containsExactly("SIM-X");
+    }
+
+    // ================= 全局明细服务端分页（2026-10-17 · 用户 P0）=================
+
+    @Test
+    @DisplayName("detail：total 与行集走**同一个 status 谓词**；limit 夹到 200、offset 负数归 0")
+    void detailPagesOnTheServerWithClampedParams() {
+        when(orderDao.countOrderPage(false, "waitShip", false)).thenReturn(2271);
+        when(orderDao.selectOrderPage(false, "waitShip", false, 40, 200))
+                .thenReturn(List.of(row("O-1", 1, 0, 0, null)));
+
+        Map<String, Object> out = service.detail(false, "waitShip", false, 40, 9999);
+
+        assertThat(out).containsEntry("status", "waitShip").containsEntry("offset", 40)
+                .containsEntry("limit", 200).containsEntry("total", 2271);
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> rows = (List<Map<String, Object>>) out.get("rows");
+        assertThat(rows).hasSize(1);
+        assertThat(rows.get(0)).containsEntry("orderId", "O-1").containsEntry("state", "waitShip");
+        // 关键：total 来自 COUNT，不是 rows.size() —— 否则「Tab 2271、表 20 条」又会被读成只有 20 单。
+        assertThat(rows).as("这一页只有一条，但 total 仍是 2271").hasSizeLessThan(2271);
+    }
+
+    @Test
+    @DisplayName("detail：offset 负数归 0、limit 0 抬到 1（手改 URL 不能把整表拉进内存）")
+    void detailClampsNegativeOffsetAndZeroLimit() {
+        when(orderDao.countOrderPage(false, "", false)).thenReturn(1);
+        when(orderDao.selectOrderPage(false, "", false, 0, 1))
+                .thenReturn(List.of(row("O-1", 1, 1, 1, null)));
+
+        Map<String, Object> out = service.detail(false, "", false, -5, 0);
+
+        assertThat(out).containsEntry("offset", 0).containsEntry("limit", 1);
+        verify(orderDao).selectOrderPage(false, "", false, 0, 1);
     }
 
     // ================= 本批次五态计数（块 7 · commit 10 · Q3 路线 i）=================

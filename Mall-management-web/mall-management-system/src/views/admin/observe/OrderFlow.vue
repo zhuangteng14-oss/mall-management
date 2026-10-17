@@ -190,7 +190,7 @@
             </span>
             <span class="a-of-step-meta">
               <span>占全表 {{ total ? ((num(counts.cancelled) / total) * 100).toFixed(1) : '0.0' }}%</span>
-              <span>超时取消不产生 moves</span>
+              <span>取消流入 {{ qpsText(qpsIn.cancelled) }}</span>
               <span>点此筛选已取消</span>
             </span>
           </button>
@@ -229,20 +229,28 @@
           <span>流出 <b>{{ qpsText(totalQpsOut) }}</b></span>
           <span class="a-of-mono">{{ lastTickAt }}</span>
         </div>
-        <!-- 主链粒子轨道：SSE move = 一颗从左向右飞向 to 的发光粒子；
-             轨道虚线本身也向右流动（见 `a-of-lane-dash`）。
-             取消 = 支线：从待付款/待发货向下弧线落到「已取消」，与主链同时动。 -->
+        <!-- 主链粒子轨道：SSE move = 一颗从左向右飞向 to 的发光粒子。
+             ⚠️ 2026-10-17 用户纠偏：**静态拓扑线 ≠ 动态流转**。
+             底层虚线永远是暗灰、**不动**；只有这条边真的发生过流转（`activeEdges` 亮起）
+             时才高亮并向右流动。没有流转时轨道是「待命的路由图」，不是「一直在跑」。
+             取消 = 支线：同样只在 `waitPay>cancelled` / `waitShip>cancelled` 真的亮起时变黄。 -->
         <div class="a-of-lane" aria-hidden="true">
-          <i class="a-of-lane-track"></i>
+          <i
+            v-for="(e, i) in MAIN_EDGES"
+            :key="e.id"
+            class="a-of-lane-track"
+            :class="{ 'is-on': activeEdges.has(e.id) }"
+            :style="laneSegStyle(i)"
+          ></i>
           <svg class="a-of-cancel-links" viewBox="0 0 100 100" preserveAspectRatio="none">
             <path
               d="M10,24 C 42,58 70,64 90,82"
-              :class="{ on: pulseNodes.has('cancelled') }"
+              :class="{ on: activeEdges.has(CANCEL_FROM_PAY) }"
               vector-effect="non-scaling-stroke"
             />
             <path
               d="M37,24 C 55,54 74,66 90,82"
-              :class="{ on: pulseNodes.has('cancelled') }"
+              :class="{ on: activeEdges.has(CANCEL_FROM_SHIP) }"
               vector-effect="non-scaling-stroke"
             />
           </svg>
@@ -278,14 +286,15 @@
             v-for="p in cancelParticles"
             :key="p.id"
             class="a-of-cancel-particle"
-            :class="'from-' + p.from"
-            :style="{ '--pcolor': stateColor('cancelled') }"
+            :class="['from-' + p.from, { 'is-big': p.big }]"
+            :style="{ '--pcolor': stateColor('cancelled'), '--pdelay': (p.delay || 0) + 'ms' }"
           ></i>
         </div>
         <ul v-if="streamRows.length" class="a-of-stream-list">
           <li v-for="m in streamRows" :key="m.orderId + '-' + m.ts" class="a-of-stream-i">
             <span class="a-of-stream-t">{{ hms(m.ts) }}</span>
-            <span class="a-of-id">#{{ m.orderId }}</span>
+            <!-- 汇总事件没有订单号：显示「批量取消 N 单」，不要渲染成一个空的 `#`。 -->
+            <span class="a-of-id" :class="{ 'is-batch': m.batchCount }">{{ m.batchCount ? `批量取消 ${fmtInt(m.batchCount)} 单` : `#${m.orderId}` }}</span>
             <span class="a-of-stream-track" aria-hidden="true">
               <template v-for="n in 4" :key="n">
                 <i class="a-of-dot-sm" :class="{ on: m.step >= n, now: m.step === n }"></i>
@@ -372,7 +381,7 @@
     <!-- ══ ④ 全局流转明细（主从联动 + 前端分页）══════════════════════════════ -->
     <h2 class="a-h2">
       全局流转明细
-      <span class="a-h2n">{{ filterLabel }} · {{ fmtInt(filteredRows.length) }} 单 · 最新在前 · 点行看链路</span>
+      <span class="a-h2n">{{ filterLabel }} · {{ fmtInt(tableTotal) }} 单 · 最新在前 · 点行看链路</span>
     </h2>
     <div class="a-card a-of-table-card">
       <div class="a-of-filters">
@@ -381,7 +390,7 @@
           class="a-of-chip"
           :class="{ on: !filterState }"
           @click="filterState = ''; onlyTimeout = false"
-        >全部 {{ fmtInt(listRows.length) }}</button>
+        >全部 {{ fmtInt(allCount) }}</button>
         <button
           v-for="s in STATES"
           :key="s.key"
@@ -396,6 +405,7 @@
         </label>
         <span class="a-of-filter-note">
           数据源：{{ demo.on ? '模拟日常流（分析面仍为库内聚合）' : '后端聚合 + SSE' }}
+          <template v-if="!demo.on"> · {{ (detailLoading && !pageRows.length) ? '明细加载中…' : (detailError || '服务端分页') }}</template>
         </span>
       </div>
 
@@ -440,7 +450,10 @@
             </tr>
             <tr v-if="!pageRows.length">
               <td colspan="8" class="a-empty">
-                {{ first ? '还没收到第一拍。' : '当前筛选下没有订单 —— 换个状态，或取消「仅超时」。' }}
+                <template v-if="first">还没收到第一拍。</template>
+                <template v-else-if="!demo.on && detailLoading && !detailRows.length">正在加载{{ filterLabel }}明细…</template>
+                <template v-else-if="!demo.on && detailError">明细加载失败：{{ detailError }}</template>
+                <template v-else>当前筛选下没有订单 —— 换个状态，或取消「仅超时」。</template>
               </td>
             </tr>
           </tbody>
@@ -448,7 +461,7 @@
       </div>
 
       <Pager
-        :total="filteredRows.length"
+        :total="tableTotal"
         :limit="pageSize"
         :offset="offset"
         :sizes="PAGE_SIZES"
@@ -804,7 +817,7 @@
 <script setup>
 /* eslint-disable no-undef */ /* 理由见 `ui/KpiCard.vue` 同款注释（eslint-plugin-vue 8.7.1 缺宏环境） */
 import { computed, nextTick, onBeforeUnmount, onDeactivated, onMounted, reactive, ref, watch } from 'vue'
-import { openOrderStream, orderInsight } from '../../../api/observe'
+import { openOrderStream, orderDetail, orderInsight } from '../../../api/observe'
 // 演示模式（块 7 收尾 ②）：`DemoModeToggle` 摆开关，`demo` 是被 `watch` 的那个状态，
 // `openDemoStream` 是与 `openOrderStream` **同形**的假流 —— 见 `connect()` 里那处三元式。
 import { demo, openDemoStream } from '../../../api/demo-stream'
@@ -1026,10 +1039,28 @@ const filterState = ref('')          // 表格 / 抽屉的主从筛选（'' = �
 const onlyTimeout = ref(false)
 const drawerOpen = ref(false)
 const drawerQuery = ref('')          // 抽屉左列：订单号 / 商品名模糊搜索
-/** 本会话最近捕获的流转（流轨 + QPS 的原料；有界，避免跑一晚上攒成几万条）。 */
+/** 本会话最近捕获的流转（流轨渲染原料；有界，避免跑一晚上攒成几万条）。 */
 const recentMoves = ref([])
 const RECENT_MOVE_CAP = 300
-/** 当前节点 QPS（滚动 5 秒窗口）。 */
+/* ── 全局明细：服务端分页（2026-10-17 · 用户 P0）──────────────────────────────
+   此前表格吃的是 `insight.orders`（最近 1000 行），前端再本地过滤 —— Tab 是全库 COUNT、
+   表是 1000 行子集 ⇒ 点「待发货 2271」空表。现在真流走 `/orders/detail`：
+   `status / timeout / offset / limit` 原样传给后端，`total` 是**该筛选下的真实行数**。
+   ⚠️ 演示模式（`demo.on`）仍走本页内存表：假流有自己的世界，把它分页到真库上是两本账。 */
+const detailRows = ref([])
+const detailTotal = ref(0)
+const detailLoading = ref(false)
+const detailError = ref('')
+/** 请求序号：只认最后一次发出的响应（连点筛选/翻页时旧响应后到不能覆盖新的）。 */
+let detailSeq = 0
+let detailTimer = 0
+let detailDebounce = 0
+/** QPS 的原料：**全量** moves 的加权事件（不经过渲染抽样）。
+ *  `weight` = 汇总事件的 `count`（普通事件 1）—— 超时任务一条代表上千单，
+ *  只数条数会把 1000 单读成 1 单。 */
+let qpsEvents = []
+const QPS_EVENT_CAP = 4000
+/** 当前节点 QPS（滚动 5 秒窗口，单位：单/秒）。 */
 const qpsIn = reactive({ waitPay: 0, waitShip: 0, waitReceive: 0, completed: 0, cancelled: 0 })
 const qpsOut = reactive({ waitPay: 0, waitShip: 0, waitReceive: 0, completed: 0, cancelled: 0 })
 
@@ -1054,13 +1085,21 @@ const laneParticles = ref([])
 let particleSeq = 0
 const LANE_POS = [10, 37, 64, 91]
 const LANE_INDEX = { waitPay: 0, waitShip: 1, waitReceive: 2, completed: 3 }
+/** 第 i 条主链边的轨道段：从第 i 个节点中心到第 i+1 个节点中心（%）。 */
+function laneSegStyle(i) {
+  const left = LANE_POS[i]
+  const right = LANE_POS[i + 1]
+  return { left: `${left}%`, width: `${right - left}%` }
+}
 /* 背压（2026-10-17 用户 P0）：压测一帧可能有数千条 moves。
    · 计数 / 批次 / 累计条数按**全量**算（账不能少）；
    · DOM 与动画只取**均匀抽样**的 ≤120 条，粒子每帧 ≤8 颗。
    这样主线程不会被几千次响应式写入 + setTimeout 打爆，流轨仍然「有东西在动」。 */
 const MAX_MOVE_RENDER_PER_FRAME = 120
 const MAX_PARTICLES_PER_FRAME = 8
-const CANCEL_PARTICLES_CAP = 8
+/** 取消支线同时在场的粒子上限。2026-10-17 从 8 提到 18：汇总事件的瀑布一次最多 10 颗，
+ *  再加上逐单取消的 8 颗，8 会把瀑布本身截断（只看到后半截）。 */
+const CANCEL_PARTICLES_CAP = 18
 let frameParticleBudget = 0
 let cancelMovesInFrame = 0
 const cancelParticles = ref([])
@@ -1609,7 +1648,17 @@ async function loadInsight() {
     const data = await orderInsight(filterHealthy.value)
     insight.value = data
     insightAt.value = num(data.ts) || Date.now()
-    seedOrders(Array.isArray(data.orders) ? data.orders : [])
+    // 明细不再来自 insight（见 `detailRows` 注释）；这里只把「最慢 Top N」记进订单表，
+    // 否则点开 Top3 链路抽屉时 `openedRow` 查不到那一单、右栏空白。
+    rememberRows(Array.isArray(data.slowest) ? data.slowest : [])
+    // 第一拍 SSE 还没到时，顶部 Tab / 「全部 N」先用分析面的权威 counts 铺上，避免 0。
+    if (!Object.keys(counts.value || {}).length && data.counts) {
+      counts.value = data.counts
+      STATES.forEach((s) => {
+        target[s.key] = num(counts.value[s.key])
+        shown[s.key] = target[s.key]
+      })
+    }
   } catch (e) {
     insightError.value = (e && e.message) || '分析面加载失败'
   } finally {
@@ -1621,19 +1670,23 @@ async function loadInsight() {
   }
 }
 
-/** 一次性的分析面订单 → 本页的订单表（保留后端给的倒序）。 */
-function seedOrders(rows) {
-  const ids = []
+/**
+ * 明细页 / Top N → 本页订单表：**更新行、把新 id 插到最前**，不动已有顺序。
+ * 表格本身渲染 `detailRows`（服务端那一页），这里维护 Map 只为抽屉 / 时间线
+ * （`openedRow`）能查到单；「新出现的在前」与 SSE `absorbOrders` 同口径。
+ */
+function rememberRows(rows) {
+  const fresh = []
   for (const raw of rows) {
-    const id = raw.orderId
+    const id = raw && raw.orderId
     if (id === null || id === undefined) continue
     const idStr = String(id)
-    if (!ordersById.has(idStr)) ids.push(idStr)
+    if (!ordersById.has(idStr)) fresh.push(idStr)
     ordersById.set(idStr, toRow(raw))
   }
-  // 后到的流订单可能已经在前排；保留它们在前，再接分析面的其余行。
-  const head = orderIds.value.filter((id) => !ids.includes(id))
-  orderIds.value = head.concat(ids.filter((id) => ordersById.has(id))).slice(0, LIST_CAP)
+  if (!fresh.length) return
+  const head = orderIds.value.filter((id) => !fresh.includes(id))
+  orderIds.value = fresh.concat(head).slice(0, LIST_CAP)
 }
 
 /** 原始行 → 本页统一行形状（SSE 与分析面同形；这里只做防御性收口）。 */
@@ -1734,13 +1787,29 @@ function closeDrawer() {
   closeTimeline()
 }
 
-/** 滚动 5 秒窗口的 QPS（每秒流入 / 流出多少单）。 */
+/**
+ * 滚动 5 秒窗口的 QPS（每秒流入 / 流出多少**单**）。
+ *
+ * <p>⚠️ 原料是 `qpsEvents`（**全量** moves，不经过渲染抽样），不是 `recentMoves`
+ * （后者为背压只留 ≤120 条/帧）。逐条按 `weight` 加权：
+ *   普通流转 = 1 单；超时取消的汇总事件 = `count` 单（一条代表上千单）。
+ * 只数条数 ⇒ 一批 1000 单的超时取消在页面上只跳 0.2/s；加权后才是真实的 200/s。
+ */
 function computeQps() {
   const cutoff = Date.now() - 5000
-  const fresh = recentMoves.value.filter((m) => num(m.ts) >= cutoff)
+  // 顺手裁掉窗口外的（数组有界，不会跑一晚上攒成十万条）。
+  qpsEvents = qpsEvents.filter((e) => e.ts >= cutoff)
   STATES.forEach((s) => {
-    qpsIn[s.key] = fresh.filter((m) => stateKeyOf(m.to) === s.key).length / 5
-    qpsOut[s.key] = fresh.filter((m) => stateKeyOf(m.from) === s.key).length / 5
+    qpsIn[s.key] = 0
+    qpsOut[s.key] = 0
+  })
+  for (const e of qpsEvents) {
+    if (e.toKey) qpsIn[e.toKey] += e.weight
+    if (e.fromKey) qpsOut[e.fromKey] += e.weight
+  }
+  STATES.forEach((s) => {
+    qpsIn[s.key] /= 5
+    qpsOut[s.key] /= 5
   })
 }
 
@@ -1777,17 +1846,73 @@ function minuteText(v) {
   return dwellText(num(v) * 60)
 }
 
-/* ── 列表（本会话累积 + 前端分页）────────────────────────────────────────────── */
+/* ── 列表 ──────────────────────────────────────────────────────────────────────
+   真流：`/orders/detail` 的**服务端分页**（`detailRows` 已经是当前页）；
+   演示流：本页内存表前端分页（假流有自己的世界，不能拿真库 COUNT 去分它）。
+   ⚠️ 两条路只在这三个 computed 里分叉，模板与 Pager 不需要知道数据源。 */
 const listRows = computed(() => orderIds.value.map((id) => ordersById.get(id)).filter(Boolean))
-/** 主从联动 / 仅超时的过滤结果（前端过滤，数据源仍是本页累积表）。 */
+/** 演示流的本地过滤结果（真流不使用 —— 真流的筛选在 SQL 里）。 */
 const filteredRows = computed(() => {
   let rows = listRows.value
   if (filterState.value) rows = rows.filter((r) => r.state === filterState.value)
   if (onlyTimeout.value) rows = rows.filter((r) => r.timeout)
   return rows
 })
-const pageRows = computed(() => filteredRows.value.slice(offset.value, offset.value + pageSize.value))
+/** 当前页要渲染的行。 */
+const pageRows = computed(() => (demo.on
+  ? filteredRows.value.slice(offset.value, offset.value + pageSize.value)
+  : detailRows.value))
+/** 分页脚 / 「全部 N」用的总数：真流是服务端 COUNT，演示流是本地过滤结果。 */
+const tableTotal = computed(() => (demo.on ? filteredRows.value.length : detailTotal.value))
+/** 「全部」chip 的总量：真流取权威 counts.total（不受当前筛选影响），演示流取本地表。 */
+const allCount = computed(() => (demo.on ? listRows.value.length : total.value))
 const filterLabel = computed(() => (filterState.value ? (STATE_LABEL[filterState.value] || filterState.value) : '全部状态'))
+
+/**
+ * 拉当前筛选下的一页明细（真流）。展示层**不做任何本地过滤** ——
+ * `status` / `timeout` 必须到 SQL 的 WHERE 里，否则又会回到「Tab 2271、表 0 条」。
+ * 失败时保留上一页（`detailError` 显示在表头小字），不把表格清成空。
+ */
+async function loadDetail() {
+  if (demo.on || replaySession.active || replaySession.loading) return
+  const my = ++detailSeq
+  detailLoading.value = true
+  detailError.value = ''
+  try {
+    const data = await orderDetail({
+      healthy: filterHealthy.value,
+      status: filterState.value,
+      timeout: onlyTimeout.value,
+      offset: offset.value,
+      limit: pageSize.value,
+    })
+    if (my !== detailSeq) return
+    const total = num(data.total)
+    detailTotal.value = total
+    const rows = Array.isArray(data.rows) ? data.rows.map(toRow) : []
+    detailRows.value = rows
+    // 抽屉 / 时间线从 Map 里取单，页行也记进去。
+    rememberRows(rows)
+    // 删数据或翻过头：把页码收回到最后一页（触发 watch 再拉一次，避免停在空页）。
+    if (!rows.length && total > 0 && offset.value > 0) {
+      offset.value = Math.max(0, (Math.ceil(total / pageSize.value) - 1) * pageSize.value)
+    }
+  } catch (e) {
+    if (my !== detailSeq) return
+    detailError.value = (e && e.message) || '明细加载失败'
+  } finally {
+    if (my === detailSeq) detailLoading.value = false
+  }
+}
+
+/** 筛选 / 翻页 / 数据源变化后**合并**成一次请求（连点筛选不会打一串并发）。 */
+function scheduleDetail(delay = 80) {
+  if (detailDebounce) clearTimeout(detailDebounce)
+  detailDebounce = setTimeout(() => {
+    detailDebounce = 0
+    loadDetail()
+  }, delay)
+}
 const openedRow = computed(() => (openedId.value ? ordersById.get(openedId.value) || null : null))
 const openedMoves = computed(() => (openedId.value ? movesById.get(openedId.value) || [] : []))
 /** 主链四步（时间线骨架）。**每一步都在**，不再只画「有时间的行」——
@@ -1955,6 +2080,7 @@ function absorbMoves(moves) {
   capturedTotal.value += moves.length
   // 超过上限时均匀抽样：保留首尾与中段，流轨不会只剩某一批。
   const step = Math.max(1, Math.ceil(moves.length / MAX_MOVE_RENDER_PER_FRAME))
+  const now = Date.now()
   for (let i = 0; i < moves.length; i += 1) {
     const m = moves[i]
     // ① 批次号：先学（这一步与「这一单认不认得出来」无关，故放在最前面）。
@@ -1966,59 +2092,99 @@ function absorbMoves(moves) {
     }
 
     const id = m.orderId === null || m.orderId === undefined ? '' : String(m.orderId)
+    const toKey = stateKeyOf(m.to)
+    const fromKey = stateKeyOf(m.from)
+    // 2026-10-17：超时取消的**汇总事件**（`count=N`、无订单号）。一条代表 N 单，
+    // QPS / 动画都按 N 加权；它不是「哪一单」，故不进 `movesById`。
+    const summary = num(m.count) > 0
+    const weight = summary ? num(m.count) : 1
+    const ts = num(m.ts) || now
 
     // ② 计数口径按全量走（批量取消也能触发支线动画）。
-    const toKey = stateKeyOf(m.to)
-    if (toKey && batch && batch === currentBatch.value) batchNodeHits[toKey] += 1
-    if (toKey === 'cancelled') cancelMovesInFrame += 1
+    if (toKey && batch && batch === currentBatch.value) batchNodeHits[toKey] += weight
+    if (toKey === 'cancelled') cancelMovesInFrame += weight
 
-    // ③ 以下才是 DOM / 动画：抽样执行，防止数千条 move 同帧写爆主线程。
-    if (!id || (i % step !== 0 && i !== moves.length - 1)) continue
+    // ③ QPS 原料：**全量**（不经过下面的渲染抽样），汇总事件按 count 加权。
+    qpsEvents.push({ ts, fromKey, toKey, weight })
+    if (qpsEvents.length > QPS_EVENT_CAP) qpsEvents.splice(0, qpsEvents.length - QPS_EVENT_CAP)
+
+    // ④ 以下才是 DOM / 动画：抽样执行，防止数千条 move 同帧写爆主线程。
+    //    汇总事件**永远渲染**（它本身就是一条，抽掉就看不见「批量取消」了）。
+    if (!summary && (!id || (i % step !== 0 && i !== moves.length - 1))) continue
     recentMoves.value = [{
       orderId: id,
+      batchCount: summary ? weight : 0,
       from: m.from,
       to: m.to,
-      ts: num(m.ts) || Date.now(),
+      ts,
+      weight,
     }, ...recentMoves.value].slice(0, RECENT_MOVE_CAP)
 
-    const arr = movesById.get(id) || []
-    arr.push({ from: m.from, to: m.to, ts: num(m.ts) })
-    // 时间线不该无限长（同一张单被反复推同一拍）：同 (from,to,ts) 只留一条。
-    const dedup = arr.filter((x, idx) => idx === arr.findIndex((y) => y.from === x.from && y.to === x.to && y.ts === x.ts))
-    movesById.set(id, dedup)
+    if (id) {
+      const arr = movesById.get(id) || []
+      arr.push({ from: m.from, to: m.to, ts })
+      // 时间线不该无限长（同一张单被反复推同一拍）：同 (from,to,ts) 只留一条。
+      const dedup = arr.filter((x, idx) => idx === arr.findIndex((y) => y.from === x.from && y.to === x.to && y.ts === x.ts))
+      movesById.set(id, dedup)
+    }
 
     if (!toKey) continue
     flashThrottled(pulseNodes, toKey)
-    const fromKey = stateKeyOf(m.from)
     if (fromKey) {
       const edgeId = `${fromKey}>${toKey}`
       if (KNOWN_EDGES.has(edgeId)) flashThrottled(activeEdges, edgeId)
       // 取消 = 支线（向下）；主链 = 正向粒子。两者各自限流。
-      if (toKey === 'cancelled') spawnCancelParticle(fromKey)
-      else spawnLaneParticle(fromKey, toKey, id)
+      if (toKey === 'cancelled') {
+        // 汇总事件 ⇒ 大号瀑布（一次 3–10 颗，按单数加密度）；逐单 ⇒ 一颗普通粒子。
+        if (summary) spawnCancelWaterfall(fromKey, weight)
+        else spawnCancelParticle(fromKey)
+      } else if (id) {
+        spawnLaneParticle(fromKey, toKey, id)
+      }
     }
   }
 }
 
 /**
  * 取消支线的一颗「下落」粒子：从待付款 / 待发货节点沿曲线落向已取消。
- * ⚠️ 真实 SSE 的取消大多不进 `moves`（超时任务只写 `CancelledAt`），
- *    那种情况由 `noteCancelDelta` 按 counts 跳变补画 —— 否则大批取消时流轨看起来是死的。
+ *
+ * @param {string} fromKey waitPay | waitShip
+ * @param {boolean} [big] 汇总事件用的大号粒子：**不占**逐帧预算（否则瀑布会被
+ *        抽样预算掐成一颗），尺寸与拖尾更强；数量由 {@link spawnCancelWaterfall} 按单数定。
+ * @param {number} [delay] 依次落下的错峰延时（毫秒）
  */
-function spawnCancelParticle(fromKey) {
-  if (frameParticleBudget <= 0) return
+function spawnCancelParticle(fromKey, big = false, delay = 0) {
   const origin = fromKey === 'waitShip' ? 'waitShip' : 'waitPay'
-  frameParticleBudget -= 1
-  const p = { id: `c${++cancelParticleSeq}`, from: origin }
+  if (!big) {
+    if (frameParticleBudget <= 0) return
+    frameParticleBudget -= 1
+  }
+  const p = { id: `c${++cancelParticleSeq}`, from: origin, big, delay }
   cancelParticles.value = cancelParticles.value.concat(p).slice(-CANCEL_PARTICLES_CAP)
   const t = setTimeout(() => {
     timers.delete(t)
     cancelParticles.value = cancelParticles.value.filter((x) => x.id !== p.id)
-  }, 1600)
+  }, 1600 + delay)
   timers.add(t)
 }
 
-/** counts.cancelled 的跳变 → 补画取消支线（扣掉本帧已由 moves 画过的那些，避免双份）。 */
+/**
+ * 超时取消的**汇总事件**（`count=N`）→ 一场大号瀑布。
+ *
+ * <p>为什么必须是「瀑布」而不是一颗光点：这一条代表几百上千单，画一颗等于把
+ * 「批次取消」伪装成「一单取消」—— 用户要的是「肉眼能看出这里发生了一大坨」。
+ * 数量随单数增长但有上限（3–10 颗），既保留量级感，又不会把 DOM 打爆。
+ */
+function spawnCancelWaterfall(fromKey, count) {
+  const n = Math.min(10, Math.max(3, Math.ceil(num(count) / 300)))
+  for (let i = 0; i < n; i += 1) spawnCancelParticle(fromKey, true, i * 90)
+}
+
+/**
+ * counts.cancelled 的跳变 → 补画取消支线（扣掉本帧已由 moves 画过的那些，避免双份）。
+ * ⚠️ `cancelMovesInFrame` 记的是**单数**（汇总事件按 count 加权），不是事件条数 ——
+ *    否则一批 1000 单会先被汇总事件画一次瀑布、再被这里的差额补画一次。
+ */
 function noteCancelDelta(prev, next) {
   if (!prev) return
   const d = num(next.cancelled) - num(prev.cancelled) - cancelMovesInFrame
@@ -2059,6 +2225,7 @@ function resetReplayState() {
 
 /** QPS 归零（回放/切数据源时）。 */
 function statesForQpsReset() {
+  qpsEvents = []
   STATES.forEach((s) => {
     qpsIn[s.key] = 0
     qpsOut[s.key] = 0
@@ -2269,8 +2436,8 @@ function resetStreamHistory() {
 /* ── 会话快照（刷新恢复）────────────────────────────────────────────────────── */
 let saveAt = 0
 
-/** 落盘用的最小快照。⚠️ `insight.orders` 刻意剔掉：它最多 1000 行、是分析面的**种子**，
- *  刷新后 15 秒内一定会重新拉到；为它撑爆 sessionStorage 配额反而会丢掉趋势/计数这些不可再生的。 */
+/** 落盘用的最小快照。⚠️ 订单行刻意不存：明细已是服务端分页，刷新后 80ms 内重新拉到；
+ *  为它撑爆 sessionStorage 配额反而会丢掉趋势/计数这些不可再生的。 */
 function snapshot() {
   const moves = []
   for (const [id, arr] of movesById) {
@@ -2289,7 +2456,7 @@ function snapshot() {
     liveTail: liveTail.value,
     movesById: moves,
     filterHealthy: filterHealthy.value,
-    insight: insight.value ? { ...insight.value, orders: [] } : null,
+    insight: insight.value,
     insightAt: insightAt.value,
   }
 }
@@ -2342,7 +2509,8 @@ function restoreSession() {
   filterHealthy.value = p.filterHealthy === true
   insight.value = p.insight || null
   insightAt.value = num(p.insightAt)
-  if (insight.value) seedOrders(Array.isArray(insight.value.orders) ? insight.value.orders : [])
+  // 订单表不再从快照恢复（v1 快照本来也没存它）：挂载后 80ms 内由 `/orders/detail`
+  // 拉回当前筛选页，SSE 的 `orders` 也会继续补最近 20 行。
   // 数字直接落位：刷新不是「从 0 长起来」，补间会让恢复后的第一眼反而像在造假。
   STATES.forEach((s) => {
     target[s.key] = num(counts.value[s.key])
@@ -2439,6 +2607,11 @@ onMounted(() => {
   // ⚠️ 恢复过快照也照拉一次：快照里的趋势可能是几分钟前的，低频刷新本就该追平。
   loadInsight()
   insightTimer = setInterval(loadInsight, 15000)
+  // 明细是服务端分页：首屏拉一次，之后每 5 秒追平（分页脚 total 也会跟着变）。
+  scheduleDetail(0)
+  detailTimer = setInterval(() => {
+    if (!demo.on && !replaySession.active && !replaySession.loading) loadDetail()
+  }, 5000)
   window.addEventListener('pagehide', onPageHide)
   // 本页可能在回放已经跑起来之后才挂载（KeepAlive 失活再回来 / 从别的页切过来）
   // ⇒ 先按 `stateChanges` 补建到当前时刻，不要再连实时流。
@@ -2449,6 +2622,14 @@ onMounted(() => {
 watch(() => demo.on, () => {
   resetStreamHistory()
   connect()
+  // 真流 ⇄ 演示流换的是**账本**：演示走本地表、真流走服务端分页。
+  detailRows.value = []
+  detailTotal.value = 0
+  if (demo.on) {
+    detailSeq += 1   // 让在途的真流响应作废，别把真库行塞进演示表
+  } else {
+    scheduleDetail()
+  }
 })
 /**
  * 打开「剔除已取消 / 仅看真实数据」时，把已经在表里的不合格行摘掉：
@@ -2479,15 +2660,22 @@ watch(filterHealthy, () => {
   if (filterHealthy.value) dropUnhealthyRows()
   loadInsight()
   connect()
+  scheduleDetail()
 })
 // 主从筛选一变，页码回到第一页（否则筛完只剩 3 行却停在第 9 页）。
-watch([filterState, onlyTimeout], () => { offset.value = 0 })
+watch([filterState, onlyTimeout], () => {
+  offset.value = 0
+  scheduleDetail()
+})
+// 翻页 / 改每页条数：真流重新向服务端要**这一页**（演示流由 pageRows 本地切）。
+watch([offset, pageSize], () => scheduleDetail())
 // 开始/结束回放：切流 + 重置本页口径。⚠️ 退出后 `connect()` 才恢复实时。
 watch(() => replaySession.active, (on) => {
   if (on) enterReplay()
   else {
     resetReplayState()
     connect()
+    scheduleDetail()
   }
 })
 // 装载失败（没进回放、`loading` 落回 false）⇒ 恢复实时流。
@@ -2509,6 +2697,14 @@ onBeforeUnmount(() => {
   if (insightTimer) {
     clearInterval(insightTimer)
     insightTimer = 0
+  }
+  if (detailTimer) {
+    clearInterval(detailTimer)
+    detailTimer = 0
+  }
+  if (detailDebounce) {
+    clearTimeout(detailDebounce)
+    detailDebounce = 0
   }
 })
 </script>
@@ -3022,6 +3218,7 @@ export default { name: 'OrderFlow' }
   .a-of-nodes .is-pulse .a-of-box,
   .a-of-trend::after,
   .a-of-lane-track,
+  .a-of-cancel-links path.on,
   .a-of-cancel-particle,
   .a-of-lane-dot::after,
   .a-of-lane-node.is-live .a-of-lane-dot,
@@ -3542,17 +3739,27 @@ export default { name: 'OrderFlow' }
   margin: var(--s2) 0 0;
   border-bottom: 1px solid var(--line);
 }
+/* 静态拓扑线：暗灰、**不动**。只有真实流转点亮那段（`.is-on`）才变蓝并向右流动。
+   2026-10-17 用户纠偏：默认就画一条清晰流动的虚线 = 视觉欺骗。 */
 .a-of-lane-track {
   position: absolute;
-  left: 10%;
-  right: 9%;
   top: 26px;
   height: 2px;
   background-image: repeating-linear-gradient(
     90deg,
-    var(--line-2) 0 5px,
+    var(--line) 0 5px,
     transparent 5px 10px
   );
+  opacity: 0.45;
+  transition: opacity 0.2s ease;
+}
+.a-of-lane-track.is-on {
+  background-image: repeating-linear-gradient(
+    90deg,
+    var(--info) 0 5px,
+    transparent 5px 10px
+  );
+  opacity: 1;
   animation: a-of-lane-dash 1.2s linear infinite;
 }
 /* 方向 = 正向（左 → 右）：位移必须为正；负值会让点阵向左爬（2026-10-17 用户纠偏）。 */
@@ -3570,15 +3777,22 @@ export default { name: 'OrderFlow' }
 }
 .a-of-cancel-links path {
   fill: none;
-  stroke: var(--line-2);
+  stroke: var(--line);
   stroke-width: 1;
   stroke-dasharray: 4 5;
-  opacity: 0.55;
+  opacity: 0.3;
   transition: stroke 0.2s ease, opacity 0.2s ease;
 }
+/* 只有该分支真的发生取消（`activeEdges` 亮起）才高亮并沿弧线向右下流动。
+   默认这只是一条「系统有这条路」的暗线，不是「正在取消」。 */
 .a-of-cancel-links path.on {
   stroke: var(--warning);
   opacity: 1;
+  animation: a-of-cancel-dash 0.8s linear infinite;
+}
+@keyframes a-of-cancel-dash {
+  from { stroke-dashoffset: 0; }
+  to { stroke-dashoffset: -9; }
 }
 /* ⚠️ 选择器必须带 `.a-of-lane`：`.a-of-lane-node` 定义在后面且同为单类选择器，
    只写 `.a-of-lane-cancel { top: 88px }` 会被它的 `top: 0` 覆盖 ⇒ 取消节点
@@ -3606,6 +3820,14 @@ export default { name: 'OrderFlow' }
 }
 .a-of-cancel-particle.from-waitShip {
   animation: a-of-cancel-fall-ship 1.5s cubic-bezier(0.3, 0.7, 0.4, 1) forwards;
+}
+/* 汇总事件的「大号光点」：看得见这一条代表一整批，而不是一单。
+   必须排在上面两条 from-* 之后：两者同特异性，靠后者覆盖 animation 的 delay。 */
+.a-of-cancel-particle.is-big {
+  width: 11px;
+  height: 11px;
+  box-shadow: 0 0 10px var(--pcolor), 0 0 22px var(--warning), 0 0 34px var(--warning);
+  animation-delay: var(--pdelay, 0ms);
 }
 @keyframes a-of-cancel-fall-pay {
   0% { left: 10%; top: 30px; opacity: 0; transform: scale(0.4); }
@@ -3640,14 +3862,17 @@ export default { name: 'OrderFlow' }
   margin-bottom: 2px;
   box-shadow: 0 0 6px currentColor;
 }
-/* 雷达波：每个节点常驻一圈向外扩散的细环；有流转时下方再叠一层强脉冲。 */
+/* 雷达波：**只在节点真的有流转时**才扩散（`.is-live`）。
+   2026-10-17 用户纠偏：静止时整条轨道不能有任何「在跑」的动效 —— 常驻雷达波也算假动作。 */
 .a-of-lane-dot::after {
   content: '';
   position: absolute;
   inset: -4px;
   border: 1px solid currentColor;
   border-radius: 50%;
-  opacity: 0.4;
+  opacity: 0.18;
+}
+.a-of-lane-node.is-live .a-of-lane-dot::after {
   animation: a-of-radar 2.4s ease-out infinite;
 }
 @keyframes a-of-radar {
@@ -3779,12 +4004,21 @@ export default { name: 'OrderFlow' }
 }
 .a-of-stream-i {
   display: grid;
-  grid-template-columns: 48px 62px 76px minmax(0, 1fr);
+  /* 2026-10-17 用户纠偏：订单号列不再钉死 62px（`SIM-BU...` 被截断、右边却有大片空白）。
+     改成按内容自适应、空间不足才省略；剩余宽度全给状态文本。 */
+  grid-template-columns: 48px minmax(0, auto) 76px minmax(0, 1fr);
   align-items: center;
   gap: var(--s2);
   padding: 5px 0;
   border-bottom: 1px dashed var(--line);
   font-size: 11px;
+}
+.a-of-stream-i .a-of-id {
+  min-width: 0;
+}
+.a-of-id.is-batch {
+  color: var(--warning);
+  font-weight: var(--fw-med);
 }
 .a-of-stream-i:last-child {
   border-bottom: 0;
