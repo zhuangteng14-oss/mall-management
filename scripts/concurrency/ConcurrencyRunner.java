@@ -1887,6 +1887,7 @@ public class ConcurrencyRunner {
      * 退出码却是 0」的组合。
      */
     static void c(Opt o) throws InterruptedException {
+        Thread.sleep(1200);   // 等入站限流 200/s 的令牌桶刷新（CI 39056399205：C/A-C6 探针 6/6 被 429）
         String lock0 = lockCounters(o);
         Ass a1 = ass("C-1", "时间线行数 == 四端点 success 之和（各端点 success 另与状态机预测值比对）", true);
         Ass a2 = ass("C-2", "时间线可重放：首行 from=NONE、逐行首尾相接、末行 to == order 表现值", true);
