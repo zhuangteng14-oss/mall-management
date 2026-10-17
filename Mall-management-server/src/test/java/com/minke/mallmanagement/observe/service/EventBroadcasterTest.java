@@ -108,7 +108,7 @@ class EventBroadcasterTest {
     // ================= severity 规则表 =================
 
     @Test
-    @DisplayName("severity 规则表：error ← result=error；protect ← 身份拒绝；warn ← 业务被拒/超时/降级/不足；其余 info")
+    @DisplayName("severity 规则表：error ← result=error；protect ← 身份拒绝/敏感词/重复提交；warn ← 业务被拒/超时/降级/不足；其余 info")
     void severityFollowsTheOneRuleTable() {
         stock.deduct(SKU, 1, StockMetrics.Deduct.INSUFFICIENT, 1_500L, null,
                 "防超卖拦截：扣减未命中（库存不足或 goods_sku 无此 SKU，需 1 件）");      // warn
@@ -120,11 +120,15 @@ class EventBroadcasterTest {
         audit.failed("C-1", "goods.add", "db down", "goods", "M-1:P-1", 1_500L);  // warn
         notify.sent("email", "order.paid", "C-1", 1_500L);                   // info
         notify.failed("email", "order.paid", "C-1", "smtp 550", 1_500L);     // warn
-        sensitive.masked("comment", 1, 20, "傻逼", 1_500L);                   // info
+        // 2026-10-17 用户最终口径：敏感词拒收 / 打码都是**防护层成功防御** ⇒ PROTECT（紫），
+        //   业务没有被执行、系统也没崩，绝不能算进「业务失败率」。
+        sensitive.masked("comment", 1, 20, "傻逼", 1_500L);                   // protect
         sensitive.rejected("comment", 9, 10, "滚", 1_500L,
-                "敏感词拒收：命中比例 90% ≥ 40%（命中 9/10）");                   // warn
+                "敏感词拒收：命中比例 90% ≥ 40%（命中 9/10）");                   // protect
         identity.passed("C-1", "/goods/goodsUp", 1_500L);                    // info
         identity.rejected("C-1", "令牌过期", "/goods/goodsUp", 1_500L);        // protect
+        protection.blocked("duplicateSubmit", "order", "orderId=O-9 已存在", null,
+                "幂等查重命中：同一 OrderId 重复提交");                             // protect
         lock.acquire("order:create", "O-9", MallLockMetrics.Outcome.TIMEOUT, 3_000_000L,
                 "取锁超时：等待 3000 ms 未获得");  // warn（fail-open）
         cache.l1Request("goods", "k1", false, 1_500L);                       // info（miss 刻意不染黄）
@@ -137,14 +141,14 @@ class EventBroadcasterTest {
         //    （库存 → 审计 → …… → 锁 → 缓存）与断言里的顺序对不上，是**设计如此**，不是巧合。
         //    页面按 seq 排卡片 ⇒ 它看到的同拍顺序就是这个环序（全局时间序只有墙钟 ts 能还原）。
         assertThat(titlesOf(Severity.ERROR)).as("只有 result=error 才红").containsExactly("库存释放失败");
-        assertThat(titlesOf(Severity.PROTECT)).as("身份鉴权拒绝 = 防护拦截（紫），不算业务失败")
-                .containsExactly("身份拒绝");
+        assertThat(titlesOf(Severity.PROTECT)).as("防护层成功防御（紫）：敏感词 / 身份 / 重复提交，均不算业务失败")
+                .containsExactly("敏感词打码", "敏感词拒收", "身份拒绝", "重复提交拦截（未执行）");
         assertThat(titlesOf(Severity.WARN)).as("真正的业务失败 / 降级 / 超时 —— 页面配色靠这一档")
                 .containsExactly("取锁超时（fail-open 直行）", "库存不足（未扣，防超卖命中）",
-                        "审计写入失败", "通知发送失败", "敏感词拒收");
+                        "审计写入失败", "通知发送失败");
         assertThat(titlesOf(Severity.INFO)).as("成功路径 + miss/missing（不看这一档数「拦了多少」）")
                 .containsExactly("L1 未命中", "释放未命中（无该 SKU 行）", "审计写入",
-                        "通知发送", "敏感词打码", "身份放行");
+                        "通知发送", "身份放行");
     }
 
     @Test

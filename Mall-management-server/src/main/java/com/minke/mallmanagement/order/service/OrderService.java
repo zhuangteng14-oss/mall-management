@@ -25,6 +25,7 @@ import com.minke.mallmanagement.marketing.coupon.service.CouponService;
 import com.minke.mallmanagement.marketing.seckill.dao.SeckillDao;
 import com.minke.mallmanagement.notification.NotificationEvents;
 import com.minke.mallmanagement.notification.service.NotificationService;
+import com.minke.mallmanagement.observe.metrics.ProtectionMetrics;
 import com.minke.mallmanagement.observe.metrics.StockMetrics;
 import com.minke.mallmanagement.observe.metrics.StockMetrics.Deduct;
 import com.minke.mallmanagement.order.model.OrderAction;
@@ -231,6 +232,17 @@ public class OrderService {
      */
     private final StockMetrics stockMetrics;
 
+    /**
+     * 防护面的观测出口（块 7 · 2026-10-17 用户口径新增）。
+     *
+     * <p>只用于一处：{@link #addLocked} 里幂等查重挡下「同一 OrderId 的重复提交」时，
+     * 发一条 {@code blocked("duplicateSubmit", ...)} —— 这属于<b>防护层成功防御</b>，
+     * 事件严重度是 PROTECT（紫），<b>不进业务失败率</b>。
+     *
+     * <p>⚠️ 与 {@link #stockMetrics} 同一条依赖方向（订单 → 观测），观测域对订单域一无所知 ⇒ 无环。
+     */
+    private final ProtectionMetrics protectionMetrics;
+
     private static final Logger log = LoggerFactory.getLogger(OrderService.class);
 
     /** 支付流水号的日期段格式（{@code PAY} + {@code yyyyMMdd} + 6 位随机）。 */
@@ -247,7 +259,8 @@ public class OrderService {
                         CouponService couponService,
                         GoodsDao goodsDao,
                         SeckillDao seckillDao,
-                        StockMetrics stockMetrics) {
+                        StockMetrics stockMetrics,
+                        ProtectionMetrics protectionMetrics) {
         this.orderDao = orderDao;
         this.lockService = lockService;
         this.orderStateMachine = orderStateMachine;
@@ -260,6 +273,7 @@ public class OrderService {
         this.goodsDao = goodsDao;
         this.seckillDao = seckillDao;
         this.stockMetrics = stockMetrics;
+        this.protectionMetrics = protectionMetrics;
     }
 
     // ==================== 下单 ====================
@@ -593,6 +607,13 @@ public class OrderService {
         try {
             int sameOrderId = orderDao.countByOrderId(OrderId);
             if (sameOrderId > 0) {
+                // 块 7 · 2026-10-17 用户最终口径：这是**防护层成功防御**（同一 OrderId 的重复
+                // 提交被幂等查重挡下，业务只执行了一次）⇒ 事件必须是 PROTECT（紫），
+                // 不能算进「业务失败率」。埋点放在早退**之前**，只记事实、不改返回值。
+                String oid = OrderId == null ? "" : OrderId;
+                protectionMetrics.blocked("duplicateSubmit", "order",
+                        "orderId=" + (oid.length() > 64 ? oid.substring(0, 64) + "…" : oid) + " 已存在",
+                        null, "幂等查重命中：同一 OrderId 重复提交");
                 result.put("success", false);
                 result.put("msg", "订单已存在，请勿重复提交");
                 return result;

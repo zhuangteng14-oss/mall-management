@@ -54,11 +54,12 @@ import java.util.concurrent.atomic.AtomicLong;
  *   <li><b>severity 规则（一处定义，九处适用）</b>：
  *       <pre>
  *       error   ← result = error（抛异常 / 真失败）
- *       protect ← 入站限流 / 熔断翻转（blocked / opened / half_open / shed）与身份鉴权拒绝
- *                 —— 「防护层主动挡下，业务没有被执行」；页面用紫色，**不计入业务失败率**
+ *       protect ← 入站限流 / 熔断翻转（blocked / opened / half_open / shed）、身份鉴权拒绝、
+ *                 重复提交拦截、敏感词拒收 / 打码
+ *                 —— 「防护层主动挡下或改写，业务没有被执行」；页面用紫色，**不计入业务失败率**
  *       warn    ← result ∈ {failed, rejected, timeout, degraded, skipped_degraded,
  *                          insufficient, lease_lost, retry_failed}
- *                 —— 「真的业务失败 / 降级 / 重试仍失败」（如库存不足、超卖拦截）
+ *                 —— 「真的业务失败 / 降级 / 重试仍失败」（如库存不足、超卖拦截、异步流转被拒）
  *       info    ← 其余（成功路径、以及 miss / missing 这类「什么也没发生」）
  *       </pre>
  *       ⚠️ 它是**展示口径**（页面据此配色），不是契约 —— 改它只影响日志页的颜色，
@@ -743,7 +744,10 @@ public class EventBroadcaster {
         fields.put("hit", e.hit());
         fields.put("total", e.total());
         putReason(fields, e.reason());
-        return new Emit(masked ? Severity.INFO.tag : Severity.WARN.tag,
+        // 用户 2026-10-17 最终口径：敏感词拒收 / 打码都是**防护层成功防御**（内容被挡下/被改写，
+        //   业务没有受损）⇒ PROTECT（紫），不是业务失败。只有真正执行失败才配 WARN。
+        //   未知 result 仍按防护处理：本环只可能因「敏感词」触发，未知值不该倒灌成业务失败。
+        return new Emit(Severity.PROTECT.tag,
                 masked ? "敏感词打码" : "敏感词拒收", detail, fields);
     }
 
@@ -781,6 +785,10 @@ public class EventBroadcaster {
                     title = "入站限流拦下";
                 } else if ("circuitBreak".equals(key)) {
                     title = "熔断开路拒绝（未执行）";
+                } else if ("duplicateSubmit".equals(key)) {
+                    // 幂等查重挡下同一 OrderId 的重复提交（OrderService.addLocked）——
+                    // 属于防护层的成功防御，不是业务失败。
+                    title = "重复提交拦截（未执行）";
                 } else {
                     title = "防护拦下：" + key;
                 }

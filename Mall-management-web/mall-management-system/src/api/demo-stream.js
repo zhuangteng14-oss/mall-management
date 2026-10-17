@@ -237,8 +237,9 @@ const KIND_CONTENT = {
   sensitive: {
     ids: ['代购', '刷单', '假货'],
     titles: [
-      { w: 6, sev: 'warn', title: '敏感词命中，已拦截', result: 'rejected', dur: [20, 300] },
-      { w: 4, sev: 'info', title: '敏感词命中（仅告警）', result: 'masked', dur: [20, 300] },
+      // 2026-10-17 用户最终口径：拒收 / 打码都是防护层成功防御 ⇒ 紫（protect），不进业务失败率。
+      { w: 6, sev: 'protect', title: '敏感词命中，已拦截', result: 'rejected', dur: [20, 300] },
+      { w: 4, sev: 'protect', title: '敏感词命中（仅告警）', result: 'masked', dur: [20, 300] },
     ],
   },
   identity: {
