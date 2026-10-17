@@ -1,0 +1,77 @@
+块 7 · 3a.3 收尾（批 1）—— 图标色 / 模拟日常假帧 / 两档手验 证据
+日期：2026-10-17   分支：feat/c3-admin-block7   基线：0fb30b3
+
+一、静态与离线判据
+  · npx eslint src/api/demo-stream.js src/views/admin/observe/EventLog.vue
+    ⇒ EXIT=0（只有 caniuse-lite 过旧提示，无 error/warning）
+  · node scripts/probes/demo-stream-check.mjs
+    ⇒ 全部通过（31 条 PASS；含十五键 / actor 两形态 / durationUs / 各环 fields 键集 /
+       src 只在 detail / remaining 只在 stock ok|insufficient 有值 / 同种子可复演）
+
+二、页面级判据（headless Edge + 探针自带后端 mock）
+  命令：node scripts/probes/probe-b7a3-eventlog-rewrite.mjs
+  结果：178 项 / 0 失败（原 171 项 + 新增 7 项）
+
+  ㉔10 图标色（读**计算色**，令牌从 CSS 现取；admin 主题）：
+    令牌：--c1=rgb(47,111,237)  --c4=rgb(245,158,11)
+          --warning=rgb(245,158,11)  --ink-2=rgb(163,174,194)
+    ② 过滤栏：缓存 icon = rgb(47,111,237)（蓝）；库存 icon = rgb(245,158,11)（琥珀）
+    ③ 事件流：缓存 icon = rgb(47,111,237)；库存 icon = rgb(245,158,11)
+    ④ 类计数：缓存 icon = rgb(47,111,237)
+    ④ 严重度：警告 icon = rgb(245,158,11)；② 栏底警告圆点 background = rgb(245,158,11)
+    判据：③ 同类 = ② 同类 = ④ 同类；三处均 ≠ --ink-2（修复前是灰白 rgb(163,174,194)）
+    ⚠️ 用户参考判据写「② 库存图标 = 绿」，但色板里 stock = --c4 = 琥珀 #f59e0b
+       （绿是 order = --c3 #22c55e）。本次按「同类同色」的结构性判据落地，色板未改；
+       是否把 stock 改成绿，留待用户裁定。
+
+  ㉔10 现场值（一次运行）：
+    {"令牌":{"c1":"rgb(47, 111, 237)","c4":"rgb(245, 158, 11)","warning":"rgb(245, 158, 11)","ink2":"rgb(163, 174, 194)"},
+     "②类":{"缓存":"rgb(47, 111, 237)","库存":"rgb(245, 158, 11)"},"②严重度圆点":"rgb(245, 158, 11)",
+     "③类":{"缓存":"rgb(47, 111, 237)","库存":"rgb(245, 158, 11)"},
+     "④类":{"缓存":"rgb(47, 111, 237)"},"④严重度":{"警告":"rgb(245, 158, 11)"}}
+
+  ⑯+ 演示假帧上屏（切「模拟日常」后 4.5 秒）：
+    {"缓存从句":"好友申请",
+     "审计上下文":"（操作者 M205 · 动作 商品更新 · trace t2cd · 耗时 450 µs）",
+     "库存上下文":"（剩余 56 件 · trace t2c5 · 耗时 721 µs）",
+     "带耗时行数":51,"总行数":51}
+    ⇒ fields.cache / fields.actor / 顶层 remaining / durationUs 四样都真的被页面念出来了。
+
+三、两档手验（真后端 dev profile 8088 × 前端 dev server 8080）
+  后端：bash _work/c10b-restart.sh（dev profile，app.auth.enabled=false）
+  前端：npm run serve（8080，先删 node_modules/.cache/eslint）
+  步骤：打开 admin.html ⇒ 写前端登录态（dev 无管理员种子，只给路由守卫看）⇒ 实时日志页
+        ⇒ 「正常」截图 ⇒ 点「模拟日常」⇒ 再截图
+
+  「正常」档（真流）：
+    行数 6；数据源 = 正常(on) / 模拟日常
+    文本节选：
+      请求开始 首页商品
+      缓存 L1 未命中 首页商品 键 all-v3（trace 16170752 · 耗时 74 µs）
+      缓存 L2 未命中 首页商品 键 all-v3（trace 16170752 · 耗时 53 ms）
+      缓存 回源查库 首页商品 键 all-v3（trace 16170752 · 耗时 226 ms）
+    ⚠️ dev profile 下 actor 恒 null（闸关、无身份），这是预期，不是缺字段。
+
+  「模拟日常」档（前端假帧）：
+    行数 68；数据源 = 正常 / 模拟日常(on)；顶栏「假数据 · 不入库 · 已放 68 / 500 条」
+    文本节选：
+      订单 支付成功（待发货）待付款 → 已付款（待发货）订单 SO-20261015-1041（动作 付款 · trace t2c3 · 耗时 543 µs）
+      缓存 缓存预热超时 好友申请 键 u-1007（trace t2c4 · 耗时 6 ms）
+      库存 库存扣减 1 件 SKU GD-103-5196（剩余 56 件 · trace t2c5 · 耗时 721 µs）
+      缓存 L1 命中 首页商品 键 page:1（耗时 1 µs）
+      缓存 未命中，回源数据库 商品价格 键 GD-101-9552（trace t2c7 · 耗时 1 ms）
+
+  截图（与本文同目录）：
+    · 3a3-handverify-normal.png（「正常」档，真流 6 行）
+    · 3a3-handverify-demo.png（「模拟日常」档，68 行；② / ④ 图标有色）
+
+四、refs 收口
+  · before：git worktree add _work/wt-refs-before HEAD ⇒ 5217 条
+  · 正面对照：临时 md 里写一条已有引用，再在它上方插一行 ⇒ 恰好一对 LOST+NEW（扫描器有效）
+  · after（最后一次编辑之后）：5217 条
+  · 按「(引用者, token)」对比较：4150 对，LOST 3 / NEW 3，逐条配对：
+      tech-debt.md 的两处 demo-stream.js 指针：原 420 行 → 611 行；原 422 行 → 613 行
+      context-packs/c3-block-D-hardening.md 的区间指针：原 422-426 行 → 613-617 行
+    = 因 demo-stream.js 增行而跟随重指的 3 处，语义未变。
+  · docs/agent/evidence/c3-block7/b7w-demo-probe.txt 里的那条指针是**历史证据**，
+    写的是当时那次运行的行号，按证据冻结口径不改。

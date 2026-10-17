@@ -744,7 +744,7 @@
 
 | 口径 | 定义 | 块 7 前 | 块 7 后（HEAD） | 出处 |
 |---|---|---|---|---|
-| **后端 method-level** | 全仓 `*Controller.java` 中 `^\s*@(Post\|Get\|Put\|Delete)Mapping` 行数（**不含**类级 `@RequestMapping`） | **134** | **144**（+10） | 2026-10-15 实测：`grep -rhE "^\s*@(Post\|Get\|Put\|Delete)Mapping" --include=*Controller.java … \| wc -l` ⇒ **144**（原记 141 = +7，是 **commit 10c 的 `/attack/stop` 落地前**的读数；该端点补上后 +8 → 142；**块 7 收尾 commit 1** 再 +2（`/attack/status` · `/admin/observe/replay`）⇒ 144） |
+| **后端 method-level** | 全仓 `*Controller.java` 中 `^\s*@(Post\|Get\|Put\|Delete)Mapping` 行数（**不含**类级 `@RequestMapping`） | **134** | **146**（+12） | 2026-10-15 实测：`grep -rhE "^\s*@(Post\|Get\|Put\|Delete)Mapping" --include=*Controller.java … \| wc -l` ⇒ **144**（原记 141 = +7，是 **commit 10c 的 `/attack/stop` 落地前**的读数；该端点补上后 +8 → 142；**块 7 收尾 commit 1** 再 +2（`/attack/status` · `/admin/observe/replay`）⇒ 144）；**2026-10-17 实测 146**（**阶段 3a.1 乙案**的 `/config` 两条落地后 +2：`POST /admin/observe/attack/config` 写配置、`GET /admin/observe/attack/config` 读配置） |
 | **本文件 §2 的「36 个」** | 只数 5 个核心 Controller（`/user` / `/message` / `/goods` / `/order` / `/health`） | 36 | **36（一字未变）** | §2 标题 |
 | **前端 `endpoints.js`** | `key: '/path'` 条目数（含 2 处**同行两条**） | 133 | **143** | 该文件头注记账链（… → 133 → 141 → **143**）：块 7 commit 3 的 3 条 SSE + commit 4 的 3 条 + commit 8b 的 1 条 + commit 10c 的 1 条（`attackStop`）= 8 条，**块 7 收尾**再 +2（`observe.attackStatus` · `observe.replay`），**全落 `observe` 组**；实测 `grep -cE "^[[:space:]]*[A-Za-z0-9_]+:[[:space:]]*'/"` = **141 行**、+2 处同行两条 = 143 |
 

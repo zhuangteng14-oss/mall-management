@@ -1605,6 +1605,74 @@ try {
   ok('㉔9 ③ 的组头行也带中文名（`startLabel()` 的第二个消费点；认不出时会回落成裸路径）',
     typeof groupHead === 'string' && groupHead.includes('修改商品'), groupHead)
 
+  // ── ㉔10 图标色：② / ④ 必须与 ③ 同类**同色**（用户 2026-10-17 截图实测：这两处原本灰白）
+  //   ⚠️ 量的是**计算色**，令牌从 CSS 现取（不手抄十六进制）。三种元素分别读：
+  //      · ② / ③ / ④ 的 lucide 图标 → `color`（吃 `currentColor`）
+  //      · ② 栏底严重度那枚 8px 圆点 → `background-color`（它是色块，不是描边图标）
+  //   ⚠️ 负向一半：同时断言它们都**不再是 `--ink-2`** —— 否则「CSS 没接上」也能因为
+  //      `--c1` 恰好等于灰而假绿（虽然当前值不相等，但判据要写死这一条）。
+  const iconColor = await b.evalJS(`(() => {
+    const tok = (n) => {
+      const d = document.createElement('span')
+      d.style.color = 'var(' + n + ')'
+      document.body.appendChild(d)
+      const c = getComputedStyle(d).color
+      d.remove()
+      return c
+    }
+    const colorOf = (root, sel) => {
+      const e = root && root.querySelector(sel)
+      return e ? getComputedStyle(e).color : null
+    }
+    const railRow = (label) => [...document.querySelectorAll('.ev-rail .rows .row:not(.all):not(.is-fac)')]
+      .find((r) => { const k = r.querySelector('.k'); return k && k.textContent.trim() === label })
+    const barRow = (sel, label) => [...document.querySelectorAll(sel)]
+      .find((r) => { const n = r.querySelector('.nm'); return n && n.textContent.trim().startsWith(label) })
+    // ⚠️ ③ 的行没有「类名」列：.md 是折叠摘要（主行恒空），要认类只能看标题
+    //    （.ms b = title）。探针假帧里「缓存命中（L1）」/「库存扣减」是**不同标题**，
+    //    所以这能唯一定位到两类各一行。
+    //    ⚠️ 本段是模板字符串：注释里写反引号会把模板提前闭合（本轮就是这样炸的）。
+    const lineByTitle = (title) => [...document.querySelectorAll('.log-line')]
+      .find((r) => { const m = r.querySelector('.ms b'); return m && m.textContent.trim() === title })
+    const sevChip = (label) => [...document.querySelectorAll('.ev-rail .sevchip')]
+      .find((r) => r.textContent.trim().startsWith(label))
+    return {
+      令牌: {
+        c1: tok('--c1'), c4: tok('--c4'),
+        warning: tok('--warning'), ink2: tok('--ink-2'),
+      },
+      '②类': { 缓存: colorOf(railRow('缓存'), '.ic svg'), 库存: colorOf(railRow('库存'), '.ic svg') },
+      '②严重度圆点': (() => {
+        const d = sevChip('警告') && sevChip('警告').querySelector('.dot')
+        return d ? getComputedStyle(d).backgroundColor : null
+      })(),
+      '③类': {
+        缓存: colorOf(lineByTitle('缓存命中（L1）'), '.ic svg'),
+        库存: colorOf(lineByTitle('库存扣减'), '.ic svg'),
+      },
+      '④类': { 缓存: colorOf(barRow('.ev-bars:not(.sev) .ev-bar', '缓存'), '.nm svg') },
+      '④严重度': { 警告: colorOf(barRow('.ev-bars.sev .ev-bar', '警告'), '.nm svg') },
+    }
+  })()`)
+  ok('㉔10 ② 过滤栏：缓存图标 = `--c1`（蓝）、库存图标 = `--c4`，且都**不再是 `--ink-2` 灰白**',
+    iconColor['②类'].缓存 === iconColor.令牌.c1 && iconColor['②类'].库存 === iconColor.令牌.c4
+    && iconColor['②类'].缓存 !== iconColor.令牌.ink2 && iconColor['②类'].库存 !== iconColor.令牌.ink2,
+    iconColor)
+  ok('㉔10 ④ 类计数：缓存图标 = `--c1`；④ 严重度：警告图标 = `--warning`（黄），不是灰白',
+    iconColor['④类'].缓存 === iconColor.令牌.c1
+    && iconColor['④严重度'].警告 === iconColor.令牌.warning
+    && iconColor['④类'].缓存 !== iconColor.令牌.ink2 && iconColor['④严重度'].警告 !== iconColor.令牌.ink2,
+    iconColor)
+  ok('㉔10 **同类同色**：③ 的缓存/库存图标 = ② 的缓存/库存图标 = ④ 的缓存图标；'
+    + '④ 警告图标 = ② 栏底那枚警告圆点（同一档严重度色）',
+    iconColor['③类'].缓存 === iconColor['②类'].缓存
+    && iconColor['③类'].库存 === iconColor['②类'].库存
+    && iconColor['④类'].缓存 === iconColor['②类'].缓存
+    && iconColor['④严重度'].警告 === iconColor['②严重度圆点'],
+    iconColor)
+  await zoomShot('.ev-rail .rows', `${WORK}zoom-3a3-icons-color-rail.png`, { 宽: 210, 高: 120, scale: 5 })
+  await zoomShot('.ev-live', `${WORK}zoom-3a3-icons-color-live.png`, { 宽: 340, 高: 330, scale: 4 })
+
   // ══ 裁定 B · 切源 = 隔离，不是清空 + 易漏项① 演示下 ⑤ 起止恒空 ══════════════════
   // `api/demo-stream.js:364` 逐字：「演示不造请求链路（日志页那张抽屉留空，不去编一条假的调用链）」
   // ⇒ 演示帧的 `traces` **恒为 `[]`**；而事件行 75% 带 `traceId`（`:298`）
@@ -1640,6 +1708,37 @@ try {
     demoHasNormal === false && demoReq === 0, { 有真流残留: demoHasNormal, req: demoReq })
   const demoOpenable = await b.evalJS(`document.querySelectorAll('.log-line[role="button"]').length`)
   ok('⑯ 演示下的行**仍然可点**（事件带 traceId）', demoOpenable > 0, demoOpenable)
+  // ── ⑯+ 3a.3：演示假帧补的三样（fields / durationUs / remaining / actor）**在页面上真的看得见**
+  //   ⚠️ 只验「假帧里有这几个键」是离线探针（`demo-stream-check.mjs`）的事；这里验的是
+  //      **前端有没有把它们念出来** —— 两件事缺一不可（假数据对了但页面不显示，等于没做）。
+  //   ⚠️ 演示场次是随机的（种子固定但已推了几秒），所以按「八大类里找得到一条」来断言，
+  //      不钉死某一行；`库存扣减` / 审计四档标题在演示里是高频，4.5 秒足够出现。
+  const demoShape = await b.evalJS(`(() => {
+    const rows = [...document.querySelectorAll('.log-line')]
+    const midOf = (r) => { const m = r.querySelector('.se-mid'); return m ? m.textContent.trim() : '' }
+    const ctxOf = (r) => { const m = r.querySelector('.se-ctx'); return m ? m.textContent.trim() : '' }
+    const titleOf = (r) => { const b = r.querySelector('.ms b'); return b ? b.textContent.trim() : '' }
+    const CACHE_ZH = ['商品类型', '首页商品', '店铺商品', '商品价格', '商品编码', '好友列表', '好友申请', '用户公开资料']
+    const AUDIT_TITLES = ['商品更新', '通知发送', '敏感词新增', '举报处理']
+    const cache = rows.find((r) => CACHE_ZH.includes(midOf(r)))
+    const audit = rows.find((r) => AUDIT_TITLES.includes(titleOf(r)))
+    const stock = rows.find((r) => titleOf(r) === '库存扣减')
+    return {
+      缓存从句: cache ? midOf(cache) : null,
+      审计上下文: audit ? ctxOf(audit) : null,
+      库存上下文: stock ? ctxOf(stock) : null,
+      带耗时行数: rows.filter((r) => ctxOf(r).includes('耗时')).length,
+      总行数: rows.length,
+    }
+  })()`)
+  ok('⑯+ 演示假帧的 `fields` 真的落到了句子里：某条缓存的从句 = 缓存区中文名（不是英文 tag）',
+    demoShape.缓存从句 !== null, demoShape)
+  ok('⑯+ `actor` 真的落到了页面上：审计行的括号里出现「操作者 <业务号>」',
+    !!demoShape.审计上下文 && demoShape.审计上下文.includes('操作者'), demoShape)
+  ok('⑯+ 顶层 `remaining` 真的落到了页面上：库存扣减行的括号里出现「剩余 N 件」',
+    !!demoShape.库存上下文 && /剩余\s*\d+\s*件/.test(demoShape.库存上下文), demoShape)
+  ok('⑯+ `durationUs` 真的落到了页面上：演示行里有「耗时」这一格（且有不止一行）',
+    demoShape.带耗时行数 > 1, demoShape)
   if (demoOpenable > 0) {
     await b.evalJS(`document.querySelector('.log-line[role="button"]').click()`)
     await sleep(400)

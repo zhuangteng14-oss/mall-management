@@ -154,6 +154,7 @@
               type="button"
               class="row"
               :class="{ off: !activeKinds.has(k) }"
+              :style="{ '--c': kindColor(k) }"
               :title="`${kindLabel(k)}：范围内 ${sessionByKind[k] || 0} 条（点一下${activeKinds.has(k) ? '关掉' : '打开'}这一类）`"
               @click="toggleKind(k)"
             >
@@ -338,7 +339,7 @@
               <!-- 用户 2026-10-16「④ 类计数 9 类：无 → 每类前加图标」（与 ② 同一套 `KIND_ICON`）。
                    ⚠️ D 块：图标与文字之间原来是**一个空格**（12px 字号下 ≈3px），达不到 6–8px
                    ⇒ 删掉那个空格、改由 `.nm` 的 `gap` 定间距（间距从此是 CSS 里量得出来的一格）。 -->
-              <span class="nm"><component :is="KIND_ICON[k]" class="ev-ic s" />{{ kindLabel(k) }}</span>
+              <span class="nm"><component :is="KIND_ICON[k]" class="ev-ic s" :style="{ color: kindColor(k) }" />{{ kindLabel(k) }}</span>
               <span class="track"><span class="fill" :style="{ width: barW(sessionByKind[k] || 0, kindMax) }"></span></span>
               <span class="num">{{ fmtInt(sessionByKind[k] || 0) }}</span>
             </div>
@@ -370,7 +371,7 @@
                      一套，同一个事件可能同时出现在「缓存」和「error」两个条上，图标不该一样。
                    ⚠️ D 块：图标后那个空格与上面类计数那条**同款**，一起删（间距交给 `.ev-bar .nm`
                      的 `gap`）—— 只删一处会让 ④ 的两排横条间距不同档。 -->
-              <span class="nm"><component :is="SEV_ICON[s]" class="ev-ic s" />{{ severityLabel(s) }}</span>
+              <span class="nm"><component :is="SEV_ICON[s]" class="ev-ic s" :style="{ color: severityColor(s) }" />{{ severityLabel(s) }}</span>
               <span class="track"><span class="fill" :style="{ width: barW(sessionBySev[s] || 0, sevMax), background: severityColor(s) }"></span></span>
               <span class="num">{{ fmtInt(sessionBySev[s] || 0) }}</span>
             </button>
@@ -2093,7 +2094,11 @@ onBeforeUnmount(() => {
   justify-content: center;
   width: 12px;
   flex: none;
-  color: var(--ink-2);
+  /* 用户 2026-10-17：② 的类图标要与 ③ 同类**同色**（截图实测这里原来是 `--ink-2` 灰白，
+     `KIND_COLOR` 只喂到了 ③ 的 `.log-line .ic`）。`--c` 由行上的内联样式给（= `kindColor(k)`）；
+     认不出时回落中性灰（与 `kindColor()` 的兜底同一档）。`.row.off` 那条规则特异性更高，
+     关掉该类时仍然整行转灰 —— 关掉的类不该继续亮着。 */
+  color: var(--c, var(--ink-2));
 }
 .ev-rail .row.off .ic {
   color: var(--ink-3);

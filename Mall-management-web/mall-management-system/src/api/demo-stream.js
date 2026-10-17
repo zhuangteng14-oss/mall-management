@@ -133,80 +133,116 @@ const KIND_WEIGHT = [
   { kind: 'identity', w: 3 },
 ]
 
-/** 类 → 标题池（`w` 是相对频率、`sev` 是严重度）+ 对象池。 */
+/* ══════════════════════════════════════════════════════════════════════════
+   ★ 2026-10-17（3a.3 收尾）：假帧补上 3a.3 新增的三样 —— `actor` / `durationUs` / `fields`。
+   ⚠️ **形状逐字对齐真帧**（`EventStreamService.frame()` 的 `eventRow()` 十五键），值是编的：
+      · `actor` 是 `{id, role}` 对象或 **null**（无身份），不是两个平铺字段；
+      · `durationUs` 单位是**微秒**（亚毫秒的照实写 µs，不四舍五入成 0 ms）；
+      · `fields` 的键名**逐环照抄后端 `EventBroadcaster` 的 `Emit`**
+        （cache/lock 是 cache|lock/result/key，order 是 action/result/from/to/order，
+         stock 是 kind/sku/qty/result，audit 是 actor/action/reason，
+         notify 是 to/event/reason，sensitive 是 scene/hit/total，identity 是 subject/reason）；
+      · `remaining` 仍是**顶层键**（只有库存扣减档有值，扣得动/扣不动两档），**不塞进 fields**
+        —— 真帧就是这么给的（见 `StockMetrics.StockEvent#remaining()`）；
+      · `src=环名#源seq` 只在 `detail` 尾部，**不进 fields**（后端 `add()` 的追加位置）。
+   ⚠️ **诚实边界**：这里的 `actor` 是编出来的演示身份，不是这台后端的真实会话。
+      默认 profile 下真流有 actor；dev/a3 下 `app.auth.enabled=false`，真流恒为 null。
+      演示模式出现 actor，是为了让「谁做的」这一要素在模拟日常里也看得见，
+      **不代表**这台后端登录过谁（页面上「模拟日常」那枚开关仍在自报家门）。
+   ══════════════════════════════════════════════════════════════════════════ */
+
+/** 缓存区 8 个（有界 —— `@Cacheable(cacheNames=…)` 的去重值，见 `api-labels.js` 的 `CACHE_AREA_LABEL`）。
+ *  每项 = [区名, 该区一个像样的键]；演示的 `objectId` 就是键。 */
+const CACHE_AREAS = [
+  ['userPublic', 'adminC3r00t'],
+  ['goodsHome', 'page:1'],
+  ['goodstype', 'all'],
+  ['goodsByMerchant', 'M205'],
+  ['goodsPrice', 'GD-101-9552'],
+  ['goodsCodes', 'GD-101-9552'],
+  ['friendList', 'u-1001'],
+  ['friendRequests', 'u-1007'],
+]
+
+/** 锁名 5 把（`DistributedLockService.LockName` 的 tag，有界 —— 别写不存在的值）。 */
+const LOCK_NAMES = ['order-add', 'order-pay', 'order-receive', 'order-delivery', 'friend-add']
+
+/** 审计的发起人池：管理员 / 商家 / 客户各一（角色号即 `login.Role`：1 客户 / 2 商家 / 3 管理员）。 */
+const AUDIT_ACTORS = [
+  ['adminC3r00t', 3],
+  ['M205', 2],
+  ['C1086', 1],
+]
+
+/** 类 → 标题池（`w` 是相对频率、`sev` 是严重度）+ 各环自己的业务参数。
+ *  ⚠️ `dur` = `durationUs` 的取值区间（**微秒**；缺 = 这一档没有有意义的耗时，落 null）。
+ *     `null` 是**判定**不是漏填：真帧里也不是每条事件都测得到耗时。 */
 const KIND_CONTENT = {
   cache: {
-    ids: ['goods:1021', 'goods:1044', 'sku:GD-101-9552', 'coupon:51', 'seckill:3'],
     titles: [
-      { w: 20, sev: 'info', title: 'L1 命中' },
-      { w: 10, sev: 'info', title: 'L2 命中' },
-      { w: 5, sev: 'info', title: '未命中，回源数据库' },
-      { w: 2, sev: 'warn', title: '缓存预热超时' },
+      { w: 20, sev: 'info', title: 'L1 命中', result: 'hit', dur: [1, 8] },
+      { w: 10, sev: 'info', title: 'L2 命中', result: 'hit', dur: [80, 400] },
+      { w: 5, sev: 'info', title: '未命中，回源数据库', result: 'miss', dur: [300, 1500] },
+      { w: 2, sev: 'warn', title: '缓存预热超时', result: 'timeout', dur: [2000, 8000] },
     ],
   },
   lock: {
-    ids: ['t_order', 't_goods', 't_seckill_stock', 't_coupon'],
     titles: [
-      { w: 18, sev: 'info', title: '获得行锁' },
-      { w: 6, sev: 'info', title: '锁等待 120ms' },
-      { w: 2, sev: 'warn', title: '锁等待超时，已放弃' },
-      { w: 1, sev: 'error', title: '死锁，已回滚重试' },
+      { w: 18, sev: 'info', title: '获得行锁', result: 'acquired', dur: [20, 300] },
+      { w: 6, sev: 'info', title: '锁等待 120ms', result: 'timeout', dur: [120000, 120000] },
+      { w: 2, sev: 'warn', title: '锁等待超时，已放弃', result: 'timeout', dur: [3000000, 5000000] },
+      { w: 1, sev: 'error', title: '死锁，已回滚重试', result: 'error', dur: [1000000, 3000000] },
     ],
   },
   order: {
-    ids: [], // 订单号由世界现编（见 `nextOrderId`）
     titles: [
-      { w: 16, sev: 'info', title: '订单创建（待付款）' },
-      { w: 12, sev: 'info', title: '支付成功（待发货）' },
-      { w: 9, sev: 'info', title: '发货成功（待收货）' },
-      { w: 8, sev: 'info', title: '确认收货（已完成）' },
-      { w: 2, sev: 'warn', title: '订单取消' },
+      { w: 16, sev: 'info', title: '订单创建（待付款）', action: 'create', result: 'ok', to: 'CREATED', dur: [300, 1200] },
+      { w: 12, sev: 'info', title: '支付成功（待发货）', action: 'pay', result: 'ok', from: 'CREATED', to: 'PAID', dur: [500, 2500] },
+      { w: 9, sev: 'info', title: '发货成功（待收货）', action: 'deliver', result: 'ok', from: 'PAID', to: 'SHIPPED', dur: [400, 2000] },
+      { w: 8, sev: 'info', title: '确认收货（已完成）', action: 'receive', result: 'ok', from: 'SHIPPED', to: 'COMPLETED', dur: [300, 1500] },
+      { w: 2, sev: 'warn', title: '订单取消', result: 'cancelled', reason: 'user_cancel', dur: [200, 1000] },
     ],
   },
   stock: {
     ids: ['GD-101-9552', 'GD-103-5196', 'GD-102-3310'],
     titles: [
-      { w: 12, sev: 'info', title: '库存扣减' },
-      { w: 3, sev: 'warn', title: '库存水位偏低' },
-      { w: 2, sev: 'warn', title: '库存不足，已拒绝' },
-      { w: 1, sev: 'error', title: '超卖拦截' },
+      // `remaining` = 扣减那一刻的剩余件数：真帧里 `deduct` 的 ok / insufficient 两档有值，
+      // error 与 release 恒 null（口径见 `StockMetrics.StockEvent#remaining()`）。
+      { w: 12, sev: 'info', title: '库存扣减', result: 'ok', remaining: [20, 90], dur: [200, 1200] },
+      { w: 3, sev: 'warn', title: '库存水位偏低', result: 'ok', remaining: [1, 8], dur: [200, 1200] },
+      { w: 2, sev: 'warn', title: '库存不足，已拒绝', result: 'insufficient', remaining: [0, 0], dur: [100, 600] },
+      { w: 1, sev: 'error', title: '超卖拦截', result: 'error', remaining: null, dur: [100, 800] },
     ],
   },
   audit: {
-    // ⚠️ `objectType` 走 `TARGET_TYPE_LABEL` 的域前缀（审计那类才带它）。
-    ids: [
-      ['goods', '20'],
-      ['order', '7'],
-      ['sensitive_word', '3'],
-      ['report', '11'],
-    ],
+    // ⚠️ `target` = [TargetType, TargetId]；`objectType` 走 `TARGET_TYPE_LABEL` 的域前缀（审计那类才带它）。
     titles: [
-      { w: 10, sev: 'info', title: '商品更新' },
-      { w: 6, sev: 'info', title: '通知发送' },
-      { w: 4, sev: 'info', title: '敏感词新增' },
-      { w: 3, sev: 'info', title: '举报处理' },
+      { w: 10, sev: 'info', title: '商品更新', action: 'goods.update', target: ['goods', '20'], dur: [100, 900] },
+      { w: 6, sev: 'info', title: '通知发送', action: 'notification.send', target: ['notification', '5'], dur: [50, 500] },
+      { w: 4, sev: 'info', title: '敏感词新增', action: 'sensitive_word.add', target: ['sensitive_word', '3'], dur: [50, 400] },
+      { w: 3, sev: 'info', title: '举报处理', action: 'report.handle', target: ['report', '11'], dur: [100, 700] },
     ],
   },
   notify: {
     ids: ['u-1001', 'u-1007', 'u-1024'],
     titles: [
-      { w: 10, sev: 'info', title: '通知已投递' },
-      { w: 3, sev: 'warn', title: '通知投递失败，已重试' },
-      { w: 1, sev: 'error', title: '通知模板缺失' },
+      { w: 10, sev: 'info', title: '通知已投递', result: 'sent', to: 'customer', event: 'order.notice', dur: [50, 400] },
+      { w: 3, sev: 'warn', title: '通知投递失败，已重试', result: 'failed', to: 'merchant', event: 'goods.audit.passed', reason: 'SMTP 超时', dur: [1000, 3000] },
+      { w: 1, sev: 'error', title: '通知模板缺失', result: 'failed', to: 'customer', event: 'comment.reply', reason: '模板不存在', dur: [1, 20] },
     ],
   },
   sensitive: {
     ids: ['代购', '刷单', '假货'],
     titles: [
-      { w: 6, sev: 'warn', title: '敏感词命中，已拦截' },
-      { w: 4, sev: 'info', title: '敏感词命中（仅告警）' },
+      { w: 6, sev: 'warn', title: '敏感词命中，已拦截', result: 'rejected', dur: [20, 300] },
+      { w: 4, sev: 'info', title: '敏感词命中（仅告警）', result: 'masked', dur: [20, 300] },
     ],
   },
   identity: {
     ids: ['/api/order/create', '/api/goods/list', '/api/seckill/1'],
     titles: [
-      { w: 8, sev: 'info', title: '身份放行' },
-      { w: 1, sev: 'error', title: '身份校验失败' },
+      { w: 8, sev: 'info', title: '身份放行', result: 'passed', dur: [10, 100] },
+      { w: 1, sev: 'error', title: '身份校验失败', result: 'rejected', reason: '令牌过期', dur: [10, 100] },
     ],
   },
 }
@@ -238,6 +274,9 @@ function newWorld() {
     orderNo: 1040,   // 订单号递增器
     orders: [],      // 会话内建过的单（新→旧）
     counts: { waitPay: 14, waitShip: 9, waitReceive: 6, completed: 41, cancelled: 4 },
+    // 每个环自己的「源 seq」—— 只喂 `detail` 尾部那格 `src=环名#n`（真帧由各源环的计数器给）。
+    // ⚠️ 按环分开计数（不是全场一个），否则九类会共用一条递增线，读起来不像九条源环。
+    srcSeqs: {},
   }
 }
 
@@ -267,36 +306,188 @@ function dbTime(ms) {
    四、造事件 / 造订单动作（两页共用同一批「活动条数」）
    ══════════════════════════════════════════════════════════════════════════ */
 
+/** 某个环的源 seq（`detail` 尾部那格 `src=环名#n` 用它）。按环独立、0 起 —— 同真帧。 */
+function nextSrcSeq(w, kind) {
+  const cur = w.srcSeqs[kind]
+  const next = cur === undefined ? 0 : cur + 1
+  w.srcSeqs[kind] = next
+  return next
+}
+
+/** 业务键：优先用会话里最新那张单（订单环与锁环共用同一个「世界」）。 */
+function orderRef(w) {
+  return w.orders.length ? w.orders[0].orderId : nextOrderId(w)
+}
+
+/** 编一个演示身份对象。角色号与 `login.Role` 同口径：1 客户 / 2 商家 / 3 管理员。 */
+function actorOf(id) {
+  const s = String(id)
+  if (s === 'adminC3r00t') return { id: s, role: 3 }
+  return { id: s, role: s.startsWith('M') ? 2 : 1 }
+}
+
+/** 这条事件挂在谁身上。`null` = 没有身份（定时任务 / 消息线程；真帧同样允许）。 */
+function makeActor(w, kind) {
+  // 九成挂在请求线程上；剩下一成是后台任务 —— 真流里那些 actor 就是 null。
+  if (w.rnd() >= 0.9) return null
+  if (kind === 'notify') {
+    return actorOf(w.rnd() < 0.5
+      ? `C${intBetween(w.rnd, 1001, 1099)}`
+      : `M${intBetween(w.rnd, 201, 209)}`)
+  }
+  return actorOf(`C${intBetween(w.rnd, 1001, 1099)}`)
+}
+
+/** 去掉值为 `undefined` 的键（JSON 里本来也会丢；这里先丢，免得 `hasOwnProperty` 判到它）。 */
+function dropUndef(o) {
+  for (const k of Object.keys(o)) if (o[k] === undefined) delete o[k]
+  return o
+}
+
+/**
+ * 这一条事件的「各环自己的业务字段」—— `objectType` / `objectId` / `key` / `fields`
+ * （外加库存扣减档的 `remaining`、审计档的 `actor`）。
+ *
+ * ⚠️ 逐环键名**照抄后端 `EventBroadcaster` 的九个 `fromXxx`**，不是一套通用词汇：
+ *    `cache`/`lock` 用 `cache|lock/result/key`，`order` 用 `action/result/from/to/order`，
+ *    `stock` 用 `kind/sku/qty/result`，`audit` 用 `actor/action/reason`，
+ *    `notify` 用 `to/event/reason`，`sensitive` 用 `scene/hit/total`，`identity` 用 `subject/reason`。
+ *    多一个键或少一个键都会让前端「fields 优先」那条路静默走到回落分支。
+ */
+function buildBody(w, kind, t) {
+  switch (kind) {
+    case 'cache': {
+      const [area, key] = pickOne(w.rnd, CACHE_AREAS)
+      return { objectType: '', objectId: key, key, fields: { cache: area, result: t.result, key } }
+    }
+    case 'lock': {
+      const lock = pickOne(w.rnd, LOCK_NAMES)
+      const bizKey = lock === 'friend-add'
+        ? `friend:add/u-${intBetween(w.rnd, 1001, 1099)}->u-${intBetween(w.rnd, 1001, 1099)}`
+        : `${lock}/${orderRef(w)}`
+      return { objectType: '', objectId: bizKey, key: bizKey, fields: { lock, result: t.result, key: bizKey } }
+    }
+    case 'order': {
+      const orderId = orderRef(w)
+      return {
+        objectType: '', objectId: orderId, key: orderId,
+        fields: dropUndef({
+          action: t.action, result: t.result, from: t.from, to: t.to,
+          order: orderId, reason: t.reason,
+        }),
+      }
+    }
+    case 'stock': {
+      const sku = pickOne(w.rnd, KIND_CONTENT.stock.ids)
+      return {
+        objectType: '', objectId: sku, key: sku,
+        fields: { kind: 'deduct', sku, qty: intBetween(w.rnd, 1, 3), result: t.result },
+        // ⚠️ `remaining` 是**顶层键**（不是 fields 的一格）：只有扣减的 ok / insufficient 两档有值。
+        remaining: t.remaining ? intBetween(w.rnd, t.remaining[0], t.remaining[1]) : null,
+      }
+    }
+    case 'audit': {
+      const [id, role] = pickOne(w.rnd, AUDIT_ACTORS)
+      return {
+        objectType: t.target[0], objectId: t.target[1], key: id,
+        // 审计环的 `actor` 是**字符串业务号**（来自审计行的 Actor 列），与顶层 `actor` 对象不是一回事。
+        fields: { actor: id, action: t.action, reason: null },
+        actor: { id, role },
+      }
+    }
+    case 'notify': {
+      const toId = pickOne(w.rnd, KIND_CONTENT.notify.ids)
+      return {
+        objectType: '', objectId: toId, key: toId,
+        fields: { to: t.to, event: t.event, reason: t.reason === undefined ? null : t.reason },
+      }
+    }
+    case 'sensitive': {
+      const words = pickOne(w.rnd, KIND_CONTENT.sensitive.ids)
+      return {
+        objectType: '', objectId: words, key: words,
+        fields: { scene: '评论', hit: intBetween(w.rnd, 1, 3), total: intBetween(w.rnd, 20, 120) },
+      }
+    }
+    case 'identity': {
+      const path = pickOne(w.rnd, KIND_CONTENT.identity.ids)
+      const subject = `u-${intBetween(w.rnd, 1001, 1099)}`
+      return {
+        objectType: '', objectId: path, key: subject,
+        fields: { subject, reason: t.reason === undefined ? null : t.reason },
+      }
+    }
+    default:
+      return { objectType: '', objectId: '', key: '', fields: null }
+  }
+}
+
+/**
+ * `detail` 的拼法 —— **逐环照抄后端 `EventBroadcaster` 的 `detail` 形状**，尾部追加
+ * `src=环名#源seq`（后端在 `add()` 里统一追加，前端不把 src 放进 `fields`）。
+ * ⚠️ 这是给人读的孪生串；结构化那份在 `fields`，两者说的是同一批事实。
+ */
+function detailFor(kind, fields, srcSeq) {
+  let body
+  switch (kind) {
+    case 'cache':
+      body = `cache=${fields.cache} result=${fields.result} key=${fields.key}`
+      break
+    case 'lock':
+      body = `lock=${fields.lock} result=${fields.result} key=${fields.key}`
+      break
+    case 'order':
+      body = fields.action
+        ? `action=${fields.action} result=${fields.result} order#${fields.order}`
+        : `result=${fields.result}${fields.reason ? ` reason=${fields.reason}` : ''} order#${fields.order}`
+      break
+    case 'stock':
+      body = `kind=${fields.kind} sku=${fields.sku} qty=${fields.qty} result=${fields.result}`
+      break
+    case 'audit':
+      body = `actor=${fields.actor} action=${fields.action}${fields.reason ? ` reason=${fields.reason}` : ''}`
+      break
+    case 'notify':
+      body = `to=${fields.to} event=${fields.event}${fields.reason ? ` reason=${fields.reason}` : ''}`
+      break
+    case 'sensitive':
+      body = `scene=${fields.scene} hit=${fields.hit}/${fields.total}`
+      break
+    case 'identity':
+      body = `subject=${fields.subject}${fields.reason ? ` reason=${fields.reason}` : ''}`
+      break
+    default:
+      body = ''
+  }
+  return `${body} src=${kind}#${srcSeq}`
+}
+
 /** 造一条事件（`events` 帧里的 `events[]` 一行）。 */
 function makeEvent(w, nowMs) {
   const { kind } = pickWeighted(w.rnd, KIND_WEIGHT)
   const c = KIND_CONTENT[kind]
   const t = pickWeighted(w.rnd, c.titles)
   w.evSeq += 1
-  let objectType = ''
-  let objectId
-  if (kind === 'audit') {
-    const pair = pickOne(w.rnd, c.ids)
-    objectType = pair[0]
-    objectId = pair[1]
-  } else if (kind === 'order') {
-    objectId = w.orders.length ? w.orders[0].orderId : nextOrderId(w)
-  } else {
-    objectId = c.ids.length ? pickOne(w.rnd, c.ids) : ''
-  }
+  const srcSeq = nextSrcSeq(w, kind)
+  const body = buildBody(w, kind, t)
   return {
     seq: w.evSeq,
     ts: nowMs,
     kind,
     severity: t.sev,
     title: t.title,
-    detail: `${kind} · 模拟日常`,
-    key: `${kind}:${objectId}`,
-    objectType,
-    objectId,
+    detail: detailFor(kind, body.fields, srcSeq),
+    key: body.key,
+    objectType: body.objectType,
+    objectId: body.objectId,
     // ⚠️ 每 4 条里 3 条挂得上链路（真库里也是有的有、有的没有）—— 全挂上反而不像真的。
     traceId: w.rnd() < 0.75 ? `t${(w.evSeq % 997).toString(16).padStart(3, '0')}` : null,
     batchId: null, // 演示不是演练 ⇒ 没有批次（理由见文件头）
+    // 3a.3 的三样（帧 11 → 15 键的后三个）。形状：actor 是 `{id, role}` 或 null。
+    actor: body.actor !== undefined ? body.actor : makeActor(w, kind),
+    durationUs: t.dur ? intBetween(w.rnd, t.dur[0], t.dur[1]) : null,
+    remaining: body.remaining === undefined ? null : body.remaining,
+    fields: body.fields,
   }
 }
 

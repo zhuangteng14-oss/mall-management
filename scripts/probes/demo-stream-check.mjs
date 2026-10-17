@@ -82,6 +82,80 @@ ok('⑤ info 占八成以上', bySev.info / events.length > 0.8,
 ok('③ 事件行带 batchId=null（演示不是演练）', events.every((e) => e.batchId === null))
 ok('③ 严重度的值都在三档内', events.every((e) => ['info', 'warn', 'error'].includes(e.severity)))
 
+// ── ③+ 2026-10-17：假帧补上 3a.3 的三样（actor / durationUs / fields），形状对真帧 ──
+// ⚠️ 这里比的是**键集**（不是「有没有这几个键」）：多一个少一个都会让前端 `fields` 优先那条路
+//    静默走到回落分支，或让导出（JSON/ndjson 原样键）与真流长得不一样。
+const REAL_EVENT_KEYS = 'actor,batchId,detail,durationUs,fields,key,kind,objectId,objectType,remaining,seq,severity,title,traceId,ts'
+const keySet = (o) => Object.keys(o).sort().join(',')
+ok('③+ 每条事件的**十五键与真帧逐字一致**（含 actor / durationUs / remaining / fields）',
+  events.every((e) => keySet(e) === REAL_EVENT_KEYS),
+  [...new Set(events.map(keySet))].filter((s) => s !== REAL_EVENT_KEYS).slice(0, 3))
+
+const actors = events.map((e) => e.actor)
+ok('③+ `actor` 是 `{id, role}` 对象或 **null**（不是两个平铺字段、不是空对象）',
+  actors.every((a) => a === null
+    || (typeof a === 'object' && typeof a.id === 'string' && [1, 2, 3].includes(a.role))),
+  { 有身份: actors.filter(Boolean).length, 无身份: actors.filter((a) => a === null).length })
+// ⚠️ 「全都有」或「全没有」都会让上一条的合法性变成空真：真流两种都会出现，演示也该两种都有。
+ok('③+ actor 的**两种形态都真的出现过**（既有 `{id, role}`，也有 null）',
+  actors.some(Boolean) && actors.some((a) => a === null),
+  { 有身份: actors.filter(Boolean).length, 无身份: actors.filter((a) => a === null).length })
+ok('③+ 审计环的 `fields.actor` 与顶层 `actor.id` **同一个人**（审计行的 Actor 列与 MDC 同源）',
+  events.filter((e) => e.kind === 'audit').every((e) => e.actor && e.fields.actor === e.actor.id))
+
+const durs = events.map((e) => e.durationUs)
+ok('③+ `durationUs` 是**正整数（微秒）**或 null（不是毫秒、不是 0 冒充「测过」）',
+  durs.every((d) => d === null || (Number.isInteger(d) && d > 0)),
+  { 有耗时: durs.filter((d) => d !== null).length, 无耗时: durs.filter((d) => d === null).length })
+ok('③+ 每类都至少有一个带耗时的样本（九类里没有一整类恒 null）',
+  [...new Set(events.filter((e) => e.durationUs !== null).map((e) => e.kind))].length === 8,
+  [...new Set(events.filter((e) => e.durationUs !== null).map((e) => e.kind))].sort().join(','))
+
+const FIELDS_KEYS = {
+  cache: 'cache,key,result',
+  lock: 'key,lock,result',
+  stock: 'kind,qty,result,sku',
+  audit: 'action,actor,reason',
+  notify: 'event,reason,to',
+  sensitive: 'hit,scene,total',
+  identity: 'reason,subject',
+}
+const fieldGroups = {}
+for (const e of events) {
+  const k = keySet(e.fields)
+  fieldGroups[e.kind] = fieldGroups[e.kind] || new Set()
+  fieldGroups[e.kind].add(k)
+}
+ok('③+ 各环 `fields` 的**键集逐环对齐后端 `Emit`**（cache/lock/stock/audit/notify/sensitive/identity 七套）',
+  Object.entries(FIELDS_KEYS).every(([k, want]) => fieldGroups[k] && [...fieldGroups[k]].every((got) => got === want)),
+  Object.fromEntries(Object.entries(fieldGroups).map(([k, v]) => [k, [...v]])))
+ok('③+ `order` 的 `fields` 是**真帧那套词**：`action/result/from/to/order`（取消档只带 result/reason/order），'
+  + '不是另起一套 key',
+  events.filter((e) => e.kind === 'order').every((e) => {
+    const ks = Object.keys(e.fields)
+    return ks.every((k) => ['action', 'result', 'from', 'to', 'order', 'reason'].includes(k))
+      && 'result' in e.fields && 'order' in e.fields
+  })
+  && events.filter((e) => e.kind === 'order' && e.fields.from && e.fields.to).length > 0,
+  [...new Set(events.filter((e) => e.kind === 'order').map((e) => keySet(e.fields)))])
+
+ok('③+ `src=环名#n` 只在 `detail` 尾部、**不在 fields 里**（后端 `add()` 的追加位置）',
+  events.every((e) => new RegExp(` src=${e.kind}#\\d+$`).test(e.detail)
+    && !('src' in e.fields)),
+  events.slice(0, 2).map((e) => e.detail))
+
+const stockEv = events.filter((e) => e.kind === 'stock')
+ok('③+ `remaining` 是**顶层键**且只有库存扣减的 ok / insufficient 两档有值（error 档恒 null）',
+  stockEv.every((e) => (e.fields.result === 'ok' || e.fields.result === 'insufficient'
+    ? Number.isInteger(e.remaining) && e.remaining >= 0
+    : e.remaining === null))
+  && events.filter((e) => e.kind !== 'stock').every((e) => e.remaining === null),
+  {
+    扣减有剩余: stockEv.filter((e) => e.fields.result === 'ok' && e.remaining !== null).length,
+    不足有剩余: stockEv.filter((e) => e.fields.result === 'insufficient' && e.remaining !== null).length,
+    错误为null: stockEv.filter((e) => e.fields.result === 'error' && e.remaining === null).length,
+  })
+
 // ── ③ 三页帧形状（与后端逐键对齐）────────────────────────────────────────
 const keysOf = (o) => Object.keys(o).sort().join(',')
 ok('③ events 帧键', keysOf(ev[0]) === 'events,mq,rate,seq,traces,ts', keysOf(ev[0]))

@@ -292,7 +292,7 @@ static final List<String> PROTECTION_KEYS =
    `{tag,label,value}` 构造器 `:579-585`，全部取自 Micrometer 本拍增量、**不读配置**）。
    ⇒ 「开防护后指标帧要反映防护」需要**新增**一组读数，不能复用这 8 条。
    ⚠️ 另注：演示模式（块 7 收尾 ②）里那 5 条 `protections` 是**前端假数据**造的
-   （`src/api/demo-stream.js:422-426`）—— 两处别混。
+   （`src/api/demo-stream.js:613-617`）—— 两处别混。
 2. **「MQ 幂等（TraceId + Seq 唯一键）」—— 表上**没有**可用的 `Seq`。**
    - `observed_event` 的列实测：`Id, Kind, Severity, Title, ObjectType, ObjectId, TraceId, BatchId,
      OccurredAt, created_at, updated_at`（`mall_management_sql.sql:1866-1883`）—— **没有 `Seq`**，
