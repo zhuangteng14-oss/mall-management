@@ -259,22 +259,22 @@
                   @click="stockFilter = f.key"
                 >{{ f.label }}</button>
               </div>
-              <p class="mp-stock-note">仅在最低库存 20 条内搜索 / 筛选</p>
+              <p class="mp-stock-note">
+                仅在最低库存 20 条内搜索 / 筛选
+                <span v-if="stockFallbackAny"> · 基线缺失，按当前库存最高值 {{ fmtInt(stockFallbackMax) }} 兜底（*）</span>
+              </p>
             </div>
 
             <p v-if="!stockRows.length" class="mp-empty">库存查询没有返回任何 SKU。</p>
             <p v-else-if="!stockFiltered.length" class="mp-empty">没有匹配的 SKU。</p>
             <template v-else>
-              <p v-if="stockAllUnknown" class="mp-stock-warn">
-                真库当前没有 BaselineStock，水位百分比不可算；先按演示基线步骤打基线才会出现深浅。
-              </p>
               <ul class="mp-stock-list">
                 <li v-for="r in stockFiltered" :key="r.sku" class="mp-stock-row">
                   <div class="mp-stock-top">
                     <span class="mp-stock-name" :title="r.goodName || r.sku">{{ r.goodName || '（无商品名）' }}</span>
                     <span class="mp-stock-n">
                       <b>{{ r.stock === null || r.stock === undefined ? '—' : fmtInt(Math.round(displayOf(r))) }}</b>
-                      <span>/ {{ r.baseline === null || r.baseline === undefined ? '—' : fmtInt(r.baseline) }}</span>
+                      <span>/ {{ fmtInt(effectiveBaseline(r)) }}{{ stockFallback(r) ? '*' : '' }}</span>
                     </span>
                   </div>
                   <div class="mp-stock-sub">
@@ -496,8 +496,9 @@
      才会落在同一条竖线上。
   ⚠️ 延迟图用 `requests.meanMs`（逐拍真值）；`p95Ms/p99Ms/maxMs` 是 Micrometer 衰减窗口
      分位，不是本拍，只能放 KPI 的次要小字，不能进时间轴（TD-77）。
-  ⚠️ 库存水位是全页唯一次真查询（后端 `stock()`）；真库当前 `baseline=null` 时画灰斜纹
-     「未设基线」，不能当 0% 或充足。演示源里才有 baseline。
+  ⚠️ 库存水位是全页唯一次真查询（后端 `stock()`）；`BaselineStock` 缺失时用本拍
+     当前库存最高值兜底算条宽（页内标注 `*`），不再画一排灰斜纹「未测」；有基线的行
+     仍按真基线算。演示源里才有真 baseline。
 -->
 
 <script setup>
@@ -1014,8 +1015,31 @@ function protPct(v) {
 /* ── 库存水位 ─────────────────────────────────────────────────────────────── */
 const stockAvailable = computed(() => !!(latest.value && latest.value.stock && latest.value.stock.available))
 const stockRows = computed(() => ((latest.value && latest.value.stock && latest.value.stock.rows) || []))
-const stockAllUnknown = computed(() => stockRows.value.length > 0
-  && stockRows.value.every((r) => r.baseline === null || r.baseline === undefined))
+/** 基线缺失的兜底分母：本拍返回的这 20 条里**当前库存**的最大值。
+ *  没有基线 ≠ 水位不可画；用当前库存最高值归一，条宽仍有相对含义（最低的短、批内最高的满）。
+ *  只在 `BaselineStock` 缺失的行上生效，有基线的行仍按真基线算。 */
+const stockFallbackMax = computed(() => {
+  let max = 0
+  for (const r of stockRows.value) {
+    const v = Number(r.stock)
+    if (Number.isFinite(v) && v > max) max = v
+  }
+  return max
+})
+const stockFallbackAny = computed(() => stockRows.value.some((r) => stockFallback(r)))
+function stockFallback(r) {
+  return r.baseline === null || r.baseline === undefined
+}
+/** 本行实际用于算水位的分母：真基线优先，缺失时落本批当前库存最高值。 */
+function effectiveBaseline(r) {
+  return stockFallback(r) ? stockFallbackMax.value : Number(r.baseline)
+}
+function effectiveRatio(r) {
+  if (Number(r.stock) <= 0) return 0
+  const b = effectiveBaseline(r)
+  if (!Number.isFinite(b) || b <= 0) return null
+  return Number(r.stock) / b
+}
 const stockFiltered = computed(() => {
   const q = stockQuery.value.trim().toLowerCase()
   return stockRows.value.filter((r) => {
@@ -1069,18 +1093,23 @@ function stockStatus(r) {
   // 库存为 0 是**观测到的事实**，优先于「没有基线算不出比例」：真库现在就有
   // `stock:0, baseline:null` 的 SKU，不能因为未设基线就把它归进「未测」。
   if (Number(r.stock) <= 0) return 'out'
-  if (r.ratio === null || r.ratio === undefined) return 'unknown'
-  if (Number(r.ratio) < 0.5) return 'low'
-  return 'ok'
+  // 后端 ratio 只在「库存 + 基线都是数」时给值；基线缺失时用本批当前库存最高值兜底，
+  // 所以这里不再把 baseline:null 一律打成「未测」（那会让整列灰斜纹、页面像坏了）。
+  const ratio = (r.ratio === null || r.ratio === undefined) ? effectiveRatio(r) : Number(r.ratio)
+  if (ratio === null || !Number.isFinite(ratio)) return 'unknown'
+  return ratio < 0.5 ? 'low' : 'ok'
 }
 function stockStatusLabel(r) {
   return { ok: '充足', low: '偏低', out: '缺货', unknown: '未测' }[stockStatus(r)]
 }
 function barWidth(r) {
-  // 0 库存是确定的「缺货」，哪怕没有基线也不该画成满条灰斜纹。
+  // 0 库存是确定的「缺货」，哪怕没有基线也不该画成满条。
   if (Number(r.stock) <= 0) return '2%'
-  if (r.baseline === null || r.baseline === undefined || Number(r.baseline) <= 0) return '100%'
-  const pct = Math.max(0, Math.min(100, (displayOf(r) / Number(r.baseline)) * 100))
+  // 基线缺失时用本批当前库存最高值兜底；分母 <= 0（整批都是 0，理论上已被上一行拦掉）
+  // 才退回 2% —— 不再画「永远 100%」的假水位条。
+  const b = effectiveBaseline(r)
+  if (!Number.isFinite(b) || b <= 0) return '2%'
+  const pct = Math.max(0, Math.min(100, (displayOf(r) / b) * 100))
   return Math.max(2, pct) + '%'
 }
 function barTone(r) {
@@ -1090,10 +1119,13 @@ function barTone(r) {
   return 'is-ok'
 }
 function stockTitle(r) {
-  if (r.baseline === null || r.baseline === undefined) {
-    return '没有 BaselineStock，算不出水位；先把演示基线打上'
+  const b = effectiveBaseline(r)
+  const pct = effectiveRatio(r)
+  const pctText = pct === null ? '—' : (pct * 100).toFixed(1) + '%'
+  if (stockFallback(r)) {
+    return `基线缺失，按当前库存最高值 ${fmtInt(b)} 兜底 · 库存 ${fmtInt(r.stock)} / ${fmtInt(b)} · 水位 ${pctText}`
   }
-  return `水位 ${(Number(r.ratio) * 100).toFixed(1)}% · 库存 ${fmtInt(r.stock)} / 基线 ${fmtInt(r.baseline)}`
+  return `水位 ${pctText} · 库存 ${fmtInt(r.stock)} / 基线 ${fmtInt(b)}`
 }
 
 /* ── KPI 数字滚动 ─────────────────────────────────────────────────────────── */
@@ -1810,15 +1842,6 @@ onBeforeUnmount(closeStream)
 .mp-stock-note {
   font-size: var(--fs-xs);
   color: var(--ink-3);
-}
-.mp-stock-warn {
-  font-size: var(--fs-xs);
-  line-height: 1.5;
-  color: var(--warning-deep);
-  background: var(--warning-ground);
-  border-radius: var(--r1);
-  padding: var(--s1) var(--s2);
-  margin-bottom: var(--s2);
 }
 /* ⚠️ 故意**不再**是 220px 的内嵌滚动区：右栏现在整体滚，内层再滚就是「栏内双滚动条」。
    库存列表按内容自然增高，滚的是 `.mp-rail` 这一根。 */
