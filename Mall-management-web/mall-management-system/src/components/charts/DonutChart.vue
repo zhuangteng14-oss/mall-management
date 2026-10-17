@@ -52,6 +52,10 @@ const showCenter = computed(
 
 const option = computed(() => {
   return {
+    // 计数每秒在变：让扇区滑到新角度，而不是整块重画。
+    animationDuration: 500,
+    animationDurationUpdate: 650,
+    animationEasingUpdate: 'cubicOut',
     tooltip: TOOLTIP_ITEM,
     legend: props.showLegend ? LEGEND_SHOWN : LEGEND_HIDDEN,
     series: [

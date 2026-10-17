@@ -58,7 +58,7 @@
         <header class="a-of-chd">
           <div>
             <h2 class="a-of-ct">过去 24 小时积压趋势</h2>
-            <p class="a-of-cs">{{ trendWindowText }} · 每点为整点快照 · 压测开始后线会立刻抬升</p>
+            <p class="a-of-cs">{{ trendWindowText }} · 右侧实时尾窗每 3 秒推进一格 · 压测开始后线会抬升</p>
           </div>
           <span class="a-of-live" :class="{ 'is-anchored': trendAnchored }">
             {{ trendAnchored ? '窗口已锚定' : '实时窗口' }}
@@ -126,14 +126,21 @@
             :key="n.key"
             type="button"
             class="a-of-step"
-            :class="{ 'is-on': filterState === n.key, 'is-warn': n.timeout > 0 }"
+            :class="{ 'is-on': filterState === n.key, 'is-warn': n.timeout > 0, 'is-live': pulseNodes.has(n.key) }"
             @click="selectState(n.key)"
           >
             <span class="a-of-step-top">
               <span class="a-of-step-name">
-                <i class="a-of-dot" :style="{ background: stateColor(n.key) }"></i>{{ n.label }}
+                <i class="a-of-dot" :style="{ background: stateColor(n.key), color: stateColor(n.key) }"></i>{{ n.label }}
               </span>
-              <b class="a-of-step-n">{{ fmtInt(n.count) }}</b>
+              <span class="a-of-step-num">
+                <b class="a-of-step-n" :class="{ 'is-bump': statePulse[n.key] }">{{ fmtInt(n.count) }}</b>
+                <span
+                  v-if="stateDeltas[n.key]"
+                  class="a-of-delta"
+                  :class="'is-' + stateDeltas[n.key].dir"
+                >{{ stateDeltas[n.key].text }}</span>
+              </span>
               <span class="a-of-step-qps">流入 {{ qpsText(n.inQps) }} · 流出 {{ qpsText(n.outQps) }}</span>
             </span>
             <span class="a-of-rail" aria-hidden="true">
@@ -155,8 +162,15 @@
             @click="selectState('cancelled')"
           >
             <span class="a-of-step-top">
-              <span class="a-of-step-name"><i class="a-of-dot" :style="{ background: stateColor('cancelled') }"></i>已取消（支线）</span>
-              <b class="a-of-step-n">{{ fmtInt(counts.cancelled) }}</b>
+              <span class="a-of-step-name"><i class="a-of-dot" :style="{ background: stateColor('cancelled'), color: stateColor('cancelled') }"></i>已取消（支线）</span>
+              <span class="a-of-step-num">
+                <b class="a-of-step-n" :class="{ 'is-bump': statePulse.cancelled }">{{ fmtInt(counts.cancelled) }}</b>
+                <span
+                  v-if="stateDeltas.cancelled"
+                  class="a-of-delta"
+                  :class="'is-' + stateDeltas.cancelled.dir"
+                >{{ stateDeltas.cancelled.text }}</span>
+              </span>
               <span class="a-of-step-qps">退出流程 · 不计入积压</span>
             </span>
             <span class="a-of-rail" aria-hidden="true">
@@ -202,7 +216,31 @@
           <span>流出 <b>{{ qpsText(totalQpsOut) }}</b></span>
           <span class="a-of-mono">{{ lastTickAt }}</span>
         </div>
-        <ul class="a-of-stream-list">
+        <!-- 主链粒子轨道：SSE move = 一颗从 from 飞向 to 的发光粒子；
+             轨道本身是虚线路线，不是一排死点。cancel 支线不在这条轨道上。 -->
+        <div class="a-of-lane" aria-hidden="true">
+          <i class="a-of-lane-track"></i>
+          <span
+            v-for="(n, i) in FLOW_NODES"
+            :key="n.key"
+            class="a-of-lane-node"
+            :class="{ 'is-live': pulseNodes.has(n.key) }"
+            :style="{ left: LANE_POS[i] + '%' }"
+          >
+            <i class="a-of-lane-dot" :style="{ background: stateColor(n.key) }"></i>
+            <b>{{ n.label }}</b>
+            <em>{{ fmtInt(counts[n.key]) }}</em>
+          </span>
+          <span
+            v-for="p in laneParticles"
+            :key="p.id"
+            class="a-of-particle-wrap"
+            :style="{ left: p.x1 + '%', width: p.w + '%', '--pcolor': p.color }"
+          >
+            <i class="a-of-particle"></i>
+          </span>
+        </div>
+        <ul v-if="streamRows.length" class="a-of-stream-list">
           <li v-for="m in streamRows" :key="m.orderId + '-' + m.ts" class="a-of-stream-i">
             <span class="a-of-stream-t">{{ hms(m.ts) }}</span>
             <span class="a-of-id">#{{ m.orderId }}</span>
@@ -215,11 +253,18 @@
             <span class="a-of-stream-d">
               <template v-if="m.from">{{ moveStateLabel(m.from) }} → </template>
               <b>{{ moveStateLabel(m.to) }}</b>
-              <span v-if="!m.live" class="a-of-stream-quiet">当前节点</span>
             </span>
           </li>
         </ul>
-        <p v-if="!streamRows.length" class="a-empty">还没有捕获到流转；压测开始后这里会滚动。</p>
+        <div v-else class="a-of-stream-empty">
+          <i class="a-of-stream-radar" aria-hidden="true"></i>
+          <b>暂无实时流转</b>
+          <span>压测开始后，粒子会沿上方轨道从当前节点飞向目标节点。</span>
+        </div>
+        <div v-if="streamRows.length" class="a-of-stream-foot">
+          <span class="a-of-stream-radar" aria-hidden="true"></span>
+          <span>轨道待命 · 最近 {{ fmtInt(streamRows.length) }} 条在本拍窗口 · 共捕获 {{ fmtInt(moveTotal) }} 条</span>
+        </div>
       </section>
     </div>
 
@@ -525,35 +570,53 @@
         <header class="a-of-drawer-hd">
           <div>
             <h3>链路抽屉 · {{ filterLabel }}</h3>
-            <p>{{ fmtInt(drawerRows.length) }} 单 · 按已停留倒序（前 30，含当前选中）· 点左列切换右上时间线</p>
+            <p v-if="drawerQuery.trim()">
+              匹配 {{ fmtInt(drawerMatchedRows.length) }} 单 · 按已停留倒序（最多显示 50）· 点左列切换右上时间线
+            </p>
+            <p v-else>{{ fmtInt(drawerRows.length) }} 单 · 按已停留倒序（前 30，含当前选中）· 点左列切换右上时间线</p>
           </div>
           <button type="button" class="a-btn" @click="closeDrawer">关闭</button>
         </header>
 
         <div class="a-of-drawer-body">
-          <ul class="a-of-drawer-list">
-            <li
-              v-for="r in drawerRows"
-              :key="r.orderId"
-              class="a-of-drawer-i"
-              :class="{ on: openedId === r.orderId, 'is-timeout': r.timeout }"
-              tabindex="0"
-              role="button"
-              @click="pickRow(r.orderId)"
-              @keydown.enter.prevent="pickRow(r.orderId)"
-            >
-              <span class="a-of-id">#{{ r.orderId }}</span>
-              <span class="a-of-drawer-g" :title="r.product">{{ r.product || '（无商品信息）' }}</span>
-              <span class="a-of-st" :class="'is-' + r.state">{{ stateLabel(r.state) }}</span>
-              <b class="a-of-mono">{{ dwellText(r.dwellSeconds) }}</b>
-              <span v-if="r.timeout" class="a-of-badge-bad">超时</span>
-            </li>
-            <li v-if="!drawerRows.length" class="a-empty">当前筛选下没有订单。</li>
-          </ul>
+          <div class="a-of-drawer-side">
+            <div class="a-of-drawer-search">
+              <input
+                v-model.trim="drawerQuery"
+                type="search"
+                class="a-of-search"
+                placeholder="搜订单号 / 商品名"
+                aria-label="搜索订单号或商品名"
+              >
+              <span class="a-of-search-n">{{ fmtInt(drawerMatchedRows.length) }} 单</span>
+            </div>
+            <ul class="a-of-drawer-list">
+              <li
+                v-for="r in drawerRows"
+                :key="r.orderId"
+                class="a-of-drawer-i"
+                :class="{ on: openedId === r.orderId, 'is-timeout': r.timeout }"
+                tabindex="0"
+                role="button"
+                @click="pickRow(r.orderId)"
+                @keydown.enter.prevent="pickRow(r.orderId)"
+              >
+                <span class="a-of-id">#{{ r.orderId }}</span>
+                <span class="a-of-drawer-g" :title="r.product">{{ r.product || '（无商品信息）' }}</span>
+                <span class="a-of-st" :class="'is-' + r.state">{{ stateLabel(r.state) }}</span>
+                <b class="a-of-mono">{{ dwellText(r.dwellSeconds) }}</b>
+                <span v-if="r.timeout" class="a-of-badge-bad">超时</span>
+              </li>
+              <li v-if="!drawerRows.length" class="a-empty">
+                {{ drawerQuery ? '没有匹配的订单号 / 商品名。' : '当前筛选下没有订单。' }}
+              </li>
+            </ul>
+          </div>
 
           <section class="a-of-drawer-detail">
             <template v-if="openedRow">
               <header class="a-of-drawer-oh">
+                <span class="a-of-drawer-now">当前选中</span>
                 <b class="a-of-id">#{{ openedRow.orderId }}</b>
                 <span class="a-of-st" :class="'is-' + openedRow.state">{{ stateLabel(openedRow.state) }}</span>
                 <span v-if="openedRow.timeout" class="a-of-badge-bad">超时 · 阈值 {{ openedRow.timeoutThresholdHours }}h</span>
@@ -570,12 +633,28 @@
               </dl>
 
               <ol class="a-of-tl">
-                <li v-for="(m, i) in openedSteps" :key="i" class="a-of-tl-i">
-                  <span class="a-of-tl-t">{{ dt(m.t) }}</span>
-                  <span class="a-of-tl-d">{{ m.text }}</span>
+                <li
+                  v-for="(m, i) in openedTimeline"
+                  :key="m.key + '-' + i"
+                  class="a-of-tl-i"
+                  :class="{
+                    'is-done': m.done,
+                    'is-current': m.current,
+                    'is-future': !m.done && !m.current,
+                    'is-cancel': m.cancel,
+                  }"
+                >
+                  <i class="a-of-tl-dot" :style="{ '--tl-color': stateColor(m.key) }"></i>
+                  <span class="a-of-tl-t">{{ m.t ? dt(m.t) : '—' }}</span>
+                  <span class="a-of-tl-d">
+                    <b>{{ m.text }}</b>
+                    <small v-if="m.current">当前状态</small>
+                    <small v-else-if="!m.done">未到达</small>
+                    <small v-else>已走过</small>
+                  </span>
                 </li>
               </ol>
-              <p v-if="!openedSteps.length" class="a-empty">这张单没有任何生命周期时间戳。</p>
+              <p v-if="!openedTimeline.length" class="a-empty">这张单没有任何生命周期时间戳。</p>
               <p class="a-of-tl-note">
                 时间线来自订单行自带的 CreateTime / PaidAt / ShippedAt / ReceivedAt / CancelledAt；
                 页面打开之后才发生的流转另由 SSE moves 累积。超时取消只写 CancelledAt，不走状态机。
@@ -613,7 +692,7 @@
 
 <script setup>
 /* eslint-disable no-undef */ /* 理由见 `ui/KpiCard.vue` 同款注释（eslint-plugin-vue 8.7.1 缺宏环境） */
-import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { openOrderStream, orderInsight } from '../../../api/observe'
 // 演示模式（块 7 收尾 ②）：`DemoModeToggle` 摆开关，`demo` 是被 `watch` 的那个状态，
 // `openDemoStream` 是与 `openOrderStream` **同形**的假流 —— 见 `connect()` 里那处三元式。
@@ -704,6 +783,7 @@ const STATE_KEY_OF_ORDER_STATE = {
   SHIPPED: 'waitReceive',                         // (1,1,0)
   RECEIVED_NODELIVERY: 'completed',               // (1,0,1) —— ReceiveIf=1，链上先于「已发货」判
   COMPLETED: 'completed',                         // (1,1,1)
+  CANCELLED: 'cancelled',                         // 支线：不走三元组，直接落第五态
   ILLEGAL_DELIVERED_UNPAID: 'waitReceive',        // (0,1,0)
   ILLEGAL_RECEIVED_UNPAID: 'completed',           // (0,0,1)
   ILLEGAL_DELIVERED_RECEIVED_UNPAID: 'completed', // (0,1,1)
@@ -830,6 +910,7 @@ const insightError = ref('')
 const filterState = ref('')          // 表格 / 抽屉的主从筛选（'' = 全部）
 const onlyTimeout = ref(false)
 const drawerOpen = ref(false)
+const drawerQuery = ref('')          // 抽屉左列：订单号 / 商品名模糊搜索
 /** 本会话最近捕获的流转（流轨 + QPS 的原料；有界，避免跑一晚上攒成几万条）。 */
 const recentMoves = ref([])
 const RECENT_MOVE_CAP = 300
@@ -839,6 +920,25 @@ const qpsOut = reactive({ waitPay: 0, waitShip: 0, waitReceive: 0, completed: 0,
 
 const target = reactive({ waitPay: 0, waitShip: 0, waitReceive: 0, completed: 0, cancelled: 0 })
 const shown = reactive({ waitPay: 0, waitShip: 0, waitReceive: 0, completed: 0, cancelled: 0 })
+
+/* ── 动效状态（2026-10-17 视觉重构）────────────────────────────────────────────
+   ① 趋势「滑动尾窗」：每 `LIVE_SAMPLE_MS` 从本拍 counts 追加一个实时点，
+      只保留最近 `LIVE_TAIL_CAP` 个 ⇒ 折线右端肉眼可见地向右生长，随后整窗左移。
+   ② 阶梯数字的变化量：每拍与上一拍比，只给**真变了的态**播一次 +N / -N；
+      计时器统一进 `timers`，卸页 / 重连时由 `closeStream()` 收走。
+   ③ 流轨粒子：每条 SSE move 从 `from` 节点飞向 `to` 节点；只画主链 4 节点
+      （取消支线不在这条轨道上，硬画会误导成「取消也是主链的一步」）。 */
+const LIVE_TAIL_CAP = 10
+const LIVE_SAMPLE_MS = 3000
+const liveTail = ref([])
+let liveTailAt = 0
+const stateDeltas = reactive({ waitPay: null, waitShip: null, waitReceive: null, completed: null, cancelled: null })
+const statePulse = reactive({ waitPay: false, waitShip: false, waitReceive: false, completed: false, cancelled: false })
+const deltaSeq = { waitPay: 0, waitShip: 0, waitReceive: 0, completed: 0, cancelled: 0 }
+const laneParticles = ref([])
+let particleSeq = 0
+const LANE_POS = [10, 37, 64, 91]
+const LANE_INDEX = { waitPay: 0, waitShip: 1, waitReceive: 2, completed: 3 }
 
 /* ── 回放态（2026-10-17 全链路联动）─────────────────────────────────────────────
    ⚠️ 与实时态**并行存在**、互不覆盖：回放期间模板走 `v-else` 分支，实时流的
@@ -1007,15 +1107,24 @@ const FLOW_NODES = [
 const TREND_COLOR = { waitPay: 4, waitShip: 1, waitReceive: 6 }
 
 const trend = computed(() => insight.value?.trend || { categories: [], series: [], anchoredToLatest: false })
-const trendCategories = computed(() => trend.value.categories || [])
+/** 24h 历史桶 + 右侧实时尾点。尾点是本页自己按本拍 counts 采的，不等 insight 的 15 秒刷新。 */
+const trendCategories = computed(() => {
+  const base = trend.value.categories || []
+  return base.concat(liveTail.value.map((t) => t.label))
+})
 const trendSeries = computed(() => {
   const cats = trendCategories.value
+  const tail = liveTail.value
   return (trend.value.series || []).map((s) => {
-    const data = s.data || []
+    const base = s.data || []
+    const data = base.concat(tail.map((t) => num(t[s.key])))
     const last = data.length ? data[data.length - 1] : null
     // 末点标出「此刻积压」—— 平线也能一眼读到当前值，不靠悬停。
+    // ⚠️ 三条线在尾窗可能贴得很近（演示刚开始时两条同为 18）⇒ 标签必须分侧，
+    //    否则三个数字会叠成一坨（2026-10-17 截帧实测）。
+    const labelPos = s.key === 'waitPay' ? 'top' : (s.key === 'waitShip' ? 'bottom' : 'right')
     const markPoints = last !== null && last > 0 && cats.length
-      ? [{ x: cats[cats.length - 1], y: last, text: String(last), position: 'top' }]
+      ? [{ x: cats[cats.length - 1], y: last, text: String(last), position: labelPos }]
       : []
     return {
       name: s.name,
@@ -1219,7 +1328,23 @@ function selectState(key) {
 /** 打开链路抽屉；带 state 时同时把表格筛到该状态。
  *  ⚠️ 没点名订单（点预警卡 / 「打开链路」）时**自动选最慢的一单** —— 否则右列是空的，
  *  用户看到的是「请从左列点一张单」，而这张卡的卖点正是「最慢的那单长什么样」。 */
+/** 从表格 / 预警卡打开抽屉时，选中的单可能排在左列很靠后（按停留倒序，不是表格顺序）。
+ *  打开后把左列滚到选中行，否则用户只看得到右列换了单、左列却没有高亮。 */
+function revealDrawerSelection() {
+  nextTick(() => {
+    const list = document.querySelector('.a-of-drawer-list')
+    const el = list && list.querySelector('.a-of-drawer-i.on')
+    if (!list || !el) return
+    const lr = list.getBoundingClientRect()
+    const er = el.getBoundingClientRect()
+    if (er.top < lr.top || er.bottom > lr.bottom) {
+      list.scrollTop += er.top - lr.top - (list.clientHeight - el.clientHeight) / 2
+    }
+  })
+}
+
 function openDrawer(orderId, state) {
+  drawerQuery.value = ''
   if (state) {
     filterState.value = state
     offset.value = 0
@@ -1232,10 +1357,12 @@ function openDrawer(orderId, state) {
   }
   drawerOpen.value = true
   openedId.value = id
+  revealDrawerSelection()
 }
 
 function closeDrawer() {
   drawerOpen.value = false
+  drawerQuery.value = ''
   closeTimeline()
 }
 
@@ -1262,23 +1389,14 @@ const stateColor = (key) => ({
   cancelled: 'var(--ink-3)',
 }[key] || 'var(--ink-3)')
 
-/** 流轨：优先画最近捕获的真实 moves；没有就退回「最近订单的当前节点」。 */
-const streamRows = computed(() => {
-  const moves = recentMoves.value.slice(0, 10).map((m) => ({
-    ...m,
-    step: STATE_STEP[stateKeyOf(m.to)] || 0,
-    live: true,
-  }))
-  if (moves.length) return moves
-  return listRows.value.slice(0, 10).map((r) => ({
-    orderId: r.orderId,
-    ts: r.createdAt,
-    from: '',
-    to: r.state,
-    step: r.step,
-    live: false,
-  }))
-})
+/** 流轨：**只画本会话捕获的真实 moves**。
+ *  ⚠️ 不再用「最近订单的当前节点」兜底：那是静态存量，不是「流转」，
+ *  在压测没起来时会把一列静止文字伪装成实时流。没有 moves 就交给空态。 */
+const streamRows = computed(() => recentMoves.value.slice(0, 10).map((m) => ({
+  ...m,
+  step: STATE_STEP[stateKeyOf(m.to)] || 0,
+  live: true,
+})))
 
 /** 账龄条：按本组最大桶归一。 */
 function ageWidth(row, bin) {
@@ -1304,48 +1422,94 @@ const pageRows = computed(() => filteredRows.value.slice(offset.value, offset.va
 const filterLabel = computed(() => (filterState.value ? (STATE_LABEL[filterState.value] || filterState.value) : '全部状态'))
 const openedRow = computed(() => (openedId.value ? ordersById.get(openedId.value) || null : null))
 const openedMoves = computed(() => (openedId.value ? movesById.get(openedId.value) || [] : []))
-/** 时间线实际渲染的步数：**去掉建档那一步**（`action=create`、`from` 为空）。
- *  ⚠️ 为什么去掉：上面第一行「创建订单（待付款）」就是它 —— 演练下 100% 的流转都是建档
- *  （`块7-commit10-阶段一核实.txt` §3b 实测 4670/4670），不去掉就是每张单都多一行废话。
- *  判据用 `from` 空不空，而不是 `action === 'create'`：后者是英文 code，且本页**刻意不存** `action`
- *  （`movesById` 的注释里写了理由 —— `from → to` 已经把这一步说全了）。 */
-const openedSteps = computed(() => {
+/** 主链四步（时间线骨架）。**每一步都在**，不再只画「有时间的行」——
+ *  只画有时间的行时，一条待收货单可能只剩「创建订单（待付款）」一行，
+ *  看起来就像把初始状态硬编码给了所有订单。现在走过的亮、没到的灰，当前态带脉冲。 */
+const CHAIN_STEPS = [
+  { key: 'waitPay', text: '创建订单（待付款）', field: 'createdAt' },
+  { key: 'waitShip', text: '付款 → 待发货', field: 'paidAt' },
+  { key: 'waitReceive', text: '发货 → 待收货', field: 'shippedAt' },
+  { key: 'completed', text: '收货 → 已完成', field: 'receivedAt' },
+]
+const CHAIN_INDEX = { waitPay: 0, waitShip: 1, waitReceive: 2, completed: 3 }
+
+/**
+ * 当前选中单的时间线。判据链：
+ *   ① 状态来自订单行（`state` / `cancelled`），**不是**拿第一条时间戳当状态；
+ *   ② 时间优先取生命周期列，列缺失时取本会话 SSE moves 里第一次到该态的 ts；
+ *   ③ 没走过的步骤保留为 `future`（灰色），而不是从列表里删掉；
+ *   ④ 取消单只画「已走过的段 + 取消」，不把取消后的主链画成还会继续。
+ */
+const openedTimeline = computed(() => {
   const r = openedRow.value
-  if (r) {
-    const steps = []
-    if (r.createdAt) steps.push({ t: r.createdAt, text: '创建订单（待付款）' })
-    if (r.paidAt) steps.push({ t: r.paidAt, text: '付款 → 待发货' })
-    if (r.shippedAt) steps.push({ t: r.shippedAt, text: '发货 → 待收货' })
-    if (r.receivedAt) steps.push({ t: r.receivedAt, text: '收货 → 已完成' })
-    if (r.cancelledAt) steps.push({ t: r.cancelledAt, text: '取消 → 已取消' })
-    if (steps.length) return steps
+  if (!r) return []
+  const moveTimes = {}
+  for (const m of openedMoves.value) {
+    const k = stateKeyOf(m.to)
+    if (k && moveTimes[k] === undefined) moveTimes[k] = m.ts
   }
-  // 老数据 / 演示流只有本会话 moves 时才退到这条路径。
-  return openedMoves.value
-    .filter((m) => stateKeyOf(m.from) !== '')
-    .map((m) => ({
-      t: m.ts,
-      text: `${moveStateLabel(m.from)} → ${moveStateLabel(m.to)}`,
+  const state = r.cancelled || r.state === 'cancelled' ? 'cancelled' : r.state
+  if (state === 'cancelled') {
+    const steps = [CHAIN_STEPS[0]]
+    if (r.paidAt || moveTimes.waitShip) steps.push(CHAIN_STEPS[1])
+    steps.push({ key: 'cancelled', text: '取消 → 已取消', field: 'cancelledAt' })
+    return steps.map((s, i) => ({
+      key: s.key,
+      text: s.text,
+      t: r[s.field] || moveTimes[s.key],
+      done: true,
+      current: i === steps.length - 1,
+      cancel: s.key === 'cancelled',
     }))
+  }
+  const cur = CHAIN_INDEX[state]
+  if (cur === undefined) return []
+  return CHAIN_STEPS.map((s, i) => ({
+    key: s.key,
+    text: s.text,
+    t: r[s.field] || moveTimes[s.key],
+    done: i <= cur,
+    current: i === cur,
+    cancel: false,
+  }))
 })
 
-/** 抽屉左列：当前筛选下按停留倒序的前 30 单（DLC：先找出卡得最久的）。
- *  ⚠️ 从表格行直接打开时，选中的单可能不在「最慢 30」里 ⇒ 补进列表末尾，
- *  否则左列没有 `on` 高亮、右列却显示着它，像点错了行。 */
-const drawerRows = computed(() => {
+/** 抽屉候选池：当前筛选下的全部订单，按停留倒序（DLC：先找出卡得最久的）。 */
+const drawerPool = computed(() => {
   let rows = listRows.value
   if (filterState.value) rows = rows.filter((r) => r.state === filterState.value)
-  const top = rows
-    .slice()
-    .sort((a, b) => num(b.dwellSeconds) - num(a.dwellSeconds))
-    .slice(0, 30)
-  const selected = openedId.value ? ordersById.get(openedId.value) : null
-  if (selected && !top.some((r) => r.orderId === selected.orderId)
-    && (!filterState.value || selected.state === filterState.value)) {
-    top.push(selected)
-  }
-  return top
+  return rows.slice().sort((a, b) => num(b.dwellSeconds) - num(a.dwellSeconds))
 })
+
+/** 模糊搜索必须打在**全部筛选结果**上，而不是先截前 30 再搜 ——
+ *  否则搜一条排名 200 的单会得到「没有匹配」，抽屉像是坏的。
+ *  订单号或商品名任一命中即可（大小写不敏感）。 */
+const drawerMatchedRows = computed(() => {
+  const q = drawerQuery.value.trim().toLowerCase()
+  if (!q) return drawerPool.value
+  return drawerPool.value.filter((r) => (
+    String(r.orderId || '').toLowerCase().includes(q)
+    || String(r.product || '').toLowerCase().includes(q)
+  ))
+})
+
+/** 左列实际渲染：不搜索时取最慢 30；搜索时取命中里最慢 50（有界 + 提示条数）。
+ *  ⚠️ 从表格行直接打开时，选中的单可能不在截断范围内 ⇒ 若它也命中当前搜索就补进末尾，
+ *  否则左列没有 `on` 高亮、右列却显示着它，像点错了行。 */
+const drawerRows = computed(() => {
+  const matched = drawerMatchedRows.value
+  const limit = drawerQuery.value.trim() ? 50 : 30
+  const rows = matched.slice(0, limit)
+  const selected = openedId.value ? ordersById.get(openedId.value) : null
+  if (selected && matched.some((r) => r.orderId === selected.orderId)
+    && !rows.some((r) => r.orderId === selected.orderId)) {
+    rows.push(selected)
+  }
+  return rows
+})
+
+/** 搜索把列表缩短后，选中的单可能落到可视区外 ⇒ 重新滚到它（找不到就保持原位）。 */
+watch(drawerQuery, revealDrawerSelection)
 
 /** 抽屉内切换选中单（只换右列，不关抽屉、不改筛选）。 */
 function pickRow(id) {
@@ -1361,6 +1525,7 @@ function openTimeline(id) {
   if (ordersById.has(id)) {
     openedId.value = id
     drawerOpen.value = true
+    revealDrawerSelection()
   }
 }
 function closeTimeline() {
@@ -1456,6 +1621,8 @@ function absorbMoves(moves) {
     if (fromKey) {
       const edgeId = `${fromKey}>${toKey}`
       if (KNOWN_EDGES.has(edgeId)) flashThrottled(activeEdges, edgeId)
+      // 主链轨道上的粒子：一跳或跨步都画，从 from 节点滑向 to 节点。
+      spawnLaneParticle(fromKey, toKey, id)
     }
   }
 }
@@ -1558,6 +1725,7 @@ function syncReplayChanges(animate) {
 function enterReplay() {
   closeStream()
   resetReplayState()
+  resetMotion()
   currentBatch.value = replaySession.batchId || ''
   syncReplayChanges(false)
 }
@@ -1594,8 +1762,83 @@ function tweenTo(next) {
   rafId = requestAnimationFrame(step)
 }
 
+/* ── 动效的三条生产线 ─────────────────────────────────────────────────────── */
+/** 两拍 counts 的差 → 阶梯数字旁的 `+N / -N`，并让数字弹一下。首帧没有上一拍，不播。 */
+function noteCountDeltas(prev, next) {
+  const hasPrev = STATES.some((s) => prev && prev[s.key] !== undefined)
+  if (!hasPrev) return
+  STATES.forEach((s) => {
+    const d = num(next[s.key]) - num(prev[s.key])
+    if (!d) return
+    const token = ++deltaSeq[s.key]
+    stateDeltas[s.key] = { text: `${d > 0 ? '+' : ''}${d}`, dir: d > 0 ? 'up' : 'down' }
+    statePulse[s.key] = true
+    const t = setTimeout(() => {
+      timers.delete(t)
+      if (deltaSeq[s.key] !== token) return
+      stateDeltas[s.key] = null
+      statePulse[s.key] = false
+    }, 1200)
+    timers.add(t)
+  })
+}
+
+/** 追加一个实时尾点。滑动窗口只在**右端**生长，旧点从左边退出。 */
+function sampleLiveTail() {
+  const now = Date.now()
+  if (now - liveTailAt < LIVE_SAMPLE_MS) return
+  liveTailAt = now
+  const d = new Date(now)
+  liveTail.value = liveTail.value.concat({
+    label: `${pad2(d.getHours())}:${pad2(d.getMinutes())}:${pad2(d.getSeconds())}`,
+    waitPay: num(counts.value.waitPay),
+    waitShip: num(counts.value.waitShip),
+    waitReceive: num(counts.value.waitReceive),
+  }).slice(-LIVE_TAIL_CAP)
+}
+
+/** 一条 SSE move → 主链轨道上的一颗发光粒子。端点认不出来 / 不在主链上就不画。 */
+function spawnLaneParticle(fromKey, toKey, orderId) {
+  const a = LANE_INDEX[fromKey]
+  const b = LANE_INDEX[toKey]
+  if (a === undefined || b === undefined || b <= a) return
+  const p = {
+    id: `${orderId}-${++particleSeq}`,
+    x1: LANE_POS[a],
+    w: LANE_POS[b] - LANE_POS[a],
+    color: stateColor(toKey),
+  }
+  laneParticles.value = laneParticles.value.concat(p).slice(-10)
+  const t = setTimeout(() => {
+    timers.delete(t)
+    laneParticles.value = laneParticles.value.filter((x) => x.id !== p.id)
+  }, 1400)
+  timers.add(t)
+}
+
+/** 切数据源 / 重连时把三条动画线清零，避免上一场的粒子和尾点带进下一场。 */
+function resetMotion() {
+  laneParticles.value = []
+  liveTail.value = []
+  liveTailAt = 0
+  STATES.forEach((s) => {
+    stateDeltas[s.key] = null
+    statePulse[s.key] = false
+  })
+}
+
+/** 切数据源时必须清掉**上一场的事件账**（流轨 / QPS / 时间线补充）。
+ *  否则「模拟日常 → 后端真流」后，假数据流转会继续挂在流轨里，直到被新事件挤出窗口；
+ *  真流若一直没 move，就会永远显示上一场的假数据。 */
+function resetStreamHistory() {
+  recentMoves.value = []
+  movesById.clear()
+  statesForQpsReset()
+}
+
 /* ── 收帧 ──────────────────────────────────────────────────────────────────── */
 function onFrame(f) {
+  const prevCounts = counts.value && Object.keys(counts.value).length ? counts.value : null
   seq.value = num(f.seq)
   ts.value = num(f.ts) || Date.now()
   counts.value = f.counts || {}
@@ -1605,6 +1848,8 @@ function onFrame(f) {
   absorbOrders(Array.isArray(f.orders) ? f.orders : [])
   absorbMoves(Array.isArray(f.moves) ? f.moves : [])
   computeQps()
+  noteCountDeltas(prevCounts, counts.value)
+  sampleLiveTail()
 
   STATES.forEach((s) => { target[s.key] = num(counts.value[s.key]) })
   tweenTo({ ...target })
@@ -1616,6 +1861,7 @@ function connect() {
   //    若只判 `active`，这一瞬间会先连上实时流、回放装载完再切断（白闪一帧实时数据）。
   if (replaySession.active || replaySession.loading) return
   closeStream()
+  resetMotion()
   errMsg.value = ''
   lost.value = null
   phase.value = 'connecting'
@@ -1665,8 +1911,11 @@ onMounted(() => {
   if (replaySession.active) enterReplay()
   else connect()
 })
-// ⚠️ 切数据源（`正常` ⇄ `模拟日常`）⇒ 立刻重连（`connect()` 会先 `closeStream()`）。
-watch(() => demo.on, connect)
+// ⚠️ 切数据源（`正常` ⇄ `模拟日常`）⇒ 清掉上一场事件账 + 立刻重连（`connect()` 会先 `closeStream()`）。
+watch(() => demo.on, () => {
+  resetStreamHistory()
+  connect()
+})
 // 主从筛选一变，页码回到第一页（否则筛完只剩 3 行却停在第 9 页）。
 watch([filterState, onlyTimeout], () => { offset.value = 0 })
 // 开始/结束回放：切流 + 重置本页口径。⚠️ 退出后 `connect()` 才恢复实时。
@@ -1698,6 +1947,22 @@ onBeforeUnmount(() => {
 .a-of {
   /* 高密度大盘：比其它看板宽一档（1120 → 1320），让趋势 + 阶梯 + 明细表同屏。 */
   max-width: 1320px;
+  position: relative;
+  /* 雷达监控屏底纹：极淡网格 + 顶部冷光。网格只铺在内容区，不另建浮层。 */
+  background-image:
+    radial-gradient(circle at 50% 0%, color-mix(in srgb, var(--c1) 7%, transparent), transparent 46%),
+    linear-gradient(to right, color-mix(in srgb, var(--line) 55%, transparent) 1px, transparent 1px),
+    linear-gradient(to bottom, color-mix(in srgb, var(--line) 55%, transparent) 1px, transparent 1px);
+  background-size: 100% 100%, 30px 30px, 30px 30px;
+  background-position: 0 0, -1px -1px, -1px -1px;
+}
+/* 面板：细边界 + 一点内发光，别只是贴一块纯深色。 */
+.a-of .a-card {
+  position: relative;
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, var(--ink) 6%, transparent),
+    inset 0 0 26px color-mix(in srgb, var(--c1) 4%, transparent),
+    0 0 0 1px color-mix(in srgb, var(--line) 55%, transparent);
 }
 
 /* ── ① 状态条（逐字照 `MetricsPanel.vue`，那里又同源于 `StatsPage.vue`）──────── */
@@ -2122,7 +2387,20 @@ onBeforeUnmount(() => {
 }
 @media (prefers-reduced-motion: reduce) {
   .a-of-node.now,
-  .a-of-nodes .is-pulse .a-of-box {
+  .a-of-nodes .is-pulse .a-of-box,
+  .a-of-trend::after,
+  .a-of-lane-track,
+  .a-of-lane-dot::after,
+  .a-of-lane-node.is-live .a-of-lane-dot,
+  .a-of-dot-sm.now,
+  .a-of-seg-sm.on,
+  .a-of-step.is-live,
+  .a-of-step.is-live .a-of-dot,
+  .a-of-step-n.is-bump,
+  .a-of-delta,
+  .a-of-tl-i.is-current .a-of-tl-dot,
+  .a-of-stream-radar::before,
+  .a-of-stream-radar::after {
     animation: none;
   }
   /* 3a 的「—」流动也关掉 —— ⚠️ 只关 animation、**不关虚线本身**：
@@ -2132,7 +2410,8 @@ onBeforeUnmount(() => {
   }
   .a-of-node,
   .a-of-edge,
-  .a-of-row.is-jump {
+  .a-of-row.is-jump,
+  .a-of-rail > i {
     transition: none;
   }
 }
@@ -2184,24 +2463,95 @@ onBeforeUnmount(() => {
   list-style: none;
   display: flex;
   flex-direction: column;
-  gap: var(--s3);
   margin: var(--s4) 0;
 }
+/* 时间线不是「只列有时间的行」：四步骨架都在，走过的亮、当前态脉冲、没到的灰。 */
 .a-of-tl-i {
+  position: relative;
   display: grid;
-  grid-template-columns: 76px minmax(0, 1fr);
-  gap: var(--s3);
+  grid-template-columns: 12px 76px minmax(0, 1fr);
+  gap: 0 var(--s3);
+  padding-bottom: var(--s3);
   font-size: var(--fs-sm);
   color: var(--ink);
+}
+.a-of-tl-i::before {
+  content: '';
+  position: absolute;
+  left: 5px;
+  top: 14px;
+  bottom: 0;
+  width: 1px;
+  background: var(--line-2);
+}
+.a-of-tl-i:last-child {
+  padding-bottom: 0;
+}
+.a-of-tl-i:last-child::before {
+  display: none;
+}
+.a-of-tl-dot {
+  position: relative;
+  z-index: 1;
+  width: 11px;
+  height: 11px;
+  margin-top: 3px;
+  border-radius: 50%;
+  border: 1px solid var(--line-2);
+  background: var(--surface);
+  box-sizing: border-box;
+}
+.a-of-tl-i.is-done .a-of-tl-dot {
+  background: var(--tl-color);
+  border-color: var(--tl-color);
+  box-shadow: 0 0 7px var(--tl-color);
+}
+.a-of-tl-i.is-current .a-of-tl-dot {
+  animation: a-of-tl-pulse 1.8s ease-out infinite;
+}
+.a-of-tl-i.is-cancel .a-of-tl-dot {
+  background: var(--danger);
+  border-color: var(--danger);
+  box-shadow: 0 0 7px var(--danger);
+}
+@keyframes a-of-tl-pulse {
+  0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--tl-color) 55%, transparent), 0 0 7px var(--tl-color); }
+  100% { box-shadow: 0 0 0 7px transparent, 0 0 3px transparent; }
 }
 .a-of-tl-t {
   font-family: var(--font-mono);
   font-size: var(--fs-xs);
   color: var(--ink-3);
+  padding-top: 2px;
+}
+.a-of-tl-d {
+  display: flex;
+  align-items: baseline;
+  gap: var(--s2);
+  min-width: 0;
 }
 .a-of-tl-d b {
-  color: var(--success-deep);
   font-weight: var(--fw-semi);
+}
+.a-of-tl-i.is-done:not(.is-current) .a-of-tl-d b {
+  color: var(--ink-2);
+}
+.a-of-tl-i.is-current .a-of-tl-d b {
+  color: var(--ink);
+}
+.a-of-tl-i.is-future {
+  opacity: 0.42;
+}
+.a-of-tl-i.is-future .a-of-tl-d b {
+  color: var(--ink-3);
+}
+.a-of-tl-d small {
+  font-size: 10px;
+  color: var(--ink-3);
+  white-space: nowrap;
+}
+.a-of-tl-i.is-current .a-of-tl-d small {
+  color: var(--success);
 }
 .a-of-tl-note {
   font-size: var(--fs-xs);
@@ -2223,6 +2573,27 @@ onBeforeUnmount(() => {
 }
 .a-of-hero > .a-card {
   margin-bottom: 0;
+}
+/* 趋势卡上的一道极淡扫描线：图在动之外，整块也有一点「雷达在扫」的生气。 */
+.a-of-trend {
+  position: relative;
+  overflow: hidden;
+}
+.a-of-trend::after {
+  content: '';
+  position: absolute;
+  top: 52px;
+  bottom: 10px;
+  left: -8%;
+  width: 1px;
+  background: linear-gradient(to bottom, transparent, var(--c1), transparent);
+  opacity: 0.3;
+  pointer-events: none;
+  animation: a-of-scan 7s linear infinite;
+}
+@keyframes a-of-scan {
+  0% { left: -8%; }
+  100% { left: 108%; }
 }
 .a-of-chd {
   display: flex;
@@ -2320,6 +2691,13 @@ onBeforeUnmount(() => {
 .a-of-main > .a-card {
   margin-bottom: 0;
 }
+/* 右栏是纵向 flex：列表按内容长，剩余高度交给空态 / 待命条，
+   不再让「列表写死 286px」在数据少时留下死白。 */
+.a-of-stream {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
 .a-of-flow-body {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 230px;
@@ -2391,11 +2769,63 @@ onBeforeUnmount(() => {
   flex: none;
   display: inline-block;
 }
+.a-of-step-num {
+  position: relative;
+  display: inline-flex;
+  align-items: baseline;
+}
 .a-of-step-n {
   font-family: var(--font-mono);
   font-size: var(--fs-lg);
   font-weight: var(--fw-semi);
   line-height: 1;
+  transform-origin: left center;
+}
+.a-of-step-n.is-bump {
+  animation: a-of-bump 0.55s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+/* +N / -N 从数字右侧浮起、淡出 —— 只在**真变了**的那一拍出现。 */
+.a-of-delta {
+  position: absolute;
+  left: 100%;
+  top: -2px;
+  margin-left: 3px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: var(--fw-semi);
+  white-space: nowrap;
+  pointer-events: none;
+  animation: a-of-delta-float 1.2s ease-out forwards;
+}
+.a-of-delta.is-up { color: var(--success); }
+.a-of-delta.is-down { color: var(--danger); }
+@keyframes a-of-bump {
+  0% { transform: scale(1); }
+  35% { transform: scale(1.28); }
+  100% { transform: scale(1); }
+}
+@keyframes a-of-delta-float {
+  0% { opacity: 0; transform: translateY(4px) scale(0.8); }
+  18% { opacity: 1; transform: translateY(0) scale(1); }
+  70% { opacity: 1; }
+  100% { opacity: 0; transform: translateY(-12px) scale(0.9); }
+}
+/* 有流转落到这个节点：左侧色条呼吸（雷达波），与状态机图的描边脉冲同一语义。 */
+.a-of-step.is-live {
+  animation: a-of-step-breathe 1.2s ease-out 2;
+}
+@keyframes a-of-step-breathe {
+  0% { box-shadow: inset 3px 0 0 var(--success), 0 0 0 0 color-mix(in srgb, var(--success) 45%, transparent); }
+  60% { box-shadow: inset 3px 0 0 var(--success), 0 0 0 5px transparent; }
+  100% { box-shadow: inset 3px 0 0 transparent, 0 0 0 0 transparent; }
+}
+.a-of-step.is-live .a-of-dot {
+  box-shadow: 0 0 0 0 currentColor;
+  animation: a-of-dot-breathe 1.2s ease-out 2;
+}
+@keyframes a-of-dot-breathe {
+  0% { box-shadow: 0 0 0 0 currentColor, 0 0 8px currentColor; }
+  100% { box-shadow: 0 0 0 7px transparent, 0 0 0 transparent; }
 }
 .a-of-step-qps {
   margin-left: auto;
@@ -2461,10 +2891,188 @@ onBeforeUnmount(() => {
 .a-of-stream-sum .a-of-mono {
   margin-left: auto;
 }
+
+/* ── 主链粒子轨道 ─────────────────────────────────────────────────────────── */
+.a-of-lane {
+  position: relative;
+  height: 88px;
+  margin: var(--s2) 0 0;
+  border-bottom: 1px solid var(--line);
+}
+.a-of-lane-track {
+  position: absolute;
+  left: 10%;
+  right: 9%;
+  top: 26px;
+  height: 2px;
+  background-image: repeating-linear-gradient(
+    90deg,
+    var(--line-2) 0 5px,
+    transparent 5px 10px
+  );
+  animation: a-of-lane-dash 1.2s linear infinite;
+}
+@keyframes a-of-lane-dash {
+  from { background-position: 0 0; }
+  to { background-position: -10px 0; }
+}
+.a-of-lane-node {
+  position: absolute;
+  top: 0;
+  transform: translateX(-50%);
+  width: 64px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1px;
+  text-align: center;
+  color: var(--ink-3);
+  white-space: nowrap;
+}
+.a-of-lane-dot {
+  position: relative;
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+  margin-bottom: 2px;
+  box-shadow: 0 0 6px currentColor;
+}
+/* 雷达波：每个节点常驻一圈向外扩散的细环；有流转时下方再叠一层强脉冲。 */
+.a-of-lane-dot::after {
+  content: '';
+  position: absolute;
+  inset: -4px;
+  border: 1px solid currentColor;
+  border-radius: 50%;
+  opacity: 0.4;
+  animation: a-of-radar 2.4s ease-out infinite;
+}
+@keyframes a-of-radar {
+  0% { transform: scale(0.7); opacity: 0.55; }
+  100% { transform: scale(1.9); opacity: 0; }
+}
+.a-of-lane-node b {
+  font-size: 10px;
+  font-weight: var(--fw-med);
+  color: var(--ink-2);
+}
+.a-of-lane-node em {
+  font-style: normal;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+}
+.a-of-lane-node.is-live .a-of-lane-dot {
+  animation: a-of-lane-hit 1.2s ease-out 2;
+}
+@keyframes a-of-lane-hit {
+  0% { box-shadow: 0 0 0 0 currentColor, 0 0 8px currentColor; }
+  100% { box-shadow: 0 0 0 8px transparent, 0 0 2px transparent; }
+}
+.a-of-particle-wrap {
+  position: absolute;
+  top: 24px;
+  height: 6px;
+  pointer-events: none;
+}
+.a-of-particle {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--pcolor);
+  box-shadow: 0 0 6px var(--pcolor), 0 0 14px var(--pcolor);
+  animation: a-of-fly 1.35s cubic-bezier(0.25, 0.8, 0.35, 1) forwards;
+}
+@keyframes a-of-fly {
+  0% { left: 0; opacity: 0; transform: scale(0.4); }
+  12% { opacity: 1; transform: scale(1); }
+  82% { opacity: 1; transform: scale(1); }
+  100% { left: calc(100% - 6px); opacity: 0; transform: scale(0.7); }
+}
+
 .a-of-stream-list {
   list-style: none;
-  max-height: 286px;
+  flex: 0 1 auto;
+  min-height: 0;
+  max-height: 320px;
   overflow-y: auto;
+}
+/* 没有 moves 时占满右栏剩余高度，给一个像样的空态，而不是一行灰字 + 大片空白。 */
+.a-of-stream-empty {
+  flex: 1;
+  min-height: 170px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--s2);
+  padding: var(--s4);
+  text-align: center;
+  border-top: 1px dashed var(--line);
+  overflow: hidden;
+}
+.a-of-stream-empty b {
+  font-size: var(--fs-sm);
+  color: var(--ink-2);
+  font-weight: var(--fw-med);
+}
+.a-of-stream-empty span {
+  max-width: 280px;
+  font-size: 10px;
+  line-height: 1.65;
+  color: var(--ink-3);
+}
+/* 有数据时，列表下方的待命条也吃掉剩余高度 —— 面板不会在底部空一截。 */
+.a-of-stream-foot {
+  position: relative;
+  flex: 1;
+  min-height: 54px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--s2);
+  margin-top: var(--s2);
+  padding-top: var(--s2);
+  border-top: 1px dashed var(--line);
+  font-size: 10px;
+  color: var(--ink-3);
+  overflow: hidden;
+}
+.a-of-stream-radar {
+  position: relative;
+  flex: none;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  border: 1px solid var(--info);
+  box-sizing: border-box;
+}
+.a-of-stream-empty .a-of-stream-radar {
+  width: 42px;
+  height: 42px;
+  margin-bottom: var(--s2);
+  border-color: color-mix(in srgb, var(--info) 55%, transparent);
+}
+.a-of-stream-radar::before,
+.a-of-stream-radar::after {
+  content: '';
+  position: absolute;
+  inset: -1px;
+  border: 1px solid var(--info);
+  border-radius: 50%;
+  opacity: 0;
+  animation: a-of-stream-ring 2.4s ease-out infinite;
+}
+.a-of-stream-radar::after {
+  animation-delay: 1.2s;
+}
+@keyframes a-of-stream-ring {
+  0% { transform: scale(0.7); opacity: 0.65; }
+  100% { transform: scale(2.6); opacity: 0; }
 }
 .a-of-stream-i {
   display: grid;
@@ -2491,22 +3099,41 @@ onBeforeUnmount(() => {
   width: 5px;
   height: 5px;
   border-radius: 50%;
-  background: var(--line-2);
+  background: var(--surface);
+  border: 1px solid var(--line-2);
+  box-sizing: border-box;
   flex: none;
 }
 .a-of-dot-sm.on {
   background: var(--success);
+  border-color: var(--success);
+  box-shadow: 0 0 5px var(--success);
 }
 .a-of-dot-sm.now {
-  box-shadow: 0 0 0 3px var(--success-ground);
+  animation: a-of-node-pulse 1.2s ease-out infinite;
 }
+/* 轨道改成**虚线路线**：走过的段用流动虚线，不再是一根实心灰线。 */
 .a-of-seg-sm {
   flex: 1;
   height: 1px;
-  background: var(--line-2);
+  background-image: repeating-linear-gradient(
+    90deg,
+    var(--line-2) 0 3px,
+    transparent 3px 6px
+  );
 }
 .a-of-seg-sm.on {
-  background: var(--success);
+  height: 2px;
+  background-image: repeating-linear-gradient(
+    90deg,
+    var(--success) 0 5px,
+    transparent 5px 10px
+  );
+  animation: a-of-seg-sm-flow 0.9s linear infinite;
+}
+@keyframes a-of-seg-sm-flow {
+  from { background-position: 0 0; }
+  to { background-position: -10px 0; }
 }
 .a-of-stream-d {
   min-width: 0;
@@ -2825,10 +3452,50 @@ onBeforeUnmount(() => {
   display: grid;
   grid-template-columns: 300px minmax(0, 1fr);
 }
+.a-of-drawer-side {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  border-right: 1px solid var(--line);
+}
+.a-of-drawer-search {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  padding: var(--s2) var(--s3);
+  border-bottom: 1px solid var(--line-2);
+  background: var(--surface-2);
+}
+.a-of-search {
+  flex: 1;
+  min-width: 0;
+  font: inherit;
+  font-size: var(--fs-xs);
+  color: var(--ink);
+  background: var(--surface);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r1);
+  padding: 5px var(--s2);
+  outline: none;
+}
+.a-of-search:focus {
+  border-color: var(--info);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--info) 20%, transparent);
+}
+.a-of-search::placeholder {
+  color: var(--ink-3);
+}
+.a-of-search-n {
+  flex: none;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--ink-3);
+}
 .a-of-drawer-list {
+  flex: 1;
+  min-height: 0;
   list-style: none;
   overflow-y: auto;
-  border-right: 1px solid var(--line);
   padding: var(--s2) 0;
 }
 .a-of-drawer-i {
@@ -2838,16 +3505,24 @@ onBeforeUnmount(() => {
   align-items: center;
   padding: 7px var(--s4);
   border-bottom: 1px dashed var(--line);
+  border-left: 3px solid transparent;
   cursor: pointer;
   font-size: 11px;
+  transition: background 0.18s ease, border-color 0.18s ease;
 }
 .a-of-drawer-i:hover,
 .a-of-drawer-i:focus-visible {
   background: var(--surface-2);
   outline: none;
 }
+/* 选中态必须一眼看得出来：深蓝底 + 左侧亮条，而不是只换一档浅色。 */
 .a-of-drawer-i.on {
-  background: var(--info-ground);
+  background: color-mix(in srgb, var(--info) 22%, var(--surface));
+  border-left-color: var(--info);
+}
+.a-of-drawer-i.on .a-of-id {
+  color: var(--ink);
+  font-weight: var(--fw-semi);
 }
 .a-of-drawer-i.is-timeout {
   box-shadow: inset 3px 0 0 var(--danger);
@@ -2889,6 +3564,14 @@ onBeforeUnmount(() => {
 .a-of-drawer-oh .a-of-id {
   font-size: var(--fs-md);
   color: var(--ink);
+}
+.a-of-drawer-now {
+  font-size: 10px;
+  color: var(--info);
+  background: var(--info-ground);
+  border-radius: var(--r1);
+  padding: 1px 6px;
+  white-space: nowrap;
 }
 .a-of-drawer-sub {
   margin: var(--s2) 0 var(--s3);
@@ -2958,7 +3641,7 @@ onBeforeUnmount(() => {
     grid-template-columns: minmax(0, 1fr);
     grid-template-rows: minmax(120px, 40%) minmax(0, 1fr);
   }
-  .a-of-drawer-list {
+  .a-of-drawer-side {
     border-right: 0;
     border-bottom: 1px solid var(--line);
   }

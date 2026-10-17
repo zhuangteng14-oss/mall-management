@@ -130,6 +130,10 @@ const option = computed(() => {
   const xAxis = categoryAxis(props.categories, { boundaryGap: props.boundaryGap })
   return {
     animation: props.animation,
+    // 数据更新时让线/扇区滑过去，而不是瞬间换一帧（趋势滑动窗口与实时尾点靠这一条）。
+    animationDuration: 650,
+    animationDurationUpdate: 650,
+    animationEasingUpdate: 'cubicOut',
     grid: {
       left: props.gridLeft,
       right: props.gridRight === null ? (dual.value ? 56 : 24) : props.gridRight,
@@ -167,7 +171,13 @@ const option = computed(() => {
         smooth: isBar ? undefined : props.smooth,
         showSymbol: isBar ? undefined : longest <= props.symbolLimit,
         // 线宽 / 数据点形状与大小在主题的 `line` 里；这里只写**本序列特有**的（色、虚线）。
-        lineStyle: isBar ? undefined : { color, type: s.dashed ? [4, 3] : 'solid' },
+        // 面积图的线加一层同色辉光 —— 监控盘上的「光」来自数据本身，不另铺装饰层。
+        lineStyle: isBar ? undefined : {
+          color,
+          type: s.dashed ? [4, 3] : 'solid',
+          shadowBlur: s.area ? 10 : 0,
+          shadowColor: color,
+        },
         itemStyle: isBar
           ? { color, borderRadius: [2, 2, 0, 0] }
           : { color },
@@ -176,9 +186,11 @@ const option = computed(() => {
         areaStyle: !isBar && s.area
           ? {
               color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
-                { offset: 0, color: mixHex(t.surface, color, 0.42) },
-                { offset: 1, color: mixHex(t.surface, color, 0.04) },
+                { offset: 0, color: mixHex(t.surface, color, 0.46) },
+                { offset: 1, color: mixHex(t.surface, color, 0.05) },
               ]),
+              shadowBlur: 12,
+              shadowColor: mixHex(t.surface, color, 0.22),
             }
           : undefined,
         markPoint: isBar ? undefined : markPointOf(s.markPoints, color, t),

@@ -76,7 +76,12 @@ const option = computed(() => {
       type: 'bar',
       data: counts.map((v, i) => ({
         value: v,
-        itemStyle: { color: labels[i] === avgLabel ? t.ink2 : t.axisLabel },
+        itemStyle: {
+          color: labels[i] === avgLabel ? t.ink2 : t.axisLabel,
+          // 灰阶柱也要有「屏幕发光」的一层；不改变柱子的色阶结构。
+          shadowBlur: 7,
+          shadowColor: t.ink2,
+        },
       })),
       barMaxWidth: 26,
       itemStyle: { opacity: 0.9 },
