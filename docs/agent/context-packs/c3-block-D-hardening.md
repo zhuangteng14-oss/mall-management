@@ -163,8 +163,8 @@ static final List<String> PROTECTION_KEYS =
   解码逻辑现址 = `AttackSwitchConfig.updateFromJson`。
 - 前端开关面板：`views/admin/observe/AttackConsole.vue` —— 模板 `:122-145`（`v-for="k in PROTECTIONS"` `:128`）·
   状态 `:624`（`ref(new Set(PROTECTIONS))`，**默认全开**）· 拨动 `:674-692` · 提交 `:1005`。
-- 中文标签：`config/labels/observe-labels.js:274`（`PROTECTIONS`）· `:277-283`（`PROTECTION_LABEL`：
-  限流 / 熔断 / 降级 / 重试 / 分池）· `:360-364`（`protectionLabel`）。
+- 中文标签：`config/labels/observe-labels.js:379`（`PROTECTIONS`）· `:382-388`（`PROTECTION_LABEL`：
+  限流 / 熔断 / 降级 / 重试 / 分池）· `:467-472`（`protectionLabel`）。
 
 **三处「只记录不实现」的原话**（D 段做完要**逐处改**，改的时候别只改一处）：
 1. `AttackEngine.java:336`（类注释）**原话**：「⚠️ **本笔只负责把它们「收下来、记进演练记录、打进日志」，

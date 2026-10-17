@@ -182,6 +182,111 @@ export const OBJECT_FIELD_LABEL = {
 /** 认不出 ⇒ 用最中性的那个词（同各表的兜底口径）。 */
 export const FALLBACK_FIELD_LABEL = '对象'
 
+/**
+ * 事件帧 **`fields` 里的键名** → 中文（3a.3 收尾批 2，用户 2026-10-17 裁定「第一层要全 fields」）。
+ *
+ * ⚠️ 【键集**逐字来自真帧**，不是猜的】唯一出处是后端 `EventBroadcaster` 九个 `from…()` 方法里
+ *    那串 `fields.put(...)`（cache / lock / order / stock / audit / notify / sensitive /
+ *    identity / protection）。3a.3 之前前端只把 `detail` 当人读串，没登记过键名 ——
+ *    本轮逐环读了一遍源码才落这张表。用户明令：**真帧里没有的键不预留**
+ *    （`toType` / `eventType` / `words` / `targetType` / `targetId` / `detail` / `src` /
+ *    `actorRole` / `op` / `path` 都不在这张表里）。
+ *
+ * ⚠️ `actor` 在两处含义不同：`fields.actor` 是**审计里的业务号**（字符串），帧顶层 `actor` 是
+ *    `{id, role}` —— 顶层那个的标签在 `EVENT_KEY_LABEL`，别拿这张表去解释它。
+ * ⚠️ `kind` 在 `fields` 里是**库存操作**（deduct / release），帧顶层 `kind` 是**事件类** ——
+ *    同名不同物，故这张表只在 `fields` 上生效。
+ */
+export const FIELD_LABEL = {
+  // 缓存 / 锁
+  cache: '缓存区',
+  lock: '锁',
+  key: '键',
+  result: '结果',
+  // 订单（transition / illegal / async 三支共用这些键里的若干）
+  action: '动作',
+  from: '前态',
+  to: '后态',
+  order: '订单号',
+  shape: '状态形状',
+  atBirth: '出生时',
+  reason: '原因',
+  // 库存
+  kind: '操作',
+  sku: 'SKU',
+  qty: '数量',
+  // 审计 / 通知 / 敏感词 / 身份 / 防护
+  actor: '发起人',
+  event: '事件类型',
+  scene: '场景',
+  hit: '命中数',
+  total: '总数',
+  subject: '主体',
+  protection: '防护',
+  scope: '范围',
+  extra: '附加信息',
+}
+
+/**
+ * **逐环覆盖**：同一个英文键在不同环里指的不是一件事，只有覆盖才说得准。
+ *
+ * ⚠️ 目前只有两处真的撞了：
+ *   · `order.to` = **后态**（状态机），`notify.to` = **收件人类型**（`customer` / `merchant`）；
+ *   · `order.action` / `audit.action` 都是「动作」，但值的翻译表不同（见 `fieldValueText`）。
+ * 其余键在九环里语义一致，走 `FIELD_LABEL` 的通用词。
+ */
+export const FIELD_LABEL_BY_KIND = {
+  notify: { to: '收件人类型' },
+}
+
+/**
+ * 帧**顶层**结构键 → 中文（⑤ 的「中文（英文原键）= 值」那一层用）。
+ * ⚠️ 与 `FIELD_LABEL` 分开：顶层的 `kind` / `key` / `actor` 和 `fields` 里的同名键**不是一回事**。
+ */
+export const EVENT_KEY_LABEL = {
+  kind: '类型',
+  severity: '级别',
+  key: '键',
+  objectType: '对象类型',
+  objectId: '对象 id',
+  traceId: '链路号',
+  batchId: '批次号',
+  durationUs: '耗时',
+  remaining: '剩余',
+  actor: '发起人',
+  src: '来源环',
+}
+
+/**
+ * 通知收件人类型（`fields.to` 的**值**）→ 中文。
+ * ⚠️ 取值出处是后端 `NotificationService.TO_TYPE_CUSTOMER` / `TO_TYPE_MERCHANT`
+ *    （两个常量逐字就是 `customer` / `merchant`）；认不出回落原值。
+ */
+export const NOTIFY_TO_LABEL = {
+  customer: '客户',
+  merchant: '商家',
+}
+
+/** 库存操作（`fields.kind` 的**值**）→ 中文。出处：后端 `StockMetrics` 的 `deduct` / `release`。 */
+export const STOCK_KIND_LABEL = {
+  deduct: '扣减',
+  release: '释放',
+}
+
+/** 取 `fields` 键名的中文（逐环覆盖优先；认不出**回落英文原键**，绝不空白）。 */
+export function fieldLabel(kind, key) {
+  const k = String(key)
+  const byKind = Object.prototype.hasOwnProperty.call(FIELD_LABEL_BY_KIND, kind) ? FIELD_LABEL_BY_KIND[kind] : null
+  if (byKind && Object.prototype.hasOwnProperty.call(byKind, k)) return byKind[k]
+  return Object.prototype.hasOwnProperty.call(FIELD_LABEL, k) ? FIELD_LABEL[k] : k
+}
+
+/** 取帧顶层结构键的中文（认不出回落英文原键）。 */
+export function eventKeyLabel(key) {
+  const k = String(key)
+  return Object.prototype.hasOwnProperty.call(EVENT_KEY_LABEL, k) ? EVENT_KEY_LABEL[k] : k
+}
+
 /** 取中文名（认不出回落 tag 原文）。⚠️ 用 `hasOwnProperty` 而不是 `X[k] || k` —— 理由见
  *  `notify-events.js` 块首那条：`'constructor'` 之类**原型链上的键**会拿到函数（truthy）并渲染进模板。 */
 export function kindLabel(tag) {

@@ -1,0 +1,76 @@
+块 7 · 3a.3 收尾批 2 —— 第一层五要素 / 2 行截断 / ⑤「中文（英文原键）= 值」
+========================================================================
+日期：2026-10-17
+基线：b3f9969（收尾批 1）
+改动文件：
+  · Mall-management-web/mall-management-system/src/config/labels/observe-labels.js
+  · Mall-management-web/mall-management-system/src/views/admin/observe/EventLog.vue
+  · scripts/probes/probe-b7a3-eventlog-rewrite.mjs
+  · docs/agent/context-packs/c3-block-D-hardening.md（仅 refs 重指）
+
+一、页面探针
+  node scripts/probes/probe-b7a3-eventlog-rewrite.mjs
+  ⇒ 181 项 / 0 失败
+  （收尾批 1 时 178 项；本批新增 .md 裁字回归 1 项，其余为新口径下的改写断言）
+  过程图：3a3-b2-probe-shot.png
+
+二、eslint
+  npx eslint src/config/labels/observe-labels.js src/views/admin/observe/EventLog.vue
+  ⇒ EXIT=0
+
+三、两档手验（真后端 dev 8088 × 前端 8080）
+  正常（真流）：14 行；首行可见「缓存 / L1 未命中 / 键 all-v3 / 缓存区 首页商品 /
+    结果 miss / 来源 cache#4 / trace e3dd0809 / 耗时 253 µs」
+  模拟日常：68 行；首行可见「订单 支付成功（待发货） / 动作 付款 / 结果 ok /
+    前态 待付款 / 后态 已付款（待发货） / 发起人 C1031（客户） / 来源 order#0 /
+    耗时 543 µs」；库存行可见「操作 扣减 / 数量 1 件 / 剩余 56 件」
+  证据图：3a3-b2-handverify-normal.png · 3a3-b2-handverify-demo.png
+
+  说明：正常档的 actor 为空是 dev profile 的既定行为（默认 profile 才有真 actor）；
+  演示档的 actor 为前端演示身份，文件头已注明。
+
+四、发现并修掉的回归：`.md` 类名列第一个字被裁
+  现象：放大截图后看到「缓存」只显示「存」、「请求」只显示「求」。
+  量测（修复前，两行同形）：clientWidth 40 / scrollWidth 54 ⇒ 溢出 14px。
+  根因：`.ln` 的悬挂缩进 `text-indent: -2ch` 会被 inline-block 的 `.md` 继承，
+       首行整体左移 2ch，再被 `.ln` 的 overflow:hidden 裁掉。
+  修复：`.log-line .md { text-indent: 0; }`（不叠加、只归零）。
+  修复后量测：clientWidth 40 / scrollWidth 40（「缓存」「请求」两行都相等）；
+       探针新增 ㉔2 回归断言（clientWidth 装得下 scrollWidth 且 text-indent = 0px）。
+  证据图：3a3-b2-first-layer-zoom.png（scale 2 放大）
+
+五、refs 收口
+  before 树：_work/3a3/before-3a3e（b3f9969），产物 _work/3a3/refs-before-b2.txt
+  after：工作区（全部编辑完成后），产物 _work/3a3/refs-after-b2.txt
+  阳性对照：在临时文件里插入一行让 token 下移 ⇒ 恰好 1 对 LOST+NEW
+    （…/__refs_pc__.md 第 3 行 → 第 4 行，token 未变）⇒ 扫描器能捕获位移。
+  配对判据：(引用者, token)，不比对裸 token。
+  before=5217 / after=5217；LOST=2 / NEW=2，全部是 c3-block-D-hardening.md 第 166 行
+  的两处跟随重指（observe-labels.js 在旧第 184 行之后纯插入 105 行）：
+    · PROTECTIONS：原 274 行 → 现 379 行
+    · PROTECTION_LABEL：原 277-283 行 → 现 382-388 行
+    · 同段 protectionLabel：原 360-364 行 → 现 467-472 行
+      （该 token 是同行续引、无命名上游，扫描器按「无主裸行号」丢弃 ⇒ 人工核过）
+  语义核对：379 = PROTECTIONS 声明；382-388 = PROTECTION_LABEL 五键；467-472 =
+    protectionLabel 文档注释 + 整个函数体。
+  docs/agent/evidence/c3-block7/d2-keys-alignment.txt 里那条旧行号是 D 段 commit 2 的
+  历史快照，按既往口径不重指（收尾批 1 同样只重指活文档）。
+
+六、批 2 落地口径（用户 4 件裁定）
+  ① stock 颜色保持琥珀 --c4，不改绿（不与 order 撞色；三处同类一致优先）
+  ② actor 进第一层：格式「发起人 M205（商家）」；dev 下 actor 为 null ⇒ 整段不出现
+  ③ hover 纯 CSS：.ln 用 max-height 2 行截断，hover/focus 展开；≤2 行的行高度不变；
+    行底色 hover 保留（可点提示）
+  ④ fields 键名按真帧，不预留不存在的键；认不出的键回落英文原名，绝不空白
+    （探针用 protection 帧的 weirdKey 验证）
+
+  第一层：中文主消息 + 全部 fields + actor + src + 括号（trace / 耗时）
+    · fields 值有标签表的翻中文（缓存区 / 锁 / 动作 / 前态后态 / 操作 / 收件人类型…）
+    · 与对象列同值的 key / sku / order / protection 不重复念；fields.actor 与顶层 actor
+      同值时不重复念
+    · 顶层 remaining 落成「剩余 N 件」
+  第二层：.ln 两行截断（max-height: calc(2 * 1.45em)），hover / focus 展开
+  第三层：⑤ 抽屉里每条技术键写成「中文（英文原键）= 原始值」，值不翻译
+    · 覆盖顶层 kind / severity / objectType / objectId / key / traceId / batchId /
+      durationUs / remaining / actor，再逐条列 fields，最后 src
+    · durationUs 按「N µs」原样；actor 写成「id（role=N）」

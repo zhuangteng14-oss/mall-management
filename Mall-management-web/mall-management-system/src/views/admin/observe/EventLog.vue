@@ -292,11 +292,20 @@
                     :title="r.objId ? '点一下 ⇒ 只看这个对象的日志（会填进 ② 的「对象」框）' : ''"
                     @click.stop="r.objId && (objFilter = r.objId)"
                   >{{ r.obj }}</span>
-                  <!-- 括号 = 上下文（`sentence()` 的 `ctx`：环境项 · trace 短号 · 耗时）。
+                  <!-- 第一层的技术字段：**默认常显**（用户 2026-10-17 收尾批 2）。
+                       每一项 = `中文键 值`；`k` 是中文键名、`v` 是人话值（键的原文见 ⑤ 第三层）。 -->
+                  <span v-if="r.fields.length" class="dt"><!--
+                    --><span v-for="(f, i) in r.fields" :key="'f' + i" class="tf"><span class="tf-k">{{ f.k }}</span> <span class="tf-v">{{ f.v }}</span></span></span>
+                  <!-- 五要素里的「谁」：`发起人 M205（商家）`。没有 actor（dev / a3 闸关）⇒ 整段不出现。 -->
+                  <span v-if="r.act" class="se-act">发起人 <span class="v">{{ r.act }}</span></span>
+                  <!-- `src=环名#源seq` 只在 `detail` 尾部，单独成段 `来源 cache#0`。 -->
+                  <span v-if="r.src" class="se-src">来源 <span class="v">{{ r.src }}</span></span>
+                  <!-- 括号 = 上下文（`sentence()` 的 `ctx`：trace 短号 · 耗时）。
                        ⚠️ 空数组 ⇒ **整对括号都不画**（不是画一对空括号）。 -->
                   <span v-if="r.ctx.length" class="se-ctx"><!--
                     -->（<span v-for="(s, i) in r.ctx" :key="'c' + i" :class="'se-' + s.c">{{ s.t }}</span>）</span>
-                  <span class="dt">{{ r.detail }}</span>
+                  <!-- 请求行（组头 / 组尾）的原样串；事件行走 `fields` 那一支，这里是空的。 -->
+                  <span v-if="r.rawDetail" class="dt raw">{{ r.rawDetail }}</span>
                 </span>
               </span></span>
             </li>
@@ -537,14 +546,14 @@
      ② 九类行、④ 类计数九条、④ 严重度三条都加；③ 事件流本来就有（用户「有 ✓ 保留」）。
      ⚠️ 「全部」与设施 3 类那几行放**空 `.ic` 占位**，否则 9 行的左缘参差。
 
-  **消息呈现（规则一/二/三）· 预览层中文人话，技术字段 hover 才出；折行最多 2 行、悬挂缩进 2ch。**
+  **消息呈现（收尾批 2 定稿）· 第一层中文主消息 + 全 fields + actor + src；折行最多 2 行、悬挂缩进 2ch。**
      · ③ 数据行从**栅格**改成**一行自然流**（`.ln` 折行容器 + `.flow` 行内流）：栅格里折行只发生在
        格子内部，`1fr` 那格一折就撑高整行、前五格却不缩进 —— 做不出「续行缩进、不带前导符」。
        列宽用等值的 inline-block 宽度 + 8px `margin-right` 复刻原 `gap` ⇒ 与表头的列**逐像素对齐不变**。
-     · 技术字段（`.dt`）默认 `display: none`，**hover / 键盘聚焦**整行才 `inline`；
-       ⚠️ 3a.3 起 `traceShort` 那一格（`.tr`）**删了** —— trace 短号搬进句子的括号里常显。
-       用行内展开而不是原生 tooltip（tooltip 会盖住刚要看的那几行、鼠标一动就没）。
-     · ⑤ 详情层**中英文都要**（用户：「两个都不能省」）：人话一行 + `techLine()` 的技术字段一行。
+     · 技术字段（`.dt`）**默认常显**（`中文键 值` 逐对排），不再等 hover；超过 2 行靠纯 CSS
+       `hover` 展开。⚠️ 3a.3 起 `traceShort` 那一格（`.tr`）**删了** —— trace 短号搬进括号里常显。
+     · ⑤ 详情层**中英文都要**（用户：「两个都不能省」）：人话一行 + `techLine()` 的
+       `中文（英文原键）= 值` 一行（值照原文，不翻）。
 
      ⚠️ **「紧凑密度量到 25px 而不是 22px」的真因**（第 ⑦ 步返工时抓到，记在这里免得下次再找）：
        数据行改成行内流之后，前导符 / 时刻 / 图标 / 级别 / 类 这五格成了 `inline-block`，
@@ -608,11 +617,15 @@ import {
   KINDS, SEVERITIES,
   kindLabel, kindColor, severityLabel, severityColor,
   objectFieldLabel,
+  // 3a.3 收尾批 2：事件帧 `fields` 的键名中文（真帧键集，认不出回落英文原键）。
+  fieldLabel, eventKeyLabel, NOTIFY_TO_LABEL, STOCK_KIND_LABEL,
   // ⑥ 开关栏的两组（PROTECTION_* / INJECTION_*）：**唯一出处是后端**
   //（`ProtectionGate.WIRED_KEYS` / `AttackEngine.INJECTION_KEYS` 的镜像）—— 本页只读它，不自造清单。
   PROTECTIONS, protectionLabel, protectionWired, protectionNotWiredTip,
   INJECTIONS, injectionLabel, INJECTIONS_NOT_WIRED,
 } from '../../../config/labels/observe-labels'
+// 3a.3 收尾批 2：顶层 `actor` = `{id, role}`，role 走用户域那张唯一表（1 客户 / 2 商家 / 3 管理员）。
+import { roleLabel } from '../../../config/labels/user-labels'
 // commit 9：审计那一类的 `objectType` 是英文域前缀（`goods` / `comment_image`…）⇒ 复用审计域那张表。
 import { targetTypeLabel, auditActionLabel } from '../../../config/labels/audit-labels'
 // 3a.3 · C 块：订单动作 / 状态两张表本来就在（`OrderFlow.vue` 在用）——本页拼句子时也用它们。
@@ -806,52 +819,145 @@ function objText(ev) {
   const type = ev.kind === 'audit' && ev.objectType ? `${targetTypeLabel(ev.objectType)} #` : ''
   return `${label} ${type}${id}`
 }
-/** ⑤ 每条事件下面那行**技术字段原文**（用户 2026-10-16「打开详细 ⇒ 中英文都要」）。
- *  上一层是中文人话（类 + 标题 + 对象），这一层是帧里的原名，逐字可 grep：
- *  中文方便看链路形状，英文方便拿去和后端人员/日志对。**两层都不能省**。
- *  ⚠️ `detail` 本身就是技术串（`src=cache#2041` / `result=hit` / `lock=order-pay`…），
- *    原样带出来，**不再翻译一遍** —— 页面只做「把 tag 画成人话」，判据在后端那一处。 */
+/** ⑤ 每条事件下面那行**技术字段**（用户 2026-10-17 裁定：`中文（英文原键）= 值`）。
+ *  上一层是中文人话（类 + 标题 + 对象），这一层把帧里的**原名与值都留着**，逐字可 grep：
+ *  中文方便看链路形状，英文原键方便拿去和后端人员/日志对。**两层都不能省**。
+ *  ⚠️ 这一层的**值一律照原文**（`severity=info` 就写 `info`，不翻成「信息」）—— 用户给的
+ *    样例就是 `severity（级别）= info` / `kind（类型）= lock`。翻译只发生在第一层的人话里。
+ *  ⚠️ 帧顶层键与 `fields` 键**分开列**：顶层 `kind` 是事件类、`fields.kind` 是库存操作，
+ *    同名不同物；后者用 `fieldLabel(kind, key)` 逐环取词。 */
 function techLine(e) {
-  const parts = [`kind=${e.kind}`, `severity=${e.severity}`]
-  if (e.detail) parts.push(e.detail)
-  if (e.key) parts.push(`key=${e.key}`)
-  if (e.objectType) parts.push(`objectType=${e.objectType}`)
-  if (e.objectId !== null && e.objectId !== undefined && e.objectId !== '') parts.push(`objectId=${e.objectId}`)
-  if (e.traceId) parts.push(`traceId=${e.traceId}`)
+  const parts = []
+  const addTop = (key, value) => {
+    if (value === null || value === undefined || value === '') return
+    parts.push(`${eventKeyLabel(key)}（${key}）= ${value}`)
+  }
+  addTop('kind', e.kind)
+  addTop('severity', e.severity)
+  addTop('objectType', e.objectType)
+  if (e.objectId !== null && e.objectId !== undefined && e.objectId !== '') addTop('objectId', e.objectId)
+  if (e.key !== null && e.key !== undefined && e.key !== '') addTop('key', e.key)
+  addTop('traceId', e.traceId)
+  addTop('batchId', e.batchId)
+  const us = num(e.durationUs)
+  if (e.durationUs !== null && e.durationUs !== undefined && us > 0) addTop('durationUs', `${us} µs`)
+  if (e.remaining !== null && e.remaining !== undefined) addTop('remaining', `${e.remaining} 件`)
+  if (e.actor && e.actor.id !== null && e.actor.id !== undefined && e.actor.id !== '') {
+    const role = e.actor.role === null || e.actor.role === undefined || e.actor.role === ''
+      ? ''
+      : `（role=${e.actor.role}）`
+    addTop('actor', `${e.actor.id}${role}`)
+  }
+  const f = e.fields
+  if (f && typeof f === 'object') {
+    for (const k of Object.keys(f)) {
+      const v = f[k]
+      if (v === null || v === undefined || v === '') continue
+      const text = typeof v === 'object' ? JSON.stringify(v) : String(v)
+      parts.push(`${fieldLabel(e.kind, k)}（${k}）= ${text}`)
+    }
+  }
+  const src = srcOf(e)
+  if (src) addTop('src', src)
   return parts.join(' · ')
 }
 
-/* ── ③ 的消息：**自然流拼接**（用户 2026-10-17 放行的 A 块）────────────────────────
-   语法 = `{标题} {自然流从句} {对象}（{上下文} · trace · 请求耗时）`。
+/** `detail` 尾部的 `src=环名#源seq`（后端只把它写在 `detail` 里，**不在 `fields` 里**）。
+ *  取不到 ⇒ 空串（`detail` 缺失 / 旧帧 / 请求行都走这一支）。 */
+function srcOf(e) {
+  const m = /(?:^|\s)src=([^\s]+)\s*$/.exec(String((e && e.detail) || ''))
+  return m ? m[1] : ''
+}
+
+/** 顶层 `actor` → `M205（商家）`（无角色时只写 id；无 id ⇒ 空串，整段不出现）。 */
+function actorText(e) {
+  const a = e && e.actor
+  if (!a || a.id === null || a.id === undefined || a.id === '') return ''
+  if (a.role === null || a.role === undefined || a.role === '') return String(a.id)
+  return `${a.id}（${roleLabel(a.role)}）`
+}
+
+/** `fields` 的**值** → 第一层的人话（只翻有表可查的那几个；其余原样）。
+ *  ⚠️ 与 `techLine()` 的分工：这里翻值、那里留原文 —— 两层各自完整，不是同一串的两种写法。 */
+function fieldValueText(kind, key, value) {
+  if (value === null || value === undefined || value === '') return ''
+  const k = String(key)
+  if (k === 'cache') return cacheAreaLabel(value)
+  if (k === 'lock') return lockLabel(value)
+  if (k === 'action') {
+    if (kind === 'audit') return auditActionLabel(value)
+    if (kind === 'order') return orderActionLabel(value)
+    return String(value)
+  }
+  if (kind === 'order' && (k === 'from' || k === 'to')) return orderStateLabel(value)
+  if (kind === 'notify' && k === 'to') {
+    return Object.prototype.hasOwnProperty.call(NOTIFY_TO_LABEL, value) ? NOTIFY_TO_LABEL[value] : String(value)
+  }
+  if (kind === 'stock' && k === 'kind') {
+    return Object.prototype.hasOwnProperty.call(STOCK_KIND_LABEL, value) ? STOCK_KIND_LABEL[value] : String(value)
+  }
+  if (k === 'qty') return `${value} 件`
+  if (k === 'atBirth') return value ? '是' : '否'
+  return String(value)
+}
+
+/** 第一层（默认可见）的**全部技术字段**：`[{ k: 中文键, v: 值 }]`。
+ *  ⚠️ 数据源优先 `fields`；旧帧 / 演示帧没有 `fields` 时回落解析 `detail`（同一套 `parseDetail`）。
+ *  ⚠️ **去重只去「对象列已经念过的同一件事」**：
+ *     · `key` / `sku` / `order` 的值等于 `objectId` ⇒ 对象列已经写着 `键 xxx` / `SKU xxx`，不再念第二遍；
+ *     · `fields.actor` 等于顶层 `actor.id` ⇒ 由「发起人 M205（商家）」那一格说（带角色，信息更全）。
+ *     其余键**一个都不省**（用户裁定「全 fields」）。 */
+function firstLayerFields(e) {
+  const out = []
+  // `protection` 也在内：防护环的 `fields.protection` 与 `objectId` 是同一个闸的 key（真帧如此）。
+  const objectCarrying = ['key', 'sku', 'order', 'protection']
+  const push = (key, value) => {
+    if (value === null || value === undefined || value === '') return
+    const id = e.objectId
+    if (id !== null && id !== undefined && id !== '' &&
+        objectCarrying.includes(key) && String(value) === String(id)) return
+    if (key === 'actor' && e.actor && e.actor.id !== null && e.actor.id !== undefined &&
+        String(e.actor.id) === String(value)) return
+    out.push({ k: fieldLabel(e.kind, key), v: fieldValueText(e.kind, key, value) })
+  }
+  if (e.fields && typeof e.fields === 'object') {
+    for (const key of Object.keys(e.fields)) push(key, e.fields[key])
+  } else {
+    const parsed = parseDetail(e.detail)
+    for (const key of Object.keys(parsed)) {
+      if (key === 'src') continue   // src 单独成段（`来源 cache#0`），不混进键值对
+      push(key, parsed[key])
+    }
+  }
+  // 「剩余 N 件」是帧的**顶层键**（`e.remaining`，只有库存扣减档有）—— 不在 `fields` 里。
+  if (e.remaining !== null && e.remaining !== undefined) {
+    out.push({ k: '剩余', v: `${e.remaining} 件` })
+  }
+  return out
+}
+
+/* ── ③ 的消息：**自然流拼接**（用户 2026-10-17 放行的 A 块 / 收尾批 2 改口径）──────────
+   语法 = `{标题} {对象} {全 fields（中文键 值）} 发起人 {id（角色）} 来源 {环#seq}（trace · 耗时）`。
    ⚠️ **缺槽位就少一段，不写占位符** —— 句子里出现「—」「undefined」「null」比少说一句更糟：
       前者会被读成「这一格的值是空」，而真相是「这件事压根没有这个量」。
-   ⚠️ **先读 `fields`，读不到再回落解析 `detail`**：`fields` 是后端 3a.3 起给前端拼句子用的
-      结构化表（`EventBroadcaster.Emit` 的第四个参数），`detail` 是它的**人读孪生**
-      （两者在同一个 `Emit` 构造里一起产生，形状见各类 `…Aspect` 方法）。
-      回落只在「帧里没带 fields」（旧后端 / 演示帧）时走 —— 抠不出来就**跳过那一段**，不猜。
-   ⚠️ 从句补的是「title 与对象列**没说的事实**」，所以：
-      缓存补的是**区名**（title 只说 L1/L2、对象列只有键）、锁补的是**锁名**
-      （对象列装的是业务键）、库存补的是**件数**、订单补的是**状态的中文**。
-      title 已经念过的一律不再念（命中/未命中、from→to 的原值、result 的各档）。 */
+   ⚠️ **fields 优先，detail 只做回落**：`fields` 是后端 3a.3 起给前端拼句子用的结构化表
+      （`EventBroadcaster.Emit` 的第四个参数），`detail` 是它的**人读孪生**。回落只在
+      「帧里没带 fields」（旧后端 / 演示帧）时走 —— 抠不出来就跳过，不猜。
+   ⚠️ **从句那一层已取消**：fields / actor / src 都已常显在第一层，从句再念一遍就是同一件事
+      写两遍。`sentence()` 现在只剩括号里的 `trace` 与 `耗时` 两格。 */
 
 /** 分段 token 的**色档**（CSS 在 `.log-line .ms .se-*`，一把锁在 admin 主题的 `tokens.css`）：
- *  `k` 键（`--ink`）/ `v` 值（`--ink-2`）/ `v3` 值·最次要（`--ink-3`）/
- *  `a` 可点（`--brand-ink` + 点状下划线）/ `x` 中性连接词（`--ink-3`）。 */
+ *  `k` 键（`--ink`）/ `v` 值（`--ink-2`）/ `a` 可点（`--brand-ink` + 点状下划线）/
+ *  `x` 中性连接词（`--ink-3`）。 */
 const TK = (t) => ({ t: String(t), c: 'k' })
 const TV = (t) => ({ t: String(t), c: 'v' })
 const TA = (t) => ({ t: String(t), c: 'a' })
 const TX = (t) => ({ t: String(t), c: 'x' })
-/** 「值·最次要」那档的**判据是长度**（≥ 16 字符）：短值一眼可读，长值会把整对括号撑成主角
- *  —— 用户给的那档例子正是「长缓存键」。长度是**现算的**，不是给某几个键写死的白名单。 */
-const VALUE_MINOR_LEN = 16
-const TVx = (t) => ({ t: String(t), c: String(t).length >= VALUE_MINOR_LEN ? 'v3' : 'v' })
-/** 「键 值」一对（中间一个空格）。 */
-const KV = (label, value) => [TK(label), TX(' '), TVx(value)]
 
 /** 从 `detail` 里**尽力**抠出 `k=v` 对（回落路径专用）。
  *  ⚠️ 只能尽力：这套 `detail` 是**人读串**、形状逐类不同 —— `order#O-1` 那种不带等号、
  *     敏感词把两个量塞进一个 token（`hit=9/20`）、防护的 `extra` 可以带空格。
- *     抠不出来的一律**跳过**（`fld()` 会当它不存在），不猜、不填占位符。 */
+ *     抠不出来的一律**跳过**（`firstLayerFields()` 不会把它放进键值对），不猜、不填占位符。 */
 function parseDetail(detail) {
   const m = {}
   if (!detail) return m
@@ -868,115 +974,22 @@ function parseDetail(detail) {
   return m
 }
 
-/** 取一个字段：`fields` **优先**，回落 `detail` 解析出来的那份。
- *  取不到（缺 / 空串 / 字面量 `null`）⇒ `undefined`，调用方据此**跳过那个槽位**。 */
-function fld(e, key, parsed) {
-  const f = e.fields
-  if (f && typeof f === 'object' && Object.prototype.hasOwnProperty.call(f, key)) {
-    const v = f[key]
-    return v === null || v === undefined || v === '' ? undefined : v
-  }
-  const v = parsed[key]
-  return v === undefined || v === '' || v === 'null' ? undefined : v
-}
-
 /**
- * 一条事件的**自然流句子**（分段 token，模板逐段渲染成 `<span class="se-…">`）。
+ * 一条事件的**上下文括号**（分段 token，模板渲染成 `<span class="se-…">`）。
+ *
+ * ⚠️ 3a.3 收尾批 2 起，本函数**不再产从句**：用户把「全 fields + actor + src」提到了第一层
+ *    常显（见 `firstLayerFields()` / `actorText()` / `srcOf()`），从句再念一遍就是同一条事实
+ *    写两遍。这里只剩括号里的两格：`trace 短号` 与 `耗时`。
  *
  * @param e 帧里那条事件（本页 `absorbEvents` 抄下来的形状）
  * @param rec 这一条 traceId 的**收尾记录**（`recFor()` 取；查不到 ⇒ `null`）。
- *            ⚠️ 只用来兜「事件自己没有耗时、但这次请求有」的那一格 —— 别的槽位都不用请求级数据。
- * @returns {{mid: Array, ctx: Array}} `mid` = 从句（接在标题后、对象前）；`ctx` = 括号里那串。
- *          两个都可能是**空数组**（= 那一段整个不出现）。
+ *            ⚠️ 只用来兜「事件自己没有耗时、但这次请求有」的那一格。
+ * @returns {{mid: Array, ctx: Array}} `mid` 恒为空数组（保留返回形状，模板/调用方不用分叉）；
+ *          `ctx` = 括号里那串，可能是空数组（= 整对括号不出现）。
  */
 function sentence(e, rec) {
-  const parsed = parseDetail(e.detail)
-  const g = (k) => fld(e, k, parsed)
   const mid = []
   const ctx = []
-  /** 往括号里追加一个「键 值」对；值取不到就**不加**（连分隔符也不加）。 */
-  const kv = (label, value) => {
-    if (value === undefined || value === null || value === '') return
-    if (ctx.length) ctx.push(TX(' · '))
-    for (const t of KV(label, value)) ctx.push(t)
-  }
-
-  // ── 从句（按 kind 分派；子类型不在这里判 —— 那些差异都在 title 里，判了就是重复）──
-  switch (e.kind) {
-    case 'cache': {
-      const area = g('cache')
-      if (area !== undefined) mid.push(TV(cacheAreaLabel(area)))
-      break
-    }
-    case 'lock': {
-      const lk = g('lock')
-      if (lk !== undefined) mid.push(TV(lockLabel(lk)))
-      break
-    }
-    case 'stock': {
-      const qty = g('qty')
-      if (qty !== undefined) mid.push(TV(`${qty} 件`))
-      // ⚠️ 「剩余 N」是 3a.3 第二步才进帧的（`ObservedEvent.remaining`，只有扣减档有）
-      //    ⇒ 这一格**以前恒缺**，现在有值了就必须出现在句子里（用户点名的）。
-      // ⚠️ **它不在 `fields` 里** —— 是帧的**顶层键**（后端 `EventBroadcaster.add(...)` 把它当
-      //    第 7 个实参单独传，见 `:425` 那行的 `e.remaining()`），九个调用点里只有扣减档非 null。
-      //    ⇒ 必须直接读事件本身。走 `g()`（= `fields` 优先、回落 detail）在这一格上**两条路都空**：
-      //    `detail` 里也从不写它 ⇒ 那样写会**永远取不到**（本轮探针实测踩过：假数据把它塞进
-      //    `fields` 才绿，而真实帧的形状不是那样 —— 探针那侧是对的，代码这侧才是错的）。
-      const rem = e.remaining
-      if (rem !== null && rem !== undefined) kv('剩余', `${rem} 件`)
-      break
-    }
-    case 'order': {
-      // 两种子类型靠**认得出的字段**分派，不靠猜 title 的文字：
-      //   transition 带 from/to（且只有它带）；illegal 带 shape；async 带 reason。
-      const from = g('from')
-      const to = g('to')
-      if (from !== undefined && to !== undefined) {
-        // ⚠️ from/to 是 `OrderState` 的**枚举名**（后端 `stateName()` 的返回值）⇒ 走
-        //    `orderStateLabel`（那张表认的就是枚举名）；认不出回落原值，不硬套。
-        //    ⚠️ 真实数据里 `rejected` / `error` 那两路 from/to **就是 null**（守卫没命中 /
-        //    UPDATE 抛异常，压根没有「从哪里到哪里」）⇒ 这一格会**如实缺席**。
-        mid.push(TV(`${orderStateLabel(from)} → ${orderStateLabel(to)}`))
-      }
-      const act = g('action')
-      if (act !== undefined) kv('动作', orderActionLabel(act))
-      kv('三位', g('shape'))
-      kv('原因', g('reason'))
-      break
-    }
-    case 'audit': {
-      kv('操作者', g('actor'))
-      const act = g('action')
-      if (act !== undefined) kv('动作', auditActionLabel(act))
-      kv('原因', g('reason'))
-      break
-    }
-    case 'notify':
-      kv('渠道', g('to'))
-      kv('事件', g('event'))
-      kv('原因', g('reason'))
-      break
-    case 'sensitive': {
-      kv('场景', g('scene'))
-      const hit = g('hit')
-      const total = g('total')
-      if (hit !== undefined && total !== undefined) kv('命中', `${hit}/${total}`)
-      break
-    }
-    case 'identity':
-      kv('主体', g('subject'))
-      kv('原因', g('reason'))
-      break
-    case 'protection':
-      kv('范围', g('scope'))
-      kv('详情', g('extra'))
-      break
-    default:
-      // 认不出的 kind（后端加了第 10 类而这里没跟）：**不加从句、不加上下文**，
-      // 标题 + 对象列照常显示 —— 少说一句，但不编。
-      break
-  }
 
   // ── 括号的尾巴：trace 短号 + 耗时（两样都没有 ⇒ 整对括号不出现）────────────────
   if (e.traceId) {
@@ -1327,13 +1340,13 @@ function buildStream(list) {
   return rows
 }
 
-/** ③ 两层的呈现规则（用户 2026-10-16「中英文分两层」）：
- *    · 预览层（默认）= **中文人话**：`title`（后端已给人话）+ `对象`（中文标签 + 值）。
- *    · 技术字段（`detail` 里的 `src=… / result=… / lock=… / action=…`）
- *      = **默认不显示，hover / 键盘聚焦那一行才展开**（CSS 里 `.dt` 的 `display`）。
- *  ⚠️ 用**行内展开**而不是原生 `title` tooltip：tooltip 会盖住刚要看的那几行，且鼠标一动就没，
- *    没法逐字读。行内展开就长在行下面（正是用户那条「续行」形态），可读、可选中、可复制。
- *  ⚠️ 「点开 ⑤」那一层**中英文都要**（两个都不能省）—— 见 ⑤ 里每条的双层渲染。 */
+/** ③ 三层的呈现规则（用户 2026-10-17 收尾批 2 定稿）：
+ *    · 第一层（默认）= **中文主消息 + 全 fields（中文键名）+ 发起人 + 来源 + 括号(trace/耗时)**；
+ *      技术字段不再等 hover —— 用户要的是「一睁眼就看得见五要素」。
+ *    · 第二层 = **纯 CSS 2 行截断**：`.ln` 的 `max-height` 夹住，hover / 键盘聚焦展开全文；
+ *      ≤2 行的行 hover 前后高度不变（没有 JS 测量、没有 `is-clip` 类）。
+ *    · 第三层 = ⑤ 链里的 `中文（英文原键）= 值`（见 `techLine()`）。
+ *  ⚠️ 缺槽位就少一段，不写占位符（同一页的老规矩）。 */
 
 function makeRow(mk, rail, gl, depth) {
   const pc = `calc(${3 * depth + 2}ch + 8px)`
@@ -1356,6 +1369,7 @@ function makeRow(mk, rail, gl, depth) {
       t: hmsms(e.ts), lv: { info: 'INFO', warn: 'WARN', error: 'ERROR' }[e.severity] || '',
       md: kindLabel(e.kind),
       title: e.title, detail: e.detail, obj: objText(e), objId: String(e.objectId || ''),
+      fields: firstLayerFields(e), act: actorText(e), src: srcOf(e), rawDetail: '',
       mid: sent.mid, ctx: sent.ctx,
       cls: `lv-${e.severity.slice(0, 1)}`,
     })
@@ -1365,19 +1379,20 @@ function makeRow(mk, rail, gl, depth) {
       key: `t-${mk.tid}`, kind: '__req', color: 'var(--ink-3)', sevColor: 'var(--ink-3)',
       t: hmsms(mk.rec.endMs), lv: '', md: '请求', title: '请求结束', detail: `总耗时 ${mk.rec.ms} ms`, obj: '', objId: '',
       // ⚠️ 这一行**不是事件**（它来自 `traces` 记录）⇒ 没有 `fields`、没有 kind、没有从句。
-      //    括号里只放它真正有的那一个数：总耗时（原来它藏在 `.dt` 里、要 hover 才看得见，
-      //    而 ⑤ 抽屉默认是塌着的 ⇒ 那个数实际上哪儿都没显示）。
+      //    括号里只放它真正有的那一个数：总耗时；`rawDetail` 留空，免得同一句话在行内出现两遍。
+      fields: [], act: '', src: '', rawDetail: '',
       mid: [], ctx: [TK('总耗时'), TX(' '), TV(`${mk.rec.ms} ms`)], cls: 'req',
     })
   }
-  // 组头：括号里不重复路径（`.dt` 里本来就有原样的一行）—— 只把**看得懂的中文名**补在标题后
-  // （C 块的 `apiLabel()` 在本页的消费点之一；⑤ 链首那行是另一个，见 `startLabel()`）。
+  // 组头：括号里放**看得懂的中文名**，`rawDetail` 放原样的一行（方法 + 路径）。
+  // （C 块的 `apiLabel()` 在本页的消费点之一；⑤ 链首那行是另一个，见 `startLabel()`。）
   const headRaw = `${mk.rec.method} ${mk.rec.path}`
   const headZh = apiLabel(mk.rec.method, mk.rec.path)
   return Object.assign(base, {
     key: `h-${mk.tid}`, kind: '__req', color: 'var(--ink-3)', sevColor: 'var(--ink-3)',
     t: hmsms(mk.rec.startMs), lv: '', md: '请求', title: '请求开始', detail: headRaw,
     obj: '', objId: '',
+    fields: [], act: '', src: '', rawDetail: headRaw,
     mid: headZh === headRaw ? [] : [TV(headZh)], ctx: [], cls: 'req',
   })
 }
@@ -2278,8 +2293,8 @@ onBeforeUnmount(() => {
   padding-left: 2ch;
   text-indent: -2ch;
 }
-/* hover（或键盘聚焦）⇒ **展开全文**：既解除 2 行上限，也把技术字段那一层显示出来
-   （`.dt` 见下）。两条规则必须同进同出，否则会出现「展开了但技术字段还没有」的半开态。 */
+/* hover（或键盘聚焦）⇒ **展开全文**：只解除 2 行上限（收尾批 2 起技术字段已常显，
+   这里不再兼职「显不显示」）。纯 CSS，没有 JS 测量 / `is-clip` 类。 */
 .log-line:hover .ln,
 .log-line:focus-visible .ln,
 .log-line:focus-within .ln {
@@ -2453,6 +2468,11 @@ onBeforeUnmount(() => {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  /* ⚠️ 必须显式归零：`.ln` 的悬挂缩进是 `text-indent: -2ch`，而 `text-indent` **会被继承**，
+     行内块自己又是个块容器 ⇒ `.md` 里的首行被左移 24px、再被 `overflow: hidden` 裁掉
+     ⇒ 类名列只剩第二个字（「缓存」显示成「存」、「请求」显示成「求」）。
+     这是收尾批 2 目检时量出来的（`.md` clientWidth 40 / scrollWidth 54），不是猜的。 */
+  text-indent: 0;
 }
 /* ⚠️ 前导符 / 时刻 / 图标 / 级别 / 类 这五格是 `inline-block`（原栅格列改行内流时留下的）。
    它们的 `line-height` 继承 `.log-line` 的 1.45 ⇒ **盒子高 17.39px**，比父级的行盒还高
@@ -2527,21 +2547,33 @@ onBeforeUnmount(() => {
 .log-line .ms .se-ctx {
   margin-left: var(--s2);
 }
-/* ── 第二层：技术字段（`detail` 那一串原始 `k=v`）──────────────────────────────
-   用户 2026-10-16：「预览层默认显示中文人话 · 技术字段 hover 才显」＋「hover 展开全文」。
-   ⚠️ 3a.3 起 **`traceShort` 那一格（原 `.tr`）删掉了** —— trace 短号搬进了 A 块那对括号里
-     （默认就可见、可点色），同一条事实不留两份；`.dt` 照旧只做「原始串」那一层。
-   ⚠️ 用 `display: none → inline` 而不是 `opacity/color`：藏起来时要真的不占位置，
-     否则折行的断点会按「包含技术字段」算，默认态的行就白折了一道（2 行额度浪费掉）。 */
+/* ── 第一层：技术字段 / 发起人 / 来源（用户 2026-10-17 收尾批 2：**默认常显**）──────
+   ⚠️ 3a.3 之前这里是 `display: none → hover inline`；收尾批 2 明确取消 hover 才显：
+     用户要的是「一睁眼就看得见五要素」。行高仍由 `.ln` 的 2 行上限夹住 —— 超过 2 行
+     仍然靠 hover 展开（纯 CSS，见上面 `.log-line:hover .ln`）。
+   ⚠️ 每一对 `中文键 值` 之间给 `--s2` 外距（Vue 会压掉模板换行空白，同 `.ob` 那条的成因）；
+     键用 `--ink-3`、值用 `--ink-2` —— 键是说明词、值才是内容。 */
 .log-line .ms .dt {
-  display: none;
   color: var(--ink-3);
   margin-left: var(--s2);
 }
-.log-line:hover .ms .dt,
-.log-line:focus-visible .ms .dt,
-.log-line:focus-within .ms .dt {
-  display: inline;
+.log-line .ms .dt .tf + .tf {
+  margin-left: var(--s2);
+}
+.log-line .ms .dt .tf-k {
+  color: var(--ink-3);
+}
+.log-line .ms .dt .tf-v {
+  color: var(--ink-2);
+}
+.log-line .ms .se-act,
+.log-line .ms .se-src {
+  margin-left: var(--s2);
+  color: var(--ink-3);
+}
+.log-line .ms .se-act .v,
+.log-line .ms .se-src .v {
+  color: var(--ink-2);
 }
 .ev-empty {
   font-size: var(--fs-sm);

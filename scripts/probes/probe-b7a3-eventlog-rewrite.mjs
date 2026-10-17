@@ -92,45 +92,49 @@ const TRACE = 'trace0001'
  *  ⚠️ 三条**故意**造出来当对照，缺一条就有一半判据是空的：
  *     · `cache` 的 `fields.cache` 与 `detail` 里的区名**不一致** ⇒ 才判得出「谁优先」；
  *     · `notify` **只给 detail、不给 fields** ⇒ 才是真的在测回落分支；
- *     · `protection` 的 `scope` **33 字符**（≥ 前端 `VALUE_MINOR_LEN = 16`）⇒ 才判得出
- *       「长值降一档」（配一条短的 `email` 作对照，证明是**按长度**分档、不是「全给 v3」）。 */
+ *     · `protection` 带顶层 `actor` + `batchId` ⇒ 才量得到第一层「发起人 M205（商家）」与 ⑤ 的
+ *       结构键（`batchId（批次号）`）。收尾批 2 起 `src` 一律只放 detail 尾部（真帧形状）。 */
 const PERKIND = [
   {
     kind: 'cache', title: '缓存命中（L1）',
-    detail: 'cache=goodstype result=hit key=all', objectId: 'goodsType:all',
-    fields: { cache: 'goodsHome', result: 'hit', key: 'all', src: 'cache#7' },
+    detail: 'cache=goodstype result=hit key=all src=cache#7', objectId: 'goodsType:all',
+    // ⚠️ `src` **只在 detail 尾部**、不进 fields（真帧形状：后端 `EventBroadcaster.add` 不往
+    //    `fields` 里放 src）。上一版这里把它塞进了 fields —— 那是替错形状背书，收尾批 2 已纠正。
+    fields: { cache: 'goodsHome', result: 'hit', key: 'all' },
   },
   {
     kind: 'lock', title: '取锁成功（order:pay）',
-    detail: 'lock=order-pay result=acquired key=order:pay/O-1', objectId: 'order:pay/O-1',
+    detail: 'lock=order-pay result=acquired key=order:pay/O-1 src=lock#4', objectId: 'order:pay/O-1',
     // ⚠️ 锁名必须是 `DistributedLockService.LockName` 那**五把**之一（`order-pay`），
     //    写 `order:create` 这种不存在的值只会走兜底、测不到 `LOCK_LABEL` 那一步。
-    fields: { lock: 'order-pay', result: 'acquired', key: 'order:pay/O-1', src: 'lock#4' },
+    fields: { lock: 'order-pay', result: 'acquired', key: 'order:pay/O-1' },
   },
   {
     kind: 'order', title: '状态流转 CREATED → PAID',
-    detail: 'action=pay result=ok order#O-1', objectId: 'O-1',
+    detail: 'action=pay result=ok order#O-1 src=order#2', objectId: 'O-1',
     // ⚠️ from/to 用 `OrderState` 的**枚举名**（后端 `stateName()` 的返回值）—— 与真实
     //    vocabulary 对齐；`waitPay` 那套是 `ORDER_FLOW_STATE_LABEL`，是**另一张表**。
-    fields: { action: 'pay', result: 'ok', from: 'CREATED', to: 'PAID', order: 'O-1', src: 'order#2' },
+    fields: { action: 'pay', result: 'ok', from: 'CREATED', to: 'PAID', order: 'O-1' },
     durationUs: 12400,
   },
   {
     kind: 'stock', title: '库存扣减',
-    detail: 'kind=deduct sku=SKU-0001 qty=1 result=ok', objectId: 'SKU-0001',
-    fields: { kind: 'deduct', sku: 'SKU-0001', qty: '1', result: 'ok', src: 'stock#9' },
+    detail: 'kind=deduct sku=SKU-0001 qty=1 result=ok src=stock#9', objectId: 'SKU-0001',
+    fields: { kind: 'deduct', sku: 'SKU-0001', qty: '1', result: 'ok' },
     // ⚠️ 「剩余 N」—— 这是 3a.3 第二步才进帧的那一列（九个调用点里只有扣减档有值）
     //    ⇒ 用户点名要它出现在句子里，本段由它一处提供。
     remaining: 7,
   },
   {
     kind: 'audit', title: '审计写入',
-    detail: 'actor=C-9 action=goods.delete reason=违规下架', objectId: 'M-1:P-1',
-    fields: { actor: 'C-9', action: 'goods.delete', reason: '违规下架', src: 'audit#3' },
+    detail: 'actor=C-9 action=goods.delete reason=违规下架 src=audit#3', objectId: 'M-1:P-1',
+    fields: { actor: 'C-9', action: 'goods.delete', reason: '违规下架' },
   },
   {
     kind: 'notify', title: '通知发送',
-    detail: 'to=email event=order.paid reason=下单成功',
+    // ⚠️ `to` 的取值域是后端 `NotificationService.TO_TYPE_CUSTOMER/MERCHANT`（customer / merchant），
+    //    不是邮箱 —— 上一版写 `email` 属于假形状，收尾批 2 已改成真值域里的 `merchant`。
+    detail: 'to=merchant event=order.paid reason=下单成功 src=notify#6',
     // ⚠️ **本条是两重对照**，两处都不是随手写的：
     //    ① `fields: null`（显式）⇒ 走 `parseDetail(e.detail)` 的**回落路径**；
     //    ② `objectId: ''` ⇒ 页面在「对象列」上该做的是**根本不画**（`objText()` 对空 id 返回
@@ -141,23 +145,26 @@ const PERKIND = [
   },
   {
     kind: 'sensitive', title: '敏感词拒收',
-    detail: 'scene=评论 hit=9/20 result=rejected', objectId: '傻逼,滚',
-    fields: { scene: '评论', hit: 9, total: 20, src: 'sensitive#1' },
+    detail: 'scene=评论 hit=9/20 result=rejected src=sensitive#1', objectId: '傻逼,滚',
+    fields: { scene: '评论', hit: 9, total: 20 },
     // ⚠️ 亚毫秒那档（<1000 µs）：句子该写 `850 µs` 而不是四舍五入成 `1 ms`（或 `0 ms`）。
     durationUs: 850,
   },
   {
     kind: 'identity', title: '身份拒绝',
-    detail: 'subject=C-1 reason=令牌过期 result=rejected', objectId: 'C-1',
-    fields: { subject: 'C-1', reason: '令牌过期', src: 'identity#5' },
+    detail: 'subject=C-1 reason=令牌过期 result=rejected src=identity#5', objectId: 'C-1',
+    fields: { subject: 'C-1', reason: '令牌过期' },
   },
   {
     kind: 'protection', title: '限流拦截',
-    detail: 'protection=rateLimit scope=/admin/observe/attack/run result=blocked', objectId: 'rateLimit',
+    detail: 'protection=rateLimit scope=/admin/observe/attack/run result=blocked src=protection#2', objectId: 'rateLimit',
     fields: {
       protection: 'rateLimit',
       scope: '/admin/observe/attack/run 全路径限流窗口',
-      extra: 'qps=20', src: 'protection#2',
+      extra: 'qps=20',
+      // ⚠️ 故意放一个**表里没有的键**：用户裁定「认不出的回落英文原名，不显示空白」——
+      //    这条是那句裁定的唯一活判据（全用已知键时，兜底分支等于没测）。
+      weirdKey: '未来值',
     },
     actor: { id: 'C-9', role: 3 },
     batchId: 'b-7a3-#12',
@@ -997,24 +1004,30 @@ try {
   ok('㉓4 ④ 类计数九条都有图标', icons.kindIc === 9, icons)
   ok('㉓4 ④ 严重度三条都有图标，且两两不同', icons.sevIc === 3 && icons.sevSig === 3, icons)
 
-  // ── ㉓5 折行：2 行上限 + 技术字段默认藏、**真 hover** 才出（不是只查 CSS 规则在不在）
+  // ── ㉓5 折行：2 行上限 + 技术字段**默认常显**（收尾批 2：不再 hover 才出）
   const lnCap = await b.evalJS(`(() => {
     const ln = document.querySelector('.log-line .ln')
     if (!ln) return null
     const cs = getComputedStyle(ln)
     const lh = parseFloat(getComputedStyle(document.querySelector('.log-line')).lineHeight)
     const dt = document.querySelector('.log-line .ms .dt')
+    const tf = dt ? dt.querySelector('.tf') : null
     return {
       maxH: cs.maxHeight, 行lineHeight: lh, 两行: Math.round(lh * 2),
       maxHpx: Math.round(parseFloat(cs.maxHeight)),
       dtDisplay: dt ? getComputedStyle(dt).display : '(没有 .dt)',
+      技术项数: document.querySelectorAll('.log-line .ms .dt .tf').length,
+      首对键: tf ? (tf.querySelector('.tf-k') || {}).textContent : null,
+      首对值: tf ? (tf.querySelector('.tf-v') || {}).textContent : null,
       省略号: cs.textOverflow,
     }
   })()`)
   ok('㉓5 `.ln` 的 2 行上限 = 2 × 行高（不是 `-webkit-line-clamp`，那个自带 23px 高）',
     !!lnCap && lnCap.maxHpx === lnCap.两行, lnCap)
-  ok('㉓5 技术字段（`.dt`）**默认不显示**（预览层只留中文人话）',
-    !!lnCap && lnCap.dtDisplay === 'none', lnCap && lnCap.dtDisplay)
+  ok('㉓5 技术字段（`.dt`）**默认就显示**（收尾批 2：一睁眼看得见五要素，不等 hover）'
+    + '，且确实排出了 `中文键 值` 对',
+    !!lnCap && lnCap.dtDisplay === 'inline' && lnCap.技术项数 > 0
+    && lnCap.首对键 !== null && lnCap.首对值 !== null, lnCap)
   ok('㉓5 **没有** `text-overflow: ellipsis`（用户：「不截断，删掉它」）',
     !!lnCap && lnCap.省略号 === 'clip', lnCap && lnCap.省略号)
   // 真 hover：把鼠标**移到**某一行上（`Input.dispatchMouseEvent`），再读 —— 只查规则不算数。
@@ -1022,33 +1035,44 @@ try {
   //      往往已经滚到屏幕上方之外 —— 那种行的 `getBoundingClientRect()` 算出的 y 是负数，
   //      `moveTo` 过去鼠标并不在那行上（`matches(':hover')` 恒 0，红的是「hover 没生效」的假象）。
   //      这里用 `elementFromPoint` 反查：只认「鼠标真能压到那一行」的行。
-  const rowBox = await b.evalJS(`(() => {
+  //   ⚠️ 再挑**本身没被 2 行夹住的**行（`scrollHeight <= clientHeight`）：只有这种行，
+  //      用户说的「≤2 行时 hover 高度不变」才可判 —— 被夹住的行 hover 本来就该变高。
+  const fitRow = await b.evalJS(`(() => {
     for (const e of document.querySelectorAll('.log-line')) {
-      if (!e.querySelector('.ms .dt')) continue
+      const ln = e.querySelector('.ln')
+      if (!ln || ln.scrollHeight > ln.clientHeight + 1) continue
       const x = e.getBoundingClientRect()
       if (x.top < 0 || x.bottom > innerHeight) continue
       const cx = Math.round(Math.max(1, x.left + 40)), cy = Math.round(x.top + x.height / 2)
       const hit = document.elementFromPoint(cx, cy)
       if (!hit || !e.contains(hit)) continue
-      return { x: cx, y: cy }
+      return { x: cx, y: cy, 高度: ln.clientHeight, 技术项数: e.querySelectorAll('.ms .tf').length }
     }
     return null
   })()`)
-  if (rowBox) await b.moveTo(rowBox.x, rowBox.y)
+  if (fitRow) await b.moveTo(fitRow.x, fitRow.y)
   await sleep(250)
-  if (rowBox && !(await b.evalJS(`!!document.querySelector('.log-line:hover')`))) {
-    await b.moveTo(rowBox.x + 1, rowBox.y)   // 兜底：有些 headless 要第二下才把 hover 状态派下来
+  if (fitRow && !(await b.evalJS(`!!document.querySelector('.log-line:hover')`))) {
+    await b.moveTo(fitRow.x + 1, fitRow.y)   // 兜底：有些 headless 要第二下才把 hover 状态派下来
     await sleep(250)
   }
   const hovered = await b.evalJS(`(() => {
     const rs = [...document.querySelectorAll('.log-line')]
     const on = rs.filter(r => r.matches(':hover'))
     if (!on.length) return { hover: 0 }
+    const ln = on[0].querySelector('.ln')
     const dt = on[0].querySelector('.ms .dt')
-    return { hover: on.length, dtDisplay: dt ? getComputedStyle(dt).display : null, 文本: (dt || {}).textContent || null }
+    return {
+      hover: on.length,
+      高度: ln ? ln.clientHeight : null,
+      dtDisplay: dt ? getComputedStyle(dt).display : null,
+      技术项数: on[0].querySelectorAll('.ms .tf').length,
+    }
   })()`)
-  ok('㉓5 **真 hover 到那一行 ⇒ 技术字段显示出来**（`display: none → inline`，鼠标事件实测）',
-    hovered.hover > 0 && hovered.dtDisplay === 'inline', hovered)
+  ok('㉓5 **真 hover 到一行 ≤2 行的行 ⇒ 高度不变**（纯 CSS：`.ln` 已装得下，`max-height:none` 不产生视觉变化）',
+    !!fitRow && fitRow.技术项数 > 0 && hovered.hover > 0
+    && hovered.dtDisplay === 'inline' && Math.abs(hovered.高度 - fitRow.高度) <= 1,
+    { fitRow, hovered })
   await b.evalJS(`document.querySelector('.ev-list').dispatchEvent(new MouseEvent('mouseleave'))`)
 
   // ── ㉓5b 折行的**几何**：续行缩进 2ch、最多 2 行、hover 展开（用户规则三 / 四）
@@ -1240,6 +1264,7 @@ try {
         人话: dText(i),
         技术: (i.querySelector('.tech') || {}).textContent,
       })),
+      技术全文: withTech.map(i => (i.querySelector('.tech') || {}).textContent || ''),
       技术行色: withTech.length ? getComputedStyle(withTech[0].querySelector('.tech')).color : null,
       技术行字体: withTech.length ? getComputedStyle(withTech[0].querySelector('.tech')).fontFamily.split(',')[0] : null,
     }
@@ -1260,8 +1285,13 @@ try {
     chainTwo.事件条数 > 0 && chainTwo.带技术行 === chainTwo.事件条数, chainTwo)
   ok('㉓8 链首/链尾那两行**不是事件**（请求开始 / 请求结束来自 trace 记录）⇒ 不该有技术行',
     chainTwo.非事件条数 === 2, chainTwo)
-  ok('㉓8 那行技术字段里带 `kind=` 与 `severity=`（帧里的原名，可拿去 grep）',
-    chainTwo.样例.length > 0 && chainTwo.样例.every(s => /kind=/.test(s.技术) && /severity=/.test(s.技术)), chainTwo.样例)
+  ok('㉓8 那行技术字段是**「中文（英文原键）= 值」**（收尾批 2）：含 `类型（kind）=` / `级别（severity）=`，'
+    + '且 `fields` 的键也按这个格式带英文原键（值照原文，可拿去 grep）',
+    chainTwo.技术全文.length > 0
+    && chainTwo.技术全文.every(s => /类型（kind）=/.test(s) && /级别（severity）=/.test(s))
+    && chainTwo.技术全文.some(s => /（cache）= goodsHome/.test(s) && /来源环（src）= cache#7/.test(s))
+    && chainTwo.技术全文.some(s => /weirdKey（weirdKey）= 未来值/.test(s)),
+    chainTwo.技术全文.slice(0, 3))
 
   // ══ ㉔ 3a.3 前端 4 块（A 句子 · B 色系 · C 端点标签 · D 图标间距；用户 2026-10-17 放行）════
   // ⚠️ 与 ㉓ 同一条约束：**必须在 ⑯ 之前** —— ⑯ 结尾把数据源切到「模拟日常」，而本段的判据
@@ -1305,9 +1335,9 @@ try {
     && api.cacheAreaLabel('goodstype') === '商品类型' && api.cacheAreaLabel('nope') === 'nope' && api.cacheAreaLabel('') === '',
     { 锁: Object.keys(api.LOCK_LABEL), 区: Object.keys(api.CACHE_AREA_LABEL) })
 
-  // ── ㉔2 A 块：句子形态。逐 kind 从 DOM 里读**渲染出来的分段**（类名 = 色档，见 ㉔6）
-  //   ⚠️ 读法：`<b>` 后面那两段（`.se-mid` 从句 / `.se-ctx` 括号）里各是一个个 `<span class="se-*">`。
-  //      这里把每段的 `{色档, 文本}` 都取出来 —— 既验「句子拼对了」，也验「分色落在该落的段上」。
+  // ── ㉔2 第一层（收尾批 2）：**全 fields + actor + src** 默认就在行里。
+  //   ⚠️ 读法：`.dt .tf` 每一对 = `中文键 值`；`.se-act` = 发起人、`.se-src` = 来源环。
+  //      括号 `.se-ctx` 只剩 trace / 耗时 两格（见 ㉔3）。
   const readRow = (title) => b.evalJS(`(() => {
     const row = [...document.querySelectorAll('.log-line')].find(r => {
       const b = r.querySelector('.ms b')
@@ -1315,14 +1345,20 @@ try {
     })
     if (!row) return null
     const seg = (sel) => [...row.querySelectorAll(sel + ' > span')].map(s => ({ c: s.className.replace('se-', ''), t: s.textContent }))
-    const mid = seg('.se-mid')
     const ctx = seg('.se-ctx')
+    const fields = [...row.querySelectorAll('.ms .dt .tf')].map(f => ({
+      k: (f.querySelector('.tf-k') || {}).textContent || '',
+      v: (f.querySelector('.tf-v') || {}).textContent || '',
+    }))
+    const textOf = (sel) => { const n = row.querySelector(sel); return n ? n.textContent.trim() : '' }
     return {
       title: row.querySelector('.ms b').textContent,
-      mid, ctx,
-      mid文本: mid.map(s => s.t).join(''),
+      字段: fields,
+      字段文本: fields.map(f => f.k + ' ' + f.v).join(' · '),
+      act: textOf('.se-act'),
+      src: textOf('.se-src'),
+      ctx,
       ctx文本: ctx.map(s => s.t).join(''),
-      有mid: !!row.querySelector('.se-mid'),
       有ctx: !!row.querySelector('.se-ctx'),
       对象: (row.querySelector('.ms .ob') || {}).textContent || null,
       可点: !!row.querySelector('.ms .ob.p'),
@@ -1333,28 +1369,64 @@ try {
     '审计写入', '通知发送', '敏感词拒收', '身份拒绝', '限流拦截', '批量事件 0']
   const rows = {}
   for (const t of TITLES) rows[t] = await readRow(t)
-  const gotRow = (t) => rows[t] && (rows[t].mid文本 + ' ｜ ' + rows[t].ctx文本)
+  const gotRow = (t) => rows[t] && (rows[t].字段文本 + ' ｜ ' + rows[t].act + ' ｜ ' + rows[t].src + ' ｜ ' + rows[t].ctx文本)
+  // 「某一对键值在不在」—— 按**键名 + 值**一起比，避免「页面上恰好有个同名值」混过去。
+  const hasPair = (t, k, v) => !!rows[t] && rows[t].字段.some((f) => f.k === k && f.v === v)
   ok('㉔2 起点：十条参照行（九类各一条 + 一条批量）全在 ③ 里按标题找得到',
     TITLES.every((t) => !!rows[t]), TITLES.filter((t) => !rows[t]))
+  // ⚠️ 这条是**目检抓到的回归**（截图里「缓存」只剩「存」）：`.ln` 的悬挂缩进
+  //    `text-indent: -2ch` 会被 `.md` 继承，行内块首行左移 24px 后被 `overflow:hidden` 裁掉。
+  //    判据读几何（scrollWidth vs clientWidth），不读 CSS 声明。
+  const mdBox = await b.evalJS(`(() => {
+    const r = [...document.querySelectorAll('.log-line')].find(x => {
+      const m = x.querySelector('.md'); return m && m.textContent === '缓存'
+    })
+    if (!r) return null
+    const md = r.querySelector('.md')
+    return { 文本: md.textContent, clientWidth: md.clientWidth, scrollWidth: md.scrollWidth,
+             textIndent: getComputedStyle(md).textIndent }
+  })()`)
+  ok('㉔2 类名列（`.md`）**没有被悬挂缩进裁掉第一个字**：`缓存` 的 clientWidth 装得下 scrollWidth，且 text-indent 归零',
+    !!mdBox && mdBox.clientWidth >= mdBox.scrollWidth && mdBox.textIndent === '0px', mdBox)
 
-  ok('㉔2 `cache`：从句补**区名的中文**，且取的是 `fields.cache`（`goodsHome` → 「首页商品」）'
+  ok('㉔2 `cache`：第一层就念**缓存区**，且取的是 `fields.cache`（`goodsHome` → 「首页商品」）'
     + ' —— 不是 detail 里的 `goodstype`（两条故意不一致，这是唯一能证明「谁优先」的办法）',
-    !!rows['缓存命中（L1）'] && rows['缓存命中（L1）'].mid文本 === '首页商品',
-    gotRow('缓存命中（L1）'))
-  ok('㉔2 `lock`：从句补**锁名**（`order-pay` → 「支付」）—— 对象列装的是业务键，锁名是 title 没说出口的那半',
-    !!rows['取锁成功（order:pay）'] && rows['取锁成功（order:pay）'].mid文本 === '支付',
-    gotRow('取锁成功（order:pay）'))
-  ok('㉔2 `order`（流转）：从句把 `from → to` 的**枚举名翻成中文**（`CREATED → PAID` → 「待付款 → 已付款（待发货）」）',
-    !!rows['状态流转 CREATED → PAID'] && rows['状态流转 CREATED → PAID'].mid文本 === '待付款 → 已付款（待发货）',
-    gotRow('状态流转 CREATED → PAID'))
-  ok('㉔2 `stock`：从句补**件数**（「1 件」）',
-    !!rows['库存扣减'] && rows['库存扣减'].mid文本 === '1 件', gotRow('库存扣减'))
-  ok('㉔2 **title 念过的不再念**：`sensitive` 那条从句为空（落点/命中档/result 都在 title 里）⇒ 整段 `.se-mid` 都不出现',
-    !!rows['敏感词拒收'] && rows['敏感词拒收'].有mid === false, gotRow('敏感词拒收'))
+    hasPair('缓存命中（L1）', '缓存区', '首页商品'), gotRow('缓存命中（L1）'))
+  ok('㉔2 `lock`：第一层念**锁名**（`order-pay` → 「支付」）；与对象列同值的 `key` 不重复念',
+    hasPair('取锁成功（order:pay）', '锁', '支付')
+    && !rows['取锁成功（order:pay）'].字段文本.includes('order:pay/O-1'), gotRow('取锁成功（order:pay）'))
+  ok('㉔2 `order`（流转）：`前态 / 后态` 都翻成中文（`CREATED → PAID` → 「待付款 / 已付款（待发货）」），`动作` 也翻',
+    hasPair('状态流转 CREATED → PAID', '前态', '待付款')
+    && hasPair('状态流转 CREATED → PAID', '后态', '已付款（待发货）')
+    && hasPair('状态流转 CREATED → PAID', '动作', '付款'), gotRow('状态流转 CREATED → PAID'))
+  ok('㉔2 `stock`：`操作 扣减`（`fields.kind` 的值翻中文）+ `数量 1 件`；'
+    + '「剩余 N 件」也进了第一层（顶层 `remaining` 那一格，不在 ctx 里）',
+    hasPair('库存扣减', '操作', '扣减') && hasPair('库存扣减', '数量', '1 件')
+    && hasPair('库存扣减', '剩余', '7 件'), gotRow('库存扣减'))
+  ok('㉔2 `stock` 的 `sku` 与对象列同值 ⇒ **不重复念**（对象列已经写着 `SKU SKU-0001`）',
+    !!rows['库存扣减'] && !rows['库存扣减'].字段文本.includes('SKU-0001'), gotRow('库存扣减'))
+  ok('㉔2 `sensitive`：`场景 评论` + `命中数 9` + `总数 20`（数字按字段原样拼，不出现 `9/20undefined`）',
+    hasPair('敏感词拒收', '场景', '评论') && hasPair('敏感词拒收', '命中数', '9')
+    && hasPair('敏感词拒收', '总数', '20'), gotRow('敏感词拒收'))
+  ok('㉔2 `audit`：`发起人 C-9` / 动作 `goods.delete` → 「商家删除商品」/ 原因原样',
+    hasPair('审计写入', '发起人', 'C-9') && hasPair('审计写入', '动作', '商家删除商品')
+    && hasPair('审计写入', '原因', '违规下架'), gotRow('审计写入'))
+  ok('㉔2 **回落分支真的走到了**：`notify` 那条没有 `fields` ⇒ 从 `detail` 抠出三格，'
+    + '`to=merchant` 按真值域翻成「商家」',
+    hasPair('通知发送', '收件人类型', '商家') && hasPair('通知发送', '事件类型', 'order.paid')
+    && hasPair('通知发送', '原因', '下单成功'), gotRow('通知发送'))
+  ok('㉔2 `identity` 两格：主体 + 原因',
+    hasPair('身份拒绝', '主体', 'C-1') && hasPair('身份拒绝', '原因', '令牌过期'), gotRow('身份拒绝'))
+  ok('㉔2 `protection`：范围（长值）+ 附加信息；顶层 `actor` 落成「发起人 C-9（管理员）」，不藏在 ⑤ 里',
+    hasPair('限流拦截', '范围', '/admin/observe/attack/run 全路径限流窗口')
+    && hasPair('限流拦截', '附加信息', 'qps=20')
+    && rows['限流拦截'].act.includes('发起人 C-9（管理员）'), gotRow('限流拦截'))
+  ok('㉔2 `fields` 里**认不出的键回落英文原名**（`weirdKey 未来值`），不是空白 —— 用户裁定的兜底口径',
+    hasPair('限流拦截', 'weirdKey', '未来值'), gotRow('限流拦截'))
 
-  // ── ㉔3 A 块：括号里那串（环境项 · trace 短号 · 耗时）+ **剩余 N**
-  ok('㉔3 **「剩余 N」进句子了**（3a.3 第二步才进帧的那一列；九个调用点里只有扣减档有值）',
-    !!rows['库存扣减'] && /剩余\s*7\s*件/.test(rows['库存扣减'].ctx文本), gotRow('库存扣减'))
+  // ── ㉔3 第一层的尾巴：`src` 单独成段 + 括号只剩 trace / 耗时
+  ok('㉔3 `src` 只在 detail 尾部 ⇒ 页面单独念成「来源 cache#7」（不混进 fields 键值对）',
+    !!rows['缓存命中（L1）'] && /^来源\s+cache#7$/.test(rows['缓存命中（L1）'].src), gotRow('缓存命中（L1）'))
   ok('㉔3 括号尾带 `trace` + **8 位短号**；事件自身没耗时就退到**请求级**那一格，且标签换成「请求耗时」',
     !!rows['缓存命中（L1）'] && /trace trace000/.test(rows['缓存命中（L1）'].ctx文本)
     && /请求耗时 42 ms/.test(rows['缓存命中（L1）'].ctx文本), gotRow('缓存命中（L1）'))
@@ -1364,21 +1436,9 @@ try {
     && !!rows['敏感词拒收'] && /耗时 850 µs/.test(rows['敏感词拒收'].ctx文本)
     && !/请求耗时/.test(rows['敏感词拒收'].ctx文本),
     { order: gotRow('状态流转 CREATED → PAID'), sensitive: gotRow('敏感词拒收') })
-  ok('㉔3 **回落分支真的走到了**：`notify` 那条没有 `fields` ⇒ 从 `detail` 抠出渠道/事件/原因三格',
-    !!rows['通知发送'] && /渠道 email/.test(rows['通知发送'].ctx文本)
-    && /事件 order\.paid/.test(rows['通知发送'].ctx文本) && /原因 下单成功/.test(rows['通知发送'].ctx文本),
-    gotRow('通知发送'))
-  ok('㉔3 `fields` 里的**数字**（`hit:9` / `total:20`）拼出来仍是 `9/20`（不是 `9/20undefined`）',
-    !!rows['敏感词拒收'] && /命中 9\/20/.test(rows['敏感词拒收'].ctx文本), gotRow('敏感词拒收'))
-  ok('㉔3 `audit` 三格都翻中文：操作者 `C-9` / 动作 `goods.delete` → 「商家删除商品」/ 原因原样',
-    !!rows['审计写入'] && /操作者 C-9/.test(rows['审计写入'].ctx文本)
-    && /动作 商家删除商品/.test(rows['审计写入'].ctx文本), gotRow('审计写入'))
-  ok('㉔3 `identity` 两格：主体 + 原因',
-    !!rows['身份拒绝'] && /主体 C-1/.test(rows['身份拒绝'].ctx文本)
-    && /原因 令牌过期/.test(rows['身份拒绝'].ctx文本), gotRow('身份拒绝'))
-  ok('㉔3 `protection` 两格：范围（长值）+ 详情',
-    !!rows['限流拦截'] && /范围 \/admin\/observe\/attack\/run/.test(rows['限流拦截'].ctx文本)
-    && /详情 qps=20/.test(rows['限流拦截'].ctx文本), gotRow('限流拦截'))
+  ok('㉔3 第一层只把「谁/来源/时间坐标」留在字段与括号里：`ctx` 里**不再重复** fields 的键值对'
+    + '（收尾批 2 取消从句后，ctx 只剩 trace / 耗时）',
+    !!rows['审计写入'] && !/发起人|动作|原因/.test(rows['审计写入'].ctx文本), gotRow('审计写入'))
 
   // ── ㉔4 A 块：**缺槽位跳过**（不写占位符）—— 这条要按「整页扫」，不能只看那十条
   const slots = await b.evalJS(`(() => {
@@ -1406,10 +1466,11 @@ try {
   })()`)
   ok('㉔4 全页扫一遍：从句/括号里**一个占位符都没有**（没有 `undefined` / `null` / `NaN`），也没有**空括号**',
     slots.占位符.length === 0 && slots.空括号.length === 0, slots)
-  ok('㉔4 **缺槽位 = 整段不出现**（不是画一对空括号）：从句恰好 **5** 段、括号恰好 **10** 段'
-    + '（事件那 9 条里 4 条有从句、9 条有括号；另加组头 1 段从句、组尾 1 段括号 —— 见 `makeRow` 三分支）',
-    slots.从句段数 === 5 && slots.括号段数 === 10, { 从句: slots.从句段数, 括号: slots.括号段数 })
-  ok('㉔4 没有 traceId 的批量行（150 条里的一条）：**从句与括号都不在**，技术层照旧（`display:none` 收着）',
+  ok('㉔4 **缺槽位 = 整段不出现**（不是画一对空括号）：从句恰好 **1** 段、括号恰好 **10** 段'
+    + '（收尾批 2 取消事件从句后，`.se-mid` 只剩组头那 1 段中文接口名；括号 = 9 条事件 + 组尾 1 段）',
+    slots.从句段数 === 1 && slots.括号段数 === 10, { 从句: slots.从句段数, 括号: slots.括号段数 })
+  ok('㉔4 没有 traceId 的批量行（150 条里的一条）：**从句与括号都不在**，但第一层技术字段照常出现'
+    + '（`fields` 缺失时回落解析 detail —— 不是靠 traceId 才有的东西）',
     !!slots.批量那条 && slots.批量那条.有从句 === false && slots.批量那条.有括号 === false
     && slots.批量那条.有技术层 === true, slots.批量那条)
 
@@ -1428,7 +1489,7 @@ try {
       主题: document.documentElement.getAttribute('data-theme'),
       令牌: { ink: tok('--ink'), ink2: tok('--ink-2'), ink3: tok('--ink-3'), brandInk: tok('--brand-ink') },
       取到: {
-        k: pick('.log-line .ms .se-k'), v: pick('.log-line .ms .se-v'), v3: pick('.log-line .ms .se-v3'),
+        k: pick('.log-line .ms .se-k'), v: pick('.log-line .ms .se-v'),
         x: pick('.log-line .ms .se-x'), a: pick('.log-line .ms .se-a'),
         对象可点: pick('.log-line .ms .ob.p'),
       },
@@ -1436,9 +1497,9 @@ try {
   })()`)
   ok('㉔5 色板确实锁在 **admin 主题**上（`data-theme` 哨兵 —— 打到 `index.html` 上会量到别家的 token）',
     colors.主题 === 'admin', colors.主题)
-  ok('㉔5 键 → `--ink`；值 → `--ink-2`；值·最次要 → `--ink-3`；连接词 `·` → `--ink-3`（全部读的是计算色）',
+  ok('㉔5 键 → `--ink`；值 → `--ink-2`；连接词 `·` → `--ink-3`（全部读的是计算色）',
     colors.取到.k === colors.令牌.ink && colors.取到.v === colors.令牌.ink2
-    && colors.取到.v3 === colors.令牌.ink3 && colors.取到.x === colors.令牌.ink3,
+    && colors.取到.x === colors.令牌.ink3,
     { 取到: colors.取到, 令牌: colors.令牌 })
   const deco = await b.evalJS(`(() => {
     const a = document.querySelector('.log-line .ms .se-a')
@@ -1451,30 +1512,24 @@ try {
     && !!deco.短号 && deco.短号.line === 'underline' && deco.短号.style === 'dotted'
     && !!deco.对象 && deco.对象.line === 'underline' && deco.对象.style === 'dotted',
     { 色: { 短号: colors.取到.a, 对象: colors.取到.对象可点, 品牌: colors.令牌.brandInk }, 线: deco })
-  ok('㉔5 四档色**两两不同**（若全同，「分档」就是假的）',
-    new Set([colors.取到.k, colors.取到.v, colors.取到.v3, colors.取到.a]).size === 4,
-    [colors.取到.k, colors.取到.v, colors.取到.v3, colors.取到.a])
-  // ⚠️ 这一条是「分档按**长度**现算」的对照：长值（33 字符的 scope）与短值（5 字符的 email）
-  //    落在**不同**的档上才说明规则是活的；若实现改成「全给 v3」或写死白名单，本条会红。
-  const lenClass = await b.evalJS(`(() => {
-    const rowOf = (title) => [...document.querySelectorAll('.log-line')].find(x => {
-      const b = x.querySelector('.ms b')
-      return b && b.textContent === title
-    })
-    const spanOf = (title, pred) => {
-      const r = rowOf(title)
-      if (!r) return null
-      const s = [...r.querySelectorAll('.se-ctx span')].find((z) => pred(z.textContent))
-      return s ? { 文本: s.textContent, 档: s.className.replace('se-', ''), 长度: s.textContent.length } : null
-    }
-    return {
-      长: spanOf('限流拦截', (t) => t.indexOf('/admin/observe/attack/run') === 0),
-      短: spanOf('通知发送', (t) => t === 'email'),
-    }
+  ok('㉔5 三档色**两两不同**（若全同，「分档」就是假的）',
+    new Set([colors.取到.k, colors.取到.v, colors.取到.a]).size === 3,
+    [colors.取到.k, colors.取到.v, colors.取到.a])
+  // 第一层新结构（`.tf-k` 中文键 / `.tf-v` 值）自己也要分色 —— 这段是收尾批 2 新加的渲染层，
+  // 不能只验旧的分段 token。读的仍是**计算色**，不是查 CSS 声明。
+  const tfColors = await b.evalJS(`(() => {
+    const k = document.querySelector('.log-line .ms .dt .tf-k')
+    const v = document.querySelector('.log-line .ms .dt .tf-v')
+    const a = document.querySelector('.log-line .ms .se-act .v')
+    const s = document.querySelector('.log-line .ms .se-src .v')
+    const c = (e) => (e ? getComputedStyle(e).color : null)
+    return { 键: c(k), 值: c(v), 发起人值: c(a), 来源值: c(s),
+      键文本: k ? k.textContent : null, 值文本: v ? v.textContent : null }
   })()`)
-  ok('㉔5 「值·最次要」是**现按长度算**的、不是写死的白名单：长 `scope`（33 字符）落 `se-v3`，短 `email`（5 字符）落 `se-v`',
-    !!lenClass.长 && lenClass.长.档 === 'v3' && lenClass.长.长度 >= 16
-    && !!lenClass.短 && lenClass.短.档 === 'v' && lenClass.短.长度 < 16, lenClass)
+  ok('㉔5 第一层 `中文键` → `--ink-3`、`值` → `--ink-2`；发起人 / 来源的值也走 `--ink-2`',
+    tfColors.键 === colors.令牌.ink3 && tfColors.值 === colors.令牌.ink2
+    && tfColors.发起人值 === colors.令牌.ink2 && tfColors.来源值 === colors.令牌.ink2,
+    { 取到: tfColors, 令牌: colors.令牌 })
   // ⚠️ 「可点不许骗人」的**负面对照**在这一条里：`notify` 那条没有 `objectId`，页面对它的正确
   //    行为是**根本不画对象列**（`objText()` 对空 id 返回空串、模板 `v-if="r.obj"` 挡掉）。
   //    ⇒「画了却不可点」的对象数应当为 **0**。
@@ -1547,8 +1602,8 @@ try {
     trGone.旧格子数 === 0, trGone.旧格子数)
   ok('㉔7 短号**默认就可见**（不 hover 也是 `inline` 且有实测宽度）—— 搬进括号的意义就在这里',
     trGone.短号display !== 'none' && trGone.短号宽 > 8 && trGone.该行hover === false, trGone)
-  ok('㉔7 对照：技术层 `.dt` 仍是**默认收起**（人话常显、机器那串 hover 才出 —— 两层口径没被这次改动带偏）',
-    trGone.技术层display === 'none', trGone.技术层display)
+  ok('㉔7 对照：技术层 `.dt` 现在**默认就显示**（收尾批 2 把 fields 提到第一层；不再等 hover）',
+    trGone.技术层display === 'inline', trGone.技术层display)
 
   // ── ㉔8 D 块：图标与文字之间 **6–8px**（用户给的线）。⚠️ 量**几何距离**，不是查 `gap` 声明
   //   ⚠️ 为什么要量几何：`gap` 声明在不在 ≠ 屏幕上真隔了那么远（弹性盒里插进匿名文本项、
@@ -1715,28 +1770,34 @@ try {
   //      不钉死某一行；`库存扣减` / 审计四档标题在演示里是高频，4.5 秒足够出现。
   const demoShape = await b.evalJS(`(() => {
     const rows = [...document.querySelectorAll('.log-line')]
-    const midOf = (r) => { const m = r.querySelector('.se-mid'); return m ? m.textContent.trim() : '' }
     const ctxOf = (r) => { const m = r.querySelector('.se-ctx'); return m ? m.textContent.trim() : '' }
     const titleOf = (r) => { const b = r.querySelector('.ms b'); return b ? b.textContent.trim() : '' }
+    const pairOf = (r, k) => {
+      const f = [...r.querySelectorAll('.ms .dt .tf')].find((x) => {
+        const n = x.querySelector('.tf-k'); return n && n.textContent === k
+      })
+      const v = f && f.querySelector('.tf-v')
+      return v ? v.textContent.trim() : ''
+    }
     const CACHE_ZH = ['商品类型', '首页商品', '店铺商品', '商品价格', '商品编码', '好友列表', '好友申请', '用户公开资料']
-    const AUDIT_TITLES = ['商品更新', '通知发送', '敏感词新增', '举报处理']
-    const cache = rows.find((r) => CACHE_ZH.includes(midOf(r)))
-    const audit = rows.find((r) => AUDIT_TITLES.includes(titleOf(r)))
-    const stock = rows.find((r) => titleOf(r) === '库存扣减')
+    const cache = rows.find((r) => CACHE_ZH.includes(pairOf(r, '缓存区')))
+    const stock = rows.find((r) => titleOf(r) === '库存扣减' && /^\\d+ 件$/.test(pairOf(r, '剩余')))
+    const withAct = rows.find((r) => r.querySelector('.se-act'))
     return {
-      缓存从句: cache ? midOf(cache) : null,
-      审计上下文: audit ? ctxOf(audit) : null,
-      库存上下文: stock ? ctxOf(stock) : null,
+      缓存区值: cache ? pairOf(cache, '缓存区') : null,
+      有发起人行数: rows.filter((r) => r.querySelector('.se-act')).length,
+      发起人样例: withAct ? withAct.querySelector('.se-act').textContent.trim() : null,
+      剩余样例: stock ? pairOf(stock, '剩余') : null,
       带耗时行数: rows.filter((r) => ctxOf(r).includes('耗时')).length,
       总行数: rows.length,
     }
   })()`)
-  ok('⑯+ 演示假帧的 `fields` 真的落到了句子里：某条缓存的从句 = 缓存区中文名（不是英文 tag）',
-    demoShape.缓存从句 !== null, demoShape)
-  ok('⑯+ `actor` 真的落到了页面上：审计行的括号里出现「操作者 <业务号>」',
-    !!demoShape.审计上下文 && demoShape.审计上下文.includes('操作者'), demoShape)
-  ok('⑯+ 顶层 `remaining` 真的落到了页面上：库存扣减行的括号里出现「剩余 N 件」',
-    !!demoShape.库存上下文 && /剩余\s*\d+\s*件/.test(demoShape.库存上下文), demoShape)
+  ok('⑯+ 演示假帧的 `fields` 真的落到了第一层：某条缓存的 `缓存区` = 中文区名（不是英文 tag）',
+    demoShape.缓存区值 !== null, demoShape)
+  ok('⑯+ `actor` 真的落到了第一层：演示行里出现「发起人 <id>（客户|商家|管理员）」（不止一行）',
+    demoShape.有发起人行数 > 1 && /发起人\s+\S+（(客户|商家|管理员)）/.test(demoShape.发起人样例 || ''), demoShape)
+  ok('⑯+ 顶层 `remaining` 真的落到了第一层：库存扣减行的 `剩余` = `N 件`',
+    !!demoShape.剩余样例 && /^\d+ 件$/.test(demoShape.剩余样例), demoShape)
   ok('⑯+ `durationUs` 真的落到了页面上：演示行里有「耗时」这一格（且有不止一行）',
     demoShape.带耗时行数 > 1, demoShape)
   if (demoOpenable > 0) {
