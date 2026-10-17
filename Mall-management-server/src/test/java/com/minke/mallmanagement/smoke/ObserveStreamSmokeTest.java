@@ -64,9 +64,10 @@ class ObserveStreamSmokeTest extends AbstractSmokeTest {
         String body = callStream("/admin/observe/events/stream");
         assertThat(body).contains("\"events\"").contains("\"severity\"");
         // 8 类（顺序 = EventBroadcaster.Kind 的声明顺序）—— 少一个就说明枚举与帧对不上了。
-        assertThat(body).contains("\"cache\":0").contains("\"lock\":0").contains("\"order\":0")
-                .contains("\"stock\":0").contains("\"audit\":0").contains("\"notify\":0")
-                .contains("\"sensitive\":0").contains("\"identity\":0");
+        // ⚠️ 只断「键在」、不断数值：counts 跨测试累计（同一份切片上下文；CI run 39055832261 实测 stock=19）。
+        assertThat(body).contains("\"cache\":").contains("\"lock\":").contains("\"order\":")
+                .contains("\"stock\":").contains("\"audit\":").contains("\"notify\":")
+                .contains("\"sensitive\":").contains("\"identity\":");
     }
 
     /**
