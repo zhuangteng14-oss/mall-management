@@ -580,7 +580,7 @@
                 <span class="a-of-step-num">
                   <b class="a-of-step-n" :class="{ 'is-bump': statePulse[n.key] }">{{ fmtInt(n.count) }}</b>
                 </span>
-                <span class="a-of-step-qps">回放经过 {{ fmtInt(n.hits) }} 次</span>
+                <span class="a-of-step-qps">流入 {{ qpsText(replayQps.inflow[n.key]) }} · 流出 {{ qpsText(replayQps.outflow[n.key]) }} · 经过 {{ fmtInt(n.hits) }} 次</span>
               </span>
               <span class="a-of-rail" aria-hidden="true">
                 <i :style="{ width: n.width + '%', background: stateColor(n.key) }"></i>
@@ -598,7 +598,7 @@
                 <span class="a-of-step-num">
                   <b class="a-of-step-n" :class="{ 'is-bump': statePulse.cancelled }">{{ fmtInt(replayCounts.cancelled) }}</b>
                 </span>
-                <span class="a-of-step-qps">回放经过 {{ fmtInt(batchNodeHits.cancelled || 0) }} 次</span>
+                <span class="a-of-step-qps">取消流入 {{ qpsText(replayQps.inflow.cancelled) }} · 经过 {{ fmtInt(batchNodeHits.cancelled || 0) }} 次</span>
               </span>
               <span class="a-of-rail" aria-hidden="true">
                 <i :style="{ width: replayCancelWidth + '%', background: stateColor('cancelled') }"></i>
@@ -621,13 +621,74 @@
           <span class="a-of-live">回放中</span>
         </header>
         <div class="a-of-stream-sum">
+          <span>流入 <b>{{ qpsText(replayTotalQpsIn) }}</b></span>
+          <span>流出 <b>{{ qpsText(replayTotalQpsOut) }}</b></span>
           <span>回放进度 <b>{{ fmtInt(replaySession.cursor) }}</b> / {{ fmtInt(replaySession.count) }}</span>
           <span class="a-of-mono">{{ replaySession.spanMs ? (replaySession.spanMs / 1000).toFixed(1) + 's' : '—' }}</span>
+        </div>
+        <!-- 回放流轨：与实时页**同一套**拓扑 / 粒子 / 取消支线，只是数据源换成
+             `replaySession.stateChanges`。方向仍是左 → 右；只有真的发生流转时该边才亮。
+             ⚠️ 汇总取消（`count=N`）走大号瀑布，逐单取消一颗粒子 —— 与实时页同一函数。 -->
+        <div class="a-of-lane" aria-hidden="true">
+          <i
+            v-for="(e, i) in MAIN_EDGES"
+            :key="e.id"
+            class="a-of-lane-track"
+            :class="{ 'is-on': activeEdges.has(e.id) }"
+            :style="laneSegStyle(i)"
+          ></i>
+          <svg class="a-of-cancel-links" viewBox="0 0 100 100" preserveAspectRatio="none">
+            <path
+              d="M10,24 C 42,58 70,64 90,82"
+              :class="{ on: activeEdges.has(CANCEL_FROM_PAY) }"
+              vector-effect="non-scaling-stroke"
+            />
+            <path
+              d="M37,24 C 55,54 74,66 90,82"
+              :class="{ on: activeEdges.has(CANCEL_FROM_SHIP) }"
+              vector-effect="non-scaling-stroke"
+            />
+          </svg>
+          <span
+            v-for="(n, i) in FLOW_NODES"
+            :key="n.key"
+            class="a-of-lane-node"
+            :class="{ 'is-live': pulseNodes.has(n.key) }"
+            :style="{ left: LANE_POS[i] + '%' }"
+          >
+            <i class="a-of-lane-dot" :style="{ background: stateColor(n.key) }"></i>
+            <b>{{ n.label }}</b>
+            <em>{{ fmtInt(replayCounts[n.key]) }}</em>
+          </span>
+          <span
+            class="a-of-lane-node a-of-lane-cancel"
+            :class="{ 'is-live': pulseNodes.has('cancelled') }"
+            :style="{ left: LANE_POS[3] + '%' }"
+          >
+            <i class="a-of-lane-dot" :style="{ background: stateColor('cancelled') }"></i>
+            <b>已取消</b>
+            <em>{{ fmtInt(replayCounts.cancelled) }}</em>
+          </span>
+          <span
+            v-for="p in laneParticles"
+            :key="p.id"
+            class="a-of-particle-wrap"
+            :style="{ left: p.x1 + '%', width: p.w + '%', '--pcolor': p.color }"
+          >
+            <i class="a-of-particle"></i>
+          </span>
+          <i
+            v-for="p in cancelParticles"
+            :key="p.id"
+            class="a-of-cancel-particle"
+            :class="['from-' + p.from, { 'is-big': p.big }]"
+            :style="{ '--pcolor': stateColor('cancelled'), '--pdelay': (p.delay || 0) + 'ms' }"
+          ></i>
         </div>
         <ul v-if="replayRecentMoves.length" class="a-of-stream-list">
           <li v-for="m in replayRecentMoves.slice(0, 8)" :key="m.seq" class="a-of-stream-i">
             <span class="a-of-stream-t">{{ hms(m.ts) }}</span>
-            <span class="a-of-id">#{{ m.orderId }}</span>
+            <span class="a-of-id" :class="{ 'is-batch': m.batchCount }">{{ m.batchCount ? `批量取消 ${fmtInt(m.batchCount)} 单` : `#${m.orderId}` }}</span>
             <span class="a-of-stream-d">
               <template v-if="m.from">{{ moveStateLabel(m.from) }} → </template>
               <b>{{ moveStateLabel(m.to) }}</b>
@@ -676,7 +737,7 @@
         <ul v-else class="a-of-rpm">
           <li v-for="m in replayRecentMoves" :key="m.seq" class="a-of-rpm-i">
             <span class="a-of-rpm-t">{{ hms(m.ts) }}</span>
-            <span class="a-of-id">#{{ m.orderId }}</span>
+            <span class="a-of-id" :class="{ 'is-batch': m.batchCount }">{{ m.batchCount ? `批量取消 ${fmtInt(m.batchCount)} 单` : `#${m.orderId}` }}</span>
             <span class="a-of-rpm-d">{{ moveStateLabel(m.from) }} → <b>{{ moveStateLabel(m.to) }}</b></span>
             <span v-if="m.result" class="a-of-rpm-r">{{ m.result }}</span>
           </li>
@@ -1229,6 +1290,35 @@ const replayCancelShare = computed(() => {
   const tot = replayOrderTotal.value
   return tot ? ((num(replayCounts.cancelled) / tot) * 100).toFixed(1) : '0.0'
 })
+/**
+ * 回放语境下的流入/流出 QPS：取**回放时钟前 5 秒日志时间**内的流转，按单数加权 ÷ 5。
+ * ⚠️ 窗口边界用历史时间戳（`m.ts` 与 `clockTs`），不是 `Date.now()` —— 回放里「最近 5 秒」
+ *    指的是录像里的 5 秒，墙钟早已过去。
+ * ⚠️ 汇总事件按 `count` 加权：一条「批量取消 39 单」在取消节点上是 7.8/s，而不是 0.2/s。
+ */
+const replayQps = computed(() => {
+  const inflow = {}
+  const outflow = {}
+  STATES.forEach((s) => { inflow[s.key] = 0; outflow[s.key] = 0 })
+  const clock = num(replaySession.clockTs)
+  if (clock) {
+    for (const m of replaySession.stateChanges) {
+      if (m.ts > clock || m.ts <= clock - 5000) continue
+      const w = num(m.count) || 1
+      const to = stateKeyOf(m.to)
+      const from = stateKeyOf(m.from)
+      if (to) inflow[to] += w
+      if (from) outflow[from] += w
+    }
+  }
+  STATES.forEach((s) => {
+    inflow[s.key] /= 5
+    outflow[s.key] /= 5
+  })
+  return { inflow, outflow }
+})
+const replayTotalQpsIn = computed(() => FLOW_NODES.reduce((a, n) => a + num(replayQps.value.inflow[n.key]), 0))
+const replayTotalQpsOut = computed(() => FLOW_NODES.reduce((a, n) => a + num(replayQps.value.outflow[n.key]), 0))
 function replayAvgMinutes(segment) {
   const arr = replayDurations[segment] || []
   if (!arr.length) return 0
@@ -2248,22 +2338,38 @@ function applyReplayChange(m, animate) {
   // 认不出的节点：不猜、不动角标（明细里仍原样显示枚举名，见 `moveStateLabel`）。
   if (!toKey) return
   const fromKey = stateKeyOf(m.from)
-  const tracked = replayOrderState.get(m.orderId)
-  if (tracked === undefined) {
-    replayCounts[toKey] += 1
-  } else if (tracked !== toKey) {
-    replayCounts[tracked] = Math.max(0, replayCounts[tracked] - 1)
-    replayCounts[toKey] += 1
-  }
-  replayOrderState.set(m.orderId, toKey)
-  noteReplayLifecycle(m, toKey)
+  // 2026-10-17 回放复核：超时取消的**汇总事件**（`count=N`、无订单号）必须按 N 加权。
+  // 台账里它是唯一能证明「这一轮真取消了几十/几百单」的记录；按 1 条算会把一场批量
+  // 取消缩成一颗小光点，已取消数字也只 +1。
+  const count = num(m.count)
+  const summary = count > 0
+  const weight = summary ? count : 1
 
-  batchNodeHits[toKey] += 1
+  if (summary) {
+    // 汇总事件没有单号 ⇒ 不能走 `replayOrderState`（那是「哪一单在哪」）。
+    // 按 `from` 扣、按 `to` 加；台账被截断时 `from` 存量可能不足，夹到 0。
+    if (fromKey) replayCounts[fromKey] = Math.max(0, replayCounts[fromKey] - weight)
+    replayCounts[toKey] += weight
+  } else {
+    const tracked = replayOrderState.get(m.orderId)
+    if (tracked === undefined) {
+      replayCounts[toKey] += 1
+    } else if (tracked !== toKey) {
+      replayCounts[tracked] = Math.max(0, replayCounts[tracked] - 1)
+      replayCounts[toKey] += 1
+    }
+    replayOrderState.set(m.orderId, toKey)
+    // 耗时样本只从**同一张单**的相邻时间戳推：汇总事件不是一张单，不能参与。
+    noteReplayLifecycle(m, toKey)
+  }
+
+  batchNodeHits[toKey] += weight
   replayMoveCount.value += 1
   replayRecentMoves.value = [{
     seq: m.seq,
     ts: m.ts,
     orderId: m.orderId,
+    batchCount: summary ? weight : 0,
     from: m.from,
     to: m.to,
     result: m.result,
@@ -2274,6 +2380,13 @@ function applyReplayChange(m, animate) {
   if (fromKey) {
     const edgeId = `${fromKey}>${toKey}`
     if (KNOWN_EDGES.has(edgeId)) flash(activeEdges, edgeId, REPLAY_FLASH_MS, true)
+    if (toKey === 'cancelled') {
+      // 汇总 ⇒ 大号瀑布（与实时页同一个函数、同一套粒子上限）；逐单 ⇒ 一颗。
+      if (summary) spawnCancelWaterfall(fromKey, weight)
+      else spawnCancelParticle(fromKey)
+    } else if (m.orderId) {
+      spawnLaneParticle(fromKey, toKey, m.orderId)
+    }
   }
 }
 
@@ -2683,8 +2796,16 @@ watch(() => replaySession.loading, (loading) => {
   if (!loading && !replaySession.active) connect()
 })
 // 播放器每吐一批流转就响一次；只消费新到的尾部（`replayApplied`）。
+// ⚠️ 每批重置一次粒子预算：与实时 `onFrame` 同一条背压规则，回放也不会几千条 move 同帧堆 DOM。
 watch(() => replaySession.stateChanges.length, () => {
-  if (replaySession.active) syncReplayChanges(true)
+  if (replaySession.active) {
+    frameParticleBudget = MAX_PARTICLES_PER_FRAME
+    syncReplayChanges(true)
+  }
+})
+// 「重新开始（重放）」：清掉本页重建的状态机 / 耗时样本 / 粒子，再从第一条重来。
+watch(() => replaySession.restartSeq, () => {
+  if (replaySession.active) enterReplay()
 })
 // KeepAlive 失活（路由切走）时**不卸载**：落一次盘就够了，内存状态原样留着。
 onDeactivated(() => {

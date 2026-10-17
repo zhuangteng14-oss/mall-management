@@ -9,7 +9,9 @@
            之间的白条）—— 六区共用 `.ev-frame` 一个框，`> * + *` 之间是一条 1px 线。 -->
       <header class="ev-status">
         <div class="r1">
-          <span class="hl"><i class="led" :class="{ off: !mqConnected }"></i>{{ phaseText }}</span>
+          <!-- ⚠️ 回放期间 MQ/SSE 已被主动切断，那不是故障：LED 用「回放」色，
+               不再沿用「未连接」的灰点（用户 2026-10-17：回放不许飘 MQ 误报）。 -->
+          <span class="hl"><i class="led" :class="{ off: !mqConnected && !replaySession.active, 'is-replay': replaySession.active }"></i>{{ phaseText }}</span>
           <!-- 冻结开关（2026-10-17 · 800 QPS 反压）：暂停 / 手动上滚时数据只进缓冲池，
                列表不跳。恢复 = 把池子里最新的一截并进来 + 回到实时底部。 -->
           <button
@@ -122,8 +124,14 @@
           <!-- ⚠️ 必须是**两个 span**（不是一段内联文本）：`.tz` 是 flex column 容器，内联文本的
                每个片段都会各自变成一个 flex item、各占一行 —— 实测撑成 71px。拆成两个 span ⇒ 两行。 -->
           <span class="tz">
-            <span>第 <b>{{ seq }}</b> 拍 · 每秒 1 拍 · {{ lastTickAt }}</span>
-            <span><i class="mqdot" :class="{ off: !mqConnected }"></i>MQ {{ mqConnected ? '已连接' : '未连接' }}</span>
+            <template v-if="!replaySession.active">
+              <span>第 <b>{{ seq }}</b> 拍 · 每秒 1 拍 · {{ lastTickAt }}</span>
+              <span><i class="mqdot" :class="{ off: !mqConnected }"></i>MQ {{ mqConnected ? '已连接' : '未连接' }}</span>
+            </template>
+            <template v-else>
+              <span>回放进度 <b>{{ fmtInt(replaySession.cursor) }}</b> / {{ fmtInt(replaySession.count) }}</span>
+              <span><i class="mqdot is-replay"></i>回放时钟 <b>{{ replayClockText }}</b> · 不检查 MQ / SSE</span>
+            </template>
           </span>
         </div>
       </header>
@@ -136,7 +144,9 @@
         <button type="button" class="ev-btn" @click="connect">立即重连</button>
       </p>
       <!-- MQ 未连接：**压缩成一行**（原文那段长说明搬进 ① 下排的 note 与 ② 栏脚）。 -->
-      <p v-else-if="!mqConnected" class="ev-cond is-warn">
+      <!-- ⚠️ 回放期间**不显示**「MQ 未连接」：那条流是回放模式主动切断的，不是故障。
+           页面此时由回放横幅解释「过去时」，不应再叠一条实时健康告警。 -->
+      <p v-else-if="!mqConnected && !replaySession.active" class="ev-cond is-warn">
         <span>MQ 未连接：八个环的事件都只在<b>进程内存</b>里，<b>不落库</b> —— 这台服务一重启就没了。</span>
         <span class="sub">（后端每 5 秒实探一次；连上后本行自动消失）</span>
       </p>
@@ -1343,6 +1353,12 @@ const lostText = computed(() => {
   return `${head} —— 上面的数字停在断开前最后一拍，${s.nextRetryInMs / 1000} 秒后自动重连（第 ${s.attempt} 次）`
 })
 const lastTickAt = computed(() => (ts.value ? hmsms(ts.value) : '—'))
+/** 回放时钟（带毫秒）：横幅 / 三页同一口径；跟「已吐出的最后一条事件」的原时间戳走。 */
+const replayClockText = computed(() => {
+  const ms = replaySession.clockTs
+  if (!ms) return '—'
+  return hmsms(ms)
+})
 const isAllOn = computed(() => activeKinds.value.size === KINDS.length && activeSevs.value.size === SEVERITIES.length)
 
 /* ── ① 时间范围（裁定 A）⇒「范围内」是 ②③④ 的统一口径 ──────────────────────── */
@@ -2368,6 +2384,11 @@ watch(() => replaySession.active, (on) => {
   if (on) enterReplayView()
   else leaveReplayView()
 })
+// 「重新开始（重放）」：会话只在模块里把游标归零，本页必须把自己那份回放行也清掉 ——
+// 否则重放的新行会叠在上一遍的旧行上（seq 是合成的，看起来像 1:1 回放却重复了）。
+watch(() => replaySession.restartSeq, () => {
+  if (replaySession.active) enterReplayView()
+})
 // 装载失败兜底（成功时 `active` 已先置 true，这里不会再连）：
 // 回放没装载成功 ⇒ 恢复用户原来那条实时流，页面不会停在「什么都不更新」的状态。
 watch(() => replaySession.loading, (loading, was) => {
@@ -2560,6 +2581,11 @@ onBeforeUnmount(() => {
 .led.off {
   background: var(--line-2);
 }
+/* 回放：LED 不是「连上」，也不是「断开」——是过去时。用警示色与横幅同族。 */
+.led.is-replay {
+  background: var(--warning);
+  box-shadow: 0 0 0 2px var(--warning-ground);
+}
 .ev-status .cell {
   display: flex;
   flex-direction: column;
@@ -2671,6 +2697,9 @@ onBeforeUnmount(() => {
 .mqdot.off {
   background: transparent;
   border: 1px solid var(--line-2);
+}
+.mqdot.is-replay {
+  background: var(--warning);
 }
 .ev-status .note {
   font-size: var(--fs-xs);

@@ -12,7 +12,9 @@
 // 【时钟口径（用户 2026-10-17 的规格 + 「全链路联动」补充）】
 //   · 播放位置 `virtualMs` 是**日志时间偏移**，从 0 起；时钟按 **rAF**（≈16ms）推进，
 //     每帧推进 `speed × Δt`。**缺省 1×**（1 秒日志 = 1 秒墙钟，用户 2026-10-17 改），
-//     横幅上可切 1x / 2x / 5x / 10x；切换**不重置** `virtualMs` / `cursor`。
+//     横幅上可切 0.25x / 0.5x / 1x / 2x / 5x / 10x；切换**不重置** `virtualMs` / `cursor`。
+//     ⚠️ 慢速档同样是**真实时间差值**：每帧 `virtualMs += Δt × speed`，不是把时间戳改写成
+//        `Date.now()`，也不是把历史事件摊平成固定间隔 —— 0.25x 时 1 秒墙钟只推进 250ms 日志时间。
 //   · 每帧上限 `maxPerFrame` 不是常数：装载完成后按该批次的**峰值事件密度**算
 //     `clamp(ceil(peakPerSec × speed / 60), 50, 200)`（50 = 用户定的基线，200 = 防一帧
 //     把主线程打爆的天花板）。稀疏批次 50 条/帧就够，密集批次自动放宽，**不靠 5 条/帧慢放**。
@@ -41,12 +43,24 @@ import { advanceMetricWindow, createMetricWindow, flushMetricWindow, pushMetricE
 // 日志页的 `cur` 会指向 demo 桶 ⇒ 回放行写了却看不见。进回放前强制切回正常源。
 import { setDemoMode } from './demo-stream'
 
+/**
+ * 一次回放最多向后台要多少条台账。
+ *
+ * ⚠️ 必须显式给 **后端上限**（`ReplayService.MAX_LIMIT = 50000`）：不传时后端缺省只给 5000，
+ * 一轮 35k 条的演练会被截成前 10 秒 —— 用户 2026-10-17 的验收口径是「回放与实时演练
+ * 完全一致」，只放前一段就看不到后面所有取消/失败。超 5 万条的批次仍会截断，
+ * 但横幅会把 `total / count / limit` 三者的差写出来，不静默。
+ */
+export const REPLAY_LOAD_LIMIT = 50000
+
 /** 播放时钟节拍：**rAF**（帧同步，≈16ms）——由用户「不要抽帧感」那条指令定死。 */
 export const REPLAY_TICK_MS = 16
 /** 默认时间倍率：1 秒墙钟 = 1 秒日志（用户 2026-10-17：「点回放就直接 10× 狂奔」要改掉）。 */
 export const REPLAY_SPEED = 1
-/** 横幅上可选的倍速档位（声明序 = 按钮从左到右）。 */
-export const REPLAY_SPEEDS = [1, 2, 5, 10]
+/** 横幅上可选的倍速档位（声明序 = 按钮从左到右）。
+ *  ⚠️ 0.25 / 0.5 是用户 2026-10-17 明令补的慢速档：查案时要看清同一毫秒内的并发顺序。
+ *     时钟按 `virtualMs += Δt × speed` 推进 ⇒ 慢速档只是「日志时间走得慢」，不改事件时间戳。 */
+export const REPLAY_SPEEDS = [0.25, 0.5, 1, 2, 5, 10]
 /** 每帧吞吐的**基线**（用户 2026-10-17 最终定：50 条/帧起）。
  *  ⚠️ 真正生效的是 `replaySession.maxPerFrame`：装载后按批次峰值算
  *     `clamp(ceil(peakPerSec × speed / 60), 50, 200)`。稀疏批次就是 50；密集批次自动放宽，
@@ -98,6 +112,9 @@ export const replaySession = reactive({
   stateChanges: [],
   metricSeq: 0,
   stateSeq: 0,
+  /** 「重新开始」计数：每次重放 +1。三页 watch 它来清掉自己那份回放视图
+   *  （日志行、状态机重建、直方图样本），会话本身不动。 */
+  restartSeq: 0,
 })
 
 /** 全量行（非响应式）：`{ off, ts, event }`，`off` = 距首条事件的毫秒偏移。 */
@@ -133,10 +150,24 @@ function adaptiveCap(list, speed) {
   return Math.max(REPLAY_MAX_PER_FRAME, Math.min(REPLAY_MAX_PER_FRAME_CEILING, need || 0))
 }
 
-/** SQL 的 `CAST(OccurredAt AS CHAR)`（库内 UTC、无时区文本）→ epoch 毫秒。 */
+/**
+ * SQL 的 `CAST(OccurredAt AS CHAR)` → epoch 毫秒。
+ *
+ * ⚠️ 这一列是 **Asia/Shanghai 本地墙钟文本，不是 UTC**（2026-10-17 对 dev 库实测）：
+ *   `observed_event.OccurredAt` 由 `ObservedEventDao.insertBatch` 绑 `new Timestamp(epochMilli)`，
+ *   驱动按连接串 `serverTimezone=Asia/Shanghai` 转成 +08 墙钟再写进 `datetime(3)`；
+ *   而 MySQL 服务器时区是 UTC（`@@system_time_zone=UTC`，`NOW()` 比 JVM 慢 8 小时）。
+ *   同一批 `8fdb21b7…`：`drill_record.created_at = 15:42:26`（库里 UTC），
+ *   台账首末 `OccurredAt = 23:41:12.958 ~ 23:42:26.570`（本地 +08）—— 首尾正好差 8 小时。
+ * ⇒ 必须补 `+08:00`。补 `Z` 会把回放时钟整体推后 8 小时，进度条旁的时间与批次列表对不上。
+ */
+const LEDGER_TZ_OFFSET = '+08:00'
 function epochOf(sqlTime) {
   if (sqlTime === null || sqlTime === undefined || sqlTime === '') return 0
-  const ms = new Date(`${String(sqlTime).replace(' ', 'T')}Z`).getTime()
+  const text = String(sqlTime).replace(' ', 'T')
+  // 台账文本没有时区标记；已带 Z / ±hh:mm 的值原样解析（防御后端未来改口径）。
+  const withTz = /(?:Z|[+-]\d{2}:?\d{2})$/.test(text) ? text : `${text}${LEDGER_TZ_OFFSET}`
+  const ms = new Date(withTz).getTime()
   return Number.isNaN(ms) ? 0 : ms
 }
 
@@ -260,7 +291,14 @@ function appendMetricTicks(ticks) {
   if (over > 0) replaySession.metricTicks.splice(0, over)
 }
 
-/** 从本拍吐出的事件里摘出订单流转（from/to 原样保留，由状态页的 `stateKeyOf` 翻译）。 */
+/** 从本拍吐出的事件里摘出订单流转（from/to 原样保留，由状态页的 `stateKeyOf` 翻译）。
+ *
+ *  ⚠️ **汇总事件也要收**（2026-10-17 回放复核）：超时取消任务每轮只发一条
+ *     `count=N / orderId=null / from=CREATED / to=CANCELLED` 的汇总 move（见
+ *     `MallOrderStateMetrics.cancelBatch`）。旧实现见到空订单号就 `continue` ⇒ 回放里
+ *     每一次批量取消都凭空消失，状态机的「已取消」永远不会涨。
+ *     → 汇总事件以 `orderId=null + count=N` 入列，状态页按 N 加权重放。
+ *  ⚠️ 时间戳一律取台账的 `OccurredAt`（`e.ts`），**不是**装载/播放时刻。 */
 function appendStateChanges(batchRows) {
   for (const row of batchRows) {
     const e = row.event
@@ -269,13 +307,16 @@ function appendStateChanges(batchRows) {
     const to = f.to
     if (!to) continue
     const orderId = f.order === null || f.order === undefined ? e.objectId : f.order
-    if (orderId === null || orderId === undefined || orderId === '') continue
+    const count = Number(f.count) > 0 ? Number(f.count) : 0
+    // 既没有订单号、也不是汇总事件 ⇒ 这条流转无从落地（脏台账），不猜。
+    if (!count && (orderId === null || orderId === undefined || orderId === '')) continue
     replaySession.stateSeq += 1
     replaySession.stateChanges.push({
       seq: replaySession.stateSeq,
       ts: e.ts,
       off: row.off,
-      orderId: String(orderId),
+      orderId: orderId === null || orderId === undefined || orderId === '' ? null : String(orderId),
+      count,
       from: f.from === undefined ? null : f.from,
       to,
       result: f.result === undefined || f.result === null ? '' : String(f.result),
@@ -366,7 +407,7 @@ export async function startReplaySession(batchId, recordSnapshot) {
   // （`active || loading`）会拦住这次重连 —— 回放准备期间不该先闪一帧实时数据。
   setDemoMode(false)
   try {
-    const data = await fetchReplay(batchId)
+    const data = await fetchReplay(batchId, REPLAY_LOAD_LIMIT)
     // 后端已经是 `ORDER BY OccurredAt, Id`；这里再排一次只为**稳定**：同一毫秒内按 Id 兜底，
     // 不靠 JS 的「恰好稳定」碰运气（V8 稳定，但契约不写死排序器实现）。
     const list = ((data && data.list) || []).slice()
@@ -469,6 +510,42 @@ export function setReplaySpeed(speed) {
   lastNow = performance.now()
   rateStart = 0
   rateCount = 0
+}
+
+/**
+ * 「重新开始（重放）」：进度归零，从这批台账的第一条重播。
+ *
+ * <p>⚠️ 与 {@link stopReplaySession} 的区别：**不退出回放、不重新请求后端**。
+ *    批次、原时间轴、已装载行、当前倍速都保留，只把播放位置、游标、指标拍与
+ *    状态流转清回起点 —— 重放读的是同一份历史，不该再走一次网络。
+ * <p>⚠️ `restartSeq` 自增是给三页的**信号**：日志页要清掉已画的回放行，状态页要清掉
+ *    重建出的五态计数 / 耗时样本 / 趋势样本。没有这个信号，重放后旧画面会与新行叠在一起。
+ * <p>⚠️ 时钟仍是「真实时间差值」：从第一条事件的 `OccurredAt` 重新起算，慢速档照样
+ *    `virtualMs += Δt × speed`，不会把历史时间戳改写成墙钟。
+ */
+export function restartReplaySession() {
+  if (!replaySession.active || !rows.length) return
+  stopClock()
+  backlog = []
+  virtualMs = 0
+  lastNow = 0
+  metricWindow = createMetricWindow()
+  rateStart = 0
+  rateCount = 0
+  replaySession.cursor = 0
+  replaySession.paused = false
+  replaySession.done = false
+  replaySession.playing = false
+  replaySession.elapsedMs = 0
+  replaySession.clockTs = replaySession.startTs
+  replaySession.effectiveRate = 0
+  replaySession.metricTicks = []
+  replaySession.stateChanges = []
+  replaySession.metricSeq = 0
+  replaySession.stateSeq = 0
+  replaySession.maxPerFrame = adaptiveCap(rows, replaySession.speed)
+  replaySession.restartSeq += 1
+  startClock()
 }
 
 /** 退出回放：停表、放掉全量数组。日志页/指标页各自 watch `active` 恢复实时。 */

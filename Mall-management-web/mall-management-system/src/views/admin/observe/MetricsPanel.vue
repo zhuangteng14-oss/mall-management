@@ -409,23 +409,40 @@
               />
             </section>
 
-            <!-- ④ 事件类别分布（当前窗口累计） -->
-            <section class="mp-chart mp-chart--last">
+            <!-- ④ 事件类别分布（当前窗口累计）—— 用**同一个** BarChart 组件画横向条，
+                 不是另写一套方块列表（用户 2026-10-17：回放禁止简化版图表）。 -->
+            <section class="mp-chart">
               <div class="mp-chart-h">
                 <h3>事件类别分布</h3>
-                <span class="mp-chart-n">当前窗口累计条数 · 9 类声明序</span>
+                <span class="mp-chart-n">当前窗口累计条数 · 按条数倒序 · 与实时页同一个横向柱组件</span>
               </div>
-              <ul v-if="replayKindRows.length" class="mp-rp-kinds">
-                <li v-for="k in replayKindRows" :key="k.key" class="mp-rp-kind">
-                  <span class="mp-rp-kind-k"><i :style="{ background: k.color }"></i>{{ k.label }}</span>
-                  <span class="mp-rp-kind-track">
-                    <i :style="{ width: k.pct + '%', background: k.color }"></i>
-                  </span>
-                  <b>{{ fmtInt(k.n) }}</b>
-                  <em>{{ k.share }}%</em>
-                </li>
-              </ul>
-              <p v-else class="mp-empty">当前窗口没有事件 —— 回放时钟在走，但这 1 秒台账里没有事件。</p>
+              <BarChart
+                :categories="replayKindDistLabels" :series="replayKindDistSeries"
+                height="180px" horizontal :show-legend="false" label-truncate="10"
+                value-formatter="{value}" :tooltip-formatter="replayKindDistTooltip" :animation="false"
+                :loading="!replayRows.length && !replaySession.done"
+                is-replay empty-overlay
+                empty-text="当前窗口没有事件 —— 回放时钟在走，但这 1 秒台账里没有事件。" @retry="connect"
+              />
+            </section>
+
+            <!-- ⑤ 事件类别 × 时间热力图 —— 复用实时页的 HeatmapChart。
+                 数据全部来自台账（Kind × 日志秒），不是拿 0 伪造锁等待。 -->
+            <section class="mp-chart mp-chart--last">
+              <div class="mp-chart-h">
+                <h3>事件类别 × 时间热力图</h3>
+                <span class="mp-chart-n">行 = 事件类别 · 列 = 最近 {{ WINDOW }} 拍（1 秒日志时间）· 越深 = 本拍条数越多</span>
+              </div>
+              <HeatmapChart
+                :x-labels="replayXLabels" :y-labels="replayHeatLabels" :data="replayHeatData"
+                value-name="事件数" height="190px" :legend-text="['多', '少']"
+                :x-label-interval="replayHeatInterval" :grid-left="64" :grid-right="56"
+                :tooltip-formatter="replayHeatTooltip" :animation="false"
+                is-replay empty-text="本批台账里还没有可推算的事件" @retry="connect"
+              />
+              <p class="mp-axis-note">
+                ⇡ 上面三张时间序列图与这张热力图共用同一根日志时间 x 轴；纵向柱状分布图按类别聚合。
+              </p>
             </section>
           </div>
 
@@ -734,6 +751,47 @@ const replayKindRows = computed(() => {
     share: all ? ((k.n / all) * 100).toFixed(1) : '0.0',
   }))
 })
+
+/* ④ 横向柱：复用 BarChart（`horizontal`），类别与条数都来自同一份 `replayKindRows`。 */
+const replayKindDistLabels = computed(() => replayKindRows.value.map((k) => k.label))
+const replayKindDistSeries = computed(() => [{
+  name: '窗口累计',
+  data: replayKindRows.value.map((k) => k.n),
+  colorIndex: 1,
+}])
+function replayKindDistTooltip(params) {
+  const i = params && params[0] ? params[0].dataIndex : -1
+  const k = replayKindRows.value[i]
+  if (!k) return ''
+  return `<b>${k.label}</b><br/>当前窗口累计 ${fmtInt(k.n)} 条（占 ${k.share}%）`
+}
+
+/* ⑤ 热力图：行 = 窗口内出现过的事件类别，列 = 回放指标拍（日志时间）。
+   ⚠️ 数据源全部是台账里真实存在的 `Kind` 与 `OccurredAt` 落点 —— 不拿锁等待字段伪造。 */
+const replayHeatKinds = computed(() => KINDS.filter((k) => replayRows.value.some(
+  (r) => num(r.byKind && r.byKind[k]) > 0
+)))
+const replayHeatLabels = computed(() => replayHeatKinds.value.map((k) => KIND_LABEL[k] || k))
+const replayHeatData = computed(() => {
+  const ys = replayHeatKinds.value
+  const out = []
+  replayRows.value.forEach((r, x) => {
+    ys.forEach((k, y) => {
+      const v = num(r.byKind && r.byKind[k])
+      if (v > 0) out.push([x, y, v])
+    })
+  })
+  return out
+})
+/** 60 列时每 10 拍一个刻度，避免标签挤成一团（与实时页热力图同款规则）。 */
+const replayHeatInterval = computed(() => (replayRows.value.length > 30 ? 9 : 0))
+function replayHeatTooltip(p) {
+  const v = p && p.value
+  if (!v) return ''
+  const [x, y] = v
+  const k = replayHeatKinds.value[y]
+  return `<b>${replayXLabels.value[x] || ''}</b><br/>${KIND_LABEL[k] || k || ''}：${fmtInt(v[2])} 条`
+}
 
 function replayQpsTooltip(params) {
   const i = params && params[0] ? params[0].dataIndex : -1

@@ -3,15 +3,18 @@
        用户原话：「顶部必须有一条显眼的横幅：正在回放演练记录（进度 X / Y，
        [暂停/继续] [退出回放]），让用户明确知道当前是『过去时』」。
        ⚠️ 它不是装饰：回放期间实时 SSE 已被切断，横幅是页面上**唯一**能解释
-          「为什么数字不跳了 / 为什么时间是旧的」的东西 ⇒ 必须比页头其它读数更显眼。 -->
+          「为什么数字不跳了 / 为什么时间是旧的」的东西 ⇒ 必须比页头其它读数更显眼。
+       ⚠️ 2026-10-17 终极修复：**未回放时这里也是一条常驻入口** —— 指标页 / 状态页 /
+          日志页顶部都能直接「选择历史批次 → 回放」，不再只能从攻击模拟器页进入。 -->
   <section v-if="s.active" class="a-rb" role="status" aria-live="polite">
     <span class="a-rb-badge">回放</span>
     <div class="a-rb-main">
       <div class="a-rb-line">
         <b class="a-rb-t">正在回放演练记录</b>
+        <span class="a-rb-batch" :title="`批次 ${s.batchId}`">批次 {{ shortId }}</span>
         <span class="a-rb-prog">进度 <b>{{ fmtInt(s.cursor) }}</b> / {{ fmtInt(s.count) }}</span>
         <span class="a-rb-clock" :title="clockTitle">回放时钟 <b>{{ clockText }}</b></span>
-        <span class="a-rb-speed" :title="`播放时钟：每 1 秒墙钟推进 ${s.speed} 秒日志时间；每帧上限按本批密度自适应（50–200 条，本批 ${s.maxPerFrame}）。回放 1:1，不做同类合并。`">{{ s.speed }}× 时钟 · 1:1 不合并 · 每帧 ≤{{ s.maxPerFrame }} 条<template v-if="s.effectiveRate"> · 实测 {{ fmtInt(s.effectiveRate) }} 条/秒</template></span>
+        <span class="a-rb-speed" :title="`播放时钟：每 1 秒墙钟推进 ${s.speed} 秒日志时间（按历史时间差值播放）；每帧上限按本批密度自适应（50–200 条，本批 ${s.maxPerFrame}）。回放 1:1，不做同类合并。`">{{ s.speed }}× 时钟 · 1:1 不合并 · 每帧 ≤{{ s.maxPerFrame }} 条<template v-if="s.effectiveRate"> · 实测 {{ fmtInt(s.effectiveRate) }} 条/秒</template></span>
         <span v-if="s.paused" class="a-rb-state is-paused">已暂停</span>
         <span v-else-if="s.done" class="a-rb-state is-done">已放完</span>
         <span v-else class="a-rb-state is-play">播放中</span>
@@ -25,7 +28,8 @@
         这批台账共 {{ fmtInt(s.total) }} 条，本次按上限载入 {{ fmtInt(s.count) }} 条（limit={{ fmtInt(s.limit) }}）—— 回放的是前一段。
       </p>
     </div>
-    <!-- 倍速：1x / 2x / 5x / 10x。用户 2026-10-17：「默认 1 倍速；切档不重置进度」。
+    <!-- 倍速：0.25x / 0.5x / 1x / 2x / 5x / 10x。用户 2026-10-17：「默认 1 倍速；切档不重置进度」，
+         并明令在 1x 旁补 0.5x / 0.25x 慢速档。
          ⚠️ 只改 `replaySession.speed`（时钟倍率），不碰 cursor / virtualMs。 -->
     <div class="a-rb-speeds" role="group" aria-label="回放倍速">
       <button
@@ -40,6 +44,13 @@
       >{{ sp }}x</button>
     </div>
     <div class="a-rb-act">
+      <!-- 重新开始（重放）：进度归零，从这批台账第一条重播；不退出回放、不重新请求后端。 -->
+      <button
+        type="button"
+        class="a-rb-btn"
+        title="重新开始：播放进度归零，从这批台账的第一条重播（批次与倍速不变）"
+        @click="restartReplaySession"
+      >重新开始</button>
       <button
         v-if="!s.done"
         type="button"
@@ -55,6 +66,29 @@
       >退出回放</button>
     </div>
   </section>
+
+  <!-- 未回放：三页顶部常驻的「选择历史批次」入口。
+       ⚠️ 只列**有 BatchId 的演练记录**：存量记录当时没写批次，点了也回放不到
+          （与攻击页那颗置灰按钮同一判据）。 -->
+  <section v-else class="a-rb a-rb--idle" role="region" aria-label="演练回放入口">
+    <span class="a-rb-badge is-idle">演练回放</span>
+    <div class="a-rb-pick">
+      <label class="a-rb-pick-l" for="a-rb-batch">选择历史批次</label>
+      <select id="a-rb-batch" v-model="pickId" class="a-rb-sel" :disabled="loading || s.loading">
+        <option value="">{{ loading ? '载入批次…' : (batches.length ? '— 请选择 —' : '暂无带批次的演练记录') }}</option>
+        <option v-for="b in batches" :key="b.BatchId" :value="b.BatchId">
+          {{ b.Name || '未命名演练' }} · {{ fmtBatchTime(b.CreatedAt) }} · {{ (b.TotalRequests || 0) }} 请求
+        </option>
+      </select>
+      <button type="button" class="a-rb-btn" :disabled="loading || s.loading || !pickId" :title="pickId ? '读这批台账并按原时间戳回放' : '先选择一个历史批次'" @click="startPicked">
+        {{ s.loading ? '载入中…' : '回放' }}
+      </button>
+      <button type="button" class="a-rb-btn is-exit" :disabled="loading || s.loading" title="重新读取演练记录列表" @click="loadBatches">刷新</button>
+      <span v-if="err" class="a-rb-err" :title="err">{{ err }}</span>
+      <span v-else-if="s.err" class="a-rb-err" :title="s.err">{{ s.err }}</span>
+      <span v-else class="a-rb-hint">顶部直接回放 · 无需先进攻击模拟器页</span>
+    </div>
+  </section>
 </template>
 
 <!--
@@ -66,12 +100,91 @@
      被截断时下面那行小字会写清两者差在哪（`truncated`）。
 -->
 <script setup>
-import { computed } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
+import { attackRecords } from '../../api/observe'
 import {
-  REPLAY_SPEEDS, replaySession as s, setReplaySpeed, stopReplaySession, toggleReplayPause,
+  REPLAY_SPEEDS, replaySession as s, restartReplaySession, setReplaySpeed,
+  startReplaySession, stopReplaySession, toggleReplayPause,
 } from '../../api/replay-session'
 
 const fmtInt = (v) => Number(v || 0).toLocaleString('zh-CN')
+
+/**
+ * 演练记录 `CreatedAt` → 浏览器本地时间文本。
+ *
+ * ⚠️ 它是**库内 UTC 文本**（`drill_record.created_at` 没在 INSERT 里赋值，走 DB 默认值；
+ *    dev 库服务器时区实测为 UTC），与台账 `observed_event.OccurredAt`（Asia/Shanghai 本地）
+ *    口径**不同**。不转换的话，下拉框里写 `15:42`、旁边回放时钟写 `23:41`，
+ *    看起来像回放错了 8 小时 —— 实际是两列来源不同。
+ */
+function fmtBatchTime(v) {
+  if (!v) return '时间未知'
+  const text = String(v).replace(' ', 'T')
+  const withTz = /(?:Z|[+-]\d{2}:?\d{2})$/.test(text) ? text : `${text}Z`
+  const ms = new Date(withTz).getTime()
+  if (Number.isNaN(ms)) return String(v)
+  const d = new Date(ms)
+  const p = (n) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`
+}
+
+/* ── 未回放时的「选择历史批次」入口（2026-10-17 终极修复）────────────────────
+   ⚠️ 数据源是演练记录列表（`/admin/observe/attack/records`），不是新建的后端端点：
+      回放的入口键 `BatchId` 本来就挂在每一行记录上（`DrillRecordDao.COLUMNS`），
+      而且「哪一轮演练」的人话名字/时间也只有这张表有。
+   ⚠️ 只收 `BatchId` 非空的行：存量记录当时没写批次，点了也读不到台账。 */
+const batches = ref([])
+const batchLoading = ref(false)
+const err = ref('')
+const pickId = ref('')
+
+async function loadBatches() {
+  if (s.active) return
+  batchLoading.value = true
+  err.value = ''
+  try {
+    const data = await attackRecords({ limit: 50, offset: 0 })
+    const list = (data && data.list) || []
+    batches.value = list.filter((r) => r && r.BatchId)
+    if (pickId.value && !batches.value.some((r) => r.BatchId === pickId.value)) pickId.value = ''
+  } catch (e) {
+    batches.value = []
+    err.value = `演练记录读取失败：${(e && (e.message || e)) || '未知错误'}`
+  } finally {
+    batchLoading.value = false
+  }
+}
+
+/** 顶部直接回放：装载成功后横幅自动切到「正在回放」（同一个模块级会话，三页共用）。 */
+async function startPicked() {
+  const row = batches.value.find((r) => r.BatchId === pickId.value)
+  if (!row) return
+  err.value = ''
+  try {
+    await startReplaySession(row.BatchId, {
+      totalRequests: row.TotalRequests,
+      blockedRequests: row.BlockedRequests,
+      failedRequests: row.FailedRequests,
+      durationMs: row.DurationMs,
+    })
+  } catch (e) {
+    err.value = `回放装载失败：${(e && (e.message || e)) || '未知错误'}`
+  }
+}
+
+onMounted(() => {
+  if (!s.active) loadBatches()
+})
+// 退出回放后刷新一次：期间可能又跑完了新的演练。
+watch(() => s.active, (on) => {
+  if (!on) loadBatches()
+})
+
+/** 批次 UUID 截短显示；完整值留在 title 里。 */
+const shortId = computed(() => {
+  const id = String(s.batchId || '')
+  return id.length > 12 ? `${id.slice(0, 8)}…` : (id || '—')
+})
 
 /** 进度按**条数**算（不按时间）：时间轴上可能有很长一段没有事件，按时间会看着「卡住」。 */
 const pct = computed(() => {
@@ -245,5 +358,69 @@ const truncated = computed(() => s.count > 0 && s.limit > 0 && s.count >= s.limi
 .a-rb-btn.is-exit:hover {
   color: var(--ink);
   background: var(--surface-2);
+}
+.a-rb-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.a-rb-batch {
+  color: var(--ink-3);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* ── 未回放：常驻的批次选择条（三页顶部） ───────────────────────────────── */
+.a-rb--idle {
+  background: var(--surface);
+  border-color: var(--line);
+  padding: 3px var(--s3);
+  min-height: 30px;
+}
+.a-rb-badge.is-idle {
+  background: var(--surface-2);
+  color: var(--ink-2);
+  border: 1px solid var(--line);
+}
+.a-rb-pick {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  flex-wrap: wrap;
+}
+.a-rb-pick-l {
+  font-size: var(--fs-xs);
+  color: var(--ink-2);
+  white-space: nowrap;
+}
+.a-rb-sel {
+  font: inherit;
+  font-size: var(--fs-xs);
+  color: var(--ink);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--r1);
+  padding: 1px var(--s2);
+  min-width: 260px;
+  max-width: 520px;
+  height: 24px;
+}
+.a-rb-sel:disabled {
+  color: var(--ink-3);
+  background: var(--surface-2);
+}
+.a-rb-err {
+  font-size: var(--fs-xs);
+  color: var(--bad, var(--c7));
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+.a-rb-hint {
+  font-size: var(--fs-xs);
+  color: var(--ink-3);
+  white-space: nowrap;
 }
 </style>

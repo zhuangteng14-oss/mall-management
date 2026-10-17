@@ -6,6 +6,7 @@
     :empty="!hasData"
     :error="error"
     :empty-text="emptyText"
+    :is-replay="isReplay"
     @retry="emit('retry')"
   />
 </template>
@@ -42,6 +43,8 @@ const props = defineProps({
   loading: { type: Boolean, default: false },
   error: { type: String, default: '' },
   emptyText: { type: String, default: '区间内暂无数据' },
+  /** 回放角标：数据由回放帧推算，不是实时 SSE。 */
+  isReplay: { type: Boolean, default: false },
 })
 
 const emit = defineEmits(['retry'])

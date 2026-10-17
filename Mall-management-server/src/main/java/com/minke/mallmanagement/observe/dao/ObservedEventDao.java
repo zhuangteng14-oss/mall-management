@@ -123,8 +123,8 @@ public class ObservedEventDao {
      * {@code DATE_FORMAT(OccurredAt, '%Y-%m-%d %H:%i:%s')}（{@code DrillRecordDao.COLUMNS} 那份）
      * —— 差别就是**毫秒**：回放要按原时间戳撒点，秒级会把同一秒里的事件压成一坨。
      * 列是 {@code datetime(3)} ⇒ {@code CAST} 按列精度出 3 位小数（{@code 2026-10-15 11:30:22.123}），
-     * 与 {@code DATE_FORMAT} 一样是**无时区文本**（库内 UTC，前端按 {@code AuditPage.vue#toLocal}
-     * 那条「末尾补 Z」的口径解析）⇒ 前端用的解析函数一个字都不用改。
+     * 与 {@code DATE_FORMAT} 一样是**无时区文本**，但落的是 **Asia/Shanghai 本地墙钟**（不是 UTC）：
+     * 本列的 {@code Timestamp} 绑定按连接时区写库，DB 服务器时区为 UTC ⇒ 前端解析要补 {@code +08:00}。
      *
      * <p>⚠️ 块 7 · 阶段 3a.3 两步各加了列，回放响应（{@code ReplayService#replay} 把行**原样**
      * 塞进 {@code list}）会**多带** {@code ActorId / ActorRole / DurationUs / RemainingStock /
@@ -215,31 +215,31 @@ public class ObservedEventDao {
 
     // ==================== 读：回放（块 7 收尾 · 演练回放）====================
 
+    /** 回放行过滤（主分支 + 无批次号的汇总取消）；完整理由见 {@link #selectByBatch}。 */
+    private static final String BATCH_PREDICATE = "BatchId = ? OR (BatchId IS NULL AND Kind = 'order' "
+            + "AND FieldsJson LIKE '%\"count\"%' AND FieldsJson LIKE '%CANCELLED%' "
+            + "AND OccurredAt BETWEEN (SELECT MIN(OccurredAt) FROM mall_management_sql.observed_event WHERE BatchId = ?) "
+            + "AND (SELECT MAX(OccurredAt) FROM mall_management_sql.observed_event WHERE BatchId = ?)) ";
+
     /**
      * 按批次读事件（**演练回放**的读出口）—— 按发生时刻**升序**，同一个毫秒内按 {@code Id} 升序。
      *
-     * <p>⚠️ 「按 {@code OccurredAt} 升序」是回放的**语义前提**，不是顺手排一下：前端要按这个顺序
-     * 把事件按原时间戳撒回去，顺序错了等于把当时发生的事重排了一遍。同一个毫秒内的先后
-     * （演练压满时一秒几百条，必然撞上）只有 {@code Id}（自增 = 入库顺序）能作判据 ⇒
-     * <b>{@code ORDER BY OccurredAt, Id}</b> 两列都要，少了第二列同一毫秒内的顺序就不确定
-     * （MySQL 不保证稳定序，翻页/重跑都可能换个排法）。
+     * <p>⚠️ 按 {@code OccurredAt} 升序是回放的语义前提：前端照此撒回原时间戳，顺序错了就是重排历史。
+     * 同一毫秒内（演练压满时一秒几百条）只有 {@code Id} 能分先后 ⇒ <b>两列都要</b>；MySQL 不保证稳定序。
      *
-     * <p>⚠️ {@code LIMIT} 由调用方（{@code ReplayService}）收好再传进来：本类不判断「多少条算合适」
-     * —— 那是策略，不是 SQL。
+     * <p>⚠️ {@code LIMIT} 由调用方（{@code ReplayService}）收好再传进来 —— 那是策略，不是 SQL。
      *
-     * <p>⚠️ 走 {@code idx_observed_event_batch (BatchId)}（⑲-1 的第四个索引，它的唯一归属就是
-     * 「按批次取回一条演练的全部事件」）⇒ 别给这条查询再加条件把它变成索引失效的形状
-     * （例如 {@code DATE(BatchId)}；本表还有 {@code idx_observed_event_time} 给「按时刻」那条路）。
+     * <p>⚠️ 主分支走 {@code idx_observed_event_batch}；第二支补「批次首末之间、无批次号的 order 汇总取消」——
+     * 超时任务在调度线程上没有 {@code X-Drill-Batch}，只按 {@code BatchId = ?} 读会让它在回放里整段消失。
      *
-     * @param batchId 批次 UUID（**非空**；调用方已判空，本类不做「空值 = 查全部」的兜底 ——
-     *                那会把一次误传参数变成「把整张表读出来」）
+     * @param batchId 批次 UUID（**非空**；调用方已判空，空值不做「查全部」兜底 —— 那会把误传变成全表读）
      * @param limit   最多读多少行（&gt; 0；调用方已收进区间）
      * @return 行（列见 {@link #COLUMNS}）；没有该批次 ⇒ 空表，**不是** {@code null}
      */
     public List<Map<String, Object>> selectByBatch(String batchId, int limit) {
         return jdbcClient.sql("SELECT " + COLUMNS + "FROM mall_management_sql.observed_event "
-                        + "WHERE BatchId = ? ORDER BY OccurredAt ASC, Id ASC LIMIT ?")
-                .params(batchId, limit)
+                        + "WHERE " + BATCH_PREDICATE + "ORDER BY OccurredAt ASC, Id ASC LIMIT ?")
+                .params(batchId, batchId, batchId, limit)
                 .query().listOfRows();
     }
 
@@ -247,12 +247,12 @@ public class ObservedEventDao {
      * 该批次**一共有多少条**（回放要如实说「放的是不是全部」—— 见 {@code ReplayService} 的
      * 「为什么多这一条 COUNT」）。
      *
-     * <p>⚠️ 与 {@link #selectByBatch} 同走 {@code idx_observed_event_batch}；代价是每次回放多一次
-     * 索引计数 —— 换来的是前端能写出「共 N 条，已放前 M 条」而不是含糊地播完就停。
+     * <p>⚠️ 与 {@link #selectByBatch} 同一套过滤（批次主分支 + 无批次号汇总取消）；计数口径必须与
+     * 取行一致，否则前端「共 N 条」会把补进来的取消行漏掉。
      */
     public long countByBatch(String batchId) {
-        return jdbcClient.sql("SELECT COUNT(*) FROM mall_management_sql.observed_event WHERE BatchId = ?")
-                .param(batchId).query(Long.class).single();
+        return jdbcClient.sql("SELECT COUNT(*) FROM mall_management_sql.observed_event WHERE " + BATCH_PREDICATE)
+                .params(batchId, batchId, batchId).query(Long.class).single();
     }
 
     /** 按列宽截断；{@code null} 原样回去（这几列的 NULL 语义是「没有值」，不是空串）。 */
