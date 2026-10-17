@@ -454,5 +454,10 @@ export const endpoints = {
     //    ⚠️ 入参 `limit`（可选；缺省窗口 = 60 拍）；返回 `{success,list,size}`，
     //       `list` 里每一帧与 SSE 帧**逐字同形**，前端不必写第二套解析。
     metricsHistory: '/admin/observe/metrics/history',
+    // ⚠️ 2026-10-17（状态流转页高密度落地）：**订单分析面** 1 条。
+    //    路径挂在 `/admin/observe/orders` 之下（后端 `OrderStreamController#insight`），
+    //    与上面的 SSE `orders` 同组不同语义：它是**一次性 JSON**（趋势 / 直方图 / 账龄 /
+    //    健康度 / 最慢 Top N / 全局明细），页面挂载时铺满、之后低频刷新 —— 故走 `http.post`。
+    ordersInsight: '/admin/observe/orders/insight',
   },
 }

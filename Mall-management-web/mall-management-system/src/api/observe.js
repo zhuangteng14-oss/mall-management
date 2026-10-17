@@ -490,3 +490,24 @@ export function cleanupAttack() {
 export function metricsHistory(limit) {
   return postJson(endpoints.observe.metricsHistory, q({ limit }))
 }
+
+// ==================== 状态流转页分析面（块 7 · 2026-10-17）====================
+//
+// ⚠️ **与上面的 SSE `orders` 是两件事**：流只给「每秒变的那几个数」（五态计数 / 最近 20 单 /
+//   本拍 moves），本端点给「打开页面时要铺满屏的聚合」—— 24 小时趋势、耗时直方图、账龄分桶、
+//   健康度、最慢 Top N、全局明细。一次 JSON、无「拍」、无重连语义 ⇒ 走 `http.post`。
+// ⚠️ **只读**：不删数据、不改库、不写审计。页面按低频（默认 15 秒）刷新即可，别塞进 1 秒循环：
+//   它内部会扫表并在 Java 里重算 24 个整点，频次 = 打开的页面数 / 15 秒，可控。
+
+/**
+ * 状态流转页分析面（一次性 JSON）。
+ *
+ * @returns {Promise<{success?:boolean, ts:number, counts:Object, trend:Object,
+ *          durations:Object, aging:Object, health:Object, slowest:Array, orders:Array}>}
+ *          `trend.categories` + `trend.series` 直接喂折线图；`durations.{pay,ship,receive}` 各带
+ *          `bins/avgMinutes/samples`；`aging.{waitShip,waitReceive}` 各带 `bins/total/timeout`；
+ *          `orders` 与 SSE 帧里的订单行**同形**（含 `dwellSeconds` / `timeout` / 时间戳）。
+ */
+export function orderInsight() {
+  return postJson(endpoints.observe.ordersInsight, '')
+}

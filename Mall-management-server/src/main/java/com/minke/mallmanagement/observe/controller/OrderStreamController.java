@@ -1,6 +1,7 @@
 package com.minke.mallmanagement.observe.controller;
 
 import com.minke.mallmanagement.observe.service.AttackEngine;
+import com.minke.mallmanagement.observe.service.OrderInsightService;
 import com.minke.mallmanagement.observe.service.OrderStreamService;
 import com.minke.mallmanagement.observe.service.SseStreamWriter;
 import jakarta.servlet.http.HttpServletResponse;
@@ -9,6 +10,8 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBody;
+
+import java.util.Map;
 
 /**
  * 状态流转页的 SSE 出口（块 7 commit 3）—— 1 秒 1 帧，帧的内容见 {@link OrderStreamService}。
@@ -24,12 +27,14 @@ import org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBo
 public class OrderStreamController {
 
     private final OrderStreamService orders;
+    private final OrderInsightService insight;
     private final AttackEngine attackEngine;
     private final SseStreamWriter writer;
 
-    public OrderStreamController(OrderStreamService orders, AttackEngine attackEngine,
-                                 SseStreamWriter writer) {
+    public OrderStreamController(OrderStreamService orders, OrderInsightService insight,
+                                 AttackEngine attackEngine, SseStreamWriter writer) {
         this.orders = orders;
+        this.insight = insight;
         this.attackEngine = attackEngine;
         this.writer = writer;
     }
@@ -52,5 +57,18 @@ public class OrderStreamController {
         response.setContentType(MediaType.TEXT_EVENT_STREAM_VALUE);
         response.setHeader("Cache-Control", "no-cache");
         return writer.stream("orders", () -> orders.newFrameSource(attackEngine::currentBatch));
+    }
+
+    /**
+     * 状态流转页的分析面（2026-10-17）—— 24 小时趋势 / 耗时直方图 / 账龄分桶 /
+     * 健康度 / 最慢 Top N / 全局明细。与 {@link #stream} **并列**：流负责「每秒变的那几个数」，
+     * 本端点负责「打开页面时要铺满屏的聚合」，低频刷新即可。
+     *
+     * <p>⚠️ 它**只读**（同 {@link #stream}），但走普通 POST 而不是 SSE：一次性 JSON，
+     * 没有「拍」也没有重连语义。
+     */
+    @PostMapping("/insight")
+    public Map<String, Object> insight() {
+        return insight.insight();
     }
 }

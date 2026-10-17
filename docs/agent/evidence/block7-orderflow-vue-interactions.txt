@@ -1,0 +1,8 @@
+INITIAL {"chips":["全部 415","待付款 0","待发货 89","待收货 24","已完成 108","已取消 194"],"note":"横轴 = 时间桶、纵轴 = 单数 · 虚线 = 精确均耗所在桶 · 灰阶柱与桶边界是结构，不是颜色分组","rowStates":["已取消","已取消","已取消","已取消","已取消","已取消","已取消","已取消","已取消","已取消","已取消","已取消","已取消","已取消","已取消","已取消","已取消","已取消","已取消","已取消"]}
+FILTER waitShip {"note":"待发货 · 89 单 · 最新在前 · 点行看链路","chipOn":["待发货 89"],"rowStates":["待发货"],"rows":20,"firstTimeout":"超时 · 阈值 24h"}
+DRAWER row {"open":true,"head":"#B7CAP-sgu0g-r9-9待发货超时 · 阈值 24h","timeline":"#B7CAP-sgu0g-r9-9待发货超时 · 阈值 24hB7CAP-PI · ¥1.50 当前停留1天2小时状态起点10-16 17:53建单时刻10-16 17:53是否取消否10-16 17:53创建订单（待付款）10-16 17:53付款 → 待发货 时间线来自订单行自带的 CreateTime / PaidAt / ShippedAt / ReceivedAt / CancelledAt； 页面打开之后才发生的流转另由 SSE moves 累积。超时取消只写 CancelledAt，不走状态机。","listRows":31,"listFirst":"#GOWW80602762山核桃仁 罐装 260g:GD-434-4D09待发货52天17小时超时"}
+DRAWER closed true
+ONLY TIMEOUT {"note":"待发货 · 89 单 · 最新在前 · 点行看链路","rows":20,"allBad":true,"badCount":20}
+DRAWER warn {"open":true,"head":"链路抽屉 · 待发货30 单 · 按已停留倒序（前 30，含当前选中）· 点左列切换右上时间线关闭","listRows":30,"first":"#GOWW80602762山核桃仁 罐装 260g:GD-434-4D09待发货52天17小时超时"}
+PAGER {"beforePage":"1","afterPage":{"firstId":"#B7CAP-sgu0g-r8-11","note":"待发货 · 89 单 · 最新在前 · 点行看链路"}}
+INTERACT DONE

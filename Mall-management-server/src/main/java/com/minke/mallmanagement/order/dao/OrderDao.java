@@ -528,7 +528,7 @@ public class OrderDao {
      */
     public List<Map<String, Object>> selectRecentOrders(int limit) {
         String sql = "SELECT OrderId, CustomerId, MerchantId, Price, Quantity, ProductInformation, "
-                + "PayIf, DeliveryIf, ReceiveIf, CancelledAt, CreateTime "
+                + "PayIf, DeliveryIf, ReceiveIf, CancelledAt, CreateTime, PaidAt, ShippedAt, ReceivedAt "
                 + "FROM mall_management_sql.`order` ORDER BY CreateTime DESC, OrderId DESC LIMIT ?";
         return jdbcClient.sql(sql).param(limit).query().listOfRows();
     }

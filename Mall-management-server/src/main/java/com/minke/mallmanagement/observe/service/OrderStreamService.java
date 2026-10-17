@@ -5,6 +5,11 @@ import com.minke.mallmanagement.order.metrics.MallOrderStateMetrics;
 import com.minke.mallmanagement.order.metrics.MallOrderStateMetrics.OrderStateEvent;
 import org.springframework.stereotype.Component;
 
+import java.sql.Timestamp;
+import java.time.Duration;
+import java.time.LocalDateTime;
+import java.time.ZoneOffset;
+import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -162,10 +167,27 @@ public class OrderStreamService {
         }
     }
 
-    /** 一行订单 → 页面要的形状（状态 + 进度步数）。 */
-    private Map<String, Object> orderRow(Map<String, Object> raw) {
+    /**
+     * 一行订单 → 页面要的形状（状态 + 进度步数 + 停留时长 / 超时判据）。
+     *
+     * <p>⚠️ 2026-10-17 起**同时给状态流转页与洞察端点**用（原先是私有实例方法）：两处若各写一份
+     * 「状态 + 停留时长」的映射，判据链迟早走岔 —— 而这条链正是本页最容易写错的一处。
+     * 做成 {@code static} 后没有实例状态，调用方不必再新建一个 service。
+     */
+    static Map<String, Object> orderRow(Map<String, Object> raw) {
+        LocalDateTime created = timeOf(raw.get("CreateTime"));
+        LocalDateTime paid = timeOf(raw.get("PaidAt"));
+        LocalDateTime shipped = timeOf(raw.get("ShippedAt"));
+        LocalDateTime received = timeOf(raw.get("ReceivedAt"));
+        LocalDateTime cancelled = timeOf(raw.get("CancelledAt"));
         String state = stateOf(raw.get("CancelledAt"), raw.get("PayIf"),
                 raw.get("DeliveryIf"), raw.get("ReceiveIf"));
+        LocalDateTime since = stateSince(state, created, paid, shipped, received, cancelled);
+        Long dwellSeconds = since == null ? null
+                : Math.max(0L, Duration.between(since, LocalDateTime.now(DB_ZONE)).getSeconds());
+        Integer thresholdHours = timeoutHoursOf(state);
+        boolean timeout = dwellSeconds != null && thresholdHours != null
+                && dwellSeconds >= thresholdHours * 3600L;
         Map<String, Object> row = new LinkedHashMap<>();
         row.put("orderId", raw.get("OrderId"));
         row.put("customerId", raw.get("CustomerId"));
@@ -177,7 +199,81 @@ public class OrderStreamService {
         row.put("state", state);
         row.put("step", stepOf(state));
         row.put("cancelled", "cancelled".equals(state));
+        // 时间轴 / 超时判据的原料 —— 与 state 同源（同一行原始时间戳），不另算一套。
+        row.put("paidAt", raw.get("PaidAt"));
+        row.put("shippedAt", raw.get("ShippedAt"));
+        row.put("receivedAt", raw.get("ReceivedAt"));
+        row.put("cancelledAt", raw.get("CancelledAt"));
+        row.put("stateSince", since == null ? null : TIME_FMT.format(since));
+        row.put("dwellSeconds", dwellSeconds);
+        row.put("timeout", timeout);
+        row.put("timeoutThresholdHours", thresholdHours);
         return row;
+    }
+
+    /** 待发货 / 待收货的超时阈值（小时）—— 页面上两条预警带与洞察端点共用这一份。 */
+    static final int WAIT_SHIP_TIMEOUT_HOURS = 24;
+    static final int WAIT_RECEIVE_TIMEOUT_HOURS = 48;
+
+    /** 库内时间文本是 **UTC**（`@@system_time_zone=UTC`，同 `OrderDao`/`ShippingTrackDao` 的口径）
+     *  ⇒ 「现在」必须也取 UTC 再相减；展示层（前端 `hms`/`dt`）再转本机时区。 */
+    private static final ZoneOffset DB_ZONE = ZoneOffset.UTC;
+    private static final DateTimeFormatter TIME_FMT = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
+
+    /** 当前态是从哪个时刻开始的（停留时长的起点）。 */
+    static LocalDateTime stateSince(String state, LocalDateTime created, LocalDateTime paid,
+                                    LocalDateTime shipped, LocalDateTime received,
+                                    LocalDateTime cancelled) {
+        switch (state) {
+            case "waitPay":
+                return created;
+            case "waitShip":
+                return paid != null ? paid : created;
+            case "waitReceive":
+                return shipped != null ? shipped : (paid != null ? paid : created);
+            case "completed":
+                return received != null ? received : (shipped != null ? shipped : created);
+            case "cancelled":
+                return cancelled != null ? cancelled : created;
+            default:
+                return created;
+        }
+    }
+
+    /** 该状态的超时阈值；{@code null} = 本页不把这一态算进超时预警。 */
+    static Integer timeoutHoursOf(String state) {
+        if ("waitShip".equals(state)) {
+            return WAIT_SHIP_TIMEOUT_HOURS;
+        }
+        if ("waitReceive".equals(state)) {
+            return WAIT_RECEIVE_TIMEOUT_HOURS;
+        }
+        return null;
+    }
+
+    /** DB 里时间列的两种形状都吃：{@code Timestamp} 与 ISO 式字符串（可能带毫秒）。 */
+    static LocalDateTime timeOf(Object v) {
+        if (v == null) {
+            return null;
+        }
+        if (v instanceof Timestamp ts) {
+            return ts.toLocalDateTime();
+        }
+        if (v instanceof LocalDateTime ldt) {
+            return ldt;
+        }
+        String s = String.valueOf(v).trim();
+        if (s.isEmpty() || "null".equalsIgnoreCase(s)) {
+            return null;
+        }
+        if (s.length() > 19) {
+            s = s.substring(0, 19);
+        }
+        try {
+            return LocalDateTime.parse(s.replace('T', ' '), TIME_FMT);
+        } catch (RuntimeException e) {
+            return null;
+        }
     }
 
     /**

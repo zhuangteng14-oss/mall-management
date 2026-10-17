@@ -7,7 +7,7 @@
     <header class="a-status">
       <div class="a-stat">
         <b>{{ fmtInt(total) }}</b>
-        <span>订单总数（库里此刻）</span>
+        <span>{{ demo.on ? '本场演示订单（假数据）' : '订单总数（库里此刻）' }}</span>
       </div>
       <div class="a-stat">
         <b>{{ fmtInt(moveTotal) }}</b>
@@ -30,108 +30,343 @@
       <button type="button" class="a-btn" @click="connect">立即重连</button>
     </p>
 
-    <!-- ══ ② 五态计数卡 + 状态分布环图 ═════════════════════════════════════════════
-         ⚠️ 计数口径 = **后端聚合查询**（`OrderDao.countOrderStates()`），不是「前端把事件流累加」——
-         事件环有界且只覆盖本进程起来之后，累加出来的数在演示着跑一会儿之后必然与库里对不上。
-         卡片上的数**会实时变**：库里某单付了款，下一拍这个数就跳。
-         ⚠️ 与 `MetricsPanel` 的 KPI 卡不同，这里**不给环比**：五态计数是「存量」，不是「速率」，
-         拍与拍之间的差全是噪声（1 拍里 ±3 单说明不了任何事），所以 `delta` 恒为 null、
-         副行改说「占总数几成」—— 那个数是同一条 SQL 里的 `total`，口径自洽。 -->
-    <h2 class="a-h2">
-      五态计数 <span class="a-h2n">后端聚合查询（非事件累加）· 每拍重算 · 判据链：取消 → 已完成 → 待收货 → 待发货 → 待付款</span>
-    </h2>
-    <div class="a-of-top">
-      <div class="a-of-kpis">
+    <!-- 五态计数条（保留原口径）：点卡片 = 主从联动，筛选下面的全局明细。 -->
+    <div class="a-of-kpis">
+      <button
+        v-for="s in STATES"
+        :key="s.key"
+        type="button"
+        class="a-of-kpi"
+        :class="{ on: filterState === s.key }"
+        @click="selectState(s.key)"
+      >
         <KpiCard
-          v-for="s in STATES"
-          :key="s.key"
           :label="s.label"
           glyph="flow"
           :value="fmtInt(shown[s.key])"
           :hint="shareText(s.key)"
           :loading="first"
         />
-      </div>
-      <div class="a-card a-of-donut">
-        <!-- ⚠️ 半径**两处一起收**（容器 400px + inner 46% / outer 58%，缺省是 58% / 78%）：
-             环图的扇区名走 ECharts 的**图外标签**（`{b} {d}%`），标签从环边缘再向外
-             延伸「折线 15px + 文字 ~70px」。缺省半径下左右两条（「已完成 41.9%」「待收货 30.6%」）
-             会伸出容器被 canvas **裁掉**（2026-10-14 截图实测，左右两端都被裁）。
-             摆得下的条件（容器内宽 368、高 240 ⇒ 半径基数 = min/2 = 120）：
-               左边缘 184 − 120×outer% ≥ 15 + 70   ⇒  outer% ≤ 82% …单看这条很宽松，
-             真正的约束是**环整体要居中**，故 outer 取 58%（半径 70px）留足两端。
-             改这三个数里的任何一个之前，先按这条式子算一遍。 -->
-        <DonutChart
-          :data="donutData"
-          height="240px"
-          :show-legend="false"
-          inner-ratio="42%"
-          outer-ratio="54%"
-          :center-value="fmtInt(total)"
-          center-title="订单总数"
-          :loading="first"
-          :error="errMsg"
-          empty-text="还没收到第一拍"
-          @retry="connect"
-        />
-      </div>
+      </button>
     </div>
 
-    <!-- ══ ③ 实时订单列表（每单一行 + 4 节点进度条）══════════════════════════════
-         ⚠️ **这一段的条数是前端攒的**，不是后端给的：流的每一拍只推**最近 20 张单**
-         （`OrderStreamService.RECENT_LIMIT`），不够翻页，也留不住「刚才那单现在到哪了」。
-         故本页按 `orderId` 累积成本会话见过的一张表（封顶 `LIST_CAP` 条，见 `<script>` 注释），
-         `Pager` 对它做**前端分页** —— 这与 `Pager.vue` 头注释里「分页走后端」的**惯用**场景不同，
-         但组件本身是纯受控件（拿 total/limit/offset 画控件、emit change），调用方怎么响应 change
-         是调用方的事：本页没有分页端点可发（后端唯一的分页读端点是订单治理页的 `POST /admin/order/list`，
-         它按条件筛，不是按「最近流转」推），也不该为了让控件对口去加一个端点。 -->
-    <h2 class="a-h2">
-      实时订单列表
-      <span class="a-h2n">本会话见过 {{ listRows.length }} 张 · 每拍推最近 {{ RECENT_LIMIT }} 张 · 进度 4 节点 = 待付款 → 待发货 → 待收货 → 已完成</span>
-    </h2>
-    <div class="a-card">
-      <p v-if="!listRows.length" class="a-empty">
-        {{ first ? '还没收到第一拍。' : '本会话还没收到任何订单（库里 `order` 表为空，或流的窗口内没有单）。' }}
-      </p>
-      <ul v-else class="a-of-list">
-        <li
-          v-for="r in pageRows"
-          :key="r.orderId"
-          class="a-of-row"
-          :class="{ 'is-jump': jumpIds.has(r.orderId) }"
-          :title="'点开看这一单的时间线'"
-          tabindex="0"
-          role="button"
-          @click="openTimeline(r.orderId)"
-          @keydown.enter.prevent="openTimeline(r.orderId)"
-          @keydown.space.prevent="openTimeline(r.orderId)"
-        >
-          <span class="a-of-id">#{{ r.orderId }}</span>
-
-          <!-- 4 节点进度条：`step` 由后端算好（0–4）⇒ 前端不重推一遍状态链（两处判据已经够多了）。
-               ⚠️ `is-live`（「—」流动）的判据就两条：**没取消** 且 **没走完**（step < 4）。
-                  已取消的单已经退出流程、已完成的单已经走完 —— 这两种还在流动是假信号
-                  （commit 7 那版是两个都没判，所以任何单看着都是死的，见 `<style>` 里 `.a-of-seg` 注释）。 -->
-          <span class="a-of-track" :class="{ 'is-dead': r.cancelled, 'is-live': !r.cancelled && r.step < 4 }" aria-hidden="true">
-            <template v-for="(n, i) in 4" :key="n">
-              <i v-if="i > 0" class="a-of-seg" :class="{ on: r.step > i }"></i>
-              <i class="a-of-node" :class="{ on: r.step >= n, now: r.step === n }"></i>
-            </template>
+    <!-- ══ ① 24h 积压趋势 + 健康度（高密度落地 · 2026-10-17）════════════════════
+         数据来自 `orderInsight()`：趋势按生命周期时间戳逐整点重建；健康度由
+         超时率 / 积压占比 / 平均停留三项扣分。SSE 仍负责每秒变的计数与 moves。 -->
+    <div class="a-of-hero">
+      <section class="a-card a-of-trend">
+        <header class="a-of-chd">
+          <div>
+            <h2 class="a-of-ct">过去 24 小时积压趋势</h2>
+            <p class="a-of-cs">{{ trendWindowText }} · 每点为整点快照 · 压测开始后线会立刻抬升</p>
+          </div>
+          <span class="a-of-live" :class="{ 'is-anchored': trendAnchored }">
+            {{ trendAnchored ? '窗口已锚定' : '实时窗口' }}
           </span>
+        </header>
+        <p v-if="trendAnchored" class="a-of-anchor">{{ trend.anchorHint }}</p>
+        <p v-if="insightError" class="a-of-insight-err">{{ insightError }}（订单表仍由 SSE 实时更新）</p>
+        <LineChart
+          :categories="trendCategories"
+          :series="trendSeries"
+          height="250px"
+          :smooth="false"
+          :show-legend="true"
+          :grid-right="44"
+          :loading="insightLoading && !insight"
+          empty-text="还没有可用于重建趋势的时间戳"
+        />
+      </section>
 
-          <span class="a-of-st" :class="'is-' + r.state">{{ stateLabel(r.state) }}</span>
-          <span class="a-of-goods" :title="r.product">{{ r.product || '（无商品信息）' }}</span>
-          <span class="a-of-amt">{{ money(r.amount) }}<template v-if="r.quantity > 1"> × {{ r.quantity }}</template></span>
-        </li>
-      </ul>
+      <section class="a-card a-of-health">
+        <header class="a-of-chd">
+          <h2 class="a-of-ct">流转健康度</h2>
+          <span class="a-of-cs">{{ healthView.grade }}</span>
+        </header>
+        <HealthGauge :score="healthView.score" :grade="healthView.grade" height="168px" />
+        <dl class="a-of-health-grid">
+          <div>
+            <dt>超时率</dt>
+            <dd>{{ healthView.timeoutRate }}%</dd>
+            <small>{{ fmtInt(healthView.timeoutCount) }} / {{ fmtInt(healthView.activeCount) }} 单</small>
+          </div>
+          <div>
+            <dt>积压占比</dt>
+            <dd>{{ healthView.backlogShare }}%</dd>
+            <small>在途 / 全表</small>
+          </div>
+          <div>
+            <dt>平均停留</dt>
+            <dd>{{ healthView.avgDwellHours }}h</dd>
+            <small>待发货 / 待收货均值</small>
+          </div>
+          <div>
+            <dt>分析面</dt>
+            <dd class="a-of-mini">{{ insightAtText }}</dd>
+            <small>{{ demo.on ? '模拟流开启，分析面仍取库内聚合' : '15 秒低频刷新' }}</small>
+          </div>
+        </dl>
+      </section>
+    </div>
+
+    <!-- ══ ② 状态流转阶梯 + SSE 流轨 ══════════════════════════════════════════ -->
+    <div class="a-of-main">
+      <section class="a-card a-of-flow">
+        <header class="a-of-chd">
+          <div>
+            <h2 class="a-of-ct">状态流转 · 积压阶梯</h2>
+            <p class="a-of-cs">条宽 = 当前积压 · 底色轨道 = 该节点容量参照 · 点节点把下表筛到该状态</p>
+          </div>
+          <span class="a-of-cs">判据链：取消 → 已完成 → 待收货 → 待发货 → 待付款</span>
+        </header>
+        <div class="a-of-flow-body">
+        <div class="a-of-ladder">
+          <button
+            v-for="n in flowRows"
+            :key="n.key"
+            type="button"
+            class="a-of-step"
+            :class="{ 'is-on': filterState === n.key, 'is-warn': n.timeout > 0 }"
+            @click="selectState(n.key)"
+          >
+            <span class="a-of-step-top">
+              <span class="a-of-step-name">
+                <i class="a-of-dot" :style="{ background: stateColor(n.key) }"></i>{{ n.label }}
+              </span>
+              <b class="a-of-step-n">{{ fmtInt(n.count) }}</b>
+              <span class="a-of-step-qps">流入 {{ qpsText(n.inQps) }} · 流出 {{ qpsText(n.outQps) }}</span>
+            </span>
+            <span class="a-of-rail" aria-hidden="true">
+              <i :style="{ width: n.width + '%', background: stateColor(n.key) }"></i>
+            </span>
+            <span class="a-of-step-meta">
+              <span>累计 {{ fmtInt(n.reach) }}</span>
+              <span>转化 {{ n.conversion.toFixed(1) }}%</span>
+              <span>{{ n.avgLabel }} {{ minuteText(n.avg) }}</span>
+              <span v-if="n.timeout" class="a-of-warnchip">超时 {{ fmtInt(n.timeout) }} · {{ n.threshold }}</span>
+              <span v-else class="a-of-okchip">阈值 {{ n.threshold }}</span>
+            </span>
+          </button>
+
+          <button
+            type="button"
+            class="a-of-step is-cancel"
+            :class="{ 'is-on': filterState === 'cancelled' }"
+            @click="selectState('cancelled')"
+          >
+            <span class="a-of-step-top">
+              <span class="a-of-step-name"><i class="a-of-dot" :style="{ background: stateColor('cancelled') }"></i>已取消（支线）</span>
+              <b class="a-of-step-n">{{ fmtInt(counts.cancelled) }}</b>
+              <span class="a-of-step-qps">退出流程 · 不计入积压</span>
+            </span>
+            <span class="a-of-rail" aria-hidden="true">
+              <i :style="{ width: Math.min(100, (num(counts.cancelled) / Math.max(1, total)) * 100) + '%', background: stateColor('cancelled') }"></i>
+            </span>
+            <span class="a-of-step-meta">
+              <span>占全表 {{ total ? ((num(counts.cancelled) / total) * 100).toFixed(1) : '0.0' }}%</span>
+              <span>超时取消不产生 moves</span>
+              <span>点此筛选已取消</span>
+            </span>
+          </button>
+        </div>
+
+          <div class="a-of-flow-dist">
+            <DonutChart
+              :data="donutData"
+              height="196px"
+              :show-legend="false"
+              inner-ratio="46%"
+              outer-ratio="60%"
+              :center-value="fmtInt(total)"
+              center-title="全表单量"
+              :loading="first"
+              :error="errMsg"
+              empty-text="还没收到第一拍"
+              @retry="connect"
+            />
+            <p class="a-of-cs">扇区 = 库里此刻五态存量；中心 = 全表单量。</p>
+          </div>
+        </div>
+      </section>
+
+      <section class="a-card a-of-stream">
+        <header class="a-of-chd">
+          <div>
+            <h2 class="a-of-ct">SSE 实时流轨</h2>
+            <p class="a-of-cs">本拍第 {{ seq }} 拍 · 本会话捕获 {{ fmtInt(moveTotal) }} 条</p>
+          </div>
+          <span class="a-of-live">1 秒 / 拍</span>
+        </header>
+        <div class="a-of-stream-sum">
+          <span>流入 <b>{{ qpsText(totalQpsIn) }}</b></span>
+          <span>流出 <b>{{ qpsText(totalQpsOut) }}</b></span>
+          <span class="a-of-mono">{{ lastTickAt }}</span>
+        </div>
+        <ul class="a-of-stream-list">
+          <li v-for="m in streamRows" :key="m.orderId + '-' + m.ts" class="a-of-stream-i">
+            <span class="a-of-stream-t">{{ hms(m.ts) }}</span>
+            <span class="a-of-id">#{{ m.orderId }}</span>
+            <span class="a-of-stream-track" aria-hidden="true">
+              <template v-for="n in 4" :key="n">
+                <i class="a-of-dot-sm" :class="{ on: m.step >= n, now: m.step === n }"></i>
+                <i v-if="n < 4" class="a-of-seg-sm" :class="{ on: m.step > n }"></i>
+              </template>
+            </span>
+            <span class="a-of-stream-d">
+              <template v-if="m.from">{{ moveStateLabel(m.from) }} → </template>
+              <b>{{ moveStateLabel(m.to) }}</b>
+              <span v-if="!m.live" class="a-of-stream-quiet">当前节点</span>
+            </span>
+          </li>
+        </ul>
+        <p v-if="!streamRows.length" class="a-empty">还没有捕获到流转；压测开始后这里会滚动。</p>
+      </section>
+    </div>
+
+    <!-- ══ ③ 耗时直方图 + 超时积压 ════════════════════════════════════════════ -->
+    <h2 class="a-h2">
+      耗时分布
+      <span class="a-h2n">横轴 = 时间桶、纵轴 = 单数 · 虚线 = 精确均耗所在桶 · 灰阶柱与桶边界是结构，不是颜色分组</span>
+    </h2>
+    <div class="a-of-hists">
+      <section v-for="g in durationGroups" :key="g.key" class="a-card a-of-hist">
+        <HistogramChart
+          :title="g.title"
+          :bins="g.bins || []"
+          :avg-minutes="g.avgMinutes || 0"
+          :samples="g.samples || 0"
+          height="226px"
+        />
+      </section>
+    </div>
+
+    <div class="a-of-warns">
+      <section
+        v-for="w in agingRows"
+        :key="w.key"
+        class="a-card a-of-warn"
+        @click="openDrawer('', w.key)"
+      >
+        <header class="a-of-warn-hd">
+          <div>
+            <h3>{{ w.title }}</h3>
+            <p>阈值 {{ w.threshold }} · 账龄按状态起点到现在计算</p>
+          </div>
+          <div class="a-of-warn-n">
+            <b>{{ fmtInt(w.timeout) }}</b>
+            <span>/ {{ fmtInt(w.count) }} 单</span>
+          </div>
+        </header>
+        <div class="a-of-agebars">
+          <div v-for="b in w.bins" :key="b.label" class="a-of-agebar">
+            <span>{{ b.label }}</span>
+            <i><em :style="{ width: ageWidth(w, b) + '%' }"></em></i>
+            <b>{{ fmtInt(b.count) }}</b>
+          </div>
+        </div>
+        <div class="a-of-top3">
+          <span class="a-of-top3-t">最慢 Top 3 · 停留倒序</span>
+          <button
+            v-for="t in w.top"
+            :key="t.orderId"
+            type="button"
+            class="a-of-top3-i"
+            @click.stop="openDrawer(t.orderId, w.key)"
+          >
+            <span class="a-of-id">#{{ t.orderId }}</span>
+            <span class="a-of-top3-g">{{ t.product || '（无商品信息）' }}</span>
+            <b>{{ dwellText(t.dwellSeconds) }}</b>
+          </button>
+          <button type="button" class="a-btn a-of-top3-open" @click.stop="openDrawer('', w.key)">打开链路 →</button>
+        </div>
+      </section>
+    </div>
+
+    <!-- ══ ④ 全局流转明细（主从联动 + 前端分页）══════════════════════════════ -->
+    <h2 class="a-h2">
+      全局流转明细
+      <span class="a-h2n">{{ filterLabel }} · {{ fmtInt(filteredRows.length) }} 单 · 最新在前 · 点行看链路</span>
+    </h2>
+    <div class="a-card a-of-table-card">
+      <div class="a-of-filters">
+        <button
+          type="button"
+          class="a-of-chip"
+          :class="{ on: !filterState }"
+          @click="filterState = ''; onlyTimeout = false"
+        >全部 {{ fmtInt(listRows.length) }}</button>
+        <button
+          v-for="s in STATES"
+          :key="s.key"
+          type="button"
+          class="a-of-chip"
+          :class="{ on: filterState === s.key }"
+          @click="selectState(s.key)"
+        >{{ s.label }} {{ fmtInt(counts[s.key]) }}</button>
+        <label class="a-of-timeout-toggle">
+          <input v-model="onlyTimeout" type="checkbox" />
+          仅超时
+        </label>
+        <span class="a-of-filter-note">
+          数据源：{{ demo.on ? '模拟日常流（分析面仍为库内聚合）' : '后端聚合 + SSE' }}
+        </span>
+      </div>
+
+      <div class="a-of-table-wrap">
+        <table class="a-of-table">
+          <thead>
+            <tr>
+              <th>订单号</th>
+              <th>商品名</th>
+              <th>当前状态</th>
+              <th>已停留</th>
+              <th>超时预警</th>
+              <th>状态起点</th>
+              <th class="a-of-r">金额</th>
+              <th>操作</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr
+              v-for="r in pageRows"
+              :key="r.orderId"
+              :class="{ 'is-jump': jumpIds.has(r.orderId), 'is-timeout': r.timeout }"
+              @click="openTimeline(r.orderId)"
+            >
+              <td class="a-of-id">#{{ r.orderId }}</td>
+              <td class="a-of-goods" :title="r.product">{{ r.product || '（无商品信息）' }}</td>
+              <td>
+                <span class="a-of-st" :class="'is-' + r.state">
+                  <i class="a-of-dot" :style="{ background: stateColor(r.state) }"></i>{{ stateLabel(r.state) }}
+                </span>
+              </td>
+              <td class="a-of-mono">{{ dwellText(r.dwellSeconds) }}</td>
+              <td>
+                <span v-if="r.timeout" class="a-of-badge-bad">超时 · 阈值 {{ r.timeoutThresholdHours }}h</span>
+                <span v-else class="a-of-badge-ok">—</span>
+              </td>
+              <td class="a-of-mono">{{ dt(r.stateSince) }}</td>
+              <td class="a-of-r a-of-mono">{{ money(r.amount) }}<template v-if="r.quantity > 1"> × {{ r.quantity }}</template></td>
+              <td>
+                <button type="button" class="a-btn a-of-op" @click.stop="openTimeline(r.orderId)">链路</button>
+              </td>
+            </tr>
+            <tr v-if="!pageRows.length">
+              <td colspan="8" class="a-empty">
+                {{ first ? '还没收到第一拍。' : '当前筛选下没有订单 —— 换个状态，或取消「仅超时」。' }}
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
 
       <Pager
-        :total="listRows.length"
+        :total="filteredRows.length"
         :limit="pageSize"
         :offset="offset"
         :sizes="PAGE_SIZES"
         unit="单"
-        label="实时订单"
+        label="流转明细"
         @change="onPage"
       />
     </div>
@@ -161,6 +396,8 @@
       </p>
     </template>
 
+    <!-- 回放分支沿用旧状态机图（实时分支的主视觉已换成上面的积压阶梯 + 趋势）。 -->
+    <template v-if="replaySession.active">
     <!-- ══ ④ 状态机图（4 主节点 + 取消）═══════════════════════════════════════════
          ⚠️ 手写 SVG 而**不是** ECharts 的 `graph` 系列：本仓 `components/charts/` 里没有 graph 封装，
          为了这一张图去引一个新图表类型（连带它的布局算法与主题参数）不划算 —— 5 个节点 5 条边，
@@ -277,57 +514,80 @@
         </ul>
       </div>
     </template>
+    </template>
 
-    <!-- ══ ⑤ 单条订单时间线（点列表某行弹出）═════════════════════════════════════
-         ⚠️ 数据来源**只有两处**：订单行自带的 `createdAt`（建单时刻）+ 本会话在 `moves` 里捕获的流转。
-         本页没有「查某单历史」的端点（后端也不该为这一页加一个）⇒ 页面打开**之前**已经走完的流转
-         捕获不到。这条如实写在弹层里，不假装是一条完整时间线。 -->
-    <div v-if="openedId" class="a-of-modal" @click.self="closeTimeline">
-      <div class="a-of-modal-box" role="dialog" aria-modal="true" :aria-label="'订单 ' + openedId + ' 的时间线'">
-        <header class="a-of-modal-hd">
-          <b class="a-of-id">#{{ openedId }}</b>
-          <span v-if="openedRow" class="a-of-st" :class="'is-' + openedRow.state">{{ stateLabel(openedRow.state) }}</span>
-          <button type="button" class="a-btn a-of-close" @click="closeTimeline">关闭</button>
+    <!-- ══ ⑤ 链路抽屉（点表格行 / 预警卡 / Top N 打开）══════════════════════════════
+         数据来源：本页累积的订单行（分析面种子 + SSE 最近 20）与生命周期时间戳。
+         抽屉左列 = 当前筛选下按停留倒序的前 30 单；右列 = 选中单的完整生命周期。
+         ⚠️ 页面不查「某单历史」端点；时间线只画订单行自带的五个时间戳 + 本会话 moves。 -->
+    <div v-if="drawerOpen" class="a-of-mask" @click.self="closeDrawer">
+      <aside class="a-of-drawer" role="dialog" aria-modal="true" aria-label="订单链路抽屉">
+        <header class="a-of-drawer-hd">
+          <div>
+            <h3>链路抽屉 · {{ filterLabel }}</h3>
+            <p>{{ fmtInt(drawerRows.length) }} 单 · 按已停留倒序（前 30，含当前选中）· 点左列切换右上时间线</p>
+          </div>
+          <button type="button" class="a-btn" @click="closeDrawer">关闭</button>
         </header>
-        <p v-if="openedRow" class="a-of-modal-sub">
-          {{ openedRow.product || '（无商品信息）' }} · {{ money(openedRow.amount) }}
-          <template v-if="openedRow.quantity > 1"> × {{ openedRow.quantity }}</template>
-        </p>
 
-        <ol class="a-of-tl">
-          <li v-if="openedRow && openedRow.createdAt" class="a-of-tl-i">
-            <span class="a-of-tl-t">{{ hms(openedRow.createdAt) }}</span>
-            <span class="a-of-tl-d">创建订单（待付款）</span>
-          </li>
-          <li v-for="(m, i) in openedSteps" :key="i" class="a-of-tl-i">
-            <span class="a-of-tl-t">{{ hms(m.ts) }}</span>
-            <span class="a-of-tl-d">
-              {{ moveStateLabel(m.from) }} → <b>{{ moveStateLabel(m.to) }}</b>
-            </span>
-          </li>
-        </ol>
+        <div class="a-of-drawer-body">
+          <ul class="a-of-drawer-list">
+            <li
+              v-for="r in drawerRows"
+              :key="r.orderId"
+              class="a-of-drawer-i"
+              :class="{ on: openedId === r.orderId, 'is-timeout': r.timeout }"
+              tabindex="0"
+              role="button"
+              @click="pickRow(r.orderId)"
+              @keydown.enter.prevent="pickRow(r.orderId)"
+            >
+              <span class="a-of-id">#{{ r.orderId }}</span>
+              <span class="a-of-drawer-g" :title="r.product">{{ r.product || '（无商品信息）' }}</span>
+              <span class="a-of-st" :class="'is-' + r.state">{{ stateLabel(r.state) }}</span>
+              <b class="a-of-mono">{{ dwellText(r.dwellSeconds) }}</b>
+              <span v-if="r.timeout" class="a-of-badge-bad">超时</span>
+            </li>
+            <li v-if="!drawerRows.length" class="a-empty">当前筛选下没有订单。</li>
+          </ul>
 
-        <p class="a-of-tl-note">
-          <!-- ⚠️ 三条**互斥**分支，顺序即优先级（写成一包 `v-if/v-else-if/v-else`，
-               不是三条并列的 `v-if` —— 并列会让「只捕获到建档」时同时命中一、两条，
-               于是同一段话里既说「还没捕获到」又说「捕获到 N 次」，自相矛盾）。
-               ⚠️ 「建档」那一步（`from` 为空的 create）**不进上面那个列表**：本段第一行
-               「创建订单（待付款）」就是它，再列一遍等于每张单多一行废话
-               （演练下 100% 的流转都是建档，见 `块7-commit10-阶段一核实.txt` §3b 实测 4670/4670）。 -->
-          <template v-if="!openedMoves.length">
-            本会话还没捕获到这张单的流转 —— 它可能在本页打开之前就走完了（本页不查历史，见组件头注释）。
-          </template>
-          <template v-else-if="!openedSteps.length">
-            捕获到 {{ openedMoves.length }} 次流转，**全部是建档** —— 已由上面第一行「创建订单（待付款）」表达，不重复列。
-          </template>
-          <template v-else>
-            时间线只含**本页打开之后**捕获到的流转；更早的那几步不在流里，故不显示。
-          </template>
-          <template v-if="openedRow && openedRow.cancelled">
-            这张单是**已取消**：取消时刻后端不推（超时取消不走状态机，见状态机图下的说明）。
-          </template>
-        </p>
-      </div>
+          <section class="a-of-drawer-detail">
+            <template v-if="openedRow">
+              <header class="a-of-drawer-oh">
+                <b class="a-of-id">#{{ openedRow.orderId }}</b>
+                <span class="a-of-st" :class="'is-' + openedRow.state">{{ stateLabel(openedRow.state) }}</span>
+                <span v-if="openedRow.timeout" class="a-of-badge-bad">超时 · 阈值 {{ openedRow.timeoutThresholdHours }}h</span>
+              </header>
+              <p class="a-of-drawer-sub">
+                {{ openedRow.product || '（无商品信息）' }} · {{ money(openedRow.amount) }}
+                <template v-if="openedRow.quantity > 1"> × {{ openedRow.quantity }}</template>
+              </p>
+              <dl class="a-of-drawer-kv">
+                <div><dt>当前停留</dt><dd>{{ dwellText(openedRow.dwellSeconds) }}</dd></div>
+                <div><dt>状态起点</dt><dd>{{ dt(openedRow.stateSince) }}</dd></div>
+                <div><dt>建单时刻</dt><dd>{{ dt(openedRow.createdAt) }}</dd></div>
+                <div><dt>是否取消</dt><dd>{{ openedRow.cancelled ? '是' : '否' }}</dd></div>
+              </dl>
+
+              <ol class="a-of-tl">
+                <li v-for="(m, i) in openedSteps" :key="i" class="a-of-tl-i">
+                  <span class="a-of-tl-t">{{ dt(m.t) }}</span>
+                  <span class="a-of-tl-d">{{ m.text }}</span>
+                </li>
+              </ol>
+              <p v-if="!openedSteps.length" class="a-empty">这张单没有任何生命周期时间戳。</p>
+              <p class="a-of-tl-note">
+                时间线来自订单行自带的 CreateTime / PaidAt / ShippedAt / ReceivedAt / CancelledAt；
+                页面打开之后才发生的流转另由 SSE moves 累积。超时取消只写 CancelledAt，不走状态机。
+              </p>
+            </template>
+            <p v-else class="a-empty">
+              从左列点一张单，这里会显示它的完整生命周期。左列已按「停留时长」倒序 ——
+              最上面的就是卡得最久的。
+            </p>
+          </section>
+        </div>
+      </aside>
     </div>
   </section>
 </template>
@@ -354,13 +614,16 @@
 <script setup>
 /* eslint-disable no-undef */ /* 理由见 `ui/KpiCard.vue` 同款注释（eslint-plugin-vue 8.7.1 缺宏环境） */
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
-import { openOrderStream } from '../../../api/observe'
+import { openOrderStream, orderInsight } from '../../../api/observe'
 // 演示模式（块 7 收尾 ②）：`DemoModeToggle` 摆开关，`demo` 是被 `watch` 的那个状态，
 // `openDemoStream` 是与 `openOrderStream` **同形**的假流 —— 见 `connect()` 里那处三元式。
 import { demo, openDemoStream } from '../../../api/demo-stream'
 import DemoModeToggle from '../../../components/observe/DemoModeToggle.vue'
 import KpiCard from '../../../components/ui/KpiCard.vue'
 import DonutChart from '../../../components/charts/DonutChart.vue'
+import LineChart from '../../../components/charts/LineChart.vue'
+import HistogramChart from '../../../components/charts/HistogramChart.vue'
+import HealthGauge from '../../../components/charts/HealthGauge.vue'
 import Pager from '../../../components/Pager.vue'
 import { chartTokens } from '../../../components/charts/chartTokens'
 import { orderFlowStateLabel } from '../../../config/labels/observe-labels'
@@ -369,10 +632,11 @@ import { orderFlowStateLabel } from '../../../config/labels/observe-labels'
 import ReplayBanner from '../../../components/observe/ReplayBanner.vue'
 import { replaySession } from '../../../api/replay-session'
 
-/** 后端每拍推的「最近订单」条数（`OrderStreamService.RECENT_LIMIT`）。本页只用来写说明。 */
-const RECENT_LIMIT = 20
-/** 本页自己累积的订单表上限。⚠️ 必须有：SSE 每秒推 20 条，不封顶跑一晚上就是几万条 DOM。 */
-const LIST_CAP = 200
+/** 本页自己累积的订单表上限。⚠️ 必须有：SSE 每秒推 20 条，不封顶跑一晚上就是几万条 DOM。
+ *  取 1000 = 后端 `OrderInsightService.ROW_LIMIT` 的同一口径：分析面能给到的行全进表，
+ *  「全部 / 按状态筛选」的条数与上方 KPI 对得上（200 时待发货只筛出 40/89，主从联动会缺一截）。
+ *  DOM 只渲染当前页（10/20/50），1000 行活在 Map + 数组里，不在 DOM 里。 */
+const LIST_CAP = 1000
 /** 可选的每页条数（`Pager` 的入参；`Pager` 头注释：卡片大/行窄排布不同，不该一刀切）。 */
 const PAGE_SIZES = [10, 20, 50]
 /** 高亮持续时长（毫秒）—— 边/节点/行「刚动过」的短时标记（《块 7 参考》§3.3 的 0.5 秒起，取 1.2 秒让肉眼追得上）。 */
@@ -555,6 +819,24 @@ const openedId = ref('')                   // 时间线弹层打开的订单
 const pageSize = ref(20)
 const offset = ref(0)
 
+/* ── 高密度分析面（2026-10-17）──────────────────────────────────────────────
+   `insight` 来自 `POST /admin/observe/orders/insight`（一次性 JSON），低频刷新；
+   SSE 仍负责每秒变的那几个数。两者**不互相覆盖**：趋势/直方图/账龄是聚合面，
+   计数/流轨/表格行是实时面。 */
+const insight = ref(null)
+const insightAt = ref(0)
+const insightLoading = ref(false)
+const insightError = ref('')
+const filterState = ref('')          // 表格 / 抽屉的主从筛选（'' = 全部）
+const onlyTimeout = ref(false)
+const drawerOpen = ref(false)
+/** 本会话最近捕获的流转（流轨 + QPS 的原料；有界，避免跑一晚上攒成几万条）。 */
+const recentMoves = ref([])
+const RECENT_MOVE_CAP = 300
+/** 当前节点 QPS（滚动 5 秒窗口）。 */
+const qpsIn = reactive({ waitPay: 0, waitShip: 0, waitReceive: 0, completed: 0, cancelled: 0 })
+const qpsOut = reactive({ waitPay: 0, waitShip: 0, waitReceive: 0, completed: 0, cancelled: 0 })
+
 const target = reactive({ waitPay: 0, waitShip: 0, waitReceive: 0, completed: 0, cancelled: 0 })
 const shown = reactive({ waitPay: 0, waitShip: 0, waitReceive: 0, completed: 0, cancelled: 0 })
 
@@ -579,6 +861,7 @@ const replayClockText = computed(() => {
 
 let stream = null
 let rafId = 0
+let insightTimer = 0                      // 分析面的低频刷新（15 秒；不是 SSE 的 1 秒）
 const timers = new Set()                   // 所有短时标记的定时器 —— 卸页时必须逐个清（否则回调打到已卸载的组件上）
 
 /* ── 小工具（本页自备：与 `MetricsPanel.vue` 的口径同源，不抽公共模块）────────────── */
@@ -586,15 +869,29 @@ const num = (v) => {
   const n = Number(v)
   return Number.isFinite(n) ? n : 0
 }
-const fmtInt = (v) => Number(v || 0).toLocaleString('zh-CN')
+// ⚠️ 必须 `Math.round`：计数卡有 300ms 补间，取整前的值会是 `17.995` 这种小数
+// （演示流每秒都变，截图正好抓到中间帧）。计数一律按整数显示。
+const fmtInt = (v) => Math.round(Number(v) || 0).toLocaleString('zh-CN')
 function pad2(n) {
   return String(n).padStart(2, '0')
 }
-/** 统一成 `HH:mm:ss`。⚠️ `createdAt` 是后端 `CreateTime`（ISO 式**字符串**），
- *  `moves[].ts` 是 epoch 毫秒（**数字**）—— 两种都吃，别指望调用方自己分。 */
+/**
+ * 数据库时间文本 → `Date`。
+ * ⚠️ 后端生命周期列是**无时区 UTC 文本**（`@@system_time_zone=UTC`，见
+ * `OrderInsightService` 类注释）—— 直接 `new Date('2026-10-17 11:55:24')` 会被当成本地时间，
+ * 显示早 8 小时。没有显式时区的字符串一律补 `Z` 再解析；epoch 毫秒原样。
+ */
+function toDate(v) {
+  if (typeof v === 'number') return new Date(v)
+  let s = String(v).trim().replace(' ', 'T')
+  if (!/([zZ]|[+-]\d{2}:?\d{2})$/.test(s)) s += 'Z'
+  return new Date(s)
+}
+
+/** 统一成 `HH:mm:ss`。⚠️ `createdAt` 是后端 UTC 文本，`moves[].ts` 是 epoch 毫秒 —— 两种都吃。 */
 function hms(v) {
   if (v === null || v === undefined || v === '') return '—'
-  const d = typeof v === 'number' ? new Date(v) : new Date(String(v).replace(' ', 'T'))
+  const d = toDate(v)
   if (Number.isNaN(d.getTime())) return String(v)
   return `${pad2(d.getHours())}:${pad2(d.getMinutes())}:${pad2(d.getSeconds())}`
 }
@@ -697,9 +994,314 @@ function cssVar(name) {
   return getComputedStyle(document.documentElement).getPropertyValue(name).trim()
 }
 
+/* ── 高密度分析面（2026-10-17）──────────────────────────────────────────────
+   数据来自 `orderInsight()`；SSE 只覆盖「每拍会变」的计数与 moves。
+   ⚠️ 这里**不再前端拼 SQL / 重算全表**：趋势、分桶、Top N 都由后端算好，
+   页面只做「翻译成图表 option」和「按状态过滤」。 */
+const FLOW_NODES = [
+  { key: 'waitPay', label: '待付款', colorIndex: 4, threshold: '30 分钟' },
+  { key: 'waitShip', label: '待发货', colorIndex: 1, threshold: '24 小时' },
+  { key: 'waitReceive', label: '待收货', colorIndex: 6, threshold: '48 小时' },
+  { key: 'completed', label: '已完成', colorIndex: 3, threshold: '—' },
+]
+const TREND_COLOR = { waitPay: 4, waitShip: 1, waitReceive: 6 }
+
+const trend = computed(() => insight.value?.trend || { categories: [], series: [], anchoredToLatest: false })
+const trendCategories = computed(() => trend.value.categories || [])
+const trendSeries = computed(() => {
+  const cats = trendCategories.value
+  return (trend.value.series || []).map((s) => {
+    const data = s.data || []
+    const last = data.length ? data[data.length - 1] : null
+    // 末点标出「此刻积压」—— 平线也能一眼读到当前值，不靠悬停。
+    const markPoints = last !== null && last > 0 && cats.length
+      ? [{ x: cats[cats.length - 1], y: last, text: String(last), position: 'top' }]
+      : []
+    return {
+      name: s.name,
+      data,
+      area: true,
+      colorIndex: TREND_COLOR[s.key] || 1,
+      markPoints,
+    }
+  })
+})
+const trendAnchored = computed(() => !!trend.value.anchoredToLatest)
+const trendWindowText = computed(() => {
+  const t = trend.value
+  if (!t.from) return '—'
+  return `${t.from} → ${t.to}${t.anchoredToLatest ? '（锚到库内最后活动）' : ''}`
+})
+
+const durations = computed(() => insight.value?.durations || {})
+const durationGroups = computed(() => ([
+  { key: 'pay', title: '付款耗时 · CreateTime → PaidAt', ...(durations.value.pay || {}) },
+  { key: 'ship', title: '发货耗时 · PaidAt → ShippedAt', ...(durations.value.ship || {}) },
+  { key: 'receive', title: '收货耗时 · ShippedAt → ReceivedAt', ...(durations.value.receive || {}) },
+]))
+const slowestRows = computed(() => insight.value?.slowest || [])
+
+const cumulative = computed(() => {
+  const c = counts.value || {}
+  const completed = num(c.completed)
+  const waitReceive = num(c.waitReceive)
+  const waitShip = num(c.waitShip)
+  return {
+    created: total.value,
+    paid: waitShip + waitReceive + completed,
+    shipped: waitReceive + completed,
+    received: completed,
+  }
+})
+
+const flowRows = computed(() => {
+  const c = counts.value || {}
+  const reach = cumulative.value
+  const maxCount = Math.max(1, ...FLOW_NODES.map((n) => num(c[n.key])))
+  const rows = [
+    {
+      ...FLOW_NODES[0],
+      count: num(c.waitPay),
+      reach: reach.created,
+      conversion: 100,
+      avg: durations.value.pay?.avgMinutes || 0,
+      avgLabel: '付款均耗',
+    },
+    {
+      ...FLOW_NODES[1],
+      count: num(c.waitShip),
+      reach: reach.paid,
+      conversion: reach.created ? (reach.paid / reach.created) * 100 : 0,
+      avg: durations.value.ship?.avgMinutes || 0,
+      avgLabel: '发货均耗',
+    },
+    {
+      ...FLOW_NODES[2],
+      count: num(c.waitReceive),
+      reach: reach.shipped,
+      conversion: reach.paid ? (reach.shipped / reach.paid) * 100 : 0,
+      avg: durations.value.receive?.avgMinutes || 0,
+      avgLabel: '收货均耗',
+    },
+    {
+      ...FLOW_NODES[3],
+      count: num(c.completed),
+      reach: reach.received,
+      conversion: reach.shipped ? (reach.received / reach.shipped) * 100 : 0,
+      avg: durations.value.receive?.avgMinutes || 0,
+      avgLabel: '全链路',
+    },
+  ]
+  return rows.map((r) => ({
+    ...r,
+    width: Math.max(r.count ? 4 : 0, (r.count / maxCount) * 100),
+    timeout: timeoutOf(r.key),
+    inQps: qpsIn[r.key] || 0,
+    outQps: qpsOut[r.key] || 0,
+  }))
+})
+
+const agingRows = computed(() => ([
+  {
+    key: 'waitShip',
+    title: '待发货超时积压',
+    threshold: '> 24 小时',
+    ...(insight.value?.aging?.waitShip || { total: 0, timeout: 0, bins: [], avgHours: 0, maxHours: 0 }),
+    count: num((counts.value || {}).waitShip),
+    top: slowestRows.value.filter((r) => r.state === 'waitShip').slice(0, 3),
+  },
+  {
+    key: 'waitReceive',
+    title: '待收货超时积压',
+    threshold: '> 48 小时',
+    ...(insight.value?.aging?.waitReceive || { total: 0, timeout: 0, bins: [], avgHours: 0, maxHours: 0 }),
+    count: num((counts.value || {}).waitReceive),
+    top: slowestRows.value.filter((r) => r.state === 'waitReceive').slice(0, 3),
+  },
+]))
+
+const healthView = computed(() => insight.value?.health || {
+  score: 0, grade: '—', timeoutRate: 0, timeoutCount: 0, activeCount: 0,
+  backlogShare: 0, avgDwellHours: 0,
+})
+
+const insightAtText = computed(() => (insightAt.value ? hms(insightAt.value) : '—'))
+
+/** 拉一次分析面；不阻塞 SSE。失败时页面仍能用流里的订单行。 */
+async function loadInsight() {
+  if (insightLoading.value) return
+  insightLoading.value = true
+  insightError.value = ''
+  try {
+    const data = await orderInsight()
+    insight.value = data
+    insightAt.value = num(data.ts) || Date.now()
+    seedOrders(Array.isArray(data.orders) ? data.orders : [])
+  } catch (e) {
+    insightError.value = (e && e.message) || '分析面加载失败'
+  } finally {
+    insightLoading.value = false
+  }
+}
+
+/** 一次性的分析面订单 → 本页的订单表（保留后端给的倒序）。 */
+function seedOrders(rows) {
+  const ids = []
+  for (const raw of rows) {
+    const id = raw.orderId
+    if (id === null || id === undefined) continue
+    const idStr = String(id)
+    if (!ordersById.has(idStr)) ids.push(idStr)
+    ordersById.set(idStr, toRow(raw))
+  }
+  // 后到的流订单可能已经在前排；保留它们在前，再接分析面的其余行。
+  const head = orderIds.value.filter((id) => !ids.includes(id))
+  orderIds.value = head.concat(ids.filter((id) => ordersById.has(id))).slice(0, LIST_CAP)
+}
+
+/** 原始行 → 本页统一行形状（SSE 与分析面同形；这里只做防御性收口）。 */
+function toRow(raw) {
+  return {
+    orderId: String(raw.orderId),
+    customerId: raw.customerId,
+    merchantId: raw.merchantId,
+    amount: raw.amount,
+    quantity: raw.quantity,
+    product: raw.product,
+    createdAt: raw.createdAt,
+    paidAt: raw.paidAt,
+    shippedAt: raw.shippedAt,
+    receivedAt: raw.receivedAt,
+    cancelledAt: raw.cancelledAt,
+    state: raw.state,
+    step: num(raw.step),
+    cancelled: !!raw.cancelled,
+    stateSince: raw.stateSince,
+    dwellSeconds: raw.dwellSeconds === null || raw.dwellSeconds === undefined ? null : num(raw.dwellSeconds),
+    timeout: !!raw.timeout,
+    timeoutThresholdHours: raw.timeoutThresholdHours,
+  }
+}
+
+/** 停留时长：秒 → 「53天0小时」「7小时12分」「28分」。 */
+function dwellText(seconds) {
+  if (seconds === null || seconds === undefined) return '—'
+  const s = Math.max(0, num(seconds))
+  const d = Math.floor(s / 86400)
+  const h = Math.floor((s % 86400) / 3600)
+  const m = Math.floor((s % 3600) / 60)
+  if (d > 0) return `${d}天${h}小时`
+  if (h > 0) return `${h}小时${m}分`
+  return `${m}分`
+}
+
+/** 日期时间（`MM-dd HH:mm`）；时间轴弹层里用。 */
+function dt(v) {
+  if (v === null || v === undefined || v === '') return '—'
+  const d = toDate(v)
+  if (Number.isNaN(d.getTime())) return String(v)
+  return `${pad2(d.getMonth() + 1)}-${pad2(d.getDate())} ${pad2(d.getHours())}:${pad2(d.getMinutes())}`
+}
+
+/** 该节点有没有超时积压（只有待发货 / 待收货算）。 */
+function timeoutOf(key) {
+  return num((insight.value?.aging?.[key] || {}).timeout)
+}
+
+/** 主从联动：点节点（含「已取消」支线）切换筛选；再点一次取消。 */
+function selectState(key) {
+  if (!STATE_LABEL[key]) return
+  filterState.value = filterState.value === key ? '' : key
+  onlyTimeout.value = false
+  offset.value = 0
+}
+
+/** 打开链路抽屉；带 state 时同时把表格筛到该状态。
+ *  ⚠️ 没点名订单（点预警卡 / 「打开链路」）时**自动选最慢的一单** —— 否则右列是空的，
+ *  用户看到的是「请从左列点一张单」，而这张卡的卖点正是「最慢的那单长什么样」。 */
+function openDrawer(orderId, state) {
+  if (state) {
+    filterState.value = state
+    offset.value = 0
+  }
+  let id = orderId || ''
+  if (!id) {
+    const rows = listRows.value.filter((r) => !state || r.state === state)
+    const slowest = rows.slice().sort((a, b) => num(b.dwellSeconds) - num(a.dwellSeconds))[0]
+    if (slowest) id = slowest.orderId
+  }
+  drawerOpen.value = true
+  openedId.value = id
+}
+
+function closeDrawer() {
+  drawerOpen.value = false
+  closeTimeline()
+}
+
+/** 滚动 5 秒窗口的 QPS（每秒流入 / 流出多少单）。 */
+function computeQps() {
+  const cutoff = Date.now() - 5000
+  const fresh = recentMoves.value.filter((m) => num(m.ts) >= cutoff)
+  STATES.forEach((s) => {
+    qpsIn[s.key] = fresh.filter((m) => stateKeyOf(m.to) === s.key).length / 5
+    qpsOut[s.key] = fresh.filter((m) => stateKeyOf(m.from) === s.key).length / 5
+  })
+}
+
+const qpsText = (v) => (num(v) > 0 ? `${num(v).toFixed(1)}/s` : '0/s')
+const totalQpsIn = computed(() => FLOW_NODES.reduce((a, n) => a + num(qpsIn[n.key]), 0))
+const totalQpsOut = computed(() => FLOW_NODES.reduce((a, n) => a + num(qpsOut[n.key]), 0))
+
+const STATE_STEP = { waitPay: 1, waitShip: 2, waitReceive: 3, completed: 4 }
+const stateColor = (key) => ({
+  waitPay: 'var(--c4)',
+  waitShip: 'var(--c1)',
+  waitReceive: 'var(--c6)',
+  completed: 'var(--c3)',
+  cancelled: 'var(--ink-3)',
+}[key] || 'var(--ink-3)')
+
+/** 流轨：优先画最近捕获的真实 moves；没有就退回「最近订单的当前节点」。 */
+const streamRows = computed(() => {
+  const moves = recentMoves.value.slice(0, 10).map((m) => ({
+    ...m,
+    step: STATE_STEP[stateKeyOf(m.to)] || 0,
+    live: true,
+  }))
+  if (moves.length) return moves
+  return listRows.value.slice(0, 10).map((r) => ({
+    orderId: r.orderId,
+    ts: r.createdAt,
+    from: '',
+    to: r.state,
+    step: r.step,
+    live: false,
+  }))
+})
+
+/** 账龄条：按本组最大桶归一。 */
+function ageWidth(row, bin) {
+  const max = Math.max(1, ...(row.bins || []).map((b) => num(b.count)))
+  return Math.max(num(bin.count) ? 3 : 0, (num(bin.count) / max) * 100)
+}
+
+/** 分钟 → 人读（用于阶梯行里的均耗）。 */
+function minuteText(v) {
+  return dwellText(num(v) * 60)
+}
+
 /* ── 列表（本会话累积 + 前端分页）────────────────────────────────────────────── */
 const listRows = computed(() => orderIds.value.map((id) => ordersById.get(id)).filter(Boolean))
-const pageRows = computed(() => listRows.value.slice(offset.value, offset.value + pageSize.value))
+/** 主从联动 / 仅超时的过滤结果（前端过滤，数据源仍是本页累积表）。 */
+const filteredRows = computed(() => {
+  let rows = listRows.value
+  if (filterState.value) rows = rows.filter((r) => r.state === filterState.value)
+  if (onlyTimeout.value) rows = rows.filter((r) => r.timeout)
+  return rows
+})
+const pageRows = computed(() => filteredRows.value.slice(offset.value, offset.value + pageSize.value))
+const filterLabel = computed(() => (filterState.value ? (STATE_LABEL[filterState.value] || filterState.value) : '全部状态'))
 const openedRow = computed(() => (openedId.value ? ordersById.get(openedId.value) || null : null))
 const openedMoves = computed(() => (openedId.value ? movesById.get(openedId.value) || [] : []))
 /** 时间线实际渲染的步数：**去掉建档那一步**（`action=create`、`from` 为空）。
@@ -707,14 +1309,59 @@ const openedMoves = computed(() => (openedId.value ? movesById.get(openedId.valu
  *  （`块7-commit10-阶段一核实.txt` §3b 实测 4670/4670），不去掉就是每张单都多一行废话。
  *  判据用 `from` 空不空，而不是 `action === 'create'`：后者是英文 code，且本页**刻意不存** `action`
  *  （`movesById` 的注释里写了理由 —— `from → to` 已经把这一步说全了）。 */
-const openedSteps = computed(() => openedMoves.value.filter((m) => stateKeyOf(m.from) !== ''))
+const openedSteps = computed(() => {
+  const r = openedRow.value
+  if (r) {
+    const steps = []
+    if (r.createdAt) steps.push({ t: r.createdAt, text: '创建订单（待付款）' })
+    if (r.paidAt) steps.push({ t: r.paidAt, text: '付款 → 待发货' })
+    if (r.shippedAt) steps.push({ t: r.shippedAt, text: '发货 → 待收货' })
+    if (r.receivedAt) steps.push({ t: r.receivedAt, text: '收货 → 已完成' })
+    if (r.cancelledAt) steps.push({ t: r.cancelledAt, text: '取消 → 已取消' })
+    if (steps.length) return steps
+  }
+  // 老数据 / 演示流只有本会话 moves 时才退到这条路径。
+  return openedMoves.value
+    .filter((m) => stateKeyOf(m.from) !== '')
+    .map((m) => ({
+      t: m.ts,
+      text: `${moveStateLabel(m.from)} → ${moveStateLabel(m.to)}`,
+    }))
+})
+
+/** 抽屉左列：当前筛选下按停留倒序的前 30 单（DLC：先找出卡得最久的）。
+ *  ⚠️ 从表格行直接打开时，选中的单可能不在「最慢 30」里 ⇒ 补进列表末尾，
+ *  否则左列没有 `on` 高亮、右列却显示着它，像点错了行。 */
+const drawerRows = computed(() => {
+  let rows = listRows.value
+  if (filterState.value) rows = rows.filter((r) => r.state === filterState.value)
+  const top = rows
+    .slice()
+    .sort((a, b) => num(b.dwellSeconds) - num(a.dwellSeconds))
+    .slice(0, 30)
+  const selected = openedId.value ? ordersById.get(openedId.value) : null
+  if (selected && !top.some((r) => r.orderId === selected.orderId)
+    && (!filterState.value || selected.state === filterState.value)) {
+    top.push(selected)
+  }
+  return top
+})
+
+/** 抽屉内切换选中单（只换右列，不关抽屉、不改筛选）。 */
+function pickRow(id) {
+  const k = String(id)
+  if (ordersById.has(k)) openedId.value = k
+}
 
 function onPage({ limit, offset: off }) {
   pageSize.value = limit
   offset.value = off
 }
 function openTimeline(id) {
-  if (ordersById.has(id)) openedId.value = id
+  if (ordersById.has(id)) {
+    openedId.value = id
+    drawerOpen.value = true
+  }
 }
 function closeTimeline() {
   openedId.value = ''
@@ -734,18 +1381,7 @@ function absorbOrders(rows) {
     if (id === null || id === undefined) continue
     const idStr = String(id)
     const prev = ordersById.get(idStr)
-    ordersById.set(idStr, {
-      orderId: idStr,
-      customerId: raw.customerId,
-      merchantId: raw.merchantId,
-      amount: raw.amount,
-      quantity: raw.quantity,
-      product: raw.product,
-      createdAt: raw.createdAt,
-      state: raw.state,
-      step: num(raw.step),
-      cancelled: !!raw.cancelled,
-    })
+    ordersById.set(idStr, toRow(raw))
     if (!prev) {
       fresh.push(idStr)
     } else if (prev.state !== raw.state) {
@@ -793,14 +1429,23 @@ function absorbMoves(moves) {
     const id = m.orderId === null || m.orderId === undefined ? '' : String(m.orderId)
     if (!id) continue
 
-    // ② 时间线
+    // ② 流轨 / QPS 的滚动窗口（与时间线分开存：流轨要的是「最近 N 条事件」，
+    //    不是「每张单的全部历史」）。
+    recentMoves.value = [{
+      orderId: id,
+      from: m.from,
+      to: m.to,
+      ts: num(m.ts) || Date.now(),
+    }, ...recentMoves.value].slice(0, RECENT_MOVE_CAP)
+
+    // ③ 时间线
     const arr = movesById.get(id) || []
     arr.push({ from: m.from, to: m.to, ts: num(m.ts) })
     // 时间线不该无限长（同一张单被反复推同一拍）：同 (from,to,ts) 只留一条。
     const dedup = arr.filter((x, i) => i === arr.findIndex((y) => y.from === x.from && y.to === x.to && y.ts === x.ts))
     movesById.set(id, dedup)
 
-    // ③ 图上高亮（枚举名 → 五态 key 之后才谈得上「查得到」）
+    // ④ 图上高亮（枚举名 → 五态 key 之后才谈得上「查得到」）
     const toKey = stateKeyOf(m.to)
     if (!toKey) continue
     // ⚠️ 这里**再比一次** `batch === currentBatch` 不是多余：一帧里可能同时夹着上一批的尾巴与
@@ -835,6 +1480,16 @@ function resetReplayState() {
   pulseNodes.value = new Set()
   jumpIds.value = new Set()
   openedId.value = ''
+  recentMoves.value = []
+  statesForQpsReset()
+}
+
+/** QPS 归零（回放/切数据源时）。 */
+function statesForQpsReset() {
+  STATES.forEach((s) => {
+    qpsIn[s.key] = 0
+    qpsOut[s.key] = 0
+  })
 }
 
 /**
@@ -949,6 +1604,7 @@ function onFrame(f) {
 
   absorbOrders(Array.isArray(f.orders) ? f.orders : [])
   absorbMoves(Array.isArray(f.moves) ? f.moves : [])
+  computeQps()
 
   STATES.forEach((s) => { target[s.key] = num(counts.value[s.key]) })
   tweenTo({ ...target })
@@ -1001,6 +1657,9 @@ function closeStream() {
 }
 
 onMounted(() => {
+  // 分析面先铺满（趋势 / 直方图 / 账龄 / Top N / 表格种子行），再连 SSE。
+  loadInsight()
+  insightTimer = setInterval(loadInsight, 15000)
   // 本页可能在回放已经跑起来之后才挂载（KeepAlive 失活再回来 / 从别的页切过来）
   // ⇒ 先按 `stateChanges` 补建到当前时刻，不要再连实时流。
   if (replaySession.active) enterReplay()
@@ -1008,6 +1667,8 @@ onMounted(() => {
 })
 // ⚠️ 切数据源（`正常` ⇄ `模拟日常`）⇒ 立刻重连（`connect()` 会先 `closeStream()`）。
 watch(() => demo.on, connect)
+// 主从筛选一变，页码回到第一页（否则筛完只剩 3 行却停在第 9 页）。
+watch([filterState, onlyTimeout], () => { offset.value = 0 })
 // 开始/结束回放：切流 + 重置本页口径。⚠️ 退出后 `connect()` 才恢复实时。
 watch(() => replaySession.active, (on) => {
   if (on) enterReplay()
@@ -1024,12 +1685,19 @@ watch(() => replaySession.loading, (loading) => {
 watch(() => replaySession.stateChanges.length, () => {
   if (replaySession.active) syncReplayChanges(true)
 })
-onBeforeUnmount(closeStream)
+onBeforeUnmount(() => {
+  closeStream()
+  if (insightTimer) {
+    clearInterval(insightTimer)
+    insightTimer = 0
+  }
+})
 </script>
 
 <style scoped>
 .a-of {
-  max-width: 1120px;
+  /* 高密度大盘：比其它看板宽一档（1120 → 1320），让趋势 + 阶梯 + 明细表同屏。 */
+  max-width: 1320px;
 }
 
 /* ── ① 状态条（逐字照 `MetricsPanel.vue`，那里又同源于 `StatsPage.vue`）──────── */
@@ -1228,6 +1896,29 @@ onBeforeUnmount(closeStream)
   .a-of-kpis {
     grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
   }
+}
+/* 计数卡本身是 `KpiCard` 的 div，这里用按钮包一层以获得点击/键盘语义。 */
+.a-of-kpi {
+  display: block;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  text-align: left;
+  border-radius: var(--r3);
+  cursor: pointer;
+}
+.a-of-kpi:hover {
+  background: var(--surface-2);
+}
+.a-of-kpi:focus-visible {
+  outline: 2px solid var(--c1);
+  outline-offset: 2px;
+}
+.a-of-kpi.on .kpi {
+  border-color: var(--c1);
+  box-shadow: inset 0 0 0 1px var(--c1);
 }
 .a-of-donut {
   margin-bottom: 0;
@@ -1518,5 +2209,758 @@ onBeforeUnmount(closeStream)
   line-height: 1.7;
   padding-top: var(--s3);
   border-top: 1px dashed var(--line);
+}
+
+/* ══ 高密度实时大盘（2026-10-17）══════════════════════════════════════════════
+   结构：趋势/健康 → 阶梯/流轨 → 直方图 → 账龄预警 → 全局明细。
+   ⚠️ 这里刻意不再用「一排等宽卡片」：hero 是 1fr+300px，主区是 1.35fr+1fr，
+      直方图 3 列、预警 2 列 —— 相邻区块的列数/轴向都不同（taste 的「相邻不共用布局」）。 */
+.a-of-hero {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 300px;
+  gap: var(--s3);
+  align-items: stretch;
+}
+.a-of-hero > .a-card {
+  margin-bottom: 0;
+}
+.a-of-chd {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--s3);
+  margin-bottom: var(--s2);
+}
+.a-of-ct {
+  margin: 0;
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-semi);
+  color: var(--ink);
+}
+.a-of-cs {
+  margin: 2px 0 0;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--ink-3);
+}
+.a-of-live {
+  flex: none;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--info);
+  background: var(--info-ground);
+  border-radius: var(--r1);
+  padding: 2px 7px;
+  white-space: nowrap;
+}
+.a-of-live.is-anchored {
+  color: var(--c4);
+  background: var(--surface-2);
+  box-shadow: inset 0 0 0 1px var(--c4);
+}
+.a-of-anchor,
+.a-of-insight-err {
+  margin: 0 0 var(--s2);
+  padding: var(--s2) var(--s3);
+  font-size: 11px;
+  line-height: 1.5;
+  border-radius: var(--r1);
+}
+.a-of-anchor {
+  color: var(--c4);
+  background: var(--surface-2);
+  border-left: 3px solid var(--c4);
+}
+.a-of-insight-err {
+  color: var(--danger);
+  background: var(--danger-ground);
+}
+.a-of-health-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--s2) var(--s3);
+  margin: var(--s2) 0 0;
+  padding-top: var(--s2);
+  border-top: 1px dashed var(--line);
+}
+.a-of-health-grid div {
+  min-width: 0;
+}
+.a-of-health-grid dt {
+  font-size: 10px;
+  color: var(--ink-3);
+}
+.a-of-health-grid dd {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: var(--fs-md);
+  font-weight: var(--fw-semi);
+  color: var(--ink);
+  line-height: 1.25;
+}
+.a-of-health-grid small {
+  display: block;
+  font-size: 10px;
+  color: var(--ink-3);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.a-of-health-grid dd.a-of-mini {
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-reg);
+}
+
+.a-of-main {
+  display: grid;
+  grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr);
+  gap: var(--s3);
+  margin-top: var(--s3);
+}
+.a-of-main > .a-card {
+  margin-bottom: 0;
+}
+.a-of-flow-body {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 230px;
+  gap: var(--s3);
+  align-items: start;
+}
+.a-of-flow-dist {
+  min-width: 0;
+  padding-left: var(--s3);
+  border-left: 1px dashed var(--line);
+}
+.a-of-flow-dist .a-of-cs {
+  text-align: center;
+}
+.a-of-ladder {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s2);
+}
+/* 阶梯的一级 = 一条**可点按钮**：上面是名字/单量/QPS，中间是粗轨道，下面是口径。
+   ⚠️ 轨道底色恒在（没数据的态也画一条空心轨），否则「0 单」会读成「这一级不存在」。 */
+.a-of-step {
+  display: block;
+  width: 100%;
+  text-align: left;
+  font: inherit;
+  color: var(--ink);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--r2);
+  padding: var(--s2) var(--s3);
+  cursor: pointer;
+}
+.a-of-step:hover,
+.a-of-step:focus-visible {
+  background: var(--surface-2);
+  outline: none;
+}
+.a-of-step.is-on {
+  background: var(--surface-2);
+  border-color: var(--c1);
+}
+.a-of-step.is-warn {
+  box-shadow: inset 3px 0 0 var(--danger);
+}
+.a-of-step.is-cancel {
+  margin-top: var(--s2);
+  border-top: 1px dashed var(--line);
+  border-radius: 0 0 var(--r2) var(--r2);
+}
+.a-of-step-top {
+  display: flex;
+  align-items: baseline;
+  gap: var(--s2);
+  min-width: 0;
+}
+.a-of-step-name {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--fs-sm);
+  color: var(--ink);
+  white-space: nowrap;
+}
+.a-of-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex: none;
+  display: inline-block;
+}
+.a-of-step-n {
+  font-family: var(--font-mono);
+  font-size: var(--fs-lg);
+  font-weight: var(--fw-semi);
+  line-height: 1;
+}
+.a-of-step-qps {
+  margin-left: auto;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--ink-3);
+  white-space: nowrap;
+}
+.a-of-rail {
+  display: block;
+  height: 14px;
+  margin: var(--s2) 0;
+  background: var(--surface-3, var(--surface-2));
+  border-radius: var(--r1);
+  overflow: hidden;
+}
+.a-of-rail > i {
+  display: block;
+  height: 100%;
+  min-width: 0;
+  border-radius: var(--r1);
+  transition: width 0.5s ease;
+}
+.a-of-step-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px var(--s3);
+  font-size: 10px;
+  color: var(--ink-3);
+  font-variant-numeric: tabular-nums;
+}
+.a-of-warnchip,
+.a-of-okchip {
+  border-radius: var(--r1);
+  padding: 1px 6px;
+  white-space: nowrap;
+}
+.a-of-warnchip {
+  color: var(--danger);
+  background: var(--danger-ground);
+  font-weight: var(--fw-semi);
+}
+.a-of-okchip {
+  color: var(--ink-3);
+  background: var(--surface-2);
+}
+
+.a-of-stream-sum {
+  display: flex;
+  align-items: baseline;
+  gap: var(--s3);
+  padding: var(--s2) 0;
+  border-bottom: 1px solid var(--line);
+  font-size: var(--fs-xs);
+  color: var(--ink-3);
+  font-variant-numeric: tabular-nums;
+}
+.a-of-stream-sum b {
+  font-family: var(--font-mono);
+  color: var(--ink);
+}
+.a-of-stream-sum .a-of-mono {
+  margin-left: auto;
+}
+.a-of-stream-list {
+  list-style: none;
+  max-height: 286px;
+  overflow-y: auto;
+}
+.a-of-stream-i {
+  display: grid;
+  grid-template-columns: 48px 62px 76px minmax(0, 1fr);
+  align-items: center;
+  gap: var(--s2);
+  padding: 5px 0;
+  border-bottom: 1px dashed var(--line);
+  font-size: 11px;
+}
+.a-of-stream-i:last-child {
+  border-bottom: 0;
+}
+.a-of-stream-t {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--ink-3);
+}
+.a-of-stream-track {
+  display: flex;
+  align-items: center;
+}
+.a-of-dot-sm {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--line-2);
+  flex: none;
+}
+.a-of-dot-sm.on {
+  background: var(--success);
+}
+.a-of-dot-sm.now {
+  box-shadow: 0 0 0 3px var(--success-ground);
+}
+.a-of-seg-sm {
+  flex: 1;
+  height: 1px;
+  background: var(--line-2);
+}
+.a-of-seg-sm.on {
+  background: var(--success);
+}
+.a-of-stream-d {
+  min-width: 0;
+  color: var(--ink-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.a-of-stream-d b {
+  color: var(--ink);
+  font-weight: var(--fw-semi);
+}
+.a-of-stream-quiet {
+  margin-left: 6px;
+  font-size: 9px;
+  color: var(--ink-3);
+}
+
+.a-of-hists {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--s3);
+}
+.a-of-hists > .a-card {
+  margin-bottom: 0;
+  padding: var(--s3) var(--s3) var(--s2);
+}
+.a-of-warns {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--s3);
+  margin-top: var(--s3);
+}
+.a-of-warn {
+  margin-bottom: 0;
+  cursor: pointer;
+}
+.a-of-warn:hover {
+  border-color: var(--line-2);
+}
+.a-of-warn-hd {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--s3);
+  margin-bottom: var(--s3);
+}
+.a-of-warn-hd h3 {
+  margin: 0;
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-semi);
+}
+.a-of-warn-hd p {
+  margin: 2px 0 0;
+  font-size: 10px;
+  color: var(--ink-3);
+}
+.a-of-warn-n {
+  text-align: right;
+  white-space: nowrap;
+}
+.a-of-warn-n b {
+  font-family: var(--font-mono);
+  font-size: var(--fs-xl);
+  color: var(--danger);
+  line-height: 1;
+}
+.a-of-warn-n span {
+  margin-left: 4px;
+  font-size: 10px;
+  color: var(--ink-3);
+}
+.a-of-agebars {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.a-of-agebar {
+  display: grid;
+  grid-template-columns: 64px minmax(0, 1fr) 32px;
+  align-items: center;
+  gap: var(--s2);
+  font-size: 10px;
+  color: var(--ink-3);
+}
+.a-of-agebar > span {
+  white-space: nowrap;
+}
+.a-of-agebar > i {
+  display: block;
+  height: 8px;
+  background: var(--surface-3, var(--surface-2));
+  border-radius: var(--r1);
+  overflow: hidden;
+}
+.a-of-agebar > i > em {
+  display: block;
+  height: 100%;
+  background: var(--danger);
+  border-radius: var(--r1);
+}
+.a-of-agebar > b {
+  font-family: var(--font-mono);
+  font-weight: var(--fw-reg);
+  text-align: right;
+}
+.a-of-top3 {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-top: var(--s3);
+  padding-top: var(--s2);
+  border-top: 1px dashed var(--line);
+}
+.a-of-top3-t {
+  font-size: 10px;
+  color: var(--ink-3);
+  margin-bottom: 2px;
+}
+.a-of-top3-i {
+  display: grid;
+  grid-template-columns: 72px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--s2);
+  font: inherit;
+  text-align: left;
+  color: var(--ink-2);
+  background: transparent;
+  border: 0;
+  border-radius: var(--r1);
+  padding: 3px var(--s1);
+  cursor: pointer;
+}
+.a-of-top3-i:hover {
+  background: var(--surface-2);
+}
+.a-of-top3-g {
+  font-size: 10px;
+  color: var(--ink-3);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.a-of-top3-i b {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--c4);
+}
+.a-of-top3-open {
+  align-self: flex-end;
+  margin-top: var(--s1);
+  padding: 2px var(--s2);
+  font-size: 10px;
+}
+
+.a-of-table-card {
+  padding: 0;
+  overflow: hidden;
+}
+.a-of-filters {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--s2);
+  padding: var(--s3) var(--s4);
+  border-bottom: 1px solid var(--line);
+}
+.a-of-chip {
+  font: inherit;
+  font-size: var(--fs-xs);
+  color: var(--ink-2);
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 3px 10px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.a-of-chip:hover {
+  border-color: var(--line-2);
+}
+.a-of-chip.on {
+  color: var(--info);
+  background: var(--info-ground);
+  border-color: var(--info);
+}
+.a-of-timeout-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-left: var(--s2);
+  font-size: var(--fs-xs);
+  color: var(--ink-2);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.a-of-filter-note {
+  margin-left: auto;
+  font-size: 10px;
+  color: var(--ink-3);
+}
+.a-of-table-wrap {
+  max-height: 560px;
+  overflow: auto;
+}
+.a-of-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--fs-xs);
+  font-variant-numeric: tabular-nums;
+}
+.a-of-table th,
+.a-of-table td {
+  padding: 7px var(--s3);
+  text-align: left;
+  white-space: nowrap;
+  border-bottom: 1px solid var(--line);
+}
+.a-of-table th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  font-weight: var(--fw-semi);
+  font-size: 10px;
+  color: var(--ink-3);
+  background: var(--surface-2);
+}
+.a-of-table tbody tr {
+  cursor: pointer;
+}
+.a-of-table tbody tr:hover {
+  background: var(--surface-2);
+}
+.a-of-table tbody tr.is-jump {
+  background: var(--success-ground);
+}
+.a-of-table tbody tr.is-timeout {
+  box-shadow: inset 3px 0 0 var(--danger);
+}
+.a-of-table td.a-of-goods {
+  max-width: 260px;
+}
+.a-of-table .a-of-r {
+  text-align: right;
+}
+.a-of-mono {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--ink-2);
+}
+.a-of-st {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.a-of-badge-bad,
+.a-of-badge-ok {
+  display: inline-block;
+  border-radius: var(--r1);
+  padding: 1px 6px;
+  font-size: 10px;
+  white-space: nowrap;
+}
+.a-of-badge-bad {
+  color: var(--danger);
+  background: var(--danger-ground);
+  font-weight: var(--fw-semi);
+}
+.a-of-badge-ok {
+  color: var(--ink-3);
+}
+.a-of-op {
+  padding: 1px 8px;
+  font-size: 10px;
+}
+
+/* ── 链路抽屉（右侧滑入；左列 Top 30，右列时间线）────────────────────────────── */
+.a-of-mask {
+  position: fixed;
+  inset: 0;
+  z-index: 70;
+  display: flex;
+  justify-content: flex-end;
+  background: rgba(0, 0, 0, 0.34);
+}
+.a-of-drawer {
+  display: flex;
+  flex-direction: column;
+  width: min(780px, 94vw);
+  height: 100%;
+  background: var(--surface);
+  border-left: 1px solid var(--line);
+  box-shadow: -12px 0 30px rgba(0, 0, 0, 0.18);
+}
+.a-of-drawer-hd {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--s3);
+  padding: var(--s4);
+  border-bottom: 1px solid var(--line-2);
+}
+.a-of-drawer-hd h3 {
+  margin: 0;
+  font-size: var(--fs-md);
+  font-weight: var(--fw-semi);
+}
+.a-of-drawer-hd p {
+  margin: 2px 0 0;
+  font-size: 10px;
+  color: var(--ink-3);
+}
+.a-of-drawer-body {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: 300px minmax(0, 1fr);
+}
+.a-of-drawer-list {
+  list-style: none;
+  overflow-y: auto;
+  border-right: 1px solid var(--line);
+  padding: var(--s2) 0;
+}
+.a-of-drawer-i {
+  display: grid;
+  grid-template-columns: 72px minmax(0, 1fr);
+  gap: 2px var(--s2);
+  align-items: center;
+  padding: 7px var(--s4);
+  border-bottom: 1px dashed var(--line);
+  cursor: pointer;
+  font-size: 11px;
+}
+.a-of-drawer-i:hover,
+.a-of-drawer-i:focus-visible {
+  background: var(--surface-2);
+  outline: none;
+}
+.a-of-drawer-i.on {
+  background: var(--info-ground);
+}
+.a-of-drawer-i.is-timeout {
+  box-shadow: inset 3px 0 0 var(--danger);
+}
+.a-of-drawer-g {
+  font-size: 10px;
+  color: var(--ink-3);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.a-of-drawer-i .a-of-st {
+  grid-column: 1;
+}
+.a-of-drawer-i > b {
+  grid-column: 2;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: var(--fw-reg);
+  color: var(--c4);
+  text-align: right;
+}
+.a-of-drawer-i .a-of-badge-bad {
+  grid-column: 2;
+  justify-self: end;
+}
+.a-of-drawer-detail {
+  overflow-y: auto;
+  padding: var(--s4);
+}
+.a-of-drawer-oh {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--s2);
+  padding-bottom: var(--s2);
+  border-bottom: 1px solid var(--line-2);
+}
+.a-of-drawer-oh .a-of-id {
+  font-size: var(--fs-md);
+  color: var(--ink);
+}
+.a-of-drawer-sub {
+  margin: var(--s2) 0 var(--s3);
+  font-size: var(--fs-sm);
+  color: var(--ink-3);
+}
+.a-of-drawer-kv {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--s2) var(--s3);
+  margin: 0 0 var(--s3);
+  padding: var(--s2) var(--s3);
+  background: var(--surface-2);
+  border-radius: var(--r2);
+}
+.a-of-drawer-kv dt {
+  font-size: 10px;
+  color: var(--ink-3);
+}
+.a-of-drawer-kv dd {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+  color: var(--ink);
+}
+.a-of-drawer .a-of-tl {
+  margin-top: var(--s3);
+}
+
+@media (max-width: 1100px) {
+  .a-of-hero {
+    grid-template-columns: minmax(0, 1fr) 260px;
+  }
+  .a-of-hists {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .a-of-hists > .a-card:last-child {
+    grid-column: 1 / -1;
+  }
+}
+@media (max-width: 900px) {
+  .a-of-hero,
+  .a-of-main,
+  .a-of-warns,
+  .a-of-hists {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .a-of-hists > .a-card:last-child {
+    grid-column: auto;
+  }
+  .a-of-step-qps {
+    margin-left: 0;
+  }
+  .a-of-flow-body {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .a-of-flow-dist {
+    padding-left: 0;
+    padding-top: var(--s2);
+    border-left: 0;
+    border-top: 1px dashed var(--line);
+  }
+  .a-of-drawer {
+    width: 100%;
+  }
+  .a-of-drawer-body {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(120px, 40%) minmax(0, 1fr);
+  }
+  .a-of-drawer-list {
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
+  }
 }
 </style>

@@ -13,7 +13,7 @@
  * 而这恰好是 `npm run build` 的产物体积能看出来、代码里看不出来的那种退化）。
  */
 import * as echarts from 'echarts/core'
-import { LineChart, BarChart, PieChart, HeatmapChart } from 'echarts/charts'
+import { LineChart, BarChart, PieChart, HeatmapChart, GaugeChart } from 'echarts/charts'
 import {
   GridComponent,        // 折线 / 柱 / 热力图都要直角坐标系网格
   TooltipComponent,     // 三端看板全都开 tooltip
@@ -21,6 +21,7 @@ import {
   VisualMapComponent,   // HeatmapChart 必需（色阶图例就是它）
   AxisPointerComponent, // tooltip 的 trigger:'axis' 靠它画指示线
   MarkPointComponent,   // 时间栈的峰值 / 谷值数字标注（3a.4）
+  MarkLineComponent,    // 耗时直方图的「平均耗时」虚线辅助线（2026-10-17）
 } from 'echarts/components'
 import { CanvasRenderer } from 'echarts/renderers'
 
@@ -29,12 +30,14 @@ echarts.use([
   BarChart,
   PieChart,
   HeatmapChart,
+  GaugeChart,
   GridComponent,
   TooltipComponent,
   LegendComponent,
   VisualMapComponent,
   AxisPointerComponent,
   MarkPointComponent,
+  MarkLineComponent,
   CanvasRenderer,
 ])
 
