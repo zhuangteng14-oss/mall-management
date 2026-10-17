@@ -33,6 +33,7 @@ import com.minke.mallmanagement.observe.service.MetricsSnapshotService;
 import com.minke.mallmanagement.observe.service.MetricsHistoryService;
 import com.minke.mallmanagement.observe.service.OrderStreamService;
 import com.minke.mallmanagement.observe.service.EventStreamService;
+import com.minke.mallmanagement.observe.service.OrderInsightService;
 import com.minke.mallmanagement.observe.service.AttackEngine;
 import com.minke.mallmanagement.observe.service.AttackSwitchConfig;
 import com.minke.mallmanagement.observe.service.DrillRecordService;
@@ -364,6 +365,10 @@ import static org.mockito.Mockito.when;
         // 块 7 收尾：`MetricsHistoryController`（3a.4 首屏历史）吃 `MetricsHistoryService`；
         // 它是 `@WebMvcTest` 自动扫进来的 @Controller，本清单不登记 ⇒ 切片上下文启动失败。
         MetricsHistoryService.class,
+        // 状态流转页高保真（0b5f91e）：`OrderStreamController` 多吃了 `OrderInsightService`——
+        // **第二十四次同一处地雷**（形状 = 老 Controller 多吃 bean，最隐蔽的一种）。
+        // 依赖链：`OrderInsightService` → `OrderDao`（上面已登记）⇒ 只补它一个类。
+        OrderInsightService.class,
         MallCacheMetrics.class, MallLockMetrics.class, MallOrderStateMetrics.class,
         AuditMetrics.class, NotifyMetrics.class, SensitiveMetrics.class, IdentityMetrics.class,
         // C3 块 7 · commit 4〈攻击引擎 + 演练记录〉（2026-10-14）：**一个**新 Controller
