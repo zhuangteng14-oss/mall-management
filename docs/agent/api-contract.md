@@ -12,7 +12,7 @@
 
 - 全部路径无版本号、无 RESTful 语义，**全部 `POST`**，仅 **2 个 `GET`**：业务侧 `/goods/goodstype`、运维侧 `/health/db`（`@Profile("a3")`，`HealthController:43`，仅 a3 profile 下注册 —— 原记只列了 `goodstype`，漏了它）。
 - 失败返回不统一：`loginSelect` 返回 `0`；`getUserInfo` 返回 `null`（HTTP 200 空体）；`/user/me` 无会话返回 **HTTP 401** + `{success:false,msg:"未登录"}`（与闸的 401 **逐字节相同**，共享常量 `AuthInterceptor.BODY_NOT_LOGGED_IN`）；`/goods` 与 `/order` 系列返回 `{success:false, msg}`。
-- 无分页参数，列表接口全量返回。
+- ~~无分页参数，列表接口全量返回。~~ ⚠️ **2026-10-17 订正（块 7 收尾 · 附录 J.2）**：**不成立**。真正 `limit + offset` 的 DB 列表端点已有 **10 个**；多数其余端点仅 `limit` 截断；`/message/history`、`/order/*` 等仍无任何 `LIMIT`。逐端点盘点见 **附录 J.2** 与桌面《当前长列表接口盘点报告.txt》。
 - ⚠️ **「读接口」≠「无副作用」**：本表按**方法语义**分类，不按 HTTP 方法。`/message/history` 名字是查询，**实为写** —— 除 SELECT 外**无条件** upsert `user_conversation_read.last_read_time = NOW()`（SQL 在 `MessageDao.upsertLastReadTime:206-209`，由 `MessageService.getMessageHistory:200` 调用）⇒ 统计「读接口」或做只读性验证时**不得**把它算进去。
 
 ## 2. 接口清单（共 36 个） {#api-2}
@@ -1023,3 +1023,82 @@ grep -rn "updateFromJson(\|\.resetToDefault(" --include=*.java Mall-management-s
 
 ⚠️ **色 token 用的是既有的 `--c9`**（`assets/tokens.css` 的浅色 `:201` / admin `:301` 早就定义了，两套主题同值）
 ⇒ **本笔没有动 `tokens.css`**（动了就会让那两处引用漂移）。
+
+## 附录 J：块 7 收尾〈合并前加固〉契约增补（2026-10-17） {#api-app-j}
+
+> **范围**：本附录记的是**既有端点**的契约变化 —— 收尾加固**没有新增端点**（A3/A4/A5/A7/TD-64 与分页口径全部落在既有入口/出口上）。
+> 与附录 C–I 同口径：正文 §2 / §3 矩阵**不插入**，坐标重填归「文档漂移清理笔」。
+
+### J.1 P0 全局异常兜底 —— 四个保护码，HTTP 一律 200 {#api-j-1}
+
+| 触发 | `code` | `msg` | HTTP | 证据 |
+|---|---|---|---|---|
+| `DuplicateKeyException` 且命中订单唯一键 `uk_order_orderid` | `DUPLICATE_ORDER` | `订单已存在` | **200** | `ProtectionExceptionHandler.java:68-72` |
+| 其余 `DuplicateKeyException`（账号/商品编码…） | `DUPLICATE_KEY` | `数据已存在` | **200** | `ProtectionExceptionHandler.java:72` |
+| `CallNotPermittedException`（熔断打开，下游未被调用） | `CIRCUIT_OPEN` | `当前系统繁忙，请稍后再试` | **200** | `ProtectionExceptionHandler.java:88-91` |
+| `CannotAcquireLockException` / `DeadlockLoserDataAccessException` | `DB_BUSY` | `系统处理中，请重试` | **200** | `ProtectionExceptionHandler.java:100-104` |
+
+- 响应体随全仓 `Result` 惯例：`{success:false, msg, code}`；**这四类绝不返回 500**（假 500 归零的判据见 `b7-load-500-status.txt`）。
+- 重复键/锁等待记 `ProtectionMetrics.blocked`；**熔断拒绝不记「被拦」**（没有下游调用可拦，见 handler 内注释）。
+- 事件侧新增严重度 **`PROTECT`**（`EventBroadcaster.java:163`）：防护拦截、幂等查重挡下、敏感词命中都归它，**不进业务失败率**（后者只统计 WARN+ERROR，见 `EventBroadcaster.java:793-816`、`OrderService.java:240,611`）。
+- 单测：`ProtectionExceptionHandlerTest` 7 条（订单/非订单分支、三种类型、无 metrics bean 的切片、`ExceptionHandlerMethodResolver` 覆盖范围）。
+
+### J.2 分页契约（收尾后的现状口径） {#api-j-2}
+
+**真正 `limit + offset` 的 DB 列表端点 = 10 个**（参数都落到 SQL `LIMIT ? OFFSET ?`）：
+
+| 端点 | 默认 `limit` | 上限 | 默认 `offset` | SQL 证据 |
+|---|---|---|---|---|
+| `POST /goods/goodsSelectHome` | 24 | 100 | 0 | `GoodsCacheService.java:141` |
+| `POST /goods/productSearch` | 24 | 100 | 0 | `GoodsDao.java:288` |
+| `POST /goods/categoryGoods` | 24 | 100 | 0 | `GoodsDao.java:351` |
+| `POST /admin/accounts/users` | 100 | 500 | 0 | `UserGovernanceDao.java:159` |
+| `POST /comment/list` | 20 | 100 | 0 | `CommentDao.java:302-303` |
+| `POST /comment/adminList` | 20 | 100 | 0 | `CommentDao.java:369-372` |
+| `POST /comment/imageReview` | 20 | 100 | 0 | `CommentDao.java:624-626` |
+| `POST /report/list` | 100 | 500 | 0 | `ReportDao.java:205` |
+| `POST /sensitive/list` | 100 | 500 | 0 | `SensitiveWordDao.java:52-53` |
+| `POST /admin/observe/attack/records` | 20 | 200 | 0 | `DrillRecordDao.java:112-114` |
+
+- 后端兜底：商品三端点统一 `Math.min(pageSize, 100)`（`GoodsService.java:252-255,521-533,550-563`）；`/admin/order/list` 的 `limit <= 0 ⇒ 200`、上限 500（`AdminOrderDao.java:182-186`）。
+- 前端：商城端无限滚动 `useInfiniteList.js:24,36,90`（首页/搜索/分类 24 条一页）；管理/商家端标准 `Pager` 默认 **20**（`AccountsPage.vue:588,758-762`、`AttackConsole.vue:660,879,894`、`GoodsUp.vue:190-200`）。
+- ⚠️ **只 `limit`、无 `offset`（超出上限即不可达）**：`/admin/order/list`、`/admin/audit/list`、`/notification/list`、`/admin/notify/history`、`/admin/accounts/applications`、`/admin/catalog/applications`、`/goods/myApplications`、`/merchant/myApplications`、营销域全部列表、`/admin/observe/replay`。
+- ⚠️ **完全无 `LIMIT`（随业务线性增长）**：`/message/history`（`MessageDao.java:148-151`）、`/message/conversations`（`:111-119`）、四条 `/order/*` 用户/商家列表（`OrderDao.java:195-232`）、`/marketing/myCoupons`（`CouponDao.java:447-470`）、`/admin/stats` 的 `merchants`（`StatsDao.java:108-118`）；`/goods/goodsSelect` 为硬 `LIMIT 200`（`GoodsCacheService.java:227-229`）。
+- 逐端点盘点与前端调用面见桌面《当前长列表接口盘点报告.txt》；该报告是**静态代码盘点**（每行可复核到 `文件:行号`），**未**对每个端点做运行时压测。
+
+### J.3 A4 死信：不建独立页 {#api-j-3}
+
+- 消费者最终异常 ⇒ 转 DLQ（`ObservedEventConsumer.java:186-212`），同时由 `EventBroadcaster` 发一条 `ERROR` 防护事件 + 计数 `mall.observe.dead.letters`（`ObservedEventConsumer.java:111`）。
+- 指标帧新增 `dlq: {total, delta}`（`MetricsSnapshotService.java:208,363-370`），面板顶部显示「死信数量」；**没有死信列表端点**（DLQ 常量 `RabbitObserveConfig.java:93`）。
+
+### J.4 A5 掩码与非法输入 {#api-j-4}
+
+- 管理端/本人看到明文；商城端掩码；**写接口拒绝含 `*` 的非法输入**。
+- 共享判定：`MaskedInput.MASK_CHAR = '*'`（`shared/text/MaskedInput.java:26`）、`firstMasked`（`:43`）、`rejectMessage`（`:61`）→「邮箱/地址/联系电话不能包含 * 号：页面上的 * 是掩码，不是真实内容，请填写完整值。」
+- 调用点：`MerchantApplicationController.java:101-103`（contactPhone）、`UserController.java:186-188`（email / address）。
+
+### J.5 A7 SSE 空闲超时：只在自身层 {#api-j-5}
+
+- 默认 `mall.observe.sse.idle-timeout-ms=30000`（`SseStreamWriter.java:121`）；**不改全局配置**。
+- 判据 = **连续 30 s 没有一次成功写出**（含心跳），不是「没有新事件」；`sse-idle-watchdog` 线程（`:107,157-165`）主动关闭输出流 ⇒ 半死连接被掐断，安静的页面保持在线。
+- 运行时证据（强制 1500 ms）：`b7-a7-idle-watchdog-runtime.txt` —— 首帧后 2548 ms 服务端断开、1 帧 316 字节、curl rc=0。
+
+### J.6 TD-64 破坏性端点必须带角色闸 {#api-j-6}
+
+- `AuthInterceptor.ADMIN_ONLY_PATHS`（`AuthInterceptor.java:137-138`）当前仅 **`/admin/observe/attack/cleanup`**；未登录 ⇒ **401**，已登录但非管理员 ⇒ **403**（角色必须显式 `ROLE_ADMIN`，`null` 不算，`:320-322`）。
+- ⚠️ 该闸依赖 `app.auth.enabled=true`；**dev / a3 profile 均为 `false`** ⇒ 手验绿 ≠ 默认 profile 绿。默认 profile 下另有 `AuthInterceptorAdminOnlyTest`（6 条）钉住 401/403 两路。
+
+### J.7 A3 幂等键：`observed_event` 唯一约束 {#api-j-7}
+
+- 表结构：`Seq bigint NULL` 位于 `Id` 之后（第 2 列，共 17 列）+ UNIQUE `uk_observed_event_trace_seq (TraceId, Seq)`；落库实测见 `b7-a3-migration-23-verify.txt`。
+- 写入口：INSERT 带 `ON DUPLICATE KEY UPDATE Id = Id`（重投只留 1 行）；发布端无 `TraceId` 时注入 UUID（`RabbitEventPublisher#send`）。
+- 存量行 `Seq = NULL`（唯一索引允许多个 NULL），不受影响；回滚与净变更表见 `db-schema.md` §21 / `mall_management_sql.sql` ㉓。
+
+### J.8 证据索引（`docs/agent/evidence/c3-block7/`） {#api-j-8}
+
+| 证据 | 证明什么 |
+|---|---|
+| `b7-load-500-status.txt` | 500 并发：250×200 + 250×429，server5xx=0，transportErrors=0 |
+| `b7-load-500-trace-purity.txt` | 250 trace × 3 事件、无外来商品码、`DUP_TRACE_SEQ_GROUPS=0` ⇒ traceId 不串线 |
+| `b7-a7-idle-watchdog-runtime.txt` | 空闲看门狗在真实 HTTP 流上主动断开 |
+| `b7-a3-migration-23-verify.txt` | ㉓ 迁移后 17 列 / UNIQUE(TraceId,Seq) / 表数 38 不变 |
