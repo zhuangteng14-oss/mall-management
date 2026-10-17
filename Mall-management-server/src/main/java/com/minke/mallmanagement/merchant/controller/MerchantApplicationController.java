@@ -5,6 +5,7 @@ import com.minke.mallmanagement.admin.service.AuditService;
 import com.minke.mallmanagement.merchant.service.MerchantApplicationService;
 import com.minke.mallmanagement.notification.NotificationEvents;
 import com.minke.mallmanagement.notification.service.NotificationService;
+import com.minke.mallmanagement.shared.text.MaskedInput;
 import com.minke.mallmanagement.shared.web.AuthSession;
 import com.minke.mallmanagement.shared.web.IdentityGuard;
 import com.minke.mallmanagement.shared.web.Result;
@@ -95,6 +96,11 @@ public class MerchantApplicationController {
     ) {
         if (!IdentityGuard.requireSelfOrAdminByUsername(request, username, userStateLookupProvider.getIfAvailable())) {
             return IdentityGuard.forbidden();
+        }
+        // 块 7 收尾 · A5：联系电话是**展示时会掩码**的字段，带 `*` 的串是页面掩码、不是真值。
+        String maskedField = MaskedInput.firstMasked("contactPhone", contactPhone);
+        if (maskedField != null) {
+            return ResponseEntity.ok(Result.fail(MaskedInput.rejectMessage(maskedField)));
         }
 
         Map<String, Object> result = applicationService.apply(username, shopName, licenseNo,

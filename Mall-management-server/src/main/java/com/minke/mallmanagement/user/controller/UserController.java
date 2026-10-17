@@ -7,6 +7,7 @@ import com.minke.mallmanagement.shared.web.AuthSession;
 import com.minke.mallmanagement.shared.web.AuthTokenStore;
 import com.minke.mallmanagement.shared.web.IdentityGuard;
 import com.minke.mallmanagement.shared.web.Result;
+import com.minke.mallmanagement.shared.text.MaskedInput;
 import com.minke.mallmanagement.shared.web.UserStateLookup;
 import com.minke.mallmanagement.user.service.UserService;
 import jakarta.servlet.http.HttpServletRequest;
@@ -180,6 +181,12 @@ public class UserController {
             @RequestParam("address") String address,
             @RequestParam("selfintroduction") String selfintroduction
     ) {
+        // 块 7 收尾 · A5：邮箱 / 地址在商城端是**掩码展示**的 —— 把带 `*` 的掩码串原样提交
+        // 会把假值写进库，此后连真值都掩不回来。只拦这两个字段（密码 / 自我介绍里 `*` 合法）。
+        String maskedField = MaskedInput.firstMasked("email", email, "address", address);
+        if (maskedField != null) {
+            return Result.fail(MaskedInput.rejectMessage(maskedField));
+        }
         return Result.of(userService.updateUserInfo(username, email, address, selfintroduction));
     }
 
