@@ -1,5 +1,11 @@
 <template>
   <section class="a-mp">
+    <!-- 回放横幅（2026-10-17 全链路联动重做）：回放期间本页**停掉实时流**，
+         改用 `replaySession.metricTicks`（由事件台账按日志时间逐秒推算）动态重绘。
+         ⚠️ 实时态与回放态是**两套视图**：实时视图原样保留（含用户明令保留的 5xx/P99 红色警告），
+            回放视图不伪造健康度、缓存命中率、锁等待 —— 台账里没有这些字段。 -->
+    <ReplayBanner />
+    <template v-if="!replaySession.active">
     <!-- ── ① 状态带：健康度由后端算（`MetricsSnapshotService.health()`），本页不重算 ───── -->
     <header class="a-status">
       <div class="a-stat">
@@ -282,6 +288,186 @@
       </aside>
       </div>
     </div>
+    </template>
+
+    <template v-else>
+      <!-- ══ 回放视图：由 `replaySession.metricTicks` 驱动，随回放时钟动态重绘 ══════════
+           ⚠️ 这不是实时框架图的「冻结快照」，是一套**独立的、可推算的**回放指标：
+              QPS（事件推算）/ 错误事件占比 / 延迟样本 / 类别分布。
+           ⚠️ 缓存命中率、锁等待、HTTP 4xx/5xx 拆分在台账里没有字段 ⇒ 回放视图不画、不猜；
+              右栏底部明确写「不可推算」。 -->
+      <header class="a-status a-status--rp">
+        <div class="a-stat">
+          <b class="a-hv a-hv--warn"><span class="a-dot" aria-hidden="true"></span>回放</b>
+          <span>指标由事件台账推算</span>
+        </div>
+        <div class="a-stat">
+          <b>{{ replayNow ? fmt1(replayNow.qps) : '—' }}</b>
+          <span>QPS（事件推算）</span>
+        </div>
+        <div class="a-stat">
+          <b>{{ replayErrText }}</b>
+          <span>错误事件占比（本拍）</span>
+        </div>
+        <div class="a-stat">
+          <b>{{ replayP99Text }}</b>
+          <span>P99 延迟（样本内）</span>
+        </div>
+        <div class="a-tz">
+          <span class="a-chip-utc">回放中（实时流已切断）</span>
+          <span>指标拍 <b>{{ replayRows.length }}</b> · 窗口 {{ WINDOW }} 秒</span>
+          <span class="a-tz-off">{{ replayClockText }}</span>
+        </div>
+      </header>
+
+      <p class="mp-rp-warn">
+        <b>回放指标由事件台账推算，非 HTTP 原始指标。</b>
+        QPS = 该秒日志时间内吐出的事件条数（不是后端 `http.server.requests` 的请求量）；
+        没有 4xx/5xx 拆分，也没有缓存命中 / 锁等待字段。延迟只统计带 `DurationUs` 的事件，
+        无样本时画断点而不是 0。
+      </p>
+
+      <div class="mp-body">
+        <div class="mp-grid">
+          <div class="mp-stack">
+            <!-- ① QPS（事件推算）· 按事件类别堆叠 -->
+            <section class="mp-chart">
+              <div class="mp-chart-h">
+                <h3>QPS（事件推算）</h3>
+                <span class="mp-chart-n">按事件类别堆叠 · 每 1 秒日志时间一拍</span>
+                <span class="mp-legend" aria-hidden="true">
+                  <template v-for="s in replayQpsSeries" :key="s.name">
+                    <i :style="{ background: 'var(--c' + s.colorIndex + ')' }"></i>{{ s.name }}
+                  </template>
+                </span>
+              </div>
+              <BarChart
+                :categories="replayXLabels" :series="replayQpsSeries"
+                height="200px" :show-legend="false" :show-x-axis="false"
+                :grid-left="64" :grid-right="56" :grid-top="24" :grid-bottom="14"
+                value-formatter="{value}" :tooltip-formatter="replayQpsTooltip" :animation="false"
+                :loading="!replayRows.length && !replaySession.done"
+                empty-text="本批台账里还没有可推算的事件" @retry="connect"
+              />
+            </section>
+
+            <!-- ② 错误事件占比 -->
+            <section class="mp-chart">
+              <div class="mp-chart-h">
+                <h3>错误事件占比</h3>
+                <span class="mp-chart-n">severity=error ÷ 本拍事件数 · 无事件的拍断开（不是 0）</span>
+              </div>
+              <LineChart
+                :categories="replayXLabels" :series="replayErrorSeries"
+                height="160px" :show-legend="false" :show-x-axis="false"
+                :grid-left="64" :grid-right="56" :grid-top="24" :grid-bottom="14"
+                boundary-gap y-min="0" y-max="100" y-formatter="{value}%"
+                :tooltip-formatter="replayErrorTooltip" :animation="false"
+                :loading="!replayRows.length && !replaySession.done"
+                empty-text="本批台账里还没有可推算的事件" @retry="connect"
+              />
+            </section>
+
+            <!-- ③ 延迟（只统计带 DurationUs 的样本） -->
+            <section class="mp-chart">
+              <div class="mp-chart-h">
+                <h3>延迟（DurationUs 样本）</h3>
+                <span class="mp-chart-n">均值 / P99 · 无样本的拍断开（不是 0）</span>
+                <span class="mp-legend" aria-hidden="true">
+                  <i class="lg-mean"></i>均值
+                  <i class="lg-p99"></i>P99
+                </span>
+              </div>
+              <LineChart
+                :categories="replayXLabels" :series="replayLatencySeries"
+                height="160px" :show-legend="false" :show-x-axis="false"
+                :grid-left="64" :grid-right="56" :grid-top="24" :grid-bottom="14"
+                boundary-gap y-min="0" y-formatter="{value} ms"
+                :tooltip-formatter="replayLatencyTooltip" :animation="false"
+                :loading="!replayRows.length && !replaySession.done"
+                empty-text="本批台账里还没有带 DurationUs 的事件" @retry="connect"
+              />
+            </section>
+
+            <!-- ④ 事件类别分布（当前窗口累计） -->
+            <section class="mp-chart mp-chart--last">
+              <div class="mp-chart-h">
+                <h3>事件类别分布</h3>
+                <span class="mp-chart-n">当前窗口累计条数 · 9 类声明序</span>
+              </div>
+              <ul v-if="replayKindRows.length" class="mp-rp-kinds">
+                <li v-for="k in replayKindRows" :key="k.key" class="mp-rp-kind">
+                  <span class="mp-rp-kind-k"><i :style="{ background: k.color }"></i>{{ k.label }}</span>
+                  <span class="mp-rp-kind-track">
+                    <i :style="{ width: k.pct + '%', background: k.color }"></i>
+                  </span>
+                  <b>{{ fmtInt(k.n) }}</b>
+                  <em>{{ k.share }}%</em>
+                </li>
+              </ul>
+              <p v-else class="mp-empty">当前窗口没有事件 —— 回放时钟在走，但这 1 秒台账里没有事件。</p>
+            </section>
+          </div>
+
+          <aside class="mp-rail">
+            <section class="mp-rail-sec">
+              <h3 class="mp-rail-h">回放本拍 <span>1 秒日志时间 · 缺值显示 —</span></h3>
+              <div class="mp-kpis">
+                <div class="mp-kpi">
+                  <span class="mp-kpi-k">本拍事件数</span>
+                  <span class="mp-kpi-v"><b>{{ replayNow ? fmtInt(replayNow.count) : '—' }}</b><em>条</em></span>
+                  <span class="mp-kpi-d">其中 error {{ replayNow ? fmtInt(replayNow.errors) : '—' }} · warn {{ replayNow ? fmtInt(replayNow.warns) : '—' }}</span>
+                  <span class="mp-kpi-nospark">每 1 秒日志时间</span>
+                </div>
+                <div class="mp-kpi">
+                  <span class="mp-kpi-k">错误事件占比</span>
+                  <span class="mp-kpi-v"><b>{{ replayErrText }}</b><em>%</em></span>
+                  <span class="mp-kpi-d">错误 {{ replayNow ? fmtInt(replayNow.errors) : '—' }} / 事件 {{ replayNow ? fmtInt(replayNow.count) : '—' }}</span>
+                  <span class="mp-kpi-nospark">severity=error</span>
+                </div>
+                <div class="mp-kpi">
+                  <span class="mp-kpi-k">P99 延迟</span>
+                  <span class="mp-kpi-v"><b>{{ replayP99Text }}</b><em>ms</em></span>
+                  <span class="mp-kpi-d">均值 {{ replayNow && replayNow.meanMs !== null ? fmt1(replayNow.meanMs) : '—' }} ms · 样本 {{ replayNow ? fmtInt(replayNow.latencyCount) : '—' }} 条</span>
+                  <span class="mp-kpi-nospark">仅 DurationUs</span>
+                </div>
+                <div class="mp-kpi">
+                  <span class="mp-kpi-k">已播事件</span>
+                  <span class="mp-kpi-v"><b>{{ fmtInt(replaySession.cursor) }}</b><em>/ {{ fmtInt(replaySession.count) }}</em></span>
+                  <span class="mp-kpi-d">回放倍率 {{ replaySession.speed }}× · 本帧 ≤{{ replaySession.maxPerFrame }} 条</span>
+                  <span class="mp-kpi-nospark">实吐 {{ fmtInt(replaySession.effectiveRate) }} 条/秒</span>
+                </div>
+              </div>
+            </section>
+
+            <section class="mp-rail-sec">
+              <h3 class="mp-rail-h">本轮回放 <span>记录级聚合 · 非时间序列</span></h3>
+              <ul class="mp-rp-facts">
+                <li>时间跨度 <b>{{ replaySpanText }}</b></li>
+                <li>回放时钟 <b>{{ replayClockText }}</b></li>
+                <li>指标拍 <b>{{ fmtInt(replaySession.metricSeq) }}</b> 个（滚动保留最近 600）</li>
+                <li v-if="replaySession.recordSnapshot">
+                  记录总量 <b>{{ fmtInt(replaySession.recordSnapshot.totalRequests) }}</b> 请求 ·
+                  拦截 {{ fmtInt(replaySession.recordSnapshot.blockedRequests) }} ·
+                  失败 {{ fmtInt(replaySession.recordSnapshot.failedRequests) }} ·
+                  耗时 {{ fmt1((replaySession.recordSnapshot.durationMs || 0) / 1000) }} 秒
+                </li>
+                <li v-else class="mp-rp-facts-miss">这条演练记录没有可用的聚合快照。</li>
+              </ul>
+            </section>
+
+            <section class="mp-rail-sec">
+              <h3 class="mp-rail-h">不可推算的指标 <span>台账无字段 · 不伪造</span></h3>
+              <p class="mp-rp-note">
+                事件台账没有 HTTP 状态码、缓存命中字段、锁等待耗时 ⇒
+                <b>缓存命中率、锁等待、4xx/5xx 拆分</b>在回放视图中不展示，也不拿 0 或估算值填充。
+                要看这些指标，请退出回放回到实时视图。
+              </p>
+            </section>
+          </aside>
+        </div>
+      </div>
+    </template>
   </section>
 </template>
 
@@ -308,8 +494,11 @@ import {
 } from '@lucide/vue'
 import { metricsHistory, openMetricsStream } from '../../../api/observe'
 import { demo, openDemoStream } from '../../../api/demo-stream'
-import { KIND_COLOR } from '../../../config/labels/observe-labels'
+// 回放（2026-10-17 重做）：本页在回放期间**停实时**（后端没有按时间戳的指标帧）。
+import { replaySession } from '../../../api/replay-session'
+import { KIND_COLOR, KIND_LABEL, KINDS } from '../../../config/labels/observe-labels'
 import DemoModeToggle from '../../../components/observe/DemoModeToggle.vue'
+import ReplayBanner from '../../../components/observe/ReplayBanner.vue'
 import LineChart from '../../../components/charts/LineChart.vue'
 import BarChart from '../../../components/charts/BarChart.vue'
 import HeatmapChart from '../../../components/charts/HeatmapChart.vue'
@@ -423,6 +612,108 @@ const hitRateNow = computed(() => (latestRow.value ? latestRow.value.hitRate : n
 const p99Now = computed(() => (latestRow.value ? latestRow.value.p99 : null))
 
 const shown = reactive({ qps: 0, mean: 0, hitRate: 0, lockWait: 0 })
+
+/* ── 回放指标（全链路联动 · 2026-10-17）───────────────────────────────────────
+   ⚠️ 数据源是 `replaySession.metricTicks`（`api/replay-metrics.js` 按日志时间 1 秒一拍
+      从**已吐出的事件**算出来的），不是实时 SSE，也不是冻结快照。
+   ⚠️ 页面只读，不自己起定时器：回放时钟在 `replay-session.js` 里唯一一份。 */
+/** 指标图窗口：与实时视图同为 60 拍（60 秒日志时间）。 */
+const replayRows = computed(() => replaySession.metricTicks.slice(-WINDOW))
+const replayXLabels = computed(() => replayRows.value.map((r) => hms(r.ts)))
+const replayNow = computed(() => (replayRows.value.length ? replayRows.value[replayRows.value.length - 1] : null))
+const replayErrText = computed(() => (replayNow.value && replayNow.value.errorRate !== null
+  ? fmt1(replayNow.value.errorRate * 100)
+  : '—'))
+const replayP99Text = computed(() => (replayNow.value && replayNow.value.p99Ms !== null
+  ? fmtInt(Math.round(replayNow.value.p99Ms))
+  : '—'))
+/** 回放时钟（带毫秒）：与横幅同一口径，切页时三页读到同一个值。 */
+const replayClockText = computed(() => {
+  const ms = replaySession.clockTs
+  if (!ms) return '—'
+  const d = new Date(ms)
+  const p = (n) => String(n).padStart(2, '0')
+  return `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}.${String(d.getMilliseconds()).padStart(3, '0')}`
+})
+const replaySpanText = computed(() => {
+  const sec = (replaySession.spanMs || 0) / 1000
+  return `${sec.toFixed(sec >= 10 ? 0 : 1)} 秒`
+})
+
+/** 窗口内出现过的类别（按声明序 → 颜色稳定；全 0 的类别不上图）。 */
+const replayKindsPresent = computed(() => KINDS.filter((k) => replayRows.value.some(
+  (r) => num(r.byKind && r.byKind[k]) > 0
+)))
+/** 堆叠 QPS：窗口长度 1 秒，所以「本拍条数」就是「条/秒」。 */
+const replayQpsSeries = computed(() => replayKindsPresent.value.map((k) => ({
+  name: KIND_LABEL[k] || k,
+  data: replayRows.value.map((r) => num(r.byKind && r.byKind[k])),
+  colorIndex: KINDS.indexOf(k) + 1,
+  stack: 'rp-kind',
+})))
+const replayErrorSeries = computed(() => [{
+  name: '错误事件占比',
+  data: replayRows.value.map((r) => (r.errorRate === null ? null : r.errorRate * 100)),
+  colorIndex: 7,
+  area: true,
+}])
+const replayLatencySeries = computed(() => [
+  {
+    name: '均值',
+    data: replayRows.value.map((r) => r.meanMs),
+    colorIndex: 1,
+    area: true,
+  },
+  {
+    name: 'P99',
+    data: replayRows.value.map((r) => r.p99Ms),
+    colorIndex: 4,
+    dashed: true,
+  },
+])
+
+/** 类别分布：窗口累计条数（不是累计 QPS），按条数倒序；宽度按最大项归一。 */
+const replayKindRows = computed(() => {
+  const totals = KINDS.map((k) => ({
+    key: k,
+    label: KIND_LABEL[k] || k,
+    color: `var(--c${KINDS.indexOf(k) + 1})`,
+    n: replayRows.value.reduce((a, r) => a + num(r.byKind && r.byKind[k]), 0),
+  })).filter((k) => k.n > 0).sort((a, b) => b.n - a.n)
+  const max = totals.length ? totals[0].n : 0
+  const all = totals.reduce((a, k) => a + k.n, 0)
+  return totals.map((k) => ({
+    ...k,
+    pct: max ? Math.max(2, Math.round((k.n / max) * 100)) : 0,
+    share: all ? ((k.n / all) * 100).toFixed(1) : '0.0',
+  }))
+})
+
+function replayQpsTooltip(params) {
+  const i = params && params[0] ? params[0].dataIndex : -1
+  const r = replayRows.value[i]
+  if (!r) return ''
+  const parts = KINDS
+    .filter((k) => num(r.byKind && r.byKind[k]) > 0)
+    .map((k) => `${KIND_LABEL[k] || k} ${fmtInt(r.byKind[k])}`)
+    .join(' · ')
+  return `<b>${replayXLabels.value[i]}</b><br/>事件 ${fmtInt(r.count)} 条（${fmt1(r.qps)} 条/秒）`
+    + `<br/>${parts || '本秒没有事件'}`
+}
+function replayErrorTooltip(params) {
+  const i = params && params[0] ? params[0].dataIndex : -1
+  const r = replayRows.value[i]
+  if (!r) return ''
+  return `<b>${replayXLabels.value[i]}</b><br/>错误 ${fmtInt(r.errors)} / 事件 ${fmtInt(r.count)}`
+    + `<br/>占比 ${r.errorRate === null ? '—' : fmt1(r.errorRate * 100) + '%'}`
+}
+function replayLatencyTooltip(params) {
+  const i = params && params[0] ? params[0].dataIndex : -1
+  const r = replayRows.value[i]
+  if (!r) return ''
+  return `<b>${replayXLabels.value[i]}</b><br/>均值 ${r.meanMs === null ? '本拍无 DurationUs 样本' : fmt1(r.meanMs) + ' ms'}`
+    + `<br/>P99 ${r.p99Ms === null ? '—' : fmt1(r.p99Ms) + ' ms'} · 样本 ${fmtInt(r.latencyCount)} 条`
+}
 
 /* ── 共用的 x 轴与各图序列 ────────────────────────────────────────────────── */
 const xLabels = computed(() => rows.value.map((r) => hms(r.ts)))
@@ -923,6 +1214,12 @@ async function loadHistory() {
 
 /* ── 连接 ─────────────────────────────────────────────────────────────────── */
 function connect() {
+  // 回放期间不建实时流：`connect()` 还会被「重新连接」、切数据源、退出回放的 watch 调到，
+  // 任何一条都不该在回放里复活 SSE（用户 2026-10-17：指标页回放期间禁用实时刷新）。
+  if (replaySession.active) {
+    closeStream()
+    return
+  }
   closeStream()
   errMsg.value = ''
   lost.value = null
@@ -971,6 +1268,8 @@ onDeactivated(() => {
 })
 onActivated(() => {
   pageActive.value = true
+  // 回放期间实时面板整块隐藏（见模板），补间动画也不要空转。
+  if (replaySession.active) return
   const lastRow = rows.value[rows.value.length - 1]
   if (lastRow) {
     animateStock((latest.value && latest.value.stock && latest.value.stock.rows) || [])
@@ -990,6 +1289,26 @@ watch(() => demo.on, () => {
   rows.value = []
   latest.value = null
   connect()
+})
+// 回放开关 ⇒ 停 / 恢复实时。
+// ⚠️ 进入时清空实时窗口：回放视图读的是 `metricTicks`，留着旧实时行既不可见、也会在
+//    退出回放时和历史帧拼出两段不连续的时间轴。退出时同样清空，再让 `loadHistory()`
+//    重新铺最近 60 拍 —— 用户 2026-10-17 的「不要白板」由回放视图自己的图表满足，
+//    不再是「冻结实时面板 + 遮罩」。
+watch(() => replaySession.active, (on) => {
+  historyToken += 1
+  closeStream()
+  errMsg.value = ''
+  lost.value = null
+  rows.value = []
+  latest.value = null
+  phase.value = on ? 'stopped' : 'connecting'
+  if (on) {
+    if (rafId) { cancelAnimationFrame(rafId); rafId = 0 }
+    if (stockRaf) { cancelAnimationFrame(stockRaf); stockRaf = 0 }
+  } else {
+    connect()
+  }
 })
 onBeforeUnmount(closeStream)
 </script>
@@ -1589,6 +1908,97 @@ onBeforeUnmount(closeStream)
 .mp-rail::-webkit-scrollbar-track {
   background: transparent;
 }
+
+/* ── 回放视图（全链路联动 · 2026-10-17）──────────────────────────────────── */
+.lg-mean { background: var(--c1); }
+.lg-p99 { background: var(--c4); }
+.a-status--rp { border-color: var(--warning); }
+.mp-rp-warn {
+  flex: 0 0 auto;
+  margin: 0 0 var(--s3);
+  padding: var(--s2) var(--s3);
+  font-size: var(--fs-sm);
+  line-height: 1.65;
+  color: var(--warning-deep);
+  background: var(--warning-ground);
+  border: 1px solid var(--warning);
+  border-radius: var(--r2);
+}
+.mp-rp-warn b { font-weight: var(--fw-semi); }
+.mp-rp-kinds {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--s2);
+}
+.mp-rp-kind {
+  display: grid;
+  grid-template-columns: 92px minmax(0, 1fr) 56px 48px;
+  align-items: center;
+  gap: var(--s2);
+  font-size: var(--fs-xs);
+  color: var(--ink-2);
+}
+.mp-rp-kind-k {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.mp-rp-kind-k i {
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+  flex: 0 0 auto;
+}
+.mp-rp-kind-track {
+  height: 8px;
+  border-radius: 4px;
+  background: var(--surface-2);
+  overflow: hidden;
+}
+.mp-rp-kind-track i {
+  display: block;
+  height: 100%;
+  border-radius: 4px;
+  transition: width 160ms linear;
+}
+.mp-rp-kind b {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink);
+}
+.mp-rp-kind em {
+  text-align: right;
+  font-style: normal;
+  color: var(--ink-3);
+  font-variant-numeric: tabular-nums;
+}
+.mp-rp-facts {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--s2);
+  font-size: var(--fs-xs);
+  line-height: 1.6;
+  color: var(--ink-2);
+}
+.mp-rp-facts b {
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+}
+.mp-rp-facts-miss { color: var(--ink-3); }
+.mp-rp-note {
+  margin: 0;
+  font-size: var(--fs-xs);
+  line-height: 1.7;
+  color: var(--ink-2);
+}
+.mp-rp-note b { color: var(--ink); }
 
 @media (max-width: 1100px) {
   .a-mp { height: auto; min-height: 0; overflow: visible; }

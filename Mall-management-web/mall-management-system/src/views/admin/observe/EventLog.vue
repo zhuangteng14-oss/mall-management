@@ -1,5 +1,8 @@
 <template>
   <section class="a-el">
+    <!-- 回放横幅（2026-10-17 重做）：回放期间本页**不再接实时流**，顶部这条是唯一解释
+         「为什么时间是旧的 / 为什么数字不跳」的东西。退出按钮就在横幅上。 -->
+    <ReplayBanner />
     <div class="ev-frame">
       <!-- ══ ① 状态条 ══════════════════════════════════════════════════════════════════
            两排：上排读数 / 下排时刻与 MQ。⚠️ 窗口化之后它是**外框里的一条带**（不是浮在区块
@@ -51,9 +54,13 @@
             <span>P99 耗时（n={{ lat.n }}）</span>
           </div>
           <!-- 数据源：用户 2026-10-16 裁定 —— **留页头右上**。计数**常驻**（组件开着时自报，
-               没开时本页补一行；见下面那个 `v-if="!demo.on"`）。 -->
-          <DemoModeToggle />
-          <span v-if="!demo.on" class="cnt">已放 {{ fmtInt(demo.emitted) }} / {{ DEMO_TOTAL }} 条（模拟日常未开）</span>
+               没开时本页补一行；见下面那个 `v-if="!demo.on"`）。
+               ⚠️ 回放期间**整枚收起**：两个「不是实时」的模式同时摆在页头上，用户分不清
+                  现在看的是哪一种；回放横幅里已经写了当前状态与退出方式。 -->
+          <template v-if="!replaySession.active">
+            <DemoModeToggle />
+            <span v-if="!demo.on" class="cnt">已放 {{ fmtInt(demo.emitted) }} / {{ DEMO_TOTAL }} 条（模拟日常未开）</span>
+          </template>
         </div>
         <div class="r2">
           <!-- ── 三枚控件（用户 2026-10-16 裁定 A：**现在就补、不留 TD**，都是真功能）────────
@@ -654,7 +661,13 @@ import { openEventStream } from '../../../api/observe'
 // 演示模式（块 7 收尾 ②）：`DemoModeToggle` 摆开关，`demo` 是被 `watch` 的那个状态，
 // `openDemoStream` 是与 `openEventStream` **同形**的假流 —— 见 `connect()` 里那处三元式。
 import { DEMO_TOTAL, demo, openDemoStream } from '../../../api/demo-stream'
+// 回放（2026-10-17 重做）：会话与播放时钟在 `api/replay-session.js`，本页只负责
+// 「把吐出来的事件画成行」+「回放期间切断实时流」。横幅是同一个会话的第二块 UI。
+import {
+  attachReplaySink, detachReplaySink, replaySession,
+} from '../../../api/replay-session'
 import DemoModeToggle from '../../../components/observe/DemoModeToggle.vue'
+import ReplayBanner from '../../../components/observe/ReplayBanner.vue'
 import {
   KINDS, SEVERITIES,
   kindLabel, kindColor, severityLabel, severityColor,
@@ -702,8 +715,9 @@ const TRACE_CAP = 300
  *  视口内 + 上下各 `OVERSCAN` 行，数据侧仍保留最近 `EVENT_CAP`（200）条。
  *  ⚠️ 行高不固定（1 行 22/28、2 行 36.78）⇒ 用「估算 + 实测回填」，见 `rowH`。 */
 const VIRTUAL_MIN = 200
-/** 窗口上下各多渲染几行：快速滚动时先有内容，再靠下一帧实测高度修正。 */
-const OVERSCAN = 5
+/** 窗口上下各多渲染几行：快速滚动时先有内容，再靠下一帧实测高度修正。
+ *  ⚠️ 2026-10-17 5 → 10：用户实测快速滚动时底部会先出现空白再补上（预渲染区太小）。 */
+const OVERSCAN = 10
 /** 未实测过的行高估值（px）。取 2 行态 34.78 + 上下 padding 2 ≈ 37 的近似；
  *  实测回填后会立刻接近真实值。⚠️ 不写死成 `--row-h`：那只代表单行态。 */
 const EST_ROW_H = 36
@@ -859,14 +873,23 @@ const tracesById = reactive(new Map())
 const autoBottom = ref(true)
 const pageActive = ref(true)   // KeepAlive 失活 ⇒ 暂停 UI 刷新（数据照收，见 onFrame / 门控 watch）
 
-/* ── 数据缓冲池 + 定时冲刷（2026-10-17 · 800 QPS 渲染雪崩的架构级修复）────────────────
-   收到的帧**只进这里**，不碰任何 Vue 响应式量；每 100ms 由 `flushTimer` 一次性并入视图。
+/* ── 数据缓冲池 + 帧同步冲刷（2026-10-17 · 800 QPS 渲染雪崩的架构级修复）────────────────
+   收到的帧**只进这里**，不碰任何 Vue 响应式量；由 `flushTimer`（rAF）逐帧并入视图。
    · `rawBuf` 是**普通数组**（非 reactive / 非 ref）—— 800 条/拍的 push 不触发任何 getter/setter。
    · 每个源各一桶（normal / demo），与 `W` 的分源口径一致；切源不串数据。
    · 池子封顶 `BUF_CAP`：暂停 / 上滚期间可能攒很久，不封顶就是换一处内存泄漏。
-   · 冻结（点「暂停」或手动上滚）时**只进池不入视图** —— 列表不跳、滚动位置不动。 */
+   · 冻结（点「暂停」或手动上滚）时**只进池不入视图** —— 列表不跳、滚动位置不动。
+
+   ⚠️ 【2026-10-17 第二次改造：100ms 定时器 → rAF】
+      用户实测「滚动一卡一卡（抽帧感）」：`setInterval(100ms)` 一秒只重绘 10 次，每次是一整波
+      数据同时出现 —— 人眼看到的是跳变而不是流动。现在改为**帧同步**：每帧（≈16ms）从池子里
+      取 `FLUSH_MAX_PER_FRAME` 条（2–5，取 5）平滑追加，正常速率下约 60 次/秒的连续滚动。
+      高密度帧（一次 SSE 帧几百条）**例外**：整批交给 `absorbEvents` 走原有聚合（见
+      `MAX_RENDER_PER_TICK`），否则 5 条/帧 × 60 = 300 条/秒永远追不上 800 条/秒的入池速度，
+      池子会被 `BUF_CAP` 一直截断、聚合也就永远不会触发。 */
 const BUF_CAP = 4096
-const FLUSH_MS = 100
+/** 每帧平滑追加的条数（用户给的 2–5 档，取上限 5：60fps ≈ 300 条/秒）。 */
+const FLUSH_MAX_PER_FRAME = 5
 const rawBuf = {
   normal: { events: [], traces: [], dropped: 0 },
   demo: { events: [], traces: [], dropped: 0 },
@@ -1249,7 +1272,10 @@ function doExport(fmt) {
 
 /* ── 派生量 ─────────────────────────────────────────────────────────────────── */
 const first = computed(() => seq.value === 0 && !errMsg.value)
-const phaseText = computed(() => (phase.value === 'live' ? '已连接' : (phase.value === 'stopped' ? '已断开' : '连接中')))
+const phaseText = computed(() => {
+  if (replaySession.active) return '回放中（实时流已切断）'
+  return phase.value === 'live' ? '已连接' : (phase.value === 'stopped' ? '已断开' : '连接中')
+})
 /**
  * 断线条那句话。⚠️ 两种都要写全：真错误（`err`）与**服务端正常收尾**（`err === null`）——
  * 后者不是故障，但页面上的数字同样停在断开前那一拍，不说清楚就回到「静默陈旧」。
@@ -1791,7 +1817,7 @@ function aggregateEvents(list) {
  *    照 `ts` 做全局重排会让用户正在看的行在两拍之间跳走。本拍内部排一次，正是为了把那个
  *    「按环分组」的假顺序在**⑤/③ 显示层**纠正掉。
  */
-function absorbEvents(batch, src) {
+function absorbEvents(batch, src, opts) {
   const fresh = []
   for (const raw of batch) {
     const s = num(raw.seq)
@@ -1839,7 +1865,10 @@ function absorbEvents(batch, src) {
   fresh.sort((a, b) => b.ts - a.ts || b.seq - a.seq)
   // 动态背压：单拍超过实测的渲染安全阈值 ⇒ 同类同标题合并；否则**原样一条条展示**。
   // ⚠️ 聚合后仍可能超过 EVENT_CAP（全部是不同类且各出现一次时），下一步照旧封顶。
-  const next = fresh.length > MAX_RENDER_PER_TICK ? aggregateEvents(fresh) : fresh
+  // ⚠️ **回放传 `{ noAgg: true }`**（用户 2026-10-17）：查案要 1:1 还原，同一类同标题的
+  //    两条也是两条独立事实（各有自己的时间戳），合并成 ×N 就是篡改录像。
+  const noAgg = !!(opts && opts.noAgg)
+  const next = !noAgg && fresh.length > MAX_RENDER_PER_TICK ? aggregateEvents(fresh) : fresh
   aggStats.flushes += 1
   aggStats.lastRaw = fresh.length
   aggStats.lastView = next.length
@@ -1912,19 +1941,26 @@ function pushBuffer(batch, src, key) {
   }
 }
 
-/** 100ms 一次：把当前源池子里的数据一次性并入视图。
- *  ⚠️ `frozen` 时**直接返回**（只入池）：暂停 / 手动上滚时不许改 `events`，
- *     否则列表会继续长高、把用户正在看的位置顶走。 */
+/** 一帧：把当前源池子里的一小截并入视图（帧同步，见上方常量注释）。
+ *  ⚠️ `frozen` / 回放 / 页面失活时**直接返回**（只入池）：暂停、上滚、回放都不许改 `events`。
+ *  ⚠️ 大爆发（本帧池子 > `MAX_RENDER_PER_TICK`）整批交给 `absorbEvents`：那条路里有聚合，
+ *     一次 800 条会被并成几十行；若仍按 5 条/帧取，聚合永远不触发、池子也永远追不平。 */
 function flushBuffer() {
+  // 回放期间**只有回放会话**能往视图里写（它走 `onReplayBatch`，不经过这个池子）。
+  // 这一条是「彻底切断实时数据」的兜底：即使关闭流时还有一帧在路上，也不会被并进来。
+  if (replaySession.active) return
   if (!pageActive.value || frozen.value) return
   const src = cur.value
   const b = rawBuf[src]
   if (!b.events.length && !b.traces.length) return
-  const ev = b.events.splice(0, b.events.length)
-  const tr = b.traces.splice(0, b.traces.length)
+  const evTake = b.events.length > MAX_RENDER_PER_TICK ? b.events.length : Math.min(FLUSH_MAX_PER_FRAME, b.events.length)
+  const trTake = b.traces.length > MAX_RENDER_PER_TICK ? b.traces.length : Math.min(FLUSH_MAX_PER_FRAME, b.traces.length)
+  const ev = b.events.splice(0, evTake)
+  const tr = b.traces.splice(0, trTake)
   absorbEvents(ev, src)
   absorbTraces(tr, src)
   bufPending.value = b.events.length
+  bufDropped.value = b.dropped
   nextTick(scrollBottom)
 }
 
@@ -1941,11 +1977,16 @@ function flushAllBuffers() {
   bufPending.value = rawBuf[cur.value].events.length
 }
 
+/** rAF 冲刷循环：**每帧先排下一帧再干活**（一帧抛错也不会让循环断掉）。 */
+function flushFrame() {
+  flushTimer = requestAnimationFrame(flushFrame)
+  flushBuffer()
+}
 function startFlush() {
-  if (!flushTimer) flushTimer = setInterval(flushBuffer, FLUSH_MS)
+  if (!flushTimer) flushTimer = requestAnimationFrame(flushFrame)
 }
 function stopFlush() {
-  if (flushTimer) { clearInterval(flushTimer); flushTimer = null }
+  if (flushTimer) { cancelAnimationFrame(flushTimer); flushTimer = null }
 }
 
 /** 暂停 / 回到底部（一枚按钮两种语义，按当前状态取）。
@@ -1967,6 +2008,9 @@ const pauseLabel = computed(() => (paused.value ? '继续' : (!autoBottom.value 
 /** 收一拍。⚠️ `src` 由 `connect()` 在**建这条流的那一刻**定死（不是在这里读 `demo.on`）：
  *  帧回来时用户可能已经切走了，读 `demo.on` 会把旧流的帧记到新源头上。 */
 function onFrame(f, src) {
+  // 回放期间一律不收：`closeStream()` 之后理论上不会再回来，但切源的竞态里可能还有一帧在
+  // 事件队列上 —— 这一条把它彻底挡在视图之外（用户 2026-10-17：回放期间实时数据必须切断）。
+  if (replaySession.active) return
   W[src].seq = num(f.seq)
   W[src].ts = num(f.ts) || Date.now()
   W[src].rate = num(f.rate)
@@ -1975,7 +2019,7 @@ function onFrame(f, src) {
   const tr = Array.isArray(f.traces) ? f.traces : []
   W[src].freshE = ev.length
   W[src].freshT = tr.length
-  // 关键：帧只入**非响应式**缓冲池。`W[src].events` 由 100ms 的 `flushBuffer()` 批量改写。
+  // 关键：帧只入**非响应式**缓冲池。`W[src].events` 由 rAF 的 `flushBuffer()` 逐帧平滑改写。
   pushBuffer(ev, src, 'events')
   pushBuffer(tr, src, 'traces')
   // ① 折线：本页自攒（帧只有本拍一个数，画不出线）。按源各攒一条。
@@ -1988,6 +2032,17 @@ function onFrame(f, src) {
 }
 
 function connect() {
+  // 回放期间**不许**建实时流：`connect()` 还会被「切数据源」与「立即重连」两颗按钮调到，
+  // 那两条路都不该在回放里复活 SSE（用户 2026-10-17：回放期间实时数据必须完全切断）。
+  // `loading` 也要挡：回放装载期间会 `setDemoMode(false)`，那次 `watch(demo.on)` 会调到这里 ——
+  // 放行就会先建一条实时流，等 `active` 变真再切断，首屏闪一帧假实时数据。
+  // ⚠️ 这里**不关旧流**：装载失败时用户还指望这条流继续跑；关掉而 `active` 又没变成 true，
+  //    页面会停在「没有流、也没有回放」的空档（下面的 `loading` 兜底 watch 也救不回已关的流）。
+  if (replaySession.active) {
+    closeStream()
+    return
+  }
+  if (replaySession.loading) return
   // 切源 / 重连前：把两桶池子里还没并的数据落进各自的视图（否则切走那一刻会少一截）。
   flushAllBuffers()
   closeStream()
@@ -2027,9 +2082,87 @@ function closeStream() {
   }
 }
 
+/* ── 回放模式（2026-10-17 重做）────────────────────────────────────────────────
+   用户原话：「点击回放后必须 `events = []` 清空当前实时列表，并强制切断/挂起 SSE 的接收」。
+   这里做三件事：① 关流；② 把两个源桶（含 seenSeq / tracesById / 池子）清空；
+   ③ 让 `flushBuffer` / `onFrame` / `connect` 在 `active` 期间全部短路（见各自的守卫）。
+   回放行**不经过 rawBuf**：会话每拍直接回调 `onReplayBatch` ⇒ 只有它在往视图里写。 */
+function clearBucket(src) {
+  const w = W[src]
+  w.events = []
+  w.traces = []
+  w.series = []
+  w.dropped = 0
+  w.seq = 0
+  w.ts = 0
+  w.rate = 0
+  w.freshE = 0
+  w.freshT = 0
+  w.mq = false
+  rawBuf[src].events.length = 0
+  rawBuf[src].traces.length = 0
+  rawBuf[src].dropped = 0
+}
+
+/** 回放会话吐出来的一批行 → 本页的事件窗口（与实时收帧同一条 `absorbEvents` 渲染链）。
+ *  ⚠️ `noAgg: true`：回放**永不合并**（不允许 ×N 徽标），每一条都带自己的时间戳。 */
+function onReplayBatch(batch) {
+  absorbEvents(batch, 'normal', { noAgg: true })
+  if (pageActive.value && autoBottom.value && !paused.value) nextTick(scrollBottom)
+  else nextTick(updateWindow)
+}
+
+/** 进入回放：清空当前视图并切断实时流（只清数据、不动回放会话本身）。 */
+function enterReplayView() {
+  closeStream()
+  clearBucket('normal')
+  clearBucket('demo')
+  seenSeq.clear()
+  tracesById.clear()
+  // 时间范围回到「全部」：回放的是历史批次，默认 5m/30m 会把整批滤成「一条都没有」。
+  range.value = 'all'
+  customFrom.value = ''
+  customTo.value = ''
+  paused.value = false
+  autoBottom.value = true
+  openedTrace.value = ''
+  openedEvent.value = null
+  exportNote.value = ''
+  bufPending.value = 0
+  bufDropped.value = 0
+  lost.value = null
+  errMsg.value = ''
+  phase.value = 'live'
+  aggStats.flushes = 0
+  aggStats.raw = 0
+  aggStats.view = 0
+  aggStats.lastRaw = 0
+  aggStats.lastView = 0
+  aggStats.aggregated = 0
+  closeTrace()
+  nextTick(() => { scrollBottom(); updateWindow(); scheduleWindow() })
+}
+
+/** 退出回放：把回放行也清掉（它们的 seq 是合成的），然后恢复实时流。
+ *  ⚠️ 必须清：不清的话，`seenSeq` 里留着 1e9 段的合成 seq，而实时行会与回放行混在同一张表里，
+ *    用户看到的「退出回放」就只是又叠了一层数据，不是回到实时。 */
+function leaveReplayView() {
+  clearBucket('normal')
+  clearBucket('demo')
+  seenSeq.clear()
+  tracesById.clear()
+  openedTrace.value = ''
+  openedEvent.value = null
+  connect()
+}
+
 let tickTimer = null   // 每秒推一次 nowMs：近 5 分 / 近 30 分的滑动窗口靠它
 onMounted(() => {
-  connect()
+  // ⚠️ 回放可能在本页**从未挂载**时就已开始（从攻击模拟器页点 [回放] 直接跳过来）：
+  //    这时不能 `connect()`，否则会先建一条实时流、再被 watch 切断 —— 首屏闪一帧假实时数据。
+  if (replaySession.active) enterReplayView()
+  else connect()
+  attachReplaySink(onReplayBatch)
   startFlush()
   tickTimer = setInterval(() => { nowMs.value = Date.now() }, 1000)
 })
@@ -2037,23 +2170,38 @@ onMounted(() => {
 //    去重集合 `seenSeq` 跨源共用（不封顶）；两套 seq 必须不重叠，由 demo-stream 的高位 `evSeq` 保证。
 onDeactivated(() => {
   pageActive.value = false
-  stopFlush()          // 页面不可见 ⇒ 连 100ms 冲刷也停（数据仍进池）
+  stopFlush()          // 页面不可见 ⇒ 连 rAF 冲刷也停（数据仍进池）
+  // 回放会话在后台**继续走**（用户切到指标页时进度不该倒退），吐出的行先攒在会话的
+  // backlog 里；本页回到屏上时 `attachReplaySink` 会一次性补画。
+  detachReplaySink(onReplayBatch)
   clearInterval(tickTimer); tickTimer = null
 })
 onActivated(() => {
   pageActive.value = true; nowMs.value = Date.now()
   startFlush()
   clearInterval(tickTimer); tickTimer = setInterval(() => { nowMs.value = Date.now() }, 1000)
-  flushBuffer()        // 把失活期间攒下的最新一截补上（冻结状态下 flushBuffer 自己会跳过）
+  attachReplaySink(onReplayBatch)
+  flushBuffer()        // 把失活期间攒下的最新一截补上（冻结 / 回放状态下 flushBuffer 自己会跳过）
   nextTick(() => { if (autoBottom.value) scrollBottom(); updateWindow(); scheduleWindow() })
 })
 watch(() => demo.on, connect)
+// 回放会话的开关 ⇒ 本页进入 / 退出「录像模式」（见上面 enterReplayView / leaveReplayView）。
+watch(() => replaySession.active, (on) => {
+  if (on) enterReplayView()
+  else leaveReplayView()
+})
+// 装载失败兜底（成功时 `active` 已先置 true，这里不会再连）：
+// 回放没装载成功 ⇒ 恢复用户原来那条实时流，页面不会停在「什么都不更新」的状态。
+watch(() => replaySession.loading, (loading, was) => {
+  if (was && !loading && !replaySession.active) connect()
+})
 // ⚠️ 切源要**关掉抽屉**：`openedTrace` 指向的是另一桶里的某一组，留着会把「上一源的链路」
 //    挂在「这一源的列表」旁边。关掉是 UI 状态、不是数据 —— 两桶的数据一行没动。
 watch(cur, closeTrace)
 onBeforeUnmount(() => {
   closeStream()
   stopFlush()
+  detachReplaySink(onReplayBatch)
   if (tickTimer) clearInterval(tickTimer)
   if (winRaf) cancelAnimationFrame(winRaf)
   clearTimeout(exportNoteTimer)
@@ -2800,6 +2948,10 @@ onBeforeUnmount(() => {
 .log-line {
   padding: 1px var(--s3);
   cursor: default;
+  /* 行级渲染隔离（2026-10-17 滚动平滑）：`.ln` 上已有同一条，这里补在**行根**上 ——
+     行根的高度 / hover / 选中态变化不再向上触发整表布局；配合窗口化与上面的逐帧追加，
+     滚动时才不会「一走一顿」。 */
+  contain: layout paint style;
 }
 /* 行间 gap = 0、不加行边框：前导符与 hover 已经给足了行感（docker logs 也没有行线）。 */
 .log-line:hover {

@@ -1,5 +1,8 @@
 <template>
   <section class="a-of">
+    <!-- 回放横幅（2026-10-17 全链路联动）：状态页与日志/指标页共用同一个会话时钟。 -->
+    <ReplayBanner />
+    <template v-if="!replaySession.active">
     <!-- ── ① 状态条（与 `MetricsPanel.vue` / `StatsPage.vue` 逐字同源，不另立一套）────────── -->
     <header class="a-status">
       <div class="a-stat">
@@ -132,6 +135,31 @@
         @change="onPage"
       />
     </div>
+    </template>
+
+    <!-- 回放模式的状态条：不回显实时计数（实时流已切断），改说回放自己的两个口径。 -->
+    <template v-else>
+      <header class="a-status a-status--rp">
+        <div class="a-stat">
+          <b>{{ fmtInt(replayOrderTotal) }}</b>
+          <span>回放已见订单（当前各态合计）</span>
+        </div>
+        <div class="a-stat">
+          <b>{{ fmtInt(replayMoveCount) }}</b>
+          <span>回放已捕获流转（只增）</span>
+        </div>
+        <div class="a-tz">
+          <span class="a-chip-live">回放中（实时流已切断）</span>
+          <span>回放时钟 <b>{{ replayClockText }}</b></span>
+          <span>进度 <b>{{ fmtInt(replaySession.cursor) }}</b> / {{ fmtInt(replaySession.count) }}</span>
+        </div>
+      </header>
+      <p class="a-of-rp-note">
+        <b>回放 1:1，不做同类合并。</b>
+        框内角标 = 回放时钟此刻各态订单数（会加会减）；框下小字 = 本批次经过次数（只增）。
+        状态高亮按回放节奏亮灭，不是实时流的 4Hz 节流。退出回放后恢复实时。
+      </p>
+    </template>
 
     <!-- ══ ④ 状态机图（4 主节点 + 取消）═══════════════════════════════════════════
          ⚠️ 手写 SVG 而**不是** ECharts 的 `graph` 系列：本仓 `components/charts/` 里没有 graph 封装，
@@ -140,9 +168,13 @@
          「走过的边亮绿」= 本拍 `moves` 里出现过的 `from>to`，亮 1.2 秒后自动熄（见 `flash()`）。 -->
     <h2 class="a-h2">
       状态机
-      <span class="a-h2n">
+      <span v-if="!replaySession.active" class="a-h2n">
         被本拍流转走过的边，短时高亮（每秒最多 {{ FLASH_HZ_MAX }} 次）· 落到哪个节点，哪个脉冲 ·
         框内角标 = <b>全表</b>多少单，框下小字 = <b>本批次</b>经过多少次
+      </span>
+      <span v-else class="a-h2n">
+        回放时钟驱动的同一张状态机 · 框内角标 = <b>回放此刻各态订单数</b>（会加会减）·
+        框下小字 = <b>本批次经过次数</b>（只增）· 走过的边按回放节奏亮灭
       </span>
     </h2>
     <div class="a-card a-of-fsm">
@@ -211,12 +243,40 @@
         <template v-if="currentBatch">
           当前批次：<code>{{ currentBatch }}</code>。
         </template>
-        <template v-if="batchCountsRows">
+        <template v-if="!replaySession.active && batchCountsRows">
           <br />本批次单数（后端 `batchCounts`，**单数**口径，与上面小字的**次数**口径不同）：
           <template v-for="(r, i) in batchCountsRows" :key="r.key">{{ i ? ' · ' : '' }}{{ r.label }} {{ fmtInt(r.n) }}</template>。
         </template>
+        <template v-else-if="replaySession.active">
+          <br />回放口径：角标由 `replaySession.stateChanges` 逐条重建（建档 +1；之后按重建出的当前位置 −1 / to +1），
+          不是后端 `batchCounts` 的库内聚合；台账里没有的订单不会被凭空补进来。
+        </template>
       </p>
     </div>
+
+    <!-- ══ 回放流转明细（只读，按原台账时间戳倒序）════════════════════════════════
+         ⚠️ 清单来自 `replaySession.stateChanges`（逐步重建时压进 `replayRecentMoves`），
+            不是实时流的 `movesById` —— 后者在回放期间没有数据（SSE 已切断）。 -->
+    <template v-if="replaySession.active">
+      <h2 class="a-h2">
+        回放流转明细
+        <span class="a-h2n">最近 {{ replayRecentMoves.length }} 条 · 时间 = 原台账时间戳（不是墙钟）</span>
+      </h2>
+      <div class="a-card">
+        <p v-if="!replayRecentMoves.length" class="a-empty">
+          本批台账里还没有订单状态流转事件 —— 回放时钟仍在推进；可能是这一轮只跑了非订单场景，
+          或台账只载入了前 {{ fmtInt(replaySession.limit || replaySession.count) }} 条。
+        </p>
+        <ul v-else class="a-of-rpm">
+          <li v-for="m in replayRecentMoves" :key="m.seq" class="a-of-rpm-i">
+            <span class="a-of-rpm-t">{{ hms(m.ts) }}</span>
+            <span class="a-of-id">#{{ m.orderId }}</span>
+            <span class="a-of-rpm-d">{{ moveStateLabel(m.from) }} → <b>{{ moveStateLabel(m.to) }}</b></span>
+            <span v-if="m.result" class="a-of-rpm-r">{{ m.result }}</span>
+          </li>
+        </ul>
+      </div>
+    </template>
 
     <!-- ══ ⑤ 单条订单时间线（点列表某行弹出）═════════════════════════════════════
          ⚠️ 数据来源**只有两处**：订单行自带的 `createdAt`（建单时刻）+ 本会话在 `moves` 里捕获的流转。
@@ -304,6 +364,10 @@ import DonutChart from '../../../components/charts/DonutChart.vue'
 import Pager from '../../../components/Pager.vue'
 import { chartTokens } from '../../../components/charts/chartTokens'
 import { orderFlowStateLabel } from '../../../config/labels/observe-labels'
+// 全链路联动回放（2026-10-17）：与日志页 / 指标页共用同一个会话时钟。
+// 状态页只消费 `replaySession.stateChanges`（订单流转），不另起一份计时器。
+import ReplayBanner from '../../../components/observe/ReplayBanner.vue'
+import { replaySession } from '../../../api/replay-session'
 
 /** 后端每拍推的「最近订单」条数（`OrderStreamService.RECENT_LIMIT`）。本页只用来写说明。 */
 const RECENT_LIMIT = 20
@@ -313,6 +377,10 @@ const LIST_CAP = 200
 const PAGE_SIZES = [10, 20, 50]
 /** 高亮持续时长（毫秒）—— 边/节点/行「刚动过」的短时标记（《块 7 参考》§3.3 的 0.5 秒起，取 1.2 秒让肉眼追得上）。 */
 const FLASH_MS = 1200
+/** 回放的高亮时长：回放 10×，1.2 秒墙钟会糊成一片 ⇒ 收到 400ms（仍看得见「亮一下再熄」）。 */
+const REPLAY_FLASH_MS = 400
+/** 「回放流转明细」清单最多留多少条（DOM 有界；更早的仍可从日志页查）。 */
+const REPLAY_RECENT_CAP = 30
 /** 计数卡数字滚动时长（《块 7 参考》§3.3 的 0.3 秒口径）。 */
 const TWEEN_MS = 300
 
@@ -490,6 +558,25 @@ const offset = ref(0)
 const target = reactive({ waitPay: 0, waitShip: 0, waitReceive: 0, completed: 0, cancelled: 0 })
 const shown = reactive({ waitPay: 0, waitShip: 0, waitReceive: 0, completed: 0, cancelled: 0 })
 
+/* ── 回放态（2026-10-17 全链路联动）─────────────────────────────────────────────
+   ⚠️ 与实时态**并行存在**、互不覆盖：回放期间模板走 `v-else` 分支，实时流的
+      `counts / orders / movesById` 一概不画（SSE 也已切断）。退出回放后实时态原样恢复。
+   ⚠️ 角标语义（用户 2026-10-17 裁定）：框内角标 = **回放此刻各态订单数**（会加会减），
+      框下小字 = 本批次**经过次数**（只增）。两者各自独立累加，不合并成一个数。 */
+const replayCounts = reactive({ waitPay: 0, waitShip: 0, waitReceive: 0, completed: 0, cancelled: 0 })
+/** orderId → 回放重建出的当前五态 key。只装台账里出现过的单，不凭空补。 */
+const replayOrderState = new Map()
+const replayRecentMoves = ref([])
+let replayApplied = 0                    // 已消费到 `replaySession.stateChanges` 的第几条
+const replayMoveCount = ref(0)           // 回放已捕获流转条数（只增）
+const replayOrderTotal = computed(() => sumOf(replayCounts))
+const replayClockText = computed(() => {
+  const t = replaySession.clockTs
+  if (!t) return '—'
+  const d = new Date(t)
+  return `${pad2(d.getHours())}:${pad2(d.getMinutes())}:${pad2(d.getSeconds())}.${String(d.getMilliseconds()).padStart(3, '0')}`
+})
+
 let stream = null
 let rafId = 0
 const timers = new Set()                   // 所有短时标记的定时器 —— 卸页时必须逐个清（否则回调打到已卸载的组件上）
@@ -521,7 +608,10 @@ const stateLabel = (k) => STATE_LABEL[k] || k || '—'
 
 /* ── 一段短时标记：加进 Set、`FLASH_MS` 后自动移除 ───────────────────────────────
    ⚠️ 三个 Set 用同一个手法（边 / 节点 / 行），但**各自独立**：一条边亮了不该顺带点亮别的。 */
-function flash(setRef, key) {
+function flash(setRef, key, ms = FLASH_MS, keepIfOn = false) {
+  // 回放用 `keepIfOn`：已经亮着的 key 不重新计时 —— 回放 10×、一帧可吐 200 条，
+  // 每条都重开一个定时器既浪费又会让高亮「永远不熄」。熄了之后再来才重新亮。
+  if (keepIfOn && setRef.value.has(key)) return
   const next = new Set(setRef.value)
   next.add(key)
   setRef.value = next
@@ -530,7 +620,7 @@ function flash(setRef, key) {
     const after = new Set(setRef.value)
     after.delete(key)
     setRef.value = after
-  }, FLASH_MS)
+  }, ms)
   timers.add(t)
 }
 
@@ -725,6 +815,98 @@ function absorbMoves(moves) {
   }
 }
 
+/* ── 回放：逐步重建状态机（2026-10-17 全链路联动）────────────────────────────────
+   数据源只有 `replaySession.stateChanges`（播放器从台账里摘出的 `kind=order` 事件，
+   含原 `from` / `to` 枚举名）。**没有**任何一条从这里读实时 `counts` —— 回放期间
+   SSE 已切断，实时口径在这几秒里本来就不存在，拿它会对不上时钟。 */
+function resetReplayState() {
+  STATES.forEach((s) => {
+    replayCounts[s.key] = 0
+    batchNodeHits[s.key] = 0
+  })
+  replayOrderState.clear()
+  replayRecentMoves.value = []
+  replayMoveCount.value = 0
+  replayApplied = 0
+  currentBatch.value = ''
+  counts.value = {}
+  batchCounts.value = null
+  activeEdges.value = new Set()
+  pulseNodes.value = new Set()
+  jumpIds.value = new Set()
+  openedId.value = ''
+}
+
+/**
+ * 应用**一条**回放流转到状态机。
+ *
+ * 角标口径（会加会减）：
+ *   · 首次见到这张单（台账里没有它的建单记录）⇒ 直接把它记在 `to`，**不**去减 `from`：
+ *     那张单在本簿里根本没被 `+1` 过，减了就是偷别的单的数。
+ *   · 之后按重建出的当前位置迁移：`tracked −1 / to +1`（下限 0，脏台账不画负数）。
+ *   · 台账若重复推同一条流转（`tracked === to`）⇒ 不再动角标，避免一张单被算两次；
+ *     但「经过次数」和明细仍照收（那是台账里真实存在的行）。
+ * 口径 `batchNodeHits`（只增）：每一条落点都 +1，与角标是两本账。
+ */
+function applyReplayChange(m, animate) {
+  const toKey = stateKeyOf(m.to)
+  // 认不出的节点：不猜、不动角标（明细里仍原样显示枚举名，见 `moveStateLabel`）。
+  if (!toKey) return
+  const fromKey = stateKeyOf(m.from)
+  const tracked = replayOrderState.get(m.orderId)
+  if (tracked === undefined) {
+    replayCounts[toKey] += 1
+  } else if (tracked !== toKey) {
+    replayCounts[tracked] = Math.max(0, replayCounts[tracked] - 1)
+    replayCounts[toKey] += 1
+  }
+  replayOrderState.set(m.orderId, toKey)
+
+  batchNodeHits[toKey] += 1
+  replayMoveCount.value += 1
+  replayRecentMoves.value = [{
+    seq: m.seq,
+    ts: m.ts,
+    orderId: m.orderId,
+    from: m.from,
+    to: m.to,
+    result: m.result,
+  }, ...replayRecentMoves.value].slice(0, REPLAY_RECENT_CAP)
+
+  if (!animate) return
+  flash(pulseNodes, toKey, REPLAY_FLASH_MS, true)
+  if (fromKey) {
+    const edgeId = `${fromKey}>${toKey}`
+    if (KNOWN_EDGES.has(edgeId)) flash(activeEdges, edgeId, REPLAY_FLASH_MS, true)
+  }
+}
+
+/**
+ * 把 `replaySession.stateChanges` 里**新到的**部分消费掉。
+ * `animate=false` 用于「回放中途才挂载本页」：把已经播过的流转一次性补建到当前时刻，
+ * 但不补闪 —— 那些高亮发生在过去，补闪等于把历史说成「刚刚」。
+ */
+function syncReplayChanges(animate) {
+  const list = replaySession.stateChanges
+  // 会话被重置（新回放 / 退出）⇒ 从头重建。正常情况下 `stateChanges` 只增不减。
+  if (replayApplied > list.length) {
+    resetReplayState()
+  }
+  for (let i = replayApplied; i < list.length; i += 1) {
+    applyReplayChange(list[i], animate)
+  }
+  replayApplied = list.length
+  counts.value = { ...replayCounts, total: replayOrderTotal.value }
+}
+
+/** 进入回放视图：切断实时流、重置本页口径、补建当前时刻的状态。 */
+function enterReplay() {
+  closeStream()
+  resetReplayState()
+  currentBatch.value = replaySession.batchId || ''
+  syncReplayChanges(false)
+}
+
 /* ── 数字滚动动画（0.3 秒）───────────────────────────────────────────────────
    ⚠️ 与 `MetricsPanel.vue` 同款：`KpiCard` 的 `value` 是**格式化好的字符串**，
    CSS transition 认不出 `1,234` → `1,256` 中间的帧 ⇒ 用 rAF 自己插值。
@@ -773,6 +955,10 @@ function onFrame(f) {
 }
 
 function connect() {
+  // 回放（含装载中）期间不连实时流：播放器控制三页的时钟，旁边再跑一条 SSE 就是两种时间并存。
+  // ⚠️ `loading` 也要拦：新回放启动时 `resetSession()` 会先把 `active` 置 false，
+  //    若只判 `active`，这一瞬间会先连上实时流、回放装载完再切断（白闪一帧实时数据）。
+  if (replaySession.active || replaySession.loading) return
   closeStream()
   errMsg.value = ''
   lost.value = null
@@ -814,9 +1000,30 @@ function closeStream() {
   lastFlashAt.clear()
 }
 
-onMounted(connect)
+onMounted(() => {
+  // 本页可能在回放已经跑起来之后才挂载（KeepAlive 失活再回来 / 从别的页切过来）
+  // ⇒ 先按 `stateChanges` 补建到当前时刻，不要再连实时流。
+  if (replaySession.active) enterReplay()
+  else connect()
+})
 // ⚠️ 切数据源（`正常` ⇄ `模拟日常`）⇒ 立刻重连（`connect()` 会先 `closeStream()`）。
 watch(() => demo.on, connect)
+// 开始/结束回放：切流 + 重置本页口径。⚠️ 退出后 `connect()` 才恢复实时。
+watch(() => replaySession.active, (on) => {
+  if (on) enterReplay()
+  else {
+    resetReplayState()
+    connect()
+  }
+})
+// 装载失败（没进回放、`loading` 落回 false）⇒ 恢复实时流。
+watch(() => replaySession.loading, (loading) => {
+  if (!loading && !replaySession.active) connect()
+})
+// 播放器每吐一批流转就响一次；只消费新到的尾部（`replayApplied`）。
+watch(() => replaySession.stateChanges.length, () => {
+  if (replaySession.active) syncReplayChanges(true)
+})
 onBeforeUnmount(closeStream)
 </script>
 
@@ -875,6 +1082,25 @@ onBeforeUnmount(closeStream)
 .a-tz-off {
   font-family: var(--font-mono);
   color: var(--brand-ink);
+}
+/* 回放状态条：用琥珀色边框把它和实时状态条分开（颜色 = 「这不是实时」）。 */
+.a-status--rp {
+  border-color: var(--c4);
+  background: var(--c4-ground, var(--surface-2));
+}
+.a-status--rp .a-chip-live {
+  color: var(--c4-ink, var(--brand-ink));
+  background: var(--c4-ground, var(--info-ground));
+}
+.a-of-rp-note {
+  margin: calc(-1 * var(--s2)) 0 var(--s4);
+  padding: var(--s2) var(--s3);
+  font-size: var(--fs-xs);
+  line-height: 1.6;
+  color: var(--ink-2);
+  background: var(--surface-2);
+  border-left: 3px solid var(--c4);
+  border-radius: var(--r1);
 }
 
 /* ── 通用件 ───────────────────────────────────────────────────────────────── */
@@ -938,6 +1164,44 @@ onBeforeUnmount(closeStream)
   font-size: var(--fs-sm);
   color: var(--ink-3);
   padding: var(--s4) 0;
+}
+
+/* ── 回放流转明细（只读清单）────────────────────────────────────────────────── */
+.a-of-rpm {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  max-height: 280px;
+  overflow-y: auto;
+}
+.a-of-rpm-i {
+  display: flex;
+  align-items: baseline;
+  gap: var(--s3);
+  padding: var(--s2) 0;
+  border-bottom: 1px dashed var(--line);
+  font-size: var(--fs-sm);
+}
+.a-of-rpm-i:last-child {
+  border-bottom: 0;
+}
+.a-of-rpm-t {
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+  color: var(--ink-3);
+  white-space: nowrap;
+}
+.a-of-rpm-d {
+  color: var(--ink-2);
+}
+.a-of-rpm-d b {
+  color: var(--ink);
+  font-weight: var(--fw-semi);
+}
+.a-of-rpm-r {
+  margin-left: auto;
+  font-size: var(--fs-xs);
+  color: var(--ink-3);
 }
 
 /* ── ② 计数卡 + 环图（左卡右环；窄屏堆叠）──────────────────────────────────── */
