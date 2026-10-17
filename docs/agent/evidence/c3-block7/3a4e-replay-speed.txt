@@ -1,0 +1,332 @@
+{
+  "at": "2026-10-17T07:56:51.649Z",
+  "checks": {
+    "replay-started": {
+      "ok": true,
+      "detail": {
+        "ok": true,
+        "record": "probe-protect-20261017 总 18407 · 拦下 16006 · 失败 0 （认不出身份） 角色 0 耗时 23.2 s 2026-10-17 15:55:58 库内 2026-10-17 07:55:58 ▾ 总请求 18407 拦下 16006 失败 0 耗时 23.2 s 本批事件台账 20"
+      }
+    },
+    "banner-present": {
+      "ok": true,
+      "detail": {
+        "buttons": [
+          "1x",
+          "2x",
+          "5x",
+          "10x"
+        ],
+        "active": "1x",
+        "speedText": "1× 时钟 · 1:1 不合并 · 每帧 ≤50 条",
+        "prog": "51",
+        "count": "进度 51 / 5,000",
+        "clock": "23:55:36.718",
+        "state": "播放中"
+      }
+    },
+    "four-speed-buttons": {
+      "ok": true,
+      "detail": [
+        "1x",
+        "2x",
+        "5x",
+        "10x"
+      ]
+    },
+    "default-1x": {
+      "ok": true,
+      "detail": {
+        "buttons": [
+          "1x",
+          "2x",
+          "5x",
+          "10x"
+        ],
+        "active": "1x",
+        "speedText": "1× 时钟 · 1:1 不合并 · 每帧 ≤50 条",
+        "prog": "51",
+        "count": "进度 51 / 5,000",
+        "clock": "23:55:36.718",
+        "state": "播放中"
+      }
+    },
+    "initial-progress-moves": {
+      "ok": true,
+      "detail": {
+        "buttons": [
+          "1x",
+          "2x",
+          "5x",
+          "10x"
+        ],
+        "active": "1x",
+        "speedText": "1× 时钟 · 1:1 不合并 · 每帧 ≤50 条",
+        "prog": "51",
+        "count": "进度 51 / 5,000",
+        "clock": "23:55:36.718",
+        "state": "播放中"
+      }
+    },
+    "click-5x": {
+      "ok": true,
+      "detail": {
+        "label": "5x"
+      }
+    },
+    "5x-active": {
+      "ok": true,
+      "detail": {
+        "active": "5x",
+        "speedText": "5× 时钟 · 1:1 不合并 · 每帧 ≤50 条 · 实测 318 条/秒",
+        "prog": "501",
+        "clock": "23:55:37.579",
+        "speed": null
+      }
+    },
+    "5x-progress-not-reset": {
+      "ok": true,
+      "detail": {
+        "before": 101,
+        "after": 518
+      }
+    },
+    "5x-progress-advances": {
+      "ok": true,
+      "detail": {
+        "before": 101,
+        "after": 518
+      }
+    },
+    "stats-consistent-when-paused": {
+      "ok": true,
+      "detail": {
+        "n": 568,
+        "sum": 568,
+        "sev": {
+          "protect": 153,
+          "info": 351,
+          "warn": 64
+        },
+        "sessionSev": {
+          "protect": 153,
+          "info": 351,
+          "warn": 64
+        },
+        "protectRate": "26.9",
+        "failRate": "11.3",
+        "left": [
+          "信息 351",
+          "防护 153",
+          "警告 64",
+          "错误 0"
+        ],
+        "right": [
+          "信息 351",
+          "防护 153",
+          "警告 64",
+          "错误 0"
+        ],
+        "prot": "防护拦截率 (protect) 26.9%",
+        "fail": "11.3 %"
+      }
+    },
+    "shot5-dom-consistent": {
+      "ok": true,
+      "detail": {
+        "before": {
+          "topN": 568,
+          "chips": [
+            "信息 351",
+            "防护 153",
+            "警告 64",
+            "错误 0"
+          ],
+          "sum": 568,
+          "fail": "11.3 %",
+          "prot": "防护拦截率 (protect) 26.9%",
+          "prog": "568"
+        },
+        "after": {
+          "topN": "568",
+          "chips": [
+            "信息 351",
+            "防护 153",
+            "警告 64",
+            "错误 0"
+          ],
+          "prot": "防护拦截率 (protect) 26.9%"
+        }
+      }
+    },
+    "click-1x": {
+      "ok": true,
+      "detail": {
+        "label": "1x"
+      }
+    },
+    "back-to-1x-active": {
+      "ok": true,
+      "detail": {
+        "active": "1x",
+        "speedText": "1× 时钟 · 1:1 不合并 · 每帧 ≤50 条",
+        "prog": "783",
+        "state": "播放中"
+      }
+    },
+    "1x-progress-not-reset": {
+      "ok": true,
+      "detail": {
+        "after5": 518,
+        "after1": 783
+      }
+    },
+    "shot1-dom-consistent": {
+      "ok": true,
+      "detail": {
+        "before": {
+          "topN": 783,
+          "chips": [
+            "信息 484",
+            "防护 207",
+            "警告 92",
+            "错误 0"
+          ],
+          "sum": 783,
+          "fail": "11.7 %",
+          "prot": "防护拦截率 (protect) 26.4%",
+          "prog": "783"
+        },
+        "after": {
+          "topN": "783",
+          "chips": [
+            "信息 484",
+            "防护 207",
+            "警告 92",
+            "错误 0"
+          ],
+          "prot": "防护拦截率 (protect) 26.4%"
+        }
+      }
+    }
+  },
+  "samples": {
+    "clicked": {
+      "ok": true,
+      "record": "probe-protect-20261017 总 18407 · 拦下 16006 · 失败 0 （认不出身份） 角色 0 耗时 23.2 s 2026-10-17 15:55:58 库内 2026-10-17 07:55:58 ▾ 总请求 18407 拦下 16006 失败 0 耗时 23.2 s 本批事件台账 20"
+    },
+    "initial": {
+      "buttons": [
+        "1x",
+        "2x",
+        "5x",
+        "10x"
+      ],
+      "active": "1x",
+      "speedText": "1× 时钟 · 1:1 不合并 · 每帧 ≤50 条",
+      "prog": "51",
+      "count": "进度 51 / 5,000",
+      "clock": "23:55:36.718",
+      "state": "播放中"
+    },
+    "after5x": {
+      "active": "5x",
+      "speedText": "5× 时钟 · 1:1 不合并 · 每帧 ≤50 条 · 实测 318 条/秒",
+      "prog": "501",
+      "clock": "23:55:37.579",
+      "speed": null,
+      "cursor": 518,
+      "before": 101
+    },
+    "settled5x": {
+      "n": 568,
+      "sum": 568,
+      "sev": {
+        "protect": 153,
+        "info": 351,
+        "warn": 64
+      },
+      "sessionSev": {
+        "protect": 153,
+        "info": 351,
+        "warn": 64
+      },
+      "protectRate": "26.9",
+      "failRate": "11.3",
+      "left": [
+        "信息 351",
+        "防护 153",
+        "警告 64",
+        "错误 0"
+      ],
+      "right": [
+        "信息 351",
+        "防护 153",
+        "警告 64",
+        "错误 0"
+      ],
+      "prot": "防护拦截率 (protect) 26.9%",
+      "fail": "11.3 %"
+    },
+    "shot5": {
+      "before": {
+        "topN": 568,
+        "chips": [
+          "信息 351",
+          "防护 153",
+          "警告 64",
+          "错误 0"
+        ],
+        "sum": 568,
+        "fail": "11.3 %",
+        "prot": "防护拦截率 (protect) 26.9%",
+        "prog": "568"
+      },
+      "after": {
+        "topN": "568",
+        "chips": [
+          "信息 351",
+          "防护 153",
+          "警告 64",
+          "错误 0"
+        ],
+        "prot": "防护拦截率 (protect) 26.9%"
+      }
+    },
+    "after1x": {
+      "active": "1x",
+      "speedText": "1× 时钟 · 1:1 不合并 · 每帧 ≤50 条",
+      "prog": "783",
+      "state": "播放中",
+      "cursor": 783,
+      "before": 518
+    },
+    "shot1": {
+      "before": {
+        "topN": 783,
+        "chips": [
+          "信息 484",
+          "防护 207",
+          "警告 92",
+          "错误 0"
+        ],
+        "sum": 783,
+        "fail": "11.7 %",
+        "prot": "防护拦截率 (protect) 26.4%",
+        "prog": "783"
+      },
+      "after": {
+        "topN": "783",
+        "chips": [
+          "信息 484",
+          "防护 207",
+          "警告 92",
+          "错误 0"
+        ],
+        "prot": "防护拦截率 (protect) 26.4%"
+      }
+    }
+  },
+  "ok": true,
+  "fail": []
+}

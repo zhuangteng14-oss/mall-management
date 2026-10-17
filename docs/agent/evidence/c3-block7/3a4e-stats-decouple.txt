@@ -1,0 +1,252 @@
+{
+  "at": "2026-10-17T07:43:20.914Z",
+  "checks": {
+    "injected-541": {
+      "ok": true,
+      "detail": {
+        "rawN": 541
+      }
+    },
+    "raw-severity-counts": {
+      "ok": true,
+      "detail": {
+        "error": 1,
+        "warn": 40,
+        "protect": 200,
+        "info": 300
+      }
+    },
+    "display-window-capped-200": {
+      "ok": true,
+      "detail": {
+        "displayEvents": 200
+      }
+    },
+    "agg-on-collapses-rows": {
+      "ok": true,
+      "detail": {
+        "streamRows": 3,
+        "aggChips": [
+          "× 159",
+          "× 40"
+        ]
+      }
+    },
+    "fail-rate-from-raw": {
+      "ok": true,
+      "detail": {
+        "failText": "7.6%",
+        "expected": "7.6%",
+        "detail": "41 / 541"
+      }
+    },
+    "protect-rate-from-raw": {
+      "ok": true,
+      "detail": {
+        "protText": "防护拦截率 (protect) 37.0%"
+      }
+    },
+    "left-right-severity-same": {
+      "ok": true,
+      "detail": {
+        "leftSev": [
+          "信息 300",
+          "防护 200",
+          "警告 40",
+          "错误 1"
+        ],
+        "rightSev": [
+          "信息 300",
+          "防护 200",
+          "警告 40",
+          "错误 1"
+        ]
+      }
+    },
+    "range-total-from-raw": {
+      "ok": true,
+      "detail": {
+        "readSum": "范围内合计541"
+      }
+    },
+    "agg-off-raw-rows": {
+      "ok": true,
+      "detail": {
+        "aggEnabled": false,
+        "domRows": 200,
+        "aggChips": []
+      }
+    },
+    "stats-identical-after-toggle": {
+      "ok": true,
+      "detail": {
+        "on": {
+          "rawN": 541,
+          "rawSev": {
+            "error": 1,
+            "warn": 40,
+            "protect": 200,
+            "info": 300
+          },
+          "failText": "7.6%",
+          "protText": "防护拦截率 (protect) 37.0%",
+          "leftSev": [
+            "信息 300",
+            "防护 200",
+            "警告 40",
+            "错误 1"
+          ]
+        },
+        "off": {
+          "rawN": 541,
+          "rawSev": {
+            "error": 1,
+            "warn": 40,
+            "protect": 200,
+            "info": 300
+          },
+          "failText": "7.6%",
+          "protText": "防护拦截率 (protect) 37.0%",
+          "leftSev": [
+            "信息 300",
+            "防护 200",
+            "警告 40",
+            "错误 1"
+          ]
+        }
+      }
+    },
+    "stats-identical-back-on": {
+      "ok": true,
+      "detail": {
+        "rawN": 541,
+        "rawSev": {
+          "error": 1,
+          "warn": 40,
+          "protect": 200,
+          "info": 300
+        },
+        "failText": "7.6%",
+        "protText": "防护拦截率 (protect) 37.0%"
+      }
+    }
+  },
+  "samples": {
+    "aggOn": {
+      "aggEnabled": true,
+      "rawN": 541,
+      "rawSev": {
+        "error": 1,
+        "warn": 40,
+        "protect": 200,
+        "info": 300
+      },
+      "rawKind": {
+        "audit": 1,
+        "stock": 40,
+        "protection": 200,
+        "cache": 300
+      },
+      "displayEvents": 200,
+      "streamRows": 3,
+      "domRows": 3,
+      "aggChips": [
+        "× 159",
+        "× 40"
+      ],
+      "leftSev": [
+        "信息 300",
+        "防护 200",
+        "警告 40",
+        "错误 1"
+      ],
+      "rightSev": [
+        "信息 300",
+        "防护 200",
+        "警告 40",
+        "错误 1"
+      ],
+      "readSum": "范围内合计541",
+      "failText": "7.6%",
+      "protText": "防护拦截率 (protect) 37.0%",
+      "topFailTitle": "业务失败率 = (警告 40 + 错误 1) ÷ 范围内原始事件 541 条；防护拦截 200 条不计入"
+    },
+    "aggOff": {
+      "aggEnabled": false,
+      "rawN": 541,
+      "rawSev": {
+        "error": 1,
+        "warn": 40,
+        "protect": 200,
+        "info": 300
+      },
+      "rawKind": {
+        "audit": 1,
+        "stock": 40,
+        "protection": 200,
+        "cache": 300
+      },
+      "displayEvents": 200,
+      "streamRows": 200,
+      "domRows": 200,
+      "aggChips": [],
+      "leftSev": [
+        "信息 300",
+        "防护 200",
+        "警告 40",
+        "错误 1"
+      ],
+      "rightSev": [
+        "信息 300",
+        "防护 200",
+        "警告 40",
+        "错误 1"
+      ],
+      "readSum": "范围内合计541",
+      "failText": "7.6%",
+      "protText": "防护拦截率 (protect) 37.0%",
+      "topFailTitle": "业务失败率 = (警告 40 + 错误 1) ÷ 范围内原始事件 541 条；防护拦截 200 条不计入"
+    },
+    "aggBackOn": {
+      "aggEnabled": true,
+      "rawN": 541,
+      "rawSev": {
+        "error": 1,
+        "warn": 40,
+        "protect": 200,
+        "info": 300
+      },
+      "rawKind": {
+        "audit": 1,
+        "stock": 40,
+        "protection": 200,
+        "cache": 300
+      },
+      "displayEvents": 200,
+      "streamRows": 3,
+      "domRows": 3,
+      "aggChips": [
+        "× 159",
+        "× 40"
+      ],
+      "leftSev": [
+        "信息 300",
+        "防护 200",
+        "警告 40",
+        "错误 1"
+      ],
+      "rightSev": [
+        "信息 300",
+        "防护 200",
+        "警告 40",
+        "错误 1"
+      ],
+      "readSum": "范围内合计541",
+      "failText": "7.6%",
+      "protText": "防护拦截率 (protect) 37.0%",
+      "topFailTitle": "业务失败率 = (警告 40 + 错误 1) ÷ 范围内原始事件 541 条；防护拦截 200 条不计入"
+    }
+  },
+  "ok": true,
+  "fail": []
+}

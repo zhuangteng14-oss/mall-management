@@ -20,12 +20,12 @@
             @click="togglePause"
           >{{ pauseLabel }}</button>
           <span v-if="frozen" class="cnt ev-buf" :title="`缓冲池上限 ${BUF_CAP} 条；超出时丢弃最旧的（已丢 ${fmtInt(bufDropped)} 条）`">{{ frozenText }}</span>
-          <!-- ⚠️ 这两个读数自 2026-10-16 起是**范围内**（受 ① 下排那个时间范围约束），
-               不是「本页已收」。两者不是一个数：本页已收 {{ fmtInt(events.length) }} 条是原始窗口，
-               范围内是它再按时间过一遍的结果 —— `title` 里把两个都写出来，免得读者自己猜。 -->
-          <div class="cell" :title="`本页已收 ${fmtInt(events.length)} 条（原始窗口，上限 ${EVENT_CAP}）；当前时间范围内 ${fmtInt(ranged.length)} 条`">
-            <b>{{ fmtInt(ranged.length) }}</b>
-            <span>范围内事件（上限 {{ EVENT_CAP }}）</span>
+          <!-- ⚠️ 统计口径（2026-10-17）：这个数是**压缩前的原始事件**再按时间过一遍的结果，
+               读 `rawWindow`（原始台账 ≤ RAW_CAP），**不是**展示窗口 `events`（≤ EVENT_CAP）。
+               聚合开关只影响 ③ 列表怎么画，这个数勾不勾都一样。 -->
+          <div class="cell" :title="`统计口径：范围内原始事件 ${fmtInt(rawWindow.n)} 条（压缩前，保留最近 ${RAW_CAP} 条）；展示窗口 ${fmtInt(events.length)} 条（上限 ${EVENT_CAP}，同类合并开关只影响列表）`">
+            <b>{{ fmtInt(rawWindow.n) }}</b>
+            <span>范围内原始事件（上限 {{ RAW_CAP }}）</span>
           </div>
           <div class="cell">
             <b>{{ fmtRate(rate) }}</b>
@@ -35,18 +35,29 @@
             <b>{{ fmtInt(rangedTraces.length) }}</b>
             <span>范围内链路（上限 {{ TRACE_CAP }}）</span>
           </div>
-          <!-- 错误率 —— 与右边那条三色条紧挨着（就近）。⚠️ 动效落点 10 在它身上。
-               ⚠️ 它是**本页窗口内累计**（warn+error / 窗口内事件），不是帧里本拍的 counts。 -->
-          <div class="cell err" :class="{ alert: errBad > 0 }" data-anim="10">
-            <b>{{ errRate }}<i>%</i></b>
-            <span>错误率 warn+error</span>
+          <!-- 业务失败率 —— 与右边那条四色条紧挨着（就近）。⚠️ 动效落点 10 在它身上。
+               ⚠️ 口径（2026-10-17 用户裁定）：分子 = warn + error，**绝不含 protect**；
+                  分母 = 范围内事件数。防护拦截率单独显示在右侧小字，不进 fail 分子。
+                  它是**本页窗口内累计**，不是帧里本拍的 counts。 -->
+          <div
+            class="cell err"
+            :class="{ alert: failBad > 0 }"
+            data-anim="10"
+            :title="`业务失败率 = (警告 ${fmtInt(sessionBySev.warn || 0)} + 错误 ${fmtInt(sessionBySev.error || 0)}) ÷ 范围内原始事件 ${fmtInt(rawWindow.n)} 条；防护拦截 ${fmtInt(sessionBySev.protect || 0)} 条不计入`"
+          >
+            <div class="errline">
+              <b>{{ failRate }}<i>%</i></b>
+              <em class="prot">防护拦截率 (protect) {{ protectRate }}%</em>
+            </div>
+            <span>业务失败率 (fail)</span>
           </div>
-          <!-- 严重度 mini 三色条（动效落点 9）：宽度 = 窗口内占比。它是 ④ 严重度横条的紧凑版。 -->
+          <!-- 严重度 mini 四色条（动效落点 9）：宽度 = 窗口内占比（蓝 → 紫 → 黄 → 红）。
+               ⚠️ 任何 > 0 的色块 `min-width: 4px`：小占比（尤其红色）也一定看得见。 -->
           <span class="sevmini" data-anim="9" :title="sevMiniTitle">
             <i
               v-for="s in SEVERITIES"
               :key="s"
-              :style="{ flexGrow: sessionBySev[s] || 0, background: severityColor(s) }"
+              :style="sevMiniStyle(s)"
             ></i>
           </span>
           <div class="cell">
@@ -140,6 +151,15 @@
               <span class="lab">搜索</span>
               <input v-model="q" class="box" type="text" placeholder="标题 / 明细 / traceId…" >
             </label>
+            <!-- 视图开关（用户 2026-10-17）：「同类合并（聚合）」只控制 ③ 列表怎么画；
+                 左侧统计 / 右侧分布 / Top-N / 失败率**永远读原始台账**，勾不勾都不变。 -->
+            <span class="ln">
+              <span class="lab">视图</span>
+              <label class="agg" :title="aggEnabled ? '列表把同一类 + 同一标题的事件合并成 ×N 一行；统计仍为原始总量' : '列表逐条显示原始事件（最多展示窗口 200 行）；统计仍为原始总量'">
+                <input v-model="aggEnabled" type="checkbox" :disabled="replaySession.active" >
+                <span>同类合并（聚合）</span>
+              </label>
+            </span>
             <span class="ln">
               <span class="lab">批次</span>
               <button type="button" class="chip" :class="{ on: !warnUp }" @click="warnUp = false">全部</button>
@@ -163,7 +183,7 @@
               <!-- ⚠️ 空 `.ic` 不是漏写：9 类那几行每行都有一个图标列，这里留一个等宽的占位，
                    否则「全部」这一行的勾选框/文字会与下面 9 行**对不齐**（用户在截图里一眼能看出）。 -->
               <span class="sw"></span><span class="ic"></span><span class="k">全部</span>
-              <span class="c">{{ fmtInt(ranged.length) }}</span>
+              <span class="c">{{ fmtInt(rawWindow.n) }}</span>
             </button>
             <button
               v-for="k in KINDS"
@@ -418,7 +438,7 @@
           <div class="ev-read">
             <span>本拍事件<i>{{ fmtInt(freshEvents) }}</i></span>
             <span>本拍链路<i>{{ fmtInt(freshTraces) }}</i></span>
-            <span>范围内合计<i>{{ fmtInt(ranged.length) }}</i></span>
+            <span>范围内合计<i>{{ fmtInt(rawWindow.n) }}</i></span>
             <span>丢帧<i>{{ fmtInt(droppedTotal) }}</i></span>
             <span>耗时 P50 / P95 / P99<i>{{ lat.p50 }} / {{ lat.p95 }} / {{ lat.p99 }} ms</i></span>
           </div>
@@ -655,7 +675,7 @@
 import { computed, nextTick, onActivated, onBeforeUnmount, onDeactivated, onMounted, reactive, ref, watch } from 'vue'
 import {
   Database, Lock, ShoppingCart, Package, Clipboard, Bell, AlertTriangle, Shield, ShieldCheck,
-  Info, AlertCircle, AlertOctagon,
+  Info, AlertCircle, AlertOctagon, ShieldAlert,
 } from '@lucide/vue'
 import { openEventStream } from '../../../api/observe'
 // 演示模式（块 7 收尾 ②）：`DemoModeToggle` 摆开关，`demo` 是被 `watch` 的那个状态，
@@ -691,19 +711,21 @@ import { orderActionLabel, orderStateLabel } from '../../../config/labels/order-
 //    两个访问器 —— 表是给人维护的，页面只认访问器（认不出回落原值的兜底就在访问器里）。
 import { apiLabel, lockLabel, cacheAreaLabel } from '../../../config/labels/api-labels'
 
-/** 本页自己累积的事件上限（2026-10-17 反压改造：1000 → 200）。
+/** **展示窗口**上限（2026-10-17 反压改造：1000 → 200；同日统计解耦后语义更明确）。
  *  ⚠️ 必须有：SSE 每秒推若干条，不封顶跑一晚上就是几万条。
- *  ⚠️ 这个数现在是**UI 反压的硬上限**（用户原话：Vue 的 `events` 最多只保留最近 200 条）：
- *     超出的当场丢弃，不进 Vue 的响应式图；原始数据另有 `rawBuf` 兜底（见下方「收帧」一节）。 */
+ *  ⚠️ 它只限制 `W.events`（③ 列表能显示的行数）：超出的当场丢弃，不进 Vue 的响应式图。
+ *     **统计不读它** —— 统计读 `RAW`（≤ `RAW_CAP`，压缩前的原始台账）。
+ *     ⇒ 列表最多 200 行，但「范围内原始事件 / 失败率 / 拦截率」可以是几百上千。 */
 const EVENT_CAP = 200
 
 /** 单次冲刷**安全渲染条数**（2026-10-17 用 `scripts/probes/c3b7-3a4d-backpressure.mjs` 实测）。
  *  判据：日志页分别注入 50 / 100 / 200 条，量 Vue diff + DOM 更新与本帧 Long Task（>50ms 计数）。
  *  实测 max tick ≈ 20–23 / 26–27 / 35–38 ms（多轮），三档 Long Task 均为 0 ⇒ 取最大档 200（也是 EVENT_CAP 上限）。
  *  产物：docs/agent/evidence/c3-block7/3a4d-backpressure-report.txt（常量与探针输出必须一致）。
- *  ⚠️ 它只决定**是否触发聚合**，不直接截断：batch ≤ 阈值 ⇒ 原样一条条展示。 */
+ *  ⚠️ 它现在只用于**探针遥测**（估算「若展示层合并会省多少行」，见 `aggStats`）：
+ *     展示层合并由用户开关控制，收帧阶段恒定存原始行并立即封顶 `EVENT_CAP`。 */
 const MAX_RENDER_PER_TICK = 200
-/** 聚合的最小重复次数：同 `kind + title` 在一拍里出现 ≥2 次才合并（单条低频业务不受影响）。 */
+/** 聚合的最小重复次数：同 `kind + title` 在一批里出现 ≥2 次才合并（单条低频业务不受影响）。 */
 const AGG_MIN_COUNT = 2
 /** 聚合过程计数（**非响应式**，只给探针取证用 —— 不改视图、不占渲染路径）。
  *  探针在真实 800 QPS 下读它，回答「聚合前多少条 / 聚合后多少条」。 */
@@ -737,10 +759,10 @@ const KIND_ICON = {
   cache: Database, lock: Lock, order: ShoppingCart, stock: Package, audit: Clipboard,
   notify: Bell, sensitive: AlertTriangle, identity: Shield, protection: ShieldCheck,
 }
-/** 严重度三档的图标（同一条裁定的后半句：「④ 严重度分布：info/warn/error 各加图标」）。
+/** 严重度四档的图标（「④ 严重度分布：每一档各加图标」；保护拦截 = 盾牌加感叹号）。
  *  ⚠️ 与 `KIND_ICON` 分开：严重度是**另一个维度**（同一类事件可以是 info 也可以是 error），
  *    两套图标各自独立，不互相借用。 */
-const SEV_ICON = { info: Info, warn: AlertCircle, error: AlertOctagon }
+const SEV_ICON = { info: Info, protect: ShieldAlert, warn: AlertCircle, error: AlertOctagon }
 /** ④ Top-N 榜的三档（值 = 数据取法，标签 = tab 文字）。 */
 const TOP_TAB = [['obj', '对象'], ['slow', '慢请求'], ['err', '错误']]
 
@@ -805,6 +827,27 @@ const W = reactive({
   demo: { events: [], traces: [], series: [], dropped: 0, seq: 0, ts: 0, rate: 0, freshE: 0, freshT: 0, mq: false },
 })
 
+/**
+ * 原始事件台账（**统计口径的唯一数据源**，2026-10-17 · 统计与聚合解耦）。
+ *
+ * <p>为什么不是直接数 `W[src].events`：那是**展示窗口**（200 条封顶），而且过去在收帧时就把
+ * 同类事件并成了 `×N` 一行 —— 统计跟着它走，几百次拦截就只剩个位数，左侧「信息 86」与右侧
+ * 「信息 107」也会因为各自读取时机不同而打架。
+ *
+ * <p>这里存**压缩前**的每一条原始事件（同一批对象引用，不复制字段）：
+ * · `RAW_CAP = 8192` 是统计窗口的上限（约 800 QPS 下 10 秒；本页单次打开足够用），
+ *   超出只丢**最旧**的，与展示窗口各丢各的、互不影响；
+ * · 普通数组 + `rawVer` 版本号：收帧时不进 Vue 响应式图（800 条/拍也不会触发深层 setter），
+ *   统计 computed 只依赖 `rawVer` 这一个整数。
+ * · ⚠️ 分源口径与 `W` 一致：切源不改数据，统计只读当前源。
+ */
+const RAW_CAP = 8192
+const RAW = {
+  normal: { events: [] },
+  demo: { events: [] },
+}
+const rawVer = ref(0)
+
 /* ── 页面状态 ───────────────────────────────────────────────────────────────── */
 const phase = ref('connecting')            // connecting | live | stopped
 const errMsg = ref('')
@@ -834,6 +877,10 @@ const openedTrace = ref('')                // ⑤ 抽屉打开的 traceId
 const openedEvent = ref(null)
 const drawerOpen = ref(true)               // ⑤ 是否拉起（塌着的时候只有一条 48px 的带）
 const q = ref('')                          // ② 搜索框
+/** ③ 是否「同类合并（聚合）」。⚠️ **只影响列表怎么画，不影响任何统计**：
+ *  勾选 = 同一 `kind + title` 合并成 `×N` 一行；取消 = 原始事件逐条显示（受展示窗口 200 条限制）。
+ *  左侧统计 / 右侧分布 / Top-N / 失败率与拦截率始终读 `RAW`（见 `rawWindow`）。 */
+const aggEnabled = ref(true)
 const objFilter = ref('')                  // ② 对象筛选（点 ③ 里的对象徽标填进来）
 const warnUp = ref(false)                  // ② ≥ WARN 快捷筛选
 const topTab = ref('obj')                  // ④ Top-N 当前档
@@ -989,6 +1036,7 @@ function techSegments(e) {
 function techTone(e, seg) {
   if (!seg || seg.key !== 'reason') return ''
   if (e.severity === 'error') return 'is-error'
+  if (e.severity === 'protect') return 'is-protect'
   if (e.severity === 'warn') return 'is-warn'
   return ''
 }
@@ -1323,30 +1371,68 @@ function recFor(tid) {
   return r && r.source === cur.value ? r : null
 }
 
-/** **范围内**按类计数（② 的行清单 / ④ 的横条）。⚠️ **本页自己攒的**，不是帧里那个本拍的
- *  `counts` —— 拿帧里的数当图例数字，每次静默的一拍上会全体归零。 */
-const sessionByKind = computed(() => {
-  const m = {}
-  for (const e of ranged.value) m[e.kind] = (m[e.kind] || 0) + 1
-  return m
+/**
+ * **范围内原始事件**的计数（② 的行清单 / ④ 的横条 / ① 的失败率与拦截率 / Top-N 的共同分母）。
+ *
+ * <p>数据源是 `RAW`（压缩前、未被 200 条展示窗口截断的原始台账），**不是** `ranged`：
+ * · `ranged` 来自 `W.events`，最多 200 条，且过去装的是收帧阶段就聚合过的行 ⇒ 几百次拦截只剩个位数；
+ * · 左侧「信息 86」与右侧「信息 107」就是两边各自读不同时机的压缩数据造成的 —— 现在**只有这一个**
+ *   计数口，左右必然一致；
+ * · 聚合开关只影响列表怎么画，不碰这里 ⇒ 勾选/取消勾选，统计数字绝对不变。
+ *
+ * <p>`rawVer` 是普通数组的版本号：收帧时只 `rawVer.value++`，统计 computed 依赖它重算，
+ * 800 条/拍的写入不经过 Vue 的深层响应式代理。
+ */
+const rawWindow = computed(() => {
+  void rawVer.value
+  const b = rangeBounds.value
+  const out = { n: 0, byKind: {}, bySev: {}, byObj: {}, byErr: {} }
+  for (const e of RAW[cur.value].events) {
+    if (b && (e.ts < b.from || e.ts > b.to)) continue
+    out.n += 1
+    out.byKind[e.kind] = (out.byKind[e.kind] || 0) + 1
+    out.bySev[e.severity] = (out.bySev[e.severity] || 0) + 1
+    // Top-N「对象」与「错误」也在这一趟里数完：它们必须和上面的总数来自**同一批**原始行，
+    // 否则榜单一换档就会出现「合计 800、榜上 3」这种看着像 bug 的对不上。
+    const o = objText(e)
+    if (o) out.byObj[o] = (out.byObj[o] || 0) + 1
+    if (e.severity === 'error') {
+      const k = `${kindLabel(e.kind)} · ${e.title}`
+      out.byErr[k] = (out.byErr[k] || 0) + 1
+    }
+  }
+  return out
 })
-const sessionBySev = computed(() => {
-  const m = {}
-  for (const e of ranged.value) m[e.severity] = (m[e.severity] || 0) + 1
-  return m
-})
+/** **范围内**按类计数（② 的行清单 / ④ 的横条）。原始口径，见 `rawWindow`。 */
+const sessionByKind = computed(() => rawWindow.value.byKind)
+const sessionBySev = computed(() => rawWindow.value.bySev)
 const kindMax = computed(() => Math.max(1, ...KINDS.map((k) => sessionByKind.value[k] || 0)))
 const sevMax = computed(() => Math.max(1, ...SEVERITIES.map((s) => sessionBySev.value[s] || 0)))
 function barW(v, mx) {
   return `${((v / mx) * 100).toFixed(1)}%`
 }
 
-/** ① 错误率 = (warn+error) / **范围内**事件。⚠️ 范围内累计，不是本拍。 */
-const errBad = computed(() => (sessionBySev.value.warn || 0) + (sessionBySev.value.error || 0))
-const errRate = computed(() => {
-  const total = ranged.value.length
-  return total ? ((errBad.value / total) * 100).toFixed(1) : '0.0'
+/** ① 业务失败率 = (warn+error) / **范围内**事件。⚠️ 防护拦截（protect）**不进分子**。 */
+const failBad = computed(() => (sessionBySev.value.warn || 0) + (sessionBySev.value.error || 0))
+const failRate = computed(() => {
+  const total = rawWindow.value.n
+  return total ? ((failBad.value / total) * 100).toFixed(1) : '0.0'
 })
+/** 防护拦截率单独一个口径：protect / 范围内原始事件。它只用于展示，不参与健康度判定。 */
+const protectRate = computed(() => {
+  const total = rawWindow.value.n
+  return total ? (((sessionBySev.value.protect || 0) / total) * 100).toFixed(1) : '0.0'
+})
+/** mini 四色条：flex-grow = 该级条数（⇒ 宽度 ≈ 占比）；>0 的块强制 4px，小占比不被吞。 */
+function sevMiniStyle(s) {
+  const n = sessionBySev.value[s] || 0
+  return {
+    flexGrow: n,
+    flexBasis: 0,
+    minWidth: n > 0 ? '4px' : '0',
+    background: severityColor(s),
+  }
+}
 const sevMiniTitle = computed(() =>
   SEVERITIES.map((s) => `${severityLabel(s)} ${fmtInt(sessionBySev.value[s] || 0)}`).join(' · '))
 
@@ -1395,7 +1481,14 @@ const filtered = computed(() => {
  * ⚠️ 数据侧不再截 200 行（`ROW_MAX` 已删）：截断改在 **DOM 侧**做窗口化（见下方
  *    `VIRTUAL_MIN` / `vRows`）—— 200 条数据都在，首屏只铺看得见的那几十行。
  */
-const streamRows = computed(() => buildStream(filtered.value.slice().reverse()))
+const streamRows = computed(() => {
+  // 聚合只发生在**显示层**（用户 2026-10-17）：
+  //   勾选 ⇒ 同一 `kind + title` 合并成 `×N` 一行；取消 ⇒ 原始事件逐条（`filtered` 本身来自
+  //   `W.events`，最多 EVENT_CAP=200 条，这就是「DOM 上限 200 行」）。
+  //   ⚠️ 回放永远不合并：查案要 1:1 还原（横幅上也写着「1:1 不合并」）。
+  const list = aggEnabled.value && !replaySession.active ? aggregateEvents(filtered.value) : filtered.value
+  return buildStream(list.slice().reverse())
+})
 
 /* ── ③ 窗口化渲染（虚拟滚动）───────────────────────────────────────────────────
    用户 2026-10-17 性能微调：1000 条数据在内存里，向上翻时掉帧。
@@ -1610,7 +1703,7 @@ function makeRow(mk, rail, gl, depth) {
     const sent = sentence(e, recFor(e.traceId))
     return Object.assign(base, {
       key: `e-${e.seq}`, kind: e.kind, color: kindColor(e.kind), sevColor: severityColor(e.severity),
-      t: hmsms(e.ts), lv: { info: 'INFO', warn: 'WARN', error: 'ERROR' }[e.severity] || '',
+      t: hmsms(e.ts), lv: { info: 'INFO', protect: 'PROTECT', warn: 'WARN', error: 'ERROR' }[e.severity] || '',
       md: kindLabel(e.kind),
       title: e.title, detail: e.detail, obj: objText(e), objId: String(e.objectId || ''),
       // 动态聚合行：`agg` = 合并了多少条同类（0 = 普通单条）。③ 的 `× N` 徽标读它。
@@ -1646,13 +1739,11 @@ function makeRow(mk, rail, gl, depth) {
 /* ── ④ Top-N 榜（三档）──────────────────────────────────────────────────────── */
 const topRows = computed(() => {
   const t = topTab.value
+  // ⚠️ obj / error 两档读 `rawWindow`（压缩前原始计数，与左右统计同一个口）——
+  //    不许再读 `ranged`：那是最多 200 条的展示窗口，榜单会与图例各说各话。
   if (t === 'obj') {
-    const m = new Map()
-    for (const e of ranged.value) {
-      const k = objText(e)
-      if (k) m.set(k, (m.get(k) || 0) + 1)
-    }
-    return [...m.entries()].sort((a, b) => b[1] - a[1]).slice(0, TOP_N).map(([k, n]) => [k, `${fmtInt(n)} 条`, ''])
+    return Object.entries(rawWindow.value.byObj)
+      .sort((a, b) => b[1] - a[1]).slice(0, TOP_N).map(([k, n]) => [k, `${fmtInt(n)} 条`, ''])
   }
   if (t === 'slow') {
     const m = new Map()
@@ -1663,13 +1754,8 @@ const topRows = computed(() => {
     }
     return [...m.entries()].sort((a, b) => b[1].ms - a[1].ms).slice(0, TOP_N).map(([k, v]) => [k, `${v.ms} ms`, `${v.n}`])
   }
-  const m = new Map()
-  for (const e of ranged.value) {
-    if (e.severity !== 'error') continue
-    const k = `${kindLabel(e.kind)} · ${e.title}`
-    m.set(k, (m.get(k) || 0) + 1)
-  }
-  return [...m.entries()].sort((a, b) => b[1] - a[1]).slice(0, TOP_N).map(([k, n]) => [k, `${n}`, ''])
+  return Object.entries(rawWindow.value.byErr)
+    .sort((a, b) => b[1] - a[1]).slice(0, TOP_N).map(([k, n]) => [k, `${n}`, ''])
 })
 
 /* ── ⑤ 链路展开 ─────────────────────────────────────────────────────────────── */
@@ -1768,7 +1854,10 @@ function forgetSeqs(e) {
 }
 
 /**
- * 动态同类聚合（2026-10-17 · 企业级背压）：只在**单拍超过渲染安全阈值**时启用。
+ * 同类聚合（**纯展示层**，2026-10-17 统计解耦后只在 `streamRows` 里调用）。
+ *
+ * <p>⚠️ 它返回的是**新对象**，绝不会写回 `W.events` / `RAW` —— 原始台账永远保留每一条，
+ * 所以开关一关就能逐条还原，统计也永远不受 `×N` 影响。
  *
  * <p>分组键 = `kind + title`（「不同类分开」：缓存 / 锁 / 订单 / 库存各自一组，标题也不同组）。
  * 同组 ≥ {@link AGG_MIN_COUNT} 次合并成一条：
@@ -1811,7 +1900,8 @@ function aggregateEvents(list) {
 
 /**
  * 收一拍的 `events`：去重（按 `seq`）→ 本拍内按 `ts`/`seq` **倒序**
- * →（单拍超阈值时）同类聚合 → 整批**前插** → 封顶。
+ * → 原始台账记账（`RAW`）→ 整批**前插**展示窗口 → 封顶 `EVENT_CAP`。
+ * ⚠️ **收帧阶段不聚合**（聚合只在 `streamRows` 的显示层）；展示窗口存的是原始行。
  * ⚠️ 存储是「新的在前」（列表渲染时翻成时间正序，见 `streamRows`）。
  * ⚠️ 「整批前插、不全局重排」是刻意的：后端一拍内的事件是**按环分组**的（`poll()` 一环一环并），
  *    照 `ts` 做全局重排会让用户正在看的行在两拍之间跳走。本拍内部排一次，正是为了把那个
@@ -1863,18 +1953,26 @@ function absorbEvents(batch, src, opts) {
   }
   if (!fresh.length) return
   fresh.sort((a, b) => b.ts - a.ts || b.seq - a.seq)
-  // 动态背压：单拍超过实测的渲染安全阈值 ⇒ 同类同标题合并；否则**原样一条条展示**。
-  // ⚠️ 聚合后仍可能超过 EVENT_CAP（全部是不同类且各出现一次时），下一步照旧封顶。
-  // ⚠️ **回放传 `{ noAgg: true }`**（用户 2026-10-17）：查案要 1:1 还原，同一类同标题的
-  //    两条也是两条独立事实（各有自己的时间戳），合并成 ×N 就是篡改录像。
-  const noAgg = !!(opts && opts.noAgg)
-  const next = !noAgg && fresh.length > MAX_RENDER_PER_TICK ? aggregateEvents(fresh) : fresh
+  // ── 原始台账：**先**记账，再谈展示。统计只认这里（见 `RAW` 上方注释）。
+  //   ⚠️ 放在聚合/封顶之前：被展示窗口挤掉的、被并成 `×N` 的，都得算进原始总量。
+  const raw = RAW[src]
+  raw.events.push(...fresh)
+  if (raw.events.length > RAW_CAP) raw.events.splice(0, raw.events.length - RAW_CAP)
+  rawVer.value += 1
+  // 展示窗口**不再在收帧时聚合**（2026-10-17 统计解耦）：`W[src].events` 保存原始行，
+  //   聚合改到 `streamRows` 的显示层，由 ② 的「同类合并（聚合）」开关控制。
+  //   ⇒ 取消勾选能立刻还原原始事件（收帧阶段就并掉的话，原始行已经不存在了）。
+  //   ⚠️ `next` 仍要封顶，展示数组恒 ≤ EVENT_CAP —— 800 条/拍不会整批铺进响应式图。
+  const next = fresh
+  // 探针口径（`aggStats`）保留「如果此刻展示层合并会省多少行」的计数：它只是遥测，不参与存储。
+  const noAgg = !!(opts && opts.noAgg) || replaySession.active
+  const viewPreview = !noAgg && fresh.length > MAX_RENDER_PER_TICK ? aggregateEvents(fresh) : fresh
   aggStats.flushes += 1
   aggStats.lastRaw = fresh.length
-  aggStats.lastView = next.length
+  aggStats.lastView = viewPreview.length
   aggStats.raw += fresh.length
-  aggStats.view += next.length
-  if (next.length < fresh.length) aggStats.aggregated += fresh.length - next.length
+  aggStats.view += viewPreview.length
+  if (viewPreview.length < fresh.length) aggStats.aggregated += fresh.length - viewPreview.length
   // ⚠️ 本拍自己就可能超过 `EVENT_CAP`（800 QPS 的一拍 ≈ 800 条，合并环冷启动一拍最多 2,048 条）。
   //    只夹旧数据不夹新数据的话，`next.concat(kept)` 仍会把整拍铺进响应式图 —— 上限形同虚设。
   //    排序是「新在前」⇒ 留下前 `EVENT_CAP` 条（最新的），多出来的当场丢弃。
@@ -1943,8 +2041,8 @@ function pushBuffer(batch, src, key) {
 
 /** 一帧：把当前源池子里的一小截并入视图（帧同步，见上方常量注释）。
  *  ⚠️ `frozen` / 回放 / 页面失活时**直接返回**（只入池）：暂停、上滚、回放都不许改 `events`。
- *  ⚠️ 大爆发（本帧池子 > `MAX_RENDER_PER_TICK`）整批交给 `absorbEvents`：那条路里有聚合，
- *     一次 800 条会被并成几十行；若仍按 5 条/帧取，聚合永远不触发、池子也永远追不平。 */
+ *  ⚠️ 大爆发（本帧池子 > `MAX_RENDER_PER_TICK`）整批交给 `absorbEvents`：一次 800 条
+ *     在收帧阶段就封顶到展示窗口（统计另记 `RAW`）；若仍按 5 条/帧取，池子永远追不平。 */
 function flushBuffer() {
   // 回放期间**只有回放会话**能往视图里写（它走 `onReplayBatch`，不经过这个池子）。
   // 这一条是「彻底切断实时数据」的兜底：即使关闭流时还有一帧在路上，也不会被并进来。
@@ -2102,10 +2200,15 @@ function clearBucket(src) {
   rawBuf[src].events.length = 0
   rawBuf[src].traces.length = 0
   rawBuf[src].dropped = 0
+  // ⚠️ 统计台账也必须清：不清的话，回放/切源时上一批原始事件会继续算进
+  //    「范围内事件 / 失败率 / 防护拦截率」，列表是空的、统计却有数。
+  RAW[src].events.length = 0
+  rawVer.value += 1
 }
 
 /** 回放会话吐出来的一批行 → 本页的事件窗口（与实时收帧同一条 `absorbEvents` 渲染链）。
- *  ⚠️ `noAgg: true`：回放**永不合并**（不允许 ×N 徽标），每一条都带自己的时间戳。 */
+ *  ⚠️ `noAgg: true`：回放**永不合并**（不允许 ×N 徽标），每一条都带自己的时间戳。
+ *     收帧阶段本来就不聚合；`noAgg` 只让探针遥测也按 1:1 计。 */
 function onReplayBatch(batch) {
   absorbEvents(batch, 'normal', { noAgg: true })
   if (pageActive.value && autoBottom.value && !paused.value) nextTick(scrollBottom)
@@ -2399,7 +2502,21 @@ onBeforeUnmount(() => {
   color: var(--ink-3);
 }
 .ev-status .cell.err {
-  min-width: 84px;
+  min-width: 168px;
+}
+.ev-status .cell.err .errline {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+/* 右侧小字：防护拦截率（紫）—— 与左侧红色业务失败率是**两个口径**，颜色也分开 */
+.ev-status .cell.err .prot {
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+  font-style: normal;
+  font-weight: var(--fw-normal);
+  color: var(--protect);
+  white-space: nowrap;
 }
 .ev-status .cell.err b {
   display: flex;
@@ -2420,7 +2537,8 @@ onBeforeUnmount(() => {
   border-bottom: 2px solid var(--danger);
   margin-bottom: -2px;
 }
-/* 严重度 mini 三色条：宽度 = 窗口内占比（动效落点 9） */
+/* 严重度 mini 四色条：宽度 = 窗口内占比（蓝 → 紫 → 黄 → 红；动效落点 9）
+   ⚠️ `min-width` 由模板按「该级 > 0 ⇒ 4px」逐块给；这里只保证不被压成 0。 */
 .ev-status .sevmini {
   display: flex;
   gap: 1px;
@@ -2431,6 +2549,7 @@ onBeforeUnmount(() => {
 }
 .ev-status .sevmini i {
   height: 100%;
+  flex-shrink: 1;
   transition: flex-grow 0.4s ease;
 }
 .cnt {
@@ -2581,6 +2700,21 @@ onBeforeUnmount(() => {
   font-size: var(--fs-xs);
   color: var(--ink-3);
   flex: 0 0 30px;
+}
+/* 「同类合并（聚合）」开关：勾选框 + 文案，与左侧 `.lab` 列对齐 */
+.ev-rail .agg {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: var(--fs-xs);
+  color: var(--ink-2);
+  cursor: pointer;
+  user-select: none;
+}
+.ev-rail .agg input {
+  margin: 0;
+  accent-color: var(--brand);
+  cursor: pointer;
 }
 .ev-rail .box {
   flex: 1 1 auto;
@@ -3474,6 +3608,7 @@ button.ev-bar {
    ⚠️ 不新增节点/行：颜色加在逐段渲染的同一个 `<span>` 上（段与段仍是 ` · ` 相连的一行文字）。 */
 .chain-i .d .tech .is-error { color: var(--danger); }
 .chain-i .d .tech .is-warn { color: var(--warning); }
+.chain-i .d .tech .is-protect { color: var(--protect); }
 
 /* ── ⑥ 开关栏（占位）───────────────────────────────────────────────────────── */
 .ev-switch {

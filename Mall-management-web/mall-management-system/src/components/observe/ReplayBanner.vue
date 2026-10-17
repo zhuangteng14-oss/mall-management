@@ -25,6 +25,20 @@
         这批台账共 {{ fmtInt(s.total) }} 条，本次按上限载入 {{ fmtInt(s.count) }} 条（limit={{ fmtInt(s.limit) }}）—— 回放的是前一段。
       </p>
     </div>
+    <!-- 倍速：1x / 2x / 5x / 10x。用户 2026-10-17：「默认 1 倍速；切档不重置进度」。
+         ⚠️ 只改 `replaySession.speed`（时钟倍率），不碰 cursor / virtualMs。 -->
+    <div class="a-rb-speeds" role="group" aria-label="回放倍速">
+      <button
+        v-for="sp in REPLAY_SPEEDS"
+        :key="sp"
+        type="button"
+        class="a-rb-sp"
+        :class="{ on: s.speed === sp }"
+        :aria-pressed="s.speed === sp"
+        :title="`${sp}x：每 1 秒墙钟推进 ${sp} 秒日志时间；切换不重置当前进度`"
+        @click="setReplaySpeed(sp)"
+      >{{ sp }}x</button>
+    </div>
     <div class="a-rb-act">
       <button
         v-if="!s.done"
@@ -54,7 +68,7 @@
 <script setup>
 import { computed } from 'vue'
 import {
-  replaySession as s, stopReplaySession, toggleReplayPause,
+  REPLAY_SPEEDS, replaySession as s, setReplaySpeed, stopReplaySession, toggleReplayPause,
 } from '../../api/replay-session'
 
 const fmtInt = (v) => Number(v || 0).toLocaleString('zh-CN')
@@ -173,6 +187,37 @@ const truncated = computed(() => s.count > 0 && s.limit > 0 && s.count >= s.limi
   margin: 0;
   font-size: var(--fs-xs);
   color: var(--ink-3);
+}
+.a-rb-speeds {
+  flex: 0 0 auto;
+  display: flex;
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid var(--line);
+  border-radius: var(--r1);
+  background: var(--surface);
+}
+.a-rb-sp {
+  font: inherit;
+  font-size: var(--fs-xs);
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-2);
+  background: transparent;
+  border: 0;
+  border-radius: var(--r1);
+  padding: 1px var(--s2);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.a-rb-sp:hover {
+  color: var(--ink);
+  background: var(--surface-2);
+}
+/* 当前档位：实心高亮（与横幅同族），不是只换字色 */
+.a-rb-sp.on {
+  color: var(--surface);
+  background: var(--warning);
+  font-weight: var(--fw-med);
 }
 .a-rb-act {
   flex: 0 0 auto;

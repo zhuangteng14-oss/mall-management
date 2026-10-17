@@ -108,7 +108,7 @@ class EventBroadcasterTest {
     // ================= severity 规则表 =================
 
     @Test
-    @DisplayName("severity 规则表：error ← result=error；warn ← 被挡/被拒/超时/降级/不足；其余 info")
+    @DisplayName("severity 规则表：error ← result=error；protect ← 身份拒绝；warn ← 业务被拒/超时/降级/不足；其余 info")
     void severityFollowsTheOneRuleTable() {
         stock.deduct(SKU, 1, StockMetrics.Deduct.INSUFFICIENT, 1_500L, null,
                 "防超卖拦截：扣减未命中（库存不足或 goods_sku 无此 SKU，需 1 件）");      // warn
@@ -124,7 +124,7 @@ class EventBroadcasterTest {
         sensitive.rejected("comment", 9, 10, "滚", 1_500L,
                 "敏感词拒收：命中比例 90% ≥ 40%（命中 9/10）");                   // warn
         identity.passed("C-1", "/goods/goodsUp", 1_500L);                    // info
-        identity.rejected("C-1", "令牌过期", "/goods/goodsUp", 1_500L);        // warn
+        identity.rejected("C-1", "令牌过期", "/goods/goodsUp", 1_500L);        // protect
         lock.acquire("order:create", "O-9", MallLockMetrics.Outcome.TIMEOUT, 3_000_000L,
                 "取锁超时：等待 3000 ms 未获得");  // warn（fail-open）
         cache.l1Request("goods", "k1", false, 1_500L);                       // info（miss 刻意不染黄）
@@ -137,9 +137,11 @@ class EventBroadcasterTest {
         //    （库存 → 审计 → …… → 锁 → 缓存）与断言里的顺序对不上，是**设计如此**，不是巧合。
         //    页面按 seq 排卡片 ⇒ 它看到的同拍顺序就是这个环序（全局时间序只有墙钟 ts 能还原）。
         assertThat(titlesOf(Severity.ERROR)).as("只有 result=error 才红").containsExactly("库存释放失败");
-        assertThat(titlesOf(Severity.WARN)).as("被挡 / 被拒 / 超时 / 不足 —— 页面配色靠这一档")
+        assertThat(titlesOf(Severity.PROTECT)).as("身份鉴权拒绝 = 防护拦截（紫），不算业务失败")
+                .containsExactly("身份拒绝");
+        assertThat(titlesOf(Severity.WARN)).as("真正的业务失败 / 降级 / 超时 —— 页面配色靠这一档")
                 .containsExactly("取锁超时（fail-open 直行）", "库存不足（未扣，防超卖命中）",
-                        "审计写入失败", "通知发送失败", "敏感词拒收", "身份拒绝");
+                        "审计写入失败", "通知发送失败", "敏感词拒收");
         assertThat(titlesOf(Severity.INFO)).as("成功路径 + miss/missing（不看这一档数「拦了多少」）")
                 .containsExactly("L1 未命中", "释放未命中（无该 SKU 行）", "审计写入",
                         "通知发送", "敏感词打码", "身份放行");
@@ -247,9 +249,9 @@ class EventBroadcasterTest {
     // ================= 第 9 类：防护（D 段 · commit 2） =================
 
     @Test
-    @DisplayName("防护环翻译：blocked 按 key 分标题（限流 / 熔断）、四档 warn、closed 落 info")
+    @DisplayName("防护环翻译：blocked 按 key 分标题（限流 / 熔断）、四档 protect、closed 落 info")
     void protectionRingIsTranslatedPerGate() {
-        // 两条 blocked 的 key 不同 —— 标题必须跟着分岔：两者都是 warn，但排障方向相反
+        // 两条 blocked 的 key 不同 —— 标题必须跟着分岔：两者都是 protect，但排障方向相反
         // （限流查流量、熔断查下游）。合并成一个标题就等于把两条线索糊成一条。
         protection.blocked("rateLimit", "inbound", "path=/goods/goodsSelectHome 每 1s 放 200 条，这一拍没有余量", null,
                 "入站限流：未取得令牌（limitForPeriod=200）");
@@ -265,9 +267,9 @@ class EventBroadcasterTest {
         broadcaster.poll();
 
         assertThat(severityOfAll())
-                .as("四档 warn，第五档 closed（恢复）刻意落 info —— 见类注释第 2 件")
-                .containsExactly("warn", "warn", "warn", "warn", "info", "warn");
-        assertThat(titlesOf(Severity.WARN)).containsExactly(
+                .as("四档 protect，第五档 closed（恢复）刻意落 info —— 见类注释第 2 件")
+                .containsExactly("protect", "protect", "protect", "protect", "info", "protect");
+        assertThat(titlesOf(Severity.PROTECT)).containsExactly(
                 "入站限流拦下", "熔断开路拒绝（未执行）", "熔断打开", "熔断半开（放行试探）", "线程池挤出（未排队）");
         assertThat(titlesOf(Severity.INFO)).containsExactly("熔断恢复关闭");
 
@@ -288,9 +290,9 @@ class EventBroadcasterTest {
                 "熔断打开：熔断器 degrade 已打开，本次调用未执行");
         broadcaster.poll();
 
-        assertThat(titlesOf(Severity.WARN)).as("不写「入站限流拦下」也不写「熔断开路拒绝」—— 两者都是猜")
+        assertThat(titlesOf(Severity.PROTECT)).as("不写「入站限流拦下」也不写「熔断开路拒绝」—— 两者都是猜")
                 .containsExactly("防护拦下：degrade");
-        assertThat(severityOfAll()).containsExactly("warn");
+        assertThat(severityOfAll()).containsExactly("protect");
     }
 
     // ================= 失败原因（块 7 · 阶段 3a.3 后续） =================

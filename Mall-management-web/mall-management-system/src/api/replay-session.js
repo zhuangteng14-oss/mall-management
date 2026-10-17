@@ -11,10 +11,12 @@
 //
 // 【时钟口径（用户 2026-10-17 的规格 + 「全链路联动」补充）】
 //   · 播放位置 `virtualMs` 是**日志时间偏移**，从 0 起；时钟按 **rAF**（≈16ms）推进，
-//     每帧推进 `speed × Δt`（缺省 10× ⇒ 1 秒墙钟放 10 秒日志）。
+//     每帧推进 `speed × Δt`。**缺省 1×**（1 秒日志 = 1 秒墙钟，用户 2026-10-17 改），
+//     横幅上可切 1x / 2x / 5x / 10x；切换**不重置** `virtualMs` / `cursor`。
 //   · 每帧上限 `maxPerFrame` 不是常数：装载完成后按该批次的**峰值事件密度**算
 //     `clamp(ceil(peakPerSec × speed / 60), 50, 200)`（50 = 用户定的基线，200 = 防一帧
 //     把主线程打爆的天花板）。稀疏批次 50 条/帧就够，密集批次自动放宽，**不靠 5 条/帧慢放**。
+//     切倍速时按新倍率**重算**这个上限（不重新装载，也不动播放位置）。
 //   · 到期但没吐完（上限真的被顶住）时，播放位置钳在已吐出的最后一条上，下一帧继续 ——
 //     三页才在同一秒；横幅如实显示「实际速率 / 本帧上限」，不拿 10× 冒充。
 //   · 播放是**本地时钟**：后端在装载之后不再参与（一次性的只读 SELECT）。
@@ -41,8 +43,10 @@ import { setDemoMode } from './demo-stream'
 
 /** 播放时钟节拍：**rAF**（帧同步，≈16ms）——由用户「不要抽帧感」那条指令定死。 */
 export const REPLAY_TICK_MS = 16
-/** 时间倍率：1 秒墙钟 = 10 秒日志（高密度批次会被每帧条数上限压低，横幅上已注明）。 */
-export const REPLAY_SPEED = 10
+/** 默认时间倍率：1 秒墙钟 = 1 秒日志（用户 2026-10-17：「点回放就直接 10× 狂奔」要改掉）。 */
+export const REPLAY_SPEED = 1
+/** 横幅上可选的倍速档位（声明序 = 按钮从左到右）。 */
+export const REPLAY_SPEEDS = [1, 2, 5, 10]
 /** 每帧吞吐的**基线**（用户 2026-10-17 最终定：50 条/帧起）。
  *  ⚠️ 真正生效的是 `replaySession.maxPerFrame`：装载后按批次峰值算
  *     `clamp(ceil(peakPerSec × speed / 60), 50, 200)`。稀疏批次就是 50；密集批次自动放宽，
@@ -116,15 +120,16 @@ let rateCount = 0
 /** 指标拍滚动保留数：页面窗口 60，留 10 倍余量给切页 / 暂停后回来。 */
 const METRIC_TICK_CAP = 600
 /** 每帧上限：按「峰值事件/日志秒 × 倍率 ÷ 60fps」算，夹在 [50, 200]。 */
-function adaptiveCap(rows) {
+function adaptiveCap(list, speed) {
   const buckets = new Map()
-  for (const r of rows) {
+  for (const r of list) {
     const sec = Math.floor(r.off / 1000)
     buckets.set(sec, (buckets.get(sec) || 0) + 1)
   }
   let peak = 0
   for (const n of buckets.values()) peak = Math.max(peak, n)
-  const need = Math.ceil((peak * REPLAY_SPEED) / 60)
+  const rate = Number(speed) > 0 ? Number(speed) : REPLAY_SPEED
+  const need = Math.ceil((peak * rate) / 60)
   return Math.max(REPLAY_MAX_PER_FRAME, Math.min(REPLAY_MAX_PER_FRAME_CEILING, need || 0))
 }
 
@@ -381,7 +386,7 @@ export async function startReplaySession(batchId, recordSnapshot) {
     replaySession.clockTs = t0
     replaySession.spanMs = Math.max(0, t1 - t0)
     // 自适应每帧上限：50 条/帧是下限，密集批次按峰值放宽（上限 200）。
-    replaySession.maxPerFrame = adaptiveCap(rows)
+    replaySession.maxPerFrame = adaptiveCap(rows, replaySession.speed)
     // ⚠️ 先 `active` 后 `loading`：日志页有一个 `loading: true→false` 的兜底 watch
     //    （装载失败时恢复实时流）—— 顺序反了会在成功的这一格误触发一次重连。
     replaySession.active = true
@@ -447,6 +452,23 @@ export function resumeReplaySession() {
 export function toggleReplayPause() {
   if (replaySession.paused) resumeReplaySession()
   else pauseReplaySession()
+}
+
+/**
+ * 切换播放倍率（横幅的 1x / 2x / 5x / 10x）。
+ * ⚠️ **只改倍率**：`virtualMs` / `cursor` / 已画出的行 / 指标拍一律不动 —— 用户点名
+ *    「不能点一下 2x 就从头开始」。下一帧的 `dt × speed` 自然按新倍率推进。
+ * ⚠️ `maxPerFrame` 按新倍率重算（高倍率下每秒要吐更多条）；重算只读已装载的 `rows`。
+ */
+export function setReplaySpeed(speed) {
+  const next = Number(speed)
+  if (!REPLAY_SPEEDS.includes(next) || next === replaySession.speed) return
+  replaySession.speed = next
+  replaySession.maxPerFrame = adaptiveCap(rows, next)
+  // 从「现在」重新计帧间隔：避免把切档前的那一小段按新倍率再算一遍。
+  lastNow = performance.now()
+  rateStart = 0
+  rateCount = 0
 }
 
 /** 退出回放：停表、放掉全量数组。日志页/指标页各自 watch `active` 恢复实时。 */

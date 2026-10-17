@@ -114,7 +114,8 @@ function pickWeighted(rnd, entries) {
 /* ══════════════════════════════════════════════════════════════════════════
    二、八类事件的「日常长什么样」
    ⚠️ 严重度**跟着标题走**（每条标题自带 `sev`），不另抽一次 —— 这是后端 `EventBroadcaster.severityOf`
-      那条判据的镜像：`error` ← 失败；`warn` ← 被挡/被拒/超时/降级/不足；其余 `info`。
+      那条判据的镜像：`error` ← 真失败；`protect` ← 防护拦截（身份鉴权拒绝等）；
+      `warn` ← 真正的业务失败 / 超时 / 降级 / 不足；其余 `info`。
       于是「绝大多数是 info」这件事由**标题的权重**自然给出（见每类第一、二条的 `w` 偏大）。
    ⚠️ `objectType` / `objectId` 的口径见 `observe-labels.js` 的 `OBJECT_FIELD_LABEL`：八类里
       这一格指的**不是同一种东西**（`cache` 是键、`order` 是订单号、`sensitive` 是命中的词…）。
@@ -244,7 +245,7 @@ const KIND_CONTENT = {
     ids: ['/api/order/create', '/api/goods/list', '/api/seckill/1'],
     titles: [
       { w: 8, sev: 'info', title: '身份放行', result: 'passed', dur: [10, 100] },
-      { w: 1, sev: 'error', title: '身份校验失败', result: 'rejected', reason: '令牌过期', dur: [10, 100] },
+      { w: 1, sev: 'protect', title: '身份校验失败', result: 'rejected', reason: '令牌过期', dur: [10, 100] },
     ],
   },
 }
@@ -574,7 +575,7 @@ function eventsFrame(w, nowMs, n) {
   for (let i = 0; i < n; i += 1) events.push(makeEvent(w, nowMs))
   w.seq += 1
   const counts = {}
-  const severity = { info: 0, warn: 0, error: 0 }
+  const severity = { info: 0, protect: 0, warn: 0, error: 0 }
   for (const e of events) {
     counts[e.kind] = (counts[e.kind] || 0) + 1
     severity[e.severity] += 1

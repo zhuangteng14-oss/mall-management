@@ -49,16 +49,17 @@ export const KIND_LABEL = {
 /**
  * tag → 色（**CSS 变量引用**，不是色值）。
  *
- * ⚠️ 九类落 `--c1`–`--c9`，`KINDS` 序一一对应。写 `var(--cN)` 而不是 `#hex`：本仓两套主题
+ * ⚠️ 前八类落 `--c1`–`--c8`，`KINDS` 序一一对应。写 `var(--cN)` 而不是 `#hex`：本仓两套主题
  *   （浅色 `:root` / 管理端 `html[data-theme="admin"]`）下这些名字**同名不同值**
  *   （`--c3` 浅色 `#00a64a` / 管理端 `#22c55e`）—— 硬编码色值会在另一套主题上错，
  *   而且错得不明显（都是绿）。见 `assets/tokens.css:200` / `:300` 两行。
- *   ⚠️ `--c9` 与 `--c10` **不是本文件新造的**：色板早就到 `--c10`（可视化段 commit 1 的图表十色）。
- *   第 9 类只是**第一次有事件环用到 `--c9`** ⇒ 防护环的类色与图表第 9 色**同一个值**（`#ec4899`）。
- *   这是取用既有色板、不新造色的取舍 —— 同页同时出现折线与卡片时，两处的粉指向不同东西。
+ *   ⚠️ 第 9 类 `protection` 自**块 7 指标口径重构（2026-10-17）**起改用 `var(--protect)`：
+ *   防护拦截在页面上的语义色统一为紫。原 `--c9`（粉 `#ec4899`）仍是图表第 9 色，只是
+ *   **不再兼作事件类色** —— 同页同时出现折线与卡片时，粉只指向图表。
  *
- * ⚠️ 与**严重度**色（`--info` / `--warning` / `--danger`）是**两套轴**：类色说「这是哪个环」，
+ * ⚠️ 与**严重度**色（`--info` / `--protect` / `--warning` / `--danger`）是**两套轴**：类色说「这是哪个环」，
  *   严重度色说「它好不好」。卡片上类色走左侧色条 + 图标，严重度色走角标 —— 不混用。
+ *   （唯一的刻意重合：`protection` 类色与 `protect` 严重度色同为紫 —— 这个环本身就是防护语义。）
  */
 export const KIND_COLOR = {
   cache: 'var(--c1)',
@@ -69,7 +70,7 @@ export const KIND_COLOR = {
   notify: 'var(--c6)',
   sensitive: 'var(--c7)',
   identity: 'var(--c8)',
-  protection: 'var(--c9)',
+  protection: 'var(--protect)',
 }
 
 /**
@@ -140,15 +141,24 @@ export const FALLBACK_ICON = ['M3.4 3.4h9.2v9.2H3.4z']
 export const FALLBACK_COLOR = 'var(--ink-3)'
 
 /**
- * 严重度三档（tag → 中文 + 色）。
+ * 严重度四档（tag → 中文 + 色）。
  *
  * ⚠️ 规则表**唯一的出处是后端**（`EventBroadcaster.severityOf`，类注释第 2 件）：
- *    `error` ← `result=error`；`warn` ← 被挡/被拒/超时/降级/不足；其余 `info`。
+ *    `error` ← `result=error`（真失败）；
+ *    `protect` ← 入站限流 / 熔断翻转 / 身份鉴权拒绝（防护层挡下，业务未执行）；
+ *    `warn` ← 真正的业务失败 / 降级 / 超时 / 不足（如库存不足、超卖拦截）；
+ *    其余 `info`。
  *    前端**不重推一遍**这条判据（两处判据迟早漂），只负责把帧里那个 tag 画成人话。
+ *
+ * ⚠️ `SEVERITIES` 的序 = 页面统计 / 四色占比条的**渲染序**：
+ *    蓝（info）→ 紫（protect）→ 黄（warn）→ 红（error），用户 2026-10-17 明令。
+ *    改序会同时改统计栏与进度条的分段顺序，两边一起看。
  */
-export const SEVERITY_LABEL = { info: '信息', warn: '警告', error: '错误' }
-export const SEVERITY_COLOR = { info: 'var(--info)', warn: 'var(--warning)', error: 'var(--danger)' }
-export const SEVERITIES = ['info', 'warn', 'error']
+export const SEVERITY_LABEL = { info: '信息', protect: '防护', warn: '警告', error: '错误' }
+export const SEVERITY_COLOR = {
+  info: 'var(--info)', protect: 'var(--protect)', warn: 'var(--warning)', error: 'var(--danger)',
+}
+export const SEVERITIES = ['info', 'protect', 'warn', 'error']
 
 /**
  * tag → **对象列**该叫什么（实时日志页那张卡片上「这事件动的是谁」那一格的说明词）。

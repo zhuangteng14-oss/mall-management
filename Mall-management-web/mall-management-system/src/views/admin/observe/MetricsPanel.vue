@@ -305,9 +305,14 @@
           <b>{{ replayNow ? fmt1(replayNow.qps) : '—' }}</b>
           <span>QPS（事件推算）</span>
         </div>
-        <div class="a-stat">
-          <b>{{ replayErrText }}</b>
-          <span>错误事件占比（本拍）</span>
+        <!-- 业务失败率（左大字）= (warn+error) ÷ 本拍事件数；防护拦截率（右小字，紫）单列。
+             ⚠️ 防空：protect 绝不进 fail 的分子 —— 大拦截量下 fail 必须仍然很低。 -->
+        <div class="a-stat a-stat--fail">
+          <div class="rp-fail">
+            <b>{{ replayFailText }}<i>%</i></b>
+            <em class="rp-prot">防护拦截率 (protect) {{ replayProtectText }}%</em>
+          </div>
+          <span>业务失败率 (fail)</span>
         </div>
         <div class="a-stat">
           <b>{{ replayP99Text }}</b>
@@ -324,7 +329,8 @@
         <b>回放指标由事件台账推算，非 HTTP 原始指标。</b>
         QPS = 该秒日志时间内吐出的事件条数（不是后端 `http.server.requests` 的请求量）；
         没有 4xx/5xx 拆分，也没有缓存命中 / 锁等待字段。延迟只统计带 `DurationUs` 的事件，
-        无样本时画断点而不是 0。
+        无样本时画断点而不是 0。业务失败率 =（警告 + 错误）÷ 本拍事件数，
+        <b>防护拦截（protect）单列，不计入失败率，也不参与健康度判定。</b>
       </p>
 
       <div class="mp-body">
@@ -351,18 +357,22 @@
               />
             </section>
 
-            <!-- ② 错误事件占比 -->
+            <!-- ② 业务失败率（红）vs 防护拦截率（紫）-->
             <section class="mp-chart">
               <div class="mp-chart-h">
-                <h3>错误事件占比</h3>
-                <span class="mp-chart-n">severity=error ÷ 本拍事件数 · 无事件的拍断开（不是 0）</span>
+                <h3>业务失败率 vs 防护拦截率</h3>
+                <span class="mp-chart-n">fail = (warn+error) ÷ 本拍事件数 · protect 单列，绝不进 fail 分子</span>
+                <span class="mp-legend" aria-hidden="true">
+                  <i class="lg-fail"></i>业务失败率
+                  <i class="lg-protect"></i>防护拦截率
+                </span>
               </div>
               <LineChart
-                :categories="replayXLabels" :series="replayErrorSeries"
+                :categories="replayXLabels" :series="replayFailSeries"
                 height="160px" :show-legend="false" :show-x-axis="false"
                 :grid-left="64" :grid-right="56" :grid-top="24" :grid-bottom="14"
                 boundary-gap y-min="0" y-max="100" y-formatter="{value}%"
-                :tooltip-formatter="replayErrorTooltip" :animation="false"
+                :tooltip-formatter="replayFailTooltip" :animation="false"
                 :loading="!replayRows.length && !replaySession.done"
                 empty-text="本批台账里还没有可推算的事件" @retry="connect"
               />
@@ -416,14 +426,14 @@
                 <div class="mp-kpi">
                   <span class="mp-kpi-k">本拍事件数</span>
                   <span class="mp-kpi-v"><b>{{ replayNow ? fmtInt(replayNow.count) : '—' }}</b><em>条</em></span>
-                  <span class="mp-kpi-d">其中 error {{ replayNow ? fmtInt(replayNow.errors) : '—' }} · warn {{ replayNow ? fmtInt(replayNow.warns) : '—' }}</span>
+                  <span class="mp-kpi-d">其中 protect {{ replayNow ? fmtInt(replayNow.protects) : '—' }} · warn {{ replayNow ? fmtInt(replayNow.warns) : '—' }} · error {{ replayNow ? fmtInt(replayNow.errors) : '—' }}</span>
                   <span class="mp-kpi-nospark">每 1 秒日志时间</span>
                 </div>
                 <div class="mp-kpi">
-                  <span class="mp-kpi-k">错误事件占比</span>
-                  <span class="mp-kpi-v"><b>{{ replayErrText }}</b><em>%</em></span>
-                  <span class="mp-kpi-d">错误 {{ replayNow ? fmtInt(replayNow.errors) : '—' }} / 事件 {{ replayNow ? fmtInt(replayNow.count) : '—' }}</span>
-                  <span class="mp-kpi-nospark">severity=error</span>
+                  <span class="mp-kpi-k">业务失败率 (fail)</span>
+                  <span class="mp-kpi-v"><b>{{ replayFailText }}</b><em>%</em></span>
+                  <span class="mp-kpi-d">warn+error {{ replayNow ? fmtInt(replayNow.fails) : '—' }} / 事件 {{ replayNow ? fmtInt(replayNow.count) : '—' }}</span>
+                  <span class="mp-kpi-nospark">防护拦截率 (protect) {{ replayProtectText }}%（不计入 fail）</span>
                 </div>
                 <div class="mp-kpi">
                   <span class="mp-kpi-k">P99 延迟</span>
@@ -621,8 +631,13 @@ const shown = reactive({ qps: 0, mean: 0, hitRate: 0, lockWait: 0 })
 const replayRows = computed(() => replaySession.metricTicks.slice(-WINDOW))
 const replayXLabels = computed(() => replayRows.value.map((r) => hms(r.ts)))
 const replayNow = computed(() => (replayRows.value.length ? replayRows.value[replayRows.value.length - 1] : null))
-const replayErrText = computed(() => (replayNow.value && replayNow.value.errorRate !== null
-  ? fmt1(replayNow.value.errorRate * 100)
+/** 业务失败率 = (warn+error) ÷ 本拍事件数。⚠️ protect 不在分子里。 */
+const replayFailText = computed(() => (replayNow.value && replayNow.value.failRate !== null
+  ? fmt1(replayNow.value.failRate * 100)
+  : '—'))
+/** 防护拦截率 = protect ÷ 本拍事件数（只展示，不进 failRate / 健康度）。 */
+const replayProtectText = computed(() => (replayNow.value && replayNow.value.protectRate !== null
+  ? fmt1(replayNow.value.protectRate * 100)
   : '—'))
 const replayP99Text = computed(() => (replayNow.value && replayNow.value.p99Ms !== null
   ? fmtInt(Math.round(replayNow.value.p99Ms))
@@ -651,12 +666,20 @@ const replayQpsSeries = computed(() => replayKindsPresent.value.map((k) => ({
   colorIndex: KINDS.indexOf(k) + 1,
   stack: 'rp-kind',
 })))
-const replayErrorSeries = computed(() => [{
-  name: '错误事件占比',
-  data: replayRows.value.map((r) => (r.errorRate === null ? null : r.errorRate * 100)),
-  colorIndex: 7,
-  area: true,
-}])
+const replayFailSeries = computed(() => [
+  {
+    name: '业务失败率',
+    data: replayRows.value.map((r) => (r.failRate === null ? null : r.failRate * 100)),
+    colorIndex: 7, // --c7 红
+    area: true,
+  },
+  {
+    name: '防护拦截率',
+    data: replayRows.value.map((r) => (r.protectRate === null ? null : r.protectRate * 100)),
+    colorIndex: 5, // --c5 紫
+    dashed: true,
+  },
+])
 const replayLatencySeries = computed(() => [
   {
     name: '均值',
@@ -700,12 +723,14 @@ function replayQpsTooltip(params) {
   return `<b>${replayXLabels.value[i]}</b><br/>事件 ${fmtInt(r.count)} 条（${fmt1(r.qps)} 条/秒）`
     + `<br/>${parts || '本秒没有事件'}`
 }
-function replayErrorTooltip(params) {
+function replayFailTooltip(params) {
   const i = params && params[0] ? params[0].dataIndex : -1
   const r = replayRows.value[i]
   if (!r) return ''
-  return `<b>${replayXLabels.value[i]}</b><br/>错误 ${fmtInt(r.errors)} / 事件 ${fmtInt(r.count)}`
-    + `<br/>占比 ${r.errorRate === null ? '—' : fmt1(r.errorRate * 100) + '%'}`
+  return `<b>${replayXLabels.value[i]}</b><br/>事件 ${fmtInt(r.count)} 条`
+    + `<br/>warn ${fmtInt(r.warns)} + error ${fmtInt(r.errors)} = fail ${fmtInt(r.fails)}`
+    + `<br/>业务失败率 ${r.failRate === null ? '—' : fmt1(r.failRate * 100) + '%'}`
+    + `<br/>防护拦截 ${fmtInt(r.protects)} · protect 率 ${r.protectRate === null ? '—' : fmt1(r.protectRate * 100) + '%'}（不计入 fail）`
 }
 function replayLatencyTooltip(params) {
   const i = params && params[0] ? params[0].dataIndex : -1
@@ -1912,6 +1937,27 @@ onBeforeUnmount(closeStream)
 /* ── 回放视图（全链路联动 · 2026-10-17）──────────────────────────────────── */
 .lg-mean { background: var(--c1); }
 .lg-p99 { background: var(--c4); }
+.lg-fail { background: var(--c7); }
+.lg-protect { background: var(--c5); }
+/* 业务失败率（左大字，红）+ 防护拦截率（右小字，紫）—— 两个口径并排但不相加 */
+.a-stat--fail { min-width: 248px; }
+.a-stat--fail .rp-fail {
+  display: flex;
+  align-items: baseline;
+  gap: var(--s3);
+}
+.a-stat--fail .rp-fail b i {
+  font-size: var(--fs-xs);
+  font-style: normal;
+  color: var(--ink-3);
+}
+.a-stat--fail .rp-prot {
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+  font-style: normal;
+  color: var(--protect);
+  white-space: nowrap;
+}
 .a-status--rp { border-color: var(--warning); }
 .mp-rp-warn {
   flex: 0 0 auto;

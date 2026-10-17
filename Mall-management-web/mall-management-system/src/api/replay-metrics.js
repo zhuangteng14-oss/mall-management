@@ -4,11 +4,14 @@
 //   后端 `/admin/observe/replay` 只回 `observed_event` 台账（事件），**没有**逐秒的 HTTP 指标帧
 //   （`MetricsHistoryService` 那个 60 拍窗口是全局实时环，不按批次、跑完就被覆盖）。
 //   本文件把「已经吐出来的事件」按**日志时间**做 1 秒滑动窗口，算出：
-//     QPS（事件吞吐）/ 错误事件占比 / 均值与 P99 延迟（仅 DurationUs 有值的样本）/ 按类计数。
+//     QPS（事件吞吐）/ 业务失败率（warn+error）/ 防护拦截率（protect）/ 均值与 P99 延迟
+//     （仅 DurationUs 有值的样本）/ 按类计数。
 //
 // 【口径边界（页面必须照抄，别把推算说成原始指标）】
 //   · 这不是 HTTP QPS：分母是「台账里的事件条数」，不是后端 `http.server.requests` 的请求数。
-//   · 没有 4xx/5xx 拆分：台账只有 `severity`（info/warn/error），没有状态码。
+//   · 没有 4xx/5xx 拆分：台账只有 `severity`（info/protect/warn/error），没有状态码。
+//   · 业务失败率 = (warn + error) ÷ 事件数；**protect 不在分子里**（限流/熔断/身份拒绝
+//     是「系统挡下了」，不是「业务失败」）。防护拦截率单列，不参与健康度判定。
 //   · 没有缓存命中率 / 锁等待：台账没有对应字段，本文件不猜。
 //   · `DurationUs` 只有部分事件有（审计 / 通知 / 身份 / 敏感词 / 限流拒绝等）⇒ 无样本时
 //     均值 / P99 一律 `null`（页面画断点），**不画 0** —— 0 ms 是「很快」，null 是「没测到」。
@@ -68,10 +71,12 @@ function sample(events, off, windowMs) {
   for (const k of KINDS) byKind[k] = 0
   let errors = 0
   let warns = 0
+  let protects = 0
   const durations = []
   for (const e of events) {
     if (e.kind && byKind[e.kind] !== undefined) byKind[e.kind] += 1
     if (e.severity === 'error') errors += 1
+    else if (e.severity === 'protect') protects += 1
     else if (e.severity === 'warn') warns += 1
     if (e.durationMs !== null && e.durationMs !== undefined) durations.push(e.durationMs)
   }
@@ -89,6 +94,14 @@ function sample(events, off, windowMs) {
     qps: count / seconds,
     errors,
     warns,
+    protects,
+    /** 业务失败数：warn + error。⚠️ **不含 protect**（用户 2026-10-17 裁定）。 */
+    fails: warns + errors,
+    /** 业务失败率 = (warn + error) ÷ 事件数。 */
+    failRate: count ? (warns + errors) / count : null,
+    /** 防护拦截率 = protect ÷ 事件数。只用于展示，不进 failRate / 健康度。 */
+    protectRate: count ? protects / count : null,
+    /** 旧口径（仅 error ÷ 事件数），保留给将来的「纯系统错误」视图；页面不再用它当失败率。 */
     errorRate: count ? errors / count : null,
     meanMs: mean === null ? null : Math.round(mean * 10) / 10,
     p99Ms: percentile(durations, 0.99),

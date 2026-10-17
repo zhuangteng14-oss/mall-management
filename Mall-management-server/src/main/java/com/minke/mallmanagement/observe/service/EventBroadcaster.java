@@ -53,16 +53,19 @@ import java.util.concurrent.atomic.AtomicLong;
  *       是**页面要的**，不是「环里有的」。翻译表逐条写在下面的 {@code fromXxx} 私有方法里。</li>
  *   <li><b>severity 规则（一处定义，九处适用）</b>：
  *       <pre>
- *       error  ← result = error（抛异常 / 真失败）
- *       warn   ← result ∈ {failed, rejected, timeout, degraded, skipped_degraded,
- *                          insufficient, lease_lost, blocked, opened, half_open, shed}
- *                —— 「被挡下 / 被拒 / 降级 / 抢不到 / 闸动了」
- *       info   ← 其余（成功路径、以及 miss / missing 这类「什么也没发生」）
+ *       error   ← result = error（抛异常 / 真失败）
+ *       protect ← 入站限流 / 熔断翻转（blocked / opened / half_open / shed）与身份鉴权拒绝
+ *                 —— 「防护层主动挡下，业务没有被执行」；页面用紫色，**不计入业务失败率**
+ *       warn    ← result ∈ {failed, rejected, timeout, degraded, skipped_degraded,
+ *                          insufficient, lease_lost, retry_failed}
+ *                 —— 「真的业务失败 / 降级 / 重试仍失败」（如库存不足、超卖拦截）
+ *       info    ← 其余（成功路径、以及 miss / missing 这类「什么也没发生」）
  *       </pre>
  *       ⚠️ 它是**展示口径**（页面据此配色），不是契约 —— 改它只影响日志页的颜色，
  *       不影响任何计数。⚠️ {@code miss} / {@code missing} 刻意留在 info：
  *       本环回答「**发生了什么**」，把每一次未命中都染成黄/红会让整屏都是警告色。
- *       想读「防护拦了多少」请走指标（那是 {@link MetricsSnapshotService} 的活）。
+ *       ⚠️ 防护拦截（protect）**既不是 warn 也不是 error**：它是系统按预期挡住了请求，
+ *       业务失败率（warn+error）与健康度（只看 error / P99）都不含它。
  *       ⚠️ D 段第九环的 {@code closed}（熔断试探通过、恢复关闭）也刻意留在 info：
  *       那是**恢复**，染成黄/红会让「闸刚救回来一次」看起来像又一次故障。</li>
  *   <li><b>游标 + 合并环</b>：每个源记一个「已并入的最大 seq」（初始 -1 = 空环）；
@@ -154,9 +157,9 @@ public class EventBroadcaster {
         }
     }
 
-    /** 严重度三档（规则见类注释第 2 件）。 */
+    /** 严重度四档（规则见类注释第 2 件）。 */
     public enum Severity {
-        INFO("info"), WARN("warn"), ERROR("error");
+        INFO("info"), PROTECT("protect"), WARN("warn"), ERROR("error");
 
         public final String tag;
 
@@ -750,7 +753,7 @@ public class EventBroadcaster {
         Map<String, Object> fields = new LinkedHashMap<>();
         fields.put("subject", e.subject());
         fields.put("reason", e.reason());
-        return new Emit(passed ? Severity.INFO.tag : Severity.WARN.tag,
+        return new Emit(passed ? Severity.INFO.tag : Severity.PROTECT.tag,
                 passed ? "身份放行" : "身份拒绝", detail, fields);
     }
 
@@ -760,7 +763,9 @@ public class EventBroadcaster {
      *
      * <p>⚠️ 标题按「**哪道闸 + 哪一档**」拼，不按 result 一档一个标题：{@code blocked} 同时来自
      * 入站限流与熔断开路，而这两者的排障方向相反（前者查流量、后者查下游），挤成同一个标题
-     * 会让人读错方向。severity 仍走 {@link #severityOf} 那唯一一处规则（四档都是 warn）。
+     * 会让人读错方向。severity 仍走 {@link #severityOf} 那唯一一处规则：
+     * blocked / opened / half_open / shed 四档是 {@link Severity#PROTECT}（防护拦截），
+     * retry_failed 是真失败 ⇒ {@link Severity#WARN}。
      */
     private static Emit fromProtection(ProtectionEvent e) {
         String result = String.valueOf(e.result());
@@ -834,15 +839,17 @@ public class EventBroadcaster {
             case "skipped_degraded":
             case "insufficient":
             case "lease_lost":
-            // ↓ D 段第九环（防护）的这几档：闸拦下了 / 闸自己翻转了 / 重试又失败了 ——
+            // ↓ D 段第九环（防护）里唯一算「真失败」的一档：重试又失败了。
             //   ⚠️ closed（熔断恢复关闭）与 retry_success（重试成功）**不在这里**：
             //   那是恢复，不是故障（理由写在类注释第 2 件里）。
+            case "retry_failed":
+                return Severity.WARN.tag;
+            // ↓ 防护层主动挡下 / 闸自己翻转：业务没有被执行，既不算 warn 也不算 error。
             case "blocked":
             case "opened":
             case "half_open":
             case "shed":
-            case "retry_failed":
-                return Severity.WARN.tag;
+                return Severity.PROTECT.tag;
             default:
                 return Severity.INFO.tag;
         }

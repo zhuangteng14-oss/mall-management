@@ -84,9 +84,10 @@ class EventStreamServiceTest {
 
         @SuppressWarnings("unchecked")
         Map<String, Object> bySeverity = (Map<String, Object>) frame.get("severity");
-        assertThat(bySeverity).containsOnlyKeys("info", "warn", "error");
-        assertThat(bySeverity).as("ok 一条 = info；insufficient 与 failed 各一条 = warn；无 error")
-                .containsEntry("info", 1).containsEntry("warn", 2).containsEntry("error", 0);
+        assertThat(bySeverity).containsOnlyKeys("info", "protect", "warn", "error");
+        assertThat(bySeverity).as("ok 一条 = info；insufficient 与 failed 各一条 = warn；无 protect / error")
+                .containsEntry("info", 1).containsEntry("protect", 0)
+                .containsEntry("warn", 2).containsEntry("error", 0);
     }
 
     @Test
