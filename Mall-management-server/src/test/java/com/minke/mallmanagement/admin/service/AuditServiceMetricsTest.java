@@ -8,12 +8,16 @@ import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
+
+import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 
 /**
  * 块 7 · commit 2b —— 审计环的**真观测点**（{@code AuditService.record}）钉三件事：
@@ -88,5 +92,22 @@ class AuditServiceMetricsTest {
         assertThat(metrics.recentEvents()).singleElement()
                 .satisfies(e -> assertThat(e.actor()).isNull());
         assertThat(registry.counter(WRITES, "result", "written").count()).isEqualTo(1.0d);
+    }
+
+    @Test
+    @DisplayName("TargetId 超列宽 128 ⇒ 截断后写入，整条审计行不再丢（实测：清场汇总 130+ 字符）")
+    void longTargetIdIsTruncatedBeforeInsert() {
+        String longId = "共 893634 行（" + "x".repeat(200) + "）";
+
+        service.record(ACTOR, "observe.attack.cleanup", "attack", longId, null, Map.of("order", 57206));
+
+        ArgumentCaptor<String> captured = ArgumentCaptor.forClass(String.class);
+        verify(dao).insert(any(), any(), any(), any(), captured.capture(), any(), any());
+        assertThat(captured.getValue())
+                .as("varchar(128) 是列宽，超出会被 MySQL 整行拒绝")
+                .hasSize(128).endsWith("…");
+        assertThat(registry.counter(WRITES, "result", "written").count())
+                .as("截断后走的是成功路径 —— 这正是修复的判据")
+                .isEqualTo(1.0d);
     }
 }
