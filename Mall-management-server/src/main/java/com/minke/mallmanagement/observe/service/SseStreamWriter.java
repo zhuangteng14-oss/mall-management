@@ -3,6 +3,7 @@ package com.minke.mallmanagement.observe.service;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 import org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBody;
@@ -11,6 +12,12 @@ import java.io.IOException;
 import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.Map;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Supplier;
 import java.util.regex.Pattern;
 
@@ -88,13 +95,34 @@ public class SseStreamWriter {
     private final ObjectMapper mapper;
     private final long intervalMs;
     private final int maxTicks;
+    private final long idleTimeoutMs;
 
+    /**
+     * 空闲看门狗（A7 · 块 7 收尾）。⚠️ 必须 daemon：本仓自建线程一律守护，否则非守护线程会把 JVM 拖住
+     * （见 {@code ObservePoolConfig} 的同款理由）。单线程足够 —— 每个任务只做一次纳秒比较，
+     * 真正阻塞的是 {@code out.close()}，而它通常立刻返回。
+     */
+    private static final ScheduledExecutorService WATCHDOG =
+            Executors.newSingleThreadScheduledExecutor(r -> {
+                Thread t = new Thread(r, "sse-idle-watchdog");
+                t.setDaemon(true);
+                return t;
+            });
+
+    /** 测试 / 手工构造用（默认空闲超时 30 秒，与生产一致）。 */
+    public SseStreamWriter(ObjectMapper mapper, long intervalMs, int maxTicks) {
+        this(mapper, intervalMs, maxTicks, 30_000L);
+    }
+
+    @Autowired
     public SseStreamWriter(ObjectMapper mapper,
                            @Value("${mall.observe.sse.interval-ms:1000}") long intervalMs,
-                           @Value("${mall.observe.sse.max-ticks:0}") int maxTicks) {
+                           @Value("${mall.observe.sse.max-ticks:0}") int maxTicks,
+                           @Value("${mall.observe.sse.idle-timeout-ms:30000}") long idleTimeoutMs) {
         this.mapper = mapper;
         this.intervalMs = Math.max(0L, intervalMs);
         this.maxTicks = Math.max(0, maxTicks);
+        this.idleTimeoutMs = Math.max(0L, idleTimeoutMs);
     }
 
     /**
@@ -119,12 +147,39 @@ public class SseStreamWriter {
             //    调用方若把本方法返回的响应体缓存起来复用，状态也不会跨连接串。
             FrameSource source = frames.get();
             long tick = 0;
+            // A7（块 7 收尾）：空闲超时在**本层**实现，不改 `spring.mvc.async.request-timeout=-1`
+            // （那是 commit 10b 的刻意选择：容器在 30s 掐断会把正常长连接一起杀掉）。
+            // 判据是「连续 idleTimeoutMs 没有一次**成功写出**」——不是「没有新事件」：
+            // 每秒一帧本身是心跳，写不出去（客户端半死 / 网络黑洞）才是需要断开的状态。
+            AtomicLong lastWriteNanos = new AtomicLong(System.nanoTime());
+            AtomicBoolean idleFired = new AtomicBoolean(false);
+            ScheduledFuture<?> idleGuard = null;
+            if (idleTimeoutMs > 0) {
+                long idleNanos = TimeUnit.MILLISECONDS.toNanos(idleTimeoutMs);
+                long period = Math.max(50L, Math.min(intervalMs <= 0 ? 50L : intervalMs, 1_000L));
+                idleGuard = WATCHDOG.scheduleAtFixedRate(() -> {
+                    if (System.nanoTime() - lastWriteNanos.get() <= idleNanos) {
+                        return;
+                    }
+                    if (idleFired.compareAndSet(false, true)) {
+                        log.info("[observe] {} 流空闲超过 {} ms 未成功写出 ⇒ 主动断开", tag, idleTimeoutMs);
+                    }
+                    try {
+                        // ⚠️ 从看门狗线程 close：目的是让阻塞中的 write/flush 立刻抛异常退出。
+                        //    正常收工时本任务已被 cancel，不会走到这里。
+                        out.close();
+                    } catch (IOException ignored) {
+                        // 已经断了：什么都不用做。
+                    }
+                }, period, period, TimeUnit.MILLISECONDS);
+            }
             try {
                 while (maxTicks <= 0 || tick < maxTicks) {
                     if (tick > 0) {
                         Thread.sleep(intervalMs);
                     }
                     writeFrame(out, source.frame(tick));
+                    lastWriteNanos.set(System.nanoTime());
                     tick++;
                 }
                 log.debug("[observe] {} 流按 max-ticks={} 正常结束", tag, maxTicks);
@@ -137,6 +192,10 @@ public class SseStreamWriter {
                 //    ⇒ 这是**正常的终态**，按 debug 记一行即可，不 WARN、不重试。
                 //    其余（含 FrameSource 自己抛）同样只记不吞：流结束 = 页面看得见（前端 onerror/close）。
                 log.debug("[observe] {} 流结束：{}", tag, e.toString());
+            } finally {
+                if (idleGuard != null) {
+                    idleGuard.cancel(false);
+                }
             }
         };
     }

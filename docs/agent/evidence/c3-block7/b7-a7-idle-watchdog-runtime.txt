@@ -1,0 +1,26 @@
+A7 · SSE 空闲看门狗的**运行时**实证（强制短阈值）
+================================================================
+时间      ：2026-10-17 18:25:51 – 18:26:05（Asia/Shanghai）
+实例      ：dev profile · 第二个实例 PID 38816 · http://127.0.0.1:8091
+启动参数  ：--mall.observe.sse.idle-timeout-ms=1500 --mall.observe.sse.interval-ms=3000
+            （刻意让「节拍 3000 ms」> 「空闲阈值 1500 ms」⇒ 首帧之后必然进空闲）
+
+命令
+  curl -sN -X POST -d x=1 http://127.0.0.1:8091/admin/observe/events/stream -o a7-short-stream.txt
+
+实测（原文）
+  curl_rc=0 elapsed_ms=2548 bytes=316 frames=1
+  2026-10-17 18:26:02.645  INFO 38816 --- [e-idle-watchdog] []
+    c.m.m.observe.service.SseStreamWriter : [observe] events 流空闲超过 1500 ms 未成功写出 ⇒ 主动断开
+
+判读
+  1. 首帧立即写出（1 帧，316 字节），此后节拍 3000 ms 未到，看门狗在 ~2.5 s 时判定
+     「连续 1500 ms 没有一次成功写出」⇒ 从 sse-idle-watchdog 线程主动断开。
+  2. curl 正常退出（rc=0）——流是被服务端结束的，不是客户端超时。
+  3. 生产默认值下（interval 1000 ms、idle 30000 ms）每秒都有成功写出 ⇒ 健康流**不会**
+     被看门狗误杀；此前 50 s 长连接实测未断开，与本条一致。
+  4. 判据口径：这里的"空闲"= **没有一次成功写出**（含心跳），不是"没有新事件"。
+     这样半死连接（写阻塞）会被掐断，而安静的页面（没有新事件但心跳在写）保持在线。
+
+补充：确定性单测 SseStreamWriterIdleTest（2 条，负向"写阻塞必断" + 正向"正常写不许断"）
+      覆盖同一行为，不依赖真实时钟与网络。
