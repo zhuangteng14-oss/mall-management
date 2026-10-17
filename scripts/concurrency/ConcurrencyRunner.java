@@ -1094,6 +1094,33 @@ public class ConcurrencyRunner {
         return n;
     }
 
+    /**
+     * 等入站限流（{@code InboundRateLimitInterceptor}：每 1 秒放行 200 条）翻到新一拍再发请求。
+     *
+     * <p>为什么必须等：限流是**固定刷新窗口**，一个 burst 是 20~40 条同栅栏齐发。若整批
+     * 落在窗口尾部、余量不足，会**整批**收到 429「请求过于频繁」——不是部分失败。
+     * CI run 39057108728 的 A-S4a-4：{@code succ=0} 符合期望，但 20 条业务 msg 一条都
+     * 没命中，而相邻的 A-S4a-1/-2/-3 全绿；同一轮 B2 的 loginAdd 实测到 3 条 429。
+     * ⇒ 最合理的解释是这一批落在窗口尾部被整批打回（**是推断，非该批响应的实测**；
+     * 本笔新增的 {@code codes=} 会在复发时直接打出状态码分布）。同理，C 组紧跟 S4b 的
+     * 120 QPS 负载后会撞上尚未刷新的桶 —— 那一条有直接证据（A-C6-1 的 6 条探针全 429）。
+     *
+     * <p>1.2s &gt; {@code REFRESH_PERIOD=1s} ⇒ 一定跨过刷新点；等待期间没有请求
+     * ⇒ 起跑时是满桶 200，足够一个 burst。
+     */
+    static void freshLimitWindow() throws InterruptedException {
+        Thread.sleep(1200);
+    }
+
+    /** 一批响应的 HTTP 状态分布（如 {@code {200=20}} / {@code {429=20}}）——把「业务拒绝」与「被限流」分开。 */
+    static String codeHist(List<Call> cs) {
+        Map<Integer, Integer> m = new LinkedHashMap<>();
+        for (Call c : cs) {
+            m.merge(c.r.code, 1, Integer::sum);
+        }
+        return m.toString();
+    }
+
     static int count5xx(List<Call> cs) {
         int n = 0;
         for (Call c : cs) {
@@ -1597,6 +1624,9 @@ public class ConcurrencyRunner {
         Map<String, String> idOf = new LinkedHashMap<>();
         StringBuilder preStates = new StringBuilder();
         boolean preBuilt = true;
+        // S4a 紧跟在 S3（10 单 × 20 线程 = 200 请求）之后；先等一拍，别让 setup 的
+        // 9 条写请求撞上 S3 尾部的空桶（症状会是 A-S4a-0「前置态没建成」）。
+        freshLimitWindow();
         for (int k = 0; k < keys.length; k++) {
             String id = ns() + "-S4a" + keys[k];
             idOf.put(keys[k], id);
@@ -1652,27 +1682,37 @@ public class ConcurrencyRunner {
         String dlyMsg = "订单不存在或未付款或已发货/已收货";
         String rcvMsg = "订单未付款或已收货";
 
+        // c1 可以不等：它和 setup 共用同一拍（9 + 20 = 29 ≪ 200）。c2 起每个 burst 前等一拍，
+        // 否则整批可能落在窗口尾部，被 429 整批打回（见 freshLimitWindow 的注释）。
         List<Call> c1 = burst(20, i -> call("dly-U", send(HTTP, o.baseUrl + "/order/orderDeliveryIfUp", form("orderId", idOf.get("U")))));
-        settle(a1, countSuccess(c1) == 0 && countMsg(c1, dlyMsg) == 20, "succ=" + countSuccess(c1) + " msg 命中=" + countMsg(c1, dlyMsg));
+        settle(a1, countSuccess(c1) == 0 && countMsg(c1, dlyMsg) == 20,
+                "succ=" + countSuccess(c1) + " msg 命中=" + countMsg(c1, dlyMsg) + " codes=" + codeHist(c1));
 
+        freshLimitWindow();
         List<Call> c2 = burst(20, i -> call("dly-P", send(HTTP, o.baseUrl + "/order/orderDeliveryIfUp", form("orderId", idOf.get("P")))));
-        settle(a2, countSuccess(c2) == 1, "succ=" + countSuccess(c2));
+        settle(a2, countSuccess(c2) == 1, "succ=" + countSuccess(c2) + " codes=" + codeHist(c2));
 
+        freshLimitWindow();
         List<Call> c3 = burst(20, i -> call("dly-PDR", send(HTTP, o.baseUrl + "/order/orderDeliveryIfUp", form("orderId", idOf.get("PDR")))));
-        settle(a3, countSuccess(c3) == 0, "succ=" + countSuccess(c3));
+        settle(a3, countSuccess(c3) == 0, "succ=" + countSuccess(c3) + " codes=" + codeHist(c3));
 
+        freshLimitWindow();
         List<Call> c4 = burst(20, i -> call("rcv-U", send(HTTP, o.baseUrl + "/order/orderReceiveIfUp", form("orderId", idOf.get("U")))));
-        settle(a4, countSuccess(c4) == 0 && countMsg(c4, rcvMsg) == 20, "succ=" + countSuccess(c4) + " msg 命中=" + countMsg(c4, rcvMsg));
+        settle(a4, countSuccess(c4) == 0 && countMsg(c4, rcvMsg) == 20,
+                "succ=" + countSuccess(c4) + " msg 命中=" + countMsg(c4, rcvMsg) + " codes=" + codeHist(c4));
 
+        freshLimitWindow();
         List<Call> c5 = burst(20, i -> call("rcv-PR", send(HTTP, o.baseUrl + "/order/orderReceiveIfUp", form("orderId", idOf.get("PR")))));
-        settle(a5, countSuccess(c5) == 0, "succ=" + countSuccess(c5));
+        settle(a5, countSuccess(c5) == 0, "succ=" + countSuccess(c5) + " codes=" + codeHist(c5));
 
+        freshLimitWindow();
         List<Call> c6 = burst(20, i -> call("rcv-PD", send(HTTP, o.baseUrl + "/order/orderReceiveIfUp", form("orderId", idOf.get("PD")))));
-        settle(a6, countSuccess(c6) == 1, "succ=" + countSuccess(c6));
+        settle(a6, countSuccess(c6) == 1, "succ=" + countSuccess(c6) + " codes=" + codeHist(c6));
 
         // A-S4a-7：同一未付款单上 pay 与 delivery 同时释放。delivery 的 WHERE 要求 PayIf=1，
         // 故它最多在 pay 提交之后成功一次；不变式 NOT(DeliveryIf=1 AND PayIf=0) 是此项的真正判据。
         String raceId = ns() + "-S4aRACE";
+        freshLimitWindow();
         Resp rr = send(HTTP, o.baseUrl + "/order/orderAdd", orderForm(raceId, 0, 0, 0));
         final Map<String, String> payF = form("orderId", raceId);
         List<Call> c7 = burst(40, i -> call(i % 2 == 0 ? "pay-race" : "dly-race",
@@ -1887,7 +1927,7 @@ public class ConcurrencyRunner {
      * 退出码却是 0」的组合。
      */
     static void c(Opt o) throws InterruptedException {
-        Thread.sleep(1200);   // 等入站限流 200/s 的令牌桶刷新（CI 39056399205：C/A-C6 探针 6/6 被 429）
+        freshLimitWindow();   // CI 39056399205：C/A-C6 探针 6/6 被入站限流打成 429
         String lock0 = lockCounters(o);
         Ass a1 = ass("C-1", "时间线行数 == 四端点 success 之和（各端点 success 另与状态机预测值比对）", true);
         Ass a2 = ass("C-2", "时间线可重放：首行 from=NONE、逐行首尾相接、末行 to == order 表现值", true);
