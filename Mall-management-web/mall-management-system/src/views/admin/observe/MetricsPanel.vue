@@ -1,8 +1,6 @@
 <template>
   <section class="a-mp">
-    <!-- ── ① 健康度大字 + 状态条（与 `StatsPage.vue` / `AuditPage.vue` 同款，不另立一套）──
-         ⚠️ 「健康度」是后端算的（`MetricsSnapshotService.health()`），本页**不重算**：
-         阈值是演示口径（5xx ≥5% 红 / P99 ≥1000ms 红 / 锁或 L2 降级黄），重算一遍迟早与后端走岔。 -->
+    <!-- ── ① 状态带：健康度由后端算（`MetricsSnapshotService.health()`），本页不重算 ───── -->
     <header class="a-status">
       <div class="a-stat">
         <b class="a-hv" :class="'a-hv--' + healthLevel">
@@ -26,201 +24,361 @@
       <DemoModeToggle />
     </header>
 
-    <!-- ⚠️ 断线条的判据是 `lost`、**不是** `errMsg`（块 7 · commit 10c）：
-         服务端**正常收尾**（`onEnd(null)`）时 `errMsg` 一路为空，而那种情况下不提示
-         就等于「KPI 静静停在上一次连接的那一拍」—— 面板上一切正常、其实早就不更新了。 -->
-    <p v-if="lost" class="a-flash bad">
+    <p v-if="lost" class="a-flash" :class="lost.err ? 'bad' : 'warn'">
       {{ lostText }}
       <button type="button" class="a-btn" @click="connect">立即重连</button>
     </p>
 
-    <!-- 健康度的「判据」（后端 `health.reasons`）。⚠️ 绿色时这一串**常常不是空的** ——
-         后端在健康态填的是「L1 命中率 94.2%」这类**正面**理由（见 `health()` 的 else 分支），
-         故标题叫「判据」不叫「告警」：叫告警会在全绿时显示一行看起来像故障的话。
-         ⚠️ 但它**也可能是空的**：那条正面理由只在 `cache.hitRate != null` 时才补（`health()` :383），
-         而没流量时 `hitRate` 就是 `null` ⇒ 真起服务看到的第一帧正是 `reasons: []`
-         （2026-10-14 对 dev 后端实测）。故这里是 `v-if="length"`，不是无条件渲染。 -->
     <ul v-if="healthReasons.length" class="a-reasons" :class="'a-reasons--' + healthLevel">
       <li v-for="(r, i) in healthReasons" :key="i">{{ r }}</li>
     </ul>
 
-    <!-- ══ ② 4 个 KPI 卡 ══════════════════════════════════════════════════════
-         ⚠️ 环比口径 = **本拍 vs 本窗口（近 60 秒）均值**，不是「较昨日」（本页没有日粒度基线）。
-         均值把当前这一拍也算进去了，所以它是「高于/低于近期水位」而不是严格的前后对比 ——
-         这一条必须写在卡上（`delta-label`），否则读者会按「较上一拍」理解，
-         而 1 秒粒度的前后差全是噪声。分母为 0（如锁等待恒为 0）时**不画箭头**、退回 `hint`。 -->
-    <h2 class="a-h2">本拍指标 <span class="a-h2n">每秒 1 拍 · 缺值显示 — 而不是 0</span></h2>
-    <div class="a-kpis">
-      <KpiCard
-        label="QPS" glyph="metrics" unit="次/秒"
-        :value="first ? '—' : fmt1(shown.qps)"
-        :delta="first ? null : delta.qps" delta-label="较 60 秒均值" :delta-text="dtext.qps"
-        :hint="'本拍请求 ' + fmtInt(tickCount) + ' 次'" :loading="first"
-      />
-      <KpiCard
-        label="P99 延迟" glyph="metrics" unit="ms" inverse
-        :value="p99 === null ? '—' : fmtInt(Math.round(shown.p99))"
-        :delta="first ? null : delta.p99" delta-label="较 60 秒均值" :delta-text="dtext.p99"
-        :hint="'全站分位数的上界近似（各序列取最大）'" :loading="first"
-      />
-      <KpiCard
-        label="缓存命中率" glyph="metrics" unit="%"
-        :value="hitRate === null ? '—' : (shown.hitRate * 100).toFixed(1)"
-        :delta="first ? null : delta.hitRate" delta-label="较 60 秒均值" :delta-text="dtext.hitRate"
-        :hint="'L1 命中 / (命中 + 未命中)'" :loading="first"
-      />
-      <KpiCard
-        label="锁等待次数" glyph="metrics" unit="次" inverse
-        :value="first ? '—' : fmtInt(Math.round(shown.lockWait))"
-        :delta="first ? null : delta.lockWait" delta-label="较 60 秒均值" :delta-text="dtext.lockWait"
-        :hint="'全部锁名本拍 timeouts 之和'" :loading="first"
-      />
-    </div>
-
-    <!-- ══ ③ QPS 面积图（滚动 60 秒）══════════════════════════════════════════ -->
-    <h2 class="a-h2">
-      QPS · 滚动 {{ WINDOW }} 秒
-      <span class="a-h2n">每秒 1 点 · 新点从右进、旧点从左出 · 前 {{ WINDOW }} 拍之外不留</span>
-    </h2>
-    <div class="a-card">
-      <LineChart
-        :categories="xLabels" :series="[{ name: 'QPS', data: qpsSeries, area: true }]"
-        height="220px" :show-legend="false" y-formatter="{value}"
-        :loading="first" :error="errMsg" empty-text="还没收到第一拍" @retry="connect"
-      />
-    </div>
-
-    <!-- ══ ④ 缓存命中率折线（滚动 60 秒）═══════════════════════════════════════ -->
-    <h2 class="a-h2">
-      缓存命中率 · 滚动 {{ WINDOW }} 秒
-      <span class="a-h2n">本拍无请求的拍点留空（不断线连成 0）</span>
-    </h2>
-    <div class="a-card">
-      <LineChart
-        :categories="xLabels" :series="[{ name: '命中率', data: hitSeries }]"
-        height="220px" :show-legend="false" y-formatter="{value}%" :y-min="0" :y-max="100"
-        :loading="first" :error="errMsg" empty-text="还没收到第一拍" @retry="connect"
-      />
-    </div>
-
-    <!-- ══ ⑤ 锁竞争热力图（锁名 × 时间）═══════════════════════════════════════
-         ⚠️ **`HeatmapChart.vue` 的首次调用点**（《块 7 参考》§8.3：该组件此前零调用点）。
-         口径：行 = 锁名，列 = 拍点，颜色深浅 = 该锁**本拍超时数**（`locks[].timeouts`）。 -->
-    <h2 class="a-h2">
-      锁竞争热力图 <span class="a-h2n">行 = 锁名 · 列 = 最近 {{ WINDOW }} 拍 · 越深 = 本拍超时越多</span>
-    </h2>
-    <div class="a-card">
-      <HeatmapChart
-        :x-labels="xLabels" :y-labels="lockNames" :data="heatData" value-name="超时数"
-        height="260px" :loading="first" :error="errMsg"
-        empty-text="窗口内没有任何锁活动" @retry="connect"
-      />
-    </div>
-
-    <!-- ══ ⑥ 防护命中柱状图（8 类）═════════════════════════════════════════════ -->
-    <h2 class="a-h2">
-      防护命中 · 8 类 <span class="a-h2n">本拍增量（不是累计）· 含「缓存命中」这种正面计数</span>
-    </h2>
-    <div class="a-card">
-      <BarChart
-        :categories="protLabels" :series="[{ name: '本拍命中', data: protValues }]"
-        height="240px" :show-legend="false" :max-bar-width="26"
-        :loading="first" :error="errMsg" empty-text="还没收到第一拍" @retry="connect"
-      />
-    </div>
-
-    <!-- ══ ⑦ 库存水位（多 SKU 进度条）═════════════════════════════════════════
-         ⚠️ 这一段是全页**唯一**一次真查询（后端 `stock()`），且它会**独立失败**：
-         `available=false` 时该段不可用，但**流继续推**（见后端注释）⇒ 这里画成灰条 + 说明，
-         不把整页判成错误。 -->
-    <h2 class="a-h2">
-      库存水位 <span class="a-h2n">Stock / BaselineStock · 只列有基线的前 {{ STOCK_MAX }} 个 SKU</span>
-    </h2>
-    <div class="a-card">
-      <p v-if="!stockAvailable" class="a-empty">
-        {{ first ? '还没收到第一拍。' : '本拍库存水位读取失败（后端已标注为不可用，流仍在推）—— 不是「库存为 0」。' }}
-      </p>
-      <p v-else-if="!stockRows.length" class="a-empty">库里有基线的 SKU 一个都没有（先把演示基线打上）。</p>
-      <ul v-else class="a-bars">
-        <li v-for="r in stockRows" :key="r.sku" class="a-bar">
-          <div class="a-bar-k">
-            <span class="a-bar-name">{{ r.goodName || '（无商品名）' }}</span>
-            <span class="a-bar-sku">{{ r.sku }}<template v-if="r.axisName"> · {{ r.axisName }}</template></span>
+    <!-- ── ② 主体：左时间栈 / 右实体栏 ───────────────────────────────────────────
+         ⚠️ 滚动容器（`.mp-body`）与两栏网格（`.mp-grid`）**必须分开**：若让同一个元素既是
+         `overflow-y:auto` 又是 `display:grid`，固定高度下右栏会比左栏高、溢出部分不计入
+         `scrollHeight` ⇒ 库存区底部会被裁掉且滚不到（3a.4 实测）。网格高度交给内容撑。 -->
+    <div class="mp-body">
+      <div class="mp-grid">
+      <div class="mp-stack">
+        <!-- QPS 堆叠 -->
+        <section class="mp-chart">
+          <div class="mp-chart-h">
+            <h3>QPS · 堆叠</h3>
+            <span class="mp-chart-n">成功 / 4xx / 5xx · 每秒</span>
+            <span class="mp-legend" aria-hidden="true">
+              <i class="lg-ok"></i>成功
+              <i class="lg-4xx"></i>4xx
+              <i class="lg-5xx"></i>5xx
+            </span>
           </div>
-          <div class="a-bar-track">
-            <div
-              class="a-bar-fill"
-              :class="barTone(r)"
-              :style="{ width: barWidth(r) }"
-              :title="barTitle(r)"
-            ></div>
+          <BarChart
+            :categories="xLabels" :series="qpsChartSeries"
+            height="200px" :show-legend="false" :show-x-axis="false"
+            :grid-left="64" :grid-right="56" :grid-top="24" :grid-bottom="14"
+            value-formatter="{value}" :tooltip-formatter="qpsTooltip" :animation="false"
+            :loading="first" :error="errMsg" empty-text="还没收到第一拍" @retry="connect"
+          />
+        </section>
+
+        <!-- 命中率：命中/未命中柱 + 命中率线 -->
+        <section class="mp-chart">
+          <div class="mp-chart-h">
+            <h3>缓存命中率</h3>
+            <span class="mp-chart-n">柱 = 命中/未命中计数（左轴）· 虚线 = 命中率（右轴 0–100）</span>
+            <span class="mp-legend" aria-hidden="true">
+              <i class="lg-hit"></i>命中
+              <i class="lg-miss"></i>未命中
+              <i class="lg-rate"></i>命中率
+            </span>
           </div>
-          <div class="a-bar-n">
-            <b>{{ r.stock === null ? '—' : fmtInt(r.stock) }}</b>
-            <span>/ {{ r.baseline === null ? '—' : fmtInt(r.baseline) }}</span>
+          <LineChart
+            :categories="xLabels" :series="hitChartSeries"
+            height="170px" :show-legend="false" :show-x-axis="false"
+            :grid-left="64" :grid-right="56" :grid-top="24" :grid-bottom="14"
+            boundary-gap y-min="0" y2-min="0" y2-max="100"
+            y-formatter="{value}" y2-formatter="{value}%"
+            :tooltip-formatter="hitTooltip" :animation="false"
+            :loading="first" :error="errMsg" empty-text="还没收到第一拍" @retry="connect"
+          />
+        </section>
+
+        <!-- 平均延迟 -->
+        <section class="mp-chart">
+          <div class="mp-chart-h">
+            <h3>平均延迟</h3>
+            <span class="mp-chart-n">逐拍均值 · 无样本的拍断开（不是 0）· 纵轴从 0 起</span>
           </div>
-        </li>
-      </ul>
+          <LineChart
+            :categories="xLabels" :series="meanChartSeries"
+            height="160px" :show-legend="false" :show-x-axis="false"
+            :grid-left="64" :grid-right="56" :grid-top="24" :grid-bottom="14"
+            boundary-gap y-min="0" y-formatter="{value} ms"
+            :tooltip-formatter="meanTooltip" :animation="false"
+            :loading="first" :error="errMsg" empty-text="还没收到第一拍" @retry="connect"
+          />
+        </section>
+
+        <!-- 锁等待 -->
+        <section class="mp-chart">
+          <div class="mp-chart-h">
+            <h3>锁等待</h3>
+            <span class="mp-chart-n">每把锁一条 · 无等待的拍断开（不是 0）</span>
+            <span v-if="lockNames.length" class="mp-legend" aria-hidden="true">
+              <template v-for="(n, i) in lockNames" :key="n">
+                <i :style="{ background: 'var(--c' + ((i % 10) + 1) + ')' }"></i>{{ n }}
+              </template>
+            </span>
+          </div>
+          <LineChart
+            :categories="xLabels" :series="waitSeriesWithMarks"
+            height="160px" :show-legend="false" :show-x-axis="false"
+            :grid-left="64" :grid-right="56" :grid-top="24" :grid-bottom="14"
+            boundary-gap y-min="0" y-formatter="{value} ms"
+            :tooltip-formatter="waitTooltip" :animation="false"
+            :loading="first" :error="errMsg" empty-text="窗口内没有任何锁活动" @retry="connect"
+          />
+        </section>
+
+        <!-- 锁竞争热力图 -->
+        <section class="mp-chart mp-chart--last">
+          <div class="mp-chart-h">
+            <h3>锁竞争热力图</h3>
+            <span class="mp-chart-n">行 = 锁名 · 列 = 最近 {{ WINDOW }} 拍 · 越深 = 本拍超时越多</span>
+          </div>
+          <HeatmapChart
+            :x-labels="xLabels" :y-labels="lockNames" :data="heatData" value-name="超时数"
+            height="190px" :legend-text="['超时多', '超时少']" :x-label-interval="heatInterval"
+            :grid-left="64" :grid-right="56" :tooltip-formatter="heatTooltip" :animation="false"
+            :loading="first" :error="errMsg"
+            empty-text="窗口内没有任何锁活动" @retry="connect"
+          />
+          <p class="mp-axis-note">
+            ⇡ 以上五张图共用同一根 x 轴：前四张不画刻度，只在最底这张画一次。
+          </p>
+        </section>
+      </div>
+
+      <!-- ══ 右栏：实体域 ═════════════════════════════════════════════════════ -->
+      <aside class="mp-rail">
+        <!-- 本拍指标 -->
+        <section class="mp-rail-sec">
+          <h3 class="mp-rail-h">本拍指标 <span>每秒 1 拍 · 缺值显示 —</span></h3>
+          <div class="mp-kpis">
+            <div class="mp-kpi">
+              <span class="mp-kpi-k">QPS</span>
+              <span class="mp-kpi-v"><b>{{ first ? '—' : fmt1(shown.qps) }}</b><em>次/秒</em></span>
+              <span class="mp-kpi-d">本拍请求 {{ fmtInt(latestRow ? latestRow.count : 0) }} 次</span>
+              <span class="mp-spark" aria-hidden="true">
+                <i v-for="(b, i) in qpsSpark" :key="i" :class="{ off: b.off }" :style="{ height: b.h + '%' }"></i>
+              </span>
+            </div>
+            <div class="mp-kpi">
+              <span class="mp-kpi-k">平均延迟</span>
+              <span class="mp-kpi-v"><b>{{ meanNow === null ? '—' : fmtInt(Math.round(shown.mean)) }}</b><em>ms</em></span>
+              <span class="mp-kpi-d">P99（衰减窗口，非本拍）{{ p99Now === null ? '—' : fmtInt(Math.round(p99Now)) }} ms</span>
+              <span class="mp-kpi-nospark">无序列</span>
+            </div>
+            <div class="mp-kpi">
+              <span class="mp-kpi-k">缓存命中率</span>
+              <span class="mp-kpi-v"><b>{{ hitRateNow === null ? '—' : fmt1(shown.hitRate * 100) }}</b><em>%</em></span>
+              <span class="mp-kpi-d">命中 {{ fmtInt(latestRow ? latestRow.hit : 0) }} · 未命中 {{ fmtInt(latestRow ? latestRow.miss : 0) }}</span>
+              <span class="mp-spark" aria-hidden="true">
+                <i v-for="(b, i) in hitSpark" :key="i" :class="{ off: b.off }" :style="{ height: b.h + '%' }"></i>
+              </span>
+            </div>
+            <div class="mp-kpi">
+              <span class="mp-kpi-k">锁等待次数</span>
+              <span class="mp-kpi-v"><b>{{ first ? '—' : fmtInt(Math.round(shown.lockWait)) }}</b><em>次</em></span>
+              <span class="mp-kpi-d">全部锁名本拍 timeouts 之和</span>
+              <span class="mp-kpi-nospark">无序列</span>
+            </div>
+          </div>
+        </section>
+
+        <!-- 设施 3 类 -->
+        <section class="mp-rail-sec">
+          <h3 class="mp-rail-h">依赖状态 <span>常量 · 画点不画线</span></h3>
+          <ul class="mp-facs">
+            <li v-for="f in facilities" :key="f.key" class="mp-fac">
+              <component :is="f.icon" :size="15" :style="{ color: f.color }" />
+              <span class="mp-fac-k">{{ f.label }}</span>
+              <i class="mp-fac-dot" :class="'is-' + f.tone"></i>
+              <span class="mp-fac-s">{{ f.text }}</span>
+            </li>
+          </ul>
+        </section>
+
+        <!-- 严重度分布 -->
+        <section class="mp-rail-sec">
+          <h3 class="mp-rail-h">严重度分布 <span>最近 {{ rows.length || 0 }} 拍 health.level</span></h3>
+          <div class="mp-sev-bar" aria-hidden="true">
+            <i
+              v-for="s in SEV_META" :key="s.key"
+              :style="{ flexGrow: sevCounts[s.key] || 0, background: s.color }"
+            ></i>
+          </div>
+          <ul class="mp-sevs">
+            <li v-for="s in SEV_META" :key="s.key">
+              <component :is="s.icon" :size="14" :style="{ color: s.color }" />
+              <span>{{ s.label }}</span>
+              <b>{{ sevCounts[s.key] }}</b>
+              <em>{{ sevPct(s.key) }}</em>
+            </li>
+          </ul>
+        </section>
+
+        <!-- 防护命中 8 类 -->
+        <section class="mp-rail-sec">
+          <h3 class="mp-rail-h">防护命中 · 8 类 <span>本拍增量</span></h3>
+          <ul v-if="protRows.length" class="mp-prots">
+            <li v-for="p in protRows" :key="p.tag" class="mp-prot">
+              <span class="mp-prot-k">
+                <component :is="PROT_ICON[p.tag] || ShieldCheck" :size="14" :style="{ color: protColor(p.tag) }" />
+                <span>{{ p.label }}</span>
+              </span>
+              <span class="mp-prot-track">
+                <i :style="{ width: protPct(p.value), background: protColor(p.tag) }"></i>
+              </span>
+              <b>{{ fmtInt(p.value) }}</b>
+            </li>
+          </ul>
+          <p v-else class="mp-empty">还没收到第一拍。</p>
+        </section>
+
+        <!-- 库存水位 -->
+        <section class="mp-rail-sec mp-stock">
+          <h3 class="mp-rail-h">
+            <Droplets :size="16" :style="{ color: 'var(--c4)' }" />
+            库存水位 <span>{{ stockRows.length }} 条 · 最低库存前 20</span>
+          </h3>
+
+          <p v-if="!stockAvailable" class="mp-empty">
+            {{ first ? '还没收到第一拍。' : '本拍库存水位读取失败（后端已标注为不可用，流仍在推）—— 不是「库存为 0」。' }}
+          </p>
+          <template v-else>
+            <div class="mp-stock-tools">
+              <input
+                v-model.trim="stockQuery" type="search" class="mp-stock-search"
+                placeholder="搜 SKU 名 / 编码 / 规格" aria-label="搜索库存"
+              />
+              <div class="mp-stock-filters">
+                <button
+                  v-for="f in STOCK_FILTERS" :key="f.key" type="button"
+                  class="mp-chip" :class="{ on: stockFilter === f.key }"
+                  @click="stockFilter = f.key"
+                >{{ f.label }}</button>
+              </div>
+              <p class="mp-stock-note">仅在最低库存 20 条内搜索 / 筛选</p>
+            </div>
+
+            <p v-if="!stockRows.length" class="mp-empty">库存查询没有返回任何 SKU。</p>
+            <p v-else-if="!stockFiltered.length" class="mp-empty">没有匹配的 SKU。</p>
+            <template v-else>
+              <p v-if="stockAllUnknown" class="mp-stock-warn">
+                真库当前没有 BaselineStock，水位百分比不可算；先按演示基线步骤打基线才会出现深浅。
+              </p>
+              <ul class="mp-stock-list">
+                <li v-for="r in stockFiltered" :key="r.sku" class="mp-stock-row">
+                  <div class="mp-stock-top">
+                    <span class="mp-stock-name" :title="r.goodName || r.sku">{{ r.goodName || '（无商品名）' }}</span>
+                    <span class="mp-stock-n">
+                      <b>{{ r.stock === null || r.stock === undefined ? '—' : fmtInt(Math.round(displayOf(r))) }}</b>
+                      <span>/ {{ r.baseline === null || r.baseline === undefined ? '—' : fmtInt(r.baseline) }}</span>
+                    </span>
+                  </div>
+                  <div class="mp-stock-sub">
+                    <code>{{ r.sku }}</code>
+                    <span v-if="r.axisName"> · {{ r.axisName }}</span>
+                    <em class="mp-stock-tag" :class="'is-' + stockStatus(r)">{{ stockStatusLabel(r) }}</em>
+                  </div>
+                  <div class="mp-stock-track" :title="stockTitle(r)">
+                    <div class="mp-stock-fill" :class="barTone(r)" :style="{ width: barWidth(r) }"></div>
+                  </div>
+                </li>
+              </ul>
+            </template>
+          </template>
+        </section>
+      </aside>
+      </div>
     </div>
   </section>
 </template>
 
 <!--
-  管理端「指标面板」页（C3 块 7 · commit 6，2026-10-14）。
+  管理端「指标面板」页（C3 块 7 · 3a.4 重做为 S1「时间栈 + 实体栏」）。
 
-  ⚠️ **数据源是一条 SSE 流**（`POST /admin/observe/metrics/stream`，1 秒 1 帧）——
-     与 `StatsPage.vue`（一次性 JSON）**不是一类页面**：本页**没有「查询」按钮**，
-     唯一的用户动作是「重新连接」。所以别照 `StatsPage` 的 `load()` 形态写。
-     契约与帧字段见 `api/observe.js` 的 `openMetricsStream` 注释 + 后端
-     `MetricsSnapshotService.frame()`。
-
-  ⚠️ **页面卸载必须 `close()`**（`onBeforeUnmount` 里那一条）：SSE 的
-     `StreamingResponseBody` 在服务端占**一条异步线程**，不断开就是一条常驻线程
-     —— 页面切走了还留着 = 攒线程。`api/observe.js` 的 `openStream` 头注释记了这条代价。
-
-  ⚠️ **本页自己维护一个 60 拍的滚动窗口**（`rows`）：后端每帧只给「本拍」的瞬时值，
-     「QPS 面积图 / 命中率折线 / 热力图」三条时间轴都需要历史 ⇒ 由前端攒。
-     攒的代价是**切页即丢**（刷新后重新攒 60 秒）—— 这是刻意的：本页是「实时看板」，
-     不是「历史查询」（历史查询走 MySQL，见块 7 §三的读路径分工）。
+  ⚠️ 数据源仍是一条 SSE 流（`POST /admin/observe/metrics/stream`，1 秒 1 帧），
+     本页自己维护 60 拍滚动窗口（`rows`）；后端每帧只给本拍增量。
+  ⚠️ 五张时间图共用 `xLabels` / `grid-left=64` / `grid-right=56`，前四张 `show-x-axis=false`，
+     只由最底的锁竞争热力图画一次刻度。柱与折线都 `boundaryGap=true`，点/柱/热力格中心
+     才会落在同一条竖线上。
+  ⚠️ 延迟图用 `requests.meanMs`（逐拍真值）；`p95Ms/p99Ms/maxMs` 是 Micrometer 衰减窗口
+     分位，不是本拍，只能放 KPI 的次要小字，不能进时间轴（TD-77）。
+  ⚠️ 库存水位是全页唯一次真查询（后端 `stock()`）；真库当前 `baseline=null` 时画灰斜纹
+     「未设基线」，不能当 0% 或充足。演示源里才有 baseline。
 -->
 
 <script setup>
+/* eslint-disable no-undef */ /* 理由见 `BaseChart.vue` 同款注释（eslint-plugin-vue 8.7.1 缺宏环境） */
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
+import {
+  AlertCircle, AlertOctagon, AlertTriangle, Bell, Clipboard, Database,
+  Droplets, Info, Lock, Package, Server, Shield, ShieldCheck, ShoppingCart,
+} from '@lucide/vue'
 import { openMetricsStream } from '../../../api/observe'
-// 演示模式（块 7 收尾 ②）：`DemoModeToggle` 摆开关，`demo` 是被 `watch` 的那个状态，
-// `openDemoStream` 是与 `openMetricsStream` **同形**的假流 —— 见 `connect()` 里那处三元式。
 import { demo, openDemoStream } from '../../../api/demo-stream'
+import { KIND_COLOR } from '../../../config/labels/observe-labels'
 import DemoModeToggle from '../../../components/observe/DemoModeToggle.vue'
-import KpiCard from '../../../components/ui/KpiCard.vue'
 import LineChart from '../../../components/charts/LineChart.vue'
 import BarChart from '../../../components/charts/BarChart.vue'
 import HeatmapChart from '../../../components/charts/HeatmapChart.vue'
 
-/** 滚动窗口长度（拍）。⚠️ 《块 7 参考》§2.2 写死 60 秒，别在这里改小 —— 热力图的行数是锁名、列数就是它。 */
+/** 滚动窗口长度（拍）。热力图列数就是它。 */
 const WINDOW = 60
-/** 库存水位最多画多少行（与后端 `STOCK_LIMIT` 同量级；后端已经限过，这里只是兜底）。 */
-const STOCK_MAX = 12
-/** 数字滚动动画时长（《块 7 参考》§2.3 的口径 0.3 秒）。 */
+/** KPI 数字滚动时长（与旧页一致的 0.3 秒）。 */
 const TWEEN_MS = 300
+/** 库存水位数字/条宽的推进时长：1 秒一帧，取 0.6 秒留出停顿。 */
+const STOCK_TWEEN_MS = 600
 
+/* ── 八类防护的图标与环色（与日志页 9 环同一套 `KIND_COLOR`）──────────────── */
+const PROT_ICON = {
+  cacheHit: Database,
+  lockTimeout: Lock,
+  orderRejected: ShoppingCart,
+  stockInsufficient: Package,
+  auditFailed: Clipboard,
+  notifyFailed: Bell,
+  sensitiveHit: AlertTriangle,
+  identityRejected: Shield,
+}
+const PROT_RING = {
+  cacheHit: 'cache',
+  lockTimeout: 'lock',
+  orderRejected: 'order',
+  stockInsufficient: 'stock',
+  auditFailed: 'audit',
+  notifyFailed: 'notify',
+  sensitiveHit: 'sensitive',
+  identityRejected: 'identity',
+}
+function protColor(tag) {
+  const ring = PROT_RING[tag]
+  return (ring && KIND_COLOR[ring]) || 'var(--ink-3)'
+}
+
+const SEV_META = [
+  { key: 'ok', label: '健康', color: 'var(--success)', icon: Info },
+  { key: 'warn', label: '警告', color: 'var(--warning)', icon: AlertCircle },
+  { key: 'error', label: '错误', color: 'var(--danger)', icon: AlertOctagon },
+]
+
+const STOCK_FILTERS = [
+  { key: 'all', label: '全部' },
+  { key: 'ok', label: '充足' },
+  { key: 'low', label: '偏低' },
+  { key: 'out', label: '缺货' },
+  { key: 'unknown', label: '未测' },
+]
+
+/* ── 基础状态 ─────────────────────────────────────────────────────────────── */
 const phase = ref('connecting')       // connecting | live | stopped
 const errMsg = ref('')
-/**
- * 断线状态：`null` = 没断；否则 `{ err, attempt, nextRetryInMs }`（`openResilientStream` 的
- * `onLost` 原样存下来，commit 10c）。
- * ⚠️ 它和 `errMsg` 是**两个判据**：`errMsg` 只装**真错误**（非 2xx / 帧解析失败 / 读失败），
- * 而「服务端正常收尾」那一格 `errMsg` 是空的 —— 断线条必须覆盖它（见模板里那条注释）。
- */
 const lost = ref(null)
-const latest = ref(null)              // 最近一帧的派生量（非数字那些：health / protections / stock）
+const latest = ref(null)              // 最近一帧的非数字派生量（health / protections / stock）
 const rows = ref([])                  // 滚动窗口：每拍一条
-const target = reactive({ qps: 0, p99: 0, hitRate: 0, lockWait: 0 })
-const shown = reactive({ qps: 0, p99: 0, hitRate: 0, lockWait: 0 })
+const stockQuery = ref('')
+const stockFilter = ref('all')
 
 let stream = null
 let rafId = 0
+let stockRaf = 0
 
-/* ── 小工具（本页自备：三端显示口径各不相同，不抽公共模块 —— 同 `StatsPage.vue` 的口径）── */
+const reduceMotion = typeof window !== 'undefined' && typeof window.matchMedia === 'function'
+  ? window.matchMedia('(prefers-reduced-motion: reduce)').matches
+  : false
+
+/* ── 小工具 ───────────────────────────────────────────────────────────────── */
 const num = (v) => {
   const n = Number(v)
   return Number.isFinite(n) ? n : 0
@@ -232,8 +390,12 @@ function hms(ts) {
   const p = (n) => String(n).padStart(2, '0')
   return `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`
 }
+function esc(s) {
+  return String(s === null || s === undefined ? '' : s)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+}
 
-/* ── 从「最近一帧」直接读的字段（不做滚动，故不进 rows）──────────────────── */
+/* ── 状态带 ───────────────────────────────────────────────────────────────── */
 const first = computed(() => latest.value === null && !errMsg.value)
 const seq = computed(() => (latest.value && latest.value.seq) || 0)
 const lastTickAt = computed(() => (latest.value ? hms(latest.value.ts) : '—'))
@@ -243,14 +405,6 @@ const healthReasons = computed(() => (latest.value && latest.value.health && lat
 const errRate = computed(() => (latest.value && latest.value.errorRate !== undefined ? latest.value.errorRate : null))
 const clientErrRate = computed(() => (latest.value && latest.value.clientErrorRate !== undefined ? latest.value.clientErrorRate : null))
 const phaseText = computed(() => (phase.value === 'live' ? '已连接' : (phase.value === 'stopped' ? '已断开' : '连接中')))
-
-/**
- * 断线条那句话（commit 10c）。⚠️ 两种都要写全：真错误（`err`）与**服务端正常收尾**
- * （`err === null`，例如后端重启、中间层掐连接、`async.request-timeout` 到点）——
- * 后者不是故障，但面板上的 KPI 同样停在断开前那一拍，不说清楚就回到「静默陈旧」。
- * ⚠️ `nextRetryInMs / 1000` 不必格式化：退避档位就是 500/1000/2000/4000/8000，
- * 除以 1000 恰好是 0.5 / 1 / 2 / 4 / 8。
- */
 const lostText = computed(() => {
   const s = lost.value
   if (!s) return ''
@@ -260,21 +414,52 @@ const lostText = computed(() => {
   return `${head} —— 上面的数字停在断开前最后一拍，${s.nextRetryInMs / 1000} 秒后自动重连（第 ${s.attempt} 次）`
 })
 
-const tickCount = computed(() => (rows.value.length ? rows.value[rows.value.length - 1].count : 0))
-const p99 = computed(() => (rows.value.length ? rows.value[rows.value.length - 1].p99 : null))
-const hitRate = computed(() => (rows.value.length ? rows.value[rows.value.length - 1].hitRate : null))
+/* ── 最近一拍与 KPI ───────────────────────────────────────────────────────── */
+const latestRow = computed(() => (rows.value.length ? rows.value[rows.value.length - 1] : null))
+const meanNow = computed(() => (latestRow.value ? latestRow.value.meanMs : null))
+const hitRateNow = computed(() => (latestRow.value ? latestRow.value.hitRate : null))
+const p99Now = computed(() => (latestRow.value ? latestRow.value.p99 : null))
 
-/* ── 三条时间轴共用的 x 轴（时间标签）──────────────────────────────────── */
+const shown = reactive({ qps: 0, mean: 0, hitRate: 0, lockWait: 0 })
+
+/* ── 共用的 x 轴与各图序列 ────────────────────────────────────────────────── */
 const xLabels = computed(() => rows.value.map((r) => hms(r.ts)))
-const qpsSeries = computed(() => rows.value.map((r) => r.qps))
-/** ⚠️ 命中率**转成 0-100 的百分数**再给图（后端给的是 0-1 的小数，见 `ratio()`）；
- *  为 `null` 的拍点**原样传 null** —— ECharts 会把 null 画成断点，正是要的
- *  （连成 0 会读成「这一秒一个都没命中」，而事实是「这一秒没有请求」）。 */
-const hitSeries = computed(() => rows.value.map((r) => (r.hitRate === null ? null : r.hitRate * 100)))
 
-/* ── 热力图：行 = 锁名（窗口内出现过就算），列 = 拍点 ─────────────────────── */
-/** ⚠️ 锁名**从窗口里现算**而不是累加到一个 ref 里：某个锁 60 拍没动静就该从行里退出，
- *  否则跑一场攻击演练之后，行会永久停在那一堆锁上、把常驻的两三个锁压扁。 */
+/** `count` / `errors4xx` / `errors5xx` 是每拍计数；堆叠 QPS 统一换算成「每秒」。 */
+const qps4xxSeries = computed(() => rows.value.map((r) => (r.err4xx / r.intervalSec)))
+const qps5xxSeries = computed(() => rows.value.map((r) => (r.err5xx / r.intervalSec)))
+const qpsOkSeries = computed(() => rows.value.map((r, i) => Math.max(
+  0, r.qps - qps4xxSeries.value[i] - qps5xxSeries.value[i]
+)))
+const qpsTotalSeries = computed(() => rows.value.map((r) => r.qps))
+const qpsMarkPoints = computed(() => markPointsOf(qpsTotalSeries.value, fmt1, ' 次/秒'))
+const qpsChartSeries = computed(() => [
+  { name: '成功', data: qpsOkSeries.value, colorIndex: 3, stack: 'qps' },
+  { name: '4xx', data: qps4xxSeries.value, colorIndex: 4, stack: 'qps' },
+  { name: '5xx', data: qps5xxSeries.value, colorIndex: 7, stack: 'qps', markPoints: qpsMarkPoints.value },
+])
+
+const hitBarSeries = computed(() => rows.value.map((r) => r.hit))
+const missBarSeries = computed(() => rows.value.map((r) => r.miss))
+/** 命中率转成 0–100；`null` 原样保留 —— ECharts 画成断点，不能连成 0。 */
+const hitRateSeries = computed(() => rows.value.map((r) => (r.hitRate === null ? null : r.hitRate * 100)))
+const hitMarkPoints = computed(() => markPointsOf(hitRateSeries.value, fmt1, '%'))
+const hitChartSeries = computed(() => [
+  { name: '命中', data: hitBarSeries.value, type: 'bar', colorIndex: 3, barMaxWidth: 5, stack: 'cache' },
+  { name: '未命中', data: missBarSeries.value, type: 'bar', colorIndex: 4, barMaxWidth: 5, stack: 'cache' },
+  {
+    name: '命中率', data: hitRateSeries.value, type: 'line', axis: 'right',
+    colorIndex: 1, dashed: true, markPoints: hitMarkPoints.value,
+  },
+])
+
+const meanSeries = computed(() => rows.value.map((r) => r.meanMs))
+const meanMarkPoints = computed(() => markPointsOf(meanSeries.value, (v) => fmtInt(Math.round(v)), ' ms'))
+const meanChartSeries = computed(() => [
+  { name: '平均延迟', data: meanSeries.value, area: true, colorIndex: 1, markPoints: meanMarkPoints.value },
+])
+
+/** 行 = 窗口内出现过的锁名；某锁 60 拍没动静就从行里退出。 */
 const lockNames = computed(() => {
   const seen = []
   for (const r of rows.value) {
@@ -284,88 +469,287 @@ const lockNames = computed(() => {
   }
   return seen
 })
+const waitChartSeries = computed(() => lockNames.value.map((name, i) => ({
+  name,
+  data: rows.value.map((r) => (r.locks[name] ? r.locks[name].waitMeanMs : null)),
+  colorIndex: (i % 10) + 1,
+})))
+const waitMarkPoints = computed(() => {
+  if (!waitChartSeries.value.length) return []
+  return globalMarkPoints(
+    waitChartSeries.value.filter((s) => s.data.some((v) => v !== null && v !== undefined)),
+    (v) => fmt1(v), ' ms',
+  )
+})
+/** 峰值/谷值标注只挂到第一条序列上（标注的坐标可以落在别条线的值上）。 */
+const waitSeriesWithMarks = computed(() => waitChartSeries.value.map((s, i) => (
+  i === 0 ? { ...s, markPoints: waitMarkPoints.value } : s
+)))
+
 const heatData = computed(() => {
   const names = lockNames.value
   const out = []
   rows.value.forEach((r, x) => {
     names.forEach((n, y) => {
-      const v = r.locks[n]
-      if (v !== undefined) out.push([x, y, v])
+      const l = r.locks[n]
+      if (l !== undefined) out.push([x, y, l.timeouts])
     })
   })
   return out
 })
+const heatInterval = computed(() => Math.max(0, Math.ceil(Math.max(1, rows.value.length) / 10) - 1))
 
-/* ── 防护命中（8 类）：只画**最近一帧** ──────────────────────────────────── */
-const protLabels = computed(() => ((latest.value && latest.value.protections) || []).map((p) => p.label))
-const protValues = computed(() => ((latest.value && latest.value.protections) || []).map((p) => num(p.value)))
+/* ── 峰值 / 谷值标注 ──────────────────────────────────────────────────────── */
+function markPointsOf(values, fmt, unit) {
+  const pts = []
+  for (let i = 0; i < values.length; i++) {
+    const v = values[i]
+    if (v !== null && v !== undefined && Number.isFinite(Number(v))) pts.push({ i, v: Number(v) })
+  }
+  if (!pts.length) return []
+  let max = pts[0]
+  let min = pts[0]
+  for (const p of pts) {
+    if (p.v > max.v) max = p
+    if (p.v < min.v) min = p
+  }
+  if (max.v === min.v) {
+    return [{ x: xLabels.value[max.i], y: max.v, text: `持平 ${fmt(max.v)}${unit}`, position: 'top' }]
+  }
+  return [
+    { x: xLabels.value[max.i], y: max.v, text: `峰 ${fmt(max.v)}${unit}`, position: 'top' },
+    // 谷值落在 0 时 `bottom` 会掉出绘图区（QPS 第一拍就是 0）⇒ 改标在 0 线上方。
+    { x: xLabels.value[min.i], y: min.v, text: `谷 ${fmt(min.v)}${unit}`, position: min.v === 0 ? 'top' : 'bottom' },
+  ]
+}
 
-/* ── 库存水位 ────────────────────────────────────────────────────────────── */
+/** 多序列（锁等待）里找全局峰/谷；文字带锁名，避免读者以为那是第一条线的点。 */
+function globalMarkPoints(series, fmt, unit) {
+  const pts = []
+  for (const s of series) {
+    s.data.forEach((v, i) => {
+      if (v !== null && v !== undefined && Number.isFinite(Number(v))) {
+        pts.push({ i, v: Number(v), name: s.name })
+      }
+    })
+  }
+  if (!pts.length) return []
+  let max = pts[0]
+  let min = pts[0]
+  for (const p of pts) {
+    if (p.v > max.v) max = p
+    if (p.v < min.v) min = p
+  }
+  if (max.v === min.v) {
+    return [{ x: xLabels.value[max.i], y: max.v, text: `持平 ${fmt(max.v)}${unit}`, position: 'top' }]
+  }
+  return [
+    { x: xLabels.value[max.i], y: max.v, text: `峰 ${max.name} ${fmt(max.v)}${unit}`, position: 'top' },
+    { x: xLabels.value[min.i], y: min.v, text: `谷 ${min.name} ${fmt(min.v)}${unit}`, position: min.v === 0 ? 'top' : 'bottom' },
+  ]
+}
+
+/* ── tooltip ──────────────────────────────────────────────────────────────── */
+function qpsTooltip(params) {
+  const i = params && params[0] ? params[0].dataIndex : -1
+  const r = rows.value[i]
+  if (!r) return ''
+  return `<b>${xLabels.value[i]}</b><br/>成功 ${fmt1(qpsOkSeries.value[i])} 次/秒`
+    + `<br/>4xx ${fmt1(qps4xxSeries.value[i])} 次/秒 · 5xx ${fmt1(qps5xxSeries.value[i])} 次/秒`
+    + `<br/>本拍请求 ${fmtInt(r.count)} 次`
+}
+function hitTooltip(params) {
+  const i = params && params[0] ? params[0].dataIndex : -1
+  const r = rows.value[i]
+  if (!r) return ''
+  return `<b>${xLabels.value[i]}</b><br/>命中 ${fmtInt(r.hit)} · 未命中 ${fmtInt(r.miss)}`
+    + `<br/>命中率 ${r.hitRate === null ? '—' : fmt1(r.hitRate * 100) + '%'}`
+}
+function meanTooltip(params) {
+  const i = params && params[0] ? params[0].dataIndex : -1
+  const r = rows.value[i]
+  if (!r) return ''
+  return `<b>${xLabels.value[i]}</b><br/>平均延迟 ${r.meanMs === null ? '本拍无延迟样本' : fmt1(r.meanMs) + ' ms'}`
+}
+function waitTooltip(params) {
+  const i = params && params[0] ? params[0].dataIndex : -1
+  const r = rows.value[i]
+  if (!r) return ''
+  const parts = []
+  for (const [name, l] of Object.entries(r.locks)) {
+    if (l.waitMeanMs === null || l.waitMeanMs === undefined) continue
+    parts.push(`${esc(name)} ${fmt1(l.waitMeanMs)} ms（超时 ${fmtInt(l.timeouts)} 次）`)
+  }
+  return `<b>${xLabels.value[i]}</b><br/>${parts.length ? parts.join('<br/>') : '本拍无锁等待样本'}`
+}
+function heatTooltip(p) {
+  const v = p && (Array.isArray(p.value) ? p.value : p.data)
+  if (!v) return ''
+  const x = Number(v[0])
+  const y = Number(v[1])
+  const val = Number(v[2])
+  const name = lockNames.value[y] || ''
+  const r = rows.value[x]
+  const l = r && r.locks[name]
+  let s = `<b>${esc(name)}</b> · 第 ${x + 1} 拍`
+    + `${xLabels.value[x] ? '（' + xLabels.value[x] + '）' : ''} · 超时 ${fmtInt(val)} 次`
+  if (l) {
+    s += `<br/>取锁 ${fmtInt(l.acquires)} · 成功 ${fmtInt(l.acquired)}`
+      + ` · 降级 ${fmtInt(l.degraded)} · 错误 ${fmtInt(l.errors)}`
+  }
+  return s
+}
+
+/* ── 微条（K1 QPS / K3 命中率）───────────────────────────────────────────── */
+function sparkBars(values, bins = 20) {
+  const arr = values.slice(-bins)
+  const nums = arr.filter((v) => v !== null && v !== undefined && Number.isFinite(Number(v)))
+  const max = Math.max(1, ...nums.map(Number))
+  return arr.map((v) => {
+    if (v === null || v === undefined || !Number.isFinite(Number(v))) return { h: 0, off: true }
+    return { h: Math.max(4, Math.round((Number(v) / max) * 100)), off: false }
+  })
+}
+const qpsSpark = computed(() => sparkBars(qpsTotalSeries.value))
+const hitSpark = computed(() => sparkBars(hitRateSeries.value))
+
+/* ── 设施 3 类 ────────────────────────────────────────────────────────────── */
+const facilities = computed(() => {
+  const l2 = latest.value ? latest.value.l2Up : null
+  const l2Deg = latest.value ? latest.value.l2Degraded : null
+  const lock = latest.value ? latest.value.lockUp : null
+  const db = latest.value ? !!(latest.value.stock && latest.value.stock.available) : null
+
+  let l2s
+  if (l2 === null || l2 === undefined) l2s = { text: '未上报', tone: 'unknown' }
+  else if (!l2) l2s = { text: '不可用', tone: 'bad' }
+  else if (l2Deg) l2s = { text: '降级', tone: 'warn' }
+  else l2s = { text: '正常', tone: 'ok' }
+
+  let locks
+  if (lock === null || lock === undefined) locks = { text: '未上报', tone: 'unknown' }
+  else if (lock) locks = { text: '正常', tone: 'ok' }
+  else locks = { text: '不可用（fail-open）', tone: 'bad' }
+
+  let dbs
+  if (db === null) dbs = { text: '未上报', tone: 'unknown' }
+  else if (db) dbs = { text: '正常', tone: 'ok' }
+  else dbs = { text: '查询失败', tone: 'bad' }
+
+  return [
+    { key: 'l2', label: 'L2 缓存', icon: Database, color: 'var(--c6)', ...l2s },
+    { key: 'lock', label: '锁客户端', icon: Lock, color: 'var(--c2)', ...locks },
+    { key: 'db', label: '商品库', icon: Server, color: 'var(--c4)', ...dbs },
+  ]
+})
+
+/* ── 严重度分布（health.level 的 60 拍计数）──────────────────────────────── */
+const sevCounts = computed(() => {
+  const c = { ok: 0, warn: 0, error: 0 }
+  for (const r of rows.value) {
+    if (c[r.health] !== undefined) c[r.health] += 1
+  }
+  return c
+})
+const sevTotal = computed(() => Math.max(1, rows.value.length))
+function sevPct(key) {
+  if (!rows.value.length) return '—'
+  return `${Math.round((sevCounts.value[key] / sevTotal.value) * 100)}%`
+}
+
+/* ── 防护 8 类 ────────────────────────────────────────────────────────────── */
+const protRows = computed(() => (latest.value && latest.value.protections) || [])
+const protMax = computed(() => Math.max(1, ...protRows.value.map((p) => num(p.value))))
+function protPct(v) {
+  return Math.max(2, Math.min(100, (num(v) / protMax.value) * 100)) + '%'
+}
+
+/* ── 库存水位 ─────────────────────────────────────────────────────────────── */
 const stockAvailable = computed(() => !!(latest.value && latest.value.stock && latest.value.stock.available))
-const stockRows = computed(() => ((latest.value && latest.value.stock && latest.value.stock.rows) || []).slice(0, STOCK_MAX))
-/** 条宽：`ratio` 为 null（无基线）时画满一格的**灰条**，表示「有这行但算不出水位」。 */
+const stockRows = computed(() => ((latest.value && latest.value.stock && latest.value.stock.rows) || []))
+const stockAllUnknown = computed(() => stockRows.value.length > 0
+  && stockRows.value.every((r) => r.baseline === null || r.baseline === undefined))
+const stockFiltered = computed(() => {
+  const q = stockQuery.value.trim().toLowerCase()
+  return stockRows.value.filter((r) => {
+    if (stockFilter.value !== 'all' && stockStatus(r) !== stockFilter.value) return false
+    if (!q) return true
+    return [r.goodName, r.sku, r.axisName]
+      .some((x) => String(x || '').toLowerCase().includes(q))
+  })
+})
+
+/** 显示值：由 rAF 从上一帧推进到目标 stock；无动画偏好时直接落位。 */
+const displayStock = reactive({})
+function animateStock(list) {
+  const from = {}
+  const to = {}
+  for (const r of list) {
+    const key = String(r.sku)
+    const targetValue = r.stock === null || r.stock === undefined ? 0 : Number(r.stock)
+    if (!Number.isFinite(targetValue)) continue
+    const cur = displayStock[key]
+    from[key] = Number.isFinite(Number(cur)) ? Number(cur) : 0
+    to[key] = targetValue
+    if (cur === undefined) displayStock[key] = 0
+  }
+  if (reduceMotion) {
+    for (const k of Object.keys(to)) displayStock[k] = to[k]
+    return
+  }
+  if (stockRaf) cancelAnimationFrame(stockRaf)
+  const t0 = performance.now()
+  const step = (now) => {
+    const p = Math.min(1, (now - t0) / STOCK_TWEEN_MS)
+    const e = 1 - Math.pow(1 - p, 3)          // easeOutCubic：起步快、收尾稳
+    for (const k of Object.keys(to)) {
+      displayStock[k] = from[k] + (to[k] - from[k]) * e
+    }
+    if (p < 1) {
+      stockRaf = requestAnimationFrame(step)
+    } else {
+      stockRaf = 0
+      for (const k of Object.keys(to)) displayStock[k] = to[k]
+    }
+  }
+  stockRaf = requestAnimationFrame(step)
+}
+function displayOf(r) {
+  const v = displayStock[String(r.sku)]
+  return Number.isFinite(Number(v)) ? Number(v) : num(r.stock)
+}
+function stockStatus(r) {
+  // 库存为 0 是**观测到的事实**，优先于「没有基线算不出比例」：真库现在就有
+  // `stock:0, baseline:null` 的 SKU，不能因为未设基线就把它归进「未测」。
+  if (Number(r.stock) <= 0) return 'out'
+  if (r.ratio === null || r.ratio === undefined) return 'unknown'
+  if (Number(r.ratio) < 0.5) return 'low'
+  return 'ok'
+}
+function stockStatusLabel(r) {
+  return { ok: '充足', low: '偏低', out: '缺货', unknown: '未测' }[stockStatus(r)]
+}
 function barWidth(r) {
-  if (r.ratio === null || r.ratio === undefined) return '100%'
-  return Math.max(2, Math.min(100, Number(r.ratio) * 100)) + '%'
+  // 0 库存是确定的「缺货」，哪怕没有基线也不该画成满条灰斜纹。
+  if (Number(r.stock) <= 0) return '2%'
+  if (r.baseline === null || r.baseline === undefined || Number(r.baseline) <= 0) return '100%'
+  const pct = Math.max(0, Math.min(100, (displayOf(r) / Number(r.baseline)) * 100))
+  return Math.max(2, pct) + '%'
 }
 function barTone(r) {
-  if (r.ratio === null || r.ratio === undefined) return 'is-unknown'
-  if (r.ratio < 0.2) return 'is-low'
-  if (r.ratio < 0.5) return 'is-mid'
+  const s = stockStatus(r)
+  if (s === 'unknown') return 'is-unknown'
+  if (s === 'out' || s === 'low') return 'is-low'
   return 'is-ok'
 }
-function barTitle(r) {
-  if (r.ratio === null || r.ratio === undefined) return '没有演示基线（BaselineStock），算不出水位'
-  return `水位 ${(Number(r.ratio) * 100).toFixed(1)}%`
+function stockTitle(r) {
+  if (r.baseline === null || r.baseline === undefined) {
+    return '没有 BaselineStock，算不出水位；先把演示基线打上'
+  }
+  return `水位 ${(Number(r.ratio) * 100).toFixed(1)}% · 库存 ${fmtInt(r.stock)} / 基线 ${fmtInt(r.baseline)}`
 }
 
-/* ── 环比：本拍 vs 本窗口均值（口径写在 KPI 卡的 `delta-label` 上）──────── */
-function avgOf(pick) {
-  const vals = rows.value.map(pick).filter((v) => v !== null && v !== undefined && Number.isFinite(Number(v)))
-  if (!vals.length) return null
-  return vals.reduce((a, b) => a + Number(b), 0) / vals.length
-}
-function deltaOf(pick, cur) {
-  const a = avgOf(pick)
-  const c = Number(cur)
-  if (a === null || a === 0 || !Number.isFinite(c)) return null
-  return ((c - a) / a) * 100
-}
-const delta = computed(() => ({
-  qps: deltaOf((r) => r.qps, shown.qps),
-  p99: p99.value === null ? null : deltaOf((r) => r.p99, shown.p99),
-  hitRate: hitRate.value === null ? null : deltaOf((r) => r.hitRate, shown.hitRate),
-  lockWait: deltaOf((r) => r.lockWait, shown.lockWait),
-}))
-
-/**
- * 环比的**显示文本**。
- * ⚠️ 必须显式交给 `KpiCard` 的 `deltaText`：不给的话它回落到 `Math.abs(delta) + '%'`，
- *    把浮点**原样上屏** —— 页面会出现 `▼13.793103448275861% 较 60 秒均值` 这种
- *    （2026-10-14 探针截图实测到，紧接着修的就是它）。`KpiCard` 只负责加箭头，
- *    **格式化是调用方的活**（与它 `value` 要「已格式化好的字符串」是同一条口径）。
- *    空串 = 回落到默认实现，安全。
- */
-const dtext = computed(() => ({
-  qps: dtx(delta.value.qps),
-  p99: dtx(delta.value.p99),
-  hitRate: dtx(delta.value.hitRate),
-  lockWait: dtx(delta.value.lockWait),
-}))
-/** 一位小数 + `%`。⚠️ 不取绝对值以外的加工：正负由 `KpiCard` 的箭头表达，这里只给数。 */
-function dtx(d) {
-  const n = Number(d)
-  return d === null || d === undefined || !Number.isFinite(n) ? '' : Math.abs(n).toFixed(1) + '%'
-}
-
-/* ── 数字滚动动画（0.3 秒）──────────────────────────────────────────────
-   ⚠️ 用 rAF 自己插值而不是 CSS transition：`KpiCard` 的 `value` 是**格式化好的字符串**，
-   CSS 认不出「1,234」→「1,256」中间的帧。⚠️ `prefers-reduced-motion` 时**直接落位**
-   （同 `KpiCard` 里 `.kpi-skel` 的处置口径）。 */
-const reduceMotion = typeof window !== 'undefined' && typeof window.matchMedia === 'function'
-  ? window.matchMedia('(prefers-reduced-motion: reduce)').matches
-  : false
-
+/* ── KPI 数字滚动 ─────────────────────────────────────────────────────────── */
 function tweenTo(next) {
   const keys = Object.keys(next)
   if (reduceMotion) {
@@ -378,7 +762,7 @@ function tweenTo(next) {
   if (rafId) cancelAnimationFrame(rafId)
   const step = (now) => {
     const p = Math.min(1, (now - t0) / TWEEN_MS)
-    const e = 1 - Math.pow(1 - p, 3)          // easeOutCubic：起步快、收尾稳
+    const e = 1 - Math.pow(1 - p, 3)
     keys.forEach((k) => { shown[k] = from[k] + (next[k] - from[k]) * e })
     if (p < 1) {
       rafId = requestAnimationFrame(step)
@@ -390,31 +774,51 @@ function tweenTo(next) {
   rafId = requestAnimationFrame(step)
 }
 
-/* ── 收帧 ──────────────────────────────────────────────────────────────── */
+/* ── 收帧 ─────────────────────────────────────────────────────────────────── */
 function onFrame(f) {
   const req = f.requests || {}
   const cache = f.cache || {}
-  const locks = f.locks || []
   const gauge = f.gauges || {}
+  const intervalMs = num(f.intervalMs) || 1000
+  const intervalSec = Math.max(0.001, intervalMs / 1000)
+  const locks = Array.isArray(f.locks) ? f.locks : []
 
   const lockMap = {}
-  let lockWait = 0
-  locks.forEach((r) => {
-    const name = String(r.lock)
-    const t = num(r.timeouts)
-    lockMap[name] = t
-    lockWait += t
-  })
+  let lockTimeouts = 0
+  for (const l of locks) {
+    const name = String(l.lock)
+    const row = {
+      acquires: num(l.acquires),
+      acquired: num(l.acquired),
+      timeouts: num(l.timeouts),
+      degraded: num(l.degraded),
+      errors: num(l.errors),
+      waitMeanMs: l.waitMeanMs === null || l.waitMeanMs === undefined ? null : num(l.waitMeanMs),
+    }
+    lockMap[name] = row
+    lockTimeouts += row.timeouts
+  }
 
-  rows.value.push({
+  const count = num(req.count)
+  const qps = req.qps === null || req.qps === undefined ? count / intervalSec : num(req.qps)
+  const row = {
     ts: num(f.ts) || Date.now(),
-    count: num(req.count),
-    qps: num(req.qps),
+    seq: num(f.seq),
+    intervalSec,
+    count,
+    qps,
+    err4xx: num(req.errors4xx),
+    err5xx: num(req.errors5xx),
+    meanMs: req.meanMs === null || req.meanMs === undefined ? null : num(req.meanMs),
     p99: req.p99Ms === null || req.p99Ms === undefined ? null : num(req.p99Ms),
+    hit: num(cache.hit),
+    miss: num(cache.miss),
     hitRate: cache.hitRate === null || cache.hitRate === undefined ? null : num(cache.hitRate),
-    lockWait,
+    health: (f.health && f.health.level) || 'ok',
     locks: lockMap,
-  })
+    lockTimeouts,
+  }
+  rows.value.push(row)
   if (rows.value.length > WINDOW) rows.value.shift()
 
   latest.value = {
@@ -427,27 +831,24 @@ function onFrame(f) {
     clientErrorRate: req.clientErrorRate === undefined ? null : req.clientErrorRate,
     l2Up: gauge.l2Up === undefined ? null : gauge.l2Up,
     lockUp: gauge.lockUp === undefined ? null : gauge.lockUp,
+    l2Degraded: cache.l2Degraded === undefined ? null : cache.l2Degraded,
   }
 
-  target.qps = rows.value.length ? rows.value[rows.value.length - 1].qps : 0
-  target.p99 = rows.value.length ? rows.value[rows.value.length - 1].p99 || 0 : 0
-  target.hitRate = rows.value.length ? rows.value[rows.value.length - 1].hitRate || 0 : 0
-  target.lockWait = lockWait
-  tweenTo({ qps: target.qps, p99: target.p99, hitRate: target.hitRate, lockWait: target.lockWait })
+  animateStock((f.stock && f.stock.rows) || [])
+  tweenTo({
+    qps: row.qps,
+    mean: row.meanMs === null ? 0 : row.meanMs,
+    hitRate: row.hitRate === null ? 0 : row.hitRate,
+    lockWait: row.lockTimeouts,
+  })
 }
 
+/* ── 连接 ─────────────────────────────────────────────────────────────────── */
 function connect() {
   closeStream()
   errMsg.value = ''
   lost.value = null
   phase.value = 'connecting'
-  // ⚠️ `openMetricsStream` 从 commit 10c 起是**带自动重连**的那一层（`onEnd` → `onLost`）。
-  //    ⚠️ 这一句下面的注释在 commit 10c 被**改判**：`onEnd(null)`（服务端正常收尾）以前
-  //    「只置 stopped、不给红条」，现在**要给** —— 不给的话，面板上的 KPI 会静静停在上一次
-  //    连接的那一拍，用户看不出任何异常（用户 2026-10-14 批文对这一格的用词是「静默陈旧」）。
-  // ⚠️ 演示模式（块 7 收尾 ②）：**只换数据源这一处**，上面那三个回调两边共用 ——
-  //    `openDemoStream` 与 `openMetricsStream` 同形（收同一组 handlers、回同一个 `close()`）。
-  //    `onLost` 在演示流上**永远不触发**（它没有连接可断）⇒ 切到演示后那条断线条自己消失。
   const handlers = {
     onOpen() {
       phase.value = 'live'
@@ -458,13 +859,11 @@ function connect() {
     onLost(s) {
       phase.value = 'stopped'
       lost.value = s
-      // ⚠️ `errMsg` 只装**真错误**：它同时是「还没收到第一拍」那个加载闸的判据（见 `first`）。
       errMsg.value = s.err ? ((s.err && s.err.message) || '连接中断') : ''
     },
   }
   stream = demo.on ? openDemoStream('metrics', handlers) : openMetricsStream(handlers)
 }
-
 function closeStream() {
   if (stream) {
     stream.close()
@@ -474,22 +873,31 @@ function closeStream() {
     cancelAnimationFrame(rafId)
     rafId = 0
   }
+  if (stockRaf) {
+    cancelAnimationFrame(stockRaf)
+    stockRaf = 0
+  }
 }
 
 onMounted(connect)
-// ⚠️ 切数据源（`正常` ⇄ `模拟日常`）⇒ 立刻重连。`connect()` 自己会先 `closeStream()`，
-//    两条旧流（真流的重连层 / 演示流的定时器）都断得干净，不必在这里各断一遍。
 watch(() => demo.on, connect)
 onBeforeUnmount(closeStream)
 </script>
 
 <style scoped>
+/* ── 页高：1.4 倍视口内，超出走主体内部滚动 ─────────────────────────────────── */
 .a-mp {
-  max-width: 1120px;
+  max-width: 1280px;
+  height: calc(140vh - 124px);
+  min-height: 560px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
 }
 
-/* ── ① 状态条（与 `StatsPage.vue:400-450` 逐字同源，只多一个色点）────────────── */
+/* ── 状态带（与其它可观测页同源，只把字号收进 12/15/19 三档）───────────────── */
 .a-status {
+  flex: 0 0 auto;
   display: flex;
   align-items: stretch;
   flex-wrap: wrap;
@@ -497,8 +905,8 @@ onBeforeUnmount(closeStream)
   background: var(--surface);
   border: 1px solid var(--line);
   border-radius: var(--r3);
-  padding: var(--s5);
-  margin-bottom: var(--s5);
+  padding: var(--s4) var(--s5);
+  margin-bottom: var(--s3);
 }
 .a-stat {
   display: flex;
@@ -506,30 +914,28 @@ onBeforeUnmount(closeStream)
   min-width: 96px;
 }
 .a-stat b {
-  font-size: var(--fs-2xl);
+  font-size: var(--fs-md);
   font-weight: var(--fw-semi);
-  line-height: 1.1;
+  line-height: 1.15;
   color: var(--ink);
 }
 .a-stat span {
   font-size: var(--fs-xs);
   color: var(--ink-3);
 }
-/* 健康度大字：字号比其它三格小一档 —— 它是**字**（「健康」两个字），
-   与旁边那三格的数字混排时同字号会显得头重（并且它会换行）。 */
 .a-hv {
   display: inline-flex;
   align-items: center;
   gap: var(--s2);
-  font-size: var(--fs-lg);
+  font-size: var(--fs-sm);
 }
 .a-hv--ok { color: var(--success-deep); }
 .a-hv--warn { color: var(--warning-deep); }
 .a-hv--error { color: var(--danger); }
 .a-dot {
   display: inline-block;
-  width: 10px;
-  height: 10px;
+  width: 9px;
+  height: 9px;
   border-radius: 50%;
   background: currentColor;
 }
@@ -558,43 +964,31 @@ onBeforeUnmount(closeStream)
   font-family: var(--font-mono);
   color: var(--brand-ink);
 }
-
-/* ── 判据条 / 反馈条 ─────────────────────────────────────────────────────── */
 .a-reasons {
+  flex: 0 0 auto;
   list-style: none;
   font-size: var(--fs-sm);
-  line-height: 1.8;
+  line-height: 1.6;
   border-radius: var(--r2);
-  padding: var(--s3) var(--s4);
-  margin-bottom: var(--s4);
+  padding: var(--s2) var(--s4);
+  margin-bottom: var(--s3);
 }
-.a-reasons--ok {
-  color: var(--success-deep);
-  background: var(--success-ground);
-}
-.a-reasons--warn {
-  color: var(--warning-deep);
-  background: var(--warning-ground);
-}
-.a-reasons--error {
-  color: var(--danger);
-  background: var(--danger-ground);
-}
+.a-reasons--ok { color: var(--success-deep); background: var(--success-ground); }
+.a-reasons--warn { color: var(--warning-deep); background: var(--warning-ground); }
+.a-reasons--error { color: var(--danger); background: var(--danger-ground); }
 .a-flash {
+  flex: 0 0 auto;
   display: flex;
   align-items: center;
   gap: var(--s3);
   font-size: var(--fs-sm);
   border-radius: var(--r2);
   padding: var(--s3) var(--s4);
-  margin-bottom: var(--s4);
+  margin-bottom: var(--s3);
 }
-.a-flash.bad {
-  color: var(--danger);
-  background: var(--danger-ground);
-}
-
-/* ── 通用件（照 `StatsPage.vue`，逐字同源）────────────────────────────────── */
+.a-flash.bad { color: var(--danger); background: var(--danger-ground); }
+/* 服务端正常收尾（`onEnd(null)`）不是故障：给琥珀色提示，别用红条冒充连接错误。 */
+.a-flash.warn { color: var(--warning-deep); background: var(--warning-ground); }
 .a-btn {
   font: inherit;
   font-size: var(--fs-sm);
@@ -602,105 +996,432 @@ onBeforeUnmount(closeStream)
   background: var(--surface-2);
   border: 1px solid var(--line-2);
   border-radius: var(--r2);
-  padding: var(--s2) var(--s4);
+  padding: var(--s1) var(--s3);
   cursor: pointer;
   white-space: nowrap;
 }
-.a-btn:hover {
-  color: var(--ink);
-  background: var(--surface-3);
+.a-btn:hover { color: var(--ink); background: var(--surface-3); }
+
+/* ── 主体两栏 ─────────────────────────────────────────────────────────────── */
+/* 滚动容器只负责滚动；两栏网格的高度由两边内容的较高者撑开（见模板里的 ⚠️）。 */
+.mp-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding-right: 2px;
 }
-.a-h2 {
+.mp-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 380px;
+  gap: var(--s4);
+  align-items: start;
+}
+.mp-stack {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s3);
+  min-width: 0;
+}
+.mp-chart {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--r3);
+  padding: var(--s2) var(--s3) 0;
+  min-width: 0;
+}
+.mp-chart--last { padding-bottom: var(--s2); }
+.mp-chart-h {
   display: flex;
   align-items: baseline;
-  gap: var(--s3);
+  gap: var(--s2);
   flex-wrap: wrap;
-  margin: var(--s6) 0 var(--s3);
-  padding-bottom: var(--s2);
+  min-height: 24px;
+  padding: 0 var(--s1);
+}
+.mp-chart-h h3 {
+  margin: 0;
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-semi);
+  color: var(--ink);
+}
+.mp-chart-n {
+  font-size: var(--fs-xs);
+  color: var(--ink-3);
+}
+.mp-legend {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--fs-xs);
+  color: var(--ink-3);
+  white-space: nowrap;
+}
+.mp-legend i {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+  margin-left: var(--s1);
+}
+.mp-legend i:first-child { margin-left: 0; }
+.lg-ok { background: var(--c3); }
+.lg-4xx { background: var(--c4); }
+.lg-5xx { background: var(--c7); }
+.lg-hit { background: var(--c3); }
+.lg-miss { background: var(--c4); }
+.lg-rate { background: var(--c1); }
+.mp-axis-note {
+  margin: var(--s1) var(--s1) 0;
+  font-size: var(--fs-xs);
+  color: var(--ink-3);
+}
+
+/* ── 右栏 ─────────────────────────────────────────────────────────────────── */
+.mp-rail {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--s3);
+}
+.mp-rail-sec {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--r3);
+  padding: var(--s3);
+  min-width: 0;
+}
+.mp-rail-h {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  margin: 0 0 var(--s2);
+  padding-bottom: var(--s1);
   border-bottom: 1px solid var(--line-2);
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-semi);
+  color: var(--ink);
+}
+.mp-rail-h span {
+  margin-left: auto;
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-reg);
+  color: var(--ink-3);
+  text-align: right;
+}
+
+/* 4 张读数卡：K1/K3 挂微条，K2/K4 无序列 */
+.mp-kpis {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s2);
+}
+.mp-kpi {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 64px;
+  grid-template-rows: auto auto auto;
+  column-gap: var(--s2);
+  align-items: center;
+  padding: var(--s1) 0;
+  border-bottom: 1px solid var(--line);
+}
+.mp-kpi:last-child { border-bottom: none; }
+.mp-kpi-k {
+  grid-column: 1;
+  font-size: var(--fs-xs);
+  color: var(--ink-3);
+}
+.mp-kpi-v {
+  grid-column: 1;
+  display: flex;
+  align-items: baseline;
+  gap: var(--s1);
+}
+.mp-kpi-v b {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
   font-size: var(--fs-md);
   font-weight: var(--fw-semi);
   color: var(--ink);
 }
-.a-h2n {
-  font-family: var(--font-mono);
+.mp-kpi-v em {
+  font-style: normal;
   font-size: var(--fs-xs);
-  font-weight: var(--fw-reg);
   color: var(--ink-3);
 }
-.a-mp > .a-h2:first-of-type {
-  margin-top: 0;
-}
-.a-kpis {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-  gap: var(--s3);
-}
-.a-card {
-  background: var(--surface);
-  border: 1px solid var(--line);
-  border-radius: var(--r3);
-  padding: var(--s4);
-  margin-bottom: var(--s4);
-}
-.a-empty {
-  font-size: var(--fs-sm);
+.mp-kpi-d {
+  grid-column: 1;
+  font-size: var(--fs-xs);
   color: var(--ink-3);
-  padding: var(--s4) 0;
-}
-
-/* ── ⑦ 库存水位进度条 ────────────────────────────────────────────────────── */
-.a-bars {
-  list-style: none;
-  display: flex;
-  flex-direction: column;
-  gap: var(--s3);
-}
-.a-bar {
-  display: grid;
-  grid-template-columns: 1fr 160px 96px;
-  align-items: center;
-  gap: var(--s3);
-}
-@media (max-width: 720px) {
-  .a-bar {
-    grid-template-columns: 1fr;
-    gap: var(--s1);
-  }
-}
-.a-bar-k {
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-}
-.a-bar-name {
-  font-size: var(--fs-sm);
-  color: var(--ink);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.a-bar-sku {
-  font-family: var(--font-mono);
+.mp-spark {
+  grid-column: 2;
+  grid-row: 1 / span 3;
+  height: 30px;
+  display: flex;
+  align-items: flex-end;
+  gap: 1px;
+}
+.mp-spark i {
+  flex: 1 1 0;
+  min-width: 0;
+  background: var(--c1);
+  border-radius: 1px 1px 0 0;
+}
+.mp-spark i.off { background: var(--line-2); opacity: 0.5; }
+.mp-kpi:nth-child(3) .mp-spark i { background: var(--c3); }
+.mp-kpi-nospark {
+  grid-column: 2;
+  grid-row: 1 / span 3;
+  align-self: center;
+  font-size: var(--fs-xs);
+  color: var(--ink-3);
+  text-align: center;
+}
+
+/* 设施 3 类 */
+.mp-facs, .mp-sevs, .mp-prots {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+}
+.mp-facs { gap: var(--s2); }
+.mp-fac {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  font-size: var(--fs-sm);
+}
+.mp-fac-k { color: var(--ink-2); }
+.mp-fac-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  margin-left: auto;
+  background: var(--ink-3);
+}
+.mp-fac-dot.is-ok { background: var(--success); }
+.mp-fac-dot.is-warn { background: var(--warning); }
+.mp-fac-dot.is-bad { background: var(--danger); }
+.mp-fac-dot.is-unknown { background: var(--ink-3); }
+.mp-fac-s {
+  min-width: 92px;
+  text-align: right;
   font-size: var(--fs-xs);
   color: var(--ink-3);
 }
-.a-bar-track {
+
+/* 严重度分布 */
+.mp-sev-bar {
+  display: flex;
   height: 8px;
+  overflow: hidden;
+  border-radius: var(--r1);
+  background: var(--surface-2);
+  margin-bottom: var(--s2);
+}
+.mp-sev-bar i { min-width: 0; }
+.mp-sevs { gap: var(--s1); }
+.mp-sevs li {
+  display: grid;
+  grid-template-columns: 16px 1fr auto 42px;
+  align-items: center;
+  gap: var(--s2);
+  font-size: var(--fs-xs);
+  color: var(--ink-2);
+}
+.mp-sevs b {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  color: var(--ink);
+}
+.mp-sevs em {
+  font-style: normal;
+  text-align: right;
+  color: var(--ink-3);
+}
+
+/* 防护 8 类 */
+.mp-prots { gap: 5px; }
+.mp-prot {
+  display: grid;
+  grid-template-columns: 118px minmax(0, 1fr) 32px;
+  align-items: center;
+  gap: var(--s2);
+  font-size: var(--fs-xs);
+}
+.mp-prot-k {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  min-width: 0;
+  color: var(--ink-2);
+}
+.mp-prot-k span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.mp-prot-track {
+  height: 6px;
   background: var(--surface-2);
   border-radius: var(--r1);
   overflow: hidden;
 }
-.a-bar-fill {
+.mp-prot-track i {
+  display: block;
   height: 100%;
   border-radius: var(--r1);
-  transition: width 0.3s ease;
 }
-.a-bar-fill.is-ok { background: var(--success); }
-.a-bar-fill.is-mid { background: var(--warning); }
-.a-bar-fill.is-low { background: var(--danger); }
-/* 无基线：**不是**红条也不是绿条 —— 画成灰底斜纹，读作「这行算不出水位」。 */
-.a-bar-fill.is-unknown {
+.mp-prot b {
+  text-align: right;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  color: var(--ink);
+}
+
+/* 库存水位 */
+.mp-stock-tools {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s2);
+}
+.mp-stock-search {
+  width: 100%;
+  box-sizing: border-box;
+  font: inherit;
+  font-size: var(--fs-xs);
+  color: var(--ink);
+  background: var(--surface-2);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r2);
+  padding: var(--s1) var(--s2);
+}
+.mp-stock-search::placeholder { color: var(--ink-3); }
+.mp-stock-search:focus {
+  outline: none;
+  border-color: var(--brand);
+}
+.mp-stock-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s1);
+}
+.mp-chip {
+  font: inherit;
+  font-size: var(--fs-xs);
+  color: var(--ink-3);
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 2px 8px;
+  cursor: pointer;
+}
+.mp-chip.on {
+  color: var(--ink);
+  border-color: var(--brand);
+  background: var(--brand-tint);
+}
+.mp-stock-note {
+  font-size: var(--fs-xs);
+  color: var(--ink-3);
+}
+.mp-stock-warn {
+  font-size: var(--fs-xs);
+  line-height: 1.5;
+  color: var(--warning-deep);
+  background: var(--warning-ground);
+  border-radius: var(--r1);
+  padding: var(--s1) var(--s2);
+  margin-bottom: var(--s2);
+}
+.mp-stock-list {
+  list-style: none;
+  height: 220px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--s2);
+  padding-right: 2px;
+}
+.mp-stock-row {
+  flex: 0 0 auto;
+  padding-bottom: var(--s1);
+  border-bottom: 1px solid var(--line);
+}
+.mp-stock-top {
+  display: flex;
+  align-items: baseline;
+  gap: var(--s2);
+}
+.mp-stock-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--fs-sm);
+  color: var(--ink);
+}
+.mp-stock-n {
+  flex: 0 0 auto;
+  font-size: var(--fs-xs);
+  color: var(--ink-3);
+  font-variant-numeric: tabular-nums;
+}
+.mp-stock-n b {
+  font-family: var(--font-mono);
+  font-size: var(--fs-sm);
+  color: var(--ink);
+}
+.mp-stock-sub {
+  display: flex;
+  align-items: center;
+  gap: var(--s1);
+  min-width: 0;
+  font-size: var(--fs-xs);
+  color: var(--ink-3);
+}
+.mp-stock-sub code {
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.mp-stock-tag {
+  margin-left: auto;
+  flex: 0 0 auto;
+  font-style: normal;
+  font-size: var(--fs-xs);
+  padding: 0 5px;
+  border-radius: var(--r1);
+}
+.mp-stock-tag.is-ok { color: var(--success); background: var(--success-ground); }
+.mp-stock-tag.is-low { color: var(--warning); background: var(--warning-ground); }
+.mp-stock-tag.is-out { color: var(--danger); background: var(--danger-ground); }
+.mp-stock-tag.is-unknown { color: var(--ink-3); background: var(--surface-2); }
+.mp-stock-track {
+  height: 7px;
+  margin-top: var(--s1);
+  background: var(--surface-2);
+  border-radius: var(--r1);
+  overflow: hidden;
+}
+.mp-stock-fill {
+  height: 100%;
+  border-radius: var(--r1);
+}
+.mp-stock-fill.is-ok {
+  background: linear-gradient(90deg, var(--success), var(--success-deep));
+}
+.mp-stock-fill.is-low {
+  background: linear-gradient(90deg, var(--warning), var(--danger));
+}
+.mp-stock-fill.is-unknown {
   background: repeating-linear-gradient(
     45deg,
     var(--surface-3),
@@ -709,17 +1430,37 @@ onBeforeUnmount(closeStream)
     var(--surface-2) 8px
   );
 }
-@media (prefers-reduced-motion: reduce) {
-  .a-bar-fill { transition: none; }
-}
-.a-bar-n {
-  text-align: right;
-  font-variant-numeric: tabular-nums;
-  font-size: var(--fs-sm);
-  color: var(--ink);
-}
-.a-bar-n span {
-  color: var(--ink-3);
+.mp-empty {
   font-size: var(--fs-xs);
+  line-height: 1.6;
+  color: var(--ink-3);
+  padding: var(--s2) 0;
+}
+
+/* 滚动条 ≤ 8px、淡色（主体与库存列表） */
+.mp-body, .mp-stock-list {
+  scrollbar-width: thin;
+  scrollbar-color: var(--line-2) transparent;
+}
+.mp-body::-webkit-scrollbar,
+.mp-stock-list::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+.mp-body::-webkit-scrollbar-thumb,
+.mp-stock-list::-webkit-scrollbar-thumb {
+  background: var(--line-2);
+  border-radius: 3px;
+}
+.mp-body::-webkit-scrollbar-track,
+.mp-stock-list::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+@media (max-width: 1100px) {
+  .a-mp { height: auto; min-height: 0; overflow: visible; }
+  .mp-body { overflow: visible; }
+  .mp-grid { grid-template-columns: minmax(0, 1fr); }
+  .mp-stock-list { height: 260px; }
 }
 </style>

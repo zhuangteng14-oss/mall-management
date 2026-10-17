@@ -616,54 +616,141 @@ function ordersFrame(w, nowMs, n) {
   }
 }
 
+/**
+ * 指标帧。
+ *
+ * ⚠️ 形状**逐键对齐** `MetricsSnapshotService.frame()`（2026-10-17 按真实抓帧
+ *    `_work/3a4/metrics-real-sample.txt` 补齐）：本文件原先只有 `count/qps/p99Ms/errorRate/
+ *    clientErrorRate/hitRate` 这几格，指标页 3a.4 的五图一栏需要 `errors4xx/errors5xx`、
+ *    `meanMs`、`cache.hit/miss/l2Degraded`、锁的 `acquires/acquired/timeouts/degraded/errors/
+ *    waitMeanMs` —— 缺一格图上就少一条线。**这里只补形状，不把演示值说成真值**：
+ *    `health.reasons` 里那句「模拟日常」仍在，页面照旧显示「模拟日常」。
+ *
+ * ⚠️ 本场活动额度放完后 `n = 0`：与真流空闲时同形 —— `qps=0`、`hitRate=null`、
+ *    `meanMs=null`、`locks=[]`。不能落成「0 ms / 0%」（那是「测到了 0」，不是「没样本」）。
+ */
 function metricsFrame(w, nowMs, n) {
   const rnd = w.rnd
   w.seq += 1
   w.reqTotal += n
-  const hitRate = Math.round((0.86 + rnd() * 0.09) * 1000) / 1000
-  const lockTimeouts = rnd() < 0.12 ? intBetween(rnd, 1, 3) : 0
+  const busy = n > 0
+
+  // 5xx 罕见（约 1.5% 拍），4xx 每拍 0–2 条；两者都按「本拍计数」给，占比现算（与后端同口径）。
+  const errors5xx = busy && rnd() < 0.015 ? 1 : 0
+  const errors4xx = busy ? intBetween(rnd, 0, 2) : 0
+  const errorRate = n > 0 ? Math.round((errors5xx / n) * 10000) / 10000 : null
+  const clientErrorRate = n > 0 ? Math.round((errors4xx / n) * 10000) / 10000 : null
+
+  // 缓存命中/未命中：一次请求平均 2 次缓存访问，命中率 86%–95%（演示口径，不是后端真值）。
+  const cacheOps = busy ? n * 2 : 0
+  const hitRateRaw = 0.86 + rnd() * 0.09
+  const hit = Math.round(cacheOps * hitRateRaw)
+  const miss = cacheOps - hit
+  const hitRate = hit + miss > 0 ? Math.round((hit / (hit + miss)) * 1000) / 1000 : null
+
+  // 三把锁：日常都有取锁，偶尔超时/降级。`waitMeanMs` 有流量才有样本，空闲时为 null。
+  const lockNames = ['order-pay', 'stock-deduct', 'coupon-claim']
+  const locks = []
+  let lockTimeouts = 0
+  if (busy) {
+    for (const lock of lockNames) {
+      const acquires = intBetween(rnd, 2, 9)
+      const timeouts = rnd() < 0.1 ? intBetween(rnd, 1, 3) : 0
+      const degraded = rnd() < 0.02 ? 1 : 0
+      const errors = rnd() < 0.01 ? 1 : 0
+      lockTimeouts += timeouts
+      locks.push({
+        lock,
+        acquires,
+        acquired: Math.max(0, acquires - timeouts - degraded - errors),
+        timeouts,
+        degraded,
+        errors,
+        waitMeanMs: Math.round((0.4 + rnd() * 6.5) * 10) / 10,
+      })
+    }
+  }
+
+  // 健康度与后端同阈值（warn > 1% 5xx，error ≥ 5%），但 reasons 里永远先自报「模拟日常」。
+  let level = 'ok'
+  let label = '健康'
+  const reasons = [`模拟日常（假数据，不入库）· L1 命中率 ${hitRate === null ? '—' : (hitRate * 100).toFixed(1) + '%'}`]
+  if (errorRate !== null && errorRate > 0.01) {
+    level = 'warn'
+    label = '警告'
+    reasons.push(`模拟 5xx 占比 ${(errorRate * 100).toFixed(1)}%（> 1%）`)
+  }
+  if (errorRate !== null && errorRate >= 0.05) {
+    level = 'error'
+    label = '错误'
+  }
+
+  // 库存：12 条覆盖 充足 / 偏低 / 缺货 / 未设基线 四种状态，才能验搜索、筛选与内部滚动。
+  // 活动拍轻微抖动（0 库存的仍保持 0），空闲拍不动。
+  const stockBase = [
+    { sku: 'DEMO-GD-101', goodName: '模拟商品 · 气泡水', axisName: '330ml', stock: 0, baseline: 120 },
+    { sku: 'DEMO-GD-102', goodName: '模拟商品 · 无线耳机', axisName: '标准版', stock: 12, baseline: 120 },
+    { sku: 'DEMO-GD-103', goodName: '模拟商品 · 智能手环', axisName: '标准版', stock: 42, baseline: 120 },
+    { sku: 'DEMO-GD-104', goodName: '模拟商品 · 机械键盘', axisName: '茶轴', stock: 88, baseline: 160 },
+    { sku: 'DEMO-GD-105', goodName: '模拟商品 · 2K 显示器', axisName: '27 英寸', stock: 120, baseline: 120 },
+    { sku: 'DEMO-GD-106', goodName: '模拟商品 · 积木套装', axisName: '大盒', stock: 9, baseline: 80 },
+    { sku: 'DEMO-GD-107', goodName: '模拟商品 · 保温杯', axisName: '500ml', stock: 64, baseline: 200 },
+    { sku: 'DEMO-GD-108', goodName: '模拟商品 · 蓝牙音箱', axisName: 'mini', stock: 35, baseline: 80 },
+    { sku: 'DEMO-GD-109', goodName: '模拟商品 · 充电宝', axisName: '10000mAh', stock: 150, baseline: 200 },
+    { sku: 'DEMO-GD-110', goodName: '模拟商品 · 台灯', axisName: '护眼版', stock: 18, baseline: 120 },
+    { sku: 'DEMO-GD-111', goodName: '模拟商品 · 鼠标垫', axisName: '加厚', stock: 0, baseline: 60 },
+    { sku: 'DEMO-GD-112', goodName: '模拟商品 · 数据线', axisName: 'Type-C', stock: 48, baseline: null },
+  ]
+  const stockRows = stockBase.map((r) => {
+    const delta = busy && r.stock > 0 ? intBetween(rnd, -2, 2) : 0
+    return { ...r, stock: Math.max(0, r.stock + delta), ratio: null }
+  })
+
   return {
     seq: w.seq,
     ts: nowMs,
+    intervalMs: 1000, // 演示流固定 1 秒 1 拍（真流按实际间隔给，页面用同一公式折算）
     requests: {
       count: n,
-      qps: n,
-      p99Ms: intBetween(rnd, 38, 260),
-      errorRate: Math.round(rnd() * 150) / 10000,      // 0 ~ 1.5%
-      clientErrorRate: Math.round(100 + rnd() * 500) / 10000, // 1% ~ 6%（日常的 4xx 大多是「没登录」这类）
+      qps: n, // 一拍 1 秒 ⇒ 本拍条数就是每秒条数
+      errors5xx,
+      errors4xx,
+      errorRate,
+      clientErrorRate,
+      meanMs: busy ? intBetween(rnd, 8, 90) : null,
+      p95Ms: busy ? intBetween(rnd, 60, 180) : null,
+      p99Ms: busy ? intBetween(rnd, 90, 260) : null,
+      maxMs: busy ? intBetween(rnd, 120, 420) : null,
     },
-    cache: { hitRate },
-    locks: lockTimeouts ? [{ lock: 't_order', timeouts: lockTimeouts }] : [],
-    gauges: { l2Up: true, lockUp: true },
-    // ⚠️ 健康度照后端那套形状给（`level` / `label` / `reasons`），且**在 `reasons` 里明说**
-    //    这是模拟数据 —— 那块大字写着「健康度（后端算）」，演示模式下必须自报家门，
-    //    否则一屏「健康」会被当成这台后端真的健康。
-    health: {
-      level: 'ok',
-      label: '健康',
-      reasons: [`模拟日常（假数据，不入库）· L1 命中率 ${(hitRate * 100).toFixed(1)}%`],
+    cache: {
+      hit,
+      miss,
+      hitRate,
+      l2Degraded: busy && rnd() < 0.02 ? 1 : 0,
     },
-    protections: PROTECTIONS.map((tag) => ({
-      tag,
-      label: PROTECTION_LABEL[tag],
-      value: rnd() < 0.7 ? intBetween(rnd, 0, 3) : 0,
-    })),
-    stock: {
-      available: true,
-      rows: [
-        { sku: 'DEMO-GD-101', goodName: '模拟商品 · 气泡水', axisName: '330ml', stock: 42 + intBetween(rnd, -6, 6), baseline: 120, ratio: null },
-        { sku: 'DEMO-GD-103', goodName: '模拟商品 · 智能手环', axisName: '标准版', stock: 88 + intBetween(rnd, -8, 8), baseline: 120, ratio: null },
-        { sku: 'DEMO-GD-107', goodName: '模拟商品 · 积木套装', axisName: '大盒', stock: 12 + intBetween(rnd, -4, 4), baseline: 120, ratio: null },
-      ],
-    },
+    gauges: { l2Up: 1.0, lockUp: 1.0 },
+    locks,
+    health: { level, label, reasons },
+    protections: PROTECTIONS.map((tag) => {
+      let value
+      if (tag === 'cacheHit') value = hit
+      else if (tag === 'lockTimeout') value = lockTimeouts
+      else value = rnd() < 0.7 ? intBetween(rnd, 0, 3) : 0
+      return { tag, label: PROTECTION_LABEL[tag], value }
+    }),
+    stock: { available: true, rows: stockRows },
   }
 }
 
 // 库存水位：`ratio` 由 `stock / baseline` 现算（后端也是在 `MetricsSnapshotService` 里算的，
-// 这里照算一遍只为让那三条柱子的颜色分档（<20% 红 / <50% 黄 / 其余绿）真的会分档）。
+// 这里照算一遍只为让颜色分档（<20% 红 / <50% 黄 / 其余绿）真的会分档）。
+// ⚠️ `baseline` 为 null（真库还没打演示基线）时 **ratio 必须是 null**，不能 `stock / null`
+//    → Infinity → clamp 成 1：那会把「未测」画成「满仓」，与后端 `ratio:null` 的形状相反。
 function withRatio(frame) {
   for (const r of frame.stock.rows) {
-    r.ratio = Math.max(0, Math.min(1, r.stock / r.baseline))
+    r.ratio = r.baseline === null || r.baseline === undefined || Number(r.baseline) <= 0
+      ? null
+      : Math.max(0, Math.min(1, Number(r.stock) / Number(r.baseline)))
   }
   return frame
 }

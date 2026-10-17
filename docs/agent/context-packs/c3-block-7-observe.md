@@ -73,15 +73,15 @@
 
 | 文件 | 行数 | 状态 |
 |---|---|---|
-| `src/components/charts/echarts.js` | 52 | **唯一** `echarts.use(...)` 处；已注册 Line/Bar/Pie/Heatmap + Grid/Tooltip/Legend/VisualMap/AxisPointer + CanvasRenderer；**刻意不注册** TitleComponent / UniversalTransition / LabelLayout；`NODE_ENV !== 'production'` 时挂 `window.__echarts`（**探针出口**，3a.2 加） |
+| `src/components/charts/echarts.js` | 54 | **唯一** `echarts.use(...)` 处；已注册 Line/Bar/Pie/Heatmap + Grid/Tooltip/Legend/VisualMap/AxisPointer/**MarkPoint** + CanvasRenderer；**刻意不注册** TitleComponent / UniversalTransition / LabelLayout；`NODE_ENV !== 'production'` 时挂 `window.__echarts`（**探针出口**，3a.2 加） |
 | `src/components/charts/BaseChart.vue` | 195 | 底座：生命周期 + `ResizeObserver` + **三态浮层**（error > loading > empty，canvas **恒挂载**、状态是**不透明浮层**不是 `v-if`）；`init` 第二个入参 = 主题名（3a.2 起不是 `null`） |
 | `src/components/charts/theme.js` | 153 | **图表面唯一的取值点**（3a.2）：`buildTheme(t)` / `registerChartTheme()` / `CHART_THEME`。承载「整站一个样」的键（色板兜底 / 文字档 / 轴与分割线 / tooltip / 图例 / `line`·`pie`·`heatmap`·`visualMap` 的默认）。⚠️ 合并序 **option > 主题 > 内置默认** ⇒ 主题只在 option 没写到的键上生效；**主题不能声明组件**（`legend`/`tooltip` 必须出现在 option 里）。3a.2b 的甲/乙差异面就落在这里 |
 | `src/components/charts/chartTokens.js` | 145 | **只剩取值与参数**：色值现读 CSS 变量的 `chartTokens()` + `TEXT_SIZE` + `TOOLTIP_AXIS`/`TOOLTIP_ITEM` + `LEGEND_SHOWN`/`LEGEND_HIDDEN` + `categoryAxis(data,opts)`/`valueAxis(opts)`/`mixHex`。⚠️ `baseOption`/`axisTooltip`/`legendStyle` 已**删除**（样式搬进了 `theme.js`） |
-| `LineChart.vue` | 115 | 折线（props：`categories` `series` `height` `smooth` `showLegend` `yFormatter` `yMin` `yMax` `symbolLimit`）⚠️ **无 `area` 属性** |
-| `BarChart.vue` | 92 | 柱状（`horizontal` `stacked` `valueFormatter` `maxBarWidth` `labelTruncate`） |
+| `LineChart.vue` | 189 | 折线（`categories` `series` `height` `smooth` `showLegend` `showXAxis` `boundaryGap` `gridLeft` `gridRight` `gridTop` `gridBottom` `yFormatter` `yMin` `yMax` `y2Formatter` `y2Min` `y2Max` `symbolLimit` `tooltipFormatter` `animation`）；`series` 支持 `area` / `dashed` / `axis:'right'`（双轴）/ `type:'bar'`（柱+线组合）/ `colorIndex` / `markPoints` |
+| `BarChart.vue` | 141 | 柱状（`horizontal` `stacked` `showXAxis` `gridLeft` `gridRight` `gridTop` `gridBottom` `valueFormatter` `maxBarWidth` `labelTruncate` `colorIndex` `markPoints` `tooltipFormatter` `animation`） |
 | `PieChart.vue` | 68 | 饼图 |
 | `DonutChart.vue` | 103 | 环图（`centerValue` `centerTitle` `innerRatio` `outerRatio`） |
-| `HeatmapChart.vue` | 95 | 热力图 —— 指标面板「锁竞争热力图」是它的调用点（`MetricsPanel.vue:113`） |
+| `HeatmapChart.vue` | 123 | 热力图（`xLabels` `yLabels` `data` `max` `valueName` `legendText` `xLabelInterval` `gridLeft` `gridRight` `tooltipFormatter` `animation`）—— 指标面板「锁竞争热力图」是它的调用点（`MetricsPanel.vue:128`） |
 
 - `package.json:13` `echarts ^5.6.0`（实装 5.6.0）；`@lucide/vue ^1.55.0`。
 - **现有用法**：9 页 / **24 实例**（Line 6 · Bar 9 · Donut 8 · Pie 1 · Heatmap 0）。

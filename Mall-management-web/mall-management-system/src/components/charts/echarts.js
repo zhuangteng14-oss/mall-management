@@ -20,6 +20,7 @@ import {
   LegendComponent,      // 多序列图例
   VisualMapComponent,   // HeatmapChart 必需（色阶图例就是它）
   AxisPointerComponent, // tooltip 的 trigger:'axis' 靠它画指示线
+  MarkPointComponent,   // 时间栈的峰值 / 谷值数字标注（3a.4）
 } from 'echarts/components'
 import { CanvasRenderer } from 'echarts/renderers'
 
@@ -33,6 +34,7 @@ echarts.use([
   LegendComponent,
   VisualMapComponent,
   AxisPointerComponent,
+  MarkPointComponent,
   CanvasRenderer,
 ])
 

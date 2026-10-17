@@ -16,17 +16,38 @@ import { computed } from 'vue'
 import BaseChart from './BaseChart.vue'
 import echarts from './echarts'
 import {
-  chartTokens, TOOLTIP_AXIS, LEGEND_SHOWN, LEGEND_HIDDEN, categoryAxis, valueAxis,
+  chartTokens, mixHex, TOOLTIP_AXIS, LEGEND_SHOWN, LEGEND_HIDDEN, categoryAxis, valueAxis,
 } from './chartTokens'
 
 const props = defineProps({
   /** x 轴类目（如 `['10-01','10-02',…]` 或 `['00:00',…]`）。必填。 */
   categories: { type: Array, required: true },
-  /** 序列：`[{ name, data, area?, dashed?, axis? }]`。`name` 进图例，`data` 与 `categories` 等长。必填。 */
+  /**
+   * 序列：`[{ name, data, area?, dashed?, axis?, type?, stack?, colorIndex?, barMaxWidth?,
+   * markPoints? }]`。
+   *
+   * `type` 默认 `'line'`；传 `'bar'` 时本组件退化成「柱 + 线」的组合图（命中率那张就是
+   * 命中/未命中柱 + 命中率线）。`markPoints` 是本序列的峰值/谷值标注，形状见 `markPointOf()`。
+   */
   series: { type: Array, required: true },
   height: { type: String, default: '320px' },
   smooth: { type: Boolean, default: true },
   showLegend: { type: Boolean, default: true },
+  /**
+   * 是否画 x 轴。时间栈里前四张图共用最底那张的 x 轴 ⇒ 传 `false` 把轴**隐藏但保留网格几何**
+   * （`grid` 的左右内边距不变，否则五张图的绘图区对不齐）。
+   */
+  showXAxis: { type: Boolean, default: true },
+  /**
+   * 类目轴 `boundaryGap`。折线默认 `false`、柱默认 `true`；时间栈要求五图逐点对齐 ⇒
+   * 统一传 `true`，折线点落在每个时间带中心，与柱子/热力格中心同一条竖线。
+   */
+  boundaryGap: { type: Boolean, default: false },
+  /** 绘图区内边距（px）。五图共用同一套值才能「共享一根 x 轴」。 */
+  gridLeft: { type: Number, default: 56 },
+  gridRight: { type: Number, default: null },
+  gridTop: { type: Number, default: 18 },
+  gridBottom: { type: Number, default: null },
   /** y 轴标签格式化（如 `'{value}%'` / `'{value} 元'`）。单位走这里，不走轴名（见 `valueAxis`）。 */
   yFormatter: { type: String, default: '' },
   yMin: { type: Number, default: null },
@@ -43,8 +64,14 @@ const props = defineProps({
    * 变成「取决于两条轴各自怎么缩放」，反而不可比。
    */
   y2Formatter: { type: String, default: '' },
+  y2Min: { type: Number, default: null },
+  y2Max: { type: Number, default: null },
   /** 折点数超过它就不再画数据点（只留线）—— 24 个点以上标点会糊成一条毛边。 */
   symbolLimit: { type: Number, default: 24 },
+  /** tooltip 自定义 formatter（ECharts 原样接收）。不传 = 主题里的轴触发默认格式。 */
+  tooltipFormatter: { type: Function, default: null },
+  /** 是否开启 ECharts 的补间动画。时间栈每拍 `notMerge` 重建，关掉可避免每秒重播。 */
+  animation: { type: Boolean, default: true },
   loading: { type: Boolean, default: false },
   error: { type: String, default: '' },
   emptyText: { type: String, default: '区间内暂无数据' },
@@ -59,8 +86,37 @@ const hasData = computed(
 /** 双 Y 轴：`series` 里任一条带 `axis: 'right'` ⇒ 开右轴。见 `y2Formatter` 的 props 注释。 */
 const dual = computed(() => props.series.some((s) => s.axis === 'right'))
 
-/** 第 i 条序列的颜色（与下面 `series` 里分配的是**同一套**顺序，轴染色要跟它一致）。 */
-const seriesColor = (t, i) => t.series[i % t.series.length]
+/** 第 i 条序列的颜色。`colorIndex` 是 1-based 的 `--cN` 序号（见 chartTokens 的 series）。 */
+function colorOf(t, s, i) {
+  const idx = Number(s.colorIndex)
+  if (Number.isFinite(idx) && idx >= 1) return t.series[(idx - 1) % t.series.length]
+  return t.series[i % t.series.length]
+}
+
+/**
+ * 峰值 / 谷值标注。`markPoints` 由调用方算好（跳过 null、持平时只留一个点），
+ * 这里只负责翻成 ECharts 的 `markPoint` 形状 —— 数据在哪、标什么文字是页面的判断。
+ */
+function markPointOf(points, color, t) {
+  if (!points || !points.length) return undefined
+  return {
+    symbol: 'circle',
+    symbolSize: 5,
+    itemStyle: { color },
+    label: {
+      show: true,
+      color: t.ink,
+      fontSize: 10,
+      formatter: (p) => (p.data && p.data.labelText) || '',
+    },
+    data: points.map((p) => ({
+      coord: [p.x, p.y],
+      value: p.y,
+      labelText: p.text,
+      label: { position: p.position || 'top' },
+    })),
+  }
+}
 
 const option = computed(() => {
   const t = chartTokens()
@@ -69,45 +125,63 @@ const option = computed(() => {
   // ⚠️ 两条轴各染各的色 ⇒ 「哪个轴是哪个指标」不靠写轴名（本仓 `valueAxis` 明确不写 `name`，
   //    理由见它）也能一眼对上；右轴的 splitLine 关掉，避免与左轴网格线叠成双线。
   const rightIdx = props.series.findIndex((s) => s.axis === 'right')
+  const firstColor = colorOf(t, props.series[0] || {}, 0)
+  const rightColor = colorOf(t, props.series[rightIdx] || {}, Math.max(0, rightIdx))
+  const xAxis = categoryAxis(props.categories, { boundaryGap: props.boundaryGap })
   return {
-    grid: { left: 56, right: dual.value ? 56 : 24, top: 18, bottom: props.showLegend ? 44 : 26 },
-    tooltip: TOOLTIP_AXIS,
+    animation: props.animation,
+    grid: {
+      left: props.gridLeft,
+      right: props.gridRight === null ? (dual.value ? 56 : 24) : props.gridRight,
+      top: props.gridTop,
+      bottom: props.gridBottom === null ? (props.showLegend ? 44 : 26) : props.gridBottom,
+    },
+    tooltip: props.tooltipFormatter
+      ? { ...TOOLTIP_AXIS, formatter: props.tooltipFormatter }
+      : TOOLTIP_AXIS,
     legend: props.showLegend ? LEGEND_SHOWN : LEGEND_HIDDEN,
-    xAxis: categoryAxis(props.categories, { boundaryGap: false }),
+    // `show:false` 把轴线/刻度/标签一起藏掉，但 `grid` 的左右留白不变 ⇒ 五图绘图区仍然对齐。
+    xAxis: props.showXAxis ? xAxis : { ...xAxis, show: false },
     yAxis: dual.value
       ? [
           valueAxis({
             min: props.yMin, max: props.yMax, formatter: props.yFormatter,
-            color: seriesColor(t, 0),
+            color: firstColor,
           }),
           valueAxis({
-            formatter: props.y2Formatter, color: seriesColor(t, rightIdx), splitLine: false,
+            min: props.y2Min, max: props.y2Max, formatter: props.y2Formatter,
+            color: rightColor, splitLine: false,
           }),
         ]
       : valueAxis({ min: props.yMin, max: props.yMax, formatter: props.yFormatter }),
     series: props.series.map((s, i) => {
-      const color = seriesColor(t, i)
+      const color = colorOf(t, s, i)
+      const isBar = s.type === 'bar'
       return {
         name: s.name,
         yAxisIndex: dual.value && s.axis === 'right' ? 1 : 0,
-        type: 'line',
+        type: isBar ? 'bar' : 'line',
         data: s.data,
-        smooth: props.smooth,
-        showSymbol: longest <= props.symbolLimit,
+        stack: isBar ? s.stack : undefined,
+        barMaxWidth: isBar ? (s.barMaxWidth || 8) : undefined,
+        smooth: isBar ? undefined : props.smooth,
+        showSymbol: isBar ? undefined : longest <= props.symbolLimit,
         // 线宽 / 数据点形状与大小在主题的 `line` 里；这里只写**本序列特有**的（色、虚线）。
-        lineStyle: { color, type: s.dashed ? [4, 3] : 'solid' },
-        itemStyle: { color },
-        // ⚠️ 面积渐变靠色值**后缀拼 alpha**（`'55'` / `'00'`）⇒ 要求 token 是 6 位 hex。
-        //    本仓 `--c1`-`--c10` 两套主题都是 6 位 hex（见 `tokens.css`）⇒ 成立。
-        //    哪天换成 `rgb()` 这里会静默退化成不透明色块，改动色板时留意。
-        areaStyle: s.area
+        lineStyle: isBar ? undefined : { color, type: s.dashed ? [4, 3] : 'solid' },
+        itemStyle: isBar
+          ? { color, borderRadius: [2, 2, 0, 0] }
+          : { color },
+        // ⚠️ 面积渐变用 `mixHex` 从主题底色起算：顶部深、底部接近底色但**不消失**。
+        //    旧版拼 `'55'` / `'00'` 在暗色主题下低值段几乎与背景同色（3a.4 提亮）。
+        areaStyle: !isBar && s.area
           ? {
               color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
-                { offset: 0, color: color + '55' },
-                { offset: 1, color: color + '00' },
+                { offset: 0, color: mixHex(t.surface, color, 0.42) },
+                { offset: 1, color: mixHex(t.surface, color, 0.04) },
               ]),
             }
           : undefined,
+        markPoint: isBar ? undefined : markPointOf(s.markPoints, color, t),
       }
     }),
   }
