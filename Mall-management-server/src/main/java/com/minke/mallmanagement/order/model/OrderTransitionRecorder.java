@@ -106,16 +106,17 @@ public class OrderTransitionRecorder {
         } catch (Exception e) {
             log.warn("转移已生效但三位读不回，这条时间线补不回来（B3）：订单 {} 动作 {}，原因：{}",
                     orderId, action.tag(), e.toString());
-            metrics.transition(action, null, null, Result.APPLIED, orderId, durationNanos);
+            metrics.transition(action, null, null, Result.APPLIED, orderId, durationNanos, null);
             // ⚠️ 耗时传 null 不是「测不到」而是「**没发生**」：三位读不回来 ⇒ 没有 from/to 可写，
             //    这次 INSERT 一次都没跑过。区别于 OrderTimelineWriter 那条真抛了异常的路
-            metrics.timelineWrite(false, orderId, null);
+            metrics.timelineWrite(false, orderId, null,
+                    com.minke.mallmanagement.shared.text.EventReason.of("状态读回失败", e));
             return;
         }
 
         String toState = stateMachine.stateName(payIf, deliveryIf, receiveIf);
         String fromState = stateMachine.previousStateName(action, payIf, deliveryIf, receiveIf);
-        metrics.transition(action, fromState, toState, Result.APPLIED, orderId, durationNanos);
+        metrics.transition(action, fromState, toState, Result.APPLIED, orderId, durationNanos, null);
 
         // 读回的三位若是伪造/越界的，这里会分类出形状 —— 与下单口那次检测同一个口径，
         // 只是这次发生在**转移之后**：PAY 能把伪造态洗成合法态，所以两处都得看。
@@ -132,9 +133,11 @@ public class OrderTransitionRecorder {
      *
      * @param durationNanos 那次 CAS 的墙钟（块 7 · 阶段 3a.3 新增）；理由同 {@link #applied}。
      *                 ⚠️ 0 行那一路**也真的跑了一次 UPDATE**（谓词没命中），故照记，不是 null
+     * @param reason 拒绝的人话原因（块 7 · 阶段 3a.3 后续新增）：直接复用调用方的响应文案
+     *               （{@code noRowsMsg}，「订单不存在或已付款」等），不另造一份
      */
-    public void rejected(OrderAction action, String orderId, long durationNanos) {
-        metrics.transition(action, null, null, Result.REJECTED, orderId, durationNanos);
+    public void rejected(OrderAction action, String orderId, long durationNanos, String reason) {
+        metrics.transition(action, null, null, Result.REJECTED, orderId, durationNanos, reason);
     }
 
     /**
@@ -142,9 +145,11 @@ public class OrderTransitionRecorder {
      *
      * @param durationNanos 从起表到**抛出来**那一刻的墙钟（块 7 · 阶段 3a.3 新增）——
      *                 异常路径上这个数就是「卡了多久才失败」，超时排查最先看它
+     * @param reason 失败的人话原因（块 7 · 阶段 3a.3 后续新增）：由调用方用
+     *               {@code EventReason.of("数据库错误", e)} 生成，本类不重复拼异常文本
      */
-    public void errored(OrderAction action, String orderId, long durationNanos) {
-        metrics.transition(action, null, null, Result.ERROR, orderId, durationNanos);
+    public void errored(OrderAction action, String orderId, long durationNanos, String reason) {
+        metrics.transition(action, null, null, Result.ERROR, orderId, durationNanos, reason);
     }
 
     /**
@@ -171,7 +176,7 @@ public class OrderTransitionRecorder {
     public void created(String orderId, int payIf, int deliveryIf, int receiveIf, long durationNanos) {
         long occurredAt = System.currentTimeMillis();
         String toState = stateMachine.stateName(payIf, deliveryIf, receiveIf);
-        metrics.transition(OrderAction.CREATE, null, toState, Result.APPLIED, orderId, durationNanos);
+        metrics.transition(OrderAction.CREATE, null, toState, Result.APPLIED, orderId, durationNanos, null);
         recordIllegalIfAny(orderId, payIf, deliveryIf, receiveIf);
 
         submitTimeline(orderId, OrderAction.CREATE, OrderStateMachine.NO_PREVIOUS_STATE, toState, occurredAt);

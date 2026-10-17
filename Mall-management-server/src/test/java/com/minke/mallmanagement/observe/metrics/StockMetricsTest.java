@@ -34,9 +34,11 @@ class StockMetricsTest {
     @Test
     @DisplayName("deduct 三路各自计数，且事件与计数在同一调用点一起发")
     void deductOutcomesAreRecorded() {
-        metrics.deduct(SKU, 2, Deduct.OK, 1_500L, 98);
-        metrics.deduct(SKU, 2, Deduct.INSUFFICIENT, 2_000_000L, 1);
-        metrics.deduct(SKU, 2, Deduct.ERROR, 1_500L, null);
+        metrics.deduct(SKU, 2, Deduct.OK, 1_500L, 98, null);
+        metrics.deduct(SKU, 2, Deduct.INSUFFICIENT, 2_000_000L, 1,
+                "防超卖拦截：库存不足（需 2 件，剩余 1 件）");
+        metrics.deduct(SKU, 2, Deduct.ERROR, 1_500L, null,
+                com.minke.mallmanagement.shared.text.EventReason.of("库存扣减失败", new IllegalStateException("db down")));
 
         assertThat(count(StockMetrics.DEDUCT, "ok")).isEqualTo(1.0);
         assertThat(count(StockMetrics.DEDUCT, "insufficient")).isEqualTo(1.0);
@@ -57,12 +59,30 @@ class StockMetricsTest {
         assertThat(events).extracting(StockEvent::remaining)
                 .as("ok=98 / insufficient=1（扣不动时还剩多少）/ error=null（UPDATE 生效没有都不知道）")
                 .containsExactly(98, 1, null);
+        // 块 7 · 阶段 3a.3 后续新增：失败原因（成功档为 null，不写空原因）
+        assertThat(events).extracting(StockEvent::reason)
+                .as("ok ⇒ null；insufficient / error ⇒ 具体人话原因")
+                .containsExactly(null, "防超卖拦截：库存不足（需 2 件，剩余 1 件）",
+                        "库存扣减失败：IllegalStateException：db down");
+    }
+
+    @Test
+    @DisplayName("reason 有界：超长原因裁到 160 字并以「…」结尾（异常消息不可控）")
+    void reasonIsClipped() {
+        String longMessage = "x".repeat(400);
+        metrics.deduct(SKU, 1, Deduct.ERROR, 1_500L, null,
+                com.minke.mallmanagement.shared.text.EventReason.of("库存扣减失败",
+                        new IllegalStateException(longMessage)));
+
+        String reason = metrics.recentEvents().get(0).reason();
+        assertThat(reason).hasSize(160).endsWith("…");
+        assertThat(reason).startsWith("库存扣减失败：IllegalStateException：xxx");
     }
 
     @Test
     @DisplayName("⚠️ CAS 0 行记 insufficient、**不是** error —— 判成失败会让告警误报（A 档第 4 条）")
     void zeroRowsIsNotAnError() {
-        metrics.deduct(SKU, 1, Deduct.INSUFFICIENT, 1_500L, 0);
+        metrics.deduct(SKU, 1, Deduct.INSUFFICIENT, 1_500L, 0, "防超卖拦截：库存不足（需 1 件，剩余 0 件）");
 
         assertThat(count(StockMetrics.DEDUCT, "insufficient")).isEqualTo(1.0);
         assertThat(count(StockMetrics.DEDUCT, "error"))
@@ -77,9 +97,10 @@ class StockMetricsTest {
     @Test
     @DisplayName("release 三路各自计数；0 行记 missing（无处可放）、不是 error")
     void releaseOutcomesAreRecorded() {
-        metrics.release(SKU, 3, Release.OK, 1_500L);
-        metrics.release(SKU, 3, Release.MISSING, 1_500L);
-        metrics.release(SKU, 3, Release.ERROR, 1_500L);
+        metrics.release(SKU, 3, Release.OK, 1_500L, null);
+        metrics.release(SKU, 3, Release.MISSING, 1_500L, "释放未命中：goods_sku 中不存在该 SKU");
+        metrics.release(SKU, 3, Release.ERROR, 1_500L,
+                com.minke.mallmanagement.shared.text.EventReason.of("库存释放失败", new IllegalStateException("db down")));
 
         assertThat(count(StockMetrics.RELEASE, "ok")).isEqualTo(1.0);
         assertThat(count(StockMetrics.RELEASE, "missing")).isEqualTo(1.0);
@@ -91,6 +112,10 @@ class StockMetricsTest {
         assertThat(metrics.recentEvents()).extracting(StockEvent::kind).containsOnly("release");
         assertThat(metrics.recentEvents()).extracting(StockEvent::result)
                 .containsExactly("ok", "missing", "error");
+        assertThat(metrics.recentEvents()).extracting(StockEvent::reason)
+                .as("release 的失败原因也带上（ok ⇒ null）")
+                .containsExactly(null, "释放未命中：goods_sku 中不存在该 SKU",
+                        "库存释放失败：IllegalStateException：db down");
     }
 
     // ================= 基数铁律 =================
@@ -98,8 +123,8 @@ class StockMetricsTest {
     @Test
     @DisplayName("业务键只进事件流、绝不进 tag（基数铁律）：两个不同 SKU 共用一个时间序列")
     void skuCodeNeverBecomesATag() {
-        metrics.deduct("SKU-0001", 1, Deduct.OK, 1_500L, null);
-        metrics.deduct("SKU-0002", 1, Deduct.OK, 1_500L, null);
+        metrics.deduct("SKU-0001", 1, Deduct.OK, 1_500L, null, null);
+        metrics.deduct("SKU-0002", 1, Deduct.OK, 1_500L, null, null);
 
         assertThat(count(StockMetrics.DEDUCT, "ok")).as("两个不同的码落在同一条计数上").isEqualTo(2.0);
         assertThat(registry.find(StockMetrics.DEDUCT).counters())
@@ -116,7 +141,7 @@ class StockMetricsTest {
         int capacity = 2048;
         int extra = 88;
         for (int i = 0; i < capacity + extra; i++) {
-            metrics.deduct(SKU, 1, Deduct.OK, 1_500L, null);
+            metrics.deduct(SKU, 1, Deduct.OK, 1_500L, null, null);
         }
 
         List<StockEvent> events = metrics.recentEvents();

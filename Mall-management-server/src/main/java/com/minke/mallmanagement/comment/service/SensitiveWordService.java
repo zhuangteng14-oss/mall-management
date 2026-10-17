@@ -284,7 +284,11 @@ public class SensitiveWordService {
         // `hit / total` 就等于被拿去比阈值的那个命中率；场景现值只有一个（唯一调用点 =
         // `CommentService.add` 发表前）。
         if (Boolean.TRUE.equals(result.get("rejected"))) {
-            sensitiveMetrics.rejected("评论", hit, text.length(), joinWords(hitWords), System.nanoTime() - startedNanos);
+            // 块 7 · 阶段 3a.3 后续：拒收的人话原因 —— 命中比例与阈值（不写命中的词，
+            // 词已经在 words 形参里；reason 只回答「为什么拒」）
+            sensitiveMetrics.rejected("评论", hit, text.length(), joinWords(hitWords), System.nanoTime() - startedNanos,
+                    "敏感词拒收：命中比例 " + Math.round(ratio * 100) + "% ≥ "
+                            + Math.round(REJECT_RATIO * 100) + "%（命中 " + hit + "/" + text.length() + "）");
         } else {
             sensitiveMetrics.masked("评论", hit, text.length(), joinWords(hitWords), System.nanoTime() - startedNanos);
         }

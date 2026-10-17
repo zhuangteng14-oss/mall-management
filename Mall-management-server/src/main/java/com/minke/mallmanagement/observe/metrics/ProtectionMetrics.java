@@ -85,9 +85,11 @@ public class ProtectionMetrics {
      * @param durationNanos 墙钟（块 7 · 阶段 3a.3 新增）；**只有入站限流这一路有值**
      *                   （{@code InboundRateLimitInterceptor} 从拦截入口量到 {@code acquirePermission()} 返回）。
      *                   熔断开路那一路（{@code ProtectionMetricsBinder}）是**瞬时回调**、没有自然起止 ⇒ 传 {@code null}
+     * @param reason 拦下的人话原因（块 7 · 阶段 3a.3 后续新增）：限流未取得令牌 / 熔断已打开。
+     *               只进事件 record → {@code fields.reason}
      */
-    public void blocked(String key, String scope, String detail, Long durationNanos) {
-        event(Result.BLOCKED.tag, key, scope, detail, durationNanos);
+    public void blocked(String key, String scope, String detail, Long durationNanos, String reason) {
+        event(Result.BLOCKED.tag, key, scope, detail, durationNanos, reason);
     }
 
     /**
@@ -97,9 +99,9 @@ public class ProtectionMetrics {
      * {@code blocked} 是「闸按规则没放它进来」，{@code shed} 是「闸想放但自己没有余量了」。
      * 合成一档会让「阈值定得太松」与「池子开得太小」两种病读出同一个数。
      */
-    public void shed(String key, String scope, String detail) {
+    public void shed(String key, String scope, String detail, String reason) {
         // 不记耗时（块 7 · 阶段 3a.3 定）：池拒绝是**瞬时回调**（任务被当场弹回），没有起止 ⇒ 恒 null
-        event(Result.SHED.tag, key, scope, detail, null);
+        event(Result.SHED.tag, key, scope, detail, null, reason);
     }
 
     /**
@@ -108,9 +110,9 @@ public class ProtectionMetrics {
      * @param result 必须是 {@link Result} 里状态三档之一 —— 由调用方给枚举而不是字符串，
      *               免得「opend」这种拼错变成一条谁也不认识的 tag（它不会报错，只会让图例少一格）
      */
-    public void state(Result result, String key, String scope, String detail) {
+    public void state(Result result, String key, String scope, String detail, String reason) {
         // 不记耗时（同 shed）：熔断状态翻转是瞬时事实，没有起止
-        event(result.tag, key, scope, detail, null);
+        event(result.tag, key, scope, detail, null, reason);
     }
 
     /**
@@ -126,10 +128,10 @@ public class ProtectionMetrics {
      *
      * @param result 只能是 {@link Result#RETRY_SUCCESS} 或 {@link Result#RETRY_FAILED}
      */
-    public void retry(Result result, String key, String scope, String detail) {
+    public void retry(Result result, String key, String scope, String detail, String reason) {
         // 不记耗时（块 7 · 阶段 3a.3 定）：本档要的自然量是「两次尝试的间隔」，而现有代码只有 attempt 计数、
         // 没有任何时刻差 ⇒ 要新增计时才行。**已知缺口**，如实记 —— 别把恒 null 当成「间隔为 0」
-        event(result.tag, key, scope, detail, null);
+        event(result.tag, key, scope, detail, null, reason);
     }
 
     // ================= 事件流 =================
@@ -154,7 +156,8 @@ public class ProtectionMetrics {
     }
 
     /** 追加一条事件：先计数、后入环（两条通道同点发，与既有八环同款）。 */
-    private void event(String result, String key, String scope, String detail, Long durationNanos) {
+    private void event(String result, String key, String scope, String detail, Long durationNanos,
+                       String reason) {
         registry.counter(EVENTS, "protection", key == null ? "-" : key, "result", result).increment();
         long seq = eventCursor.getAndIncrement();
         events[(int) (seq & EVENT_MASK)] = new ProtectionEvent(
@@ -164,7 +167,8 @@ public class ProtectionMetrics {
                 detail,
                 TraceIdFilter.current(), TraceIdFilter.currentBatch(),
                 TraceIdFilter.currentActorId(), TraceIdFilter.currentActorRole(),
-                durationNanos == null ? null : durationNanos / 1000);
+                durationNanos == null ? null : durationNanos / 1000,
+                reason == null ? null : com.minke.mallmanagement.shared.text.EventReason.clip(reason));
     }
 
     /**
@@ -184,10 +188,14 @@ public class ProtectionMetrics {
      * @param actorRole  发起者的角色号（块 7 · 阶段 3a.3 新增）；无身份时为 null
      * @param durationUs 拦截耗时（**微秒**，块 7 · 阶段 3a.3 新增）；**只有限流被拒那一档有值**
      *                   （见 {@link #blocked}）；熔断 / 池 / 重试三档恒 null（瞬时回调，无起止）
+     * @param reason     处置的人话原因（块 7 · 阶段 3a.3 后续新增）：限流未取得令牌 / 熔断已打开 /
+     *                   失败率越线 / 池已满 / 重试仍撞死锁。成功档（closed / retry_success）为 {@code null}。
+     *                   ⚠️ 与 {@code detail} 分工：detail 是自由文本明细（含路径、实例名），
+     *                   reason 是一句可被前端单独着色的「为什么」；两者都要，不互相替代
      */
     public record ProtectionEvent(long seq, long epochMilli, String result,
                                   String key, String scope, String detail, String traceId, String batchId,
-                                  String actorId, Integer actorRole, Long durationUs)
+                                  String actorId, Integer actorRole, Long durationUs, String reason)
             implements com.minke.mallmanagement.observe.metrics.Sourced {
     }
 

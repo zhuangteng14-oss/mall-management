@@ -28,7 +28,8 @@ class SensitiveMetricsTest {
     @DisplayName("masked / rejected 两档各自计数，命中数与被判词数一并进事件（命中率是它们的派生量）")
     void bothOutcomesAreRecorded() {
         metrics.masked(SCENE, 1, 20, "傻逼", 1_500L);
-        metrics.rejected(SCENE, 9, 20, "傻逼,滚", 2_000_000L);
+        metrics.rejected(SCENE, 9, 20, "傻逼,滚", 2_000_000L,
+                "敏感词拒收：命中比例 45% ≥ 40%（命中 9/20）");
 
         assertThat(count(Result.MASKED.tag)).isEqualTo(1.0);
         assertThat(count(Result.REJECTED.tag)).isEqualTo(1.0);
@@ -46,6 +47,9 @@ class SensitiveMetricsTest {
                 .as("纳秒→微秒：1500ns→1µs、2000000ns→2000µs").containsExactly(1L, 2_000L);
         assertThat(events.get(0).actorId()).as("无 MDC ⇒ actorId 为 null").isNull();
         assertThat(events.get(0).actorRole()).as("无 MDC ⇒ actorRole 为 null").isNull();
+        // 块 7 · 阶段 3a.3 后续新增：拒收档带人话原因（不写命中的词），打码档无原因
+        assertThat(events).extracting(SensitiveEvent::reason)
+                .containsExactly(null, "敏感词拒收：命中比例 45% ≥ 40%（命中 9/20）");
     }
 
     @Test
@@ -78,7 +82,7 @@ class SensitiveMetricsTest {
         int capacity = 2048;
         int extra = 16;
         for (int i = 0; i < capacity + extra; i++) {
-            metrics.rejected(SCENE, 9, 20, "傻逼", 1_500L);
+            metrics.rejected(SCENE, 9, 20, "傻逼", 1_500L, "敏感词拒收：命中比例 45% ≥ 40%（命中 9/20）");
         }
 
         List<SensitiveEvent> events = metrics.recentEvents();

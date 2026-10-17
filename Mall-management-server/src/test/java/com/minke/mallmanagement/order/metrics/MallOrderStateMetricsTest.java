@@ -51,9 +51,11 @@ class MallOrderStateMetricsTest {
     @Test
     @DisplayName("transitions 三路各自计数，且事件流里带着行动作与前后态")
     void transitionOutcomesAreRecordedOnBothChannels() {
-        metrics.transition(OrderAction.PAY, "CREATED", "PAID", Result.APPLIED, ORDER, 1_500L);
-        metrics.transition(OrderAction.PAY, "PAID", null, Result.REJECTED, ORDER, 2_000_000L);
-        metrics.transition(OrderAction.DELIVER, "PAID", null, Result.ERROR, ORDER, 1_500L);
+        metrics.transition(OrderAction.PAY, "CREATED", "PAID", Result.APPLIED, ORDER, 1_500L, null);
+        metrics.transition(OrderAction.PAY, "PAID", null, Result.REJECTED, ORDER, 2_000_000L,
+                "订单不存在或已付款");
+        metrics.transition(OrderAction.DELIVER, "PAID", null, Result.ERROR, ORDER, 1_500L,
+                "数据库错误：IllegalStateException：db down");
 
         assertThat(count(MallOrderStateMetrics.TRANSITIONS, "action", "pay", "result", "applied")).isEqualTo(1.0);
         assertThat(count(MallOrderStateMetrics.TRANSITIONS, "action", "pay", "result", "rejected")).isEqualTo(1.0);
@@ -70,13 +72,17 @@ class MallOrderStateMetricsTest {
                 .as("纳秒→微秒：1500ns→1µs、2000000ns→2000µs").containsExactly(1L, 2_000L, 1L);
         assertThat(metrics.recentEvents().get(0).actorId()).as("无 MDC ⇒ actorId 为 null").isNull();
         assertThat(metrics.recentEvents().get(0).actorRole()).as("无 MDC ⇒ actorRole 为 null").isNull();
+        // 块 7 · 阶段 3a.3 后续新增：rejected / error 带人话原因，applied 为 null
+        assertThat(metrics.recentEvents()).extracting(OrderStateEvent::reason)
+                .containsExactly(null, "订单不存在或已付款",
+                        "数据库错误：IllegalStateException：db down");
     }
 
     @Test
     @DisplayName("业务键只进事件流、绝不进 tag（基数铁律）：两次不同订单的转移共用一个时间序列")
     void businessKeyNeverBecomesATag() {
-        metrics.transition(OrderAction.PAY, "CREATED", "PAID", Result.APPLIED, "ORDER-1", 1_500L);
-        metrics.transition(OrderAction.PAY, "CREATED", "PAID", Result.APPLIED, "ORDER-2", 1_500L);
+        metrics.transition(OrderAction.PAY, "CREATED", "PAID", Result.APPLIED, "ORDER-1", 1_500L, null);
+        metrics.transition(OrderAction.PAY, "CREATED", "PAID", Result.APPLIED, "ORDER-2", 1_500L, null);
 
         assertThat(count(MallOrderStateMetrics.TRANSITIONS, "action", "pay", "result", "applied"))
                 .as("两个不同的订单落在同一条计数上").isEqualTo(2.0);
@@ -92,7 +98,7 @@ class MallOrderStateMetricsTest {
         for (OrderAction action : new OrderAction[]{OrderAction.CREATE, OrderAction.PAY,
                 OrderAction.DELIVER, OrderAction.RECEIVE}) {
             for (Result r : Result.values()) {
-                metrics.transition(action, "X", "Y", r, ORDER, 1_500L);
+                metrics.transition(action, "X", "Y", r, ORDER, 1_500L, null);
             }
         }
         assertThat(registry.find(MallOrderStateMetrics.TRANSITIONS).counters())
@@ -194,9 +200,9 @@ class MallOrderStateMetricsTest {
     @Test
     @DisplayName("timeline.writes：ok 只计数**不发事件**，error 两条通道都发 —— 失败才需要追到哪一单")
     void timelineWriteOnlyEmitsAnEventOnFailure() {
-        metrics.timelineWrite(true, ORDER, null);
-        metrics.timelineWrite(true, ORDER, null);
-        metrics.timelineWrite(false, ORDER, null);
+        metrics.timelineWrite(true, ORDER, null, null);
+        metrics.timelineWrite(true, ORDER, null, null);
+        metrics.timelineWrite(false, ORDER, null, "时间线写入失败：IllegalStateException：db down");
 
         assertThat(count(MallOrderStateMetrics.TIMELINE_WRITES, "result", "ok")).isEqualTo(2.0);
         assertThat(count(MallOrderStateMetrics.TIMELINE_WRITES, "result", "error")).isEqualTo(1.0);
@@ -207,6 +213,9 @@ class MallOrderStateMetricsTest {
         assertThat(metrics.recentEvents().get(0).kind()).isEqualTo("async");
         assertThat(metrics.recentEvents().get(0).result()).isEqualTo("error");
         assertThat(metrics.recentEvents().get(0).key()).isEqualTo(ORDER);
+        assertThat(metrics.recentEvents().get(0).reason())
+                .as("失败才发事件 ⇒ 只验失败档的原因；成功档不发事件、原因无落点")
+                .isEqualTo("时间线写入失败：IllegalStateException：db down");
     }
 
     // ================= async.rejected / duration / queue.depth =================
@@ -258,7 +267,7 @@ class MallOrderStateMetricsTest {
     @Test
     @DisplayName("不埋 async.submitted：它在 timeline.enabled=true 时恒等于 transitions{applied}（规范第 6 条）")
     void submittedIsDeliberatelyNotASeparateMeter() {
-        metrics.transition(OrderAction.PAY, "CREATED", "PAID", Result.APPLIED, ORDER, 1_500L);
+        metrics.transition(OrderAction.PAY, "CREATED", "PAID", Result.APPLIED, ORDER, 1_500L, null);
 
         assertThat(registry.find("mall.order.state.async.submitted").counters())
                 .as("可派生值不重复埋点 —— 该等式由启动期打印的 timeline.enabled 生效值保证可判定")
@@ -272,7 +281,7 @@ class MallOrderStateMetricsTest {
     void eventRingOverwritesOldestAndKeepsSequenceMonotonic() {
         int capacity = 2048;
         for (int i = 0; i < capacity + 88; i++) {
-            metrics.transition(OrderAction.PAY, "CREATED", "PAID", Result.APPLIED, ORDER, 1_500L);
+            metrics.transition(OrderAction.PAY, "CREATED", "PAID", Result.APPLIED, ORDER, 1_500L, null);
         }
 
         List<OrderStateEvent> events = metrics.recentEvents();
@@ -305,7 +314,7 @@ class MallOrderStateMetricsTest {
                         start.await();
                         for (int i = 0; i < perThread; i++) {
                             metrics.transition(OrderAction.RECEIVE, "SHIPPED", "COMPLETED",
-                                    Result.APPLIED, key, 1_500L);
+                                    Result.APPLIED, key, 1_500L, null);
                         }
                     } catch (InterruptedException e) {
                         Thread.currentThread().interrupt();

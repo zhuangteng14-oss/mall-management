@@ -105,10 +105,15 @@ public class StockMetrics {
      *                取数点与三类 {@code null} 见 {@link StockEvent#remaining()} 的完整口径。
      *                ⚠️ 本形参**追加在末尾**是刻意的：既有四个形参的相对位置一个不动
      *                （与帧侧「前 11 个键的名字与顺序一个字没动」同一纪律）。
+     * @param reason  失败 / 拦截的**人话原因**（块 7 · 阶段 3a.3 后续新增）；成功档传 {@code null}。
+     *                只进事件 record → {@code fields.reason}，绝不进 tag（基数无界）。
+     *                调用点给的是具体事实（「防超卖拦截：库存不足…」/「库存扣减失败：…」），
+     *                不是 {@code result} 的同义复述 —— 后者页面已经有一列了。
      */
-    public void deduct(String skuCode, int qty, Deduct result, long durationNanos, Integer remaining) {
+    public void deduct(String skuCode, int qty, Deduct result, long durationNanos, Integer remaining,
+                       String reason) {
         registry.counter(DEDUCT, "result", result.tag).increment();
-        event("deduct", result.tag, skuCode, qty, durationNanos, remaining);
+        event("deduct", result.tag, skuCode, qty, durationNanos, remaining, reason);
     }
 
     /**
@@ -125,10 +130,12 @@ public class StockMetrics {
      *                已扣掉的量，见 {@code GoodsDao#releaseStock}）⇒ 释放档的
      *                {@link StockEvent#remaining()} 恒为 {@code null}。这是**判定不做**，
      *                不是漏了 —— 要补也是补在扣减一侧（那条路才是「还剩多少」要被追问的地方）。
+     * @param reason  失败 / 未命中的**人话原因**（块 7 · 阶段 3a.3 后续新增）；成功档传 {@code null}。
+     *                口径同 {@link #deduct} 的最后一个形参。
      */
-    public void release(String skuCode, int qty, Release result, long durationNanos) {
+    public void release(String skuCode, int qty, Release result, long durationNanos, String reason) {
         registry.counter(RELEASE, "result", result.tag).increment();
-        event("release", result.tag, skuCode, qty, durationNanos, null);
+        event("release", result.tag, skuCode, qty, durationNanos, null, reason);
     }
 
     // ================= 事件流 =================
@@ -161,7 +168,7 @@ public class StockMetrics {
      * 但 tag 里绝不能有它（基数无界）。
      */
     private void event(String kind, String result, String skuCode, int qty, Long durationNanos,
-                       Integer remaining) {
+                       Integer remaining, String reason) {
         long seq = eventCursor.getAndIncrement();
         events[(int) (seq & EVENT_MASK)] = new StockEvent(
                 seq, System.currentTimeMillis(), kind, result,
@@ -172,7 +179,10 @@ public class StockMetrics {
                 // 块 7 · 阶段 3a.3 第二步：**原样透传**调用点读到的当时剩余 ——
                 // ⚠️ 本类**不做任何兜底**（不查库、不猜）：读不到就是 {@code null}，
                 // 理由见 {@link StockEvent#remaining()}（「当时」这个口径只有调用点拿得到）。
-                remaining);
+                remaining,
+                // 块 7 · 阶段 3a.3 后续：原因在写 record 前统一收口（折叠空白 / 160 字截断 / 空转 null），
+                // 调用点不必各自重复这三条。⚠️ 这里**只裁不编**：调用点给什么就是什么。
+                reason == null ? null : com.minke.mallmanagement.shared.text.EventReason.clip(reason));
     }
 
     /**
@@ -211,10 +221,18 @@ public class StockMetrics {
      *                   要做成精确快照得开事务 + {@code FOR UPDATE}（或 {@code SELECT ... FOR UPDATE}
      *                   把扣减也包进去），代价是给**下单主链路**加锁 —— 为一个给页面看的数
      *                   不值得，故取「读已提交下的现读现记」并在这里写明。
+     * @param reason     <b>失败 / 拦截的人话原因</b>（块 7 · 阶段 3a.3 后续新增）。
+     *                   只有 {@code ok} 两档为 {@code null}；其余档由调用点给出具体事实
+     *                   （库存不足 / 扣减未命中 / 影响行数异常 / DAO 异常），
+     *                   经 {@code EventReason} 折叠空白并裁到 160 字。
+     *                   <p>⚠️ 它<b>不替代</b> {@code result}：{@code result} 是闭集 tag、
+     *                   回答「哪一档」，{@code reason} 是开集人话、回答「为什么」。
+     *                   {@code insufficient} 的两种成因（库存不足 / 无 SKU 行）就靠它分开。
      */
     public record StockEvent(long seq, long epochMilli, String kind, String result,
                              String skuCode, int qty, String traceId, String batchId,
-                             String actorId, Integer actorRole, Long durationUs, Integer remaining)
+                             String actorId, Integer actorRole, Long durationUs, Integer remaining,
+                             String reason)
             implements com.minke.mallmanagement.observe.metrics.Sourced {
     }
 

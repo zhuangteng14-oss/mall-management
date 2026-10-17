@@ -238,7 +238,8 @@ public class DistributedLockService implements DisposableBean {
         RedissonClient redis = obtain();
         if (redis == null) {
             // 降级放行：与「争用超时」同级，见方法注释的推演。
-            lockMetrics.acquire(name.tag(), bizKey, Outcome.DEGRADED, 0L);
+            lockMetrics.acquire(name.tag(), bizKey, Outcome.DEGRADED, 0L,
+                    "锁客户端不可用：降级冷却期内跳过取锁");
             return action.get();
         }
 
@@ -251,12 +252,13 @@ public class DistributedLockService implements DisposableBean {
             // 恢复中断位：本方法把中断当「取锁失败」吞掉，但不该**顺带**吞掉线程的中断语义
             // （调用方或容器可能正靠它收尾）。
             Thread.currentThread().interrupt();
-            lockMetrics.acquire(name.tag(), bizKey, Outcome.ERROR, elapsed(startNanos));
+            lockMetrics.acquire(name.tag(), bizKey, Outcome.ERROR, elapsed(startNanos), "取锁被中断");
             return action.get();
         } catch (Exception e) {
             // ⚠️ catch Exception 而不是 RedisException：锁层的异常**必须 total catch**
             // （A-S2b-1）—— 任何取锁异常都不该变成业务请求的 5xx。
-            lockMetrics.acquire(name.tag(), bizKey, Outcome.ERROR, elapsed(startNanos));
+            lockMetrics.acquire(name.tag(), bizKey, Outcome.ERROR, elapsed(startNanos),
+                    com.minke.mallmanagement.shared.text.EventReason.of("取锁异常", e));
             markDegraded(e);
             return action.get();
         }
@@ -268,11 +270,12 @@ public class DistributedLockService implements DisposableBean {
         markOk();
 
         if (!held) {
-            lockMetrics.acquire(name.tag(), bizKey, Outcome.TIMEOUT, elapsed(startNanos));
+            lockMetrics.acquire(name.tag(), bizKey, Outcome.TIMEOUT, elapsed(startNanos),
+                    "取锁超时：等待 " + wait.toMillis() + " ms 未获得");
             return action.get();
         }
 
-        lockMetrics.acquire(name.tag(), bizKey, Outcome.ACQUIRED, elapsed(startNanos));
+        lockMetrics.acquire(name.tag(), bizKey, Outcome.ACQUIRED, elapsed(startNanos), null);
         try {
             return action.get();
         } finally {
@@ -448,7 +451,8 @@ public class DistributedLockService implements DisposableBean {
         cooldownUntilNanos.set(System.nanoTime() + cooldown.toNanos());
         if (!degraded) {
             degraded = true;
-            lockMetrics.transition(false);
+            lockMetrics.transition(false,
+                    com.minke.mallmanagement.shared.text.EventReason.of("锁进入降级", e));
             log.warn("分布式锁转为降级（B2）：{} 秒内不再尝试取锁，写请求按 fail-open 走原路径（结果仍然正确性自洽，"
                             + "但 orderAdd 在此期间退化为裸 INSERT）。原因：{}", cooldown.toSeconds(), e.toString());
         }
@@ -464,7 +468,7 @@ public class DistributedLockService implements DisposableBean {
     private void markOk() {
         if (degraded) {
             degraded = false;
-            lockMetrics.transition(true);
+            lockMetrics.transition(true, null);
             log.info("分布式锁已恢复（B2）：下一次取锁将正常尝试");
         }
     }
@@ -483,12 +487,14 @@ public class DistributedLockService implements DisposableBean {
         try {
             if (lock.isHeldByCurrentThread()) {
                 lock.unlock();
-                lockMetrics.hold(name.tag(), bizKey, Hold.RELEASED);
+                lockMetrics.hold(name.tag(), bizKey, Hold.RELEASED, null);
             } else {
-                lockMetrics.hold(name.tag(), bizKey, Hold.LEASE_LOST);
+                lockMetrics.hold(name.tag(), bizKey, Hold.LEASE_LOST,
+                        "租约已丢失：临界区可能与他人重叠");
             }
         } catch (Exception e) {
-            lockMetrics.hold(name.tag(), bizKey, Hold.ERROR);
+            lockMetrics.hold(name.tag(), bizKey, Hold.ERROR,
+                    com.minke.mallmanagement.shared.text.EventReason.of("释放锁失败", e));
         }
     }
 

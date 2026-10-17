@@ -146,11 +146,15 @@ public class MallOrderStateMetrics {
      *                 <b>{@code orderDao.casUpdate(...)} 之前到之后</b>（裁定 ⑤）。
      *                 ⚠️ 该段<b>在订单锁的临界区内</b> ⇒ 这个数含**持锁等待 + 真 UPDATE 往返**，
      *                 不是纯 SQL 耗时；两者在页面上不分开（分开需要另一次埋点，且分不出「等锁」的归属）
+     * @param reason   失败 / 拒绝的人话原因（块 7 · 阶段 3a.3 后续新增）；applied 传 {@code null}。
+     *                 ⚠️ 与 {@code shape} 分工：{@code shape} 是**三位形状 / async 的 queue_full|shutdown**，
+     *                 本参数只补 transition 的 rejected / error 与 timelineWrite 的失败 ——
+     *                 同一事实不写两遍。只进 {@code fields.reason}，绝不进 tag
      */
     public void transition(OrderAction action, String fromName, String toName, Result result, String orderId,
-                           long durationNanos) {
+                           long durationNanos, String reason) {
         registry.counter(TRANSITIONS, "action", action.tag(), "result", result.tag).increment();
-        event("transition", action.tag(), fromName, toName, result.tag, null, orderId, durationNanos);
+        event("transition", action.tag(), fromName, toName, result.tag, null, orderId, durationNanos, reason);
     }
 
     /**
@@ -170,7 +174,8 @@ public class MallOrderStateMetrics {
      */
     public void illegal(String shape, String orderId, long durationNanos) {
         registry.counter(ILLEGAL, "shape", shape).increment();
-        event("illegal", null, null, null, null, shape, orderId, durationNanos);
+        // 原因由 shape 表达（三位形状就是原因）⇒ reason 传 null，不重复写同一事实
+        event("illegal", null, null, null, null, shape, orderId, durationNanos, null);
     }
 
     /**
@@ -200,7 +205,8 @@ public class MallOrderStateMetrics {
      */
     public void birthRejected(String shape, String orderId, long durationNanos) {
         registry.counter(BIRTH_REJECTED, "shape", shape).increment();
-        event("illegal", null, null, null, "rejected", shape, orderId, durationNanos);
+        // 同上：shape 就是原因，reason 传 null
+        event("illegal", null, null, null, "rejected", shape, orderId, durationNanos, null);
     }
 
     /**
@@ -217,11 +223,13 @@ public class MallOrderStateMetrics {
      *                       ⇒ 根本没有 from/to 可写、INSERT <b>一次都没发生过</b> ⇒ 传 {@code null}。
      *                       这里 {@code null} 不是「测不到」而是「没发生」，两者在页面上意思完全不同</li>
      *                 </ul>
+     * @param reason  失败的人话原因（块 7 · 阶段 3a.3 后续新增）；{@code ok} 传 {@code null}。
+     *                只进事件 record → {@code fields.reason}
      */
-    public void timelineWrite(boolean ok, String orderId, Long durationNanos) {
+    public void timelineWrite(boolean ok, String orderId, Long durationNanos, String reason) {
         registry.counter(TIMELINE_WRITES, "result", ok ? "ok" : "error").increment();
         if (!ok) {
-            event("async", null, null, null, "error", null, orderId, durationNanos);
+            event("async", null, null, null, "error", null, orderId, durationNanos, reason);
         }
     }
 
@@ -235,7 +243,8 @@ public class MallOrderStateMetrics {
         // 耗时恒 null（块 7 · 阶段 3a.3）：被拒的语义是「这个任务**根本没跑**」——
         // 没有可测的执行段（线程池的拒绝发生在提交处，纳秒级且不是任务本身的耗时），
         // 与 protection 环「熔断/池/重试恒 null」同一条处置
-        event("async", null, null, null, "rejected", reason.tag, orderId, null);
+        // 原因由 shape（queue_full / shutdown）表达 ⇒ 新加的 reason 形参传 null，不重复
+        event("async", null, null, null, "rejected", reason.tag, orderId, null, null);
     }
 
     /** 异步任务本身的执行墙钟。 */
@@ -283,14 +292,15 @@ public class MallOrderStateMetrics {
     }
 
     private void event(String kind, String action, String from, String to,
-                       String result, String shape, String key, Long durationNanos) {
+                       String result, String shape, String key, Long durationNanos, String reason) {
         long seq = eventCursor.getAndIncrement();
         events[(int) (seq & EVENT_MASK)] = new OrderStateEvent(
                 seq, System.currentTimeMillis(), kind, action, from, to, result, shape,
                 key == null ? null : String.valueOf(key), com.minke.mallmanagement.shared.web.TraceIdFilter.current(), com.minke.mallmanagement.shared.web.TraceIdFilter.currentBatch(),
                 com.minke.mallmanagement.shared.web.TraceIdFilter.currentActorId(),
                 com.minke.mallmanagement.shared.web.TraceIdFilter.currentActorRole(),
-                durationNanos == null ? null : durationNanos / 1000);   // 块 7 · commit 8/8c：写全限定名而非 import，理由同 {@code MallCacheMetrics#event}（保本文件 `:3` 与 `:104` 的引用不下移）。⚠️ durationNanos 是**纳秒**、落进 record 的是**微秒**
+                durationNanos == null ? null : durationNanos / 1000,   // 块 7 · commit 8/8c：写全限定名而非 import，理由同 {@code MallCacheMetrics#event}（保本文件 `:3` 与 `:104` 的引用不下移）。⚠️ durationNanos 是**纳秒**、落进 record 的是**微秒**
+                reason == null ? null : com.minke.mallmanagement.shared.text.EventReason.clip(reason));
     }
 
     /**
@@ -318,11 +328,15 @@ public class MallOrderStateMetrics {
      *                   口径逐 kind 不同：{@code transition} = CAS 前到后（**含持锁等待**）、
      *                   {@code illegal} = 三位到手到判完形状（纯内存）、{@code async/error} =
      *                   那次 INSERT 的墙钟（读回失败那一路为 null）；{@code async/rejected} 恒 null
+     * @param reason     失败 / 拒绝的人话原因（块 7 · 阶段 3a.3 后续新增）。
+     *                   <b>只补</b> {@code transition} 的 rejected / error 与 {@code async/error}；
+     *                   {@code illegal} / 出生闸 / async 被拒的「原因」仍由 {@code shape} 表达
+     *                   （{@code 010} 或 {@code queue_full|shutdown}）—— 同一事实不写两遍
      */
     public record OrderStateEvent(long seq, long epochMilli, String kind, String action,
                                   String from, String to, String result, String shape, String key,
                                   String traceId, String batchId, String actorId, Integer actorRole,
-                                  Long durationUs)
+                                  Long durationUs, String reason)
             implements com.minke.mallmanagement.observe.metrics.Sourced {
     }
 

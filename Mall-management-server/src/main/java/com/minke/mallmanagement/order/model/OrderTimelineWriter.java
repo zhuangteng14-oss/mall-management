@@ -127,13 +127,14 @@ public class OrderTimelineWriter {
         try {
             jdbcTemplate.update(INSERT_SQL, orderId, action.tag(), fromState, toState,
                     toUtcText(occurredAtMillis));
-            metrics.timelineWrite(true, orderId, System.nanoTime() - startedNanos);
+            metrics.timelineWrite(true, orderId, System.nanoTime() - startedNanos, null);
             markOk();
         } catch (Exception e) {
             // ⚠️ catch Exception 而不是 DataAccessException：时间线**必须 total catch**
             // （同 DistributedLockService 对锁异常的处理）—— 任何落库失败都不该让异步线程带着
             // 异常退出，那会同时丢掉计数、丢掉事件、丢掉 WARN。
-            metrics.timelineWrite(false, orderId, System.nanoTime() - startedNanos);
+            metrics.timelineWrite(false, orderId, System.nanoTime() - startedNanos,
+                    com.minke.mallmanagement.shared.text.EventReason.of("时间线写入失败", e));
             markFailed(e, orderId);
         }
     }

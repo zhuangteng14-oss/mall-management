@@ -215,7 +215,8 @@ public class TwoLevelCache implements Cache {
             // 冷却中（或本线程刚探完）：视作 L2 未命中 —— 与「Redis 连不上」同一条降级路径。
             // 耗时传 null：本行没碰网络；本线程若恰好抢到探测权、在上面那次同步 PING 里花了 233ms，
             // 那段记在 probe 事件上（见 MallCacheMetrics#l2Request），不是丢失。
-            metrics.l2Request(name, key, L2Result.DEGRADED, null);
+            metrics.l2Request(name, key, L2Result.DEGRADED, null,
+                    "L2 降级冷却中：本次未访问 Redis");
             return null;
         }
         long startedNanos = System.nanoTime();
@@ -223,11 +224,13 @@ public class TwoLevelCache implements Cache {
             ValueWrapper wrapper = l2.get(key);
             long elapsed = System.nanoTime() - startedNanos;
             probe.markOk();
-            metrics.l2Request(name, key, wrapper != null ? L2Result.HIT : L2Result.MISS, elapsed);
+            // 命中 / 未命中不是失败，没有原因 ⇒ null
+            metrics.l2Request(name, key, wrapper != null ? L2Result.HIT : L2Result.MISS, elapsed, null);
             return wrapper;
         } catch (DataAccessException e) {
             probe.markFailed(e);
-            metrics.l2Request(name, key, L2Result.ERROR, System.nanoTime() - startedNanos);
+            metrics.l2Request(name, key, L2Result.ERROR, System.nanoTime() - startedNanos,
+                    com.minke.mallmanagement.shared.text.EventReason.of("L2 读取失败", e));
             return null;
         }
     }
@@ -255,7 +258,8 @@ public class TwoLevelCache implements Cache {
             // 冷却中：跳过失效。L2 里可能因此留下一个旧值，但：
             //   (a) 这段时间本就没在读 L2，(b) L2 TTL（a3 为 5m）是陈旧上界的兜底
             // 耗时传 null：没碰 L2（「没发生」，不是「很快」）
-            metrics.evicted(name, false, EvictResult.SKIPPED_DEGRADED, key, null);
+            metrics.evicted(name, false, EvictResult.SKIPPED_DEGRADED, key, null,
+                    "L2 降级冷却中：单键失效已跳过");
             return;
         }
         long startedNanos = System.nanoTime();
@@ -263,10 +267,11 @@ public class TwoLevelCache implements Cache {
             l2.evict(key);
             long elapsed = System.nanoTime() - startedNanos;
             probe.markOk();
-            metrics.evicted(name, false, EvictResult.EVICTED, key, elapsed);
+            metrics.evicted(name, false, EvictResult.EVICTED, key, elapsed, null);
         } catch (DataAccessException e) {
             probe.markFailed(e);
-            metrics.evicted(name, false, EvictResult.ERROR, key, System.nanoTime() - startedNanos);
+            metrics.evicted(name, false, EvictResult.ERROR, key, System.nanoTime() - startedNanos,
+                    com.minke.mallmanagement.shared.text.EventReason.of("L2 失效失败", e));
         }
     }
 
@@ -276,7 +281,8 @@ public class TwoLevelCache implements Cache {
         }
         if (!probe.isL2UsableNow()) {
             // 冷却中：跳过整片失效（同上，L2 TTL 兜底）；耗时传 null（没碰 L2）
-            metrics.evicted(name, true, EvictResult.SKIPPED_DEGRADED, null, null);
+            metrics.evicted(name, true, EvictResult.SKIPPED_DEGRADED, null, null,
+                    "L2 降级冷却中：整片失效已跳过");
             return;
         }
         long startedNanos = System.nanoTime();
@@ -284,10 +290,11 @@ public class TwoLevelCache implements Cache {
             l2.clear();
             long elapsed = System.nanoTime() - startedNanos;
             probe.markOk();
-            metrics.evicted(name, true, EvictResult.EVICTED, null, elapsed);
+            metrics.evicted(name, true, EvictResult.EVICTED, null, elapsed, null);
         } catch (DataAccessException e) {
             probe.markFailed(e);
-            metrics.evicted(name, true, EvictResult.ERROR, null, System.nanoTime() - startedNanos);
+            metrics.evicted(name, true, EvictResult.ERROR, null, System.nanoTime() - startedNanos,
+                    com.minke.mallmanagement.shared.text.EventReason.of("L2 整片失效失败", e));
         }
     }
 }

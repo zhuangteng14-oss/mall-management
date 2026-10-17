@@ -552,26 +552,26 @@ public class EventBroadcaster {
         String result = String.valueOf(e.result());
         switch (String.valueOf(e.kind())) {
             case "l1":
-                return hit("hit".equals(result) ? "缓存命中（L1）" : "L1 未命中", result, e.cache(), e.key());
+                return hit("hit".equals(result) ? "缓存命中（L1）" : "L1 未命中", result, e.cache(), e.key(), e.reason());
             case "l2":
                 switch (result) {
                     case "hit":
-                        return hit("缓存命中（L2）", result, e.cache(), e.key());
+                        return hit("缓存命中（L2）", result, e.cache(), e.key(), e.reason());
                     case "miss":
-                        return hit("L2 未命中", result, e.cache(), e.key());
+                        return hit("L2 未命中", result, e.cache(), e.key(), e.reason());
                     case "degraded":
                         return cacheEmit(e, Severity.WARN.tag, "L2 降级跳过", result);
                     default:
                         return cacheEmit(e, severityOf(result), "L2 读取失败", result);
                 }
             case "load":
-                return hit("回源查库", result, e.cache(), e.key());
+                return hit("回源查库", result, e.cache(), e.key(), e.reason());
             case "singleflight":
-                return hit("并发合并（单飞）", result, e.cache(), e.key());
+                return hit("并发合并（单飞）", result, e.cache(), e.key(), e.reason());
             case "evict":
                 switch (result) {
                     case "evicted":
-                        return hit("缓存失效", result, e.cache(), e.key());
+                        return hit("缓存失效", result, e.cache(), e.key(), e.reason());
                     case "skipped_degraded":
                         return cacheEmit(e, Severity.WARN.tag, "缓存失效被跳过（降级窗口）", result);
                     default:
@@ -633,6 +633,8 @@ public class EventBroadcaster {
                 fields.put("from", e.from());
                 fields.put("to", e.to());
                 fields.put("order", e.key());
+                // rejected / error 才有值；applied 为 null ⇒ 不写这个键
+                putReason(fields, e.reason());
                 return new Emit(severityOf(result), title,
                         "action=" + e.action() + " result=" + result + " order#"
                                 + (e.key() == null ? "-" : e.key()), fields);
@@ -652,10 +654,12 @@ public class EventBroadcaster {
                         "三位=" + e.shape() + " order#" + (e.key() == null ? "-" : e.key()), fields);
             }
             default: {
-                String reason = e.shape() == null ? "" : " reason=" + e.shape();
+                // 原因优先级：shape（async 被拒的 queue_full|shutdown）→ 新加的 reason（时间线写入失败）
+                String cause = e.shape() != null ? e.shape() : e.reason();
+                String reason = cause == null ? "" : " reason=" + cause;
                 Map<String, Object> fields = new LinkedHashMap<>();
                 fields.put("result", result);
-                fields.put("reason", e.shape());
+                putReason(fields, cause);
                 fields.put("order", e.key());
                 return new Emit(severityOf(result), "异步流转" + asyncSuffix(result),
                         "result=" + result + reason + " order#" + (e.key() == null ? "-" : e.key()), fields);
@@ -698,6 +702,8 @@ public class EventBroadcaster {
         fields.put("sku", e.skuCode());
         fields.put("qty", e.qty());
         fields.put("result", result);
+        // 块 7 · 阶段 3a.3 后续：超卖拦截 / 扣减失败的具体原因（旧帧没有这个字段 ⇒ 不写键）
+        putReason(fields, e.reason());
         return new Emit(severityOf(result), title,
                 "kind=" + e.kind() + " sku=" + e.skuCode() + " qty=" + e.qty() + " result=" + result, fields);
     }
@@ -733,6 +739,7 @@ public class EventBroadcaster {
         fields.put("scene", e.scene());
         fields.put("hit", e.hit());
         fields.put("total", e.total());
+        putReason(fields, e.reason());
         return new Emit(masked ? Severity.INFO.tag : Severity.WARN.tag,
                 masked ? "敏感词打码" : "敏感词拒收", detail, fields);
     }
@@ -801,15 +808,17 @@ public class EventBroadcaster {
         fields.put("protection", e.key());
         fields.put("scope", e.scope());
         fields.put("extra", e.detail());
+        // detail 是自由文本明细，reason 是单独可着色的一句「为什么」—— 两者都留
+        putReason(fields, e.reason());
         return new Emit(severityOf(result), title, detail, fields);
     }
 
     // ==================== 小工具 ====================
 
     /** 命中类事件（缓存命中 / 回源 / 单飞）：一律 info。 */
-    private static Emit hit(String title, String result, String cache, String key) {
+    private static Emit hit(String title, String result, String cache, String key, String reason) {
         return new Emit(Severity.INFO.tag, title, cacheAspect(result, cache, key),
-                cacheFields(result, cache, key));
+                cacheFields(result, cache, key, reason));
     }
 
     /** 严重度规则（**唯一出处**，见类注释第 2 件）。 */
@@ -842,7 +851,7 @@ public class EventBroadcaster {
     /** 非命中口径的缓存事件（降级 / 失败 / 探活）：severity 与标题由调用方给定。 */
     private static Emit cacheEmit(MallCacheEvent e, String severity, String title, String result) {
         return new Emit(severity, title, cacheAspect(result, e.cache(), e.key()),
-                cacheFields(result, e.cache(), e.key()));
+                cacheFields(result, e.cache(), e.key(), e.reason()));
     }
 
     private static String cacheAspect(String result, String cache, String key) {
@@ -851,12 +860,26 @@ public class EventBroadcaster {
     }
 
     /** {@link #cacheAspect} 的**同一批事实**的结构化形态 —— 两者必须在同一个 {@link Emit} 里一起产生。 */
-    private static Map<String, Object> cacheFields(String result, String cache, String key) {
+    private static Map<String, Object> cacheFields(String result, String cache, String key, String reason) {
         Map<String, Object> fields = new LinkedHashMap<>();
         fields.put("cache", cache);
         fields.put("result", result);
         fields.put("key", key);
+        putReason(fields, reason);
         return fields;
+    }
+
+    /**
+     * 把失败 / 降级原因放进 {@code fields.reason}（块 7 · 阶段 3a.3 后续新增）。
+     *
+     * <p>⚠️ 只在非空白时写：{@code null} 不该在页面上变成一个空的「原因」键。
+     * reason 永不进顶层帧（帧仍 15 键）、不进 Micrometer tag（基数无界）—— 它只走
+     * {@code fields}，与既有 {@code result} / {@code key} 同一列。
+     */
+    private static void putReason(Map<String, Object> fields, String reason) {
+        if (reason != null && !reason.isBlank()) {
+            fields.put("reason", reason);
+        }
     }
 
     private static Emit lockEmit(MallLockEvent e, String severity, String title, String result) {
@@ -871,6 +894,7 @@ public class EventBroadcaster {
         fields.put("lock", e.lock());
         fields.put("result", result);
         fields.put("key", e.key());
+        putReason(fields, e.reason());
         return fields;
     }
 

@@ -149,7 +149,8 @@ public class MallCacheMetrics {
      */
     public void l1Request(String cache, Object key, boolean hit, long durationNanos) {
         registry.counter(L1_REQUESTS, "cache", cache, "result", hit ? "hit" : "miss").increment();
-        event(cache, "l1", hit ? "hit" : "miss", key, durationNanos);
+        // 命中 / 未命中都不是失败，没有「原因」可言 —— 传 null（本笔新增形参的归属写在这里）
+        event(cache, "l1", hit ? "hit" : "miss", key, durationNanos, null);
     }
 
     /**
@@ -160,10 +161,12 @@ public class MallCacheMetrics {
      *                      会在 {@code probe.isL2UsableNow()} 里**同步 PING 一次**（不可达时约 233ms）
      *                      —— 那段发生在别处、这里量不到，但它**记在 probe 事件上**（见 {@link #probe}），
      *                      不是丢失，只是不挂在这条事件上。故本参数用 {@code Long} 而非 {@code long}
+     * @param reason 失败 / 降级的人话原因（块 7 · 阶段 3a.3 后续新增）；hit / miss 传 {@code null}。
+     *               只进事件 record → {@code fields.reason}，绝不进 tag（基数无界）
      */
-    public void l2Request(String cache, Object key, L2Result result, Long durationNanos) {
+    public void l2Request(String cache, Object key, L2Result result, Long durationNanos, String reason) {
         registry.counter(L2_REQUESTS, "cache", cache, "result", result.tag).increment();
-        event(cache, "l2", result.tag, key, durationNanos);
+        event(cache, "l2", result.tag, key, durationNanos, reason);
     }
 
     /**
@@ -178,7 +181,7 @@ public class MallCacheMetrics {
      */
     public void loadedFromDb(String cache, Object key, long durationNanos) {
         registry.counter(LOADS, "cache", cache).increment();
-        event(cache, "load", null, key, durationNanos);
+        event(cache, "load", null, key, durationNanos, null);
     }
 
     /**
@@ -193,7 +196,7 @@ public class MallCacheMetrics {
      */
     public void singleflightMerged(String cache, Object key, long durationNanos) {
         registry.counter(SINGLEFLIGHT, "cache", cache).increment();
-        event(cache, "singleflight", null, key, durationNanos);
+        event(cache, "singleflight", null, key, durationNanos, null);
     }
 
     /**
@@ -202,11 +205,13 @@ public class MallCacheMetrics {
      * @param allEntries    true = {@code clear()}/{@code @CacheEvict(allEntries=true)}；false = 单键
      * @param durationNanos 这次失效的墙钟（块 7 · 阶段 3a.3 新增）；{@code SKIPPED_DEGRADED} 传 {@code null}
      *                      —— 冷却窗口内跳过，根本没碰 L2（「没发生」不是「很快」）
+     * @param reason        失败 / 降级的人话原因（块 7 · 阶段 3a.3 后续新增）；evicted 传 {@code null}
      */
-    public void evicted(String cache, boolean allEntries, EvictResult result, Object key, Long durationNanos) {
+    public void evicted(String cache, boolean allEntries, EvictResult result, Object key, Long durationNanos,
+                        String reason) {
         registry.counter(EVICTS, "cache", cache, "kind", allEntries ? "all" : "key",
                 "result", result.tag).increment();
-        event(cache, "evict", result.tag, allEntries ? null : key, durationNanos);
+        event(cache, "evict", result.tag, allEntries ? null : key, durationNanos, reason);
     }
 
     /**
@@ -241,21 +246,25 @@ public class MallCacheMetrics {
      *                      可直接用本指标复核（稳态约 233ms、进程内首次 0.5~0.8s）。
      *                      ⚠️ 块 7 · 阶段 3a.3 起这个值**同时进事件**（原来只进 timer）——
      *                      DEGRADED 那次「同步 PING」的钱就记在这条 probe 事件上，见 {@link #l2Request}
+     * @param reason 探测失败的人话原因（块 7 · 阶段 3a.3 后续新增）；{@code ok} 传 {@code null}
      */
-    public void probe(boolean ok, long durationNanos) {
+    public void probe(boolean ok, long durationNanos, String reason) {
         registry.counter(L2_PROBES, "result", ok ? "ok" : "failed").increment();
         registry.timer(L2_PROBE_DURATION).record(durationNanos, TimeUnit.NANOSECONDS);
-        event(null, "probe", ok ? "ok" : "failed", null, durationNanos);
+        event(null, "probe", ok ? "ok" : "failed", null, durationNanos, reason);
     }
 
-    /** 健康 → 降级（真实翻转）。 */
-    public void degraded() {
-        transition("degraded");
+    /** 健康 → 降级（真实翻转）。
+     *
+     * @param reason 降级的人话原因（块 7 · 阶段 3a.3 后续新增）；真实翻转才有值
+     */
+    public void degraded(String reason) {
+        transition("degraded", reason);
     }
 
-    /** 降级 → 健康（真实翻转）。 */
+    /** 降级 → 健康（真实翻转）。恢复不是失败，没有原因 ⇒ 本笔不给它加 reason 形参。 */
     public void recovered() {
-        transition("healthy");
+        transition("healthy", null);
     }
 
     /**
@@ -295,10 +304,10 @@ public class MallCacheMetrics {
         return snapshot;
     }
 
-    private void transition(String to) {
+    private void transition(String to, String reason) {
         registry.counter(L2_TRANSITIONS, "to", to).increment();
         // 不记耗时：翻正是「瞬时事实」，没有起止（与 evict 的 SKIPPED 同款，见 event 的 javadoc）
-        event(null, "transition", to, null, null);
+        event(null, "transition", to, null, null, reason);
     }
 
     /**
@@ -313,15 +322,20 @@ public class MallCacheMetrics {
      * @param durationNanos 本条事件自身的墙钟（纳秒）；{@code null} = 量不出来。
      *                      ⚠️ 值为 {@code null} 的情形都是**有理由的**，不是漏了：
      *                      evict 被降级跳过 / 翻转（瞬时事实，根本没有起止）
+     * @param reason        失败 / 降级的人话原因（块 7 · 阶段 3a.3 后续新增）；
+     *                      {@code null} = 本档没有原因（成功 / 命中 / 瞬时事实）。
+     *                      写 record 前统一 {@code EventReason.clip} 兜底（折叠空白 / 160 字）
      */
-    private void event(String cache, String kind, String result, Object key, Long durationNanos) {
+    private void event(String cache, String kind, String result, Object key, Long durationNanos,
+                       String reason) {
         long seq = eventCursor.getAndIncrement();
         events[(int) (seq & EVENT_MASK)] = new MallCacheEvent(
                 seq, System.currentTimeMillis(), cache, kind, result,
                 key == null ? null : String.valueOf(key), com.minke.mallmanagement.shared.web.TraceIdFilter.current(), com.minke.mallmanagement.shared.web.TraceIdFilter.currentBatch(),
                 com.minke.mallmanagement.shared.web.TraceIdFilter.currentActorId(),
                 com.minke.mallmanagement.shared.web.TraceIdFilter.currentActorRole(),
-                durationNanos == null ? null : durationNanos / 1000);   // 块 7 · commit 8/8c：写全限定名而非 import —— 本文件 `:65`/`:102-103`/`:109` 那批「文件:行号」引用不能因加一行 import 而下移
+                durationNanos == null ? null : durationNanos / 1000,   // 块 7 · commit 8/8c：写全限定名而非 import —— 本文件 `:65`/`:102-103`/`:109` 那批「文件:行号」引用不能因加一行 import 而下移
+                reason == null ? null : com.minke.mallmanagement.shared.text.EventReason.clip(reason));
     }
 
     /**
@@ -341,10 +355,15 @@ public class MallCacheMetrics {
      * @param actorRole  发起者的角色号（块 7 · 阶段 3a.3 新增，1 客户 / 2 商家 / 3 管理员）；无身份时为 null
      * @param durationUs 本条事件的耗时（**微秒**，块 7 · 阶段 3a.3 新增）；{@code null} = 量不出来。
      *                   ⚠️ 由纳秒入参除以 1000 得来 —— 微秒而非毫秒，因为最便宜的一档是纳秒级的
+     * @param reason     失败 / 降级的人话原因（块 7 · 阶段 3a.3 后续新增）；
+     *                   {@code null} = 本档没有原因（命中 / 未命中 / 成功失效 / 探活成功 / 恢复）。
+     *                   ⚠️ 与 {@code result} 分工同 {@code StockEvent#reason()}：闭集 tag 答「哪一档」，
+     *                   开集人话答「为什么」——{@code l2/degraded} 的「冷却中」与「刚探测失败」
+     *                   就靠它分开
      */
     public record MallCacheEvent(long seq, long epochMilli, String cache, String kind,
                                  String result, String key, String traceId, String batchId,
-                                 String actorId, Integer actorRole, Long durationUs)
+                                 String actorId, Integer actorRole, Long durationUs, String reason)
             implements com.minke.mallmanagement.observe.metrics.Sourced {
     }
 

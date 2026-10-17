@@ -66,8 +66,9 @@ class EventStreamServiceTest {
     @Test
     @DisplayName("首帧：把八环已攒的都送出来，三个汇总都是**本拍**的；第一拍速率报 0（不报无穷）")
     void firstFrameCarriesEverythingAlreadyInTheRings() {
-        stock.deduct(SKU, 1, StockMetrics.Deduct.OK, 1_500L, 99);
-        stock.deduct(SKU, 2, StockMetrics.Deduct.INSUFFICIENT, 1_500L, 1);
+        stock.deduct(SKU, 1, StockMetrics.Deduct.OK, 1_500L, 99, null);
+        stock.deduct(SKU, 2, StockMetrics.Deduct.INSUFFICIENT, 1_500L, 1,
+                "防超卖拦截：库存不足（需 2 件，剩余 1 件）");
         audit.failed("C-1", "goods.add", "db down", "goods", "M-1:P-1", 1_500L);
 
         Map<String, Object> frame = frames.frame(0);
@@ -91,7 +92,7 @@ class EventStreamServiceTest {
     @Test
     @DisplayName("增量：送过的不再送（第二拍 0 条；速率仍是数字，页面画折线要一个数）")
     void secondFrameOnlyCarriesWhatIsNew() {
-        stock.deduct(SKU, 1, StockMetrics.Deduct.OK, 1_500L, null);
+        stock.deduct(SKU, 1, StockMetrics.Deduct.OK, 1_500L, null, null);
         frames.frame(0);
 
         Map<String, Object> quiet = frames.frame(1);
@@ -99,7 +100,7 @@ class EventStreamServiceTest {
         assertThat((List<?>) quiet.get("events")).isEmpty();
         assertThat(quiet.get("rate")).as("没有新事件 ⇒ 0.0，但字段仍在").isInstanceOf(Double.class);
 
-        stock.deduct(SKU, 1, StockMetrics.Deduct.OK, 1_500L, null);
+        stock.deduct(SKU, 1, StockMetrics.Deduct.OK, 1_500L, null, null);
         Map<String, Object> next = frames.frame(2);
         assertThat(next).containsEntry("count", 1).containsEntry("cursor", 1L);
         assertThat((List<?>) next.get("events")).as("只送第 1 号（第 0 号上一拍已送过）").hasSize(1);
@@ -108,7 +109,7 @@ class EventStreamServiceTest {
     @Test
     @DisplayName("每张卡片带的字段：seq / ts / kind / severity / title / detail / key，一个不少")
     void eventsCarryEverythingTheCardNeeds() {
-        stock.deduct("SKU-9", 5, StockMetrics.Deduct.OK, 1_500L, 12);
+        stock.deduct("SKU-9", 5, StockMetrics.Deduct.OK, 1_500L, 12, null);
 
         @SuppressWarnings("unchecked")
         List<Map<String, Object>> events =
@@ -137,6 +138,26 @@ class EventStreamServiceTest {
     }
 
     @Test
+    @DisplayName("失败原因只进 fields.reason：卡片仍是 15 键、顶层没有 reason（导出结构不变）")
+    void reasonTravelsInsideFieldsOnly() {
+        stock.deduct(SKU, 2, StockMetrics.Deduct.INSUFFICIENT, 1_500L, 1,
+                "防超卖拦截：库存不足（需 2 件，剩余 1 件）");
+
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> events =
+                (List<Map<String, Object>>) frames.frame(0).get("events");
+
+        assertThat(events).hasSize(1);
+        Map<String, Object> card = events.get(0);
+        assertThat(card).as("顶层仍是 15 键 —— 原因不许变成第 16 个顶层键（导出列数不能因此变）")
+                .hasSize(15).doesNotContainKey("reason");
+        @SuppressWarnings("unchecked")
+        Map<String, Object> fields = (Map<String, Object>) card.get("fields");
+        assertThat(fields).as("原因在嵌套 fields 里（JSON/ndjson 的导出结构不变）")
+                .containsEntry("reason", "防超卖拦截：库存不足（需 2 件，剩余 1 件）");
+    }
+
+    @Test
     @DisplayName("MDC 里装好身份 ⇒ 帧里 actor 是 {id, role} 对象（裁定 ② 的**正向**那一半）")
     void actorTravelsFromMdcIntoTheFrameAsAnObject() {
         // ⚠️ 上一条用例（eventsCarryEverythingTheCardNeeds）只钉住了「没身份 ⇒ 整个 null」这一半；
@@ -144,7 +165,7 @@ class EventStreamServiceTest {
         //    （对象 vs 平铺两键的取舍就在这一半上）。台账侧的对应两列走 ㉑ 的落库证据，不在此处。
         TraceIdFilter.bind("trace-actor", "batch-actor", "C-42", 2);
         try {
-            stock.deduct(SKU, 1, StockMetrics.Deduct.OK, 1_500L, null);
+            stock.deduct(SKU, 1, StockMetrics.Deduct.OK, 1_500L, null, null);
 
             @SuppressWarnings("unchecked")
             List<Map<String, Object>> events =
@@ -201,7 +222,7 @@ class EventStreamServiceTest {
     void eventCarriesDrillBatchFromMdc() {
         MDC.put(TraceIdFilter.MDC_BATCH_KEY, "batch-8c");
         try {
-            stock.deduct(SKU, 1, StockMetrics.Deduct.OK, 1_500L, null);
+            stock.deduct(SKU, 1, StockMetrics.Deduct.OK, 1_500L, null, null);
         } finally {
             // ⚠️ 必须清：MDC 是 ThreadLocal，JUnit 默认**同一线程**跑下一个用例
             //    （不共享 MDC 的干净线程只在别处出现）⇒ 漏清会让别的用例读到这个批次。
@@ -219,8 +240,8 @@ class EventStreamServiceTest {
     @DisplayName("丙（块 7 · commit 10）：两条连接各读各的 —— 后开的那条不会被先开的那条「吃空」")
     void twoSessionsEachSeeTheSameDelta() {
         SseStreamWriter.FrameSource other = service.newFrameSource();
-        stock.deduct(SKU, 1, StockMetrics.Deduct.OK, 1_500L, null);
-        stock.deduct(SKU, 2, StockMetrics.Deduct.OK, 1_500L, null);
+        stock.deduct(SKU, 1, StockMetrics.Deduct.OK, 1_500L, null, null);
+        stock.deduct(SKU, 2, StockMetrics.Deduct.OK, 1_500L, null, null);
 
         assertThat(frames.frame(0)).as("先开的那条：两条都在").containsEntry("count", 2);
         assertThat(other.frame(0)).as("后开的那条：**也是**两条。共用一份帧源时这里会是 0 "
@@ -237,7 +258,7 @@ class EventStreamServiceTest {
         // 页 B 只负责**推着合并环往前走**；页 A 故意停在原地不读（模拟：标签页被浏览器降频）。
         SseStreamWriter.FrameSource pageB = service.newFrameSource();
         for (int i = 0; i < capacity; i++) {
-            stock.deduct(SKU, 1, StockMetrics.Deduct.OK, 1_500L, null);
+            stock.deduct(SKU, 1, StockMetrics.Deduct.OK, 1_500L, null, null);
         }
         Map<String, Object> first = frames.frame(0);
         assertThat(first).as("首帧一屏 = 本类的语义，**不是**跟丢").containsEntry("count", capacity);
@@ -245,7 +266,7 @@ class EventStreamServiceTest {
 
         for (int round = 0; round < 2; round++) {
             for (int i = 0; i < capacity + 10; i++) {
-                stock.deduct(SKU, 1, StockMetrics.Deduct.OK, 1_500L, null);
+                stock.deduct(SKU, 1, StockMetrics.Deduct.OK, 1_500L, null, null);
             }
             pageB.frame(round);
         }

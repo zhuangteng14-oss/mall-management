@@ -1080,15 +1080,28 @@ public class OrderService {
                 //    只要有一行命中就成立 —— {@code SkuCode} 不是唯一键，理论上一条明细可以命中多行。
                 // ⚠️ 事件里的 skuCode 仍用**未截断**的 {@code s.code()}（既有口径，本笔不动）：
                 //    展示串要还原商家填的原值，而查库用的才是截断后的那一串。
+                // 块 7 · 阶段 3a.3 后续：失败原因（人话）——`result` 只回答「哪一档」，
+                // 这里回答「为什么」。insufficient 的两种成因（库存不足 / 无 SKU 行）就靠它分开。
+                // ⚠️ remaining 为 null 时**不猜**是哪一种：stockRemaining 刻意 fail-soft，
+                //    文案如实并列两种可能（新增一次查询只为分辨文案不值得）。
+                String deductReason = null;
+                if (rows == 0) {
+                    deductReason = remaining == null
+                            ? "防超卖拦截：扣减未命中（库存不足或 goods_sku 无此 SKU，需 " + s.qty() + " 件）"
+                            : "防超卖拦截：库存不足（需 " + s.qty() + " 件，剩余 " + remaining + " 件）";
+                } else if (rows > 1) {
+                    deductReason = "扣减异常：影响行数为 " + rows + "（SkuCode 可能非唯一）";
+                }
                 stockMetrics.deduct(s.code(), s.qty(),
-                        rows == 1 ? Deduct.OK : Deduct.INSUFFICIENT, deductNanos, remaining);
+                        rows == 1 ? Deduct.OK : Deduct.INSUFFICIENT, deductNanos, remaining, deductReason);
                 if (rows > 0) {
                     anyDeducted = true;
                 }
             } catch (Exception e) {
                 // 异常这一路也埋点：否则「扣减根本没发出去」在指标上与「一次都没下单」无法区分。
                 // ⚠️ remaining 传 null：UPDATE 到底生效没有都不知道，剩余更无从谈起（口径 ②）。
-                stockMetrics.deduct(s.code(), s.qty(), Deduct.ERROR, System.nanoTime() - deductStartedNanos, null);
+                stockMetrics.deduct(s.code(), s.qty(), Deduct.ERROR, System.nanoTime() - deductStartedNanos, null,
+                        com.minke.mallmanagement.shared.text.EventReason.of("库存扣减失败", e));
                 log.warn("订单明细 {} 的库存扣减失败（跳过该条，不动订单结论）：{}", s.code(), e.toString());
             }
         }
@@ -1397,14 +1410,16 @@ public class OrderService {
                 result.put("success", false);
                 result.put("msg", noRowsMsg);
                 // 守卫没命中：重复流转 / 单不存在。**既有行为**，本笔不新增任何拒绝文案。
-                orderTransitionRecorder.rejected(action, orderId, casNanos);
+                // 原因直接复用响应文案（noRowsMsg）—— 页面看到的拒绝理由与接口返回的是同一句
+                orderTransitionRecorder.rejected(action, orderId, casNanos, noRowsMsg);
             }
         } catch (Exception e) {
             e.printStackTrace();
             result.put("success", false);
             result.put("msg", "数据库错误：" + e.getMessage());
             // 异常路径：量的是「卡了多久才失败」，故现算（casNanos 那一行没执行到）
-            orderTransitionRecorder.errored(action, orderId, System.nanoTime() - casStartedNanos);
+            orderTransitionRecorder.errored(action, orderId, System.nanoTime() - casStartedNanos,
+                    com.minke.mallmanagement.shared.text.EventReason.of("数据库错误", e));
         }
         return result;
     }

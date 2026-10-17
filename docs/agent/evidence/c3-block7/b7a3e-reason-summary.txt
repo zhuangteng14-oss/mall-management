@@ -1,0 +1,115 @@
+块 7 · 阶段 3a.3 后续 —— 失败原因（reason）补全 · 证据汇总
+================================================================================
+日期：2026-10-17
+笔名：b7a3e
+范围：九个事件环中缺 reason 的六环（库存 / 缓存 / 锁 / 订单 / 敏感词 / 防护）补齐有界人话原因；
+      reason 只进 fields.reason，不新增顶层帧键、不改 CSV/JSON 结构；
+      前端只在 ⑤ 的 .tech 串内按严重度着色，③ 第一层保持中性灰。
+
+⚠️ 本文件刻意不写任何「文件 + 行号」引用：扫描根含 docs，写进去会被 refs 扫描器
+   当成新引用收进 after 侧，凭空造出 token。要定位请用类名 / 符号名。
+
+【一、改动面（按符号）】
+- 新增 shared.text.EventReason：clip / of；折叠空白、空白→null、上限 160 字、超长加「…」；
+  of 只取「前缀：简单类名：message」，不拼堆栈、不拼 SQL。
+- 六个事件 record 追加 reason 末位分量：StockEvent / MallCacheEvent / MallLockEvent /
+  OrderStateEvent / SensitiveEvent / ProtectionEvent；对应 Metrics 公开方法直接改签名，
+  不留旧重载（编译器强制暴露全部调用点）。
+- EventBroadcaster 新增 putReason(fields, reason)：非空才写 fields.reason；order 异步档
+  仍先用 shape，shape 为空才用 reason（不再无条件写 reason:null）。
+- 调用点：OrderService.deductStocks / OrderTimeoutCancelJob / TwoLevelCache / L2HealthProbe /
+  DistributedLockService / OrderService.casTransition / OrderTransitionRecorder /
+  OrderTimelineWriter / SensitiveWordService / InboundRateLimitInterceptor /
+  ProtectionMetricsBinder / ObservePoolConfig / MerchantDowngradeService。
+- 前端 EventLog.vue：techLine 拆成 techSegments（拼回的 textContent 逐字不变）；
+  ⑤ 模板按段渲染并以「 · 」相连；techTone 只给 key === reason 的段按 severity 加
+  is-error / is-warn；不新增节点、不另起一行、无 .d-reason；③ 第一层沿用 .tf-k / .tf-v。
+- 探针 probe-b7a3-eventlog-rewrite.mjs：stock / order 假帧改成真实失败形状并带 reason；
+  新增 ㉔2b 四组断言（③ 中性、⑤ 结构、⑤ 颜色、⑤ 无原因 info 无害）。
+
+【二、验证】
+1) 后端全量测试（工作目录 Mall-management-server）
+   命令：./mvnw -B test
+   汇总行（逐字）：
+     [WARNING] Tests run: 567, Failures: 0, Errors: 0, Skipped: 26
+     [INFO] BUILD SUCCESS
+     EXIT=0；Finished at: 2026-10-17T11:26:34+08:00
+   全量日志：_work/3a3/backend-test-final.txt（584095 字节）
+   ⚠️ 刻意未把全量日志抄进本目录：maven 日志里有 4609 处堆栈形式的引用，
+      抄进 docs 会被 refs 扫描器当成数千条新 token。此处只留命令与汇总行。
+   本笔相关测试类（逐字）：
+     ProtectionMetricsTest        6 项 / 0 失败 / 0 错误
+     SensitiveMetricsTest         4 项 / 0 失败 / 0 错误
+     StockMetricsTest             6 项 / 0 失败 / 0 错误
+     EventBroadcasterTest        13 项 / 0 失败 / 0 错误
+     EventStreamServiceTest      10 项 / 0 失败 / 0 错误
+     OrderStreamServiceTest      10 项 / 0 失败 / 0 错误
+     MallOrderStateMetricsTest   14 项 / 0 失败 / 0 错误
+     OrderTransitionRecorderTest 17 项 / 0 失败 / 0 错误
+     MallCacheMetricsTest        10 项 / 0 失败 / 0 错误
+     MallLockMetricsTest          7 项 / 0 失败 / 0 错误
+   判别力样例：
+     StockMetricsTest.reasonIsClipped —— 400 字异常消息 ⇒ reason 恰 160 字且以「…」结尾；
+     StockMetricsTest.deductOutcomesAreRecorded —— ok / insufficient / error 三档 reason 逐字；
+     EventBroadcasterTest —— 失败档有 fields.reason、成功档无该键、order 异步档仍用 shape。
+
+2) 前端（工作目录 Mall-management-web/mall-management-system）
+   npm run lint  ⇒ "DONE  No lint errors found!"；EXIT=0
+   npm run build ⇒ "DONE  Build complete."；EXIT=0
+   仅 2 条既有 asset / entrypoint size warning（非本笔引入，无 ERROR）。
+   产物：b7a3e-reason-frontend-lint-build.txt
+
+3) 主探针（mock 后端 SSE，headless Edge）
+   连续两跑均 192 项 / 0 失败（11:13 与 11:14；两次输出均为 62346 字节）。
+   产物：b7a3e-reason-probe-main.txt
+   关键新增断言（逐字摘）：
+     OK ㉔2b ③ 原因的键/值都是中性灰（不是 warning / danger）
+     OK ㉔2b ⑤ 结构：单 code、只有 span、分隔恰为「 · 」、非空文本节点数 = 0、
+        .d-reason = 0、li = 11
+     OK ㉔2b ⑤ error 的 reason 段 = danger；warn 的 reason 段 = warning；其余段 ink3
+     OK ㉔2b ⑤ 无原因的 info（缓存命中）没有 reason 段、也没有 is-error/is-warn 子节点
+   虚拟滚动探针：23 项 / 0 失败。产物：b7a3e-reason-probe-virtual.txt
+
+4) 真后端（dev profile）端到端
+   先以 2200 次 GET /goods/goodstype 触发入站限流：实测 200×400、429×1800
+   （脚本 _work/3a3/blast-rate.py；产物 _work/3a3/manual-blast-out.txt）。
+   b7a3e-reason-manual-real.txt（原样输出）：
+     ③ 行内「原因」= 入站限流：未取得令牌（limitForPeriod=200）
+        键色 = rgb(123,138,163) = --ink-3；值色 = rgb(163,174,194) = --ink-2
+     ⑤ reason 段 class = is-warn；计算色 = rgb(245,158,11) = --warning；
+        其余段 ink3；.d-reason = 0；.tech 行数 = 1；结论 = 单行单 code
+   截图：_work/3a3/manual-normal-reason.png
+
+5) 两档手验
+   b7a3e-reason-manual-two-modes.txt（原样输出）：
+     正常真流：23 行 / 23 个「原因」键值对（本窗口全部为限流行）
+     模拟日常：8 行 / 0 个「原因」；⑤ 链含原因段 = 0、着色段 = 0、.d-reason = 0
+   截图：_work/3a3/manual-normal.png、_work/3a3/manual-demo.png
+
+【三、refs 收口（只记计数，不含 token）】
+  before = HEAD 临时 worktree（db731c6）；after = 最终工作区（含本笔文档重指）。
+  两次扫描均：594 个文件 / 5227 条命中（原始 5381，去重 154）。
+  阳性对照：在临时文件里把同一引用上移一行 ⇒ 恰好 1 对 LOST + NEW，证明检测有效。
+  最终比对：5227 vs 5227；9 对 (引用者, token) 变化，全部是本笔有意重指的一对一替换；
+  LOST 未配对 = 0，NEW 未配对 = 0（含两处同一条目里的双 token）。
+  只改活文档中因本笔行偏移而漂移的引用；事故快照 / 归档 / 既有证据里的历史行号一律不动。
+  另：同一条目里一条本笔之前就已不准的符号引用（l2Put 的旧范围）未动，
+  避免把旧账算进本笔。
+  收口明细（含 token）只落 _work/3a3/refs-收口-b7a3e.txt，不进 docs。
+  补完本目录的证据文件后再扫一次：600 个文件 / 仍是 5227 条，
+  与补证据前逐条比对 0 增 0 减 ⇒ 证据文件自身没有引入任何新 token。
+  扫描产物：_work/3a3/refs-control-1.txt、refs-control-2.txt、
+  refs-before.txt、refs-after2.txt、refs-after3.txt。
+
+【四、时间戳核对（证据晚于最后一次代码编辑）】
+  最后一次代码 / 探针编辑：探针 11:12:50；EventLog.vue 11:09:04；EventReason 10:59:26。
+  验证产物：后端测试 11:26:34 完成；lint 11:26:17；build 11:26:51；真后端手验 11:27:43；
+  两档手验 11:27:50；本证据副本与汇总均在其后生成。
+  ⇒ 全部证据均晚于最后一次代码编辑。
+
+【五、边界与不做】
+  - 未 push / 未 merge / 未开 PR。
+  - 未改演示数据源的事件文案与字段（模拟日常里没有 reason，属预期）。
+  - rows > 1 仍记 INSUFFICIENT（本笔只补原因，不改结果语义）。
+  - 未新增数据库迁移；reason 只走既有 fields JSON 落库路径。
+  - reason 绝不进 Micrometer tag（基数无界），只进事件 record / fields。

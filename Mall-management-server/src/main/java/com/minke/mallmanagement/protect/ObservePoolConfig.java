@@ -95,7 +95,11 @@ public class ObservePoolConfig implements WebMvcConfigurer {
                         + " active=" + executor.getActiveCount()
                         + " poolSize=" + executor.getPoolSize()
                         + " queue=" + executor.getQueue().size()
-                        + " ⇒ 拒绝（不排队）：观测量已超池容量");
+                        + " ⇒ 拒绝（不排队）：观测量已超池容量",
+                        // 块 7 · 阶段 3a.3 后续：挤出的人话原因（与 detail 同一批事实，供页面单独着色）
+                        "线程池已满：任务未排队、当场拒绝（active=" + executor.getActiveCount()
+                                + "，poolSize=" + executor.getPoolSize()
+                                + "，queue=" + executor.getQueue().size() + "）");
             }
             throw new java.util.concurrent.RejectedExecutionException(
                     POOL_NAME + " 已满（active=" + executor.getActiveCount()

@@ -279,7 +279,7 @@ OrderAction                               （mallmanagement_service）  ← 闭�
 | R2 | **两个 Controller 是「拆分」不是「移动」** | Goods 17 端点（商品 9 / 订单 8）；Message 10 端点（消息 4 / 好友 5 / userSelect 1） | **高** |
 | R3 | `@SpringBootApplication` 在 `com.minke` 且**无 `scanBasePackages`** | 扫描 `com.minke.**` ⇒ 域包必须留在其下 | 高（做错 = 全应用起不来） |
 | R4 | `MallOrderStateMetrics → OrderAction` 反向边 | `MallOrderStateMetrics.java:3` | 中（§5 已给解：归 `order.metrics`） |
-| R5 | `LockName` 内嵌于 `DistributedLockService` | `DistributedLockService.java:519` | 低-中（**已裁决保持内嵌**，见 §1） |
+| R5 | `LockName` 内嵌于 `DistributedLockService` | `DistributedLockService.java:525` | 低-中（**已裁决保持内嵌**，见 §1） |
 | R6 | 测试包名三种拼写不一致 | `mallmanagement_server`(4) / `mallmanagement_service`(8) / `mallmanagementserver`(2+smoke 5) | 中（迁移时顺手统一） |
 | R7 | `info` 是孤儿类 | 0 处真实引用（早前假边来自 `log.info(` 误匹配） | 低（**已裁决删除**） |
 | R8 | `LockSceneService` 生产零引用，仅 2 个测试引用 | 全仓 grep | 低（**已裁决留 `shared.lock`**） |

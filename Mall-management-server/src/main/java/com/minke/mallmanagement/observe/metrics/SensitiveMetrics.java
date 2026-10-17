@@ -88,7 +88,8 @@ public class SensitiveMetrics {
      */
     public void masked(String scene, int hit, int total, String words, long durationNanos) {
         registry.counter(CHECKS, "result", Result.MASKED.tag).increment();
-        event(Result.MASKED.tag, scene, hit, total, words, durationNanos);
+        // 打码放行不是失败，没有原因 ⇒ null（本笔新增形参的归属写在这里）
+        event(Result.MASKED.tag, scene, hit, total, words, durationNanos, null);
     }
 
     /**
@@ -99,10 +100,12 @@ public class SensitiveMetrics {
      * @param durationNanos 墙钟（块 7 · 阶段 3a.3 新增）：<b>从 {@code SensitiveWordService.filter}
      *                   入口到处置判定完成</b>。⚠️ 口径**含**读词库（若 {@code filter} 内部走 DB 读词表），
      *                   不是「纯匹配耗时」—— 见 {@code SensitiveWordService} 的落地说明
+     * @param reason 拒收的人话原因（块 7 · 阶段 3a.3 后续新增）：命中比例与阈值；
+     *               ⚠️ <b>不写命中的词</b>（词已在 {@code words} 里；原因只回答「为什么拒」）
      */
-    public void rejected(String scene, int hit, int total, String words, long durationNanos) {
+    public void rejected(String scene, int hit, int total, String words, long durationNanos, String reason) {
         registry.counter(CHECKS, "result", Result.REJECTED.tag).increment();
-        event(Result.REJECTED.tag, scene, hit, total, words, durationNanos);
+        event(Result.REJECTED.tag, scene, hit, total, words, durationNanos, reason);
     }
 
     // ================= 事件流 =================
@@ -127,14 +130,16 @@ public class SensitiveMetrics {
     }
 
     /** 追加一条事件。{@code scene} 只在事件里以字符串形式出现 —— tag 里绝不能有它。 */
-    private void event(String result, String scene, int hit, int total, String words, Long durationNanos) {
+    private void event(String result, String scene, int hit, int total, String words, Long durationNanos,
+                       String reason) {
         long seq = eventCursor.getAndIncrement();
         events[(int) (seq & EVENT_MASK)] = new SensitiveEvent(
                 seq, System.currentTimeMillis(), result,
                 scene == null ? null : String.valueOf(scene), hit, total, words,
                 TraceIdFilter.current(), TraceIdFilter.currentBatch(),
                 TraceIdFilter.currentActorId(), TraceIdFilter.currentActorRole(),
-                durationNanos == null ? null : durationNanos / 1000);
+                durationNanos == null ? null : durationNanos / 1000,
+                reason == null ? null : com.minke.mallmanagement.shared.text.EventReason.clip(reason));
     }
 
     /**
@@ -153,10 +158,12 @@ public class SensitiveMetrics {
      * @param actorId    发起那次请求的业务号（块 7 · 阶段 3a.3 新增）；无身份时为 null
      * @param actorRole  发起者的角色号（块 7 · 阶段 3a.3 新增）；无身份时为 null
      * @param durationUs 判定耗时（**微秒**，块 7 · 阶段 3a.3 新增，含读词库）；{@code null} = 没测到
+     * @param reason     拒收的人话原因（块 7 · 阶段 3a.3 后续新增）；打码放行传 {@code null}。
+     *                   只进 {@code fields.reason}，绝不进 tag
      */
     public record SensitiveEvent(long seq, long epochMilli, String result,
                                  String scene, int hit, int total, String words, String traceId, String batchId,
-                                 String actorId, Integer actorRole, Long durationUs)
+                                 String actorId, Integer actorRole, Long durationUs, String reason)
             implements com.minke.mallmanagement.observe.metrics.Sourced {
     }
 

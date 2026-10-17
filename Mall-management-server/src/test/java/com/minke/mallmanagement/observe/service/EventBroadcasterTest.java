@@ -77,17 +77,19 @@ class EventBroadcasterTest {
     @Test
     @DisplayName("since(afterSeq) 只给**之后**的：读走的不再重复给")
     void sinceReturnsOnlyNewerThanTheCursor() {
-        stock.deduct(SKU, 1, StockMetrics.Deduct.OK, 1_500L, null);
-        stock.deduct(SKU, 1, StockMetrics.Deduct.OK, 1_500L, null);
-        stock.deduct(SKU, 1, StockMetrics.Deduct.OK, 1_500L, null);
+        stock.deduct(SKU, 1, StockMetrics.Deduct.OK, 1_500L, null, null);
+        stock.deduct(SKU, 1, StockMetrics.Deduct.OK, 1_500L, null, null);
+        stock.deduct(SKU, 1, StockMetrics.Deduct.OK, 1_500L, null, null);
         broadcaster.poll();
 
         assertThat(broadcaster.since(-1)).as("首次读（-1）= 要一屏全量").hasSize(3);
         assertThat(broadcaster.since(0L)).as("读到 0 之后：还剩 2 条").hasSize(2);
         assertThat(broadcaster.since(2L)).as("读到最新：0 条").isEmpty();
 
-        stock.deduct(SKU, 1, StockMetrics.Deduct.INSUFFICIENT, 1_500L, null);
-        stock.deduct(SKU, 1, StockMetrics.Deduct.ERROR, 1_500L, null);
+        stock.deduct(SKU, 1, StockMetrics.Deduct.INSUFFICIENT, 1_500L, null,
+                "防超卖拦截：扣减未命中（库存不足或 goods_sku 无此 SKU，需 1 件）");
+        stock.deduct(SKU, 1, StockMetrics.Deduct.ERROR, 1_500L, null,
+                "库存扣减失败：IllegalStateException：db down");
         broadcaster.poll();
 
         assertThat(broadcaster.since(2L)).extracting(ObservedEvent::seq)
@@ -108,18 +110,23 @@ class EventBroadcasterTest {
     @Test
     @DisplayName("severity 规则表：error ← result=error；warn ← 被挡/被拒/超时/降级/不足；其余 info")
     void severityFollowsTheOneRuleTable() {
-        stock.deduct(SKU, 1, StockMetrics.Deduct.INSUFFICIENT, 1_500L, null);      // warn
-        stock.release(SKU, 1, StockMetrics.Release.ERROR, 1_500L);           // error
-        stock.release(SKU, 1, StockMetrics.Release.MISSING, 1_500L);         // info（「什么也没发生」）
+        stock.deduct(SKU, 1, StockMetrics.Deduct.INSUFFICIENT, 1_500L, null,
+                "防超卖拦截：扣减未命中（库存不足或 goods_sku 无此 SKU，需 1 件）");      // warn
+        stock.release(SKU, 1, StockMetrics.Release.ERROR, 1_500L,
+                "库存释放失败：IllegalStateException：db down");           // error
+        stock.release(SKU, 1, StockMetrics.Release.MISSING, 1_500L,
+                "释放未命中：goods_sku 中不存在该 SKU");         // info（「什么也没发生」）
         audit.written("C-1", "goods.add", "goods", "M-1:P-1", 1_500L);       // info
         audit.failed("C-1", "goods.add", "db down", "goods", "M-1:P-1", 1_500L);  // warn
         notify.sent("email", "order.paid", "C-1", 1_500L);                   // info
         notify.failed("email", "order.paid", "C-1", "smtp 550", 1_500L);     // warn
         sensitive.masked("comment", 1, 20, "傻逼", 1_500L);                   // info
-        sensitive.rejected("comment", 9, 10, "滚", 1_500L);                   // warn
+        sensitive.rejected("comment", 9, 10, "滚", 1_500L,
+                "敏感词拒收：命中比例 90% ≥ 40%（命中 9/10）");                   // warn
         identity.passed("C-1", "/goods/goodsUp", 1_500L);                    // info
         identity.rejected("C-1", "令牌过期", "/goods/goodsUp", 1_500L);        // warn
-        lock.acquire("order:create", "O-9", MallLockMetrics.Outcome.TIMEOUT, 3_000_000L);  // warn（fail-open）
+        lock.acquire("order:create", "O-9", MallLockMetrics.Outcome.TIMEOUT, 3_000_000L,
+                "取锁超时：等待 3000 ms 未获得");  // warn（fail-open）
         cache.l1Request("goods", "k1", false, 1_500L);                       // info（miss 刻意不染黄）
 
         broadcaster.poll();
@@ -141,9 +148,11 @@ class EventBroadcasterTest {
     @Test
     @DisplayName("订单流转：applied → info、rejected → warn、error → error")
     void orderTransitionSeverity() {
-        order.transition(OrderAction.PAY, "waitPay", "waitShip", MallOrderStateMetrics.Result.APPLIED, "O-1", 1_500L);
-        order.transition(OrderAction.PAY, "waitPay", null, MallOrderStateMetrics.Result.REJECTED, "O-1", 1_500L);
-        order.transition(OrderAction.PAY, "waitPay", null, MallOrderStateMetrics.Result.ERROR, "O-1", 1_500L);
+        order.transition(OrderAction.PAY, "waitPay", "waitShip", MallOrderStateMetrics.Result.APPLIED, "O-1", 1_500L, null);
+        order.transition(OrderAction.PAY, "waitPay", null, MallOrderStateMetrics.Result.REJECTED, "O-1", 1_500L,
+                "订单不存在或已付款");
+        order.transition(OrderAction.PAY, "waitPay", null, MallOrderStateMetrics.Result.ERROR, "O-1", 1_500L,
+                "数据库错误：IllegalStateException：db down");
         broadcaster.poll();
 
         assertThat(severityOfAll()).containsExactly("info", "warn", "error");
@@ -156,8 +165,9 @@ class EventBroadcasterTest {
     @Test
     @DisplayName("业务键透传 + detail 尾部带 src=环名#源seq（排查时能定位回原环）")
     void keyIsPassedThroughAndDetailCarriesTheSourceRing() {
-        stock.deduct(SKU, 3, StockMetrics.Deduct.OK, 1_500L, 97);
-        stock.deduct(SKU, 4, StockMetrics.Deduct.INSUFFICIENT, 1_500L, 1);
+        stock.deduct(SKU, 3, StockMetrics.Deduct.OK, 1_500L, 97, null);
+        stock.deduct(SKU, 4, StockMetrics.Deduct.INSUFFICIENT, 1_500L, 1,
+                "防超卖拦截：库存不足（需 4 件，剩余 1 件）");
 
         broadcaster.poll();
         List<ObservedEvent> events = broadcaster.since(-1);
@@ -185,6 +195,13 @@ class EventBroadcasterTest {
         assertThat(events).extracting(ObservedEvent::remaining)
                 .as("扣档 97 / 不足档 1 原样带出（其余八环恒 null，见 ObservedEvent#remaining 的裁定）")
                 .containsExactly(97, 1);
+        // 块 7 · 阶段 3a.3 后续：原因只进 fields.reason，成功档不写空键
+        assertThat(events.get(0).fields()).as("成功档不写 fields.reason（不是写了 null）")
+                .doesNotContainKey("reason");
+        assertThat(events.get(1).fields()).as("不足档的原因进了 fields（不进顶层、不进 tag）")
+                .containsEntry("reason", "防超卖拦截：库存不足（需 4 件，剩余 1 件）");
+        assertThat(events.get(1)).extracting(ObservedEvent::fields).as("reason 不新增顶层帧键")
+                .isSameAs(events.get(1).fields());
     }
 
     @Test
@@ -234,12 +251,17 @@ class EventBroadcasterTest {
     void protectionRingIsTranslatedPerGate() {
         // 两条 blocked 的 key 不同 —— 标题必须跟着分岔：两者都是 warn，但排障方向相反
         // （限流查流量、熔断查下游）。合并成一个标题就等于把两条线索糊成一条。
-        protection.blocked("rateLimit", "inbound", "path=/goods/goodsSelectHome 每 1s 放 200 条，这一拍没有余量", null);
-        protection.blocked("circuitBreak", "mysql", "circuitBreaker=mallMysqlWrite 已打开：本次调用未执行", null);
-        protection.state(Result.OPENED, "circuitBreak", "mysql", "circuitBreaker=mallMysqlWrite CLOSED → OPEN 失败率=62.5%");
-        protection.state(Result.HALF_OPEN, "circuitBreak", "mysql", "circuitBreaker=mallMysqlWrite OPEN → HALF_OPEN");
-        protection.state(Result.CLOSED, "circuitBreak", "mysql", "circuitBreaker=mallMysqlWrite HALF_OPEN → CLOSED");
-        protection.shed("poolIsolation", "pool", "pool=observe-stream active=32 ⇒ 拒绝（不排队）");
+        protection.blocked("rateLimit", "inbound", "path=/goods/goodsSelectHome 每 1s 放 200 条，这一拍没有余量", null,
+                "入站限流：未取得令牌（limitForPeriod=200）");
+        protection.blocked("circuitBreak", "mysql", "circuitBreaker=mallMysqlWrite 已打开：本次调用未执行", null,
+                "熔断开路：熔断器 mallMysqlWrite 已打开，本次调用未执行");
+        protection.state(Result.OPENED, "circuitBreak", "mysql", "circuitBreaker=mallMysqlWrite CLOSED → OPEN 失败率=62.5%",
+                "熔断打开：失败率 62.5%，慢调用率 0%");
+        protection.state(Result.HALF_OPEN, "circuitBreak", "mysql", "circuitBreaker=mallMysqlWrite OPEN → HALF_OPEN",
+                "熔断半开：等待期结束，放行试探请求");
+        protection.state(Result.CLOSED, "circuitBreak", "mysql", "circuitBreaker=mallMysqlWrite HALF_OPEN → CLOSED", null);
+        protection.shed("poolIsolation", "pool", "pool=observe-stream active=32 ⇒ 拒绝（不排队）",
+                "线程池已满：任务未排队、当场拒绝（active=32，poolSize=32，queue=64）");
         broadcaster.poll();
 
         assertThat(severityOfAll())
@@ -262,12 +284,61 @@ class EventBroadcasterTest {
     @Test
     @DisplayName("防护环的第一条 blocked 的 key 认不出时：**不硬套**某个闸名，照实写 key")
     void protectionBlockedWithUnknownGateDoesNotGuess() {
-        protection.blocked("degrade", "somewhere", "一个本段不该出现的 key", null);
+        protection.blocked("degrade", "somewhere", "一个本段不该出现的 key", null,
+                "熔断打开：熔断器 degrade 已打开，本次调用未执行");
         broadcaster.poll();
 
         assertThat(titlesOf(Severity.WARN)).as("不写「入站限流拦下」也不写「熔断开路拒绝」—— 两者都是猜")
                 .containsExactly("防护拦下：degrade");
         assertThat(severityOfAll()).containsExactly("warn");
+    }
+
+    // ================= 失败原因（块 7 · 阶段 3a.3 后续） =================
+
+    @Test
+    @DisplayName("六环失败档的 reason 都落进 fields；成功档不写这个键；order 异步仍以 shape 为原因")
+    void reasonIsCarriedInFieldsAcrossRings() {
+        stock.deduct(SKU, 1, StockMetrics.Deduct.INSUFFICIENT, 1_500L, 0,
+                "防超卖拦截：库存不足（需 1 件，剩余 0 件）");
+        lock.acquire("order:create", "O-1", MallLockMetrics.Outcome.TIMEOUT, 1_000_000L,
+                "取锁超时：等待 1000 ms 未获得");
+        lock.acquire("order:create", "O-2", MallLockMetrics.Outcome.ACQUIRED, 1_000_000L, null);
+        cache.l2Request("goods", "k1", MallCacheMetrics.L2Result.ERROR, 1_500L,
+                "L2 读取失败：IllegalStateException：db down");
+        order.timelineWrite(false, "O-1", null, "时间线写入失败：IllegalStateException：db down");
+        order.asyncRejected(MallOrderStateMetrics.RejectReason.QUEUE_FULL, "O-2");
+        sensitive.rejected("comment", 9, 10, "滚", 1_500L,
+                "敏感词拒收：命中比例 90% ≥ 40%（命中 9/10）");
+        protection.blocked("rateLimit", "inbound", "d", null, "入站限流：未取得令牌（limitForPeriod=200）");
+        broadcaster.poll();
+
+        List<ObservedEvent> events = broadcaster.since(-1);
+        assertThat(events).extracting(ObservedEvent::kind)
+                .as("环序：cache 1 + lock 2 + order 2 + stock 1 + sensitive 1 + protection 1")
+                .containsExactly("cache", "lock", "lock", "order", "order", "stock", "sensitive", "protection");
+
+        assertThat(events.get(0).fields()).as("cache 的 L2 读失败原因")
+                .containsEntry("reason", "L2 读取失败：IllegalStateException：db down");
+        assertThat(events.get(1).fields()).as("lock timeout 原因")
+                .containsEntry("reason", "取锁超时：等待 1000 ms 未获得");
+        assertThat(events.get(2).fields()).as("lock acquired（成功档）不写 reason 键")
+                .doesNotContainKey("reason");
+        assertThat(events.get(3).fields()).as("order 时间线写失败原因（来自新加的 reason）")
+                .containsEntry("reason", "时间线写入失败：IllegalStateException：db down");
+        assertThat(events.get(4).fields()).as("order 异步被拒仍以 shape 为准（queue_full），不混进空原因")
+                .containsEntry("reason", "queue_full");
+        assertThat(events.get(5).fields()).as("stock 不足原因")
+                .containsEntry("reason", "防超卖拦截：库存不足（需 1 件，剩余 0 件）");
+        assertThat(events.get(6).fields()).as("sensitive 拒收原因")
+                .containsEntry("reason", "敏感词拒收：命中比例 90% ≥ 40%（命中 9/10）");
+        assertThat(events.get(7).fields()).as("protection 限流原因")
+                .containsEntry("reason", "入站限流：未取得令牌（limitForPeriod=200）");
+
+        // 原因绝不进 tag（基数铁律由源环那侧保证，这里钉住出口没多出一条时间序列）
+        assertThat(registry.find("mall.stock.deduct")
+                .tag("reason", "防超卖拦截：库存不足（需 1 件，剩余 0 件）").counters())
+                .as("reason 不进 tag：按 reason 查时间序列必须查不到")
+                .isEmpty();
     }
 
     // ================= 覆盖边界 =================
@@ -280,7 +351,7 @@ class EventBroadcasterTest {
         int capacity = 2048;
         int extra = 88;
         for (int i = 0; i < capacity + extra; i++) {
-            stock.deduct(SKU, 1, StockMetrics.Deduct.OK, 1_500L, null);
+            stock.deduct(SKU, 1, StockMetrics.Deduct.OK, 1_500L, null, null);
         }
 
         assertThat(broadcaster.poll()).as("并入的是**源环还剩的** %d 条，不是全部", capacity).isEqualTo(capacity);
@@ -297,7 +368,7 @@ class EventBroadcasterTest {
         int capacity = 2048;
         int extra = 88;
         for (int i = 0; i < capacity + extra; i++) {
-            stock.deduct(SKU, 1, StockMetrics.Deduct.OK, 1_500L, null);
+            stock.deduct(SKU, 1, StockMetrics.Deduct.OK, 1_500L, null, null);
             broadcaster.poll();          // 逐条推进，确保每条都真进了合并环
         }
 
@@ -313,9 +384,9 @@ class EventBroadcasterTest {
     /** 九个环各发一条（值都取「成功路径」，故本用例只关心**类序**）。 */
     private void emitOneOfEach() {
         cache.l1Request("goods", "k1", true, 1_500L);
-        lock.acquire("order:create", "O-1", MallLockMetrics.Outcome.ACQUIRED, 1_000_000L);
-        order.transition(OrderAction.CREATE, "none", "waitPay", MallOrderStateMetrics.Result.APPLIED, "O-1", 1_500L);
-        stock.deduct(SKU, 1, StockMetrics.Deduct.OK, 1_500L, null);
+        lock.acquire("order:create", "O-1", MallLockMetrics.Outcome.ACQUIRED, 1_000_000L, null);
+        order.transition(OrderAction.CREATE, "none", "waitPay", MallOrderStateMetrics.Result.APPLIED, "O-1", 1_500L, null);
+        stock.deduct(SKU, 1, StockMetrics.Deduct.OK, 1_500L, null, null);
         audit.written("C-1", "order.add", "order", "O-1", 1_500L);
         notify.sent("email", "order.created", "C-1", 1_500L);
         sensitive.masked("comment", 0, 20, null, 1_500L);
@@ -324,7 +395,7 @@ class EventBroadcasterTest {
         // （⚠️ 阶段 2b 起落 info 的有两档，另一档是 retry_success —— 这里取 closed 是因为它
         //   属于熔断三态那一族、不引入新标题分组），于是这条共用夹具不会把 severity 规则表
         //   那几条断言搅乱（那几条按档位分组断言标题）。
-        protection.state(Result.CLOSED, "circuitBreak", "mysql", "circuitBreaker=mallMysqlWrite HALF_OPEN → CLOSED");
+        protection.state(Result.CLOSED, "circuitBreak", "mysql", "circuitBreaker=mallMysqlWrite HALF_OPEN → CLOSED", null);
     }
 
     private List<String> titlesOf(Severity severity) {

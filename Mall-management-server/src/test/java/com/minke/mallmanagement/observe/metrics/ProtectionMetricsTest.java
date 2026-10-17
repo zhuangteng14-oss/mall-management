@@ -32,15 +32,20 @@ class ProtectionMetricsTest {
     @Test
     @DisplayName("七档 result 各自计数、各自入环（计数与事件在同一调用点一起发）")
     void everyResultIsCountedAndRecorded() {
-        metrics.blocked("rateLimit", "inbound", "path=/goods/goodsSelectHome", 1_500L);
-        metrics.state(Result.OPENED, "circuitBreak", "mysql", "circuitBreaker=mallMysqlWrite CLOSED → OPEN");
-        metrics.state(Result.HALF_OPEN, "circuitBreak", "mysql", "OPEN → HALF_OPEN");
-        metrics.state(Result.CLOSED, "circuitBreak", "mysql", "HALF_OPEN → CLOSED");
-        metrics.shed("poolIsolation", "pool", "pool=observe-stream active=32");
+        metrics.blocked("rateLimit", "inbound", "path=/goods/goodsSelectHome", 1_500L,
+                "入站限流：未取得令牌（limitForPeriod=200）");
+        metrics.state(Result.OPENED, "circuitBreak", "mysql", "circuitBreaker=mallMysqlWrite CLOSED → OPEN",
+                "熔断打开：失败率 50%，慢调用率 20%");
+        metrics.state(Result.HALF_OPEN, "circuitBreak", "mysql", "OPEN → HALF_OPEN",
+                "熔断半开：等待期结束，放行试探请求");
+        metrics.state(Result.CLOSED, "circuitBreak", "mysql", "HALF_OPEN → CLOSED", null);
+        metrics.shed("poolIsolation", "pool", "pool=observe-stream active=32",
+                "线程池已满：任务未排队、当场拒绝（active=32，poolSize=32，queue=64）");
         // 阶段 2b 新增的两档（死锁受害者重试的两种结局）—— 走的是**另一个**入口
         // `retry(...)` 而不是 `state(...)`：它记的不是「闸的状态翻转」，是「一次重试尝试的结果」。
-        metrics.retry(Result.RETRY_SUCCESS, "retry", "relist", "action=retry attempt=2 result=success");
-        metrics.retry(Result.RETRY_FAILED, "retry", "relist", "action=retry attempt=2 result=deadlock");
+        metrics.retry(Result.RETRY_SUCCESS, "retry", "relist", "action=retry attempt=2 result=success", null);
+        metrics.retry(Result.RETRY_FAILED, "retry", "relist", "action=retry attempt=2 result=deadlock",
+                "死锁重试失败：第 2 次尝试仍撞上死锁");
 
         assertThat(count("blocked")).isEqualTo(1.0);
         assertThat(count("opened")).isEqualTo(1.0);
@@ -66,6 +71,16 @@ class ProtectionMetricsTest {
         assertThat(events.get(1).durationUs()).as("熔断翻转是瞬时回调 ⇒ null（没测到，不是 0）").isNull();
         assertThat(events.get(0).actorId()).as("无 MDC ⇒ actorId 为 null").isNull();
         assertThat(events.get(0).actorRole()).as("无 MDC ⇒ actorRole 为 null").isNull();
+        // 块 7 · 阶段 3a.3 后续新增：失败/翻转档的人话原因；CLOSED（恢复）与 RETRY_SUCCESS 为 null
+        assertThat(events).extracting(ProtectionEvent::reason)
+                .as("blocked / opened / half_open / shed / retry_failed 有原因；closed / retry_success 无")
+                .containsExactly("入站限流：未取得令牌（limitForPeriod=200）",
+                        "熔断打开：失败率 50%，慢调用率 20%",
+                        "熔断半开：等待期结束，放行试探请求",
+                        null,
+                        "线程池已满：任务未排队、当场拒绝（active=32，poolSize=32，queue=64）",
+                        null,
+                        "死锁重试失败：第 2 次尝试仍撞上死锁");
     }
 
     /**
@@ -77,8 +92,8 @@ class ProtectionMetricsTest {
     @Test
     @DisplayName("基数铁律：detail 里的自由文本**不进 tag**（两条不同 detail 落进同一个时间序列）")
     void freeTextDetailNeverBecomesATag() {
-        metrics.blocked("rateLimit", "inbound", "path=/goods/goodsSelectHome", null);
-        metrics.blocked("rateLimit", "inbound", "path=/order/orderReceive", null);
+        metrics.blocked("rateLimit", "inbound", "path=/goods/goodsSelectHome", null, "入站限流：未取得令牌");
+        metrics.blocked("rateLimit", "inbound", "path=/order/orderReceive", null, "入站限流：未取得令牌");
 
         // 两条事件的 detail 不同，但计数只有一个序列、值 2 ⇒ detail 没进 tag
         assertThat(count("blocked")).as("同一个 (protection, result) 两个不同 detail ⇒ 仍是一条序列").isEqualTo(2.0);
@@ -92,9 +107,9 @@ class ProtectionMetricsTest {
     @Test
     @DisplayName("key 进 tag：不同 key 是不同序列（页面按 key 数「哪道闸拦得多」靠它）")
     void keyIsATag() {
-        metrics.blocked("rateLimit", "inbound", "d1", null);
-        metrics.blocked("rateLimit", "inbound", "d2", null);
-        metrics.blocked("circuitBreak", "mysql", "d3", null);
+        metrics.blocked("rateLimit", "inbound", "d1", null, "入站限流：未取得令牌");
+        metrics.blocked("rateLimit", "inbound", "d2", null, "入站限流：未取得令牌");
+        metrics.blocked("circuitBreak", "mysql", "d3", null, "熔断开路：熔断器 mallMysqlWrite 已打开，本次调用未执行");
 
         assertThat(registry.find(ProtectionMetrics.EVENTS).tag("protection", "rateLimit")
                 .tag("result", "blocked").counter().count()).isEqualTo(2.0);
@@ -116,13 +131,13 @@ class ProtectionMetricsTest {
         MDC.put(TraceIdFilter.MDC_KEY, "trace0009");
         MDC.put(TraceIdFilter.MDC_BATCH_KEY, "batch-9");
         try {
-            metrics.blocked("rateLimit", "inbound", "在请求线程上", null);
+            metrics.blocked("rateLimit", "inbound", "在请求线程上", null, "入站限流：未取得令牌");
         } finally {
             MDC.remove(TraceIdFilter.MDC_KEY);
             MDC.remove(TraceIdFilter.MDC_BATCH_KEY);
         }
         // 到这里 MDC 已清空 —— 若取值点落在 recentEvents() 上，下面两条都会是 null
-        metrics.shed("poolIsolation", "pool", "在池线程上（无 MDC）");
+        metrics.shed("poolIsolation", "pool", "在池线程上（无 MDC）", "线程池已满：任务未排队、当场拒绝");
 
         List<ProtectionEvent> events = metrics.recentEvents();
         assertThat(events.get(0).traceId()).isEqualTo("trace0009");
@@ -139,7 +154,7 @@ class ProtectionMetricsTest {
         int capacity = 2048;
         int extra = 88;
         for (int i = 0; i < capacity + extra; i++) {
-            metrics.shed("poolIsolation", "pool", "第 " + i + " 次");
+            metrics.shed("poolIsolation", "pool", "第 " + i + " 次", "线程池已满：任务未排队、当场拒绝");
         }
 
         List<ProtectionEvent> events = metrics.recentEvents();

@@ -129,7 +129,10 @@ public class InboundRateLimitInterceptor implements HandlerInterceptor {
             metrics.blocked("rateLimit", "inbound",
                     "method=" + request.getMethod() + " path=" + path
                             + " limiter=" + limiter.getName() + " limitForPeriod=" + limiter.getRateLimiterConfig().getLimitForPeriod(),
-                    System.nanoTime() - startedNanos);
+                    System.nanoTime() - startedNanos,
+                    // 块 7 · 阶段 3a.3 后续：拦下的人话原因（阈值同样取自 limiter 配置，不重抄字面量）
+                    "入站限流：未取得令牌（limitForPeriod="
+                            + limiter.getRateLimiterConfig().getLimitForPeriod() + "）");
         }
         writeTooManyRequests(response, limiter.getRateLimiterConfig().getLimitForPeriod(),
                 limiter.getRateLimiterConfig().getLimitRefreshPeriod().toSeconds());

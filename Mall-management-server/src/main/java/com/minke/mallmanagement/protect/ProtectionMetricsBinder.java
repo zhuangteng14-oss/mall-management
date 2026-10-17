@@ -74,10 +74,30 @@ public class ProtectionMetricsBinder {
             metrics.state(result, "circuitBreak", scope, "circuitBreaker=" + breaker.getName()
                     + " " + event.getStateTransition().getFromState() + " → " + to
                     + " 失败率=" + breaker.getMetrics().getFailureRate() + "%"
-                    + " 慢调用率=" + breaker.getMetrics().getSlowCallRate() + "%");
+                    + " 慢调用率=" + breaker.getMetrics().getSlowCallRate() + "%",
+                    reasonOf(result, breaker));
         });
         breaker.getEventPublisher().onCallNotPermitted(event -> metrics.blocked("circuitBreak", scope,
-                "circuitBreaker=" + breaker.getName() + " 已打开：本次调用未执行（不占连接、不开事务）", null));   // 块 7 · 3a.3：末参 = 耗时，熔断这一路是瞬时回调、没有起止 ⇒ null
+                "circuitBreaker=" + breaker.getName() + " 已打开：本次调用未执行（不占连接、不开事务）", null,   // 块 7 · 3a.3：倒二参 = 耗时，熔断这一路是瞬时回调、没有起止 ⇒ null
+                "熔断开路：熔断器 " + breaker.getName() + " 已打开，本次调用未执行"));
+    }
+
+    /**
+     * 熔断状态翻转的**人话原因**（块 7 · 阶段 3a.3 后续新增）。
+     *
+     * <p>只给「故障方向」两档写原因：{@code OPENED}（失败率越线）与 {@code HALF_OPEN}（等待期结束、
+     * 放行试探）；{@code CLOSED} 是恢复，不是失败 ⇒ {@code null}。数字取自同一时刻的熔断器指标，
+     * 与 detail 里的那串同源（detail 是给排查看的明细，reason 是给页面单独着色的一句话）。
+     */
+    private static String reasonOf(Result result, CircuitBreaker breaker) {
+        if (result == Result.OPENED) {
+            return "熔断打开：失败率 " + breaker.getMetrics().getFailureRate()
+                    + "%，慢调用率 " + breaker.getMetrics().getSlowCallRate() + "%";
+        }
+        if (result == Result.HALF_OPEN) {
+            return "熔断半开：等待期结束，放行试探请求";
+        }
+        return null;
     }
 
     /** 熔断的三档 → 本环的 result 三档；其余档返回 {@code null} = 不记。 */

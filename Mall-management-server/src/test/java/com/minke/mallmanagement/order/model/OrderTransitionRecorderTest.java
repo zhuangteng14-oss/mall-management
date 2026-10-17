@@ -185,11 +185,14 @@ class OrderTransitionRecorderTest {
     @Test
     @DisplayName("守卫没命中：只记 rejected，**不写时间线、不投递**（没有「转移后」可言）")
     void rejectedRecordsOnlyTheOutcome() {
-        recorder.rejected(PAY, ORDER, 1_500L);
+        recorder.rejected(PAY, ORDER, 1_500L, "订单不存在或已付款");
 
         assertThat(count(TRANSITIONS, "action", "pay", "result", "rejected")).isEqualTo(1.0);
         assertThat(metrics.recentEvents()).hasSize(1);
         assertThat(metrics.recentEvents().get(0).to()).isNull();
+        assertThat(metrics.recentEvents().get(0).reason())
+                .as("复用既有 noRowsMsg —— 与日志里的那句话同源，不另编一份")
+                .isEqualTo("订单不存在或已付款");
         assertThat(writer.rows).isEmpty();
         assertThat(executor.submitted).isEmpty();
         assertThat(jdbc.queries).as("被拒绝的路径一次都不用读回三位").hasValue(0);
@@ -198,9 +201,13 @@ class OrderTransitionRecorderTest {
     @Test
     @DisplayName("UPDATE 抛异常：只记 error，同样不碰时间线")
     void erroredRecordsOnlyTheOutcome() {
-        recorder.errored(DELIVER, ORDER, 1_500L);
+        recorder.errored(DELIVER, ORDER, 1_500L,
+                "数据库错误：IllegalStateException：db down");
 
         assertThat(count(TRANSITIONS, "action", "deliver", "result", "error")).isEqualTo(1.0);
+        assertThat(metrics.recentEvents().get(0).reason())
+                .as("error 档带异常摘要（类名 + message，不拼 SQL）")
+                .isEqualTo("数据库错误：IllegalStateException：db down");
         assertThat(writer.rows).isEmpty();
         assertThat(executor.submitted).isEmpty();
     }

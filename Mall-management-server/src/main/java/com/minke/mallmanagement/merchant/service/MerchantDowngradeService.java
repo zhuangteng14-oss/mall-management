@@ -365,13 +365,14 @@ public class MerchantDowngradeService {
             });
             if (attempt > 1) {
                 protectionMetrics.retry(ProtectionMetrics.Result.RETRY_SUCCESS, RETRY_KEY, RELIST_SCOPE,
-                        "action=retry attempt=" + attempt + " result=success");
+                        "action=retry attempt=" + attempt + " result=success", null);
             }
             return done;
         } catch (CannotAcquireLockException e) {
             if (attempt > 1) {
                 protectionMetrics.retry(ProtectionMetrics.Result.RETRY_FAILED, RETRY_KEY, RELIST_SCOPE,
-                        "action=retry attempt=" + attempt + " result=deadlock");
+                        "action=retry attempt=" + attempt + " result=deadlock",
+                        "死锁重试失败：第 " + attempt + " 次尝试仍撞上死锁");
             }
             throw e;
         }

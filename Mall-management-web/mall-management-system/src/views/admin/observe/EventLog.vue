@@ -436,7 +436,9 @@
               <span class="d-hd"><component :is="KIND_ICON[e.kind]" class="ev-ic s" /><b>{{ kindLabel(e.kind) }}</b></span> · {{ e.title }}<template v-if="objText(e)">（{{ objText(e) }}）</template>
               <!-- 第二层：**技术字段原文**（用户 2026-10-16「打开详细 ⇒ 中英文都要 · 两个都不能省」）。
                    ③ 的预览层只给中文人话，这一层把帧里的原名补齐 —— 中文方便看，英文方便和后端确认。 -->
-              <code class="tech">{{ techLine(e) }}</code>
+              <!-- 用户 2026-10-17 裁定：原因就是普通键值对、跟在句尾（` · ` 隔开），不另起一行、
+                   不新增 `.d-reason`、不新增 `<li>`；只有 `fields.reason` 那一段按严重度着色。 -->
+              <code class="tech"><template v-for="(seg, i) in techSegments(e)" :key="i"><span v-if="i"> · </span><span :class="techTone(e, seg)">{{ seg.text }}</span></template></code>
             </span>
           </li>
           <li v-if="openedTraceRec && !openedEvents.length" class="chain-i is-miss">
@@ -556,7 +558,7 @@
        列宽用等值的 inline-block 宽度 + 8px `margin-right` 复刻原 `gap` ⇒ 与表头的列**逐像素对齐不变**。
      · 技术字段（`.dt`）**默认常显**（`中文键 值` 逐对排），不再等 hover；超过 2 行靠纯 CSS
        `hover` 展开。⚠️ 3a.3 起 `traceShort` 那一格（`.tr`）**删了** —— trace 短号搬进括号里常显。
-     · ⑤ 详情层**中英文都要**（用户：「两个都不能省」）：人话一行 + `techLine()` 的
+     · ⑤ 详情层**中英文都要**（用户：「两个都不能省」）：人话一行 + `techSegments()` 的
        `中文（英文原键）= 值` 一行（值照原文，不翻）。
 
      ⚠️ **「紧凑密度量到 25px 而不是 22px」的真因**（第 ⑦ 步返工时抓到，记在这里免得下次再找）：
@@ -836,12 +838,15 @@ function objText(ev) {
  *  ⚠️ 这一层的**值一律照原文**（`severity=info` 就写 `info`，不翻成「信息」）—— 用户给的
  *    样例就是 `severity（级别）= info` / `kind（类型）= lock`。翻译只发生在第一层的人话里。
  *  ⚠️ 帧顶层键与 `fields` 键**分开列**：顶层 `kind` 是事件类、`fields.kind` 是库存操作，
- *    同名不同物；后者用 `fieldLabel(kind, key)` 逐环取词。 */
-function techLine(e) {
+ *    同名不同物；后者用 `fieldLabel(kind, key)` 逐环取词。
+ *  ⚠️ 返回**段数组**（模板逐段渲染，只给 `fields.reason` 着色）；段间在模板里以 ` · ` 相连，
+ *    整串 `textContent` 与拆分前**逐字相同**。 */
+function techSegments(e) {
   const parts = []
   const addTop = (key, value) => {
     if (value === null || value === undefined || value === '') return
-    parts.push(`${eventKeyLabel(key)}（${key}）= ${value}`)
+    // 顶层段不带 key ⇒ 永不着色（只有 fields.reason 那一段按严重度上色）
+    parts.push({ text: `${eventKeyLabel(key)}（${key}）= ${value}` })
   }
   addTop('kind', e.kind)
   addTop('severity', e.severity)
@@ -865,12 +870,21 @@ function techLine(e) {
       const v = f[k]
       if (v === null || v === undefined || v === '') continue
       const text = typeof v === 'object' ? JSON.stringify(v) : String(v)
-      parts.push(`${fieldLabel(e.kind, k)}（${k}）= ${text}`)
+      // fields 段带上原键名：模板只对 key === 'reason' 的那一段着色
+      parts.push({ text: `${fieldLabel(e.kind, k)}（${k}）= ${text}`, key: k })
     }
   }
   const src = srcOf(e)
   if (src) addTop('src', src)
-  return parts.join(' · ')
+  return parts
+}
+
+/** 技术串里只有 `fields.reason` 这一段按严重度着色；其余段（含成功档）保持中性灰。 */
+function techTone(e, seg) {
+  if (!seg || seg.key !== 'reason') return ''
+  if (e.severity === 'error') return 'is-error'
+  if (e.severity === 'warn') return 'is-warn'
+  return ''
 }
 
 /** `detail` 尾部的 `src=环名#源seq`（后端只把它写在 `detail` 里，**不在 `fields` 里**）。
@@ -889,7 +903,7 @@ function actorText(e) {
 }
 
 /** `fields` 的**值** → 第一层的人话（只翻有表可查的那几个；其余原样）。
- *  ⚠️ 与 `techLine()` 的分工：这里翻值、那里留原文 —— 两层各自完整，不是同一串的两种写法。 */
+ *  ⚠️ 与 ⑤ 技术串的分工：这里翻值、那里留原文 —— 两层各自完整，不是同一串的两种写法。 */
 function fieldValueText(kind, key, value) {
   if (value === null || value === undefined || value === '') return ''
   const k = String(key)
@@ -1447,7 +1461,7 @@ function buildStream(list) {
  *      技术字段不再等 hover —— 用户要的是「一睁眼就看得见五要素」。
  *    · 第二层 = **纯 CSS 2 行截断**：`.ln` 的 `max-height` 夹住，hover / 键盘聚焦展开全文；
  *      ≤2 行的行 hover 前后高度不变（没有 JS 测量、没有 `is-clip` 类）。
- *    · 第三层 = ⑤ 链里的 `中文（英文原键）= 值`（见 `techLine()`）。
+ *    · 第三层 = ⑤ 链里的 `中文（英文原键）= 值`（见 `techSegments()`）。
  *  ⚠️ 缺槽位就少一段，不写占位符（同一页的老规矩）。 */
 
 function makeRow(mk, rail, gl, depth) {
@@ -2991,6 +3005,10 @@ button.ev-bar {
   color: var(--ink-3);
   word-break: break-all;
 }
+/* 用户 2026-10-17 裁定：`.tech` 整串仍是中性灰，只有 `fields.reason` 那一段按严重度上色。
+   ⚠️ 不新增节点/行：颜色加在逐段渲染的同一个 `<span>` 上（段与段仍是 ` · ` 相连的一行文字）。 */
+.chain-i .d .tech .is-error { color: var(--danger); }
+.chain-i .d .tech .is-warn { color: var(--warning); }
 
 /* ── ⑥ 开关栏（占位）───────────────────────────────────────────────────────── */
 .ev-switch {

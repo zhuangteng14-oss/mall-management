@@ -96,8 +96,8 @@ TD-01（ddl-auto）、TD-03（回滚规则矛盾）、TD-04/06/07/08（锚点与
 | 3 | `goodstype.GoodTypeNew` 不许显式传 NULL | `mall_management_sql.sql:76` | 三层内（Service 校验）。_行为本身待验，见「待验」_ | 小 |
 | 4 | `login.Id` 唯一性（前提 C） | 无约束，客户端直传 `userid` | 三层内（Service）；DB 侧加 UNIQUE 属 schema 变更 | 小 / 中 |
 | 5 | 三处上传提取 basename + 类型白名单 | `GoodsService:105-117`（goodsAdd）/ `:265-284`（goodsUp）、`UserService.updateAvatar:254-264`（三层前为 `GoodsController:106-113,282-287`） | 三层内（Service）。⚠️ **路径穿越仍待验**，不得写成「可穿越」 | 小 |
-| 6 | `l2Put` 冷却路径补指标 | `TwoLevelCache.java:235-248` | 并行（观测） | 小 |
-| 7 | `L2HealthProbe.down` 改 CAS | `L2HealthProbe.java:154-177` | 并行（观测） | 小 |
+| 6 | `l2Put` 冷却路径补指标 | `TwoLevelCache.java:238-251` | 并行（观测） | 小 |
+| 7 | `L2HealthProbe.down` 改 CAS | `L2HealthProbe.java:154-179` | 并行（观测） | 小 |
 | 8 | 文档锚点 → 符号名 | `defect-survey.md §五` | 独立（文档）。**TD-17 已于 2026-09-30 改完**；TD-04/06/07 待改 | 小～中 |
 
 ## C. Class B —— 语义未定，须先裁决 {#pack-three-layers-c}

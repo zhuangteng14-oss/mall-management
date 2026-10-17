@@ -110,20 +110,31 @@ const PERKIND = [
     fields: { lock: 'order-pay', result: 'acquired', key: 'order:pay/O-1' },
   },
   {
-    kind: 'order', title: '状态流转 CREATED → PAID',
-    detail: 'action=pay result=ok order#O-1 src=order#2', objectId: 'O-1',
+    // ⚠️ 3a.3 后续（失败原因）：这一条改成 **error + reason**（sev=error），用来验 ⑤ 的
+    //    红色原因段。to 必须为 null —— 真帧里 error 档的「转移后」是不知道，后端 `fromOrder`
+    //    的 title 就是 `状态流转 CREATED → null`，编一个 to=PAID 是替错形状背书。
+    kind: 'order', title: '状态流转 CREATED → null', severity: 'error',
+    detail: 'action=pay result=error order#O-2 src=order#2', objectId: 'O-2',
     // ⚠️ from/to 用 `OrderState` 的**枚举名**（后端 `stateName()` 的返回值）—— 与真实
     //    vocabulary 对齐；`waitPay` 那套是 `ORDER_FLOW_STATE_LABEL`，是**另一张表**。
-    fields: { action: 'pay', result: 'ok', from: 'CREATED', to: 'PAID', order: 'O-1' },
+    fields: {
+      action: 'pay', result: 'error', from: 'CREATED', to: null, order: 'O-2',
+      reason: '数据库错误：IllegalStateException：db down',
+    },
     durationUs: 12400,
   },
   {
-    kind: 'stock', title: '库存扣减',
-    detail: 'kind=deduct sku=SKU-0001 qty=1 result=ok src=stock#9', objectId: 'SKU-0001',
-    fields: { kind: 'deduct', sku: 'SKU-0001', qty: '1', result: 'ok' },
+    // ⚠️ 3a.3 后续：这一条改成**真实的超卖拦截档**（insufficient + reason，sev=warn）。
+    //    原来是 ok 档，验不到「失败原因为什么要看得到」—— 而用户报的就是这个场景。
+    kind: 'stock', title: '库存不足（未扣，防超卖命中）', severity: 'warn',
+    detail: 'kind=deduct sku=SKU-0002 qty=8 result=insufficient src=stock#9', objectId: 'SKU-0002',
+    fields: {
+      kind: 'deduct', sku: 'SKU-0002', qty: '8', result: 'insufficient',
+      reason: '防超卖拦截：库存不足（需 8 件，剩余 1 件）',
+    },
     // ⚠️ 「剩余 N」—— 这是 3a.3 第二步才进帧的那一列（九个调用点里只有扣减档有值）
     //    ⇒ 用户点名要它出现在句子里，本段由它一处提供。
-    remaining: 7,
+    remaining: 1,
   },
   {
     kind: 'audit', title: '审计写入',
@@ -173,7 +184,8 @@ const PERKIND = [
   seq: 1000 + i,
   ts: T + 5000 + (8 - i) * 4,
   kind: x.kind,
-  severity: x.kind === 'sensitive' || x.kind === 'identity' || x.kind === 'protection' ? 'warn' : 'info',
+  // 显式 severity 优先（order=error / stock=warn）；其余沿用「这三类 warn、其余 info」
+  severity: x.severity || (x.kind === 'sensitive' || x.kind === 'identity' || x.kind === 'protection' ? 'warn' : 'info'),
   title: x.title,
   detail: x.detail,
   key: x.objectId,
@@ -213,7 +225,7 @@ const FRAME1 = {
 const FRAME2 = {
   seq: 2, ts: T + 2000, cursor: 159, count: 9, rate: 8.0, mq: false,
   counts: { cache: 1, lock: 1, order: 1, stock: 1, audit: 1, notify: 1, sensitive: 1, identity: 1, protection: 1 },
-  severity: { info: 6, warn: 3, error: 0 },
+  severity: { info: 5, warn: 3, error: 1 },
   events: PERKIND,
   traces: [{
     seq: 0, traceId: TRACE, method: 'POST', path: '/goods/goodsUp',
@@ -716,14 +728,14 @@ try {
   const cellOf = (row) => csvSplit(row)
   const rowOfTitle = (t) => csvRows.map(cellOf).find((c) => c[colOf('title')] === t)
   const protRow = rowOfTitle('限流拦截')
-  const stockRow = rowOfTitle('库存扣减')
+  const stockRow = rowOfTitle('库存不足（未扣，防超卖命中）')
   ok('⑲ 导出 CSV：`actorId` / `actorRole` 两列**真的有值**（`protection` 那条 = `C-9` / `3`），无身份的行留白',
     !!protRow && protRow[colOf('actorId')] === 'C-9' && protRow[colOf('actorRole')] === '3'
     && !!stockRow && stockRow[colOf('actorId')] === '',
     { 有身份: protRow && [protRow[colOf('actorId')], protRow[colOf('actorRole')]], 无身份: stockRow && stockRow[colOf('actorId')] })
-  ok('⑲ 导出 CSV：`remaining` 列**真的有值**（`库存扣减` 那条 = `7`），其余行留白（不是满列 0）',
-    !!stockRow && stockRow[colOf('remaining')] === '7'
-    && csvRows.filter((l) => cellOf(l)[colOf('remaining')] === '7').length === 1,
+  ok('⑲ 导出 CSV：`remaining` 列**真的有值**（超卖那条 = `1`），其余行留白（不是满列 0）',
+    !!stockRow && stockRow[colOf('remaining')] === '1'
+    && csvRows.filter((l) => cellOf(l)[colOf('remaining')] === '1').length === 1,
     { 该行: stockRow && stockRow[colOf('remaining')], 全表非空条数: csvRows.filter((l) => cellOf(l)[colOf('remaining')] !== '').length })
 
   await clickSeg('JSON')
@@ -742,16 +754,24 @@ try {
     jKeys.length === 16 && ['batchId', 'actor', 'durationUs', 'remaining', 'fields'].every((k) => k in jsonParse[0]),
     { 键数: jKeys.length, 键: jKeys })
   const jProt = (jsonParse || []).find((x) => x.title === '限流拦截')
-  const jStock = (jsonParse || []).find((x) => x.title === '库存扣减')
+  const jStock = (jsonParse || []).find((x) => x.title === '库存不足（未扣，防超卖命中）')
+  const jOrder = (jsonParse || []).find((x) => x.title === '状态流转 CREATED → null')
   const jNoti = (jsonParse || []).find((x) => x.title === '通知发送')
   ok('⑲ 导出 JSON：`actor` 保持**帧里的对象形状**（`{id,role}`），没有身份的行是 `null` 而不是 `{}`',
     !!jProt && JSON.stringify(jProt.actor) === JSON.stringify({ id: 'C-9', role: 3 })
     && !!jStock && jStock.actor === null,
     { 有身份: jProt && jProt.actor, 无身份: jStock && jStock.actor })
-  ok('⑲ 导出 JSON：`remaining` 只有那一条有值（`7`），其余是 `null`；`durationUs` / `batchId` 也在',
-    !!jStock && jStock.remaining === 7 && !!jProt && jProt.remaining === null
+  ok('⑲ 导出 JSON：`remaining` 只有那一条有值（`1`），其余是 `null`；`durationUs` / `batchId` 也在',
+    !!jStock && jStock.remaining === 1 && !!jProt && jProt.remaining === null
     && !!jProt && jProt.durationUs === null && jProt.batchId === 'b-7a3-#12',
     { stock: jStock && jStock.remaining, prot: jProt && { remaining: jProt.remaining, durationUs: jProt.durationUs, batchId: jProt.batchId } })
+  ok('⑲ 导出结构不因原因而变：顶层没有 `reason`，原因只在 `fields.reason`；CSV 里干脆没有原因文本',
+    !!jStock && !!jOrder
+    && !('reason' in jStock) && !('reason' in jOrder)
+    && jStock.fields && jStock.fields.reason === '防超卖拦截：库存不足（需 8 件，剩余 1 件）'
+    && jOrder.fields && jOrder.fields.reason === '数据库错误：IllegalStateException：db down'
+    && !csv.includes('防超卖拦截') && !csv.includes('数据库错误'),
+    { stock: jStock && jStock.fields, order: jOrder && jOrder.fields, 顶层键数: jStock && Object.keys(jStock).length })
   ok('⑲ 导出 JSON：`fields` 是**原样那袋**（`notify` 那条显式 `null` ⇒ 回落路径才有意义）',
     !!jNoti && jNoti.fields === null && !!jProt && !!jProt.fields && jProt.fields.scope === '/admin/observe/attack/run 全路径限流窗口',
     { notify: jNoti && jNoti.fields, protection: jProt && jProt.fields })
@@ -1365,7 +1385,7 @@ try {
       短号: [...row.querySelectorAll('.se-ctx .se-a')].map(s => s.textContent),
     }
   })()`)
-  const TITLES = ['缓存命中（L1）', '取锁成功（order:pay）', '状态流转 CREATED → PAID', '库存扣减',
+  const TITLES = ['缓存命中（L1）', '取锁成功（order:pay）', '状态流转 CREATED → null', '库存不足（未扣，防超卖命中）',
     '审计写入', '通知发送', '敏感词拒收', '身份拒绝', '限流拦截', '批量事件 0']
   const rows = {}
   for (const t of TITLES) rows[t] = await readRow(t)
@@ -1395,16 +1415,23 @@ try {
   ok('㉔2 `lock`：第一层念**锁名**（`order-pay` → 「支付」）；与对象列同值的 `key` 不重复念',
     hasPair('取锁成功（order:pay）', '锁', '支付')
     && !rows['取锁成功（order:pay）'].字段文本.includes('order:pay/O-1'), gotRow('取锁成功（order:pay）'))
-  ok('㉔2 `order`（流转）：`前态 / 后态` 都翻成中文（`CREATED → PAID` → 「待付款 / 已付款（待发货）」），`动作` 也翻',
-    hasPair('状态流转 CREATED → PAID', '前态', '待付款')
-    && hasPair('状态流转 CREATED → PAID', '后态', '已付款（待发货）')
-    && hasPair('状态流转 CREATED → PAID', '动作', '付款'), gotRow('状态流转 CREATED → PAID'))
-  ok('㉔2 `stock`：`操作 扣减`（`fields.kind` 的值翻中文）+ `数量 1 件`；'
+  ok('㉔2 `order`（流转·失败档）：`前态` 翻成中文（`CREATED` → 「待付款」）、`动作` 翻；'
+    + '`后态` 是 null ⇒ **整格不出现**（不写占位），`原因` 逐字上屏',
+    hasPair('状态流转 CREATED → null', '前态', '待付款')
+    && hasPair('状态流转 CREATED → null', '动作', '付款')
+    && hasPair('状态流转 CREATED → null', '原因', '数据库错误：IllegalStateException：db down')
+    && !rows['状态流转 CREATED → null'].字段.some((f) => f.k === '后态'),
+    gotRow('状态流转 CREATED → null'))
+  ok('㉔2 `stock`：`操作 扣减`（`fields.kind` 的值翻中文）+ `数量 8 件` + `原因`；'
     + '「剩余 N 件」也进了第一层（顶层 `remaining` 那一格，不在 ctx 里）',
-    hasPair('库存扣减', '操作', '扣减') && hasPair('库存扣减', '数量', '1 件')
-    && hasPair('库存扣减', '剩余', '7 件'), gotRow('库存扣减'))
-  ok('㉔2 `stock` 的 `sku` 与对象列同值 ⇒ **不重复念**（对象列已经写着 `SKU SKU-0001`）',
-    !!rows['库存扣减'] && !rows['库存扣减'].字段文本.includes('SKU-0001'), gotRow('库存扣减'))
+    hasPair('库存不足（未扣，防超卖命中）', '操作', '扣减')
+    && hasPair('库存不足（未扣，防超卖命中）', '数量', '8 件')
+    && hasPair('库存不足（未扣，防超卖命中）', '原因', '防超卖拦截：库存不足（需 8 件，剩余 1 件）')
+    && hasPair('库存不足（未扣，防超卖命中）', '剩余', '1 件'), gotRow('库存不足（未扣，防超卖命中）'))
+  ok('㉔2 `stock` 的 `sku` 与对象列同值 ⇒ **不重复念**（对象列已经写着 `SKU SKU-0002`）',
+    !!rows['库存不足（未扣，防超卖命中）']
+    && !rows['库存不足（未扣，防超卖命中）'].字段文本.includes('SKU-0002'),
+    gotRow('库存不足（未扣，防超卖命中）'))
   ok('㉔2 `sensitive`：`场景 评论` + `命中数 9` + `总数 20`（数字按字段原样拼，不出现 `9/20undefined`）',
     hasPair('敏感词拒收', '场景', '评论') && hasPair('敏感词拒收', '命中数', '9')
     && hasPair('敏感词拒收', '总数', '20'), gotRow('敏感词拒收'))
@@ -1432,13 +1459,125 @@ try {
     && /请求耗时 42 ms/.test(rows['缓存命中（L1）'].ctx文本), gotRow('缓存命中（L1）'))
   ok('㉔3 **耗时两档分开写**：事件自带 `durationUs=12400` ⇒ 「耗时 12 ms」；`850` ⇒ 「耗时 850 µs」'
     + '（亚毫秒不四舍五入成 `0 ms`，那会把「很快」写成「没花时间」）',
-    !!rows['状态流转 CREATED → PAID'] && /耗时 12 ms/.test(rows['状态流转 CREATED → PAID'].ctx文本)
+    !!rows['状态流转 CREATED → null'] && /耗时 12 ms/.test(rows['状态流转 CREATED → null'].ctx文本)
     && !!rows['敏感词拒收'] && /耗时 850 µs/.test(rows['敏感词拒收'].ctx文本)
     && !/请求耗时/.test(rows['敏感词拒收'].ctx文本),
-    { order: gotRow('状态流转 CREATED → PAID'), sensitive: gotRow('敏感词拒收') })
+    { order: gotRow('状态流转 CREATED → null'), sensitive: gotRow('敏感词拒收') })
   ok('㉔3 第一层只把「谁/来源/时间坐标」留在字段与括号里：`ctx` 里**不再重复** fields 的键值对'
     + '（收尾批 2 取消从句后，ctx 只剩 trace / 耗时）',
     !!rows['审计写入'] && !/发起人|动作|原因/.test(rows['审计写入'].ctx文本), gotRow('审计写入'))
+
+  // ── ㉔2b 失败原因（块 7 · 3a.3 后续）：③ 第一层中性、⑤ 只有 reason 段按严重度着色 ──────
+  //   ⚠️ ③ 必须保持中性灰：用户裁定「③ 第一层保持中性灰，不变」—— 行的 severity 升到
+  //      warn / error 也**不该**让 `.tf-k` / `.tf-v` 变色。负向半边同时钉住「值不是 danger/warning」，
+  //      否则把整块染红也能让「等于 ink-2」那一半假绿。
+  const reasonInk = await b.evalJS(`(() => {
+    const tok = (n) => {
+      const d = document.createElement('span')
+      d.style.color = 'var(' + n + ')'
+      document.body.appendChild(d)
+      const c = getComputedStyle(d).color
+      d.remove()
+      return c
+    }
+    const rowOf = (title) => [...document.querySelectorAll('.log-line')]
+      .find((r) => { const m = r.querySelector('.ms b'); return m && m.textContent.trim() === title })
+    const reasonPair = (title) => {
+      const r = rowOf(title)
+      if (!r) return null
+      const tf = [...r.querySelectorAll('.ms .dt .tf')]
+        .find((f) => { const k = f.querySelector('.tf-k'); return k && k.textContent.trim() === '原因' })
+      if (!tf) return null
+      const k = tf.querySelector('.tf-k')
+      const v = tf.querySelector('.tf-v')
+      return {
+        键: getComputedStyle(k).color, 值: getComputedStyle(v).color,
+        键文本: k.textContent.trim(), 值文本: v.textContent.trim(),
+      }
+    }
+    return {
+      令牌: { ink2: tok('--ink-2'), ink3: tok('--ink-3'), danger: tok('--danger'), warning: tok('--warning') },
+      库存: reasonPair('库存不足（未扣，防超卖命中）'),
+      订单: reasonPair('状态流转 CREATED → null'),
+    }
+  })()`)
+  ok('㉔2b ③ 第一层：warn / error 行的 `原因` 键值仍是中性灰（`--ink-3` / `--ink-2`），'
+    + '**不跟着严重度变色** —— ③ 的视觉口径不变',
+    !!reasonInk.库存 && !!reasonInk.订单
+    && reasonInk.库存.键 === reasonInk.令牌.ink3 && reasonInk.库存.值 === reasonInk.令牌.ink2
+    && reasonInk.订单.键 === reasonInk.令牌.ink3 && reasonInk.订单.值 === reasonInk.令牌.ink2
+    && reasonInk.库存.值 !== reasonInk.令牌.warning && reasonInk.订单.值 !== reasonInk.令牌.danger,
+    reasonInk)
+
+  const techReason = await b.evalJS(`(() => {
+    const tok = (n) => {
+      const d = document.createElement('span')
+      d.style.color = 'var(' + n + ')'
+      document.body.appendChild(d)
+      const c = getComputedStyle(d).color
+      d.remove()
+      return c
+    }
+    const items = [...document.querySelectorAll('.chain .chain-i')]
+    const pick = (kind) => {
+      const item = items.find((x) => {
+        const c = x.querySelector('.tech')
+        return c && c.textContent.includes('类型（kind）= ' + kind)
+      })
+      if (!item) return null
+      const code = item.querySelector('.tech')
+      const spans = [...code.children]
+      const seps = spans.filter((s, i) => i % 2 === 1)
+      const segs = spans.filter((s, i) => i % 2 === 0)
+      const reason = segs.find((s) => s.textContent.startsWith('原因（reason）='))
+      const others = segs.filter((s) => s !== reason)
+      return {
+        段数: segs.length,
+        分隔符: seps.map((s) => s.textContent),
+        分隔符全为点隔: seps.length > 0 && seps.every((s) => s.textContent === ' · '),
+        // ⚠️ Vue 的 template v-for 每个 fragment 会留下**空文本锚点**（nodeType 3、内容 ''），
+        //    它们不排版、不进 textContent ⇒ 要钉的是「**非空**裸文本节点」= 0（有内容的文本会绕过逐段渲染）。
+        非空文本节点数: [...code.childNodes].filter((n) => n.nodeType === 3 && n.textContent !== '').length,
+        子元素全为span: [...code.children].every((n) => n.tagName === 'SPAN'),
+        reason文本: reason ? reason.textContent : null,
+        reason类: reason ? reason.className : null,
+        reason色: reason ? getComputedStyle(reason).color : null,
+        其余段色: [...new Set(others.map((s) => getComputedStyle(s).color))],
+        其余段类: [...new Set(others.map((s) => s.className))],
+        整串: code.textContent,
+        拼回: segs.map((s) => s.textContent).join(' · '),
+      }
+    }
+    return {
+      令牌: { ink3: tok('--ink-3'), danger: tok('--danger'), warning: tok('--warning') },
+      库存: pick('stock'), 订单: pick('order'), 缓存: pick('cache'),
+      链节点数: items.length,
+      li总数: document.querySelectorAll('.chain li').length,
+      dReason节点数: document.querySelectorAll('.d-reason').length,
+    }
+  })()`)
+  ok('㉔2b ⑤ 不新增节点：`.tech` 仍是**一个 `<code>`**、子元素只有逐段 `<span>`、段间恰为 ` · `、'
+    + '没有非空裸文本节点（Vue 的 fragment 空锚点不算）；`.d-reason` = 0，`<li>` 仍是 9 事件 + 起止 2 = 11',
+    !!techReason.库存 && !!techReason.订单
+    && techReason.库存.子元素全为span && techReason.库存.非空文本节点数 === 0
+    && techReason.库存.分隔符全为点隔 && techReason.库存.整串 === techReason.库存.拼回
+    && techReason.订单.整串 === techReason.订单.拼回
+    && techReason.dReason节点数 === 0 && techReason.li总数 === 11 && techReason.链节点数 === 11,
+    techReason)
+  ok('㉔2b ⑤ 原因段按严重度上色：order（error）= `--danger`、stock（warn）= `--warning`，'
+    + '同一条里的**其余段仍是 `--ink-3`**（只染那一段，不是整行）',
+    techReason.订单.reason类 === 'is-error' && techReason.订单.reason色 === techReason.令牌.danger
+    && techReason.库存.reason类 === 'is-warn' && techReason.库存.reason色 === techReason.令牌.warning
+    && techReason.订单.其余段色.length === 1 && techReason.订单.其余段色[0] === techReason.令牌.ink3
+    && techReason.库存.其余段色.length === 1 && techReason.库存.其余段色[0] === techReason.令牌.ink3
+    && techReason.订单.其余段类.every((c) => c === '') && techReason.库存.其余段类.every((c) => c === ''),
+    techReason)
+  ok('㉔2b ⑤ 无原因的 info 事件（缓存命中）没有 `原因（reason）` 段、也没有 `.is-error/.is-warn` 子节点 '
+    + '—— 染色只认 `fields.reason`，不会误伤别的段',
+    !!techReason.缓存 && techReason.缓存.reason文本 === null
+    && !techReason.缓存.整串.includes('原因（reason）')
+    && techReason.缓存.其余段类.every((c) => c === ''),
+    techReason.缓存)
 
   // ── ㉔4 A 块：**缺槽位跳过**（不写占位符）—— 这条要按「整页扫」，不能只看那十条
   const slots = await b.evalJS(`(() => {
@@ -1758,7 +1897,7 @@ try {
     const barRow = (sel, label) => [...document.querySelectorAll(sel)]
       .find((r) => { const n = r.querySelector('.nm'); return n && n.textContent.trim().startsWith(label) })
     // ⚠️ ③ 的行没有「类名」列：.md 是折叠摘要（主行恒空），要认类只能看标题
-    //    （.ms b = title）。探针假帧里「缓存命中（L1）」/「库存扣减」是**不同标题**，
+    //    （.ms b = title）。探针假帧里「缓存命中（L1）」/「库存不足（未扣，防超卖命中）」是**不同标题**，
     //    所以这能唯一定位到两类各一行。
     //    ⚠️ 本段是模板字符串：注释里写反引号会把模板提前闭合（本轮就是这样炸的）。
     const lineByTitle = (title) => [...document.querySelectorAll('.log-line')]
@@ -1777,7 +1916,7 @@ try {
       })(),
       '③类': {
         缓存: colorOf(lineByTitle('缓存命中（L1）'), '.ic svg'),
-        库存: colorOf(lineByTitle('库存扣减'), '.ic svg'),
+        库存: colorOf(lineByTitle('库存不足（未扣，防超卖命中）'), '.ic svg'),
       },
       '④类': { 缓存: colorOf(barRow('.ev-bars:not(.sev) .ev-bar', '缓存'), '.nm svg') },
       '④严重度': { 警告: colorOf(barRow('.ev-bars.sev .ev-bar', '警告'), '.nm svg') },

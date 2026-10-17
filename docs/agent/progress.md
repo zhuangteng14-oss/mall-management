@@ -2499,7 +2499,7 @@ DB 级唯一锁探针 `ProbeB6c7Lock` = **PASS 12 / FAIL 0**；接口级 8 条�
    `context-packs/c3-block-D-hardening.md` 尾部〈未还项〉。
 2. **订正 · 「加类要一起改」的两处实测不必改**（pack 原判 → 以实测为准）：① `smoke/ObserveStreamSmokeTest.java:69`
    是 `contains(...)` **子集**断言（只证「原有 8 键一个不少」）⇒ 加第 9 类**不会红**；⚠️ 代价是**切片层不看第 9 键**，
-   帧里真有它由 `observe/service/EventStreamServiceTest.java:81` 的 `containsOnlyKeys(9 个)` 与探针守。
+   帧里真有它由 `observe/service/EventStreamServiceTest.java:82` 的 `containsOnlyKeys(9 个)` 与探针守。
    ② `scripts/probes/probe-b7c8-event-log.mjs:69` 只是 `['cache',…,'identity'][i % 8]` **轮流取**（不校验枚举完整性）。
    ⇒ 两文件本笔**未动**。
 3. **补 · 第 9 类 `protection` 的两处枚举**：`mall_management_sql.sql:1868`（`ObservedEvent` 的 `Kind` 列注释里那份 8 名清单）

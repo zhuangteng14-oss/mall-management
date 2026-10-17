@@ -268,10 +268,14 @@ public class OrderTimeoutCancelJob {
                 // 块 7 · 观测（commit 2）：与 OrderService.deductStocks 对称，两条通道同一调用点一起发。
                 // 0 行记 MISSING（该码在 goods_sku 里没有行 ⇒ 无处可放），**不是** ERROR ——
                 // 非矩阵商品本来就没有 goods_sku 行，这类明细每单都会走到这里。
+                // 块 7 · 阶段 3a.3 后续：0 行的人话原因 ——「无处可放」是事实，
+                // 与「回补失败」分开（result=missing / error 已分开，reason 把话说全）。
                 stockMetrics.release(skuCode, qty,
-                        rows == 1 ? Release.OK : Release.MISSING, releaseNanos);
+                        rows == 1 ? Release.OK : Release.MISSING, releaseNanos,
+                        rows == 1 ? null : "释放未命中：goods_sku 中不存在该 SKU");
             } catch (Exception e) {
-                stockMetrics.release(skuCode, qty, Release.ERROR, System.nanoTime() - releaseStartedNanos);
+                stockMetrics.release(skuCode, qty, Release.ERROR, System.nanoTime() - releaseStartedNanos,
+                        com.minke.mallmanagement.shared.text.EventReason.of("库存释放失败", e));
                 log.warn("超时释放：订单 {} 的 SKU {} 回补失败（跳过该条）：{}", orderId, skuCode, e.toString());
             }
         }
