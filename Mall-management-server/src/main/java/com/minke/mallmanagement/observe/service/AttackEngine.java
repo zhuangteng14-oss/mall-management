@@ -7,6 +7,7 @@ import com.minke.mallmanagement.shared.cache.L2HealthProbe;
 import com.minke.mallmanagement.shared.web.AuthTokenStore;
 import com.minke.mallmanagement.shared.web.ObserveContext;
 import com.minke.mallmanagement.shared.web.TraceIdFilter;
+import jakarta.annotation.PreDestroy;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -35,7 +36,10 @@ import java.util.concurrent.CompletionException;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.Semaphore;
+import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -265,6 +269,30 @@ public class AttackEngine {
      * 它那边也写了一条反向的 ⚠️ 指回本处。
      */
     static final String ATTACK_SOURCE = "attack";
+
+    // ==================== 订单生命周期模拟（2026-10-17）====================
+    //
+    // 旧行为：四个下单场景只把订单**建出来**（PayIf/DeliveryIf/ReceiveIf 全 0，
+    // 突发场景的第 2 档除外）⇒ 状态流转页的 SSE 流轨永远只有「建档」一种 move，
+    // 四条主链节点一直卡在「待付款」。用户报的「流轨假死」就是这件事。
+    //
+    // 新行为：对**真的建成功**的演练单按采样率挑一部分，交给一个独立的定时器，
+    // 用 1–5 秒的随机延迟依次推进「付款 → 发货 → 收货」。要点：
+    //   ① 采样 + 上限：不把几万张单全部排进定时器，也不让同一秒爆出几百条流转；
+    //   ② 每步都重新随机 1–5 秒 ⇒ 订单错落有致，不会同帧集体变状态；
+    //   ③ 只推进**响应 success=true** 的单（秒杀失败 / 重复提交被拦的那几条不推）；
+    //   ④ 不推 {@link #UNPAID_TIMEOUT}（那一路要留给超时取消 job）与已经落成
+    //      {@code (1,1,1)} 的突发档（它出生就是已完成，再推只会拿到 rejected）。
+    /** 每个演练轮次最多模拟多少张单的生命周期（采样上限，防定时器被几万单压垮）。 */
+    static final int JOURNEY_MAX_ORDERS = 600;
+    /** 建单成功后进入生命周期模拟的概率。 */
+    static final double JOURNEY_SAMPLE_RATE = 0.6;
+    /** 每一步的随机延迟区间（毫秒）—— 用户验收口径「1~5 秒」。 */
+    static final int JOURNEY_MIN_DELAY_MS = 1000;
+    static final int JOURNEY_MAX_DELAY_MS = 5000;
+    /** 付款 / 发货之后继续推进下一步的概率（剩下的停在当前状态，像真实业务一样有积压）。 */
+    static final double JOURNEY_PAY_TO_SHIP_RATE = 0.85;
+    static final double JOURNEY_SHIP_TO_RECEIVE_RATE = 0.8;
 
     /** {@code drill_record.Name} 是 {@code varchar(64)}、{@code Scenario} 是 {@code varchar(500)}。 */
     static final int NAME_MAX = 64;
@@ -641,6 +669,28 @@ public class AttackEngine {
     private volatile String currentBatch = "";
 
     /**
+     * 订单生命周期模拟的定时器（懒建）。两条守护线程足够：每次触发只是发一条异步 HTTP，
+     * 真正的等待在 {@link HttpClient} 的线程池里，不占这里。
+     * ⚠️ 必须懒建：单测 {@code new AttackEngine(...)} 不该因为构造器就多出一条线程。
+     */
+    private volatile ScheduledExecutorService journeyExecutor;
+
+    /** 本轮已经排进生命周期模拟的单数（每轮 {@code runOnce} 开头清零）。 */
+    private final AtomicInteger journeyOrders = new AtomicInteger();
+
+    /**
+     * 本轮的**商家票**缓存（发货要商家身份，而 {@link #currentToken} 是买家票）。
+     *
+     * <p>⚠️ 为什么不能拿买家的票去发货：{@code orderDeliveryIfUp} 的归属校验判的是**卖家**
+     * （`OrderController.isOwner(asMerchant=true)`）⇒ 买家票会 403，页面上的流轨就一直停在「待发货」。
+     * 这里按商家现铸一张 role=2 的票并缓存；每轮清空（票是进程内表，30 分钟过期，但没必要跨轮复用）。
+     *
+     * <p>⚠️ 只在生命周期模拟里用，**不换** {@link #currentToken}：那个字段还被 BANNED_USER
+     * 等场景用来演示「入参指向他人」的 403，换成管理员票会把那条场景的判据弄钝。
+     */
+    private final Map<String, String> journeyMerchantTokens = new ConcurrentHashMap<>();
+
+    /**
      * 在途请求许可数的**硬顶**（甲 · 细节 1）。有效许可数 = {@code min(concurrency, 本值)}。
      *
      * <p>⚠️ 走 {@code @Value} 而**不入参**（A 档清单第 3 条，用户已批）：避免入参爆炸。
@@ -859,6 +909,8 @@ public class AttackEngine {
         //    而这几个数是要和「已发 M 条」放在一起算平均 QPS 的，起点必须与 sent 的起点同源。
         liveMeters = meters;
         liveStartedMs = System.currentTimeMillis();
+        journeyOrders.set(0);
+        journeyMerchantTokens.clear();
 
         int stockBefore = measureStock(target.main().code(), -1);
         Integer baseline = readBaseline(target.main().code());
@@ -1025,10 +1077,15 @@ public class AttackEngine {
             }
             int n = seq.getAndIncrement();
             String reqId = reqIdOf(key, n);
+            // 生命周期模拟要用**这一发所属的批次**，不能等到钩子里再读 currentBatch
+            // （并发两轮时后一轮会覆盖它，旧单会被记到新批次上）。
+            String batchAtSend = currentBatch;
             long t0 = System.nanoTime();
             CompletableFuture<HttpResponse<String>> f;
+            Call call;
             try {
-                f = send(baseUrl, buildCall(key, target, n, orderIds, runSeq), reqId);
+                call = buildCall(key, target, n, orderIds, runSeq);
+                f = send(baseUrl, call, reqId);
             } catch (RuntimeException e) {
                 slots.release();              // 发都没发出去 ⇒ 许可必须还回去，否则并发上限自己缩水
                 throw e;
@@ -1054,6 +1111,11 @@ public class AttackEngine {
                 Outcome o = classify(resp.statusCode(), resp.body());
                 meter.add(o);
                 reqLog.record(reqId, o.name(), resp.statusCode(), ms);
+                // 只有**真的落库成功**的下单才进入生命周期模拟：
+                // 秒杀没抢到库存 / 重复提交被拦 / 价格闸拒绝，都会在这里被判成 BLOCKED。
+                if (o == Outcome.PASSED && call.journey() && call.orderId() != null) {
+                    maybeScheduleJourney(baseUrl, call.orderId(), call.merchantId(), batchAtSend);
+                }
             });
         } while (!oneshot && System.nanoTime() < deadline);
     }
@@ -1179,7 +1241,19 @@ public class AttackEngine {
      * ⚠️ 甲把「拼参数」与「发出去」拆成两半（旧的 {@code fireOnce} 是发完才回）—— 于是
      * 「一条线程 = 一条在途」那条链在 {@link #buildCall} 与 {@link #send} 之间断开。
      */
-    private record Call(String path, Map<String, String> params, boolean withToken) {
+    private record Call(String path, Map<String, String> params, boolean withToken,
+                        String orderId, String merchantId, boolean journey) {
+
+        /** 非下单请求（读商品价 / 购物车 / 评论）。 */
+        Call(String path, Map<String, String> params, boolean withToken) {
+            this(path, params, withToken, null, null, false);
+        }
+
+        /** 下单请求：建成功后进入生命周期模拟。{@code merchantId} 是**这单的卖家**（发货要用它的票）。 */
+        Call(String path, Map<String, String> params, boolean withToken, String orderId,
+             String merchantId) {
+            this(path, params, withToken, orderId, merchantId, true);
+        }
     }
 
     /**
@@ -1196,7 +1270,8 @@ public class AttackEngine {
                 String orderId = ATTACK_PREFIX + "SECKILL-" + runSeq + "-" + seq;
                 offer(orderIds, orderId);
                 return new Call("/order/orderAdd",
-                        orderForm(t, t.main(), orderId, t.main().price(), 0, 0, 0, 1), true);
+                        orderForm(t, t.main(), orderId, t.main().price(), 0, 0, 0, 1),
+                        true, orderId, t.main().merchantId());
             }
             case ORDER_BURST: {
                 // 四档轮转：合法 / 价格非法（价格闸）/ 出生态非法（出生闸）/ 换一件 SKU（多商品并发）
@@ -1208,22 +1283,28 @@ public class AttackEngine {
                 int payIf = variant == 2 ? 1 : 0;
                 int deliveryIf = variant == 2 ? 1 : 0;
                 int receiveIf = variant == 2 ? 1 : 0;
+                // 第 2 档出生即 (1,1,1) = 已完成 ⇒ 不再模拟生命周期；其余三档建成功后推进。
                 return new Call("/order/orderAdd",
-                        orderForm(t, sku, orderId, price, payIf, deliveryIf, receiveIf, 1), true);
+                        orderForm(t, sku, orderId, price, payIf, deliveryIf, receiveIf, 1),
+                        true, orderId, sku.merchantId(), variant != 2);
             }
             case REPEAT_SUBMIT: {
                 // 同一个 OrderId 反复打：唯一索引 + 锁 + 幂等查重 ⇒ 只有第一单落库，其余 success:false
                 String orderId = ATTACK_PREFIX + "REPEAT-" + runSeq;
                 offer(orderIds, orderId);
                 return new Call("/order/orderAdd",
-                        orderForm(t, t.main(), orderId, t.main().price(), 0, 0, 0, 1), true);
+                        orderForm(t, t.main(), orderId, t.main().price(), 0, 0, 0, 1),
+                        true, orderId, t.main().merchantId());
             }
             case UNPAID_TIMEOUT: {
                 // PayIf=0 且此后不付款 ⇒ 交给 dev 的超时取消 job（60 秒）去取消并回补库存
                 String orderId = ATTACK_PREFIX + "UNPAID-" + runSeq + "-" + seq;
                 offer(orderIds, orderId);
+                // ⚠️ 不模拟生命周期：这一路要留给 `OrderTimeoutCancelJob` 在 60 秒后真取消，
+                //    若在这里 1–5 秒就把它付掉，场景 4 的验收对象当场消失。
                 return new Call("/order/orderAdd",
-                        orderForm(t, t.main(), orderId, t.main().price(), 0, 0, 0, 1), true);
+                        orderForm(t, t.main(), orderId, t.main().price(), 0, 0, 0, 1),
+                        true, orderId, t.main().merchantId(), false);
             }
             case CACHE_COLD: {
                 // 冷键：@Cacheable(sync=true) 的 priceByTriple —— 同一波（约 25 个并发）撞同一个
@@ -1361,6 +1442,142 @@ public class AttackEngine {
         }
     }
 
+    // ==================== 订单生命周期模拟（随机延迟）====================
+
+    /**
+     * 一步的随机延迟（毫秒），落在 {@code [1000, 5000]} 闭区间。
+     * 包可见是为了让单测直接钉住「1–5 秒」这条验收口径，而不是只测它「大于 0」。
+     */
+    static long journeyDelayMs() {
+        return ThreadLocalRandom.current().nextLong(JOURNEY_MIN_DELAY_MS, JOURNEY_MAX_DELAY_MS + 1L);
+    }
+
+    /**
+     * 建单成功后，**抽签**决定要不要给这张单模拟后续生命周期。
+     *
+     * <p>为什么抽签而不是全量：一轮演练可能造几千单，全量排期会让「付款/发货」反客为主，
+     * 把真正的攻击场景（重复提交、超卖……）淹没；抽 60% 且封顶 {@value #JOURNEY_MAX_ORDERS} 单，
+     * 足以让流轨持续有光点，又不至于把演练变成「只有正常下单」。
+     *
+     * <p>只对判定 {@code PASSED} 的单排期（调用点在 {@link #dispatch} 的完成钩子里）：
+     * 被防护拦掉的请求本来就没建单，给它们排后续只会刷一串 404/403。
+     *
+     * @param merchantId 这单的卖家（发货要它的票，见 {@link #journeyMerchantTokens}）
+     * @param batchId    这一发**发出时**的批次（不是排期时再读字段，理由见
+     *                   {@link #send(String, Call, String, String, String)}）
+     */
+    void maybeScheduleJourney(String baseUrl, String orderId, String merchantId, String batchId) {
+        if (stopRequested || orderId == null || orderId.isBlank()) {
+            return;
+        }
+        if (ThreadLocalRandom.current().nextDouble() >= JOURNEY_SAMPLE_RATE) {
+            return;
+        }
+        if (journeyOrders.incrementAndGet() > JOURNEY_MAX_ORDERS) {
+            return;
+        }
+        scheduleJourney(baseUrl, orderId, merchantId, 0, batchId);
+    }
+
+    /** 把某一步挂到定时器上；停表 / 换轮之后到点的任务自己会退出（见 {@link #journeyStep}）。 */
+    private void scheduleJourney(String baseUrl, String orderId, String merchantId, int step,
+                                 String batchId) {
+        if (stopRequested) {
+            return;
+        }
+        journeyExecutor().schedule(() -> journeyStep(baseUrl, orderId, merchantId, step, batchId),
+                journeyDelayMs(), TimeUnit.MILLISECONDS);
+    }
+
+    /** 发货用的商家票（按商家缓存；{@code merchantId} 为空时退回买家票，交给服务端如实判 403）。 */
+    private String merchantTokenFor(String merchantId) {
+        if (merchantId == null || merchantId.isBlank()) {
+            return currentToken;
+        }
+        return journeyMerchantTokens.computeIfAbsent(merchantId,
+                id -> AuthTokenStore.mint(id, 2));
+    }
+
+    /**
+     * 推进一步：0 = 付款，1 = 发货，2 = 收货。
+     *
+     * <p>⚠️ 每步都重新校验「还在同一轮」：用户点[暂停]、或又点了一次[开始]之后，
+     * 旧单的定时任务不该继续往新批次里写事件。判据与 {@link #send} 的批次头同源。
+     *
+     * <p>概率是**链式**的而不是「付款后一定发货」：现实中会有付了不发货、发了不收的单，
+     * 页面上的待发货/待收货才不会永远往回堆。费率见
+     * {@link #JOURNEY_PAY_TO_SHIP_RATE} / {@link #JOURNEY_SHIP_TO_RECEIVE_RATE}。
+     */
+    private void journeyStep(String baseUrl, String orderId, String merchantId, int step,
+                             String batchId) {
+        if (stopRequested || batchId == null || batchId.isBlank() || !batchId.equals(currentBatch)) {
+            return;
+        }
+        String path;
+        Map<String, String> params;
+        switch (step) {
+            case 0 -> {
+                path = "/order/orderPayIfUp";
+                params = Map.of("orderId", orderId, "paymentMethod", "drill");
+            }
+            case 1 -> {
+                path = "/order/orderDeliveryIfUp";
+                params = Map.of("orderId", orderId);
+            }
+            default -> {
+                path = "/order/orderReceiveIfUp";
+                params = Map.of("orderId", orderId);
+            }
+        }
+        // 发货用**商家**票（买家票必 403）；付款/收货用本轮的买家票。
+        String token = step == 1 ? merchantTokenFor(merchantId) : currentToken;
+        Call call = new Call(path, params, true);
+        send(baseUrl, call, "journey-" + step + "-" + orderId, batchId, token)
+                .whenComplete((resp, err) -> {
+                    if (err != null || resp == null) {
+                        return;
+                    }
+                    if (classify(resp.statusCode(), resp.body()) != Outcome.PASSED) {
+                        return;
+                    }
+                    if (step == 0
+                            && ThreadLocalRandom.current().nextDouble() < JOURNEY_PAY_TO_SHIP_RATE) {
+                        scheduleJourney(baseUrl, orderId, merchantId, 1, batchId);
+                    } else if (step == 1
+                            && ThreadLocalRandom.current().nextDouble() < JOURNEY_SHIP_TO_RECEIVE_RATE) {
+                        scheduleJourney(baseUrl, orderId, merchantId, 2, batchId);
+                    }
+                });
+    }
+
+    /** 懒建定时器（见字段注释）；双层检查避免两条派发线程各建一个。 */
+    private ScheduledExecutorService journeyExecutor() {
+        ScheduledExecutorService e = journeyExecutor;
+        if (e == null) {
+            synchronized (this) {
+                e = journeyExecutor;
+                if (e == null) {
+                    e = Executors.newScheduledThreadPool(2, r -> {
+                        Thread t = new Thread(r, "drill-order-journey");
+                        t.setDaemon(true);
+                        return t;
+                    });
+                    journeyExecutor = e;
+                }
+            }
+        }
+        return e;
+    }
+
+    /** 停机时收掉定时器（守护线程不至于拦住 JVM 退出，但让生命周期有始有终）。 */
+    @PreDestroy
+    void shutdownJourney() {
+        ScheduledExecutorService e = journeyExecutor;
+        if (e != null) {
+            e.shutdownNow();
+        }
+    }
+
     // ==================== HTTP ====================
 
     /**
@@ -1374,6 +1591,26 @@ public class AttackEngine {
      * @param reqId 出站请求号（{@link #REQ_HEADER}）—— 只做出站标记，服务端不消费（见该常量注释）
      */
     private CompletableFuture<HttpResponse<String>> send(String baseUrl, Call call, String reqId) {
+        return send(baseUrl, call, reqId, currentBatch, currentToken);
+    }
+
+    private CompletableFuture<HttpResponse<String>> send(String baseUrl, Call call, String reqId,
+                                                         String batch) {
+        return send(baseUrl, call, reqId, batch, currentToken);
+    }
+
+    /**
+     * 同上，但**显式指定批次头与票**。
+     *
+     * <p>生命周期模拟的请求是 1–5 秒后才发出的：那时 {@link #currentBatch} / {@link #currentToken}
+     * 可能已经换成下一轮。若仍读字段，旧单的付款/发货会被标成新一轮的事件（账就串了）⇒ 定时任务把
+     * **排期那一刻的批次**与**这单该用的票**一路带到这里。空批次 = 不带该头（与旧行为一致）。
+     *
+     * <p>票要显式传的第二个原因见 {@link #journeyMerchantTokens}：发货必须用商家票，
+     * 而字段里那张是买家票。
+     */
+    private CompletableFuture<HttpResponse<String>> send(String baseUrl, Call call, String reqId,
+                                                         String batch, String token) {
         HttpRequest.Builder builder = HttpRequest.newBuilder(URI.create(baseUrl + call.path()))
                 // 超时第一层：**保留不动**（每请求 10 秒）。另外两层在 runPhase / drain。
                 .timeout(Duration.ofSeconds(10))
@@ -1381,14 +1618,14 @@ public class AttackEngine {
                 .header(REQ_HEADER, reqId)
                 .POST(HttpRequest.BodyPublishers.ofString(formEncode(call.params()),
                         StandardCharsets.UTF_8));
-        if (call.withToken()) {
-            builder.header(AuthTokenStore.HEADER, AuthTokenStore.BEARER + currentToken);
+        if (call.withToken() && token != null && !token.isEmpty()) {
+            builder.header(AuthTokenStore.HEADER, AuthTokenStore.BEARER + token);
         }
         // 块 7 · commit 8c：把本轮批次告诉服务端。⚠️ 它是**服务端那一半**的唯一入口 ——
         // TraceIdFilter 收到它才写进 MDC，之后这轮打出来的事件才带 batchId（见 currentBatch）。
         // ⚠️ 刻意**无条件**带（含匿名那一路）：批次是「这是演练造的」的标记，与带不带票无关。
-        if (!currentBatch.isEmpty()) {
-            builder.header(TraceIdFilter.BATCH_HEADER, currentBatch);
+        if (batch != null && !batch.isEmpty()) {
+            builder.header(TraceIdFilter.BATCH_HEADER, batch);
         }
         return http.sendAsync(builder.build(),
                 HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));

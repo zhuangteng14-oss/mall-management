@@ -83,7 +83,19 @@ public class OrderStreamService {
      *              构造期取一次会让这一整条连接永远停在「没有批次」。
      */
     public SseStreamWriter.FrameSource newFrameSource(Supplier<String> batch) {
-        return new Session(batch);
+        return newFrameSource(batch, false);
+    }
+
+    /**
+     * 同上，并指定**计数/最近订单是否走「健康业务分布」口径**
+     * （排除演练数据 + 已取消单，谓词见 {@code OrderDataScope.HEALTHY_SCOPE_SQL}）。
+     *
+     * <p>⚠️ 只过滤 {@code counts} 与 {@code orders}，**不过滤 {@code moves}**：页面上的
+     * 「剔除已取消 / 仅看真实数据」开关针对的是聚合数字与表格；实时流轨仍要看见演练单的流转
+     * （把流也藏掉，轨道就真的「死」了 —— 那正是本笔要治的病）。
+     */
+    public SseStreamWriter.FrameSource newFrameSource(Supplier<String> batch, boolean healthyOnly) {
+        return new Session(batch, healthyOnly);
     }
 
     /** 一条连接的全部可变状态（见类注释「每连接一份」）。 */
@@ -92,11 +104,29 @@ public class OrderStreamService {
         /** 本批次号（空白 = 无）。 */
         private final Supplier<String> batch;
 
-        /** 订单状态环「已读到哪」的游标；-1 = 还没读过（空环的 seq 从 0 起）。 */
-        private long lastEventSeq = -1L;
+        /** true ⇒ 计数与最近订单走健康口径（排除演练 + 已取消）；{@code moves} 不受影响。 */
+        private final boolean healthyOnly;
 
-        private Session(Supplier<String> batch) {
+        /**
+         * 订单状态环「已读到哪」的游标。
+         *
+         * <p>⚠️ <b>初值 = 本会话建立那一刻环里的最大 seq</b>（没有事件则 -1）。
+         * 旧实现固定从 -1 起，于是页面第一次连上时会把环里**最近 2048 条历史流转**一次全吐给前端 ——
+         * 刷新/切页后表现就是「数字与流轨瞬间爆一屏」，正是用户报的「造假感 / 瞬间突变」。
+         * 「本会话捕获」只应包含连上之后真正发生的事件；历史属于分析面（insight），不属于实时流。
+         */
+        private long lastEventSeq;
+
+        private Session(Supplier<String> batch, boolean healthyOnly) {
             this.batch = batch;
+            this.healthyOnly = healthyOnly;
+            long last = -1L;
+            for (OrderStateEvent e : orderMetrics.recentEvents()) {
+                if (e.seq() > last) {
+                    last = e.seq();
+                }
+            }
+            this.lastEventSeq = last;
         }
 
         /**
@@ -106,9 +136,15 @@ public class OrderStreamService {
          */
         @Override
         public Map<String, Object> frame(long tick) {
-            Map<String, Object> counts = orderDao.countOrderStates();
+            // ⚠️ false 时走**老的无参重载**（而不是 `(false)`）：老重载是既有调用方与单测的替身
+            //    唯一会打桩的方法，换成 `(false)` 会让它们静默拿到空 Map（实测：两条旧用例当场红）。
+            Map<String, Object> counts = healthyOnly
+                    ? orderDao.countOrderStates(true) : orderDao.countOrderStates();
             List<Map<String, Object>> orders = new ArrayList<>();
-            for (Map<String, Object> raw : orderDao.selectRecentOrders(RECENT_LIMIT)) {
+            List<Map<String, Object>> recent = healthyOnly
+                    ? orderDao.selectRecentOrders(RECENT_LIMIT, true)
+                    : orderDao.selectRecentOrders(RECENT_LIMIT);
+            for (Map<String, Object> raw : recent) {
                 orders.add(orderRow(raw));
             }
             List<Map<String, Object>> moves = drainMoves();

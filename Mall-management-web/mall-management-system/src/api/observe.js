@@ -40,9 +40,17 @@ export function openMetricsStream(handlers) {
   return openResilientStream(endpoints.observe.metrics, handlers)
 }
 
-/** 状态流转页流（1 秒 1 帧）。⚠️ 同上：断了会自己接回来。 */
-export function openOrderStream(handlers) {
-  return openResilientStream(endpoints.observe.orders, handlers)
+/**
+ * 状态流转页流（1 秒 1 帧）。⚠️ 同上：断了会自己接回来。
+ *
+ * @param {boolean} [healthy=false] 计数/最近订单是否走「健康业务分布」口径 ——
+ *        排除演练数据（`SIM-%` 前缀 **OR** `Source='attack'`）与已取消单。
+ *        **moves 不受影响**（流轨仍显示演练单的流转）。改值需要重连：它是连接级参数。
+ *        ⚠️ 缺省 false = 全量，压测现场先要「压迫感」；开关打开才收窄。
+ */
+export function openOrderStream(handlers, healthy = false) {
+  const path = `${endpoints.observe.orders}?healthy=${healthy ? 'true' : 'false'}`
+  return openResilientStream(path, handlers)
 }
 
 /** 实时日志页流（1 秒 1 帧）。⚠️ 同上：断了会自己接回来。 */
@@ -502,12 +510,18 @@ export function metricsHistory(limit) {
 /**
  * 状态流转页分析面（一次性 JSON）。
  *
+ * @param {boolean} [healthy=false] 是否在**聚合前**收窄到「健康业务分布」——
+ *        排除演练数据（`SIM-%` 前缀 **OR** `Source='attack'`）与已取消单。
+ *        必须由后端过滤：趋势/直方图/健康度都是聚合值，前端拿到时已经不可拆。
+ *        页面上的「剔除已取消 / 仅看真实数据」开关显式传值；缺省 false 与后端缺省一致
+ *        （全量，含压测数据）。
+ *        ⚠️ SSE 实时流**不受这个开关影响**（流轨要看见演练单真的在动）。
  * @returns {Promise<{success?:boolean, ts:number, counts:Object, trend:Object,
  *          durations:Object, aging:Object, health:Object, slowest:Array, orders:Array}>}
  *          `trend.categories` + `trend.series` 直接喂折线图；`durations.{pay,ship,receive}` 各带
  *          `bins/avgMinutes/samples`；`aging.{waitShip,waitReceive}` 各带 `bins/total/timeout`；
  *          `orders` 与 SSE 帧里的订单行**同形**（含 `dwellSeconds` / `timeout` / 时间戳）。
  */
-export function orderInsight() {
-  return postJson(endpoints.observe.ordersInsight, '')
+export function orderInsight(healthy = false) {
+  return postJson(endpoints.observe.ordersInsight, q({ healthy: healthy ? 'true' : 'false' }))
 }

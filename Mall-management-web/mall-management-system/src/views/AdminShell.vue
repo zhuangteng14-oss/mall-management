@@ -40,7 +40,9 @@
       </header>
 
       <main class="a-main">
-        <router-view v-slot="{ Component }"><keep-alive include="MetricsPanel,EventLog"><component :is="Component" /></keep-alive></router-view>
+        <!-- ⚠️ `include` 按**组件 name** 匹配（不是路由名/文件名）：`OrderFlow` 的 name 显式写在
+             它自己的第二个 `<script>` 里（Vue 3.2.13 不从文件名推断）。 -->
+        <router-view v-slot="{ Component }"><keep-alive include="MetricsPanel,EventLog,OrderFlow"><component :is="Component" /></keep-alive></router-view>
       </main>
     </div>
   </div>

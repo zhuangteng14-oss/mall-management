@@ -36,6 +36,12 @@ const props = defineProps({
   /** 内圈占比（`'58%'` 这种）。越大小洞越大 —— 洞里要放两行字时别低于 55%。 */
   innerRatio: { type: String, default: '58%' },
   outerRatio: { type: String, default: '78%' },
+  /**
+   * 最小扇区角度（度）。`0` = 按真实占比画（缺省）。
+   * ⚠️ 只在「某一态压到 95%+」时由调用方传非 0：否则正常分布会被它夸大。
+   * ECharts 会把超出 360° 的部分按比例收回来，所以它保证的是**可见性**，不是精确占比。
+   */
+  minAngle: { type: Number, default: 0 },
   showLegend: { type: Boolean, default: true },
   loading: { type: Boolean, default: false },
   error: { type: String, default: '' },
@@ -62,6 +68,8 @@ const option = computed(() => {
       {
         type: 'pie',
         radius: [props.innerRatio, props.outerRatio],
+        // 小扇区保底角度：99% 一态时，其余态仍有可见弧长（见 prop 注释）。
+        minAngle: props.minAngle,
         center: ['50%', props.showLegend ? '45%' : '50%'],
         // 扇区底色描边 / 标签字色字号 / 引导线全在主题的 `pie` 里；这里只留 formatter。
         label: { formatter: '{b} {d}%' },

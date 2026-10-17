@@ -183,6 +183,49 @@ class OrderStreamServiceTest {
                 + "先算的那条会把这条 move 读走，后开的那条页面看着像死机").hasSize(1);
     }
 
+    @Test
+    @DisplayName("⚠️ 晚连上的会话**不重放**环里的历史：只看见连上之后的流转（「瞬间爆一屏」的根因）")
+    void aLateSessionDoesNotReplayHistoricalMoves() {
+        when(orderDao.countOrderStates()).thenReturn(Map.of());
+        when(orderDao.selectRecentOrders(anyInt())).thenReturn(List.of());
+
+        // 会话建立**之前**环里已经有的那条（旧实现会把这条也吐给页面）。
+        orderMetrics.transition(OrderAction.PAY, "waitPay", "waitShip",
+                MallOrderStateMetrics.Result.APPLIED, "O-OLD", 1_500L, null);
+        SseStreamWriter.FrameSource late = service.newFrameSource(() -> "");
+        // 连上之后真的发生的那条。
+        orderMetrics.transition(OrderAction.DELIVER, "waitShip", "waitReceive",
+                MallOrderStateMetrics.Result.APPLIED, "O-NEW", 2_500L, null);
+
+        assertThat(movesOf(late.frame(0)))
+                .as("游标初值必须 = 本会话建立那一刻环里的最大 seq；固定从 -1 起会把最近 2048 条全灌进来")
+                .extracting(m -> m.get("orderId"))
+                .containsExactly("O-NEW");
+    }
+
+    @Test
+    @DisplayName("「仅看真实数据」：healthy 只换计数/最近订单的口径，**moves 仍全量**（流轨不能一起被藏掉）")
+    void healthyOnlyFiltersCountsAndOrdersButNotMoves() {
+        Map<String, Object> filtered = new LinkedHashMap<>();
+        filtered.put("waitPay", 2L);
+        filtered.put("total", 2L);
+        when(orderDao.countOrderStates(true)).thenReturn(filtered);
+        when(orderDao.selectRecentOrders(anyInt(), org.mockito.ArgumentMatchers.eq(true)))
+                .thenReturn(List.of(row("O-REAL", 0, 0, 0, null)));
+        SseStreamWriter.FrameSource filteredSession = service.newFrameSource(() -> "", true);
+        orderMetrics.transition(OrderAction.PAY, "waitPay", "waitShip",
+                MallOrderStateMetrics.Result.APPLIED, "SIM-X", 1_500L, null);
+
+        Map<String, Object> frame = filteredSession.frame(0);
+
+        assertThat(frame.get("counts")).as("计数走过滤版").isSameAs(filtered);
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> rows = (List<Map<String, Object>>) frame.get("orders");
+        assertThat(rows).extracting(o -> o.get("orderId")).containsExactly("O-REAL");
+        assertThat(movesOf(frame)).as("演练单的流转仍要在流轨里看得见")
+                .extracting(m -> m.get("orderId")).containsExactly("SIM-X");
+    }
+
     // ================= 本批次五态计数（块 7 · commit 10 · Q3 路线 i）=================
 
     @Test

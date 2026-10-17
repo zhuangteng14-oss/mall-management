@@ -64,14 +64,28 @@ public class OrderInsightService {
         this.orderDao = orderDao;
     }
 
-    /** 一拍分析面。返回的键都是页面直接消费的形状，前端不再二次聚合。 */
+    /** 一拍分析面（默认**全量**：含压测单与已取消单，与页面开关的默认态一致）。 */
     public Map<String, Object> insight() {
+        return insight(false);
+    }
+
+    /**
+     * 一拍分析面。
+     *
+     * @param healthyOnly {@code true} ⇒ 聚合前先排除演练数据（{@code SIM-%} 前缀 **OR**
+     *                    {@code Source='attack'}）与已取消单 —— 与超时取消 job / 清场端点
+     *                    共用 {@link OrderDao} 背后那一条 {@code OrderDataScope} 谓词。
+     *                    ⚠️ 过滤必须发生在**这一层**：趋势 / 耗时 / 账龄 / 健康度 / 明细
+     *                    全部由同一批行派生，前端拿到的是聚合结果、无法自己重算分母。
+     *                    实时 SSE 流**不**受这个开关影响（流轨要看见演练单真的在动）。
+     */
+    public Map<String, Object> insight(boolean healthyOnly) {
         LocalDateTime now = LocalDateTime.now(DB_ZONE);
         List<Life> rows = new ArrayList<>();
-        for (Map<String, Object> raw : orderDao.selectRecentOrders(ROW_LIMIT)) {
+        for (Map<String, Object> raw : orderDao.selectRecentOrders(ROW_LIMIT, healthyOnly)) {
             rows.add(new Life(raw));
         }
-        Map<String, Object> counts = orderDao.countOrderStates();
+        Map<String, Object> counts = orderDao.countOrderStates(healthyOnly);
 
         Map<String, Object> out = new LinkedHashMap<>();
         out.put("ts", System.currentTimeMillis());

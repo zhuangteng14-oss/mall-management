@@ -11,7 +11,7 @@
       :option="option"
       :height="height"
       :empty="!hasData"
-      empty-text="这段没有可算的时间戳"
+      empty-text="当前时间段暂无有效耗时样本"
     />
   </div>
 </template>

@@ -500,6 +500,21 @@ public class OrderDao {
      * <p>外层的 {@code COALESCE} 是给**空表**兜底：没有行的表只应回 5 个 0。
      */
     public Map<String, Object> countOrderStates() {
+        return countOrderStates(false);
+    }
+
+    /**
+     * 五态计数的**可选口径版**（2026-10-17，状态流转页「剔除已取消 / 仅看真实数据」开关）。
+     *
+     * <p>{@code healthyOnly=true} ⇒ 扫描范围先按 {@link OrderDataScope#HEALTHY_SCOPE_SQL}
+     * 收窄：排除演练数据（{@code SIM-%} 前缀 **OR** {@code Source='attack'}）**且**排除已取消单。
+     * 判据链本身**一字不动**：过滤发生在扫描范围，不参与五态判定 —— 两件事不能混
+     * （把过滤写进 CASE 会让每条分支都多一个条件，三处镜像更难对齐）。
+     *
+     * <p>⚠️ 谓词只有 {@link OrderDataScope} 一处定义：超时取消 job、状态流转页、清场端点
+     * 用**同一条**口径。前端不给这个开关传值时用无参重载（全量）。
+     */
+    public Map<String, Object> countOrderStates(boolean healthyOnly) {
         String sql = "SELECT "
                 + "COALESCE(SUM(CASE WHEN CancelledAt IS NOT NULL THEN 1 ELSE 0 END), 0) AS cancelled, "
                 + "COALESCE(SUM(CASE WHEN CancelledAt IS NULL AND ReceiveIf = 1 THEN 1 ELSE 0 END), 0) AS completed, "
@@ -507,7 +522,8 @@ public class OrderDao {
                 + "COALESCE(SUM(CASE WHEN CancelledAt IS NULL AND ReceiveIf = 0 AND DeliveryIf = 0 AND PayIf = 1 THEN 1 ELSE 0 END), 0) AS waitShip, "
                 + "COALESCE(SUM(CASE WHEN CancelledAt IS NULL AND ReceiveIf = 0 AND DeliveryIf = 0 AND PayIf = 0 THEN 1 ELSE 0 END), 0) AS waitPay, "
                 + "COUNT(*) AS total "
-                + "FROM mall_management_sql.`order`";
+                + "FROM mall_management_sql.`order`"
+                + (healthyOnly ? " WHERE " + OrderDataScope.HEALTHY_SCOPE_SQL : "");
         return jdbcClient.sql(sql).query().listOfRows().stream().findFirst().orElse(Map.of());
     }
 
@@ -527,9 +543,22 @@ public class OrderDao {
      * {@code AdminOrderService} 那套分页截断（{@code clampLimit}）不是一回事。
      */
     public List<Map<String, Object>> selectRecentOrders(int limit) {
+        return selectRecentOrders(limit, false);
+    }
+
+    /**
+     * 最近 {@code limit} 张单的**可选口径版**（2026-10-17，状态流转页「剔除已取消 / 仅看真实数据」）。
+     *
+     * <p>{@code healthyOnly=true} ⇒ 与 {@link #countOrderStates(boolean)} 用**同一条**
+     * {@link OrderDataScope#HEALTHY_SCOPE_SQL}：趋势、耗时、账龄、健康度、明细若各走一套过滤，
+     * 同一张图上的分母与点会互相打架。
+     */
+    public List<Map<String, Object>> selectRecentOrders(int limit, boolean healthyOnly) {
         String sql = "SELECT OrderId, CustomerId, MerchantId, Price, Quantity, ProductInformation, "
                 + "PayIf, DeliveryIf, ReceiveIf, CancelledAt, CreateTime, PaidAt, ShippedAt, ReceivedAt "
-                + "FROM mall_management_sql.`order` ORDER BY CreateTime DESC, OrderId DESC LIMIT ?";
+                + "FROM mall_management_sql.`order`"
+                + (healthyOnly ? " WHERE " + OrderDataScope.HEALTHY_SCOPE_SQL : "")
+                + " ORDER BY CreateTime DESC, OrderId DESC LIMIT ?";
         return jdbcClient.sql(sql).param(limit).query().listOfRows();
     }
 

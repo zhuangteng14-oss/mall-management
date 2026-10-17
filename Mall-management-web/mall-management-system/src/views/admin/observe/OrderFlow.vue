@@ -18,6 +18,17 @@
         <span>第 <b>{{ seq }}</b> 拍 · 每秒 1 拍</span>
         <span class="a-tz-off">{{ lastTickAt }}</span>
       </div>
+      <!-- 口径开关：默认全量（含压测单与已取消单 = 最真实的压迫感）；开启后收窄到
+           「健康业务分布」——排除演练数据（`SIM-%` OR `Source='attack'`）与已取消单。
+           ⚠️ 实时流轨**永不过滤**：它的职责是「看见事件真的在动」，藏掉演练单等于把流弄假。 -->
+      <label
+        class="a-of-filter"
+        title="默认全量（含压测单 / 已取消单）；开启后只保留真实、未取消的单，环形图与流转阶梯回到健康业务分布。实时流轨不受影响。"
+      >
+        <input v-model="filterHealthy" type="checkbox" role="switch" />
+        <span class="a-of-switch" aria-hidden="true"><i></i></span>
+        <span>剔除已取消 / 仅看真实数据</span>
+      </label>
       <DemoModeToggle />
     </header>
 
@@ -187,6 +198,7 @@
           <div class="a-of-flow-dist">
             <DonutChart
               :data="donutData"
+              :min-angle="donutMinAngle"
               height="196px"
               :show-legend="false"
               inner-ratio="46%"
@@ -692,7 +704,7 @@
 
 <script setup>
 /* eslint-disable no-undef */ /* 理由见 `ui/KpiCard.vue` 同款注释（eslint-plugin-vue 8.7.1 缺宏环境） */
-import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onDeactivated, onMounted, reactive, ref, watch } from 'vue'
 import { openOrderStream, orderInsight } from '../../../api/observe'
 // 演示模式（块 7 收尾 ②）：`DemoModeToggle` 摆开关，`demo` 是被 `watch` 的那个状态，
 // `openDemoStream` 是与 `openOrderStream` **同形**的假流 —— 见 `connect()` 里那处三元式。
@@ -726,6 +738,20 @@ const REPLAY_FLASH_MS = 400
 const REPLAY_RECENT_CAP = 30
 /** 计数卡数字滚动时长（《块 7 参考》§3.3 的 0.3 秒口径）。 */
 const TWEEN_MS = 300
+
+/* ── 会话状态持久化（2026-10-17「刷新不能从 0 重算」）──────────────────────────────
+   两道保险，各管一段：
+     · KeepAlive（`AdminShell.vue` 的 `include` + 本文件的 `name`）—— 路由切走再回来**不卸载**，
+       内存里的 `counts / movesById / capturedTotal / liveTail` 原样还在；
+     · sessionStorage（下面这几个函数）—— **浏览器刷新**会把内存全清掉，只能落盘再读回。
+   两者缺一不可：只有 KeepAlive 挡不住 F5，只有 sessionStorage 会在每次切页时闪一下空表。
+   ⚠️ 按数据源分键：演示流与后端真流的订单号/计数不是一套账，混存会让「切回真流」时
+      先闪一屏假数据。 */
+// v2（2026-10-17）：开关语义从「过滤演练单（默认开）」改成「剔除已取消 / 仅看真实数据
+// （默认关）」。旧 v1 快照里的 `filterTest:true` 若被读回，会反着开开关 ⇒ 直接换前缀，
+// 旧快照当不存在（它本来也只是本会话的增强项）。
+const SESSION_KEY_PREFIX = 'mall:orderFlow:v2:'
+const sessionKey = () => SESSION_KEY_PREFIX + (demo.on ? 'demo' : 'live')
 
 /** 五态（顺序 = 上方计数卡与环图的显示顺序）。键名与后端 `counts` / `state` 逐字相同。 */
 const STATES = [
@@ -885,6 +911,14 @@ const lost = ref(null)
 const seq = ref(0)
 const ts = ref(0)
 const counts = ref({})                     // 本拍五态计数（后端权威口径）
+/** 本会话捕获的流转总条数。**只增**，与 `movesById` 的淘汰/去重脱钩 ——
+ *  旧实现的 `moveTotal` 是 `movesById` 各数组长度之和，表满 1000 行后旧单被淘汰，
+ *  这个数会**往回掉**（刷新后从 0 起更是用户直接报的「历史被清零」）。 */
+const capturedTotal = ref(0)
+/** 「剔除已取消 / 仅看真实数据」开关：只作用于计数、分析面（趋势/直方图/账龄/健康度/
+ *  明细种子）与订单表；**不作用于 SSE moves** —— 流轨要看见演练单真的在动
+ *  （后端 `/stream?healthy=` 只收窄 counts/orders）。缺省 false = 全量，压测冲击先上屏。 */
+const filterHealthy = ref(false)
 const ordersById = reactive(new Map())     // orderId → 订单行（值随拍刷新）
 const orderIds = ref([])                   // orderId 的顺序（新出现的排前面；超 CAP 从尾部淘汰）
 /** 本会话捕获的流转：orderId → `[{from, to, ts}]`（时间线弹层唯一的流转来源）。
@@ -1045,12 +1079,8 @@ const lastTickAt = computed(() => (ts.value ? hms(ts.value) : '—'))
 function sumOf(c) {
   return STATES.reduce((a, s) => a + num(c && c[s.key]), 0)
 }
-/** 本会话捕获到的流转总条数。 */
-const moveTotal = computed(() => {
-  let n = 0
-  for (const arr of movesById.values()) n += arr.length
-  return n
-})
+/** 本会话捕获到的流转总条数（单调递增，见 `capturedTotal` 的注释）。 */
+const moveTotal = computed(() => capturedTotal.value)
 
 /** 计数卡的副行：「占总数几成」。分母为 0（空表）时不给数 —— 那是「还没数据」不是「0%」。 */
 function shareText(key) {
@@ -1078,6 +1108,18 @@ const donutData = computed(() => {
     value: num(counts.value[s.key]),
     itemStyle: { color: c[s.key] },
   }))
+})
+
+/**
+ * 环图最小扇区角度（2026-10-17）：压测后「已取消」常占 99%，其余四态会被挤成看不见的线。
+ * 判据 = **有至少两态非零** 且 **最大一态占比 ≥ 95%** ⇒ 给每个扇区 10° 保底。
+ * ⚠️ 正常分布时不传（0）：`minAngle` 会夸大真实占比，不能无脑常开。
+ */
+const donutMinAngle = computed(() => {
+  const vals = donutData.value.map((d) => num(d.value)).filter((v) => v > 0)
+  if (vals.length < 2) return 0
+  const sum = vals.reduce((a, b) => a + b, 0)
+  return Math.max(...vals) / sum >= 0.95 ? 10 : 0
 })
 
 /** 五态色：四个语义位取自图表色板（读的是**当前主题**的计算值），取消取中性灰。 */
@@ -1236,13 +1278,19 @@ const healthView = computed(() => insight.value?.health || {
 
 const insightAtText = computed(() => (insightAt.value ? hms(insightAt.value) : '—'))
 
-/** 拉一次分析面；不阻塞 SSE。失败时页面仍能用流里的订单行。 */
+/** 拉一次分析面；不阻塞 SSE。失败时页面仍能用流里的订单行。
+ *  ⚠️ 开关在请求途中变化时不能**静默丢掉**那一次：记一个 dirty 标记，
+ *  本次收尾后再拉一遍（否则图表会停在旧口径，直到 15 秒后的定时刷新）。 */
+let insightDirty = false
 async function loadInsight() {
-  if (insightLoading.value) return
+  if (insightLoading.value) {
+    insightDirty = true
+    return
+  }
   insightLoading.value = true
   insightError.value = ''
   try {
-    const data = await orderInsight()
+    const data = await orderInsight(filterHealthy.value)
     insight.value = data
     insightAt.value = num(data.ts) || Date.now()
     seedOrders(Array.isArray(data.orders) ? data.orders : [])
@@ -1250,6 +1298,10 @@ async function loadInsight() {
     insightError.value = (e && e.message) || '分析面加载失败'
   } finally {
     insightLoading.value = false
+    if (insightDirty) {
+      insightDirty = false
+      loadInsight()
+    }
   }
 }
 
@@ -1594,6 +1646,9 @@ function absorbMoves(moves) {
     const id = m.orderId === null || m.orderId === undefined ? '' : String(m.orderId)
     if (!id) continue
 
+    // 「本会话捕获」的累计条数：**每条到达的事件都算一次**，与时间线去重/淘汰无关。
+    capturedTotal.value += 1
+
     // ② 流轨 / QPS 的滚动窗口（与时间线分开存：流轨要的是「最近 N 条事件」，
     //    不是「每张单的全部历史」）。
     recentMoves.value = [{
@@ -1816,24 +1871,127 @@ function spawnLaneParticle(fromKey, toKey, orderId) {
   timers.add(t)
 }
 
-/** 切数据源 / 重连时把三条动画线清零，避免上一场的粒子和尾点带进下一场。 */
-function resetMotion() {
+/**
+ * 切数据源 / 重连时把三条动画线清零，避免上一场的粒子和尾点带进下一场。
+ *
+ * @param {boolean} keepTail true = **保留实时尾点**（重连用）。断线自动重连时
+ *        趋势图的滑动窗口不该整段消失 —— 那正是用户报的「切页/重连图表被清零」；
+ *        只有真的换数据源（`resetStreamHistory`）才把尾点也清掉。
+ */
+function resetMotion(keepTail = false) {
   laneParticles.value = []
-  liveTail.value = []
-  liveTailAt = 0
+  if (!keepTail) {
+    liveTail.value = []
+    liveTailAt = 0
+  }
   STATES.forEach((s) => {
     stateDeltas[s.key] = null
     statePulse[s.key] = false
   })
 }
 
-/** 切数据源时必须清掉**上一场的事件账**（流轨 / QPS / 时间线补充）。
+/** 切数据源时必须清掉**上一场的事件账**（流轨 / QPS / 累加计数 / 实时尾点）。
  *  否则「模拟日常 → 后端真流」后，假数据流转会继续挂在流轨里，直到被新事件挤出窗口；
- *  真流若一直没 move，就会永远显示上一场的假数据。 */
+ *  真流若一直没 move，就会永远显示上一场的假数据。
+ *  ⚠️ 与「刷新恢复」是两条相反的路：这里清空是因为**账本换了**，不是页面重开。 */
 function resetStreamHistory() {
   recentMoves.value = []
   movesById.clear()
+  capturedTotal.value = 0
+  liveTail.value = []
+  liveTailAt = 0
+  counts.value = {}
+  seq.value = 0
+  ts.value = 0
+  currentBatch.value = ''
+  batchCounts.value = null
   statesForQpsReset()
+}
+
+/* ── 会话快照（刷新恢复）────────────────────────────────────────────────────── */
+let saveAt = 0
+
+/** 落盘用的最小快照。⚠️ `insight.orders` 刻意剔掉：它最多 1000 行、是分析面的**种子**，
+ *  刷新后 15 秒内一定会重新拉到；为它撑爆 sessionStorage 配额反而会丢掉趋势/计数这些不可再生的。 */
+function snapshot() {
+  const moves = []
+  for (const [id, arr] of movesById) {
+    moves.push([id, arr.slice(-6)])
+    if (moves.length >= 400) break
+  }
+  return {
+    v: 1,
+    capturedTotal: capturedTotal.value,
+    seq: seq.value,
+    ts: ts.value,
+    counts: counts.value,
+    batchCounts: batchCounts.value,
+    currentBatch: currentBatch.value,
+    recentMoves: recentMoves.value.slice(0, RECENT_MOVE_CAP),
+    liveTail: liveTail.value,
+    movesById: moves,
+    filterHealthy: filterHealthy.value,
+    insight: insight.value ? { ...insight.value, orders: [] } : null,
+    insightAt: insightAt.value,
+  }
+}
+
+/** 会话快照落盘。默认节流 2 秒（1 秒 1 帧，每帧都写会把主线程耗在 JSON 上）；
+ *  `force = true` 用于 `pagehide` / KeepAlive 失活 —— 那些时刻没有「下一帧」来补写。 */
+function saveSession(force = false) {
+  const now = Date.now()
+  if (!force && now - saveAt < 2000) return
+  saveAt = now
+  try {
+    sessionStorage.setItem(sessionKey(), JSON.stringify(snapshot()))
+  } catch (e) {
+    // 隐私模式 / 配额满：持久化是增强项，不该让页面本身挂掉。
+    return
+  }
+}
+
+/**
+ * 读回上一次会话。返回是否恢复成功。
+ * ⚠️ **必须在 `watch` 注册之前调用**（见文件底部 `restoreSession()` 的位置）：
+ *     否则恢复 `filterHealthy` 会触发一次多余的重新拉取。
+ */
+function restoreSession() {
+  let p = null
+  try {
+    p = JSON.parse(sessionStorage.getItem(sessionKey()) || 'null')
+  } catch (e) {
+    p = null
+  }
+  if (!p || p.v !== 1) return false
+  capturedTotal.value = num(p.capturedTotal)
+  seq.value = num(p.seq)
+  ts.value = num(p.ts)
+  counts.value = p.counts && typeof p.counts === 'object' ? p.counts : {}
+  batchCounts.value = p.batchCounts || null
+  currentBatch.value = p.currentBatch || ''
+  recentMoves.value = Array.isArray(p.recentMoves) ? p.recentMoves.slice(0, RECENT_MOVE_CAP) : []
+  liveTail.value = Array.isArray(p.liveTail) ? p.liveTail.slice(-LIVE_TAIL_CAP) : []
+  liveTailAt = Date.now()   // 下一拍不用立刻再补一个同刻的点
+  movesById.clear()
+  if (Array.isArray(p.movesById)) {
+    for (const pair of p.movesById) {
+      if (Array.isArray(pair) && pair[0] && Array.isArray(pair[1])) {
+        movesById.set(String(pair[0]), pair[1])
+      }
+    }
+  }
+  // 缺省 false = 全量。只有快照里明确 `true` 才开启收窄。
+  filterHealthy.value = p.filterHealthy === true
+  insight.value = p.insight || null
+  insightAt.value = num(p.insightAt)
+  if (insight.value) seedOrders(Array.isArray(insight.value.orders) ? insight.value.orders : [])
+  // 数字直接落位：刷新不是「从 0 长起来」，补间会让恢复后的第一眼反而像在造假。
+  STATES.forEach((s) => {
+    target[s.key] = num(counts.value[s.key])
+    shown[s.key] = target[s.key]
+  })
+  computeQps()
+  return true
 }
 
 /* ── 收帧 ──────────────────────────────────────────────────────────────────── */
@@ -1853,6 +2011,7 @@ function onFrame(f) {
 
   STATES.forEach((s) => { target[s.key] = num(counts.value[s.key]) })
   tweenTo({ ...target })
+  saveSession()
 }
 
 function connect() {
@@ -1861,7 +2020,8 @@ function connect() {
   //    若只判 `active`，这一瞬间会先连上实时流、回放装载完再切断（白闪一帧实时数据）。
   if (replaySession.active || replaySession.loading) return
   closeStream()
-  resetMotion()
+  // 重连保留实时尾点：趋势右端不该因为一次断线而清空（换数据源另有 `resetStreamHistory`）。
+  resetMotion(true)
   errMsg.value = ''
   lost.value = null
   phase.value = 'connecting'
@@ -1884,7 +2044,9 @@ function connect() {
       errMsg.value = s.err ? ((s.err && s.err.message) || '连接中断') : ''
     },
   }
-  stream = demo.on ? openDemoStream('orders', handlers) : openOrderStream(handlers)
+  stream = demo.on
+    ? openDemoStream('orders', handlers)
+    : openOrderStream(handlers, filterHealthy.value)
 }
 
 function closeStream() {
@@ -1902,10 +2064,20 @@ function closeStream() {
   lastFlashAt.clear()
 }
 
+/** `pagehide` 是刷新/关标签页前**最后**一个可靠时机（`unload` 在移动端常不触发）。 */
+function onPageHide() {
+  saveSession(true)
+}
+
+// 刷新恢复必须早于任何 `watch` 注册（理由见 `restoreSession` 的注释）。
+restoreSession()
+
 onMounted(() => {
   // 分析面先铺满（趋势 / 直方图 / 账龄 / Top N / 表格种子行），再连 SSE。
+  // ⚠️ 恢复过快照也照拉一次：快照里的趋势可能是几分钟前的，低频刷新本就该追平。
   loadInsight()
   insightTimer = setInterval(loadInsight, 15000)
+  window.addEventListener('pagehide', onPageHide)
   // 本页可能在回放已经跑起来之后才挂载（KeepAlive 失活再回来 / 从别的页切过来）
   // ⇒ 先按 `stateChanges` 补建到当前时刻，不要再连实时流。
   if (replaySession.active) enterReplay()
@@ -1914,6 +2086,36 @@ onMounted(() => {
 // ⚠️ 切数据源（`正常` ⇄ `模拟日常`）⇒ 清掉上一场事件账 + 立刻重连（`connect()` 会先 `closeStream()`）。
 watch(() => demo.on, () => {
   resetStreamHistory()
+  connect()
+})
+/**
+ * 打开「剔除已取消 / 仅看真实数据」时，把已经在表里的不合格行摘掉：
+ * 演练单（`SIM-` 前缀）与已取消单。判定与后端 `OrderDataScope.HEALTHY_SCOPE_SQL` 对齐
+ * （订单行没有 `Source` 字段，但攻击引擎造的订单**同时**带 `SIM-` 前缀，前缀这一半就够）。
+ * ⚠️ 只动**订单表**（`orderIds` / `ordersById`），不动 `movesById` / `recentMoves`：
+ * 后者是流轨的账，本来就不过滤；删了反而会让「共捕获」与时间线对不上。
+ */
+function dropUnhealthyRows() {
+  const kept = []
+  for (const id of orderIds.value) {
+    const row = ordersById.get(id)
+    if (id.startsWith('SIM-') || (row && row.cancelled)) {
+      ordersById.delete(id)
+      if (openedId.value === id) closeTimeline()
+    } else {
+      kept.push(id)
+    }
+  }
+  orderIds.value = kept
+}
+
+// 「剔除已取消 / 仅看真实数据」：分析面重拉 + **流重连**（healthy 是连接级参数，
+// 见 `openOrderStream`）。关掉开关时不做反向补行：下一拍 SSE / 15 秒 insight 会把全量行带回来。
+// 流轨本身仍全量（`moves` 不过滤）—— 藏掉演练单不等于把轨道的动作也停掉。
+watch(filterHealthy, () => {
+  saveSession(true)
+  if (filterHealthy.value) dropUnhealthyRows()
+  loadInsight()
   connect()
 })
 // 主从筛选一变，页码回到第一页（否则筛完只剩 3 行却停在第 9 页）。
@@ -1934,13 +2136,26 @@ watch(() => replaySession.loading, (loading) => {
 watch(() => replaySession.stateChanges.length, () => {
   if (replaySession.active) syncReplayChanges(true)
 })
+// KeepAlive 失活（路由切走）时**不卸载**：落一次盘就够了，内存状态原样留着。
+onDeactivated(() => {
+  saveSession(true)
+})
 onBeforeUnmount(() => {
+  saveSession(true)
+  window.removeEventListener('pagehide', onPageHide)
   closeStream()
   if (insightTimer) {
     clearInterval(insightTimer)
     insightTimer = 0
   }
 })
+</script>
+
+<script>
+// KeepAlive 的 `include` 按**组件 name** 匹配；Vue 3.2.13 不会从文件名推断 `__name`
+// （那是 3.2.34+ 才有的行为）⇒ 必须显式声明，否则 `include="OrderFlow"` 会静默不生效：
+// 路由切走即卸载，计数与捕获数全丢。`MetricsPanel` / `EventLog` 两页同样是这么写的。
+export default { name: 'OrderFlow' }
 </script>
 
 <style scoped>
@@ -2015,6 +2230,61 @@ onBeforeUnmount(() => {
 .a-tz-off {
   font-family: var(--font-mono);
   color: var(--brand-ink);
+}
+/* 图表口径开关：与状态条同一行，不抢主数字的视觉权重。 */
+.a-of-filter {
+  position: relative;
+  align-self: center;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--fs-xs);
+  color: var(--ink-2);
+  cursor: pointer;
+  user-select: none;
+  white-space: nowrap;
+}
+/* 原生 checkbox 留作可访问/可点的那一层，视觉换成开关。 */
+.a-of-filter input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+.a-of-switch {
+  position: relative;
+  flex: none;
+  width: 34px;
+  height: 18px;
+  border-radius: 9px;
+  background: var(--line-2);
+  transition: background 160ms ease;
+}
+.a-of-switch i {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--surface);
+  box-shadow: 0 1px 2px rgb(0 0 0 / 25%);
+  transition: transform 160ms ease;
+}
+.a-of-filter input:checked + .a-of-switch {
+  background: var(--brand);
+}
+.a-of-filter input:checked + .a-of-switch i {
+  transform: translateX(16px);
+}
+.a-of-filter input:focus-visible + .a-of-switch {
+  outline: 2px solid var(--brand);
+  outline-offset: 2px;
 }
 /* 回放状态条：用琥珀色边框把它和实时状态条分开（颜色 = 「这不是实时」）。 */
 .a-status--rp {

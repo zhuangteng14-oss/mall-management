@@ -8,6 +8,7 @@ import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBody;
 
@@ -53,10 +54,16 @@ public class OrderStreamController {
      * 的响应头）—— 理由与实测见 {@link MetricsStreamController#stream}。
      */
     @PostMapping(value = "/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
-    public StreamingResponseBody stream(HttpServletResponse response) {
+    public StreamingResponseBody stream(
+            HttpServletResponse response,
+            // 2026-10-17：页面「剔除已取消 / 仅看真实数据」开关接到这里 —— 只过滤
+            // counts/orders，moves 仍全量（流轨要看见演练单在动）。缺省 false = 全量展示，
+            // 这正是压测现场要的「压迫感」。谓词与超时 job / 清场端点同源。
+            @RequestParam(value = "healthy", defaultValue = "false") boolean healthy) {
         response.setContentType(MediaType.TEXT_EVENT_STREAM_VALUE);
         response.setHeader("Cache-Control", "no-cache");
-        return writer.stream("orders", () -> orders.newFrameSource(attackEngine::currentBatch));
+        return writer.stream("orders",
+                () -> orders.newFrameSource(attackEngine::currentBatch, healthy));
     }
 
     /**
@@ -68,7 +75,11 @@ public class OrderStreamController {
      * 没有「拍」也没有重连语义。
      */
     @PostMapping("/insight")
-    public Map<String, Object> insight() {
-        return insight.insight();
+    public Map<String, Object> insight(
+            // 2026-10-17：图表聚合**默认全量**（含演练单与已取消单）—— 用户要先看见压测的
+            // 真实冲击，而不是打开页面就被「替用户洗干净」。页面上的开关显式传 true 时才走
+            // 健康口径；实时 SSE 流无论如何都原样显示演练单的流转（流轨要看见它们真的在动）。
+            @RequestParam(value = "healthy", defaultValue = "false") boolean healthy) {
+        return insight.insight(healthy);
     }
 }

@@ -4,6 +4,7 @@ import com.minke.mallmanagement.goods.dao.GoodsDao;
 import com.minke.mallmanagement.observe.metrics.StockMetrics;
 import com.minke.mallmanagement.observe.metrics.StockMetrics.Release;
 import com.minke.mallmanagement.order.dao.OrderDao;
+import com.minke.mallmanagement.order.dao.OrderDataScope;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -72,8 +73,8 @@ import java.util.Map;
  * {@code true} ⇒ **60 秒后仍在**（{@code CancelledAt} 仍为 {@code NULL}、{@code PayIf} 仍 0）。
  *
  * <p>⚠️ <b>标记有两个载体，谓词两半都认</b>（{@link #isAttackData}）：
- * ①{@code OrderId} 前缀 {@link #ATTACK_ORDER_PREFIX}（{@code SIM-}）；
- * ②{@code order.Source} 列 == {@link #ATTACK_SOURCE}（{@code attack}）。
+ * ①{@code OrderId} 前缀 {@link OrderDataScope#ATTACK_ORDER_PREFIX}（{@code SIM-}）；
+ * ②{@code order.Source} 列 == {@link OrderDataScope#ATTACK_SOURCE}（{@code attack}）。
  * <p>⚠️ <b>边界已由「边界补笔」（2026-10-14）消除</b>：本条①（{@code Source='attack'}）此前
  * **没有任何写入方** —— {@code order.Source} 列虽在（块 5 建表，{@code varchar(16) NOT NULL DEFAULT ''}），
  * 但从没有路径往里写 {@code 'attack'}（{@code seed-demo.sql} 写的是 {@code 'seed'}）⇒ 谓词里
@@ -130,18 +131,6 @@ public class OrderTimeoutCancelJob {
      */
     @Value("${mall.order.cancel.skip-attack-data:false}")
     private boolean skipAttackData;
-
-    /**
-     * 演练订单的**业务串前缀** —— 与 {@code AttackEngine.ATTACK_PREFIX} **逐字同源**
-     * （演练域不宜被订单域 import ⇒ 这里写第二份字面量，两边各留一条反向 ⚠️）。
-     */
-    static final String ATTACK_ORDER_PREFIX = "SIM-";
-
-    /**
-     * 演练写入的 {@code Source} 列值 —— 与 {@code AttackEngine.ATTACK_SOURCE} **逐字同源**
-     * （同上一行的理由）。⚠️ 这两个常量是 {@link #isAttackData} 的全部判据，别在别处再写一遍。
-     */
-    static final String ATTACK_SOURCE = "attack";
 
     public OrderTimeoutCancelJob(OrderDao orderDao, GoodsDao goodsDao, StockMetrics stockMetrics) {
         this.orderDao = orderDao;
@@ -285,30 +274,17 @@ public class OrderTimeoutCancelJob {
      * 「这行是不是演练造的」的**唯一判据**（C3 块 7 · commit B · ②）。两个载体**任一**命中即算：
      *
      * <ol>
-     *   <li>{@code OrderId} 以 {@link #ATTACK_ORDER_PREFIX}（{@code SIM-}）开头 —— 演练造单时贴的
-     *       业务串前缀（{@code AttackEngine.ATTACK_PREFIX} 同源字面量）；</li>
-     *   <li>{@code Source} 列等于 {@link #ATTACK_SOURCE}（{@code attack}，忽略大小写、前后空白已去）。</li>
+     *   <li>{@code OrderId} 以 {@link OrderDataScope#ATTACK_ORDER_PREFIX}（{@code SIM-}）开头 ——
+     *       演练造单时贴的业务串前缀；</li>
+     *   <li>{@code Source} 列等于 {@link OrderDataScope#ATTACK_SOURCE}（{@code attack}，
+     *       忽略大小写、前后空白已去）。</li>
      * </ol>
      *
-     * <p>⚠️ <b>为什么用 {@code static} 且只吃两个 {@code String}</b>：判据是**纯函数**，不碰
-     * {@code skipAttackData}（那是调用方的闸）也不碰库 —— 故能被单测直接钉边界
-     * （大小写 / 空白 / null / 只命中一半）。把闸和判据分开，是在「开关关着时谓词一次都不求值」
-     * 这件事上不留歧义。
-     *
-     * <p>⚠️ {@code source} 用 {@code trim()} 后比：列是 {@code NOT NULL DEFAULT ''} 但没人保证
-     * 写入方不回一个带空白的值；{@code equalsIgnoreCase} 而不是 {@code equals} —— 这一列没有
-     * collation 约定（{@code seed} / {@code attack} 全是手写的小写字面量），宁松不严。
-     * ⚠️ 空串 / {@code null} 都**不是**演练数据（{@code ""} 是列默认值，绝大多数行都是它）。
-     *
-     * <p>⚠️ <b>与 {@code AttackEngine.ATTACK_PREFIX} 是逐字同源的两份字面量</b>，改一边必须改另一边
-     * （两边各留了一条反向 ⚠️）—— 本类在订单域、那个类在演练域，跨域 import 一个常量比抄一行
-     * 字面量更脆（那会把两个域的编译期绑在一起）。
+     * <p>⚠️ 判据的**唯一源**已搬到 {@link OrderDataScope}（2026-10-17）：状态流转页的
+     * 「剔除已取消 / 仅看真实数据」开关要用同一条。本方法保留成薄壳，单测与既有调用点不漂移。
      */
     static boolean isAttackData(String orderId, String source) {
-        if (orderId != null && orderId.startsWith(ATTACK_ORDER_PREFIX)) {
-            return true;
-        }
-        return source != null && source.trim().equalsIgnoreCase(ATTACK_SOURCE);
+        return OrderDataScope.isAttackData(orderId, source);
     }
 
     /** {@code ResultSet} 里列的取值：{@code null} 原样返回，其余 {@code String.valueOf}（char 列已去尾空格）。 */

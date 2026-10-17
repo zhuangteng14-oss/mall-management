@@ -1,0 +1,41 @@
+OK   ① 页面挂载
+OK   ① 新连接「本会话捕获」≈0，而库内订单总数是三位数以上（历史没有被灌进实时流）  → {"captured":0,"text":"0","dbTotal":18413}
+OK   ① 连上真流（已连接）且已推进 ≥2 拍  → {"phase":"已连接","seq":3}
+OK   ① 直方图容器有固定高度（空/满都不塌成白板）  → {"h":282,"canvas":[342,226]}
+OK   ② 口径开关存在且默认关（全量展示，压测压迫感先上屏）  → {"exists":true,"checked":false,"hasSwitch":true,"label":"剔除已取消 / 仅看真实数据"}
+OK   ② 开关文案 =「剔除已取消 / 仅看真实数据」  → "剔除已取消 / 仅看真实数据"
+OK   ② 默认全量的环形图占比不算极端（max < 95% ⇒ minAngle 不启用）  → {"cancelled":13945,"completed":2031,"waitReceive":499,"waitShip":1437,"waitPay":501,"total":18413}
+OK   ② 压测请求已发出
+OK   ① 捕获数在压测期间持续增长（不是 0 或一帧爆满）  → {"first":0,"last":1979,"grown":1979}
+OK   ① 任一 600ms 窗口的增量都远小于总量（错落有致，不瞬间突变）  → {"maxStep":208,"grown":1979}
+OK   ① 五态计数出现了 ≥8 种不同组合（逐拍在变，不是截图造图）  → 14
+OK   ① 趋势实时尾窗在生长（liveTail 点数从少到多，最多 10 格）  → {"min":4,"max":10}
+OK   ① 阶梯/轨道节点数字同步在变（≥8 种组合）  → 14
+OK   ② 有光点在轨道上移动（≥10 帧拍到粒子）  → {"particleFrames":22,"maxParticles":10}
+OK   ② 流列表的 to 不再是清一色「待付款」（付款/发货/收货都出现）  → ["待发货","待收货","已完成"]
+OK   ② 截图中能读到「→ 待发货 / → 待收货 / → 已完成」的流转
+OK   ② 压测正常结束（HTTP 200，非 error）  → {"state":"done","resp":"{\"FailedRequests\":0,\"DurationMs\":24390,\"success\":true,\"ShedRequests\":432,\"AbandonedRequests\":0,\"TotalRequests\":2216,\"BlockedRequests\":1108,\"Id\":139,\"Name\":\"b7-orderflow-evidence\",\"Result\":{\"Scenarios\":[{\"Key\":\"orderBurst\",\"Name\":\"订单并发\",\"Protections\":\"出生闸 + 价格闸 + 冻结闸 + 锁 + CAS\",\"Requests\":2216,\"Passed\":1108,\"Blocked\":1108,\"Failed\":0,\"Shed\":432,\"Abandoned\":0}],\"Stock\":{\"SkuCode\":\"dddddd\",\"Before\":14,\"After\":0,\"Baseline\":null,\"Deducted\":14,\"SeckillOrders\":0},\"Markers\":{\"OrderIdPrefix\":\"SIM-\",\"Comme"}
+OK   ③ 刷新后「本会话捕获」从 sessionStorage 恢复（不是归零）  → {"capBefore":2252,"restored":{"captured":2252,"capturedText":"2,252","seq":18,"liveTail":10,"phase":"连接中"}}
+OK   ③ 刷新后趋势尾窗也恢复（liveTail 不为空）  → {"tailBefore":10,"restoredTail":10}
+OK   ③ 刷新后流重新连上并继续推进（新连接拍号从 0 起，已连接）  → {"phase":"已连接","seq":1,"restoredSeq":18}
+OK   ③ 刷新后捕获数不回退（继续只增）  → {"restored":2252,"after":2372}
+OK   ③ 切页再切回（KeepAlive/快照）捕获数不归零  → {"capA":2372,"capB":2481}
+OK   ② 开关打开：计数口径切到「健康业务分布」，总量显著收窄  → {"fullTotal":19521,"healthyTotal":221}
+OK   ② 开关打开后「已取消」不再进入计数（环形图 / 阶梯回到健康分布）  → {"fullCancelled":13945,"healthyCancelled":0}
+OK   ② 开关打开后计数里仍有在途/完成各态（不是被一刀切成空表）  → {"cancelled":0,"completed":108,"waitReceive":24,"waitShip":89,"waitPay":0,"total":221}
+OK   ③ 99% 一态时 donutMinAngle 从 0 切到 10°（其余四态仍可见）  → {"before":0,"after":10,"seriesMin":10,"nonzero":4,"values":[0,10,10,10,9970]}
+OK   ③ 主从筛选切到「待收货」  → true
+OK   ③ 点表格行打开链路抽屉  → {"opened":true,"drawerOpen":true}
+OK   ③ 按订单号搜索命中且列表收敛  → {"n":1,"ids":["ILMH17697325"],"prods":["云感记忆枕 护颈款:GD-220-2681"],"now":"1 单"}
+OK   ③ 按商品名搜索命中  → {"prod":"云感记忆枕 护颈款:GD-220-2681","n":2,"matched":true}
+OK   ③ 点击左列行只有一个「深蓝底」高亮，且右列头部同步切换  → {"ok":true,"id":"BNGK37272921","onId":"BNGK37272921","headerId":"BNGK37272921"}
+OK   ③ 待收货单的时间线：4 步齐全、前 3 步点亮、最后 1 步灰  → {"found":true,"n":4,"done":3,"future":1}
+OK   ③ 待收货单的当前节点是「发货 → 待收货」，**不是**「创建订单（待付款）」  → {"current":"发货 → 待收货","small":"当前状态"}
+OK   ③ 抽屉右列与左列选中的是同一张单  → {"id":"ILMH17697325","header":"ILMH17697325"}
+OK   ③ 清空搜索后仍可正常选中（高亮唯一）  → true
+OK   ③ 抽屉可关闭
+OK   全流程无 console.error / unhandledrejection  → []
+
+块 7 · 状态流转页重构验收（真后端）: 37 项 / 0 失败
+
+产物目录：C:/Users/86159/Desktop/软件工程/期末项目/scripts/probes/out-b7-orderflow-rework

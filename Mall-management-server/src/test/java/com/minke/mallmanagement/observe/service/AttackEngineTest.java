@@ -473,4 +473,28 @@ class AttackEngineTest {
         assertFalse(engine.progress().running(), "叫停失败不该把 progress 说成在跑");
         assertEquals(0, engine.progress().sent());
     }
+
+    // ==================== 五、订单生命周期模拟的随机延迟 ====================
+
+    /**
+     * 「1–5 秒错落有致」这条验收口径的**唯一**可单测的一半：延迟真的落在
+     * {@code [1000, 5000]}，且确实在抖动（不是常数）。
+     *
+     * <p>⚠️ 另一半（订单真的错开付款/发货）必须真跑一轮演练看 SSE 帧，单测替代不了 ——
+     * 这里只钉「延迟生成器」这个纯函数，不让它退化成 0 或固定值。
+     */
+    @Test
+    void journeyDelayIsRandomWithinOneToFiveSeconds() {
+        long min = Long.MAX_VALUE;
+        long max = Long.MIN_VALUE;
+        for (int i = 0; i < 500; i++) {
+            long d = AttackEngine.journeyDelayMs();
+            assertTrue(d >= AttackEngine.JOURNEY_MIN_DELAY_MS && d <= AttackEngine.JOURNEY_MAX_DELAY_MS,
+                    "延迟越界：" + d);
+            min = Math.min(min, d);
+            max = Math.max(max, d);
+        }
+        assertTrue(max - min > 1000,
+                "500 次抽样应覆盖明显的一段区间（实际 " + min + ".." + max + "）—— 常数延迟就是「同一帧全变」");
+    }
 }
