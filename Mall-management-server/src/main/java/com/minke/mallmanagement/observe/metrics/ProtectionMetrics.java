@@ -155,10 +155,39 @@ public class ProtectionMetrics {
         return snapshot;
     }
 
+    /**
+     * 一次<b>按秒聚合</b>的「拦下」事件（2026-10-17 · 800 QPS 日志风暴修复）。
+     *
+     * <p>入站限流拦下 800 次/秒时，逐条发事件会把 SSE 与页面一起淹没。口径拆成两条通道：
+     * <ul>
+     *   <li><b>Micrometer counter 仍按请求数累加</b>（{@code increment(count)}）——
+     *       指标口径一个字不变，Prometheus 侧仍是「被限流了多少次请求」；</li>
+     *   <li><b>事件环只写一条汇总</b>（{@code 入站限流触发：该秒内拦下 N 次请求}）——
+     *       人看的那条流只保留「这一秒被限流了」这个事实。</li>
+     * </ul>
+     * ⚠️ 本方法不记耗时（汇总事件对应的是 N 次请求，不存在单一 duration）。
+     *
+     * @param count 该秒内被拦下的请求数（必须 &gt; 0；≤ 0 直接忽略）
+     */
+    public void blockedBurst(String key, String scope, long count, String detail, String reason) {
+        if (count <= 0L) {
+            return;
+        }
+        registry.counter(EVENTS, "protection", key == null ? "-" : key, "result", Result.BLOCKED.tag)
+                .increment(count);
+        writeEvent(Result.BLOCKED.tag, key, scope, detail, null, reason);
+    }
+
     /** 追加一条事件：先计数、后入环（两条通道同点发，与既有八环同款）。 */
     private void event(String result, String key, String scope, String detail, Long durationNanos,
                        String reason) {
         registry.counter(EVENTS, "protection", key == null ? "-" : key, "result", result).increment();
+        writeEvent(result, key, scope, detail, durationNanos, reason);
+    }
+
+    /** 只写事件环、不碰 counter —— 逐条与按秒聚合两条路径共用（counter 的累加口径各自决定）。 */
+    private void writeEvent(String result, String key, String scope, String detail, Long durationNanos,
+                            String reason) {
         long seq = eventCursor.getAndIncrement();
         events[(int) (seq & EVENT_MASK)] = new ProtectionEvent(
                 seq, System.currentTimeMillis(), result,

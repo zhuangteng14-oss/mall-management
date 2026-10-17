@@ -7,6 +7,16 @@
       <header class="ev-status">
         <div class="r1">
           <span class="hl"><i class="led" :class="{ off: !mqConnected }"></i>{{ phaseText }}</span>
+          <!-- 冻结开关（2026-10-17 · 800 QPS 反压）：暂停 / 手动上滚时数据只进缓冲池，
+               列表不跳。恢复 = 把池子里最新的一截并进来 + 回到实时底部。 -->
+          <button
+            type="button"
+            class="ev-btn ev-pause"
+            :class="{ on: frozen }"
+            :title="paused ? '继续并入新事件并回到底部' : (!autoBottom ? '列表停在历史位置；点击回到最新并恢复并入' : '暂停列表更新（事件继续进缓冲池，页面不跳动）')"
+            @click="togglePause"
+          >{{ pauseLabel }}</button>
+          <span v-if="frozen" class="cnt ev-buf" :title="`缓冲池上限 ${BUF_CAP} 条；超出时丢弃最旧的（已丢 ${fmtInt(bufDropped)} 条）`">{{ frozenText }}</span>
           <!-- ⚠️ 这两个读数自 2026-10-16 起是**范围内**（受 ① 下排那个时间范围约束），
                不是「本页已收」。两者不是一个数：本页已收 {{ fmtInt(events.length) }} 条是原始窗口，
                范围内是它再按时间过一遍的结果 —— `title` 里把两个都写出来，免得读者自己猜。 -->
@@ -281,6 +291,13 @@
                 <span class="md">{{ r.md }}</span>
                 <span class="ms">
                   <b>{{ r.title }}</b>
+                  <!-- 动态聚合徽标（2026-10-17）：同 kind + title 在一拍里高频重复 ⇒ 合并成一条。
+                       点击整行进 ⑤，那里写着「已折叠 N 条」并展示最新一条的完整字段。 -->
+                  <span
+                    v-if="r.agg"
+                    class="agg-chip"
+                    :title="`同类同标题高频事件已合并 ${fmtInt(r.agg)} 条（本行展示其中最新的一条）`"
+                  >× {{ fmtInt(r.agg) }}</span>
                   <!-- A 块「自然流」：从句接在标题后（`sentence()` 按 kind 分派产出分段 token）。
                        ⚠️ 整段 `v-if` = **缺槽位就不出现**（空数组 ⇒ 连那个 8px 的外距都不占）。 -->
                   <span v-if="r.mid.length" class="se-mid"><!--
@@ -420,14 +437,22 @@
           <template v-else-if="openedEvent">
             <code class="mono">#{{ openedEvent.seq }}</code>
             <span class="kv">{{ hmsms(openedEvent.ts) }} · {{ kindLabel(openedEvent.kind) }} · {{ openedEvent.title }}</span>
-            <span class="cnt">1 条事件</span>
+            <span class="cnt">{{ openedEvent.agg ? `已折叠 ${fmtInt(openedEvent.aggCount)} 条` : '1 条事件' }}</span>
             <button type="button" class="ev-btn" @click.stop="drawerOpen = !drawerOpen">{{ drawerOpen ? '收起' : '展开' }}</button>
             <button type="button" class="ev-btn" @click.stop="closeTrace">关闭</button>
           </template>
           <span v-else class="hint">点 ③ 里任意一行 ⇒ 带 traceId 的显示那一次请求的完整链路；没有 traceId 的显示这一条自己的事件详情</span>
         </div>
         <ol v-if="drawerOpen && (openedTrace || openedEvent)" class="chain">
-          <li v-if="openedEvent" class="chain-i is-miss">
+          <li v-if="openedEvent && openedEvent.agg" class="chain-i is-miss">
+            <span class="tm">—</span>
+            <span class="d">
+              这是<b>动态聚合行</b>：同一类 + 同一标题的高频事件在 100ms 冲刷窗口内出现
+              <b>{{ fmtInt(openedEvent.aggCount) }}</b> 次，已合并为这一条。本行展示其中<b>最新的一条</b>的上下文，
+              被折叠的明细未逐条保留（保留全部会重新制造渲染雪崩）。
+            </span>
+          </li>
+          <li v-else-if="openedEvent" class="chain-i is-miss">
             <span class="tm">—</span>
             <span class="d">这条事件<b>不在请求线程上</b>（没有 traceId），没有跨事件的链路可展开；下面是它自己的全部字段。</span>
           </li>
@@ -653,13 +678,28 @@ import { orderActionLabel, orderStateLabel } from '../../../config/labels/order-
 //    两个访问器 —— 表是给人维护的，页面只认访问器（认不出回落原值的兜底就在访问器里）。
 import { apiLabel, lockLabel, cacheAreaLabel } from '../../../config/labels/api-labels'
 
-/** 本页自己累积的事件上限。⚠️ 必须有：SSE 每秒推若干条，不封顶跑一晚上就是几万条。 */
-const EVENT_CAP = 1000
+/** 本页自己累积的事件上限（2026-10-17 反压改造：1000 → 200）。
+ *  ⚠️ 必须有：SSE 每秒推若干条，不封顶跑一晚上就是几万条。
+ *  ⚠️ 这个数现在是**UI 反压的硬上限**（用户原话：Vue 的 `events` 最多只保留最近 200 条）：
+ *     超出的当场丢弃，不进 Vue 的响应式图；原始数据另有 `rawBuf` 兜底（见下方「收帧」一节）。 */
+const EVENT_CAP = 200
+
+/** 单次冲刷**安全渲染条数**（2026-10-17 用 `scripts/probes/c3b7-3a4d-backpressure.mjs` 实测）。
+ *  判据：日志页分别注入 50 / 100 / 200 条，量 Vue diff + DOM 更新与本帧 Long Task（>50ms 计数）。
+ *  实测 max tick ≈ 20–23 / 26–27 / 35–38 ms（多轮），三档 Long Task 均为 0 ⇒ 取最大档 200（也是 EVENT_CAP 上限）。
+ *  产物：docs/agent/evidence/c3-block7/3a4d-backpressure-report.txt（常量与探针输出必须一致）。
+ *  ⚠️ 它只决定**是否触发聚合**，不直接截断：batch ≤ 阈值 ⇒ 原样一条条展示。 */
+const MAX_RENDER_PER_TICK = 200
+/** 聚合的最小重复次数：同 `kind + title` 在一拍里出现 ≥2 次才合并（单条低频业务不受影响）。 */
+const AGG_MIN_COUNT = 2
+/** 聚合过程计数（**非响应式**，只给探针取证用 —— 不改视图、不占渲染路径）。
+ *  探针在真实 800 QPS 下读它，回答「聚合前多少条 / 聚合后多少条」。 */
+const aggStats = { flushes: 0, raw: 0, view: 0, lastRaw: 0, lastView: 0, aggregated: 0 }
 /** 本页自己累积的 `traces`（请求起止）上限。一次请求一行，比事件稀得多。 */
 const TRACE_CAP = 300
 /** ③ 的窗口化渲染阈值（用户 2026-10-17 性能微调）：行数 **≤** 这个值 ⇒ 全量渲染
  *  （小数据量窗口化没有收益，而且整表可见本身就是现有探针的判据）；**超过** ⇒ 只渲染
- *  视口内 + 上下各 `OVERSCAN` 行，数据侧仍保留最近 `EVENT_CAP`（1000）条。
+ *  视口内 + 上下各 `OVERSCAN` 行，数据侧仍保留最近 `EVENT_CAP`（200）条。
  *  ⚠️ 行高不固定（1 行 22/28、2 行 36.78）⇒ 用「估算 + 实测回填」，见 `rowH`。 */
 const VIRTUAL_MIN = 200
 /** 窗口上下各多渲染几行：快速滚动时先有内容，再靠下一帧实测高度修正。 */
@@ -722,8 +762,8 @@ const FACILITY_TIP = '后端面待落地：这一类在 Java 侧一个写入点�
  *  重做成窗口形态时被压掉了散文；现在同时留在 ① 本常量（= ② 栏底那行小字的 `title`）
  *  ② 本文件顶部那段注释 ③ `_work/3a3/日志页-覆盖与边界-全文.md`。 */
 const COVERAGE_FULL = [
-  '① 事件是内存里的、有界且会被覆盖：八个源环各留最近 512 条，合并环再留最近 512 条；本页自己留最近 1000 条。⇒「窗口内」是本页能看到的全部，不是历史总量。',
-  '② 首帧可能很大：冷启动时八个环可能各自攒了一屏，首帧会把合并环留得下的最后 512 条一次送出（页面按 1000 条封顶）。之后每拍只送真正新发生的（正常是个位数）。',
+  '① 事件是内存里的、有界且会被覆盖：八个源环各留最近 512 条，合并环再留最近 512 条；本页视图只留最近 200 条（100ms 批量冲刷，冻结时先进缓冲池）。⇒「窗口内」是本页能看到的全部，不是历史总量。',
+  '② 首帧可能很大：冷启动时八个环可能各自攒了一屏，首帧会把合并环留得下的最后 512 条一次送出（页面按 200 条封顶）。之后每拍只送真正新发生的（正常是个位数）。',
   '③ 规则表在后端：严重度那三档（info / warn / error）由后端 severityOf 一处判定，本页只负责把 tag 画成人话 —— 前端不重推一遍判据。',
   '④ 对象列八类不是同一种东西：锁/缓存/通知取各自的键、订单取订单号、库存取 SKU、审计取对象类型 + #Id、敏感词取命中的词、身份取请求路径（逐类口径见 config/labels/observe-labels.js 的 OBJECT_FIELD_LABEL）。',
   '⑤ 中文标签 commit 9 已全部收敛：本页 + 指标 / 状态流转 / 攻击模拟器四页的中文表只在 config/labels/ 下那一处（可观测域是本目录的 observe-labels.js）；页面只负责把后端帧里的 tag 画成人话，不重推任何判据。',
@@ -813,9 +853,38 @@ const seenSeq = new Set()
  *    否则演示源的一条事件可能挂到真流留下的同 id 记录上（两套 traceId 形状不同，
  *    真撞上的概率约等于零，但「约等于零」正是这种 bug 藏身的地方）。 */
 const tracesById = reactive(new Map())
-/** 自动滚到底：用户手动往上滚就关掉，滚回底部再打开（见 `onScroll`）。 */
-let autoBottom = true
+/** 自动滚到底：用户手动往上滚就关掉，滚回底部再打开（见 `onScroll`）。
+ *  ⚠️ 2026-10-17 起是 `ref`：模板要按它显示「已冻结」并切按钮文案（原先是普通变量，
+ *     视图层读不到它的变化）。 */
+const autoBottom = ref(true)
 const pageActive = ref(true)   // KeepAlive 失活 ⇒ 暂停 UI 刷新（数据照收，见 onFrame / 门控 watch）
+
+/* ── 数据缓冲池 + 定时冲刷（2026-10-17 · 800 QPS 渲染雪崩的架构级修复）────────────────
+   收到的帧**只进这里**，不碰任何 Vue 响应式量；每 100ms 由 `flushTimer` 一次性并入视图。
+   · `rawBuf` 是**普通数组**（非 reactive / 非 ref）—— 800 条/拍的 push 不触发任何 getter/setter。
+   · 每个源各一桶（normal / demo），与 `W` 的分源口径一致；切源不串数据。
+   · 池子封顶 `BUF_CAP`：暂停 / 上滚期间可能攒很久，不封顶就是换一处内存泄漏。
+   · 冻结（点「暂停」或手动上滚）时**只进池不入视图** —— 列表不跳、滚动位置不动。 */
+const BUF_CAP = 4096
+const FLUSH_MS = 100
+const rawBuf = {
+  normal: { events: [], traces: [], dropped: 0 },
+  demo: { events: [], traces: [], dropped: 0 },
+}
+const paused = ref(false)
+/** 当前源池子里还没并入视图的条数（冻结时给用户看见「攒了多少」）。 */
+const bufPending = ref(0)
+/** 当前源池子因超 `BUF_CAP` 丢弃的条数（冻结很久时给用户一个明确交代）。 */
+const bufDropped = ref(0)
+let flushTimer = null
+/** 冻结 = 用户点了暂停，或手动上滚去看历史（两种都不许强拉视图）。 */
+const frozen = computed(() => paused.value || !autoBottom.value)
+const frozenText = computed(() => {
+  if (!frozen.value) return ''
+  const n = bufPending.value
+  const why = paused.value ? '已暂停' : '已冻结（翻看历史）'
+  return n > 0 ? `${why} · 缓冲 ${fmtInt(n)} 条` : why
+})
 
 /* ── 小工具（本页自备：与 `OrderFlow.vue` 的口径同源，不抽公共模块）────────────── */
 const num = (v) => {
@@ -1298,7 +1367,7 @@ const filtered = computed(() => {
  * ⚠️ `events` 是「新的在前」存的，这里翻过来 —— 列表要「先发生的在最上面」，
  *    与之前的分页表**刻意相反**（那是「最新的在最上面」）。
  * ⚠️ 数据侧不再截 200 行（`ROW_MAX` 已删）：截断改在 **DOM 侧**做窗口化（见下方
- *    `VIRTUAL_MIN` / `vRows`）—— 1000 条数据都在，首屏只铺看得见的那几十行。
+ *    `VIRTUAL_MIN` / `vRows`）—— 200 条数据都在，首屏只铺看得见的那几十行。
  */
 const streamRows = computed(() => buildStream(filtered.value.slice().reverse()))
 
@@ -1309,13 +1378,23 @@ const streamRows = computed(() => buildStream(filtered.value.slice().reverse()))
      渲染后用 `.ln` 的 scrollHeight（夹到 2 行）回填 `rowH`，再重算窗口。
    · 滚动事件走 `@scroll.passive` + rAF 合帧；**不劫持滚动、不做平滑**
      （平滑滚动在日志列表里只会带来粘滞感）。
-   · 行数 ≤ `VIRTUAL_MIN` 时全量渲染 —— 小数据量下窗口化没有收益，整表可见本身就是判据。 */
+   · 行数**从未超过** `VIRTUAL_MIN` 时全量渲染 —— 小数据量下窗口化没有收益，整表可见本身就是判据。
+   · 超过后带**滞回**：降到 `VIRTUAL_OFF_BELOW` 以下才退出（见下方 `virtualOn` 与 3a4d 实测）。 */
 const rowH = new Map()          // key → 实测行高（px）；key 稳定 ⇒ 跨重渲染保留
 const vStart = ref(0)
 const vEnd = ref(40)   // ⚠️ 首帧只铺 40 行（不是 200）：首次进页铺满 200 行时，仅 Layout 就实测 >100ms
 let winRaf = 0
 
-const virtualOn = computed(() => streamRows.value.length > VIRTUAL_MIN)
+/** 窗口化开关带**滞回**：升到 `VIRTUAL_MIN` 以上才开，降到 `VIRTUAL_OFF_BELOW` 以下才关。
+ *  ⚠️ 2026-10-17 800 QPS 实测：`EVENT_CAP` 200 + trace 脚手架行进出，让行数在 200~204 间抖动；
+ *     开关每翻一次「关」，就把 200 行真实字段一次性挂载 —— 实测 68ms Long Task（探针 3a4d）。
+ *     ⇒ 关闭阈值留 100 行余量：只要行数没真正掉下来，就一直保持窗口化、不重挂整表。 */
+const VIRTUAL_OFF_BELOW = VIRTUAL_MIN - 100
+const virtualOn = ref(false)
+watch(() => streamRows.value.length, (n) => {
+  if (!virtualOn.value && n > VIRTUAL_MIN) virtualOn.value = true
+  else if (virtualOn.value && n < VIRTUAL_OFF_BELOW) virtualOn.value = false
+}, { immediate: true })
 /** 前缀和：`off[i]` = 第 i 行上边缘。每次行数 / 实测高变化重算（≤1000 行，成本可忽略）。 */
 const rowOffsets = computed(() => {
   const rows = streamRows.value
@@ -1384,7 +1463,7 @@ function scheduleWindow() {
   })
 }
 watch(() => (pageActive.value ? streamRows.value : null), () => nextTick(() => {
-  if (autoBottom) scrollBottom()
+  if (autoBottom.value) scrollBottom()
   updateWindow()
   scheduleWindow()
 }))
@@ -1508,6 +1587,8 @@ function makeRow(mk, rail, gl, depth) {
       t: hmsms(e.ts), lv: { info: 'INFO', warn: 'WARN', error: 'ERROR' }[e.severity] || '',
       md: kindLabel(e.kind),
       title: e.title, detail: e.detail, obj: objText(e), objId: String(e.objectId || ''),
+      // 动态聚合行：`agg` = 合并了多少条同类（0 = 普通单条）。③ 的 `× N` 徽标读它。
+      agg: e.agg ? num(e.aggCount) : 0,
       fields: firstLayerFields(e), act: actorText(e), src: srcOf(e), rawDetail: '',
       mid: sent.mid, ctx: sent.ctx,
       cls: `lv-${e.severity.slice(0, 1)}`,
@@ -1606,6 +1687,15 @@ function resetFilters() {
 }
 function openTrace(r) {
   if (!r) return
+  // 动态聚合行：它代表 N 条同类事件（成员来自不同请求），打开「事件详情」而不是某一条链路 ——
+  // 拿最新成员的 traceId 去开链路会冒充「其余 N-1 条也属于这次请求」。
+  if (r.event && r.event.agg) {
+    if (openedEvent.value && openedEvent.value.seq === r.event.seq) { drawerOpen.value = !drawerOpen.value; return }
+    openedTrace.value = ''
+    openedEvent.value = r.event
+    drawerOpen.value = true
+    return
+  }
   if (r.traceId) {
     openedEvent.value = null
     if (openedTrace.value === r.traceId) { drawerOpen.value = !drawerOpen.value; return }
@@ -1631,18 +1721,71 @@ function closeTrace() {
 function onScroll() {
   const el = listEl.value
   if (!el) return
-  autoBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 24
+  autoBottom.value = el.scrollHeight - el.scrollTop - el.clientHeight < 24
   // 窗口化：只改「渲染哪一段」，不碰 scrollTop —— 滚动始终由浏览器原生处理。
   scheduleWindow()
 }
 function scrollBottom() {
   const el = listEl.value
-  if (el && autoBottom) el.scrollTop = el.scrollHeight
+  if (el && autoBottom.value) el.scrollTop = el.scrollHeight
 }
 
 /* ── 收帧 ──────────────────────────────────────────────────────────────────── */
+
+/** 把一拍的 `seq` 集合从去重表里摘掉（聚合行带着整组成员的 seq，见 `aggregateEvents`）。 */
+function forgetSeqs(e) {
+  if (e.seqs) {
+    for (const s of e.seqs) seenSeq.delete(s)
+  } else {
+    seenSeq.delete(e.seq)
+  }
+}
+
 /**
- * 收一拍的 `events`：去重（按 `seq`）→ 本拍内按 `ts`/`seq` **倒序** → 整批**前插** → 封顶。
+ * 动态同类聚合（2026-10-17 · 企业级背压）：只在**单拍超过渲染安全阈值**时启用。
+ *
+ * <p>分组键 = `kind + title`（「不同类分开」：缓存 / 锁 / 订单 / 库存各自一组，标题也不同组）。
+ * 同组 ≥ {@link AGG_MIN_COUNT} 次合并成一条：
+ * · 展示用**最新的一条**（`ts` 最大、同刻取 `seq` 最大）的全部上下文；
+ * · 附 `aggCount`（UI 上的 `× N` 徽标）与 `seqs`（去重表淘汰时用，见 `forgetSeqs`）；
+ * · `count === 1` 的组**原样保留** —— 低频业务事件（比如某一次锁超时）不会被并掉。
+ *
+ * <p>⚠️ 聚合发生在**去重之后**，所以每个成员 seq 都已进 `seenSeq`；`seqs` 必须带着它们，
+ * 否则聚合行被 200 条窗口挤出去时那些 seq 会永久留在集合里（内存泄漏）。
+ */
+function aggregateEvents(list) {
+  const groups = new Map()
+  for (const e of list) {
+    const k = `${e.kind}\u0000${e.title || ''}`
+    let g = groups.get(k)
+    if (!g) {
+      g = { latest: e, count: 0, seqs: [] }
+      groups.set(k, g)
+    }
+    g.count += 1
+    g.seqs.push(e.seq)
+    if (e.ts > g.latest.ts || (e.ts === g.latest.ts && e.seq > g.latest.seq)) g.latest = e
+  }
+  const out = []
+  for (const g of groups.values()) {
+    if (g.count < AGG_MIN_COUNT) {
+      out.push(g.latest)
+      continue
+    }
+    out.push({
+      ...g.latest,
+      agg: true,          // 展示层：行右侧 `× N` 徽标 + 点击进「已折叠」详情
+      aggCount: g.count,
+      seqs: g.seqs,       // 淘汰时统一清去重表（见 forgetSeqs）
+    })
+  }
+  out.sort((a, b) => b.ts - a.ts || b.seq - a.seq)
+  return out
+}
+
+/**
+ * 收一拍的 `events`：去重（按 `seq`）→ 本拍内按 `ts`/`seq` **倒序**
+ * →（单拍超阈值时）同类聚合 → 整批**前插** → 封顶。
  * ⚠️ 存储是「新的在前」（列表渲染时翻成时间正序，见 `streamRows`）。
  * ⚠️ 「整批前插、不全局重排」是刻意的：后端一拍内的事件是**按环分组**的（`poll()` 一环一环并），
  *    照 `ts` 做全局重排会让用户正在看的行在两拍之间跳走。本拍内部排一次，正是为了把那个
@@ -1694,13 +1837,29 @@ function absorbEvents(batch, src) {
   }
   if (!fresh.length) return
   fresh.sort((a, b) => b.ts - a.ts || b.seq - a.seq)
+  // 动态背压：单拍超过实测的渲染安全阈值 ⇒ 同类同标题合并；否则**原样一条条展示**。
+  // ⚠️ 聚合后仍可能超过 EVENT_CAP（全部是不同类且各出现一次时），下一步照旧封顶。
+  const next = fresh.length > MAX_RENDER_PER_TICK ? aggregateEvents(fresh) : fresh
+  aggStats.flushes += 1
+  aggStats.lastRaw = fresh.length
+  aggStats.lastView = next.length
+  aggStats.raw += fresh.length
+  aggStats.view += next.length
+  if (next.length < fresh.length) aggStats.aggregated += fresh.length - next.length
+  // ⚠️ 本拍自己就可能超过 `EVENT_CAP`（800 QPS 的一拍 ≈ 800 条，合并环冷启动一拍最多 2,048 条）。
+  //    只夹旧数据不夹新数据的话，`next.concat(kept)` 仍会把整拍铺进响应式图 —— 上限形同虚设。
+  //    排序是「新在前」⇒ 留下前 `EVENT_CAP` 条（最新的），多出来的当场丢弃。
+  if (next.length > EVENT_CAP) {
+    for (const d of next.slice(EVENT_CAP)) forgetSeqs(d)
+    next.length = EVENT_CAP
+  }
   // 封顶：丢掉的是**最早**的那些（数组尾部）。同时把它们的 seq 从去重集里摘掉 ——
   // ⚠️ 不摘的话这个 Set 会随会话无界增长（它是本页唯一不封顶的东西）。
-  const kept = W[src].events.slice(0, Math.max(0, EVENT_CAP - fresh.length))
-  const dropped = W[src].events.slice(Math.max(0, EVENT_CAP - fresh.length))
-  W[src].events = fresh.concat(kept)
+  const kept = W[src].events.slice(0, Math.max(0, EVENT_CAP - next.length))
+  const dropped = W[src].events.slice(Math.max(0, EVENT_CAP - next.length))
+  W[src].events = next.concat(kept)
   W[src].dropped += dropped.length
-  for (const d of dropped) seenSeq.delete(d.seq)
+  for (const d of dropped) forgetSeqs(d)
 }
 
 /** 收一拍的 `traces`：按 traceId 更新索引 + 前插列表（同一次请求只会出现在一拍里）。
@@ -1737,6 +1896,74 @@ function absorbTraces(batch, src) {
   }
 }
 
+/* ── 缓冲池：入池 / 冲刷 ─────────────────────────────────────────────────────────
+   ⚠️ 入池必须是**同步、无响应式**的（帧一到就 push 完就走）；所有对象化 / 排序 / 响应式
+      赋值都推迟到 `flushBuffer()`，这样 800 条/拍只换一次视图更新，而不是 800 次。 */
+function pushBuffer(batch, src, key) {
+  if (!batch.length) return
+  const b = rawBuf[src]
+  b[key].push(...batch)
+  const over = b[key].length - BUF_CAP
+  if (over > 0) {
+    // 冻结太久时丢**最旧**的：反压的本意是「跟不上的旧数据不要拖垮页面」，
+    // 保留最新的一截才能让用户恢复时看到当前正在发生什么。
+    b[key].splice(0, over)
+    b.dropped += over
+  }
+}
+
+/** 100ms 一次：把当前源池子里的数据一次性并入视图。
+ *  ⚠️ `frozen` 时**直接返回**（只入池）：暂停 / 手动上滚时不许改 `events`，
+ *     否则列表会继续长高、把用户正在看的位置顶走。 */
+function flushBuffer() {
+  if (!pageActive.value || frozen.value) return
+  const src = cur.value
+  const b = rawBuf[src]
+  if (!b.events.length && !b.traces.length) return
+  const ev = b.events.splice(0, b.events.length)
+  const tr = b.traces.splice(0, b.traces.length)
+  absorbEvents(ev, src)
+  absorbTraces(tr, src)
+  bufPending.value = b.events.length
+  nextTick(scrollBottom)
+}
+
+/** 切源 / 重连前的兜底：两桶都并入各自的视图（**不受冻结约束**）。
+ *  ⚠️ 不这么做的话，切源那一刻池子里还没冲刷的几十条会留在旧桶里，
+ *     用户切回来时看到的是「缺了一截」的列表。 */
+function flushAllBuffers() {
+  for (const src of ['normal', 'demo']) {
+    const b = rawBuf[src]
+    if (!b.events.length && !b.traces.length) continue
+    absorbEvents(b.events.splice(0, b.events.length), src)
+    absorbTraces(b.traces.splice(0, b.traces.length), src)
+  }
+  bufPending.value = rawBuf[cur.value].events.length
+}
+
+function startFlush() {
+  if (!flushTimer) flushTimer = setInterval(flushBuffer, FLUSH_MS)
+}
+function stopFlush() {
+  if (flushTimer) { clearInterval(flushTimer); flushTimer = null }
+}
+
+/** 暂停 / 回到底部（一枚按钮两种语义，按当前状态取）。
+ *  ⚠️ 恢复时先 `autoBottom=true` 并把池子里的最新数据并进来，再滚到底 ——
+ *     这样用户看到的是「跳回现在」，而不是恢复到一段已经过时的画面。 */
+function togglePause() {
+  // 正常态（在实时底部）⇒ 点它就暂停；其余两种（已暂停 / 上滚冻结）⇒ 都是恢复实时。
+  if (!paused.value && autoBottom.value) {
+    paused.value = true
+    return
+  }
+  paused.value = false
+  autoBottom.value = true
+  // 冲刷自己会在 DOM 更新后 `nextTick(scrollBottom)` —— 这里不要再提前滚一次（滚的是旧高度）。
+  nextTick(flushBuffer)
+}
+const pauseLabel = computed(() => (paused.value ? '继续' : (!autoBottom.value ? '回到底部' : '暂停')))
+
 /** 收一拍。⚠️ `src` 由 `connect()` 在**建这条流的那一刻**定死（不是在这里读 `demo.on`）：
  *  帧回来时用户可能已经切走了，读 `demo.on` 会把旧流的帧记到新源头上。 */
 function onFrame(f, src) {
@@ -1748,21 +1975,27 @@ function onFrame(f, src) {
   const tr = Array.isArray(f.traces) ? f.traces : []
   W[src].freshE = ev.length
   W[src].freshT = tr.length
-  absorbEvents(ev, src)
-  absorbTraces(tr, src)
+  // 关键：帧只入**非响应式**缓冲池。`W[src].events` 由 100ms 的 `flushBuffer()` 批量改写。
+  pushBuffer(ev, src, 'events')
+  pushBuffer(tr, src, 'traces')
   // ① 折线：本页自攒（帧只有本拍一个数，画不出线）。按源各攒一条。
+  //    ⚠️ 这是每帧一次的小更新（1 拍/秒），不是每事件一次 —— 留在收帧路径上无妨。
   W[src].series = W[src].series.concat([num(f.rate)]).slice(-RATE_CAP)
-  // ③ 自动到底：等 DOM 铺完再滚，不然滚的是旧高度。
-  // ⚠️ 只在**当前源**的帧上滚：另一条流的帧回来时不该动现在这一屏的滚动位置。
-  if (src === cur.value && pageActive.value) nextTick(scrollBottom)
+  if (src === cur.value) {
+    bufPending.value = rawBuf[src].events.length
+    bufDropped.value = rawBuf[src].dropped
+  }
 }
 
 function connect() {
+  // 切源 / 重连前：把两桶池子里还没并的数据落进各自的视图（否则切走那一刻会少一截）。
+  flushAllBuffers()
   closeStream()
   errMsg.value = ''
   lost.value = null
   phase.value = 'connecting'
-  autoBottom = true
+  autoBottom.value = true
+  paused.value = false
   // ⚠️ `openEventStream` 是**带自动重连**的那一层（`onEnd` → `onLost`）：`onLost` **每次**断开
   //    都报，含「服务端正常收尾」那一格 —— 这是断线条要治的那一格。
   // ⚠️ 演示模式：**只换数据源这一处**，三个回调两边共用。演示帧的 `mq` 一律 `false` ⇒ 黄条会亮，
@@ -1797,13 +2030,22 @@ function closeStream() {
 let tickTimer = null   // 每秒推一次 nowMs：近 5 分 / 近 30 分的滑动窗口靠它
 onMounted(() => {
   connect()
+  startFlush()
   tickTimer = setInterval(() => { nowMs.value = Date.now() }, 1000)
 })
 // ⚠️ 切数据源（`正常` ⇄ `模拟日常`）⇒ 立刻重连；**切源 = 隔离不是清空**（两桶各留、显示只取 `cur`）。
 //    去重集合 `seenSeq` 跨源共用（不封顶）；两套 seq 必须不重叠，由 demo-stream 的高位 `evSeq` 保证。
-onDeactivated(() => { pageActive.value = false; clearInterval(tickTimer); tickTimer = null })
+onDeactivated(() => {
+  pageActive.value = false
+  stopFlush()          // 页面不可见 ⇒ 连 100ms 冲刷也停（数据仍进池）
+  clearInterval(tickTimer); tickTimer = null
+})
 onActivated(() => {
-  pageActive.value = true; nowMs.value = Date.now(); clearInterval(tickTimer); tickTimer = setInterval(() => { nowMs.value = Date.now() }, 1000); nextTick(() => { if (autoBottom) scrollBottom(); updateWindow(); scheduleWindow() })
+  pageActive.value = true; nowMs.value = Date.now()
+  startFlush()
+  clearInterval(tickTimer); tickTimer = setInterval(() => { nowMs.value = Date.now() }, 1000)
+  flushBuffer()        // 把失活期间攒下的最新一截补上（冻结状态下 flushBuffer 自己会跳过）
+  nextTick(() => { if (autoBottom.value) scrollBottom(); updateWindow(); scheduleWindow() })
 })
 watch(() => demo.on, connect)
 // ⚠️ 切源要**关掉抽屉**：`openedTrace` 指向的是另一桶里的某一组，留着会把「上一源的链路」
@@ -1811,6 +2053,7 @@ watch(() => demo.on, connect)
 watch(cur, closeTrace)
 onBeforeUnmount(() => {
   closeStream()
+  stopFlush()
   if (tickTimer) clearInterval(tickTimer)
   if (winRaf) cancelAnimationFrame(winRaf)
   clearTimeout(exportNoteTimer)
@@ -2125,6 +2368,19 @@ onBeforeUnmount(() => {
 .ev-btn[disabled] {
   color: var(--ink-3);
   cursor: not-allowed;
+}
+/* 状态条里的冻结按钮（2026-10-17 · 反压）：`flex: none` —— 读数格可压，这枚不可压。 */
+.ev-status .ev-pause {
+  flex: 0 0 auto;
+  line-height: 18px;
+}
+.ev-status .ev-pause.on {
+  color: var(--warning);
+  border-color: var(--warning);
+  background: var(--warning-ground);
+}
+.ev-status .ev-buf {
+  color: var(--warning);
 }
 
 /* ── 中段：三栏（甲）────────────────────────────────────────────────────────── */
@@ -2687,6 +2943,22 @@ onBeforeUnmount(() => {
 .log-line .ms b {
   font-weight: var(--fw-semi);
   color: var(--ink);
+}
+/* 动态聚合徽标（2026-10-17）：紧跟在标题后，`× 500` 一眼能看出这行代表一批。
+   ⚠️ `margin-left` 显式给（Vue 会压掉模板换行空白，同下面 `.ob` 那条按语）；
+   `inline-block` + 小圆角让它像一枚 Chip，而不是标题的一部分。 */
+.log-line .ms .agg-chip {
+  display: inline-block;
+  margin-left: var(--s2);
+  padding: 0 5px;
+  border-radius: 999px;
+  font-size: var(--fs-xs);
+  line-height: 16px;
+  font-variant-numeric: tabular-nums;
+  color: var(--warning);
+  background: var(--warning-ground);
+  border: 1px solid var(--warning);
+  vertical-align: 1px;
 }
 .log-line .ms .ob {
   /* ⚠️ `margin-left` 必须显式给：模板里 `<b>` 与 `<span class="ob">` 之间的空白是**换行**，

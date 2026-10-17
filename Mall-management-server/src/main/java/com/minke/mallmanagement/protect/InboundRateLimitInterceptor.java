@@ -10,6 +10,11 @@ import org.springframework.web.servlet.HandlerInterceptor;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * <b>入站限流闸</b>（D 段 · commit 2 · 裁定「限流 = 入站闸」）—— 全站第一个、也是唯一一个
@@ -82,14 +87,76 @@ public class InboundRateLimitInterceptor implements HandlerInterceptor {
 
     private static final AntPathMatcher MATCHER = new AntPathMatcher();
 
+    /** 聚合窗口（毫秒）：窗口边界由 `startAggregator()` 的定时器推进，不受是否有流量影响。 */
+    static final long AGGREGATE_PERIOD_MS = 1000L;
+
     private final RateLimiter limiter;
     private final ProtectionGate gate;
     private final ProtectionMetrics metrics;
+
+    /** 本窗口内被拦下的请求数（请求线程只做一次原子自增；代价与逐条发事件无关）。 */
+    private final AtomicLong blockedInWindow = new AtomicLong();
+    /** 本窗口第一条被拦请求的「方法与路径」—— 汇总事件里带一个示例，排查时能定位到面。 */
+    private final AtomicReference<String> blockedSample = new AtomicReference<>();
+    /** 聚合定时器：由装配方在构造完成后调 {@link #startAggregator()} 启动（不在构造器里启动线程）。 */
+    private ScheduledExecutorService aggregator;
 
     public InboundRateLimitInterceptor(RateLimiter limiter, ProtectionGate gate, ProtectionMetrics metrics) {
         this.limiter = limiter;
         this.gate = gate;
         this.metrics = metrics;
+    }
+
+    /**
+     * 启动按秒聚合的定时器（幂等；未接闸时什么都不做）。
+     *
+     * <p>⚠️ <b>刻意不在构造器里起线程</b>：构造器里 `this` 逃逸到新线程是典型的可见性坑，
+     * 而且单测会造一堆拦截器。装配点（{@code ProtectConfig}）在 `new` 完成之后调本方法。
+     */
+    public synchronized void startAggregator() {
+        if (aggregator != null || limiter == null) {
+            return;
+        }
+        aggregator = Executors.newSingleThreadScheduledExecutor(r -> {
+            Thread t = new Thread(r, "inbound-rate-limit-aggregate");
+            t.setDaemon(true);   // 容器没走到 close() 时也不拖住 JVM（同 EventPersistPoller 的口径）
+            return t;
+        });
+        aggregator.scheduleAtFixedRate(this::flushAggregate,
+                AGGREGATE_PERIOD_MS, AGGREGATE_PERIOD_MS, TimeUnit.MILLISECONDS);
+    }
+
+    /** 停聚合线程：先补发最后一个窗口，再关（正常关容器时调用）。 */
+    public synchronized void close() {
+        if (aggregator == null) {
+            return;
+        }
+        flushAggregate();
+        aggregator.shutdownNow();
+        aggregator = null;
+    }
+
+    /**
+     * 把当前窗口的计数发成<b>一条</b>汇总事件。
+     *
+     * <p>⚠️ <b>两条通道分开</b>（用户 2026-10-17 原话「不要每次被限流都发一条事件」）：
+     * Micrometer counter 仍累加本窗口的请求数，事件环只写一条
+     * `入站限流触发：该秒内拦下 N 次请求`。这样指标口径不变，日志不再被刷屏。
+     *
+     * <p>包级可见是为了单测能<b>确定性</b>地触发一次冲刷，不必真的 sleep 1 秒。
+     */
+    void flushAggregate() {
+        long count = blockedInWindow.getAndSet(0L);
+        String sample = blockedSample.getAndSet(null);
+        if (count <= 0L || metrics == null) {
+            return;
+        }
+        int limit = limiter.getRateLimiterConfig().getLimitForPeriod();
+        String detail = "入站限流触发：该秒内拦下 " + count + " 次请求"
+                + (sample == null ? "" : "（示例 " + sample + "，limitForPeriod=" + limit + "）");
+        metrics.blockedBurst("rateLimit", "inbound", count, detail,
+                // 原因与逐条时同一句：阈值取自 limiter 配置，不重抄字面量
+                "入站限流：未取得令牌（limitForPeriod=" + limit + "）");
     }
 
     /** 本闸是不是真的接着闸（三个依赖齐备）。给启动日志与测试用。 */
@@ -117,23 +184,15 @@ public class InboundRateLimitInterceptor implements HandlerInterceptor {
         //    本仓把它配成 **0**（见 `ProtectConfig`）⇒ 等价于「不等、当场答」，正是本闸要的。
         //    ⚠️ 换句话说：**「不排队」这件事由 timeoutDuration=0 保证，不由方法名保证**。
         //    谁要是哪天把那个 0 改成非 0，这里就会开始让 Tomcat 工作线程睡在闸上。
-        // 块 7 · 阶段 3a.3：耗时起 = **闸口处**（不是 preHandle 入口）。⚠️ 方案写的是「拦截入口」，
-        // 这里收窄到闸口，两条理由：① 通过路径**不发事件** ⇒ 把 t0 提到方法入口等于给全量请求
-        // 白付一次 nanoTime；② 方法入口那几行含 exempt(path) 的 AntPathMatcher 匹配（微秒级、
-        // 与「闸拦了多久」无关），包进来只会稀释这个数。量的是**取令牌这一步**（timeoutDuration=0 ⇒ 当场答）
-        long startedNanos = System.nanoTime();
         if (limiter.acquirePermission()) {
             return true;
         }
-        if (metrics != null) {
-            metrics.blocked("rateLimit", "inbound",
-                    "method=" + request.getMethod() + " path=" + path
-                            + " limiter=" + limiter.getName() + " limitForPeriod=" + limiter.getRateLimiterConfig().getLimitForPeriod(),
-                    System.nanoTime() - startedNanos,
-                    // 块 7 · 阶段 3a.3 后续：拦下的人话原因（阈值同样取自 limiter 配置，不重抄字面量）
-                    "入站限流：未取得令牌（limitForPeriod="
-                            + limiter.getRateLimiterConfig().getLimitForPeriod() + "）");
-        }
+        // 块 7 · 2026-10-17：**不再逐条发事件**（800 QPS 时那是一秒 600+ 条 WARN，把 SSE 与页面
+        // 一起淹没）。这里只做两次原子操作；真正的发事件在每秒一次的 `flushAggregate()` 里，
+        // 一次汇总写一条：`入站限流触发：该秒内拦下 N 次请求`。
+        // ⚠️ Micrometer counter 不变：`blockedBurst` 仍按请求数累加，指标口径与改造前一致。
+        blockedInWindow.incrementAndGet();
+        blockedSample.compareAndSet(null, "method=" + request.getMethod() + " path=" + path);
         writeTooManyRequests(response, limiter.getRateLimiterConfig().getLimitForPeriod(),
                 limiter.getRateLimiterConfig().getLimitRefreshPeriod().toSeconds());
         return false;

@@ -90,11 +90,20 @@ public class ProtectConfig implements WebMvcConfigurer {
                         .build())
                 : null;
         this.interceptor = new InboundRateLimitInterceptor(limiter, gate, metrics);
+        // 构造完成后再起聚合线程（不在拦截器构造器里起线程，理由见 startAggregator 的注释）。
+        // 闸未接（limiter == null）时本方法空转。
+        this.interceptor.startAggregator();
         // 启动期取证口（惯例同 app.auth.enabled / app.lock.*）：闸开没开、阈值多少、豁免哪几条，
         // 都从这一行读。ASCII 片段 "PROTECT" 供 GBK 检索。
         log.info("[PROTECT] 入站限流闸已装配（PROTECT）：enabled={} 生效={} 阈值={}/{}s 豁免 {} 条 {}",
                 enabled, interceptor.armed(), LIMIT_FOR_PERIOD, REFRESH_PERIOD.toSeconds(),
                 InboundRateLimitInterceptor.EXEMPT_PATHS.size(), InboundRateLimitInterceptor.EXEMPT_PATHS);
+    }
+
+    /** 关容器时停掉按秒聚合线程（并补发最后一个窗口）—— 它不在 Spring 调度器上，得自己收。 */
+    @jakarta.annotation.PreDestroy
+    void stopInboundAggregator() {
+        interceptor.close();
     }
 
     /** 挂到 {@code /**}（与 {@code AuthInterceptor} 同一形状；白名单在拦截器内部判，不走 exclude）。 */

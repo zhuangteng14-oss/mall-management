@@ -11,8 +11,11 @@ import org.springframework.amqp.rabbit.core.RabbitTemplate;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
+import java.util.concurrent.ArrayBlockingQueue;
+import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * {@link EventPublisher} 的 RabbitMQ 实现（块 7 · commit 8c）—— **永不抛、不阻塞调用方超过一次
@@ -34,6 +37,18 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * ⚠️ 如实登记的**残留窗口**：MQ 掉线后的头 5 秒（探测还没跑到）里，逐条 {@code publish}
  * 会各自阻塞至多一个 connection-timeout。要彻底消除它得把发布也搬到独立线程（引入队列与
  * 顺序问题），本笔不走那一步 —— 批文要的是 fail-soft，不是「发布异步化」。
+ *
+ * <h2>【2026-10-17 订正：发布**已**异步化（上面那条「不走那一步」作废）】</h2>
+ * 800 QPS 实测暴露了同步发布的第二个代价，比「掉线头 5 秒」严重得多：发布跑在
+ * {@code EventBroadcaster#add} 里，而 {@code add} 只在 {@code synchronized poll()} 的临界区内
+ * 被调用 ⇒ 每秒 800 条 {@code convertAndSend} 把 <b>broadcaster 的锁</b>占住约 5 秒，
+ * 于是 {@code /events/stream} 的帧线程卡在同一个锁上：实测帧间隔从 1 秒变成 5~8 秒，
+ * 页面上「看起来不更新」（探针产物 {@code 3a4d-backpressure-report.txt} 首跑即此现象）。
+ * 这不是「页面渲染慢」，是**数据根本没到页面**。
+ * ⇒ 现在 {@link #publish} 只做一次 {@code offer}（非阻塞），由单条守护线程
+ * {@code observe-mq-publish} 按队列顺序逐条发；队列有界（{@value #PUBLISH_QUEUE_CAPACITY}），
+ * 满了就丢并计数 —— 与 {@link EventPublisher} 的「不保证送达」契约一致，**页面优先**。
+ * 顺序由单线程 + FIFO 保持；连接探测与发布仍是两条线程，互不阻塞。
  *
  * <h2>【{@code connected()} 是「实测」，不是「我刚才发成功过」】</h2>
  * 它由 {@link #probe} 用 {@code channel.isOpen()} 主动问 broker（拿连接、开通道、看它开不开），
@@ -67,6 +82,19 @@ public class RabbitEventPublisher implements EventPublisher {
 
     /** 实测间隔。5 秒 = 「页面上的点最多滞后 5 秒」与「探测线程的开销可忽略」之间的取舍。 */
     private static final long PROBE_INTERVAL_MS = 5_000L;
+
+    /** 发布队列容量（条）。800 QPS × 10 秒的余量；满了丢弃（契约见 {@link EventPublisher}）。 */
+    static final int PUBLISH_QUEUE_CAPACITY = 8192;
+
+    /** 待发布事件（{@link #publish} 只 offer，守护线程按 FIFO 逐条发 —— 见类注释「2026-10-17 订正」）。 */
+    private final BlockingQueue<ObservedEvent> publishQueue = new ArrayBlockingQueue<>(PUBLISH_QUEUE_CAPACITY);
+
+    /** 队列满时丢掉的累计条数（只给日志用；`publish` 不因它抛异常）。 */
+    private final AtomicLong droppedPublish = new AtomicLong();
+
+    /** 发布线程的运行令旗（{@link #stopPublisher} 置 false 后，线程把队列收尾再退出）。 */
+    private volatile boolean publishing = true;
+    private Thread publishThread;
 
     private final RabbitTemplate rabbitTemplate;
 
@@ -106,6 +134,22 @@ public class RabbitEventPublisher implements EventPublisher {
             // 且页面上的点是黄的。
             return;
         }
+        // ⚠️ 只入队、**不碰网络**：本方法在 `EventBroadcaster#add` 里被调，而那条路径
+        //    跑在 `synchronized poll()` 的临界区内 —— 一旦在这里等待 broker，整条日志流
+        //    都跟着卡住（800 QPS 实测帧间隔 5~8 秒，见类注释「2026-10-17 订正」）。
+        if (!publishQueue.offer(event)) {
+            long dropped = droppedPublish.incrementAndGet();
+            // 只在第一条与每 10000 条记一次：队列满通常意味着 broker/网络整体变慢，
+            // 逐条记会把日志刷得比事件本身还多。
+            if (dropped == 1L || dropped % 10_000L == 0L) {
+                log.warn("[EVENT] 发布队列已满（容量 {}），事件不落库（仍留在内存环里；累计丢弃 {} 条）",
+                        PUBLISH_QUEUE_CAPACITY, dropped);
+            }
+        }
+    }
+
+    /** 真正发出：只在 {@code observe-mq-publish} 线程上调用（排队顺序 = 事件顺序）。 */
+    private void send(ObservedEvent event) {
         try {
             rabbitTemplate.convertAndSend(RabbitObserveConfig.EXCHANGE, RabbitObserveConfig.ROUTING_KEY,
                     event,
@@ -163,6 +207,54 @@ public class RabbitEventPublisher implements EventPublisher {
         probing = false;
         if (probeThread != null) {
             probeThread.interrupt();
+        }
+    }
+
+    /**
+     * 起**唯一一条**发布线程（daemon）：按 FIFO 把队列里的条目交给 broker。
+     *
+     * <p>⚠️ daemon 的理由同探测线程：容器没走到 {@link #stopPublisher} 时不能把 JVM 拖住。
+     * <p>⚠️ 收尾顺序（{@link #stopPublisher}）：先把令旗放下，线程醒后会把队列**排空再退**；
+     * {@code join} 等 3 秒还不够才 interrupt —— 正常关停不该丢已经收下的事件。
+     */
+    @PostConstruct
+    void startPublisher() {
+        publishThread = new Thread(() -> {
+            while (true) {
+                ObservedEvent event;
+                try {
+                    // 运行中最多等 1 秒；收到停止令后不再等，只把队列里剩下的发完。
+                    event = publishQueue.poll(publishing ? 1L : 0L, TimeUnit.SECONDS);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    return;
+                }
+                if (event == null) {
+                    if (!publishing) {
+                        return;
+                    }
+                    continue;
+                }
+                send(event);
+            }
+        }, "observe-mq-publish");
+        publishThread.setDaemon(true);
+        publishThread.start();
+    }
+
+    @PreDestroy
+    void stopPublisher() {
+        publishing = false;
+        if (publishThread == null) {
+            return;
+        }
+        try {
+            publishThread.join(3_000L);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
+        if (publishThread.isAlive()) {
+            publishThread.interrupt();
         }
     }
 

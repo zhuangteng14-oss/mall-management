@@ -102,12 +102,47 @@ class InboundRateLimitInterceptorTest {
         gate.preHandle(get("/goods/goodsUp"), new MockHttpServletResponse(), new Object());
         gate.preHandle(get("/goods/goodsUp"), new MockHttpServletResponse(), new Object());
 
-        assertThat(metrics.recentEvents()).as("放行那条不记；被拦那条记一笔").hasSize(1);
+        // 2026-10-17 起：**不再逐条写事件环**（800 QPS 时会刷屏），窗口结束时才发一条汇总。
+        assertThat(metrics.recentEvents()).as("秒窗口未结束 ⇒ 事件环里还没有（请求已经被计数）").isEmpty();
+        gate.flushAggregate();
+
+        assertThat(metrics.recentEvents()).as("放行那条不记；被拦那条在窗口结束后汇总成一条").hasSize(1);
         ProtectionMetrics.ProtectionEvent event = metrics.recentEvents().get(0);
         assertThat(event.key()).isEqualTo("rateLimit");
         assertThat(event.scope()).isEqualTo("inbound");
         assertThat(event.result()).as("拦下 = blocked（不是 shed：闸按规则没放它进来）").isEqualTo("blocked");
-        assertThat(event.detail()).as("明细要能让排查的人直接重放这条请求").contains("GET").contains("/goods/goodsUp");
+        assertThat(event.detail())
+                .as("汇总文案是用户点名的那句；示例里保留方法与路径，排查时仍能定位到面")
+                .contains("入站限流触发：该秒内拦下 1 次请求")
+                .contains("GET").contains("/goods/goodsUp");
+    }
+
+    @Test
+    @DisplayName("按秒聚合：一秒内 N 次拦下 → 事件环只 1 条，Micrometer counter 仍记 N 次（指标口径不变）")
+    void blockedRequestsAreAggregatedPerSecond() throws Exception {
+        InboundRateLimitInterceptor gate = newInterceptor(1);   // 第 1 条放行，第 2~4 条被拦
+        for (int i = 0; i < 4; i++) {
+            gate.preHandle(get("/order/orderReceive"), new MockHttpServletResponse(), new Object());
+        }
+        assertThat(metrics.recentEvents()).as("窗口内一条事件都不发").isEmpty();
+        gate.flushAggregate();
+
+        // ⚠️ 指标名 / tag 与 ProtectionMetrics 同一口径（那里是包内常量，本类在 protect 包 ⇒ 用字面量）。
+        assertThat(registry.get("mall.protection.events")
+                .tag("protection", "rateLimit").tag("result", "blocked")
+                .counter().count())
+                .as("counter 仍是「被拦的请求数」，不是「发了几条事件」").isEqualTo(3.0);
+        assertThat(metrics.recentEvents()).as("3 次拦下 ⇔ 1 条汇总事件").hasSize(1);
+        assertThat(metrics.recentEvents().get(0).detail()).contains("该秒内拦下 3 次请求");
+
+        // 第二个窗口：再来 2 次被拦 + 冲刷 ⇒ 再发 1 条（不是把上一个窗口重发）
+        gate.preHandle(get("/order/orderReceive"), new MockHttpServletResponse(), new Object());
+        gate.preHandle(get("/order/orderReceive"), new MockHttpServletResponse(), new Object());
+        gate.flushAggregate();
+        assertThat(metrics.recentEvents()).as("每个窗口一条 —— 两个窗口共 2 条").hasSize(2);
+        assertThat(registry.get("mall.protection.events")
+                .tag("protection", "rateLimit").tag("result", "blocked")
+                .counter().count()).isEqualTo(5.0);
     }
 
     // ================= 「不接闸」的两条路 =================
