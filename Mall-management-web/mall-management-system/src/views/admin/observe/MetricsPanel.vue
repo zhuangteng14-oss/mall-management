@@ -105,7 +105,7 @@
             <span class="mp-chart-n">每把锁一条 · 无等待的拍断开（不是 0）</span>
             <span v-if="lockNames.length" class="mp-legend" aria-hidden="true">
               <template v-for="(n, i) in lockNames" :key="n">
-                <i :style="{ background: 'var(--c' + ((i % 10) + 1) + ')' }"></i>{{ n }}
+                <i :style="{ background: 'var(--c' + ((i % 10) + 1) + ')' }"></i><span :title="n">{{ lockLabel(n) }}</span>
               </template>
             </span>
           </div>
@@ -126,7 +126,7 @@
             <span class="mp-chart-n">行 = 锁名 · 列 = 最近 {{ WINDOW }} 拍 · 越深 = 本拍超时越多</span>
           </div>
           <HeatmapChart
-            :x-labels="xLabels" :y-labels="lockNames" :data="heatData" value-name="超时数"
+            :x-labels="xLabels" :y-labels="lockAxisLabels" :data="heatData" value-name="超时数"
             height="190px" :legend-text="['超时多', '超时少']" :x-label-interval="heatInterval"
             :grid-left="64" :grid-right="56" :tooltip-formatter="heatTooltip" :animation="false"
             :loading="first" :error="errMsg"
@@ -469,6 +469,28 @@ const lockNames = computed(() => {
   }
   return seen
 })
+/**
+ * 锁名 → 中文短名。**只用于显示**：`lockNames` 仍是后端原键，`heatData` / tooltip 取数一律
+ * 走原键（改数据键会把图打空）。
+ * ⚠️ 为什么需要它：五图共享 `grid-left=64`，y 轴文字可用宽度只有 56px，`order-add` 会被
+ *    `overflow:'truncate'` 切成 `order-a...`（2026-10-17 用户实测）。中文三字 ≈36px，放得下；
+ *    原键仍留在图例的 `title` 与 tooltip 里，`代码 ↔ 界面` 的对应关系不丢。
+ * ⚠️ 表里没有的键原样显示（后端将来加锁时不会变成空白）。
+ * ⚠️ `stock-deduct` / `coupon-claim` 只出现在「模拟日常」的假指标帧里（`api/demo-stream.js`
+ *    的 metrics 段），后端真锁枚举里没有它们；一并给中文短名，免得演示模式下 y 轴又出现截断。
+ */
+const LOCK_LABELS = {
+  'order-add': '下单锁',
+  'order-pay': '支付锁',
+  'order-receive': '收货锁',
+  'order-delivery': '发货锁',
+  'friend-add': '好友锁',
+  'stock-deduct': '扣库存锁',
+  'coupon-claim': '领券锁',
+}
+const lockLabel = (name) => LOCK_LABELS[name] || name
+/** 热力图 y 轴用中文短名；顺序与 `lockNames` 一一对应（`heatData` 的 y 下标靠这个顺序）。 */
+const lockAxisLabels = computed(() => lockNames.value.map(lockLabel))
 const waitChartSeries = computed(() => lockNames.value.map((name, i) => ({
   name,
   data: rows.value.map((r) => (r.locks[name] ? r.locks[name].waitMeanMs : null)),
@@ -578,7 +600,7 @@ function waitTooltip(params) {
   const parts = []
   for (const [name, l] of Object.entries(r.locks)) {
     if (l.waitMeanMs === null || l.waitMeanMs === undefined) continue
-    parts.push(`${esc(name)} ${fmt1(l.waitMeanMs)} ms（超时 ${fmtInt(l.timeouts)} 次）`)
+    parts.push(`${esc(lockLabel(name))}（${esc(name)}） ${fmt1(l.waitMeanMs)} ms（超时 ${fmtInt(l.timeouts)} 次）`)
   }
   return `<b>${xLabels.value[i]}</b><br/>${parts.length ? parts.join('<br/>') : '本拍无锁等待样本'}`
 }
@@ -591,7 +613,7 @@ function heatTooltip(p) {
   const name = lockNames.value[y] || ''
   const r = rows.value[x]
   const l = r && r.locks[name]
-  let s = `<b>${esc(name)}</b> · 第 ${x + 1} 拍`
+  let s = `<b>${esc(lockLabel(name))}</b>（${esc(name)}） · 第 ${x + 1} 拍`
     + `${xLabels.value[x] ? '（' + xLabels.value[x] + '）' : ''} · 超时 ${fmtInt(val)} 次`
   if (l) {
     s += `<br/>取锁 ${fmtInt(l.acquires)} · 成功 ${fmtInt(l.acquired)}`
@@ -885,11 +907,14 @@ onBeforeUnmount(closeStream)
 </script>
 
 <style scoped>
-/* ── 页高：1.4 倍视口内，超出走主体内部滚动 ─────────────────────────────────── */
+/* ── 页高：**一屏**（与日志页同一条 `calc(100vh - 顶部高度)`）────────────────
+   ⚠️ 2026-10-17 修「双滚动条 + 左右两栏底部不齐」：原来的 `140vh` 让页面本身高于视口
+      ⇒ ① 浏览器右侧出现全局长条；② `.mp-body` 里再滚一次；③ 右栏比左栏高出来的部分
+      把整页撑长，首屏看不全。现在外层只负责占满一屏并裁掉溢出，滚动**下放给两栏各自**。 */
 .a-mp {
   max-width: 1280px;
-  height: calc(140vh - 124px);
-  min-height: 560px;
+  height: calc(100vh - 124px);
+  min-height: 360px;
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -1003,18 +1028,33 @@ onBeforeUnmount(closeStream)
 .a-btn:hover { color: var(--ink); background: var(--surface-3); }
 
 /* ── 主体两栏 ─────────────────────────────────────────────────────────────── */
-/* 滚动容器只负责滚动；两栏网格的高度由两边内容的较高者撑开（见模板里的 ⚠️）。 */
+/* 外层 `.mp-body` **不滚**：它只把剩余一屏高度交给网格；两栏各自 `overflow-y:auto`。
+   ⚠️ 这样左右两栏的**可视区底边等价**（同一行网格、同一高度），左栏短、右栏长也不会
+      把页面撑长；滚动条只出现在各自栏内，不会再有「全局长条 + 内部条」两条。 */
 .mp-body {
   flex: 1 1 auto;
   min-height: 0;
-  overflow-y: auto;
-  padding-right: 2px;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
 }
 .mp-grid {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 380px;
   gap: var(--s4);
-  align-items: start;
+  align-items: stretch;
+  /* 用 flex 撑满（不靠 `height:100%`）：父级的“确定高度”来自 flex 分配，百分比高度
+     在部分外壳形态下解析不出来（本仓 `ael-height-does-not-resolve` 那条实测的教训）。 */
+  flex: 1 1 auto;
+  min-height: 0;
+}
+/* 两栏独立滚动 + 等高。`min-height:0` 是让 flex/grid 子项真能收缩的那一刀；
+   没有它内容会把栏撑高，`overflow` 永远轮不到生效。 */
+.mp-stack,
+.mp-rail {
+  min-height: 0;
+  overflow-y: auto;
+  padding-right: 2px;
 }
 .mp-stack {
   display: flex;
@@ -1338,14 +1378,13 @@ onBeforeUnmount(closeStream)
   padding: var(--s1) var(--s2);
   margin-bottom: var(--s2);
 }
+/* ⚠️ 故意**不再**是 220px 的内嵌滚动区：右栏现在整体滚，内层再滚就是「栏内双滚动条」。
+   库存列表按内容自然增高，滚的是 `.mp-rail` 这一根。 */
 .mp-stock-list {
   list-style: none;
-  height: 220px;
-  overflow-y: auto;
   display: flex;
   flex-direction: column;
   gap: var(--s2);
-  padding-right: 2px;
 }
 .mp-stock-row {
   flex: 0 0 auto;
@@ -1437,30 +1476,38 @@ onBeforeUnmount(closeStream)
   padding: var(--s2) 0;
 }
 
-/* 滚动条 ≤ 8px、淡色（主体与库存列表） */
-.mp-body, .mp-stock-list {
-  scrollbar-width: thin;
-  scrollbar-color: var(--line-2) transparent;
+/* 滚动条：7px（≤8px）+ `--line-2` 深色滑块，口径与日志页 `.ev-list` 逐条一致。
+   ⚠️ 只写在**真正滚的两个栏**上；`.mp-stock-list` 已不是滚动容器。
+   ⚠️ **绝不能**在祖先（`.mp-body` / 本页任何元素）上写 `scrollbar-width` / `scrollbar-color`：
+      Chrome ≥121 只要元素上的这两个属性非 `auto`，整段 `::-webkit-scrollbar` 就被**整块忽略**；
+      `scrollbar-color` 还会**继承**到 `.mp-stack` / `.mp-rail` ⇒ 实测这两栏退回默认 15px
+      （2026-10-17 探针：`offsetWidth-clientWidth = 15`）。本页原来就有一条第 `.mp-body,
+      .mp-stock-list` 的 `scrollbar-width: thin`（6px 规则同时被它作废）—— 已删。 */
+.mp-stack::-webkit-scrollbar,
+.mp-rail::-webkit-scrollbar {
+  width: 7px;
+  height: 7px;
 }
-.mp-body::-webkit-scrollbar,
-.mp-stock-list::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
-}
-.mp-body::-webkit-scrollbar-thumb,
-.mp-stock-list::-webkit-scrollbar-thumb {
+.mp-stack::-webkit-scrollbar-thumb,
+.mp-rail::-webkit-scrollbar-thumb {
   background: var(--line-2);
-  border-radius: 3px;
+  border-radius: 4px;
 }
-.mp-body::-webkit-scrollbar-track,
-.mp-stock-list::-webkit-scrollbar-track {
+.mp-stack::-webkit-scrollbar-thumb:hover,
+.mp-rail::-webkit-scrollbar-thumb:hover {
+  background: var(--ink-3);
+}
+.mp-stack::-webkit-scrollbar-track,
+.mp-rail::-webkit-scrollbar-track {
   background: transparent;
 }
 
 @media (max-width: 1100px) {
   .a-mp { height: auto; min-height: 0; overflow: visible; }
   .mp-body { overflow: visible; }
-  .mp-grid { grid-template-columns: minmax(0, 1fr); }
-  .mp-stock-list { height: 260px; }
+  .mp-grid { grid-template-columns: minmax(0, 1fr); height: auto; }
+  .mp-stack,
+  .mp-rail { overflow: visible; }
+  .mp-stock-list { height: 260px; overflow-y: auto; }
 }
 </style>

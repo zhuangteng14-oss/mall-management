@@ -205,7 +205,7 @@
           :disabled="stopping"
           @click="stopRun"
         >
-          <IconGlyph name="no" />{{ stopping ? '叫停中…' : '暂停' }}
+          <IconGlyph name="no" />{{ stopping ? '叫停中…' : '停止' }}
         </button>
       </div>
 
@@ -427,11 +427,29 @@
           </template>
         </p>
 
-        <div v-if="replay.rows.length" class="a-rp-bar">
-          <button type="button" class="a-btn" :disabled="replay.loading || replay.done" @click="toggleReplayPause">
+        <!-- 回放状态条（用户 2026-10-17）：进度 X/Y + 进度条 + 退出回放。
+             ⚠️ 放在**顶部**（面板一打开就看得到），不跟下面的统计行混在一起。 -->
+        <div
+          v-if="replay.rows.length"
+          class="a-rp-live"
+          :class="{ 'is-done': replay.done, 'is-paused': replay.paused && !replay.done }"
+        >
+          <span class="a-rp-live-t">
+            <template v-if="replay.done">回放结束</template>
+            <template v-else-if="replay.paused">已暂停</template>
+            <template v-else>正在回放</template>
+            （进度 <b>{{ replay.cursor }}</b> / {{ replay.rows.length }}）
+          </span>
+          <div class="a-rp-live-bar" role="progressbar" :aria-valuenow="replayPct" aria-valuemin="0" aria-valuemax="100">
+            <i :style="{ width: replayPct + '%' }"></i>
+          </div>
+          <button type="button" class="a-btn" :disabled="replay.done" @click="toggleReplayPause">
             <IconGlyph :name="replay.paused ? 'ok' : 'no'" />{{ replay.paused ? '继续' : '暂停' }}
           </button>
-          <button type="button" class="a-btn" @click="closeReplay"><IconGlyph name="no" />停止并收起</button>
+          <button type="button" class="a-btn" @click="closeReplay"><IconGlyph name="no" />退出回放</button>
+        </div>
+
+        <div v-if="replay.rows.length" class="a-rp-bar">
           <span class="a-rp-stat">
             已放 <b>{{ replay.cursor }}</b> / {{ replay.rows.length }} 条 ·
             回放时钟 <b>{{ replay.clock }}</b> ·
@@ -542,7 +560,7 @@
 
 <script setup>
 /* eslint-disable no-undef */ /* 理由见 `../../../components/charts/BaseChart.vue` 同款注释（eslint-plugin-vue 8.7.1 缺宏环境） */
-import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 // ⚠️ 三层 `../`（不是管理端其它页的两层）：本页在 `views/admin/observe/`，比 `views/admin/` 深一层。
 // ⚠️ `replay` 在这里起了别名 `replayEvents`：本页脚本里那个 `replay` 是**回放的播放状态**
 //    （下面那个 `reactive`），两个同名会互相遮住 —— 别名比改名更省事，也不会让人以为
@@ -646,6 +664,70 @@ let timer = null
  */
 const prog = reactive({ sent: null, blocked: null, elapsedMs: 0, err: '' })
 let statusTimer = null
+/** 这一页当前显示的 `running` 是「切回来时从后端恢复」的（不是本页 `fire()` 发起的）。 */
+const restoredRun = ref(false)
+
+/* ── 跨路由持久化（用户 2026-10-17 报「切页后整页重置」）──────────────────────
+ * 两件不同的东西，存两把键：
+ *   ① `FORM_KEY`：表单（权重 / 并发 / 秒数 / 档位 / 两组开关）—— 用户拖好的值不该因为
+ *      去别的页看了一眼就回到缺省；
+ *   ② `RUN_KEY`：**本页发起的那一轮**的开始信息（计划秒数 / 起点墙钟）—— 只靠
+ *      `/attack/status` 恢复不了「预计跑多久」，它只回 `ElapsedMs`（见 `api/observe.js`）。
+ *      ⚠️ 它**不是**后端账本：只用于本页画进度条，后端 `Running` 才是唯一判据。
+ * 用 `sessionStorage`（不是 `localStorage`）：这些是**这一次打开管理端**的事，关掉标签页就该忘。
+ */
+const FORM_KEY = 'mall.observe.attack.form.v1'
+const RUN_KEY = 'mall.observe.attack.run.v1'
+
+function readStore(key) {
+  try {
+    const raw = sessionStorage.getItem(key)
+    return raw ? JSON.parse(raw) : null
+  } catch (e) {
+    return null
+  }
+}
+function writeStore(key, value) {
+  try {
+    sessionStorage.setItem(key, JSON.stringify(value))
+  } catch (e) {
+    /* 隐私模式 / 配额满：持久化是增强，不是主路径；失败不打断页面。 */
+  }
+}
+function dropStore(key) {
+  try {
+    sessionStorage.removeItem(key)
+  } catch (e) {
+    /* 同上 */
+  }
+}
+
+/** 把表单恢复成上次离开这一页时的样子（在 `loadScenarios()` 之前跑，缺省权重才不会盖掉它）。 */
+function restoreForm() {
+  const v = readStore(FORM_KEY)
+  if (!v || typeof v !== 'object') return
+  if (v.weights && typeof v.weights === 'object') {
+    for (const [k, n] of Object.entries(v.weights)) {
+      const x = Number(n)
+      if (Number.isFinite(x) && x >= 0) weights[k] = x
+    }
+  }
+  if (Number.isFinite(Number(v.concurrency))) concurrency.value = normInt(v.concurrency, CONC_MIN, CONC_MAX, CONC_DEFAULT)
+  if (Number.isFinite(Number(v.durationSeconds))) durationSeconds.value = normInt(v.durationSeconds, DUR_MIN, DUR_MAX, DUR_DEFAULT)
+  if (TIERS.some((t) => t.qps === Number(v.tier))) tier.value = Number(v.tier)
+  if (Array.isArray(v.protections)) protections.value = new Set(v.protections.filter((k) => PROTECTIONS.includes(k) && protectionWired(k)))
+  if (Array.isArray(v.injections)) injections.value = new Set(v.injections.filter((k) => INJECTIONS.includes(k)))
+}
+function persistForm() {
+  writeStore(FORM_KEY, {
+    weights: { ...weights },
+    concurrency: concurrency.value,
+    durationSeconds: durationSeconds.value,
+    tier: tier.value,
+    protections: [...protections.value],
+    injections: [...injections.value],
+  })
+}
 
 const records = ref([])
 const total = ref(0)
@@ -938,23 +1020,51 @@ async function pollStatus() {
     prog.blocked = Number(data && data.Blocked) || 0
     prog.elapsedMs = Number(data && data.ElapsedMs) || 0
     prog.err = ''
-    if (data && data.Running === false) stopStatusPolling()
+    if (data && data.Running === false) {
+      stopStatusPolling()
+      // ⚠️ 只有「恢复来的」那一轮要在这里收口：本页 `fire()` 发起的那轮有 `/run` 的
+      //    `finally` 收 `running`，这里再写一次就变成两个地方抢写（见 `running` 的注释）。
+      //    恢复来的那轮没有 `/run` 的 await 挂在页面上了，后端说停了就是停了。
+      if (restoredRun.value) await finishRestoredRun()
+    }
   } catch (e) {
     prog.err = errText(e)
   }
+}
+
+function stopElapsedTimer() {
+  if (timer) {
+    clearInterval(timer)
+    timer = null
+  }
+}
+
+/** 恢复来的那一轮在后端收口了：退出「演练中」态、刷新记录、说明结果去哪看。 */
+async function finishRestoredRun() {
+  restoredRun.value = false
+  running.value = false
+  stopping.value = false
+  stopElapsedTimer()
+  dropStore(RUN_KEY)
+  await loadRecords()
+  flash.kind = 'info'
+  flash.text = '后端那一轮演练已经收口，进度显示已退出；结果已刷新到「演练记录」。'
 }
 
 /**
  * 起 1 秒轮询（`fire()` 开跑时调）。
  * ⚠️ 立刻打**第一拍**、再排 interval：辅助条一出现就该有读数，空 1 秒会让人以为它坏了。
  * ⚠️ 先清再起：连着跑两轮不会留下两个 `setInterval`（同 `fire()` 里那条计时器的处置）。
+ * @param {boolean} reset 是否把读数清成「未读到」（恢复场景要保留刚拿到的第一拍）。
  */
-function startStatusPolling() {
+function startStatusPolling(reset = true) {
   stopStatusPolling()
-  prog.sent = null
-  prog.blocked = null
-  prog.elapsedMs = 0
-  prog.err = ''
+  if (reset) {
+    prog.sent = null
+    prog.blocked = null
+    prog.elapsedMs = 0
+    prog.err = ''
+  }
   pollStatus()
   statusTimer = setInterval(pollStatus, 1000)
 }
@@ -985,6 +1095,9 @@ async function fire(name, chosen) {
   expectedMs = secs * 1000 + REDIS_DOWN_GRACE_MS
   startedAt = Date.now()
   elapsedMs.value = 0
+  // 记下这一轮的「计划秒数 / 起点」：切走再回来时 `/attack/status` 只回已跑毫秒数，
+  // 没有计划时长就画不出「已等 N / 预计 M」那条进度（见 FORM_KEY 上方的说明）。
+  writeStore(RUN_KEY, { plannedSeconds: secs, expectedMs, startedAt })
   timer = setInterval(() => {
     elapsedMs.value = Date.now() - startedAt
   }, 200)
@@ -1031,10 +1144,8 @@ async function fire(name, chosen) {
   } finally {
     running.value = false
     stopStatusPolling()
-    if (timer) {
-      clearInterval(timer)
-      timer = null
-    }
+    stopElapsedTimer()
+    dropStore(RUN_KEY)
   }
 }
 
@@ -1095,7 +1206,15 @@ function toggle(r) {
 // ⇒ **当时没人开着日志页的那一段，事件不会落库**（TD-61 一族，块 7 期间实测过）。
 // 故面板上那句「回放数据来自「当时开着日志页的演练」」不是免责声明，是这个数据源的准确描述。
 const REPLAY_TICK_MS = 40
-/** 屏上最多留多少条（**只影响渲染**：撒点本身一条不漏，滚动窗口之外的不再画）。 */
+/**
+ * 每一拍**最多**撒多少条（用户 2026-10-17 报「回放变成一键全显」）。
+ * ⚠️ 原来的循环是「把所有 `off <= now` 的一次性撒完」—— 真批次实测 5000 条 / 原时长 8.7 秒，
+ *    相当于 575 条/秒 ⇒ 200 条的画面上限在 0.6 秒内就填满，看起来就是「一股脑全出来」。
+ *    现在每拍最多 3 条（≈75 条/秒），画面是逐批长出来的；代价是播放比原始时间轴慢，
+ *    这是「看得见」与「严格等速」之间的取舍（进度条 X/Y 会如实说明放到哪了）。
+ */
+const REPLAY_MAX_PER_TICK = 3
+/** 屏上最多留多少条（**只影响渲染**：撒点一条不漏，滚动窗口之外的不再画）。 */
 const REPLAY_KEEP = 200
 
 const replay = reactive({
@@ -1141,6 +1260,9 @@ function clockOf(ms) {
 /** 本批事件的原时间跨度（毫秒）—— 面板上「原时长 X 秒」的分母。 */
 const replaySpanMs = computed(() =>
   replay.rows.length ? replay.rows[replay.rows.length - 1].off : 0)
+/** 回放进度（按**条数**，不是时间）：`已放 / 载入`，给顶部状态条和进度条用。 */
+const replayPct = computed(() =>
+  replay.rows.length ? Math.min(100, Math.round((replay.cursor / replay.rows.length) * 100)) : 0)
 
 /**
  * **是不是被 `limit` 截断了**。
@@ -1160,19 +1282,30 @@ function stopReplayTimer() {
   }
 }
 
-/** 一拍：把「原时间偏移已到」的事件撒出来（一拍的粒度见 `REPLAY_TICK_MS`）。 */
+/** 一拍：把「原时间偏移已到」的事件**限量**撒出来（一拍至多 `REPLAY_MAX_PER_TICK` 条）。 */
 function replayTick() {
   const now = replayOffset + (Date.now() - replayBase)
-  while (replay.cursor < replay.rows.length && replay.rows[replay.cursor].off <= now) {
+  let emitted = 0
+  while (
+    emitted < REPLAY_MAX_PER_TICK &&
+    replay.cursor < replay.rows.length &&
+    replay.rows[replay.cursor].off <= now
+  ) {
     const e = replay.rows[replay.cursor]
     replay.cursor += 1
+    emitted += 1
     replay.played.push({ ...e, clock: clockOf(epochOf(e.OccurredAt)) })
   }
   if (replay.played.length > REPLAY_KEEP) {
     replay.played.splice(0, replay.played.length - REPLAY_KEEP)
   }
-  replay.elapsedMs = now
-  replay.clock = replay.rows.length ? clockOf(epochOf(replay.rows[0].OccurredAt) + now) : ''
+  // ⚠️ 回放时钟跟**已放出来的最后一条**走，不跟墙钟走：限量之后墙钟会跑到画面前面
+  //    （40ms 一拍只放 3 条，原时间轴却一直在走），拿墙钟画时钟就会出现「时钟 8 秒、
+  //    画面还停在 2 秒」的自相矛盾。没有放出任何一条时（两批之间有空档）才用墙钟。
+  const last = replay.rows[replay.cursor - 1]
+  const playhead = last ? last.off : now
+  replay.elapsedMs = playhead
+  replay.clock = replay.rows.length ? clockOf(epochOf(replay.rows[0].OccurredAt) + playhead) : ''
   if (replay.cursor >= replay.rows.length) {
     replay.done = true
     stopReplayTimer()
@@ -1259,9 +1392,69 @@ function closeReplay() {
   replay.limit = 0
 }
 
+/**
+ * 切回本页时把**后端仍在跑**的那一轮接回来（用户 2026-10-17 报「切页后按钮回到开始、
+ * 进度条没了」）。判据只有一个：`POST /attack/status` 的 `Running`（`attackStatus()`，实际就是
+ * POST —— 用户口径里的 `GET` 是这件事的语义，不是方法名）。
+ *
+ * ⚠️ 为什么不恢复 `openId` / 结果：那一轮还没结束，`drill_record` 尚未落行；等
+ *    `pollStatus()` 看到 `Running=false` 时由 `finishRestoredRun()` 刷新列表。
+ * ⚠️ 恢复的是**显示**，不是控制：本页没有那条 `/run` 的 await，点「停止」走的是同一个
+ *    `/attack/stop`，后端照停；本页靠下一拍 `Running=false` 退出「演练中」。
+ */
+async function restoreRunState() {
+  let data
+  try {
+    data = await attackStatus()
+  } catch (e) {
+    return // 读不到就按「没在跑」处理：这是切页恢复，不该把页面顶成一条红错误
+  }
+  if (!data || data.Running !== true) {
+    dropStore(RUN_KEY)
+    return
+  }
+  const meta = readStore(RUN_KEY)
+  const elapsed = Number(data.ElapsedMs) || 0
+  restoredRun.value = true
+  running.value = true
+  stopping.value = false
+  openId.value = null
+  plannedSeconds.value =
+    meta && Number.isFinite(Number(meta.plannedSeconds))
+      ? normInt(meta.plannedSeconds, DUR_MIN, DUR_MAX, DUR_DEFAULT)
+      : DUR_DEFAULT
+  expectedMs =
+    meta && Number(meta.expectedMs) > 0
+      ? Number(meta.expectedMs)
+      // 没有本地记录（比如那一轮是别的标签页发起的）：至少让进度条从「已跑时长 + 宽限」起步
+      : Math.max(elapsed, 1000) + REDIS_DOWN_GRACE_MS
+  startedAt =
+    meta && Number(meta.startedAt) > 0 ? Number(meta.startedAt) : Date.now() - elapsed
+  // 以「后端已跑毫秒」和「本地墙钟」中较大的为准：前者不会因系统时钟回拨变小，
+  // 后者在本地记录存在时更连续。
+  elapsedMs.value = Math.max(elapsed, Date.now() - startedAt)
+  stopElapsedTimer()
+  timer = setInterval(() => {
+    elapsedMs.value = Date.now() - startedAt
+  }, 200)
+  prog.sent = Number(data.Sent) || 0
+  prog.blocked = Number(data.Blocked) || 0
+  prog.elapsedMs = elapsed
+  prog.err = ''
+  // 保留刚拿到的第一拍，只接上 1 秒轮询（`reset=false`）。
+  startStatusPolling(false)
+  flash.kind = 'info'
+  flash.text = '检测到后端还有一轮演练在跑：已恢复进度条与实时读数；跑完会自动刷新「演练记录」。'
+}
+
 onMounted(() => {
+  // 顺序有讲究：先恢复表单，再取场景清单 —— `loadScenarios()` 只给「还没有值」的键填缺省权重，
+  // 反过来的话用户拖过的滑条会被后端缺省覆盖（这正是切页后「权重全回默认」的成因之一）。
+  restoreForm()
   loadScenarios()
   loadRecords()
+  restoreRunState()
+  watch([weights, concurrency, durationSeconds, tier, protections, injections], persistForm, { deep: true })
 })
 
 // ⚠️ 页面切走要停掉本地的计时器 —— 它只是一个 `setInterval`，不停就一直在给一个没人看的
@@ -1925,6 +2118,48 @@ onBeforeUnmount(() => {
   background: var(--surface-2);
   border-radius: var(--r2);
   padding: var(--s3) var(--s4);
+}
+/* 顶部回放状态条：一行「正在回放（进度 X/Y）」+ 进度条 + 暂停 / 退出回放。
+   ⚠️ `position: sticky; top: 0`：回放列表能滚很长，滚到中段还要能看见进度与「退出回放」。 */
+.a-rp-live {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--s3);
+  margin: var(--s3) 0;
+  padding: var(--s2) var(--s3);
+  background: var(--surface-2);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r2);
+}
+.a-rp-live.is-done { background: var(--success-ground); border-color: transparent; }
+.a-rp-live.is-paused { background: var(--warning-ground); border-color: transparent; }
+.a-rp-live-t {
+  font-size: var(--fs-sm);
+  color: var(--ink-2);
+  white-space: nowrap;
+}
+.a-rp-live-t b {
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+}
+.a-rp-live-bar {
+  flex: 1 1 180px;
+  min-width: 120px;
+  height: 6px;
+  background: var(--surface-3);
+  border-radius: 3px;
+  overflow: hidden;
+}
+.a-rp-live-bar i {
+  display: block;
+  height: 100%;
+  background: var(--brand-ink);
+  border-radius: 3px;
+  transition: width 120ms linear;
 }
 .a-rp-bar {
   display: flex;

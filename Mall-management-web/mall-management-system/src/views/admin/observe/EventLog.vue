@@ -256,12 +256,12 @@
               :key="r.key"
               :data-vidx="virtualOn ? vStart + vi : undefined"
               class="log-line"
-              :class="[r.cls, { 'is-openable': !!r.traceId, sel: r.traceId && r.traceId === openedTrace, 'is-tree': r.tree }]"
+              :class="[r.cls, { 'is-openable': true, sel: rowSelected(r), 'is-tree': r.tree }]"
               :style="{ '--pc': r.pc, '--c': r.color, '--sevc': r.sevColor }"
               :data-d="r.d"
-              :role="r.traceId ? 'button' : undefined"
-              :tabindex="r.traceId ? 0 : undefined"
-              :title="r.traceId ? '点开看这一次请求的完整链路' : '这条不在请求线程上（没有 traceId），看不到链路'"
+              role="button"
+              tabindex="0"
+              :title="r.traceId ? '点开看这一次请求的完整链路' : '这条不在请求线程上（没有 traceId）：点开只看这一条自己的事件详情'"
               @click="openTrace(r)"
               @keydown.enter.prevent="openTrace(r)"
               @keydown.space.prevent="openTrace(r)"
@@ -406,9 +406,9 @@
               记录（请求的起止与总耗时）。**没有**「按 traceId 查历史」的端点，也不该加。
            ⚠️ 起止那两行**推不出**：事件只说「某事发生了」，说不了「请求何时结束」。
            ⚠️ 演示模式下帧里的 `traces` 恒空 ⇒ 起止两行必然缺席（显示「起止还没到」），**不伪造**。 -->
-      <div class="ev-drawer" data-anim="6" :class="{ 'is-open': !!openedTrace }">
-        <div class="hd" @click="openedTrace && (drawerOpen = !drawerOpen)">
-          <b><span class="idx">⑤</span> 链路展开</b>
+      <div class="ev-drawer" data-anim="6" :class="{ 'is-open': !!(openedTrace || openedEvent) }">
+        <div class="hd" @click="(openedTrace || openedEvent) && (drawerOpen = !drawerOpen)">
+          <b><span class="idx">⑤</span> {{ openedTrace ? '链路展开' : '事件详情' }}</b>
           <template v-if="openedTrace">
             <code class="mono">{{ openedTrace }}</code>
             <span v-if="openedTraceRec" class="st" :class="statusClass(openedTraceRec.status)">{{ openedTraceRec.status }}</span>
@@ -417,18 +417,29 @@
             <button type="button" class="ev-btn" @click.stop="drawerOpen = !drawerOpen">{{ drawerOpen ? '收起' : '展开' }}</button>
             <button type="button" class="ev-btn" @click.stop="closeTrace">关闭</button>
           </template>
-          <span v-else class="hint">点 ③ 里带 traceId 的行 ⇒ 这里显示那一次请求的完整链路（没有 traceId 的行不给点）</span>
+          <template v-else-if="openedEvent">
+            <code class="mono">#{{ openedEvent.seq }}</code>
+            <span class="kv">{{ hmsms(openedEvent.ts) }} · {{ kindLabel(openedEvent.kind) }} · {{ openedEvent.title }}</span>
+            <span class="cnt">1 条事件</span>
+            <button type="button" class="ev-btn" @click.stop="drawerOpen = !drawerOpen">{{ drawerOpen ? '收起' : '展开' }}</button>
+            <button type="button" class="ev-btn" @click.stop="closeTrace">关闭</button>
+          </template>
+          <span v-else class="hint">点 ③ 里任意一行 ⇒ 带 traceId 的显示那一次请求的完整链路；没有 traceId 的显示这一条自己的事件详情</span>
         </div>
-        <ol v-if="openedTrace && drawerOpen" class="chain">
+        <ol v-if="drawerOpen && (openedTrace || openedEvent)" class="chain">
+          <li v-if="openedEvent" class="chain-i is-miss">
+            <span class="tm">—</span>
+            <span class="d">这条事件<b>不在请求线程上</b>（没有 traceId），没有跨事件的链路可展开；下面是它自己的全部字段。</span>
+          </li>
           <li v-if="openedTraceRec" class="chain-i is-ends">
             <span class="tm">{{ hmsms(openedTraceRec.startMs) }}</span>
             <span class="d">请求开始（{{ startLabel(openedTraceRec) }}）</span>
           </li>
-          <li v-else class="chain-i is-miss">
+          <li v-else-if="openedTrace" class="chain-i is-miss">
             <span class="tm">—</span>
             <span class="d">这一次请求的「起止」还没到：它的收尾记录在请求返回时才写（长连接与流线程不记；演示模式下恒空）</span>
           </li>
-          <li v-for="e in openedEvents" :key="e.seq" class="chain-i">
+          <li v-for="e in chainEvents" :key="e.seq" class="chain-i">
             <span class="tm">{{ hmsms(e.ts) }}</span>
             <span class="d">
               <!-- D 块：图标↔文字 8px 的落点之一。⚠️ 原来这里是**一个空格**（15px 字号下 ≈4px），
@@ -765,6 +776,8 @@ const exportNote = ref('')
 const activeKinds = ref(new Set(KINDS))    // 开着的类（空集 = 一条也不显示，是**允许**的状态）
 const activeSevs = ref(new Set(SEVERITIES))// 开着的严重度
 const openedTrace = ref('')                // ⑤ 抽屉打开的 traceId
+/** ⑤ 的「单条事件」模式：点没有 traceId 的行时放这一条（同一个抽屉，不另开一个面板）。 */
+const openedEvent = ref(null)
 const drawerOpen = ref(true)               // ⑤ 是否拉起（塌着的时候只有一条 48px 的带）
 const q = ref('')                          // ② 搜索框
 const objFilter = ref('')                  // ② 对象筛选（点 ③ 里的对象徽标填进来）
@@ -1417,6 +1430,10 @@ function buildStream(list) {
   //    **可证等价** —— 在一个「同 tid 的极大连续段」里长度 ≥2 ⇔ 该 tid 在整个 list 里出现 ≥2 次
   //    （这一段自己就贡献了 ≥2 次）。两个条件并列写会让人以为它们各管一件事，实际后者恒真。
   const marks = []
+  // 组号：同一个 traceId 可能在窗口里出现**两段不相邻**的连续 run（中间夹了别的事件），
+  // 两段都会各自产出 `h-<tid>` / `t-<tid>` ⇒ 键撞车会让 Vue 复用错节点（点击落到别的行）。
+  // 键里带上这个组号即唯一；事件行本来就用全局唯一的 `seq`。
+  let gid = 0
   let i = 0
   while (i < n) {
     const tid = list[i].traceId
@@ -1424,9 +1441,10 @@ function buildStream(list) {
     while (tid && j < n && list[j].traceId === tid) j++
     if (tid && j - i >= 2 && recFor(tid)) {
       const rec = recFor(tid)
-      marks.push({ head: true, tid, rec })
+      const group = ++gid
+      marks.push({ head: true, tid, rec, gid: group })
       for (let k = i; k < j; k++) marks.push({ child: true, tid, ev: list[k] })
-      marks.push({ tail: true, tid, rec })
+      marks.push({ tail: true, tid, rec, gid: group })
     } else {
       for (let k = i; k < j; k++) marks.push({ ev: list[k] })
     }
@@ -1467,9 +1485,13 @@ function buildStream(list) {
 function makeRow(mk, rail, gl, depth) {
   const pc = `calc(${3 * depth + 2}ch + 8px)`
   const base = {
-    key: mk.tail ? `t-${mk.tid}` : mk.head ? `h-${mk.tid}` : `e-${mk.ev.seq}`,
+    // 组头 / 组尾带 `gid`（见 `buildStream`），避免同 traceId 的两段不相邻 run 撞键。
+    key: mk.tail ? `t-${mk.tid}-${mk.gid}` : mk.head ? `h-${mk.tid}-${mk.gid}` : `e-${mk.ev.seq}`,
     rail, gl, pre: `${rail}${gl}`, pc, d: depth,
     traceId: mk.tid || (mk.ev && mk.ev.traceId) || '',
+    // 单条事件行：⑤ 在「没有 traceId」时用它显示这一条自己的详情。
+    seq: mk.ev ? mk.ev.seq : '',
+    event: mk.ev || null,
     // 「这一行有树形」（组头 / 组尾 / 成员）—— 只用来决定前缀提不提亮（见 CSS `.log-line.is-tree`）。
     // ⚠️ 与 `d`（缩进层级）**不是一回事**：组头是 `d=0` 但属于树形。两者各自管各自的事。
     tree: !!(mk.head || mk.tail || depth > 0),
@@ -1552,6 +1574,14 @@ const openedEvents = computed(() =>
     ? ranged.value.filter((e) => e.traceId === openedTrace.value).slice().sort((a, b) => a.ts - b.ts || a.seq - b.seq)
     : []
 )
+/** ⑤ 列表的实际数据源：链路模式 = 这一条 trace 的全部事件；单条模式 = 只有它自己。 */
+const chainEvents = computed(() => (openedTrace.value ? openedEvents.value : (openedEvent.value ? [openedEvent.value] : [])))
+
+/** 行选中态：链路模式看 traceId（同 trace 整组染），单条模式看 seq。 */
+function rowSelected(r) {
+  if (r.traceId) return r.traceId === openedTrace.value
+  return !!openedEvent.value && r.seq === openedEvent.value.seq
+}
 
 /* ── 筛选 / 抽屉 ────────────────────────────────────────────────────────────── */
 function toggleKind(k) {
@@ -1574,14 +1604,25 @@ function resetFilters() {
   q.value = ''
 }
 function openTrace(r) {
-  // ⚠️ 没有 traceId 的行点了不做事（模板也没给它 `role`/`tabindex`）。
-  if (!r || !r.traceId) return
-  if (openedTrace.value === r.traceId) { drawerOpen.value = !drawerOpen.value; return }
-  openedTrace.value = r.traceId
+  if (!r) return
+  if (r.traceId) {
+    openedEvent.value = null
+    if (openedTrace.value === r.traceId) { drawerOpen.value = !drawerOpen.value; return }
+    openedTrace.value = r.traceId
+    drawerOpen.value = true
+    return
+  }
+  // 没有 traceId 的行**也响应**（用户 2026-10-17 报「某些行鼠标是普通箭头、点了没反应」——
+  // 那些正是这类行）。⑤ 退化成「单条事件详情」，并明确说明它没有链路，不伪造一条。
+  if (!r.event) return
+  if (openedEvent.value && openedEvent.value.seq === r.event.seq) { drawerOpen.value = !drawerOpen.value; return }
+  openedTrace.value = ''
+  openedEvent.value = r.event
   drawerOpen.value = true
 }
 function closeTrace() {
   openedTrace.value = ''
+  openedEvent.value = null
   drawerOpen.value = true
 }
 
