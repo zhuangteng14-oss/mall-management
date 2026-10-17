@@ -19,14 +19,38 @@
         <span v-else-if="s.done" class="a-rb-state is-done">已放完</span>
         <span v-else class="a-rb-state is-play">播放中</span>
       </div>
-      <div
-        class="a-rb-bar" role="progressbar"
-        :aria-valuenow="pct" aria-valuemin="0" aria-valuemax="100"
-        :aria-label="`回放进度 ${pct}%`"
-      ><i :style="{ width: pct + '%' }"></i></div>
+      <!-- 可拖拽进度条（Seek Slider）——视频播放器式定位。
+           ⚠️ 拖拽中（`@input`）**只改这一行的目标时间文字**，不触发任何 seek / 重绘；
+              松开鼠标（`@change`）才做一次状态重建。重建期间 `s.seeking` 显示遮罩。 -->
+      <div class="a-rb-seek">
+        <input
+          class="a-rb-range"
+          type="range"
+          min="0"
+          max="100"
+          step="0.1"
+          :value="dragging ? dragPct : timePct"
+          :style="{ '--fill': (dragging ? dragPct : timePct) + '%' }"
+          :disabled="s.seeking"
+          :aria-valuetext="`${Math.round(dragging ? dragPct : timePct)}%${dragging ? ` · 目标 ${seekClockText}` : ''}`"
+          aria-label="回放进度：拖动定位到任意时刻"
+          @pointerdown="beginSeek"
+          @input="onSeekInput"
+          @change="commitSeek"
+        >
+        <span class="a-rb-seektip" :class="{ on: dragging }">
+          <template v-if="dragging">松开 → {{ seekClockText }}（{{ Math.round(dragPct) }}%）</template>
+          <template v-else>拖动进度条定位</template>
+        </span>
+      </div>
       <p v-if="truncated" class="a-rb-note">
         这批台账共 {{ fmtInt(s.total) }} 条，本次按上限载入 {{ fmtInt(s.count) }} 条（limit={{ fmtInt(s.limit) }}）—— 回放的是前一段。
       </p>
+    </div>
+    <!-- 状态重建遮罩：重建是同步的一大段 apply，遮罩必须在它之前先上屏（会话里 `await nextFrame()`）。 -->
+    <div v-if="s.seeking" class="a-rb-mask" role="status" aria-live="assertive">
+      <span class="a-rb-spin" aria-hidden="true"></span>
+      正在重建 {{ s.seekPct }}% 处的状态：重放历史事件并重绘图表 / 流轨 / 明细…
     </div>
     <!-- 倍速：0.25x / 0.5x / 1x / 2x / 5x / 10x。用户 2026-10-17：「默认 1 倍速；切档不重置进度」，
          并明令在 1x 旁补 0.5x / 0.25x 慢速档。
@@ -76,11 +100,11 @@
       <label class="a-rb-pick-l" for="a-rb-batch">选择历史批次</label>
       <select id="a-rb-batch" v-model="pickId" class="a-rb-sel" :disabled="loading || s.loading">
         <option value="">{{ loading ? '载入批次…' : (batches.length ? '— 请选择 —' : '暂无带批次的演练记录') }}</option>
-        <option v-for="b in batches" :key="b.BatchId" :value="b.BatchId">
-          {{ b.Name || '未命名演练' }} · {{ fmtBatchTime(b.CreatedAt) }} · {{ (b.TotalRequests || 0) }} 请求
+        <option v-for="b in batches" :key="b.BatchId" :value="b.BatchId" :disabled="b.HasData === false">
+          {{ b.Name || '未命名演练' }} · {{ fmtBatchTime(b.CreatedAt) }} · {{ (b.TotalRequests || 0) }} 请求<template v-if="b.HasData === false">（数据已过期清理）</template>
         </option>
       </select>
-      <button type="button" class="a-rb-btn" :disabled="loading || s.loading || !pickId" :title="pickId ? '读这批台账并按原时间戳回放' : '先选择一个历史批次'" @click="startPicked">
+      <button type="button" class="a-rb-btn" :disabled="loading || s.loading || !pickId || pickedDisabled" :title="pickedDisabled ? '这批台账已过保留期被清理，无法回放' : (pickId ? '读这批台账并按原时间戳回放' : '先选择一个历史批次')" @click="startPicked">
         {{ s.loading ? '载入中…' : '回放' }}
       </button>
       <button type="button" class="a-rb-btn is-exit" :disabled="loading || s.loading" title="重新读取演练记录列表" @click="loadBatches">刷新</button>
@@ -103,8 +127,8 @@
 import { computed, onMounted, ref, watch } from 'vue'
 import { attackRecords } from '../../api/observe'
 import {
-  REPLAY_SPEEDS, replaySession as s, restartReplaySession, setReplaySpeed,
-  startReplaySession, stopReplaySession, toggleReplayPause,
+  REPLAY_SPEEDS, pauseReplaySession, replaySession as s, restartReplaySession,
+  seekReplaySession, setReplaySpeed, startReplaySession, stopReplaySession, toggleReplayPause,
 } from '../../api/replay-session'
 
 const fmtInt = (v) => Number(v || 0).toLocaleString('zh-CN')
@@ -155,10 +179,25 @@ async function loadBatches() {
   }
 }
 
+/**
+ * 当前选中的批次行 + 「台账已被保留期清理」判据（2026-10-18）。
+ *
+ * ⚠️ `HasData === false` 是**后端算的**（`DrillRecordDao` 的索引子查询 → 服务层 `HasData`）：
+ *    前端不自己拿 `TotalRequests` 猜，也不在选中时才发一次请求去探 —— 列表已经带回来了。
+ * ⚠️ 判据写成**严格等于 false** 而不是 `!b.HasData`：存量后端（或旧缓存）没有这个键时
+ *    是 `undefined`，那表示「不知道」，不该把还能回放的批次一并置灰。
+ */
+const pickedRow = computed(() => batches.value.find((r) => r.BatchId === pickId.value) || null)
+const pickedDisabled = computed(() => !!pickedRow.value && pickedRow.value.HasData === false)
+
 /** 顶部直接回放：装载成功后横幅自动切到「正在回放」（同一个模块级会话，三页共用）。 */
 async function startPicked() {
   const row = batches.value.find((r) => r.BatchId === pickId.value)
   if (!row) return
+  if (row.HasData === false) {
+    err.value = '该批次历史数据已过期被清理，无法回放（换一批，或重新跑一轮演练）。'
+    return
+  }
   err.value = ''
   try {
     await startReplaySession(row.BatchId, {
@@ -186,11 +225,54 @@ const shortId = computed(() => {
   return id.length > 12 ? `${id.slice(0, 8)}…` : (id || '—')
 })
 
-/** 进度按**条数**算（不按时间）：时间轴上可能有很长一段没有事件，按时间会看着「卡住」。 */
-const pct = computed(() => {
-  if (!s.count) return s.done ? 100 : 0
-  return Math.max(0, Math.min(100, Math.round((s.cursor / s.count) * 100)))
+/* ── 可拖拽进度条（Seek Slider）─────────────────────────────────────────────
+   ⚠️ 条的位置按**日志时间**算（`elapsedMs / spanMs`），不是按条数：拖动 40% 就应该
+      定位到原时间轴的 40% 处，与「视频播放器」的直觉一致；条数进度仍在上面的
+      「进度 X / Y」里如实显示，两者不混用。
+   ⚠️ 拖拽中的 `dragPct` 与播放中的 `timePct` 是两个值：前者只跟手指，后者只跟时钟。
+      松开鼠标前绝不把 `dragPct` 写回会话 —— 那正是用户点名禁止的「拖一格重绘一次」。 */
+const dragging = ref(false)
+const dragPct = ref(0)
+/** 拖拽开始前是否在播（重建完成后据此续播；拖拽一开始会先暂停时钟）。 */
+let dragWasPlaying = false
+
+const timePct = computed(() => {
+  if (!s.spanMs) return s.done ? 100 : 0
+  const p = ((Number(s.elapsedMs) || 0) / s.spanMs) * 100
+  return Math.max(0, Math.min(100, Math.round(p * 10) / 10))
 })
+
+/** 拖拽格上的目标时间（原台账时间轴），只用于文字预览。 */
+const seekClockText = computed(() => clockOf(s.startTs + (dragPct.value / 100) * (s.spanMs || 0)))
+
+function beginSeek() {
+  if (dragging.value || s.seeking) return
+  dragWasPlaying = !s.paused && !s.done
+  dragPct.value = Math.round(timePct.value)
+  dragging.value = true
+  // 用户开拖 = 立刻暂停自动播放：否则滑块一边跟手指、一边被播放时钟改写。
+  pauseReplaySession()
+}
+
+/** `@input`：只改本地目标值 + 那行文字，**不**调用 seek、不写会话。 */
+function onSeekInput(e) {
+  if (!dragging.value) beginSeek()
+  const v = Number(e && e.target && e.target.value)
+  if (Number.isFinite(v)) dragPct.value = Math.max(0, Math.min(100, v))
+}
+
+/** `@change`（松开鼠标 / 键盘确认）：只在这里做**一次**状态重建。 */
+async function commitSeek() {
+  if (!dragging.value) return
+  const target = dragPct.value
+  const resume = dragWasPlaying
+  // 重建期间保持 dragging=true：否则 `elapsedMs` 在重建落位时变化，滑块会先跳一下。
+  try {
+    await seekReplaySession(target / 100, { resume })
+  } finally {
+    dragging.value = false
+  }
+}
 
 /** 回放时钟 = 已吐出的最后一条的**原时间戳**（浏览器本地时区）—— 它是「过去时」的直接证据。 */
 function clockOf(ms) {
@@ -284,17 +366,114 @@ const truncated = computed(() => s.count > 0 && s.limit > 0 && s.count >= s.limi
 .a-rb-state.is-play { color: var(--warning-deep); }
 .a-rb-state.is-paused { color: var(--warning-deep); font-weight: var(--fw-med); }
 .a-rb-state.is-done { color: var(--success); }
-.a-rb-bar {
+/* ── Seek Slider：原生 range + 自定义轨道/滑块 ───────────────────────────── */
+.a-rb-seek {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  min-width: 0;
+}
+.a-rb-range {
+  -webkit-appearance: none;
+  appearance: none;
+  flex: 1 1 auto;
+  min-width: 80px;
+  height: 14px;
+  margin: 0;
+  background: transparent;
+  cursor: pointer;
+}
+/* 已播放段 = 实心暖色，未播放段 = 浅底；`--fill` 由模板按当前百分比写入。 */
+.a-rb-range::-webkit-slider-runnable-track {
+  height: 4px;
+  border-radius: 2px;
+  background: linear-gradient(
+    to right,
+    var(--warning) 0,
+    var(--warning) var(--fill, 0%),
+    var(--surface-2) var(--fill, 0%),
+    var(--surface-2) 100%
+  );
+}
+.a-rb-range::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 12px;
+  height: 12px;
+  margin-top: -4px;
+  border-radius: 50%;
+  background: var(--warning);
+  border: 2px solid var(--surface);
+  box-shadow: 0 0 0 1px var(--warning);
+}
+.a-rb-range::-moz-range-track {
   height: 4px;
   border-radius: 2px;
   background: var(--surface-2);
-  overflow: hidden;
 }
-.a-rb-bar > i {
-  display: block;
-  height: 100%;
+.a-rb-range::-moz-range-progress {
+  height: 4px;
+  border-radius: 2px;
   background: var(--warning);
-  transition: width 100ms linear;
+}
+.a-rb-range::-moz-range-thumb {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--warning);
+  border: 2px solid var(--surface);
+  box-shadow: 0 0 0 1px var(--warning);
+}
+.a-rb-range:focus-visible {
+  outline: 2px solid var(--warning);
+  outline-offset: 2px;
+  border-radius: var(--r1);
+}
+.a-rb-range:disabled {
+  cursor: progress;
+  opacity: 0.6;
+}
+.a-rb-seektip {
+  flex: 0 0 auto;
+  font-size: var(--fs-xs);
+  color: var(--ink-3);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.a-rb-seektip.on {
+  color: var(--warning-deep);
+  font-weight: var(--fw-med);
+}
+
+/* ── 重建遮罩：盖住横幅（含倍速/按钮），避免重建中途还能改倍率或退出 ───────── */
+.a-rb-mask {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--s2);
+  padding: 0 var(--s3);
+  background: var(--warning-ground);
+  border-radius: var(--r2);
+  font-size: var(--fs-xs);
+  color: var(--warning-deep);
+  font-weight: var(--fw-med);
+}
+.a-rb-spin {
+  width: 12px;
+  height: 12px;
+  border: 2px solid var(--warning);
+  border-top-color: transparent;
+  border-radius: 50%;
+  animation: a-rb-spin 0.7s linear infinite;
+}
+@keyframes a-rb-spin {
+  to { transform: rotate(360deg); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .a-rb-spin { animation: none; }
 }
 .a-rb-note {
   margin: 0;

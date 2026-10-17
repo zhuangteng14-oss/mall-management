@@ -23,6 +23,13 @@
 //     三页才在同一秒；横幅如实显示「实际速率 / 本帧上限」，不拿 10× 冒充。
 //   · 播放是**本地时钟**：后端在装载之后不再参与（一次性的只读 SELECT）。
 //
+// 【拖拽定位（Seek，2026-10-18）】
+//   横幅的进度条可拖拽：拖拽中（`@input`）只改目标时间文字，**不重绘**；松开（`@change`）
+//   调用一次 `seekReplaySession(ratio)` —— 停表 → 清空三页视图 → 把 `0 → 目标索引` 的
+//   事件全量 apply 一遍（指标窗口逐秒重算、订单流转逐条重放、日志行一把补画）→ 瞬间重绘；
+//   之前在播则从新位置续播，之前暂停则停在新位置。重建期间 `replaySession.seeking=true`，
+//   横幅显示 loading 遮罩；`seekSeq` 是给日志页 / 状态页的清空信号（与 `restartSeq` 分开）。
+//
 // 【回放绝不合并同类事件】
 //   日志页的 `absorbEvents(..., { noAgg: true })` 由 EventLog 保证（用户 2026-10-17：
 //   回放是查案，要 1:1 看并发时序，不允许 ×N）。本模块不提供任何聚合开关。
@@ -36,7 +43,7 @@
 //   回放只进 `normal` 桶（日志页的 `absorbEvents(..., 'normal')`）。进入回放前调用方会
 //   把 `demo.on` 关掉 —— 两个「过去/假数据」模式同时开，页面上就说不清在看什么。
 
-import { reactive } from 'vue'
+import { nextTick, reactive } from 'vue'
 import { replay as fetchReplay } from './observe'
 import { advanceMetricWindow, createMetricWindow, flushMetricWindow, pushMetricEvent } from './replay-metrics'
 // 回放只进 `normal` 桶（日志页的 `absorbEvents(..., 'normal')`）：若「模拟日常」还开着，
@@ -115,6 +122,18 @@ export const replaySession = reactive({
   /** 「重新开始」计数：每次重放 +1。三页 watch 它来清掉自己那份回放视图
    *  （日志行、状态机重建、直方图样本），会话本身不动。 */
   restartSeq: 0,
+  /** 拖拽定位（Seek）**正在重建**：横幅画 loading 遮罩，`@input` 期间不触发任何重绘。 */
+  seeking: false,
+  /** 本次 seek 的目标百分比（只在 `seeking` 时有效，横幅显示「正在重建到 40%」）。 */
+  seekPct: 0,
+  /** 「定位重建」信号：每次 seek +1。日志页据此清掉旧行、状态页据此清掉状态机，
+   *  然后会话把 `0 → 目标索引` 的历史事件重新 apply 一遍。与 `restartSeq` 分开：
+   *  重放是「回到 0 继续播」，seek 是「跳到任意位置且可能不再继续」。 */
+  seekSeq: 0,
+  /** 正在批量 apply 历史事件（不是正常的一帧一帧吐）。
+   *  ⚠️ 状态页据此**跳过逐条粒子/高亮动画**：历史高亮发生在过去，重建时补闪等于把
+   *     几千条流转同时说成「刚刚」。 */
+  rebuilding: false,
 })
 
 /** 全量行（非响应式）：`{ off, ts, event }`，`off` = 距首条事件的毫秒偏移。 */
@@ -133,6 +152,8 @@ let metricWindow = createMetricWindow()
 /** 自适应上限的统计口：1 秒墙钟内的吐出条数。 */
 let rateStart = 0
 let rateCount = 0
+/** 拖拽定位的世代号：新的一次 seek / 退出会话会让旧的异步重建立即作废。 */
+let seekToken = 0
 
 /** 指标拍滚动保留数：页面窗口 60，留 10 倍余量给切页 / 暂停后回来。 */
 const METRIC_TICK_CAP = 600
@@ -207,6 +228,8 @@ function toEvent(r, i) {
 }
 
 function resetSession() {
+  // 作废仍在 await 里的 seek：否则它在装载/退出之后还会往新会话里写一次历史重建。
+  seekToken += 1
   rows = []
   backlog = []
   virtualMs = 0
@@ -238,6 +261,9 @@ function resetSession() {
   replaySession.stateChanges = []
   replaySession.metricSeq = 0
   replaySession.stateSeq = 0
+  replaySession.seeking = false
+  replaySession.seekPct = 0
+  replaySession.rebuilding = false
 }
 
 function stopClock() {
@@ -428,12 +454,28 @@ export async function startReplaySession(batchId, recordSnapshot) {
     replaySession.spanMs = Math.max(0, t1 - t0)
     // 自适应每帧上限：50 条/帧是下限，密集批次按峰值放宽（上限 200）。
     replaySession.maxPerFrame = adaptiveCap(rows, replaySession.speed)
+
+    // ⚠️ 2026-10-18：**空批次绝不能进入回放模式**。
+    //    `observed_event` 有保留期清理（攻击批次 3 天），而 `drill_record` 不参与那次清理
+    //    ⇒ 历史批次下拉里可能有「记录还在、台账已删空」的孤儿批次。旧代码在这里把
+    //    `active=true`、`done=true` 后直接 return —— 页面会显示「进度 0/0 · 已放完」，
+    //    看起来像放完了，实际是假死（用户批文点名禁止）。
+    //    现在的处置：**先退出会话**（`resetSession` 会把 active/loading/cur 全部归零，
+    //    三个页面据此恢复实时流），再把错误挂回这个批次并抛给调用方显示。
+    //    ⚠️ `batchId` 要在 reset **之后**写回：攻击页那行错误是按
+    //    `replaySession.batchId === r.BatchId` 匹配的，清掉它就看不到错误了。
+    if (!rows.length) {
+      const message = `该批次历史数据已过期被清理，无法回放（批次 ${batchId}）`
+      resetSession()
+      replaySession.batchId = batchId
+      replaySession.err = message
+      throw new Error(message)
+    }
     // ⚠️ 先 `active` 后 `loading`：日志页有一个 `loading: true→false` 的兜底 watch
     //    （装载失败时恢复实时流）—— 顺序反了会在成功的这一格误触发一次重连。
     replaySession.active = true
     replaySession.loading = false
-    replaySession.done = rows.length === 0
-    if (!rows.length) return replaySession
+    replaySession.done = false
     startClock()
     return replaySession
   } catch (e) {
@@ -546,6 +588,150 @@ export function restartReplaySession() {
   replaySession.maxPerFrame = adaptiveCap(rows, replaySession.speed)
   replaySession.restartSeq += 1
   startClock()
+}
+
+/** 等到下一帧：让横幅的 loading 遮罩先上屏，再开始同步重建（否则 35k 条的重建
+ *  会在同一个任务里做完，用户看不到任何「正在计算」的反馈）。 */
+function nextFrame() {
+  return new Promise((resolve) => {
+    if (typeof requestAnimationFrame === 'function') requestAnimationFrame(() => resolve())
+    else setTimeout(resolve, 0)
+  })
+}
+
+/** 首个 `off > targetOff` 的下标（二分）。返回它 = 目标时刻**已发生**的事件条数。 */
+function upperBoundByOff(targetOff) {
+  let lo = 0
+  let hi = rows.length
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1
+    if (rows[mid].off <= targetOff) lo = mid + 1
+    else hi = mid
+  }
+  return lo
+}
+
+/**
+ * 拖拽定位（Seek）：把播放位置跳到 `ratio`（0~1），并**重建那一刻的全部状态**。
+ *
+ * <p>步骤（与用户 2026-10-18 的「视频播放器」规格逐条对应）：
+ * <ol>
+ *   <li>立刻停表（暂停自动播放）；`seeking=true` 让横幅画 loading 遮罩。</li>
+ *   <li>按 `ratio × spanMs` 换算出目标时间戳，再用二分找到 `0 → 目标索引`。</li>
+ *   <li>发 `seekSeq` 信号，让日志页清行、状态页清状态机；清空指标拍数组
+ *       （指标页的图表全部是 `metricTicks` 的 computed，数组一空即重绘为空）。</li>
+ *   <li>在一个同步批次里把 `0 → 目标索引` 的事件**全量 apply 一遍**：指标窗口逐条重算、
+ *       指标拍逐秒补齐、订单流转逐条入列、日志行一把交给日志页 —— 得到的就是那一刻的
+ *       积压 / QPS / 流轨 / 明细，而不是「目标之前的状态 + 目标之后的增量」。</li>
+ *   <li>若之前是播放态，从新位置继续播；若之前是暂停/已放完，则停在新位置等用户继续。</li>
+ * </ol>
+ *
+ * <p>⚠️ **拖拽过程中不调用它**：横幅的 `@input` 只改时间文字，`@change`（松开鼠标）
+ *    才调用一次。这里自己也按世代号防重入：快速连拖时旧的重建会在下一个 await 处作废。
+ *
+ * @param {number} ratio 0~1
+ * @param {{resume?: boolean}} [opts] `resume`：重建完成后是否继续播（默认按当前是否在播推断；
+ *        横幅在 pointerdown 时已经暂停了时钟，所以会把「拖拽前是否在播」显式传进来）
+ */
+export async function seekReplaySession(ratio, opts) {
+  if (!replaySession.active || !rows.length) return
+  const token = ++seekToken
+  const targetRatio = Math.max(0, Math.min(1, Number(ratio) || 0))
+  const resume = opts && typeof opts.resume === 'boolean'
+    ? opts.resume
+    : (!replaySession.paused && !replaySession.done)
+
+  // ① 立刻停表：拖拽/重建期间不允许时钟继续往前走（否则重建完又被下一帧覆盖）。
+  stopClock()
+  replaySession.playing = false
+  replaySession.seeking = true
+  replaySession.seekPct = Math.round(targetRatio * 100)
+  replaySession.rebuilding = true
+
+  // ② 先让遮罩上屏一帧，再做同步重建。
+  await nextTick()
+  await nextFrame()
+  if (token !== seekToken) return
+
+  try {
+    // ③ 目标时间戳与目标索引。`spanMs` = 首末事件的差；拖动 40% ⇒ 日志时间 40% 处。
+    //    ⚠️ 极端批次（所有事件同一毫秒、spanMs=0）没有时间轴可拖 ⇒ 退回按条数比例。
+    let targetOff = 0
+    let idx = 0
+    if (replaySession.spanMs > 0) {
+      targetOff = targetRatio * replaySession.spanMs
+      idx = upperBoundByOff(targetOff)
+    } else {
+      idx = Math.round(targetRatio * rows.length)
+      targetOff = idx > 0 ? rows[idx - 1].off : 0
+    }
+    const atEnd = idx >= rows.length
+    if (atEnd) {
+      idx = rows.length
+      targetOff = replaySession.spanMs
+    }
+
+    // ④ 清空「三页共享的派生状态」。指标页的图表全是 computed，数组一空就清空；
+    //    日志页 / 状态页没有 computed 源，需要 `seekSeq` 信号。
+    replaySession.metricTicks = []
+    replaySession.metricSeq = 0
+    replaySession.stateChanges = []
+    replaySession.stateSeq = 0
+    replaySession.cursor = 0
+    replaySession.elapsedMs = 0
+    replaySession.clockTs = replaySession.startTs
+    // 指标窗口 / backlog 是模块级的，必须一起归零：否则重建会从旧窗口的 `lastOff`
+    // 继续推进（往前的 seek 出不了拍，往后的 seek 会把旧队列里的未来事件算进来）。
+    metricWindow = createMetricWindow()
+    backlog = []
+    replaySession.seekSeq += 1
+    await nextTick()
+    if (token !== seekToken) return
+
+    // ⑤ 把 0 → 目标索引全量重放。指标窗口、指标拍、状态流转、日志行进同一份历史。
+    const applied = idx > 0 ? rows.slice(0, idx) : []
+    // ⚠️ 指标窗口必须**先把这一整段全部入队，再统一推进到目标时刻**。
+    //    逐条 `push → advance` 会在「同一毫秒有多条事件」时丢数：推进到边界的那一条
+    //    提前生成本秒拍，同毫秒的后续条还没来得及入队，而它们又因 `off <= 左边界`
+    //    永远进不了下一拍（实测 40% 处本拍少 1 条）。一次性推进由 `advanceMetricWindow`
+    //    按 `(from, boundary]` 过滤，同毫秒的事件全部落在同一拍。
+    for (const row of applied) pushMetricEvent(metricWindow, row.event, row.off)
+    appendMetricTicks(advanceMetricWindow(metricWindow, targetOff))
+    appendStateChanges(applied)
+    if (applied.length) deliver(applied.map((row) => row.event))
+
+    // ⑥ 落位。`virtualMs` 与目标时间戳一致，下一帧不会补吐/倒退。
+    virtualMs = targetOff
+    lastNow = performance.now()
+    rateStart = 0
+    rateCount = 0
+    replaySession.cursor = idx
+    replaySession.elapsedMs = atEnd ? replaySession.spanMs : targetOff
+    replaySession.clockTs = atEnd ? replaySession.endTs : replaySession.startTs + targetOff
+    replaySession.playing = false
+    replaySession.effectiveRate = 0
+
+    if (atEnd) {
+      // 拖到最右 = 放完：与正常播放的收尾同口径（补最后半拍、游标落在末尾）。
+      appendMetricTicks(flushMetricWindow(metricWindow, replaySession.spanMs))
+      replaySession.done = true
+      replaySession.paused = false
+    } else {
+      replaySession.done = false
+      // 之前是播放态 ⇒ 从新位置继续；之前是暂停/已放完 ⇒ 停在新位置等用户继续。
+      replaySession.paused = !resume
+      if (resume) startClock()
+    }
+
+    await nextTick()
+  } finally {
+    // 只有最新一代 seek 有资格关遮罩（快速连拖时，旧的一代不能把新的一代的遮罩关掉）。
+    if (token === seekToken) {
+      replaySession.rebuilding = false
+      replaySession.seeking = false
+      replaySession.seekPct = 0
+    }
+  }
 }
 
 /** 退出回放：停表、放掉全量数组。日志页/指标页各自 watch `active` 恢复实时。 */

@@ -1,7 +1,7 @@
 // src/api/observe.js —— 可观测面板的客户端（块 7 commit 3 的 SSE + commit 4 的三个普通 POST
 // + commit 8b 的清场 + commit 10c 的暂停与三条流的自动重连）。
 //
-// 十一条端点（**全在** `endpoints.js` 里，本文件一个后端路径字面量都不出现 —— 那条判据可 grep 自动化）：
+// 十二条端点（**全在** `endpoints.js` 里，本文件一个后端路径字面量都不出现 —— 那条判据可 grep 自动化）：
 //   metrics → 指标面板（KPI / 锁 / 防护 / 库存水位）          ┐
 //   orders  → 状态流转页（五态计数 / 最近订单 / 本拍流转）      ├ 三条 **SSE 流**（commit 3；
 //   events  → 实时日志页（8 类归一化事件流）                  ┘ commit 10c 起**自带自动重连**）
@@ -13,6 +13,8 @@
 //   replay        → 演练回放（块 7 收尾）—— 普通 POST、**只读**、有入参（`batchId` + `limit`）；
 //                   ⚠️ 唯一一条**不属于 `AttackController`** 的（路径在 `/admin/observe` 根，
 //                   后端是 `ReplayController` —— 它读的是事件台账，不是演练记录）
+//   attackReset   → 复位演练环境（2026-10-18）—— 普通 POST、**无入参**；改种子行的库存 / 在架 /
+//                   冻结状态（不删行、不碰真实业务），调用点必须回显 `summary`
 //   metricsHistory → 指标首屏历史（2026-10-17）—— 普通 POST、**只读**、可选 `limit`；
 //                   一次回最近 60 拍已算好的帧（与流帧同形），页面挂载时先铺满再接着消费流
 //
@@ -474,6 +476,22 @@ export function attackRecords(p) {
 export function cleanupAttack() {
   // body 传空串：本仓 POST 一律带 urlencoded 头（同 `attackScenarios()`），后端不读 body。
   return postJson(endpoints.observe.attackCleanup, '')
+}
+
+// ==================== 复位演练环境（块 7 · 2026-10-18）====================
+//
+// ⚠️ 与 `cleanupAttack` 的区别：清场**删攻击写出的行**，复位**改种子行的值**
+//   （库存 / 父商品在架 / 商家冻结 / 秒杀已售）。压测把库存打空后，只清场删不回库存 ⇒
+//   下一轮 `attackRun` 仍报「库里挑不到可演练的商品」。错误态那颗按钮走本函数。
+// ⚠️ 作用面由后端按种子标记判（`SEED-%` / `Source='seed'`）—— 前端不传范围、也没有范围可传。
+/**
+ * 复位演示种子的演练环境（**无入参**）。
+ *
+ * @returns {Promise<{success:boolean, restored:Object<string,number>, total:number, summary:string}>}
+ *          `summary` 是可直接显示的中文一句话；调用点**回显它**，不要只提示「已重置」。
+ */
+export function resetAttackEnvironment() {
+  return postJson(endpoints.observe.attackReset, '')
 }
 
 // ==================== 指标页首屏历史（块 7 · 2026-10-17）====================

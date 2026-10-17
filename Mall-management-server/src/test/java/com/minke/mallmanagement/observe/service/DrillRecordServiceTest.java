@@ -57,6 +57,8 @@ class DrillRecordServiceTest {
         r.put("CreatedAt", "2026-10-13 20:00:00");
         // 块 7 收尾：回放的入口键（用户 2026-10-15 裁「甲」）—— 顺序与 `DrillRecordDao.COLUMNS` 一致（尾部）
         r.put("BatchId", "b-1");
+        // 2026-10-18：台账是否还在（DAO 的索引子查询）—— 同样在 COLUMNS 尾部
+        r.put("EventCount", 120L);
         return r;
     }
 
@@ -82,14 +84,38 @@ class DrillRecordServiceTest {
         //    `split()` 把 Result 摘下来最后再放回去的结果（块 7 收尾补 BatchId 时才显出来）。
         assertEquals(List.of("Id", "OperatorId", "OperatorRole", "Name", "Scenario",
                         "TotalRequests", "BlockedRequests", "FailedRequests", "DurationMs",
-                        "CreatedAt", "BatchId", "Result"),
+                        "CreatedAt", "BatchId", "EventCount", "HasData", "Result"),
                 List.copyOf(list.get(0).keySet()));
         // ⚠️ 这一个键是**回放能不能用**的全部：没有它，页面那个〔回放〕按钮无从知道该回放哪一批
         //    （块 7 收尾实测：它此前**没有**出现在任何响应里 —— 库里两处都有这个值）。
         assertEquals("b-1", list.get(0).get("BatchId"));
+        // 有台账 ⇒ HasData=true（前端据此保持〔回放〕可用）
+        assertEquals(Boolean.TRUE, list.get(0).get("HasData"));
         assertEquals(1L, out.get("total"));
         assertEquals(DrillRecordService.DEFAULT_LIMIT, out.get("limit"));
         assertEquals(0, out.get("offset"));
+    }
+
+    /**
+     * 台账已过保留期被清理的批次：{@code EventCount=0} ⇒ {@code HasData=false}。
+     *
+     * <p>⚠️ 这是 2026-10-18 修「孤儿记录 / 空回放」的**服务层判据**：记录行还在（drill_record
+     * 不参与保留期清理），但 observed_event 已删空 ⇒ 前端必须能看出「这一点进去是 0/0」。
+     * 负向用例（0）与上面正向用例（120）成对，缺一条都证明不了这个标志真的跟着计数走。
+     */
+    @Test
+    void marksRecordsWhoseEventsWerePruned() {
+        Map<String, Object> orphan = row("{}", "");
+        orphan.put("EventCount", 0L);
+        when(dao.selectRecords(anyInt(), anyInt())).thenReturn(List.of(orphan));
+        when(dao.countRecords()).thenReturn(1L);
+
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> list =
+                (List<Map<String, Object>>) service.records(null, null).get("list");
+
+        assertEquals(0L, list.get(0).get("EventCount"));
+        assertEquals(Boolean.FALSE, list.get(0).get("HasData"));
     }
 
     /** 坏行：解析失败 ⇒ {@code Result} 为 null + 原串挂 {@code ResultRaw} + 标错（**不静默**）。 */

@@ -20,12 +20,13 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 
 /**
- * 攻击模拟器的**八个**出口（块 7 · commit 4 建前三条、commit 8b 加第四条、commit 10 加第五条、
- * 块 7 收尾加第六条、**3a.1 加第七条与第八条 = 开关配置**）：场景清单 / 跑一轮 / **叫停** /
- * 演练记录 / **清理演练数据** / **实时进度** / **读开关配置** / **写开关配置**。
+ * 攻击模拟器的**九个**出口（块 7 · commit 4 建前三条、commit 8b 加第四条、commit 10 加第五条、
+ * 块 7 收尾加第六条、**3a.1 加第七条与第八条 = 开关配置**、**2026-10-18 加第九条 = 复位演练环境**）：
+ * 场景清单 / 跑一轮 / **叫停** / 演练记录 / **清理演练数据** / **实时进度** /
+ * **读开关配置** / **写开关配置** / **复位演练环境**。
  *
  * <h2>【端点口径：不加角色闸、不在白名单】</h2>
- * 八条与本批 SSE 三条**逐字同款**（{@code MetricsStreamController} 写了完整理由）：
+ * 九条与本批 SSE 三条**逐字同款**（{@code MetricsStreamController} 写了完整理由）：
  * {@code AUTH_WHITELIST} 维持 14 不动（管理端端点没有公开面，靠 {@code AuthInterceptor} 拦）；
  * 不给 {@code /admin/**} 加角色判据（TD-18 —— 加了之后默认 profile 上管理员自己也进不来）。
  *
@@ -42,7 +43,7 @@ import java.util.Map;
  *       换到的是「读用 GET、写用 POST」在代码里一眼分得开（{@code http.get} 已存在，
  *       见 {@code http.js}）。</li>
  * </ol>
- * ⚠️ 其余七条**一条都没动**：{@code /run} 仍收 {@code @RequestParam}、仍然 POST。
+ * ⚠️ 其余八条**一条都没动**：{@code /run} 仍收 {@code @RequestParam}、仍然 POST。
  *
  * <h2>【入参一律 {@code @RequestParam}（+ 一个 JSON 串参数），不用 {@code @RequestBody}】</h2>
  * 三条理由，任一条都足够：
@@ -166,6 +167,12 @@ public class AttackController {
         }
         AuthSession.Identity who = AuthSession.identify(request);
         try {
+            // 2026-10-18：开跑前自检。压测把种子库存打空 / 把父商品打下架 / 把商家冻住之后，
+            // 下一轮会稳定报「库里挑不到可演练的商品」；这里在库存不足时静默复位一次，
+            // 让「再点一次开始」就能跑（用户批文第二节的可选进阶）。
+            // ⚠️ 它是**尽力而为**：复位失败不抛（见 `ObservedEventCleanupService` 类注释的例外），
+            //    引擎仍按原样报「挑不到靶子」，不把一轮本来能跑的演练翻成 500。
+            cleanupService.autoResetIfNeeded();
             Map<String, Object> payload = drillRecordService.run(name, concurrency, durationSeconds,
                     targetQps, scenarios,
                     who == null || who.userId() == null ? "" : who.userId(),
@@ -407,6 +414,39 @@ public class AttackController {
         Map<String, Object> payload = cleanupService.cleanupAttackData();
         auditService.record(AuthSession.identify(request), AuditActions.OBSERVE_ATTACK_CLEANUP, "attack",
                 String.valueOf(payload.get("summary")), null, payload.get("deleted"));
+        return Result.of(payload);
+    }
+
+    // ==================== 2026-10-18：复位演练环境（第九条出口）====================
+
+    /**
+     * 复位**演示种子**被压测改变的状态（无入参）：{@code goods_sku.Stock} / 父商品在架 /
+     * 商家未冻结 / 秒杀已售。
+     *
+     * <h2>【为什么它必须是一个端点】</h2>
+     * 压测把演示 SKU 的库存扣到 0 之后，{@code /run} 会稳定报
+     * 「库里挑不到可演练的商品」—— 而清场端点只删攻击写出来的行，**删不回库存**。
+     * 让演示人在答辩台上手敲 {@code UPDATE goods_sku SET Stock = …} 是把一次演示赌在
+     * 「他记得住那条 SQL」上。本端点把它变成一次点击。
+     *
+     * <h2>【作用面：只碰种子，真实业务不动】</h2>
+     * 判据是 {@code goods_sku.SkuCode LIKE 'SEED-%'} / {@code goods.Source='seed'} /
+     * {@code user.Source='seed'}（逐条见 {@code ObservedEventCleanupDao.restoreSeedEnvironment}）。
+     *
+     * <h2>【⚠️ 写审计：它改的是真行的值】</h2>
+     * 与 {@code /cleanup} 同一档：虽然不删行，但把库存 / 在架 / 冻结状态改回基准，
+     * 是一次**不可从响应反推回原值**的写（响应只有计数）。⇒ 记
+     * {@code OBSERVE_ATTACK_RESET}，{@code AfterJson} 存按表计数，{@code BeforeJson} 传
+     * {@code null}（不先把整批原值读一遍，同 {@code /cleanup}）。
+     *
+     * <p>⚠️ {@code /run} 里还有一条**静默**自动复位（库存 &lt; 阈值时），那条不写审计 ——
+     * 它是让「再点一次开始」能跑的无感兜底，不是一次运维动作；显式点按钮才有操作者。
+     */
+    @PostMapping("/reset")
+    public Result<Map<String, Object>> reset(HttpServletRequest request) {
+        Map<String, Object> payload = cleanupService.resetDrillEnvironment();
+        auditService.record(AuthSession.identify(request), AuditActions.OBSERVE_ATTACK_RESET, "attack",
+                String.valueOf(payload.get("summary")), null, payload.get("restored"));
         return Result.of(payload);
     }
 }

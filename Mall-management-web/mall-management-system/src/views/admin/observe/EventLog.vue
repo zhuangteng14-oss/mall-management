@@ -2389,6 +2389,13 @@ watch(() => replaySession.active, (on) => {
 watch(() => replaySession.restartSeq, () => {
   if (replaySession.active) enterReplayView()
 })
+// 拖拽定位（Seek）：会话要把「0 → 目标索引」重新投一遍 ⇒ 本页先清掉旧行。
+// ⚠️ 与「重新开始」分开一个信号：重放后会话继续按原速播，而 seek 可能停在原地。
+//    清完之后会话会把历史事件走同一个 `sink` 交回来（`onReplayBatch`），所以这里
+//    仍然复用 `enterReplayView`，不另写一套清空逻辑。
+watch(() => replaySession.seekSeq, () => {
+  if (replaySession.active) enterReplayView()
+})
 // 装载失败兜底（成功时 `active` 已先置 true，这里不会再连）：
 // 回放没装载成功 ⇒ 恢复用户原来那条实时流，页面不会停在「什么都不更新」的状态。
 watch(() => replaySession.loading, (loading, was) => {

@@ -22,7 +22,7 @@ package com.minke.mallmanagement.admin;
  * 其余 15 个改库端点**随各自那一笔**挂（横切本来就该跟着业务改动走，见
  * {@code docs/agent/c3-modules.md} §11 与 {@code slot-registry.md} 末条）。
  * ⇒ 每挂一个新勾，**在这里加一条**。今天有 2 条：{@link #GOODS_UPDATE}（批 A 的样板）
- * 与 {@link #NOTIFICATION_SEND}（块 1 · I2 的**第二个**挂钩点）。⚠️ 上面那两句说的是**开笔当时**的实况，别拿它当今天的清单：此后块 2～6 各自把自己那一笔挂了上来，**今天共 45 条**（块 7 · commit 8 跨域补挂 {@link #GOODS_DELETE} / {@link #COMMENT_DELETE} 两条；commit 8b 加 {@link #OBSERVE_ATTACK_CLEANUP}）（数常量、不数调用点 —— {@code coupon.stop} 等一条 tag 覆盖两个端点，{@code seckill.*} 三个 tag 挂在同一个 Controller 的三个方法上）；**清单就是下面那些常量**，本段只是「为什么一开始只有 1 条」的由来。
+ * 与 {@link #NOTIFICATION_SEND}（块 1 · I2 的**第二个**挂钩点）。⚠️ 上面那两句说的是**开笔当时**的实况，别拿它当今天的清单：此后块 2～6 各自把自己那一笔挂了上来，**今天共 46 条**（块 7 · commit 8 跨域补挂 {@link #GOODS_DELETE} / {@link #COMMENT_DELETE} 两条；commit 8b 加 {@link #OBSERVE_ATTACK_CLEANUP}）（数常量、不数调用点 —— {@code coupon.stop} 等一条 tag 覆盖两个端点，{@code seckill.*} 三个 tag 挂在同一个 Controller 的三个方法上）；**清单就是下面那些常量**，本段只是「为什么一开始只有 1 条」的由来。
  */
 public final class AuditActions {
 
@@ -327,6 +327,22 @@ public final class AuditActions {
      * 没有一个表名配得上它。
      */
     public static final String OBSERVE_ATTACK_CLEANUP = "observe.attack.cleanup";
+
+    // ==================== 2026-10-18：演练环境复位新增的 1 条 ====================
+    // 由来：攻击模拟器新增 `POST /admin/observe/attack/reset` —— 把压测打空的种子库存 /
+    // 下架的父商品 / 冻结的演示商家复位回可演练状态。它**不删行**，但改的是真行的值
+    // （库存、在架、冻结），且响应只回计数、原值不保留 ⇒ 与 `/cleanup` 同一档，必须留痕。
+
+    /**
+     * 复位演练环境 —— {@code POST /admin/observe/attack/reset}（种子 SKU 库存 / 父商品在架 /
+     * 商家解冻 / 秒杀已售）。
+     *
+     * <p>{@code TargetType="attack"}（跨表的一批种子行，没有单个表名配得上）；
+     * {@code TargetId} 用服务层回的中文摘要（「演练环境已复位：共 N 行（…）」）；
+     * {@code AfterJson} 存按表计数；{@code BeforeJson} 传 {@code null}（同 `/cleanup`，
+     * 不先把整批原值读一遍）。
+     */
+    public static final String OBSERVE_ATTACK_RESET = "observe.attack.reset";
 
     private AuditActions() {
     }

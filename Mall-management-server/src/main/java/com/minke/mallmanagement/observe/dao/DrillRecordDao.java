@@ -51,12 +51,21 @@ public class DrillRecordDao {
      * <p>⚠️ 顺序：追加在**最后**（{@code CreatedAt} 之后）—— 新字段加在尾部，别插在中间：
      * 前端表格列顺序跟着这个键序走（{@code DrillRecordServiceTest} 钉住了它）。
      * ⚠️ 而 {@code Result} **总是**排在最末：{@code DrillRecordService.split()} 会把它从原位置摘下来、
-     * 最后再放回去（见那个方法）⇒ 响应里每行的键序是 {@code […, DurationMs, CreatedAt, BatchId, Result]}。
+     * 最后再放回去（见那个方法）⇒ 响应里每行的键序是
+     * {@code […, DurationMs, CreatedAt, BatchId, EventCount, HasData, Result]}。
+     * <p>⚠️ {@code EventCount}（2026-10-18）同样追加在尾部：它是**派生列**（子查询），
+     * 不该插在业务列中间；{@code HasData} 由服务层紧随其后生成。
      */
     private static final String COLUMNS =
-            "Id, OperatorId, OperatorRole, Name, Scenario, TotalRequests, BlockedRequests, "
-                    + "FailedRequests, DurationMs, CAST(Result AS CHAR) AS Result, "
-                    + "DATE_FORMAT(created_at, '%Y-%m-%d %H:%i:%s') AS CreatedAt, BatchId ";
+            "r.Id, r.OperatorId, r.OperatorRole, r.Name, r.Scenario, r.TotalRequests, r.BlockedRequests, "
+                    + "r.FailedRequests, r.DurationMs, CAST(r.Result AS CHAR) AS Result, "
+                    + "DATE_FORMAT(r.created_at, '%Y-%m-%d %H:%i:%s') AS CreatedAt, r.BatchId, "
+                    // 2026-10-18：批次**是否还有台账**。observed_event 有保留期清理（攻击批次 3 天），
+                    // 而 drill_record 不参与那次清理 ⇒ 过期批次的记录还在、事件已删空，下拉框会给出
+                    // 一个点进去 0/0 的「幽灵批次」。这一列让列表能把它们标出来（服务层转成 HasData）。
+                    // ⚠️ 子查询走 `idx_observed_event_batch`（Migration ⑲-1），每行一次索引 COUNT。
+                    + "(SELECT COUNT(*) FROM mall_management_sql.observed_event e "
+                    + " WHERE e.BatchId = r.BatchId) AS EventCount ";
 
     private final JdbcClient jdbcClient;
 
@@ -109,8 +118,8 @@ public class DrillRecordDao {
 
     /** 按时间倒序列演练记录（{@code Id} 兜底：同一秒内的多行顺序稳定、可复算）。 */
     public List<Map<String, Object>> selectRecords(int limit, int offset) {
-        return jdbcClient.sql("SELECT " + COLUMNS + "FROM mall_management_sql.drill_record "
-                        + "ORDER BY created_at DESC, Id DESC LIMIT ? OFFSET ?")
+        return jdbcClient.sql("SELECT " + COLUMNS + "FROM mall_management_sql.drill_record r "
+                        + "ORDER BY r.created_at DESC, r.Id DESC LIMIT ? OFFSET ?")
                 .params(limit, offset).query().listOfRows();
     }
 
@@ -123,7 +132,7 @@ public class DrillRecordDao {
     /** 单条演练记录（详情用；{@code Result} 已 CAST 成字符串）。没这一行 ⇒ {@code null}。 */
     public Map<String, Object> selectRecordById(long id) {
         List<Map<String, Object>> rows = jdbcClient.sql(
-                        "SELECT " + COLUMNS + "FROM mall_management_sql.drill_record WHERE Id = ?")
+                        "SELECT " + COLUMNS + "FROM mall_management_sql.drill_record r WHERE r.Id = ?")
                 .param(id).query().listOfRows();
         return rows.isEmpty() ? null : rows.get(0);
     }

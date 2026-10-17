@@ -65,6 +65,27 @@ public class ObservedEventCleanupDao {
     private static final List<String> CHILD_FIRST =
             List.of("order_item", "order_state_transition", "coupon_grant", "order_shipping_track");
 
+    /**
+     * 种子 SKU 的**来源标记** —— {@code goods_sku} 没有 {@code Source} 列（Migration ⑰-2 只加了
+     * {@code BaselineStock}），所以这一段种子的「是谁写的」只能按码前缀认，同 {@code seed-demo.sql}
+     * ⑤-b 段的口径。
+     */
+    private static final String SEED_SKU_PREFIX = "SEED-%";
+
+    /**
+     * 复位后**至少**给到多少库存（2026-10-18 用户批文「如 1000 或种子初始值」）。
+     * ⚠️ 优先用人工拍的 {@code BaselineStock}；没有基线时用 1000 —— 但两者都要过一道
+     * {@link #MIN_RESET_STOCK}：基线可能是在**上一轮已经打空之后**才拍的 0，
+     * 照抄它会让「复位」复位成仍然跑不起来。
+     */
+    private static final int RESET_STOCK_FLOOR = 1000;
+
+    /**
+     * 「可演练」的库存下限 —— **复位后也必须达到它**，否则自检会立刻认为还需要复位。
+     * 服务层 {@code AUTO_RESET_STOCK_THRESHOLD} 引用的就是本常量（两处必须同值）。
+     */
+    public static final int MIN_RESET_STOCK = 100;
+
     private final JdbcClient jdbcClient;
 
     public ObservedEventCleanupDao(JdbcTemplate jdbcTemplate) {
@@ -156,6 +177,83 @@ public class ObservedEventCleanupDao {
             deleted.put("observed_event", events);
         }
         return deleted;
+    }
+
+    // ==================== ①-b 复位「演练环境」（2026-10-18 用户批文） ====================
+
+    /**
+     * 把**演示种子**被压测改变的三件事复位，返回「哪张表命中了几行」（只含非零项）。
+     *
+     * <h2>【为什么清场不够】</h2>
+     * {@link #deleteAttackData()} 只删**攻击写出来的行**（订单 / 评论 / 台账），但压测还会
+     * **改既有种子行的数值**：{@code goods_sku.Stock} 被扣到 0、父 {@code goods} 被下架、
+     * 商家被冻结。下一轮 {@code AttackEngine.resolveTarget()} 因此挑不到靶子，
+     * 页面只能报「库里挑不到可演练的商品」—— 删行删不回库存，这是两类不同的动作。
+     *
+     * <h2>【作用面：只碰种子，判据写在 SQL 里】</h2>
+     * <ul>
+     *   <li>{@code goods_sku}：{@code SkuCode LIKE 'SEED-%'}（该表没有 {@code Source} 列，
+     *       前缀就是它的来源标记，同 {@code seed-demo.sql} ⑤-b）；</li>
+     *   <li>{@code goods}：{@code Source='seed'} <b>且</b>是种子 SKU 的父商品
+     *       （不碰 {@code Source='seed'} 但不在演练靶子里的商品 —— 那些商品的上下架
+     *       可能是演示脚本故意摆的状态）；</li>
+     *   <li>{@code user}：{@code Source='seed'} 且是种子 SKU 所属商家；</li>
+     *   <li>{@code seckill_activity}：父商品是 {@code Source='seed'} 的活动。</li>
+     * </ul>
+     * ⇒ 真实业务行（{@code Source} 为空的存量数据 / 真实商家）**一个字节都不动**。
+     *
+     * <h2>【库存取什么值】</h2>
+     * {@code GREATEST(COALESCE(BaselineStock, 1000), 100)}：
+     * 优先人工拍的基线，没有基线给 1000（用户批文点名的值），两者都不低于
+     * {@link #MIN_RESET_STOCK} —— 理由见 {@link #RESET_STOCK_FLOOR}。
+     * 秒杀侧同款：{@code SoldStock = COALESCE(BaselineSoldStock, 0)}。
+     *
+     * <p>⚠️ 本方法**不删任何行**，也不碰 {@code observed_event}（复位是写业务表，不是写台账）；
+     * 调用方可以先 {@link #deleteAttackData()} 再复位，两件事互不依赖。
+     */
+    public Map<String, Integer> restoreSeedEnvironment() {
+        Map<String, Integer> restored = new LinkedHashMap<>();
+
+        int skus = jdbcClient.sql(
+                        "UPDATE mall_management_sql.goods_sku "
+                                + "SET Stock = GREATEST(COALESCE(BaselineStock, ?), ?) "
+                                + "WHERE SkuCode LIKE ?")
+                .params(RESET_STOCK_FLOOR, MIN_RESET_STOCK, SEED_SKU_PREFIX).update();
+        if (skus > 0) {
+            restored.put("goods_sku", skus);
+        }
+
+        int goods = jdbcClient.sql(
+                        "UPDATE mall_management_sql.goods g "
+                                + "SET g.ShelfState = 1, g.DelistedAt = NULL, g.DeletedAt = NULL "
+                                + "WHERE g.Source = 'seed' AND g.Id IN ("
+                                + "SELECT GoodsId FROM mall_management_sql.goods_sku WHERE SkuCode LIKE ?)")
+                .param(SEED_SKU_PREFIX).update();
+        if (goods > 0) {
+            restored.put("goods", goods);
+        }
+
+        int merchants = jdbcClient.sql(
+                        "UPDATE mall_management_sql.`user` u "
+                                + "SET u.DowngradeState = 'none', u.ScheduledDowngradeAt = NULL, "
+                                + "u.DowngradeReason = NULL, u.FrozenAt = NULL, u.FreezeUntil = NULL "
+                                + "WHERE u.Source = 'seed' AND u.merchantid IN ("
+                                + "SELECT DISTINCT MerchantId FROM mall_management_sql.goods_sku "
+                                + "WHERE SkuCode LIKE ?)")
+                .param(SEED_SKU_PREFIX).update();
+        if (merchants > 0) {
+            restored.put("user", merchants);
+        }
+
+        int seckill = jdbcClient.sql(
+                        "UPDATE mall_management_sql.seckill_activity sa "
+                                + "JOIN mall_management_sql.goods g ON g.Id = sa.GoodsId "
+                                + "SET sa.SoldStock = COALESCE(sa.BaselineSoldStock, 0) "
+                                + "WHERE g.Source = 'seed'").update();
+        if (seckill > 0) {
+            restored.put("seckill_activity", seckill);
+        }
+        return restored;
     }
 
     // ==================== ② 按龄清「事件落库台账」 ====================

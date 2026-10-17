@@ -1369,9 +1369,12 @@ const replayDurationGroups = computed(() => ([
   { key: 'receive', title: '收货耗时 · 回放推算', ...replayHistogram('receive') },
 ]))
 
-/** 记一个回放趋势样本（每 2 秒日志时间最多一个）。 */
-function noteReplaySample(force) {
-  const ts = num(replaySession.clockTs)
+/** 记一个回放趋势样本（每 2 秒日志时间最多一个）。
+ *  @param {boolean} force 没有样本时强制落一个起点
+ *  @param {number} [tsOverride] 用**流转自己的历史时间戳**采样（拖拽重建时，
+ *         所有流转是在同一拍里补 apply 的，若仍读 `clockTs` 会把整段历史压成目标时刻一个点） */
+function noteReplaySample(force, tsOverride) {
+  const ts = num(tsOverride) || num(replaySession.clockTs)
   if (!ts) return
   if (!force && ts - replaySampleAt < REPLAY_TREND_SAMPLE_MS) return
   replaySampleAt = ts
@@ -2403,6 +2406,9 @@ function syncReplayChanges(animate) {
   }
   for (let i = replayApplied; i < list.length; i += 1) {
     applyReplayChange(list[i], animate)
+    // 批量补建（拖拽定位 / 中途挂载）：按每条流转的原时间戳补趋势样本，
+    // 否则 `clockTs` 已经是目标时刻，整段历史只会留下一个点。
+    if (!animate) noteReplaySample(replaySamples.value.length === 0, list[i].ts)
   }
   replayApplied = list.length
   // 趋势采样跟着回放时钟走（每 2 秒日志时间一个点）；首帧强制落一个起点。
@@ -2800,11 +2806,19 @@ watch(() => replaySession.loading, (loading) => {
 watch(() => replaySession.stateChanges.length, () => {
   if (replaySession.active) {
     frameParticleBudget = MAX_PARTICLES_PER_FRAME
-    syncReplayChanges(true)
+    // 拖拽定位 / 中途挂载：一次补建了几千条历史流转，不能逐条闪粒子/高亮
+    // （那是「刚刚发生」的语义）。`rebuilding` 只影响动画，不影响状态重建本身。
+    syncReplayChanges(!replaySession.rebuilding)
   }
 })
 // 「重新开始（重放）」：清掉本页重建的状态机 / 耗时样本 / 粒子，再从第一条重来。
 watch(() => replaySession.restartSeq, () => {
+  if (replaySession.active) enterReplay()
+})
+// 拖拽定位（Seek）：会话会把 `stateChanges` 清空后按目标索引重投 ⇒ 本页先归零，
+// 等下一拍 `stateChanges.length` 变化时从 0 全量 apply（`replayApplied` 已在
+// `enterReplay` 的 `resetReplayState` 里归零）。
+watch(() => replaySession.seekSeq, () => {
   if (replaySession.active) enterReplay()
 })
 // KeepAlive 失活（路由切走）时**不卸载**：落一次盘就够了，内存状态原样留着。

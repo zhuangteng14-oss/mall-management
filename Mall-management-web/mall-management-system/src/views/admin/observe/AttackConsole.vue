@@ -29,6 +29,25 @@
 
     <p v-if="flash.text" class="a-flash" :class="flash.kind">{{ flash.text }}</p>
 
+    <!-- ── 演练环境被压测打空时的**恢复入口**（2026-10-18 用户批文）────────────────
+         触发条件只有一条：`fire()` 的 catch（`/run` 报「库里挑不到可演练的商品」、
+         或任何一轮没跑起来）。⚠️ 不常驻显示：环境正常时多一枚「重置」按钮会让人误以为
+         它是个日常动作；它只在**已经失败**的那一屏出现，且点一次就会自动重试上一轮参数。 -->
+    <div v-if="showReset" class="a-recover" role="alert">
+      <span class="a-recover-t">
+        演练环境可能已被压测打空（种子 SKU 库存为 0 / 父商品下架 / 商家冻结）。
+        清场只删数据、删不回库存 —— 点右边复位后会自动重跑上一轮参数。
+      </span>
+      <button
+        type="button"
+        class="a-btn a-btn-danger"
+        :disabled="resetting || running"
+        @click="doResetEnvironment"
+      >
+        <IconGlyph name="ok" />{{ resetting ? '复位中…' : '一键重置演练商品库存' }}
+      </button>
+    </div>
+
     <!-- ── ② 固定一键：8 个预置场景，各一键 ──────────────────────────────────────
          用**当前**并发 / 持续秒数跑**这一个**场景（权重 100）。与下面「自定义」的区别只有两处：
          勾选固定成一个场景、参数仍取面板上的值 —— 这样「先把并发调到 300 再点秒杀风暴」也成立。 -->
@@ -296,15 +315,20 @@
             <div class="a-rp-in">
               <span class="a-dim">本批事件台账</span>
               <code class="a-tag">{{ r.BatchId || '（这一行没有批次）' }}</code>
+              <span class="a-dim">· {{ num(r.EventCount) }} 条</span>
               <button
                 type="button"
                 class="a-btn"
-                :disabled="!r.BatchId || replaySession.loading"
+                :disabled="!r.BatchId || r.HasData === false || replaySession.loading"
+                :title="r.HasData === false ? '这批台账已过保留期被清理，无法回放' : '读这批台账并按原时间戳回放'"
                 @click="startReplay(r)"
               >
                 <IconGlyph name="ok" />{{ replaySession.loading && replaySession.batchId === r.BatchId ? '载入中…' : '回放' }}
               </button>
               <span v-if="!r.BatchId" class="a-dim">引擎当时没写批次 ⇒ 回放不到（存量记录）</span>
+              <span v-else-if="r.HasData === false" class="a-bad">
+                该批次历史数据已过期被清理（台账 0 条）⇒ 无法回放
+              </span>
               <span v-else-if="replaySession.err && replaySession.batchId === r.BatchId" class="a-bad">
                 回放装载失败：{{ replaySession.err }}
               </span>
@@ -404,13 +428,15 @@
          ⚠️ 它清的是**演练标记出来的业务数据**（`SIM-` 单号前缀 **OR** `Source='attack'`，
             后端 `ObservedEventCleanupDao` 判的），**不含**上面那份 `drill_record` 自己。 -->
     <h2 class="a-h2">
-      清场
-      <span class="a-h2n">真删 · 不可撤销 · 清的是演练写进业务表的行（不含演练记录本身）</span>
+      清理并恢复环境
+      <span class="a-h2n">真删 · 不可撤销 · 删演练写进业务表的行，并把种子库存 / 在架 / 冻结状态复位</span>
     </h2>
     <div class="a-card">
       <p class="a-note">
         按演练留下的标记清（`SIM-` 开头单号 **OR** `Source='attack'` 两种一起判，缺一会漏）：
-        订单 / 评论 / 事件台账等业务行会被**真删**，清完回显每张表各删了几行。
+        订单 / 评论 / 事件台账等业务行会被**真删**；随后把种子 SKU 的库存、父商品的在架状态、
+        演示商家的冻结状态复位（判据 `SEED-%` / `Source='seed'`，真实业务行不动）。
+        清完回显**删了几行 + 复位了几行**两部分。
       </p>
       <div class="a-f-actions">
         <button
@@ -421,7 +447,7 @@
           @click="doCleanup"
         >
           <IconGlyph name="no" />
-          {{ cleaning ? '清场中…' : armedClean ? '再点一次：确认清场（不可撤销）' : '清理本次演练数据' }}
+          {{ cleaning ? '清理并恢复中…' : armedClean ? '再点一次：确认清理并恢复（不可撤销）' : '清理并恢复环境' }}
         </button>
       </div>
     </div>
@@ -438,14 +464,16 @@
   ⚠️ 那条「不塞三面板」是**用户 2026-10-13 的改判**（原 D2 = 三面板同屏当总控台）；
      别按更早的方案把它合回去。
 
-  【它消费后端 5 个端点，全部经 `api/observe.js`】
+  【它消费后端 7 个端点，全部经 `api/observe.js`】
     · `attackScenarios()` —— 8 个预置场景（Key / Name / Protections / Needs / DefaultWeight）；
     · `runAttack(p)`      —— 跑一轮（**同步跑到结束**，见下）；
     · `attackRecords(p)`  —— 演练记录（`Result` 长文本已由后端拆成字段）；
-    · `cleanupAttack()`   —— 清场（commit 9 补的按钮，破坏性、两段式确认）；
-    · `stopAttack()`      —— 叫停正在跑的那一轮（commit 10c 的 `[暂停]`）。
+    · `cleanupAttack()`   —— 清理并恢复（commit 9 补的按钮，破坏性、两段式确认）；
+    · `stopAttack()`      —— 叫停正在跑的那一轮（commit 10c 的 `[暂停]`）；
+    · `attackStatus()`    —— 演练期间的实时读数（块 7 收尾，1 秒一拍）；
+    · `resetAttackEnvironment()` —— 复位演练环境（2026-10-18，失败态按钮 + 复位后自动重跑）。
   ⚠️ 本页**不出现任何后端路径字面量**（那条判据可 grep 自动化：路径只许出现在
-     `api/endpoints.js`）。五个函数名即全部后端面。
+     `api/endpoints.js`）。七个函数名即全部后端面。
 
   【commit 10c 给本页加的三样东西（丁 · 开关面板）】
     · **压力档位**（120 / 400 / 拉满）—— 值就是 `targetQps`；与「总并发数」是两把各管各的旋钮，
@@ -487,7 +515,7 @@ import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 // 播放时钟、行、横幅都在 `api/replay-session.js` 与日志页那条链上。
 import { useRouter } from 'vue-router'
 // ⚠️ 三层 `../`（不是管理端其它页的两层）：本页在 `views/admin/observe/`，比 `views/admin/` 深一层。
-import { attackRecords, attackScenarios, attackStatus, cleanupAttack, runAttack, stopAttack } from '../../../api/observe'
+import { attackRecords, attackScenarios, attackStatus, cleanupAttack, resetAttackEnvironment, runAttack, stopAttack } from '../../../api/observe'
 import { replaySession, startReplaySession } from '../../../api/replay-session'
 import WeightSlider from '../../../components/observe/WeightSlider.vue'
 import IconGlyph from '../../../components/ui/IconGlyph.vue'
@@ -664,6 +692,13 @@ const openId = ref(null)
 /** 「上膛」态：点了第一次**不发请求**（见 `doCleanup`）。 */
 const armedClean = ref(false)
 const cleaning = ref(false)
+
+// ── 演练环境复位（2026-10-18）────────────────────────────────────────────────
+/** `/run` 失败后的恢复入口是否显示（只在失败那一屏出现，成功后收起）。 */
+const showReset = ref(false)
+const resetting = ref(false)
+/** 上一次 `fire()` 的参数 —— 复位成功后**自动重跑同一轮**（用户批文第二节第 2 条）。 */
+let lastRun = null
 
 // ── 编排状态 ─────────────────────────────────────────────────────────────────
 const weightOf = (key) => Number(weights[key]) || 0
@@ -914,7 +949,8 @@ async function doCleanup() {
   if (!armedClean.value) {
     armedClean.value = true
     flash.kind = 'ok'
-    flash.text = '再点一次「确认清场」：会真删掉攻击演练写进业务表的行（订单 / 评论 / 事件台账等），不可撤销。'
+    flash.text = '再点一次「确认清理并恢复」：会真删掉攻击演练写进业务表的行（订单 / 评论 / 事件台账等），'
+      + '并把种子库存 / 在架 / 冻结状态复位；删除不可撤销。'
     return
   }
   armedClean.value = false
@@ -922,13 +958,47 @@ async function doCleanup() {
   try {
     const data = await cleanupAttack()
     flash.kind = 'ok'
-    flash.text = `已清场：${(data && data.summary) || '共 0 行（库里没有待清的攻击数据）'}`
+    flash.text = `已清理并恢复：${(data && data.summary) || '共 0 行（库里没有待清的攻击数据）'}`
     await loadRecords()
   } catch (e) {
     flash.kind = 'bad'
     flash.text = `清场失败：${errText(e)}`
   } finally {
     cleaning.value = false
+  }
+}
+
+// ── 演练环境复位（`/attack/reset` · 2026-10-18）──────────────────────────────
+/**
+ * 把压测打空的种子库存 / 下架的父商品 / 冻结的演示商家复位，然后**自动重跑上一轮**。
+ *
+ * <p>用户批文第二节：错误态给一颗显眼按钮，点完恢复库存并「自动重试拉起演练」。
+ * 重跑参数取 {@link lastRun}（`fire()` 每次开跑时记下的 name + chosen），不读当前面板 ——
+ * 用户在失败之后可能又拨了滑条，而这次重跑要复现的是**刚才失败的那一轮**。
+ *
+ * <p>⚠️ 回显后端 `summary`（「演练环境已复位：共 N 行（…）」）：只报「已重置」等于把
+ * 「到底改了几行」藏起来（与 `doCleanup` 同一口径）。
+ * ⚠️ `resetting` 在**重跑之前**落下：`fire()` 自己会接管 `running` 态；否则「复位中…」
+ * 会跟着整轮演练（最长 600 秒）一直亮着。
+ */
+async function doResetEnvironment() {
+  if (resetting.value || running.value) return
+  const rerun = lastRun
+  resetting.value = true
+  try {
+    const data = await resetAttackEnvironment()
+    flash.kind = 'ok'
+    // 后端 `summary` 自己就以「演练环境已复位：共 N 行（…）」开头 ⇒ 这里不再加前缀，否则叠成
+    // 「已复位：演练环境已复位：…」（2026-10-18 截图里看到）。
+    flash.text = `${(data && data.summary) || '演练环境已复位'}${rerun ? '；正在用上一轮参数重跑…' : ''}`
+    showReset.value = false
+    resetting.value = false
+    if (rerun) await fire(rerun.name, rerun.chosen, { keepFlash: true })
+  } catch (e) {
+    flash.kind = 'bad'
+    flash.text = `复位失败：${errText(e)}`
+  } finally {
+    resetting.value = false
   }
 }
 
@@ -1012,11 +1082,20 @@ function stopStatusPolling() {
  *
  * @param {string} name   场景名（进 `drill_record.Name`，后端按列宽截断到 64）
  * @param {Array<{key:string,weight:number}>} chosen 勾选与权重
+ * @param {{keepFlash?:boolean}} [opts] `keepFlash:true` 时**不清空**上一句提示 ——
+ *        复位入口的「已复位：…」要留到重跑出结果（否则同一帧被本函数的 `flash.text=''`
+ *        抹掉，用户只会看到重跑结果、看不到复位摘要；2026-10-18 实测踩到）。
  */
-async function fire(name, chosen) {
+async function fire(name, chosen, opts) {
   if (running.value) return
+  // 复位入口只属于**上一次失败**：新一轮开始时先收起，失败时再由 catch 打开。
+  showReset.value = false
+  // 记下参数（浅拷贝）：复位按钮要能「用同一套参数自动重跑」，而调用方传进来的
+  // `chosen` 是 `picked.value.map(…)` 的新数组、`name` 是字符串 —— 但仍拷一份，
+  // 不依赖调用方在 await 期间不碰它。
+  lastRun = { name, chosen: (chosen || []).map((c) => ({ ...c })) }
   running.value = true
-  flash.text = ''
+  if (!(opts && opts.keepFlash)) flash.text = ''
   openId.value = null
 
   const secs = normInt(durationSeconds.value, DUR_MIN, DUR_MAX, DUR_DEFAULT)
@@ -1070,6 +1149,9 @@ async function fire(name, chosen) {
   } catch (e) {
     flash.kind = 'bad'
     flash.text = `演练没跑起来：${errText(e)}`
+    // 「挑不到商品」是库存被打空的典型症状；但**任何**没跑起来都值得给一次复位入口
+    // （下架 / 冻结也是同一组判据）⇒ 不按错误文案匹配，失败即显示。
+    showReset.value = true
   } finally {
     running.value = false
     stopStatusPolling()
@@ -1134,6 +1216,13 @@ function toggle(r) {
 async function startReplay(r) {
   const batchId = r && r.BatchId
   if (!batchId) return
+  // 2026-10-18：台账已被保留期清空的批次 —— 按钮已置灰，这里再挡一层（置灰只是视觉，
+  // 键盘 / 脚本仍可能触发点击）。错误挂在 `replaySession.err` 上，模板按 BatchId 显示。
+  if (r.HasData === false) {
+    replaySession.err = '该批次历史数据已过期被清理，无法回放'
+    replaySession.batchId = batchId
+    return
+  }
   try {
     // 记录级聚合快照（用户 2026-10-17 裁定的「B 为主 + C」）：这是**本轮总量**，不是时间序列，
     // 只用于指标页右栏「记录快照」；逐秒指标由前端按台账事件推算（`api/replay-metrics.js`）。
@@ -1330,7 +1419,9 @@ onBeforeUnmount(() => {
   margin-bottom: var(--s4);
 }
 .a-flash.ok {
-  color: var(--success-deep);
+  /* ⚠️ 用 `--success` 不用 `--success-deep`：深色主题下 deep(#154c38) 压在 ground(#133230)
+     上几乎看不见（2026-10-18 截「已复位」时实测）；`--success` 亮绿在两种主题下都够。 */
+  color: var(--success);
   background: var(--success-ground);
 }
 .a-flash.bad {
@@ -1342,6 +1433,27 @@ onBeforeUnmount(() => {
 .a-flash.info {
   color: var(--ink-2);
   background: var(--surface-2);
+}
+/* 演练环境复位入口（2026-10-18）：只在 `/run` 失败那一屏出现。
+   ⚠️ 用危险色系画边框与按钮 —— 它是「环境已经坏了」的提示，不是普通信息条。 */
+.a-recover {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s3);
+  flex-wrap: wrap;
+  margin-bottom: var(--s4);
+  padding: var(--s3) var(--s4);
+  border: 1px solid var(--danger);
+  border-left-width: 4px;
+  border-radius: var(--r2);
+  background: var(--danger-ground);
+  font-size: var(--fs-sm);
+  color: var(--ink-2);
+}
+.a-recover-t {
+  flex: 1 1 320px;
+  min-width: 0;
 }
 .a-err {
   font-size: var(--fs-sm);

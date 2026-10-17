@@ -1,5 +1,6 @@
 package com.minke.mallmanagement.observe.service;
 
+import com.minke.mallmanagement.observe.dao.DrillTargetDao;
 import com.minke.mallmanagement.observe.dao.ObservedEventCleanupDao;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -10,19 +11,26 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 
 /**
- * 可观测域的**清理编排**（块 7 · commit 8b）—— 两个入口，一个 service：
- * ① 管理端点「清掉演练污染」；② 定时 job「清掉过期事件」。
+ * 可观测域的**清理 / 复位编排**（块 7 · commit 8b；2026-10-18 加复位）—— 三个入口，一个 service：
+ * ① 管理端点「清掉演练污染并恢复种子环境」；② 定时 job「清掉过期事件」；
+ * ③ 演练前自检「库存打空时静默复位」。
  *
- * <h2>【⚠️ 为什么两件事共一个 service，而不是各写各的】</h2>
- * 它们删的是**两张不同的表、两套不同的判据**（谓词 vs 保留期），没有任何共用 SQL ——
- * 合并的理由不在代码复用，在**保留期这两个数是同一份配置**：`3 天 / 30 天` 是「攻击数据留多久、
- * 日常数据留多久」这一件事的一体两面，裂成两个类会让它们各有各的默认值、各改各的。
- * 而用户批文里那句「3 天攻击 / 30 天日常」正是**一条**口径。
+ * <h2>【⚠️ 为什么这几件事共一个 service，而不是各写各的】</h2>
+ * 它们删 / 改的是**不同的表、不同的判据**（谓词 vs 保留期 vs 种子前缀），共用 SQL 很少 ——
+ * 合并的理由不在代码复用，在**「演练环境」这一件事的一体两面**：
+ * 「清掉演练写出的行」与「把演练改过的种子值恢复」都是**一次演示结束后回到干净态**，
+ * 拆成两个 service 会让「清理」按钮只做一半（删了订单、库存仍然是 0，下一轮还是跑不起来）。
+ * 另一条合并理由是**保留期这两个数是同一份配置**：`3 天 / 30 天` 是「攻击数据留多久、
+ * 日常数据留多久」这一件事的两面，裂开会让它们各有各的默认值。用户批文里那句
+ * 「3 天攻击 / 30 天日常」正是**一条**口径。
  *
- * <h2>【⚠️ 本 service 不吞异常，与 {@code AuditService} 相反】</h2>
+ * <h2>【⚠️ 本 service 不吞异常，与 {@code AuditService} 相反 —— 一个例外写明】</h2>
  * 审计是 fail-open（业务已成，不能让审计把它翻红）。本类是**破坏性动作的发起方**：
- * 删失败必须让调用方**知道**（端点回 500 / job 记 error 日志），静默成功比失败坏得多
+ * 删 / 复位失败必须让调用方**知道**（端点回 500 / job 记 error 日志），静默成功比失败坏得多
  * —— 那是 TD-20 的口径。DAO 层的异常原样上抛，本类不 catch。
+ * <p>⚠️ **唯一例外是 {@link #autoResetIfNeeded()}**：它是 {@code /run} 之前的**尽力而为**自检，
+ * 失败不能让「本来还能跑」的一轮演练因为复位出错而变成 500（复位的出发点就是「能跑起来」）。
+ * 那条路径改为记 WARN 并放行，让引擎按原样报「挑不到靶子」；显式复位端点仍原样上抛。
  *
  * <h2>【⚠️ 不埋点】</h2>
  * 清理是**运维动作**（几分钟一次、行数不是事件），照 {@code DrillRecordDao.countRecords}
@@ -37,6 +45,13 @@ public class ObservedEventCleanupService {
     private final ObservedEventCleanupDao cleanupDao;
 
     /**
+     * 靶子取数（只读，2026-10-18 加）—— 只为一件事：{@code /run} 之前问一句
+     * 「现在可演练的最大库存是多少」。判据必须与 {@code DrillTargetDao.pickSku} 同源，
+     * 否则自检说「够」而引擎挑不到，等于把报错留给用户。
+     */
+    private final DrillTargetDao drillTargetDao;
+
+    /**
      * 攻击批次行（{@code observed_event.BatchId IS NOT NULL}）的保留期。
      * ⚠️ 默认值写在**注解里**（不是只写在 properties）：本仓既有 job 一律如此
      * （见 {@code OrderTimeoutCancelJob} 的 {@code timeoutMs}），好处是漏配一个 profile 时
@@ -49,8 +64,9 @@ public class ObservedEventCleanupService {
     @Value("${mall.observe.cleanup.normal-retention-days:30}")
     private int normalRetentionDays;
 
-    public ObservedEventCleanupService(ObservedEventCleanupDao cleanupDao) {
+    public ObservedEventCleanupService(ObservedEventCleanupDao cleanupDao, DrillTargetDao drillTargetDao) {
         this.cleanupDao = cleanupDao;
+        this.drillTargetDao = drillTargetDao;
     }
 
     // ==================== ① 端点：按谓词清演练污染 ====================
@@ -85,13 +101,21 @@ public class ObservedEventCleanupService {
     public Map<String, Object> cleanupAttackData() {
         Map<String, Integer> deleted = cleanupDao.deleteAttackData();
         int total = deleted.values().stream().mapToInt(Integer::intValue).sum();
-        log.info("攻击数据清理完成（OBSERVE-CLEANUP）：共删 {} 行，明细={}", total, deleted);
+        // 2026-10-18：清场与复位合并成一次动作（用户批文第三节「清理并恢复环境」）。
+        // ⚠️ 顺序是**先删后复位**：复位只写种子行，不依赖被删的行；反过来也一样，
+        //    但先删能把台账里的旧库存事件清掉，复位产生的新值不会混进「上一轮」的残留里。
+        Map<String, Integer> restored = cleanupDao.restoreSeedEnvironment();
+        int restoredTotal = restored.values().stream().mapToInt(Integer::intValue).sum();
+        log.info("攻击数据清理 / 演练环境复位完成（OBSERVE-CLEANUP）：共删 {} 行，明细={}；复位 {} 行，明细={}",
+                total, deleted, restoredTotal, restored);
 
         Map<String, Object> payload = new LinkedHashMap<>();
         payload.put("success", true);
         payload.put("deleted", deleted);
         payload.put("total", total);
-        payload.put("summary", summarize(deleted, total));
+        payload.put("restored", restored);
+        payload.put("restoredTotal", restoredTotal);
+        payload.put("summary", summarize(deleted, total) + "；" + summarizeRestored(restored, restoredTotal));
         return payload;
     }
 
@@ -110,6 +134,82 @@ public class ObservedEventCleanupService {
             first = false;
         }
         return sb.append('）').toString();
+    }
+
+    /** 复位动作的一句话摘要（与 {@link #summarize} 同一形状，用在合并后的 {@code summary} 里）。 */
+    public static String summarizeRestored(Map<String, Integer> restored, int total) {
+        if (total == 0) {
+            return "演练环境无需复位（没有命中的种子行）";
+        }
+        StringBuilder sb = new StringBuilder("演练环境已复位：共 ").append(total).append(" 行（");
+        boolean first = true;
+        for (Map.Entry<String, Integer> e : restored.entrySet()) {
+            if (!first) {
+                sb.append(" / ");
+            }
+            sb.append(e.getKey()).append(' ').append(e.getValue());
+            first = false;
+        }
+        return sb.append('）').toString();
+    }
+
+    // ==================== ①-c 复位演练环境（2026-10-18 用户批文） ====================
+
+    /**
+     * 把演示种子被压测改变的状态复位（库存 / 父商品在架 / 商家未冻结 / 秒杀已售），
+     * 回一张**可分字段显示**的结果表。
+     *
+     * <p>响应形状与 {@link #cleanupAttackData()} 同款：
+     * {@code {"success":true, "restored":{"goods_sku":4,…}, "total":N, "summary":"…"}}。
+     * ⚠️ {@code restored} 只含**命中过**的表 —— 与 {@code deleted} 同口径，别让前端把
+     * 「没这张表」读成「这张表复位成 0 行」。
+     *
+     * <p>⚠️ 显式调用（{@code POST /admin/observe/attack/reset}）**不吞异常**：复位失败就 500 +
+     * 审计记不下来，让操作者知道环境没有回到干净态。自动自检那条路见
+     * {@link #autoResetIfNeeded()}。
+     */
+    public Map<String, Object> resetDrillEnvironment() {
+        Map<String, Integer> restored = cleanupDao.restoreSeedEnvironment();
+        int total = restored.values().stream().mapToInt(Integer::intValue).sum();
+        log.info("演练环境复位（OBSERVE-RESET）：共命中 {} 行，明细={}", total, restored);
+
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("success", true);
+        payload.put("restored", restored);
+        payload.put("total", total);
+        payload.put("summary", summarizeRestored(restored, total));
+        return payload;
+    }
+
+    /**
+     * 演练前自检：**可演练的最大库存低于 {@code MIN_RESET_STOCK}** 时静默复位种子环境。
+     *
+     * <p>用户批文第二节「可选进阶」：让用户无感 —— 压测把库存打空后，下一次点「开始」不该先
+     * 吃一个「挑不到商品」的报错再点重置。
+     *
+     * @return {@code true} = 这一拍确实做了复位；{@code false} = 库存够（没动）或复位失败
+     *         （已记 WARN，交给 {@code /run} 按原样报错）
+     *
+     * <p>⚠️ 判据取的是 {@link DrillTargetDao#maxPickableStock()}（**全部**可演练商品），
+     * 不是种子 SKU 的库存：真实商品还有货时，复位种子环境是多余的写操作。
+     * ⚠️ 复位失败在这里**不抛**：自检的职责是「锦上添花」，不能把一轮本来能跑的演练翻成 500
+     * （异常口径的总说明见类注释）。
+     */
+    public boolean autoResetIfNeeded() {
+        int maxStock = drillTargetDao.maxPickableStock();
+        if (maxStock >= ObservedEventCleanupDao.MIN_RESET_STOCK) {
+            return false;
+        }
+        try {
+            Map<String, Object> payload = resetDrillEnvironment();
+            log.warn("演练前自检（OBSERVE-RESET）：可演练最大库存 {} < {}，已自动复位种子环境 —— {}",
+                    maxStock, ObservedEventCleanupDao.MIN_RESET_STOCK, payload.get("summary"));
+            return true;
+        } catch (RuntimeException e) {
+            log.warn("演练前自检（OBSERVE-RESET）：可演练最大库存 {} < {}，自动复位失败；"
+                    + "/run 将按原样报「挑不到靶子」", maxStock, ObservedEventCleanupDao.MIN_RESET_STOCK, e);
+            return false;
+        }
     }
 
     // ==================== ② job：按龄清事件台账 ====================

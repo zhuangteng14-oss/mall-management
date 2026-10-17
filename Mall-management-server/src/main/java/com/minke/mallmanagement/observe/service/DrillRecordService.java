@@ -251,6 +251,27 @@ public class DrillRecordService {
     //    「没给」与「给了 []」是两件事）一并搬了过去 —— 语义一字未改，只是换了个人持有。
 
     /**
+     * 一个计数列是不是正数（{@code HasData} 的唯一判据）。
+     *
+     * <p>兼容两种驱动形状：JDBC 的 {@code COUNT(*)} 通常是 {@code Long}，但切片 / 替身里可能是
+     * {@link Integer} 或数字字符串 ⇒ 先认 {@link Number}，再退回解析字符串。
+     * 解析不了 ⇒ {@code false}（「读不到计数」按「没有台账」处理：宁可置灰，也不让用户点进一个空回放）。
+     */
+    private static boolean isPositive(Object value) {
+        if (value instanceof Number n) {
+            return n.longValue() > 0;
+        }
+        if (value == null) {
+            return false;
+        }
+        try {
+            return Long.parseLong(String.valueOf(value).trim()) > 0;
+        } catch (NumberFormatException e) {
+            return false;
+        }
+    }
+
+    /**
      * 字符串参数 → 整数。空白 ⇒ {@code fallback}（= 没给）；**不是整数 ⇒ 抛**（控制器转 400）。
      *
      * <p>⚠️ 数值范围**由调用方收**（本方法不管上下限）：这两个参数的口径是「收进区间」而不是
@@ -282,6 +303,16 @@ public class DrillRecordService {
             }
             if ("Scenario".equals(e.getKey())) {
                 out.put("Scenario", parseOrRaw(e.getValue(), out, "Scenario"));
+                continue;
+            }
+            // 2026-10-18：事件台账保留期比演练记录短（攻击批次 3 天 vs drill_record 不参与那次清理）
+            // ⇒ 会出现「记录还在、台账已删空」的幽灵批次。EventCount 由 DAO 的索引子查询给出，
+            // 这里转成前端可直接判定的 HasData；两者都保留（计数本身也是有用读数）。
+            // ⚠️ 键名用 PascalCase（`HasData`）而不是批文里的 `hasData`：本响应其余键全是
+            //    首字母大写（`BatchId` / `TotalRequests` …），混一个小写键会让前端多一套解析口径。
+            if ("EventCount".equals(e.getKey())) {
+                out.put("EventCount", e.getValue());
+                out.put("HasData", isPositive(e.getValue()));
                 continue;
             }
             out.put(e.getKey(), e.getValue());

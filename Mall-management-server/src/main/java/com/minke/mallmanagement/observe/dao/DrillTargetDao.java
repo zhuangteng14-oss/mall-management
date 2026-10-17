@@ -87,6 +87,28 @@ public class DrillTargetDao {
     }
 
     /**
+     * 当前**可演练**靶子的最大库存 —— 与 {@link #pickSku()} **同一套判据**，只是不取行。
+     *
+     * <p>用途：{@code /attack/run} 开跑前的自检（2026-10-18 用户批文）。压测会把演示 SKU 的
+     * 库存扣光，或把父商品打下架 / 把商家冻住；这三件事任一发生，{@link #pickSku()} 就挑不到靶子，
+     * 页面只能报「库里挑不到可演练的商品」。自检据此判断「要不要先复位种子环境」。
+     *
+     * <p>⚠️ <b>不按 {@code SEED-%} 过滤</b>：真实商品有库存时不必复位；复位只恢复种子靶子。
+     * ⇒ 判据必须是「**全部**可演练商品的最大库存」，不是「种子 SKU 的最大库存」。
+     * ⚠️ 返回 {@code 0} 也表示「一件都挑不到」（{@code COALESCE(MAX(…), 0)} 与空结果同解）。
+     */
+    public int maxPickableStock() {
+        List<Integer> rows = jdbcClient.sql(
+                        "SELECT COALESCE(MAX(sku.Stock), 0) FROM mall_management_sql.goods_sku sku "
+                                + "JOIN mall_management_sql.goods g ON g.Id = sku.GoodsId "
+                                + "WHERE sku.Stock > 0 AND sku.SkuCode <> '' "
+                                + "AND g.DeletedAt IS NULL AND g.ShelfState = 1 "
+                                + FROZEN_MERCHANT_EXCLUDED)
+                .query(Integer.class).list();
+        return rows.isEmpty() || rows.get(0) == null ? 0 : rows.get(0);
+    }
+
+    /**
      * 演练账号：一个**未封禁**的客户（业务号 + 登录名一起取，见类注释第 2 条）。
      *
      * <p>⚠️ <b>排序键是 {@code u.username}，不是 {@code u.id}</b>（2026-10-14 块 7 · commit 8b 修）：
