@@ -154,34 +154,58 @@ class SlowSqlListenerTest {
 
     // ==================== D3：dbSlow 注入 ====================
 
+    /**
+     * ⚠️ 非请求线程的预算是 **static ThreadLocal 的 1 秒窗口**（每个线程最多睡
+     * {@code dbSlowBudgetMs}）。同类的几个注入用例都在 main 上跑 ⇒ 前一个用例睡过的毫秒
+     * 会算进后一个的预算：CI 实测 {@code dbSlowStopsAtTheBudget} 只剩 220ms（300 − 40 − 40），
+     * 本机只是碰巧跨过了 1 秒窗口才绿。凡是要断言**睡够 / 被预算截断**的用例，都换一条
+     * 新线程跑，让窗口从零开始 —— 这不是放宽判据，而是把判据从「同线程历史」解耦。
+     */
+    private static long onFreshThread(Runnable body) throws InterruptedException {
+        long[] elapsed = new long[1];
+        Thread worker = new Thread(() -> {
+            long start = System.nanoTime();
+            body.run();
+            elapsed[0] = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start);
+        }, "slow-sql-test");
+        worker.start();
+        worker.join();
+        return elapsed[0];
+    }
+
     @Test
     @DisplayName("dbSlow：只延迟 SELECT / WITH；写路径不睡（一条 30ms 也量得出来）")
-    void dbSlowSleepsForSelectOnly() {
+    void dbSlowSleepsForSelectOnly() throws InterruptedException {
         SlowSqlListener listener = new SlowSqlListener(THRESHOLD, () -> true, 40, 300);
+        long[] updateMs = new long[1];
+        long[] selectMs = new long[1];
 
-        long updateStart = System.nanoTime();
-        listener.beforeQuery(null, sql("update mall_management_sql.`user` set phone = ? where id = ?"));
-        long updateMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - updateStart);
+        onFreshThread(() -> {
+            long updateStart = System.nanoTime();
+            listener.beforeQuery(null, sql("update mall_management_sql.`user` set phone = ? where id = ?"));
+            updateMs[0] = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - updateStart);
 
-        long selectStart = System.nanoTime();
-        listener.beforeQuery(null, sql("  SeLeCt 1"));
-        long selectMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - selectStart);
+            long selectStart = System.nanoTime();
+            listener.beforeQuery(null, sql("  SeLeCt 1"));
+            selectMs[0] = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - selectStart);
+        });
 
-        assertThat(updateMs).as("写路径不延迟（不是没测到：下面那条真的睡了）").isLessThan(30);
-        assertThat(selectMs).as("SELECT 真的延迟了").isGreaterThanOrEqualTo(30);
+        assertThat(updateMs[0]).as("写路径不延迟（不是没测到：下面那条真的睡了）").isLessThan(30);
+        assertThat(selectMs[0]).as("SELECT 真的延迟了").isGreaterThanOrEqualTo(30);
         assertThat(SlowSqlListener.containsSelect(sql("with t as (select 1) select * from t"))).isTrue();
         assertThat(SlowSqlListener.containsSelect(sql("insert into t values (1)"))).isFalse();
     }
 
     @Test
     @DisplayName("dbSlow：预算硬上限 300ms —— 连续 SELECT 不会被叠加成 N×delay")
-    void dbSlowStopsAtTheBudget() {
+    void dbSlowStopsAtTheBudget() throws InterruptedException {
         SlowSqlListener listener = new SlowSqlListener(THRESHOLD, () -> true, 50, 300);
-        long start = System.nanoTime();
-        for (int i = 0; i < 10; i++) {
-            listener.beforeQuery(null, sql("select " + i));
-        }
-        long elapsedMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start);
+
+        long elapsedMs = onFreshThread(() -> {
+            for (int i = 0; i < 10; i++) {
+                listener.beforeQuery(null, sql("select " + i));
+            }
+        });
 
         assertThat(elapsedMs).as("10 × 50ms 若不受预算约束会是 500ms").isLessThan(500);
         assertThat(elapsedMs).as("预算不是 0（前几拍确实延迟了）").isGreaterThanOrEqualTo(250);
@@ -191,16 +215,18 @@ class SlowSqlListenerTest {
 
     @Test
     @DisplayName("A5：超阈值 ⇒ 出口收到 injected=false；dbSlow 注入过 ⇒ 未到阈值也发 injected=true")
-    void emitsFacilityEvents() {
+    void emitsFacilityEvents() throws InterruptedException {
         List<String> calls = new ArrayList<>();
         SlowSqlListener listener = new SlowSqlListener(THRESHOLD, () -> true, 40, 300,
                 (elapsed, threshold, dataSource, count, sql, injected) ->
                         calls.add(elapsed + "|" + injected + "|" + sql));
 
-        listener.beforeQuery(null, sql("select injected"));
-        listener.afterQuery(exec(40L), sql("select injected"));   // 注入过：40 < 200 也要发
-        listener.afterQuery(exec(THRESHOLD), sql("select slow")); // 无注入：恰好阈值
-        listener.afterQuery(exec(199L), sql("select quiet"));     // 无注入且未到阈值：不发
+        onFreshThread(() -> {
+            listener.beforeQuery(null, sql("select injected"));
+            listener.afterQuery(exec(40L), sql("select injected"));   // 注入过：40 < 200 也要发
+            listener.afterQuery(exec(THRESHOLD), sql("select slow")); // 无注入：恰好阈值
+            listener.afterQuery(exec(199L), sql("select quiet"));     // 无注入且未到阈值：不发
+        });
 
         assertThat(calls).containsExactly(
                 "40|true|select injected",
