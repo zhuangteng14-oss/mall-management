@@ -9,13 +9,16 @@ import com.rabbitmq.client.Channel;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.springframework.amqp.core.Message;
 import org.springframework.amqp.core.MessageProperties;
+import org.springframework.data.redis.core.ListOperations;
 import org.springframework.data.redis.core.StringRedisTemplate;
 
 import java.nio.charset.StandardCharsets;
 import java.util.List;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
@@ -100,6 +103,32 @@ class ObservedEventConsumerDlqTest {
         verify(dlqDao).insertBatch(any(), eq("落库连续 " + ObservedEventConsumer.MAX_ATTEMPTS + " 次失败"),
                 anyString(), anyString());
         verify(dlqDao, never()).insertRaw(any(), anyString(), anyString(), anyString());
+    }
+
+    @Test
+    @DisplayName("落库成功 ⇒ Redis 整批一次 leftPushAll + 一次 trim，最后批 ACK（不是逐条 50 次往返）")
+    void successfulBatchPushesRedisInOneRoundTrip() throws Exception {
+        ObservedEvent e1 = new ObservedEvent(
+                1L, 1_700_000_000_000L, "stock", "info", "库存扣减", "detail", "SKU-1",
+                "sku", "SKU-1", "trace-1", "batch-1", "C-42", 2, 171L, 98, null);
+        ObservedEvent e2 = new ObservedEvent(
+                2L, 1_700_000_000_001L, "order", "info", "订单流转", "detail", "SIM-1",
+                "order", "SIM-1", "trace-2", "batch-1", "C-42", 2, 172L, null, null);
+        String j1 = mapper.writeValueAsString(e1);
+        String j2 = mapper.writeValueAsString(e2);
+        @SuppressWarnings("unchecked")
+        ListOperations<String, String> list = mock(ListOperations.class);
+        when(redis.opsForList()).thenReturn(list);
+
+        consumer.onBatch(List.of(message(j1, 31L), message(j2, 32L)), channel);
+
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<List<String>> pushed = ArgumentCaptor.forClass(List.class);
+        verify(list).leftPushAll(eq(ObservedEventConsumer.REDIS_KEY), pushed.capture());
+        assertThat(pushed.getValue()).containsExactly(j1, j2);
+        verify(list, never()).leftPush(anyString(), anyString());
+        verify(list).trim(ObservedEventConsumer.REDIS_KEY, 0, ObservedEventConsumer.REDIS_CAPACITY - 1);
+        verify(channel).basicAck(32L, true);
     }
 
     private static Message message(String body, long deliveryTag) {

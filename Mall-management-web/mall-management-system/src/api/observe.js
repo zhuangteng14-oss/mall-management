@@ -107,37 +107,82 @@ export function openResilientStream(path, { onOpen, onFrame, onLost } = {}) {
   let attempt = 0
   let timer = null
   let current = null
+  /** 页面被隐藏时暂停（见本函数头注释「连接预算」一节）。 */
+  let paused = false
 
   function start() {
+    if (closed || paused) return
     current = openStream(path, {
       onOpen() {
         attempt = 0
-        if (!closed) onOpen && onOpen()
+        if (!closed && !paused) onOpen && onOpen()
       },
       onFrame(f) {
-        if (!closed) onFrame && onFrame(f)
+        if (!closed && !paused) onFrame && onFrame(f)
       },
       onEnd(err) {
         current = null
         // ⚠️ 自己 close() 引起的那次收尾不报：调用方已经在卸载路径上了（与 `openStream` 同口径）。
-        if (closed) return
+        //    暂停时的 close() 同理：页面没开，不该把「省连接」显示成「重连中」。
+        if (closed || paused) return
         // ⚠️ 这里**不判 err**：正常收尾与真出错走同一条路（理由见本节头注释）。
         const delay = RETRY_BACKOFF_MS[Math.min(attempt, RETRY_BACKOFF_MS.length - 1)]
         attempt += 1
         onLost && onLost({ err: err || null, attempt, nextRetryInMs: delay })
         timer = setTimeout(() => {
           timer = null
-          if (!closed) start()
+          if (!closed && !paused) start()
         }, delay)
       },
     })
   }
+
+  // ── 连接预算：页面隐藏 ⇒ 停流，重新可见 ⇒ 立刻接回 ────────────────────────
+  //
+  // ⚠️ 这不是性能优化，是**正确性**：浏览器对同一个 origin 的 HTTP/1.1 连接数上限是 6，
+  //   而本仓的观察页每页各占一条 SSE（攻击页的实时预览占 3 条）。用户压测时习惯同时开
+  //   日志/指标/状态/攻击四个标签页 —— 3 + 1 + 1 + 1 = 6 条常驻流会把连接池占满，
+  //   此后**任何**普通请求（`/attack/scenarios`、`/records`）都拿不到连接，只能等 10 秒
+  //   被 `http.js` 的超时 abort —— 页面报的「场景清单加载失败：请求超时（10000ms）」就是它。
+  //   （2026-10-18 500 并发后的现场症状与这一形态吻合：后端 `/scenarios` 实测 1–20ms，
+  //    前端却稳定等满 10 秒；单页探针无法复现四开标签页，故此处按机制修复并单独验证释放行为。）
+  //
+  //   让**隐藏的标签页**把流让出来：同一时刻最多只有一个可见页面在占连接，普通请求永远
+  //   至少剩 3 条槽位。隐藏期间数据不累积 —— 重新可见时流会重连，首帧本身就是快照。
+  function pause() {
+    if (closed || paused) return
+    paused = true
+    if (timer) {
+      clearTimeout(timer)
+      timer = null
+    }
+    if (current) {
+      current.close()
+      current = null
+    }
+  }
+
+  function resume() {
+    if (closed || !paused) return
+    paused = false
+    attempt = 0
+    start()
+  }
+
+  const onVisibilityChange = () => {
+    if (document.visibilityState === 'hidden') pause()
+    else resume()
+  }
+  document.addEventListener('visibilitychange', onVisibilityChange)
+  // 挂载那一刻页面已经不可见（后台标签页里预渲染/恢复）⇒ 不要先占一条再等事件。
+  if (document.visibilityState === 'hidden') paused = true
 
   start()
 
   return {
     close() {
       closed = true
+      document.removeEventListener('visibilitychange', onVisibilityChange)
       if (timer) {
         clearTimeout(timer)
         timer = null
@@ -192,9 +237,17 @@ export function openStream(path, { onOpen, onFrame, onEnd } = {}) {
     }
 
     reader = res.body.getReader()
+    // ⚠️ 连接建立期间调用方已经 close()（页面卸载 / 切到后台暂停）：此刻 `close()` 拿到的
+    //    `reader` 还是 null，取消不到这条请求。等响应头最终回来时这里必须补一次 cancel，
+    //    否则这条流会带着 `closed=true` 一直读到服务端关连接 —— 连接槽位被一条「已关闭」
+    //    的流占着，正是普通请求拿不到连接的那类事故。
+    if (closed) {
+      Promise.resolve(reader.cancel()).catch(() => {})
+      return
+    }
     const decoder = new TextDecoder('utf-8')
     let buffer = ''
-    if (!closed) onOpen && onOpen()
+    onOpen && onOpen()
 
     try {
       for (;;) {

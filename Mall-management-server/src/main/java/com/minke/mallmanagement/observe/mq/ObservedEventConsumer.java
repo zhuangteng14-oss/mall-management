@@ -321,9 +321,11 @@ public class ObservedEventConsumer {
      */
     private void pushToRedis(List<String> bodies) {
         try {
-            for (String body : bodies) {
-                redis.opsForList().leftPush(REDIS_KEY, body);
-            }
+            // ⚠️ 一次 LPUSH 整批，不是逐条：一批 50 条逐条发就是 50 次网络往返。积压 53 万条时
+            //    单条往返把批消费拖成「落库很快、Redis 很慢」，消费者线程全等在这上面。
+            //    `leftPushAll(key, values)` 的入栈顺序与逐条 leftPush 相同（后者也是逆序），
+            //    Redis 列表的最终顺序不变；失败语义也不变（整段 try/catch，不上抛）。
+            redis.opsForList().leftPushAll(REDIS_KEY, bodies);
             redis.opsForList().trim(REDIS_KEY, 0, REDIS_CAPACITY - 1);
         } catch (Exception e) {
             log.warn("[EVENT] Redis {} 写入失败（不影响落库与 ACK）：cause={}", REDIS_KEY, e.toString());
