@@ -50,8 +50,31 @@ public class SlowSqlListener implements QueryExecutionListener {
      */
     private static final int MAX_SQL_CHARS = 500;
 
+    /**
+     * 慢 SQL 事件出口（A5）：把「一条语句慢了」送进 {@code EventBroadcaster} 的合并环。
+     *
+     * <p>⚠️ 本类由 {@code SlowSqlConfig} **手工构造**（不是 Spring bean），故出口以构造参数
+     * 传入；旧构造器不传 ⇒ 恒为 {@code null}（单测与只关心日志的调用方逐字节同行为）。
+     * <p>⚠️ 出口调用必须 fail-soft：观测链路坏掉不能反过来把业务查询打断。
+     */
+    @FunctionalInterface
+    public interface SlowSqlSink {
+        void onSlowSql(long elapsedMs, long thresholdMs, String dataSource,
+                       int queryCount, String sqlSummary, boolean injected);
+    }
+
     /** 慢 SQL 告警阈值（ms）：{@code afterQuery} 在总耗时 ≥ 它时 WARN 一行。 */
     private final long thresholdMs;
+
+    /** 慢 SQL 事件出口；{@code null} = 不发射（见 {@link SlowSqlSink} 的注释）。 */
+    private final SlowSqlSink slowSqlSink;
+
+    /**
+     * 本条查询是否被 {@code dbSlow} 注入延迟过（ms）。{@code beforeQuery} 写、{@code afterQuery}
+     * 读后清除 —— 一条查询在同一线程上成对调用，ThreadLocal 天然按查询隔离。
+     * ⚠️ 不能用请求属性：一个请求会跑多条 SELECT，那样第一条注入后每条 afterQuery 都会误报。
+     */
+    private final ThreadLocal<Long> injectedDelayMs = new ThreadLocal<>();
 
     /**
      * D3 演练注入 {@code dbSlow} 的开关（读共享配置）。默认恒 false ⇒ 本类与 D3 之前
@@ -81,11 +104,17 @@ public class SlowSqlListener implements QueryExecutionListener {
     }
 
     public SlowSqlListener(long thresholdMs, BooleanSupplier dbSlowOn, long dbSlowMs, long dbSlowBudgetMs) {
+        this(thresholdMs, dbSlowOn, dbSlowMs, dbSlowBudgetMs, null);
+    }
+
+    public SlowSqlListener(long thresholdMs, BooleanSupplier dbSlowOn, long dbSlowMs, long dbSlowBudgetMs,
+                           SlowSqlSink slowSqlSink) {
         this.thresholdMs = thresholdMs;
         this.dbSlowOn = dbSlowOn == null ? () -> false : dbSlowOn;
         this.dbSlowMs = Math.max(0L, dbSlowMs);
         // 需求裁定逐字是「每请求最多延迟 300ms」⇒ 配置写大了也在这里夹住。
         this.dbSlowBudgetMs = Math.min(300L, Math.max(0L, dbSlowBudgetMs));
+        this.slowSqlSink = slowSqlSink;
     }
 
     /**
@@ -106,6 +135,9 @@ public class SlowSqlListener implements QueryExecutionListener {
      */
     @Override
     public void beforeQuery(ExecutionInfo execInfo, List<QueryInfo> queryInfoList) {
+        // 每次查询开始先清掉上一条可能残留的标记（正常路径由 afterQuery 清除；
+        // 这条是防「查询异常 / 监听器顺序异常」时把上一条的注入标记带进下一条）。
+        injectedDelayMs.remove();
         if (dbSlowMs <= 0L || dbSlowBudgetMs <= 0L || !dbSlowOn.getAsBoolean()) {
             return;
         }
@@ -145,6 +177,9 @@ public class SlowSqlListener implements QueryExecutionListener {
             Thread.currentThread().interrupt();
             return;
         }
+        // 标记「本条查询真的被注入延迟过」—— afterQuery 据此发射 slowSql 事件（哪怕总耗时
+        // 没到阈值：注入本身的延迟就是需要被日志中心看见的设施故障）。
+        injectedDelayMs.set(sleepMs);
         if (request == null) {
             THREAD_BUDGET.get()[1] += TimeUnit.MILLISECONDS.toNanos(sleepMs);
             log.debug("[DB-SLOW] 演练注入：非请求线程 SELECT 延迟 {} ms", sleepMs);
@@ -198,12 +233,26 @@ public class SlowSqlListener implements QueryExecutionListener {
     @Override
     public void afterQuery(ExecutionInfo execInfo, List<QueryInfo> queryInfoList) {
         long elapsed = execInfo.getElapsedTime();
-        if (elapsed < thresholdMs) {
+        // dbSlow 注入过的查询：即使总耗时没到阈值，也是需要被日志中心捕获的设施故障。
+        Long injected = injectedDelayMs.get();
+        injectedDelayMs.remove();
+        if (elapsed < thresholdMs && injected == null) {
             return;
         }
-        log.warn("慢 SQL（SLOW-SQL）：{} ms ≥ 阈值 {} ms · 数据源 {} · 条数 {} · 语句 {}",
-                elapsed, thresholdMs, execInfo.getDataSourceName(),
-                queryInfoList == null ? 0 : queryInfoList.size(), summarize(queryInfoList));
+        int count = queryInfoList == null ? 0 : queryInfoList.size();
+        String summary = summarize(queryInfoList);
+        log.warn("慢 SQL（SLOW-SQL）：{} ms ≥ 阈值 {} ms · 数据源 {} · 条数 {} · 语句 {}{}",
+                elapsed, thresholdMs, execInfo.getDataSourceName(), count, summary,
+                injected == null ? "" : " · dbSlow 注入延迟 " + injected + " ms");
+        if (slowSqlSink != null) {
+            try {
+                slowSqlSink.onSlowSql(elapsed, thresholdMs, execInfo.getDataSourceName(),
+                        count, summary, injected != null);
+            } catch (RuntimeException e) {
+                // 观测出口坏掉不能反过来打断业务查询（与 EventPublisher 的 fail-soft 同口径）。
+                log.debug("[SLOW-SQL] 事件出口失败（已忽略，不影响查询）：{}", e.toString());
+            }
+        }
     }
 
     /** 把这一批语句拼成一行可读文本（截断见 {@link #MAX_SQL_CHARS}）。包级可见是为了可单测。 */

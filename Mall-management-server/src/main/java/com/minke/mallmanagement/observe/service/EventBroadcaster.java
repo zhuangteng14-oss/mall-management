@@ -149,7 +149,17 @@ public class EventBroadcaster {
         SENSITIVE("sensitive", "敏感词"),
         IDENTITY("identity", "身份"),
         /** 防护层自己的动作（限流拦下 / 熔断翻转 / 池挤出）—— D 段新增，源环是 {@code ProtectionMetrics}。 */
-        PROTECTION("protection", "防护");
+        PROTECTION("protection", "防护"),
+        /**
+         * 设施类（A5）：慢 SQL、MQ、调度。⚠️ 这三类**没有源环**，也不经过 {@link #poll()} ——
+         * 它们由 {@link #emitSlowSql} / {@link #emitMq} / {@link #emitScheduler} **直接**写进合并环。
+         * 原因：设施事件不是「业务请求的副产品」，它们可能发生在探测线程 / 定时任务线程上，
+         * 而 {@code poll()} 只在有人观看日志页时才被 SSE 流线程推动（见类注释末节）。
+         * 追加在末尾，既有九类的声明序一字未动。
+         */
+        SLOW_SQL("slowSql", "慢 SQL"),
+        MQ("mq", "MQ"),
+        SCHEDULER("scheduler", "调度");
 
         /** 页面用作筛选键 / 配色的稳定标识（英文，别拿 {@code label} 当键）。 */
         public final String tag;
@@ -453,6 +463,104 @@ public class EventBroadcaster {
             "mqDown", "MQ 发布中断",
             "dbSlow", "数据库慢查询",
             "jobDown", "调度停摆");
+
+    // ==================== A5：设施 3 类事件（2026-10-18） ====================
+
+    /**
+     * 慢 SQL 事件 —— 由 {@code SlowSqlListener.afterQuery} 在「耗时 ≥ 阈值」或「dbSlow 注入
+     * 真的延迟了本条查询」时调用。
+     *
+     * <p>⚠️ 与 {@link #emitInjection} 同一条写入方式：直接分配合并环 seq、写槽位、发布台账。
+     * 不走 {@link #poll()} 的理由见 {@link Kind#SLOW_SQL} 的 javadoc。
+     *
+     * @param elapsedMs   本条语句的总耗时（ms，datasource-proxy 的 ExecutionInfo 实测值）
+     * @param thresholdMs 生效阈值（ms）
+     * @param dataSource  数据源名（一般是 {@code mall}）
+     * @param queryCount  本批语句条数
+     * @param sqlSummary  语句摘要（已压成单行并截断，见 {@code SlowSqlListener.summarize}）
+     * @param injected    true = 本条被 {@code dbSlow} 演练注入额外延迟过
+     * @return 本条事件的合并环 seq
+     */
+    public synchronized long emitSlowSql(long elapsedMs, long thresholdMs, String dataSource,
+                                         int queryCount, String sqlSummary, boolean injected) {
+        long seq = cursor.getAndIncrement();
+        Map<String, Object> f = new LinkedHashMap<>();
+        f.put("elapsedMs", elapsedMs);
+        f.put("thresholdMs", thresholdMs);
+        f.put("dataSource", dataSource);
+        f.put("queryCount", queryCount);
+        f.put("sql", sqlSummary);
+        f.put("injected", injected);
+        String d = "耗时 " + elapsedMs + " ms（阈值 " + thresholdMs + " ms）"
+                + (injected ? " · dbSlow 注入生效" : "")
+                + " · 数据源 " + (dataSource == null ? "-" : dataSource)
+                + " · 条数 " + queryCount
+                + " · 语句 " + (sqlSummary == null || sqlSummary.isBlank() ? "(无语句)" : sqlSummary)
+                + " src=" + Kind.SLOW_SQL.tag + "#" + seq;
+        ObservedEvent event = new ObservedEvent(
+                seq, System.currentTimeMillis(), Kind.SLOW_SQL.tag, Severity.WARN.tag,
+                "慢 SQL 触发", d,
+                null, "sql", dataSource, null, null, null, null, null, null, f);
+        events[(int) (seq & EVENT_MASK)] = event;
+        eventPublisher.publish(event);
+        return seq;
+    }
+
+    /**
+     * MQ 可用性事件 —— 由 {@code RabbitEventPublisher} 在「broker 连接翻转 / 启动即不可达 /
+     * mqDown 注入翻转」时调用。
+     *
+     * <p>⚠️ {@code up=true} 是恢复（INFO），{@code up=false} 是不可用（WARN）。
+     * 与 {@link #emitInjection} 一样，mqDown 期间本方法仍会 {@code publish}，发布侧自行丢弃
+     * ⇒ 页面（走 SSE 合并环）看得到，broker / {@code observed_event} 表看不到。
+     *
+     * @param up      true = 恢复可用（broker 连着且未被注入断开）
+     * @param detail  人话补充（断开原因 / 恢复说明）；可为 null
+     * @param fields  结构化明细；可为 null（本方法会补 {@code up}）
+     * @return 本条事件的合并环 seq
+     */
+    public synchronized long emitMq(boolean up, String detail, Map<String, Object> fields) {
+        long seq = cursor.getAndIncrement();
+        Map<String, Object> f = fields == null ? new LinkedHashMap<>() : new LinkedHashMap<>(fields);
+        f.put("up", up);
+        String d = (detail == null || detail.isBlank() ? "MQ 可用性翻转" : detail)
+                + " src=" + Kind.MQ.tag + "#" + seq;
+        ObservedEvent event = new ObservedEvent(
+                seq, System.currentTimeMillis(), Kind.MQ.tag,
+                up ? Severity.INFO.tag : Severity.WARN.tag,
+                up ? "MQ 恢复" : "MQ 连接不可用", d,
+                "mq", "mq", up ? "up" : "down", null, null, null, null, null, null, f);
+        events[(int) (seq & EVENT_MASK)] = event;
+        eventPublisher.publish(event);
+        return seq;
+    }
+
+    /**
+     * 调度事件 —— 由 {@code ScheduledJobGate.paused} 在「第一次因 jobDown 跳过」与「恢复后第一次
+     * 真跑」时调用（不逐轮刷，口径与闸自己的日志一致）。
+     *
+     * @param job    被跳过 / 恢复的 job 名（如 {@code orderTimeoutCancel}）
+     * @param paused true = 本轮及后续轮次整轮跳过（WARN）；false = 恢复执行（INFO）
+     * @param detail 人话补充；可为 null
+     * @return 本条事件的合并环 seq
+     */
+    public synchronized long emitScheduler(String job, boolean paused, String detail) {
+        long seq = cursor.getAndIncrement();
+        Map<String, Object> f = new LinkedHashMap<>();
+        f.put("job", job);
+        f.put("paused", paused);
+        String d = "job=" + (job == null ? "-" : job)
+                + (detail == null || detail.isBlank() ? "" : " · " + detail)
+                + " src=" + Kind.SCHEDULER.tag + "#" + seq;
+        ObservedEvent event = new ObservedEvent(
+                seq, System.currentTimeMillis(), Kind.SCHEDULER.tag,
+                paused ? Severity.WARN.tag : Severity.INFO.tag,
+                paused ? "调度任务停摆跳过" : "调度任务恢复执行", d,
+                job, "job", job, null, null, null, null, null, null, f);
+        events[(int) (seq & EVENT_MASK)] = event;
+        eventPublisher.publish(event);
+        return seq;
+    }
 
     // ==================== 并入：每个源一段，游标推进写在各自的段里 ====================
 

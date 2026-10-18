@@ -48,7 +48,7 @@ public class EventStreamController {
     public StreamingResponseBody stream(HttpServletRequest request, HttpServletResponse response) {
         SseConnectionRegistry.Permit permit = connections.tryAcquire(request);
         if (permit == null) {
-            return SseRejection.of(response, connections);
+            return SseRejection.of(response, connections, request);
         }
         response.setContentType(MediaType.TEXT_EVENT_STREAM_VALUE);
         response.setHeader("Cache-Control", "no-cache");

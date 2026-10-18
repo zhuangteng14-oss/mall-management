@@ -2,9 +2,14 @@ package com.minke.mallmanagement.observe.service;
 
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.ObjectProvider;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
@@ -31,5 +36,28 @@ class ScheduledJobGateTest {
 
         when(config.jobsPaused()).thenReturn(false);
         assertThat(gate.paused("orderTimeoutCancel")).isFalse();
+    }
+
+    @Test
+    @DisplayName("A5：设施事件只在翻转时发 —— 停摆中同一 job 多轮只一条，恢复时再一条 INFO")
+    @SuppressWarnings("unchecked")
+    void emitsFacilityEventOnlyOnFlip() {
+        AttackSwitchConfig config = mock(AttackSwitchConfig.class);
+        ObjectProvider<EventBroadcaster> provider = mock(ObjectProvider.class);
+        EventBroadcaster broadcaster = mock(EventBroadcaster.class);
+        when(provider.getIfAvailable()).thenReturn(broadcaster);
+        ScheduledJobGate gate = new ScheduledJobGate(config, provider);
+
+        when(config.jobsPaused()).thenReturn(true);
+        gate.paused("orderTimeoutCancel");
+        gate.paused("orderTimeoutCancel");
+        gate.paused("orderTimeoutCancel");
+        verify(broadcaster, times(1))
+                .emitScheduler(eq("orderTimeoutCancel"), eq(true), anyString());
+
+        when(config.jobsPaused()).thenReturn(false);
+        gate.paused("orderTimeoutCancel");
+        verify(broadcaster, times(1))
+                .emitScheduler(eq("orderTimeoutCancel"), eq(false), anyString());
     }
 }

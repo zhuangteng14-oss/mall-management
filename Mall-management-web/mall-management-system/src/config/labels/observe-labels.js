@@ -27,6 +27,19 @@
 export const KINDS = ['cache', 'lock', 'order', 'stock', 'audit', 'notify', 'sensitive', 'identity', 'protection']
 
 /**
+ * 设施 3 类（A5，2026-10-18）：慢 SQL / MQ / 调度。
+ *
+ * ⚠️ 它们与 `KINDS` **分列**而不是并进同一条数组：`KINDS` 是「九个业务源环」的序
+ * （后端 `poll()` 的并入顺序），设施三类**没有源环**、由后端直接写进合并环
+ * （`EventBroadcaster.emitSlowSql/emitMq/emitScheduler`）⇒ 页面上要分组画。
+ * 但 `KIND_LABEL` / `KIND_COLOR` / `kindLabel()` 等访问器对两者一视同仁 ——
+ * 「分组」是版面，不是协议。
+ *
+ * 声明序与后端 `EventBroadcaster.Kind` 末尾三项逐字对齐：`slowSql → mq → scheduler`。
+ */
+export const FACILITY_KINDS = ['slowSql', 'mq', 'scheduler']
+
+/**
  * tag → 中文名。**取值逐字抄自后端** `EventBroadcaster.Kind` 的 `label` 字段
  * （后端那两列是「页面图例上的中文名」的**唯一出处**，前端这份是它的镜像）。
  *
@@ -44,6 +57,10 @@ export const KIND_LABEL = {
   sensitive: '敏感词',
   identity: '身份',
   protection: '防护',
+  // 设施 3 类（A5）：名字逐字来自后端 `Kind` 的 label。
+  slowSql: '慢 SQL',
+  mq: 'MQ',
+  scheduler: '调度',
 }
 
 /**
@@ -71,6 +88,12 @@ export const KIND_COLOR = {
   sensitive: 'var(--c7)',
   identity: 'var(--c8)',
   protection: 'var(--protect)',
+  // 设施 3 类（A5）：沿用图表色板里尚未被事件类占用的三档。
+  // ⚠️ 设施组与业务组在版面上分开，颜色重复不会指向同一行；但不要再把这几个色
+  // 借给别的类，否则「同色 = 同一环」的读法会失效。
+  slowSql: 'var(--c10)',
+  mq: 'var(--c6)',
+  scheduler: 'var(--c8)',
 }
 
 /**
@@ -187,6 +210,10 @@ export const OBJECT_FIELD_LABEL = {
   // ⚠️ 写「防护开关」而不是「对象」：这一列在防护环里装的是**哪道闸动了**（rateLimit / circuitBreak /
   //    poolIsolation），不是「谁被拦了」—— 后者在防护环里根本不存在（事件不带业务键）。
   protection: '防护开关',
+  // 设施 3 类（A5）：慢 SQL 的对象是数据源，MQ 是连接，调度是被跳过的任务。
+  slowSql: '数据源',
+  mq: 'MQ 连接',
+  scheduler: '任务',
 }
 
 /** 认不出 ⇒ 用最中性的那个词（同各表的兜底口径）。 */
@@ -235,6 +262,18 @@ export const FIELD_LABEL = {
   protection: '防护',
   scope: '范围',
   extra: '附加信息',
+  // 设施 3 类（A5）：这三组键都是**真帧**里已有的（emitSlowSql / emitMq / emitScheduler）。
+  elapsedMs: '耗时（毫秒）',
+  thresholdMs: '阈值（毫秒）',
+  dataSource: '数据源',
+  queryCount: '语句条数',
+  sql: '语句',
+  injected: '演练注入',
+  job: '任务',
+  paused: '已停摆',
+  up: '可用',
+  cause: '原因',
+  injection: '注入',
 }
 
 /**

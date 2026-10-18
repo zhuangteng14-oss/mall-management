@@ -2,6 +2,8 @@ package com.minke.mallmanagement.observe.service;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 import java.util.Set;
@@ -38,11 +40,26 @@ public class ScheduledJobGate {
 
     private final AttackSwitchConfig switchConfig;
 
+    /**
+     * 事件出口（A5）。⚠️ 用 {@link ObjectProvider} 而不是直接注入：本类被七个 job 与
+     * {@code ScheduledJobGateTest} 直接 new 出来，直接注入会让纯单测无法构造；且事件是
+     * **附加观测**，不该成为调度闸可用性的前提（与 {@code AttackController} 的处置同款）。
+     */
+    private final ObjectProvider<EventBroadcaster> eventBroadcaster;
+
     /** 已记过「停摆中」的 job 名。集合的增删就是翻转判据（不另存布尔位）。 */
     private final Set<String> pausedLogged = ConcurrentHashMap.newKeySet();
 
+    /** 纯单测 / 切片用：不发事件。 */
     public ScheduledJobGate(AttackSwitchConfig switchConfig) {
+        this(switchConfig, null);
+    }
+
+    @Autowired
+    public ScheduledJobGate(AttackSwitchConfig switchConfig,
+                            ObjectProvider<EventBroadcaster> eventBroadcaster) {
         this.switchConfig = switchConfig;
+        this.eventBroadcaster = eventBroadcaster;
     }
 
     /**
@@ -55,13 +72,29 @@ public class ScheduledJobGate {
         if (!switchConfig.jobsPaused()) {
             if (pausedLogged.remove(job)) {
                 log.info("[JOB-INJECTION] 调度恢复：{} 下一轮起照常执行（jobDown 已关）", job);
+                emitScheduler(job, false, "jobDown 已关闭，下一轮起照常执行");
             }
             return false;
         }
         if (pausedLogged.add(job)) {
             log.info("[JOB-INJECTION] 演练注入 jobDown 开启：{} 本轮及后续轮次整轮跳过"
                     + "（后台调度没有停表，只是每个入口在方法第一行返回）", job);
+            emitScheduler(job, true, "演练注入 jobDown 开启，本轮及后续轮次整轮跳过");
         }
         return true;
+    }
+
+    /** 只在翻转时发一条设施事件（与上面的日志同一处判定，不逐轮刷）。 */
+    private void emitScheduler(String job, boolean paused, String detail) {
+        EventBroadcaster broadcaster = eventBroadcaster == null ? null : eventBroadcaster.getIfAvailable();
+        if (broadcaster == null) {
+            return;
+        }
+        try {
+            broadcaster.emitScheduler(job, paused, detail);
+        } catch (RuntimeException e) {
+            // 事件出口坏掉不能反过来让调度入口抛出（观测是附加链路）。
+            log.debug("[JOB-INJECTION] 调度事件出口失败（已忽略）：{}", e.toString());
+        }
     }
 }

@@ -1,6 +1,7 @@
 package com.minke.mallmanagement.observe.controller;
 
 import com.minke.mallmanagement.observe.service.SseConnectionRegistry;
+import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.http.MediaType;
 import org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBody;
@@ -22,15 +23,22 @@ final class SseRejection {
     private SseRejection() {
     }
 
-    static StreamingResponseBody of(HttpServletResponse response, SseConnectionRegistry registry) {
+    static StreamingResponseBody of(HttpServletResponse response, SseConnectionRegistry registry,
+                                    HttpServletRequest request) {
         response.setStatus(429);
         response.setContentType(MediaType.APPLICATION_JSON_VALUE);
         response.setCharacterEncoding(StandardCharsets.UTF_8.name());
         response.setHeader("Cache-Control", "no-store");
         response.setHeader("Retry-After", "5");
-        String msg = "SSE 连接数已达上限（单用户 " + registry.maxPerUser() + " 条 / 全局 "
-                + registry.maxTotal() + " 条）。请关闭不用的观测页标签，或调整 "
-                + "application.properties 的 mall.observe.sse.max-per-user / max-total";
+        // 分角色文案：管理员看到的是 500/2000，普通用户/商家看到的是 20/200。
+        // ⚠️ 档位从**这次请求**重新判定（与 tryAcquire 同一口径），不是从全局配置里猜。
+        SseConnectionRegistry.Limits limits = registry.limitsFor(request);
+        String msg = "SSE 连接数已达上限（" + limits.label() + "：单个账号 " + limits.maxPerUser()
+                + " 条 / 全局 " + limits.maxTotal() + " 条）。请关闭不用的观测页标签，稍后重试；"
+                + "管理员可调整 application.properties 的 "
+                + (registry.tierOf(request) == SseConnectionRegistry.Tier.ADMIN
+                        ? "mall.observe.sse.admin.max-per-user / mall.observe.sse.admin.max-total"
+                        : "mall.observe.sse.max-per-user / mall.observe.sse.max-total");
         byte[] body = ("{\"success\":false,\"msg\":\"" + msg + "\"}")
                 .getBytes(StandardCharsets.UTF_8);
         return out -> {

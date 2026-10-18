@@ -187,6 +187,26 @@ class SlowSqlListenerTest {
         assertThat(elapsedMs).as("预算不是 0（前几拍确实延迟了）").isGreaterThanOrEqualTo(250);
     }
 
+    // ==================== A5：设施事件出口 ====================
+
+    @Test
+    @DisplayName("A5：超阈值 ⇒ 出口收到 injected=false；dbSlow 注入过 ⇒ 未到阈值也发 injected=true")
+    void emitsFacilityEvents() {
+        List<String> calls = new ArrayList<>();
+        SlowSqlListener listener = new SlowSqlListener(THRESHOLD, () -> true, 40, 300,
+                (elapsed, threshold, dataSource, count, sql, injected) ->
+                        calls.add(elapsed + "|" + injected + "|" + sql));
+
+        listener.beforeQuery(null, sql("select injected"));
+        listener.afterQuery(exec(40L), sql("select injected"));   // 注入过：40 < 200 也要发
+        listener.afterQuery(exec(THRESHOLD), sql("select slow")); // 无注入：恰好阈值
+        listener.afterQuery(exec(199L), sql("select quiet"));     // 无注入且未到阈值：不发
+
+        assertThat(calls).containsExactly(
+                "40|true|select injected",
+                THRESHOLD + "|false|select slow");
+    }
+
     @Test
     @DisplayName("模拟库自带实现的反例：本实现**不排**任何定时任务（afterQuery 立即同步返回）")
     void doesNotScheduleAnything() throws Exception {

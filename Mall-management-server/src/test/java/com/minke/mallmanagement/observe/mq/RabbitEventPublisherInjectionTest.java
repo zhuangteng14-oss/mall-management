@@ -64,6 +64,9 @@ class RabbitEventPublisherInjectionTest {
         Gauge gauge = registry.find("mall.observe.mq.up").gauge();
         assertThat(gauge).isNotNull();
         assertThat(gauge.value()).as("注入中 ⇒ 发布侧不可用").isZero();
+        assertThat(publisher.connected()).as("connected() 仍如实回答 broker 通不通（未被注入篡改）")
+                .isTrue();
+        assertThat(publisher.usable()).as("日志帧读的页面口径：注入中 ⇒ 不可用").isFalse();
     }
 
     @Test
@@ -75,5 +78,6 @@ class RabbitEventPublisherInjectionTest {
         Gauge gauge = registry.find("mall.observe.mq.up").gauge();
         assertThat(gauge).isNotNull();
         assertThat(gauge.value()).isEqualTo(1.0);
+        assertThat(publisher.usable()).as("注入关着且 broker 连着 ⇒ 页面口径可用").isTrue();
     }
 }

@@ -14,6 +14,7 @@ import java.util.concurrent.CyclicBarrier;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import com.minke.mallmanagement.shared.cache.MallCacheMetrics;
 
@@ -243,6 +244,29 @@ class L2HealthProbeConcurrencyTest {
             return "PONG";
         });
         return probeOver(connection);
+    }
+
+    @Test
+    @DisplayName("D3 redisDown 注入：拨开即刻 isHealthy=false、isL2UsableNow=false，且一次 PING 都不打")
+    void redisDownInjectionShortCircuitsWithoutProbing() {
+        AtomicBoolean injected = new AtomicBoolean(true);
+        AtomicInteger pings = new AtomicInteger();
+        RedisConnection connection = mock(RedisConnection.class);
+        when(connection.ping()).thenAnswer(invocation -> {
+            pings.incrementAndGet();
+            return "PONG";
+        });
+        RedisConnectionFactory factory = mock(RedisConnectionFactory.class);
+        when(factory.getConnection()).thenReturn(connection);
+        L2HealthProbe probe = new L2HealthProbe(factory, COOLDOWN, metrics, injected::get);
+
+        assertThat(probe.isHealthy()).as("注入期间 gauge 口径 = 不可用（立即变 0）").isFalse();
+        assertThat(probe.isL2UsableNow()).as("热路径直接走降级").isFalse();
+        assertThat(pings.get()).as("注入期间零网络代价（不 PING、不碰 Redis）").isZero();
+
+        injected.set(false);
+        assertThat(probe.isHealthy()).as("关掉注入 ⇒ 回到真实健康态（初始 HEALTHY）").isTrue();
+        assertThat(probe.isL2UsableNow()).as("关掉注入 ⇒ 热路径恢复可用").isTrue();
     }
 
     private L2HealthProbe probeOver(RedisConnection connection) {

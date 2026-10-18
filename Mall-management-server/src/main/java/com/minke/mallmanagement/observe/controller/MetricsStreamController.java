@@ -66,7 +66,7 @@ public class MetricsStreamController {
         // D3-6：先占名额，占不到就 429（不再开流）。释放点在 SseStreamWriter 的 finally。
         SseConnectionRegistry.Permit permit = connections.tryAcquire(request);
         if (permit == null) {
-            return SseRejection.of(response, connections);
+            return SseRejection.of(response, connections, request);
         }
         response.setContentType(MediaType.TEXT_EVENT_STREAM_VALUE);
         response.setHeader("Cache-Control", "no-cache");

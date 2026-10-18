@@ -1,6 +1,7 @@
 package com.minke.mallmanagement.observe.mq;
 
 import com.minke.mallmanagement.observe.service.AttackSwitchConfig;
+import com.minke.mallmanagement.observe.service.EventBroadcaster;
 import com.minke.mallmanagement.observe.service.EventBroadcaster.ObservedEvent;
 import io.micrometer.core.instrument.Gauge;
 import io.micrometer.core.instrument.MeterRegistry;
@@ -11,9 +12,13 @@ import org.slf4j.LoggerFactory;
 import org.springframework.amqp.core.MessageDeliveryMode;
 import org.springframework.amqp.rabbit.connection.CorrelationData;
 import org.springframework.amqp.rabbit.core.RabbitTemplate;
+import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
+import java.util.LinkedHashMap;
+import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.BlockingQueue;
@@ -129,17 +134,38 @@ public class RabbitEventPublisher implements EventPublisher {
     private volatile boolean probing = true;
     private Thread probeThread;
 
+    /**
+     * 设施事件出口（A5）。⚠️ {@link ObjectProvider} 而不是直接注入 {@code EventBroadcaster}：
+     * 后者依赖 {@link EventPublisher}（就是本类）⇒ 直接注入会形成构造器环。provider 在探测线程
+     * **真正要发事件时**才取，且本类对取出失败（切片测试）保持静默。
+     */
+    private final ObjectProvider<EventBroadcaster> eventBroadcaster;
+
+    /** 上一次探测到的 mqDown 注入状态 —— 只用于「翻转才发一条设施事件」。 */
+    private final AtomicBoolean injectedState = new AtomicBoolean(false);
+
+    /** 纯单测 / 切片用：不发设施事件。 */
     public RabbitEventPublisher(RabbitTemplate rabbitTemplate,
                                 AttackSwitchConfig switchConfig,
                                 MeterRegistry registry,
-                                @Value("${mall.observe.mq.warn-interval-ms:300000}") long warnIntervalMs) {
+                                long warnIntervalMs) {
+        this(rabbitTemplate, switchConfig, registry, warnIntervalMs, null);
+    }
+
+    @Autowired
+    public RabbitEventPublisher(RabbitTemplate rabbitTemplate,
+                                AttackSwitchConfig switchConfig,
+                                MeterRegistry registry,
+                                @Value("${mall.observe.mq.warn-interval-ms:300000}") long warnIntervalMs,
+                                ObjectProvider<EventBroadcaster> eventBroadcaster) {
         this.rabbitTemplate = rabbitTemplate;
         this.switchConfig = switchConfig;
+        this.eventBroadcaster = eventBroadcaster;
         this.warnIntervalNanos = TimeUnit.MILLISECONDS.toNanos(warnIntervalMs);
         // D3：MQ 可用性 = 「broker 真连着」且「没有被演练注入断开」。
         // ⚠️ 它是独立 gauge 而不是拿 connected 改口径 —— connected() 仍然如实回答
         //    「broker 通不通」，只有页面健康度需要把两者的合取画出来。
-        Gauge.builder("mall.observe.mq.up", this, p -> p.mqUsable() ? 1.0 : 0.0)
+        Gauge.builder("mall.observe.mq.up", this, p -> p.usable() ? 1.0 : 0.0)
                 .description("MQ 发布侧可用（1=broker 连着且未被演练注入断开）")
                 .register(registry);
     }
@@ -217,8 +243,9 @@ public class RabbitEventPublisher implements EventPublisher {
         return switchConfig.injections().contains("mqDown");
     }
 
-    /** 页面口径的「MQ 可用」= broker 连着 **且** 没有被注入断开。 */
-    private boolean mqUsable() {
+    /** 页面口径的「MQ 可用」= broker 连着 **且** 没有被注入断开（见接口 javadoc）。 */
+    @Override
+    public boolean usable() {
         return connected.get() && !mqDownInjected();
     }
 
@@ -236,6 +263,7 @@ public class RabbitEventPublisher implements EventPublisher {
             while (probing) {
                 try {
                     refreshConnected();
+                    refreshInjectionState();
                 } catch (Throwable t) {
                     // 兜底：探测**绝不能**把这个线程打死（打死了 connected 会永远停在旧值，
                     // 而页面上那个点会一直画「已连接」—— 比没有这个点更坏）。
@@ -322,6 +350,8 @@ public class RabbitEventPublisher implements EventPublisher {
                 unreachableWarned.set(false);   // 通了 ⇒ 下一次失败重新走「首条」路径
                 log.info("[EVENT] MQ 已连接：事件将落库（observed_event）+ 进 Redis events:latest"
                         + "（exchange={} queue={}）", RabbitObserveConfig.EXCHANGE, RabbitObserveConfig.QUEUE);
+                emitMq(true, "broker 连接已恢复：事件恢复落库（observed_event）并进 Redis events:latest",
+                        "broker-recovered");
             }
             return;
         }
@@ -333,9 +363,59 @@ public class RabbitEventPublisher implements EventPublisher {
         }
         unreachableWarned.set(true);
         lastWarnNanos = at;
+        String cause = flipped ? "刚从「已连接」掉下来" : (first ? "启动即不可达" : "仍未恢复，按间隔重复");
         log.warn("[EVENT] MQ 不可达（{}）：事件**不落库**，只留在内存环里（页面上的 MQ 点会变黄）"
-                        + "—— 检查 spring.rabbitmq.host/port/username/password（dev profile）",
-                flipped ? "刚从「已连接」掉下来" : (first ? "启动即不可达" : "仍未恢复，按间隔重复"));
+                        + "—— 检查 spring.rabbitmq.host/port/username/password（dev profile）", cause);
+        // 设施事件只在「翻转 / 首次」发一条：稳态失败由上面的日志按 5 分钟节流，
+        // 不同步刷进合并环（否则日志页每 5 分钟多一条同义事件，且 5 秒探测一轮就会过量）。
+        if (flipped || first) {
+            emitMq(false, "broker 不可达（" + cause + "）：事件只留在内存环里，不落库",
+                    flipped ? "broker-disconnected" : "startup-unreachable");
+        }
+    }
+
+    /**
+     * mqDown 注入的翻转检测（A5）。由探测线程每 5 秒看一眼共享配置 —— 不把发事件塞进
+     * {@code AttackController}：本类才是「MQ 可用性」的归属地，且 5 秒的滞后对日志页可接受。
+     *
+     * <p>⚠️ 注入期间 broker 可能仍然连着（mqDown 只拦发布侧）⇒ 这里与 {@link #refreshConnected}
+     * 是**两条独立判据**：一个回答「TCP 通不通」，一个回答「发布侧有没有被人为断开」。
+     */
+    private void refreshInjectionState() {
+        boolean now = mqDownInjected();
+        boolean was = injectedState.getAndSet(now);
+        if (now == was) {
+            return;
+        }
+        Map<String, Object> fields = new LinkedHashMap<>();
+        fields.put("injection", "mqDown");
+        emitMq(!now,
+                now ? "演练注入 mqDown 已开启：发布侧丢弃事件，消费者与死信出口不受影响"
+                        : "演练注入 mqDown 已关闭：发布侧恢复投递",
+                now ? "injection-on" : "injection-off", fields);
+    }
+
+    /** 设施事件出口（fail-soft：观测链路不能反过来影响探测线程）。 */
+    private void emitMq(boolean up, String detail, String cause) {
+        emitMq(up, detail, cause, null);
+    }
+
+    /** 同上，附带额外结构化字段（如注入键）。 */
+    private void emitMq(boolean up, String detail, String cause, Map<String, Object> extra) {
+        EventBroadcaster broadcaster = eventBroadcaster == null ? null : eventBroadcaster.getIfAvailable();
+        if (broadcaster == null) {
+            return;
+        }
+        Map<String, Object> fields = new LinkedHashMap<>();
+        fields.put("cause", cause);
+        if (extra != null) {
+            fields.putAll(extra);
+        }
+        try {
+            broadcaster.emitMq(up, detail, fields);
+        } catch (RuntimeException e) {
+            log.debug("[EVENT] MQ 设施事件出口失败（已忽略）：{}", e.toString());
+        }
     }
 
     /**
