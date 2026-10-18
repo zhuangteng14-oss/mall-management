@@ -1,0 +1,40 @@
+{
+  "stamp": "d3-dlq-drawer-empty",
+  "base": "http://localhost:8080",
+  "steps": [
+    {
+      "login": {
+        "ok": true,
+        "pwdLen": 9
+      }
+    },
+    {
+      "afterLoginHash": "#/admin"
+    },
+    {
+      "clicked": true
+    }
+  ],
+  "card": {
+    "text": "0\n死信数量（累计 · 本拍 +0 · 已落库 0）· 查看详情 ›",
+    "count": "0",
+    "cls": "a-stat a-stat--dlq is-zero",
+    "borderColor": "rgb(43, 57, 79)",
+    "opacity": "0.72",
+    "clickable": "button"
+  },
+  "drawer": {
+    "title": "死信详情",
+    "subtitle": "共 0 条 · 按落库时间倒序（本页 0 条）",
+    "rows": 0,
+    "empty": "当前没有处理失败的死信消息",
+    "err": null,
+    "items": []
+  },
+  "shots": [
+    "docs/agent/evidence/c3-d3/d3-dlq-drawer-empty.png",
+    "docs/agent/evidence/c3-d3/d3-dlq-drawer-empty-full.png"
+  ]
+}
+SHOT docs/agent/evidence/c3-d3/d3-dlq-drawer-empty.png
+SHOT docs/agent/evidence/c3-d3/d3-dlq-drawer-empty-full.png

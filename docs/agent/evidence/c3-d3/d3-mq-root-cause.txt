@@ -1,0 +1,47 @@
+D3 MQ 黄条排查与恢复实测（2026-10-18，dev profile）
+
+环境：VM 192.168.229.129:5672 / RabbitMQ 4.0.5（管理端 15672 可访问）
+结论：**不是健康检查缓存未刷新，也不是本地死锁**。TCP 5672 是通的
+      （Test-NetConnection=True），但旧后端进程启动时没有带 `MALL_MQ_PASSWORD`
+      —— application-dev.properties 里是 `${MALL_MQ_PASSWORD:}` ⇒ 空口令，
+      broker 以 ACCESS_REFUSED 拒绝并在握手后关闭 socket。黄条是如实告警。
+
+[1] 管理端 /api/overview（凭据只从 _work/b7-mq.env + _work/mq-pass 读，不回显）
+    空口令                -> HTTP 401 Unauthorized
+    真实口令（mq-pass）   -> HTTP 200，rabbitmq_version=4.0.5
+
+[2] AMQP 握手（amqp-client 5.22.0，复现日志里的 "Socket closed"）
+    空口令                -> AuthenticationFailureException:
+                             ACCESS_REFUSED - Login was refused using authentication
+                             mechanism PLAIN. For details see the broker logfile.
+    真实口令（mq-pass）   -> CONNECTED=true，server=4.0.5
+
+[3] 旧后端进程日志（_work/d3/manual-session-backend.log，PID 51272）
+    每 5 秒一条：
+      Attempting to connect to: [192.168.229.129:5672]
+      An unexpected connection driver error occurred (Exception message: Socket closed)
+    本轮累计 "Socket closed" 430 行（约 35 分钟持续失败）。
+
+[4] 带口令重启（_work/backend-restart-mq.log，PID 30996）
+    export MALL_MQ_PASSWORD="$(tr -d '\r\n' < _work/mq-pass)"
+    ./mvnw spring-boot:run -Dspring-boot.run.arguments="--spring.profiles.active=dev \
+      --spring.rabbitmq.listener.simple.auto-startup=false"
+
+    2026-10-18 21:09:17.721 [observe-mq-probe] [EVENT] MQ 已连接：事件将落库（observed_event）
+      + 进 Redis events:latest（exchange=mall.observe.events queue=observed_event.queue）
+    2026-10-18 21:09:19.605 Started MallManagementApplication in 8.656 seconds
+    （启动后不再有任何 "Socket closed"）
+
+[5] 指标 SSE 首帧（POST /admin/observe/metrics/stream）
+    health = {"level":"ok","label":"健康","reasons":[]}
+    gauges = {"l2Up":1.0,"lockUp":1.0,
+              "injections":{"redisDown":0.0,"mqDown":0.0,"dbSlow":0.0,"jobDown":0.0},
+              "mqUp":1.0}
+
+[6] 页面探针（scripts/probes/d3-mq-banner-cleared-shot.mjs）
+    健康度 = 健康（a-hv--ok），`.a-reasons` 为空，页面上没有 MQ 告警条。
+    截图：d3-mq-banner-cleared.png
+
+说明：健康检查逻辑本身无需改 —— 探针每 5 秒实测一次，`connected` 翻转会立刻
+      反映到 gauge（本次重启后 1 秒内即由 0 变 1）。本次修复的是**启动配置**：
+      运行 dev 后端必须带 MALL_MQ_PASSWORD（口令来源 `_work/mq-pass`）。

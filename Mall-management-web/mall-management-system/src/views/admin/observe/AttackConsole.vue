@@ -140,8 +140,11 @@
            ⚠️ 缺省 = 防护**全开** / 注入**全关**（后端白名单：表外的 key 一律 400，不静默忽略）。
            ⚠️ D3（2026-10-18）起四个注入**全部真接通**（见 `INJECTIONS_NOT_WIRED` 现为空）：
               `mqDown` 只拦发布侧、`dbSlow` 只延迟 SELECT、`jobDown` 只让定时任务整轮跳过。 -->
-      <!-- ⚠️【3a.1 → 3a.6 临时窗口】下一行的 `<p>` 就是窗口开关：**提示在 = 窗口开、提示没 = 窗口关**（3a.6 接上配置面时删掉它即可）。 -->
-      <p class="a-window-note">⚠️ 本区暂不可用（配置面已就绪，页面接线在 3a.6）</p>
+      <!-- 共享配置状态行（2026-10-18 · D3 手验修复）：开关不再是死控件，拨动即
+           `POST /admin/observe/attack/config`（整组替换）。只有写入中 / 写入失败时才出现。 -->
+      <p v-if="configSaving || configErr" class="a-window-note" :class="{ 'is-bad': configErr }">
+        {{ configErr || '共享开关正在写入服务端…' }}
+      </p>
       <h3 class="a-sub">
         防护开关
         <span class="a-subn">默认全开 · 限流 / 熔断 / 重试 / 分池已接闸，改读数；降级不可开关</span>
@@ -513,7 +516,10 @@ import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 // 播放时钟、行、横幅都在 `api/replay-session.js` 与日志页那条链上。
 import { useRouter } from 'vue-router'
 // ⚠️ 三层 `../`（不是管理端其它页的两层）：本页在 `views/admin/observe/`，比 `views/admin/` 深一层。
-import { attackRecords, attackScenarios, attackStatus, cleanupAttack, resetAttackEnvironment, runAttack, stopAttack } from '../../../api/observe'
+import {
+  attackRecords, attackScenarios, attackStatus, cleanupAttack, readAttackConfig,
+  resetAttackEnvironment, runAttack, stopAttack, updateAttackConfig,
+} from '../../../api/observe'
 import { replaySession, startReplaySession } from '../../../api/replay-session'
 import WeightSlider from '../../../components/observe/WeightSlider.vue'
 import IconGlyph from '../../../components/ui/IconGlyph.vue'
@@ -722,6 +728,7 @@ function toggleProtection(key) {
   if (next.has(key)) next.delete(key)
   else next.add(key)
   protections.value = next
+  pushConfig()
 }
 
 /** 拨一枚注入开关（同上）。D3 起四枚都真接通，拨动即生效（后端 `AttackSwitchConfig` 共享配置）。 */
@@ -730,6 +737,77 @@ function toggleInjection(key) {
   if (next.has(key)) next.delete(key)
   else next.add(key)
   injections.value = next
+  pushConfig()
+}
+
+// ── 共享配置读写（2026-10-18 · 修「关掉 mqDown 但指标页横幅不消失」）──────────
+// 根因：此前这两组开关只改本地 `Set` + sessionStorage，**从未 POST 过**配置 ⇒ 后端
+// `AttackSwitchConfig` 里的注入一直开着，`mall.observe.mq.up` 恒为 0，指标页横幅自然是
+// 诚实的「还断着」。修法不是前端藏横幅，而是把开关真的接到后端那份进程内共享配置上。
+//
+// ⚠️ 写请求**串行化**：每次拨动都是「整组替换」，连点两枚时若两发并行，回包顺序颠倒
+//    会让后到的旧快照把新状态盖回去（页面与服务端各说各话）。串成一条 promise 链即可。
+// ⚠️ 失败时**重新读**服务端快照，不留下「页面显示已关、后端其实还开着」的假象。
+const configSaving = ref(false)
+const configErr = ref('')
+let configWrite = Promise.resolve()
+let configPending = 0
+
+function applyConfig(snapshot) {
+  if (!snapshot || typeof snapshot !== 'object') return
+  if (Array.isArray(snapshot.Protections)) {
+    protections.value = new Set(snapshot.Protections.filter((k) => PROTECTIONS.includes(k) && protectionWired(k)))
+  }
+  if (Array.isArray(snapshot.Injections)) {
+    injections.value = new Set(snapshot.Injections.filter((k) => INJECTIONS.includes(k)))
+  }
+}
+
+async function loadSharedConfig() {
+  try {
+    const data = await readAttackConfig()
+    if (data && data.success === false) {
+      configErr.value = data.msg || '共享开关读取失败（页面暂用本地缓存）'
+      return
+    }
+    applyConfig(data)
+    configErr.value = ''
+  } catch (e) {
+    // 配置面读不到不该让整页不可用：本地表单仍可编辑，开跑时引擎读的是服务端那份。
+    configErr.value = `共享开关读取失败（页面暂用本地缓存）：${errText(e)}`
+    console.error('attack config read', e)
+  }
+}
+
+function pushConfig() {
+  const payload = {
+    protections: [...protections.value],
+    injections: [...injections.value],
+  }
+  configPending += 1
+  configSaving.value = true
+  configErr.value = ''
+  configWrite = configWrite
+    .then(() => updateAttackConfig(payload))
+    .then(async (data) => {
+      if (data && data.success === false) {
+        // 先按服务端真相回填，再显示失败文案（loadSharedConfig 成功时会清空 configErr）。
+        await loadSharedConfig()
+        configErr.value = data.msg || '共享开关保存失败'
+        return
+      }
+      applyConfig(data)
+    })
+    .catch(async (e) => {
+      console.error('attack config write', e)
+      await loadSharedConfig()
+      configErr.value = `共享开关保存失败：${errText(e)}`
+    })
+    .finally(() => {
+      configPending -= 1
+      if (configPending <= 0) configSaving.value = false
+    })
+  return configWrite
 }
 
 /** 勾选 = 权重 > 0（后端 `parse` 把 0 权重直接剔除，见 `WeightSlider.vue` 块首）。 */
@@ -1113,10 +1191,10 @@ async function fire(name, chosen, opts) {
       // ⚠️ 3a.1（乙案）：两组开关**不再随这一轮发出** —— 它们是共享配置，由
       //    `GET/POST /admin/observe/attack/config` 读写；引擎开跑时**自己**去读那一份。
       //    ⇒ 这里刻意**什么都不传**：传了后端会直接 400 并指路（不静默忽略）。
-      //    ⚠️ **别**为了「让页面上的开关生效」在这里顺手 POST 一次配置 —— 那会把日志页
-      //    刚拨的开关覆盖回去，乙案的唯一目的（过程中能改、两页共读共写）就白做了。
-      //    ⚠️ 于是本页顶部那两组控件在 3a.1→3a.6 之间是**死控件**（拨了不影响任何东西，
-      //    也不再被读），等 3a.6 接上配置面；窗口登记见本笔收笔报告。
+      //    ⚠️ 本页开关现在**当场**写共享配置（见 `pushConfig`）；`/run` 仍不传 ——
+      //    引擎开跑时自己读那一份，且过程中两页都还能改（乙案）。
+      //    ⚠️ **别**为了「让这一轮用上刚拨的开关」再 POST 一次：多一次无意义写入，
+      //    还可能把日志页刚改的覆盖回去。
     })
     // 甲：这一轮有没有被叫停过、有没有背压弃投 / 取消。后两个数是 `DrillRecordService.run()`
     // 在**响应根上**单列出来的（`ShedRequests` / `AbandonedRequests`），**不并进「失败」那一档**
@@ -1295,6 +1373,10 @@ onMounted(() => {
   // 顺序有讲究：先恢复表单，再取场景清单 —— `loadScenarios()` 只给「还没有值」的键填缺省权重，
   // 反过来的话用户拖过的滑条会被后端缺省覆盖（这正是切页后「权重全回默认」的成因之一）。
   restoreForm()
+  // 两组开关的**权威值在服务端**（`attack/config` 是共享配置，日志页也读写同一份）；
+  // sessionStorage 只是读不到时的兜底。必须在 restoreForm 之后覆盖，否则页面会显示
+  // 上一次本地勾选、而后端其实已被人从另一页改掉。
+  loadSharedConfig()
   loadScenarios()
   loadRecords()
   restoreRunState()
@@ -1878,11 +1960,12 @@ onBeforeUnmount(() => {
   opacity: 0.85;
   margin-left: var(--s2);
 }
-.a-kv, .a-window-note {  /* ⚠️ 后者 = 3a.1→3a.6 的**临时**提示（开关控件组尚未接上配置面）；3a.6 删掉模板那行 `<p>` 后本类无引用 */
+.a-kv, .a-window-note {  /* ⚠️ 后者 = 共享开关写入中 / 写入失败的状态行（不再是「本区不可用」） */
   font-size: var(--fs-xs);
   color: var(--ink-2);
   line-height: 1.9;
 }
+.a-window-note.is-bad { color: var(--danger); }
 .a-kv code {
   font-family: var(--font-mono);
   color: var(--ink);

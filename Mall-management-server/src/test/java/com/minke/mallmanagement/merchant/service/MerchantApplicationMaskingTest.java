@@ -18,11 +18,10 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.when;
 
 /**
- * D3-4 读侧接线：入驻申请**管理端列表**掩 {@code ContactPhone} / {@code ShopAddress}，
- * 「我的申请」（本人查询）保持明文。
+ * 入驻申请的**明文**约定：管理端审核列表与「我的申请」都必须返回原始联系方式。
  *
- * <p>⚠️ 本人查询那条不是凑数：商家要靠明文核对「我填的号码对不对」；如果只测管理端，
- * 把 {@code myApplications} 一并接上掩码也会全绿。
+ * <p>⚠️ 2026-10-18 手验后改：D3-4 曾把管理端列表掩成 {@code 138****8000}，客服无法按电话
+ * 联系申请人 ⇒ 用户裁决恢复明文。本测试把「恢复」钉住：若有人再次把列表接上掩码，它会当场红。
  */
 @ExtendWith(MockitoExtension.class)
 class MerchantApplicationMaskingTest {
@@ -51,8 +50,8 @@ class MerchantApplicationMaskingTest {
     }
 
     @Test
-    @DisplayName("listForAdmin：电话 / 店铺地址掩码，店铺名原样，源行不被改写")
-    void listForAdminMasksPhoneAndShopAddress() {
+    @DisplayName("listForAdmin：审核列表必须返回明文电话 / 店铺地址（不再脱敏）")
+    void listForAdminKeepsContactPlaintext() {
         Map<String, Object> row = pendingRow();
         when(applicationDao.selectByStatus("pending", 100)).thenReturn(List.of(row));
         when(applicationDao.countByStatus("pending")).thenReturn(1L);
@@ -62,11 +61,9 @@ class MerchantApplicationMaskingTest {
         @SuppressWarnings("unchecked")
         List<Map<String, Object>> list = (List<Map<String, Object>>) result.get("list");
         assertThat(list).hasSize(1);
-        assertThat(list.get(0).get("ContactPhone")).isEqualTo("138****8000");
-        assertThat(list.get(0).get("ShopAddress")).isEqualTo("北京市朝***");
+        assertThat(list.get(0).get("ContactPhone")).isEqualTo("13800138000");
+        assertThat(list.get(0).get("ShopAddress")).isEqualTo("北京市朝阳区建国路1号");
         assertThat(list.get(0).get("ShopName")).isEqualTo("小铺");
-        assertThat(row.get("ContactPhone")).as("DAO 返回的源行必须保持明文").isEqualTo("13800138000");
-        assertThat(row.get("ShopAddress")).as("DAO 返回的源行必须保持明文").isEqualTo("北京市朝阳区建国路1号");
     }
 
     @Test

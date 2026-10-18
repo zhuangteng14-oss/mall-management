@@ -1,0 +1,30 @@
+{
+  "base": "http://localhost:8080",
+  "steps": [
+    {
+      "login": {
+        "ok": true
+      }
+    }
+  ],
+  "before": {
+    "sw": {
+      "text": "MQ 断开",
+      "pressed": "false",
+      "cls": "a-sw is-off",
+      "disabled": false
+    },
+    "injections": [],
+    "version": 6
+  },
+  "afterOn": {
+    "injections": [
+      "mqDown"
+    ],
+    "version": 7
+  },
+  "afterOff": {
+    "injections": [],
+    "version": 8
+  }
+}

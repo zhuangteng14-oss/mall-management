@@ -39,6 +39,8 @@ public class UserGovernanceService {
      * 用户列表（{@code keyword} 可空；块 7 收尾 · P1 起支持 {@code offset} 真分页）。
      *
      * <p>⚠️ <b>读侧掩码（D3-4）只在这里做</b>：{@code email} 出列表时是 {@code a***@x.com}。
+     * 需要明文时走 {@code POST /admin/accounts/user/detail}（Controller 调 {@link #userRow}
+     * 并写一条 {@code user.viewPlaintext} 审计）—— 掩码列表 + 按次明文，两者缺一不可。
      * {@link #userRow} 刻意**不掩** —— 它是审计快照与治理弹窗的数据源，必须能还原事实。
      */
     public Map<String, Object> listUsers(String keyword, Integer limit, Integer offset) {

@@ -1,6 +1,5 @@
 package com.minke.mallmanagement.merchant.service;
 
-import com.minke.mallmanagement.shared.text.DataMasking;
 import com.minke.mallmanagement.shared.web.PageLimits;
 import com.minke.mallmanagement.goods.dao.GoodsShelfDao;
 import com.minke.mallmanagement.merchant.dao.MerchantApplicationDao;
@@ -122,16 +121,17 @@ public class MerchantApplicationService {
     /**
      * 管理端入驻申请列表（{@code status} 可空 ⇒ 全部）。
      *
-     * <p>⚠️ <b>读侧掩码（D3-4）只在这里做</b>：{@code ContactPhone} / {@code ShopAddress}
-     * 出列表时是 {@code 138****8000} / {@code 北京市朝***}。{@link #myApplications}
-     * （商家看自己的申请）与审核快照刻意**不掩**，理由见 {@link DataMasking} 类注释。
+     * <p>⚠️ <b>本列表必须返回明文</b>（用户 2026-10-18 手验裁决）：客服要按
+     * {@code ContactPhone} / {@code ShopAddress} 打电话核实，掩码会让审核无法完成。
+     * D3-4 曾在这里接过读侧掩码，现按要求**恢复明文**；脱敏只保留在用户治理列表
+     * （{@code UserGovernanceService.listUsers}），且明文由单行详情端点按次查看并留痕。
+     * {@link #myApplications}（商家看自己的申请）与审核快照同样保持明文。
      */
     public Map<String, Object> listForAdmin(String status, Integer limit) {
         int effective = normalizeLimit(limit);
         Map<String, Object> result = new HashMap<>();
         result.put("success", true);
-        result.put("list", DataMasking.maskApplicationRows(
-                applicationDao.selectByStatus(status, effective)));
+        result.put("list", applicationDao.selectByStatus(status, effective));
         result.put("total", applicationDao.countByStatus(status));
         result.put("limit", effective);
         return result;

@@ -1,0 +1,98 @@
+{
+  "stamp": "d3-dlq-drawer-translated",
+  "base": "http://localhost:8080",
+  "steps": [
+    {
+      "login": {
+        "ok": true,
+        "pwdLen": 9
+      }
+    },
+    {
+      "afterLoginHash": "#/admin"
+    },
+    {
+      "clicked": true
+    }
+  ],
+  "card": {
+    "text": "0\n死信数量（累计 · 本拍 +0 · 已落库 6）· 查看详情 ›",
+    "count": "0",
+    "cls": "a-stat a-stat--dlq is-zero",
+    "borderColor": "rgb(43, 57, 79)",
+    "opacity": "0.72",
+    "clickable": "button"
+  },
+  "drawer": {
+    "title": "死信详情",
+    "subtitle": "共 6 条 · 按落库时间倒序（本页 6 条）",
+    "rows": 6,
+    "empty": null,
+    "err": null,
+    "items": [
+      {
+        "time": "2026-10-18 13:13:02",
+        "trace": "—",
+        "errClass": "系统异常",
+        "errTitle": "java.lang.IllegalStateException",
+        "errorText": "【系统异常】具体堆栈：boom: unexpected state",
+        "errorTitle": "boom: unexpected state"
+      },
+      {
+        "time": "2026-10-18 13:13:02",
+        "trace": "—",
+        "errClass": "数据库错误",
+        "errTitle": "java.sql.SQLException",
+        "errorText": "【数据库错误】落库时发生异常",
+        "errorTitle": "Communications link failure"
+      },
+      {
+        "time": "2026-10-18 13:13:02",
+        "trace": "—",
+        "errClass": "数据库错误",
+        "errTitle": "org.springframework.dao.CannotAcquireLockException",
+        "errorText": "【数据库错误】落库时发生异常",
+        "errorTitle": "Deadlock found when trying to get lock; try restarting transaction"
+      },
+      {
+        "time": "2026-10-18 13:13:02",
+        "trace": "—",
+        "errClass": "格式错误",
+        "errTitle": "com.fasterxml.jackson.core.JsonParseException",
+        "errorText": "【格式错误】消息体不是合法的 JSON 格式",
+        "errorTitle": "Unexpected character (')': expected a number"
+      },
+      {
+        "time": "2026-10-18 13:13:02",
+        "trace": "—",
+        "errClass": "格式错误",
+        "errTitle": "com.fasterxml.jackson.core.JsonParseException",
+        "errorText": "【格式错误】消息体不是合法的 JSON 格式",
+        "errorTitle": "Unrecognized token 'not': was expecting (JSON String, Number, Array, Object)"
+      },
+      {
+        "time": "2026-10-18 13:13:02",
+        "trace": "—",
+        "errClass": "格式错误",
+        "errTitle": "com.fasterxml.jackson.core.JsonParseException",
+        "errorText": "【格式错误】消息体不是合法的 JSON 格式",
+        "errorTitle": "Unexpected character (}') at position 27"
+      }
+    ]
+  },
+  "expand": {
+    "clicked": {
+      "ok": true
+    },
+    "raw": {
+      "text": "{\"kind\":\"order\",\"seq\":42,\"fields\":{\"qty\":1,}}",
+      "height": 41
+    }
+  },
+  "shots": [
+    "docs/agent/evidence/c3-d3/d3-dlq-drawer-translated.png",
+    "docs/agent/evidence/c3-d3/d3-dlq-drawer-translated-full.png"
+  ]
+}
+SHOT docs/agent/evidence/c3-d3/d3-dlq-drawer-translated.png
+SHOT docs/agent/evidence/c3-d3/d3-dlq-drawer-translated-full.png

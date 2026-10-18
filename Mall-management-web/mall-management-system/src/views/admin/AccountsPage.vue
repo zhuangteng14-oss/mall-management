@@ -212,6 +212,25 @@
         </p>
         <p v-if="u.DowngradeReason" class="a-why">降级原因：{{ u.DowngradeReason }}</p>
 
+        <!-- 读侧掩码 + 按次明文（D3 手验裁决）：列表只给 `a***@x.com`，点按钮才拉单行详情；
+             每次成功读取后端写一条 `user.viewplaintext` 审计，故这里**不做本地长期缓存**。 -->
+        <p class="a-contact">
+          <span class="a-contact-k">邮箱</span>
+          <span class="a-contact-v" :class="{ 'is-plain': plainEmail[u.username] }">
+            {{ plainEmail[u.username] || u.email || '—' }}
+          </span>
+          <span v-if="plainEmail[u.username]" class="a-badge approved">明文</span>
+          <button
+            type="button"
+            class="a-btn a-btn-mini"
+            :disabled="plainBusy !== null"
+            @click="viewPlainEmail(u)"
+          >
+            {{ plainBusy === u.username ? '读取中…' : '查看明文' }}
+          </button>
+        </p>
+        <p v-if="plainError[u.username]" class="a-why">{{ plainError[u.username] }}</p>
+
         <div class="a-acts">
           <template v-if="!isBanned(u)">
             <input
@@ -409,6 +428,7 @@ import {
   accountsAudit,
   accountsBan,
   accountsUnban,
+  accountsUserDetail,
   accountsUsers,
   downgradeCancel,
   downgradeRelist,
@@ -594,6 +614,40 @@ const banReasons = reactive({})
 /** 正在被处理的那个账号（防重复点）。`null` = 空闲。 */
 const busyName = ref(null)
 
+// ── ③-1 查看明文（2026-10-18 · D3 手验裁决）──────────────────────────────────
+// ⚠️ 列表仍返回**掩码** `email`（`a***@x.com`）；明文只在管理员显式点本条按钮时按次读取，
+//    后端每成功一次写一条 `user.viewplaintext` 审计 —— 权限面靠「按次留痕」而不是「不给出」。
+// ⚠️ 缓存以 `username` 为键、且在**每次重新拉列表时清空**：列表行换了还留着明文，等于
+//    悄悄绕开了那次审计（用户看到的值不再对应任何一次显式操作）。
+const plainEmail = reactive({})
+const plainError = reactive({})
+const plainBusy = ref(null)
+
+function clearPlaintext() {
+  Object.keys(plainEmail).forEach((k) => { delete plainEmail[k] })
+  Object.keys(plainError).forEach((k) => { delete plainError[k] })
+}
+
+async function viewPlainEmail(u) {
+  const name = u && u.username
+  if (!name) return
+  plainBusy.value = name
+  plainError[name] = ''
+  try {
+    const data = await accountsUserDetail({ username: name })
+    if (data && data.success && data.user) {
+      plainEmail[name] = data.user.email || '（该用户没有邮箱）'
+    } else {
+      plainError[name] = (data && data.msg) || '读取明文失败'
+    }
+  } catch (e) {
+    plainError[name] = `读取明文失败：${failOf(e)}`
+    console.error('admin user detail', e)
+  } finally {
+    if (plainBusy.value === name) plainBusy.value = null
+  }
+}
+
 /**
  * 「选模板」弹窗当前为**哪个用户**而开（`null` = 没开）。
  *
@@ -719,6 +773,7 @@ const banMix = computed(() => {
 })
 
 async function loadUsers() {
+  clearPlaintext()
   loadingUsers.value = true
   try {
     const data = await accountsUsers({ keyword: uf.keyword, limit: uf.limit, offset: uf.offset })
@@ -1275,6 +1330,29 @@ onMounted(() => {
   gap: var(--s2);
   flex-wrap: wrap;
   margin-top: var(--s3);
+}
+/* 邮箱行：掩码值（暗）+ 明文值（强调）+ 按次查看按钮。 */
+.a-contact {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  flex-wrap: wrap;
+  margin: var(--s3) 0 0;
+  font-size: var(--fs-xs);
+}
+.a-contact-k { color: var(--ink-3); }
+.a-contact-v {
+  color: var(--ink-3);
+  font-family: var(--font-mono, monospace);
+  overflow-wrap: anywhere;
+}
+.a-contact-v.is-plain {
+  color: var(--ink);
+  font-weight: var(--fw-semi);
+}
+.a-btn-mini {
+  padding: 2px var(--s2);
+  font-size: var(--fs-xs);
 }
 .a-inp {
   flex: 1 1 220px;

@@ -2,7 +2,7 @@
 //
 // 与 `src/api/admin.js` 的分工 —— 这两份**有意不合并**：
 //   · `admin.js`    = 批 A 的审计 3 条 + 块 1·I2 的发送侧 4 条（`/admin/audit/*`、`/admin/notify/*`）；
-//   · 本文件        = 块 2 的治理 8 条（`/admin/accounts/*`）—— 同前缀、同「无角色闸」姿态，
+//   · 本文件        = 块 2 的治理 8 条 + 2026-10-18 的明文详情 1 条（`/admin/accounts/*`）—— 同前缀、同「无角色闸」姿态，
 //                     但**归属一块**：它们随「用户块」一起落地、一起被引，跟另两块不该混在一处。
 //   ⚠️ 后端也是**两个 Controller**（`AdminAuditController` / `AdminNotificationController` ⇄
 //      `AdminAccountsController`）⇒ 前端跟着分文件，免得日后有人以为「管理端接口都在一个模块里」
@@ -196,4 +196,25 @@ export function downgradeCancel(params) {
  */
 export function downgradeRelist(params) {
   return post(endpoints.accounts.downgradeRelist, q(params))
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// ④ 用户明文详情（2026-10-18 · D3 手验裁决）
+//
+// ⚠️ 用户治理**列表**仍返回掩码 email（`a***@x.com`）；本条是管理员显式点「查看明文」时
+//    才走的一次单行读取。后端每次成功调用都会写一条 `user.viewplaintext` 审计
+//    （`AdminAccountsController#userDetail`）—— 前端不需要、也不应该自己再记一份。
+// ⚠️ 传**空 username** 会得到 `{success:false,msg:'用户不存在'}`（不回退成「列出全部」）；
+//    调用点必须从当前行取 username，别让空串走到这里。
+// ══════════════════════════════════════════════════════════════════════════════
+
+/**
+ * 单个用户的**明文**整行（含 `email`）。
+ *
+ * @param {{username:string}} params
+ * @returns {Promise<{success:boolean, user?:object, msg?:string}>}
+ *          `user` 的列与列表行同源（`UserGovernanceDao.USER_COLUMNS`），只是 email 未脱敏。
+ */
+export function accountsUserDetail(params) {
+  return post(endpoints.accountsDetail.userDetail, q(params))
 }

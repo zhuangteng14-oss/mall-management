@@ -1,0 +1,41 @@
+{
+  "stamp": "d3-accounts-plaintext",
+  "base": "http://localhost:8080",
+  "username": "chenh99",
+  "steps": [
+    {
+      "login": {
+        "ok": true
+      }
+    },
+    {
+      "tabbed": {
+        "ok": true
+      }
+    },
+    {
+      "searched": {
+        "ok": true
+      }
+    },
+    {
+      "click": {
+        "ok": true
+      }
+    }
+  ],
+  "before": {
+    "rows": 1,
+    "text": "c***@163.com",
+    "plainClass": "a-contact-v",
+    "badge": false
+  },
+  "after": {
+    "text": "chenh99@163.com",
+    "plainClass": "a-contact-v is-plain",
+    "badge": "明文",
+    "error": null
+  },
+  "shot": "docs/agent/evidence/c3-d3/d3-accounts-plaintext.png"
+}
+SHOT docs/agent/evidence/c3-d3/d3-accounts-plaintext.png

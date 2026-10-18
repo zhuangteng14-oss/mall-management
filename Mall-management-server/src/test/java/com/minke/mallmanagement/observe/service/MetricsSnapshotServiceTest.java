@@ -12,6 +12,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.anyInt;
@@ -132,6 +133,44 @@ class MetricsSnapshotServiceTest {
         assertThat(injections).containsEntry("dbSlow", 0.0).containsEntry("jobDown", 0.0);
         // 健康度里必须点名「是演练把它弄成这样的」，否则红/黄会被当成真故障
         assertThat(frame.get("health").toString()).contains("演练注入开启");
+    }
+
+    @Test
+    @DisplayName("D3：关掉 mqDown 且 broker 恢复 ⇒ 注入与 MQ 两条 warn 都在下一拍消失")
+    void mqWarningsClearWhenInjectionOffAndBrokerUp() {
+        when(goodsDao.selectStockLevels(anyInt())).thenReturn(List.of());
+        AtomicReference<Double> mqUp = new AtomicReference<>(0.0);
+        AtomicReference<Double> mqDown = new AtomicReference<>(1.0);
+        Gauge.builder("mall.observe.mq.up", mqUp, ref -> ref.get()).register(registry);
+        Gauge.builder("mall.observe.injection.mqDown", mqDown, ref -> ref.get()).register(registry);
+
+        Map<String, Object> on = frames.frame(0);
+        assertThat(reasonsOf(on)).anySatisfy(r -> assertThat(r).contains("演练注入开启").contains("MQ 发布中断"));
+        assertThat(reasonsOf(on)).as("注入期间不再重复报「broker 断开」").noneSatisfy(
+                r -> assertThat(r).contains("MQ broker 连接不可用"));
+
+        // 控制台关掉 mqDown，broker 此时是通的 ⇒ 下一拍必须回到 ok，且两条 MQ 相关理由都不在。
+        mqDown.set(0.0);
+        mqUp.set(1.0);
+        Map<String, Object> off = frames.frame(1);
+        assertThat(healthOf(off)).containsEntry("level", "ok");
+        assertThat(reasonsOf(off)).noneSatisfy(r -> assertThat(r).contains("演练注入"));
+        assertThat(reasonsOf(off)).noneSatisfy(r -> assertThat(r).contains("MQ"));
+    }
+
+    @Test
+    @DisplayName("D3：mqDown 关着但 broker 真断 ⇒ 仍报 broker 不可用（不能被「关开关」静默抹掉）")
+    void brokerWarningStaysWhenInjectionOffButBrokerDown() {
+        when(goodsDao.selectStockLevels(anyInt())).thenReturn(List.of());
+        AtomicReference<Double> mqUp = new AtomicReference<>(0.0);
+        Gauge.builder("mall.observe.mq.up", mqUp, ref -> ref.get()).register(registry);
+
+        Map<String, Object> down = frames.frame(0);
+        assertThat(healthOf(down)).containsEntry("level", "warn");
+        assertThat(reasonsOf(down)).anySatisfy(r -> assertThat(r).contains("MQ broker 连接不可用"));
+
+        mqUp.set(1.0);
+        assertThat(healthOf(frames.frame(1))).containsEntry("level", "ok");
     }
 
     @Test
@@ -361,6 +400,11 @@ class MetricsSnapshotServiceTest {
     @SuppressWarnings("unchecked")
     private static Map<String, Object> healthOf(Map<String, Object> frame) {
         return (Map<String, Object>) frame.get("health");
+    }
+
+    @SuppressWarnings("unchecked")
+    private static List<String> reasonsOf(Map<String, Object> frame) {
+        return (List<String>) healthOf(frame).get("reasons");
     }
 
     @SuppressWarnings("unchecked")

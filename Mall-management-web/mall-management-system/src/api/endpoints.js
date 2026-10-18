@@ -473,5 +473,21 @@ export const endpoints = {
     //    本端点把 `status` 传到 SQL 的 WHERE，`total` 与 `rows` 同源同谓词，支持 `offset/limit`。
     //    入参与后端形参逐字一致；`status` 留空 = 全部。
     ordersDetail: '/admin/observe/orders/detail',
+    // ⚠️ 2026-10-18（D3 手验补全）：死信落库副本的**只读**出口（后端 `DlqController`）。
+    //    POST + `@RequestParam`（`limit` / `offset`），响应 `{success,list,total,limit,offset}`。
+    //    页面顶部「死信数量」卡片点开抽屉时调用；空表也是 200 + `list:[]`。
+    dlqList: '/admin/observe/dlq/list',
+    // ⚠️ 2026-10-18（D3 手修「mqDown 关掉横幅不消失」）：**同一路径 GET / POST**。
+    //    POST 写共享开关（`protections` / `injections` 两个 JSON 数组串，`[]` = 全关，
+    //    **不传** = 不动它）；GET 读当前快照（`no-store`）。攻击页的开关必须走这里，
+    //    只改本地 `Set` 不会影响后端健康度的 `mall.observe.mq.up`。
+    attackConfig: '/admin/observe/attack/config',
+  },
+  // ⚠️ 2026-10-18（D3 手验补全）：用户治理「查看明文」1 条。
+  //    单列一组并追加在**文件尾**（同本文件既有零漂移手法）—— 往 `accounts` 组里插行会把
+  //    后面所有条目整体下移。后端 `AdminAccountsController#userDetail`，**读**动作但返回明文，
+  //    每次调用写一条 `user.viewplaintext` 审计。
+  accountsDetail: {
+    userDetail: '/admin/accounts/user/detail',
   },
 }

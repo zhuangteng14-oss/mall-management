@@ -22,11 +22,22 @@
         <b>{{ clientErrRate === null ? '—' : (clientErrRate * 100).toFixed(1) + '%' }}</b>
         <span>4xx 占比（本拍）</span>
       </div>
-      <!-- A4 / D3-2：MQ 消费重试彻底失败、落 DLQ 的累计条数 + 本拍增量 + 同库副本已落库行数。 -->
-      <div class="a-stat">
+      <!-- A4 / D3-2：MQ 消费重试彻底失败、落 DLQ 的累计条数 + 本拍增量 + 同库副本已落库行数。
+           D3 手验补全：整张卡可点 ⇒ 右侧死信详情抽屉；0 条置灰、>0 红框高亮（警告语义）。 -->
+      <button
+        type="button"
+        class="a-stat a-stat--dlq"
+        :class="{
+          'is-zero': dlqTotal === 0,
+          'is-alert': dlqTotal !== null && dlqTotal > 0,
+          'is-unknown': dlqTotal === null,
+        }"
+        aria-label="死信数量：点击查看死信详情"
+        @click="openDlqDrawer"
+      >
         <b :class="{ 'a-bad': dlqTotal > 0 }">{{ dlqTotal === null ? '—' : fmtInt(dlqTotal) }}</b>
-        <span>死信数量（累计 · 本拍 {{ dlqDelta === null ? '—' : '+' + fmtInt(dlqDelta) }} · 已落库 {{ dlqPersisted === null ? '—' : fmtInt(dlqPersisted) }}）</span>
-      </div>
+        <span>死信数量（累计 · 本拍 {{ dlqDelta === null ? '—' : '+' + fmtInt(dlqDelta) }} · 已落库 {{ dlqPersisted === null ? '—' : fmtInt(dlqPersisted) }}）· <em>查看详情 ›</em></span>
+      </button>
       <div class="a-tz">
         <span class="a-chip-utc">{{ phaseText }}</span>
         <span>第 <b>{{ seq }}</b> 拍 · 窗口 {{ WINDOW }} 秒</span>
@@ -505,6 +516,47 @@
         </div>
       </div>
     </template>
+
+    <!-- ── 死信详情抽屉（D3 手验补全）──────────────────────────────────────────
+         数据源：`POST /admin/observe/dlq/list`（同库副本 `observed_event_dlq`，不是 broker）。
+         交互：点行展开 `RawBody`（连 JSON 都解不开的那种才会落这一列）；空态逐字写
+         「当前没有处理失败的死信消息」—— 与 `null`（读不到）区分，后者由加载/错误态表达。 -->
+    <RightDrawer
+      v-if="dlqOpen"
+      title="死信详情"
+      :subtitle="dlqSubtitle"
+      aria-label="死信详情抽屉"
+      @close="closeDlqDrawer"
+    >
+      <div class="a-dlq">
+        <div class="a-dlq-bar">
+          <span v-if="dlqLoading">读取中…</span>
+          <span v-else>同库副本 · 最近 100 条（按落库时间倒序）</span>
+          <button type="button" class="a-btn" :disabled="dlqLoading" @click="loadDlq">刷新</button>
+        </div>
+        <p v-if="dlqError" class="a-dlq-tip is-bad">
+          {{ dlqError }}
+          <button type="button" class="a-btn" @click="loadDlq">重试</button>
+        </p>
+        <p v-else-if="dlqLoading && !dlqRows.length" class="a-empty">正在读取死信…</p>
+        <p v-else-if="!dlqRows.length" class="a-empty">当前没有处理失败的死信消息</p>
+        <ul v-else class="a-dlq-list">
+          <li class="a-dlq-cols" aria-hidden="true">
+            <span>发生时间</span><span>TraceId</span><span>错误类型</span><span></span><span>错误详情</span>
+          </li>
+          <li v-for="r in dlqRows" :key="r.Id" class="a-dlq-i" :class="{ on: dlqOpenedId === r.Id }">
+            <button type="button" class="a-dlq-row" @click="toggleDlqRow(r.Id)">
+              <span class="a-dlq-time">{{ dlqTime(r) }}</span>
+              <span class="a-dlq-trace" :title="r.TraceId || '—'">{{ r.TraceId || '—' }}</span>
+              <span class="a-dlq-err" :title="r.ErrorClass || r.FailedStage || '—'">{{ dlqErrorCategory(r).label }}</span>
+              <span class="a-dlq-toggle">{{ dlqOpenedId === r.Id ? '收起' : '原始体' }}</span>
+              <span class="a-dlq-text" :title="r.ErrorText || ''">{{ dlqErrorText(r) }}</span>
+            </button>
+            <pre v-if="dlqOpenedId === r.Id" class="a-dlq-raw">{{ dlqRawText(r) }}</pre>
+          </li>
+        </ul>
+      </div>
+    </RightDrawer>
   </section>
 </template>
 
@@ -531,13 +583,16 @@ import {
   Droplets, Gauge, Info, Layers, Lock, Package, RotateCcw, Server, Shield, ShieldCheck,
   ShoppingCart, Zap,
 } from '@lucide/vue'
-import { metricsHistory, openMetricsStream } from '../../../api/observe'
+import { dlqList, metricsHistory, openMetricsStream } from '../../../api/observe'
 import { demo, openDemoStream } from '../../../api/demo-stream'
 // 回放（2026-10-17 重做）：本页在回放期间**停实时**（后端没有按时间戳的指标帧）。
 import { replaySession } from '../../../api/replay-session'
 import { KIND_COLOR, KIND_LABEL, KINDS } from '../../../config/labels/observe-labels'
+// 死信错误中文化（D3 手验）：库里保留英文原文，只在渲染层翻译；旧行一并生效。
+import { dlqErrorCategory, dlqErrorText } from './dlq-error'
 import DemoModeToggle from '../../../components/observe/DemoModeToggle.vue'
 import ReplayBanner from '../../../components/observe/ReplayBanner.vue'
+import RightDrawer from '../../../components/observe/RightDrawer.vue'
 import LineChart from '../../../components/charts/LineChart.vue'
 import BarChart from '../../../components/charts/BarChart.vue'
 import HeatmapChart from '../../../components/charts/HeatmapChart.vue'
@@ -673,6 +728,71 @@ function finiteOrNull(v) {
 const dlqTotal = computed(() => (latest.value && latest.value.dlq ? finiteOrNull(latest.value.dlq.total) : null))
 const dlqDelta = computed(() => (latest.value && latest.value.dlq ? finiteOrNull(latest.value.dlq.delta) : null))
 const dlqPersisted = computed(() => (latest.value && latest.value.dlq ? finiteOrNull(latest.value.dlq.persisted) : null))
+
+/* ── 死信详情抽屉（D3 手验补全）────────────────────────────────────────────
+   ⚠️ 点开才拉、且**不跟随 SSE 自动刷新**：死信是低频审计数据，每拍重拉会在用户展开
+      RawBody 读到一半时把行冲掉；要新数据点抽屉里的「刷新」。
+   ⚠️ 空列表 ≠ 读不到：`list:[]` 才显示空态文案；请求失败显示错误态（绝不写成「0 条」）。 */
+const dlqOpen = ref(false)
+const dlqRows = ref([])
+const dlqAllTotal = ref(null)
+const dlqLoading = ref(false)
+const dlqError = ref('')
+const dlqOpenedId = ref(null)
+let dlqSeq = 0
+
+const dlqSubtitle = computed(() => {
+  if (dlqLoading.value && !dlqRows.value.length) return '正在读取…'
+  if (dlqError.value && !dlqRows.value.length) return '读取失败'
+  if (dlqAllTotal.value === null) return ''
+  return `共 ${fmtInt(dlqAllTotal.value)} 条 · 按落库时间倒序（本页 ${fmtInt(dlqRows.value.length)} 条）`
+})
+
+function openDlqDrawer() {
+  dlqOpen.value = true
+  loadDlq()
+}
+
+function closeDlqDrawer() {
+  dlqOpen.value = false
+  dlqOpenedId.value = null
+}
+
+async function loadDlq() {
+  const my = ++dlqSeq
+  dlqLoading.value = true
+  dlqError.value = ''
+  try {
+    const data = await dlqList({ limit: 100, offset: 0 })
+    if (my !== dlqSeq) return
+    if (data && data.success === false) {
+      dlqError.value = data.msg || '死信列表读取失败'
+      return
+    }
+    dlqRows.value = Array.isArray(data && data.list) ? data.list : []
+    dlqAllTotal.value = finiteOrNull(data && data.total)
+  } catch (e) {
+    if (my !== dlqSeq) return
+    dlqError.value = (e && e.message) || '死信列表读取失败（网络或服务不可用）'
+  } finally {
+    if (my === dlqSeq) dlqLoading.value = false
+  }
+}
+
+function toggleDlqRow(id) {
+  dlqOpenedId.value = dlqOpenedId.value === id ? null : id
+}
+
+/** 发生时间优先 `OccurredAt`；非法 JSON 的原始消息没有事件时刻 ⇒ 退回落库时刻 `CreatedAt`。 */
+function dlqTime(row) {
+  return row.OccurredAt || row.CreatedAt || '—'
+}
+
+/** 展开内容只展示 `RawBody`：能解析的事件体不冒充「原始消息体」，如实说明这一列为空的原因。 */
+function dlqRawText(row) {
+  if (row.RawBody) return row.RawBody
+  return '（该条死信没有原始消息体：事件本身可解析，失败发生在落库/投递阶段）'
+}
 
 const shown = reactive({ qps: 0, mean: 0, hitRate: 0, lockWait: 0 })
 
@@ -1530,6 +1650,153 @@ onBeforeUnmount(closeStream)
 }
 .a-stat span {
   font-size: var(--fs-xs);
+  color: var(--ink-3);
+}
+/* 死信卡（D3 手验补全）：0 条置灰、>0 红框高亮、读不到（null）虚线中性。
+   卡从 div 变成 button ⇒ 必须显式重置浏览器默认的字体/底色/内边距。 */
+.a-stat--dlq {
+  font: inherit;
+  text-align: left;
+  background: transparent;
+  border: 1px solid var(--line-2);
+  border-radius: var(--r2);
+  padding: var(--s1) var(--s2);
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s, box-shadow 0.15s;
+}
+.a-stat--dlq span em {
+  font-style: normal;
+  color: var(--info);
+}
+.a-stat--dlq.is-zero {
+  border-color: var(--line);
+  opacity: 0.72;
+}
+.a-stat--dlq.is-alert {
+  border-color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 8%, transparent);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--danger) 35%, transparent);
+}
+.a-stat--dlq.is-unknown {
+  border-style: dashed;
+  opacity: 0.66;
+}
+.a-stat--dlq:hover,
+.a-stat--dlq:focus-visible {
+  border-color: var(--info);
+  opacity: 1;
+}
+.a-stat--dlq:focus-visible {
+  outline: 2px solid var(--info);
+  outline-offset: 2px;
+}
+
+/* ── 死信详情抽屉 ─────────────────────────────────────────────────────────── */
+.a-dlq {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.a-dlq-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s3);
+  padding: var(--s2) var(--s4);
+  font-size: var(--fs-xs);
+  color: var(--ink-3);
+  border-bottom: 1px solid var(--line-2);
+  background: var(--surface-2);
+}
+.a-dlq-tip {
+  margin: var(--s3) var(--s4) 0;
+  font-size: var(--fs-sm);
+  color: var(--ink-2);
+}
+.a-dlq-tip.is-bad { color: var(--danger); }
+.a-dlq-list {
+  flex: 1;
+  min-height: 0;
+  margin: 0;
+  padding: var(--s2) var(--s4) var(--s4);
+  list-style: none;
+  overflow: auto;
+}
+.a-dlq-cols {
+  display: grid;
+  grid-template-columns: 150px minmax(0, 1fr) 170px 52px;
+  gap: var(--s2);
+  padding: var(--s2) var(--s3) 0;
+  font-size: var(--fs-xs);
+  color: var(--ink-3);
+}
+.a-dlq-cols span:last-child { grid-column: 1 / -1; }
+.a-dlq-i {
+  border: 1px solid var(--line-2);
+  border-radius: var(--r2);
+  margin-top: var(--s2);
+  background: var(--surface);
+}
+.a-dlq-i.on { border-color: var(--info); }
+.a-dlq-row {
+  display: grid;
+  grid-template-columns: 150px minmax(0, 1fr) 170px 52px;
+  gap: var(--s2);
+  width: 100%;
+  font: inherit;
+  text-align: left;
+  background: transparent;
+  border: 0;
+  padding: var(--s2) var(--s3);
+  cursor: pointer;
+}
+.a-dlq-row:hover { background: var(--surface-2); }
+.a-dlq-time {
+  font-size: var(--fs-xs);
+  color: var(--ink-2);
+  font-variant-numeric: tabular-nums;
+}
+.a-dlq-trace,
+.a-dlq-err {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono, monospace);
+  font-size: var(--fs-xs);
+  color: var(--ink-2);
+}
+.a-dlq-err { color: var(--danger); }
+.a-dlq-toggle {
+  font-size: var(--fs-xs);
+  color: var(--info);
+  text-align: right;
+}
+.a-dlq-text {
+  grid-column: 1 / -1;
+  font-size: var(--fs-xs);
+  color: var(--ink);
+  line-height: 1.5;
+  word-break: break-all;
+}
+.a-dlq-raw {
+  margin: 0;
+  padding: var(--s3);
+  border-top: 1px solid var(--line-2);
+  background: var(--surface-2);
+  font-family: var(--font-mono, monospace);
+  font-size: var(--fs-xs);
+  color: var(--ink-2);
+  white-space: pre-wrap;
+  word-break: break-all;
+  max-height: 320px;
+  overflow: auto;
+}
+.a-empty {
+  padding: var(--s4);
+  text-align: center;
+  font-size: var(--fs-sm);
   color: var(--ink-3);
 }
 .a-hv {

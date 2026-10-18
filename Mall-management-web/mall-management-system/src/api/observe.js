@@ -569,3 +569,57 @@ export function orderDetail({ healthy = false, status = '', timeout = false, off
     limit,
   }))
 }
+
+// ==================== 死信详情抽屉（2026-10-18 · D3 手验补全）====================
+//
+// ⚠️ 与 `metrics` 流里的 `dlq.persisted` 分工：那个数是**总量**，这里给**具体行**
+//    （时间 / TraceId / 失败阶段 / 异常类 / ErrorText / RawBody）。没有它，页面只能
+//    说「丢了 N 条」，答不出「哪一批、卡在哪、最后一次异常是什么」。
+// ⚠️ 一次性 JSON、无「拍」概念 ⇒ 走 `http.post`，别套 `openStream`。空表也是 200 + `list:[]`。
+
+/**
+ * 最近死信（按落库时刻倒序）。
+ *
+ * @param {{limit?:number, offset?:number}} [o]
+ * @returns {Promise<{success:boolean, list:Array, total:number, limit:number, offset:number}>}
+ *          `total` 是**全表**条数；`list` 里 `OccurredAt` 可能为 NULL（非法 JSON 的原始消息
+ *          没有事件发生时刻），页面回落到 `CreatedAt` 并标注。
+ */
+export function dlqList({ limit = 100, offset = 0 } = {}) {
+  return postJson(endpoints.observe.dlqList, q({ limit, offset }))
+}
+
+// ==================== 演练开关共享配置（2026-10-18 · 修「关掉 mqDown 横幅不消失」）====
+//
+// ⚠️ 这组开关**不是**攻击页的本地状态：后端 `AttackSwitchConfig` 是一份进程内共享配置，
+//    指标页健康度读的 `mall.observe.mq.up` 也由它（+ broker 实探）决定。此前页面只改本地
+//    `Set`，所以「关掉 mqDown」不会让后端恢复发布侧，横幅自然一直挂着。
+// ⚠️ 写入语义：`null` / 空白 = 不动那一组；`[]` = 把那一组关光（有意义，不是「没给」）。
+//    故 `updateAttackConfig` 只在调用方**明确给了数组**时才序列化发送。
+
+/**
+ * 读共享配置（GET，后端带 `Cache-Control: no-store`）。
+ *
+ * @returns {Promise<{Protections:string[], Injections:string[], IsDefault:boolean,
+ *          Version:number, Catalog:object}>}
+ *          ⚠️ 本端点**没有** `success` 键（后端 `Result.of` 只搬运、不追加）；写入失败是
+ *          HTTP 400 + `{success:false,msg}`，读取本身失败看网络异常。
+ */
+export function readAttackConfig() {
+  return http.get(endpoints.observe.attackConfig).then((res) => res.json())
+}
+
+/**
+ * 写共享配置（POST）。
+ *
+ * @param {{protections?:string[], injections?:string[]}} [o]
+ *        传了就**整组替换**（`[]` = 全关）；不传 = 后端保持原值。
+ *        ⚠️ 两个值都必须是 JSON 数组串（后端按 `@RequestParam` + JSON 解），别传逗号串。
+ * @returns {Promise<object>} 写入后的快照，形状与 {@link readAttackConfig} 逐字相同。
+ */
+export function updateAttackConfig({ protections, injections } = {}) {
+  return postJson(endpoints.observe.attackConfig, q({
+    protections: Array.isArray(protections) ? JSON.stringify(protections) : undefined,
+    injections: Array.isArray(injections) ? JSON.stringify(injections) : undefined,
+  }))
+}

@@ -9,13 +9,14 @@ import java.util.function.UnaryOperator;
 /**
  * 管理端列表的**读侧掩码**（块 7 · D3-4）。
  *
- * <h2>【只掩四个字段，且只掩「管理端列表」】</h2>
+ * <h2>【只掩用户治理列表；入驻审核列表已恢复明文】</h2>
  * 用户裁决的字段域是 {@code email} / {@code address} / {@code contactPhone} /
- * {@code ShopAddress}，一个不多。调用点也只有两处：
+ * {@code ShopAddress}，一个不多。今日生产调用点只有一处：
  * <ul>
  *   <li>{@code UserGovernanceService.listUsers} —— 用户治理列表的 {@code email}；</li>
- *   <li>{@code MerchantApplicationService.listForAdmin} —— 入驻申请列表的
- *       {@code ContactPhone} / {@code ShopAddress}。</li>
+ *   <li>~~{@code MerchantApplicationService.listForAdmin}~~ —— <b>2026-10-18 手验后已恢复明文</b>
+ *       （审核要按电话 / 地址联系申请人）。{@link #maskApplicationRow} 等 helper 保留为工具，
+ *       但**不再接线**；若将来重新启用，必须同步恢复 {@code MerchantApplicationMaskingTest}。</li>
  * </ul>
  *
  * <p>⚠️ <b>本人查询与审计快照一律保持明文，别顺手接上</b>：

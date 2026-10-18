@@ -618,6 +618,13 @@ public class MetricsSnapshotService {
             warnReasons.add("L2 处于降级窗口（读回落数据库）");
         }
         // D3：演练注入 / MQ 发布侧 —— 这两条是「我们故意弄坏的」与「真坏了」，页面都要能看见。
+        // ⚠️ 两条必须**分开**（2026-10-18 手验后修）：mqDown 注入期间 mqUp 必然是 0，若再把
+        //    「broker 断开或 mqDown 注入中」拼成一条，关掉注入后这句话仍会让人以为「还是 mqDown」；
+        //    而 broker 真断时 mqUp 也一直是 0，不能靠「关掉开关」把它从页面上抹掉。判据：
+        //    · 有注入 ⇒ 只报注入总览（逐键列名，关掉哪个就少哪个，全关后整条消失）；
+        //    · 无注入但 mqUp==0 ⇒ 报真实 broker 不可用（这条**不该**随开关消失）；
+        //    · mqUp==1 ⇒ 两条都不出现。
+        boolean mqDownOn = false;
         Object rawInjections = gauges.get("injections");
         if (rawInjections instanceof Map<?, ?> injections) {
             List<String> on = new ArrayList<>();
@@ -625,14 +632,17 @@ public class MetricsSnapshotService {
                 Object v = injections.get(key);
                 if (v instanceof Double d && d == 1.0) {
                     on.add(INJECTION_LABELS.getOrDefault(key, key));
+                    if ("mqDown".equals(key)) {
+                        mqDownOn = true;
+                    }
                 }
             }
             if (!on.isEmpty()) {
                 warnReasons.add("演练注入开启：" + String.join(" / ", on) + "（读数会偏离真实健康度）");
             }
         }
-        if (mqUp != null && mqUp == 0.0) {
-            warnReasons.add("MQ 发布侧不可用（broker 断开或 mqDown 注入中）");
+        if (mqUp != null && mqUp == 0.0 && !mqDownOn) {
+            warnReasons.add("MQ broker 连接不可用（发布侧已暂停投递；consumer 与 DLQ 出口不受影响）");
         }
         if (Boolean.FALSE.equals(stock.get("available"))) {
             warnReasons.add("库存水位本轮读不到");

@@ -22,7 +22,7 @@ package com.minke.mallmanagement.admin;
  * 其余 15 个改库端点**随各自那一笔**挂（横切本来就该跟着业务改动走，见
  * {@code docs/agent/c3-modules.md} §11 与 {@code slot-registry.md} 末条）。
  * ⇒ 每挂一个新勾，**在这里加一条**。今天有 2 条：{@link #GOODS_UPDATE}（批 A 的样板）
- * 与 {@link #NOTIFICATION_SEND}（块 1 · I2 的**第二个**挂钩点）。⚠️ 上面那两句说的是**开笔当时**的实况，别拿它当今天的清单：此后块 2～6 各自把自己那一笔挂了上来，**今天共 46 条**（块 7 · commit 8 跨域补挂 {@link #GOODS_DELETE} / {@link #COMMENT_DELETE} 两条；commit 8b 加 {@link #OBSERVE_ATTACK_CLEANUP}）（数常量、不数调用点 —— {@code coupon.stop} 等一条 tag 覆盖两个端点，{@code seckill.*} 三个 tag 挂在同一个 Controller 的三个方法上）；**清单就是下面那些常量**，本段只是「为什么一开始只有 1 条」的由来。
+ * 与 {@link #NOTIFICATION_SEND}（块 1 · I2 的**第二个**挂钩点）。⚠️ 上面那两句说的是**开笔当时**的实况，别拿它当今天的清单：此后块 2～6 各自把自己那一笔挂了上来，**今天共 47 条**（块 7 · commit 8 跨域补挂 {@link #GOODS_DELETE} / {@link #COMMENT_DELETE} 两条；commit 8b 加 {@link #OBSERVE_ATTACK_CLEANUP}；2026-10-18 加 {@link #USER_VIEW_PLAINTEXT}）（数常量、不数调用点 —— {@code coupon.stop} 等一条 tag 覆盖两个端点，{@code seckill.*} 三个 tag 挂在同一个 Controller 的三个方法上）；**清单就是下面那些常量**，本段只是「为什么一开始只有 1 条」的由来。
  */
 public final class AuditActions {
 
@@ -343,6 +343,17 @@ public final class AuditActions {
      * 不先把整批原值读一遍）。
      */
     public static final String OBSERVE_ATTACK_RESET = "observe.attack.reset";
+
+    // ==================== 2026-10-18：用户治理「查看明文」新增的 1 条 ====================
+    // 由来：D3-4 的读侧掩码保留在用户列表（email 仍是 a***@x.com），但业务要求客服能按次看到
+    // 真实联系方式 ⇒ 新增单行详情端点。明文导出是敏感动作，必须留下「谁在什么时候看了谁」。
+    // ⚠️ 这是**读**动作，BeforeJson/AfterJson 都没有「改前/改后」语义：本钩子把当前整行放进
+    //    AfterJson（含明文 email），BeforeJson 传 null；TargetId 用 username。
+
+    /**
+     * 查看用户明文联系方式 —— {@code POST /admin/accounts/user/detail}。
+     */
+    public static final String USER_VIEW_PLAINTEXT = "user.viewplaintext";
 
     private AuditActions() {
     }

@@ -750,19 +750,13 @@
          数据来源：本页累积的订单行（分析面种子 + SSE 最近 20）与生命周期时间戳。
          抽屉左列 = 当前筛选下按停留倒序的前 30 单；右列 = 选中单的完整生命周期。
          ⚠️ 页面不查「某单历史」端点；时间线只画订单行自带的五个时间戳 + 本会话 moves。 -->
-    <div v-if="drawerOpen" class="a-of-mask" @click.self="closeDrawer">
-      <aside class="a-of-drawer" role="dialog" aria-modal="true" aria-label="订单链路抽屉">
-        <header class="a-of-drawer-hd">
-          <div>
-            <h3>链路抽屉 · {{ filterLabel }}</h3>
-            <p v-if="drawerQuery.trim()">
-              匹配 {{ fmtInt(drawerMatchedRows.length) }} 单 · 按已停留倒序（最多显示 50）· 点左列切换右上时间线
-            </p>
-            <p v-else>{{ fmtInt(drawerRows.length) }} 单 · 按已停留倒序（前 30，含当前选中）· 点左列切换右上时间线</p>
-          </div>
-          <button type="button" class="a-btn" @click="closeDrawer">关闭</button>
-        </header>
-
+    <RightDrawer
+      v-if="drawerOpen"
+      :title="`链路抽屉 · ${filterLabel}`"
+      :subtitle="drawerSubtitle"
+      aria-label="订单链路抽屉"
+      @close="closeDrawer"
+    >
         <div class="a-of-drawer-body">
           <div class="a-of-drawer-side">
             <div class="a-of-drawer-search">
@@ -851,8 +845,7 @@
             </p>
           </section>
         </div>
-      </aside>
-    </div>
+    </RightDrawer>
   </section>
 </template>
 
@@ -883,6 +876,7 @@ import { openOrderStream, orderDetail, orderInsight } from '../../../api/observe
 // `openDemoStream` 是与 `openOrderStream` **同形**的假流 —— 见 `connect()` 里那处三元式。
 import { demo, openDemoStream } from '../../../api/demo-stream'
 import DemoModeToggle from '../../../components/observe/DemoModeToggle.vue'
+import RightDrawer from '../../../components/observe/RightDrawer.vue'
 import KpiCard from '../../../components/ui/KpiCard.vue'
 import DonutChart from '../../../components/charts/DonutChart.vue'
 import LineChart from '../../../components/charts/LineChart.vue'
@@ -2093,6 +2087,12 @@ const drawerRows = computed(() => {
   }
   return rows
 })
+
+/** 抽屉副标题：搜索态报「命中数（上限 50）」，否则报「列表条数（前 30，含选中）」。
+ *  2026-10-18 抽共享 `RightDrawer` 时把原模板里的两个 `<p>` 收敛到这里（文案逐字保留）。 */
+const drawerSubtitle = computed(() => (drawerQuery.value.trim()
+  ? `匹配 ${fmtInt(drawerMatchedRows.value.length)} 单 · 按已停留倒序（最多显示 50）· 点左列切换右上时间线`
+  : `${fmtInt(drawerRows.value.length)} 单 · 按已停留倒序（前 30，含当前选中）· 点左列切换右上时间线`))
 
 /** 搜索把列表缩短后，选中的单可能落到可视区外 ⇒ 重新滚到它（找不到就保持原位）。 */
 watch(drawerQuery, revealDrawerSelection)
