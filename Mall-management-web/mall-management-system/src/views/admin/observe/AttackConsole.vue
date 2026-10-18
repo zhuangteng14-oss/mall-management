@@ -464,6 +464,60 @@
         </button>
       </div>
     </div>
+
+    <!-- ── ⑥ 事件台账存储水位 / 彻底清空（2026-10-19）──────────────────────────
+         与 ⑤ 的区别写在卡片里：⑤ 只删**演练标记**命中的行，⑥ 的按钮删**整张**
+         `observed_event`（含日常事件）。⚠️ ⑥ 的按钮同样两段式确认（真删、不可撤销）。
+         水位熔断由后端在 `/run` 开跑前与定时 job 里执行，本卡片只**读**当前刻度；
+         触发时 `/run` 的响应会带 `EvictionWarning`，由 `fire()` 原样显示在页顶。 -->
+    <h2 class="a-h2">
+      可观测事件台账存储
+      <span class="a-h2n">超过高水位时，开跑前自动淘汰最旧数据 —— 牺牲历史，保全当下</span>
+    </h2>
+    <div class="a-card">
+      <p v-if="storage.err" class="a-err">水位读取失败：{{ storage.err }}</p>
+      <p class="a-kv">
+        当前 <b>{{ storage.count == null ? '—' : storage.count.toLocaleString() }}</b> 行
+        / 高水位 <b>{{ storage.highWatermark.toLocaleString() }}</b> 行
+        · 安全线 <b>{{ storage.targetWatermark.toLocaleString() }}</b> 行
+        · 保留最近 <b>{{ storage.retentionDays }}</b> 天
+        · 每批 {{ storage.batchSize.toLocaleString() }} 行
+      </p>
+      <div class="a-water" role="img" :aria-label="`台账水位 ${storagePct}%`">
+        <span
+          class="a-water-fill"
+          :class="{ 'is-high': storage.above }"
+          :style="{ width: storagePct + '%' }"
+        ></span>
+      </div>
+      <p v-if="storage.above" class="a-warn">
+        ⚠️ 当前已超过高水位：下一次「开始演练」会先按时间淘汰最旧数据，直到回到安全线以下。
+      </p>
+      <div class="a-f-actions">
+        <button
+          type="button"
+          class="a-btn"
+          :disabled="loadingStorage || purging || running"
+          @click="loadStorage"
+        >
+          {{ loadingStorage ? '读取中…' : '刷新水位' }}
+        </button>
+        <button
+          type="button"
+          class="a-btn"
+          :class="{ 'a-btn-danger': armedPurge }"
+          :disabled="purging || cleaning || running"
+          @click="doPurge"
+        >
+          <IconGlyph name="no" />
+          {{ purging ? '彻底清空中…' : armedPurge ? '再点一次：确认彻底清空（不可撤销）' : '彻底清空可观测历史数据' }}
+        </button>
+      </div>
+      <p class="a-note">
+        与上面的「清理并恢复环境」不同：那个只删**演练标记**命中的行，这个删**整张**
+        `observed_event`（含日常事件）。后端按批删除，积压多时需要几十秒，请勿重复点击。
+      </p>
+    </div>
   </section>
 </template>
 
@@ -480,7 +534,7 @@
      三列**纯文字滚动**（不暂停、不画图、不筛选）。它与上面那条裁决不冲突：用户要的是
      「跑的时候能看见流在动」，不是把三张图表塞回来。
 
-  【它消费后端 10 个端点，全部经 `api/observe.js`】
+  【它消费的后端端点，全部经 `api/observe.js`】
     · `attackScenarios()` —— 8 个预置场景（Key / Name / Protections / Needs / DefaultWeight）；
     · `runAttack(p)`      —— 跑一轮（**同步跑到结束**，见下）；
     · `attackRecords(p)`  —— 演练记录（`Result` 长文本已由后端拆成字段）；
@@ -488,6 +542,7 @@
     · `stopAttack()`      —— 叫停正在跑的那一轮（commit 10c 的 `[暂停]`）；
     · `attackStatus()`    —— 演练期间的实时读数（块 7 收尾，1 秒一拍）；
     · `resetAttackEnvironment()` —— 复位演练环境（2026-10-18，失败态按钮 + 复位后自动重跑）；
+    · `attackStorage()` / `purgeAttackEvents()` —— 事件台账水位 / 彻底清空（2026-10-19，⑥ 区）；
     · `openMetricsStream` / `openOrderStream` / `openEventStream` —— 批四 ③c 预览的三条 SSE
       （在 `LivePreview.vue` 里开与关，本页只挂组件）。
   ⚠️ 本页**不出现任何后端路径字面量**（那条判据可 grep 自动化：路径只许出现在
@@ -534,8 +589,9 @@ import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 // ⚠️ 三层 `../`（不是管理端其它页的两层）：本页在 `views/admin/observe/`，比 `views/admin/` 深一层。
 import {
-  attackRecords, attackScenarios, attackStatus, cleanupAttack, readAttackConfig,
-  resetAttackEnvironment, runAttack, stopAttack, updateAttackConfig,
+  attackRecords, attackScenarios, attackStatus, attackStorage, cleanupAttack,
+  purgeAttackEvents, readAttackConfig, resetAttackEnvironment, runAttack, stopAttack,
+  updateAttackConfig,
 } from '../../../api/observe'
 import { replaySession, startReplaySession } from '../../../api/replay-session'
 import LivePreview from '../../../components/observe/LivePreview.vue'
@@ -713,6 +769,26 @@ const openId = ref(null)
 /** 「上膛」态：点了第一次**不发请求**（见 `doCleanup`）。 */
 const armedClean = ref(false)
 const cleaning = ref(false)
+
+// ── 事件台账存储水位 / 彻底清空（2026-10-19）────────────────────────────────
+/**
+ * 当前水位快照。`count` 初值 `null`（**不是 0**）—— 第一拍回来之前页面画「—」，
+ * 画 0 是在报一个没读到过的数（与 `prog` 同一条口径）。
+ * 其余键的缺省值与后端 `application.properties` 同源，读不到时页面仍能画出刻度。
+ */
+const storage = reactive({
+  count: null,
+  highWatermark: 300000,
+  targetWatermark: 250000,
+  retentionDays: 3,
+  batchSize: 5000,
+  above: false,
+  err: '',
+})
+const loadingStorage = ref(false)
+/** 「上膛」态：与 `armedClean` 同款（`confirm()` 在本仓不可用，见 `doCleanup` 注释）。 */
+const armedPurge = ref(false)
+const purging = ref(false)
 
 // ── 演练环境复位（2026-10-18）────────────────────────────────────────────────
 /** `/run` 失败后的恢复入口是否显示（只在失败那一屏出现，成功后收起）。 */
@@ -1044,11 +1120,75 @@ async function doCleanup() {
     flash.kind = 'ok'
     flash.text = `已清理并恢复：${(data && data.summary) || '共 0 行（库里没有待清的攻击数据）'}`
     await loadRecords()
+    // 清场第 ③ 段会删 observed_event 的演练行 ⇒ 水位读数跟着刷新。
+    await loadStorage()
   } catch (e) {
     flash.kind = 'bad'
     flash.text = `清场失败：${errText(e)}`
   } finally {
     cleaning.value = false
+  }
+}
+
+// ── 事件台账存储水位 / 彻底清空（2026-10-19）────────────────────────────────
+/** 水位条宽度（0–100）：`count / highWatermark`。读不到值时画 0 —— 不编一个比例。 */
+const storagePct = computed(() => {
+  const n = Number(storage.count)
+  const h = Number(storage.highWatermark)
+  if (!Number.isFinite(n) || !Number.isFinite(h) || h <= 0) return 0
+  return Math.min(100, Math.max(0, Math.round((n / h) * 100)))
+})
+
+/**
+ * 拉一次存储水位。⚠️ 失败**只记不抛**：水位是辅助读数，读不到不该把整页的其他动作拖停；
+ * `storage.err` 在卡片里单独显示，下一次刷新（跑完 / 清理后 / 挂载）会自己好。
+ */
+async function loadStorage() {
+  loadingStorage.value = true
+  try {
+    const data = await attackStorage()
+    storage.count = Number(data && data.count) || 0
+    storage.highWatermark = Number(data && data.highWatermark) || storage.highWatermark
+    storage.targetWatermark = Number(data && data.targetWatermark) || storage.targetWatermark
+    storage.retentionDays = Number(data && data.retentionDays) || storage.retentionDays
+    storage.batchSize = Number(data && data.batchSize) || storage.batchSize
+    storage.above = !!(data && data.aboveHighWatermark)
+    storage.err = ''
+  } catch (e) {
+    storage.err = errText(e)
+  } finally {
+    loadingStorage.value = false
+  }
+}
+
+/**
+ * 【彻底清空可观测历史数据】—— 两次点击才算数（与 `doCleanup` 同一套上膛机制）。
+ *
+ * ⚠️ 与「清理并恢复环境」的区别：后者只删**演练标记**命中的行，日常事件行不动；
+ *    本按钮删**整张** `observed_event`。⚠️ 真删、不可撤销 ⇒ 第一次点击只上膛。
+ * ⚠️ 后端分批删（5000 行 + 100ms 间歇），积压多时远超默认 10s —— 超时在
+ *    `api/observe.js#purgeAttackEvents` 里已加到 180 秒，本页不重复传。
+ */
+async function doPurge() {
+  if (!armedPurge.value) {
+    armedPurge.value = true
+    flash.kind = 'warn'
+    flash.text = '再点一次「彻底清空」：会真删掉可观测事件台账里的**全部**行（不只演练批次，'
+      + '日常事件也会一起清空），删除不可撤销。'
+    return
+  }
+  armedPurge.value = false
+  purging.value = true
+  try {
+    const data = await purgeAttackEvents()
+    flash.kind = 'ok'
+    flash.text = (data && data.summary) || '已彻底清空事件台账'
+    await loadStorage()
+  } catch (e) {
+    flash.kind = 'bad'
+    flash.text = `彻底清空失败：${errText(e)}`
+  } finally {
+    purging.value = false
   }
 }
 
@@ -1221,14 +1361,22 @@ async function fire(name, chosen, opts) {
     const engNotes = []
     if (Number(data.ShedRequests) > 0) engNotes.push(`背压弃投 ${data.ShedRequests}（没发出去，不算失败）`)
     if (Number(data.AbandonedRequests) > 0) engNotes.push(`取消 ${data.AbandonedRequests}`)
-    flash.kind = 'ok'
+    // ⚠️ 2026-10-19：开跑前的容量水位熔断如果真触发了，后端在 `/run` 响应里带
+    //    `EvictionWarning`（用户批文原句）+ `Evicted` / `StorageCount`。提示必须**原样**显示，
+    //    不能只报「跑完了」—— 否则用户不知道「这一轮为什么清理了几万行旧历史」。
+    const evicted = Number(data.Evicted) || 0
+    flash.kind = data.EvictionWarning ? 'warn' : 'ok'
     flash.text =
+      (data.EvictionWarning ? `${data.EvictionWarning} ` : '') +
       `${eng.Stopped ? '已叫停' : `「${data.Name || name}」跑完`}：总请求 ${data.TotalRequests} · ` +
       `拦下 ${data.BlockedRequests} · 失败 ${data.FailedRequests} · 耗时 ${fmtMs(data.DurationMs)}。` +
       (engNotes.length ? ` ${engNotes.join(' · ')}。` : '') +
+      (evicted > 0 ? ` 开跑前已淘汰最旧 ${evicted} 行事件（现 ${data.StorageCount} 行）。` : '') +
       `记录 Id=${data.Id} 已刷新到「演练记录」并展开。`
     // 跑完刷新列表并按 Id 展开 —— 理由见文件头「跑完之后为什么不再自己拼一行」。
     await loadRecords()
+    // 一轮演练会写进大量事件 ⇒ 水位随之上涨；顺手刷新卡片里的刻度。
+    await loadStorage()
     if (data.Id != null) openId.value = data.Id
   } catch (e) {
     flash.kind = 'bad'
@@ -1397,6 +1545,8 @@ onMounted(() => {
   loadSharedConfig()
   loadScenarios()
   loadRecords()
+  // 2026-10-19：存储水位是「这一页开跑之前要不要熔断」的可读判据，挂载即拉一次。
+  loadStorage()
   restoreRunState()
   watch([weights, concurrency, durationSeconds, tier, protections, injections], persistForm, { deep: true })
 })
@@ -1521,6 +1671,30 @@ onBeforeUnmount(() => {
 .a-flash.info {
   color: var(--ink-2);
   background: var(--surface-2);
+}
+/* 水位熔断提示（2026-10-19）：跑**成功**了、但历史被淘汰了一部分 ⇒ 既不是绿也不是红。
+   用 `.a-warn` 同源的警告色，避免把「牺牲历史」读成「演练失败」。 */
+.a-flash.warn {
+  color: var(--warning);
+  background: var(--warning-ground);
+}
+/* 事件台账水位条（2026-10-19）：宽度 = count / highWatermark，超线时变警告色。 */
+.a-water {
+  height: 10px;
+  margin: var(--s3) 0;
+  border-radius: 999px;
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  overflow: hidden;
+}
+.a-water-fill {
+  display: block;
+  height: 100%;
+  background: var(--brand-ink);
+  transition: width 0.3s ease;
+}
+.a-water-fill.is-high {
+  background: var(--warning);
 }
 /* 演练环境复位入口（2026-10-18）：只在 `/run` 失败那一屏出现。
    ⚠️ 用危险色系画边框与按钮 —— 它是「环境已经坏了」的提示，不是普通信息条。 */

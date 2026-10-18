@@ -1,7 +1,7 @@
 // src/api/observe.js —— 可观测面板的客户端（块 7 commit 3 的 SSE + commit 4 的三个普通 POST
 // + commit 8b 的清场 + commit 10c 的暂停与三条流的自动重连）。
 //
-// 十二条端点（**全在** `endpoints.js` 里，本文件一个后端路径字面量都不出现 —— 那条判据可 grep 自动化）：
+// 本文件封装的端点（**全在** `endpoints.js` 里，本文件一个后端路径字面量都不出现 —— 那条判据可 grep 自动化）：
 //   metrics → 指标面板（KPI / 锁 / 防护 / 库存水位）          ┐
 //   orders  → 状态流转页（五态计数 / 最近订单 / 本拍流转）      ├ 三条 **SSE 流**（commit 3；
 //   events  → 实时日志页（8 类归一化事件流）                  ┘ commit 10c 起**自带自动重连**）
@@ -354,6 +354,15 @@ async function postJson(path, body, opts) {
  */
 const RUN_GRACE_MS = 60000
 
+/**
+ * 清理 / 彻底清空的长超时（毫秒）。
+ * ⚠️ 2026-10-19 起这两条后端都改成**分批删除**（每批 5000 行 + 100ms 间歇）：
+ *    一行大 DELETE 没了，但总时长反而变长（70 万行 ≈ 140 批 ≈ 删除本身 + 14 秒间歇）。
+ *    默认 10 秒会在「正在删」的时候把前端 abort 掉 —— 后端照删完，页面却报超时。
+ *    180 秒按「30 万行 / 每批 5000」的 60 批留足余量；更大的积压会先被水位熔断压下来。
+ */
+const CLEANUP_GRACE_MS = 180000
+
 /** 后端缺省的持续秒数（与 `AttackEngine.DEFAULT_DURATION_SECONDS` 一致，用于算超时）。 */
 const DEFAULT_DURATION_SECONDS = 60
 
@@ -528,7 +537,8 @@ export function attackRecords(p) {
  */
 export function cleanupAttack() {
   // body 传空串：本仓 POST 一律带 urlencoded 头（同 `attackScenarios()`），后端不读 body。
-  return postJson(endpoints.observe.attackCleanup, '')
+  // ⚠️ 2026-10-19：必须给长超时 —— 事件台账那一段已改成分批删，默认 10s 不够（见 CLEANUP_GRACE_MS）。
+  return postJson(endpoints.observe.attackCleanup, '', { timeout: CLEANUP_GRACE_MS })
 }
 
 // ==================== 复位演练环境（块 7 · 2026-10-18）====================
@@ -675,4 +685,38 @@ export function updateAttackConfig({ protections, injections } = {}) {
     protections: Array.isArray(protections) ? JSON.stringify(protections) : undefined,
     injections: Array.isArray(injections) ? JSON.stringify(injections) : undefined,
   }))
+}
+
+// ==================== 事件台账存储水位 / 彻底清空（2026-10-19）====================
+//
+// ⚠️ 这一组与上面的清场是**两件不同的事**：
+//    · `cleanupAttack` 按**资源域判据**删（批次号 / 种子 SKU / 攻击对象），日常事件行不动；
+//    · `purgeAttackEvents` 按**整张表**删 —— 用户点名的【彻底清空可观测历史数据】。
+// ⚠️ 水位熔断（超过 30 万行自动淘汰最老数据）由**后端**在 `/run` 与定时 job 里执行；
+//    本层负责的只是「把当前水位读给页面看」+ 提供那枚手动清空按钮。
+
+/**
+ * 当前事件台账水位（只读）。
+ *
+ * @returns {Promise<{success:boolean, count:number, highWatermark:number,
+ *          targetWatermark:number, retentionDays:number, batchSize:number,
+ *          aboveHighWatermark:boolean}>}
+ *          `count` 是 `observed_event` 当前行数；`highWatermark` 是熔断线（缺省 30 万）。
+ *          ⚠️ 它是**快照**：演练正在跑时行数每秒都在涨，不要拿它做对账。
+ */
+export function attackStorage() {
+  // body 传空串：同本域其余只读 POST（`attackScenarios()` / `attackStatus()`）。
+  return postJson(endpoints.observe.attackStorage, '')
+}
+
+/**
+ * **彻底清空**可观测事件台账（无入参、一次删空整张 `observed_event`）。
+ *
+ * @returns {Promise<{success:boolean, before:number, deleted:number, total:number,
+ *          after:number, summary:string}>}
+ *          `summary` 是后端写好的中文一句话（**直接显示**）。
+ *          ⚠️ 破坏性：调用点必须两段式确认；长超时（分批删，见 `CLEANUP_GRACE_MS`）。
+ */
+export function purgeAttackEvents() {
+  return postJson(endpoints.observe.attackPurge, '', { timeout: CLEANUP_GRACE_MS })
 }

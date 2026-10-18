@@ -36,6 +36,7 @@ import java.util.concurrent.CompletionException;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.Semaphore;
@@ -652,12 +653,34 @@ public class AttackEngine {
     private final AttackSwitchConfig switchConfig;
 
     /**
+     * {@code HttpClient} 的固定大小执行器（2026-10-19〈性能隔离〉）。
+     *
+     * <p>⚠️ <b>为什么必须显式给一个</b>：不给时 JDK 用 {@code newCachedThreadPool}，
+     * 500 并发诊断实测堆到 **631 条 {@code HttpClient-1-Worker-*}**（{@code jvm.threads.live}=1072）。
+     * 问题不在「线程多」本身，而在它们与 Tomcat / 消费者线程一起抢 2 vCPU。
+     * 固定 64 条 + 有界语义（{@code newFixedThreadPool} 的队列无界，但任务本身很短）
+     * 把这一侧的上限钉死，且 64 ≫ 32 条派发线程，不会成为吞吐瓶颈。
+     */
+    private static final int HTTP_EXECUTOR_THREADS = 64;
+    private static final AtomicInteger HTTP_THREAD_SEQ = new AtomicInteger();
+
+    private final ExecutorService httpExecutor = Executors.newFixedThreadPool(
+            HTTP_EXECUTOR_THREADS, r -> {
+                Thread t = new Thread(r, "attack-http-" + HTTP_THREAD_SEQ.incrementAndGet());
+                // 守护线程：应用关闭时不让这 64 条把 JVM 拖住（引擎不是 Web 容器的一部分）。
+                t.setDaemon(true);
+                return t;
+            });
+
+    /**
      * 真发 HTTP 的客户端。**一个实例复用全程**：{@code HttpClient} 不可变且线程安全、自带连接池；
      * 每轮新建会白白丢掉连接池（100 线程 × 每请求一次 TCP 握手）。
+     * 执行器固定 64（见 {@link #HTTP_EXECUTOR_THREADS}），不再随并发数无限长。
      */
     private final HttpClient http = HttpClient.newBuilder()
             .connectTimeout(Duration.ofSeconds(5))
             .followRedirects(HttpClient.Redirect.NEVER)
+            .executor(httpExecutor)
             .build();
 
     /**
@@ -1593,6 +1616,12 @@ public class AttackEngine {
         if (e != null) {
             e.shutdownNow();
         }
+    }
+
+    /** 停机时收掉固定的 HTTP 执行器（2026-10-19）—— 与 {@link #shutdownJourney()} 同一条口径。 */
+    @PreDestroy
+    void shutdownHttpExecutor() {
+        httpExecutor.shutdownNow();
     }
 
     // ==================== HTTP ====================

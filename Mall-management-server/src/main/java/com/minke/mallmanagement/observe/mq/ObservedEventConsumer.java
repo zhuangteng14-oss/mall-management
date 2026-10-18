@@ -12,6 +12,7 @@ import io.micrometer.core.instrument.MeterRegistry;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.amqp.core.Message;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.amqp.rabbit.annotation.RabbitListener;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.data.redis.core.StringRedisTemplate;
@@ -122,7 +123,8 @@ public class ObservedEventConsumer {
     private final EventBroadcaster broadcaster;
     private final MeterRegistry registry;
 
-    public ObservedEventConsumer(ObservedEventDao observedEventDao, ObservedEventDlqDao dlqDao,
+    public ObservedEventConsumer(@Qualifier("observeConsumerObservedEventDao") ObservedEventDao observedEventDao,
+                                 ObservedEventDlqDao dlqDao,
                                  StringRedisTemplate redis, ObjectMapper objectMapper,
                                  EventBroadcaster broadcaster, MeterRegistry registry) {
         this.observedEventDao = observedEventDao;
@@ -142,7 +144,8 @@ public class ObservedEventConsumer {
     @RabbitListener(queues = RabbitObserveConfig.QUEUE,
             containerFactory = "observeListenerContainerFactory")
     public void onBatch(List<Message> messages, Channel channel) throws IOException {
-        // ⚠️ 消费线程是**复用**的（simple listener 的并发从 2 起、最多 8）：本方法里的日志必须
+        // ⚠️ 消费线程是**复用**的（simple listener 的并发固定 4，2026-10-19 起与台账小池的 4 条连接对齐）：
+        //    本方法里的日志必须
         //    带着「这一批」的 traceId，结束时还原成进来时的上下文 —— 否则下一条消息顶着一批的号。
         //    一批最多 50 条、可能来自不同的 traceId ⇒ 日志统一挂**第一个非空 traceId**，
         //    并在帧的 fields.traces 里如实记「本批涉及几个 traceId」（不假装整批同号）。

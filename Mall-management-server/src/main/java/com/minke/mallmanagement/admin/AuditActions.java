@@ -22,7 +22,7 @@ package com.minke.mallmanagement.admin;
  * 其余 15 个改库端点**随各自那一笔**挂（横切本来就该跟着业务改动走，见
  * {@code docs/agent/c3-modules.md} §11 与 {@code slot-registry.md} 末条）。
  * ⇒ 每挂一个新勾，**在这里加一条**。今天有 2 条：{@link #GOODS_UPDATE}（批 A 的样板）
- * 与 {@link #NOTIFICATION_SEND}（块 1 · I2 的**第二个**挂钩点）。⚠️ 上面那两句说的是**开笔当时**的实况，别拿它当今天的清单：此后块 2～6 各自把自己那一笔挂了上来，**今天共 47 条**（块 7 · commit 8 跨域补挂 {@link #GOODS_DELETE} / {@link #COMMENT_DELETE} 两条；commit 8b 加 {@link #OBSERVE_ATTACK_CLEANUP}；2026-10-18 加 {@link #USER_VIEW_PLAINTEXT}）（数常量、不数调用点 —— {@code coupon.stop} 等一条 tag 覆盖两个端点，{@code seckill.*} 三个 tag 挂在同一个 Controller 的三个方法上）；**清单就是下面那些常量**，本段只是「为什么一开始只有 1 条」的由来。
+ * 与 {@link #NOTIFICATION_SEND}（块 1 · I2 的**第二个**挂钩点）。⚠️ 上面那两句说的是**开笔当时**的实况，别拿它当今天的清单：此后块 2～6 各自把自己那一笔挂了上来，**今天共 48 条**（块 7 · commit 8 跨域补挂 {@link #GOODS_DELETE} / {@link #COMMENT_DELETE} 两条；commit 8b 加 {@link #OBSERVE_ATTACK_CLEANUP}；2026-10-18 加 {@link #USER_VIEW_PLAINTEXT}；2026-10-19 加 {@link #OBSERVE_ATTACK_EVENTS_PURGE}）（数常量、不数调用点 —— {@code coupon.stop} 等一条 tag 覆盖两个端点，{@code seckill.*} 三个 tag 挂在同一个 Controller 的三个方法上）；**清单就是下面那些常量**，本段只是「为什么一开始只有 1 条」的由来。
  */
 public final class AuditActions {
 
@@ -343,6 +343,20 @@ public final class AuditActions {
      * 不先把整批原值读一遍）。
      */
     public static final String OBSERVE_ATTACK_RESET = "observe.attack.reset";
+
+    // ==================== 2026-10-19：彻底清空事件台账新增的 1 条 ====================
+    // 由来：攻击模拟器新增 `POST /admin/observe/attack/purge` —— 不是按演练标记清，而是把
+    // `observed_event` **整张表**清空（用户点名的【彻底清空可观测历史数据】）。
+    // 它比 `/cleanup` 更强：日常事件行也会被删 ⇒ 必须与清理同档留痕（谁、删了多少、清前清后）。
+
+    /**
+     * 彻底清空可观测历史数据 —— {@code POST /admin/observe/attack/purge}。
+     *
+     * <p>{@code TargetType="attack"}（跨表域的一批台账行）；{@code TargetId} 用服务层回的中文摘要
+     * （「已彻底清空事件台账：共删 N 行…」）；{@code AfterJson} 存
+     * {@code {observed_event: 删除行数}}；{@code BeforeJson} 传 {@code null}。
+     */
+    public static final String OBSERVE_ATTACK_EVENTS_PURGE = "observe.attack.events.purge";
 
     // ==================== 2026-10-18：用户治理「查看明文」新增的 1 条 ====================
     // 由来：D3-4 的读侧掩码保留在用户列表（email 仍是 a***@x.com），但业务要求客服能按次看到
