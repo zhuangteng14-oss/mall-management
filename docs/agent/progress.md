@@ -2583,3 +2583,16 @@ DB 级唯一锁探针 `ProbeB6c7Lock` = **PASS 12 / FAIL 0**；接口级 8 条�
 
 **⚠️ 本笔不 push / 不 merge**；**手验**按批文仍推迟到 **commit 4 之后**统一一轮。⚠️ **dev / a3 两个 profile 都是
 `app.auth.enabled=false`** ⇒ 手验绿 ≠ 默认 profile 绿（每次手验前重复这一句）。
+
+#### 7-B7-归档. 块 7 合并与报告归档（2026-10-18）
+
+**这一段做什么** ⇒ 块 7 已由 PR **#92** 合并进 `main`（merge commit `3bb6168`；D 段 commit 2 + 阶段 2b 亦随该分支一并入主干）。
+本笔只做**归档与台账更新**，不改任何后端 / 前端代码。
+
+- **报告归档**：块 7 期间产出的 **44 份** `.txt` 报告统一收进仓根 `reports/` —— 其中 **7 份**早前已入库，
+  **37 份**本笔入库（`块 7 PR 申请说明.txt`、各阶段收笔 / 方案 / 诊断档等）。
+  ⚠️ `reports/` 在 `scripts/refs-scan.sh` 的 `SKIP_DIRS` 里，不参与引用扫描。
+- **D 段状态**：commit 1（块 7 收尾）· commit 2（后端防护接闸）· 阶段 2b（死锁索引 + 重试）**已落码并随 PR #92 合并**；
+  **commit 3（边界 + 演示联动）在 `feat/c3-d3-hardening` 上开工**；commit 4（收口 + 块 8 前置）未开工。
+- **手验口径不变**：块 7 + D 段仍压成 **commit 4 之后**一轮；⚠️ dev / a3 两档 `app.auth.enabled=false`
+  ⇒ 手验绿 ≠ 默认 profile 绿。

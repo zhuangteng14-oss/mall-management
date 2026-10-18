@@ -1,0 +1,145 @@
+块 7 · 阶段 3a.3 后续 —— 失败原因（reason）补全 · 完成报告
+================================================================================
+日期：2026-10-17
+分支：feat/c3-admin-block7
+提交：d9e6f0e（41 个文件，+1436 / −263）
+状态：已提交，未 push / 未 merge / 未开 PR
+
+一、为什么要做
+--------------------------------------------------------------------------------
+点开 ③ 里的「超卖拦截」「订单流转失败」等事件，⑤ 只能看到 result=error /
+insufficient，答不出「为什么」。排查九个事件环，只有审计 / 通知 / 身份三环自带
+reason；库存 / 缓存 / 锁 / 订单 / 敏感词 / 防护六环在失败或降级时把原因只写进日志，
+事件里丢掉了。
+
+二、最终口径（按你的裁决）
+--------------------------------------------------------------------------------
+1. ③ 第一层：「原因」就是普通键值对，中性灰，不新增样式。
+2. ⑤ 详情：不新增 .d-reason、不加 <span> 包裹、不新增 <li>、不另起一行；
+   reason 作为普通一段跟在现有 .tech 长句末尾，用「 · 」隔开，整块自然折行。
+3. 着色：只在 .tech 的逐段渲染里，碰到 reason 键且 severity 是 error / warn 时，
+   给这一段文字加 --danger / --warning；其余段保持中性。
+4. 演示数据源不动：模拟日常里本来就没有 reason，属预期。（**已被第十节补记覆盖**）
+
+三、后端改了什么（19 个主代码文件 + 1 个新类）
+--------------------------------------------------------------------------------
+新增 shared.text.EventReason：
+  - clip：折叠空白、空白→null、上限 160 字、超长截断加「…」；
+  - of：拼「前缀：异常简单类名：message」，不拼堆栈、不拼 SQL；
+  - 绝不进 Micrometer tag（原因基数无界），只进事件 record / fields。
+六个事件 record 追加 reason 末位分量：
+  StockEvent / MallCacheEvent / MallLockEvent / OrderStateEvent /
+  SensitiveEvent / ProtectionEvent。
+对应 Metrics 方法直接改签名、不留旧重载，编译器把全部调用点逼出来。
+EventBroadcaster 新增 putReason：非空才写 fields.reason；order 异步档仍优先用 shape。
+补齐原因的调用点（示例）：
+  - 库存扣减失败：防超卖拦截：库存不足（需 N 件，剩余 M 件）/
+    扣减未命中 / 影响行数异常；
+  - 库存释放：释放未命中（goods_sku 无此 SKU）/ EventReason.of；
+  - L2：降级冷却中 / 读取失败 / 失效失败 / 探活失败 / 不可达；
+  - 锁：客户端不可用 / 取锁被中断 / 取锁超时 / 租约丢失 / 释放失败；
+  - 订单：transition rejected 复用既有 noRowsMsg、DB 错误、时间线写入 / 读回失败；
+  - 敏感词：命中比例 ≥ 40% 的拒收原因（不写命中词）；
+  - 防护：入站限流、熔断开路 / 打开 / 半开、池满拒绝、死锁重试失败。
+不动：Audit / Notify / Identity 三环语义；不新增顶层帧键；CSV 仍 16 列、
+JSON 仍 16 键（reason 只在嵌套 fields）；无数据库迁移。
+
+四、前端改了什么（EventLog.vue）
+--------------------------------------------------------------------------------
+- techLine 拆成 techSegments（返回 {text, key?} 段数组），拼回的整串逐字不变；
+- ⑤ 模板按段渲染，段间仍是「 · 」，只有 reason 段拿 is-error / is-warn；
+- CSS 只加 .chain-i .d .tech .is-error / .is-warn 两条颜色规则；
+- 无 .d-reason 残留（探针断言节点数为 0）；导出逻辑未动。
+
+五、探针改了什么（probe-b7a3-eventlog-rewrite.mjs）
+--------------------------------------------------------------------------------
+- stock 假帧改成真实失败形状：result=insufficient、qty=8、剩余 1 件、带 reason；
+- order 假帧改成 result=error + to=null + reason；
+- 同步更新所有依赖旧标题的断言；演示数据源的「库存扣减」保持原样；
+- 新增 ㉔2b 四组断言：
+    ③ 原因键值必须是 --ink-3 / --ink-2 中性灰；
+    ⑤ 结构：单 <code>、只有 span、分隔恰为「 · 」、非空文本节点 = 0、
+       .d-reason = 0、li = 11；
+    ⑤ 颜色：error 段 = --danger、warn 段 = --warning、其余段中性；
+    ⑤ 无原因的 info（缓存命中）没有 reason 段、也没有着色子节点。
+
+六、验证结果（全部本地可复核）
+--------------------------------------------------------------------------------
+后端全量测试：
+    ./mvnw -B test
+    Tests run: 567, Failures: 0, Errors: 0, Skipped: 26
+    BUILD SUCCESS；EXIT=0
+    全量日志：_work/3a3/backend-test-final.txt
+前端：
+    npm run lint  ⇒ DONE  No lint errors found!
+    npm run build ⇒ DONE  Build complete.（仅 2 条既有体积 warning，无 ERROR）
+主探针（mock SSE，headless Edge）：
+    192 项 / 0 失败，连跑两次（11:13、11:14）
+虚拟滚动探针：
+    23 项 / 0 失败
+真后端端到端（dev profile）：
+    用 2200 次 GET /goods/goodstype 触发入站限流（200×400、429×1800）；
+    ③ 行内「原因」键色 rgb(123,138,163)=--ink-3、值色 rgb(163,174,194)=--ink-2；
+    ⑤ reason 段 is-warn、计算色 rgb(245,158,11)=--warning；其余段 ink3；
+    .d-reason=0，.tech 行数=1（仍是单行单 code）。
+两档手验：
+    正常真流：23 行 / 23 个原因键值对；
+    模拟日常：8 行 / 0 个原因，⑤ 无原因段、着色段 0、.d-reason 0。
+
+七、refs 收口
+--------------------------------------------------------------------------------
+before = HEAD 临时 worktree（db731c6），after = 最终工作区。
+两次扫描均 594 文件 / 5227 条；补完证据文件后再扫 600 文件 / 仍 5227 条（0 增 0 减）。
+阳性对照：临时文件里同一引用上移一行 ⇒ 恰好 1 对 LOST+NEW。
+最终：9 对 (引用者, token) 变化，全部是有意重指的一对一替换；未配对 0。
+只改活文档中因本笔行偏移而漂移的引用；归档 / 既有证据快照里的历史行号未动。
+收口明细只落 _work/3a3/refs-收口-b7a3e.txt，未进 docs。
+
+八、证据落在哪
+--------------------------------------------------------------------------------
+docs/agent/evidence/c3-block7/
+    b7a3e-reason-summary.txt            总述（命令、计数、时间戳核对）
+    b7a3e-reason-probe-main.txt         主探针 192/0 全文
+    b7a3e-reason-probe-virtual.txt      虚拟滚动 23/0 全文
+    b7a3e-reason-manual-real.txt        真后端端到端原始输出
+    b7a3e-reason-manual-two-modes.txt   两档手验原始输出
+    b7a3e-reason-frontend-lint-build.txt lint + build 原始输出
+工作产物：_work/3a3/（测试全量日志、截图、refs 扫描与收口明细、触发脚本）
+
+九、边界与未做
+--------------------------------------------------------------------------------
+- 未 push / 未 merge / 未开 PR。
+- rows > 1 仍记 INSUFFICIENT：本笔只补原因，不改既有结果语义（风险单独记录）。
+- remaining 读不到时不新增查询，文案如实并列「库存不足或无此 SKU」两种可能。
+- 不做历史事件回溯；旧事件没有 reason 就是没有。
+- 演示数据源事件文案与字段未改。（**已被第十节补记覆盖**）
+
+十、补记（2026-10-17）—— 用户实报：⑤ 原因不显示（演示源）
+--------------------------------------------------------------------------------
+现象：点开 WARN「敏感词命中，已拦截」，⑤ 只有 kind / severity / src，
+整段 .tech 灰色，没有「原因（reason）」。
+定位：
+  1. 该标题只存在于 api/demo-stream.js；真后端标题是「敏感词拒收」。
+  2. 真后端 SSE 现场抓帧确认 fields.reason 有值：
+     「敏感词拒收：命中比例 100% ≥ 40%（命中 6/6）」；⑤ 实测 is-warn /
+     rgb(245,158,11)。后端与前端渲染均无缺陷。
+  3. 根因：演示假帧只写标题，WARN / ERROR 档没有 fields.reason
+     ⇒ techSegments 没有 reason 段可渲染，自然没有颜色。
+修复（提交 021e181，9 个文件）：
+  - 演示数据源所有 WARN / ERROR 档补 reason：缓存预热超时、锁等待超时、
+    死锁回滚、超卖拦截、库存水位偏低 / 不足、敏感词命中已拦截；
+  - info 档仍不写 reason；敏感词 hit/total 与 40% 阈值对齐。
+验证：
+  - 真后端：⑤「原因（reason）= 敏感词拒收：命中比例 100% ≥ 40%（命中 6/6）」，
+    is-warn、rgb(245,158,11)；其余段 --ink-3；.d-reason = 0。
+  - 模拟日常：页面 35 行 / 7 条 WARN+ERROR / 缺原因 0；点开
+    「敏感词命中，已拦截」后，⑤「原因（reason）= 敏感词拒收：命中比例 50%
+    ≥ 40%（命中 59/118）」，is-warn、rgb(245,158,11)；其余段 --ink-3；
+    .d-reason = 0。
+  - 主探针 194/0（新增 2 项：所有警告错误行都有原因；⑤ 原因段按级别着色）；
+    虚拟滚动探针 23/0；lint 无错、build 成功。
+截图：
+  C:\Users\86159\Desktop\软件工程\期末项目\_work\3a3\manual-real-sensitive-reason.png
+  C:\Users\86159\Desktop\软件工程\期末项目\_work\3a3\manual-demo-sensitive-reason.png
+  C:\Users\86159\Desktop\软件工程\期末项目\_work\3a3\out-b7a3-eventlog.png
+提交：021e181（未 push / 未 merge / 未开 PR）。

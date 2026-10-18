@@ -1,0 +1,200 @@
+================================================================================
+C3 块 7 · 阶段 3a 停工快照（2026-10-16 停工时刻，给中午的自己）
+仓库：C:/Users/86159/Desktop/软件工程/期末项目
+================================================================================
+
+【六行快照】
+  1. HEAD hash  : 4cd132d7012f708d1893f07cf6994629e5e3e85e
+  2. 分支名      : feat/c3-admin-block7
+  3. 工作区      : 干净（git status --short 空；无未跟踪文件；git diff HEAD 空）
+  4. 3a 做到哪了 : **只读了文件，未改任何仓内文件**。新建过 1 个 Java 文件，
+                  已删并回退（设计稿另存 _work/3a/AttackSwitchConfig.java.draft）。
+  5. 未跟踪文件  : 无（_work/ 被 gitignore，不算）
+  6. 可安全重启  : **是**。无半成品改动、无未提交内容、无锁文件；重启后重跑
+                   `git log -1` 应看到 4cd132d 即一切正常。
+
+================================================================================
+一、本会话已落的全部 5 笔（勿重复做）
+================================================================================
+
+  7365de5  阶段 1 · 块 7 收尾（回放 + 模拟日常 + 进度 6 数
+           + D pack + 3 txt 入库 + 文档）
+           35 文件 / +2999 −42；测试 498 / 0 / 0 / 26 skip
+
+  4df799a  阶段 2 · D 段后端防护（第 9 类事件环 + 限流 +
+           熔断 + 分池）
+           41 文件 / +3277 −116；测试 541 / 0 / 0 / 26 skip
+
+  cfe2948  阶段 2b · 死锁修复（索引 + 重试 + 重试可视化）
+           30 文件 / +1566 −171；测试 548 / 0 / 0 / 26 skip
+           ⚠️ 索引只缩锁粒度、不治本环；重试才兜住 5xx=0
+
+  25e61b1  chore · 6 份历史报告归位 reports/
+           8 文件 / +1504 −3
+
+  4cd132d  docs · 阶段 2b 补记（TD-76 + Migration ⑳ 块注释
+           + EXPLAIN 证据 + 报告）
+           4 文件 / +393 −1
+
+  ── 后两笔（本会话新落）的细节 ────────────────────────────
+     · 25e61b1：6 份旧报告从 docs/agent/context-packs/ 移到仓根 reports/（扫描器 SKIP_DIRS
+       含 'reports' ⇒ 不参与 refs-scan；仍在仓内、换机可取证）；另把 progress.md:2361 /
+       :2402、slot-registry.md:5000 三处「另见桌面 X.txt」的 token 改成 `reports/X.txt`
+       —— **三处都是同行替换、净 0 行** ⇒ 全仓互引零漂移。
+     · 4cd132d：tech-debt.md 新增 TD-76（现象/性质/价值/触发条件/状态五项）；·
+       mall_management_sql.sql 第 1936 行**同行**追加逐字句（净 0 行）；· 新增只读证据
+       docs/agent/evidence/c3-block7/d2-user-explain.txt；· reports/块7-阶段2b-死锁修复-报告.txt
+       （内容有改动，故随本笔提交，不藏进「移动」提交里）。
+
+================================================================================
+二、顾问 2026-10-16 夜收尾的三条裁定（已生效，勿再问）
+================================================================================
+
+  【裁定 1】Result 枚举：维持现状 —— 不动 ProtectionEvent 结构、不加 action/attempt 字段；
+            action / attempt 落 detail 文本；retry_success / retry_failed 保持第 6、7 档；
+            前端 labels 不用改。顾问自认上一轮「原裁定：不动 Result 枚举」是**措辞错误**。
+  【裁定 2】7 份报告挪出扫描根 → 仓根 reports/（已做，见 25e61b1）。
+  【裁定 3】user.merchantid 不加（EXPLAIN 走 PRIMARY / rows=1；49 行锁全在 goods 侧）。
+
+  另有一处**本会话新增裁决**（3a.1 前提，用户已选）：
+  「乙案的共享配置在一轮演练结束后**不复位**，重启才回默认」= 选项 X。
+  配套兜底（必须实现，否则丢掉原来 resetToDefault 的安全职责）：
+    · GET /config 返回 IsDefault
+    · 两个页面的开关栏**常驻**「⚠ 当前非默认配置」提示 + 一键 [恢复默认]
+    · 写入非默认时后端记一行 WARN
+
+================================================================================
+三、3a 开工前必须答对的四条（已答，抄给中午的自己）
+================================================================================
+
+  ① 本笔提交 4 文件？报告挪到 reports/ 了吗？
+     ⇒ 拆成两笔（见上），7 份**全部**已挪到 reports/，工作区干净。
+  ② 开关面板是乙案（不是甲案）？
+     ⇒ 是。**现状实测 = 甲案**：protections/injections 走 /attack/run 入参
+        （AttackEngine.java:1480-1484 的 parseKeys）。AttackController 现有 **6 条出口全
+        POST**：/scenarios /run /stop /status /records /cleanup ⇒ 加 /config 的 POST+GET 后共 8 条。
+  ③ 日志页是控制台风格（不是表格）？
+     ⇒ 是，但要**更正前提**：EventLog.vue **不是表格**（el-table/<thead>/<th/sortable 全零命中），
+        它已经是卡片行列表；真正违反 tail -f 的是**分页器**
+        （:143 :limit="pageSize"、:311 PAGE_DEFAULT、:399 pageRows、:100「每页 N 条」）。
+        重做重点是**拆分页 + 自动滚到底**，不是「去表格」。
+  ④ 色系锁定？
+     ⇒ 是。色源唯一 = Mall-management-web/mall-management-system/src/assets/tokens.css 的
+        `html[data-theme="admin"]` 块（:225 起；该文件同被商城入口引入，写成裸 :root 会把商城
+        刷暗）。仓里**已有**图表色板 10 + 图表辅助 6（tokens.css:187-218，注明「色相逐一沿用
+        admin 那十条」）⇒ ECharts 主题 JSON 直接引这些 token，不新造色值。
+
+================================================================================
+四、3a 的拆笔计划（未开工，建议顺序）
+================================================================================
+
+  3a.1 后端乙案（新独立一笔）
+        · 新 @Component AttackSwitchConfig（observe/service）—— 设计稿在
+          _work/3a/AttackSwitchConfig.java.draft，已验证过的要点：
+            - 防护 5 键的位**不复制**，代理 ProtectionGate（热路径读的必须是真值）
+            - 注入 3 键的位在本类；INJECTION_KEYS 引用 AttackEngine.INJECTION_KEYS（不二写）
+            - update(protections, injections)：null=不动、[]=关光；校验全过再写
+            - state() 全量快照 + isDefault + version；catalog() 给 Key/Wired
+            - resetToDefault()；非默认时 WARN
+        · AttackEngine：加构造依赖 switchConfig；parse 里**不再收** protections/injections
+          （若报文仍带 ⇒ **抛 400 并指路 /attack/config**，不静默忽略）；阶段 B 的注入判据
+          改读 switchConfig（实时）；Result.Engine 记「起跑那一刻的快照」+ 说明实时读
+        · DrillRecordService：去掉 protections/injections 形参与 gate 字段（原 apply/finally
+          resetToDefault 整段删除 —— 语义已改为不复位）
+        · AttackController：新增 POST + GET /admin/observe/attack/config（第 7、8 条出口）
+        · ⚠️ 必改的配套（本仓「同一处地雷」）：
+            AbstractSmokeTest 的 @Import 要加 AttackSwitchConfig.class（AttackController 多一个
+            依赖 ⇒ 切片整片起不来）、AttackEngine 也多一个依赖
+        · 待改测试：AttackEngineTest（:342-375 parse 的开关用例、:388）、
+          DrillRecordServiceTest（构造器 11 参、:199-204、:228-265 的「开跑前写入/收尾复位」两条
+          结构钉 —— 复位那条要按新裁定反写）
+  3a.2 ECharts 主题 JSON（统一主题，三页所有图表加载它）
+  3a.3 EventLog.vue 完整重做（控制台风格 + ①~⑥ 六区 + 8 处实时动画 + 8 类 lucide 图标）
+  3a.4 MetricsPanel.vue 结构重做（KPI 卡 + 折线/环/柱 + 图间联动）
+  3a.5 OrderFlow.vue 结构重做（节点脉冲 / 边高亮 1.2s / 角标实时）
+  3a.6 AttackConsole.vue / EventLog.vue 两边接乙案
+
+        核心语义（顾问 2026-10-16 夜裁定，勿再议）：
+          · 共享配置 = 唯一真相，谁都不覆盖谁
+          · 攻击页 UI 从 GET /attack/config 读初始状态
+          · 日志页开关栏同款：GET 读、任何一处拨动 →
+            立即 POST /attack/config（**不等点开始**）
+          · 点【开始】时不再传 protections/injections
+            —— 若报文仍带 ⇒ 抛 400 并指路 /attack/config
+              （不静默忽略）
+          · 跑起来后，引擎每秒读共享配置
+          · 攻击页和日志页都是**消费者**，不是配置源
+
+        ⚠️ 反面（不许做）：
+            点开始时把 UI 上的开关「同步一次」给 /config
+            —— 那会在日志页改完开关后，被攻击页覆盖回去，
+              乙案的唯一目的（过程中能改）就白做了
+
+        ⚠️ 3a.1 里 DrillRecordService 那条「原 apply/finally
+            resetToDefault 整段删除」要细读：
+            · 删的是 **finally 里的自动调用**（不复位）
+            · ProtectionGate.resetToDefault() **方法本身保留**
+              —— 「一键恢复默认」按钮要调它
+            · 别把方法一起删了
+
+  已确认可用的现成件：@lucide/vue ^1.55.0、echarts ^5.6.0、前端 http.get 存在（http.js:190）、
+  已有图表基建 src/components/charts/{BaseChart.vue, echarts.js, LineChart.vue}。
+
+================================================================================
+五、refs 基线与待重指清单（3a 改行号后必用）
+================================================================================
+
+  _work/3a/refs-before.txt   —— 在**干净树**上取的基线：扫 550 文件 / **5183 条**引用
+                               （与阶段 2b 报告里的 after 数一致 ⇒ 基线可信）
+  _work/3a/repoint-list.txt  —— 改动前，指向「3a 会改的那 4 个文件」的 token 全清单（25 条）：
+      活文档要重指（21 条）：
+        docs/agent/context-packs/c3-block-D-hardening.md  :17 :45 :87 :88 :150 :155 :157 :158
+                                                          :165 :168 :205 :362 :446 :447 :448
+                                                          :449 :450 :451
+        docs/agent/progress.md:2398            → AttackController.java:100-102
+        docs/agent/slot-registry.md:5080 :5091 → AttackController.java:100-102
+      史料/证据，按「快照不追」不动（4 条）：
+        docs/agent/context-packs/块7-commit10-阶段一核实.txt:216 :252
+        docs/agent/evidence/c3-block7/d2-keys-alignment.txt:4 :7
+
+  做法：改完再跑 `bash scripts/refs-scan.sh _work/3a/refs-after.txt`，
+        比「(引用者文件, token) 组合」，**丢失组合 = 0** 才算零漂移；
+        重指记录的旧值一律写「原 N 行」、**不写 `文件:N`**（否则旧 token 会留在集合里）。
+
+================================================================================
+六、纪律提醒（照旧，勿松）
+================================================================================
+
+  · 不 push / 不 merge / 不开 PR；每笔报 commit hash + 一句话 + 文件数 + 行数 + 测试结果
+  · 手验压到阶段 4 之后一轮
+  · 临时产物写 _work/、探针→scripts/probes/、证据→docs/agent/evidence/<笔名>/
+  · 提交：commit -F 传文件（不用 heredoc）、add 具体路径（不用 -A）、提交后抽查重复段
+  · dev / a3 两档 app.auth.enabled=false ⇒ 手验绿 ≠ 默认 profile 绿（手验前提醒用户）
+  · 后端 548 passed / 0 failed / 0 errors / 26 skipped 是当前基线（阶段 2b 时的读数）
+  · 重启用 dev profile（块 7 不用 a3）；起后端前按端口找 PID 强杀残留 java
+
+================================================================================
+七、本会话未完成 / 被中断的事（如实登记）
+================================================================================
+
+  · 3a.1 只写了新文件 AttackSwitchConfig.java（已删、回退），**未改** AttackEngine /
+    DrillRecordService / AttackController，未跑测试。
+  · 一次「攻击开关调用面测绘」的子代理被中断，**没有拿到结果** ⇒ 前端 AttackConsole.vue
+    的开关维护方式、api/observe.js 的封装函数名、application.properties 的开关注释段、
+    api-contract.md 的 /attack/run 入参节 —— 中午开工时**要重新测一遍**（这几处是 3a.1
+    必须同步的连锁面，别漏）。
+  · 无任何未提交改动、无半成品文件。
+
+================================================================================
+八、中午开工前必答的三条
+================================================================================
+
+  ① 「本会话已落 5 笔」看过了吗？（不是 2 笔）
+  ② 3a.6 的乙案语义 = 「读 + 立即 POST」，
+     不是「点开始时同步覆盖」—— 对吗？
+  ③ 三页重做要同时满足「结构重做」+「高级感提升」
+     不是「结构对了就行」—— 对吗？
+
+  三条都确认后 → 开工 3a（先做后端乙案）。
+
+================================================================================

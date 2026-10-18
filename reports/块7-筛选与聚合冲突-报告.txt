@@ -1,0 +1,110 @@
+块 7 · 日志页「过滤条件 × 聚合」导致列表空 —— 复现与修复报告
+================================================================
+日期：2026-10-17
+分支：feat/c3-admin-block7
+范围：Mall-management-web/mall-management-system/src/views/admin/observe/EventLog.vue
+      探针 scripts/probes/c3b7-filter-agg-empty.mjs
+      证据 docs/agent/evidence/c3-block7/3a4g-filter-agg.txt
+           docs/agent/evidence/c3-block7/3a4g-filter-agg-before.png
+           docs/agent/evidence/c3-block7/3a4g-filter-agg-after.png
+
+
+一、问题复现（真后端，不 mock）
+------------------------------
+按您给的路径：勾选「同类合并（聚合）」→ 点顶部「≥ WARN」。
+
+修复前实测（截图 3a4g-filter-agg-before.png）：
+  左下角统计：警告 218（原始台账 RAW 8185 条：info 7651 / protect 316 / warn 218）
+  中间列表  ：0 条，显示「当前筛选下一条也没有。点 ② 的「全部打开」还原。」
+
+造数方式（全部走 8088 真服务）：
+  1) seckill 200 QPS × 12s 打空库存，产生大量 WARN「库存不足（未扣，防超卖命中）」；
+  2) 临时关掉入站限流，cacheCold 600 QPS × 6s 灌 INFO，把 WARN 挤出展示窗口（灌完立即还原限流）；
+  3) 冻结视图 → 勾聚合 → 点 ≥ WARN。
+
+
+二、根因（三处，缺一不可）
+--------------------------
+1. 统计与列表不同源（主因）
+   统计一直读 RAW（原始台账，上限 8192）；列表的筛选链却从展示窗口 W.events
+   （上限 200）出发。WARN 被后来的 INFO 挤出 200 条窗口后，列表按 ≥WARN 过滤
+   必然是 0 条 —— 与左下角的数字无关。您要求的顺序（先筛原始数据 → 再聚合 →
+   再交给虚拟滚动）此前没有真正落在这条链上。
+
+2. computed 引用不更新（改造中暴露的隐藏原因）
+   RAW 是原地追加的普通数组。若筛选函数每次返回同一个数组引用，Vue 的 computed
+   会认为「值没变」，不再通知下游，列表永远停留在首帧的空数组。
+   现在筛选每次都返回新数组。
+
+3. 虚拟滚动游标残留（您指出的索引问题）
+   筛选后行数骤减，vStart/vEnd 仍是按旧行数算的值，slice 切出空窗口。
+   实测把游标推到 9999 时旧实现确实得到 0 行。
+
+
+三、修复内容
+------------
+1. 数据顺序改为：
+   RAW（原始台账）→ 时间范围/类/严重度/≥WARN/对象/搜索（单趟筛选）
+   → 同类聚合（开关开启时）→ 虚拟滚动窗口化。
+   聚合关闭时，从筛完的 RAW 里取最新 200 条逐条显示（数据侧上限）；
+   聚合开启时一行代表 N 条、不截断，列表可覆盖整本 RAW —— 与统计同源同量。
+2. 筛选条件（类 / 严重度 / ≥WARN / 对象 / 搜索 / 时间范围 / 聚合开关）任一变化：
+   同步把 vStart 归零、vEnd 置 40；下一帧把 scrollTop 拉回 0 并重算窗口。
+   程序性 scrollTop=0 引发的滚动事件用一次性标记吞掉，避免被误判成
+   「用户上滚」而冻结视图（那会让列表停止并入新事件）。
+3. 越界兜底：vRows 与窗口计算在切取前把游标夹到 [0, n-1]，
+   即便某一帧尚未重算，非空列表也至少切得到一行，不会空白。
+4. 空状态判据改为「筛选后的原始数据是否为空」：
+   · 本会话有原始事件、筛选后 0 条 ⇒「当前筛选下一条也没有」；
+   · 真一条原始事件都没有 ⇒「本会话还没收到任何事件」。
+5. 顺带：聚合不再为每个成员维护 seq 数组（聚合行不进展示窗口，该数组已无消费方），
+   每拍省掉几千次无用 push。
+
+
+四、修复后验收（同一探针，exit 0，9/9 判据通过）
+------------------------------------------------
+点「≥ WARN」后（截图 3a4g-filter-agg-after.png）：
+  rawWindow : 8192 条（info 7383 / protect 399 / warn 410）
+  W.events  : 200 条，全部 info（前提成立：WARN 确实不在展示窗口里）
+  filtered  : 809 条（warn 410 + protect 399），info 0
+  列表      : 5 条聚合行，可见：
+                PROTECT 防护入站限流拦下 × 3
+                PROTECT 敏感词打码 × 123
+                PROTECT 敏感词拒收 × 122
+                PROTECT 身份拒绝 × 151
+                WARN   库存不足（未扣，防超卖命中）× 410
+  空状态    : 不显示
+
+虚拟滚动回归：
+  强制 virtualOn、vStart=9999/vEnd=10039（远越界）
+    ⇒ 仍渲染 1 行（夹取生效，不空白）
+  再把 ≥WARN 改回「全部」
+    ⇒ vStart=0、vEnd=22、scrollTop=0、DOM 22 行、空状态不显示
+
+九项判据全部 ok：
+  warn-exists-in-raw / warn-absent-from-display-window / filter-keeps-raw-warn /
+  stream-rows-not-empty / dom-rows-rendered / empty-state-hidden /
+  virtual-cursor-in-range / stale-cursor-clamped-not-blank / cursor-reset-on-filter-change
+
+
+五、性能
+--------
+800 QPS × 12s（bannedUser / sensitiveWord 各半）实时收帧：
+  RAW 约 5950 条时，一次重算中位数：
+    仅统计(rawWindow) 1.8 ms；仅筛选 3.4 ms；筛选+聚合+streamRows 全链 6.5 ms（max 9.6 ms）
+  同场 rAF：766 帧 / 13.43 s ≈ 57 fps；Long Task(>50ms) 11 次、最大 77 ms。
+  全链比改造前多约 3–4 ms/帧（改造前列表只扫 200 条），换来列表与统计同源。
+  大帧在此前 800 QPS 证据里同样存在，本轮未归因于本改动，如实记录。
+  若后续对 800 QPS 帧率有更严判据，可再做重算节流或增量聚合。
+
+
+六、质量门
+----------
+- 前端 ESLint（EventLog.vue）：exit 0
+- 探针 c3b7-filter-agg-empty.mjs：exit 0
+- 证据与截图 mtime 均晚于最后一次代码编辑
+- 未改动 api/demo-stream.js 接口，「模拟日常」入口保留
+- 未 push、未开 PR
+
+注意：本轮手动验收跑在 dev profile（app.auth.enabled=false）。
+默认 profile 身份鉴权是开的，手验绿 ≠ 默认 profile 绿，合并前请按默认 profile 再走一遍。

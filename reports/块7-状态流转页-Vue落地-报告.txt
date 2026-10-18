@@ -1,0 +1,199 @@
+块7 · 状态流转页（OrderFlow）Vue 高保真落地报告
+============================================================
+日期：2026-10-17
+分支：feat/c3-admin-block7
+页面：admin.html#/admin/observe/timeline
+对应草图：乙案（LAYOUT 非对称双栏强化版）
+
+一、交付物（截图与证据）
+------------------------------------------------------------
+最终整页高保真截图（1440 × 2764）：
+  docs/agent/evidence/block7-orderflow-vue-full.png
+
+首屏 1440 × 900 截图：
+  docs/agent/evidence/block7-orderflow-vue-viewport-1440x900.png
+
+交互截图：
+  docs/agent/evidence/block7-orderflow-vue-interact-filter-waitship.png
+  docs/agent/evidence/block7-orderflow-vue-interact-drawer-order.png
+  docs/agent/evidence/block7-orderflow-vue-interact-drawer-timeout.png
+  docs/agent/evidence/block7-orderflow-vue-demo-mode.png
+
+运行数据与交互记录：
+  docs/agent/evidence/block7-orderflow-vue-insight.txt
+  docs/agent/evidence/block7-orderflow-vue-interactions.txt
+  docs/agent/evidence/block7-orderflow-vue-demo-mode.txt
+
+二、按指令逐条落地情况
+------------------------------------------------------------
+1. 过去 24 小时状态流转趋势图
+   - 位置：KPI 条下方、左侧主视觉上方，占满整行。
+   - 三条面积/折线：待付款、待发货、待收货，横轴 25 个整点桶。
+   - 每条线末端标出最新数值（截图中为 89 / 24），配面积渐变与图例。
+   - 数据来自新增低频接口 /admin/observe/orders/insight，每 15 秒刷新一次；
+     不塞进 1 秒 SSE 帧，避免每次广播做多轮聚合扫描。
+   - 时区口径：数据库时间为 UTC，桶标签与 from/to 统一转 Asia/Shanghai 展示。
+
+2. 全局常驻流转明细表（主从联动）
+   - 位置：页面最底部，独占整行，把底部填满。
+   - 列：订单号、商品名、当前状态、已停留时间、超时预警、状态起点、金额、操作。
+   - 默认每页 20 条，带分页器；全量 415 单参与筛选。
+   - 筛选片：全部 415 / 待付款 0 / 待发货 89 / 待收货 24 / 已完成 108 / 已取消 194。
+   - 主从联动：点左侧阶梯任一状态节点，表格自动过滤到该状态；
+     点表格行或「链路」打开右侧链路抽屉。
+   - 另有「仅超时」开关，可与状态筛选叠加。
+   - 数据源：insight 接口最多 1000 行做种子，SSE 帧持续增量更新。
+
+3. 图表细节强化
+   a) 耗时分布直方图
+      - 三组：付款耗时（CreateTime→PaidAt）、发货耗时（PaidAt→ShippedAt）、
+        收货耗时（ShippedAt→ReceivedAt）。
+      - 竖向灰阶柱；清晰的 X 轴时间桶、Y 轴单数、刻度线与网格线。
+      - 虚线平均耗时辅助线落在「精确均耗所在桶」，标签写明精确均值。
+      - 桶边界是结构，不是颜色分组；柱身仅用灰阶深浅区分均值桶。
+   b) 阶梯进度条与 QPS
+      - 每条阶梯加粗并带底色轨道，按积压量成比例填充。
+      - 每个节点显示流入 / 流出 QPS（前端用 SSE moves 的 5 秒滚动窗口计算）。
+      - 节点旁保留超时预警徽标（待发货 >24h、待收货 >48h）。
+   c) 流转健康度仪表盘
+      - 右上角 ECharts 仪表盘，无指针，分数 + 等级。
+      - 综合超时率、积压占比、平均停留时长三项计算，并把三项输入原样展示。
+   d) 积压超时预警卡
+      - 待发货、待收货各一张，按停留时长分桶（0–1 天、1–3 天、…）。
+      - 卡内列出 Top 3 最慢订单，可一键打开链路抽屉。
+
+4. 实时订单流
+   - SSE 实时流保留轨道式呈现：流入 / 流出计数、每拍捕获条数、逐条事件。
+   - 「数据源」切换保留：正常（后端真流） / 模拟日常（假数据，不入库）。
+
+三、实测结果（2026-10-17 20:26）
+------------------------------------------------------------
+接口 /admin/observe/orders/insight：HTTP 200，188,279 字节。
+counts：cancelled 194 / completed 108 / total 415 / waitPay 0 /
+        waitReceive 24 / waitShip 89。
+trend：10-16 20:00 → 10-17 20:00，25 点，anchored=False。
+durations：付款 215 样本均值 28.2 分；发货 126 样本均值 1133.3 分；
+           收货 102 样本均值 3634.8 分。
+health：score 11，grade 危险，timeoutRate 100.0%（113/113），
+        backlogShare 27.2%，avgDwellHours 376.0。
+交互回归：
+  - 点「待发货」→ 表格提示「待发货 · 89 单」，可见行全部为待发货。
+  - 点表格行 → 抽屉打开，时间线展示建单、付款等节点。
+  - 仅超时 → 可见 20 行全部带超时徽标。
+  - 警告卡 → 抽屉按停留倒序，自动选中并展示最慢单的时间线。
+  - 翻页 → 首行变化且筛选条件保持。
+  - 模拟日常 → 流入 5.8/s、流出 3.8/s，34 条演示事件；切回正常恢复真流。
+
+四、工程口径与说明（如实标注）
+------------------------------------------------------------
+1. 没有引入第三方 UI 库。
+   仓库现有前端零 UI 依赖，沿用 KpiCard、Pager、DonutChart、LineChart
+   与自研 CSS，并新增 ECharts 的 HealthGauge、HistogramChart 两个图表组件。
+   这样不破坏现有构建与主题体系。
+2. 趋势线目前是平的（89 / 24 恒定）。
+   原因不是图表没接数据，而是过去 24 小时没有压测流量，库里处于待发货、
+   待收货的订单在该窗口内没有新增或流转。跑压测时由同一套时间戳聚合得到
+   的曲线会随压测升降。
+3. 健康度 11 分（危险）是真实结果。
+   当前活跃积压 113 单全部超过各自阈值（待发货 24h、待收货 48h），
+   超时率 100%，因此分数被压到接近下限。
+4. 6 条历史遗留订单有状态标志但时间戳为空，后端用「当前状态单调回退」
+   推定状态起点，避免被误算成待付款。
+5. 演示模式为纯前端假数据，不入库；放完 500 条后停止，不是断线。
+   演示模式下总数标签显示「本场演示订单（假数据）」，不冒充库中真实总量。
+6. 质量门禁：
+   npm run lint    → No lint errors found
+   npm run build   → Build complete
+   ./mvnw -q -DskipTests compile → exit 0
+
+五、动效重构 + 抽屉/流轨修复（2026-10-17 21:05 复验）
+------------------------------------------------------------
+1. SSE 实时流轨动效
+   - 每收到一条 move，从 from 节点向 to 节点生成一颗发光粒子
+     （.a-of-particle，按目标状态取色，1.4 秒后回收；主链跨步也画）。
+   - 轨道背景由静态点阵改为持续流动的虚线路线。
+   - 四个节点带雷达式呼吸环，落点节点额外脉冲。
+   - cancel 支线不画主链粒子（轨道只表示主链），但节点/边高亮与计数仍保留。
+   - 实测动画：46/46 帧有粒子，单帧最多 10 颗。
+
+2. 24 小时趋势升级为实时尾窗
+   - 折线加 areaStyle 纵向渐变（顶部深、底部接近底色但不消失）与 lineStyle 辉光。
+   - 每 3 秒追加一个实时点，最多保留 10 个；X 轴右端持续推进，
+     历史桶不重算。ECharts 开 animationDurationUpdate=650ms，线会滑到新位置。
+   - 三条线末端标签按 top / bottom / right 分侧，避免相近数值叠在一起。
+   - 实测尾窗从 4 个点增长到 7 个点，右端确实向右生长。
+
+3. 左侧主视觉反馈
+   - 阶梯宽度走 CSS transition；计数变化时数字弹一下，并在旁边飘 +N / -N。
+   - 环形图开 animationDurationUpdate=650ms，扇区滑动到新角度。
+   - 实测录屏中的浮字：+4、+3、+1、-2、-1、+6、+2；
+     五态数字从 19/12/7/43/8 变为 31/15/9/61/13。
+
+4. 视觉强化
+   - 页面底图加淡网格（雷达监控屏感），趋势卡有扫描线。
+   - 直方图柱子加 shadowBlur 灰色辉光；趋势线/面积加同色辉光。
+   - 面板改为极细边界 + 轻微内发光，不再是纯深色块。
+   - prefers-reduced-motion 下关闭新增动画。
+
+5. 抽屉状态显示修复（P0）
+   - 时间轴不再只渲染「有时间的行」，而是完整四步主链：
+     创建订单 → 付款待发货 → 发货待收货 → 收货已完成。
+   - 已走过节点亮起（按状态取色）、当前节点脉冲并标「当前状态」、
+     未来节点灰色并标「未到达」；取消单只展开展开实际走过的步骤 + 取消节点。
+   - 以订单行 state / 生命周期时间戳为准，缺失时用本会话 SSE moves 兜底，
+     不存在「所有订单硬编码待付款」。
+   - 实测 ZKTO71032739（待收货）：前 3 步 is-done（第 3 步 is-current），
+     第 4 步 is-future 灰点；头部显示「当前选中 / #ZKTO71032739 / 待收货」。
+
+6. 抽屉搜索与选中高亮（P0）
+   - 左列顶部新增搜索框，按订单号或商品名模糊匹配，大小写不敏感。
+   - 搜索打在「当前筛选下的全部订单」上，再按停留倒序取前 50；
+     不是先截前 30 再搜（否则排名靠后的单永远搜不到）。
+   - 选中行深蓝底 + 3px 亮青左边框；从表格/预警卡打开时自动把左列滚到选中行。
+   - 右列头部固定显示「当前选中 + 单号 + 状态」，左点右换。
+   - 实测搜索「潮汕手」：匹配 4 单、可见 4 行、全部命中，选中行仍在可视区并高亮。
+
+7. SSE 流轨空白修复（P1）
+   - 流轨卡改为 flex 纵向布局；列表有数据时内部滚动，
+     底部待命条撑满剩余高度；无数据时给整卡空态（雷达环 + 文案），不再留大片空白。
+   - 实测：空态整卡 594px、空态区 381px；实时态整卡 595px、列表 14 行 + 10 颗粒子。
+   - 切换数据源时清空上一场事件账（recentMoves / movesById / QPS），
+     切回「后端真流」后流轨立即回到 0 行空态，假数据不会残留。
+
+8. 本轮新增证据
+   - docs/agent/evidence/block7-orderflow-vue-motion.gif（46 帧，约 9.2 秒）
+   - docs/agent/evidence/block7-orderflow-vue-drawer-timeline.png
+   - docs/agent/evidence/block7-orderflow-vue-drawer-search.png
+   - docs/agent/evidence/block7-orderflow-vue-stream-empty.png
+   - docs/agent/evidence/block7-orderflow-vue-stream-live.png
+   - docs/agent/evidence/block7-orderflow-vue-trend-live.png
+   - docs/agent/evidence/block7-orderflow-vue-motion-delta.png
+   - docs/agent/evidence/block7-orderflow-vue-motion-particles.png
+   - docs/agent/evidence/block7-orderflow-vue-motion.txt
+
+9. 如实说明
+   - 模拟日常是纯前端假流，分析面的历史桶仍来自库内聚合。切到演示后，
+     真实历史末点（待发货约 89）与演示计数（从个位数增长）之间会出现一个台阶；
+     这是数据源切换，不是渲染错误。动效证据主要看尾窗推进、粒子与数字浮动。
+   - GIF 能证明三类动效在演示开始后连续出现，不证明每一帧都稳定 60fps。
+   - 时间轴按建单 → 当前的时间顺序展示，所以第一行仍是「创建订单（待付款）」，
+     但它已明确标为「已走过」；当前状态在第三行高亮并写「当前状态」。
+
+六、涉及文件
+------------------------------------------------------------
+后端：
+  observe/service/OrderInsightService.java（新增）
+  observe/service/OrderStreamService.java
+  observe/controller/OrderStreamController.java
+  order/dao/OrderDao.java
+前端：
+  views/admin/observe/OrderFlow.vue
+  components/charts/HistogramChart.vue（新增；本轮加柱体辉光）
+  components/charts/HealthGauge.vue（新增）
+  components/charts/LineChart.vue（本轮加面积渐变、辉光、更新动画）
+  components/charts/DonutChart.vue（本轮加扇区更新动画）
+  components/charts/echarts.js
+  api/endpoints.js
+  api/observe.js
+
+（本报告按用户要求落桌面；工作产物在 _work/，证据在 docs/agent/evidence/。）

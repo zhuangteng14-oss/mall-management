@@ -1,0 +1,446 @@
+块 7 · 3a.3 日志页 · 消息内容扩充 + 色系 + 接口中文名 —— **先报清单与草案**（未落码）
+日期 2026-10-16 · 分支 feat/c3-admin-block7 · 本轮改动尚未开始，等你审
+（你要求先报四件：① 后端字段清单 ② 每类拼接模板 ③ 中文名映射表 ④ 色系方案）
+
+════════════════════════════════════════════════════════════════════
+零、先说三件「我核过、和你想的不一样」的事（不然下面的模板会写错）
+════════════════════════════════════════════════════════════════════
+
+1. **「谁」在真流里几乎没有**。九类事件里只有两类带主体：审计（`actor=`）和身份
+   （`subject=`）。库存 / 订单 / 锁 / 缓存 / 通知 / 敏感词 / 防护 **七类没有**任何人。
+   后端确实拿得到（`AuthSession` 的 `identity.userId()` 在拦截器上就有），但**没往事件里写**，
+   MDC 里也只塞了 `traceId` 和 `batchId` 两个键。⇒ 想显示「用户 u-1001」**必须动后端**。
+
+2. **「耗时」只有请求级的，没有事件级的**。链路记录（`RequestTrace`）里有 `ms`（= endMs − startMs），
+   那是**整趟请求**的耗时；事件记录里**没有任何耗时字段**。
+   顺带一个实证：锁的**等待时长后端其实算好了**（`lockMetrics.acquire(..., elapsed(startNanos))`），
+   但它**只进了计时器，没进事件记录** —— `MallLockEvent` 那个 record 里就没有这个字段。
+
+3. **「剩余 99」这类余量，真数据里没有**。`StockEvent` 只有 `skuCode / qty / result`，
+   没有「扣完还剩多少」。演示源里那句「剩余 99」是 `demo-stream.js` 自己编的日常样例，
+   **真流拼不出来**。
+
+⇒ 所以下面的模板里，凡是你要求但今天拿不到的字段，我一律**留空位 + 标出来**，不编。
+
+════════════════════════════════════════════════════════════════════
+一、后端字段清单（哪些可用 / 哪些缺）
+════════════════════════════════════════════════════════════════════
+
+【A. 帧里到底有什么 —— 两个数组，字段固定】
+
+事件行（`events[]`，11 个字段，逐个都有出处）：
+  seq · ts · kind · severity · title · detail · key · objectType · objectId · traceId · batchId
+  （后端 `EventStreamService` 逐行 put；`ObservedEvent` record 是这 11 个的源头）
+
+链路行（`traces[]`，8 个字段）：
+  seq · traceId · method · path · status · startMs · endMs · ms
+  （`TraceLog.RequestTrace`；`ms` 已是算好的差值）
+
+⚠️ 两条边界（都会让字段变 null / 缺失，必须知道）：
+  · `traceId` 在**非请求线程**上为 null（定时任务、SSE 流线程自己产生的事件）⇒ 那类事件
+    **没有请求可挂**，也就没有「请求中文名」和「请求耗时」。
+  · 链路环只有 **256 槽**（`TraceLog.CAPACITY = 256`，覆盖式），而事件窗口是 1000 条、
+    ③ 只画最近 200 行 ⇒ 老事件可能**已经找不到自己的链路行**。
+    另有 `/stream` 结尾的路径**刻意不记**（SSE 长连接），所以三个流的请求永远不会出现在 traces 里。
+
+【B. 你要的字段 × 九类 —— 可用性矩阵】
+
+图例：✅ 现成可用　△ 能拿到但有前提　❌ 现在没有（要么不显示，要么动后端）
+
+字段            库存  订单  锁   敏感词 审计  通知  缓存  身份  防护
+谁              ❌    ❌    ❌   ❌    ✅    ❌    ❌    ✅    ❌
+什么请求        △    △    △    △    △    △    △    △    △
+动作            ✅    ✅    ✅   ✅    ✅    ✅    ✅    ✅    ✅
+对象            ✅    ✅    ✅   ✅    ✅    ✅    ✅    ✅    ✅
+量              ✅    ❌    ❌   ❌    ❌    ❌    ❌    ❌    ❌
+结果            ✅    ✅    ✅   ✅    ✅    ✅    ✅    ✅    ✅
+业务上下文      ✅    ✅    ✅   ✅    ✅    ✅    ✅    △    ✅
+trace           ✅    ✅    ✅   ✅    ✅    ✅    ✅    ✅    ✅
+耗时（事件级）  ❌    ❌    ❌   ❌    ❌    ❌    ❌    ❌    ❌
+耗时（请求级）  △    △    △    △    △    △    △    △    △
+
+逐格的口径与出处（右列就是我实际看到的东西，不是推测）：
+
+· **谁** ✅ 的两个：审计 = `actor=`（写审计时传的是 `actor.userId()`）；
+  身份 = `subject=`（`IdentityGuard` 记的是被校验的 id / 用户名）。其余七类**到此为止**。
+· **什么请求** △：事件自己不记路径。能拿到是因为 `event.traceId` → `traces[]` 里有 method+path。
+  前提两条：那趟请求**已经结束**（链路行是结束时才写的）+ 链路行**还没被挤出 256 槽**。
+  实测口径：请求进行中的那几百毫秒里，新事件是「还没有请求中文名」的状态。
+· **动作** ✅：`title` 就是后端给的人话（「库存扣减」/「取锁超时（fail-open 直行）」/
+  「状态流转 CREATED → PAID」…），`kind`+`detail` 里的 `action=` / `kind=` 是英文原名。
+· **对象** ✅：九类的 `objectType` / `objectId` 取值逐类不同 ——
+  缓存=缓存键、锁=业务键（订单号）、订单=订单号、库存=SKU、审计=对象类型+对象 id、
+  通知=收件人、敏感词=**命中的词**、身份=**被校验的请求路径**、防护=**哪道闸**（rateLimit…）。
+  ⚠️ 同一格在九类里**不是同一种东西** —— 所以中文说明词必须逐类给（前端 `OBJECT_FIELD_LABEL` 已有这张表）。
+· **量** ✅ 只有库存：`detail` 里 `qty=`。
+· **结果** ✅：`detail` 里 `result=`（hit/miss/ok/insufficient/timeout/blocked…）+ 帧里的 `severity`。
+  ⚠️ **要解析 `detail`** —— 见 §五 要你裁的第 3 件。
+· **业务上下文** ✅：订单 `order#`（订单号）、通知 `event=`（事件码）+ `to=`（收件人类型）、
+  敏感词 `scene=评论` + `hit=命中个数/total=文本长度`、审计 `targetType`+`targetId`、
+  防护 `scope=`、缓存 `cache=`（缓存区名）、锁 `lock=`（锁名）。
+  身份的「业务上下文」只有请求路径，△ 是因为**路径已经占了对象那一格**。
+· **trace** ✅：`traceId` 原值（前 8 位已够用，现有 UI 就是截 8 位）。
+· **耗时** ❌ 事件级：**九个 record 里一个耗时字段都没有**。△ 请求级：`traces[].ms`。
+
+【C. 本节结论 —— 要挂 TD 的三处（编号是提议，等你点头再落 `tech-debt.md`）】
+
+TD-80（提议）**事件帧没有「主体」**：七类事件的记录里没有 actor / userId 字段。
+  补点已经存在：拦截器上有 `AuthSession.identity.userId()`；MDC 里现在只有 traceId/batchId 两个键。
+  要落的话是「MDC 多一个键 + 九个 record + 台账列 + 帧」四处同改。
+TD-81（提议）**没有事件级耗时**，且**锁等待时长已经算好却没进记录**
+  （`MallLockEvent` 无此字段，值只进了计时器）—— 前者要新埋点，后者只是**把已算好的值带出来**。
+TD-82（提议）**`detail` 是自由文本**（`kind=deduct sku=… qty=… result=… src=stock#128`），
+  前端要拼自然流就得正则解析它。替代方案是后端把 detail 里的键抽成结构化字段。
+
+════════════════════════════════════════════════════════════════════
+二、每类拼接模板（草案）
+════════════════════════════════════════════════════════════════════
+
+【句子语法】`{动作短语(title)} {自然流从句}（{业务上下文} · trace {号} · 请求耗时 {ms}ms）`
+  · 打头用后端 `title`（它本来就是人话），**不重写一遍动作**；
+  · 中段用自然流从句（「在下单请求中扣减 …」），**不用 · 分隔的 key-value**；
+  · 尾巴括号里是**键亮值灰**的三件套，可点的加下划线（见 §四）；
+  · 超行宽自然折行（2 行上限、续行 2-3 字符缩进）—— 上一轮已落地，本轮不动。
+
+【档位怎么体现】你定的档是**每类一个下限**，所以模板按类分派即可：
+  档5（写操作 / 有业务后果）：库存 · 订单（状态流转 + 订单创建）· 锁 · 敏感词
+  档4（只读但涉业务）：审计 · 通知
+  档3（系统级 / 高频无害）：缓存 · 身份 · 防护
+  ⚠️ 同一类里的子事件字段本来就不同（比如缓存有 transition 这种「可用性翻转」），
+     模板按**子类型**再分一次，缺的槽位**跳过**，不写「-」也不写占位符。
+
+【逐类模板】`{❌ = 今天拿不到，本轮不写}`　`{△ = 有前提}`
+
+① 库存（档5，`stock` · kind=deduct/release）
+   `库存扣减 {谁❌} 在下单请求中△扣减 {SKU} 库存 {qty} 件 {剩余❌}（trace {t} · 请求耗时 {ms}ms）`
+   不扣成时：`库存不足（未扣，防超卖命中） {SKU} 请求 {qty} 件（trace …）` ← title 自己已经把话说完了
+   落成示例（今天真能拼出来的最长形态）：
+     `库存扣减 在下单请求中扣减 SKU_GD-101-9552 库存 1 件（trace 7f3a · 请求耗时 8ms）`
+
+② 订单 · 状态流转（档5，`order` · kind=transition）
+   `状态流转 {前态中文} → {后态中文} 订单 {订单号}（动作 {动作中文} · trace {t} · 请求耗时 {ms}ms）`
+   ⚠️ 前后态有现成的中文表（`labels/order-labels.js` 的 `ORDER_STATE_LABEL`，
+      8 个枚举名 + 非法态都在），动作表 `ORDER_ACTION_LABEL`（create/pay/deliver/receive）。
+      **不用现编**。非法态那两条（出生闸拦下 / 观测到非法状态）走同一模板，前态就是「非法态·…」。
+   落成示例：
+     `状态流转 待付款 → 已付款（待发货） 订单 RZN123（动作 付款 · trace 7f3a · 请求耗时 12ms）`
+
+③ 订单 · 订单创建（档5，`order` · action=create）
+   `订单创建 订单 {订单号} 待付款（下单请求 · trace {t} · 请求耗时 {ms}ms）`
+   ⚠️ **商品与金额今天拿不到**（事件里没有这两个字段，订单号之后的后端没往事件里写）
+      ⇒ 你表里「商品 + 金额」两项**只能挂 TD 或砍掉**。
+
+④ 锁（档5，`lock` · kind=acquire/hold）
+   `取锁成功 {锁名中文} 锁 业务键 {订单号} {等待时长❌}（在下单请求中△ · trace {t} · 请求耗时 {ms}ms）`
+   超时那条：`取锁超时（fail-open 直行） …`（title 已说明后果）
+   ⚠️ 锁名有 5 个有界取值：order-add / order-pay / order-receive / order-delivery / friend-add
+      ⇒ 建议登记成中文（下单锁 / 付款锁 / 收货锁 / 发货锁 / 加好友锁），与接口中文名同一张表。
+   ⚠️ 锁事件的 `objectId` **就是业务键（订单号）**，不是锁名 ⇒ 对象格显示「订单号」，
+      锁名要从 `detail` 的 `lock=` 里取。
+
+⑤ 敏感词（档5，`sensitive`）
+   `敏感词拒收 评论场景命中 {命中个数} 个词（词：{words} · trace {t} · 请求耗时 {ms}ms）`
+   打码那条：`敏感词打码 …`
+   ⚠️ `hit/total` 里的 **total 是文本长度、不是词数**（后端传的是 `text.length()`）
+      ⇒ 模板写「命中 N 个词 / 文本 M 字」，**不能写「N/M 个词」**（那是误读）。
+   ⚠️ scene 今天只有一个值 `评论`（后端字面量已经是中文）。
+
+⑥ 审计（档4，`audit`）
+   `审计写入 {对象类型中文} #{对象 id}（{actor} · 动作 {action} · trace {t} · 请求耗时 {ms}ms）`
+   ⚠️ `action` 有 **45 条**现成中文表（`labels/audit-labels.js` 的 `AUDIT_ACTION_LABEL`）
+      ⇒ 「动作」这一格也现成，不用编。
+
+⑦ 通知（档4，`notify`）
+   `通知发送 收件人 {toType} {收件人 id}（事件「{event 中文}」· trace {t} · 请求耗时 {ms}ms）`
+   ⚠️ 事件码有现成中文表（`src/config/notify-events.js` 的 `EVENT_LABELS`，覆盖后端
+      `NotificationEvents` 的常量）；`toType` 目前只有 user / merchant / admin 三个值，
+      建议一并登记中文（用户 / 商家 / 管理端）。
+   失败那条：`通知发送失败 … reason=…`
+
+⑧ 缓存（档3，`cache`）
+   `缓存命中（L1） {缓存区中文} {缓存键}（在下单请求中△ · trace {t} · 请求耗时 {ms}ms）`
+   ⚠️ 缓存区名今天有 **8 个**有界取值（goodstype / goodsPrice / goodsHome / goodsCodes /
+      goodsByMerchant / userPublic / friendList / friendRequests，全部来自各 `@Cacheable(cacheNames=…)`）
+      ⇒ 建议登记中文（商品类目缓存 / 商品价格缓存 / 首页商品缓存 / 商品编码缓存 /
+      商家商品缓存 / 用户公开资料缓存 / 好友列表缓存 / 好友申请缓存）。
+      ⚠️ 缓存是档3，**高频**（实测占 ③ 窗口 76%）⇒ 串长必须压得住：缓存键本身就很长
+      （`goodsHome::商家::商品`），**建议这一类的尾巴括号只留 trace、不留请求耗时**或整段省略，
+      否则整屏全是折行。**这一条要你拍**（见 §五 第 5 件）。
+
+⑨ 身份（档3，`identity`）
+   `身份放行 校验 {请求路径}（{subject} · trace {t} · 请求耗时 {ms}ms）`
+   ⚠️ 对象的那个值**本身就是请求路径**（后端把 path 当 objectId 用）⇒ 这一类的对象格写中文名会比
+      写原值更可读（「校验 改商品」而不是「校验 /goods/goodsUp」）。**这一条也要你拍。**
+
+⑩ 防护（档3，`protection`）
+   `入站限流拦下 闸 {限流} 范围 {scope}（trace {t} · 请求耗时 {ms}ms）`
+   ⚠️ 防护没有业务键（对象格装的是「哪道闸」）；「谁被拦了」要看同拍的 429/503。
+   ⚠️ 熔断那条可能**没有任何业务请求在跑**（半开由 Resilience4j 自己的线程推）⇒ 那时
+      traceId 是 null，模板要**整段跳过括号**，不能留一个空括号。
+
+【演示源（「模拟日常」）会短一截 —— 这是数据源本身的差别，不是渲染退化】
+  `demo-stream.js` 造的帧里 `detail` 只有「{类} · 模拟日常」，`traces` 恒为 `[]`（刻意不造链路）
+  ⇒ 演示模式下：请求中文名、请求耗时、档5 的上下文**都没有**，句子退化成
+  `库存扣减 库存扣减 SKU_xxx` 这种「只剩 title + 对象」的短句。
+  **不补假数据**（那会让演示模式看起来比真流还真）。
+
+════════════════════════════════════════════════════════════════════
+三、接口中文名映射表（完整草案 · 按域分组）
+════════════════════════════════════════════════════════════════════
+
+【取值来源】全部**逐条核对后端路由注解 + 紧邻注释**得到（不是照英文名猜的），共
+  **147 条路由注解**，落在 **146 个不同路径**上（`/admin/observe/attack/config` 的 GET 与 POST
+  共用一条路径，故路径比注解少一个）。
+  非 POST 的只有三处：`/health/db`（GET）· `/admin/observe/attack/config`（POST 写 / GET 读）·
+  `/goods/goodstype`（**一个注解同时收 GET 与 POST**：查类型 / 增改类型）。
+⚠️ 这个数我中途改过一次，过程照实说：第一遍拿正则从 `@PostMapping("…")` 里抠路径，抠出 141 条；
+  第二遍按「行首的 `@XxxMapping`」重数，得 146 条 —— 第一遍**漏了 5 条**（写法是
+  `@PostMapping` 不带参数、或带 `produces=` 的那种，正则没吃住）：三条 SSE 流
+  （events / metrics / orders）、`/admin/stats`、`/merchant/stats`；另外还漏了一条
+  **`@RequestMapping("/goods/goodstype")`** —— 它根本不是 `@PostMapping`，我那遍没想到它。
+  ⇒ 最终 **147**。下面各组**按 147 逐条列，不是抽样**。
+【兜底】认不出 ⇒ **回落路径原文**（看得见英文，不是空白）—— 与现有各表同一口径。
+
+┌─ 订单（9）──────────────────────────────────────────────────────────
+│ /order/orderAdd                下单
+│ /order/orderSelect             我的订单（查）
+│ /order/orderDeliveryIfSelect   商家订单中心（查）
+│ /order/orderDeliverySelect     商家已完成订单（查）
+│ /order/historicalOrdersSelect  历史订单（查）
+│ /order/orderPayIfUp            付款
+│ /order/orderReceiveIfUp        收货
+│ /order/orderDeliveryIfUp       发货
+│ /order/orderDetail             订单详情（查）
+└──────────────────────────────────────────────────────────────────
+┌─ 购物车（5）────────────────────────────────────────────────────────
+│ /cart/add        加入购物车        │ /cart/checkout   结算下单
+│ /cart/update     改购物车数量      │ /cart/list       购物车（查）
+│ /cart/remove     移出购物车
+└──────────────────────────────────────────────────────────────────
+┌─ 商品（12）─────────────────────────────────────────────────────────
+│ /goods/goodsAdd                 上架商品
+│ /goods/goodsSelect              商家商品列表（查）
+│ /goods/goodsSelectHome          首页商品（查）
+│ /goods/goodsDe                  下架商品
+│ /goods/goodsUp                  更新商品
+│ /goods/productCodePrice         商品价格（查）
+│ /goods/skuList                  SKU 规格矩阵（查）
+│ /goods/GoodsProductCodeSelect   商品编码列表（查）
+│ /goods/productSearch            搜索商品（查）
+│ /goods/categoryGoods            按类目查商品（查）
+│ /goods/myApplications           我的商品提审（查）
+│ /goods/goodstype                商品类型（GET 查 / POST 增改 —— ⚠️ 一个路径两种语义）
+└──────────────────────────────────────────────────────────────────
+┌─ 用户（9）──────────────────────────────────────────────────────────
+│ /user/loginSelect        登录            │ /user/getUserInfo     用户信息（查）
+│ /user/loginAdd           注册            │ /user/updateAvatar    改头像
+│ /user/me                 当前用户（查）  │ /user/updateUserInfo  更新用户信息
+│ /user/token              签发 token      │ /user/updateProfile   完善资料
+│ /user/logout             退出登录
+└──────────────────────────────────────────────────────────────────
+┌─ 商家 / 店铺（6）───────────────────────────────────────────────────
+│ /merchant/apply                提交入驻申请
+│ /merchant/myApplications       我的入驻申请（查）
+│ /shop/follow                   关注店铺        │ /shop/profile          店铺档案（查）
+│ /shop/unfollow                 取关店铺
+│ /shop/followState              关注状态（查）
+└──────────────────────────────────────────────────────────────────
+┌─ 消息 / 好友（10）──────────────────────────────────────────────────
+│ /message/send                   发消息
+│ /message/conversations          会话列表（查）
+│ /message/history                聊天记录（查）
+│ /message/getOrCreateConversation 打开会话（无则新建）
+│ /message/userSelect             搜索用户（查）
+│ /message/friendAdd              发好友申请
+│ /message/selectFriend           待处理好友申请（查）
+│ /message/friendUp               通过好友申请
+│ /message/friendDe               忽略好友申请
+│ /message/friendSelect           好友列表（查）
+└──────────────────────────────────────────────────────────────────
+┌─ 通知（4）──────────────────────────────────────────────────────────
+│ /notification/list         收件箱（查）   │ /notification/read     标记已读
+│ /notification/unreadCount  未读数（查）   │ /notification/readAll  全部已读
+└──────────────────────────────────────────────────────────────────
+┌─ 评论 / 举报 / 敏感词（14）─────────────────────────────────────────
+│ /comment/list          评论列表（查）      │ /comment/accept       采纳答案
+│ /comment/adminList     评论管理列表（查）  │ /comment/like         评论点赞/踩
+│ /comment/add           发评论·提问·回答    │ /comment/imageReview  评论图审核
+│ /comment/delete        删评论              │ /comment/myOrders     可评论订单（查）
+│ /report/add            提交举报            │ /report/handle        处理举报
+│ /report/list           举报列表（查）      │ /sensitive/list       敏感词列表（查）
+│ /sensitive/add         新增敏感词          │ /sensitive/delete     删除敏感词
+└──────────────────────────────────────────────────────────────────
+┌─ 管理端 · 账号 / 审计 / 类目 / 订单（22）───────────────────────────
+│ /admin/accounts/users                      用户列表（查）
+│ /admin/accounts/user/ban                   封禁用户
+│ /admin/accounts/user/unban                 解封用户
+│ /admin/accounts/applications               入驻申请列表（查）
+│ /admin/accounts/application/audit          审核入驻申请
+│ /admin/accounts/downgrade/schedule         排定商家降级
+│ /admin/accounts/downgrade/cancel           取消商家降级
+│ /admin/accounts/downgrade/relist           商家重新上架
+│ /admin/audit/list                          审计列表（查）
+│ /admin/audit/detail                        审计详情（查）
+│ /admin/audit/facets                        审计筛选面（查）
+│ /admin/catalog/applications                提审单列表（查）
+│ /admin/catalog/application/audit           审核商品提审
+│ /admin/catalog/category/create             新增类目
+│ /admin/catalog/category/update             改类目
+│ /admin/catalog/category/delete             删类目
+│ /admin/catalog/violation/delist            违规下架商品
+│ /admin/catalog/violation/delete            违规删除商品
+│ /admin/order/list                          订单列表（查）
+│ /admin/order/detail                        订单详情（查）
+│ /admin/order/monitor                       异常订单监控（查）
+│ /admin/order/intervene                     管理员介入订单
+└──────────────────────────────────────────────────────────────────
+┌─ 管理端 · 营销 / 模板 / 通知（25）─────────────────────────────────
+│ /admin/marketing/coupon/list               优惠券列表（查）
+│ /admin/marketing/coupon/create             新建优惠券
+│ /admin/marketing/coupon/stop               停用优惠券
+│ /admin/marketing/coupon/activate           重新启用优惠券
+│ /admin/marketing/coupon/grants             领券明细（查）
+│ /admin/marketing/coupon/grant              定向发券
+│ /admin/marketing/coupon/stats              优惠券统计（查）
+│ /admin/marketing/seckill/invitations       秒杀邀请列表（查）
+│ /admin/marketing/seckill/invite            邀请商家上秒杀
+│ /admin/marketing/seckill/applications      秒杀申请列表（查）
+│ /admin/marketing/seckill/review            审核秒杀申请
+│ /admin/marketing/seckill/activities        秒杀活动列表（查）
+│ /admin/marketing/seckill/stop              停用秒杀活动
+│ /admin/marketing/subsidy/list              国补规则列表（查）
+│ /admin/marketing/subsidy/create            新建国补规则
+│ /admin/marketing/subsidy/stop              停用国补规则
+│ /admin/marketing/subsidy/activate          重新启用国补规则
+│ /admin/marketing/subsidy/nominate          提名商品参加国补
+│ /admin/marketing/subsidy/nominations       国补提名列表（查）
+│ /admin/notify/send                         发通知
+│ /admin/notify/history                      通知历史（查）
+│ /admin/template/list · create · update · delete   模板列表（查）· 新增模板 · 改模板 · 删模板
+└──────────────────────────────────────────────────────────────────
+┌─ 统计（3）─────────────────────────────────────────────────────────
+│ /admin/stats          管理端看板（全站逐日 + 区间合计 + 环比 + 各商家汇总）（查）
+│ /admin/stats/rebuild  重建统计数据
+│ /merchant/stats       商家看板（本店逐日 + 区间合计 + 环比 + 商品榜）（查）
+└──────────────────────────────────────────────────────────────────
+┌─ 营销（用户 / 商家端，13）──────────────────────────────────────────
+│ /marketing/coupons              领券中心（查）
+│ /marketing/myCoupons            我的券包（查）
+│ /marketing/coupon/claim         领券
+│ /marketing/coupon/claimBatch    一键领取
+│ /marketing/seckill/invitations  我的秒杀邀请（查）
+│ /marketing/seckill/respond      应答秒杀邀请
+│ /marketing/seckill/applications 我的秒杀申请（查）
+│ /marketing/seckill/apply        报名秒杀
+│ /marketing/seckill/activities   我的秒杀活动（查）
+│ /marketing/seckill/live         进行中的秒杀（查）
+│ /marketing/subsidy/invitations  我的国补提名（查）
+│ /marketing/subsidy/confirm      应答国补提名
+│ /marketing/subsidy/goods        国补商品列表（查）
+└──────────────────────────────────────────────────────────────────
+┌─ 模板（用户端，2）· 健康（1）───────────────────────────────────────
+│ /template/list   模板选择列表（查）      │ /health/db  数据库健康检查（查，GET）
+│ /template/get    取一条模板（查）
+└──────────────────────────────────────────────────────────────────
+┌─ 可观测域（12 条注解 / 11 个路径）─────────────────────────────────
+│ /admin/observe/events/stream          事件流（SSE 长连接）
+│ /admin/observe/metrics/stream         指标流（SSE 长连接）
+│ /admin/observe/orders/stream          订单流（SSE 长连接）
+│ /admin/observe/replay                 回放批次事件（查）
+│ /admin/observe/attack/scenarios       演练场景清单（查）
+│ /admin/observe/attack/run             跑一轮演练
+│ /admin/observe/attack/stop            叫停演练
+│ /admin/observe/attack/status          演练实时读数（查）
+│ /admin/observe/attack/records         演练记录（查）
+│ /admin/observe/attack/cleanup         清理演练数据
+│ POST /admin/observe/attack/config     改开关配置     ← ⚠️ 这两条**同路径不同方法**
+│ GET  /admin/observe/attack/config     读开关配置（查）   ⇒ 键必须带方法
+└──────────────────────────────────────────────────────────────────
+
+⚠️ 四条实现注意：
+ 1. **键要带方法**：147 条里有两处「一符两义」—— `/admin/observe/attack/config`（GET 读 / POST 写）
+    和 `/goods/goodstype`（GET 查 / POST 增改）⇒ 只按路径做键会把两种语义混成一个名字。
+    建议键用 `METHOD /path`；其余 144 条注解方法唯一（143 条 POST + 1 条 GET）⇒ 这条规则不产生歧义。
+ 2. **三个流端点的名字用不上**：`/stream` 结尾的请求**刻意不入链路台账**（SSE 长连接），
+    所以事件永远挂不到它们 ⇒ 留着只为「表要完整」（12 条里有 3 条实际渲染不出来）。
+ 3. **同一路径在不同分组里出现两次的不必担心**：本次没有重名路径跨组（`/goodstype`、`/admin/stats`、
+    `/merchant/stats` 都已归到唯一一组）。
+ 4. **表放哪**：建议新开 `src/config/labels/api-labels.js`（与订单 / 审计 / 用户各表并列），
+    不塞进 `observe-labels.js` —— 那一份是「可观测域」的表，这张是全仓的接口名。
+
+════════════════════════════════════════════════════════════════════
+四、色系方案（键 / 值 / 可点 三类）
+════════════════════════════════════════════════════════════════════
+
+【现状】消息那一格现在只有三段色：标题 `--ink`（亮白）· 对象 `--ink-2`（灰）·
+技术字段 `--ink-3`（最灰，hover 才出）。**没有「键」这一层** —— 因为现在还没有键值结构。
+
+【要加的（全部用现有 token，不新造色）】
+
+| 角色 | token | 值（admin 主题） | 现状 / 变化 |
+|---|---|---|---|
+| 键（trace / 耗时 / 订单 / 锁 这些标签词） | `--ink` | `#e8ecf3` | 新加：`.ms .k` |
+| 值（具体号 / 数字 / 名字） | `--ink-2` | `#a3aec2` | 复用：`.ms .v` |
+| 值 · 最次要的（缓存键这种长串） | `--ink-3` | `#7b8aa3` | 可选：`.ms .v.q` |
+| 可点的值（对象 / 订单号 / trace 短号） | `--brand-ink` + 点状下划线 | `#5b90ff` | 复用现有 `.ob.p` 的做法：默认点状下划线，hover 变实线 + 变品牌色 |
+| 动作短语（title） | `--ink`（半粗） | `#e8ecf3` | 不变 |
+| 类列 / 严重度 | 不动 | | 两套轴各自管各自 |
+
+⚠️ 两条边界：
+ · **可点提示不许骗人**：上一轮刚修过一次「没有 objectId 也画下划线」的错 —— 本轮同理，
+   只有**真的能点**的才给下划线和 brand 色（trace 短号点它 = 打开 ⑤ 链路；对象点它 = 填 ② 对象框）。
+ · **对比度**：这三档在 `--surface #172032` 上的对比度我还没实测（上一轮只量了 ④ 的横条）。
+   落地后按老规矩**用探针读回计算值**，不靠肉眼；若 `--ink-3` 作正文不够，就退到 `--ink-2`。
+
+════════════════════════════════════════════════════════════════════
+五、要你裁的 5 件（都不是我能替你定的）
+════════════════════════════════════════════════════════════════════
+
+1. **「谁」怎么办** —— ⓐ 本轮先不显示（缺的槽位直接不写，句子短一点、不骗人）；
+   ⓑ 现在动后端补主体（MDC 加键 + 九个 record + 台账列 + 帧，四处同改，另起一笔）。
+   ⟶ 我倾向 ⓐ + 挂 TD-80（这一笔只做呈现层，动后端另开一笔更干净）。
+2. **「耗时」口径** —— ⓐ 用**请求级**总耗时，字面就写「**请求耗时** 8ms」（现成、请求结束才有）；
+   ⓑ 挂 TD-81 本轮不显示。⟶ 我倾向 ⓐ，但**字面必须写清是请求级**，不能写成「耗时 8ms」
+     让人以为是这条事件的耗时。
+3. **`detail` 要不要解析** —— ⓐ 前端解析（`kind=… sku=… qty=…` 按空格切、再按首个 `=` 切；
+   防护那条的尾巴是自由文本 ⇒ 只解析已知键，其余整段当「备注」）；
+   ⓑ 后端把 detail 抽成结构化字段（更干净，但动后端）。
+   ⟶ 我倾向 ⓐ 本轮落地 + 挂 TD-82 记下「结构化的正确做法」。
+4. **trace / 请求耗时 是不是默认就显示** —— 你的示例里它们在默认行里；但那会让每行更长、
+   更容易触发 2 行上限（尤其缓存类）。ⓐ 默认显示（照你的示例）；ⓑ 只有档4/5 默认显示，
+   档3（缓存 / 身份 / 防护）仍 hover 才出。⟶ 我倾向 ⓑ，因为缓存占 76% 的窗口。
+5. **缓存类的压缩**（承接第 4 件）—— 缓存键本身就长，ⓐ 照拼；ⓑ 缓存类的尾巴括号只留 trace、
+   不留请求耗时。⟶ 我倾向 ⓑ。
+
+════════════════════════════════════════════════════════════════════
+六、你列的「其他修正」现状（上几轮已定，逐条点名核对，别当成没做）
+════════════════════════════════════════════════════════════════════
+
+四处图标统一色映射（② / ③ / ④类 / ④严重度） …… 已在上一笔落地（KIND_COLOR / SEVERITY_COLOR 两套轴）
+图标和等级文字 6-8px gap（含 ② / ④ 同类检查） …… **未做**（本轮一并做，需逐处量回）
+进度条对比度 ≥ 3:1 ………………………………………… 已落地（④ 横条实测全部 ≥ 3:1，原 1.05:1）
+滚动条 ≤ 8px + 淡色 ………………………………………… 已落地（四个容器 7px、轨道透明、滑块淡灰）
+折线图小字标签（峰值/当前/时间范围）………………… 已落地（图内两排小字，不画轴线刻度）
+消息折行（2-3 字符缩进、最多 2 行）…………………… 已落地（实测夹在 2 行、续行 2.01ch）
+树内行折行（小缩进）……………………………………… 已落地（续行不带前导符、缩进 2.0ch）
+修树形 bug ……………………………………………………… 已落地（前导符拆 rl/gl 两段、树内提亮）
+对象可点 ………………………………………………………… 已落地（`.p` 与 objectId 三者一致）
+缓存不治理 + 备忘 …………………………………………… 已落地（TD-79 已入 tech-debt.md）
+
+⇒ **上一笔只差「图标与等级文字的 6-8px gap」这一件**，其余都在 commit e1dc20d 里；
+  本轮的新增是「消息自然流 + 色系 + 接口中文名」三件。
+
+════════════════════════════════════════════════════════════════════
+七、我打算怎么落（等你点头才动手）
+════════════════════════════════════════════════════════════════════
+
+1. 新文件 `src/config/labels/api-labels.js`：接口中文名表（147 条注解 / 146 路径，`METHOD /path` 为键，
+   认不出回落原值）+ 锁名表（5）+ 缓存区名表（8）
+2. `EventLog.vue`：新增一个 `sentence(e, rec)` 拼接器（按 kind + 子类型分派，缺槽位跳过），
+   模板里把消息那格从「标题 + 对象」换成「键值流」；`.ms .k/.v/.v.p` 三条 CSS
+3. ⑥ 开关栏 / ② 栏等**不接口** —— 这轮不动
+4. 探针加一组断言（新段 ㉔）：句子形态（无 · 分隔残留 / 无空括号 / 缺字段不出现占位符）+
+   键值色**读回计算值** + 可点仍是「有 id 才点」+ 折行仍是 2 行上限
+5. 证据落 `docs/agent/evidence/c3-block7/`（`.txt`）+ 探针 `scripts/probes/`；
+   TD-80/81/82 按你的裁定登记；报告回桌面
+6. 上一笔已 commit（e1dc20d）且未 push —— 本轮改动会接在它后面，同样 **不 push / 不 merge / 不开 PR**

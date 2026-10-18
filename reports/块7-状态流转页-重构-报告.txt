@@ -1,0 +1,160 @@
+==============================================================================
+块 7 · 状态流转页（OrderFlow）核心数据流与交互重构 —— 收笔报告
+==============================================================================
+日期：2026-10-17
+分支：feat/c3-admin-block7
+基线：387e81a（feat(block7): 状态流转页动效重构与链路抽屉修复）
+入口：admin.html#/admin/observe/timeline
+环境：后端 dev profile · 8088；前端 dev server · 8080；MySQL 192.168.229.129
+
+说明：本报告中的数字均来自 2026-10-17 21:56 的真后端验收探针（37 项 / 0 失败）
+与 22:00 的回归测试；原始逐项输出见
+docs/agent/evidence/c3-block7/b7-orderflow-rework-probe.txt。
+
+------------------------------------------------------------------------------
+一、交付结论
+------------------------------------------------------------------------------
+1. 压测期间数据「错落有致」：探针 30 拍采样里，本会话捕获从 0 长到 1,979，
+   任意 600ms 步进最大 208（远小于总量），五态计数出现 14 种不同组合，
+   趋势尾窗 4→10 格，阶梯/轨道节点数字同步在变。GIF 可直接看生长过程。
+2. 流轨不再「全卡在待付款」：30 帧中 22 帧拍到光点；流转去向覆盖
+   「待发货 / 待收货 / 已完成」，截图中可读到 → 待发货 / → 待收货 / → 已完成。
+3. 刷新不丢历史：刷新前本会话捕获 2,252，刷新后恢复 2,252（精确相等），
+   趋势尾窗 10→10；新 SSE 连接拍号从 1 重新起算（每连接独立游标，属预期），
+   随后捕获数继续增长 2,252→2,372；切页再切回 2,372→2,481。
+4. 「测试数据过滤」口径已按纠正指令整改：默认展示全量（含 SIM- 压测单与
+   已取消单），开关「剔除已取消 / 仅看真实数据」打开后才收敛到健康业务分布。
+5. 环形图防挤爆：某一态占比 ≥95% 且至少两个非零态时，minAngle 自动切到 10°，
+   99% 场景下其余四态仍有可见弧长；正常分布时 minAngle=0，不夸大占比。
+6. 抽屉：订单号/商品名搜索、左列唯一深蓝高亮、右列同步切换；
+   待收货单时间线严格 4 步（创建/付款/发货/收货），3 亮 1 灰，
+   当前节点为「发货 → 待收货」，不再错显「创建订单（待付款）」。
+
+------------------------------------------------------------------------------
+二、后端改动（单一口径来源 + 开关透传）
+------------------------------------------------------------------------------
+新增 Mall-management-server/.../order/dao/OrderDataScope.java
+  · 唯一定义演练单判据：OrderId LIKE 'SIM-%' OR Source = 'attack'
+  · NOT_ATTACK_SQL / HEALTHY_SCOPE_SQL = "CancelledAt IS NULL AND NOT (...)"
+  · isAttackData(orderId, source) 供 Java 侧复用
+  · 该类是抽取自原 OrderTimeoutCancelJob 的判据，不是新造口径：
+    超时取消任务与状态流转页现在共用同一份定义。
+
+OrderTimeoutCancelJob.java
+  · 删除本地 ATTACK_ORDER_PREFIX / ATTACK_SOURCE 常量，改为委托 OrderDataScope；
+  · skip-attack-data 行为不变，测试 9 项全绿。
+
+OrderDao.java
+  · countOrderStates(boolean healthyOnly) / selectRecentOrders(int, boolean healthyOnly)
+    按开关拼接 HEALTHY_SCOPE_SQL；
+  · 无参重载委托 false，既有调用方语义不变。
+
+OrderStreamService.java / OrderInsightService.java
+  · excludeSim 字段更名 healthyOnly，工厂 newFrameSource(..., healthyOnly)；
+  · counts 与 orders 走开关口径；moves 始终全量（否则打开开关会把流轨一起藏掉，
+    与「流轨要一直活着」的目标冲突）。
+
+OrderStreamController.java
+  · /stream、/insight 新增 healthy 参数（defaultValue="false"）；
+  · 缺省 = 全量，与日志页/指标页的演练数据口径一致。
+
+------------------------------------------------------------------------------
+三、前端改动（OrderFlow / DonutChart / API）
+------------------------------------------------------------------------------
+api/observe.js
+  · openOrderStream(handlers, healthy=false) → ?healthy=true|false
+  · orderInsight(healthy=false) → healthy 参数
+  · 均保留“数据源”切换入口与 demo-stream 公开接口（未改 api/demo-stream.js）。
+
+OrderFlow.vue
+  · 顶部新增 Switch「剔除已取消 / 仅看真实数据」：
+      默认关 = 全量（压测压迫感）；
+      打开 = 后端 healthy 口径 + 前端立即剔除已取消/ SIM- 行，
+             关闭正在查看的抽屉（若该单被剔除）。
+  · 会话键升级为 mall:orderFlow:v2:，持久化 filterHealthy、capturedTotal、
+    liveTail、seq 等；刷新后恢复，路由切换由 KeepAlive 保留。
+  · 环形图传 :min-angle="donutMinAngle"：
+      仅当 max/sum ≥ 0.95 且非零扇区 ≥2 时取 10°，否则 0。
+  · 主从表：搜索（订单号/商品名）、点击行深蓝高亮、右列同步切换；
+  · 时间线按真实状态渲染四步，waitReceive 的当前节点为「发货 → 待收货」。
+
+DonutChart.vue
+  · 新增 minAngle prop（默认 0），透传至 pie series.minAngle；
+  · 注释写明 minAngle 保证的是“可见性”，不是精确占比。
+
+HistogramChart.vue / AdminShell.vue
+  · 直方图容器固定高度，n=0 时保留空态「当前时间段暂无有效耗时样本」；
+  · KeepAlive 组件名与路由缓存对齐。
+
+------------------------------------------------------------------------------
+四、验收证据（真后端，37 项 / 0 失败）
+------------------------------------------------------------------------------
+证据目录：docs/agent/evidence/c3-block7/
+  b7-orderflow-rework-live.gif                 30 帧 / 600ms 采样合成（1,080×750）
+  b7-orderflow-rework-before-attack.png        压测前（本会话捕获 0，库内 18,413）
+  b7-orderflow-rework-load-early.png           压测早段
+  b7-orderflow-rework-load-late.png            压测后段
+  b7-orderflow-rework-before-reload.png        刷新前（捕获 2,252）
+  b7-orderflow-rework-after-refresh.png        刷新后（恢复 2,252，继续增长）
+  b7-orderflow-rework-drawer-search.png        按订单号搜索收敛到 1 单
+  b7-orderflow-rework-drawer-highlight.png     唯一深蓝高亮 + 右列同步
+  b7-orderflow-rework-drawer-timeline.png      待收货时间线 4 步 / 3 亮 1 灰
+  b7-orderflow-rework-healthy-on.png           开关打开后的健康分布
+  b7-orderflow-rework-donut-minangle99.png     99% 单态时 minAngle=10° 的效果
+  b7-orderflow-rework-probe.txt                37 项逐项输出
+  b7-orderflow-rework-verify.txt               测试/构建摘要
+  b7-orderflow-rework-lint-build.txt           前端 lint+build 完整输出
+  b7-orderflow-rework-samples.json             30 拍逐拍原始样本
+
+关键数字：
+  · 默认全量：total=18,413（cancelled=13,945 / completed=2,031 /
+    waitReceive=499 / waitShip=1,437 / waitPay=501），max 占比 75.7% < 95%，
+    minAngle 不启用（符合“正常分布不被夸大”）。
+  · 压测：24.4s / 2,216 请求 / 0 失败（Shed 432、Blocked 1,108 为保护生效）。
+  · 开关打开：total 19,521→221，cancelled 13,945→0，
+    仍有 completed=108 / waitReceive=24 / waitShip=89（不是一刀切成空表）。
+  · 99% 单态合成：donutMinAngle 0→10，DonutChart series.minAngle=10，
+    非零扇区 4 个，数值 [0,10,10,10,9970]。
+  · 抽屉：搜索 n=1；唯一 .on 高亮；header id 与左列选中一致；
+    时间线 n=4 / done=3 / future=1；current=「发货 → 待收货」。
+  · 全流程无 console.error / unhandledrejection。
+
+------------------------------------------------------------------------------
+五、回归与构建（2026-10-17 22:00，晚于最后一次代码编辑 21:51:42）
+------------------------------------------------------------------------------
+后端：
+  ./mvnw -Dtest=OrderStreamServiceTest,OrderTimeoutCancelJobSkipAttackDataTest,AttackEngineTest test
+  OrderStreamServiceTest                  12 / 0 失败
+  OrderTimeoutCancelJobSkipAttackDataTest  9 / 0 失败
+  AttackEngineTest                        29 / 0 失败
+  合计 50 项全绿（surefire 报告时间戳已按本轮过滤，未混入历史残留）。
+前端：
+  npm run lint   → LINT_EXIT=0（No lint errors found!）
+  npm run build  → BUILD_EXIT=0（仅 2 条既有 asset size limit 警告，
+                   vendor/common 包体积，非本次改动引入）
+
+------------------------------------------------------------------------------
+六、复现方式
+------------------------------------------------------------------------------
+1. 后端：./mvnw spring-boot:run -Dspring-boot.run.profiles=dev（8088）
+2. 前端：cd Mall-management-web/mall-management-system && npm run serve（8080）
+3. 打开 http://localhost:8080/admin.html#/admin/observe/timeline
+4. 进入「攻击模拟器」发起压测（orderBurst），或在页面观察实时流；
+5. 验收探针：
+   node scripts/probes/probe-b7-orderflow-rework-evidence.mjs
+   产物写到 scripts/probes/out-b7-orderflow-rework/（不入库的原始帧，
+   入库证据见 docs/agent/evidence/c3-block7/）。
+
+------------------------------------------------------------------------------
+七、边界与说明
+------------------------------------------------------------------------------
+· SSE 的 moves 不受开关过滤：开关只影响 counts/orders，否则「仅看真实数据」
+  会把演练单的流转一起藏掉，流轨重新变死。这是刻意选择。
+· minAngle 是“可见性保障”，开启后小扇区的角度会被抬高，ECharts 会按比例
+  收回收超出的角度；因此它只在一个态 ≥95% 时启用，正常分布不启用。
+· 本会话捕获数的历史来自 sessionStorage，刷新/切页保留；SSE 每连接独立
+  游标，所以刷新后拍号从 1 重新计数，但捕获总数不回退。
+· 证据文件 mtime（21:56–22:00）均晚于最后一次代码编辑（21:51:42）。
+· 本次只提交，不 push / 不建 PR / 不合并（未收到相应指令）。
+
+==============================================================================

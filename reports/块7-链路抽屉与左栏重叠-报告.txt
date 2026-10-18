@@ -1,0 +1,72 @@
+块 7 · 日志页「⑤ 链路展开」与「② 过滤栏」文字重叠 —— 修复报告
+================================================================
+日期：2026-10-17
+分支：feat/c3-admin-block7
+范围：Mall-management-web/mall-management-system/src/views/admin/observe/EventLog.vue（仅 CSS）
+      探针 scripts/probes/c3b7-drawer-rail-overlap.mjs
+      证据 docs/agent/evidence/c3-block7/3a4h-drawer-rail.txt
+           docs/agent/evidence/c3-block7/3a4h-drawer-rail-before.png
+           docs/agent/evidence/c3-block7/3a4h-drawer-rail-after.png
+
+
+一、复现
+--------
+打开「实时日志」→ 点 ③ 任一行拉起 ⑤ 链路展开 → 左侧 ② 过滤栏底部
+（严重度四枚 + 「全部打开 / 清筛选」）直接画到 ⑤ 的标题带和链路上，两组文字叠印。
+
+该问题与窗口高度有关：
+  1440×900：栏内容 361px、栏高 392px —— 恰好放得下，看不出问题；
+  1440×800：栏高 292px —— 严重度溢出 35px、按钮溢出 69px，必现；
+  1366×768 / 1280×720：溢出 119px / 173px，更明显。
+截图 3a4h-drawer-rail-before.png（1440×800）就是叠印形态。
+
+
+二、根因
+--------
+1. ⑤ 抽屉最高占外框 42%，把唯一伸缩的中段（三栏）压矮；抽屉一开，左栏可用高度只剩一半。
+2. ② 栏底「口径 / 严重度 / 全部打开」是 flex: 0 0 auto，按设计压不下去；
+   行清单虽然能缩，但剩下的固定块仍超出栏高。
+3. `.ev-rail` 的 overflow 默认 visible —— flex 子块直接从栏底画出去，
+   盖到下方 ⑤ 的标题与链路文字上。不是层级（z-index）问题，是内容越界绘制。
+   另有 1440×900 恰好放得下，导致日常全屏时容易漏测。
+
+
+三、修复（只改 CSS，不动模板与数据链）
+--------------------------------------
+1. `.ev-rail` 增加 overflow-y: auto、overflow-x: hidden。
+   先保证内容不出界；空间不足时整栏可滚动，栏底控件（严重度 / 全部打开）仍够得着。
+   正常高度下内容不超出，不出现滚动条，原布局与「栏底钉住」的观感不变。
+2. 把 `.ev-rail` 纳入既有的 7px 淡色滚动条规则（轨道 / 滑块 / hover / corner），
+   避免兜底滚动条退回 Chromium 默认的 15px 粗条。
+
+
+四、验收（真后端 + 真前端，探针 exit 0，7/7 判据通过）
+-------------------------------------------------------
+1440×800：
+  修复前：overflowY=visible；严重度溢出 35.3px、按钮溢出 69.3px（叠印）
+  修复后：overflowY=auto；内容 361 / 可视 292，整栏可滚；
+          滚到底后「严重度」与「全部打开 / 清筛选」完整落在栏内（y 433.8~526.8），
+          ⑤ 标题带从 y=527.5 开始，两者之间是干净分界
+  截图 3a4h-drawer-rail-after.png
+
+多分辨率复核：
+  1440×900 栏 392 / 内容 392 —— 不出现滚动条，控件全部可见（原观感保留）
+  1366×768 栏 242 / 内容 361 —— 可滚 119px，滚到底控件完整可见
+  1280×720 栏 188 / 内容 361 —— 可滚 173px，滚到底控件完整可见
+
+判据：
+  drawer-opened-by-click / before-overflow-visible / before-spill-reproduced /
+  after-overflow-not-visible / after-rail-scrollable /
+  after-foot-reachable / after-sev-reachable   全部 ok
+
+
+五、质量门
+----------
+- 前端 ESLint（EventLog.vue）：exit 0
+- 探针 c3b7-drawer-rail-overlap.mjs：exit 0
+- 证据与截图 mtime 均晚于最后一次代码编辑
+- 未改动 api/demo-stream.js 接口，「模拟日常」入口保留
+- 未 push、未开 PR
+
+注意：本轮手验跑在 dev profile（app.auth.enabled=false）。
+默认 profile 身份鉴权是开的，手验绿 ≠ 默认 profile 绿，合并前请按默认 profile 再走一遍。

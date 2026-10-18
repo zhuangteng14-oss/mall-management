@@ -1,0 +1,188 @@
+块 7 · 阶段 3a.4 —— 真实链路三问题 报告
+日期：2026-10-17
+分支：feat/c3-admin-block7（**未 push / 未 merge / 未建 PR**）
+环境：真实 dev 后端 8088（--spring.profiles.active=dev，2026-10-17 13:14 重启载入新代码）
+      + 真实前端 dev server 8080（admin.html 入口）
+      + 真 MySQL / 真 RabbitMQ / 真攻击引擎
+      **全程不 mock、不开「模拟日常」**（探针连 `_cdp.mjs` 的 mock 参数都不传）。
+
+
+一、结论（先看这一段）
+────────────────────────────────────────────────────────────────────────────
+三个问题都定位到了真实链路上的根因，并已修复；用真后端重跑验收 **8/8 全过**：
+
+  1. 日志能实时刷
+     进页面即有 2,048 条（后端合并环首帧快照），页面不再空白；
+     日志页开着时跑一轮 4 秒真演练，3 秒内收到 **1,000 条**新事件（1000 条窗口被打满）。
+
+  2. 指标切页不重置
+     首屏直接从 **60 拍历史**起画（不再是 0）；
+     指标 → 日志 → 指标（SPA 路由，不刷新）后：「第 N 拍」从 **4 走到 11**，窗口仍 **60 拍**，
+     证明 SSE 连接没断、组件状态没重建。
+
+  3. 回放能一点点放出来
+     **在浏览器停在 about:blank（没有任何日志页 SSE）的情况下**跑 8 秒真演练，
+     台账 `observed_event` 仍有 **4,932 条**（证明落库不再依赖有人看日志页）；
+     回放 UI 从 **35 / 5000** 涨到 **332 / 5000**（约 75 条/秒），截图可见进度条与列表逐条长出来。
+
+验收脚本：scripts/probes/c3b7-3a4-real-link.mjs
+机器可读证据：docs/agent/evidence/c3-block7/3a4-real-link-report.txt（8 项 checks 全 true）
+截图：docs/agent/evidence/c3-block7/3a4-real-*.png（6 张，见第六节）
+
+
+二、问题 1 —— 日志页进页面空白，但状态显示「已连接」
+────────────────────────────────────────────────────────────────────────────
+根因（不是 SSE 解析失败，也不是后端不推）：
+  · 事件流的**第一帧本来就带一屏快照**（EventBroadcaster 合并环 ≤2048 条，since(-1) 语义），
+    前端 `absorbEvents` 也正常收下了 —— 探针实测进页面时 `events.length = 2048`；
+  · 但页面「时间范围」的缺省值是 `5m`（近 5 分钟），而快照里的事件时刻可能是几小时前
+    （尤其是后端刚重启 / 刚跑完演练之后）⇒ `ranged` 把它全滤光 ⇒ 列表只剩空态文案。
+  · 也就是说：数据到了、解析对了，是**缺省筛选**把它藏起来了。
+
+修复（EventLog.vue）：
+  · `RANGES` 增加第一档 `['all', '全部']`；`range = ref('all')` 作为缺省；
+  · `rangeBounds` 对 `all` 直接返回 `null`（不过滤）；
+  · 为什么不是改空态文案了事：用户要的是「进页面能看到数据」，不是「空的时候解释得更好」。
+  · 行数净零处理：修改处只有替换 + 把两行 parseLocal 合成一行，净增 0 行（保护全仓 file:line 引用）；
+    文件尾追加的 `export default { name: 'EventLog' }` 在所有既有引用行号之后，不造成漂移。
+
+真实验收（最终一轮）：
+  · 进页面：范围内事件 2,048 条、时间范围选中「全部」；
+  · 页面开着跑 4 秒演练：3 秒内按时间戳统计到 **1,000 条新行**（窗口上限 1000，被新行打满）。
+
+
+三、问题 2 —— 指标/日志切页后重新从 0 开始
+────────────────────────────────────────────────────────────────────────────
+根因（两条叠加）：
+  · 前端：三个面板各自 `onMounted(connect)` + `onBeforeUnmount(closeStream)`，状态全在组件 ref 里。
+    路由切走 ⇒ 组件销毁 ⇒ SSE 流被关、`rows` 窗口清零；切回来重新挂载 ⇒ 新连接首帧是
+    **差分预热拍（intervalMs=0、全 0）** ⇒ 曲线从 0 开始爬。
+  · 后端：`/metrics/stream` 只答「从现在起」，没有「最近 60 拍」的读口 ⇒ 新挂载拿不到历史。
+
+修复：
+  1) 前端（AdminShell.vue）：把 `<router-view />` 换成**限定名单**的 KeepAlive：
+         <keep-alive include="MetricsPanel,EventLog">
+     只缓存这两页（它们的生命周期与 SSE 绑定）；其他页可能自带轮询，**故意不做全缓存**。
+     ⚠️ Vue 3.2.13 不会按文件名推 `__name`（那是 3.2.34 才有的）⇒ 两个组件各在文件尾追加
+        一个普通 `<script>` 块 `export default { name: 'MetricsPanel' / 'EventLog' }`，
+        否则 include 不匹配、KeepAlive 静默不生效。
+  2) 后端（新增 MetricsHistoryService + MetricsHistoryController）：
+         POST /admin/observe/metrics/history?limit=60
+     服务端常驻 daemon 线程每秒采一拍，滚动保留最近 60 拍；
+     返回 `{success, list, size}`，**每帧与 SSE 帧逐字同形**（同一个 newFrameSource() 产出），
+     前端直接复用 toRow() 解析，不写第二套。
+     不用 @Scheduled：本仓调度器总闸挂在 mall.downgrade.job.enabled 上（a3 下不存在）。
+  3) 前端（MetricsPanel.vue）：
+     · 拆出 toRow()（帧→行）与 applyLatest()（KPI/健康/库存），SSE 与历史共用同一条解析；
+     · onFrame 跳过 `intervalMs=0` 的预热拍（否则首屏历史后插一根假的 0 尖峰）；
+     · loadHistory() 用 ts 截断去重（历史与 SSE 并发，谁先回都不画重）；
+     · 切「模拟日常」时清空窗口与历史令牌，避免真流历史混进演示画面。
+  4) endpoints.js 登记 metricsHistory（头部计数 143 → 144）；observe.js 增加 metricsHistory()。
+
+真实验收（最终一轮）：
+  · 首次进指标页：`rows = 60`、第 4 拍 —— 首屏就是 60 拍历史，不是 0；
+  · 指标 → 日志（4 秒）→ 指标：「第 4 拍」变「第 11 拍」，`rows` 仍 60 ⇒ 流与窗口都活着。
+
+
+四、问题 3 —— 回放点了没反应 / 放不出来
+────────────────────────────────────────────────────────────────────────────
+根因（数据层，不是播放层）：
+  · 事件台账 `observed_event` 的唯一出口是 EventBroadcaster.add() → EventPublisher → MQ
+    → ObservedEventConsumer 落库；而 add() 只被 poll() 调到，poll() 原来**只由日志页 SSE
+    流线程驱动** ⇒ **没人开着日志页时，事件根本不落库**（TD-61）。
+  · 演练现场最常见的用法恰恰是「在攻击模拟器页起一轮，跑完再回放」——
+    这段演练一条都没落库，回放批次 total=0（此前实测批次 42/43 = 0，44–50 有人看着才有数据）。
+  · 前端 setTimeout 循环本身没有字段 undefined 导致首帧终止的问题；回放 API 对**有数据**的批次
+    一直能返回（此前实测可行）。真正缺的是数据。
+
+修复：
+  1) 新增 EventPersistPoller（后端常驻 daemon 线程）：
+     每 1000ms 调一次 EventBroadcaster.poll()，与「有没有人开日志页」解耦。
+     · poll() 是 synchronized，九个源环的游标按源只前进一次 ⇒ 与 SSE 流线程谁先调都不会
+       重复并入、也不会把对方要的数据吃掉；新连接的首帧快照语义一个字没变。
+     · 不用 @Scheduled：同上，调度器总闸被 mall.downgrade.job.enabled 关着。
+     · 间隔可配：mall.observe.persist.interval-ms（默认 1000，下限 100）。
+  2) AttackConsole.vue：
+     · 回放面板说明改成「读的是落库的事件台账（2026-10-17 起后台常驻落库，不再要求当时开着日志页）」；
+     · total=0 的空态写明原因与下一步（该批早于修复 / 已被清理 —— 重跑一段演练再回放）；
+     · 定时器回调包一层 guardedTick()：异常时 console.error('[replay] tick failed', ...) 并停表，
+       不再进 console 后下一拍照旧空转。
+
+真实验收（最终一轮，全部真接口）：
+  · 浏览器导航到 about:blank（确保没有日志页 SSE）→ 跑 8 秒 / 20 并发 / 1,514 次请求的真演练；
+  · POST /admin/observe/replay?batchId=ce2c6382-... → `total = 4,932`（修复前同类批次为 0）；
+  · 回放 UI：进度 35 / 5000 → 332 / 5000（4 秒采样，10 个点单调递增，首点远小于总数）；
+    截图 3a4-real-replay-early.png / 3a4-real-replay-progress.png 可见进度条与列表逐条出现。
+
+
+五、改动清单（本地提交，未 push）
+────────────────────────────────────────────────────────────────────────────
+后端（新增 3 个文件）：
+  Mall-management-server/src/main/java/com/minke/mallmanagement/observe/
+    service/EventPersistPoller.java      常驻驱动 poll()，让落库与观看解耦（治回放 total=0）
+    service/MetricsHistoryService.java   最近 60 拍滚动窗口（治指标首屏从 0 起）
+    controller/MetricsHistoryController.java   POST /admin/observe/metrics/history
+前端（改 6 个文件）：
+  src/views/AdminShell.vue                限定名单 KeepAlive（MetricsPanel / EventLog）
+  src/views/admin/observe/MetricsPanel.vue  首屏历史 + 预热拍过滤 + 数据源切换清空 + 组件名
+  src/views/admin/observe/EventLog.vue      时间范围缺省「全部」+ 组件名
+  src/views/admin/observe/AttackConsole.vue 回放说明/空态 + guardedTick 诊断
+  src/api/endpoints.js                      登记 metricsHistory，计数 143 → 144
+  src/api/observe.js                        新增 metricsHistory()
+验收脚本与证据：
+  scripts/probes/c3b7-3a4-real-link.mjs
+  docs/agent/evidence/c3-block7/3a4-real-link-report.txt
+  docs/agent/evidence/c3-block7/3a4-real-*.png（6 张）
+编译/静态检查：
+  ./mvnw -q -DskipTests compile  → 通过（后端启动日志可见两个常驻线程已起）
+  npx vue-cli-service lint --no-fix → No lint errors found
+  npm run build → Build complete（含「</style> 后追加 <script>」的块顺序也被构建验证）
+
+
+六、截图清单（docs/agent/evidence/c3-block7/）
+────────────────────────────────────────────────────────────────────────────
+  3a4-real-logs-entry.png        进日志页即有 2,048 条，时间范围「全部」
+  3a4-real-logs-live.png         真演练期间实时刷（第 12/14 拍，窗口被打满）
+  3a4-real-metrics-first.png     指标页首屏 60 拍历史（不是从 0 起）
+  3a4-real-metrics-roundtrip.png 指标 → 日志 → 指标后仍在同一流上（第 11 拍、窗口 60）
+  3a4-real-replay-early.png      回放刚开始（进度 35 / 5000）
+  3a4-real-replay-progress.png   回放进行中（进度 332 / 5000，列表逐条出现）
+
+
+七、已知边界（如实登记，不在本笔偷偷改）
+────────────────────────────────────────────────────────────────────────────
+  1. 修复前已经落成 total=0 的旧批次仍然回放不出来（数据当时就没写进去，无法补造）。
+     保留期：攻击批次 3 天、日常事件 30 天，超期由清理任务删除 —— 这是正常，不是坏了。
+  2. 常驻轮询的代价：即使没人看日志页，每秒一次九环扫描 + 一次 stock() 只读查询（指标历史线程）
+     仍会发生。这是「首屏有历史」「无人值守也落库」的必要代价，间隔均可配置。
+  3. EventLog 的 `seenSeq` 去重集合只按 seq 去重，而后端重启后 seq 从 0 重新开始 ⇒
+     「后端重启 + 页面一直开着（SSE 自动重连）」这一种组合下，新事件的 seq 可能撞上旧集合被误丢。
+     这是**既有**问题（本次 KeepAlive/常驻落库之前就存在），不在本次三问题范围内，未改；
+     建议后续在「连接重置」信号上清空该集合（或改用 (进程代次, seq) 复合键）。
+  4. docs/agent/api-contract.md 未追加新端点行：该文件存在大量 `api-contract.md:<行号>` 的跨文件引用，
+     中段插行会让它们集体漂移；按本仓「只登记、不修」的口径，本次只在 endpoints.js 头部计数与
+     observe.js 文件头登记（144 条 / 十一条端点）。
+  5. 本次验收的前端入口是 admin.html（`document.documentElement.dataset.theme === 'admin'` 已断言），
+     不是 `/`（商城入口）。
+
+
+八、复现
+────────────────────────────────────────────────────────────────────────────
+  1. 起后端（dev 8088，MQ 口令从 _work/mq-pass 读，不回显）：
+       cd Mall-management-server
+       MALL_MQ_PASSWORD=$(cat ../_work/mq-pass) ./mvnw spring-boot:run \
+         -Dspring-boot.run.profiles=dev \
+         -Dspring-boot.run.arguments="--mall.drill.engine.in-flight-cap=4096"
+  2. 前端 dev server（8080）已在跑；入口 http://localhost:8080/admin.html
+  3. 跑验收：
+       node scripts/probes/c3b7-3a4-real-link.mjs
+     （输出 JSON；exit 0 = 8 项全过）
+
+
+九、红线自查
+────────────────────────────────────────────────────────────────────────────
+  · 未 push、未 merge、未建 PR（本地 commit）。
+  · 无新增明文口令；MQ 口令只从 _work/mq-pass 读进环境变量。
+  · 未改 api/demo-stream.js 接口；未开「模拟日常」；探针未 mock 任何请求。
+  · 临时产物在 _work/3a4/；探针在 scripts/probes/；证据在 docs/agent/evidence/c3-block7/ 且为 .txt/.png。
+  · 证据时间（13:20–13:23）晚于最后一次应用代码编辑（13:14 前）。
