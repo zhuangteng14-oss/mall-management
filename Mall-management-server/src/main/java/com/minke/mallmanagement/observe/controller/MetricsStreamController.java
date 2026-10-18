@@ -1,7 +1,9 @@
 package com.minke.mallmanagement.observe.controller;
 
 import com.minke.mallmanagement.observe.service.MetricsSnapshotService;
+import com.minke.mallmanagement.observe.service.SseConnectionRegistry;
 import com.minke.mallmanagement.observe.service.SseStreamWriter;
+import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -37,9 +39,14 @@ public class MetricsStreamController {
     private final MetricsSnapshotService snapshots;
     private final SseStreamWriter writer;
 
-    public MetricsStreamController(MetricsSnapshotService snapshots, SseStreamWriter writer) {
+    /** 连接名额表（D3-6）：单用户 50 / 全局 200，超限 429 + 提示。 */
+    private final SseConnectionRegistry connections;
+
+    public MetricsStreamController(MetricsSnapshotService snapshots, SseStreamWriter writer,
+                                   SseConnectionRegistry connections) {
         this.snapshots = snapshots;
         this.writer = writer;
+        this.connections = connections;
     }
 
     /**
@@ -55,9 +62,14 @@ public class MetricsStreamController {
      * 两条都留着：{@code produces} 管**路由与 Accept 协商**，这一行管**真实响应头**。
      */
     @PostMapping(value = "/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
-    public StreamingResponseBody stream(HttpServletResponse response) {
+    public StreamingResponseBody stream(HttpServletRequest request, HttpServletResponse response) {
+        // D3-6：先占名额，占不到就 429（不再开流）。释放点在 SseStreamWriter 的 finally。
+        SseConnectionRegistry.Permit permit = connections.tryAcquire(request);
+        if (permit == null) {
+            return SseRejection.of(response, connections);
+        }
         response.setContentType(MediaType.TEXT_EVENT_STREAM_VALUE);
         response.setHeader("Cache-Control", "no-cache");
-        return writer.stream("metrics", snapshots::newFrameSource);
+        return writer.stream("metrics", snapshots::newFrameSource, permit::release);
     }
 }

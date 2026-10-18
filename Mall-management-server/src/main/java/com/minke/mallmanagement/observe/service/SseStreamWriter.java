@@ -142,10 +142,19 @@ public class SseStreamWriter {
      * @param frames 逐拍产帧的**工厂**：每条连接各调一次
      */
     public StreamingResponseBody stream(String tag, Supplier<FrameSource> frames) {
+        return stream(tag, frames, null);
+    }
+
+    /**
+     * 同上，外加一个**关流钩子**（D3-6 新增）。
+     *
+     * <p>⚠️ {@code onClose} 在 lambda 的 {@code finally} 里跑：正常结束、客户端断开、
+     * 产帧抛异常、空闲看门狗断开 —— 四条路径都会经过。本仓唯一的调用方是
+     * {@link SseConnectionRegistry.Permit#release()}，漏调一次就永久少一个名额。
+     * ⚠️ 钩子自身抛异常只记 debug，不外抛：流已经在收尾，再抛只会掩盖真正的结束原因。
+     */
+    public StreamingResponseBody stream(String tag, Supplier<FrameSource> frames, Runnable onClose) {
         return out -> {
-            // ⚠️ 建在这里（lambda 内、每条连接各一次），不是建在 `stream(...)` 那一行上：
-            //    调用方若把本方法返回的响应体缓存起来复用，状态也不会跨连接串。
-            FrameSource source = frames.get();
             long tick = 0;
             // A7（块 7 收尾）：空闲超时在**本层**实现，不改 `spring.mvc.async.request-timeout=-1`
             // （那是 commit 10b 的刻意选择：容器在 30s 掐断会把正常长连接一起杀掉）。
@@ -174,6 +183,10 @@ public class SseStreamWriter {
                 }, period, period, TimeUnit.MILLISECONDS);
             }
             try {
+                // ⚠️ 建在这里（lambda 内、每条连接各一次），不是建在 `stream(...)` 那一行上：
+                //    调用方若把本方法返回的响应体缓存起来复用，状态也不会跨连接串。
+                //    D3-6 起也放进 try：帧源工厂抛异常时 finally 仍要还名额。
+                FrameSource source = frames.get();
                 while (maxTicks <= 0 || tick < maxTicks) {
                     if (tick > 0) {
                         Thread.sleep(intervalMs);
@@ -195,6 +208,13 @@ public class SseStreamWriter {
             } finally {
                 if (idleGuard != null) {
                     idleGuard.cancel(false);
+                }
+                if (onClose != null) {
+                    try {
+                        onClose.run();
+                    } catch (Exception e) {
+                        log.debug("[observe] {} 流关闭钩子失败（忽略）：{}", tag, e.toString());
+                    }
                 }
             }
         };

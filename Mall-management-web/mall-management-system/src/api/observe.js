@@ -436,7 +436,7 @@ export function replay(batchId, limit) {
  * 演练记录（时间倒序）。
  *
  * @param {object} [p]
- * @param {number} [p.limit]  每页条数（缺省 20、上限 200）
+ * @param {number} [p.limit]  每页条数（缺省 20、上限 100）
  * @param {number} [p.offset] 偏移（负数归 0）
  * @returns {Promise<{success:boolean, list:Array, total:number, limit:number, offset:number}>}
  *          每行的 `Result` / `Scenario` 已是**对象**（后端拆过字段）；解析失败的那行

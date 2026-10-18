@@ -3,7 +3,9 @@ package com.minke.mallmanagement.observe.controller;
 import com.minke.mallmanagement.observe.service.AttackEngine;
 import com.minke.mallmanagement.observe.service.OrderInsightService;
 import com.minke.mallmanagement.observe.service.OrderStreamService;
+import com.minke.mallmanagement.observe.service.SseConnectionRegistry;
 import com.minke.mallmanagement.observe.service.SseStreamWriter;
+import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -32,12 +34,17 @@ public class OrderStreamController {
     private final AttackEngine attackEngine;
     private final SseStreamWriter writer;
 
+    /** 连接名额表（D3-6），口径同 {@link MetricsStreamController}。 */
+    private final SseConnectionRegistry connections;
+
     public OrderStreamController(OrderStreamService orders, OrderInsightService insight,
-                                 AttackEngine attackEngine, SseStreamWriter writer) {
+                                 AttackEngine attackEngine, SseStreamWriter writer,
+                                 SseConnectionRegistry connections) {
         this.orders = orders;
         this.insight = insight;
         this.attackEngine = attackEngine;
         this.writer = writer;
+        this.connections = connections;
     }
 
     /**
@@ -55,15 +62,20 @@ public class OrderStreamController {
      */
     @PostMapping(value = "/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public StreamingResponseBody stream(
+            HttpServletRequest request,
             HttpServletResponse response,
             // 2026-10-17：页面「剔除已取消 / 仅看真实数据」开关接到这里 —— 只过滤
             // counts/orders，moves 仍全量（流轨要看见演练单在动）。缺省 false = 全量展示，
             // 这正是压测现场要的「压迫感」。谓词与超时 job / 清场端点同源。
             @RequestParam(value = "healthy", defaultValue = "false") boolean healthy) {
+        SseConnectionRegistry.Permit permit = connections.tryAcquire(request);
+        if (permit == null) {
+            return SseRejection.of(response, connections);
+        }
         response.setContentType(MediaType.TEXT_EVENT_STREAM_VALUE);
         response.setHeader("Cache-Control", "no-cache");
         return writer.stream("orders",
-                () -> orders.newFrameSource(attackEngine::currentBatch, healthy));
+                () -> orders.newFrameSource(attackEngine::currentBatch, healthy), permit::release);
     }
 
     /**
@@ -92,7 +104,7 @@ public class OrderStreamController {
      * total 与行集**同源同谓词**。
      *
      * <p>⚠️ 本端点**只读**、无角色闸，口径与 {@link #stream} / {@link #insight} 相同。
-     * 参数消毒（offset ≥ 0、limit ∈ [1, 200]）在服务层，不在这里 —— 控制器保持薄。
+     * 参数消毒（offset ≥ 0、limit ∈ [1, 100]）在服务层，不在这里 —— 控制器保持薄。
      */
     @PostMapping("/detail")
     public Map<String, Object> detail(

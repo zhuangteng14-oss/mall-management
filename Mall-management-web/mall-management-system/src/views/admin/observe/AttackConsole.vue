@@ -138,7 +138,8 @@
               那组**真的会进引擎并写进记录**，这一枚不会改变任何读数，形状不同就该长得不同）。
            ⚠️ 五枚都照旧进 `drill_record`（后端 `AttackEngine.buildScenarioJson` 写进 `Result.Engine`）⇒ 「这一轮到底是按哪套开关跑的」事后可复现仍是它们的价值之一。
            ⚠️ 缺省 = 防护**全开** / 注入**全关**（后端白名单：表外的 key 一律 400，不静默忽略）。
-           ⚠️ 注入里 `mqDown` / `dbSlow` **未接通**：拨得动、进记录，但读数不变 —— 「收了但没实现」如实列进结果的 `Engine.InjectionsNotWired`（见 `INJECTIONS_NOT_WIRED`）。 -->
+           ⚠️ D3（2026-10-18）起四个注入**全部真接通**（见 `INJECTIONS_NOT_WIRED` 现为空）：
+              `mqDown` 只拦发布侧、`dbSlow` 只延迟 SELECT、`jobDown` 只让定时任务整轮跳过。 -->
       <!-- ⚠️【3a.1 → 3a.6 临时窗口】下一行的 `<p>` 就是窗口开关：**提示在 = 窗口开、提示没 = 窗口关**（3a.6 接上配置面时删掉它即可）。 -->
       <p class="a-window-note">⚠️ 本区暂不可用（配置面已就绪，页面接线在 3a.6）</p>
       <h3 class="a-sub">
@@ -168,7 +169,7 @@
 
       <h3 class="a-sub">
         故障注入
-        <span class="a-subn">默认全关 · 标「未接通」的两个拨了也不变读数</span>
+        <span class="a-subn">默认全关 · 四枚都会改变读数（MQ 只拦发布侧、慢 SQL 只延迟 SELECT、调度停摆不中断在途）</span>
       </h3>
       <div class="a-switches">
         <button
@@ -176,17 +177,14 @@
           :key="k"
           type="button"
           class="a-sw"
-          :class="{ 'is-off': !injections.has(k), 'is-na': !wired(k) }"
+          :class="{ 'is-off': !injections.has(k) }"
           :aria-pressed="injections.has(k) ? 'true' : 'false'"
-          :title="wired(k)
-            ? `${injectionLabel(k)}：${injections.has(k) ? '已开' : '已关'}（点一下拨动）—— 这一路真接通了`
-            : `${injectionLabel(k)}：未接通 —— 拨动只进记录，读数不变（结果里列进 InjectionsNotWired）`"
+          :title="`${injectionLabel(k)}：${injections.has(k) ? '已开' : '已关'}（点一下拨动）—— 这一路真接通了`"
           :disabled="running"
           @click="toggleInjection(k)"
         >
           <i class="a-sw-dot" aria-hidden="true"></i>
           <span class="a-sw-n">{{ injectionLabel(k) }}</span>
-          <span v-if="!wired(k)" class="a-sw-na">未接通</span>
         </button>
       </div>
 
@@ -526,7 +524,6 @@ import Pager from '../../../components/Pager.vue'
 //    任何开关中文（那条判据见 `observe-labels.js` 文件头：可观测域的中文只有一份，在那）。
 import {
   INJECTIONS,
-  INJECTIONS_NOT_WIRED,
   injectionLabel,
   PROTECTIONS,
   protectionLabel,
@@ -708,17 +705,10 @@ function setWeight(key, v) {
 
 // ── 丁：开关的拨动（commit 10c）──────────────────────────────────────────────
 /**
- * 这一路注入**真接通了没有**。判据取自 `INJECTIONS_NOT_WIRED` —— 它是后端
- * `AttackEngine.INJECTIONS_NOT_WIRED` 的镜像，页面**不自己判断**哪几个未接通
- * （那是一条后端事实，前端写第二遍迟早对不上）。
- */
-const wired = (key) => !INJECTIONS_NOT_WIRED.includes(key)
-
-/**
  * 防护开关**有没有真闸**（阶段 2b 起只剩 `degrade` 这一枚）—— 判据取自 `PROTECTIONS_NOT_WIRED`（后端
  * `ProtectionGate.WIRED_KEYS` 的镜像，见 `observe-labels.js` 那张表）。页面**不自己判断**
- * 哪几枚没接闸（那是后端事实，前端写第二遍迟早对不上）。⚠️ 与 `wired(k)` 是**两个不同的判据**，
- * 别合并：那个说的是「这一路**注入**接通了没有」，这个说的是「这枚**防护开关**接了闸没有」。
+ * 哪几枚没接闸（那是后端事实，前端写第二遍迟早对不上）。
+ * ⚠️ D3（2026-10-18）起四个**注入**全部真接通，本页不再有「注入是否接通」的第二个判据。
  */
 const protectionOn = (key) => protectionWired(key)
 
@@ -734,9 +724,7 @@ function toggleProtection(key) {
   protections.value = next
 }
 
-/** 拨一枚注入开关（同上）。⚠️ 未接通的那两枚**照样拨得动**：它们的意义就是「接口位」——
- *  拨不动会让人以为「后端根本没有这个开关」，而它确实在白名单里、收得下、记得住，
- *  只是这一路没有实现 ⇒ 用「拨得动 + 标着未接通」说这件事，比禁用更如实（见 `INJECTIONS_NOT_WIRED`）。 */
+/** 拨一枚注入开关（同上）。D3 起四枚都真接通，拨动即生效（后端 `AttackSwitchConfig` 共享配置）。 */
 function toggleInjection(key) {
   const next = new Set(injections.value)
   if (next.has(key)) next.delete(key)
@@ -1598,25 +1586,13 @@ onBeforeUnmount(() => {
 .a-sw-n {
   font-size: var(--fs-xs);
 }
-/* 未接通的那两枚（`mqDown` / `dbSlow`）：整枚改成虚线边 —— 一眼看出它是个**占位**。
-   ⚠️ 但**不置灰到不可点**：拨得动是故意的（理由见 `toggleInjection` —— 拨不动会被读成
-   「后端根本没这个开关」，而它确实在白名单里）。 */
-.a-sw.is-na {
-  border-style: dashed;
-}
-/* 「未接通」的角标 —— 虚线边 + 警示色：它是一条**说明**，不是一个按钮。 */
-.a-sw-na {
-  font-size: var(--fs-xs);
-  color: var(--warning);
-  border: 1px dashed var(--warning);
-  border-radius: var(--r1);
-  padding: 0 var(--s1);
-}
+/* ⚠️ D3（2026-10-18）起注入四枚全部真接通：原先给 `mqDown` / `dbSlow` 的
+   `.a-sw.is-na`（虚线边）与 `.a-sw-na`（「未接通」角标）**已删除** —— 留着会让读代码的人
+   以为还有占位开关。页面不再存在「拨了也不变读数」的注入。 */
 /* 「不可开关」的那一枚防护开关（D 段 · commit 2 立案、阶段 2b 起只剩
    `degrade` = 记录位 —— `retry` 已接闸、不再是这一类）—— **标灰 + 虚线边 + 中性色角标**。
-   ⚠️ 与上面 `.a-sw.is-na`（注入的「未接通」）**不是同一件事**，故另起两条类名，不共用：
-   那个说的是「接通了没有」（**拨得动**，拨动会进记录）；这个说的是「**能不能拨**」（不可开关）。
-   共用一条会让防护开关看起来「也能拨」，而它们的模板 `disabled` 是常开的。 */
+   ⚠️ 它说的是「**能不能拨**」（不可开关），与「注入了没有」是两件事；
+   共用类名会让防护开关看起来「也能拨」，而它们的模板 `disabled` 是常开的。 */
 .a-sw.is-locked {
   border-style: dashed;
   background: transparent;

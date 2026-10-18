@@ -17,6 +17,7 @@ import java.lang.reflect.Method;
 import java.sql.PreparedStatement;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -149,6 +150,41 @@ class SlowSqlListenerTest {
         assertThat(msg).contains("set phone = ?");          // 模板在
         assertThat(msg).doesNotContain("13800138000");      // 值不在
         assertThat(msg).doesNotContain("13900139000");
+    }
+
+    // ==================== D3：dbSlow 注入 ====================
+
+    @Test
+    @DisplayName("dbSlow：只延迟 SELECT / WITH；写路径不睡（一条 30ms 也量得出来）")
+    void dbSlowSleepsForSelectOnly() {
+        SlowSqlListener listener = new SlowSqlListener(THRESHOLD, () -> true, 40, 300);
+
+        long updateStart = System.nanoTime();
+        listener.beforeQuery(null, sql("update mall_management_sql.`user` set phone = ? where id = ?"));
+        long updateMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - updateStart);
+
+        long selectStart = System.nanoTime();
+        listener.beforeQuery(null, sql("  SeLeCt 1"));
+        long selectMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - selectStart);
+
+        assertThat(updateMs).as("写路径不延迟（不是没测到：下面那条真的睡了）").isLessThan(30);
+        assertThat(selectMs).as("SELECT 真的延迟了").isGreaterThanOrEqualTo(30);
+        assertThat(SlowSqlListener.containsSelect(sql("with t as (select 1) select * from t"))).isTrue();
+        assertThat(SlowSqlListener.containsSelect(sql("insert into t values (1)"))).isFalse();
+    }
+
+    @Test
+    @DisplayName("dbSlow：预算硬上限 300ms —— 连续 SELECT 不会被叠加成 N×delay")
+    void dbSlowStopsAtTheBudget() {
+        SlowSqlListener listener = new SlowSqlListener(THRESHOLD, () -> true, 50, 300);
+        long start = System.nanoTime();
+        for (int i = 0; i < 10; i++) {
+            listener.beforeQuery(null, sql("select " + i));
+        }
+        long elapsedMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start);
+
+        assertThat(elapsedMs).as("10 × 50ms 若不受预算约束会是 500ms").isLessThan(500);
+        assertThat(elapsedMs).as("预算不是 0（前几拍确实延迟了）").isGreaterThanOrEqualTo(250);
     }
 
     @Test

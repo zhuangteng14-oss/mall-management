@@ -1,6 +1,8 @@
 package com.minke.mallmanagement.observe.service;
 
 import com.minke.mallmanagement.goods.dao.GoodsDao;
+import com.minke.mallmanagement.observe.dao.ObservedEventDlqDao;
+import io.micrometer.core.instrument.Gauge;
 import io.micrometer.core.instrument.Timer;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.DisplayName;
@@ -95,17 +97,41 @@ class MetricsSnapshotServiceTest {
     }
 
     @Test
-    @DisplayName("防护 8 项：固定 8 行、顺序与 tag 固定（页面柱子顺序不许随数据变）")
-    void protectionsAreAlwaysTheSameEightRows() {
+    @DisplayName("防护 12 项：固定 12 行、顺序与 tag 固定（页面柱子顺序不许随数据变）")
+    void protectionsAreAlwaysTheSameTwelveRows() {
         when(goodsDao.selectStockLevels(anyInt())).thenReturn(List.of());
 
         Map<String, Object> frame = frames.frame(0);
 
         assertThat(rowsOf(frame, "protections")).extracting(r -> r.get("tag")).containsExactly(
                 "cacheHit", "lockTimeout", "orderRejected", "stockInsufficient",
-                "auditFailed", "notifyFailed", "sensitiveHit", "identityRejected");
+                "auditFailed", "notifyFailed", "sensitiveHit", "identityRejected",
+                // D3（2026-10-18）：4 个防护开关读数追加在后，共 12 条
+                "rateLimit", "circuitBreak", "poolIsolation", "retry");
         assertThat(rowsOf(frame, "protections")).extracting(r -> r.get("label"))
                 .allSatisfy(label -> assertThat(label).as("标签是给页面直接显示的中文").isInstanceOf(String.class));
+    }
+
+    @Test
+    @DisplayName("D3：注入状态在 gauges.injections 里（读不到是 null，不是 0）")
+    void injectionGaugesAreExposedSeparatelyFromProtectionHits() {
+        when(goodsDao.selectStockLevels(anyInt())).thenReturn(List.of());
+        Gauge.builder("mall.observe.injection.redisDown", () -> 0.0).register(registry);
+        Gauge.builder("mall.observe.injection.mqDown", () -> 1.0).register(registry);
+        Gauge.builder("mall.observe.injection.dbSlow", () -> 0.0).register(registry);
+        Gauge.builder("mall.observe.injection.jobDown", () -> 0.0).register(registry);
+
+        Map<String, Object> frame = frames.frame(0);
+
+        @SuppressWarnings("unchecked")
+        Map<String, Object> gauges = (Map<String, Object>) frame.get("gauges");
+        assertThat(gauges).containsKey("injections");
+        @SuppressWarnings("unchecked")
+        Map<String, Object> injections = (Map<String, Object>) gauges.get("injections");
+        assertThat(injections).containsEntry("mqDown", 1.0).containsEntry("redisDown", 0.0);
+        assertThat(injections).containsEntry("dbSlow", 0.0).containsEntry("jobDown", 0.0);
+        // 健康度里必须点名「是演练把它弄成这样的」，否则红/黄会被当成真故障
+        assertThat(frame.get("health").toString()).contains("演练注入开启");
     }
 
     @Test
@@ -283,7 +309,49 @@ class MetricsSnapshotServiceTest {
                 + "这里会是 0（读数已被前一条读走）—— 页面看起来像铁死了").containsEntry("hit", 6L);
     }
 
+    // ================= 死信副本（D3-2）=================
+
+    @Test
+    @DisplayName("⚠️ 没有 DAO（切片 / MQ 与库分离）⇒ persisted=null，**不是 0**")
+    void persistedIsNullWithoutTheDao() {
+        when(goodsDao.selectStockLevels(anyInt())).thenReturn(List.of());
+
+        assertThat(dlqOf(frames.frame(0)).get("persisted"))
+                .as("「读不到副本表」与「副本表一条都没有」在页面上必须显示成两种东西（— vs 0）")
+                .isNull();
+    }
+
+    @Test
+    @DisplayName("有 DAO ⇒ persisted = 表里的真实行数；它**不是**本拍差分（累计口径）")
+    void persistedReadsTheTableCount() {
+        when(goodsDao.selectStockLevels(anyInt())).thenReturn(List.of());
+        ObservedEventDlqDao dlqDao = mock(ObservedEventDlqDao.class);
+        when(dlqDao.count()).thenReturn(3L);
+        service.setDlqDao(dlqDao);
+
+        assertThat(dlqOf(frames.frame(0)).get("persisted")).isEqualTo(3L);
+        assertThat(dlqOf(frames.frame(1)).get("persisted")).as("累计口径：不因两拍而减半 / 差分").isEqualTo(3L);
+    }
+
+    @Test
+    @DisplayName("⚠️ 读表抛异常（数据库不可用正是死信产生的时候）⇒ persisted=null，绝不回落成 0")
+    void persistedIsNullWhenTheReadFails() {
+        when(goodsDao.selectStockLevels(anyInt())).thenReturn(List.of());
+        ObservedEventDlqDao dlqDao = mock(ObservedEventDlqDao.class);
+        when(dlqDao.count()).thenThrow(new IllegalStateException("db down"));
+        service.setDlqDao(dlqDao);
+
+        Map<String, Object> dlq = dlqOf(frames.frame(0));
+        assertThat(dlq.get("persisted")).isNull();
+        assertThat(dlq.get("total")).as("计数器那一路仍照常给数（两条路互不依赖）").isEqualTo(0L);
+    }
+
     // ================= 工具 =================
+
+    @SuppressWarnings("unchecked")
+    private static Map<String, Object> dlqOf(Map<String, Object> frame) {
+        return (Map<String, Object>) frame.get("dlq");
+    }
 
     @SuppressWarnings("unchecked")
     private static Map<String, Object> cacheOf(Map<String, Object> frame) {

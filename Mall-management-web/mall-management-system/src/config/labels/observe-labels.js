@@ -429,38 +429,40 @@ export const PROTECTION_NOT_WIRED_TIP = {
 }
 
 /**
- * 攻击演练的**三个故障注入开关** key → 中文名 + 声明序（commit 10c 起头）。
+ * 攻击演练的**四个故障注入开关** key → 中文名 + 声明序（commit 10c 起头，D3 扩到 4 枚）。
  *
  * ⚠️ 【key 与顺序对齐后端】`AttackEngine.java` 的
- *    `INJECTION_KEYS = List.of("redisDown","mqDown","dbSlow")` 是唯一出处。
+ *    `INJECTION_KEYS = List.of("redisDown","mqDown","dbSlow","jobDown")` 是唯一出处。
+ *    第 4 枚 `jobDown` 是 D3（2026-10-18）新增：让七个 {@code @Scheduled} 任务整轮跳过。
  *
- * ⚠️ 【中文名是**本仓新起**的，不是抄来的】后端对这三个 key **没有**中文文案
+ * ⚠️ 【中文名是**本仓新起**的，不是抄来的】后端对这四个 key **没有**中文文案
  *    （`redisDown` 那一路复用的是 `AttackEngine.REDIS_DOWN_CAUSE` 那句「SIM：演练注入的 L2 故障…」，
- *    那是日志文案不是开关名）。故这里如实登记：`Redis 断开` / `MQ 断开` / `慢 SQL` 三个词
- *    **出自本文件**（前两个与 `SCENARIO_LABEL.redisDown`、`AttackEngine` 里「慢 SQL」的用词对齐）。
+ *    那是日志文案不是开关名）。故这里如实登记：`Redis 断开` / `MQ 断开` / `慢 SQL` / `调度停摆`
+ *    四个词**出自本文件**（前两个与 `SCENARIO_LABEL.redisDown`、`AttackEngine` 里「慢 SQL」的用词对齐）。
  *
  * ⚠️ 【`redisDown` 这个词在两处出现，含义不同】这里说的是**注入开关**（让 L2 真的不可用）；
  *    `SCENARIO_LABEL.redisDown` 说的是**场景**（打 Redis 相关读的那一类请求）。
  *    两者能同时开、也能只开一个 —— 别把两张表合成一张。
  */
-export const INJECTIONS = ['redisDown', 'mqDown', 'dbSlow']
+export const INJECTIONS = ['redisDown', 'mqDown', 'dbSlow', 'jobDown']
 
 /** `INJECTIONS` 的 key → 中文（本仓新起，见上）。 */
 export const INJECTION_LABEL = {
   redisDown: 'Redis 断开',
   mqDown: 'MQ 断开',
   dbSlow: '慢 SQL',
+  jobDown: '调度停摆',
 }
 
 /**
- * **本笔没有真接通**的注入 —— 面板必须把它们画成「未接通」（可点也要标出来，或不给点）。
+ * **没有真接通**的注入 —— 面板必须把它们画成「未接通」。
  *
- * ⚠️ 这是后端 `AttackEngine.INJECTIONS_NOT_WIRED = List.of("mqDown","dbSlow")` 的**镜像**。
- *    后端把「这一轮哪些注入其实没生效」如实列进结果里的 `Engine.InjectionsNotWired`
- *    ⇒ 前端这份只用于**开跑之前**就把话说明白（那一刻还没有结果可读）。
- *    ⚠️ 未接通 = 拨了它**读数不会变**。画成一个能拨的开关而不标出来，等于骗人。
+ * ⚠️ D3（2026-10-18）起为空：`mqDown` 拦发布侧、`dbSlow` 延迟 SELECT、`jobDown` 停调度，
+ *    四个注入**全部真接通**（后端 `AttackEngine.INJECTIONS_NOT_WIRED = List.of()`）。
+ *    本表保留为空数组而不是删掉：它是「面板是否该标未接通」的**唯一判据**，后端若再添
+ *    占位键，两边各改一行即可；删掉会让页面失去这个判据。
  */
-export const INJECTIONS_NOT_WIRED = ['mqDown', 'dbSlow']
+export const INJECTIONS_NOT_WIRED = []
 
 /** 取场景中文名（认不出回落 key 原文）。 */
 export function scenarioLabel(key) {

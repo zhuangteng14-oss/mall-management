@@ -2701,14 +2701,15 @@ public class ConcurrencyRunner {
                   + "AND LOWER(table_name) IN ('order_state_transition','admin_audit','notification',"
                   + "'merchant_application','goods_audit','template','cart','order_shipping_track','order_item','stats_daily','goods_sku',"
                   + "'coupon','coupon_grant','subsidy_rule','subsidy_goods','seckill_invitation','seckill_application','seckill_activity','shop_follow',"
-                  + "'comment','comment_mention','comment_image','comment_like','report','sensitive_word','drill_record','observed_event')");
-            final int KNOWN_TABLES = 27;   // = 上面 IN 清单的长度（加表时**四处同改**，见上方注释块）
+                  + "'comment','comment_mention','comment_image','comment_like','report','sensitive_word','drill_record','observed_event',"
+                  + "'observed_event_dlq')");
+            final int KNOWN_TABLES = 28;   // = 上面 IN 清单的长度（加表时**四处同改**，见上方注释块）
             boolean p3 = tables == 11 + known && known == KNOWN_TABLES;
             pre.put("P3", (p3 ? "PASS" : "FAIL") + " 表数=" + tables + "；已知追加表 order_state_transition /"
                     + " admin_audit / notification / merchant_application /"
                     + " goods_audit / template / cart / order_shipping_track / order_item / stats_daily / goods_sku /"
                     + " coupon / coupon_grant / subsidy_rule / subsidy_goods / seckill_invitation / seckill_application / seckill_activity / shop_follow /"
-                    + " comment / comment_mention / comment_image / comment_like / report / sensitive_word / drill_record / observed_event 在 " + known + "/" + KNOWN_TABLES
+                    + " comment / comment_mention / comment_image / comment_like / report / sensitive_word / drill_record / observed_event / observed_event_dlq 在 " + known + "/" + KNOWN_TABLES
                     + " 张（期望表数 = 11 + " + KNOWN_TABLES + " = " + (11 + KNOWN_TABLES) + "）");
 
             // P4 种子计数：确认是刚导入过的干净实例，而非被上一轮污染过的库

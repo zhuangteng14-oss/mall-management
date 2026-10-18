@@ -1,5 +1,6 @@
 package com.minke.mallmanagement.marketing.seckill.service;
 
+import com.minke.mallmanagement.shared.web.PageLimits;
 import com.minke.mallmanagement.marketing.seckill.dao.SeckillDao;
 import org.springframework.stereotype.Service;
 
@@ -39,9 +40,9 @@ import java.util.regex.Pattern;
 @Service
 public class SeckillService {
 
-    public static final int DEFAULT_LIMIT = 100;
+    public static final int DEFAULT_LIMIT = PageLimits.DEFAULT_PAGE_SIZE;
 
-    public static final int MAX_LIMIT = 500;
+    public static final int MAX_LIMIT = PageLimits.MAX_PAGE_SIZE;
 
     /** {@code seckill_invitation.Status} 取值域（与建表注释逐字一致）。 */
     public static final String INVITED = "invited";

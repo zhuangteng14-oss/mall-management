@@ -1,6 +1,7 @@
 package com.minke.mallmanagement.observe.service;
 
 import com.minke.mallmanagement.goods.dao.GoodsDao;
+import com.minke.mallmanagement.observe.dao.ObservedEventDlqDao;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.Gauge;
 import io.micrometer.core.instrument.MeterRegistry;
@@ -8,6 +9,7 @@ import io.micrometer.core.instrument.Timer;
 import io.micrometer.core.instrument.distribution.ValueAtPercentile;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 import java.util.ArrayList;
@@ -98,6 +100,23 @@ public class MetricsSnapshotService {
     private static final String SENSITIVE_CHECKS = "mall.sensitive.checks";
     /** {@code observe/metrics/IdentityMetrics.java} */
     private static final String IDENTITY_CHECKS = "mall.identity.checks";
+    /** {@code observe/metrics/ProtectionMetrics.java:63}（tag：protection / result）—— D3 起进 protections 段。 */
+    private static final String PROTECTION_EVENTS = "mall.protection.events";
+    /** 演练注入的 0/1 状态 gauge（D3，注册在 {@code AttackSwitchConfig} 的构造器里）。 */
+    private static final String INJECTION_GAUGE_PREFIX = "mall.observe.injection.";
+    /** MQ 发布侧可用性 gauge（D3，注册在 {@code RabbitEventPublisher} 的构造器里）。 */
+    private static final String MQ_UP = "mall.observe.mq.up";
+
+    /** 四个演练注入键（顺序与攻击页一致）。 */
+    private static final List<String> INJECTION_KEYS =
+            List.of("redisDown", "mqDown", "dbSlow", "jobDown");
+
+    /** 注入键 → 中文名（健康度理由里用；前端也有一份同口径的，见 observe-labels.js）。 */
+    private static final Map<String, String> INJECTION_LABELS = Map.of(
+            "redisDown", "Redis 降级",
+            "mqDown", "MQ 发布中断",
+            "dbSlow", "数据库慢查询",
+            "jobDown", "调度停摆");
 
     /** 5xx 占比达到它 = 健康度红（**演示阈值，待业务裁**）。 */
     private static final double ERROR_RATE_ERROR = 0.05;
@@ -144,9 +163,25 @@ public class MetricsSnapshotService {
     private final MeterRegistry registry;
     private final GoodsDao goodsDao;
 
+    /**
+     * 死信副本的读口（D3-2）。用**可选 setter** 而不是构造器参数：本类的构造器
+     * {@code (MeterRegistry, GoodsDao)} 被大量单测与 {@code @WebMvcTest} 切片直接调用，
+     * 多一个必填形参会同时打破两边；而「没有这个 DAO」本身就是一个合法状态
+     * （切片没导入它 / 将来 MQ 与库分离部署）⇒ {@code persisted} 如实回 {@code null}。
+     */
+    private volatile ObservedEventDlqDao dlqDao;
+
+    /** 只告警一次：读表失败时每拍都 WARN 会把日志刷成一条河；恢复成功后再重新武装。 */
+    private volatile boolean dlqCountWarned;
+
     public MetricsSnapshotService(MeterRegistry registry, GoodsDao goodsDao) {
         this.registry = registry;
         this.goodsDao = goodsDao;
+    }
+
+    @Autowired(required = false)
+    public void setDlqDao(ObservedEventDlqDao dlqDao) {
+        this.dlqDao = dlqDao;
     }
 
     /** 现建一份「这条连接自己的」帧源（见类注释「每连接一份」）。 */
@@ -354,11 +389,19 @@ public class MetricsSnapshotService {
         }
 
         /**
-         * 死信（A4）：{@code total} 累计、{@code delta} 本拍增量。
+         * 死信（A4）：{@code total} 累计、{@code delta} 本拍增量、{@code persisted} 已落库副本数。
          *
-         * <p>⚠️ 计数器由 {@code ObservedEventConsumer} 在「重试耗尽、转 DLQ」那一刻加
+         * <p>⚠️ {@code total} 由 {@code ObservedEventConsumer} 在「重试耗尽、转 DLQ」那一刻加
          * （指标名 {@code mall.observe.dead.letters}）。MQ 未配置时没有消费者 ⇒ 恒 0，
          * 这是**如实**的：没有消费者就没有死信，不是「读不到」。
+         *
+         * <p>⚠️ {@code persisted} 是**另一个口径**：它读的是 {@code observed_event_dlq} 表当前
+         * 有多少行（D3-2 的 best-effort 副本）。两种情况下它必须是 {@code null}、**不能是 0**：
+         * <ul>
+         *   <li>DAO 不可用（切片里没导入 / 将来 MQ 与库分离部署）；</li>
+         *   <li>读表抛异常（数据库不可用 —— 那恰恰是死信产生的时候）。</li>
+         * </ul>
+         * 「一条都没落库」与「读不到表」在页面上必须是两句话（前者 {@code 0}，后者 {@code —}）。
          */
         private Map<String, Object> dlq() {
             double total = 0.0;
@@ -368,10 +411,18 @@ public class MetricsSnapshotService {
             Map<String, Object> row = new LinkedHashMap<>();
             row.put("total", (long) total);
             row.put("delta", (long) delta("dlq.total", total));
+            row.put("persisted", persistedDeadLetters());
             return row;
         }
 
-        /** 8 类防护命中（本拍增量）。前 4 类来自既有三块，后 4 类来自本块四环。 */
+        /**
+         * 12 类防护命中（本拍增量）：前 8 类是既有业务读数，后 4 类是 D3 追加的防护开关读数
+         * （{@code rateLimit} / {@code circuitBreak} / {@code poolIsolation} / {@code retry}）。
+         *
+         * <p>⚠️ 后 4 类**不是**「开关现在是开还是关」，而是「本拍这套保护实际挡下了多少」——
+         * 开关状态在 {@code gauges.injections} 里，两者别混。开关开着但没流量命中，读数就是 0，
+         * 那是**如实**的（面板上「开关开」与「命中 0」并存不是矛盾，是「没有东西打过来」）。
+         */
         private List<Map<String, Object>> protections(Map<String, Object> cache,
                                                       List<Map<String, Object>> locks) {
             long lockTimeout = 0L;
@@ -393,7 +444,35 @@ public class MetricsSnapshotService {
                     delta(key(SENSITIVE_CHECKS, "all"), sumAll(SENSITIVE_CHECKS))));
             out.add(protection("identityRejected", "身份拒绝",
                     delta(key(IDENTITY_CHECKS, "rejected"), sum(IDENTITY_CHECKS, "result", "rejected"))));
+            // ==== D3：追加 4 条防护开关读数（共 12 条）====
+            out.add(protection("rateLimit", "限流拦截",
+                    delta(protectionKey("rateLimit"), protectionSum("rateLimit"))));
+            out.add(protection("circuitBreak", "熔断拦截",
+                    delta(protectionKey("circuitBreak"), protectionSum("circuitBreak"))));
+            out.add(protection("poolIsolation", "线程池隔离",
+                    delta(protectionKey("poolIsolation"), protectionSum("poolIsolation"))));
+            out.add(protection("retry", "死锁重试",
+                    delta(protectionKey("retry"), protectionSum("retry"))));
             return out;
+        }
+
+        /**
+         * 某一个防护开关的**累计**命中数（该 protection tag 下所有 result 之和）。
+         *
+         * <p>⚠️ 不按 result 过滤：这一行要与「开关」对上，用户看图读的是「限流这套东西动了没有」，
+         * 而不只是「拦了几个 429」。熔断打开/半开/恢复、线程池挤出的 success 等同样是它做过的事。
+         * 各 result 的细分在事件流里（{@code ProtectionMetrics} 的 9 类源环），这里不重复建一份。
+         */
+        private double protectionSum(String protectionTag) {
+            double total = 0.0;
+            for (Counter c : registry.find(PROTECTION_EVENTS).tag("protection", protectionTag).counters()) {
+                total += c.count();
+            }
+            return total;
+        }
+
+        private static String protectionKey(String protectionTag) {
+            return key(PROTECTION_EVENTS, "protection:" + protectionTag);
         }
     }
 
@@ -433,12 +512,53 @@ public class MetricsSnapshotService {
         return !uri.endsWith(SSE_URI_SUFFIX) && !DRILL_RUN_URI.equals(uri);
     }
 
-    /** 两个 0/1 状态通道（可能为 null：gauge 还没被绑定时 Micrometer 里根本没有这个 meter）。 */
+    /**
+     * 状态通道（可能为 null：gauge 还没被绑定时 Micrometer 里根本没有这个 meter）。
+     *
+     * <p>D3 追加两段：
+     * <ul>
+     *   <li>{@code injections}：4 个演练注入的 0/1 状态（Meter 名 {@code mall.observe.injection.*}）；</li>
+     *   <li>{@code mqUp}：发布侧可用（broker 连着且未被 mqDown 断开）。</li>
+     * </ul>
+     * ⚠️ 注入项读不到时是 {@code null} 而不是 0 —— 「能力不存在」与「开关关着」不是一回事，
+     * 页面要把 {@code null} 显示成 `—`（同 DLQ 的口径）。
+     */
     private Map<String, Object> gauges() {
         Map<String, Object> out = new LinkedHashMap<>();
         out.put("l2Up", gauge(CACHE_L2_UP));
         out.put("lockUp", gauge(LOCK_UP));
+        Map<String, Object> injections = new LinkedHashMap<>();
+        for (String key : INJECTION_KEYS) {
+            injections.put(key, gauge(INJECTION_GAUGE_PREFIX + key));
+        }
+        out.put("injections", injections);
+        out.put("mqUp", gauge(MQ_UP));
         return out;
+    }
+
+    /**
+     * 死信副本的行数；**读不到 ⇒ {@code null}**（不是 0）。
+     *
+     * <p>⚠️ 这是每拍一次 COUNT（面板本来每拍就查一次库存水位，代价同级）。
+     * 失败只 WARN **一次**：数据库不可用会让每一拍都失败，1 秒一条 WARN 会把日志刷屏，
+     * 而第一条之后的那些并不带来新信息；恢复成功后重新武装。
+     */
+    private Long persistedDeadLetters() {
+        if (dlqDao == null) {
+            return null;
+        }
+        try {
+            Long count = dlqDao.count();
+            dlqCountWarned = false;
+            return count;
+        } catch (RuntimeException e) {
+            if (!dlqCountWarned) {
+                dlqCountWarned = true;
+                log.warn("[observe] 死信副本行数读取失败（本拍 dlq.persisted=null；后续失败不再逐拍告警）：{}",
+                        e.toString());
+            }
+            return null;
+        }
     }
 
     /** 库存水位段（唯一一次真查询；失败也不让流断，理由见类注释「代价」一节）。 */
@@ -480,6 +600,7 @@ public class MetricsSnapshotService {
         Double p99 = (Double) requests.get("p99Ms");
         Double l2Up = (Double) gauges.get("l2Up");
         Double lockUp = (Double) gauges.get("lockUp");
+        Double mqUp = (Double) gauges.get("mqUp");
         Double cacheHitRate = (Double) cache.get("hitRate");
         if (errorRate != null && errorRate >= ERROR_RATE_ERROR) {
             reasons.add("5xx 占比 " + pct(errorRate) + "（≥ " + pct(ERROR_RATE_ERROR) + "）");
@@ -495,6 +616,23 @@ public class MetricsSnapshotService {
         }
         if (l2Up != null && l2Up == 0.0) {
             warnReasons.add("L2 处于降级窗口（读回落数据库）");
+        }
+        // D3：演练注入 / MQ 发布侧 —— 这两条是「我们故意弄坏的」与「真坏了」，页面都要能看见。
+        Object rawInjections = gauges.get("injections");
+        if (rawInjections instanceof Map<?, ?> injections) {
+            List<String> on = new ArrayList<>();
+            for (String key : INJECTION_KEYS) {
+                Object v = injections.get(key);
+                if (v instanceof Double d && d == 1.0) {
+                    on.add(INJECTION_LABELS.getOrDefault(key, key));
+                }
+            }
+            if (!on.isEmpty()) {
+                warnReasons.add("演练注入开启：" + String.join(" / ", on) + "（读数会偏离真实健康度）");
+            }
+        }
+        if (mqUp != null && mqUp == 0.0) {
+            warnReasons.add("MQ 发布侧不可用（broker 断开或 mqDown 注入中）");
         }
         if (Boolean.FALSE.equals(stock.get("available"))) {
             warnReasons.add("库存水位本轮读不到");

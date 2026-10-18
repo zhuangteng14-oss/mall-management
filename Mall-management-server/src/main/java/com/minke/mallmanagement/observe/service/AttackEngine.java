@@ -177,9 +177,12 @@ import java.util.concurrent.atomic.AtomicLong;
  * </ol>
  * ⚠️ 但<b>本类一条防护逻辑都不实现</b>：{@code protections} 五个开关的真闸在 {@code ProtectionGate}
  * （D 段 commit 2 落地、{@code retry} 于阶段 2b 接上，口径 = **4 键接闸 + 1 键记录位**）。
- * 三个注入里**只有 {@link #INJECTION_REDIS_DOWN} 真接通**（复用 {@code L2HealthProbe} 那套现成原语，
- * 见类注释四）；{@code mqDown} / {@code dbSlow} 收得下、记得住，但没有任何实现
- * —— 结果里会把它们列进 {@code NotWired}，免得看数字的人以为它们生效了。
+ * 四个注入自 **D3（2026-10-18）** 起**全部真接通**：
+ * {@link #INJECTION_REDIS_DOWN} 复用 {@code L2HealthProbe} 的原语（见类注释四）；
+ * {@code mqDown} 拦 {@code RabbitEventPublisher} 的发布侧（消费者不暂停）；
+ * {@code dbSlow} 在 {@code SlowSqlListener.beforeQuery} 延迟 SELECT（每请求 ≤300ms）；
+ * {@code jobDown} 经 {@code ScheduledJobGate} 让七个定时任务整轮跳过。
+ * ⇒ {@link #INJECTIONS_NOT_WIRED} 为空，结果里的 {@code NotWired} 不再列任何键。
  */
 @Component
 public class AttackEngine {
@@ -370,21 +373,35 @@ public class AttackEngine {
             List.of("rateLimit", "circuitBreak", "degrade", "retry", "poolIsolation");
 
     /**
-     * 三个**故障注入开关**的 key（默认全关）。
+     * 四个**故障注入开关**的 key（默认全关）。
      *
-     * <p>⚠️ 本笔只有 {@link #INJECTION_REDIS_DOWN} 一个**真接通**（走 {@code L2HealthProbe} 那套
-     * 现成原语，见类注释四）；{@code mqDown} / {@code dbSlow} 收得下、记得住，但**没有实现**
-     * —— 前者在 {@code RabbitEventPublisher} 里没有任何 down 开关，后者要做就得在查询路径上
-     * 注入 sleep（那是**改后端性能**，正撞边界 A/B）。UI 上这两个标「未接通」，
-     * 结果里把它们列进 {@code Engine.InjectionsNotWired}。
+     * <p>⚠️ D3 起**四个都真接通**：{@link #INJECTION_REDIS_DOWN} 走 {@code L2HealthProbe}；
+     * {@link #INJECTION_MQ_DOWN} 在 {@code RabbitEventPublisher#publish} 入口丢弃（发布侧暂停，
+     * **不动消费者**）；{@link #INJECTION_DB_SLOW} 在 {@code SlowSqlListener} 里对 SELECT
+     * 注入有界延迟（每请求预算 300 ms）；{@link #INJECTION_JOB_DOWN} 由
+     * {@code ScheduledJobGate} 让七个 {@code @Scheduled} 入口整轮跳过。
+     *
+     * <p>⚠️ 结果里的 {@code Engine.InjectionsNotWired} **保留**（形状不变），但 D3 起它恒为空
+     * —— 留着是为了让「曾经有两个未接通」这段历史在结果里仍有一个可读的位置，而不是让
+     * 读旧报告的人找不到字段。
      */
-    static final List<String> INJECTION_KEYS = List.of("redisDown", "mqDown", "dbSlow");
+    static final List<String> INJECTION_KEYS =
+            List.of("redisDown", "mqDown", "dbSlow", "jobDown");
 
-    /** 唯一真接通的注入 key（其余两个只是占位，见 {@link #INJECTION_KEYS}）。 */
+    /** L2 故障注入 key（走 {@code L2HealthProbe.markFailed}）。 */
     static final String INJECTION_REDIS_DOWN = "redisDown";
 
-    /** 本笔**未接通**的注入 —— 结果里如实标出来，免得看数字的人以为它们生效了。 */
-    static final List<String> INJECTIONS_NOT_WIRED = List.of("mqDown", "dbSlow");
+    /** MQ 发布侧断开 key（{@code RabbitEventPublisher} 丢弃，不暂停消费者）。 */
+    static final String INJECTION_MQ_DOWN = "mqDown";
+
+    /** 慢 SQL 注入 key（{@code SlowSqlListener} 对 SELECT 注入有界延迟）。 */
+    static final String INJECTION_DB_SLOW = "dbSlow";
+
+    /** 调度停摆注入 key（{@code ScheduledJobGate}，七个 {@code @Scheduled} 入口共用）。 */
+    static final String INJECTION_JOB_DOWN = "jobDown";
+
+    /** D3 起**没有未接通的注入**；字段保留（形状兼容），值恒为空。 */
+    static final List<String> INJECTIONS_NOT_WIRED = List.of();
 
     // ==================== 一次跑的产物 ====================
 
@@ -1908,7 +1925,8 @@ public class AttackEngine {
                 "Abandoned = 收尾宽限 " + GRACE_SECONDS + "s 用尽后被**取消**的在途请求。"
                         + "同样不并入任何一档：那条请求可能已经在服务端跑完了，只是响应没等到",
                 "Protections 五枚里**四枚真生效**（rateLimit / circuitBreak / retry / poolIsolation，阶段 2b）；"
-                        + "degrade 只作记录位 ⇒ 面板上不可开关；Injections 里只有 redisDown 真接通",
+                        + "degrade 只作记录位 ⇒ 面板上不可开关；Injections 四枚（redisDown / mqDown / dbSlow / jobDown）"
+                        + "**全部真接通**（D3）",
                 "Protections / Injections 是**起跑那一刻**的快照（共享配置，3a.1 乙案）。"
                         + "跑的过程中改 /attack/config 对**本轮立即生效**（闸逐发请求读、阶段 B 判据实时读）"
                         + "，但**不改这两项** —— 它们是「开跑时是什么配置」，不是「跑的时候读到了什么」"));

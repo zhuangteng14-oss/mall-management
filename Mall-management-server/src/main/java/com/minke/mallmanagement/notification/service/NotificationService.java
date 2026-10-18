@@ -1,5 +1,6 @@
 package com.minke.mallmanagement.notification.service;
 
+import com.minke.mallmanagement.shared.web.PageLimits;
 import com.minke.mallmanagement.notification.dao.NotificationDao;
 import com.minke.mallmanagement.observe.metrics.NotifyMetrics;
 import org.slf4j.Logger;
@@ -55,10 +56,10 @@ public class NotificationService {
     private static final Logger log = LoggerFactory.getLogger(NotificationService.class);
 
     /** 列表默认条数（前端不传 {@code limit} 时）—— 与 {@code AuditService} 同值，便于心智统一。 */
-    public static final int DEFAULT_LIMIT = 100;
+    public static final int DEFAULT_LIMIT = PageLimits.DEFAULT_PAGE_SIZE;
 
     /** 列表上限 —— 防止一次拉爆整个收件箱。 */
-    public static final int MAX_LIMIT = 500;
+    public static final int MAX_LIMIT = PageLimits.MAX_PAGE_SIZE;
 
     // ==================== 取值域（本笔的口径唯一出处） ====================
 
@@ -264,7 +265,7 @@ public class NotificationService {
 
     // ==================== 内部 ====================
 
-    /** {@code null} / 非正数 ⇒ 默认 100；超上限 ⇒ 截到 500（与 {@code AuditService} 同口径）。 */
+    /** {@code null} / 非正数 ⇒ 默认 100；超上限 ⇒ 截到 100（与 {@code AuditService} 同口径；D3-3 统一上限）。 */
     private static int normalizeLimit(Integer limit) {
         if (limit == null || limit <= 0) {
             return DEFAULT_LIMIT;

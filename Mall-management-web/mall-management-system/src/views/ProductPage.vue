@@ -1178,7 +1178,7 @@ const subsidy = computed(() => {
 const loadSubsidy = async () => {
   if (!isLoggedIn()) return
   try {
-    const data = await subsidyGoods({ limit: 200 })
+    const data = await subsidyGoods({ limit: 100 })
     subsidyRows.value = data && data.success && Array.isArray(data.list) ? data.list : []
   } catch (e) {
     subsidyRows.value = []
@@ -1210,7 +1210,7 @@ const seckill = computed(() => {
 const loadSeckill = async () => {
   if (!isLoggedIn()) return
   try {
-    const data = await seckillLive({ limit: 200 })
+    const data = await seckillLive({ limit: 100 })
     seckillRows.value = data && data.success && Array.isArray(data.list) ? data.list : []
   } catch (e) {
     seckillRows.value = []

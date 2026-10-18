@@ -90,7 +90,7 @@
         </label>
         <label class="a-f a-f-narrow">
           <span>上限</span>
-          <input v-model.number="f.limit" type="number" min="1" max="500" />
+          <input v-model.number="f.limit" type="number" min="1" max="100" />
         </label>
         <div class="a-f-actions">
           <button type="submit" class="a-btn a-btn-on" :disabled="loading"><IconGlyph name="ok" />查询</button>
@@ -101,14 +101,14 @@
       <p class="a-hint">
         未知的状态词**不当成「不筛」**：后端回 <code>success:false</code> 并把原词念回来
         —— 「筛错了一个词」与「这个状态确实没数据」在画面上都是空表，把前者说成后者是最坏的一种错。
-        上限（默认 200 / 最大 <code>500</code>）只做**截断**不做真分页：<code>order</code> 表没有分页键。
+        上限（默认 100 / 最大 <code>100</code>）只做**截断**不做真分页：<code>order</code> 表没有分页键。
       </p>
       <p v-if="truncated" class="a-note">
         本次结果已达取回上限：仅取回 {{ rows.length }} 条（按时间倒序），后面可能还有。
       </p>
 
       <!-- ── 状态分布 · GMV 趋势 · 发货时效（可视化段 commit 3）──────────────────
-           ⚠️ 三张图的数据源都是**本次已取回的 `rows`**（受筛选与上限 200/500 约束），
+           ⚠️ 三张图的数据源都是**本次已取回的 `rows`**（受筛选与上限 100 约束），
               不是全库。`truncated` 为真时它们只覆盖按时间倒序的最近那一段 —— 标题里
               一律带「本次 N 条」，不冒充全量口径。 -->
       <h2 class="a-h2">
@@ -381,7 +381,7 @@ const TABS = [
 ]
 
 // ── 全量视图 ─────────────────────────────────────────────────────────────────
-const f = reactive({ CustomerId: '', MerchantId: '', status: '', from: '', to: '', limit: 200 })
+const f = reactive({ CustomerId: '', MerchantId: '', status: '', from: '', to: '', limit: 100 })
 const rows = ref([])
 const total = ref(0)
 /** ⚠️ 截断由**后端**判（`rows.size() >= 生效上限`），前端**不**拿全表 `total` 反推 ——
@@ -422,7 +422,7 @@ function resetFilters() {
   f.status = ''
   f.from = ''
   f.to = ''
-  f.limit = 200
+  f.limit = 100
   loadList()
 }
 

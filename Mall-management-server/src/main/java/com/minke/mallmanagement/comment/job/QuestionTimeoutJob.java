@@ -3,8 +3,10 @@ package com.minke.mallmanagement.comment.job;
 import com.minke.mallmanagement.comment.dao.CommentDao;
 import com.minke.mallmanagement.notification.NotificationEvents;
 import com.minke.mallmanagement.notification.service.NotificationService;
+import com.minke.mallmanagement.observe.service.ScheduledJobGate;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
@@ -84,9 +86,17 @@ public class QuestionTimeoutJob {
     private final CommentDao commentDao;
     private final NotificationService notificationService;
 
+    /** 调度停摆注入（D3）。{@code null} 只出现在手工 new 的测试里 ⇒ 视为未注入。 */
+    private ScheduledJobGate jobGate;
+
     public QuestionTimeoutJob(CommentDao commentDao, NotificationService notificationService) {
         this.commentDao = commentDao;
         this.notificationService = notificationService;
+    }
+
+    @Autowired(required = false)
+    public void setJobGate(ScheduledJobGate jobGate) {
+        this.jobGate = jobGate;
     }
 
     /**
@@ -95,6 +105,9 @@ public class QuestionTimeoutJob {
      */
     @Scheduled(fixedDelayString = "${mall.comment.question.timeout.fixed-delay-ms:600000}")
     public void scanTimedOutQuestions() {
+        if (jobGate != null && jobGate.paused("questionTimeout")) {
+            return;     // D3：jobDown 注入 ⇒ 整轮跳过（不查库、不发通知）
+        }
         try {
             List<Map<String, Object>> timedOut = commentDao.selectTimedOutQuestions(
                     TIMEOUT_MINUTES, MAX_PER_ROUND, ADMIN_INBOX_ID, NotificationEvents.QUESTION_TIMEOUT);

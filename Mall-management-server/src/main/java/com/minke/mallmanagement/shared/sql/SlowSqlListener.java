@@ -1,12 +1,17 @@
 package com.minke.mallmanagement.shared.sql;
 
+import jakarta.servlet.http.HttpServletRequest;
 import net.ttddyy.dsproxy.ExecutionInfo;
 import net.ttddyy.dsproxy.QueryInfo;
 import net.ttddyy.dsproxy.listener.QueryExecutionListener;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.web.context.request.RequestContextHolder;
+import org.springframework.web.context.request.ServletRequestAttributes;
 
 import java.util.List;
+import java.util.concurrent.TimeUnit;
+import java.util.function.BooleanSupplier;
 
 /**
  * 慢 SQL 告警（C3 块 7 · commit 6b · 批文 Q4 的「丁」）：一条语句跑够 {@code thresholdMs} 就 WARN 一行。
@@ -45,16 +50,149 @@ public class SlowSqlListener implements QueryExecutionListener {
      */
     private static final int MAX_SQL_CHARS = 500;
 
+    /** 慢 SQL 告警阈值（ms）：{@code afterQuery} 在总耗时 ≥ 它时 WARN 一行。 */
     private final long thresholdMs;
 
+    /**
+     * D3 演练注入 {@code dbSlow} 的开关（读共享配置）。默认恒 false ⇒ 本类与 D3 之前
+     * **逐字节同行为**（测试 / 关掉 slow-ms 的 profile 都走这条默认）。
+     */
+    private final BooleanSupplier dbSlowOn;
+
+    /** 每条 SELECT 注入的延迟（ms）。 */
+    private final long dbSlowMs;
+
+    /** 每个请求的延迟总预算（ms）。需求裁定：**最多 300ms**。 */
+    private final long dbSlowBudgetMs;
+
+    /** 请求属性：本请求的延迟截止时刻（{@link System#nanoTime()} 基准）。 */
+    private static final String BUDGET_ATTR = "mall.observe.injection.dbSlow.budgetDeadline";
+
+    /** 请求属性：本请求是否已经记过一行注入日志（避免一次请求几十条 SELECT 刷屏）。 */
+    private static final String LOGGED_ATTR = "mall.observe.injection.dbSlow.logged";
+
+    /** 非请求线程（定时任务 / SSE 流线程）的 1 秒窗口预算：[窗口起点纳秒, 已用纳秒]。 */
+    private static final ThreadLocal<long[]> THREAD_BUDGET =
+            ThreadLocal.withInitial(() -> new long[]{System.nanoTime(), 0L});
+
+    /** 旧构造器：不启用注入（测试与「只关心慢 SQL 告警」的调用方用）。 */
     public SlowSqlListener(long thresholdMs) {
-        this.thresholdMs = thresholdMs;
+        this(thresholdMs, () -> false, 0L, 0L);
     }
 
-    /** 刻意留空：本类只关心「跑完了、跑了多久」，不关心「要跑了」。 */
+    public SlowSqlListener(long thresholdMs, BooleanSupplier dbSlowOn, long dbSlowMs, long dbSlowBudgetMs) {
+        this.thresholdMs = thresholdMs;
+        this.dbSlowOn = dbSlowOn == null ? () -> false : dbSlowOn;
+        this.dbSlowMs = Math.max(0L, dbSlowMs);
+        // 需求裁定逐字是「每请求最多延迟 300ms」⇒ 配置写大了也在这里夹住。
+        this.dbSlowBudgetMs = Math.min(300L, Math.max(0L, dbSlowBudgetMs));
+    }
+
+    /**
+     * D3：{@code dbSlow} 注入 —— **只对 SELECT** 生效，且有界。
+     *
+     * <p>三条边界，任一条不满足就**不睡**：
+     * <ol>
+     *   <li>只SELECT（{@code select} / {@code with} 开头）：写路径不被拖慢，避免一开注入就把
+     *       下单 / 取消 / 回补也拖成 300ms；</li>
+     *   <li>跳过攻击控制端点（{@code /admin/observe/attack/**}）：否则「打开注入」这个动作本身
+     *       会被自己拖慢，演示台上点开关像卡死；</li>
+     *   <li>每个请求 / 每个线程每秒有预算上限（{@code mall.observe.injection.db-slow-budget-ms}，
+     *       硬上限 300）：一条请求发几十条 SELECT 时不会被叠加成几十秒。</li>
+     * </ol>
+     *
+     * <p>⚠️ 本方法在**请求线程**上跑（datasource-proxy 的 beforeQuery），睡的是当前线程 ——
+     * 这正是「后端真切感知到慢」的落点，不是伪造指标。
+     */
     @Override
     public void beforeQuery(ExecutionInfo execInfo, List<QueryInfo> queryInfoList) {
-        // no-op
+        if (dbSlowMs <= 0L || dbSlowBudgetMs <= 0L || !dbSlowOn.getAsBoolean()) {
+            return;
+        }
+        if (!containsSelect(queryInfoList) || isAttackControlRequest()) {
+            return;
+        }
+        long now = System.nanoTime();
+        ServletRequestAttributes attrs = requestAttributes();
+        HttpServletRequest request = attrs == null ? null : attrs.getRequest();
+        long sleepMs;
+        if (request != null) {
+            Object deadline = request.getAttribute(BUDGET_ATTR);
+            long deadlineNanos;
+            if (deadline instanceof Long value) {
+                deadlineNanos = value;
+            } else {
+                deadlineNanos = now + TimeUnit.MILLISECONDS.toNanos(dbSlowBudgetMs);
+                request.setAttribute(BUDGET_ATTR, deadlineNanos);
+            }
+            long remainingMs = TimeUnit.NANOSECONDS.toMillis(deadlineNanos - now);
+            sleepMs = Math.min(dbSlowMs, remainingMs);
+        } else {
+            long[] window = THREAD_BUDGET.get();
+            if (now - window[0] >= TimeUnit.SECONDS.toNanos(1L)) {
+                window[0] = now;
+                window[1] = 0L;
+            }
+            long remainingNanos = TimeUnit.MILLISECONDS.toNanos(dbSlowBudgetMs) - window[1];
+            sleepMs = Math.min(dbSlowMs, TimeUnit.NANOSECONDS.toMillis(remainingNanos));
+        }
+        if (sleepMs <= 0L) {
+            return;
+        }
+        try {
+            Thread.sleep(sleepMs);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return;
+        }
+        if (request == null) {
+            THREAD_BUDGET.get()[1] += TimeUnit.MILLISECONDS.toNanos(sleepMs);
+            log.debug("[DB-SLOW] 演练注入：非请求线程 SELECT 延迟 {} ms", sleepMs);
+            return;
+        }
+        if (request.getAttribute(LOGGED_ATTR) == null) {
+            request.setAttribute(LOGGED_ATTR, Boolean.TRUE);
+            log.info("[DB-SLOW] 演练注入 dbSlow 生效：{} 的 SELECT 注入延迟 {} ms"
+                            + "（本请求预算 {} ms；只延迟 SELECT，写路径不受影响）",
+                    request.getRequestURI(), sleepMs, dbSlowBudgetMs);
+        }
+    }
+
+    /** 本批语句里有没有（至少一条）SELECT / WITH。包级可见是为了可单测。 */
+    static boolean containsSelect(List<QueryInfo> queryInfoList) {
+        if (queryInfoList == null) {
+            return false;
+        }
+        for (QueryInfo qi : queryInfoList) {
+            String sql = qi == null ? null : qi.getQuery();
+            if (sql == null) {
+                continue;
+            }
+            String head = sql.stripLeading().toLowerCase(java.util.Locale.ROOT);
+            if (head.startsWith("select") || head.startsWith("with")) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static ServletRequestAttributes requestAttributes() {
+        try {
+            return RequestContextHolder.getRequestAttributes() instanceof ServletRequestAttributes attrs
+                    ? attrs : null;
+        } catch (IllegalStateException e) {
+            // 非 web 上下文（纯单测）
+            return null;
+        }
+    }
+
+    private static boolean isAttackControlRequest() {
+        ServletRequestAttributes attrs = requestAttributes();
+        if (attrs == null) {
+            return false;
+        }
+        String uri = attrs.getRequest().getRequestURI();
+        return uri != null && uri.startsWith("/admin/observe/attack");
     }
 
     @Override

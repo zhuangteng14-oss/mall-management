@@ -1,5 +1,6 @@
 package com.minke.mallmanagement.goods.service;
 
+import com.minke.mallmanagement.shared.web.PageLimits;
 import com.minke.mallmanagement.goods.dao.GoodsDao;
 import com.minke.mallmanagement.shared.upload.UploadStorage;
 import io.github.resilience4j.circuitbreaker.annotation.CircuitBreaker;
@@ -252,7 +253,7 @@ public class GoodsService {
     public static final int DEFAULT_PAGE_SIZE = 24;
 
     /** 商城端列表的**硬上限**（安全兜底：`limit=99999` 一律夹到 100）。 */
-    public static final int MAX_PAGE_SIZE = 100;
+    public static final int MAX_PAGE_SIZE = PageLimits.MAX_PAGE_SIZE;
 
     /**
      * 客户端首页商品列表。**委托 + 响应组装** —— 注解与 {@code SELECT *} 都在 {@link GoodsCacheService#listHome}。

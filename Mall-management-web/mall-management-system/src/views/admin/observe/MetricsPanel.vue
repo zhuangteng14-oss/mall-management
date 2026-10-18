@@ -22,10 +22,10 @@
         <b>{{ clientErrRate === null ? '—' : (clientErrRate * 100).toFixed(1) + '%' }}</b>
         <span>4xx 占比（本拍）</span>
       </div>
-      <!-- A4（块 7 收尾）：MQ 消费重试彻底失败、落 DLQ 的累计条数 + 本拍增量。 -->
+      <!-- A4 / D3-2：MQ 消费重试彻底失败、落 DLQ 的累计条数 + 本拍增量 + 同库副本已落库行数。 -->
       <div class="a-stat">
         <b :class="{ 'a-bad': dlqTotal > 0 }">{{ dlqTotal === null ? '—' : fmtInt(dlqTotal) }}</b>
-        <span>死信数量（累计 · 本拍 +{{ fmtInt((latest && latest.dlq && latest.dlq.delta) || 0) }}）</span>
+        <span>死信数量（累计 · 本拍 {{ dlqDelta === null ? '—' : '+' + fmtInt(dlqDelta) }} · 已落库 {{ dlqPersisted === null ? '—' : fmtInt(dlqPersisted) }}）</span>
       </div>
       <div class="a-tz">
         <span class="a-chip-utc">{{ phaseText }}</span>
@@ -218,9 +218,9 @@
           </ul>
         </section>
 
-        <!-- 防护命中 8 类 -->
+        <!-- 防护命中：行数由后端帧决定（D3 起 12 类），标题跟着走，不写死 -->
         <section class="mp-rail-sec">
-          <h3 class="mp-rail-h">防护命中 · 8 类 <span>本拍增量</span></h3>
+          <h3 class="mp-rail-h">防护命中 · {{ protRows.length || '—' }} 类 <span>本拍增量</span></h3>
           <ul v-if="protRows.length" class="mp-prots">
             <li v-for="p in protRows" :key="p.tag" class="mp-prot">
               <span class="mp-prot-k">
@@ -528,7 +528,8 @@
 import { computed, onActivated, onBeforeUnmount, onDeactivated, onMounted, reactive, ref, watch } from 'vue'
 import {
   AlertCircle, AlertOctagon, AlertTriangle, Bell, Clipboard, Database,
-  Droplets, Info, Lock, Package, Server, Shield, ShieldCheck, ShoppingCart,
+  Droplets, Gauge, Info, Layers, Lock, Package, RotateCcw, Server, Shield, ShieldCheck,
+  ShoppingCart, Zap,
 } from '@lucide/vue'
 import { metricsHistory, openMetricsStream } from '../../../api/observe'
 import { demo, openDemoStream } from '../../../api/demo-stream'
@@ -548,7 +549,10 @@ const TWEEN_MS = 300
 /** 库存水位数字/条宽的推进时长：1 秒一帧，取 0.6 秒留出停顿。 */
 const STOCK_TWEEN_MS = 600
 
-/* ── 八类防护的图标与环色（与日志页 9 环同一套 `KIND_COLOR`）──────────────── */
+/* ── 十二类防护的图标与环色（与日志页 9 环同一套 `KIND_COLOR`）────────────────
+   D3（2026-10-18）追加后 4 类（rateLimit / circuitBreak / poolIsolation / retry）：
+   前 8 类各归自己的事件环；后 4 类是**防护开关本身**的读数，统一归 `protection` 环
+   （紫）—— 它们不是「某个业务环出的事」，而是「防护层挡下了多少」。 */
 const PROT_ICON = {
   cacheHit: Database,
   lockTimeout: Lock,
@@ -558,6 +562,10 @@ const PROT_ICON = {
   notifyFailed: Bell,
   sensitiveHit: AlertTriangle,
   identityRejected: Shield,
+  rateLimit: Gauge,
+  circuitBreak: Zap,
+  poolIsolation: Layers,
+  retry: RotateCcw,
 }
 const PROT_RING = {
   cacheHit: 'cache',
@@ -568,6 +576,10 @@ const PROT_RING = {
   notifyFailed: 'notify',
   sensitiveHit: 'sensitive',
   identityRejected: 'identity',
+  rateLimit: 'protection',
+  circuitBreak: 'protection',
+  poolIsolation: 'protection',
+  retry: 'protection',
 }
 function protColor(tag) {
   const ring = PROT_RING[tag]
@@ -648,8 +660,19 @@ const latestRow = computed(() => (rows.value.length ? rows.value[rows.value.leng
 const meanNow = computed(() => (latestRow.value ? latestRow.value.meanMs : null))
 const hitRateNow = computed(() => (latestRow.value ? latestRow.value.hitRate : null))
 const p99Now = computed(() => (latestRow.value ? latestRow.value.p99 : null))
-/** A4：死信累计（进程启动以来）。`latest` 为空时显示 `—`，不显示假的 0。 */
-const dlqTotal = computed(() => (latest.value && latest.value.dlq ? num(latest.value.dlq.total) : null))
+/**
+ * A4 / D3-2：死信三读数。⚠️ `num(null)` 会回 0（见上面 `num` 的定义）⇒ 这里**逐个显式判 null**：
+ * 「计数器没有这个读数」「副本表读不到」「确实一条都没有」在页面上必须是三种状态，
+ * 而前两种都只能显示 `—`（用户 D3 第 6 条裁定：不可用显示横杠，不显示 0）。
+ */
+function finiteOrNull(v) {
+  if (v === null || v === undefined || v === '') return null
+  const n = Number(v)
+  return Number.isFinite(n) ? n : null
+}
+const dlqTotal = computed(() => (latest.value && latest.value.dlq ? finiteOrNull(latest.value.dlq.total) : null))
+const dlqDelta = computed(() => (latest.value && latest.value.dlq ? finiteOrNull(latest.value.dlq.delta) : null))
+const dlqPersisted = computed(() => (latest.value && latest.value.dlq ? finiteOrNull(latest.value.dlq.persisted) : null))
 
 const shown = reactive({ qps: 0, mean: 0, hitRate: 0, lockWait: 0 })
 
@@ -1090,7 +1113,7 @@ function sevPct(key) {
   return `${Math.round((sevCounts.value[key] / sevTotal.value) * 100)}%`
 }
 
-/* ── 防护 8 类 ────────────────────────────────────────────────────────────── */
+/* ── 防护 12 类（前 8 业务环 + 后 4 防护开关；行数以后端帧为准）────────────── */
 const protRows = computed(() => (latest.value && latest.value.protections) || [])
 const protMax = computed(() => Math.max(1, ...protRows.value.map((p) => num(p.value))))
 function protPct(v) {
@@ -1304,9 +1327,11 @@ function applyLatest(f) {
     l2Up: gauge.l2Up === undefined ? null : gauge.l2Up,
     lockUp: gauge.lockUp === undefined ? null : gauge.lockUp,
     l2Degraded: cache.l2Degraded === undefined ? null : cache.l2Degraded,
-    // A4（块 7 收尾）：死信计数由后端 `MetricsSnapshotService.dlq()` 汇总
-    // （`mall.observe.dead.letters` 计数器 ⇒ `{total, delta}`）。旧后端没有这个键 ⇒ 显示 0。
-    dlq: f.dlq || { total: 0, delta: 0 },
+    // A4 / D3-2：死信由后端 `MetricsSnapshotService.dlq()` 汇总
+    // （计数器 ⇒ `{total, delta, persisted}`）。⚠️ 旧后端没有这个键 ⇒ 保留 null（页面显示 `—`），
+    // **不要**补 `{total:0, delta:0}` —— 「后端没给」与「一条都没有」是两件事。
+    // `persisted` 为 null 同样表示「副本表读不到 / 这个后端没有副本」，不是 0 条。
+    dlq: f.dlq || null,
   }
 }
 
@@ -1843,7 +1868,7 @@ onBeforeUnmount(closeStream)
   color: var(--ink-3);
 }
 
-/* 防护 8 类 */
+/* 防护 12 类 */
 .mp-prots { gap: 5px; }
 .mp-prot {
   display: grid;

@@ -406,6 +406,54 @@ public class EventBroadcaster {
         return deadLetterCount.get();
     }
 
+    // ==================== D3：演练注入开关事件（2026-10-18） ====================
+
+    /**
+     * 把「某个演练注入被打开 / 关闭」这件事送进合并环，于是实时日志页、链路抽屉、指标面板
+     * 都能看到一条 PROTECTION 事件 —— 演示时「点了开关」不再只有 {@code AttackConsole} 自己知道。
+     *
+     * <p>⚠️ <b>调用点唯一</b>：{@code AttackController.updateConfig}（配置真的变了才调）。
+     * 别把调用塞进 {@code RabbitEventPublisher.publish} —— 那里在 mqDown 开启时会丢弃事件，
+     * 而这条「我已经开始丢弃了」的告知本身不该被丢弃；更糟的是 publish 已在别的临界区里，
+     * 从那里回调本类的 synchronized 方法是可预见的死锁面。
+     *
+     * <p>⚠️ {@code mqDown} 开启的瞬间，本方法照旧 {@link EventPublisher#publish}，只是发布侧会自行丢弃
+     * ⇒ 页面（走 SSE 合并环）看得到，broker / {@code observed_event} 表看不到。这是裁定 5 的必然结果，
+     * 不是遗漏：页面的权威来源是合并环，不是 MQ。
+     *
+     * @param key    注入键（{@code redisDown} / {@code mqDown} / {@code dbSlow} / {@code jobDown}）
+     * @param on     true = 打开，false = 关闭
+     * @param detail 人话补充（哪个端点点的、影响面是什么）；可为 null
+     * @return 本条事件的合并环 seq
+     */
+    public synchronized long emitInjection(String key, boolean on, String detail) {
+        long seq = cursor.getAndIncrement();
+        Map<String, Object> f = new LinkedHashMap<>();
+        f.put("injection", key);
+        f.put("on", on);
+        if (detail != null && !detail.isBlank()) {
+            f.put("note", detail);
+        }
+        String label = INJECTION_LABELS.getOrDefault(key, key);
+        String d = label + " ⇒ " + (on ? "开启" : "关闭")
+                + (detail == null || detail.isBlank() ? "" : "（" + detail + "）")
+                + " src=injection#" + seq;
+        ObservedEvent event = new ObservedEvent(
+                seq, System.currentTimeMillis(), Kind.PROTECTION.tag, Severity.WARN.tag,
+                on ? "演练注入已开启" : "演练注入已关闭", d,
+                key, "injection", key, null, null, null, null, null, null, f);
+        events[(int) (seq & EVENT_MASK)] = event;
+        eventPublisher.publish(event);
+        return seq;
+    }
+
+    /** 注入键 → 页面可读中文名（与前端 {@code observe-labels.js} 的 INJECTION_LABEL 同口径）。 */
+    private static final Map<String, String> INJECTION_LABELS = Map.of(
+            "redisDown", "Redis 降级",
+            "mqDown", "MQ 发布中断",
+            "dbSlow", "数据库慢查询",
+            "jobDown", "调度停摆");
+
     // ==================== 并入：每个源一段，游标推进写在各自的段里 ====================
 
     private void ingestCache() {

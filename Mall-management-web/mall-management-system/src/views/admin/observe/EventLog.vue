@@ -539,13 +539,7 @@
           >{{ protectionLabel(k) }}<template v-if="!protectionWired(k)"> · 不可开关</template></span>
         </div>
         <div class="grp"><span class="lab">注入</span>
-          <span
-            v-for="k in INJECTIONS"
-            :key="k"
-            class="sw2"
-            :class="{ dead: INJECTIONS_NOT_WIRED.includes(k) }"
-            :title="INJECTIONS_NOT_WIRED.includes(k) ? '未接通：拨了读数不会变（后端 AttackEngine.INJECTIONS_NOT_WIRED 的镜像）' : ''"
-          >{{ injectionLabel(k) }}<template v-if="INJECTIONS_NOT_WIRED.includes(k)"> · 不可开关</template></span>
+          <span v-for="k in INJECTIONS" :key="k" class="sw2">{{ injectionLabel(k) }}</span>
         </div>
         <span class="n">3a.6 乙案引入 · 本页只占位（本轮不接行为）· 虚线 = 后端 WIRED 清单里没有它</span>
       </div>
@@ -708,7 +702,7 @@ import {
   // ⑥ 开关栏的两组（PROTECTION_* / INJECTION_*）：**唯一出处是后端**
   //（`ProtectionGate.WIRED_KEYS` / `AttackEngine.INJECTION_KEYS` 的镜像）—— 本页只读它，不自造清单。
   PROTECTIONS, protectionLabel, protectionWired, protectionNotWiredTip,
-  INJECTIONS, injectionLabel, INJECTIONS_NOT_WIRED,
+  INJECTIONS, injectionLabel,
 } from '../../../config/labels/observe-labels'
 // 3a.3 收尾批 2：顶层 `actor` = `{id, role}`，role 走用户域那张唯一表（1 客户 / 2 商家 / 3 管理员）。
 import { roleLabel } from '../../../config/labels/user-labels'

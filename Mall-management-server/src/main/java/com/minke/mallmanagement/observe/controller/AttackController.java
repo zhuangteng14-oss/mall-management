@@ -5,10 +5,12 @@ import com.minke.mallmanagement.admin.service.AuditService;
 import com.minke.mallmanagement.observe.service.AttackEngine;
 import com.minke.mallmanagement.observe.service.AttackSwitchConfig;
 import com.minke.mallmanagement.observe.service.DrillRecordService;
+import com.minke.mallmanagement.observe.service.EventBroadcaster;
 import com.minke.mallmanagement.observe.service.ObservedEventCleanupService;
 import com.minke.mallmanagement.shared.web.AuthSession;
 import com.minke.mallmanagement.shared.web.Result;
 import jakarta.servlet.http.HttpServletRequest;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -17,7 +19,10 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
+import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * 攻击模拟器的**九个**出口（块 7 · commit 4 建前三条、commit 8b 加第四条、commit 10 加第五条、
@@ -107,14 +112,38 @@ public class AttackController {
      */
     private final AttackSwitchConfig switchConfig;
 
+    /**
+     * 演练注入开关的**事件出口**（D3 新增的本类第五个依赖）。
+     *
+     * <p>⚠️ 用 {@link ObjectProvider} 而不是直接注入：{@code AbstractSmokeTest} 与其他
+     * {@code @WebMvcTest} 切片不扫 {@code EventBroadcaster}（它连九个 metrics 环和 MQ 出口），
+     * 直接注入会让那些切片**启动失败**。{@code getIfAvailable()} 在它们那里返回 {@code null}
+     * ⇒ 跳过发事件，配置写入本身照常。这与本类前四个依赖「进构造器就必须进 @Import」的处置不同，
+     * 是刻意的：事件是**附加观测**，不该成为端点可用性的前提。
+     */
+    private final ObjectProvider<EventBroadcaster> eventBroadcaster;
+
+    /** 注入键的固定顺序（与 {@code AttackEngine.INJECTION_KEYS} 同序；那边是包级可见，跨包这里另列）。 */
+    private static final List<String> INJECTION_KEYS =
+            List.of("redisDown", "mqDown", "dbSlow", "jobDown");
+
+    /** 每个注入键「打开之后会发生什么」的一句人话（进事件 detail，演示时直接读给观众听）。 */
+    private static final Map<String, String> INJECTION_EFFECTS = Map.of(
+            "redisDown", "缓存读穿透降级：L1/L2 照常走真实链路",
+            "mqDown", "只拦发布侧：消费者与死信出口不受影响",
+            "dbSlow", "只延迟 SELECT，每请求最多 300ms",
+            "jobDown", "定时任务整轮跳过；不中断已经在跑的那一轮");
+
     public AttackController(DrillRecordService drillRecordService,
                             ObservedEventCleanupService cleanupService,
                             AuditService auditService,
-                            AttackSwitchConfig switchConfig) {
+                            AttackSwitchConfig switchConfig,
+                            ObjectProvider<EventBroadcaster> eventBroadcaster) {
         this.drillRecordService = drillRecordService;
         this.cleanupService = cleanupService;
         this.auditService = auditService;
         this.switchConfig = switchConfig;
+        this.eventBroadcaster = eventBroadcaster;
     }
 
     /** 8 个预置场景（key / 中文名 / 同时演示的防护 / 需要的人工动作 / 默认权重）。无入参。 */
@@ -222,11 +251,37 @@ public class AttackController {
             @RequestParam(value = "protections", required = false) String protections,
             @RequestParam(value = "injections", required = false) String injections) {
         try {
-            return ResponseEntity.ok(Result.of(
-                    view(switchConfig.updateFromJson(protections, injections))));
+            // D3：先留一份「改之前」的注入清单，用来算真实翻转（顺序固定，见 INJECTION_KEYS）。
+            Set<String> before = new LinkedHashSet<>(switchConfig.injections());
+            AttackSwitchConfig.State st = switchConfig.updateFromJson(protections, injections);
+            emitInjectionToggles(before, new LinkedHashSet<>(st.injections()));
+            return ResponseEntity.ok(Result.of(view(st)));
         } catch (IllegalArgumentException e) {
             // 形状错（不是 JSON 数组串）/ key 不认识 ⇒ 400（与本类其余参数校验同一条口径）
             return ResponseEntity.badRequest().body(Result.fail(e.getMessage()));
+        }
+    }
+
+    /**
+     * 只对**真的翻转了**的注入键发一条 PROTECTION 事件（开→关、关→开各一条；没变不发）。
+     *
+     * <p>⚠️ 由本类而不是 {@code AttackSwitchConfig} 发：配置类不该知道「事件」这回事
+     * （它在被 {@code RedisDegradeGuard} / 定时任务等每秒读，掺入 I/O 或锁会放大到全站）；
+     * 而这里是**唯一**写入口，天然只会在「人拨了开关」时触发。
+     *
+     * <p>⚠️ 事件出口缺席（切片测试）时静默跳过 —— 见 {@code eventBroadcaster} 字段注释。
+     */
+    private void emitInjectionToggles(Set<String> before, Set<String> after) {
+        EventBroadcaster broadcaster = eventBroadcaster.getIfAvailable();
+        if (broadcaster == null) {
+            return;
+        }
+        for (String key : INJECTION_KEYS) {
+            boolean was = before.contains(key);
+            boolean now = after.contains(key);
+            if (was != now) {
+                broadcaster.emitInjection(key, now, INJECTION_EFFECTS.get(key));
+            }
         }
     }
 
@@ -358,7 +413,7 @@ public class AttackController {
      * 演练记录（时间倒序）。每条记录里的 {@code Result} 长文本已由服务层**拆成字段**
      * （方案 §1.5：不是为了展示原始长文本，是为了分字段显示）。
      *
-     * @param limit  每页条数（可选，缺省 20、上限 200）
+     * @param limit  每页条数（可选，缺省 20、上限 100；D3-3 统一上限）
      * @param offset 偏移（可选，负数归 0）
      */
     @PostMapping("/records")

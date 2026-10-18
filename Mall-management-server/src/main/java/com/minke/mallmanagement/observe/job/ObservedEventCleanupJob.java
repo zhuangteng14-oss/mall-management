@@ -1,8 +1,10 @@
 package com.minke.mallmanagement.observe.job;
 
 import com.minke.mallmanagement.observe.service.ObservedEventCleanupService;
+import com.minke.mallmanagement.observe.service.ScheduledJobGate;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
@@ -51,8 +53,16 @@ public class ObservedEventCleanupJob {
 
     private final ObservedEventCleanupService cleanupService;
 
+    /** 调度停摆注入（D3）。{@code null} 只出现在手工 new 的测试里 ⇒ 视为未注入。 */
+    private ScheduledJobGate jobGate;
+
     public ObservedEventCleanupJob(ObservedEventCleanupService cleanupService) {
         this.cleanupService = cleanupService;
+    }
+
+    @Autowired(required = false)
+    public void setJobGate(ScheduledJobGate jobGate) {
+        this.jobGate = jobGate;
     }
 
     /**
@@ -62,6 +72,9 @@ public class ObservedEventCleanupJob {
      */
     @Scheduled(fixedDelayString = "${mall.observe.cleanup.fixed-delay-ms:3600000}")
     public void prune() {
+        if (jobGate != null && jobGate.paused("observeCleanup")) {
+            return;     // D3：jobDown 注入 ⇒ 整轮跳过（不删 observed_event）
+        }
         try {
             cleanupService.pruneExpiredEvents();
         } catch (Exception e) {

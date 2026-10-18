@@ -1,5 +1,6 @@
 package com.minke.mallmanagement.observe.service;
 
+import com.minke.mallmanagement.shared.web.PageLimits;
 import com.minke.mallmanagement.order.dao.OrderDao;
 import com.minke.mallmanagement.order.metrics.MallOrderStateMetrics;
 import com.minke.mallmanagement.order.metrics.MallOrderStateMetrics.OrderStateEvent;
@@ -80,7 +81,7 @@ public class OrderStreamService {
     private final MallOrderStateMetrics orderMetrics;
 
     /** 明细分页一页最多多少条（防手改 URL 把整表拉进内存）。 */
-    private static final int MAX_DETAIL_LIMIT = 200;
+    private static final int MAX_DETAIL_LIMIT = PageLimits.MAX_PAGE_SIZE;
 
     public OrderStreamService(OrderDao orderDao, MallOrderStateMetrics orderMetrics) {
         this.orderDao = orderDao;
@@ -96,7 +97,7 @@ public class OrderStreamService {
      * 分页脚上的 total 一定等于该筛选下的真实行数，不会出现「Tab 写 2271、表说 0 条」。
      *
      * <p>⚠️ {@code offset}/{@code limit} 是**入参消毒**而不是信任客户端：offset 负数归 0，
-     * limit 夹到 {@code [1, 200]}。空状态 = 全部；未知状态由 DAO 翻成 {@code 1 = 0}（返回 0 条，
+     * limit 夹到 {@code [1, 100]}（D3-3 统一上限）。空状态 = 全部；未知状态由 DAO 翻成 {@code 1 = 0}（返回 0 条，
      * 不抛错 —— 状态名来自前端 URL，不该把页面打崩）。
      *
      * <p>⚠️ 排序与 {@link OrderDao#selectRecentOrders} 同口径（{@code CreateTime DESC, OrderId DESC}），

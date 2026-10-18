@@ -62,7 +62,7 @@
       <label class="a-f a-f-narrow">
         <span>上限</span>
         <select v-model.number="af.limit" @change="loadApps">
-          <option v-for="n in [50, 100, 200, 500]" :key="n" :value="n">{{ n }}</option>
+          <option v-for="n in [20, 50, 100]" :key="n" :value="n">{{ n }}</option>
         </select>
       </label>
       <div class="a-f-actions">
@@ -641,7 +641,7 @@ function idsOf(u) {
  * 本次取回的 `users` → **按本地日**的三条同量级序列：当日新增 / 当日封禁 / 当日净增。
  *
  * ⚠️ 三个口径必须一起读，否则这张图会骗人：
- *   ① 范围只有**本次 `users`**（≤「上限」那档，最多 500），不是全库；
+ *   ① 范围只有**本次 `users`**（≤「上限」那档，最多 100），不是全库；
  *   ② 两个时刻**各有各的缺口**：`CreatedAt`（`login.CreateTime`，本段新补的列）**存量行一律
  *      NULL 且不回填**（注册时刻没有第二个来源）⇒ 老账号在「新增」那条线上**不存在**；
  *      `bannedAt` 只在 `banned=1` 时有值。两条线的缺口**不重合** —— 被封的恰恰多半是老账号，

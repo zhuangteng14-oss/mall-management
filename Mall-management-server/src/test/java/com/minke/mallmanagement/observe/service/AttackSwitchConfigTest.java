@@ -176,7 +176,8 @@ class AttackSwitchConfigTest {
     /**
      * ⚠️ {@code Wired=false} 的键在面板上**必须画成不可开关**（用户 2026-10-15 裁定）——
      * 画成一个能拨却什么也不发生的控件，比不画它坏得多。本用例是那份「不可拨清单」的哨兵：
-     * 防护里的 {@code degrade}（记录位）+ 注入里的 {@code mqDown} / {@code dbSlow}。
+     * 防护里的 {@code degrade}（记录位）；四个注入自 D3（2026-10-18）起**全部真接通**
+     * （{@code mqDown} 拦发布侧 / {@code dbSlow} 延迟 SELECT / {@code jobDown} 停调度）。
      */
     @Test
     void catalogMarksTheNotWiredKeysSoTheUiCannotOfferDeadToggles() {
@@ -187,8 +188,8 @@ class AttackSwitchConfigTest {
                 "注入键 = 引擎那一份（见下一条的同一份断言）");
         assertEquals(List.of(true, true, false, true, true), wired(cat.get("Protections")),
                 "只有 degrade 是记录位（名单见 ProtectionGate.RECORD_ONLY_KEY）");
-        assertEquals(List.of(true, false, false), wired(cat.get("Injections")),
-                "只有 redisDown 真接通（另两个见 AttackEngine.INJECTIONS_NOT_WIRED）");
+        assertEquals(List.of(true, true, true, true), wired(cat.get("Injections")),
+                "D3 起四个注入全部接通（AttackEngine.INJECTIONS_NOT_WIRED 为空）");
     }
 
     /**

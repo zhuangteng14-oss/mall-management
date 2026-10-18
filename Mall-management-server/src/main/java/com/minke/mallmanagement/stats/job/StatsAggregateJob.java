@@ -1,9 +1,11 @@
 package com.minke.mallmanagement.stats.job;
 
+import com.minke.mallmanagement.observe.service.ScheduledJobGate;
 import com.minke.mallmanagement.stats.dao.StatsDao;
 import com.minke.mallmanagement.stats.service.StatsService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.scheduling.annotation.Scheduled;
@@ -51,9 +53,17 @@ public class StatsAggregateJob {
     @Value("${mall.stats.job.window-days:3}")
     private int windowDays;
 
+    /** 调度停摆注入（D3）。{@code null} 只出现在手工 new 的测试里 ⇒ 视为未注入。 */
+    private ScheduledJobGate jobGate;
+
     public StatsAggregateJob(StatsDao statsDao, StatsService statsService) {
         this.statsDao = statsDao;
         this.statsService = statsService;
+    }
+
+    @Autowired(required = false)
+    public void setJobGate(ScheduledJobGate jobGate) {
+        this.jobGate = jobGate;
     }
 
     /**
@@ -65,6 +75,9 @@ public class StatsAggregateJob {
      */
     @Scheduled(fixedDelayString = "${mall.stats.job.fixed-delay-ms:60000}")
     public void refresh() {
+        if (jobGate != null && jobGate.paused("statsAggregate")) {
+            return;     // D3：jobDown 注入 ⇒ 整轮跳过（不重算 stats_daily）
+        }
         try {
             int days = windowDays <= 0 ? 1 : windowDays;
             String to = statsDao.currentDate();

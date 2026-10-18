@@ -1,5 +1,7 @@
 package com.minke.mallmanagement.merchant.service;
 
+import com.minke.mallmanagement.shared.text.DataMasking;
+import com.minke.mallmanagement.shared.web.PageLimits;
 import com.minke.mallmanagement.goods.dao.GoodsShelfDao;
 import com.minke.mallmanagement.merchant.dao.MerchantApplicationDao;
 import com.minke.mallmanagement.user.dao.UserGovernanceDao;
@@ -45,8 +47,8 @@ public class MerchantApplicationService {
     private static final int ROLE_MERCHANT = 2;
 
     /** 列表默认条数 / 上限（与 {@code AuditService} 同口径）。 */
-    public static final int DEFAULT_LIMIT = 100;
-    public static final int MAX_LIMIT = 500;
+    public static final int DEFAULT_LIMIT = PageLimits.DEFAULT_PAGE_SIZE;
+    public static final int MAX_LIMIT = PageLimits.MAX_PAGE_SIZE;
 
     private final MerchantApplicationDao applicationDao;
     private final UserGovernanceDao userGovernanceDao;
@@ -117,12 +119,19 @@ public class MerchantApplicationService {
         return result;
     }
 
-    /** 管理端申请列表（{@code status} 可空 ⇒ 全部）。 */
+    /**
+     * 管理端入驻申请列表（{@code status} 可空 ⇒ 全部）。
+     *
+     * <p>⚠️ <b>读侧掩码（D3-4）只在这里做</b>：{@code ContactPhone} / {@code ShopAddress}
+     * 出列表时是 {@code 138****8000} / {@code 北京市朝***}。{@link #myApplications}
+     * （商家看自己的申请）与审核快照刻意**不掩**，理由见 {@link DataMasking} 类注释。
+     */
     public Map<String, Object> listForAdmin(String status, Integer limit) {
         int effective = normalizeLimit(limit);
         Map<String, Object> result = new HashMap<>();
         result.put("success", true);
-        result.put("list", applicationDao.selectByStatus(status, effective));
+        result.put("list", DataMasking.maskApplicationRows(
+                applicationDao.selectByStatus(status, effective)));
         result.put("total", applicationDao.countByStatus(status));
         result.put("limit", effective);
         return result;

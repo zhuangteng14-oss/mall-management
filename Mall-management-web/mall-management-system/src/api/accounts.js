@@ -51,7 +51,7 @@ async function post(path, body) {
  *
  * @param {{keyword?:string, limit?:number, offset?:number}} params
  *        `keyword` 命中 `username` / `customerid` / `merchantid` 三列的**包含**匹配（模糊）；
- *        `limit` 缺省 100、上限 500（后端夹取，回显在 `limit` 里）；`offset` 负数归 0。
+ *        `limit` 缺省 100、上限 100（后端夹取，回显在 `limit` 里）；`offset` 负数归 0。
  *        ⚠️ 块 7 收尾 · P1 起管理页默认 `limit=20` + `offset` 翻页（后端真 `LIMIT ? OFFSET ?`）。
  * @returns {Promise<{success:boolean, list:Array, total:number, limit:number, offset:number}>}
  *          ⚠️ `total` 是**同一筛选条件下**的总数（与 `list` 同源），不是全表数。

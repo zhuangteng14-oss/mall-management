@@ -3,8 +3,10 @@ package com.minke.mallmanagement.merchant.job;
 import com.minke.mallmanagement.merchant.service.MerchantDowngradeService;
 import com.minke.mallmanagement.notification.NotificationEvents;
 import com.minke.mallmanagement.notification.service.NotificationService;
+import com.minke.mallmanagement.observe.service.ScheduledJobGate;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
@@ -51,10 +53,18 @@ public class MerchantDowngradeJob {
     private final MerchantDowngradeService downgradeService;
     private final NotificationService notificationService;
 
+    /** 调度停摆注入（D3）。{@code null} 只出现在手工 new 的测试里 ⇒ 视为未注入。 */
+    private ScheduledJobGate jobGate;
+
     public MerchantDowngradeJob(MerchantDowngradeService downgradeService,
                                 NotificationService notificationService) {
         this.downgradeService = downgradeService;
         this.notificationService = notificationService;
+    }
+
+    @Autowired(required = false)
+    public void setJobGate(ScheduledJobGate jobGate) {
+        this.jobGate = jobGate;
     }
 
     /**
@@ -64,6 +74,9 @@ public class MerchantDowngradeJob {
      */
     @Scheduled(fixedDelayString = "${mall.downgrade.job.fixed-delay-ms:60000}")
     public void scanAndApply() {
+        if (jobGate != null && jobGate.paused("merchantDowngrade")) {
+            return;     // D3：jobDown 注入 ⇒ 整轮跳过（不扫描、不降级、不通知）
+        }
         try {
             List<Map<String, Object>> done = downgradeService.runDue();
             if (done.isEmpty()) {

@@ -1,9 +1,11 @@
 package com.minke.mallmanagement.order.job;
 
+import com.minke.mallmanagement.observe.service.ScheduledJobGate;
 import com.minke.mallmanagement.order.dao.OrderDao;
 import com.minke.mallmanagement.order.dao.ShippingTrackDao;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.scheduling.annotation.Scheduled;
@@ -113,9 +115,17 @@ public class ShippingTrackAdvanceJob {
     @Value("${mall.order.shipping.track.signed-ms:60000}")
     private long signedMs;
 
+    /** 调度停摆注入（D3）。{@code null} 只出现在手工 new 的测试里 ⇒ 视为未注入。 */
+    private ScheduledJobGate jobGate;
+
     public ShippingTrackAdvanceJob(OrderDao orderDao, ShippingTrackDao shippingTrackDao) {
         this.orderDao = orderDao;
         this.shippingTrackDao = shippingTrackDao;
+    }
+
+    @Autowired(required = false)
+    public void setJobGate(ScheduledJobGate jobGate) {
+        this.jobGate = jobGate;
     }
 
     /**
@@ -124,6 +134,9 @@ public class ShippingTrackAdvanceJob {
      */
     @Scheduled(fixedDelayString = "${mall.order.shipping.track.fixed-delay-ms:15000}")
     public void advance() {
+        if (jobGate != null && jobGate.paused("shippingTrack")) {
+            return;     // D3：jobDown 注入 ⇒ 整轮跳过（不查待推进单、不补轨迹）
+        }
         List<Map<String, Object>> orders;
         try {
             orders = orderDao.selectShippableForTrack();

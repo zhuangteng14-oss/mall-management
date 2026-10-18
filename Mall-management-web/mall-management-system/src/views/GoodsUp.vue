@@ -740,7 +740,7 @@ const seckillCodes = ref(new Set())
 const loadPromoKinds = async () => {
   if (!isLoggedIn()) return
   try {
-    const [sub, sek] = await Promise.all([subsidyGoods({ limit: 200 }), seckillLive({ limit: 200 })])
+    const [sub, sek] = await Promise.all([subsidyGoods({ limit: 100 }), seckillLive({ limit: 100 })])
     subsidyCodes.value = new Set(((sub && sub.list) || []).map((r) => String(r.ProductCode || '')).filter(Boolean))
     seckillCodes.value = new Set(((sek && sek.list) || []).map((r) => String(r.ProductCode || '')).filter(Boolean))
   } catch (e) {

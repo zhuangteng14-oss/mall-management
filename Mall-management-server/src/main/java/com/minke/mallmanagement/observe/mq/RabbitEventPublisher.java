@@ -1,6 +1,9 @@
 package com.minke.mallmanagement.observe.mq;
 
+import com.minke.mallmanagement.observe.service.AttackSwitchConfig;
 import com.minke.mallmanagement.observe.service.EventBroadcaster.ObservedEvent;
+import io.micrometer.core.instrument.Gauge;
+import io.micrometer.core.instrument.MeterRegistry;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
 import org.slf4j.Logger;
@@ -93,6 +96,12 @@ public class RabbitEventPublisher implements EventPublisher {
     /** 队列满时丢掉的累计条数（只给日志用；`publish` 不因它抛异常）。 */
     private final AtomicLong droppedPublish = new AtomicLong();
 
+    /** D3 演练注入 {@code mqDown} 期间丢掉的条数（只给日志/指标用，不抛）。 */
+    private final AtomicLong droppedByInjection = new AtomicLong();
+
+    /** 攻击开关共享配置（D3：{@code mqDown} 在**发布侧**丢弃，消费者的 ACK/NACK 一个字不动）。 */
+    private final AttackSwitchConfig switchConfig;
+
     /** 发布线程的运行令旗（{@link #stopPublisher} 置 false 后，线程把队列收尾再退出）。 */
     private volatile boolean publishing = true;
     private Thread publishThread;
@@ -121,13 +130,32 @@ public class RabbitEventPublisher implements EventPublisher {
     private Thread probeThread;
 
     public RabbitEventPublisher(RabbitTemplate rabbitTemplate,
+                                AttackSwitchConfig switchConfig,
+                                MeterRegistry registry,
                                 @Value("${mall.observe.mq.warn-interval-ms:300000}") long warnIntervalMs) {
         this.rabbitTemplate = rabbitTemplate;
+        this.switchConfig = switchConfig;
         this.warnIntervalNanos = TimeUnit.MILLISECONDS.toNanos(warnIntervalMs);
+        // D3：MQ 可用性 = 「broker 真连着」且「没有被演练注入断开」。
+        // ⚠️ 它是独立 gauge 而不是拿 connected 改口径 —— connected() 仍然如实回答
+        //    「broker 通不通」，只有页面健康度需要把两者的合取画出来。
+        Gauge.builder("mall.observe.mq.up", this, p -> p.mqUsable() ? 1.0 : 0.0)
+                .description("MQ 发布侧可用（1=broker 连着且未被演练注入断开）")
+                .register(registry);
     }
 
     @Override
     public void publish(ObservedEvent event) {
+        // D3：mqDown 注入 —— **只拦发布侧**。消费者的 ACK/NACK、重试与 DLQ 出口一个字不动；
+        // 消息不发给 broker，事件仍留在内存合并环里（页面照常看得到）。
+        if (mqDownInjected()) {
+            long dropped = droppedByInjection.incrementAndGet();
+            if (dropped == 1L || dropped % 10_000L == 0L) {
+                log.warn("[EVENT] 演练注入 mqDown 开启：发布侧丢弃事件（不发给 broker；累计 {} 条）。"
+                        + "消费者未暂停，DLQ 出口不受影响", dropped);
+            }
+            return;
+        }
         if (!connected.get()) {
             // 已知连不上：**一次网络都不碰**（理由见类注释）。⚠️ 这里刻意不记日志：
             // 这一路是「稳态失败」的常态路径，逐条记会把它变成刷屏；「连不上」这件事
@@ -182,6 +210,16 @@ public class RabbitEventPublisher implements EventPublisher {
     @Override
     public boolean connected() {
         return connected.get();
+    }
+
+    /** 演练注入是否把发布侧断开（D3）。读共享配置，不另存位。 */
+    private boolean mqDownInjected() {
+        return switchConfig.injections().contains("mqDown");
+    }
+
+    /** 页面口径的「MQ 可用」= broker 连着 **且** 没有被注入断开。 */
+    private boolean mqUsable() {
+        return connected.get() && !mqDownInjected();
     }
 
     // ==================== 探测线程 ====================
