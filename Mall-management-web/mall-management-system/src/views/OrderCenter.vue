@@ -149,7 +149,7 @@
         <nav class="pager" data-slot="预留 · 分页（动现有代码 4 处 · 超档）"
              title="待 C3〈订单〉——两条商户 SQL 都没有 LIMIT，全量返回。4 处 = OrderDao（加 LIMIT + 一条 count）+ OrderService + OrderController + OrderCenter.vue。**超档**，因清单点名而画出。⚠️ 与标签页互锁：先上分页，则「待发货/已发货/全部」的 N 从 1 变 4">
           <button class="pg" disabled title="待 C3〈订单〉——上一页无端点">‹</button>
-          <button class="pg on" title="当前页">1</button>
+          <button class="pg on" aria-current="page" title="当前页">1</button>
           <button class="pg" disabled title="待 C3〈订单〉——下一页无端点">›</button>
           <span class="tot" title="⚠️ 两条商户 SQL 都没有 LIMIT ⇒ 全部行一次返回，没有「页」。「每页 20」是稿的目标版文案（稿 :743 自注：稿的数据集 6 单所以是 1 页；71 单 / 每页 20 下是 4 页）。">共 {{ orderList.length }} 单 · 每页 20</span>
         </nav>

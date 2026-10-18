@@ -61,23 +61,24 @@
     </div>
 
     <!-- 空态 = 稿 `fr0` 面（`:679-693`）。⚠️ 文案照稿换字不换态（同 commit 5 对 OrderCenter 空态的处理）。
-         ⚠️ 稿的 `.row`（输入框 + 搜索钮）**没有** `data-slot`、也没有 `disabled`（裸控件）⇒ 按 §三
-         「稿外死控件」口径落 `disabled` + `title`：它指向的搜索能力**已有**（页头「搜索好友」开的是同一个
-         `.searchDialogVisible` 弹窗），但本笔功能量恒为 0 ⇒ **不接线**（同 commit 5 的 `.go2` 先例）。 -->
+         ⚠️ **批四（2026-10-18）接线**：输入框 + 搜索钮不再 `disabled` —— 它接通页头「搜索好友」
+         用的**同一个** `.searchDialogVisible` 弹窗（能力早就存在，缺的只是入口）；有词就带进去并
+         直接搜，没词就只开弹窗（弹窗自身提示「请输入用户ID」）。
+         ⇒ `slot-registry` 里「稿外死控件」那条（原 `:71-76`）随本笔销账。 -->
     <div v-else class="empty">
       <h2>还没有好友</h2>
       <p>输入对方的商家 ID 或客户 ID，就能把人加进来。</p>
       <div class="row">
         <input
           class="inp"
+          v-model="emptyKeyword"
           placeholder="例如 84sH27Lw"
-          disabled
-          title="稿外死控件（老稿 子页面改造.html:689）——搜索能力已有（页头「搜索好友」开同一个弹窗），本笔功能量恒为 0 故不接线"
+          @keyup.enter="searchFromEmpty"
         >
         <button
           class="btn btn-solid"
-          disabled
-          title="稿外死控件（老稿 子页面改造.html:690）——同上，不接线"
+          @click="searchFromEmpty"
+          title="打开搜索好友弹窗（批四起与页头那颗按钮走同一处）"
         >搜索</button>
       </div>
     </div>
@@ -141,7 +142,7 @@ const friendList = ref([])
 const searchDialogVisible = ref(false)
 const searchKeyword = ref('')
 const searchResult = ref(null)
-const searchError = ref('')
+const searchError = ref(''); const emptyKeyword = ref('')
 
 const requestDialogVisible = ref(false)
 const pendingRequests = ref([])
@@ -233,9 +234,9 @@ const openSearchDialog = () => {
   searchError.value = ''
   searchDialogVisible.value = true
 }
-const closeSearchDialog = () => {
-  searchDialogVisible.value = false
-}
+const closeSearchDialog = () => { searchDialogVisible.value = false }
+// 批四：空态搜索框接通既有弹窗 —— 有词就带进去并直接搜，没词就只开弹窗（弹窗里会提示「请输入」）。
+const searchFromEmpty = () => { const kw = emptyKeyword.value.trim(); openSearchDialog(); if (kw) { searchKeyword.value = kw; searchUser() } }
 
 // 加载待处理的好友申请
 const loadPendingRequests = async () => {

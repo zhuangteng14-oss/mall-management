@@ -253,6 +253,18 @@
       </div>
     </div>
 
+    <!-- ── ③c 实时预览（批四 · 第一批 1）────────────────────────────────────────
+         插在「自定义编排」下方、「演练记录」上方：跑之前先看见三条流现在是活的，
+         跑完也能在这一页确认「刚才那轮压出来的东西长什么样」，不必来回切页。
+         ⚠️ 三列都是**纯文字滚动**（不 import 任何 `components/charts/*`）—— 与块 7 那条
+            「攻击页不画图」的裁决不冲突：这里展示的是流本身，不是图表。
+         ⚠️ 流由子组件自己开、自己关（`onBeforeUnmount` 三条一起 close）；本页不持有句柄。 -->
+    <h2 class="a-h2">
+      实时预览
+      <span class="a-h2n">指标 / 订单 / 日志三条流 · 只读滚动 · 切走本页自动断开</span>
+    </h2>
+    <LivePreview />
+
     <!-- ── ④ 演练记录（`drill_record` 时间倒序）─────────────────────────────── -->
     <h2 class="a-h2">
       演练记录
@@ -458,21 +470,26 @@
 <!--
   攻击模拟器页（块 7 · commit 5）—— `/admin/observe/attack-sim` 的真页（原走 `StubPage.vue`）。
 
-  【它是块 7 四页里的第一页，也是**唯一不画图**的一页】
+  【它仍然是块 7 四页里**唯一不画图**的一页 —— 但批四起多了一块「文字预览」】
   《块7参考》§1.1 逐字：「攻击页 = AttackConsole.vue，只做**编排 + 跑 + 演练记录**；
   三面板已独立成页（D2 后期改判），不塞进攻击页」。⇒ 本页**不 import 任何图表组件**
-  （`components/charts/*` 一个都不引），指标 / 状态流转 / 日志分别是 commit 6–8 的另外三页。
+  （`components/charts/*` 一个都不引），指标 / 状态流转 / 日志**图表**仍在另外三页。
   ⚠️ 那条「不塞三面板」是**用户 2026-10-13 的改判**（原 D2 = 三面板同屏当总控台）；
-     别按更早的方案把它合回去。
+     别按更早的方案把**图表**合回来。
+  ⚠️ **批四 · 第一批（2026-10-18 用户批文）另加**：③c 的 `LivePreview` —— 复用三条 SSE 流，
+     三列**纯文字滚动**（不暂停、不画图、不筛选）。它与上面那条裁决不冲突：用户要的是
+     「跑的时候能看见流在动」，不是把三张图表塞回来。
 
-  【它消费后端 7 个端点，全部经 `api/observe.js`】
+  【它消费后端 10 个端点，全部经 `api/observe.js`】
     · `attackScenarios()` —— 8 个预置场景（Key / Name / Protections / Needs / DefaultWeight）；
     · `runAttack(p)`      —— 跑一轮（**同步跑到结束**，见下）；
     · `attackRecords(p)`  —— 演练记录（`Result` 长文本已由后端拆成字段）；
     · `cleanupAttack()`   —— 清理并恢复（commit 9 补的按钮，破坏性、两段式确认）；
     · `stopAttack()`      —— 叫停正在跑的那一轮（commit 10c 的 `[暂停]`）；
     · `attackStatus()`    —— 演练期间的实时读数（块 7 收尾，1 秒一拍）；
-    · `resetAttackEnvironment()` —— 复位演练环境（2026-10-18，失败态按钮 + 复位后自动重跑）。
+    · `resetAttackEnvironment()` —— 复位演练环境（2026-10-18，失败态按钮 + 复位后自动重跑）；
+    · `openMetricsStream` / `openOrderStream` / `openEventStream` —— 批四 ③c 预览的三条 SSE
+      （在 `LivePreview.vue` 里开与关，本页只挂组件）。
   ⚠️ 本页**不出现任何后端路径字面量**（那条判据可 grep 自动化：路径只许出现在
      `api/endpoints.js`）。七个函数名即全部后端面。
 
@@ -521,6 +538,7 @@ import {
   resetAttackEnvironment, runAttack, stopAttack, updateAttackConfig,
 } from '../../../api/observe'
 import { replaySession, startReplaySession } from '../../../api/replay-session'
+import LivePreview from '../../../components/observe/LivePreview.vue'
 import WeightSlider from '../../../components/observe/WeightSlider.vue'
 import IconGlyph from '../../../components/ui/IconGlyph.vue'
 import Pager from '../../../components/Pager.vue'
@@ -1960,7 +1978,7 @@ onBeforeUnmount(() => {
   opacity: 0.85;
   margin-left: var(--s2);
 }
-.a-kv, .a-window-note {  /* ⚠️ 后者 = 共享开关写入中 / 写入失败的状态行（不再是「本区不可用」） */
+.a-kv, .a-window-note {  /* ⚠️ 后者 = 共享开关写入中 / 写入失败的状态行（批四已清掉旧的过期提示文案） */
   font-size: var(--fs-xs);
   color: var(--ink-2);
   line-height: 1.9;

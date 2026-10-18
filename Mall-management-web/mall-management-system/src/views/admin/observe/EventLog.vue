@@ -526,9 +526,13 @@
         </ol>
       </div>
 
-      <!-- ══ ⑥ 开关栏（3a.6 乙案引入；本页只占位，本轮不接行为）════════════════════ -->
+      <!-- ══ ⑥ 开关栏 —— 批四起**降级为只读图例**（3a.6 乙案引入时是占位）
+           原先的 chip 长得像能点的按钮，但本页从来没有接开关行为 ⇒ 用户会以为在这里
+           就能拨闸。现在：① 去掉「不可开关」这种**仍然暗示可操作**的措辞；② 样式改成
+           纯文字图例（`.sw2` 不再有按钮底）；③ 末句直接给出去处链接。
+           ⚠️ 真开关只在攻击页（`/admin/observe/attack-sim`），本页不 import 任何开关 API。 -->
       <div class="ev-switch">
-        <b><span class="idx">⑥</span> 开关栏</b>
+        <b><span class="idx">⑥</span> 开关图例</b>
         <div class="grp"><span class="lab">防护闸</span>
           <span
             v-for="k in PROTECTIONS"
@@ -552,7 +556,7 @@
 
   ⚠️ **3a.3 第 ⑥ 步（2026-10-16）把本页从「纵向卡片流」重做成「一屏六区的三栏驾驶舱」** ——
      结构来自草图 `docs/美化/c3-admin-preview/3a3-甲-三栏驾驶舱.html`（用户从甲/丙里选了甲）。
-     六区：① 状态条 ② 过滤栏 ③ 事件流（核心）④ 实时统计 ⑤ 链路展开 ⑥ 开关栏。
+     六区：① 状态条 ② 过滤栏 ③ 事件流（核心）④ 实时统计 ⑤ 链路展开 ⑥ 开关图例（只读）。
      判据、逐条口径、与草图的差异见 `_work/3a3/3a3-第6步-落地方案.md`。
 
   ⚠️ **数据源 = `POST /admin/observe/events/stream`**：一帧 = 本拍增量 `events` + 三个汇总
@@ -3764,20 +3768,30 @@ button.ev-bar {
   color: var(--ink-3);
 }
 .ev-switch .sw2 {
-  border: 1px solid var(--line-2);
+  /* 批四起是**只读图例**：没有按钮底、没有 hover、光标也不是 pointer ——
+     长得像开关就是这一处最贵的误导（用户会去点它）。 */
+  border: 1px solid transparent;
   border-radius: var(--r1);
-  padding: 0 6px;
-  background: var(--surface-2);
+  padding: 0 4px;
+  background: none;
+  color: var(--ink-2);
+  cursor: default;
 }
 .ev-switch .sw2.dead {
+  border-color: var(--line-2);
   border-style: dashed;
   color: var(--ink-3);
-  background: none;
 }
 .ev-switch .n {
   color: var(--ink-3);
   margin-left: auto;
 }
+.ev-switch .go {
+  color: var(--brand);
+  text-decoration: none;
+  font-weight: 600;
+}
+.ev-switch .go:hover { text-decoration: underline; }
 
 /* ── 窄屏：三栏塌成两栏（③ 让位），再窄就堆叠 ──────────────────────────────── */
 @media (max-width: 1100px) {
