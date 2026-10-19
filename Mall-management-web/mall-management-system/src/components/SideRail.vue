@@ -207,7 +207,9 @@ const buyerLinks = computed(() => {
 
 const merchantLinks = computed(() => {
   const rows = [
-    { no: '10', label: '商家工作台', to: '/merchant', path: '/merchant', exact: true },
+    // ⚠️ 同日修正：`/merchant` 是**公域商城主页**（与 `/customer` 同一个 `HomePage`），
+    //    该页不挂身份树 ⇒ 不能把「商家工作台」指过去（点进去左树消失）。商家私域入口
+    //    以下面这组为准；首页入口在顶栏「商城主页」。
     { no: '11', label: '订单中心', to: '/merchant/order', path: '/merchant/order', exact: true },
     { no: '12', label: '商品发布', to: '/merchant/user/add', path: '/merchant/user/add', exact: true },
     { no: '13', label: '商品管理', to: '/merchant/user/list', path: '/merchant/user/list', exact: true },
@@ -265,7 +267,7 @@ function logout() {
    300px、发丝线、等宽编号、选中项黑底反白；不用圆角 / 渐变 / 阴影 / 侧边强调条。
    ⚠️ 颜色全部走现有 token（`--ink` / `--surface-2` / `--line` …），不另造灰阶。 */
 .side-rail {
-  width: 300px;
+  width: 272px;   /* A 版同日修正：私域中台宽度取 240–280 档（用户 2026-10-19 手验意见） */
   flex: none;
   align-self: flex-start;
   position: sticky;

@@ -1,8 +1,9 @@
 <template>
   <div class="app-shell">
-    <!-- A 版骨架（2026-10-19）：300px 左侧身份树。顶栏与内容区原样保留在 `.shell-main` 内，
-         消息红点 / 黄条 / 搜索 / KeepAlive 全部不动。 -->
-    <SideRail :role="role" :base="base" :unread="unreadCount" :notify-unread="notifyUnreadCount" />
+    <!-- A 版骨架（2026-10-19，同日修正）：身份树**只给私域中台**（购物车 / 订单 / 个人中心 /
+         发布 / 消息）。公域前台（商城主页、搜索页，`meta.public`）撤掉左侧栏，顶栏 + 内容全宽。
+         顶栏、黄条、5s 双轮询、搜索、KeepAlive 全部不动。 -->
+    <SideRail v-if="showRail" :role="role" :base="base" :unread="unreadCount" :notify-unread="notifyUnreadCount" />
     <div class="shell-main">
     <div class="top-nav">
       <div class="nav-left">
@@ -132,6 +133,14 @@ const router = useRouter()
 //    ② `meta.layout` 是「路由决定布局」的**自洽**机制（一条 computed + 路由表里的字符串），
 //    那条承诺写下时（R1）还没看到它跑起来的效果；③ R6 的章程是**纯消重**。
 const layoutClass = computed(() => route.meta.layout || 'page')
+
+/** A 版布局分层（2026-10-19 修正）：
+ *  · 公域前台（`meta.public`：商城主页 `/customer`·`/merchant`、搜索页）⇒ **不挂身份树**，
+ *    顶栏 + 内容全宽，商品区铺开；
+ *  · 私域中台（购物车 / 订单中心 / 个人中心 / 消息 / 发布 / 售后）⇒ 左侧 272px 身份树 + 右工作台。
+ *  ⚠️ 判据只认路由 `meta.public`（路由表既有键），不按路径前缀猜 —— `/merchant` 与 `/customer`
+ *     渲染的是**同一个商城首页**，都属于公域。 */
+const showRail = computed(() => route.meta.public !== true)
 
 // 未读消息数量（用于顶部红点）
 const unreadCount = ref(0)
@@ -483,10 +492,11 @@ position: relative;
    ⚠️ 只加居中三件 —— `display:flex` / `align-items:flex-start` / `gap` / `height:100%` **不动**。 */
 .user-page {
 display: flex;
-align-items: flex-start;
-gap: var(--s8);
+flex-direction: column;   /* A 版（2026-10-19）：二级菜单从 200px 左栏改成横向页签，内容区吃满整宽 */
+align-items: stretch;
+gap: var(--s5);
 height: 100%;
-max-width: 1140px;
+max-width: 1240px;
 margin: 0 auto;
 padding: var(--s7) var(--s5) var(--s8);
 }

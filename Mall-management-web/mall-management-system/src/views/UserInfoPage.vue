@@ -11,10 +11,24 @@
   -->
   <main class="uc-main">
 
-    <h1 class="page-h">个人信息</h1>
-    <!-- ⚠️ 用户裁决 F3 = 甲：稿原文是「…在 ChatRoom.html 里展开。」—— 稿文件名进**可见正文**
-         是残渣，改指「消息页」（`Person`/「消息」菜单项指向的真路由，稿 `:297` / `:286`）。 -->
-    <p class="page-h-sub">历史购买记录、好友与消息在消息页里展开。</p>
+    <!-- A 版分屏仪表盘（2026-10-19）：页头 + 左身份/账户栏 + 右工作台。
+         原 ①–⑦ 的业务块与全部数据处理函数一个未删，只重排了版式与外观。 -->
+    <header class="uc-head">
+      <div class="uc-head-main">
+        <div class="uc-kicker">ACCOUNT / 个人中心</div>
+        <h1 class="page-h">个人信息</h1>
+        <!-- ⚠️ 用户裁决 F3 = 甲：稿原文是「…在 ChatRoom.html 里展开。」—— 稿文件名进**可见正文**
+             是残渣，改指「消息页」（`Person`/「消息」菜单项指向的真路由，稿 `:297` / `:286`）。 -->
+        <p class="page-h-sub">历史购买记录、好友与消息在消息页里展开。</p>
+      </div>
+      <div class="uc-head-meta">
+        <span>MEMBER / {{ Number(userInfo.MemberLevel) > 0 ? 'VIP' : 'STANDARD' }}</span>
+        <span>{{ idType }} {{ idValue || '—' }}</span>
+      </div>
+    </header>
+
+    <div class="uc-dash">
+      <aside class="uc-side">
 
     <!-- ── ① 身份卡 —— 釉面（稿全页唯一强面）。两稿逐字同构，不分支 ──────────────────
          稿 `:308-320`（客户，字母圆牌「声」）/ `:296-308`（商家，「商」）。
@@ -49,6 +63,63 @@
       >
     </section><!-- ⚠️ C3 块 2〈用户块〉**降级状态条**：同行追加、不新插一行 —— 本文件第 55 行（分支判据那行）被 `context-packs/c3-block-2-user.md` 按行号引，而它在本行之后 ⇒ 插行会让那条引用当场失效。位置选在 ① 身份卡之后、两支模板之前：`scheduled`（还没降级，人在商家壳）与 `frozen`（已降级，`login.Role` 已被改回 1 ⇒ 人在客户壳）画的正是两支不同模板，状态条必须在两边都看得见。文案里**不给**「申诉 / 恢复」控件：恢复走管理端 `downgrade/relist`，商家侧本块没有自助端点；`DowngradeReason` 本身就是要给商家看的原因（`/user/me` 那 5 列）。 --><p v-if="dg" class="dg-note" :class="dg.state"><b class="dg-tag">{{ dg.tag }}</b>{{ dg.text }}<span class="dg-why">原因：{{ dg.reason }}</span></p>
 
+    <!-- ── ⑥ 账号设置 —— 线（全页只有这一块用线）。两稿逐字同构（稿 `:383-391` / `:364-372`）──
+         ⚠️ 本块是**既有真功能**：三个 `v-model` + `saveUserInfo()` 发 `POST /user/updateUserInfo`
+            的路径**逐字保留**（`getUserData` / `saveUserInfo` / `doUpload` / `chooseImage` 一行未动）。
+         ⚠️ A 版分屏（2026-10-19）：本块从页尾移进**左身份栏**，端点、字段、事件一字未改。 -->
+    <section class="sec side-sec">
+      <div class="sec-h"><h2>账号设置</h2></div>
+      <div class="form2 form2-1">
+        <div class="f">
+          <label for="mail">邮箱</label>
+          <input id="mail" type="text" v-model="userInfo.email" placeholder="暂未填写邮箱">
+        </div>
+        <div class="f">
+          <label for="addr">常用地址</label>
+          <input id="addr" type="text" v-model="userInfo.address" placeholder="暂未填写地址">
+        </div>
+      </div>
+      <div class="f">
+        <label for="bio">自我介绍</label>
+        <textarea id="bio" v-model="userInfo.selfintroduction" placeholder="暂无自我介绍"></textarea>
+      </div>
+      <div class="actions">
+        <button class="btn btn-primary" @click="saveUserInfo"><IconGlyph name="ok" />保存个人信息</button>
+      </div>
+    </section>
+
+    <!-- ── ⑦ 资料完善（C3 块 2〈用户块〉**新增**）─────────────────────────────────────
+         ⚠️ 与 ① 身份卡的分工：卡是**只读展示**（`usertype` / `gender` / `age`），本块才是**编辑**入口；
+            `gender` / `age` 在本笔**之前没有任何前端入口**（`/user/updateProfile` 是新端点）。
+         ⚠️ 它走 `POST /user/updateProfile`（**不是**上面那个 `/user/updateUserInfo`）—— 两个端点收的
+            字段集**不相交**，**别合并成一个「保存」**：合并会要求一次请求改两处，而任一处失败时
+            「另一处算不算存下」没有答案（后端也是两个 `@PostMapping`）。
+         ⚠️ 空值语义：留空并保存 = **清空该列**（后端把「没填」当「没有」，不当「保持原值」）。
+         ⚠️ A 版分屏（2026-10-19）：本块从页尾移进**左身份栏**，端点、字段、事件一字未改。 -->
+    <section class="sec side-sec">
+      <div class="sec-h"><h2>资料完善</h2></div>
+      <div class="form2 form2-1">
+        <div class="f">
+          <label for="gender">性别</label>
+          <select id="gender" v-model="userInfo.gender">
+            <option value="">未填写</option>
+            <option value="男">男</option>
+            <option value="女">女</option>
+          </select>
+        </div>
+        <div class="f">
+          <label for="age">年龄</label>
+          <input id="age" type="number" min="0" max="150" v-model.number="userInfo.age" placeholder="暂未填写年龄">
+        </div>
+      </div>
+      <div class="actions">
+        <button class="btn btn-primary" @click="saveProfile"><IconGlyph name="ok" />保存资料完善</button>
+        <span class="dp-hint">留空 = 清空该列（后端把「没填」当「没有」）</span>
+      </div>
+    </section>
+      </aside>
+
+      <div class="uc-work">
     <!-- ── ②–⑤ 客户 / 商家两版（稿分两份）—— ⚠️ 分支判据 C3 块 2〈用户块〉**已换**：旧 `!customerid && merchantid`
          （与 `getUserData()` 里 `if (data.customerid) … else if (data.merchantid)` 同构）**已废** ⇒ 现为 `isMerchantShell`。
          旧的为什么必须废、新的为什么只能是它：三条理由逐条写在 `<script setup>` 里那个同名 `computed` 上。 -->
@@ -351,60 +422,8 @@
       </section>
 
     </template>
-
-    <!-- ── ⑥ 账号设置 —— 线（全页只有这一块用线）。两稿逐字同构（稿 `:383-391` / `:364-372`）──
-         ⚠️ 本块是**既有真功能**：三个 `v-model` + `saveUserInfo()` 发 `POST /user/updateUserInfo`
-            的路径**逐字保留**（`getUserData` / `saveUserInfo` / `doUpload` / `chooseImage` 一行未动）。 -->
-    <section class="sec">
-      <div class="sec-h"><h2>账号设置</h2></div>
-      <div class="form2">
-        <div class="f">
-          <label for="mail">邮箱</label>
-          <input id="mail" type="text" v-model="userInfo.email" placeholder="暂未填写邮箱">
-        </div>
-        <div class="f">
-          <label for="addr">常用地址</label>
-          <input id="addr" type="text" v-model="userInfo.address" placeholder="暂未填写地址">
-        </div>
-      </div>
-      <div class="f">
-        <label for="bio">自我介绍</label>
-        <textarea id="bio" v-model="userInfo.selfintroduction" placeholder="暂无自我介绍"></textarea>
-      </div>
-      <div class="actions">
-        <button class="btn btn-primary" @click="saveUserInfo"><IconGlyph name="ok" />保存个人信息</button>
-      </div>
-    </section>
-
-    <!-- ── ⑦ 资料完善（C3 块 2〈用户块〉**新增**）─────────────────────────────────────
-         ⚠️ 与 ① 身份卡的分工：卡是**只读展示**（`usertype` / `gender` / `age`），本块才是**编辑**入口；
-            `gender` / `age` 在本笔**之前没有任何前端入口**（`/user/updateProfile` 是新端点）。
-         ⚠️ 它走 `POST /user/updateProfile`（**不是**上面那个 `/user/updateUserInfo`）—— 两个端点收的
-            字段集**不相交**，**别合并成一个「保存」**：合并会要求一次请求改两处，而任一处失败时
-            「另一处算不算存下」没有答案（后端也是两个 `@PostMapping`）。
-         ⚠️ 空值语义：留空并保存 = **清空该列**（后端把「没填」当「没有」，不当「保持原值」）。 -->
-    <section class="sec">
-      <div class="sec-h"><h2>资料完善</h2></div>
-      <div class="form2">
-        <div class="f">
-          <label for="gender">性别</label>
-          <select id="gender" v-model="userInfo.gender">
-            <option value="">未填写</option>
-            <option value="男">男</option>
-            <option value="女">女</option>
-          </select>
-        </div>
-        <div class="f">
-          <label for="age">年龄</label>
-          <input id="age" type="number" min="0" max="150" v-model.number="userInfo.age" placeholder="暂未填写年龄">
-        </div>
-      </div>
-      <div class="actions">
-        <button class="btn btn-primary" @click="saveProfile"><IconGlyph name="ok" />保存资料完善</button>
-        <span class="dp-hint">留空 = 清空该列（后端把「没填」当「没有」）</span>
-      </div>
-    </section>
-
+      </div><!-- /.uc-work -->
+    </div><!-- /.uc-dash -->
 
     <!-- ⚠️ 两枚弹窗都挂在**两支模板之外、`</main>` 之前**（与 ⑥⑦ 同层）⇒ 两支壳都 mount 得到。
          ⚠️ 这里原来写着「券包弹窗挂在**客户分支内**（`<template v-else>` 里）／商家壳根本不 mount 它」
@@ -1184,5 +1203,140 @@ button {
   background: var(--surface);
   border: 1px solid var(--line-2);
   border-radius: var(--r2);
+}
+
+/* ══════════════════════════════════════════════════════════════════════════════
+   A 版分屏仪表盘（2026-10-19）—— 本段只改**版式与外观**：
+     · 页头 + 左身份栏（① 身份卡 / 降级条 / ⑥ 账号设置 / ⑦ 资料完善）
+       + 右工作台（② 订单 / ③ 资产 / ④ 收藏·上架 / ⑤ 服务）
+     · 纯黑白灰、1px 发丝线、零圆角、无渐变无阴影（A 版语言）
+     · 所有业务块、端点、事件、disabled 占位与 title 一个未删
+   ⚠️ 选择器写在本文件最后 ⇒ 同权重时覆盖上面的旧稿样式；不改旧段，方便对照回滚。
+   ══════════════════════════════════════════════════════════════════════════════ */
+
+/* 页头：标题在左、身份 / 会员档在右，底边一条发丝线 */
+.uc-head {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: var(--s6);
+  padding-bottom: var(--s5);
+  border-bottom: 1px solid var(--line);
+}
+.uc-kicker {
+  margin-bottom: var(--s3);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: .14em;
+  color: var(--ink-3);
+}
+.uc-head-meta {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s2);
+  flex: none;
+  text-align: right;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: .06em;
+  color: var(--ink-3);
+}
+
+/* 两栏：左 330px 身份/账户，右自适应工作台 */
+.uc-dash {
+  display: grid;
+  grid-template-columns: 330px minmax(0, 1fr);
+  gap: var(--s8);
+  align-items: start;
+  margin-top: var(--s6);
+}
+.uc-side,
+.uc-work { min-width: 0; }
+.uc-side { position: sticky; top: calc(60px + var(--s5)); }
+.uc-side > .ident { margin-top: 0; }
+.uc-side > .sec { margin-top: var(--s6); }
+.uc-work > .sec { margin-top: var(--s7); }
+.uc-work > .sec:first-of-type { margin-top: 0; }
+
+/* ① 身份卡：去掉釉面/圆角/彩色，改成白底 + 发丝线 */
+.ident {
+  flex-wrap: wrap;
+  gap: var(--s5);
+  align-items: flex-start;
+  padding: var(--s5);
+  background: var(--surface);
+  border: 1px solid var(--line-2);
+  border-radius: 0;
+}
+.avatar {
+  width: 72px;
+  height: 72px;
+  border: 1px solid var(--line-2);
+  border-radius: 0;
+  background: var(--surface-2);
+}
+.ident-name { font-size: var(--fs-xl); }
+.ident-meta {
+  order: 5;
+  width: 100%;
+  margin-left: 0;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--s4);
+  padding-top: var(--s5);
+  border-top: 1px solid var(--line);
+}
+.ident-meta .v { font-size: var(--fs-sm); }
+.ident-btn { order: 6; margin-left: 0; border-radius: 0; }
+
+/* ⑥⑦ 在左栏里改成单列，控件方角 */
+.form2-1 { grid-template-columns: 1fr; }
+.f input,
+.f textarea,
+.f select { border-radius: 0; }
+.btn,
+.btn-plain { border-radius: 0; }
+.btn-primary { background: var(--ink); color: var(--bg); }
+.btn-primary:hover { background: var(--ink-2); }
+
+/* ② 我的订单：浅绿底 → 浅灰底 + 发丝线；图标与标题回黑 */
+.tiles button {
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  border-radius: 0;
+}
+.tiles button:hover:not([disabled]) { background: var(--surface-3); }
+.tiles b { color: var(--ink); }
+.card-ic { color: var(--ink); }
+
+/* ③ 资产盒 / 卡片：方角、发丝线 */
+.assets-box { border-color: var(--line); border-radius: 0; }
+.assets > .asset-card { border-radius: 0; }
+
+/* ④ 收藏 / 足迹 / 最近上架：方角灰底占位图，价格回黑 */
+.pcard { border-radius: 0; }
+.pthumb { border-radius: 0; }
+.pprice { color: var(--ink); }
+
+/* ⑤ 服务 */
+.svc button:hover:not([disabled]) b { color: var(--ink); }
+
+/* 状态条：语义底色保留（提示仍要能区分），只去圆角、改左线为黑 */
+.dg-note { border-radius: 0; border-left-color: var(--ink); }
+.dg-note.frozen { border-left-color: var(--warning); }
+
+/* 弹窗：A 版方角（不再用阴影强调层级，改 1px 深线） */
+.mc-dlg { border-radius: 0; box-shadow: none; }
+.mc-state { color: var(--ink); }
+
+@media (max-width: 1150px) {
+  .uc-dash { grid-template-columns: 1fr; gap: var(--s7); }
+  .uc-side { position: static; }
+  .uc-work > .sec:first-of-type { margin-top: var(--s7); }
+}
+@media (max-width: 640px) {
+  .uc-head { flex-direction: column; align-items: flex-start; }
+  .uc-head-meta { text-align: left; }
+  .ident-meta { grid-template-columns: 1fr; }
 }
 </style>

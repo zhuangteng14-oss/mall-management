@@ -148,4 +148,34 @@ const toLogin = () => {
 .user-menu .logout:hover {
   color: var(--danger);
 }
+
+/* ── A 版（2026-10-19）：二级菜单从 200px 左栏改成**横向页签** ──────────────────
+   理由：全局左侧身份树（`components/SideRail.vue`，300px）已经承担了主导航，
+   再叠一条 200px 左栏会把工作区压到 ~830px，分屏仪表盘放不下。
+   行为不变：同一组 `meta.subMenu` 路由、同一个 `toLogin()`；只把「竖列发丝线」
+   换成「横向页签 + 选中项黑底反白」，与 A 版骨架同一套语言。 */
+.user-menu {
+  width: 100%;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  border-bottom: 1px solid var(--line);
+}
+.user-menu .menu-btn,
+.user-menu .logout {
+  width: auto;
+  margin: 0;
+  border: 0;
+  border-radius: 0;
+  padding: var(--s3) var(--s4);
+  background: none;
+}
+.user-menu .menu-btn:hover { background: var(--surface-2); }
+.user-menu .menu-btn.active {
+  background: var(--ink);
+  color: var(--bg);
+  font-weight: var(--fw-med);
+}
+.user-menu .logout { margin-top: 0; margin-left: auto; color: var(--ink-3); }
+.user-menu .logout:hover { color: var(--ink); }
 </style>
