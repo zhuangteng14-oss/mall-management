@@ -37,6 +37,45 @@
 import { http, streamPost } from './http'
 import { endpoints } from './endpoints'
 
+// ==================== 全局 SSE 连接预算（2026-10-19）====================
+//
+// 为什么需要：浏览器对同一 origin 的 HTTP/1.1 并发连接上限是 6。攻击页的实时预览
+// 一次就占 3 条 SSE；而指标 / 日志 / 状态三页被 `AdminShell.vue` 的 `<keep-alive>`
+// 缓存，路由切走**不卸载** ⇒ 它们的流若不显式关，会和攻击页的 3 条叠加到 6 条，
+// 普通 POST 只能排队到 `http.js` 的 10 秒超时（2026-10-19 现场）。
+//
+// 两道闸：① 三页在 `onDeactivated` 关流（正常路径，见各页）；② 这里再兜一层硬预算 ——
+// 整个页面最多同时存在 4 条逻辑 SSE，第 5 条进来时回收最老的一条，给普通请求留 2 条槽位。
+//
+// ⚠️ 预算挂在 `window` 上而不是模块变量：dev 的 HMR 会重新求值本模块，模块变量会丢；
+//    `window.__sse_instances` 跨热更新仍在，旧实例也继续受同一预算约束（探针读它）。
+const SSE_BUDGET = 4
+const SSE_REGISTRY = typeof window !== 'undefined'
+  ? (window.__sse_instances || (window.__sse_instances = []))
+  : []
+
+function sseRegister(entry) {
+  SSE_REGISTRY.push(entry)
+  while (SSE_REGISTRY.length > SSE_BUDGET) {
+    // 「最老的空闲连接」：优先回收超过 2 秒没收到帧的（按创建序取第一个）；
+    // 全都在收帧时退化为回收最老的（仍按创建序）。空闲 = 不占实时数据通道。
+    const now = Date.now()
+    let idx = SSE_REGISTRY.findIndex((e) => now - (e.lastFrameAt || 0) >= 2000)
+    if (idx < 0) idx = 0
+    const [victim] = SSE_REGISTRY.splice(idx, 1)
+    try { victim.evict() } catch (e) { /* 回收失败不阻断新流 */ }
+  }
+  return entry
+}
+
+function sseUnregister(entry) {
+  const i = SSE_REGISTRY.indexOf(entry)
+  if (i >= 0) SSE_REGISTRY.splice(i, 1)
+}
+
+/** 当前活跃的逻辑 SSE 数（探针用；页面代码不要依赖）。 */
+export function activeSseCount() { return SSE_REGISTRY.length }
+
 /** 指标面板流（1 秒 1 帧）。⚠️ 块 7 · commit 10c 起：**断了会自己接回来**（见 `openResilientStream`）。 */
 export function openMetricsStream(handlers) {
   return openResilientStream(endpoints.observe.metrics, handlers)
@@ -109,6 +148,8 @@ export function openResilientStream(path, { onOpen, onFrame, onLost } = {}) {
   let current = null
   /** 页面被隐藏时暂停（见本函数头注释「连接预算」一节）。 */
   let paused = false
+  /** 预算表里的这一条（登记在 start() 之前，帧到达时更新它的空闲时刻）。 */
+  let entry = null
 
   function start() {
     if (closed || paused) return
@@ -118,6 +159,12 @@ export function openResilientStream(path, { onOpen, onFrame, onLost } = {}) {
         if (!closed && !paused) onOpen && onOpen()
       },
       onFrame(f) {
+        if (entry) entry.lastFrameAt = Date.now()
+        // 探针读数（2026-10-19）：每条流的累计帧数，用来证明「切回来数据真的在动」。
+        if (typeof window !== 'undefined') {
+          window.__sse_frames = window.__sse_frames || {}
+          window.__sse_frames[path] = (window.__sse_frames[path] || 0) + 1
+        }
         if (!closed && !paused) onFrame && onFrame(f)
       },
       onEnd(err) {
@@ -177,9 +224,7 @@ export function openResilientStream(path, { onOpen, onFrame, onLost } = {}) {
   // 挂载那一刻页面已经不可见（后台标签页里预渲染/恢复）⇒ 不要先占一条再等事件。
   if (document.visibilityState === 'hidden') paused = true
 
-  start()
-
-  return {
+  const handle = {
     close() {
       closed = true
       document.removeEventListener('visibilitychange', onVisibilityChange)
@@ -193,6 +238,32 @@ export function openResilientStream(path, { onOpen, onFrame, onLost } = {}) {
       }
     },
   }
+
+  // 预算登记：一条**逻辑流**只占一个名额（重连不重复计数）。
+  // 被回收时先 `close()`（停掉重连），再把 `evicted` 报给页面 —— 页面据此把句柄置空，
+  // 下次 `onActivated` 才有机会重建（见三页的 KeepAlive 生命周期）。
+  entry = sseRegister({
+    path,
+    lastFrameAt: Date.now(),
+    close: handle.close,
+    evict() {
+      if (closed) return
+      handle.close()
+      onLost && onLost({
+        err: new Error(`SSE 连接预算已满（最多 ${SSE_BUDGET} 条），本流被回收`),
+        attempt: 0,
+        nextRetryInMs: 0,
+        evicted: true,
+      })
+    },
+  })
+  const closeHandle = handle.close
+  handle.close = () => {
+    closeHandle()
+    sseUnregister(entry)
+  }
+  start()
+  return handle
 }
 
 /**
@@ -218,6 +289,18 @@ export function openResilientStream(path, { onOpen, onFrame, onLost } = {}) {
 export function openStream(path, { onOpen, onFrame, onEnd } = {}) {
   let closed = false
   let reader = null
+  // 真实连接计数（探针用）：一条已建立、尚未结束的 SSE = 浏览器里的一条同源连接。
+  let counted = false
+  const connOpened = () => {
+    if (counted) return
+    counted = true
+    if (typeof window !== 'undefined') window.__sse_connections = (window.__sse_connections || 0) + 1
+  }
+  const connClosed = () => {
+    if (!counted) return
+    counted = false
+    if (typeof window !== 'undefined') window.__sse_connections = Math.max(0, (window.__sse_connections || 1) - 1)
+  }
 
   const done = (async () => {
     let res
@@ -247,6 +330,7 @@ export function openStream(path, { onOpen, onFrame, onEnd } = {}) {
     }
     const decoder = new TextDecoder('utf-8')
     let buffer = ''
+    connOpened()
     onOpen && onOpen()
 
     try {
@@ -271,15 +355,18 @@ export function openStream(path, { onOpen, onFrame, onEnd } = {}) {
     } catch (e) {
       // 读失败（网络断 / 服务端异常关闭）。⚠️ 调用方自己 close() 时也会走到这里
       //（cancel 会让 await read() 抛），故用 closed 区分「谁结束的」。
+      connClosed()
       if (!closed) onEnd && onEnd(e)
       return
     }
+    connClosed()
     if (!closed) onEnd && onEnd(null)
   })()
 
   return {
     close() {
       closed = true
+      connClosed()
       if (reader) {
         // Promise 形态的 cancel 失败（已关闭）不必上报：调用方已经在卸载路径上了。
         Promise.resolve(reader.cancel()).catch(() => {})

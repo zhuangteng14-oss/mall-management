@@ -2262,7 +2262,7 @@ function connect() {
     onFrame: (f) => onFrame(f, src),
     onLost(s) {
       phase.value = 'stopped'
-      lost.value = s
+      lost.value = s; if (s.evicted) stream = null
       errMsg.value = s.err ? ((s.err && s.err.message) || '连接中断') : ''
     },
   }
@@ -2368,7 +2368,7 @@ onMounted(() => {
 // ⚠️ 切数据源（`正常` ⇄ `模拟日常`）⇒ 立刻重连；**切源 = 隔离不是清空**（两桶各留、显示只取 `cur`）。
 //    去重集合 `seenSeq` 跨源共用（不封顶）；两套 seq 必须不重叠，由 demo-stream 的高位 `evSeq` 保证。
 onDeactivated(() => {
-  pageActive.value = false
+  pageActive.value = false; flushAllBuffers(); closeStream()   // 2026-10-19 连接预算：KeepAlive 切走必须让出 SSE（同行追加，保净零行数）
   stopFlush()          // 页面不可见 ⇒ 连 rAF 冲刷也停（数据仍进池）
   // 回放会话在后台**继续走**（用户切到指标页时进度不该倒退），吐出的行先攒在会话的
   // backlog 里；本页回到屏上时 `attachReplaySink` 会一次性补画。
@@ -2376,7 +2376,7 @@ onDeactivated(() => {
   clearInterval(tickTimer); tickTimer = null
 })
 onActivated(() => {
-  pageActive.value = true; nowMs.value = Date.now()
+  pageActive.value = true; nowMs.value = Date.now(); if (!stream && !replaySession.active && !replaySession.loading) connect()   // 2026-10-19：切回来立刻重建 SSE（同行追加，保净零行数）
   startFlush()
   clearInterval(tickTimer); tickTimer = setInterval(() => { nowMs.value = Date.now() }, 1000)
   attachReplaySink(onReplayBatch)

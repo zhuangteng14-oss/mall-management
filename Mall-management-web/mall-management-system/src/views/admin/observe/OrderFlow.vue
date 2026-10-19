@@ -870,7 +870,7 @@
 
 <script setup>
 /* eslint-disable no-undef */ /* 理由见 `ui/KpiCard.vue` 同款注释（eslint-plugin-vue 8.7.1 缺宏环境） */
-import { computed, nextTick, onBeforeUnmount, onDeactivated, onMounted, reactive, ref, watch } from 'vue'
+import { computed, nextTick, onActivated, onBeforeUnmount, onDeactivated, onMounted, reactive, ref, watch } from 'vue'
 import { openOrderStream, orderDetail, orderInsight } from '../../../api/observe'
 // 演示模式（块 7 收尾 ②）：`DemoModeToggle` 摆开关，`demo` 是被 `watch` 的那个状态，
 // `openDemoStream` 是与 `openOrderStream` **同形**的假流 —— 见 `connect()` 里那处三元式。
@@ -2689,6 +2689,7 @@ function connect() {
     onLost(s) {
       phase.value = 'stopped'
       lost.value = s
+      if (s.evicted) stream = null
       // ⚠️ `errMsg` 只装**真错误**：它同时是「还没收到第一拍」那个加载闸的判据（见 `first`）。
       errMsg.value = s.err ? ((s.err && s.err.message) || '连接中断') : ''
     },
@@ -2821,9 +2822,15 @@ watch(() => replaySession.restartSeq, () => {
 watch(() => replaySession.seekSeq, () => {
   if (replaySession.active) enterReplay()
 })
-// KeepAlive 失活（路由切走）时**不卸载**：落一次盘就够了，内存状态原样留着。
+// KeepAlive 失活（路由切走）时**不卸载**：内存状态原样留着，但 SSE 必须让出 ——
+// 否则它会和攻击页的 3 条预览叠加到浏览器 6 条上限（见 `api/observe.js` 文件头预算一节）。
 onDeactivated(() => {
   saveSession(true)
+  closeStream()
+})
+// 切回来立刻重建，不等用户手动操作；`!stream` 保证首次 mount 时不重复建。
+onActivated(() => {
+  if (!stream && !replaySession.active && !replaySession.loading) connect()
 })
 onBeforeUnmount(() => {
   saveSession(true)

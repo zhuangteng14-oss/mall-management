@@ -1531,6 +1531,7 @@ function connect() {
     onLost(s) {
       phase.value = 'stopped'
       lost.value = s
+      if (s.evicted) stream = null
       errMsg.value = s.err ? ((s.err && s.err.message) || '连接中断') : ''
     },
   }
@@ -1562,9 +1563,15 @@ onDeactivated(() => {
   pageActive.value = false
   if (rafId) { cancelAnimationFrame(rafId); rafId = 0 }
   if (stockRaf) { cancelAnimationFrame(stockRaf); stockRaf = 0 }
+  // 连接预算（2026-10-19）：KeepAlive 只缓存组件、不替我们关连接。切走必须让出 SSE，
+  // 否则它会和攻击页的 3 条预览叠加到浏览器 6 条上限（见 `api/observe.js` 文件头）。
+  closeStream()
 })
 onActivated(() => {
   pageActive.value = true
+  // 切回来：句柄已在上面的 onDeactivated 里关掉 ⇒ 立刻重建，不等用户点「重新连接」。
+  // ⚠️ 首页 mount 时 onMounted(connect) 已经建过流，`!stream` 保证不会重复建。
+  if (!stream && !replaySession.active) connect()
   // 回放期间实时面板整块隐藏（见模板），补间动画也不要空转。
   if (replaySession.active) return
   const lastRow = rows.value[rows.value.length - 1]
