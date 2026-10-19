@@ -30,7 +30,7 @@
       <div class="id-main">
         <div class="id-name">
           {{ userInfo.username || '未知用户' }}
-          <span class="id-badge" :class="{ vip }">{{ vip ? '黑金会员' : '普通会员' }}</span>
+          <span class="id-badge" :class="'lv-' + memberTheme" :title="plaqueLevelName">{{ memberLevelLabel }}</span>
           <span v-if="isMerchantShell" class="id-badge merchant">商家</span>
         </div>
         <div class="id-meta">
@@ -496,7 +496,7 @@ const plaqueKicker = computed(() => PLAQUE_KICKER[memberTheme.value])
 const plaqueLevelName = computed(() => {
   const lv = memberOv.value && memberOv.value.level
   return `${(lv && lv.Name) || PLAQUE_NAME[memberTheme.value]} · ${(lv && lv.Code) || (vip.value ? 'V1' : 'V0')}`
-})
+}); /* 2026-10-19 用户令：头像旁标签不再写死「黑金会员 / 普通会员」—— 直接绑 `member_level.Name`（银卡就写银卡）。同行追加、不新增行。 */ const memberLevelLabel = computed(() => { const lv = memberOv.value && memberOv.value.level; return (lv && lv.Name) || PLAQUE_NAME[memberTheme.value] })
 const plaquePoints = computed(() => {
   const acc = memberOv.value && memberOv.value.account
   return acc ? String(Number(acc.Balance || 0)) : '—'
@@ -522,8 +522,8 @@ const rechargeLogs = ref([])
 const openRecharge = async () => {
   rechargeMsg.value = ''
   rechargeOpen.value = true
-  const cid = getCustomerId()
-  if (!cid) { rechargeOk.value = false; rechargeMsg.value = '未识别到客户账号，请重新登录后再充值'; return }
+  // 2026-10-19：商家 customerid 为 NULL ⇒ 与会员中心同口径（customerid → merchantid → 登录名；后端 WalletDao 同款三键），否则商家必现「未识别到客户账号」。
+  const cid = getMemberId(); if (!cid) { rechargeOk.value = false; rechargeMsg.value = '未识别到登录账号，请重新登录后再充值'; return }
   try {
     const data = await walletOverview(cid)
     if (data && data.success) rechargeLogs.value = (data.logs || []).slice(0, 5)
@@ -531,7 +531,7 @@ const openRecharge = async () => {
 }
 
 const doRecharge = async () => {
-  const cid = getCustomerId()
+  const cid = getMemberId()   // 2026-10-19：三键兜底，商家 customerid 为 NULL（见 openRecharge）
   if (!cid) { rechargeOk.value = false; rechargeMsg.value = '未识别到客户账号，请重新登录'; return }
   const amount = Number(rechargeAmount.value)
   if (!Number.isFinite(amount) || amount < 10 || amount > 1000) {
@@ -1173,45 +1173,48 @@ button {
 
 /* ── 黑金牌匾 ─────────────────────────────────────────────────────────────── */
 /* 2026-10-19 用户令：黑金牌匾必须是**真黑 + 金**，不能是青瓷墨绿（旧版用了 `--brand-ink`）。 */
-.plaque { background: #101010; color: var(--surface); border: 1px solid #101010; padding: 9px; position: relative; overflow: hidden; }
+.plaque { --pl-fg: #ffffff; --pl-fg-soft: rgba(255, 255, 255, .72); --pl-line: rgba(255, 255, 255, .24); --pl-code: rgba(255, 255, 255, .42); background: #101010; color: var(--pl-fg); border: 1px solid #101010; padding: 9px; position: relative; overflow: hidden; }
 .plaque-inner { border: 1px solid rgba(232, 201, 138, .38); padding: 22px 24px; display: flex; flex-direction: column; gap: 24px; }
-.plaque-top { display: flex; justify-content: space-between; gap: 16px; font-family: var(--font-mono); font-size: 9px; letter-spacing: .1em; color: rgba(255, 255, 255, 0.72); }
+.plaque-top { display: flex; justify-content: space-between; gap: 16px; font-family: var(--font-mono); font-size: 9px; letter-spacing: .1em; color: var(--pl-fg-soft); }
 .plaque-mid { display: grid; grid-template-columns: 1.1fr auto .9fr; gap: 24px; align-items: end; }
 .plaque-mid .member-level { font-family: var(--font-display); font-size: 30px; line-height: 1.05; letter-spacing: -.02em; color: #e8c98a; }
-.plaque-mid .member-level small { display: block; font-family: var(--font); font-size: 11px; letter-spacing: 0; color: rgba(255, 255, 255, 0.72); margin-top: 6px; }
+.plaque-mid .member-level small { display: block; font-family: var(--font); font-size: 11px; letter-spacing: 0; color: var(--pl-fg-soft); margin-top: 6px; }
 .plaque-num { font-family: var(--font-mono); font-size: 58px; line-height: .9; letter-spacing: -.07em; }
-.plaque-num small { display: block; font-size: 9px; letter-spacing: .12em; color: rgba(255, 255, 255, 0.72); margin-top: 7px; text-align: right; }
+.plaque-num small { display: block; font-size: 9px; letter-spacing: .12em; color: var(--pl-fg-soft); margin-top: 7px; text-align: right; }
 /* 等级牌匾动态分色（2026-10-19 用户令）：普通 / 银 / 金 / 黑金 / 青瓷绿。
    浅色底一律用青瓷绿文字（`#275e4e`）保证对比度；黑金是真黑 + 香槟金；顶级是青瓷绿底。 */
-.plaque.pl-white { background: #f3f1ea; border-color: #f3f1ea; color: #275e4e; }
+.plaque.pl-white { --pl-fg: #275e4e; --pl-fg-soft: rgba(39, 94, 78, .78); --pl-line: rgba(39, 94, 78, .22); --pl-code: rgba(39, 94, 78, .26); background: #f3f1ea; border-color: #f3f1ea; color: var(--pl-fg); }
 .plaque.pl-white .plaque-inner { border-color: rgba(39, 94, 78, .28); }
 .plaque.pl-white .plaque-top, .plaque.pl-white .plaque-mid .member-level small,
 .plaque.pl-white .plaque-num small, .plaque.pl-white .plaque-bottom { color: rgba(39, 94, 78, .72); }
 .plaque.pl-white .plaque-mid .member-level, .plaque.pl-white .balance { color: #275e4e; }
-.plaque.pl-silver { background: linear-gradient(135deg, #e8ebef, #c3c9d1 60%, #aeb6c0); border-color: #aeb6c0; color: #275e4e; }
+.plaque.pl-silver { --pl-fg: #275e4e; --pl-fg-soft: rgba(39, 94, 78, .78); --pl-line: rgba(39, 94, 78, .22); --pl-code: rgba(39, 94, 78, .28); background: linear-gradient(135deg, #e8ebef, #c3c9d1 60%, #aeb6c0); border-color: #aeb6c0; color: var(--pl-fg); }
 .plaque.pl-silver .plaque-inner { border-color: rgba(39, 94, 78, .26); }
 .plaque.pl-silver .plaque-top, .plaque.pl-silver .plaque-mid .member-level small,
 .plaque.pl-silver .plaque-num small, .plaque.pl-silver .plaque-bottom { color: rgba(39, 94, 78, .72); }
 .plaque.pl-silver .plaque-mid .member-level, .plaque.pl-silver .balance { color: #275e4e; }
-.plaque.pl-gold { background: linear-gradient(135deg, #d8b452, #b8912c 60%, #9c7a1f); border-color: #9c7a1f; color: #275e4e; }
-.plaque.pl-gold .plaque-inner { border-color: rgba(39, 94, 78, .34); }
+/* 2026-10-19 用户令：金卡牌匾 = 深金底 + **白字**（用户明列金-白色文字）。 */
+.plaque.pl-gold { --pl-fg: #ffffff; --pl-fg-soft: rgba(255, 255, 255, .8); --pl-line: rgba(255, 255, 255, .28); --pl-code: rgba(255, 255, 255, .46); background: linear-gradient(135deg, #9c7a1f, #7d5e14 60%, #634a0f); border-color: #634a0f; color: var(--pl-fg); }
+.plaque.pl-gold .plaque-inner { border-color: rgba(255, 255, 255, .34); }
 .plaque.pl-gold .plaque-top, .plaque.pl-gold .plaque-mid .member-level small,
-.plaque.pl-gold .plaque-num small, .plaque.pl-gold .plaque-bottom { color: rgba(39, 94, 78, .78); }
-.plaque.pl-gold .plaque-mid .member-level, .plaque.pl-gold .balance { color: #275e4e; }
-.plaque.pl-platinum { background: linear-gradient(135deg, #eef3f8, #c2ccd8 60%, #9dabb9); border-color: #9dabb9; color: #275e4e; }
+.plaque.pl-gold .plaque-num small, .plaque.pl-gold .plaque-bottom { color: rgba(255, 255, 255, .8); }
+.plaque.pl-gold .plaque-mid .member-level, .plaque.pl-gold .balance { color: #ffffff; }
+.plaque.pl-platinum { --pl-fg: #275e4e; --pl-fg-soft: rgba(39, 94, 78, .78); --pl-line: rgba(39, 94, 78, .22); --pl-code: rgba(39, 94, 78, .28); background: linear-gradient(135deg, #eef3f8, #c2ccd8 60%, #9dabb9); border-color: #9dabb9; color: var(--pl-fg); }
 .plaque.pl-platinum .plaque-inner { border-color: rgba(39, 94, 78, .26); }
 .plaque.pl-platinum .plaque-top, .plaque.pl-platinum .plaque-mid .member-level small,
 .plaque.pl-platinum .plaque-num small, .plaque.pl-platinum .plaque-bottom { color: rgba(39, 94, 78, .72); }
 .plaque.pl-platinum .plaque-mid .member-level, .plaque.pl-platinum .balance { color: #275e4e; }
-.plaque.pl-diamond { background: linear-gradient(135deg, #e6f4fc, #a9d3ec 60%, #6fa9cf); border-color: #6fa9cf; color: #275e4e; }
+.plaque.pl-diamond { --pl-fg: #275e4e; --pl-fg-soft: rgba(39, 94, 78, .78); --pl-line: rgba(39, 94, 78, .22); --pl-code: rgba(39, 94, 78, .28); background: linear-gradient(135deg, #e6f4fc, #a9d3ec 60%, #6fa9cf); border-color: #6fa9cf; color: var(--pl-fg); }
 .plaque.pl-diamond .plaque-inner { border-color: rgba(39, 94, 78, .3); }
 .plaque.pl-diamond .plaque-top, .plaque.pl-diamond .plaque-mid .member-level small,
 .plaque.pl-diamond .plaque-num small, .plaque.pl-diamond .plaque-bottom { color: rgba(39, 94, 78, .74); }
 .plaque.pl-diamond .plaque-mid .member-level, .plaque.pl-diamond .balance { color: #275e4e; }
-.plaque.pl-black { background: #101010; border-color: #101010; color: #fff; }
+/* 2026-10-19 用户令：黑金牌匾 = 真黑底 + **全金文字**（不再只把等级名染金）。 */
+.plaque.pl-black { --pl-fg: #e8c98a; --pl-fg-soft: rgba(232, 201, 138, .76); --pl-line: rgba(232, 201, 138, .32); --pl-code: rgba(232, 201, 138, .5); background: #101010; border-color: #101010; color: var(--pl-fg); }
 .plaque.pl-black .plaque-inner { border-color: rgba(232, 201, 138, .38); }
 .plaque.pl-black .plaque-mid .member-level { color: #e8c98a; }
-.plaque.pl-ink { background: linear-gradient(135deg, #3b7966, #275e4e 60%, #1c4739); border-color: #1c4739; color: #f3f1e7; }   /* 顶级牌匾 = 青瓷绿（用户令 2026-10-19） */
+/* 青瓷至尊牌匾 = 青瓷绿底 + **金文字**。 */
+.plaque.pl-ink { --pl-fg: #d9c68c; --pl-fg-soft: rgba(217, 198, 140, .78); --pl-line: rgba(217, 198, 140, .3); --pl-code: rgba(217, 198, 140, .5); background: linear-gradient(135deg, #3b7966, #275e4e 60%, #1c4739); border-color: #1c4739; color: var(--pl-fg); }
 .plaque.pl-ink .plaque-inner { border-color: rgba(217, 198, 140, .4); }
 .plaque.pl-ink .plaque-mid .member-level { color: #d9c68c; }
 .balance-btn { display: block; margin-left: auto; padding: 0; background: none; border: 0; font: inherit; cursor: pointer; text-align: right; }
@@ -1225,13 +1228,13 @@ button {
 .recharge-log b { margin-left: auto; color: var(--brand-ink); }
 .recharge-log small { color: var(--ink-3); }
 .plaque-mid .balance { text-align: right; font-family: var(--font-mono); font-size: 19px; }
-.plaque-mid .balance small { display: block; font-family: var(--font); font-size: 10px; color: rgba(255, 255, 255, 0.72); margin-bottom: 4px; }
-.plaque-bottom { display: flex; align-items: center; justify-content: space-between; gap: 16px; border-top: 1px solid rgba(255, 255, 255, 0.24); padding-top: 13px; }
-.plaque-bottom .name { font-size: 12px; letter-spacing: .15em; }
-.barcode { display: flex; align-items: flex-end; gap: 2px; height: 18px; }
-.barcode i { display: block; width: 2px; background: rgba(255, 255, 255, 0.82); }
-.plaque-link { font-size: 11px; color: rgba(255, 255, 255, 0.88); border-bottom: 1px solid rgba(255, 255, 255, 0.5); padding-bottom: 1px; text-decoration: none; }
-.plaque-link:hover { color: var(--surface); border-color: var(--surface); }
+.plaque-mid .balance small { display: block; font-family: var(--font); font-size: 10px; color: var(--pl-fg-soft); margin-bottom: 4px; }
+.plaque-bottom { display: flex; align-items: center; justify-content: space-between; gap: 16px; border-top: 1px solid var(--pl-line); padding-top: 13px; }
+.plaque-bottom .name { font-size: 12px; letter-spacing: .15em; color: var(--pl-fg); }
+.barcode { display: flex; align-items: flex-end; gap: 2px; height: 18px; opacity: .75; }
+.barcode i { display: block; width: 2px; background: var(--pl-code); }
+.plaque-link { font-size: 11px; color: var(--pl-fg); border-bottom: 1px solid var(--pl-line); padding-bottom: 1px; text-decoration: none; }
+.plaque-link:hover { color: var(--pl-fg); border-color: var(--pl-fg); }
 
 /* ── 面板 ─────────────────────────────────────────────────────────────────── */
 .panel { border: 1px solid var(--line); padding: 22px 24px; background: var(--surface); }
@@ -1367,23 +1370,27 @@ button {
 }
 .id-main { min-width: 0; }
 .id-name {
-  display: flex; align-items: center; flex-wrap: wrap; gap: 10px;
-  font-family: var(--font-display); font-size: 26px; font-weight: 500; color: var(--ink);
-  line-height: 1.2;
+  display: flex; align-items: baseline; flex-wrap: wrap; gap: 10px;
+  font-family: var(--font-display); font-size: 24px; font-weight: 600; color: #1c1c1a;
+  line-height: 1.25; letter-spacing: -.01em;
 }
 .id-badge {
-  font-family: var(--font-mono); font-size: 10px; letter-spacing: .06em;
-  padding: 3px 8px; border: 1px solid var(--line-2); color: var(--ink-3);
-  line-height: 1.4; white-space: nowrap;
+  font-family: var(--font); font-size: 11px; font-weight: 500; letter-spacing: .02em;
+  padding: 2px 9px; border: 1px solid #e2dfd7; border-radius: 999px; color: #4a4a45; background: #f6f4ef;
+  line-height: 1.5; white-space: nowrap;
 }
-.id-badge.vip { background: var(--ink); color: var(--surface); border-color: var(--ink); }
-.id-badge.merchant { border-color: var(--brand-ink); color: var(--brand-ink); }
+/* 2026-10-19 用户令：头像旁等级标签的文字颜色跟牌匾同一套色卡 —— 普通/银/铂/钻 = 青瓷绿，金 = 白，黑金 = 金，青瓷至尊 = 金（深底保证对比度）。 */
+.id-badge.lv-plain, .id-badge.lv-silver, .id-badge.lv-platinum, .id-badge.lv-diamond { color: #275e4e; background: #f4f2ec; border-color: rgba(39, 94, 78, .24); }
+.id-badge.lv-gold { color: #fff; background: linear-gradient(135deg, #9c7a1f, #7d5e14); border-color: #7d5e14; }
+.id-badge.lv-black { color: #e8c98a; background: #101010; border-color: #101010; }
+.id-badge.lv-supreme { color: #d9c68c; background: linear-gradient(135deg, #3b7966, #275e4e 60%, #1c4739); border-color: #1c4739; }
+.id-badge.merchant { background: transparent; border-color: #d8d4ca; color: #55554f; }
 .id-meta {
-  display: flex; flex-wrap: wrap; gap: 8px 22px;
-  margin-top: 10px; font-size: 12px; color: var(--ink-3);
+  display: flex; align-items: baseline; flex-wrap: wrap; gap: 6px 24px;
+  margin-top: 12px; font-size: 12px; line-height: 1.6; color: #8a8a82;
 }
-.id-meta b { font-family: var(--font-mono); font-weight: 500; color: var(--ink-2); }
-.id-bio { margin-top: 10px; font-size: 13px; line-height: 1.7; color: var(--ink-2); }
+.id-meta b { font-family: var(--font-mono); font-weight: 500; color: #30302c; }
+.id-bio { margin-top: 10px; font-size: 12.5px; line-height: 1.7; color: #55554f; }
 .id-actions { display: flex; gap: 10px; justify-content: flex-end; }
 
 /* ── 断点（照 A 版 1080 / 860 / 600） ─────────────────────────────────────── */

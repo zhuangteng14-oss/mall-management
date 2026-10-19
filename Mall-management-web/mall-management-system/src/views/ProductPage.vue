@@ -96,7 +96,7 @@
         <div class="info pd-info">
           <div class="kicker">{{ goodType }} / {{ currentItem.productCode || 'PRODUCT' }}</div>
           <h1 class="pname">{{ goodName }}<span v-if="currentItem.isBrand === true || currentItem.isBrand === 1 || currentItem.isBrand === '1'" class="pname-brand">品牌</span></h1>
-          <p class="pd-sub">商品编号 {{ currentItem.productCode || '加载中…' }} · {{ currentItem.UserName ? currentItem.UserName + '小店' : '商家信息加载中…' }}。型号与数量在购入弹窗内一并提交。</p>
+          <!-- 2026-10-19 用户令：H1 下方「商品编号 · 店铺名 · 型号与数量…」整行已删（信息重复且泄版面）；保留本行注释占位，净零行数不顶漂下方行号。 -->
 
           <!-- ①【原价 / 折扣】—— C3 块 5〈折扣〉**落地**（2026-10-12 用户 A 档批准）。
                改前：`.was`（`¥199.00`）与 `.off`（`6.5 折`）是**稿内 mock 的写死字面量**，
@@ -2783,24 +2783,28 @@ button { background: none; border: 0; cursor: pointer; }
   --pd-main: var(--brand);
   --pd-main-ink: var(--brand-ink);
   --pd-price: var(--brand-ink);
+  --pd-tab-line: var(--brand-ink);
   --pd-on-main: var(--bg);
 }
 .goods-detail-page.pd-seckill {
   --pd-main: var(--accent);
   --pd-main-ink: var(--accent);
   --pd-price: var(--accent);
+  --pd-tab-line: #7a140f;
   --pd-on-main: var(--bg);
 }
 .goods-detail-page.pd-subsidy {
   --pd-main: #1f9d55;
   --pd-main-ink: #157347;
   --pd-price: #157347;
+  --pd-tab-line: #0f5132;
   --pd-on-main: #ffffff;
 }
 .goods-detail-page.pd-brand {
   --pd-main: #101010;
   --pd-main-ink: #101010;
   --pd-price: #c9a227;
+  --pd-tab-line: #c9a227;
   --pd-on-main: #e8c98a;
 }
 
@@ -2841,4 +2845,15 @@ button { background: none; border: 0; cursor: pointer; }
   color: var(--ink);
   font-weight: var(--fw-med);
 }
+
+/* 2026-10-19 用户令：H1 与四个页签也必须跟着 `pdThemeClass` 走 ——
+   标题字用主色墨色；选中页签用主色实底（黑金档 = 黑底金字）、下缘压一条同族深色线。
+   评价列表内部内容不在本组选择器内，保持原色。 */
+.goods-detail-page .pd-info .pname { color: var(--pd-main-ink); }
+.goods-detail-page .a-pd-tabs button.on {
+  background: var(--pd-main);
+  color: var(--pd-on-main);
+  box-shadow: inset 0 -3px 0 var(--pd-tab-line);
+}
+.goods-detail-page .a-pd-tabs button:not(.on):hover { color: var(--pd-main-ink); }
 </style>

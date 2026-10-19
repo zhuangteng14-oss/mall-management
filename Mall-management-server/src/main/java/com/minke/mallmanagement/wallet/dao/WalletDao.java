@@ -77,8 +77,12 @@ public class WalletDao {
 
     /** 权威账户 → {@code user.Balance} 的事务内镜像。 */
     public int mirrorUserBalance(String userId, BigDecimal available) {
-        String sql = "UPDATE mall_management_sql.`user` SET Balance = ? WHERE customerid = ?";
-        return jdbcClient.sql(sql).params(available, userId).update();
+        // 2026-10-19 终局清道夫（沙箱充值）：商家账号 `user.customerid` 恒为 NULL（实测 14/14），
+        // 只按 customerid 回写会 0 行受影响 ⇒ `/user/me` 刷新后余额又变回 0。
+        // 与 `PointsDao` / `FavoriteDao` 同口径：customerid → merchantid → username 三键兜底。
+        String sql = "UPDATE mall_management_sql.`user` SET Balance = ? "
+                + "WHERE customerid = ? OR merchantid = ? OR username = ?";
+        return jdbcClient.sql(sql).params(available, userId, userId, userId).update();
     }
 
     // ==================== 流水 ====================
