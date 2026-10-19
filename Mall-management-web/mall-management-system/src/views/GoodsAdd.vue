@@ -40,7 +40,7 @@
         <p>新建一件商品，名称 / 价格 / 图片 / 类型 / 型号五项必填。保存草稿不生成商品行，提交审核后进入平台审核队列。</p>
       </div>
       <div class="head-actions">
-        <router-link class="btn" to="/merchant/user/goods">商品管理</router-link>
+        <router-link class="btn" to="/merchant/user/list">商品管理</router-link>
       </div>
     </section>
 
@@ -1253,7 +1253,10 @@ textarea.inp { height: 88px; padding: var(--s3); resize: none; font-family: inhe
 .acts .hint { margin-left: auto; font-size: var(--fs-xs); color: var(--ink-3); text-align: right; }
 
 /* ── 原实现的行内 `style="display:none"` ⇒ 收敛成类 ────────────────────────── */
-.file-hidden { display: none; }
+/* 2026-10-19 终局清道夫第 5 条：**不能用 `display:none`** —— Chromium/Edge 会拒绝
+   为「未渲染」的 file input 打开系统选择框（`input.click()` 不报错、也不弹窗，实测）。
+   改成「视觉隐藏但仍在渲染树里」：1px 大小 + 裁切，既能被 `.click()` 唤起，又看不见。 */
+.file-hidden { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
 
 /* ── 窄档（稿 `:296-308`）—— `.body` / `.uc-menu` 两件不在本组件 ⇒ 只搬后两条 ──── */
 @media (max-width: 1080px) {

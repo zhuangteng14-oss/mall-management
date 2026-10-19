@@ -127,10 +127,10 @@
 
     <!-- 买家资产入口（A `entry-grid`） -->
     <div class="entry-grid section-gap" aria-label="买家资产入口">
-      <div class="entry-cell locked" title="收藏列表暂无聚合端点 —— 预留入口">
-        <span class="ek">01 / FAVORITES</span><b>我的收藏</b><span class="ev">—</span>
+      <router-link class="entry-cell entry-link" :to="favoritesPath" title="打开我的收藏（真端点 /favorite/list）">
+        <span class="ek">01 / FAVORITES</span><b>我的收藏</b><span class="ev">{{ favCount === null ? '—' : favCount }}</span>
         <small>看中的器物，先放进收藏夹</small><span class="ego">查看收藏 →</span>
-      </div>
+      </router-link>
       <div
         class="entry-cell entry-link"
         role="button"
@@ -217,7 +217,7 @@
           </div>
           <div class="panel-foot">
             <span class="small muted">{{ isMerchantShell ? '两种身份的待办在同一个工作台里出现，不需要退出登录。' : '入驻之前，这里只显示买家待办；升级后不会丢失任何一项。' }}</span>
-            <router-link class="link" :to="isMerchantShell ? myOrdersPath : applyPath">{{ isMerchantShell ? '查看商家工作台 →' : '了解商家入驻 →' }}</router-link>
+            <router-link class="link" :to="isMerchantShell ? orderCenterPath : applyPath">{{ isMerchantShell ? '查看商家工作台 →' : '了解商家入驻 →' }}</router-link>
           </div>
         </section>
 
@@ -260,13 +260,12 @@
           <div class="panel-head"><div><div class="kicker">ASSETS</div><h2>账户资产</h2></div><router-link class="tiny" :to="memberPath">明细 →</router-link></div>
           <div class="ledger">
             <div class="ledger-row entry-link" role="button" tabindex="0" title="模拟充值（沙箱）" @click="openRecharge" @keydown.enter.prevent="openRecharge" @keydown.space.prevent="openRecharge"><div class="l"><b>账户余额</b><small>退款入账</small></div><div class="v">¥{{ money(userInfo.Balance) }}<small>可用 · 点击充值</small></div></div>
-            <router-link class="ledger-row" :to="memberPath"><div class="l"><b>可用积分</b><small>100 积分 = ¥1</small></div><div class="v">—<small>积分端点未接</small></div></router-link>
+            <router-link class="ledger-row" :to="memberPath"><div class="l"><b>可用积分</b><small>100 积分 = ¥1</small></div><div class="v">{{ plaquePoints }}<small>查看积分明细</small></div></router-link>
             <div class="ledger-row entry-link" role="button" tabindex="0" :title="walletTitle" @click="openWallet" @keydown.enter.prevent="openWallet" @keydown.space.prevent="openWallet"><div class="l"><b>优惠券</b><small>券包弹窗</small></div><div class="v">{{ walletCount === null ? '—' : `${walletCount} 张` }}<small>去使用</small></div></div>
-            <div class="ledger-row locked" title="收藏列表暂无聚合端点"><div class="l"><b>我的收藏</b><small>长期保存</small></div><div class="v">—<small>查看</small></div></div>
-            <router-link class="ledger-row" :to="friendPath"><div class="l"><b>好友 / 消息</b><small>打开私信</small></div><div class="v">—<small>打开</small></div></router-link>
+            <router-link class="ledger-row" :to="friendPath"><div class="l"><b>好友 / 消息</b><small>打开私信</small></div><div class="v">{{ unreadTotal === null ? '—' : unreadTotal }}<small>未读</small></div></router-link>
             <div v-if="isMerchantShell" class="ledger-row entry-link" role="button" tabindex="0" title="去我自己的店铺主页" @click="enterMyShop" @keydown.enter.prevent="enterMyShop" @keydown.space.prevent="enterMyShop"><div class="l"><b>店铺信息</b><small>我的店铺主页</small></div><div class="v">进店<small>查看</small></div></div>
             <div v-if="isMerchantShell" class="ledger-row entry-link" role="button" tabindex="0" :title="certTitle" @click="openCert" @keydown.enter.prevent="openCert" @keydown.space.prevent="openCert"><div class="l"><b>商家认证</b><small>入驻申请提审状态</small></div><div class="v">{{ certLabel }}<small>详情</small></div></div>
-            <div v-if="isMerchantShell" class="ledger-row entry-link" role="button" tabindex="0" title="经营等级规则先占位 —— 点开看说明" @click="openLevel" @keydown.enter.prevent="openLevel" @keydown.space.prevent="openLevel"><div class="l"><b>经营等级</b><small>规则开发中</small></div><div class="v">—<small>说明</small></div></div>
+            <div v-if="isMerchantShell" class="ledger-row entry-link" role="button" tabindex="0" :title="plaqueLevelName" @click="openLevel" @keydown.enter.prevent="openLevel" @keydown.space.prevent="openLevel"><div class="l"><b>经营等级</b><small>按会员成长值</small></div><div class="v">{{ plaqueLevelName }}<small>说明</small></div></div>
           </div>
         </section>
 
@@ -299,11 +298,11 @@
           </div>
         </section>
 
-        <!-- 积分动态（A `RECENT POINTS`，端点未接 → 空态） -->
+        <!-- 积分动态（A `RECENT POINTS`，2026-10-19 补充令：接真端点 `/member/points/logs`） -->
         <section class="panel">
           <div class="panel-head"><div><div class="kicker">RECENT POINTS</div><h2>积分动态</h2></div><router-link class="tiny" :to="memberPath">全部 →</router-link></div>
           <div class="ledger">
-            <p class="empty-line">暂无积分记录 —— 积分端点尚未接通。</p>
+            <router-link v-for="lg in pointLogs.slice(0, 3)" :key="lg.Id" class="ledger-row" :to="memberPath"><div class="l"><b>{{ lg.Remark || lg.BizType || '积分变动' }}</b><small>{{ lg.created_at || '' }}</small></div><div class="v">{{ Number(lg.ChangeAmount) > 0 ? '+' : '' }}{{ lg.ChangeAmount }}<small>积分</small></div></router-link><p v-if="!pointLogs.length" class="empty-line">暂无积分记录。</p>
           </div>
         </section>
 
@@ -334,7 +333,6 @@
         <router-link v-if="isMerchantShell" class="shortcut" :to="addGoodsPath"><span class="s-no">05 / LISTING</span><strong>上架商品</strong><small>新建商品、保存草稿并提交审核。</small><span class="s-go">去上架 →</span></router-link>
         <router-link v-if="isMerchantShell" class="shortcut" :to="listGoodsPath"><span class="s-no">06 / CATALOG</span><strong>查看商品</strong><small>管理在售、待审与驳回商品及 SKU。</small><span class="s-go">查看商品 →</span></router-link>
         <router-link v-if="isMerchantShell" class="shortcut" :to="statsPath"><span class="s-no">07 / STATS</span><strong>经营数据</strong><small>查看销售、订单与库存的经营看板。</small><span class="s-go">查看数据 →</span></router-link>
-        <div class="shortcut locked" title="收藏列表暂无聚合端点"><span class="s-no">— / FAVORITES</span><strong>我的收藏</strong><small>看中的器物，随时回到详情页。</small><span class="s-go">打开收藏 →</span></div>
       </div>
     </section>
 
@@ -432,11 +430,18 @@
 import { ref, onMounted, computed } from 'vue'
 import { http, handleApiError, assetOf } from '../api/http'
 import { endpoints } from '../api/endpoints'
-import { getUsername, getCustomerId, setBalance, isLoggedIn, clearCredentials, clearMerchantId, clearToken } from '../api/auth'; import IconGlyph from '../components/ui/IconGlyph.vue'   // ⚠️ 两条 import **同行**（2026-10-11 补图标那一笔）—— 合并到既有行 = 不新增行号漂移（`api-contract.md` 按 `:99` 钉住本文件）。`getCustomerId` 供余额充值弹窗（2026-10-19）。
+import { getUsername, getCustomerId, getMerchantId, getMemberId, getRole, setBalance, isLoggedIn, clearCredentials, clearMerchantId, clearToken } from '../api/auth'; import IconGlyph from '../components/ui/IconGlyph.vue'   // ⚠️ 两条 import **同行**（2026-10-11 补图标那一笔）—— 合并到既有行 = 不新增行号漂移（`api-contract.md` 按 `:99` 钉住本文件）。`getCustomerId` 供余额充值弹窗（2026-10-19）；`getMemberId` 供收藏数（2026-10-19 终局清道夫第 7 条，商家 customerid 为 NULL ⇒ 三键兜底）。
 import { myCoupons } from '../api/marketing'; import CouponWalletDialog from '../components/CouponWalletDialog.vue'   // ⚠️ 两条 import **同行**（C3 块 5 · 券的信息架构重排，2026-10-11）—— 同上一行的理由：本文件多处被按行号引，**能省一行就省一行**
 import { useRouter } from 'vue-router'; import { merchantMyApplications } from '../api/merchant'   // ⚠️ 两条 import **同行**（C3 块 5 · B 组，2026-10-12）—— 理由同上：`useRouter` 给「店铺信息」格跳 `/shop`用（那条路由属 commit C），`merchantMyApplications` 给「商家认证」格读本人提审历史（`/merchant/myApplications`，`api/merchant.js` 已有封装，**没有新增端点、没有动 `endpoints.js`**）
 import { brandOverview } from '../api/brand'; import { cartList, orderHistory } from '../api/order'   // A 版个人中心（2026-10-19）：品牌四态 / 购物车件数 / 最近订单。两个 api 模块都是既有封装，未新增端点。
-import { memberOverview } from '../api/member'; import { walletOverview, walletRecharge } from '../api/wallet'   // 2026-10-19 用户令：等级牌匾动态分色 + 账户余额模拟充值（钱包四条端点早已落地，这里只接 UI）。
+import { memberOverview, memberPointLogs } from '../api/member'; import { walletOverview, walletRecharge } from '../api/wallet'   // 2026-10-19 用户令：等级牌匾动态分色 + 账户余额模拟充值（钱包四条端点早已落地，这里只接 UI）。
+import { favoriteList } from '../api/favorite'   // 2026-10-19 终局清道夫第 7 条：收藏数读真端点（/favorite/list 的 total），不再写死「—」。
+// 收藏数：`null` = 还没读到（显示 —）；0 = 真没收藏（显示 0）。取不到身份时保持 `null`，不编 0。
+const favCount = ref(null); const loadFavoriteCount = async () => { const id = getMemberId(); if (!id) return; try { const d = await favoriteList(id, 1); if (d && d.success) favCount.value = Number(d.total) || 0 } catch (e) { favCount.value = null } }
+// 好友 / 消息未读数（2026-10-19 补充令）：与 `AppShell.fetchUnreadCount` **同一端点、同一判据** ——
+// `/message/conversations` 里 `unread === true` 的会话数。身份用**会话角色**选号（`getRole()`），
+// 不用 `userInfo.role`：两者并发加载，后者可能还没回来。`null` = 读取失败（显示 —），0 = 真没有未读。
+const unreadTotal = ref(null); const loadUnreadCount = async () => { if (!isLoggedIn()) { unreadTotal.value = 0; return } const mid = getMerchantId(); const cid = getCustomerId(); const isM = String(getRole()) === '2'; const id = isM ? (mid || cid) : (cid || mid); if (!id) { unreadTotal.value = 0; return } const usp = new URLSearchParams(); usp.append('currentId', id); usp.append('currentType', isM ? 'merchant' : 'customer'); try { const res = await http.post(endpoints.message.conversations, usp.toString()); const d = await res.json(); if (d && d.success) unreadTotal.value = (d.list || []).filter((c) => c.unread === true).length; else unreadTotal.value = null } catch (e) { unreadTotal.value = null } }
 
 const userInfo = ref({})
 const idType = ref('')
@@ -497,7 +502,7 @@ const plaquePoints = computed(() => {
   return acc ? String(Number(acc.Balance || 0)) : '—'
 })
 const loadMemberOverview = async () => {
-  const cid = getCustomerId()
+  const cid = getMemberId()   // 2026-10-19：商家 customerid 为 NULL ⇒ 三键兜底（后端 PointsDao 同口径），否则商家牌匾/积分永远 —。
   if (!cid) return
   try {
     const data = await memberOverview(cid)
@@ -583,7 +588,7 @@ const listGoodsPath = '/merchant/user/list'
 const statsPath = '/merchant/stats'
 const friendPath = computed(() => (isMerchantShell.value ? '/merchant/user/friend' : '/customer/user/friend'))
 const memberPath = computed(() => (isMerchantShell.value ? '/merchant/user/member' : '/customer/user/member'))
-const applyPath = computed(() => (isMerchantShell.value ? '/merchant/user/apply' : '/customer/user/apply'))
+const applyPath = computed(() => (isMerchantShell.value ? '/merchant/user/apply' : '/customer/user/apply')); const favoritesPath = computed(() => (isMerchantShell.value ? '/merchant/user/favorites' : '/customer/user/favorites'))   // 2026-10-19 终局清道夫第 7 条：收藏列表独立页（页面在 router 文件尾追加，不移动既有行号）。
 
 /** 品牌四态（A 版 `BRAND_STATES` 的序号 / 键 / 文案逐字照抄）。 */
 const BRAND_STATES = [
@@ -661,7 +666,7 @@ const dg = computed(() => {
 
 onMounted(() => {
   getUserData()
-  loadMemberOverview()
+  loadMemberOverview(); loadFavoriteCount(); loadUnreadCount(); loadPointLogs()
 })
 
 const getUserData = async () => {
@@ -965,7 +970,7 @@ const scrollToWorkbench = () => {
 }
 
 /** 「经营等级」格：开弹窗。规则未定（用户 2026-10-12 裁定 ④「先占位，不做」）⇒ 面板是固定文案。 */
-const openLevel = () => { cardPanel.value = 'level' }
+const openLevel = () => { cardPanel.value = 'level' }; /* 2026-10-19 补充令：积分动态接真端点（`/member/points/logs`）—— 与会员中心同一条流水，身份走 `getMemberId()` 三键兜底（商家 customerid 为 NULL）。**同行追加、不新增行**：本文件 `:983`/`:1098` 等被文档按行号钉住。 */ const pointLogs = ref([]); const loadPointLogs = async () => { const id = getMemberId(); if (!id) return; try { const d = await memberPointLogs({ customerId: id, limit: 3 }); pointLogs.value = d && d.success && Array.isArray(d.list) ? d.list : [] } catch (e) { pointLogs.value = [] } }
 </script>
 
 <style scoped>
@@ -1259,7 +1264,7 @@ button {
 .growth-step a, .growth-step .g-link { margin-top: auto; font-size: 10px; border-bottom: 1px solid currentColor; width: max-content; padding: 0 0 1px; color: inherit; text-decoration: none; }
 
 /* ── 账户资产 / 最近订单 ──────────────────────────────────────────────────── */
-.ledger { border-top: 1px solid var(--line); }
+.ledger { border-top: 1px solid var(--line); padding-bottom: 24px; }
 .ledger-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 12px; padding: 12px 0; border-bottom: 1px solid var(--line); align-items: center; color: inherit; text-decoration: none; }
 .ledger-row:last-child { border-bottom: 0; }
 .ledger-row .l { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
@@ -1301,7 +1306,9 @@ button {
 }
 
 /* ── 编辑资料 / 券包 / 认证弹窗 ────────────────────────────────────────────── */
-.file-hidden { display: none; }
+/* 2026-10-19 终局清道夫第 5 条：**不能用 `display:none`** —— 未渲染的 file input 无法被
+   `input.click()` 唤起（Chromium/Edge 静默拒绝，实测）。1px 视觉隐藏但保留在渲染树里。 */
+.file-hidden { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
 .edit-dlg { width: min(640px, 100%); }
 .edit-avatar { display: flex; align-items: center; gap: 16px; margin-bottom: 18px; }
 .avatar { width: 64px; height: 64px; flex: none; display: block; border-radius: 50%; background: var(--brand-tint); object-fit: cover; }

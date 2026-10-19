@@ -509,6 +509,11 @@ import static org.mockito.Mockito.when;
         com.minke.mallmanagement.member.service.MemberService.class,
         com.minke.mallmanagement.wallet.dao.WalletDao.class,
         com.minke.mallmanagement.wallet.service.WalletService.class,
+        // 2026-10-19 用户令〈终局清道夫第 7 条〉：新 Controller `FavoriteController` 自动被切片扫入，
+        // 它吃 `FavoriteService`；Service 吃 `FavoriteDao`（只吃 JdbcTemplate ⇒ 落回上面那个替身）。
+        // 照本文件既有处置：**不 @Import 就整片起不来**。全限定名写在同一处，避免新增 import 行。
+        com.minke.mallmanagement.favorite.dao.FavoriteDao.class,
+        com.minke.mallmanagement.favorite.service.FavoriteService.class,
         })
 public abstract class AbstractSmokeTest {
 

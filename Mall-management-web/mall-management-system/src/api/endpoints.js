@@ -568,4 +568,11 @@ export const endpoints = {
     logs: '/wallet/logs',
     recharge: '/wallet/recharge',
   },
+  // 2026-10-19 终局清道夫第 7 条：商品收藏（后端 `FavoriteController`，身份键 `UserId`）。
+  favorite: {
+    add: '/favorite/add',
+    remove: '/favorite/remove',
+    list: '/favorite/list',
+    check: '/favorite/check',
+  },
 }

@@ -59,13 +59,16 @@ public class PointsDao {
                 .params(balance, frozen, growth, totalEarned, totalSpent, userId).update();
     }
 
-    /** {@code user} 侧的等级 / 成长值镜像（权威仍在 {@code user_points_account}）。 */
+    /** {@code user} 侧的等级 / 成长值镜像（权威仍在 {@code user_points_account}）。
+     *  ⚠️ 2026-10-19 用户令「会员中心全面瘫痪」：商家账号 {@code user.customerid} 恒为空
+     *  （实测 14/14），会员中心此前只读客户业务号 ⇒ 商家点「会员中心」必报「未识别到客户账号」。
+     *  ⇒ 三个用户侧回查统一接受 customerid / merchantid / username 任意一种身份键。 */
     public int mirrorUser(String userId, int levelNo, long growth) {
         String sql = "UPDATE mall_management_sql.`user` SET MemberLevelNo = ?, GrowthValue = ?, "
                 + "MemberLevel = CASE WHEN ? > 0 THEN 1 ELSE MemberLevel END, "
                 + "MemberSince = CASE WHEN ? > 0 AND MemberSince IS NULL THEN NOW() ELSE MemberSince END "
-                + "WHERE customerid = ?";
-        return jdbcClient.sql(sql).params(levelNo, growth, levelNo, levelNo, userId).update();
+                + "WHERE customerid = ? OR merchantid = ? OR username = ?";
+        return jdbcClient.sql(sql).params(levelNo, growth, levelNo, levelNo, userId, userId, userId).update();
     }
 
     // ==================== 流水 ====================
@@ -188,18 +191,21 @@ public class PointsDao {
                 .param(orderId).update();
     }
 
-    /** 客户业务号 → 登录名（积分商城发券要用登录名挂 `coupon_grant`）。 */
+    /** 客户业务号 → 登录名（积分商城发券要用登录名挂 `coupon_grant`）。
+     *  ⚠️ 同时接受 merchantid / username（理由见 {@link #mirrorUser}）。 */
     public String selectUsername(String userId) {
-        String sql = "SELECT username FROM mall_management_sql.`user` WHERE customerid = ? LIMIT 1";
-        List<String> rows = jdbcClient.sql(sql).param(userId).query(String.class).list();
+        String sql = "SELECT username FROM mall_management_sql.`user` "
+                + "WHERE customerid = ? OR merchantid = ? OR username = ? LIMIT 1";
+        List<String> rows = jdbcClient.sql(sql).params(userId, userId, userId).query(String.class).list();
         return rows.isEmpty() || rows.get(0) == null ? "" : rows.get(0);
     }
 
-    /** 用户当前等级序号（{@code user.MemberLevelNo}；旧列 {@code MemberLevel} 作兜底）。 */
+    /** 用户当前等级序号（{@code user.MemberLevelNo}；旧列 {@code MemberLevel} 作兜底）。
+     *  ⚠️ 同时接受 merchantid / username（理由见 {@link #mirrorUser}）。 */
     public int selectUserLevelNo(String userId) {
         String sql = "SELECT COALESCE(NULLIF(MemberLevelNo, 0), MemberLevel, 0) FROM mall_management_sql.`user` "
-                + "WHERE customerid = ? LIMIT 1";
-        List<Integer> rows = jdbcClient.sql(sql).param(userId).query(Integer.class).list();
+                + "WHERE customerid = ? OR merchantid = ? OR username = ? LIMIT 1";
+        List<Integer> rows = jdbcClient.sql(sql).params(userId, userId, userId).query(Integer.class).list();
         return rows.isEmpty() || rows.get(0) == null ? 0 : rows.get(0);
     }
 

@@ -278,7 +278,7 @@
               <span class="sub">商品类型：{{ goodType }}</span>
             </span>
             <span class="ops">
-              <button type="button" title="现有功能 consultProduct" @click="consultProduct">客服</button>
+              <button type="button" class="fav-toggle" :class="{ on: isFav }" :title="isFav ? '取消收藏（真端点 /favorite/remove）' : '收藏这件商品（真端点 /favorite/add）'" :disabled="favBusy" @click="toggleFav">{{ isFav ? '❤ 已收藏' : '♡ 收藏' }}</button><button type="button" title="现有功能 consultProduct" @click="consultProduct">客服</button>
               <button type="button" title="真跳转：/shop 店铺主页（新建页 ShopHome，卖家 = 本页 route 的 MerchantId）" @click="enterShop">进店逛逛</button>
               <!-- 举报入口（方案 §4.4「可举报：评论 / 回复 / 商品 / 用户」）—— 商品还剩这一条：
                    对象 = 本商品的 `goods.Id`。⚠️ **「商家」那一条已不在本页**（2026-10-13 用户裁定 ①
@@ -706,8 +706,8 @@ import { ref, onMounted, computed, watch, onBeforeUnmount } from 'vue'   // ⚠�
 import { useRoute, useRouter } from 'vue-router'
 import { http, handleApiError } from '../api/http'
 import { endpoints } from '../api/endpoints'; import { orderAdd, cartAdd } from '../api/order'   // ⚠️ C3 块 4：**同行追加**（不新增行 —— 本文件 `:794`/`:803` 被 `slot-registry.md:1994-1995` 按行号引（〈Bug 1〉本笔 +19 行前为 `:775`/`:784`），此处加行会顶漂它们）。两个函数就是原先那两串 `URLSearchParams` + `http.post` + `res.json()` 的收口
-import CashierDialog from '../components/CashierDialog.vue'; import ProductCard from '../components/ProductCard.vue'; import ReportDialog from '../components/ReportDialog.vue'; import { sharedList } from '../config/goods-flags'; import { useInfiniteList } from '../composables/useInfiniteList'   // ⚠️ **同行追加** `sharedList`（C3 块 5 ·〈Bug 2/3〉落码，2026-10-12）：本页只用它算「猜你喜欢」（见 `:522` 那条按语）。本行已有一条「本笔确实新增了一行」的记账（2026-10-10 Bug 1），**这一笔不再加行** —— 本文件下面 `:571` / `:638` / `:794` / `:1032` / `:1330` 等处被文档按行号钉着   // ⚠️ 2026-10-10（Bug 1）：收银台与「我的订单」**共用同一个组件** —— 本行**确实**新增了一行；本笔在 `ProductPage.vue` 净 +19 行（`git diff` 实测：模板 `:412` 起 +5、import +1、`handlePay` 段 +13）⇒ 下面两处 `:775`/`:784` 漂到 `:794`/`:803`，随本笔一并重指（见 `slot-registry.md:1994-1995`）
-import { getMerchantId, getCustomerId, getUsername, isLoggedIn, getRole, getMemberLevel } from '../api/auth'; import IconGlyph from '../components/ui/IconGlyph.vue'; import { coupons, claim, subsidyGoods, seckillLive } from '../api/marketing'; import { couponName } from '../config/coupon-format'; import { useCouponPick } from '../composables/useCouponPick'; import { list as commentList, add as commentAdd, remove as commentRemove, accept as commentAccept, like as commentLike, myOrders as commentOrders } from '../api/comment'; import DonutChart from '../components/charts/DonutChart.vue'; import { memberPriceOf } from '../composables/useMember'   // ⚠️ **块 6 整改 commit 2〈问答漏项补齐〉同行追加** `DonutChart`（§4.2「左圆比例图」，与 `views/admin/AccountsPage.vue` 的「封禁分布」同款）—— **不新增行**，故本行行号不动。⚠️ **整改 commit 4〈举报〉曾同行追加** `reportAdd`（`/report/add`；本页的「举报 / 提删」弹窗，§4.4 与 §4.2 的商家提删走同一条）—— **2026-10-13 撤出**：举报弹窗抽成 `components/ReportDialog.vue` 后本页不再自己发 `/report/add`，该 import 随弹窗搬进组件（本行仍**不新增行**）。⚠️ 六条 import **同行**（第 6 条 `../api/comment` 的六个别名：块 6 · commit 1「评论」+ commit 2「问答」的 `accept`，2026-10-12 —— 别名是必需的，`list`/`add` 这种裸名在本文件里跟 `allItems` 那些局部名撞脸，读不出是谁的）（第 5 条 `useCouponPick`：块 5 · commit 5 续笔「立即购买」也能用券，2026-10-12；与 `ShoppingCart.vue` 共用同一处，不抄第二份）（第 2、3 条：2026-10-11 补图标笔 + C3 块 5 · commit 1；第 4 条 `couponName`：块 5 · A 组 · A7 后半；`getUsername`：块 5 券口径改登录名，2026-10-12）—— 合并到既有行 = 不新增行号漂移（本文件 `:794`/`:803` 被 `slot-registry.md:1994-1995` 按行号引，上面 `:424` 那条注释记过同一件事）。⚠️ **块 5 · commit 1 仍整体 +90 行**（模板 +17 / `<script setup>` 尾 +70 / `<style>` +3）⇒ `slot-registry.md:1994` 引的 `:794` 漂 **`:881`**、`:1995` 引的 `:803` 漂 **`:890`**（两值均为 `grep -n` 实测，见 `_work/b5-repoint.md`）。⚠️ **块 6 · commit 1 又整体 +N 行**、**commit 2（问答）再 +M 行**，漂移台账见 `_work/b6-commit1-repoint.md` 与 `_work/b6-commit2-repoint.md`（收口 commit 逐处重指）。
+import CashierDialog from '../components/CashierDialog.vue'; import ProductCard from '../components/ProductCard.vue'; import ReportDialog from '../components/ReportDialog.vue'; import { sharedList, isSeckill, isSubsidy } from '../config/goods-flags'; import { useInfiniteList } from '../composables/useInfiniteList'   // ⚠️ **同行追加** `sharedList`（C3 块 5 ·〈Bug 2/3〉落码，2026-10-12）：本页只用它算「猜你喜欢」（见 `:522` 那条按语）。本行已有一条「本笔确实新增了一行」的记账（2026-10-10 Bug 1），**这一笔不再加行** —— 本文件下面 `:571` / `:638` / `:794` / `:1032` / `:1330` 等处被文档按行号钉着   // ⚠️ 2026-10-10（Bug 1）：收银台与「我的订单」**共用同一个组件** —— 本行**确实**新增了一行；本笔在 `ProductPage.vue` 净 +19 行（`git diff` 实测：模板 `:412` 起 +5、import +1、`handlePay` 段 +13）⇒ 下面两处 `:775`/`:784` 漂到 `:794`/`:803`，随本笔一并重指（见 `slot-registry.md:1994-1995`）
+import { getMerchantId, getCustomerId, getUsername, isLoggedIn, getRole, getMemberLevel } from '../api/auth'; import { favoriteAdd, favoriteRemove, favoriteCheck } from '../api/favorite'; import IconGlyph from '../components/ui/IconGlyph.vue'; import { coupons, claim, subsidyGoods, seckillLive } from '../api/marketing'; import { couponName } from '../config/coupon-format'; import { useCouponPick } from '../composables/useCouponPick'; import { list as commentList, add as commentAdd, remove as commentRemove, accept as commentAccept, like as commentLike, myOrders as commentOrders } from '../api/comment'; import DonutChart from '../components/charts/DonutChart.vue'; import { memberPriceOf } from '../composables/useMember'   // ⚠️ **块 6 整改 commit 2〈问答漏项补齐〉同行追加** `DonutChart`（§4.2「左圆比例图」，与 `views/admin/AccountsPage.vue` 的「封禁分布」同款）—— **不新增行**，故本行行号不动。⚠️ **整改 commit 4〈举报〉曾同行追加** `reportAdd`（`/report/add`；本页的「举报 / 提删」弹窗，§4.4 与 §4.2 的商家提删走同一条）—— **2026-10-13 撤出**：举报弹窗抽成 `components/ReportDialog.vue` 后本页不再自己发 `/report/add`，该 import 随弹窗搬进组件（本行仍**不新增行**）。⚠️ 六条 import **同行**（第 6 条 `../api/comment` 的六个别名：块 6 · commit 1「评论」+ commit 2「问答」的 `accept`，2026-10-12 —— 别名是必需的，`list`/`add` 这种裸名在本文件里跟 `allItems` 那些局部名撞脸，读不出是谁的）（第 5 条 `useCouponPick`：块 5 · commit 5 续笔「立即购买」也能用券，2026-10-12；与 `ShoppingCart.vue` 共用同一处，不抄第二份）（第 2、3 条：2026-10-11 补图标笔 + C3 块 5 · commit 1；第 4 条 `couponName`：块 5 · A 组 · A7 后半；`getUsername`：块 5 券口径改登录名，2026-10-12）—— 合并到既有行 = 不新增行号漂移（本文件 `:794`/`:803` 被 `slot-registry.md:1994-1995` 按行号引，上面 `:424` 那条注释记过同一件事）。⚠️ **块 5 · commit 1 仍整体 +90 行**（模板 +17 / `<script setup>` 尾 +70 / `<style>` +3）⇒ `slot-registry.md:1994` 引的 `:794` 漂 **`:881`**、`:1995` 引的 `:803` 漂 **`:890`**（两值均为 `grep -n` 实测，见 `_work/b5-repoint.md`）。⚠️ **块 6 · commit 1 又整体 +N 行**、**commit 2（问答）再 +M 行**，漂移台账见 `_work/b6-commit1-repoint.md` 与 `_work/b6-commit2-repoint.md`（收口 commit 逐处重指）。
 
 const route = useRoute()
 const router = useRouter()
@@ -847,7 +847,7 @@ const loadAllItems = async () => {
           originalPrice: d2.originalPrice, // 块 5〈折扣〉：划线价（0/undefined = 不打折）
           goodImg: d2.goodImg,
           imgList: d2.imgList, // 2026-10-19 多图：JSON 数组串（null/空 ⇒ 只用 goodImg）
-          isBrand: d2.isBrand, memberPrice: d2.memberPrice, // 批四第二批 commit 2/3（**同行追加、不新增行**）：`isBrand` = 品牌加盟店标（1/true/"1"）；`memberPrice` = **仅 VIP 响应带此键**（严格加性）、模板 `currentMemberPrice` 比价后再画
+          isBrand: d2.isBrand, memberPrice: d2.memberPrice, isSeckill: d2.isSeckill, isSubsidy: d2.isSubsidy, // 批四第二批 commit 2/3 + 终局清道夫补充二（**同行追加、不新增行**）：`isBrand` = 品牌加盟店标（1/true/"1"）；`memberPrice` = **仅 VIP 响应带此键**（严格加性）、模板 `currentMemberPrice` 比价后再画；`isSeckill` / `isSubsidy` = 后端 `productCodePrice` 新透出的营销标记（真数据，驱动 `pdThemeClass`）
           UserName: ''
         })
       }
@@ -1327,13 +1327,14 @@ const skuKind = (code) => {
  * 详情页主色按商品属性动态渲染（2026-10-19 用户令）：
  *   秒杀 → 朱砂红；国补 → 亮绿；品牌加盟店 → 金色文字 + 黑色主色；普通 → 青瓷绿。
  * 优先级与 `skuKind` 同序（秒杀 > 国补 > 品牌 > 普通）：同屏已有 `.sk-zone` 在说秒杀，
- * 再把它染成别的色会自相矛盾。判据只读本页已有的 `currentItem` / 两个集合，不新发请求。
+ * 再把它染成别的色会自相矛盾。判据只读本页已有的 `currentItem` / `currentGood` / 两个集合，不新发请求。
  */
 const pdThemeClass = computed(() => {
-  const kind = skuKind(currentItem.value.productCode)
-  if (kind === 'seckill') return 'pd-seckill'
-  if (kind === 'subsidy') return 'pd-subsidy'
-  const it = currentItem.value || {}
+  const it = currentItem.value || {}; const has = (v) => Number(v) === 1
+  if (has(it.isSeckill) || isSeckill(currentGood.value)) return 'pd-seckill'
+  if (has(it.isSubsidy) || isSubsidy(currentGood.value)) return 'pd-subsidy'
+  const kind = skuKind(it.productCode)
+  if (kind === 'seckill') return 'pd-seckill'; if (kind === 'subsidy') return 'pd-subsidy'
   const brand = it.isBrand === true || it.isBrand === 1 || it.isBrand === '1'
   return brand ? 'pd-brand' : 'pd-normal'
 })
@@ -1828,7 +1829,7 @@ const removeRev = async (row) => {
 // ⚠️ 本文件**第四个** `onMounted`（Vue 允许注册多次）；不并进上面三个，理由同 `:992` 那条。
 //    评价区**未登录也照常加载**（商品详情页是浏览面，`/comment/list` 已进 `AUTH_WHITELIST`）——
 //    故这里**没有** `if (!isLoggedIn()) return`，与上面 `loadSeckill` 那一条**刻意不同**。
-onMounted(() => { loadRev(false); loadRevOrders() })   // ⚠️ 同批预拉「可评价商品」—— 否则「未购买 ⇒ 写评价 disabled + tooltip『购买后可评价』」（方案 §4.1）在用户点开之前判不出来（`revCanReview` 恒假）。两个请求各自 fail-soft，互不阻塞。
+onMounted(() => { loadRev(false); loadRevOrders() }); /* ── 2026-10-19 终局清道夫第 7 条：收藏心形按钮（真端点 /favorite/*）──────────────── ⚠️ 本段**接在同一物理行尾**（不新增行）：本文件被 slot-registry.md / progress.md / OrderService.java 按行号引，新增行会让 <style> 段（:2736-2737 等）集体顶漂。身份键 = 本页既有的 customerId（:724-728，客户号或商家号，后端三键兜底同口径）。productId 来自 route.query.Id，后端 GoodsId 收 Integer，数字串可直接绑定。未登录不给收藏（与「举报商品」同判据）：收藏要落到一个 UserId 上，匿名没有。 */ const isFav = ref(false); const favBusy = ref(false); const loadFavState = async () => { if (!customerId || !productId) return; try { const d = await favoriteCheck(customerId, productId); isFav.value = !!(d && d.success && d.favorited) } catch (e) { isFav.value = false } }; const toggleFav = async () => { if (!isLoggedIn()) { alert('请先登录后再收藏'); return } if (!customerId || !productId || favBusy.value) return; favBusy.value = true; try { const d = isFav.value ? await favoriteRemove(customerId, productId) : await favoriteAdd(customerId, productId); if (d && d.success) isFav.value = !!d.favorited; else alert((d && d.msg) || '收藏操作失败') } catch (e) { handleApiError(e, '收藏失败：') } finally { favBusy.value = false } }; onMounted(loadFavState); // ⚠️ 同批预拉「可评价商品」—— 否则「未购买 ⇒ 写评价 disabled + tooltip『购买后可评价』」（方案 §4.1）在用户点开之前判不出来（`revCanReview` 恒假）。两个请求各自 fail-soft，互不阻塞。
 </script>
 
 <style scoped>
@@ -2831,5 +2832,13 @@ button { background: none; border: 0; cursor: pointer; }
   background: #101010;
   border-color: #101010;
   color: #e8c98a;
+}
+
+/* 2026-10-19 终局清道夫第 7 条：收藏心形按钮的「已收藏」态（其余尺寸/边框沿用
+   `.shop .ops button` 两条既有规则，不在这里另抄一份）。 */
+.shop .ops button.fav-toggle.on {
+  border-color: var(--ink);
+  color: var(--ink);
+  font-weight: var(--fw-med);
 }
 </style>

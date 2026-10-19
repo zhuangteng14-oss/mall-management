@@ -736,3 +736,9 @@ router.afterEach((to) => {
   if (String(to.path).startsWith('/admin')) root.setAttribute('data-theme', 'admin')
   else root.removeAttribute('data-theme')
 })
+
+// ── 2026-10-19 终局清道夫第 7 条：我的收藏独立页 ─────────────────────────────
+// 客户 / 商家两个壳各一条（同一组件 `FavoritesPage.vue`）。入口 = 个人中心「我的收藏」格
+// （`UserInfoPage.vue` 的 `favoritesPath`）。追加在文件最尾：不移动任何既有行号。
+router.addRoute('customerUser', { path: '/customer/user/favorites', component: () => import('../views/FavoritesPage.vue'), meta: { sub: 'favorites' } })
+router.addRoute('merchantUser', { path: '/merchant/user/favorites', component: () => import('../views/FavoritesPage.vue'), meta: { sub: 'favorites' } })

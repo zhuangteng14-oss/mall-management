@@ -1324,7 +1324,9 @@ a { color: inherit; text-decoration: none; }
 }
 
 /* ── 原实现的行内 `style="display:none"` ⇒ 收敛成类（适配 ⑥）────────────────── */
-.file-hidden { display: none; }
+/* 2026-10-19 终局清道夫第 5 条：**不能用 `display:none`** —— 未渲染的 file input 无法被
+   `input.click()` 唤起（Chromium/Edge 静默拒绝，实测）。1px 视觉隐藏但保留在渲染树里。 */
+.file-hidden { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
 
 /* ── 窄档 ─────────────────────────────────────────────────────────────────── */
 @media (max-width: 1080px) {

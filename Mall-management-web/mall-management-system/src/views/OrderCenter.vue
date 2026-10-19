@@ -188,7 +188,8 @@
           <div class="head-actions">
             <!-- 2026-10-19 用户令：订单处理页必须有清晰出口，别让商家进来就出不去。 -->
             <router-link class="btn" to="/merchant/user/info">← 用户中心</router-link>
-            <router-link class="btn" to="/merchant">商家工作台</router-link>
+            <!-- 2026-10-19 用户令第 3 条：原「商家工作台」按钮已删 —— 它与左边「← 用户中心」同效，
+                 且「商家工作台」的真正入口是用户中心里的四张卡片；此处保留一行注释占位，净零行数。 -->
             <button type="button" class="btn" @click="toggleRefund">售后工作台<span v-if="refundList.length" class="cnt">{{ refundList.length }}</span></button>
             <router-link class="btn solid" to="/merchant/user/list">商品管理</router-link>
             <select v-model="orderStatus" class="status-select" @change="loadOrders">

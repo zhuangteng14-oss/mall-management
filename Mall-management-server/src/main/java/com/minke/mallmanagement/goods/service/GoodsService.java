@@ -595,6 +595,10 @@ public class GoodsService {
             result.put("imgList", row.get("ImgList"));
             // 批四第二批 commit 2：品牌标 —— **加性键**，老前端不读；1/true ⇒ 详情页画「品牌」徽标。
             result.put("isBrand", row.get("IsBrand"));
+            // 2026-10-19 终局清道夫（补充二）：秒杀 / 国补标记 —— **加性键**，供详情页主色联动
+            // （优先级 秒杀 > 国补 > 品牌 > 普通）。谓词唯一真相在 MarketingGoodsFlags，本层只透出。
+            result.put("isSeckill", row.get("IsSeckill"));
+            result.put("isSubsidy", row.get("IsSubsidy"));
             // 批四第二批 commit 3：会员价 —— **仅 VIP 返回**（严格加性）。算不出的价格基础不编造。
             Object basePrice = row.get("Price");
             if (isMember(customerId) && basePrice instanceof Number n && n.doubleValue() > 0) {

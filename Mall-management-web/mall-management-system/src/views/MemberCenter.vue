@@ -278,7 +278,7 @@
 
 <script setup>
 import { computed, onMounted, ref } from 'vue'
-import { getBalance, getCustomerId, getMemberLevel, getUsername, setMemberLevel } from '../api/auth'
+import { getBalance, getMemberId, getMemberLevel, getUsername, setMemberLevel } from '../api/auth'
 import { openMember, claimDailyCoupon, memberOverview, memberSignin, memberPointLogs, memberExchangeCoupon, memberExchangeGrowth } from '../api/member'
 
 // 会员中心 / 积分商城两个 Tab（2026-10-19 用户令：积分商城为新 Tab）。
@@ -291,9 +291,11 @@ const balance = ref(Number(getBalance()) || 0)
 const balanceText = computed(() => balance.value.toFixed(2))
 
 // ── 会员概览 / 签到 / 积分流水（第三批㉘㉙，2026-10-19）────────────────────────────
-// ⚠️ 这一组端点收的是**客户业务号**（`user.customerid`），不是登录名 —— 与上面的
-//    `openMember` / `claimDailyCoupon` 不是同一套身份判据（见 `api/member.js` 分段注释）。
-const customerId = getCustomerId() || ''
+// ⚠️ 这一组端点收的是**业务号**（`user.customerid` / `user.merchantid` / 登录名兜底，
+//    与后端 `PointsDao` 的三键查询同序）。商家行的 `customerid` 恒为 NULL（实测 14/14），
+//    而商家也能进本页 ⇒ 用 `getMemberId()` 兜底，否则整页显示「未识别到客户账号」。
+//    与上面的 `openMember` / `claimDailyCoupon` 不是同一套身份判据（见 `api/member.js` 分段注释）。
+const customerId = getMemberId()
 const overview = ref(null)
 const account = computed(() => (overview.value && overview.value.account) || null)
 const pointsLoading = ref(false)

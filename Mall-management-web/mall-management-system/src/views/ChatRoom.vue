@@ -965,7 +965,9 @@ button {
 }
 /* 真正的窄屏（手机）才把会话栏横过来 —— 此时宽度本来就装不下两列 */
 /* ── 图片消息（2026-10-19）── 气泡已走 `.bare`（零内距/无底色），图片自带发丝边。 */
-.file-hidden { display: none; }
+/* 2026-10-19 终局清道夫第 5 条：**不能用 `display:none`** —— 未渲染的 file input 无法被
+   `input.click()` 唤起（Chromium/Edge 静默拒绝，实测）。1px 视觉隐藏但保留在渲染树里。 */
+.file-hidden { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
 .msg-img {
   display: block;
   max-width: min(320px, 100%);

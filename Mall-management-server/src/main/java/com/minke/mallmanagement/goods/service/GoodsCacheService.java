@@ -331,10 +331,15 @@ public class GoodsCacheService {
             // ⚠️ 批四第二批：'v2::' → 'v3::'。SQL 新增 Status=2 过滤（复审驳回的商品不再可买），
             //    旧键里缓存的是一段「曾经合法、现在已不可售」的答案，必须撂下。
             //    commit 2 同日再升 'v4::'：响应多一列品牌标 IsBrand。
-            key = "'v4::' + #MerchantId + '::' + #GoodName + '::' + #ProductCode", sync = true)
+            key = "'v5::' + #MerchantId + '::' + #GoodName + '::' + #ProductCode", sync = true)
     public Map<String, Object> priceByTriple(String MerchantId, String GoodName, String ProductCode) {
-        String sql = "SELECT g.Price, g.GoodImg, g.OriginalPrice, g.ImgList, "   // 2026-10-19 批四第二批：多图 + 品牌标（加性列；键已 bump `v4::`）
-                + "EXISTS(SELECT 1 FROM mall_management_sql.user u WHERE u.merchantid = g.MerchantId AND u.IsBrand = 1) AS IsBrand "
+        // 2026-10-19 终局清道夫（补充二）：再升 'v4::' → 'v5::' —— 响应多两列营销标记
+        // IsSeckill / IsSubsidy（详情页主色联动的**真数据**，谓词仍取自 MarketingGoodsFlags，
+        // 不在商品域另抄一份）。旧键没有这两列 ⇒ 命中即静默退回普通配色，必须撂下。
+        String sql = "SELECT g.Price, g.GoodImg, g.OriginalPrice, g.ImgList, "   // 2026-10-19 批四第二批：多图 + 品牌标（加性列）
+                + "EXISTS(SELECT 1 FROM mall_management_sql.user u WHERE u.merchantid = g.MerchantId AND u.IsBrand = 1) AS IsBrand, "
+                + MarketingGoodsFlags.existsIsSeckill("g") + " AS IsSeckill, "
+                + MarketingGoodsFlags.existsIsSubsidy("g") + " AS IsSubsidy "
                 + "FROM mall_management_sql.goods g "
                 + "WHERE g.MerchantId=? AND g.GoodName=? AND g.ProductCode=? AND g.Status = 2 "
                 + "ORDER BY g.Id ASC LIMIT 1";

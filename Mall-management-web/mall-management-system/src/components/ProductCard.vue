@@ -94,7 +94,8 @@
     </div>
     <div class="pcard-tx">
       <div class="pcard-name">{{ goods.GoodName }}</div>
-      <!-- 类别标签（秒杀 / 国补）：**独立标记、可以同屏**，也可以一枚都没有（普通商品）。
+      <!-- 类别标签（秒杀 / 国补 / 品牌）：**严格互斥**，按优先级只画一枚（2026-10-19 用户令），
+           普通商品一枚都没有。
            ⚠️ 整行**恒渲染**（不写 `v-if`）—— 一枚都没有时画一枚隐形签占住这一行的高度，
               否则「有标签的卡高、没标签的卡矮」，栅格参差。见文件头〈标签行等高占位〉。 -->
       <div class="pcard-kinds">
@@ -186,11 +187,12 @@ const isBrand = computed(() => {
   return v === true || v === 1 || String(v) === '1'
 })
 const kinds = computed(() => {
-  const out = []
-  if (isBrand.value) out.push({ key: 'brand', text: '品牌' })
-  if (isSeckill(props.goods)) out.push({ key: 'seckill', text: '秒杀商品' })
-  if (isSubsidy(props.goods)) out.push({ key: 'subsidy', text: '国补' })
-  return out
+  // 2026-10-19 用户令：标签**严格互斥、按优先级只画一枚** —— 秒杀 > 国补 > 品牌。
+  // 「同屏多签」的旧口径已废弃：秒杀+国补同时命中时只留红色【秒杀】。
+  if (isSeckill(props.goods)) return [{ key: 'seckill', text: '秒杀' }]
+  if (isSubsidy(props.goods)) return [{ key: 'subsidy', text: '国补' }]
+  if (isBrand.value) return [{ key: 'brand', text: '品牌' }]
+  return []
 })
 
 /**
@@ -208,7 +210,7 @@ const priceTone = computed(() => {
  *  ⚠️ 文案与类名**故意**沿用真签那一套（`秒杀商品` / `seckill`）—— 见文件头〈标签行等高占位〉：
  *     等高的保证来自「同一个元素 + 同一套 class + 同一个字体」，换一套写法就得自己去算高度了。 */
 const rowKinds = computed(() => (
-  kinds.value.length ? kinds.value : [{ key: 'seckill', text: '秒杀商品', ghost: true }]
+  kinds.value.length ? kinds.value : [{ key: 'seckill', text: '秒杀', ghost: true }]
 ))
 </script>
 

@@ -17,7 +17,7 @@
           <span class="range-k">区间</span>
           <b>{{ rangeLabel }}</b>
         </span>
-        <button type="button" class="btn" :disabled="loading" @click="load">
+        <router-link class="btn" to="/merchant/user/info">返回用户中心</router-link><button type="button" class="btn" :disabled="loading" @click="load">
           <IconGlyph name="flow" />刷新
         </button>
       </div>

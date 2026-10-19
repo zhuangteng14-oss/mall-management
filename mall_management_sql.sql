@@ -2865,3 +2865,26 @@ INSERT IGNORE INTO `user_wallet`
 SELECT `customerid`, COALESCE(`Balance`, 0.00), 0.00, 0.00, 0.00, 0.00, 0.00, 0, 'active'
 FROM `user`
 WHERE `customerid` IS NOT NULL AND `customerid` <> '';
+
+-- ============================================================
+-- Migration ㉚：商品收藏  Date: 2026-10-19
+-- 依据：用户令〈终局清道夫〉第 7 条「我的收藏依然是空壳」
+--       —— 后端无收藏表/接口，商品详情页无收藏按钮，个人中心只有占位。
+-- 内容：① 新表 user_favorite（1 张）
+--       ② 唯一键 (UserId, GoodsId) ⇒ 重复收藏幂等
+-- 身份口径：UserId = 客户 customerid / 商家 merchantid / 登录名兜底
+--           （与会员中心同一口径；商家账号 user.customerid 恒为空，实测 14/14）。
+-- 回滚（逻辑废弃）：停用端点 + 保留表；本地开发库重导时才 DROP TABLE。
+-- 幂等：CREATE TABLE IF NOT EXISTS。本段无加列、无种子、无回填。
+-- ============================================================
+
+-- ---- ㉚-1 商品收藏表 ----
+CREATE TABLE IF NOT EXISTS `user_favorite` (
+  `Id`         int NOT NULL AUTO_INCREMENT COMMENT '自增主键',
+  `UserId`     varchar(40) NOT NULL COMMENT '收藏人：customerid / merchantid / 登录名兜底',
+  `GoodsId`    int NOT NULL COMMENT '商品 Id（goods.Id）',
+  `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '收藏时刻',
+  PRIMARY KEY (`Id`),
+  UNIQUE KEY `uk_user_favorite_user_goods` (`UserId`, `GoodsId`),
+  KEY `idx_user_favorite_user` (`UserId`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='商品收藏（2026-10-19 终局清道夫第 7 条）';

@@ -332,3 +332,17 @@ export function clearAdminSession() {
   sessionStorage.removeItem(K_ADMIN_USER)
   sessionStorage.removeItem(K_ADMIN_SESSION)
 }
+
+/**
+ * 「当前登录人的业务号」—— 会员中心 / 积分 / 收藏共用的身份键（2026-10-19 终局清道夫第 1 条）。
+ *
+ * ⚠️ 为什么需要它：客户有 `user.customerid`，但**商家行 `customerid` 恒为 NULL**
+ *    （VM 库实测 14/14），而商家也能从首页 dock 进会员中心 ⇒ 只读 `getCustomerId()`
+ *    会让商家看到「未识别到客户账号，积分信息暂不可用」，签到 / 领券 / 积分流水全灰。
+ *    后端 `PointsDao` / `FavoriteDao` 三个查询口都按 `customerid → merchantid → username`
+ *    三键兜底，所以这里按**同一顺序**给值即可，不必再加一套身份表。
+ * 取不到（匿名）⇒ 空串，调用方照旧走「请重新登录」提示。
+ */
+export function getMemberId() {
+  return getCustomerId() || getMerchantId() || getUsername() || ''
+}
