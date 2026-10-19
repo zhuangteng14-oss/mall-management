@@ -5,6 +5,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
 
+import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
@@ -104,6 +105,28 @@ public class GoodsDao {
                            String goodType, String productCode, int goodTypeNew, Integer typeId, String detail, String spec, String afterSale,
                            boolean promiseGenuine, boolean promiseReturn7, boolean promiseFastRefund, boolean promiseFreightIns,
                            String imgList, int status) {
+    }
+
+    /**
+     * 第三批㉖：审核通过后把提审单的折扣模板快照搬进 {@code goods}（5 列）。
+     *
+     * <p>⚠️ 刻意不扩 {@link GoodsRow} / {@link #insertGoods} 的签名：那两个形状被既有测试
+     * 与 {@code GoodsAuditService.writeGoodsFromAudit} 钉死，扩 record 会让 18 处构造调用一起改。
+     * 本方法与 {@code insertGoods} 同处审核通过的 {@code @Transactional} 里 ⇒ 原子性不变。
+     *
+     * <p>未选模板（{@code discountTemplateId == null}）⇒ 只有 {@code PriceSnapshotAt} 可能为
+     * {@code null}，四列保持 DEFAULT（{@code DiscountAmount=0.00}，其余 {@code NULL}）。
+     */
+    public int updatePriceSnapshot(long goodsId, Long discountTemplateId, String discountType,
+                                   BigDecimal discountRate, BigDecimal discountAmount,
+                                   LocalDateTime priceSnapshotAt) {
+        String sql = "UPDATE mall_management_sql.goods SET DiscountTemplateId = ?, DiscountType = ?, "
+                + "DiscountRate = ?, DiscountAmount = ?, PriceSnapshotAt = ? WHERE Id = ?";
+        return jdbcClient.sql(sql)
+                .params(discountTemplateId, discountType, discountRate,
+                        discountAmount == null ? BigDecimal.ZERO : discountAmount,
+                        priceSnapshotAt, goodsId)
+                .update();
     }
 
     /**

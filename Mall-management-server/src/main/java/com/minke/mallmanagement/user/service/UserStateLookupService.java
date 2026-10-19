@@ -98,6 +98,23 @@ public class UserStateLookupService implements UserStateLookup {
         }
     }
 
+    /**
+     * 等级折扣率（㉘ 起读 {@code member_level}，权威配置）。⚠️ 读失败回 {@code null}
+     * （调用方按 9 折兜底）—— fail-open，见接口注释。
+     */
+    @Override
+    public java.math.BigDecimal memberDiscountRate(String customerId) {
+        if (customerId == null) {
+            return null;
+        }
+        try {
+            return dao.selectMemberDiscountRateByCustomerId(customerId);
+        } catch (Exception e) {
+            log.warn("会员折扣率读取失败（USERSTATE）：customerId={} —— 本次按 9 折兜底", customerId, e);
+            return null;
+        }
+    }
+
     @Override
     public boolean isMerchantFrozen(String merchantId) {
         if (merchantId == null) {

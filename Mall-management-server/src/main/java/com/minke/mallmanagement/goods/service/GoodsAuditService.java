@@ -11,7 +11,9 @@ import com.minke.mallmanagement.notification.service.NotificationService;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.math.BigDecimal;
 import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -140,6 +142,26 @@ public class GoodsAuditService {
                                       String detail, String spec, String afterSale,
                                       String skuSpec, Boolean promiseGenuine, Boolean promiseReturn7,
                                       Boolean promiseFastRefund, Boolean promiseFreightIns, String status) {
+        // 第三批㉖：不带折扣模板快照的旧签名 —— 逐字沿用改前行为。
+        return submit(merchantId, batchId, goodName, price, originalPrice, goodType, goodTypeNew, typeId,
+                productCode, goodImg, imgList, detail, spec, afterSale, skuSpec,
+                promiseGenuine, promiseReturn7, promiseFastRefund, promiseFreightIns, status,
+                null, null, null, null);
+    }
+
+    /**
+     * 第三批㉖：带折扣模板快照的新签名。快照来自 {@code DiscountService.snapshotForSubmit}
+     * （服务端反算），此处**只负责落库**，不再计算 —— 计算与落库分开，审核通过才能原样搬运。
+     */
+    @Transactional
+    public Map<String, Object> submit(String merchantId, String batchId, String goodName,
+                                      Double price, Double originalPrice, String goodType, Integer goodTypeNew,
+                                      Integer typeId, String productCode, String goodImg, String imgList,
+                                      String detail, String spec, String afterSale,
+                                      String skuSpec, Boolean promiseGenuine, Boolean promiseReturn7,
+                                      Boolean promiseFastRefund, Boolean promiseFreightIns, String status,
+                                      Long discountTemplateId, String discountType,
+                                      java.math.BigDecimal discountRate, java.math.BigDecimal discountAmount) {
         Map<String, Object> result = new HashMap<>();
         Integer effectiveTypeId = typeId != null ? typeId : goodsDao.selectTypeIdByName(goodType);
         String effectiveStatus = isBlank(status) ? STATUS_PENDING : status;
@@ -147,7 +169,9 @@ public class GoodsAuditService {
         auditDao.insert(merchantId, batchId, goodName, price, originalPrice, goodType, goodTypeNew, effectiveTypeId,
                 productCode, goodImg, imgList, detail, spec, afterSale, skuSpec, LocalDateTime.now(),
                 boolOrTrue(promiseGenuine), boolOrTrue(promiseReturn7), boolOrTrue(promiseFastRefund), boolOrTrue(promiseFreightIns),
-                effectiveStatus);
+                effectiveStatus,
+                discountTemplateId, discountType, discountRate, discountAmount,
+                discountTemplateId == null ? null : LocalDateTime.now());
 
         result.put("success", true);
         result.put("batchId", batchId);
@@ -360,6 +384,15 @@ public class GoodsAuditService {
         Integer lastId = goodsDao.lastInsertId();
         long goodsId = lastId == null ? 0L : lastId.longValue();
 
+        // 第三批㉖：折扣模板快照原样搬进 goods（提审时服务端已反算好，此处不重算）。
+        // 与 insertGoods 同事务 ⇒ 不会留下「商品在、快照丢」的半完成态。
+        goodsDao.updatePriceSnapshot(goodsId,
+                toLong(auditRow.get("DiscountTemplateId")),
+                str(auditRow.get("DiscountType")),
+                toBigDecimal(auditRow.get("DiscountRate")),
+                toBigDecimal(auditRow.get("DiscountAmount")),
+                toLocalDateTime(auditRow.get("PriceSnapshotAt")));
+
         goodsDao.insertProductsales(str(auditRow.get("MerchantId")),
                 str(auditRow.get("GoodName")), str(auditRow.get("ProductCode")));
 
@@ -451,6 +484,40 @@ public class GoodsAuditService {
     private static int toInt(Object v, int fallback) {
         Integer i = toInteger(v);
         return i == null ? fallback : i;
+    }
+
+    private static Long toLong(Object v) {
+        if (v == null) {
+            return null;
+        }
+        if (v instanceof Number n) {
+            return n.longValue();
+        }
+        return Long.valueOf(v.toString());
+    }
+
+    private static BigDecimal toBigDecimal(Object v) {
+        if (v == null) {
+            return null;
+        }
+        if (v instanceof BigDecimal bd) {
+            return bd;
+        }
+        if (v instanceof Number n) {
+            return BigDecimal.valueOf(n.doubleValue());
+        }
+        return new BigDecimal(v.toString());
+    }
+
+    /** {@code goods_audit.PriceSnapshotAt} 经 {@code DATE_FORMAT} 投影成字符串，这里解回。 */
+    private static LocalDateTime toLocalDateTime(Object v) {
+        if (v == null) {
+            return null;
+        }
+        if (v instanceof LocalDateTime dt) {
+            return dt;
+        }
+        return LocalDateTime.parse(v.toString(), DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"));
     }
 
     private static boolean isBlank(String s) {

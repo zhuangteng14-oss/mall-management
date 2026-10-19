@@ -30,6 +30,7 @@ import java.util.function.Supplier;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.within;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
@@ -67,6 +68,8 @@ class MemberDiscountTest {
     @Mock private SeckillDao seckillDao;
     @Mock private StockMetrics stockMetrics;
     @Mock private ProtectionMetrics protectionMetrics;
+    @Mock private com.minke.mallmanagement.wallet.service.WalletService walletService;
+    @Mock private com.minke.mallmanagement.member.service.MemberService memberService;
 
     // ==================== 一、公式 ====================
 
@@ -95,7 +98,7 @@ class MemberDiscountTest {
 
         assertThat(result.get("success")).isEqualTo(true);
         ArgumentCaptor<OrderDao.OrderRow> row = ArgumentCaptor.forClass(OrderDao.OrderRow.class);
-        verify(orderDao).insertOrder(row.capture());
+        verify(orderDao).insertOrder(row.capture(), anyString(), any(), anyLong(), any());
         assertThat(row.getValue().price()).isCloseTo(89.99f, within(0.001f));
         assertThat((Double) result.get("MemberPrice")).isCloseTo(89.99d, within(1e-9));
         assertThat((Double) result.get("MemberDiscount")).isCloseTo(10.00d, within(1e-3));
@@ -113,7 +116,7 @@ class MemberDiscountTest {
 
         assertThat(result.get("success")).isEqualTo(true);
         ArgumentCaptor<OrderDao.OrderRow> row = ArgumentCaptor.forClass(OrderDao.OrderRow.class);
-        verify(orderDao).insertOrder(row.capture());
+        verify(orderDao).insertOrder(row.capture(), anyString(), any(), anyLong(), any());
         assertThat(row.getValue().price()).isCloseTo(99.99f, within(0.001f));
         assertThat(result).doesNotContainKeys("MemberPrice", "MemberDiscount", "Discount");
     }
@@ -132,7 +135,7 @@ class MemberDiscountTest {
 
         assertThat(result.get("success")).isEqualTo(true);
         ArgumentCaptor<OrderDao.OrderRow> row = ArgumentCaptor.forClass(OrderDao.OrderRow.class);
-        verify(orderDao).insertOrder(row.capture());
+        verify(orderDao).insertOrder(row.capture(), anyString(), any(), anyLong(), any());
         assertThat(row.getValue().price()).isCloseTo(99.99f, within(0.001f));
         assertThat(result).doesNotContainKeys("MemberPrice", "MemberDiscount");
     }
@@ -154,7 +157,7 @@ class MemberDiscountTest {
 
         assertThat(result.get("success")).isEqualTo(true);
         ArgumentCaptor<OrderDao.OrderRow> row = ArgumentCaptor.forClass(OrderDao.OrderRow.class);
-        verify(orderDao).insertOrder(row.capture());
+        verify(orderDao).insertOrder(row.capture(), anyString(), any(), anyLong(), any());
         // 70 = max(0, 90 - 20)
         assertThat(row.getValue().price()).isCloseTo(70.00f, within(0.001f));
         // ⚠️ 这一行才是「叠加顺序」的判据：第 4 个实参是**会员价**，不是入参原价 100。
@@ -179,7 +182,7 @@ class MemberDiscountTest {
 
         assertThat(result.get("success")).isEqualTo(true);
         ArgumentCaptor<OrderDao.OrderRow> row = ArgumentCaptor.forClass(OrderDao.OrderRow.class);
-        verify(orderDao).insertOrder(row.capture());
+        verify(orderDao).insertOrder(row.capture(), anyString(), any(), anyLong(), any());
         assertThat(row.getValue().price()).isCloseTo(80.00f, within(0.001f));
         verify(couponService).redeem(eq("bob"), eq("CP2"), eq("M1"),
                 eq(100.0d), eq(false), eq("O5"));
@@ -202,11 +205,14 @@ class MemberDiscountTest {
                 .thenAnswer(invocation -> invocation.getArgument(2, Supplier.class).get());
         return new OrderService(orderDao, lockService, orderStateMachine, orderTransitionRecorder,
                 userStateLookupProvider, notificationService, shippingTrackDao, new ObjectMapper(),
-                couponService, goodsDao, seckillDao, stockMetrics, protectionMetrics);
+                couponService, goodsDao, seckillDao, stockMetrics, protectionMetrics,
+                walletService, memberService);
     }
 
     private void stubInsert(int rows) {
         when(orderDao.countByOrderId(anyString())).thenReturn(0);
-        when(orderDao.insertOrder(any(OrderDao.OrderRow.class))).thenReturn(rows);
+        // 第三批㉙：OrderService 现在走带支付/积分快照的 5 参重载。
+        when(orderDao.insertOrder(any(OrderDao.OrderRow.class), anyString(), any(), anyLong(), any()))
+                .thenReturn(rows);
     }
 }

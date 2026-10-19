@@ -539,4 +539,31 @@ export const endpoints = {
     adminList: '/admin/order/refund/list',
     adminHandle: '/admin/order/refund/handle',
   },
+  // ⚠️ 2026-10-19（第三批 ㉖–㉙ · 五个高保真页真实数据接入）：4 组。追加在**文件尾**
+  //    （同本文件既有零漂移手法）。调用方是 `views/preview/*.vue` 五页 + `api/discount.js` /
+  //    `api/wallet.js` / `api/member.js`。
+  //    · `discount`：模板列表与「按模板反算划线价」预览（`DiscountController`，公开面）。
+  //    · `brand`：商家品牌四态概览 / 品牌加盟申请（`BrandController`，身份闸 = 登录名）。
+  //    · `memberCenter`：V0–V6 矩阵 / 积分账户概览 / 签到 / 积分流水（`MemberController`，
+  //      身份闸 = 客户业务号）。⚠️ 与 `memberB4`（开通 / 管理端设级 / 每日券）**不是同一组**。
+  //    · `wallet`：钱包概览 / 流水 / 沙箱充值（`WalletController`，身份闸 = 客户业务号）。
+  discountB4: {
+    templates: '/goods/discount/templates',
+    preview: '/goods/discount/preview',
+  },
+  brandB4: {
+    overview: '/merchant/brand/overview',
+    apply: '/merchant/brand/apply',
+  },
+  memberCenter: {
+    levels: '/member/levels',
+    overview: '/member/overview',
+    signin: '/member/signin',
+    logs: '/member/points/logs',
+  },
+  walletB4: {
+    overview: '/wallet/overview',
+    logs: '/wallet/logs',
+    recharge: '/wallet/recharge',
+  },
 }

@@ -36,4 +36,23 @@ public final class MemberPricing {
     public static double priceOf(double price) {
         return Math.round(price * 90d) / 100d;
     }
+
+    /**
+     * 按**等级表折扣率**算会员价（㉘ 起 {@code member_level.DiscountRate}，V0–V6 各档不同）。
+     *
+     * <p>{@code rate == null} ⇒ 退回 {@link #priceOf(double)}（全场 9 折的老口径兜底）——
+     * 等级配置读不到时不能把会员价直接抹成原价。
+     *
+     * <p>⚠️ 用 {@code BigDecimal} 乘再 {@code HALF_UP} 到分：{@code double} 的
+     * {@code 0.88} 在上一位带尾数，展示与落库两处各 round 一次会差一分。
+     */
+    public static double priceOf(double price, java.math.BigDecimal rate) {
+        if (rate == null) {
+            return priceOf(price);
+        }
+        return java.math.BigDecimal.valueOf(price)
+                .multiply(rate)
+                .setScale(2, java.math.RoundingMode.HALF_UP)
+                .doubleValue();
+    }
 }

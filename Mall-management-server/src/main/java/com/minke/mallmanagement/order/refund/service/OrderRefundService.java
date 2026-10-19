@@ -50,11 +50,15 @@ public class OrderRefundService {
     private final OrderRefundDao refundDao;
     private final OrderDao orderDao;
     private final GoodsDao goodsDao;
+    /** 第三批㉙：退款入账走钱包台账（权威账户 + 流水 + user.Balance 镜像同事务）。 */
+    private final com.minke.mallmanagement.wallet.service.WalletService walletService;
 
-    public OrderRefundService(OrderRefundDao refundDao, OrderDao orderDao, GoodsDao goodsDao) {
+    public OrderRefundService(OrderRefundDao refundDao, OrderDao orderDao, GoodsDao goodsDao,
+                              com.minke.mallmanagement.wallet.service.WalletService walletService) {
         this.refundDao = refundDao;
         this.orderDao = orderDao;
         this.goodsDao = goodsDao;
+        this.walletService = walletService;
     }
 
     // ==================== 用户：申请 ====================
@@ -286,7 +290,12 @@ public class OrderRefundService {
             amount = doubleOf(row, "Price");
         }
         if (!isBlank(customerId) && amount > 0d) {
-            refundDao.creditBalance(customerId, amount);
+            // 第三批㉙：入钱包台账，不再直接 UPDATE user.Balance。
+            // 幂等键 refund:<OrderId> 兜住「同一单被处理两次」—— 即便 CAS 已防，账本仍自带幂等。
+            walletService.credit(customerId,
+                    com.minke.mallmanagement.shared.Money.of(amount),
+                    "refund", "order", orderId, "refund:" + orderId,
+                    "balance", "售后退款入账", "system", orderId);
         }
         restoreStock(orderId);
     }

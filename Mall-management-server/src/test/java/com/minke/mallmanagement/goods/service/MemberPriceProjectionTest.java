@@ -38,6 +38,7 @@ class MemberPriceProjectionTest {
     @Mock private GoodsAuditService goodsAuditService;
     @Mock private DiscountLimitService discountLimitService;
     @Mock private NotificationService notificationService;
+    @Mock private com.minke.mallmanagement.marketing.discount.service.DiscountService discountService;
     @Mock private ObjectProvider<UserStateLookup> userStateLookupProvider;
     @Mock private UserStateLookup userStateLookup;
 
@@ -46,7 +47,8 @@ class MemberPriceProjectionTest {
     @BeforeEach
     void setUp() {
         service = new GoodsService(goodsDao, goodsCacheService, goodsAuditService,
-                discountLimitService, notificationService, userStateLookupProvider, "/tmp/upload");
+                discountLimitService, notificationService, userStateLookupProvider,
+                discountService, "/tmp/upload");
     }
 
     @Test

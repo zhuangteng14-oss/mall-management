@@ -111,6 +111,8 @@ public class GoodsService {
      * 裸注入会让切片在上下文加载期红；取不到 ⇒ 详情页按普通用户定价。
      */
     private final ObjectProvider<UserStateLookup> userStateLookupProvider;
+    /** 折扣模板引擎（第三批㉖）—— 只被 {@link #goodsAdd} 的服务端重算消费。 */
+    private final com.minke.mallmanagement.marketing.discount.service.DiscountService discountService;
     private final String uploadDir;
 
     public GoodsService(GoodsDao goodsDao,
@@ -119,6 +121,7 @@ public class GoodsService {
                         com.minke.mallmanagement.marketing.discount.service.DiscountLimitService discountLimitService,
                         com.minke.mallmanagement.notification.service.NotificationService notificationService,
                         ObjectProvider<UserStateLookup> userStateLookupProvider,
+                        com.minke.mallmanagement.marketing.discount.service.DiscountService discountService,
                         @Value("${app.upload-dir:${user.dir}/src/main/resources/static/img/}") String uploadDir) {
         this.goodsDao = goodsDao;
         this.goodsCacheService = goodsCacheService;
@@ -126,6 +129,7 @@ public class GoodsService {
         this.discountLimitService = discountLimitService;
         this.notificationService = notificationService;
         this.userStateLookupProvider = userStateLookupProvider;
+        this.discountService = discountService;
         this.uploadDir = uploadDir;
     }
 
@@ -211,12 +215,56 @@ public class GoodsService {
             Boolean PromiseGenuine, Boolean PromiseReturn7, Boolean PromiseFastRefund, Boolean PromiseFreightIns,
             MultipartFile[] files, Boolean Draft
     ) {
+        // 第三批㉖：不带折扣模板的旧签名 —— 逐字沿用批四第二批的行为。
+        return goodsAdd(MerchantId, GoodName, Price, OriginalPrice, file, GoodType, ProductCode, GoodTypeNew,
+                TypeId, Detail, Spec, AfterSale, SkuSpec,
+                PromiseGenuine, PromiseReturn7, PromiseFastRefund, PromiseFreightIns,
+                files, Draft, null);
+    }
+
+    /**
+     * 第三批㉖：带折扣模板的完整签名。
+     *
+     * <p>选模板（{@code DiscountTemplateId != null}）⇒ **划线价由服务端按模板重算**并覆盖客户端
+     * {@code OriginalPrice}；未选模板 ⇒ 沿用客户端手工原价。重算在**任何 I/O 之前**完成，
+     * 失败路径与既有校验一样一条 JDBC / 一次磁盘写都不执行。
+     */
+    @CircuitBreaker(name = "mallMysqlWrite")
+    @Transactional
+    public Map<String, Object> goodsAdd(
+            String MerchantId,
+            String GoodName,
+            Double Price,
+            Double OriginalPrice,
+            MultipartFile file,
+            String GoodType,
+            String ProductCode,
+            int GoodTypeNew,
+            Integer TypeId, String Detail, String Spec, String AfterSale, String SkuSpec,
+            Boolean PromiseGenuine, Boolean PromiseReturn7, Boolean PromiseFastRefund, Boolean PromiseFreightIns,
+            MultipartFile[] files, Boolean Draft, Long DiscountTemplateId
+    ) {
         Map<String, Object> result = new HashMap<>();
+
+        // ═══ 第三批㉖：服务端反算划线价（客户端提交的原价在选了模板时**不采信**）═══
+        com.minke.mallmanagement.marketing.discount.service.DiscountService.SubmitSnapshot snapshot =
+                discountService.snapshotForSubmit(DiscountTemplateId, Price, GoodType);
+        if (!snapshot.valid()) {
+            result.put("success", false);
+            result.put("msg", snapshot.msg());
+            return result;
+        }
+        // ⚠️ 一支是 primitive double、一支是 Double ⇒ 条件表达式会走二元数值提升，
+        //    把 null 的 OriginalPrice **拆箱**成 NPE（不带原价的老调用方必炸）。
+        //    用 Double.valueOf 把两支都钉成包装类型。
+        Double effectiveOriginalPrice = snapshot.originalPrice() != null
+                ? Double.valueOf(com.minke.mallmanagement.shared.Money.doubleOf(snapshot.originalPrice()))
+                : OriginalPrice;
 
         // ═══ 块 5〈折扣〉：划线原价的**权威校验**（前端那处实时提示只是助手，不是判据）═══
         // ⚠️ 位置是刻意的：**在任何 I/O 之前**（图片落盘也不做）—— 与两条既有早退同口径，
         //    失败路径一条 JDBC、一次磁盘写都不执行。
-        String discountError = discountLimitService.validate(GoodType, Price, OriginalPrice);
+        String discountError = discountLimitService.validate(GoodType, Price, effectiveOriginalPrice);
         if (discountError != null) {
             result.put("success", false);
             result.put("msg", discountError);
@@ -266,9 +314,18 @@ public class GoodsService {
         try {
             // 提审 / 存草稿：只写 goods_audit，**不写 goods 行**（提审制的定义，见类注释）。
             String batchId = GoodsAuditService.newBatchId();
-            goodsAuditService.submit(MerchantId, batchId, GoodName, Price, OriginalPrice, GoodType, GoodTypeNew, TypeId,
+            goodsAuditService.submit(MerchantId, batchId, GoodName, Price, effectiveOriginalPrice, GoodType, GoodTypeNew, TypeId,
                     ProductCode, GoodImg, imgList, Detail, Spec, AfterSale, SkuSpec,
-                    PromiseGenuine, PromiseReturn7, PromiseFastRefund, PromiseFreightIns, status);
+                    PromiseGenuine, PromiseReturn7, PromiseFastRefund, PromiseFreightIns, status,
+                    snapshot.templateId(), snapshot.discountType(),
+                    snapshot.discountRate(), snapshot.discountAmount());
+
+            // 价格快照流水（旁路证据，写失败不影响提审结果）。
+            discountService.logPrice(null, batchId, MerchantId, "submit",
+                    com.minke.mallmanagement.shared.Money.of(Price),
+                    effectiveOriginalPrice == null ? null
+                            : com.minke.mallmanagement.shared.Money.of(effectiveOriginalPrice),
+                    snapshot);
 
             result.put("success", true);
             // 文案：提交审核沿用块 3 的「已提交审核」；草稿另给一句（前端据此提示）。
@@ -541,8 +598,11 @@ public class GoodsService {
             // 批四第二批 commit 3：会员价 —— **仅 VIP 返回**（严格加性）。算不出的价格基础不编造。
             Object basePrice = row.get("Price");
             if (isMember(customerId) && basePrice instanceof Number n && n.doubleValue() > 0) {
+                // ㉘ 起折扣率读 member_level（读不到 ⇒ null ⇒ MemberPricing 退回 9 折兜底），
+                // 与下单落库走**同一个**重载，详情页与实付不会差一分。
                 result.put("memberPrice",
-                        com.minke.mallmanagement.shared.MemberPricing.priceOf(n.doubleValue()));
+                        com.minke.mallmanagement.shared.MemberPricing.priceOf(
+                                n.doubleValue(), memberRateOf(customerId)));
             }
         } catch (Exception e) {
             // 技术异常（2026-10-12〈Bug 1〉起「>1 行」不再从这里来 —— 那条路改走 MIN(Id)）：
@@ -551,6 +611,16 @@ public class GoodsService {
             result.put("success", false);
         }
         return result;
+    }
+
+    /** 等级折扣率；探针缺席 / 读失败 / 查无此人 ⇒ {@code null}（调用方按 9 折兜底）。 */
+    private java.math.BigDecimal memberRateOf(String customerId) {
+        try {
+            UserStateLookup lookup = userStateLookupProvider.getIfAvailable();
+            return lookup == null ? null : lookup.memberDiscountRate(customerId);
+        } catch (Exception e) {
+            return null;
+        }
     }
 
     /** VIP 判据：探针缺席 / 读失败 / 查无此人 ⇒ {@code false}（按普通用户，fail-open）。 */

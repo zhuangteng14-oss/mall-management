@@ -56,17 +56,21 @@ public class MerchantApplicationService {
     private final UserCacheService userCacheService;
     /** 品牌审核通过后要清买家侧商品缓存（品牌标来自 {@code EXISTS user.IsBrand}）。 */
     private final GoodsCacheService goodsCacheService;
+    /** 第三批㉗：品牌审核通过后落 {@code merchant_brand_profile}（同事务）。 */
+    private final com.minke.mallmanagement.merchant.brand.service.BrandService brandService;
 
     public MerchantApplicationService(MerchantApplicationDao applicationDao,
                                       UserGovernanceDao userGovernanceDao,
                                       GoodsShelfDao goodsShelfDao,
                                       UserCacheService userCacheService,
-                                      GoodsCacheService goodsCacheService) {
+                                      GoodsCacheService goodsCacheService,
+                                      com.minke.mallmanagement.merchant.brand.service.BrandService brandService) {
         this.applicationDao = applicationDao;
         this.userGovernanceDao = userGovernanceDao;
         this.goodsShelfDao = goodsShelfDao;
         this.userCacheService = userCacheService;
         this.goodsCacheService = goodsCacheService;
+        this.brandService = brandService;
     }
 
     // ==================== 提交 ====================
@@ -234,11 +238,16 @@ public class MerchantApplicationService {
 
         if (isBrand) {
             userGovernanceDao.setBrand(applicant, true);
+            // 第三批㉗：品牌档案同事务落库（明细来自 merchant_brand_application_detail）。
+            // 落档失败不把整次审核打回：user.IsBrand 已置位、CAS 已消费 —— 返回一个显式标记，
+            // 管理端可据此提示「请补齐品牌资料」。这一腿是**旁路档案**，不是品牌开通的判据。
+            boolean profileWritten = brandService.approve(id, now);
             // 品牌标由 goodsHome / goodsPrice 的 EXISTS 投影带出 ⇒ 不清缓存就看不到。
             goodsCacheService.evictByMerchant(brandMerchantId);
             result.put("success", true);
             result.put("outcome", "brand-approved");
             result.put("username", applicant);
+            result.put("profileWritten", profileWritten);
             return result;
         }
 

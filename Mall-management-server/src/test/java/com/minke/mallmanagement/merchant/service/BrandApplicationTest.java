@@ -50,13 +50,14 @@ class BrandApplicationTest {
     @Mock private GoodsShelfDao goodsShelfDao;
     @Mock private UserCacheService userCacheService;
     @Mock private GoodsCacheService goodsCacheService;
+    @Mock private com.minke.mallmanagement.merchant.brand.service.BrandService brandService;
 
     private MerchantApplicationService service;
 
     @BeforeEach
     void setUp() {
         service = new MerchantApplicationService(applicationDao, userGovernanceDao,
-                goodsShelfDao, userCacheService, goodsCacheService);
+                goodsShelfDao, userCacheService, goodsCacheService, brandService);
     }
 
     private static Map<String, Object> application(boolean isBrand) {

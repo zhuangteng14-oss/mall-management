@@ -159,6 +159,8 @@ public class GoodsController {
             // ═══ 批四第二批：多图 + 草稿（全部可选，老客户端不传 ⇒ 行为逐字不变）═══
             @RequestParam(value = "files", required = false) MultipartFile[] files,
             @RequestParam(value = "Draft", required = false) Boolean Draft,
+            // ═══ 第三批㉖：折扣模板（可选）—— 选了模板 ⇒ 服务端按模板重算划线价 ═══
+            @RequestParam(value = "DiscountTemplateId", required = false) Long DiscountTemplateId,
             HttpServletRequest request
     ) throws IOException {
         // ⚠️ 第一行：上架只能挂到**自己**名下（管理员豁免）—— 必须在落盘/写库之前。
@@ -170,7 +172,8 @@ public class GoodsController {
         // 只有**提交审核**成功才**触达管理端**（共享收件箱）+ 记账；存草稿不发。
         Map<String, Object> result = goodsService.goodsAdd(MerchantId, GoodName, Price, OriginalPrice, file,
                 GoodType, ProductCode, GoodTypeNew, TypeId, Detail, Spec, AfterSale, SkuSpec,
-                PromiseGenuine, PromiseReturn7, PromiseFastRefund, PromiseFreightIns, files, Draft);
+                PromiseGenuine, PromiseReturn7, PromiseFastRefund, PromiseFreightIns, files, Draft,
+                DiscountTemplateId);
         boolean submitted = Boolean.TRUE.equals(result.get("success"))
                 && !GoodsAuditService.STATUS_DRAFT.equals(result.get("status"));
         if (submitted) {

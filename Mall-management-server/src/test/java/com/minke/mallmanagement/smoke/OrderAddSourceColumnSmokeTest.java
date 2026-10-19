@@ -95,7 +95,7 @@ class OrderAddSourceColumnSmokeTest extends AbstractSmokeTest {
     // ==================== 一、SQL 形状：列真的在、占位符真的够 ====================
 
     @Test
-    @DisplayName("订单 INSERT **列清单里有 `Source`**，占位符 12 个，且排在 CreateTime 之前")
+    @DisplayName("订单 INSERT **列清单里有 `Source`**，占位符 16 个，且排在 CreateTime 之前")
     void orderInsertCarriesTheSourceColumn() throws Exception {
         Captured capture = runAndCaptureSource(Optional.empty());
 
@@ -103,11 +103,15 @@ class OrderAddSourceColumnSmokeTest extends AbstractSmokeTest {
                 .as("表名沿用既有形态（无引号，见 OrderDao 类注释），但新加的列带反引号")
                 .startsWith(ORDER_INSERT_PREFIX)
                 .contains("`Source`")
-                .as("Source 排在 BatchId 之前、BatchId 又排在 CreateTime **之前** —— CreateTime 是 VALUES 里唯一写死 NOW() 的非参列")
-                .contains("`Source`, BatchId, CreateTime)");
+                .as("Source 排在 BatchId 之前；第三批㉙ 又在 BatchId 与 CreateTime 之间插了 5 个支付/积分列")
+                .contains("`Source`, BatchId")
+                .contains("PayChannel, WalletPaidAmount, PointsUsed, PointsDiscount, PointsSettled, CreateTime)");
+        assertThat(capture.sql().indexOf("CreateTime")).isGreaterThan(capture.sql().indexOf("BatchId"));
+        // 第三批㉙：16 个带参列（原 12 + PayChannel / WalletPaidAmount / PointsUsed / PointsDiscount）；
+        // PointsSettled 写死 0，CreateTime 写死 NOW()，两者都不占位。
         assertThat(capture.sql().chars().filter(c -> c == '?').count())
-                .as("12 列带参（CreateTime 是 NOW()）⇒ 必须恰 12 个占位符：少一个真库上炸，多一个绑不上")
-                .isEqualTo(12);
+                .as("16 列带参（PointsSettled=0 / CreateTime=NOW()）⇒ 必须恰 16 个占位符：少一个真库上炸，多一个绑不上")
+                .isEqualTo(16);
     }
 
     @Test

@@ -4,6 +4,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
 
+import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
@@ -40,6 +41,9 @@ public class GoodsAuditDao {
                     + "ProductCode, GoodImg, ImgList, Detail, Spec, AfterSale, SkuSpec, "
                     + "PromiseGenuine, PromiseReturn7, PromiseFastRefund, PromiseFreightIns, "
                     + "Status, RejectReason, GoodsId, ReviewedBy, "
+                    // 第三批㉖：折扣模板快照 5 列（提审时重算、通过时原样搬进 goods）
+                    + "DiscountTemplateId, DiscountType, DiscountRate, DiscountAmount, "
+                    + "DATE_FORMAT(PriceSnapshotAt, '%Y-%m-%d %H:%i:%s') AS PriceSnapshotAt, "
                     + "DATE_FORMAT(SubmittedAt, '%Y-%m-%d %H:%i:%s') AS SubmittedAt, "
                     + "DATE_FORMAT(ReviewedAt,  '%Y-%m-%d %H:%i:%s') AS ReviewedAt ";
 
@@ -86,16 +90,41 @@ public class GoodsAuditDao {
                       LocalDateTime submittedAt,
                       boolean promiseGenuine, boolean promiseReturn7, boolean promiseFastRefund,
                       boolean promiseFreightIns, String status) {
+        // 第三批㉖：不带折扣模板快照的旧签名（券提审 / 未选模板的商品）—— 逐字沿用改前行为。
+        return insert(merchantId, batchId, goodName, price, originalPrice, goodType, goodTypeNew, typeId,
+                productCode, goodImg, imgList, detail, spec, afterSale, skuSpec, submittedAt,
+                promiseGenuine, promiseReturn7, promiseFastRefund, promiseFreightIns, status,
+                null, null, null, null, null);
+    }
+
+    /**
+     * 第三批㉖：带折扣模板快照的新签名。五个快照列由 {@code DiscountService} 服务端反算后传入，
+     * 审核通过时原样搬进 {@code goods}（改模板配置不影响已提审 / 已上架商品）。
+     *
+     * <p>⚠️ 绑参顺序 = SQL 里 {@code ?} 的出现顺序；{@code PriceSnapshotAt} 在 {@code SubmittedAt}
+     * 之后、紧跟列清单末尾 —— 改列清单时成对改。
+     */
+    public int insert(String merchantId, String batchId, String goodName, Double price, Double originalPrice,
+                      String goodType, Integer goodTypeNew, Integer typeId, String productCode, String goodImg,
+                      String imgList, String detail, String spec, String afterSale, String skuSpec,
+                      LocalDateTime submittedAt,
+                      boolean promiseGenuine, boolean promiseReturn7, boolean promiseFastRefund,
+                      boolean promiseFreightIns, String status,
+                      Long discountTemplateId, String discountType, BigDecimal discountRate,
+                      BigDecimal discountAmount, LocalDateTime priceSnapshotAt) {
         String sql = "INSERT INTO mall_management_sql.goods_audit "
                 + "(MerchantId, BatchId, GoodName, Price, OriginalPrice, GoodType, GoodTypeNew, TypeId, ProductCode, GoodImg, ImgList, "
                 + " Detail, Spec, AfterSale, SkuSpec, "
-                + " PromiseGenuine, PromiseReturn7, PromiseFastRefund, PromiseFreightIns, Status, SubmittedAt) "
-                + "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+                + " PromiseGenuine, PromiseReturn7, PromiseFastRefund, PromiseFreightIns, Status, SubmittedAt, "
+                + " DiscountTemplateId, DiscountType, DiscountRate, DiscountAmount, PriceSnapshotAt) "
+                + "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
         return jdbcClient.sql(sql)
                 .params(merchantId, batchId, goodName, price, originalPrice == null ? 0.0 : originalPrice, goodType, goodTypeNew, typeId, productCode, goodImg, imgList,
                         detail, spec, afterSale, skuSpec,
                         promiseGenuine, promiseReturn7, promiseFastRefund, promiseFreightIns,
-                        isBlank(status) ? "pending" : status, submittedAt)
+                        isBlank(status) ? "pending" : status, submittedAt,
+                        discountTemplateId, discountType, discountRate,
+                        discountAmount == null ? BigDecimal.ZERO : discountAmount, priceSnapshotAt)
                 .update();
     }
 

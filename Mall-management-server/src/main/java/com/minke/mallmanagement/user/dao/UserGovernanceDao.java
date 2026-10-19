@@ -373,12 +373,35 @@ public class UserGovernanceDao {
     }
 
     private int selectMemberLevel(String column, String value) {
-        String sql = "SELECT MemberLevel FROM `user` WHERE " + column + " = ? LIMIT 1";
+        // ㉘ 起权威读列是 MemberLevelNo（V0–V6）；MemberLevel（0/1）只是老口径镜像。
+        // COALESCE(NULLIF(...,0), ...) 让「已回填的存量」与「只写了镜像的新行」两类都读对。
+        String sql = "SELECT COALESCE(NULLIF(MemberLevelNo, 0), MemberLevel) AS MemberLevel "
+                + "FROM `user` WHERE " + column + " = ? LIMIT 1";
         List<Map<String, Object>> rows = jdbcClient.sql(sql).param(value).query().listOfRows();
         if (rows.isEmpty() || rows.get(0).get("MemberLevel") == null) {
             return 0;
         }
         return ((Number) rows.get(0).get("MemberLevel")).intValue();
+    }
+
+    /**
+     * 按客户业务号取**等级折扣率**（{@code member_level.DiscountRate}）。
+     *
+     * <p>生效等级与 {@link #selectMemberLevelByCustomerId} 同口径
+     * （{@code COALESCE(NULLIF(MemberLevelNo,0), MemberLevel)}），保证「判是不是会员」与
+     * 「按几折算」读的是同一个等级。查不到 / 等级表没有该行 / 列空 ⇒ {@code null}
+     * （调用方退回 {@code MemberPricing.RATE}）。
+     */
+    public java.math.BigDecimal selectMemberDiscountRateByCustomerId(String customerId) {
+        String sql = "SELECT l.DiscountRate AS DiscountRate FROM `user` u "
+                + "JOIN member_level l ON l.LevelNo = COALESCE(NULLIF(u.MemberLevelNo, 0), u.MemberLevel) "
+                + "WHERE u.customerid = ? AND l.Status = 'active' LIMIT 1";
+        List<Map<String, Object>> rows = jdbcClient.sql(sql).param(customerId).query().listOfRows();
+        if (rows.isEmpty() || rows.get(0).get("DiscountRate") == null) {
+            return null;
+        }
+        Object v = rows.get(0).get("DiscountRate");
+        return v instanceof java.math.BigDecimal b ? b : new java.math.BigDecimal(String.valueOf(v));
     }
 
     /**

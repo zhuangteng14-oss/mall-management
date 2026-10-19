@@ -17,9 +17,11 @@ import java.util.List;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyDouble;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
@@ -47,12 +49,13 @@ class OrderRefundStateMachineTest {
     @Mock private OrderRefundDao refundDao;
     @Mock private OrderDao orderDao;
     @Mock private GoodsDao goodsDao;
+    @Mock private com.minke.mallmanagement.wallet.service.WalletService walletService;
 
     private OrderRefundService service;
 
     @BeforeEach
     void setUp() {
-        service = new OrderRefundService(refundDao, orderDao, goodsDao);
+        service = new OrderRefundService(refundDao, orderDao, goodsDao, walletService);
     }
 
     // ==================== 申请 ====================
@@ -141,13 +144,16 @@ class OrderRefundStateMachineTest {
         when(orderDao.selectStockDeducted("O1")).thenReturn(1);
         when(orderDao.selectItemStocksByOrder("O1")).thenReturn(List.of(
                 item("SKU-1", 2), item("SKU-2", 1)));
-        when(refundDao.creditBalance("C1", 99.0)).thenReturn(1);
+        when(walletService.credit(anyString(), any(), anyString(), anyString(), anyString(),
+                anyString(), anyString(), anyString(), anyString(), anyString())).thenReturn(true);
 
         Map<String, Object> result = service.merchantHandle("M1", "O1", true, "同意");
 
         assertThat(result.get("success")).isEqualTo(true);
         assertThat(result.get("outcome")).isEqualTo("refunded");
-        verify(refundDao).creditBalance("C1", 99.0);
+        verify(walletService).credit(eq("C1"), eq(com.minke.mallmanagement.shared.Money.of(99.0)),
+                eq("refund"), eq("order"), eq("O1"), eq("refund:O1"),
+                eq("balance"), anyString(), eq("system"), eq("O1"));
         verify(goodsDao).releaseStock("SKU-1", 2);
         verify(goodsDao).releaseStock("SKU-2", 1);
         verify(refundDao).markStockRestored("O1");
@@ -162,7 +168,8 @@ class OrderRefundStateMachineTest {
         Map<String, Object> result = service.merchantHandle("M1", "O1", true, null);
 
         assertThat(result.get("success")).isEqualTo(false);
-        verify(refundDao, never()).creditBalance(anyString(), anyDouble());
+        verify(walletService, never()).credit(anyString(), any(), anyString(), anyString(), anyString(),
+                anyString(), anyString(), anyString(), anyString(), anyString());
         verify(goodsDao, never()).releaseStock(anyString(), anyInt());
         verify(refundDao, never()).markStockRestored(anyString());
     }
@@ -177,7 +184,9 @@ class OrderRefundStateMachineTest {
         Map<String, Object> result = service.merchantHandle("M1", "O1", true, null);
 
         assertThat(result.get("success")).isEqualTo(true);
-        verify(refundDao).creditBalance("C1", 99.0);
+        verify(walletService).credit(eq("C1"), eq(com.minke.mallmanagement.shared.Money.of(99.0)),
+                eq("refund"), eq("order"), eq("O1"), eq("refund:O1"),
+                eq("balance"), anyString(), eq("system"), eq("O1"));
         verify(goodsDao, never()).releaseStock(anyString(), anyInt());
         verify(refundDao, never()).markStockRestored(anyString());
     }
@@ -192,7 +201,8 @@ class OrderRefundStateMachineTest {
         assertThat(result.get("success")).isEqualTo(false);
         assertThat(String.valueOf(result.get("msg"))).contains("无权");
         verify(refundDao, never()).merchantApprove(anyString(), anyString(), anyInt());
-        verify(refundDao, never()).creditBalance(anyString(), anyDouble());
+        verify(walletService, never()).credit(anyString(), any(), anyString(), anyString(), anyString(),
+                anyString(), anyString(), anyString(), anyString(), anyString());
     }
 
     // ==================== 商家：拒绝 → 2 / 3 ====================
@@ -208,7 +218,8 @@ class OrderRefundStateMachineTest {
         assertThat(result.get("success")).isEqualTo(true);
         assertThat(result.get("outcome")).isEqualTo("rejected");
         verify(refundDao).merchantReject("O1", "M1", 1, 2);
-        verify(refundDao, never()).creditBalance(anyString(), anyDouble());
+        verify(walletService, never()).credit(anyString(), any(), anyString(), anyString(), anyString(),
+                anyString(), anyString(), anyString(), anyString(), anyString());
         verify(goodsDao, never()).releaseStock(anyString(), anyInt());
     }
 
@@ -223,7 +234,8 @@ class OrderRefundStateMachineTest {
         assertThat(result.get("success")).isEqualTo(true);
         assertThat(result.get("outcome")).isEqualTo("escalated");
         verify(refundDao).merchantReject("O1", "M1", 2, 3);
-        verify(refundDao, never()).creditBalance(anyString(), anyDouble());
+        verify(walletService, never()).credit(anyString(), any(), anyString(), anyString(), anyString(),
+                anyString(), anyString(), anyString(), anyString(), anyString());
     }
 
     @Test
@@ -252,7 +264,9 @@ class OrderRefundStateMachineTest {
 
         assertThat(result.get("success")).isEqualTo(true);
         assertThat(result.get("outcome")).isEqualTo("refunded");
-        verify(refundDao).creditBalance("C1", 88.5);
+        verify(walletService).credit(eq("C1"), eq(com.minke.mallmanagement.shared.Money.of(88.5)),
+                eq("refund"), eq("order"), eq("O1"), eq("refund:O1"),
+                eq("balance"), anyString(), eq("system"), eq("O1"));
         verify(goodsDao).releaseStock("SKU-1", 1);
         verify(refundDao).markStockRestored("O1");
     }
@@ -267,7 +281,8 @@ class OrderRefundStateMachineTest {
 
         assertThat(result.get("success")).isEqualTo(true);
         assertThat(result.get("outcome")).isEqualTo("refused");
-        verify(refundDao, never()).creditBalance(anyString(), anyDouble());
+        verify(walletService, never()).credit(anyString(), any(), anyString(), anyString(), anyString(),
+                anyString(), anyString(), anyString(), anyString(), anyString());
         verify(goodsDao, never()).releaseStock(anyString(), anyInt());
     }
 
@@ -280,7 +295,8 @@ class OrderRefundStateMachineTest {
         Map<String, Object> result = service.platformHandle("admin", "O1", true, null);
 
         assertThat(result.get("success")).isEqualTo(false);
-        verify(refundDao, never()).creditBalance(anyString(), anyDouble());
+        verify(walletService, never()).credit(anyString(), any(), anyString(), anyString(), anyString(),
+                anyString(), anyString(), anyString(), anyString(), anyString());
         verify(goodsDao, never()).releaseStock(anyString(), anyInt());
     }
 

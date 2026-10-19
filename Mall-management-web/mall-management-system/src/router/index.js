@@ -674,3 +674,26 @@ router.addRoute({ path: '/brand', component: () => import('../views/BrandZone.vu
 // ══════════════════════════════════════════════════════════════════════════════════════════
 
 router.addRoute('customerUser', { path: '/customer/user/member', component: () => import('../views/MemberCenter.vue'), meta: { sub: 'member' } })
+
+// ══════════════════════════════════════════════════════════════════════════════════════════
+// ── UI 先行阶段（2026-10-19）：五页高保真静态预览 ─────────────────────────────────────────
+//
+// 目的：五页高保真预览 —— 匿名访问显示 Mock 示例；有登录身份且后端可达时切真实数据
+//       （折扣模板 / 品牌加盟 / 会员等级与积分 / 钱包流水 / 秒杀活动）。
+// 约束：父级 `meta.public` 让匿名可达；**匿名一律不发请求**（秒杀 live 不在白名单，匿名发必 401）。
+// 说明：本段只追加在文件最尾，避免上面的行号互引漂移。
+// ══════════════════════════════════════════════════════════════════════════════════════════
+
+router.addRoute({
+  path: '/preview',
+  component: () => import('../views/preview/PreviewLayout.vue'),
+  meta: { public: true },
+  children: [
+    { path: '', component: () => import('../views/preview/PreviewIndex.vue') },
+    { path: 'discount', component: () => import('../views/preview/DiscountPreview.vue') },
+    { path: 'brand', component: () => import('../views/preview/BrandPreview.vue') },
+    { path: 'member', component: () => import('../views/preview/MemberPreview.vue') },
+    { path: 'wallet', component: () => import('../views/preview/WalletPreview.vue') },
+    { path: 'seckill', component: () => import('../views/preview/SeckillPreview.vue') },
+  ],
+})

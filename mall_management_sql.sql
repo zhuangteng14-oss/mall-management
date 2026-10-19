@@ -2311,3 +2311,557 @@ INSERT IGNORE INTO `coupon`
 VALUES
   ('VIP_DAILY_TEMPLATE', '会员每日专属券', 'threshold', 5.00, 50.00, 0, 0,
    'all', '', '', NULL, NULL, 'stopped', 1);
+
+-- ============================================================
+-- Migration ㉖：折扣模板引擎  Date: 2026-10-19
+-- 依据：第三批核心业务设计方案 §2（折扣模板 / 七层防线 / 划线价反算）
+-- 内容：① 新表 goods_discount_template（平台折扣模板，商家模板位预留）
+--       ② 新表 goods_price_log（价格快照流水）
+--       ③ goods / goods_audit 各加 5 列（模板快照，审核通过原样搬运）
+--       ④ 种子：RATE_95 / RATE_90 / RATE_85 / RATE_80 / CUT_10
+-- 回滚（规则 v2：回滚 = 逻辑废弃，执行前须人工确认）：
+--       DROP TABLE IF EXISTS `goods_price_log`;
+--       DROP TABLE IF EXISTS `goods_discount_template`;
+--       ALTER TABLE `goods` DROP COLUMN `DiscountTemplateId`,`DiscountType`,`DiscountRate`,`DiscountAmount`,`PriceSnapshotAt`;
+--       ALTER TABLE `goods_audit` DROP COLUMN `DiscountTemplateId`,`DiscountType`,`DiscountRate`,`DiscountAmount`,`PriceSnapshotAt`;
+-- 幂等：建表 IF NOT EXISTS；加列 / 索引走 information_schema 守卫 + PREPARE。
+-- ⚠️ `OriginalPrice` 既有列是 NOT NULL DEFAULT 0.00，0 在业务里已表示「无划线价」
+--    —— 不改成 NULL（改列类型属有条件变更，且会破坏老客户端契约）。回填语义为 0 = 无。
+-- ============================================================
+
+-- ---- ㉖-1 折扣模板表 ----
+CREATE TABLE IF NOT EXISTS `goods_discount_template` (
+  `Id`             bigint NOT NULL AUTO_INCREMENT COMMENT '自增主键',
+  `TemplateCode`   varchar(40) NOT NULL COMMENT '模板业务码（RATE_90 / CUT_10 …）',
+  `Name`           varchar(64) NOT NULL COMMENT '模板名',
+  `DiscountType`   varchar(10) NOT NULL DEFAULT 'rate' COMMENT '折扣类型：rate 折扣率 / cut 直降',
+  `Rate`           decimal(5,4) NOT NULL DEFAULT 0.0000 COMMENT '折扣率（0.9000=九折；仅 rate 有效）',
+  `CutAmount`      decimal(10,2) NOT NULL DEFAULT 0.00 COMMENT '直降金额（仅 cut 有效）',
+  `OwnerType`      varchar(16) NOT NULL DEFAULT 'platform' COMMENT '归属：platform 平台 / merchant 商家（本期只落平台）',
+  `OwnerId`        varchar(40) NOT NULL DEFAULT '' COMMENT '商家业务号（OwnerType=merchant 时有值）',
+  `CategoryScope`  varchar(255) NOT NULL DEFAULT '' COMMENT '适用类目名（逗号分隔；空=全部）',
+  `MinPrice`       decimal(10,2) NOT NULL DEFAULT 0.00 COMMENT '适用最低销售价（0=不限）',
+  `MaxPrice`       decimal(10,2) NOT NULL DEFAULT 0.00 COMMENT '适用最高销售价（0=不限）',
+  `MaxMarkupRate`  decimal(6,4) NOT NULL DEFAULT 2.0000 COMMENT '划线价相对销售价的最大倍数（默认 2.0）',
+  `Status`         varchar(16) NOT NULL DEFAULT 'active' COMMENT 'active / stopped（逻辑废弃）',
+  `SortWeight`     int NOT NULL DEFAULT 0 COMMENT '展示排序（升序）',
+  `ValidFrom`      datetime DEFAULT NULL COMMENT '模板生效起；NULL=不限',
+  `ValidTo`        datetime DEFAULT NULL COMMENT '模板生效止；NULL=不限',
+  `CreatedBy`      varchar(40) NOT NULL DEFAULT '' COMMENT '创建人（管理员账号）',
+  `created_at`     datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '行落库时刻',
+  `updated_at`     datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '行更新时刻',
+  PRIMARY KEY (`Id`),
+  UNIQUE KEY `uk_discount_template_code` (`TemplateCode`),
+  KEY `idx_discount_template_status_sort` (`Status`,`SortWeight`),
+  KEY `idx_discount_template_owner` (`OwnerType`,`OwnerId`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='商品折扣模板（第三批㉖；平台模板本期唯一写口）';
+
+-- ---- ㉖-2 价格快照流水 ----
+CREATE TABLE IF NOT EXISTS `goods_price_log` (
+  `Id`                 bigint NOT NULL AUTO_INCREMENT COMMENT '自增主键',
+  `GoodsId`            bigint DEFAULT NULL COMMENT 'goods.Id（提审阶段尚未建行，故可 NULL）',
+  `BatchId`            varchar(36) NOT NULL DEFAULT '' COMMENT '提审批次号（提审阶段的稳定关联键）',
+  `MerchantId`         varchar(20) NOT NULL DEFAULT '' COMMENT '商家业务号',
+  `ChangeType`         varchar(20) NOT NULL DEFAULT 'submit' COMMENT 'submit 提审 / approve 审核通过 / update 改价',
+  `Price`              decimal(10,2) NOT NULL DEFAULT 0.00 COMMENT '销售价快照',
+  `OriginalPrice`      decimal(10,2) NOT NULL DEFAULT 0.00 COMMENT '划线价快照（0=无）',
+  `DiscountTemplateId` bigint DEFAULT NULL COMMENT '所用模板 Id（软引用）',
+  `DiscountType`       varchar(10) NOT NULL DEFAULT '' COMMENT '模板类型快照',
+  `DiscountRate`       decimal(5,4) DEFAULT NULL COMMENT '模板折扣率快照',
+  `DiscountAmount`     decimal(10,2) NOT NULL DEFAULT 0.00 COMMENT '模板直降额快照',
+  `OperatorType`       varchar(16) NOT NULL DEFAULT 'merchant' COMMENT '操作者类型：merchant / admin / system',
+  `OperatorId`         varchar(40) NOT NULL DEFAULT '' COMMENT '操作者业务号 / 管理员账号',
+  `created_at`         datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) COMMENT '行落库时刻',
+  PRIMARY KEY (`Id`),
+  KEY `idx_goods_price_log_goods` (`GoodsId`,`created_at`),
+  KEY `idx_goods_price_log_batch` (`BatchId`),
+  KEY `idx_goods_price_log_merchant_time` (`MerchantId`,`created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='商品价格快照流水（第三批㉖；只追加）';
+
+-- ---- ㉖-3 goods 加 5 列（模板快照）----
+SET @s := (SELECT IF(COUNT(*) = 0,
+  'ALTER TABLE `goods` ADD COLUMN `DiscountTemplateId` bigint DEFAULT NULL COMMENT ''折扣模板 Id（软引用 goods_discount_template.Id；NULL=未选模板）''',
+  'DO 0')
+  FROM information_schema.COLUMNS
+  WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'goods' AND COLUMN_NAME = 'DiscountTemplateId');
+PREPARE _p FROM @s; EXECUTE _p; DEALLOCATE PREPARE _p;
+
+SET @s := (SELECT IF(COUNT(*) = 0,
+  'ALTER TABLE `goods` ADD COLUMN `DiscountType` varchar(10) DEFAULT NULL COMMENT ''折扣类型快照：rate / cut''',
+  'DO 0')
+  FROM information_schema.COLUMNS
+  WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'goods' AND COLUMN_NAME = 'DiscountType');
+PREPARE _p FROM @s; EXECUTE _p; DEALLOCATE PREPARE _p;
+
+SET @s := (SELECT IF(COUNT(*) = 0,
+  'ALTER TABLE `goods` ADD COLUMN `DiscountRate` decimal(5,4) DEFAULT NULL COMMENT ''折扣率快照（rate）''',
+  'DO 0')
+  FROM information_schema.COLUMNS
+  WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'goods' AND COLUMN_NAME = 'DiscountRate');
+PREPARE _p FROM @s; EXECUTE _p; DEALLOCATE PREPARE _p;
+
+SET @s := (SELECT IF(COUNT(*) = 0,
+  'ALTER TABLE `goods` ADD COLUMN `DiscountAmount` decimal(10,2) NOT NULL DEFAULT 0.00 COMMENT ''直降额快照（cut）''',
+  'DO 0')
+  FROM information_schema.COLUMNS
+  WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'goods' AND COLUMN_NAME = 'DiscountAmount');
+PREPARE _p FROM @s; EXECUTE _p; DEALLOCATE PREPARE _p;
+
+SET @s := (SELECT IF(COUNT(*) = 0,
+  'ALTER TABLE `goods` ADD COLUMN `PriceSnapshotAt` datetime(3) DEFAULT NULL COMMENT ''最近一次价格模板快照时刻''',
+  'DO 0')
+  FROM information_schema.COLUMNS
+  WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'goods' AND COLUMN_NAME = 'PriceSnapshotAt');
+PREPARE _p FROM @s; EXECUTE _p; DEALLOCATE PREPARE _p;
+
+-- ---- ㉖-4 goods_audit 加 5 列（提审快照，通过时原样写 goods）----
+SET @s := (SELECT IF(COUNT(*) = 0,
+  'ALTER TABLE `goods_audit` ADD COLUMN `DiscountTemplateId` bigint DEFAULT NULL COMMENT ''折扣模板 Id 快照''',
+  'DO 0')
+  FROM information_schema.COLUMNS
+  WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'goods_audit' AND COLUMN_NAME = 'DiscountTemplateId');
+PREPARE _p FROM @s; EXECUTE _p; DEALLOCATE PREPARE _p;
+
+SET @s := (SELECT IF(COUNT(*) = 0,
+  'ALTER TABLE `goods_audit` ADD COLUMN `DiscountType` varchar(10) DEFAULT NULL COMMENT ''折扣类型快照：rate / cut''',
+  'DO 0')
+  FROM information_schema.COLUMNS
+  WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'goods_audit' AND COLUMN_NAME = 'DiscountType');
+PREPARE _p FROM @s; EXECUTE _p; DEALLOCATE PREPARE _p;
+
+SET @s := (SELECT IF(COUNT(*) = 0,
+  'ALTER TABLE `goods_audit` ADD COLUMN `DiscountRate` decimal(5,4) DEFAULT NULL COMMENT ''折扣率快照（rate）''',
+  'DO 0')
+  FROM information_schema.COLUMNS
+  WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'goods_audit' AND COLUMN_NAME = 'DiscountRate');
+PREPARE _p FROM @s; EXECUTE _p; DEALLOCATE PREPARE _p;
+
+SET @s := (SELECT IF(COUNT(*) = 0,
+  'ALTER TABLE `goods_audit` ADD COLUMN `DiscountAmount` decimal(10,2) NOT NULL DEFAULT 0.00 COMMENT ''直降额快照（cut）''',
+  'DO 0')
+  FROM information_schema.COLUMNS
+  WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'goods_audit' AND COLUMN_NAME = 'DiscountAmount');
+PREPARE _p FROM @s; EXECUTE _p; DEALLOCATE PREPARE _p;
+
+SET @s := (SELECT IF(COUNT(*) = 0,
+  'ALTER TABLE `goods_audit` ADD COLUMN `PriceSnapshotAt` datetime(3) DEFAULT NULL COMMENT ''价格模板快照时刻''',
+  'DO 0')
+  FROM information_schema.COLUMNS
+  WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'goods_audit' AND COLUMN_NAME = 'PriceSnapshotAt');
+PREPARE _p FROM @s; EXECUTE _p; DEALLOCATE PREPARE _p;
+
+-- ---- ㉖-5 种子：五个平台模板 ----
+INSERT IGNORE INTO `goods_discount_template`
+  (`TemplateCode`, `Name`, `DiscountType`, `Rate`, `CutAmount`, `OwnerType`, `OwnerId`,
+   `CategoryScope`, `MinPrice`, `MaxPrice`, `MaxMarkupRate`, `Status`, `SortWeight`, `CreatedBy`)
+VALUES
+  ('RATE_95', '九五折', 'rate', 0.9500, 0.00, 'platform', '', '', 0.00, 0.00, 2.0000, 'active', 10, 'system'),
+  ('RATE_90', '九折',   'rate', 0.9000, 0.00, 'platform', '', '', 0.00, 0.00, 2.0000, 'active', 20, 'system'),
+  ('RATE_85', '八五折', 'rate', 0.8500, 0.00, 'platform', '', '', 0.00, 0.00, 2.0000, 'active', 30, 'system'),
+  ('RATE_80', '八折',   'rate', 0.8000, 0.00, 'platform', '', '', 0.00, 0.00, 2.0000, 'active', 40, 'system'),
+  ('CUT_10',  '直降 10 元', 'cut', 0.0000, 10.00, 'platform', '', '', 0.10, 0.00, 2.0000, 'active', 50, 'system');
+
+-- ============================================================
+-- Migration ㉗：品牌加盟  Date: 2026-10-19
+-- 依据：第三批核心业务设计方案 §3（状态机 / 24h 冷却 / 30 天 3 次 / 档案表）
+-- 内容：① merchant_application 加 3 列 + 生成列 PendingGuard + 唯一键
+--       ② 新表 merchant_brand_application_detail（品牌申请明细）
+--       ③ 新表 merchant_brand_profile（品牌档案，MerchantId 唯一）
+--       ④ 回填历史已批准品牌（批四第二批 IsBrand=1）
+-- 回滚（逻辑废弃）：DROP 两张新表；DROP INDEX uk_application_pending；
+--       ALTER TABLE merchant_application DROP COLUMN PendingGuard, ApplicationType, AttemptNo, ParentId;
+-- 幂等：加列 / 索引守卫；生成列守卫；建表 IF NOT EXISTS。
+-- ⚠️ 唯一键建立前先做一次「同账号同类只保留最新 pending」的去重 UPDATE，
+--    否则存量并发提交的重复 pending 会让唯一键建不上（历史数据兜底）。
+-- ============================================================
+
+-- ---- ㉗-1 merchant_application 加列 ----
+SET @s := (SELECT IF(COUNT(*) = 0,
+  'ALTER TABLE `merchant_application` ADD COLUMN `ApplicationType` varchar(20) NOT NULL DEFAULT ''settle'' COMMENT ''申请类型：settle 入驻 / brand 品牌加盟''',
+  'DO 0')
+  FROM information_schema.COLUMNS
+  WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'merchant_application' AND COLUMN_NAME = 'ApplicationType');
+PREPARE _p FROM @s; EXECUTE _p; DEALLOCATE PREPARE _p;
+
+SET @s := (SELECT IF(COUNT(*) = 0,
+  'ALTER TABLE `merchant_application` ADD COLUMN `AttemptNo` int NOT NULL DEFAULT 1 COMMENT ''同类申请第几次（品牌重申计数）''',
+  'DO 0')
+  FROM information_schema.COLUMNS
+  WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'merchant_application' AND COLUMN_NAME = 'AttemptNo');
+PREPARE _p FROM @s; EXECUTE _p; DEALLOCATE PREPARE _p;
+
+SET @s := (SELECT IF(COUNT(*) = 0,
+  'ALTER TABLE `merchant_application` ADD COLUMN `ParentId` bigint DEFAULT NULL COMMENT ''上一版申请 Id（品牌重申链）''',
+  'DO 0')
+  FROM information_schema.COLUMNS
+  WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'merchant_application' AND COLUMN_NAME = 'ParentId');
+PREPARE _p FROM @s; EXECUTE _p; DEALLOCATE PREPARE _p;
+
+-- 历史品牌申请（批四第二批以 IsBrand=1 标记）迁到 ApplicationType='brand'
+UPDATE `merchant_application` SET `ApplicationType` = 'brand' WHERE `IsBrand` = 1;
+
+-- 去重：同账号 + 同类型只保留 Id 最大的一条 pending，其余逻辑拒绝（不删行）
+UPDATE `merchant_application` a
+JOIN `merchant_application` b
+  ON a.`Username` = b.`Username`
+ AND a.`ApplicationType` = b.`ApplicationType`
+ AND a.`Status` = 'pending'
+ AND b.`Status` = 'pending'
+ AND a.`Id` < b.`Id`
+SET a.`Status` = 'rejected',
+    a.`RejectReason` = '系统迁移：同账号同类待审申请仅保留最新一条',
+    a.`ReviewedBy` = 'system-migration',
+    a.`ReviewedAt` = NOW(3);
+
+SET @s := (SELECT IF(COUNT(*) = 0,
+  'ALTER TABLE `merchant_application` ADD COLUMN `PendingGuard` varchar(90) GENERATED ALWAYS AS (IF(`Status` = ''pending'', CONCAT(`Username`, '':'', `ApplicationType`), NULL)) STORED COMMENT ''待审唯一守卫：pending 时 = username:type，否则 NULL''',
+  'DO 0')
+  FROM information_schema.COLUMNS
+  WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'merchant_application' AND COLUMN_NAME = 'PendingGuard');
+PREPARE _p FROM @s; EXECUTE _p; DEALLOCATE PREPARE _p;
+
+SET @s := (SELECT IF(COUNT(*) = 0,
+  'ALTER TABLE `merchant_application` ADD UNIQUE KEY `uk_application_pending` (`PendingGuard`)',
+  'DO 0')
+  FROM information_schema.STATISTICS
+  WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'merchant_application' AND INDEX_NAME = 'uk_application_pending');
+PREPARE _p FROM @s; EXECUTE _p; DEALLOCATE PREPARE _p;
+
+SET @s := (SELECT IF(COUNT(*) = 0,
+  'ALTER TABLE `merchant_application` ADD INDEX `idx_application_type_status` (`ApplicationType`,`Status`,`SubmittedAt`)',
+  'DO 0')
+  FROM information_schema.STATISTICS
+  WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'merchant_application' AND INDEX_NAME = 'idx_application_type_status');
+PREPARE _p FROM @s; EXECUTE _p; DEALLOCATE PREPARE _p;
+
+-- ---- ㉗-2 品牌申请明细 ----
+CREATE TABLE IF NOT EXISTS `merchant_brand_application_detail` (
+  `Id`             bigint NOT NULL AUTO_INCREMENT COMMENT '自增主键',
+  `ApplicationId`  bigint NOT NULL COMMENT 'merchant_application.Id（一申请一行）',
+  `BrandName`      varchar(64) NOT NULL COMMENT '品牌中文名',
+  `BrandNameEn`    varchar(64) NOT NULL DEFAULT '' COMMENT '品牌英文名',
+  `TrademarkNo`    varchar(64) NOT NULL DEFAULT '' COMMENT '商标注册号',
+  `TrademarkClass` varchar(32) NOT NULL DEFAULT '' COMMENT '商标类别',
+  `BrandLevel`     varchar(16) NOT NULL DEFAULT '' COMMENT '品牌等级（自主/授权/代理）',
+  `LogoUrl`        varchar(500) NOT NULL DEFAULT '' COMMENT '品牌 Logo URL',
+  `LicenseUrl`     varchar(500) NOT NULL DEFAULT '' COMMENT '品牌授权书 URL',
+  `LicenseExpiry`  date DEFAULT NULL COMMENT '授权有效期至',
+  `MainCategory`   varchar(64) NOT NULL DEFAULT '' COMMENT '主营类目',
+  `Remark`         varchar(500) NOT NULL DEFAULT '' COMMENT '补充说明',
+  `created_at`     datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '行落库时刻',
+  `updated_at`     datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '行更新时刻',
+  PRIMARY KEY (`Id`),
+  UNIQUE KEY `uk_brand_detail_application` (`ApplicationId`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='品牌加盟申请明细（第三批㉗；ApplicationId 唯一）';
+
+-- ---- ㉗-3 品牌档案 ----
+CREATE TABLE IF NOT EXISTS `merchant_brand_profile` (
+  `Id`                  bigint NOT NULL AUTO_INCREMENT COMMENT '自增主键',
+  `MerchantId`          varchar(20) NOT NULL COMMENT '商家业务号（user.merchantid）',
+  `BrandName`           varchar(64) NOT NULL COMMENT '品牌中文名',
+  `BrandNameEn`         varchar(64) NOT NULL DEFAULT '' COMMENT '品牌英文名',
+  `TrademarkNo`         varchar(64) NOT NULL DEFAULT '' COMMENT '商标注册号',
+  `TrademarkClass`      varchar(32) NOT NULL DEFAULT '' COMMENT '商标类别',
+  `BrandLevel`          varchar(16) NOT NULL DEFAULT '' COMMENT '品牌等级',
+  `LogoUrl`             varchar(500) NOT NULL DEFAULT '' COMMENT '品牌 Logo URL',
+  `LicenseUrl`          varchar(500) NOT NULL DEFAULT '' COMMENT '品牌授权书 URL',
+  `MainCategory`        varchar(64) NOT NULL DEFAULT '' COMMENT '主营类目',
+  `Status`              varchar(16) NOT NULL DEFAULT 'active' COMMENT 'active / expired / revoked',
+  `SourceApplicationId` bigint DEFAULT NULL COMMENT '来源申请 Id（软引用）',
+  `ApprovedAt`          datetime(3) DEFAULT NULL COMMENT '审核通过时刻',
+  `ValidFrom`           datetime DEFAULT NULL COMMENT '品牌有效期起',
+  `ValidTo`             datetime DEFAULT NULL COMMENT '品牌有效期止（NULL=长期）',
+  `RevokeReason`        varchar(255) NOT NULL DEFAULT '' COMMENT '撤销理由',
+  `Version`             bigint NOT NULL DEFAULT 0 COMMENT '乐观锁版本号',
+  `created_at`          datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '行落库时刻',
+  `updated_at`          datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '行更新时刻',
+  PRIMARY KEY (`Id`),
+  UNIQUE KEY `uk_brand_profile_merchant` (`MerchantId`),
+  KEY `idx_brand_profile_status_valid` (`Status`,`ValidTo`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='商家品牌档案（第三批㉗；MerchantId 唯一，商品品牌标与专区读它）';
+
+-- ---- ㉗-4 回填：历史已批准品牌申请 → 品牌档案 ----
+INSERT IGNORE INTO `merchant_brand_profile`
+  (`MerchantId`, `BrandName`, `Status`, `SourceApplicationId`, `ApprovedAt`, `ValidFrom`, `Version`)
+SELECT u.`merchantid`, COALESCE(NULLIF(d.`BrandName`, ''), a.`ShopName`), 'active',
+       a.`Id`, COALESCE(a.`ReviewedAt`, a.`SubmittedAt`), COALESCE(a.`ReviewedAt`, a.`SubmittedAt`), 1
+FROM `merchant_application` a
+JOIN `user` u ON u.`username` = a.`Username` AND u.`merchantid` IS NOT NULL AND u.`merchantid` <> ''
+LEFT JOIN `merchant_brand_application_detail` d ON d.`ApplicationId` = a.`Id`
+WHERE a.`ApplicationType` = 'brand' AND a.`Status` = 'approved';
+
+-- ============================================================
+-- Migration ㉘：会员等级 / 积分  Date: 2026-10-19
+-- 依据：第三批核心业务设计方案 §4（V0–V6 / 签到 / FIFO 过期 / 成长值升级）
+-- 内容：① 新表 member_level（7 行种子）
+--       ② 新表 user_points_account / user_points_log / user_signin / member_level_log
+--       ③ user 加 3 列（MemberLevelNo / GrowthValue / MemberSince）
+--       ④ 回填：MemberLevel=1 → MemberLevelNo=1；为存量客户建积分账户
+-- 回滚（逻辑废弃）：DROP 五张新表；ALTER TABLE user DROP 3 列。
+-- 幂等：建表 IF NOT EXISTS；加列守卫；种子 INSERT IGNORE；账户回填 INSERT IGNORE。
+-- ============================================================
+
+-- ---- ㉘-1 等级表 ----
+CREATE TABLE IF NOT EXISTS `member_level` (
+  `Id`              int NOT NULL AUTO_INCREMENT COMMENT '自增主键',
+  `LevelNo`         tinyint NOT NULL COMMENT '等级序号 0–6',
+  `Code`            varchar(8) NOT NULL COMMENT '等级码 V0–V6',
+  `Name`            varchar(32) NOT NULL COMMENT '等级名',
+  `MinGrowth`       bigint NOT NULL DEFAULT 0 COMMENT '升级所需成长值下限',
+  `DiscountRate`    decimal(5,4) NOT NULL DEFAULT 1.0000 COMMENT '会员折扣率（0.9000=九折）',
+  `PointsRate`      decimal(5,2) NOT NULL DEFAULT 1.00 COMMENT '积分倍率',
+  `MonthlyCoupons`  int NOT NULL DEFAULT 0 COMMENT '每月专属券张数',
+  `PriorityWeight`  int NOT NULL DEFAULT 0 COMMENT '售后/客服优先级权重（越大越优先）',
+  `Theme`           varchar(32) NOT NULL DEFAULT 'plain' COMMENT '前端主题标识',
+  `BenefitsJson`    text COMMENT '权益矩阵 JSON（前端展示用）',
+  `Status`          varchar(16) NOT NULL DEFAULT 'active' COMMENT 'active / stopped',
+  `created_at`      datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '行落库时刻',
+  `updated_at`      datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '行更新时刻',
+  PRIMARY KEY (`Id`),
+  UNIQUE KEY `uk_member_level_no` (`LevelNo`),
+  UNIQUE KEY `uk_member_level_code` (`Code`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='会员等级矩阵（第三批㉘；V0–V6）';
+
+INSERT IGNORE INTO `member_level`
+  (`LevelNo`, `Code`, `Name`, `MinGrowth`, `DiscountRate`, `PointsRate`, `MonthlyCoupons`, `PriorityWeight`, `Theme`, `BenefitsJson`)
+VALUES
+  (0, 'V0', '普通会员', 0,     1.0000, 1.00, 0, 0,  'plain',    '{"discount":"无折扣","points":"1.0x","coupons":"0 张/月","support":"标准客服"}'),
+  (1, 'V1', '银卡会员', 500,   0.9000, 1.00, 1, 10, 'silver',   '{"discount":"9 折","points":"1.0x","coupons":"1 张/月","support":"优先客服"}'),
+  (2, 'V2', '金卡会员', 2000,  0.8800, 1.20, 1, 20, 'gold',     '{"discount":"8.8 折","points":"1.2x","coupons":"1 张/月","support":"优先客服"}'),
+  (3, 'V3', '铂金会员', 5000,  0.8500, 1.50, 2, 30, 'platinum', '{"discount":"8.5 折","points":"1.5x","coupons":"2 张/月","support":"专属客服"}'),
+  (4, 'V4', '钻石会员', 10000, 0.8200, 1.80, 2, 40, 'diamond',  '{"discount":"8.2 折","points":"1.8x","coupons":"2 张/月","support":"专属客服"}'),
+  (5, 'V5', '黑金会员', 30000, 0.8000, 2.00, 3, 50, 'black',    '{"discount":"8 折","points":"2.0x","coupons":"3 张/月","support":"黑金专线"}'),
+  (6, 'V6', '至尊会员', 100000,0.7800, 2.50, 4, 60, 'supreme',  '{"discount":"7.8 折","points":"2.5x","coupons":"4 张/月","support":"至尊专线"}');
+
+-- ---- ㉘-2 积分账户 ----
+CREATE TABLE IF NOT EXISTS `user_points_account` (
+  `UserId`       varchar(20) NOT NULL COMMENT '客户业务号（user.customerid）',
+  `Balance`      bigint NOT NULL DEFAULT 0 COMMENT '可用积分',
+  `Frozen`       bigint NOT NULL DEFAULT 0 COMMENT '冻结积分',
+  `GrowthValue`  bigint NOT NULL DEFAULT 0 COMMENT '成长值（只增不减）',
+  `TotalEarned`  bigint NOT NULL DEFAULT 0 COMMENT '累计获得积分',
+  `TotalSpent`   bigint NOT NULL DEFAULT 0 COMMENT '累计消耗积分',
+  `Version`      bigint NOT NULL DEFAULT 0 COMMENT '乐观锁版本号',
+  `Status`       varchar(16) NOT NULL DEFAULT 'active' COMMENT 'active / frozen',
+  `created_at`   datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '行落库时刻',
+  `updated_at`   datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '行更新时刻',
+  PRIMARY KEY (`UserId`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='用户积分账户（第三批㉘；权威账户）';
+
+-- ---- ㉘-3 积分流水 ----
+CREATE TABLE IF NOT EXISTS `user_points_log` (
+  `Id`            bigint NOT NULL AUTO_INCREMENT COMMENT '自增主键',
+  `UserId`        varchar(20) NOT NULL COMMENT '客户业务号',
+  `ChangeAmount`  bigint NOT NULL COMMENT '变动量（正=获得，负=消耗/过期）',
+  `BalanceAfter`  bigint NOT NULL COMMENT '变动后可用余额',
+  `GrowthDelta`   bigint NOT NULL DEFAULT 0 COMMENT '成长值增量',
+  `BizType`       varchar(32) NOT NULL COMMENT '业务类型：order_earn / signin / order_spend / expire / refund …',
+  `BizId`         varchar(64) NOT NULL COMMENT '业务幂等键',
+  `RemainAmount`  bigint NOT NULL DEFAULT 0 COMMENT '本笔获得积分剩余可过期数量（FIFO）',
+  `ExpireAt`      datetime DEFAULT NULL COMMENT '本笔获得积分过期时刻',
+  `Remark`        varchar(255) NOT NULL DEFAULT '' COMMENT '备注',
+  `OperatorType`  varchar(16) NOT NULL DEFAULT 'system' COMMENT 'system / customer / admin / merchant',
+  `OperatorId`    varchar(40) NOT NULL DEFAULT '' COMMENT '操作者业务号 / 管理员账号',
+  `created_at`    datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) COMMENT '行落库时刻',
+  PRIMARY KEY (`Id`),
+  UNIQUE KEY `uk_points_log_biz` (`UserId`,`BizType`,`BizId`),
+  KEY `idx_points_log_user_time` (`UserId`,`created_at`),
+  KEY `idx_points_log_user_expire` (`UserId`,`ExpireAt`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='积分流水（第三批㉘；只追加，幂等键 UserId+BizType+BizId）';
+
+-- ---- ㉘-4 签到 ----
+CREATE TABLE IF NOT EXISTS `user_signin` (
+  `Id`         bigint NOT NULL AUTO_INCREMENT COMMENT '自增主键',
+  `UserId`     varchar(20) NOT NULL COMMENT '客户业务号',
+  `SignDate`   date NOT NULL COMMENT '签到日期（服务器本地日期）',
+  `Points`     int NOT NULL DEFAULT 0 COMMENT '本次获得积分',
+  `Streak`     int NOT NULL DEFAULT 1 COMMENT '连续签到天数',
+  `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '行落库时刻',
+  PRIMARY KEY (`Id`),
+  UNIQUE KEY `uk_signin_user_date` (`UserId`,`SignDate`),
+  KEY `idx_signin_user_date` (`UserId`,`SignDate`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='会员签到（第三批㉘；唯一键防刷）';
+
+-- ---- ㉘-5 等级变更日志 ----
+CREATE TABLE IF NOT EXISTS `member_level_log` (
+  `Id`          bigint NOT NULL AUTO_INCREMENT COMMENT '自增主键',
+  `UserId`      varchar(20) NOT NULL COMMENT '客户业务号',
+  `FromLevel`   tinyint NOT NULL DEFAULT 0 COMMENT '升级前等级',
+  `ToLevel`     tinyint NOT NULL DEFAULT 0 COMMENT '升级后等级',
+  `BizType`     varchar(32) NOT NULL DEFAULT 'growth' COMMENT '业务类型',
+  `BizId`       varchar(64) NOT NULL DEFAULT '' COMMENT '业务幂等键',
+  `GrowthValue` bigint NOT NULL DEFAULT 0 COMMENT '变更后成长值',
+  `Remark`      varchar(255) NOT NULL DEFAULT '' COMMENT '备注',
+  `created_at`  datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '行落库时刻',
+  PRIMARY KEY (`Id`),
+  UNIQUE KEY `uk_level_log_biz` (`UserId`,`BizType`,`BizId`),
+  KEY `idx_level_log_user_time` (`UserId`,`created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='会员等级变更日志（第三批㉘）';
+
+-- ---- ㉘-6 user 加 3 列 ----
+SET @s := (SELECT IF(COUNT(*) = 0,
+  'ALTER TABLE `user` ADD COLUMN `MemberLevelNo` tinyint NOT NULL DEFAULT 0 COMMENT ''会员等级序号 V0–V6（权威读列；MemberLevel 保留 0/1 镜像）''',
+  'DO 0')
+  FROM information_schema.COLUMNS
+  WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'user' AND COLUMN_NAME = 'MemberLevelNo');
+PREPARE _p FROM @s; EXECUTE _p; DEALLOCATE PREPARE _p;
+
+SET @s := (SELECT IF(COUNT(*) = 0,
+  'ALTER TABLE `user` ADD COLUMN `GrowthValue` bigint NOT NULL DEFAULT 0 COMMENT ''成长值（user 侧镜像；权威在 user_points_account）''',
+  'DO 0')
+  FROM information_schema.COLUMNS
+  WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'user' AND COLUMN_NAME = 'GrowthValue');
+PREPARE _p FROM @s; EXECUTE _p; DEALLOCATE PREPARE _p;
+
+SET @s := (SELECT IF(COUNT(*) = 0,
+  'ALTER TABLE `user` ADD COLUMN `MemberSince` datetime DEFAULT NULL COMMENT ''成为付费/等级会员的时刻''',
+  'DO 0')
+  FROM information_schema.COLUMNS
+  WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'user' AND COLUMN_NAME = 'MemberSince');
+PREPARE _p FROM @s; EXECUTE _p; DEALLOCATE PREPARE _p;
+
+-- ---- ㉘-7 回填 ----
+UPDATE `user` SET `MemberLevelNo` = 1 WHERE `MemberLevel` = 1 AND `MemberLevelNo` = 0;
+
+INSERT IGNORE INTO `user_points_account`
+  (`UserId`, `Balance`, `Frozen`, `GrowthValue`, `TotalEarned`, `TotalSpent`, `Version`, `Status`)
+SELECT `customerid`, 0, 0, `GrowthValue`, 0, 0, 0, 'active'
+FROM `user`
+WHERE `customerid` IS NOT NULL AND `customerid` <> '';
+
+-- ============================================================
+-- Migration ㉙：余额钱包  Date: 2026-10-19
+-- 依据：第三批核心业务设计方案 §5（账本优先 / 幂等键 / CAS / 沙箱充值风控）
+-- 内容：① 新表 user_wallet / user_balance_log / wallet_recharge_order
+--       ② P2 预留表 wallet_withdraw_order（只建表，本期不实现提现）
+--       ③ order 加 5 列（PayChannel / WalletPaidAmount / PointsUsed / PointsDiscount / PointsSettled）
+--       ④ 回填 user.Balance → user_wallet.Available
+-- 回滚（逻辑废弃）：DROP 四张新表；ALTER TABLE order DROP 5 列。
+-- 幂等：建表 IF NOT EXISTS；加列守卫；回填 INSERT IGNORE。
+-- ============================================================
+
+-- ---- ㉙-1 钱包账户 ----
+CREATE TABLE IF NOT EXISTS `user_wallet` (
+  `UserId`         varchar(20) NOT NULL COMMENT '客户业务号（user.customerid）',
+  `Available`      decimal(12,2) NOT NULL DEFAULT 0.00 COMMENT '可用余额（权威）',
+  `Frozen`         decimal(12,2) NOT NULL DEFAULT 0.00 COMMENT '冻结余额（提现占位用）',
+  `TotalRecharge`  decimal(12,2) NOT NULL DEFAULT 0.00 COMMENT '累计充值',
+  `TotalRefund`    decimal(12,2) NOT NULL DEFAULT 0.00 COMMENT '累计退款入账',
+  `TotalConsume`   decimal(12,2) NOT NULL DEFAULT 0.00 COMMENT '累计消费',
+  `TotalWithdraw`  decimal(12,2) NOT NULL DEFAULT 0.00 COMMENT '累计提现',
+  `Version`        bigint NOT NULL DEFAULT 0 COMMENT '乐观锁版本号',
+  `Status`         varchar(16) NOT NULL DEFAULT 'active' COMMENT 'active / frozen',
+  `created_at`     datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '行落库时刻',
+  `updated_at`     datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '行更新时刻',
+  PRIMARY KEY (`UserId`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='用户钱包账户（第三批㉙；权威账户，user.Balance 是同事务镜像）';
+
+-- ---- ㉙-2 余额流水 ----
+CREATE TABLE IF NOT EXISTS `user_balance_log` (
+  `Id`                  bigint NOT NULL AUTO_INCREMENT COMMENT '自增主键',
+  `UserId`              varchar(20) NOT NULL COMMENT '客户业务号',
+  `ChangeType`          varchar(24) NOT NULL COMMENT 'recharge / refund / consume / withdraw_freeze / withdraw_settle / withdraw_release / adjust',
+  `Direction`           tinyint NOT NULL DEFAULT 1 COMMENT '1 入账 / -1 出账',
+  `Amount`              decimal(12,2) NOT NULL COMMENT '变动金额（正数）',
+  `BalanceBefore`       decimal(12,2) NOT NULL COMMENT '变动前可用余额',
+  `BalanceAfter`        decimal(12,2) NOT NULL COMMENT '变动后可用余额',
+  `FrozenBefore`        decimal(12,2) NOT NULL DEFAULT 0.00 COMMENT '变动前冻结',
+  `FrozenAfter`         decimal(12,2) NOT NULL DEFAULT 0.00 COMMENT '变动后冻结',
+  `BizType`             varchar(32) NOT NULL DEFAULT '' COMMENT '业务类型',
+  `BizId`               varchar(64) NOT NULL DEFAULT '' COMMENT '业务号',
+  `IdempotencyKey`      varchar(120) NOT NULL COMMENT '幂等键（全表唯一）',
+  `Channel`             varchar(16) NOT NULL DEFAULT '' COMMENT 'sandbox / balance / refund / admin',
+  `Status`              varchar(16) NOT NULL DEFAULT 'success' COMMENT 'success / failed',
+  `Remark`              varchar(255) NOT NULL DEFAULT '' COMMENT '备注',
+  `OperatorType`        varchar(16) NOT NULL DEFAULT 'system' COMMENT 'system / customer / admin',
+  `OperatorId`          varchar(40) NOT NULL DEFAULT '' COMMENT '操作者业务号 / 管理员账号',
+  `created_at`          datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) COMMENT '行落库时刻',
+  PRIMARY KEY (`Id`),
+  UNIQUE KEY `uk_balance_log_idem` (`IdempotencyKey`),
+  KEY `idx_balance_log_user_time` (`UserId`,`created_at`),
+  KEY `idx_balance_log_biz` (`BizType`,`BizId`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='余额流水（第三批㉙；只追加，IdempotencyKey 唯一）';
+
+-- ---- ㉙-3 沙箱充值单 ----
+CREATE TABLE IF NOT EXISTS `wallet_recharge_order` (
+  `Id`           bigint NOT NULL AUTO_INCREMENT COMMENT '自增主键',
+  `RechargeId`   varchar(40) NOT NULL COMMENT '充值业务号',
+  `UserId`       varchar(20) NOT NULL COMMENT '客户业务号',
+  `Amount`       decimal(12,2) NOT NULL COMMENT '充值金额',
+  `Channel`      varchar(16) NOT NULL DEFAULT 'sandbox' COMMENT '通道（本期只有 sandbox）',
+  `Status`       varchar(16) NOT NULL DEFAULT 'pending' COMMENT 'pending / success / failed',
+  `RequestId`    varchar(64) NOT NULL COMMENT '客户端请求幂等号',
+  `ClientIp`     varchar(64) NOT NULL DEFAULT '' COMMENT '请求 IP',
+  `CompletedAt`  datetime DEFAULT NULL COMMENT '完成时刻',
+  `FailReason`   varchar(255) NOT NULL DEFAULT '' COMMENT '失败原因',
+  `created_at`   datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '行落库时刻',
+  `updated_at`   datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '行更新时刻',
+  PRIMARY KEY (`Id`),
+  UNIQUE KEY `uk_recharge_id` (`RechargeId`),
+  UNIQUE KEY `uk_recharge_user_request` (`UserId`,`RequestId`),
+  KEY `idx_recharge_user_time` (`UserId`,`created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='沙箱充值单（第三批㉙；RequestId 幂等）';
+
+-- ---- ㉙-4 P2 预留：提现单（本期只建表，不提供写端点）----
+CREATE TABLE IF NOT EXISTS `wallet_withdraw_order` (
+  `Id`            bigint NOT NULL AUTO_INCREMENT COMMENT '自增主键',
+  `WithdrawId`    varchar(40) NOT NULL COMMENT '提现业务号',
+  `UserId`        varchar(20) NOT NULL COMMENT '客户业务号',
+  `Amount`        decimal(12,2) NOT NULL COMMENT '提现金额',
+  `Fee`           decimal(12,2) NOT NULL DEFAULT 0.00 COMMENT '手续费',
+  `Status`        varchar(16) NOT NULL DEFAULT 'pending' COMMENT 'pending / approved / rejected / settled',
+  `RequestId`     varchar(64) NOT NULL COMMENT '客户端请求幂等号',
+  `AccountMask`   varchar(64) NOT NULL DEFAULT '' COMMENT '收款账户掩码',
+  `HandledAt`     datetime DEFAULT NULL COMMENT '处理时刻',
+  `Handler`       varchar(40) NOT NULL DEFAULT '' COMMENT '处理人',
+  `RejectReason`  varchar(255) NOT NULL DEFAULT '' COMMENT '拒绝理由',
+  `created_at`    datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '行落库时刻',
+  `updated_at`    datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '行更新时刻',
+  PRIMARY KEY (`Id`),
+  UNIQUE KEY `uk_withdraw_id` (`WithdrawId`),
+  UNIQUE KEY `uk_withdraw_user_request` (`UserId`,`RequestId`),
+  KEY `idx_withdraw_user_time` (`UserId`,`created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='提现单（P2 预留；第三批只建表，不实现提现）';
+
+-- ---- ㉙-5 order 加 5 列 ----
+SET @s := (SELECT IF(COUNT(*) = 0,
+  'ALTER TABLE `order` ADD COLUMN `PayChannel` varchar(16) NOT NULL DEFAULT '''' COMMENT ''支付通道：sandbox / balance / external / 空=未指定''',
+  'DO 0')
+  FROM information_schema.COLUMNS
+  WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'order' AND COLUMN_NAME = 'PayChannel');
+PREPARE _p FROM @s; EXECUTE _p; DEALLOCATE PREPARE _p;
+
+SET @s := (SELECT IF(COUNT(*) = 0,
+  'ALTER TABLE `order` ADD COLUMN `WalletPaidAmount` decimal(10,2) NOT NULL DEFAULT 0.00 COMMENT ''余额支付金额快照''',
+  'DO 0')
+  FROM information_schema.COLUMNS
+  WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'order' AND COLUMN_NAME = 'WalletPaidAmount');
+PREPARE _p FROM @s; EXECUTE _p; DEALLOCATE PREPARE _p;
+
+SET @s := (SELECT IF(COUNT(*) = 0,
+  'ALTER TABLE `order` ADD COLUMN `PointsUsed` bigint NOT NULL DEFAULT 0 COMMENT ''本单使用积分数''',
+  'DO 0')
+  FROM information_schema.COLUMNS
+  WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'order' AND COLUMN_NAME = 'PointsUsed');
+PREPARE _p FROM @s; EXECUTE _p; DEALLOCATE PREPARE _p;
+
+SET @s := (SELECT IF(COUNT(*) = 0,
+  'ALTER TABLE `order` ADD COLUMN `PointsDiscount` decimal(10,2) NOT NULL DEFAULT 0.00 COMMENT ''积分抵扣金额''',
+  'DO 0')
+  FROM information_schema.COLUMNS
+  WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'order' AND COLUMN_NAME = 'PointsDiscount');
+PREPARE _p FROM @s; EXECUTE _p; DEALLOCATE PREPARE _p;
+
+SET @s := (SELECT IF(COUNT(*) = 0,
+  'ALTER TABLE `order` ADD COLUMN `PointsSettled` tinyint(1) NOT NULL DEFAULT 0 COMMENT ''积分是否已结算（收货后发放/退款回滚防重）''',
+  'DO 0')
+  FROM information_schema.COLUMNS
+  WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'order' AND COLUMN_NAME = 'PointsSettled');
+PREPARE _p FROM @s; EXECUTE _p; DEALLOCATE PREPARE _p;
+
+-- ---- ㉙-6 回填：user.Balance → user_wallet.Available ----
+INSERT IGNORE INTO `user_wallet`
+  (`UserId`, `Available`, `Frozen`, `TotalRecharge`, `TotalRefund`, `TotalConsume`, `TotalWithdraw`, `Version`, `Status`)
+SELECT `customerid`, COALESCE(`Balance`, 0.00), 0.00, 0.00, 0.00, 0.00, 0.00, 0, 'active'
+FROM `user`
+WHERE `customerid` IS NOT NULL AND `customerid` <> '';

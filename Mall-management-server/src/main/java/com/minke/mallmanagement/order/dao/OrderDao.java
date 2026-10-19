@@ -99,13 +99,30 @@ public class OrderDao {
      * —— 那是既有形态，理由见类注释（跟随点号的词按标识符解析，保留字也无需引号），本笔不动。
      */
     public int insertOrder(OrderRow r) {
+        // 第三批㉙：老签名委托到全列版本（支付/积分为默认值）—— SQL 只有一份。
+        return insertOrder(r, "", java.math.BigDecimal.ZERO, 0L, java.math.BigDecimal.ZERO);
+    }
+
+    /**
+     * 第三批㉙：带支付通道 / 余额支付 / 积分抵扣的完整写入。
+     *
+     * <p>{@code PointsSettled} 恒写 0（积分在**收货**时发放，见 {@code MemberService.earnForOrder}）；
+     * 其余快照列是「这一单实际用了什么」的不可变证据，退款 / 对账都读它。
+     */
+    public int insertOrder(OrderRow r, String payChannel, java.math.BigDecimal walletPaidAmount,
+                           long pointsUsed, java.math.BigDecimal pointsDiscount) {
         String sql = "INSERT INTO mall_management_sql.order " +
-                "(OrderId, CustomerId, MerchantId, Price, Quantity, ProductInformation, Images, PayIf, DeliveryIf, ReceiveIf, `Source`, BatchId, CreateTime) " +
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())";
+                "(OrderId, CustomerId, MerchantId, Price, Quantity, ProductInformation, Images, PayIf, DeliveryIf, ReceiveIf, `Source`, BatchId, " +
+                " PayChannel, WalletPaidAmount, PointsUsed, PointsDiscount, PointsSettled, CreateTime) " +
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, NOW())";
         return jdbcClient.sql(sql)
                 .params(r.orderId(), r.customerId(), r.merchantId(), r.price(), r.quantity(),
                         r.productInformation(), r.images(),
-                        r.payIf(), r.deliveryIf(), r.receiveIf(), normaliseSource(r.source()), clipBatchId(r.batchId()))
+                        r.payIf(), r.deliveryIf(), r.receiveIf(), normaliseSource(r.source()), clipBatchId(r.batchId()),
+                        payChannel == null ? "" : payChannel,
+                        walletPaidAmount == null ? java.math.BigDecimal.ZERO : walletPaidAmount,
+                        pointsUsed,
+                        pointsDiscount == null ? java.math.BigDecimal.ZERO : pointsDiscount)
                 .update();
     }
 
