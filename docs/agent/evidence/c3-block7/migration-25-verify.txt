@@ -1,0 +1,28 @@
+== SELECT TABLE_NAME, COLUMN_NAME, COLUMN_TYPE, COLUMN_DEFAULT, IS_NULLABLE FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND ((TABLE_NAME='goods' AND COLUMN_NAME IN ('Status','ImgList')) OR (TABLE_NAME='goods_audit' AND COLUMN_NAME='ImgList') OR (TABLE_NAME='user' AND COLUMN_NAME IN ('MemberLevel','IsBrand','Balance')) OR (TABLE_NAME='merchant_application' AND COLUMN_NAME='IsBrand') OR (TABLE_NAME='coupon' AND COLUMN_NAME='MemberLevel') OR (TABLE_NAME='order' AND COLUMN_NAME LIKE 'Refund%')) ORDER BY TABLE_NAME, ORDINAL_POSITION
+TABLE_NAME | COLUMN_NAME | COLUMN_TYPE | COLUMN_DEFAULT | IS_NULLABLE
+coupon | MemberLevel | tinyint | 0 | NO
+goods | Status | tinyint | 2 | NO
+goods | ImgList | mediumtext | null | YES
+goods_audit | ImgList | mediumtext | null | YES
+merchant_application | IsBrand | tinyint(1) | 0 | NO
+order | RefundStatus | tinyint | 0 | NO
+order | RefundRetryCount | int | 0 | NO
+order | RefundReason | varchar(255) | null | YES
+order | RefundAmount | decimal(10,2) | 0.00 | NO
+order | RefundApplyAt | datetime(3) | null | YES
+order | RefundHandledAt | datetime(3) | null | YES
+order | RefundHandler | varchar(40) | null | YES
+user | MemberLevel | tinyint | 0 | NO
+user | IsBrand | tinyint(1) | 0 | NO
+user | Balance | decimal(10,2) | 0.00 | NO
+rows=15
+== SELECT TABLE_NAME, INDEX_NAME FROM INFORMATION_SCHEMA.STATISTICS WHERE TABLE_SCHEMA=DATABASE() AND INDEX_NAME IN ('idx_user_merchantid','idx_user_customerid','idx_order_refund_status') GROUP BY TABLE_NAME, INDEX_NAME
+TABLE_NAME | INDEX_NAME
+user | idx_user_merchantid
+user | idx_user_customerid
+order | idx_order_refund_status
+rows=3
+== SELECT CouponId, Name, MemberLevel, Status FROM coupon WHERE CouponId='VIP_DAILY_TEMPLATE'
+CouponId | Name | MemberLevel | Status
+VIP_DAILY_TEMPLATE | 会员每日专属券 | 1 | stopped
+rows=1
