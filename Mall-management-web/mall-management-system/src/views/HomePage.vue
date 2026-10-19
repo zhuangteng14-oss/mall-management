@@ -1491,108 +1491,40 @@ onUnmounted(() => {
   color: var(--brand-ink);
 }
 
-/* ── ⑤ 为你推荐：12 栏错落网格 ───────────────────────────────────────── */
+/* ── ⑤ 为你推荐：A 版瀑布流（`a.html:427-438`）──────────────────────────
+   ⚠️ 用户 2026-10-19 命令三：旧 12 栏网格每行都有明显白色间隙 ⇒ 改回稿子的
+      `column-count` + `break-inside: avoid`，列距与下边距按「砖墙」取 12px
+      （稿是 24px；用户明确允许「设小或设为 0」，取紧凑值）。
+   ⚠️ 卡片本体不设 `display:flex`：多列布局里 flex 列会把卡片强行拉平，
+      破坏瀑布流按内容高度收边的能力。 */
 .grid {
-  display: grid;
-  grid-template-columns: repeat(12, minmax(0, 1fr));
-  gap: 30px 20px;
+  column-count: 3;
+  column-gap: 12px;
   margin-top: 28px;
-  /* 错落：一行里 6/3/3 与 4/4/4 的卡**不拉齐**。拉齐会把 3 栏矮卡的白色卡面一直
-     拉到和大卡同高，中间空出一大截（实测 461px）；按各自内容高度收边反而更像画册。 */
-  align-items: start;
 }
 .grid > * {
+  break-inside: avoid;
+  margin: 0 0 12px;
   min-width: 0;
-  transition: transform 0.3s cubic-bezier(0.2, 0.7, 0.2, 1);
 }
-.grid > *:hover {
-  transform: translateY(-6px);
-}
-/* 节奏：6-3-3 / 4-4-4 / 6-3-3（每 9 件一循环） */
-.grid > *:nth-child(9n + 1),
-.grid > *:nth-child(9n + 7) {
-  grid-column: span 6;
-}
-.grid > *:nth-child(9n + 2),
-.grid > *:nth-child(9n + 3),
-.grid > *:nth-child(9n + 8),
-.grid > *:nth-child(9n + 9) {
-  grid-column: span 3;
-}
-.grid > *:nth-child(9n + 4),
-.grid > *:nth-child(9n + 5),
-.grid > *:nth-child(9n + 6) {
-  grid-column: span 4;
-}
-/* 卡片本体（ProductCard 的根就是 `.pcard`）—— 大面、轻阴影、悬浮抬升。
-   ⚠️ 必须写 `.grid > *.pcard`，**不能**写 `.grid > * :deep(.pcard)`：`ProductCard` 的根
-   就是 `.pcard` 自己，` :deep()` 后是**后代**选择器，匹配不到根。父组件的 scope 属性会
-   落在子组件根上，所以 `.grid > *[data-v]` 能直接命中它。 */
 .grid > *.pcard {
-  /* 卡片自己按内容收边；文字区仍用纵向 flex，保证价格贴底（内容高度自然时即为紧贴）。 */
-  display: flex;
-  flex-direction: column;
-  border-color: transparent;
-  border-radius: 14px;
-  box-shadow: 0 1px 0 rgba(16, 20, 24, 0.04), 0 10px 24px rgba(16, 20, 24, 0.05);
-  transition: box-shadow 0.3s ease, border-color 0.24s ease;
-}
-.grid > * :deep(.pcard-img) {
-  flex: none;
-  /* ⚠️ `min-height: 0` 不能省：`.pcard` 改成纵向 flex 后，图区成了 flex item，
-     其 `min-height: auto` 会取**图片原始比例**的 min-content 高度，把
-     `aspect-ratio: 16/10 | 3/2` 顶掉（实测方图被撑成 1:1、大卡 669px 高）。 */
-  min-height: 0;
-}
-.grid > * :deep(.pcard-tx) {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-}
-.grid > * :deep(.pcard-foot) {
-  margin-top: auto;
+  border-color: var(--line);
+  border-radius: 0;
+  box-shadow: none;
+  transition: border-color 0.15s linear;
 }
 .grid > *.pcard:hover {
-  box-shadow: 0 30px 60px rgba(16, 20, 24, 0.17);
+  border-color: var(--ink);
+}
+.grid > * :deep(.pcard-img) {
+  min-height: 0;
+  aspect-ratio: 4 / 3;
 }
 .grid > * :deep(.pcard-img img) {
   transition: transform 0.55s cubic-bezier(0.2, 0.7, 0.2, 1);
 }
 .grid > *:hover :deep(.pcard-img img) {
   transform: scale(1.045);
-}
-/* 大卡（6 栏）：更宽的画幅 + 更大的字阶，形成视觉重心 */
-.grid > *:nth-child(9n + 1) :deep(.pcard-img),
-.grid > *:nth-child(9n + 7) :deep(.pcard-img) {
-  aspect-ratio: 16 / 10;
-}
-.grid > *:nth-child(9n + 1) :deep(.pcard-tx),
-.grid > *:nth-child(9n + 7) :deep(.pcard-tx) {
-  padding: 18px 20px 20px;
-}
-.grid > *:nth-child(9n + 1) :deep(.pcard-name),
-.grid > *:nth-child(9n + 7) :deep(.pcard-name) {
-  font-size: var(--fs-md);
-  -webkit-line-clamp: 1;
-  min-height: 1.45em;
-}
-.grid > *:nth-child(9n + 1) :deep(.pcard-price .int),
-.grid > *:nth-child(9n + 7) :deep(.pcard-price .int) {
-  font-size: 30px;
-}
-.grid > *:nth-child(9n + 1) :deep(.pcard-price .sym),
-.grid > *:nth-child(9n + 7) :deep(.pcard-price .sym) {
-  font-size: 16px;
-}
-.grid > *:nth-child(9n + 1) :deep(.pcard-price .dec),
-.grid > *:nth-child(9n + 7) :deep(.pcard-price .dec) {
-  font-size: 18px;
-}
-/* 中卡（4 栏）：介于大小之间 */
-.grid > *:nth-child(9n + 4) :deep(.pcard-img),
-.grid > *:nth-child(9n + 5) :deep(.pcard-img),
-.grid > *:nth-child(9n + 6) :deep(.pcard-img) {
-  aspect-ratio: 3 / 2;
 }
 
 /* 无限滚动哨兵 */
@@ -1780,18 +1712,6 @@ onUnmounted(() => {
   .flash-card {
     flex-basis: 40%;
   }
-  .grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-  .grid > * {
-    grid-column: span 1 !important;
-  }
-  .grid > * :deep(.pcard-img) {
-    aspect-ratio: 4 / 3 !important;
-  }
-  .grid > *:nth-child(2n) :deep(.pcard-img) {
-    aspect-ratio: 3 / 2 !important;
-  }
 }
 @media (max-width: 720px) {
   .stage {
@@ -1859,6 +1779,17 @@ onUnmounted(() => {
 }
 
 /* ── 降低动态偏好 ───────────────────────────────────────────────────── */
+/* A 版瀑布流断点（`a.html:697/746`）：≤860 两列、≤600 一列。 */
+@media (max-width: 860px) {
+  .grid {
+    column-count: 2;
+  }
+}
+@media (max-width: 600px) {
+  .grid {
+    column-count: 1;
+  }
+}
 @media (prefers-reduced-motion: reduce) {
   .stage-slide,
   .stage-slide img,
