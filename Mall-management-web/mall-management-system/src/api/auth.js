@@ -101,14 +101,14 @@ export function getCustomerId() { return pick('customerId', K.customerId) }
  *     调用方（`router/index.js` 的首页守卫）的 `getMerchantId()` 兜底**仍留着**：匿名、或没走成恢复
  *     （超时 / 后端不可达）时它仍是唯一出路。**本笔仍不从 `usertype` 反推**（那会让 `role` 有第二个来源）。
  *  ⚠️ `pick` 照用（恢复值优先、存储兜底）—— 正因如此，`/user/me` 一答 `role`，本口**一行都不用改**。 */
-export function getRole() { return pick('role', K.role) }
+export function getRole() { return getAdminUsername() ? '3' : pick('role', K.role) }   // 2026-10-19 管理员独立登录：本标签页存在管理员会话时角色恒为 "3"（不写 `K.role`，用户/商家的 role 原样保留）
 
 /** 是否已登录 —— 原**唯一**定义在 `HomePage.vue:116`（`!!loginUsername || !!merchantid`）。
  *  收敛到此处后，鉴权笔有了落点（改这里的判据即可）。
  *  ⚠️ 判据**一行未改**（仍是 `!!(username || merchantid)`），只是改从两个读口取
  *     ⇒ 恢复了身份时自然为真，未恢复时与改前逐字等价（`pick` 的兜底就是原来的 `read`）。 */
 export function isLoggedIn() {
-  return !!(getUsername() || getMerchantId())
+  return !!(getUsername() || getMerchantId() || getAdminUsername())   // 2026-10-19：管理员独立会话也算登录（不依赖用户/商家的三个键）
 }
 
 /**
@@ -201,7 +201,7 @@ export function clear() {
   clearCredentials()
   clearMerchantId()
   sessionStorage.removeItem(K.customerId)
-  clearToken()   // ⚠️ 多账户隔离笔（2026-10-06）：票也是凭据 ⇒ 「会话没了」时一并清（指针由 D6 判）
+  clearToken(); clearAdminSession()   // ⚠️ 多账户隔离笔（2026-10-06）：票也是凭据 ⇒ 「会话没了」时一并清（指针由 D6 判）；2026-10-19：管理员独立会话同样属于「会话没了」
   dropRestored()
 }
 
@@ -299,3 +299,34 @@ export function getIsBrand() { return !!(restored && restored.isBrand) || read(K
  *  ⚠️ 只在**本人主动开通**这一处调用；管理员改他人档位仍走 `api/accounts.js`，被改的那一端下次恢复（刷新若已登录则不会重取）才见新值。 */
 export function setMemberLevel(level) { const n = Number(level) || 0; if (restored) restored.memberLevel = n; try { sessionStorage.setItem(K.memberLevel, String(n)) } catch (e) { /* 存储不可用 ⇒ 只留内存 */ } }
 
+
+// ── 管理员独立会话（2026-10-19，用户令：拆分管理员登录页）────────────────────────
+// 目的：`#/admin/login` 的管理员登录**不覆盖**用户端 / 商家端的身份键与票。
+//   · 管理员身份只落这两个**独立键**（`adminUsername` 非空 = 本标签页有管理员会话）；
+//   · `K.role` / `K.username` / `K.token` / `merchantid` / `customerid` 一个字都不写；
+//   · 真正的凭据仍是后端 `loginSelect` 建的 **cookie 会话**（role=3 时服务端才建）——
+//     前端这两个键只是「本页当前以管理员身份工作」的标记，供路由守卫与 `http.js` 判。
+// ⚠️ 管理端入口（`main-admin.js`）本就会 `dropPageToken()`；本标记额外让**同一标签页**
+//    从商城入口进 `/admin` 时也**不携带**用户/商家的 Bearer 票（否则后端 `identify` 票优先，
+//    会把管理员认成上一次登录的客户/商家）。
+const K_ADMIN_USER = 'adminUsername'
+const K_ADMIN_SESSION = 'adminSession'
+
+/** 本标签页的管理员账号（没有 ⇒ null）。 */
+export function getAdminUsername() { return usable(read(K_ADMIN_USER)) }
+
+/** 本标签页是否处于管理员会话（`adminSession === '1'`）。 */
+export function isAdminSession() { return usable(read(K_ADMIN_SESSION)) === '1' }
+
+/** 登录成功后写入管理员会话。**不写**用户/商家的任何键，也不动 `restored` ——
+ *  退出管理员后，用户/商家在本次登录前留下的身份仍可原样恢复。 */
+export function setAdminSession(username) {
+  sessionStorage.setItem(K_ADMIN_USER, username)
+  sessionStorage.setItem(K_ADMIN_SESSION, '1')
+}
+
+/** 退出管理员：只清这两个键。用户/商家的身份键与票**保留**（用户令第 4 条）。 */
+export function clearAdminSession() {
+  sessionStorage.removeItem(K_ADMIN_USER)
+  sessionStorage.removeItem(K_ADMIN_SESSION)
+}

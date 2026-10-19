@@ -34,7 +34,7 @@
     <!-- ═══════════ 右：表单面（**外壳固定**，只换 .stage 里的内容）═══════════ -->
     <section class="pane">
       <nav class="pane-top">
-        <router-link to="/customer">返回商城</router-link>
+        <router-link to="/customer">返回商城</router-link><router-link class="admin-entry" to="/admin/login">管理员登录 / Admin Portal</router-link>
         <!-- ⚠️ 结构二次调整（2026-10-07）：原「用户中心」(`/customer`) 已删 —— 未登录用户不需要它，且落点与左项重复 -->
       </nav>
 
@@ -694,5 +694,32 @@ h1.t { font-family: var(--font-display); font-size: var(--d2); font-weight: var(
   .page[data-page="register"] .btn-block { margin-top: var(--s2); }
   .page[data-page="register"] .swap { margin-top: var(--s2); padding-top: var(--s2); }
   .brand { padding-top: var(--s5); padding-bottom: var(--s4); }   /* 用户原文「压左栏」：照加（32/32 → 24/16；对 docH 0 影响） */
+}
+
+/* ── 管理员独立入口（2026-10-19 用户令）────────────────────────────────────
+   右上角、与「返回商城」同一行（`.pane-top` 是 space-between ⇒ 自动靠右）。
+   ⚠️ 只加这一枚链接与样式；表单、校验、鉴权与脚本段一个字未动。
+   ⚠️ 选择器用 `.pane-top a.admin-entry`（0,2,1）：压过既有 `.pane-top a` 的 padding。 */
+.pane-top a.admin-entry {
+  margin-left: auto;
+  padding: 4px 12px;
+  border: 1px solid var(--ink);
+  border-radius: 999px;
+  background: var(--ink);
+  color: var(--surface);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 16px;
+  letter-spacing: .02em;
+  text-decoration: none;
+  white-space: nowrap;
+}
+.pane-top a.admin-entry:hover {
+  background: var(--brand-ink);
+  border-color: var(--brand-ink);
+  color: #fff;
+}
+@media (max-width: 560px) {
+  .pane-top a.admin-entry { padding: 3px 9px; font-size: 10px; }
 }
 </style>

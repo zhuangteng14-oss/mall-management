@@ -713,3 +713,10 @@ router.addRoute('merchantUser', { path: '/merchant/user/member', component: () =
 // 无侧栏（`noRail`）、无容器 Tab，进来就是一列订单卡。
 router.addRoute('customer', { path: 'orders', component: () => import('../views/OrderMine.vue'), meta: { tab: 'orders', layout: 'cart-container', noRail: true } })
 router.addRoute('merchant', { path: 'orders', component: () => import('../views/OrderMine.vue'), meta: { tab: 'orders', layout: 'cart-container', noRail: true } })
+
+// ── 2026-10-19 用户令：管理员登录彻底独立 ─────────────────────────────────────
+// 独立顶层记录（**不在** `/admin` 的 children 里） ⇒ 不继承 `meta.roles: ['3']`、不渲染
+// `AdminShell`（无侧边栏 / 顶栏），`meta.public: true` 让匿名也能进。
+// ⚠️ 追加在文件最尾：不移动任何既有行号（上面的行号互引全部有效）。
+// ⚠️ 静态路径 `/admin/login` 比父记录 `/admin` 更具体，注册先后不影响匹配。
+router.addRoute({ path: '/admin/login', component: () => import('../views/AdminLoginPage.vue'), meta: { public: true } })

@@ -17,7 +17,7 @@
 //
 // ⚠️ 401 出口（职责③）要清本地登录态 ⇒ 依赖 `auth.js`。`auth.js` 自身**无任何 import**
 //    ⇒ 反向依赖不存在，不成环（这与 router 的情况不同 —— 见职责③的注释）。
-import { clear as clearAuth, getToken } from './auth'
+import { clear as clearAuth, getToken, isAdminSession } from './auth'
 
 const API_BASE = process.env.VUE_APP_API_BASE || ''
 
@@ -146,7 +146,9 @@ function buildInit(method, body) {
   //       （上面的 Content-Type 仍按原判据只发给 POST / 带 body 者）⇒ 不与「GET 不加内容头」那条判据冲突。
   //    ⚠️ 票要 **`getToken()` 现取**、不做缓存：登录 / 认领 / 登出都可能在两次请求之间改它。
   //    ⚠️ 头值逐字 `Bearer ` + 票（后端 `AuthTokenStore.BEARER` 大小写敏感，别改成小写）。
-  const token = getToken()
+  // ⚠️ 2026-10-19 管理员独立登录：管理员会话期间**不带**用户/商家的票。后端 `identify` 票优先
+  //    ⇒ 带着别人的票会把管理员认成客户/商家（收件箱 403、审计记错人）。管理员身份走 cookie 会话。
+  const token = isAdminSession() ? null : getToken()
   if (token) init.headers = { ...(init.headers || {}), Authorization: `Bearer ${token}` }
   return init
 }
