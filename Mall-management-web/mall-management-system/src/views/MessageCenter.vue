@@ -1,5 +1,18 @@
 <template>
   <div class="msg-center">
+    <!-- A 版线框（BUYER / MESSAGE CENTER）：页头 + 页签。两个子页的**数据链一个字不动**，
+         只换「怎么进、长什么样」（2026-10-19 极速 UI 重构，命令二）。 -->
+    <section class="page-head">
+      <div>
+        <div class="kicker">BUYER / MESSAGE CENTER</div>
+        <h1>消息中心</h1>
+        <p>会话与通知是同页两个页签，通知页签就是全局导航里的「通知」落点。</p>
+      </div>
+      <div class="head-actions">
+        <router-link class="btn" to="/customer/search">去逛逛</router-link>
+      </div>
+    </section>
+
     <div class="mc-bar" role="tablist" aria-label="消息中心">
       <button
         v-for="t in TABS"
@@ -77,13 +90,62 @@ function goTab(key) {
 </script>
 
 <style scoped>
+/* ── 页头（A 版线框 BUYER / MESSAGE CENTER）─────────────────────────────── */
+.page-head {
+  max-width: 1180px;
+  margin: 0 auto;
+  padding: var(--s7) var(--s5) 0;
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: var(--s5);
+  font-family: var(--font);
+}
+.kicker {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+.page-head h1 {
+  margin-top: 6px;
+  font-family: var(--font-display);
+  font-size: var(--fs-2xl);
+  font-weight: 600;
+  line-height: 1.1;
+  letter-spacing: -0.02em;
+  color: var(--ink);
+}
+.page-head p {
+  margin-top: 8px;
+  max-width: 58ch;
+  font-size: var(--fs-sm);
+  line-height: 1.7;
+  color: var(--ink-2);
+}
+.head-actions { display: flex; gap: var(--s2); flex: 0 0 auto; }
+.head-actions .btn {
+  display: inline-flex;
+  align-items: center;
+  height: 36px;
+  padding: 0 var(--s5);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r1);
+  font-size: var(--fs-sm);
+  color: var(--ink-2);
+  text-decoration: none;
+  background: var(--surface);
+}
+.head-actions .btn:hover { border-color: var(--brand-ink); color: var(--brand-ink); }
+
 /* tab 条与两个子页**对齐**：子页（`.chat-room:489` / `.notify-room:296`）都是
    `max-width:1180px; margin:0 auto; padding:var(--s6) var(--s5) …` ⇒ 本条约同宽同侧距，
    否则切 tab 时内容会左右跳一下。⚠️ 下内距为 0、由子页自己的 `padding-top` 出间距（不叠加）。 */
 .mc-bar {
   max-width: 1180px;
   margin: 0 auto;
-  padding: var(--s6) var(--s5) 0;
+  padding: var(--s5) var(--s5) 0;
   display: flex;
   gap: var(--s2);
   border-bottom: 1px solid var(--line);
@@ -103,13 +165,15 @@ function goTab(key) {
   cursor: pointer;
 }
 .mc-tab:hover {
-  color: var(--ink);
+  color: var(--brand-ink);
 }
-/* 选中态用 `--nav-now`：与本壳顶栏「消息」项的高亮**同一个颜色**（切进本页后顶栏那项是亮的、
-   页内的 tab 也是亮的，用户看到的是同一次「我在消息里」）。 */
+/* 选中态用 `--brand-ink`（青瓷绿实色）：与顶栏当前项同一套语义。 */
 .mc-tab.active {
-  color: var(--nav-now);
+  color: var(--brand-ink);
   font-weight: var(--fw-semi);
-  border-bottom-color: var(--nav-now);
+  border-bottom-color: var(--brand-ink);
+}
+@media (max-width: 760px) {
+  .page-head { flex-direction: column; align-items: flex-start; }
 }
 </style>

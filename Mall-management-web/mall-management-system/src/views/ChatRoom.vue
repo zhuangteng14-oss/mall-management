@@ -47,7 +47,7 @@
               :class="isSelfMessage(msg) ? 'self' : 'other'"
             >
               <div class="bwrap">
-                <div class="bub" :class="{ bare: isProductMessage(msg) }">
+                <div class="bub" :class="{ bare: isProductMessage(msg) || isImageMessage(msg) }">
                   <template v-if="isProductMessage(msg)">
                     <div class="pc" title="现有功能 goToProduct" @click="goToProduct(parseProductInfo(msg.content))">
                       <div class="th">
@@ -65,6 +65,9 @@
                       </div>
                     </div>
                   </template>
+                  <template v-else-if="isImageMessage(msg)">
+                    <img class="msg-img" :src="imageSrc(msg)" alt="图片消息" @load="onImageLoaded" />
+                  </template>
                   <template v-else>{{ msg.content }}</template>
                 </div>
                 <div class="tm">{{ formatTimeHM(msg.create_time) }}</div>
@@ -78,10 +81,10 @@
           <button
             class="icon"
             type="button"
-            disabled
-            data-slot="预留 · 图片消息（动现有代码 4 处）"
-            title="待 C3〈消息〉——发图要先有上传端点：endpoints.js + MessageController.java + mall_management_sql.sql（消息表要加一列存图 URL）+ ChatRoom.vue = 4 处。**超档**（因清单点名而画出，见 README 挂账表）"
+            title="发图片 —— 纯前端压缩成 data URL，走现有 message.send（不改后端）"
+            @click="pickImage"
           >图片</button>
+          <input ref="fileInputRef" class="file-hidden" type="file" accept="image/*" @change="onPickImage" />
           <input
             v-model="newMessage"
             type="text"
@@ -141,6 +144,68 @@ const parseProductInfo = (content) => {
     return JSON.parse(jsonStr)
   } catch (e) {
     return null
+  }
+}
+
+// ── 图片消息（2026-10-19 极速 UI 重构，命令二「支持图片发送」）──────────────
+// ⚠️ **不改后端**：`message.content` 是 `TEXT`（64KB），图片在浏览器端缩到
+//    长边 720px 的 JPEG 后以 `[IMG]data:image/jpeg;base64,…` 形式走现有
+//    `message.send`。两条判据：① 压缩后字符数 ≤ 60000（给 UTF-8/表单编码留余量）；
+//    ② 仍超限就明确报错，不静默截断。
+const IMG_PREFIX = '[IMG]'
+const IMG_MAX_CHARS = 60000
+const isImageMessage = (msg) => !!(msg.content && msg.content.startsWith(IMG_PREFIX))
+const imageSrc = (msg) => msg.content.slice(IMG_PREFIX.length)
+const fileInputRef = ref(null)
+const onImageLoaded = () => { nextTick(() => scrollToBottom()) }
+
+const pickImage = () => {
+  if (!currentOther.value) { alert('请先选择一个会话'); return }
+  if (fileInputRef.value) fileInputRef.value.click()
+}
+
+/** 读文件 → 画布缩放 → JPEG 迭代降质，直到 ≤ IMG_MAX_CHARS。 */
+const compressImage = (file) => new Promise((resolve, reject) => {
+  const reader = new FileReader()
+  reader.onerror = () => reject(new Error('读取图片失败'))
+  reader.onload = () => {
+    const img = new Image()
+    img.onerror = () => reject(new Error('图片格式不支持'))
+    img.onload = () => {
+      const maxSide = 720
+      const scale = Math.min(1, maxSide / Math.max(img.width, img.height))
+      const canvas = document.createElement('canvas')
+      canvas.width = Math.max(1, Math.round(img.width * scale))
+      canvas.height = Math.max(1, Math.round(img.height * scale))
+      const ctx = canvas.getContext('2d')
+      ctx.fillStyle = '#fff'
+      ctx.fillRect(0, 0, canvas.width, canvas.height)
+      ctx.drawImage(img, 0, 0, canvas.width, canvas.height)
+      let quality = 0.72
+      let dataUrl = canvas.toDataURL('image/jpeg', quality)
+      while (dataUrl.length > IMG_MAX_CHARS && quality > 0.28) {
+        quality -= 0.12
+        dataUrl = canvas.toDataURL('image/jpeg', quality)
+      }
+      resolve(dataUrl)
+    }
+    img.src = reader.result
+  }
+  reader.readAsDataURL(file)
+})
+
+const onPickImage = async (e) => {
+  const file = e.target.files && e.target.files[0]
+  e.target.value = ''   // 允许连续选同一张图
+  if (!file) return
+  if (!file.type.startsWith('image/')) { alert('请选择图片文件'); return }
+  try {
+    const dataUrl = await compressImage(file)
+    if (dataUrl.length > IMG_MAX_CHARS) { alert('图片过大，压缩后仍超出消息上限，请换一张更小的图片'); return }
+    await sendContent(IMG_PREFIX + dataUrl)
+  } catch (err) {
+    console.error('发送图片失败', err)
+    alert('图片处理失败，请换一张再试')
   }
 }
 
@@ -376,8 +441,8 @@ const insertEmoji = () => {
   newMessage.value += EMOJI[emojiAt++ % EMOJI.length]
 }
 
-const sendMessage = async () => {
-  if (!newMessage.value.trim()) return
+const sendContent = async (content) => {
+  if (!content) return
   if (!currentOther.value) {
     alert('请先选择一个会话')
     return
@@ -387,7 +452,7 @@ const sendMessage = async () => {
   params.append('fromType', currentType.value)
   params.append('toId', currentOther.value.id)
   params.append('toType', currentOther.value.type)
-  params.append('content', newMessage.value.trim())
+  params.append('content', content)
   try {
     const res = await http.post(endpoints.message.send, params.toString())
     const data = await res.json()
@@ -398,11 +463,10 @@ const sendMessage = async () => {
         from_type: currentType.value,
         to_id: currentOther.value.id,
         to_type: currentOther.value.type,
-        content: newMessage.value.trim(),
+        content,
         create_time: new Date().toISOString().replace('T', ' ').substring(0, 19)
       }
       messages.value.push(tempMsg)
-      newMessage.value = ''
       await nextTick()
       scrollToBottom()
       await loadConversations()
@@ -413,6 +477,13 @@ const sendMessage = async () => {
     console.error('发送消息失败', err)
     alert('网络错误，请稍后重试')
   }
+}
+
+const sendMessage = async () => {
+  const text = newMessage.value.trim()
+  if (!text) return
+  await sendContent(text)
+  newMessage.value = ''
 }
 
 watch(
@@ -810,6 +881,17 @@ button {
   }
 }
 /* 真正的窄屏（手机）才把会话栏横过来 —— 此时宽度本来就装不下两列 */
+/* ── 图片消息（2026-10-19）── 气泡已走 `.bare`（零内距/无底色），图片自带发丝边。 */
+.file-hidden { display: none; }
+.msg-img {
+  display: block;
+  max-width: min(320px, 100%);
+  max-height: 320px;
+  border-radius: var(--r2);
+  border: 1px solid var(--line);
+  background: var(--img);
+}
+
 @media (max-width: 760px) {
   .chat {
     grid-template-columns: 1fr;

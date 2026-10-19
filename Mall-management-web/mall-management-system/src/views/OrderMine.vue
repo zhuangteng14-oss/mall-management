@@ -26,9 +26,16 @@
         <span class="cur">我的订单</span>
       </nav>
 
-      <div class="h1row">
-        <h1 class="page-h">我的订单 <span class="n">共 {{ totalCount }} 单 · 进行中 {{ activeOrders.length }} 单</span></h1>
-      </div>
+      <!-- A 版线框（BUYER / ORDERS）：页头 + 订单卡。进行中与已完成仍分两块
+           —— 两路数据源的字段面不同（见文件头按语），合表会让缺失列只能写「—」。 -->
+      <section class="page-head">
+        <div>
+          <div class="kicker">BUYER / ORDERS</div>
+          <h1 class="page-h">我的订单 <span class="n">共 {{ totalCount }} 单 · 进行中 {{ activeOrders.length }} 单</span></h1>
+          <p>售后进度按六态展示。申请、商家拒绝、平台介入、退款完成，每一步都能看到落在哪个状态。</p>
+        </div>
+        <div class="head-actions"><router-link class="btn" :to="cartTabPath">去购物车</router-link></div>
+      </section>
 
       <div v-if="loading" class="empty">
         <div class="p">加载中…</div>
@@ -45,37 +52,37 @@
         <section v-if="activeOrders.length > 0" class="block">
           <h2 class="block-h">进行中 <span class="n">{{ activeOrders.length }}</span></h2>
 
-          <div class="thead">
-            <span></span><span>商品</span><span>订单号</span>
-            <span class="r">数量</span><span class="r">金额</span><span class="cen">状态</span><span class="r">操作</span>
-          </div>
-          <div v-for="order in activeOrders" :key="order.OrderId" class="trow">
-            <div class="thumb"><img v-if="order.Images" :src="order.Images" alt="商品图片" /></div>
-            <div class="pn" :title="order.ProductInformation">{{ order.ProductInformation }}</div>
-            <div class="oid">{{ order.OrderId }}</div>
-            <div class="num">{{ quantityOf(order) }}</div>
-            <div class="money">¥{{ formatPrice(order.Price) }}</div>
-            <div class="cen"><span class="st" :class="stateOf(order)[0]"><IconGlyph :name="STATE_GLYPH[stateOf(order)[0]] || 'wait'" />{{ stateOf(order)[1] }}</span></div>
-            <div class="op">
-              <button
-                v-if="order.PayIf !== 1 && !order.CancelledAt"
-                class="act"
-                @click="openPay(order)"
-              ><IconGlyph name="ok" />付款</button>
-              <button
-                v-if="canReceive(order)"
-                class="act"
-                @click="handleReceive(order)"
-              ><IconGlyph name="ok" />收货</button>
-              <!-- ⚠️ C3 块4 补丁：**发货之后**才有物流可看（`DeliveryIf === 1`）——
-                   在「待发货」上画它只会弹一个空时间线。收货后仍保留（`ReceiveIf === 1` 也是 `DeliveryIf === 1`）。 -->
-              <button
-                v-if="order.DeliveryIf === 1"
-                class="act"
-                @click="openDetail(order)"
-              ><IconGlyph name="orders" />物流</button>
-              <span v-if="order.PayIf === 1 && !canReceive(order) && order.DeliveryIf !== 1" class="dash">等待商家发货</span>
-            </div>
+          <div class="order-list">
+            <article v-for="order in activeOrders" :key="order.OrderId" class="order-card">
+              <div class="order-head">
+                <span class="oid">{{ order.OrderId }}</span>
+                <span class="st" :class="stateOf(order)[0]"><IconGlyph :name="STATE_GLYPH[stateOf(order)[0]] || 'wait'" />{{ stateOf(order)[1] }}</span>
+                <span class="date">{{ formatDateTime(order.CreateTime) || '进行中' }}<template v-if="order.MerchantId"> · 商家 {{ order.MerchantId }}</template></span>
+                <span class="tag">无售后</span>
+              </div>
+              <div class="order-body">
+                <div class="order-items">
+                  <div class="order-item">
+                    <div class="thumb"><img v-if="order.Images" :src="order.Images" alt="商品图片" /></div>
+                    <div class="oi-tx">
+                      <div class="nm" :title="order.ProductInformation">{{ order.ProductInformation }}</div>
+                      <div class="meta">数量 {{ quantityOf(order) }} 件</div>
+                    </div>
+                  </div>
+                </div>
+                <div class="order-total"><b>¥{{ formatPrice(order.Price) }}</b><small>共 {{ quantityOf(order) }} 件</small></div>
+              </div>
+              <div class="order-foot">
+                <span class="foot-note">{{ activeNote(order) }}</span>
+                <div class="order-actions">
+                  <button v-if="order.PayIf !== 1 && !order.CancelledAt" class="act solid" @click="openPay(order)"><IconGlyph name="ok" />付款</button>
+                  <button v-if="canReceive(order)" class="act solid" @click="handleReceive(order)"><IconGlyph name="ok" />收货</button>
+                  <!-- ⚠️ **发货之后**才有物流可看（`DeliveryIf === 1`）——
+                       在「待发货」上画它只会弹一个空时间线。 -->
+                  <button v-if="order.DeliveryIf === 1" class="act" @click="openDetail(order)"><IconGlyph name="orders" />物流</button>
+                </div>
+              </div>
+            </article>
           </div>
           <p class="hint">⚠️ 数量列显示的是下单时记下的件数；`Quantity` 列是 C3 块 4 新加的，此前落库的行一律回填成 <b>1</b>。</p>
         </section>
@@ -84,24 +91,35 @@
         <section v-if="historyOrders.length > 0" class="block">
           <h2 class="block-h">已完成 <span class="n">{{ historyOrders.length }}</span></h2>
 
-          <div class="thead done">
-            <span></span><span>商品</span><span>订单号</span><span>商家 ID</span>
-            <span class="r">数量</span><span>结单日期</span><span class="cen">售后</span>
+          <div class="order-list">
+            <article v-for="order in historyOrders" :key="order.OrderId" class="order-card">
+              <div class="order-head">
+                <span class="oid">{{ order.OrderId }}</span>
+                <span class="st ok">已完成</span>
+                <span class="date">{{ formatDateTime(order.SettlementDate) }}<template v-if="order.MerchantId"> · 商家 {{ order.MerchantId }}</template></span>
+                <!-- 只读 chip：申请 / 处理都在「历史订单」页（那里有原因弹窗与重试判据）。 -->
+                <span v-if="refundText(order)" class="rf-chip" :class="`s${Number(order.RefundStatus) || 0}`">{{ refundText(order) }}</span>
+                <span v-else class="tag">无售后</span>
+              </div>
+              <div class="order-body">
+                <div class="order-items">
+                  <div class="order-item">
+                    <div class="thumb"><img v-if="order.Images" :src="order.Images" alt="商品图片" /></div>
+                    <div class="oi-tx">
+                      <div class="nm" :title="order.ProductInformation">{{ order.ProductInformation }}</div>
+                      <div class="meta">数量 {{ quantityOf(order) }} 件</div>
+                    </div>
+                  </div>
+                </div>
+                <div class="order-total"><b>¥{{ formatPrice(order.Price) }}</b><small>共 {{ quantityOf(order) }} 件</small></div>
+              </div>
+              <div class="order-foot">
+                <span class="foot-note">结单日期 {{ formatDateTime(order.SettlementDate) }}</span>
+                <div class="order-actions"><router-link class="act" :to="historyPath">查看记录</router-link></div>
+              </div>
+            </article>
           </div>
-          <div v-for="order in historyOrders" :key="order.OrderId" class="trow done">
-            <div class="thumb"><img v-if="order.Images" :src="order.Images" alt="商品图片" /></div>
-            <div class="pn" :title="order.ProductInformation">{{ order.ProductInformation }}</div>
-            <div class="oid">{{ order.OrderId }}</div>
-            <div class="mid">{{ order.MerchantId }}</div>
-            <div class="num">{{ quantityOf(order) }}</div>
-            <div class="time">{{ formatDateTime(order.SettlementDate) }}</div>
-            <div class="cen">
-              <!-- 只读 chip：申请 / 处理都在「历史订单」页（那里有原因弹窗与重试判据）。 -->
-              <span v-if="refundText(order)" class="rf-chip" :class="`s${Number(order.RefundStatus) || 0}`">{{ refundText(order) }}</span>
-              <span v-else class="dash">—</span>
-            </div>
-          </div>
-          <p class="hint">⚠️ 这一块**仍不画金额列**：`historicalOrdersSelect` 本笔已加性回 `Price`，但金额展示归「历史订单」页；本页只加只读售后 chip，两页分工不变。</p>
+          <p class="hint">⚠️ 已完成单仍不画三位状态位（`historicalOrdersSelect` 只回成交字段）；售后进度可在「历史订单」页申请或重申。</p>
         </section>
       </template>
     </div>
@@ -183,6 +201,10 @@ const totalCount = computed(() => activeOrders.value.length + historyOrders.valu
 const cartTabPath = computed(() =>
   route.path.startsWith('/merchant') ? '/merchant/order/cart?tab=cart' : '/customer/cart?tab=cart'
 )
+// 已完成块的「查看记录」落点：历史购买记录页（两壳路径不同，同 cartTabPath 的判据）。
+const historyPath = computed(() =>
+  route.path.startsWith('/merchant') ? '/merchant/user/history' : '/customer/user/history'
+)
 
 const getBuyerId = () => resolveBuyerId()
 
@@ -227,6 +249,16 @@ const stateOf = (order) => {
 }
 
 const canReceive = (order) => order.PayIf === 1 && order.DeliveryIf === 1 && order.ReceiveIf !== 1
+
+/** 进行中订单卡页脚说「下一步在谁那儿」（A 版线框的 `foot-note`）。
+ *  ⚠️ 只做措辞，不改状态判据 —— 状态 chip 仍由 `stateOf` 出。 */
+const activeNote = (order) => {
+  if (order.CancelledAt) return '订单已取消'
+  if (order.PayIf !== 1) return '等待买家付款'
+  if (order.DeliveryIf !== 1) return '等待商家发货'
+  if (order.ReceiveIf !== 1) return '商家已发货，等待确认收货'
+  return stateOf(order)[1]
+}
 
 // 已完成单的只读售后态（批四第二批 commit 4）；0 = 没申请过 ⇒ 不画 chip。
 const REFUND_TEXT = { 1: '待商家审核', 2: '商家已拒绝', 3: '平台处理中', 4: '平台已拒绝', 5: '已退款' }
@@ -565,4 +597,115 @@ onMounted(load)
 /* 物流失败态（Bug 2）：失败**要说出来**，不能与「确实没有轨迹」同脸。 */
 .tl-err { display: flex; align-items: center; gap: var(--s3); color: var(--danger-deep); }
 .tl-err .act { flex: 0 0 auto; }
+
+/* ══ A 版线框重排（2026-10-19）：页头 + 订单卡 ══════════════════════════════
+   ⚠️ 旧表格式 `.thead/.trow` 规则原样保留（不再有元素命中）—— 删除属于独立清理，
+      不在本次「极速 UI 重构」的改动面里。 */
+.page-head {
+  margin-top: var(--s4);
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: var(--s5);
+}
+.kicker {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: .16em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+.page-head .page-h { margin-top: 6px; }
+.page-head p {
+  margin-top: 8px;
+  max-width: 58ch;
+  font-size: var(--fs-sm);
+  line-height: 1.7;
+  color: var(--ink-2);
+}
+.head-actions { display: flex; gap: var(--s2); flex: 0 0 auto; }
+.head-actions .btn {
+  display: inline-flex;
+  align-items: center;
+  height: 36px;
+  padding: 0 var(--s5);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r1);
+  font-size: var(--fs-sm);
+  color: var(--ink-2);
+  text-decoration: none;
+  background: var(--surface);
+}
+.head-actions .btn:hover { border-color: var(--brand-ink); color: var(--brand-ink); }
+
+.order-list { display: flex; flex-direction: column; gap: var(--s4); }
+.order-card {
+  border: 1px solid var(--line-2);
+  border-radius: var(--r2);
+  background: var(--surface);
+  overflow: hidden;
+}
+.order-head {
+  display: flex;
+  align-items: center;
+  gap: var(--s3);
+  flex-wrap: wrap;
+  padding: var(--s3) var(--s5);
+  border-bottom: 1px solid var(--line);
+  background: var(--surface-2);
+  font-size: var(--fs-xs);
+}
+.order-head .date { color: var(--ink-3); }
+.order-head .tag {
+  margin-left: auto;
+  padding: 2px 8px;
+  border: 1px solid var(--line-2);
+  border-radius: var(--r1);
+  color: var(--ink-3);
+  white-space: nowrap;
+}
+.order-body { display: flex; align-items: center; gap: var(--s5); padding: var(--s4) var(--s5); }
+.order-items { flex: 1; min-width: 0; }
+.order-item { display: flex; align-items: center; gap: var(--s4); min-width: 0; }
+.oi-tx { min-width: 0; }
+.oi-tx .nm {
+  font-size: var(--fs-md);
+  font-weight: var(--fw-med);
+  color: var(--ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.oi-tx .meta { margin-top: var(--s1); font-size: var(--fs-xs); color: var(--ink-3); }
+.order-total { flex: 0 0 auto; text-align: right; }
+.order-total b {
+  display: block;
+  font-family: var(--font-display);
+  font-size: var(--fs-lg);
+  font-weight: var(--fw-med);
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+}
+.order-total small { font-size: var(--fs-xs); color: var(--ink-3); }
+.order-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s4);
+  padding: var(--s3) var(--s5);
+  border-top: 1px solid var(--line);
+}
+.foot-note { font-size: var(--fs-xs); color: var(--ink-3); }
+.order-actions { display: flex; align-items: center; gap: var(--s2); flex-wrap: wrap; }
+.act { text-decoration: none; display: inline-flex; align-items: center; gap: 4px; }
+.act.solid { background: var(--brand); border-color: var(--brand); color: #fff; }
+.act.solid:hover { background: var(--brand-ink); border-color: var(--brand-ink); }
+
+@media (max-width: 760px) {
+  .page-head { flex-direction: column; align-items: flex-start; }
+  .order-body { flex-direction: column; align-items: stretch; gap: var(--s3); }
+  .order-total { text-align: left; }
+  .order-foot { flex-direction: column; align-items: flex-start; }
+  .order-head .tag { margin-left: 0; }
+}
 </style>

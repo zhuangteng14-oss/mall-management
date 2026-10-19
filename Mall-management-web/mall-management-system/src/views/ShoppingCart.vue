@@ -23,13 +23,22 @@
         <span class="cur">购物车</span>
       </nav>
 
-      <div class="h1row">
-        <h1 class="page-h">购物车 <span class="n">{{ totalCount }} 件商品</span></h1>
-        <!-- ⚠️ 「编辑」（批量删 / 移入收藏）**仍无端点** ⇒ 保持 disabled + title，不画死控件。
-             （块 4 的 5 个 `/cart/*` 端点里没有批量口。） -->
-        <button v-if="rows.length > 0" class="edit" disabled
-                title="待后续笔——批量删 / 移入收藏均无端点（`/cart/*` 5 条里只有单行 remove）">编辑</button>
-      </div>
+      <!-- A 版线框（BUYER / CART · 同一账户）页头。原「面包屑 + 大标题」合并成一条页头，
+           编辑按钮仍是 disabled（批量删 / 移入收藏无端点）。 -->
+      <section class="page-head">
+        <div>
+          <div class="kicker">BUYER / CART · 同一账户</div>
+          <h1 class="page-h">购物车 <span class="n">{{ totalCount }} 件商品</span></h1>
+          <p>单商家合并结算。黑金会员价已计入；优惠券与积分可以叠加，积分单笔最多抵扣券后价的 20%。</p>
+        </div>
+        <div class="head-actions">
+          <!-- ⚠️ 「编辑」（批量删 / 移入收藏）**仍无端点** ⇒ 保持 disabled + title，不画死控件。
+               （块 4 的 5 个 `/cart/*` 端点里没有批量口。） -->
+          <button v-if="rows.length > 0" class="edit" disabled
+                  title="待后续笔——批量删 / 移入收藏均无端点（`/cart/*` 5 条里只有单行 remove）">编辑</button>
+          <router-link class="btn" :to="searchPath">继续购物</router-link>
+        </div>
+      </section>
 
       <div v-if="loading" class="empty">
         <div class="p">加载中…</div>
@@ -42,8 +51,12 @@
         <router-link class="go2" :to="searchPath">去挑商品</router-link>
       </div>
 
-      <!-- ── 有商品 ──────────────────────────────────────────────────────── -->
+      <!-- ── 有商品 ────────────────────────────────────────────────────────
+           A 版线框：左「购物车清单」+ 右「结算台」两栏。原吸底结算栏的全部控件
+           （优惠券 / 积分 / 合计 / 去结算）整体搬进右栏，一个功能都没删。 -->
       <template v-else>
+        <div class="cart-layout">
+        <div class="cart-main">
         <section class="shops">
           <div class="list-head">
             <span></span><span>商品</span>
@@ -115,26 +128,46 @@
              title="待 C3〈商品〉——goods 无承诺列，选了什么存不下来。⚠️ 文案必须与 ProductPage 的承诺条逐字一致（跨页共性组件）">
           <span>正品保障</span><span>7 天无理由</span><span>极速退款</span><span>运费险</span>
         </div>
-      </template>
-    </div>
+        </div>
 
-    <!-- 吸底结算栏：整车结算（`/cart/checkout` 不带 `ProductCode`）。
-         ⚠️ 「已选 N 件」不落 —— 本页**没有**勾选这回事（逐件结算走行内那枚按钮），
-             写「全选」就是不存在的状态 ⇒ 口径换成能说真话的「共 N 件」。 -->
-    <div v-if="rows.length > 0" class="paybar">
-      <div class="paybar-in">
-        <span class="sel">共 {{ totalCount }} 件商品</span>
-        <span class="cp" :class="{ off: !couponPickable }" :title="couponHint"><i>券</i><select v-model="couponId" :disabled="busy || !couponPickable"><option value="">{{ usableCoupons.length ? '不使用优惠券' : '暂无可用券' }}</option><option v-for="c in usableCoupons" :key="c.CouponId" :value="c.CouponId" :disabled="!!couponBlockedReason(c)">{{ couponLabel(c) }}{{ couponBlockedReason(c) ? '（' + couponBlockedReason(c) + '）' : '' }}</option></select><b v-if="discount > 0" class="save">−¥{{ formatPrice(discount) }}</b></span>
-        <span class="pts" :class="{ off: !pointsUsable }" :title="pointsHint">
-          <label class="pts-sw"><input type="checkbox" v-model="usePoints" :disabled="busy || !pointsUsable" /><span class="pts-track" aria-hidden="true"><span class="pts-dot"></span></span><span class="pts-name">使用积分抵扣</span></label>
-          <span v-if="usePoints && pointsToUse > 0" class="pts-detail">已使用 <b>{{ pointsToUse }}</b> 积分，抵扣 <b>¥{{ formatPrice(pointsDiscount) }}</b></span><span v-else class="pts-balance">{{ pointsLoading ? '积分读取中…' : pointsBalance > 0 ? `可用 ${pointsBalance} 积分` : '暂无可用积分' }}</span>
-        </span>
-        <span class="sums">
-          <span class="d">商品总额 <s v-if="isVipMember" class="m-was">¥{{ formatPrice(cartTotal) }}</s> ¥{{ formatPrice(memberTotal) }}<template v-if="pointsDiscount > 0"> · 积分 −¥{{ formatPrice(pointsDiscount) }}</template></span>
-          <span class="total" title="口径：VIP 先按 Σ（成交价快照 × 数量）× 0.9 得会员价，再减券与积分抵扣；非 VIP 与加券之前逐字同值。实付以结算响应为准。"><span class="k">合计</span><span class="v"><i>¥</i>{{ formatPrice(finalPay) }}</span></span>
-        </span>
-        <button class="go" :disabled="busy || !canCheckoutAll" @click="checkout()"><IconGlyph name="ok" />{{ busy ? '处理中…' : `去结算（${totalCount} 件）` }}</button>
-      </div>
+        <!-- ══ 结算台（A 版线框右栏）══════════════════════════════════════════
+             控件与改前吸底栏**一一对应**：券选择、积分开关、会员价合计、整车结算。
+             ⚠️ 「已选 N 件」不落 —— 本页没有「勾选」这个状态（逐件结算走行内按钮），
+                 只写能说真话的「共 N 件」。 -->
+        <aside class="checkout-desk">
+          <div class="cd-top"><strong>结算台</strong><span>CHECKOUT / 01</span></div>
+          <div class="cd-body">
+            <div class="sum-row"><span>商品小计</span><b><s v-if="isVipMember" class="m-was">¥{{ formatPrice(cartTotal) }}</s><span class="m-price">¥{{ formatPrice(memberTotal) }}</span></b></div>
+            <div class="sum-row"><span>会员优惠</span><b>{{ isVipMember ? '已计入（9 折）' : '—' }}</b></div>
+            <div class="coupon-row" :class="{ off: !couponPickable }" :title="couponHint">
+              <span>{{ usableCoupons.length ? '优惠券' : '暂无可用券' }}</span>
+              <select v-model="couponId" :disabled="busy || !couponPickable">
+                <option value="">{{ usableCoupons.length ? '不使用优惠券' : '暂无可用券' }}</option>
+                <option v-for="c in usableCoupons" :key="c.CouponId" :value="c.CouponId" :disabled="!!couponBlockedReason(c)">{{ couponLabel(c) }}{{ couponBlockedReason(c) ? '（' + couponBlockedReason(c) + '）' : '' }}</option>
+              </select>
+            </div>
+            <div class="sum-row"><span>优惠券</span><b :class="{ neg: discount > 0 }">−¥{{ formatPrice(discount) }}</b></div>
+            <div class="gauge" :class="{ off: !pointsUsable }" :title="pointsHint">
+              <div class="gauge-head">
+                <span>积分抵扣 · 可用 {{ pointsBalance }}</span>
+                <label class="pts-sw">
+                  <input type="checkbox" v-model="usePoints" :disabled="busy || !pointsUsable" />
+                  <span class="pts-track" aria-hidden="true"><span class="pts-dot"></span></span>
+                  <span class="pts-name">{{ usePoints ? '已开启' : '开启' }}</span>
+                </label>
+              </div>
+              <div v-if="usePoints && pointsToUse > 0" class="gauge-foot"><span>已使用 {{ pointsToUse }} 积分</span><b>抵扣 ¥{{ formatPrice(pointsDiscount) }}</b></div>
+              <div v-else class="gauge-foot"><span>{{ pointsLoading ? '积分读取中…' : pointsHint }}</span></div>
+            </div>
+            <div class="sum-row"><span>运费</span><b>¥0.00</b></div>
+            <div class="sum-row total" title="口径：VIP 先按 Σ（成交价快照 × 数量）× 0.9 得会员价，再减券与积分抵扣；非 VIP 与加券之前逐字同值。实付以结算响应为准。"><span>应付合计</span><b><i>¥</i>{{ formatPrice(finalPay) }}</b></div>
+            <p class="cd-note">共 {{ totalCount }} 件商品 · 实付以结算响应为准</p>
+            <button class="go" :disabled="busy || !canCheckoutAll" @click="checkout()"><IconGlyph name="ok" />{{ busy ? '处理中…' : `去结算（${totalCount} 件）` }}</button>
+            <p class="desk-note">积分与优惠券仅作演示；商家身份不会影响买家购物车。</p>
+          </div>
+        </aside>
+        </div>
+      </template>
     </div>
   </div>
 </template>
@@ -686,5 +719,138 @@ onMounted(loadCoupons); onMounted(loadPoints)
    ⇒ 数字两列各加 8/16px，从名称列（`minmax(0,1fr)`，本来就是省略号）里匀出来。 */
 @media (min-width: 1121px) {
   .list-head, .row { grid-template-columns: 64px minmax(0, 1fr) 120px 104px 128px 168px; }
+}
+
+/* ══ A 版线框重排（2026-10-19）：页头 + 左清单 / 右结算台 ══════════════════ */
+.page-head {
+  margin-top: var(--s4);
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: var(--s5);
+}
+.kicker {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: .16em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+.page-head .page-h { margin-top: 6px; }
+.page-head p {
+  margin-top: 8px;
+  max-width: 58ch;
+  font-size: var(--fs-sm);
+  line-height: 1.7;
+  color: var(--ink-2);
+}
+.head-actions { display: flex; align-items: center; gap: var(--s3); flex: 0 0 auto; }
+.head-actions .btn {
+  display: inline-flex;
+  align-items: center;
+  height: 36px;
+  padding: 0 var(--s5);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r1);
+  font-size: var(--fs-sm);
+  color: var(--ink-2);
+  text-decoration: none;
+  background: var(--surface);
+}
+.head-actions .btn:hover { border-color: var(--brand-ink); color: var(--brand-ink); }
+
+.cart-layout {
+  margin-top: var(--s6);
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 332px;
+  gap: var(--s6);
+  align-items: start;
+}
+.cart-main { min-width: 0; }
+
+/* 结算台：A 版线框的右栏。`position:sticky` 替代原吸底条 —— 视口里始终可见，
+   不盖住列表最后一行（原柱状 sticky bottom 的已知问题）。 */
+.checkout-desk {
+  position: sticky;
+  top: var(--s5);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r2);
+  background: var(--surface);
+  overflow: hidden;
+}
+.cd-top {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--s3);
+  padding: var(--s4) var(--s5);
+  border-bottom: 1px solid var(--line);
+  background: var(--surface-2);
+}
+.cd-top strong { font-size: var(--fs-md); font-weight: var(--fw-med); color: var(--ink); }
+.cd-top span { font-family: var(--font-mono); font-size: var(--fs-xs); color: var(--ink-3); letter-spacing: .08em; }
+.cd-body { padding: var(--s5); display: flex; flex-direction: column; gap: var(--s3); }
+.sum-row { display: flex; align-items: baseline; justify-content: space-between; gap: var(--s3); font-size: var(--fs-sm); color: var(--ink-2); }
+.sum-row b { font-weight: var(--fw-med); color: var(--ink); font-variant-numeric: tabular-nums; }
+.sum-row b .m-was { margin-right: 6px; }
+.sum-row b .m-price { color: var(--brand-ink); }
+.sum-row .neg { color: var(--accent); }
+.sum-row.total {
+  margin-top: var(--s1);
+  padding-top: var(--s4);
+  border-top: 1px solid var(--line);
+  font-size: var(--fs-md);
+  color: var(--ink);
+}
+.sum-row.total b {
+  font-family: var(--font-display);
+  font-size: var(--fs-xl);
+  line-height: 1;
+  color: var(--accent);
+}
+.sum-row.total b i { font-style: normal; font-size: var(--fs-sm); margin-right: 2px; }
+
+.coupon-row { display: flex; align-items: center; justify-content: space-between; gap: var(--s3); font-size: var(--fs-sm); color: var(--ink-2); }
+.coupon-row select {
+  flex: 1;
+  min-width: 0;
+  max-width: 190px;
+  height: 32px;
+  padding: 0 var(--s2);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r1);
+  background: var(--surface);
+  color: var(--ink-2);
+  font-size: var(--fs-sm);
+  cursor: pointer;
+}
+.coupon-row.off { opacity: .55; }
+.coupon-row select[disabled] { cursor: not-allowed; }
+
+.gauge { padding: var(--s3); border: 1px solid var(--line); border-radius: var(--r1); background: var(--surface-2); }
+.gauge-head { display: flex; align-items: center; justify-content: space-between; gap: var(--s3); font-size: var(--fs-xs); color: var(--ink-2); }
+.gauge-foot { margin-top: var(--s2); font-size: var(--fs-xs); color: var(--ink-3); line-height: 1.6; }
+.gauge-foot b { color: var(--brand-ink); font-weight: var(--fw-med); }
+.gauge.off { opacity: .6; }
+
+/* 积分开关：样式从原 `.paybar .pts-*` 平移过来（原规则仍保留，避免影响别处引用）。 */
+.gauge .pts-sw { display: inline-flex; align-items: center; gap: var(--s2); cursor: pointer; user-select: none; }
+.gauge .pts-sw input { position: absolute; opacity: 0; width: 0; height: 0; }
+.gauge .pts-track { position: relative; flex: none; width: 34px; height: 20px; border-radius: 999px; background: #d8dde0; transition: background .22s ease; display: inline-block; }
+.gauge .pts-dot { position: absolute; top: 2px; left: 2px; width: 16px; height: 16px; border-radius: 50%; background: #fff; box-shadow: 0 1px 2px rgba(0, 0, 0, .18); transition: transform .22s cubic-bezier(.2, .8, .2, 1); }
+.gauge .pts-sw input:checked + .pts-track { background: var(--brand); }
+.gauge .pts-sw input:checked + .pts-track .pts-dot { transform: translateX(14px); }
+.gauge .pts-sw input:focus-visible + .pts-track { outline: 2px solid var(--brand); outline-offset: 2px; }
+.gauge .pts-name { font-size: var(--fs-xs); color: var(--ink-2); }
+
+.cd-note { font-size: var(--fs-xs); color: var(--ink-3); }
+.checkout-desk .go { width: 100%; padding: 0; }
+.desk-note { font-size: var(--fs-xs); line-height: 1.6; color: var(--ink-3); }
+
+@media (max-width: 1120px) {
+  .page-head { flex-direction: column; align-items: flex-start; }
+  .cart-layout { grid-template-columns: minmax(0, 1fr); }
+  .checkout-desk { position: static; }
+  .coupon-row select { max-width: none; }
 }
 </style>
