@@ -5,30 +5,37 @@
          顶栏、黄条、5s 双轮询、搜索、KeepAlive 全部不动。 -->
     <SideRail v-if="showRail" :role="role" :base="base" :unread="unreadCount" :notify-unread="notifyUnreadCount" />
     <div class="shell-main">
+    <!-- ── 全局顶栏（2026-10-19 一比一重写，公域 / 私域**同一套**）────────────────────
+         左：黑色 MALL 字标（A 版 `.rail-mark` 的字形，按用户命令一放到顶栏左侧）。
+         中：搜索框（A 版 `.top-search`：34px、1px 发丝线、按钮带左分隔线）。
+         右：登录后 = 首页 / 通知 / 购物车 / 用户中心·用户名；未登录 = 登录 / 注册。
+         ⚠️ 旧顶栏的 `.nav-left` / `.nav-btn` / `.nav-right` 已整体退场；「订单中心」不再占
+            顶栏位（它仍是商家身份树的入口，且个人中心的「今日工作台 / 快捷入口」直达）。 -->
     <div class="top-nav">
-      <div class="nav-left">
-        <router-link v-for="item in navTop.left" :key="item.tab" :to="item.to" class="nav-btn"
-                     :class="{ active: route.meta.tab === item.tab }"><IconGlyph v-if="item.glyph" :name="item.glyph" />{{ item.label }}
-          <span v-if="dotCount(item.badge) > 0" class="nav-red-dot"></span></router-link>
-      </div>
-      <!-- ── 顶栏搜索框（用户 2026-10-08 第 1 条）：顶栏只留一行 = 商城主页 | 搜索框 | 账号。
-           形态照 `ProductPage.vue` 的顶栏搜索（用户：「参考商品详情页的顶栏结构，那个是对的」）；落点 = `${base}/search?kw=`,
-           与 `handlePendingSearch`（本文件 `:201`）同路径、同 query 键。⚠️ 匿名也渲染（搜索页 `meta.public`）；空串由 `required` 挡。 -->
-      <form class="nav-search" @submit.prevent="router.push({ path: `${base}/search`, query: { kw: $event.target.kw.value.trim() } })">
-        <input name="kw" type="text" class="search-input" placeholder="搜索商品、品牌、分类" required />
-        <button type="submit" class="search-btn">搜索</button>
+      <router-link class="top-mark" :to="base" aria-label="MALL 商城主页">
+        MALL<small>器物商城 / SELECT</small>
+      </router-link>
+      <form class="top-search" @submit.prevent="router.push({ path: `${base}/search`, query: { kw: $event.target.kw.value.trim() } })">
+        <input name="kw" type="search" placeholder="搜索器物、品牌、场次" aria-label="搜索" required />
+        <button type="submit">搜索</button>
       </form>
-      <div class="nav-right">
-        <router-link
-          v-for="item in navTop.right"
-          :key="item.tab"
-          :to="item.to"
-          class="nav-btn"
-          :class="{ active: route.meta.tab === item.tab }"
-        >
-          <IconGlyph v-if="item.glyph" :name="item.glyph" />{{ item.label }}
-          <span v-if="dotCount(item.badge) > 0" class="nav-red-dot"></span>
-        </router-link>
+      <div class="top-actions">
+        <template v-if="loggedIn">
+          <span class="top-links">
+            <router-link
+              v-for="item in headerLinks"
+              :key="item.tab"
+              :to="item.query ? { path: item.to, query: item.query } : item.to"
+              :class="{ on: route.meta.tab === item.tab }"
+            >
+              {{ item.label }}<small>{{ item.tab === 'home' ? '商城主页' : '消息中心' }}</small>
+              <b v-if="dotCount(item.badge) > 0" class="unread-dot">{{ dotCount(item.badge) }}</b>
+            </router-link>
+          </span>
+          <router-link class="top-cart" :to="cartTo">购物车</router-link>
+          <router-link class="top-account" :to="accountTo">用户中心 / {{ username }}</router-link>
+        </template>
+        <router-link v-else class="top-account" to="/login">登录 / 注册</router-link>
       </div>
     </div>
 
@@ -65,8 +72,8 @@ import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { http, handleApiError } from '../api/http'
 import { endpoints } from '../api/endpoints'
-import { getMerchantId, getCustomerId, isLoggedIn } from '../api/auth'
-import { navFor } from '../config/nav'; import IconGlyph from '../components/ui/IconGlyph.vue'   // ⚠️ 两条 import **同行**（2026-10-11 补图标那一笔）—— 不为省钱，是为**净零行数**：`progress.md` §5-AB 有 15+ 条按行号引本文件（`:76-78` / `:98` / `:101` / `:106` / `:127` / `:137-144` / `:161` / `:257` / `:374-377` …），在本文件顶部加一行会让它们**集体漂移**。同理下面两处顶栏 `v-for` 里的 `<IconGlyph …>` 也是**同行**插的
+import { getMerchantId, getCustomerId, getUsername, isLoggedIn } from '../api/auth'
+import { navFor } from '../config/nav'
 
 import SideRail from '../components/SideRail.vue'   // A 版骨架（2026-10-19）：左侧身份树（自带两区入口、身份闸门、退出登录）
 
@@ -140,7 +147,10 @@ const layoutClass = computed(() => route.meta.layout || 'page')
  *  · 私域中台（购物车 / 订单中心 / 个人中心 / 消息 / 发布 / 售后）⇒ 左侧 272px 身份树 + 右工作台。
  *  ⚠️ 判据只认路由 `meta.public`（路由表既有键），不按路径前缀猜 —— `/merchant` 与 `/customer`
  *     渲染的是**同一个商城首页**，都属于公域。 */
-const showRail = computed(() => route.meta.public !== true)
+// ⚠️ `noRail` 是 2026-10-19 新加的**独立键**，不能复用 `meta.public`：后者同时是
+//     路由守卫的「匿名白名单」判据（`router/index.js` 的 `if (to.meta.public === true) return true`）
+//     ⇒ 给个人中心标 `public` 会让匿名也能进。`noRail` 只管「画不画树」。
+const showRail = computed(() => route.meta.public !== true && route.meta.noRail !== true)
 
 // 未读消息数量（用于顶部红点）
 const unreadCount = ref(0)
@@ -211,7 +221,11 @@ const fetchNotifyUnread = async () => {
 /** 顶栏项的未读数 —— `item.badge` 的**唯一**解释处（模板里两处红点条件都走它）；认不出的 `badge`（含 `undefined`）一律 `0`。
  *  ⚠️ **2026-10-09 入口合并后 `'unread'` 是两笔的合计**（未读消息 + 未读通知）、`'notify'` 那支**已删** —— 顶栏只剩一个「消息」项（`nav.js` 有墓碑），红点必须两笔都带（详见 `slot-registry.md §十六`）。
  *  ⚠️ 合并的**只是这一个点**：两笔计数与两支 5s 轮询（`fetchUnreadCount` / `fetchNotifyUnread`）**仍各走各的**；匿名态 `ANON_RIGHT` 不带 `badge` ⇒ 天然无红点、不必为「未登录」另写分支（`navFor` 只换表、不换壳）。 */
-const dotCount = (badge) => (badge === 'unread' ? unreadCount.value + notifyUnreadCount.value : 0)
+const dotCount = (badge) => {
+  if (badge === 'notify') return notifyUnreadCount.value
+  if (badge === 'unread') return unreadCount.value + notifyUnreadCount.value
+  return 0
+}
 
 // 进入消息中心则立即清红点（路由化后改看路由 —— 壳里已无 `curPage`）。判据与路由化前 `curPage === 'msg'` 一致：只认**壳的** `/customer/msg`
 //    （⚠️ **2026-10-09 合并入口**后同一地址下**多了两个 tab**（`?tab=notify`）⇒ 清哪一笔要跟 tab 走、`route.path` 在此**不足**。）
@@ -270,7 +284,15 @@ onUnmounted(() => {
 
 // R3：顶栏的登录态分支 —— **在这里算一次**（`isLoggedIn()` 不是响应式，写成 `computed` 会**永远不
 //   更新**；见 `config/nav.js` 的 `navFor`）。壳每次进出都会重建 ⇒ 登录 / 退出 / 401 后必然重算，够用。
-const navTop = navFor(props.nav, isLoggedIn())
+const loggedIn = isLoggedIn()
+const navTop = navFor(props.nav, loggedIn)
+
+/** 右侧四项固定为「首页 / 通知 / 购物车 / 用户中心」——前两项同框（A 版 `.top-links`），
+ *  后两项各自一个控件。`account` / `cart` 不进 `headerLinks`。 */
+const headerLinks = computed(() => navTop.right.filter((i) => i.tab === 'home' || i.tab === 'msg'))
+const cartTo = computed(() => (props.role === 'merchant' ? `${props.base}/order/cart` : `${props.base}/cart`))
+const accountTo = computed(() => `${props.base}/user`)
+const username = getUsername() || '未登录'
 </script>
 
 <style scoped>
@@ -301,7 +323,8 @@ background: var(--bg);
       底 `#fff` → `var(--surface)`（同值，只换成语义名）。
    ⚠️ **高度必须与 `.home-container` 的 `top` / `height` 锁步**（那两条已同步改成 60）。 */
 .top-nav {
-height: 60px;
+/* A 版 `.work-top`（`a.html:89`）：66px / 左右 40px / 22px 间距，公域私域一套。 */
+height: 66px;
 /* ⚠️ **D 笔 commit 7b 丁案**（用户 2026-10-07 裁决，三案择「丁 = 甲 + sticky」）——
    修「顶栏被压扁」（见 `docs/agent/slot-registry.md` 同名小节）。
    `flex: none` 是**修 bug 必需**：`.app-shell` 是 `height:100vh` 的 flex column，
@@ -321,7 +344,8 @@ z-index: 10;
 display: flex;
 justify-content: space-between;
 align-items: center;
-padding: 0 var(--s7);
+padding: 0 40px;
+gap: 22px;
 border-bottom: 1px solid var(--line);
 background: var(--surface);
 /* ⚠️ 本仓**没有**稿子那条全局 `body{font-family:…}`：`public/index.html` 与全仓 CSS 里
@@ -343,7 +367,7 @@ font-family: var(--font);
 .nav-notice {
   flex: none;
   position: sticky;
-  top: 60px;
+  top: 66px;
   z-index: 9;
   display: flex;
   align-items: center;
@@ -379,60 +403,132 @@ font-family: var(--font);
 .nav-notice-x:hover {
   opacity: 1;
 }
-/* 顶栏两族入口与稿子的一一对应：左 = 稿子的 `.brand`（文字「商城主页」，`nav.js` 的 `left`
-   恒为这 1 项）；右 = 稿子的 `.nav-right`（3 项，逐字同构）。
-   ⚠️ **不能照抄稿子那条全局 `a{color:inherit;text-decoration:none}`**：本仓没有它，而
-      `.top-nav a` 的特异性 (0,1,1) 会**压过** `.brand` 的 (0,1,0) —— 破法是拆成两条**显式**
-      规则，而不是提高 `.brand` 的特异性。
-   ⚠️ 稿子的顶栏**没有 hover 态**（三态先例 `主页改造.html:562-568` 的 `.subnav a` 属
-      **二级导航**，不属顶栏）⇒ 照稿不加；改前那条也没有 ⇒ **本项净零**。
-   ⚠️ 左项落成 `.brand` 后**在首页不再高亮**（稿子的 `.brand` 没有 `.on` 变体）—— 这是照稿的
-      必然结果。模板里那个 `:class="{ active: … }"` 原样保留，只是 `.nav-left a.active` 不再有规则。 */
-.nav-left a {
+/* ── 顶栏三段（左侧 MALL 字标 / 中间搜索 / 右侧四项）──────────────────────────
+   全部数值取自 A 版 `a.html:89-107` 与 `:1004-1012`（`renderTop` 那一组），
+   只把颜色映射到本仓 token。 */
+.top-mark {
+  flex: none;
+  display: flex;
+  flex-direction: column;
   font-family: var(--font-display);
-  font-size: var(--fs-lg);
-  font-weight: var(--fw-semi);
-  color: var(--brand-ink);
+  font-size: 25px;
+  line-height: 1;
+  letter-spacing: -0.04em;
+  color: var(--ink);
+  text-decoration: none;
+  white-space: nowrap;
+}
+.top-mark small {
+  margin-top: 6px;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 400;
+  letter-spacing: 0.13em;
+  color: var(--ink-3);
+}
+.top-search {
+  margin-left: auto;
+  display: flex;
+  flex: 1 1 auto;
+  height: 34px;
+  min-width: 210px;
+  max-width: 280px;
+  border: 1px solid var(--line-2);
+  background: var(--surface);
+}
+.top-search input {
+  flex: 1;
+  min-width: 0;
+  padding: 0 10px;
+  border: 0;
+  outline: none;
+  background: transparent;
+  font-size: 12px;
+  color: var(--ink);
+}
+.top-search button {
+  flex: none;
+  padding: 0 12px;
+  border: 0;
+  border-left: 1px solid var(--line-2);
+  background: var(--surface);
+  font-size: 11px;
+  color: var(--ink);
+  cursor: pointer;
+}
+.top-search button:hover { background: var(--ink); color: var(--surface); }
+.top-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: none;
+  white-space: nowrap;
+}
+.top-links {
+  display: flex;
+  flex: none;
+  border: 1px solid var(--line-2);
+}
+.top-links a {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  padding: 5px 11px;
+  border-right: 1px solid var(--line-2);
+  font-size: 12px;
+  line-height: 1.25;
+  color: var(--ink-2);
   text-decoration: none;
 }
-.nav-right {
-margin-left: auto;
-display: flex;
-align-items: center;
-gap: var(--s5);
-color: var(--nav-tx); flex: none; white-space: nowrap;   /* ⚠️ 同上（用户 2026-10-08 第 2 条）：右三项（商家 = 消息/订单中心/用户中心）**不许缩、不许换行** */
+.top-links a:last-child { border-right: 0; }
+.top-links a small {
+  margin-top: 1px;
+  font-family: var(--font-mono);
+  font-size: 8px;
+  letter-spacing: 0.05em;
+  color: var(--ink-3);
 }
-/* R1/R2：顶栏入口由 `button` 改成 `router-link`（渲染成 `a`）⇒ 选择器随之改。
-   ⚠️ C 笔：原 `.top-nav a` 那条**整条拆掉** —— 它的 `display:inline-block` / `border:none` /
-      `background:transparent` / `font-size:15px` / `color:#333` / `cursor:pointer` /
-      `padding:6px 12px` / `border-radius:4px` / `transition:0.2s` 是**按钮**的形态；
-      稿子的顶栏入口是无内距、无圆角、无过渡的**文字链**（`router-link` 渲染成带 `href` 的
-      `a`，指针形状浏览器自带，不需要 `cursor`）。高亮 `#007bff` → `--nav-now`、500 → `--fw-semi`。 */
-.nav-right a {
-color: inherit;
-text-decoration: none;
+.top-links a:hover { border-color: var(--ink); }
+.top-links a.on { background: var(--ink); color: var(--surface); }
+.top-links a.on small { color: #c9c9c9; }
+.unread-dot {
+  position: absolute;
+  top: 3px;
+  right: 3px;
+  min-width: 13px;
+  padding: 0 3px;
+  background: var(--ink);
+  color: var(--surface);
+  font-family: var(--font-mono);
+  font-size: 8px;
+  font-weight: 400;
+  line-height: 13px;
+  text-align: center;
 }
-.nav-right a.active {
-color: var(--nav-now);
-font-weight: var(--fw-semi);
+.top-links a.on .unread-dot { background: var(--surface); color: var(--ink); }
+.top-cart {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 10px;
+  border: 1px solid var(--ink);
+  font-size: 11px;
+  color: var(--ink);
+  text-decoration: none;
 }
-.nav-left {
-display: flex;
-align-items: center; flex: none; white-space: nowrap;   /* ⚠️ **用户 2026-10-08 第 2 条（顶栏被盖）**：挤不下时 flex 默认**先压品牌与右三项** —— 中文可逐字换行 ⇒ 品牌被压成 2 行、右三项 2–4 行（`_dbg9` 实测：700 宽时品牌 y=−5..65、右三项高 48px；600 宽时 96px）⇒ 60px 顶栏的**内容溢到带外、压住页面**。修法 = 两头**不许缩、不许换行**，让位交给中间那个 `flex:1 1 auto` 的搜索框（本行里唯一该缩的东西）。 */
+.top-cart:hover { background: var(--ink); color: var(--surface); }
+.top-account {
+  max-width: 240px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding-bottom: 1px;
+  border-bottom: 1px solid var(--line-2);
+  font-size: 11px;
+  color: var(--ink-3);
+  text-decoration: none;
 }
-/* 未读红点：照稿的 `.dot`（同上那 6 处顶栏逐字相同）。
-   ⚠️ 改前是 8px **纯红** + `vertical-align: middle`；现在 6px **朱砂 `--accent`** +
-      `super`（位置上移到上标位）。两条都是用户裁决项 —— 色那一项连带把 `tokens.css` 的房规
-      「朱砂只负责价格」订正为「价格、促销与未读提示」。 */
-.nav-red-dot {
-  display: inline-block;
-  width: 6px;
-  height: 6px;
-  background: var(--accent);
-  border-radius: 50%;
-  margin-left: 3px;
-  vertical-align: super;
-}
+.top-account:hover { color: var(--ink); border-color: var(--ink); }
 .content {
 flex: 1;
 padding: 0;
@@ -448,7 +544,7 @@ position: relative;   /* ⚠️ **用户 2026-10-08 第 1 条（顶栏 sticky）
 top: 0;               /*    ⇒ 壳恒 900px、`.top-nav` 的 sticky 约束盒只有 900 ⇒ 首页滚过 840px 顶栏就释放（实测滚 1041 时 `navY = −201`，用户所见「滚到底顶栏没了」）。改回流内；`top` 随之归零（流内它已在 `.content` 的 y=60 上，再留 60 会再压 60px）。 */
 left: 0;
 width: 100%;
-min-height: calc(100vh - 60px);   /* ⚠️ 同行 `height` → `min-height`（同上）：定高只让内容**溢出**（`.home-page` 实高 1881）而壳不动；`min-height` 既保住「内容短时页脚贴底」，又让壳随内容长高（改后量测 shell 1941）⇒ sticky 全程有效。数值一个没动。 */
+min-height: calc(100vh - 66px);   /* ⚠️ 同行 `height` → `min-height`（同上）：定高只让内容**溢出**（`.home-page` 实高 1881）而壳不动；`min-height` 既保住「内容短时页脚贴底」，又让壳随内容长高（改后量测 shell 1941）⇒ sticky 全程有效。数值一个没动。 */
 background: var(--bg);
 padding: 0;
 margin: 0;
@@ -496,67 +592,16 @@ flex-direction: column;   /* A 版（2026-10-19）：二级菜单从 200px 左�
 align-items: stretch;
 gap: var(--s5);
 height: 100%;
-max-width: 1240px;
+/* A 版 `a.html` 的 `.page`：1360 居中、40/48/78 内距 —— 用户中心全宽居中、无侧栏。 */
+max-width: 1360px;
 margin: 0 auto;
-padding: var(--s7) var(--s5) var(--s8);
+padding: 40px 48px 78px;
 }
 /* ⚠️ 用户中心左菜单的样式（`.user-menu*`）R1 起已随 markup 搬进 `UserCenter.vue` 自己的
    `<style scoped>` 里 —— 各文件的样式各归其主。`.user-page` 留在壳里：它是**布局容器**
    （`meta.layout`），不是菜单自己的样式。
    ⚠️ R6 裁决 D8：原两壳里那条 `.empty-page`（`display:flex` 居中提示）**已随两壳删除一并终结** ——
    全仓 0 使用（R1 前是 `curPage` 认不出时的兜底，路由化后没有「认不出」这回事），属死规则。 */
-
-/* ── 顶栏搜索框（用户 2026-10-08 第 1 条；**尺寸/颜色** = 同日第 2 条的回退）──────────
-   ▸ **摆法**（容器怎么放在顶栏里）来源 = `ProductPage.vue:1022-1030` 已有顶栏那一组
-     （用户：「参考商品详情页的顶栏结构，那个是对的」）—— 只把最外层容器名改成
-     `.nav-search`（`.search-wrapper` 在本仓已有两处**页内**同名，壳里另起一名免得混）。
-   ▸ **尺寸与颜色**来源 = 本批搬走的那条**页内搜索条**的原值（`HomePage.vue` 原
-     `:391-439` 的 4 条规则，删后原文存档在该文件的按语块里）⇒ 40px 白底整条容器 +
-     `--line` 发丝线 + `--r2` 圆角，内嵌 32px `--brand` 实底、白字按钮。
-     ⚠️ 取**页内**那条而**不是** `ProductPage` 那条：用户口径是「回到**改动前**的尺寸和
-     颜色」—— 改动前用户在首页看到的就是页内那条（`ProductPage` 那条只做**结构**参照）。
-   ⚠️ `flex: 1 1 auto` + `max-width: 420px` + `margin: 0 var(--s5)` 是**与 `.nav-right` 的
-      `margin-left: auto` 配对**的：搜索框先吃满 free space（上限 420），余下的被那条 auto
-      margin 全吃走 ⇒ 右三项仍贴右（`.top-nav` 的 `justify-content: space-between` 此时
-      不起作用：自动外边距优先于它）。
-   ⚠️ 落点是 `<form>` 的 `@submit.prevent`（写在模板那行上）：`Enter` 走表单隐式提交、
-      `搜索` 是 `type="submit"` ⇒ 两条入口**同一个处理**，不新造键盘判据。
-   ⚠️ 匿名态同样渲染（`ANON_RIGHT` 只换右三项）：搜索页是公开面，见模板那块注释。
-   ⚠️ 左内距 14px 是页内那条**给放大镜图标让位**留下的（壳里没搬图标 ⇒ 现只当左侧留白）。
-   ⚠️ `.search-input` / `.search-btn` 两条**一格不写字体**：改动前那两条也没写（本仓没有全局
-      `input` / `button{font:…}`）⇒ 输入框走浏览器默认、按钮由下面那条 `font-size:13px` 定。
-      这是「逐字回退」的必然结果，**不是**漏了 token；要不要并进 `var(--font)` / `--fs-*` 属
-      另议（登记于台账本批条）。 */
-.nav-search {
-  flex: 1 1 auto;
-  min-width: 88px;   /* ⚠️ 同上（用户 2026-10-08 第 2 条）：`min-width:auto` = 输入框的默认固有宽（≈170px，`size` 默认 20 字符）⇒ 顶栏挤到 640 以下时**本框不肯再缩**、改由整条顶栏溢出视口（`_dbg9` 实测 640 溢 25 → 400 溢 265）。但**不能补 `0`**：`0` 允许盒子缩到**比自身内容还窄**，盒内那枚「搜索」按钮就会**溢出到盒外压住右侧「消息」**（`_dbg9` 实测 520 宽时按钮右沿越出表单 32px、与「消息」交叠 8px；480/400 时交叠 32px —— 那正是用户说的「盖过」的极端形态）。88px = 表单内边距 18 + 按钮 66 + 一点输入框宽；代价是视口 <约 535px 时改为整条顶栏横向溢出（见本文件 :326 那条「不许缩、不许换行」的口径，此宽度超出页面设计范围）。⚠️ **I2（2026-10-09）订正**：原文写 :226 —— 那是个**陈旧错址**（按 I2 的 +43 重定基也只是挪到 :269，那儿是 `.home-container` 的 `z-index` 注释，与不可缩无关）；口径正文实测在 :326（`AppShell.vue` 的 `.nav-right` 那条「修法 = 两头不许缩、不许换行」），同款另有一句在 :308。 */
-  max-width: 420px;
-  margin: 0 var(--s5);
-  display: flex;
-  align-items: center;
-  gap: var(--s2);
-  height: 40px;
-  background: var(--bg);
-  border: 1px solid var(--line);
-  border-radius: var(--r2);
-  padding: 0 4px 0 14px;
-  transition: border-color 0.15s, background 0.15s;
-}
-.nav-search:focus-within { border-color: var(--brand); background: var(--surface); }
-.search-input { flex: 1; min-width: 0; border: none; outline: none; background: transparent; }
-.search-input::placeholder { color: var(--ink-3); }
-.search-btn {
-  flex: none;
-  height: 32px;
-  padding: 0 18px;
-  border-radius: var(--r1);
-  background: var(--brand);
-  color: #fff;
-  font-size: 13px;
-  font-weight: var(--fw-med);
-  transition: background 0.15s;
-}
-.search-btn:hover { background: var(--brand-hover); }
 
 /* ── A 版骨架（2026-10-19）：右侧工作区 ──────────────────────────────────────────
    左树（`SideRail.vue`）固定 300px；本容器承接原来的列布局 ⇒ `.top-nav` 的 sticky
@@ -573,5 +618,31 @@ padding: var(--s7) var(--s5) var(--s8);
 @media (max-width: 900px) {
   .app-shell { flex-direction: column; }
   .shell-main { min-height: 0; }
+}
+/* ── 顶栏窄屏（逐条对应 `a.html:690` 与 `:707-710`）────────────────────────
+   ⚠️ ≤1280 收内距并**收起搜索框**（A 版同一断点）；≤860 再把搜索框放回
+     第二行整行（`order:5` + `min-width:100%`），右侧四项靠右。
+   ⚠️ 不这么写的话，600px 下「MALL 标 + 210px 搜索框 + 四项」必然横向溢出
+   （探针实测 136px）—— 与 A 版窄屏形态不符。 */
+@media (max-width: 1280px) {
+  .top-nav { padding: 0 28px; gap: 14px; }
+  .top-search { display: none; }
+}
+@media (max-width: 860px) {
+  .top-nav {
+    position: relative;
+    height: auto;
+    min-height: 58px;
+    padding: 11px 18px;
+    flex-wrap: wrap;
+  }
+  .top-search {
+    display: flex;
+    order: 5;
+    min-width: 100%;
+    max-width: none;
+    margin-left: 0;
+  }
+  .top-actions { margin-left: auto; }
 }
 </style>
