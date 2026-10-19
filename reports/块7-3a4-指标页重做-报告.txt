@@ -1,0 +1,104 @@
+================================================================================
+块 7 · 3a.4 指标页重做（落地 S1：时间栈 + 实体栏）—— 收笔报告
+2026-10-17 · commit 62d0eaf · 未 push / 未 merge
+================================================================================
+
+一、落地结果
+--------------------------------------------------------------------------------
+1. 结构
+   · 左栏「时间栈」：五张图共享同一根 x 轴 —— QPS（成功/4xx/5xx 堆叠）、
+     缓存命中率（命中/未命中柱 + 命中率虚线，右轴 0–100）、平均延迟（面积渐变）、
+     锁等待（每把锁一条线）、锁竞争热力图（最底一张统一画刻度）。
+   · 右栏「实体栏」380px：K1–K4 指标卡、3 类设施状态（L2 缓存 / 锁客户端 / 商品库）、
+     严重度分布（health.level 的 ok/warn/error 拍数）、8 类防护（彩色图标 + 微条）、
+     库存水位（搜索、五档筛选、220px 内部滚动、水流动画）。
+   · 页高：.a-mp = calc(140vh − 124px)，1440×900 视口实测 1136px（上限 1260px）。
+     .mp-body 是内部滚动容器，.mp-grid 只负责左右分栏（右栏溢出计入滚动高度）。
+2. 五图对齐与可读性
+   · 五图 grid.left=64 / grid.right=56 完全一致；前四图隐藏 x 轴但保留网格几何；
+     boundaryGap=true ⇒ 柱子中心、折线点、热力格中心落在同一条竖线上。
+   · 每图都有 tooltip：QPS「成功/4xx/5xx 次每秒 + 本拍请求」、命中率「命中/未命中/%」、
+     延迟「ms」、锁等待「每把锁的 ms 与超时数」。
+     热力图 tooltip 为「锁名 · 第 N 拍（HH:mm:ss） · 超时 N 次」并带取锁/成功/降级/错误。
+   · 前四图均有峰/谷 markPoint 数字标注；谷值为 0 时标注翻到上方，避免被裁掉。
+   · 平均延迟用面积渐变；热力图色阶起点从贴底色提亮到可读区间，图例「超时多 / 超时少」。
+3. 数据口径（不编假数据）
+   · K2 = meanMs（逐拍均值）；P99 是 Micrometer 衰减窗口（TD-77），只作卡片次要小字，
+     没有画进时间轴。
+   · 严重度分布只统计 health.level 的 60 拍，不另接事件流、不扩数据源。
+   · 库存水位读真帧 stock.rows；无 BaselineStock 时画灰斜纹并显示「—」，不伪造 100%。
+   · 「模拟日常」演示数据源的指标帧补齐为与真帧同形（intervalMs、4xx/5xx、meanMs、
+     p95/p99/max、cache hit/miss/l2Degraded、锁明细、8 类 protections、12 行库存），
+     页面继续显式标注「模拟日常」，不冒充真读数。
+
+二、改动文件
+--------------------------------------------------------------------------------
+后端：无改动。
+前端：
+  Mall-management-web/mall-management-system/src/views/admin/observe/MetricsPanel.vue（重写）
+  Mall-management-web/mall-management-system/src/api/demo-stream.js（指标帧扩形）
+  Mall-management-web/mall-management-system/src/components/charts/LineChart.vue
+  Mall-management-web/mall-management-system/src/components/charts/BarChart.vue
+  Mall-management-web/mall-management-system/src/components/charts/HeatmapChart.vue
+  Mall-management-web/mall-management-system/src/components/charts/echarts.js（MarkPoint）
+探针：
+  scripts/probes/probe-b7c6-metrics-panel.mjs（按新结构重写，63 项断言）
+  scripts/probes/out-b7c6-metrics-panel-top.png / -bottom.png（新增）
+  scripts/probes/out-b7c6-metrics-panel.png（旧单图已删除，探针不再产出）
+文档（仅行号重指 / 行数与 props 同步，净零行数）：
+  docs/agent/context-packs/c3-block-7-observe.md
+  docs/agent/context-packs/c3-block-D-hardening.md
+  docs/agent/tech-debt.md
+证据：
+  docs/agent/evidence/c3-block7/b7c10-metrics-summary.txt（汇总）
+  b7c10-metrics-lint-build.txt
+  b7c10-metrics-probe.txt
+  b7c10-metrics-real-prebaseline.txt / -real-baseline.txt / -real-after-restore.txt
+  b7c10-metrics-real-top.png / -real-bottom.png
+  b7c10-metrics-stock-baseline.txt
+
+三、验证结果
+--------------------------------------------------------------------------------
+· npm run lint：DONE No lint errors found。
+· npm run build：DONE Build complete，Hash 82f7edd546919617（约 82.8s）。
+· 探针 node scripts/probes/probe-b7c6-metrics-panel.mjs：63 项 / 0 失败（exit 0）。
+  覆盖：五图 canvas、共享轴几何、隐藏 x 轴、boundaryGap、五类 tooltip、
+  markPoint、面积渐变、热力图色阶与格数、KPI 收敛、K2 用 meanMs 且 P99 未混入、
+  健康度与严重度、3 类设施 + 8 类防护图标颜色与 8px 间距、库存 15 行 / 220px 内滚 /
+  搜索筛选 / 水流动画推进、页高 1136px / 右栏 380px / 字号 12·15·19、
+  正常收尾不画红色断线条、卸载后不再发新流请求。
+· 真后端实拍（dev 8088 + serve 8080，未 mock 任何请求）：
+  - 改前真帧 6 拍，stock.rows 的 baseline 全 null（诚实「未设基线」态）。
+  - 按用户批准执行 ①（BaselineStock = Stock）→ affected 8；真帧 ratio=1.0
+    （stock=0 的 SKU ratio=null）。实拍 top/bottom 两张：QPS 约 5.9 次/秒、
+    L1 命中率 100%、平均延迟 1ms；库存 0/0 缺货 ×2、60/60、100/100、
+    120/120、180/180、240/240「充足」；页面数据源为「正常 / 后端真流」。
+  - 真后端当时没有锁活动 ⇒「锁等待 / 锁竞争热力图」显示空态
+    「窗口内没有任何锁活动」，这是诚实空态，不是渲染缺失（实拍中该两区为空白文案）。
+  - 按批准执行 ④（BaselineStock = NULL）→ affected 8；8/8 行恢复 NULL，
+    Stock 完全未动（0/60/100/100/100/120/180/240）；还原后真帧 4 拍、32 个
+    baseline 全 null。
+· refs 收口：before 用 HEAD 独立工作树，after 用工作区；按（引用者, token）对比较，
+  结果 LOST 5 / NEW 4，全部为预期：
+  - 4 对 = 活文档重指到本次被改文件的新行号（热力图调用点、演示 reasons、演示 protections 区间）；
+  - 1 条 LOST = 重写后不再引用的旧 token（StatsPage.vue 区间），属正常消失。
+  明细只落 _work/3a4/refs-diff-3a4d.txt，未写进 docs。
+
+四、边界与未做
+--------------------------------------------------------------------------------
+· 未 push、未 merge、未开 PR。
+· 后端零改动；未新增数据源、未改真帧顶层键、未把 P99 画进时间轴。
+· 库存演示基线只临时改 BaselineStock 一列，已按 ④ 全量还原；Stock 未改。
+· 真后端实拍中没有锁活动，故锁相关两图显示空态；锁竞争热力图的格级渲染
+  由 mock 探针（63 项断言，含热力图格子、色阶、tooltip 文案）覆盖。
+· 页面上仍保留「数据源：正常 / 模拟日常」切换入口，两种模式都能打开。
+
+五、关键产物位置
+--------------------------------------------------------------------------------
+真后端实拍：
+  docs/agent/evidence/c3-block7/b7c10-metrics-real-top.png
+  docs/agent/evidence/c3-block7/b7c10-metrics-real-bottom.png
+mock 探针实拍：
+  scripts/probes/out-b7c6-metrics-panel-top.png
+  scripts/probes/out-b7c6-metrics-panel-bottom.png
+================================================================================

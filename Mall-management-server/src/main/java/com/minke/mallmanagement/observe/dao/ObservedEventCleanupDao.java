@@ -86,6 +86,15 @@ public class ObservedEventCleanupDao {
      */
     public static final int MIN_RESET_STOCK = 100;
 
+    /**
+     * 删除批大小（2026-10-19）：每次 {@code DELETE … LIMIT 5000}，批间 {@value #DELETE_PAUSE_MS}ms。
+     * ⚠️ 这是「不锁表 / 不让一个事务背十几万行 undo」的取舍：总时长变长，但每批都是短事务，
+     * 压测期间也不会把业务写请求挡在行锁后面。
+     */
+    public static final int DELETE_BATCH_SIZE = 5000;
+
+    private static final long DELETE_PAUSE_MS = 100L;
+
     private final JdbcClient jdbcClient;
 
     public ObservedEventCleanupDao(JdbcTemplate jdbcTemplate) {
@@ -169,14 +178,38 @@ public class ObservedEventCleanupDao {
         //       它按龄、语义是「到点清一切」；与「清场 = 现在回到干净态」目的不同，混一起会两边都说不清。
         //    ⚠️ 这条是本类里唯一**不看时间**的整批删：它不参与上面的动态发现，因为
         //       observed_event 是一张固定的表（不是「有某列的表」之一）。
-        int events = jdbcClient.sql("DELETE FROM mall_management_sql.observed_event "
-                + "WHERE `BatchId` IS NOT NULL "
-                + "OR (`ObjectType` = 'sku' AND `ObjectId` LIKE 'SEED-%') "
-                + "OR `ObjectType` = 'attack'").update();
+        //    ⚠️ 2026-10-19：这一段改**分批**（`DELETE … ORDER BY Id LIMIT ?` + 100ms 间歇）。
+        //       旧写法是一条无界 DELETE：积压十几万行时是一个大事务，清理按钮实测超时；
+        //       在压测期间它还会长时间持有行锁 / undo，正是「清理越清越卡」的来源。
+        int events = 0;
+        while (true) {
+            int n = deleteAttackEventsBatch(DELETE_BATCH_SIZE);
+            if (n <= 0) {
+                break;
+            }
+            events += n;
+            if (n < DELETE_BATCH_SIZE || !pauseBetweenBatches()) {
+                break;
+            }
+        }
         if (events > 0) {
             deleted.put("observed_event", events);
         }
         return deleted;
+    }
+
+    /**
+     * 删**一批**演练台账行（第 ③ 段的三条 OR），最多 {@code limit} 行。
+     * 供 {@link #deleteAttackData()} 与「彻底清空」之外的清理路径复用。
+     */
+    public int deleteAttackEventsBatch(int limit) {
+        Integer n = jdbcClient.sql("DELETE FROM mall_management_sql.observed_event "
+                        + "WHERE `BatchId` IS NOT NULL "
+                        + "OR (`ObjectType` = 'sku' AND `ObjectId` LIKE 'SEED-%') "
+                        + "OR `ObjectType` = 'attack' "
+                        + "ORDER BY Id LIMIT ?")
+                .param(limit).update();
+        return n == null ? 0 : n;
     }
 
     // ==================== ①-b 复位「演练环境」（2026-10-18 用户批文） ====================
@@ -278,23 +311,88 @@ public class ObservedEventCleanupDao {
      * <p>本条用**一条语句删两档**（{@code OR}）：两条语句会让「一条成功一条失败」变成一个
      * 无信息量的中间态，而这里没有任何理由需要它。{@code INTERVAL ? DAY} 的两个占位符都走绑定，
      * 不拼字符串。
+     *
+     * <p>⚠️ 2026-10-19：本方法改为**循环分批**（每批 {@value #DELETE_BATCH_SIZE} 行 + 100ms 间歇，
+     * 见 {@link #deleteExpiredBatch}）。返回的是**本次调用删掉的总行数**；调用方（job / 端点）
+     * 拿到的语义没变，变的只是它不再是一个大事务。
      */
     public int pruneObservedEvents(int attackRetentionDays, int normalRetentionDays) {
+        int total = 0;
+        while (true) {
+            int n = deleteExpiredBatch(attackRetentionDays, normalRetentionDays, DELETE_BATCH_SIZE);
+            if (n <= 0) {
+                break;
+            }
+            total += n;
+            if (n < DELETE_BATCH_SIZE || !pauseBetweenBatches()) {
+                break;
+            }
+        }
+        return total;
+    }
+
+    /**
+     * 删**一批**过期行（最多 {@code limit} 行），返回本批行数。
+     *
+     * <p>⚠️ 2026-10-19：从「一条无界 DELETE」拆成「一批 + {@code ORDER BY Id LIMIT ?}」。
+     * 两档判据（{@code BatchId} 非 NULL / NULL）一个字没改 —— 变的只是每批的边界；
+     * 全程仍是同一条 OR 语句，不拆成两条（拆开会留下「一条成一条败」的中间态）。
+     * {@code ORDER BY Id} 让最老的行先走，也避免每批都从头扫。
+     */
+    public int deleteExpiredBatch(int attackRetentionDays, int normalRetentionDays, int limit) {
         Integer n = jdbcClient.sql("DELETE FROM mall_management_sql.observed_event "
                         + "WHERE (`BatchId` IS NOT NULL AND `OccurredAt` < NOW() - INTERVAL ? DAY) "
-                        + "   OR (`BatchId` IS NULL AND `OccurredAt` < NOW() - INTERVAL ? DAY)")
-                .params(attackRetentionDays, normalRetentionDays).update();
+                        + "   OR (`BatchId` IS NULL AND `OccurredAt` < NOW() - INTERVAL ? DAY) "
+                        + "ORDER BY Id LIMIT ?")
+                .params(attackRetentionDays, normalRetentionDays, limit).update();
         return n == null ? 0 : n;
     }
 
-    /** {@code observed_event} 当前行数（给清理结果做「清前 / 清后」的读数，不埋点：它是行数不是事件）。 */
+    /**
+     * 按 {@code Id}（≈ 时间）删最老的 {@code limit} 行 —— **容量水位熔断**的落点
+     * （2026-10-19：超过高水位时「牺牲历史，保全当下」）。
+     *
+     * <p>⚠️ 不按 {@code OccurredAt} 排序的理由：{@code Id} 是聚簇主键，{@code ORDER BY Id LIMIT}
+     * 直接沿主键顺序删，代价与「删多少」成正比；按二级索引排序会多一次回表/排序。
+     * 两者的时间序在写入路径上一致（消费者按发生顺序批写），差一秒不改变「淘汰最老」的语义。
+     */
+    public int deleteOldestBatch(int limit) {
+        Integer n = jdbcClient.sql("DELETE FROM mall_management_sql.observed_event "
+                        + "ORDER BY Id LIMIT ?")
+                .param(limit).update();
+        return n == null ? 0 : n;
+    }
+
+    /**
+     * {@code observed_event} 当前行数（给清理结果做「清前 / 清后」的读数，不埋点：它是行数不是事件）。
+     *
+     * <p>⚠️ 用 {@code list()} 取首行而**不是** {@code single()}：真 MySQL 上 {@code COUNT(*)}
+     * 恒回一行，但 {@code @WebMvcTest} / smoke 切片的替身 {@code JdbcTemplate} 对未桩的查询
+     * 返回空表 ⇒ {@code single()} 会抛 {@code EmptyResultDataAccessException}，把一次
+     * 「水位读数没桩」升级成整个 {@code /run} 失败。空表按 0 处理，与「表是空的」同义。
+     */
     public long countObservedEvents() {
-        Long n = jdbcClient.sql("SELECT COUNT(*) FROM mall_management_sql.observed_event")
-                .query(Long.class).single();
-        return n == null ? 0L : n;
+        List<Long> rows = jdbcClient.sql("SELECT COUNT(*) FROM mall_management_sql.observed_event")
+                .query(Long.class).list();
+        return rows.isEmpty() || rows.get(0) == null ? 0L : rows.get(0);
     }
 
     // ==================== 内部 ====================
+
+    /**
+     * 批间让出一拍（2026-10-19）。返回 {@code false} = 线程被中断，调用方应停止后续批次。
+     * ⚠️ 中断标志**必须还原**（{@link Thread#interrupt()}）—— 吞掉它会让上层（job / 请求线程）
+     * 失去「该收尾了」的信号。
+     */
+    private static boolean pauseBetweenBatches() {
+        try {
+            Thread.sleep(DELETE_PAUSE_MS);
+            return true;
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return false;
+        }
+    }
 
     /**
      * 现查「本库里有这一列的表」。

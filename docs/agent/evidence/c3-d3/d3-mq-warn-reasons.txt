@@ -1,0 +1,10 @@
+D3 MQ 告警语义实测（2026-10-18，dev profile，broker 192.168.229.129:5672 不可达）
+
+[注入关闭] frames=4 reasons=1
+  - MQ broker 连接不可用（发布侧已暂停投递；consumer 与 DLQ 出口不受影响）
+
+[注入开启 mqDown] frames=4 reasons=1
+  - 演练注入开启：MQ 发布中断（读数会偏离真实健康度）
+
+结论：关闭 mqDown 后「演练注入」那条理由立即消失；broker 真断时仍保留「MQ broker 连接不可用」——
+     真实故障不会被「关开关」静默抹掉；broker 恢复后该条自然消失。

@@ -3,8 +3,12 @@ package com.minke.mallmanagement.observe.service;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.minke.mallmanagement.protect.ProtectionGate;
+import io.micrometer.core.instrument.Gauge;
+import io.micrometer.core.instrument.MeterRegistry;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 import java.util.ArrayList;
@@ -135,9 +139,36 @@ public class AttackSwitchConfig {
      */
     private final AtomicLong version = new AtomicLong();
 
+    /** 测试 / 手工构造用（不注册注入面 gauge）。 */
     public AttackSwitchConfig(ProtectionGate gate, ObjectMapper objectMapper) {
         this.gate = gate;
         this.objectMapper = objectMapper;
+    }
+
+    /**
+     * 容器构造器：多一步把四个注入位注册成 gauge（{@code mall.observe.injection.<key>}，1=开）。
+     *
+     * <p>⚠️ gauge 读的是本类的 {@code injections} 字段，**不是第二份真值** —— 它只让
+     * 「注入开没开」成为指标帧能读到的状态（页面健康度据此实时变黄），写入仍然只有
+     * {@link #update} / {@link #resetToDefault()} 两个点。
+     *
+     * <p>{@code ObjectProvider} 而不是直接依赖 {@code MeterRegistry}：smoke 切片里没有它，
+     * 直接依赖会让整个切片上下文起不来。
+     */
+    @Autowired
+    public AttackSwitchConfig(ProtectionGate gate, ObjectMapper objectMapper,
+                              ObjectProvider<MeterRegistry> registryProvider) {
+        this(gate, objectMapper);
+        MeterRegistry registry = registryProvider.getIfAvailable();
+        if (registry == null) {
+            return;
+        }
+        for (String key : INJECTION_KEYS) {
+            Gauge.builder("mall.observe.injection." + key, this,
+                            cfg -> cfg.injections.contains(key) ? 1.0 : 0.0)
+                    .description("演练注入开关（1=开，0=关）：" + key)
+                    .register(registry);
+        }
     }
 
     // ==================== 读 ====================
@@ -159,6 +190,15 @@ public class AttackSwitchConfig {
     }
 
     /**
+     * 调度停摆注入是否打开（D3）—— {@code ScheduledJobGate} 的唯一判据。
+     *
+     * <p>⚠️ 与 {@link #injections()} 是同一份状态的两个读口，不另存布尔位。
+     */
+    public boolean jobsPaused() {
+        return injections.contains(AttackEngine.INJECTION_JOB_DOWN);
+    }
+
+    /**
      * 当前配置的完整快照（两个页面 + 报告 + 测试的唯一读出口）。
      *
      * @return {@link State}：{@code protections} / {@code injections} 都只列**开着的**键
@@ -175,10 +215,11 @@ public class AttackSwitchConfig {
     /**
      * 键目录：**每个键认不认得、有没有真闸** —— 给前端与探针用。
      *
-     * <p>⚠️ {@code Wired=false} 的键（防护里的 {@code degrade}、注入里的 {@code mqDown} /
-     * {@code dbSlow}）在面板上**必须画成不可开关**（标灰 + tooltip 说明它是记录位），
-     * 而不是画成一个能拨却什么也不发生的死控件（用户 2026-10-15 裁定逐字；实现在
-     * {@link ProtectionGate#wired(String)} 与 {@link AttackEngine#INJECTIONS_NOT_WIRED}）。
+     * <p>⚠️ {@code Wired=false} 的键（D3 起只剩防护里的 {@code degrade}）在面板上**必须画成
+     * 不可开关**（标灰 + tooltip 说明它是记录位），而不是画成一个能拨却什么也不发生的死控件
+     * （用户 2026-10-15 裁定逐字；实现在 {@link ProtectionGate#wired(String)} 与
+     * {@link AttackEngine#INJECTIONS_NOT_WIRED}）。⚠️ 注入四键 D3 起全部接通，
+     * {@code INJECTIONS_NOT_WIRED} 恒为空 ⇒ 注入那一组不再有「未接通」角标。
      */
     public Map<String, Object> catalog() {
         List<Map<String, Object>> protections = new ArrayList<>();

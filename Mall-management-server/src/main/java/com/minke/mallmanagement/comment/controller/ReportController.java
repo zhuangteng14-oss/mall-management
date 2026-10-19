@@ -105,7 +105,7 @@ public class ReportController {
      * 举报列表（管理端「举报中心」）。
      *
      * @param Status {@code pending} / {@code handled} / {@code rejected}；空白 = 不筛
-     * @param Limit  页大小（默认 100，上限 500）
+     * @param Limit  页大小（默认 100，上限 100；D3-3 统一上限）
      * @param Offset 偏移（默认 0）
      */
     @PostMapping("/list")

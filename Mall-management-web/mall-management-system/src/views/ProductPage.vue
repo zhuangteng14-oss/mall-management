@@ -265,7 +265,7 @@
               **依次全部渲染**（D 笔 commit 13 的「覆盖率优先」落法）—— 用户已改判为**错**：
               「叠着放不是落法 —— 它把多个内容挤一起，语义错」。现按稿的 `renderFull` 口径**真切**：
               新增页内状态 `activeTab`（UI 展示状态，不计功能量），四面板 `v-if` 各显其一；
-              三条 `data-slot` 占位（`.longimg` / `.spec` / `.rev`）与售后保障块**一个都不删**。
+              三条 `data-slot` 占位（`.longimg` / `.spec` / `.rev`）与售后保障块**一个都不删**。⚠️ **批四起改口**：`.rev` 早已在块 6 退役为真功能，`.longimg` / `.spec` 两个占位也随「详情 / 规格 mock → 空态」退役 —— 本行原话只对 2026-10-07 那一笔有效。
            ⚠️ 四枚按钮的 `on` 仍按稿的**默认切面** `desc`（`ProductPage.html:1011-1012`），
               但它现在表示「**当前面**」；键名 `desc/spec/rev/pol` 与四个面板一一对应，
               切 Tab 只换面板 ⇒ 覆盖率与切 Tab 从此不再互相牵制。 -->
@@ -276,35 +276,35 @@
         <button type="button" :class="{ on: activeTab === 'pol' }" @click="activeTab = 'pol'">售后保障</button>
       </nav>
 
-      <!-- Tab ① 商品详情。⚠️ 两段介绍文是**稿的演示文案**（本仓 goods 表没有详情字段），
-           按「`data-slot` 块内的稿 mock 逐字保留」处理 ⇒ 照留；`data-slot` 按稿只挂 `.longimg`。⚠️ **2026-10-10〈模板表通用化〉**：goods 新增 `Detail` 快照列 ⇒ 三件都加 `v-if="!detailText"`（有真内容时不再并排显示稿的演示文案——那是给「没有详情字段」这个前提配的图）。⚠️ 本页 `data-slot` 渲染数从此**随数据浮动**，见 §十九。 -->
+      <!-- Tab ① 商品详情。⚠️ **批四（2026-10-18）改判**：稿的两段演示文案与 `.longimg` 假图
+           一律退役 —— `goods.Detail` 为空时给「暂无数据」空态，拿耳机参数充数就是假象。
+           原 `.longimg` 上的 `data-slot` 随之退役（不是「随数据浮动」，是任何数据下都不再渲染）。 -->
       <div class="panel" v-if="activeTab === 'desc'">
         <p v-if="detailText" class="para pre">{{ detailText }}</p>
-        <p v-if="!detailText" class="para">声谷标准版是这一代的主力款：单耳 4.8g，入耳处用液态硅胶做了弧度，
-          长时间佩戴不压耳廓。蓝牙 5.3 双连，手机与笔记本之间切换不用重新配对。</p>
-        <p v-if="!detailText" class="para">充电盒支持 10 分钟快充补 3 小时，通勤路上临时补电够用到下班。</p>
-        <div v-if="!detailText" class="longimg"
-          data-slot="预留 · 详情富文本（动现有代码 6 处 · 超档）"
-          title="待 C3〈商品〉——goods 表无详情字段：mall_management_sql.sql + GoodsDao.java + GoodsService.java + GoodsController.java + GoodsAdd.vue（录入）+ ProductPage.vue（展示）= 6 处，**超档**，因清单点名而画出（见 README 挂账表）"
-        >商品详情长图&emsp;1200 × 400</div>
+        <!-- 有 Detail 快照 ⇒ 真文本；没有 ⇒ 空态（不再画「声谷标准版…」与 1200×400 长图）。 -->
+        <div v-else class="empty">
+          <IconGlyph name="wait" />
+          <p class="empty-t">暂无数据</p>
+          <p class="empty-d">该商品还没有填写详情介绍。</p>
+        </div>
       </div>
 
-      <!-- Tab ② 规格参数。整块级占位（`<div>`）⇒ 只挂 `data-slot` + `title`；表内 8 行是**块内
-           mock** ⇒ 逐字保留。⚠️ **2026-10-10〈模板表通用化〉**：goods 新增 `Spec` 快照列（行内 `键=值`、一行一条）⇒ 有真内容时渲染真表（**复用**同一套 `.spec`/`.r`/`.k`/`.v` 样式，不是新样式），占位块整体 `v-if="!specText"`（理由同 Tab ①）。 -->
+      <!-- Tab ② 规格参数。⚠️ **批四（2026-10-18）改判**：8 行耳机 mock（品牌 / 型号 / 材质…）
+           退役 —— `goods.Spec` 为空时给空态；有真内容仍走下方同一套 `.spec`/`.r`/`.k`/`.v` 样式。
+           原 `data-slot` 占位标记随之退役（与 Tab ① 的 `.longimg` 同一处置）。 -->
       <div class="panel" v-if="activeTab === 'spec'">
         <div v-if="specText" class="spec"><div class="r" v-for="(r, i) in specRows" :key="i"><span class="k">{{ r.k }}</span><span class="v">{{ r.v }}</span></div></div>
-        <div v-if="!specText" class="spec"
-          data-slot="预留 · 规格参数（动现有代码 6 处 · 超档）"
-          title="待 C3〈商品〉——goods 表无参数列（品牌 / 材质 / 产地 / 尺寸各一列）：mall_management_sql.sql + GoodsDao.java + GoodsService.java + GoodsController.java + GoodsAdd.vue + ProductPage.vue = 6 处，**超档**，因清单点名而画出（见 README 挂账表）"
-        >
-          <div class="r"><span class="k">品牌</span><span class="v">声谷 SG</span></div>
-          <div class="r"><span class="k">型号</span><span class="v">SG-A2</span></div>
-          <div class="r"><span class="k">材质</span><span class="v">ABS + 液态硅胶</span></div>
-          <div class="r"><span class="k">产地</span><span class="v">广东东莞</span></div>
-          <div class="r"><span class="k">尺寸</span><span class="v">62 × 42 × 24 mm（充电盒）</span></div>
-          <div class="r"><span class="k">重量</span><span class="v">单耳 4.8 g / 整机 48 g</span></div>
-          <div class="r"><span class="k">蓝牙</span><span class="v">5.3，双设备连接</span></div>
-          <div class="r"><span class="k">续航</span><span class="v">单次 8 小时 / 含盒 32 小时</span></div>
+        <!-- 有 Spec 快照 ⇒ 真表；没有 ⇒ 空态（不再拿「声谷 SG / SG-A2」等 8 行假参数充数）。
+             ⚠️ 真实内容路径没动：`specText` 仍是 goods 快照列，有值就照旧显示，空值才落到这里。 -->
+        <div v-else class="empty">
+          <IconGlyph
+            name="wait"
+            size="2em"
+            tone="muted"
+          />
+          <p class="empty-t">暂无数据</p>
+          <p class="empty-d">该商品还没有录入规格参数。</p>
+          <p class="empty-d">商家补充后这里会自动显示。</p>
         </div>
       </div>
 
@@ -1178,7 +1178,7 @@ const subsidy = computed(() => {
 const loadSubsidy = async () => {
   if (!isLoggedIn()) return
   try {
-    const data = await subsidyGoods({ limit: 200 })
+    const data = await subsidyGoods({ limit: 100 })
     subsidyRows.value = data && data.success && Array.isArray(data.list) ? data.list : []
   } catch (e) {
     subsidyRows.value = []
@@ -1210,7 +1210,7 @@ const seckill = computed(() => {
 const loadSeckill = async () => {
   if (!isLoggedIn()) return
   try {
-    const data = await seckillLive({ limit: 200 })
+    const data = await seckillLive({ limit: 100 })
     seckillRows.value = data && data.success && Array.isArray(data.list) ? data.list : []
   } catch (e) {
     seckillRows.value = []
@@ -1993,9 +1993,12 @@ button { background: none; border: 0; cursor: pointer; }
 
 .para { max-width: 68ch; font-size: var(--fs-sm); line-height: 1.9; color: var(--ink-2); }
 .para + .para { margin-top: var(--s4); }
-.longimg { margin-top: var(--s5); aspect-ratio: 3/1; border: 1px solid var(--line); border-radius: var(--r2);
-           background: var(--img); display: flex; align-items: center; justify-content: center;
-           color: var(--ink-3); font-size: var(--fs-xs); letter-spacing: .08em; }
+/* 批四：详情 / 规格的空态（稿 mock 退役后统一用这一块 —— 不是「加载失败」，只是没有内容） */
+.empty { margin-top: var(--s5); border: 1px dashed var(--line-2); border-radius: var(--r2);
+         background: var(--surface-2); padding: var(--s8) var(--s4);
+         display: flex; flex-direction: column; align-items: center; gap: var(--s2); text-align: center; }
+.empty-t { margin: 0; font-size: var(--fs-sm); font-weight: var(--fw-med); color: var(--ink); }
+.empty-d { margin: 0; font-size: var(--fs-xs); color: var(--ink-3); }
 
 /* 规格参数表 */
 .spec { max-width: 640px; font-size: var(--fs-sm); }

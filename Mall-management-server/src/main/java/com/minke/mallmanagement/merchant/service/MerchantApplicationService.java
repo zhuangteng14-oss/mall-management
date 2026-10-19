@@ -1,5 +1,6 @@
 package com.minke.mallmanagement.merchant.service;
 
+import com.minke.mallmanagement.shared.web.PageLimits;
 import com.minke.mallmanagement.goods.dao.GoodsShelfDao;
 import com.minke.mallmanagement.merchant.dao.MerchantApplicationDao;
 import com.minke.mallmanagement.user.dao.UserGovernanceDao;
@@ -45,8 +46,8 @@ public class MerchantApplicationService {
     private static final int ROLE_MERCHANT = 2;
 
     /** 列表默认条数 / 上限（与 {@code AuditService} 同口径）。 */
-    public static final int DEFAULT_LIMIT = 100;
-    public static final int MAX_LIMIT = 500;
+    public static final int DEFAULT_LIMIT = PageLimits.DEFAULT_PAGE_SIZE;
+    public static final int MAX_LIMIT = PageLimits.MAX_PAGE_SIZE;
 
     private final MerchantApplicationDao applicationDao;
     private final UserGovernanceDao userGovernanceDao;
@@ -117,7 +118,15 @@ public class MerchantApplicationService {
         return result;
     }
 
-    /** 管理端申请列表（{@code status} 可空 ⇒ 全部）。 */
+    /**
+     * 管理端入驻申请列表（{@code status} 可空 ⇒ 全部）。
+     *
+     * <p>⚠️ <b>本列表必须返回明文</b>（用户 2026-10-18 手验裁决）：客服要按
+     * {@code ContactPhone} / {@code ShopAddress} 打电话核实，掩码会让审核无法完成。
+     * D3-4 曾在这里接过读侧掩码，现按要求**恢复明文**；脱敏只保留在用户治理列表
+     * （{@code UserGovernanceService.listUsers}），且明文由单行详情端点按次查看并留痕。
+     * {@link #myApplications}（商家看自己的申请）与审核快照同样保持明文。
+     */
     public Map<String, Object> listForAdmin(String status, Integer limit) {
         int effective = normalizeLimit(limit);
         Map<String, Object> result = new HashMap<>();

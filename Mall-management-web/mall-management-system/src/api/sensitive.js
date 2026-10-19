@@ -48,7 +48,7 @@ async function post(path, body) {
  * 词表（管理端「敏感词库」）。
  *
  * @param {object} [p]
- * @param {number} [p.limit] 页大小（默认 100，上限 500）。
+ * @param {number} [p.limit] 页大小（默认 100，上限 100）。
  * @param {number} [p.offset] 偏移（默认 0）。
  * @returns {Promise<{success:boolean, list:Array, total:number, limit:number, offset:number}>}
  *          每项含 `Id` / `Word` / `CreatedAt`（后者是**无时区的文本**，前端按浏览器时区转）。

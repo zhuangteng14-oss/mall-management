@@ -1,0 +1,155 @@
+块 7 · 可观测域整改报告
+日志分级标准重构 + 压测表现 + 空态保底 + 回放一致性
+====================================================
+日期：2026-10-17
+分支：feat/c3-admin-block7
+提交：b410ecc「feat(block7): 日志分级/流轨动效/空态保底/回放保真四线整改」
+状态：本地已提交，未 push / 未开 PR / 未合并
+
+一、结论
+----------------------------------------------------
+四项 P0 全部落地，且每项都有「真后端 8088 + 真前端 8080 + 真页面」的运行时证据，
+不是只改代码。后端 19 个测试类 155 条全绿；前端 lint 0 错、生产构建通过。
+
+二、P0-1 日志等级与颜色语义重构
+----------------------------------------------------
+口径（唯一规则表在 EventBroadcaster#severityOf + 类注释）：
+  PROTECT（紫）= 能解释数据变化原因的主动拦截，绝不是错误：
+      入站限流 / 熔断翻转 / 库存不足（防超卖）/ 身份拒绝 / 敏感词拒收·打码 /
+      重复提交拦截 / 出生闸拦下非法态 / 非法状态流转被拒
+  WARN（黄）= 解决不了根本问题但系统能提示、能降级、已重试：
+      L2 缓存降级与读取失败（回落 DB）/ 取锁异常（fail-open 直行）/
+      释放锁异常（租约兜底）/ 锁等待超时 / MQ·通知重试中 / 审计·通知失败
+  ERROR（红）= 数据链断裂 / 系统崩溃：
+      result=error（SQL、未捕获异常、库存写库失败）/ DLQ /
+      已落库后才观测到非法状态（强一致性被破坏）
+  INFO = 成功路径与 miss/missing 这类「什么也没发生」。
+
+指标与日志页口径：
+  · 业务失败率 fail = error ÷ 事件数，**只数红色**；
+  · warn 单列为「警告率」，protect 单列为「防护拦截率」；
+  · 三口径并排展示但绝不相加，warn / protect 均不参与健康度。
+  · 回放指标同样改为 error only，并新增 warn 折线（黄色虚线）。
+
+证据（docs/agent/evidence/c3-block7/）：
+  · 3a4f-severity-log.png（22:58:39）
+    压测同屏：信息 1,049 / 防护 999 / 警告 0 / 错误 0；
+    业务失败率 0.0%，防护拦截率 48.8%。
+  · 3a4f-severity-rework.txt（22:58:44）
+    同配比回归 n=6244：info 3455 / protect 2789 / warn 0 / error 0，fail 0.0%。
+    改动前同场景基线为 warn 222 / 2088 = 10.6%。
+  · 3a4f-severity-duplicate.png（22:58:03）
+    重复提交拦截显示为 PROTECT「防护」，等级列不溢出、不压「防护」类列。
+  · 3a4f-warn-yellow-log.png + 3a4f-warn-yellow.txt（22:50:05）
+    redisDown 演练：n=5098，protect 1001 / warn 41 / error 0；
+    fail 0.0%、warn 0.8%、protect 19.6% —— 紫黄同屏、红色为 0。
+
+三、P0-2 SSE 流轨方向与「假死」
+----------------------------------------------------
+  · 主链光点/粒子一律从左向右（正向）流动；点阵虚线同步向前。
+  · 取消订单新增独立分支：箭头向下 + 取消粒子「向右下」飞出，
+    大批量取消时视觉不再停在原地假死。
+  · 背压：每帧最多抽样 120 条 move、最多新生成 8 个粒子；
+    主链数组上限 10、取消数组上限 8、回溯窗口 300 条；
+    全量条数照常记账（账不压，只压渲染）。
+  · 修掉一处真实的 CSS 覆盖 bug：取消节点 `.a-of-lane-cancel{top:88px}`
+    被后面同优先级的 `.a-of-lane-node{top:0}` 压掉，导致与「已完成」重叠；
+    选择器改为 `.a-of-lane .a-of-lane-cancel`，实测节点 y 偏移 = 88px。
+
+证据：
+  · c3b7-rail-motion.gif（22:43:18，882×256，46 帧）
+    主链粒子 left 1192.03 → 1205.19（向右）；
+    取消粒子 left 1008.59 → 1112.84、top 422.93 → 444.88（向右下）。
+  · 3a4f-flow-backpressure.png + 3a4f-flow-backpressure.txt（22:53:37）
+    单帧 3,000 条：capturedDelta = 3000（全量记账），recentMoves 121，
+      主链 4 / 取消 4 个粒子，处理 4ms；
+    连续 10 帧 × 2,000 = 20,000 条：capturedDelta = 20000，
+      每帧 4.5–5.8ms（重跑最大 10.1ms），>50ms Long Task = 0，DOM 粒子峰值 ≤18。
+
+四、P0-3 图表没数据不能变白板
+----------------------------------------------------
+  · 指标页：rows 为空时 X 轴仍铺满最近 60 个秒刻度；
+  · 状态页趋势图：无 insight / liveTail 时保留最近 24 小时 + 当前 = 25 个整点刻度；
+  · 状态页三张耗时直方图：桶边界常驻（每张 ≥5 个桶），数据补 0；
+  · 空态改为透明胶囊覆盖（`.bc-state--overlay` + pointer-events:none），
+    坐标轴、网格线、容器高度全部保留，仍在的空态提示是
+    「当前时间段暂无有效样本 / 耗时样本」。
+
+证据（确定性构造 n=0，不靠真流量碰巧走到）：
+  · 3a4f-empty-axis.txt（22:52:28）
+    metrics xLabels=60、图组件 xLen=60、画布仍有像素、空态胶囊在；
+    timeline 趋势 xLen=25、3 张直方图 xLen≥5、3 个空态胶囊。
+  · 3a4f-empty-metrics.png、3a4f-empty-timeline.png、
+    3a4f-empty-timeline-hist.png（22:52:24–28）。
+
+五、P0-4 回放不再「偷梁换柱」
+----------------------------------------------------
+  · 状态页与指标页回放复用同一套高保真图表组件：
+    折线图（LineChart）、环形图（DonutChart）、阶梯/漏斗、耗时直方图；
+    给组件传 `:isReplay="true"`，图表角标显示「回放」，
+    数据源绑定回放台账帧 `replaySession.metricTicks / stateChanges`，
+    不再另画一套静态方块。
+  · 回放时钟（rAF）逐帧推进；跨页用 hash 切页保活模块级会话；
+    切页前暂停、到页再续播，回放不会在切页途中跑完。
+  · 明确口径：回放指标由事件台账按日志时间 1 秒窗口推算，不是 HTTP 原始指标；
+    QPS 是事件吞吐；延迟只统计带 DurationUs 的事件，无样本画断点而不是 0。
+
+证据：
+  · 3a4f-replay-timeline.png、3a4f-replay-metrics.png（22:49:07 / 22:49:11）
+  · 3a4f-replay-fidelity.txt（22:49:11，14/14 项通过）
+    状态页：5 个 KPI、≥5 级阶梯、≥4 个 canvas、≥2 个「回放」角标，
+      画布有真实像素且两次采样指纹变化，回放时钟 846 → 1,455；
+    指标页：≥2 张图、≥2 个 canvas、≥2 个回放角标，
+      画布非白板且逐帧变化，回放时钟 1,966 → 2,598。
+
+六、测试与构建（全部晚于最后一次代码编辑）
+----------------------------------------------------
+  · 后端 3a4f-observe-tests.txt（22:55:24）
+    ./mvnw -Dtest='EventBroadcasterTest,*MetricsTest,EventStreamServiceTest,
+                    OrderStreamServiceTest,AttackEngineTest,AttackSwitchConfigTest,
+                    ReplayServiceTest' test
+    19 个类 / 155 条 / Failures 0 / Errors 0 / Skipped 0。
+    报告按 surefire 文件 mtime 过滤本次运行，避免上次残留被累加。
+    随口径同步修正一条旧断言：insufficient 由 warn 改为 protect。
+  · 前端 3a4f-lint-build.txt（23:00）
+    lint：exit 0，No lint errors found；
+    build：exit 0，Hash 6bb59a294128c1c5，29.6s；
+    仅 2 条既有体积警告（chunk-vendors 791KiB 等），非本次引入。
+
+七、复查环境
+----------------------------------------------------
+  · 后端进程启动于 22:37:46，晚于后端最后一次代码编辑；
+    日志确认：profile = dev、Tomcat 8088、jdbc:mysql://192.168.229.129:3306/
+    mall_management_sql（未在报告中记录任何凭据）。
+  · 前端 dev server 8080；管理端入口 admin.html，
+    状态页路由 #/admin/observe/timeline。
+  · 攻击开关跑完不复位：当前 dev 进程里 Protections = rateLimit/circuitBreak/
+    degrade/retry/poolIsolation，Injections = redisDown（探针收尾按开跑前状态还原）。
+    手工验收黄色 WARN 时可直接复用；若要纯紫场景，先把 Injections 置空。
+
+八、已知边界 / 说明
+----------------------------------------------------
+  · 回放台账只在演练当时「开着日志/事件流页」时才落行；没开页面跑的攻击批次
+    回放按钮不可用。这是既有设计，本次未改接口。
+  · 背压探针是渲染层探针：先 closeStream，再直接调页面自己的 onFrame，
+    验证的是 absorbMoves 抽样与上限，不改业务代码、不 mock 后端。
+  · 分级探针新增前置条件：先清空 Injections，避免 redisDown 的 L2 降级
+    （如实记 WARN）把「warn=0」判据染红；收尾已还原原注入配置。
+  · 本次未动 api/demo-stream.js 公开接口；三页「数据源」切换入口保留。
+  · 未 push / 未开 PR / 未合并；如需上远端请另行指示。
+
+九、证据文件索引（docs/agent/evidence/c3-block7/）
+----------------------------------------------------
+  severity：3a4f-severity-log.png / 3a4f-severity-duplicate.png /
+            3a4f-severity-rework.txt
+  warn 黄：3a4f-warn-yellow-log.png / 3a4f-warn-yellow.txt
+  流轨动效：c3b7-rail-motion.gif
+  背压：3a4f-flow-backpressure.png / 3a4f-flow-backpressure.txt
+  空态：3a4f-empty-axis.txt / 3a4f-empty-metrics.png /
+        3a4f-empty-timeline.png / 3a4f-empty-timeline-hist.png
+  回放：3a4f-replay-fidelity.txt / 3a4f-replay-timeline.png /
+        3a4f-replay-metrics.png
+  测试与构建：3a4f-observe-tests.txt / 3a4f-lint-build.txt
+  探针：scripts/probes/c3b7-severity-rework.mjs、c3b7-rail-motion.mjs、
+        c3b7-replay-fidelity.mjs、c3b7-warn-yellow.mjs、
+        c3b7-empty-axis.mjs、c3b7-flow-backpressure.mjs

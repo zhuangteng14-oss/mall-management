@@ -1,5 +1,6 @@
 package com.minke.mallmanagement.comment.service;
 
+import com.minke.mallmanagement.shared.web.PageLimits;
 import com.minke.mallmanagement.comment.CommentKinds;
 import com.minke.mallmanagement.comment.dao.CommentDao;
 import com.minke.mallmanagement.comment.job.QuestionTimeoutJob;
@@ -73,7 +74,7 @@ public class CommentService {
     public static final int DEFAULT_LIMIT = 20;
 
     /** 列表上限 —— 防止一次拉爆整表（同 {@code CouponService.MAX_LIMIT} 的口径）。 */
-    public static final int MAX_LIMIT = 100;
+    public static final int MAX_LIMIT = PageLimits.MAX_PAGE_SIZE;
 
     /** {@code Content} 列是 {@code varchar(1000)}（方案 §一.1）—— 超了会在 strict mode 下 ERROR 1406。 */
     public static final int MAX_CONTENT = 1000;

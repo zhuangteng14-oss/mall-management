@@ -78,7 +78,7 @@ public class SensitiveWordController {
     /**
      * 词表（管理端「敏感词库」tab）。
      *
-     * @param Limit  页大小（默认 100，上限 500）
+     * @param Limit  页大小（默认 100，上限 100；D3-3 统一上限）
      * @param Offset 偏移（默认 0）
      */
     @PostMapping("/list")

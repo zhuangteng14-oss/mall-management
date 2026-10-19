@@ -82,7 +82,7 @@ powershell.exe -NoProfile -Command "(Test-NetConnection -ComputerName 192.168.22
 **日常用 `dev`，CI 用 `a3`**（2026-10-11 职责分离，见 `tech-debt.md` TD-35）：
 
 ```bash
-SPRING_PROFILES_ACTIVE=dev ./mvnw spring-boot:run    # 日常开发 / 手验 / 攻击模拟器（job 全开）
+SPRING_PROFILES_ACTIVE=dev MALL_MQ_PASSWORD="$(tr -d '\r\n' < ../_work/mq-pass)" ./mvnw spring-boot:run    # 日常开发；MQ 口令必带，否则黄条「MQ broker 连接不可用」是如实告警
 SPRING_PROFILES_ACTIVE=a3  ./mvnw spring-boot:run    # 仅 CI 的 A3 并发门禁（job 全关）
 ```
 

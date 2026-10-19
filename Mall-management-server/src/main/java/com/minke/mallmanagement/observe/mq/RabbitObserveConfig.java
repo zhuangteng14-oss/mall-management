@@ -12,9 +12,14 @@ import org.springframework.amqp.core.TopicExchange;
 import org.springframework.amqp.rabbit.config.SimpleRabbitListenerContainerFactory;
 import org.springframework.amqp.rabbit.connection.ConnectionFactory;
 import org.springframework.amqp.rabbit.core.RabbitTemplate;
+import org.springframework.amqp.rabbit.listener.MessageListenerContainer;
+import org.springframework.amqp.rabbit.listener.RabbitListenerEndpointRegistry;
 import org.springframework.amqp.support.converter.Jackson2JsonMessageConverter;
 import org.springframework.amqp.support.converter.MessageConverter;
+import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.boot.ApplicationRunner;
 import org.springframework.boot.autoconfigure.amqp.SimpleRabbitListenerContainerFactoryConfigurer;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
@@ -218,5 +223,39 @@ public class RabbitObserveConfig {
         factory.setDeBatchingEnabled(true);
         factory.setDefaultRequeueRejected(false);
         return factory;
+    }
+
+    /**
+     * 启动后**如实报一次**监听容器是否真的在跑。
+     *
+     * <p>⚠️ 这一条是 2026-10-18 现场事故换来的：本地后端用
+     * {@code --spring.rabbitmq.listener.simple.auto-startup=false} 起过一次，容器没起来，
+     * 但应用**一切正常** —— 页面不报错、发布侧照常发、broker 队列从 0 涨到 53 万。
+     * 直到用户发现「回放为空」才暴露。仅靠「队列只进不出」这个事实在日志里没有任何一行提示。
+     *
+     * <p>这不是故障恢复（容器不跑就该被看见，而不是被偷偷拉起来）：只打一行 INFO/WARN，
+     * 把「消费者在不在」变成启动日志里可检索的事实。{@code running=0} 是 WARN。
+     */
+    @Bean
+    @ConditionalOnProperty(prefix = "spring.rabbitmq", name = "host")
+    public ApplicationRunner observeConsumerStateReporter(
+            ObjectProvider<RabbitListenerEndpointRegistry> registryProvider) {
+        return args -> {
+            RabbitListenerEndpointRegistry registry = registryProvider.getIfAvailable();
+            if (registry == null) {
+                return;     // 没有 rabbit 自动装配（切片测试等）⇒ 没有容器可报
+            }
+            long total = registry.getListenerContainers().size();
+            long running = registry.getListenerContainers().stream()
+                    .filter(MessageListenerContainer::isRunning)
+                    .count();
+            if (running == 0) {
+                log.warn("[EVENT] 事件消费者**没有在运行**（监听容器 running=0/{}）—— "
+                        + "队列会只进不出、回放查不到新事件；检查 "
+                        + "spring.rabbitmq.listener.simple.auto-startup 是否被关掉", total);
+            } else {
+                log.info("[EVENT] 事件消费者已启动（监听容器 running={}/{}）", running, total);
+            }
+        };
     }
 }

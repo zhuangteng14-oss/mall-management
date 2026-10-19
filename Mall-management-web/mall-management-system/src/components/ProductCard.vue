@@ -17,9 +17,9 @@
        ⇒ 落成**可选 prop `beforeNav`**，`HomePage` 传自己的那两行；另两处不传。
     ③ **元素不一样**：`HomePage` 是 `<article @click>` + `router.push`，另两处是 `<router-link>`。
        ⇒ 一律用 `<router-link>`（中键 / 新标签页能开，比 `@click` 强），副作用走 ②。
-    ④ **HTML 合法性**：`<a>` 内**不得**嵌交互内容，而加购钮是个 `<button>`
-       ⇒ 本组件用 `<span class="pcard-buy">`（**恒 `disabled` 的预留件**，本就不是可点物）。
+    ④ **HTML 合法性**：`<a>` 内**不得**嵌交互内容 ⇒ 加购钮用 `<span class="pcard-buy" role="button" tabindex="0">`（批四起可点；键盘与 `aria-label` 自补、点击 `.stop.prevent` 防跳详情）。
        ⚠️ 这一条是**对 `HomePage` 原写法的修正**，不是照抄 —— 原写法三处里只有它踩了这个。
+       ⚠️ 不用原生 `<button>` 是因为它在 `<a>` 里非法，不是因为它不可点。
     ⑤ **空图守卫**：`ShopHome` / `ProductPage` 两处有 `v-if="…GoodImg"`，`HomePage` 没有。
        ⇒ **保留**守卫。⚠️ 这不是「三取二数多数票」：`GoodImg` 为空时裸 `<img src="">` 画的是
        浏览器的**破图图标**，而空图该露 `.pcard-img` 的灰底（稿 `.ph` 就是灰方块）——
@@ -110,10 +110,10 @@
         <div class="pcard-price">
           <span class="sym">¥</span><span class="int">{{ priceInt }}</span><span class="dec">.{{ priceDec }}</span>
         </div>
-        <!-- ⚠️ 预留件（恒不可点）：加购要等 C3〈购物车〉笔；本卡现只进详情页。
-             用 <span> 不用 <button>：见文件头 ④（<a> 内不得嵌交互内容）。 -->
-        <span class="pcard-buy" title="预留 · 加入购物车（待 C3〈购物车〉；本卡现只进详情页）">
-          <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 5h10l-1 8.4a1 1 0 0 1-1 .9H5a1 1 0 0 1-1-.9z" stroke-linejoin="round"/><path d="M6 5V3.9a2 2 0 1 1 4 0V5" stroke-linecap="round"/></svg>
+        <!-- ⚠️ 批四起是**真加购**：走 `/cart/add`，`.stop.prevent` 防冒泡到外层 `<a>`。
+             用 <span role="button"> 不用 <button>：见文件头 ④（<a> 内不得嵌交互内容）。 -->
+        <span class="pcard-buy" :class="{ busy: buyState === 'busy', done: buyState === 'done' }" role="button" tabindex="0" :aria-label="buyLabel" :title="buyLabel" @click.stop.prevent="onAddToCart" @keydown.enter.stop.prevent="onAddToCart" @keydown.space.stop.prevent="onAddToCart">
+          <svg v-if="buyState !== 'done'" width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 5h10l-1 8.4a1 1 0 0 1-1 .9H5a1 1 0 0 1-1-.9z" stroke-linejoin="round"/><path d="M6 5V3.9a2 2 0 1 1 4 0V5" stroke-linecap="round"/></svg><svg v-else width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8"><path d="m3.5 8.4 3 3 6-6.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
         </span>
       </div>
       <div class="pcard-meta">
@@ -125,7 +125,7 @@
 </template>
 
 <script setup>
-import { computed } from 'vue'
+import { computed, onBeforeUnmount, ref } from 'vue'; import { useRoute, useRouter } from 'vue-router'; import { cartAdd } from '../api/order'; import { getCustomerId, getMerchantId } from '../api/auth'
 import { productLink } from '../config/product-link'
 // ⚠️ 三个类别 / 售完判据一律从 `config/goods-flags.js` 取（**本文件不重写一遍**）—— 见文件头
 //    〈类别标签与已售完〉与被 import 那个模块的头注。
@@ -170,7 +170,7 @@ const priceDec = computed(() => {
 
 // `SoldQty` 由 `GoodsCacheService.listHome` 的 LEFT JOIN 补出（本笔同批后端改动）。
 // 老响应里没有这个键 ⇒ `undefined || 0` = 0 ⇒ 不画那一段（不画 ≠ 画 0）。
-const soldQty = computed(() => Number(props.goods.SoldQty) || 0)
+const soldQty = computed(() => Number(props.goods.SoldQty) || 0); /* 批四（2026-10-18）：直接加购 —— 走既有 `/cart/add`，不新增端点。⚠️ 同行追加、不新增行（本文件多处在文档里按行号被引）。加购以 `ProductCode` 计行 ⇒ 卡上没有型号码时**不猜**，请用户进详情页选型号。 */ const router = useRouter(); const route = useRoute(); const buyState = ref('idle'); let buyDoneTimer = 0; const buyLabel = computed(() => buyState.value === 'done' ? '已加入购物车' : soldOut.value ? '该商品已售完' : buyState.value === 'busy' ? '正在加入…' : '加入购物车'); function onAddToCart() { if (buyState.value === 'busy') return; if (soldOut.value) { alert('该商品已售完'); return } const buyer = getCustomerId() || getMerchantId(); if (!buyer) { alert('请先登录再购买商品'); router.push({ path: '/login', query: { redirect: route.fullPath } }); return } const code = props.goods && props.goods.ProductCode; if (!code) { alert('该商品暂不支持直接加购，请进详情页选择型号'); return } const merchantId = props.goods.MerchantId; if (!merchantId) { alert('该商品缺少商家信息，暂时无法加购'); return } buyState.value = 'busy'; cartAdd({ CustomerId: buyer, MerchantId: merchantId, ProductCode: code, Quantity: 1 }).then((r) => { if (r && r.success) { buyState.value = 'done'; if (buyDoneTimer) clearTimeout(buyDoneTimer); buyDoneTimer = setTimeout(() => { buyState.value = 'idle' }, 1600) } else { buyState.value = 'idle'; alert((r && r.msg) || '加入购物车失败') } }).catch(() => { buyState.value = 'idle'; alert('网络错误，请稍后重试') }) } onBeforeUnmount(() => { if (buyDoneTimer) clearTimeout(buyDoneTimer) })
 
 // ── 类别标签与已售完（C3 块 5 ·〈Bug 2/3〉落码，2026-10-12）────────────────────────────
 // ⚠️ 三个标记都是**后端算好的**（`goodsSelectHome` / `productSearch` 投影里的 `IsSeckill` /
@@ -379,11 +379,19 @@ const rowKinds = computed(() => (
   color: var(--ink-3);
   border: 1px solid var(--line-2);
   border-radius: 50%;
+  cursor: pointer;
   transition: background 0.15s, color 0.15s, border-color 0.15s;
 }
 .pcard:hover .pcard-buy {
   background: var(--brand);
   border-color: var(--brand);
+  color: #fff;
+}
+.pcard-buy.busy { opacity: .6; cursor: progress; }
+.pcard-buy.done,
+.pcard:hover .pcard-buy.done {
+  background: var(--success);
+  border-color: var(--success);
   color: #fff;
 }
 /* 元信息行：**两端**（左店名 / 右销量）。

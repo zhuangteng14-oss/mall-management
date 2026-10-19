@@ -1,0 +1,231 @@
+块 7 PR 申请说明
+生成时间：2026-10-18 01:52（+08:00）
+分支：feat/c3-admin-block7 → main
+PR：#92  https://github.com/zhuangteng14-oss/mall-management/pull/92
+远端 HEAD：3f4a4c4（已合并进 main：3bb6168）
+
+══════════════════════════════════════════════════════════════════
+一、PR 标题与范围
+══════════════════════════════════════════════════════════════════
+
+建议标题：
+  feat(block7): 可观测域收口 —— 指标 / 日志 / 状态流转 / 攻击演练 / 回放
+
+范围：块 7 全量（可观测域 4 项 + 库存治理 2 项 + A 系列稳定性整改）。
+分支相对 main：117 个提交，683 个文件，+117,851 / −811 行。
+
+══════════════════════════════════════════════════════════════════
+二、核心功能
+══════════════════════════════════════════════════════════════════
+
+1. 可观测基础设施
+   - 三条 SSE 端点（指标 / 订单流 / 事件流）+ EventBroadcaster；
+     9 类事件环（Stock / Audit / Notify / Sensitive / Identity / Cache / Lock /
+     OrderState / Protection）。
+   - 每连接一份帧源、环满记账、异步超时关闸；动态背压与智能聚合。
+   - 事件台账 observed_event 建表（Migration ⑲）+ 保留期清理 Job；
+     MQ 发布 / 消费与批次跨线程透传（MQ 缺席时上屏仍接通）。
+
+2. 指标页
+   - S1 时间栈 + 实体栏；ECharts 主题收成一份（甲/乙版差异面）。
+   - 7 项图表、库存水位、P99；P99 剔除 SSE 长连接、无样本留空。
+
+3. 实时日志页
+   - 三栏驾驶舱、8 类事件卡片流、自然语言句子、色系分档。
+   - 「PROTECT」防护拦截独立成级；日志统计与聚合解耦。
+   - traceId 链路抽屉；窗口化渲染 + 分页 / 无限滚动；切页不重置。
+
+4. 状态流转页
+   - 五态计数、环图、漏斗进度、状态机、时间线。
+   - 高保真分析面：24h 积压趋势、耗时直方图、账龄分桶、健康度、最慢 Top N。
+   - 底部明细改服务端分页（真实 COUNT + WHERE status=…），不再拿 1000 行
+     样本当全集；状态流转明细 / 超时取消汇总口径同步。
+
+5. 攻击模拟器
+   - 八场景真压测、权重编排、异步引擎、开关面板/档位、/attack/stop。
+   - 演练记录落库；清场；演示种子。
+   - 演练环境复位 / 种子回填：
+       · POST /admin/observe/attack/reset（种子 SKU 库存、父商品在架、
+         演示商家解冻、秒杀已售复位；真实业务行不动；写审计
+         OBSERVE_ATTACK_RESET）；
+       · /attack/run 前 autoResetIfNeeded()（尽力而为，失败只记 WARN）；
+       · 清场与复位合并，按钮改为「清理并恢复环境」；
+       · 前端失败态「一键重置演练商品库存」并自动重跑。
+
+6. 回放
+   - 日志 / 指标 / 状态三页共用一根回放时钟，倍速可调。
+   - 进度条改原生 range 拖拽（Seek）：
+       · @input 不重绘；@change 调用一次 seekReplaySession；
+       · 停表 → 清空指标拍/流转/日志 → 二分定位 → 0..idx 全量 apply
+         → 状态全量重建（指标窗口整段入队后统一推进，避免同毫秒丢条）；
+       · 之前在播则续播，之前暂停则停在新位置；
+       · seekToken 防重入，rebuilding 抑制历史粒子动画。
+   - 孤儿批次守卫：DrillRecordDao 增加 EventCount 子查询 → HasData；
+     下拉置灰「（数据已过期清理）」，空批次不再进入 0/0「已放完」假死。
+
+7. 库存治理
+   - CAS 扣减、下单即扣、超时释放条件化；秒杀扣减接线（TD-38）。
+
+8. 稳定性与防护（A 系列）
+   - A3 事件幂等键 (TraceId, Seq)；A4 死信上报 + trace 上下文归属；
+     A5 掩码回写拦截；A7 SSE 空闲看门狗。
+   - 破坏性端点只允许管理员；防护异常统一返 200 + 可识别错误码。
+   - 限流 / 熔断 / 分池（第 9 类事件环）；死锁索引 + 重试 + 重试可视化。
+   - TraceIdFilter、logback 轮转、慢 SQL 告警。
+
+9. 演示数据源
+   - 「模拟日常」保留；日志 / 指标 / 状态三页都保留「数据源」切换入口
+     （真实 / 模拟日常），api/demo-stream.js 公开接口未改。
+
+══════════════════════════════════════════════════════════════════
+三、主要修复
+══════════════════════════════════════════════════════════════════
+
+- 5b971f1  断开循环依赖：ObserveMetricsConfig 的 MeterFilter 改 static。
+- 136b27c  P99 剔除 SSE 长连接，无样本留空（修 26.8 秒误红）。
+- 87806fe  防护异常统一返 200，新增可识别错误码。
+- c11249a  审计 TargetId 按 varchar(128) 截断，避免整条审计行丢失。
+- 005286b  日志筛选改为直读原始台账（勾聚合 + ≥WARN 不丢数据）。
+- 9a65282  敏感词 / 重复提交归 PROTECT，业务失败率只算 WARN+ERROR。
+- 06a4373  日志等级列按 7ch 加宽，PROTECT 不再压住「类」列。
+- aad168c  指标页库存水位黄条消除（基线缺失时用当前库存兜底）。
+- 892b8ad  真实链路三问题：日志空白 / 切页重置 / 回放无数据。
+- ad6ee74  状态流转明细服务端分页、静态流轨、超时取消汇总。
+- c17745d  回放与实时演练一致：时区口径、全批载入、高保真复用、
+           补回无批次号取消。
+- d25b653  演练环境复位 / 孤儿批次守卫 / 进度条拖拽重建（A/B/C 三件）。
+- 04d1327  smoke 切片补 OrderInsightService，全量测试恢复 0 失败 / 0 错误。
+- 69557df  录屏原始帧不入库（.gitignore + 取消跟踪），GIF 保留。
+- c65362b  事件流 smoke 不再断 counts 数值（CI 上跨测试累计 stock=19）。
+- edba73f  A3 的 C 场景等限流令牌桶刷新（修 4 条时序假红）。
+- 3f4a4c4  A3 的 S4a burst 先等限流窗口刷新（修 A-S4a-4 时序假红）。
+
+══════════════════════════════════════════════════════════════════
+四、测试结果（全部在最终代码之后重跑）
+══════════════════════════════════════════════════════════════════
+
+后端（Mall-management-server）：
+  命令：./mvnw test
+  结果：BUILD SUCCESS
+        Tests run: 595, Failures: 0, Errors: 0, Skipped: 26
+        总耗时 39.011s，完成于 2026-10-18 01:45:44 +08:00
+  日志：_work/b7-final-mvn-test2.txt（EXIT=0）
+  说明：跳过的 26 例均为需真库 / Redis 的条件用例：
+        GoodsAuditTxAtomicityTest(5)、GoodsTypeUniqueIndexTest(4)、
+        GoodsWriteTxAtomicityTest(7)、LockSceneRedisTest(4)、
+        MallManagementApplicationTests(6)。不是失败。
+  修复前：25 个 NoSuchBeanDefinitionException（OrderInsightService），
+        全部落在 smoke 包；已由 04d1327 补齐 @Import 名单。
+
+前端（Mall-management-web/mall-management-system）：
+  npm run lint → DONE  No lint errors found!（LINT_EXIT=0）
+                日志：_work/b7-pr-lint.txt
+  npm run build → DONE  Build complete.（BUILD_EXIT=0）
+                 Hash: 6a6d2db7f4357128
+                 Time: 23091ms
+                 完成于 2026-10-18 01:47:34 +08:00
+                 日志：_work/b7-pr-build.txt
+  两次门禁均晚于最后一次前端源码编辑（AttackConsole.vue，01:20）。
+
+══════════════════════════════════════════════════════════════════
+五、证据与交付物
+══════════════════════════════════════════════════════════════════
+
+- 证据根：docs/agent/evidence/c3-block7/
+    b7a2-reset/   演练环境复位（真库 13 行、7 项 UI 断言）
+    b7b-orphan/   孤儿批次（166 条中 165 条 EventCount=0）
+    b7r3-seek/    真鼠标拖拽 seek（40% / 70%，canvas 哈希 + oracle 对齐）
+    drag-seek.gif 回放拖拽录屏（GIF 为交付物，原始帧不入库、可由探针重生成）
+    其余各阶段证据帧与探针输出
+- 探针：scripts/probes/（probe-b7r3-seek.mjs、probe-b7a2-reset.mjs、
+        probe-b7r3-seek-gif.mjs 等）
+- 历史收笔报告：reports/ 与 docs/agent/archive/
+
+══════════════════════════════════════════════════════════════════
+六、工作区与提交
+══════════════════════════════════════════════════════════════════
+
+- git status：干净（无未跟踪、无未提交改动）。
+- 本轮新增（截至合并）：
+    04d1327  fix(block7): smoke 切片补 OrderInsightService
+    69557df  chore(block7): 录屏原始帧不入库
+    c65362b  fix(block7): 事件流 smoke 不再断 counts 数值
+    edba73f  fix(block7): A3 的 C 场景等限流令牌桶刷新
+    3f4a4c4  fix(block7): A3 的 S4a burst 先等限流窗口刷新
+- .gitignore 新增 **/*-frames/；三个帧目录已取消跟踪，
+  本地文件保留（需要时可删除，不影响仓库）。
+- 未新增任何明文口令；口令仍只从 _work/ 读取。
+
+══════════════════════════════════════════════════════════════════
+七、推送结果
+══════════════════════════════════════════════════════════════════
+
+- git push -u origin feat/c3-admin-block7：成功（首次为新建分支，upstream 已设置）。
+- 推送轮次（同一分支）：
+    69557df → c65362b → edba73f → 3f4a4c4
+- PR 由 gh pr create 发起：#92（base: main ← head: feat/c3-admin-block7）。
+- 最终远端 HEAD：3f4a4c433422f293499d2e372a6f1c05fc82f771（3f4a4c4）。
+- 合并：2026-10-18 02:29:13（+08:00），merge commit 3bb6168，
+  状态 MERGED；合并时的 head 就是 3f4a4c4（包含 A3 的最终修复）。
+
+══════════════════════════════════════════════════════════════════
+八、需要说明的边界
+══════════════════════════════════════════════════════════════════
+
+- 26 个跳过用例依赖真库 / Redis，不在本次 CI 无外部依赖的判定范围内；
+  它们的状态是 SKIPPED，不是 FAILED。
+- dev profile 的 app.auth.enabled=false；默认 profile 仍开启鉴权，
+  手验结论不可互推。
+- 前端 canvas 哈希仅用于证明「拖拽 @input 阶段不重绘」，
+  不代表像素级视觉回归。
+- 「清理并恢复环境」是破坏性动作，本轮没有为截图点下去；
+  其复用的 restoreSeedEnvironment() 已被 /attack/reset 真库验证。
+
+══════════════════════════════════════════════════════════════════
+九、PR 与 CI 结果（2026-10-18 02:30 终稿）
+══════════════════════════════════════════════════════════════════
+
+- PR：#92
+  https://github.com/zhuangteng14-oss/mall-management/pull/92
+  title: feat(block7): 可观测域整体交付与 D 段防护加固 (UI 重构 + 回放重构 + 异常兜底)
+  状态：MERGED（2026-10-18 02:29:13 +08:00），merge commit 3bb6168。
+
+- 四轮 CI（每次修复后重推，判据一律取 artifact 的 gates，不看 job 颜色）：
+
+  第 1 轮 run 39055832261：Backend 红
+    ObserveStreamSmokeTest 断 8 类 counts 全为 0，CI 实际 "stock":19
+    （counts 在同一份切片上下文里跨测试累计，执行顺序与本地不同）。
+    修复 c65362b：只断 8 个键存在，不断数值。
+
+  第 2 轮 run 39056399205：Backend / Frontend pass；A3 红 4 项
+    artifact：gates.count=30，gates.failed=4，exitCode=4
+    失败：C-1 / C-2 / A-C6-1 / A-C6-2
+    证据：A-C6-1 的 6 条出生闸探针全部 HTTP 429
+          「请求过于频繁：入站限流每 1 秒放行 200 条…」；
+          C 场景 add/pay/dly/rcv 探针 success 均为 0。
+          同一轮 120 QPS 负载门禁全绿（A-S1-1 5xx=0 / connErr=0；
+          A-S4b-2 add=2880/2880、pay=1440/1440、dly=1080/1080、rcv=1080/1080）。
+          ⇒ 端点功能正常，是探针与负载抢同一个 200/s 令牌桶。
+    修复 edba73f：C 场景开头等一个刷新周期（1.2s）。
+
+  第 3 轮 run 39057108728：A3 仅剩 A-S4a-4 红
+    artifact：gates.count=30，gates.failed=1，exitCode=1
+    A-S4a-4：orderReceiveIfUp on U ×20，succ=0 但 msg 命中=0。
+    相邻 A-S4a-1/-2/-3 全绿；同一轮 B2 的 loginAdd 实测到 3 条 429。
+    ⇒ 最合理的解释是该 burst 整批落在限流窗口尾部被打回
+      （推断：该批响应原文未进 artifact，不冒充实测）。
+    修复 3f4a4c4：新增 freshLimitWindow()（sleep 1.2s > 1s 刷新周期），
+      S4a 的 setup 与 c2..c7 前各等一拍；同时新增 codeHist()，
+      把 HTTP 状态分布写进 A-S4a-1..6 的 detail，复发时可直接区分
+      「业务拒绝」与「被限流」。C 场景改用同一 helper。
+
+  第 4 轮（最终）run 39057811142：三项全绿
+    Backend tests             pass  1m12s
+    Frontend build            pass  1m24s
+    A3 concurrency (120 QPS)  pass  4m52s
+    A3 artifact（_work/b7-pr-a3-artifact3）：
+      gates.count = 30，gates.failed = 0，exitCode = 0
+      A-S4a-4: PASS  succ=0 msg 命中=20 codes={200=20}
+
+- 本地补跑（两种执行顺序）：595 / 0 / 0 / 26，均 BUILD SUCCESS。
+- 最终代码即合并进 main 的 3f4a4c4；工作区干净。

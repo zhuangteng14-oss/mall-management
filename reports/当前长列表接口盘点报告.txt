@@ -1,0 +1,213 @@
+当前长列表接口盘点报告
+================================================================
+日期      ：2026-10-17
+分支      ：feat/c3-admin-block7（块 7 收尾 · 合并前加固）
+范围      ：Mall-management-server 全部 Controller + 对应 DAO/SQL + Mall-management-web 调用面
+方法      ：静态代码盘点（只读）。每条结论都可复核到「文件:行号」；
+            本报告**未**对每个端点做运行时压测，量级判断是「随业务增长」的结构性推断。
+            唯一有运行时数据的是 /goods/goodsSelectHome 一族（块 7 压测走的缓存价格路径，不是列表路径）。
+证据等级  ：【可复核】= 源码逐行读到；【推断】= 由表结构和调用面推出，未实测。
+
+一、结论摘要
+----------------------------------------------------------------
+1. 真正同时具备 limit + offset、且 SQL 落到 LIMIT ? OFFSET ? 的 DB 列表端点
+   共 10 个（清单见第二节）。
+2. 大多数列表端点只有 limit（SQL 只有 LIMIT ?，没有 OFFSET），属于
+   「截断式上限保护」，不是真正翻页 —— 超出上限的数据不可达。
+3. 没有任何 DB 列表端点出现「传了 limit 但 SQL 完全不用」。
+   唯一例外是 /admin/observe/metrics/history：limit 作用在内存滚动窗口（最多 60 条），
+   不是 SQL LIMIT，属于设计如此。
+4. 风险最高的无分页端点集中在：消息（history / conversations）、订单（用户端与商家端
+   四条）、营销券包（myCoupons）、统计商家榜（admin/stats.merchants）。
+5. 后端不存在「接收 offset 但不绑定」的端点。
+6. 轮播图、公告、死信、库存均没有独立的后端列表端点（见第七节）。
+
+二、已真正分页的端点（10 个，均为 limit + offset）
+----------------------------------------------------------------
+【可复核】
+
+ 1) POST /goods/goodsSelectHome
+    参数：limit 默认 24、上限 100；offset 默认 0
+    证据：GoodsService.java:252-255,266-287；SQL GoodsCacheService.java:141
+ 2) POST /goods/productSearch
+    参数：limit 默认 24、上限 100；offset 默认 0
+    证据：GoodsService.java:521-533；SQL GoodsDao.java:288
+ 3) POST /goods/categoryGoods
+    参数：limit 默认 24、上限 100；offset 默认 0
+    证据：GoodsService.java:550-563；SQL GoodsDao.java:351
+ 4) POST /admin/accounts/users
+    参数：limit 默认 100、上限 500；offset 默认 0
+    证据：UserGovernanceService.java:27-28,37-45；SQL UserGovernanceDao.java:159
+ 5) POST /comment/list
+    参数：Limit 默认 20、上限 100；Offset 默认 0
+    证据：CommentService.java:73-76,180-224；SQL CommentDao.java:302-303
+ 6) POST /comment/adminList
+    参数：同 5（默认 20 / 上限 100；Offset 默认 0）
+    证据：CommentService.java:294-316；SQL CommentDao.java:369-372
+ 7) POST /comment/imageReview
+    参数：同 5
+    证据：CommentService.java:839-855；SQL CommentDao.java:624-626
+ 8) POST /report/list
+    参数：Limit 默认 100、上限 500；Offset 默认 0
+    证据：ReportService.java:91-92,210-218；SQL ReportDao.java:205
+ 9) POST /sensitive/list
+    参数：Limit 默认 100、上限 500；Offset 默认 0
+    证据：SensitiveWordService.java:72-73,101-109；SQL SensitiveWordDao.java:52-53
+10) POST /admin/observe/attack/records
+    参数：limit 默认 20、上限 200；offset 默认 0
+    证据：DrillRecordService.java:53-54,201-217；SQL DrillRecordDao.java:112-114
+
+三、只 limit、无 offset（超出上限即不可达）
+----------------------------------------------------------------
+【可复核】以下端点 SQL 均只有 LIMIT ?，没有 OFFSET：
+
+  管理/运营类
+  - POST /admin/order/list
+      limit <= 0 ⇒ 200；上限 500。SQL AdminOrderDao.java:96，clamp 在 :182-186
+      ⚠️ total = 全表 COUNT(*)，不是筛选后总数，不能当截断判据
+         （AdminOrderService.java:88-95）
+  - POST /admin/audit/list        默认 100 / 上限 500；AdminAuditDao.java:108
+  - POST /admin/notify/history    默认 100 / 上限 500；NotificationDao.java:188
+  - POST /admin/accounts/applications    默认 100 / 上限 500；MerchantApplicationDao.java:83-85
+  - POST /admin/catalog/applications     默认 100 / 上限 500；GoodsAuditDao.java:101-103
+  - POST /admin/marketing/coupon/list    默认 100 / 上限 500；CouponDao.java:299
+  - POST /admin/marketing/coupon/grants  默认 100 / 上限 500；CouponDao.java:483-486
+  - POST /admin/marketing/seckill/{invitations,applications,activities}
+      SeckillDao.java:115 / :198 / :309
+  - POST /admin/marketing/subsidy/{list,nominations}
+      SubsidyDao.java:122 / :229
+  - POST /admin/observe/replay    默认 5000 / 上限 50000；ObservedEventDao.java:242
+      （单批次回放，响应体可能很大，但只针对一个 BatchId）
+
+  用户/商家类
+  - POST /notification/list        默认 100 / 上限 500；NotificationDao.java:104
+  - POST /goods/myApplications     默认 100 / 上限 500；GoodsAuditDao.java:87-89
+  - POST /merchant/myApplications  默认 100 / 上限 500；MerchantApplicationDao.java:68-70
+  - POST /comment/myOrders         固定上限 100（CommentService.java:89）；CommentDao.java:238
+  - POST /marketing/coupons        默认 100 / 上限 500；CouponDao.java:390
+  - POST /marketing/seckill/{invitations,applications,activities,live}
+      SeckillDao.java:115 / :198 / :309 / :358
+  - POST /marketing/subsidy/{invitations,goods}
+      SubsidyDao.java:263 / :317
+
+四、完全无 LIMIT（风险最高，随业务线性增长）
+----------------------------------------------------------------
+【可复核】
+
+  - POST /message/history
+      双方全部历史消息，ORDER BY create_time ASC，无 LIMIT
+      MessageDao.java:148-151；Controller MessageController.java:84-89
+      前端 ChatRoom.vue:257 初次全量加载、:315 轮询追加。
+  - POST /message/conversations
+      按参与账号扫 message 表 + GROUP BY，无 LIMIT
+      MessageDao.java:111-119；Service 逐会话 N+1 查已读时间（MessageService.java:144-181）
+  - POST /order/orderSelect
+      按 CustomerId，无 LIMIT；OrderDao.java:195-197
+  - POST /order/orderDeliveryIfSelect
+      按 MerchantId，无 LIMIT；OrderDao.java:202-204
+  - POST /order/orderDeliverySelect
+      按 MerchantId + status，无 LIMIT；OrderDao.java:215-222
+  - POST /order/historicalOrdersSelect
+      按 CustomerId + 已收货，无 LIMIT；OrderDao.java:228-232
+  - POST /marketing/myCoupons
+      按账户取券包全量，无 LIMIT；CouponDao.java:447-470
+      前端 CouponWalletDialog.vue:213 注释明确「myCoupons 不分页（后端给全量）」
+  - POST /admin/stats 的 merchants 列表
+      GROUP BY MerchantId，无 LIMIT；StatsDao.java:108-118
+      前端商家榜全量渲染。
+  - POST /goods/goodsSelect
+      不是无 LIMIT，而是**硬 LIMIT 200**（GoodsCacheService.java:227-229），无 offset；
+      MerchantId 无索引、注释明确全表扫（:215-219）。
+      前端 GoodsUp.vue:190-200 的 Pager 只是对这最多 200 行做**前端分页**；
+      >200 件商品会被后端静默截断（:675-690）。
+
+  低风险（无 LIMIT 但量级小 / 有自然上界）【推断】
+  - /goods/goodstype 全表（类目树小）GoodsTypeCacheService.java:50-51
+  - /goods/skuList 单商品 SKU（GoodsDao.java:178-180）
+  - /goods/GoodsProductCodeSelect 单商品型号去重（GoodsCacheService.java:408-418）
+  - /cart/list 单用户购物车（CartDao.java:183-189）
+  - /template/list、/admin/template/list（TemplateDao.java:119-128,144-153）
+  - /admin/audit/facets：全表 DISTINCT，结果集小但会扫大表（AdminAuditDao.java:156-163）
+  - /message/friendSelect、/message/selectFriend（FriendCacheService.java:91-92,119-120）
+  - /admin/observe/metrics/history：内存窗口最多 60 条（MetricsHistoryService.java:125-139）
+  - /admin/observe/attack/scenarios：固定 8 个场景（DrillRecordService.java:73）
+
+五、前端分页方式现状
+----------------------------------------------------------------
+【可复核】
+
+  无限滚动（IntersectionObserver），公共实现 useInfiniteList.js:24,36,90：
+  - HomePage.vue:350-361          24 条/页
+  - GoodsSelect.vue:181-200       搜索 / 分类 / 全部，24 条/页
+  - ProductPage.vue:718-726       猜你喜欢，24 条/页
+  - ProductPage.vue:1379-1397     评价「加载更多」，limit + offset 追加
+
+  后端 offset 分页 + 标准 Pager（默认 20/页）：
+  - admin/AccountsPage.vue:588,724,758-762（用户治理）
+  - admin/observe/AttackConsole.vue:660,879,894（演练记录）
+
+  前端分页（后端一次取回后切页）：
+  - GoodsUp.vue:190-200,675-690（受后端 200 行硬上限约束）
+  - admin/StatsPage.vue:209,374,384
+  - merchant/StatsPage.vue:167,325
+  - admin/observe/OrderFlow.vue:128（SSE 窗口内 20 条）
+
+  仅 limit / 截断提示，无分页器：
+  - admin/OrderPage.vue:384,397（limit 200）
+  - admin/AuditPage.vue:317,454,458-460（limit 100）
+  - admin/AccountsPage.vue:475,513（入驻申请，limit 100）
+  - admin/CatalogPage.vue:616,766,774（商品提审，limit 100）
+  - admin/ModerationPage.vue（评论/问答/图片/举报/敏感词，offset 全部为 0）
+  - admin/MarketingPage.vue:892,903,1060,1071,1082,1220,1385,1506（limit 200）
+  - admin/NotifyPage.vue:408,417-421（通知历史）
+  - NotifyInbox.vue:119,214-221（收件箱，limit 100）
+  - GoodsUp.vue:697（我的提审）
+  - ShopHome.vue:689-692（本店商品只取第一页 100 条）
+
+  完全不分页：
+  - OrderMine.vue:235-236、OrderCenter.vue:241-243、HistoricalOrders.vue:148
+  - ShoppingCart.vue:205
+  - ChatRoom.vue:232-235,257,315
+  - FriendRoom.vue:172,247
+  - CouponWalletDialog.vue:213,221、UserInfoPage.vue:671（券包）
+
+六、本次「块 7 收尾」已落地的分页口径
+----------------------------------------------------------------
+【可复核】只动商城端与三个管理端列表，未做全仓翻页改造：
+
+  1. /goods/goodsSelectHome、/goods/productSearch、/goods/categoryGoods
+     默认 24 条、上限 100（Math.min(pageSize, 100)），offset 直落 SQL。
+  2. /admin/accounts/users：默认 100、上限 500，支持 offset；前端 AccountsPage 默认 20/页。
+  3. /admin/observe/attack/records：默认 20、上限 200，支持 offset。
+  4. /admin/order/list：limit <= 0 ⇒ 200，上限 500（沿用既有 clamp）。
+  5. /admin/observe/replay：默认 5000、上限 50000（单批次回放，保留一次性语义）。
+
+  未改动（仍在待办清单）：消息、用户/商家订单四条、券包、统计商家榜、
+  以及所有「仅 limit」的运营列表 —— 改动面大会牵动前端分页器与契约，未在本次加固中擅自铺开。
+
+七、没有独立列表端点的域
+----------------------------------------------------------------
+【可复核】
+  - 轮播图：无独立 Controller/表端点；首页取 /goods/goodsSelectHome 第一页前 5 条
+    （HomePage.vue:348-356）。
+  - 公告：无独立公告列表；发送 /admin/notify/send，历史 /admin/notify/history，
+    接收面 /notification/list。
+  - 死信：无列表端点；只有 DLQ 常量 observed_event.dlq
+    （RabbitObserveConfig.java:93）、消费者重试耗尽转 DLQ
+    （ObservedEventConsumer.java:186-212）与累计计数指标 mall.observe.dead.letters
+    （:111）；指标帧以 dlq:{total,delta} 暴露（MetricsSnapshotService.java:363-370）。
+  - 库存：无独立 HTTP 列表端点；/goods/skuList 是单商品 SKU 矩阵，
+    指标快照内部另有 goods_sku 库存水位（最多 20 条，MetricsSnapshotService.java:142,449）。
+  - 店铺关注：只有 follow/unfollow/state，没有关注列表端点。
+
+八、结论与建议（本次未实施）
+----------------------------------------------------------------
+1. 合并前判据已满足：商城端列表不再全量返回，管理端用户/演练记录具备真翻页，
+   订单与审计有上限兜底。风险点已如实登记，不在收尾笔里夹带跨域重构。
+2. 若后续要收口，建议顺序：
+   a) /message/history + /message/conversations（增长最快、无上限）；
+   b) 用户/商家四条订单列表（加 limit + offset，前端接 Pager）；
+   c) /admin/audit/list、/admin/order/list、/notification/list 补 offset；
+   d) /goods/goodsSelect 改真分页（顺带解决 MerchantId 全表扫）；
+   e) /marketing/myCoupons 与 /admin/stats.merchants 评估是否设上限。
+3. 上述每一项都会改动前后端契约，应按附录 J.2 的口径逐笔登记，不要一次性铺开。

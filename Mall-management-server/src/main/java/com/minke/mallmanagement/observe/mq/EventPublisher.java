@@ -41,4 +41,15 @@ public interface EventPublisher {
 
     /** 当前「MQ 这条路通不通」——**给页面画点用**（见类注释最后一节），不参与任何业务判定。 */
     boolean connected();
+
+    /**
+     * 页面口径的「MQ 可用」= {@link #connected() broker 连着} **且**没有被演练注入断开
+     * （D3 的 {@code mqDown} 只拦发布侧，消费者与死信出口不动）。
+     *
+     * <p>⚠️ 与 {@link #connected()} 分开是为了不篡改「broker 通不通」这个实测值：
+     * 帧里的 {@code mq} 键回答的是「事件会不会落库 + 进 Redis」，演练注入期间答案是否 ——
+     * 只看 {@link #connected()} 会让日志页显示「已连接」，与指标页的
+     * {@code mall.observe.mq.up} 以及页面上「不落库」的告警自相矛盾。
+     */
+    boolean usable();
 }

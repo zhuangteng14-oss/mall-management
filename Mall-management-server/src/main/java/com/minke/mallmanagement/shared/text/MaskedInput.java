@@ -68,12 +68,19 @@ public final class MaskedInput {
             case "email" -> "邮箱";
             case "address" -> "地址";
             case "contactPhone" -> "联系电话";
+            case "shopAddress" -> "店铺地址";
             default -> field;
         };
     }
 
-    /** 供测试/日志断言使用：本类视为「掩码字段」的名字清单。 */
+    /**
+     * 供测试/日志断言使用：本类视为「掩码字段」的名字清单。
+     *
+     * <p>⚠️ 加字段时**三处一起改**：本清单、{@link #displayName}、以及实际写入点的
+     * {@link #firstMasked} 调用（{@code UserController.updateUserInfo} /
+     * {@code MerchantApplicationController.apply}）。漏一处就是「掩码值被静默写进库」。
+     */
     public static List<String> guardedFields() {
-        return List.of("email", "address", "contactPhone");
+        return List.of("email", "address", "contactPhone", "shopAddress");
     }
 }

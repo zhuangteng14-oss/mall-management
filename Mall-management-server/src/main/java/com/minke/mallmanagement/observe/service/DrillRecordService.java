@@ -1,5 +1,6 @@
 package com.minke.mallmanagement.observe.service;
 
+import com.minke.mallmanagement.shared.web.PageLimits;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.minke.mallmanagement.observe.dao.DrillRecordDao;
@@ -51,7 +52,7 @@ public class DrillRecordService {
 
     /** 列表默认 20 条（方案没定；同域其它列表用 100，但演练记录一行就带一段长 JSON ⇒ 取小）。 */
     public static final int DEFAULT_LIMIT = 20;
-    public static final int MAX_LIMIT = 200;
+    public static final int MAX_LIMIT = PageLimits.MAX_PAGE_SIZE;
 
     private final DrillRecordDao drillRecordDao;
     private final AttackEngine attackEngine;

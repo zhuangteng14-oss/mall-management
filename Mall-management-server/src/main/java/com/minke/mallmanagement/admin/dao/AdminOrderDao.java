@@ -1,5 +1,6 @@
 package com.minke.mallmanagement.admin.dao;
 
+import com.minke.mallmanagement.shared.web.PageLimits;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
@@ -37,7 +38,7 @@ public class AdminOrderDao {
      * {@code order_state_transition} 的同类注释），所以本笔**不做真分页**，
      * 只做一个**上限截断**并把「是否截断」如实回报给前端。
      */
-    public static final int MAX_LIMIT = 500;
+    public static final int MAX_LIMIT = PageLimits.MAX_PAGE_SIZE;
 
     /** 未付款超时的阈值（小时）。**拍出来的数字，待业务裁**（见 {@link #selectMonitor}）。 */
     public static final int UNPAID_HOURS = 24;
@@ -173,17 +174,15 @@ public class AdminOrderDao {
     // ==================== 内部 ====================
 
     /**
-     * 生效上限：{@code limit <= 0 ⇒ 200}，否则 {@code min(limit, }{@link #MAX_LIMIT}{@code )}。
+     * 生效上限：{@code limit <= 0 ⇒ } {@link PageLimits#DEFAULT_PAGE_SIZE}，否则
+     * {@code min(limit, }{@link #MAX_LIMIT}{@code )}（D3-3 起与全仓分页统一为 100）。
      *
      * <p>公开给 {@link com.minke.mallmanagement.admin.service.AdminOrderService} —— 它要拿**同一个**
      * 生效上限判「本次结果是否已达上限」（{@code rows.size() >= clampLimit(limit)}），
      * 不能各算各的（否则「截断」判定又和真实取回量脱钩）。
      */
     public static int clampLimit(int limit) {
-        if (limit <= 0) {
-            return 200;
-        }
-        return Math.min(limit, MAX_LIMIT);
+        return PageLimits.clamp(limit);
     }
 
     private static boolean notBlank(String s) {

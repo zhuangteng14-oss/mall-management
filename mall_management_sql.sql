@@ -2096,3 +2096,63 @@ SET @s := (SELECT IF(COUNT(*) = 0,
   WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'observed_event'
     AND INDEX_NAME = 'uk_observed_event_trace_seq');
 PREPARE _p FROM @s; EXECUTE _p; DEALLOCATE PREPARE _p;
+
+
+-- ============================================================
+-- ㉔ D3-2（2026-10-18）：死信落库副本 `observed_event_dlq`
+--
+-- 【为什么】MQ 消费者落库重试耗尽 / 消息不是合法 JSON 时，消息被 NACK 进 broker 的
+--   `observed_event.dlq` 队列。那个队列只能在 broker 管理台里看，而 a3 / dev 常常没有
+--   broker 管理台 ⇒ 页面只能说「死信 N 条」，说不出「哪一批、卡在哪一步、报了什么错」。
+--   本表是同一批死信的**同库副本**，由消费者 best-effort 写入。
+--
+-- 【它不是什么】
+--   · **不是「已处理」标记**：本表有行 ≠ 原消息已被重新入队；原消息仍在 broker 的 DLQ 里。
+--   · **不是唯一记录**：写入失败只 WARN，broker 的 DLQ 仍是最终兜底。
+--   · **库挂了 ⇒ 本表也写不进去**：落库失败最常见的原因就是数据库不可用。此时指标帧的
+--     `dlq.persisted` 必须回 `null`（页面显示 `—`），不能显示 0 —— 「读不到」与「一条都没有」是两件事。
+--
+-- 【列】前半段与 `observed_event` 逐列同宽同义（Seq / Kind / … / FieldsJson / OccurredAt），
+--   另加 `FailedStage / ErrorClass / ErrorText` 记「为什么死」、`RawBody` 记「连 JSON 都解不开
+--   时那一串原始字节」（截 64 KiB；`OccurredAt` 为 NULL，因为解析不出时间）。
+--   ⚠️ `FieldsJson` 同样**绝不截断**：截断一段 JSON 得到的是非法 JSON，`json` 列会整条拒绝。
+--
+-- 【幂等】`UNIQUE(TraceId, Seq)` + DAO 的 `ON DUPLICATE KEY UPDATE Id = Id`：同一条事件若被
+--   重复上报不会多出一行。`TraceId/Seq` 为 NULL 的原始字节行不受唯一键约束
+--   （MySQL 的 UNIQUE 不把多个 NULL 视为相等）。
+--
+-- 【⚠️ P3 门禁：本段**新增 1 张表** ⇒ 四处同改】`ConcurrencyRunner.java` 的 IN 清单加
+--   `'observed_event_dlq'`、`KNOWN_TABLES` 27 → 28、期望表数 38 → 39、**外加 P3 的 PASS 文案串**。
+--   同时**新增 1 个 UNIQUE + 1 个非唯一索引** ⇒ `db-schema.md` 的非主键索引 / UNIQUE 计数要同步。
+--
+-- 回滚（逻辑废弃，执行前须人工确认；**不 DROP 数据**，只停用写入）：
+--       DROP TABLE IF EXISTS `observed_event_dlq`;  -- 只在本地库重建时用；须人工确认
+-- ============================================================
+
+-- ---- ㉔-1 死信落库副本（写入方 = ObservedEventConsumer 的 best-effort 分支）----
+CREATE TABLE IF NOT EXISTS `observed_event_dlq` (
+  `Id`             bigint NOT NULL AUTO_INCREMENT COMMENT '自增主键',
+  `Seq`            bigint DEFAULT NULL COMMENT '与 observed_event.Seq 同义：合并环的进程内序号；原始字节行为 NULL',
+  `Kind`           varchar(16) DEFAULT NULL COMMENT '事件所属环（对齐 observed_event.Kind）',
+  `Severity`       varchar(16) DEFAULT NULL COMMENT 'info / warn / error',
+  `Title`          varchar(255) DEFAULT NULL COMMENT '事件标题（按列宽截断）',
+  `ObjectType`     varchar(32) DEFAULT NULL COMMENT '对象类型',
+  `ObjectId`       varchar(128) DEFAULT NULL COMMENT '对象标识',
+  `TraceId`        varchar(64) DEFAULT NULL COMMENT '本次请求的 traceId；原始字节行为 NULL',
+  `BatchId`        varchar(36) DEFAULT NULL COMMENT '演练批次 UUID',
+  `ActorId`        varchar(50) DEFAULT NULL COMMENT '操作者业务号',
+  `ActorRole`      int DEFAULT NULL COMMENT '操作者角色号',
+  `DurationUs`     bigint DEFAULT NULL COMMENT '耗时（微秒）',
+  `RemainingStock` int DEFAULT NULL COMMENT '扣减那一刻该 SKU 的剩余件数',
+  `FieldsJson`     json DEFAULT NULL COMMENT '事件的结构化明细（同 observed_event.FieldsJson；**不截断**）',
+  `FailedStage`    varchar(128) NOT NULL COMMENT '失败阶段的人话：落库连续 3 次失败 / 消息不是合法的事件 JSON',
+  `ErrorClass`     varchar(255) DEFAULT NULL COMMENT '最后一次异常的类名',
+  `ErrorText`      varchar(1024) DEFAULT NULL COMMENT '最后一次异常的根因 message',
+  `RawBody`        mediumtext COMMENT '连 JSON 都解不开时的原始消息（DAO 截 64 KiB）；解析成功的行为 NULL',
+  `OccurredAt`     datetime(3) DEFAULT NULL COMMENT '事件发生时刻（毫秒精度）；原始字节行为 NULL',
+  `created_at`     datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '行落库时刻',
+  `updated_at`     datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '行更新时刻',
+  PRIMARY KEY (`Id`),
+  UNIQUE KEY `uk_observed_event_dlq_trace_seq` (`TraceId`,`Seq`),
+  KEY `idx_observed_event_dlq_created` (`created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='死信落库副本（D3-2；写入方 = ObservedEventConsumer 的 best-effort 分支；broker 的 DLQ 仍是最终兜底）';

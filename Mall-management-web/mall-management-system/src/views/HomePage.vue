@@ -22,17 +22,17 @@
     <!-- ── 二级导航（稿 `:744-753`）──
          ⚠️ 壳里**没有** `.subnav`：`AppShell.vue:298-299` 自注「稿的 `.subnav a` 属**二级导航**、
          不属顶栏」⇒ C 笔既然把它从顶栏里摘出去了，就没人落过它 ⇒ 它是**页级**的，本笔落在首页顶部。
-         ⚠️ 6 项**当初都没有路由** ⇒ 原一律 `disabled` + `title`（`progress.md:1652` 判据①）。
-         ⚠️ 已接通 **3 项**：**「领券中心」**（C3 块 5 · commit 1，2026-10-11，用户批《b5-placeholder-landing.md》§一 #2「接通（锚到券包区）」）⇒ 摘 `disabled`、锚到本页 `.tickets`；**「今日秒杀」**（本块 commit 5，2026-10-12）⇒ 摘 `disabled`、改 `<router-link to="/seckill">`（秒杀页 commit 4 已落地，**不再**是「预留位」；它**不走** `emit('go-search', …)` 那条路 —— 秒杀有自己的页）；**「全部商品分类」**（2026-10-12 用户裁定 #1）⇒ 摘 `disabled`、走 `searchByType('')` 落 `/<role>/search`。**另 3 项仍是 `disabled`**（品牌专区 / 会员中心 / 客户服务，归属仍为 `<待定>`）。开放剩余项属**功能**笔，不在 D 笔边界内。
-         登记见 `docs/agent/slot-registry.md`「commit 3 · 稿外死控件」。 -->
+         ⚠️ 原 6 项都无路由 ⇒ 曾一律 `disabled`；**批四（2026-10-18）起 6 项全部接通**：分类 / 秒杀 / 领券
+         早已接线，品牌专区 / 会员中心 / 客户服务三枚不再置灰，统一落 `/coming-soon/:feature`
+         「敬请期待」静态页（真业务留给后续批次）。登记见 `docs/agent/slot-registry.md`「commit 3 · 稿外死控件」。 -->
     <nav class="subnav">
       <div class="inner">
         <button type="button" class="now" @click="searchByType('')" title="全部商品分类 —— 接通搜索页（2026-10-12 用户裁定 #1；不带关键词进 GoodsSelect ⇒ 左分类树在场，就是「按类目逛」的落点）">全部商品分类</button>
         <router-link class="hot" to="/seckill" title="今日秒杀 —— 落到秒杀页（C3 块 5 · commit 5 接线；此前是「预留位」）">今日秒杀</router-link>
         <button type="button" class="hot" @click="scrollToTickets" title="领券中心 —— 锚到本页领券中心（C3 块 5 commit 1 接线；2026-10-11 信息架构重排后本页**只留领券中心**，券包已搬去用户中心弹窗）">领券中心</button>
-        <button type="button" disabled title="预留 · 品牌专区（无落点：无品牌数据模型）">品牌专区</button>
-        <button type="button" disabled title="预留 · 会员中心（无落点：会员体系未落）">会员中心</button>
-        <button type="button" disabled title="预留 · 客户服务（无落点：在线客服是预留位）">客户服务</button>
+        <router-link class="soon" to="/coming-soon/brand" title="品牌专区 —— 批四起落「敬请期待」静态页（无品牌数据模型，真业务待后续批次）">品牌专区</router-link>
+        <router-link class="soon" to="/coming-soon/member" title="会员中心 —— 批四起落「敬请期待」静态页（会员体系未落，真业务待后续批次）">会员中心</router-link>
+        <router-link class="soon" to="/coming-soon/service" title="客户服务 —— 批四起落「敬请期待」静态页（在线客服未落，真业务待后续批次）">客户服务</router-link>
       </div>
     </nav></div>
 
@@ -272,9 +272,8 @@
         </div>
       </section>
 
-      <!-- ── 信任条（预留位，稿 `:829-846`）──
-           4 项都是静态承诺文案（无可点元素 ⇒ 无需 disabled），整块落 `data-slot` + `title`。 -->
-      <section class="trust" data-slot="预留 · 信任位" title="预留 · 信任位（老稿 主页改造.html:829）· 4 项为静态承诺文案 · 归属待定 C3〈待定〉">
+      <!-- ── 信任条（稿 `:829-846`）—— 4 项都是静态承诺文案（无可点元素）⇒ 批四起不再挂 `data-slot` / 占位 title。 -->
+      <section class="trust">
         <div>
           <span class="ic"><svg width="19" height="19" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M10 2.2 3.5 5v4.6c0 3.9 2.7 7.4 6.5 8.2 3.8-.8 6.5-4.3 6.5-8.2V5z" stroke-linejoin="round"/><path d="m7.2 9.9 2 2 3.6-3.9" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
           <span><b>正品保障</b><span>厂家直供，假一赔十</span></span>
@@ -798,7 +797,7 @@ button {
   color: var(--nav-hot);
   font-weight: var(--fw-med);
 }
-/* 四项仍无落点（disabled）⇒ 鼠标形态要说实话，别留着 `pointer` 骗人。 */
+/* 批四起二级导航**没有** disabled 项（6/6 接通）⇒ 这条规则保留为兜底，不再是活路径。 */
 .subnav button[disabled] {
   cursor: not-allowed;
 }

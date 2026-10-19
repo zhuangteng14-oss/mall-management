@@ -3,8 +3,10 @@ package com.minke.mallmanagement.shared.cache;
 import io.lettuce.core.ClientOptions;
 import io.lettuce.core.SocketOptions;
 import io.lettuce.core.TimeoutOptions;
+import com.minke.mallmanagement.observe.service.AttackSwitchConfig;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.data.redis.RedisProperties;
 import org.springframework.context.annotation.Bean;
@@ -63,6 +65,7 @@ public class L2ProbeConfig {
     public L2HealthProbe l2HealthProbe(RedisConnectionFactory redisConnectionFactory,
                                        RedisProperties redisProperties,
                                        MallCacheMetrics cacheMetrics,
+                                       ObjectProvider<AttackSwitchConfig> switchConfigProvider,
                                        @Value("${app.cache.l2-probe.timeout:200ms}") Duration probeTimeout,
                                        @Value("${app.cache.l2-probe.cooldown:30s}") Duration cooldown) {
         LettuceConnectionFactory probeChannel = createProbeChannel(redisProperties, probeTimeout);
@@ -78,7 +81,13 @@ public class L2ProbeConfig {
                 probeChannel.getHostName(), probeChannel.getPort(), probeChannel.getDatabase());
 
         selfCheckProbeChannel(probeChannel);
-        L2HealthProbe probe = new L2HealthProbe(probeChannel, cooldown, cacheMetrics);
+        // D3：redisDown 注入立即生效（理由见 L2HealthProbe#injectedDown 的 javadoc）。
+        // 与 SlowSqlConfig 同一条处置：ObjectProvider 每次现取，避免在 @Bean 构造期把配置类提前拉起。
+        java.util.function.BooleanSupplier injectedDown = () -> {
+            AttackSwitchConfig cfg = switchConfigProvider.getIfAvailable();
+            return cfg != null && cfg.injections().contains("redisDown");
+        };
+        L2HealthProbe probe = new L2HealthProbe(probeChannel, cooldown, cacheMetrics, injectedDown);
         // L2 健康状态出口：gauge mall.cache.l2.up（1=可用 0=处于冷却窗口内）。
         // 传 lambda 而不是 probe 本身：把 probe 交给 MallCacheMetrics 会构成 bean 循环引用
         // （probe ← metrics ← probe）。代价是取值对象没有别的强引用，必须由

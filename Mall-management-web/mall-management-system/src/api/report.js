@@ -87,7 +87,7 @@ export function add(p) {
  *
  * @param {object} [p]
  * @param {'pending'|'handled'|'rejected'} [p.status] 省略 = 不筛。
- * @param {number} [p.limit] 页大小（默认 100，上限 500）。
+ * @param {number} [p.limit] 页大小（默认 100，上限 100）。
  * @param {number} [p.offset] 偏移（默认 0）。
  * @returns {Promise<{success:boolean, list:Array, total:number, limit:number, offset:number}>}
  */

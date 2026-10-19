@@ -71,7 +71,7 @@ public class AdminOrderService {
      * <p>两个回报字段**刻意分流、互不推导**（2026-10-10 修：曾有「筛 status 后被误报已截断」的缺陷）：
      * <ul>
      *   <li>{@code truncated} = {@code rows.size() >= 生效上限}（上限见 {@link AdminOrderDao#clampLimit(int)}，
-     *       默认 200 / 上限 {@link AdminOrderDao#MAX_LIMIT}）—— **只表「本次已达上限、后面可能还有」**，
+     *       默认 100 / 上限 {@link AdminOrderDao#MAX_LIMIT}）—— **只表「本次已达上限、后面可能还有」**，
      *       与筛选无关；如实回报、不静默截断。</li>
      *   <li>{@code total} = **全表** {@code COUNT(*)}（供「库内共 N 单」显示），**不随筛**——
      *       它**不是**截断判据（筛 `paid` 只回 1 条时，`total` 仍是全表的 9，但那 1 条**没被截断**）。</li>

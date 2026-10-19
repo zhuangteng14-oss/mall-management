@@ -1,5 +1,6 @@
 package com.minke.mallmanagement.marketing.coupon.service;
 
+import com.minke.mallmanagement.shared.web.PageLimits;
 import com.minke.mallmanagement.marketing.coupon.dao.CouponDao;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
@@ -61,10 +62,10 @@ import java.util.regex.Pattern;
 public class CouponService {
 
     /** 列表默认条数（前端不传 {@code limit} 时）。 */
-    public static final int DEFAULT_LIMIT = 100;
+    public static final int DEFAULT_LIMIT = PageLimits.DEFAULT_PAGE_SIZE;
 
     /** 列表上限 —— 防止一次拉爆整表。 */
-    public static final int MAX_LIMIT = 500;
+    public static final int MAX_LIMIT = PageLimits.MAX_PAGE_SIZE;
 
     /** 趋势图回看的自然日数（有界，见 {@code CouponDao.selectClaimDaily} 对「内联整数」的说明）。 */
     public static final int TREND_DAYS = 14;
@@ -859,7 +860,7 @@ public class CouponService {
         return sb.toString();
     }
 
-    /** {@code null} / 非正数 ⇒ 默认 100；超上限 ⇒ 截到 500（同 {@code AuditService.normalizeLimit}）。 */
+    /** {@code null} / 非正数 ⇒ 默认 100；超上限 ⇒ 截到 100（同 {@code AuditService.normalizeLimit}；D3-3 统一上限）。 */
     private static int normalizeLimit(Integer limit) {
         if (limit == null || limit <= 0) {
             return DEFAULT_LIMIT;

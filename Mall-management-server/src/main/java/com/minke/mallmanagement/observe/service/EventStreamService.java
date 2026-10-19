@@ -139,7 +139,10 @@ public class EventStreamService {
             // 块 7 · commit 8c：MQ 桥接状态（true = 事件会落库 + 进 Redis）。页面上那个黄点读它 ——
             // 它是**实测**值（探测线程每 5 秒问一次 broker，见 RabbitEventPublisher），
             // 不是「本拍有没有发布成功」：后者会把「exchange 名字写错」也画成「MQ 离线」。
-            frame.put("mq", publisher.connected());
+            // ⚠️ D3：改用 usable()（= broker 连着 **且** 未被演练注入断开）。mqDown 注入只拦
+            //    发布侧 ⇒ 此时事件确实不落库，若仍用 connected() 会让日志页写「已连接」，
+            //    与指标页 mq.up=0 及「不落库」告警互相矛盾。
+            frame.put("mq", publisher.usable());
             // 块 7 · commit 10（裁决 2）：环满丢了多少。三个字段**口径不同，页面别混用**：
             //   dropped      本拍这条连接丢的条数（>0 ⇒ 这条页面的时间线有洞，且洞就在这一拍）
             //   droppedTotal 这条连接自打开以来累计丢的条数（会话级，页面重连后从 0 起）

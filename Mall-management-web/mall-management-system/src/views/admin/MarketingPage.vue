@@ -159,7 +159,7 @@
       </label>
       <label class="a-f a-f-narrow">
         <span>上限</span>
-        <input v-model.number="f.limit" type="number" min="1" max="500" />
+        <input v-model.number="f.limit" type="number" min="1" max="100" />
       </label>
       <div class="a-f-actions">
         <button type="submit" class="a-btn a-btn-on" :disabled="loading"><IconGlyph name="ok" />查询</button>
@@ -889,7 +889,7 @@ const nomChip = (s) => (s === 'approved' ? 'ok' : s === 'rejected' ? 'off' : 'wa
 
 async function loadSubsidyRules() {
   try {
-    const data = await subsidyRuleList({ limit: 200 })
+    const data = await subsidyRuleList({ limit: 100 })
     sbRules.value = data && data.success && Array.isArray(data.list) ? data.list : []
   } catch (e) {
     sbRules.value = []
@@ -900,7 +900,7 @@ async function loadSubsidyRules() {
 
 async function loadNominations() {
   try {
-    const data = await subsidyNominations({ limit: 200 })
+    const data = await subsidyNominations({ limit: 100 })
     sbNoms.value = data && data.success && Array.isArray(data.list) ? data.list : []
   } catch (e) {
     sbNoms.value = []
@@ -1057,7 +1057,7 @@ const stageChip = (v) => (v === 'live' ? 'ok' : v === 'ended' ? 'off' : 'wait')
 
 async function loadSeckillInvitations() {
   try {
-    const data = await seckillInvitationList({ limit: 200 })
+    const data = await seckillInvitationList({ limit: 100 })
     skInvitations.value = data && data.success && Array.isArray(data.list) ? data.list : []
   } catch (e) {
     skInvitations.value = []
@@ -1068,7 +1068,7 @@ async function loadSeckillInvitations() {
 
 async function loadSeckillApplications() {
   try {
-    const data = await seckillApplicationList({ limit: 200 })
+    const data = await seckillApplicationList({ limit: 100 })
     skApplications.value = data && data.success && Array.isArray(data.list) ? data.list : []
   } catch (e) {
     skApplications.value = []
@@ -1079,7 +1079,7 @@ async function loadSeckillApplications() {
 
 async function loadSeckillActivities() {
   try {
-    const data = await seckillActivityList({ limit: 200 })
+    const data = await seckillActivityList({ limit: 100 })
     skActivities.value = data && data.success && Array.isArray(data.list) ? data.list : []
   } catch (e) {
     skActivities.value = []
@@ -1217,7 +1217,7 @@ const flash = reactive({ text: '', kind: 'ok' })
 const rows = ref([])
 const total = ref(0)
 const limit = ref(100)
-const f = reactive({ Status: '', keyword: '', limit: 200 })
+const f = reactive({ Status: '', keyword: '', limit: 100 })
 
 const stats = ref({ trend: { days: [], claimed: [], used: [] }, types: [], totals: {} })
 
@@ -1375,7 +1375,7 @@ function resetCreate() {
 function resetFilters() {
   f.Status = ''
   f.keyword = ''
-  f.limit = 200
+  f.limit = 100
   loadList()
 }
 

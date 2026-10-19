@@ -750,19 +750,13 @@
          数据来源：本页累积的订单行（分析面种子 + SSE 最近 20）与生命周期时间戳。
          抽屉左列 = 当前筛选下按停留倒序的前 30 单；右列 = 选中单的完整生命周期。
          ⚠️ 页面不查「某单历史」端点；时间线只画订单行自带的五个时间戳 + 本会话 moves。 -->
-    <div v-if="drawerOpen" class="a-of-mask" @click.self="closeDrawer">
-      <aside class="a-of-drawer" role="dialog" aria-modal="true" aria-label="订单链路抽屉">
-        <header class="a-of-drawer-hd">
-          <div>
-            <h3>链路抽屉 · {{ filterLabel }}</h3>
-            <p v-if="drawerQuery.trim()">
-              匹配 {{ fmtInt(drawerMatchedRows.length) }} 单 · 按已停留倒序（最多显示 50）· 点左列切换右上时间线
-            </p>
-            <p v-else>{{ fmtInt(drawerRows.length) }} 单 · 按已停留倒序（前 30，含当前选中）· 点左列切换右上时间线</p>
-          </div>
-          <button type="button" class="a-btn" @click="closeDrawer">关闭</button>
-        </header>
-
+    <RightDrawer
+      v-if="drawerOpen"
+      :title="`链路抽屉 · ${filterLabel}`"
+      :subtitle="drawerSubtitle"
+      aria-label="订单链路抽屉"
+      @close="closeDrawer"
+    >
         <div class="a-of-drawer-body">
           <div class="a-of-drawer-side">
             <div class="a-of-drawer-search">
@@ -851,8 +845,7 @@
             </p>
           </section>
         </div>
-      </aside>
-    </div>
+    </RightDrawer>
   </section>
 </template>
 
@@ -877,12 +870,13 @@
 
 <script setup>
 /* eslint-disable no-undef */ /* 理由见 `ui/KpiCard.vue` 同款注释（eslint-plugin-vue 8.7.1 缺宏环境） */
-import { computed, nextTick, onBeforeUnmount, onDeactivated, onMounted, reactive, ref, watch } from 'vue'
+import { computed, nextTick, onActivated, onBeforeUnmount, onDeactivated, onMounted, reactive, ref, watch } from 'vue'
 import { openOrderStream, orderDetail, orderInsight } from '../../../api/observe'
 // 演示模式（块 7 收尾 ②）：`DemoModeToggle` 摆开关，`demo` 是被 `watch` 的那个状态，
 // `openDemoStream` 是与 `openOrderStream` **同形**的假流 —— 见 `connect()` 里那处三元式。
 import { demo, openDemoStream } from '../../../api/demo-stream'
 import DemoModeToggle from '../../../components/observe/DemoModeToggle.vue'
+import RightDrawer from '../../../components/observe/RightDrawer.vue'
 import KpiCard from '../../../components/ui/KpiCard.vue'
 import DonutChart from '../../../components/charts/DonutChart.vue'
 import LineChart from '../../../components/charts/LineChart.vue'
@@ -2094,6 +2088,12 @@ const drawerRows = computed(() => {
   return rows
 })
 
+/** 抽屉副标题：搜索态报「命中数（上限 50）」，否则报「列表条数（前 30，含选中）」。
+ *  2026-10-18 抽共享 `RightDrawer` 时把原模板里的两个 `<p>` 收敛到这里（文案逐字保留）。 */
+const drawerSubtitle = computed(() => (drawerQuery.value.trim()
+  ? `匹配 ${fmtInt(drawerMatchedRows.value.length)} 单 · 按已停留倒序（最多显示 50）· 点左列切换右上时间线`
+  : `${fmtInt(drawerRows.value.length)} 单 · 按已停留倒序（前 30，含当前选中）· 点左列切换右上时间线`))
+
 /** 搜索把列表缩短后，选中的单可能落到可视区外 ⇒ 重新滚到它（找不到就保持原位）。 */
 watch(drawerQuery, revealDrawerSelection)
 
@@ -2689,6 +2689,7 @@ function connect() {
     onLost(s) {
       phase.value = 'stopped'
       lost.value = s
+      if (s.evicted) stream = null
       // ⚠️ `errMsg` 只装**真错误**：它同时是「还没收到第一拍」那个加载闸的判据（见 `first`）。
       errMsg.value = s.err ? ((s.err && s.err.message) || '连接中断') : ''
     },
@@ -2821,9 +2822,15 @@ watch(() => replaySession.restartSeq, () => {
 watch(() => replaySession.seekSeq, () => {
   if (replaySession.active) enterReplay()
 })
-// KeepAlive 失活（路由切走）时**不卸载**：落一次盘就够了，内存状态原样留着。
+// KeepAlive 失活（路由切走）时**不卸载**：内存状态原样留着，但 SSE 必须让出 ——
+// 否则它会和攻击页的 3 条预览叠加到浏览器 6 条上限（见 `api/observe.js` 文件头预算一节）。
 onDeactivated(() => {
   saveSession(true)
+  closeStream()
+})
+// 切回来立刻重建，不等用户手动操作；`!stream` 保证首次 mount 时不重复建。
+onActivated(() => {
+  if (!stream && !replaySession.active && !replaySession.loading) connect()
 })
 onBeforeUnmount(() => {
   saveSession(true)

@@ -4,8 +4,10 @@ import com.minke.mallmanagement.marketing.coupon.dao.CouponDao;
 import com.minke.mallmanagement.notification.NotificationEvents;
 import com.minke.mallmanagement.notification.dao.NotificationDao;
 import com.minke.mallmanagement.notification.service.NotificationService;
+import com.minke.mallmanagement.observe.service.ScheduledJobGate;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
@@ -66,11 +68,19 @@ public class CouponExpiryJob {
     private final NotificationService notificationService;
     private final NotificationDao notificationDao;
 
+    /** 调度停摆注入（D3）。{@code null} 只出现在手工 new 的测试里 ⇒ 视为未注入。 */
+    private ScheduledJobGate jobGate;
+
     public CouponExpiryJob(CouponDao couponDao, NotificationService notificationService,
                            NotificationDao notificationDao) {
         this.couponDao = couponDao;
         this.notificationService = notificationService;
         this.notificationDao = notificationDao;
+    }
+
+    @Autowired(required = false)
+    public void setJobGate(ScheduledJobGate jobGate) {
+        this.jobGate = jobGate;
     }
 
     /**
@@ -79,6 +89,9 @@ public class CouponExpiryJob {
      */
     @Scheduled(fixedDelayString = "${mall.coupon.expiry.job.fixed-delay-ms:3600000}")
     public void scanExpiringUnclaimed() {
+        if (jobGate != null && jobGate.paused("couponExpiry")) {
+            return;     // D3：jobDown 注入 ⇒ 整轮跳过（不查券、不发提醒）
+        }
         try {
             List<Map<String, Object>> soon = couponDao.selectExpiringUnclaimed(MAX_COUPONS_PER_ROUND);
             if (soon.isEmpty()) {

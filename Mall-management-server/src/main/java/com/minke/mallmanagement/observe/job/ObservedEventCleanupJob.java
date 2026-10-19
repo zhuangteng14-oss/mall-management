@@ -1,16 +1,19 @@
 package com.minke.mallmanagement.observe.job;
 
 import com.minke.mallmanagement.observe.service.ObservedEventCleanupService;
+import com.minke.mallmanagement.observe.service.ScheduledJobGate;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
 /**
- * 事件台账的**保留期**清理任务（块 7 · commit 8b）—— 每轮删一次
- * {@code observed_event} 里过了保留期的行（攻击批次 3 天 / 日常事件 30 天，见
- * {@link ObservedEventCleanupService#pruneExpiredEvents()}）。
+ * 事件台账的**保留期 + 容量水位**清理任务（块 7 · commit 8b；2026-10-19 加水位）——
+ * 每轮先删 {@code observed_event} 里过了保留期的行（缺省 3 天 / 3 天，见
+ * {@link ObservedEventCleanupService#pruneExpiredEvents()}），再检查行数是否超过
+ * 30 万的高水位（见 {@link ObservedEventCleanupService#enforceHighWatermark()}）。
  *
  * <h2>【⚠️ 本笔它删的**恒为 0 行**，而这是设计好的】</h2>
  * {@code observed_event} 的**写入方**要到 8c（RabbitMQ consumer）才接 —— 用户 2026-10-14 裁决
@@ -51,8 +54,16 @@ public class ObservedEventCleanupJob {
 
     private final ObservedEventCleanupService cleanupService;
 
+    /** 调度停摆注入（D3）。{@code null} 只出现在手工 new 的测试里 ⇒ 视为未注入。 */
+    private ScheduledJobGate jobGate;
+
     public ObservedEventCleanupJob(ObservedEventCleanupService cleanupService) {
         this.cleanupService = cleanupService;
+    }
+
+    @Autowired(required = false)
+    public void setJobGate(ScheduledJobGate jobGate) {
+        this.jobGate = jobGate;
     }
 
     /**
@@ -62,10 +73,16 @@ public class ObservedEventCleanupJob {
      */
     @Scheduled(fixedDelayString = "${mall.observe.cleanup.fixed-delay-ms:3600000}")
     public void prune() {
+        if (jobGate != null && jobGate.paused("observeCleanup")) {
+            return;     // D3：jobDown 注入 ⇒ 整轮跳过（不删 observed_event）
+        }
         try {
             cleanupService.pruneExpiredEvents();
+            // 2026-10-19：保留期之后再过一次**容量水位**。两者独立：保留期管「太旧」，
+            // 水位管「太多」。一场 500 并发演练能在几分钟内写进十万行，3 天保留期来不及兜。
+            cleanupService.enforceHighWatermark();
         } catch (Exception e) {
-            log.error("事件台账保留期清理失败（OBSERVE-CLEANUP）—— 本轮跳过，下一轮照常", e);
+            log.error("事件台账保留期 / 水位清理失败（OBSERVE-CLEANUP）—— 本轮跳过，下一轮照常", e);
         }
     }
 }

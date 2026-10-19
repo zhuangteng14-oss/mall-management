@@ -2,6 +2,7 @@ package com.minke.mallmanagement.observe.mq;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.minke.mallmanagement.observe.dao.ObservedEventDao;
+import com.minke.mallmanagement.observe.dao.ObservedEventDlqDao;
 import com.minke.mallmanagement.observe.service.EventBroadcaster;
 import com.minke.mallmanagement.observe.service.EventBroadcaster.ObservedEvent;
 import com.minke.mallmanagement.shared.web.ObserveContext;
@@ -11,6 +12,7 @@ import io.micrometer.core.instrument.MeterRegistry;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.amqp.core.Message;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.amqp.rabbit.annotation.RabbitListener;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.data.redis.core.StringRedisTemplate;
@@ -115,15 +117,18 @@ public class ObservedEventConsumer {
     private static final long RETRY_BACKOFF_MS = 200L;
 
     private final ObservedEventDao observedEventDao;
+    private final ObservedEventDlqDao dlqDao;
     private final StringRedisTemplate redis;
     private final ObjectMapper objectMapper;
     private final EventBroadcaster broadcaster;
     private final MeterRegistry registry;
 
-    public ObservedEventConsumer(ObservedEventDao observedEventDao, StringRedisTemplate redis,
-                                 ObjectMapper objectMapper, EventBroadcaster broadcaster,
-                                 MeterRegistry registry) {
+    public ObservedEventConsumer(@Qualifier("observeConsumerObservedEventDao") ObservedEventDao observedEventDao,
+                                 ObservedEventDlqDao dlqDao,
+                                 StringRedisTemplate redis, ObjectMapper objectMapper,
+                                 EventBroadcaster broadcaster, MeterRegistry registry) {
         this.observedEventDao = observedEventDao;
+        this.dlqDao = dlqDao;
         this.redis = redis;
         this.objectMapper = objectMapper;
         this.broadcaster = broadcaster;
@@ -139,7 +144,8 @@ public class ObservedEventConsumer {
     @RabbitListener(queues = RabbitObserveConfig.QUEUE,
             containerFactory = "observeListenerContainerFactory")
     public void onBatch(List<Message> messages, Channel channel) throws IOException {
-        // ⚠️ 消费线程是**复用**的（simple listener 的并发从 2 起、最多 8）：本方法里的日志必须
+        // ⚠️ 消费线程是**复用**的（simple listener 的并发固定 4，2026-10-19 起与台账小池的 4 条连接对齐）：
+        //    本方法里的日志必须
         //    带着「这一批」的 traceId，结束时还原成进来时的上下文 —— 否则下一条消息顶着一批的号。
         //    一批最多 50 条、可能来自不同的 traceId ⇒ 日志统一挂**第一个非空 traceId**，
         //    并在帧的 fields.traces 里如实记「本批涉及几个 traceId」（不假装整批同号）。
@@ -160,7 +166,7 @@ public class ObservedEventConsumer {
                     log.warn("[EVENT] 消息不是合法的事件 JSON ⇒ 单条转 DLQ：cause={} body={}",
                             e.toString(), abbreviate(body));
                     channel.basicNack(message.getMessageProperties().getDeliveryTag(), false, false);
-                    reportDeadLetters(null, 1, e, "消息不是合法的事件 JSON");
+                    reportDeadLetters(null, 1, e, "消息不是合法的事件 JSON", body);
                 }
             }
             if (events.isEmpty()) {
@@ -209,7 +215,7 @@ public class ObservedEventConsumer {
         // A4（块 7 收尾）：重试彻底失败 = 这条链路的「最终异常」。在 NACK 之前先把死信这件事
         // 送进合并环（实时日志页的 ERROR + 链路抽屉 + 指标面板的死信数），否则它只存在于 broker
         // 的一个队列里，页面看上去一切正常。
-        reportDeadLetters(events, okMessages.size(), last, "落库连续 " + MAX_ATTEMPTS + " 次失败");
+        reportDeadLetters(events, okMessages.size(), last, "落库连续 " + MAX_ATTEMPTS + " 次失败", null);
         for (Message message : okMessages) {
             // 逐条 NACK（multiple=false）：multiple=true 会连带这一批**之外**的 tag，
             // 而那些早已被上一次 ACK/NACK 消化掉了 ⇒ 对已确认的 tag 再操作是通道级错误。
@@ -221,15 +227,20 @@ public class ObservedEventConsumer {
     /**
      * 死信上报（A4）：一条 ERROR 事件进合并环 + 指标计数器累加。
      *
-     * <p>两条路都 fail-soft：上报/计数失败不能反过来改变 NACK 的结果（死信已经在 broker 里了，
-     * 页面少一条说明是「少一条说明」，不是「转运失败」）。
+     * <p>三条路都 fail-soft：上报/计数/**落库副本**失败不能反过来改变 NACK 的结果（死信已经在
+     * broker 里了，页面少一条说明是「少一条说明」，不是「转运失败」）。
+     * ⚠️ 落库副本（D3-2）与「台账落库」是**两条独立的路**：台账落不进去的时候，本方法才被调用；
+     * 而本方法写副本时数据库可能仍然不可用 —— 此时只 WARN，broker 的 DLQ 仍是最终兜底。
+     * 「指标帧的 {@code persisted} 读不到」与「这批复制的写入失败了」都由那个计数如实反映（→ null）。
      *
-     * @param events 失败的那批事件（可空：非法 JSON 的那条没有解析结果）
-     * @param count  本次进入死信的条数
-     * @param last   最后一次异常（可空）
-     * @param stage  失败阶段的人话（「落库连续 3 次失败」/「消息不是合法的事件 JSON」）
+     * @param events  失败的那批事件（可空：非法 JSON 的那条没有解析结果）
+     * @param count   本次进入死信的条数
+     * @param last    最后一次异常（可空）
+     * @param stage   失败阶段的人话（「落库连续 3 次失败」/「消息不是合法的事件 JSON」）
+     * @param rawBody 解析失败时的原始字节（可空；只有「非法 JSON」那一条会给）
      */
-    private void reportDeadLetters(List<ObservedEvent> events, int count, Exception last, String stage) {
+    private void reportDeadLetters(List<ObservedEvent> events, int count, Exception last, String stage,
+                                   String rawBody) {
         if (count <= 0) {
             return;
         }
@@ -263,6 +274,17 @@ public class ObservedEventConsumer {
             registry.counter(DEAD_LETTER_METER).increment(count);
         } catch (RuntimeException e) {
             log.warn("[EVENT] 死信计数失败：{}", e.toString());
+        }
+        // D3-2：尽力把死信写一份同库副本。**放在最后**：前两条是内存/注册表操作，不该被一次
+        // 数据库等待拖住；而这里失败只 WARN —— broker 的 DLQ 队列仍是最终兜底。
+        try {
+            if (events != null && !events.isEmpty()) {
+                dlqDao.insertBatch(events, stage, exClass, exMsg);
+            } else {
+                dlqDao.insertRaw(rawBody, stage, exClass, exMsg);
+            }
+        } catch (RuntimeException e) {
+            log.warn("[EVENT] 死信副本落库失败（不影响 NACK，broker 的 DLQ 仍是最终兜底）：{}", e.toString());
         }
     }
 
@@ -302,9 +324,11 @@ public class ObservedEventConsumer {
      */
     private void pushToRedis(List<String> bodies) {
         try {
-            for (String body : bodies) {
-                redis.opsForList().leftPush(REDIS_KEY, body);
-            }
+            // ⚠️ 一次 LPUSH 整批，不是逐条：一批 50 条逐条发就是 50 次网络往返。积压 53 万条时
+            //    单条往返把批消费拖成「落库很快、Redis 很慢」，消费者线程全等在这上面。
+            //    `leftPushAll(key, values)` 的入栈顺序与逐条 leftPush 相同（后者也是逆序），
+            //    Redis 列表的最终顺序不变；失败语义也不变（整段 try/catch，不上抛）。
+            redis.opsForList().leftPushAll(REDIS_KEY, bodies);
             redis.opsForList().trim(REDIS_KEY, 0, REDIS_CAPACITY - 1);
         } catch (Exception e) {
             log.warn("[EVENT] Redis {} 写入失败（不影响落库与 ACK）：cause={}", REDIS_KEY, e.toString());

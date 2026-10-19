@@ -1,0 +1,19 @@
+{
+  "stamp": "d3-mq-banner-cleared",
+  "base": "http://localhost:8080",
+  "steps": [
+    {
+      "login": {
+        "ok": true
+      }
+    }
+  ],
+  "page": {
+    "health": "健康",
+    "healthClass": "a-hv a-hv--ok",
+    "reasons": [],
+    "dlqCard": true
+  },
+  "shot": "docs/agent/evidence/c3-d3/d3-mq-banner-cleared.png"
+}
+SHOT docs/agent/evidence/c3-d3/d3-mq-banner-cleared.png

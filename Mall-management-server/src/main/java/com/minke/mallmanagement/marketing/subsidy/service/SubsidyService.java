@@ -1,5 +1,6 @@
 package com.minke.mallmanagement.marketing.subsidy.service;
 
+import com.minke.mallmanagement.shared.web.PageLimits;
 import com.minke.mallmanagement.marketing.subsidy.dao.SubsidyDao;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
@@ -46,9 +47,9 @@ import java.util.regex.Pattern;
 @Service
 public class SubsidyService {
 
-    public static final int DEFAULT_LIMIT = 100;
+    public static final int DEFAULT_LIMIT = PageLimits.DEFAULT_PAGE_SIZE;
 
-    public static final int MAX_LIMIT = 500;
+    public static final int MAX_LIMIT = PageLimits.MAX_PAGE_SIZE;
 
     /** {@code subsidy_goods.Status} 取值域 —— 与建表注释逐字一致。 */
     public static final String STATUS_PENDING = "pending";

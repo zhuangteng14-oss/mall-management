@@ -1,5 +1,6 @@
 package com.minke.mallmanagement.comment.service;
 
+import com.minke.mallmanagement.shared.web.PageLimits;
 import com.minke.mallmanagement.comment.dao.CommentDao;
 import com.minke.mallmanagement.comment.dao.SensitiveWordDao;
 import com.minke.mallmanagement.observe.metrics.SensitiveMetrics;
@@ -69,8 +70,8 @@ public class SensitiveWordService {
     /** {@code Word} 列是 {@code varchar(64)}（方案 §一.6）—— 超了 strict mode 下 ERROR 1406。 */
     public static final int MAX_WORD = 64;
 
-    public static final int DEFAULT_LIMIT = 100;
-    public static final int MAX_LIMIT = 500;
+    public static final int DEFAULT_LIMIT = PageLimits.DEFAULT_PAGE_SIZE;
+    public static final int MAX_LIMIT = PageLimits.MAX_PAGE_SIZE;
 
     /**
      * 拒收时回的**唯一**一句话 —— 刻意不提是哪个词、也不提「敏感词」三个字里的细节
@@ -96,7 +97,7 @@ public class SensitiveWordService {
 
     // ==================== 读：词表（管理端） ====================
 
-    /** 词表列表。{@code limit} 缺省 100、上限 500（同 {@code ReportService.list} 的口径）。 */
+    /** 词表列表。{@code limit} 缺省 100、上限 100（同 {@code ReportService.list} 的口径；D3-3 统一上限）。 */
     public Map<String, Object> list(Integer limit, Integer offset) {
         int effectiveLimit = normalizeLimit(limit);
         int effectiveOffset = (offset == null || offset < 0) ? 0 : offset;

@@ -1,5 +1,7 @@
 package com.minke.mallmanagement.admin.service;
 
+import com.minke.mallmanagement.shared.text.DataMasking;
+import com.minke.mallmanagement.shared.web.PageLimits;
 import com.minke.mallmanagement.user.dao.UserGovernanceDao;
 import org.springframework.stereotype.Service;
 
@@ -24,8 +26,8 @@ import java.util.Map;
 @Service
 public class UserGovernanceService {
 
-    public static final int DEFAULT_LIMIT = 100;
-    public static final int MAX_LIMIT = 500;
+    public static final int DEFAULT_LIMIT = PageLimits.DEFAULT_PAGE_SIZE;
+    public static final int MAX_LIMIT = PageLimits.MAX_PAGE_SIZE;
 
     private final UserGovernanceDao userGovernanceDao;
 
@@ -33,13 +35,21 @@ public class UserGovernanceService {
         this.userGovernanceDao = userGovernanceDao;
     }
 
-    /** 用户列表（{@code keyword} 可空；块 7 收尾 · P1 起支持 {@code offset} 真分页）。 */
+    /**
+     * 用户列表（{@code keyword} 可空；块 7 收尾 · P1 起支持 {@code offset} 真分页）。
+     *
+     * <p>⚠️ <b>读侧掩码（D3-4）只在这里做</b>：{@code email} 出列表时是 {@code a***@x.com}。
+     * 需要明文时走 {@code POST /admin/accounts/user/detail}（Controller 调 {@link #userRow}
+     * 并写一条 {@code user.viewPlaintext} 审计）—— 掩码列表 + 按次明文，两者缺一不可。
+     * {@link #userRow} 刻意**不掩** —— 它是审计快照与治理弹窗的数据源，必须能还原事实。
+     */
     public Map<String, Object> listUsers(String keyword, Integer limit, Integer offset) {
         int effective = normalizeLimit(limit);
         int skip = offset == null || offset < 0 ? 0 : offset;
         Map<String, Object> result = new HashMap<>();
         result.put("success", true);
-        result.put("list", userGovernanceDao.selectUsers(keyword, effective, skip));
+        result.put("list", DataMasking.maskUserRows(
+                userGovernanceDao.selectUsers(keyword, effective, skip)));
         result.put("total", userGovernanceDao.countUsers(keyword));
         result.put("limit", effective);
         result.put("offset", skip);

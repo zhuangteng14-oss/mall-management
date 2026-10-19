@@ -66,7 +66,7 @@
       <label class="c-f c-f-narrow">
         <span>上限</span>
         <select v-model.number="af.limit" @change="loadApps">
-          <option v-for="n in [50, 100, 200, 500]" :key="n" :value="n">{{ n }}</option>
+          <option v-for="n in [20, 50, 100]" :key="n" :value="n">{{ n }}</option>
         </select>
       </label>
       <div class="c-f-actions">

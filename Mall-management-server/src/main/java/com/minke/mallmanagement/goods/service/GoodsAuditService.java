@@ -1,5 +1,6 @@
 package com.minke.mallmanagement.goods.service;
 
+import com.minke.mallmanagement.shared.web.PageLimits;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.minke.mallmanagement.goods.dao.GoodsAuditDao;
@@ -54,8 +55,8 @@ public class GoodsAuditService {
     public static final String STATUS_REJECTED = "rejected";
 
     /** 列表默认条数 / 上限（与 {@code MerchantApplicationService} 同口径）。 */
-    public static final int DEFAULT_LIMIT = 100;
-    public static final int MAX_LIMIT = 500;
+    public static final int DEFAULT_LIMIT = PageLimits.DEFAULT_PAGE_SIZE;
+    public static final int MAX_LIMIT = PageLimits.MAX_PAGE_SIZE;
 
     private final GoodsAuditDao auditDao;
     private final GoodsDao goodsDao;

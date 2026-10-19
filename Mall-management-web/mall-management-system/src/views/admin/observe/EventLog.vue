@@ -213,23 +213,24 @@
               <span class="c">{{ fmtInt(sessionByKind[k] || 0) }}</span>
             </button>
 
-            <!-- ── 设施 3 类（用户 2026-10-16 裁定 D：框架做、**置灰**）──────────────────
-                 ⚠️ `disabled` 而不是「点一下弹个提示」：这三类**后端一个写入点都没有**
-                    （Java 侧不存在 `SLOW_SQL` / `MQ` / `SCHEDULER`），点得动就是在骗人。
-                 虚线边框 = 同 ⑥ 开关栏对「后端 WIRED 清单里没有它」的同一套画法。
-                 ⚠️ 计数列写 `—` 而不是 `0`：`0` 读起来像「这一类存在、只是此刻没有」。 -->
-            <div class="sep" :title="FACILITY_TIP"><span>设施 3 类 · 后端面待落地</span></div>
+            <!-- ── 设施 3 类（A5：已从占位改为真功能）──────────────────────────────────
+                 ⚠️ 与上面九个业务类同一套行 / 勾选框 / 计数 / 点击筛选，只是分组画。
+                 后端三类没有源环，但事件确实进同一个合并环 ⇒ 这里点一下就是一次真筛选。 -->
+            <div class="sep" :title="FACILITY_TIP"><span>设施 3 类</span></div>
             <button
               v-for="f in FACILITY_KINDS"
               :key="f.k"
               type="button"
-              class="row is-fac"
-              disabled
-              :title="FACILITY_TIP"
+              class="row"
+              :class="{ off: !activeKinds.has(f.k) }"
+              :style="{ '--c': kindColor(f.k) }"
+              :title="`${kindLabel(f.k)}：范围内 ${sessionByKind[f.k] || 0} 条（点一下${activeKinds.has(f.k) ? '关掉' : '打开'}这一类）`"
+              @click="toggleKind(f.k)"
             >
-              <span class="sw"></span><span class="ic"></span>
-              <span class="k">{{ f.label }}</span>
-              <span class="c">—</span>
+              <span class="sw"></span>
+              <span class="ic"><component :is="KIND_ICON[f.k]" class="ev-ic s" /></span>
+              <span class="k">{{ kindLabel(f.k) }}</span>
+              <span class="c">{{ fmtInt(sessionByKind[f.k] || 0) }}</span>
             </button>
           </div>
 
@@ -411,16 +412,16 @@
               <span class="track"><span class="fill" :style="{ width: barW(sessionByKind[k] || 0, kindMax) }"></span></span>
               <span class="num">{{ fmtInt(sessionByKind[k] || 0) }}</span>
             </div>
-            <!-- 设施 3 类（裁定 D）：横条画出来但**恒空**、**置灰**、计数写 `—` —— 见 ② 里的长注释。 -->
+            <!-- 设施 3 类（A5）：与业务 9 类同一条横条，计数来自同一份 `sessionByKind`。 -->
             <div
               v-for="f in FACILITY_KINDS"
               :key="f.k"
-              class="ev-bar is-fac"
-              :title="FACILITY_TIP"
+              class="ev-bar"
+              :title="`${kindLabel(f.k)} ${sessionByKind[f.k] || 0} 条`"
             >
-              <span class="nm">{{ f.label }}</span>
-              <span class="track"><span class="fill" style="width: 0"></span></span>
-              <span class="num">—</span>
+              <span class="nm"><component :is="KIND_ICON[f.k]" class="ev-ic s" :style="{ color: kindColor(f.k) }" />{{ kindLabel(f.k) }}</span>
+              <span class="track"><span class="fill" :style="{ width: barW(sessionByKind[f.k] || 0, kindMax) }"></span></span>
+              <span class="num">{{ fmtInt(sessionByKind[f.k] || 0) }}</span>
             </div>
           </div>
 
@@ -526,9 +527,13 @@
         </ol>
       </div>
 
-      <!-- ══ ⑥ 开关栏（3a.6 乙案引入；本页只占位，本轮不接行为）════════════════════ -->
+      <!-- ══ ⑥ 开关栏 —— 批四起**降级为只读图例**（3a.6 乙案引入时是占位）
+           原先的 chip 长得像能点的按钮，但本页从来没有接开关行为 ⇒ 用户会以为在这里
+           就能拨闸。现在：① 去掉「不可开关」这种**仍然暗示可操作**的措辞；② 样式改成
+           纯文字图例（`.sw2` 不再有按钮底）；③ 末句直接给出去处链接。
+           ⚠️ 真开关只在攻击页（`/admin/observe/attack-sim`），本页不 import 任何开关 API。 -->
       <div class="ev-switch">
-        <b><span class="idx">⑥</span> 开关栏</b>
+        <b><span class="idx">⑥</span> 开关图例</b>
         <div class="grp"><span class="lab">防护闸</span>
           <span
             v-for="k in PROTECTIONS"
@@ -536,18 +541,15 @@
             class="sw2"
             :class="{ dead: !protectionWired(k) }"
             :title="protectionNotWiredTip(k)"
-          >{{ protectionLabel(k) }}<template v-if="!protectionWired(k)"> · 不可开关</template></span>
+          >{{ protectionLabel(k) }}</span>
         </div>
         <div class="grp"><span class="lab">注入</span>
-          <span
-            v-for="k in INJECTIONS"
-            :key="k"
-            class="sw2"
-            :class="{ dead: INJECTIONS_NOT_WIRED.includes(k) }"
-            :title="INJECTIONS_NOT_WIRED.includes(k) ? '未接通：拨了读数不会变（后端 AttackEngine.INJECTIONS_NOT_WIRED 的镜像）' : ''"
-          >{{ injectionLabel(k) }}<template v-if="INJECTIONS_NOT_WIRED.includes(k)"> · 不可开关</template></span>
+          <span v-for="k in INJECTIONS" :key="k" class="sw2">{{ injectionLabel(k) }}</span>
         </div>
-        <span class="n">3a.6 乙案引入 · 本页只占位（本轮不接行为）· 虚线 = 后端 WIRED 清单里没有它</span>
+        <span class="n">
+          只读图例 · 本页不能开关 · 虚线 = 后端 WIRED 清单里没有它 ·
+          <router-link class="go" to="/admin/observe/attack-sim">去攻击模拟器操作 →</router-link>
+        </span>
       </div>
     </div>
   </section>
@@ -558,7 +560,7 @@
 
   ⚠️ **3a.3 第 ⑥ 步（2026-10-16）把本页从「纵向卡片流」重做成「一屏六区的三栏驾驶舱」** ——
      结构来自草图 `docs/美化/c3-admin-preview/3a3-甲-三栏驾驶舱.html`（用户从甲/丙里选了甲）。
-     六区：① 状态条 ② 过滤栏 ③ 事件流（核心）④ 实时统计 ⑤ 链路展开 ⑥ 开关栏。
+     六区：① 状态条 ② 过滤栏 ③ 事件流（核心）④ 实时统计 ⑤ 链路展开 ⑥ 开关图例（只读）。
      判据、逐条口径、与草图的差异见 `_work/3a3/3a3-第6步-落地方案.md`。
 
   ⚠️ **数据源 = `POST /admin/observe/events/stream`**：一帧 = 本拍增量 `events` + 三个汇总
@@ -596,9 +598,10 @@
      全文在它的 `title`（= 下面 `COVERAGE_FULL`）、本注释、以及 `_work/3a3/日志页-覆盖与边界-全文.md`。
      ⚠️ ① 下排原来那条 `.note`（也是这 5 条的一部分）已挪进 ②，为三枚控件腾出一行 —— 信息没删。
 
-  **D · 设施 3 类：框架做、置灰。** ② 的图例与 ④ 的横条各多一组「设施 3 类」（慢 SQL / MQ / 调度），
-     `disabled`、虚线、计数写 `—`。⚠️ 后端 Java 侧**根本不存在**这三类 —— 画出来是为了让缺口
-     在页面上看得见，不是为了假装有。
+  **D · 设施 3 类（A5 已从占位改为真功能）。** ② 的图例与 ④ 的横条各多一组「设施 3 类」
+     （慢 SQL / MQ / 调度），可点、可筛、计数实时。后端写入点：`SlowSqlListener` /
+     `RabbitEventPublisher` / `ScheduledJobGate` → `EventBroadcaster.emitSlowSql/emitMq/emitScheduler`。
+     ⚠️ 这三类**没有源环**、不经 `poll()`，但事件进同一个合并环 ⇒ 与业务 9 类同权。
 
   **E · ⑤ 底部塌条**：保持原样（用户接受）。
 
@@ -624,7 +627,7 @@
   **图标（视觉修正三·第二半）· 4 处，映射照抄用户给的那张表。**
      `KIND_ICON` 相对上一版**换掉五个**（order/audit/notify/sensitive/identity），新增 `SEV_ICON`。
      ② 九类行、④ 类计数九条、④ 严重度三条都加；③ 事件流本来就有（用户「有 ✓ 保留」）。
-     ⚠️ 「全部」与设施 3 类那几行放**空 `.ic` 占位**，否则 9 行的左缘参差。
+     ⚠️ 「全部」那一行放**空 `.ic` 占位**，否则各行左缘参差；设施 3 类自 A5 起有真图标。
 
   **消息呈现（收尾批 2 定稿）· 第一层中文主消息 + 全 fields + actor + src；折行最多 2 行、悬挂缩进 2ch。**
      · ③ 数据行从**栅格**改成**一行自然流**（`.ln` 折行容器 + `.flow` 行内流）：栅格里折行只发生在
@@ -687,6 +690,7 @@ import { computed, nextTick, onActivated, onBeforeUnmount, onDeactivated, onMoun
 import {
   Database, Lock, ShoppingCart, Package, Clipboard, Bell, AlertTriangle, Shield, ShieldCheck,
   Info, AlertCircle, AlertOctagon, ShieldAlert,
+  Timer, RadioTower, CalendarClock,
 } from '@lucide/vue'
 import { openEventStream } from '../../../api/observe'
 // 演示模式（块 7 收尾 ②）：`DemoModeToggle` 摆开关，`demo` 是被 `watch` 的那个状态，
@@ -700,7 +704,7 @@ import {
 import DemoModeToggle from '../../../components/observe/DemoModeToggle.vue'
 import ReplayBanner from '../../../components/observe/ReplayBanner.vue'
 import {
-  KINDS, SEVERITIES,
+  KINDS, FACILITY_KINDS as FACILITY_TAGS, SEVERITIES,
   kindLabel, kindColor, severityLabel, severityColor,
   objectFieldLabel,
   // 3a.3 收尾批 2：事件帧 `fields` 的键名中文（真帧键集，认不出回落英文原键）。
@@ -708,7 +712,7 @@ import {
   // ⑥ 开关栏的两组（PROTECTION_* / INJECTION_*）：**唯一出处是后端**
   //（`ProtectionGate.WIRED_KEYS` / `AttackEngine.INJECTION_KEYS` 的镜像）—— 本页只读它，不自造清单。
   PROTECTIONS, protectionLabel, protectionWired, protectionNotWiredTip,
-  INJECTIONS, injectionLabel, INJECTIONS_NOT_WIRED,
+  INJECTIONS, injectionLabel,
 } from '../../../config/labels/observe-labels'
 // 3a.3 收尾批 2：顶层 `actor` = `{id, role}`，role 走用户域那张唯一表（1 客户 / 2 商家 / 3 管理员）。
 import { roleLabel } from '../../../config/labels/user-labels'
@@ -770,6 +774,8 @@ const TOP_N = 5
 const KIND_ICON = {
   cache: Database, lock: Lock, order: ShoppingCart, stock: Package, audit: Clipboard,
   notify: Bell, sensitive: AlertTriangle, identity: Shield, protection: ShieldCheck,
+  // 设施 3 类（A5）：秒表 = 耗时、信号塔 = 连接、日历钟 = 调度。
+  slowSql: Timer, mq: RadioTower, scheduler: CalendarClock,
 }
 /** 严重度四档的图标（「④ 严重度分布：每一档各加图标」；保护拦截 = 盾牌加感叹号）。
  *  ⚠️ 与 `KIND_ICON` 分开：严重度是**另一个维度**（同一类事件可以是 info 也可以是 error），
@@ -793,17 +799,16 @@ const EXPORTS = [
 const DENSITIES = [['compact', '紧凑'], ['cozy', '舒适']]
 const ROW_H = { compact: '22px', cozy: '28px' }
 
-/** ② / ④ 里「设施 3 类」的两组框架（用户 2026-10-16 裁定 D：**框架做，设施 3 置灰**）。
- *  ⚠️ 后端 Java 侧**根本不存在这三类**（`SLOW_SQL` / `MQ` / `SCHEDULER` 一个写入点都没有，
- *     `config/labels/observe-labels.js` 的 `KINDS` 里也没有）⇒ 它们是**后端面待落地**的占位，
- *     不是「本轮没做」。故：**画出来、置灰、不可点、不进筛选** —— 让缺口在页面上看得见，
- *     而不是把草图里的三类悄悄删掉（那也是把缺口藏起来）。 */
-const FACILITY_KINDS = [
-  { k: 'slow_sql', label: '慢 SQL' },
-  { k: 'mq', label: 'MQ' },
-  { k: 'scheduler', label: '调度' },
-]
-const FACILITY_TIP = '后端面待落地：这一类在 Java 侧一个写入点都没有，先占位、不参与筛选、不进任何计数'
+/** ② / ④ 里「设施 3 类」的两组（A5，2026-10-18：**从占位改为真功能**）。
+ *  ⚠️ 后端三类已接通：`SlowSqlListener` → `emitSlowSql`、`RabbitEventPublisher` → `emitMq`、
+ *     `ScheduledJobGate` → `emitScheduler`。三类**没有源环**，由后端直接写进合并环 ⇒
+ *     页面上与九个业务类分两组画，但筛选 / 计数与业务类**完全同权**（都进 `activeKinds`
+ *     与 `sessionByKind`）。
+ *  ⚠️ 标签仍从 `observe-labels.js` 读（`kindLabel`），页面不另写一份中文。 */
+const FACILITY_KINDS = FACILITY_TAGS.map((k) => ({ k, label: kindLabel(k) }))
+/** 筛选 / 计数 / 全部打开 的总类集 = 九个业务类 + 三个设施类。 */
+const ALL_KINDS = [...KINDS, ...FACILITY_TAGS]
+const FACILITY_TIP = '设施故障：慢 SQL / MQ / 调度（后端已埋点，参与筛选与计数）'
 
 /** 「覆盖与边界」5 条 —— **压缩上屏、全文在 `title` 里**（用户 2026-10-16 裁定 C：接受压缩，
  *  但要告诉用户全文在哪能查到）。⚠️ 逐字全文的**原始出处** = `git show HEAD:` 本文件里那一节，
@@ -882,7 +887,7 @@ const density = ref('compact')
 /** 导出后那行小字（「已导出 N 条 → 文件名」）。⚠️ 没有它，下载被浏览器拦掉时用户看不出
  *  发生过什么 —— 那不是「静默失败」而是「静默成功」，两者都查不出来。 */
 const exportNote = ref('')
-const activeKinds = ref(new Set(KINDS))    // 开着的类（空集 = 一条也不显示，是**允许**的状态）
+const activeKinds = ref(new Set(ALL_KINDS))   // 开着的类（九个业务类 + 三个设施类；空集 = 一条也不显示，是**允许**的状态）
 const activeSevs = ref(new Set(SEVERITIES))// 开着的严重度
 const openedTrace = ref('')                // ⑤ 抽屉打开的 traceId
 /** ⑤ 的「单条事件」模式：点没有 traceId 的行时放这一条（同一个抽屉，不另开一个面板）。 */
@@ -1359,7 +1364,7 @@ const replayClockText = computed(() => {
   if (!ms) return '—'
   return hmsms(ms)
 })
-const isAllOn = computed(() => activeKinds.value.size === KINDS.length && activeSevs.value.size === SEVERITIES.length)
+const isAllOn = computed(() => activeKinds.value.size === ALL_KINDS.length && activeSevs.value.size === SEVERITIES.length)
 
 /* ── ① 时间范围（裁定 A）⇒「范围内」是 ②③④ 的统一口径 ──────────────────────── */
 /** 当前时间范围的 `[from, to]`（毫秒，闭区间）。`null` = **不过滤**（`all` 或自定义两栏都空）。 */
@@ -1441,7 +1446,7 @@ const hasAnyRaw = computed(() => {
 /** **范围内**按类计数（② 的行清单 / ④ 的横条）。原始口径，见 `rawWindow`。 */
 const sessionByKind = computed(() => rawWindow.value.byKind)
 const sessionBySev = computed(() => rawWindow.value.bySev)
-const kindMax = computed(() => Math.max(1, ...KINDS.map((k) => sessionByKind.value[k] || 0)))
+const kindMax = computed(() => Math.max(1, ...ALL_KINDS.map((k) => sessionByKind.value[k] || 0)))
 const sevMax = computed(() => Math.max(1, ...SEVERITIES.map((s) => sessionBySev.value[s] || 0)))
 function barW(v, mx) {
   return `${((v / mx) * 100).toFixed(1)}%`
@@ -1879,7 +1884,7 @@ function toggleSev(s) {
   activeSevs.value = next
 }
 function resetFilters() {
-  activeKinds.value = new Set(KINDS)
+  activeKinds.value = new Set(ALL_KINDS)
   activeSevs.value = new Set(SEVERITIES)
   warnUp.value = false
   objFilter.value = ''
@@ -2257,7 +2262,7 @@ function connect() {
     onFrame: (f) => onFrame(f, src),
     onLost(s) {
       phase.value = 'stopped'
-      lost.value = s
+      lost.value = s; if (s.evicted) stream = null
       errMsg.value = s.err ? ((s.err && s.err.message) || '连接中断') : ''
     },
   }
@@ -2363,7 +2368,7 @@ onMounted(() => {
 // ⚠️ 切数据源（`正常` ⇄ `模拟日常`）⇒ 立刻重连；**切源 = 隔离不是清空**（两桶各留、显示只取 `cur`）。
 //    去重集合 `seenSeq` 跨源共用（不封顶）；两套 seq 必须不重叠，由 demo-stream 的高位 `evSeq` 保证。
 onDeactivated(() => {
-  pageActive.value = false
+  pageActive.value = false; flushAllBuffers(); closeStream()   // 2026-10-19 连接预算：KeepAlive 切走必须让出 SSE（同行追加，保净零行数）
   stopFlush()          // 页面不可见 ⇒ 连 rAF 冲刷也停（数据仍进池）
   // 回放会话在后台**继续走**（用户切到指标页时进度不该倒退），吐出的行先攒在会话的
   // backlog 里；本页回到屏上时 `attachReplaySink` 会一次性补画。
@@ -2371,7 +2376,7 @@ onDeactivated(() => {
   clearInterval(tickTimer); tickTimer = null
 })
 onActivated(() => {
-  pageActive.value = true; nowMs.value = Date.now()
+  pageActive.value = true; nowMs.value = Date.now(); if (!stream && !replaySession.active && !replaySession.loading) connect()   // 2026-10-19：切回来立刻重建 SSE（同行追加，保净零行数）
   startFlush()
   clearInterval(tickTimer); tickTimer = setInterval(() => { nowMs.value = Date.now() }, 1000)
   attachReplaySink(onReplayBatch)
@@ -2925,7 +2930,7 @@ onBeforeUnmount(() => {
 }
 /* 9 类每类前的那枚图标（用户 2026-10-16）。⚠️ 固定 12px 宽 + `flex: none`：
    `.row` 是 flex 容器，不给固定宽的话图标列会随类名长短**一行一个宽度**，9 行左缘参差。
-   ⚠️ 「全部」与设施 3 类那几行放的是**空** `.ic` 占位 —— 见的模板注释。 */
+   ⚠️ 只有「全部」那一行放**空** `.ic` 占位；九个业务类与设施 3 类都有真图标（A5 起）。 */
 .ev-rail .row .ic {
   display: inline-flex;
   align-items: center;
@@ -2958,28 +2963,15 @@ onBeforeUnmount(() => {
   font-weight: var(--fw-med);
   border-bottom: 1px solid var(--line-2);
 }
-/* ── 设施 3 类（裁定 D：框架做、置灰）──────────────────────────────────────────
-   虚线边框 = 同 ⑥ 开关栏「后端 WIRED 清单里没有它」的同一套画法（全页只有这两种地方用虚线，
-   都在说同一件事：**后端面没接上**）。`cursor: not-allowed` + `[disabled]` 双重表达不可点。 */
+/* ── 设施 3 类（A5：已接通，分组标题）────────────────────────────────────────
+   与业务 9 类同权（可点、可筛、计数），故不再有置灰 / 虚线 / not-allowed 那一套；
+   这一条只剩「分组标题」的排版。 */
 .ev-rail .rows .sep {
   display: flex;
   align-items: center;
   gap: var(--s2);
   padding: var(--s2) var(--s3) 2px;
   font-size: var(--fs-xs);
-  color: var(--ink-3);
-}
-.ev-rail .row.is-fac,
-.ev-rail .row.is-fac:hover {
-  color: var(--ink-3);
-  background: none;
-  cursor: not-allowed;
-}
-.ev-rail .row.is-fac .sw {
-  background: none;
-  border-style: dashed;
-}
-.ev-rail .row.is-fac .c {
   color: var(--ink-3);
 }
 /* 口径 / 严重度 / 全部打开：**钉在栏底**，不跟着行清单滚 */
@@ -3599,23 +3591,6 @@ button.ev-bar {
   font-variant-numeric: tabular-nums;
   text-align: right;
 }
-/* 设施 3 类（裁定 D）：横条画出来但**恒空**、整行压暗、轨道改成虚线（同 ② 的 `.sw` 与 ⑥ 的
-   `.sw2.dead`：全页第三处虚线，说的还是「后端面待落地」）。计数列写 `—` 不写 `0`。 */
-.ev-bar.is-fac .nm,
-.ev-bar.is-fac .num {
-  color: var(--ink-3);
-}
-/* ⚠️ 设施 3 类那三条**没有图标**（不在这 9 类里）⇒ 文字会比其他 9 条左移一格。
-   补一个等宽的左内边距（12px 图标 + 一个空格 ≈ 15px）把两种行的文字左缘对齐；
-   不补的话同一个列表里两组的标签会参差 —— 那是画法不一致，不是「有意义的差异」。 */
-.ev-bar.is-fac .nm {
-  padding-left: 15px;
-}
-.ev-bar.is-fac .track {
-  background: none;
-  border: 1px dashed var(--line-2);
-  opacity: 0.7;
-}
 .ev-read {
   display: flex;
   flex-wrap: wrap;
@@ -3770,20 +3745,30 @@ button.ev-bar {
   color: var(--ink-3);
 }
 .ev-switch .sw2 {
-  border: 1px solid var(--line-2);
+  /* 批四起是**只读图例**：没有按钮底、没有 hover、光标也不是 pointer ——
+     长得像开关就是这一处最贵的误导（用户会去点它）。 */
+  border: 1px solid transparent;
   border-radius: var(--r1);
-  padding: 0 6px;
-  background: var(--surface-2);
+  padding: 0 4px;
+  background: none;
+  color: var(--ink-2);
+  cursor: default;
 }
 .ev-switch .sw2.dead {
+  border-color: var(--line-2);
   border-style: dashed;
   color: var(--ink-3);
-  background: none;
 }
 .ev-switch .n {
   color: var(--ink-3);
   margin-left: auto;
 }
+.ev-switch .go {
+  color: var(--brand);
+  text-decoration: none;
+  font-weight: 600;
+}
+.ev-switch .go:hover { text-decoration: underline; }
 
 /* ── 窄屏：三栏塌成两栏（③ 让位），再窄就堆叠 ──────────────────────────────── */
 @media (max-width: 1100px) {

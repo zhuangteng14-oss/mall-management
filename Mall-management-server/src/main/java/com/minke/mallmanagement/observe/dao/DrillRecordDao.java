@@ -6,8 +6,12 @@ import org.springframework.jdbc.support.GeneratedKeyHolder;
 import org.springframework.jdbc.support.KeyHolder;
 import org.springframework.stereotype.Repository;
 
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * 可观测域的**内联 SQL 唯一出口**（块 7 · commit 4）—— 只碰一张表 {@code drill_record}
@@ -53,19 +57,19 @@ public class DrillRecordDao {
      * ⚠️ 而 {@code Result} **总是**排在最末：{@code DrillRecordService.split()} 会把它从原位置摘下来、
      * 最后再放回去（见那个方法）⇒ 响应里每行的键序是
      * {@code […, DurationMs, CreatedAt, BatchId, EventCount, HasData, Result]}。
-     * <p>⚠️ {@code EventCount}（2026-10-18）同样追加在尾部：它是**派生列**（子查询），
-     * 不该插在业务列中间；{@code HasData} 由服务层紧随其后生成。
+     * <p>⚠️ {@code EventCount}（2026-10-18）同样追加在尾部：它是**派生列**，不该插在业务列中间；
+     * {@code HasData} 由服务层紧随其后生成。
+     *
+     * <p>⚠️ <b>2026-10-19 性能修复：{@code EventCount} 不再是一条相关子查询</b>。
+     * 旧写法对列表里的**每一行**各跑一次 {@code COUNT(*)}，500 并发压测时这条语句实测
+     * 10,127ms（{@code /attack/records} 10 秒超时的直接原因）。现在列表先取本页行，
+     * 再对**本页出现的批次号**一次性 {@code WHERE BatchId IN (…) GROUP BY BatchId}
+     * （走 {@code idx_observed_event_batch}）。见 {@link #attachEventCounts(List)}。
      */
     private static final String COLUMNS =
             "r.Id, r.OperatorId, r.OperatorRole, r.Name, r.Scenario, r.TotalRequests, r.BlockedRequests, "
                     + "r.FailedRequests, r.DurationMs, CAST(r.Result AS CHAR) AS Result, "
-                    + "DATE_FORMAT(r.created_at, '%Y-%m-%d %H:%i:%s') AS CreatedAt, r.BatchId, "
-                    // 2026-10-18：批次**是否还有台账**。observed_event 有保留期清理（攻击批次 3 天），
-                    // 而 drill_record 不参与那次清理 ⇒ 过期批次的记录还在、事件已删空，下拉框会给出
-                    // 一个点进去 0/0 的「幽灵批次」。这一列让列表能把它们标出来（服务层转成 HasData）。
-                    // ⚠️ 子查询走 `idx_observed_event_batch`（Migration ⑲-1），每行一次索引 COUNT。
-                    + "(SELECT COUNT(*) FROM mall_management_sql.observed_event e "
-                    + " WHERE e.BatchId = r.BatchId) AS EventCount ";
+                    + "DATE_FORMAT(r.created_at, '%Y-%m-%d %H:%i:%s') AS CreatedAt, r.BatchId ";
 
     private final JdbcClient jdbcClient;
 
@@ -118,9 +122,12 @@ public class DrillRecordDao {
 
     /** 按时间倒序列演练记录（{@code Id} 兜底：同一秒内的多行顺序稳定、可复算）。 */
     public List<Map<String, Object>> selectRecords(int limit, int offset) {
-        return jdbcClient.sql("SELECT " + COLUMNS + "FROM mall_management_sql.drill_record r "
-                        + "ORDER BY r.created_at DESC, r.Id DESC LIMIT ? OFFSET ?")
+        List<Map<String, Object>> rows = jdbcClient.sql(
+                        "SELECT " + COLUMNS + "FROM mall_management_sql.drill_record r "
+                                + "ORDER BY r.created_at DESC, r.Id DESC LIMIT ? OFFSET ?")
                 .params(limit, offset).query().listOfRows();
+        attachEventCounts(rows);
+        return rows;
     }
 
     /** 总行数（前端分页要用；不埋点：它是行数不是事件）。 */
@@ -134,6 +141,50 @@ public class DrillRecordDao {
         List<Map<String, Object>> rows = jdbcClient.sql(
                         "SELECT " + COLUMNS + "FROM mall_management_sql.drill_record r WHERE r.Id = ?")
                 .param(id).query().listOfRows();
+        attachEventCounts(rows);
         return rows.isEmpty() ? null : rows.get(0);
+    }
+
+    /**
+     * 给本页记录补 {@code EventCount}：**一次** {@code GROUP BY} 查完整页的批次，而不是每行一次
+     * 相关子查询（2026-10-19，见 {@link #COLUMNS} 的说明）。
+     *
+     * <p>⚠️ 键序：{@code EventCount} 是 {@code put} 追加的，落在 {@code BatchId} 之后
+     * —— 与旧 {@code COLUMNS} 的位置一致（{@code DrillRecordServiceTest} 钉住了这个顺序）。
+     *
+     * <p>⚠️ 没有 {@code BatchId} 的行（存量记录）与查不到计数的批次都补 {@code 0L}，
+     * 与旧子查询的 {@code COUNT(*) = 0} 同义：服务层据此给出 {@code HasData=false}。
+     */
+    private void attachEventCounts(List<Map<String, Object>> rows) {
+        if (rows == null || rows.isEmpty()) {
+            return;
+        }
+        Set<String> batchIds = new LinkedHashSet<>();
+        for (Map<String, Object> row : rows) {
+            Object batchId = row.get("BatchId");
+            if (batchId != null && !String.valueOf(batchId).isBlank()) {
+                batchIds.add(String.valueOf(batchId));
+            }
+        }
+        Map<String, Long> counts = new HashMap<>();
+        if (!batchIds.isEmpty()) {
+            String placeholders = String.join(", ", Collections.nCopies(batchIds.size(), "?"));
+            List<Map<String, Object>> counted = jdbcClient.sql(
+                            "SELECT BatchId, COUNT(*) AS EventCount "
+                                    + "FROM mall_management_sql.observed_event "
+                                    + "WHERE BatchId IN (" + placeholders + ") "
+                                    + "GROUP BY BatchId")
+                    .params(batchIds.toArray()).query().listOfRows();
+            for (Map<String, Object> c : counted) {
+                Object value = c.get("EventCount");
+                counts.put(String.valueOf(c.get("BatchId")),
+                        value instanceof Number n ? n.longValue() : 0L);
+            }
+        }
+        for (Map<String, Object> row : rows) {
+            Object batchId = row.get("BatchId");
+            row.put("EventCount", batchId == null
+                    ? 0L : counts.getOrDefault(String.valueOf(batchId), 0L));
+        }
     }
 }

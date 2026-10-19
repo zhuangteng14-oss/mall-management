@@ -8,6 +8,7 @@ import org.springframework.data.redis.connection.RedisConnectionFactory;
 
 import java.time.Duration;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.function.BooleanSupplier;
 import com.minke.mallmanagement.shared.cache.MallCacheMetrics;
 
 /**
@@ -106,11 +107,27 @@ public class L2HealthProbe implements DisposableBean {
      */
     private final MallCacheMetrics metrics;
 
+    /**
+     * D3 演练注入 {@code redisDown} 的开关（读共享配置）。
+     *
+     * <p>⚠️ 与 {@code mqDown} / {@code dbSlow} / {@code jobDown} 同一条口径：**拨开就立即生效**，
+     * 不等一轮攻击演练的阶段 B。理由：用户 2026-10-18 的实弹演习要求「开启 Redis 断开 ⇒ 刷新
+     * 商品页就能看到 L2 降级」，而阶段 B 只在演练跑到末尾的 5 秒里注入一次 —— 那种「拨了没反应」
+     * 与其它三枚注入键的体感不一致。默认恒 false ⇒ 本类与 D3 之前逐字节同行为。
+     */
+    private final BooleanSupplier injectedDown;
+
     L2HealthProbe(RedisConnectionFactory probeConnectionFactory, Duration cooldown,
                   MallCacheMetrics metrics) {
+        this(probeConnectionFactory, cooldown, metrics, () -> false);
+    }
+
+    L2HealthProbe(RedisConnectionFactory probeConnectionFactory, Duration cooldown,
+                  MallCacheMetrics metrics, BooleanSupplier injectedDown) {
         this.probeConnectionFactory = probeConnectionFactory;
         this.cooldown = cooldown;
         this.metrics = metrics;
+        this.injectedDown = injectedDown == null ? () -> false : injectedDown;
     }
 
     /**
@@ -121,7 +138,9 @@ public class L2HealthProbe implements DisposableBean {
      * 本方法只读一个 volatile，故可以被任意频繁地调用。
      */
     public boolean isHealthy() {
-        return probeAllowedAtNanos.get() == HEALTHY;
+        // D3：注入期间页面口径就是「不可用」—— gauge mall.cache.l2.up 会立刻变 0，且恢复健康态
+        // 的标记不会被注入清掉（注入关掉后照旧按原来的冷却窗口判定）。
+        return !injectedDown.getAsBoolean() && probeAllowedAtNanos.get() == HEALTHY;
     }
 
     /**
@@ -136,6 +155,9 @@ public class L2HealthProbe implements DisposableBean {
      * 副作用写在这里，别只看名字。
      */
     public boolean isL2UsableNow() {
+        if (injectedDown.getAsBoolean()) {
+            return false;   // D3 演练注入：零网络代价，直接走「与 Redis 连不上完全相同的降级路径」
+        }
         long deadline = probeAllowedAtNanos.get();
         if (deadline == HEALTHY) {
             return true;

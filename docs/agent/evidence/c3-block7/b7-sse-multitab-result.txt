@@ -1,0 +1,341 @@
+ROUND 1 [
+ {
+  "round": 1,
+  "tab": "metrics",
+  "vis": "visible",
+  "logical": 1,
+  "real": 1,
+  "cdpInflight": 1,
+  "hiddenReal": {
+   "logs": 0,
+   "timeline": 0,
+   "attack": 0
+  },
+  "aggReal": 1,
+  "aggInflight": 1,
+  "framesMoved": true,
+  "post": {
+   "status": 200,
+   "ms": 5
+  }
+ },
+ {
+  "round": 1,
+  "tab": "logs",
+  "vis": "visible",
+  "logical": 1,
+  "real": 1,
+  "cdpInflight": 1,
+  "hiddenReal": {
+   "metrics": 0,
+   "timeline": 0,
+   "attack": 0
+  },
+  "aggReal": 1,
+  "aggInflight": 1,
+  "framesMoved": true,
+  "post": {
+   "status": 200,
+   "ms": 5
+  }
+ },
+ {
+  "round": 1,
+  "tab": "timeline",
+  "vis": "visible",
+  "logical": 1,
+  "real": 1,
+  "cdpInflight": 1,
+  "hiddenReal": {
+   "metrics": 0,
+   "logs": 0,
+   "attack": 0
+  },
+  "aggReal": 1,
+  "aggInflight": 1,
+  "framesMoved": true,
+  "post": {
+   "status": 200,
+   "ms": 6
+  }
+ },
+ {
+  "round": 1,
+  "tab": "attack",
+  "vis": "visible",
+  "logical": 3,
+  "real": 3,
+  "cdpInflight": 3,
+  "hiddenReal": {
+   "metrics": 0,
+   "logs": 0,
+   "timeline": 0
+  },
+  "aggReal": 3,
+  "aggInflight": 3,
+  "framesMoved": true,
+  "post": {
+   "status": 200,
+   "ms": 5
+  }
+ }
+]
+ROUND 2 [
+ {
+  "round": 2,
+  "tab": "metrics",
+  "vis": "visible",
+  "logical": 1,
+  "real": 1,
+  "cdpInflight": 1,
+  "hiddenReal": {
+   "logs": 0,
+   "timeline": 0,
+   "attack": 0
+  },
+  "aggReal": 1,
+  "aggInflight": 1,
+  "framesMoved": true,
+  "post": {
+   "status": 200,
+   "ms": 5
+  }
+ },
+ {
+  "round": 2,
+  "tab": "logs",
+  "vis": "visible",
+  "logical": 1,
+  "real": 1,
+  "cdpInflight": 1,
+  "hiddenReal": {
+   "metrics": 0,
+   "timeline": 0,
+   "attack": 0
+  },
+  "aggReal": 1,
+  "aggInflight": 1,
+  "framesMoved": true,
+  "post": {
+   "status": 200,
+   "ms": 5
+  }
+ },
+ {
+  "round": 2,
+  "tab": "timeline",
+  "vis": "visible",
+  "logical": 1,
+  "real": 1,
+  "cdpInflight": 1,
+  "hiddenReal": {
+   "metrics": 0,
+   "logs": 0,
+   "attack": 0
+  },
+  "aggReal": 1,
+  "aggInflight": 1,
+  "framesMoved": true,
+  "post": {
+   "status": 200,
+   "ms": 5
+  }
+ },
+ {
+  "round": 2,
+  "tab": "attack",
+  "vis": "visible",
+  "logical": 3,
+  "real": 3,
+  "cdpInflight": 3,
+  "hiddenReal": {
+   "metrics": 0,
+   "logs": 0,
+   "timeline": 0
+  },
+  "aggReal": 3,
+  "aggInflight": 3,
+  "framesMoved": true,
+  "post": {
+   "status": 200,
+   "ms": 8
+  }
+ }
+]
+RESULT {
+  "rounds": [
+    [
+      {
+        "round": 1,
+        "tab": "metrics",
+        "vis": "visible",
+        "logical": 1,
+        "real": 1,
+        "cdpInflight": 1,
+        "hiddenReal": {
+          "logs": 0,
+          "timeline": 0,
+          "attack": 0
+        },
+        "aggReal": 1,
+        "aggInflight": 1,
+        "framesMoved": true,
+        "post": {
+          "status": 200,
+          "ms": 5
+        }
+      },
+      {
+        "round": 1,
+        "tab": "logs",
+        "vis": "visible",
+        "logical": 1,
+        "real": 1,
+        "cdpInflight": 1,
+        "hiddenReal": {
+          "metrics": 0,
+          "timeline": 0,
+          "attack": 0
+        },
+        "aggReal": 1,
+        "aggInflight": 1,
+        "framesMoved": true,
+        "post": {
+          "status": 200,
+          "ms": 5
+        }
+      },
+      {
+        "round": 1,
+        "tab": "timeline",
+        "vis": "visible",
+        "logical": 1,
+        "real": 1,
+        "cdpInflight": 1,
+        "hiddenReal": {
+          "metrics": 0,
+          "logs": 0,
+          "attack": 0
+        },
+        "aggReal": 1,
+        "aggInflight": 1,
+        "framesMoved": true,
+        "post": {
+          "status": 200,
+          "ms": 6
+        }
+      },
+      {
+        "round": 1,
+        "tab": "attack",
+        "vis": "visible",
+        "logical": 3,
+        "real": 3,
+        "cdpInflight": 3,
+        "hiddenReal": {
+          "metrics": 0,
+          "logs": 0,
+          "timeline": 0
+        },
+        "aggReal": 3,
+        "aggInflight": 3,
+        "framesMoved": true,
+        "post": {
+          "status": 200,
+          "ms": 5
+        }
+      }
+    ],
+    [
+      {
+        "round": 2,
+        "tab": "metrics",
+        "vis": "visible",
+        "logical": 1,
+        "real": 1,
+        "cdpInflight": 1,
+        "hiddenReal": {
+          "logs": 0,
+          "timeline": 0,
+          "attack": 0
+        },
+        "aggReal": 1,
+        "aggInflight": 1,
+        "framesMoved": true,
+        "post": {
+          "status": 200,
+          "ms": 5
+        }
+      },
+      {
+        "round": 2,
+        "tab": "logs",
+        "vis": "visible",
+        "logical": 1,
+        "real": 1,
+        "cdpInflight": 1,
+        "hiddenReal": {
+          "metrics": 0,
+          "timeline": 0,
+          "attack": 0
+        },
+        "aggReal": 1,
+        "aggInflight": 1,
+        "framesMoved": true,
+        "post": {
+          "status": 200,
+          "ms": 5
+        }
+      },
+      {
+        "round": 2,
+        "tab": "timeline",
+        "vis": "visible",
+        "logical": 1,
+        "real": 1,
+        "cdpInflight": 1,
+        "hiddenReal": {
+          "metrics": 0,
+          "logs": 0,
+          "attack": 0
+        },
+        "aggReal": 1,
+        "aggInflight": 1,
+        "framesMoved": true,
+        "post": {
+          "status": 200,
+          "ms": 5
+        }
+      },
+      {
+        "round": 2,
+        "tab": "attack",
+        "vis": "visible",
+        "logical": 3,
+        "real": 3,
+        "cdpInflight": 3,
+        "hiddenReal": {
+          "metrics": 0,
+          "logs": 0,
+          "timeline": 0
+        },
+        "aggReal": 3,
+        "aggInflight": 3,
+        "framesMoved": true,
+        "post": {
+          "status": 200,
+          "ms": 8
+        }
+      }
+    ]
+  ],
+  "maxRealAggregate": 3,
+  "maxPostMs": 8,
+  "fails": [],
+  "perTabPeak": {
+    "metrics": 1,
+    "logs": 1,
+    "timeline": 1,
+    "attack": 3
+  }
+}

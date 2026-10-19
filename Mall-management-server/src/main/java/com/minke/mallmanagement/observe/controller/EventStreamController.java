@@ -1,7 +1,9 @@
 package com.minke.mallmanagement.observe.controller;
 
 import com.minke.mallmanagement.observe.service.EventStreamService;
+import com.minke.mallmanagement.observe.service.SseConnectionRegistry;
 import com.minke.mallmanagement.observe.service.SseStreamWriter;
+import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -26,9 +28,14 @@ public class EventStreamController {
     private final EventStreamService events;
     private final SseStreamWriter writer;
 
-    public EventStreamController(EventStreamService events, SseStreamWriter writer) {
+    /** 连接名额表（D3-6），口径同 {@link MetricsStreamController}。 */
+    private final SseConnectionRegistry connections;
+
+    public EventStreamController(EventStreamService events, SseStreamWriter writer,
+                                 SseConnectionRegistry connections) {
         this.events = events;
         this.writer = writer;
+        this.connections = connections;
     }
 
     /**
@@ -38,9 +45,13 @@ public class EventStreamController {
      * 的响应头）—— 理由与实测见 {@link MetricsStreamController#stream}。
      */
     @PostMapping(value = "/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
-    public StreamingResponseBody stream(HttpServletResponse response) {
+    public StreamingResponseBody stream(HttpServletRequest request, HttpServletResponse response) {
+        SseConnectionRegistry.Permit permit = connections.tryAcquire(request);
+        if (permit == null) {
+            return SseRejection.of(response, connections, request);
+        }
         response.setContentType(MediaType.TEXT_EVENT_STREAM_VALUE);
         response.setHeader("Cache-Control", "no-cache");
-        return writer.stream("events", events::newFrameSource);
+        return writer.stream("events", events::newFrameSource, permit::release);
     }
 }

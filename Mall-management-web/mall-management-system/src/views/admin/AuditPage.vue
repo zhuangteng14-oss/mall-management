@@ -54,7 +54,7 @@
       <label class="a-f a-f-narrow">
         <span>上限</span>
         <select v-model.number="f.limit" @change="load">
-          <option v-for="n in [50, 100, 200, 500]" :key="n" :value="n">{{ n }}</option>
+          <option v-for="n in [20, 50, 100]" :key="n" :value="n">{{ n }}</option>
         </select>
       </label>
       <div class="a-f-actions">
@@ -347,7 +347,7 @@ const visibleDiff = computed(() => (onlyChanged.value ? diff.value.filter((d) =>
 /**
  * 本次取回的审计行 → **按本地日历日**分桶的连续日期序列。
  *
- * ⚠️ 覆盖范围只有**本次已取的 `rows`**（≤「上限」那档，最多 500），不是全库 ——
+ * ⚠️ 覆盖范围只有**本次已取的 `rows`**（≤「上限」那档，最多 100），不是全库 ——
  *    `truncated` 为真时曲线只画最近的那些。这一点写在图标题里，不在图上找补。
  * ⚠️ 分桶沿 `toLocal`（库内 UTC → 浏览器时区）再取前 10 字，**不是**直接切 `OccurredAt`：
  *    后者是 UTC 日，东八区凌晨的记录会被算到前一天，与页面别处显示的时刻对不上。
@@ -400,7 +400,7 @@ const ROLE_ORDER = ['管理员', '商家', '客户', '未识别']
  *    单列一条「未识别」。审计页把「多少条认不出人」藏起来才是真的危险；没有这种行时
  *    这一条**不出现**（不会留一条恒 0 的空图例）。
  * ⚠️ 域 > 8 类时只留前 7 + 「其他」合并段：再多就回归成一片糊掉的柱林。
- * ⚠️ 覆盖范围同样只有**本次已取的 `rows`**（≤「上限」那档，最多 500），不是全库。
+ * ⚠️ 覆盖范围同样只有**本次已取的 `rows`**（≤「上限」那档，最多 100），不是全库。
  */
 const byDomain = computed(() => {
   const grid = new Map() // 域 → 角色 → 条数

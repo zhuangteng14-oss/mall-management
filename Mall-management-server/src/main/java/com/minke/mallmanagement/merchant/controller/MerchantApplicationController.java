@@ -97,8 +97,10 @@ public class MerchantApplicationController {
         if (!IdentityGuard.requireSelfOrAdminByUsername(request, username, userStateLookupProvider.getIfAvailable())) {
             return IdentityGuard.forbidden();
         }
-        // 块 7 收尾 · A5：联系电话是**展示时会掩码**的字段，带 `*` 的串是页面掩码、不是真值。
-        String maskedField = MaskedInput.firstMasked("contactPhone", contactPhone);
+        // 块 7 收尾 · A5 / D3-4：联系电话与店铺地址都是**展示时会掩码**的字段，
+        // 带 `*` 的串是页面掩码、不是真值。
+        String maskedField = MaskedInput.firstMasked("contactPhone", contactPhone,
+                "shopAddress", shopAddress);
         if (maskedField != null) {
             return ResponseEntity.ok(Result.fail(MaskedInput.rejectMessage(maskedField)));
         }

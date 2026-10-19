@@ -1,15 +1,19 @@
 package com.minke.mallmanagement.shared.sql;
 
+import com.minke.mallmanagement.observe.service.AttackSwitchConfig;
+import com.minke.mallmanagement.observe.service.EventBroadcaster;
 import net.ttddyy.dsproxy.support.ProxyDataSource;
 import net.ttddyy.dsproxy.support.ProxyDataSourceBuilder;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.beans.factory.config.BeanPostProcessor;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
 import javax.sql.DataSource;
+import java.util.function.BooleanSupplier;
 
 /**
  * 慢 SQL 的装配点（C3 块 7 · commit 6b · 批文 Q4 的「丁」）：
@@ -47,24 +51,64 @@ public class SlowSqlConfig {
     private static final String SLOW_MS_KEY = "${app.sql.slow-ms:200}";
 
     @Bean
-    static BeanPostProcessor slowSqlDataSourceWrapper(@Value(SLOW_MS_KEY) long slowMs) {
+    static BeanPostProcessor slowSqlDataSourceWrapper(
+            @Value(SLOW_MS_KEY) long slowMs,
+            @Value("${mall.observe.injection.db-slow-ms:120}") long dbSlowMs,
+            @Value("${mall.observe.injection.db-slow-budget-ms:300}") long dbSlowBudgetMs,
+            ObjectProvider<AttackSwitchConfig> switchConfigProvider,
+            ObjectProvider<EventBroadcaster> eventBroadcasterProvider) {
         if (slowMs <= 0) {
-            log.info("慢 SQL 告警已装配（SLOW-SQL）：已关闭（app.sql.slow-ms={}）—— 数据源不做包装，连接池保持 Boot 原样", slowMs);
+            log.info("慢 SQL 告警已装配（SLOW-SQL）：已关闭（app.sql.slow-ms={}）—— 数据源不做包装，连接池保持 Boot 原样"
+                    + "；D3 的 dbSlow 注入随之不可用（a3 不演示，见批文裁定）", slowMs);
             return new BeanPostProcessor() {
                 // 关闭态：什么都不做（刻意**不留**注解式开关，那样仍会创建 BPP，只是不做事的差别看不出来）
             };
         }
-        log.info("慢 SQL 告警已装配（SLOW-SQL）：阈值 {} ms —— 超阈值的语句按 WARN 打印（含 traceId，因回调就在请求线程上）", slowMs);
-        return new SlowSqlDataSourceWrapper(slowMs);
+        // ⚠️ ObjectProvider 而不是直接注入 AttackSwitchConfig：本方法是 static @Bean 且是
+        // BeanPostProcessor，实例化时机早于普通 bean。getIfAvailable() 是**每次调用**才去取，
+        // 不会在 BPP 注册阶段把配置类提前拉起来（那会触发 Boot 的 not eligible 告警 / 可能的环）。
+        BooleanSupplier dbSlowOn = () -> {
+            AttackSwitchConfig cfg = switchConfigProvider.getIfAvailable();
+            return cfg != null && cfg.injections().contains("dbSlow");
+        };
+        // A5：慢 SQL 事件出口。和上面同一条理由 —— BPP 实例化早于普通 bean，故用
+        // ObjectProvider 在**真正需要发事件时**才去取；取不到（切片测试 / 关闭态）就跳过。
+        SlowSqlListener.SlowSqlSink sink = (elapsedMs, thresholdMs, dataSource, queryCount, sql, injected) -> {
+            EventBroadcaster broadcaster = eventBroadcasterProvider.getIfAvailable();
+            if (broadcaster != null) {
+                broadcaster.emitSlowSql(elapsedMs, thresholdMs, dataSource, queryCount, sql, injected);
+            }
+        };
+        log.info("慢 SQL 告警已装配（SLOW-SQL）：阈值 {} ms —— 超阈值的语句按 WARN 打印（含 traceId，因回调就在请求线程上）"
+                        + "；D3 dbSlow 注入：每条 SELECT 延迟 {} ms、每请求预算 {} ms（硬上限 300）",
+                slowMs, dbSlowMs, Math.min(300L, dbSlowBudgetMs));
+        return new SlowSqlDataSourceWrapper(slowMs, dbSlowOn, dbSlowMs, dbSlowBudgetMs, sink);
     }
 
     /** 只包一层，且只包一次。独立成类（而不是匿名）是为了错误栈里能看见它叫什么。 */
     static final class SlowSqlDataSourceWrapper implements BeanPostProcessor {
 
         private final long slowMs;
+        private final BooleanSupplier dbSlowOn;
+        private final long dbSlowMs;
+        private final long dbSlowBudgetMs;
+        private final SlowSqlListener.SlowSqlSink slowSqlSink;
 
         SlowSqlDataSourceWrapper(long slowMs) {
+            this(slowMs, () -> false, 0L, 0L, null);
+        }
+
+        SlowSqlDataSourceWrapper(long slowMs, BooleanSupplier dbSlowOn, long dbSlowMs, long dbSlowBudgetMs) {
+            this(slowMs, dbSlowOn, dbSlowMs, dbSlowBudgetMs, null);
+        }
+
+        SlowSqlDataSourceWrapper(long slowMs, BooleanSupplier dbSlowOn, long dbSlowMs, long dbSlowBudgetMs,
+                                 SlowSqlListener.SlowSqlSink slowSqlSink) {
             this.slowMs = slowMs;
+            this.dbSlowOn = dbSlowOn;
+            this.dbSlowMs = dbSlowMs;
+            this.dbSlowBudgetMs = dbSlowBudgetMs;
+            this.slowSqlSink = slowSqlSink;
         }
 
         @Override
@@ -74,7 +118,7 @@ public class SlowSqlConfig {
             if (bean instanceof DataSource dataSource && !(bean instanceof ProxyDataSource)) {
                 return ProxyDataSourceBuilder.create(dataSource)
                         .name("mall")   // 出现在 ExecutionInfo.getDataSourceName() ⇒ 告警行里能看出是哪个源
-                        .listener(new SlowSqlListener(slowMs))
+                        .listener(new SlowSqlListener(slowMs, dbSlowOn, dbSlowMs, dbSlowBudgetMs, slowSqlSink))
                         .build();
             }
             return bean;

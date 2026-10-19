@@ -3,7 +3,6 @@ package com.minke.mallmanagement.observe.dao;
 import com.minke.mallmanagement.observe.service.EventBroadcaster.ObservedEvent;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.simple.JdbcClient;
-import org.springframework.stereotype.Repository;
 
 import java.sql.Timestamp;
 import java.util.ArrayList;
@@ -14,9 +13,18 @@ import java.util.Map;
  * {@code observed_event} 的**写入出口**（块 7 · commit 8c）+ **回放的读出口**（块 7 收尾）——
  * 全仓唯一往这张表 INSERT 的地方，也是唯一按批次把它读回来的地方（见 {@link #selectByBatch}）。
  *
- * <p>范式照 {@link ObservedEventCleanupDao}（同域、同批）：{@code @Repository} + 构造器收
- * {@code JdbcTemplate}（让 {@code @WebMvcTest} 切片里既有的 {@code @MockitoBean JdbcTemplate}
- * 继续喂给本类）+ 语句以 Java 字符串内联；表名带 {@code mall_management_sql.} 前缀。
+ * <p>范式照 {@link ObservedEventCleanupDao}（同域、同批）：构造器收 {@code JdbcTemplate}
+ * （让 {@code @WebMvcTest} 切片里既有的 {@code @MockitoBean JdbcTemplate} 继续喂给本类）+
+ * 语句以 Java 字符串内联；表名带 {@code mall_management_sql.} 前缀。
+ *
+ * <h2>【⚠️ 2026-10-19：本类不再标 {@code @Repository}，由 {@code ObserveDataSourceConfig} 装配<b>两份</b>】</h2>
+ * 一份给业务读路径（回放，{@code @Primary}，走业务主池），一份给 MQ 消费者（写路径，
+ * 走独立的小池 {@code observe-consumer-pool}，4 条连接）。理由：后台台账写入不能在压测时
+ * 抢占业务主池的 10 条连接 —— 实测 500 并发下 91–122 条 Tomcat 线程卡在
+ * {@code HikariPool.getConnection}，消费者线程也在这条队列里。
+ * ⚠️ 两份是**同一个类**的两个实例，SQL 仍只有这一份 —— 改 {@link #insertBatch} 不需要改两处。
+ * ⚠️ 切片里没有 {@code ObserveDataSourceConfig}，{@code AbstractSmokeTest} 仍直接
+ * {@code @Import(ObservedEventDao.class)}，落回那个 {@code @MockitoBean JdbcTemplate}。
  * 建表在 {@code mall_management_sql.sql} 的 Migration ⑲-1（12 列，4 个非空之外的都允许 NULL）；
  * 块 7 · 阶段 3a.3 由迁移 ㉑ 追加了 {@code ActorId / ActorRole / DurationUs} 三列。
  *
@@ -74,7 +82,6 @@ import java.util.Map;
  * ⚠️ 批很大时这条语句会很长，但 50 × 13 个占位符在 MySQL 的包上限与占位符上限面前都很小
  * （{@code max_allowed_packet} 默认 64MB、预处理语句占位符上限 65535）。
  */
-@Repository
 public class ObservedEventDao {
 
     /** 列宽上限：与 ⑲-1 的 DDL 逐列对齐。改 DDL 就要改这里（否则超长会在严格模式下报错）。 */

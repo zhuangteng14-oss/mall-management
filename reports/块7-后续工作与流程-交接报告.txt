@@ -1,0 +1,630 @@
+块 7（C3 可观测域）+ D 段加固
+—— 现在做到哪了 / 后续还没做什么 / 工作流程 / 计划  交接报告
+================================================================================
+日期：2026-10-17
+分支：feat/c3-admin-block7（HEAD 878364d，工作区干净）
+远端：origin  git@github.com:zhuangteng14-oss/mall-management.git
+读者：新接手的顾问 / 开发
+用途：把「现状、缺口、规矩、排期」一次讲清，避免只读 progress.md 被误导
+
+
+〇、先看这 8 条（结论先行）
+--------------------------------------------------------------------------------
+1. C3 块 1～6 已合入 main（PR #81～#91）。块 7 的全部工作都在
+   feat/c3-admin-block7：领先 main 78 笔、落后 0 笔；未 push（远端没有这个分支）、
+   未开 PR、未合并。分支 diff：492 个文件 / +80447 / -542（含大量文档、证据、截图）。
+
+2. 块 7 的功能面已经完整落地：攻击模拟器、指标面板、订单状态流转、实时日志四页；
+   9 类事件环；3 条 SSE；回放（10×）；模拟日常（纯前端假数据源）；
+   D 段防护已接 4 键（限流 / 熔断 / 重试 / 分池），degrade 只作记录位；
+   死锁索引 + 重试已落（阶段 2b）。
+
+3. 2026-10-16～10-17 的「阶段 3a」三页重做（3a.1～3a.5）已完成：
+   3a.3 日志页、3a.4 指标页、3a.5 状态页 + 全链路联动回放（commit 3a9e353）。
+   今天又按用户实拍修了 4 类缺陷，最后一笔是 878364d（链路抽屉与左栏重叠）。
+
+4. 真正没做的，是下面这条主线：
+   · D 段 commit 3：边界四项 + 攻防联动演示（未开工）
+   · D 段 commit 4：收口 + 块 8 前置（未开工）
+   · 块 7 + D 段合并的一轮正式手验（未做）
+   · push / PR / CI（含 A3）/ 合并（未做）
+   · 块 8 部署（未开工，pack 也还没建）
+
+5. D 段 commit 3 开工前有 5 条 A 档必须先拍板：A3（MQ 幂等口径）、A4（DLQ 出口形态）、
+   A5（脱敏口径）、A6（大表 LIMIT 名单）、A7（SSE 空闲超时放在哪一层）。
+   本仓硬线：建表 / 改契约 / 删文件必须先出方案等批；A 档不批，不能动代码。
+
+6. 文档有明显落差，新顾问必须知道：
+   · progress.md 与 slot-registry.md 只记到 2026-10-15 的 D 段 2b；
+     10-16～10-17 的整个 3a 系列（约 30 笔 commit）没有进这两本账。
+   · 3a 系列的收笔报告目前只在桌面（13 份 txt），没有归档进仓根 reports/。
+   · c3-blocks-index.md 也过期了：它写块 5「未落码」、块 6/7「未开工」，
+     实际块 5/6 已合、块 7 已基本完成。
+   · 因此：不能只看 progress.md 判断「块 7 停在 D2b」；要以 git log + 桌面报告 +
+     docs/agent/evidence/c3-block7/ 三方交叉核对。
+
+7. 质量门现状（重要）：
+   · 最近一次后端全量测试：567 passed / 0 failed / 26 skipped（2026-10-17，
+     3a.3 后续 reason 笔，证据 docs/agent/evidence/c3-block7/b7a3e-reason-summary.txt）。
+   · 之后又有后端改动（05de6bc 防护等级、9a65282 敏感词/重复提交归级），
+     只跑了针对性 23 条（EventBroadcasterTest 13 + EventStreamServiceTest 10），全绿。
+   ⇒ 合并前必须重跑一次全量后端测试。
+   · 前端最后一次 npm run build 绿是在 3a.5（约 85 秒）；之后今天有 JS/CSS 改动，
+     合并前要再 build + lint。
+
+8. 建议的下一步顺序（详见 §五）：
+   确认三页 UI 是否定稿、拍板 A 档 → 重跑基线（全量测试/build/lint）→
+   D3 → D4 → 用户手验一轮 → PR/CI/A3/合并 → 块 8。
+   未排期挂账（④ 三块预览、KPI 迷你图、mqDown/dbSlow、TD 系列）见 §三.8。
+
+
+一、现在做到哪了
+================================================================================
+
+1.1 仓库与分支（2026-10-17 实测）
+--------------------------------------------------------------------------------
+· 当前分支：feat/c3-admin-block7
+· HEAD：878364d  fix(block7): 链路抽屉与左栏文字重叠 —— 过滤栏加滚动兜底
+· 与 main：领先 78 笔，落后 0 笔（无需 rebase）
+· 远端分支：不存在（git ls-remote 为空）⇒ 确实未 push
+· main 最新合并：c2efb81  Merge pull request #91（块 6）
+· 工作区：干净（无未提交、无未跟踪）
+· 分支 diff：492 files changed, 80447 insertions(+), 542 deletions(-)
+
+1.2 C3 八块真实进度（以此为准，c3-blocks-index.md 的表已过期）
+--------------------------------------------------------------------------------
+块 1 基础设施（权限与审计 + 系统通知）    已合 main（PR #81 / #82）
+块 2 用户块（三端）                        已合 main（PR #83）
+块 3 商品块（三端）                        已合 main（PR #84，合并 fbf5c00）
+块 4 订单块（三端，含购物车拆分）          已合 main（PR #85 / #86）
+块 5 营销块（券 / 国补 / 折扣 / 秒杀）     已合 main（PR #90）
+块 6 内容 + 消息块（三端）                 已合 main（PR #91，合并 c2efb81）
+块 7 可观测域（管理端）                    在 feat/c3-admin-block7，功能基本完成，未合并
+D 段 防护加固                              块 7 与块 8 之间插入的一段，不在 8 块表里
+                                           commit 1 / 2 / 2b 已完成；commit 3 / 4 未开工
+块 8 部署                                  未开工；context-packs/c3-block-8-deploy.md 待建
+
+1.3 块 7 功能现状（四页 + 后端）
+--------------------------------------------------------------------------------
+【攻击模拟器】前端 views/admin/observe/AttackConsole.vue
+· 8 条攻击面端点：POST /admin/observe/attack/{scenarios,run,config,stop,status,records,cleanup}
+  + GET /admin/observe/attack/config（共享配置面，3a.1 乙案）
+· 8 个预置场景 + 自定义权重；异步引擎（32 派发线程、在途许可、背压/SHED、可中止）
+· 防护开关面板：4 键真生效（rateLimit / circuitBreak / retry / poolIsolation）；
+  degrade 只作记录位，画成不可开关（标灰 + tooltip，防死控件）
+· 演练记录、清场、实时进度（Sent / Completed / Blocked / Failed / Shed / Abandoned）
+· 回放：按 batchId 从 observed_event 读台账，严格按原时间戳播；10× 时钟；
+  载入上限由后端控制，截断时横幅如实标注
+
+【指标面板】前端 views/admin/observe/MetricsPanel.vue
+· S1 时间栈 + 实体栏；KPI 卡、QPS 栈、错误率、延迟、状态条、类别分布
+· 3a.4 重做 + 3a.4c 性能重构 + 3a.4d 动态背压/智能聚合
+· 回放时四块可推算图表随 metricTicks 重绘；页面明确声明「回放指标由事件台账推算，
+  非 HTTP 原始指标」，4xx/5xx、缓存命中率、锁等待没有台账来源就隐藏并写明
+
+【订单状态流转】前端 views/admin/observe/OrderFlow.vue
+· 五态状态机可视化、流转连线、最近流转明细
+· 3a.5 回放：角标 = 回放此刻各态订单数（会增会减）；框下小字 = 本批次经过次数（只增）；
+  顶部 KPI = 当前各态合计 / 已捕获流转
+· 已知债：TD-78（health 翻红判据只吃 5xx 与 p99，不吃 4xx；红态入口当前不可达）
+
+【实时日志】前端 views/admin/observe/EventLog.vue
+· 三栏驾驶舱；9 类事件（stock / cache / lock / order / audit / notify / sensitive /
+  identity / protection，其中 protection 为 D 段 commit 2 新加的第 9 类）
+· 虚拟滚动（VIRTUAL_MIN=200，进入/退出阈值分开，防抖动）
+· 动态背压 + 智能聚合（800 QPS 不再渲染雪崩）；统计与聚合解耦
+· 筛选、严重度、类筛选、聚合开关；链路抽屉；端点中文表；fields/耗时/身份列
+· 2026-10-17 修的三个显示/数据问题：PROTECT 等级列宽、敏感词/重复提交归 PROTECT、
+  过滤条件与聚合冲突导致丢数据、链路抽屉与左栏文字重叠（最后一笔 878364d）
+
+【后端】
+· observe 包：AttackEngine / AttackController / AttackSwitchConfig / ProtectionGate /
+  EventBroadcaster（9 类事件环）/ MetricsSnapshotService / SseStreamWriter /
+  ReplayController / ReplayService / MQ（RabbitObserveConfig / ObservedEventConsumer）等
+· 端点：攻击面 8 条 + 回放 1 条（/admin/observe/replay）+ 指标历史 1 条
+  （/admin/observe/metrics/history）+ 3 条 SSE（events / metrics / orders）
+· 台账 observed_event：3a.3 后 16 列（含 FieldsJson），帧 15 键；Migration ⑰～㉒
+· 库存治理：goods_sku.Stock 的 CAS 扣减 + 下单即扣 + 超时释放；
+  秒杀 SoldStock 真扣减接线（TD-36 / TD-38 已关闭）
+
+【演示】
+· 「模拟日常」纯前端假数据源 api/demo-stream.js；三页都有「数据源」切换入口
+· 硬约束：api/demo-stream.js 的接口不许改；三页重做后入口必须还在
+· 回放与演示不是一回事：回放读真台账；模拟日常不碰后端
+
+1.4 D 段（防护加固）进度
+--------------------------------------------------------------------------------
+已做：
+· commit 1（7365de5）：块 7 收尾 —— 回放、模拟日常、实时进度、D pack 等
+· commit 2（cfe2948）：后端防护接闸 —— 第 9 类 protection、熔断、限流、池、测试
+· 阶段 2b（同批）：死锁索引 idx_goods_merchant + MerchantDowngradeService.relist 重试
+  + 重试可视化；实测结论：死锁次数不变、HTTP 5xx 归零（139 → 0）
+· 3a.1：防护开关改走共享配置面（/attack/config）
+未做：
+· commit 3：SSE 连接保护 / MQ 幂等 + DLQ / 大表 LIMIT / 数据脱敏 /
+  攻击模拟器场景判据与开关面板接功能 / 攻防联动演示（多进程实验已移出）
+· commit 4：文档统一补 / refs 重指 / 块 7 + D 段合并手验清单 / 演示种子 /
+  块 8 前置清单（Nginx、启动脚本、部署文档输入清单、JVM -Xms/-Xmx）
+· 帧读数第 9 条：指标帧的 protections 仍是 8 条命中计数，尚未反映 4 个防护开关的
+  动作（本项归 commit 3）
+
+1.5 阶段 3a（三页重做）进度
+--------------------------------------------------------------------------------
+3a.1  开关走共享配置面                         已完成
+3a.2  图表面收成一份 ECharts 主题               已完成
+3a.2b 指标页甲/乙两版预览 + 结构方案 S1/S2/S3   已完成（S1 选定，S2 废弃）
+3a.3  日志页重做（三栏驾驶舱 + 字段补齐）       已完成
+3a.4  指标页重做（S1 时间栈 + 实体栏）          已完成（含 4c/4d 性能与背压）
+3a.5  状态页 + 全链路联动回放                   已完成（commit 3a9e353）
+之后 3a.4e/4f/4g/4h 级别的修复（防护等级、等级列宽、筛选×聚合、抽屉重叠）已完成
+
+⚠️ 命名提醒：这里的「阶段 3a」与「D 段 commit 3」不是一回事。
+   D 段 commit 3 是「边界四项 + 攻防联动演示」；阶段 3a 是用户新开的 UI 重做系列。
+
+1.6 2026-10-17 当天收尾（最后 5 笔）
+--------------------------------------------------------------------------------
+9a65282  敏感词/重复提交归 PROTECT —— 业务失败率只算 WARN+ERROR
+06a4373  日志等级列按 7ch 加宽 —— PROTECT 不再压住「类」列
+05de6bc  防护拦截独立成级 + 回放倍速 + 日志统计与聚合解耦
+005286b  筛选改为直读原始台账 —— 勾聚合 + ≥WARN 不再丢数据
+878364d  链路抽屉与左栏文字重叠 —— 过滤栏加滚动兜底
+
+1.7 证据与质量门
+--------------------------------------------------------------------------------
+· 证据根：docs/agent/evidence/c3-block7/（3a 系列证据齐全：3a3 / 3a4c / 3a4d /
+  3a4e / 3a4f / 3a4g / 3a4h / b7c11 等）
+· 探针：scripts/probes/（c3b7-drawer-rail-overlap.mjs、c3b7-filter-agg-empty.mjs、
+  c3b7-severity-rework.mjs、probe-b7c11-trilink-replay.mjs、d2-deadlock-scout.mjs 等）
+· 桌面收笔报告（3a 系列，13 份）：块7-阶段3a3-*、块7-3a4-*、块7-阶段3a4c/4d、
+  块7-阶段3a5-*、块7-severity重排*、块7-筛选与聚合冲突*、块7-链路抽屉与左栏重叠*
+· 仓根 reports/：7 份早期块 7 收笔报告（commit 9 / 10 / 10c / 10d / 2 / 2b / D 段死锁）
+⚠️ 3a 报告尚未归档进 reports/；按 2026-10-16 顾问裁定，历史收笔报告应归档到仓根
+   reports/（挪出 refs-scan 扫描根）。
+
+1.8 当前运行环境（截稿时）
+--------------------------------------------------------------------------------
+· 后端：8088 在监听，dev profile（app.auth.enabled=false）；PID 38048；
+  日志 _work/backend-restart-protect4.log
+· 前端：8080 在监听（vue-cli-service serve）
+· 数据库 / MQ：dev 连 VM 192.168.229.129（MySQL / RabbitMQ）
+· 注意：dev / a3 两个 profile 的鉴权闸都是 false；只有默认 profile 是 true
+· 库里可能仍有 3a.5 验收批次的数据（285 笔 SIM- 订单已真实付款/发货/收货，
+  演练记录 128 条左右）；清场入口只删 Source='attack' 或 SIM-% 的行，
+  drill_record 刻意不动（TD-67）
+
+
+二、后续还没做的部分（按优先级）
+================================================================================
+
+2.1 第一优先：把当前分支收干净（D3 前）
+--------------------------------------------------------------------------------
+(a) 确认三页 UI 是否「定稿」。3a.3 / 3a.4 / 3a.5 已按用户反馈迭代多轮；
+    若还有 UI 缺陷，先继续修，不要带着未定的 UI 进 D3。
+(b) 重跑基线：
+    · 后端全量：cd Mall-management-server && ./mvnw test
+      （注意本仓用 ./mvnw，不是 mvn；最近一次全量 567 绿，但之后有后端改动）
+    · 前端：npm run lint；npm run build
+    · 页面关键路径：日志页筛选×聚合、链路抽屉、指标页回放、状态页回放
+(c) 文档补账：把 3a 系列登进 progress.md / slot-registry.md（收口时按规矩一次性补，
+    块内不动账本）；把桌面 3a 报告归档 reports/。
+(d) 决定验收数据怎么处理：3a.5 批次留在库里，交接演示前要么保留当样例，
+    要么走清场按钮（只清攻击域，不删 drill_record）。
+
+2.2 D 段 commit 3 —— 边界 + 演示联动（未开工，原估 2～3 天）
+--------------------------------------------------------------------------------
+批文七项，逐项现状：
+
+① SSE 连接保护（连接上限 + 空闲超时）
+   现状：没有连接表、没有上限、没有心跳；spring.mvc.async.request-timeout=-1
+   是 commit 10b 刻意关掉长连接超时的。
+   前置裁决 A7：空闲超时做在 SSE 自己那层（SseStreamWriter「连续 N 拍写失败/无帧即收工」）
+   还是改回正值的 async timeout（等于部分撤 10b）。两条都不能偷偷做。
+
+② MQ 幂等 + DLQ 出口
+   已有：topic exchange、主队列 durable + dead-letter、DLX/DLQ、prefetch 500、
+   批大小 50、手工 ACK、应用层 3 次重试。
+   缺：幂等键（observed_event 无唯一键）与 DLQ 的查看/重投/计数出口。
+   前置裁决 A3：加 Seq 列 + UNIQUE(TraceId, Seq)（甲，新 DDL）还是弱键（乙）。
+   注意：TraceId 可为 NULL（定时任务 / SSE 流线程），MySQL UNIQUE 不把两个 NULL
+   当相等 ⇒ 那批事件天生去不了重，必须写进验收口径。
+   前置裁决 A4：DLQ 出口是自建只读端点 / 走 RabbitMQ management / 只加指标。
+   验收：同批次两条同键消息只落一行；DLQ 条数可见；毒消息有「明确不重投」路径。
+
+③ 大表 LIMIT 默认 100
+   前置裁决 A6：一刀切 100，还是只对时间序列表打默认、按业务键收窄的查询除外。
+   会影响聊天记录、调度器扫描等既有行为（改的是用户看得见的行为）。
+   验收：无上限的那批逐条给出「加了没有 / 加了多少 / 语义变没变」。
+
+④ 数据脱敏
+   真实靶子不是批文说的手机号/收货地址（本仓不存在），而是 user.email / user.address /
+   merchant_application.ContactPhone / ShopAddress 四处出口。
+   最危险的一处：/user/me 是本人资料编辑页的回填源；把掩码回给本人 ⇒ 页面把掩码
+   当原值提交 ⇒ 数据被污染。必须区分「给本人」与「给第三方/管理端」，写接口要拒绝掩码值。
+   前置裁决 A5：掩给谁？本人出口掩不掩？写接口怎么挡掩码值？
+   验收：只对第三方/管理端生效；反向对照：本人提交一次资料，确认存下来的不是掩码。
+
+⑤ 攻击模拟器更新（场景判据 + 开关面板接功能）
+   已有：4 键真生效、degrade 记录位、面板防死控件、/attack/config 共享配置面。
+   本项主要是把演示口径与场景判据写清、页面文案与真实行为对齐。
+
+⑥ 攻防联动演示（120 稳 / 400 吃紧 / 拉满饱和；关防护 + 故障 ⇒ 崩；开防护 ⇒ 恢复）
+   注意 TD-73：模拟日常的 protections 是前端假造的 5 条，与后端开关状态无关。
+   ⇒ 这条对照只能在「正常模式 + 真后端」下走，不能在模拟日常里演示；
+   手验清单里必须写明。
+
+⑦ 帧读数第 9 条（指标帧反映防护）
+   现状：MetricsSnapshotService 的 protections 仍返回 8 条命中计数（cacheHit /
+   lockTimeout / orderRejected / stockInsufficient / auditFailed / notifyFailed /
+   sensitiveHit / identityRejected）；防护动作目前只从帧 counts 的第 9 键与
+   mall.protection.events 指标回答。
+   本项归 commit 3：要在页面上给出「开/关防护 ⇒ 读数变化」的可见后果。
+
+2.3 D 段 commit 3 开工前必须拍板的决策（A 档 5 条 + 3 条待裁）
+--------------------------------------------------------------------------------
+| # | 要裁什么 | 为什么是 A 档 / 风险 |
+|---|----------|----------------------|
+| A3 | MQ 幂等口径：甲（加 Seq 列 + UNIQUE）还是乙（弱键） | 甲 = 新字段 + 新 DDL；乙会丢同毫秒同 trace 的同类事件 |
+| A4 | DLQ 出口形态：自建只读端点 / RabbitMQ management / 只加指标 | 新端点或新运维面 |
+| A5 | 脱敏口径：掩给谁；本人出口掩不掩；写接口怎么拒绝掩码值 | 改既有响应的值语义；/user/me 回填会被污染 |
+| A6 | LIMIT 名单与默认值：一刀切 100，还是只对时间序列表 | 改既有端点默认行为，可能悄悄少给数据 |
+| A7 | SSE 空闲超时放在哪一层；连接上限数值 | 与 commit 10b 的 request-timeout=-1 直接冲突 |
+| 6 | degrade 开关到底管什么（今天一族降级行为都不由它管） | 决定面板文案与演示口径 |
+| 7 | 重试挂哪一层、针对哪个真实死锁 | ✅ 已由阶段 2b 解决：MerchantDowngradeService.relist；TD-74 已关闭 |
+| 8 | TD-18（管理员铸票）/ TD-64（破坏性/长连端点无角色闸）要不要在 D 段结清 | TD-64 的破坏面是真 DELETE |
+
+⚠️ 还有一条隐含前提：A 档拖一天，commit 3 / 4 / 手验逐日顺延（D pack 的估时口径）。
+
+2.4 D 段 commit 4 —— 收口 + 块 8 前置（未开工，原估 1～2 天）
+--------------------------------------------------------------------------------
+① 文档统一补（api-contract / tech-debt / progress / slot-registry 等）
+② refs 重指（放最后一笔）
+③ 手验清单：块 7 + D 段合并一份，三列式（操作步骤 → 期望 → 判据），
+   profile 必须标清（dev 验业务/防护/MQ；默认 profile 验鉴权）
+④ 假数据（演示用种子；注意 TD-65 四条前提更正、TD-50 假数据不在 seed-demo.sql）
+⑤ 块 8 前置清单：Nginx / 启动脚本 / 部署文档的「输入清单」（不写实现）
+   + JVM -Xms/-Xmx 建议（TD-71：4 核 6G → 建议 -Xmx1g，与 Hikari、攻击并发一起对齐）
+
+2.5 正式手验一轮（未做，原估 1～2 天；批文：commit 4 之后压成一轮）
+--------------------------------------------------------------------------------
+· 业务 + 防护：dev profile（五闸真实行为、MQ 幂等/DLQ、SSE 上限、攻防联动、/attack 全链）
+· 鉴权：默认 profile（未登录 / 越权；含 TD-64 那类破坏性端点的角色闸）
+· 验收归属：手验由用户跑并裁决；agent 只写「agent 预跑记录（非用户手验）」，
+  不得写「手验全部通过」。
+· 每验一项前重复一句：dev / a3 的 app.auth.enabled=false ⇒ 手验绿 ≠ 默认 profile 绿。
+
+2.6 push / PR / CI / 合并（未做）
+--------------------------------------------------------------------------------
+· 分支零落后 main，可直接 PR；但 78 笔一次性 PR 体量很大（492 文件 / +80k 行，
+  其中大量是文档、证据、截图）。
+  需要决定：一笔 PR 全合，还是先合一个「块 7 检查点」再开 D 段分支。
+· PR 后 CI 三 job：Backend tests / Frontend build / A3 concurrency。
+  A3 的 concurrency job 是 continue-on-error: true ⇒ 颜色没有信息量，
+  必须拉产物读 gates.count / gates.failed（不要记死数字，以产物为准）。
+· 合并前：全量测试、build、lint、手验、默认 profile 鉴权、refs-scan 零漂移。
+
+2.7 块 8 部署（未开工）
+--------------------------------------------------------------------------------
+· context-packs/c3-block-8-deploy.md 还不存在（c3-blocks-index 里只是约定路径）。
+· 内容预期：打包（jar / Docker）、systemd 或启动脚本、Nginx、profile 选择、
+  本地化（DB 从 VM 迁本机）、QPS 验证阶段（多进程实验等到本地化后再做）、
+  JVM 堆参数、TD-20 静默失败路径测试（块 8 部署前必须处理）。
+· 与块 8 直接相关的既有登记：TD-05 / 06 / 08 / 09（部署类）、TD-71（JVM 堆）、
+  TD-20（静默失败测试）、selection-status §8 类 1 #9（部署）。
+
+2.8 已登记但未排期的功能 / 挂账（不阻塞 D3，但别当它们不存在）
+--------------------------------------------------------------------------------
+【④ 三块小型预览】—— AttackConsole 下方加「指标 / 订单 / 日志」三块预览
+· 来处：块 7 commit 1 批文；当轮调研 agent 未回，按批文留 TODO 登记。
+· 现状：该页下方只有 ④ 演练记录 + ⑤ 清场，没有任何预览；页面 import 里没有图表。
+· 两条结构路线：(a) 攻击页各连自己那三条 SSE（零后端改动，代价是服务端多 3 条常驻线程，
+  events 那条与日志页耦合）；(b) 后端新增一条聚合流（要动后端）。
+· 「暂停」口径未定：/attack/run 是同步跑到结束，无法中途暂停；
+  可选口径 = 只停渲染、连接不断，并如实上屏说明「请求照跑」。
+· 改动面估算：AttackConsole.vue 约 +350～+500 行。
+· 注意：这与 2026-10-13「三面板已独立成页、不塞进攻击页」的改判反向，
+  做之前要先裁「改回多少」。
+
+【KPI 迷你图（sparkline）】—— 阶段 3a 挂账
+· 落点：KpiCard 加可选 #value 插槽（或新建 Sparkline 组件）
+· 时机：两版选定、三页重做（3a.3 / 3a.4 / 3a.5）之后单独一笔补
+  —— 三页现在已完成，这条挂账的时机条件已经满足。
+· 内容：4 张 KPI 卡各一条 60 拍 sparkline（QPS / P99 / 命中率 / 锁等待）；
+  自绘 SVG/canvas，不是 4 个完整 ECharts 实例。
+· 前提：KpiCard 的 .kpi-n 字号靠 cqw 算式；sparkline 进来会挤掉数字行宽，
+  --kpi-chars 与 140cqw 都要重新量（量出来，不是看出来）。
+
+【mqDown / dbSlow 两路故障注入】
+· 现状：injections 三键里只有 redisDown 真接通；mqDown / dbSlow 只收下、记录、
+  前端拨得动，但读数不变（后端如实回报 InjectionsNotWired）。
+· 2026-10-16 全仓核查：没有任何计划认领「接通」—— 不是「3b 还是 3c」的选择题，是漏了。
+· 若裁定接通：照 redisDown 先例在 AttackEngine 加两路判据，并从
+  INJECTIONS_NOT_WIRED 摘掉对应键（前后端各一份镜像）。
+· 关联 TD-78：接通后要验证这两条注入能否真把 errorRate 推过 5% 或 p99 推过 1000ms，
+  否则状态页的红态入口仍然不可达。
+
+【TD 系列（活跃、与本段相关）】
+TD-15  loginAdd 在 usertype 非法时返回「添加成功！」但不插行（登记未修）
+TD-18  管理员 /user/token 铸票路径缺失（判不做但立 TD；D 段是否结清待裁）
+TD-20  静默失败路径缺专门测试（DAO ? 计数、审计/通知真库冒烟、fail-open 显式验证）
+       —— 块 8 部署前必须处理
+TD-37  演示数据残留：seed 明文口令（push 会被 [Credential Leakage] 拦）；
+       goods Id 120 重复行 / customerimage / merchantimage 残留，用户未裁「清还是留」
+TD-47  举报的 TargetType=user 没有处置落点（要产品裁决）
+TD-62  台账保留期 Job 是 @Scheduled 第 7 处，调度器总闸挂在 MerchantDowngradeSchedulingConfig
+       上（a3 下整台调度器不醒；验 job 要手动放开 mall.downgrade.job.enabled）
+TD-63  a3 / dev 闸关 ⇒ 观测面身份列为空（同 TD-57 形态，不是 bug）
+TD-64  块 7 的破坏性/长连端点没有角色闸（cleanup 是真 DELETE；3 条 SSE 是长连接）
+TD-67  drill_record 里留着收口验证行，清场按钮刻意不动（设计，不是没清干净）
+TD-69  按龄保留期把演练副产物归进「日常」档 ⇒ 多留 30 天（用户裁不同步）
+TD-70  延迟口径的排除名单是手工白名单（新增同步长任务端点时要回来看）
+TD-71  启动脚本/部署文档没有固定 -Xms/-Xmx（4 核 6G 目标机隐患）→ commit 4 ⑤
+TD-72  回放空批次：事件行 3 天保留期、记录行不删 ⇒ 旧批次点回放得空表
+TD-73  模拟日常假数据只在两处留痕；与 D 段防护接闸冲突（攻防对照只能在正常模式做）
+TD-75  熔断只挂 MySQL 两个实例（Redis / MQ 已有手写熔断，不叠 r4j）
+TD-77  延迟只有累计/衰减窗口分位，拿不到逐拍 P95/P99（要开直方图再对桶差分）
+TD-78  health 翻红判据只吃 5xx 与 p99，不看 4xx；红态入口当前不可达
+TD-79  事件流缓存噪声当前不治理（用户裁定丁），判据留在条目里防下次凭「看着多」动手
+TD-83  observed_event.Kind 的实库列注释缺第 9 类 protection（源 .sql 有、库里没有；
+       改列注释要整条 MODIFY COLUMN，属 A 档 DDL，单为一行注释不值得开迁移）
+
+【其他已登记挂账】
+· 49 条 data-slot 的 disabled 全部来自稿；启用会静默丢数据，真误伤 0 条、
+  体感同类 7 条（LoginPage 3 条、GoodsAdd 4 条）—— 只能等用户裁决，不能自行改。
+· 3a 派生的边界（见 3a.5 报告「后续可做」）：
+  回放中要看到 4xx/5xx，只能先让后端把 HTTP 状态码写进台账；前端推算不出来。
+· selection-status.md §8（2026-10-04 快照）里的类 1 / 类 4 项：
+  不要直接照抄状态 —— 表已明显过期（例如前端 loginPassword 明文入 sessionStorage
+  这条，今天全仓已 grep 不到 loginPassword，实际已不适用）。
+  仍值得复核的：缓存正确性收口、前端 API 层规范化、鉴权（JWT/RBAC）、部署；
+  类 4 的 loginAdd 无 else、productSearch 拼 SQL、goodsUp 的 WHERE 缺 GoodName、
+  getUserInfoById 副本、单飞等待无界、雪崩形态 3、productsales 无 UNIQUE。
+  若要排期，先逐条实测现状再立项。
+
+
+三、流程（这个仓怎么干活）
+================================================================================
+
+3.1 读文档的顺序
+--------------------------------------------------------------------------------
+· 新会话开场：agent.md（规则）→ docs/agent/README.md（文档地图）→
+  当前任务的 context-pack → selection-status.md（§8 待办 + §9 新功能引出）。
+· 做 C3 块：先 docs/agent/c3-blocks-index.md（8 块路线），再读该块 pack；
+  不要整目录读 docs/。
+· 块 7 相关：context-packs/c3-block-7-observe.md + c3-block-D-hardening.md；
+  历史在 progress.md §7-B7 系列（只到 D2b，3a 要看 git log / 桌面报告 / evidence）。
+· 技能/规范：docs/美化/看板规范.md；项目规则 agent.md §项目级规则。
+
+3.2 决策分档（A / B / C）与三条硬线
+--------------------------------------------------------------------------------
+· A 必问：建表 / 改契约 / 删文件（三条硬线），或撞用户明令。
+· B 自裁 + 报备：不落硬线，可自决，但要写进方案 / 收口。
+· C 自决：落码时按方案走，不单独问。
+· 先规划、后干活：不确定的改动先出方案，等人工确认；不要直接改代码。
+· 数据库只允许追加：新增表/字段/索引无条件；新增 FK、改列类型有条件；
+  禁止删表/删列/删索引/改旧行为。
+
+3.3 证据优先（这个仓最核心的纪律）
+--------------------------------------------------------------------------------
+· 任何「修好了 / 通过 / 归零」都要有可复核证据：探针输出、截图、SQL 计数、
+  actuator 读数、时间戳对照。
+· 证据文件用 .txt（不要 .log：*.log 被 gitignore，git add 会整条失败）。
+· 证据必须晚于最后一次代码编辑（提交前 stat 对比 mtime；早于代码 ⇒ 作废重跑）。
+· 证据要读内容、不要只看 exit 0 / 绿色：校验器只验它查的那几件事，
+  「OK」不等于没问题（checker-ok-means-only-what-it-checks）。
+· 数字先定位证据：用户给的数字也要找出处；区分「可复核 / 叙述记录 / 推断」三档。
+· 反面教材：假数据的形状要对着真帧；探针假定前提要先验证（例如「重复值」触发分支，
+  不能拿不重复的数据跑）。
+· 破坏性操作（清场 / 删行）要读回双重确认；Windows/GBK 下 curl 传中文会乱码。
+
+3.4 探针与页面验证
+--------------------------------------------------------------------------------
+· 探针放 scripts/probes/；一次性的放 _work/（gitignored，不落桌面）。
+· CDP 工具：docs/美化/_cdp.mjs（open / sleep / goto / evalJS / shot / send）。
+· 页面探针在 docs/美化/ 下的 shot*.mjs / check-*.mjs 自带后端 mock（请求拦截），
+  只需 dev server，不要让用户白起后端；但真实验收要用真后端 + 真前端，不用 mock。
+· evalJS 是模板字符串：注释里不要写反引号或 ${，否则模板提前闭合，报错指向注释行。
+· 登录口令从环境变量 PROBE_ADMIN_PWD 读（本地值 _work/admin-pass），不要硬编码。
+· 视口高度会改变结论：同一 bug 1440×900 可能看不出、1440×800 必现；
+  对照图必须 1:1（max-width:100% 会把 2× 裁图缩到 0.63×，正好抹平 1px 差）。
+· 无头滚动条宽度不是恒为 0（经典 headless 0、--headless=new 15），每次实测。
+· 圆形/树形/卡片等结构判据要逐子元素量，别只看首个；外壳类名可能与共用 CSS 撞车。
+
+3.5 提交纪律
+--------------------------------------------------------------------------------
+· 小步提交、一笔一个目的；杂活单独一笔（先 chore 后功能）。
+· git add 只列具体路径，不用 -A；git commit -F 文件，不用 heredoc；
+  提交后 cat -n 抽查有无重复段。
+· commit message 前缀：feat / fix / perf / refactor / test / docs / chore（带 scope）。
+· 不 push / 不 merge / 不建 PR，除非用户明确要求（本仓批文：块 7 全部手验通过后
+  由用户决定）。
+· 明文口令会被 push 侧 [Credential Leakage] 拦；探针与文档都不许出现口令。
+· 非用户手验的 agent 自测，标题必须写「agent 预跑记录（非用户手验）」。
+· 未跟踪残留先归置，别混进功能 commit。
+
+3.6 文档三层治理与引用纪律
+--------------------------------------------------------------------------------
+· 活文档：context-packs/、db-schema.md、api-contract.md —— 能不改就不改，
+  只加新事实；块内不动，收口一次性重指。
+· 账本：progress.md、slot-registry.md、tech-debt.md —— 块内一行不动，收口一次性追加。
+· 档案：evidence/、archive/、progress.md 旧条目 —— 永不改，不追旧行号。
+· 活文档引用写 #锚点（如 db-schema.md#db-16-1），不写行号；
+  账本/代码/稿仍写「文件:行号」。
+· 收口跑 bash scripts/doc-anchor-check.sh：
+  当前实测 exit 0，悬空引用 0 条，死锚点 369 条（仅报告，不一定错）。
+· 行号引用全仓互引：增删一行会让其后引用集体偏移；改注释也要净零行数。
+  纯插入 hunk 的行映射：@@ -a,0 +c,d @@ 里旧行 a 不动、delta 从 a+1 起；
+  算错会静默伪报 moved。
+· refs-scan 产物的 before 用临时 worktree 取；只比「(引用者, token)」对；
+  diff 为空先跑阳性对照；报告只落 _work/（扫描根含 docs ⇒ 报告旧号会被反向抄成新 LOST）。
+
+3.7 环境、重启与 profile
+--------------------------------------------------------------------------------
+· 后端：Mall-management-server，用 ./mvnw spring-boot:run；块 7 用 dev profile。
+· 前端：Mall-management-web/mall-management-system，npm run serve（8080），
+  管理端入口是 /admin.html（不是 /；打到 / 是商城入口，不报 404 但是别家的外壳）。
+· 起后端前按端口找 PID 强杀（TaskStop 只停 shell，不停 JVM）；
+  重启后三查：端口 / profile / VM 库。
+· 不要加 --spring.main.allow-circular-references：那个循环依赖已由 5b971f1
+  把 MeterFilter 改成 static 修掉；起不来先看日志有没有 form a cycle。
+· dev profile：DB 与 MQ 都在 VM 192.168.229.129；MQ 口令从环境变量
+  MALL_MQ_PASSWORD 读（本地 _work/mq-pass），不落仓、不回显。
+· 默认 profile 才有 app.auth.enabled=true；dev / a3 都是 false。
+  「手验绿 ≠ 默认 profile 绿」每次手验前都要说。
+· A3 的 concurrency job 是 continue-on-error ⇒ 只读产物 gates.count / gates.failed，
+  不读 job 颜色；P0～P7 逐项看。
+
+3.8 产物去向
+--------------------------------------------------------------------------------
+· 临时脚本/日志/中间文件：_work/（gitignored），路径写绝对路径。
+· 可复跑探针：scripts/probes/。
+· 验收证据：docs/agent/evidence/<笔名>/（块 7 用 c3-block7）。
+· 给用户看的收笔报告：桌面，文件名对应「块7-…-报告.txt」（用户明令）。
+· 历史收笔报告归档：仓根 reports/（挪出 refs-scan 扫描根）。
+· refs-scan 产物：只落 _work/，不进 docs/。
+
+3.9 常踩的坑（交接时先看这 10 条）
+--------------------------------------------------------------------------------
+1. 只看 job 颜色判断 A3（continue-on-error 让它系统性无信息量）。
+2. 把「校验器 OK」当成「没问题」——它只查它查的那几件事。
+3. 证据早于代码（mtime 必须晚于最后一次编辑）。
+4. 数据源/模拟日常入口被重做挤掉（三页都必须保留「数据源」切换）。
+5. 预览页覆盖 scoped 样式被压掉（scoped 编成 .kpi[data-v-…]，裸 .kpi 静默失效）。
+6. 对照图不是 1:1（max-width:100% 把 2× 图缩小，正好抹平要看的差异）。
+7. refs 报告落进 docs/，把旧行号抄成新 LOST。
+8. 假数据形状不对真帧（把顶层键 remaining 塞进 fields，等于替错代码背书）。
+9. 停 shell 不杀 Java 子进程（8088 仍被占）。
+10. Windows/GBK 下 curl 传中文变乱码；python print 的 CRLF 让键名带 \r，
+    破坏性操作要读回双重确认。
+
+
+四、计划（建议排期）
+================================================================================
+
+4.1 推荐顺序
+--------------------------------------------------------------------------------
+步骤 0：UI 定稿 + 决策拍板（用户/顾问）
+  · 三页 UI 是否定稿；是否还有截图缺陷要修
+  · A3 / A4 / A5 / A6 / A7 + 待裁 6 / 8（详见 §2.3）
+  · TD-18 / TD-64 是否在 D 段结清
+  · ④ 三块预览做不做、走 (a) 还是 (b)、暂停口径
+  · 是否先合块 7 检查点再开 D3
+
+步骤 1：基线与补账（0.5～1 天）
+  · 全量后端测试、前端 lint/build
+  · 3a 系列登进 progress.md / slot-registry.md，桌面报告归档 reports/
+  · 确认验收数据去留
+
+步骤 2：D 段 commit 3（2～3 天，A 档批完才开工）
+  · 建议按边界拆小笔：SSE 保护 / MQ 幂等+DLQ / LIMIT / 脱敏 / 攻防联动演示
+  · 每笔带探针 + 证据 + 测试；帧第 9 条随攻防联动落
+  · 出口判据见 D pack「逐项判据」表（熔断、限流、重试、分池、第 9 类、
+    SSE 保护、MQ 幂等、DLQ、LIMIT、脱敏、攻防联动）
+
+步骤 3：D 段 commit 4（1～2 天）
+  · 文档统一补 + refs 重指
+  · 块 7 + D 段合并手验清单（三列式，标 profile）
+  · 演示种子 + 块 8 前置清单 + JVM 参数建议
+
+步骤 4：用户手验一轮（1～2 天，用户跑）
+  · dev：业务 + 四键防护 + MQ + SSE + 攻防联动
+  · 默认 profile：未登录 / 越权 / 角色闸
+  · 发现问题回到步骤 2/3 修，再验
+
+步骤 5：PR / CI / A3 / 合并（0.5 天 + 等待）
+  · 全量测试、build、lint、手验、默认 profile、refs 零漂移
+  · A3 按产物读 gates.count / gates.failed
+  · 用户决定合并方式（一笔 PR 或拆）
+
+步骤 6：块 8 部署（未估时）
+  · 先建 c3-block-8-deploy.md pack
+  · 打包 / 启动脚本 / systemd / Nginx / profile
+  · 本地化（DB 从 VM 迁本机）+ QPS 验证阶段（多进程实验并入这里）
+  · TD-20 静默失败测试、TD-71 JVM 堆、TD-05/06/08/09 部署债
+
+可并行/可延后：
+  · TD-78 红态验证、mqDown/dbSlow 接通（与 D3 的攻防联动/注入相关）
+  · ④ 三块预览（+350～500 行，建议独立一笔）
+  · KPI 迷你图（时机条件已满足，建议独立一笔）
+  · 49 条 disabled 裁决、TD-37 脏行裁决、TD-47 举报 user 处置
+  · 类 1 / 类 4 待办复核
+
+4.2 估时口径
+--------------------------------------------------------------------------------
+· D pack 原估：commit 2 3～4 天（已完成）、commit 3 2～3 天、commit 4 1～2 天、
+  块 7 收尾 2～3 天（已完成）、手验 1～2 天；到块 8 前合计约 2 周。
+· 现在 commit 1 / 2 / 2b / 3a 已完成，剩余主要是 D3 + D4 + 手验 ≈ 4～7 天，
+  前提是 A 档在 D3 开工前批完；A 档拖一天，后面逐日顺延。
+
+4.3 主要风险
+--------------------------------------------------------------------------------
+1. 78 笔未合并，文档账本与代码已有落差；拖得越久，收口补账成本越高。
+2. D3 的 5 条 A 档未批 ⇒ 无法开工；最危险的是 A5（脱敏会污染 /user/me 回填）
+   与 A3（无 traceId 事件天生去不了重）。
+3. 合并前若只跑针对性测试，可能漏掉后端回归；必须全量。
+4. 手验若只在 dev 跑，鉴权（默认 profile）与 TD-64 角色闸永远没验过。
+5. 3a.5 验收批次改动了 VM 库真实状态（285 笔 SIM- 订单），演示前要确认数据口径。
+6. 块 8 的 pack 尚未建，部署目标机（4 核 6G）与本地化方案未定。
+
+
+五、关键文件索引
+================================================================================
+规则：
+  agent.md
+  docs/agent/README.md
+  docs/agent/c3-blocks-index.md（块表已过期，仅看依赖关系）
+块 7：
+  docs/agent/context-packs/c3-block-7-observe.md
+  docs/agent/context-packs/c3-block-D-hardening.md
+  docs/agent/progress.md §7-B7 / §7-B7-收口 / §7-B7-续 / §7-B7-收尾 / §7-B7-D2 / §7-B7-D2b
+  docs/agent/tech-debt.md TD-60～TD-83（块 7 相关）
+  桌面：块7-阶段3a5-全链路联动回放-报告.txt 等 13 份 3a 报告
+  仓根：reports/块7-*.txt（7 份早期报告）
+证据：
+  docs/agent/evidence/c3-block7/（3a* / b7c11* / d2* / b7a3* 等）
+  scripts/probes/（c3b7-*、probe-b7c11-*、d2-deadlock-scout.mjs 等）
+契约与库：
+  docs/agent/api-contract.md 附录 H（攻击面 / SSE / 回放）
+  docs/agent/db-schema.md §16（observed_event）、§17（库存基线/扣减）
+  mall_management_sql.sql（权威 DDL，含迁移段 ⑰～㉒）
+前端：
+  Mall-management-web/mall-management-system/src/views/admin/observe/
+    AttackConsole.vue / MetricsPanel.vue / OrderFlow.vue / EventLog.vue
+  src/api/replay-session.js / replay-metrics.js / demo-stream.js
+  src/components/observe/ReplayBanner.vue / DemoModeToggle.vue
+后端：
+  Mall-management-server/src/main/java/com/minke/mallmanagement/observe/
+  .../protect/ProtectionGate.java
+  .../merchant/service/MerchantDowngradeService.java（死锁重试落点）
+CI：
+  .github/workflows/ci.yml（Backend tests / Frontend build / A3 concurrency）
+运行：
+  _work/admin-pass（探针口令，勿外传）
+  _work/mq-pass（MQ 口令，勿外传）
+  _work/backend-restart-protect4.log（当前后端日志）
+
+
+六、交接前必须确认的 10 个问题
+================================================================================
+1. 三页 UI（日志 / 指标 / 状态）是否定稿？还有没有要继续修的截图缺陷？
+2. A3 MQ 幂等走甲（加 Seq 列）还是乙（弱键）？无 traceId 事件怎么算？
+3. A4 DLQ 出口走自建只读端点、RabbitMQ management，还是只加指标？
+4. A5 脱敏：掩给谁？本人出口掩不掩？写接口怎么挡掩码值？
+5. A6 大表 LIMIT：一刀切 100，还是只对时间序列表？
+6. A7 SSE 空闲超时：SSE 自己实现，还是改回 async.request-timeout（部分撤 10b）？
+7. TD-18 / TD-64 是否在本段结清（TD-64 的 cleanup 是真 DELETE）？
+8. ④ 三块预览做不做？走三条流还是新增聚合流？「暂停」按什么口径？
+9. 78 笔是现在开 PR 合一个检查点，还是等 D3/D4 一起？块 8 是否先本地化 DB？
+10. 3a.5 验收批次（285 笔 SIM 订单 + 演练记录）保留还是清场？
+    49 条 disabled 占位、goods Id 120 重复行是否现在裁决？
+
+
+附：本报告的证据口径
+================================================================================
+· 分支/提交/远端：git log / git branch -vv / git ls-remote 实测（2026-10-17）
+· 当前服务：netstat 实测 8080 / 8088 监听；后端日志尾部实测
+· 文档状态：progress.md / slot-registry.md / c3-blocks-index.md 实际内容核对
+· 测试：567 绿来自 docs/agent/evidence/c3-block7/b7a3e-reason-summary.txt；
+  23 条来自 docs/agent/evidence/c3-block7/3a4e-protect-backend-tests.txt
+· 锚点检查：bash scripts/doc-anchor-check.sh 实测 exit 0、悬空 0、死锚 369
+· D 段范围与决策：context-packs/c3-block-D-hardening.md 逐节核对
+· 未做任何代码改动；本报告只做盘点。

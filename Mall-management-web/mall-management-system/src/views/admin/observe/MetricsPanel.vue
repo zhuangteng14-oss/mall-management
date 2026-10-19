@@ -22,11 +22,22 @@
         <b>{{ clientErrRate === null ? '—' : (clientErrRate * 100).toFixed(1) + '%' }}</b>
         <span>4xx 占比（本拍）</span>
       </div>
-      <!-- A4（块 7 收尾）：MQ 消费重试彻底失败、落 DLQ 的累计条数 + 本拍增量。 -->
-      <div class="a-stat">
+      <!-- A4 / D3-2：MQ 消费重试彻底失败、落 DLQ 的累计条数 + 本拍增量 + 同库副本已落库行数。
+           D3 手验补全：整张卡可点 ⇒ 右侧死信详情抽屉；0 条置灰、>0 红框高亮（警告语义）。 -->
+      <button
+        type="button"
+        class="a-stat a-stat--dlq"
+        :class="{
+          'is-zero': dlqTotal === 0,
+          'is-alert': dlqTotal !== null && dlqTotal > 0,
+          'is-unknown': dlqTotal === null,
+        }"
+        aria-label="死信数量：点击查看死信详情"
+        @click="openDlqDrawer"
+      >
         <b :class="{ 'a-bad': dlqTotal > 0 }">{{ dlqTotal === null ? '—' : fmtInt(dlqTotal) }}</b>
-        <span>死信数量（累计 · 本拍 +{{ fmtInt((latest && latest.dlq && latest.dlq.delta) || 0) }}）</span>
-      </div>
+        <span>死信数量（累计 · 本拍 {{ dlqDelta === null ? '—' : '+' + fmtInt(dlqDelta) }} · 已落库 {{ dlqPersisted === null ? '—' : fmtInt(dlqPersisted) }}）· <em>查看详情 ›</em></span>
+      </button>
       <div class="a-tz">
         <span class="a-chip-utc">{{ phaseText }}</span>
         <span>第 <b>{{ seq }}</b> 拍 · 窗口 {{ WINDOW }} 秒</span>
@@ -218,9 +229,9 @@
           </ul>
         </section>
 
-        <!-- 防护命中 8 类 -->
+        <!-- 防护命中：行数由后端帧决定（D3 起 12 类），标题跟着走，不写死 -->
         <section class="mp-rail-sec">
-          <h3 class="mp-rail-h">防护命中 · 8 类 <span>本拍增量</span></h3>
+          <h3 class="mp-rail-h">防护命中 · {{ protRows.length || '—' }} 类 <span>本拍增量</span></h3>
           <ul v-if="protRows.length" class="mp-prots">
             <li v-for="p in protRows" :key="p.tag" class="mp-prot">
               <span class="mp-prot-k">
@@ -505,6 +516,47 @@
         </div>
       </div>
     </template>
+
+    <!-- ── 死信详情抽屉（D3 手验补全）──────────────────────────────────────────
+         数据源：`POST /admin/observe/dlq/list`（同库副本 `observed_event_dlq`，不是 broker）。
+         交互：点行展开 `RawBody`（连 JSON 都解不开的那种才会落这一列）；空态逐字写
+         「当前没有处理失败的死信消息」—— 与 `null`（读不到）区分，后者由加载/错误态表达。 -->
+    <RightDrawer
+      v-if="dlqOpen"
+      title="死信详情"
+      :subtitle="dlqSubtitle"
+      aria-label="死信详情抽屉"
+      @close="closeDlqDrawer"
+    >
+      <div class="a-dlq">
+        <div class="a-dlq-bar">
+          <span v-if="dlqLoading">读取中…</span>
+          <span v-else>同库副本 · 最近 100 条（按落库时间倒序）</span>
+          <button type="button" class="a-btn" :disabled="dlqLoading" @click="loadDlq">刷新</button>
+        </div>
+        <p v-if="dlqError" class="a-dlq-tip is-bad">
+          {{ dlqError }}
+          <button type="button" class="a-btn" @click="loadDlq">重试</button>
+        </p>
+        <p v-else-if="dlqLoading && !dlqRows.length" class="a-empty">正在读取死信…</p>
+        <p v-else-if="!dlqRows.length" class="a-empty">当前没有处理失败的死信消息</p>
+        <ul v-else class="a-dlq-list">
+          <li class="a-dlq-cols" aria-hidden="true">
+            <span>发生时间</span><span>TraceId</span><span>错误类型</span><span></span><span>错误详情</span>
+          </li>
+          <li v-for="r in dlqRows" :key="r.Id" class="a-dlq-i" :class="{ on: dlqOpenedId === r.Id }">
+            <button type="button" class="a-dlq-row" @click="toggleDlqRow(r.Id)">
+              <span class="a-dlq-time">{{ dlqTime(r) }}</span>
+              <span class="a-dlq-trace" :title="r.TraceId || '—'">{{ r.TraceId || '—' }}</span>
+              <span class="a-dlq-err" :title="r.ErrorClass || r.FailedStage || '—'">{{ dlqErrorCategory(r).label }}</span>
+              <span class="a-dlq-toggle">{{ dlqOpenedId === r.Id ? '收起' : '原始体' }}</span>
+              <span class="a-dlq-text" :title="r.ErrorText || ''">{{ dlqErrorText(r) }}</span>
+            </button>
+            <pre v-if="dlqOpenedId === r.Id" class="a-dlq-raw">{{ dlqRawText(r) }}</pre>
+          </li>
+        </ul>
+      </div>
+    </RightDrawer>
   </section>
 </template>
 
@@ -528,15 +580,19 @@
 import { computed, onActivated, onBeforeUnmount, onDeactivated, onMounted, reactive, ref, watch } from 'vue'
 import {
   AlertCircle, AlertOctagon, AlertTriangle, Bell, Clipboard, Database,
-  Droplets, Info, Lock, Package, Server, Shield, ShieldCheck, ShoppingCart,
+  Droplets, Gauge, Info, Layers, Lock, Package, RotateCcw, Server, Shield, ShieldCheck,
+  ShoppingCart, Zap,
 } from '@lucide/vue'
-import { metricsHistory, openMetricsStream } from '../../../api/observe'
+import { dlqList, metricsHistory, openMetricsStream } from '../../../api/observe'
 import { demo, openDemoStream } from '../../../api/demo-stream'
 // 回放（2026-10-17 重做）：本页在回放期间**停实时**（后端没有按时间戳的指标帧）。
 import { replaySession } from '../../../api/replay-session'
 import { KIND_COLOR, KIND_LABEL, KINDS } from '../../../config/labels/observe-labels'
+// 死信错误中文化（D3 手验）：库里保留英文原文，只在渲染层翻译；旧行一并生效。
+import { dlqErrorCategory, dlqErrorText } from './dlq-error'
 import DemoModeToggle from '../../../components/observe/DemoModeToggle.vue'
 import ReplayBanner from '../../../components/observe/ReplayBanner.vue'
+import RightDrawer from '../../../components/observe/RightDrawer.vue'
 import LineChart from '../../../components/charts/LineChart.vue'
 import BarChart from '../../../components/charts/BarChart.vue'
 import HeatmapChart from '../../../components/charts/HeatmapChart.vue'
@@ -548,7 +604,10 @@ const TWEEN_MS = 300
 /** 库存水位数字/条宽的推进时长：1 秒一帧，取 0.6 秒留出停顿。 */
 const STOCK_TWEEN_MS = 600
 
-/* ── 八类防护的图标与环色（与日志页 9 环同一套 `KIND_COLOR`）──────────────── */
+/* ── 十二类防护的图标与环色（与日志页 9 环同一套 `KIND_COLOR`）────────────────
+   D3（2026-10-18）追加后 4 类（rateLimit / circuitBreak / poolIsolation / retry）：
+   前 8 类各归自己的事件环；后 4 类是**防护开关本身**的读数，统一归 `protection` 环
+   （紫）—— 它们不是「某个业务环出的事」，而是「防护层挡下了多少」。 */
 const PROT_ICON = {
   cacheHit: Database,
   lockTimeout: Lock,
@@ -558,6 +617,10 @@ const PROT_ICON = {
   notifyFailed: Bell,
   sensitiveHit: AlertTriangle,
   identityRejected: Shield,
+  rateLimit: Gauge,
+  circuitBreak: Zap,
+  poolIsolation: Layers,
+  retry: RotateCcw,
 }
 const PROT_RING = {
   cacheHit: 'cache',
@@ -568,6 +631,10 @@ const PROT_RING = {
   notifyFailed: 'notify',
   sensitiveHit: 'sensitive',
   identityRejected: 'identity',
+  rateLimit: 'protection',
+  circuitBreak: 'protection',
+  poolIsolation: 'protection',
+  retry: 'protection',
 }
 function protColor(tag) {
   const ring = PROT_RING[tag]
@@ -648,8 +715,84 @@ const latestRow = computed(() => (rows.value.length ? rows.value[rows.value.leng
 const meanNow = computed(() => (latestRow.value ? latestRow.value.meanMs : null))
 const hitRateNow = computed(() => (latestRow.value ? latestRow.value.hitRate : null))
 const p99Now = computed(() => (latestRow.value ? latestRow.value.p99 : null))
-/** A4：死信累计（进程启动以来）。`latest` 为空时显示 `—`，不显示假的 0。 */
-const dlqTotal = computed(() => (latest.value && latest.value.dlq ? num(latest.value.dlq.total) : null))
+/**
+ * A4 / D3-2：死信三读数。⚠️ `num(null)` 会回 0（见上面 `num` 的定义）⇒ 这里**逐个显式判 null**：
+ * 「计数器没有这个读数」「副本表读不到」「确实一条都没有」在页面上必须是三种状态，
+ * 而前两种都只能显示 `—`（用户 D3 第 6 条裁定：不可用显示横杠，不显示 0）。
+ */
+function finiteOrNull(v) {
+  if (v === null || v === undefined || v === '') return null
+  const n = Number(v)
+  return Number.isFinite(n) ? n : null
+}
+const dlqTotal = computed(() => (latest.value && latest.value.dlq ? finiteOrNull(latest.value.dlq.total) : null))
+const dlqDelta = computed(() => (latest.value && latest.value.dlq ? finiteOrNull(latest.value.dlq.delta) : null))
+const dlqPersisted = computed(() => (latest.value && latest.value.dlq ? finiteOrNull(latest.value.dlq.persisted) : null))
+
+/* ── 死信详情抽屉（D3 手验补全）────────────────────────────────────────────
+   ⚠️ 点开才拉、且**不跟随 SSE 自动刷新**：死信是低频审计数据，每拍重拉会在用户展开
+      RawBody 读到一半时把行冲掉；要新数据点抽屉里的「刷新」。
+   ⚠️ 空列表 ≠ 读不到：`list:[]` 才显示空态文案；请求失败显示错误态（绝不写成「0 条」）。 */
+const dlqOpen = ref(false)
+const dlqRows = ref([])
+const dlqAllTotal = ref(null)
+const dlqLoading = ref(false)
+const dlqError = ref('')
+const dlqOpenedId = ref(null)
+let dlqSeq = 0
+
+const dlqSubtitle = computed(() => {
+  if (dlqLoading.value && !dlqRows.value.length) return '正在读取…'
+  if (dlqError.value && !dlqRows.value.length) return '读取失败'
+  if (dlqAllTotal.value === null) return ''
+  return `共 ${fmtInt(dlqAllTotal.value)} 条 · 按落库时间倒序（本页 ${fmtInt(dlqRows.value.length)} 条）`
+})
+
+function openDlqDrawer() {
+  dlqOpen.value = true
+  loadDlq()
+}
+
+function closeDlqDrawer() {
+  dlqOpen.value = false
+  dlqOpenedId.value = null
+}
+
+async function loadDlq() {
+  const my = ++dlqSeq
+  dlqLoading.value = true
+  dlqError.value = ''
+  try {
+    const data = await dlqList({ limit: 100, offset: 0 })
+    if (my !== dlqSeq) return
+    if (data && data.success === false) {
+      dlqError.value = data.msg || '死信列表读取失败'
+      return
+    }
+    dlqRows.value = Array.isArray(data && data.list) ? data.list : []
+    dlqAllTotal.value = finiteOrNull(data && data.total)
+  } catch (e) {
+    if (my !== dlqSeq) return
+    dlqError.value = (e && e.message) || '死信列表读取失败（网络或服务不可用）'
+  } finally {
+    if (my === dlqSeq) dlqLoading.value = false
+  }
+}
+
+function toggleDlqRow(id) {
+  dlqOpenedId.value = dlqOpenedId.value === id ? null : id
+}
+
+/** 发生时间优先 `OccurredAt`；非法 JSON 的原始消息没有事件时刻 ⇒ 退回落库时刻 `CreatedAt`。 */
+function dlqTime(row) {
+  return row.OccurredAt || row.CreatedAt || '—'
+}
+
+/** 展开内容只展示 `RawBody`：能解析的事件体不冒充「原始消息体」，如实说明这一列为空的原因。 */
+function dlqRawText(row) {
+  if (row.RawBody) return row.RawBody
+  return '（该条死信没有原始消息体：事件本身可解析，失败发生在落库/投递阶段）'
+}
 
 const shown = reactive({ qps: 0, mean: 0, hitRate: 0, lockWait: 0 })
 
@@ -1090,7 +1233,7 @@ function sevPct(key) {
   return `${Math.round((sevCounts.value[key] / sevTotal.value) * 100)}%`
 }
 
-/* ── 防护 8 类 ────────────────────────────────────────────────────────────── */
+/* ── 防护 12 类（前 8 业务环 + 后 4 防护开关；行数以后端帧为准）────────────── */
 const protRows = computed(() => (latest.value && latest.value.protections) || [])
 const protMax = computed(() => Math.max(1, ...protRows.value.map((p) => num(p.value))))
 function protPct(v) {
@@ -1304,9 +1447,11 @@ function applyLatest(f) {
     l2Up: gauge.l2Up === undefined ? null : gauge.l2Up,
     lockUp: gauge.lockUp === undefined ? null : gauge.lockUp,
     l2Degraded: cache.l2Degraded === undefined ? null : cache.l2Degraded,
-    // A4（块 7 收尾）：死信计数由后端 `MetricsSnapshotService.dlq()` 汇总
-    // （`mall.observe.dead.letters` 计数器 ⇒ `{total, delta}`）。旧后端没有这个键 ⇒ 显示 0。
-    dlq: f.dlq || { total: 0, delta: 0 },
+    // A4 / D3-2：死信由后端 `MetricsSnapshotService.dlq()` 汇总
+    // （计数器 ⇒ `{total, delta, persisted}`）。⚠️ 旧后端没有这个键 ⇒ 保留 null（页面显示 `—`），
+    // **不要**补 `{total:0, delta:0}` —— 「后端没给」与「一条都没有」是两件事。
+    // `persisted` 为 null 同样表示「副本表读不到 / 这个后端没有副本」，不是 0 条。
+    dlq: f.dlq || null,
   }
 }
 
@@ -1386,6 +1531,7 @@ function connect() {
     onLost(s) {
       phase.value = 'stopped'
       lost.value = s
+      if (s.evicted) stream = null
       errMsg.value = s.err ? ((s.err && s.err.message) || '连接中断') : ''
     },
   }
@@ -1417,9 +1563,15 @@ onDeactivated(() => {
   pageActive.value = false
   if (rafId) { cancelAnimationFrame(rafId); rafId = 0 }
   if (stockRaf) { cancelAnimationFrame(stockRaf); stockRaf = 0 }
+  // 连接预算（2026-10-19）：KeepAlive 只缓存组件、不替我们关连接。切走必须让出 SSE，
+  // 否则它会和攻击页的 3 条预览叠加到浏览器 6 条上限（见 `api/observe.js` 文件头）。
+  closeStream()
 })
 onActivated(() => {
   pageActive.value = true
+  // 切回来：句柄已在上面的 onDeactivated 里关掉 ⇒ 立刻重建，不等用户点「重新连接」。
+  // ⚠️ 首页 mount 时 onMounted(connect) 已经建过流，`!stream` 保证不会重复建。
+  if (!stream && !replaySession.active) connect()
   // 回放期间实时面板整块隐藏（见模板），补间动画也不要空转。
   if (replaySession.active) return
   const lastRow = rows.value[rows.value.length - 1]
@@ -1505,6 +1657,153 @@ onBeforeUnmount(closeStream)
 }
 .a-stat span {
   font-size: var(--fs-xs);
+  color: var(--ink-3);
+}
+/* 死信卡（D3 手验补全）：0 条置灰、>0 红框高亮、读不到（null）虚线中性。
+   卡从 div 变成 button ⇒ 必须显式重置浏览器默认的字体/底色/内边距。 */
+.a-stat--dlq {
+  font: inherit;
+  text-align: left;
+  background: transparent;
+  border: 1px solid var(--line-2);
+  border-radius: var(--r2);
+  padding: var(--s1) var(--s2);
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s, box-shadow 0.15s;
+}
+.a-stat--dlq span em {
+  font-style: normal;
+  color: var(--info);
+}
+.a-stat--dlq.is-zero {
+  border-color: var(--line);
+  opacity: 0.72;
+}
+.a-stat--dlq.is-alert {
+  border-color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 8%, transparent);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--danger) 35%, transparent);
+}
+.a-stat--dlq.is-unknown {
+  border-style: dashed;
+  opacity: 0.66;
+}
+.a-stat--dlq:hover,
+.a-stat--dlq:focus-visible {
+  border-color: var(--info);
+  opacity: 1;
+}
+.a-stat--dlq:focus-visible {
+  outline: 2px solid var(--info);
+  outline-offset: 2px;
+}
+
+/* ── 死信详情抽屉 ─────────────────────────────────────────────────────────── */
+.a-dlq {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.a-dlq-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s3);
+  padding: var(--s2) var(--s4);
+  font-size: var(--fs-xs);
+  color: var(--ink-3);
+  border-bottom: 1px solid var(--line-2);
+  background: var(--surface-2);
+}
+.a-dlq-tip {
+  margin: var(--s3) var(--s4) 0;
+  font-size: var(--fs-sm);
+  color: var(--ink-2);
+}
+.a-dlq-tip.is-bad { color: var(--danger); }
+.a-dlq-list {
+  flex: 1;
+  min-height: 0;
+  margin: 0;
+  padding: var(--s2) var(--s4) var(--s4);
+  list-style: none;
+  overflow: auto;
+}
+.a-dlq-cols {
+  display: grid;
+  grid-template-columns: 150px minmax(0, 1fr) 170px 52px;
+  gap: var(--s2);
+  padding: var(--s2) var(--s3) 0;
+  font-size: var(--fs-xs);
+  color: var(--ink-3);
+}
+.a-dlq-cols span:last-child { grid-column: 1 / -1; }
+.a-dlq-i {
+  border: 1px solid var(--line-2);
+  border-radius: var(--r2);
+  margin-top: var(--s2);
+  background: var(--surface);
+}
+.a-dlq-i.on { border-color: var(--info); }
+.a-dlq-row {
+  display: grid;
+  grid-template-columns: 150px minmax(0, 1fr) 170px 52px;
+  gap: var(--s2);
+  width: 100%;
+  font: inherit;
+  text-align: left;
+  background: transparent;
+  border: 0;
+  padding: var(--s2) var(--s3);
+  cursor: pointer;
+}
+.a-dlq-row:hover { background: var(--surface-2); }
+.a-dlq-time {
+  font-size: var(--fs-xs);
+  color: var(--ink-2);
+  font-variant-numeric: tabular-nums;
+}
+.a-dlq-trace,
+.a-dlq-err {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono, monospace);
+  font-size: var(--fs-xs);
+  color: var(--ink-2);
+}
+.a-dlq-err { color: var(--danger); }
+.a-dlq-toggle {
+  font-size: var(--fs-xs);
+  color: var(--info);
+  text-align: right;
+}
+.a-dlq-text {
+  grid-column: 1 / -1;
+  font-size: var(--fs-xs);
+  color: var(--ink);
+  line-height: 1.5;
+  word-break: break-all;
+}
+.a-dlq-raw {
+  margin: 0;
+  padding: var(--s3);
+  border-top: 1px solid var(--line-2);
+  background: var(--surface-2);
+  font-family: var(--font-mono, monospace);
+  font-size: var(--fs-xs);
+  color: var(--ink-2);
+  white-space: pre-wrap;
+  word-break: break-all;
+  max-height: 320px;
+  overflow: auto;
+}
+.a-empty {
+  padding: var(--s4);
+  text-align: center;
+  font-size: var(--fs-sm);
   color: var(--ink-3);
 }
 .a-hv {
@@ -1843,7 +2142,7 @@ onBeforeUnmount(closeStream)
   color: var(--ink-3);
 }
 
-/* 防护 8 类 */
+/* 防护 12 类 */
 .mp-prots { gap: 5px; }
 .mp-prot {
   display: grid;

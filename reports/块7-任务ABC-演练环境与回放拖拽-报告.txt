@@ -1,0 +1,171 @@
+块 7 · 三项整改收笔报告
+生成时间：2026-10-18 01:30（+08:00）
+分支：feat/c3-admin-block7
+本轮提交：5914d29（chore，补齐上一笔证据帧）
+          d25b653（feat，A/B/C 三件功能）
+          01da2e0（docs，回放拖拽录屏）
+运行环境：dev profile；后端 8088、前端 8080、MySQL VM 192.168.229.129:3306/mall_management_sql。
+          dev 的 app.auth.enabled=false（默认 profile 仍是 true，手验结论不要外推到默认 profile）。
+
+══════════════════════════════════════════════════════════════════
+一、任务 A：攻击模拟器的演练环境重置与种子回填
+══════════════════════════════════════════════════════════════════
+
+问题：压测把演示 SKU 库存扣到 0（或把父商品打下架、把商家冻住）后，/attack/run
+稳定报「库里挑不到可演练的商品」；原来的「清场」只删攻击写出的行，删不回库存。
+
+后端
+1) 新增 POST /admin/observe/attack/reset（AttackController 第 9 条出口）：
+   - goods_sku：SkuCode LIKE 'SEED-%'，Stock = GREATEST(COALESCE(BaselineStock, 1000), 100)；
+   - goods：Source='seed' 且是种子 SKU 的父商品 ⇒ 重新在架、清 DelistedAt/DeletedAt；
+   - user：Source='seed' 且是种子 SKU 所属商家 ⇒ 解冻、清降级状态；
+   - seckill_activity：父商品 Source='seed' ⇒ SoldStock 回到 BaselineSoldStock。
+   真实业务行一个字节都不动。
+2) /attack/run 开跑前 autoResetIfNeeded()：全部可演练商品的最大库存 < 100 时
+   静默复位一次；失败只记 WARN，不把本来能跑的演练翻成 500。
+3) 清场与复位合并：cleanupAttackData() 先删后复位，summary 同时回「删了几行 + 复位了几行」。
+4) 复位写审计 OBSERVE_ATTACK_RESET（AuditActions 45 → 46）。
+
+前端（AttackConsole.vue）
+1) /run 失败那一屏出现显眼按钮「一键重置演练商品库存」；点击后调用真复位端点，
+   回显后端 summary（如「演练环境已复位：共 13 行（…）」），再用上一轮参数自动重跑。
+2) 「清场」按钮改为「清理并恢复环境」，两段式确认文案同步更新。
+3) 顺手修了三处实测发现的问题：
+   - fire() 开跑即清空 flash，把复位摘要同一帧抹掉 ⇒ 加重跑时的 keepFlash；
+   - 「已复位：演练环境已复位：…」重复前缀 ⇒ 去掉前端前缀；
+   - 深色主题下 .a-flash.ok 用 --success-deep(#154c38) 压在 ground(#133230) 上
+     几乎不可读 ⇒ 改用 --success。
+
+真库 / 真浏览器验收
+- 复位端点实测返回 13 行：goods_sku 4 / goods 4 / user 3 / seckill_activity 2；
+  4 个种子 SKU 库存全部回到 1000。
+- UI 探针 probe-b7a2-reset.mjs（只把 /attack/run 拦成 500，复位端点打真后端）：
+  7 项断言全绿 —— 场景清单渲染、失败态横幅出现、错误文案、按钮文案、
+  真后端复位摘要上屏、复位后 /run 自动重试 1 次。
+- 证据：docs/agent/evidence/c3-block7/b7a2-reset/
+    01-失败态-复位入口.png
+    02-复位成功并自动重跑.png
+    探针输出.txt
+  说明：为避免删掉刚生成的 12,545 条回放台账，「清理并恢复环境」按钮本轮没有点下去；
+  其后端合并逻辑由代码评审 + 单测/编译覆盖，复位端点本身已真库实测。
+
+══════════════════════════════════════════════════════════════════
+二、任务 B：演练记录孤儿数据与空回放
+══════════════════════════════════════════════════════════════════
+
+问题：observed_event 有保留期清理，drill_record 不参与 ⇒ 下拉里存在「记录在、
+台账已删空」的批次；点进去 0/0，显示「已放完」的假死。
+
+后端
+1) DrillRecordDao.COLUMNS 尾部增加索引子查询：
+   (SELECT COUNT(*) FROM observed_event e WHERE e.BatchId = r.BatchId) AS EventCount；
+   走 idx_observed_event_batch。
+2) DrillRecordService.split() 把 EventCount 转成 HasData（正数 true，0/解析不了 false）；
+   键序 [..., BatchId, EventCount, HasData, Result] 由 DrillRecordServiceTest 钉住。
+3) 单测新增正/负向两条：EventCount=120 ⇒ HasData=true；EventCount=0 ⇒ HasData=false。
+   结果：Tests run 9 / Failures 0 / Errors 0 / Skipped 0。
+
+前端
+1) 回放横幅下拉：HasData===false 的 option disabled，文案追加「（数据已过期清理）」；
+   选中孤儿批次时「回放」按钮同时置灰。
+2) AttackConsole 演练记录行：显示「本批事件台账 N 条」；孤儿行〔回放〕置灰并红字说明。
+3) startReplaySession 遇空批次：不再进入回放模式，而是 resetSession + 挂 err 并抛错；
+   页面弹「该批次历史数据已过期被清理，无法回放」，不会出现进度 0/0「已放完」。
+
+真库验收（2026-10-18 01:24）
+- drill_record 共 166 条；LEFT JOIN observed_event 后 EventCount=0 的有 165 条
+  ⇒ 均 HasData=false；Id=166（b81ab9b5-3497-4e16-965e-6c67f567c403）有 12,545 条。
+- 前端下拉实测：孤儿批次 b7e62494-… disabled=true、文案含「数据已过期清理」；
+  正样本 b81ab9b5-… 可选。
+- 证据：docs/agent/evidence/c3-block7/b7b-orphan/
+    库内对照.txt
+    01-孤儿批次置灰.png
+
+══════════════════════════════════════════════════════════════════
+三、任务 C：回放进度条拖拽（Seek）与状态重建
+══════════════════════════════════════════════════════════════════
+
+UI（ReplayBanner.vue）
+- 原静态进度线换成原生 <input type="range">，双向绑定：播放时随 elapsedMs 前进；
+  拖动时只改滑块与「松开 → 目标时刻（n%）」文字。
+- @input：绝不调用 seek、不写会话、不重绘。
+- @change（松开）：调用一次 seekReplaySession(ratio)，并按拖前状态决定是否续播。
+- 重建期间横幅显示 loading 遮罩「正在重建 N% 处的状态…」。
+
+内核（api/replay-session.js）
+seekReplaySession(ratio, {resume}) 的步骤：
+1) 立刻停表；
+2) 按 ratio × spanMs 换算目标时间戳，二分 upperBoundByOff 找到目标索引；
+3) 清空 metricTicks / stateChanges / backlog / 指标窗口，seekSeq+1 通知日志页与状态页清空；
+4) 把 0..idx 的事件全量 apply：
+   - 指标事件先整段入队，再统一 advanceMetricWindow 到目标时刻
+     （逐条 advance 会在同一毫秒多条事件时丢拍，实测少 1 条，已修并复测）；
+   - 指标拍逐秒补齐、订单流转逐条 append、日志行交给 sink 批量补画；
+5) 落位 virtualMs = targetOff；之前播放则 startClock 续播，否则停在新位置。
+- seekToken 防快速连拖重入；rebuilding 让状态页跳过历史粒子动画；
+  seekSeq 与 restartSeq 分开（重放=回 0 继续播，seek=跳任意位置且可能不续播）。
+- 空批次守卫见任务 B。
+
+真浏览器验收（probe-b7r3-seek.mjs，独立读台账算 oracle）
+- 拖拽 @input 前后指标图表 canvas 哈希完全一致 ⇒ 拖拽中不重绘。
+- 松开 @change 后重绘；遮罩出现，遮罩存活约 61–69ms；整段重建约 373–380ms。
+- 40% 处全部与 oracle 一致：
+    横幅 cursor 6,909 / 12,545；
+    回放时钟 01:08:08.266；
+    本拍事件 645 条（protect 5 / warn 0 / error 0）；
+    日志页最新行时间 01:08:08.266（滚到底并轮询到补画完成）；
+    状态页已捕获流转 1,354 条。
+- 70% 处：探针观测到 cursor 11,395 → 11,862 持续增长 ⇒ 松开后自动续播。
+- 三页数据同一会话口径，切页后仍停在 seek 后的位置。
+- 证据：docs/agent/evidence/c3-block7/b7r3-seek/
+    02-seek-40-metrics.png
+    03-seek-40-timeline.png
+    04-seek-40-logs.png
+    05-seek-70-resumed.png
+    探针输出.txt（VERDICT 全 true，FAILED []）
+
+录屏（用户点名交付项）
+- docs/agent/evidence/c3-block7/b7r3-seek/drag-seek.gif
+  用 CDP Input.dispatchMouseEvent 真按鼠标：拖到 20% → 30% → 40%
+  （每步图表不动，只有目标时间文字变化）→ 松开 → 重建完成 → 40% 处指标刷新。
+- 原始帧：docs/agent/evidence/c3-block7/b7r3-seek/drag-frames/f00–f07.png
+- 采集脚本：scripts/probes/probe-b7r3-seek-gif.mjs
+  记录：MOVE 20 → range 20；MOVE 30 → 30.1；MOVE 40 → 40。
+
+══════════════════════════════════════════════════════════════════
+四、质量门与改动面
+══════════════════════════════════════════════════════════════════
+
+- 前端 npm run lint：DONE No lint errors found!（最终编辑之后重跑）
+- 后端 ./mvnw -q -Dtest=DrillRecordServiceTest test：
+  Tests run: 9, Failures: 0, Errors: 0, Skipped: 0（surefire 报告时间 01:22）
+- 证据文件 mtime 均晚于对应源码最后一次编辑（已 stat 核对）。
+- 后端改动 8 个 Java 文件；前端改动 7 个 JS/Vue 文件；
+  新增探针 3 个；新增证据目录 b7a2-reset / b7b-orphan / b7r3-seek。
+- 没有新增明文口令；MQ/管理员口令仍只从 _work/ 读取，未写入源码、日志或本报告。
+
+══════════════════════════════════════════════════════════════════
+五、手工复验路径
+══════════════════════════════════════════════════════════════════
+
+1. 确认前后端在跑：后端 8088（dev）、前端 8080。重启后先查端口 / profile / VM 库三项。
+2. 浏览器打开 http://localhost:8080/admin.html#/login，用管理员账号登录。
+3. 任务 A：进入 #/admin/observe/attack-sim。
+   - 「清理并恢复环境」在页面下方（两段式确认，会真删攻击数据，慎点）；
+   - 演练失败时页面顶部会出现「一键重置演练商品库存」，点完自动重跑。
+4. 任务 B/C：进入 #/admin/observe/metrics（状态流转 / 实时日志同样有横幅）。
+   - 下拉中灰色项带「（数据已过期清理）」，不可选；
+   - 选正样本 → 回放 → 拖进度条到任意位置 → 松开，看遮罩、图表、KPI、日志刷新；
+   - 状态流转页与实时日志页会同步跳到同一时刻（三页共用同一个回放会话）。
+
+══════════════════════════════════════════════════════════════════
+六、需要说明的边界
+══════════════════════════════════════════════════════════════════
+
+- 「清理并恢复环境」是破坏性动作，本轮没有为了截图去点它；它复用的
+  restoreSeedEnvironment() 已被 /attack/reset 真库验证，合并编排由代码评审与编译覆盖。
+- 回放进度条按日志时间定位（elapsedMs / spanMs），条数进度仍显示在「进度 X / Y」，
+  两者不混用；极短批次 spanMs=0 时退回按条数比例。
+- 前端 chart 的 canvas 哈希只用于证明「input 阶段不重绘」，不代表像素级视觉回归。
+- dev profile auth 关闭；默认 profile 仍开启鉴权，二者手验结论不可互推。
+- 本报告只写到桌面；仓内证据均在 docs/agent/evidence/c3-block7/ 下。

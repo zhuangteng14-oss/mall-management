@@ -380,7 +380,7 @@ const shownList = computed(() => {
 const loadSubsidy = async () => {
   if (!isLoggedIn()) return
   try {
-    const data = await subsidyGoods({ limit: 200 })
+    const data = await subsidyGoods({ limit: 100 })
     const list = data && data.success && Array.isArray(data.list) ? data.list : []
     subsidyCodes.value = new Set(list.map((r) => String(r.ProductCode || '')))
   } catch (e) {

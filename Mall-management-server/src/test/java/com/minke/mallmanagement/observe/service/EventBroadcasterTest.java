@@ -21,10 +21,14 @@ import org.junit.jupiter.api.Test;
 import org.slf4j.MDC;
 
 import java.util.List;
+import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.tuple;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
 
 /**
  * 事件广播器（{@link EventBroadcaster}）的语义实测 —— 九环合并、游标、severity 规则表、
@@ -408,6 +412,34 @@ class EventBroadcasterTest {
         assertThat(merged.get(0).seq()).as("最旧的那条是第 %d 个（合并环的 seq 坐标系）", extra).isEqualTo(extra);
         assertThat(merged.get(capacity - 1).seq()).isEqualTo(capacity + extra - 1L);
         assertThat(broadcaster.since(extra - 1L)).as("被覆盖掉的区间：不报错也不补（覆盖即淘汰）").hasSize(capacity);
+    }
+
+    // ================= A5：设施 3 类 =================
+
+    @Test
+    @DisplayName("设施 3 类直接写进合并环：标签 / 严重度 / 标题符合约定，且同一条也交给台账出口")
+    void facilityEventsAreEmittedDirectly() {
+        broadcaster.emitSlowSql(320L, 200L, "mall", 2, "select 1", true);
+        broadcaster.emitMq(false, "broker 不可达", Map.of("cause", "disconnected"));
+        broadcaster.emitMq(true, "broker 恢复", Map.of());
+        broadcaster.emitScheduler("orderTimeoutCancel", true, "jobDown 开启");
+
+        List<ObservedEvent> all = broadcaster.since(-1);
+        assertThat(all).extracting(ObservedEvent::kind, ObservedEvent::severity, ObservedEvent::title)
+                .containsExactly(
+                        tuple("slowSql", "warn", "慢 SQL 触发"),
+                        tuple("mq", "warn", "MQ 连接不可用"),
+                        tuple("mq", "info", "MQ 恢复"),
+                        tuple("scheduler", "warn", "调度任务停摆跳过"));
+
+        ObservedEvent slow = all.get(0);
+        assertThat(slow.fields()).containsEntry("elapsedMs", 320L)
+                .containsEntry("thresholdMs", 200L)
+                .containsEntry("injected", true)
+                .containsEntry("sql", "select 1");
+        assertThat(all.get(3).fields()).containsEntry("job", "orderTimeoutCancel")
+                .containsEntry("paused", true);
+        verify(publisher, times(4)).publish(any(ObservedEvent.class));
     }
 
     // ================= 工具 =================

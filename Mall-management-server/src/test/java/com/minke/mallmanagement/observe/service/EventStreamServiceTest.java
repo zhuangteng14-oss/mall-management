@@ -78,8 +78,10 @@ class EventStreamServiceTest {
 
         @SuppressWarnings("unchecked")
         Map<String, Object> byKind = (Map<String, Object>) frame.get("counts");
-        assertThat(byKind).as("9 类键一个不少（顺序 = Kind 声明序；第 9 类 protection 是 D 段新增）").containsOnlyKeys(
-                "cache", "lock", "order", "stock", "audit", "notify", "sensitive", "identity", "protection");
+        assertThat(byKind).as("12 类键一个不少（顺序 = Kind 声明序；前 9 类业务 + protection，后 3 类是 A5 设施埋点）")
+                .containsOnlyKeys(
+                        "cache", "lock", "order", "stock", "audit", "notify", "sensitive", "identity",
+                        "protection", "slowSql", "mq", "scheduler");
         assertThat(byKind).containsEntry("stock", 2).containsEntry("audit", 1).containsEntry("cache", 0);
 
         @SuppressWarnings("unchecked")
@@ -204,14 +206,14 @@ class EventStreamServiceTest {
     }
 
     @Test
-    @DisplayName("块 7 · commit 8c：帧里的 `mq` = 发布方**实测**的连接状态（页面那个黄点读它）")
-    void frameCarriesMqConnectivity() {
-        when(publisher.connected()).thenReturn(false);
-        assertThat(frames.frame(0)).as("连不上 ⇒ 帧里是 false（页面画黄点 + 那句「不落库」）")
+    @DisplayName("块 7 · commit 8c / D3：帧里的 `mq` = 页面口径的 MQ 可用（broker 连着且未被注入断开）")
+    void frameCarriesMqUsability() {
+        when(publisher.usable()).thenReturn(false);
+        assertThat(frames.frame(0)).as("不可用 ⇒ 帧里是 false（页面画黄点 + 那句「不落库」）")
                 .containsEntry("mq", false);
 
-        when(publisher.connected()).thenReturn(true);
-        assertThat(frames.frame(1)).as("连上了 ⇒ true。⚠️ 只有这一条用例会把替身设成 true")
+        when(publisher.usable()).thenReturn(true);
+        assertThat(frames.frame(1)).as("可用 ⇒ true。⚠️ 只有这一条用例会把替身设成 true")
                 .containsEntry("mq", true);
     }
 

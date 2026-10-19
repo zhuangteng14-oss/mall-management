@@ -1,0 +1,200 @@
+块 7 · 可观测域终极修复（回放架构 / 数据口径 / 流轨）报告
+日期：2026-10-18
+分支：feat/c3-admin-block7
+基线提交：ad6ee74
+
+============================================================
+一、结论（先看这里）
+============================================================
+本轮把「回放必须与实时演练完全一致」落到了可复核的证据上，三组探针全绿：
+
+  1. 回放架构 / 时间口径 / 顶部入口：36 项 / 0 失败
+     docs/agent/evidence/c3-block7/b7r-replay-parity.txt
+  2. 回放取消支线（批次窗口内的无批次号汇总取消）：9 项 / 0 失败
+     docs/agent/evidence/c3-block7/b7r-replay-cancel.txt
+  3. 实时超时取消流轨动图（真库 + 真 SSE）：13 项 / 0 失败
+     docs/agent/evidence/c3-block7/b7r-cancel-live.txt
+
+另有：
+  · 前端 `npm run lint`：0 error；`npm run build`：成功（2026-10-18 00:13/00:14）。
+  · 后端 `ObservedEventDaoTest`、`ReplayServiceTest`：通过。
+  · 本轮新增的「回放补取消」查询用真库回放实测：batch 713b2210…，
+    台账 35,226 行，补进 2 条无批次号汇总取消（count=20 / 253），
+    回放重建「已取消 273、取消流入 50.6/s」。
+
+============================================================
+二、根因与修复
+============================================================
+【1】回放时钟早 8 小时 —— 时区口径写反了
+  现象：回放时钟显示 07:4x，而演练实际发生在 23:4x；所有事件看起来「在早上」。
+  根因（实测，不是猜）：
+    · MySQL 服务器 `@@system_time_zone = UTC`，`NOW()` 是 UTC 墙钟；
+    · JVM 本地时区是 `Asia/Shanghai`；
+    · `observed_event.OccurredAt` 由 `new Timestamp(epochMilli)` 绑定、连接串是
+      `serverTimezone=Asia/Shanghai` ⇒ 库里存的是 **本地 +08 墙钟文本**；
+    · `drill_record.created_at` 走 DB 默认值（DB 是 UTC）⇒ 存的是 **UTC 墙钟文本**；
+    · 旧前端 `epochOf()` 一律在末尾补 `Z`，把 +08 台账当 UTC ⇒ 整体早 8 小时。
+  修复：
+    · `src/api/replay-session.js`：台账 `OccurredAt` 补 `+08:00`；已带 Z/±hh:mm 的值原样解析。
+    · `ReplayBanner.vue`：批次下拉的 `CreatedAt`（UTC 文本）补 `Z` 后再格式化成北京时间。
+    · `ObservedEventDao.java` 的类注释同步纠正「库内 UTC」的错误说法。
+  实测：进度分母 35,204；回放时钟 23:41:13.858，1x 下 2.4 秒墙钟推进 2,399ms 日志时间。
+
+【2】只回放前 5,000 条 —— 不是全批
+  根因：前端调用 `fetchReplay(batchId)` 没传 limit，后端缺省 `DEFAULT_LIMIT=5000`。
+  修复：`REPLAY_LOAD_LIMIT = 50000`（= 后端 `MAX_LIMIT`），显式传给后端。
+  实测：batch 8fdb21b7… 回放分母 35,204，覆盖原演练 23:41:12.958 ~ 23:42:26.570 全程。
+  超 5 万条仍会截断，但横幅会把 total / count / limit 三者的差写出来，不静默。
+
+【3】指标页 / 状态页回放复用真实高保真组件
+  · 指标页：QPS / 失败 / 耗时 / 种类 / 热力图 5 张图全部复用实时组件
+    （LineChart / BarChart / HeatmapChart 等），每张带 `is-replay` 角标；没有另写简化版。
+  · 状态页：趋势线、环形图、阶梯、直方图、SSE 流轨同一套组件，5 张图均带角标。
+  · 日志页：回放时列表铺台账事件（实测 200 行），状态条写明「回放时钟 · 不检查 MQ / SSE」。
+  · 回放期间强制屏蔽 MQ / SSE 实时检查：三页均未出现「MQ 未连接」误报。
+
+【4】耗时 / Bins 用历史 occurredAt 相减，不用 NOW()
+  · `replay-session.js#appendStateChanges` 的 `ts` 一律取台账 `e.ts`（OccurredAt 的 epoch），
+    不使用装载时刻。
+  · `OrderFlow.vue#noteReplayLifecycle` 用同一订单相邻流转的 `m.ts` 相减得到付款/发货/收货
+    耗时，再按与实时页相同的桶边界分箱；没有调用 `Date.now()`。
+  · 流入/流出 QPS 的回放窗口也取「回放时钟前 5 秒日志时间」，不是墙钟。
+  · ⚠️ 本批演练总长只有 73 秒，相邻流转的耗时本来就都落在 0–5 分桶 —— 这不是「被 NOW 挤到
+    0–5 分」，而是这批数据的真实耗时就是秒级。判据是时间源（历史 ts），不是桶的分布形状。
+
+【5】顶部直接选历史批次 + 重新开始 + 慢速档
+  · 指标页、状态页、日志页顶部都有「选择历史批次」下拉框和「回放」按钮，不再只能从攻击页进。
+  · 「重新开始」把进度打回 0 附近（实测 1,742 → 50），时钟回到本批首条 23:41:1x。
+  · 倍速档：0.25x / 0.5x / 1x / 2x / 5x / 10x。
+    实测 1x：2.4 秒墙钟推进 2,399ms 日志时间；0.25x：2.6 秒墙钟只推进 655ms 日志时间。
+
+【6】明细表空表：服务端 WHERE + 分页
+  · 点「待发货」后，后端带 `WHERE status='待发货'` 查询，前端传 page / size；
+    表头总数 = 后端该态真实 COUNT，表里每一行都是待发货，翻到第 2 页仍是待发货。
+  · 证据截图里总数是 2,603（截图时刻的实时库值），不是你当时看到的 2,271 —— 这个数会随真实
+    流量漂移；验收判据是「表头总数 = 分页脚总数 = 该态真实 COUNT」，不是某个固定数字。
+
+【7】流入 / 流出 QPS
+  · 流出不是只算「新建」：按每条流转的 from → to 同时记流出（from）和流入（to），
+    再除以窗口秒数；汇总取消按 count 加权。
+  · 实时页与回放页各自用同一套口径；回放窗口是历史日志时间。
+
+【8】SSE 流轨
+  · 没有真实流转时：拓扑线暗灰、无动画、无雷达、无粒子；
+  · 只有真实流转才点亮对应边并放飞粒子，方向左 → 右；
+    同轨同帧实测：飞得久的粒子位置更靠右（dx=28px，dt=117ms）。
+  · 超时取消：一条「批量取消 N 单」汇总事件驱动大号瀑布粒子流向「已取消」，
+    取消流入 QPS 实时跳动（峰值 7.8/s，事件过后回落 0/s —— 它是 1 秒窗口速率，不是累计值）。
+
+【9】本轮新增：回放补回「无批次号的超时取消汇总」
+  这是复核时发现的真缺口，必须单独说清：
+    · 超时取消任务跑在调度线程上，没有 `X-Drill-Batch` 请求头 ⇒ 它发的汇总事件
+      `observed_event.BatchId` 恒为 NULL；
+    · 旧回放只按 `WHERE BatchId = ?` 读 ⇒ 批次窗口内真的发生过的批量取消，在回放里整段消失，
+      与「回放必须与实时演练完全一致」直接冲突；
+    · 修复：`ObservedEventDao.BATCH_PREDICATE` 的主分支仍按 BatchId 走索引，第二支补
+      「BatchId IS NULL + Kind='order' + fields 含 count/CANCELLED + 落在本批首末 OccurredAt 之间」
+      的汇总取消；`countByBatch` 用同一套过滤，保证「共 N 条」与取行一致；
+    · 实测 batch 713b2210…（00:18:08 ~ 00:19:48）：台账 35,226 行，补进 2 条
+      （00:19:02 count=20、00:19:32 count=253）；回放界面出现
+      「批量取消 20 单 / 批量取消 253 单」，已取消 273，取消流入 50.6/s。
+
+============================================================
+三、交付验收对照
+============================================================
+验收 1：三个页面点击回放，复用高保真图表、时间戳合理
+  · docs/agent/evidence/c3-block7/b7r-metrics-replay.png
+    指标页：回放横幅 + 5 张图，全部带「回放」角标。
+  · docs/agent/evidence/c3-block7/b7r-timeline-replay.png
+    docs/agent/evidence/c3-block7/b7r-timeline-replay-top.png
+    状态页：2,882 / 35,204，回放时钟 23:41:19.417，6 个倍速档、
+    重新开始/暂停、KPI、趋势线、环形图、阶梯、流轨。
+  · docs/agent/evidence/c3-block7/b7r-logs-replay.png
+    日志页：回放进度、回放时钟 23:4x、无「MQ 未连接」。
+  · 动图：b7r-timeline-replay.gif（全页）、b7r-timeline-rail.gif（右侧流轨局部）。
+
+验收 2：点「待发货」，下表正确显示待发货订单
+  · docs/agent/evidence/c3-block7/b7x-waitship-page.png
+    表头「待发货 2,603 单」，分页脚 2,603，表格 20 行全部为待发货，当前是第 2 页；
+    服务端 WHERE + offset 生效，不是前端拿 1000 条自己过滤。
+
+验收 3：流轨光点从左向右；超时取消明显流向「已取消」；QPS 实时跳动
+  · docs/agent/evidence/c3-block7/b7r-cancel-live.gif（全页）
+  · docs/agent/evidence/c3-block7/b7r-cancel-rail.gif（右侧流轨局部）
+    实时真库造 40 张未付款单，付 1 张，等 60 秒阈值 + 15 秒扫描：
+    「批量取消 39 单」汇总行出现、大号瀑布粒子朝「已取消」下落、
+    取消流入 7.8/s、已取消 +39、待付款归零。
+  · docs/agent/evidence/c3-block7/b7r-timeline-rail.gif
+    回放批次内的普通流转：同轨同帧粒子由左向右（dx=28px）。
+  · docs/agent/evidence/c3-block7/b7r-replay-cancel-row.png
+    docs/agent/evidence/c3-block7/b7r-replay-cancel-state.png
+    历史回放里的批量取消：明细行「批量取消 20 单」，随后两条汇总重建出「已取消 273、
+    取消流入 50.6/s」。
+
+============================================================
+四、变更文件
+============================================================
+后端：
+  · Mall-management-server/src/main/java/com/minke/mallmanagement/observe/dao/ObservedEventDao.java
+    逐字纠正 OccurredAt 的时区注释；新增 BATCH_PREDICATE，回放补「无批次号汇总取消」；
+    selectByBatch / countByBatch 共用同一过滤；净行数不变（避免行号引用漂移）。
+
+前端：
+  · Mall-management-web/mall-management-system/src/api/replay-session.js
+    台账时间解析改 +08:00；REPLAY_LOAD_LIMIT=50000；回放 stateChanges / metric ticks 用历史 ts。
+  · .../src/components/observe/ReplayBanner.vue
+    批次下拉的 CreatedAt 按 UTC 解析后转本地；顶部入口、倍速、重新开始。
+  · .../src/views/admin/observe/OrderFlow.vue
+    回放复用高保真组件；耗时由相邻 occurredAt 推算；历史 5 秒窗口 QPS；回放取消瀑布。
+  · .../src/views/admin/observe/MetricsPanel.vue
+    回放复用 LineChart / BarChart / HeatmapChart 等高保真组件（不写简化版）。
+  · .../src/views/admin/observe/EventLog.vue
+    回放状态条：回放时钟、不检查 MQ / SSE、LED 切色。
+  · .../src/components/charts/HeatmapChart.vue
+    透传 is-replay 角标。
+
+探针：
+  · scripts/probes/probe-b7r-replay-parity.mjs（36 项）
+  · scripts/probes/probe-b7r-replay-cancel.mjs（9 项）
+  · scripts/probes/probe-b7r-cancel-gif.mjs（13 项 + 16 帧动图原料）
+
+============================================================
+五、证据清单（docs/agent/evidence/c3-block7/）
+============================================================
+回放主链路：
+  b7r-replay-parity.txt        36 项 / 0 失败
+  b7r-metrics-replay.png
+  b7r-timeline-replay.png
+  b7r-timeline-replay-top.png
+  b7r-logs-replay.png
+  b7r-timeline-replay.gif
+  b7r-timeline-rail.gif
+回放取消支线：
+  b7r-replay-cancel.txt        9 项 / 0 失败
+  b7r-replay-cancel-row.png
+  b7r-replay-cancel-state.png
+实时取消动图：
+  b7r-cancel-live.txt          13 项 / 0 失败
+  b7r-cancel-before.png
+  b7r-cancel-after.png
+  b7r-cancel-live.gif
+  b7r-cancel-rail.gif
+分页：
+  b7x-waitship-page.png
+
+============================================================
+六、口径与限制（如实登记）
+============================================================
+1. 回放读的是 `observed_event` 台账，不是当时 SSE 的帧。台账留存期受清理任务管
+   （攻击批次 3 天、日常 30 天），超过留存期的批次无法回放。
+2. 超时取消的汇总事件没有 BatchId（调度线程），本轮已按「批次自身首末 OccurredAt」补进回放；
+   这是一条**时间窗**判据，不是伪造批次号。它会把窗口内所有无批次号的汇总取消都带进来 ——
+   这正是当时实时 SSE 也确实展示过的事件，符合「回放与实时一致」。
+3. 本批 73 秒演练的耗时天然落在 0–5 分桶；不要拿桶分布当作「是否用了 NOW」的判据，
+   判据是代码里的时间源和回放时钟（已列在第二.4 节）。
+4. 本轮没有跑后端全量测试，只跑了 `ObservedEventDaoTest`、`ReplayServiceTest` 与前端
+   lint/build；全量测试与 CI 产物未在本报告引用。
+5. 证据文件均晚于最后一次源码编辑（DAO 00:16:17；回放 00:22、回放取消 00:26、
+   实时取消 00:24），满足「证据必须晚于代码」。
+
+（完）

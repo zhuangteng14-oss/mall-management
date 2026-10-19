@@ -1,0 +1,253 @@
+块 7 · 阶段 3a.4 收尾 —— 指标页布局 / 锁热力图 / 三个严重 Bug 修复报告
+日期：2026-10-17　分支：feat/c3-admin-block7　状态：本地已改完、lint/build 绿、探针复验通过；未 push、未 merge。
+
+======================================================================
+〇、结论摘要
+======================================================================
+1) 指标页双重滚动条 + 左右两栏底边不齐：已修。页面不再出现浏览器全局长条，
+   两栏 177→868（691px）等高、各自 overflow-y:auto，滚动条实测 7px。
+2) 锁热力图：容器仍固定（图卡 254px，其中 canvas 190px），1 把或 5 把锁都在固定
+   高度内自适应；y 轴锁名改为中文短名（下单锁/支付锁/…），不再出现 order-a...。
+3) 日志页“部分行点不动”：真实根因不是遮罩，而是**没有 traceId 的行原先根本没绑点击**。
+   现在所有行都可点、cursor:pointer、role=button；无 traceId 的行点开走「⑤ 事件详情」
+   单条抽屉，并说明“这条事件不在请求线程上”。
+4) 攻击页切页后状态重置：表单与运行元信息用 sessionStorage 持久化；onMounted 主动查
+   POST /admin/observe/attack/status，Running=true 时恢复进度条/读数/停止按钮/轮询。
+5) 回放“一键全显”：改为按原始 ts 偏移推进 + 每拍限量 3 条；顶部新增
+   “正在回放（进度 X / Y）”状态条、进度百分比、回放时钟、暂停/继续、退出回放。
+6) 回归：3 个文件 lint 0 error；npm run build 成功（27502ms）。
+7) 未 push / 未 merge / 未建 PR。
+
+======================================================================
+一、环境与证据
+======================================================================
+- 前端 dev server：http://localhost:8080/admin.html（入口 admin.html）
+- 后端：dev profile，http://localhost:8088
+- 登录：admin / 123@admin
+- 探针底座：docs/美化/_cdp.mjs（headless Edge + CDP）
+- 探针脚本（新增，已按仓里命名惯例放进 scripts/probes/）：
+    scripts/probes/probe-b7c11-metrics-layout.mjs
+    scripts/probes/probe-b7c11-heatmap-locks.mjs
+    scripts/probes/probe-b7c11-log-click.mjs
+    scripts/probes/probe-b7c11-attack-restore.mjs
+    scripts/probes/probe-b7c11-replay-pacing.mjs
+- 证据目录：docs/agent/evidence/c3-block7/b7c11-*
+  （6 份 .txt 探针输出 + lint/build + 6 张关键截图；全部晚于最后一次代码编辑 12:43:20）
+- 复现命令（先起 serve 与后端）：
+    node scripts/probes/probe-b7c11-metrics-layout.mjs
+    node scripts/probes/probe-b7c11-heatmap-locks.mjs
+    node scripts/probes/probe-b7c11-log-click.mjs
+    node scripts/probes/probe-b7c11-attack-restore.mjs
+    node scripts/probes/probe-b7c11-replay-pacing.mjs
+
+======================================================================
+二、指标页布局（双滚动条 / 底边不齐）
+======================================================================
+【根因】
+- .a-mp 原为 `height: calc(140vh - 124px)`：页面本身高于视口 ⇒ ① 浏览器右侧出现
+  全局长条；② .mp-body 里再滚一次；③ 右栏（库存水位）内容把整页继续撑长，
+  首屏看不全。
+- 两栏没有可收缩的 flex/grid 子项约束（缺 min-height:0），内容高度会顶开容器，
+  栏上的 overflow 轮不到生效。
+- 滚动条宽度 15px 的根因不是规则没写：祖先 .mp-body 上有
+  `scrollbar-width: thin; scrollbar-color: …`。Chrome ≥121 只要元素上这两个属性
+  非 auto，整段 ::-webkit-scrollbar 就被整块忽略；scrollbar-color 还会继承到
+  .mp-stack/.mp-rail ⇒ 6px/7px 规则作废，退回默认 15px。
+
+【改法】（MetricsPanel.vue）
+- 行 916 起：.a-mp 改为 `height: calc(100vh - 124px); overflow: hidden`（一屏）。
+- .mp-body：`flex:1 1 auto; min-height:0; overflow:hidden`，只把剩余高度交给网格。
+- 行 1053 起：.mp-stack / .mp-rail 均 `min-height:0; overflow-y:auto`，两栏等高；
+  网格行 stretch。
+- 行 1383 起：.mp-stock-list 去掉固定 220px 与自身 overflow，改为自然增高，
+  只随右栏滚（不再套第二层滚动）。
+- 行 1482–1503：删除祖先 .mp-body/.mp-stock-list 的 scrollbar-width/color；
+  只给两个真正滚动的栏写 ::-webkit-scrollbar，width/height 7px、深色半透明 thumb，
+  track 透明（与日志页一致）。
+- 窄屏媒体查询（行 1509 起）保留降级：两栏 overflow:visible、库存列表 260px 自滚。
+
+【实测】（b7c11-metrics-layout.txt，1440×900）
+- document.scrollHeight = 900 = clientHeight ⇒ 无浏览器全局滚动条。
+- .a-mp 92→868（776px），.mp-body 177→868（691px）。
+- .mp-stack 177→868、.mp-rail 177→868：底边同为 868，等高对齐。
+- 两栏 overflow-y 均为 auto；offsetWidth-clientWidth = 7（滚动条 7px）。
+- .mp-stack scrollHeight 1128 / clientHeight 691（左栏可滚）；
+  .mp-rail scrollHeight 1599 / clientHeight 691（右栏可滚）。
+- .mp-stock-list scrollHeight = clientHeight = 496 ⇒ 自身不再出现第二层滚动。
+- 截图：b7c11-metrics-layout.png（正常源）、b7c11-metrics-demo.png（模拟日常）。
+
+======================================================================
+三、锁热力图自适应 / 锁名截断
+======================================================================
+【根因】
+- HeatmapChart.vue 固定 `height:190px`、grid.left=64、y 轴 axisLabel.width=56 +
+  overflow:'truncate'；而数据里锁名是原始英文键（order-add 等），宽度不够就截成
+  “order-a...”。
+- 图表本身高度固定，多锁同时活动**不会**撑高卡片；用户担心的是行高/标签在 5 把锁
+  时是否还能读。需要解决的是“显示全称 + 多行自适应”而不是改容器高度。
+
+【改法】（MetricsPanel.vue）
+- 行 482 起新增 LOCK_LABELS：order-add→下单锁、order-pay→支付锁、
+  order-receive→收货锁、order-delivery→发货锁、friend-add→好友锁；
+  演示源另有 stock-deduct→扣库存锁、coupon-claim→领券锁。
+- 行 493 lockAxisLabels：y 轴传中文短名；图例/提示仍保留原始键（title 与 tooltip
+  显示“下单锁（order-add）”），排查时对得上后端锁名。
+- 热力图仍由左栏 flex 分配固定高度（图卡 254px，其中 canvas 190px），1 把或 5 把锁
+  都在这个固定高度内铺行高，绝不撑开整页。
+
+【实测】（b7c11-heatmap-locks.txt + b7c11-metrics-layout.txt）
+- 模拟日常下热力图图例：“下单锁 | 支付锁 | 扣库存锁 | 领券锁”，
+  title 依次为 order-add / order-pay / stock-deduct / coupon-claim。
+- 左栏滚到底：图卡 614→868（254px），canvas 190px；document 高度仍 900，
+  页面没有被热力图撑长。
+- 截图：b7c11-heatmap-locks.png（演示源 4 把锁同屏，y 轴全为中文短名）。
+- 说明：正常源当前只有下单锁；演示源覆盖 4 把；第 5 把（好友锁）由同一固定高度
+  布局承载，未单独造 5 锁同屏数据（布局不随行数改变，判断依据是 canvas 高度固定）。
+
+======================================================================
+四、Bug 1：日志页部分行点不动 / 鼠标指针不对
+======================================================================
+【排查过程（先证伪再落码）】
+- 第一版探针怀疑 `.ax` / `.log-head` 等绝对定位元素遮挡。复测把可见性判据改为
+  与 `#ev-list` 的裁剪矩形求交后发现：被报“遮挡”的行其实是已经滚到列表上沿之外、
+  中心点落在表头上的行 —— 真实点击有效，**遮挡不是根因**。
+- 第二版探针按行扫描：可见行中有一类行 title 不是“点开看这一次请求的完整链路”，
+  即**没有 traceId 的事件**。这类行原来没有绑定 click，也没有 pointer 光标 ⇒
+  用户随机点到它们时“没反应、指针正常”。这才是真实根因。
+- 顺带排查了 Vue key：旧 key 在 trace 头/尾/子事件之间可能撞值；改为带自增
+  gid 的唯一 key（h-<tid>-<gid> / e-<seq> / t-<tid>-<gid>），探针未再捕获
+  Duplicate key 警告。
+
+【改法】（EventLog.vue）
+- 行 259–267：所有行 class 固定 `is-openable`、role=button、tabindex=0，
+  click/Enter/Space 统一走 openTrace(r)；title 按有无 traceId 给不同文案。
+- 行 1436：buildStream 引入组号 gid，头/子/尾 key 全局唯一。
+- 行 778–781、1578–?：新增 openedTrace / openedEvent / drawerOpen 三态；
+  rowSelected 同时支持“按 traceId 选中”和“按 seq 选中单条”。
+- openTrace（行 1606）：有 traceId → 打开/收起链路抽屉；无 traceId → 打开
+  “事件详情”单条抽屉，再点同一条则折叠。
+- 抽屉（行 409 起）：标题按状态显示「链路展开」或「事件详情」；单条事件时插入
+  一条说明“这条事件不在请求线程上（没有 traceId），没有跨事件的链路可展开；
+  下面是它自己的全部字段”，随后列出该事件全部 fields。
+
+【实测】（b7c11-log-click.txt）
+- 模拟日常下扫描 79 行、可见 11 行，其中无 traceId 的可见行 2 条。
+- allOpenable=true；cursor 集合只有 ["pointer"]；role 集合只有 ["button"]；
+  重复 key / Vue key 警告 = []。
+- CDP 真实鼠标点击一条无 traceId 行（缓存 L1 命中）后：
+  drawer.open=true，标题“⑤ 事件详情 #900072 12:49:08.211 · 缓存 · L1 命中 1 条事件”；
+  链区第一条即“这条事件不在请求线程上…”，第二条列出 kind/severity/objectId/key/
+  耗时等全部字段；选中行数 =1。
+- 截图：b7c11-log-single-event.png。
+
+======================================================================
+五、Bug 2：攻击模拟器切页后状态重置
+======================================================================
+【根因】
+- AttackConsole.vue 的运行态（running / 进度 / 读数 / 计时器）只存在组件内存里；
+  路由切走组件销毁，切回来 onMounted 从默认值重建。
+- 后端那一轮演练并不会因为前端切页而停止，但前端从不主动查询 Running 状态 ⇒
+  用户看到“按钮变回开始、进度条没了”，而后端其实还在跑。
+- 表单（权重 / 并发 / 秒数 / 档位 / 两个开关组）同样只存组件内存。
+
+【改法】（AttackConsole.vue）
+- 行 668–699：新增 sessionStorage 存取工具与两个键：
+  FORM_KEY = mall.observe.attack.form.v1，
+  RUN_KEY = mall.observe.attack.run.v1（计划秒数 / 预计时长 / 起点墙钟）。
+  用 sessionStorage 而非 localStorage：关标签页即忘。
+- restoreForm / persistForm（行 707 起）：恢复并校验权重、并发、时长、档位、
+  防护开关、故障注入；watch 深度监听，任何改动即落盘。
+- restoreRunState（行 1405 起）：onMounted 主动 POST /admin/observe/attack/status；
+  Running=true 时恢复 running、按 RUN_KEY 或后端 ElapsedMs 恢复进度条与计时器，
+  启动 200ms 本地计时 + 状态轮询（startStatusPolling(false)），并提示：
+  “检测到后端还有一轮演练在跑：已恢复进度条与实时读数；跑完会自动刷新「演练记录」。”
+- pollStatus（行 1028）：发现 Running=false 时停轮询；如果是恢复来的运行，
+  走 finishRestoredRun（行 1043）——清 RUN_KEY、回开始态、刷新演练记录并提示收口。
+- fire：开始时写 RUN_KEY，结束后 stopElapsedTimer + dropStore(RUN_KEY)。
+- 停止按钮文案由“暂停”改为“停止”（行为本来就是 /attack/stop）。
+
+【实测】（b7c11-attack-restore.txt）
+- 表单跨路由：并发 333、时长 2、档位 400、首权重 40，切到指标页再回来全部保持
+  （formMeta 完整回读）。
+- 起一轮 10 秒演练（并发 8 / 120 档），中途切走约 2 秒再回来：
+  进度条 23%（“已等 3 秒 / 预计 10 秒”）、已发 299 条、平均 86.8 QPS、
+  按钮为“演练中… / 停止”，flash 为恢复提示，RUN_KEY 存在。
+- 点“停止”后：回到开始态，prog=null，RUN_KEY=null，flash
+  “后端那一轮演练已经收口，进度显示已退出；结果已刷新到「演练记录」。”
+- 截图：b7c11-attack-restored.png（恢复后的进度条 + 停止按钮 + 读数）、
+  out-b7c11-attack-finished.png。
+
+======================================================================
+六、Bug 3：回放变成“一键全显”
+======================================================================
+【根因】
+- replay 取回整批（实测 910 / 5000 条）后一次性塞进 played 数组渲染，没有按原始
+  事件 ts 的偏移推进，也没有节流 ⇒ 看起来就是“全出现”。
+- 原实现即使逐条 setTimeout，也会因为列表上限 200 条窗口而瞬间顶满；缺少可感知的
+  进度与退出入口。
+
+【改法】（AttackConsole.vue）
+- 行 1216：REPLAY_MAX_PER_TICK = 3。原时间轴 8.7 秒内 5000 条 ≈ 575 条/秒，
+  全速放会 1 秒内放完且窗口瞬间顶满；限到 3 条/拍（40ms）≈ 75 条/秒。
+- replayTick（行 1285 起）：每拍只放“原时间偏移已到”的前 N 条；回放时钟跟
+  **已放出的最后一条**的 off 走，不跟墙钟（否则会出现时钟已 8 秒、画面还停 2 秒）。
+- 顶部新增 sticky 状态条（模板行 434 起）：正在回放 / 已暂停 / 回放结束
+  （进度 X / N）+ 进度百分比条 + 暂停/继续 + 退出回放；原统计条只留统计。
+- replayPct = cursor / rows.length；退出即清空面板与定时器。
+
+【实测】（b7c11-replay-pacing.txt）
+- 打开一条 910 条的演练记录后点回放：
+  T0.3 → 20 条（2%）；T1.0 → 74 条（8%）；T2.0 → 149 条（16%）；
+  T3.2 → 已放 239 条（26%），列表窗口 200 条（上限），进度仍按 239/910 计。
+- 状态条文案：“正在回放（进度 239 / 910）”，按钮“暂停 / 退出回放”；
+  统计条：“已放 239 / 910 条 · 回放时钟 20:44:50.867 · 走过 0.6 秒 / 原 2.1 秒”
+  —— 列表首条始终是 20:44:50.307，末条随回放推进，证明是按 ts 推进而非全显。
+- 点“退出回放”：面板与状态条均消失（after.panel=false, after.live=false）。
+- 截图：b7c11-replay-pacing.png。
+
+======================================================================
+七、回归
+======================================================================
+- lint（3 个文件，--no-fix）：DONE No lint errors found!
+- build：DONE Build complete（27502ms，Hash 0d465cc935e58e62）。
+- 证据：b7c11-lint-build.txt。
+- 已知但未处理（非本次范围）：MetricsPanel 传给 LineChart 的 yMin/y2Min/y2Max
+  是字符串，Vue 报 “Expected Number … got String”；为此前既有告警，本次布局
+  修复未触碰这些 props，故未顺手改动，避免混入无关变。
+
+======================================================================
+八、改动文件
+======================================================================
+生产代码（3 个）：
+- Mall-management-web/mall-management-system/src/views/admin/observe/MetricsPanel.vue
+- Mall-management-web/mall-management-system/src/views/admin/observe/EventLog.vue
+- Mall-management-web/mall-management-system/src/views/admin/observe/AttackConsole.vue
+探针（5 个，新增）：
+- scripts/probes/probe-b7c11-metrics-layout.mjs
+- scripts/probes/probe-b7c11-heatmap-locks.mjs
+- scripts/probes/probe-b7c11-log-click.mjs
+- scripts/probes/probe-b7c11-attack-restore.mjs
+- scripts/probes/probe-b7c11-replay-pacing.mjs
+证据（docs/agent/evidence/c3-block7/）：
+- b7c11-metrics-layout.txt / .png、b7c11-metrics-demo.png
+- b7c11-heatmap-locks.txt / .png
+- b7c11-log-click.txt / b7c11-log-single-event.png
+- b7c11-attack-restore.txt / b7c11-attack-restored.png
+- b7c11-replay-pacing.txt / .png
+- b7c11-lint-build.txt
+未改：api/demo-stream.js 接口；无新增明文口令。
+
+======================================================================
+九、截图索引（docs/agent/evidence/c3-block7/）
+======================================================================
+1. b7c11-metrics-layout.png    指标页两栏等高、各自 7px 滚动条、无全局滚动条
+2. b7c11-metrics-demo.png      模拟日常源
+3. b7c11-heatmap-locks.png     热力图 4 把锁、y 轴中文短名、画布固定 190px
+4. b7c11-log-single-event.png  无 traceId 行的「事件详情」单条抽屉
+5. b7c11-attack-restored.png   切页回来后恢复的进度条 / 86.8 QPS / 停止按钮
+6. b7c11-replay-pacing.png     “正在回放（进度 X / Y）”状态条与逐批推进
+
+======================================================================
+十、状态
+======================================================================
+本地提交完成（见 git log），未 push、未 merge、未建 PR。

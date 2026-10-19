@@ -5,10 +5,12 @@ import com.minke.mallmanagement.admin.service.AuditService;
 import com.minke.mallmanagement.observe.service.AttackEngine;
 import com.minke.mallmanagement.observe.service.AttackSwitchConfig;
 import com.minke.mallmanagement.observe.service.DrillRecordService;
+import com.minke.mallmanagement.observe.service.EventBroadcaster;
 import com.minke.mallmanagement.observe.service.ObservedEventCleanupService;
 import com.minke.mallmanagement.shared.web.AuthSession;
 import com.minke.mallmanagement.shared.web.Result;
 import jakarta.servlet.http.HttpServletRequest;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -17,13 +19,17 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
+import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /**
- * 攻击模拟器的**九个**出口（块 7 · commit 4 建前三条、commit 8b 加第四条、commit 10 加第五条、
- * 块 7 收尾加第六条、**3a.1 加第七条与第八条 = 开关配置**、**2026-10-18 加第九条 = 复位演练环境**）：
+ * 攻击模拟器的**十一个**出口（块 7 · commit 4 建前三条、commit 8b 加第四条、commit 10 加第五条、
+ * 块 7 收尾加第六条、**3a.1 加第七与第八条 = 开关配置**、**2026-10-18 加第九条 = 复位演练环境**、
+ * **2026-10-19 加第十与第十一条 = 存储水位 / 彻底清空**）：
  * 场景清单 / 跑一轮 / **叫停** / 演练记录 / **清理演练数据** / **实时进度** /
- * **读开关配置** / **写开关配置** / **复位演练环境**。
+ * **读开关配置** / **写开关配置** / **复位演练环境** / **存储水位** / **彻底清空事件台账**。
  *
  * <h2>【端点口径：不加角色闸、不在白名单】</h2>
  * 九条与本批 SSE 三条**逐字同款**（{@code MetricsStreamController} 写了完整理由）：
@@ -107,14 +113,38 @@ public class AttackController {
      */
     private final AttackSwitchConfig switchConfig;
 
+    /**
+     * 演练注入开关的**事件出口**（D3 新增的本类第五个依赖）。
+     *
+     * <p>⚠️ 用 {@link ObjectProvider} 而不是直接注入：{@code AbstractSmokeTest} 与其他
+     * {@code @WebMvcTest} 切片不扫 {@code EventBroadcaster}（它连九个 metrics 环和 MQ 出口），
+     * 直接注入会让那些切片**启动失败**。{@code getIfAvailable()} 在它们那里返回 {@code null}
+     * ⇒ 跳过发事件，配置写入本身照常。这与本类前四个依赖「进构造器就必须进 @Import」的处置不同，
+     * 是刻意的：事件是**附加观测**，不该成为端点可用性的前提。
+     */
+    private final ObjectProvider<EventBroadcaster> eventBroadcaster;
+
+    /** 注入键的固定顺序（与 {@code AttackEngine.INJECTION_KEYS} 同序；那边是包级可见，跨包这里另列）。 */
+    private static final List<String> INJECTION_KEYS =
+            List.of("redisDown", "mqDown", "dbSlow", "jobDown");
+
+    /** 每个注入键「打开之后会发生什么」的一句人话（进事件 detail，演示时直接读给观众听）。 */
+    private static final Map<String, String> INJECTION_EFFECTS = Map.of(
+            "redisDown", "缓存读穿透降级：L1/L2 照常走真实链路",
+            "mqDown", "只拦发布侧：消费者与死信出口不受影响",
+            "dbSlow", "只延迟 SELECT，每请求最多 300ms",
+            "jobDown", "定时任务整轮跳过；不中断已经在跑的那一轮");
+
     public AttackController(DrillRecordService drillRecordService,
                             ObservedEventCleanupService cleanupService,
                             AuditService auditService,
-                            AttackSwitchConfig switchConfig) {
+                            AttackSwitchConfig switchConfig,
+                            ObjectProvider<EventBroadcaster> eventBroadcaster) {
         this.drillRecordService = drillRecordService;
         this.cleanupService = cleanupService;
         this.auditService = auditService;
         this.switchConfig = switchConfig;
+        this.eventBroadcaster = eventBroadcaster;
     }
 
     /** 8 个预置场景（key / 中文名 / 同时演示的防护 / 需要的人工动作 / 默认权重）。无入参。 */
@@ -172,12 +202,22 @@ public class AttackController {
             // 让「再点一次开始」就能跑（用户批文第二节的可选进阶）。
             // ⚠️ 它是**尽力而为**：复位失败不抛（见 `ObservedEventCleanupService` 类注释的例外），
             //    引擎仍按原样报「挑不到靶子」，不把一轮本来能跑的演练翻成 500。
+            // 2026-10-19（用户批文）：开跑前先过**容量水位**。超过 30 万行就按时间淘汰最老的数据，
+            // 直到回到 25 万以下 —— 「牺牲历史，保全当下」。它排在自检复位之前：两者都可能写库，
+            // 先做更重的淘汰，再让复位面对一个更轻的库。
+            ObservedEventCleanupService.EvictionResult eviction = cleanupService.enforceHighWatermark();
             cleanupService.autoResetIfNeeded();
             Map<String, Object> payload = drillRecordService.run(name, concurrency, durationSeconds,
                     targetQps, scenarios,
                     who == null || who.userId() == null ? "" : who.userId(),
                     who == null || who.role() == null ? 0 : who.role(),
                     baseUrlOf(request));
+            // UI 的两个读数：淘汰了多少行 + 这一轮开始时的台账水位；触发熔断时带上用户批文的原句。
+            payload.put("Evicted", eviction.deleted());
+            payload.put("StorageCount", eviction.after());
+            if (eviction.triggered()) {
+                payload.put("EvictionWarning", ObservedEventCleanupService.EVICTION_WARNING);
+            }
             return ResponseEntity.ok(Result.of(payload));
         } catch (IllegalArgumentException e) {
             return ResponseEntity.badRequest().body(Result.fail(e.getMessage()));
@@ -222,11 +262,37 @@ public class AttackController {
             @RequestParam(value = "protections", required = false) String protections,
             @RequestParam(value = "injections", required = false) String injections) {
         try {
-            return ResponseEntity.ok(Result.of(
-                    view(switchConfig.updateFromJson(protections, injections))));
+            // D3：先留一份「改之前」的注入清单，用来算真实翻转（顺序固定，见 INJECTION_KEYS）。
+            Set<String> before = new LinkedHashSet<>(switchConfig.injections());
+            AttackSwitchConfig.State st = switchConfig.updateFromJson(protections, injections);
+            emitInjectionToggles(before, new LinkedHashSet<>(st.injections()));
+            return ResponseEntity.ok(Result.of(view(st)));
         } catch (IllegalArgumentException e) {
             // 形状错（不是 JSON 数组串）/ key 不认识 ⇒ 400（与本类其余参数校验同一条口径）
             return ResponseEntity.badRequest().body(Result.fail(e.getMessage()));
+        }
+    }
+
+    /**
+     * 只对**真的翻转了**的注入键发一条 PROTECTION 事件（开→关、关→开各一条；没变不发）。
+     *
+     * <p>⚠️ 由本类而不是 {@code AttackSwitchConfig} 发：配置类不该知道「事件」这回事
+     * （它在被 {@code RedisDegradeGuard} / 定时任务等每秒读，掺入 I/O 或锁会放大到全站）；
+     * 而这里是**唯一**写入口，天然只会在「人拨了开关」时触发。
+     *
+     * <p>⚠️ 事件出口缺席（切片测试）时静默跳过 —— 见 {@code eventBroadcaster} 字段注释。
+     */
+    private void emitInjectionToggles(Set<String> before, Set<String> after) {
+        EventBroadcaster broadcaster = eventBroadcaster.getIfAvailable();
+        if (broadcaster == null) {
+            return;
+        }
+        for (String key : INJECTION_KEYS) {
+            boolean was = before.contains(key);
+            boolean now = after.contains(key);
+            if (was != now) {
+                broadcaster.emitInjection(key, now, INJECTION_EFFECTS.get(key));
+            }
         }
     }
 
@@ -358,7 +424,7 @@ public class AttackController {
      * 演练记录（时间倒序）。每条记录里的 {@code Result} 长文本已由服务层**拆成字段**
      * （方案 §1.5：不是为了展示原始长文本，是为了分字段显示）。
      *
-     * @param limit  每页条数（可选，缺省 20、上限 200）
+     * @param limit  每页条数（可选，缺省 20、上限 100；D3-3 统一上限）
      * @param offset 偏移（可选，负数归 0）
      */
     @PostMapping("/records")
@@ -447,6 +513,39 @@ public class AttackController {
         Map<String, Object> payload = cleanupService.resetDrillEnvironment();
         auditService.record(AuthSession.identify(request), AuditActions.OBSERVE_ATTACK_RESET, "attack",
                 String.valueOf(payload.get("summary")), null, payload.get("restored"));
+        return Result.of(payload);
+    }
+
+    // ==================== 2026-10-19：存储水位 / 彻底清空（第十、十一条出口）====================
+
+    /**
+     * 当前事件台账水位（无入参、只读）：行数 / 高水位 / 安全线 / 保留天数。
+     *
+     * <p>UI 用它画「当前 N / 30 万」那一行；触发熔断的提示由 {@code /run} 响应带回
+     * （见 {@link ObservedEventCleanupService#EVICTION_WARNING}），不在这里重复判断。
+     */
+    @PostMapping("/storage")
+    public Result<Map<String, Object>> storage() {
+        return Result.of(cleanupService.storageStats());
+    }
+
+    /**
+     * **彻底清空可观测历史数据**（无入参）：把 {@code observed_event} 整张表按批删空。
+     *
+     * <h2>【它与 {@code /cleanup} 的区别】</h2>
+     * {@code /cleanup} 只删**演练标记**命中的行（批次号 / 种子 SKU / 攻击对象），日常事件行不动；
+     * 本端点删**全部** —— 用户 2026-10-19 点名的【彻底清空可观测历史数据】。
+     * ⚠️ 破坏性更强 ⇒ 三条护栏与 {@code /cleanup} 同档：真删、不可撤销、写审计；
+     * 前端调用点必须两段式确认。
+     *
+     * <p>分批删除（默认每批 5000 行 + 100ms 间歇），不在一个大事务里删整表。
+     */
+    @PostMapping("/purge")
+    public Result<Map<String, Object>> purge(HttpServletRequest request) {
+        Map<String, Object> payload = cleanupService.purgeAllEvents();
+        auditService.record(AuthSession.identify(request), AuditActions.OBSERVE_ATTACK_EVENTS_PURGE,
+                "attack", String.valueOf(payload.get("summary")), null,
+                Map.of("observed_event", payload.get("deleted")));
         return Result.of(payload);
     }
 }

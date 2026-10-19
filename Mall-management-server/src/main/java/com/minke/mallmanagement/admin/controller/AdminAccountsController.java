@@ -20,9 +20,9 @@ import java.util.Map;
 import java.util.UUID;
 
 /**
- * 管理端「用户与商家治理」Web 层（C3 块 2 用户块）—— 8 个端点，四组：
+ * 管理端「用户与商家治理」Web 层（C3 块 2 用户块）—— 9 个端点，四组：
  * <ol>
- *   <li><b>用户治理</b>：{@code /users} · {@code /user/ban} · {@code /user/unban}</li>
+ *   <li><b>用户治理</b>：{@code /users} · {@code /user/detail} · {@code /user/ban} · {@code /user/unban}</li>
  *   <li><b>商家审核</b>：{@code /applications} · {@code /application/audit}</li>
  *   <li><b>降级</b>：{@code /downgrade/schedule} · {@code /downgrade/cancel} · {@code /downgrade/relist}</li>
  * </ol>
@@ -223,6 +223,34 @@ public class AdminAccountsController {
         if (Boolean.TRUE.equals(result.get("success"))) {
             auditService.record(AuthSession.identify(request), AuditActions.MERCHANT_DOWNGRADE_APPLY,
                     "user", username, before, result);
+        }
+        return Result.of(result);
+    }
+
+    // ==================== 四、按次查看明文（用户治理列表仍脱敏） ====================
+
+    /**
+     * 单账号详情（**明文**）—— 用户治理列表的「查看明文」按钮。
+     *
+     * <p>⚠️ 与 {@link #users} 的分工是本条业务裁决的另一半（2026-10-18 手验后确定）：
+     * 列表继续给掩码 email（防止整屏明文被顺手截走），需要联系用户时由管理员**显式**点一次，
+     * 每次查看都写一条 {@code user.viewplaintext} 审计，回答「谁在什么时候看了谁」。
+     *
+     * <p>⚠️ 这是**读**动作，但因为它返回明文，仍按敏感操作留痕：{@code before=null}，
+     * {@code after} = 当前整行（含明文 email），{@code TargetType="user"}、{@code TargetId=username}。
+     *
+     * @return {@code {success:true,user:{…}}}；用户不存在 ⇒ {@code {success:false,msg:"用户不存在"}}，
+     *         **不写审计**（什么都没看到）。
+     */
+    @PostMapping("/user/detail")
+    public Result<Map<String, Object>> userDetail(
+            @RequestParam(value = "username", required = false) String username,
+            HttpServletRequest request
+    ) {
+        Map<String, Object> result = governanceService.userRow(username);
+        if (Boolean.TRUE.equals(result.get("success"))) {
+            auditService.record(AuthSession.identify(request), AuditActions.USER_VIEW_PLAINTEXT,
+                    "user", username, null, result.get("user"));
         }
         return Result.of(result);
     }

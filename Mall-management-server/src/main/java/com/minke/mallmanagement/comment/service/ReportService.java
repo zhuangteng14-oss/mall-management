@@ -1,5 +1,6 @@
 package com.minke.mallmanagement.comment.service;
 
+import com.minke.mallmanagement.shared.web.PageLimits;
 import com.minke.mallmanagement.admin.service.UserGovernanceService;
 import com.minke.mallmanagement.catalog.service.GoodsViolationService;
 import com.minke.mallmanagement.comment.dao.ReportDao;
@@ -88,8 +89,8 @@ public class ReportService {
     /** 自动封禁时写给被封者看的理由（落 {@code user.banReason}，见 {@code UserGovernanceService.ban}）。 */
     private static final String AUTO_BAN_REASON = "内容多次违规，累计 3 次警告，系统自动封禁";
 
-    public static final int DEFAULT_LIMIT = 100;
-    public static final int MAX_LIMIT = 500;
+    public static final int DEFAULT_LIMIT = PageLimits.DEFAULT_PAGE_SIZE;
+    public static final int MAX_LIMIT = PageLimits.MAX_PAGE_SIZE;
 
     /** 通知的 {@code TargetType} —— 与 {@code CommentService.NOTIFY_TARGET_COMMENT} 同值（各域各一份）。 */
     private static final String NOTIFY_TARGET_COMMENT = "comment";

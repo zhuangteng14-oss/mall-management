@@ -1,0 +1,107 @@
+块 7 · 2026-10-17 三项优化收笔报告
+=====================================
+
+提交：05de6bc  feat(block7): 防护拦截独立成级 + 回放倍速 + 日志统计与聚合解耦
+分支：feat/c3-admin-block7（未 push、未开 PR）
+环境：后端 8088（dev profile，PID 39524）+ 前端 8080（真后端真流，未开「模拟日常」）
+
+⚠️ 口径提醒：a3 / dev 两个 profile 都是 app.auth.enabled=false，本报告里的手验绿
+   只代表 dev profile；默认 profile 的身份鉴权未在本次改动中验证。
+
+
+一、防护拦截（PROTECT，紫色）独立成级
+------------------------------------
+代码
+- 后端 Severity 四档：INFO / PROTECT / WARN / ERROR
+  Mall-management-server/src/main/java/com/minke/mallmanagement/observe/service/EventBroadcaster.java:161
+- 身份鉴权拒绝 → PROTECT：EventBroadcaster.java:756
+- blocked / opened / half_open / shed → PROTECT；retry_failed 留在 WARN：
+  EventBroadcaster.java:830、:852
+- 前端严重度标签/配色/渲染序：src/config/labels/observe-labels.js
+  （SEVERITIES = info → protect → warn → error）
+- 紫色 token：src/assets/tokens.css 末尾（--protect / --protect-ground / --protect-deep）
+- 日志页顶部失败率/拦截率同格：src/views/admin/observe/EventLog.vue:42-53
+- 四色占比条（任一 >0 强制 min-width 4px）：EventLog.vue:1427
+- 回放指标页大字 fail / 小字 protect：src/views/admin/observe/MetricsPanel.vue:310
+
+计算口径
+- 业务失败率 fail = (warn + error) ÷ 原始事件数；protect 永不进分子：EventLog.vue:1422 附近
+- 防护拦截率 protect = protect ÷ 原始事件数，只展示、不参与健康度
+- 健康度仍只由 ERROR / 5xx / P99 决定（后端 MetricsSnapshotService.health 未改）
+
+压测（真后端 800 QPS × 25s，bannedUser 70% / sensitiveWord 30%，入站限流开启）
+- 原始事件 2,088：信息 1,295 / 防护 571 / 警告 222 / 错误 0
+- 业务失败率 10.6%（= 222/2088，不含 571 条防护）
+- 防护拦截率 27.3%（= 571/2088）
+- 顶部四色条：紫色段实测宽 22.16px、min-width 4px；红色段 0 条故宽 0
+- 左侧统计 = 右侧严重度分布（1,295 / 571 / 222 / 0 完全一致）
+- 指标页实时态：5xx 0.0%、4xx 83.8%，健康度仍为绿色「健康」，无告警原因
+- 指标页回放态：业务失败率 (fail) 11.8%，右侧紫字防护拦截率 (protect) 26.3%，
+  图表标题「业务失败率 vs 防护拦截率」，并写明「不计入失败率，也不参与健康度判定」
+
+证据
+- docs/agent/evidence/c3-block7/3a4e-stress-protect.txt
+- docs/agent/evidence/c3-block7/3a4e-stress-log-protect.png
+- docs/agent/evidence/c3-block7/3a4e-stress-metrics.png
+- docs/agent/evidence/c3-block7/3a4e-stress-metrics-replay.png
+- 后端单测：EventBroadcasterTest 13 + EventStreamServiceTest 10，共 23 passed
+  docs/agent/evidence/c3-block7/3a4e-protect-backend-tests.txt
+
+
+二、全链路回放倍速
+------------------
+代码
+- 默认 1x：src/api/replay-session.js:47
+- 档位 1x/2x/5x/10x：replay-session.js:49
+- 切档只改 replaySession.speed（重算 maxPerFrame、重置速率窗口），
+  不动 virtualMs / cursor / 已画行：replay-session.js:465 附近
+- 横幅按钮组：src/components/observe/ReplayBanner.vue:30（样式 :191）
+
+验证（真实台账回放）
+- 横幅四个按钮 1x | 2x | 5x | 10x，进入时默认高亮 1x
+- 点 5x：高亮切到 5x，时钟文字变「5× 时钟」，进度 101 → 518（未回零）
+- 点回 1x：高亮回 1x，进度 518 → 783（未回零）
+- 截图前先暂停并强制全页重绘，再从 DOM 读回「顶部总数 = 左栏合计」后才截，
+  避免此前出现过的 CDP 陈旧合成层假不一致
+
+证据
+- docs/agent/evidence/c3-block7/3a4e-replay-speed.txt
+- docs/agent/evidence/c3-block7/3a4e-replay-speed-5x.png
+- docs/agent/evidence/c3-block7/3a4e-replay-speed-1x.png
+
+
+三、日志页统计与聚合解耦 + 同类合并开关
+--------------------------------------
+代码
+- 新增原始台账 RAW（非响应式，上限 8192，只丢最旧）：EventLog.vue:844
+- 统计唯一数据源 rawWindow（范围内原始事件）：EventLog.vue:1386
+  左右统计、Top-N（对象/错误）、失败率、拦截率全部读它
+- 视图开关 aggEnabled：EventLog.vue:883；列表聚合只在显示层 streamRows 执行，
+  收帧阶段保存原始行，取消勾选可逐条还原（DOM 展示上限 200 行）
+- clearBucket 同步清空 RAW，避免回放/切源后残留旧统计
+
+验证（注入 541 条：信息 300 / 防护 200 / 警告 40 / 错误 1）
+- 聚合开：3 行（×159、×40 等），统计 541、失败率 7.6%、拦截率 37.0%
+- 聚合关：恢复 200 行原始事件，统计仍是 541 / 300 / 200 / 40 / 1，一个数都没变
+- 左侧「信息 300」与右侧「信息 300」同源同值；开关前后绝对不变
+
+证据
+- docs/agent/evidence/c3-block7/3a4e-stats-decouple.txt
+- docs/agent/evidence/c3-block7/3a4e-stats-agg-on.png
+- docs/agent/evidence/c3-block7/3a4e-stats-agg-off.png
+
+
+四、质量门
+----------
+- 前端 ESLint（改动 6 个文件）：exit 0，无告警（仅 Browserslist 数据陈旧提示）
+- 后端 ./mvnw -Dtest=EventBroadcasterTest,EventStreamServiceTest test：BUILD SUCCESS
+- 证据文件时间均晚于最后一次代码编辑
+- git add 仅列具体文件；git commit -F 传文件；提交后已抽查提交信息无重复段
+- 「模拟日常」数据源接口/开关未改（demo-stream.js 只补 protect 严重度映射，接口不变）
+
+
+五、探针入口（可重跑）
+----------------------
+- scripts/probes/c3b7-3a4e-stress-protect.mjs
+- scripts/probes/c3b7-3a4e-replay-speed.mjs
+- scripts/probes/c3b7-3a4e-stats-decouple.mjs

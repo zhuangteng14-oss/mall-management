@@ -1544,6 +1544,15 @@ public class ConcurrencyRunner {
         Ass a3 = ass("A-S3-3", "无任何响应 msg 以「数据库错误」开头", true);
         Ass a4 = ass("A-S3-4", "JDBC：每单 PayIf=1；SettlementDate IS NOT NULL", true);
 
+        // ⚠️ 入站限流是**全站共用一个、固定 1 秒刷新**的桶（200 条/窗口），S3 自己就有
+        // 10 条预建 + 10×20 条支付 = 210 条：全挤在一拍里时尾部订单会被 429 整批打回。
+        // CI run 39140904565 门禁 30/3 就是这种形状（P8 succ=1/msg=3；P9 succ=0/msg=0 且
+        // 库里仍未付款），历史 ci115/ci129 全绿只是恰好跨过了窗口边界。
+        // 这不是状态机缺陷：本机对业务端点做 260 条突发，实测 {200=200, 429=60}，
+        // 429 体为「请求过于频繁：入站限流每 1 秒放行 200 条」。
+        // 修法：预建与支付段各换一次窗；支付按 8 单一组（8×20=160 < 200）分段，
+        // 「每单 20 线程同栅栏」的断言语义不变，只是不与限流桶抢同一拍。
+        freshLimitWindow();
         // 预建：必须自建 —— 种子 6 单全是 (1,1,1) 终态，在它们身上「恰好 1 次成功」必不成立（F4）
         List<String> ids = new ArrayList<>();
         int preBuilt = 0;
@@ -1558,21 +1567,27 @@ public class ConcurrencyRunner {
             ids.add(id);
         }
 
+        freshLimitWindow();
         int totalSucc = 0;
         int badUnits = 0;
         int dbErr = 0;
         int stateBad = 0;
         StringBuilder per = new StringBuilder();
-        for (String id : ids) {
+        for (int i = 0; i < ids.size(); i++) {
+            String id = ids.get(i);
+            if (i > 0 && i % 8 == 0) {
+                freshLimitWindow();
+            }
             final Map<String, String> f = form("orderId", id);
-            List<Call> cs = burst(S3_T, i -> call("orderPayIfUp", send(HTTP, o.baseUrl + "/order/orderPayIfUp", f)));
+            List<Call> cs = burst(S3_T, k -> call("orderPayIfUp", send(HTTP, o.baseUrl + "/order/orderPayIfUp", f)));
             int s = countSuccess(cs);
             int m = countMsg(cs, "订单不存在或已付款");
             totalSucc += s;
             dbErr += countDbError(cs);
             if (s != 1 || m != S3_T - 1) {
                 badUnits++;
-                per.append(id).append("(succ=").append(s).append(",msg=").append(m).append(") ");
+                per.append(id).append("(succ=").append(s).append(",msg=").append(m)
+                        .append(",codes=").append(codeHist(cs)).append(") ");
             }
             int[] st = jdbcOrderState(o, id);
             if (st == null || st[0] != 1 || st[3] != 1) {
@@ -2701,14 +2716,15 @@ public class ConcurrencyRunner {
                   + "AND LOWER(table_name) IN ('order_state_transition','admin_audit','notification',"
                   + "'merchant_application','goods_audit','template','cart','order_shipping_track','order_item','stats_daily','goods_sku',"
                   + "'coupon','coupon_grant','subsidy_rule','subsidy_goods','seckill_invitation','seckill_application','seckill_activity','shop_follow',"
-                  + "'comment','comment_mention','comment_image','comment_like','report','sensitive_word','drill_record','observed_event')");
-            final int KNOWN_TABLES = 27;   // = 上面 IN 清单的长度（加表时**四处同改**，见上方注释块）
+                  + "'comment','comment_mention','comment_image','comment_like','report','sensitive_word','drill_record','observed_event',"
+                  + "'observed_event_dlq')");
+            final int KNOWN_TABLES = 28;   // = 上面 IN 清单的长度（加表时**四处同改**，见上方注释块）
             boolean p3 = tables == 11 + known && known == KNOWN_TABLES;
             pre.put("P3", (p3 ? "PASS" : "FAIL") + " 表数=" + tables + "；已知追加表 order_state_transition /"
                     + " admin_audit / notification / merchant_application /"
                     + " goods_audit / template / cart / order_shipping_track / order_item / stats_daily / goods_sku /"
                     + " coupon / coupon_grant / subsidy_rule / subsidy_goods / seckill_invitation / seckill_application / seckill_activity / shop_follow /"
-                    + " comment / comment_mention / comment_image / comment_like / report / sensitive_word / drill_record / observed_event 在 " + known + "/" + KNOWN_TABLES
+                    + " comment / comment_mention / comment_image / comment_like / report / sensitive_word / drill_record / observed_event / observed_event_dlq 在 " + known + "/" + KNOWN_TABLES
                     + " 张（期望表数 = 11 + " + KNOWN_TABLES + " = " + (11 + KNOWN_TABLES) + "）");
 
             // P4 种子计数：确认是刚导入过的干净实例，而非被上一轮污染过的库

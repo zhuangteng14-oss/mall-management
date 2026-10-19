@@ -566,7 +566,7 @@
         <label class="g-f g-f-narrow">
           <span>上限</span>
           <select v-model.number="is.limit" @change="loadImages">
-            <option v-for="n in [50, 100, 200, 500]" :key="n" :value="n">{{ n }}</option>
+            <option v-for="n in [20, 50, 100]" :key="n" :value="n">{{ n }}</option>
           </select>
         </label>
         <div class="g-f-actions">
@@ -668,7 +668,7 @@
         <label class="g-f g-f-narrow">
           <span>上限</span>
           <select v-model.number="rs.limit" @change="loadReports">
-            <option v-for="n in [50, 100, 200, 500]" :key="n" :value="n">{{ n }}</option>
+            <option v-for="n in [20, 50, 100]" :key="n" :value="n">{{ n }}</option>
           </select>
         </label>
         <div class="g-f-actions">
@@ -1689,7 +1689,7 @@ const sw = reactive({ rows: [], total: 0, loaded: false, adding: false, busyId: 
 async function loadWords() {
   sw.msg = null
   try {
-    const data = await sensitiveList({ limit: 500 })
+    const data = await sensitiveList({ limit: 100 })
     if (!data || !data.success) {
       say('bad', (data && data.msg) || '词表加载失败')
       return

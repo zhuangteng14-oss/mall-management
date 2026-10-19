@@ -20,9 +20,9 @@ import java.util.Map;
  * 合并的理由不在代码复用，在**「演练环境」这一件事的一体两面**：
  * 「清掉演练写出的行」与「把演练改过的种子值恢复」都是**一次演示结束后回到干净态**，
  * 拆成两个 service 会让「清理」按钮只做一半（删了订单、库存仍然是 0，下一轮还是跑不起来）。
- * 另一条合并理由是**保留期这两个数是同一份配置**：`3 天 / 30 天` 是「攻击数据留多久、
- * 日常数据留多久」这一件事的两面，裂开会让它们各有各的默认值。用户批文里那句
- * 「3 天攻击 / 30 天日常」正是**一条**口径。
+ * 另一条合并理由是**保留期这两个数是同一份配置**：`3 天 / 3 天` 是「攻击数据留多久、
+ * 日常数据留多久」这一件事的两面，裂开会让它们各有各的默认值。2026-10-19 用户裁定
+ * 「默认保留最近 3 天」⇒ 两档缺省都改成 3（旧值是 3 天攻击 / 30 天日常）。
  *
  * <h2>【⚠️ 本 service 不吞异常，与 {@code AuditService} 相反 —— 一个例外写明】</h2>
  * 审计是 fail-open（业务已成，不能让审计把它翻红）。本类是**破坏性动作的发起方**：
@@ -60,9 +60,38 @@ public class ObservedEventCleanupService {
     @Value("${mall.observe.cleanup.attack-retention-days:3}")
     private int attackRetentionDays;
 
-    /** 日常事件行（{@code BatchId IS NULL}）的保留期。 */
-    @Value("${mall.observe.cleanup.normal-retention-days:30}")
+    /**
+     * 日常事件行（{@code BatchId IS NULL}）的保留期。
+     * ⚠️ 2026-10-19 用户裁定：**默认保留最近 3 天**（旧缺省 30 天）—— 演示环境的事件台账
+     * 只服务于「最近几轮演练 / 最近几天排障」，30 天会让表在几次压测后就到百万行。
+     */
+    @Value("${mall.observe.cleanup.normal-retention-days:3}")
     private int normalRetentionDays;
+
+    /**
+     * 容量高水位（2026-10-19）。超过它在**每轮演练开始前 / 每次定时清理时**强制淘汰最老的行，
+     * 直到回到 {@link #targetWatermark} 以下 —— 用户批文：「牺牲历史，保全当下」。
+     * 30 万行是实测出来的安全线：当前单行 ≈ 780B（571.6MB / 729,885 行），30 万行约 230MB，
+     * 远小于 512MB buffer pool；再高就会开始把业务页挤出内存。
+     */
+    @Value("${mall.observe.cleanup.high-watermark:300000}")
+    private int highWatermark;
+
+    /** 熔断后的安全线（低于高水位，留 5 万行滞回，避免每轮都在 30 万附近反复触发）。 */
+    @Value("${mall.observe.cleanup.target-watermark:250000}")
+    private int targetWatermark;
+
+    /** 水位熔断 / 彻底清空的批大小（默认 5000，与 DAO 的保留期批大小一致）。 */
+    @Value("${mall.observe.cleanup.batch-size:5000}")
+    private int evictionBatchSize;
+
+    /** 批间间歇（毫秒）。 */
+    @Value("${mall.observe.cleanup.batch-pause-ms:100}")
+    private long evictionPauseMs;
+
+    /** UI / `/run` 响应里原样显示的熔断提示（用户批文逐字）。 */
+    public static final String EVICTION_WARNING =
+            "⚠️ 历史事件过多，系统已自动清理最旧数据以保障本次演练性能。";
 
     public ObservedEventCleanupService(ObservedEventCleanupDao cleanupDao, DrillTargetDao drillTargetDao) {
         this.cleanupDao = cleanupDao;
@@ -223,13 +252,146 @@ public class ObservedEventCleanupService {
     public int pruneExpiredEvents() {
         int n = cleanupDao.pruneObservedEvents(attackRetentionDays, normalRetentionDays);
         if (n > 0) {
-            log.info("事件台账保留期清理（OBSERVE-CLEANUP）：删 {} 行（攻击 {} 天 / 日常 {} 天）",
-                    n, attackRetentionDays, normalRetentionDays);
+            log.info("事件台账保留期清理（OBSERVE-CLEANUP）：删 {} 行（攻击 {} 天 / 日常 {} 天，"
+                            + "每批 {} 行 + 100ms 间歇）",
+                    n, attackRetentionDays, normalRetentionDays,
+                    ObservedEventCleanupDao.DELETE_BATCH_SIZE);
         } else {
             log.debug("事件台账保留期清理（OBSERVE-CLEANUP）：本轮无可删行（攻击 {} 天 / 日常 {} 天）",
                     attackRetentionDays, normalRetentionDays);
         }
         return n;
+    }
+
+    // ==================== ③ 容量水位熔断（2026-10-19 用户批文）====================
+
+    /**
+     * 容量水位熔断的结果（给 `/run` 响应 / job 日志用）。
+     *
+     * @param before    触发前的行数
+     * @param after     收口后的行数
+     * @param deleted   本次淘汰的行数（0 = 没触发）
+     * @param triggered 是否真的发生了淘汰
+     */
+    public record EvictionResult(long before, long after, long deleted, boolean triggered) {
+    }
+
+    /**
+     * **超过高水位就按时间淘汰最老的行**，直到回到安全线以下。返回这次淘汰的读数。
+     *
+     * <p>调用点有两处（用户批文）：① {@code POST /attack/run} 开始演练前；② 定时清理 job。
+     * 判据是「事件台账行数 > {@code high-watermark}」—— 与保留期（按龄）是**两个独立的闸**：
+     * 保留期管「太旧」，水位管「太多」。只靠保留期时，一场 500 并发演练能在几分钟内写进
+     * 十万行，3 天保留期根本来不及兜住。
+     *
+     * <p>⚠️ 淘汰顺序是 {@code ORDER BY Id}（≈ 写入时间），**不是**随机 / 按大小：
+     * 「牺牲历史，保全当下」要求先走最老的那些；且主键顺序删除不需要额外排序。
+     * <p>⚠️ 每批 {@code batch-size}（默认 5000）行、批间 {@code batch-pause-ms}（默认 100ms）：
+     * 不让一次熔断变成另一个大事务。每批之后**重读真实行数**再判一次 —— 不用「before 减删除量」
+     * 估算：熔断发生在演练开始前，但上一轮的消费者可能仍在落库，估算会把并发写入漏掉，
+     * 从而在「以为到安全线」时其实还在线上。{@code COUNT(*)} 只在**超水位**这条罕见路径上跑，
+     * 几十万行的主键计数代价可接受。
+     *
+     * @return 淘汰读数；未超水位 ⇒ {@code deleted=0, triggered=false}
+     */
+    public EvictionResult enforceHighWatermark() {
+        long before = cleanupDao.countObservedEvents();
+        if (before <= highWatermark) {
+            return new EvictionResult(before, before, 0, false);
+        }
+
+        long deleted = 0;
+        while (true) {
+            long remaining = cleanupDao.countObservedEvents();
+            if (remaining <= targetWatermark) {
+                break;
+            }
+            int n = cleanupDao.deleteOldestBatch(evictionBatchSize);
+            if (n <= 0) {
+                break;
+            }
+            deleted += n;
+            if (!pauseBetweenEvictions()) {
+                break;
+            }
+        }
+        long after = cleanupDao.countObservedEvents();
+        boolean triggered = deleted > 0;
+        if (triggered) {
+            log.warn("事件台账水位熔断（OBSERVE-CLEANUP）：{} 行 > 高水位 {}，"
+                            + "已按时间淘汰最旧 {} 行 ⇒ 现 {} 行（安全线 {}）。{}",
+                    before, highWatermark, deleted, after, targetWatermark, EVICTION_WARNING);
+        }
+        return new EvictionResult(before, after, deleted, triggered);
+    }
+
+    /**
+     * 当前存储水位（UI 展示用）：行数 / 高水位 / 安全线 / 保留天数。
+     * ⚠️ 只读，不删任何行；调用点应把它当作「快照」，不要拿它做计数对账。
+     */
+    public Map<String, Object> storageStats() {
+        long count = cleanupDao.countObservedEvents();
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("success", true);
+        payload.put("count", count);
+        payload.put("highWatermark", highWatermark);
+        payload.put("targetWatermark", targetWatermark);
+        payload.put("retentionDays", attackRetentionDays);
+        payload.put("batchSize", evictionBatchSize);
+        payload.put("aboveHighWatermark", count > highWatermark);
+        return payload;
+    }
+
+    // ==================== ④ 彻底清空事件台账（2026-10-19 用户批文）====================
+
+    /**
+     * 清空**整个** {@code observed_event}（不只演练批次），返回清前 / 清后读数。
+     *
+     * <p>它与「清理并恢复环境」的区别：后者按**资源域判据**（批次号 / 种子 SKU / 攻击对象）
+     * 删演练污染，日常事件行不动；本方法按「**整张表**」删，是用户点名的
+     * 【彻底清空可观测历史数据】。⚠️ 破坏性更强，端点层必须两段式确认 + 写审计。
+     *
+     * <p>同样分批（{@code ORDER BY Id LIMIT batch-size} + 批间间歇），绝不用一条无界 DELETE。
+     */
+    public Map<String, Object> purgeAllEvents() {
+        long before = cleanupDao.countObservedEvents();
+        long deleted = 0;
+        while (true) {
+            int n = cleanupDao.deleteOldestBatch(evictionBatchSize);
+            if (n <= 0) {
+                break;
+            }
+            deleted += n;
+            if (n < evictionBatchSize || !pauseBetweenEvictions()) {
+                break;
+            }
+        }
+        long after = cleanupDao.countObservedEvents();
+
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("success", true);
+        payload.put("before", before);
+        payload.put("deleted", deleted);
+        payload.put("total", deleted);
+        payload.put("after", after);
+        payload.put("summary", deleted == 0
+                ? "事件台账本来就是空的（0 行）"
+                : "已彻底清空事件台账：共删 " + deleted + " 行（清前 " + before
+                        + " 行 / 清后 " + after + " 行）");
+        log.info("事件台账彻底清空（OBSERVE-CLEANUP）：清前 {} 行，删 {} 行，清后 {} 行",
+                before, deleted, after);
+        return payload;
+    }
+
+    /** 批间间歇；中断 ⇒ 返回 {@code false} 并还原中断标志（同 DAO 的处置）。 */
+    private boolean pauseBetweenEvictions() {
+        try {
+            Thread.sleep(evictionPauseMs);
+            return true;
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return false;
+        }
     }
 
     /** 事件台账当前行数（只读；给手验 / 探针做「清前清后」的读数）。 */

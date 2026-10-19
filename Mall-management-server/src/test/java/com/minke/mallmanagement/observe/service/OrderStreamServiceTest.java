@@ -247,16 +247,16 @@ class OrderStreamServiceTest {
     // ================= 全局明细服务端分页（2026-10-17 · 用户 P0）=================
 
     @Test
-    @DisplayName("detail：total 与行集走**同一个 status 谓词**；limit 夹到 200、offset 负数归 0")
+    @DisplayName("detail：total 与行集走**同一个 status 谓词**；limit 夹到 100（D3-3 统一上限）、offset 负数归 0")
     void detailPagesOnTheServerWithClampedParams() {
         when(orderDao.countOrderPage(false, "waitShip", false)).thenReturn(2271);
-        when(orderDao.selectOrderPage(false, "waitShip", false, 40, 200))
+        when(orderDao.selectOrderPage(false, "waitShip", false, 40, 100))
                 .thenReturn(List.of(row("O-1", 1, 0, 0, null)));
 
         Map<String, Object> out = service.detail(false, "waitShip", false, 40, 9999);
 
         assertThat(out).containsEntry("status", "waitShip").containsEntry("offset", 40)
-                .containsEntry("limit", 200).containsEntry("total", 2271);
+                .containsEntry("limit", 100).containsEntry("total", 2271);
         @SuppressWarnings("unchecked")
         List<Map<String, Object>> rows = (List<Map<String, Object>>) out.get("rows");
         assertThat(rows).hasSize(1);

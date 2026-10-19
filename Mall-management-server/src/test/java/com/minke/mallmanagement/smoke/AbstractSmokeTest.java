@@ -27,6 +27,7 @@ import com.minke.mallmanagement.observe.metrics.SensitiveMetrics;
 import com.minke.mallmanagement.observe.metrics.IdentityMetrics;
 import com.minke.mallmanagement.observe.metrics.ProtectionMetrics;
 import com.minke.mallmanagement.protect.ProtectionGate;
+import com.minke.mallmanagement.observe.service.SseConnectionRegistry;
 import com.minke.mallmanagement.observe.service.SseStreamWriter;
 import com.minke.mallmanagement.observe.service.EventBroadcaster;
 import com.minke.mallmanagement.observe.service.MetricsSnapshotService;
@@ -43,6 +44,7 @@ import com.minke.mallmanagement.observe.dao.DrillTargetDao;
 import com.minke.mallmanagement.observe.dao.DrillRecordDao;
 import com.minke.mallmanagement.observe.dao.ObservedEventCleanupDao;
 import com.minke.mallmanagement.observe.dao.ObservedEventDao;
+import com.minke.mallmanagement.observe.dao.ObservedEventDlqDao;
 import com.minke.mallmanagement.shared.cache.L2HealthProbe;
 import com.minke.mallmanagement.shared.cache.MallCacheMetrics;
 import com.minke.mallmanagement.shared.lock.MallLockMetrics;
@@ -360,7 +362,10 @@ import static org.mockito.Mockito.when;
         // ⚠️ 三个产帧服务与 `SseStreamWriter` 都收 `@Value("${mall.observe.sse.*}")` ——
         //    两个属性都带默认值（1000 / 0），但 `application-smoke.properties` 把 **max-ticks 钉成 1**
         //    （理由见那个文件；否则 `ObserveStreamSmokeTest` 会对着一条永不结束的流等下去）。
-        SseStreamWriter.class, EventBroadcaster.class,
+        // D3-6（2026-10-18）：三个流 Controller 多吃了 `SseConnectionRegistry`（SSE 名额表）——
+        // **第二十五次同一处地雷**（形状 = 老 Controller 多吃 bean）。它吃 `MeterRegistry`，
+        // 本清单里已有 `SimpleMeterRegistry` ⇒ 只补它一个类。
+        SseStreamWriter.class, EventBroadcaster.class, SseConnectionRegistry.class,
         MetricsSnapshotService.class, OrderStreamService.class, EventStreamService.class,
         // 块 7 收尾：`MetricsHistoryController`（3a.4 首屏历史）吃 `MetricsHistoryService`；
         // 它是 `@WebMvcTest` 自动扫进来的 @Controller，本清单不登记 ⇒ 切片上下文启动失败。
@@ -423,6 +428,11 @@ import static org.mockito.Mockito.when;
         // ⚠️ `ObservedEventDao` 是**本笔第一次**进这个清单（8c 那笔只登记了它的兄弟
         //    `ObservedEventCleanupDao` —— 写类一次、读类一次，两者不是同一个 bean）。
         ObservedEventDao.class, ReplayService.class,
+        // D3-2（2026-10-18）：新 Controller `DlqController` 吃 `ObservedEventDlqDao`。
+        // **第二十二次同一处地雷**（@WebMvcTest 无参会加载全部 @Controller ⇒ 不导入就整片起不来）。
+        // `ObservedEventDlqDao` 只吃 `JdbcTemplate` ⇒ 落回下面的 @MockitoBean，SQL 仍不出切片。
+        // `MetricsSnapshotService.setDlqDao` 是 `@Autowired(required=false)`，不导入也只是 persisted=null。
+        ObservedEventDlqDao.class,
         // C3 块 7 · D 段 commit 2〈D 段后端防护〉（2026-10-15）：**零新 Controller**，但有两个
         // **既有** bean 的构造器各多了一个形参 ⇒ **第二十一次同一处地雷**，形状与〈5 套新事件环〉
         // 那笔逐字相同（「既有 bean 多吃一个 bean」，最隐蔽的那一种）。

@@ -1,7 +1,7 @@
 // src/api/observe.js —— 可观测面板的客户端（块 7 commit 3 的 SSE + commit 4 的三个普通 POST
 // + commit 8b 的清场 + commit 10c 的暂停与三条流的自动重连）。
 //
-// 十二条端点（**全在** `endpoints.js` 里，本文件一个后端路径字面量都不出现 —— 那条判据可 grep 自动化）：
+// 本文件封装的端点（**全在** `endpoints.js` 里，本文件一个后端路径字面量都不出现 —— 那条判据可 grep 自动化）：
 //   metrics → 指标面板（KPI / 锁 / 防护 / 库存水位）          ┐
 //   orders  → 状态流转页（五态计数 / 最近订单 / 本拍流转）      ├ 三条 **SSE 流**（commit 3；
 //   events  → 实时日志页（8 类归一化事件流）                  ┘ commit 10c 起**自带自动重连**）
@@ -36,6 +36,45 @@
 
 import { http, streamPost } from './http'
 import { endpoints } from './endpoints'
+
+// ==================== 全局 SSE 连接预算（2026-10-19）====================
+//
+// 为什么需要：浏览器对同一 origin 的 HTTP/1.1 并发连接上限是 6。攻击页的实时预览
+// 一次就占 3 条 SSE；而指标 / 日志 / 状态三页被 `AdminShell.vue` 的 `<keep-alive>`
+// 缓存，路由切走**不卸载** ⇒ 它们的流若不显式关，会和攻击页的 3 条叠加到 6 条，
+// 普通 POST 只能排队到 `http.js` 的 10 秒超时（2026-10-19 现场）。
+//
+// 两道闸：① 三页在 `onDeactivated` 关流（正常路径，见各页）；② 这里再兜一层硬预算 ——
+// 整个页面最多同时存在 4 条逻辑 SSE，第 5 条进来时回收最老的一条，给普通请求留 2 条槽位。
+//
+// ⚠️ 预算挂在 `window` 上而不是模块变量：dev 的 HMR 会重新求值本模块，模块变量会丢；
+//    `window.__sse_instances` 跨热更新仍在，旧实例也继续受同一预算约束（探针读它）。
+const SSE_BUDGET = 4
+const SSE_REGISTRY = typeof window !== 'undefined'
+  ? (window.__sse_instances || (window.__sse_instances = []))
+  : []
+
+function sseRegister(entry) {
+  SSE_REGISTRY.push(entry)
+  while (SSE_REGISTRY.length > SSE_BUDGET) {
+    // 「最老的空闲连接」：优先回收超过 2 秒没收到帧的（按创建序取第一个）；
+    // 全都在收帧时退化为回收最老的（仍按创建序）。空闲 = 不占实时数据通道。
+    const now = Date.now()
+    let idx = SSE_REGISTRY.findIndex((e) => now - (e.lastFrameAt || 0) >= 2000)
+    if (idx < 0) idx = 0
+    const [victim] = SSE_REGISTRY.splice(idx, 1)
+    try { victim.evict() } catch (e) { /* 回收失败不阻断新流 */ }
+  }
+  return entry
+}
+
+function sseUnregister(entry) {
+  const i = SSE_REGISTRY.indexOf(entry)
+  if (i >= 0) SSE_REGISTRY.splice(i, 1)
+}
+
+/** 当前活跃的逻辑 SSE 数（探针用；页面代码不要依赖）。 */
+export function activeSseCount() { return SSE_REGISTRY.length }
 
 /** 指标面板流（1 秒 1 帧）。⚠️ 块 7 · commit 10c 起：**断了会自己接回来**（见 `openResilientStream`）。 */
 export function openMetricsStream(handlers) {
@@ -107,37 +146,88 @@ export function openResilientStream(path, { onOpen, onFrame, onLost } = {}) {
   let attempt = 0
   let timer = null
   let current = null
+  /** 页面被隐藏时暂停（见本函数头注释「连接预算」一节）。 */
+  let paused = false
+  /** 预算表里的这一条（登记在 start() 之前，帧到达时更新它的空闲时刻）。 */
+  let entry = null
 
   function start() {
+    if (closed || paused) return
     current = openStream(path, {
       onOpen() {
         attempt = 0
-        if (!closed) onOpen && onOpen()
+        if (!closed && !paused) onOpen && onOpen()
       },
       onFrame(f) {
-        if (!closed) onFrame && onFrame(f)
+        if (entry) entry.lastFrameAt = Date.now()
+        // 探针读数（2026-10-19）：每条流的累计帧数，用来证明「切回来数据真的在动」。
+        if (typeof window !== 'undefined') {
+          window.__sse_frames = window.__sse_frames || {}
+          window.__sse_frames[path] = (window.__sse_frames[path] || 0) + 1
+        }
+        if (!closed && !paused) onFrame && onFrame(f)
       },
       onEnd(err) {
         current = null
         // ⚠️ 自己 close() 引起的那次收尾不报：调用方已经在卸载路径上了（与 `openStream` 同口径）。
-        if (closed) return
+        //    暂停时的 close() 同理：页面没开，不该把「省连接」显示成「重连中」。
+        if (closed || paused) return
         // ⚠️ 这里**不判 err**：正常收尾与真出错走同一条路（理由见本节头注释）。
         const delay = RETRY_BACKOFF_MS[Math.min(attempt, RETRY_BACKOFF_MS.length - 1)]
         attempt += 1
         onLost && onLost({ err: err || null, attempt, nextRetryInMs: delay })
         timer = setTimeout(() => {
           timer = null
-          if (!closed) start()
+          if (!closed && !paused) start()
         }, delay)
       },
     })
   }
 
-  start()
+  // ── 连接预算：页面隐藏 ⇒ 停流，重新可见 ⇒ 立刻接回 ────────────────────────
+  //
+  // ⚠️ 这不是性能优化，是**正确性**：浏览器对同一个 origin 的 HTTP/1.1 连接数上限是 6，
+  //   而本仓的观察页每页各占一条 SSE（攻击页的实时预览占 3 条）。用户压测时习惯同时开
+  //   日志/指标/状态/攻击四个标签页 —— 3 + 1 + 1 + 1 = 6 条常驻流会把连接池占满，
+  //   此后**任何**普通请求（`/attack/scenarios`、`/records`）都拿不到连接，只能等 10 秒
+  //   被 `http.js` 的超时 abort —— 页面报的「场景清单加载失败：请求超时（10000ms）」就是它。
+  //   （2026-10-18 500 并发后的现场症状与这一形态吻合：后端 `/scenarios` 实测 1–20ms，
+  //    前端却稳定等满 10 秒；单页探针无法复现四开标签页，故此处按机制修复并单独验证释放行为。）
+  //
+  //   让**隐藏的标签页**把流让出来：同一时刻最多只有一个可见页面在占连接，普通请求永远
+  //   至少剩 3 条槽位。隐藏期间数据不累积 —— 重新可见时流会重连，首帧本身就是快照。
+  function pause() {
+    if (closed || paused) return
+    paused = true
+    if (timer) {
+      clearTimeout(timer)
+      timer = null
+    }
+    if (current) {
+      current.close()
+      current = null
+    }
+  }
 
-  return {
+  function resume() {
+    if (closed || !paused) return
+    paused = false
+    attempt = 0
+    start()
+  }
+
+  const onVisibilityChange = () => {
+    if (document.visibilityState === 'hidden') pause()
+    else resume()
+  }
+  document.addEventListener('visibilitychange', onVisibilityChange)
+  // 挂载那一刻页面已经不可见（后台标签页里预渲染/恢复）⇒ 不要先占一条再等事件。
+  if (document.visibilityState === 'hidden') paused = true
+
+  const handle = {
     close() {
       closed = true
+      document.removeEventListener('visibilitychange', onVisibilityChange)
       if (timer) {
         clearTimeout(timer)
         timer = null
@@ -148,6 +238,32 @@ export function openResilientStream(path, { onOpen, onFrame, onLost } = {}) {
       }
     },
   }
+
+  // 预算登记：一条**逻辑流**只占一个名额（重连不重复计数）。
+  // 被回收时先 `close()`（停掉重连），再把 `evicted` 报给页面 —— 页面据此把句柄置空，
+  // 下次 `onActivated` 才有机会重建（见三页的 KeepAlive 生命周期）。
+  entry = sseRegister({
+    path,
+    lastFrameAt: Date.now(),
+    close: handle.close,
+    evict() {
+      if (closed) return
+      handle.close()
+      onLost && onLost({
+        err: new Error(`SSE 连接预算已满（最多 ${SSE_BUDGET} 条），本流被回收`),
+        attempt: 0,
+        nextRetryInMs: 0,
+        evicted: true,
+      })
+    },
+  })
+  const closeHandle = handle.close
+  handle.close = () => {
+    closeHandle()
+    sseUnregister(entry)
+  }
+  start()
+  return handle
 }
 
 /**
@@ -173,6 +289,18 @@ export function openResilientStream(path, { onOpen, onFrame, onLost } = {}) {
 export function openStream(path, { onOpen, onFrame, onEnd } = {}) {
   let closed = false
   let reader = null
+  // 真实连接计数（探针用）：一条已建立、尚未结束的 SSE = 浏览器里的一条同源连接。
+  let counted = false
+  const connOpened = () => {
+    if (counted) return
+    counted = true
+    if (typeof window !== 'undefined') window.__sse_connections = (window.__sse_connections || 0) + 1
+  }
+  const connClosed = () => {
+    if (!counted) return
+    counted = false
+    if (typeof window !== 'undefined') window.__sse_connections = Math.max(0, (window.__sse_connections || 1) - 1)
+  }
 
   const done = (async () => {
     let res
@@ -192,9 +320,18 @@ export function openStream(path, { onOpen, onFrame, onEnd } = {}) {
     }
 
     reader = res.body.getReader()
+    // ⚠️ 连接建立期间调用方已经 close()（页面卸载 / 切到后台暂停）：此刻 `close()` 拿到的
+    //    `reader` 还是 null，取消不到这条请求。等响应头最终回来时这里必须补一次 cancel，
+    //    否则这条流会带着 `closed=true` 一直读到服务端关连接 —— 连接槽位被一条「已关闭」
+    //    的流占着，正是普通请求拿不到连接的那类事故。
+    if (closed) {
+      Promise.resolve(reader.cancel()).catch(() => {})
+      return
+    }
     const decoder = new TextDecoder('utf-8')
     let buffer = ''
-    if (!closed) onOpen && onOpen()
+    connOpened()
+    onOpen && onOpen()
 
     try {
       for (;;) {
@@ -218,15 +355,18 @@ export function openStream(path, { onOpen, onFrame, onEnd } = {}) {
     } catch (e) {
       // 读失败（网络断 / 服务端异常关闭）。⚠️ 调用方自己 close() 时也会走到这里
       //（cancel 会让 await read() 抛），故用 closed 区分「谁结束的」。
+      connClosed()
       if (!closed) onEnd && onEnd(e)
       return
     }
+    connClosed()
     if (!closed) onEnd && onEnd(null)
   })()
 
   return {
     close() {
       closed = true
+      connClosed()
       if (reader) {
         // Promise 形态的 cancel 失败（已关闭）不必上报：调用方已经在卸载路径上了。
         Promise.resolve(reader.cancel()).catch(() => {})
@@ -300,6 +440,15 @@ async function postJson(path, body, opts) {
  * ⚠️ 演练里还有一段 `redisDown` 是**另算**的 5 秒（不在 `durationSeconds` 里），故余量取 60 秒。
  */
 const RUN_GRACE_MS = 60000
+
+/**
+ * 清理 / 彻底清空的长超时（毫秒）。
+ * ⚠️ 2026-10-19 起这两条后端都改成**分批删除**（每批 5000 行 + 100ms 间歇）：
+ *    一行大 DELETE 没了，但总时长反而变长（70 万行 ≈ 140 批 ≈ 删除本身 + 14 秒间歇）。
+ *    默认 10 秒会在「正在删」的时候把前端 abort 掉 —— 后端照删完，页面却报超时。
+ *    180 秒按「30 万行 / 每批 5000」的 60 批留足余量；更大的积压会先被水位熔断压下来。
+ */
+const CLEANUP_GRACE_MS = 180000
 
 /** 后端缺省的持续秒数（与 `AttackEngine.DEFAULT_DURATION_SECONDS` 一致，用于算超时）。 */
 const DEFAULT_DURATION_SECONDS = 60
@@ -436,7 +585,7 @@ export function replay(batchId, limit) {
  * 演练记录（时间倒序）。
  *
  * @param {object} [p]
- * @param {number} [p.limit]  每页条数（缺省 20、上限 200）
+ * @param {number} [p.limit]  每页条数（缺省 20、上限 100）
  * @param {number} [p.offset] 偏移（负数归 0）
  * @returns {Promise<{success:boolean, list:Array, total:number, limit:number, offset:number}>}
  *          每行的 `Result` / `Scenario` 已是**对象**（后端拆过字段）；解析失败的那行
@@ -475,7 +624,8 @@ export function attackRecords(p) {
  */
 export function cleanupAttack() {
   // body 传空串：本仓 POST 一律带 urlencoded 头（同 `attackScenarios()`），后端不读 body。
-  return postJson(endpoints.observe.attackCleanup, '')
+  // ⚠️ 2026-10-19：必须给长超时 —— 事件台账那一段已改成分批删，默认 10s 不够（见 CLEANUP_GRACE_MS）。
+  return postJson(endpoints.observe.attackCleanup, '', { timeout: CLEANUP_GRACE_MS })
 }
 
 // ==================== 复位演练环境（块 7 · 2026-10-18）====================
@@ -568,4 +718,92 @@ export function orderDetail({ healthy = false, status = '', timeout = false, off
     offset,
     limit,
   }))
+}
+
+// ==================== 死信详情抽屉（2026-10-18 · D3 手验补全）====================
+//
+// ⚠️ 与 `metrics` 流里的 `dlq.persisted` 分工：那个数是**总量**，这里给**具体行**
+//    （时间 / TraceId / 失败阶段 / 异常类 / ErrorText / RawBody）。没有它，页面只能
+//    说「丢了 N 条」，答不出「哪一批、卡在哪、最后一次异常是什么」。
+// ⚠️ 一次性 JSON、无「拍」概念 ⇒ 走 `http.post`，别套 `openStream`。空表也是 200 + `list:[]`。
+
+/**
+ * 最近死信（按落库时刻倒序）。
+ *
+ * @param {{limit?:number, offset?:number}} [o]
+ * @returns {Promise<{success:boolean, list:Array, total:number, limit:number, offset:number}>}
+ *          `total` 是**全表**条数；`list` 里 `OccurredAt` 可能为 NULL（非法 JSON 的原始消息
+ *          没有事件发生时刻），页面回落到 `CreatedAt` 并标注。
+ */
+export function dlqList({ limit = 100, offset = 0 } = {}) {
+  return postJson(endpoints.observe.dlqList, q({ limit, offset }))
+}
+
+// ==================== 演练开关共享配置（2026-10-18 · 修「关掉 mqDown 横幅不消失」）====
+//
+// ⚠️ 这组开关**不是**攻击页的本地状态：后端 `AttackSwitchConfig` 是一份进程内共享配置，
+//    指标页健康度读的 `mall.observe.mq.up` 也由它（+ broker 实探）决定。此前页面只改本地
+//    `Set`，所以「关掉 mqDown」不会让后端恢复发布侧，横幅自然一直挂着。
+// ⚠️ 写入语义：`null` / 空白 = 不动那一组；`[]` = 把那一组关光（有意义，不是「没给」）。
+//    故 `updateAttackConfig` 只在调用方**明确给了数组**时才序列化发送。
+
+/**
+ * 读共享配置（GET，后端带 `Cache-Control: no-store`）。
+ *
+ * @returns {Promise<{Protections:string[], Injections:string[], IsDefault:boolean,
+ *          Version:number, Catalog:object}>}
+ *          ⚠️ 本端点**没有** `success` 键（后端 `Result.of` 只搬运、不追加）；写入失败是
+ *          HTTP 400 + `{success:false,msg}`，读取本身失败看网络异常。
+ */
+export function readAttackConfig() {
+  return http.get(endpoints.observe.attackConfig).then((res) => res.json())
+}
+
+/**
+ * 写共享配置（POST）。
+ *
+ * @param {{protections?:string[], injections?:string[]}} [o]
+ *        传了就**整组替换**（`[]` = 全关）；不传 = 后端保持原值。
+ *        ⚠️ 两个值都必须是 JSON 数组串（后端按 `@RequestParam` + JSON 解），别传逗号串。
+ * @returns {Promise<object>} 写入后的快照，形状与 {@link readAttackConfig} 逐字相同。
+ */
+export function updateAttackConfig({ protections, injections } = {}) {
+  return postJson(endpoints.observe.attackConfig, q({
+    protections: Array.isArray(protections) ? JSON.stringify(protections) : undefined,
+    injections: Array.isArray(injections) ? JSON.stringify(injections) : undefined,
+  }))
+}
+
+// ==================== 事件台账存储水位 / 彻底清空（2026-10-19）====================
+//
+// ⚠️ 这一组与上面的清场是**两件不同的事**：
+//    · `cleanupAttack` 按**资源域判据**删（批次号 / 种子 SKU / 攻击对象），日常事件行不动；
+//    · `purgeAttackEvents` 按**整张表**删 —— 用户点名的【彻底清空可观测历史数据】。
+// ⚠️ 水位熔断（超过 30 万行自动淘汰最老数据）由**后端**在 `/run` 与定时 job 里执行；
+//    本层负责的只是「把当前水位读给页面看」+ 提供那枚手动清空按钮。
+
+/**
+ * 当前事件台账水位（只读）。
+ *
+ * @returns {Promise<{success:boolean, count:number, highWatermark:number,
+ *          targetWatermark:number, retentionDays:number, batchSize:number,
+ *          aboveHighWatermark:boolean}>}
+ *          `count` 是 `observed_event` 当前行数；`highWatermark` 是熔断线（缺省 30 万）。
+ *          ⚠️ 它是**快照**：演练正在跑时行数每秒都在涨，不要拿它做对账。
+ */
+export function attackStorage() {
+  // body 传空串：同本域其余只读 POST（`attackScenarios()` / `attackStatus()`）。
+  return postJson(endpoints.observe.attackStorage, '')
+}
+
+/**
+ * **彻底清空**可观测事件台账（无入参、一次删空整张 `observed_event`）。
+ *
+ * @returns {Promise<{success:boolean, before:number, deleted:number, total:number,
+ *          after:number, summary:string}>}
+ *          `summary` 是后端写好的中文一句话（**直接显示**）。
+ *          ⚠️ 破坏性：调用点必须两段式确认；长超时（分批删，见 `CLEANUP_GRACE_MS`）。
+ */
+export function purgeAttackEvents() {
+  return postJson(endpoints.observe.attackPurge, '', { timeout: CLEANUP_GRACE_MS })
 }

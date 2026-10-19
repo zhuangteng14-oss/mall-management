@@ -263,7 +263,7 @@ export function myOrders(account) {
  * @param {'list'|'approve'|'reject'} [p.action] 省略 = `list`。
  * @param {string|number} [p.id]  单张图 Id（`approve` / `reject` 必填）。
  * @param {string} [p.status]     `list` 的筛子：`pending`（默认）/ `approved` / `rejected`。
- * @param {number} [p.limit] / @param {number} [p.offset] 分页（默认 100 / 0，上限 500）。
+ * @param {number} [p.limit] / @param {number} [p.offset] 分页（默认 100 / 0，上限 100）。
  * @returns {Promise<{success:boolean, list?:Array, total?:number, Id?:number, Status?:string,
  *                    fileDeleted?:boolean, msg?:string}>}
  *          ⚠️ `list` 项里**带 `ImageUrl`（即便 `pending`）** —— 那是**管理端**要看着图判，

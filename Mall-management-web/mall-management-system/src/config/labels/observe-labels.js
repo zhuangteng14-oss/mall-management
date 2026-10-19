@@ -27,6 +27,19 @@
 export const KINDS = ['cache', 'lock', 'order', 'stock', 'audit', 'notify', 'sensitive', 'identity', 'protection']
 
 /**
+ * 设施 3 类（A5，2026-10-18）：慢 SQL / MQ / 调度。
+ *
+ * ⚠️ 它们与 `KINDS` **分列**而不是并进同一条数组：`KINDS` 是「九个业务源环」的序
+ * （后端 `poll()` 的并入顺序），设施三类**没有源环**、由后端直接写进合并环
+ * （`EventBroadcaster.emitSlowSql/emitMq/emitScheduler`）⇒ 页面上要分组画。
+ * 但 `KIND_LABEL` / `KIND_COLOR` / `kindLabel()` 等访问器对两者一视同仁 ——
+ * 「分组」是版面，不是协议。
+ *
+ * 声明序与后端 `EventBroadcaster.Kind` 末尾三项逐字对齐：`slowSql → mq → scheduler`。
+ */
+export const FACILITY_KINDS = ['slowSql', 'mq', 'scheduler']
+
+/**
  * tag → 中文名。**取值逐字抄自后端** `EventBroadcaster.Kind` 的 `label` 字段
  * （后端那两列是「页面图例上的中文名」的**唯一出处**，前端这份是它的镜像）。
  *
@@ -44,6 +57,10 @@ export const KIND_LABEL = {
   sensitive: '敏感词',
   identity: '身份',
   protection: '防护',
+  // 设施 3 类（A5）：名字逐字来自后端 `Kind` 的 label。
+  slowSql: '慢 SQL',
+  mq: 'MQ',
+  scheduler: '调度',
 }
 
 /**
@@ -71,6 +88,12 @@ export const KIND_COLOR = {
   sensitive: 'var(--c7)',
   identity: 'var(--c8)',
   protection: 'var(--protect)',
+  // 设施 3 类（A5）：沿用图表色板里尚未被事件类占用的三档。
+  // ⚠️ 设施组与业务组在版面上分开，颜色重复不会指向同一行；但不要再把这几个色
+  // 借给别的类，否则「同色 = 同一环」的读法会失效。
+  slowSql: 'var(--c10)',
+  mq: 'var(--c6)',
+  scheduler: 'var(--c8)',
 }
 
 /**
@@ -187,6 +210,10 @@ export const OBJECT_FIELD_LABEL = {
   // ⚠️ 写「防护开关」而不是「对象」：这一列在防护环里装的是**哪道闸动了**（rateLimit / circuitBreak /
   //    poolIsolation），不是「谁被拦了」—— 后者在防护环里根本不存在（事件不带业务键）。
   protection: '防护开关',
+  // 设施 3 类（A5）：慢 SQL 的对象是数据源，MQ 是连接，调度是被跳过的任务。
+  slowSql: '数据源',
+  mq: 'MQ 连接',
+  scheduler: '任务',
 }
 
 /** 认不出 ⇒ 用最中性的那个词（同各表的兜底口径）。 */
@@ -235,6 +262,18 @@ export const FIELD_LABEL = {
   protection: '防护',
   scope: '范围',
   extra: '附加信息',
+  // 设施 3 类（A5）：这三组键都是**真帧**里已有的（emitSlowSql / emitMq / emitScheduler）。
+  elapsedMs: '耗时（毫秒）',
+  thresholdMs: '阈值（毫秒）',
+  dataSource: '数据源',
+  queryCount: '语句条数',
+  sql: '语句',
+  injected: '演练注入',
+  job: '任务',
+  paused: '已停摆',
+  up: '可用',
+  cause: '原因',
+  injection: '注入',
 }
 
 /**
@@ -429,38 +468,40 @@ export const PROTECTION_NOT_WIRED_TIP = {
 }
 
 /**
- * 攻击演练的**三个故障注入开关** key → 中文名 + 声明序（commit 10c 起头）。
+ * 攻击演练的**四个故障注入开关** key → 中文名 + 声明序（commit 10c 起头，D3 扩到 4 枚）。
  *
  * ⚠️ 【key 与顺序对齐后端】`AttackEngine.java` 的
- *    `INJECTION_KEYS = List.of("redisDown","mqDown","dbSlow")` 是唯一出处。
+ *    `INJECTION_KEYS = List.of("redisDown","mqDown","dbSlow","jobDown")` 是唯一出处。
+ *    第 4 枚 `jobDown` 是 D3（2026-10-18）新增：让七个 {@code @Scheduled} 任务整轮跳过。
  *
- * ⚠️ 【中文名是**本仓新起**的，不是抄来的】后端对这三个 key **没有**中文文案
+ * ⚠️ 【中文名是**本仓新起**的，不是抄来的】后端对这四个 key **没有**中文文案
  *    （`redisDown` 那一路复用的是 `AttackEngine.REDIS_DOWN_CAUSE` 那句「SIM：演练注入的 L2 故障…」，
- *    那是日志文案不是开关名）。故这里如实登记：`Redis 断开` / `MQ 断开` / `慢 SQL` 三个词
- *    **出自本文件**（前两个与 `SCENARIO_LABEL.redisDown`、`AttackEngine` 里「慢 SQL」的用词对齐）。
+ *    那是日志文案不是开关名）。故这里如实登记：`Redis 断开` / `MQ 断开` / `慢 SQL` / `调度停摆`
+ *    四个词**出自本文件**（前两个与 `SCENARIO_LABEL.redisDown`、`AttackEngine` 里「慢 SQL」的用词对齐）。
  *
  * ⚠️ 【`redisDown` 这个词在两处出现，含义不同】这里说的是**注入开关**（让 L2 真的不可用）；
  *    `SCENARIO_LABEL.redisDown` 说的是**场景**（打 Redis 相关读的那一类请求）。
  *    两者能同时开、也能只开一个 —— 别把两张表合成一张。
  */
-export const INJECTIONS = ['redisDown', 'mqDown', 'dbSlow']
+export const INJECTIONS = ['redisDown', 'mqDown', 'dbSlow', 'jobDown']
 
 /** `INJECTIONS` 的 key → 中文（本仓新起，见上）。 */
 export const INJECTION_LABEL = {
   redisDown: 'Redis 断开',
   mqDown: 'MQ 断开',
   dbSlow: '慢 SQL',
+  jobDown: '调度停摆',
 }
 
 /**
- * **本笔没有真接通**的注入 —— 面板必须把它们画成「未接通」（可点也要标出来，或不给点）。
+ * **没有真接通**的注入 —— 面板必须把它们画成「未接通」。
  *
- * ⚠️ 这是后端 `AttackEngine.INJECTIONS_NOT_WIRED = List.of("mqDown","dbSlow")` 的**镜像**。
- *    后端把「这一轮哪些注入其实没生效」如实列进结果里的 `Engine.InjectionsNotWired`
- *    ⇒ 前端这份只用于**开跑之前**就把话说明白（那一刻还没有结果可读）。
- *    ⚠️ 未接通 = 拨了它**读数不会变**。画成一个能拨的开关而不标出来，等于骗人。
+ * ⚠️ D3（2026-10-18）起为空：`mqDown` 拦发布侧、`dbSlow` 延迟 SELECT、`jobDown` 停调度，
+ *    四个注入**全部真接通**（后端 `AttackEngine.INJECTIONS_NOT_WIRED = List.of()`）。
+ *    本表保留为空数组而不是删掉：它是「面板是否该标未接通」的**唯一判据**，后端若再添
+ *    占位键，两边各改一行即可；删掉会让页面失去这个判据。
  */
-export const INJECTIONS_NOT_WIRED = ['mqDown', 'dbSlow']
+export const INJECTIONS_NOT_WIRED = []
 
 /** 取场景中文名（认不出回落 key 原文）。 */
 export function scenarioLabel(key) {

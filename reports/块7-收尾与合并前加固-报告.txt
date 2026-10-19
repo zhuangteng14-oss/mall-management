@@ -1,0 +1,252 @@
+块 7 收尾与合并前加固 —— 完成报告
+================================================================
+日期      ：2026-10-17 18:45（Asia/Shanghai）
+分支      ：feat/c3-admin-block7
+状态      ：全部加固项已完成并验证；改动仍在工作区，**未提交、未 push、未建 PR**
+              （按指令：合入时机由你决定）
+运行实例  ：dev profile · PID 42416 · http://127.0.0.1:8088
+              18:40:23 重启，已加载全部收尾代码；DB = 192.168.229.129:3306/mall_management_sql
+
+一、P0 修复（立即执行项）
+----------------------------------------------------------------
+1. 全局异常兜底 —— 已落地【可复核 + 单测】
+   - DuplicateKeyException（订单唯一键 uk_order_orderid）
+       ⇒ HTTP 200 + {success:false, code:"DUPLICATE_ORDER", msg:"订单已存在"}
+   - 其他 DuplicateKeyException
+       ⇒ HTTP 200 + code:"DUPLICATE_KEY" + "数据已存在"
+   - CallNotPermittedException（熔断打开）
+       ⇒ HTTP 200 + code:"CIRCUIT_OPEN" + "当前系统繁忙，请稍后再试"
+   - CannotAcquireLockException / DeadlockLoserDataAccessException
+       ⇒ HTTP 200 + code:"DB_BUSY" + "系统处理中，请重试"
+   - 这四类**绝不返回 500**；重复键/锁等待记 ProtectionMetrics.blocked，
+     熔断拒绝不记"被拦"（没有下游调用）。
+   - 事件严重度新增 PROTECT：防护拦截 / 幂等挡下 / 敏感词命中归 PROTECT，
+     业务失败率只统计 WARN+ERROR。
+   - 单测：ProtectionExceptionHandlerTest 7 条全绿（含订单/非订单分支、三种类型、
+     无 metrics bean 的切片、ExceptionHandlerMethodResolver 覆盖范围）。
+   证据：ProtectionExceptionHandler.java:68-72 / :88-91 / :100-104
+
+2. TraceId 串线 —— 已修复并用 500 并发实测【可复核 + 运行时证据】
+   - 32 派发线程：ObserveContext 显式跨线程携带 + GatedExecutor 包装；
+   - SseEmitter / SSE 写帧：TraceIdFilter + SseStreamWriter 各自持有 trace 上下文；
+   - RabbitMQ 消费者：消费线程入口恢复 MDC，批量内逐事件带自己的 traceId。
+   - 最终代码复跑（runId=b7load-final-1842，500 并发）：
+       ROWS=1200 DISTINCT_TRACE=400 NULL_TRACE=0
+       TRACES_WITH_FOREIGN_CODE=0      ← 没有任何一条 trace 指向别人的商品码
+       DUP_TRACE_SEQ_GROUPS=0          ← A3 唯一键在压测下未撞破
+       EVENTS_PER_TRACE={3=400}
+   证据：docs/agent/evidence/c3-block7/b7-load-500-trace-purity.txt
+
+二、P1 分页与长列表
+----------------------------------------------------------------
+1. 商城端无限滚动：首页 / 搜索 / 分类统一默认 24 条、上限 100
+   （Math.min(pageSize, 100)），offset 直落 SQL；
+   前端公共实现 useInfiniteList.js，首页/搜索页/猜你喜欢/评价"加载更多"均已接入。
+2. 管理/商家端标准分页器默认每页 20：
+   - /admin/accounts/users：默认 100、上限 500，支持 offset；AccountsPage 默认 20/页；
+   - /admin/observe/attack/records：默认 20、上限 200，支持 offset；
+   - /admin/order/list：limit<=0 ⇒ 200、上限 500（沿用既有 clamp）。
+3. 后端兜底：商品三端点 Math.min(pageSize, 100)；其余上限见盘点报告。
+4. 《当前长列表接口盘点报告.txt》已生成在桌面：
+   - 真分页 10 个端点；
+   - 仅 limit 截断的端点清单；
+   - 完全无 LIMIT 的高风险端点（消息 history/conversations、四条订单列表、
+     券包 myCoupons、统计商家榜）；
+   - 前端分页现状与未分页页面清单；
+   - 每条结论均带「文件:行号」，并标注了"静态盘点、未逐端点压测"的口径。
+
+三、A 档最终决策落地
+----------------------------------------------------------------
+A3（甲方案）已完成：
+  - observed_event 新增 Seq bigint NULL（第 2 列，共 17 列）；
+  - UNIQUE uk_observed_event_trace_seq (TraceId, Seq)；
+  - INSERT 改为 ON DUPLICATE KEY UPDATE Id = Id；
+  - 发布端无 TraceId 时注入 UUID；
+  - 存量行 Seq 为 NULL，不受影响；
+  - 落库复核：17 列 / UNIQUE 两段 (TraceId, Seq) / 全库表数 38 不变。
+  证据：b7-a3-migration-23-verify.txt；说明：db-schema.md §21、api-contract.md 附录 J.7。
+
+A4（死信）已完成：
+  - 不建独立页；
+  - 消费者最终异常 ⇒ EventBroadcaster 发 ERROR 事件 + 计数 mall.observe.dead.letters；
+  - 指标帧新增 dlq:{total, delta}，面板顶部显示"死信数量"；
+  - 无死信列表端点（设计如此）。
+
+A5（掩码）已完成：
+  - 管理端/本人明文、商城端掩码；
+  - 写接口拒绝含 * 的邮箱/地址/联系电话，返回明确提示；
+  - 共享判定 MaskedInput（shared/text/MaskedInput.java:26,43,61）；
+  - 调用点 MerchantApplicationController.java:101-103、UserController.java:186-188。
+
+A7（SSE 超时）已完成：
+  - 不改全局配置，只在 SSE 自身层；
+  - 默认 30 s 内没有一次成功写出（含心跳）⇒ 看门狗主动断开；
+  - 运行时实证（强制 1500 ms）：首帧后 2548 ms 服务端断开、curl rc=0。
+  证据：b7-a7-idle-watchdog-runtime.txt。
+
+TD-64（破坏性端点权限）已完成：
+  - AuthInterceptor.ADMIN_ONLY_PATHS 当前含 /admin/observe/attack/cleanup；
+  - 未登录 401；已登录但非管理员 403；
+  - 单测 AuthInterceptorAdminOnlyTest 6 条全绿；
+  - 重要口径：dev / a3 profile 的 app.auth.enabled=false，
+    手验绿 ≠ 默认 profile 绿；默认 profile 由该单测覆盖。
+
+四、验收结果
+----------------------------------------------------------------
+1. 500 并发压测（最终代码复跑）
+   SUMMARY {"runId":"b7load-final-1842","concurrency":500,"wallMs":693,
+            "statuses":{"200":400,"429":100},"server5xx":0,
+            "transportErrors":0,"failedSamples":[]}
+   - 429 是限流器正常出口，不是错误；
+   - 0 个 5xx ≈ 假 500 归零；
+   - 0 条传输错误；
+   - 本窗口后端日志 0 条 ERROR。
+   证据：b7-load-500-status.txt
+
+2. traceId 不串线：见第一节第 2 条（400 trace × 3 事件，零外来码）。
+
+3. 后端全量测试：
+   ./mvnw test ⇒ **Tests run: 584, Failures: 0, Errors: 0, Skipped: 26**
+   BUILD SUCCESS。
+   （Skipped 26 为既有条件跳过，含 MallManagementApplicationTests 6 条。）
+
+4. 前端生产构建：
+   npm run build ⇒ **DONE Build complete**，Exit 0，
+   Hash 771f4071e4d39012（最终编辑后重跑，2026-10-17 18:43）。
+
+5. 后端重启后三查：
+   - 端口：8088 LISTENING（PID 42416）；
+   - profile：dev；
+   - DB：192.168.229.129:3306/mall_management_sql；
+   - 冒烟：GET /goods/goodstype ⇒ HTTP 200，返回真实类目数据。
+
+五、本次找到并修掉的额外缺陷
+----------------------------------------------------------------
+清场成功后审计行丢失：
+  - 现象：/admin/observe/attack/cleanup 返回 success=true（删除 893,634 行），
+    但 admin_audit 没有对应记录；
+  - 根因：清场汇总 130+ 字符 > admin_audit.TargetId varchar(128)，
+    MySQL 报 Data too long，整条审计行被拒；AuditService 是 fail-open，只留 ERROR 日志；
+  - 修复：写库前把 TargetId 截到 128 字符（substring(0,127)+"…"），
+    完整明细仍在 AfterJson；
+  - 验证：AuditServiceMetricsTest 新增用例 longTargetIdIsTruncatedBeforeInsert 全绿。
+  位置：AuditService.java:167-181
+
+六、修改文件清单（工作区，50 项 = 39 改 + 11 新增）
+----------------------------------------------------------------
+【修改 · 后端 20】
+  Mall-management-server/src/main/java/com/minke/mallmanagement/admin/controller/AdminAccountsController.java
+  Mall-management-server/src/main/java/com/minke/mallmanagement/admin/service/AuditService.java
+  Mall-management-server/src/main/java/com/minke/mallmanagement/admin/service/UserGovernanceService.java
+  Mall-management-server/src/main/java/com/minke/mallmanagement/goods/controller/GoodsController.java
+  Mall-management-server/src/main/java/com/minke/mallmanagement/goods/dao/GoodsDao.java
+  Mall-management-server/src/main/java/com/minke/mallmanagement/goods/service/GoodsCacheService.java
+  Mall-management-server/src/main/java/com/minke/mallmanagement/goods/service/GoodsService.java
+  Mall-management-server/src/main/java/com/minke/mallmanagement/merchant/controller/MerchantApplicationController.java
+  Mall-management-server/src/main/java/com/minke/mallmanagement/observe/dao/ObservedEventDao.java
+  Mall-management-server/src/main/java/com/minke/mallmanagement/observe/mq/ObservedEventConsumer.java
+  Mall-management-server/src/main/java/com/minke/mallmanagement/observe/mq/RabbitEventPublisher.java
+  Mall-management-server/src/main/java/com/minke/mallmanagement/observe/service/EventBroadcaster.java
+  Mall-management-server/src/main/java/com/minke/mallmanagement/observe/service/MetricsSnapshotService.java
+  Mall-management-server/src/main/java/com/minke/mallmanagement/observe/service/SseStreamWriter.java
+  Mall-management-server/src/main/java/com/minke/mallmanagement/protect/ObservePoolConfig.java
+  Mall-management-server/src/main/java/com/minke/mallmanagement/shared/web/AuthInterceptor.java
+  Mall-management-server/src/main/java/com/minke/mallmanagement/shared/web/ObserveContext.java
+  Mall-management-server/src/main/java/com/minke/mallmanagement/shared/web/TraceIdFilter.java
+  Mall-management-server/src/main/java/com/minke/mallmanagement/user/controller/UserController.java
+  Mall-management-server/src/main/java/com/minke/mallmanagement/user/dao/UserGovernanceDao.java
+
+【修改 · 后端测试 4】
+  Mall-management-server/src/test/java/com/minke/mallmanagement/admin/service/AuditServiceMetricsTest.java
+  Mall-management-server/src/test/java/com/minke/mallmanagement/goods/service/GoodsListCacheFailTest.java
+  Mall-management-server/src/test/java/com/minke/mallmanagement/observe/dao/ObservedEventDaoTest.java
+  Mall-management-server/src/test/java/com/minke/mallmanagement/smoke/AbstractSmokeTest.java
+
+【修改 · 前端 12】
+  Mall-management-web/mall-management-system/src/api/accounts.js
+  Mall-management-web/mall-management-system/src/api/admin.js
+  Mall-management-web/mall-management-system/src/views/GoodsSelect.vue
+  Mall-management-web/mall-management-system/src/views/GoodsUp.vue
+  Mall-management-web/mall-management-system/src/views/HomePage.vue
+  Mall-management-web/mall-management-system/src/views/ProductPage.vue
+  Mall-management-web/mall-management-system/src/views/ShopHome.vue
+  Mall-management-web/mall-management-system/src/views/admin/AccountsPage.vue
+  Mall-management-web/mall-management-system/src/views/admin/StatsPage.vue
+  Mall-management-web/mall-management-system/src/views/admin/observe/AttackConsole.vue
+  Mall-management-web/mall-management-system/src/views/admin/observe/MetricsPanel.vue
+  Mall-management-web/mall-management-system/src/views/merchant/StatsPage.vue
+
+【修改 · 文档/脚本 3】
+  docs/agent/api-contract.md      （订正"列表接口全量返回" + 新增附录 J）
+  docs/agent/db-schema.md         （新增 §21 A3 幂等键）
+  mall_management_sql.sql         （新增㉓段：Seq 列 + 唯一索引；行尾已归一到 CRLF）
+
+【新增 · 后端 5】
+  Mall-management-server/src/main/java/com/minke/mallmanagement/shared/text/MaskedInput.java
+  Mall-management-server/src/main/java/com/minke/mallmanagement/shared/web/ProtectionExceptionHandler.java
+  Mall-management-server/src/test/java/com/minke/mallmanagement/observe/service/SseStreamWriterIdleTest.java
+  Mall-management-server/src/test/java/com/minke/mallmanagement/shared/web/AuthInterceptorAdminOnlyTest.java
+  Mall-management-server/src/test/java/com/minke/mallmanagement/shared/web/ProtectionExceptionHandlerTest.java
+
+【新增 · 前端 1】
+  Mall-management-web/mall-management-system/src/composables/useInfiniteList.js
+
+【新增 · 证据 4】
+  docs/agent/evidence/c3-block7/b7-a3-migration-23-verify.txt
+  docs/agent/evidence/c3-block7/b7-a7-idle-watchdog-runtime.txt
+  docs/agent/evidence/c3-block7/b7-load-500-status.txt
+  docs/agent/evidence/c3-block7/b7-load-500-trace-purity.txt
+
+【新增 · 探针 1】
+  scripts/probes/probe-b7-finish-load.mjs
+
+七、需要你知道的破坏性操作与数据现状
+----------------------------------------------------------------
+1. 已执行的清场（通过内置 /admin/observe/attack/cleanup 端点，非手写 DELETE）：
+   删除合计 893,634 行：
+     order_item                 57,206
+     order_state_transition     56,712
+     order_shipping_track            6
+     order                      57,206
+     comment                    24,546
+     observed_event            697,958
+   读回：SIM-% 订单 0 行、Source='attack' 评论 0 行；
+         演练前的真实探针事件 3,150 行保留。
+   该端点由 TD-64 角色闸保护；清场汇总的审计行因 TargetId 超宽曾丢失，已修复（见第五节）。
+
+2. 压测探针数据（未清）：
+   - 台账新增 1,200 行（runId=b7load-final-1842，400 trace × 3），
+     此前各轮探针事件也在库中；
+   - 探针账号 td64probe 的 login / user 行仍在；
+   - DLQ 中仍有 1 条消息（演练期间产生，A4 的 ERROR 事件与计数已记录）。
+   是否清理这三类残留，等你决定；清理动作我不会擅自执行。
+
+八、互引扫描（refs-scan）与已知风险
+----------------------------------------------------------------
+1. refs-scan（before 取 HEAD 临时 worktree，产物只落 _work/）：
+   - before 5,225 条 / after 5,268 条；
+   - 按「(引用者, token)」配对：LOST=1、NEW=44；
+   - 唯一 LOST 是 GoodsUp.vue 旧占位注释里的 `GoodsDao:187`。
+     该注释在 P1 落地时被替换，且原 token 在 HEAD 上指向的是 deleteGoods 的 javadoc，
+     本就是陈旧指针；替换后的注释改为指向 `GoodsCacheService.java:227-229`（真实限制处）。
+     ⇒ 这是一次**有意的旧指针退役**，不是漏改。
+   - 其余行号变化均为引用者自身增删行导致的 same-token 位移，无真实丢失。
+   产物：_work/refs-before-b7-closeout.txt、refs-after-b7-closeout.txt、
+         refs-analyze-b7-closeout.txt
+
+2. 已知风险 / 口径：
+   - dev / a3 两个 profile 的 app.auth.enabled=false；手验绿不等于默认 profile 绿；
+   - SseStreamWriter 客户端主动 abort 时，Tomcat 可能在 async 完成阶段重抛 IOException
+     （旧实例实测 2 条 ERROR；本轮最终代码复跑 0 条，属容器行为，未改）；
+   - 长列表只改造了商城端与管理端少数列表，消息/订单/券包等仍是全量或仅 limit，
+     已在盘点报告登记，未在收尾笔里跨域铺开；
+   - 本次改动尚未提交；建议提交时按「P0 兜底 / A3-A4-A5-A7 / P1 分页 / 文档与证据」
+     拆成数笔，便于审阅。
+
+九、等待你的决定
+----------------------------------------------------------------
+- 现在是否要我把上述改动按主题拆成 commit？
+- 何时允许 push 并创建 PR？
+- 七.2 的探针残留（td64probe 账号、探针事件、1 条 DLQ）是否清理？
+
+在你答复之前，我不会执行 push / merge / 建 PR，也不会动上述残留数据。

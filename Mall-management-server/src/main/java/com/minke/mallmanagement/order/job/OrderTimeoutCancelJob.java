@@ -3,11 +3,13 @@ package com.minke.mallmanagement.order.job;
 import com.minke.mallmanagement.goods.dao.GoodsDao;
 import com.minke.mallmanagement.observe.metrics.StockMetrics;
 import com.minke.mallmanagement.observe.metrics.StockMetrics.Release;
+import com.minke.mallmanagement.observe.service.ScheduledJobGate;
 import com.minke.mallmanagement.order.dao.OrderDao;
 import com.minke.mallmanagement.order.dao.OrderDataScope;
 import com.minke.mallmanagement.order.metrics.MallOrderStateMetrics;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.scheduling.annotation.Scheduled;
@@ -147,6 +149,9 @@ public class OrderTimeoutCancelJob {
     @Value("${mall.order.cancel.skip-attack-data:false}")
     private boolean skipAttackData;
 
+    /** 调度停摆注入（D3）。{@code null} 只出现在手工 new 的测试里 ⇒ 视为未注入。 */
+    private ScheduledJobGate jobGate;
+
     public OrderTimeoutCancelJob(OrderDao orderDao, GoodsDao goodsDao, StockMetrics stockMetrics,
                                  MallOrderStateMetrics orderMetrics) {
         this.orderDao = orderDao;
@@ -155,12 +160,20 @@ public class OrderTimeoutCancelJob {
         this.orderMetrics = orderMetrics;
     }
 
+    @Autowired(required = false)
+    public void setJobGate(ScheduledJobGate jobGate) {
+        this.jobGate = jobGate;
+    }
+
     /**
      * 扫描 + 取消。整方法 catch 一切（同 {@code ShippingTrackAdvanceJob.advance}：
      * 一个定时任务抛异常会让 Spring 把后续调度一起停掉）。单条失败只跳过该条，不拖垮整轮。
      */
     @Scheduled(fixedDelayString = "${mall.order.cancel.fixed-delay-ms:15000}")
     public void advance() {
+        if (jobGate != null && jobGate.paused("orderTimeoutCancel")) {
+            return;     // D3：jobDown 注入 ⇒ 整轮跳过（不扫描、不取消、不回补库存）
+        }
         long timeoutSeconds = timeoutMs / 1000L;
         if (timeoutSeconds <= 0) {
             // 阈值 <= 0 会让「刚下的单立刻被取消」——那是配置事故，不是业务行为。宁可整轮不动。

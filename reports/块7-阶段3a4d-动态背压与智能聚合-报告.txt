@@ -1,0 +1,174 @@
+块 7 · 阶段 3a.4d「动态背压与智能聚合」收笔报告
+日期：2026-10-17
+分支：feat/c3-admin-block7
+提交：1c6ff3c（未 push / 未 merge / 未建 PR）
+运行环境：真实前端 http://localhost:8080（admin.html）+ 真实后端 http://localhost:8088（dev profile）
+（按用户既有口径：不 mock 后端、不开「模拟日常」）
+
+────────────────────────────────────────────────────────────────────
+一、结论（先看这三条）
+────────────────────────────────────────────────────────────────────
+1. 800 QPS 真实演练下，日志页 Long Task（>50ms）实测 0 次，FPS 59.8，DOM 稳定在 70 行以内。
+2. 前端按 100ms 批量冲刷 + 200 条 UI 上限 + 同类聚合：raw 7964 条压到视图 68 行（聚合 7896 条）。
+3. 后端入站限流改为按秒汇总：采样 6 秒只出现 9 行，每行写着「该秒内拦下 N 次请求」，不再逐请求刷屏。
+
+探针 c3b7-3a4d-backpressure.mjs 最终一轮 24/24 全绿，EXIT=0。
+
+────────────────────────────────────────────────────────────────────
+二、用户需求与落点
+────────────────────────────────────────────────────────────────────
+【一、前端接收与 DOM 渲染解耦】全部落地在
+  Mall-management-web/mall-management-system/src/views/admin/observe/EventLog.vue
+  · SSE 收帧只 push 非响应式 rawBuf（normal / demo 两桶），不直接改 Vue 的 events。
+  · setInterval(100ms) 批量冲刷 flushBuffer()：800 次/秒的更新合并成约 10 次/秒。
+  · UI 反压：events 最多保留最近 200 条（EVENT_CAP=200），超出在内存丢弃。
+  · 冻结：点「暂停」或手动上滚（autoBottom=false）时不冲刷，数据只进 rawBuf；
+    rawBuf 自身有 4096 上限，超出丢最旧；恢复（继续 / 滚回底部）后一次性吸收。
+  · rawBuf 与 events 分离后，冻结期间原始数据不丢，只是不渲染。
+
+【二、后端按秒聚合限流事件】
+  Mall-management-server/.../protect/InboundRateLimitInterceptor.java
+  · 拦截时不再逐请求发事件，改为 AtomicLong 累加；
+  · 单线程 daemon 调度器每秒收口一次，只发一条汇总事件：
+    「入站限流触发：该秒内拦下 N 次请求（示例 method=... path=...，limitForPeriod=...）」。
+  · ProtectionMetrics 仍是双通道：请求计数按次累加（指标口径不变），事件环每秒只写一条。
+  · ProtectConfig 负责启动聚合器；@PreDestroy 关闭。
+
+【三、验证（不准假绿）】
+  探针 scripts/probes/c3b7-3a4d-backpressure.mjs，产物
+  docs/agent/evidence/c3-block7/3a4d-backpressure-report.txt。
+  · Phase A：真日志页注入 50/100/200 条，量 Vue diff + 强制 Layout + Long Task；
+  · Phase A2：窗口化滞回回归（201→200→99 行）；
+  · Phase B：500 条同类 + 1 条锁等待超时，验证聚合与低频保留；
+  · Phase C：真实 800 QPS 演练进行中采样 Long Task / FPS / DOM / 聚合 / 限流行 / 时间戳，
+    并在演练中验证「暂停」「上滚」冻结与恢复。
+
+【第二步：动态背压 + 智能聚合】
+  · MAX_RENDER_PER_TICK = 200（实测写死，见下节数据）：一拍内 batch ≤ 200 原样逐条；
+    超过 200 才触发聚合。
+  · 聚合键 = kind + title；同组 ≥2 条合并为一条，保留最新一条的上下文，附 aggCount 与 seqs；
+    单条低频原样保留。
+  · UI：聚合行右侧 ×N Chip；点行在 ⑤ 抽屉提示「已折叠 N 条同类高频事件」。
+  · 注意：MAX_RENDER_PER_TICK 只决定「是否触发聚合」，不直接截断；真正的 UI 上限是 EVENT_CAP=200。
+
+────────────────────────────────────────────────────────────────────
+三、渲染耐受度实测（Phase A，最终一轮）
+────────────────────────────────────────────────────────────────────
+注入条数   单拍最大耗时   窗口 FPS    >50ms Long Task
+50         21.4 ms        60.2        0
+100        26.5 ms        60.0        0
+200        32.6 ms        57.4        0
+⇒ 不产生 >50ms Long Task 的最大档位 = 200，写入 MAX_RENDER_PER_TICK = 200。
+（多轮区间约 20–23 / 26–27 / 35–38 ms；探针输出与代码常量一致。）
+
+────────────────────────────────────────────────────────────────────
+四、本轮修掉的一个真实 Long Task（不是探针噪声）
+────────────────────────────────────────────────────────────────────
+首轮演练出现 1 次 66–68ms Long Task。用 _work/3a4d/diag-lt.mjs 每 200ms 对齐页面状态后定位：
+  streamRows 在 200~204 行之间抖动（EVENT_CAP 200 + trace 的请求起止脚手架行进出），
+  virtualOn 用「>200」单阈值判断 ⇒ 掉到恰好 200 行时退出虚拟滚动，一次性挂载 200 行真实字段。
+修复：窗口化开关加滞回。
+  · 超过 200 行才进入虚拟滚动；
+  · 降到 160 行以下才退出（VIRTUAL_OFF_BELOW = VIRTUAL_MIN − 100）。
+回归（Phase A2，最终一轮）：
+  201 行 → virtual=true，DOM 23；
+  200 行 → 仍 virtual=true，DOM 23（无滞回时这里会挂 200 行）；
+  99 行  → virtual=false，DOM 99；
+  整个过程 >50ms Long Task = 0。
+说明：滞回只影响「何时用窗口化渲染」，数据侧仍保留 events 最近 200 条，语义不变。
+
+────────────────────────────────────────────────────────────────────
+五、真实 800 QPS 演练（Phase C，最终一轮）
+────────────────────────────────────────────────────────────────────
+演练结果：Id=78，TotalRequests=15806，BlockedRequests=13234，
+          FailedRequests=0，ShedRequests=12，DurationMs=20323，平均 777.7 QPS。
+页面采样（6 秒，每秒一拍）：
+  时间   视图行  DOM   ×N Chip  单条行  限流汇总行  时间戳有序
+  +1s     29     29     26        3       4          是
+  +2s     37     37     33        4       5          是
+  +3s     45     45     40        5       6          是
+  +4s     53     55     47        6       7          是
+  +5s     61     65     53        8       8          是
+  +6s     68     70     59        9       9          是
+  · Long Task：0 次（>50ms 为 0，最大 Long Task = 0），FPS 59.8；
+  · rawBuf 累计 7964 条，视图 68 行，聚合掉 7896 条；
+  · 限流汇总文本示例：「入站限流触发：该秒内拦下 78 次请求（示例 method=POST
+    path=/order/orderAdd，limitForPeriod=200）」；
+  · 单条行里同时存在业务行（如「库存扣减」）与每秒一条的限流汇总行；
+  · 时间序判据排除 buildStream 插入的 .req 请求起止脚手架行，事件行时间戳单调不减。
+冻结验证（演练仍在跑，流量持续）：
+  · 点「暂停」1.6s：events 75 → 75（newest 不变），rawBuf 增长到 1882 条；再点恢复后 newest 变化；
+  · 上滚 1.2s：events 不变，rawBuf 748/760 条；滚回底部后 newest 变化，恢复冲刷。
+
+────────────────────────────────────────────────────────────────────
+六、智能聚合单元（Phase B）
+────────────────────────────────────────────────────────────────────
+一次注入 500 条「缓存命中」+ 1 条「锁等待超时」：
+  聚合前 501 条 → 聚合后 2 行；
+  1 条聚合行 ×500（aggCount=500），1 条单条行「锁等待超时」；
+  DOM 2 行，Chip 文本「× 500」。
+⇒ 高频同类被合并，低频业务不被误伤。
+
+────────────────────────────────────────────────────────────────────
+七、截图（docs/agent/evidence/c3-block7/）
+────────────────────────────────────────────────────────────────────
+3a4d-render-limit.png    Phase A 渲染耐受度现场
+3a4d-agg-synthetic.png   Phase B 501→2 聚合现场
+3a4d-800qps-logs.png     真实 800 QPS 演练进行中：
+                         同屏可见多条 ×N 聚合行（×182 / ×126 / ×134 / ×164 / ×94 / ×39 等）
+                         与单条行（入站限流每秒汇总、库存扣减等）。
+
+────────────────────────────────────────────────────────────────────
+八、改动文件（本次提交 1c6ff3c，11 个文件）
+────────────────────────────────────────────────────────────────────
+前端
+  Mall-management-web/mall-management-system/src/views/admin/observe/EventLog.vue
+后端
+  .../observe/metrics/ProtectionMetrics.java
+  .../observe/mq/RabbitEventPublisher.java        （SSE 卡顿根因修复，见下）
+  .../protect/InboundRateLimitInterceptor.java
+  .../protect/ProtectConfig.java
+  .../test/.../protect/InboundRateLimitInterceptorTest.java
+探针/证据
+  scripts/probes/c3b7-3a4d-backpressure.mjs
+  docs/agent/evidence/c3-block7/3a4d-backpressure-report.txt
+  docs/agent/evidence/c3-block7/3a4d-render-limit.png
+  docs/agent/evidence/c3-block7/3a4d-agg-synthetic.png
+  docs/agent/evidence/c3-block7/3a4d-800qps-logs.png
+
+附带修复（同一提交）：
+  RabbitEventPublisher 原先在 EventBroadcaster 的 synchronized poll() 内同步 convertAndSend，
+  800 QPS 下把锁占住约 5 秒，SSE 帧间隔从 1 秒退化到 5~8 秒（探针帧间隔实测
+  104ms / 1097ms / 6030ms / 14049ms）。
+  改为有界队列（8192）+ 单守护线程 observe-mq-publish 异步发送，满队列丢弃并计数；
+  页面数据优先。改后 SSE 帧恢复每秒到达（count 312–1263），保护汇总正常出现。
+
+────────────────────────────────────────────────────────────────────
+九、口径与边界（避免把结论读大）
+────────────────────────────────────────────────────────────────────
+1. 本次「限流每秒 1 条」是**后端聚合后的正确行为**，不是漏数据；
+   判据是「没有逐请求刷屏」+ 文本含「该秒内拦下 N 次请求」。
+2. 真实 800 QPS 下业务事件几乎全是高频组，单条低频业务在同一采样窗内不一定出现；
+   「低频不被合并」由 Phase B 的 500+1 对照组证明；真实演练里单条业务行在
+   +5s/+6s 采样到「库存扣减」。
+3. 证据时间戳均晚于最后一次代码/探针编辑（2026-10-17 14:26:44 / 14:26:40，
+   证据 14:27:14–14:27:44），符合「证据必须晚于代码」。
+4. 前端 lint：npx eslint src/views/admin/observe/EventLog.vue → EXIT=0。
+5. refs 互引扫描（HEAD worktree vs 工作区）：5225 条引用，diff 仅
+   InboundRateLimitInterceptor.java 自身行号 44/46→49/51（引用者自己长行），
+   目标 token（application.properties:124、ImgPath.java:109）未变，无目标漂移；
+   扫描产物只落 _work/3a4d/，未进 docs/。
+6. 未 push / 未 merge / 未建 PR（按既有纪律）。
+
+────────────────────────────────────────────────────────────────────
+十、复跑命令
+────────────────────────────────────────────────────────────────────
+后端（dev profile，按端口先杀旧进程）：
+  MALL_MQ_PASSWORD=$(cat _work/mq-pass) ./Mall-management-server/mvnw \
+    -f Mall-management-server/pom.xml spring-boot:run \
+    -Dspring-boot.run.profiles=dev \
+    -Dspring-boot.run.arguments="--mall.drill.engine.in-flight-cap=4096"
+前端：cd Mall-management-web/mall-management-system && npm run serve
+探针：
+  node scripts/probes/c3b7-3a4d-backpressure.mjs \
+    > docs/agent/evidence/c3-block7/3a4d-backpressure-report.txt 2>&1

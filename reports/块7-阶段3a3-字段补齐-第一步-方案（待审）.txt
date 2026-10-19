@@ -1,0 +1,318 @@
+块 7 · 3a.3 日志页「消息扩充 + 后端字段补齐」—— **第一步：方案（只报，不动代码）**
+日期 2026-10-16 · 分支 feat/c3-admin-block7 · 未 push / 未 merge / 未开 PR
+
+这份只是方案，**一行码都没写**。你审完点头，我才动第二步（后端 4 块 + 前端 4 块）。
+
+════════════════════════════════════════════════════════════════════
+§零  先说三件「和你原话不一样」的事 —— 都会改变工作量
+════════════════════════════════════════════════════════════════════
+
+【0.1】你说「耗时」主要加在 metrics 类里 —— **做不到**。实测：9 个 metrics 类里
+       只有 **3 个**有现成计时（cache.probe / lock.acquire / order.asyncDuration），
+       其余 **6 个类一个字都没测过**（StockMetrics / AuditMetrics / NotifyMetrics /
+       SensitiveMetrics / IdentityMetrics / ProtectionMetrics 全无 Timer、无 nanoTime）。
+       而「库存扣减从哪到哪」「状态流转 CAS 前到 CAS 后」这类起止点**根本不在 metrics 类里**
+       —— metrics 类只在业务调用点被「通知一声」，它看不见起止。
+       ⇒ **必须改业务调用点**（OrderService / AuditService / NotificationService /
+       SensitiveWordService / IdentityGuard / InboundRateLimitInterceptor /
+       OrderTimeoutCancelJob / MerchantDangerService 等），并给这些 public 方法**加入参**。
+       这就是「半天 → 1–2 天」的真实来源，不是估计。
+
+【0.2】你说的 `durationMs` —— 对**缓存 L1 会恒为 0**。L1 是 Caffeine 本地缓存，
+       `getIfPresent` 是纳秒级（命中约 0.2–1 µs），整数 ms 永远是 0。
+       建议改 **`durationUs`（微秒）**，前端按阈值显示（<1000 µs 显 µs、否则显 ms）。
+       ⇒ 这是对你原话的**偏离**，要你点头（§八 待裁 ①）。
+
+【0.3】审计环**已经有** `actor` 字段了。`AuditEvent` 的分量里本来就有
+       `String actor`（javadoc 逐字：「谁写的（业务号，会话取值）」）。
+       ⇒ 审计环的「谁」**不用新增**，只需补 `actorRole`；`actorId` 直接复用现有 `actor`。
+       其余 8 环的 record 里都没有任何「谁」。
+
+════════════════════════════════════════════════════════════════════
+§一  9 个 record 各加什么字段
+════════════════════════════════════════════════════════════════════
+
+统一新增三件（第 5 行少一件）：
+  · `actorId    : String`   —— 请求发起者业务号；非请求线程为 null
+  · `actorRole  : Integer`  —— 发起者角色；非请求线程为 null
+  · `durationUs : Long`     —— 毫秒改微秒的理由见 §0.2；**测不到时为 null**（不是 0）
+
+| # | record（定义处） | 现有字段 | 新增字段 |
+|---|---|---|---|
+| 1 | `MallCacheEvent`<br>`shared/cache/MallCacheMetrics.java:293` | `seq, epochMilli, cache, kind, result, key, traceId, batchId`（8） | `+actorId` `+actorRole` `+durationUs` |
+| 2 | `MallLockEvent`<br>`shared/lock/MallLockMetrics.java:191` | `seq, epochMilli, lock, kind, result, key, traceId, batchId`（8） | `+actorId` `+actorRole` `+durationUs` |
+| 3 | `OrderStateEvent`<br>`order/metrics/MallOrderStateMetrics.java:265` | `seq, epochMilli, kind, action, from, to, result, shape, key, traceId, batchId`（11） | `+actorId` `+actorRole` `+durationUs` |
+| 4 | `StockEvent`<br>`observe/metrics/StockMetrics.java:155` | `seq, epochMilli, kind, result, skuCode, qty, traceId, batchId`（8） | `+actorId` `+actorRole` `+durationUs` |
+| 5 | `AuditEvent`<br>`observe/metrics/AuditMetrics.java:139` | `seq, epochMilli, result, **actor**, action, reason, targetType, targetId, traceId, batchId`（10） | `+actorRole` `+durationUs`<br>⚠️ **`actorId` 已有 = 现有 `actor` 分量**，不重复加 |
+| 6 | `NotifyEvent`<br>`observe/metrics/NotifyMetrics.java:132` | `seq, epochMilli, result, toType, eventType, key, reason, traceId, batchId`（9） | `+actorId` `+actorRole` `+durationUs` |
+| 7 | `SensitiveEvent`<br>`observe/metrics/SensitiveMetrics.java:135` | `seq, epochMilli, result, scene, hit, total, words, traceId, batchId`（9） | `+actorId` `+actorRole` `+durationUs` |
+| 8 | `IdentityEvent`<br>`observe/metrics/IdentityMetrics.java:137` | `seq, epochMilli, result, subject, reason, path, traceId, batchId`（8） | `+actorId` `+actorRole` `+durationUs` |
+| 9 | `ProtectionEvent`<br>`observe/metrics/ProtectionMetrics.java:161` | `seq, epochMilli, result, key, scope, detail, traceId, batchId`（8） | `+actorId` `+actorRole` `+durationUs` |
+
+**actor 从哪来（落点已定，代价如实报）**
+  · 写入口 = `TraceIdFilter`（`shared/web/TraceIdFilter.java`）—— 它已经有 request、已经是
+    「请求级上下文」的**唯一写入点**（现有 traceId / batchId 就在这）。
+    加两个 MDC key：`actorId` / `actorRole`（沿用现有 `MDC_KEY` / `MDC_BATCH_KEY` 的写法）。
+    取值 `AuthSession.identify(request)` —— 全 static、`AuthTokenStore` 是**纯内存
+    ConcurrentHashMap**（不查库），便宜。
+  · **为什么不写进 `AuthInterceptor`**：① 总开关 `app.auth.enabled=false` 时它**直接
+    `return true`、根本不解身份** ⇒ 写在那里，本机 dev/a3（两个 profile 都 false）
+    **actor 会全为 null**；② `preHandle` 返回 false 时 `afterCompletion` **不会被调用**
+    ⇒ 往 MDC 写会在池线程里泄漏。
+  · **代价（如实）**：`AuthSession.identify()` 会被调**两次**（TraceIdFilter 一次、
+    AuthInterceptor 一次）。内存表，实测很便宜，但这是一处新增重复调用。
+  · **跨线程搬运要一起扩**：`ObserveContext`（`record ObserveContext(traceId, batchId)`）
+    要加两个分量，`TraceIdFilter.bind(...)` 签名随之变；三处派生线程
+    （`OrderStateExecutor#submit` / `LockSceneService#run` / `AttackEngine#runPhase`）
+    各改一行。
+  · **TraceIdFilter 的硬约束**（历史咬过两次）：**构造函数必须零参数**（10 个
+    @WebMvcTest 切片都会加载它）。本次只在 `doFilterInternal` 内部加两行、不碰构造签名 ⇒ 不违反。
+
+**非请求线程 ⇒ actor 为 null（你已给定，逐处坐实）**
+  `OrderStateExecutor` 线程池（async）· `OrderTimeoutCancelJob`（定时任务）·
+  `L2HealthProbe` 调度线程（probe / transition）· `AttackEngine` 派生线程 · MQ consumer 线程。
+
+════════════════════════════════════════════════════════════════════
+§二  每类事件耗时算法（逐类定义）
+════════════════════════════════════════════════════════════════════
+
+总原则（先说清三个坑）：
+  ⓐ **测不到就写 null，不写 0** —— 0 会被前端当成「极快」，那是假事实。
+  ⓑ **只有 3 条路是「已有、带出来即可」**，其余全要新加计时。
+  ⓒ 「改调用点」= 那个类的 public 方法**签名要变**（多一个 `long durationNanos` 入参）
+     ⇒ 它的**测试类**要跟着改（§七 已逐类列名）。
+
+| 类 | 耗时起 | 耗时止 | 备注 |
+|---|---|---|---|
+| **cache** | 逐 kind 不同，见下四行 | | 该环 7 个 kind，**不建议合成一个数**（L1 命中时根本不到 L2） |
+| ├ cache·l1 | `TwoLevelCache.l1Get` 里 `l1.getIfPresent(key)` **调用前**（`:196` 上一行） | 同一行**返回后** | ⚠️ Caffeine 本地命中 **纳秒级** ⇒ ms 恒 0（§0.2 的由来）；需**新增** nanoTime |
+| ├ cache·l2 | `l2.get(key)` **调用前**（`:212`） | 同一行返回后（HIT/MISS） | 网络调用、真 ms 级；`DEGRADED` 分支（`:206`）**没进 L2** ⇒ 无耗时 |
+| ├ cache·load | `valueLoader.call()` **调用前**（`:142` 已有的 `loadedFromDb` 计数点） | `:155` 回填收口处 | 「DB 回填一次多久」；需新增 nanoTime |
+| └ cache·evict | `l2.evict(key)` 调用前（`:249` / `:268`） | 同一行返回后 | 跳过/降级分支（`:243` / `:262`）无耗时 |
+| **cache·probe** | **已有**：`L2HealthProbe:202 long startedAtNanos = System.nanoTime()` | **已有**：`:206/:211 System.nanoTime() - startedAtNanos` | **已算未记** —— 现在只进了 Micrometer Timer（`mall.cache.l2.probe.duration`），**带进 record 即可**，零新增计时 |
+| **lock** | **已有**：`DistributedLockService:246 long startNanos = System.nanoTime()` | **已有**：`elapsed(startNanos)`（`:508-509`） | **正是你说的「锁等待：已算未记」** ✓ 5 个 acquire 分支里 4 个已经算好了（ACQUIRED/TIMEOUT/ERROR×2），**只有 DEGRADED（`:241`）在 startNanos 之前** ⇒ 那一路为 null。`hold`（释放动作）/ `transition`（全局翻转）**无有意义耗时** ⇒ null |
+| **order·transition** | ⚠️ **要改 `OrderService`**：`casTransition` 里 `int rows = orderDao.casUpdate(...)`（`:1337/:1342/:1348`）**之前**加 nanoTime | 该行返回后 | **你问的「CAS 前到 CAS 后」= 这个定义**。现状：`OrderTransitionRecorder` 的 `applied()` 是**在 CAS 之后**才被调的 ⇒ **metrics 拿不到 CAS 前的时刻**，只能在 `OrderService` 里测、算好再传下去。该段**在订单锁临界区内**，耗时含持锁时间 |
+| ├ order·illegal / birthRejected | 同「要改 OrderService」。`birthRejected` 的调用点 `OrderService:362` **在锁外**（该处注释逐字「本方法在锁外调用」） | 同上 | 两者都是「一次判定」的耗时，代价小 |
+| ├ order·timelineWrite | `OrderTimelineWriter`:126 `jdbcTemplate.update(INSERT_SQL, …)` 之前 | 该行返回后 | 「时间线落库多久」 |
+| └ order·async | **已有**：`OrderStateExecutor:242 long startNanos = System.nanoTime()` | **已有**：`:246 metrics.asyncDuration(System.nanoTime() - startNanos)` | **已算**，但只进了 Timer（`mall.order.state.async.duration`）**且不发事件** ⇒ 带进 record 即可。⚠️ 线程池 ⇒ **actor 为 null** |
+| **stock·deduct** | `OrderService.deductStocks` 里 `goodsDao.deductStock(...)`（`:1059` 上一行） | 同一行返回后 | **你问的「从进 Service 到写库完」有两种口径**：(a) 紧包那一行 SQL（推荐，干净）；(b) `deductStocks` 方法入口到出口（含多 sku 循环）。⚠️ `deductStocks` **在订单锁临界区内**。`OrderService` 全文件**无 nanoTime** ⇒ 新增 |
+| **stock·release** | `OrderTimeoutCancelJob.releaseStock` 里 `goodsDao.releaseStock(...)`（`:267` 上一行） | 同一行返回后 | ⚠️ **定时任务线程 ⇒ actor 为 null**（duration 仍可有） |
+| **audit** | ⚠️ **要改 `AuditService.record()`**：方法**入口**加 nanoTime | `:88` 那一行 `auditMetrics.written(...)` 之前（= 审计 INSERT 已发出） | **你问的「进 method 到写库完」= 这个定义**。fail 路径止于 catch（`:93`）。⚠️ 后端**已有** `actor` ⇒ 只有 duration 是新的 |
+| **notify** | ⚠️ **要改 `NotificationService.send()`**：方法**入口**加 nanoTime | `:130` `notifyMetrics.sent(...)` 之前（= 通知 INSERT 已入库） | **你问的「构造到 send 完」= 这个定义**。fail 路径止于 catch（`:136`，fail-soft） |
+| **sensitive** | ⚠️ **要改 `SensitiveWordService.filter()`**：方法**入口**加 nanoTime | `:281-286` 处置判定之后（`return result` 之前） | **你问的「匹配一次多久」= 这个定义**。⚠️ 这个口径**含不含读词库**没定 —— 若 `filter` 内部走 DB 读词表，则「含」；要「纯匹配耗时」得把起点挪到读词之后（**动手前我读一遍 `filter()` 全文再定**） |
+| **identity** | ⚠️ **要改 `IdentityGuard`**：校验**入口**加 nanoTime | `recordAndReturn`（`:76`）里 `:80/:82` 发事件之前 | **你问的「guard 校验多久」= 这个定义**。⚠️ **两个坑**：① `IdentityGuard` 是 **static 无状态工具** ⇒ **不得**引入可变静态字段存 startNanos（会并发串号），只能由调用方把 startNanos 传进来；② 我还**没读** `IdentityGuard` 两个判据方法的全文 ⇒ **这条定义标「待确认」**，动手前我补读一次再落 |
+| **protection·rateLimit** | ⚠️ **要改 `InboundRateLimitInterceptor`**：拦截入口加 nanoTime | `:124` `limiter.acquirePermission()` 返回处（发事件之前） | **你问的「拦截多久」= 这个定义**。⚠️ **只在「被拒」时有值** —— 通过路径**根本不发事件**（`:124` 的 if 直接 return true）⇒ 样本天生只覆盖拒绝。要么接受（推荐），要么在通过路径也发事件（会**显著增噪声**，不建议） |
+| ├ protection·circuitBreak / pool / retry | —— **无自然起止** —— | | 三者都是**瞬时回调**：熔断状态翻转（`ProtectionMetricsBinder:74/79`）、池拒绝（`ObservePoolConfig:94`）、死锁重试（`MerchantDowngradeService:367/373`）。**定义不出「起」和「止」** ⇒ `durationUs` 恒 null。重试那一路真要给数，自然量是「两次尝试的间隔」，但现有代码只有 `attempt` 计数、**没有时刻差** ⇒ 要新增 |
+
+**八个「要改业务调用点」的清单**（§2 的落点汇总，按文件）：
+  `shared/cache/TwoLevelCache.java`（l1/l2/load/evict 4 个 kind）
+  `order/service/OrderService.java`（transition / illegal / birthRejected / stock·deduct）
+  `order/model/OrderTimelineWriter.java`（timelineWrite）
+  `admin/service/AuditService.java`（audit）
+  `notification/service/NotificationService.java`（notify）
+  `comment/service/SensitiveWordService.java`（sensitive）
+  `shared/web/IdentityGuard.java`（identity）
+  `protect/InboundRateLimitInterceptor.java` + `order/job/OrderTimeoutCancelJob.java`（protection / stock·release）
+
+**签名怎么变 —— 两个方案（待裁 ③）**
+  甲·**改签名**：`public void deduct(String sku, int qty, Deduct r, long durationNanos)`
+      —— 干净，旧签名没有语义；代价 = 9 个 `*MetricsTest` + 若干业务测试要改。
+  乙·**加重载**：保留旧签名（内部传 `-1` ⇒ 落成 null）
+      —— 测试不动；代价 = 留一个**会静默丢时长**的旧入口，将来有人调它 → 数据悄悄缺一块。
+  ⇒ **我推荐甲**（乙那种「静默降级」在本仓栽过跟头）。
+
+════════════════════════════════════════════════════════════════════
+§三  detail 结构化草案
+════════════════════════════════════════════════════════════════════
+
+口径（四条）：
+  1. **`detail` 一个字符都不改**（后端 `EventBroadcaster.fromXxx()` 的原样拼接保留）
+     ⇒ 老前端、老测试、已入库的 60 拍真帧全部不受影响。
+  2. **新增 `fields`**，类型 `Map<String,Object>`（混合类型：`qty` 是数字、`result` 是字符串）
+     ⇒ 序列化成 JSON 后就是原生类型，正合你给的例子。
+  3. **fields 从源 record 的分量抽，不解析 detail 字符串**
+     ⇒ 不做正则往返（那会在 detail 改文案时悄悄失配）。
+  4. **fields 要自足**：前端「优先读 fields」要求只读 fields 就能拼出完整句子
+     ⇒ 顶层已有的 `key` 也在 fields 里重复一份（顶层那份是给过滤/排行榜用的）。
+
+逐环 fields 键集（键名 = record 分量同名，全小写驼峰）：
+
+| 环 | fields 的键 | 备注 |
+|---|---|---|
+| cache | `op, cache, key, result` | `key` 顶层也有（= objectId）；`op` = 子 kind（l1/l2/load/…） |
+| lock | `op, lock, key, result` | `op` = acquire/hold/transition |
+| order | `op, action, from, to, result, shape` | `op` = transition/illegal/async |
+| stock | `op, sku, qty, result` | 与**你给的例子一致**：`{op:"deduct", sku:"SKU_GD-101-9552", qty:1, result:"OK"}`<br>⚠️ 你写的是 `result:"deduct"` —— 我理解 `deduct` 是**动作**、不是 result ⇒ 拆成 `op:"deduct"` + `result:"OK"`。**若你本意就是只放动作，说一声** |
+| audit | `action, targetType, targetId, result, reason` | ⚠️ **`actor` 不重复放进 fields** —— 它已是 record 分量、会升到帧顶层的 `actor` 里 |
+| notify | `toType, eventType, to, result, reason` | `to` = record 的 `key`（收件人业务号） |
+| sensitive | `scene, hit, total, words, result` | |
+| identity | `subject, path, result, reason` | |
+| protection | `protection, scope, result` | ⚠️ **`detail` 分量不放进去** —— 它就是「人话明细」本身，放进去是自我重复 |
+
+字段缺失一律**省略该键**（不是 `null`），前端用 `??` 回落 ⇒ 老帧（没有 fields）走解析分支，
+新帧走 fields 分支，两条路都能渲染。
+
+════════════════════════════════════════════════════════════════════
+§四  帧字段清单（events[] 11 → 14）
+════════════════════════════════════════════════════════════════════
+
+`EventStreamService.asMap(ObservedEvent e)` 现在的 11 个键（逐行 put）：
+```
+seq · ts · kind · severity · title · detail · key · objectType · objectId · traceId · batchId
+```
+新增 3 个（其余键**一个不动**）：
+```
++ actor        ← 「谁」。形状见下面三个选项（待裁 ②）
++ durationUs   ← 微秒；测不到时为 null（§0.2）
++ fields       ← §三 的结构化 map；老数据没有则为 null
+```
+
+**`actor` 这一个键怎么装「谁 + 角色」—— 三个选项（待裁 ②，你原话写的是「+actor」= 一个键）**
+  甲·字符串：`actor: "RZN123"` + 角色塞进字符串（`"RZN123/商家"`）—— 省事，但前端要再解析
+  乙·**对象（推荐）**：`actor: {id:"RZN123", role:3}`（无身份时整个 `null`）
+     —— 满足「一个键」的字面，不丢角色，前端 `e.actor?.id`
+  丙·两个平键：`actorId` + `actorRole`（总计 +4）
+     —— 最直白，但和你写的「+actor」不符
+
+**不变**：`traces[]` 的 8 个字段（`seq, traceId, method, path, status, startMs, endMs, ms`）
+—— 请求总耗时**现成就在 `traces` 里**（`ms`），本笔不碰它。
+
+════════════════════════════════════════════════════════════════════
+§五  台账 `observed_event` 加哪几列（DDL · A 档）
+════════════════════════════════════════════════════════════════════
+
+现状：11 列（`Id, Kind(16), Severity(16), Title(255), ObjectType(32), ObjectId(128),
+        TraceId(64), BatchId(36), OccurredAt datetime(3), created_at, updated_at`）+ 4 个非唯一索引。
+DDL 在 `mall_management_sql.sql:1866-1883`；**迁移最后一段是 ⑳** ⇒ 本笔新段从 **㉑** 起。
+
+新增 4 列（**全部可空、默认 null ⇒ 既有行零影响**）：
+
+| 列 | 类型 | 命名依据 | 对应帧字段 |
+|---|---|---|---|
+| `ActorId` | `varchar(50) NULL` | **逐字沿用 `admin_audit.ActorId varchar(50) NULL`** | `actor.id` |
+| `ActorRole` | `int NULL` | **逐字沿用 `admin_audit.ActorRole int NULL`** | `actor.role` |
+| `DurationUs` | `int NULL` | 新造；单位写进列名（比 `DurationMs` 诚实，§0.2） | `durationUs` |
+| `FieldsJson` | `json NULL` | 尾缀 `Json` 沿用 `admin_audit.BeforeJson / AfterJson` | `fields` |
+
+⇒ 11 → **15 列**。
+
+DDL 骨架（照 ⑬ / ⑰ 先例 = `information_schema.COLUMNS` 守卫 + `PREPARE`/`EXECUTE`/`DEALLOCATE`）：
+
+```sql
+-- ============================================================
+-- Migration: 观测台账加「谁 / 多久 / 结构明细」  Date: 2026-10-16
+-- ============================================================
+-- 只允许追加（规则 v2）：4 列全部 NULL 默认，既有行走 null。
+-- 回滚 = 逻辑废弃（保留列 + 停用写入），不得 DROP COLUMN。
+SET @s = IF((SELECT COUNT(*) FROM information_schema.COLUMNS
+             WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'observed_event'
+               AND COLUMN_NAME = 'ActorId') > 0,
+            'SELECT 1',
+            'ALTER TABLE `observed_event` ADD COLUMN `ActorId` varchar(50) DEFAULT NULL AFTER `BatchId`');
+PREPARE stmt FROM @s; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+-- 同上四段：ActorRole(int) / DurationUs(int) / FieldsJson(json)
+```
+
+⚠️ **DAO 有四处必须同改**（`ObservedEventDao.java:55` 那条注释自己写着「四处同改」）：
+   ① `COLUMNS` 常量（SELECT 用）② 列清单 ③ `ROW_PLACEHOLDERS` ④ `params.add(...)`。
+   现在 INSERT 是**手写 8 列**、`detail` / `key` / `seq` **刻意不落库** —— 加列后要决定
+   `FieldsJson` 落不落（我倾向落，正是「结构化」的意义）。
+
+════════════════════════════════════════════════════════════════════
+§六  A 档清单（要动数据库 / 迁移 / 文档口径的全部）
+════════════════════════════════════════════════════════════════════
+
+| # | 动作 | 落点 | 说明 |
+|---|---|---|---|
+| A1 | **追加 DDL 新段 ㉑** | `mall_management_sql.sql` 末尾（当前末段 ⑳ 在 `:1953`） | §五 的 4 列，守卫式幂等 |
+| A2 | **DAO 四处同改** | `observe/dao/ObservedEventDao.java` | `COLUMNS` / 列清单 / `ROW_PLACEHOLDERS` / `params.add` |
+| A3 | **登记迁移** | `docs/agent/db-migration.md` 变更登记表新行 **#41** | 编号接 #40；含正向 SQL 行号 + 回滚口径 |
+| A4 | **同步表结构快照** | `docs/agent/db-schema.md` §16.1（`:937` 起）+ 附录实测数 | 列数 11 → 15；附录里 `.sql` 行数（本笔会变）、表数 38 / 非主键索引 73 / UNIQUE 19 需**重测后**更新 |
+| A5 | **同步接口契约** | `docs/agent/api-contract.md` H.2 帧内容表（`:830` 起）+ `:885`（「MDC 键名两个」→ **四个**）+ `:892`（台账边界）+ H.7 台账（`:741` 起） | ⚠️ H 段**有 `文件:行号` 引用**（`MDC_KEY @ :70` / `MDC_BATCH_KEY @ :82`）⇒ 改 `TraceIdFilter` 会**牵动这本账**（§七） |
+| A6 | **落库（VM 库）** | 用 `_work/ApplyMigration.java` 按 marker 截段，**先 dry 再落** | 你裁「A 档」时一并裁「本笔就落库还是只写 DDL」 |
+
+════════════════════════════════════════════════════════════════════
+§七  影响面（哪些既有测试 / 探针 / 引用要改）
+════════════════════════════════════════════════════════════════════
+
+**7.1 一条已取证的**好消息**：没有任何测试构造 record**
+  逐环核实：每个 record 的 `new XxxEvent(...)` **全仓只有一处**，都在**它自己那个 metrics 类内部**
+  （`MallOrderStateMetrics:257` / `AuditMetrics:127` / `NotifyMetrics:122` / `SensitiveMetrics:127` /
+  `IdentityMetrics:128` / `MallLockMetrics:184` / `MallCacheMetrics:272` / `ProtectionMetrics:150` /
+  `StockMetrics:148`）+ `EventBroadcaster:775` 造 `ObservedEvent`。
+  测试只读 accessor（`.key()` / `.detail()`）⇒ **改 record 形状不会批量弄红测试**。
+
+**7.2 会红的（分三档）**
+
+  ① **签名档（取决于 §二 待裁 ③）** —— 选「甲·改签名」则这些都是：
+     `MallCacheMetricsTest` · `MallLockMetricsTest` · `MallOrderStateMetricsTest` ·
+     `StockMetricsTest` · `AuditMetricsTest` · `NotifyMetricsTest` · `SensitiveMetricsTest` ·
+     `IdentityMetricsTest` · `ProtectionMetricsTest`
+     （它们是这些 public 方法的唯一直接调用方）
+     选「乙·加重载」则本档**不动**。
+
+  ② **业务测试档（加了 nanoTime / 传参的那些类）**：
+     `AuditServiceMetricsTest` · `NotificationServiceMetricsTest` · `SensitiveWordServiceMetricsTest` ·
+     `IdentityGuardMetricsTest` · `OrderTransitionRecorderTest` · `OrderTimelineWriterTest` ·
+     `OrderStateExecutorTest` · `OrderTimeoutCancelJobStockGateTest` ·
+     `InboundRateLimitInterceptorTest` · `ProtectionMetricsBinderTest` ·
+     `RelistDeadlockRetryTest` · `DistributedLockServiceTest` · `LockSceneServiceTest` ·
+     `L2HealthProbeConcurrencyTest`
+
+  ③ **结构与断言档**：
+     `EventStreamServiceTest`（`asMap` 键集 11 → 14） · `EventBroadcasterTest` ·
+     `ObserveStreamSmokeTest` · `ReplayServiceTest` · `ObservedEventCleanupDaoTest`
+     ⚠️ `AbstractSmokeTest` 的 `@Import` 地雷（本仓第 **24** 次：动后端就可能踩）—— 动手前先看它的 @Import 清单。
+
+**7.3 探针**
+  `scripts/probes/probe-b7a3-eventlog-rewrite.mjs` 的 **⑲ 段**断言导出 CSV **表头 13 列**
+  （= 事件 10 字段 + 时刻/类/源）⇒ 加 3 字段后按口径**应变 16 列**（或按前端呈现决定），
+  **该断言必须改**；另**新加一段**验 actor / durationUs / fields 三件事真的端到端通了。
+
+**7.4 refs（「文件:行号」互引）漂移账**
+  本笔要改的文件里，**被文档引用的**至少两处：
+  `TraceIdFilter`（`api-contract.md` 引 `:70` / `:82` 的 `MDC_KEY` / `MDC_BATCH_KEY`）
+  9 个 metrics 类（record 定义位置一旦下移，任何引它们的文档记账都会漂）
+  ⇒ **before 必须用 `git worktree add --detach HEAD` 单独扫**（不要 checkout 再还原），
+    after 在主树扫，**两次产物逐字节相同（md5 一致）才算零漂移**。
+
+**7.5 后端测试基线**
+  当前 **548**，本笔新增测试后要重跑全量并给出新基线（不写「应该不会红」这种话，跑完再说）。
+
+════════════════════════════════════════════════════════════════════
+§八  要你裁的（7 件）
+════════════════════════════════════════════════════════════════════
+
+① **量纲**：`durationUs`（微秒，推荐）还是照你原话 `durationMs`（L1 缓存命中会**恒 0**）？
+② **帧里 `actor` 的形状**：乙·对象 `{id, role}`（推荐）/ 甲·字符串 / 丙·两个平键（总 +4）？
+③ **耗时入参怎么进 public 方法**：甲·改签名（推荐）/ 乙·加重载（留静默丢时长的口子）？
+④ **缓存环**：逐 kind 分开记（推荐）/ 合成「一次 get 总耗时」一个数？
+⑤ **订单环**：改 `OrderService` 测真 CAS 前到后（推荐，你问的就是这个）/ 只在 recorder 内测（测不到 CAS）？
+⑥ **防护环 rateLimit**：接受「只在**被拒**样本上有耗时」（推荐）/ 在**通过**路径也发事件（显著增噪声）？
+⑦ **台账**：本笔就**落 VM 库**（照 ⑰/⑱/⑲ 先例，A 档）/ 只写 DDL + 登记、下笔再落？
+
+另外一件**不是裁定、是我要补的功课**：`identity` 环的起点要读完 `IdentityGuard` 两个判据
+方法的全文才能定（现在只读了发出事件的 `recordAndReturn` 那一段）—— 动手前我先补读。
+
+════════════════════════════════════════════════════════════════════
+§九  第二步的施工清单（你点头后才动，此处只列不执行）
+════════════════════════════════════════════════════════════════════
+
+后端 4 块：
+  A「谁」四处同改 —— `TraceIdFilter` 加 2 个 MDC key / 9 个 record 加字段 /
+                       台账加 4 列 / 帧加 `actor`
+  B 事件加 `durationUs`（§二 逐类算法，含 8 处业务调用点改签名）
+  C detail 结构化（§三，新增 `fields`，`detail` 原样保留）
+  D 帧加 3 个字段（§四）
+前端 4 块：
+  A `sentence(e, rec)` 自然流拼接器（优先读 fields、回落解析 detail）
+  B 色系（锁定 `tokens.css` 的 `html[data-theme="admin"]`，不新造色）
+  C 新建 `src/config/labels/api-labels.js` —— 147 条注解 / 146 路径 + 锁名表(5) + 缓存区名表(8)
+  D 图标与等级文字 6–8px gap
+收尾：探针加新段 + 改 ⑲ + TD 登记（原 **TD-80/81/82** 视改动改为「已落」或「部分落」）+ 报告回桌面。
+
+⚠️ 全程：**不 push / 不 merge / 不开 PR**。
+⚠️ 你手工验证前提醒：本机 **a3 / dev 两个 profile 的 `app.auth.enabled` 都是 false**
+   （只有默认 profile 是 true）⇒ 手验绿 ≠ 默认 profile 绿；而且正因为 dev/a3 关着，
+   **actor 在 dev/a3 下会全是 null** —— 这是 profile 口径不是 bug，但要你知道怎么验：
+   验 actor 得开默认 profile（或临时把 dev 的这个开关打开）。

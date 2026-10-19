@@ -198,8 +198,11 @@ class ObservedEventCleanupDaoTest {
                 .as("三条都是**资源域**判据 ⇒ 不许出现时间窗（时间窗会随时间推移吃真日常证据）")
                 .doesNotContain("OccurredAt")
                 .as("日常事件行是**运维证据**，归保留期管、不归清场按钮管 ⇒ 这一段不许带 IS NULL 那半")
-                .doesNotContain("`BatchId` IS NULL");
-        assertThat(preparedBinds.get(i)).as("字面语句、无占位符（不是拼字符串）").isEmpty();
+                .doesNotContain("`BatchId` IS NULL")
+                .as("2026-10-19：分批删 —— 单批行数走绑定，不拼字符串")
+                .contains("ORDER BY Id LIMIT ?");
+        assertThat(preparedBinds.get(i)).as("批大小按 DAO 常量绑定")
+                .containsExactly("1=" + ObservedEventCleanupDao.DELETE_BATCH_SIZE);
     }
 
     // ==================== ② 保留期 ====================
@@ -222,10 +225,31 @@ class ObservedEventCleanupDaoTest {
                 .as("日常一档（BatchId 为 NULL）—— 只写一档会让另一档永不清理，表无限长")
                 .contains("`BatchId` IS NULL AND `OccurredAt` < NOW() - INTERVAL ? DAY")
                 .as("两档是 OR，不是 AND（AND 会让两档互相抵消、永远命中 0 行，且没有任何报错）")
-                .contains(" OR ");
+                .contains(" OR ")
+                .as("2026-10-19：分批删 —— 单批行数走绑定，不拼字符串")
+                .contains("ORDER BY Id LIMIT ?");
         assertThat(preparedBinds.get(i))
-                .as("按调用方给的顺序绑：先攻击、后日常（反了就是把 3 天与 30 天对调，静默删错行）")
-                .containsExactly("1=3", "2=30");
+                .as("按调用方给的顺序绑：先攻击、后日常（反了就是把 3 天与 30 天对调，静默删错行）；"
+                        + "第 3 个是批大小")
+                .containsExactly("1=3", "2=30", "3=" + ObservedEventCleanupDao.DELETE_BATCH_SIZE);
+    }
+
+    @Test
+    @DisplayName("水位熔断：按 Id（≈时间）删最老的一批，批大小走绑定")
+    void deleteOldestBatchOrdersByIdAndBindsLimit() {
+        stubUpdateReturns(5000);
+
+        int n = dao.deleteOldestBatch(ObservedEventCleanupDao.DELETE_BATCH_SIZE);
+
+        assertThat(n).as("删掉的行数原样透传").isEqualTo(5000);
+        int i = firstIndexOfSqlContaining("DELETE FROM mall_management_sql.observed_event");
+        assertThat(i).isNotNegative();
+        assertThat(preparedSql.get(i))
+                .as("「牺牲历史，保全当下」⇒ 走主键序，先删最老的那些")
+                .contains("ORDER BY Id LIMIT ?")
+                .as("熔断是整表淘汰，不带保留期谓词（那是另一条独立闸）")
+                .doesNotContain("OccurredAt");
+        assertThat(preparedBinds.get(i)).containsExactly("1=" + ObservedEventCleanupDao.DELETE_BATCH_SIZE);
     }
 
     @Test

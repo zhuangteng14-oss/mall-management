@@ -138,9 +138,13 @@
               那组**真的会进引擎并写进记录**，这一枚不会改变任何读数，形状不同就该长得不同）。
            ⚠️ 五枚都照旧进 `drill_record`（后端 `AttackEngine.buildScenarioJson` 写进 `Result.Engine`）⇒ 「这一轮到底是按哪套开关跑的」事后可复现仍是它们的价值之一。
            ⚠️ 缺省 = 防护**全开** / 注入**全关**（后端白名单：表外的 key 一律 400，不静默忽略）。
-           ⚠️ 注入里 `mqDown` / `dbSlow` **未接通**：拨得动、进记录，但读数不变 —— 「收了但没实现」如实列进结果的 `Engine.InjectionsNotWired`（见 `INJECTIONS_NOT_WIRED`）。 -->
-      <!-- ⚠️【3a.1 → 3a.6 临时窗口】下一行的 `<p>` 就是窗口开关：**提示在 = 窗口开、提示没 = 窗口关**（3a.6 接上配置面时删掉它即可）。 -->
-      <p class="a-window-note">⚠️ 本区暂不可用（配置面已就绪，页面接线在 3a.6）</p>
+           ⚠️ D3（2026-10-18）起四个注入**全部真接通**（见 `INJECTIONS_NOT_WIRED` 现为空）：
+              `mqDown` 只拦发布侧、`dbSlow` 只延迟 SELECT、`jobDown` 只让定时任务整轮跳过。 -->
+      <!-- 共享配置状态行（2026-10-18 · D3 手验修复）：开关不再是死控件，拨动即
+           `POST /admin/observe/attack/config`（整组替换）。只有写入中 / 写入失败时才出现。 -->
+      <p v-if="configSaving || configErr" class="a-window-note" :class="{ 'is-bad': configErr }">
+        {{ configErr || '共享开关正在写入服务端…' }}
+      </p>
       <h3 class="a-sub">
         防护开关
         <span class="a-subn">默认全开 · 限流 / 熔断 / 重试 / 分池已接闸，改读数；降级不可开关</span>
@@ -168,7 +172,7 @@
 
       <h3 class="a-sub">
         故障注入
-        <span class="a-subn">默认全关 · 标「未接通」的两个拨了也不变读数</span>
+        <span class="a-subn">默认全关 · 四枚都会改变读数（MQ 只拦发布侧、慢 SQL 只延迟 SELECT、调度停摆不中断在途）</span>
       </h3>
       <div class="a-switches">
         <button
@@ -176,17 +180,14 @@
           :key="k"
           type="button"
           class="a-sw"
-          :class="{ 'is-off': !injections.has(k), 'is-na': !wired(k) }"
+          :class="{ 'is-off': !injections.has(k) }"
           :aria-pressed="injections.has(k) ? 'true' : 'false'"
-          :title="wired(k)
-            ? `${injectionLabel(k)}：${injections.has(k) ? '已开' : '已关'}（点一下拨动）—— 这一路真接通了`
-            : `${injectionLabel(k)}：未接通 —— 拨动只进记录，读数不变（结果里列进 InjectionsNotWired）`"
+          :title="`${injectionLabel(k)}：${injections.has(k) ? '已开' : '已关'}（点一下拨动）—— 这一路真接通了`"
           :disabled="running"
           @click="toggleInjection(k)"
         >
           <i class="a-sw-dot" aria-hidden="true"></i>
           <span class="a-sw-n">{{ injectionLabel(k) }}</span>
-          <span v-if="!wired(k)" class="a-sw-na">未接通</span>
         </button>
       </div>
 
@@ -251,6 +252,18 @@
         </p>
       </div>
     </div>
+
+    <!-- ── ③c 实时预览（批四 · 第一批 1）────────────────────────────────────────
+         插在「自定义编排」下方、「演练记录」上方：跑之前先看见三条流现在是活的，
+         跑完也能在这一页确认「刚才那轮压出来的东西长什么样」，不必来回切页。
+         ⚠️ 三列都是**纯文字滚动**（不 import 任何 `components/charts/*`）—— 与块 7 那条
+            「攻击页不画图」的裁决不冲突：这里展示的是流本身，不是图表。
+         ⚠️ 流由子组件自己开、自己关（`onBeforeUnmount` 三条一起 close）；本页不持有句柄。 -->
+    <h2 class="a-h2">
+      实时预览
+      <span class="a-h2n">指标 / 订单 / 日志三条流 · 只读滚动 · 切走本页自动断开</span>
+    </h2>
+    <LivePreview />
 
     <!-- ── ④ 演练记录（`drill_record` 时间倒序）─────────────────────────────── -->
     <h2 class="a-h2">
@@ -451,27 +464,87 @@
         </button>
       </div>
     </div>
+
+    <!-- ── ⑥ 事件台账存储水位 / 彻底清空（2026-10-19）──────────────────────────
+         与 ⑤ 的区别写在卡片里：⑤ 只删**演练标记**命中的行，⑥ 的按钮删**整张**
+         `observed_event`（含日常事件）。⚠️ ⑥ 的按钮同样两段式确认（真删、不可撤销）。
+         水位熔断由后端在 `/run` 开跑前与定时 job 里执行，本卡片只**读**当前刻度；
+         触发时 `/run` 的响应会带 `EvictionWarning`，由 `fire()` 原样显示在页顶。 -->
+    <h2 class="a-h2">
+      可观测事件台账存储
+      <span class="a-h2n">超过高水位时，开跑前自动淘汰最旧数据 —— 牺牲历史，保全当下</span>
+    </h2>
+    <div class="a-card">
+      <p v-if="storage.err" class="a-err">水位读取失败：{{ storage.err }}</p>
+      <p class="a-kv">
+        当前 <b>{{ storage.count == null ? '—' : storage.count.toLocaleString() }}</b> 行
+        / 高水位 <b>{{ storage.highWatermark.toLocaleString() }}</b> 行
+        · 安全线 <b>{{ storage.targetWatermark.toLocaleString() }}</b> 行
+        · 保留最近 <b>{{ storage.retentionDays }}</b> 天
+        · 每批 {{ storage.batchSize.toLocaleString() }} 行
+      </p>
+      <div class="a-water" role="img" :aria-label="`台账水位 ${storagePct}%`">
+        <span
+          class="a-water-fill"
+          :class="{ 'is-high': storage.above }"
+          :style="{ width: storagePct + '%' }"
+        ></span>
+      </div>
+      <p v-if="storage.above" class="a-warn">
+        ⚠️ 当前已超过高水位：下一次「开始演练」会先按时间淘汰最旧数据，直到回到安全线以下。
+      </p>
+      <div class="a-f-actions">
+        <button
+          type="button"
+          class="a-btn"
+          :disabled="loadingStorage || purging || running"
+          @click="loadStorage"
+        >
+          {{ loadingStorage ? '读取中…' : '刷新水位' }}
+        </button>
+        <button
+          type="button"
+          class="a-btn"
+          :class="{ 'a-btn-danger': armedPurge }"
+          :disabled="purging || cleaning || running"
+          @click="doPurge"
+        >
+          <IconGlyph name="no" />
+          {{ purging ? '彻底清空中…' : armedPurge ? '再点一次：确认彻底清空（不可撤销）' : '彻底清空可观测历史数据' }}
+        </button>
+      </div>
+      <p class="a-note">
+        与上面的「清理并恢复环境」不同：那个只删**演练标记**命中的行，这个删**整张**
+        `observed_event`（含日常事件）。后端按批删除，积压多时需要几十秒，请勿重复点击。
+      </p>
+    </div>
   </section>
 </template>
 
 <!--
   攻击模拟器页（块 7 · commit 5）—— `/admin/observe/attack-sim` 的真页（原走 `StubPage.vue`）。
 
-  【它是块 7 四页里的第一页，也是**唯一不画图**的一页】
+  【它仍然是块 7 四页里**唯一不画图**的一页 —— 但批四起多了一块「文字预览」】
   《块7参考》§1.1 逐字：「攻击页 = AttackConsole.vue，只做**编排 + 跑 + 演练记录**；
   三面板已独立成页（D2 后期改判），不塞进攻击页」。⇒ 本页**不 import 任何图表组件**
-  （`components/charts/*` 一个都不引），指标 / 状态流转 / 日志分别是 commit 6–8 的另外三页。
+  （`components/charts/*` 一个都不引），指标 / 状态流转 / 日志**图表**仍在另外三页。
   ⚠️ 那条「不塞三面板」是**用户 2026-10-13 的改判**（原 D2 = 三面板同屏当总控台）；
-     别按更早的方案把它合回去。
+     别按更早的方案把**图表**合回来。
+  ⚠️ **批四 · 第一批（2026-10-18 用户批文）另加**：③c 的 `LivePreview` —— 复用三条 SSE 流，
+     三列**纯文字滚动**（不暂停、不画图、不筛选）。它与上面那条裁决不冲突：用户要的是
+     「跑的时候能看见流在动」，不是把三张图表塞回来。
 
-  【它消费后端 7 个端点，全部经 `api/observe.js`】
+  【它消费的后端端点，全部经 `api/observe.js`】
     · `attackScenarios()` —— 8 个预置场景（Key / Name / Protections / Needs / DefaultWeight）；
     · `runAttack(p)`      —— 跑一轮（**同步跑到结束**，见下）；
     · `attackRecords(p)`  —— 演练记录（`Result` 长文本已由后端拆成字段）；
     · `cleanupAttack()`   —— 清理并恢复（commit 9 补的按钮，破坏性、两段式确认）；
     · `stopAttack()`      —— 叫停正在跑的那一轮（commit 10c 的 `[暂停]`）；
     · `attackStatus()`    —— 演练期间的实时读数（块 7 收尾，1 秒一拍）；
-    · `resetAttackEnvironment()` —— 复位演练环境（2026-10-18，失败态按钮 + 复位后自动重跑）。
+    · `resetAttackEnvironment()` —— 复位演练环境（2026-10-18，失败态按钮 + 复位后自动重跑）；
+    · `attackStorage()` / `purgeAttackEvents()` —— 事件台账水位 / 彻底清空（2026-10-19，⑥ 区）；
+    · `openMetricsStream` / `openOrderStream` / `openEventStream` —— 批四 ③c 预览的三条 SSE
+      （在 `LivePreview.vue` 里开与关，本页只挂组件）。
   ⚠️ 本页**不出现任何后端路径字面量**（那条判据可 grep 自动化：路径只许出现在
      `api/endpoints.js`）。七个函数名即全部后端面。
 
@@ -515,8 +588,13 @@ import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 // 播放时钟、行、横幅都在 `api/replay-session.js` 与日志页那条链上。
 import { useRouter } from 'vue-router'
 // ⚠️ 三层 `../`（不是管理端其它页的两层）：本页在 `views/admin/observe/`，比 `views/admin/` 深一层。
-import { attackRecords, attackScenarios, attackStatus, cleanupAttack, resetAttackEnvironment, runAttack, stopAttack } from '../../../api/observe'
+import {
+  attackRecords, attackScenarios, attackStatus, attackStorage, cleanupAttack,
+  purgeAttackEvents, readAttackConfig, resetAttackEnvironment, runAttack, stopAttack,
+  updateAttackConfig,
+} from '../../../api/observe'
 import { replaySession, startReplaySession } from '../../../api/replay-session'
+import LivePreview from '../../../components/observe/LivePreview.vue'
 import WeightSlider from '../../../components/observe/WeightSlider.vue'
 import IconGlyph from '../../../components/ui/IconGlyph.vue'
 import Pager from '../../../components/Pager.vue'
@@ -526,7 +604,6 @@ import Pager from '../../../components/Pager.vue'
 //    任何开关中文（那条判据见 `observe-labels.js` 文件头：可观测域的中文只有一份，在那）。
 import {
   INJECTIONS,
-  INJECTIONS_NOT_WIRED,
   injectionLabel,
   PROTECTIONS,
   protectionLabel,
@@ -693,6 +770,26 @@ const openId = ref(null)
 const armedClean = ref(false)
 const cleaning = ref(false)
 
+// ── 事件台账存储水位 / 彻底清空（2026-10-19）────────────────────────────────
+/**
+ * 当前水位快照。`count` 初值 `null`（**不是 0**）—— 第一拍回来之前页面画「—」，
+ * 画 0 是在报一个没读到过的数（与 `prog` 同一条口径）。
+ * 其余键的缺省值与后端 `application.properties` 同源，读不到时页面仍能画出刻度。
+ */
+const storage = reactive({
+  count: null,
+  highWatermark: 300000,
+  targetWatermark: 250000,
+  retentionDays: 3,
+  batchSize: 5000,
+  above: false,
+  err: '',
+})
+const loadingStorage = ref(false)
+/** 「上膛」态：与 `armedClean` 同款（`confirm()` 在本仓不可用，见 `doCleanup` 注释）。 */
+const armedPurge = ref(false)
+const purging = ref(false)
+
 // ── 演练环境复位（2026-10-18）────────────────────────────────────────────────
 /** `/run` 失败后的恢复入口是否显示（只在失败那一屏出现，成功后收起）。 */
 const showReset = ref(false)
@@ -708,17 +805,10 @@ function setWeight(key, v) {
 
 // ── 丁：开关的拨动（commit 10c）──────────────────────────────────────────────
 /**
- * 这一路注入**真接通了没有**。判据取自 `INJECTIONS_NOT_WIRED` —— 它是后端
- * `AttackEngine.INJECTIONS_NOT_WIRED` 的镜像，页面**不自己判断**哪几个未接通
- * （那是一条后端事实，前端写第二遍迟早对不上）。
- */
-const wired = (key) => !INJECTIONS_NOT_WIRED.includes(key)
-
-/**
  * 防护开关**有没有真闸**（阶段 2b 起只剩 `degrade` 这一枚）—— 判据取自 `PROTECTIONS_NOT_WIRED`（后端
  * `ProtectionGate.WIRED_KEYS` 的镜像，见 `observe-labels.js` 那张表）。页面**不自己判断**
- * 哪几枚没接闸（那是后端事实，前端写第二遍迟早对不上）。⚠️ 与 `wired(k)` 是**两个不同的判据**，
- * 别合并：那个说的是「这一路**注入**接通了没有」，这个说的是「这枚**防护开关**接了闸没有」。
+ * 哪几枚没接闸（那是后端事实，前端写第二遍迟早对不上）。
+ * ⚠️ D3（2026-10-18）起四个**注入**全部真接通，本页不再有「注入是否接通」的第二个判据。
  */
 const protectionOn = (key) => protectionWired(key)
 
@@ -732,16 +822,86 @@ function toggleProtection(key) {
   if (next.has(key)) next.delete(key)
   else next.add(key)
   protections.value = next
+  pushConfig()
 }
 
-/** 拨一枚注入开关（同上）。⚠️ 未接通的那两枚**照样拨得动**：它们的意义就是「接口位」——
- *  拨不动会让人以为「后端根本没有这个开关」，而它确实在白名单里、收得下、记得住，
- *  只是这一路没有实现 ⇒ 用「拨得动 + 标着未接通」说这件事，比禁用更如实（见 `INJECTIONS_NOT_WIRED`）。 */
+/** 拨一枚注入开关（同上）。D3 起四枚都真接通，拨动即生效（后端 `AttackSwitchConfig` 共享配置）。 */
 function toggleInjection(key) {
   const next = new Set(injections.value)
   if (next.has(key)) next.delete(key)
   else next.add(key)
   injections.value = next
+  pushConfig()
+}
+
+// ── 共享配置读写（2026-10-18 · 修「关掉 mqDown 但指标页横幅不消失」）──────────
+// 根因：此前这两组开关只改本地 `Set` + sessionStorage，**从未 POST 过**配置 ⇒ 后端
+// `AttackSwitchConfig` 里的注入一直开着，`mall.observe.mq.up` 恒为 0，指标页横幅自然是
+// 诚实的「还断着」。修法不是前端藏横幅，而是把开关真的接到后端那份进程内共享配置上。
+//
+// ⚠️ 写请求**串行化**：每次拨动都是「整组替换」，连点两枚时若两发并行，回包顺序颠倒
+//    会让后到的旧快照把新状态盖回去（页面与服务端各说各话）。串成一条 promise 链即可。
+// ⚠️ 失败时**重新读**服务端快照，不留下「页面显示已关、后端其实还开着」的假象。
+const configSaving = ref(false)
+const configErr = ref('')
+let configWrite = Promise.resolve()
+let configPending = 0
+
+function applyConfig(snapshot) {
+  if (!snapshot || typeof snapshot !== 'object') return
+  if (Array.isArray(snapshot.Protections)) {
+    protections.value = new Set(snapshot.Protections.filter((k) => PROTECTIONS.includes(k) && protectionWired(k)))
+  }
+  if (Array.isArray(snapshot.Injections)) {
+    injections.value = new Set(snapshot.Injections.filter((k) => INJECTIONS.includes(k)))
+  }
+}
+
+async function loadSharedConfig() {
+  try {
+    const data = await readAttackConfig()
+    if (data && data.success === false) {
+      configErr.value = data.msg || '共享开关读取失败（页面暂用本地缓存）'
+      return
+    }
+    applyConfig(data)
+    configErr.value = ''
+  } catch (e) {
+    // 配置面读不到不该让整页不可用：本地表单仍可编辑，开跑时引擎读的是服务端那份。
+    configErr.value = `共享开关读取失败（页面暂用本地缓存）：${errText(e)}`
+    console.error('attack config read', e)
+  }
+}
+
+function pushConfig() {
+  const payload = {
+    protections: [...protections.value],
+    injections: [...injections.value],
+  }
+  configPending += 1
+  configSaving.value = true
+  configErr.value = ''
+  configWrite = configWrite
+    .then(() => updateAttackConfig(payload))
+    .then(async (data) => {
+      if (data && data.success === false) {
+        // 先按服务端真相回填，再显示失败文案（loadSharedConfig 成功时会清空 configErr）。
+        await loadSharedConfig()
+        configErr.value = data.msg || '共享开关保存失败'
+        return
+      }
+      applyConfig(data)
+    })
+    .catch(async (e) => {
+      console.error('attack config write', e)
+      await loadSharedConfig()
+      configErr.value = `共享开关保存失败：${errText(e)}`
+    })
+    .finally(() => {
+      configPending -= 1
+      if (configPending <= 0) configSaving.value = false
+    })
+  return configWrite
 }
 
 /** 勾选 = 权重 > 0（后端 `parse` 把 0 权重直接剔除，见 `WeightSlider.vue` 块首）。 */
@@ -960,11 +1120,75 @@ async function doCleanup() {
     flash.kind = 'ok'
     flash.text = `已清理并恢复：${(data && data.summary) || '共 0 行（库里没有待清的攻击数据）'}`
     await loadRecords()
+    // 清场第 ③ 段会删 observed_event 的演练行 ⇒ 水位读数跟着刷新。
+    await loadStorage()
   } catch (e) {
     flash.kind = 'bad'
     flash.text = `清场失败：${errText(e)}`
   } finally {
     cleaning.value = false
+  }
+}
+
+// ── 事件台账存储水位 / 彻底清空（2026-10-19）────────────────────────────────
+/** 水位条宽度（0–100）：`count / highWatermark`。读不到值时画 0 —— 不编一个比例。 */
+const storagePct = computed(() => {
+  const n = Number(storage.count)
+  const h = Number(storage.highWatermark)
+  if (!Number.isFinite(n) || !Number.isFinite(h) || h <= 0) return 0
+  return Math.min(100, Math.max(0, Math.round((n / h) * 100)))
+})
+
+/**
+ * 拉一次存储水位。⚠️ 失败**只记不抛**：水位是辅助读数，读不到不该把整页的其他动作拖停；
+ * `storage.err` 在卡片里单独显示，下一次刷新（跑完 / 清理后 / 挂载）会自己好。
+ */
+async function loadStorage() {
+  loadingStorage.value = true
+  try {
+    const data = await attackStorage()
+    storage.count = Number(data && data.count) || 0
+    storage.highWatermark = Number(data && data.highWatermark) || storage.highWatermark
+    storage.targetWatermark = Number(data && data.targetWatermark) || storage.targetWatermark
+    storage.retentionDays = Number(data && data.retentionDays) || storage.retentionDays
+    storage.batchSize = Number(data && data.batchSize) || storage.batchSize
+    storage.above = !!(data && data.aboveHighWatermark)
+    storage.err = ''
+  } catch (e) {
+    storage.err = errText(e)
+  } finally {
+    loadingStorage.value = false
+  }
+}
+
+/**
+ * 【彻底清空可观测历史数据】—— 两次点击才算数（与 `doCleanup` 同一套上膛机制）。
+ *
+ * ⚠️ 与「清理并恢复环境」的区别：后者只删**演练标记**命中的行，日常事件行不动；
+ *    本按钮删**整张** `observed_event`。⚠️ 真删、不可撤销 ⇒ 第一次点击只上膛。
+ * ⚠️ 后端分批删（5000 行 + 100ms 间歇），积压多时远超默认 10s —— 超时在
+ *    `api/observe.js#purgeAttackEvents` 里已加到 180 秒，本页不重复传。
+ */
+async function doPurge() {
+  if (!armedPurge.value) {
+    armedPurge.value = true
+    flash.kind = 'warn'
+    flash.text = '再点一次「彻底清空」：会真删掉可观测事件台账里的**全部**行（不只演练批次，'
+      + '日常事件也会一起清空），删除不可撤销。'
+    return
+  }
+  armedPurge.value = false
+  purging.value = true
+  try {
+    const data = await purgeAttackEvents()
+    flash.kind = 'ok'
+    flash.text = (data && data.summary) || '已彻底清空事件台账'
+    await loadStorage()
+  } catch (e) {
+    flash.kind = 'bad'
+    flash.text = `彻底清空失败：${errText(e)}`
+  } finally {
+    purging.value = false
   }
 }
 
@@ -1125,10 +1349,10 @@ async function fire(name, chosen, opts) {
       // ⚠️ 3a.1（乙案）：两组开关**不再随这一轮发出** —— 它们是共享配置，由
       //    `GET/POST /admin/observe/attack/config` 读写；引擎开跑时**自己**去读那一份。
       //    ⇒ 这里刻意**什么都不传**：传了后端会直接 400 并指路（不静默忽略）。
-      //    ⚠️ **别**为了「让页面上的开关生效」在这里顺手 POST 一次配置 —— 那会把日志页
-      //    刚拨的开关覆盖回去，乙案的唯一目的（过程中能改、两页共读共写）就白做了。
-      //    ⚠️ 于是本页顶部那两组控件在 3a.1→3a.6 之间是**死控件**（拨了不影响任何东西，
-      //    也不再被读），等 3a.6 接上配置面；窗口登记见本笔收笔报告。
+      //    ⚠️ 本页开关现在**当场**写共享配置（见 `pushConfig`）；`/run` 仍不传 ——
+      //    引擎开跑时自己读那一份，且过程中两页都还能改（乙案）。
+      //    ⚠️ **别**为了「让这一轮用上刚拨的开关」再 POST 一次：多一次无意义写入，
+      //    还可能把日志页刚改的覆盖回去。
     })
     // 甲：这一轮有没有被叫停过、有没有背压弃投 / 取消。后两个数是 `DrillRecordService.run()`
     // 在**响应根上**单列出来的（`ShedRequests` / `AbandonedRequests`），**不并进「失败」那一档**
@@ -1137,14 +1361,22 @@ async function fire(name, chosen, opts) {
     const engNotes = []
     if (Number(data.ShedRequests) > 0) engNotes.push(`背压弃投 ${data.ShedRequests}（没发出去，不算失败）`)
     if (Number(data.AbandonedRequests) > 0) engNotes.push(`取消 ${data.AbandonedRequests}`)
-    flash.kind = 'ok'
+    // ⚠️ 2026-10-19：开跑前的容量水位熔断如果真触发了，后端在 `/run` 响应里带
+    //    `EvictionWarning`（用户批文原句）+ `Evicted` / `StorageCount`。提示必须**原样**显示，
+    //    不能只报「跑完了」—— 否则用户不知道「这一轮为什么清理了几万行旧历史」。
+    const evicted = Number(data.Evicted) || 0
+    flash.kind = data.EvictionWarning ? 'warn' : 'ok'
     flash.text =
+      (data.EvictionWarning ? `${data.EvictionWarning} ` : '') +
       `${eng.Stopped ? '已叫停' : `「${data.Name || name}」跑完`}：总请求 ${data.TotalRequests} · ` +
       `拦下 ${data.BlockedRequests} · 失败 ${data.FailedRequests} · 耗时 ${fmtMs(data.DurationMs)}。` +
       (engNotes.length ? ` ${engNotes.join(' · ')}。` : '') +
+      (evicted > 0 ? ` 开跑前已淘汰最旧 ${evicted} 行事件（现 ${data.StorageCount} 行）。` : '') +
       `记录 Id=${data.Id} 已刷新到「演练记录」并展开。`
     // 跑完刷新列表并按 Id 展开 —— 理由见文件头「跑完之后为什么不再自己拼一行」。
     await loadRecords()
+    // 一轮演练会写进大量事件 ⇒ 水位随之上涨；顺手刷新卡片里的刻度。
+    await loadStorage()
     if (data.Id != null) openId.value = data.Id
   } catch (e) {
     flash.kind = 'bad'
@@ -1307,8 +1539,14 @@ onMounted(() => {
   // 顺序有讲究：先恢复表单，再取场景清单 —— `loadScenarios()` 只给「还没有值」的键填缺省权重，
   // 反过来的话用户拖过的滑条会被后端缺省覆盖（这正是切页后「权重全回默认」的成因之一）。
   restoreForm()
+  // 两组开关的**权威值在服务端**（`attack/config` 是共享配置，日志页也读写同一份）；
+  // sessionStorage 只是读不到时的兜底。必须在 restoreForm 之后覆盖，否则页面会显示
+  // 上一次本地勾选、而后端其实已被人从另一页改掉。
+  loadSharedConfig()
   loadScenarios()
   loadRecords()
+  // 2026-10-19：存储水位是「这一页开跑之前要不要熔断」的可读判据，挂载即拉一次。
+  loadStorage()
   restoreRunState()
   watch([weights, concurrency, durationSeconds, tier, protections, injections], persistForm, { deep: true })
 })
@@ -1433,6 +1671,30 @@ onBeforeUnmount(() => {
 .a-flash.info {
   color: var(--ink-2);
   background: var(--surface-2);
+}
+/* 水位熔断提示（2026-10-19）：跑**成功**了、但历史被淘汰了一部分 ⇒ 既不是绿也不是红。
+   用 `.a-warn` 同源的警告色，避免把「牺牲历史」读成「演练失败」。 */
+.a-flash.warn {
+  color: var(--warning);
+  background: var(--warning-ground);
+}
+/* 事件台账水位条（2026-10-19）：宽度 = count / highWatermark，超线时变警告色。 */
+.a-water {
+  height: 10px;
+  margin: var(--s3) 0;
+  border-radius: 999px;
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  overflow: hidden;
+}
+.a-water-fill {
+  display: block;
+  height: 100%;
+  background: var(--brand-ink);
+  transition: width 0.3s ease;
+}
+.a-water-fill.is-high {
+  background: var(--warning);
 }
 /* 演练环境复位入口（2026-10-18）：只在 `/run` 失败那一屏出现。
    ⚠️ 用危险色系画边框与按钮 —— 它是「环境已经坏了」的提示，不是普通信息条。 */
@@ -1598,25 +1860,13 @@ onBeforeUnmount(() => {
 .a-sw-n {
   font-size: var(--fs-xs);
 }
-/* 未接通的那两枚（`mqDown` / `dbSlow`）：整枚改成虚线边 —— 一眼看出它是个**占位**。
-   ⚠️ 但**不置灰到不可点**：拨得动是故意的（理由见 `toggleInjection` —— 拨不动会被读成
-   「后端根本没这个开关」，而它确实在白名单里）。 */
-.a-sw.is-na {
-  border-style: dashed;
-}
-/* 「未接通」的角标 —— 虚线边 + 警示色：它是一条**说明**，不是一个按钮。 */
-.a-sw-na {
-  font-size: var(--fs-xs);
-  color: var(--warning);
-  border: 1px dashed var(--warning);
-  border-radius: var(--r1);
-  padding: 0 var(--s1);
-}
+/* ⚠️ D3（2026-10-18）起注入四枚全部真接通：原先给 `mqDown` / `dbSlow` 的
+   `.a-sw.is-na`（虚线边）与 `.a-sw-na`（「未接通」角标）**已删除** —— 留着会让读代码的人
+   以为还有占位开关。页面不再存在「拨了也不变读数」的注入。 */
 /* 「不可开关」的那一枚防护开关（D 段 · commit 2 立案、阶段 2b 起只剩
    `degrade` = 记录位 —— `retry` 已接闸、不再是这一类）—— **标灰 + 虚线边 + 中性色角标**。
-   ⚠️ 与上面 `.a-sw.is-na`（注入的「未接通」）**不是同一件事**，故另起两条类名，不共用：
-   那个说的是「接通了没有」（**拨得动**，拨动会进记录）；这个说的是「**能不能拨**」（不可开关）。
-   共用一条会让防护开关看起来「也能拨」，而它们的模板 `disabled` 是常开的。 */
+   ⚠️ 它说的是「**能不能拨**」（不可开关），与「注入了没有」是两件事；
+   共用类名会让防护开关看起来「也能拨」，而它们的模板 `disabled` 是常开的。 */
 .a-sw.is-locked {
   border-style: dashed;
   background: transparent;
@@ -1902,11 +2152,12 @@ onBeforeUnmount(() => {
   opacity: 0.85;
   margin-left: var(--s2);
 }
-.a-kv, .a-window-note {  /* ⚠️ 后者 = 3a.1→3a.6 的**临时**提示（开关控件组尚未接上配置面）；3a.6 删掉模板那行 `<p>` 后本类无引用 */
+.a-kv, .a-window-note {  /* ⚠️ 后者 = 共享开关写入中 / 写入失败的状态行（批四已清掉旧的过期提示文案） */
   font-size: var(--fs-xs);
   color: var(--ink-2);
   line-height: 1.9;
 }
+.a-window-note.is-bad { color: var(--danger); }
 .a-kv code {
   font-family: var(--font-mono);
   color: var(--ink);
