@@ -8,38 +8,43 @@
       <div class="nav-right" @click="goUserCenter">{{ isLogin ? '用户中心' : '登录 / 注册' }}</div>
     </nav>
 
-    <!-- 头图：深空灰 → 高级黑，右下角一层香槟金辉光；毛玻璃说明卡压在同一块渐变上。
-         文案只说服务端真正在筛的东西（品牌加盟审核 + 在架可售），不写「每一件都可追溯」这类
-         本页拿不出证据的话。 -->
-    <header class="hero">
-      <div class="hero-mesh" aria-hidden="true"></div>
-      <div class="hero-in">
-        <div class="hero-copy">
-          <nav class="crumb">
-            <router-link :to="homePath">首页</router-link>
-            <i class="sp">/</i><span>品牌专区</span>
-          </nav>
-          <p class="hero-kicker">平台直审 · 品牌加盟</p>
-          <h1 class="hero-title">品牌专区</h1>
-          <p class="hero-lede">只陈列通过品牌加盟审核的商家在架商品；售完与下架即移出本页。</p>
-          <span class="hero-rule" aria-hidden="true"></span>
-        </div>
-
-        <aside class="hero-glass" aria-label="专区说明">
-          <div class="glass-hd">
-            <span class="glass-seal" aria-hidden="true">品</span>
-            <span class="glass-title">专区说明</span>
-          </div>
-          <dl class="glass-list">
-            <div class="glass-row"><dt>入驻门槛</dt><dd>平台审核通过</dd></div>
-            <div class="glass-row"><dt>在架口径</dt><dd>上架且未售完</dd></div>
-            <div class="glass-row"><dt>会员权益</dt><dd>会员价同享</dd></div>
-          </dl>
-        </aside>
-      </div>
-    </header>
-
     <main class="wrap">
+      <!-- A 版页头（BUYER / BRAND ZONE）：眉题 + 大标题 + 说明 + 右侧动作。
+           动作全部落在既有地址上：入驻申请页 / 商城首页 / 秒杀日程。 -->
+      <section class="page-head">
+        <div>
+          <div class="kicker">BUYER / BRAND ZONE</div>
+          <h1>品牌专区</h1>
+          <p>只陈列通过品牌加盟审核的商家在架商品；售完与下架即移出本页。</p>
+        </div>
+        <div class="head-actions">
+          <router-link class="btn solid" :to="applyPath">{{ applyLabel }}</router-link>
+          <router-link class="btn" :to="homePath">回商城首页</router-link>
+          <router-link class="btn" to="/seckill">秒杀日程</router-link>
+        </div>
+      </section>
+
+      <!-- 品牌说明（A 版 brand-hero）：左侧大字与说明，右侧品牌认证发丝线表。
+           说明文案沿用改前头图里的口径；右侧四行是服务端真正在筛的东西。
+           ⚠️ 放在三态链**之外**：加载 / 空 / 错误时这份专区说明仍要在（改前头图也是常驻）。 -->
+      <section class="brand-hero" aria-label="专区说明">
+        <div class="brand-copy">
+          <div class="kicker">品牌认证 / BRAND CERTIFIED</div>
+          <h2>平台直审，<br>只留通过审核的在架品牌。</h2>
+          <p>只陈列通过品牌加盟审核的商家在架商品；售完与下架即移出本页。</p>
+          <div class="bh-actions">
+            <router-link class="btn solid" :to="applyPath">{{ applyLabel }}</router-link>
+            <router-link class="btn" to="/seckill">秒杀日程</router-link>
+          </div>
+        </div>
+        <dl class="cert">
+          <div class="cert-line"><dt>入驻门槛</dt><dd>平台审核通过</dd></div>
+          <div class="cert-line"><dt>在架口径</dt><dd>上架且未售完</dd></div>
+          <div class="cert-line"><dt>会员权益</dt><dd>会员价同享</dd></div>
+          <div class="cert-line"><dt>当前在架</dt><dd>{{ shelfCount }} 件</dd></div>
+        </dl>
+      </section>
+
       <p v-if="errMsg" class="tip">
         {{ errMsg }}
         <button type="button" class="tip-a" @click="retry">重试</button>
@@ -62,27 +67,37 @@
       </div>
 
       <template v-else>
-        <!-- 品牌橱窗：左一占满两行的品牌大图卡，右侧四枚小卡。手机端整体堆叠。 -->
+        <!-- 品牌橱窗：左一占满两行的品牌大图卡，右侧四枚小卡。手机端整体堆叠。
+             字段与改前一致：图 / 品牌首字 + 店名 / 商品名 / 价格 / 详情跳转。 -->
         <section v-if="showShowcase" class="showcase" aria-label="品牌精选">
-          <div class="sec-hd">
-            <h2 class="sec-title">本季精选</h2>
+          <div class="reco-head">
+            <div>
+              <div class="kicker">FEATURED / 精选</div>
+              <h2 class="sec-title">本季精选</h2>
+            </div>
             <span class="sec-sub">来自品牌加盟商家的在架单品</span>
           </div>
           <div class="show-grid">
             <router-link class="show-card show-feature" :to="linkOf(feature)">
-              <img v-if="feature.GoodImg" :src="feature.GoodImg" :alt="feature.GoodName" loading="lazy" />
-              <span class="show-badge"><i class="mono">{{ brandInitial(feature) }}</i><b>{{ brandName(feature) }}</b></span>
+              <div class="show-media">
+                <img v-if="feature.GoodImg" :src="feature.GoodImg" :alt="feature.GoodName" loading="lazy" />
+                <span class="show-badge"><i class="mono">{{ brandInitial(feature) }}</i><b>{{ brandName(feature) }}</b></span>
+              </div>
               <div class="show-copy">
                 <span class="show-kicker">精选</span>
                 <h3 class="show-name">{{ feature.GoodName }}</h3>
-                <span class="show-price">¥{{ fmt(feature.Price) }}</span>
+                <div class="show-foot">
+                  <span class="show-price">¥{{ fmt(feature.Price) }}</span>
+                  <span class="show-cta">查看详情 <i aria-hidden="true">→</i></span>
+                </div>
               </div>
-              <span class="show-cta">查看详情 <i aria-hidden="true">→</i></span>
             </router-link>
 
             <router-link v-for="g in minis" :key="g.Id || g.ProductCode" class="show-card show-mini" :to="linkOf(g)">
-              <img v-if="g.GoodImg" :src="g.GoodImg" :alt="g.GoodName" loading="lazy" />
-              <span class="mini-badge"><i class="mono">{{ brandInitial(g) }}</i><b>{{ brandName(g) }}</b></span>
+              <div class="show-media">
+                <img v-if="g.GoodImg" :src="g.GoodImg" :alt="g.GoodName" loading="lazy" />
+                <span class="mini-badge"><i class="mono">{{ brandInitial(g) }}</i><b>{{ brandName(g) }}</b></span>
+              </div>
               <div class="mini-copy">
                 <span class="mini-name">{{ g.GoodName }}</span>
                 <span class="mini-price">¥{{ fmt(g.Price) }}</span>
@@ -91,15 +106,19 @@
           </div>
         </section>
 
-        <!-- 货架：六列栅格，常规卡跨 2 列（一行三枚）、每五枚里后两枚跨 3 列（一行两枚）——
-             3×2 + 2×3 = 12 列正好铺满两行，不靠 `dense` 重排，顺序仍是服务端的 `Id DESC`。 -->
+        <!-- 货架：12 列错落（7 / 5 / 4 / 4 / 4 一轮 = 两行正好铺满），不靠 dense 重排，
+             顺序仍是服务端的 `Id DESC`。商品卡本身（图 / 名 / 价 / 品牌标 / 加购 / 跳转）
+             由 `ProductCard.vue` 原样提供，本页只覆写直角与错落跨度。 -->
         <section class="shelf" aria-label="全部品牌商品">
-          <div class="sec-hd">
-            <h2 class="sec-title">全部在架</h2>
-            <span class="sec-sub">已加载 {{ shelfCount }} 件</span>
+          <div class="shelf-bar">
+            <div>
+              <div class="kicker">ALL IN STOCK</div>
+              <h2 class="sec-title">全部在架</h2>
+            </div>
+            <span class="brand-count">已加载 {{ shelfCount }} 件</span>
           </div>
           <div class="grid">
-            <ProductCard v-for="(g, i) in list" :key="g.Id || g.ProductCode || i" :goods="g" :class="{ wide: i % 5 >= 3 }" />
+            <ProductCard v-for="(g, i) in list" :key="g.Id || g.ProductCode || i" :goods="g" :class="'w' + [7, 5, 4, 4, 4][i % 5]" />
           </div>
         </section>
       </template>
@@ -123,7 +142,7 @@
 // 列表侧共用「去重 + 滤已售完」口径（`config/goods-flags.js` 的 `sharedList`，与首页一致）：
 // 品牌专区是**共享面**，售完商品不该占位。
 //
-// 第二步 UI 升维（2026-10-19）：深空灰头图 + 毛玻璃说明卡 + 左大右小的品牌橱窗 + 错落货架。
+// A 版线框复刻（2026-10-19）：页头 / brand-hero / 发丝线直角卡片 / 12 列错落货架。
 // 视觉只在本页的 `<style scoped>` 里成立，**不改** `ProductCard.vue` 的通用形制（卡上品牌标
 // 已在组件里单独升成黑金，那是全局品牌语义）。
 import { computed, onMounted } from 'vue'
@@ -139,6 +158,10 @@ import ProductCard from '../components/ProductCard.vue'
 const router = useRouter()
 const isLogin = computed(() => isLoggedIn())
 const homePath = computed(() => (getMerchantId() ? '/merchant' : '/customer'))
+// 纯展示 computed：两条入驻申请地址都是既有路由（客户侧 /customer/user/apply，
+// 商家侧 /merchant/user/apply）。商家身份才带 `?type=brand` 直达品牌加盟表单。
+const applyPath = computed(() => (homePath.value === '/merchant' ? '/merchant/user/apply?type=brand' : '/customer/user/apply'))
+const applyLabel = computed(() => (homePath.value === '/merchant' ? '申请品牌加盟' : '申请商家入驻'))
 
 const PAGE_SIZE = 24
 const feed = useInfiniteList(async (offset, limit) => {
@@ -180,16 +203,10 @@ onMounted(() => { feed.loadNext() })
 
 <style scoped>
 /* ── 本页色板（只在本组件生效）────────────────────────────────────────────────────
-   深空灰 / 高级黑打底，香槟金只做「品牌」这一件事的强调（眉题、徽章、价格、发丝线）。
-   ⚠️ 这是用户第二步口令明确授权的越族配色（品牌语义），不回流到 tokens.css，
-      秒杀仍朱砂、国补仍青瓷绿。 */
+   A 版线框：白纸 / 墨色 / 发丝线 / 直角。香槟金只留在「品牌徽章」这一件事上
+   （品牌语义），不铺到正文与卡片底，避免把品牌专区洗成另一套页面主题。 */
 .bz-page {
-  --bz-black: #0c0d0f;
-  --bz-graphite: #17191c;
-  --bz-gold: #c9a25a;
   --bz-gold-2: #e8c98a;
-  --bz-cream: #f4f1ea;
-  --bz-line: rgba(255, 255, 255, .1);
   --bz-ease: cubic-bezier(.22, .61, .36, 1);
   min-height: 100vh;
   background: var(--bg);
@@ -198,7 +215,7 @@ onMounted(() => { feed.loadNext() })
   font-size: var(--fs-sm);
 }
 
-/* ── 顶栏：与头图连成一块深色，滚动时毛玻璃。 ─────────────────────────────────── */
+/* ── 顶栏：A 版白纸横条，与页面共用发丝线。 ─────────────────────────────────── */
 .nav-bar {
   position: sticky;
   top: 0;
@@ -206,286 +223,259 @@ onMounted(() => { feed.loadNext() })
   display: flex;
   align-items: center;
   gap: var(--s4);
-  padding: var(--s3) var(--s5);
-  background: rgba(12, 13, 15, .92);
-  border-bottom: 1px solid var(--bz-line);
-  backdrop-filter: blur(14px);
-  -webkit-backdrop-filter: blur(14px);
-  color: var(--bz-cream);
+  height: 60px;
+  padding: 0 var(--s7);
+  background: rgba(255, 255, 255, .94);
+  border-bottom: 1px solid var(--line);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
 }
 .nav-back {
   border: 0;
   background: transparent;
-  color: rgba(244, 241, 234, .72);
+  color: var(--ink-2);
   cursor: pointer;
   font-size: var(--fs-sm);
-  transition: color .2s;
+  padding: 0 var(--s2);
+  white-space: nowrap;
+  transition: color .16s;
 }
-.nav-back:hover { color: var(--bz-gold-2); }
+.nav-back:hover { color: var(--ink); }
 .brand {
+  font-family: var(--font-display);
   font-size: var(--fs-lg);
-  font-weight: 600;
-  letter-spacing: .16em;
-  color: var(--bz-cream);
+  font-weight: var(--fw-semi);
+  letter-spacing: .02em;
+  color: var(--ink);
   text-decoration: none;
+  white-space: nowrap;
 }
 .nav-right {
   margin-left: auto;
-  color: rgba(244, 241, 234, .72);
+  color: var(--ink-2);
+  font-weight: var(--fw-med);
   cursor: pointer;
-  transition: color .2s;
+  white-space: nowrap;
+  transition: color .16s;
 }
-.nav-right:hover { color: var(--bz-gold-2); }
+.nav-right:hover { color: var(--ink); }
 .nav-back:focus-visible,
 .nav-right:focus-visible,
 .brand:focus-visible {
-  outline: 2px solid var(--bz-gold);
-  outline-offset: 4px;
-  border-radius: var(--r1);
+  outline: 2px solid var(--ink);
+  outline-offset: 3px;
 }
 
-/* ── 头图 ─────────────────────────────────────────────────────────────────────── */
-.hero {
-  position: relative;
-  overflow: hidden;
-  background:
-    radial-gradient(900px 420px at 82% -12%, rgba(201, 162, 90, .22), transparent 68%),
-    radial-gradient(700px 380px at 8% 112%, rgba(79, 96, 104, .22), transparent 70%),
-    linear-gradient(138deg, #16181b 0%, #0c0d0f 56%, #17130d 100%);
-  color: var(--bz-cream);
-}
-/* 细网格 + 向下淡出：给「深空」一点尺度感，不做整屏纹理。 */
-.hero-mesh {
-  position: absolute;
-  inset: 0;
-  background-image:
-    linear-gradient(rgba(255, 255, 255, .04) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(255, 255, 255, .04) 1px, transparent 1px);
-  background-size: 64px 64px;
-  mask-image: radial-gradient(120% 90% at 30% 0%, #000 20%, transparent 78%);
-  -webkit-mask-image: radial-gradient(120% 90% at 30% 0%, #000 20%, transparent 78%);
-  pointer-events: none;
-}
-.hero-in {
-  position: relative;
-  z-index: 1;
-  max-width: 1180px;
-  margin: 0 auto;
-  padding: 34px var(--s5) 54px;
-  display: grid;
-  grid-template-columns: minmax(0, 1.4fr) minmax(300px, .85fr);
-  gap: 48px;
-  align-items: end;
-}
-.crumb {
-  font-size: var(--fs-xs);
-  color: rgba(244, 241, 234, .5);
-  margin-bottom: 34px;
-}
-.crumb a {
-  color: rgba(244, 241, 234, .5);
-  text-decoration: none;
-  transition: color .2s;
-}
-.crumb a:hover { color: var(--bz-gold-2); }
-.crumb .sp {
-  margin: 0 6px;
-  font-style: normal;
-}
-.hero-kicker {
-  margin: 0 0 14px;
-  font-size: 12px;
-  letter-spacing: .26em;
-  color: var(--bz-gold);
-}
-.hero-title {
-  margin: 0;
-  font-size: clamp(42px, 6vw, 68px);
-  font-weight: 600;
-  line-height: 1.04;
-  letter-spacing: .05em;
-  color: var(--bz-cream);
-}
-.hero-lede {
-  max-width: 34em;
-  margin: 20px 0 0;
-  font-size: var(--fs-sm);
-  line-height: 1.8;
-  color: rgba(244, 241, 234, .62);
-}
-.hero-rule {
-  display: block;
-  width: 72px;
-  height: 1px;
-  margin-top: 30px;
-  background: linear-gradient(90deg, var(--bz-gold), rgba(201, 162, 90, 0));
-}
-
-/* 毛玻璃说明卡：半透明底 + 14px 模糊 + 内高光；它压在同一块金色辉光上才「像玻璃」。 */
-.hero-glass {
-  position: relative;
-  padding: 22px 22px 18px;
-  border-radius: 16px;
-  background: linear-gradient(145deg, rgba(255, 255, 255, .09), rgba(255, 255, 255, .035));
-  border: 1px solid rgba(255, 255, 255, .14);
-  box-shadow: 0 24px 60px -30px rgba(0, 0, 0, .9), inset 0 1px 0 rgba(255, 255, 255, .16);
-  backdrop-filter: blur(14px) saturate(115%);
-  -webkit-backdrop-filter: blur(14px) saturate(115%);
-}
-.glass-hd {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding-bottom: 14px;
-  border-bottom: 1px solid var(--bz-line);
-}
-.glass-seal {
-  display: grid;
-  place-items: center;
-  width: 30px;
-  height: 30px;
-  border-radius: 8px;
-  background: linear-gradient(135deg, var(--bz-gold-2), #a97f3c);
-  color: #1a1409;
-  font-size: 15px;
-  font-weight: 700;
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .45);
-}
-.glass-title {
-  font-size: 13px;
-  letter-spacing: .14em;
-  color: rgba(244, 241, 234, .8);
-}
-.glass-list { margin: 6px 0 0; }
-.glass-row {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 18px;
-  padding: 10px 0;
-  border-bottom: 1px solid rgba(255, 255, 255, .06);
-}
-.glass-row:last-child { border-bottom: 0; padding-bottom: 2px; }
-.glass-row dt {
-  font-size: 12px;
-  letter-spacing: .08em;
-  color: rgba(244, 241, 234, .45);
-}
-.glass-row dd {
-  margin: 0;
-  font-size: 13px;
-  color: var(--bz-gold-2);
-  letter-spacing: .04em;
-}
-
-/* ── 内容区 ───────────────────────────────────────────────────────────────────── */
+/* ── A 版页头 ────────────────────────────────────────────────────────────────── */
 .wrap {
-  max-width: 1180px;
+  max-width: 1220px;
   margin: 0 auto;
   padding: 40px var(--s5) var(--s8);
 }
-.sec-hd {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: var(--s4);
-  margin-bottom: 18px;
+.page-head {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 32px;
+  align-items: end;
+  padding-bottom: 24px;
+  border-bottom: 1px solid var(--ink);
+  margin-bottom: 32px;
 }
-.sec-title {
-  margin: 0;
-  font-size: 22px;
-  font-weight: 600;
-  letter-spacing: .04em;
-  color: var(--ink);
-}
-.sec-sub {
-  font-size: var(--fs-xs);
+.kicker {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: .12em;
+  text-transform: uppercase;
   color: var(--ink-3);
 }
-.showcase { margin-bottom: 52px; }
+.page-head h1 {
+  margin: 10px 0 12px;
+  font-family: var(--font-display);
+  font-size: clamp(38px, 5vw, 48px);
+  line-height: 1.02;
+  font-weight: var(--fw-semi);
+  letter-spacing: -.035em;
+  color: var(--ink);
+}
+.page-head p {
+  max-width: 700px;
+  color: var(--ink-3);
+  font-size: 14px;
+  line-height: 1.7;
+}
+.head-actions {
+  display: flex;
+  gap: var(--s2);
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  align-items: center;
+}
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 38px;
+  padding: 0 16px;
+  border: 1px solid var(--ink);
+  border-radius: 0;
+  background: var(--surface);
+  color: var(--ink);
+  font-size: 13px;
+  line-height: 1.2;
+  text-decoration: none;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background-color .12s linear, color .12s linear;
+}
+.btn:hover { background: var(--ink); color: var(--bg); }
+.btn.solid { background: var(--ink); color: var(--bg); }
+.btn.solid:hover { background: var(--surface); color: var(--ink); }
+.btn:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
 
-/* 左一占两行 + 右四枚小卡。 */
+/* ── brand-hero：左侧大字说明，右侧认证发丝线表。 ───────────────────────────── */
+.brand-hero {
+  display: grid;
+  grid-template-columns: minmax(0, 1.2fr) minmax(280px, .65fr);
+  gap: 40px;
+  align-items: end;
+  padding: 34px 36px;
+  border: 1px solid var(--line-2);
+  background: var(--surface);
+  margin-bottom: 28px;
+}
+.brand-hero h2 {
+  margin: 12px 0 16px;
+  font-family: var(--font-display);
+  font-size: clamp(38px, 4.6vw, 58px);
+  line-height: .98;
+  font-weight: var(--fw-semi);
+  letter-spacing: -.05em;
+  color: var(--ink);
+}
+.brand-hero p {
+  max-width: 640px;
+  font-size: 13px;
+  line-height: 1.8;
+  color: var(--ink-3);
+}
+.bh-actions {
+  display: flex;
+  gap: var(--s2);
+  flex-wrap: wrap;
+  margin-top: 18px;
+}
+.cert {
+  margin: 0;
+  padding-left: 26px;
+  border-left: 1px solid var(--line);
+}
+.cert-line {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 9px 0;
+  border-bottom: 1px solid var(--line);
+  font-size: 12px;
+}
+.cert-line:last-child { border-bottom: 0; }
+.cert-line dt { color: var(--ink-3); }
+.cert-line dd {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--ink);
+  text-align: right;
+}
+
+/* ── 本季精选：左一占两行 + 右四枚小卡，图上一行、文字一行的直角卡。 ───────── */
+.showcase { margin-bottom: 32px; }
+.reco-head,
+.shelf-bar {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: var(--s4);
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--line);
+  margin-bottom: 16px;
+}
+.sec-title {
+  margin: 4px 0 0;
+  font-family: var(--font-display);
+  font-size: 24px;
+  line-height: 1.15;
+  font-weight: var(--fw-semi);
+  letter-spacing: -.02em;
+  color: var(--ink);
+}
+.sec-sub,
+.brand-count {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--ink-3);
+  white-space: nowrap;
+}
 .show-grid {
   display: grid;
   grid-template-columns: minmax(0, 1.55fr) minmax(0, 1fr) minmax(0, 1fr);
-  grid-template-rows: 218px 218px;
+  grid-template-rows: 240px 240px;
   gap: var(--s4);
 }
 .show-card {
   position: relative;
-  display: block;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
   overflow: hidden;
-  border-radius: 14px;
-  background: #101113;
-  color: var(--bz-cream);
+  border: 1px solid var(--line-2);
+  border-radius: 0;
+  background: var(--surface);
+  color: var(--ink);
   text-decoration: none;
-  isolation: isolate;
-  transition: box-shadow .45s var(--bz-ease), transform .45s var(--bz-ease);
+  transition: border-color .18s linear;
 }
-.show-card::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  z-index: 1;
-  background: linear-gradient(180deg, rgba(8, 8, 9, .04) 32%, rgba(8, 8, 9, .8) 100%);
-  transition: background .45s var(--bz-ease);
-  pointer-events: none;
+.show-card:hover { border-color: var(--ink); }
+.show-card:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+.show-media {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--img);
 }
-.show-card img {
+.show-media img {
+  display: block;
   width: 100%;
   height: 100%;
   object-fit: cover;
-  display: block;
-  transition: transform .65s var(--bz-ease);
+  transition: transform .55s var(--bz-ease);
 }
-.show-card:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 30px 64px -28px rgba(10, 10, 12, .72);
-}
-.show-card:hover img { transform: scale(1.05); }
-.show-card:hover::after {
-  background: linear-gradient(180deg, rgba(8, 8, 9, 0) 18%, rgba(8, 8, 9, .88) 100%);
-}
-.show-card:focus-visible {
-  outline: 2px solid var(--bz-gold);
-  outline-offset: 3px;
-}
-
-.show-feature {
-  grid-column: 1;
-  grid-row: 1 / span 2;
-}
+.show-card:hover .show-media img { transform: scale(1.04); }
+.show-feature { grid-column: 1; grid-row: 1 / span 2; }
 .show-badge,
 .mini-badge {
   position: absolute;
   z-index: 2;
   display: inline-flex;
   align-items: center;
-  gap: 8px;
-  border-radius: 999px;
-  background: rgba(12, 12, 14, .55);
-  border: 1px solid rgba(232, 201, 138, .42);
-  backdrop-filter: blur(10px);
-  -webkit-backdrop-filter: blur(10px);
+  gap: 6px;
+  max-width: calc(100% - 20px);
+  padding: 3px 8px 3px 3px;
+  border: 1px solid rgba(201, 162, 90, .6);
+  border-radius: 0;
+  background: rgba(20, 17, 12, .9);
   color: var(--bz-gold-2);
-  max-width: calc(100% - 36px);
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: .04em;
 }
-.show-badge {
-  top: 18px;
-  left: 18px;
-  padding: 5px 14px 5px 5px;
-  font-size: 12px;
-}
-.mini-badge {
-  top: 10px;
-  left: 10px;
-  padding: 3px 10px 3px 3px;
-  font-size: 11px;
-}
+.show-badge { top: 12px; left: 12px; }
+.mini-badge { top: 8px; left: 8px; padding: 2px 6px 2px 2px; font-size: 8px; }
 .show-badge b,
 .mini-badge b {
-  font-weight: 500;
+  min-width: 0;
   overflow: hidden;
+  font-weight: 400;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -493,116 +483,127 @@ onMounted(() => { feed.loadNext() })
   display: grid;
   place-items: center;
   flex: none;
-  width: 26px;
-  height: 26px;
-  border-radius: 50%;
+  width: 18px;
+  height: 18px;
   background: linear-gradient(135deg, var(--bz-gold-2), #a97f3c);
   color: #1a1409;
   font-style: normal;
-  font-size: 12px;
+  font-size: 10px;
   font-weight: 700;
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .45);
 }
-.mini-badge .mono { width: 20px; height: 20px; font-size: 10px; }
-
+.mini-badge .mono { width: 14px; height: 14px; font-size: 8px; }
 .show-copy {
-  position: absolute;
-  z-index: 2;
-  left: 26px;
-  right: 150px;
-  bottom: 24px;
+  flex: none;
+  padding: 16px 18px 18px;
+  border-top: 1px solid var(--line-2);
 }
 .show-kicker {
   display: block;
-  margin-bottom: 8px;
-  font-size: 11px;
-  letter-spacing: .32em;
-  color: var(--bz-gold);
+  margin-bottom: 6px;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: .14em;
+  color: var(--ink-3);
+  text-transform: uppercase;
 }
 .show-name {
-  margin: 0 0 12px;
-  font-size: clamp(21px, 2.2vw, 28px);
-  font-weight: 600;
-  line-height: 1.3;
-  color: var(--bz-cream);
   display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
   overflow: hidden;
+  margin: 0 0 10px;
+  font-family: var(--font-display);
+  font-size: clamp(21px, 2.2vw, 28px);
+  line-height: 1.2;
+  font-weight: var(--fw-semi);
+  letter-spacing: -.02em;
+  color: var(--ink);
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+.show-foot {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--s3);
 }
 .show-price {
-  font-size: 20px;
+  font-family: var(--font-mono);
+  font-size: 17px;
+  color: var(--ink);
   font-variant-numeric: tabular-nums;
-  color: var(--bz-gold-2);
 }
 .show-cta {
-  position: absolute;
-  z-index: 2;
-  right: 22px;
-  bottom: 24px;
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  padding: 8px 14px;
-  border-radius: 999px;
-  background: rgba(244, 241, 234, .1);
-  border: 1px solid rgba(232, 201, 138, .38);
-  color: var(--bz-gold-2);
-  font-size: 12px;
+  gap: 4px;
+  padding-bottom: 1px;
+  border-bottom: 1px solid var(--ink);
+  font-size: 11px;
+  color: var(--ink);
   white-space: nowrap;
-  opacity: 0;
-  transform: translateY(8px);
-  transition: opacity .35s var(--bz-ease), transform .35s var(--bz-ease);
 }
-.show-cta i { font-style: normal; transition: transform .35s var(--bz-ease); }
-.show-feature:hover .show-cta { opacity: 1; transform: none; }
-.show-feature:hover .show-cta i { transform: translateX(2px); }
-
+.show-cta i { font-style: normal; transition: transform .2s ease; }
+.show-card:hover .show-cta i { transform: translateX(2px); }
 .mini-copy {
-  position: absolute;
-  z-index: 2;
-  left: 14px;
-  right: 14px;
-  bottom: 13px;
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 11px 12px 12px;
+  border-top: 1px solid var(--line-2);
 }
 .mini-name {
   display: -webkit-box;
-  margin-bottom: 6px;
+  overflow: hidden;
   font-size: 13px;
   line-height: 1.4;
-  color: rgba(244, 241, 234, .92);
-  -webkit-line-clamp: 2;
+  color: var(--ink);
   -webkit-box-orient: vertical;
-  overflow: hidden;
+  -webkit-line-clamp: 2;
 }
 .mini-price {
-  font-size: 13px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--ink-2);
   font-variant-numeric: tabular-nums;
-  color: var(--bz-gold-2);
 }
 
-/* ── 货架：六列错落（跨 2 / 跨 3），不靠 dense 重排。 ─────────────────────────── */
+/* ── 货架：12 列错落（7 / 5 / 4 / 4 / 4），直角 + 发丝线，不用 dense 重排。 ─── */
+.shelf { margin-top: 8px; }
 .grid {
   display: grid;
-  grid-template-columns: repeat(6, minmax(0, 1fr));
+  grid-template-columns: repeat(12, minmax(0, 1fr));
   gap: var(--s4);
 }
 .grid :deep(.pcard) {
-  grid-column: span 2;
-  transition: transform .4s var(--bz-ease), box-shadow .4s var(--bz-ease), border-color .3s;
+  grid-column: span 4;
+  border-color: var(--line-2);
+  border-radius: 0;
+  transition: transform .35s var(--bz-ease), border-color .18s linear, box-shadow .35s var(--bz-ease);
 }
-.grid :deep(.pcard.wide) { grid-column: span 3; }
-.grid :deep(.pcard-img) { overflow: hidden; }
-.grid :deep(.pcard-img img) { transition: transform .6s var(--bz-ease); }
+.grid :deep(.pcard.w7) { grid-column: span 7; }
+.grid :deep(.pcard.w5) { grid-column: span 5; }
 .grid :deep(.pcard:hover) {
-  transform: translateY(-3px);
-  border-color: rgba(201, 162, 90, .72);
-  box-shadow: 0 24px 46px -26px rgba(20, 22, 24, .45);
+  transform: translateY(-2px);
+  border-color: var(--ink);
+  box-shadow: 0 20px 38px -30px rgba(20, 22, 24, .5);
 }
-.grid :deep(.pcard:hover .pcard-img) { background: #efe9dc; }
-.grid :deep(.pcard:hover .pcard-img img) { transform: scale(1.045); }
-/* 宽卡把图换成更扁的横幅比例，避免整卡被一张 4/3 大图撑得过高。 */
-.grid :deep(.pcard.wide .pcard-img) { aspect-ratio: 21 / 9; }
+.grid :deep(.pcard-img) { overflow: hidden; }
+.grid :deep(.pcard-img img) { transition: transform .55s var(--bz-ease); }
+.grid :deep(.pcard:hover .pcard-img img) { transform: scale(1.04); }
+/* 宽卡用固定图高，让同一行的 7 / 5 两枚卡在底部对齐（不靠 aspect-ratio 各算各的）。 */
+.grid :deep(.pcard.w7 .pcard-img),
+.grid :deep(.pcard.w5 .pcard-img) { height: 300px; }
+.grid :deep(.pcard-name) {
+  font-family: var(--font-display);
+  font-size: 17px;
+  line-height: 1.35;
+  min-height: 2.7em;
+}
+.grid :deep(.pcard.w7 .pcard-name),
+.grid :deep(.pcard.w5 .pcard-name) { font-size: 21px; }
+.grid :deep(.pcard-kind),
+.grid :deep(.pcard-tag) { border-radius: 0; }
+.grid :deep(.pcard-buy) { border-radius: 0; }
 
 /* ── 加载 / 空态 / 提示 ──────────────────────────────────────────────────────── */
 .sk-shelf {
@@ -611,69 +612,77 @@ onMounted(() => { feed.loadNext() })
   gap: var(--s4);
 }
 .sk-card {
-  border: 1px solid var(--line);
-  border-radius: var(--r2);
   overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 0;
   background: var(--surface);
   animation: bz-pulse 1.8s ease-in-out infinite;
 }
-.sk-img { aspect-ratio: 4 / 3; background: var(--zone); }
+.sk-img { aspect-ratio: 4 / 3; background: var(--img); }
 .sk-line {
   height: 12px;
   margin: 14px 16px 0;
-  border-radius: 4px;
-  background: var(--zone);
+  background: var(--surface-3);
 }
 .sk-line.short { width: 46%; margin-bottom: 16px; }
 @keyframes bz-pulse { 50% { opacity: .55; } }
 
 .empty {
-  padding: 72px 0 56px;
+  padding: 72px 24px 56px;
+  border: 1px solid var(--line);
+  background: var(--surface);
   text-align: center;
 }
 .empty-mark {
   display: inline-grid;
   place-items: center;
-  width: 64px;
-  height: 64px;
+  width: 56px;
+  height: 56px;
   margin-bottom: 20px;
-  border-radius: 18px;
-  background: linear-gradient(135deg, #2b2418, #14110c);
-  border: 1px solid rgba(201, 162, 90, .5);
+  border: 1px solid var(--ink);
+  border-radius: 0;
+  background: var(--ink);
   color: var(--bz-gold-2);
-  font-size: 24px;
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .12);
+  font-family: var(--font-display);
+  font-size: 22px;
 }
 .empty-title {
   margin: 0 0 8px;
-  font-size: 18px;
-  font-weight: 600;
+  font-family: var(--font-display);
+  font-size: 24px;
+  font-weight: var(--fw-semi);
   color: var(--ink);
 }
 .empty-sub {
   margin: 0 0 22px;
   color: var(--ink-3);
+  font-size: 13px;
 }
 .empty-cta {
-  display: inline-block;
-  padding: 9px 22px;
-  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  height: 38px;
+  padding: 0 20px;
+  border: 1px solid var(--ink);
+  border-radius: 0;
   background: var(--ink);
   color: var(--bg);
-  font-size: var(--fs-sm);
+  font-size: 13px;
   text-decoration: none;
+  transition: background-color .12s linear, color .12s linear;
 }
-.empty-cta:hover { background: var(--brand-ink); }
+.empty-cta:hover { background: var(--surface); color: var(--ink); }
 
 .tip {
+  padding: 20px 0;
   color: var(--ink-3);
-  padding: var(--s6) 0;
 }
 .tip-a {
   border: 0;
   background: transparent;
-  color: var(--brand-ink);
+  color: var(--ink);
   cursor: pointer;
+  font: inherit;
   text-decoration: underline;
 }
 .sentinel {
@@ -687,40 +696,64 @@ onMounted(() => { feed.loadNext() })
 }
 
 @media (max-width: 980px) {
-  .hero-in {
+  .nav-bar { padding: 0 var(--s5); }
+  .page-head {
     grid-template-columns: minmax(0, 1fr);
-    gap: 30px;
-    padding-bottom: 40px;
+    gap: 20px;
   }
-  .hero-glass { max-width: 460px; }
+  .head-actions { justify-content: flex-start; }
+  .brand-hero {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 26px;
+    padding: 26px 24px;
+  }
+  .brand-hero h2 { font-size: clamp(34px, 6vw, 46px); }
+  .cert {
+    padding-left: 0;
+    padding-top: 16px;
+    border-left: 0;
+    border-top: 1px solid var(--line);
+  }
   .show-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
-    grid-template-rows: 280px 190px 190px;
+    grid-template-rows: 300px 200px 200px;
   }
   .show-feature { grid-column: 1 / -1; grid-row: 1; }
-  .show-copy { right: 26px; }
   .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .grid :deep(.pcard),
-  .grid :deep(.pcard.wide) { grid-column: span 1; }
+  .grid :deep(.pcard.w7),
+  .grid :deep(.pcard.w5) { grid-column: span 1; }
+  .grid :deep(.pcard.w7 .pcard-img),
+  .grid :deep(.pcard.w5 .pcard-img) { height: auto; aspect-ratio: 4 / 3; }
+  .grid :deep(.pcard.w7 .pcard-name),
+  .grid :deep(.pcard.w5 .pcard-name) { font-size: 17px; }
   .sk-shelf { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 @media (max-width: 620px) {
-  .show-grid { grid-template-columns: minmax(0, 1fr); grid-template-rows: 300px repeat(4, 200px); }
+  .nav-bar { height: 54px; padding: 0 var(--s4); gap: var(--s2); }
+  .wrap { padding: 24px var(--s4) var(--s7); }
+  .page-head h1 { font-size: 36px; }
+  .brand-hero { padding: 22px 18px; }
+  .brand-hero h2 { font-size: 32px; }
+  .show-grid {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: 320px repeat(4, 220px);
+  }
   .show-feature { grid-row: 1; }
   .grid { grid-template-columns: minmax(0, 1fr); }
-  .sec-hd { align-items: flex-start; flex-direction: column; gap: 4px; }
+  .reco-head,
+  .shelf-bar { align-items: flex-start; flex-direction: column; gap: 4px; }
 }
 @media (prefers-reduced-motion: reduce) {
   .show-card,
-  .show-card img,
-  .show-card::after,
-  .show-cta,
+  .show-media img,
   .show-cta i,
   .grid :deep(.pcard),
-  .grid :deep(.pcard-img img) { transition: none; }
+  .grid :deep(.pcard-img img),
+  .empty-cta { transition: none; }
   .sk-card { animation: none; }
-  .show-card:hover { transform: none; }
-  .show-card:hover img,
+  .show-card:hover .show-media img,
   .grid :deep(.pcard:hover .pcard-img img) { transform: none; }
+  .grid :deep(.pcard:hover) { transform: none; }
 }
 </style>

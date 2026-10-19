@@ -44,11 +44,25 @@
         <span>{{ goodName }}</span>
       </nav>
 
-      <!-- ── 一、主区：图集 56 / 信息 44 ─────────────────────────────────────── -->
-      <div class="pd">
-        <div class="gal">
+      <!-- A 版页头（BUYER / PRODUCT）：大标题 + 真实商品摘要 + 两个既有落点。 -->
+      <section class="page-head">
+        <div>
+          <div class="kicker">BUYER / PRODUCT</div>
+          <h1>商品详情</h1>
+          <p>{{ goodType }} · {{ goodName }}<template v-if="currentItem.UserName"> · {{ currentItem.UserName }}</template>。价格、促销、优惠券、秒杀与国补均来自真实接口；买入动作仍走原有的购入弹窗。</p>
+        </div>
+        <div class="head-actions">
+          <router-link class="btn" :to="getMerchantId() ? '/merchant' : '/customer'">继续逛逛</router-link>
+          <router-link class="btn solid" :to="getMerchantId() ? '/merchant/order/cart?tab=cart' : '/customer/cart?tab=cart'">购物车</router-link>
+        </div>
+      </section>
+
+      <!-- ── 一、主区：A 版左大图 / 右信息（原 56/44 两栏，机制逐字未动）── -->
+      <div class="pd pd-layout">
+        <div class="gal pd-gallery">
+          <div class="media-label"><b>封面图 / COVER</b><span>{{ gallery.length ? gallery.length + ' 张 · 当前型号图集' : '暂无图集' }}</span></div>
           <!-- `.stage` 是全页**唯一**一处 `overflow:hidden`（放大镜裁切）—— 它里面没有任何角标 -->
-          <div class="stage">
+          <div class="stage main-thumb">
             <div class="zoom">商品主图 800 × 800</div>
             <img
               v-for="(item, idx) in allItems"
@@ -62,7 +76,7 @@
             <button type="button" class="arw r" title="下一张（现有实现 scroll(+1)）" :disabled="start + 3 >= allItems.length" @click="scroll(1)">›</button>
           </div>
           <!-- 缩略图：既有真图集（`showImages` + `realIdx`），机制逐字未动；稿的 `.thb` 是灰方块 -->
-          <div class="thumbs">
+          <div class="thumbs pd-thumbs">
             <div
               v-for="(item, idx) in showImages"
               :key="idx"
@@ -75,7 +89,7 @@
             </div>
           </div>
           <!-- 2026-10-19 多图：封面之外的那几张（`ImgList`）。只有 1 张时不画这一排。 -->
-          <div v-if="gallery.length > 1" class="thumbs">
+          <div v-if="gallery.length > 1" class="thumbs pd-thumbs pd-thumbs-gallery">
             <div
               v-for="(u, gi) in gallery"
               :key="'g' + gi"
@@ -87,12 +101,15 @@
               <img :src="u" />
             </div>
           </div>
+          <p class="gallery-note">点击缩略图切换主图；下方第二排是该型号的完整图集。</p>
         </div>
 
-        <!-- 右信息区 = 本页的**一个釉面主块**（v5 由 `--glaze-deep` 换成 `--glaze-mid`）。
-             层级：商品名 24 衬线 / 现价 36 衬线朱砂 / 其余 12–19 无衬线。 -->
-        <div class="info">
+        <!-- 右信息区：A 版直落排版（发丝线分段 + display 标题 + mono 数字）。
+             原釉面主块由文件末的 `.pd-info` 覆盖；区块里的全部数据与动作保持不变。 -->
+        <div class="info pd-info">
+          <div class="kicker">{{ goodType }} / {{ currentItem.productCode || 'PRODUCT' }}</div>
           <h1 class="pname">{{ goodName }}<span v-if="currentItem.isBrand === true || currentItem.isBrand === 1 || currentItem.isBrand === '1'" class="pname-brand">品牌</span></h1>
+          <p class="pd-sub">商品编号 {{ currentItem.productCode || '加载中…' }} · {{ currentItem.UserName ? currentItem.UserName + '小店' : '商家信息加载中…' }}。型号与数量在购入弹窗内一并提交。</p>
 
           <!-- ①【原价 / 折扣】—— C3 块 5〈折扣〉**落地**（2026-10-12 用户 A 档批准）。
                改前：`.was`（`¥199.00`）与 `.off`（`6.5 折`）是**稿内 mock 的写死字面量**，
@@ -203,7 +220,20 @@
             </div>
           </div>
 
+          <!-- 2026-10-19 A 版复刻：按本轮要求把数量步进器放回主区。它绑定既有 `popupQty`
+               （与购入弹窗同源、同一套 0–100 钳位），不新增状态；0 = 尚未在购入弹窗中选量。 -->
+          <div class="pd-spec qty-line">
+            <div class="label">数量</div>
+            <div class="qty">
+              <button type="button" :disabled="!currentItem.productCode" title="减一（与购入弹窗同一套 0–100 钳位）" @click="setPopQtyByCode(currentItem.productCode, -1)">−</button>
+              <span>{{ popupQty[currentItem.productCode] || 0 }}</span>
+              <button type="button" :disabled="!currentItem.productCode" title="加一（与购入弹窗同一套 0–100 钳位）" @click="setPopQtyByCode(currentItem.productCode, 1)">+</button>
+            </div>
+            <span class="qty-hint">与购入弹窗同源 · 0 = 未选</span>
+          </div>
+
           <!-- 数量选择栏 —— **C 笔 C1 下线**（2026-10-08）：用户裁定浏览态「去掉数量选择栏」。
+               （2026-10-19 A 版复刻已按新一轮要求把步进器加回主区，见上面 `.qty-line`。）
                原块 = 3 件 `disabled` 步进器（稿 `:967-975` 画的是**活控件**，而本页主区没有对应
                状态 —— 数量只在购入模块里 ⇒ 这三件曾以占位形态登记在台账 §三「稿内但本笔无法
                接线的控件」的 15 件里）+ `.stock`「现货，下单后 48 小时内发出」。
@@ -254,7 +284,7 @@
                本笔改的只有「进店逛逛」：它现在是**真按钮**（`enterShop` → `/shop`）。
                ⚠️ 店名与 `.sub` 后半句落真值（`currentItem.UserName` / `goodType`），
                摘掉稿里 mock 的「声谷小店」/「数码配件 ·」—— 与上述撤销无关，依旧有效。 -->
-          <div class="shop">
+          <div class="shop a-pd-shop">
             <span class="mark">{{ (currentItem.UserName || '商')[0] }}</span>
             <span>
               <span class="nm">{{ currentItem.UserName }}小店</span>
@@ -270,6 +300,14 @@
               <button type="button" v-if="revAccount" @click="openReport('goods', Id, '商品')">举报商品</button>
             </span>
           </div>
+
+          <!-- A 版「商品注释」：只落真实字段（编号 / 类型 / 商家 / 有快照时的售后原文）。 -->
+          <div class="pd-notes">
+            <div class="pd-note"><b>编号</b><span>{{ currentItem.productCode || '—' }}</span></div>
+            <div class="pd-note"><b>类型</b><span>{{ goodType || '—' }}</span></div>
+            <div class="pd-note"><b>商家</b><span>{{ currentItem.UserName ? currentItem.UserName + '小店' : '—' }}</span></div>
+            <div class="pd-note" v-if="afterSaleText"><b>售后</b><span>{{ afterSaleText }}</span></div>
+          </div>
         </div>
       </div>
 
@@ -282,7 +320,7 @@
            ⚠️ 四枚按钮的 `on` 仍按稿的**默认切面** `desc`（`ProductPage.html:1011-1012`），
               但它现在表示「**当前面**」；键名 `desc/spec/rev/pol` 与四个面板一一对应，
               切 Tab 只换面板 ⇒ 覆盖率与切 Tab 从此不再互相牵制。 -->
-      <nav class="tabs">
+      <nav class="tabs a-pd-tabs">
         <button type="button" :class="{ on: activeTab === 'desc' }" @click="activeTab = 'desc'">商品详情</button>
         <button type="button" :class="{ on: activeTab === 'spec' }" @click="activeTab = 'spec'">规格参数</button>
         <button type="button" :class="{ on: activeTab === 'rev' }" @click="activeTab = 'rev'">累计评价<span class="cnt">{{ revTotalLabel }}</span></button>
@@ -292,7 +330,7 @@
       <!-- Tab ① 商品详情。⚠️ **批四（2026-10-18）改判**：稿的两段演示文案与 `.longimg` 假图
            一律退役 —— `goods.Detail` 为空时给「暂无数据」空态，拿耳机参数充数就是假象。
            原 `.longimg` 上的 `data-slot` 随之退役（不是「随数据浮动」，是任何数据下都不再渲染）。 -->
-      <div class="panel" v-if="activeTab === 'desc'">
+      <div class="panel a-pd-tab-body" v-if="activeTab === 'desc'">
         <p v-if="detailText" class="para pre">{{ detailText }}</p>
         <!-- 有 Detail 快照 ⇒ 真文本；没有 ⇒ 空态（不再画「声谷标准版…」与 1200×400 长图）。 -->
         <div v-else class="empty">
@@ -305,7 +343,7 @@
       <!-- Tab ② 规格参数。⚠️ **批四（2026-10-18）改判**：8 行耳机 mock（品牌 / 型号 / 材质…）
            退役 —— `goods.Spec` 为空时给空态；有真内容仍走下方同一套 `.spec`/`.r`/`.k`/`.v` 样式。
            原 `data-slot` 占位标记随之退役（与 Tab ① 的 `.longimg` 同一处置）。 -->
-      <div class="panel" v-if="activeTab === 'spec'">
+      <div class="panel a-pd-tab-body" v-if="activeTab === 'spec'">
         <div v-if="specText" class="spec"><div class="r" v-for="(r, i) in specRows" :key="i"><span class="k">{{ r.k }}</span><span class="v">{{ r.v }}</span></div></div>
         <!-- 有 Spec 快照 ⇒ 真表；没有 ⇒ 空态（不再拿「声谷 SG / SG-A2」等 8 行假参数充数）。
              ⚠️ 真实内容路径没动：`specText` 仍是 goods 快照列，有值就照旧显示，空值才落到这里。 -->
@@ -330,7 +368,7 @@
            而这几个数是**纯假数据**；真列表来了还并排画 12,043 条，等于把两个互斥的事实摆在同一块里。
            ⚠️ 数据、判定、排序**全在后端**（`CommentService`）：前端这里没有「买过没有」「能不能重复评」
            的第二份判据 —— 抄一份就等着两边慢慢分叉。 -->
-      <div class="panel" v-if="activeTab === 'rev'">
+      <div class="panel a-pd-tab-body" v-if="activeTab === 'rev'">
         <div class="rev">
           <div class="score">
             <!-- 评论子 tab：均分 + 5→1 星分布 + 实拍图墙 -->
@@ -548,7 +586,7 @@
       </div>
 
       <!-- Tab ④ 售后保障：稿判「真功能 N=0」（纯静态政策文案）⇒ 不标 slot、不 `disabled`。⚠️ **2026-10-10〈模板表通用化〉**：goods 新增 `AfterSale` 快照列 ⇒ 商家填了这段文字，本 Tab 就显示**它**（那四条平台默认政策 `v-if="!afterSaleText"` 让位）——即「商家自己的售后说明」优先于「平台通用政策」。 -->
-      <div class="panel" v-if="activeTab === 'pol'">
+      <div class="panel a-pd-tab-body" v-if="activeTab === 'pol'">
         <p v-if="afterSaleText" class="para pre">{{ afterSaleText }}</p><div v-if="!afterSaleText" class="pol">
           <div class="r"><span class="k">7 天无理由</span>
             <span class="v">签收次日起 7 天内，商品及包装保持完好、不影响二次销售的，可申请无理由退货。</span></div>
@@ -2547,4 +2585,187 @@ button { background: none; border: 0; cursor: pointer; }
                   font-size: var(--fs-xs); font-weight: var(--fw-med); letter-spacing: 0; vertical-align: middle; }
 .m-was { color: var(--ink-3); font-size: var(--fs-xs); text-decoration: line-through; margin-right: 4px; }
 .m-price { color: var(--brand-ink); font-weight: var(--fw-med); }
+
+/* ══════════════════════════════════════════════════════════════════════════════
+   A 版商品详情线框（2026-10-19）—— 页头 + 左大图 / 右信息 + 直角页签。
+   ⚠️ 只换呈现：所有绑定、事件、禁用条件、API 调用、弹窗与占位/空态都沿用上面的
+      模板与 `<script setup>`。规则落在样式表最末 ⇒ 覆盖上面的旧形态而不改旧规则。
+   ══════════════════════════════════════════════════════════════════════════════ */
+
+/* 页头：kicker（mono）+ display 大标题 + 一条发丝线；右侧两个既有落点。 */
+.page-head {
+  display: flex; align-items: flex-end; justify-content: space-between; gap: var(--s5);
+  margin-top: var(--s4); padding-bottom: var(--s5); margin-bottom: var(--s5);
+  border-bottom: 1px solid var(--ink);
+}
+.kicker {
+  font-family: var(--font-mono); font-size: 10px; letter-spacing: .16em;
+  text-transform: uppercase; color: var(--ink-3);
+}
+.page-head h1 {
+  margin-top: 6px; font-family: var(--font-display); font-size: var(--fs-2xl);
+  font-weight: var(--fw-semi); line-height: 1.05; letter-spacing: -.03em; color: var(--ink);
+}
+.page-head p { margin-top: 8px; max-width: 62ch; font-size: var(--fs-sm); line-height: 1.7; color: var(--ink-2); }
+.head-actions { display: flex; align-items: center; gap: var(--s3); flex: 0 0 auto; }
+.head-actions .btn {
+  display: inline-flex; align-items: center; height: 36px; padding: 0 var(--s5);
+  border: 1px solid var(--line-2); border-radius: 0; background: var(--surface);
+  color: var(--ink-2); font-size: var(--fs-sm); text-decoration: none;
+}
+.head-actions .btn:hover { border-color: var(--ink); color: var(--ink); }
+.head-actions .btn.solid { background: var(--ink); border-color: var(--ink); color: var(--bg); }
+.head-actions .btn.solid:hover { background: var(--surface); color: var(--ink); }
+
+/* 顶栏 / 面包屑：A 版用 mono 小字与直角控件。 */
+.nav-bar { border-bottom: 1px solid var(--line-2); }
+.nav-back { font-family: var(--font-mono); font-size: var(--fs-xs); letter-spacing: .04em; }
+.search-input, .search-btn { border-radius: 0; }
+.crumb { font-family: var(--font-mono); font-size: 10px; letter-spacing: .04em; }
+
+/* 主区：左图 1.05 / 右信息 .82，间隙 42（A 版比例）。 */
+.pd-layout {
+  margin-top: var(--s6);
+  display: grid; grid-template-columns: minmax(0, 1.05fr) minmax(320px, .82fr);
+  gap: 42px; align-items: start;
+}
+.pd-gallery { min-width: 0; }
+.media-label { display: flex; align-items: baseline; justify-content: space-between; gap: var(--s3); margin-bottom: 7px; }
+.media-label b { font-size: 11px; font-weight: var(--fw-med); letter-spacing: .04em; color: var(--ink); }
+.media-label span { font-family: var(--font-mono); font-size: 10px; color: var(--ink-3); }
+.stage.main-thumb {
+  height: 430px; aspect-ratio: auto; border: 1px solid var(--line-2);
+  border-radius: 0; background: var(--surface-2);
+}
+.stage.main-thumb .lens { border-radius: 0; font-family: var(--font-mono); font-size: 10px; }
+.stage.main-thumb .arw { width: 34px; height: 34px; border-radius: 0; }
+.pd-thumbs { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+.pd-thumbs .thb { width: 68px; border-radius: 0; border-color: var(--line-2); background: var(--surface-2); }
+.pd-thumbs .thb.on { border-color: var(--ink); outline: 1px solid var(--ink); outline-offset: -1px; }
+.pd-thumbs-gallery { margin-top: 6px; }
+.gallery-note { margin-top: 8px; font-family: var(--font-mono); font-size: 10px; line-height: 1.6; color: var(--ink-3); }
+
+/* 右信息：去掉釉面卡片，回到 A 版的直落排版。 */
+.pd-info { background: transparent; border-radius: 0; padding: 0; margin-left: 0; }
+.pd-info .pname { margin: 8px 0 10px; font-size: 38px; line-height: 1.06; font-weight: var(--fw-semi); letter-spacing: -.03em; }
+.pd-info .pname-brand {
+  border: 1px solid var(--line-2); border-radius: 0; background: var(--surface-2);
+  color: var(--ink-2); font-family: var(--font-mono); font-size: 10px; letter-spacing: .05em;
+}
+.pd-info .pd-sub { font-size: var(--fs-xs); line-height: 1.7; color: var(--ink-3); }
+
+/* 价格行：上下发丝线 + mono 数字（A 版价签）。 */
+.pd-info .priceline {
+  margin: 18px 0; padding: 16px 0; gap: var(--s3);
+  border-top: 1px solid var(--ink); border-bottom: 1px solid var(--line-2);
+}
+.pd-info .price { font-family: var(--font-mono); }
+.pd-info .price .sym { font-size: var(--fs-sm); }
+.pd-info .price .int { font-size: 32px; font-weight: var(--fw-med); }
+.pd-info .was { font-family: var(--font-mono); }
+.pd-info .off, .pd-info .subsidy, .pd-info .vip-tag { border-radius: 0; font-family: var(--font-mono); }
+
+/* 秒杀块：朱砂套层保留，只把圆角收成直角。 */
+.pd-info .sk-zone, .pd-info .sk-card { border-radius: 0; }
+.pd-info .sk-mark { border-radius: 0; font-family: var(--font-mono); }
+.pd-info .sk-now, .pd-info .sk-left { font-family: var(--font-mono); }
+
+/* 促销 / 领券：发丝线分区 + 直角券卡。 */
+.pd-info .promo {
+  margin-top: var(--s5); padding: var(--s4) 0; gap: var(--s3);
+  border-top: 1px solid var(--line-3); border-bottom: 1px solid var(--line-3);
+}
+.pd-info .promo .r { grid-template-columns: 44px minmax(0, 1fr); font-size: var(--fs-xs); }
+.pd-info .promo .r-coupons { grid-template-columns: 44px minmax(0, 1fr) auto; }
+.pd-info .promo .tag { font-family: var(--font-mono); font-size: 10px; letter-spacing: .06em; color: var(--ink-3); }
+.pd-info .coupon { border: 1px solid var(--line-2); border-radius: 0; background: var(--surface-2); }
+.pd-info .coupon .amt { font-family: var(--font-mono); }
+.pd-info .coupon .get, .pd-info .cp-more { border-radius: 0; font-family: var(--font-mono); }
+
+/* 型号：直角 chip；选中反转成黑底白字（国补 / 秒杀保留类别底色，只加描边）。 */
+.pd-info .pick { margin-top: var(--s5); }
+.pd-info .pick .lbl, .pd-spec .label {
+  font-family: var(--font-mono); font-size: 10px; letter-spacing: .08em; color: var(--ink-3);
+}
+.pd-info .pick .row { margin-top: 7px; gap: 6px; }
+.pd-info .md { height: 32px; padding: 0 var(--s4); border-radius: 0; font-family: var(--font-mono); font-size: var(--fs-xs); }
+.pd-info .md.on:not(.sub):not(.sec) { background: var(--ink); border-color: var(--ink); color: var(--bg); }
+.pd-info .md.sub.on, .pd-info .md.sec.on { outline: 1px solid var(--ink); outline-offset: 1px; }
+
+/* 数量：A 版直角步进器，绑定既有 `popupQty`（与购入弹窗同源）。 */
+.pd-spec.qty-line { margin-top: var(--s4); display: flex; align-items: center; gap: var(--s3); flex-wrap: wrap; }
+.qty-line .qty { display: inline-grid; grid-template-columns: 28px 40px 28px; margin: 0; gap: 0; border: 1px solid var(--line-2); }
+.qty-line .qty button { width: auto; height: 30px; color: var(--ink-2); font-family: var(--font-mono); }
+.qty-line .qty button:hover:not(:disabled) { background: var(--ink); color: var(--bg); }
+.qty-line .qty span {
+  display: grid; place-items: center; border-left: 1px solid var(--line-2);
+  border-right: 1px solid var(--line-2); font-family: var(--font-mono);
+  font-size: var(--fs-xs); font-variant-numeric: tabular-nums;
+}
+.qty-line .qty button:disabled { color: var(--ink-3); cursor: not-allowed; }
+.qty-hint { font-family: var(--font-mono); font-size: 10px; color: var(--ink-3); }
+
+/* 动作：A 版等宽双钮；加入购物车 = 实底，立即购买 = 描边（悬停反转）。 */
+.pd-info .acts { margin-top: var(--s5); gap: 8px; }
+.pd-info .acts .b {
+  flex: 1 1 0; height: 48px; border: 1px solid var(--ink); border-radius: 0;
+  display: inline-flex; align-items: center; justify-content: center; gap: var(--s2);
+  font-size: var(--fs-sm); font-weight: var(--fw-med);
+}
+.pd-info .acts .ghost { background: var(--ink); color: var(--bg); }
+.pd-info .acts .ghost:hover { background: var(--surface); color: var(--ink); }
+.pd-info .acts .primary { background: var(--surface); color: var(--ink); }
+.pd-info .acts .primary:hover { background: var(--ink); color: var(--bg); }
+
+/* 服务承诺条：mono 小字 + 发丝线上下框。 */
+.pd-info .promise { margin-top: var(--s5); border-top: 1px solid var(--line-3); border-bottom: 1px solid var(--line-3); }
+.pd-info .promise span { font-family: var(--font-mono); font-size: 10px; letter-spacing: .02em; color: var(--ink-3); }
+
+/* 商家卡：A 版直角发丝框；客服 / 进店 / 举报三枚原样保留。 */
+.pd-info .shop { margin-top: var(--s5); padding: var(--s3); border: 1px solid var(--line-2); gap: var(--s3); }
+.pd-info .shop .mark {
+  width: 42px; height: 42px; border: 1px solid var(--line-2); border-radius: 0;
+  background: var(--surface-2); color: var(--ink); font-size: var(--fs-md);
+}
+.pd-info .shop .nm { font-size: var(--fs-sm); font-weight: var(--fw-semi); }
+.pd-info .shop .sub { font-family: var(--font-mono); font-size: 10px; letter-spacing: .02em; }
+.pd-info .shop .ops { gap: 6px; }
+.pd-info .shop .ops button { height: 28px; border-radius: 0; font-family: var(--font-mono); font-size: 10px; }
+.pd-info .shop .ops button:not(:disabled):hover { background: var(--ink); border-color: var(--ink); color: var(--bg); }
+
+/* 商品注释（A 版 pd-notes）：只落真实字段。 */
+.pd-notes { margin-top: var(--s5); padding-top: var(--s4); border-top: 1px solid var(--line-3); display: grid; gap: 6px; }
+.pd-note { display: flex; gap: 10px; font-size: var(--fs-xs); line-height: 1.6; color: var(--ink-3); }
+.pd-note b { flex: 0 0 42px; font-family: var(--font-mono); font-size: 10px; font-weight: var(--fw-reg); letter-spacing: .08em; color: var(--ink-3); }
+.pd-note span { min-width: 0; color: var(--ink-2); overflow-wrap: anywhere; }
+
+/* 页签：A 版整条直角框，选中反白；面板接在同一条框下。 */
+.a-pd-tabs { margin-top: var(--s7); display: flex; gap: 0; border: 1px solid var(--line); }
+.a-pd-tabs button {
+  flex: 1 1 0; display: flex; align-items: center; justify-content: center; gap: var(--s2);
+  padding: 13px 8px; margin: 0; border: 0; border-right: 1px solid var(--line-2);
+  font-family: var(--font-mono); font-size: var(--fs-xs); letter-spacing: .04em; color: var(--ink-2);
+}
+.a-pd-tabs button:last-child { border-right: 0; }
+.a-pd-tabs button.on { background: var(--ink); color: var(--bg); font-weight: var(--fw-med); border-bottom-color: transparent; }
+.a-pd-tabs .cnt { margin-left: 0; padding: 0 4px; border: 1px solid currentColor; font-size: 10px; line-height: 14px; color: inherit; }
+.a-pd-tab-body { margin-top: 0; padding: var(--s5); border: 1px solid var(--line); border-top: 0; background: var(--surface); }
+
+/* 推荐区：与 A 版分区线同一条深线。 */
+.reco { margin-top: var(--s7); padding-top: var(--s6); border-top: 1px solid var(--ink); }
+
+@media (max-width: 1080px) {
+  .pd-layout { grid-template-columns: minmax(0, 1fr) minmax(300px, .9fr); gap: var(--s6); }
+}
+@media (max-width: 820px) {
+  .page-head { flex-direction: column; align-items: flex-start; }
+  .pd-layout { grid-template-columns: 1fr; gap: var(--s6); }
+  .stage.main-thumb { height: 300px; }
+  .pd-info .pname { font-size: 30px; }
+  .pd-info .promise { grid-template-columns: repeat(2, 1fr); }
+  .a-pd-tabs { flex-wrap: wrap; }
+  .a-pd-tabs button { flex: 1 1 48%; border-bottom: 1px solid var(--line-2); }
+  .a-pd-tabs button:last-child { border-right: 0; }
+  .a-pd-tab-body { padding: var(--s4); }
+}
 </style>

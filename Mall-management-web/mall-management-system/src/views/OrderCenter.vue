@@ -33,41 +33,17 @@
               稿 :53 的 ★ 是「收紧成 6 个标签页」，但 6 个 tab 全部 disabled，
               真把 select 拿掉 ⇒「已完成」这一视图在页面上**不可达**（现有端点仍在，属功能回退）。
            代价 = 标题行比稿低 16px（`.h1row{margin-top:var(--s4)}`），登记见 §一 commit 5。 -->
-      <div class="h1row">
-        <h1 class="page-h">订单中心 <span class="n">共 {{ orderList.length }} 单 · 待处理 {{ orderList.filter(o => canSend(o)).length }} 单</span></h1>
-        <select v-model="orderStatus" class="status-select" @change="loadOrders">
-          <option value="active">首页</option>
-          <option value="completed">历史订单</option>
-        </select>
-      </div>
-
-      <div v-if="loading" class="empty">
-        <div class="p">加载中…</div>
-      </div>
-
-      <!-- 空态（稿 :811-825）。⚠️ 概览 / 标签页 / 筛选 / 批量 / 分页**五块全部不画** ——
-           稿那份 pane 里它们都不存在 ⇒ **空态 slots 计数 = 0**（对账用，见 §五）。
-           ⚠️ 文案照稿：「还没有订单」（现有 :26 是「暂无订单」，稿 :47-49 明写换字不换态）。 -->
-      <!-- ⚠️ 售后台（`refundMode`）下即便两边都空也必须渲染 —— 否则空态吃掉 tab 栏，用户无法切回。 -->
-      <div v-else-if="orderList.length === 0 && refundList.length === 0 && !refundMode" class="empty">
-        <div class="big">还没有订单</div>
-        <div class="p">买家下单后会出现在这里。</div>
-        <button class="go2" disabled title="待 C3〈订单〉——商品管理路由已有，但本笔功能量恒为 0，不接线">去商品管理</button>
-      </div>
-
-      <template v-else>
-        <!-- ① 数据概览（稿 :677-687）。⚠️ 四张卡**全部是 `—`**：它们是**预留位**（无聚合端点），
-             而现有两次请求各自只取一个口径（active = `ReceiveIf != 1`）⇒ 四个数**都算不出来**。
-             稿的四个数是从它自带的 6 行静态数据集推出来的，本页没有那个数据集，
-             照稿「凡是另一个数算得出来的数都不许手写」（稿 :881-885）的反面 ⇒ **不手写、留 `—`**。
-             稿 :684-686 记：第 5 个合法态「已收货·未发货」不设卡，它在表格里有自己的红色 chip。 -->
-        <section v-if="!refundMode" class="stats" data-slot="预留 · 数据概览（动现有代码 4 处 · 超档）"
-                 title="待 C3〈订单〉——无聚合端点。4 处 = OrderDao（一条 GROUP BY 的 count 查询）+ OrderService + OrderController + OrderCenter.vue，**超档**，因清单点名而画出">
-          <div class="stat"><div class="k">未付款</div><div class="v">—</div></div>
-          <div class="stat"><div class="k">待发货</div><div class="v">—</div></div>
-          <div class="stat"><div class="k">已发货</div><div class="v">—</div></div>
-          <div class="stat"><div class="k">已完成</div><div class="v">—</div></div>
-        </section>
+      <!-- ══ 售后工作台（refundMode）════════════════════════════════════════
+           ⚠️ 本分支的标题行 / 标签页 / 统计带 / 筛选 chips / 左队列 / 右案件 / 弹窗
+           **全部沿用改版前的实现**；A 版重排只发生在下面的 `!refundMode` 分支。 -->
+      <template v-if="refundMode">
+        <div class="h1row">
+          <h1 class="page-h">订单中心 <span class="n">共 {{ orderList.length }} 单 · 待处理 {{ orderList.filter(o => canSend(o)).length }} 单</span></h1>
+          <select v-model="orderStatus" class="status-select" @change="loadOrders">
+            <option value="active">首页</option>
+            <option value="completed">历史订单</option>
+          </select>
+        </div>
 
         <!-- ② 标签页（稿 :689-702）。前 5 枚仍是预留位 disabled；**第 6 枚「售后」本批启用**
              （批四第二批 commit 4）：点击在本页切到商家售后队列，端点 `/order/refund/merchant/list`
@@ -190,76 +166,128 @@
           </div>
         </template>
 
-        <!-- ③ 筛选栏（稿 :704-715）。整块是预留位；输入框与两枚按钮逐枚 disabled + title（稿里都带 title）。 -->
-        <div v-if="!refundMode" class="filter" data-slot="预留 · 筛选栏（动现有代码 4 处 · 超档）"
-             title="待 C3〈订单〉——现有只有一个二选一下拉（OrderCenter.vue:20-23），无任何搜索。4 处 = OrderDao（SQL 加 WHERE）+ OrderService + OrderController + OrderCenter.vue，**超档**，因清单点名而画出">
-          <span class="fld"><label>订单号</label><input type="text" placeholder="ZHJC53759811" disabled title="待 C3〈订单〉——按订单号搜索无端点（4 处，超档）"></span>
-          <span class="fld"><label>买家</label><input type="text" placeholder="用户名 / 客户号" disabled title="待 C3〈订单〉——按买家搜索无端点（4 处，超档）"></span>
-          <span class="fld"><label>商品名</label><input type="text" placeholder="商品关键字" disabled title="待 C3〈订单〉——按商品名搜索无端点（4 处，超档）"></span>
-          <span class="fld"><label>下单时间</label><input type="text" placeholder="2026-10-01" disabled title="待 C3〈订单〉——时间区间无端点（4 处，超档）"><i class="til">–</i><input type="text" placeholder="2026-10-06" disabled title="同左"></span>
-          <span class="acts">
-            <button class="btn" disabled title="待 C3〈订单〉——重置无端点">重置</button>
-            <button class="btn pri" disabled title="待 C3〈订单〉——查询无端点">查询</button>
-          </span>
-        </div>
+      </template>
 
-        <!-- ④ 批量操作条（稿 :717-726）。「已选 0 单」照稿写死 —— 与空框自洽（稿 :438-439 的规矩）。 -->
-        <div v-if="!refundMode" class="bulk" data-slot="预留 · 批量操作条（动现有代码 ≥4 处 · 超档）"
-             title="待 C3〈订单〉——无批量端点：批量发货要事务 + 逐单走状态机（≥4 处：OrderDao + OrderService + OrderController + OrderCenter.vue），导出 CSV 还要一个新的响应类型。**超档**，因清单点名而画出">
-          <button class="ck" disabled title="待 C3〈订单〉——全选无端点（≥4 处，超档）"></button>
-          <span>全选</span>
-          <span class="sel">已选 <b>0</b> 单</span>
-          <span class="sp"></span>
-          <button class="btn" disabled title="待 C3〈订单〉——批量发货无端点（≥4 处，超档）">批量发货</button>
-          <button class="btn" disabled title="待 C3〈订单〉——导出无端点（≥4 处，超档）">导出 CSV</button>
-        </div>
-
-        <!-- 表格：9 列。⚠️ **不挂 data-slot** —— 稿 :728 原话「9 列全是真功能（状态由三个状态位推出、
-             金额/订单号/时间/商品/买家 id 都在响应里）⇒ 不挂角标」。 -->
-        <section v-if="!refundMode" class="tbl">
-          <div class="thead">
-            <span></span><span></span><span>商品</span><span>订单号</span><span>买家</span>
-            <span class="r">金额</span><span class="cen">状态</span><span>下单时间</span><span class="r">操作</span>
+      <!-- ══ 订单列表（!refundMode）：A 版 `pageMerchantOrders` ═══════════════
+           参考稿 `a.html` :3283-3322 与其 `.page-head` / `.morder-summary` /
+           `.filter-bar` / `.chips` / `.morder-row` / `.morder-card`。
+           数据只来自现有 `orderList`：统计四格全部现算，算不出的一律画 `—`（不造假）。 -->
+      <template v-else>
+        <section class="page-head">
+          <div>
+            <div class="kicker">MERCHANT / ORDER PROCESSING</div>
+            <h1 class="page-h">商家订单处理</h1>
+            <p>买家下单后的真实处理台：看到用户买的单，填写运单号并发货。发货后买家订单状态同步变为「待收货」。</p>
           </div>
-          <div v-for="order in orderList" :key="order.OrderId" class="trow">
-            <button class="ck" disabled title="待 C3〈订单〉——行勾选无端点（≥4 处，超档）"></button>
-            <div class="thumb"><img v-if="order.Images" :src="order.Images" alt="商品图片" /></div>
-            <div class="pn" :title="order.ProductInformation">{{ order.ProductInformation }}</div>
-            <div class="oid">{{ order.OrderId }}</div>
-            <!-- ⚠️ 买家列画的是 `CustomerId`（响应里只有它）。昵称要 join 用户表（N=2）⇒ 归 C3〈订单〉，
-                 不写死、也不假造。 -->
-            <div class="buyer" title="待 C3〈订单〉——买家昵称需关联用户表（N=2）；此处显示的是响应里的 CustomerId">{{ order.CustomerId }}</div>
-            <div class="money">¥{{ Number(order.Price || 0).toFixed(2) }}</div>
-            <div class="cen"><span class="st" :class="stateOf(order)[0]"><IconGlyph :name="STATE_GLYPH[stateOf(order)[0]] || 'wait'" />{{ stateOf(order)[1] }}</span></div>
-            <!-- 时间列（稿 :863-865）。第一行 = 下单时间；「已完成」视图该列为空 —— 既有缺陷，
-                 详见下面那枚 `.dash` 的 title。第二行 = 更改日期，见 `.tcell` 上的说明。 -->
-            <div class="tcell">
-              <span v-if="order.CreateTime" class="time" title="下单时间（CreateTime）">{{ formatDateTime(order.CreateTime) }}</span>
-              <span v-else class="dash" title="既有缺陷：OrderDao.selectByMerchant 的两条分支都不 SELECT CreateTime（OrderDao.java:146 / :149 —— C3 块 4 给 order 加 Quantity 列后，两条 SELECT 各下移 8 行；原 :138 / :141）⇒「已完成」视图这一列在库里就没取出来 —— 不是「这一单没有时间」。修它 = 改响应字段集，属另一笔">—</span>
-              <span v-if="order.SettlementDate" class="time upd" title="订单更改日期（SettlementDate）—— ⚠️ 稿的 A 列对照（OrderCenter-merchant.html:44-54）逐条登记了现有 411 行的去留，却**没有**这一条（既不在「保留并重画」也不在「删」）。本笔按「不删既有已显示字段」保留，并入同一格第二行；是否照稿撤掉待用户裁。">{{ formatDateTime(order.SettlementDate) }}</span>
-            </div>
-            <!-- 操作列（稿 :875-877）。⚠️ 真功能：`order.orderDeliveryIfUp`（endpoints.js:58）——
-                 本页**唯一**不禁用的按钮；`:disabled` / `:class` / `@click` **逐字保留原实现**。
-                 ⚠️ 稿的判据是 `canSend`（= 待发货），未付款行画 `—` 而不是按钮 ⇒ 今天「点了弹
-                 『用户未付款，暂不能发货』」这条路径在 UI 上消失；`handleDeliver()` 的三道守卫
-                 **逐字保留**（纵深防御），且状态列已具名「未付款」。登记见 §一 commit 5。 -->
-            <div class="op r">
-              <button v-if="canSend(order)" class="send" :disabled="order.DeliveryIf === 1 || order.ReceiveIf === 1" :class="{ disabled: order.DeliveryIf === 1 || order.ReceiveIf === 1 }" title="现有端点 order.orderDeliveryIfUp（endpoints.js:58）——本页唯一不禁用的按钮；C3 块4 补丁起改为先开【填写快递信息】弹窗，再发货" @click="openDeliver(order)"><IconGlyph name="orders" />发货</button>
-              <span v-else class="dash">—</span>
-            </div>
+          <div class="head-actions">
+            <button type="button" class="btn" @click="toggleRefund">售后工作台<span v-if="refundList.length" class="cnt">{{ refundList.length }}</span></button>
+            <router-link class="btn solid" to="/merchant/user/list">商品管理</router-link>
+            <select v-model="orderStatus" class="status-select" @change="loadOrders">
+              <option value="active">首页</option>
+              <option value="completed">历史订单</option>
+            </select>
           </div>
         </section>
 
-        <!-- ⑤ 分页（稿 :737-744）。⚠️ `.pg.on`「1」照稿**不 disabled**（稿 :741 带 `title="当前页"`、
-             无 disabled）；它无 @click ⇒ 点击无副作用。禁用反而会被 `.pager .pg[disabled]` 的同特异性
-             规则压掉 `.pg.on` 的描边色，把「当前页」画成「不可用」。登记见 §三。 -->
-        <nav v-if="!refundMode" class="pager" data-slot="预留 · 分页（动现有代码 4 处 · 超档）"
-             title="待 C3〈订单〉——两条商户 SQL 都没有 LIMIT，全量返回。4 处 = OrderDao（加 LIMIT + 一条 count）+ OrderService + OrderController + OrderCenter.vue。**超档**，因清单点名而画出。⚠️ 与标签页互锁：先上分页，则「待发货/已发货/全部」的 N 从 1 变 4">
-          <button class="pg" disabled title="待 C3〈订单〉——上一页无端点">‹</button>
-          <button class="pg on" aria-current="page" title="当前页">1</button>
-          <button class="pg" disabled title="待 C3〈订单〉——下一页无端点">›</button>
-          <span class="tot" title="⚠️ 两条商户 SQL 都没有 LIMIT ⇒ 全部行一次返回，没有「页」。「每页 20」是稿的目标版文案（稿 :743 自注：稿的数据集 6 单所以是 1 页；71 单 / 每页 20 下是 4 页）。">共 {{ orderList.length }} 单 · 每页 20</span>
-        </nav>
+        <!-- 统计带（A 版 `.morder-summary`）：四格全部来自当前 `orderList`。 -->
+        <div class="morder-summary">
+          <div><small>TO SHIP</small><b>{{ shipCount }}</b><span>待发货 · SLA 24h</span></div>
+          <div><small>IN TRANSIT</small><b>{{ transitCount }}</b><span>已发货待收货</span></div>
+          <div><small>DONE</small><b>{{ doneCount }}</b><span>已完成订单</span></div>
+          <div><small>AMOUNT</small><b>¥{{ orderAmount }}</b><span>本页订单金额</span></div>
+        </div>
+
+        <!-- 筛选 chips（A 版 `.filter-bar`）：全部按现有状态位在前端筛，无新端点。 -->
+        <div class="filter-bar morder-filter">
+          <div class="chips">
+            <button
+              v-for="f in orderFilters"
+              :key="f.key"
+              type="button"
+              class="chip"
+              :class="{ on: orderFilter === f.key }"
+              @click="orderFilter = f.key"
+            >{{ f.label }}<span>{{ f.count }}</span></button>
+          </div>
+          <span class="filter-note">共 {{ orderList.length }} 单 · 按创建时间倒序</span>
+        </div>
+
+        <div v-if="loading" class="empty">
+          <div class="p">加载中…</div>
+        </div>
+
+        <!-- 空态：沿用原文案；商品管理路由已有 ⇒ 出口接到真实的商品列表页。 -->
+        <div v-else-if="orderList.length === 0" class="empty">
+          <div class="big">还没有订单</div>
+          <div class="p">买家下单后会出现在这里。</div>
+          <router-link class="go2" to="/merchant/user/list">去商品管理</router-link>
+        </div>
+
+        <template v-else>
+          <div class="morder-card">
+            <div v-for="order in filteredOrders" :key="order.OrderId" class="morder-row">
+              <div class="mrow-id">
+                <div class="oid" :title="order.OrderId">{{ order.OrderId }}</div>
+                <div class="buyer" title="响应里只有 CustomerId；昵称需关联用户表">买家 {{ order.CustomerId }}</div>
+                <div v-if="order.CreateTime" class="date" :title="`下单时间 ${formatDateTime(order.CreateTime)}`">下单 {{ formatDateTime(order.CreateTime).slice(5, 16) }}</div>
+                <div v-else class="date" title="既有缺陷：OrderDao.selectByMerchant 的 completed 分支不 SELECT CreateTime">下单 —</div>
+                <div v-if="order.SettlementDate" class="date" :title="`订单更改日期 ${formatDateTime(order.SettlementDate)}`">更改 {{ formatDateTime(order.SettlementDate).slice(5, 16) }}</div>
+              </div>
+
+              <div class="items">
+                <div class="thumb"><img v-if="order.Images" :src="order.Images" alt="商品图片" /></div>
+                <div class="item-main">
+                  <b :title="order.ProductInformation">{{ order.ProductInformation }}</b>
+                  <small>数量 × {{ order.Quantity || 1 }}</small>
+                </div>
+              </div>
+
+              <div class="amt">¥{{ Number(order.Price || 0).toFixed(2) }}</div>
+
+              <div class="state">
+                <span class="tag" :class="stateOf(order)[0]"><IconGlyph :name="STATE_GLYPH[stateOf(order)[0]] || 'wait'" />{{ stateOf(order)[1] }}</span>
+                <!-- ⚠️ 商家订单列表两条 SQL 都不返回 ExpressCompany / TrackingNo ⇒ 运单号画 `—`，
+                     不拿单号或时间冒充。 -->
+                <div
+                  class="tiny tracking"
+                  :title="order.DeliveryIf === 1 ? '商家订单列表接口不返回 ExpressCompany / TrackingNo' : ''"
+                >
+                  <template v-if="order.CancelledAt">已取消</template>
+                  <template v-else-if="canSend(order)">尚未发货</template>
+                  <template v-else-if="order.DeliveryIf === 1">运单 —</template>
+                  <template v-else-if="order.PayIf === 1">未发货</template>
+                  <template v-else>未付款</template>
+                </div>
+              </div>
+
+              <div class="ops">
+                <button
+                  v-if="canSend(order)"
+                  class="btn sm solid"
+                  :disabled="order.DeliveryIf === 1 || order.ReceiveIf === 1"
+                  :class="{ disabled: order.DeliveryIf === 1 || order.ReceiveIf === 1 }"
+                  title="现有端点 order.orderDeliveryIfUp（endpoints.js:58）——先开【填写快递信息】弹窗，再发货"
+                  @click="openDeliver(order)"
+                ><IconGlyph name="orders" />去发货</button>
+                <span v-else class="dash">—</span>
+              </div>
+            </div>
+
+            <div v-if="filteredOrders.length === 0" class="empty" style="border: 0">
+              <div class="p">这个筛选下没有订单。</div>
+              <button class="go2" type="button" @click="orderFilter = 'all'">查看全部</button>
+            </div>
+          </div>
+
+          <!-- 分页：保留既有占位与真实总数（两条商户 SQL 仍无 LIMIT ⇒ 单页全量）。 -->
+          <nav class="pager" data-slot="预留 · 分页（动现有代码 4 处 · 超档）"
+               title="待 C3〈订单〉——两条商户 SQL 都没有 LIMIT，全量返回。4 处 = OrderDao（加 LIMIT + 一条 count）+ OrderService + OrderController + OrderCenter.vue。**超档**，因清单点名而画出。">
+            <button class="pg" disabled title="待 C3〈订单〉——上一页无端点">‹</button>
+            <button class="pg on" aria-current="page" title="当前页">1</button>
+            <button class="pg" disabled title="待 C3〈订单〉——下一页无端点">›</button>
+            <span class="tot" title="⚠️ 两条商户 SQL 都没有 LIMIT ⇒ 全部行一次返回，没有「页」。「每页 20」是目标版文案。">共 {{ orderList.length }} 单 · 每页 20</span>
+          </nav>
+        </template>
       </template>
     </div>
 
@@ -413,6 +441,29 @@ const stateOf = (order) => {
 }
 // 稿 :875 的 `canSend`（= 待发货）：只有这一态渲染可点的【发货】。
 const canSend = (order) => order.PayIf === 1 && order.DeliveryIf === 0 && order.ReceiveIf === 0
+
+/* ── A 版订单列表：纯展示派生 ──────────────────────────────────────────────
+   ⚠️ 数据只来自现有 `orderList`（两次 POST 的响应），不发新请求、不写死样例值。
+   四格统计 = 状态机可推出的三态计数 + 本页 `Price` 求和；运单号在响应里没有 ⇒ 行内画 `—`。 */
+const orderFilter = ref('all')
+const shipCount = computed(() => orderList.value.filter(canSend).length)
+const transitCount = computed(() => orderList.value.filter((o) => stateOf(o)[0] === 'info').length)
+const doneCount = computed(() => orderList.value.filter((o) => stateOf(o)[0] === 'ok').length)
+const orderAmount = computed(() =>
+  orderList.value.reduce((sum, o) => sum + Number(o.Price || 0), 0).toFixed(2)
+)
+const orderFilters = computed(() => [
+  { key: 'all', label: '全部', count: orderList.value.length },
+  { key: 'ship', label: '待发货', count: shipCount.value },
+  { key: 'transit', label: '待收货', count: transitCount.value },
+  { key: 'done', label: '已完成', count: doneCount.value }
+])
+const filteredOrders = computed(() => {
+  if (orderFilter.value === 'ship') return orderList.value.filter(canSend)
+  if (orderFilter.value === 'transit') return orderList.value.filter((o) => stateOf(o)[0] === 'info')
+  if (orderFilter.value === 'done') return orderList.value.filter((o) => stateOf(o)[0] === 'ok')
+  return orderList.value
+})
 
 /* ── 发货弹窗（C3 块4 补丁）───────────────────────────────────────────────────
    ⚠️ 原 `handleDeliver` 一分为二：`openDeliver` 先跑**三道守卫**再开弹窗，
@@ -710,6 +761,211 @@ onMounted(() => {
   color: var(--ink-2);
   font-size: var(--fs-sm);
   cursor: pointer;
+}
+
+/* ══ A 版商家订单处理（!refundMode）══════════════════════════════════════════
+   参考稿 `a.html` 的 `pageMerchantOrders`（约 :3283-3322）及 `.page-head` /
+   `.morder-summary` / `.filter-bar` / `.chips` / `.morder-card` / `.morder-row`。
+   token 映射：稿 `--paper` → `--surface`、`--ink-4` → `--ink-3`、`--line-3` → `--line`。
+   ⚠️ 售后工作台复用的 `.filter-bar` / `.chip` / `.stat-band` 规则一字未动 ——
+      订单模式的新规则一律挂 `.page-head` / `.head-actions` / `.morder-*` 前缀。 */
+.page-head {
+  margin-top: var(--s4);
+  margin-bottom: var(--s6);
+  padding-bottom: var(--s5);
+  border-bottom: 1px solid var(--line);
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: var(--s5);
+}
+.kicker {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: .16em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+.page-head .page-h { margin-top: 6px; }
+.page-head p {
+  margin-top: 8px;
+  max-width: 58ch;
+  font-size: var(--fs-sm);
+  line-height: 1.7;
+  color: var(--ink-2);
+}
+.head-actions { display: flex; align-items: center; gap: var(--s2); flex: 0 0 auto; flex-wrap: wrap; }
+.head-actions .btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 36px;
+  padding: 0 var(--s5);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r1);
+  font-size: var(--fs-sm);
+  color: var(--ink-2);
+  text-decoration: none;
+  background: var(--surface);
+  cursor: pointer;
+}
+.head-actions .btn:hover { border-color: var(--brand-ink); color: var(--brand-ink); }
+.head-actions .btn.solid { background: var(--brand); border-color: var(--brand); color: var(--bg); }
+.head-actions .btn.solid:hover { background: var(--brand-ink); border-color: var(--brand-ink); color: var(--bg); }
+.head-actions .btn .cnt {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  color: inherit;
+  opacity: .72;
+}
+.head-actions .status-select { margin-left: 0; }
+
+.morder-summary {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  border: 1px solid var(--line);
+  margin-bottom: var(--s5);
+}
+.morder-summary > div { padding: 15px 18px; border-right: 1px solid var(--line); }
+.morder-summary > div:last-child { border-right: 0; }
+.morder-summary small {
+  font-family: var(--font-mono);
+  font-size: 8px;
+  letter-spacing: .06em;
+  color: var(--ink-3);
+}
+.morder-summary b {
+  display: block;
+  margin-top: 8px;
+  font-family: var(--font-mono);
+  font-size: 26px;
+  font-weight: 400;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink);
+}
+.morder-summary span { display: block; margin-top: 4px; font-size: 10px; color: var(--ink-3); }
+
+.filter-bar.morder-filter { margin-top: 0; margin-bottom: var(--s5); }
+
+.morder-card { border: 1px solid var(--line); background: var(--surface); }
+.morder-row {
+  display: grid;
+  grid-template-columns: 118px minmax(0, 1fr) 120px 140px 150px;
+  gap: var(--s4);
+  align-items: center;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--line);
+}
+.morder-row:last-child { border-bottom: 0; }
+.morder-row .mrow-id { min-width: 0; }
+.morder-row .oid {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--ink-2);
+  font-variant-numeric: tabular-nums;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.morder-row .buyer {
+  margin-top: 3px;
+  font-size: 11px;
+  color: var(--ink-3);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.morder-row .date {
+  margin-top: 2px;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  color: var(--ink-3);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.morder-row .items { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.morder-row .items .thumb {
+  width: 42px;
+  height: 50px;
+  flex: none;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: var(--r1);
+  background: var(--img);
+}
+.morder-row .items .thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.morder-row .item-main { min-width: 0; }
+.morder-row .items b {
+  display: block;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.morder-row .items small { display: block; margin-top: 2px; font-size: 9px; color: var(--ink-3); }
+.morder-row .amt {
+  text-align: right;
+  font-family: var(--font-mono);
+  font-size: 14px;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink);
+}
+.morder-row .state { min-width: 0; }
+.morder-row .tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 7px;
+  border: 1px solid var(--line-2);
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: .05em;
+  line-height: 1.5;
+  color: var(--ink-3);
+  white-space: nowrap;
+}
+.morder-row .tag.warn { background: var(--ink); border-color: var(--ink); color: var(--bg); }
+.morder-row .tag.info { border-color: var(--brand-ink); color: var(--brand-ink); }
+.morder-row .tag.ok { border-color: var(--success-deep); color: var(--success-deep); }
+.morder-row .tag.err { border-color: var(--danger-deep); color: var(--danger-deep); }
+.morder-row .tracking { margin-top: 5px; font-size: 9px; color: var(--ink-3); }
+.morder-row .ops { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 6px; }
+.morder-row .ops .btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 30px;
+  padding: 0 var(--s3);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r1);
+  background: none;
+  font-size: var(--fs-xs);
+  color: var(--ink-2);
+  cursor: pointer;
+}
+.morder-row .ops .btn.solid { background: var(--brand); border-color: var(--brand); color: var(--bg); }
+.morder-row .ops .btn.solid:hover { background: var(--brand-ink); border-color: var(--brand-ink); }
+.morder-row .ops .btn[disabled] { opacity: .45; cursor: not-allowed; }
+.morder-row .dash { color: var(--ink-3); }
+
+@media (max-width: 1120px) {
+  .page-head { flex-direction: column; align-items: flex-start; }
+  .head-actions { justify-content: flex-start; }
+  .morder-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .morder-summary > div:nth-child(2) { border-right: 0; }
+  .morder-summary > div:nth-child(-n + 2) { border-bottom: 1px solid var(--line); }
+  .morder-row { grid-template-columns: 100px minmax(0, 1fr) 120px; }
+  .morder-row .ops { grid-column: 1 / -1; justify-content: flex-start; }
+}
+@media (max-width: 720px) {
+  .morder-summary { grid-template-columns: 1fr; }
+  .morder-summary > div { border-right: 0; border-bottom: 1px solid var(--line); }
+  .morder-summary > div:last-child { border-bottom: 0; }
 }
 
 /* ① 数据概览：四格。稿 :360-394 —— 本页唯一的「面」（`--glaze-deep`），四条线一并删掉。 */
