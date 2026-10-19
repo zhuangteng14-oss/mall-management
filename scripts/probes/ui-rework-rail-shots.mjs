@@ -2,7 +2,8 @@
 //
 // 用户 2026-10-19 紧急修正后的**唯一**布局契约：
 //   · 公域前台（路由 `meta.public`：两壳首页 / 搜索页）⇒ **没有**左侧身份树，顶栏 + 内容全宽；
-//   · 私域中台（个人中心 / 购物车 / 订单 / 消息 / 发布 / 售后）⇒ 272px 身份树 + 右工作台。
+//   · 私域中台（购物车 / 订单 / 消息 / 发布 / 售后）⇒ 272px 身份树 + 右工作台；
+//   · 个人中心例外（用户 2026-10-19 命令二）：身份树**从 DOM 删除**，整页全宽居中。
 // 覆盖三种真实身份：
 //   ① 客户壳（role=1）：公域无树 / 私域 272px、买家区 11 条、商家区锁定 + 入驻 CTA、未读两笔
 //   ② 商家壳（role=2）：/merchant 无树；/merchant/order 有树、买家功能映射到商家壳地址（9 条）、商家区 7 条
@@ -67,7 +68,7 @@ const SNAP = `(() => {
     active: [...document.querySelectorAll('.zone-link.active')].map(a => (a.innerText || '').replace(/\\s+/g, ' ').trim()),
     scrollW: root.scrollWidth,
     clientW: root.clientWidth,
-    redDot: !!document.querySelector('.top-nav .nav-red-dot'),
+    redDot: !!document.querySelector('.top-nav .unread-dot'),
     railLinks: [...document.querySelectorAll('.side-rail a')].map(a => a.getAttribute('href')),
   }
 })()`
@@ -101,17 +102,35 @@ await withIdentity(
     R.ok('客户壳·公域搜索页：无身份树', sea.exists === false)
     R.ok('客户壳·公域搜索页：工作区铺满可用宽', Math.abs(sea.mainWidth - sea.clientW) <= 1, `${sea.mainWidth}/${sea.clientW}`)
 
-    // 私域个人中心：272px 身份树
+    // 私域个人中心（用户命令二）：身份树从 DOM 删除、全宽居中、旧侧栏菜单不渲染
     await b.goto(`${BASE}/#/customer/user/info`, 2000)
+    const ui = await b.evalJS(`(() => ({
+      rail: !!document.querySelector('.side-rail'),
+      menu: !!document.querySelector('.user-menu'),
+      mainW: (() => { const m = document.querySelector('.shell-main'); return m ? Math.round(m.getBoundingClientRect().width) : 0 })(),
+      clientW: document.documentElement.clientWidth,
+      pageHead: !!document.querySelector('.page-head'),
+      plaque: !!document.querySelector('.plaque'),
+      overflow: document.documentElement.scrollWidth - document.documentElement.clientWidth
+    }))()`)
+    R.ok('客户壳·个人中心：身份树不在 DOM 里', ui.rail === false)
+    R.ok('客户壳·个人中心：工作区铺满可用宽', Math.abs(ui.mainW - ui.clientW) <= 1, `${ui.mainW}/${ui.clientW}`)
+    R.ok('客户壳·个人中心：旧 .user-menu 侧栏不渲染', ui.menu === false)
+    R.ok('客户壳·个人中心：A 版身份页结构在位', ui.pageHead && ui.plaque, `${ui.pageHead}/${ui.plaque}`)
+    R.ok('客户壳·个人中心：无横向溢出', ui.overflow <= 1, ui.overflow)
+    await b.shot(`${EV}/rail-customer-userinfo-norail.png`)
+
+    // 私域购物车仍是 272px 身份树（个人中心是唯一例外）
+    await b.goto(`${BASE}/#/customer/cart`, 2000)
     const s = await b.evalJS(SNAP)
 
-    R.ok('客户壳·个人中心：身份树存在', s.exists === true)
-    R.ok('客户壳·个人中心：侧栏宽 272', s.width === 272, s.width)
-    R.ok('客户壳·个人中心：sticky 100vh', s.position === 'sticky' && s.top === '0px', `${s.position}/${s.top}`)
+    R.ok('客户壳·购物车：身份树存在', s.exists === true)
+    R.ok('客户壳·购物车：侧栏宽 272', s.width === 272, s.width)
+    R.ok('客户壳·购物车：sticky 100vh', s.position === 'sticky' && s.top === '0px', `${s.position}/${s.top}`)
     // ⚠️ 用 clientW（扣掉竖滚动条）而非 innerWidth：`--headless=new` 的量法有 15px 滚动条，
     //    拿 innerW 算会每跑必红（本仓已踩过这个坑，见 headless-scrollbar-width-zero）。
-    R.ok('客户壳·个人中心：右侧工作区 = 可用宽 − 272', Math.abs(s.mainWidth - (s.clientW - 272)) <= 1, `${s.mainWidth}/${s.clientW}`)
-    R.ok('客户壳·个人中心：品牌区 MALL + 双身份', s.brand.includes('MALL') && s.brand.includes('DUAL IDENTITY'))
+    R.ok('客户壳·购物车：右侧工作区 = 可用宽 − 272', Math.abs(s.mainWidth - (s.clientW - 272)) <= 1, `${s.mainWidth}/${s.clientW}`)
+    R.ok('客户壳·购物车：品牌区 MALL + 双身份', s.brand.includes('MALL') && s.brand.includes('DUAL IDENTITY'))
 
     R.ok('客户壳：账户名 = probe_customer', s.account.includes('probe_customer'), s.account.replace(/\n/g, ' | '))
     R.ok('客户壳：身份标 = 普通买家', s.account.includes('普通买家'))
@@ -130,15 +149,15 @@ await withIdentity(
 
     R.ok('客户壳：未读会话徽标 = 1', /\b1$/.test(s.buyer[6].text), s.buyer[6].text)
     R.ok('客户壳：未读通知徽标 = 3', /\b3$/.test(s.buyer[7].text), s.buyer[7].text)
-    R.ok('客户壳：顶栏红点仍在（两笔合计）', s.redDot === true)
+    R.ok('客户壳：顶栏未读圆点在位（两笔合计）', s.redDot === true)
 
     R.ok('客户壳：商家区锁定', s.locked === true && s.merchant.length === 0, s.merchant.length)
     R.ok('客户壳：锁定区给入驻 CTA', s.gateCtas.includes('申请商家入驻'), s.gateCtas)
 
-    R.ok('客户壳·个人中心：选中「个人中心」且黑底反白',
-      s.active.length === 1 && s.active[0].includes('个人中心') &&
-      s.buyer[1].active && s.buyer[1].bg === 'rgb(27, 30, 32)' && s.buyer[1].fg === 'rgb(255, 255, 255)',
-      `${s.active} ${s.buyer[1].bg}/${s.buyer[1].fg}`)
+    R.ok('客户壳·购物车：选中「购物车」且黑底反白',
+      s.active.length === 1 && s.active[0].includes('购物车') &&
+      s.buyer[2].active && s.buyer[2].bg === 'rgb(27, 30, 32)' && s.buyer[2].fg === 'rgb(255, 255, 255)',
+      `${s.active} ${s.buyer[2].bg}/${s.buyer[2].fg}`)
 
     R.ok('客户壳：无横向溢出', s.scrollW <= s.clientW + 1, `${s.scrollW}/${s.clientW}`)
     R.ok('客户壳：侧栏链接全部是真实 hash 地址',
@@ -224,6 +243,10 @@ await withIdentity(
   { loginUsername: 'probe_admin', merchantid: 'M001', customerid: 'C10086', role: '3' },
   async (b) => {
     await b.goto(`${BASE}/#/customer/user/info`, 2000)
+    const adminUi = await b.evalJS(`({ rail: !!document.querySelector('.side-rail'), pageHead: !!document.querySelector('.page-head') })`)
+    R.ok('管理员·个人中心：身份树同样不在 DOM 里', adminUi.rail === false)
+    R.ok('管理员·个人中心：A 版身份页在位', adminUi.pageHead === true)
+    await b.goto(`${BASE}/#/customer/cart`, 2000)
     const s = await b.evalJS(SNAP)
     R.ok('管理员：身份树在位', s.exists === true)
     R.ok('管理员：身份标 = 管理员', s.account.includes('管理员'))

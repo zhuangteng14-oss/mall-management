@@ -78,8 +78,16 @@ const SHAPE = `(() => {
     clientW: root.clientWidth,
     scrollW: root.scrollWidth,
     topNav: !!q('.top-nav'),
-    search: !!q('.nav-search input'),
-    topLinks: qa('.top-nav .nav-btn').map(a => (a.innerText || '').replace(/\\s+/g, ' ').trim()),
+    search: !!q('.top-search input'),
+    topLinks: qa('.top-nav .top-links a, .top-nav .top-cart, .top-nav .top-account').map(a => (a.innerText || '').replace(/\s+/g, ' ').trim()),
+    topMark: (q('.top-mark') || {}).innerText || '',
+    gridStyle: (() => { if (!g) return {}; const c = getComputedStyle(g); return { count: c.columnCount, gap: c.columnGap } })(),
+    sameColGap: (() => {
+      if (!g || !kids[0]) return -1
+      const r0 = kids[0].getBoundingClientRect()
+      const next = kids.find((k, i) => i > 0 && Math.abs(k.getBoundingClientRect().left - r0.left) < 1)
+      return next ? Math.round(next.getBoundingClientRect().top - r0.bottom) : -1
+    })(),
     stageW: q('.stage') ? Math.round(rect(q('.stage')).width) : 0,
     stageH: q('.stage') ? Math.round(rect(q('.stage')).height) : 0,
     dock: !!dock,
@@ -133,8 +141,8 @@ try {
   R.ok('公域主页：无左侧身份树', s.rail === false)
   R.ok('公域主页：工作区铺满可用宽', Math.abs(s.mainW - s.clientW) <= 1, `${s.mainW}/${s.clientW}`)
   R.ok('公域主页：无横向溢出', s.scrollW <= s.clientW + 1, `${s.scrollW}/${s.clientW}`)
-  R.ok('顶栏在位：搜索框 + 消息/购物车/用户中心',
-    s.topNav && s.search && ['消息', '购物车', '用户中心'].every(t => s.topLinks.some(x => x.includes(t))), s.topLinks)
+  R.ok('顶栏在位：MALL 标 + 搜索框 + 通知/购物车/用户中心',
+    s.topNav && s.search && /MALL/.test(s.topMark) && ['通知', '购物车', '用户中心'].every(t => s.topLinks.some(x => x.includes(t))), { mark: s.topMark, links: s.topLinks })
   R.ok('旧「左分类栏 / hero 三栏」结构已不存在', s.oldLeftCol === false)
 
   // ② 沉浸主视觉 + 毛玻璃悬浮条
@@ -172,15 +180,14 @@ try {
 
   R.ok('推荐区 24 张商品卡', s.gridKids === 24 && s.cardsInGrid === 24, `${s.gridKids}/${s.cardsInGrid}`)
   const w = s.widths
-  R.ok('错落网格第一行 6-3-3（大卡 ≈ 2× 小卡）',
-    w[0] > 600 && w[1] > 290 && Math.abs(w[1] - w[2]) <= 2 && Math.abs(w[0] - (w[1] * 2 + 20)) <= 6,
-    w.slice(0, 3))
-  // 列宽期望值同样由内容区宽算（12 栏 / 20px 列距），不写死像素。
-  const want4 = (s.wrapContent - 20 * 2) / 3
-  R.ok('错落网格第二行 4-4-4（三张等宽）',
-    Math.abs(w[3] - w[4]) <= 2 && Math.abs(w[4] - w[5]) <= 2 && Math.abs(w[3] - want4) <= 3,
-    { got: w.slice(3, 6), want: Math.round(want4) })
-  R.ok('错落节奏每 9 件循环（第 7 张回到大卡宽）', Math.abs(w[6] - w[0]) <= 2, w.slice(6, 9))
+  // A 版瀑布流（用户命令三）：column-count:3、列距与下距 12px，三栏等宽。
+  const wantCol = (s.wrapContent - 12 * 2) / 3
+  R.ok('瀑布流 = 3 栏（column-count:3）', s.gridStyle.count === '3', s.gridStyle)
+  R.ok('瀑布流列距 = 12px', s.gridStyle.gap === '12px', s.gridStyle.gap)
+  R.ok('同列相邻卡下距 = 12px（砖墙无白缝）', s.sameColGap === 12, s.sameColGap)
+  R.ok('三栏等宽（列宽由内容区宽算出）',
+    w.slice(0, 12).every(x => Math.abs(x - wantCol) <= 2),
+    { got: w.slice(0, 6), want: Math.round(wantCol) })
   R.ok('矮卡文字区被拉满：元信息行贴近卡底（≤ 24px）', s.footGap >= 0 && s.footGap <= 24, s.footGap)
   R.ok('商品卡链接走 7 参数商品页契约',
     s.productLinks.every(h => h && h.startsWith('#/product?') && h.includes('Id=') && h.includes('MerchantId=') &&
@@ -239,29 +246,35 @@ try {
     /^#\/product\?/.test(pc.hash) && ['Id=', 'MerchantId=', 'GoodName=', 'Price=', 'GoodImg=', 'GoodType=', 'ProductCode='].every(k => pc.hash.includes(k)), pc.hash)
 
   await b.goto(`${BASE}/#/customer`, 2600)
-  await b.evalJS(`(() => { const f = document.querySelector('.nav-search'); f.kw.value = '耳机'; f.requestSubmit() })()`)
+  await b.evalJS(`(() => { const f = document.querySelector('.top-search'); f.kw.value = '耳机'; f.requestSubmit() })()`)
   await sleep(900)
   const sq = await b.evalJS(`({ hash: location.hash })`)
   R.ok('顶栏搜索提交 → 公域搜索页且带 kw', /^#\/customer\/search\?kw=/.test(sq.hash), sq.hash)
 
-  // ④ 私域中台仍有身份树（272px）
+  // ④ 私域个人中心（用户命令二）：**身份树从 DOM 删除**、全宽居中、不渲染旧侧栏菜单
   await b.goto(`${BASE}/#/customer/user/info`, 1800)
   const priv = await b.evalJS(`(() => {
     const rail = document.querySelector('.side-rail')
     const main = document.querySelector('.shell-main')
     return {
       rail: !!rail,
-      width: rail ? Math.round(rail.getBoundingClientRect().width) : 0,
+      menu: !!document.querySelector('.user-menu'),
       mainW: main ? Math.round(main.getBoundingClientRect().width) : 0,
       clientW: document.documentElement.clientWidth,
-      active: [...document.querySelectorAll('.zone-link.active')].map(a => (a.innerText || '').replace(/\\s+/g, ' ').trim())
+      pageHead: !!document.querySelector('.page-head'),
+      plaque: !!document.querySelector('.plaque'),
+      twoCol: !!document.querySelector('.two-col'),
+      shortcuts: document.querySelectorAll('.shortcut-grid > *').length,
+      overflow: document.documentElement.scrollWidth - document.documentElement.clientWidth
     }
   })()`)
-  R.ok('私域个人中心：身份树在位', priv.rail === true)
-  R.ok('私域个人中心：272px + 工作区 = 可用宽 − 272',
-    priv.width === 272 && Math.abs(priv.mainW - (priv.clientW - 272)) <= 1,
-    `${priv.width}/${priv.mainW}/${priv.clientW}`)
-  R.ok('私域个人中心：选中「个人中心」', priv.active.some(t => t.includes('个人中心')), priv.active)
+  R.ok('私域个人中心：身份树不在 DOM 里', priv.rail === false)
+  R.ok('私域个人中心：工作区铺满可用宽', Math.abs(priv.mainW - priv.clientW) <= 1, `${priv.mainW}/${priv.clientW}`)
+  R.ok('私域个人中心：旧 .user-menu 侧栏不渲染', priv.menu === false)
+  R.ok('私域个人中心：A 版结构在位（page-head / 黑金牌匾 / two-col）',
+    priv.pageHead && priv.plaque && priv.twoCol, `${priv.pageHead}/${priv.plaque}/${priv.twoCol}`)
+  R.ok('私域个人中心：快捷入口 4 格', priv.shortcuts === 4, priv.shortcuts)
+  R.ok('私域个人中心：无横向溢出', priv.overflow <= 1, priv.overflow)
   await b.shot(`${EV}/home-private-userinfo.png`)
 
   // 私域购物车同样有身份树
