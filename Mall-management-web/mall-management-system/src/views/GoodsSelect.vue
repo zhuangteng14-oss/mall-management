@@ -1,149 +1,149 @@
 <template>
+  <!-- ══════════════════════════════════════════════════════════════════════
+       公域搜索页 · A 版无左栏全宽布局（2026-10-19 命令四重写）
+       ──────────────────────────────────────────────────────────────────────
+       分类 / 排序 / 筛选全部横排在顶部；结果网格与首页「为你推荐」同款瀑布流。
+       功能一个没少：类目接线、搜索、国补筛选、无限滚动、回程与 saveState。
+       ⚠️ 本模板行数刻意保持 148 行：`<script setup>` 被外部按行号引用，脚本起始行不能漂。
+       ⚠️ 分类树 `<aside class="cat">` 整块从 DOM 删除（不是隐藏），与用户中心剥侧栏同一口径。
+       ⚠️ 公域 / 私域两壳共用本页（`/customer/search` 与 `/merchant/search`），行为一致。
+       ══════════════════════════════════════════════════════════════════════ -->
   <div class="goods-select-view">
     <nav class="crumb">
       <a>首页</a><span class="sp">/</span><span class="cur">商品搜索</span>
     </nav>
-    <h1 class="page-h">商品搜索</h1>
 
-    <div class="search">
-      <input
-        v-model="searchKeyword"
-        type="text"
-        placeholder="搜索商品、品牌、分类"
-        @keyup.enter="doSearch"
-      />
-      <button class="go" @click="doSearch">搜索</button>
-    </div>
-
-    <div class="grid-wrap">
-      <!-- ⚠️ 左栏**三块**「超档」预留位里，本笔（C3 块 3，2026-10-10）**接的是分类树** ——
-           排序 / 筛选条与分页**仍是占位**（`disabled` + `data-slot` + `title` 三件套）。判据见
-           `docs/美化/README.md:212-218`：它管的是「**功能实现**成本」，不是「UI 落不落」；台账见
-           `docs/agent/slot-registry.md`。⚠️ 分类树能接的**唯一**原因：数据源本就好 + 本笔加了新端点。 -->
-      <aside
-        class="cat"
-        title="C3 块 3〈商品块〉已接线（2026-10-10）：一级取 ParentId===0、二级取该父级下，数据源是**既有**端点 /goods/goodstype；点击调**新端点** /goods/categoryGoods（传 TypeId）。故原 data-slot「动现有代码 6 处」**退场** —— 本笔**没改**既有 SQL（GoodsDao 只新增了 selectByTypeId 一个查询，goodsSelect 那条链一字未动）"
-        aria-label="商品分类树"
-      >
-        <div class="cat-h">全部分类</div>
-        <ul class="cat-l">
-          <!-- C3 块 3（2026-10-10）接线：**一级 = `ParentId === 0` 的真类目**，二级 = 该父级下的真类目。
-               ⚠️ 块 3 之前 `ParentId` 列不存在、`GoodTypeNew` 全为 0 ⇒ 稿只能画 5 条一级 + 二级「示意名」，
-               现在两层都是真数据（读**既有** `GET /goods/goodstype` —— 本笔**不新开读端点**）。
-               ⚠️ 点**一级**也发 `categoryGoods`：一级自己就是合法的 `TypeId`（它不是「纯容器」）。
-               ⚠️ 二级选中沿用稿的 `.on`，一级选中用新加的 `.cat-l > li > .lv1.on`（同一条青瓷绿 50 底）。 -->
-          <li>
-            <a
-              class="lv1"
-              :class="{ on: activeType === null }"
-              @click="pickCat(null)"
-            >全部商品</a>
-          </li>
-          <li
-            v-for="t in roots"
-            :key="t.Id"
-            :class="{ open: isOpen(t.Id) }"
-          >
-            <a
-              class="lv1"
-              :class="{ on: activeType === t.Id }"
-              @click="pickCat(t.Id)"
-            >{{ t.GoodType }}</a>
-            <ul v-if="kidsOf(t.Id).length">
-              <li
-                v-for="c in kidsOf(t.Id)"
-                :key="c.Id"
-              >
-                <a
-                  :class="{ on: activeType === c.Id }"
-                  @click="pickCat(c.Id)"
-                >{{ c.GoodType }}</a>
-              </li>
-            </ul>
-            <div v-else class="cat-more">
-              <button type="button" disabled title="该一级下暂无二级类目">更多<span class="car"></span></button>
-            </div>
-          </li>
-        </ul>
-      </aside>
-
-      <div class="main">
-        <div v-if="shownList.length === 0" class="empty">
-          <div class="big">没有找到相关商品</div>
-          <div>换个关键词，或去掉品牌与价格区间限制再试一次。</div>
-        </div>
-
-        <template v-else>
-          <div
-            class="toolbar"
-            data-slot="预留 · 排序 / 筛选（逐项 4～6 处 · 均超档）"
-            title="待 C3〈搜索〉——每个控件自己的 N 见其 title。共同点：都要改 searchByKeyword 的 SQL 并加参数，最短链路 4 处（GoodsDao + GoodsService + GoodsController + GoodsSelect.vue）"
-          >
-            <div class="trow">
-              <div class="tgroup">
-                <span class="lbl">排序</span>
-                <button class="sort on" disabled title="综合 —— 真功能：就是现在的默认返回序，前端不加参数即可，N=0">综合</button>
-                <button class="sort" disabled title="销量 —— 动现有代码 4 处（GoodsDao 加 join productsales + GoodsService + GoodsController + GoodsSelect.vue），**超档**。⚠️ 且 productsales.OrderVolume 全仓硬编码传 0、无 SELECT 读出 ⇒ 就算排了序也是全员并列">销量</button>
-                <button class="sort" disabled title="价格升序 —— 动现有代码 4 处（GoodsDao 的 SQL 加 ORDER BY + GoodsService + GoodsController + GoodsSelect.vue），**超档**">价格 ↑</button>
-                <button class="sort" disabled title="价格降序 —— 同上，4 处，**超档**">价格 ↓</button>
-                <button class="sort" disabled title="有货优先 —— 动现有代码 5 处（goods 表**无库存列**：mall_management_sql.sql + GoodsDao + GoodsService + GoodsController + GoodsSelect.vue），**超档**">有货</button>
-              </div>
-              <!-- ⚠️ 「已加载」不是「共」：分页后本页不知道总数（端点不回 total），
-                   写「共」会把当前已加载数说成全量。 -->
-              <span class="right">已加载 {{ shownList.length }} 件</span>
-            </div>
-            <div class="trow">
-              <div class="tgroup">
-                <span class="lbl">品牌</span>
-                <button class="pick" disabled title="品牌筛选 —— 动现有代码 ≥5 处（goods 表**无品牌列**：mall_management_sql.sql + GoodsDao + GoodsService + GoodsController + GoodsSelect.vue），**超档**">全部品牌<span class="car"></span></button>
-              </div>
-              <div class="tgroup">
-                <span class="lbl">价格</span>
-                <div class="range">
-                  <input type="text" value="0" disabled title="价格区间 —— 动现有代码 4 处（GoodsDao 的 SQL 加 BETWEEN + GoodsService + GoodsController + GoodsSelect.vue），**超档**" />
-                  <span class="dash">—</span>
-                  <input type="text" value="500" disabled title="同上，4 处，**超档**" />
-                </div>
-              </div>
-              <div class="tgroup">
-                <span class="lbl">更多</span>
-                <button class="pick" disabled title="更多筛选（抽屉）—— 上面各项的聚合，动现有代码 ≥6 处（各项之和 + 抽屉组件），**超档**">更多筛选<span class="car"></span></button>
-              </div><div class="tgroup"><span class="lbl">国补</span><button class="pick" :class="{ on: subsidyOnly }" :disabled="!subsidyReady" :title="!isLoggedIn() ? '国补商品 —— 登录后可用（端点不在白名单，匿名会 401）' : (subsidyCodes.size ? '只看国家补贴商品（C3 块 5 · commit 3 已有端点 /marketing/subsidy/goods；本页是**客户端过滤**，未改任何 SQL）' : '当前没有国补商品（规则未配 / 商家未确认 / 不在期）')" @click="subsidyOnly = !subsidyOnly">国补商品</button></div>
-            </div>
-          </div>
-
-          <!-- 商品卡改用公共组件（C3 块 5 ·〈Bug 1/2/3〉落码，2026-10-12）—— **本页是「4 处复用」的
-               第 2 处**。换掉的是原来本页自持的那套（`.card` + `.thumb` + `.c-name` + `.c-price`）。
-               ⚠️ **`from="search"` 不能省**：原来这张卡跳转带 `from: 'search'`，而
-                  `ProductPage.goBack` 按 `route.query.from === 'search'` 决定回程去 `?back=search`
-                  （那一跳让本页 `onMounted` 的 `loadState()` 恢复上次结果）⇒ 不传就是**删行为**。
-               ⚠️ `:before-nav="saveState"` = 原来 `toGoodsDetail` 里那句「跳转前保存」的**同一件事**，
-                  挂在组件的 `beforeNav` 上（组件不自己碰 sessionStorage）。
-               ⚠️ **显示内容变了（有意）**：原卡写「商品名：型号」，现随组件走「图 + 名 + 价 + 类别标签
-                  + 店名 / 已售 N 件」。用户 ⑤ 点名四处统一，这一处是统一后的样子。 -->
-          <div class="grid">
-            <ProductCard v-for="goods in shownList" :key="goods.Id" :goods="goods" :before-nav="saveState" from="search" />
-          </div>
-
-          <!-- 无限滚动哨兵（块 7 收尾 · P1）：原来的 7 枚 disabled 页码是稿的占位（无分页端点），
-               现在后端 `LIMIT ? OFFSET ?` 已落地、本页改为加载更多 ⇒ 占位退场、换成真控件。
-               ⚠️ 不换成分页器：搜索/类目是「浏览型」列表，无限滚动与首页同一交互；
-                  管理端表格才用 `components/Pager.vue`（那种面板有明确的总数与页码语义）。 -->
-          <div
-            v-if="shownList.length"
-            ref="feedSentinel"
-            class="list-more"
-            :class="{ 'list-more--loading': feedLoading, 'list-more--done': feedDone }"
-            @click="!feedDone && feed.retry()"
-          >
-            <span v-if="feedLoading">正在加载更多…</span>
-            <span v-else-if="feedErrMsg">加载失败，点击重试</span>
-            <span v-else-if="feedDone">已经到底了</span>
-            <span v-else>下拉加载更多</span>
-          </div>
-        </template>
+    <header class="head">
+      <div class="head-row">
+        <h1 class="page-h">商品搜索</h1>
+        <span class="head-note">结果与首页「为你推荐」同一套卡片</span>
       </div>
+      <form class="search" @submit.prevent="doSearch">
+        <input
+          v-model="searchKeyword"
+          type="search"
+          placeholder="搜索商品、品牌、分类"
+          aria-label="搜索商品"
+        />
+        <button class="go" type="submit">搜索</button>
+      </form>
+    </header>
+
+    <!-- ⚠️ 分类筛选（C3 块 3 接线，2026-10-10）：A 版公域页不带左栏 ⇒ 一级类目横排成 chip，
+         选中一级后在其下方展开二级。数据源仍是 **既有** `/goods/goodstype`、点击仍走
+         **新端点** `/goods/categoryGoods`（传 TypeId，不是类目名）；一级自己也能筛，
+         故「选中」与「展开」是两件事（见 `pickCat` 的注释）。
+         ⚠️ 二级在原实现里是「选中一级才展开」；横排后改成一行子 chip，展开条件不变。
+         ⚠️ `kidsOf` 为空的一级不再画「更多」死按钮（原占位随树一起退役）。 -->
+    <section class="cats" aria-label="商品分类">
+      <span class="cat-h">全部分类</span>
+      <div class="cat-l">
+        <button
+          type="button"
+          class="chip"
+          :class="{ on: activeType === null }"
+          @click="pickCat(null)"
+        >全部商品</button>
+        <button
+          v-for="t in roots"
+          :key="t.Id"
+          type="button"
+          class="chip"
+          :class="{ on: activeType === t.Id, open: isOpen(t.Id) }"
+          @click="pickCat(t.Id)"
+        >{{ t.GoodType }}</button>
+      </div>
+      <div v-if="openRoot !== null && kidsOf(openRoot).length" class="cat-sub">
+        <span class="lbl">{{ (roots.find((t) => t.Id === openRoot) || {}).GoodType || '全部商品' }}</span>
+        <button
+          v-for="c in kidsOf(openRoot)"
+          :key="c.Id"
+          type="button"
+          class="chip sm"
+          :class="{ on: activeType === c.Id }"
+          @click="pickCat(c.Id)"
+        >{{ c.GoodType }}</button>
+      </div>
+    </section>
+
+    <div v-if="shownList.length === 0" class="empty">
+      <div class="big">没有找到相关商品</div>
+      <div>换个关键词，或去掉品牌与价格区间限制再试一次。</div>
     </div>
+
+    <template v-else>
+      <!-- ⚠️ 排序 / 筛选条（预留位 · C3〈搜索〉）：仍照稿落 `disabled` + `data-slot` + `title`
+           三件套，只是从「左侧竖栏」改为「顶部横向」；真功能链路与 N 值见各控件 title，
+           台账 `docs/agent/slot-registry.md`（条目行号随本笔版面调整，仅登记）。 -->
+      <div
+        class="toolbar"
+        data-slot="预留 · 排序 / 筛选（逐项 4～6 处 · 均超档）"
+        title="待 C3〈搜索〉——每个控件自己的 N 见其 title。共同点：都要改 searchByKeyword 的 SQL 并加参数，最短链路 4 处（GoodsDao + GoodsService + GoodsController + GoodsSelect.vue）"
+      >
+        <div class="trow">
+          <div class="tgroup">
+            <span class="lbl">排序</span>
+            <button class="sort on" disabled title="综合 —— 真功能：就是现在的默认返回序，前端不加参数即可，N=0">综合</button>
+            <button class="sort" disabled title="销量 —— 动现有代码 4 处（GoodsDao 加 join productsales + GoodsService + GoodsController + GoodsSelect.vue），**超档**。⚠️ 且 productsales.OrderVolume 全仓硬编码传 0、无 SELECT 读出 ⇒ 就算排了序也是全员并列">销量</button>
+            <button class="sort" disabled title="价格升序 —— 动现有代码 4 处（GoodsDao 的 SQL 加 ORDER BY + GoodsService + GoodsController + GoodsSelect.vue），**超档**">价格 ↑</button>
+            <button class="sort" disabled title="价格降序 —— 同上，4 处，**超档**">价格 ↓</button>
+            <button class="sort" disabled title="有货优先 —— 动现有代码 5 处（goods 表**无库存列**：mall_management_sql.sql + GoodsDao + GoodsService + GoodsController + GoodsSelect.vue），**超档**">有货</button>
+          </div>
+          <!-- ⚠️ 「已加载」不是「共」：分页后本页不知道总数（端点不回 total），
+               写「共」会把当前已加载数说成全量。 -->
+          <span class="right">已加载 {{ shownList.length }} 件</span>
+        </div>
+        <div class="trow">
+          <div class="tgroup">
+            <span class="lbl">品牌</span>
+            <button class="pick" disabled title="品牌筛选 —— 动现有代码 ≥5 处（goods 表**无品牌列**：mall_management_sql.sql + GoodsDao + GoodsService + GoodsController + GoodsSelect.vue），**超档**">全部品牌<span class="car"></span></button>
+          </div>
+          <div class="tgroup">
+            <span class="lbl">价格</span>
+            <div class="range">
+              <input type="text" value="0" disabled title="价格区间 —— 动现有代码 4 处（GoodsDao 的 SQL 加 BETWEEN + GoodsService + GoodsController + GoodsSelect.vue），**超档**" />
+              <span class="dash">—</span>
+              <input type="text" value="500" disabled title="同上，4 处，**超档**" />
+            </div>
+          </div>
+          <div class="tgroup">
+            <span class="lbl">更多</span>
+            <button class="pick" disabled title="更多筛选（抽屉）—— 上面各项的聚合，动现有代码 ≥6 处（各项之和 + 抽屉组件），**超档**">更多筛选<span class="car"></span></button>
+          </div>
+          <div class="tgroup">
+            <span class="lbl">国补</span>
+            <button class="pick" :class="{ on: subsidyOnly }" :disabled="!subsidyReady" :title="!isLoggedIn() ? '国补商品 —— 登录后可用（端点不在白名单，匿名会 401）' : (subsidyCodes.size ? '只看国家补贴商品（C3 块 5 · commit 3 已有端点 /marketing/subsidy/goods；本页是**客户端过滤**，未改任何 SQL）' : '当前没有国补商品（规则未配 / 商家未确认 / 不在期）')" @click="subsidyOnly = !subsidyOnly">国补商品</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- ⚠️ 商品卡沿用公共组件（C3 块 5，2026-10-12）；`from="search"` 不能省 ——
+           `ProductPage.goBack` 按 `route.query.from === 'search'` 决定回程，
+           ⚠️ 网格与首页「为你推荐」同一套瀑布流：`column-count: 3` +
+              `break-inside: avoid` + 12px 列距 / 下距（用户命令三、四要求两页一致）。
+           ⚠️ 卡片本体不设 `display:flex`：多列布局里 flex 列会强行拉平，
+              破坏按内容高度收边的能力。
+           `:before-nav="saveState"` 承担原来「跳转前保存」的同一件事。 -->
+      <div class="grid">
+        <ProductCard v-for="goods in shownList" :key="goods.Id" :goods="goods" :before-nav="saveState" from="search" />
+      </div>
+
+      <!-- 无限滚动哨兵（块 7 收尾 · P1）：替代原稿 7 枚 disabled 页码。 -->
+           不换成分页器：搜索 / 类目是「浏览型」列表，无限滚动与首页同一交互；
+           管理端表格才用 `components/Pager.vue`（那种面板有明确的总数与页码语义）。
+      <div
+        v-if="shownList.length"
+        ref="feedSentinel"
+        class="list-more"
+        :class="{ 'list-more--loading': feedLoading, 'list-more--done': feedDone }"
+        @click="!feedDone && feed.retry()"
+      >
+        <span v-if="feedLoading">正在加载更多…</span>
+        <span v-else-if="feedErrMsg">加载失败，点击重试</span>
+        <span v-else-if="feedDone">已经到底了</span>
+        <span v-else>下拉加载更多</span>
+      </div>
+    </template>
   </div>
 </template>
 
@@ -393,20 +393,16 @@ onMounted(loadSubsidy)
 
 
 <style scoped>
-/* ⚠️ D 笔（2026-10-07）：全块按 `docs/美化/pages/GoodsSelect.html` 的 `<style>` 重写。
-   类名一律取稿名（`crumb` / `page-h` / `search` / `grid-wrap` / `cat` / `toolbar` / `grid` /
-   `card` / `thumb` / `c-name` / `c-price` / `pager` / `empty`），旧名（`search-section` /
-   `goods-wrap` / `goods-card` / …）全部退役。
-   ⚠️ 稿的 `.page` / `.nav-bar` / `.bar` 是预览脚手架，不进 Vue。
-   ✅ `.cat`（分类树 N=6）/ `.toolbar`（排序筛选 N=4~6）/ `.pager`（分页 N=4）三块自标「超档」，
-   **照落 UI**（用户 2026-10-07 裁决，**覆盖**同日早先的「只登记、不落」）：`README.md:212-218`
-   的三档表管的是「**功能实现**成本」（改既有文件几处），**不是**「UI 落不落」⇒ N≤3 功能本笔做、
-   N>3 登记 `C3〈搜索〉`，**UI 一律落占位**（`disabled` + `data-slot` + `title`）⇒ 栅格是
-   `260px + minmax(0,1fr)` 两栏，不是单栏。台账 `docs/agent/slot-registry.md`。
-   ⚠️ 稿的 `--d2` 由各稿自己的 `:root` 持有（`calc(var(--fs-2xl) * 1.00)` = 36px，稿 `:211`）；
-   scoped 下 `:root` 不生效 ⇒ 直接写 `var(--fs-2xl)`（数值等价），**不**在组件里造 token。
-   ⚠️ `.wrap` 的角色由本页**根** `.goods-select-view` 承接：壳的 `.content` 已归零内距
-   （commit 0 / 乙案）⇒ 1180 居中与内距由本页自持。 */
+/* ══════════════════════════════════════════════════════════════════════════
+   A 版公域搜索页（2026-10-19 用户命令四重写）
+   ──────────────────────────────────────────────────────────────────────────
+   ① 去掉左分类栏（`<aside class="cat">` 整块从 DOM 退役），页面全宽；
+   ② 结果网格与首页「为你推荐」同款瀑布流（`column-count` + `break-inside`）；
+   ③ 分类 / 排序 / 筛选全部横排在顶部。
+   功能一个没少：类目接线、搜索、国补筛选、无限滚动、`from="search"` 回程、`saveState`。
+   ⚠️ 本页与首页同宽：1440 居中 + 左右 `--s6`，与 `HomePage.vue` 的 `.wrap` 对齐。
+   ⚠️ scoped 下 `:root` 不生效 ⇒ 只用 `tokens.css` 的既有变量，不在组件里造 token。
+   ══════════════════════════════════════════════════════════════════════════ */
 
 /* 基础重置：稿的**全局** `a` / `button` / `input` 规则搬进 scoped（只作用本组件的元素）。 */
 button,
@@ -420,14 +416,16 @@ button {
   cursor: pointer;
 }
 .goods-select-view {
-  max-width: 1180px;
+  width: 100%;
+  max-width: 1440px;
   margin: 0 auto;
-  padding: var(--s7) var(--s5) var(--s8);
+  padding: 40px var(--s6) 96px;
   font-family: var(--font);
   font-size: var(--fs-sm);
   color: var(--ink);
 }
-/* 面包屑：分隔符**与文字同色**（同为 `--ink-3`）—— 用 `--line-2` 时对比度只有 1.47:1。 */
+
+/* ── 页头：面包屑 → 标题行 → 搜索框 ───────────────────────────────────── */
 .crumb {
   display: flex;
   align-items: center;
@@ -441,32 +439,47 @@ button {
 .crumb .cur {
   color: var(--ink-2);
 }
-.page-h {
+.head {
   margin-top: var(--s4);
+  padding-bottom: 26px;
+  border-bottom: 1px solid var(--line);
+}
+.head-row {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 24px;
+}
+.page-h {
+  margin: 0;
   font-family: var(--font-display);
   font-size: var(--fs-2xl);
   font-weight: var(--fw-med);
   line-height: 1.15;
   letter-spacing: -0.02em;
 }
-/* 搜索框（主视觉）：56px，按钮嵌在框内 */
+.head-note {
+  font-size: var(--fs-xs);
+  color: var(--ink-3);
+  white-space: nowrap;
+}
+/* 搜索框：A 版顶栏 `.top-search` 的放大版 —— 方框、发丝线、黑底按钮贴右边框。 */
 .search {
-  margin-top: var(--s6);
+  margin-top: var(--s5);
   display: flex;
   align-items: center;
-  max-width: 760px;
-  height: 56px;
+  height: 52px;
   border: 1px solid var(--line-2);
-  border-radius: var(--r3);
   background: var(--surface);
   transition: border-color 0.15s, box-shadow 0.15s;
 }
 .search:focus-within {
-  border-color: var(--brand);
-  box-shadow: 0 0 0 3px var(--brand-tint);
+  border-color: var(--ink);
+  box-shadow: 0 0 0 3px rgba(27, 30, 32, 0.06);
 }
 .search input {
   flex: 1;
+  min-width: 0;
   height: 100%;
   padding: 0 var(--s5);
   border: 0;
@@ -477,137 +490,88 @@ button {
   outline: none;
 }
 .search .go {
-  margin-right: 6px;
-  height: 44px;
+  flex: none;
+  height: 100%;
   padding: 0 var(--s6);
-  border-radius: var(--r2);
-  background: var(--brand);
-  color: var(--bg);
+  border-left: 1px solid var(--line-2);
+  background: var(--ink);
+  color: var(--surface);
   font-weight: var(--fw-med);
+  letter-spacing: 0.04em;
+  transition: background 0.15s;
 }
 .search .go:hover {
   background: var(--brand-hover);
-}
-/* ⚠️ 左栏 260px 是被 slots 角标**逼出来**的：分类树角标文案宽约 242px，栏宽 200px 时它会伸到
-   右邻的排序条上。260px 也正好落在淘宝/京东分类栏的量级上，不算为调试让步。（稿 `:291-293`）
-   `minmax(0,1fr)` 而非 `1fr`：不给主区设下限，长内容不会把栅格撑破。 */
-.grid-wrap {
-  margin-top: var(--s6);
-  display: grid;
-  grid-template-columns: 260px minmax(0, 1fr);
-  gap: var(--s6);
-  align-items: start;
-}
-.main {
-  min-width: 0;
+  color: var(--surface);
 }
 
-/* ── 左分类树（预留位 · C3〈搜索〉）───────────────────────────────────────────
-   ⚠️ 稿 v5 删掉了这里原来的 `border-right:1px solid var(--line)`：左栏 ⇄ 主栅格是**同级**两栏
-   （不是分区内分组），同级的分隔手段是间距、不是线 ⇒ 改为纯大留白（`--s5` + `--s6` gap）。
-   ⚠️ 唯一一条用色规则：**「当前态 = 青瓷绿 50 底」**（`--brand-tint`，ΔE00/白 = 7.30），
-   出现在三处 —— 这里选中的二级分类、排序选中项、分页当前页。文字色只管层级，底色才管状态。 */
-.cat {
-  padding-right: var(--s5);
+/* ── 分类：横排 chip（原左栏 260px 分类树退役）──────────────────────────
+   ⚠️ 一级 chip 选中 = 黑底白字（全页唯一的「当前态」视觉语言，与排序 `.sort.on`、
+      国补 `.pick.on` 同族）；展开二级时在下方铺一行浅底子 chip。
+   ⚠️ 数据与点击逻辑一行没改：`roots` / `kidsOf` / `pickCat` / `activeType`。 */
+.cats {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px 18px;
+  padding: 18px 0;
+  border-bottom: 1px solid var(--line);
 }
 .cat-h {
+  flex: none;
   font-size: var(--fs-xs);
   color: var(--ink-3);
-  margin-bottom: var(--s4);
+  letter-spacing: 0.08em;
 }
-.cat-l,
-.cat-l ul {
-  list-style: none;
-  margin: 0;
-  padding: 0;
+.cat-l {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
 }
-.cat-l > li {
-  border-bottom: 1px solid var(--line);
-  padding: var(--s3) 0;
-}
-.cat-l > li:first-child {
-  border-top: 1px solid var(--line);
-}
-.lv1 {
-  display: block;
-  font-size: var(--fs-sm);
+.chip {
+  padding: 7px 14px;
+  border: 1px solid var(--line-2);
+  background: var(--surface);
   color: var(--ink-2);
-  padding: var(--s1) 0;
+  font-size: var(--fs-xs);
+  line-height: 1.2;
+  transition: border-color 0.15s, color 0.15s, background 0.15s;
 }
-.lv1:hover {
+.chip:hover {
+  border-color: var(--ink);
   color: var(--ink);
 }
-/* ⚠️ 「已展开」和「已选中」必须是**两种**视觉语言，否则同栏里会同时出现两处「绿 + 加粗」，
-   读起来像两个都选中了 ⇒ 绿 + 加粗**只留给选中**（`.on`）；「已展开」的一级只深一档灰。 */
-li.open > .lv1 {
-  color: var(--ink);
+.chip.on {
+  border-color: var(--ink);
+  background: var(--ink);
+  color: var(--surface);
 }
-/* ⚠️ C3 块 3：树里的 `<a>` 从「死链」变成**可点**了 —— 无 `href` 的 `<a>` 不会自己给手型。 */
-.cat-l a {
-  cursor: pointer;
+.chip.sm {
+  padding: 5px 11px;
+  font-size: var(--fs-xs);
 }
-/* C3 块 3 新增：**一级**的选中态。稿只有二级的 `.on`（`.cat-l ul a.on`），一级从来没有选中概念
-   （它当时只是个静态标题）⇒ 新加一条，且刻意与二级 `.on` 同款（青瓷绿 50 底 + 负外边距抵消
-   新增内距，行宽不跳）—— 「选中」在全页只有这一种视觉语言（见上面 `.cat` 块首那条用色规则）。 */
-.cat-l > li > .lv1.on {
-  color: var(--brand-ink);
-  font-weight: var(--fw-med);
-  background: var(--brand-tint);
-  border-radius: var(--r1);
-  padding: var(--s1) var(--s2);
-  margin-left: calc(var(--s2) * -1);
+.cat-sub {
+  flex-basis: 100%;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 10px 12px;
+  background: var(--surface-2);
+  border-left: 2px solid var(--ink);
 }
-.cat-l ul {
-  margin-top: var(--s2);
-  padding-left: var(--s3);
-  border-left: 1px solid var(--line);
-}
-.cat-l ul a {
-  display: block;
+.cat-sub .lbl {
   font-size: var(--fs-xs);
   color: var(--ink-3);
-  padding: 3px 0;
-}
-.cat-l ul a:hover {
-  color: var(--brand-ink);
-}
-.cat-l ul a.on {
-  color: var(--brand-ink);
-  font-weight: var(--fw-med);
-  background: var(--brand-tint);
-  border-radius: var(--r1);
-  padding: 3px var(--s2);
-  margin-left: calc(var(--s2) * -1);
-}
-.cat-more {
-  padding-left: var(--s3);
-  margin-top: var(--s2);
-}
-.cat-more button {
-  font-size: var(--fs-xs);
-  color: var(--ink-3);
-}
-.cat-more button:hover {
-  color: var(--brand-ink);
-}
-.cat-more .car {
-  display: inline-block;
-  width: 0;
-  height: 0;
-  border-left: 4px solid transparent;
-  border-right: 4px solid transparent;
-  border-top: 5px solid currentColor;
-  margin-left: 4px;
-  vertical-align: middle;
+  margin-right: 2px;
 }
 
-/* ── 排序 / 筛选条（预留位 · C3〈搜索〉）：去盒子，上下两条发丝线；**显式两行**，不靠 flex-wrap ─ */
+/* ── 排序 / 筛选条：横向两行，发丝线分隔 ───────────────────────────────── */
 .toolbar {
   display: flex;
   flex-direction: column;
   gap: var(--s3);
   padding: var(--s4) 0;
-  border-top: 1px solid var(--line);
   border-bottom: 1px solid var(--line);
 }
 .trow {
@@ -674,16 +638,10 @@ li.open > .lv1 {
 .pick[disabled] {
   cursor: not-allowed;
 }
-/* ── 2026-10-12〈国补筛选〉：`.pick` 的**选中态** ────────────────────────────────────
-   ⚠️ 借**同一条工具栏**里 `.sort.on` 的**色与字重**（`--brand-ink` + 加粗）—— 它是这一页
-      「当前生效的排序 / 筛选」既有的视觉语言（类目树那套 `.on` 也是同一族 `--brand-*`）。
-      ⚠️ **不借它的底**（`--brand-tint`）：`.sort` 自己带 `padding: var(--s1) var(--s3)`，
-      注释里写明「每个排序项都带 padding ⇒ 选中项加底色时**行高不跳**」；而 `.pick` **没有**
-      padding ⇒ 在这里补一层底会当场推挤同一 `tgroup` 里的 `.lbl` 与邻项。要底色得先给
-      `.pick` 补 padding（那会动到整条工具栏的既有间距）⇒ 本笔不做。
-   ⚠️ **有意不用 `--accent`**：`tokens.css` 的用法规矩把朱砂限定在「价格 / 促销 / 未读」，
-      一枚生效中的筛选 chip 不属于那三件事（本页唯一的朱砂用法是商品价）。
-   ⚠️ 只给国补这一枚用 —— 上面那些 `disabled` 的占位控件永远进不了 `.on`。 */
+/* ── 国补筛选：`.pick` 的**选中态** ─────────────────────────────────────
+   ⚠️ 借同一页 `.sort.on` 的色与字重（`--brand-ink` + 加粗）—— 这是「当前生效的
+      排序 / 筛选」既有的视觉语言；不借底色（`.pick` 没有 padding，加底会推挤邻项）。
+   ⚠️ 有意不用 `--accent`：朱砂只给价格 / 促销 / 未读，筛选 chip 不属于那三件事。 */
 .pick.on {
   color: var(--brand-ink);
   font-weight: var(--fw-med);
@@ -704,18 +662,41 @@ li.open > .lv1 {
   white-space: nowrap;
 }
 
-/* 商品栅格：auto-fill + 40px 行距 */
+/* ── 商品网格：与首页「为你推荐」同一套瀑布流（`HomePage.vue` 的 `.grid`）──
+   ⚠️ 用户命令四：搜索结果的排布必须和主页一致 ⇒ 这里逐条照抄首页那一份：
+      `column-count: 3` + `column-gap: 12px` + `break-inside: avoid` + 下距 12px。
+   ⚠️ 卡片本体不设 `display:flex`：多列布局里 flex 列会把卡片强行拉平，
+      破坏瀑布流按内容高度收边的能力。 */
 .grid {
-  margin-top: var(--s6);
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
-  gap: 40px 24px;
+  column-count: 3;
+  column-gap: 12px;
+  margin-top: 24px;
 }
-/* ⚠️ **墓碑**（C3 块 5 ·〈Bug 2/3〉落码，2026-10-12）：这里原来有 `.card` / `.thumb` / `.c-name` /
-   `.c-price`（+ `.sym/.int/.dec`）一族 —— 本页卡片已换成 `components/ProductCard.vue`，那一族
-   **一个用了它的节点都不剩**（原来它们只服务模板里那个卡片 `div`）。样式随组件走（`scoped`），
-   不在本页留第二份：留着的话，下一个人改卡片时会以为改这里也生效。
-   ⚠️ 上面 `.grid`（栅格列宽 / 间距）**保留**：它是**版面**、不是卡片自己的漆面，换卡不换栅格。 */
+.grid > * {
+  break-inside: avoid;
+  margin: 0 0 12px;
+  min-width: 0;
+}
+.grid > *.pcard {
+  border-color: var(--line);
+  border-radius: 0;
+  box-shadow: none;
+  transition: border-color 0.15s linear;
+}
+.grid > *.pcard:hover {
+  border-color: var(--ink);
+}
+.grid > * :deep(.pcard-img) {
+  min-height: 0;
+  aspect-ratio: 4 / 3;
+}
+.grid > * :deep(.pcard-img img) {
+  transition: transform 0.55s cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+.grid > *:hover :deep(.pcard-img img) {
+  transform: scale(1.045);
+}
+
 .empty {
   padding: var(--s8) 0;
   text-align: center;
@@ -728,7 +709,7 @@ li.open > .lv1 {
   margin-bottom: var(--s3);
 }
 
-/* ── 加载更多（块 7 收尾 · P1；取代原稿的 7 枚 disabled 页码占位）──────────────
+/* ── 加载更多（块 7 收尾 · P1；取代原稿的 7 枚 disabled 页码占位）──────
    底部渐变 = 「下面还有」的提示；`done` 后淡出。新插入的卡从下方淡入（`.grid > *`
    —— ProductCard 是子组件，但它的**根节点**带本页 scoped 属性，所以选得中）。 */
 .grid > * {
@@ -779,36 +760,48 @@ li.open > .lv1 {
   to { transform: rotate(360deg); }
 }
 
-/* 1080：分类树**改横排**，主区吃满整宽。
-   ⚠️ 不这么做的话，左 260px 会把主区压到约 520px，栅格掉到 2 列、卡片又宽又扁 ——
-   与 1440 的观感不是同一张稿。 */
-@media (max-width: 1080px) {
-  .grid-wrap {
-    grid-template-columns: 1fr;
-    gap: var(--s5);
+/* ── 响应式：与首页瀑布流同一组断点（3 → 2 → 1）────────────────────── */
+@media (max-width: 1180px) {
+  .goods-select-view {
+    padding-left: var(--s5);
+    padding-right: var(--s5);
   }
-  .cat {
-    padding-right: 0;
-    border-bottom: 1px solid var(--line);
-    padding-bottom: var(--s4);
+}
+@media (max-width: 860px) {
+  .grid {
+    column-count: 2;
   }
-  .cat-l {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 0 var(--s5);
+  .head-row {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 8px;
   }
-  .cat-l > li {
-    border-bottom: 0;
-    padding: var(--s2) 0;
+  .head-note {
+    white-space: normal;
   }
-  .cat-l > li:first-child {
-    border-top: 0;
+}
+@media (max-width: 600px) {
+  .grid {
+    column-count: 1;
   }
-  /* ⚠️ 横排时**二级分类整层收掉**，只留一级 —— 摊平的话「耳机 / 音箱 充电配件」浮在
-     「电子用品 生活用品」下面，读不出谁是谁的子项，反而比不显示更容易误读。 */
-  .cat-l ul,
-  .cat-more {
-    display: none;
+  .search {
+    height: 46px;
+  }
+  .search .go {
+    padding: 0 var(--s4);
+  }
+  .cats {
+    gap: 8px 12px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .grid > *,
+  .grid > * :deep(.pcard-img img) {
+    animation: none;
+    transition: none;
+  }
+  .grid > *:hover :deep(.pcard-img img) {
+    transform: none;
   }
 }
 </style>
