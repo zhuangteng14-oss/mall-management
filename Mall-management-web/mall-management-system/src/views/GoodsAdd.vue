@@ -31,12 +31,41 @@
          ⚠️ **类名用本页稿自己的 `.head` / `.head h1` / `.head .sub`**，不去套 `UserInfoPage.vue`
          的 `.page-h`：两份稿**自己就不同**（本页 `.head` 带一条发丝线 + `--fs-xs` 副题；
          UserCenter 稿 `.page-h` 无发丝线 + `--fs-sm` 副题）⇒「同壳一套类名」的口径**在此不适用**。 -->
-    <div class="head">
-      <h1>上架商品</h1>
-      <div class="sub">新建一件商品，名称 / 价格 / 图片 / 类型 / 型号五项必填</div>
+    <!-- A 版线框（MERCHANT / GOODS STUDIO）：页头 + 步骤条 + 左步骤 / 中表单 / 右预览。
+         表单字段、校验、草稿与提审逻辑一个字不动，只换容器与呈现（2026-10-19 极速 UI 重构）。 -->
+    <section class="page-head">
+      <div>
+        <div class="kicker">MERCHANT / GOODS STUDIO</div>
+        <h1>商品发布</h1>
+        <p>新建一件商品，名称 / 价格 / 图片 / 类型 / 型号五项必填。保存草稿不生成商品行，提交审核后进入平台审核队列。</p>
+      </div>
+      <div class="head-actions">
+        <router-link class="btn" to="/merchant/user/goods">商品管理</router-link>
+      </div>
+    </section>
+
+    <div class="publish-top">
+      <div class="steps">
+        <span><b>01</b> 基本信息</span>
+        <span><b>02</b> 价格库存</span>
+        <span><b>03</b> 图片</span>
+        <span><b>04</b> 详情与规格</span>
+        <span><b>05</b> 提交审核</span>
+      </div>
+      <span class="tag">草稿 · 未提交</span>
     </div>
 
-    <form class="form" @submit.prevent>
+    <div class="publish-grid">
+      <aside class="publish-steps">
+        <div class="pstep on"><b>01</b><div><span>基本信息</span><small>标题、类型、型号</small></div></div>
+        <div class="pstep"><b>02</b><div><span>价格与库存</span><small>售价 / 划线原价</small></div></div>
+        <div class="pstep"><b>03</b><div><span>商品图片</span><small>封面 1 张 · 图集最多 5 张</small></div></div>
+        <div class="pstep"><b>04</b><div><span>详情与规格</span><small>详情、规格、售后</small></div></div>
+        <div class="pstep"><b>05</b><div><span>提交审核</span><small>平台审核通过后上架</small></div></div>
+        <div class="pv-note">草稿不会生成商品行；提交后状态变为「待审」。</div>
+      </aside>
+
+      <form class="form" @submit.prevent>
 
       <!-- 校验汇总条（稿 `:519`，只在「校验态」出现）。稿写死「还有 5 项未完成」—— 那是它
            一次全空的示意值 ⇒ 本页**实时算**：数的是 `submitGoods` 那 5 个必填判据里的空项。
@@ -399,6 +428,34 @@
         <div class="hint">提交成功后会清空表单，可继续上架下一件。</div>
       </div>
     </form>
+
+      <!-- A 版右栏：买家预览 + 提交前检查（只读，数据全部来自表单实时值）。 -->
+      <aside class="publish-side">
+        <div class="side-title"><h3>买家预览</h3><span class="tiny">BUYER VIEW</span></div>
+        <div class="preview-card">
+          <div class="pv-img">
+            <img v-if="previewImg" :src="previewImg" alt="商品封面预览" />
+            <span v-else>封面图</span>
+          </div>
+          <div class="pv-name">{{ GoodName || '商品名称' }}</div>
+          <div class="pv-price">
+            <b>¥{{ Price || '0.00' }}</b>
+            <s v-if="OriginalPrice">¥{{ OriginalPrice }}</s>
+          </div>
+          <div class="pv-meta">{{ GoodType || '未选型号' }}</div>
+        </div>
+
+        <div class="side-title" style="margin-top: 18px"><h3>提交前检查</h3><span class="tiny">AUDIT</span></div>
+        <div class="audit-box">
+          <div class="audit-line" :class="{ ok: !!GoodName }"><span>商品名称</span><span>{{ GoodName ? 'PASS' : '待补' }}</span></div>
+          <div class="audit-line" :class="{ ok: !!Price }"><span>价格高于 0</span><span>{{ Price ? 'PASS' : '待补' }}</span></div>
+          <div class="audit-line" :class="{ ok: !!selectedFile }"><span>封面图 1 张</span><span>{{ selectedFile ? 'PASS' : '待补' }}</span></div>
+          <div class="audit-line" :class="{ ok: !!GoodType }"><span>商品类型</span><span>{{ GoodType ? 'PASS' : '待补' }}</span></div>
+          <div class="audit-line" :class="{ ok: !!ProductCode }"><span>商品型号</span><span>{{ ProductCode ? 'PASS' : '待补' }}</span></div>
+        </div>
+        <div class="pv-note">保存草稿不写 goods 行；提交审核后由平台审核，通过才上架。</div>
+      </aside>
+    </div>
 
     <!-- ═══ 「选模板」弹窗 ×3（2026-10-10〈模板表通用化〉）═════════════════════════
          ⚠️ 触发按钮**留在各自字段里**（`.btn-quiet`，本页既有类），组件只出弹窗 —— 见
@@ -913,6 +970,118 @@ button { background: none; border: 0; cursor: pointer; }
   font-size: var(--d2); font-weight: var(--fw-med); line-height: 1.15; letter-spacing: -.02em;
 }
 .head .sub { margin-top: var(--s1); font-size: var(--fs-xs); color: var(--ink-3); }
+
+/* ── A 版工作室布局（MERCHANT / GOODS STUDIO）──────────────────────────────── */
+.page-head {
+  display: flex; align-items: flex-end; justify-content: space-between;
+  gap: var(--s5); padding-bottom: var(--s5); border-bottom: 1px solid var(--line-2);
+}
+.page-head .kicker {
+  font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.16em;
+  text-transform: uppercase; color: var(--ink-3);
+}
+.page-head h1 {
+  margin-top: 6px; font-family: var(--font-display); font-size: var(--d2);
+  font-weight: var(--fw-med); line-height: 1.15; letter-spacing: -0.02em;
+}
+.page-head p {
+  margin-top: 8px; max-width: 62ch; font-size: var(--fs-xs);
+  line-height: 1.7; color: var(--ink-2);
+}
+.head-actions { display: flex; gap: var(--s2); flex: 0 0 auto; }
+.head-actions .btn {
+  display: inline-flex; align-items: center; height: 36px; padding: 0 var(--s5);
+  border: 1px solid var(--line-2); border-radius: var(--r1);
+  font-size: var(--fs-sm); color: var(--ink-2); text-decoration: none;
+  background: var(--surface);
+}
+.head-actions .btn:hover { border-color: var(--brand-ink); color: var(--brand-ink); }
+
+.publish-top {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: var(--s4); flex-wrap: wrap; border: 1px solid var(--line);
+  padding: 12px 16px; background: var(--zone); margin: var(--s5) 0 var(--s6);
+}
+.publish-top .steps { display: flex; gap: var(--s4); flex-wrap: wrap; }
+.publish-top .steps span {
+  font-family: var(--font-mono); font-size: 9px; letter-spacing: 0.06em; color: var(--ink-3);
+}
+.publish-top .steps b { color: var(--ink); font-weight: 400; margin-right: 5px; }
+.publish-top .tag {
+  padding: 2px var(--s2); border: 1px solid var(--line-2);
+  font-family: var(--font-mono); font-size: 9px; color: var(--ink-2); white-space: nowrap;
+}
+
+.publish-grid {
+  display: grid; grid-template-columns: 206px minmax(0, 1fr) 334px;
+  gap: 28px; align-items: start;
+}
+.publish-grid .form { margin-top: 0; max-width: none; }
+.publish-steps { border-top: 1px solid var(--line); position: sticky; top: var(--s5); }
+.pstep {
+  display: flex; gap: var(--s3); padding: var(--s3) 0;
+  border-bottom: 1px solid var(--line); color: var(--ink-3);
+}
+.pstep b {
+  font-family: var(--font-mono); font-size: 9px; font-weight: 400;
+  color: var(--ink-3); padding-top: 2px;
+}
+.pstep span { display: block; font-size: var(--fs-sm); color: var(--ink-2); }
+.pstep small { display: block; margin-top: 3px; font-size: 9px; color: var(--ink-3); }
+.pstep.on b { color: var(--brand-ink); }
+.pstep.on span { color: var(--ink); font-weight: var(--fw-med); }
+.pv-note {
+  margin-top: var(--s4); padding: var(--s3); border: 1px solid var(--line);
+  background: var(--zone); font-size: 9px; line-height: 1.7; color: var(--ink-3);
+}
+
+.publish-side { position: sticky; top: var(--s5); }
+.side-title {
+  display: flex; align-items: baseline; justify-content: space-between;
+  gap: var(--s2); margin-bottom: var(--s3);
+}
+.side-title h3 { font-size: var(--fs-sm); font-weight: var(--fw-semi); }
+.side-title .tiny { font-family: var(--font-mono); font-size: 9px; color: var(--ink-3); }
+.preview-card { border: 1px solid var(--line); background: var(--surface); padding: var(--s3); }
+.pv-img {
+  aspect-ratio: 4 / 5; display: flex; align-items: center; justify-content: center;
+  background: var(--zone); color: var(--ink-3); font-size: var(--fs-xs); overflow: hidden;
+}
+.pv-img img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.pv-name {
+  margin-top: var(--s3); font-size: var(--fs-sm); font-weight: var(--fw-med);
+  line-height: 1.4; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.pv-price { display: flex; align-items: baseline; gap: var(--s2); margin-top: 6px; }
+.pv-price b {
+  font-family: var(--font-mono); font-size: var(--fs-lg); font-weight: 400;
+  color: var(--brand-ink); font-variant-numeric: tabular-nums;
+}
+.pv-price s { font-size: var(--fs-xs); color: var(--ink-3); }
+.pv-meta { margin-top: 4px; font-size: 9px; color: var(--ink-3); }
+
+.audit-box { border: 1px solid var(--line); background: var(--surface); }
+.audit-line {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: var(--s3); padding: 8px var(--s3); border-bottom: 1px solid var(--line);
+  font-size: var(--fs-xs); color: var(--ink-2);
+}
+.audit-line:last-child { border-bottom: 0; }
+.audit-line span:last-child { font-family: var(--font-mono); font-size: 9px; color: var(--ink-3); }
+.audit-line.ok span:last-child { color: var(--brand-ink); }
+
+@media (max-width: 1280px) {
+  .publish-grid { grid-template-columns: 180px minmax(0, 1fr) 300px; gap: 20px; }
+}
+@media (max-width: 1060px) {
+  .publish-grid { grid-template-columns: minmax(0, 1fr) 320px; }
+  .publish-steps { display: none; }
+}
+@media (max-width: 820px) {
+  .publish-grid { grid-template-columns: 1fr; }
+  .publish-side { position: static; }
+  .page-head { flex-direction: column; align-items: flex-start; }
+}
 
 /* ── 分区：靠**序号 + 发丝线 + 留白**分层，不靠字号（稿 `:191-199`）────────────── */
 .form { margin-top: var(--s6); max-width: 680px; }

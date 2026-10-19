@@ -83,37 +83,112 @@
           <button class="tab" :class="{ on: refundMode }" title="商家售后队列：只看待商家审核（RefundStatus=1）的售后" @click="toggleRefund">售后<span class="c">{{ refundList.length }}</span></button>
         </nav>
 
-        <!-- 售后队列表（批四第二批 commit 4）。⚠️ 只列 `RefundStatus=1`；拒绝第 2 次时后端自动转平台
+        <!-- 售后工作台（A 版 MERCHANT / AFTER-SALES DESK）：统计带 + 筛选 chips + 左队列 / 右案件。
+             ⚠️ 数据链不变：只列 `RefundStatus=1`；拒绝第 2 次时后端自动转平台
              （`outcome='escalated'`）⇒ 本表不再显示，改由管理端「平台售后」处理。 -->
-        <section v-if="refundMode" class="rtbl">
+        <template v-if="refundMode">
+          <section class="stat-band">
+            <div class="stat-cell"><small>PENDING</small><b>{{ refundList.length }}</b><span>待商家审核 · SLA 4h</span></div>
+            <div class="stat-cell"><small>AMOUNT</small><b>¥{{ refundAmountSum }}</b><span>待处理退款金额</span></div>
+            <div class="stat-cell"><small>SECOND</small><b>{{ secondCount }}</b><span>二次申请 · 拒绝即转平台</span></div>
+            <div class="stat-cell"><small>AVG</small><b>{{ avgRetry }}</b><span>平均申请次数</span></div>
+          </section>
+
+          <div class="filter-bar">
+            <div class="chips">
+              <button
+                v-for="f in refundFilters"
+                :key="f.key"
+                type="button"
+                class="chip"
+                :class="{ on: refundFilter === f.key }"
+                @click="refundFilter = f.key"
+              >{{ f.label }}<span>{{ f.count }}</span></button>
+            </div>
+            <span class="filter-note">按申请时间倒序 · 第 2 次拒绝自动转平台</span>
+          </div>
+
           <div v-if="refundLoading" class="empty"><div class="p">加载中…</div></div>
           <div v-else-if="refundList.length === 0" class="empty">
             <div class="big">暂无待处理的售后</div>
             <div class="p">买家对已收货订单申请退货后会出现在这里。</div>
           </div>
-          <template v-else>
-            <div class="rt-head">
-              <span></span><span>商品</span><span>订单号</span><span>买家</span>
-              <span class="r">退款金额</span><span class="cen">申请次数</span><span>申请时间</span><span class="r">操作</span>
-            </div>
-            <div v-for="r in refundList" :key="r.OrderId" class="rt-row">
-              <div class="thumb"><img v-if="r.Images" :src="r.Images" alt="商品图片" /></div>
-              <div class="pn" :title="r.ProductInformation">{{ r.ProductInformation }}</div>
-              <div class="oid">{{ r.OrderId }}</div>
-              <div class="buyer" :title="`客户号 ${r.CustomerId}`">{{ r.CustomerId }}</div>
-              <div class="money">¥{{ refundAmountOf(r) }}</div>
-              <div class="cen">{{ retryOf(r) }} / 2</div>
-              <div class="tcell">
-                <span class="time">{{ formatDateTime(r.RefundApplyAt) }}</span>
-                <span class="reason" :title="r.RefundReason">原因：{{ r.RefundReason || '—' }}</span>
+          <div v-else class="desk-layout">
+            <div class="queue">
+              <div class="queue-head"><span>QUEUE / {{ filteredRefunds.length }} 条</span><span>AMOUNT</span></div>
+              <button
+                v-for="r in filteredRefunds"
+                :key="r.OrderId"
+                type="button"
+                class="queue-item"
+                :class="{ on: refundSel && refundSel.OrderId === r.OrderId }"
+                @click="refundSel = r"
+              >
+                <div class="q-top">
+                  <span class="q-name">买家 {{ r.CustomerId }}</span>
+                  <span class="tag" :class="{ dark: retryOf(r) >= 2 }">{{ retryOf(r) >= 2 ? '二次申请' : '首次申请' }}</span>
+                </div>
+                <div class="q-meta">{{ r.OrderId }} · {{ formatDateTime(r.RefundApplyAt) }}</div>
+                <div class="q-amount">¥{{ refundAmountOf(r) }} · 第 {{ retryOf(r) }} 次申请</div>
+                <div class="q-reason">{{ r.RefundReason || '未填写原因' }}</div>
+              </button>
+              <div v-if="!filteredRefunds.length" class="empty" style="border:0">
+                <div class="p">这个筛选下没有售后单。</div>
+                <button class="go2" type="button" @click="refundFilter = 'all'">查看全部</button>
               </div>
-              <div class="op r">
-                <button class="send" @click="openRefund(r, true)">同意退款</button>
-                <button class="act-no" @click="openRefund(r, false)">拒绝</button>
-              </div>
             </div>
-          </template>
-        </section>
+
+            <article v-if="refundSel" class="case">
+              <div class="case-head">
+                <div>
+                  <div class="kicker">CASE / 待商家审核</div>
+                  <h2>{{ refundSel.ProductInformation }}</h2>
+                  <div class="sub">订单 {{ refundSel.OrderId }} · 申请于 {{ formatDateTime(refundSel.RefundApplyAt) }}</div>
+                </div>
+                <div class="case-amount"><b>¥{{ refundAmountOf(refundSel) }}</b><small>退款金额 · 退回买家余额</small></div>
+              </div>
+              <div class="case-body">
+                <div>
+                  <div class="section-title"><h3>申请信息</h3><span class="tiny">{{ retryOf(refundSel) }} / 2 次</span></div>
+                  <dl class="kv">
+                    <dt>买家</dt><dd>{{ refundSel.CustomerId }}</dd>
+                    <dt>商品</dt><dd>{{ refundSel.ProductInformation }} × {{ refundSel.Quantity || 1 }}</dd>
+                    <dt>退款原因</dt><dd>{{ refundSel.RefundReason || '—' }}</dd>
+                    <dt>订单金额</dt><dd>¥{{ refundAmountOf(refundSel) }}</dd>
+                    <dt>退款去向</dt><dd>账户余额（演示）</dd>
+                  </dl>
+                  <div class="section-title"><h3>商品快照</h3><span class="tiny">ORDER SNAPSHOT</span></div>
+                  <div class="snap">
+                    <div class="snap-thumb"><img v-if="refundSel.Images" :src="refundSel.Images" alt="商品图片" /><span v-else>无图</span></div>
+                    <p>{{ refundSel.ProductInformation }} · 数量 {{ refundSel.Quantity || 1 }}</p>
+                  </div>
+                </div>
+                <aside>
+                  <div class="section-title"><h3>六态进度</h3><span class="tiny">REFUND STATE</span></div>
+                  <div class="refund-strip">
+                    <div class="rs-item done"><b>01</b><span>买家申请</span></div>
+                    <div class="rs-item cur"><b>02</b><span>商家审核</span></div>
+                    <div class="rs-item" :class="{ next: retryOf(refundSel) >= 2 }"><b>03</b><span>{{ retryOf(refundSel) >= 2 ? '拒绝即转平台' : '平台审核' }}</span></div>
+                    <div class="rs-item"><b>04</b><span>退款完成</span></div>
+                  </div>
+                  <div class="section-title" style="margin-top: 18px"><h3>处理提示</h3><span class="tiny">NOTE</span></div>
+                  <div class="cart-note">
+                    <span class="tiny">
+                      {{ retryOf(refundSel) >= 2
+                        ? '这已是第 2 次申请：拒绝后系统会自动升级到平台处理，本店不再处理。'
+                        : '同意退款会立即把金额退回买家余额，并回补库存；拒绝后买家可在剩余次数内重申。' }}
+                    </span>
+                  </div>
+                </aside>
+              </div>
+              <div class="case-btns">
+                <button class="send" type="button" @click="openRefund(refundSel, true)">同意退款 · ¥{{ refundAmountOf(refundSel) }}</button>
+                <button class="act-no" type="button" @click="openRefund(refundSel, false)">拒绝并说明理由</button>
+              </div>
+            </article>
+            <div v-else class="case case-empty">选择左侧一条售后单查看详情。</div>
+          </div>
+        </template>
 
         <!-- ③ 筛选栏（稿 :704-715）。整块是预留位；输入框与两枚按钮逐枚 disabled + title（稿里都带 title）。 -->
         <div v-if="!refundMode" class="filter" data-slot="预留 · 筛选栏（动现有代码 4 处 · 超档）"
@@ -250,7 +325,7 @@
 
 <script setup>
 /* eslint-disable no-undef */
-import { ref, onMounted } from 'vue'
+import { computed, ref, onMounted } from 'vue'
 import { http, handleApiError, urlOf } from '../api/http'
 import { endpoints } from '../api/endpoints'
 import { orderRefundMerchantList, orderRefundMerchantHandle } from '../api/order'
@@ -406,6 +481,29 @@ const refundBusy = ref(false)
 const retryOf = (row) => Number(row && row.RefundRetryCount) || 0
 const refundAmountOf = (row) => Number((row && (row.RefundAmount || row.Price)) || 0).toFixed(2)
 
+/* ── A 版售后工作台：筛选 chips + 左队列 / 右案件（纯前端视图状态，不新增请求）── */
+const refundFilter = ref('all')
+const refundSel = ref(null)
+const filteredRefunds = computed(() => {
+  if (refundFilter.value === 'second') return refundList.value.filter((r) => retryOf(r) >= 2)
+  if (refundFilter.value === 'first') return refundList.value.filter((r) => retryOf(r) < 2)
+  return refundList.value
+})
+const refundFilters = computed(() => [
+  { key: 'all', label: '全部', count: refundList.value.length },
+  { key: 'first', label: '首次申请', count: refundList.value.filter((r) => retryOf(r) < 2).length },
+  { key: 'second', label: '二次申请', count: refundList.value.filter((r) => retryOf(r) >= 2).length }
+])
+const refundAmountSum = computed(() =>
+  refundList.value.reduce((sum, r) => sum + Number((r && (r.RefundAmount || r.Price)) || 0), 0).toFixed(2)
+)
+const secondCount = computed(() => refundList.value.filter((r) => retryOf(r) >= 2).length)
+const avgRetry = computed(() => {
+  if (!refundList.value.length) return '—'
+  const total = refundList.value.reduce((sum, r) => sum + retryOf(r), 0)
+  return (total / refundList.value.length).toFixed(1)
+})
+
 const loadRefunds = async () => {
   const merchantId = currentMerchantId()
   if (!merchantId) return
@@ -414,6 +512,8 @@ const loadRefunds = async () => {
     const data = await orderRefundMerchantList(merchantId, 1)
     if (data.success) {
       refundList.value = data.list || []
+      const keep = refundSel.value && refundList.value.find((r) => r.OrderId === refundSel.value.OrderId)
+      refundSel.value = keep || refundList.value[0] || null
     } else {
       console.error('获取售后队列失败', data.msg)
     }
@@ -1157,6 +1257,153 @@ onMounted(() => {
 }
 .act-no:hover { text-decoration: underline; }
 
+/* ══ A 版售后工作台（统计带 / chips / 左队列 / 右案件）════════════════════════
+   ⚠️ 与上面的 `.rt-*` 表是同一份数据的两种呈现；旧规则保留不删（回退用）。 */
+.stat-band {
+  display: grid; grid-template-columns: repeat(4, minmax(0, 1fr));
+  border: 1px solid var(--line); margin-top: var(--s4); background: var(--surface);
+}
+.stat-cell { padding: var(--s4); border-right: 1px solid var(--line); }
+.stat-cell:last-child { border-right: 0; }
+.stat-cell small {
+  display: block; font-family: var(--font-mono); font-size: 9px;
+  letter-spacing: 0.12em; color: var(--ink-3);
+}
+.stat-cell b {
+  display: block; margin-top: 6px; font-family: var(--font-mono);
+  font-size: var(--fs-xl); line-height: 1; font-weight: 400;
+  font-variant-numeric: tabular-nums; color: var(--ink);
+}
+.stat-cell span { display: block; margin-top: 6px; font-size: var(--fs-xs); color: var(--ink-3); }
+
+.filter-bar {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: var(--s4); margin-top: var(--s4); padding-bottom: var(--s3);
+  border-bottom: 1px solid var(--line-2);
+}
+.filter-bar .chips { display: flex; gap: var(--s2); flex-wrap: wrap; }
+.filter-bar .chip {
+  display: inline-flex; align-items: center; gap: 6px;
+  height: 30px; padding: 0 var(--s3); border-radius: var(--r1);
+  border: 1px solid var(--line-2); background: var(--surface);
+  font-size: var(--fs-xs); color: var(--ink-2); cursor: pointer;
+}
+.filter-bar .chip span { font-family: var(--font-mono); font-size: 9px; color: var(--ink-3); }
+.filter-bar .chip.on { border-color: var(--brand-ink); color: var(--brand-ink); background: var(--brand-soft); }
+.filter-bar .chip.on span { color: var(--brand-ink); }
+.filter-note { font-family: var(--font-mono); font-size: 9px; color: var(--ink-3); white-space: nowrap; }
+
+.desk-layout {
+  display: grid; grid-template-columns: 360px minmax(0, 1fr);
+  gap: var(--s5); align-items: start; margin-top: var(--s4);
+}
+.queue { border-top: 1px solid var(--line); }
+.queue-head {
+  display: flex; justify-content: space-between; padding: var(--s2) 0;
+  font-family: var(--font-mono); font-size: 9px; letter-spacing: 0.1em;
+  color: var(--ink-3); border-bottom: 1px solid var(--line);
+}
+.queue-item {
+  display: block; width: 100%; text-align: left; font: inherit;
+  padding: var(--s4) var(--s3); border: 0; border-bottom: 1px solid var(--line);
+  border-left: 2px solid transparent; background: transparent; cursor: pointer; color: inherit;
+}
+.queue-item:hover { background: var(--zone); }
+.queue-item.on { background: var(--zone); border-left-color: var(--ink); }
+.q-top { display: flex; align-items: center; justify-content: space-between; gap: var(--s2); }
+.q-name { font-size: var(--fs-sm); font-weight: var(--fw-med); }
+.q-top .tag {
+  padding: 0 var(--s2); border: 1px solid var(--line-2); border-radius: var(--r1);
+  font-size: 9px; color: var(--ink-3); white-space: nowrap;
+}
+.q-top .tag.dark { border-color: var(--accent); color: var(--accent); }
+.q-meta { margin-top: 5px; font-family: var(--font-mono); font-size: 9px; color: var(--ink-3); }
+.q-amount { margin-top: 6px; font-family: var(--font-mono); font-size: var(--fs-sm); color: var(--ink); }
+.q-reason {
+  margin-top: 4px; font-size: var(--fs-xs); color: var(--ink-3);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+
+.case { border: 1px solid var(--line); background: var(--surface); }
+.case-empty {
+  display: flex; align-items: center; justify-content: center;
+  min-height: 220px; font-size: var(--fs-sm); color: var(--ink-3);
+}
+.case-head {
+  display: flex; align-items: flex-start; justify-content: space-between;
+  gap: var(--s5); padding: var(--s5); border-bottom: 1px solid var(--line);
+}
+.case-head .kicker {
+  font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.16em;
+  text-transform: uppercase; color: var(--ink-3);
+}
+.case-head h2 {
+  margin-top: 6px; font-family: var(--font-display); font-size: var(--fs-lg);
+  font-weight: 600; line-height: 1.2; color: var(--ink);
+}
+.case-head .sub { margin-top: 6px; font-size: var(--fs-xs); color: var(--ink-3); }
+.case-amount { text-align: right; flex: 0 0 auto; }
+.case-amount b {
+  display: block; font-family: var(--font-mono); font-size: var(--fs-xl);
+  font-weight: 400; font-variant-numeric: tabular-nums; color: var(--ink);
+}
+.case-amount small { display: block; margin-top: 4px; font-size: 9px; color: var(--ink-3); }
+
+.case-body {
+  display: grid; grid-template-columns: minmax(0, 1fr) 260px;
+  gap: var(--s5); padding: var(--s5);
+}
+.section-title {
+  display: flex; align-items: baseline; justify-content: space-between;
+  gap: var(--s3); margin-bottom: var(--s3);
+}
+.section-title h3 { font-size: var(--fs-sm); font-weight: var(--fw-semi); color: var(--ink); }
+.section-title .tiny { font-family: var(--font-mono); font-size: 9px; color: var(--ink-3); }
+.kv {
+  display: grid; grid-template-columns: 88px minmax(0, 1fr);
+  gap: var(--s2) var(--s3); margin: 0 0 var(--s5);
+  font-size: var(--fs-sm);
+}
+.kv dt { color: var(--ink-3); }
+.kv dd { margin: 0; color: var(--ink); overflow-wrap: anywhere; }
+
+.snap {
+  display: flex; align-items: center; gap: var(--s3);
+  padding: var(--s3); border: 1px solid var(--line); background: var(--zone);
+}
+.snap-thumb {
+  width: 64px; height: 64px; flex: 0 0 auto; overflow: hidden;
+  display: flex; align-items: center; justify-content: center;
+  background: var(--surface); font-size: 9px; color: var(--ink-3);
+}
+.snap-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.snap p { font-size: var(--fs-xs); line-height: 1.6; color: var(--ink-2); }
+
+.refund-strip { display: grid; gap: 6px; }
+.rs-item {
+  display: flex; align-items: center; gap: var(--s2);
+  padding: 6px var(--s2); border: 1px solid var(--line);
+  font-size: var(--fs-xs); color: var(--ink-3);
+}
+.rs-item b {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 20px; height: 20px; border: 1px solid var(--line-2);
+  font-family: var(--font-mono); font-size: 9px; font-weight: 400;
+}
+.rs-item.done { color: var(--ink-2); border-color: var(--line-2); }
+.rs-item.done b { border-color: var(--brand-ink); color: var(--brand-ink); }
+.rs-item.cur { border-color: var(--ink); color: var(--ink); font-weight: var(--fw-med); }
+.rs-item.cur b { border-color: var(--ink); background: var(--ink); color: var(--bg); }
+.rs-item.next span { color: var(--accent); }
+
+.cart-note { display: block; padding: var(--s3); background: var(--zone); border: 1px solid var(--line); }
+.cart-note .tiny { font-size: var(--fs-xs); line-height: 1.7; color: var(--ink-3); }
+
+.case-btns {
+  display: flex; align-items: center; gap: var(--s3); flex-wrap: wrap;
+  padding: var(--s4) var(--s5); border-top: 1px solid var(--line);
+}
+
 @media (max-width: 1120px) {
   .rt-head,
   .rt-row {
@@ -1164,5 +1411,16 @@ onMounted(() => {
     gap: var(--s3);
   }
   .rt-row .reason { max-width: 140px; }
+  .stat-band { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .stat-cell:nth-child(2) { border-right: 0; }
+  .stat-cell:nth-child(-n + 2) { border-bottom: 1px solid var(--line); }
+  .desk-layout { grid-template-columns: 1fr; }
+  .case-body { grid-template-columns: 1fr; }
+}
+@media (max-width: 720px) {
+  .stat-band { grid-template-columns: 1fr; }
+  .stat-cell { border-right: 0; border-bottom: 1px solid var(--line); }
+  .stat-cell:last-child { border-bottom: 0; }
+  .filter-bar { flex-direction: column; align-items: flex-start; }
 }
 </style>
