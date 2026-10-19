@@ -245,10 +245,12 @@
         <p v-if="tkMsg" class="tk-msg">{{ tkMsg }}</p>
       </section>
 
-      <!-- ── ⑤ 为你推荐（12 栏错落网格）────────────────────────────────────────
+      <!-- ── ⑤ 为你推荐（马赛克错落网格 · Mosaic/Bento）────────────────────────
            ⚠️ 卡片仍是公共组件 `components/ProductCard.vue`（7 个 query 参数契约、
               导航前副作用走 `onCardNav`、加购逻辑都在组件里）。
-           ⚠️ 错落只改**父级栅格**：6-3-3 / 4-4-4 / 6-3-3 每 9 件一循环。 -->
+           ⚠️ 用户 2026-10-19 命令五：废弃等宽瀑布流，改 4 列 CSS Grid；
+              档位表在 `config/mosaic.js`（8 件一循环恰好铺满 4×4），
+              样式在全局 `assets/mosaic.css`（搜索页共用同一份）。 -->
       <section class="sec rec">
         <header class="sec-head">
           <div>
@@ -265,8 +267,8 @@
           <button type="button" class="more" @click="retryHome">重试</button>
         </p>
         <p v-else-if="goodsList.length === 0 && !homeLoading" class="empty-tip">暂无商品</p>
-        <div v-else class="grid">
-          <ProductCard v-for="goods in goodsList" :key="goods.Id" :goods="goods" :before-nav="onCardNav" />
+        <div v-else class="grid mosaic-grid">
+          <ProductCard v-for="(goods, i) in goodsList" :key="goods.Id" :goods="goods" :class="MOSAIC[i % MOSAIC.length]" :before-nav="onCardNav" />
         </div>
         <!-- 无限滚动哨兵：留在文档流里，`useInfiniteList` 靠 IntersectionObserver 观察它 -->
         <div
@@ -323,7 +325,7 @@
 import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import { useInfiniteList } from '../composables/useInfiniteList'
 import { http, handleApiError } from '../api/http'
-import { endpoints } from '../api/endpoints'; import { getUsername } from '../api/auth'; import { coupons, claim, claimBatch, seckillLive } from '../api/marketing'; import { truthy, couponFace, couponName, couponLine } from '../config/coupon-format'; import ProductCard from '../components/ProductCard.vue'; import { sharedList } from '../config/goods-flags'; import { productLink } from '../config/product-link'   // ⚠️ 本行保持**单行**（本文件多处在文档里按行号被引，能省一行就省一行；同 `ProductPage.vue` 的做法）
+import { endpoints } from '../api/endpoints'; import { getUsername } from '../api/auth'; import { coupons, claim, claimBatch, seckillLive } from '../api/marketing'; import { truthy, couponFace, couponName, couponLine } from '../config/coupon-format'; import ProductCard from '../components/ProductCard.vue'; import { sharedList } from '../config/goods-flags'; import { productLink } from '../config/product-link'; import { MOSAIC } from '../config/mosaic'   // ⚠️ 本行保持**单行**（本文件多处在文档里按行号被引，能省一行就省一行；同 `ProductPage.vue` 的做法）；`MOSAIC` 见命令五的马赛克档位表
 
 // ── 未登录可逛公开面（2026-10-06 用户改判 2）──────────────────────────────────
 // 本页没有登录墙：搜索 / 商品详情都是公开面，匿名入口统一走顶栏「登录 / 注册」。
@@ -787,7 +789,7 @@ onUnmounted(() => {
   transition: transform 0.22s ease;
 }
 .stage-cta:hover {
-  background: var(--ink);
+  background: var(--brand-ink);
   color: #fff;
   gap: 18px;
 }
@@ -888,8 +890,8 @@ onUnmounted(() => {
 }
 .dock-all:hover,
 .dock-cat:hover {
-  background: rgba(27, 30, 32, 0.06);
-  color: var(--ink);
+  background: var(--brand-tint);
+  color: var(--brand-ink);
 }
 .dock-mono {
   width: 22px;
@@ -905,13 +907,13 @@ onUnmounted(() => {
   transition: background 0.16s ease, color 0.16s ease, border-color 0.16s ease;
 }
 .dock-all .dock-mono {
-  background: var(--ink);
-  border-color: var(--ink);
+  background: var(--brand-ink);
+  border-color: var(--brand-ink);
   color: #fff;
 }
 .dock-cat:hover .dock-mono {
-  border-color: var(--ink);
-  color: var(--ink);
+  border-color: var(--brand-ink);
+  color: var(--brand-ink);
 }
 .dock-div {
   flex: none;
@@ -946,8 +948,8 @@ onUnmounted(() => {
   flex: none;
 }
 .dock-link:hover {
-  color: var(--ink);
-  background: rgba(27, 30, 32, 0.06);
+  color: var(--brand-ink);
+  background: var(--brand-tint);
 }
 
 /* ── 内容区 ─────────────────────────────────────────────────────────── */
@@ -1016,7 +1018,7 @@ onUnmounted(() => {
 .flash {
   display: grid;
   grid-template-columns: 300px minmax(0, 1fr);
-  background: var(--ink);
+  background: var(--brand-ink);
   color: #fff;
   border-radius: 18px;
   overflow: hidden;
@@ -1025,8 +1027,8 @@ onUnmounted(() => {
   display: flex;
   flex-direction: column;
   padding: 30px 28px 28px;
-  background: radial-gradient(130% 100% at 0% 0%, #2d3337 0%, #1b1e20 62%);
-  border-right: 1px solid rgba(255, 255, 255, 0.08);
+  background: radial-gradient(130% 100% at 0% 0%, var(--brand) 0%, var(--brand-ink) 62%);
+  border-right: 1px solid rgba(255, 255, 255, 0.12);
 }
 .flash-title {
   margin-top: 8px;
@@ -1232,7 +1234,7 @@ onUnmounted(() => {
 
 /* 秒杀空态：仍保留一块安静的黑面，不让版面塌掉 */
 .flash-flat {
-  background: var(--ink);
+  background: var(--brand-ink);
   color: #fff;
   border-radius: 18px;
 }
@@ -1291,8 +1293,8 @@ onUnmounted(() => {
 }
 .tk-all {
   padding: 8px 14px;
-  border: 1px solid var(--ink);
-  background: var(--ink);
+  border: 1px solid var(--brand-ink);
+  background: var(--brand-ink);
   color: #fff;
   font-family: var(--font);
   font-size: 12.5px;
@@ -1301,7 +1303,7 @@ onUnmounted(() => {
 }
 .tk-all:hover:not([disabled]) {
   background: transparent;
-  color: var(--ink);
+  color: var(--brand-ink);
 }
 .tk-all[disabled] {
   opacity: 0.36;
@@ -1320,8 +1322,8 @@ onUnmounted(() => {
 }
 .tk-more:hover,
 .tk-more-on {
-  background: var(--ink);
-  border-color: var(--ink);
+  background: var(--brand-ink);
+  border-color: var(--brand-ink);
   color: #fff;
 }
 .tk-strip {
@@ -1420,7 +1422,7 @@ onUnmounted(() => {
   letter-spacing: 0.08em;
   line-height: 1.4;
   color: #fff;
-  background: var(--ink);
+  background: var(--brand-ink);
 }
 .tk-name {
   max-width: 100%;
@@ -1441,9 +1443,9 @@ onUnmounted(() => {
 .tk-get {
   align-self: stretch;
   padding: 8px 10px;
-  border: 1px solid var(--ink);
+  border: 1px solid var(--brand-ink);
   background: transparent;
-  color: var(--ink);
+  color: var(--brand-ink);
   font-family: var(--font);
   font-size: 12px;
   letter-spacing: 0.04em;
@@ -1451,7 +1453,7 @@ onUnmounted(() => {
   transition: background 0.2s ease, color 0.2s ease, border-color 0.2s ease;
 }
 .tk-get:hover:not([disabled]) {
-  background: var(--ink);
+  background: var(--brand-ink);
   color: #fff;
 }
 .tk-get[disabled] {
@@ -1491,41 +1493,10 @@ onUnmounted(() => {
   color: var(--brand-ink);
 }
 
-/* ── ⑤ 为你推荐：A 版瀑布流（`a.html:427-438`）──────────────────────────
-   ⚠️ 用户 2026-10-19 命令三：旧 12 栏网格每行都有明显白色间隙 ⇒ 改回稿子的
-      `column-count` + `break-inside: avoid`，列距与下边距按「砖墙」取 12px
-      （稿是 24px；用户明确允许「设小或设为 0」，取紧凑值）。
-   ⚠️ 卡片本体不设 `display:flex`：多列布局里 flex 列会把卡片强行拉平，
-      破坏瀑布流按内容高度收边的能力。 */
-.grid {
-  column-count: 3;
-  column-gap: 12px;
-  margin-top: 28px;
-}
-.grid > * {
-  break-inside: avoid;
-  margin: 0 0 12px;
-  min-width: 0;
-}
-.grid > *.pcard {
-  border-color: var(--line);
-  border-radius: 0;
-  box-shadow: none;
-  transition: border-color 0.15s linear;
-}
-.grid > *.pcard:hover {
-  border-color: var(--ink);
-}
-.grid > * :deep(.pcard-img) {
-  min-height: 0;
-  aspect-ratio: 4 / 3;
-}
-.grid > * :deep(.pcard-img img) {
-  transition: transform 0.55s cubic-bezier(0.2, 0.7, 0.2, 1);
-}
-.grid > *:hover :deep(.pcard-img img) {
-  transform: scale(1.045);
-}
+/* ── ⑤ 为你推荐：马赛克错落网格（用户命令五，2026-10-19）─────────────────
+   ⚠️ 等宽瀑布流（`column-count`）已废弃 ⇒ 这里是 4 列 CSS Grid + 跨位卡片。
+      全部规则在全局 `assets/mosaic.css`，档位表在 `config/mosaic.js`；
+      本页只保留 section 自己的间距，不再重复一份卡片几何。 */
 
 /* 无限滚动哨兵 */
 .rec-more {
@@ -1602,7 +1573,7 @@ onUnmounted(() => {
 /* ── 页脚 ───────────────────────────────────────────────────────────── */
 .home-foot {
   margin-top: 72px;
-  background: var(--ink);
+  background: var(--brand-ink);
   color: rgba(255, 255, 255, 0.62);
 }
 .home-foot .inner {

@@ -1,0 +1,127 @@
+/* ══════════════════════════════════════════════════════════════════════════
+   马赛克错落网格 · Mosaic / Bento（2026-10-19 用户命令五）
+   ──────────────────────────────────────────────────────────────────────────
+   首页「为你推荐」与搜索页结果共用这一份（命令四要求两页排布一致）。
+   父级：display:grid + 固定 4 列 + 200px 基础行高 + 16px gap；
+   卡片：按 `config/mosaic.js` 的 8 件循环分配 2×2 / 2×1 / 1×2 / 1×1。
+   ⚠️ 卡片内部（`.pcard-*`）属于 `ProductCard.vue` 的 scoped 样式；本文件是全局表，
+      选择器带 `.mosaic-grid > .pcard` 前缀，specificity 高于 scoped 的
+      `.pcard-img[data-v-…]`，因此能覆盖它的 4/3 定高而不用 `!important`。
+   ══════════════════════════════════════════════════════════════════════════ */
+
+.mosaic-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-auto-rows: 200px;
+  grid-auto-flow: dense;
+  gap: 16px;
+  margin-top: 28px;
+}
+
+/* 卡片填满自己的网格区域 */
+.mosaic-grid > .pcard {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  border-radius: 0;
+  box-shadow: none;
+  transition: transform 0.28s ease, box-shadow 0.28s ease, border-color 0.2s ease;
+}
+.mosaic-grid > .pcard:hover {
+  border-color: var(--brand-ink);
+  transform: translateY(-3px);
+  box-shadow: 0 18px 40px rgba(39, 94, 78, 0.16);
+}
+
+/* 四档跨位 */
+.mosaic-grid > .m-big { grid-column: span 2; grid-row: span 2; }
+.mosaic-grid > .m-wide { grid-column: span 2; grid-row: span 1; }
+.mosaic-grid > .m-tall { grid-column: span 1; grid-row: span 2; }
+.mosaic-grid > .m-small { grid-column: span 1; grid-row: span 1; }
+
+/* 图片吃掉剩余高度，`cover` 保证任何跨位都不拉伸 */
+.mosaic-grid > .pcard .pcard-img {
+  flex: 1 1 auto;
+  min-height: 0;
+  aspect-ratio: auto;
+}
+.mosaic-grid > .pcard .pcard-img img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  transition: transform 0.55s cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+.mosaic-grid > .pcard:hover .pcard-img img { transform: scale(1.045); }
+.mosaic-grid > .pcard .pcard-tx { flex: 0 0 auto; min-width: 0; }
+
+/* 大图：标题与价格抬一档，坐实「爆款」的视觉重心 */
+.mosaic-grid > .m-big .pcard-name {
+  font-size: 20px;
+  line-height: 1.3;
+  min-height: 0;
+}
+.mosaic-grid > .m-big .pcard-price .int { font-size: 30px; }
+
+/* 宽幅横图：图左文右，图占满整格高度（200px），适合场景图 */
+.mosaic-grid > .m-wide { flex-direction: row; }
+.mosaic-grid > .m-wide .pcard-img { flex: 1 1 58%; height: 100%; }
+.mosaic-grid > .m-wide .pcard-tx {
+  flex: 1 1 42%;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+.mosaic-grid > .m-wide .pcard-name {
+  -webkit-line-clamp: 1;
+  min-height: 1.45em;
+}
+
+/* 小卡：标题一行、隐去标签与元信息，把面积留给图 */
+.mosaic-grid > .m-small .pcard-name {
+  -webkit-line-clamp: 1;
+  min-height: 1.45em;
+}
+.mosaic-grid > .m-small .pcard-kinds,
+.mosaic-grid > .m-small .pcard-meta { display: none; }
+
+/* ── 断点：4 → 3 → 2 → 1 ─────────────────────────────────────────────── */
+@media (max-width: 1100px) {
+  .mosaic-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+@media (max-width: 820px) {
+  .mosaic-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+  .mosaic-grid > .m-big .pcard-price .int { font-size: 26px; }
+}
+@media (max-width: 560px) {
+  .mosaic-grid {
+    grid-template-columns: 1fr;
+    grid-auto-rows: auto;
+    gap: 14px;
+  }
+  .mosaic-grid > .pcard {
+    grid-column: 1 / -1;
+    grid-row: auto;
+    height: auto;
+  }
+  .mosaic-grid > .pcard .pcard-img {
+    flex: none;
+    aspect-ratio: 4 / 3;
+  }
+  .mosaic-grid > .m-wide { flex-direction: column; }
+  .mosaic-grid > .m-wide .pcard-img { flex: none; width: 100%; height: auto; }
+  .mosaic-grid > .m-wide .pcard-tx { flex: 0 0 auto; }
+  .mosaic-grid > .m-wide .pcard-name { -webkit-line-clamp: 2; min-height: 2.9em; }
+  .mosaic-grid > .m-small .pcard-kinds { display: flex; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .mosaic-grid > .pcard,
+  .mosaic-grid > .pcard .pcard-img img {
+    transition: none;
+  }
+  .mosaic-grid > .pcard:hover { transform: none; }
+  .mosaic-grid > .pcard:hover .pcard-img img { transform: none; }
+}

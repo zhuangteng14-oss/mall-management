@@ -823,28 +823,28 @@ button {
 .small { font-size: 12px; }
 .muted { color: var(--ink-3); }
 .tiny { font-family: var(--font-mono); font-size: 10px; letter-spacing: .06em; color: var(--ink-3); }
-.link { display: inline-flex; align-items: center; gap: 6px; border-bottom: 1px solid var(--ink); padding-bottom: 1px; font-size: 13px; color: var(--ink); text-decoration: none; }
+.link { display: inline-flex; align-items: center; gap: 6px; border-bottom: 1px solid var(--brand-ink); padding-bottom: 1px; font-size: 13px; color: var(--brand-ink); text-decoration: none; }
 .btn {
   display: inline-flex; align-items: center; justify-content: center; gap: 8px;
-  border: 1px solid var(--ink); background: var(--surface); color: var(--ink);
+  border: 1px solid var(--brand-ink); background: var(--surface); color: var(--brand-ink);
   padding: 10px 15px; font-size: 13px; line-height: 1.2; text-decoration: none;
   transition: background-color .12s linear, color .12s linear;
 }
-.btn:hover { background: var(--ink); color: var(--surface); }
-.btn.solid { background: var(--ink); color: var(--surface); }
-.btn.solid:hover { background: var(--surface); color: var(--ink); }
+.btn:hover { background: var(--brand-ink); color: var(--surface); }
+.btn.solid { background: var(--brand-ink); color: var(--surface); }
+.btn.solid:hover { background: var(--surface); color: var(--brand-ink); }
 .btn.ghost { background: transparent; }
 .btn.xs { padding: 5px 8px; font-size: 11px; }
 .btn.sm { padding: 6px 10px; font-size: 11px; }
-.btn.btn-primary { background: var(--ink); color: var(--surface); }
-.btn.btn-primary:hover { background: var(--surface); color: var(--ink); }
+.btn.btn-primary { background: var(--brand-ink); color: var(--surface); }
+.btn.btn-primary:hover { background: var(--surface); color: var(--brand-ink); }
 .tag {
   display: inline-flex; align-items: center; border: 1px solid var(--line-2);
   padding: 2px 7px; font-family: var(--font-mono); font-size: 9px;
   letter-spacing: .05em; color: var(--ink-3); line-height: 1.5; white-space: nowrap;
 }
-.tag.dark { background: var(--ink); color: var(--surface); border-color: var(--ink); }
-.tag.outline { border-color: var(--ink); color: var(--ink); }
+.tag.dark { background: var(--brand-ink); color: var(--surface); border-color: var(--brand-ink); }
+.tag.outline { border-color: var(--brand-ink); color: var(--brand-ink); }
 
 /* ── 页头 ─────────────────────────────────────────────────────────────────── */
 .page-head {
@@ -871,7 +871,7 @@ button {
 /* ── 降级状态条（保留旧语义） ───────────────────────────────────────────────── */
 .dg-note {
   display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px 12px;
-  margin: 0 0 24px; padding: 12px 16px; border-left: 3px solid var(--ink);
+  margin: 0 0 24px; padding: 12px 16px; border-left: 3px solid var(--brand-ink);
   background: var(--surface-2); font-size: 13px; line-height: 1.7; color: var(--ink-2);
 }
 .dg-note.frozen { border-left-color: var(--warning); background: var(--warning-ground); color: var(--warning-deep); }
@@ -881,43 +881,43 @@ button {
 /* ── 品牌加盟（商家）/ 入驻横幅（买家） ─────────────────────────────────────── */
 .brand-cta {
   display: grid; grid-template-columns: minmax(0, 1fr) 270px; gap: 30px;
-  align-items: center; border: 1px solid var(--ink); background: var(--ink);
+  align-items: center; border: 1px solid var(--brand-ink); background: var(--brand-ink);
   color: var(--surface); padding: 32px 36px; margin-bottom: 24px;
 }
-.brand-cta .kicker { color: #bdbdbd; }
+.brand-cta .kicker { color: rgba(255, 255, 255, 0.72); }
 .brand-cta h2 {
   font-family: var(--font-display); font-size: 44px; line-height: 1;
   letter-spacing: -.045em; margin: 9px 0 12px; font-weight: 600;
 }
-.brand-cta p { font-size: 12px; line-height: 1.75; color: #c9c9c9; max-width: 640px; }
+.brand-cta p { font-size: 12px; line-height: 1.75; color: rgba(255, 255, 255, 0.78); max-width: 640px; }
 .brand-cta .cta-side {
   display: flex; flex-direction: column; gap: 10px;
-  border-left: 1px solid #5d5d5d; padding-left: 26px;
+  border-left: 1px solid rgba(255, 255, 255, 0.24); padding-left: 26px;
 }
 .brand-cta .cta-side .btn {
   background: var(--surface); color: var(--ink); border-color: var(--surface);
   padding: 16px 18px; font-size: 14px; justify-content: center;
 }
 .brand-cta .cta-side .btn:hover { background: transparent; color: var(--surface); }
-.brand-cta .cta-side small { font-family: var(--font-mono); font-size: 9px; line-height: 1.7; color: #bdbdbd; }
+.brand-cta .cta-side small { font-family: var(--font-mono); font-size: 9px; line-height: 1.7; color: rgba(255, 255, 255, 0.72); }
 
 .join-banner {
   display: grid; grid-template-columns: minmax(0, 1.45fr) 290px; gap: 34px;
-  align-items: center; border: 1px solid var(--ink); background: var(--ink);
+  align-items: center; border: 1px solid var(--brand-ink); background: var(--brand-ink);
   color: var(--surface); padding: 30px 34px; margin-bottom: 24px;
 }
-.join-banner .kicker { color: #bdbdbd; }
+.join-banner .kicker { color: rgba(255, 255, 255, 0.72); }
 .join-banner h2 {
   font-family: var(--font-display); font-size: 36px; line-height: 1.05;
   letter-spacing: -.035em; margin: 8px 0 10px; font-weight: 600;
 }
-.join-banner p { font-size: 12px; line-height: 1.75; color: #c9c9c9; max-width: 650px; }
+.join-banner p { font-size: 12px; line-height: 1.75; color: rgba(255, 255, 255, 0.78); max-width: 650px; }
 .join-banner .jb-actions { display: flex; flex-direction: column; gap: 8px; }
 .join-banner .jb-actions .btn { border-color: var(--surface); background: transparent; color: var(--surface); padding: 13px 16px; font-size: 13px; }
 .join-banner .jb-actions .btn:hover { background: var(--surface); color: var(--ink); }
 .join-banner .jb-actions .btn.solid { background: var(--surface); color: var(--ink); }
 .join-banner .jb-actions .btn.solid:hover { background: transparent; color: var(--surface); }
-.join-banner .jb-meta { font-family: var(--font-mono); font-size: 9px; letter-spacing: .05em; color: #9d9d9d; text-align: right; margin-top: 4px; }
+.join-banner .jb-meta { font-family: var(--font-mono); font-size: 9px; letter-spacing: .05em; color: rgba(255, 255, 255, 0.6); text-align: right; margin-top: 4px; }
 
 /* ── 双身份桥 ─────────────────────────────────────────────────────────────── */
 .bridge {
@@ -929,14 +929,14 @@ button {
   color: inherit; text-decoration: none;
 }
 .bridge-side:hover { background: var(--surface-2); }
-.bridge-side.active { background: var(--ink); color: var(--surface); }
-.bridge-side.active:hover { background: var(--ink); }
+.bridge-side.active { background: var(--brand-ink); color: var(--surface); }
+.bridge-side.active:hover { background: var(--brand-ink); }
 .bridge-side .b-kicker { font-family: var(--font-mono); font-size: 9px; letter-spacing: .1em; color: var(--ink-3); }
 .bridge-side.active .b-kicker { color: var(--surface); }
 .bridge-side strong { font-family: var(--font-display); font-size: 34px; line-height: 1; font-weight: 600; letter-spacing: -.03em; }
 .bridge-side dl { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 18px; }
 .bridge-side dl div { border-top: 1px solid var(--line); padding-top: 7px; }
-.bridge-side.active dl div { border-color: #666; }
+.bridge-side.active dl div { border-color: rgba(255, 255, 255, 0.28); }
 .bridge-side dt { font-size: 10px; color: var(--ink-3); }
 .bridge-side.active dt { color: var(--surface); }
 .bridge-side dd { font-family: var(--font-mono); font-size: 13px; margin-top: 2px; }
@@ -948,8 +948,8 @@ button {
   text-align: center; padding: 14px 10px; gap: 11px; background: var(--surface-2);
 }
 .bridge-spine { display: flex; flex-direction: column; align-items: center; gap: 4px; margin: 2px 0; }
-.bridge-spine i { display: block; width: 5px; height: 5px; border: 1px solid var(--ink); background: var(--surface); }
-.bridge-spine i:nth-child(2) { background: var(--ink); }
+.bridge-spine i { display: block; width: 5px; height: 5px; border: 1px solid var(--brand-ink); background: var(--surface); }
+.bridge-spine i:nth-child(2) { background: var(--brand-ink); }
 .bridge-core p { font-size: 10px; line-height: 1.55; color: var(--ink-3); }
 .bridge-core .btn { font-size: 10px; padding: 6px 8px; width: 100%; }
 
@@ -980,21 +980,21 @@ button {
 .stack > * + * { margin-top: 24px; }
 
 /* ── 黑金牌匾 ─────────────────────────────────────────────────────────────── */
-.plaque { background: var(--ink); color: var(--surface); border: 1px solid var(--ink); padding: 9px; position: relative; overflow: hidden; }
-.plaque-inner { border: 1px solid #5d5d5d; padding: 22px 24px; display: flex; flex-direction: column; gap: 24px; }
-.plaque-top { display: flex; justify-content: space-between; gap: 16px; font-family: var(--font-mono); font-size: 9px; letter-spacing: .1em; color: #bdbdbd; }
+.plaque { background: var(--brand-ink); color: var(--surface); border: 1px solid var(--brand-ink); padding: 9px; position: relative; overflow: hidden; }
+.plaque-inner { border: 1px solid rgba(255, 255, 255, 0.24); padding: 22px 24px; display: flex; flex-direction: column; gap: 24px; }
+.plaque-top { display: flex; justify-content: space-between; gap: 16px; font-family: var(--font-mono); font-size: 9px; letter-spacing: .1em; color: rgba(255, 255, 255, 0.72); }
 .plaque-mid { display: grid; grid-template-columns: 1.1fr auto .9fr; gap: 24px; align-items: end; }
 .plaque-mid .member-level { font-family: var(--font-display); font-size: 30px; line-height: 1.05; letter-spacing: -.02em; }
-.plaque-mid .member-level small { display: block; font-family: var(--font); font-size: 11px; letter-spacing: 0; color: #bdbdbd; margin-top: 6px; }
+.plaque-mid .member-level small { display: block; font-family: var(--font); font-size: 11px; letter-spacing: 0; color: rgba(255, 255, 255, 0.72); margin-top: 6px; }
 .plaque-num { font-family: var(--font-mono); font-size: 58px; line-height: .9; letter-spacing: -.07em; }
-.plaque-num small { display: block; font-size: 9px; letter-spacing: .12em; color: #bdbdbd; margin-top: 7px; text-align: right; }
+.plaque-num small { display: block; font-size: 9px; letter-spacing: .12em; color: rgba(255, 255, 255, 0.72); margin-top: 7px; text-align: right; }
 .plaque-mid .balance { text-align: right; font-family: var(--font-mono); font-size: 19px; }
-.plaque-mid .balance small { display: block; font-family: var(--font); font-size: 10px; color: #bdbdbd; margin-bottom: 4px; }
-.plaque-bottom { display: flex; align-items: center; justify-content: space-between; gap: 16px; border-top: 1px solid #5d5d5d; padding-top: 13px; }
+.plaque-mid .balance small { display: block; font-family: var(--font); font-size: 10px; color: rgba(255, 255, 255, 0.72); margin-bottom: 4px; }
+.plaque-bottom { display: flex; align-items: center; justify-content: space-between; gap: 16px; border-top: 1px solid rgba(255, 255, 255, 0.24); padding-top: 13px; }
 .plaque-bottom .name { font-size: 12px; letter-spacing: .15em; }
 .barcode { display: flex; align-items: flex-end; gap: 2px; height: 18px; }
-.barcode i { display: block; width: 2px; background: #d7d7d7; }
-.plaque-link { font-size: 11px; color: #e6e6e6; border-bottom: 1px solid #8b8b8b; padding-bottom: 1px; text-decoration: none; }
+.barcode i { display: block; width: 2px; background: rgba(255, 255, 255, 0.82); }
+.plaque-link { font-size: 11px; color: rgba(255, 255, 255, 0.88); border-bottom: 1px solid rgba(255, 255, 255, 0.5); padding-bottom: 1px; text-decoration: none; }
 .plaque-link:hover { color: var(--surface); border-color: var(--surface); }
 
 /* ── 面板 ─────────────────────────────────────────────────────────────────── */
@@ -1023,8 +1023,8 @@ button {
 .growth-step strong { font-size: 14px; }
 .growth-step small { font-size: 10px; color: var(--ink-3); line-height: 1.5; }
 .growth-step.done { background: var(--surface-2); }
-.growth-step.current { background: var(--ink); color: var(--surface); }
-.growth-step.current .g-no, .growth-step.current small { color: #c9c9c9; }
+.growth-step.current { background: var(--brand-ink); color: var(--surface); }
+.growth-step.current .g-no, .growth-step.current small { color: rgba(255, 255, 255, 0.78); }
 .growth-step a { margin-top: auto; font-size: 10px; border-bottom: 1px solid currentColor; width: max-content; padding-bottom: 1px; color: inherit; text-decoration: none; }
 
 /* ── 账户资产 / 最近订单 ──────────────────────────────────────────────────── */
@@ -1045,8 +1045,8 @@ button {
 .brand-state { padding: 11px 10px; border-right: 1px solid var(--line); text-align: center; font-size: 10px; color: var(--ink-3); text-decoration: none; }
 .brand-state:last-child { border-right: 0; }
 .brand-state b { display: block; font-family: var(--font-mono); font-size: 9px; margin-bottom: 3px; color: var(--ink-3); }
-.brand-state.on { background: var(--ink); color: var(--surface); }
-.brand-state.on b { color: #c9c9c9; }
+.brand-state.on { background: var(--brand-ink); color: var(--surface); }
+.brand-state.on b { color: rgba(255, 255, 255, 0.78); }
 .brand-locked-note { line-height: 1.75; }
 .brand-locked-actions { display: grid; gap: 7px; margin-top: 14px; }
 
@@ -1081,7 +1081,7 @@ button {
   width: 100%; padding: 9px 10px; border: 1px solid var(--line-2);
   background: var(--surface); outline: none; font-size: 13px;
 }
-.f input:focus, .f textarea:focus, .f select:focus { border-color: var(--ink); }
+.f input:focus, .f textarea:focus, .f select:focus { border-color: var(--brand-ink); }
 .f textarea { min-height: 76px; resize: vertical; }
 .actions { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 18px; }
 .dp-hint { font-size: 10px; color: var(--ink-3); }
@@ -1128,7 +1128,7 @@ button {
   .entry-cell:nth-child(2) { border-right: 0; }
   .entry-cell:nth-child(-n+2) { border-bottom: 1px solid var(--line); }
   .brand-cta, .join-banner { grid-template-columns: 1fr; }
-  .brand-cta .cta-side { border-left: 0; border-top: 1px solid #5d5d5d; padding-left: 0; padding-top: 18px; }
+  .brand-cta .cta-side { border-left: 0; border-top: 1px solid rgba(255, 255, 255, 0.24); padding-left: 0; padding-top: 18px; }
 }
 @media (max-width: 600px) {
   .page-head h1 { font-size: 32px; }

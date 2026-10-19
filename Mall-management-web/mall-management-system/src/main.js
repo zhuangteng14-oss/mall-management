@@ -1,5 +1,5 @@
 import { createApp } from 'vue'
-import App from './App.vue'; import './assets/fonts/noto.css'; import './assets/fonts/mono.css'; import './assets/tokens.css'   // 界面优化笔 A 笔（2026-10-06）：自托管字体（黑体/宋体/等宽）+ 设计 token。四条压一行是为保住本文件 `:21`/`:28`/`:49` 的行号（同行压缩沿用本文件既有做法，见 `:27`）
+import App from './App.vue'; import './assets/fonts/noto.css'; import './assets/fonts/mono.css'; import './assets/tokens.css'; import './assets/mosaic.css'   // 界面优化笔 A 笔（2026-10-06）：自托管字体（黑体/宋体/等宽）+ 设计 token。四条压一行是为保住本文件 `:21`/`:28`/`:49` 的行号（同行压缩沿用本文件既有做法，见 `:27`）
 import router from './router/index.js'
 import { http, setUnauthorizedHandler, resetUnauthorizedLatch, UnauthorizedError } from './api/http'
 import { endpoints } from './api/endpoints'

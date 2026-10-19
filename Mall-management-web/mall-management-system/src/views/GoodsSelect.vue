@@ -118,14 +118,13 @@
       </div>
 
       <!-- ⚠️ 商品卡沿用公共组件（C3 块 5，2026-10-12）；`from="search"` 不能省 ——
-           `ProductPage.goBack` 按 `route.query.from === 'search'` 决定回程，
-           ⚠️ 网格与首页「为你推荐」同一套瀑布流：`column-count: 3` +
-              `break-inside: avoid` + 12px 列距 / 下距（用户命令三、四要求两页一致）。
-           ⚠️ 卡片本体不设 `display:flex`：多列布局里 flex 列会强行拉平，
-              破坏按内容高度收边的能力。
+           `ProductPage.goBack` 按 `route.query.from === 'search'` 决定回程。
+           ⚠️ 网格与首页「为你推荐」同一套马赛克（用户命令五）：4 列 CSS Grid +
+              跨位卡片，规则在全局 `assets/mosaic.css`、档位表在 `config/mosaic.js`
+              （命令四要求两页排布一致，所以这里同步换，不留旧瀑布流）。
            `:before-nav="saveState"` 承担原来「跳转前保存」的同一件事。 -->
-      <div class="grid">
-        <ProductCard v-for="goods in shownList" :key="goods.Id" :goods="goods" :before-nav="saveState" from="search" />
+      <div class="grid mosaic-grid">
+        <ProductCard v-for="(goods, i) in shownList" :key="goods.Id" :goods="goods" :class="MOSAIC[i % MOSAIC.length]" :before-nav="saveState" from="search" />
       </div>
 
       <!-- 无限滚动哨兵（块 7 收尾 · P1）：替代原稿 7 枚 disabled 页码。 -->
@@ -152,7 +151,7 @@ import { ref, computed, onMounted, watch } from 'vue'
 import { useRoute } from 'vue-router'   // ⚠️ `useRouter` 随 `toGoodsDetail` 一起退役（卡片换公共组件后本页没有 `router.push` 了，只剩 `route`：`watch(route.query.kw)` / `onMounted(route.query.back)`）
 import { useInfiniteList } from '../composables/useInfiniteList'
 import { http, handleApiError, urlOf } from '../api/http'
-import { endpoints } from '../api/endpoints'; import ProductCard from '../components/ProductCard.vue'; import { sharedList } from '../config/goods-flags'   // ⚠️ 两条 import **同行**（C3 块 5 ·〈Bug 2/3〉落码，2026-10-12）—— 合并到既有行 = 不新增行号漂移（同下面 `:151` 那条的做法）。`ProductCard` = 本页卡片改用的公共组件（⑤「4 处复用」的第 2 处）；`sharedList` = **共享面列表的唯一定义处**（去重 + 滤已售完），本页与主页 / 两处「猜你喜欢」同源
+import { endpoints } from '../api/endpoints'; import ProductCard from '../components/ProductCard.vue'; import { sharedList } from '../config/goods-flags'; import { MOSAIC } from '../config/mosaic'   // ⚠️ 三条 import **同行**（C3 块 5 ·〈Bug 2/3〉落码，2026-10-12；`MOSAIC` 于命令五同行追加）—— 合并到既有行 = 不新增行号漂移（同下面 `:151` 那条的做法）。`ProductCard` = 本页卡片改用的公共组件（⑤「4 处复用」的第 2 处）；`sharedList` = **共享面列表的唯一定义处**（去重 + 滤已售完），本页与主页 / 两处「猜你喜欢」同源
 import { isLoggedIn } from '../api/auth'; import { subsidyGoods } from '../api/marketing'   // ⚠️ 两条 import **同行**（2026-10-12 国补筛选那一笔）—— 合并到既有行 = 不新增行号漂移（同 `ShoppingCart.vue:146` 那条的做法）
 
 // ⚠️ 这个 name 是**两个壳**里 `<KeepAlive :include="['HomeTab', 'GoodsSelect']">` 的
@@ -474,8 +473,8 @@ button {
   transition: border-color 0.15s, box-shadow 0.15s;
 }
 .search:focus-within {
-  border-color: var(--ink);
-  box-shadow: 0 0 0 3px rgba(27, 30, 32, 0.06);
+  border-color: var(--brand-ink);
+  box-shadow: 0 0 0 3px rgba(39, 94, 78, 0.12);
 }
 .search input {
   flex: 1;
@@ -494,14 +493,14 @@ button {
   height: 100%;
   padding: 0 var(--s6);
   border-left: 1px solid var(--line-2);
-  background: var(--ink);
+  background: var(--brand-ink);
   color: var(--surface);
   font-weight: var(--fw-med);
   letter-spacing: 0.04em;
   transition: background 0.15s;
 }
 .search .go:hover {
-  background: var(--brand-hover);
+  background: var(--brand);
   color: var(--surface);
 }
 
@@ -538,12 +537,12 @@ button {
   transition: border-color 0.15s, color 0.15s, background 0.15s;
 }
 .chip:hover {
-  border-color: var(--ink);
-  color: var(--ink);
+  border-color: var(--brand-ink);
+  color: var(--brand-ink);
 }
 .chip.on {
-  border-color: var(--ink);
-  background: var(--ink);
+  border-color: var(--brand-ink);
+  background: var(--brand-ink);
   color: var(--surface);
 }
 .chip.sm {
@@ -558,7 +557,7 @@ button {
   gap: 8px;
   padding: 10px 12px;
   background: var(--surface-2);
-  border-left: 2px solid var(--ink);
+  border-left: 2px solid var(--brand-ink);
 }
 .cat-sub .lbl {
   font-size: var(--fs-xs);
@@ -662,40 +661,10 @@ button {
   white-space: nowrap;
 }
 
-/* ── 商品网格：与首页「为你推荐」同一套瀑布流（`HomePage.vue` 的 `.grid`）──
-   ⚠️ 用户命令四：搜索结果的排布必须和主页一致 ⇒ 这里逐条照抄首页那一份：
-      `column-count: 3` + `column-gap: 12px` + `break-inside: avoid` + 下距 12px。
-   ⚠️ 卡片本体不设 `display:flex`：多列布局里 flex 列会把卡片强行拉平，
-      破坏瀑布流按内容高度收边的能力。 */
-.grid {
-  column-count: 3;
-  column-gap: 12px;
-  margin-top: 24px;
-}
-.grid > * {
-  break-inside: avoid;
-  margin: 0 0 12px;
-  min-width: 0;
-}
-.grid > *.pcard {
-  border-color: var(--line);
-  border-radius: 0;
-  box-shadow: none;
-  transition: border-color 0.15s linear;
-}
-.grid > *.pcard:hover {
-  border-color: var(--ink);
-}
-.grid > * :deep(.pcard-img) {
-  min-height: 0;
-  aspect-ratio: 4 / 3;
-}
-.grid > * :deep(.pcard-img img) {
-  transition: transform 0.55s cubic-bezier(0.2, 0.7, 0.2, 1);
-}
-.grid > *:hover :deep(.pcard-img img) {
-  transform: scale(1.045);
-}
+/* ── 商品网格：与首页「为你推荐」同一套马赛克（用户命令五）───────────────
+   ⚠️ 命令四要求两页排布一致 ⇒ 首页换 4 列 CSS Grid 后，这里同步换；
+      规则全部在全局 `assets/mosaic.css`，档位表在 `config/mosaic.js`。
+      旧 `column-count` 瀑布流已废弃，本页不再重复一份卡片几何。 */
 
 .empty {
   padding: var(--s8) 0;

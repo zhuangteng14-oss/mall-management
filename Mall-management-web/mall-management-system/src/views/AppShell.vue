@@ -414,7 +414,7 @@ font-family: var(--font);
   font-size: 25px;
   line-height: 1;
   letter-spacing: -0.04em;
-  color: var(--ink);
+  color: var(--brand-ink);
   text-decoration: none;
   white-space: nowrap;
 }
@@ -456,7 +456,7 @@ font-family: var(--font);
   color: var(--ink);
   cursor: pointer;
 }
-.top-search button:hover { background: var(--ink); color: var(--surface); }
+.top-search button:hover { background: var(--brand-ink); color: var(--surface); }
 .top-actions {
   display: flex;
   align-items: center;
@@ -488,16 +488,16 @@ font-family: var(--font);
   letter-spacing: 0.05em;
   color: var(--ink-3);
 }
-.top-links a:hover { border-color: var(--ink); }
-.top-links a.on { background: var(--ink); color: var(--surface); }
-.top-links a.on small { color: #c9c9c9; }
+.top-links a:hover { border-color: var(--brand-ink); }
+.top-links a.on { background: var(--brand-ink); color: var(--surface); }
+.top-links a.on small { color: rgba(255, 255, 255, 0.72); }
 .unread-dot {
   position: absolute;
   top: 3px;
   right: 3px;
   min-width: 13px;
   padding: 0 3px;
-  background: var(--ink);
+  background: var(--accent);
   color: var(--surface);
   font-family: var(--font-mono);
   font-size: 8px;
@@ -505,18 +505,18 @@ font-family: var(--font);
   line-height: 13px;
   text-align: center;
 }
-.top-links a.on .unread-dot { background: var(--surface); color: var(--ink); }
+.top-links a.on .unread-dot { background: var(--accent); color: var(--surface); }
 .top-cart {
   display: flex;
   align-items: center;
   gap: 6px;
   padding: 7px 10px;
-  border: 1px solid var(--ink);
+  border: 1px solid var(--brand-ink);
   font-size: 11px;
-  color: var(--ink);
+  color: var(--brand-ink);
   text-decoration: none;
 }
-.top-cart:hover { background: var(--ink); color: var(--surface); }
+.top-cart:hover { background: var(--brand-ink); color: var(--surface); }
 .top-account {
   max-width: 240px;
   overflow: hidden;
@@ -528,7 +528,7 @@ font-family: var(--font);
   color: var(--ink-3);
   text-decoration: none;
 }
-.top-account:hover { color: var(--ink); border-color: var(--ink); }
+.top-account:hover { color: var(--brand-ink); border-color: var(--brand-ink); }
 .content {
 flex: 1;
 padding: 0;

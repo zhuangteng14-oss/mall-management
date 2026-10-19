@@ -172,10 +172,10 @@ const toLogin = () => {
 }
 .user-menu .menu-btn:hover { background: var(--surface-2); }
 .user-menu .menu-btn.active {
-  background: var(--ink);
+  background: var(--brand-ink);
   color: var(--bg);
   font-weight: var(--fw-med);
 }
 .user-menu .logout { margin-top: 0; margin-left: auto; color: var(--ink-3); }
-.user-menu .logout:hover { color: var(--ink); }
+.user-menu .logout:hover { color: var(--brand-ink); }
 </style>
