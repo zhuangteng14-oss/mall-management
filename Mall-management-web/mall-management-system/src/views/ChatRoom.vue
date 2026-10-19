@@ -20,8 +20,11 @@
             title="切换会话"
             @click="selectConversation(conv)"
           >
-            <span class="ty">{{ conv.other_type === 'customer' ? '用户' : '商家' }}</span>
-            <span class="id">{{ conv.other_id }}</span>
+            <span class="cav" :class="conv.other_type">{{ initialOf(conv.other_id) }}</span>
+            <span class="cinfo">
+              <span class="id">{{ conv.other_id }}</span>
+              <span class="ty">{{ conv.other_type === 'customer' ? '用户' : '商家' }}</span>
+            </span>
             <span v-if="conv.unread" class="udot" title="未读"></span>
           </button>
           <div v-if="conversations.length === 0" class="rail-empty">暂无会话</div>
@@ -31,8 +34,11 @@
       <div class="main">
         <div class="chead">
           <template v-if="currentOther">
-            <h2>与 {{ currentOther.username }} 的会话</h2>
-            <span class="meta">{{ currentOther.id }}</span>
+            <span class="cav lg" :class="currentOther.type">{{ initialOf(currentOther.username) }}</span>
+            <div class="chead-tx">
+              <h2>{{ currentOther.username }}</h2>
+              <span class="meta">{{ currentOther.id }}</span>
+            </div>
           </template>
           <span v-else class="none">请选择一个会话</span>
         </div>
@@ -46,6 +52,7 @@
               class="mi"
               :class="isSelfMessage(msg) ? 'self' : 'other'"
             >
+              <span class="mav" :class="isSelfMessage(msg) ? 'self' : 'other'">{{ initialOf(isSelfMessage(msg) ? currentId : currentOther?.id) }}</span>
               <div class="bwrap">
                 <div class="bub" :class="{ bare: isProductMessage(msg) || isImageMessage(msg) }">
                   <template v-if="isProductMessage(msg)">
@@ -77,7 +84,12 @@
         </div>
 
         <div v-if="currentOther" class="inp-area">
-          <button class="icon" type="button" title="表情 —— 纯前端：插入字符进输入框，走现有 message.send，不需要新端点" @click="insertEmoji">表情</button>
+          <div class="emoji-wrap">
+            <button class="icon" type="button" :aria-expanded="emojiOpen ? 'true' : 'false'" title="表情 —— 纯前端：插入字符进输入框，走现有 message.send，不需要新端点" @click="emojiOpen = !emojiOpen">表情</button>
+            <div v-if="emojiOpen" class="emoji-pop">
+              <button v-for="e in EMOJI" :key="e" class="emoji-btn" type="button" :aria-label="`插入 ${e}`" @click="pickEmoji(e)">{{ e }}</button>
+            </div>
+          </div>
           <button
             class="icon"
             type="button"
@@ -435,11 +447,17 @@ const scrollToBottom = () => {
 // 稿的判据：`title="表情 —— 纯前端：插入字符进输入框，走现有 message.send，不需要新端点"`。
 // 若落成 `disabled` 占位就与稿相反；若落成可点却无处理函数，就是**死控件**
 // （`progress.md:1652` 验收判据①）⇒ 照稿实现：按下即把下一枚字符追加进输入框。
-const EMOJI = ['😊', '👍', '🙏', '❤️', '😄', '🎉']
-let emojiAt = 0
-const insertEmoji = () => {
-  newMessage.value += EMOJI[emojiAt++ % EMOJI.length]
+// 2026-10-19 用户令：表情从「连点轮播」升级为**选择面板**（点开 → 选一枚 → 关面板）。
+// 仍是纯前端插入，走现有 `message.send`，不新增端点。
+const EMOJI = ['😊', '👍', '🙏', '❤️', '😄', '🎉', '🔥', '👏', '🤝', '💯', '😍', '🛒']
+const emojiOpen = ref(false)
+const pickEmoji = (e) => {
+  newMessage.value += e
+  emojiOpen.value = false
 }
+
+/** 会话头像的占位字符（没有头像字段，用 id/用户名的首字符，稳定且不额外请求）。 */
+const initialOf = (v) => (v ? String(v).trim().slice(0, 1).toUpperCase() : '?')
 
 const sendContent = async (content) => {
   if (!content) return
@@ -600,14 +618,25 @@ button {
 }
 .conv {
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
-  align-items: baseline;
-  gap: var(--s2);
+  grid-template-columns: 36px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--s3);
   width: 100%;
   text-align: left;
-  padding: var(--s4) var(--s5);
+  padding: var(--s3) var(--s4);
   border-bottom: 1px solid var(--line);
 }
+/* 头像占位（2026-10-19 重做）：会话/消息/页头共用，无头像字段 ⇒ 用首字符，不新增请求。 */
+.cav {
+  width: 36px; height: 36px; border-radius: 50%;
+  display: inline-flex; align-items: center; justify-content: center;
+  flex: none; background: var(--ink); color: var(--bg);
+  font-family: var(--font-display); font-size: 15px; line-height: 1;
+}
+.cav.customer { background: var(--brand-ink); }
+.cav.merchant { background: var(--accent); }
+.cav.lg { width: 44px; height: 44px; font-size: 18px; }
+.cinfo { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 /* ⚠️ 会话 id 是 15px、类型标签是 12px：两截都做 12px 时整列没有主次 —— 一列导航**得能扫**；
    id 用等宽是因为它是个标识符，不是句子。 */
 .conv .ty {
@@ -654,13 +683,13 @@ button {
   min-height: 0;
 }
 .chead {
-  padding: var(--s4) var(--s5);
+  padding: var(--s3) var(--s5);
   border-bottom: 1px solid var(--line);
   display: flex;
-  align-items: baseline;
-  gap: var(--s4);
-  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--s3);
 }
+.chead-tx { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
 .chead h2 {
   font-family: var(--font-display);
   font-size: var(--fs-lg);
@@ -699,10 +728,19 @@ button {
 }
 .mi {
   display: flex;
+  align-items: flex-end;
+  gap: 10px;
 }
 .mi.self {
   justify-content: flex-end;
 }
+.mav {
+  width: 30px; height: 30px; border-radius: 50%; flex: none;
+  display: inline-flex; align-items: center; justify-content: center;
+  font-family: var(--font-display); font-size: 12px; line-height: 1;
+}
+.mav.other { background: var(--brand-ink); color: var(--bg); }
+.mav.self { background: var(--ink); color: var(--bg); order: 2; }
 .bwrap {
   max-width: min(74%, 460px);
   display: flex;
@@ -711,18 +749,22 @@ button {
 .mi.self .bwrap {
   align-items: flex-end;
 }
+/* 现代气泡（2026-10-19 重做）：对方浅灰 + 自己墨黑，圆角只在「尾侧」收一点。 */
 .bub {
-  padding: var(--s3) var(--s4);
-  border-radius: var(--r2);
+  padding: 11px 14px;
+  border-radius: 16px 16px 16px 4px;
   font-size: var(--fs-sm);
-  line-height: 1.6;
+  line-height: 1.65;
+  word-break: break-word;
 }
 .mi.other .bub {
   background: var(--surface-2);
+  border: 1px solid var(--line);
 }
-/* 自己的气泡 = 青瓷绿最浅一档（原 `#dcf8c5` 是 WhatsApp 绿，跟色板无关）。 */
 .mi.self .bub {
-  background: var(--brand-tint);
+  background: var(--ink);
+  color: var(--bg);
+  border-radius: 16px 16px 4px 16px;
 }
 .bub.bare {
   padding: 0;
@@ -846,6 +888,22 @@ button {
   color: var(--ink-3);
   cursor: not-allowed;
 }
+/* 表情面板（2026-10-19）：点开在输入区上方浮出，选一枚即插入并收起。 */
+.emoji-wrap { position: relative; flex: 0 0 auto; }
+.emoji-pop {
+  position: absolute; left: 0; bottom: 48px; z-index: 20;
+  display: grid; grid-template-columns: repeat(6, 34px); gap: 2px;
+  padding: 8px;
+  background: var(--surface);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r2);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.14);
+}
+.emoji-btn {
+  height: 34px; border-radius: var(--r1);
+  font-size: 18px; line-height: 1;
+}
+.emoji-btn:hover { background: var(--surface-2); }
 .send {
   height: 40px;
   padding: 0 var(--s6);

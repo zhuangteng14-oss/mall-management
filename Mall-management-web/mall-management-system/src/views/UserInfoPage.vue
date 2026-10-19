@@ -24,6 +24,30 @@
       </div>
     </section>
 
+    <!-- 身份卡（2026-10-19 用户令：头像 / 用户名 / 会员等级 / 资料 / 退出登录必须可见）。
+         数据全部来自 `/user/me`（`userInfo`），取不到的字段按本仓口径显示 `—`，不编数。 -->
+    <section class="id-card" aria-label="账户身份">
+      <img class="id-avatar" :src="userInfo.image || assetOf('/img/default_user.png')" alt="头像" />
+      <div class="id-main">
+        <div class="id-name">
+          {{ userInfo.username || '未知用户' }}
+          <span class="id-badge" :class="{ vip }">{{ vip ? '黑金会员' : '普通会员' }}</span>
+          <span v-if="isMerchantShell" class="id-badge merchant">商家</span>
+        </div>
+        <div class="id-meta">
+          <span v-if="userInfo.customerid">客户号 <b>{{ userInfo.customerid }}</b></span>
+          <span v-if="userInfo.merchantid">商家号 <b>{{ userInfo.merchantid }}</b></span>
+          <span>{{ userInfo.gender || '未填写性别' }} · {{ userInfo.age === null || userInfo.age === undefined || userInfo.age === '' ? '—' : userInfo.age }} 岁</span>
+          <span>{{ userInfo.email || '未填写邮箱' }}</span>
+          <span>{{ userInfo.address || '未填写地址' }}</span>
+        </div>
+        <p class="id-bio">{{ userInfo.selfintroduction || '暂无自我介绍' }}</p>
+      </div>
+      <div class="id-actions">
+        <button class="btn ghost" type="button" @click="toLogin">退出登录</button>
+      </div>
+    </section>
+
     <!-- 降级状态条（C3 块 2）：A 版没有对应模块，但它只在一类异常态出现，保留原语义。 -->
     <p v-if="dg" class="dg-note" :class="dg.state"><b class="dg-tag">{{ dg.tag }}</b>{{ dg.text }}<span class="dg-why">原因：{{ dg.reason }}</span></p>
 
@@ -356,7 +380,7 @@
 import { ref, onMounted, computed } from 'vue'
 import { http, handleApiError, assetOf } from '../api/http'
 import { endpoints } from '../api/endpoints'
-import { getUsername, isLoggedIn } from '../api/auth'; import IconGlyph from '../components/ui/IconGlyph.vue'   // ⚠️ 两条 import **同行**（2026-10-11 补图标那一笔）—— 合并到既有行 = 不新增行号漂移（`api-contract.md` 按 `:99` 钉住本文件）
+import { getUsername, isLoggedIn, clearCredentials, clearMerchantId, clearToken } from '../api/auth'; import IconGlyph from '../components/ui/IconGlyph.vue'   // ⚠️ 两条 import **同行**（2026-10-11 补图标那一笔）—— 合并到既有行 = 不新增行号漂移（`api-contract.md` 按 `:99` 钉住本文件）
 import { myCoupons } from '../api/marketing'; import CouponWalletDialog from '../components/CouponWalletDialog.vue'   // ⚠️ 两条 import **同行**（C3 块 5 · 券的信息架构重排，2026-10-11）—— 同上一行的理由：本文件多处被按行号引，**能省一行就省一行**
 import { useRouter } from 'vue-router'; import { merchantMyApplications } from '../api/merchant'   // ⚠️ 两条 import **同行**（C3 块 5 · B 组，2026-10-12）—— 理由同上：`useRouter` 给「店铺信息」格跳 `/shop`用（那条路由属 commit C），`merchantMyApplications` 给「商家认证」格读本人提审历史（`/merchant/myApplications`，`api/merchant.js` 已有封装，**没有新增端点、没有动 `endpoints.js`**）
 import { brandOverview } from '../api/brand'; import { cartList, orderHistory } from '../api/order'   // A 版个人中心（2026-10-19）：品牌四态 / 购物车件数 / 最近订单。两个 api 模块都是既有封装，未新增端点。
@@ -680,6 +704,15 @@ const loadWallet = async (account) => {
 
 /** 路由 —— 「店铺信息」格跳 `/shop`。⚠️ 那条路由属 **commit C**（本 commit 里点它只有控制台告警）。 */
 const router = useRouter()
+
+// 退出登录（2026-10-19 用户令）：本页 `noRail` + `noMenu` 把黑树与浅色菜单两处退出入口都遮掉了，这里补回。
+// 口径镜像 `UserCenter.vue`（`:52-63`）：清本地 → 跳登录 → 异步销服务端会话（allowUnauthorized 防退出时 401）→ 票在 finally 里清。
+const toLogin = () => {
+  clearCredentials()
+  if (isMerchantShell.value) clearMerchantId()
+  router.push('/login')
+  http.post(endpoints.user.logout, null, { allowUnauthorized: true }).catch(() => {}).finally(() => clearToken())
+}
 
 /** 遮罩开着时画哪一份面板：`null` 关 / `'cert'` 商家认证 / `'level'` 经营等级。 */
 const cardPanel = ref(null)
@@ -1102,6 +1135,45 @@ button {
 .mc-state { font-family: var(--font-display); font-size: 32px; font-weight: 500; line-height: 1.1; color: var(--ink); }
 .mc-why { margin-top: 16px; font-size: 15px; color: var(--ink-2); line-height: 1.7; }
 
+/* ── 身份卡（2026-10-19 用户令）────────────────────────────────────────────── */
+.id-card {
+  display: grid;
+  grid-template-columns: 88px minmax(0, 1fr) auto;
+  gap: 24px;
+  align-items: center;
+  padding: 24px 26px;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  margin-bottom: 38px;
+}
+.id-avatar {
+  width: 88px; height: 88px;
+  object-fit: cover;
+  border-radius: 50%;
+  border: 1px solid var(--line-2);
+  background: var(--surface-2);
+}
+.id-main { min-width: 0; }
+.id-name {
+  display: flex; align-items: center; flex-wrap: wrap; gap: 10px;
+  font-family: var(--font-display); font-size: 26px; font-weight: 500; color: var(--ink);
+  line-height: 1.2;
+}
+.id-badge {
+  font-family: var(--font-mono); font-size: 10px; letter-spacing: .06em;
+  padding: 3px 8px; border: 1px solid var(--line-2); color: var(--ink-3);
+  line-height: 1.4; white-space: nowrap;
+}
+.id-badge.vip { background: var(--ink); color: var(--surface); border-color: var(--ink); }
+.id-badge.merchant { border-color: var(--brand-ink); color: var(--brand-ink); }
+.id-meta {
+  display: flex; flex-wrap: wrap; gap: 8px 22px;
+  margin-top: 10px; font-size: 12px; color: var(--ink-3);
+}
+.id-meta b { font-family: var(--font-mono); font-weight: 500; color: var(--ink-2); }
+.id-bio { margin-top: 10px; font-size: 13px; line-height: 1.7; color: var(--ink-2); }
+.id-actions { display: flex; gap: 10px; justify-content: flex-end; }
+
 /* ── 断点（照 A 版 1080 / 860 / 600） ─────────────────────────────────────── */
 @media (max-width: 1080px) {
   .two-col { grid-template-columns: 1fr; }
@@ -1132,6 +1204,9 @@ button {
 }
 @media (max-width: 600px) {
   .page-head h1 { font-size: 32px; }
+  .id-card { grid-template-columns: 1fr; }
+  .id-avatar { width: 64px; height: 64px; }
+  .id-actions { justify-content: flex-start; }
   .entry-grid { grid-template-columns: 1fr; }
   .entry-cell { border-right: 0; border-bottom: 1px solid var(--line); }
   .entry-cell:last-child { border-bottom: 0; }

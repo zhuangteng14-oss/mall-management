@@ -1018,7 +1018,7 @@ onUnmounted(() => {
 .flash {
   display: grid;
   grid-template-columns: 300px minmax(0, 1fr);
-  background: var(--brand-ink);
+  background: var(--cin-800);
   color: #fff;
   border-radius: 18px;
   overflow: hidden;
@@ -1027,7 +1027,7 @@ onUnmounted(() => {
   display: flex;
   flex-direction: column;
   padding: 30px 28px 28px;
-  background: radial-gradient(130% 100% at 0% 0%, var(--brand) 0%, var(--brand-ink) 62%);
+  background: radial-gradient(130% 100% at 0% 0%, var(--cin-600) 0%, var(--cin-800) 62%);
   border-right: 1px solid rgba(255, 255, 255, 0.12);
 }
 .flash-title {
@@ -1142,7 +1142,7 @@ onUnmounted(() => {
 .flash-pic {
   aspect-ratio: 4 / 3;
   overflow: hidden;
-  background: #2a2f33;
+  background: #35120e;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1234,7 +1234,7 @@ onUnmounted(() => {
 
 /* 秒杀空态：仍保留一块安静的黑面，不让版面塌掉 */
 .flash-flat {
-  background: var(--brand-ink);
+  background: var(--cin-800);
   color: #fff;
   border-radius: 18px;
 }

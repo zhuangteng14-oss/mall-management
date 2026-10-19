@@ -340,14 +340,14 @@ onBeforeUnmount(() => {
   font-size: var(--fs-sm); color: var(--ink-2); text-decoration: none;
   background: var(--surface);
 }
-.head-actions .btn:hover { border-color: var(--brand-ink); color: var(--brand-ink); }
+.head-actions .btn:hover { border-color: var(--cin-600); color: var(--cin-600); }
 
 /* ── 下一场 / 进行中（A 版 sk-clock）────────────────────────────────────────── */
 .sk-clock {
   display: grid; grid-template-columns: minmax(0, 1fr) 330px;
-  border: 1px solid var(--ink); margin-bottom: var(--s5); background: var(--surface);
+  border: 1px solid var(--cin-700); margin-bottom: var(--s5); background: var(--surface);
 }
-.clock-main { padding: 26px 30px; border-right: 1px solid var(--ink); }
+.clock-main { padding: 26px 30px; border-right: 1px solid var(--cin-700); }
 .clock-main h2 {
   font-family: var(--font-display); font-size: 34px; line-height: 1.05;
   letter-spacing: -0.035em; margin: 8px 0; font-weight: 600;
@@ -355,10 +355,11 @@ onBeforeUnmount(() => {
 .clock-sub { font-size: var(--fs-xs); color: var(--ink-3); }
 .clock-num { display: flex; gap: 8px; margin-top: 18px; }
 .clock-num div {
-  border: 1px solid var(--ink); min-width: 78px; padding: 10px 12px; text-align: center;
+  border: 1px solid var(--cin-300); min-width: 78px; padding: 10px 12px; text-align: center;
 }
 .clock-num b {
   display: block; font-family: var(--font-mono); font-size: 34px; line-height: 1;
+  color: var(--cin-700);
   font-weight: 400; letter-spacing: -0.05em; font-variant-numeric: tabular-nums;
 }
 .clock-num small {
@@ -375,7 +376,7 @@ onBeforeUnmount(() => {
   font-family: var(--font-mono); font-size: 9px; color: var(--ink-3);
 }
 .clock-side .bar { height: 8px; border: 1px solid var(--ink); background: var(--surface); }
-.clock-side .bar i { display: block; height: 100%; background: var(--brand-ink); }
+.clock-side .bar i { display: block; height: 100%; background: var(--cin-600); }
 .clock-side .remain {
   font-family: var(--font-mono); font-size: 22px; line-height: 1;
   margin: 4px 0 2px; font-variant-numeric: tabular-nums;
@@ -383,12 +384,12 @@ onBeforeUnmount(() => {
 .hero-price { display: flex; align-items: baseline; gap: var(--s2); }
 .hero-price b {
   font-family: var(--font-mono); font-size: var(--fs-xl);
-  color: var(--brand-ink); font-variant-numeric: tabular-nums;
+  color: var(--cin-600); font-variant-numeric: tabular-nums;
 }
 .hero-price s { font-size: var(--fs-xs); color: var(--ink-3); }
 .btn-hero {
   align-self: flex-start; height: 34px; padding: 0 var(--s5); border-radius: var(--r1);
-  border: 1px solid var(--brand-ink); background: var(--brand-ink); color: var(--bg);
+  border: 1px solid var(--cin-600); background: var(--cin-600); color: var(--bg);
   font-size: var(--fs-sm); font-weight: var(--fw-med); cursor: pointer;
 }
 .btn-hero:hover { filter: brightness(1.06); }
@@ -396,13 +397,13 @@ onBeforeUnmount(() => {
 .btn-hero.off:hover { filter: none; }
 
 .tip { font-size: var(--fs-sm); color: var(--ink-3); padding: var(--s6) 0; }
-.tip-a { color: var(--brand-ink); }
+.tip-a { color: var(--cin-600); }
 
 /* ── 时间轴（A 版 sk-timeline）─────────────────────────────────────────────── */
 .sk-timeline { border-top: 1px solid var(--line); }
 .sk-now {
   display: grid; grid-template-columns: 142px minmax(0, 1fr);
-  background: var(--ink); color: var(--bg);
+  background: var(--cin-800); color: var(--bg);
 }
 .sk-now .n-time {
   padding: 14px 20px; font-family: var(--font-mono); font-size: 10px;
@@ -410,7 +411,7 @@ onBeforeUnmount(() => {
 }
 .sk-now .n-body {
   padding: 14px 26px; font-family: var(--font-mono); font-size: 9px;
-  letter-spacing: 0.08em; color: var(--ink-3);
+  letter-spacing: 0.08em; color: rgba(255, 255, 255, 0.66);
 }
 .sk-now .n-body b { color: var(--bg); font-weight: 400; }
 
@@ -452,31 +453,33 @@ onBeforeUnmount(() => {
   font-family: var(--font-display); font-size: 20px; line-height: 1.15;
   font-weight: 600; color: inherit; text-decoration: none;
 }
-.nm:hover { color: var(--brand-ink); }
+.nm:hover { color: var(--cin-600); }
 .info { min-width: 0; }
 .meta { font-size: 10px; color: var(--ink-3); margin-top: 4px; }
 .price { font-family: var(--font-mono); font-size: 18px; margin-top: 6px; font-variant-numeric: tabular-nums; }
-.price b { color: var(--brand-ink); font-weight: 400; }
+.price b { color: var(--cin-600); font-weight: 400; }
 .price s { font-size: 10px; margin-left: 6px; color: var(--ink-3); }
 .bar { height: 7px; border: 1px solid var(--ink); background: var(--surface); margin-top: 9px; }
-.bar i { display: block; height: 100%; background: var(--brand-ink); }
+.bar i { display: block; height: 100%; background: var(--cin-600); }
 .bar-meta {
   display: flex; justify-content: space-between;
   font-family: var(--font-mono); font-size: 8px; color: var(--ink-3); margin-top: 4px;
 }
 .act { display: flex; flex-direction: column; align-items: flex-end; gap: 7px; text-align: right; }
 
-/* ⚠️ 阶段与售罄**都不吃 `--accent`** —— 朱砂在本仓只负责促销 / 未读 / **秒杀标识**（`tokens.css:34-42`），
-   2026-10-12 用户配色令起**秒杀价**改用青瓷绿（`--brand-ink`）⇒ 同一张卡里「绿价 + 红标识」各司其职。 */
+/* ⚠️ 2026-10-19 用户令：秒杀页主色调**必须红**（推翻 2026-10-12「秒杀价用青瓷绿」那版），
+   价格 / 进度 / 按钮 / 进行中带全部改走朱砂 ramp；青瓷绿只留给站名等全局品牌位。 */
 .chip {
   font-size: var(--fs-xs); padding: 0 var(--s2); border-radius: var(--r1);
   white-space: nowrap; border: 1px solid transparent;
 }
-.chip.on { background: var(--brand-soft); color: var(--brand-ink); border-color: var(--brand-ink); }
+.chip.on { background: var(--cin-50); color: var(--cin-700); border-color: var(--cin-300); }
 .chip.soon { background: var(--zone); color: var(--ink-2); border-color: var(--line-2); }
 .chip.soldout { background: var(--ink-3); color: var(--bg); }
 
 /* 售完：整行降不透明度（不吃 `filter: grayscale()`，商品图是商家资产、不该被页面改色）。 */
+.sk-row.live { background: var(--cin-50); }
+.sk-row.live .sk-time b { color: var(--cin-700); }
 .sk-row.sold { background: var(--zone); }
 .sk-row.sold .thumb,
 .sk-row.sold .info { opacity: 0.55; }

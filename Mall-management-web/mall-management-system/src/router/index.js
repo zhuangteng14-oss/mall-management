@@ -57,8 +57,8 @@ const routes = [
     children: [
       { path: '', name: 'customerHome', component: HomeTab, props: { base: '/customer' }, meta: { tab: 'home', layout: 'home-container', public: true } },   // ⚠️ C3 块 2（2026-10-09）：**同行**加 `name` —— 只为消一条 vue-router warn。父记录 `:55` 有 `name` 而本子记录**空路径**又**无名**时，`createRouter` 建匹配表就发 `checkChildMissingNameWithEmptyPath`（`vue-router.mjs:848`）（三壳三条，`#/login` 上一样刷）。本 name **没有别的用处**，全仓无 `push({name:'customerHome'})` —— 那正是警告说的「用父名不会渲染空路径子记录」那件事，这里靠**给子记录起名**消掉（警告原话：`add a name to the child route to remove the warning`）。
       { path: 'search', component: GoodsSelect, meta: { layout: 'page', public: true } },
-      { path: 'msg', component: MessageCenter, meta: { tab: 'msg', layout: 'page' } },   // ⚠️ 2026-10-09：`component` 由 `ChatRoom` 换成 `MessageCenter`（**同行替换**，两壳各一处）—— 本记录现在还承载「通知」tab（`?tab=notify`）；`meta.tab` 仍是 `'msg'` ⇒ 顶栏「消息」在两个 tab 下都亮
-      { path: 'cart', component: OrderPane, meta: { tab: 'cart', layout: 'cart-container' } },   // ⚠️ C3 块 4：`component` 由 `ShoppingCart` 换成 `OrderPane`（购物车块容器，内含「购物车 / 我的订单」两个 tab，由 `?tab=` 选面），并**删掉** `props:{showSwitch:false}` —— 那个 prop 是给 `ShoppingCart` 用的，容器不认 ⇒ 留着会变成根元素上的野属性。R1 当年那条「必须传 false，否则凭空多出 📋/🛒 开关」的告警随之作废（`showSwitch` / `orderTab` / `@toggle` 三个 prop 在块 4 全线退役，登记见 `tech-debt.md`；见 progress.md §5-X (16)2）
+      { path: 'msg', component: MessageCenter, meta: { tab: 'msg', layout: 'page', noRail: true } },   // ⚠️ 2026-10-19 用户令：消息中心归公域 ⇒ 无侧栏全宽。`noRail` 只关身份树，登录闸仍走父记录
+      { path: 'cart', component: OrderPane, meta: { tab: 'cart', layout: 'cart-container', noRail: true } },   // ⚠️ 2026-10-19 用户令：购物车归公域 ⇒ 无侧栏全宽   // ⚠️ C3 块 4：`component` 由 `ShoppingCart` 换成 `OrderPane`（购物车块容器，内含「购物车 / 我的订单」两个 tab，由 `?tab=` 选面），并**删掉** `props:{showSwitch:false}` —— 那个 prop 是给 `ShoppingCart` 用的，容器不认 ⇒ 留着会变成根元素上的野属性。R1 当年那条「必须传 false，否则凭空多出 📋/🛒 开关」的告警随之作废（`showSwitch` / `orderTab` / `@toggle` 三个 prop 在块 4 全线退役，登记见 `tech-debt.md`；见 progress.md §5-X (16)2）
       {
         path: 'user', name: 'customerUser',   // ⚠️ C3 块 2〈用户块〉：**同行**加 `name`（不新插一行）—— 文件尾那条 `router.addRoute('customerUser', …)` 靠它把「商家入驻」挂成本壳的子页（`addRoute` 的第一个参数**只认 name**）。⚠️ 一旦插行，本组 `:61`-`:122` 的既有行号引用会整体下移。
         component: UserCenter,
@@ -88,12 +88,12 @@ const routes = [
     children: [
       { path: '', name: 'merchantHome', component: HomeTab, props: { base: '/merchant' }, meta: { tab: 'home', layout: 'home-container', public: true } },   // ⚠️ C3 块 2：**同行**加 `name`，理由与 `/customer` 那条逐字相同（父 `:86` 有 name）；无任何 `push({name:'merchantHome'})`。
       { path: 'search', component: GoodsSelect, meta: { layout: 'page', public: true } },
-      { path: 'msg', component: MessageCenter, meta: { tab: 'msg', layout: 'page' } },   // ⚠️ 2026-10-09：`component` 由 `ChatRoom` 换成 `MessageCenter`（**同行替换**，两壳各一处）—— 本记录现在还承载「通知」tab（`?tab=notify`）；`meta.tab` 仍是 `'msg'` ⇒ 顶栏「消息」在两个 tab 下都亮
+      { path: 'msg', component: MessageCenter, meta: { tab: 'msg', layout: 'page', noRail: true } },   // ⚠️ 2026-10-19 用户令：消息中心归公域 ⇒ 无侧栏全宽
       // ⚠️ C3 块 4：两条记录的 `meta.tab` **不再相同** —— `/merchant/order` = `'order'`（顶栏「订单中心」
       //    亮），`/merchant/order/cart` = `'cart'`（顶栏**新增**的商家「购物车」项亮）。改前两条都是 `'order'`。
       // ⚠️ `order/cart` 仍是**单条多段子路径**，不嵌第二层 `children`（容器 `OrderPane` 自己渲染它的两个 tab）。
       { path: 'order', component: () => import('../views/OrderCenter.vue'), meta: { tab: 'order', layout: 'order-container' } },   // ⚠️ C3 块 4：块 4 前这里指 `OrderPane`（「订单中心 ⇄ 购物车」两态包装组件）—— 现在**直接指订单中心自己**。用**行内动态 import** 而不是顶部加一行 import：顶部加行会让 `:8` 以下全体下移（同一手法见本文件 `:434` 的 `AdminStub`）
-      { path: 'order/cart', component: OrderPane, meta: { tab: 'cart', layout: 'order-container' } },
+      { path: 'order/cart', component: OrderPane, meta: { tab: 'cart', layout: 'order-container', noRail: true } },   // ⚠️ 2026-10-19 用户令：购物车归公域 ⇒ 无侧栏全宽
       {
         path: 'user', name: 'merchantUser',   // ⚠️ 可视化段 commit 3（2026-10-11，用户裁决 ④「经营数据入口放个人中心里」）：**同行**加 `name`（不新插一行，理由同 `:63` 那条 —— 本组 `:98`-`:122` 的既有行号引用会整体下移）。文件尾那条 `router.addRoute('merchantUser', …)` 靠它把「经营数据」挂成**本记录的子页** ⇒ 个人中心左菜单在场（`UserCenter.vue` 的 `.user-menu` 只在 `matched` 含本记录时渲染）。⚠️ `checkSameNameAsAncestor` 只禁同名（本 name ≠ 祖先 `merchant`）⇒ 不多发 warn。
         component: UserCenter,
