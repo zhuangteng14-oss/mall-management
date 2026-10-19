@@ -314,7 +314,9 @@ public class GoodsDao {
         String sql = "SELECT g.*, "
                 + MarketingGoodsFlags.existsIsSeckill("g") + " AS IsSeckill, "
                 + MarketingGoodsFlags.existsIsSoldOut("g") + " AS IsSoldOut, "
-                + MarketingGoodsFlags.existsIsSubsidy("g") + " AS IsSubsidy " +
+                + MarketingGoodsFlags.existsIsSubsidy("g") + " AS IsSubsidy, " +
+                // 批四第二批 commit 2：品牌标（同一个 EXISTS 谓词，见 GoodsCacheService.listHome）。
+                "EXISTS(SELECT 1 FROM user u WHERE u.merchantid = g.MerchantId AND u.IsBrand = 1) AS IsBrand " +
                 "FROM goods g WHERE 1=1 " +
                 "AND g.ShelfState = 1 AND g.DeletedAt IS NULL AND g.Status = 2 " +
                 "AND (g.GoodType = ? " +
@@ -380,7 +382,10 @@ public class GoodsDao {
      */
     public List<Map<String, Object>> selectByTypeId(Integer TypeId, String keyword, int limit, int offset) {
         boolean filtered = keyword != null && !keyword.trim().isEmpty();
-        String sql = "SELECT * FROM mall_management_sql.goods "
+        String sql = "SELECT g.*, "
+                // 批四第二批 commit 2：品牌标（同 searchByKeyword / GoodsCacheService.listHome 谓词）。
+                + "EXISTS(SELECT 1 FROM mall_management_sql.user u WHERE u.merchantid = g.MerchantId AND u.IsBrand = 1) AS IsBrand "
+                + "FROM mall_management_sql.goods g "
                 + "WHERE TypeId = ? AND ShelfState = 1 AND DeletedAt IS NULL AND Status = 2 "
                 + (filtered ? "AND GoodName LIKE CONCAT('%', ?, '%') " : "")
                 + "ORDER BY Id DESC LIMIT ? OFFSET ?";

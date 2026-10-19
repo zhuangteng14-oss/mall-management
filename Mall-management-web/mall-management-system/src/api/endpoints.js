@@ -507,5 +507,12 @@ export const endpoints = {
   goodsB4: {
     applicationSubmit: '/goods/application/submit',
     skuStockUpdate: '/goods/skuStockUpdate',
+    // 批四第二批 commit 2：品牌专区（公开读，只列 user.IsBrand=1 商家的在架商品）。
+    brandHome: '/goods/brandHome',
+  },
+  // ⚠️ 2026-10-19（批四第二批 · 品牌加盟）：商家自服务 1 条。追加在**文件尾**（同本文件既有
+  //    零漂移手法）。品牌申请**不改身份**，通过只置 `user.IsBrand=1` —— 与 `merchant.apply` 分开。
+  merchantB4: {
+    brandApply: '/merchant/brandApply',
   },
 }

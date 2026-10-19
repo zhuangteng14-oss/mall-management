@@ -647,3 +647,16 @@ router.addRoute({
   component: () => import('../views/ComingSoonPage.vue'),
   meta: { public: true },
 })
+
+// ══════════════════════════════════════════════════════════════════════════════════════════
+// ── 批四 · 第二批（2026-10-19）：品牌专区 `/brand` 真页 ────────────────────────────────────
+//
+// ⚠️ **新增行落在文件最尾**（本仓「零漂移」手法）：本文件全篇按行号互引，上面那条
+//    `/coming-soon/:feature` 也保留（客户服务 / 会员（commit 3 前）仍用它兜底）。
+//
+// ⚠️ **壳外、顶层、`meta.public`**（形制照 `/seckill`）：首页二级导航是公开面，
+//    挂进 `/customer` 壳会把匿名用户踢去登录页。数据端点 `/goods/brandHome` 为公开读，
+//    匿名可取的判据与首页 `goodsSelectHome` 相同。
+// ══════════════════════════════════════════════════════════════════════════════════════════
+
+router.addRoute({ path: '/brand', component: () => import('../views/BrandZone.vue'), meta: { public: true } })

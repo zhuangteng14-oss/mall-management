@@ -19,6 +19,13 @@
         <h3 class="card-h">提交入驻申请</h3>
 
         <form class="f" @submit.prevent="submit">
+          <!-- 批四第二批（2026-10-19）：申请类型。品牌加盟只对已入驻商家开放，
+               前端让选、后端用 `selectMerchantId` 判 —— 前端不猜身份，也不因此多发一次请求。 -->
+          <div class="fld fld-wide">
+            <span>申请类型</span>
+            <label class="type-opt"><input v-model="applyType" type="radio" value="join" /> 商家入驻</label>
+            <label class="type-opt"><input v-model="applyType" type="radio" value="brand" /> 品牌加盟</label>
+          </div>
           <label class="fld">
             <span>店铺名称 <i>必填</i></span>
             <input v-model.trim="form.shopName" type="text" maxlength="64" placeholder="例如：米可数码专营店" />
@@ -59,6 +66,7 @@
           ⚠️ 提交<b>不等于</b>通过：申请只是躺在表里等管理员审核，通过前你仍然是<b>普通客户</b>；
           每次提交都会<b>新增一条</b>记录（不会覆盖旧的）。
           审核通过后需<b>重新登录</b>才会进入商家端。
+          <template v-if="applyType === 'brand'">品牌加盟<b>仅限已入驻商家</b>：通过后<b>不改身份</b>，只给本店商品加品牌标并进入品牌专区。</template>
         </p>
       </section>
 
@@ -79,6 +87,7 @@
           <li v-for="r in rows" :key="r.Id" class="app" :class="r.Status">
             <div class="app-l1">
               <b class="app-shop">{{ r.ShopName }}</b>
+              <span v-if="isBrandRow(r)" class="badge brandt">品牌加盟</span>
               <span class="badge" :class="r.Status"><IconGlyph :name="statusGlyph(r.Status)" />{{ statusLabel(r.Status) }}</span>
               <span class="grow"></span>
               <span class="dim">{{ fmt(r.SubmittedAt) }}</span>
@@ -126,7 +135,7 @@
 <script setup>
 import { computed, onMounted, reactive, ref } from 'vue'
 import { getUsername } from '../api/auth'
-import { merchantApply, merchantMyApplications } from '../api/merchant'; import IconGlyph from '../components/ui/IconGlyph.vue'   // ⚠️ 两条 import **同行**（2026-10-11 补图标那一笔）—— 合并到既有行的惯例见各页同款注释
+import { merchantApply, merchantBrandApply, merchantMyApplications } from '../api/merchant'; import IconGlyph from '../components/ui/IconGlyph.vue'   // ⚠️ 两条 import **同行**（2026-10-11 补图标那一笔）—— 合并到既有行的惯例见各页同款注释
 
 // ── 申请人 ───────────────────────────────────────────────────────────────────
 // ⚠️ `getUsername()` 读 `sessionStorage`，未登录时可能回**字面串** `'null'` / `'undefined'`
@@ -161,6 +170,9 @@ function statusLabel(s) {
 const statusGlyph = (s) => (s === 'approved' ? 'ok' : s === 'rejected' ? 'no' : 'wait')
 
 // ── 表单 ─────────────────────────────────────────────────────────────────────
+/** 申请类型：`join` 入驻（旧行为）/ `brand` 品牌加盟（批四第二批）。 */
+const applyType = ref('join')
+const isBrandRow = (r) => r && (r.IsBrand === true || r.IsBrand === 1 || String(r.IsBrand) === '1')
 const form = reactive({
   shopName: '',
   licenseNo: '',
@@ -197,12 +209,17 @@ async function submit() {
   formErr.value = ''
   okMsg.value = ''
   try {
-    const data = await merchantApply({ username: who.value, ...form })
+    const isBrand = applyType.value === 'brand'
+    const data = isBrand
+      ? await merchantBrandApply({ username: who.value, ...form })
+      : await merchantApply({ username: who.value, ...form })
     if (!data || !data.success) {
       formErr.value = (data && data.msg) || '提交失败'
       return
     }
-    okMsg.value = `已提交（批次 ${dash(data.batchId)}）—— 等管理员审核，通过后需重新登录。`
+    okMsg.value = isBrand
+      ? `品牌加盟申请已提交（批次 ${dash(data.batchId)}）—— 等管理员审核，通过后商品会带品牌标并进入品牌专区。`
+      : `已提交（批次 ${dash(data.batchId)}）—— 等管理员审核，通过后需重新登录。`
     resetForm()
     await loadMine()
   } catch (e) {
@@ -470,6 +487,21 @@ onMounted(loadMine)
 .badge.rejected {
   color: var(--danger);
   background: var(--danger-ground);
+}
+/* 批四第二批：品牌加盟标签（与审核状态徽章并排，故不沿用状态色）。 */
+.badge.brandt {
+  color: var(--brand-ink);
+  background: var(--brand-soft);
+}
+.type-opt {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-right: var(--s5);
+  cursor: pointer;
+}
+.type-opt input {
+  accent-color: var(--brand-ink);
 }
 .app-l2 {
   display: flex;

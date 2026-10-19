@@ -92,7 +92,7 @@
         <!-- 右信息区 = 本页的**一个釉面主块**（v5 由 `--glaze-deep` 换成 `--glaze-mid`）。
              层级：商品名 24 衬线 / 现价 36 衬线朱砂 / 其余 12–19 无衬线。 -->
         <div class="info">
-          <h1 class="pname">{{ goodName }}</h1>
+          <h1 class="pname">{{ goodName }}<span v-if="currentItem.isBrand === true || currentItem.isBrand === 1 || currentItem.isBrand === '1'" class="pname-brand">品牌</span></h1>
 
           <!-- ①【原价 / 折扣】—— C3 块 5〈折扣〉**落地**（2026-10-12 用户 A 档批准）。
                改前：`.was`（`¥199.00`）与 `.off`（`6.5 折`）是**稿内 mock 的写死字面量**，
@@ -822,6 +822,7 @@ const loadAllItems = async () => {
           originalPrice: d2.originalPrice, // 块 5〈折扣〉：划线价（0/undefined = 不打折）
           goodImg: d2.goodImg,
           imgList: d2.imgList, // 2026-10-19 多图：JSON 数组串（null/空 ⇒ 只用 goodImg）
+          isBrand: d2.isBrand, // 批四第二批 commit 2：品牌加盟店标（1/true/"1" ⇒ 画徽标）
           UserName: ''
         })
       }
@@ -2528,4 +2529,12 @@ button { background: none; border: 0; cursor: pointer; }
 /* ⚠️ 单独覆盖 `:hover`：上面 `.ract button:hover` 那条（`2214`）会把边框刷回 `--line-2`，
    正好在**悬停时**把这道「危险动作」的颜色提示抹掉 —— 那是反的。 */
 .ract button.acc:hover { border-color: var(--brand-ink); color: var(--brand-ink); }
+
+/* 品牌加盟店标（批四第二批 commit 2）。挂在 `.pname` 右侧；颜色与 `ProductCard.vue` 的
+   `.pcard-kind.brand` 同源（`--brand-soft` 底 + `--brand-ink` 字），两处一眼认成同一个标。
+   `letter-spacing: 0` 是**显式复位**：`.pname` 的 `-.01em` 会继承下来，中文两字会显得挤。 */
+.pname-brand { display: inline-block; margin-left: var(--s2); padding: 1px 6px; border-radius: var(--r1);
+               background: var(--brand-soft); color: var(--brand-ink); font-family: var(--font);
+               font-size: var(--fs-xs); font-weight: var(--fw-med); letter-spacing: 0;
+               vertical-align: middle; white-space: nowrap; }
 </style>

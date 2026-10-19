@@ -344,6 +344,22 @@ public class UserGovernanceDao {
         return jdbcClient.sql(sql).params(username, merchantId, image, merchantId, image).update();
     }
 
+    // ==================== 写：品牌加盟（批四第二批） ====================
+
+    /**
+     * 置 / 清账号的品牌店标记（{@code user.IsBrand}）。**只对已是商家的行有意义** ——
+     * 调用方（{@code MerchantApplicationService.audit} 的品牌分支）先用
+     * {@link #selectMerchantId} 校验，不在这里重复判身份。
+     *
+     * <p>⚠️ {@code IsBrand} 不在 {@code userPublic} 缓存的 5 列里，但商品列表的品牌标
+     * （{@code GoodsCacheService} 的 {@code EXISTS ... IsBrand}）走 {@code goodsHome} 缓存
+     * ⇒ 审核通过后必须由调用方 {@code evictByMerchant}，否则品牌标要到 TTL 才出现。
+     */
+    public int setBrand(String username, boolean isBrand) {
+        String sql = "UPDATE `user` SET IsBrand = ? WHERE username = ?";
+        return jdbcClient.sql(sql).params(isBrand ? 1 : 0, username).update();
+    }
+
     // ==================== 内部 ====================
 
     /** {@code banned} 三形态兜底 —— 见类注释「tinyint(1) 映射成 Boolean」。 */

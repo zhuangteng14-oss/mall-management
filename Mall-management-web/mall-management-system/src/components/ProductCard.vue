@@ -179,8 +179,15 @@ const soldQty = computed(() => Number(props.goods.SoldQty) || 0); /* 批四（20
 const soldOut = computed(() => isSoldOut(props.goods))
 /** 标签**有序**（秒杀在前、国补在后）且**没有就不画** —— 普通商品既不画红也不画绿。
  *  ⚠️ 「不画」不 = 「行不占位」：这一支只决定**画几枚**，占位由下面的 `rowKinds` 兜底。 */
+// 批四第二批（2026-10-19）：品牌标 —— 后端投影 `IsBrand`（`user.IsBrand=1` 的商家）。
+// `tinyint(1)` 到 JSON 可能是 boolean / 1 / "1"，三种都认（同 MerchantApplyPage 的 isBrandRow）。
+const isBrand = computed(() => {
+  const v = props.goods && props.goods.IsBrand
+  return v === true || v === 1 || String(v) === '1'
+})
 const kinds = computed(() => {
   const out = []
+  if (isBrand.value) out.push({ key: 'brand', text: '品牌' })
   if (isSeckill(props.goods)) out.push({ key: 'seckill', text: '秒杀商品' })
   if (isSubsidy(props.goods)) out.push({ key: 'subsidy', text: '国补' })
   return out
@@ -329,6 +336,11 @@ const rowKinds = computed(() => (
 }
 .pcard-kind.subsidy {
   background: var(--brand-tint);
+  color: var(--brand-ink);
+}
+/* 品牌标（批四第二批）：与国补同色系但换一档底色，两枚同屏时仍分得开。 */
+.pcard-kind.brand {
+  background: var(--brand-soft);
   color: var(--brand-ink);
 }
 /* ── 隐形占位签（用户 ①，2026-10-12）────────────────────────────────────────────────

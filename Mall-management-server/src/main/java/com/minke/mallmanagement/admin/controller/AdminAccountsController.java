@@ -147,10 +147,22 @@ public class AdminAccountsController {
         String outcome = result.get("outcome") == null ? null : result.get("outcome").toString();
         if (outcome != null && !"already-handled".equals(outcome)) {
             String applicant = result.get("username") == null ? null : result.get("username").toString();
+            // 批四第二批：品牌加盟走同一张表 / 同一个审核端点，但**不改身份** ⇒ 通知与审计按 outcome 分流。
+            boolean brand = outcome.startsWith("brand-");
             if (pass) {
-                notifyApplicant(applicant, NotificationEvents.MERCHANT_AUDIT_PASSED,
-                        "入驻申请已通过",
-                        "您提交的商家入驻申请已通过审核。现在可以进入商家端管理店铺了。");
+                if (brand) {
+                    notifyApplicant(applicant, NotificationEvents.MERCHANT_BRAND_APPROVED,
+                            "品牌加盟申请已通过",
+                            "您的品牌加盟申请已通过审核。店铺商品现在会带上品牌标，并进入首页的品牌专区。");
+                } else {
+                    notifyApplicant(applicant, NotificationEvents.MERCHANT_AUDIT_PASSED,
+                            "入驻申请已通过",
+                            "您提交的商家入驻申请已通过审核。现在可以进入商家端管理店铺了。");
+                }
+            } else if (brand) {
+                notifyApplicant(applicant, NotificationEvents.MERCHANT_BRAND_REJECTED,
+                        "品牌加盟申请未通过",
+                        "您的品牌加盟申请未通过。原因：" + (rejectReason == null ? "（未填写）" : rejectReason));
             } else {
                 notifyApplicant(applicant, NotificationEvents.MERCHANT_AUDIT_REJECTED,
                         "入驻申请未通过",
@@ -163,7 +175,8 @@ public class AdminAccountsController {
             after.put("Id", id);
             after.put("Status", pass ? "approved" : "rejected");
             after.put("outcome", outcome);
-            auditService.record(AuthSession.identify(request), AuditActions.MERCHANT_APPLY_AUDIT,
+            auditService.record(AuthSession.identify(request),
+                    brand ? AuditActions.MERCHANT_BRAND_APPLY_AUDIT : AuditActions.MERCHANT_APPLY_AUDIT,
                     "merchant_application", id == null ? null : id.toString(), before, after);
         }
         return Result.of(result);

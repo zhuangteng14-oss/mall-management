@@ -99,9 +99,11 @@ public class GoodsCacheService {
     //    第二页拿到的还是第一页（且键空间只有 1 个，翻页永远看不到新数据）。
     //    无商家过滤时该段为空串（`page-v4:24:0:`），与有商家过滤的键不会撞。
     // ⚠️ key 从 'page-v4' 升到 'page-v5'（批四第二批 2026-10-19）：响应多了 goods.Status / ImgList
-    //    （及后续 IsBrand）列，且 SQL 新增 Status=2 过滤 ⇒ 形状与语义都变了，必须 bump。
+    //    列，且 SQL 新增 Status=2 过滤 ⇒ 形状与语义都变了，必须 bump。
+    //    同日 commit 2 再升 'page-v6'：响应又多一列品牌标 IsBrand。
+    // ⚠️ 批四第二批 commit 2：'page-v5' → 'page-v6' —— 响应多了品牌标 IsBrand（见下）。
     @Cacheable(cacheNames = "goodsHome",
-            key = "'page-v5:' + #limit + ':' + #offset + ':' + (#merchantId == null ? '' : #merchantId)",
+            key = "'page-v6:' + #limit + ':' + #offset + ':' + (#merchantId == null ? '' : #merchantId)",
             sync = true)
     public Map<String, Object> listHome(int limit, int offset, String merchantId) {
         Map<String, Object> result = new HashMap<>();
@@ -133,7 +135,9 @@ public class GoodsCacheService {
         String sql = "SELECT g.*, COALESCE(s.SoldQty, 0) AS SoldQty, "
                 + MarketingGoodsFlags.existsIsSeckill("g") + " AS IsSeckill, "
                 + MarketingGoodsFlags.existsIsSoldOut("g") + " AS IsSoldOut, "
-                + MarketingGoodsFlags.existsIsSubsidy("g") + " AS IsSubsidy "
+                + MarketingGoodsFlags.existsIsSubsidy("g") + " AS IsSubsidy, "
+                // 批四第二批：品牌标 —— 商家在 `user.IsBrand=1` 即本店商品全带品牌标。
+                + "EXISTS(SELECT 1 FROM mall_management_sql.user u WHERE u.merchantid = g.MerchantId AND u.IsBrand = 1) AS IsBrand "
                 + "FROM mall_management_sql.goods g "
                 + "LEFT JOIN (SELECT ProductCode, CAST(SUM(Quantity) AS SIGNED) AS SoldQty "
                 + "FROM mall_management_sql.order_item WHERE ProductCode <> '' "
@@ -326,11 +330,14 @@ public class GoodsCacheService {
             //    把旧键撂下（否则滚动部署期间/未过期条目会返回**少一列**的旧形状，页面静默少个划线价）。
             // ⚠️ 批四第二批：'v2::' → 'v3::'。SQL 新增 Status=2 过滤（复审驳回的商品不再可买），
             //    旧键里缓存的是一段「曾经合法、现在已不可售」的答案，必须撂下。
-            key = "'v3::' + #MerchantId + '::' + #GoodName + '::' + #ProductCode", sync = true)
+            //    commit 2 同日再升 'v4::'：响应多一列品牌标 IsBrand。
+            key = "'v4::' + #MerchantId + '::' + #GoodName + '::' + #ProductCode", sync = true)
     public Map<String, Object> priceByTriple(String MerchantId, String GoodName, String ProductCode) {
-        String sql = "SELECT Price, GoodImg, OriginalPrice, ImgList FROM mall_management_sql.goods "   // 2026-10-19 批四第二批：多图 `ImgList` 随行透出（加性列；键已 bump `v3::`）
-                + "WHERE MerchantId=? AND GoodName=? AND ProductCode=? AND Status = 2 "
-                + "ORDER BY Id ASC LIMIT 1";
+        String sql = "SELECT g.Price, g.GoodImg, g.OriginalPrice, g.ImgList, "   // 2026-10-19 批四第二批：多图 + 品牌标（加性列；键已 bump `v4::`）
+                + "EXISTS(SELECT 1 FROM mall_management_sql.user u WHERE u.merchantid = g.MerchantId AND u.IsBrand = 1) AS IsBrand "
+                + "FROM mall_management_sql.goods g "
+                + "WHERE g.MerchantId=? AND g.GoodName=? AND g.ProductCode=? AND g.Status = 2 "
+                + "ORDER BY g.Id ASC LIMIT 1";
 
         List<Map<String, Object>> rows =
                 jdbcTemplate.queryForList(sql, MerchantId, GoodName, ProductCode);
@@ -425,6 +432,44 @@ public class GoodsCacheService {
         return result;
     }
 
+    /**
+     * 品牌专区（批四第二批 commit 2）—— `/goods/brandHome` 的唯一数据出口。
+     *
+     * <p>谓词 = 买家可见（{@code ShelfState=1} + 未删除 + {@code Status=2}）<b>且</b>该商品
+     * 所属商家 {@code user.IsBrand=1}。品牌标来自唯一真相 {@code user.IsBrand}（审核通过时置位），
+     * 本页与首页/详情读的是**同一个** EXISTS 谓词，不另抄一份。
+     *
+     * <p>⚠️ 缓存键里**没有商家维度**（品牌专区是全局列表）⇒ {@code evictByMerchant} 只能
+     * {@code allEntries=true} 清整片。品牌审核通过/撤销频率极低，整片清的代价可接受。
+     * ⚠️ {@code UserName} 用**标量子查询 + LIMIT 1**：`login.Id` 无唯一约束，JOIN 会因重复行
+     * 把商品整行复制（同 {@link #listHome} 用 queryForObject 时 >1 行上抛的那条病根）。
+     */
+    @Cacheable(cacheNames = "goodsBrand",
+            key = "'brand-page-v1:' + #limit + ':' + #offset", sync = true)
+    public Map<String, Object> brandZone(int limit, int offset) {
+        Map<String, Object> result = new HashMap<>();
+        String sql = "SELECT g.*, COALESCE(s.SoldQty, 0) AS SoldQty, "
+                + MarketingGoodsFlags.existsIsSeckill("g") + " AS IsSeckill, "
+                + MarketingGoodsFlags.existsIsSoldOut("g") + " AS IsSoldOut, "
+                + MarketingGoodsFlags.existsIsSubsidy("g") + " AS IsSubsidy, "
+                + "EXISTS(SELECT 1 FROM mall_management_sql.user u WHERE u.merchantid = g.MerchantId AND u.IsBrand = 1) AS IsBrand, "
+                + "(SELECT l.UserName FROM mall_management_sql.login l WHERE l.id = g.MerchantId LIMIT 1) AS UserName "
+                + "FROM mall_management_sql.goods g "
+                + "LEFT JOIN (SELECT ProductCode, CAST(SUM(Quantity) AS SIGNED) AS SoldQty "
+                + "FROM mall_management_sql.order_item WHERE ProductCode <> '' "
+                + "GROUP BY ProductCode) s ON s.ProductCode = g.ProductCode "
+                + "WHERE g.ShelfState = 1 AND g.DeletedAt IS NULL AND g.Status = 2 "
+                + "AND EXISTS (SELECT 1 FROM mall_management_sql.user ub "
+                + "            WHERE ub.merchantid = g.MerchantId AND ub.IsBrand = 1) "
+                + "ORDER BY g.Id DESC LIMIT ? OFFSET ?";
+        List<Map<String, Object>> list = jdbcTemplate.queryForList(sql, limit, offset);
+        result.put("success", true);
+        result.put("list", list);
+        result.put("limit", limit);
+        result.put("offset", offset);
+        return result;
+    }
+
     // ==================== 写路径：唯一的失效入口 ====================
 
     /**
@@ -445,7 +490,7 @@ public class GoodsCacheService {
      * ⚠️ 不能改成「进方法就清」：先清后写会在「清完 → 写完」窗口内被并发读回填**旧值**，
      *    那正是 @CacheEvict(beforeInvocation = true) 的经典风险。
      *
-     * 【四条 evict 的精度，逐条成立】
+     * 【五条 evict 的精度，逐条成立】（第五条 goodsBrand 见 {@link #brandZone}）
      * · goodsHome 用 allEntries=true —— 本 cacheName 上是**零精度损失**：只有 'all' 一个键，
      *   清整片 == 清那一个键；且结构上不会出现「改了 key 忘了改 evict」的失配。
      * · goodsByMerchant 用 key="#MerchantId" **精确清** —— 三个写接口的写入集合都由 MerchantId
@@ -490,7 +535,9 @@ public class GoodsCacheService {
             @CacheEvict(cacheNames = "goodsHome", allEntries = true),
             @CacheEvict(cacheNames = "goodsByMerchant", key = "'merchant-v2:' + #MerchantId"),
             @CacheEvict(cacheNames = "goodsCodes", allEntries = true),
-            @CacheEvict(cacheNames = "goodsPrice", allEntries = true)
+            @CacheEvict(cacheNames = "goodsPrice", allEntries = true),
+            // 批四第二批 commit 2：品牌专区是**全局**列表（键无商家维度）⇒ 只能整片清。
+            @CacheEvict(cacheNames = "goodsBrand", allEntries = true)
     })
     public void evictByMerchant(String MerchantId) {
         // 方法体刻意留空：失效面全部由注解声明，本方法只负责「被调到」。

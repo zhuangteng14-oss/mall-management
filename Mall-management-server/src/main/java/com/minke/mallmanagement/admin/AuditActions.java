@@ -369,6 +369,15 @@ public final class AuditActions {
      */
     public static final String USER_VIEW_PLAINTEXT = "user.viewplaintext";
 
+    /**
+     * 提交**品牌加盟申请** —— {@code POST /merchant/brandApply}（批四第二批，2026-10-19）。
+     * 与 {@link #MERCHANT_APPLY_CREATE} 分开：前者只写 {@code user.IsBrand}，后者升级身份。
+     */
+    public static final String MERCHANT_BRAND_APPLY_CREATE = "merchant.brand.apply.create";
+
+    /** 审核品牌加盟申请 —— 复用 {@code /admin/accounts/application/audit}，按 outcome 区分。 */
+    public static final String MERCHANT_BRAND_APPLY_AUDIT = "merchant.brand.apply.audit";
+
     private AuditActions() {
     }
 }

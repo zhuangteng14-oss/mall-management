@@ -1,6 +1,7 @@
 package com.minke.mallmanagement.merchant.service;
 
 import com.minke.mallmanagement.goods.dao.GoodsShelfDao;
+import com.minke.mallmanagement.goods.service.GoodsCacheService;
 import com.minke.mallmanagement.merchant.dao.MerchantApplicationDao;
 import com.minke.mallmanagement.user.dao.UserGovernanceDao;
 import com.minke.mallmanagement.user.service.UserCacheService;
@@ -34,10 +35,12 @@ class MerchantApplicationMaskingTest {
     private GoodsShelfDao goodsShelfDao;
     @Mock
     private UserCacheService userCacheService;
+    @Mock
+    private GoodsCacheService goodsCacheService;
 
     private MerchantApplicationService service() {
         return new MerchantApplicationService(applicationDao, userGovernanceDao,
-                goodsShelfDao, userCacheService);
+                goodsShelfDao, userCacheService, goodsCacheService);
     }
 
     private static Map<String, Object> pendingRow() {

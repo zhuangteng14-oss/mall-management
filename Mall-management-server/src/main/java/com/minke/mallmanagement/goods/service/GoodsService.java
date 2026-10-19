@@ -389,6 +389,20 @@ public class GoodsService {
         }
     }
 
+    /**
+     * 品牌专区列表（批四第二批 commit 2）—— 委托 + 响应组装，注解与 SQL 在
+     * {@link GoodsCacheService#brandZone}。分页参数与 {@link #goodsSelectHome} 同口径归一。
+     */
+    @CircuitBreaker(name = "mallMysqlRead")
+    public Map<String, Object> brandHome(Integer limit, Integer offset) {
+        try {
+            return goodsCacheService.brandZone(normalizePageSize(limit), normalizeOffset(offset));
+        } catch (Exception e) {
+            e.printStackTrace();
+            return cacheFailureMarker("查询失败");
+        }
+    }
+
     /** 页大小归一：缺省 {@link #DEFAULT_PAGE_SIZE}，负 / 0 同缺省，超上限夹到 {@link #MAX_PAGE_SIZE}。 */
     public static int normalizePageSize(Integer limit) {
         if (limit == null || limit <= 0) {
@@ -499,6 +513,8 @@ public class GoodsService {
             // 2026-10-19 批四第二批：多图（JSON 数组串）—— **加性键**，老前端不读。
             // null/空串 ⇒ 详情页只用 `goodImg`（单图路径与改前逐字一致）。
             result.put("imgList", row.get("ImgList"));
+            // 批四第二批 commit 2：品牌标 —— **加性键**，老前端不读；1/true ⇒ 详情页画「品牌」徽标。
+            result.put("isBrand", row.get("IsBrand"));
         } catch (Exception e) {
             // 技术异常（2026-10-12〈Bug 1〉起「>1 行」不再从这里来 —— 那条路改走 MIN(Id)）：
             // 这里接住 ⇒ 仍是 200 + {success:false}，**不是 500**（对调用方零契约变更）。

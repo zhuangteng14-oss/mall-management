@@ -225,6 +225,20 @@ public class GoodsController {
         return Result.of(goodsService.goodsSelectHome(limit, offset, MerchantId));
     }
 
+    /**
+     * 品牌专区（批四第二批 commit 2）—— 公开读，买家可见 + 商家 {@code user.IsBrand=1}。
+     *
+     * <p>分页口径与 {@code goodsSelectHome} 相同（{@code limit} 缺省 24 / 上限 100，{@code offset} 缺省 0）。
+     * ⚠️ 纯新增端点：不改既有端点的入参 / 出参。
+     */
+    @PostMapping("/brandHome")
+    public Result<Map<String, Object>> brandHome(
+            @RequestParam(value = "limit", required = false) Integer limit,
+            @RequestParam(value = "offset", required = false) Integer offset
+    ) {
+        return Result.of(goodsService.brandHome(limit, offset));
+    }
+
     // 这是一个接口（用于下架商品）
     // 方法体（两条 DELETE、无条件 success、唯一出口前 evict）逐字搬到 GoodsService.goodsDe()。
     // ⚠️ 四条 evict 的理由已收敛到 GoodsCacheService.evictByMerchant() 的 javadoc（D 笔，2026-09-28）。

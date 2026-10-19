@@ -92,8 +92,43 @@ public class MerchantApplicationController {
             @RequestParam(value = "contactPhone", required = false) String contactPhone,
             @RequestParam(value = "shopAddress", required = false) String shopAddress,
             @RequestParam(value = "licenseImage", required = false) String licenseImage,
+            // 批四第二批：可选。老前端不传 ⇒ 入驻申请，逐字保持旧行为。
+            @RequestParam(value = "IsBrand", required = false) Boolean IsBrand,
             HttpServletRequest request
     ) {
+        return submit(username, shopName, licenseNo, contactName, contactPhone, shopAddress,
+                licenseImage, Boolean.TRUE.equals(IsBrand), request);
+    }
+
+    /**
+     * 提交**品牌加盟**申请（批四第二批，2026-10-19）—— 仅供已入驻商家调用。
+     *
+     * <p>与 {@code /merchant/apply} 是两个端点而不是「同一个端点 + 布尔参数」：品牌申请
+     * **不改身份**（通过只置 {@code user.IsBrand}），文案 / 审计动作 / 通知事件都不同 ⇒ 分开
+     * 后旧端点的契约一字不动（老前端不传 {@code IsBrand} 的路径仍按入驻处理）。
+     * ⚠️ 「是否已是商家」的**服务端**判据在 {@code MerchantApplicationService.apply} 里，
+     * 本层只做身份闸与掩码拒绝。
+     */
+    @PostMapping("/brandApply")
+    public ResponseEntity<Object> brandApply(
+            @RequestParam(value = "username", required = false) String username,
+            @RequestParam(value = "shopName", required = false) String shopName,
+            @RequestParam(value = "licenseNo", required = false) String licenseNo,
+            @RequestParam(value = "contactName", required = false) String contactName,
+            @RequestParam(value = "contactPhone", required = false) String contactPhone,
+            @RequestParam(value = "shopAddress", required = false) String shopAddress,
+            @RequestParam(value = "licenseImage", required = false) String licenseImage,
+            HttpServletRequest request
+    ) {
+        return submit(username, shopName, licenseNo, contactName, contactPhone, shopAddress,
+                licenseImage, true, request);
+    }
+
+    /** 两条提交端点的公共体：身份闸 → 掩码校验 → 业务 → 通知 + 审计（四步钩子）。 */
+    private ResponseEntity<Object> submit(String username, String shopName, String licenseNo,
+                                          String contactName, String contactPhone,
+                                          String shopAddress, String licenseImage,
+                                          boolean isBrand, HttpServletRequest request) {
         if (!IdentityGuard.requireSelfOrAdminByUsername(request, username, userStateLookupProvider.getIfAvailable())) {
             return IdentityGuard.forbidden();
         }
@@ -106,19 +141,23 @@ public class MerchantApplicationController {
         }
 
         Map<String, Object> result = applicationService.apply(username, shopName, licenseNo,
-                contactName, contactPhone, shopAddress, licenseImage);
+                contactName, contactPhone, shopAddress, licenseImage, isBrand);
 
         // 四步钩子：业务成功之后才通知 + 审计（见类注释）。
         if (Boolean.TRUE.equals(result.get("success"))) {
             String batchId = result.get("batchId") == null ? null : result.get("batchId").toString();
-            String title = "新的商家入驻申请";
-            String content = "账号「" + username + "」提交了店铺「" + shopName + "」的入驻申请，待审核。";
+            String title = isBrand ? "新的品牌加盟申请" : "新的商家入驻申请";
+            String content = isBrand
+                    ? "账号「" + username + "」为店铺「" + shopName + "」提交了品牌加盟申请，待审核。"
+                    : "账号「" + username + "」提交了店铺「" + shopName + "」的入驻申请，待审核。";
             notificationService.send(UUID.randomUUID().toString(),
                     ADMIN_INBOX_ID, TO_TYPE_ADMIN,
-                    NotificationEvents.MERCHANT_APPLY_SUBMITTED,
+                    isBrand ? NotificationEvents.MERCHANT_BRAND_APPLY_SUBMITTED
+                            : NotificationEvents.MERCHANT_APPLY_SUBMITTED,
                     title, content, "merchant_application", batchId);
             auditService.record(AuthSession.identify(request),
-                    AuditActions.MERCHANT_APPLY_CREATE,
+                    isBrand ? AuditActions.MERCHANT_BRAND_APPLY_CREATE
+                            : AuditActions.MERCHANT_APPLY_CREATE,
                     "merchant_application", batchId, null, snapshot(username, shopName, licenseNo));
         }
         return ResponseEntity.ok(Result.of(result));

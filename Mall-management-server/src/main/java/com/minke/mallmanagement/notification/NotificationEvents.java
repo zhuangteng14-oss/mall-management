@@ -236,6 +236,21 @@ public final class NotificationEvents {
      */
     public static final String QUESTION_TIMEOUT = "question.timeout";
 
+    /**
+     * 商家提交**品牌加盟申请** → 管理端共享收件箱（批四第二批，2026-10-19）。
+     *
+     * <p>与 {@link #MERCHANT_APPLY_SUBMITTED} 分开一条：入驻申请要「升级身份」，品牌申请只是
+     * 「挂一枚品牌标」，管理员看队列时两者的处理动作不同（后者不 promote）。同码会让收件箱
+     * 把两类待办混成一条。
+     */
+    public static final String MERCHANT_BRAND_APPLY_SUBMITTED = "merchant.brand.apply.submitted";
+
+    /** 品牌加盟审核**通过** → 触达商家。 */
+    public static final String MERCHANT_BRAND_APPROVED = "merchant.brand.approved";
+
+    /** 品牌加盟审核**驳回** → 触达商家（正文带理由）。 */
+    public static final String MERCHANT_BRAND_REJECTED = "merchant.brand.rejected";
+
     private NotificationEvents() {
     }
 }

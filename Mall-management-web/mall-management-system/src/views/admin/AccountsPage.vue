@@ -77,6 +77,7 @@
         <div class="a-card-l1">
           <code class="a-tag">#{{ r.Id }}</code>
           <b class="a-strong">{{ r.ShopName }}</b>
+          <span v-if="isBrandRow(r)" class="a-badge brandt">品牌加盟</span>
           <span class="a-badge" :class="r.Status"><IconGlyph :name="statusGlyph(r.Status)" />{{ statusLabel(r.Status) }}</span>
           <span class="a-dim">申请人 {{ r.Username }}</span>
           <span class="a-grow"></span>
@@ -526,6 +527,8 @@ function statusLabel(s) {
 }
 // 状态徽章左侧那枚字形（2026-10-11 补图标；与 `CatalogPage.vue` 的 `statusGlyph` 同款）。未知态给 `wait`：原文已由 `statusLabel` 显示，符号只回答「是不是还没处理」，认不出就按待处理看。
 const statusGlyph = (s) => (s === 'approved' ? 'ok' : s === 'rejected' ? 'no' : 'wait')
+/** 批四第二批：品牌加盟行（`tinyint(1)` 到 JSON 可能是 boolean 也可能是 1，两种都认）。 */
+const isBrandRow = (r) => r && (r.IsBrand === true || r.IsBrand === 1 || String(r.IsBrand) === '1')
 
 async function loadApps() {
   loadingApps.value = true
@@ -561,6 +564,8 @@ async function approve(r) {
     // ⚠️ `outcome` 是判据（见 `api/accounts.js`）：`already-handled` **不是失败**，别报「通过成功」。
     if (data.outcome === 'already-handled') {
       say('bad', `#${r.Id} 这条已经被处理过了 —— 列表已刷新。`)
+    } else if (data.outcome === 'brand-approved') {
+      say('ok', `#${r.Id} 品牌加盟已通过：${dash(data.username)} 的商品会带品牌标并进入品牌专区。`)
     } else if (data.outcome === 'approved-restored') {
       say('ok', `#${r.Id} 通过，并恢复了 30 天冻结期内的旧商家号（${dash(data.username)}）。`)
     } else {
@@ -1281,6 +1286,12 @@ onMounted(() => {
 .a-badge.rejected {
   color: var(--danger);
   background: var(--danger-ground);
+  border-color: transparent;
+}
+/* 批四第二批：品牌加盟（与审核状态并列，故不复用状态色）。 */
+.a-badge.brandt {
+  color: var(--brand-ink);
+  background: var(--brand-soft);
   border-color: transparent;
 }
 .a-dim {

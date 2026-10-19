@@ -17,6 +17,7 @@ import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -57,13 +58,13 @@ class MerchantApplicationMaskedSubmitTest {
     void maskedContactPhoneIsRejected() {
         ResponseEntity<Object> response = controller().apply(
                 "alice", "小铺", "LIC-1", "张三", "138****8000", "北京市朝阳区建国路1号",
-                "img", request);
+                "img", null, request);
 
         assertThat(response.getStatusCode().value()).isEqualTo(200);
         Map<?, ?> body = (Map<?, ?>) response.getBody();
         assertThat(body.get("success")).isEqualTo(false);
         assertThat((String) body.get("msg")).contains("联系电话").contains("*");
-        verify(applicationService, never()).apply(any(), any(), any(), any(), any(), any(), any());
+        verify(applicationService, never()).apply(any(), any(), any(), any(), any(), any(), any(), anyBoolean());
     }
 
     @Test
@@ -71,27 +72,27 @@ class MerchantApplicationMaskedSubmitTest {
     void maskedShopAddressIsRejected() {
         ResponseEntity<Object> response = controller().apply(
                 "alice", "小铺", "LIC-1", "张三", "13800138000", "北京市朝***",
-                "img", request);
+                "img", null, request);
 
         Map<?, ?> body = (Map<?, ?>) response.getBody();
         assertThat(body.get("success")).isEqualTo(false);
         assertThat((String) body.get("msg")).contains("店铺地址").contains("*");
-        verify(applicationService, never()).apply(any(), any(), any(), any(), any(), any(), any());
+        verify(applicationService, never()).apply(any(), any(), any(), any(), any(), any(), any(), anyBoolean());
     }
 
     @Test
     @DisplayName("干净入参：原样到达 Service（读侧掩码不回流到写侧）")
     void cleanSubmissionReachesServiceUnchanged() {
         when(applicationService.apply("alice", "小铺", "LIC-1", "张三",
-                "13800138000", "北京市朝阳区建国路1号", "img"))
+                "13800138000", "北京市朝阳区建国路1号", "img", false))
                 .thenReturn(Map.of("success", false, "msg", "stub 拒绝，避免走通知/审计"));
 
         ResponseEntity<Object> response = controller().apply(
                 "alice", "小铺", "LIC-1", "张三", "13800138000", "北京市朝阳区建国路1号",
-                "img", request);
+                "img", null, request);
 
         assertThat(response.getStatusCode().value()).isEqualTo(200);
         verify(applicationService).apply("alice", "小铺", "LIC-1", "张三",
-                "13800138000", "北京市朝阳区建国路1号", "img");
+                "13800138000", "北京市朝阳区建国路1号", "img", false);
     }
 }

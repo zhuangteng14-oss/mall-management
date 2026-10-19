@@ -2,6 +2,7 @@ package com.minke.mallmanagement.merchant.service;
 
 import com.minke.mallmanagement.shared.web.PageLimits;
 import com.minke.mallmanagement.goods.dao.GoodsShelfDao;
+import com.minke.mallmanagement.goods.service.GoodsCacheService;
 import com.minke.mallmanagement.merchant.dao.MerchantApplicationDao;
 import com.minke.mallmanagement.user.dao.UserGovernanceDao;
 import com.minke.mallmanagement.user.service.UserCacheService;
@@ -53,15 +54,19 @@ public class MerchantApplicationService {
     private final UserGovernanceDao userGovernanceDao;
     private final GoodsShelfDao goodsShelfDao;
     private final UserCacheService userCacheService;
+    /** 品牌审核通过后要清买家侧商品缓存（品牌标来自 {@code EXISTS user.IsBrand}）。 */
+    private final GoodsCacheService goodsCacheService;
 
     public MerchantApplicationService(MerchantApplicationDao applicationDao,
                                       UserGovernanceDao userGovernanceDao,
                                       GoodsShelfDao goodsShelfDao,
-                                      UserCacheService userCacheService) {
+                                      UserCacheService userCacheService,
+                                      GoodsCacheService goodsCacheService) {
         this.applicationDao = applicationDao;
         this.userGovernanceDao = userGovernanceDao;
         this.goodsShelfDao = goodsShelfDao;
         this.userCacheService = userCacheService;
+        this.goodsCacheService = goodsCacheService;
     }
 
     // ==================== 提交 ====================
@@ -78,6 +83,20 @@ public class MerchantApplicationService {
     public Map<String, Object> apply(String username, String shopName, String licenseNo,
                                      String contactName, String contactPhone, String shopAddress,
                                      String licenseImage) {
+        return apply(username, shopName, licenseNo, contactName, contactPhone, shopAddress,
+                licenseImage, false);
+    }
+
+    /**
+     * 同 {@link #apply} 的 7 参版本，多一个 {@code isBrand}（批四第二批 2026-10-19）。
+     *
+     * <p>品牌加盟**只对已入驻商家开放**：这里先按登录名反查 {@code merchantid}，为空即拒
+     * （失败发生在写申请行之前 ⇒ 不制造一条注定被驳回的队列项）。审核侧还会再校验一次
+     * （见 {@link #audit}）—— 两道判据不是重复：申请与审核之间账号状态可能变。
+     */
+    public Map<String, Object> apply(String username, String shopName, String licenseNo,
+                                     String contactName, String contactPhone, String shopAddress,
+                                     String licenseImage, boolean isBrand) {
         Map<String, Object> result = new HashMap<>();
         if (isBlank(username)) {
             result.put("success", false);
@@ -89,13 +108,22 @@ public class MerchantApplicationService {
             result.put("msg", "店铺名称与营业执照号为必填");
             return result;
         }
+        if (isBrand) {
+            String merchantId = userGovernanceDao.selectMerchantId(username);
+            if (isBlank(merchantId)) {
+                result.put("success", false);
+                result.put("msg", "该账号尚未入驻，不能申请品牌加盟");
+                return result;
+            }
+        }
 
         String batchId = UUID.randomUUID().toString();
         applicationDao.insert(username, shopName, licenseNo, contactName, contactPhone,
-                shopAddress, licenseImage, batchId, LocalDateTime.now());
+                shopAddress, licenseImage, batchId, LocalDateTime.now(), isBrand);
 
         result.put("success", true);
         result.put("batchId", batchId);
+        result.put("isBrand", isBrand);
         return result;
     }
 
@@ -168,6 +196,20 @@ public class MerchantApplicationService {
             return result;
         }
         String applicant = before.get("Username") == null ? null : before.get("Username").toString();
+        boolean isBrand = truthy(before.get("IsBrand"));
+
+        // 批四第二批：品牌申请**不升级身份**，只置 user.IsBrand。
+        // ⚠️ 「申请人还是不是商家」必须在**消费 CAS 之前**判：CAS 一旦把它置成 approved，
+        //    这次审核就没有回退口了（pending 已被吃掉），而开通品牌又开不成 ⇒ 半完成态。
+        String brandMerchantId = null;
+        if (approve && isBrand) {
+            brandMerchantId = userGovernanceDao.selectMerchantId(applicant);
+            if (isBlank(brandMerchantId)) {
+                result.put("success", false);
+                result.put("msg", "该账号尚未入驻，不能开通品牌");
+                return result;
+            }
+        }
 
         LocalDateTime now = LocalDateTime.now();
         int affected = approve
@@ -184,9 +226,19 @@ public class MerchantApplicationService {
 
         if (!approve) {
             result.put("success", true);
-            result.put("outcome", "rejected");
+            result.put("outcome", isBrand ? "brand-rejected" : "rejected");
             result.put("username", applicant);
             result.put("rejectReason", rejectReason);
+            return result;
+        }
+
+        if (isBrand) {
+            userGovernanceDao.setBrand(applicant, true);
+            // 品牌标由 goodsHome / goodsPrice 的 EXISTS 投影带出 ⇒ 不清缓存就看不到。
+            goodsCacheService.evictByMerchant(brandMerchantId);
+            result.put("success", true);
+            result.put("outcome", "brand-approved");
+            result.put("username", applicant);
             return result;
         }
 
@@ -271,5 +323,20 @@ public class MerchantApplicationService {
 
     private static boolean isBlank(String s) {
         return s == null || s.trim().isEmpty();
+    }
+
+    /** {@code tinyint(1)} 经 Connector/J 默认映射成 Boolean，驱动配置一变又可能是 Number —— 三种都兜住。 */
+    private static boolean truthy(Object v) {
+        if (v == null) {
+            return false;
+        }
+        if (v instanceof Boolean b) {
+            return b;
+        }
+        if (v instanceof Number n) {
+            return n.intValue() != 0;
+        }
+        String s = v.toString().trim();
+        return "1".equals(s) || "true".equalsIgnoreCase(s);
     }
 }

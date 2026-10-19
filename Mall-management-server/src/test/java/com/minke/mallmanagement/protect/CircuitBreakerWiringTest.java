@@ -41,7 +41,7 @@ class CircuitBreakerWiringTest {
     private static final String WRITE = "mallMysqlWrite";
 
     @Test
-    @DisplayName("GoodsService：5 处，读 2 / 写 3 —— 逐条钉住（多了少了都红）")
+    @DisplayName("GoodsService：7 处，读 3 / 写 4 —— 逐条钉住（多了少了都红）")
     void goodsServiceLandingPoints() {
         // ⚠️ 顺序**不可断言**：`Class#getDeclaredMethods()` 的返回顺序是**未定义**的
         //    （JVM 自行决定，实测与源码顺序不一致）⇒ 用 containsExactlyInAnyOrder，
@@ -52,21 +52,23 @@ class CircuitBreakerWiringTest {
                 "goodsSelectHome", READ,    // 首页商品列表：演练的主战场
                 "goodsDe", WRITE,           // 删除：两条真 DELETE
                 "goodsUp", WRITE,           // 改名：同样两表
+                "brandHome", READ,          // 品牌专区列表：同一套买家过滤 + 品牌存在谓词
+                "skuStockUpdate", WRITE,    // 按 SKU 改库存：单表写 + evictByMerchant
                 "productSearch", READ));    // 搜索：演练的另一主战场
     }
 
     /**
      * ⚠️ 这条钉的是裁定的边界：熔断**必须跨域**（不许只挂订单 / 支付）。
-     * 本仓的形态是「商品 5 处 + 订单 1 处」，且**读 / 写都有** ——
+     * 本仓的形态是「商品 7 处 + 订单 1 处」，且**读 / 写都有** ——
      * 这条断言在「有人把商品那几处摘掉、只留订单」时会红。
      */
     @Test
-    @DisplayName("跨域：商品 5 处 + 订单 1 处（裁定「禁止只挂订单 / 支付」的反面判据）")
+    @DisplayName("跨域：商品 7 处 + 订单 1 处（裁定「禁止只挂订单 / 支付」的反面判据）")
     void circuitBreakersAreNotConfinedToOrders() {
         Map<String, String> goods = landingPoints(GoodsService.class);
         Map<String, String> order = landingPoints(OrderService.class);
 
-        assertThat(goods).as("商品域必须挂着 —— 只挂订单是不允许的").hasSize(5);
+        assertThat(goods).as("商品域必须挂着 —— 只挂订单是不允许的").hasSize(7);
         assertThat(order).as("订单域挂的是下单那一条（跨域的另一半）")
                 .containsExactlyInAnyOrderEntriesOf(Map.of("orderAdd", WRITE));
         assertThat(goods.values()).as("读 / 写两个实例都要用到（合成一个就没有「读被打开时写仍能过」这个收益）")

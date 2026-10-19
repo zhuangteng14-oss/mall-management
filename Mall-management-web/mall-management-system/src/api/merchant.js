@@ -62,3 +62,19 @@ export function merchantApply(params) {
 export function merchantMyApplications(params) {
   return post(endpoints.merchant.myApplications, q(params))
 }
+
+/**
+ * 提交一条**品牌加盟**申请（批四第二批，2026-10-19）。
+ *
+ * ⚠️ 与 `merchantApply` 的区别：本接口**不改身份**（通过只置 `user.IsBrand=1`），
+ * 且后端要求申请人**已是商家**（`MerchantApplicationService.apply` 用 `selectMerchantId` 判，
+ * 否则回 `{success:false, msg:'该账号尚未入驻，不能申请品牌加盟'}`）。
+ *
+ * @param {{username:string, shopName:string, licenseNo:string, contactName?:string,
+ *          contactPhone?:string, shopAddress?:string, licenseImage?:string}} params
+ *        入参面与 {@link merchantApply} 相同（店铺名称 / 执照号必填）。
+ * @returns {Promise<{success:boolean, batchId?:string, isBrand?:boolean, msg?:string}>}
+ */
+export function merchantBrandApply(params) {
+  return post(endpoints.merchantB4.brandApply, q(params))
+}

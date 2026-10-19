@@ -30,7 +30,7 @@
         <button type="button" class="now" @click="searchByType('')" title="全部商品分类 —— 接通搜索页（2026-10-12 用户裁定 #1；不带关键词进 GoodsSelect ⇒ 左分类树在场，就是「按类目逛」的落点）">全部商品分类</button>
         <router-link class="hot" to="/seckill" title="今日秒杀 —— 落到秒杀页（C3 块 5 · commit 5 接线；此前是「预留位」）">今日秒杀</router-link>
         <button type="button" class="hot" @click="scrollToTickets" title="领券中心 —— 锚到本页领券中心（C3 块 5 commit 1 接线；2026-10-11 信息架构重排后本页**只留领券中心**，券包已搬去用户中心弹窗）">领券中心</button>
-        <router-link class="soon" to="/coming-soon/brand" title="品牌专区 —— 批四起落「敬请期待」静态页（无品牌数据模型，真业务待后续批次）">品牌专区</router-link>
+        <router-link class="soon" to="/brand" title="品牌专区 —— 批四第二批（2026-10-19）接通真页：只列品牌加盟商家的商品">品牌专区</router-link>
         <router-link class="soon" to="/coming-soon/member" title="会员中心 —— 批四起落「敬请期待」静态页（会员体系未落，真业务待后续批次）">会员中心</router-link>
         <router-link class="soon" to="/coming-soon/service" title="客户服务 —— 批四起落「敬请期待」静态页（在线客服未落，真业务待后续批次）">客户服务</router-link>
       </div>
