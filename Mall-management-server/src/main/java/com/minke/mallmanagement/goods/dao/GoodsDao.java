@@ -82,12 +82,13 @@ public class GoodsDao {
     public int insertGoods(GoodsRow r) {
         String sql = "INSERT INTO mall_management_sql.goods "
                 + "(MerchantId, GoodName, Price, OriginalPrice, GoodImg, GoodType, ProductCode, GoodTypeNew, TypeId, Detail, Spec, AfterSale, "
-                + " PromiseGenuine, PromiseReturn7, PromiseFastRefund, PromiseFreightIns) "
-                + "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+                + " PromiseGenuine, PromiseReturn7, PromiseFastRefund, PromiseFreightIns, ImgList, Status) "
+                + "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
         return jdbcClient.sql(sql)
                 .params(r.merchantId(), r.goodName(), r.price(), r.originalPrice(), r.goodImg(), r.goodType(),
                         r.productCode(), r.goodTypeNew(), r.typeId(), r.detail(), r.spec(), r.afterSale(),
-                        r.promiseGenuine(), r.promiseReturn7(), r.promiseFastRefund(), r.promiseFreightIns())
+                        r.promiseGenuine(), r.promiseReturn7(), r.promiseFastRefund(), r.promiseFreightIns(),
+                        r.imgList(), r.status())
                 .update();
     }
 
@@ -101,7 +102,8 @@ public class GoodsDao {
      */
     public record GoodsRow(String merchantId, String goodName, Double price, Double originalPrice, String goodImg,
                            String goodType, String productCode, int goodTypeNew, Integer typeId, String detail, String spec, String afterSale,
-                           boolean promiseGenuine, boolean promiseReturn7, boolean promiseFastRefund, boolean promiseFreightIns) {
+                           boolean promiseGenuine, boolean promiseReturn7, boolean promiseFastRefund, boolean promiseFreightIns,
+                           String imgList, int status) {
     }
 
     /**
@@ -176,9 +178,33 @@ public class GoodsDao {
      * <p>⚠️ 空结果 = 该商品**没有多规格** ⇒ 调用方回落到既有的「单型号 {@code ProductCode}」路径。
      */
     public java.util.List<Map<String, Object>> selectSkusByMerchantGoodName(String MerchantId, String GoodName) {
-        String sql = "SELECT Id, GoodsId, AxisName, Price, Stock, SkuCode, Sort FROM mall_management_sql.goods_sku "
-                + "WHERE MerchantId = ? AND GoodName = ? ORDER BY Sort ASC, Id ASC";
+        // 批四第二批：只回「父商品可售（Status=2）」的 SKU —— 复审被驳回（Status=3）的商品
+        // 不能继续被加入购物车。goods_sku 只在审核通过时写入，故这层 join 不会误伤正常商品。
+        String sql = "SELECT s.Id, s.GoodsId, s.AxisName, s.Price, s.Stock, s.SkuCode, s.Sort "
+                + "FROM mall_management_sql.goods_sku s "
+                + "JOIN mall_management_sql.goods g ON g.Id = s.GoodsId "
+                + "WHERE s.MerchantId = ? AND s.GoodName = ? "
+                + "  AND g.Status = 2 AND g.ShelfState = 1 AND g.DeletedAt IS NULL "
+                + "ORDER BY s.Sort ASC, s.Id ASC";
         return jdbcClient.sql(sql).params(MerchantId, GoodName).query().listOfRows();
+    }
+
+    /**
+     * 商家改某个规格组合的库存（批四第二批）—— 谓词带 {@code MerchantId}，防改别家 SKU。
+     * 兼容 {@code AxisName} 里的单引号（参数绑定，不拼 SQL）。
+     */
+    public int updateSkuStock(int goodsId, String merchantId, String axisName, int stock) {
+        String sql = "UPDATE mall_management_sql.goods_sku SET Stock = ? "
+                + "WHERE GoodsId = ? AND MerchantId = ? AND AxisName = ?";
+        return jdbcClient.sql(sql).params(stock, goodsId, merchantId, axisName).update();
+    }
+
+    /** 按父商品 Id 读 SKU（商家改库存弹窗回读；不筛 Status，自己的商品都要能看到）。 */
+    public java.util.List<Map<String, Object>> selectSkusByGoodsId(int goodsId, String merchantId) {
+        String sql = "SELECT Id, GoodsId, MerchantId, GoodName, AxisName, Price, Stock, SkuCode, Sort "
+                + "FROM mall_management_sql.goods_sku WHERE GoodsId = ? AND MerchantId = ? "
+                + "ORDER BY Sort ASC, Id ASC";
+        return jdbcClient.sql(sql).params(goodsId, merchantId).query().listOfRows();
     }
 
     // ==================== 写：下架 ====================
@@ -235,6 +261,15 @@ public class GoodsDao {
         return jdbcClient.sql(sql).params(GoodName, MerchantId, ProductCode).update();
     }
 
+    /**
+     * 复审驳回时把已有 goods 行置 {@code Status=3}（批四第二批）。
+     * 首次提审被驳回时 {@code GoodsId} 为 NULL，调用方不会走到这里 —— 不凭空插 goods 行。
+     */
+    public int updateGoodsStatus(int goodsId, int status) {
+        String sql = "UPDATE mall_management_sql.goods SET Status = ? WHERE Id = ?";
+        return jdbcClient.sql(sql).params(status, goodsId).update();
+    }
+
     // ==================== 读：搜索 ====================
 
     /**
@@ -281,7 +316,7 @@ public class GoodsDao {
                 + MarketingGoodsFlags.existsIsSoldOut("g") + " AS IsSoldOut, "
                 + MarketingGoodsFlags.existsIsSubsidy("g") + " AS IsSubsidy " +
                 "FROM goods g WHERE 1=1 " +
-                "AND g.ShelfState = 1 AND g.DeletedAt IS NULL " +
+                "AND g.ShelfState = 1 AND g.DeletedAt IS NULL AND g.Status = 2 " +
                 "AND (g.GoodType = ? " +
                 nameSql + ") " +
                 // ⚠️ 分页要求确定性排序：无 ORDER BY 的 LIMIT/OFFSET 在 InnoDB 里可能重复/漏行。
@@ -346,7 +381,7 @@ public class GoodsDao {
     public List<Map<String, Object>> selectByTypeId(Integer TypeId, String keyword, int limit, int offset) {
         boolean filtered = keyword != null && !keyword.trim().isEmpty();
         String sql = "SELECT * FROM mall_management_sql.goods "
-                + "WHERE TypeId = ? AND ShelfState = 1 AND DeletedAt IS NULL "
+                + "WHERE TypeId = ? AND ShelfState = 1 AND DeletedAt IS NULL AND Status = 2 "
                 + (filtered ? "AND GoodName LIKE CONCAT('%', ?, '%') " : "")
                 + "ORDER BY Id DESC LIMIT ? OFFSET ?";
         JdbcClient.StatementSpec spec = jdbcClient.sql(sql).param(TypeId);

@@ -156,6 +156,9 @@ public class GoodsController {
             @RequestParam(value = "PromiseReturn7", required = false) Boolean PromiseReturn7,
             @RequestParam(value = "PromiseFastRefund", required = false) Boolean PromiseFastRefund,
             @RequestParam(value = "PromiseFreightIns", required = false) Boolean PromiseFreightIns,
+            // ═══ 批四第二批：多图 + 草稿（全部可选，老客户端不传 ⇒ 行为逐字不变）═══
+            @RequestParam(value = "files", required = false) MultipartFile[] files,
+            @RequestParam(value = "Draft", required = false) Boolean Draft,
             HttpServletRequest request
     ) throws IOException {
         // ⚠️ 第一行：上架只能挂到**自己**名下（管理员豁免）—— 必须在落盘/写库之前。
@@ -164,11 +167,13 @@ public class GoodsController {
         }
         // ═══ C3 块 3：提审制的四步钩子（照 GoodsController.goodsUp 的形状）═══
         // 业务（本方法）改为「落一条 goods_audit(pending)，不写 goods 行」；
-        // 只有提交成功才**触达管理端**（共享收件箱）+ 记账。
+        // 只有**提交审核**成功才**触达管理端**（共享收件箱）+ 记账；存草稿不发。
         Map<String, Object> result = goodsService.goodsAdd(MerchantId, GoodName, Price, OriginalPrice, file,
                 GoodType, ProductCode, GoodTypeNew, TypeId, Detail, Spec, AfterSale, SkuSpec,
-                PromiseGenuine, PromiseReturn7, PromiseFastRefund, PromiseFreightIns);
-        if (Boolean.TRUE.equals(result.get("success"))) {
+                PromiseGenuine, PromiseReturn7, PromiseFastRefund, PromiseFreightIns, files, Draft);
+        boolean submitted = Boolean.TRUE.equals(result.get("success"))
+                && !GoodsAuditService.STATUS_DRAFT.equals(result.get("status"));
+        if (submitted) {
             String batchId = str(result.get("batchId"));
             notificationService.send(UUID.randomUUID().toString(),
                     ADMIN_INBOX_ID, TO_TYPE_ADMIN,
@@ -425,6 +430,52 @@ public class GoodsController {
             return IdentityGuard.forbidden();
         }
         return ResponseEntity.ok(Result.of(goodsService.myApplications(MerchantId, limit)));
+    }
+
+    // ═══ 批四第二批：草稿提交审核 ═══
+    // 商家在「我的商品」里点「提交审核」→ draft 翻 pending；只有真正提交才通知管理端。
+    @PostMapping("/application/submit")
+    public ResponseEntity<Object> applicationSubmit(
+            @RequestParam("MerchantId") String MerchantId,
+            @RequestParam("Id") Long Id,
+            HttpServletRequest request
+    ) {
+        if (!IdentityGuard.requireSelfOrAdmin(request, MerchantId)) {
+            return IdentityGuard.forbidden();
+        }
+        Map<String, Object> result = goodsAuditService.submitDraft(MerchantId, Id);
+        if (Boolean.TRUE.equals(result.get("success"))) {
+            String batchId = str(result.get("batchId"));
+            String goodName = str(result.get("goodName"));
+            notificationService.send(UUID.randomUUID().toString(),
+                    ADMIN_INBOX_ID, TO_TYPE_ADMIN,
+                    NotificationEvents.GOODS_APPLY_SUBMITTED,
+                    "新的商品上架申请",
+                    "商家「" + MerchantId + "」提交了商品「" + (goodName == null ? "" : goodName) + "」的上架申请，待审核。",
+                    "goods_audit", batchId);
+            Map<String, Object> after = new HashMap<>();
+            after.put("MerchantId", MerchantId);
+            after.put("goodName", goodName);
+            after.put("batchId", batchId);
+            auditService.record(AuthSession.identify(request), AuditActions.GOODS_APPLY_CREATE,
+                    "goods_audit", batchId, null, after);
+        }
+        return ResponseEntity.ok(Result.of(result));
+    }
+
+    // ═══ 批四第二批：商家改 SKU 库存 ═══
+    @PostMapping("/skuStockUpdate")
+    public ResponseEntity<Object> skuStockUpdate(
+            @RequestParam("MerchantId") String MerchantId,
+            @RequestParam("GoodsId") Integer GoodsId,
+            @RequestParam("AxisName") String AxisName,
+            @RequestParam("Stock") Integer Stock,
+            HttpServletRequest request
+    ) {
+        if (!IdentityGuard.requireSelfOrAdmin(request, MerchantId)) {
+            return IdentityGuard.forbidden();
+        }
+        return ResponseEntity.ok(Result.of(goodsService.skuStockUpdate(MerchantId, GoodsId, AxisName, Stock)));
     }
 
     /** {@code Object → String}（审计快照用；{@code null} 原样返回）。 */

@@ -202,31 +202,45 @@
             <span v-else>点击选择主图</span>
           </button>
 
-          <!-- 预留位 ③（稿 `:413-421`）—— 块级 `<div class="pics">` ⇒ 只挂 `data-slot` + `title`。
-               内两只 `.picbox` 是**稿外死控件**（稿里是 `<span>`、无 `disabled`；
-               本笔照 §三 口径**不改成真控件**，改为 `span` + `off` 态样式 + `title`）⇒ 见 §三。 -->
-          <div
-            class="pics"
-            data-slot="预留 · 多图（图集）（动现有代码 ≥4 处 · 超档）"
-            title="待 C3〈商品〉——goods 表只有 GoodImg 一列（单图）：加一张图集子表或改列结构 + GoodsDao.java + GoodsService.java + GoodsController.java + GoodsAdd.vue = ≥4 处，**超档**，因清单点名而画出"
-          >
-            <span class="picbox off" title="待 C3〈商品〉——goods 只有 GoodImg 一列（≥4 处，超档）">
-              <span class="tagline">＋ 第 2 张<br>（待 C3）</span>
+          <!-- 预留位 ③ —— 2026-10-19 批四第二批**就地转真功能**（多图）：
+               迁移 ㉕ 给 `goods` / `goods_audit` 各加一列 `ImgList`（JSON 数组），
+               `GoodImg` 仍是**首图/封面**（旧单图读取路径逐字不动）。
+               ⚠️ 一次选图 = 重选整组（含主图）；不是「追加到后面」—— 追加会让「换主图」永远换不掉。 -->
+          <div class="pics">
+            <span
+              v-for="(u, i) in imagePreviews.slice(1)"
+              :key="u"
+              class="picbox extra"
+              :title="'第 ' + (i + 2) + ' 张（点 × 移除）'"
+            >
+              <img :src="u" class="picbox-img" :alt="'商品图 ' + (i + 2)">
+              <button
+                type="button"
+                class="rm-img"
+                title="移除这张"
+                @click="removeImage(i + 1)"
+              >×</button>
             </span>
-            <span class="picbox off" title="待 C3〈商品〉——同上">
-              <span class="tagline">＋ 第 3 张<br>（待 C3）</span>
-            </span>
+            <button
+              type="button"
+              class="picbox add-more"
+              title="选择图片（可多选，最多 5 张；会替换当前这一组）"
+              @click="chooseImage"
+            >
+              <span class="tagline">＋ 添加图片<br>（可多选）</span>
+            </button>
           </div>
         </div>
 
         <div v-if="showTip && !selectedFile" class="tip">请选择商品图片</div>
-        <div v-else class="pic-hint">建议 1:1 方图，长边 ≥ 800px。主图为空不能提交。</div>
+        <div v-else class="pic-hint">建议 1:1 方图，长边 ≥ 800px。第 1 张为封面；主图为空不能提交。</div>
 
         <input
           ref="fileInput"
           type="file"
           accept="image/*"
           class="file-hidden"
+          multiple
           @change="handleImageChange"
         >
       </section>
@@ -371,16 +385,17 @@
 
       <!-- ── 底部动作条（稿 `:482-489`）───────────────────────────────────── -->
       <div class="acts">
-        <!-- 预留位 ⑦（稿 `:483-485`）—— 这里**本身就是控件** ⇒ 照 §三/口径 2 落 `disabled` + `data-slot` + `title`。 -->
+        <!-- 预留位 ⑦ —— 2026-10-19 批四第二批**就地转真功能**（草稿态）：
+               `goods_audit.Status='draft'`（不写 goods 行、不进管理端待审队列），
+               在 GoodsUp 的「我的商品」里显示为「草稿」，可一键提交审核（CAS draft→pending）。 -->
         <button
           type="button"
           class="btn-draft"
-          disabled
-          data-slot="预留 · 保存草稿（动现有代码 ≥4 处 · 超档）"
-          title="待 C3〈商品〉——无草稿态：goods 表无状态列（下架 = 删行），草稿要先能存而不出现在「查看商品」里：mall_management_sql.sql + GoodsDao.java + GoodsController.java + GoodsUp.vue（列表要过滤掉草稿）= ≥4 处，**超档**，因清单点名而画出"
+          :disabled="saving"
+          @click="submitGoods(true)"
         >保存草稿</button>
 
-        <button type="button" class="btn-main" @click="submitGoods"><IconGlyph name="ok" />上架商品</button>
+        <button type="button" class="btn-main" :disabled="saving" @click="submitGoods(false)"><IconGlyph name="ok" />提交审核</button>
         <div class="hint">提交成功后会清空表单，可继续上架下一件。</div>
       </div>
     </form>
@@ -448,8 +463,15 @@ import { getMerchantId } from '../api/auth'; import IconGlyph from '../component
 import TemplatePicker from '../components/TemplatePicker.vue'
 
 const fileInput = ref(null)
-const previewImg = ref('')
-const selectedFile = ref(null)
+// ── 多图（2026-10-19 批四第二批）：`selectedFiles[0]` 即主图 ⇒ 旧判据 `selectedFile` 不动 ──
+// ⚠️ 预览 URL 必须逐张 `revokeObjectURL`（选下一组 / 移除 / 提交成功三处），否则每选一次图就漏一份内存。
+const selectedFiles = ref([])
+const imagePreviews = ref([])
+const previewImg = computed(() => imagePreviews.value[0] || '')
+const selectedFile = computed(() => selectedFiles.value[0] || null)
+/** 一次最多 5 张（1 封面 + 4 附加）；上限只在前端拦，后端没有条数闸。 */
+const MAX_IMAGES = 5
+const saving = ref(false)
 
 const GoodName = ref('')
 const Price = ref('')
@@ -662,11 +684,40 @@ const onPickSkuTpl = (row) => {
   skuRows.value = combos.map((spec) => ({ spec, price: '', stock: '', code: '' }))
 }
 
+/** 释放当前这一组预览 URL（换组 / 清空 / 离场都用它）。 */
+const revokePreviews = () => {
+  imagePreviews.value.forEach((u) => URL.revokeObjectURL(u))
+  imagePreviews.value = []
+}
+
+const resetImages = () => {
+  revokePreviews()
+  selectedFiles.value = []
+}
+
+/**
+ * 选图：本次选中的整组**替换**当前图片（不是追加）。
+ * ⚠️ 「替换」是刻意的：追加会让主图永远停在第一次选的那张（换不掉封面）。
+ */
 const handleImageChange = (e) => {
-  const file = e.target.files[0]
-  if (!file) return
-  selectedFile.value = file
-  previewImg.value = URL.createObjectURL(file)
+  const picked = Array.from(e.target.files || []).filter(Boolean).slice(0, MAX_IMAGES)
+  if (!picked.length) {
+    // 用户点了取消：保持现状（不要把已选好的图清掉）
+    e.target.value = ''
+    return
+  }
+  revokePreviews()
+  selectedFiles.value = picked
+  imagePreviews.value = picked.map((f) => URL.createObjectURL(f))
+  e.target.value = '' // 同一张图连选两次也要触发 change
+}
+
+/** 移除第 i 张（0 = 主图）。主图不可单独移除 —— 换主图请重选整组。 */
+const removeImage = (i) => {
+  if (i <= 0 || i >= selectedFiles.value.length) return
+  URL.revokeObjectURL(imagePreviews.value[i])
+  selectedFiles.value = selectedFiles.value.filter((_, idx) => idx !== i)
+  imagePreviews.value = imagePreviews.value.filter((_, idx) => idx !== i)
 }
 
 const saveNewTypeToDB = async (typeName) => {
@@ -680,8 +731,13 @@ const saveNewTypeToDB = async (typeName) => {
   }
 }
 
-// ✅ 最终修复版：完全适配你的后端接口
-const submitGoods = async () => {
+/**
+ * 提交商品：`draft=true` ⇒ 存草稿（`goods_audit.Status='draft'`）；`false` ⇒ 提交审核（pending）。
+ * ⚠️ 草稿与提审走**同一个端点**、同一套必填判据 —— 后端 `file` / `GoodName` 等仍是必填
+ *    （草稿只是「先不送审」，不是「可以先空着」）。两处差异只有 `Draft` 形参与成功文案。
+ */
+const submitGoods = async (draft = false) => {
+  if (saving.value) return
   showTip.value = true
 
   if (!GoodName.value || !Price.value || !selectedFile.value || !GoodType.value || !ProductCode.value) {
@@ -716,6 +772,11 @@ const submitGoods = async () => {
   // （与「不打折」同义；带上空串会被 `Double` 绑定报 400）。
   if (OriginalPrice.value) formData.append('OriginalPrice', OriginalPrice.value)
   formData.append('file', selectedFile.value)
+  // 多图（2026-10-19）：`files[]` **含首图** —— 后端以 `files` 的顺序定 GoodImg（首张即封面）。
+  // ⚠️ 不能只传附加图：那样封面会变成「第 2 张」，与 `file` 的语义对不上。
+  selectedFiles.value.forEach((f) => formData.append('files', f))
+  // 草稿 / 提审是同一个端点的两态；不传 = 旧客户端 = 提审（与改前行为逐字一致）。
+  formData.append('Draft', String(!!draft))
   formData.append('GoodType', GoodType.value)
   formData.append('ProductCode', ProductCode.value)
   formData.append('GoodTypeNew', realGoodTypeNew) // 用真实值！
@@ -744,6 +805,7 @@ const submitGoods = async () => {
   formData.append('PromiseFastRefund', String(PromiseFastRefund.value))
   formData.append('PromiseFreightIns', String(PromiseFreightIns.value))
 
+  saving.value = true
   try {
     const res = await http.post(endpoints.goods.goodsAdd, formData)
     const data = await res.json()
@@ -753,14 +815,13 @@ const submitGoods = async () => {
         await saveNewTypeToDB(tempNewType.value)
       }
 
-      alert('已提交审核') // C3 块 3 提审制：goodsAdd 只落待审单、不写 goods 行 ⇒ 原文案「商品上架成功！」失真；本句与后端 msg 逐字同
+      alert(draft ? '已保存草稿' : '已提交审核') // C3 块 3 提审制：goodsAdd 只落待审单、不写 goods 行 ⇒ 原文案「商品上架成功！」失真；本句与后端 msg 逐字同
       GoodName.value = ''
       Price.value = ''
       OriginalPrice.value = '' // 块 5〈折扣〉：与 Price 同清（下一件默认不打折）
       GoodType.value = ''
       ProductCode.value = ''
-      previewImg.value = ''
-      selectedFile.value = null
+      resetImages()
       tempNewType.value = ''
       showTip.value = false
       // 三段快照文本也清空（同其余字段：提交成功即开下一件）
@@ -780,6 +841,8 @@ const submitGoods = async () => {
     }
   } catch (err) {
     alert('上架请求失败')
+  } finally {
+    saving.value = false
   }
 }
 </script>
@@ -923,9 +986,17 @@ textarea.inp { height: 88px; padding: var(--s3); resize: none; font-family: inhe
 .picbox.main { border-style: solid; border-color: var(--line-2); }
 /* 无图时露 `.picbox` 自己的底；有图时预览铺满（原实现的 `previewImg`） */
 .picbox-img { width: 100%; height: 100%; object-fit: cover; border-radius: inherit; display: block; }
-/* 占位多图框：稿 `:415` / `:418` 的行内态（不可点 ⇒ 不显手型、虚线、降透明） */
-.picbox.off { cursor: not-allowed; border-style: dashed; opacity: .75; }
-.picbox.off:hover { border-color: var(--line-2); color: var(--ink-3); }
+/* 多图（2026-10-19）：附加图是**真预览**（实线框，同主图）+ 右上角移除键 */
+.picbox.extra { position: relative; border-style: solid; cursor: default; padding: 0; overflow: hidden; }
+.picbox.extra:hover { border-color: var(--line-2); color: var(--ink-3); }
+.rm-img {
+  position: absolute; top: 4px; right: 4px; width: 20px; height: 20px; padding: 0;
+  border: 0; border-radius: 50%; background: rgba(0, 0, 0, .55); color: #fff;
+  font-size: 14px; line-height: 20px; text-align: center;
+}
+.rm-img:hover { background: var(--danger); }
+/* 「+ 添加图片」：虚线框提示它是**可点的新增位**，不是一张已选的图 */
+.picbox.add-more { border-style: dashed; }
 .picbox .tagline { font-size: var(--fs-xs); color: var(--ink-3); }
 .pic-hint { margin-top: var(--s2); font-size: var(--fs-xs); color: var(--ink-3); }
 

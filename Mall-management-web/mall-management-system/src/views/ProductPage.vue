@@ -53,7 +53,7 @@
             <img
               v-for="(item, idx) in allItems"
               :key="idx"
-              :src="item.goodImg"
+              :src="idx === currentIndex && gallery.length > 1 ? gallery[galleryIndex] : item.goodImg"
               class="big-img"
               :class="{ active: idx === currentIndex }"
             />
@@ -72,6 +72,19 @@
               @click="currentIndex = realIdx(idx)"
             >
               <img :src="item.goodImg" />
+            </div>
+          </div>
+          <!-- 2026-10-19 多图：封面之外的那几张（`ImgList`）。只有 1 张时不画这一排。 -->
+          <div v-if="gallery.length > 1" class="thumbs">
+            <div
+              v-for="(u, gi) in gallery"
+              :key="'g' + gi"
+              class="thb"
+              :class="{ on: gi === galleryIndex }"
+              :title="'商品图 ' + (gi + 1)"
+              @click="galleryIndex = gi"
+            >
+              <img :src="u" />
             </div>
           </div>
         </div>
@@ -739,6 +752,26 @@ const start = ref(0)
 const showImages = computed(() => allItems.value.slice(start.value, start.value + 3))
 const realIdx = (i) => start.value + i
 
+// 2026-10-19 多图（批四第二批）：当前型号的图集 = `ImgList`（JSON 数组）优先，否则回落单图 `goodImg`。
+// ⚠️ 解析失败按单图走 —— 坏 JSON 不值得把整页打成错误态（同本页「数据不足不显」口径）。
+const gallery = computed(() => {
+  const it = currentItem.value || {}
+  const raw = it.imgList
+  if (raw) {
+    try {
+      const arr = typeof raw === 'string' ? JSON.parse(raw) : raw
+      if (Array.isArray(arr)) {
+        const ok = arr.filter(Boolean)
+        if (ok.length) return ok
+      }
+    } catch (e) { /* 坏 JSON ⇒ 回落单图 */ }
+  }
+  return it.goodImg ? [it.goodImg] : []
+})
+/** 图集内的当前下标（0 = 封面）。换型号 ⇒ 回到封面。 */
+const galleryIndex = ref(0)
+watch(currentIndex, () => { galleryIndex.value = 0 })
+
 const scroll = (d) => {
   const m = allItems.value.length - 3
   if (m <= 0) return
@@ -788,6 +821,7 @@ const loadAllItems = async () => {
           price: d2.price,
           originalPrice: d2.originalPrice, // 块 5〈折扣〉：划线价（0/undefined = 不打折）
           goodImg: d2.goodImg,
+          imgList: d2.imgList, // 2026-10-19 多图：JSON 数组串（null/空 ⇒ 只用 goodImg）
           UserName: ''
         })
       }

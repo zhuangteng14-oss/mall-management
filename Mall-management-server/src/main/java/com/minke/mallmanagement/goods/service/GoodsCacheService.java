@@ -98,8 +98,10 @@ public class GoodsCacheService {
     //    响应从「全量一份」变成「一页一份」，键必须跟着分片 —— 否则第一页会被当成全量缓存命中，
     //    第二页拿到的还是第一页（且键空间只有 1 个，翻页永远看不到新数据）。
     //    无商家过滤时该段为空串（`page-v4:24:0:`），与有商家过滤的键不会撞。
+    // ⚠️ key 从 'page-v4' 升到 'page-v5'（批四第二批 2026-10-19）：响应多了 goods.Status / ImgList
+    //    （及后续 IsBrand）列，且 SQL 新增 Status=2 过滤 ⇒ 形状与语义都变了，必须 bump。
     @Cacheable(cacheNames = "goodsHome",
-            key = "'page-v4:' + #limit + ':' + #offset + ':' + (#merchantId == null ? '' : #merchantId)",
+            key = "'page-v5:' + #limit + ':' + #offset + ':' + (#merchantId == null ? '' : #merchantId)",
             sync = true)
     public Map<String, Object> listHome(int limit, int offset, String merchantId) {
         Map<String, Object> result = new HashMap<>();
@@ -136,7 +138,7 @@ public class GoodsCacheService {
                 + "LEFT JOIN (SELECT ProductCode, CAST(SUM(Quantity) AS SIGNED) AS SoldQty "
                 + "FROM mall_management_sql.order_item WHERE ProductCode <> '' "
                 + "GROUP BY ProductCode) s ON s.ProductCode = g.ProductCode "
-                + "WHERE g.ShelfState = 1 AND g.DeletedAt IS NULL "
+                + "WHERE g.ShelfState = 1 AND g.DeletedAt IS NULL AND g.Status = 2 "
                 + (byMerchant ? "AND g.MerchantId = ? " : "")
                 + "ORDER BY g.Id DESC LIMIT ? OFFSET ?";
         List<Map<String, Object>> goodsList = byMerchant
@@ -216,7 +218,9 @@ public class GoodsCacheService {
      * ⚠️ `goods.MerchantId` 无索引（db-schema.md §索引缺失 G:160）⇒ 本方法在库里是**全表扫**。
      *    缓存把这笔代价摊薄为「每 TTL 一次」，是**掩盖而非修复**（与 listHome() 的 N+1 同性质）。
      */
-    @Cacheable(cacheNames = "goodsByMerchant", key = "#MerchantId", sync = true)
+    // ⚠️ key 从裸 #MerchantId 升到 'merchant-v2:#MerchantId'（批四第二批 2026-10-19）：
+    //    `SELECT *` 的形状随 goods 新增 Status / ImgList 列而变，且 SQL 新增 Status=2 过滤。
+    @Cacheable(cacheNames = "goodsByMerchant", key = "'merchant-v2:' + #MerchantId", sync = true)
     public Map<String, Object> listByMerchant(String MerchantId) {
         Map<String, Object> result = new HashMap<>();
         // ⚠️ 块 7 收尾 · P1 安全兜底：加**硬上限**（不再无界）。商家端「我的商品」是
@@ -225,7 +229,7 @@ public class GoodsCacheService {
         //    ⚠️ 超 200 件商品的商家会在本端点被截断 —— 已知边界，真正修法是给本端点补
         //    offset + total（需要同时改前端并表逻辑），登记在《长列表接口盘点报告》。
         String sql = "SELECT * FROM mall_management_sql.goods "
-                + "WHERE MerchantId = ? AND ShelfState = 1 AND DeletedAt IS NULL "
+                + "WHERE MerchantId = ? AND ShelfState = 1 AND DeletedAt IS NULL AND Status = 2 "
                 + "ORDER BY Id DESC LIMIT 200";
         List<Map<String, Object>> list = jdbcTemplate.queryForList(sql, MerchantId);
         result.put("success", true);
@@ -320,10 +324,13 @@ public class GoodsCacheService {
             // ⚠️ 键前缀 `'v2::'` 是**形状版本**（块 5〈折扣〉2026-10-12 加）：本方法多选了
             //    `OriginalPrice` 一列，响应**形状变了** ⇒ 照 cache-layer §10「响应形状变更 ⇒ bump 键版本」
             //    把旧键撂下（否则滚动部署期间/未过期条目会返回**少一列**的旧形状，页面静默少个划线价）。
-            key = "'v2::' + #MerchantId + '::' + #GoodName + '::' + #ProductCode", sync = true)
+            // ⚠️ 批四第二批：'v2::' → 'v3::'。SQL 新增 Status=2 过滤（复审驳回的商品不再可买），
+            //    旧键里缓存的是一段「曾经合法、现在已不可售」的答案，必须撂下。
+            key = "'v3::' + #MerchantId + '::' + #GoodName + '::' + #ProductCode", sync = true)
     public Map<String, Object> priceByTriple(String MerchantId, String GoodName, String ProductCode) {
-        String sql = "SELECT Price, GoodImg, OriginalPrice FROM mall_management_sql.goods "
-                + "WHERE MerchantId=? AND GoodName=? AND ProductCode=? ORDER BY Id ASC LIMIT 1";
+        String sql = "SELECT Price, GoodImg, OriginalPrice, ImgList FROM mall_management_sql.goods "   // 2026-10-19 批四第二批：多图 `ImgList` 随行透出（加性列；键已 bump `v3::`）
+                + "WHERE MerchantId=? AND GoodName=? AND ProductCode=? AND Status = 2 "
+                + "ORDER BY Id ASC LIMIT 1";
 
         List<Map<String, Object>> rows =
                 jdbcTemplate.queryForList(sql, MerchantId, GoodName, ProductCode);
@@ -403,12 +410,13 @@ public class GoodsCacheService {
      *    （EXPLAIN：type=ALL、rows=5、Using temporary）。缓存把这笔代价摊薄为「每 TTL 一次」，
      *    是**掩盖而非修复**（与另两个投影同性质）。
      */
+    // ⚠️ 批四第二批：键前缀 'codes-v2::'（SQL 新增 Status=2 过滤）。
     @Cacheable(cacheNames = "goodsCodes",
-            key = "#MerchantId + '::' + #GoodName", sync = true)
+            key = "'codes-v2::' + #MerchantId + '::' + #GoodName", sync = true)
     public Map<String, Object> listCodes(String MerchantId, String GoodName) {
         Map<String, Object> result = new HashMap<>();
         String sql = "SELECT DISTINCT ProductCode FROM mall_management_sql.goods "
-                + "WHERE MerchantId=? AND GoodName=?";
+                + "WHERE MerchantId=? AND GoodName=? AND Status = 2";
 
         List<String> productCodeList = jdbcTemplate.queryForList(sql,
                 String.class, MerchantId, GoodName);
@@ -480,7 +488,7 @@ public class GoodsCacheService {
      */
     @Caching(evict = {
             @CacheEvict(cacheNames = "goodsHome", allEntries = true),
-            @CacheEvict(cacheNames = "goodsByMerchant", key = "#MerchantId"),
+            @CacheEvict(cacheNames = "goodsByMerchant", key = "'merchant-v2:' + #MerchantId"),
             @CacheEvict(cacheNames = "goodsCodes", allEntries = true),
             @CacheEvict(cacheNames = "goodsPrice", allEntries = true)
     })

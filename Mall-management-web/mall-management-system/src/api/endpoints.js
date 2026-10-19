@@ -500,4 +500,12 @@ export const endpoints = {
   accountsDetail: {
     userDetail: '/admin/accounts/user/detail',
   },
+  // ⚠️ 2026-10-19（批四第二批 · 商品状态机 / 库存）：2 条。追加在**文件尾**（同本文件既有
+  //    零漂移手法）—— 往 `goodsB3` 组里插行会把后面所有条目整体下移。
+  //    · `applicationSubmit`：草稿 CAS `draft→pending`（`GoodsController#applicationSubmit`）
+  //    · `skuStockUpdate`：按 SKU 改库存（`GoodsController#skuStockUpdate`），改完触发低库存告警
+  goodsB4: {
+    applicationSubmit: '/goods/application/submit',
+    skuStockUpdate: '/goods/skuStockUpdate',
+  },
 }

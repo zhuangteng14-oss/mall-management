@@ -101,17 +101,21 @@ public class GoodsService {
     private final GoodsAuditService goodsAuditService;
     /** 折扣上下限校验（营销域，块 5〈折扣〉）—— 只被 {@link #goodsAdd} 消费。 */
     private final com.minke.mallmanagement.marketing.discount.service.DiscountLimitService discountLimitService;
+    /** 低库存告警（批四第二批）—— 只被 {@link #skuStockUpdate} 消费。 */
+    private final com.minke.mallmanagement.notification.service.NotificationService notificationService;
     private final String uploadDir;
 
     public GoodsService(GoodsDao goodsDao,
                         GoodsCacheService goodsCacheService,
                         GoodsAuditService goodsAuditService,
                         com.minke.mallmanagement.marketing.discount.service.DiscountLimitService discountLimitService,
+                        com.minke.mallmanagement.notification.service.NotificationService notificationService,
                         @Value("${app.upload-dir:${user.dir}/src/main/resources/static/img/}") String uploadDir) {
         this.goodsDao = goodsDao;
         this.goodsCacheService = goodsCacheService;
         this.goodsAuditService = goodsAuditService;
         this.discountLimitService = discountLimitService;
+        this.notificationService = notificationService;
         this.uploadDir = uploadDir;
     }
 
@@ -165,6 +169,38 @@ public class GoodsService {
             Integer TypeId, String Detail, String Spec, String AfterSale, String SkuSpec,
             Boolean PromiseGenuine, Boolean PromiseReturn7, Boolean PromiseFastRefund, Boolean PromiseFreightIns
     ) {
+        // 旧签名（既有测试 / 老前端）：单图 + 提交审核 —— 行为与改前逐字一致。
+        return goodsAdd(MerchantId, GoodName, Price, OriginalPrice, file, GoodType, ProductCode, GoodTypeNew,
+                TypeId, Detail, Spec, AfterSale, SkuSpec,
+                PromiseGenuine, PromiseReturn7, PromiseFastRefund, PromiseFreightIns, null, false);
+    }
+
+    /**
+     * 批四第二批的新签名：多图 + 草稿。
+     *
+     * <ul>
+     *   <li>{@code files} 非空 ⇒ 逐张落盘，{@code GoodImg}=首图、{@code ImgList}=全部 URL 的 JSON 数组；</li>
+     *   <li>{@code Draft=true} ⇒ {@code goods_audit.Status='draft'}，**不发**管理端通知；</li>
+     *   <li>{@code Draft=false} ⇒ 与改前一致：{@code pending} + 「已提交审核」。</li>
+     * </ul>
+     *
+     * <p>⚠️ {@code file} 仍必填（老客户端不变）；{@code files} 为空数组 / null 时回落到它。
+     */
+    @CircuitBreaker(name = "mallMysqlWrite")
+    @Transactional
+    public Map<String, Object> goodsAdd(
+            String MerchantId,
+            String GoodName,
+            Double Price,
+            Double OriginalPrice,
+            MultipartFile file,
+            String GoodType,
+            String ProductCode,
+            int GoodTypeNew,
+            Integer TypeId, String Detail, String Spec, String AfterSale, String SkuSpec,
+            Boolean PromiseGenuine, Boolean PromiseReturn7, Boolean PromiseFastRefund, Boolean PromiseFreightIns,
+            MultipartFile[] files, Boolean Draft
+    ) {
         Map<String, Object> result = new HashMap<>();
 
         // ═══ 块 5〈折扣〉：划线原价的**权威校验**（前端那处实时提示只是助手，不是判据）═══
@@ -180,18 +216,30 @@ public class GoodsService {
         // 图片保存路径
         Path uploadPath = Paths.get(uploadDir).toAbsolutePath().normalize();
 
-        // 图片为空判断
-        if (file.isEmpty()) {
-            result.put("success", false);
-            result.put("msg", "请选择商品图片");
-            return result;
+        // 组装待落盘的图片：多图优先；一个都没有 ⇒ 用必填的单图 file。
+        List<MultipartFile> uploads = new java.util.ArrayList<>();
+        if (files != null) {
+            for (MultipartFile f : files) {
+                if (f != null && !f.isEmpty()) {
+                    uploads.add(f);
+                }
+            }
+        }
+        if (uploads.isEmpty()) {
+            if (file == null || file.isEmpty()) {
+                result.put("success", false);
+                result.put("msg", "请选择商品图片");
+                return result;
+            }
+            uploads.add(file);
         }
 
-        // 保存图片，并拿到**实际落盘**的文件名（同名同内容→复用；同名不同内容→改名另存）。
-        // 必须用返回值拼 URL —— 改名时它和上传时的文件名不一致。
-        String originalFilename;
+        // 逐张落盘，拿到**实际落盘**的文件名（同名同内容→复用；同名不同内容→改名另存）。
+        List<String> imageUrls = new java.util.ArrayList<>();
         try {
-            originalFilename = UploadStorage.store(uploadPath, file);
+            for (MultipartFile f : uploads) {
+                imageUrls.add("http://localhost:8088/img/" + UploadStorage.store(uploadPath, f));
+            }
         } catch (Exception e) {
             // 显式失败：以前这里吞掉异常继续写库，结果是 DB 记下 URL、盘上没有那个文件
             // —— 静默脏数据，比 500 更难查。
@@ -200,22 +248,24 @@ public class GoodsService {
             result.put("msg", "商品图片保存失败");
             return result;
         }
-
-        // 最终存入数据库的图片 URL
-        String GoodImg = "http://localhost:8088/img/" + originalFilename;
+        String GoodImg = imageUrls.get(0);
+        String imgList = toJsonArray(imageUrls);
+        boolean draft = Boolean.TRUE.equals(Draft);
+        String status = draft ? GoodsAuditService.STATUS_DRAFT : GoodsAuditService.STATUS_PENDING;
 
         try {
-            // 提审：只写 goods_audit(pending)，**不写 goods 行**（提审制的定义，见类注释）。
+            // 提审 / 存草稿：只写 goods_audit，**不写 goods 行**（提审制的定义，见类注释）。
             String batchId = GoodsAuditService.newBatchId();
             goodsAuditService.submit(MerchantId, batchId, GoodName, Price, OriginalPrice, GoodType, GoodTypeNew, TypeId,
-                    ProductCode, GoodImg, Detail, Spec, AfterSale, SkuSpec,
-                    PromiseGenuine, PromiseReturn7, PromiseFastRefund, PromiseFreightIns);
+                    ProductCode, GoodImg, imgList, Detail, Spec, AfterSale, SkuSpec,
+                    PromiseGenuine, PromiseReturn7, PromiseFastRefund, PromiseFreightIns, status);
 
             result.put("success", true);
-            // ⚠️ 文案已改（C3 块 3）：原「商品上架成功！」⇒「已提交审核」。
-            //    连带更新 shared/web/ResultByteEquivalenceTest.java 的标签⑦字符串（键形状不变）。
-            result.put("msg", "已提交审核");
+            // 文案：提交审核沿用块 3 的「已提交审核」；草稿另给一句（前端据此提示）。
+            result.put("msg", draft ? "已保存草稿" : "已提交审核");
             result.put("GoodImg", GoodImg);
+            result.put("ImgList", imgList);
+            result.put("status", status);
             result.put("batchId", batchId);
         } catch (Exception e) {
             e.printStackTrace();
@@ -223,10 +273,75 @@ public class GoodsService {
             //    @Transactional 看到的是正常返回、照常提交，提审单会留下 —— 那正是不想要的。
             markRollbackOnlyIfActive();
             result.put("success", false);
-            result.put("msg", "商品提交失败");
+            result.put("msg", draft ? "草稿保存失败" : "商品提交失败");
         }
 
         // ⚠️ 本方法**不调** evictByMerchant：一行未动 goods 表（见方法 javadoc）。
+        return result;
+    }
+
+    /** 图片 URL 列表 → JSON 数组串（URL 已由落盘逻辑生成，只需转义引号 / 反斜杠）。 */
+    private static String toJsonArray(List<String> values) {
+        if (values == null || values.isEmpty()) {
+            return null;
+        }
+        StringBuilder sb = new StringBuilder("[");
+        for (int i = 0; i < values.size(); i++) {
+            if (i > 0) {
+                sb.append(',');
+            }
+            String v = values.get(i);
+            sb.append('"').append(v.replace("\\", "\\\\").replace("\"", "\\\"")).append('"');
+        }
+        return sb.append(']').toString();
+    }
+
+    /**
+     * 商家改某个规格的库存（批四第二批）—— 新端点 {@code /goods/skuStockUpdate}。
+     * 改完清该商家缓存，并按阈值发低库存告警（每 SKU 每日一条）。
+     */
+    @CircuitBreaker(name = "mallMysqlWrite")
+    @Transactional
+    public Map<String, Object> skuStockUpdate(String MerchantId, Integer GoodsId, String AxisName, Integer Stock) {
+        Map<String, Object> result = new HashMap<>();
+        if (MerchantId == null || MerchantId.isBlank()
+                || GoodsId == null || GoodsId <= 0
+                || AxisName == null || AxisName.isBlank()
+                || Stock == null || Stock < 0) {
+            result.put("success", false);
+            result.put("msg", "缺少参数：MerchantId / GoodsId / AxisName / Stock（Stock 不得为负）");
+            return result;
+        }
+        try {
+            int affected = goodsDao.updateSkuStock(GoodsId, MerchantId, AxisName, Stock);
+            if (affected == 0) {
+                result.put("success", false);
+                result.put("msg", "规格不存在或不属于当前商家");
+                return result;
+            }
+            goodsCacheService.evictByMerchant(MerchantId);
+            // 告警取商品名：SKU 行里本就冗余了 GoodName，用按 GoodsId 回读的第一行。
+            List<Map<String, Object>> skus = goodsDao.selectSkusByGoodsId(GoodsId, MerchantId);
+            String goodName = null;
+            String skuCode = null;
+            for (Map<String, Object> row : skus) {
+                if (AxisName.equals(String.valueOf(row.get("AxisName")))) {
+                    skuCode = row.get("SkuCode") == null ? null : row.get("SkuCode").toString();
+                    goodName = row.get("GoodName") == null ? null : row.get("GoodName").toString();
+                    break;
+                }
+            }
+            notificationService.alertLowStock(MerchantId, skuCode, AxisName, goodName, Stock);
+
+            result.put("success", true);
+            result.put("msg", "库存已更新");
+            result.put("Stock", Stock);
+        } catch (Exception e) {
+            e.printStackTrace();
+            markRollbackOnlyIfActive();
+            result.put("success", false);
+            result.put("msg", "库存更新失败");
+        }
         return result;
     }
 
@@ -381,6 +496,9 @@ public class GoodsService {
             // ⚠️ 块 5〈折扣〉加：**加性**键（老前端不读它，逐字节等价性不受影响）。
             //    0 / null ⇒ 详情页不画划线价那一行 —— 判据在**前端**，这里原样透出。
             result.put("originalPrice", row.get("OriginalPrice"));
+            // 2026-10-19 批四第二批：多图（JSON 数组串）—— **加性键**，老前端不读。
+            // null/空串 ⇒ 详情页只用 `goodImg`（单图路径与改前逐字一致）。
+            result.put("imgList", row.get("ImgList"));
         } catch (Exception e) {
             // 技术异常（2026-10-12〈Bug 1〉起「>1 行」不再从这里来 —— 那条路改走 MIN(Id)）：
             // 这里接住 ⇒ 仍是 200 + {success:false}，**不是 500**（对调用方零契约变更）。

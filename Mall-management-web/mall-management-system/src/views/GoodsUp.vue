@@ -116,7 +116,7 @@
                 <th class="c-name">商品名</th>
                 <th>类型</th><th title="商品类别（2026-10-12 用户裁定 ④ 问 2）—— 国补（绿）/ 普通商品（白）/ 秒杀商品（红）。⚠️ 与左边「类型」不是一回事：那列是 `goods.GoodType` 类目（电子用品…），这列是**这件商品此刻挂在哪个营销活动里**。判据 = 该商品名下的全部 `ProductCode` 有没有落进 `subsidy_goods` / `seckill_activity` 的码集合（见脚本里 `kindsOf`）。⚠️ 多型号商品**并排画多枚**（有几类画几枚），不二选一；一件商品可以既国补又秒杀。">商品类别</th>
                 <th class="c-num">单价</th>
-                <th class="c-num" title="占位：goods 表无库存列">库存</th>
+                <th class="c-num" title="按 SKU 编辑（goods_sku.Stock）：点行内「库存」打开规格列表；改到 <10 会触发商家站内信">库存</th>
                 <th class="c-num" title="占位：productsales.OrderVolume 恒为 0 且无 SELECT 读出">销量</th>
                 <th title="C3 块 3 起是真状态：已上架（goods 表）／待审・已驳回（goods_audit 表）—— 两表并渲染">状态</th>
                 <th>操作</th>
@@ -141,7 +141,10 @@
                   <!-- 稿 `:530` 的 `.th-img` 是灰方块（`background:var(--img)`）⇒ 保留**既有真图**
                        （`item.goodImg`）。⚠️ 补 `v-if`：`goodImg` 为空时 `<img src="">` 画的是浏览器
                        的**破图图标**，加 `v-if` 正好露出稿的灰底（同 `HistoricalOrders.vue:66` 先例）。 -->
-                  <div class="th-img"><img v-if="item.goodImg" :src="item.goodImg" alt="商品图"></div>
+                  <div class="th-img" :title="imgCount(item) > 1 ? ('共 ' + imgCount(item) + ' 张图') : '商品图'">
+                    <img v-if="item.goodImg" :src="item.goodImg" alt="商品图">
+                    <span v-if="imgCount(item) > 1" class="th-more">+{{ imgCount(item) - 1 }}</span>
+                  </div>
                 </td>
                 <td class="c-name">
                   <div class="nm">
@@ -157,13 +160,30 @@
                 <td class="c-num">
                   <span class="px"><span class="u">¥</span><span class="i">{{ formatPrice(item.price).int }}</span><span class="d">.{{ formatPrice(item.price).dec }}</span></span>
                 </td>
-                <td class="c-num"><span class="na" title="占位：goods 表无库存列">—</span></td>
+                <td class="c-num">
+                  <button
+                    v-if="item.state === 'onshelf'"
+                    type="button"
+                    class="lnk"
+                    title="按规格编辑库存（goods_sku.Stock）"
+                    @click.stop="openStock(item)"
+                  >库存</button>
+                  <span v-else class="na" title="未上架的商品还没有 goods_sku 行">—</span>
+                </td>
                 <td class="c-num"><span class="na" title="占位：OrderVolume 恒为 0 且无 SELECT 读出">—</span></td>
                 <!-- C3 块 3：状态列**不再恒为常量** —— `rows[].state` 有三值（`onshelf` / `pending` /
                      `rejected`），驳回理由挂在 `title` 上（不占列宽）。⚠️ 稿 `:537` 的常量是块 3 前口径。 -->
-                <td><span class="state" :class="item.state" :title="item.state === 'rejected' ? ('驳回理由：' + (item.rejectReason || '—')) : (item.state === 'pending' ? '已提交，等待管理员审核' : '在架')"><i class="d"></i>{{ STATE_TEXT[item.state] }}</span></td>
+                <td><span class="state" :class="item.state" :title="item.state === 'rejected' ? ('驳回理由：' + (item.rejectReason || '—')) : (item.state === 'pending' ? '已提交，等待管理员审核' : (item.state === 'draft' ? '草稿：尚未提交审核，管理员看不到' : '在架'))"><i class="d"></i>{{ STATE_TEXT[item.state] }}</span></td>
                 <td>
-                  <div v-if="item.state === 'onshelf'" class="op" @click.stop>
+                  <!-- 草稿行：唯一动作是「提交审核」（CAS draft→pending；重复点第二次会 0 行并回文案） -->
+                  <div v-if="item.state === 'draft'" class="op" @click.stop>
+                    <button
+                      type="button"
+                      title="把这条草稿提交给管理员审核"
+                      @click="submitDraft(item)"
+                    >提交审核</button>
+                  </div>
+                  <div v-else-if="item.state === 'onshelf'" class="op" @click.stop>
                     <!-- 【编辑】既有真功能 `openModal`（稿 `:539` 的 title 去掉尾部自引后逐字取稿）。⚠️ 待审 / 驳回行**整格不出操作**，见上一行的 `v-if` -->
                     <button type="button" title="打开商品详情（现有功能 openModal）" @click="openModal(item)">编辑</button>
                     <!-- 【下架】稿外死控件：稿 `:540` 那儿是 `<button class="del" title="下架这一件（现有端点
@@ -325,6 +345,39 @@
       </div>
     </div>
   </div>
+
+  <!-- ═══ 库存弹窗（2026-10-19 批四第二批）════════════════════════════════════════
+       按 SKU 编辑 `goods_sku.Stock`：读走既有 `/goods/skuList`，写走 `/goods/skuStockUpdate`。
+       ⚠️ 单规格商品（没填多规格矩阵）在 `goods_sku` 里没有行 ⇒ 这里只能如实回「没有规格行」，
+          不假装有一个「商品级库存」——`goods` 表本来就没有库存列。 -->
+  <div v-if="showStock" class="scrim" @click="closeStock">
+    <div class="dlg" @click.stop>
+      <div class="dlg-h">
+        <h2>库存 · {{ stockGoodName }}</h2>
+        <button type="button" class="x" title="关闭" @click="closeStock">×</button>
+      </div>
+      <div class="dlg-body">
+        <div class="stock-zone">
+          <div v-if="stockLoading" class="hint">读取规格中…</div>
+          <div v-else-if="stockRows.length === 0" class="hint">
+            这件商品没有规格矩阵行（`goods_sku` 里没有它的规格），库存无处可改。
+          </div>
+          <div v-else class="stock-list">
+            <div v-for="r in stockRows" :key="r.skuCode || r.axisName" class="stock-row">
+              <span class="s-axis">{{ r.axisName }}</span>
+              <span class="s-code">{{ r.skuCode || '—' }}</span>
+              <input v-model="r.stock" type="number" min="0" step="1" class="s-inp">
+              <button type="button" class="btn-quiet" @click="saveStock(r)">保存</button>
+            </div>
+            <div class="hint">库存降到 10 件以下会给本店发一条站内信（每个规格每天最多一条）。</div>
+          </div>
+        </div>
+      </div>
+      <div class="dlg-foot">
+        <button type="button" class="no" @click="closeStock">关闭</button>
+      </div>
+    </div>
+  </div>
 </template>
 
 <script setup>
@@ -428,6 +481,7 @@ const getGoodsList = async () => {
         goodName: item.GoodName,
         price: item.Price,
         goodImg: item.GoodImg,
+        imgList: item.ImgList, // 2026-10-19 多图：`goods.ImgList`（JSON 串），缩略图角标用
         goodType: item.GoodType
       }))
     }
@@ -621,8 +675,9 @@ const flt = ref({ name: '', code: '', state: '', type: '' })
 const applied = ref({ name: '', code: '', state: '', type: '' })
 const applyFlt = () => { applied.value = { ...flt.value }; pageOffset.value = 0 }   // 换筛选 ⇒ 回第一页
 
-// 状态三态的唯一文案表（`rows[].state` 的取值）= 值；下拉与状态列**共用**它，避免两处写法飘
-const STATE_TEXT = { onshelf: '已上架', pending: '待审', rejected: '已驳回' }
+// 状态四态（2026-10-19 批四第二批加 `draft`）的唯一文案表（`rows[].state` 的取值）；
+// 下拉与状态列**共用**它，避免两处写法飘。
+const STATE_TEXT = { onshelf: '已上架', draft: '草稿', pending: '待审', rejected: '已驳回' }
 const stateOptions = Object.keys(STATE_TEXT)
 
 // 分类下拉：**从已加载的行里取**（本商家自己的商品类型）—— 不发 `goodstype`，0 端点
@@ -636,14 +691,18 @@ const rows = computed(() => {
   const out = showGoodsList.value.map((g) => ({ ...g, state: 'onshelf' }))
   const seen = new Set()
   appsList.value.forEach((a) => {
-    if (a.Status !== 'pending' && a.Status !== 'rejected') return
+    // 2026-10-19：`draft` 也进本表（草稿只存在于 goods_audit，goodsSelect 看不到它）
+    if (a.Status !== 'draft' && a.Status !== 'pending' && a.Status !== 'rejected') return
     const key = `${a.GoodName}\u0000${a.ProductCode}`
     if (seen.has(key)) return
     seen.add(key)
     out.push({
+      id: a.Id,
       goodName: a.GoodName,
       price: a.Price,
       goodImg: a.GoodImg,
+      imgList: a.ImgList,
+      productCode: a.ProductCode,
       goodType: a.GoodType,
       state: a.Status,
       rejectReason: a.RejectReason,
@@ -764,6 +823,116 @@ const kindsOf = (goodName) => {
 
 // ⚠️ **另起一个** `onMounted`（理由同上面 `getMyApplications` 那条）：并进既有块要往上插行。
 onMounted(() => { loadPromoKinds() })
+
+// ══════════════════════════════════════════════════════════════════════════════
+// 批四第二批（2026-10-19）：草稿提交审核 + 按 SKU 改库存
+// ⚠️ 全部**追加在 `<script setup>` 末尾** —— 上面的行被 `slot-registry.md` 的漂移表按行号引。
+// ══════════════════════════════════════════════════════════════════════════════
+
+/** 多图张数（`ImgList` 是 JSON 数组串；解析失败按「只有封面」算 —— 这是角标，不是数据）。 */
+const imgCount = (item) => {
+  const raw = item && item.imgList
+  if (!raw) return item && item.goodImg ? 1 : 0
+  try {
+    const arr = typeof raw === 'string' ? JSON.parse(raw) : raw
+    return Array.isArray(arr) && arr.length ? arr.length : (item.goodImg ? 1 : 0)
+  } catch (e) {
+    return item && item.goodImg ? 1 : 0
+  }
+}
+
+/**
+ * 草稿 → 待审（`goods_audit.Status='draft'` → `'pending'`）。
+ * ⚠️ 后端是 CAS：重复点第二次 0 行，回 `success:false` + 明确文案（不是静默成功）。
+ */
+const submitDraft = async (item) => {
+  const merchantId = getMerchantId()
+  if (!merchantId || item.id == null) return
+  try {
+    const res = await http.post(endpoints.goodsB4.applicationSubmit, new URLSearchParams({
+      MerchantId: merchantId,
+      Id: String(item.id),
+    }))
+    const data = await res.json()
+    if (data.success) {
+      alert('已提交审核')
+      getMyApplications()
+    } else {
+      alert('失败：' + (data.msg || '提交失败'))
+    }
+  } catch (e) {
+    alert('提交失败')
+  }
+}
+
+// ── 库存编辑（按 SKU）────────────────────────────────────────────────────────
+// 读：复用既有 `/goods/skuList`（`MerchantId + GoodName`，返回该商品名下全部规格，
+//     含 `GoodsId` / `AxisName` / `SkuCode` / `Stock`）。
+// 写：`/goods/skuStockUpdate`（`MerchantId + GoodsId + AxisName + Stock`），逐行保存。
+const showStock = ref(false)
+const stockGoodName = ref('')
+const stockRows = ref([])
+const stockLoading = ref(false)
+
+const openStock = async (item) => {
+  const merchantId = getMerchantId()
+  if (!merchantId) return
+  stockGoodName.value = item.goodName
+  stockRows.value = []
+  stockLoading.value = true
+  showStock.value = true
+  try {
+    const res = await http.post(endpoints.goods.skuList, new URLSearchParams({
+      MerchantId: merchantId,
+      GoodName: item.goodName,
+    }))
+    const data = await res.json()
+    if (data.success) {
+      // ⚠️ 复制一份再改：直接绑后端对象会让「取消」也留下改动
+      stockRows.value = (data.list || []).map((r) => ({
+        goodsId: r.GoodsId,
+        axisName: r.AxisName,
+        skuCode: r.SkuCode,
+        stock: r.Stock,
+      }))
+    } else {
+      alert('失败：' + (data.msg || '读取规格失败'))
+    }
+  } catch (e) {
+    alert('读取规格失败')
+  } finally {
+    stockLoading.value = false
+  }
+}
+
+const closeStock = () => { showStock.value = false }
+
+/** 逐行保存 —— 一次点按只改这一行，后端按 (GoodsId, MerchantId, AxisName) 精确定位。 */
+const saveStock = async (row) => {
+  const merchantId = getMerchantId()
+  if (!merchantId) return
+  const n = Number(row.stock)
+  if (!Number.isInteger(n) || n < 0) {
+    alert('库存必须是非负整数')
+    return
+  }
+  try {
+    const res = await http.post(endpoints.goodsB4.skuStockUpdate, new URLSearchParams({
+      MerchantId: merchantId,
+      GoodsId: String(row.goodsId),
+      AxisName: row.axisName,
+      Stock: String(n),
+    }))
+    const data = await res.json()
+    if (data.success) {
+      alert('库存已更新')
+    } else {
+      alert('失败：' + (data.msg || '保存失败'))
+    }
+  } catch (e) {
+    alert('保存失败')
+  }
+}
 </script>
 
 <style scoped>
@@ -1055,4 +1224,31 @@ a { color: inherit; text-decoration: none; }
 .kind.normal { background: var(--surface); border: 1px solid var(--line); color: var(--ink-2); }
 .kind.subsidy { background: var(--brand-tint); color: var(--brand-ink); }
 .kind.seckill { background: var(--cin-100); color: var(--cin-700); }
+
+/* ── 批四第二批（2026-10-19）：草稿态 / 多图角标 / 库存弹窗 ──────────────────── */
+/* 草稿不是终态、但也不在架 ⇒ 用中性灰（既不冒充 success 也不冒充 danger）。 */
+.state.draft { color: var(--ink-3); }
+.state.draft .d { background: var(--ink-3); }
+/* 缩略图右下角的「还有 N 张」角标（`ImgList` 是 JSON 串，见脚本 `imgCount`） */
+.th-more {
+  position: absolute; right: 2px; bottom: 2px; padding: 0 3px; border-radius: var(--r1);
+  background: rgba(0, 0, 0, .55); color: #fff; font-size: 10px; line-height: 14px;
+}
+.th-img { position: relative; }
+/* 表格里的「库存」入口：外观同 `.op button`（文字链），不带盒子 */
+.lnk { font-size: var(--fs-xs); color: var(--brand-ink); font-weight: var(--fw-med); padding: 0; }
+/* 库存弹窗：一行一个 SKU —— 规格名 / 编码 / 输入框 / 保存。弹窗是两列网格（`200px 1fr`）
+   ⇒ 这一块横跨两列。 */
+.stock-zone { grid-column: 1 / -1; }
+.stock-row {
+  display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr) 96px auto;
+  gap: var(--s3); align-items: center; padding: var(--s2) 0; border-bottom: 1px solid var(--line);
+}
+.stock-row .s-axis { color: var(--ink-2); }
+.stock-row .s-code { color: var(--ink-3); font-family: var(--font-mono); font-size: var(--fs-xs); }
+.stock-row .s-inp {
+  width: 100%; height: 32px; padding: 0 var(--s2); border: 1px solid var(--line-2);
+  border-radius: var(--r1); background: var(--surface); font-variant-numeric: tabular-nums;
+}
+.stock-row .s-inp:focus { outline: none; border-color: var(--brand); box-shadow: 0 0 0 3px var(--brand-tint); }
 </style>

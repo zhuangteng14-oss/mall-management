@@ -748,7 +748,7 @@ public class OrderService {
                 // Migration ⑱）—— 超时释放的前置判据**只有这一列**。
                 // ⚠️ fail-soft：标记写不进去**不改订单结论**（订单已落库是既成事实，改成失败会让
                 //    调用方重复下单），代价是那单超时取消时**不回补**（偏账方向选「少还一件」，不选「虚增」）。
-                if (deductStocks(itemSpecs)) {
+                if (deductStocks(MerchantId, itemSpecs)) {
                     markStockDeducted(OrderId);
                 }
                 if (discount > 0d) {
@@ -1067,7 +1067,7 @@ public class OrderService {
      *
      * @return 是否至少有一条明细真的扣成了库存
      */
-    private boolean deductStocks(List<ItemSpec> specs) {
+    private boolean deductStocks(String merchantId, List<ItemSpec> specs) {
         boolean anyDeducted = false;
         for (ItemSpec s : specs) {
             if (s.code() == null || s.code().isBlank() || s.qty() < 1) {
@@ -1092,6 +1092,12 @@ public class OrderService {
                 // ⚠️ 读它与扣减**失败也要能分开**：stockRemaining 自己吞异常 ⇒ 读不到只是
                 //    少一个展示字段，**绝不把一次成功的 CAS 记成 error**（那是反向误报）。
                 Integer remaining = stockRemaining(sku);
+                // 批四第二批：扣减后只剩 <10 件 ⇒ 给商家一条站内信（每 SKU 每日一条）。
+                // ⚠️ 只在 rows>0（真的扣成了）且读得到剩余时发；alertLowStock 自身 fail-soft
+                //    （去重查询失败照发、send 失败吞掉），**不影响下单结论**。
+                if (rows > 0 && remaining != null) {
+                    notificationService.alertLowStock(merchantId, sku, null, s.name(), remaining);
+                }
                 // 块 7 · 观测（commit 2）：**两条通道在同一调用点**发（计数 + 事件流）——
                 // 与既有三环同款。0 行记 INSUFFICIENT 而**不是** ERROR：CAS 没命中是正常分支
                 // （库存不足 / 非矩阵商品无行，见上面的 javadoc），记成错误会让告警误报。

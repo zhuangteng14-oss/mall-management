@@ -2156,3 +2156,158 @@ CREATE TABLE IF NOT EXISTS `observed_event_dlq` (
   UNIQUE KEY `uk_observed_event_dlq_trace_seq` (`TraceId`,`Seq`),
   KEY `idx_observed_event_dlq_created` (`created_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='死信落库副本（D3-2；写入方 = ObservedEventConsumer 的 best-effort 分支；broker 的 DLQ 仍是最终兜底）';
+
+-- ============================================================
+-- Migration: 批四第二批 · 商业闭环（商品状态机 / 品牌 / 会员 / 售后）
+--            Date: 2026-10-19
+-- 依据：用户 2026-10-19 裁决 —— 全场会员 9 折；商品四态沿用 `goods_audit`；售后 6 态 + 重试上限 2。
+-- 范围：**只加列 / 只加索引 / 一条幂等种子**；不建表、不删列、不改列类型（agent.md 规则 v2）。
+-- 幂等：逐列 / 逐索引一条 `information_schema` 守卫 + `PREPARE`/`EXECUTE`（照 ⑬ / ⑰ / ㉑ / ㉒ 先例）。
+-- 回滚（逻辑废弃，执行前须人工确认；**不 DROP 数据**，只停用写入）：
+--       ALTER TABLE `order` DROP COLUMN `RefundStatus`, DROP COLUMN `RefundRetryCount`, …;   -- 须人工确认
+--       ALTER TABLE `user`  DROP COLUMN `MemberLevel`, DROP COLUMN `IsBrand`, DROP COLUMN `Balance`; -- 须人工确认
+--       ALTER TABLE `goods` DROP COLUMN `Status`, DROP COLUMN `ImgList`;                    -- 须人工确认
+-- ============================================================
+
+-- ---- ㉕-1 `goods`：商品状态 + 多图快照 ----
+-- ⚠️ `Status` 的历史行默认 2（=可售）：提审制下草稿/待审/驳回都在 `goods_audit`，
+--    本列只在「审核通过写 2」「已有 goods 行复审被驳回写 3」两处落值。
+SET @s := (SELECT IF(COUNT(*) = 0,
+  'ALTER TABLE `goods` ADD COLUMN `Status` tinyint NOT NULL DEFAULT 2 COMMENT ''商品状态：2 上架可售 / 3 复审驳回；草稿与待审在 goods_audit，历史行默认 2''',
+  'DO 0')
+  FROM information_schema.COLUMNS
+  WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'goods' AND COLUMN_NAME = 'Status');
+PREPARE _p FROM @s; EXECUTE _p; DEALLOCATE PREPARE _p;
+
+SET @s := (SELECT IF(COUNT(*) = 0,
+  'ALTER TABLE `goods` ADD COLUMN `ImgList` mediumtext DEFAULT NULL COMMENT ''多图 URL 的 JSON 数组；GoodImg 仍为首图/封面''',
+  'DO 0')
+  FROM information_schema.COLUMNS
+  WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'goods' AND COLUMN_NAME = 'ImgList');
+PREPARE _p FROM @s; EXECUTE _p; DEALLOCATE PREPARE _p;
+
+-- ---- ㉕-2 `goods_audit`：提审多图快照 ----
+SET @s := (SELECT IF(COUNT(*) = 0,
+  'ALTER TABLE `goods_audit` ADD COLUMN `ImgList` mediumtext DEFAULT NULL COMMENT ''提审时的多图快照（JSON 数组）；通过时原样写进 goods.ImgList''',
+  'DO 0')
+  FROM information_schema.COLUMNS
+  WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'goods_audit' AND COLUMN_NAME = 'ImgList');
+PREPARE _p FROM @s; EXECUTE _p; DEALLOCATE PREPARE _p;
+
+-- ---- ㉕-3 `user`：会员等级 / 品牌标 / 余额 ----
+SET @s := (SELECT IF(COUNT(*) = 0,
+  'ALTER TABLE `user` ADD COLUMN `MemberLevel` tinyint NOT NULL DEFAULT 0 COMMENT ''会员等级：0 普通 / 1 VIP（全场 9 折 + 每日专属券 + 售后优先）''',
+  'DO 0')
+  FROM information_schema.COLUMNS
+  WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'user' AND COLUMN_NAME = 'MemberLevel');
+PREPARE _p FROM @s; EXECUTE _p; DEALLOCATE PREPARE _p;
+
+SET @s := (SELECT IF(COUNT(*) = 0,
+  'ALTER TABLE `user` ADD COLUMN `IsBrand` tinyint(1) NOT NULL DEFAULT 0 COMMENT ''品牌加盟店：1 是 / 0 否（仅 usertype=商家 行有意义）''',
+  'DO 0')
+  FROM information_schema.COLUMNS
+  WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'user' AND COLUMN_NAME = 'IsBrand');
+PREPARE _p FROM @s; EXECUTE _p; DEALLOCATE PREPARE _p;
+
+SET @s := (SELECT IF(COUNT(*) = 0,
+  'ALTER TABLE `user` ADD COLUMN `Balance` decimal(10,2) NOT NULL DEFAULT 0.00 COMMENT ''账户余额（退款入账；演示用，无支付通道）''',
+  'DO 0')
+  FROM information_schema.COLUMNS
+  WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'user' AND COLUMN_NAME = 'Balance');
+PREPARE _p FROM @s; EXECUTE _p; DEALLOCATE PREPARE _p;
+
+-- ---- ㉕-4 `merchant_application`：品牌加盟申请标记 ----
+SET @s := (SELECT IF(COUNT(*) = 0,
+  'ALTER TABLE `merchant_application` ADD COLUMN `IsBrand` tinyint(1) NOT NULL DEFAULT 0 COMMENT ''本次申请是否为品牌加盟：0 入驻 / 1 品牌''',
+  'DO 0')
+  FROM information_schema.COLUMNS
+  WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'merchant_application' AND COLUMN_NAME = 'IsBrand');
+PREPARE _p FROM @s; EXECUTE _p; DEALLOCATE PREPARE _p;
+
+-- ---- ㉕-5 `coupon`：可领取的最低会员等级 ----
+SET @s := (SELECT IF(COUNT(*) = 0,
+  'ALTER TABLE `coupon` ADD COLUMN `MemberLevel` tinyint NOT NULL DEFAULT 0 COMMENT ''可领取的最低会员等级：0 不限 / 1 仅 VIP（专属券）''',
+  'DO 0')
+  FROM information_schema.COLUMNS
+  WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'coupon' AND COLUMN_NAME = 'MemberLevel');
+PREPARE _p FROM @s; EXECUTE _p; DEALLOCATE PREPARE _p;
+
+-- ---- ㉕-6 `order`：售后状态机 7 列 ----
+SET @s := (SELECT IF(COUNT(*) = 0,
+  'ALTER TABLE `order` ADD COLUMN `RefundStatus` tinyint NOT NULL DEFAULT 0 COMMENT ''售后状态：0无 / 1待商家审核 / 2商家已拒绝(可重申) / 3待平台审核 / 4平台已拒绝(终态) / 5已退款''',
+  'DO 0')
+  FROM information_schema.COLUMNS
+  WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'order' AND COLUMN_NAME = 'RefundStatus');
+PREPARE _p FROM @s; EXECUTE _p; DEALLOCATE PREPARE _p;
+
+SET @s := (SELECT IF(COUNT(*) = 0,
+  'ALTER TABLE `order` ADD COLUMN `RefundRetryCount` int NOT NULL DEFAULT 0 COMMENT ''用户申请次数（上限 2；第 2 次商家拒绝后强制转平台）''',
+  'DO 0')
+  FROM information_schema.COLUMNS
+  WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'order' AND COLUMN_NAME = 'RefundRetryCount');
+PREPARE _p FROM @s; EXECUTE _p; DEALLOCATE PREPARE _p;
+
+SET @s := (SELECT IF(COUNT(*) = 0,
+  'ALTER TABLE `order` ADD COLUMN `RefundReason` varchar(255) DEFAULT NULL COMMENT ''用户申请原因''',
+  'DO 0')
+  FROM information_schema.COLUMNS
+  WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'order' AND COLUMN_NAME = 'RefundReason');
+PREPARE _p FROM @s; EXECUTE _p; DEALLOCATE PREPARE _p;
+
+SET @s := (SELECT IF(COUNT(*) = 0,
+  'ALTER TABLE `order` ADD COLUMN `RefundAmount` decimal(10,2) NOT NULL DEFAULT 0.00 COMMENT ''退款金额（= 下单实付 order.Price；批准时入余额）''',
+  'DO 0')
+  FROM information_schema.COLUMNS
+  WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'order' AND COLUMN_NAME = 'RefundAmount');
+PREPARE _p FROM @s; EXECUTE _p; DEALLOCATE PREPARE _p;
+
+SET @s := (SELECT IF(COUNT(*) = 0,
+  'ALTER TABLE `order` ADD COLUMN `RefundApplyAt` datetime(3) DEFAULT NULL COMMENT ''最近一次申请时刻''',
+  'DO 0')
+  FROM information_schema.COLUMNS
+  WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'order' AND COLUMN_NAME = 'RefundApplyAt');
+PREPARE _p FROM @s; EXECUTE _p; DEALLOCATE PREPARE _p;
+
+SET @s := (SELECT IF(COUNT(*) = 0,
+  'ALTER TABLE `order` ADD COLUMN `RefundHandledAt` datetime(3) DEFAULT NULL COMMENT ''最近一次处理时刻''',
+  'DO 0')
+  FROM information_schema.COLUMNS
+  WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'order' AND COLUMN_NAME = 'RefundHandledAt');
+PREPARE _p FROM @s; EXECUTE _p; DEALLOCATE PREPARE _p;
+
+SET @s := (SELECT IF(COUNT(*) = 0,
+  'ALTER TABLE `order` ADD COLUMN `RefundHandler` varchar(40) DEFAULT NULL COMMENT ''处理人：商家号或管理员账号''',
+  'DO 0')
+  FROM information_schema.COLUMNS
+  WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'order' AND COLUMN_NAME = 'RefundHandler');
+PREPARE _p FROM @s; EXECUTE _p; DEALLOCATE PREPARE _p;
+
+-- ---- ㉕-7 索引：按业务号回查（会员 / 品牌）与售后队列 ----
+SET @s := (SELECT IF(COUNT(*) = 0,
+  'ALTER TABLE `user` ADD INDEX `idx_user_merchantid` (`merchantid`)',
+  'DO 0')
+  FROM information_schema.STATISTICS
+  WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'user' AND INDEX_NAME = 'idx_user_merchantid');
+PREPARE _p FROM @s; EXECUTE _p; DEALLOCATE PREPARE _p;
+
+SET @s := (SELECT IF(COUNT(*) = 0,
+  'ALTER TABLE `user` ADD INDEX `idx_user_customerid` (`customerid`)',
+  'DO 0')
+  FROM information_schema.STATISTICS
+  WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'user' AND INDEX_NAME = 'idx_user_customerid');
+PREPARE _p FROM @s; EXECUTE _p; DEALLOCATE PREPARE _p;
+
+SET @s := (SELECT IF(COUNT(*) = 0,
+  'ALTER TABLE `order` ADD INDEX `idx_order_refund_status` (`RefundStatus`,`RefundApplyAt`)',
+  'DO 0')
+  FROM information_schema.STATISTICS
+  WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'order' AND INDEX_NAME = 'idx_order_refund_status');
+PREPARE _p FROM @s; EXECUTE _p; DEALLOCATE PREPARE _p;
+
+-- ---- ㉕-8 种子：VIP 每日券模板（不直接可领，由每日任务复制成 VIPDAILY-<yyyyMMdd>）----
+INSERT IGNORE INTO `coupon`
+  (`CouponId`, `Name`, `Type`, `FaceValue`, `Threshold`, `TotalQty`, `ClaimedQty`,
+   `Scope`, `MerchantAccount`, `CategoryMatch`, `StartAt`, `EndAt`, `Status`, `MemberLevel`)
+VALUES
+  ('VIP_DAILY_TEMPLATE', '会员每日专属券', 'threshold', 5.00, 50.00, 0, 0,
+   'all', '', '', NULL, NULL, 'stopped', 1);

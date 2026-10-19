@@ -93,6 +93,9 @@ public final class NotificationEvents {
     /** 违规商品下架 / 删除。 */
     public static final String GOODS_VIOLATION_REMOVED = "goods.violation.removed";
 
+    /** 低库存提醒 —— 触达商家（同一 SKU 每日最多一条，批四第二批）。 */
+    public static final String GOODS_STOCK_LOW = "goods.stock.low";
+
     // ==================== 块 4（订单块）：订单治理 ====================
 
     /** 管理员介入订单。 */
