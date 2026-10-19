@@ -116,11 +116,12 @@ public class CartController {
             @RequestParam("CustomerId") String CustomerId,
             @RequestParam(value = "ProductCode", required = false) String ProductCode,
             @RequestParam(value = "CouponId", required = false, defaultValue = "") String CouponId,
+            @RequestParam(value = "PointsUsed", required = false) Integer PointsUsed,
             HttpServletRequest request
     ) {
         if (!IdentityGuard.requireSelfOrAdmin(request, CustomerId)) {
             return IdentityGuard.forbidden();
         }
-        return ResponseEntity.ok(Result.of(cartService.checkout(CustomerId, ProductCode, CouponId)));
+        return ResponseEntity.ok(Result.of(cartService.checkout(CustomerId, ProductCode, CouponId, PointsUsed)));
     }
 }

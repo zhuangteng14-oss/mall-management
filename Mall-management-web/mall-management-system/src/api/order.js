@@ -212,12 +212,16 @@ export function cartList(customerId) {
  * `(CustomerId, ProductCode)`），而 `order.MerchantId` 是单值 ⇒ 分组键只能是商家。
  * **单商家车（常态）才是「整车一单多行」。**
  *
- * @param {{CustomerId:string, ProductCode?:string, CouponId?:string}} params
+ * @param {{CustomerId:string, ProductCode?:string, CouponId?:string, PointsUsed?:number}} params
  *        `ProductCode` 不传 ⇒ 结算**整车**。
  *        ⚠️ **C3 块 5 commit 5 新增 `CouponId`**（结算用券）：不传 ⇒ 与加它之前**逐字节同行为**。
  *        券的核销在 `OrderService.orderAdd` 的临界区内（CAS 抢不到就整单不建），
  *        且**只随「整车且单商家」那一笔走** —— 多商家整车带券会被 `CartService.checkout`
  *        直接拒（一张券只抵一笔订单）。空串会被上面的 `q()` 丢掉。
+ *        ⚠️ **第三批㉘㉙（2026-10-19）新增 `PointsUsed`**：整数积分，空值由 `q()` 丢掉 ⇒
+ *        不传时与加它之前逐字节同行为。后端 `CartService.checkout` 把它透传给
+ *        `OrderService.orderAdd`，上限与扣减都在服务端（折后价 20%、100 积分 = 1 元）；
+ *        与券同一条限制：**多商家整车带积分会被直接拒**。
  * @returns {Promise<{success:boolean, list:Array, msg?:string}>}
  *          ⚠️ 券真的核销掉时，回体里**多** `CouponId` / `Discount` 两个键（否则不出现）——
  *             判据就是「有没有 `Discount`」（`OrderController` 据此写 `coupon.redeem` 审计）。
@@ -229,7 +233,12 @@ export function cartList(customerId) {
  *             （把部分成功报成整体失败 = 让用户重复下单）。
  */
 export function cartCheckout(params) {
-  return post(endpoints.cart.checkout, q(params))
+  return post(endpoints.cart.checkout, q({
+    CustomerId: params.CustomerId,
+    ProductCode: params.ProductCode,
+    CouponId: params.CouponId,
+    PointsUsed: params.PointsUsed,
+  }))
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
