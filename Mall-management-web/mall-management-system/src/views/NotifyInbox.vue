@@ -1,7 +1,7 @@
 <template>
-  <div class="notify-room">
+  <div class="notify-room" :class="{ compact }">
     <div class="nhead">
-      <h1>系统通知</h1>
+      <h1>{{ compact ? '最近通知' : '系统通知' }}</h1>
       <span class="sub">
         共 {{ total }} 条<template v-if="unread > 0"> · 未读 <b class="hot">{{ unread }}</b></template>
       </span>
@@ -95,6 +95,12 @@
 //   后端就是两张表（`notification` ⇄ `message`）、两套端点、两个 Controller
 //   （`NotificationController` ⇄ `MessageController`）⇒ 本页**只**调 `/notification/*`，
 //   一个 `message.*` 端点都不碰。合并两者的收件箱 = 把用户明令分开的东西又糅回去。
+/* eslint-disable no-undef */
+// `compact`：由 `MessageCenter.vue` 右栏传入 —— 去掉页面的最大宽/内距，只保留列表与操作。
+defineProps({
+  compact: { type: Boolean, default: false }
+})
+/* eslint-enable no-undef */
 import { ref, computed, watch, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
 import { handleApiError } from '../api/http'
@@ -420,6 +426,21 @@ onMounted(load)
   font-size: var(--fs-sm);
   color: var(--ink);
 }
+
+/* 右栏嵌入形态（`MessageCenter.vue`）：外层卡片已有边框与圆角 ⇒ 这里归零，
+   只保留列表与操作；标题降一档，与左栏 `.col-h` 同一视觉层级。 */
+.notify-room.compact { max-width: none; margin: 0; padding: 0; }
+.compact .nhead {
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--s2) var(--s3);
+  padding: var(--s3) var(--s4);
+  margin-bottom: 0;
+  background: var(--surface-2);
+}
+.compact .nhead h1 { font-size: var(--fs-md); }
+.compact .nlist { border: 0; border-radius: 0; }
+.compact > .hint { padding: var(--s4); }
 
 /* ── 页头 ─────────────────────────────────────────────────────────────────── */
 .nhead {

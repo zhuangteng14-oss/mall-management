@@ -109,14 +109,21 @@ public class MessageDao {
      * <p>⚠️ 结果**不含** {@code unread} 字段 —— 那是 {@code MessageService} 逐行算出来再 {@code put} 的。
      */
     public List<Map<String, Object>> selectConversations(String currentId) {
-        String sql = "SELECT other_id, other_type, MAX(create_time) as last_time " +
-                "FROM ( " +
-                "  SELECT " +
-                "    CASE WHEN from_id = ? THEN to_id ELSE from_id END AS other_id, " +
-                "    CASE WHEN from_id = ? THEN to_type ELSE from_type END AS other_type, " +
-                "    create_time " +
-                "  FROM message WHERE from_id = ? OR to_id = ?" +
-                ") t GROUP BY other_id, other_type ORDER BY last_time DESC";
+        // 2026-10-19 用户令（消息中心左栏要「摘要」）：在**不调用 `/message/history`** 的前提下
+        // 多回一列 `last_content`。⚠️ 不能用 history 取摘要 —— 那个读接口会 UPSERT 已读时间
+        // （`MessageService.getMessageHistory` 的既有副作用），列表里逐个调它 = 一进页面
+        // 把所有会话都标成已读。窗口函数只读不写，且内容不截断（GROUP_CONCAT 有长度上限）。
+        String sql = "SELECT other_id, other_type, last_time, last_content FROM ( " +
+                "  SELECT other_id, other_type, create_time AS last_time, content AS last_content, " +
+                "    ROW_NUMBER() OVER (PARTITION BY other_id, other_type ORDER BY create_time DESC, id DESC) AS rn " +
+                "  FROM ( " +
+                "    SELECT " +
+                "      CASE WHEN from_id = ? THEN to_id ELSE from_id END AS other_id, " +
+                "      CASE WHEN from_id = ? THEN to_type ELSE from_type END AS other_type, " +
+                "      create_time, content, id " +
+                "    FROM message WHERE from_id = ? OR to_id = ?" +
+                "  ) t " +
+                ") x WHERE rn = 1 ORDER BY last_time DESC";
         return jdbcClient.sql(sql).params(currentId, currentId, currentId, currentId).query().listOfRows();
     }
 

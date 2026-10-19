@@ -317,11 +317,15 @@
     <!-- 四格快捷入口（A `shortcut-grid`） -->
     <section class="section-gap">
       <div class="shortcut-grid">
-        <router-link class="shortcut" :to="historyPath"><span class="s-no">01 / HISTORY</span><strong>历史购买记录</strong><small>{{ recentOrders.length }} 笔已完成订单，支持再次购买。</small><span class="s-go">查看记录 →</span></router-link>
-        <div class="shortcut locked" title="收藏列表暂无聚合端点"><span class="s-no">02 / FAVORITES</span><strong>我的收藏</strong><small>看中的器物，随时回到详情页。</small><span class="s-go">打开收藏 →</span></div>
+        <router-link class="shortcut" :to="myOrdersPath"><span class="s-no">01 / ORDERS</span><strong>我的订单</strong><small>按状态筛选，查看每单的流程节点与售后进度。</small><span class="s-go">查看订单 →</span></router-link>
+        <router-link class="shortcut" :to="historyPath"><span class="s-no">02 / HISTORY</span><strong>历史购买记录</strong><small>{{ recentOrders.length }} 笔已完成订单，支持再次购买。</small><span class="s-go">查看记录 →</span></router-link>
         <router-link class="shortcut" :to="friendPath"><span class="s-no">03 / MESSAGES</span><strong>好友 / 消息</strong><small>打开好友与私信，继续沟通。</small><span class="s-go">打开消息 →</span></router-link>
         <router-link v-if="isMerchantShell" class="shortcut" :to="orderCenterPath"><span class="s-no">04 / SHIP</span><strong>商家订单处理</strong><small>进入订单中心处理发货与售后。</small><span class="s-go">去发货 →</span></router-link>
         <router-link v-else class="shortcut" :to="applyPath"><span class="s-no">04 / MERCHANT</span><strong>商家入驻申请</strong><small>提交表单，审核通过后解锁工作台。</small><span class="s-go">去申请 →</span></router-link>
+        <router-link v-if="isMerchantShell" class="shortcut" :to="addGoodsPath"><span class="s-no">05 / LISTING</span><strong>上架商品</strong><small>新建商品、保存草稿并提交审核。</small><span class="s-go">去上架 →</span></router-link>
+        <router-link v-if="isMerchantShell" class="shortcut" :to="listGoodsPath"><span class="s-no">06 / CATALOG</span><strong>查看商品</strong><small>管理在售、待审与驳回商品及 SKU。</small><span class="s-go">查看商品 →</span></router-link>
+        <router-link v-if="isMerchantShell" class="shortcut" :to="statsPath"><span class="s-no">07 / STATS</span><strong>经营数据</strong><small>查看销售、订单与库存的经营看板。</small><span class="s-go">查看数据 →</span></router-link>
+        <div class="shortcut locked" title="收藏列表暂无聚合端点"><span class="s-no">— / FAVORITES</span><strong>我的收藏</strong><small>看中的器物，随时回到详情页。</small><span class="s-go">打开收藏 →</span></div>
       </div>
     </section>
 
@@ -434,6 +438,12 @@ const selfPath = computed(() => (isMerchantShell.value ? '/merchant/user/info' :
 const cartPath = computed(() => (isMerchantShell.value ? '/merchant/order/cart' : '/customer/cart'))
 const orderCenterPath = computed(() => (isMerchantShell.value ? '/merchant/order' : '/customer/cart'))
 const historyPath = computed(() => (isMerchantShell.value ? '/merchant/user/history' : '/customer/user/history'))
+// 独立「我的订单」页（2026-10-19 用户令：中转站点卡片 ⇒ 全宽独立页）。
+const myOrdersPath = computed(() => (isMerchantShell.value ? '/merchant/orders' : '/customer/orders'))
+// 商家工作台三入口：菜单层退役后，必须由个人中心卡片承接，否则功能失去入口。
+const addGoodsPath = '/merchant/user/add'
+const listGoodsPath = '/merchant/user/list'
+const statsPath = '/merchant/stats'
 const friendPath = computed(() => (isMerchantShell.value ? '/merchant/user/friend' : '/customer/user/friend'))
 const memberPath = computed(() => (isMerchantShell.value ? '/merchant/user/member' : '/customer/user/member'))
 const applyPath = computed(() => (isMerchantShell.value ? '/merchant/user/apply' : '/customer/user/apply'))

@@ -1054,7 +1054,8 @@ const afterCashier = () => {
   payFor.value = null
   showPopup.value = false
   popupQty.value = {}
-  router.push(getMerchantId() ? '/merchant/order/cart?tab=orders' : '/customer/cart?tab=orders')
+  // 2026-10-19：落到独立的「我的订单」全宽页（旧 `?tab=orders` 地址仍可用）。
+  router.push(getMerchantId() ? '/merchant/orders' : '/customer/orders')
 }
 
 // 搜索功能

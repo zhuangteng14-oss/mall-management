@@ -1,14 +1,17 @@
 <template>
-  <div class="chat-room">
+  <div class="chat-room" :class="{ drawer }">
     <!-- ⚠️ D 笔（2026-10-07）：本块按 `docs/美化/pages/ChatRoom.html` 重写。稿的 5 个
          「面」（客户·消息 / 商家·消息 / 客户·用户中心·消息 / 商家·用户中心·消息 / 空态）
          在 Vue 里**只是两条路由 + 有无会话**，共用本组件 ⇒ 只落 `panel()` 那层
          （`.chat`），稿的 `.nav-bar` / `.wrap` / `.split` / `.uc-menu` 分别归
          `AppShell.vue` 与 `UserCenter.vue`，**不进本文件**。
          ⚠️ 稿把原来的 **220px 下拉**换成**常驻左栏**（`.rail`，数据同一份
-         `message.conversations`）⇒ 下拉那套脚本随之变死，见 `<script>` 里的按语。 -->
-    <div class="chat">
-      <div class="rail">
+         `message.conversations`）⇒ 下拉那套脚本随之变死，见 `<script>` 里的按语。
+         ⚠️ 2026-10-19 用户令：消息中心是「左会话 / 右通知」双栏，点会话开**聊天抽屉**。
+            抽屉复用的就是本组件 —— `drawer` 下隐藏 `.rail`（会话列表已在抽屉外那一栏），
+            消息气泡、商品卡、表情、图片、发送全部原样可用。 -->
+    <div class="chat" :class="{ drawer }">
+      <div v-if="!drawer" class="rail">
         <div class="rail-h">会话 · {{ conversations.length }}</div>
         <div class="rail-list">
           <button
@@ -124,6 +127,12 @@
 </template>
 
 <script setup>
+/* eslint-disable no-undef */
+// `drawer`：由 `MessageCenter.vue` 的聊天抽屉传入 —— 隐藏左栏、去掉页面内距。
+// ⚠️ `defineProps` 在本仓 eslint-plugin-vue 8.7.1 下会被判 `no-undef`（见 CashierDialog.vue 的同一条）。
+defineProps({
+  drawer: { type: Boolean, default: false }
+})
 import { ref, computed, onMounted, onUnmounted, nextTick, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { http, handleApiError } from '../api/http'
@@ -584,6 +593,22 @@ button {
   font-family: var(--font);
   font-size: var(--fs-sm);
   color: var(--ink);
+}
+
+/* 抽屉形态：外层已由 `MessageCenter` 提供间距与边框 ⇒ 这里全部归零。 */
+.chat-room.drawer {
+  max-width: none;
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+.chat.drawer {
+  grid-template-columns: minmax(0, 1fr);
+  height: 100%;
+  border: 0;
+  border-radius: 0;
 }
 
 /* ── 聊天面板 ─────────────────────────────────────────────────────────────── */

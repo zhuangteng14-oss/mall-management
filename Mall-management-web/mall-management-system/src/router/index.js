@@ -63,7 +63,7 @@ const routes = [
         path: 'user', name: 'customerUser',   // ⚠️ C3 块 2〈用户块〉：**同行**加 `name`（不新插一行）—— 文件尾那条 `router.addRoute('customerUser', …)` 靠它把「商家入驻」挂成本壳的子页（`addRoute` 的第一个参数**只认 name**）。⚠️ 一旦插行，本组 `:61`-`:122` 的既有行号引用会整体下移。
         component: UserCenter,
         meta: {
-          tab: 'user',   // ⚠️ A 版（2026-10-19）：`noRail` **不挂父级** —— meta 沿 matched 链合并，挂这儿会让 history/friend/apply/member 全丢身份树；只挂 info 两条子记录。
+          tab: 'user', noRail: true,   // ⚠️ 2026-10-19 用户令（反转 A 版）：个人中心是中转站，拆出的 history/friend/apply/member 都是**独立全宽页** ⇒ `noRail` 挂在父级、沿 matched 链一次性覆盖全部子页（含文件尾 addRoute 的 apply/member）。`noMenu` 随 `UserCenter.vue` 去壳一并失义。
           layout: 'user-page',
           subMenu: [
             { label: '个人信息', sub: 'info', to: '/customer/user/info', glyph: 'users' },
@@ -98,7 +98,7 @@ const routes = [
         path: 'user', name: 'merchantUser',   // ⚠️ 可视化段 commit 3（2026-10-11，用户裁决 ④「经营数据入口放个人中心里」）：**同行**加 `name`（不新插一行，理由同 `:63` 那条 —— 本组 `:98`-`:122` 的既有行号引用会整体下移）。文件尾那条 `router.addRoute('merchantUser', …)` 靠它把「经营数据」挂成**本记录的子页** ⇒ 个人中心左菜单在场（`UserCenter.vue` 的 `.user-menu` 只在 `matched` 含本记录时渲染）。⚠️ `checkSameNameAsAncestor` 只禁同名（本 name ≠ 祖先 `merchant`）⇒ 不多发 warn。
         component: UserCenter,
         meta: {
-          tab: 'user',   // ⚠️ A 版（2026-10-19）：同客户侧 —— `noRail` 只挂 info 子记录，不挂父级。
+          tab: 'user', noRail: true,   // ⚠️ 2026-10-19 用户令（反转 A 版）：同客户侧 —— 个人中心拆出的 add/list/history/friend/stats/apply/member 全部独立全宽、无侧栏。
           layout: 'user-page',
           logout: 'merchant',   // ⚠️ 商家侧退出多清 `merchantid`；客户侧无此键（见 UserCenter.vue 的 toLogin）
           subMenu: [
@@ -706,3 +706,10 @@ router.addRoute('merchantUser', { path: '/merchant/user/apply', component: () =>
 // 商家壳的会员中心（A 版个人中心「黑金牌匾 / 会员中心」入口）：客户壳那条 `/customer/user/member`
 // 受 `roles:['1','3']` 保护，商家进不去 ⇒ 在商家用户中心下补同组件地址，供黑金牌匾与资产账本直达。
 router.addRoute('merchantUser', { path: '/merchant/user/member', component: () => import('../views/MemberCenter.vue'), meta: { sub: 'member' } })
+
+// ── 2026-10-19 用户令：我的订单独立页 ──────────────────────────────────────────
+// `/customer/cart?tab=orders` 仍是旧入口（`OrderPane.vue` 的两个 tab 一字不动）；
+// 这里补一条**真正的全宽独立地址**，与「个人中心 → 独立功能页」同一套架构：
+// 无侧栏（`noRail`）、无容器 Tab，进来就是一列订单卡。
+router.addRoute('customer', { path: 'orders', component: () => import('../views/OrderMine.vue'), meta: { tab: 'orders', layout: 'cart-container', noRail: true } })
+router.addRoute('merchant', { path: 'orders', component: () => import('../views/OrderMine.vue'), meta: { tab: 'orders', layout: 'cart-container', noRail: true } })

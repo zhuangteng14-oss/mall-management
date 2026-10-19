@@ -47,7 +47,7 @@
              不往 `<script setup>` 里加逻辑。 -->
         <router-link
           class="btn"
-          :to="$route.path.startsWith('/merchant') ? '/merchant/order/cart?tab=orders' : '/customer/cart?tab=orders'"
+          :to="$route.path.startsWith('/merchant') ? '/merchant/orders' : '/customer/orders'"
         >返回进行中订单</router-link>
         <router-link
           class="btn solid"
@@ -68,7 +68,7 @@
       <div class="p">确认收货后的订单会出现在这里；进行中的订单可在订单中心查看。</div>
       <router-link
         class="go2"
-        :to="$route.path.startsWith('/merchant') ? '/merchant/order/cart?tab=orders' : '/customer/cart?tab=orders'"
+        :to="$route.path.startsWith('/merchant') ? '/merchant/orders' : '/customer/orders'"
       >返回进行中订单</router-link>
     </div>
 
