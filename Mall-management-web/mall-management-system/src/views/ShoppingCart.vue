@@ -345,10 +345,11 @@ const checkout = async (productCode) => {
   }
 }
 
-/** 结算完落到「我的订单」tab —— 由**容器**认 `?tab=`；这里只改 query，不换路由。 */
+/** 结算完落到**独立「我的订单」页**（2026-10-19 用户令：不再切购物车容器的 tab，
+    订单页是全宽独立路由、无侧栏；客户 / 商家两壳各一条）。 */
 const goOrders = () => {
-  const path = window.location.hash.replace(/^#/, '').split('?')[0]
-  window.location.hash = `${path}?tab=orders`
+  const merchant = window.location.hash.startsWith('#/merchant')
+  window.location.hash = merchant ? '#/merchant/orders' : '#/customer/orders'
 }
 
 onMounted(load)

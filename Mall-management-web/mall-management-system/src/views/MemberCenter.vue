@@ -23,7 +23,6 @@
       <div>
         <div class="kicker">BUYER / MEMBER</div>
         <h1>会员中心</h1>
-        <p>黑金牌匾、积分存折、余额与每日专属券放在同一页。积分 100 分抵 ¥1，单笔最多抵券后价 20%。</p>
       </div>
       <div class="head-actions">
         <router-link class="btn" :to="$route.path.startsWith('/merchant') ? '/merchant/order/cart' : '/customer/cart'">去使用积分</router-link>
@@ -35,10 +34,10 @@
       <div class="stack">
         <!-- 黑金会员卡：全页唯一的「重色块」，其余全部退到白面。
              外框黑底 + 内框金色发丝线（A 版 `.member-card` / `.member-card-inner` 的直角色块写法）。 -->
-        <section class="member-card">
+        <section class="member-card" :class="themeClass">
           <div class="member-card-inner">
             <div class="mc-top">
-              <span>BLACK CARD / 黑金牌匾</span>
+              <span>{{ cardKicker }}</span>
               <span class="mc-chip" :class="{ on: isVip }">{{ isVip ? '权益生效中' : '普通用户' }}</span>
             </div>
 
@@ -250,6 +249,36 @@ const levelCode = computed(() => {
   return (lv && lv.Code) || (isVip.value ? 'V1' : 'V0')
 })
 const levelInitial = computed(() => String(levelName.value).slice(0, 1) || '会')
+/**
+ * 牌匾配色按当前等级动态换（2026-10-19 用户令）：色卡来自 `member_level.Theme`
+ * （`plain / silver / gold / platinum / diamond / black / supreme`），**不在这里另造等级表**。
+ * 未取到概览时按会员与否兜底：非会员 = 白、会员 = 金；取到后以 `Theme` 为准。
+ */
+const THEME_CLASS = {
+  plain: 'mc-theme-white',
+  silver: 'mc-theme-silver',
+  gold: 'mc-theme-gold',
+  platinum: 'mc-theme-platinum',
+  diamond: 'mc-theme-diamond',
+  black: 'mc-theme-black',
+  supreme: 'mc-theme-ink',
+}
+const THEME_KICKER = {
+  plain: 'MEMBER CARD / 普通会员牌匾',
+  silver: 'SILVER CARD / 银卡牌匾',
+  gold: 'GOLD CARD / 金卡牌匾',
+  platinum: 'PLATINUM CARD / 铂金牌匾',
+  diamond: 'DIAMOND CARD / 钻石牌匾',
+  black: 'BLACK CARD / 黑金牌匾',
+  supreme: 'SUPREME CARD / 至尊牌匾',
+}
+const levelTheme = computed(() => {
+  const lv = overview.value && overview.value.level
+  const theme = String((lv && lv.Theme) || '').toLowerCase()
+  return THEME_CLASS[theme] ? theme : (isVip.value ? 'gold' : 'plain')
+})
+const themeClass = computed(() => THEME_CLASS[levelTheme.value])
+const cardKicker = computed(() => THEME_KICKER[levelTheme.value])
 const nextLevel = computed(() => (overview.value && overview.value.nextLevel) || null)
 const growthToNext = computed(() => Number(overview.value && overview.value.growthToNext) || 0)
 const growthPct = computed(() => {
@@ -520,15 +549,144 @@ button {
 }
 .stack > * + * { margin-top: 24px; }
 
-/* ── 黑金会员卡（直角色块 + 金色发丝线；本页唯一重色块）──────────────────────── */
+/* ── 会员牌匾（直角色块 + 发丝线；本页唯一重色块）──────────────────────────────
+   2026-10-19 用户令：**黑金牌匾必须是真黑 + 金**（旧的 `--ink` 底被看成墨绿），
+   且整张牌匾按当前等级换色（色名来自 `member_level.Theme`）：
+   plain 白 / silver 银 / gold 金 / platinum 铂金 / diamond 钻蓝 /
+   black 黑金 / supreme 墨绿。颜色全部收进 `--mc-*`，主题类只改这几条变量。 */
 .member-card {
-  background: var(--ink);
-  color: var(--surface);
-  border: 1px solid var(--ink);
+  --mc-bg: #101010;
+  --mc-bg-solid: #101010;
+  --mc-fg: #ffffff;
+  --mc-accent: #e8c98a;
+  --mc-accent-ink: #1a1409;
+  --mc-line: rgba(255, 255, 255, .18);
+  --mc-line-strong: rgba(232, 201, 138, .38);
+  --mc-chip-line: rgba(255, 255, 255, .28);
+  --mc-dim: rgba(255, 255, 255, .72);
+  --mc-dim-2: rgba(255, 255, 255, .6);
+  --mc-btn-line: rgba(255, 255, 255, .42);
+  --mc-btn-dim: rgba(255, 255, 255, .45);
+  --mc-bad: #ffb4a4;
+  background: var(--mc-bg);
+  color: var(--mc-fg);
+  border: 1px solid var(--mc-bg-solid);
   padding: 9px;
 }
+/* 白：普通会员 */
+.member-card.mc-theme-white {
+  --mc-bg: #f3f1ea;
+  --mc-bg-solid: #f3f1ea;
+  --mc-fg: #1b1e20;
+  --mc-accent: #275e4e;
+  --mc-accent-ink: #ffffff;
+  --mc-line: rgba(0, 0, 0, .14);
+  --mc-line-strong: rgba(0, 0, 0, .22);
+  --mc-chip-line: rgba(0, 0, 0, .24);
+  --mc-dim: rgba(0, 0, 0, .62);
+  --mc-dim-2: rgba(0, 0, 0, .5);
+  --mc-btn-line: rgba(0, 0, 0, .32);
+  --mc-btn-dim: rgba(0, 0, 0, .4);
+  --mc-bad: #b3261e;
+}
+/* 银 */
+.member-card.mc-theme-silver {
+  --mc-bg: linear-gradient(135deg, #e8ebef, #c3c9d1 55%, #aeb6c0);
+  --mc-bg-solid: #c3c9d1;
+  --mc-fg: #1d232c;
+  --mc-accent: #39424e;
+  --mc-accent-ink: #f7f9fb;
+  --mc-line: rgba(0, 0, 0, .16);
+  --mc-line-strong: rgba(0, 0, 0, .24);
+  --mc-chip-line: rgba(0, 0, 0, .26);
+  --mc-dim: rgba(0, 0, 0, .6);
+  --mc-dim-2: rgba(0, 0, 0, .48);
+  --mc-btn-line: rgba(0, 0, 0, .34);
+  --mc-btn-dim: rgba(0, 0, 0, .42);
+  --mc-bad: #b3261e;
+}
+/* 金 */
+.member-card.mc-theme-gold {
+  --mc-bg: linear-gradient(135deg, #d8b452, #b8912c 60%, #9c7a1f);
+  --mc-bg-solid: #b8912c;
+  --mc-fg: #241b06;
+  --mc-accent: #fff3cf;
+  --mc-accent-ink: #2a2008;
+  --mc-line: rgba(0, 0, 0, .2);
+  --mc-line-strong: rgba(0, 0, 0, .3);
+  --mc-chip-line: rgba(0, 0, 0, .3);
+  --mc-dim: rgba(0, 0, 0, .62);
+  --mc-dim-2: rgba(0, 0, 0, .5);
+  --mc-btn-line: rgba(0, 0, 0, .38);
+  --mc-btn-dim: rgba(0, 0, 0, .45);
+  --mc-bad: #7a1712;
+}
+/* 铂金 */
+.member-card.mc-theme-platinum {
+  --mc-bg: linear-gradient(135deg, #eef3f8, #c2ccd8 55%, #9dabb9);
+  --mc-bg-solid: #c2ccd8;
+  --mc-fg: #182430;
+  --mc-accent: #2f4a63;
+  --mc-accent-ink: #f2f7fb;
+  --mc-line: rgba(0, 0, 0, .16);
+  --mc-line-strong: rgba(0, 0, 0, .26);
+  --mc-chip-line: rgba(0, 0, 0, .26);
+  --mc-dim: rgba(0, 0, 0, .6);
+  --mc-dim-2: rgba(0, 0, 0, .48);
+  --mc-btn-line: rgba(0, 0, 0, .34);
+  --mc-btn-dim: rgba(0, 0, 0, .42);
+  --mc-bad: #b3261e;
+}
+/* 钻石 */
+.member-card.mc-theme-diamond {
+  --mc-bg: linear-gradient(135deg, #e6f4fc, #a9d3ec 55%, #6fa9cf);
+  --mc-bg-solid: #a9d3ec;
+  --mc-fg: #102a3c;
+  --mc-accent: #0f4c75;
+  --mc-accent-ink: #f2f9ff;
+  --mc-line: rgba(0, 0, 0, .15);
+  --mc-line-strong: rgba(0, 0, 0, .24);
+  --mc-chip-line: rgba(0, 0, 0, .24);
+  --mc-dim: rgba(0, 0, 0, .58);
+  --mc-dim-2: rgba(0, 0, 0, .46);
+  --mc-btn-line: rgba(0, 0, 0, .32);
+  --mc-btn-dim: rgba(0, 0, 0, .4);
+  --mc-bad: #8c1d18;
+}
+/* 黑金（真黑 + 金） */
+.member-card.mc-theme-black {
+  --mc-bg: #101010;
+  --mc-bg-solid: #101010;
+  --mc-fg: #ffffff;
+  --mc-accent: #e8c98a;
+  --mc-accent-ink: #1a1409;
+  --mc-line: rgba(255, 255, 255, .18);
+  --mc-line-strong: rgba(232, 201, 138, .38);
+  --mc-chip-line: rgba(255, 255, 255, .28);
+  --mc-dim: rgba(255, 255, 255, .72);
+  --mc-dim-2: rgba(255, 255, 255, .6);
+  --mc-btn-line: rgba(255, 255, 255, .42);
+  --mc-btn-dim: rgba(255, 255, 255, .45);
+  --mc-bad: #ffb4a4;
+}
+/* 墨绿（仅最高等级） */
+.member-card.mc-theme-ink {
+  --mc-bg: linear-gradient(135deg, #1d3b33, #142e27 60%, #0d211c);
+  --mc-bg-solid: #142e27;
+  --mc-fg: #f3f1e7;
+  --mc-accent: #d9c68c;
+  --mc-accent-ink: #17140a;
+  --mc-line: rgba(217, 198, 140, .26);
+  --mc-line-strong: rgba(217, 198, 140, .44);
+  --mc-chip-line: rgba(217, 198, 140, .36);
+  --mc-dim: rgba(243, 241, 231, .74);
+  --mc-dim-2: rgba(243, 241, 231, .6);
+  --mc-btn-line: rgba(243, 241, 231, .42);
+  --mc-btn-dim: rgba(243, 241, 231, .45);
+  --mc-bad: #ffb4a4;
+}
 .member-card-inner {
-  border: 1px solid rgba(232, 201, 138, .38);
+  border: 1px solid var(--mc-line-strong);
   padding: 24px 26px;
   display: flex;
   flex-direction: column;
@@ -542,18 +700,18 @@ button {
   font-family: var(--font-mono);
   font-size: 9px;
   letter-spacing: .1em;
-  color: rgba(255, 255, 255, .72);
+  color: var(--mc-dim);
 }
 .mc-chip {
   flex: none;
   padding: 3px 8px;
-  border: 1px solid rgba(255, 255, 255, .28);
+  border: 1px solid var(--mc-chip-line);
   font-size: 9px;
   letter-spacing: .06em;
-  color: rgba(255, 255, 255, .66);
+  color: var(--mc-dim-2);
   white-space: nowrap;
 }
-.mc-chip.on { border-color: rgba(232, 201, 138, .6); color: #e8c98a; }
+.mc-chip.on { border-color: var(--mc-line-strong); color: var(--mc-accent); }
 
 .mc-mid {
   display: grid;
@@ -568,8 +726,8 @@ button {
   flex: none;
   width: 44px;
   height: 44px;
-  background: #e8c98a;
-  color: #1a1409;
+  background: var(--mc-accent);
+  color: var(--mc-accent-ink);
   font-size: 18px;
   font-weight: 700;
 }
@@ -587,14 +745,14 @@ button {
   margin-top: 8px;
   font-family: var(--font);
   font-size: 11px;
-  color: rgba(255, 255, 255, .72);
+  color: var(--mc-dim);
 }
 .points {
   font-family: var(--font-mono);
   font-size: 48px;
   line-height: .9;
   text-align: right;
-  color: #e8c98a;
+  color: var(--mc-accent);
   font-variant-numeric: tabular-nums;
 }
 .points small {
@@ -602,10 +760,10 @@ button {
   margin-top: 7px;
   font-size: 9px;
   letter-spacing: .1em;
-  color: rgba(255, 255, 255, .72);
+  color: var(--mc-dim);
 }
 
-.mc-growth { border-top: 1px solid rgba(255, 255, 255, .18); padding-top: 14px; }
+.mc-growth { border-top: 1px solid var(--mc-line); padding-top: 14px; }
 .mc-growth-hd {
   display: flex;
   justify-content: space-between;
@@ -613,18 +771,18 @@ button {
   margin-bottom: 7px;
   font-family: var(--font-mono);
   font-size: 10px;
-  color: rgba(255, 255, 255, .72);
+  color: var(--mc-dim);
 }
-.mc-bar { height: 4px; background: rgba(255, 255, 255, .16); overflow: hidden; }
-.mc-bar i { display: block; height: 100%; background: #e8c98a; transition: width .6s cubic-bezier(.22, .61, .36, 1); }
-.mc-max { margin: 0; font-family: var(--font-mono); font-size: 10px; color: rgba(255, 255, 255, .72); }
+.mc-bar { height: 4px; background: var(--mc-line); overflow: hidden; }
+.mc-bar i { display: block; height: 100%; background: var(--mc-accent); transition: width .6s cubic-bezier(.22, .61, .36, 1); }
+.mc-max { margin: 0; font-family: var(--font-mono); font-size: 10px; color: var(--mc-dim); }
 
 .mc-bottom {
   display: flex;
   justify-content: space-between;
   align-items: flex-end;
   gap: 20px;
-  border-top: 1px solid rgba(255, 255, 255, .18);
+  border-top: 1px solid var(--mc-line);
   padding-top: 14px;
 }
 .assets { display: flex; gap: 30px; }
@@ -635,17 +793,17 @@ button {
   font-weight: 400;
   font-variant-numeric: tabular-nums;
 }
-.assets small { display: block; margin-top: 3px; font-size: 9px; color: rgba(255, 255, 255, .6); }
+.assets small { display: block; margin-top: 3px; font-size: 9px; color: var(--mc-dim-2); }
 .mc-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 
-/* 深色卡内的按钮反色（通用 `.btn` 是白底青瓷绿，直接放黑卡上会看不见）。 */
-.member-card .btn { border-color: rgba(255, 255, 255, .42); background: transparent; color: var(--surface); }
-.member-card .btn:hover:not(:disabled) { background: var(--surface); color: var(--ink); border-color: var(--surface); }
-.member-card .btn.solid { background: #e8c98a; border-color: #e8c98a; color: #1a1409; }
-.member-card .btn.solid:hover:not(:disabled) { background: transparent; color: #e8c98a; border-color: #e8c98a; }
-.member-card .btn:disabled { opacity: .38; background: transparent; border-color: rgba(255, 255, 255, .22); color: rgba(255, 255, 255, .45); }
-.mc-msg { margin: 0; font-size: 12px; color: #e8c98a; }
-.mc-msg.bad { color: #ffb4a4; }
+/* 牌匾内的按钮反色（通用 `.btn` 是白底青瓷绿，直接放牌匾上会看不见）。 */
+.member-card .btn { border-color: var(--mc-btn-line); background: transparent; color: var(--mc-fg); }
+.member-card .btn:hover:not(:disabled) { background: var(--mc-fg); color: var(--mc-bg-solid); border-color: var(--mc-fg); }
+.member-card .btn.solid { background: var(--mc-accent); border-color: var(--mc-accent); color: var(--mc-accent-ink); }
+.member-card .btn.solid:hover:not(:disabled) { background: transparent; color: var(--mc-accent); border-color: var(--mc-accent); }
+.member-card .btn:disabled { opacity: .38; background: transparent; border-color: var(--mc-line); color: var(--mc-btn-dim); }
+.mc-msg { margin: 0; font-size: 12px; color: var(--mc-accent); }
+.mc-msg.bad { color: var(--mc-bad); }
 
 /* ── 区块标题（A `.section-title`）──────────────────────────────────────────── */
 .section-title {

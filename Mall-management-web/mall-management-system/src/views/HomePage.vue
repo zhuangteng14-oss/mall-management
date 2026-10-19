@@ -1119,9 +1119,11 @@ onUnmounted(() => {
   background: rgba(255, 255, 255, 0.24);
 }
 .flash-card {
-  /* 少场次时也要把横向轨道填满：2 场 ⇒ 两张各占一半，4 场 ⇒ 各占 1/4。
-     `flex-basis: 25%` 保证四场以上仍按 1/4 起排，`flex-grow: 1` 只吃剩余空间。 */
-  flex: 1 0 25%;
+  /* 2026-10-19 用户令：**只有 1 场秒杀时不许拉满整屏** —— 卡片固定占 1/4 轨道宽
+     （`flex-grow: 0`），并给一个上限宽度；2 场以上仍是并排 1/4 起排、剩余空间留在轨道里。
+     改前 `flex-grow: 1` 会让孤卡吃满整条横轨（宽高都跟着版面撑开）。 */
+  flex: 0 0 25%;
+  max-width: 340px;
   min-width: 218px;
   display: flex;
   flex-direction: column;

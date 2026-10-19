@@ -39,6 +39,7 @@
       <template v-if="refundMode">
         <div class="h1row">
           <h1 class="page-h">订单中心 <span class="n">共 {{ orderList.length }} 单 · 待处理 {{ orderList.filter(o => canSend(o)).length }} 单</span></h1>
+          <button type="button" class="btn" @click="backToOrders">← 返回订单中心</button>
           <select v-model="orderStatus" class="status-select" @change="loadOrders">
             <option value="active">首页</option>
             <option value="completed">历史订单</option>
@@ -353,7 +354,7 @@
 
 <script setup>
 /* eslint-disable no-undef */
-import { computed, ref, onMounted } from 'vue'
+import { computed, ref, onMounted } from 'vue'; import { useRoute, useRouter } from 'vue-router'
 import { http, handleApiError, urlOf } from '../api/http'
 import { endpoints } from '../api/endpoints'
 import { orderRefundMerchantList, orderRefundMerchantHandle } from '../api/order'
@@ -521,7 +522,9 @@ const confirmDeliver = async () => {
 /* ── 售后队列（批四第二批 commit 4）──────────────────────────────────────────
    ⚠️ 只取 `RefundStatus=1`（待商家审核）。`status` 不传 = 全部有售后记录的单（含已拒绝/已升级），
    与本 tab 的语义不符 ⇒ 固定传 1。 */
-const refundMode = ref(false)
+const route = useRoute(); const router = useRouter()
+// 独立售后入口（`/merchant/after-sales`）直接以售后队列进入；旧 `?tab=refund` 也认。
+const refundMode = ref(String(route.path).includes('/after-sales') || route.query.tab === 'refund')
 const refundList = ref([])
 const refundLoading = ref(false)
 const refundFor = ref(null)
@@ -578,6 +581,12 @@ const loadRefunds = async () => {
 const toggleRefund = async () => {
   refundMode.value = !refundMode.value
   if (refundMode.value) await loadRefunds()
+}
+
+/** 售后工作台的返回按钮 —— 回普通订单处理页（独立入口与内嵌 tab 共用）。 */
+const backToOrders = () => {
+  refundMode.value = false
+  if (String(route.path).includes('/after-sales')) router.push('/merchant/order')
 }
 
 const openRefund = (row, approve) => {

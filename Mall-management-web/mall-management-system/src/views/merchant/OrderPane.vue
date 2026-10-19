@@ -46,8 +46,16 @@ const router = useRouter()
  */
 const tab = computed(() => (route.query.tab === 'orders' ? 'orders' : 'cart'))
 
-/** 换 tab = **只改 query**，不换路由记录 ⇒ 不重挂壳、不丢滚动位置、可直接深链/刷新/后退。 */
+/**
+ * 换 tab：购物车仍是**只改 query**（不重挂壳、不丢滚动位置）；
+ * 「我的订单」自 2026-10-19 起改为**独立全宽页**（`/customer/orders` / `/merchant/orders`）——
+ * 用户令「订单页布局统一、无侧栏」，旧 `?tab=orders` 深链仍可打开（下方 `v-else` 保留）。
+ */
 const go = (next) => {
+  if (next === 'orders') {
+    router.push(route.path.startsWith('/merchant') ? '/merchant/orders' : '/customer/orders')
+    return
+  }
   if (next === tab.value) return
   router.push({ path: route.path, query: { tab: next } })
 }

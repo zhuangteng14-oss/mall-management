@@ -30,9 +30,6 @@
         <div>
           <div class="kicker">THE ONLY WAY TO MERCHANT</div>
           <h2>{{ applyType === 'brand' ? '品牌不是另一个账号，' : '入驻不是换号，' }}<br />{{ applyType === 'brand' ? '是商家之上的一层认证。' : '是给同一个账户加一层能力。' }}</h2>
-          <p>{{ applyType === 'brand'
-            ? '填写品牌信息与资质图地址后提交，由平台审核。审核期间不影响商家正常经营；通过后商品带品牌标，驳回后可修改材料重新提交。'
-            : '填写店铺信息与资质后提交，由管理员审核。审核通过前你仍然是普通客户；通过后需重新登录，商家入口才会出现在顶栏、侧栏与个人中心。' }}</p>
         </div>
         <div class="jb-actions">
           <div class="jb-state">
@@ -440,9 +437,11 @@ onMounted(loadMine)
   padding: 30px 34px;
   margin-bottom: var(--s5);
 }
+/* 2026-10-19 用户令：横幅里的三行说明文字（kicker / 当前状态 / 条数）统一用贵金属金，
+   与黑底形成黑金对比；正文 `<p>` 已按同一条令删除。 */
 .join-banner .kicker {
-  color: inherit;
-  opacity: 0.62;
+  color: #d4af37;
+  opacity: 1;
 }
 .join-banner h2 {
   margin: 8px 0 10px;
@@ -476,12 +475,14 @@ onMounted(loadMine)
   font-size: var(--fs-lg);
   font-weight: var(--fw-semi);
   line-height: 1.15;
+  color: #d4af37;
 }
 .jb-meta {
   font-family: var(--font-mono);
   font-size: 10px;
   letter-spacing: 0.05em;
-  opacity: 0.65;
+  color: #d4af37;
+  opacity: 0.88;
 }
 
 /* ── 两栏：左侧表单 / 右侧规则与进度 ───────────────────────────────────── */

@@ -13,12 +13,11 @@
     <section class="page-head">
       <div>
         <div class="kicker">REIMAGINE / LAYOUT · IDENTITY OVERVIEW</div>
-        <h1>个人中心<span class="sep">/</span>双身份</h1>
-        <p>默认是普通买家。商家不是另一个账号，而是买家身份之上的升级层：入驻申请通过后，购物车、订单、积分、收藏与收货地址全部保留，并多出经营能力。</p>
+        <h1>个人中心</h1>
       </div>
       <div class="head-actions">
         <router-link class="btn solid" :to="cartPath">打开购物车 <span class="mono">{{ cartCount === null ? '—' : pad2(cartCount) }}</span></router-link>
-        <router-link v-if="isMerchantShell" class="btn" :to="orderCenterPath">售后工作台</router-link>
+        <router-link v-if="isMerchantShell" class="btn" to="/merchant/after-sales">售后工作台</router-link>
         <router-link v-else class="btn" :to="applyPath">商家入驻申请</router-link>
         <button class="btn" @click="editOpen = true">编辑资料</button>
       </div>
@@ -37,7 +36,8 @@
         <div class="id-meta">
           <span v-if="userInfo.customerid">客户号 <b>{{ userInfo.customerid }}</b></span>
           <span v-if="userInfo.merchantid">商家号 <b>{{ userInfo.merchantid }}</b></span>
-          <span>{{ userInfo.gender || '未填写性别' }} · {{ userInfo.age === null || userInfo.age === undefined || userInfo.age === '' ? '—' : userInfo.age }} 岁</span>
+          <span>性别 <b>{{ userInfo.gender || '未填写' }}</b></span>
+          <span>年龄 <b>{{ userInfo.age === null || userInfo.age === undefined || userInfo.age === '' ? '—' : userInfo.age }}</b></span>
           <span>{{ userInfo.email || '未填写邮箱' }}</span>
           <span>{{ userInfo.address || '未填写地址' }}</span>
         </div>
@@ -97,7 +97,7 @@
         <span class="kicker">SAME ACCOUNT</span>
         <div class="bridge-spine"><i></i><i></i><i></i></div>
         <p>同一账户<br>同一资产<br>{{ isMerchantShell ? '即时切换' : '升级后保留' }}</p>
-        <router-link v-if="isMerchantShell" class="btn sm solid" to="/merchant">进入商家工作台</router-link>
+        <button v-if="isMerchantShell" type="button" class="btn sm solid" @click="scrollToWorkbench">进入商家工作台</button>
         <router-link v-else class="btn sm solid" :to="applyPath">申请入驻</router-link>
       </div>
 
@@ -174,7 +174,7 @@
         </section>
 
         <!-- 今日工作台（A `task-list`） -->
-        <section class="panel">
+        <section id="today-workbench" class="panel">
           <div class="panel-head">
             <div><div class="kicker">TODAY / {{ todayText }}</div><h2>今日工作台</h2></div>
             <span class="tag">{{ isMerchantShell ? '商家视角' : '普通买家' }}</span>
@@ -208,7 +208,7 @@
           </div>
           <div class="panel-foot">
             <span class="small muted">{{ isMerchantShell ? '两种身份的待办在同一个工作台里出现，不需要退出登录。' : '入驻之前，这里只显示买家待办；升级后不会丢失任何一项。' }}</span>
-            <router-link class="link" :to="isMerchantShell ? selfPath : applyPath">{{ isMerchantShell ? '查看商家工作台 →' : '了解商家入驻 →' }}</router-link>
+            <router-link class="link" :to="isMerchantShell ? myOrdersPath : applyPath">{{ isMerchantShell ? '查看商家工作台 →' : '了解商家入驻 →' }}</router-link>
           </div>
         </section>
 
@@ -224,7 +224,7 @@
             <div v-if="isMerchantShell" class="growth-step current">
               <span class="g-no">02 / MERCHANT</span><strong>商家 · 已开通</strong>
               <small>在买家身份上叠加经营能力：发布商品、处理订单与售后。</small>
-              <router-link to="/merchant">进入工作台 →</router-link>
+              <button type="button" class="g-link" @click="scrollToWorkbench">进入工作台 →</button>
             </div>
             <div v-else class="growth-step">
               <span class="g-no">02 / MERCHANT</span><strong>商家 · 待开通</strong>
@@ -373,6 +373,21 @@
           <p class="mc-state">{{ cardPanel === 'cert' ? certLabel : '—' }}</p>
           <p v-if="cardPanel === 'cert'" class="mc-why">{{ certWhy }}</p>
           <p v-else class="mc-why">经营等级规则尚未落地（敬请期待）—— 功能开发中。</p>
+          <!-- 申请资料与证件图（2026-10-19 用户令）：读自 `certLast` = `/merchant/myApplications` 最新一条。 -->
+          <dl v-if="cardPanel === 'cert' && certLast" class="mc-kv">
+            <div><dt>申请类型</dt><dd>{{ certLast.ApplicationType || (Number(certLast.IsBrand) === 1 ? '品牌加盟' : '商家入驻') }}</dd></div>
+            <div><dt>店铺名称</dt><dd>{{ certLast.ShopName || '—' }}</dd></div>
+            <div><dt>营业执照号</dt><dd>{{ certLast.LicenseNo || '—' }}</dd></div>
+            <div><dt>联系人</dt><dd>{{ certLast.ContactName || '—' }}</dd></div>
+            <div><dt>联系电话</dt><dd>{{ certLast.ContactPhone || '—' }}</dd></div>
+            <div><dt>店铺地址</dt><dd>{{ certLast.ShopAddress || '—' }}</dd></div>
+            <div><dt>提交时间</dt><dd>{{ certLast.SubmittedAt || '—' }}</dd></div>
+            <div><dt>审核时间</dt><dd>{{ certLast.ReviewedAt || '—' }}</dd></div>
+          </dl>
+          <figure v-if="cardPanel === 'cert' && certLast && certLast.LicenseImage" class="mc-license">
+            <img :src="assetOf(certLast.LicenseImage)" alt="营业执照" />
+            <figcaption>营业执照 / 证件图</figcaption>
+          </figure>
           <p v-if="cardPanel === 'cert'" class="mc-why"><router-link class="link" :to="applyPath">查看入驻申请 →</router-link></p>
         </div>
       </div>
@@ -814,11 +829,17 @@ const loadCert = async () => {
 const enterMyShop = () => {
   const mid = userInfo.value.merchantid
   if (!mid) { alert('取不到你的商家号，进不了店铺主页'); return }
-  router.push({ path: '/shop', query: { MerchantId: mid } })
+  router.push({ path: '/shop', query: { MerchantId: mid, from: 'user' } })
 }
 
 /** 「商家认证」格：开弹窗（状态已在 `getUserData()` 那次问过）。 */
 const openCert = () => { cardPanel.value = 'cert' }
+
+/** 本页「进入工作台」类按钮：平滑滚到同页「今日工作台」，不跳走（2026-10-19 用户令）。 */
+const scrollToWorkbench = () => {
+  const el = typeof document !== 'undefined' ? document.getElementById('today-workbench') : null
+  if (el && el.scrollIntoView) el.scrollIntoView({ behavior: 'smooth', block: 'start' })
+}
 
 /** 「经营等级」格：开弹窗。规则未定（用户 2026-10-12 裁定 ④「先占位，不做」）⇒ 面板是固定文案。 */
 const openLevel = () => { cardPanel.value = 'level' }
@@ -1023,11 +1044,12 @@ button {
 .stack > * + * { margin-top: 24px; }
 
 /* ── 黑金牌匾 ─────────────────────────────────────────────────────────────── */
-.plaque { background: var(--brand-ink); color: var(--surface); border: 1px solid var(--brand-ink); padding: 9px; position: relative; overflow: hidden; }
-.plaque-inner { border: 1px solid rgba(255, 255, 255, 0.24); padding: 22px 24px; display: flex; flex-direction: column; gap: 24px; }
+/* 2026-10-19 用户令：黑金牌匾必须是**真黑 + 金**，不能是青瓷墨绿（旧版用了 `--brand-ink`）。 */
+.plaque { background: #101010; color: var(--surface); border: 1px solid #101010; padding: 9px; position: relative; overflow: hidden; }
+.plaque-inner { border: 1px solid rgba(232, 201, 138, .38); padding: 22px 24px; display: flex; flex-direction: column; gap: 24px; }
 .plaque-top { display: flex; justify-content: space-between; gap: 16px; font-family: var(--font-mono); font-size: 9px; letter-spacing: .1em; color: rgba(255, 255, 255, 0.72); }
 .plaque-mid { display: grid; grid-template-columns: 1.1fr auto .9fr; gap: 24px; align-items: end; }
-.plaque-mid .member-level { font-family: var(--font-display); font-size: 30px; line-height: 1.05; letter-spacing: -.02em; }
+.plaque-mid .member-level { font-family: var(--font-display); font-size: 30px; line-height: 1.05; letter-spacing: -.02em; color: #e8c98a; }
 .plaque-mid .member-level small { display: block; font-family: var(--font); font-size: 11px; letter-spacing: 0; color: rgba(255, 255, 255, 0.72); margin-top: 6px; }
 .plaque-num { font-family: var(--font-mono); font-size: 58px; line-height: .9; letter-spacing: -.07em; }
 .plaque-num small { display: block; font-size: 9px; letter-spacing: .12em; color: rgba(255, 255, 255, 0.72); margin-top: 7px; text-align: right; }
@@ -1068,7 +1090,7 @@ button {
 .growth-step.done { background: var(--surface-2); }
 .growth-step.current { background: var(--brand-ink); color: var(--surface); }
 .growth-step.current .g-no, .growth-step.current small { color: rgba(255, 255, 255, 0.78); }
-.growth-step a { margin-top: auto; font-size: 10px; border-bottom: 1px solid currentColor; width: max-content; padding-bottom: 1px; color: inherit; text-decoration: none; }
+.growth-step a, .growth-step .g-link { margin-top: auto; font-size: 10px; border-bottom: 1px solid currentColor; width: max-content; padding: 0 0 1px; color: inherit; text-decoration: none; }
 
 /* ── 账户资产 / 最近订单 ──────────────────────────────────────────────────── */
 .ledger { border-top: 1px solid var(--line); }
@@ -1144,6 +1166,13 @@ button {
 .mc-dlg-b { padding: 20px; }
 .mc-state { font-family: var(--font-display); font-size: 32px; font-weight: 500; line-height: 1.1; color: var(--ink); }
 .mc-why { margin-top: 16px; font-size: 15px; color: var(--ink-2); line-height: 1.7; }
+.mc-kv { margin-top: 16px; border-top: 1px solid var(--line); }
+.mc-kv div { display: grid; grid-template-columns: 96px minmax(0, 1fr); gap: 12px; padding: 8px 0; border-bottom: 1px solid var(--line); align-items: baseline; }
+.mc-kv dt { font-size: 11px; color: var(--ink-3); }
+.mc-kv dd { margin: 0; font-size: 13px; color: var(--ink-2); word-break: break-all; }
+.mc-license { margin-top: 16px; }
+.mc-license img { display: block; width: 100%; max-width: 320px; border: 1px solid var(--line-2); background: var(--surface-2); }
+.mc-license figcaption { margin-top: 6px; font-family: var(--font-mono); font-size: 10px; color: var(--ink-3); }
 
 /* ── 身份卡（2026-10-19 用户令）────────────────────────────────────────────── */
 .id-card {

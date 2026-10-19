@@ -44,19 +44,6 @@
         <span>{{ goodName }}</span>
       </nav>
 
-      <!-- A 版页头（BUYER / PRODUCT）：大标题 + 真实商品摘要 + 两个既有落点。 -->
-      <section class="page-head">
-        <div>
-          <div class="kicker">BUYER / PRODUCT</div>
-          <h1>商品详情</h1>
-          <p>{{ goodType }} · {{ goodName }}<template v-if="currentItem.UserName"> · {{ currentItem.UserName }}</template>。价格、促销、优惠券、秒杀与国补均来自真实接口；买入动作仍走原有的购入弹窗。</p>
-        </div>
-        <div class="head-actions">
-          <router-link class="btn" :to="getMerchantId() ? '/merchant' : '/customer'">继续逛逛</router-link>
-          <router-link class="btn solid" :to="getMerchantId() ? '/merchant/order/cart?tab=cart' : '/customer/cart?tab=cart'">购物车</router-link>
-        </div>
-      </section>
-
       <!-- ── 一、主区：A 版左大图 / 右信息（原 56/44 两栏，机制逐字未动）── -->
       <div class="pd pd-layout">
         <div class="gal pd-gallery">
@@ -1143,7 +1130,7 @@ const consultProduct = async () => {
     alert('网络错误，请稍后重试');
   }
 };
-const enterShop = () => router.push({ path: '/shop', query: { MerchantId: sellerId } })   // ⚠️ C3 块 5 B 组（2026-10-12）：「进店逛逛」的落点，只有这一处调用方（模板里那颗按钮）。⚠️ 本行**占的**是 `consultProduct` 与 `onMounted` 之间那个**空行**（空行已撤）—— 本文件 `:1032` / `:1107` / `:1330` 等被 `docs/` 按行号引（`slot-registry.md` 引 `:881`/`:890` 那两条同理），任何新增行都会顶漂它们 ⇒ **借一个空行放函数、净零**（同 `:592` 那条 `}; const setPopQtyByCode = …` 的手法）。⚠️ 传的只有 `MerchantId`：`ShopHome` 的店名从商品行的 `UserName` 取，本页不作第二个来源（理由见那一页的 `loadShop`）。
+const enterShop = () => router.push({ path: '/shop', query: { MerchantId: sellerId, from: 'product', Id: route.query.Id, GoodName: route.query.GoodName, Price: route.query.Price, GoodImg: route.query.GoodImg, GoodType: route.query.GoodType, ProductCode: route.query.ProductCode } })   // 2026-10-19 用户令：带 `from=product` + 本页 7 个 query ⇒ 店铺页「返回」能把人送回这件商品（而不是商城首页）。 // ⚠️ C3 块 5 B 组（2026-10-12）：「进店逛逛」的落点，只有这一处调用方（模板里那颗按钮）。⚠️ 本行**占的**是 `consultProduct` 与 `onMounted` 之间那个**空行**（空行已撤）—— 本文件 `:1032` / `:1107` / `:1330` 等被 `docs/` 按行号引（`slot-registry.md` 引 `:881`/`:890` 那两条同理），任何新增行都会顶漂它们 ⇒ **借一个空行放函数、净零**（同 `:592` 那条 `}; const setPopQtyByCode = …` 的手法）。⚠️ 店铺页的店名仍从商品行的 `UserName` 取，本页不作第二个来源（理由见那一页的 `loadShop`）；2026-10-19 起额外带 7 个 query 仅供「返回」回程。
 onMounted(async () => {
   await loadGoodsWithUser();
   loadAllItems();

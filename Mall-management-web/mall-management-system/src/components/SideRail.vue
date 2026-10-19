@@ -190,7 +190,7 @@ const buyerLinks = computed(() => {
     ...(m ? [] : [{ no: '00', label: '商城主页', to: base, path: base, exact: true }]),
     { no: '01', label: '个人中心', to: `${user}/info`, paths: [user, `${user}/info`] },
     { no: '02', label: '购物车', to: cart, path: cart, tabGroup: 'cart', tab: 'cart' },
-    { no: '03', label: '我的订单', to: `${cart}?tab=orders`, path: cart, tabGroup: 'cart', tab: 'orders' },
+    { no: '03', label: '我的订单', to: m ? '/merchant/orders' : '/customer/orders', path: m ? '/merchant/orders' : '/customer/orders', exact: true },
     { no: '04', label: '历史购买记录', to: `${user}/history`, path: `${user}/history`, exact: true },
     { no: '05', label: '好友', to: `${user}/friend`, path: `${user}/friend`, exact: true },
     { no: '06', label: '消息 · 会话', to: `${base}/msg`, path: `${base}/msg`, tabGroup: 'msg', tab: 'chat', count: props.unread || null },

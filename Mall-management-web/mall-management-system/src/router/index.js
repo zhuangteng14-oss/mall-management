@@ -720,3 +720,19 @@ router.addRoute('merchant', { path: 'orders', component: () => import('../views/
 // ⚠️ 追加在文件最尾：不移动任何既有行号（上面的行号互引全部有效）。
 // ⚠️ 静态路径 `/admin/login` 比父记录 `/admin` 更具体，注册先后不影响匹配。
 router.addRoute({ path: '/admin/login', component: () => import('../views/AdminLoginPage.vue'), meta: { public: true } })
+
+// ── 2026-10-19 用户令：售后工作台独立入口（队列 + 详情，无侧栏）─────────────────
+// 个人中心「售后工作台」原先落到 `/merchant/order`（普通订单列表）⇒ 看起来像死链。
+// 这里补一条独立地址，直接以 `refundMode` 进入 `OrderCenter`；返回按钮回 `/merchant/order`。
+router.addRoute('merchant', { path: 'after-sales', component: () => import('../views/OrderCenter.vue'), meta: { tab: 'order', layout: 'order-container', noRail: true } })
+
+// ── 2026-10-19 用户令：管理端暗色主题不被商城浅色壳污染 ──────────────────────
+// 管理员入口在普通登录页（`index.html`，`<html>` 上没有 `data-theme`）里也可能被点开；
+// `/admin` 与 `/admin/login` 共用 `tokens.css` 的 `html[data-theme="admin"]` 暗色块。
+// 这里按路由切换主题：进管理端 ⇒ 挂 `admin`；离开 ⇒ 摘掉。挂点在全局导航上，
+// 因此从商城壳点进管理端与直接打开 `admin.html` 两条路径都覆盖。
+router.afterEach((to) => {
+  const root = document.documentElement
+  if (String(to.path).startsWith('/admin')) root.setAttribute('data-theme', 'admin')
+  else root.removeAttribute('data-theme')
+})

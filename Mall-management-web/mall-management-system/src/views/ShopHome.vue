@@ -25,21 +25,6 @@
         <i class="sp">/</i><span>{{ shopName ? shopName + '小店' : '店铺' }}</span>
       </nav>
 
-      <section class="page-head">
-        <div>
-          <div class="kicker">BUYER / SHOP HOME</div>
-          <h1>店铺主页</h1>
-          <p>
-            {{ shopName ? shopName + '小店' : '店铺' }}<template v-if="mainCategory"> · {{ mainCategory }}</template>。
-            关注、举报商家、客服、本店优惠券与商品分组都保留在这里。
-          </p>
-        </div>
-        <div class="head-actions">
-          <router-link class="btn" :to="getMerchantId() ? '/merchant' : '/customer'">回商城首页</router-link>
-          <router-link class="btn" to="/brand">品牌专区</router-link>
-        </div>
-      </section>
-
       <!-- ── A 版 `.a-shop-hero` 横带 ────────────────────────────────────────────
            首字标 + 店名 / 认证 tag + 商品数与粉丝数 + 既有 facts + 三个既有动作。
            ⚠️ facts 与认证徽章仍由 `<script>` 里原来的 `facts` / `certified` 计算，
@@ -228,12 +213,13 @@
             <p>本店「{{ activeType }}」下暂时没有商品。</p>
             <button type="button" class="retry" @click="activeType = ''">看全部 {{ goods.length }} 件</button>
           </div>
-          <div v-else class="cards">
+          <div v-else class="cards mosaic-grid">
             <ProductCard
-              v-for="g in shelfGoods"
+              v-for="(g, i) in shelfGoods"
               :key="g.Id"
               :goods="g"
               :tag="isNew(g) ? '新品' : ''"
+              :class="MOSAIC[i % MOSAIC.length]"
             />
           </div>
         </div>
@@ -246,12 +232,13 @@
              ⚠️ 所以这一格**今天必然是占位**（`本店暂无折扣商品`）—— 代码在、数据没有；
                 占位句是**用户定稿里逐字给的**，不是本笔另写的。 -->
         <div v-else class="pane">
-          <div v-if="discountGoods.length" class="cards">
+          <div v-if="discountGoods.length" class="cards mosaic-grid">
             <ProductCard
-              v-for="g in discountGoods"
+              v-for="(g, i) in discountGoods"
               :key="g.Id"
               :goods="g"
               :tag="isNew(g) ? '新品' : ''"
+              :class="MOSAIC[i % MOSAIC.length]"
             />
           </div>
           <p v-else-if="phDiscount" class="ph">{{ phDiscount }}</p>
@@ -270,8 +257,8 @@
           <h2>猜你喜欢</h2>
           <span class="tiny">别家的{{ mainCategory }}</span>
         </div>
-        <div v-if="recommend.length" class="cards">
-          <ProductCard v-for="g in recommend" :key="g.Id" :goods="g" />
+        <div v-if="recommend.length" class="cards mosaic-grid">
+          <ProductCard v-for="(g, i) in recommend" :key="g.Id" :goods="g" :class="MOSAIC[i % MOSAIC.length]" />
         </div>
         <p v-else-if="phRecommend" class="ph">{{ phRecommend }}</p>
       </section>
@@ -303,7 +290,7 @@ import { coupons, claim } from '../api/marketing'
 import { truthy, couponFace, couponName, couponLine } from '../config/coupon-format'
 import { BadgeCheck } from '@lucide/vue'
 import ProductCard from '../components/ProductCard.vue'; import PlatformActivityPanel from '../components/PlatformActivityPanel.vue'; import ReportDialog from '../components/ReportDialog.vue'   // ⚠️ 三条 import **同行**（同 `:151` / `:266` 那几条的手法）：本文件有 8 条 refs token，多一行就集体顶漂。`PlatformActivityPanel` = 一级 tab「平台活动」的面板（2026-10-12 用户裁定 ④）。`ReportDialog` = 举报弹窗（2026-10-13 用户裁定 ①，与 `ProductPage.vue` 共用同一个组件）。
-import { productLink } from '../config/product-link'
+import { productLink } from '../config/product-link'; import { MOSAIC } from '../config/mosaic'   // ⚠️ 两条 import **同行**：本文件多处被按行号引，不新增行。`MOSAIC` = 首页同款马赛克档位表（2026-10-19 用户令：店铺商品与首页同排布）。
 
 // 举报弹窗的状态（2026-10-13 用户裁定 ①「举报商家」）—— 与 `ProductPage.vue` 同款两个状态：
 // **开着没** + **举报谁**。理由 / 说明 / 提交 / 回执都在 `components/ReportDialog.vue` 里
@@ -809,9 +796,33 @@ const consultShop = async () => {
   }
 }
 
-// ⚠️ 比 `ProductPage.goBack` **少一支**：那一支是 `route.query.from === 'search'` 的回程，
-// 本页没有搜索入口 ⇒ 那条 `from` 永远不会有值。
-const goBack = () => { router.push(getMerchantId() ? '/merchant' : '/customer') }
+// 返回按来源分流（2026-10-19 用户令）：
+//   from=product ⇒ 回刚才那件商品的详情页（7 个 query 原样带回，商品页靠它们取数）；
+//   from=user    ⇒ 回个人中心（店主从「店铺信息」格进店的路径）；
+//   其它         ⇒ 原有兜底：商城首页（按壳选）。
+const goBack = () => {
+  const from = String(route.query.from || '')
+  if (from === 'product') {
+    router.push({
+      path: '/product',
+      query: {
+        Id: route.query.Id,
+        MerchantId: route.query.MerchantId,
+        GoodName: route.query.GoodName,
+        Price: route.query.Price,
+        GoodImg: route.query.GoodImg,
+        GoodType: route.query.GoodType,
+        ProductCode: route.query.ProductCode
+      }
+    })
+    return
+  }
+  if (from === 'user') {
+    router.push(getMerchantId() ? '/merchant/user/info' : '/customer/user/info')
+    return
+  }
+  router.push(getMerchantId() ? '/merchant' : '/customer')
+}
 
 const goUserCenter = () => {
   const isMerchant = getMerchantId() && getMerchantId() !== 'null'
@@ -857,7 +868,7 @@ button { background: none; border: 0; cursor: pointer; }
 .wrap.top { padding-bottom: 0; }
 .crumb { display: flex; align-items: center; font-size: var(--fs-xs); color: var(--ink-3); }
 .crumb a { color: inherit; text-decoration: none; }
-.crumb a:hover { color: var(--ink); }
+.crumb a:hover { color: var(--brand-ink); }
 .crumb .sp { font-style: normal; padding: 0 var(--s2); }
 
 .page-head { margin-top: var(--s5); display: grid; grid-template-columns: minmax(0, 1fr) auto;
@@ -875,7 +886,7 @@ button { background: none; border: 0; cursor: pointer; }
                      border: 1px solid var(--line-2); border-radius: 0;
                      font-size: var(--fs-sm); color: var(--ink-2); text-decoration: none;
                      background: var(--surface); white-space: nowrap; }
-.head-actions .btn:hover { border-color: var(--ink); color: var(--ink); }
+.head-actions .btn:hover { border-color: var(--brand-ink); color: var(--brand-ink); }
 
 /* ── A 版店铺头横带（`.a-shop-hero`）──────────────────────────────────────────
    首字标 = 直角方框；facts 走等宽小字的细框签；三个动作竖排。
@@ -885,7 +896,7 @@ button { background: none; border: 0; cursor: pointer; }
                align-items: center; border: 1px solid var(--line); padding: 20px;
                background: var(--surface); }
 .a-shop-mark { width: 96px; height: 96px; display: grid; place-items: center;
-               border: 1px solid var(--ink); background: var(--surface);
+               border: 1px solid var(--brand-ink); background: var(--brand-tint);
                font-family: var(--font-display); font-size: 40px; line-height: 1; flex: none; }
 .a-shop-main { min-width: 0; }
 .a-shop-name { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
@@ -893,8 +904,8 @@ button { background: none; border: 0; cursor: pointer; }
                   line-height: 1.2; }
 /* 认证 tag：直角、墨底白字、等宽小字 —— 与「已核验」这枚事实同权重。 */
 .tag.dark { display: inline-flex; align-items: center; gap: var(--s1); height: 20px;
-            padding: 0 7px; border: 1px solid var(--ink); background: var(--ink);
-            color: var(--bg); font-family: var(--font-mono); font-size: 10px;
+            padding: 0 7px; border: 1px solid var(--brand); background: var(--brand);
+            color: var(--surface); font-family: var(--font-mono); font-size: 10px;
             letter-spacing: 0.05em; line-height: 1; white-space: nowrap; }
 .fact-ic { width: 12px; height: 12px; }
 .a-shop-meta { margin-top: var(--s2); font-size: var(--fs-xs); color: var(--ink-3); }
@@ -910,13 +921,13 @@ button { background: none; border: 0; cursor: pointer; }
 
 /* 三个动作：A 版直角描边按钮；「已关注」是状态，退回墨底白字。 */
 .a-shop-ops { display: flex; flex-direction: column; gap: 7px; min-width: 118px; }
-.act { height: 34px; padding: 0 var(--s3); border: 1px solid var(--ink); border-radius: 0;
+.act { height: 34px; padding: 0 var(--s3); border: 1px solid var(--brand-ink); border-radius: 0;
        background: var(--surface); font-size: var(--fs-xs); color: var(--ink);
        white-space: nowrap; transition: background .12s linear, color .12s linear; }
-.act:hover:not(:disabled) { background: var(--ink); color: var(--bg); }
+.act:hover:not(:disabled) { background: var(--brand); color: var(--surface); }
 .act:disabled { opacity: .4; cursor: default; }
-.act-on { background: var(--ink); border-color: var(--ink); color: var(--bg); }
-.act-on:hover:not(:disabled) { background: var(--ink); border-color: var(--ink); color: var(--bg); }
+.act-on { background: var(--brand); border-color: var(--brand); color: var(--surface); }
+.act-on:hover:not(:disabled) { background: var(--brand); border-color: var(--brand); color: var(--surface); }
 
 .wrap { max-width: 1180px; margin: 0 auto; padding: var(--s6) var(--s5) var(--s8); }
 
@@ -936,13 +947,13 @@ button { background: none; border: 0; cursor: pointer; }
 /* ── 三 · Tab 条（A 版 `.a-shop-tabs`）────────────────────────────────────────
    直角方块：未选中透明底 + 1px 底边线；选中态整格墨底反白，计数用等宽小字。
    ⚠️ 仍是**真 tab**：`role` / `aria-selected` / 点击处理都在模板里原样保留。 */
-.tabs { margin-top: var(--s4); display: flex; border-bottom: 1px solid var(--ink); }
+.tabs { margin-top: var(--s4); display: flex; border-bottom: 1px solid var(--brand-ink); }
 .tab { display: flex; align-items: center; gap: var(--s2); padding: 10px 18px;
        border: 1px solid transparent; border-bottom: 0; background: transparent;
        font-size: var(--fs-xs); color: var(--ink-2); white-space: nowrap;
        transition: color .12s linear; }
-.tab:hover { color: var(--ink); }
-.tab-on { background: var(--ink); border-color: var(--ink); color: var(--bg); }
+.tab:hover { color: var(--brand-ink); }
+.tab-on { background: var(--brand); border-color: var(--brand); color: var(--surface); }
 .cnt { font-family: var(--font-mono); font-size: 9px; opacity: .75; }
 
 /* ── 占位（用户新规：数据不足 → 占位，不静默消失）─────────────────────────────
@@ -971,10 +982,10 @@ button { background: none; border: 0; cursor: pointer; }
             overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .cpn-cond { font-size: 10px; line-height: 1.5; color: var(--ink-3);
             overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.cpn-get { flex: 0 0 auto; height: 28px; padding: 0 10px; border: 1px solid var(--ink);
+.cpn-get { flex: 0 0 auto; height: 28px; padding: 0 10px; border: 1px solid var(--brand-ink);
            border-radius: 0; font-size: 11px; color: var(--ink); background: var(--surface);
            white-space: nowrap; transition: background .12s linear, color .12s linear; }
-.cpn-get:hover:not(:disabled) { background: var(--ink); color: var(--bg); }
+.cpn-get:hover:not(:disabled) { background: var(--brand); color: var(--surface); }
 .cpn-get:disabled { opacity: .4; color: var(--ink-3); background: var(--surface-2);
                     border-color: var(--line-2); cursor: default; }
 
@@ -1054,7 +1065,7 @@ button { background: none; border: 0; cursor: pointer; }
           font-variant-numeric: tabular-nums; }
 .col-nm { font-size: var(--fs-xs); line-height: 1.4; color: var(--ink-2);
           display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
-.col:hover .col-nm { color: var(--ink); }
+.col:hover .col-nm { color: var(--brand-ink); }
 
 /* ── 三-b 分类筛选 chip（**只在 ≥2 个类目时渲染**，条件见模板）────────────────
    A 版直角小签：选中态墨底反白；计数用等宽字，比类别名浅一档。 */
@@ -1062,11 +1073,11 @@ button { background: none; border: 0; cursor: pointer; }
 .chip { height: 30px; padding: 0 var(--s3); border: 1px solid var(--line-2); border-radius: 0;
         background: var(--surface); font-size: var(--fs-xs); color: var(--ink-2);
         white-space: nowrap; transition: border-color .12s linear, background .12s linear, color .12s linear; }
-.chip:hover { border-color: var(--ink); color: var(--ink); }
-.chip-on { background: var(--ink); border-color: var(--ink); color: var(--bg); font-weight: var(--fw-med); }
+.chip:hover { border-color: var(--brand-ink); color: var(--brand-ink); }
+.chip-on { background: var(--brand); border-color: var(--brand); color: var(--surface); font-weight: var(--fw-med); }
 /* chip 上的件数 —— 比 chip 文案再浅一档（它是量词，不是类别本身）。 */
 .chip-n { font-style: normal; color: var(--ink-3); font-variant-numeric: tabular-nums; }
-.chip-on .chip-n { color: var(--bg); opacity: .75; }
+.chip-on .chip-n { color: var(--surface); opacity: .75; }
 
 /* ── 三-b 三态（载入 / 报错 / 空）────────────────────────────────────────────
    空态是**一次邀请**（给一个真能走的去处），不是一句情绪；报错说清是什么没成、
@@ -1075,9 +1086,9 @@ button { background: none; border: 0; cursor: pointer; }
 .note-err { color: var(--danger); }
 .note-empty p { margin-bottom: var(--s3); }
 .retry { display: inline-block; height: 32px; line-height: 30px; padding: 0 var(--s3);
-         border: 1px solid var(--ink); border-radius: 0; font-size: var(--fs-xs);
-         color: var(--ink); background: var(--surface); text-decoration: none; vertical-align: middle; }
-.retry:hover { background: var(--ink); color: var(--bg); }
+         border: 1px solid var(--brand-ink); border-radius: 0; font-size: var(--fs-xs);
+         color: var(--brand-ink); background: var(--surface); text-decoration: none; vertical-align: middle; }
+.retry:hover { background: var(--brand); color: var(--surface); }
 .note-err .retry { margin-left: var(--s2); }
 
 /* ── 三-b / 三-c / 四 商品格 —— `.cards` 是**栅格**（版面），`.card` 本体已搬进
@@ -1087,7 +1098,7 @@ button { background: none; border: 0; cursor: pointer; }
    有框、三段价），收成一件之后「三处一致」是**结构**保证的，不靠注释声明。
    ⚠️ A 版 `.reco-grid` 把这一页的商品格改成**三列错落**（1.2 / 0.9 / 1）；
    商品卡本体仍由 `ProductCard.vue` 提供，栅格变化不触碰卡内结构。 */
-.cards { margin-top: var(--s5); display: grid; grid-template-columns: 1.2fr .9fr 1fr; gap: var(--s4); }
+.cards { margin-top: var(--s5); }
 /* ⚠️ chip 行在时它自己已经带了 `margin-bottom`，栅格的上边距就不该再叠一层（否则第一排
    商品被顶低 24px）。用**相邻兄弟**判，不靠「有没有 chip」的 if。 */
 .chips + .cards, .chips + .note { margin-top: 0; }
@@ -1097,7 +1108,7 @@ button { background: none; border: 0; cursor: pointer; }
 /* ── 一级 tab（`本店商品` / `平台活动`，2026-10-12 用户裁定 ④）────────────────────
    A 版 `.a-shop-view`：直角页签、选中整格墨底反白，与二级 `.tabs` 同一套方块语言，
    但保留 `--fs-sm` + 更大的左右留白，两级仍能分出层级。 */
-.pact-tabs { display: flex; border-bottom: 1px solid var(--ink); margin-bottom: var(--s6); }
+.pact-tabs { display: flex; border-bottom: 1px solid var(--brand-ink); margin-bottom: var(--s6); }
 .pact-tab {
   padding: 11px 22px;
   border: 1px solid var(--line-2);
@@ -1109,6 +1120,6 @@ button { background: none; border: 0; cursor: pointer; }
   color: var(--ink-2);
   cursor: pointer;
 }
-.pact-tab:hover { border-color: var(--ink); color: var(--ink); }
-.pact-tab-on { background: var(--ink); border-color: var(--ink); color: var(--bg); }
+.pact-tab:hover { border-color: var(--brand-ink); color: var(--brand-ink); }
+.pact-tab-on { background: var(--brand); border-color: var(--brand); color: var(--surface); }
 </style>

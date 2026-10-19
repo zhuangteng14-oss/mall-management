@@ -271,6 +271,11 @@ watch(() => route.query.kw, (kw) => {
 onMounted(() => {
   if (route.query.back === 'search') {
     loadState()
+  } else if (!String(route.query.kw || '').trim()) {
+    // 2026-10-19 用户令：购物车「继续购物」等入口不带 kw ⇒ 必须默认铺满全部商品。
+    // 改前这里什么都不做，首页接口从未被调用 ⇒ 页面只剩「没有找到相关商品」。`loadByType()`
+    // 在 `activeType === null` 时走的正是既有全量面（`goodsSelectHome`），不新增端点。
+    loadByType()
   }
 })
 
