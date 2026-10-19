@@ -138,7 +138,7 @@ const props = defineProps({
   // 导航前的副作用（可空）。收 `goods` 参数以便调用方按行决策；见文件头 ②。
   beforeNav: { type: Function, default: null },
   // 图上角的小签（可空）。空串 ⇒ 不画。见文件头。
-  tag: { type: String, default: '' },
+  tag: { type: String, default: '' }, allKinds: { type: Boolean, default: false },
   // 来源标记（可空）。空串 ⇒ **一个键都不加**（URL 逐字同改前）。见文件头〈为什么要 `from` 这个 prop〉。
   from: { type: String, default: '' }
 })
@@ -186,7 +186,7 @@ const isBrand = computed(() => {
   const v = props.goods && props.goods.IsBrand
   return v === true || v === 1 || String(v) === '1'
 })
-const kinds = computed(() => {
+const kinds = computed(() => { if (props.allKinds) { const all = []; if (isSeckill(props.goods)) all.push({ key: 'seckill', text: '秒杀' }); if (isSubsidy(props.goods)) all.push({ key: 'subsidy', text: '国补' }); if (isBrand.value) all.push({ key: 'brand', text: '品牌' }); return all }
   // 2026-10-19 用户令：标签**严格互斥、按优先级只画一枚** —— 秒杀 > 国补 > 品牌。
   // 「同屏多签」的旧口径已废弃：秒杀+国补同时命中时只留红色【秒杀】。
   if (isSeckill(props.goods)) return [{ key: 'seckill', text: '秒杀' }]

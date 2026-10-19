@@ -316,7 +316,7 @@ public class GoodsDao {
         String[] keys = keyword.trim().split("");
         StringBuilder nameSql = new StringBuilder();
         java.util.List<Object> args = new java.util.ArrayList<>();
-        args.add(keyword.trim());
+        args.add(keyword.trim()); String kwTrim = keyword.trim(); boolean tagSeckill = kwTrim.equals("秒杀") || kwTrim.equals("秒杀商品"); boolean tagSubsidy = kwTrim.equals("国补") || kwTrim.equals("国补商品") || kwTrim.equals("国家补贴"); boolean tagBrand = kwTrim.equals("品牌") || kwTrim.equals("品牌商品");
         for (String s : keys) {
             if (!s.isEmpty()) {
                 // ⚠️ 块 7 收尾：逐字符 LIKE 从**字符串拼接**改成**绑定参数**（既有缺陷结清）。
@@ -325,7 +325,7 @@ public class GoodsDao {
                 nameSql.append(" OR g.GoodName LIKE CONCAT('%', ?, '%') ESCAPE '\\\\' ");
                 args.add(likeEscape(s));
             }
-        }
+        } if (tagSeckill) nameSql.append(" OR ").append(MarketingGoodsFlags.existsIsSeckill("g")); if (tagSubsidy) nameSql.append(" OR ").append(MarketingGoodsFlags.existsIsSubsidy("g")); if (tagBrand) nameSql.append(" OR EXISTS (SELECT 1 FROM mall_management_sql.user ub WHERE ub.merchantid = g.MerchantId AND ub.IsBrand = 1) ");
 
         // ⚠️ 2026-10-12〈Bug 2/3〉起本条的**列清单不再逐字等于三层前的 productSearch**：
         //    SELECT * → SELECT g.* + 三个营销态布尔（IsSeckill / IsSoldOut / IsSubsidy，

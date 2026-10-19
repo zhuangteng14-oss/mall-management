@@ -124,7 +124,7 @@
               （命令四要求两页排布一致，所以这里同步换，不留旧瀑布流）。
            `:before-nav="saveState"` 承担原来「跳转前保存」的同一件事。 -->
       <div class="grid mosaic-grid">
-        <ProductCard v-for="(goods, i) in shownList" :key="goods.Id" :goods="goods" :class="MOSAIC[i % MOSAIC.length]" :before-nav="saveState" from="search" />
+        <ProductCard v-for="(goods, i) in shownList" :key="goods.Id" :goods="goods" :class="MOSAIC[i % MOSAIC.length]" :before-nav="saveState" from="search" all-kinds />
       </div>
 
       <!-- 无限滚动哨兵（块 7 收尾 · P1）：替代原稿 7 枚 disabled 页码。 -->
