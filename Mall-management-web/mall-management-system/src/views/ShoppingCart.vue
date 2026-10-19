@@ -125,15 +125,15 @@
       <div class="paybar-in">
         <span class="sel">共 {{ totalCount }} 件商品</span>
         <span class="cp" :class="{ off: !couponPickable }" :title="couponHint"><i>券</i><select v-model="couponId" :disabled="busy || !couponPickable"><option value="">{{ usableCoupons.length ? '不使用优惠券' : '暂无可用券' }}</option><option v-for="c in usableCoupons" :key="c.CouponId" :value="c.CouponId" :disabled="!!couponBlockedReason(c)">{{ couponLabel(c) }}{{ couponBlockedReason(c) ? '（' + couponBlockedReason(c) + '）' : '' }}</option></select><b v-if="discount > 0" class="save">−¥{{ formatPrice(discount) }}</b></span>
-        <span class="sums">
-          <span class="d">商品总额 <s v-if="isVipMember" class="m-was">¥{{ formatPrice(cartTotal) }}</s> ¥{{ formatPrice(memberTotal) }}</span>
-          <span class="total" title="口径：VIP 先按 Σ（成交价快照 × 数量）× 0.9 得会员价，再减该券的减免；非 VIP 与加券之前逐字同值。实付以结算响应为准。">
-            <span class="k">合计</span><span class="v"><i>¥</i>{{ formatPrice(payTotal) }}</span>
-          </span>
+        <span class="pts" :class="{ off: !pointsUsable }" :title="pointsHint">
+          <label class="pts-sw"><input type="checkbox" v-model="usePoints" :disabled="busy || !pointsUsable" /><span class="pts-track" aria-hidden="true"><span class="pts-dot"></span></span><span class="pts-name">使用积分抵扣</span></label>
+          <span v-if="usePoints && pointsToUse > 0" class="pts-detail">已使用 <b>{{ pointsToUse }}</b> 积分，抵扣 <b>¥{{ formatPrice(pointsDiscount) }}</b></span><span v-else class="pts-balance">{{ pointsLoading ? '积分读取中…' : pointsBalance > 0 ? `可用 ${pointsBalance} 积分` : '暂无可用积分' }}</span>
         </span>
-        <button class="go" :disabled="busy || !canCheckoutAll" @click="checkout()">
-          <IconGlyph name="ok" />{{ busy ? '处理中…' : `去结算（${totalCount} 件）` }}
-        </button>
+        <span class="sums">
+          <span class="d">商品总额 <s v-if="isVipMember" class="m-was">¥{{ formatPrice(cartTotal) }}</s> ¥{{ formatPrice(memberTotal) }}<template v-if="pointsDiscount > 0"> · 积分 −¥{{ formatPrice(pointsDiscount) }}</template></span>
+          <span class="total" title="口径：VIP 先按 Σ（成交价快照 × 数量）× 0.9 得会员价，再减券与积分抵扣；非 VIP 与加券之前逐字同值。实付以结算响应为准。"><span class="k">合计</span><span class="v"><i>¥</i>{{ formatPrice(finalPay) }}</span></span>
+        </span>
+        <button class="go" :disabled="busy || !canCheckoutAll" @click="checkout()"><IconGlyph name="ok" />{{ busy ? '处理中…' : `去结算（${totalCount} 件）` }}</button>
       </div>
     </div>
   </div>
@@ -149,7 +149,7 @@
 import { ref, computed, onMounted } from 'vue'
 import { handleApiError } from '../api/http'
 import { cartList, cartUpdate, cartRemove, cartCheckout } from '../api/order'; import { useCouponPick } from '../composables/useCouponPick'   // ⚠️ 两条 import **同行**（2026-10-12 结算用券那一笔）—— 本文件被 `api-contract.md` 按 `:108/156/190`、`slot-registry.md` 按 `:46/77/173/198` 等钉住，**多一行就是十几处集体顶漂**（同 `HomePage.vue:284` 那条的做法）
-import { resolveBuyerId, getUsername, getMemberLevel } from '../api/auth'; import { memberPriceOf } from '../composables/useMember'   // 批四第二批 commit 3（**同行追加、不新增行**）：会员价展示用（`getMemberLevel` 读本地恢复态、`memberPriceOf` 与 Java `MemberPricing.priceOf` 同式）; import IconGlyph from '../components/ui/IconGlyph.vue'   // ⚠️ 两条 import **同行**（2026-10-11 补图标那一笔）—— 合并到既有行 = 不新增行号漂移（`api-contract.md` 按 `:108/156/190`、`slot-registry.md` 按 `:46/77/173/198` 钉住本文件）
+import { resolveBuyerId, getUsername, getMemberLevel, getCustomerId } from '../api/auth'; import { memberPriceOf } from '../composables/useMember'; import { memberOverview } from '../api/member'; import IconGlyph from '../components/ui/IconGlyph.vue'   // 批四第二批 commit 3（**同行追加、不新增行**）：会员价展示用（`getMemberLevel` 读本地恢复态、`memberPriceOf` 与 Java `MemberPricing.priceOf` 同式）；`memberOverview` = 积分余额；`IconGlyph` 见 2026-10-11 补图标那一笔 —— 合并到既有行 = 不新增行号漂移（`api-contract.md` 按 `:108/156/190`、`slot-registry.md` 按 `:46/77/173/198` 钉住本文件）
 
 // 上界与后端 `CartService.MAX_QUANTITY` **同值**（999）。前端拿它当 `+` 的闸，
 // 后端仍是权威（超了回「数量最多 999 件」）—— 两处都留，免得只在一边拦。
@@ -157,7 +157,7 @@ const MAX_QTY = 999
 
 const rows = ref([])
 const loading = ref(false)
-const busy = ref(false)
+const busy = ref(false); const pointsBalance = ref(0); const pointsLoading = ref(false); const usePoints = ref(false)
 
 const getBuyerId = () => resolveBuyerId()
 
@@ -204,7 +204,7 @@ const load = async () => {
   try {
     const data = await cartList(customerId)
     if (data.success) {
-      rows.value = data.list || []
+      rows.value = data.list || []; usePoints.value = false
     } else {
       console.error('获取购物车失败', data.msg)
     }
@@ -273,7 +273,7 @@ const {
   enabled: computed(() => rows.value.length > 0 && groupCount.value === 1),
   // ⚠️ 传 computed 不传字符串：整车是**异步**拉回来的，字符串会冻结在 setup 那一刻（恒「含 0 个商家」）
   blockedHint: computed(() => `本车含 ${groupCount.value} 个商家，优惠券只能抵一笔订单 —— 请按商家分单结算`), hasDiscount
-})
+}); const capPointsOf = (base) => Math.max(0, Math.floor(Math.round(Number(base || 0) * 100) / 5)); const maxPointsByCap = computed(() => Math.min(pointsBalance.value, capPointsOf(payTotal.value))); const pointsUsable = computed(() => groupCount.value === 1 && !pointsLoading.value && maxPointsByCap.value > 0); const pointsToUse = computed(() => (usePoints.value && pointsUsable.value ? maxPointsByCap.value : 0)); const pointsDiscount = computed(() => Math.round(pointsToUse.value) / 100); const finalPay = computed(() => Math.max(0, Number(payTotal.value) - pointsDiscount.value)); const pointsHint = computed(() => groupCount.value !== 1 ? '积分抵扣只能用在单个商家的结算上（请分单结算）' : pointsLoading.value ? '积分读取中…' : pointsBalance.value <= 0 ? '暂无可用积分 —— 每日签到、购物返积分可获得' : maxPointsByCap.value <= 0 ? '本单金额不足，暂不可抵扣' : '100 积分 = ¥1；单笔最多抵折后价的 20%'); const loadPoints = async () => { const cid = getCustomerId(); if (!cid) { pointsBalance.value = 0; return } pointsLoading.value = true; try { const data = await memberOverview(cid); pointsBalance.value = data && data.success && data.account ? Math.max(0, Number(data.account.Balance || 0)) : 0 } catch { pointsBalance.value = 0 } finally { pointsLoading.value = false } }; const rowPoints = (code) => { if (!usePoints.value || !pointsUsable.value) return 0; const row = rows.value.find((r) => r.ProductCode === code); if (!row) return 0; const base = isVipMember.value ? memberPriceOf(subtotal(row)) : subtotal(row); return Math.min(pointsBalance.value, capPointsOf(base)) }
 
 /**
  * 结算。不传 `productCode` = 整车；传了 = 只结算那一件。
@@ -287,15 +287,15 @@ const checkout = async (productCode) => {
   busy.value = true
   // ⚠️ 券只随**整车且单商家**那一笔走。逐行结算**不带券** —— 免得「选了券却按原价成交」
   //    这种静默；空串会被 `api/order.js` 的 `q()` 丢掉 ⇒ 后端看到的就是「没用券」。
-  const useCoupon = !productCode && couponPickable.value ? couponId.value : ''
+  const useCoupon = !productCode && couponPickable.value ? couponId.value : ''; const pointsForCheckout = productCode ? rowPoints(productCode) : pointsToUse.value
   try {
-    const res = await cartCheckout({ CustomerId: getBuyerId(), ProductCode: productCode, CouponId: useCoupon })
+    const res = await cartCheckout({ CustomerId: getBuyerId(), ProductCode: productCode, CouponId: useCoupon, PointsUsed: pointsForCheckout })
     if (res.success) {
       // 券已核销 ⇒ 清掉选择并重拉券包（那张券不会再出现在可选项里）。
       // ⚠️ 只在**成功**这一支重置：失败时后端**没**烧券（`addLocked` 里 CAS 抢不到就不建单），
       //    留着选择让用户直接重试。
-      resetCoupon()
-      await loadCoupons()
+      resetCoupon(); usePoints.value = false
+      await loadCoupons(); await loadPoints()
       alert(res.msg || '结算成功')
       await load()
       goOrders()
@@ -320,7 +320,7 @@ const goOrders = () => {
 
 onMounted(load)
 // 券包与购物车**并发**拉（不串行等）—— 两处各自成败，谁挂了都不影响另一边。
-onMounted(loadCoupons)
+onMounted(loadCoupons); onMounted(loadPoints)
 /* eslint-enable no-undef */
 </script>
 
@@ -636,4 +636,55 @@ onMounted(loadCoupons)
    金额仍是**预估值** —— 实付以 `cartCheckout` 响应为准（拆分多笔单时逐笔取整）。 */
 .m-was { color: var(--ink-3); font-size: var(--fs-xs); text-decoration: line-through; margin-right: 4px; }
 .m-price { color: var(--brand-ink); font-weight: var(--fw-med); }
+
+/* ── 积分抵扣开关（第三批㉘㉙，2026-10-19）
+   ⚠️ 规则写在**最大被引行 `:465` 之后**（理由同上一条）：插到 `.paybar` 原规则旁会让
+      `slot-registry.md` 的 `:369/372/446/465` 集体顶漂。
+   金额与可用上限都只是**预估** —— 真正扣减在 `OrderService.addLocked`（上限 20% + 余额 CAS），
+   本页只负责说清楚「要扣多少、抵多少」。 */
+.paybar .pts { display: inline-flex; align-items: center; gap: var(--s3); min-width: 0; }
+.paybar .pts-sw { position: relative; display: inline-flex; align-items: center; gap: var(--s2); cursor: pointer; user-select: none; }
+.paybar .pts-sw input { position: absolute; opacity: 0; width: 0; height: 0; }
+.paybar .pts-track { position: relative; flex: none; width: 34px; height: 20px; border-radius: 999px; background: #d8dde0; transition: background .22s ease; }
+.paybar .pts-dot { position: absolute; top: 2px; left: 2px; width: 16px; height: 16px; border-radius: 50%; background: #fff; box-shadow: 0 1px 2px rgba(0, 0, 0, .18); transition: transform .22s cubic-bezier(.2, .8, .2, 1); }
+.paybar .pts-sw input:checked + .pts-track { background: var(--brand); }
+.paybar .pts-sw input:checked + .pts-track .pts-dot { transform: translateX(14px); }
+.paybar .pts-sw input:focus-visible + .pts-track { outline: 2px solid var(--brand); outline-offset: 2px; }
+.paybar .pts-name { font-size: var(--fs-sm); color: var(--ink-2); }
+.paybar .pts-detail { font-size: var(--fs-xs); color: var(--brand-ink); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.paybar .pts-detail b { font-weight: var(--fw-med); }
+.paybar .pts-balance { font-size: var(--fs-xs); color: var(--ink-3); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.paybar .pts.off .pts-sw { cursor: not-allowed; }
+.paybar .pts.off .pts-name { color: var(--ink-3); }
+@media (max-width: 1120px) {
+  .paybar .pts { width: 100%; justify-content: space-between; }
+  .paybar .pts-detail, .paybar .pts-balance { text-align: right; white-space: normal; }
+}
+/* ── 结算栏改两行栅格（2026-10-19 截图复检）
+   原单行 flex 在 1180px 内容宽里塞不下「券 + 积分明细 + 会员价合计」⇒ 截图实测
+   `使用积分抵扣` 被压成竖排、`合计` 折成两行。改两行：上行 = 件数 / 券 / 积分，
+   下行 = 商品总额与合计（右对齐），去结算按钮跨两行贴右侧；窄屏仍按 DOM 顺序堆叠。 */
+.paybar-in { display: grid; grid-template-columns: auto auto minmax(0, 1fr) auto; align-items: center; column-gap: var(--s5); row-gap: var(--s2); }
+.paybar .sel { grid-column: 1; grid-row: 1; white-space: nowrap; }
+.paybar .cp { grid-column: 2; grid-row: 1; }
+.paybar .pts { grid-column: 3; grid-row: 1; }
+.paybar .sums { grid-column: 1 / span 3; grid-row: 2; margin-left: 0; justify-content: flex-end; }
+.paybar .go { grid-column: 4; grid-row: 1 / span 2; }
+.paybar .pts-name, .paybar .total .k { white-space: nowrap; }
+@media (max-width: 1120px) {
+  .paybar-in { grid-template-columns: minmax(0, 1fr); }
+  .paybar .sel, .paybar .cp, .paybar .pts, .paybar .sums, .paybar .go { grid-column: 1; grid-row: auto; }
+  .paybar .sums { justify-content: space-between; }
+}
+/* ── 会员价在数字列里竖排（2026-10-19 截图复检）
+   单价 / 小计两列都只有 112px：VIP 时要同时画划线原价与会员价，横排放不下，
+   会溢出到右侧「结算 / 删除」按钮上（截图实测 `¥809` 被按钮盖住）。改成上下两行、右对齐。 */
+.row .unit .v, .row .sub { display: flex; flex-direction: column; align-items: flex-end; justify-content: center; }
+.row .unit .v .m-was, .row .sub .m-was { margin-right: 0; }
+.row .sub .m-was { font-family: var(--font); font-weight: var(--fw-reg); }
+/* 会员价那一行是 `--fs-lg`，`¥2322.00` 在 112px 的小计列里仍差几个像素（会压到「结算」按钮底下）
+   ⇒ 数字两列各加 8/16px，从名称列（`minmax(0,1fr)`，本来就是省略号）里匀出来。 */
+@media (min-width: 1121px) {
+  .list-head, .row { grid-template-columns: 64px minmax(0, 1fr) 120px 104px 128px 168px; }
+}
 </style>

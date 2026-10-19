@@ -338,10 +338,14 @@ const rowKinds = computed(() => (
   background: var(--brand-tint);
   color: var(--brand-ink);
 }
-/* 品牌标（批四第二批）：与国补同色系但换一档底色，两枚同屏时仍分得开。 */
+/* 品牌标（批四第二批；2026-10-19 第二步升维）—— 用户明令「去掉浅绿色标签，用香槟金 / 黑金」：
+   墨黑底 + 香槟金字 + 发丝金边。⚠️ 这是**唯一**一处越过 tokens 青瓷绿族的颜色，按用户口令落在
+   品牌语义上，不扩用到其它标签（秒杀仍朱砂、国补仍青瓷绿）。 */
 .pcard-kind.brand {
-  background: var(--brand-soft);
-  color: var(--brand-ink);
+  background: linear-gradient(135deg, #2b2418 0%, #14110c 100%);
+  color: #e8c98a;
+  border: 1px solid rgba(201, 162, 90, 0.55);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.12);
 }
 /* ── 隐形占位签（用户 ①，2026-10-12）────────────────────────────────────────────────
    普通商品（两枚类别标签都不命中）在这一行画的那一枚：**只占高度、不显示**。
