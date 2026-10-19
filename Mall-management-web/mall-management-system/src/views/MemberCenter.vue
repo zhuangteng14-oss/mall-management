@@ -30,7 +30,13 @@
       </div>
     </section>
 
-    <div class="member-layout">
+    <!-- 会员中心 / 积分商城 两个 Tab（2026-10-19 用户令：积分商城固定版块）。 -->
+    <nav class="mc-tabs" role="tablist">
+      <button type="button" class="mc-tab" :class="{ on: activeTab === 'member' }" role="tab" :aria-selected="activeTab === 'member'" @click="activeTab = 'member'">会员中心</button>
+      <button type="button" class="mc-tab" :class="{ on: activeTab === 'points' }" role="tab" :aria-selected="activeTab === 'points'" @click="activeTab = 'points'">积分商城</button>
+    </nav>
+
+    <div v-show="activeTab === 'member'" class="member-layout">
       <div class="stack">
         <!-- 黑金会员卡：全页唯一的「重色块」，其余全部退到白面。
              外框黑底 + 内框金色发丝线（A 版 `.member-card` / `.member-card-inner` 的直角色块写法）。 -->
@@ -213,13 +219,70 @@
         </section>
       </aside>
     </div>
+
+    <!-- ══ 积分商城（2026-10-19 用户令）════════════════════════════════════
+         固定版块：① 用积分兑换**不限时**优惠券（货架由后端 `/member/overview` 的
+         `exchangeProducts` 下发，前端不另抄价格）；② 1 积分 = 1 成长值。 -->
+    <div v-show="activeTab === 'points'" class="points-mall">
+      <section class="pm-hero">
+        <div>
+          <div class="kicker">POINTS MALL / 积分商城</div>
+          <h2>把积分换成马上能用的东西</h2>
+          <p>兑换的优惠券不限时、长期有效；也可以 1:1 兑换成长值，快速升到下一个等级。</p>
+        </div>
+        <div class="pm-wallet"><small>可用积分</small><b>{{ pointsText }}</b><span>100 积分 = ¥1</span></div>
+      </section>
+
+      <p v-if="actionMsg" class="mc-msg pm-msg" :class="{ bad: !actionOk }">{{ actionMsg }}</p>
+
+      <section>
+        <div class="section-title">
+          <h2>积分兑换 · 不限时优惠券</h2>
+          <span class="tiny">兑换后立即进入券包</span>
+        </div>
+        <div class="pm-grid">
+          <article v-for="p in exchangeProducts" :key="p.key" class="pm-card">
+            <span class="pm-face">¥{{ p.face }}</span>
+            <b>{{ p.name }}</b>
+            <small>{{ p.threshold ? '满 ¥' + p.threshold + ' 可用' : '无门槛' }} · 不限时</small>
+            <button type="button" class="btn sm solid" :disabled="exchanging || pointsBalance < p.cost" @click="doExchange(p)">
+              {{ pointsBalance < p.cost ? '积分不足' : p.cost + ' 积分兑换' }}
+            </button>
+          </article>
+        </div>
+      </section>
+
+      <section class="panel pm-growth">
+        <div class="panel-head">
+          <div><div class="kicker">POINTS → GROWTH</div><h2>积分兑换成长值</h2></div>
+          <span class="tag">1 积分 = 1 成长值</span>
+        </div>
+        <div class="pm-growth-body">
+          <div>
+            <p class="small muted">当前成长值 {{ growthNow }}，距下一级还差 {{ growthToNext }} 成长值。兑换后立即重算等级。</p>
+            <div class="pm-quick">
+              <button v-for="n in GROWTH_PRESETS" :key="n" type="button" class="btn xs" :class="{ solid: Number(growthPoints) === n }" @click="growthPoints = n">{{ n }}</button>
+              <button type="button" class="btn xs" @click="growthPoints = pointsBalance">全部</button>
+            </div>
+          </div>
+          <label class="pm-input">
+            <span>消耗积分</span>
+            <input v-model.number="growthPoints" type="number" min="1" :max="pointsBalance" step="1">
+          </label>
+          <button type="button" class="btn solid" :disabled="converting || !growthPoints || growthPoints > pointsBalance" @click="doConvertGrowth">{{ converting ? '兑换中…' : '兑换成长值' }}</button>
+        </div>
+      </section>
+    </div>
   </main>
 </template>
 
 <script setup>
 import { computed, onMounted, ref } from 'vue'
 import { getBalance, getCustomerId, getMemberLevel, getUsername, setMemberLevel } from '../api/auth'
-import { openMember, claimDailyCoupon, memberOverview, memberSignin, memberPointLogs } from '../api/member'
+import { openMember, claimDailyCoupon, memberOverview, memberSignin, memberPointLogs, memberExchangeCoupon, memberExchangeGrowth } from '../api/member'
+
+// 会员中心 / 积分商城两个 Tab（2026-10-19 用户令：积分商城为新 Tab）。
+const activeTab = ref('member')
 
 // 等级用本地 ref：开通成功后立即切换页面展示；跨页面同步靠下一次 `/user/me`（刷新 / 新标签页）。
 const level = ref(Number(getMemberLevel()) || 0)
@@ -438,6 +501,68 @@ async function doClaimDaily() {
   }
 }
 
+// ── 积分商城（2026-10-19 用户令）──────────────────────────────────────────────
+// 货架以 `/member/overview` 下发的 `exchangeProducts` 为准；下面的 `FALLBACK_PRODUCTS`
+// 只在概览尚未返回/读取失败时占位用，价格与后端保持同一口径（改价先改后端）。
+const FALLBACK_PRODUCTS = [
+  { key: 'coupon5', name: '满 ¥50 减 ¥5 券', face: 5, threshold: 50, cost: 200 },
+  { key: 'coupon10', name: '满 ¥100 减 ¥10 券', face: 10, threshold: 100, cost: 500 },
+  { key: 'coupon20', name: '满 ¥200 减 ¥20 券', face: 20, threshold: 200, cost: 1000 },
+]
+const exchangeProducts = computed(() => {
+  const list = overview.value && overview.value.exchangeProducts
+  return Array.isArray(list) && list.length ? list : FALLBACK_PRODUCTS
+})
+
+const exchanging = ref(false)
+async function doExchange(product) {
+  if (!customerId) { say(false, '未识别到客户账号，请重新登录'); return }
+  if (!product || pointsBalance.value < Number(product.cost)) { say(false, '积分不足'); return }
+  exchanging.value = true
+  actionMsg.value = ''
+  try {
+    const requestId = 'EX' + Date.now() + Math.random().toString(36).slice(2, 8)
+    const data = await memberExchangeCoupon({ customerId, product: product.key, requestId })
+    if (data && data.success) {
+      say(true, data.msg || '兑换成功，优惠券已放入券包')
+      await Promise.all([loadOverview(), loadLogs()])
+    } else {
+      say(false, (data && data.msg) || '兑换失败')
+    }
+  } catch (e) {
+    say(false, '兑换失败：' + (e && e.message ? e.message : '网络错误'))
+  } finally {
+    exchanging.value = false
+  }
+}
+
+const growthNow = computed(() => Number((account.value && account.value.GrowthValue) || 0))
+const GROWTH_PRESETS = [50, 100, 200, 500]
+const growthPoints = ref(100)
+const converting = ref(false)
+async function doConvertGrowth() {
+  if (!customerId) { say(false, '未识别到客户账号，请重新登录'); return }
+  const n = Math.floor(Number(growthPoints.value))
+  if (!Number.isFinite(n) || n < 1) { say(false, '请输入大于 0 的积分数量'); return }
+  if (n > pointsBalance.value) { say(false, '积分不足，当前可用 ' + pointsBalance.value); return }
+  converting.value = true
+  actionMsg.value = ''
+  try {
+    const requestId = 'GR' + Date.now() + Math.random().toString(36).slice(2, 8)
+    const data = await memberExchangeGrowth({ customerId, points: n, requestId })
+    if (data && data.success) {
+      say(true, data.msg || `已兑换 ${n} 成长值`)
+      await Promise.all([loadOverview(), loadLogs()])
+    } else {
+      say(false, (data && data.msg) || '兑换失败')
+    }
+  } catch (e) {
+    say(false, '兑换失败：' + (e && e.message ? e.message : '网络错误'))
+  } finally {
+    converting.value = false
+  }
+}
+
 onMounted(() => { loadOverview(); loadLogs() })
 </script>
 
@@ -577,24 +702,24 @@ button {
 .member-card.mc-theme-white {
   --mc-bg: #f3f1ea;
   --mc-bg-solid: #f3f1ea;
-  --mc-fg: #1b1e20;
+  --mc-fg: #275e4e;              /* 浅底 ⇒ 青瓷绿文字（用户令 2026-10-19） */
   --mc-accent: #275e4e;
   --mc-accent-ink: #ffffff;
-  --mc-line: rgba(0, 0, 0, .14);
-  --mc-line-strong: rgba(0, 0, 0, .22);
-  --mc-chip-line: rgba(0, 0, 0, .24);
-  --mc-dim: rgba(0, 0, 0, .62);
-  --mc-dim-2: rgba(0, 0, 0, .5);
-  --mc-btn-line: rgba(0, 0, 0, .32);
-  --mc-btn-dim: rgba(0, 0, 0, .4);
+  --mc-line: rgba(39, 94, 78, .26);
+  --mc-line-strong: rgba(39, 94, 78, .4);
+  --mc-chip-line: rgba(39, 94, 78, .4);
+  --mc-dim: rgba(39, 94, 78, .78);
+  --mc-dim-2: rgba(39, 94, 78, .66);
+  --mc-btn-line: rgba(39, 94, 78, .5);
+  --mc-btn-dim: rgba(39, 94, 78, .58);
   --mc-bad: #b3261e;
 }
 /* 银 */
 .member-card.mc-theme-silver {
   --mc-bg: linear-gradient(135deg, #e8ebef, #c3c9d1 55%, #aeb6c0);
   --mc-bg-solid: #c3c9d1;
-  --mc-fg: #1d232c;
-  --mc-accent: #39424e;
+  --mc-fg: #275e4e;              /* 浅底 ⇒ 青瓷绿文字 */
+  --mc-accent: #275e4e;
   --mc-accent-ink: #f7f9fb;
   --mc-line: rgba(0, 0, 0, .16);
   --mc-line-strong: rgba(0, 0, 0, .24);
@@ -609,7 +734,7 @@ button {
 .member-card.mc-theme-gold {
   --mc-bg: linear-gradient(135deg, #d8b452, #b8912c 60%, #9c7a1f);
   --mc-bg-solid: #b8912c;
-  --mc-fg: #241b06;
+  --mc-fg: #275e4e;              /* 浅底 ⇒ 青瓷绿文字 */
   --mc-accent: #fff3cf;
   --mc-accent-ink: #2a2008;
   --mc-line: rgba(0, 0, 0, .2);
@@ -625,8 +750,8 @@ button {
 .member-card.mc-theme-platinum {
   --mc-bg: linear-gradient(135deg, #eef3f8, #c2ccd8 55%, #9dabb9);
   --mc-bg-solid: #c2ccd8;
-  --mc-fg: #182430;
-  --mc-accent: #2f4a63;
+  --mc-fg: #275e4e;              /* 浅底 ⇒ 青瓷绿文字 */
+  --mc-accent: #275e4e;
   --mc-accent-ink: #f2f7fb;
   --mc-line: rgba(0, 0, 0, .16);
   --mc-line-strong: rgba(0, 0, 0, .26);
@@ -641,8 +766,8 @@ button {
 .member-card.mc-theme-diamond {
   --mc-bg: linear-gradient(135deg, #e6f4fc, #a9d3ec 55%, #6fa9cf);
   --mc-bg-solid: #a9d3ec;
-  --mc-fg: #102a3c;
-  --mc-accent: #0f4c75;
+  --mc-fg: #275e4e;              /* 浅底 ⇒ 青瓷绿文字 */
+  --mc-accent: #275e4e;
   --mc-accent-ink: #f2f9ff;
   --mc-line: rgba(0, 0, 0, .15);
   --mc-line-strong: rgba(0, 0, 0, .24);
@@ -669,10 +794,10 @@ button {
   --mc-btn-dim: rgba(255, 255, 255, .45);
   --mc-bad: #ffb4a4;
 }
-/* 墨绿（仅最高等级） */
+/* 青瓷绿（仅最高等级；用户令 2026-10-19 把原墨绿改为青瓷绿） */
 .member-card.mc-theme-ink {
-  --mc-bg: linear-gradient(135deg, #1d3b33, #142e27 60%, #0d211c);
-  --mc-bg-solid: #142e27;
+  --mc-bg: linear-gradient(135deg, #3b7966, #275e4e 60%, #1c4739);
+  --mc-bg-solid: #275e4e;
   --mc-fg: #f3f1e7;
   --mc-accent: #d9c68c;
   --mc-accent-ink: #17140a;
@@ -996,6 +1121,104 @@ button {
   color: var(--ink);
 }
 
+/* ══ Tab 切换（会员中心 / 积分商城，2026-10-19 用户令）════════════════════════ */
+.mc-tabs {
+  display: flex;
+  gap: 0;
+  margin: 0 0 22px;
+  border-bottom: 1px solid var(--line);
+}
+.mc-tab {
+  position: relative;
+  padding: 11px 20px;
+  font-size: 13px;
+  letter-spacing: .04em;
+  color: var(--ink-3);
+}
+.mc-tab:hover { color: var(--ink); }
+.mc-tab.on { color: var(--brand-ink); font-weight: 600; }
+.mc-tab.on::after {
+  content: '';
+  position: absolute;
+  left: 14px;
+  right: 14px;
+  bottom: -1px;
+  height: 2px;
+  background: var(--brand-ink);
+}
+
+/* ══ 积分商城（2026-10-19 用户令）═════════════════════════════════════════════ */
+.points-mall { display: flex; flex-direction: column; gap: 26px; }
+.pm-hero {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 28px;
+  padding: 26px 28px;
+  border: 1px solid var(--line);
+  background: var(--surface);
+}
+.pm-hero h2 { margin: 8px 0 8px; font-size: 26px; font-weight: 600; letter-spacing: -.01em; }
+.pm-hero p { margin: 0; max-width: 62ch; font-size: 12px; line-height: 1.8; color: var(--ink-3); }
+.pm-wallet {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+  font-family: var(--font-mono);
+}
+.pm-wallet small { font-size: 10px; letter-spacing: .1em; color: var(--ink-3); }
+.pm-wallet b { font-size: 34px; font-weight: 500; color: var(--brand-ink); line-height: 1.1; }
+.pm-wallet span { font-size: 10px; color: var(--ink-3); }
+.pm-msg { margin: -10px 0 0; }
+
+.pm-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 16px;
+}
+.pm-card {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 22px;
+  border: 1px solid var(--line);
+  background: var(--surface);
+}
+.pm-card:hover { border-color: var(--brand); }
+.pm-face {
+  font-family: var(--font-mono);
+  font-size: 30px;
+  line-height: 1;
+  color: var(--brand-ink);
+}
+.pm-card b { font-size: 14px; font-weight: 600; }
+.pm-card small { font-size: 11px; color: var(--ink-3); }
+.pm-card .btn { margin-top: 8px; width: 100%; }
+.btn.xs { padding: 5px 9px; font-size: 11px; }
+
+.pm-growth-body {
+  display: flex;
+  align-items: flex-end;
+  gap: 18px;
+  flex-wrap: wrap;
+}
+.pm-growth-body > div:first-child { flex: 1 1 280px; min-width: 0; }
+.pm-growth-body p { margin: 0 0 12px; }
+.pm-quick { display: flex; gap: 8px; flex-wrap: wrap; }
+.pm-input { display: flex; flex-direction: column; gap: 6px; font-size: 11px; color: var(--ink-3); }
+.pm-input input {
+  width: 140px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  background: var(--surface-2);
+  font-family: var(--font-mono);
+  font-size: 13px;
+}
+.pm-input input:focus { outline: 0; border-color: var(--brand); }
+
 /* ── 断点（照 A 版 1080 / 860 / 600）────────────────────────────────────────── */
 @media (max-width: 1080px) {
   .member-layout { grid-template-columns: 1fr; }
@@ -1007,6 +1230,9 @@ button {
   .earn-grid { grid-template-columns: 1fr; }
   .earn { border-right: 0; border-bottom: 1px solid var(--line); }
   .earn:last-child { border-bottom: 0; }
+  .pm-hero { flex-direction: column; align-items: flex-start; }
+  .pm-wallet { align-items: flex-start; }
+  .pm-grid { grid-template-columns: 1fr; }
 }
 @media (max-width: 600px) {
   .page-head h1 { font-size: 32px; }

@@ -83,7 +83,7 @@
     <ProductCard :goods="g" from="search" />              ← 搜索页才传（详情页靠它回搜索页并恢复结果）
 -->
 <template>
-  <router-link class="pcard" :class="{ sold: soldOut }" :to="to" @click="onNav">
+  <router-link class="pcard" :class="[{ sold: soldOut }, priceTone]" :to="to" @click="onNav">
     <div class="pcard-img">
       <!-- ⚠️ `v-if` 不能省 —— 见文件头 ⑤（破图图标 vs 灰底；先例 `HistoricalOrders.vue:66`）。 -->
       <img v-if="goods.GoodImg" :src="goods.GoodImg" :alt="goods.GoodName" />
@@ -191,6 +191,17 @@ const kinds = computed(() => {
   if (isSeckill(props.goods)) out.push({ key: 'seckill', text: '秒杀商品' })
   if (isSubsidy(props.goods)) out.push({ key: 'subsidy', text: '国补' })
   return out
+})
+
+/**
+ * 卡片主色按商品属性动态渲染（2026-10-19 用户令）：
+ *   秒杀 → 朱砂红；国补 → 亮绿；品牌 → 金色文字 + 黑色主色；普通 → 青瓷绿。
+ * 优先级与详情页 / `skuKind` 同序（秒杀 > 国补 > 品牌 > 普通）。
+ */
+const priceTone = computed(() => {
+  if (isSeckill(props.goods)) return 'tone-seckill'
+  if (isSubsidy(props.goods)) return 'tone-subsidy'
+  return isBrand.value ? 'tone-brand' : 'tone-normal'
 })
 
 /** 这一行**实际渲染**的签：有标签就是标签本人，没有则给一枚**隐形签**（`ghost: true`）占高度。
@@ -334,9 +345,11 @@ const rowKinds = computed(() => (
   background: var(--cin-100);
   color: var(--cin-700);
 }
+/* 国补 = 亮绿（2026-10-19 用户令：普通青瓷绿 / 国补亮绿，两档要一眼分得开）。 */
 .pcard-kind.subsidy {
-  background: var(--brand-tint);
-  color: var(--brand-ink);
+  background: #dcf5e7;
+  border: 1px solid #9fd9b6;
+  color: #157347;
 }
 /* 品牌标（批四第二批；2026-10-19 第二步升维）—— 用户明令「去掉浅绿色标签，用香槟金 / 黑金」：
    墨黑底 + 香槟金字 + 发丝金边。⚠️ 这是**唯一**一处越过 tokens 青瓷绿族的颜色，按用户口令落在
@@ -434,4 +447,18 @@ const rowKinds = computed(() => (
 }
 /* 会员价（批四第二批 commit 3）：与整数价同基线的小字，只在本机恢复态是 VIP 时渲染。 */
 .pcard-price .m-price { margin-left: 6px; color: var(--brand-ink); font-size: var(--fs-xs); font-weight: var(--fw-med); white-space: nowrap; }
+
+/* ══ 卡片主色按属性动态渲染（2026-10-19 用户令）══════════════════════════════
+     秒杀 → 朱砂红；国补 → 亮绿；品牌 → 金色文字 + 黑色主色；普通 → 青瓷绿。
+   与 `PriceTone` computed、详情页 `.pd-*` 三处同一套优先级（秒杀 > 国补 > 品牌 > 普通）。 */
+.pcard.tone-normal .pcard-price { color: var(--brand-ink); }
+.pcard.tone-seckill .pcard-price { color: var(--accent); }
+.pcard.tone-subsidy .pcard-price { color: #157347; }
+.pcard.tone-brand .pcard-price { color: #c9a227; }
+/* 品牌店：加购钮的 hover 实心也走黑金（平时仍幽灵，见上面那条「按钮墙」判据）。 */
+.pcard.tone-brand:hover .pcard-buy {
+  background: #101010;
+  border-color: #101010;
+  color: #e8c98a;
+}
 </style>

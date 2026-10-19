@@ -560,6 +560,8 @@ export const endpoints = {
     overview: '/member/overview',
     signin: '/member/signin',
     logs: '/member/points/logs',
+    exchange: '/member/points/exchange',
+    growth: '/member/points/growth',
   },
   walletB4: {
     overview: '/wallet/overview',

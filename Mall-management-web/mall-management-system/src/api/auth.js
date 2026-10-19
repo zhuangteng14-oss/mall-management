@@ -298,6 +298,8 @@ export function getIsBrand() { return !!(restored && restored.isBrand) || read(K
 /** 开通会员成功后同步展示态（`MemberCenter` 用）：内存 + `sessionStorage` 一起写 ⇒ 刷新后仍按 VIP 展示，不必重新登录。
  *  ⚠️ 只在**本人主动开通**这一处调用；管理员改他人档位仍走 `api/accounts.js`，被改的那一端下次恢复（刷新若已登录则不会重取）才见新值。 */
 export function setMemberLevel(level) { const n = Number(level) || 0; if (restored) restored.memberLevel = n; try { sessionStorage.setItem(K.memberLevel, String(n)) } catch (e) { /* 存储不可用 ⇒ 只留内存 */ } }
+/** 沙箱充值成功后同步余额展示态（内存 + `sessionStorage`）：真实入账在 `user_wallet`，这里只防跨页读到旧值。 */
+export function setBalance(balance) { const n = Number(balance) || 0; if (restored) restored.balance = n; try { sessionStorage.setItem(K.balance, String(n)) } catch (e) { /* 存储不可用 ⇒ 只留内存 */ } }
 
 
 // ── 管理员独立会话（2026-10-19，用户令：拆分管理员登录页）────────────────────────

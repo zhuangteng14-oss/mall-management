@@ -15,6 +15,8 @@
       </div>
       <!-- 两枚按钮的 `@click` 与旧页头一致：`openSearchDialog` / `openRequestDialog`。 -->
       <div class="head-actions">
+        <!-- 2026-10-19 用户令：好友页顶部必须能回到个人中心。 -->
+        <button class="btn" type="button" @click="goUserCenter">← 返回个人中心</button>
         <button class="btn" type="button" @click="openSearchDialog">搜索好友</button>
         <button class="btn" type="button" @click="openRequestDialog">
           好友申请 <b class="num">—</b>
@@ -160,6 +162,11 @@ const getCurrentUserId = () => {
 const isMerchantUser = () => {
   const mid = getMerchantId()
   return mid && mid !== 'null' && mid !== 'undefined'
+}
+
+/** 返回个人中心：商家壳 / 客户壳各有自己的中转站（2026-10-19 用户令）。 */
+const goUserCenter = () => {
+  router.push(isMerchantUser() ? '/merchant/user' : '/customer/user')
 }
 
 // 加载好友列表

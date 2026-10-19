@@ -92,7 +92,7 @@ const routes = [
       // ⚠️ C3 块 4：两条记录的 `meta.tab` **不再相同** —— `/merchant/order` = `'order'`（顶栏「订单中心」
       //    亮），`/merchant/order/cart` = `'cart'`（顶栏**新增**的商家「购物车」项亮）。改前两条都是 `'order'`。
       // ⚠️ `order/cart` 仍是**单条多段子路径**，不嵌第二层 `children`（容器 `OrderPane` 自己渲染它的两个 tab）。
-      { path: 'order', component: () => import('../views/OrderCenter.vue'), meta: { tab: 'order', layout: 'order-container' } },   // ⚠️ C3 块 4：块 4 前这里指 `OrderPane`（「订单中心 ⇄ 购物车」两态包装组件）—— 现在**直接指订单中心自己**。用**行内动态 import** 而不是顶部加一行 import：顶部加行会让 `:8` 以下全体下移（同一手法见本文件 `:434` 的 `AdminStub`）
+      { path: 'order', component: () => import('../views/OrderCenter.vue'), meta: { tab: 'order', layout: 'order-container', noRail: true } },   // ⚠️ 2026-10-19 用户令：订单处理 / 售后工作台都归公域 ⇒ 无侧栏全宽（同行加 `noRail`）   // ⚠️ C3 块 4：块 4 前这里指 `OrderPane`（「订单中心 ⇄ 购物车」两态包装组件）—— 现在**直接指订单中心自己**。用**行内动态 import** 而不是顶部加一行 import：顶部加行会让 `:8` 以下全体下移（同一手法见本文件 `:434` 的 `AdminStub`）
       { path: 'order/cart', component: OrderPane, meta: { tab: 'cart', layout: 'order-container', noRail: true } },   // ⚠️ 2026-10-19 用户令：购物车归公域 ⇒ 无侧栏全宽
       {
         path: 'user', name: 'merchantUser',   // ⚠️ 可视化段 commit 3（2026-10-11，用户裁决 ④「经营数据入口放个人中心里」）：**同行**加 `name`（不新插一行，理由同 `:63` 那条 —— 本组 `:98`-`:122` 的既有行号引用会整体下移）。文件尾那条 `router.addRoute('merchantUser', …)` 靠它把「经营数据」挂成**本记录的子页** ⇒ 个人中心左菜单在场（`UserCenter.vue` 的 `.user-menu` 只在 `matched` 含本记录时渲染）。⚠️ `checkSameNameAsAncestor` 只禁同名（本 name ≠ 祖先 `merchant`）⇒ 不多发 warn。

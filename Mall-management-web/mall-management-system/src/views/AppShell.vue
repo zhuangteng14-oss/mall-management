@@ -426,6 +426,7 @@ font-family: var(--font);
   letter-spacing: 0.13em;
   color: var(--ink-3);
 }
+/* 2026-10-19 用户令：搜索框与购物车都要青瓷绿底，顶栏里一眼可见。 */
 .top-search {
   margin-left: auto;
   display: flex;
@@ -433,8 +434,8 @@ font-family: var(--font);
   height: 34px;
   min-width: 210px;
   max-width: 280px;
-  border: 1px solid var(--line-2);
-  background: var(--surface);
+  border: 1px solid var(--brand);
+  background: var(--brand);
 }
 .top-search input {
   flex: 1;
@@ -444,16 +445,17 @@ font-family: var(--font);
   outline: none;
   background: transparent;
   font-size: 12px;
-  color: var(--ink);
+  color: var(--surface);
 }
+.top-search input::placeholder { color: rgba(255, 255, 255, .72); }
 .top-search button {
   flex: none;
   padding: 0 12px;
   border: 0;
-  border-left: 1px solid var(--line-2);
-  background: var(--surface);
+  border-left: 1px solid rgba(255, 255, 255, .3);
+  background: var(--brand);
   font-size: 11px;
-  color: var(--ink);
+  color: var(--surface);
   cursor: pointer;
 }
 .top-search button:hover { background: var(--brand-ink); color: var(--surface); }
@@ -510,13 +512,14 @@ font-family: var(--font);
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 7px 10px;
-  border: 1px solid var(--brand-ink);
+  padding: 7px 12px;
+  border: 1px solid var(--brand);
+  background: var(--brand);
   font-size: 11px;
-  color: var(--brand-ink);
+  color: var(--surface);
   text-decoration: none;
 }
-.top-cart:hover { background: var(--brand-ink); color: var(--surface); }
+.top-cart:hover { background: var(--brand-ink); border-color: var(--brand-ink); color: var(--surface); }
 .top-account {
   max-width: 240px;
   overflow: hidden;

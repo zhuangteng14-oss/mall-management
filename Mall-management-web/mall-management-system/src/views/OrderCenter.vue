@@ -37,9 +37,14 @@
            ⚠️ 本分支的标题行 / 标签页 / 统计带 / 筛选 chips / 左队列 / 右案件 / 弹窗
            **全部沿用改版前的实现**；A 版重排只发生在下面的 `!refundMode` 分支。 -->
       <template v-if="refundMode">
+        <!-- 显眼的返回条（2026-10-19 用户令）：售后工作台不再是无出口的死页面 ——
+             顶部固定一枚实心【← 返回订单中心】，右侧再给一条回商家工作台的出口。 -->
+        <div class="back-bar">
+          <button type="button" class="btn solid back-orders" @click="backToOrders">← 返回订单中心</button>
+          <router-link class="btn back-workbench" to="/merchant">返回商家工作台</router-link>
+        </div>
         <div class="h1row">
           <h1 class="page-h">订单中心 <span class="n">共 {{ orderList.length }} 单 · 待处理 {{ orderList.filter(o => canSend(o)).length }} 单</span></h1>
-          <button type="button" class="btn" @click="backToOrders">← 返回订单中心</button>
           <select v-model="orderStatus" class="status-select" @change="loadOrders">
             <option value="active">首页</option>
             <option value="completed">历史订单</option>
@@ -181,6 +186,9 @@
             <p>买家下单后的真实处理台：看到用户买的单，填写运单号并发货。发货后买家订单状态同步变为「待收货」。</p>
           </div>
           <div class="head-actions">
+            <!-- 2026-10-19 用户令：订单处理页必须有清晰出口，别让商家进来就出不去。 -->
+            <router-link class="btn" to="/merchant/user/info">← 用户中心</router-link>
+            <router-link class="btn" to="/merchant">商家工作台</router-link>
             <button type="button" class="btn" @click="toggleRefund">售后工作台<span v-if="refundList.length" class="cnt">{{ refundList.length }}</span></button>
             <router-link class="btn solid" to="/merchant/user/list">商品管理</router-link>
             <select v-model="orderStatus" class="status-select" @change="loadOrders">
@@ -732,6 +740,22 @@ onMounted(() => {
 .crumb .cur {
   color: var(--ink-2);
 }
+
+/* 售后工作台顶部返回条（2026-10-19 用户令）：实心主按钮 + 右侧次出口。 */
+.back-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: var(--s5);
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  background: var(--surface);
+}
+.back-bar .back-orders {
+  font-weight: 600;
+  letter-spacing: .02em;
+}
+.back-bar .back-workbench { margin-left: auto; }
 
 /* 标题行（稿 :344-348）。⚠️ `.h1row` 是稿的固有规则，但**商家订单面零消费**（稿 :352）——
    本页消费它只为装那枚下拉（用户裁决 A），代价 = 标题行比稿低 `--s4`。 */

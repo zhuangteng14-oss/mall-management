@@ -38,8 +38,9 @@
           <span v-if="userInfo.merchantid">商家号 <b>{{ userInfo.merchantid }}</b></span>
           <span>性别 <b>{{ userInfo.gender || '未填写' }}</b></span>
           <span>年龄 <b>{{ userInfo.age === null || userInfo.age === undefined || userInfo.age === '' ? '—' : userInfo.age }}</b></span>
-          <span>{{ userInfo.email || '未填写邮箱' }}</span>
-          <span>{{ userInfo.address || '未填写地址' }}</span>
+          <span>邮箱 <b>{{ userInfo.email || '未填写' }}</b></span>
+          <span>地址 <b>{{ userInfo.address || '未填写' }}</b></span>
+          <span>简介 <b>{{ userInfo.selfintroduction || '未填写' }}</b></span>
         </div>
         <p class="id-bio">{{ userInfo.selfintroduction || '暂无自我介绍' }}</p>
       </div>
@@ -147,22 +148,30 @@
         <span class="ek">03 / FRIENDS &amp; MESSAGES</span><b>好友 / 消息</b><span class="ev">—</span>
         <small>打开好友与私信，继续沟通</small><span class="ego">打开消息 →</span>
       </router-link>
-      <router-link class="entry-cell" :to="memberPath">
+      <div
+        class="entry-cell entry-link"
+        role="button"
+        tabindex="0"
+        title="模拟充值（沙箱）"
+        @click="openRecharge"
+        @keydown.enter.prevent="openRecharge"
+        @keydown.space.prevent="openRecharge"
+      >
         <span class="ek">04 / BALANCE</span><b>账户余额</b><span class="ev">¥{{ money(userInfo.Balance) }}</span>
-        <small>退款入账 · 可用于演示支付</small><span class="ego">查看流水 →</span>
-      </router-link>
+        <small>退款入账 · 点击模拟充值</small><span class="ego">充值 →</span>
+      </div>
     </div>
 
     <div class="two-col section-gap">
       <div class="stack">
-        <!-- 黑金牌匾（A `plaque`） -->
-        <section class="plaque">
+        <!-- 等级牌匾（A `plaque`）—— 2026-10-19 用户令：颜色随当前等级动态切换 -->
+        <section class="plaque" :class="plaqueClass">
           <div class="plaque-inner">
-            <div class="plaque-top"><span>BLACK CARD / 黑金牌匾</span><span>NO. 8800 {{ idValue || '—' }}</span></div>
+            <div class="plaque-top"><span>{{ plaqueKicker }}</span><span>NO. 8800 {{ idValue || '—' }}</span></div>
             <div class="plaque-mid">
-              <div class="member-level">{{ vip ? '黑金 · 01' : '墨玉 · 00' }}<small>会员权益：全场 9 折 / 每日专属券 / 售后优先</small></div>
-              <div class="plaque-num">—<small>AVAILABLE POINTS</small></div>
-              <div class="balance"><small>账户余额</small>¥{{ money(userInfo.Balance) }}</div>
+              <div class="member-level">{{ plaqueLevelName }}<small>会员权益：全场 9 折 / 每日专属券 / 售后优先</small></div>
+              <div class="plaque-num">{{ plaquePoints }}<small>AVAILABLE POINTS</small></div>
+              <button type="button" class="balance balance-btn" title="模拟充值（沙箱）" @click="openRecharge"><small>账户余额 · 点击充值</small>¥{{ money(userInfo.Balance) }}</button>
             </div>
             <div class="plaque-bottom">
               <span class="name">{{ userInfo.username || '未知用户' }}</span>
@@ -250,7 +259,7 @@
         <section class="panel">
           <div class="panel-head"><div><div class="kicker">ASSETS</div><h2>账户资产</h2></div><router-link class="tiny" :to="memberPath">明细 →</router-link></div>
           <div class="ledger">
-            <router-link class="ledger-row" :to="memberPath"><div class="l"><b>账户余额</b><small>退款入账</small></div><div class="v">¥{{ money(userInfo.Balance) }}<small>可用 · 看流水</small></div></router-link>
+            <div class="ledger-row entry-link" role="button" tabindex="0" title="模拟充值（沙箱）" @click="openRecharge" @keydown.enter.prevent="openRecharge" @keydown.space.prevent="openRecharge"><div class="l"><b>账户余额</b><small>退款入账</small></div><div class="v">¥{{ money(userInfo.Balance) }}<small>可用 · 点击充值</small></div></div>
             <router-link class="ledger-row" :to="memberPath"><div class="l"><b>可用积分</b><small>100 积分 = ¥1</small></div><div class="v">—<small>积分端点未接</small></div></router-link>
             <div class="ledger-row entry-link" role="button" tabindex="0" :title="walletTitle" @click="openWallet" @keydown.enter.prevent="openWallet" @keydown.space.prevent="openWallet"><div class="l"><b>优惠券</b><small>券包弹窗</small></div><div class="v">{{ walletCount === null ? '—' : `${walletCount} 张` }}<small>去使用</small></div></div>
             <div class="ledger-row locked" title="收藏列表暂无聚合端点"><div class="l"><b>我的收藏</b><small>长期保存</small></div><div class="v">—<small>查看</small></div></div>
@@ -359,6 +368,30 @@
       </div>
     </div>
 
+    <!-- 模拟充值（沙箱）—— 2026-10-19 用户令：余额可点、能真实入账并写流水。
+         后端 `/wallet/recharge` 的幂等键是 `RequestId`（前端生成、重试复用）。 -->
+    <div v-if="rechargeOpen" class="mc-scrim" @click.self="rechargeOpen = false">
+      <div class="mc-dlg recharge-dlg" role="dialog" aria-modal="true" aria-label="模拟充值">
+        <div class="mc-dlg-h"><span>模拟充值 · 沙箱</span><button class="mc-x" aria-label="关闭" @click="rechargeOpen = false">×</button></div>
+        <div class="mc-dlg-b">
+          <p class="mc-why">当前余额 ¥{{ money(userInfo.Balance) }}。单笔 10–1000 元；充值即时入账并写入钱包流水。</p>
+          <div class="recharge-row">
+            <button v-for="amt in RECHARGE_PRESETS" :key="amt" type="button" class="btn xs" :class="{ solid: Number(rechargeAmount) === amt }" @click="rechargeAmount = amt">¥{{ amt }}</button>
+          </div>
+          <label class="f"><span>充值金额（元）</span><input v-model.number="rechargeAmount" type="number" min="10" max="1000" step="1"></label>
+          <p v-if="rechargeMsg" class="mc-why" :class="{ 'recharge-bad': !rechargeOk }">{{ rechargeMsg }}</p>
+          <div class="actions">
+            <button type="button" class="btn btn-primary" :disabled="rechargeBusy" @click="doRecharge">{{ rechargeBusy ? '充值中…' : '确认充值' }}</button>
+            <button type="button" class="btn" @click="rechargeOpen = false">关闭</button>
+          </div>
+          <div v-if="rechargeLogs.length" class="recharge-logs">
+            <div class="mc-kicker">最近流水</div>
+            <div v-for="l in rechargeLogs" :key="l.Id || l.id" class="recharge-log"><span>{{ l.Remark || l.ChangeType || '充值' }}</span><b>+¥{{ money(l.Amount) }}</b><small>余额 ¥{{ money(l.BalanceAfter) }}</small></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <!-- 券包弹窗（原样保留） -->
     <CouponWalletDialog :open="walletOpen" :account="couponAccount" @close="walletOpen = false" @changed="loadWallet" />
 
@@ -399,10 +432,11 @@
 import { ref, onMounted, computed } from 'vue'
 import { http, handleApiError, assetOf } from '../api/http'
 import { endpoints } from '../api/endpoints'
-import { getUsername, isLoggedIn, clearCredentials, clearMerchantId, clearToken } from '../api/auth'; import IconGlyph from '../components/ui/IconGlyph.vue'   // ⚠️ 两条 import **同行**（2026-10-11 补图标那一笔）—— 合并到既有行 = 不新增行号漂移（`api-contract.md` 按 `:99` 钉住本文件）
+import { getUsername, getCustomerId, setBalance, isLoggedIn, clearCredentials, clearMerchantId, clearToken } from '../api/auth'; import IconGlyph from '../components/ui/IconGlyph.vue'   // ⚠️ 两条 import **同行**（2026-10-11 补图标那一笔）—— 合并到既有行 = 不新增行号漂移（`api-contract.md` 按 `:99` 钉住本文件）。`getCustomerId` 供余额充值弹窗（2026-10-19）。
 import { myCoupons } from '../api/marketing'; import CouponWalletDialog from '../components/CouponWalletDialog.vue'   // ⚠️ 两条 import **同行**（C3 块 5 · 券的信息架构重排，2026-10-11）—— 同上一行的理由：本文件多处被按行号引，**能省一行就省一行**
 import { useRouter } from 'vue-router'; import { merchantMyApplications } from '../api/merchant'   // ⚠️ 两条 import **同行**（C3 块 5 · B 组，2026-10-12）—— 理由同上：`useRouter` 给「店铺信息」格跳 `/shop`用（那条路由属 commit C），`merchantMyApplications` 给「商家认证」格读本人提审历史（`/merchant/myApplications`，`api/merchant.js` 已有封装，**没有新增端点、没有动 `endpoints.js`**）
 import { brandOverview } from '../api/brand'; import { cartList, orderHistory } from '../api/order'   // A 版个人中心（2026-10-19）：品牌四态 / 购物车件数 / 最近订单。两个 api 模块都是既有封装，未新增端点。
+import { memberOverview } from '../api/member'; import { walletOverview, walletRecharge } from '../api/wallet'   // 2026-10-19 用户令：等级牌匾动态分色 + 账户余额模拟充值（钱包四条端点早已落地，这里只接 UI）。
 
 const userInfo = ref({})
 const idType = ref('')
@@ -438,6 +472,94 @@ const isMerchantShell = computed(() => String(userInfo.value.role) === '2')
 // ── A 版个人中心（2026-10-19）：路径 / 展示辅助 / 三路真实读数 ────────────────────
 const vip = computed(() => Number(userInfo.value.MemberLevel) > 0)
 const money = (v) => Number(v || 0).toFixed(2)
+
+// ── 等级牌匾动态分色（2026-10-19 用户令）──────────────────────────────────
+// 等级色卡来自 `member_level.Theme`（`MemberController./member/overview`），本页只在启动时读一次；
+// 取不到时按「会员=金 / 普通=白」兜底。浅底主题一律用青瓷绿文字（用户口令：保证对比度）。
+const memberOv = ref(null)
+const PLAQUE_THEME = { plain: 1, silver: 1, gold: 1, platinum: 1, diamond: 1, black: 1, supreme: 1 }
+const memberTheme = computed(() => {
+  const lv = memberOv.value && memberOv.value.level
+  const t = String((lv && lv.Theme) || '').toLowerCase()
+  return PLAQUE_THEME[t] ? t : (vip.value ? 'gold' : 'plain')
+})
+const PLAQUE_CLASS = { plain: 'pl-white', silver: 'pl-silver', gold: 'pl-gold', platinum: 'pl-platinum', diamond: 'pl-diamond', black: 'pl-black', supreme: 'pl-ink' }
+const PLAQUE_NAME = { plain: '普通会员', silver: '银卡会员', gold: '金卡会员', platinum: '铂金会员', diamond: '钻石会员', black: '黑金会员', supreme: '青瓷至尊' }
+const PLAQUE_KICKER = { plain: 'MEMBER CARD / 普通会员牌匾', silver: 'SILVER CARD / 银卡牌匾', gold: 'GOLD CARD / 金卡牌匾', platinum: 'PLATINUM CARD / 铂金牌匾', diamond: 'DIAMOND CARD / 钻石牌匾', black: 'BLACK CARD / 黑金卡牌匾', supreme: 'CELADON CARD / 青瓷至尊牌匾' }
+const plaqueClass = computed(() => PLAQUE_CLASS[memberTheme.value])
+const plaqueKicker = computed(() => PLAQUE_KICKER[memberTheme.value])
+const plaqueLevelName = computed(() => {
+  const lv = memberOv.value && memberOv.value.level
+  return `${(lv && lv.Name) || PLAQUE_NAME[memberTheme.value]} · ${(lv && lv.Code) || (vip.value ? 'V1' : 'V0')}`
+})
+const plaquePoints = computed(() => {
+  const acc = memberOv.value && memberOv.value.account
+  return acc ? String(Number(acc.Balance || 0)) : '—'
+})
+const loadMemberOverview = async () => {
+  const cid = getCustomerId()
+  if (!cid) return
+  try {
+    const data = await memberOverview(cid)
+    if (data && data.success) memberOv.value = data
+  } catch (e) { /* 概览失败 ⇒ 牌匾走 VIP / 普通兜底，不打断本页 */ }
+}
+
+// ── 模拟充值（沙箱）────────────────────────────────────────────────────────
+const RECHARGE_PRESETS = [50, 100, 300, 500]
+const rechargeOpen = ref(false)
+const rechargeAmount = ref(100)
+const rechargeBusy = ref(false)
+const rechargeMsg = ref('')
+const rechargeOk = ref(false)
+const rechargeLogs = ref([])
+
+const openRecharge = async () => {
+  rechargeMsg.value = ''
+  rechargeOpen.value = true
+  const cid = getCustomerId()
+  if (!cid) { rechargeOk.value = false; rechargeMsg.value = '未识别到客户账号，请重新登录后再充值'; return }
+  try {
+    const data = await walletOverview(cid)
+    if (data && data.success) rechargeLogs.value = (data.logs || []).slice(0, 5)
+  } catch (e) { /* 流水读取失败不影响充值 */ }
+}
+
+const doRecharge = async () => {
+  const cid = getCustomerId()
+  if (!cid) { rechargeOk.value = false; rechargeMsg.value = '未识别到客户账号，请重新登录'; return }
+  const amount = Number(rechargeAmount.value)
+  if (!Number.isFinite(amount) || amount < 10 || amount > 1000) {
+    rechargeOk.value = false; rechargeMsg.value = '单笔充值金额需在 10–1000 元之间'; return
+  }
+  rechargeBusy.value = true
+  rechargeMsg.value = ''
+  try {
+    const data = await walletRecharge({
+      customerId: cid,
+      amount,
+      // 幂等键：同一次点击重试复用；这里每次点击生成一条新的（重复点击由按钮 disabled 挡住）。
+      requestId: 'UI' + Date.now() + Math.random().toString(36).slice(2, 8)
+    })
+    if (data && data.success) {
+      const after = data.balanceAfter != null ? Number(data.balanceAfter) : Number(userInfo.value.Balance || 0) + amount
+      userInfo.value.Balance = after
+      setBalance(after)
+      rechargeOk.value = true
+      rechargeMsg.value = data.duplicate ? '该笔充值已处理过（幂等），余额未重复增加' : `充值成功 ¥${amount.toFixed(2)}，当前余额 ¥${after.toFixed(2)}`
+      const ov = await walletOverview(cid)
+      if (ov && ov.success) rechargeLogs.value = (ov.logs || []).slice(0, 5)
+    } else {
+      rechargeOk.value = false
+      rechargeMsg.value = (data && data.msg) || '充值失败'
+    }
+  } catch (e) {
+    rechargeOk.value = false
+    rechargeMsg.value = '充值失败：' + (e && e.message ? e.message : '网络错误')
+  } finally {
+    rechargeBusy.value = false
+  }
+}
 const pad2 = (n) => String(n ?? 0).padStart(2, '0')
 const todayText = computed(() => {
   const d = new Date()
@@ -539,6 +661,7 @@ const dg = computed(() => {
 
 onMounted(() => {
   getUserData()
+  loadMemberOverview()
 })
 
 const getUserData = async () => {
@@ -1053,6 +1176,49 @@ button {
 .plaque-mid .member-level small { display: block; font-family: var(--font); font-size: 11px; letter-spacing: 0; color: rgba(255, 255, 255, 0.72); margin-top: 6px; }
 .plaque-num { font-family: var(--font-mono); font-size: 58px; line-height: .9; letter-spacing: -.07em; }
 .plaque-num small { display: block; font-size: 9px; letter-spacing: .12em; color: rgba(255, 255, 255, 0.72); margin-top: 7px; text-align: right; }
+/* 等级牌匾动态分色（2026-10-19 用户令）：普通 / 银 / 金 / 黑金 / 青瓷绿。
+   浅色底一律用青瓷绿文字（`#275e4e`）保证对比度；黑金是真黑 + 香槟金；顶级是青瓷绿底。 */
+.plaque.pl-white { background: #f3f1ea; border-color: #f3f1ea; color: #275e4e; }
+.plaque.pl-white .plaque-inner { border-color: rgba(39, 94, 78, .28); }
+.plaque.pl-white .plaque-top, .plaque.pl-white .plaque-mid .member-level small,
+.plaque.pl-white .plaque-num small, .plaque.pl-white .plaque-bottom { color: rgba(39, 94, 78, .72); }
+.plaque.pl-white .plaque-mid .member-level, .plaque.pl-white .balance { color: #275e4e; }
+.plaque.pl-silver { background: linear-gradient(135deg, #e8ebef, #c3c9d1 60%, #aeb6c0); border-color: #aeb6c0; color: #275e4e; }
+.plaque.pl-silver .plaque-inner { border-color: rgba(39, 94, 78, .26); }
+.plaque.pl-silver .plaque-top, .plaque.pl-silver .plaque-mid .member-level small,
+.plaque.pl-silver .plaque-num small, .plaque.pl-silver .plaque-bottom { color: rgba(39, 94, 78, .72); }
+.plaque.pl-silver .plaque-mid .member-level, .plaque.pl-silver .balance { color: #275e4e; }
+.plaque.pl-gold { background: linear-gradient(135deg, #d8b452, #b8912c 60%, #9c7a1f); border-color: #9c7a1f; color: #275e4e; }
+.plaque.pl-gold .plaque-inner { border-color: rgba(39, 94, 78, .34); }
+.plaque.pl-gold .plaque-top, .plaque.pl-gold .plaque-mid .member-level small,
+.plaque.pl-gold .plaque-num small, .plaque.pl-gold .plaque-bottom { color: rgba(39, 94, 78, .78); }
+.plaque.pl-gold .plaque-mid .member-level, .plaque.pl-gold .balance { color: #275e4e; }
+.plaque.pl-platinum { background: linear-gradient(135deg, #eef3f8, #c2ccd8 60%, #9dabb9); border-color: #9dabb9; color: #275e4e; }
+.plaque.pl-platinum .plaque-inner { border-color: rgba(39, 94, 78, .26); }
+.plaque.pl-platinum .plaque-top, .plaque.pl-platinum .plaque-mid .member-level small,
+.plaque.pl-platinum .plaque-num small, .plaque.pl-platinum .plaque-bottom { color: rgba(39, 94, 78, .72); }
+.plaque.pl-platinum .plaque-mid .member-level, .plaque.pl-platinum .balance { color: #275e4e; }
+.plaque.pl-diamond { background: linear-gradient(135deg, #e6f4fc, #a9d3ec 60%, #6fa9cf); border-color: #6fa9cf; color: #275e4e; }
+.plaque.pl-diamond .plaque-inner { border-color: rgba(39, 94, 78, .3); }
+.plaque.pl-diamond .plaque-top, .plaque.pl-diamond .plaque-mid .member-level small,
+.plaque.pl-diamond .plaque-num small, .plaque.pl-diamond .plaque-bottom { color: rgba(39, 94, 78, .74); }
+.plaque.pl-diamond .plaque-mid .member-level, .plaque.pl-diamond .balance { color: #275e4e; }
+.plaque.pl-black { background: #101010; border-color: #101010; color: #fff; }
+.plaque.pl-black .plaque-inner { border-color: rgba(232, 201, 138, .38); }
+.plaque.pl-black .plaque-mid .member-level { color: #e8c98a; }
+.plaque.pl-ink { background: linear-gradient(135deg, #3b7966, #275e4e 60%, #1c4739); border-color: #1c4739; color: #f3f1e7; }   /* 顶级牌匾 = 青瓷绿（用户令 2026-10-19） */
+.plaque.pl-ink .plaque-inner { border-color: rgba(217, 198, 140, .4); }
+.plaque.pl-ink .plaque-mid .member-level { color: #d9c68c; }
+.balance-btn { display: block; margin-left: auto; padding: 0; background: none; border: 0; font: inherit; cursor: pointer; text-align: right; }
+.balance-btn:hover { text-decoration: underline; }
+/* 充值弹窗 */
+.recharge-dlg { max-width: 460px; }
+.recharge-row { display: flex; gap: 8px; flex-wrap: wrap; margin: 10px 0; }
+.recharge-bad { color: #b3261e; }
+.recharge-logs { margin-top: 14px; border-top: 1px solid var(--line); padding-top: 10px; }
+.recharge-log { display: flex; align-items: baseline; gap: 10px; padding: 6px 0; border-bottom: 1px dashed var(--line); font-size: 12px; }
+.recharge-log b { margin-left: auto; color: var(--brand-ink); }
+.recharge-log small { color: var(--ink-3); }
 .plaque-mid .balance { text-align: right; font-family: var(--font-mono); font-size: 19px; }
 .plaque-mid .balance small { display: block; font-family: var(--font); font-size: 10px; color: rgba(255, 255, 255, 0.72); margin-bottom: 4px; }
 .plaque-bottom { display: flex; align-items: center; justify-content: space-between; gap: 16px; border-top: 1px solid rgba(255, 255, 255, 0.24); padding-top: 13px; }

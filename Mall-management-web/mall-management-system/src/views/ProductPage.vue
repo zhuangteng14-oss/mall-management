@@ -1,5 +1,5 @@
 <template>
-  <div class="goods-detail-page">
+  <div class="goods-detail-page" :class="pdThemeClass">
     <!-- ── 自带顶栏 ───────────────────────────────────────────────────────────────
          本页路由带 `meta.public: true` ⇒ **不进壳**：没有壳的左菜单，也没有壳顶栏。 -->
     <nav class="nav-bar">
@@ -1322,6 +1322,21 @@ const skuKind = (code) => {
   if (subsidyRows.value.some((r) => String(r.ProductCode || '') === c)) return 'subsidy'
   return 'normal'
 }
+
+/**
+ * 详情页主色按商品属性动态渲染（2026-10-19 用户令）：
+ *   秒杀 → 朱砂红；国补 → 亮绿；品牌加盟店 → 金色文字 + 黑色主色；普通 → 青瓷绿。
+ * 优先级与 `skuKind` 同序（秒杀 > 国补 > 品牌 > 普通）：同屏已有 `.sk-zone` 在说秒杀，
+ * 再把它染成别的色会自相矛盾。判据只读本页已有的 `currentItem` / 两个集合，不新发请求。
+ */
+const pdThemeClass = computed(() => {
+  const kind = skuKind(currentItem.value.productCode)
+  if (kind === 'seckill') return 'pd-seckill'
+  if (kind === 'subsidy') return 'pd-subsidy'
+  const it = currentItem.value || {}
+  const brand = it.isBrand === true || it.isBrand === 1 || it.isBrand === '1'
+  return brand ? 'pd-brand' : 'pd-normal'
+})
 
 // ── 累计评价（C3 块 6 · commit 1「评论」，2026-10-12）──────────────────────────────
 // ⚠️ 本段落在 `<script setup>` 的**最末**（同上面「秒杀」/「结算用券」/「型号按钮类别」三块那条理由）：
@@ -2755,5 +2770,66 @@ button { background: none; border: 0; cursor: pointer; }
   .a-pd-tabs button { flex: 1 1 48%; border-bottom: 1px solid var(--line-2); }
   .a-pd-tabs button:last-child { border-right: 0; }
   .a-pd-tab-body { padding: var(--s4); }
+}
+
+/* ══════════════════════════════════════════════════════════════════════════════
+   商品详情页主色按属性动态渲染（2026-10-19 用户令）
+     秒杀 → 朱砂红；国补 → 亮绿；品牌 → 金色文字 + 黑色主色；普通 → 青瓷绿。
+   色值一律走 token（`--accent` / `--brand` / `--brand-ink`），只有「亮绿」与
+   「品牌金」两个词在 tokens.css 里没有现成档，故就近定义、只在本页消费。
+   ══════════════════════════════════════════════════════════════════════════════ */
+.goods-detail-page.pd-normal {
+  --pd-main: var(--brand);
+  --pd-main-ink: var(--brand-ink);
+  --pd-price: var(--brand-ink);
+  --pd-on-main: var(--bg);
+}
+.goods-detail-page.pd-seckill {
+  --pd-main: var(--accent);
+  --pd-main-ink: var(--accent);
+  --pd-price: var(--accent);
+  --pd-on-main: var(--bg);
+}
+.goods-detail-page.pd-subsidy {
+  --pd-main: #1f9d55;
+  --pd-main-ink: #157347;
+  --pd-price: #157347;
+  --pd-on-main: #ffffff;
+}
+.goods-detail-page.pd-brand {
+  --pd-main: #101010;
+  --pd-main-ink: #101010;
+  --pd-price: #c9a227;
+  --pd-on-main: #e8c98a;
+}
+
+/* 价格（主区 + 购入弹窗共用同一主色）。 */
+.goods-detail-page .price,
+.goods-detail-page .p-price,
+.goods-detail-page .sk-now { color: var(--pd-price); }
+
+/* 主操作区：加入购物车 = 主色实底；立即购买 = 主色描边（悬停反转为实底）。 */
+.goods-detail-page .pd-info .acts .b { border-color: var(--pd-main); }
+.goods-detail-page .pd-info .acts .ghost { background: var(--pd-main); color: var(--pd-on-main); }
+.goods-detail-page .pd-info .acts .ghost:hover { background: var(--surface); color: var(--pd-main-ink); }
+.goods-detail-page .pd-info .acts .primary { background: var(--surface); color: var(--pd-main-ink); border-color: var(--pd-main); }
+.goods-detail-page .pd-info .acts .primary:hover { background: var(--pd-main); color: var(--pd-on-main); }
+
+/* 型号按钮：选中态与类别底色跟着主色走（秒杀红 / 国补绿 / 普通青瓷）。 */
+.goods-detail-page .pd-info .md.on:not(.sub):not(.sec) {
+  background: var(--pd-main);
+  border-color: var(--pd-main);
+  color: var(--pd-on-main);
+}
+.goods-detail-page .pd-info .md.sub.on,
+.goods-detail-page .pd-info .md.sec.on { outline-color: var(--pd-main); }
+.goods-detail-page .pd-info .md.sub { background: #dcf5e7; border-color: #9fd9b6; }
+.goods-detail-page .pd-info .md.sec { background: var(--cin-100); border-color: var(--cin-300); }
+
+/* 品牌标：黑底金字（与商品卡 `.pcard-kind.brand` 同一套）。 */
+.goods-detail-page.pd-brand .pname-brand {
+  background: #101010;
+  border-color: #101010;
+  color: #e8c98a;
 }
 </style>

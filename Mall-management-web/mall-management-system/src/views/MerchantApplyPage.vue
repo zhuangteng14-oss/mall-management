@@ -6,11 +6,7 @@
       <div>
         <div class="kicker">MERCHANT / APPLICATION REQUIRED</div>
         <h1>{{ applyType === 'brand' ? '品牌加盟申请' : '先开通商家身份' }}</h1>
-        <p>
-          {{ applyType === 'brand'
-            ? '品牌加盟是商家之上的认证：通过后不改身份，只给本店商品加品牌标并进入品牌专区；仅限已入驻商家。'
-            : '你当前是普通买家。发布商品、处理订单与售后，都要在入驻申请通过后才会解锁；买家资产仍然完整保留。' }}
-        </p>
+        <!-- 2026-10-19 用户令：删掉顶部那行品牌说明小字，页面从标题直接进横幅。 -->
       </div>
       <div class="head-actions">
         <button type="button" class="btn" :disabled="loading" @click="loadMine">
@@ -29,7 +25,7 @@
       <section class="join-banner">
         <div>
           <div class="kicker">THE ONLY WAY TO MERCHANT</div>
-          <h2>{{ applyType === 'brand' ? '品牌不是另一个账号，' : '入驻不是换号，' }}<br />{{ applyType === 'brand' ? '是商家之上的一层认证。' : '是给同一个账户加一层能力。' }}</h2>
+          <h2 :class="{ 'brand-gold': applyType === 'brand' }">{{ applyType === 'brand' ? '品牌不是另一个账号，' : '入驻不是换号，' }}<br />{{ applyType === 'brand' ? '是商家之上的一层认证。' : '是给同一个账户加一层能力。' }}</h2>
         </div>
         <div class="jb-actions">
           <div class="jb-state">
@@ -55,11 +51,13 @@
 
               <!-- 批四第二批（2026-10-19）：申请类型。品牌加盟只对已入驻商家开放，
                    前端让选、后端用 `selectMerchantId` 判 —— 前端不猜身份，也不因此多发一次请求。 -->
+              <!-- 2026-10-19 用户令：按身份二选一 —— 普通买家只看得到「商家入驻」，
+                   已入驻商家只看得到「品牌加盟」；不再把两个选项同时摆给所有人。 -->
               <div class="field">
                 <span class="field-label">申请类型</span>
                 <div class="type-row">
-                  <label class="type-opt"><input v-model="applyType" type="radio" value="join" /> 商家入驻</label>
-                  <label class="type-opt"><input v-model="applyType" type="radio" value="brand" /> 品牌加盟</label>
+                  <label v-if="!isMerchantAccount" class="type-opt"><input v-model="applyType" type="radio" value="join" /> 商家入驻</label>
+                  <label v-else class="type-opt"><input v-model="applyType" type="radio" value="brand" /> 品牌加盟</label>
                 </div>
               </div>
 
@@ -243,8 +241,8 @@
   ⇒ 根元素必须是 `<main class="uc-main">`、自带 `flex:1; min-width:0`；页头按 A 版 `.page-head`（kicker / h1 / 说明 + 右侧动作）。
 -->
 <script setup>
-import { computed, onMounted, reactive, ref } from 'vue'; import { useRoute } from 'vue-router'
-import { getUsername } from '../api/auth'
+import { computed, onMounted, reactive, ref } from 'vue'
+import { getMerchantId, getUsername } from '../api/auth'
 import { merchantApply, merchantBrandApply, merchantMyApplications } from '../api/merchant'; import IconGlyph from '../components/ui/IconGlyph.vue'   // ⚠️ 两条 import **同行**（2026-10-11 补图标那一笔）—— 合并到既有行的惯例见各页同款注释
 
 // ── 申请人 ───────────────────────────────────────────────────────────────────
@@ -280,8 +278,18 @@ function statusLabel(s) {
 const statusGlyph = (s) => (s === 'approved' ? 'ok' : s === 'rejected' ? 'no' : 'wait')
 
 // ── 表单 ─────────────────────────────────────────────────────────────────────
-/** 申请类型：`join` 入驻（旧行为）/ `brand` 品牌加盟（批四第二批）。 */
-const applyType = ref(useRoute().query.type === 'brand' ? 'brand' : 'join')   // A 版品牌入口：`?type=brand` 直达品牌加盟表单（默认仍是入驻）
+/**
+ * 身份判据（2026-10-19 用户令）：会话里有 `merchantid` ⇒ 已入驻商家，只能申请品牌加盟；
+ * 否则是普通买家，只能申请商家入驻。前端只决定**显示哪个选项**，真正的判据仍在后端
+ * （品牌申请未入驻会被 `MerchantApplicationService.audit` 拒绝）。
+ */
+const merchantIdRaw = getMerchantId()
+const isMerchantAccount = computed(() => {
+  const v = merchantIdRaw
+  return !!v && v !== 'null' && v !== 'undefined'
+})
+/** 申请类型：`join` 入驻（旧行为）/ `brand` 品牌加盟（批四第二批）；由身份直接决定。 */
+const applyType = ref(isMerchantAccount.value ? 'brand' : 'join')
 const isBrandRow = (r) => r && (r.IsBrand === true || r.IsBrand === 1 || String(r.IsBrand) === '1')
 const form = reactive({
   shopName: '',
@@ -451,6 +459,8 @@ onMounted(loadMine)
   line-height: 1.05;
   letter-spacing: -0.035em;
 }
+/* 2026-10-19 用户令：品牌加盟时，黑底横幅主标题用金色。 */
+.join-banner h2.brand-gold { color: #d4af37; }
 .join-banner p {
   max-width: 650px;
   font-size: 12px;

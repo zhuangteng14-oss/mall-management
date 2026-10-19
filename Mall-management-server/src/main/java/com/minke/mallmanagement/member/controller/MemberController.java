@@ -61,4 +61,41 @@ public class MemberController {
         }
         return ResponseEntity.ok(Result.of(memberService.logs(CustomerId, limit)));
     }
+
+    /** 积分商城：用积分兑换一张不限时优惠券。 */
+    @PostMapping("/points/exchange")
+    public ResponseEntity<Object> exchange(@RequestParam("CustomerId") String CustomerId,
+                                           @RequestParam(value = "Product", required = false) String Product,
+                                           @RequestParam(value = "RequestId", required = false) String RequestId,
+                                           HttpServletRequest request) {
+        if (!IdentityGuard.requireSelfOrAdmin(request, CustomerId)) {
+            return IdentityGuard.forbidden();
+        }
+        return ResponseEntity.ok(Result.of(memberService.exchangeCoupon(CustomerId, Product, RequestId)));
+    }
+
+    /** 积分商城：1 积分 = 1 成长值。 */
+    @PostMapping("/points/growth")
+    public ResponseEntity<Object> growth(@RequestParam("CustomerId") String CustomerId,
+                                         @RequestParam(value = "Points", required = false) String Points,
+                                         @RequestParam(value = "RequestId", required = false) String RequestId,
+                                         HttpServletRequest request) {
+        if (!IdentityGuard.requireSelfOrAdmin(request, CustomerId)) {
+            return IdentityGuard.forbidden();
+        }
+        int points;
+        try {
+            points = Points == null || Points.trim().isEmpty() ? 0 : Integer.parseInt(Points.trim());
+        } catch (NumberFormatException e) {
+            return ResponseEntity.ok(Result.of(fail("积分数量不合法")));
+        }
+        return ResponseEntity.ok(Result.of(memberService.exchangeGrowth(CustomerId, points, RequestId)));
+    }
+
+    private static java.util.Map<String, Object> fail(String msg) {
+        java.util.Map<String, Object> result = new java.util.HashMap<>();
+        result.put("success", false);
+        result.put("msg", msg);
+        return result;
+    }
 }

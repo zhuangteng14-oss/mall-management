@@ -114,3 +114,34 @@ export function memberPointLogs(params) {
     limit: params && params.limit,
   }))
 }
+
+/**
+ * 积分商城：兑换一张**不限时**优惠券。
+ *
+ * @param {{customerId:string, product:string, requestId?:string}} params
+ *        `product` = `coupon5` / `coupon10` / `coupon20`（货架与价格由服务端 `/member/overview`
+ *        的 `exchangeProducts` 下发，前端不另抄一份）。
+ * @returns {Promise<{success:boolean,msg:string,couponId?:string,cost?:number,balance?:number}>}
+ */
+export function memberExchangeCoupon(params) {
+  return post(endpoints.memberCenter.exchange, q({
+    CustomerId: params && params.customerId,
+    Product: params && params.product,
+    RequestId: params && params.requestId,
+  }))
+}
+
+/**
+ * 积分商城：1 积分 = 1 成长值。
+ *
+ * @param {{customerId:string, points:number, requestId?:string}} params
+ * @returns {Promise<{success:boolean,msg:string,growth?:number,growthAdded?:number,
+ *          level?:object,balance?:number}>}
+ */
+export function memberExchangeGrowth(params) {
+  return post(endpoints.memberCenter.growth, q({
+    CustomerId: params && params.customerId,
+    Points: params && params.points,
+    RequestId: params && params.requestId,
+  }))
+}

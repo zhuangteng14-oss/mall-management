@@ -1,5 +1,6 @@
 package com.minke.mallmanagement.member.service;
 
+import com.minke.mallmanagement.marketing.coupon.dao.CouponDao;
 import com.minke.mallmanagement.member.dao.MemberLevelDao;
 import com.minke.mallmanagement.member.dao.PointsDao;
 import org.slf4j.Logger;
@@ -13,6 +14,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 
 /**
  * 会员 / 积分域服务（第三批㉘，2026-10-19）。
@@ -56,10 +58,143 @@ public class MemberService {
 
     private final PointsDao pointsDao;
     private final MemberLevelDao levelDao;
+    private final CouponDao couponDao;
 
-    public MemberService(PointsDao pointsDao, MemberLevelDao levelDao) {
+    public MemberService(PointsDao pointsDao, MemberLevelDao levelDao, CouponDao couponDao) {
         this.pointsDao = pointsDao;
         this.levelDao = levelDao;
+        this.couponDao = couponDao;
+    }
+
+    // ==================== 积分商城（2026-10-19 用户令）====================
+
+    /**
+     * 积分商城固定货架：三档**不限时**优惠券。前端只渲染本表，不在页面里另抄一份价格
+     * （抄一份就等着两处慢慢分叉）。
+     */
+    public List<Map<String, Object>> exchangeProducts() {
+        List<Map<String, Object>> list = new ArrayList<>();
+        list.add(product("coupon5", "满 ¥50 减 ¥5 券", 5, 50, 200));
+        list.add(product("coupon10", "满 ¥100 减 ¥10 券", 10, 100, 500));
+        list.add(product("coupon20", "满 ¥200 减 ¥20 券", 20, 200, 1000));
+        return list;
+    }
+
+    private static Map<String, Object> product(String key, String name, int face, int threshold, int cost) {
+        Map<String, Object> row = new HashMap<>();
+        row.put("key", key);
+        row.put("name", name);
+        row.put("face", face);
+        row.put("threshold", threshold);
+        row.put("cost", cost);
+        row.put("unlimited", true);
+        return row;
+    }
+
+    /**
+     * 用积分兑换一张**不限时**优惠券。
+     *
+     * <p>券是**每次兑换新建一行定义**（{@code CouponId} 随机）而不是共用一张 —— 共用的那张会撞
+     * {@code coupon_grant} 的唯一键 {@code (CouponId, ToAccount)}，同一个人第二次兑换就领不了。
+     * {@code StartAt}/{@code EndAt} 都传 {@code null} ⇒ 立即生效、永不过期。
+     *
+     * @param requestId 客户端幂等号（可空；空则每次视为新的一次兑换）
+     */
+    @Transactional
+    public Map<String, Object> exchangeCoupon(String customerId, String productKey, String requestId) {
+        if (isBlank(customerId)) {
+            return fail("缺少参数：CustomerId");
+        }
+        Map<String, Object> product = null;
+        for (Map<String, Object> p : exchangeProducts()) {
+            if (str(p.get("key")).equals(str(productKey))) {
+                product = p;
+                break;
+            }
+        }
+        if (product == null) {
+            return fail("积分商品不存在");
+        }
+        String username = pointsDao.selectUsername(customerId);
+        if (isBlank(username)) {
+            return fail("未找到该客户对应的登录账号");
+        }
+        int cost = intOf(product.get("cost"));
+        String bizId = isBlank(requestId) ? "exchange:" + UUID.randomUUID().toString().replace("-", "") : requestId.trim();
+        if (pointsDao.selectLogByBiz(customerId, "points_exchange", bizId) != null) {
+            Map<String, Object> duplicate = new HashMap<>();
+            duplicate.put("success", true);
+            duplicate.put("duplicate", true);
+            duplicate.put("msg", "该兑换请求已处理");
+            return duplicate;
+        }
+        Boolean spent = spendInternal(customerId, cost, "points_exchange", bizId,
+                "积分兑换：" + str(product.get("name")), "customer", customerId);
+        if (!Boolean.TRUE.equals(spent)) {
+            return fail("积分不足，需要 " + cost + " 积分");
+        }
+        String couponId = "PS" + UUID.randomUUID().toString().replace("-", "").substring(0, 18);
+        couponDao.insertCoupon(couponId, str(product.get("name")), "threshold",
+                (double) intOf(product.get("face")), (double) intOf(product.get("threshold")),
+                0, "all", "", "", null, null, "active");
+        couponDao.insertGrant(couponId, username, "points_exchange");
+
+        Map<String, Object> result = new HashMap<>();
+        result.put("success", true);
+        result.put("msg", "兑换成功，优惠券已放入券包");
+        result.put("couponId", couponId);
+        result.put("cost", cost);
+        result.put("balance", accountBalance(customerId));
+        return result;
+    }
+
+    /**
+     * 积分 1:1 兑换成长值（用户令「1 积分抵消 1 成长值」）。
+     * 积分走 FIFO 扣除（同下单抵扣），成长值只增不减，兑换后立即按新成长值重算等级。
+     */
+    @Transactional
+    public Map<String, Object> exchangeGrowth(String customerId, int points, String requestId) {
+        if (isBlank(customerId)) {
+            return fail("缺少参数：CustomerId");
+        }
+        if (points <= 0) {
+            return fail("兑换成长值的积分必须大于 0");
+        }
+        if (points > 100000) {
+            return fail("单次兑换积分过多（上限 100000）");
+        }
+        String bizId = isBlank(requestId) ? "growth:" + UUID.randomUUID().toString().replace("-", "") : requestId.trim();
+        if (pointsDao.selectLogByBiz(customerId, "points_growth", bizId) != null) {
+            Map<String, Object> duplicate = new HashMap<>();
+            duplicate.put("success", true);
+            duplicate.put("duplicate", true);
+            duplicate.put("msg", "该兑换请求已处理");
+            return duplicate;
+        }
+        Boolean spent = spendInternal(customerId, points, "points_growth", bizId,
+                "积分兑换成长值 " + points, "customer", customerId);
+        if (!Boolean.TRUE.equals(spent)) {
+            return fail("积分不足，需要 " + points + " 积分");
+        }
+        Map<String, Object> locked = pointsDao.lockAccount(customerId);
+        if (locked == null) {
+            return fail("积分账户不存在");
+        }
+        long newGrowth = longOf(locked.get("GrowthValue")) + points;
+        pointsDao.updateAccount(customerId, longOf(locked.get("Balance")), longOf(locked.get("Frozen")),
+                newGrowth, longOf(locked.get("TotalEarned")), longOf(locked.get("TotalSpent")));
+        applyLevel(customerId, newGrowth, "points_growth", bizId);
+
+        int levelNo = pointsDao.selectUserLevelNo(customerId);
+        Map<String, Object> level = levelDao.selectByLevelNo(levelNo);
+        Map<String, Object> result = new HashMap<>();
+        result.put("success", true);
+        result.put("msg", "已兑换 " + points + " 成长值");
+        result.put("growth", newGrowth);
+        result.put("growthAdded", points);
+        result.put("level", level);
+        result.put("balance", accountBalance(customerId));
+        return result;
     }
 
     // ==================== 读 ====================
@@ -92,6 +227,7 @@ public class MemberService {
         result.put("nextLevel", next);
         result.put("growthToNext", next == null ? 0L : Math.max(0L, longOf(next.get("MinGrowth")) - growth));
         result.put("signedToday", pointsDao.selectSignin(customerId, pointsDao.currentDate()) != null);
+        result.put("exchangeProducts", exchangeProducts());
         return result;
     }
 

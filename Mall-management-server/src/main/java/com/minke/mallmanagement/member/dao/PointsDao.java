@@ -188,6 +188,13 @@ public class PointsDao {
                 .param(orderId).update();
     }
 
+    /** 客户业务号 → 登录名（积分商城发券要用登录名挂 `coupon_grant`）。 */
+    public String selectUsername(String userId) {
+        String sql = "SELECT username FROM mall_management_sql.`user` WHERE customerid = ? LIMIT 1";
+        List<String> rows = jdbcClient.sql(sql).param(userId).query(String.class).list();
+        return rows.isEmpty() || rows.get(0) == null ? "" : rows.get(0);
+    }
+
     /** 用户当前等级序号（{@code user.MemberLevelNo}；旧列 {@code MemberLevel} 作兜底）。 */
     public int selectUserLevelNo(String userId) {
         String sql = "SELECT COALESCE(NULLIF(MemberLevelNo, 0), MemberLevel, 0) FROM mall_management_sql.`user` "
