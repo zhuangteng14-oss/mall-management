@@ -1,0 +1,20 @@
+OK   ① 商家登录落 /merchant（role=2）  → {"hash":"#/merchant","role":"2","user":"chenguang_parts","customerid":null,"merchantid":"yERU17koBc","member":"0","token":true,"warn":"","tail":".00\nqinghe_cloth\n已售 11 件\n下拉加载更多\n正品保障\n厂家直供，假一赔十\n次日达\n当日 18 点前下单\n七天无理由\n不影响二次销售\n极速退款\n审核通过秒到账\n轻松购物\n极速配送\n精致服务\n畅选无忧\n超市管理平台 · 商城"}
+OK   ① 并表含草稿行  → {"states":["已上架","已上架","已上架","已上架","草稿","待审","待审"],"drafts":1,"pendings":2,"onshelf":4}
+OK   ① 并表含待审行  → {"states":["已上架","已上架","已上架","已上架","草稿","待审","待审"],"drafts":1,"pendings":2,"onshelf":4}
+OK   ① 并表含已上架行  → {"states":["已上架","已上架","已上架","已上架","草稿","待审","待审"],"drafts":1,"pendings":2,"onshelf":4}
+OK   ② /brand 有商品卡  → 4
+OK   ② 商品卡带「品牌」标  → ["品牌","品牌","品牌","品牌"]
+OK   ③ 客户登录落 /customer（role=1，MemberLevel=1）  → {"hash":"#/customer","role":"1","user":"1111","customerid":"uDopHnCeLS","merchantid":null,"member":"1","token":true,"warn":"","tail":".10\nqinghe_cloth\n已售 11 件\n下拉加载更多\n正品保障\n厂家直供，假一赔十\n次日达\n当日 18 点前下单\n七天无理由\n不影响二次销售\n极速退款\n审核通过秒到账\n轻松购物\n极速配送\n精致服务\n畅选无忧\n超市管理平台 · 商城"}
+OK   ③ 从品牌专区点进商品详情
+OK   ③ 详情页显示会员价标签  → {"member":"¥ 89.91 会员价","was":"¥99.9","tag":"会员价","hash":"#/product?Id=130&MerchantId=yERU17koBc&GoodName=Draft-B7-Demo&Price=99.9&GoodImg=http://localhost:8088/img/draft-b7.png&GoodType=electronics&ProductCode=DRAFT-B7-001","name":"Draft-B7-Demo品牌"}
+OK   ③ 详情页原价删除线在场  → "¥99.9"
+OK   ③ 详情页有「加入购物车」按钮  → {"ok":true}
+OK   ③ 加购弹窗打开（默认 1 件）  → {"rows":1,"cta":"加入购物车"}
+OK   ③ 点「加入购物车」后弹确认框  → {"confirm":{"ok":true,"text":"加入购物车"},"afterConfirm":{"hash":"#/product?Id=130&MerchantId=yERU17koBc&GoodName=Draft-B7-Demo&Price=99.9&GoodImg=http://localhost:8088/img/draft-b7.png&GoodType=electronics&ProductCode=DRAFT-B7-001","mask":false,"dacts":true,"cta":"加入购物车","body":"‹ 返回\n商城\n搜索\n用户中心\n首页\n/\nelectronics\n/\nDraft-B7-Demo\n商品主图 800 × 800\n悬停放大\n‹\n›\nDraft-B7-Demo品牌\n¥\n89.91\n会员价\n¥99.9\n促销\n暂无满减活动\n领券\n暂无可用券\n型号\nDRAFT-B7-001\n▣加入购物车\n✓立即购买\n正品保障\n"}}
+OK   ③ 加购成功并落购物车页  → "#/customer/cart?tab=cart"
+OK   ③ 购物车显示原价删除线 + 会员价  → {"hash":"#/customer/cart?tab=cart","was":["¥99.90","¥199.80","¥199.80","¥199.80"],"price":["¥89.91","¥179.82","¥179.82"],"total":"¥179.82"}
+OK   ④ 历史订单有「申请退货」按钮  → {"ok":true,"order":["27 英寸 2K 显示器 锐视 S27","\tSIM-SECKILL-80451-275\tyERU17koBc\t2026-10-19 09:18:22\t✓已经结单\t","申请退货"]}
+OK   ④ 售后原因可填写  → {"ok":true,"v":"B7 acceptance: item not as described"}
+OK   ④ 提交后状态为「待商家审核」  → {"open":false,"err":"","hints":["待商家审核","待商家审核"],"states":["待商家审核","待商家审核","✓已经结单","✓已经结单","✓已经结单"]}
+
+c3-block7-accept: 18 项 / 0 失败
