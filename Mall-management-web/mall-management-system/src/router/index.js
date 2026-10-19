@@ -63,7 +63,7 @@ const routes = [
         path: 'user', name: 'customerUser',   // ⚠️ C3 块 2〈用户块〉：**同行**加 `name`（不新插一行）—— 文件尾那条 `router.addRoute('customerUser', …)` 靠它把「商家入驻」挂成本壳的子页（`addRoute` 的第一个参数**只认 name**）。⚠️ 一旦插行，本组 `:61`-`:122` 的既有行号引用会整体下移。
         component: UserCenter,
         meta: {
-          tab: 'user',
+          tab: 'user',   // ⚠️ A 版（2026-10-19）：`noRail` **不挂父级** —— meta 沿 matched 链合并，挂这儿会让 history/friend/apply/member 全丢身份树；只挂 info 两条子记录。
           layout: 'user-page',
           subMenu: [
             { label: '个人信息', sub: 'info', to: '/customer/user/info', glyph: 'users' },
@@ -73,8 +73,8 @@ const routes = [
           ]
         },
         children: [
-          { path: '', name: 'customerUserHome', component: UserInfoPage, meta: { sub: 'info' } },   // ⚠️ C3 块 2（2026-10-09）：**同行**加 `name`，理由同 `:58` —— 父 `:63` 那个 `name` 正是**本笔**加的，所以这三条 warn 里有本笔一条。无 `push({name:'customerUserHome'})`；**父名**照旧给文件尾的 `addRoute('customerUser', …)` 用（`checkSameNameAsAncestor` 只禁同名，本 name 与父名不同）。⚠️ `/merchant` 壳下那条**同名**子记录原**没有**加 —— ⚠️ **2026-10-11 已反转（现已加，见 `:114`）**：原写「它的父记录本身无 `name`」不再成立（`:98` 那条父记录本笔加了 `name: 'merchantUser'`，为 ④ 挂「经营数据」），而父记录一旦有 `name`，vue-router 立刻报 `has a child without a name and an empty path` ⇒ 给它命名成了**必需**（非「顺手对称」）。
-          { path: 'info', component: UserInfoPage, meta: { sub: 'info' } },
+          { path: '', name: 'customerUserHome', component: UserInfoPage, meta: { sub: 'info', noMenu: true, noRail: true } },   // ⚠️ C3 块 2（2026-10-09）：**同行**加 `name`，理由同 `:58` —— 父 `:63` 那个 `name` 正是**本笔**加的，所以这三条 warn 里有本笔一条。无 `push({name:'customerUserHome'})`；**父名**照旧给文件尾的 `addRoute('customerUser', …)` 用（`checkSameNameAsAncestor` 只禁同名，本 name 与父名不同）。⚠️ `/merchant` 壳下那条**同名**子记录原**没有**加 —— ⚠️ **2026-10-11 已反转（现已加，见 `:114`）**：原写「它的父记录本身无 `name`」不再成立（`:98` 那条父记录本笔加了 `name: 'merchantUser'`，为 ④ 挂「经营数据」），而父记录一旦有 `name`，vue-router 立刻报 `has a child without a name and an empty path` ⇒ 给它命名成了**必需**（非「顺手对称」）。
+          { path: 'info', component: UserInfoPage, meta: { sub: 'info', noMenu: true, noRail: true } },
           { path: 'history', component: HistoricalOrders, meta: { sub: 'history' } },
           { path: 'friend', component: FriendRoom, meta: { sub: 'friend' } },
           { path: 'chat', redirect: '/customer/msg' }   // ⚠️ A5：原挂 `ChatRoom`（与 `/customer/msg` **同一个组件**）⇒ 侧边栏去项后本路径**不留死链**；⚠️ 不删记录（手敲/旧书签会白屏 —— 全仓无 catch-all，R4 口径见 `:208-210`），改 redirect 与旧地址兼容
@@ -98,7 +98,7 @@ const routes = [
         path: 'user', name: 'merchantUser',   // ⚠️ 可视化段 commit 3（2026-10-11，用户裁决 ④「经营数据入口放个人中心里」）：**同行**加 `name`（不新插一行，理由同 `:63` 那条 —— 本组 `:98`-`:122` 的既有行号引用会整体下移）。文件尾那条 `router.addRoute('merchantUser', …)` 靠它把「经营数据」挂成**本记录的子页** ⇒ 个人中心左菜单在场（`UserCenter.vue` 的 `.user-menu` 只在 `matched` 含本记录时渲染）。⚠️ `checkSameNameAsAncestor` 只禁同名（本 name ≠ 祖先 `merchant`）⇒ 不多发 warn。
         component: UserCenter,
         meta: {
-          tab: 'user',
+          tab: 'user',   // ⚠️ A 版（2026-10-19）：同客户侧 —— `noRail` 只挂 info 子记录，不挂父级。
           layout: 'user-page',
           logout: 'merchant',   // ⚠️ 商家侧退出多清 `merchantid`；客户侧无此键（见 UserCenter.vue 的 toLogin）
           subMenu: [
@@ -111,8 +111,8 @@ const routes = [
           ]
         },
         children: [
-          { path: '', name: 'merchantUserHome', component: UserInfoPage, meta: { sub: 'info' } },   // ⚠️ 可视化段 commit 3（2026-10-11，用户裁决 ④）：**同行**加 `name`（不新插一行，理由同 `:63`/`:76` 那一组）。**不是**「顺手对称过去」—— 是那条告警的**必要条件**本笔才成立：`:98` 那条父记录刚加上 `name: 'merchantUser'` 之后，本仓实测（`_work/diag-4.mjs`）多出一条 `[Vue Router warn]: The route named "merchantUser" has a child without a name and an empty path.` ⇒ 房内既有的对治就是**给空路径子记录命名**（`:58` / `:76` / `:89` 三处先例，`/customer` 侧当年为 `addRoute('customerUser', …)` 就是这么做的）。⚠️ 这正是 `:76` 那条注释里「`/merchant` 壳下那条**没有**加」的**反转**，该句已同步订正。⚠️ 无任何 `push({name:'merchantUserHome'})`。
-          { path: 'info', component: UserInfoPage, meta: { sub: 'info' } },
+          { path: '', name: 'merchantUserHome', component: UserInfoPage, meta: { sub: 'info', noMenu: true, noRail: true } },   // ⚠️ 可视化段 commit 3（2026-10-11，用户裁决 ④）：**同行**加 `name`（不新插一行，理由同 `:63`/`:76` 那一组）。**不是**「顺手对称过去」—— 是那条告警的**必要条件**本笔才成立：`:98` 那条父记录刚加上 `name: 'merchantUser'` 之后，本仓实测（`_work/diag-4.mjs`）多出一条 `[Vue Router warn]: The route named "merchantUser" has a child without a name and an empty path.` ⇒ 房内既有的对治就是**给空路径子记录命名**（`:58` / `:76` / `:89` 三处先例，`/customer` 侧当年为 `addRoute('customerUser', …)` 就是这么做的）。⚠️ 这正是 `:76` 那条注释里「`/merchant` 壳下那条**没有**加」的**反转**，该句已同步订正。⚠️ 无任何 `push({name:'merchantUserHome'})`。
+          { path: 'info', component: UserInfoPage, meta: { sub: 'info', noMenu: true, noRail: true } },
           { path: 'add', component: GoodsAdd, meta: { sub: 'add' } },
           { path: 'list', component: GoodsUp, meta: { sub: 'list' } },
           { path: 'history', component: HistoricalOrders, meta: { sub: 'history' } },
@@ -697,3 +697,12 @@ router.addRoute({
     { path: 'seckill', component: () => import('../views/preview/SeckillPreview.vue') },
   ],
 })
+
+// ── A 版用户中心（2026-10-19）：商家侧「品牌加盟」入口 ─────────────────────────────
+// A 版个人中心的「品牌资质 / 品牌加盟」直达申请页。客户侧已有 `/customer/user/apply`；
+// 商家身份（roles ['2','3']）进不了那条 `meta.roles` 链 ⇒ 在商家壳内补同组件地址。
+// 追加在文件最尾：不移动任何既有行号（上面的行号互引全部有效）。
+router.addRoute('merchantUser', { path: '/merchant/user/apply', component: () => import('../views/MerchantApplyPage.vue'), meta: { sub: 'apply' } })
+// 商家壳的会员中心（A 版个人中心「黑金牌匾 / 会员中心」入口）：客户壳那条 `/customer/user/member`
+// 受 `roles:['1','3']` 保护，商家进不去 ⇒ 在商家用户中心下补同组件地址，供黑金牌匾与资产账本直达。
+router.addRoute('merchantUser', { path: '/merchant/user/member', component: () => import('../views/MemberCenter.vue'), meta: { sub: 'member' } })

@@ -1,5 +1,5 @@
 <template>
-  <div class="user-menu">
+  <div v-if="!route.meta.noMenu" class="user-menu">
     <router-link
       v-for="item in subMenu"
       :key="item.sub"

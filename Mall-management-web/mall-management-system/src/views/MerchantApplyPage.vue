@@ -133,7 +133,7 @@
   ⇒ 根元素必须是 `<main class="uc-main">`、自带 `flex:1; min-width:0`，页头沿用 `.page-h` 三件。
 -->
 <script setup>
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'; import { useRoute } from 'vue-router'
 import { getUsername } from '../api/auth'
 import { merchantApply, merchantBrandApply, merchantMyApplications } from '../api/merchant'; import IconGlyph from '../components/ui/IconGlyph.vue'   // ⚠️ 两条 import **同行**（2026-10-11 补图标那一笔）—— 合并到既有行的惯例见各页同款注释
 
@@ -171,7 +171,7 @@ const statusGlyph = (s) => (s === 'approved' ? 'ok' : s === 'rejected' ? 'no' : 
 
 // ── 表单 ─────────────────────────────────────────────────────────────────────
 /** 申请类型：`join` 入驻（旧行为）/ `brand` 品牌加盟（批四第二批）。 */
-const applyType = ref('join')
+const applyType = ref(useRoute().query.type === 'brand' ? 'brand' : 'join')   // A 版品牌入口：`?type=brand` 直达品牌加盟表单（默认仍是入驻）
 const isBrandRow = (r) => r && (r.IsBrand === true || r.IsBrand === 1 || String(r.IsBrand) === '1')
 const form = reactive({
   shopName: '',
