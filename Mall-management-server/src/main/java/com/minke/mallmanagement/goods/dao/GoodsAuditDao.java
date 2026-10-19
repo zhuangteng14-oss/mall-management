@@ -76,6 +76,9 @@ public class GoodsAuditDao {
      *
      * <p>⚠️ 绑参顺序 = SQL 里 `?` 的出现顺序：{@code Status} 在 {@code SubmittedAt} 之前，
      * 与旧实现（Status 是字面量）不同，顺序错了会被 MySQL 静默截断成脏数据。
+     *
+     * <p>⚠️ {@code originalPrice} 为空时绑 {@code 0.0}：列是 {@code NOT NULL DEFAULT 0.00}，
+     * 但**显式绑 NULL 不会触发 DEFAULT**（2026-10-19 草稿保存实测 {@code Column 'OriginalPrice' cannot be null}）。
      */
     public int insert(String merchantId, String batchId, String goodName, Double price, Double originalPrice,
                       String goodType, Integer goodTypeNew, Integer typeId, String productCode, String goodImg,
@@ -89,7 +92,7 @@ public class GoodsAuditDao {
                 + " PromiseGenuine, PromiseReturn7, PromiseFastRefund, PromiseFreightIns, Status, SubmittedAt) "
                 + "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
         return jdbcClient.sql(sql)
-                .params(merchantId, batchId, goodName, price, originalPrice, goodType, goodTypeNew, typeId, productCode, goodImg, imgList,
+                .params(merchantId, batchId, goodName, price, originalPrice == null ? 0.0 : originalPrice, goodType, goodTypeNew, typeId, productCode, goodImg, imgList,
                         detail, spec, afterSale, skuSpec,
                         promiseGenuine, promiseReturn7, promiseFastRefund, promiseFreightIns,
                         isBlank(status) ? "pending" : status, submittedAt)
