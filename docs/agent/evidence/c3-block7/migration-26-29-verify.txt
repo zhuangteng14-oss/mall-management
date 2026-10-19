@@ -1,0 +1,122 @@
+== SELECT COUNT(DISTINCT TABLE_NAME) AS tables_total, COUNT(DISTINCT TABLE_NAME, INDEX_NAME) AS indexes_non_pk, COUNT(DISTINCT CASE WHEN NON_UNIQUE=0 AND INDEX_NAME<>'PRIMARY' THEN CONCAT(TABLE_NAME,':',INDEX_NAME) END) AS uniques_non_pk FROM information_schema.STATISTICS WHERE TABLE_SCHEMA=DATABASE()
+tables_total | indexes_non_pk | uniques_non_pk
+52 | 161 | 35
+rows=1
+== SELECT TABLE_NAME, COLUMN_NAME, COLUMN_TYPE, IS_NULLABLE, COLUMN_DEFAULT FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND ((TABLE_NAME='goods' AND COLUMN_NAME IN ('DiscountTemplateId','DiscountType','DiscountRate','DiscountAmount','PriceSnapshotAt')) OR (TABLE_NAME='goods_audit' AND COLUMN_NAME IN ('DiscountTemplateId','DiscountType','DiscountRate','DiscountAmount','PriceSnapshotAt')) OR (TABLE_NAME='merchant_application' AND COLUMN_NAME IN ('ApplicationType','AttemptNo','ParentId','PendingGuard')) OR (TABLE_NAME='user' AND COLUMN_NAME IN ('MemberLevelNo','GrowthValue','MemberSince')) OR (TABLE_NAME='order' AND COLUMN_NAME IN ('PayChannel','WalletPaidAmount','PointsUsed','PointsDiscount','PointsSettled'))) ORDER BY TABLE_NAME, ORDINAL_POSITION
+TABLE_NAME | COLUMN_NAME | COLUMN_TYPE | IS_NULLABLE | COLUMN_DEFAULT
+goods | DiscountTemplateId | bigint | YES | null
+goods | DiscountType | varchar(10) | YES | null
+goods | DiscountRate | decimal(5,4) | YES | null
+goods | DiscountAmount | decimal(10,2) | NO | 0.00
+goods | PriceSnapshotAt | datetime(3) | YES | null
+goods_audit | DiscountTemplateId | bigint | YES | null
+goods_audit | DiscountType | varchar(10) | YES | null
+goods_audit | DiscountRate | decimal(5,4) | YES | null
+goods_audit | DiscountAmount | decimal(10,2) | NO | 0.00
+goods_audit | PriceSnapshotAt | datetime(3) | YES | null
+merchant_application | ApplicationType | varchar(20) | NO | settle
+merchant_application | AttemptNo | int | NO | 1
+merchant_application | ParentId | bigint | YES | null
+merchant_application | PendingGuard | varchar(90) | YES | null
+order | PayChannel | varchar(16) | NO | 
+order | WalletPaidAmount | decimal(10,2) | NO | 0.00
+order | PointsUsed | bigint | NO | 0
+order | PointsDiscount | decimal(10,2) | NO | 0.00
+order | PointsSettled | tinyint(1) | NO | 0
+user | MemberLevelNo | tinyint | NO | 0
+user | GrowthValue | bigint | NO | 0
+user | MemberSince | datetime | YES | null
+rows=22
+== SELECT TABLE_NAME, INDEX_NAME, NON_UNIQUE, SEQ_IN_INDEX, COLUMN_NAME FROM information_schema.STATISTICS WHERE TABLE_SCHEMA=DATABASE() AND INDEX_NAME IN ('uk_application_pending','idx_application_type_status','uk_brand_detail_application','uk_brand_profile_merchant','idx_brand_profile_status_valid','uk_member_level_no','uk_member_level_code','uk_points_log_biz','idx_points_log_user_time','idx_points_log_user_expire','uk_signin_user_date','idx_signin_user_date','uk_level_log_biz','idx_level_log_user_time','uk_balance_log_idem','idx_balance_log_user_time','idx_balance_log_biz','uk_recharge_id','uk_recharge_user_request','idx_recharge_user_time','uk_withdraw_id','uk_withdraw_user_request','idx_withdraw_user_time') ORDER BY TABLE_NAME, INDEX_NAME, SEQ_IN_INDEX
+TABLE_NAME | INDEX_NAME | NON_UNIQUE | SEQ_IN_INDEX | COLUMN_NAME
+member_level | uk_member_level_code | 0 | 1 | Code
+member_level | uk_member_level_no | 0 | 1 | LevelNo
+member_level_log | idx_level_log_user_time | 1 | 1 | UserId
+member_level_log | idx_level_log_user_time | 1 | 2 | created_at
+member_level_log | uk_level_log_biz | 0 | 1 | UserId
+member_level_log | uk_level_log_biz | 0 | 2 | BizType
+member_level_log | uk_level_log_biz | 0 | 3 | BizId
+merchant_application | idx_application_type_status | 1 | 1 | ApplicationType
+merchant_application | idx_application_type_status | 1 | 2 | Status
+merchant_application | idx_application_type_status | 1 | 3 | SubmittedAt
+merchant_application | uk_application_pending | 0 | 1 | PendingGuard
+merchant_brand_application_detail | uk_brand_detail_application | 0 | 1 | ApplicationId
+merchant_brand_profile | idx_brand_profile_status_valid | 1 | 1 | Status
+merchant_brand_profile | idx_brand_profile_status_valid | 1 | 2 | ValidTo
+merchant_brand_profile | uk_brand_profile_merchant | 0 | 1 | MerchantId
+user_balance_log | idx_balance_log_biz | 1 | 1 | BizType
+user_balance_log | idx_balance_log_biz | 1 | 2 | BizId
+user_balance_log | idx_balance_log_user_time | 1 | 1 | UserId
+user_balance_log | idx_balance_log_user_time | 1 | 2 | created_at
+user_balance_log | uk_balance_log_idem | 0 | 1 | IdempotencyKey
+user_points_log | idx_points_log_user_expire | 1 | 1 | UserId
+user_points_log | idx_points_log_user_expire | 1 | 2 | ExpireAt
+user_points_log | idx_points_log_user_time | 1 | 1 | UserId
+user_points_log | idx_points_log_user_time | 1 | 2 | created_at
+user_points_log | uk_points_log_biz | 0 | 1 | UserId
+user_points_log | uk_points_log_biz | 0 | 2 | BizType
+user_points_log | uk_points_log_biz | 0 | 3 | BizId
+user_signin | idx_signin_user_date | 1 | 1 | UserId
+user_signin | idx_signin_user_date | 1 | 2 | SignDate
+user_signin | uk_signin_user_date | 0 | 1 | UserId
+user_signin | uk_signin_user_date | 0 | 2 | SignDate
+wallet_recharge_order | idx_recharge_user_time | 1 | 1 | UserId
+wallet_recharge_order | idx_recharge_user_time | 1 | 2 | created_at
+wallet_recharge_order | uk_recharge_id | 0 | 1 | RechargeId
+wallet_recharge_order | uk_recharge_user_request | 0 | 1 | UserId
+wallet_recharge_order | uk_recharge_user_request | 0 | 2 | RequestId
+wallet_withdraw_order | idx_withdraw_user_time | 1 | 1 | UserId
+wallet_withdraw_order | idx_withdraw_user_time | 1 | 2 | created_at
+wallet_withdraw_order | uk_withdraw_id | 0 | 1 | WithdrawId
+wallet_withdraw_order | uk_withdraw_user_request | 0 | 1 | UserId
+wallet_withdraw_order | uk_withdraw_user_request | 0 | 2 | RequestId
+rows=41
+== SELECT 'goods_discount_template' AS t, COUNT(*) AS c FROM goods_discount_template UNION ALL SELECT 'member_level', COUNT(*) FROM member_level UNION ALL SELECT 'user_wallet', COUNT(*) FROM user_wallet UNION ALL SELECT 'user_points_account', COUNT(*) FROM user_points_account UNION ALL SELECT 'merchant_brand_profile', COUNT(*) FROM merchant_brand_profile
+t | c
+goods_discount_template | 5
+member_level | 7
+user_wallet | 34
+user_points_account | 34
+merchant_brand_profile | 1
+rows=5
+== SELECT TemplateCode, DiscountType, Rate, CutAmount, MaxMarkupRate, Status, SortWeight FROM goods_discount_template ORDER BY SortWeight
+TemplateCode | DiscountType | Rate | CutAmount | MaxMarkupRate | Status | SortWeight
+RATE_95 | rate | 0.9500 | 0.00 | 2.0000 | active | 10
+RATE_90 | rate | 0.9000 | 0.00 | 2.0000 | active | 20
+RATE_85 | rate | 0.8500 | 0.00 | 2.0000 | active | 30
+RATE_80 | rate | 0.8000 | 0.00 | 2.0000 | active | 40
+CUT_10 | cut | 0.0000 | 10.00 | 2.0000 | active | 50
+rows=5
+== SELECT LevelNo, Code, Name, MinGrowth, DiscountRate, PointsRate, MonthlyCoupons, PriorityWeight FROM member_level ORDER BY LevelNo
+LevelNo | Code | Name | MinGrowth | DiscountRate | PointsRate | MonthlyCoupons | PriorityWeight
+0 | V0 | ∆’Õ®ª·‘± | 0 | 1.0000 | 1.00 | 0 | 0
+1 | V1 | “¯ø®ª·‘± | 500 | 0.9000 | 1.00 | 1 | 10
+2 | V2 | Ωø®ª·‘± | 2000 | 0.8800 | 1.20 | 1 | 20
+3 | V3 | ≤¨Ωª·‘± | 5000 | 0.8500 | 1.50 | 2 | 30
+4 | V4 | ◊Í Øª·‘± | 10000 | 0.8200 | 1.80 | 2 | 40
+5 | V5 | ∫⁄Ωª·‘± | 30000 | 0.8000 | 2.00 | 3 | 50
+6 | V6 | ÷¡◊ª·‘± | 100000 | 0.7800 | 2.50 | 4 | 60
+rows=7
+== SELECT TABLE_NAME, COLUMN_NAME FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME IN ('goods_discount_template','goods_price_log','merchant_brand_application_detail','merchant_brand_profile','member_level','user_points_account','user_points_log','user_signin','member_level_log','user_wallet','user_balance_log','wallet_recharge_order','wallet_withdraw_order') GROUP BY TABLE_NAME, COLUMN_NAME ORDER BY TABLE_NAME, ORDINAL_POSITION
+Exception in thread "main" java.sql.SQLSyntaxErrorException: Expression #2 of ORDER BY clause is not in GROUP BY clause and contains nonaggregated column 'information_schema.COLUMNS.ORDINAL_POSITION' which is not functionally dependent on columns in GROUP BY clause; this is incompatible with sql_mode=only_full_group_by
+	at com.mysql.cj.jdbc.exceptions.SQLError.createSQLException(SQLError.java:121)
+	at com.mysql.cj.jdbc.exceptions.SQLExceptionsMapping.translateException(SQLExceptionsMapping.java:122)
+	at com.mysql.cj.jdbc.StatementImpl.executeQuery(StatementImpl.java:1200)
+	at QueryDb.main(QueryDb.java:13)
+== [Ë°•Ë∑ë] Êñ∞Ë°®ÂàóÊï∞Ôºà‰∏ä‰∏ÄËΩÆÊú´Êù° SQL Âõ† ORDINAL_POSITION ‰∏çÂú® GROUP BY Êä•ÈîôÔºåÊú™ÊâßË°åÔºâ
+== SELECT TABLE_NAME, COUNT(*) AS cols, GROUP_CONCAT(COLUMN_NAME ORDER BY ORDINAL_POSITION) AS col_names FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME IN ('goods_discount_template','goods_price_log','merchant_brand_application_detail','merchant_brand_profile','member_level','user_points_account','user_points_log','user_signin','member_level_log','user_wallet','user_balance_log','wallet_recharge_order','wallet_withdraw_order') GROUP BY TABLE_NAME ORDER BY TABLE_NAME
+TABLE_NAME | cols | col_names
+goods_discount_template | 19 | Id,TemplateCode,Name,DiscountType,Rate,CutAmount,OwnerType,OwnerId,CategoryScope,MinPrice,MaxPrice,MaxMarkupRate,Status,SortWeight,ValidFrom,ValidTo,CreatedBy,created_at,updated_at
+goods_price_log | 14 | Id,GoodsId,BatchId,MerchantId,ChangeType,Price,OriginalPrice,DiscountTemplateId,DiscountType,DiscountRate,DiscountAmount,OperatorType,OperatorId,created_at
+member_level | 14 | Id,LevelNo,Code,Name,MinGrowth,DiscountRate,PointsRate,MonthlyCoupons,PriorityWeight,Theme,BenefitsJson,Status,created_at,updated_at
+member_level_log | 9 | Id,UserId,FromLevel,ToLevel,BizType,BizId,GrowthValue,Remark,created_at
+merchant_brand_application_detail | 14 | Id,ApplicationId,BrandName,BrandNameEn,TrademarkNo,TrademarkClass,BrandLevel,LogoUrl,LicenseUrl,LicenseExpiry,MainCategory,Remark,created_at,updated_at
+merchant_brand_profile | 19 | Id,MerchantId,BrandName,BrandNameEn,TrademarkNo,TrademarkClass,BrandLevel,LogoUrl,LicenseUrl,MainCategory,Status,SourceApplicationId,ApprovedAt,ValidFrom,ValidTo,RevokeReason,Version,created_at,updated_at
+user_balance_log | 18 | Id,UserId,ChangeType,Direction,Amount,BalanceBefore,BalanceAfter,FrozenBefore,FrozenAfter,BizType,BizId,IdempotencyKey,Channel,Status,Remark,OperatorType,OperatorId,created_at
+user_points_account | 10 | UserId,Balance,Frozen,GrowthValue,TotalEarned,TotalSpent,Version,Status,created_at,updated_at
+user_points_log | 13 | Id,UserId,ChangeAmount,BalanceAfter,GrowthDelta,BizType,BizId,RemainAmount,ExpireAt,Remark,OperatorType,OperatorId,created_at
+user_signin | 6 | Id,UserId,SignDate,Points,Streak,created_at
+user_wallet | 11 | UserId,Available,Frozen,TotalRecharge,TotalRefund,TotalConsume,TotalWithdraw,Version,Status,created_at,updated_at
+wallet_recharge_order | 12 | Id,RechargeId,UserId,Amount,Channel,Status,RequestId,ClientIp,CompletedAt,FailReason,created_at,updated_at
+wallet_withdraw_order | 13 | Id,WithdrawId,UserId,Amount,Fee,Status,RequestId,AccountMask,HandledAt,Handler,RejectReason,created_at,updated_at
+rows=13
