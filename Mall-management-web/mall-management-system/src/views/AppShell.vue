@@ -1,5 +1,9 @@
 <template>
   <div class="app-shell">
+    <!-- A 版骨架（2026-10-19）：300px 左侧身份树。顶栏与内容区原样保留在 `.shell-main` 内，
+         消息红点 / 黄条 / 搜索 / KeepAlive 全部不动。 -->
+    <SideRail :role="role" :base="base" :unread="unreadCount" :notify-unread="notifyUnreadCount" />
+    <div class="shell-main">
     <div class="top-nav">
       <div class="nav-left">
         <router-link v-for="item in navTop.left" :key="item.tab" :to="item.to" class="nav-btn"
@@ -51,6 +55,7 @@
         </router-view>
       </div>
     </div>
+    </div>
   </div>
 </template>
 
@@ -61,6 +66,8 @@ import { http, handleApiError } from '../api/http'
 import { endpoints } from '../api/endpoints'
 import { getMerchantId, getCustomerId, isLoggedIn } from '../api/auth'
 import { navFor } from '../config/nav'; import IconGlyph from '../components/ui/IconGlyph.vue'   // ⚠️ 两条 import **同行**（2026-10-11 补图标那一笔）—— 不为省钱，是为**净零行数**：`progress.md` §5-AB 有 15+ 条按行号引本文件（`:76-78` / `:98` / `:101` / `:106` / `:127` / `:137-144` / `:161` / `:257` / `:374-377` …），在本文件顶部加一行会让它们**集体漂移**。同理下面两处顶栏 `v-for` 里的 `<IconGlyph …>` 也是**同行**插的
+
+import SideRail from '../components/SideRail.vue'   // A 版骨架（2026-10-19）：左侧身份树（自带两区入口、身份闸门、退出登录）
 
 // ── R6（2026-10-05）：两壳合一 ────────────────────────────────────────────────────
 // 本组件由 `CustomerPage.vue`（R1 客户壳）与 `MerchantPage.vue`（R2 商家壳）合并而来 ——
@@ -270,7 +277,7 @@ width: 100%;
    原文「留后续笔」已兑现，正文见 `docs/agent/slot-registry.md` §八（§一 commit 7c 是它的由来）。 */
 min-height: 100vh;
 display: flex;
-flex-direction: column;
+flex-direction: row;   /* A 版骨架（2026-10-19）：左身份树 + 右工作区。下方 `.shell-main` 仍是列布局 ⇒ 顶栏 sticky、内容撑高两条行为不变。 */
 background: var(--bg);
 }
 /* ── 顶栏（C 笔 2026-10-07）────────────────────────────────────────────────────
@@ -540,4 +547,21 @@ padding: var(--s7) var(--s5) var(--s8);
   transition: background 0.15s;
 }
 .search-btn:hover { background: var(--brand-hover); }
+
+/* ── A 版骨架（2026-10-19）：右侧工作区 ──────────────────────────────────────────
+   左树（`SideRail.vue`）固定 300px；本容器承接原来的列布局 ⇒ `.top-nav` 的 sticky
+   与 `.content { flex:1 }` 的撑高行为逐字不变。
+   ⚠️ `min-width:0` 必须在：顶栏搜索框与页内栅格都靠它才能在窄视口里收缩。 */
+.shell-main {
+  flex: 1;
+  min-width: 0;
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+/* 窄屏：左树回到文档流（`SideRail.vue` 自己的断点把两区并排），工作区随之全宽。 */
+@media (max-width: 900px) {
+  .app-shell { flex-direction: column; }
+  .shell-main { min-height: 0; }
+}
 </style>
