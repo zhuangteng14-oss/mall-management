@@ -42,7 +42,9 @@ import java.util.UUID;
 public class AdminOrderService {
 
     /** {@code status} 的合法取值白名单（含「不筛」的 {@code all}）。见 {@link #list}。 */
-    private static final Set<String> KNOWN_STATUS = Set.of("", "all", "unpaid", "paid", "shipped", "completed", "abnormal");
+    // 批四第二批 commit 4 追加 `refunding`（RefundStatus=1）/ `refund_platform`（RefundStatus=3）——
+    // 售后是旁路状态域，与三位状态机并列筛，不是它的新状态。
+    private static final Set<String> KNOWN_STATUS = Set.of("", "all", "unpaid", "paid", "shipped", "completed", "abnormal", "refunding", "refund_platform");
 
     /** 介入的三个**实现了的**动作。 */
     private static final Set<String> KNOWN_ACTIONS = Set.of("pay", "deliver", "receive");

@@ -481,6 +481,12 @@ import static org.mockito.Mockito.when;
         //    且 smoke 打的是 Controller 的响应文案：那份状态在切片里从不被写（没人点 [开始]）⇒
         //    用例之间没有可观察的串扰。**真演练**的配置语义归 `AttackSwitchConfigTest`。
         AttackSwitchConfig.class,
+        // 批四第二批 commit 4〈售后状态机〉：新 Controller `OrderRefundController` 自动被切片扫入，
+        // 它吃 `OrderRefundService`；Service 吃 `OrderRefundDao`（+ OrderDao / GoodsDao 上面已登记）。
+        // 照本文件既有处置：**不 @Import 就整片起不来**。两个类用全限定名写在同一行，
+        // 避免加 import 行让本文件被文档按「文件:行号」引用的位置集体下移（同 eventPublisher 那条的处置）。
+        com.minke.mallmanagement.order.refund.dao.OrderRefundDao.class,
+        com.minke.mallmanagement.order.refund.service.OrderRefundService.class,
         })
 public abstract class AbstractSmokeTest {
 

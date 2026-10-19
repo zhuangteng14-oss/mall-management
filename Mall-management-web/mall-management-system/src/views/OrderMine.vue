@@ -9,11 +9,12 @@
       · 「进行中」= `/order/orderSelect`（`OrderDao.selectActiveByCustomer`）
         —— 有 `Price` / 三个状态位 / `CreateTime` ⇒ 能画金额、状态、付款/收货。
       · 「已完成」= `/order/historicalOrdersSelect`（`OrderDao.selectHistoryByCustomer`）
-        —— **只 SELECT 六列**：`OrderId, MerchantId, ProductInformation, Images,
-        SettlementDate, Quantity`，**没有 `Price`、没有状态位、没有 `CreateTime`**。
-    把两块并成一张表 = 已完成那一半的「金额」「状态」列只能写 `—` 或假造 ⇒ 本页**不并**，
-    各画各的列。⚠️ 想补齐字段面 = 改 `selectHistoryByCustomer` 的 SELECT 列 = **改契约**
-    （硬线，须先问），不在本笔内。
+        —— 批四第二批 commit 4 起**加性**多回 `Price` / `RefundStatus` / `RefundRetryCount` /
+        `RefundReason` / `RefundAmount` / `RefundHandledAt`（旧六列一个不删）；仍**没有**三位状态位
+        与 `CreateTime`。
+    把两块并成一张表 = 已完成那一半的状态位列只能写 `—` 或假造 ⇒ 本页**不并**，
+    各画各的列。已完成块本笔只加一列**只读**售后 chip；金额展示仍归「历史订单」页
+    （两页的分工不变，避免同一事实两处各画一遍）。
   -->
   <div class="ordermine-page">
     <div class="wrap">
@@ -85,7 +86,7 @@
 
           <div class="thead done">
             <span></span><span>商品</span><span>订单号</span><span>商家 ID</span>
-            <span class="r">数量</span><span>结单日期</span>
+            <span class="r">数量</span><span>结单日期</span><span class="cen">售后</span>
           </div>
           <div v-for="order in historyOrders" :key="order.OrderId" class="trow done">
             <div class="thumb"><img v-if="order.Images" :src="order.Images" alt="商品图片" /></div>
@@ -94,8 +95,13 @@
             <div class="mid">{{ order.MerchantId }}</div>
             <div class="num">{{ quantityOf(order) }}</div>
             <div class="time">{{ formatDateTime(order.SettlementDate) }}</div>
+            <div class="cen">
+              <!-- 只读 chip：申请 / 处理都在「历史订单」页（那里有原因弹窗与重试判据）。 -->
+              <span v-if="refundText(order)" class="rf-chip" :class="`s${Number(order.RefundStatus) || 0}`">{{ refundText(order) }}</span>
+              <span v-else class="dash">—</span>
+            </div>
           </div>
-          <p class="hint">⚠️ 这一块**没有金额列**：`historicalOrdersSelect` 的 SELECT 里就没有 `Price`（见本文件头）。要补 = 改契约，没在本笔里顺手动。</p>
+          <p class="hint">⚠️ 这一块**仍不画金额列**：`historicalOrdersSelect` 本笔已加性回 `Price`，但金额展示归「历史订单」页；本页只加只读售后 chip，两页分工不变。</p>
         </section>
       </template>
     </div>
@@ -221,6 +227,10 @@ const stateOf = (order) => {
 }
 
 const canReceive = (order) => order.PayIf === 1 && order.DeliveryIf === 1 && order.ReceiveIf !== 1
+
+// 已完成单的只读售后态（批四第二批 commit 4）；0 = 没申请过 ⇒ 不画 chip。
+const REFUND_TEXT = { 1: '待商家审核', 2: '商家已拒绝', 3: '平台处理中', 4: '平台已拒绝', 5: '已退款' }
+const refundText = (order) => REFUND_TEXT[Number(order.RefundStatus) || 0] || ''
 
 const load = async () => {
   const customerId = getBuyerId()
@@ -362,7 +372,7 @@ onMounted(load)
   gap: var(--s4);
 }
 .thead.done, .trow.done {
-  grid-template-columns: 56px minmax(0, 1fr) 118px 88px 56px 160px;
+  grid-template-columns: 56px minmax(0, 1fr) 118px 88px 56px 160px 88px;
 }
 .thead {
   padding-bottom: var(--s3);
@@ -421,6 +431,19 @@ onMounted(load)
 .st.err { background: var(--danger-ground); color: var(--danger-deep); }
 .st.ok { background: var(--success-ground); color: var(--success-deep); }
 
+/* 已完成块的只读售后 chip（批四第二批 commit 4）：与状态 chip 同形状，色相按「要不要人处理」分。 */
+.rf-chip {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: var(--r1);
+  font-size: var(--fs-xs);
+  line-height: 1.6;
+  white-space: nowrap;
+}
+.rf-chip.s1, .rf-chip.s3 { background: var(--info-ground); color: var(--info-deep); }
+.rf-chip.s2, .rf-chip.s4 { background: var(--surface-3); color: var(--ink-2); }
+.rf-chip.s5 { background: var(--success-ground); color: var(--success-deep); }
+
 .op { display: flex; align-items: center; justify-content: flex-end; gap: var(--s3); }
 .act {
   height: 30px;
@@ -455,7 +478,7 @@ onMounted(load)
 /* 窄屏：只收紧列宽，**不改结构**（同 `OrderCenter.vue` 的口径）。 */
 @media (max-width: 1120px) {
   .thead, .trow { grid-template-columns: 48px minmax(0, 1fr) 104px 44px 80px 92px 132px; gap: var(--s3); }
-  .thead.done, .trow.done { grid-template-columns: 48px minmax(0, 1fr) 104px 80px 44px 132px; }
+  .thead.done, .trow.done { grid-template-columns: 48px minmax(0, 1fr) 104px 80px 44px 132px 80px; }
 }
 
 /* ══ 收银台 / 物流弹窗（C3 块4 补丁）═══════════════════════════════════════════

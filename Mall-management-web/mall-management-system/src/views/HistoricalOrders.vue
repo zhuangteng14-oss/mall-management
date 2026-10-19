@@ -43,13 +43,10 @@
             data-slot="预留 · 状态枚举"
             title="预留 · 状态枚举（老稿 子页面改造.html:630）· 归属 C3〈订单〉——稿注：数据字典 6(3) 把订单状态定成枚举「待付款 / 已付款 / 已完成」，但 historicalOrdersSelect 目前只回已结单的 ⇒ 这一列现恒为同一个值；接口一旦回多状态，这一列直接生效，不用改布局"
           >状态</th>
-          <!-- 预留位 #26（老稿 `:633`）—— 稿里这格**完全空**（无表头文字）⇒ 照落空格子 + `data-slot` + `title`。
-               ⚠️ 表体同列是「复制商家 ID」（稿自身表里不一，见文件头 ①）。N 稿未标（未计）。 -->
-          <th
-            class="c-act"
-            data-slot="预留 · 申请退货"
-            title="预留 · 申请退货（老稿 子页面改造.html:633）· 归属 C3〈订单〉——稿注：需求 4.2 有「订单售后 / 退货」（顾客发起退货申请），这是顾客侧动作，天然属于订单行，落在这一列"
-          ></th>
+          <!-- 老稿 `:633` 的「申请退货」预留位已在批四第二批 commit 4 落地（售后状态机）：
+               表头从空格子填成「售后 / 操作」，表体同列的「复制商家 ID」原样保留（稿自身表里不一，见文件头 ①），
+               新动作与它上下叠放。 -->
+          <th class="c-act">售后</th>
         </tr>
       </thead>
       <tbody>
@@ -70,16 +67,56 @@
           <td class="c-num num">{{ order.OrderId }}</td>
           <td class="c-nd num">{{ order.MerchantId }}</td>
           <td class="c-date num">{{ formatDateTime(order.SettlementDate) }}</td>
-          <td class="c-st"><span class="state"><IconGlyph name="ok" />已经结单</span></td>
+          <td class="c-st">
+            <span class="state" :class="`s-${Number(order.RefundStatus) || 0}`">
+              <IconGlyph v-if="(Number(order.RefundStatus) || 0) === 0" name="ok" />{{ refundStatusText(order.RefundStatus) }}
+            </span>
+          </td>
           <!-- 稿 `:754` 是 `<button class="btn-text">复制商家 ID</button>`（稿外死控件：裸控件、无 data-slot）。
                ⚠️ **本页不是死控件** —— 原 Vue `:20` 的「复制」已是**真事件**（`copyMerchantId`）⇒ 保留实事件，
-               **不挂 `disabled`、不进 §三**；文案照稿由「复制」改为「复制商家 ID」。 -->
+               **不挂 `disabled`、不进 §三**；文案照稿由「复制」改为「复制商家 ID」。
+               售后按钮（批四第二批 commit 4）：`RefundStatus` 0 首申 / 2 重申 / 1·3·4·5 只读文案。 -->
           <td class="c-act">
-            <button class="btn-text" @click="copyMerchantId(order.MerchantId)">复制商家 ID</button>
+            <div class="acts">
+              <button v-if="canApply(order)" class="btn-text act-refund" @click="openRefund(order)">
+                {{ (Number(order.RefundStatus) || 0) === 2 ? '再次申请' : '申请退货' }}
+              </button>
+              <span v-else-if="(Number(order.RefundStatus) || 0) === 1" class="act-hint">待商家审核</span>
+              <span v-else-if="(Number(order.RefundStatus) || 0) === 3" class="act-hint">平台处理中</span>
+              <span v-else-if="(Number(order.RefundStatus) || 0) === 4" class="act-hint">平台已拒绝</span>
+              <span v-else-if="(Number(order.RefundStatus) || 0) === 5" class="act-hint">已退款</span>
+              <button class="btn-text" @click="copyMerchantId(order.MerchantId)">复制商家 ID</button>
+            </div>
           </td>
         </tr>
       </tbody>
     </table>
+
+    <!-- 售后申请弹窗（批四第二批 commit 4）。金额**只读展示**（后端取 order.Price 快照），
+         前端不传金额 —— 见 api/order.js ⑤ 组头注释。 -->
+    <div v-if="refundDialog.open" class="rf-mask" @click.self="closeRefund">
+      <div class="rf-box">
+        <h2 class="rf-title">申请退货</h2>
+        <p class="rf-sub">
+          订单 <span class="num">{{ refundDialog.order && refundDialog.order.OrderId }}</span>
+          · 可退金额 ¥{{ Number((refundDialog.order && refundDialog.order.Price) || 0).toFixed(2) }}
+        </p>
+        <textarea
+          v-model="refundDialog.reason"
+          class="rf-input"
+          rows="4"
+          maxlength="255"
+          placeholder="请填写售后原因（必填，最多 255 字）"
+        ></textarea>
+        <p v-if="refundDialog.error" class="rf-err">{{ refundDialog.error }}</p>
+        <div class="rf-actions">
+          <button class="btn-text" :disabled="refundDialog.busy" @click="closeRefund">取消</button>
+          <button class="rf-submit" :disabled="refundDialog.busy" @click="submitRefund">
+            {{ refundDialog.busy ? '提交中…' : '提交申请' }}
+          </button>
+        </div>
+      </div>
+    </div>
 
   </main>
 </template>
@@ -88,6 +125,7 @@
 import { ref, onMounted } from 'vue'
 import { http, handleApiError } from '../api/http'
 import { endpoints } from '../api/endpoints'
+import { orderRefundApply } from '../api/order'
 import { resolveBuyerId } from '../api/auth'; import IconGlyph from '../components/ui/IconGlyph.vue'   // ⚠️ 两条 import **同行**（2026-10-11 补图标那一笔）—— 合并到既有行 = 不新增行号漂移
 
 const orderList = ref([])
@@ -132,6 +170,56 @@ const copyMerchantId = (merchantId) => {
     })
   } else {
     fallbackCopy(merchantId)
+  }
+}
+
+// ── 售后状态机（批四第二批 commit 4）────────────────────────────────────────────
+// 文案与后端六态一一对应：0 无 / 1 待商家 / 2 商家拒（可重申）/ 3 待平台 / 4 平台拒（终态）/ 5 已退款。
+const REFUND_TEXT = { 0: '已经结单', 1: '待商家审核', 2: '商家已拒绝', 3: '平台处理中', 4: '平台已拒绝', 5: '已退款' }
+const refundStatusText = (s) => REFUND_TEXT[Number(s) || 0] || '已经结单'
+// 可申请：0 首申 / 2 重申；且次数未用尽（上限 2）。其余状态后端也会拒，这里只是不展示按钮。
+const canApply = (order) => {
+  const status = Number(order.RefundStatus) || 0
+  const retry = Number(order.RefundRetryCount) || 0
+  return (status === 0 || status === 2) && retry < 2
+}
+
+const refundDialog = ref({ open: false, order: null, reason: '', busy: false, error: '' })
+
+const openRefund = (order) => {
+  refundDialog.value = { open: true, order, reason: '', busy: false, error: '' }
+}
+const closeRefund = () => {
+  refundDialog.value.open = false
+}
+const submitRefund = async () => {
+  const d = refundDialog.value
+  const reason = String(d.reason || '').trim()
+  if (!reason) {
+    d.error = '请填写售后原因'
+    return
+  }
+  const customerId = getBuyerId()
+  if (!customerId) {
+    d.error = '未登录，无法申请售后'
+    return
+  }
+  d.busy = true
+  d.error = ''
+  try {
+    const res = await orderRefundApply({ CustomerId: customerId, OrderId: d.order.OrderId, Reason: reason })
+    if (res.success) {
+      d.open = false
+      alert(res.msg || '售后申请已提交')
+      await loadHistoricalOrders()
+    } else {
+      // 非本人 / 未收货 / 次数上限 / 已退款：后端文案直接展示，不合并成一句「失败」
+      d.error = res.msg || '提交失败'
+    }
+  } catch (err) {
+    handleApiError(err, '提交失败')
+  } finally {
+    d.busy = false
   }
 }
 
@@ -262,6 +350,38 @@ button {
   transition: color .14s, border-color .14s;
 }
 .btn-text:hover { color: var(--brand-ink); border-color: var(--brand); }
+
+/* ── 售后（批四第二批 commit 4）────────────────────────────────────────────── */
+/* 状态 chip 的六态配色：0/5 与「完结」同色系；1/3 用品牌色（有进行中的事）；2/4 中性灰（已否定）。 */
+.state.s-1, .state.s-3 { color: var(--brand-ink); border-color: var(--brand); }
+.state.s-5 { color: var(--brand-ink); border-color: var(--brand); background: var(--zone); }
+.c-act .acts { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; }
+.act-refund { color: var(--brand-ink); border-color: var(--brand); }
+.act-hint { font-size: var(--fs-xs); color: var(--ink-3); }
+
+.rf-mask {
+  position: fixed; inset: 0; background: rgba(0, 0, 0, .32);
+  display: flex; align-items: center; justify-content: center; z-index: 60;
+}
+.rf-box {
+  width: min(440px, calc(100vw - 32px)); background: var(--bg);
+  border-radius: var(--r2); padding: var(--s6); box-shadow: 0 12px 40px rgba(0, 0, 0, .18);
+}
+.rf-title { font-family: var(--font-display); font-size: var(--fs-lg); font-weight: var(--fw-semi); margin-bottom: var(--s3); }
+.rf-sub { font-size: var(--fs-sm); color: var(--ink-3); margin-bottom: var(--s4); }
+.rf-input {
+  width: 100%; resize: vertical; padding: var(--s3);
+  border: 1px solid var(--line-2); border-radius: var(--r1);
+  font: inherit; color: var(--ink); background: var(--bg);
+}
+.rf-input:focus { outline: none; border-color: var(--brand); }
+.rf-err { margin-top: var(--s2); font-size: var(--fs-xs); color: #c0392b; }
+.rf-actions { display: flex; justify-content: flex-end; align-items: center; gap: var(--s4); margin-top: var(--s4); }
+.rf-submit {
+  font-size: var(--fs-sm); color: #fff; background: var(--brand);
+  border-radius: var(--r1); padding: 7px 16px; border: 1px solid var(--brand);
+}
+.rf-submit:disabled, .btn-text:disabled { opacity: .55; cursor: default; }
 
 /* ── 加载 / 空态（稿 `.empty` `:432`；稿的 `ho` 面无空态 ⇒ 文案照既有实现保留）──── */
 .empty {

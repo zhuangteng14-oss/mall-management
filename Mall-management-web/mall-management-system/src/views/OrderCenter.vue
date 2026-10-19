@@ -48,7 +48,8 @@
       <!-- 空态（稿 :811-825）。⚠️ 概览 / 标签页 / 筛选 / 批量 / 分页**五块全部不画** ——
            稿那份 pane 里它们都不存在 ⇒ **空态 slots 计数 = 0**（对账用，见 §五）。
            ⚠️ 文案照稿：「还没有订单」（现有 :26 是「暂无订单」，稿 :47-49 明写换字不换态）。 -->
-      <div v-else-if="orderList.length === 0" class="empty">
+      <!-- ⚠️ 售后台（`refundMode`）下即便两边都空也必须渲染 —— 否则空态吃掉 tab 栏，用户无法切回。 -->
+      <div v-else-if="orderList.length === 0 && refundList.length === 0 && !refundMode" class="empty">
         <div class="big">还没有订单</div>
         <div class="p">买家下单后会出现在这里。</div>
         <button class="go2" disabled title="待 C3〈订单〉——商品管理路由已有，但本笔功能量恒为 0，不接线">去商品管理</button>
@@ -60,7 +61,7 @@
              稿的四个数是从它自带的 6 行静态数据集推出来的，本页没有那个数据集，
              照稿「凡是另一个数算得出来的数都不许手写」（稿 :881-885）的反面 ⇒ **不手写、留 `—`**。
              稿 :684-686 记：第 5 个合法态「已收货·未发货」不设卡，它在表格里有自己的红色 chip。 -->
-        <section class="stats" data-slot="预留 · 数据概览（动现有代码 4 处 · 超档）"
+        <section v-if="!refundMode" class="stats" data-slot="预留 · 数据概览（动现有代码 4 处 · 超档）"
                  title="待 C3〈订单〉——无聚合端点。4 处 = OrderDao（一条 GROUP BY 的 count 查询）+ OrderService + OrderController + OrderCenter.vue，**超档**，因清单点名而画出">
           <div class="stat"><div class="k">未付款</div><div class="v">—</div></div>
           <div class="stat"><div class="k">待发货</div><div class="v">—</div></div>
@@ -68,23 +69,54 @@
           <div class="stat"><div class="k">已完成</div><div class="v">—</div></div>
         </section>
 
-        <!-- ② 标签页（稿 :689-702）。整块是预留位；6 枚标签逐枚 disabled（稿外死控件，不挂 data-slot）。
-             ⚠️ 稿 :692 自己把 N 拆成三档（全部/待发货/已发货 N=1 在档、已完成 N=0、退款中/售后 N≥6 超档）
-                —— 但本笔功能量恒为 0 ⇒ 一档都不落，全部 disabled。
-             ⚠️ 计数：前四个是 `—`（同概览的理由，算不出来）；后两个照稿写 `0` ——
-                稿 :697-699 明写「恒为 0，**不是『暂无数据』而是『这个态不存在』**」。 -->
-        <nav class="tabs" data-slot="预留 · 标签页（全部/待发货/已发货 = 1 处 · 在档；退款中/售后 = ≥6 · 超档）"
-             title="待 C3〈订单〉——现有 status 是布尔（OrderService:461 `&quot;completed&quot;.equals(status)`），只有「未完成 / 已完成」两个口径。⚠️ 拆一下：全部/待发货/已发货 **N=1**（三个状态位 selectByMerchant 已全 SELECT 出来、两条 SQL 又都没有 LIMIT ⇒ 全量在前端，纯前端筛即可，只改 OrderCenter.vue）；已完成 **N=0**（现有端点）；退款中/售后 **N≥6**（OrderState 三位已用满 8 组且全具名 ⇒ 要加第 4 位：mall_management_sql.sql + OrderState + OrderStateMachine + OrderDao + OrderService + OrderController + OrderCenter.vue）。⚠️ N=1 的保质期 = 「没有分页」；一上分页四个 tab 全得搬后端">
-          <button class="tab on" disabled title="待 C3〈订单〉——纯前端筛（N=1），本笔功能量恒为 0">全部<span class="c">—</span></button>
+        <!-- ② 标签页（稿 :689-702）。前 5 枚仍是预留位 disabled；**第 6 枚「售后」本批启用**
+             （批四第二批 commit 4）：点击在本页切到商家售后队列，端点 `/order/refund/merchant/list`
+             只取 `RefundStatus=1`（待商家审核）。其余 4 枚的 N 仍未落。
+             ⚠️ 计数：前四个照旧 `—`（不是同一口径，算不出来）；「售后」= 待商家审核的真实条数。 -->
+        <nav class="tabs" data-slot="预留 · 标签页（全部/待发货/已发货 = 1 处 · 在档；已完成 = 0；退款中 = 状态机缺口；售后 = 已启用）"
+             title="待 C3〈订单〉——现有 status 是布尔（OrderService:461 `&quot;completed&quot;.equals(status)`），只有「未完成 / 已完成」两个口径。⚠️ 全部/待发货/已发货 **N=1**（三个状态位 selectByMerchant 已全 SELECT 出来、两条 SQL 又都没有 LIMIT ⇒ 全量在前端，纯前端筛即可，只改 OrderCenter.vue）；已完成 **N=0**（现有端点）；退款中 N≥6（OrderState 无此态）；**售后已由批四第二批 commit 4 启用**（旁路状态域，不扩 OrderState）">
+          <button class="tab" :class="{ on: !refundMode }" disabled title="待 C3〈订单〉——纯前端筛（N=1），本笔功能量恒为 0">全部<span class="c">—</span></button>
           <button class="tab" disabled title="待 C3〈订单〉——纯前端筛（N=1），本笔功能量恒为 0">待发货<span class="c">—</span></button>
           <button class="tab" disabled title="待 C3〈订单〉——纯前端筛（N=1），本笔功能量恒为 0">已发货<span class="c">—</span></button>
           <button class="tab" disabled title="待 C3〈订单〉——现有端点即可（N=0），本笔功能量恒为 0">已完成<span class="c">—</span></button>
           <button class="tab" disabled title="待 C3〈订单〉——状态机缺口（N≥6，超档）：OrderState 无此态">退款中<span class="c">0</span></button>
-          <button class="tab" disabled title="待 C3〈订单〉——状态机缺口（N≥6，超档）：OrderState 无此态">售后<span class="c">0</span></button>
+          <button class="tab" :class="{ on: refundMode }" title="商家售后队列：只看待商家审核（RefundStatus=1）的售后" @click="toggleRefund">售后<span class="c">{{ refundList.length }}</span></button>
         </nav>
 
+        <!-- 售后队列表（批四第二批 commit 4）。⚠️ 只列 `RefundStatus=1`；拒绝第 2 次时后端自动转平台
+             （`outcome='escalated'`）⇒ 本表不再显示，改由管理端「平台售后」处理。 -->
+        <section v-if="refundMode" class="rtbl">
+          <div v-if="refundLoading" class="empty"><div class="p">加载中…</div></div>
+          <div v-else-if="refundList.length === 0" class="empty">
+            <div class="big">暂无待处理的售后</div>
+            <div class="p">买家对已收货订单申请退货后会出现在这里。</div>
+          </div>
+          <template v-else>
+            <div class="rt-head">
+              <span></span><span>商品</span><span>订单号</span><span>买家</span>
+              <span class="r">退款金额</span><span class="cen">申请次数</span><span>申请时间</span><span class="r">操作</span>
+            </div>
+            <div v-for="r in refundList" :key="r.OrderId" class="rt-row">
+              <div class="thumb"><img v-if="r.Images" :src="r.Images" alt="商品图片" /></div>
+              <div class="pn" :title="r.ProductInformation">{{ r.ProductInformation }}</div>
+              <div class="oid">{{ r.OrderId }}</div>
+              <div class="buyer" :title="`客户号 ${r.CustomerId}`">{{ r.CustomerId }}</div>
+              <div class="money">¥{{ refundAmountOf(r) }}</div>
+              <div class="cen">{{ retryOf(r) }} / 2</div>
+              <div class="tcell">
+                <span class="time">{{ formatDateTime(r.RefundApplyAt) }}</span>
+                <span class="reason" :title="r.RefundReason">原因：{{ r.RefundReason || '—' }}</span>
+              </div>
+              <div class="op r">
+                <button class="send" @click="openRefund(r, true)">同意退款</button>
+                <button class="act-no" @click="openRefund(r, false)">拒绝</button>
+              </div>
+            </div>
+          </template>
+        </section>
+
         <!-- ③ 筛选栏（稿 :704-715）。整块是预留位；输入框与两枚按钮逐枚 disabled + title（稿里都带 title）。 -->
-        <div class="filter" data-slot="预留 · 筛选栏（动现有代码 4 处 · 超档）"
+        <div v-if="!refundMode" class="filter" data-slot="预留 · 筛选栏（动现有代码 4 处 · 超档）"
              title="待 C3〈订单〉——现有只有一个二选一下拉（OrderCenter.vue:20-23），无任何搜索。4 处 = OrderDao（SQL 加 WHERE）+ OrderService + OrderController + OrderCenter.vue，**超档**，因清单点名而画出">
           <span class="fld"><label>订单号</label><input type="text" placeholder="ZHJC53759811" disabled title="待 C3〈订单〉——按订单号搜索无端点（4 处，超档）"></span>
           <span class="fld"><label>买家</label><input type="text" placeholder="用户名 / 客户号" disabled title="待 C3〈订单〉——按买家搜索无端点（4 处，超档）"></span>
@@ -97,7 +129,7 @@
         </div>
 
         <!-- ④ 批量操作条（稿 :717-726）。「已选 0 单」照稿写死 —— 与空框自洽（稿 :438-439 的规矩）。 -->
-        <div class="bulk" data-slot="预留 · 批量操作条（动现有代码 ≥4 处 · 超档）"
+        <div v-if="!refundMode" class="bulk" data-slot="预留 · 批量操作条（动现有代码 ≥4 处 · 超档）"
              title="待 C3〈订单〉——无批量端点：批量发货要事务 + 逐单走状态机（≥4 处：OrderDao + OrderService + OrderController + OrderCenter.vue），导出 CSV 还要一个新的响应类型。**超档**，因清单点名而画出">
           <button class="ck" disabled title="待 C3〈订单〉——全选无端点（≥4 处，超档）"></button>
           <span>全选</span>
@@ -109,7 +141,7 @@
 
         <!-- 表格：9 列。⚠️ **不挂 data-slot** —— 稿 :728 原话「9 列全是真功能（状态由三个状态位推出、
              金额/订单号/时间/商品/买家 id 都在响应里）⇒ 不挂角标」。 -->
-        <section class="tbl">
+        <section v-if="!refundMode" class="tbl">
           <div class="thead">
             <span></span><span></span><span>商品</span><span>订单号</span><span>买家</span>
             <span class="r">金额</span><span class="cen">状态</span><span>下单时间</span><span class="r">操作</span>
@@ -146,7 +178,7 @@
         <!-- ⑤ 分页（稿 :737-744）。⚠️ `.pg.on`「1」照稿**不 disabled**（稿 :741 带 `title="当前页"`、
              无 disabled）；它无 @click ⇒ 点击无副作用。禁用反而会被 `.pager .pg[disabled]` 的同特异性
              规则压掉 `.pg.on` 的描边色，把「当前页」画成「不可用」。登记见 §三。 -->
-        <nav class="pager" data-slot="预留 · 分页（动现有代码 4 处 · 超档）"
+        <nav v-if="!refundMode" class="pager" data-slot="预留 · 分页（动现有代码 4 处 · 超档）"
              title="待 C3〈订单〉——两条商户 SQL 都没有 LIMIT，全量返回。4 处 = OrderDao（加 LIMIT + 一条 count）+ OrderService + OrderController + OrderCenter.vue。**超档**，因清单点名而画出。⚠️ 与标签页互锁：先上分页，则「待发货/已发货/全部」的 N 从 1 变 4">
           <button class="pg" disabled title="待 C3〈订单〉——上一页无端点">‹</button>
           <button class="pg on" aria-current="page" title="当前页">1</button>
@@ -183,6 +215,36 @@
         </div>
       </div>
     </div>
+
+    <!-- ══ 售后处理弹窗（批四第二批 commit 4）══════════════════════════════════
+         ⚠️ 拒绝第 2 次时后端**自动升级平台**（`1→3`），前端只如实提示，不自己改状态。
+         同意 = 立即退款入买家余额 + 按明细回补库存，服务端 CAS 保证不重复入账。 -->
+    <div v-if="refundFor" class="scrim" @click="refundFor = null">
+      <div class="dlg" @click.stop>
+        <div class="dlg-h">
+          <span>{{ refundApprove ? '同意退款' : '拒绝售后' }}</span>
+          <button class="x" @click="refundFor = null" aria-label="关闭">×</button>
+        </div>
+        <div class="dlg-b">
+          <p class="dlg-oid">
+            订单号 <span class="mono">{{ refundFor.OrderId }}</span>
+            · 退款金额 <span class="mono">¥{{ refundAmountOf(refundFor) }}</span>
+            · 第 {{ retryOf(refundFor) }} 次申请
+          </p>
+          <p class="dlg-reason" :title="refundFor.RefundReason">买家原因：{{ refundFor.RefundReason || '—' }}</p>
+          <label class="dlg-fld">
+            <span class="dlg-fld-l">备注</span>
+            <input v-model.trim="refundNote" type="text" maxlength="200" :placeholder="refundApprove ? '可留空' : '建议写明拒绝理由（可留空）'" />
+          </label>
+          <p v-if="!refundApprove && retryOf(refundFor) >= 2" class="dlg-note">⚠️ 这已是第 2 次申请：拒绝后系统会自动升级到平台处理，本店不再处理。</p>
+          <p v-else-if="refundApprove" class="dlg-note">⚠️ 同意后立即退款入买家余额，并按明细回补库存；不可撤销。</p>
+        </div>
+        <div class="dlg-f">
+          <button class="act" @click="refundFor = null">取消</button>
+          <button class="send" :disabled="refundBusy" @click="confirmRefund">{{ refundBusy ? '处理中…' : (refundApprove ? '确认退款' : '确认拒绝') }}</button>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -191,6 +253,7 @@
 import { ref, onMounted } from 'vue'
 import { http, handleApiError, urlOf } from '../api/http'
 import { endpoints } from '../api/endpoints'
+import { orderRefundMerchantList, orderRefundMerchantHandle } from '../api/order'
 import { getMerchantId, getUsername } from '../api/auth'; import IconGlyph from '../components/ui/IconGlyph.vue'   // ⚠️ 两条 import **同行**（2026-10-11 补图标那一笔）—— 合并到既有行 = 不新增行号漂移（`slot-registry.md:4551` 按 `:161` 钉住本文件）
 
 defineProps({
@@ -329,8 +392,87 @@ const confirmDeliver = async () => {
   }
 }
 
+/* ── 售后队列（批四第二批 commit 4）──────────────────────────────────────────
+   ⚠️ 只取 `RefundStatus=1`（待商家审核）。`status` 不传 = 全部有售后记录的单（含已拒绝/已升级），
+   与本 tab 的语义不符 ⇒ 固定传 1。 */
+const refundMode = ref(false)
+const refundList = ref([])
+const refundLoading = ref(false)
+const refundFor = ref(null)
+const refundApprove = ref(true)
+const refundNote = ref('')
+const refundBusy = ref(false)
+
+const retryOf = (row) => Number(row && row.RefundRetryCount) || 0
+const refundAmountOf = (row) => Number((row && (row.RefundAmount || row.Price)) || 0).toFixed(2)
+
+const loadRefunds = async () => {
+  const merchantId = currentMerchantId()
+  if (!merchantId) return
+  refundLoading.value = true
+  try {
+    const data = await orderRefundMerchantList(merchantId, 1)
+    if (data.success) {
+      refundList.value = data.list || []
+    } else {
+      console.error('获取售后队列失败', data.msg)
+    }
+  } catch (err) {
+    handleApiError(err, '请求出错')
+  } finally {
+    refundLoading.value = false
+  }
+}
+
+const toggleRefund = async () => {
+  refundMode.value = !refundMode.value
+  if (refundMode.value) await loadRefunds()
+}
+
+const openRefund = (row, approve) => {
+  refundApprove.value = approve
+  refundNote.value = ''
+  refundFor.value = row
+}
+
+const confirmRefund = async () => {
+  if (!refundFor.value || refundBusy.value) return
+  const merchantId = currentMerchantId()
+  if (!merchantId) {
+    alert('未登录商家，无法处理售后')
+    return
+  }
+  refundBusy.value = true
+  try {
+    const data = await orderRefundMerchantHandle({
+      MerchantId: merchantId,
+      OrderId: refundFor.value.OrderId,
+      Approve: refundApprove.value,
+      Note: refundNote.value
+    })
+    if (data.success) {
+      const msg = data.outcome === 'refunded' ? '已退款：金额已入买家余额'
+        : data.outcome === 'escalated' ? '已拒绝（第 2 次）：该售后已自动升级平台处理'
+        : data.outcome === 'rejected' ? '已拒绝：买家可再次申请'
+        : (data.msg || '处理成功')
+      alert(msg)
+      refundFor.value = null
+      await loadRefunds()
+      await loadOrders()
+    } else {
+      alert('处理失败：' + (data.msg || '未知错误'))
+    }
+  } catch (err) {
+    console.error('售后处理请求出错', err)
+    alert('网络错误，请稍后重试')
+  } finally {
+    refundBusy.value = false
+  }
+}
+
 onMounted(() => {
   loadOrders()
+  loadRefunds()
 })
 /* eslint-enable no-undef */
 </script>
@@ -960,4 +1102,67 @@ onMounted(() => {
   font-size: var(--fs-sm);
 }
 .dlg-note { margin: var(--s3) 0 0; font-size: var(--fs-xs); line-height: 1.6; color: var(--ink-3); }
+.dlg-reason {
+  margin: 0 0 var(--s4);
+  padding: var(--s2) var(--s3);
+  border-radius: var(--r1);
+  background: var(--surface-3);
+  font-size: var(--fs-xs);
+  line-height: 1.6;
+  color: var(--ink-2);
+  overflow-wrap: anywhere;
+}
+
+/* ══ 售后队列（批四第二批 commit 4）════════════════════════════════════════════
+   ⚠️ 自己的 `.rt-head/.rt-row` 网格 —— 不复用 `.thead/.trow`，免得订单表的列宽规则连带改动。 */
+.rtbl { margin-top: var(--s4); }
+.rt-head,
+.rt-row {
+  display: grid;
+  grid-template-columns: 56px minmax(0, 1fr) 112px 88px 92px 64px 170px 140px;
+  align-items: center;
+  gap: var(--s4);
+}
+.rt-head {
+  padding-bottom: var(--s3);
+  font-size: var(--fs-xs);
+  color: var(--ink-3);
+  border-bottom: 1px solid var(--line-2);
+}
+.rt-row {
+  padding: var(--s4) 0;
+  border-bottom: 1px solid var(--line);
+}
+.rt-row .op {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--s3);
+  white-space: nowrap;
+}
+.rt-row .reason {
+  max-width: 170px;
+  font-size: var(--fs-xs);
+  color: var(--ink-3);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.act-no {
+  background: none;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+  font-size: var(--fs-sm);
+  color: var(--danger-deep);
+}
+.act-no:hover { text-decoration: underline; }
+
+@media (max-width: 1120px) {
+  .rt-head,
+  .rt-row {
+    grid-template-columns: 56px minmax(0, 1fr) 104px 76px 80px 56px 140px 120px;
+    gap: var(--s3);
+  }
+  .rt-row .reason { max-width: 140px; }
+}
 </style>

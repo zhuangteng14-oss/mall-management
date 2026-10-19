@@ -526,4 +526,17 @@ export const endpoints = {
     adminSet: '/admin/accounts/user/member',
     dailyCoupon: '/marketing/coupon/daily',
   },
+  // ⚠️ 2026-10-19（批四第二批 · 售后状态机）：5 条。追加在**文件尾**（同本文件既有零漂移手法）。
+  //    · `apply` / `my`：用户侧（`OrderRefundController`，`@RequestMapping("/order/refund")`）
+  //    · `merchantList` / `merchantHandle`：商家侧（同一个 Controller）
+  //    · `adminList` / `adminHandle`：平台侧（追加在既有 `AdminOrderController` 的 `/admin/order` 下）
+  //    ⚠️ 平台侧**单列**、不塞进 `orderAdmin` 组：那个组的 4 条被文档按行号引，插行会漂。
+  refundB4: {
+    apply: '/order/refund/apply',
+    my: '/order/refund/my',
+    merchantList: '/order/refund/merchant/list',
+    merchantHandle: '/order/refund/merchant/handle',
+    adminList: '/admin/order/refund/list',
+    adminHandle: '/admin/order/refund/handle',
+  },
 }
