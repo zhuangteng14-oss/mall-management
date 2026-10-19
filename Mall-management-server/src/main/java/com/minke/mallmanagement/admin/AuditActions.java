@@ -378,6 +378,15 @@ public final class AuditActions {
     /** 审核品牌加盟申请 —— 复用 {@code /admin/accounts/application/audit}，按 outcome 区分。 */
     public static final String MERCHANT_BRAND_APPLY_AUDIT = "merchant.brand.apply.audit";
 
+    /**
+     * 客户**自助开通会员** —— {@code POST /user/member/open}（批四第二批 commit 3）。
+     * 保存的 {@code before/after} 只有等级，不含余额等无关列。
+     */
+    public static final String USER_MEMBER_OPEN = "user.member.open";
+
+    /** 管理员**设置会员等级** —— {@code POST /admin/accounts/user/member}。 */
+    public static final String USER_MEMBER_SET = "user.member.set";
+
     private AuditActions() {
     }
 }

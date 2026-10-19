@@ -71,7 +71,7 @@
                   <span class="w-sub">{{ subText(c) }}</span>
                   <span class="w-date">有效期 {{ periodLabel(c.StartAt, c.EndAt) }}</span>
                 </span>
-                <span class="w-tag" :class="tagCls(c)">{{ tagText(c) }}</span>
+                <span v-if="Number(c.MemberLevel) > 0" class="w-tag w-tag-vip">VIP 专享</span><span class="w-tag" :class="tagCls(c)">{{ tagText(c) }}</span>
                 <span class="w-caret" :class="{ 'w-caret-on': expandedId === key(c) }">›</span>
               </div>
               <button
@@ -443,4 +443,7 @@ watch(() => props.account, (a) => { if (a && props.open) load() })
 .w-detail dd { margin: 0; color: var(--ink-2); }
 .w-mono { font-family: var(--font-mono); }
 .w-msg { margin: var(--s3) 0 0; font-size: var(--fs-xs); color: var(--brand-ink); }
+/* VIP 专享券（批四第二批 commit 3）：`coupon.MemberLevel > 0` 的券加一枚标签。
+   ⚠️ 与状态标签 `.w-tag` 同形，但颜色取品牌色 —— 它是**身份标签**，不与「可领取/已使用」抢语义。 */
+.w-tag-vip { color: var(--brand-ink); background: var(--brand-soft); }
 </style>

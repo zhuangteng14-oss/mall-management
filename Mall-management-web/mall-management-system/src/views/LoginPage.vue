@@ -240,7 +240,7 @@
 <script>
 import { http } from '../api/http'
 import { endpoints } from '../api/endpoints'
-import { setMerchantId, setCustomerId, clearMerchantId, clearCustomerId, setUsername, setRole, setToken, publishSharedToken } from '../api/auth'
+import { setMerchantId, setCustomerId, clearMerchantId, clearCustomerId, setUsername, setRole, setToken, publishSharedToken, restoreFromSession } from '../api/auth'   // 批四第二批 commit 3：`restoreFromSession` 让登录后立刻拿到 MemberLevel/Balance/IsBrand（否则本标签页要刷新一次才认会员）
 export default {
   name: "LoginPage",
   data() {
@@ -317,13 +317,13 @@ export default {
         if(role === "0"){   // ⚠️ **本支不可达**（2026-10-09 核实，非本笔引入）：它排在 `:306` 的 `/user/me` **之后**，而 `role === "0"` 时后端不写会话 ⇒ 那一发必 401、先抛 ⇒ 异常被 `:328` 的通用文案接走，永远轮不到这里。留着只为**不动行号**（本文件最大被引行是 `:687`）。封禁（`"4"`）那支已按同一理由提到 `:300` 去早退。
           this.loginWarnText = "未找到该用户，请查看对应账号密码有无写错，或者前往右侧进行注册";
         }else if(role === "1"){
-          setUsername(this.loginAccount); setRole(role); await this.mintToken(role);   // ⚠️ 止血笔：同行追加，保持净零行数（防 `api-contract.md#api-5` 引的 `:216` 漂移）；P2.6 起 setCredentials → setUsername；多账户隔离笔（2026-10-06）再加铸票（见 mintToken）
+          setUsername(this.loginAccount); setRole(role); await this.mintToken(role); restoreFromSession(userData);   // ⚠️ 止血笔：同行追加，保持净零行数（防 `api-contract.md#api-5` 引的 `:216` 漂移）；P2.6 起 setCredentials → setUsername；多账户隔离笔（2026-10-06）再加铸票（见 mintToken）；批四第二批 commit 3：`restoreFromSession` 必须排在 `setUsername`/`setRole` **之后**（它们的 `dropRestored()` 会清掉提前贴的恢复态）⇒ 登录后立刻拿到 MemberLevel/Balance
           this.$router.push(this.landingAfterLogin(role));   // 前端路由守卫笔（2026-10-06）：落点改由 landingAfterLogin 决定（有合法 redirect 则回原目标，否则 = 原来的 "/customer"）
         }
         else if(role === "2"){
-          setUsername(this.loginAccount); setRole(role); await this.mintToken(role);   // ⚠️ 止血笔：同行追加，保持净零行数（防 `api-contract.md#api-5` 引的 `:216` 漂移）；P2.6 起 setCredentials → setUsername；多账户隔离笔（2026-10-06）再加铸票（见 mintToken）
+          setUsername(this.loginAccount); setRole(role); await this.mintToken(role); restoreFromSession(userData);   // ⚠️ 止血笔：同行追加，保持净零行数（防 `api-contract.md#api-5` 引的 `:216` 漂移）；P2.6 起 setCredentials → setUsername；多账户隔离笔（2026-10-06）再加铸票（见 mintToken）；批四第二批 commit 3：同客户支，恢复态提供 MemberLevel/Balance/IsBrand
           this.$router.push(this.landingAfterLogin(role));   // 前端路由守卫笔（2026-10-06）：同上，否则 = 原来的 "/merchant"
-        }  else if(role === "3"){ setUsername(this.loginAccount); setRole(role); await this.mintToken(role); this.$router.push(this.landingAfterLogin(role)); }   // ✅ C3（2026-10-08，管理员）：⚠️ **整个分支贴在 `}` 尾巴上写完** —— 本文件最大被引行是 `:687`（全仓 15 条引用里最高的一条），`if/else` 链里在 `:326` 之后**插一行**就会让其后 360 行集体 +1、那条引用当场失效 ⇒ 沿用本链上方 `:320`/`:324` 既有的「同行追加保净零」手法。⚠️ `mintToken` 那一发今天**注定 401**（`/user/token` 明文禁止 cookie 管理员换票，是刻意的安全属性，见 slot-registry §十三 13-5）⇒ 被 `mintToken` 内部的 fail-open catch 吞掉，**不影响落点**；管理员身份今天只由 cookie 会话承载，骨架够用
+        }  else if(role === "3"){ setUsername(this.loginAccount); setRole(role); await this.mintToken(role); this.$router.push(this.landingAfterLogin(role)); restoreFromSession(userData); } // 批四第二批 commit 3：贴在 `setUsername`/`setRole` **之后**（它们的 `dropRestored()` 会清掉提前贴的恢复态）；`userData` 只含 role/username ⇒ 管理端不会带出会员字段，无害。 // ✅ C3（2026-10-08，管理员）：⚠️ **整个分支贴在 `}` 尾巴上写完** —— 本文件最大被引行是 `:687`（全仓 15 条引用里最高的一条），`if/else` 链里在 `:326` 之后**插一行**就会让其后 360 行集体 +1、那条引用当场失效 ⇒ 沿用本链上方 `:320`/`:324` 既有的「同行追加保净零」手法。⚠️ `mintToken` 那一发今天**注定 401**（`/user/token` 明文禁止 cookie 管理员换票，是刻意的安全属性，见 slot-registry §十三 13-5）⇒ 被 `mintToken` 内部的 fail-open catch 吞掉，**不影响落点**；管理员身份今天只由 cookie 会话承载，骨架够用
       } catch (e) {
         this.loginWarnText = (e instanceof TypeError || e.name === 'TimeoutError') ? "连不上服务器：请确认后端已在 8088 运行、且本页源在 CORS 白名单内" : "未识别到账户，请检查对应输入";   // ⚠️ 结构调整（2026-10-07）：连不上（fetch 抛 `TypeError`，含 CORS 被拦 / 超时）**不再**与「账号对不上」同报 —— 原句把环境问题说成用户输错（用户实测「登不上」所见即此句）。判据只放这两类：`UnauthorizedError`（role=0 ⇒ `/user/me` 401，见 :304）**必须仍走原句**，它是「账号对不上」的正规路径。同行追加，保持净零行数。
       }

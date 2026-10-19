@@ -117,6 +117,37 @@ public class UserGovernanceService {
         return result;
     }
 
+    /**
+     * 设置会员等级（批四第二批 commit 3）。{@code level} 只接受 0/1 —— 本批只定义
+     * 「普通 / VIP」两档，其余值一律拒（不静默夹断：写错档位的人该看到拒绝）。
+     *
+     * <p>⚠️ 与封禁不同，这里**不校验被设置者是不是客户**：会员价只在下单链路被读，
+     * 而商家 / 管理员下单本来就走同一套客户号口径；硬加身份判断反而会让管理员测不到。
+     */
+    public Map<String, Object> setMember(String username, Integer level) {
+        Map<String, Object> result = new HashMap<>();
+        if (isBlank(username)) {
+            result.put("success", false);
+            result.put("msg", "缺少参数：username");
+            return result;
+        }
+        if (level == null || (level != 0 && level != 1)) {
+            result.put("success", false);
+            result.put("msg", "会员等级只能是 0（普通）或 1（VIP）");
+            return result;
+        }
+        int affected = userGovernanceDao.setMemberLevel(username, level);
+        if (affected == 0) {
+            result.put("success", false);
+            result.put("msg", "用户不存在");
+            return result;
+        }
+        result.put("success", true);
+        result.put("username", username);
+        result.put("memberLevel", level);
+        return result;
+    }
+
     // ==================== 内部 ====================
 
     private static int normalizeLimit(Integer limit) {

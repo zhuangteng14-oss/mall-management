@@ -81,6 +81,23 @@ public class UserStateLookupService implements UserStateLookup {
         }
     }
 
+    /**
+     * 会员等级（批四第二批 commit 3）。⚠️ 读失败回 {@code 0}（普通用户）—— 与其余四条同守
+     * fail-open，见接口注释。
+     */
+    @Override
+    public int memberLevel(String customerId) {
+        if (customerId == null) {
+            return 0;
+        }
+        try {
+            return dao.selectMemberLevelByCustomerId(customerId);
+        } catch (Exception e) {
+            log.warn("会员等级读取失败（USERSTATE）：customerId={} —— 本次按普通用户放行", customerId, e);
+            return 0;
+        }
+    }
+
     @Override
     public boolean isMerchantFrozen(String merchantId) {
         if (merchantId == null) {

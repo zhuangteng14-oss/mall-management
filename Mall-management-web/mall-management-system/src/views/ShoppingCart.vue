@@ -78,7 +78,7 @@
                 <div class="spec"><template v-if="row.AxisName">型号 {{ row.AxisName }}&emsp;</template>商品编号 {{ row.ProductCode }}<span v-if="Number(row.OriginalPrice) > 0" class="dsc" title="这件是折扣商品（划线原价 &gt; 0）⇒ 本单的满减 / 折扣券不可用（无门槛券仍可用）。判据见 useCouponPick.couponBlockedReason，与后端 CouponService.redeem 那条闸逐字对齐。">折扣商品</span></div>
               </div>
               <div class="unit">
-                <span class="v">¥{{ formatPrice(unitPrice(row)) }}</span>
+                <span class="v"><s v-if="isVipMember" class="m-was">¥{{ formatPrice(unitPrice(row)) }}</s><b v-if="isVipMember" class="m-price">¥{{ formatPrice(memberPriceOf(unitPrice(row))) }}</b><template v-else>¥{{ formatPrice(unitPrice(row)) }}</template></span>
                 <!-- ⚠️ 成交价（`PriceSnapshot`，加购时记的）与现价（`PriceNow`）**两个都画**：
                      「购物车里 ¥10、点进去 ¥12」这件事要在画面上看得见。结算用的是**快照价**。 -->
                 <span v-if="priceChanged(row)" class="chg" title="加入购物车之后，该商品在店铺里改了价。结算按加入时的价。">
@@ -93,7 +93,7 @@
                         :title="Number(row.Quantity) >= MAX_QTY ? `数量最多 ${MAX_QTY} 件` : null"
                         @click="step(row, 1)">+</button>
               </div>
-              <div class="sub">¥{{ formatPrice(subtotal(row)) }}</div>
+              <div class="sub"><s v-if="isVipMember" class="m-was">¥{{ formatPrice(subtotal(row)) }}</s><b v-if="isVipMember" class="m-price">¥{{ formatPrice(memberPriceOf(subtotal(row))) }}</b><template v-else>¥{{ formatPrice(subtotal(row)) }}</template></div>
               <div class="op">
                 <button class="pay-btn" :disabled="busy || !row.GoodName"
                         :title="row.GoodName ? '只结算这一件' : '商品已下架，无法结算'"
@@ -104,7 +104,7 @@
 
             <div class="shop-foot">
               本店小计
-              <span class="v">¥{{ formatPrice(groupTotal(group)) }}</span>
+              <span class="v"><s v-if="isVipMember" class="m-was">¥{{ formatPrice(groupTotal(group)) }}</s><b v-if="isVipMember" class="m-price">¥{{ formatPrice(memberPriceOf(groupTotal(group))) }}</b><template v-else>¥{{ formatPrice(groupTotal(group)) }}</template></span>
             </div>
           </div>
         </section>
@@ -126,8 +126,8 @@
         <span class="sel">共 {{ totalCount }} 件商品</span>
         <span class="cp" :class="{ off: !couponPickable }" :title="couponHint"><i>券</i><select v-model="couponId" :disabled="busy || !couponPickable"><option value="">{{ usableCoupons.length ? '不使用优惠券' : '暂无可用券' }}</option><option v-for="c in usableCoupons" :key="c.CouponId" :value="c.CouponId" :disabled="!!couponBlockedReason(c)">{{ couponLabel(c) }}{{ couponBlockedReason(c) ? '（' + couponBlockedReason(c) + '）' : '' }}</option></select><b v-if="discount > 0" class="save">−¥{{ formatPrice(discount) }}</b></span>
         <span class="sums">
-          <span class="d">商品总额 ¥{{ formatPrice(cartTotal) }}</span>
-          <span class="total" title="口径：Σ（成交价快照 × 数量）− 该券的减免；未选券时与加券之前逐字同值。">
+          <span class="d">商品总额 <s v-if="isVipMember" class="m-was">¥{{ formatPrice(cartTotal) }}</s> ¥{{ formatPrice(memberTotal) }}</span>
+          <span class="total" title="口径：VIP 先按 Σ（成交价快照 × 数量）× 0.9 得会员价，再减该券的减免；非 VIP 与加券之前逐字同值。实付以结算响应为准。">
             <span class="k">合计</span><span class="v"><i>¥</i>{{ formatPrice(payTotal) }}</span>
           </span>
         </span>
@@ -149,7 +149,7 @@
 import { ref, computed, onMounted } from 'vue'
 import { handleApiError } from '../api/http'
 import { cartList, cartUpdate, cartRemove, cartCheckout } from '../api/order'; import { useCouponPick } from '../composables/useCouponPick'   // ⚠️ 两条 import **同行**（2026-10-12 结算用券那一笔）—— 本文件被 `api-contract.md` 按 `:108/156/190`、`slot-registry.md` 按 `:46/77/173/198` 等钉住，**多一行就是十几处集体顶漂**（同 `HomePage.vue:284` 那条的做法）
-import { resolveBuyerId, getUsername } from '../api/auth'; import IconGlyph from '../components/ui/IconGlyph.vue'   // ⚠️ 两条 import **同行**（2026-10-11 补图标那一笔）—— 合并到既有行 = 不新增行号漂移（`api-contract.md` 按 `:108/156/190`、`slot-registry.md` 按 `:46/77/173/198` 钉住本文件）
+import { resolveBuyerId, getUsername, getMemberLevel } from '../api/auth'; import { memberPriceOf } from '../composables/useMember'   // 批四第二批 commit 3（**同行追加、不新增行**）：会员价展示用（`getMemberLevel` 读本地恢复态、`memberPriceOf` 与 Java `MemberPricing.priceOf` 同式）; import IconGlyph from '../components/ui/IconGlyph.vue'   // ⚠️ 两条 import **同行**（2026-10-11 补图标那一笔）—— 合并到既有行 = 不新增行号漂移（`api-contract.md` 按 `:108/156/190`、`slot-registry.md` 按 `:46/77/173/198` 钉住本文件）
 
 // 上界与后端 `CartService.MAX_QUANTITY` **同值**（999）。前端拿它当 `+` 的闸，
 // 后端仍是权威（超了回「数量最多 999 件」）—— 两处都留，免得只在一边拦。
@@ -188,7 +188,7 @@ const groupTotal = (group) => group.rows.reduce((s, r) => s + subtotal(r), 0)
 
 // ⚠️ 「凡是另一个数算得出来的，都不许手写」—— 件数与合计都由 `rows` 现算。
 const totalCount = computed(() => rows.value.reduce((s, r) => s + Number(r.Quantity || 0), 0))
-const cartTotal = computed(() => rows.value.reduce((s, r) => s + subtotal(r), 0))
+const cartTotal = computed(() => rows.value.reduce((s, r) => s + subtotal(r), 0)); const isVipMember = computed(() => Number(getMemberLevel()) > 0); const memberTotal = computed(() => isVipMember.value ? memberPriceOf(cartTotal.value) : cartTotal.value)   // 批四第二批 commit 3（**同行追加、不新增行**）：整车会员合计按**整单** `round(Σ×0.9,2)` 算 —— 与后端每单 `MemberPricing.priceOf(Price)` 同基数（拆分多笔单时逐笔取整，前端只作预估；实付以 `cartCheckout` 响应为准）
 // 有下架商品时整车结算**必然**中止（后端遇到就整单停）⇒ 先把按钮禁掉，并说清原因。
 const canCheckoutAll = computed(() => rows.value.every((r) => r.GoodName))
 
@@ -269,7 +269,7 @@ const {
 } = useCouponPick({
   // 领券账户 = **登录名**（`coupon_grant.ToAccount` 存的就是 `login.UserName`，2026-10-12 起）
   account: getUsername() || '',
-  orderTotal: cartTotal,
+  orderTotal: memberTotal,   // 批四第二批 commit 3：券基数 = 会员价（先 9 折、再算券）；非 VIP 时等于原 `cartTotal`
   enabled: computed(() => rows.value.length > 0 && groupCount.value === 1),
   // ⚠️ 传 computed 不传字符串：整车是**异步**拉回来的，字符串会冻结在 setup 那一刻（恒「含 0 个商家」）
   blockedHint: computed(() => `本车含 ${groupCount.value} 个商家，优惠券只能抵一笔订单 —— 请按商家分单结算`), hasDiscount
@@ -630,4 +630,10 @@ onMounted(loadCoupons)
   border: 1px solid currentColor;
   border-radius: var(--r1);
 }
+
+/* 会员价（批四第二批 commit 3）。与 `ProductPage.vue` / `ProductCard.vue` 同一条视觉口径：
+   原价删除线弱化（`.m-was`）+ 会员价改用品牌色（`.m-price`）。⚠️ 只在本机恢复态是 VIP 时渲染；
+   金额仍是**预估值** —— 实付以 `cartCheckout` 响应为准（拆分多笔单时逐笔取整）。 */
+.m-was { color: var(--ink-3); font-size: var(--fs-xs); text-decoration: line-through; margin-right: 4px; }
+.m-price { color: var(--brand-ink); font-weight: var(--fw-med); }
 </style>

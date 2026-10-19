@@ -3,7 +3,9 @@ package com.minke.mallmanagement.goods.service;
 import com.minke.mallmanagement.shared.web.PageLimits;
 import com.minke.mallmanagement.goods.dao.GoodsDao;
 import com.minke.mallmanagement.shared.upload.UploadStorage;
+import com.minke.mallmanagement.shared.web.UserStateLookup;
 import io.github.resilience4j.circuitbreaker.annotation.CircuitBreaker;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -103,6 +105,12 @@ public class GoodsService {
     private final com.minke.mallmanagement.marketing.discount.service.DiscountLimitService discountLimitService;
     /** 低库存告警（批四第二批）—— 只被 {@link #skuStockUpdate} 消费。 */
     private final com.minke.mallmanagement.notification.service.NotificationService notificationService;
+    /**
+     * 会员等级只读探针（批四第二批 commit 3）—— 只被 {@code productCodePrice} 的 4 参版本消费。
+     * ⚠️ {@link ObjectProvider}：impl 刻意不进 smoke 切片 @Import（同 {@code OrderService}），
+     * 裸注入会让切片在上下文加载期红；取不到 ⇒ 详情页按普通用户定价。
+     */
+    private final ObjectProvider<UserStateLookup> userStateLookupProvider;
     private final String uploadDir;
 
     public GoodsService(GoodsDao goodsDao,
@@ -110,12 +118,14 @@ public class GoodsService {
                         GoodsAuditService goodsAuditService,
                         com.minke.mallmanagement.marketing.discount.service.DiscountLimitService discountLimitService,
                         com.minke.mallmanagement.notification.service.NotificationService notificationService,
+                        ObjectProvider<UserStateLookup> userStateLookupProvider,
                         @Value("${app.upload-dir:${user.dir}/src/main/resources/static/img/}") String uploadDir) {
         this.goodsDao = goodsDao;
         this.goodsCacheService = goodsCacheService;
         this.goodsAuditService = goodsAuditService;
         this.discountLimitService = discountLimitService;
         this.notificationService = notificationService;
+        this.userStateLookupProvider = userStateLookupProvider;
         this.uploadDir = uploadDir;
     }
 
@@ -493,6 +503,19 @@ public class GoodsService {
      * 响应键 {@code goodImg} 与列名 {@code GoodImg} 不同名 —— 这是契约，别「改对」。
      */
     public Map<String, Object> productCodePrice(String MerchantId, String GoodName, String ProductCode) {
+        return productCodePrice(MerchantId, GoodName, ProductCode, null);
+    }
+
+    /**
+     * 同 {@link #productCodePrice(String, String, String)}，多一个 {@code customerId}
+     * （批四第二批 commit 3）：命中 VIP 时**加性**返回 {@code memberPrice}。
+     *
+     * <p>⚠️ 会员价由**服务端**算：详情页展示与下单落库必须同一个数（公式见
+     * {@link com.minke.mallmanagement.shared.MemberPricing}）。非会员 / 未登录 /
+     * 探针读失败 ⇒ **响应里没有这个键**，与改动前逐字相同（老前端不读它）。
+     */
+    public Map<String, Object> productCodePrice(String MerchantId, String GoodName, String ProductCode,
+                                                String customerId) {
         Map<String, Object> result = new HashMap<>();
         try {
             Map<String, Object> row =
@@ -515,6 +538,12 @@ public class GoodsService {
             result.put("imgList", row.get("ImgList"));
             // 批四第二批 commit 2：品牌标 —— **加性键**，老前端不读；1/true ⇒ 详情页画「品牌」徽标。
             result.put("isBrand", row.get("IsBrand"));
+            // 批四第二批 commit 3：会员价 —— **仅 VIP 返回**（严格加性）。算不出的价格基础不编造。
+            Object basePrice = row.get("Price");
+            if (isMember(customerId) && basePrice instanceof Number n && n.doubleValue() > 0) {
+                result.put("memberPrice",
+                        com.minke.mallmanagement.shared.MemberPricing.priceOf(n.doubleValue()));
+            }
         } catch (Exception e) {
             // 技术异常（2026-10-12〈Bug 1〉起「>1 行」不再从这里来 —— 那条路改走 MIN(Id)）：
             // 这里接住 ⇒ 仍是 200 + {success:false}，**不是 500**（对调用方零契约变更）。
@@ -522,6 +551,19 @@ public class GoodsService {
             result.put("success", false);
         }
         return result;
+    }
+
+    /** VIP 判据：探针缺席 / 读失败 / 查无此人 ⇒ {@code false}（按普通用户，fail-open）。 */
+    private boolean isMember(String customerId) {
+        if (customerId == null || customerId.isBlank()) {
+            return false;
+        }
+        try {
+            UserStateLookup lookup = userStateLookupProvider.getIfAvailable();
+            return lookup != null && lookup.memberLevel(customerId) > 0;
+        } catch (Exception e) {
+            return false;
+        }
     }
 
     // ==================== 写：下架 / 更新 ====================

@@ -68,7 +68,7 @@ const routes = [
           subMenu: [
             { label: '个人信息', sub: 'info', to: '/customer/user/info', glyph: 'users' },
             { label: '历史购买记录', sub: 'history', to: '/customer/user/history', glyph: 'orders' },
-            { label: '好友', sub: 'friend', to: '/customer/user/friend', glyph: 'msg' },{ label: '商家入驻', sub: 'apply', to: '/customer/user/apply', glyph: 'merchants' },   // ⚠️ C3 块 2〈用户块〉：**同行**追加（净零行数，理由同本行上方 A5 那条）。落点在文件尾 `addRoute('customerUser', { path: 'apply', … })`，**别**在 `children` 里找它 —— 那条记录是挂上去的，不在字面数组里
+            { label: '好友', sub: 'friend', to: '/customer/user/friend', glyph: 'msg' },{ label: '商家入驻', sub: 'apply', to: '/customer/user/apply', glyph: 'merchants' },{ label: '会员中心', sub: 'member', to: '/customer/user/member', glyph: 'users' },   // ⚠️ 批四第二批 commit 3（2026-10-19）：**同行追加**（净零行数，理由同本行上方 A5 那条）。落点在**文件尾** `addRoute('customerUser', { path: '/customer/user/member', … })`，**别**在 `children` 字面数组里找它。   // ⚠️ C3 块 2〈用户块〉：**同行**追加（净零行数，理由同本行上方 A5 那条）。落点在文件尾 `addRoute('customerUser', { path: 'apply', … })`，**别**在 `children` 里找它 —— 那条记录是挂上去的，不在字面数组里
             // ⚠️ A5（2026-10-07 用户裁定）：原第 4 项「消息」（`sub: 'chat'` → `/customer/user/chat`）**已删** —— 与顶栏「消息」重复；子路由改 `redirect`（见 `children` 末尾）
           ]
         },
@@ -660,3 +660,17 @@ router.addRoute({
 // ══════════════════════════════════════════════════════════════════════════════════════════
 
 router.addRoute({ path: '/brand', component: () => import('../views/BrandZone.vue'), meta: { public: true } })
+
+// ══════════════════════════════════════════════════════════════════════════════════════════
+// ── 批四 · 第二批（2026-10-19）：会员中心 `/customer/user/member` ───────────────────────────
+//
+// ⚠️ **挂在 `customerUser` 下、新增行落在文件最尾**（本仓「零漂移」手法）：会员中心是
+//    **登录后**的业务页（开通 / 领券都要会话），必须进 AppShell + UserCenter 壳 ⇒ 左菜单在场、
+//    地址落在 `/customer/user/*` 下。⚠️ `path` 写**绝对**地址（与 `/merchant/stats` 同款写法），
+//    地址即 `subMenu` 里那一项的 `to`。
+//
+// ⚠️ `meta.sub = 'member'` 是左菜单高亮键（`UserCenter.vue` 的 `route.meta.sub === item.sub`）；
+//    `subMenu` 那一项在 `routes` 数组里、按「同行追加保净零行数」写（`docs/` 按行号引本文件）。
+// ══════════════════════════════════════════════════════════════════════════════════════════
+
+router.addRoute('customerUser', { path: '/customer/user/member', component: () => import('../views/MemberCenter.vue'), meta: { sub: 'member' } })

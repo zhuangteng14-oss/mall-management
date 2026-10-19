@@ -119,6 +119,26 @@ public class AdminAccountsController {
     // ==================== 二、商家审核 ====================
 
     /** 入驻申请列表（{@code status} 可空 ⇒ 全部；传 {@code pending} 即待审）。 */
+    /**
+     * 设置会员等级（批四第二批 commit 3）—— {@code level} 只接受 {@code 0}（普通）/ {@code 1}（VIP）。
+     * 审计照 {@link #ban} 的四步：业务成功后才记，{@code before/after} 是整行治理快照。
+     */
+    @PostMapping("/user/member")
+    public Result<Map<String, Object>> member(
+            @RequestParam(value = "username", required = false) String username,
+            @RequestParam(value = "level", required = false) Integer level,
+            HttpServletRequest request
+    ) {
+        Map<String, Object> before = userRowOrNull(username);
+        Map<String, Object> result = governanceService.setMember(username, level);
+
+        if (Boolean.TRUE.equals(result.get("success"))) {
+            auditService.record(AuthSession.identify(request), AuditActions.USER_MEMBER_SET,
+                    "user", username, before, governanceService.userRow(username).get("user"));
+        }
+        return Result.of(result);
+    }
+
     @PostMapping("/applications")
     public Result<Map<String, Object>> applications(
             @RequestParam(value = "status", required = false) String status,

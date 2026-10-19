@@ -37,7 +37,7 @@
       <dl class="ident-meta">
         <div><dt class="k">用户类型</dt><dd class="v">{{ userInfo.usertype || '—' }}</dd></div>
         <div><dt class="k">性别</dt><dd class="v">{{ userInfo.gender || '—' }}</dd></div>
-        <div><dt class="k">年龄</dt><dd class="v">{{ userInfo.age || '—' }}</dd></div>
+        <div><dt class="k">年龄</dt><dd class="v">{{ userInfo.age || '—' }}</dd></div><div><dt class="k">会员等级</dt><dd class="v">{{ Number(userInfo.MemberLevel) > 0 ? 'VIP（9 折）' : '普通' }}</dd></div><div><dt class="k">账户余额</dt><dd class="v">¥{{ Number(userInfo.Balance || 0).toFixed(2) }}</dd></div>   <!-- ⚠️ 批四第二批 commit 3：同行追加（净零行数）—— 本文件 `:55` 被 context-pack 按行号引，插行会让它下移。数据源是 `/user/me` 的 `user` 整行（`SELECT *`）⇒ 两个新列自动带出，无需额外请求。 -->
       </dl>
       <button class="btn btn-plain ident-btn" @click="chooseImage">更换头像照片</button>
       <input

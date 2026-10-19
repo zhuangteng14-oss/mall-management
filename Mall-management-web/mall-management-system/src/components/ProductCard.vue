@@ -108,7 +108,7 @@
       </div>
       <div class="pcard-foot">
         <div class="pcard-price">
-          <span class="sym">¥</span><span class="int">{{ priceInt }}</span><span class="dec">.{{ priceDec }}</span>
+          <span class="sym">¥</span><span class="int">{{ priceInt }}</span><span class="dec">.{{ priceDec }}</span><span v-if="isVipMember && memberText" class="m-price">会员 ¥{{ memberText }}</span>
         </div>
         <!-- ⚠️ 批四起是**真加购**：走 `/cart/add`，`.stop.prevent` 防冒泡到外层 `<a>`。
              用 <span role="button"> 不用 <button>：见文件头 ④（<a> 内不得嵌交互内容）。 -->
@@ -125,7 +125,7 @@
 </template>
 
 <script setup>
-import { computed, onBeforeUnmount, ref } from 'vue'; import { useRoute, useRouter } from 'vue-router'; import { cartAdd } from '../api/order'; import { getCustomerId, getMerchantId } from '../api/auth'
+import { computed, onBeforeUnmount, ref } from 'vue'; import { useRoute, useRouter } from 'vue-router'; import { cartAdd } from '../api/order'; import { getCustomerId, getMerchantId, getMemberLevel } from '../api/auth'; import { memberPriceOf } from '../composables/useMember'   // 批四第二批 commit 3（**同行追加、不新增行**）：首页/搜索卡片只做 VIP 会员价展示
 import { productLink } from '../config/product-link'
 // ⚠️ 三个类别 / 售完判据一律从 `config/goods-flags.js` 取（**本文件不重写一遍**）—— 见文件头
 //    〈类别标签与已售完〉与被 import 那个模块的头注。
@@ -166,7 +166,7 @@ const priceDec = computed(() => {
   if (!props.goods.Price) return '00'
   const dot = String(props.goods.Price).split('.')[1]
   return dot ? dot.padEnd(2, '0').slice(0, 2) : '00'
-})
+}); const isVipMember = computed(() => Number(getMemberLevel()) > 0); const memberText = computed(() => { const p = Number(props.goods.Price); return p > 0 ? Number(memberPriceOf(p)).toFixed(2) : '' })   // 批四第二批 commit 3（**同行追加**）：列表响应不带 `memberPrice`（那是详情端点对 VIP 的加性键）⇒ 卡片只按同一公式展示，不冒充服务端口径
 
 // `SoldQty` 由 `GoodsCacheService.listHome` 的 LEFT JOIN 补出（本笔同批后端改动）。
 // 老响应里没有这个键 ⇒ `undefined || 0` = 0 ⇒ 不画那一段（不画 ≠ 画 0）。
@@ -428,4 +428,6 @@ const rowKinds = computed(() => (
   flex: none;
   font-variant-numeric: tabular-nums;
 }
+/* 会员价（批四第二批 commit 3）：与整数价同基线的小字，只在本机恢复态是 VIP 时渲染。 */
+.pcard-price .m-price { margin-left: 6px; color: var(--brand-ink); font-size: var(--fs-xs); font-weight: var(--fw-med); white-space: nowrap; }
 </style>

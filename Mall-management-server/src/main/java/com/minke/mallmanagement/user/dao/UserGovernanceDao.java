@@ -63,7 +63,7 @@ public class UserGovernanceDao {
             "u.username, u.usertype, u.customerid, u.merchantid, u.gender, u.age, u.email, "
                     + "u.banned, u.banReason, "
                     + "DATE_FORMAT(u.bannedAt, '%Y-%m-%d %H:%i:%s') AS bannedAt, "
-                    + "u.DowngradeState, u.DowngradeReason, "
+                    + "u.DowngradeState, u.DowngradeReason, u.MemberLevel, "   // 批四第二批 commit 3：管理端用户列表带 VIP 徽标（加性列）
                     + "DATE_FORMAT(u.ScheduledDowngradeAt, '%Y-%m-%d %H:%i:%s') AS ScheduledDowngradeAt, "
                     + "DATE_FORMAT(u.FrozenAt, '%Y-%m-%d %H:%i:%s') AS FrozenAt, "
                     + "DATE_FORMAT(u.FreezeUntil, '%Y-%m-%d %H:%i:%s') AS FreezeUntil, "
@@ -358,6 +358,36 @@ public class UserGovernanceDao {
     public int setBrand(String username, boolean isBrand) {
         String sql = "UPDATE `user` SET IsBrand = ? WHERE username = ?";
         return jdbcClient.sql(sql).params(isBrand ? 1 : 0, username).update();
+    }
+
+    // ==================== 读 / 写：会员等级（批四第二批 commit 3） ====================
+
+    /** 按**客户业务号**取会员等级（{@code user.MemberLevel}）；查不到 / 列为空 ⇒ {@code 0}。 */
+    public int selectMemberLevelByCustomerId(String customerId) {
+        return selectMemberLevel("customerid", customerId);
+    }
+
+    /** 按**登录名**取会员等级；查不到 / 列为空 ⇒ {@code 0}。 */
+    public int selectMemberLevelByUsername(String username) {
+        return selectMemberLevel("username", username);
+    }
+
+    private int selectMemberLevel(String column, String value) {
+        String sql = "SELECT MemberLevel FROM `user` WHERE " + column + " = ? LIMIT 1";
+        List<Map<String, Object>> rows = jdbcClient.sql(sql).param(value).query().listOfRows();
+        if (rows.isEmpty() || rows.get(0).get("MemberLevel") == null) {
+            return 0;
+        }
+        return ((Number) rows.get(0).get("MemberLevel")).intValue();
+    }
+
+    /**
+     * 置会员等级（管理员设置 / 客户自助开通都走这条）。
+     * {@code level} 由调用方夹在 0/1（本批只定义了普通与 VIP 两档）。
+     */
+    public int setMemberLevel(String username, int level) {
+        String sql = "UPDATE `user` SET MemberLevel = ? WHERE username = ?";
+        return jdbcClient.sql(sql).params(level, username).update();
     }
 
     // ==================== 内部 ====================

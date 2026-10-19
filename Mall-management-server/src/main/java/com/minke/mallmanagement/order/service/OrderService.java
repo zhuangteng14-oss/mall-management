@@ -625,6 +625,25 @@ public class OrderService {
             e.printStackTrace();
         }
 
+        // ── 会员段（批四第二批 commit 3，2026-10-19）──────────────────────────────────
+        // 位置：查重**之后**、用券**之前**。三项理由：
+        //  ① 会员价是券门槛与减免的**基数**（用户裁决「券与会员价可叠加」）⇒ 必须先算出来；
+        //  ② 排在 INSERT 之前：它只影响本单金额，没有任何「占名额」的写，失败面天然小；
+        //  ③ 查等级读失败按普通用户放行（fail-open，见 UserStateLookup.memberLevel）——
+        //     绝不能因为库抖一下就让全场下单失败。
+        int memberLevel = 0;
+        if (userStateLookup != null) {
+            try {
+                memberLevel = userStateLookup.memberLevel(CustomerId);
+            } catch (Exception e) {
+                log.warn("会员等级读取失败（订单 {}）：customerId={} —— 本次按普通用户计价 {}", OrderId, CustomerId, e.toString());
+            }
+        }
+        double memberPrice = memberLevel > 0
+                ? com.minke.mallmanagement.shared.MemberPricing.priceOf(Price)
+                : Price;
+        double memberDiscount = memberLevel > 0 ? Price - memberPrice : 0d;
+
         // ── 用券段（C3 块 5 · commit 5）───────────────────────────────────────────────
         // 位置是**刻意**的，三条理由：
         //  ① 排在查重**之后**：重复提交该走的还是那条早退（`订单已存在`），不该先把券核销掉；
@@ -652,8 +671,9 @@ public class OrderService {
             // ⚠️ 券包的键是**登录名**，本方法的入参是**业务号** —— 这里必须翻一次
             //    （`coupon_grant.ToAccount` 的口径见 `CouponDao.insertGrant`）。
             couponAccount = usernameOf(CustomerId);
+            // ⚠️ 门槛与减免的基数 = **memberPrice**（先 9 折、再算券）—— 用户裁决的叠加顺序。
             CouponService.Redeem redeemed = couponService.redeem(
-                    couponAccount, CouponId.trim(), MerchantId, Price, hasDiscountItem, OrderId);
+                    couponAccount, CouponId.trim(), MerchantId, memberPrice, hasDiscountItem, OrderId);
             if (!redeemed.ok()) {
                 result.put("success", false);
                 result.put("msg", redeemed.msg());
@@ -664,7 +684,7 @@ public class OrderService {
         // 折后价：`Price` 是**原价**（前端 / `CartService` 传的都是合计），实付价落库。
         // `Math.max(0, …)` 防负数（券的减免上界已在 `CouponService.redeem` 里锁到 `orderTotal`，
         // 这里再兜一层：金额为负的订单在 `order.Price` 的语义里没有解释）。
-        float payPrice = (float) Math.max(0d, Price - discount);
+        float payPrice = (float) Math.max(0d, memberPrice - discount);
 
         // ── 秒杀段（C3 块 7 · commit 2c，2026-10-14）────────────────────────────────────
         // 位置是**刻意**的，三条理由（前两条与上面用券段逐字同源）：
@@ -756,6 +776,12 @@ public class OrderService {
                     // 不选券的老请求永远不会看到这两个键（`Result.of` 逐条 put）。
                     result.put("CouponId", CouponId.trim());
                     result.put("Discount", discount);
+                }
+                if (memberDiscount > 0d) {
+                    // 批四第二批 commit 3：会员单才回这两个键（**严格加性** —— 非会员的响应形状
+                    // 与改动前逐字相同）。前端收银弹窗据此画「会员优惠 -X」一行。
+                    result.put("MemberPrice", memberPrice);
+                    result.put("MemberDiscount", memberDiscount);
                 }
             } else {
                 result.put("success", false);

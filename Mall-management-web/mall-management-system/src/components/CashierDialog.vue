@@ -23,7 +23,7 @@
         <button class="cx" @click="close" aria-label="关闭">×</button>
       </div>
       <div class="cdlg-b">
-        <p class="pay-amt">应付金额 <b>¥{{ formatPrice(order.Price) }}</b></p>
+        <p class="pay-amt">应付金额 <b>¥{{ formatPrice(order.Price) }}</b></p><p class="pay-sub" v-if="Number(order.MemberDiscount) > 0">会员优惠 −¥{{ formatPrice(order.MemberDiscount) }}<span v-if="Number(order.CouponDiscount) > 0"> · 优惠券 −¥{{ formatPrice(order.CouponDiscount) }}</span></p>
         <p class="pay-oid">订单号 <span class="mono">{{ order.OrderId }}</span></p>
         <div class="pay-methods">
           <label v-for="m in PAY_METHODS" :key="m" class="pm" :class="{ on: method === m }">
@@ -195,4 +195,8 @@ async function confirm() {
   color: #fff;
 }
 .cact.primary[disabled] { opacity: 0.6; cursor: default; }
+
+/* 会员/券的减额行（批四第二批 commit 3）。⚠️ 只有调用方把 `MemberDiscount` 传进 `order` 时才画 ——
+   「我的订单」付款那一路的 `order` 来自列表接口（`Price` 已是实付），没有这个键 ⇒ 逐字同改前。 */
+.pay-sub { margin: 2px 0 0; font-size: var(--fs-xs); color: var(--brand-ink); }
 </style>

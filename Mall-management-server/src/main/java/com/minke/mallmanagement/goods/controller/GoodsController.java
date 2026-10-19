@@ -284,9 +284,15 @@ public class GoodsController {
     public Result<Map<String, Object>> productCodePrice(
             @NotBlank(message = "不能为空") @RequestParam("MerchantId") String MerchantId,
             @NotBlank(message = "不能为空") @RequestParam("GoodName") String GoodName,
-            @NotBlank(message = "不能为空") @RequestParam("ProductCode") String ProductCode
+            @NotBlank(message = "不能为空") @RequestParam("ProductCode") String ProductCode,
+            HttpServletRequest request
     ) {
-        return Result.of(goodsService.productCodePrice(MerchantId, GoodName, ProductCode));
+        // 批四第二批 commit 3：会话里的客户号只用于「要不要带 memberPrice」。
+        // ⚠️ 未登录 / 商家 / 管理员 ⇒ null ⇒ 与改动前同一份响应（严格加性）。
+        AuthSession.Identity identity = AuthSession.identify(request);
+        String customerId = identity != null && identity.role() != null && identity.role() == 1
+                ? identity.userId() : null;
+        return Result.of(goodsService.productCodePrice(MerchantId, GoodName, ProductCode, customerId));
     }
 
     /**

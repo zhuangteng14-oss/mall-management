@@ -103,8 +103,8 @@
                   这样改了现价，角标自动跟着变，不会留下一个算不出来的陈旧折率。
                ⚠️ 稿的 `.dec`（`.00`）**不落**：本仓价格没有固定小数位，硬拆会凭空空造两位。 -->
           <div class="priceline">
-            <span class="price"><span class="sym">¥</span><span class="int">{{ currentItem.price }}</span></span>
-            <span v-if="hasDiscount" class="was">¥{{ currentItem.originalPrice }}</span>
+            <span class="price" :class="{ vip: currentMemberPrice > 0 }"><span class="sym">¥</span><span class="int">{{ currentMemberPrice > 0 ? currentMemberPrice : currentItem.price }}</span><span v-if="currentMemberPrice > 0" class="vip-tag">会员价</span></span>
+            <span v-if="currentMemberPrice > 0" class="was">¥{{ currentItem.price }}</span><span v-if="hasDiscount" class="was">¥{{ currentItem.originalPrice }}</span>
             <span v-if="hasDiscount" class="off">{{ discountRate }} 折</span>
             <!-- ①-补【国家补贴】—— C3 块 5〈国补〉**落地**（2026-10-12）。
                  ⚠️ 只在「这件商品通过了国补、规则在期、商品在架」时才有个数 —— 后端 `/marketing/subsidy/goods`
@@ -633,14 +633,14 @@
             <div class="p-row" v-for="(it, idx) in popupBuyList" :key="idx">
               <div class="thumb"><img v-if="it.goodImg" :src="it.goodImg" /></div>
               <div class="nm"><div class="t">{{ goodName }}</div><div class="sku">规格：{{ it.productCode }}</div><div class="sku">订单号 {{ popupOrderId }}</div></div>
-              <div class="unit">¥{{ Number(it.price).toFixed(2) }}</div>
+              <div class="unit"><s v-if="popupMemberOn" class="m-was">¥{{ Number(it.price).toFixed(2) }}</s><b v-if="popupMemberOn" class="m-price">¥{{ Number(memberPriceOf(it.price)).toFixed(2) }}</b><template v-else>¥{{ Number(it.price).toFixed(2) }}</template></div>
               <div class="num"><button type="button" class="pm" title="减一（`setPopQtyByCode`，沿用 min 0）" @click="setPopQtyByCode(it.productCode, -1)">−</button><span class="n">{{ it.quantity }}</span><button type="button" class="pm" title="加一（`setPopQtyByCode`，沿用 max 100）" @click="setPopQtyByCode(it.productCode, 1)">+</button></div>
-              <div class="sub">¥{{ (it.price * it.quantity).toFixed(2) }}</div>
+              <div class="sub"><s v-if="popupMemberOn" class="m-was">¥{{ (it.price * it.quantity).toFixed(2) }}</s><b v-if="popupMemberOn" class="m-price">¥{{ Number(memberPriceOf(it.price) * it.quantity).toFixed(2) }}</b><template v-else>¥{{ (it.price * it.quantity).toFixed(2) }}</template></div>
               <button type="button" class="del" title="移出本行（现有实现 `delPopItem`）" @click="delPopItem(it.productCode)">删除</button>
             </div>
           </div>
           <aside class="p-sum"><div class="p-sum-h">结算</div>
-            <div class="p-sum-r"><span class="k">商品件数</span><span class="v">{{ popupCount }}</span></div><div class="p-sum-r"><span class="k">商品总额</span><span class="v">¥{{ Number(popupTotal).toFixed(2) }}</span></div><div class="p-sum-r" v-if="popupEntry === 'buy'"><span class="k">优惠券</span><span class="v"><span class="cp" :class="{ off: !couponPickable }" :title="couponHint"><select v-model="couponId" :disabled="!couponPickable"><option value="">{{ usableCoupons.length ? '不使用优惠券' : '暂无可用券' }}</option><option v-for="c in usableCoupons" :key="c.CouponId" :value="c.CouponId" :disabled="!!couponBlockedReason(c)">{{ couponLabel(c) }}{{ couponBlockedReason(c) ? '（' + couponBlockedReason(c) + '）' : '' }}</option></select><b v-if="discount > 0" class="save">−¥{{ Number(discount).toFixed(2) }}</b></span></span></div>
+            <div class="p-sum-r"><span class="k">商品件数</span><span class="v">{{ popupCount }}</span></div><div class="p-sum-r"><span class="k">商品总额</span><span class="v"><s v-if="popupMemberOn" class="m-was">¥{{ Number(popupTotal).toFixed(2) }}</s> ¥{{ Number(popupMemberTotal).toFixed(2) }}</span></div><div class="p-sum-r" v-if="popupEntry === 'buy'"><span class="k">优惠券</span><span class="v"><span class="cp" :class="{ off: !couponPickable }" :title="couponHint"><select v-model="couponId" :disabled="!couponPickable"><option value="">{{ usableCoupons.length ? '不使用优惠券' : '暂无可用券' }}</option><option v-for="c in usableCoupons" :key="c.CouponId" :value="c.CouponId" :disabled="!!couponBlockedReason(c)">{{ couponLabel(c) }}{{ couponBlockedReason(c) ? '（' + couponBlockedReason(c) + '）' : '' }}</option></select><b v-if="discount > 0" class="save">−¥{{ Number(discount).toFixed(2) }}</b></span></span></div><div class="p-sum-r" v-if="popupMemberOn && popupTotal - popupMemberTotal > 0"><span class="k">会员优惠</span><span class="v"><b class="save">−¥{{ Number(popupTotal - popupMemberTotal).toFixed(2) }}</b></span></div>
             <div class="p-sum-r"><span class="k">运费</span><span class="v">免运费</span></div><div class="p-sum-t"><span class="k">合计</span><span class="v"><i>¥</i>{{ Number(payTotal).toFixed(2) }}</span></div>
             <button type="button" class="p-confirm" @click="confirmPurchase">{{ popupEntry === 'cart' ? '加入购物车' : '结算' }}</button>
           </aside></div>
@@ -682,7 +682,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { http, handleApiError } from '../api/http'
 import { endpoints } from '../api/endpoints'; import { orderAdd, cartAdd } from '../api/order'   // ⚠️ C3 块 4：**同行追加**（不新增行 —— 本文件 `:794`/`:803` 被 `slot-registry.md:1994-1995` 按行号引（〈Bug 1〉本笔 +19 行前为 `:775`/`:784`），此处加行会顶漂它们）。两个函数就是原先那两串 `URLSearchParams` + `http.post` + `res.json()` 的收口
 import CashierDialog from '../components/CashierDialog.vue'; import ProductCard from '../components/ProductCard.vue'; import ReportDialog from '../components/ReportDialog.vue'; import { sharedList } from '../config/goods-flags'; import { useInfiniteList } from '../composables/useInfiniteList'   // ⚠️ **同行追加** `sharedList`（C3 块 5 ·〈Bug 2/3〉落码，2026-10-12）：本页只用它算「猜你喜欢」（见 `:522` 那条按语）。本行已有一条「本笔确实新增了一行」的记账（2026-10-10 Bug 1），**这一笔不再加行** —— 本文件下面 `:571` / `:638` / `:794` / `:1032` / `:1330` 等处被文档按行号钉着   // ⚠️ 2026-10-10（Bug 1）：收银台与「我的订单」**共用同一个组件** —— 本行**确实**新增了一行；本笔在 `ProductPage.vue` 净 +19 行（`git diff` 实测：模板 `:412` 起 +5、import +1、`handlePay` 段 +13）⇒ 下面两处 `:775`/`:784` 漂到 `:794`/`:803`，随本笔一并重指（见 `slot-registry.md:1994-1995`）
-import { getMerchantId, getCustomerId, getUsername, isLoggedIn, getRole } from '../api/auth'; import IconGlyph from '../components/ui/IconGlyph.vue'; import { coupons, claim, subsidyGoods, seckillLive } from '../api/marketing'; import { couponName } from '../config/coupon-format'; import { useCouponPick } from '../composables/useCouponPick'; import { list as commentList, add as commentAdd, remove as commentRemove, accept as commentAccept, like as commentLike, myOrders as commentOrders } from '../api/comment'; import DonutChart from '../components/charts/DonutChart.vue'   // ⚠️ **块 6 整改 commit 2〈问答漏项补齐〉同行追加** `DonutChart`（§4.2「左圆比例图」，与 `views/admin/AccountsPage.vue` 的「封禁分布」同款）—— **不新增行**，故本行行号不动。⚠️ **整改 commit 4〈举报〉曾同行追加** `reportAdd`（`/report/add`；本页的「举报 / 提删」弹窗，§4.4 与 §4.2 的商家提删走同一条）—— **2026-10-13 撤出**：举报弹窗抽成 `components/ReportDialog.vue` 后本页不再自己发 `/report/add`，该 import 随弹窗搬进组件（本行仍**不新增行**）。⚠️ 六条 import **同行**（第 6 条 `../api/comment` 的六个别名：块 6 · commit 1「评论」+ commit 2「问答」的 `accept`，2026-10-12 —— 别名是必需的，`list`/`add` 这种裸名在本文件里跟 `allItems` 那些局部名撞脸，读不出是谁的）（第 5 条 `useCouponPick`：块 5 · commit 5 续笔「立即购买」也能用券，2026-10-12；与 `ShoppingCart.vue` 共用同一处，不抄第二份）（第 2、3 条：2026-10-11 补图标笔 + C3 块 5 · commit 1；第 4 条 `couponName`：块 5 · A 组 · A7 后半；`getUsername`：块 5 券口径改登录名，2026-10-12）—— 合并到既有行 = 不新增行号漂移（本文件 `:794`/`:803` 被 `slot-registry.md:1994-1995` 按行号引，上面 `:424` 那条注释记过同一件事）。⚠️ **块 5 · commit 1 仍整体 +90 行**（模板 +17 / `<script setup>` 尾 +70 / `<style>` +3）⇒ `slot-registry.md:1994` 引的 `:794` 漂 **`:881`**、`:1995` 引的 `:803` 漂 **`:890`**（两值均为 `grep -n` 实测，见 `_work/b5-repoint.md`）。⚠️ **块 6 · commit 1 又整体 +N 行**、**commit 2（问答）再 +M 行**，漂移台账见 `_work/b6-commit1-repoint.md` 与 `_work/b6-commit2-repoint.md`（收口 commit 逐处重指）。
+import { getMerchantId, getCustomerId, getUsername, isLoggedIn, getRole, getMemberLevel } from '../api/auth'; import IconGlyph from '../components/ui/IconGlyph.vue'; import { coupons, claim, subsidyGoods, seckillLive } from '../api/marketing'; import { couponName } from '../config/coupon-format'; import { useCouponPick } from '../composables/useCouponPick'; import { list as commentList, add as commentAdd, remove as commentRemove, accept as commentAccept, like as commentLike, myOrders as commentOrders } from '../api/comment'; import DonutChart from '../components/charts/DonutChart.vue'; import { memberPriceOf } from '../composables/useMember'   // ⚠️ **块 6 整改 commit 2〈问答漏项补齐〉同行追加** `DonutChart`（§4.2「左圆比例图」，与 `views/admin/AccountsPage.vue` 的「封禁分布」同款）—— **不新增行**，故本行行号不动。⚠️ **整改 commit 4〈举报〉曾同行追加** `reportAdd`（`/report/add`；本页的「举报 / 提删」弹窗，§4.4 与 §4.2 的商家提删走同一条）—— **2026-10-13 撤出**：举报弹窗抽成 `components/ReportDialog.vue` 后本页不再自己发 `/report/add`，该 import 随弹窗搬进组件（本行仍**不新增行**）。⚠️ 六条 import **同行**（第 6 条 `../api/comment` 的六个别名：块 6 · commit 1「评论」+ commit 2「问答」的 `accept`，2026-10-12 —— 别名是必需的，`list`/`add` 这种裸名在本文件里跟 `allItems` 那些局部名撞脸，读不出是谁的）（第 5 条 `useCouponPick`：块 5 · commit 5 续笔「立即购买」也能用券，2026-10-12；与 `ShoppingCart.vue` 共用同一处，不抄第二份）（第 2、3 条：2026-10-11 补图标笔 + C3 块 5 · commit 1；第 4 条 `couponName`：块 5 · A 组 · A7 后半；`getUsername`：块 5 券口径改登录名，2026-10-12）—— 合并到既有行 = 不新增行号漂移（本文件 `:794`/`:803` 被 `slot-registry.md:1994-1995` 按行号引，上面 `:424` 那条注释记过同一件事）。⚠️ **块 5 · commit 1 仍整体 +90 行**（模板 +17 / `<script setup>` 尾 +70 / `<style>` +3）⇒ `slot-registry.md:1994` 引的 `:794` 漂 **`:881`**、`:1995` 引的 `:803` 漂 **`:890`**（两值均为 `grep -n` 实测，见 `_work/b5-repoint.md`）。⚠️ **块 6 · commit 1 又整体 +N 行**、**commit 2（问答）再 +M 行**，漂移台账见 `_work/b6-commit1-repoint.md` 与 `_work/b6-commit2-repoint.md`（收口 commit 逐处重指）。
 
 const route = useRoute()
 const router = useRouter()
@@ -704,7 +704,7 @@ const customerId = buyerId || ''
 // 数据定义
 const allItems = ref([])
 const currentIndex = ref(0)
-const currentItem = computed(() => allItems.value[currentIndex.value] || {})
+const currentItem = computed(() => allItems.value[currentIndex.value] || {}); const currentMemberPrice = computed(() => { const m = Number(currentItem.value.memberPrice); const p = Number(currentItem.value.price); return m > 0 && p > 0 && m < p ? m : 0 })   // 批四第二批 commit 3（**同行追加、不新增行**）：会员价由服务端 `productCodePrice` 只对 VIP 返回（`memberPrice`），非会员无此键 ⇒ 本 computed 恒 0（不画会员价）。
 // ── 块 5〈折扣〉：划线价 + 折扣角标（读侧现算，见模板 ① 的注释）────────────────
 // `originalPrice` 由 `/goods/productCodePrice` 透出（本笔给那条 SELECT 加的列，响应键加性）。
 // ⚠️ 老响应没有这个键 ⇒ `undefined` ⇒ `hasDiscount` 为假 ⇒ **一枚都不画**（不画 ≠ 画假的）。
@@ -822,7 +822,7 @@ const loadAllItems = async () => {
           originalPrice: d2.originalPrice, // 块 5〈折扣〉：划线价（0/undefined = 不打折）
           goodImg: d2.goodImg,
           imgList: d2.imgList, // 2026-10-19 多图：JSON 数组串（null/空 ⇒ 只用 goodImg）
-          isBrand: d2.isBrand, // 批四第二批 commit 2：品牌加盟店标（1/true/"1" ⇒ 画徽标）
+          isBrand: d2.isBrand, memberPrice: d2.memberPrice, // 批四第二批 commit 2/3（**同行追加、不新增行**）：`isBrand` = 品牌加盟店标（1/true/"1"）；`memberPrice` = **仅 VIP 响应带此键**（严格加性）、模板 `currentMemberPrice` 比价后再画
           UserName: ''
         })
       }
@@ -863,7 +863,7 @@ const loadPopupItems = async () => {
         items.push({
           productCode: code,
           price: d2.price,
-          goodImg: d2.goodImg
+          goodImg: d2.goodImg, memberPrice: d2.memberPrice // 批四第二批 commit 3（**同行追加**）：仅 VIP 响应带此键；SKU 行由 `mergeSkus` 按 SKU 价重算
         })
       }
     }
@@ -900,14 +900,14 @@ const popupBuyList = computed(() => {
     .map((i) => ({
       productCode: i.productCode,
       quantity: popupQty.value[i.productCode],
-      price: i.price, originalPrice: i.originalPrice,   // ⚠️ **同行追加**（本文件 `:794`/`:803` 被引，且 `:1032` 那类 `<style>` 引用都在下面 ⇒ 多一行就顶漂）。块 5〈用券规则〉2026-10-12 要用它算「本单含不含折扣商品」；`popupBuyList` 原来是 `productCode/quantity/price/goodImg` 四件，`originalPrice` 只有 `popupAllItems` 有（`:559`）。
+      price: i.price, originalPrice: i.originalPrice, memberPrice: i.memberPrice,   // ⚠️ **同行追加**（本文件 `:794`/`:803` 被引，且 `:1032` 那类 `<style>` 引用都在下面 ⇒ 多一行就顶漂）。块 5〈用券规则〉2026-10-12 要用它算「本单含不含折扣商品」；`popupBuyList` 原来是 `productCode/quantity/price/goodImg` 四件，`originalPrice` 只有 `popupAllItems` 有（`:559`）。
       goodImg: i.goodImg
     }))
 })
 
 const popupTotal = computed(() => {
   return popupBuyList.value.reduce((sum, item) => sum + item.price * item.quantity, 0)
-}); const popupCount = computed(() => popupBuyList.value.reduce((sum, it) => sum + it.quantity, 0))   // **商品件数** = Σ 数量（`图3.jpg` 那份 1+2+3 = 6）。⚠️ 旧 `.p-foot` 写的是 `popupBuyList.length` = **行数**（三行读成 3 件）⇒ 本笔按用户「商品件数」的口径改成数量之和。
+}); const popupCount = computed(() => popupBuyList.value.reduce((sum, it) => sum + it.quantity, 0)); const isVipMember = computed(() => Number(getMemberLevel()) > 0); const popupMemberOn = isVipMember; const popupMemberTotal = computed(() => isVipMember.value ? memberPriceOf(popupTotal.value) : popupTotal.value)   // 批四第二批 commit 3（**同行追加、不新增行**）：会员合计按**整单** `round(Σprice×qty × 0.9, 2)` 算 —— 与后端 `OrderService` 的 `memberPrice = MemberPricing.priceOf(Price)` **同一基数**（逐行四舍五入会与后端差到分）。非 VIP 时逐字等于 `popupTotal`。   // **商品件数** = Σ 数量（`图3.jpg` 那份 1+2+3 = 6）。⚠️ 旧 `.p-foot` 写的是 `popupBuyList.length` = **行数**（三行读成 3 件）⇒ 本笔按用户「商品件数」的口径改成数量之和。
 
 // 订单提交
 const showPayConfirm = ref(false); const lockScroll = (on) => { document.body.style.overflow = on ? 'hidden' : '' }; watch(showPopup, lockScroll); onBeforeUnmount(() => lockScroll(false))   // ⚠️ **2026-10-08 用户五条【1】**：弹窗开 = **锁 body 滚动**、关 = 解锁（用户逐字：「满占 = 弹窗 + 背后页面一起锁」）。⚠️ 用 `watch` 一处收口、**不在 `openPopup` 与各关闭点各写一行** —— 关闭有两条路（点旁边空白 / 点 X）都只置 `showPopup=false`。⚠️ `onBeforeUnmount` 是**兜底**：`/product` 是两壳的**兄弟**路由 ⇒ 切走即卸载，不兜底会把全站锁死。⚠️ **只写 `<body>` 就够**（探针 ⑪ 有对照：开窗时把这一行撤掉、同一发真滚轮立刻能滚）—— `document.scrollingElement` 虽是 `<html>`，但 `overflow:hidden` 会从 body **传给视口**。⚠️ **同行追加、不新增行**（本文件 775 / 784 两行在下面，新增行会顶漂它们）。
@@ -993,7 +993,7 @@ const handlePay = async (ok) => {   // **C3 块 4 改判 + 2026-10-10 补丁改�
       // ⚠️ 只在**成功**这一支清券选择并重拉券包：失败时后端**没**烧券（CAS 抢不到就不建单，见
       //    `OrderService.addLocked`），留着选择让用户直接重试（同购物车页那条）。
       resetCoupon(); loadCoupons()
-      showPopup.value = false; payFor.value = { OrderId: d.OrderId, Price: Math.max(0, Number(d.Price) - Number(result.Discount || 0)) }
+      showPopup.value = false; payFor.value = { OrderId: d.OrderId, Price: Math.max(0, Number(result.MemberPrice != null ? result.MemberPrice : d.Price) - Number(result.Discount || 0)), OriginalTotal: Number(d.Price), MemberDiscount: Number(result.MemberDiscount || 0), CouponDiscount: Number(result.Discount || 0) }
     } else {
       alert('订单提交失败：' + (result.msg || '未知错误'))
     }
@@ -1221,7 +1221,7 @@ const loadSubsidy = async () => {
 }
 onMounted(loadSubsidy)
 
-/* 2026-10-10〈模板表通用化〉三段快照文本（`goods.Detail` / `Spec` / `AfterSale`）—— 全部写在**同一物理行**（新增行会顶漂下面 `slot-registry.md:1994-1995` 引的 `:794`/`:803`）。⚠️ 取值**从 `route.query` 现取**、不用 setup 期解构的 `sellerId`/`goodName`（`:433-434` 是普通 `const`，同路径只换 query 时组件被复用、它们**不更新**，理由同 `openPopup` 那条）。 */ const detailText = computed(() => { const g = currentGood.value; return (g && g.Detail) || '' }); const specText = computed(() => { const g = currentGood.value; return (g && g.Spec) || '' }); const afterSaleText = computed(() => { const g = currentGood.value; return (g && g.AfterSale) || '' }); /* `Spec` 的行内 `键=值` 约定：一行一条，`=` 只切**第一处**（值里允许再有 `=`）；没有 `=` 的行**整行进 `.v`、`.k` 留空**，而不是丢掉它。 */ const specRows = computed(() => specText.value.split('\n').map((s) => s.trim()).filter((s) => s !== '').map((s) => { const i = s.indexOf('='); return i < 0 ? { k: '', v: s } : { k: s.slice(0, i).trim(), v: s.slice(i + 1).trim() } })); const promiseLabels = computed(() => { const g = currentGood.value; const ALL = ['正品保障', '7 天无理由', '极速退款', '运费险']; const KEYS = ['PromiseGenuine', 'PromiseReturn7', 'PromiseFastRefund', 'PromiseFreightIns']; if (!g) return ALL; if (!KEYS.some((k) => g[k] !== undefined && g[k] !== null)) return ALL; return ALL.filter((_, i) => Number(g[KEYS[i]])) }); const mergeSkus = async (baseItems) => { try { const rs = await http.post(endpoints.goods.skuList, `MerchantId=${sellerId}&GoodName=${goodName}`); const ds = await rs.json(); const skus = (ds && ds.success && ds.list) || []; if (!skus.length) return baseItems; const img = baseItems.length ? baseItems[0].goodImg : ''; const merged = skus.map((s) => ({ productCode: String(s.SkuCode || ''), price: s.Price, goodImg: img })).filter((s) => s.productCode); return merged.length ? merged : baseItems } catch (e) { return baseItems } }; const isLogin = computed(() => isLoggedIn()); const activeTab = ref('desc')   // 结构二次调整（2026-10-07）：Tab 条当前面，UI 展示状态（不计功能量）；⚠️ **同行追加、不新增行** —— 上面那条「新增行落在最大被引行之后」的约束在本笔**不成立**（`slot-registry.md:1994-1995` 引的 `:794`/`:803` 都在下面），新增行会顶漂它们。
+/* 2026-10-10〈模板表通用化〉三段快照文本（`goods.Detail` / `Spec` / `AfterSale`）—— 全部写在**同一物理行**（新增行会顶漂下面 `slot-registry.md:1994-1995` 引的 `:794`/`:803`）。⚠️ 取值**从 `route.query` 现取**、不用 setup 期解构的 `sellerId`/`goodName`（`:433-434` 是普通 `const`，同路径只换 query 时组件被复用、它们**不更新**，理由同 `openPopup` 那条）。 */ const detailText = computed(() => { const g = currentGood.value; return (g && g.Detail) || '' }); const specText = computed(() => { const g = currentGood.value; return (g && g.Spec) || '' }); const afterSaleText = computed(() => { const g = currentGood.value; return (g && g.AfterSale) || '' }); /* `Spec` 的行内 `键=值` 约定：一行一条，`=` 只切**第一处**（值里允许再有 `=`）；没有 `=` 的行**整行进 `.v`、`.k` 留空**，而不是丢掉它。 */ const specRows = computed(() => specText.value.split('\n').map((s) => s.trim()).filter((s) => s !== '').map((s) => { const i = s.indexOf('='); return i < 0 ? { k: '', v: s } : { k: s.slice(0, i).trim(), v: s.slice(i + 1).trim() } })); const promiseLabels = computed(() => { const g = currentGood.value; const ALL = ['正品保障', '7 天无理由', '极速退款', '运费险']; const KEYS = ['PromiseGenuine', 'PromiseReturn7', 'PromiseFastRefund', 'PromiseFreightIns']; if (!g) return ALL; if (!KEYS.some((k) => g[k] !== undefined && g[k] !== null)) return ALL; return ALL.filter((_, i) => Number(g[KEYS[i]])) }); const mergeSkus = async (baseItems) => { try { const rs = await http.post(endpoints.goods.skuList, `MerchantId=${sellerId}&GoodName=${goodName}`); const ds = await rs.json(); const skus = (ds && ds.success && ds.list) || []; if (!skus.length) return baseItems; const img = baseItems.length ? baseItems[0].goodImg : ''; const merged = skus.map((s) => ({ productCode: String(s.SkuCode || ''), price: s.Price, goodImg: img, memberPrice: isVipMember.value ? memberPriceOf(s.Price) : undefined })).filter((s) => s.productCode); return merged.length ? merged : baseItems } catch (e) { return baseItems } }; const isLogin = computed(() => isLoggedIn()); const activeTab = ref('desc')   // 结构二次调整（2026-10-07）：Tab 条当前面，UI 展示状态（不计功能量）；⚠️ **同行追加、不新增行** —— 上面那条「新增行落在最大被引行之后」的约束在本笔**不成立**（`slot-registry.md:1994-1995` 引的 `:794`/`:803` 都在下面），新增行会顶漂它们。
 
 // ── 块 5〈秒杀〉：当前型号的秒杀价（C3 块 5 · commit 4，2026-10-12）─────────────────────
 // 本段落在 `<script setup>` 的**最末**（上面那行物理长行之后）：本文件的行号被
@@ -1269,7 +1269,7 @@ const {
   discount, payTotal, loadCoupons, resetCoupon
 } = useCouponPick({
   account: couponAccount,
-  orderTotal: popupTotal,   // 本单**原价**合计：门槛比它、折扣按它算（后端 `redeem` 收的也是原价）
+  orderTotal: popupMemberTotal,   // 批四第二批 commit 3：券的基数 = **会员价**（先 9 折、再算券 —— 与后端 `OrderService` 的 `memberPrice` 段同序）；非 VIP 时逐字等于原 `popupTotal`
   enabled: computed(() => popupEntry.value === 'buy' && popupBuyList.value.length > 0),
   blockedHint: '请先选择至少一件商品', hasDiscount: computed(() => popupBuyList.value.some((i) => Number(i.originalPrice) > 0))   // ⚠️ **同行追加**（理由同上面那条）。本单含折扣商品 = 弹窗里**要买的那几行**（`popupBuyList`）任一行 `originalPrice > 0`；⚠️ 判据是**整单**级、不是逐行（见 `useCouponPick.couponBlockedReason`）。取 `popupBuyList` 而非 `popupAllItems`：后者是**全部型号**，没选中的型号不该影响本单 —— 该商品的划线价虽通常各型号同值，但按**本单实际行**判才与后端一致。
 })
@@ -2537,4 +2537,14 @@ button { background: none; border: 0; cursor: pointer; }
                background: var(--brand-soft); color: var(--brand-ink); font-family: var(--font);
                font-size: var(--fs-xs); font-weight: var(--fw-med); letter-spacing: 0;
                vertical-align: middle; white-space: nowrap; }
+
+/* 会员价（批四第二批 commit 3）。三处同一条视觉口径：原价删除线（`.m-was`，弱化）+ 会员价高亮
+   （`--brand-ink`，与会员中心徽标同色）。⚠️ 详情页那枚 `.price.vip` 只改字色、不改字号 ——
+   价格行里 `.int` 的字号是整屏最大的那个，再放大就会把 `国补` / `秒杀` 两枚徽标挤到下一行。 */
+.price.vip .int, .price.vip .sym { color: var(--brand-ink); }
+.price .vip-tag { display: inline-block; margin-left: var(--s2); padding: 1px 6px; border-radius: var(--r1);
+                  background: var(--brand-soft); color: var(--brand-ink); font-family: var(--font);
+                  font-size: var(--fs-xs); font-weight: var(--fw-med); letter-spacing: 0; vertical-align: middle; }
+.m-was { color: var(--ink-3); font-size: var(--fs-xs); text-decoration: line-through; margin-right: 4px; }
+.m-price { color: var(--brand-ink); font-weight: var(--fw-med); }
 </style>
