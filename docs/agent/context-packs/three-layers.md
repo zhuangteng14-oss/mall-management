@@ -57,7 +57,7 @@
 共用底线：
 
 - 后端 `cd Mall-management-server && mvnw -B test` 全绿
-- 前端 `cd Mall-management-web/mall-management-system && npm run build` 通过
+- 前端 `cd Mall-management-web/mall-management-system && pnpm build` 通过
 - ✅ A3 的 **C 组（时间线核对）自 2026-09-30 起是门禁**（C-1/C-2 由 `gate=false` 升为 `true`，`5544362`） —— 改坏时间线，**CI 会红**。⚠️ 本文**定稿时**它还是 record-only（`e930b30` 早于 `5544362`），见 E 档与「最容易漏的两条」
 - ⚠️ 种子行数 `6/5/5/5/4` 是 **P4 判据基线**，改种子数据会先让 P4 变红（`db-schema.md §6.0`）
 

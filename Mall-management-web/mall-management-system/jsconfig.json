@@ -3,6 +3,11 @@
     "target": "ES6",
     "moduleResolution": "bundler",
     "baseUrl": ".",
+    "paths": {
+      "@/*": [
+        "./src/*"
+      ]
+    },
     "ignoreDeprecations": "6.0"
   },
   "include": [

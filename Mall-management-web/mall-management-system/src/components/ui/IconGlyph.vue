@@ -35,7 +35,7 @@ const glyph = computed(() => {
   if (g) return g
   // 未知名字**不静默**：画一个「·」，并在开发期点名 —— 否则页面上只是少了个图标，
   // 而「少个图标」是最不容易被发现的回归（截图对比也常看不出来）。
-  if (process.env.NODE_ENV !== 'production') {
+  if (import.meta.env.DEV) {
     // eslint-disable-next-line no-console
     console.warn(`[IconGlyph] 未登记的字形名：'${props.name}'（合法名见 components/ui/glyphs.js）`)
   }

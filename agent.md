@@ -261,7 +261,7 @@ git rebase origin/main
 必须执行并通过：
 
 - 后端：`cd Mall-management-server && mvn test`
-- 前端：`cd Mall-management-web/mall-management-system && npm run build`
+- 前端：`cd Mall-management-web/mall-management-system && pnpm install --frozen-lockfile && pnpm build`
 - 容器：`cd Mall-management-server && docker build -t mall-management-server:feature-<功能短名> .`
 
 如果命令不存在，先说明并给出替代验证方式。

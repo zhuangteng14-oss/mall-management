@@ -13,16 +13,16 @@
 //    有的走另一分支），统一判 = 一次性改 34 处行为 ⇒ 留在各 view 自己判。
 //    本层返回的是**未解析的 Response**，调用方照旧 `await res.json()`。
 //
-// 基址来源：`.env.development` / `.env.production` 的 `VUE_APP_API_BASE`（Vue CLI 构建期内联）。
+// 基址来源：`.env.development` / `.env.production` 的 `VITE_API_BASE`（Vite 构建期内联，见 vite.config.js）。
 //
 // ⚠️ 401 出口（职责③）要清本地登录态 ⇒ 依赖 `auth.js`。`auth.js` 自身**无任何 import**
 //    ⇒ 反向依赖不存在，不成环（这与 router 的情况不同 —— 见职责③的注释）。
 import { clear as clearAuth, getToken, getAdminToken, isAdminSession } from './auth'
 
-const API_BASE = process.env.VUE_APP_API_BASE || ''
+const API_BASE = import.meta.env.VITE_API_BASE || ''
 
 // 静态资源（图片）前缀。⚠️ 与 API_BASE **分开命名** —— 反代可能给静态资源不同前缀。
-const ASSET_BASE = process.env.VUE_APP_ASSET_BASE || ''
+const ASSET_BASE = import.meta.env.VITE_ASSET_BASE || ''
 
 // ⚠️ 超时不能设小：后端 Redis 黑洞降级窗口的「首个冷读」实测 **3.376s / 3.40s / 3.38s**
 //    （`context-packs/cache-layer.md#pack-cache-layer-9-1`，2026-09-28），该耗时**整个落在 HTTP 请求里**

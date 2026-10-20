@@ -4,8 +4,8 @@
     <meta charset="utf-8">
     <meta http-equiv="X-UA-Compatible" content="IE=edge">
     <meta name="viewport" content="width=device-width,initial-scale=1.0">
-    <link rel="icon" href="<%= BASE_URL %>favicon.ico">
-    <title><%= htmlWebpackPlugin.options.title %></title>
+    <link rel="icon" href="/favicon.ico">
+    <title>管理端 · Mall Management</title>
     <!--
       ⚠️ 「无 hash 直开 admin.html ⇒ 定到 #/admin」**必须写在 bundle 之前**，所以放在这里，
          不能放 `main-admin.js` 的 `bootstrap()` 里。
@@ -14,8 +14,10 @@
       而 `main-admin.js` 顶部的 `import router from './router/index.js'` 早于 `bootstrap()` 执行
       ⇒ 首航读到的 hash 是空的 ⇒ 走 `{ path:'/', redirect: landingFor }` ⇒ 未登录 ⇒ 落到
       `#/customer`（**商城客户页被渲进管理端入口**，`#app` 里是「全部商品分类 / 今日秒杀」）。
-      本内联脚本是**解析期**执行（deferred bundle 之后才跑）⇒ 赶在一切之前。
+      本内联脚本是**解析期**执行（deferred module 之后才跑）⇒ 赶在一切之前。
       ⚠️ 用 `replaceState` 而非 `location.replace`：不触发一次多余的导航/重载。
+      ⚠️ Vite 迁移（2026-10-20）：本脚本仍是**经典脚本**（无 type），不会被 Vite 改成 module；
+         `type="module"` 的入口在 body 里，天然 deferred ⇒ 顺序不变。
     -->
     <script>
       if (!location.hash || location.hash === '#') {
@@ -25,9 +27,9 @@
   </head>
   <body>
     <noscript>
-      <strong>We're sorry but <%= htmlWebpackPlugin.options.title %> doesn't work properly without JavaScript enabled. Please enable it to continue.</strong>
+      <strong>We're sorry but 管理端 · Mall Management doesn't work properly without JavaScript enabled. Please enable it to continue.</strong>
     </noscript>
     <div id="app"></div>
-    <!-- built files will be auto injected -->
+    <script type="module" src="/src/main-admin.js"></script>
   </body>
 </html>
