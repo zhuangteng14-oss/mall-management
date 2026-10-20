@@ -139,10 +139,7 @@ try {
       const all = [...document.images]
       return { total: all.length, broken: all.filter(i => i.complete && i.naturalWidth === 0).map(i => i.currentSrc || i.src).slice(0, 6) }
     })()`)
-    // ⚠️ `draft-b7.png` 是**后端本来就缺的草稿图**（实测 8088 直连 404，与迁移无关），单独记账。
-    const known = (u) => /\/img\/draft-b7\.png$/.test(u)
-    const realBroken = imgs.broken.filter((u) => !known(u))
-    ok('图片解码成功（除后端本就缺的 draft-b7）', realBroken.length === 0, { total: imgs.total, broken: imgs.broken })
+    ok('图片全部解码成功', imgs.broken.length === 0, { total: imgs.total, broken: imgs.broken })
 
     const fonts = await b2.evalJS(`(() => {
       const f = performance.getEntriesByType('resource').filter(e => /\\.woff2/.test(e.name))
@@ -152,7 +149,7 @@ try {
 
     const cors = net2.errors.filter((e) => /CORS|Access-Control|cross-origin|Failed to fetch/i.test(e))
     ok('客户侧无 CORS / 网络 console error', cors.length === 0, cors.slice(0, 5))
-    ok('登录后无 HTTP ≥400（后端缺图 draft-b7 除外）', net2.bad.slice(bad2Before).filter((x) => !known(x.url)).length === 0, net2.bad.slice(bad2Before).slice(0, 8))
+    ok('登录后无 HTTP ≥400', net2.bad.slice(bad2Before).length === 0, net2.bad.slice(bad2Before).slice(0, 8))
   } finally {
     await b2.close()
   }
