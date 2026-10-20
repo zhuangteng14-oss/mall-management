@@ -93,6 +93,9 @@ public class UserGovernanceService {
             result.put("msg", "用户不存在");
             return result;
         }
+        // TD-18 第 3 条：封禁 = 立即撤销该账号**全部**已签发的 Bearer 票（版本号 +1）。
+        // ⚠️ 必须在 DB 更新成功之后；撤销失败会抛出（Redis 不可用），不会假装成功。
+        revokeTokensOf(username);
         result.put("success", true);
         result.put("username", username);
         return result;
@@ -149,6 +152,25 @@ public class UserGovernanceService {
     }
 
     // ==================== 内部 ====================
+
+    /**
+     * 撤销某个登录名名下两个业务号（{@code customerid} / {@code merchantid}）的全部票。
+     * 票里存的是业务号，所以两个都要试；为空的跳过。读不到行 ⇒ 无票可撤。
+     */
+    private void revokeTokensOf(String username) {
+        Map<String, Object> row = userGovernanceDao.selectUserRow(username);
+        if (row == null) {
+            return;
+        }
+        revokeRowId(row.get("customerid"));
+        revokeRowId(row.get("merchantid"));
+    }
+
+    private static void revokeRowId(Object id) {
+        if (id != null && !id.toString().isBlank()) {
+            com.minke.mallmanagement.shared.web.AuthTokenStore.revokeAll(id.toString());
+        }
+    }
 
     private static int normalizeLimit(Integer limit) {
         if (limit == null || limit <= 0) {

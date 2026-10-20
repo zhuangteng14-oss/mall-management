@@ -217,4 +217,34 @@ class AuthTokenStoreTest {
         assertThat(AuthTokenStore.resolve(mine)).isNull();
         assertThat(AuthTokenStore.resolve(otherTab)).as("别的标签页的票不是本页的凭据，替它销 = 全家掉线").isNotNull();
     }
+
+    // ==================== 四、按身份全销（TD-18，2026-10-20）====================
+
+    /**
+     * {@code revokeAll(userId)} 必须把所有标签页里该身份的票**一次销光** —— 封禁、改密
+     * 走的就是这条口子（只销当前这一张等于「踢了本标签页、别的标签页照常工作」）。
+     */
+    @Test
+    @DisplayName("revokeAll 按身份销光全部票，不误伤别的身份")
+    void revokeAllRevokesEveryTokenOfThatUserOnly() {
+        String tabA = AuthTokenStore.mint("C-1", 1);
+        String tabB = AuthTokenStore.mint("C-1", 1);
+        String other = AuthTokenStore.mint("C-2", 1);
+
+        AuthTokenStore.revokeAll("C-1");
+
+        assertThat(AuthTokenStore.resolve(tabA)).as("同身份的另一张票也必须失效").isNull();
+        assertThat(AuthTokenStore.resolve(tabB)).isNull();
+        assertThat(AuthTokenStore.resolve(other)).as("别的身份不受影响").isNotNull();
+        assertThat(AuthTokenStore.liveCount()).isEqualTo(1);
+    }
+
+    /** 没有票的身份、{@code null} 入参：静默无副作用（与 {@code revoke} 同口径）。 */
+    @Test
+    @DisplayName("revokeAll 对无票身份 / null 幂等")
+    void revokeAllIsIdempotent() {
+        AuthTokenStore.revokeAll("NO-SUCH-USER");
+        AuthTokenStore.revokeAll(null);
+        assertThat(AuthTokenStore.liveCount()).isZero();
+    }
 }

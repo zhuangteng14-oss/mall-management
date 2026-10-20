@@ -37,14 +37,14 @@ async function restoreIdentity() {
 
 async function bootstrap() {
   // ── C3 块 2 手验后补丁「丁」（2026-10-10，用户裁决）：**管理端启动第一件事 = 弃掉本页的票** ──────
-  // 由来与依据写在 `api/auth.js` 的 `dropPageToken()` 块注释里，一句话：**管理端的票只可能是别人的**
-  // （管理员铸不出票 TD-18、也不发布指针 D6，认领本入口早已不做）⇒ 带着它，后端 `AuthSession.identify`
-  // **票优先** ⇒ 认出的是上一次登录的客户/商家：收件箱 403（`'*'` 比不过他的业务号）+ `admin_audit`
+  // 由来与依据写在 `api/auth.js` 的 `dropPageToken()` 块注释里，一句话：**这里弃的 `K.token` 只可能是别人的**
+  // （管理员票在**独立键**里、由 TD-18 端点铸，也不发布指针 D6）⇒ 这里弃的只会是用户/商家的票；
+  // 带着它，后端 `AuthSession.identify` **票优先** ⇒ 认出的是上次登录的客户/商家：收件箱 403 + `admin_audit`
   // 记错人（**实测** a3 库 Id=22 把管理端的 `user.ban` 记成客户 1111 的 `uDopHnCeLS`/role=1）。
   // ⚠️ **必须在 `restoreIdentity()` 之前**：那一发 `/user/me` 也会带票。
   // ⚠️ 弃票后管理端靠 **cookie 会话**认身份 ⇒ 闸关档（a3）下 `identify` 认得出 `role=3`、
-  //    `IdentityGuard` 的管理员档放行、审计记 role=3。🔴 **闸开的档（默认 profile）本入口仍无凭据**
-  //    ⇒ 全部 401 —— 那是 TD-18 的缺口、本补丁**不假装治它**（见 slot-registry §十三 13-5 与新 TD）。
+  //    `IdentityGuard` 的管理员档放行、审计记 role=3。闸开的档（默认 profile）凭据由**管理员登录页**
+  //    的 TD-18 铸票端点提供；未登录直开本入口仍是全部 401（闸开着就该如此）。
   dropPageToken()
 
   await restoreIdentity()

@@ -265,8 +265,8 @@ export function adoptSharedToken() {
 /** 只弃**本页**的票，**不碰**「最近登录」指针（`localStorage`）—— 与 {@link clearToken} 的 D6 规则**相反**。
  *
  *  <h3>【C3 块 2 手验后补丁「丁」（2026-10-10，用户裁决）：管理端入口不能持票】</h3>
- *  **管理端的票按构造只可能是别人的**：管理员**铸不出票**（`/user/token` 对 cookie 管理员答 401，
- *  TD-18），也**不发布**指针（D6 裁决）；指针的**认领**管理端入口早已不做（`main-admin.js` 不调
+ *  **这里弃的 `K.token` 按构造只可能是别人的**：管理员票另有独立键（TD-18 端点铸票，`/user/token`
+ *  对 cookie 管理员仍答 401），也**不发布**指针（D6 裁决）；指针的**认领**管理端入口早已不做（`main-admin.js` 不调
  *  {@link adoptSharedToken}）—— 唯一漏的是**同一个标签页**里从商城入口登录留下的这张
  *  `sessionStorage` 票（两个 store 同一键名，见本文件尾部那节）。而 `AuthSession.identify`
  *  **票优先**（且票不认识也**不回落** cookie）⇒ 管理端的每个请求都被后端认成**那个人**：
@@ -277,8 +277,8 @@ export function adoptSharedToken() {
  *  ⚠️ **别拿 {@link clearToken} 顶替**：它按 D6 在「本页票 == 指针」时把 `localStorage` 指针
  *  **一起删掉** —— 管理端不该替别的标签页清指针（那会让新标签页认领不到票）。本函数刻意**只动
  *  sessionStorage**。⚠️ 弃票之后管理端靠 **cookie 会话**认身份（闸关档下 `identify` 看得见
- *  `role=3` ⇒ `IdentityGuard` 的管理员档放行）；🔴 **闸开的档（默认 profile）本入口仍无凭据，
- *  是已知缺口**（§十三 13-5 / 新增 TD）。 */
+ *  `role=3` ⇒ `IdentityGuard` 的管理员档放行）；闸开的档（默认 profile）由管理员登录页走 TD-18
+ *  端点铸票，未登录直开本入口仍无凭据（这是闸开时的正确形态，不是缺口）。 */
 export function dropPageToken() { sessionStorage.removeItem(K.token) }
 
 // ── 会员字段读口（批四第二批 commit 3，2026-10-19）──────────────────────────────
@@ -313,6 +313,8 @@ export function setBalance(balance) { const n = Number(balance) || 0; if (restor
 //    会把管理员认成上一次登录的客户/商家）。
 const K_ADMIN_USER = 'adminUsername'
 const K_ADMIN_SESSION = 'adminSession'
+// TD-18（2026-10-20）：管理员票的**独立**存储键。与 K.token 分开，登出/切角色互不覆盖。
+const K_ADMIN_TOKEN = 'adminAuthToken'
 
 /** 本标签页的管理员账号（没有 ⇒ null）。 */
 export function getAdminUsername() { return usable(read(K_ADMIN_USER)) }
@@ -320,17 +322,24 @@ export function getAdminUsername() { return usable(read(K_ADMIN_USER)) }
 /** 本标签页是否处于管理员会话（`adminSession === '1'`）。 */
 export function isAdminSession() { return usable(read(K_ADMIN_SESSION)) === '1' }
 
+/** 本标签页的管理员 Bearer 票（没有 ⇒ null）。⚠️ 与用户/商家的 `getToken()` 分开取。 */
+export function getAdminToken() { return usable(read(K_ADMIN_TOKEN)) }
+
 /** 登录成功后写入管理员会话。**不写**用户/商家的任何键，也不动 `restored` ——
- *  退出管理员后，用户/商家在本次登录前留下的身份仍可原样恢复。 */
-export function setAdminSession(username) {
+ *  退出管理员后，用户/商家在本次登录前留下的身份仍可原样恢复。
+ *  @param {string} username 管理员登录名
+ *  @param {string} token    `POST /user/adminToken` 铸出的票（TD-18） */
+export function setAdminSession(username, token) {
   sessionStorage.setItem(K_ADMIN_USER, username)
   sessionStorage.setItem(K_ADMIN_SESSION, '1')
+  if (token) sessionStorage.setItem(K_ADMIN_TOKEN, token)
 }
 
-/** 退出管理员：只清这两个键。用户/商家的身份键与票**保留**（用户令第 4 条）。 */
+/** 退出管理员：清这三个键。用户/商家的身份键与票**保留**（用户令第 4 条）。 */
 export function clearAdminSession() {
   sessionStorage.removeItem(K_ADMIN_USER)
   sessionStorage.removeItem(K_ADMIN_SESSION)
+  sessionStorage.removeItem(K_ADMIN_TOKEN)
 }
 
 /**

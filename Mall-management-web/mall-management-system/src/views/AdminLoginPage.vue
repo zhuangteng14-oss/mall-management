@@ -4,8 +4,8 @@
     · 深色主题与 `admin.html` 的 `data-theme="admin"` 同一套色值（#101828 / 运营蓝），
       但本页**自带**颜色，不依赖 html 主题 —— 从商城入口 `#/admin/login` 进来也是深色。
     · 表单只有管理员账号 + 密码，无注册入口；右上角固定「返回普通登录」。
-    · 鉴权：走既有 `POST /user/loginSelect`，只接受返回 `3`；成功后写**独立**的管理员会话
-      （`api/auth.js#setAdminSession`），不碰用户/商家的身份键与票。
+    · 鉴权：走 TD-18 的 `POST /user/adminToken`（账号 + 口令 ⇒ 可撤销 Bearer 票），只接受 `role=3`；
+      成功后写**独立**的管理员会话（`api/auth.js#setAdminSession`），不碰用户/商家的身份键与票。
   -->
   <main class="admin-login">
     <router-link class="al-back" to="/login">← 返回普通登录</router-link>
@@ -103,17 +103,27 @@ onMounted(() => {
 /**
  * 管理员登录**不走 `http.post`**：那一层会自动带上 `Authorization: Bearer <authToken>`。
  * 本页要求「不覆盖用户/商家的 Token 状态」，而票优先会让后端把管理员认成上一位登录者。
- * 这里用裸 `fetch` + `credentials:'include'`，只走 `loginSelect` 写的 **cookie 会话**。
+ * 这里用裸 `fetch` + `credentials:'include'`，只打 TD-18 的凭据铸票端点。
+ *
+ * ⚠️ TD-18（2026-10-20）：端点同时做**凭据校验 + 失败锁定 + 弱口令拒绝 + 铸票**，
+ * 不再先走 `loginSelect`（那一步只建 cookie 会话、没有票）。响应是 JSON。
  */
-async function loginSelect(username, pwd) {
-  const res = await fetch(urlOf(endpoints.user.loginSelect), {
+async function adminToken(username, pwd) {
+  const res = await fetch(urlOf(endpoints.adminAuth.token), {
     method: 'POST',
     credentials: 'include',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     body: new URLSearchParams({ username, password: pwd }).toString()
   })
-  if (!res.ok) throw new Error(`HTTP ${res.status}`)
-  return (await res.text()).trim()
+  let data = null
+  try { data = await res.json() } catch (e) { /* 非 JSON（网关/404）⇒ 下面按状态码报错 */ }
+  if (!res.ok) {
+    const rejection = new Error((data && data.msg) || `HTTP ${res.status}`)
+    rejection.status = res.status
+    rejection.retryAfter = res.headers.get('Retry-After')
+    throw rejection
+  }
+  return data
 }
 
 async function submit() {
@@ -126,25 +136,28 @@ async function submit() {
 
   busy.value = true
   try {
-    const role = await loginSelect(account.value, password.value)
-    if (role === '4') {
-      err.value = '该账号已被封禁，请联系平台处理'
-      return
-    }
-    if (role === '1' || role === '2') {
-      err.value = '该账号不是管理员账号，请从普通登录页进入'
-      return
-    }
-    if (role !== '3') {
-      err.value = '账号或密码不正确，请检查后重试'
+    const data = await adminToken(account.value, password.value)
+    if (!data || !data.success || !data.token) {
+      err.value = (data && data.msg) || '登录失败，请稍后重试'
       return
     }
 
     // 只写独立的管理员会话键：不动 loginUsername / role / authToken / merchantid / customerid。
-    setAdminSession(account.value)
+    // 管理员票另有独立存储键（adminAuthToken），由 `http.js` 在管理员会话期间取用。
+    setAdminSession(account.value, data.token)
     await router.push('/admin')
   } catch (e) {
-    err.value = '连不上服务器：请确认后端已在 8088 运行，且本页源在 CORS 白名单内'
+    if (e.status === 401) {
+      err.value = e.message || '账号或密码不正确，请检查后重试'
+    } else if (e.status === 403) {
+      err.value = e.message || '该账号不能登录管理后台'
+    } else if (e.status === 429) {
+      err.value = e.message || '登录失败次数过多，账号已临时锁定'
+    } else if (e.status === 503) {
+      err.value = e.message || '认证服务暂不可用，请稍后重试'
+    } else {
+      err.value = '连不上服务器：请确认后端已在 8088 运行，且本页源在 CORS 白名单内'
+    }
   } finally {
     busy.value = false
   }

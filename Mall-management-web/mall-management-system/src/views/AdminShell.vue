@@ -108,11 +108,11 @@ const roleLabel = { '1': '客户', '2': '商家', '3': '管理员' }[getRole()] 
 //      ② `.catch` 吞掉 —— fail-open：后端不可达也不该把用户困在「看起来还登着」的界面里；
 //      ③ `.finally` 才 `clearToken()` —— 票要**在这一发里送出去**后端才销得掉；
 //      ④ `allowUnauthorized: true` —— 未登录点退出必 401，不该进 401 出口。
-//    ⚠️ 管理员的**票本来就是空的**（TD-18：cookie 管理员铸不出票）⇒ ③ 今天是个空操作。
-//       留着它是为了「将来铸票路径定案后不用回来补」—— 而不是因为今天有用。
+//    ⚠️ TD-18 起管理员票存在**独立键**（`adminAuthToken`）⇒ ③ 这一发会带着它，后端能真正销票；
+//       顺序不能倒：先 `clearAdminSession()` 就没票可送了。旧入口（无票）下它仍是空操作。
 const exit = () => {
   const legacy = !isAdminSession()   // 旧入口（普通登录页 role=3）登录时没有管理员标记；那种才需要清用户身份键
-  http.post(endpoints.user.logout, null, { allowUnauthorized: true }).catch(() => {})   // 先发：管理员标记仍在 ⇒ `http.js` 不带用户/商家的票
+  http.post(endpoints.user.logout, null, { allowUnauthorized: true }).catch(() => {})   // 先发：管理员标记仍在 ⇒ `http.js` 带管理员票，后端据此销票
   clearAdminSession()
   if (legacy) clearCredentials()
   router.push('/admin/login')   // 2026-10-19 用户令：管理员退出回**管理员**登录页；用户/商家的身份键与票原样保留

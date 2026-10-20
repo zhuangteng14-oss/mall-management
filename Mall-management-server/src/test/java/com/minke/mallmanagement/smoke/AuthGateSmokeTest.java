@@ -54,7 +54,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * 400（{@code api-contract.md} 钉住「形参缺失：仍是 400」）。400 比「不是 401」强得多 ——
  * 它证明请求**确实穿过了闸并到达 Controller 层**；而「不是 401」在闸压根没注册时同样成立。
  *
- * <h2>【白名单 14 条为什么直调拦截器，而不是走 MockMvc】</h2>
+ * <h2>【白名单 15 条为什么直调拦截器，而不是走 MockMvc】</h2>
  * {@code /health/db} 带 {@code @Profile("a3")}，在 smoke profile 下**没有 handler**
  * ⇒ MockMvc 送不进去（无 handler 则拦截器不执行）；白名单里还有 {@code /error}、
  * {@code /favicon.ico} 这类「下游答什么不由闸决定」的路径，用 MockMvc 只能断言「不是 401」，
@@ -168,16 +168,16 @@ class AuthGateSwitchOnTest extends AbstractSmokeTest {
     }
 
     /**
-     * 白名单全表扫描：14 条逐条直调 {@code preHandle}，**无会话**也必须放行。
+     * 白名单全表扫描：15 条逐条直调 {@code preHandle}，**无会话**也必须放行。
      *
-     * <p>三条断言各堵一个口子：① 条数 == 14（防有人删条却不改注释）；② 逐条放行；
+     * <p>三条断言各堵一个口子：① 条数 == 15（防有人删条却不改注释）；② 逐条放行；
      * ③ <b>反断言</b> —— 表外路径必须被拦（否则「全都放行」也能让 ② 全绿）。
      */
     @Test
     void whitelist_allEntries_passTheGate() throws Exception {
         assertThat(WebAuthConfig.AUTH_WHITELIST)
-                .as("白名单条数 = 业务 10 + 基础设施 4。改这个数必须同时改 WebAuthConfig 的注释")
-                .hasSize(14);
+                .as("白名单条数 = 业务 11 + 基础设施 4。改这个数必须同时改 WebAuthConfig 的注释")
+                .hasSize(15);
 
         // ⚠️ 多账户隔离笔（2026-10-06）：构造参数由 2 个变 3 个（第 ④ 档 identityPaths）。
         //    传真表而不是 List.of() —— 反断言那半段（REACHABLE_BUT_NOT_PUBLIC 必须被拦）正是靠

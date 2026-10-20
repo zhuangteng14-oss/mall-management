@@ -115,8 +115,8 @@ public class UserService {
      * {@code role != null ? role : 0} 与 {@code catch → 0} 都是「查不到 = 0」的表达，
      * 三层前写了两道，本笔**两道都留**（去掉任何一道都不改变可观测行为，但会改变与改前的 diff 幅度）。
      *
-     * <p>⚠️ {@code System.out.println} 是三层前就有的副作用，照搬 —— 它不是调试残留，
-     * 而是 A3 排障时读 {@code backend} job 日志的线索之一。
+     * <p>⚠️ 三层前这里有一行 {@code System.out.println(username + "," + password)}（明文凭据落进程日志）。
+     * TD-18（2026-10-20）已删除：管理员铸票改走凭据端点后，登录日志不再是排障的唯一线索，而明文口令是确定的泄漏面。
      *
      * <h2>【C3 块 2（用户块）新增第 4 个返回值：{@link #LOGIN_BANNED}】</h2>
      * 账号被封时答 {@code 4}（既不是角色号，也不是「查不到」的 0）。取值域从
@@ -134,13 +134,13 @@ public class UserService {
      * 只查后者 ⇒ 被封的人仍能靠重新登录拿到新鲜会话）。
      */
     public int loginSelect(String username, String password) {
-        System.out.println(username + "," + password);
 
         try {
             Integer role = userDao.selectRoleByCredentials(username, password);
             if (role == null) {
                 return 0;
             }
+            if (role == 3 && AdminPasswordPolicy.isWeak(password)) return 0;   // TD-18：默认弱口令不签发任何凭据（管理员）
             if (isBanned(username)) {
                 return LOGIN_BANNED;
             }
