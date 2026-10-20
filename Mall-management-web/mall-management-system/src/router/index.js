@@ -57,24 +57,24 @@ const routes = [
     children: [
       { path: '', name: 'customerHome', component: HomeTab, props: { base: '/customer' }, meta: { tab: 'home', layout: 'home-container', public: true } },   // ⚠️ C3 块 2（2026-10-09）：**同行**加 `name` —— 只为消一条 vue-router warn。父记录 `:55` 有 `name` 而本子记录**空路径**又**无名**时，`createRouter` 建匹配表就发 `checkChildMissingNameWithEmptyPath`（`vue-router.mjs:848`）（三壳三条，`#/login` 上一样刷）。本 name **没有别的用处**，全仓无 `push({name:'customerHome'})` —— 那正是警告说的「用父名不会渲染空路径子记录」那件事，这里靠**给子记录起名**消掉（警告原话：`add a name to the child route to remove the warning`）。
       { path: 'search', component: GoodsSelect, meta: { layout: 'page', public: true } },
-      { path: 'msg', component: MessageCenter, meta: { tab: 'msg', layout: 'page' } },   // ⚠️ 2026-10-09：`component` 由 `ChatRoom` 换成 `MessageCenter`（**同行替换**，两壳各一处）—— 本记录现在还承载「通知」tab（`?tab=notify`）；`meta.tab` 仍是 `'msg'` ⇒ 顶栏「消息」在两个 tab 下都亮
-      { path: 'cart', component: OrderPane, meta: { tab: 'cart', layout: 'cart-container' } },   // ⚠️ C3 块 4：`component` 由 `ShoppingCart` 换成 `OrderPane`（购物车块容器，内含「购物车 / 我的订单」两个 tab，由 `?tab=` 选面），并**删掉** `props:{showSwitch:false}` —— 那个 prop 是给 `ShoppingCart` 用的，容器不认 ⇒ 留着会变成根元素上的野属性。R1 当年那条「必须传 false，否则凭空多出 📋/🛒 开关」的告警随之作废（`showSwitch` / `orderTab` / `@toggle` 三个 prop 在块 4 全线退役，登记见 `tech-debt.md`；见 progress.md §5-X (16)2）
+      { path: 'msg', component: MessageCenter, meta: { tab: 'msg', layout: 'page', noRail: true } },   // ⚠️ 2026-10-19 用户令：消息中心归公域 ⇒ 无侧栏全宽。`noRail` 只关身份树，登录闸仍走父记录
+      { path: 'cart', component: OrderPane, meta: { tab: 'cart', layout: 'cart-container', noRail: true } },   // ⚠️ 2026-10-19 用户令：购物车归公域 ⇒ 无侧栏全宽   // ⚠️ C3 块 4：`component` 由 `ShoppingCart` 换成 `OrderPane`（购物车块容器，内含「购物车 / 我的订单」两个 tab，由 `?tab=` 选面），并**删掉** `props:{showSwitch:false}` —— 那个 prop 是给 `ShoppingCart` 用的，容器不认 ⇒ 留着会变成根元素上的野属性。R1 当年那条「必须传 false，否则凭空多出 📋/🛒 开关」的告警随之作废（`showSwitch` / `orderTab` / `@toggle` 三个 prop 在块 4 全线退役，登记见 `tech-debt.md`；见 progress.md §5-X (16)2）
       {
         path: 'user', name: 'customerUser',   // ⚠️ C3 块 2〈用户块〉：**同行**加 `name`（不新插一行）—— 文件尾那条 `router.addRoute('customerUser', …)` 靠它把「商家入驻」挂成本壳的子页（`addRoute` 的第一个参数**只认 name**）。⚠️ 一旦插行，本组 `:61`-`:122` 的既有行号引用会整体下移。
         component: UserCenter,
         meta: {
-          tab: 'user',
+          tab: 'user', noRail: true,   // ⚠️ 2026-10-19 用户令（反转 A 版）：个人中心是中转站，拆出的 history/friend/apply/member 都是**独立全宽页** ⇒ `noRail` 挂在父级、沿 matched 链一次性覆盖全部子页（含文件尾 addRoute 的 apply/member）。`noMenu` 随 `UserCenter.vue` 去壳一并失义。
           layout: 'user-page',
           subMenu: [
             { label: '个人信息', sub: 'info', to: '/customer/user/info', glyph: 'users' },
             { label: '历史购买记录', sub: 'history', to: '/customer/user/history', glyph: 'orders' },
-            { label: '好友', sub: 'friend', to: '/customer/user/friend', glyph: 'msg' },{ label: '商家入驻', sub: 'apply', to: '/customer/user/apply', glyph: 'merchants' },   // ⚠️ C3 块 2〈用户块〉：**同行**追加（净零行数，理由同本行上方 A5 那条）。落点在文件尾 `addRoute('customerUser', { path: 'apply', … })`，**别**在 `children` 里找它 —— 那条记录是挂上去的，不在字面数组里
+            { label: '好友', sub: 'friend', to: '/customer/user/friend', glyph: 'msg' },{ label: '商家入驻', sub: 'apply', to: '/customer/user/apply', glyph: 'merchants' },{ label: '会员中心', sub: 'member', to: '/customer/user/member', glyph: 'users' },   // ⚠️ 批四第二批 commit 3（2026-10-19）：**同行追加**（净零行数，理由同本行上方 A5 那条）。落点在**文件尾** `addRoute('customerUser', { path: '/customer/user/member', … })`，**别**在 `children` 字面数组里找它。   // ⚠️ C3 块 2〈用户块〉：**同行**追加（净零行数，理由同本行上方 A5 那条）。落点在文件尾 `addRoute('customerUser', { path: 'apply', … })`，**别**在 `children` 里找它 —— 那条记录是挂上去的，不在字面数组里
             // ⚠️ A5（2026-10-07 用户裁定）：原第 4 项「消息」（`sub: 'chat'` → `/customer/user/chat`）**已删** —— 与顶栏「消息」重复；子路由改 `redirect`（见 `children` 末尾）
           ]
         },
         children: [
-          { path: '', name: 'customerUserHome', component: UserInfoPage, meta: { sub: 'info' } },   // ⚠️ C3 块 2（2026-10-09）：**同行**加 `name`，理由同 `:58` —— 父 `:63` 那个 `name` 正是**本笔**加的，所以这三条 warn 里有本笔一条。无 `push({name:'customerUserHome'})`；**父名**照旧给文件尾的 `addRoute('customerUser', …)` 用（`checkSameNameAsAncestor` 只禁同名，本 name 与父名不同）。⚠️ `/merchant` 壳下那条**同名**子记录原**没有**加 —— ⚠️ **2026-10-11 已反转（现已加，见 `:114`）**：原写「它的父记录本身无 `name`」不再成立（`:98` 那条父记录本笔加了 `name: 'merchantUser'`，为 ④ 挂「经营数据」），而父记录一旦有 `name`，vue-router 立刻报 `has a child without a name and an empty path` ⇒ 给它命名成了**必需**（非「顺手对称」）。
-          { path: 'info', component: UserInfoPage, meta: { sub: 'info' } },
+          { path: '', name: 'customerUserHome', component: UserInfoPage, meta: { sub: 'info', noMenu: true, noRail: true } },   // ⚠️ C3 块 2（2026-10-09）：**同行**加 `name`，理由同 `:58` —— 父 `:63` 那个 `name` 正是**本笔**加的，所以这三条 warn 里有本笔一条。无 `push({name:'customerUserHome'})`；**父名**照旧给文件尾的 `addRoute('customerUser', …)` 用（`checkSameNameAsAncestor` 只禁同名，本 name 与父名不同）。⚠️ `/merchant` 壳下那条**同名**子记录原**没有**加 —— ⚠️ **2026-10-11 已反转（现已加，见 `:114`）**：原写「它的父记录本身无 `name`」不再成立（`:98` 那条父记录本笔加了 `name: 'merchantUser'`，为 ④ 挂「经营数据」），而父记录一旦有 `name`，vue-router 立刻报 `has a child without a name and an empty path` ⇒ 给它命名成了**必需**（非「顺手对称」）。
+          { path: 'info', component: UserInfoPage, meta: { sub: 'info', noMenu: true, noRail: true } },
           { path: 'history', component: HistoricalOrders, meta: { sub: 'history' } },
           { path: 'friend', component: FriendRoom, meta: { sub: 'friend' } },
           { path: 'chat', redirect: '/customer/msg' }   // ⚠️ A5：原挂 `ChatRoom`（与 `/customer/msg` **同一个组件**）⇒ 侧边栏去项后本路径**不留死链**；⚠️ 不删记录（手敲/旧书签会白屏 —— 全仓无 catch-all，R4 口径见 `:208-210`），改 redirect 与旧地址兼容
@@ -88,17 +88,17 @@ const routes = [
     children: [
       { path: '', name: 'merchantHome', component: HomeTab, props: { base: '/merchant' }, meta: { tab: 'home', layout: 'home-container', public: true } },   // ⚠️ C3 块 2：**同行**加 `name`，理由与 `/customer` 那条逐字相同（父 `:86` 有 name）；无任何 `push({name:'merchantHome'})`。
       { path: 'search', component: GoodsSelect, meta: { layout: 'page', public: true } },
-      { path: 'msg', component: MessageCenter, meta: { tab: 'msg', layout: 'page' } },   // ⚠️ 2026-10-09：`component` 由 `ChatRoom` 换成 `MessageCenter`（**同行替换**，两壳各一处）—— 本记录现在还承载「通知」tab（`?tab=notify`）；`meta.tab` 仍是 `'msg'` ⇒ 顶栏「消息」在两个 tab 下都亮
+      { path: 'msg', component: MessageCenter, meta: { tab: 'msg', layout: 'page', noRail: true } },   // ⚠️ 2026-10-19 用户令：消息中心归公域 ⇒ 无侧栏全宽
       // ⚠️ C3 块 4：两条记录的 `meta.tab` **不再相同** —— `/merchant/order` = `'order'`（顶栏「订单中心」
       //    亮），`/merchant/order/cart` = `'cart'`（顶栏**新增**的商家「购物车」项亮）。改前两条都是 `'order'`。
       // ⚠️ `order/cart` 仍是**单条多段子路径**，不嵌第二层 `children`（容器 `OrderPane` 自己渲染它的两个 tab）。
-      { path: 'order', component: () => import('../views/OrderCenter.vue'), meta: { tab: 'order', layout: 'order-container' } },   // ⚠️ C3 块 4：块 4 前这里指 `OrderPane`（「订单中心 ⇄ 购物车」两态包装组件）—— 现在**直接指订单中心自己**。用**行内动态 import** 而不是顶部加一行 import：顶部加行会让 `:8` 以下全体下移（同一手法见本文件 `:434` 的 `AdminStub`）
-      { path: 'order/cart', component: OrderPane, meta: { tab: 'cart', layout: 'order-container' } },
+      { path: 'order', component: () => import('../views/OrderCenter.vue'), meta: { tab: 'order', layout: 'order-container', noRail: true } },   // ⚠️ 2026-10-19 用户令：订单处理 / 售后工作台都归公域 ⇒ 无侧栏全宽（同行加 `noRail`）   // ⚠️ C3 块 4：块 4 前这里指 `OrderPane`（「订单中心 ⇄ 购物车」两态包装组件）—— 现在**直接指订单中心自己**。用**行内动态 import** 而不是顶部加一行 import：顶部加行会让 `:8` 以下全体下移（同一手法见本文件 `:434` 的 `AdminStub`）
+      { path: 'order/cart', component: OrderPane, meta: { tab: 'cart', layout: 'order-container', noRail: true } },   // ⚠️ 2026-10-19 用户令：购物车归公域 ⇒ 无侧栏全宽
       {
         path: 'user', name: 'merchantUser',   // ⚠️ 可视化段 commit 3（2026-10-11，用户裁决 ④「经营数据入口放个人中心里」）：**同行**加 `name`（不新插一行，理由同 `:63` 那条 —— 本组 `:98`-`:122` 的既有行号引用会整体下移）。文件尾那条 `router.addRoute('merchantUser', …)` 靠它把「经营数据」挂成**本记录的子页** ⇒ 个人中心左菜单在场（`UserCenter.vue` 的 `.user-menu` 只在 `matched` 含本记录时渲染）。⚠️ `checkSameNameAsAncestor` 只禁同名（本 name ≠ 祖先 `merchant`）⇒ 不多发 warn。
         component: UserCenter,
         meta: {
-          tab: 'user',
+          tab: 'user', noRail: true,   // ⚠️ 2026-10-19 用户令（反转 A 版）：同客户侧 —— 个人中心拆出的 add/list/history/friend/stats/apply/member 全部独立全宽、无侧栏。
           layout: 'user-page',
           logout: 'merchant',   // ⚠️ 商家侧退出多清 `merchantid`；客户侧无此键（见 UserCenter.vue 的 toLogin）
           subMenu: [
@@ -111,8 +111,8 @@ const routes = [
           ]
         },
         children: [
-          { path: '', name: 'merchantUserHome', component: UserInfoPage, meta: { sub: 'info' } },   // ⚠️ 可视化段 commit 3（2026-10-11，用户裁决 ④）：**同行**加 `name`（不新插一行，理由同 `:63`/`:76` 那一组）。**不是**「顺手对称过去」—— 是那条告警的**必要条件**本笔才成立：`:98` 那条父记录刚加上 `name: 'merchantUser'` 之后，本仓实测（`_work/diag-4.mjs`）多出一条 `[Vue Router warn]: The route named "merchantUser" has a child without a name and an empty path.` ⇒ 房内既有的对治就是**给空路径子记录命名**（`:58` / `:76` / `:89` 三处先例，`/customer` 侧当年为 `addRoute('customerUser', …)` 就是这么做的）。⚠️ 这正是 `:76` 那条注释里「`/merchant` 壳下那条**没有**加」的**反转**，该句已同步订正。⚠️ 无任何 `push({name:'merchantUserHome'})`。
-          { path: 'info', component: UserInfoPage, meta: { sub: 'info' } },
+          { path: '', name: 'merchantUserHome', component: UserInfoPage, meta: { sub: 'info', noMenu: true, noRail: true } },   // ⚠️ 可视化段 commit 3（2026-10-11，用户裁决 ④）：**同行**加 `name`（不新插一行，理由同 `:63`/`:76` 那一组）。**不是**「顺手对称过去」—— 是那条告警的**必要条件**本笔才成立：`:98` 那条父记录刚加上 `name: 'merchantUser'` 之后，本仓实测（`_work/diag-4.mjs`）多出一条 `[Vue Router warn]: The route named "merchantUser" has a child without a name and an empty path.` ⇒ 房内既有的对治就是**给空路径子记录命名**（`:58` / `:76` / `:89` 三处先例，`/customer` 侧当年为 `addRoute('customerUser', …)` 就是这么做的）。⚠️ 这正是 `:76` 那条注释里「`/merchant` 壳下那条**没有**加」的**反转**，该句已同步订正。⚠️ 无任何 `push({name:'merchantUserHome'})`。
+          { path: 'info', component: UserInfoPage, meta: { sub: 'info', noMenu: true, noRail: true } },
           { path: 'add', component: GoodsAdd, meta: { sub: 'add' } },
           { path: 'list', component: GoodsUp, meta: { sub: 'list' } },
           { path: 'history', component: HistoricalOrders, meta: { sub: 'history' } },
@@ -647,3 +647,98 @@ router.addRoute({
   component: () => import('../views/ComingSoonPage.vue'),
   meta: { public: true },
 })
+
+// ══════════════════════════════════════════════════════════════════════════════════════════
+// ── 批四 · 第二批（2026-10-19）：品牌专区 `/brand` 真页 ────────────────────────────────────
+//
+// ⚠️ **新增行落在文件最尾**（本仓「零漂移」手法）：本文件全篇按行号互引，上面那条
+//    `/coming-soon/:feature` 也保留（客户服务 / 会员（commit 3 前）仍用它兜底）。
+//
+// ⚠️ **壳外、顶层、`meta.public`**（形制照 `/seckill`）：首页二级导航是公开面，
+//    挂进 `/customer` 壳会把匿名用户踢去登录页。数据端点 `/goods/brandHome` 为公开读，
+//    匿名可取的判据与首页 `goodsSelectHome` 相同。
+// ══════════════════════════════════════════════════════════════════════════════════════════
+
+router.addRoute({ path: '/brand', component: () => import('../views/BrandZone.vue'), meta: { public: true } })
+
+// ══════════════════════════════════════════════════════════════════════════════════════════
+// ── 批四 · 第二批（2026-10-19）：会员中心 `/customer/user/member` ───────────────────────────
+//
+// ⚠️ **挂在 `customerUser` 下、新增行落在文件最尾**（本仓「零漂移」手法）：会员中心是
+//    **登录后**的业务页（开通 / 领券都要会话），必须进 AppShell + UserCenter 壳 ⇒ 左菜单在场、
+//    地址落在 `/customer/user/*` 下。⚠️ `path` 写**绝对**地址（与 `/merchant/stats` 同款写法），
+//    地址即 `subMenu` 里那一项的 `to`。
+//
+// ⚠️ `meta.sub = 'member'` 是左菜单高亮键（`UserCenter.vue` 的 `route.meta.sub === item.sub`）；
+//    `subMenu` 那一项在 `routes` 数组里、按「同行追加保净零行数」写（`docs/` 按行号引本文件）。
+// ══════════════════════════════════════════════════════════════════════════════════════════
+
+router.addRoute('customerUser', { path: '/customer/user/member', component: () => import('../views/MemberCenter.vue'), meta: { sub: 'member' } })
+
+// ══════════════════════════════════════════════════════════════════════════════════════════
+// ── UI 先行阶段（2026-10-19）：五页高保真静态预览 ─────────────────────────────────────────
+//
+// 目的：五页高保真预览 —— 匿名访问显示 Mock 示例；有登录身份且后端可达时切真实数据
+//       （折扣模板 / 品牌加盟 / 会员等级与积分 / 钱包流水 / 秒杀活动）。
+// 约束：父级 `meta.public` 让匿名可达；**匿名一律不发请求**（秒杀 live 不在白名单，匿名发必 401）。
+// 说明：本段只追加在文件最尾，避免上面的行号互引漂移。
+// ══════════════════════════════════════════════════════════════════════════════════════════
+
+router.addRoute({
+  path: '/preview',
+  component: () => import('../views/preview/PreviewLayout.vue'),
+  meta: { public: true },
+  children: [
+    { path: '', component: () => import('../views/preview/PreviewIndex.vue') },
+    { path: 'discount', component: () => import('../views/preview/DiscountPreview.vue') },
+    { path: 'brand', component: () => import('../views/preview/BrandPreview.vue') },
+    { path: 'member', component: () => import('../views/preview/MemberPreview.vue') },
+    { path: 'wallet', component: () => import('../views/preview/WalletPreview.vue') },
+    { path: 'seckill', component: () => import('../views/preview/SeckillPreview.vue') },
+  ],
+})
+
+// ── A 版用户中心（2026-10-19）：商家侧「品牌加盟」入口 ─────────────────────────────
+// A 版个人中心的「品牌资质 / 品牌加盟」直达申请页。客户侧已有 `/customer/user/apply`；
+// 商家身份（roles ['2','3']）进不了那条 `meta.roles` 链 ⇒ 在商家壳内补同组件地址。
+// 追加在文件最尾：不移动任何既有行号（上面的行号互引全部有效）。
+router.addRoute('merchantUser', { path: '/merchant/user/apply', component: () => import('../views/MerchantApplyPage.vue'), meta: { sub: 'apply' } })
+// 商家壳的会员中心（A 版个人中心「黑金牌匾 / 会员中心」入口）：客户壳那条 `/customer/user/member`
+// 受 `roles:['1','3']` 保护，商家进不去 ⇒ 在商家用户中心下补同组件地址，供黑金牌匾与资产账本直达。
+router.addRoute('merchantUser', { path: '/merchant/user/member', component: () => import('../views/MemberCenter.vue'), meta: { sub: 'member' } })
+
+// ── 2026-10-19 用户令：我的订单独立页 ──────────────────────────────────────────
+// `/customer/cart?tab=orders` 仍是旧入口（`OrderPane.vue` 的两个 tab 一字不动）；
+// 这里补一条**真正的全宽独立地址**，与「个人中心 → 独立功能页」同一套架构：
+// 无侧栏（`noRail`）、无容器 Tab，进来就是一列订单卡。
+router.addRoute('customer', { path: 'orders', component: () => import('../views/OrderMine.vue'), meta: { tab: 'orders', layout: 'cart-container', noRail: true } })
+router.addRoute('merchant', { path: 'orders', component: () => import('../views/OrderMine.vue'), meta: { tab: 'orders', layout: 'cart-container', noRail: true } })
+
+// ── 2026-10-19 用户令：管理员登录彻底独立 ─────────────────────────────────────
+// 独立顶层记录（**不在** `/admin` 的 children 里） ⇒ 不继承 `meta.roles: ['3']`、不渲染
+// `AdminShell`（无侧边栏 / 顶栏），`meta.public: true` 让匿名也能进。
+// ⚠️ 追加在文件最尾：不移动任何既有行号（上面的行号互引全部有效）。
+// ⚠️ 静态路径 `/admin/login` 比父记录 `/admin` 更具体，注册先后不影响匹配。
+router.addRoute({ path: '/admin/login', component: () => import('../views/AdminLoginPage.vue'), meta: { public: true } })
+
+// ── 2026-10-19 用户令：售后工作台独立入口（队列 + 详情，无侧栏）─────────────────
+// 个人中心「售后工作台」原先落到 `/merchant/order`（普通订单列表）⇒ 看起来像死链。
+// 这里补一条独立地址，直接以 `refundMode` 进入 `OrderCenter`；返回按钮回 `/merchant/order`。
+router.addRoute('merchant', { path: 'after-sales', component: () => import('../views/OrderCenter.vue'), meta: { tab: 'order', layout: 'order-container', noRail: true } })
+
+// ── 2026-10-19 用户令：管理端暗色主题不被商城浅色壳污染 ──────────────────────
+// 管理员入口在普通登录页（`index.html`，`<html>` 上没有 `data-theme`）里也可能被点开；
+// `/admin` 与 `/admin/login` 共用 `tokens.css` 的 `html[data-theme="admin"]` 暗色块。
+// 这里按路由切换主题：进管理端 ⇒ 挂 `admin`；离开 ⇒ 摘掉。挂点在全局导航上，
+// 因此从商城壳点进管理端与直接打开 `admin.html` 两条路径都覆盖。
+router.afterEach((to) => {
+  const root = document.documentElement
+  if (String(to.path).startsWith('/admin')) root.setAttribute('data-theme', 'admin')
+  else root.removeAttribute('data-theme')
+})
+
+// ── 2026-10-19 终局清道夫第 7 条：我的收藏独立页 ─────────────────────────────
+// 客户 / 商家两个壳各一条（同一组件 `FavoritesPage.vue`）。入口 = 个人中心「我的收藏」格
+// （`UserInfoPage.vue` 的 `favoritesPath`）。追加在文件最尾：不移动任何既有行号。
+router.addRoute('customerUser', { path: '/customer/user/favorites', component: () => import('../views/FavoritesPage.vue'), meta: { sub: 'favorites' } })
+router.addRoute('merchantUser', { path: '/merchant/user/favorites', component: () => import('../views/FavoritesPage.vue'), meta: { sub: 'favorites' } })

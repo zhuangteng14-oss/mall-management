@@ -4,6 +4,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
 
+import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
@@ -37,9 +38,12 @@ public class GoodsAuditDao {
      */
     private static final String COLUMNS =
             "Id, MerchantId, BatchId, GoodName, Price, OriginalPrice, GoodType, GoodTypeNew, TypeId, "
-                    + "ProductCode, GoodImg, Detail, Spec, AfterSale, SkuSpec, "
+                    + "ProductCode, GoodImg, ImgList, Detail, Spec, AfterSale, SkuSpec, "
                     + "PromiseGenuine, PromiseReturn7, PromiseFastRefund, PromiseFreightIns, "
                     + "Status, RejectReason, GoodsId, ReviewedBy, "
+                    // 第三批㉖：折扣模板快照 5 列（提审时重算、通过时原样搬进 goods）
+                    + "DiscountTemplateId, DiscountType, DiscountRate, DiscountAmount, "
+                    + "DATE_FORMAT(PriceSnapshotAt, '%Y-%m-%d %H:%i:%s') AS PriceSnapshotAt, "
                     + "DATE_FORMAT(SubmittedAt, '%Y-%m-%d %H:%i:%s') AS SubmittedAt, "
                     + "DATE_FORMAT(ReviewedAt,  '%Y-%m-%d %H:%i:%s') AS ReviewedAt ";
 
@@ -64,21 +68,75 @@ public class GoodsAuditDao {
                       String goodType, Integer goodTypeNew, Integer typeId, String productCode, String goodImg,
                       String detail, String spec, String afterSale, String skuSpec, LocalDateTime submittedAt,
                       boolean promiseGenuine, boolean promiseReturn7, boolean promiseFastRefund, boolean promiseFreightIns) {
+        // 旧签名（块 3 / 块 5 券提审路径沿用）：恒 pending、无多图快照。
+        return insert(merchantId, batchId, goodName, price, originalPrice, goodType, goodTypeNew, typeId,
+                productCode, goodImg, null, detail, spec, afterSale, skuSpec, submittedAt,
+                promiseGenuine, promiseReturn7, promiseFastRefund, promiseFreightIns, "pending");
+    }
+
+    /**
+     * 新签名（批四第二批）：多带 {@code ImgList}（多图 JSON 快照）与 {@code Status}
+     * （{@code 'draft'} 存草稿 / {@code 'pending'} 提交审核）。
+     *
+     * <p>⚠️ 绑参顺序 = SQL 里 `?` 的出现顺序：{@code Status} 在 {@code SubmittedAt} 之前，
+     * 与旧实现（Status 是字面量）不同，顺序错了会被 MySQL 静默截断成脏数据。
+     *
+     * <p>⚠️ {@code originalPrice} 为空时绑 {@code 0.0}：列是 {@code NOT NULL DEFAULT 0.00}，
+     * 但**显式绑 NULL 不会触发 DEFAULT**（2026-10-19 草稿保存实测 {@code Column 'OriginalPrice' cannot be null}）。
+     */
+    public int insert(String merchantId, String batchId, String goodName, Double price, Double originalPrice,
+                      String goodType, Integer goodTypeNew, Integer typeId, String productCode, String goodImg,
+                      String imgList, String detail, String spec, String afterSale, String skuSpec,
+                      LocalDateTime submittedAt,
+                      boolean promiseGenuine, boolean promiseReturn7, boolean promiseFastRefund,
+                      boolean promiseFreightIns, String status) {
+        // 第三批㉖：不带折扣模板快照的旧签名（券提审 / 未选模板的商品）—— 逐字沿用改前行为。
+        return insert(merchantId, batchId, goodName, price, originalPrice, goodType, goodTypeNew, typeId,
+                productCode, goodImg, imgList, detail, spec, afterSale, skuSpec, submittedAt,
+                promiseGenuine, promiseReturn7, promiseFastRefund, promiseFreightIns, status,
+                null, null, null, null, null);
+    }
+
+    /**
+     * 第三批㉖：带折扣模板快照的新签名。五个快照列由 {@code DiscountService} 服务端反算后传入，
+     * 审核通过时原样搬进 {@code goods}（改模板配置不影响已提审 / 已上架商品）。
+     *
+     * <p>⚠️ 绑参顺序 = SQL 里 {@code ?} 的出现顺序；{@code PriceSnapshotAt} 在 {@code SubmittedAt}
+     * 之后、紧跟列清单末尾 —— 改列清单时成对改。
+     */
+    public int insert(String merchantId, String batchId, String goodName, Double price, Double originalPrice,
+                      String goodType, Integer goodTypeNew, Integer typeId, String productCode, String goodImg,
+                      String imgList, String detail, String spec, String afterSale, String skuSpec,
+                      LocalDateTime submittedAt,
+                      boolean promiseGenuine, boolean promiseReturn7, boolean promiseFastRefund,
+                      boolean promiseFreightIns, String status,
+                      Long discountTemplateId, String discountType, BigDecimal discountRate,
+                      BigDecimal discountAmount, LocalDateTime priceSnapshotAt) {
         String sql = "INSERT INTO mall_management_sql.goods_audit "
-                + "(MerchantId, BatchId, GoodName, Price, OriginalPrice, GoodType, GoodTypeNew, TypeId, ProductCode, GoodImg, "
+                + "(MerchantId, BatchId, GoodName, Price, OriginalPrice, GoodType, GoodTypeNew, TypeId, ProductCode, GoodImg, ImgList, "
                 + " Detail, Spec, AfterSale, SkuSpec, "
-                + " PromiseGenuine, PromiseReturn7, PromiseFastRefund, PromiseFreightIns, Status, SubmittedAt) "
-                + "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)";
+                + " PromiseGenuine, PromiseReturn7, PromiseFastRefund, PromiseFreightIns, Status, SubmittedAt, "
+                + " DiscountTemplateId, DiscountType, DiscountRate, DiscountAmount, PriceSnapshotAt) "
+                + "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
         return jdbcClient.sql(sql)
-                // ⚠️ 绑参顺序 = SQL 里 `?` 的**出现顺序**（不是形参顺序）：`SubmittedAt` 的 `?` 在**最后**
-                //    （`Status` 是字面量 'pending'、夹在 4 个承诺位与它之间）⇒ `submittedAt` 必须放在这一串的**末尾**。
-                //    2026-10-11 探针实测：放在 `skuSpec` 之后 ⇒ `submittedAt` 被塞进 `PromiseGenuine`
-                //    （`tinyint(1)`）⇒ `Data truncation: Out of range value for column 'PromiseGenuine'`，
-                //    且其后整串错位。编译期看不出来。
-                .params(merchantId, batchId, goodName, price, originalPrice, goodType, goodTypeNew, typeId, productCode, goodImg,
+                .params(merchantId, batchId, goodName, price, originalPrice == null ? 0.0 : originalPrice, goodType, goodTypeNew, typeId, productCode, goodImg, imgList,
                         detail, spec, afterSale, skuSpec,
-                        promiseGenuine, promiseReturn7, promiseFastRefund, promiseFreightIns, submittedAt)
+                        promiseGenuine, promiseReturn7, promiseFastRefund, promiseFreightIns,
+                        isBlank(status) ? "pending" : status, submittedAt,
+                        discountTemplateId, discountType, discountRate,
+                        discountAmount == null ? BigDecimal.ZERO : discountAmount, priceSnapshotAt)
                 .update();
+    }
+
+    /**
+     * 草稿 → 待审的 CAS。{@code WHERE Status='draft' AND MerchantId=?} 同时兜住
+     * 「已提交过」与「不是自己的草稿」两种落空，{@code 0} 行由 Service 翻成明确文案。
+     */
+    public int casSubmitDraft(long id, String merchantId) {
+        String sql = "UPDATE mall_management_sql.goods_audit "
+                + "SET Status = 'pending', SubmittedAt = ? "
+                + "WHERE Id = ? AND MerchantId = ? AND Status = 'draft'";
+        return jdbcClient.sql(sql).params(LocalDateTime.now(), id, merchantId).update();
     }
 
     // ==================== 读：提审单 ====================

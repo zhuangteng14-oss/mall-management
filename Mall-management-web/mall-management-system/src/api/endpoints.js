@@ -4,7 +4,7 @@
 // 「路径字面量只允许出现在本文件」—— 后者强得多，且同样可 grep 自动化（方案 Q8）。
 //
 // 端点来源：14 个 view 里 **42 处 fetch + 6 处 URL 赋值**，逐条抽取
-// （2026-10-04，切换自 `9add994`）共 **31 个唯一端点**，按 M5 的四域分组（+2 条 `user.me` / `user.logout`：会话恢复笔与翻开关笔 2026-10-05 加，+1 条 `user.token`：多账户隔离笔 2026-10-06 加 —— 三条均**非** view 抽取 ⇒ 加上 C3 批 A 的 3 条 `admin.audit*`（2026-10-08）与 C3 块 1·I2 的 8 条（`admin.notify*` 4 + `notification.*` 4，2026-10-09，同样**非** view 抽取），再加 C3 块 2〈用户块〉的 11 条（`user.updateProfile` 1 + `merchant.*` 2 + `admin.accounts*` 8，2026-10-09，同样**非** view 抽取），本表实为 **56** 条；再加 C3 块 3〈商品块〉的 14 条（`goodsB3` 2 + `catalog` 1 + `catalogAdmin` 11，2026-10-10，同样**非** view 抽取）；再经同日〈模板表通用化〉就地改造（**删** `catalog` 1 + `catalogAdmin` 4 + `admin.notifyTemplate*` 2 = 7 条，**加** `template` 2 + `templateAdmin` 4 = 6 条），现为 **69** 条；再加 C3 块 4〈订单块〉的 9 条（`cart` 5 + `orderAdmin` 4，2026-10-10，同样**非** view 抽取 —— 唯一调用方是新建的 `api/order.js`），现为 **78** 条；再加 C3 块 4 补丁〈订单块〉的 1 条（`order.orderDetail`，2026-10-10，同样**非** view 抽取），现为 **79** 条；再加可视化段（2026-10-11）的 4 条（`goods.skuList` 1〔与 `goodsProductCodeSelect` 同行追加〕+ `stats.*` 3〔末尾新增组〕，同样**非** view 抽取），现为 **83** 条）；再加 C3 块 5〈营销块〉commit 1（券，2026-10-11）的 10 条（`marketingCoupon` 7 + `marketing` 3，同样**非** view 抽取 —— 唯一调用方是新建的 `api/marketing.js`），现为 **93** 条；再加同日〈券的信息架构重排〉的 1 条（`marketing.claimBatch` = `/marketing/coupon/claimBatch`，2026-10-11，同样**非** view 抽取 —— 仍是 `api/marketing.js` 的调用方），现为 **94** 条；再加 C3 块 5〈营销块〉B 组 + 续笔（店铺域，2026-10-12）的 4 条（`shop` 组：`follow` / `unfollow` / `followState` / `profile`，同样**非** view 抽取 —— 新建的 `api/shop.js`），现为 **98** 条；再加 C3 块 5〈营销块〉commit 3（国补，2026-10-12）的 9 条（`marketingSubsidy` 6 + `subsidy` 3，同样**非** view 抽取 —— 管理端六条走 `api/marketing.js`，商家侧三条里的两条给 `views/NotifyInbox.vue`、第三条给详情页 / 搜索页的国补标签），现为 **107** 条；再加 C3 块 5〈营销块〉commit 4（秒杀，2026-10-12）的 12 条（`marketingSeckill` 6 + `seckill` 6，同样**非** view 抽取 —— 管理端六条与商家侧四条经 `api/marketing.js` 包一层，`live` 给主页秒杀模块），现为 **119** 条；再加 C3 块 6〈内容块〉commit 1（评论，2026-10-12）的 5 条（`comment` 组，同样**非** view 抽取 —— 商品页 `ProductPage.vue` 直调 + 新建的 `api/comment.js`），现为 **124** 条；再加 C3 块 6〈内容块〉commit 2（问答，2026-10-12）的 1 条（`comment.accept`，同样**非** view 抽取 —— 仍是 `api/comment.js` 的调用方），现为 **125** 条；再加 C3 块 6 整改 · commit 4（举报 + 图片审核，2026-10-13）的 4 条（`comment.imageReview` 1 + 新组 `report` 3，同样**非** view 抽取 —— `imageReview` 经 `api/comment.js`、三条 report 经新建的 `api/report.js`），现为 **129** 条；再加 C3 块 6 整改 · commit 5（敏感词，2026-10-13）的 3 条（`sensitive` 组，同样**非** view 抽取 —— 经新建的 `api/sensitive.js`，其唯一调用方是管理端「敏感词库」tab），现为 **132** 条；再加 C3 块 6〈内容块〉整改补笔（管理端全站列表，2026-10-13）的 1 条（`comment.adminList`，同样**非** view 抽取 —— 仍是 `api/comment.js` 的调用方，其唯一调用方是管理端「评论管理 / 问答管理」两栏），现为 **133** 条；再加 C3 块 7〈可观测域〉· commit 3（3 条 **SSE** 流端点，2026-10-13）的 3 条（`observe` 组：`metrics` / `orders` / `events`，同样**非** view 抽取 —— 经新建的 `api/observe.js` 包一层，调用方是块 7 的三块面板〔commit 5–8〕；再加 C3 块 7〈可观测域〉· commit 4（**攻击引擎**，2026-10-14）的 3 条（同属 `observe` 组：`attackScenarios` / `attackRun` / `attackRecords`，同样**非** view 抽取 —— 仍是 `api/observe.js` 的调用方，其唯一调用方是块 7 commit 5 的攻击模拟器页；⚠️ 这三条是 **POST + 表单串**，与同组上面三条 SSE 的 `streamPost` 不同路），现为 **139** 条；再加 C3 块 7〈可观测域〉· commit 8b（**事件台账 + 清理**，2026-10-14）的 1 条（同属 `observe` 组：`attackCleanup` = `/admin/observe/attack/cleanup`，同样**非** view 抽取 —— 仍是 `api/observe.js` 的调用方，其唯一调用方是块 7 commit 5 的攻击模拟器页〔⚠️ **本笔只登记路径 + 备好 `api/observe.js#cleanupAttack` 这一层**，页面上那枚按钮**不在本笔范围**〕；⚠️ 它是本表**第一条破坏性端点**〔后端真 DELETE，按 `SIM-%` 前缀 OR `Source='attack'` 两种谓词删〕，调用点必须二次确认）；再加 C3 块 7〈可观测域〉· commit 10（**攻击引擎 v2**，2026-10-15）的 1 条（同属 `observe` 组：`attackStop` = `/admin/observe/attack/stop`，同样**非** view 抽取 —— 仍是 `api/observe.js` 的调用方；⚠️ 它是「暂停一轮演练」的**唯一**出口：后端只置令旗 + 排空在途，**不落审计**〔一轮没跑完就没有可落的记录〕）；再加 C3 块 7〈可观测域〉· **块 7 收尾**（**实时进度**，2026-10-15）的 1 条（同属 `observe` 组：`attackStatus` = `/admin/observe/attack/status`，同样**非** view 抽取 —— 仍是 `api/observe.js` 的调用方，其唯一调用方是 `AttackConsole.vue` 的辅助条〔`running` 期间 1 秒一次轮询〕；⚠️ 本表**第一条「只读但仍走 POST」**的管理端端点，与本域另外五条逐字同形），现为 **142** 条；再加 C3 块 7〈可观测域〉· **块 7 收尾**（**演练回放**，2026-10-15）的 1 条（同属 `observe` 组：`replay` = `/admin/observe/replay`，同样**非** view 抽取 —— 仍是 `api/observe.js` 的调用方，其唯一调用方是 `AttackConsole.vue` 演练记录那一行的〔回放〕钮；⚠️ 它是本表**第一条路径不落在既有控制器映射之下**的 `observe` 端点 —— 路径挂在 `/admin/observe`（根），后端是新建的 `ReplayController`，**不是** `AttackController` 的第七条），现为 **144** 条，其中 2026-10-17 新增 `metricsHistory` = `/admin/observe/metrics/history`（指标页首屏历史，只读 POST）；再加 2026-10-18 的 `attackReset` = `/admin/observe/attack/reset`（复位演练环境，普通 POST、无入参、改种子行故写审计），现为 **145** 条）。
+// （2026-10-04，切换自 `9add994`）共 **31 个唯一端点**，按 M5 的四域分组（+2 条 `user.me` / `user.logout`：会话恢复笔与翻开关笔 2026-10-05 加，+1 条 `user.token`：多账户隔离笔 2026-10-06 加 —— 三条均**非** view 抽取 ⇒ 加上 C3 批 A 的 3 条 `admin.audit*`（2026-10-08）与 C3 块 1·I2 的 8 条（`admin.notify*` 4 + `notification.*` 4，2026-10-09，同样**非** view 抽取），再加 C3 块 2〈用户块〉的 11 条（`user.updateProfile` 1 + `merchant.*` 2 + `admin.accounts*` 8，2026-10-09，同样**非** view 抽取），本表实为 **56** 条；再加 C3 块 3〈商品块〉的 14 条（`goodsB3` 2 + `catalog` 1 + `catalogAdmin` 11，2026-10-10，同样**非** view 抽取）；再经同日〈模板表通用化〉就地改造（**删** `catalog` 1 + `catalogAdmin` 4 + `admin.notifyTemplate*` 2 = 7 条，**加** `template` 2 + `templateAdmin` 4 = 6 条），现为 **69** 条；再加 C3 块 4〈订单块〉的 9 条（`cart` 5 + `orderAdmin` 4，2026-10-10，同样**非** view 抽取 —— 唯一调用方是新建的 `api/order.js`），现为 **78** 条；再加 C3 块 4 补丁〈订单块〉的 1 条（`order.orderDetail`，2026-10-10，同样**非** view 抽取），现为 **79** 条；再加可视化段（2026-10-11）的 4 条（`goods.skuList` 1〔与 `goodsProductCodeSelect` 同行追加〕+ `stats.*` 3〔末尾新增组〕，同样**非** view 抽取），现为 **83** 条）；再加 C3 块 5〈营销块〉commit 1（券，2026-10-11）的 10 条（`marketingCoupon` 7 + `marketing` 3，同样**非** view 抽取 —— 唯一调用方是新建的 `api/marketing.js`），现为 **93** 条；再加同日〈券的信息架构重排〉的 1 条（`marketing.claimBatch` = `/marketing/coupon/claimBatch`，2026-10-11，同样**非** view 抽取 —— 仍是 `api/marketing.js` 的调用方），现为 **94** 条；再加 C3 块 5〈营销块〉B 组 + 续笔（店铺域，2026-10-12）的 4 条（`shop` 组：`follow` / `unfollow` / `followState` / `profile`，同样**非** view 抽取 —— 新建的 `api/shop.js`），现为 **98** 条；再加 C3 块 5〈营销块〉commit 3（国补，2026-10-12）的 9 条（`marketingSubsidy` 6 + `subsidy` 3，同样**非** view 抽取 —— 管理端六条走 `api/marketing.js`，商家侧三条里的两条给 `views/NotifyInbox.vue`、第三条给详情页 / 搜索页的国补标签），现为 **107** 条；再加 C3 块 5〈营销块〉commit 4（秒杀，2026-10-12）的 12 条（`marketingSeckill` 6 + `seckill` 6，同样**非** view 抽取 —— 管理端六条与商家侧四条经 `api/marketing.js` 包一层，`live` 给主页秒杀模块），现为 **119** 条；再加 C3 块 6〈内容块〉commit 1（评论，2026-10-12）的 5 条（`comment` 组，同样**非** view 抽取 —— 商品页 `ProductPage.vue` 直调 + 新建的 `api/comment.js`），现为 **124** 条；再加 C3 块 6〈内容块〉commit 2（问答，2026-10-12）的 1 条（`comment.accept`，同样**非** view 抽取 —— 仍是 `api/comment.js` 的调用方），现为 **125** 条；再加 C3 块 6 整改 · commit 4（举报 + 图片审核，2026-10-13）的 4 条（`comment.imageReview` 1 + 新组 `report` 3，同样**非** view 抽取 —— `imageReview` 经 `api/comment.js`、三条 report 经新建的 `api/report.js`），现为 **129** 条；再加 C3 块 6 整改 · commit 5（敏感词，2026-10-13）的 3 条（`sensitive` 组，同样**非** view 抽取 —— 经新建的 `api/sensitive.js`，其唯一调用方是管理端「敏感词库」tab），现为 **132** 条；再加 C3 块 6〈内容块〉整改补笔（管理端全站列表，2026-10-13）的 1 条（`comment.adminList`，同样**非** view 抽取 —— 仍是 `api/comment.js` 的调用方，其唯一调用方是管理端「评论管理 / 问答管理」两栏），现为 **133** 条；再加 C3 块 7〈可观测域〉· commit 3（3 条 **SSE** 流端点，2026-10-13）的 3 条（`observe` 组：`metrics` / `orders` / `events`，同样**非** view 抽取 —— 经新建的 `api/observe.js` 包一层，调用方是块 7 的三块面板〔commit 5–8〕；再加 C3 块 7〈可观测域〉· commit 4（**攻击引擎**，2026-10-14）的 3 条（同属 `observe` 组：`attackScenarios` / `attackRun` / `attackRecords`，同样**非** view 抽取 —— 仍是 `api/observe.js` 的调用方，其唯一调用方是块 7 commit 5 的攻击模拟器页；⚠️ 这三条是 **POST + 表单串**，与同组上面三条 SSE 的 `streamPost` 不同路），现为 **139** 条；再加 C3 块 7〈可观测域〉· commit 8b（**事件台账 + 清理**，2026-10-14）的 1 条（同属 `observe` 组：`attackCleanup` = `/admin/observe/attack/cleanup`，同样**非** view 抽取 —— 仍是 `api/observe.js` 的调用方，其唯一调用方是块 7 commit 5 的攻击模拟器页〔⚠️ **本笔只登记路径 + 备好 `api/observe.js#cleanupAttack` 这一层**，页面上那枚按钮**不在本笔范围**〕；⚠️ 它是本表**第一条破坏性端点**〔后端真 DELETE，按 `SIM-%` 前缀 OR `Source='attack'` 两种谓词删〕，调用点必须二次确认）；再加 C3 块 7〈可观测域〉· commit 10（**攻击引擎 v2**，2026-10-15）的 1 条（同属 `observe` 组：`attackStop` = `/admin/observe/attack/stop`，同样**非** view 抽取 —— 仍是 `api/observe.js` 的调用方；⚠️ 它是「暂停一轮演练」的**唯一**出口：后端只置令旗 + 排空在途，**不落审计**〔一轮没跑完就没有可落的记录〕）；再加 C3 块 7〈可观测域〉· **块 7 收尾**（**实时进度**，2026-10-15）的 1 条（同属 `observe` 组：`attackStatus` = `/admin/observe/attack/status`，同样**非** view 抽取 —— 仍是 `api/observe.js` 的调用方，其唯一调用方是 `AttackConsole.vue` 的辅助条〔`running` 期间 1 秒一次轮询〕；⚠️ 本表**第一条「只读但仍走 POST」**的管理端端点，与本域另外五条逐字同形），现为 **142** 条；再加 C3 块 7〈可观测域〉· **块 7 收尾**（**演练回放**，2026-10-15）的 1 条（同属 `observe` 组：`replay` = `/admin/observe/replay`，同样**非** view 抽取 —— 仍是 `api/observe.js` 的调用方，其唯一调用方是 `AttackConsole.vue` 演练记录那一行的〔回放〕钮；⚠️ 它是本表**第一条路径不落在既有控制器映射之下**的 `observe` 端点 —— 路径挂在 `/admin/observe`（根），后端是新建的 `ReplayController`，**不是** `AttackController` 的第七条），现为 **144** 条，其中 2026-10-17 新增 `metricsHistory` = `/admin/observe/metrics/history`（指标页首屏历史，只读 POST）；再加 2026-10-18 的 `attackReset` = `/admin/observe/attack/reset`（复位演练环境，普通 POST、无入参、改种子行故写审计），现为 **148** 条（2026-10-19 批四第二批 · 会员 VIP 追加 `memberB4` 3 条：`/user/member/open`、`/admin/accounts/user/member`、`/marketing/coupon/daily`）。
 //
 // ⚠️ 路径里的 `GoodsProductCodeSelect` 是**大写开头**，与后端 `@PostMapping` 逐字一致，
 //    不是笔误 —— 改名会 404。
@@ -499,5 +499,80 @@ export const endpoints = {
   //    每次调用写一条 `user.viewplaintext` 审计。
   accountsDetail: {
     userDetail: '/admin/accounts/user/detail',
+  },
+  // ⚠️ 2026-10-19（批四第二批 · 商品状态机 / 库存）：2 条。追加在**文件尾**（同本文件既有
+  //    零漂移手法）—— 往 `goodsB3` 组里插行会把后面所有条目整体下移。
+  //    · `applicationSubmit`：草稿 CAS `draft→pending`（`GoodsController#applicationSubmit`）
+  //    · `skuStockUpdate`：按 SKU 改库存（`GoodsController#skuStockUpdate`），改完触发低库存告警
+  goodsB4: {
+    applicationSubmit: '/goods/application/submit',
+    skuStockUpdate: '/goods/skuStockUpdate',
+    // 批四第二批 commit 2：品牌专区（公开读，只列 user.IsBrand=1 商家的在架商品）。
+    brandHome: '/goods/brandHome',
+  },
+  // ⚠️ 2026-10-19（批四第二批 · 品牌加盟）：商家自服务 1 条。追加在**文件尾**（同本文件既有
+  //    零漂移手法）。品牌申请**不改身份**，通过只置 `user.IsBrand=1` —— 与 `merchant.apply` 分开。
+  merchantB4: {
+    brandApply: '/merchant/brandApply',
+  },
+  // ⚠️ 2026-10-19（批四第二批 · 会员 VIP）：3 条。追加在**文件尾**（同本文件既有零漂移手法）。
+  //    · `open`：会话内自助开通（`UserController#memberOpen`），身份判据 `requireSelfOrAdminByUsername`
+  //      —— 参数是**登录名**，不是业务号。
+  //    · `adminSet`：管理员设置等级（`AdminAccountsController#member`），`level` 只收 0/1。
+  //    · `dailyCoupon`：领取今日会员专属券（`CouponController#daily`），服务端按模板建券，
+  //      前端**不传 CouponId**（「今日」是服务端语义）。
+  memberB4: {
+    open: '/user/member/open',
+    adminSet: '/admin/accounts/user/member',
+    dailyCoupon: '/marketing/coupon/daily',
+  },
+  // ⚠️ 2026-10-19（批四第二批 · 售后状态机）：5 条。追加在**文件尾**（同本文件既有零漂移手法）。
+  //    · `apply` / `my`：用户侧（`OrderRefundController`，`@RequestMapping("/order/refund")`）
+  //    · `merchantList` / `merchantHandle`：商家侧（同一个 Controller）
+  //    · `adminList` / `adminHandle`：平台侧（追加在既有 `AdminOrderController` 的 `/admin/order` 下）
+  //    ⚠️ 平台侧**单列**、不塞进 `orderAdmin` 组：那个组的 4 条被文档按行号引，插行会漂。
+  refundB4: {
+    apply: '/order/refund/apply',
+    my: '/order/refund/my',
+    merchantList: '/order/refund/merchant/list',
+    merchantHandle: '/order/refund/merchant/handle',
+    adminList: '/admin/order/refund/list',
+    adminHandle: '/admin/order/refund/handle',
+  },
+  // ⚠️ 2026-10-19（第三批 ㉖–㉙ · 五个高保真页真实数据接入）：4 组。追加在**文件尾**
+  //    （同本文件既有零漂移手法）。调用方是 `views/preview/*.vue` 五页 + `api/discount.js` /
+  //    `api/wallet.js` / `api/member.js`。
+  //    · `discount`：模板列表与「按模板反算划线价」预览（`DiscountController`，公开面）。
+  //    · `brand`：商家品牌四态概览 / 品牌加盟申请（`BrandController`，身份闸 = 登录名）。
+  //    · `memberCenter`：V0–V6 矩阵 / 积分账户概览 / 签到 / 积分流水（`MemberController`，
+  //      身份闸 = 客户业务号）。⚠️ 与 `memberB4`（开通 / 管理端设级 / 每日券）**不是同一组**。
+  //    · `wallet`：钱包概览 / 流水 / 沙箱充值（`WalletController`，身份闸 = 客户业务号）。
+  discountB4: {
+    templates: '/goods/discount/templates',
+    preview: '/goods/discount/preview',
+  },
+  brandB4: {
+    overview: '/merchant/brand/overview',
+    apply: '/merchant/brand/apply',
+  },
+  memberCenter: {
+    levels: '/member/levels',
+    overview: '/member/overview',
+    signin: '/member/signin',
+    logs: '/member/points/logs',
+    exchange: '/member/points/exchange',
+    growth: '/member/points/growth',
+  },
+  walletB4: {
+    overview: '/wallet/overview',
+    logs: '/wallet/logs',
+    recharge: '/wallet/recharge',
+  },
+  // 2026-10-19 终局清道夫第 7 条：商品收藏（后端 `FavoriteController`，身份键 `UserId`）。
+  favorite: {
+    add: '/favorite/add',
+    remove: '/favorite/remove',
+    list: '/favorite/list',
+    check: '/favorite/check',
   },
 }

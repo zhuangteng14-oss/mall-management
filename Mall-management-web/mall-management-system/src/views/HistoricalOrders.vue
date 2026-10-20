@@ -1,85 +1,187 @@
 <template>
   <!--
-    D 笔 commit 8 —— 本页承载老稿 `子页面改造.html` 的 `data-page="ho"`（历史订单）那一支。
-    基线：`docs/美化/子页面改造.html`
-        · 模板 `:615-638`（`.page[data-page=ho]`）
-        · 样式 `:293-319`（`.ords` / `.c-*` / `.state`）+ 全局件 `:57`（`.num`）`:159-165`（`.ph`）`:179-184`（`.btn-text`）
-    ⚠️ 基线口径 v2（`slot-registry.md` 口径 6）：`pages/` 里**没有**历史订单的新稿 ⇒ **回到老稿**；
-       本段 `:615-638` **有效**（`.phs` 同段的 `:538/:560/:593` 属 UserInfoPage 面，已弃用、不在本笔）。
-    ⚠️ 稿的 `.uc` / `.uc-menu` / `.stage` 三件**不进本组件** —— 它们的落点是 `UserCenter.vue`
-       （左菜单）与 `AppShell.vue` 的 `.user-page`（那一行的 padding / max-width）。
-       本页只承载稿里的 `<main class="uc-main">` 右栏那一支（与 `UserInfoPage.vue` 同槽位）。
-    ⚠️ `doc 稿自身的两处「表里不一」，照稿落、不改稿`：
-       ① `:633` 表头列 `class="c-act"` 挂的 data-slot 是「**申请退货**」，而表体 `:754` 同一列
-          渲染的是「**复制商家 ID**」按钮 —— 表头说退货、表体说复制。**照稿**：表头落退货预留位，
-          表体现有实现（复制商家 ID）原样保留。
-       ② `:630` 的状态列：稿注 `:627-629` 自写「`historicalOrdersSelect` 目前只回已结单的 ⇒
-          这一列现在恒为同一个值」 ⇒ 表体那句 `已经结单` 是**照既有实现**（原 Vue `:11` 同款，只是
-          原先是压在图片上的浮层，现按稿移进状态列）。
+    A 版线框复刻（2026-10-19）—— 历史购买记录。
+
+    参考 `_work/ui-wireframe/a.html`：
+      · `pageHistory`（`:3250-3282`）的 `.page-head`（kicker / h1 / 说明 / 右侧出口）与历史订单表；
+      · `pageOrders` / `pageOrderDetail`（`:2163` / `:2205`）的 `.order-card` / `.order-head` /
+        `.order-body` / `.order-foot` / `.refund-strip`（六态）写法；
+      · 已复刻的 `views/OrderMine.vue` / `views/OrderCenter.vue` 的 A 版类名与间距。
+
+    ⚠️ 本笔**只动模板结构与 `<style scoped>`**，`<script setup>` 一行未改（含 API、分页逻辑、
+       六态映射、`canApply` 按钮判据、退款弹窗状态与全部数据字段）。
+    ⚠️ 订单数据源仍为 `/order/historicalOrdersSelect`（`OrderDao.selectHistoryByCustomer`），
+       字段面：OrderId / MerchantId / ProductInformation / Images / SettlementDate / Quantity /
+       Price / RefundStatus / RefundRetryCount / RefundReason / RefundAmount / RefundHandledAt。
+       ⇒ 卡片里的「处理人」只在后端回 `RefundHandler` 时才有值；本接口当前不回，故按「—」如实展示，
+         不另调接口、不编数据。
+    ⚠️ `Price` 是**订单实付金额**（`order` 表按单存），不是单价 ⇒ 卡片在商品行用
+       `Price ÷ Quantity` 折算「单价」并注明口径，右侧另列「订单实付」。
+
+    保留清单（逐项对照旧模板）：
+      · 商品图 `v-if="order.Images"`（空图不画破图图标）、商品名、商家 ID、结单日期、订单号；
+      · 退款六态：`refundStatusText` + `.rf-chip` / 六态轨道高亮（0-5 全保留）；
+      · 「申请退货 / 再次申请」按钮：仍由 `canApply(order)` 判（0/2 且重试 < 2），点击仍走 `openRefund`；
+      · 1/3/4/5 的只读提示文案（待商家审核 / 平台处理中 / 平台已拒绝 / 已退款）原样保留；
+      · 「复制商家 ID」真事件 `copyMerchantId` 原样保留；
+      · 退款原因 / 处理时间 / 处理人（`RefundReason` / `RefundHandledAt` / `RefundHandler`）；
+      · 退款申请弹窗（`refundDialog.*`、`closeRefund` / `submitRefund`、busy 禁用、错误文案）；
+      · 加载态（`loading`）与空态（`暂无历史订单`）；失败路径仍由 `handleApiError` 处理（未改）。
   -->
   <main class="uc-main">
 
-    <div class="page-h">
-      <h1 class="page-h-t">历史订单</h1>
-      <!-- 稿 `:618` 的 `#ho-n` 由脚本填 `共 ${ORDERS.length} 笔` —— 这里落**真**条数（`orderList.length`）。
-           ⚠️ 加载中挂 `v-if="!loading"`：否则会先显示「共 0 笔」这个**假陈述**（稿无此态，属落地补偿）。 -->
-      <span v-if="!loading" class="page-h-n">共 {{ orderList.length }} 笔</span>
+    <!-- ── A 版页头（稿 `.page-head`）────────────────────────────────────── -->
+    <section class="page-head">
+      <div class="ph-main">
+        <div class="kicker">BUYER / ORDER HISTORY</div>
+        <h1 class="page-h">
+          历史购买
+          <!-- 稿 `pageHistory` 的条数放在说明里；这里沿用旧页「共 N 笔」的位置与 `v-if="!loading"`
+               —— 加载中不显示「共 0 笔」这个假陈述。 -->
+          <span v-if="!loading" class="ph-n">共 {{ orderList.length }} 笔</span>
+        </h1>
+        <p>已完成收货的历史订单集中在这里。售后进度按六态展示：申请、商家审核、平台处理、拒绝与退款完成，每一步都能看到落在哪个状态。</p>
+      </div>
+      <div class="head-actions">
+        <!-- 两壳共用本组件 ⇒ 出口用模板里的 `$route` 判壳（同 `MemberCenter.vue` 先例），
+             不往 `<script setup>` 里加逻辑。 -->
+        <router-link
+          class="btn"
+          :to="$route.path.startsWith('/merchant') ? '/merchant/orders' : '/customer/orders'"
+        >返回进行中订单</router-link>
+        <router-link
+          class="btn solid"
+          :to="$route.path.startsWith('/merchant') ? '/merchant' : '/customer'"
+        >继续购物</router-link>
+      </div>
+    </section>
+
+    <!-- ── 加载态（原 `loading` 判据不变）────────────────────────────────── -->
+    <div v-if="loading" class="empty">
+      <div class="big">加载中…</div>
+      <div class="p">正在读取历史购买记录。</div>
     </div>
 
-    <div v-if="loading" class="empty">加载中...</div>
-    <div v-else-if="orderList.length === 0" class="empty">暂无历史订单</div>
+    <!-- ── 空态（原文案「暂无历史订单」保留）────────────────────────────── -->
+    <div v-else-if="orderList.length === 0" class="empty">
+      <div class="big">暂无历史订单</div>
+      <div class="p">确认收货后的订单会出现在这里；进行中的订单可在订单中心查看。</div>
+      <router-link
+        class="go2"
+        :to="$route.path.startsWith('/merchant') ? '/merchant/orders' : '/customer/orders'"
+      >返回进行中订单</router-link>
+    </div>
 
-    <table v-else class="ords">
-      <thead>
-        <tr>
-          <th class="c-prod">商品</th>
-          <th class="c-num">旧订单号</th>
-          <th class="c-nd">商家 ID</th>
-          <th class="c-date">结单日期</th>
-          <!-- 预留位 #25（老稿 `:630`）—— 块级：`<th>` 本身不是控件 ⇒ 只挂 `data-slot` + `title`（无 `disabled`）。
-               N 稿未标（未计）。 -->
-          <th
-            class="c-st"
-            data-slot="预留 · 状态枚举"
-            title="预留 · 状态枚举（老稿 子页面改造.html:630）· 归属 C3〈订单〉——稿注：数据字典 6(3) 把订单状态定成枚举「待付款 / 已付款 / 已完成」，但 historicalOrdersSelect 目前只回已结单的 ⇒ 这一列现恒为同一个值；接口一旦回多状态，这一列直接生效，不用改布局"
-          >状态</th>
-          <!-- 预留位 #26（老稿 `:633`）—— 稿里这格**完全空**（无表头文字）⇒ 照落空格子 + `data-slot` + `title`。
-               ⚠️ 表体同列是「复制商家 ID」（稿自身表里不一，见文件头 ①）。N 稿未标（未计）。 -->
-          <th
-            class="c-act"
-            data-slot="预留 · 申请退货"
-            title="预留 · 申请退货（老稿 子页面改造.html:633）· 归属 C3〈订单〉——稿注：需求 4.2 有「订单售后 / 退货」（顾客发起退货申请），这是顾客侧动作，天然属于订单行，落在这一列"
-          ></th>
-        </tr>
-      </thead>
-      <tbody>
-        <tr v-for="order in orderList" :key="order.OrderId">
-          <td class="c-prod">
-            <div class="in">
-              <!-- 稿 `:749` 的 `.thumb` 是灰色占位方块（`background:var(--img)`）——那是它的 mock。
-                   本页保留**既有真图**（原 Vue `:9` 的 `<img :src="order.Images">`，取值路径一字未改）
-                   ⇒ 尺寸从「撑满 45% 宽 × 200px 高」收到稿的 48×48。
-                   ⚠️ 补 `v-if="order.Images"`（**原实现没有这一条**）：`Images` 为空时 `<img src="">`
-                   画出来的是浏览器的**破图图标**，而稿的 `.thumb` 无图就露灰底 ⇒ 加 `v-if` 正好收回
-                   稿的样子。与 `OrderCenter.vue:119` 的 `<img v-if="order.Images">` 是**同一行写法**
-                   （commit 5 先例），非新发明。 -->
+    <!-- ── 历史订单卡（A 版 `.order-card`）────────────────────────────────── -->
+    <div v-else class="order-list">
+      <article v-for="order in orderList" :key="order.OrderId" class="order-card">
+
+        <div class="order-head">
+          <span class="oid num" title="订单号">{{ order.OrderId }}</span>
+          <span class="date num" title="结单日期">{{ formatDateTime(order.SettlementDate) }}</span>
+          <span v-if="order.MerchantId" class="merchant">商家 <span class="num">{{ order.MerchantId }}</span></span>
+          <!-- 六态文案仍走 `refundStatusText`（REFUND_TEXT 未改），0 态保留 ✓ 图标。 -->
+          <span class="rf-chip" :class="`s-${Number(order.RefundStatus) || 0}`">
+            <IconGlyph v-if="(Number(order.RefundStatus) || 0) === 0" name="ok" />{{ refundStatusText(order.RefundStatus) }}
+          </span>
+        </div>
+
+        <div class="order-body">
+          <div class="order-items">
+            <div class="order-item">
+              <!-- `v-if="order.Images"` 保留：空 src 会画破图图标，稿的 `.thumb` 无图露灰底。 -->
               <div class="thumb"><img v-if="order.Images" :src="order.Images" alt="商品图片" /></div>
-              <span class="nm">{{ order.ProductInformation }}</span>
+              <div class="oi-tx">
+                <div class="nm" :title="order.ProductInformation">{{ order.ProductInformation }}</div>
+                <div class="meta">
+                  <span>数量 {{ Number(order.Quantity) || 1 }} 件</span>
+                  <span title="单价 = 订单实付 ÷ 件数">单价 ¥{{ (Number(order.Price || 0) / (Number(order.Quantity) || 1)).toFixed(2) }}</span>
+                </div>
+              </div>
             </div>
-          </td>
-          <td class="c-num num">{{ order.OrderId }}</td>
-          <td class="c-nd num">{{ order.MerchantId }}</td>
-          <td class="c-date num">{{ formatDateTime(order.SettlementDate) }}</td>
-          <td class="c-st"><span class="state"><IconGlyph name="ok" />已经结单</span></td>
-          <!-- 稿 `:754` 是 `<button class="btn-text">复制商家 ID</button>`（稿外死控件：裸控件、无 data-slot）。
-               ⚠️ **本页不是死控件** —— 原 Vue `:20` 的「复制」已是**真事件**（`copyMerchantId`）⇒ 保留实事件，
-               **不挂 `disabled`、不进 §三**；文案照稿由「复制」改为「复制商家 ID」。 -->
-          <td class="c-act">
-            <button class="btn-text" @click="copyMerchantId(order.MerchantId)">复制商家 ID</button>
-          </td>
-        </tr>
-      </tbody>
-    </table>
+          </div>
+          <div class="order-total">
+            <b>¥{{ Number(order.Price || 0).toFixed(2) }}</b>
+            <small>订单实付</small>
+          </div>
+        </div>
+
+        <!-- 退款六态轨道（稿 `refundStrip`）：文案全部取自既有 `refundStatusText`，
+             不复制第二份字典；当前态 `on`，4/5 标 `terminal`（同稿的终态下划线）。 -->
+        <div class="refund-strip" aria-label="退款状态六态，当前状态高亮">
+          <div class="refund-cell" :class="{ on: (Number(order.RefundStatus) || 0) === 0 }"><b>00</b>{{ refundStatusText(0) }}</div>
+          <div class="refund-cell" :class="{ on: (Number(order.RefundStatus) || 0) === 1 }"><b>01</b>{{ refundStatusText(1) }}</div>
+          <div class="refund-cell" :class="{ on: (Number(order.RefundStatus) || 0) === 2 }"><b>02</b>{{ refundStatusText(2) }}</div>
+          <div class="refund-cell" :class="{ on: (Number(order.RefundStatus) || 0) === 3 }"><b>03</b>{{ refundStatusText(3) }}</div>
+          <div class="refund-cell terminal" :class="{ on: (Number(order.RefundStatus) || 0) === 4 }"><b>04</b>{{ refundStatusText(4) }}</div>
+          <div class="refund-cell terminal" :class="{ on: (Number(order.RefundStatus) || 0) === 5 }"><b>05</b>{{ refundStatusText(5) }}</div>
+        </div>
+
+        <!-- 退款原因 / 处理时间 / 处理人：三列都来自既有字段；缺失一律「—」，不编数据。 -->
+        <dl class="refund-meta">
+          <div>
+            <dt>退款原因</dt>
+            <dd>{{ order.RefundReason || '—' }}</dd>
+          </div>
+          <div>
+            <dt>处理时间</dt>
+            <dd class="num">{{ order.RefundHandledAt ? formatDateTime(order.RefundHandledAt) : '—' }}</dd>
+          </div>
+          <div>
+            <dt>处理人</dt>
+            <dd>{{ order.RefundHandler || '—' }}</dd>
+          </div>
+        </dl>
+
+        <div class="order-foot">
+          <span class="foot-note">
+            售后申请 {{ Number(order.RefundRetryCount) || 0 }} 次 · 上限 2 次
+          </span>
+          <div class="order-actions">
+            <!-- 判据与旧模板逐字一致：`canApply(order)`（0 首申 / 2 重申，且 retry < 2）。 -->
+            <button v-if="canApply(order)" class="act solid" @click="openRefund(order)">
+              {{ (Number(order.RefundStatus) || 0) === 2 ? '再次申请' : '申请退货' }}
+            </button>
+            <span v-else-if="(Number(order.RefundStatus) || 0) === 1" class="act-hint">待商家审核</span>
+            <span v-else-if="(Number(order.RefundStatus) || 0) === 3" class="act-hint">平台处理中</span>
+            <span v-else-if="(Number(order.RefundStatus) || 0) === 4" class="act-hint">平台已拒绝</span>
+            <span v-else-if="(Number(order.RefundStatus) || 0) === 5" class="act-hint">已退款</span>
+            <!-- 真事件（`copyMerchantId`）原样保留；文案照稿「复制商家 ID」。 -->
+            <button class="act" @click="copyMerchantId(order.MerchantId)">复制商家 ID</button>
+          </div>
+        </div>
+
+      </article>
+    </div>
+
+    <!-- 售后申请弹窗（批四第二批 commit 4）。金额**只读展示**（后端取 order.Price 快照），
+         前端不传金额 —— 见 api/order.js ⑤ 组头注释。绑定与禁用条件一个未动。 -->
+    <div v-if="refundDialog.open" class="rf-mask" @click.self="closeRefund">
+      <div class="rf-box">
+        <div class="rf-head">
+          <h2 class="rf-title">申请退货</h2>
+          <span class="rf-kicker">AFTER-SALES</span>
+        </div>
+        <p class="rf-sub">
+          订单 <span class="num">{{ refundDialog.order && refundDialog.order.OrderId }}</span>
+          · 可退金额 ¥{{ Number((refundDialog.order && refundDialog.order.Price) || 0).toFixed(2) }}
+        </p>
+        <textarea
+          v-model="refundDialog.reason"
+          class="rf-input"
+          rows="4"
+          maxlength="255"
+          placeholder="请填写售后原因（必填，最多 255 字）"
+        ></textarea>
+        <p v-if="refundDialog.error" class="rf-err">{{ refundDialog.error }}</p>
+        <div class="rf-actions">
+          <button class="btn-text" :disabled="refundDialog.busy" @click="closeRefund">取消</button>
+          <button class="rf-submit" :disabled="refundDialog.busy" @click="submitRefund">
+            {{ refundDialog.busy ? '提交中…' : '提交申请' }}
+          </button>
+        </div>
+      </div>
+    </div>
 
   </main>
 </template>
@@ -88,6 +190,7 @@
 import { ref, onMounted } from 'vue'
 import { http, handleApiError } from '../api/http'
 import { endpoints } from '../api/endpoints'
+import { orderRefundApply } from '../api/order'
 import { resolveBuyerId } from '../api/auth'; import IconGlyph from '../components/ui/IconGlyph.vue'   // ⚠️ 两条 import **同行**（2026-10-11 补图标那一笔）—— 合并到既有行 = 不新增行号漂移
 
 const orderList = ref([])
@@ -135,6 +238,56 @@ const copyMerchantId = (merchantId) => {
   }
 }
 
+// ── 售后状态机（批四第二批 commit 4）────────────────────────────────────────────
+// 文案与后端六态一一对应：0 无 / 1 待商家 / 2 商家拒（可重申）/ 3 待平台 / 4 平台拒（终态）/ 5 已退款。
+const REFUND_TEXT = { 0: '已经结单', 1: '待商家审核', 2: '商家已拒绝', 3: '平台处理中', 4: '平台已拒绝', 5: '已退款' }
+const refundStatusText = (s) => REFUND_TEXT[Number(s) || 0] || '已经结单'
+// 可申请：0 首申 / 2 重申；且次数未用尽（上限 2）。其余状态后端也会拒，这里只是不展示按钮。
+const canApply = (order) => {
+  const status = Number(order.RefundStatus) || 0
+  const retry = Number(order.RefundRetryCount) || 0
+  return (status === 0 || status === 2) && retry < 2
+}
+
+const refundDialog = ref({ open: false, order: null, reason: '', busy: false, error: '' })
+
+const openRefund = (order) => {
+  refundDialog.value = { open: true, order, reason: '', busy: false, error: '' }
+}
+const closeRefund = () => {
+  refundDialog.value.open = false
+}
+const submitRefund = async () => {
+  const d = refundDialog.value
+  const reason = String(d.reason || '').trim()
+  if (!reason) {
+    d.error = '请填写售后原因'
+    return
+  }
+  const customerId = getBuyerId()
+  if (!customerId) {
+    d.error = '未登录，无法申请售后'
+    return
+  }
+  d.busy = true
+  d.error = ''
+  try {
+    const res = await orderRefundApply({ CustomerId: customerId, OrderId: d.order.OrderId, Reason: reason })
+    if (res.success) {
+      d.open = false
+      alert(res.msg || '售后申请已提交')
+      await loadHistoricalOrders()
+    } else {
+      // 非本人 / 未收货 / 次数上限 / 已退款：后端文案直接展示，不合并成一句「失败」
+      d.error = res.msg || '提交失败'
+    }
+  } catch (err) {
+    handleApiError(err, '提交失败')
+  } finally {
+    d.busy = false
+  }
+}
+
 const loadHistoricalOrders = async () => {
   const customerId = getBuyerId()
   if (!customerId) {
@@ -166,37 +319,23 @@ onMounted(() => {
 
 <style scoped>
 /* ══════════════════════════════════════════════════════════════════════════════
-   取自 `docs/美化/子页面改造.html`：
-     `:293-319`（`.ords` / `.c-prod|.c-num|.c-nd|.c-date|.c-st|.c-act` / `.thumb` / `.state`）
-     `:57`（`.num`）`:159-165`（`.ph`）`:179-184`（`.btn-text`）`:281-287`（`.inp`，仅取 `--r2` 一件）
-     `:430-436`（`.empty`，用于加载 / 空态两处）
+   A 版线框复刻（2026-10-19）
 
-   本次「从稿到 Vue」的**适配**，逐条登记：
-     ① 稿的全局重设 `body{}` / `a{}` / `button{}` / `input,textarea{}`（稿 `:118-122`）里的
-        `button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}`
-        **必须搬进 scoped 且限定本页** —— 稿的「复制商家 ID」是裸 `<button>`，不重设就会带上
-        UA 的 `background: rgb(240,240,240)` / `border: 2px outset` / `font-family: Arial`
-        / `font-size: 13.33px`（`UserInfoPage.vue` 的 commit 7 实踩过同一个坑）。
-     ② 稿的 `body{font-family:var(--font);font-size:var(--fs-sm);color:var(--ink)}` 落到本页根
-        `.uc-main` 上；`background` **不搬** —— 壳 `.app-shell` 已经铺了 `var(--bg)`，
-        在 `main.uc-main` 上再铺一次会把右栏画成一块与左菜单不同的底（同 `UserInfoPage.vue`）。
-     ③ 页头用具名类 `.page-h` / `.page-h-t` / `.page-h-n`，**不是**稿的 `.ph` / `.ph h1` / `.ph-n`：
-        `UserInfoPage.vue` 已用 `.page-h` 占住同一个视觉位（壳内右栏的页标题）⇒ 同壳三页沿用
-        一套类名，便于横向对读。⚠️ **字号这一条跨页不同，照实记**：本页取稿 `:162` 的
-        `var(--fs-xl)`，但**同一个 token 在两侧的值不一样** —— 稿自己的 `:root`（`:14-15`）是
-        **子页面档**（`--fs-sm/md/lg/xl` = 14/16/20/**28**），本仓 `tokens.css:12` 的「字号档冲突」
-        条**统一采了主页档**（15/19/24/**32**）⇒ 落到本页标题是 **32px**，比稿的 28px 大 4px。
-        `UserInfoPage.vue` 那页的标题是 `var(--d2)` = `--fs-2xl` = **36px** ⇒ **同壳两页标题差 4px**。
-        这是「两份基线 + 一次字号统一」的必然产物，本笔不擅自拉平，已登记
-        `slot-registry.md` §一 commit 8 的「⚠️ 跨页标题字号 36 vs 32」条，待用户裁。
-     ④ 稿的 `.uc` / `.uc-menu` / `.stage` **不进本组件**（落点在 `UserCenter.vue` / `AppShell.vue`）⇒ 未搬。
-     ⑤ 稿 `.num{font-variant-numeric:tabular-nums}` 是 `.ords` 三个号码列要的那一件 ⇒ 平铺成本页 `.num`。
-        ⚠️ 只取这一条，稿 `:56` 的「不上 monospace 字体」是**设计约束注释**，不是声明。
-     ⑥ `.thumb` 的 `background: var(--img)` 保留（无图时的兜底底色），并补 `img{object-fit:cover}`。
-   ⚠️ `box-sizing` **不在此重复** —— `tokens.css` 的 `*` 重设已是全局。
+   视觉基线：
+     `_work/ui-wireframe/a.html` `pageHistory`（`:3250-3282`）的 `.page-head`；
+     `pageOrders`（`:2163`）的 `.order-card` / `.order-head` / `.order-body` /
+     `.order-item` / `.order-total` / `.order-foot`；
+     `refundStrip`（`:1695`）的 `.refund-strip` / `.refund-cell`（六态 + `on` + `terminal`）。
+   已落同款：`views/OrderMine.vue`（`.page-head` / `.kicker` / `.head-actions` / `.order-card` 族）。
+
+   ⚠️ 稿的 `.uc` / `.uc-menu` **不在这里** —— 左菜单在 `UserCenter.vue`、外框在 `AppShell.vue`
+      的 `.user-page`（A 版已全宽居中）。本页只承载右栏内容。
+   ⚠️ `button` 重设必须留在 scoped 里：稿的动作按钮是裸 `<button>`，不重设会带 UA 的
+      灰底 / outset 边框 / Arial 字号（`UserInfoPage.vue` 实踩过）。
+   ⚠️ `box-sizing` 不重复 —— `tokens.css` 的 `*` 重设已是全局。
    ══════════════════════════════════════════════════════════════════════════════ */
 
-/* ── 稿 `:121` 的 `button{...}` 重设，限定本页 ───────────────────────────────── */
+/* ── 稿的 `button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}`，限定本页 ── */
 button {
   font: inherit;
   color: inherit;
@@ -205,71 +344,368 @@ button {
   cursor: pointer;
 }
 
-/* ── 本页根 ────────────────────────────────────────────────────────────────── */
+/* ── 本页根（与同壳子页同槽位）────────────────────────────────────────────── */
 .uc-main {
   flex: 1;
+  width: 100%;
   min-width: 0;
   font-family: var(--font);
   font-size: var(--fs-sm);
   color: var(--ink);
 }
 
-/* ── 页头（稿 `.ph` `:159-165`）────────────────────────────────────────────── */
-.page-h { display: flex; align-items: baseline; gap: var(--s4); margin-bottom: var(--s5); }
-.page-h-t {
+/* ── 页头（稿 `.page-head` `:110-112`）────────────────────────────────────── */
+.page-head {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: var(--s5);
+  padding-bottom: var(--s4);
+  border-bottom: 1px solid var(--line-2);
+  margin-bottom: var(--s5);
+}
+.kicker {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: .16em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+.page-head .page-h {
+  display: flex;
+  align-items: baseline;
+  gap: var(--s3);
+  margin-top: 6px;
   font-family: var(--font-display);
-  font-size: var(--fs-xl); font-weight: var(--fw-semi); letter-spacing: .5px; line-height: 1.2;
+  font-size: var(--fs-xl);
+  font-weight: var(--fw-med);
+  line-height: 1.15;
+  letter-spacing: -.02em;
 }
-.page-h-n { font-size: var(--fs-sm); color: var(--ink-3); }
-
-/* ── 表格（稿 `:298-319`）──────────────────────────────────────────────────── */
-.ords { width: 100%; border-collapse: collapse; }
-.ords th {
-  text-align: left; font-weight: var(--fw-reg); font-size: var(--fs-xs); color: var(--ink-3);
-  padding: 0 var(--s4) 10px 0; border-bottom: 1px solid var(--line-2); white-space: nowrap;
+.page-h .ph-n {
+  font-family: var(--font);
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-reg);
+  letter-spacing: 0;
+  color: var(--ink-3);
 }
-.ords td {
-  padding: 16px var(--s4) 16px 0; border-bottom: 1px solid var(--line);   /* ⚠️ 第 4 条修复（用户 2026-10-08）：12px → 16px。48×48 的缩略图夹在 12px 的行内距里，**上下留白只有 12.5px**，hover 时行底色（`--zone`）的上下边看起来正压在图片边上 = 用户报的「边界与背景行重叠」。加到 16px ⇒ 留白 16.5px，图与底色边不再贴着。 */
-  vertical-align: middle; font-size: var(--fs-sm); color: var(--ink-2);
+.page-head p {
+  margin-top: 8px;
+  max-width: 62ch;
+  font-size: var(--fs-sm);
+  line-height: 1.7;
+  color: var(--ink-2);
 }
-.ords th:last-child, .ords td:last-child { padding-right: var(--s4); }   /* ⚠️ 第 4 条修复：原是 `0` ⇒ 末列（`.c-act`，右对齐的「复制商家 ID」）的右边缘**与表格右边缘重合**（实测 btn 右沿 1266 = 表格右沿 1266），看起来像被裁掉一截。给回一个 `--s4`，按钮离表格右边 16px；行底色仍然铺满整格 ⇒ hover 条不会被切。 */
-/* 行高亮是**扫读**需要，跟「每张卡片都加 hover 位移」不是一回事：只换底色，
-   不做过渡、不做位移、不加投影（稿 `:308-309` 原注）。 */
-.ords tbody tr:hover td { background: var(--zone); }
+.head-actions { display: flex; gap: var(--s2); flex: 0 0 auto; }
+.head-actions .btn {
+  display: inline-flex;
+  align-items: center;
+  height: 36px;
+  padding: 0 var(--s5);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r1);
+  font-size: var(--fs-sm);
+  color: var(--ink-2);
+  text-decoration: none;
+  background: var(--surface);
+  white-space: nowrap;
+}
+.head-actions .btn:hover { border-color: var(--brand-ink); color: var(--brand-ink); }
+.head-actions .btn.solid {
+  background: var(--brand);
+  border-color: var(--brand);
+  color: #fff;
+}
+.head-actions .btn.solid:hover {
+  background: var(--brand-ink);
+  border-color: var(--brand-ink);
+  color: #fff;
+}
 
-.c-prod { width: 30%; } .c-num { width: 15%; } .c-nd { width: 14%; }
-.c-date { width: 19%; } .c-st { width: 11%; } .c-act { width: 11%; text-align: right; white-space: nowrap; }   /* ⚠️ 第 4 条修复：补 `white-space:nowrap` —— 「复制商家 ID」是一枚**不可断**的按钮文字，列宽是百分比（11%），窄档下会折成两行、把行顶高，与本列「一个动作一行」的语义不符。nowrap 让它只可能横向顶，绝不折行。 */
+/* ── 订单卡（稿 `.order-card` `:310-336`）─────────────────────────────────── */
+.order-list { display: flex; flex-direction: column; gap: var(--s4); }
+.order-card {
+  border: 1px solid var(--line);
+  border-radius: var(--r2);
+  background: var(--surface);
+  overflow: hidden;
+}
+.order-head {
+  display: flex;
+  align-items: center;
+  gap: var(--s3);
+  flex-wrap: wrap;
+  padding: var(--s3) var(--s5);
+  border-bottom: 1px solid var(--line);
+  background: var(--surface-2);
+  font-size: var(--fs-xs);
+}
+.oid { font-family: var(--font-mono); font-size: var(--fs-xs); color: var(--ink); }
+.date { font-family: var(--font-mono); font-size: 11px; color: var(--ink-3); }
+.merchant { color: var(--ink-3); }
+.merchant .num { color: var(--ink-2); }
+.rf-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+  padding: 2px 8px;
+  border: 1px solid var(--line-2);
+  border-radius: var(--r1);
+  color: var(--ink-3);
+  white-space: nowrap;
+}
+/* 六态配色沿用旧页口径：1/3 进行中 = 品牌色；5 已退款 = 品牌色 + 区块底；2/4 中性。 */
+.rf-chip.s-1, .rf-chip.s-3 { color: var(--brand-ink); border-color: var(--brand); }
+.rf-chip.s-5 { color: var(--brand-ink); border-color: var(--brand); background: var(--zone); }
 
-.c-prod .in { display: flex; align-items: center; gap: var(--s3); min-width: 0; }   /* ⚠️ 第 4 条修复：`min-width:0` 解开 flex 项的自动最小尺寸 —— 没有它，商品名一长，「缩略图 + 文字」这一组就**顶不出** td 的百分比宽，横向溢出到相邻列。 */
+.order-body { display: flex; align-items: center; gap: var(--s5); padding: var(--s4) var(--s5); }
+.order-items { flex: 1; min-width: 0; }
+.order-item { display: flex; align-items: center; gap: var(--s4); min-width: 0; }
 .thumb {
-  width: 48px; height: 48px; flex: none; border-radius: var(--r1);
-  background: var(--img); overflow: hidden;
+  width: 56px;
+  height: 68px;
+  flex: none;
+  border-radius: var(--r1);
+  background: var(--img);
+  overflow: hidden;
 }
 .thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
-.c-prod .nm { font-size: var(--fs-md); color: var(--ink); font-weight: var(--fw-med); line-height: 1.35; min-width: 0; overflow-wrap: anywhere; }   /* ⚠️ 第 4 条修复（overflow 约束）：`min-width:0` 允许本项被压到列宽以下，`overflow-wrap:anywhere` 让**超长且不可断**的商品名（如测试数据里的 `叠法双方:dfffff`）在列内就地折行，而不是横向顶出去。正常长度的名字**外观零变化**。 */
+.oi-tx { min-width: 0; }
+.oi-tx .nm {
+  font-size: var(--fs-md);
+  font-weight: var(--fw-med);
+  line-height: 1.35;
+  color: var(--ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.oi-tx .meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s3);
+  margin-top: var(--s1);
+  font-size: var(--fs-xs);
+  color: var(--ink-3);
+}
+.order-total {
+  flex: 0 0 auto;
+  padding-left: var(--s5);
+  border-left: 1px solid var(--line);
+  text-align: right;
+}
+.order-total b {
+  display: block;
+  font-family: var(--font-display);
+  font-size: var(--fs-lg);
+  font-weight: var(--fw-med);
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+}
+.order-total small { display: block; margin-top: 2px; font-size: var(--fs-xs); color: var(--ink-3); }
 
-.num { font-variant-numeric: tabular-nums; }
+/* ── 退款六态轨道（稿 `.refund-strip` / `.refund-cell` `:344-354`）──────────── */
+.refund-strip {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  margin: 0 var(--s5);
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+}
+.refund-cell {
+  min-width: 0;
+  padding: 8px;
+  border-right: 1px solid var(--line);
+  font-size: 10px;
+  line-height: 1.45;
+  color: var(--ink-3);
+  overflow-wrap: anywhere;
+}
+.refund-cell:last-child { border-right: 0; }
+.refund-cell b {
+  display: block;
+  margin-bottom: 2px;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: var(--fw-reg);
+  color: var(--ink-3);
+}
+.refund-cell.on { background: var(--ink); color: #fff; }
+.refund-cell.on b { color: #c9c9c9; }
+.refund-cell.terminal { border-bottom: 2px solid var(--ink-2); }
 
-.state {
-  display: inline-block; font-size: var(--fs-xs); color: var(--ink-3);
-  border: 1px solid var(--line-2); border-radius: var(--r1); padding: 1px 8px;
+/* ── 退款原因 / 处理时间 / 处理人 ──────────────────────────────────────────── */
+.refund-meta {
+  display: grid;
+  grid-template-columns: 1.4fr 1fr .8fr;
+  margin: 0 var(--s5);
+  border-bottom: 1px solid var(--line);
+}
+.refund-meta > div { min-width: 0; padding: var(--s3) var(--s3) var(--s3) 0; }
+.refund-meta > div + div { padding-left: var(--s3); border-left: 1px solid var(--line); }
+.refund-meta dt {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: .06em;
+  color: var(--ink-3);
+}
+.refund-meta dd {
+  margin-top: 3px;
+  font-size: var(--fs-xs);
+  line-height: 1.5;
+  color: var(--ink-2);
+  overflow-wrap: anywhere;
 }
 
-/* ── 文字钮（稿 `.btn-text` `:179-184`）—— 只给行内动作 ────────────────────── */
+/* ── 卡片底栏与动作（稿 `.order-foot` / `.order-actions`）──────────────────── */
+.order-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s4);
+  flex-wrap: wrap;
+  padding: var(--s3) var(--s5);
+}
+.foot-note { font-size: var(--fs-xs); color: var(--ink-3); }
+.order-actions { display: flex; align-items: center; gap: var(--s2); flex-wrap: wrap; }
+.act {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 30px;
+  padding: 0 var(--s4);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r1);
+  background: var(--surface);
+  color: var(--brand-ink);
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-med);
+  white-space: nowrap;
+  cursor: pointer;
+  text-decoration: none;
+}
+.act:hover { border-color: var(--brand); }
+.act.solid { background: var(--brand); border-color: var(--brand); color: #fff; }
+.act.solid:hover { background: var(--brand-ink); border-color: var(--brand-ink); }
+.act-hint { font-size: var(--fs-xs); color: var(--ink-3); }
+
+/* ── 数字列 ──────────────────────────────────────────────────────────────── */
+.num { font-variant-numeric: tabular-nums; }
+
+/* ── 加载 / 空态（稿 `.empty`；文案沿用既有实现）──────────────────────────── */
+.empty {
+  padding: var(--s8) var(--s6);
+  border: 1px solid var(--line);
+  border-radius: var(--r2);
+  background: var(--surface);
+  text-align: center;
+}
+.empty .big {
+  font-family: var(--font-display);
+  font-size: var(--fs-lg);
+  font-weight: var(--fw-med);
+  color: var(--ink-2);
+}
+.empty .p {
+  margin-top: var(--s3);
+  font-size: var(--fs-sm);
+  line-height: 1.7;
+  color: var(--ink-3);
+}
+.empty .go2 {
+  display: inline-flex;
+  align-items: center;
+  height: 36px;
+  margin-top: var(--s5);
+  padding: 0 var(--s5);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r1);
+  font-size: var(--fs-sm);
+  color: var(--ink-2);
+  text-decoration: none;
+}
+.empty .go2:hover { border-color: var(--brand-ink); color: var(--brand-ink); }
+
+/* ── 退款申请弹窗（绑定与禁用条件未改，仅视觉对齐 A 版发丝线卡片）───────────── */
+.rf-mask {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, .32);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 60;
+}
+.rf-box {
+  width: min(440px, calc(100vw - 32px));
+  padding: var(--s6);
+  border: 1px solid var(--line);
+  border-radius: var(--r2);
+  background: var(--bg);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, .18);
+}
+.rf-head { display: flex; align-items: baseline; justify-content: space-between; gap: var(--s3); }
+.rf-kicker {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: .16em;
+  color: var(--ink-3);
+}
+.rf-title {
+  font-family: var(--font-display);
+  font-size: var(--fs-lg);
+  font-weight: var(--fw-semi);
+}
+.rf-sub { margin-top: var(--s2); margin-bottom: var(--s4); font-size: var(--fs-sm); color: var(--ink-3); }
+.rf-input {
+  width: 100%;
+  resize: vertical;
+  padding: var(--s3);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r1);
+  font: inherit;
+  color: var(--ink);
+  background: var(--bg);
+}
+.rf-input:focus { outline: none; border-color: var(--brand); }
+.rf-err { margin-top: var(--s2); font-size: var(--fs-xs); color: #c0392b; }
+.rf-actions { display: flex; align-items: center; justify-content: flex-end; gap: var(--s4); margin-top: var(--s4); }
 .btn-text {
-  font-size: var(--fs-xs); color: var(--ink-3);
-  padding: 2px 0; border-bottom: 1px solid var(--line-2);
+  padding: 2px 0;
+  border-bottom: 1px solid var(--line-2);
+  font-size: var(--fs-sm);
+  color: var(--ink-3);
   transition: color .14s, border-color .14s;
 }
 .btn-text:hover { color: var(--brand-ink); border-color: var(--brand); }
-
-/* ── 加载 / 空态（稿 `.empty` `:432`；稿的 `ho` 面无空态 ⇒ 文案照既有实现保留）──── */
-.empty {
-  background: var(--zone); border-radius: var(--r2);
-  padding: var(--s8) var(--s6); text-align: center;
-  font-size: var(--fs-sm); color: var(--ink-3);
+.rf-submit {
+  padding: 7px 16px;
+  border: 1px solid var(--brand);
+  border-radius: var(--r1);
+  font-size: var(--fs-sm);
+  color: #fff;
+  background: var(--brand);
 }
+.rf-submit:hover { background: var(--brand-ink); border-color: var(--brand-ink); }
+.rf-submit:disabled, .btn-text:disabled { opacity: .55; cursor: default; }
 
-/* ── 窄档：稿 `:438-454` 的 `@media (max-width:1080px)` 只改 `.uc` 栅格与 `.uc-menu`
-   （两者都不在本组件）⇒ 本页无对应声明。表格列宽是百分比，随右栏自适应。 ───────── */
+/* ── 窄档：页头/卡体/退款三列纵向堆叠，六态轨道改 3×2 ─────────────────────── */
+@media (max-width: 760px) {
+  .page-head { flex-direction: column; align-items: flex-start; }
+  .order-body { flex-direction: column; align-items: stretch; gap: var(--s3); }
+  .order-total { padding-left: 0; border-left: 0; text-align: left; }
+  .order-foot { flex-direction: column; align-items: flex-start; }
+  .rf-chip { margin-left: 0; }
+
+  .refund-strip { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .refund-cell { border-bottom: 1px solid var(--line); }
+  .refund-cell:nth-child(3n) { border-right: 0; }
+  .refund-cell:nth-child(n+4) { border-bottom: 0; }
+  .refund-cell.terminal { border-bottom-width: 2px; }
+
+  .refund-meta { grid-template-columns: 1fr; }
+  .refund-meta > div { padding-right: 0; }
+  .refund-meta > div + div { padding-left: 0; border-left: 0; border-top: 1px solid var(--line); }
+}
 </style>

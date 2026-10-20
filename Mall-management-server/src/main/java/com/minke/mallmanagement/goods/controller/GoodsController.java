@@ -156,6 +156,11 @@ public class GoodsController {
             @RequestParam(value = "PromiseReturn7", required = false) Boolean PromiseReturn7,
             @RequestParam(value = "PromiseFastRefund", required = false) Boolean PromiseFastRefund,
             @RequestParam(value = "PromiseFreightIns", required = false) Boolean PromiseFreightIns,
+            // ═══ 批四第二批：多图 + 草稿（全部可选，老客户端不传 ⇒ 行为逐字不变）═══
+            @RequestParam(value = "files", required = false) MultipartFile[] files,
+            @RequestParam(value = "Draft", required = false) Boolean Draft,
+            // ═══ 第三批㉖：折扣模板（可选）—— 选了模板 ⇒ 服务端按模板重算划线价 ═══
+            @RequestParam(value = "DiscountTemplateId", required = false) Long DiscountTemplateId,
             HttpServletRequest request
     ) throws IOException {
         // ⚠️ 第一行：上架只能挂到**自己**名下（管理员豁免）—— 必须在落盘/写库之前。
@@ -164,11 +169,14 @@ public class GoodsController {
         }
         // ═══ C3 块 3：提审制的四步钩子（照 GoodsController.goodsUp 的形状）═══
         // 业务（本方法）改为「落一条 goods_audit(pending)，不写 goods 行」；
-        // 只有提交成功才**触达管理端**（共享收件箱）+ 记账。
+        // 只有**提交审核**成功才**触达管理端**（共享收件箱）+ 记账；存草稿不发。
         Map<String, Object> result = goodsService.goodsAdd(MerchantId, GoodName, Price, OriginalPrice, file,
                 GoodType, ProductCode, GoodTypeNew, TypeId, Detail, Spec, AfterSale, SkuSpec,
-                PromiseGenuine, PromiseReturn7, PromiseFastRefund, PromiseFreightIns);
-        if (Boolean.TRUE.equals(result.get("success"))) {
+                PromiseGenuine, PromiseReturn7, PromiseFastRefund, PromiseFreightIns, files, Draft,
+                DiscountTemplateId);
+        boolean submitted = Boolean.TRUE.equals(result.get("success"))
+                && !GoodsAuditService.STATUS_DRAFT.equals(result.get("status"));
+        if (submitted) {
             String batchId = str(result.get("batchId"));
             notificationService.send(UUID.randomUUID().toString(),
                     ADMIN_INBOX_ID, TO_TYPE_ADMIN,
@@ -220,6 +228,20 @@ public class GoodsController {
         return Result.of(goodsService.goodsSelectHome(limit, offset, MerchantId));
     }
 
+    /**
+     * 品牌专区（批四第二批 commit 2）—— 公开读，买家可见 + 商家 {@code user.IsBrand=1}。
+     *
+     * <p>分页口径与 {@code goodsSelectHome} 相同（{@code limit} 缺省 24 / 上限 100，{@code offset} 缺省 0）。
+     * ⚠️ 纯新增端点：不改既有端点的入参 / 出参。
+     */
+    @PostMapping("/brandHome")
+    public Result<Map<String, Object>> brandHome(
+            @RequestParam(value = "limit", required = false) Integer limit,
+            @RequestParam(value = "offset", required = false) Integer offset
+    ) {
+        return Result.of(goodsService.brandHome(limit, offset));
+    }
+
     // 这是一个接口（用于下架商品）
     // 方法体（两条 DELETE、无条件 success、唯一出口前 evict）逐字搬到 GoodsService.goodsDe()。
     // ⚠️ 四条 evict 的理由已收敛到 GoodsCacheService.evictByMerchant() 的 javadoc（D 笔，2026-09-28）。
@@ -265,9 +287,15 @@ public class GoodsController {
     public Result<Map<String, Object>> productCodePrice(
             @NotBlank(message = "不能为空") @RequestParam("MerchantId") String MerchantId,
             @NotBlank(message = "不能为空") @RequestParam("GoodName") String GoodName,
-            @NotBlank(message = "不能为空") @RequestParam("ProductCode") String ProductCode
+            @NotBlank(message = "不能为空") @RequestParam("ProductCode") String ProductCode,
+            HttpServletRequest request
     ) {
-        return Result.of(goodsService.productCodePrice(MerchantId, GoodName, ProductCode));
+        // 批四第二批 commit 3：会话里的客户号只用于「要不要带 memberPrice」。
+        // ⚠️ 未登录 / 商家 / 管理员 ⇒ null ⇒ 与改动前同一份响应（严格加性）。
+        AuthSession.Identity identity = AuthSession.identify(request);
+        String customerId = identity != null && identity.role() != null && identity.role() == 1
+                ? identity.userId() : null;
+        return Result.of(goodsService.productCodePrice(MerchantId, GoodName, ProductCode, customerId));
     }
 
     /**
@@ -425,6 +453,52 @@ public class GoodsController {
             return IdentityGuard.forbidden();
         }
         return ResponseEntity.ok(Result.of(goodsService.myApplications(MerchantId, limit)));
+    }
+
+    // ═══ 批四第二批：草稿提交审核 ═══
+    // 商家在「我的商品」里点「提交审核」→ draft 翻 pending；只有真正提交才通知管理端。
+    @PostMapping("/application/submit")
+    public ResponseEntity<Object> applicationSubmit(
+            @RequestParam("MerchantId") String MerchantId,
+            @RequestParam("Id") Long Id,
+            HttpServletRequest request
+    ) {
+        if (!IdentityGuard.requireSelfOrAdmin(request, MerchantId)) {
+            return IdentityGuard.forbidden();
+        }
+        Map<String, Object> result = goodsAuditService.submitDraft(MerchantId, Id);
+        if (Boolean.TRUE.equals(result.get("success"))) {
+            String batchId = str(result.get("batchId"));
+            String goodName = str(result.get("goodName"));
+            notificationService.send(UUID.randomUUID().toString(),
+                    ADMIN_INBOX_ID, TO_TYPE_ADMIN,
+                    NotificationEvents.GOODS_APPLY_SUBMITTED,
+                    "新的商品上架申请",
+                    "商家「" + MerchantId + "」提交了商品「" + (goodName == null ? "" : goodName) + "」的上架申请，待审核。",
+                    "goods_audit", batchId);
+            Map<String, Object> after = new HashMap<>();
+            after.put("MerchantId", MerchantId);
+            after.put("goodName", goodName);
+            after.put("batchId", batchId);
+            auditService.record(AuthSession.identify(request), AuditActions.GOODS_APPLY_CREATE,
+                    "goods_audit", batchId, null, after);
+        }
+        return ResponseEntity.ok(Result.of(result));
+    }
+
+    // ═══ 批四第二批：商家改 SKU 库存 ═══
+    @PostMapping("/skuStockUpdate")
+    public ResponseEntity<Object> skuStockUpdate(
+            @RequestParam("MerchantId") String MerchantId,
+            @RequestParam("GoodsId") Integer GoodsId,
+            @RequestParam("AxisName") String AxisName,
+            @RequestParam("Stock") Integer Stock,
+            HttpServletRequest request
+    ) {
+        if (!IdentityGuard.requireSelfOrAdmin(request, MerchantId)) {
+            return IdentityGuard.forbidden();
+        }
+        return ResponseEntity.ok(Result.of(goodsService.skuStockUpdate(MerchantId, GoodsId, AxisName, Stock)));
     }
 
     /** {@code Object → String}（审计快照用；{@code null} 原样返回）。 */

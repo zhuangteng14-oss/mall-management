@@ -369,6 +369,42 @@ public final class AuditActions {
      */
     public static final String USER_VIEW_PLAINTEXT = "user.viewplaintext";
 
+    /**
+     * 提交**品牌加盟申请** —— {@code POST /merchant/brandApply}（批四第二批，2026-10-19）。
+     * 与 {@link #MERCHANT_APPLY_CREATE} 分开：前者只写 {@code user.IsBrand}，后者升级身份。
+     */
+    public static final String MERCHANT_BRAND_APPLY_CREATE = "merchant.brand.apply.create";
+
+    /** 审核品牌加盟申请 —— 复用 {@code /admin/accounts/application/audit}，按 outcome 区分。 */
+    public static final String MERCHANT_BRAND_APPLY_AUDIT = "merchant.brand.apply.audit";
+
+    /**
+     * 客户**自助开通会员** —— {@code POST /user/member/open}（批四第二批 commit 3）。
+     * 保存的 {@code before/after} 只有等级，不含余额等无关列。
+     */
+    public static final String USER_MEMBER_OPEN = "user.member.open";
+
+    /** 管理员**设置会员等级** —— {@code POST /admin/accounts/user/member}。 */
+    public static final String USER_MEMBER_SET = "user.member.set";
+
+    // ==================== 批四第二批 · 售后状态机（2026-10-19）====================
+    // 域段是 `order`（表名，也是调用点传的 TargetType 字面量）；TargetId 一律传业务号 OrderId
+    // （`admin_audit.TargetId` 是 NOT NULL —— TD-20 的教训）。
+    // ⚠️ 三条的 actor 不同：申请是**用户**、商家处理是**商家**、平台处理是**管理员**。
+    //    合成一条就分不出「谁把这张单推到了终态」—— 那正是退款争议时要回答的问题。
+    // ⚠️ BeforeJson 恒 NULL：改前态（旧 RefundStatus/RetryCount）在 Service 读到后没回传，
+    //    重新读一次会多一条 SELECT 且与 CAS 之间存在 TOCTOU；结论与申请次数已足够定位。
+    //    真实的「改前态」可从 RefundRetryCount + outcome 反推（见各调用点的 after 快照）。
+
+    /** 用户申请 / 重申售后 —— {@code POST /order/refund/apply}。 */
+    public static final String REFUND_APPLY = "order.refund.apply";
+
+    /** 商家处理售后（同意 / 拒绝，拒绝二次时自动升级平台）—— {@code POST /order/refund/merchant/handle}。 */
+    public static final String REFUND_MERCHANT_HANDLE = "order.refund.merchant.handle";
+
+    /** 平台处理已升级的售后（同意 / 驳回）—— {@code POST /admin/order/refund/handle}。 */
+    public static final String REFUND_PLATFORM_HANDLE = "order.refund.platform.handle";
+
     private AuditActions() {
     }
 }

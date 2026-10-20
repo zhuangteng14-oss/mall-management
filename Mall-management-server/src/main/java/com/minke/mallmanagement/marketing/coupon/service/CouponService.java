@@ -80,6 +80,13 @@ public class CouponService {
     private static final String STATUS_ACTIVE = "active";
     private static final String STATUS_STOPPED = "stopped";
 
+    /** 会员每日券模板（迁移 ㉕ 的种子行，{@code Status='stopped'} —— 只供复制，不可直领）。 */
+    private static final String VIP_DAILY_TEMPLATE = "VIP_DAILY_TEMPLATE";
+    /** 每日券业务号前缀；完整形态 {@code VIPDAILY-<yyyyMMdd>}（同日唯一 ⇒ 一天一张）。 */
+    private static final String VIP_DAILY_PREFIX = "VIPDAILY-";
+    /** 自助领取来源标记（落 {@code coupon_grant.Source}）。 */
+    private static final String SOURCE_VIP_DAILY = "vip-daily";
+
     /** 「快过期」桶名（与 {@code CouponDao.selectMyGrants} 的 {@code Bucket} 取值**逐字**一致）。 */
     private static final String BUCKET_EXPIRING = "expiring";
 
@@ -347,7 +354,9 @@ public class CouponService {
         try {
             Map<String, Object> result = new HashMap<>();
             result.put("success", true);
-            result.put("list", couponDao.selectClaimable(account.trim(), effective, onlyWeek, merchantAccount));
+            // 批四第二批 commit 3：专属券只对够等级的人列出（普通用户看不到 VIP 券）。
+            result.put("list", couponDao.selectClaimable(account.trim(), effective, onlyWeek, merchantAccount,
+                    couponDao.selectMemberLevelByAccount(account.trim())));
             result.put("limit", effective);
             // 「本周还剩 N 天」——区块级小字，两种筛法都回（后端算，前端不碰浏览器钟）。
             result.put("daysLeft", couponDao.selectWeekWindow().get("DaysLeft"));
@@ -433,7 +442,9 @@ public class CouponService {
         }
         String acct = account.trim();
         try {
-            List<Map<String, Object>> rows = couponDao.selectClaimable(acct, MAX_LIMIT, true);
+            // 批四第二批 commit 3：一键领取同样只领得到够等级的券（与列表同一个筛）。
+            List<Map<String, Object>> rows = couponDao.selectClaimable(acct, MAX_LIMIT, true, null,
+                    couponDao.selectMemberLevelByAccount(acct));
             List<Map<String, Object>> items = new ArrayList<>();
             int claimed = 0;
             for (Map<String, Object> row : rows) {
@@ -469,6 +480,43 @@ public class CouponService {
         } catch (Exception e) {
             e.printStackTrace();
             return fail("批量领取失败：" + e.getMessage());
+        }
+    }
+
+    /**
+     * **领取今日会员专属券**（批四第二批 commit 3，2026-10-19）。
+     *
+     * <p>四步，每步都复用既有链路、不另写领券逻辑：
+     * <ol>
+     *   <li>会员闸：{@code MemberLevel > 0}，否则「仅限 VIP 会员领取」；</li>
+     *   <li>按模板 {@code VIP_DAILY_TEMPLATE} 生成今天的券定义（{@code INSERT IGNORE} 幂等）；</li>
+     *   <li>走 {@link #doClaim}（={@code tryClaim} 名额 CAS + {@code insertGrant}）——
+     *       {@code UNIQUE(CouponId, ToAccount)} 就是「同一账号同一天只能领一张」；</li>
+     *   <li>回体与单张领券同形（{@code success/msg}），前端不必分两条解析路径。</li>
+     * </ol>
+     *
+     * <p>⚠️ {@code CouponId} 每天不同 ⇒ 今天领过的，明天的新券仍可领；今天再点一次得到
+     * 「您已领取过该券」。不新增表、不改唯一键。
+     */
+    public Map<String, Object> claimDaily(String account) {
+        if (isBlank(account)) {
+            return fail("缺少参数：Account");
+        }
+        String acct = account.trim();
+        try {
+            if (couponDao.selectMemberLevelByAccount(acct) <= 0) {
+                return fail("仅限 VIP 会员领取");
+            }
+            String couponId = VIP_DAILY_PREFIX + couponDao.selectLocalDateCompact();
+            couponDao.ensureDailyCoupon(VIP_DAILY_TEMPLATE, couponId);
+            if (couponDao.selectCoupon(couponId) == null) {
+                // 模板行被删 / 迁移没落：给一句可诊断的话，不伪装成「已领」。
+                return fail("今日会员券未配置，请联系管理员");
+            }
+            return doClaim(couponId, acct, SOURCE_VIP_DAILY);
+        } catch (Exception e) {
+            e.printStackTrace();
+            return fail("领取失败：" + e.getMessage());
         }
     }
 

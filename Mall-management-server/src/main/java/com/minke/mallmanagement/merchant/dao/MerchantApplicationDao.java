@@ -31,7 +31,7 @@ public class MerchantApplicationDao {
     /** 列表共用列清单（管理端待审列表 + 我的申请共用一份投影）。时间列经 DATE_FORMAT（见下）。 */
     private static final String COLUMNS =
             "Id, Username, ShopName, LicenseNo, ContactName, ContactPhone, ShopAddress, LicenseImage, "
-                    + "Status, RejectReason, BatchId, ReviewedBy, "
+                    + "IsBrand, ApplicationType, AttemptNo, ParentId, Status, RejectReason, BatchId, ReviewedBy, "
                     + "DATE_FORMAT(SubmittedAt, '%Y-%m-%d %H:%i:%s') AS SubmittedAt, "
                     + "DATE_FORMAT(ReviewedAt,  '%Y-%m-%d %H:%i:%s') AS ReviewedAt ";
 
@@ -52,13 +52,43 @@ public class MerchantApplicationDao {
     public int insert(String username, String shopName, String licenseNo,
                       String contactName, String contactPhone, String shopAddress,
                       String licenseImage, String batchId, LocalDateTime submittedAt) {
+        return insert(username, shopName, licenseNo, contactName, contactPhone, shopAddress,
+                licenseImage, batchId, submittedAt, false);
+    }
+
+    /**
+     * 同 {@link #insert} 的 9 参版本，多一个 {@code isBrand}（批四第二批 2026-10-19）。
+     * {@code true} = 品牌加盟申请：**不改身份**，通过时只置 {@code user.IsBrand=1}。
+     * 旧签名委托到这里（{@code false}）⇒ 既有入驻路径逐字不变。
+     */
+    public int insert(String username, String shopName, String licenseNo,
+                      String contactName, String contactPhone, String shopAddress,
+                      String licenseImage, String batchId, LocalDateTime submittedAt,
+                      boolean isBrand) {
+        return insert(username, shopName, licenseNo, contactName, contactPhone, shopAddress,
+                licenseImage, batchId, submittedAt, isBrand, 1, null);
+    }
+
+    /**
+     * 第三批㉗：品牌加盟的完整写入——多带 {@code attemptNo}（第几次）与 {@code parentId}
+     * （上一版申请 Id）。{@code ApplicationType} 由 {@code isBrand} 推出并**显式落库**：
+     * 生成列 {@code PendingGuard = Username:ApplicationType} 的唯一键依赖它，
+     * 漏写会让品牌申请与入驻申请在「同账号待审唯一」上撞车。
+     *
+     * <p>委托链：8 参 → 9 参（{@code isBrand}）→ 本方法。既有入驻路径经过前两跳，行为不变。
+     */
+    public int insert(String username, String shopName, String licenseNo,
+                      String contactName, String contactPhone, String shopAddress,
+                      String licenseImage, String batchId, LocalDateTime submittedAt,
+                      boolean isBrand, int attemptNo, Long parentId) {
         String sql = "INSERT INTO merchant_application "
                 + "(Username, ShopName, LicenseNo, ContactName, ContactPhone, ShopAddress, LicenseImage, "
-                + " Status, BatchId, SubmittedAt) "
-                + "VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)";
+                + " IsBrand, ApplicationType, AttemptNo, ParentId, Status, BatchId, SubmittedAt) "
+                + "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)";
         return jdbcClient.sql(sql)
                 .params(username, shopName, licenseNo, contactName, contactPhone, shopAddress,
-                        licenseImage, batchId, submittedAt)
+                        licenseImage, isBrand ? 1 : 0, isBrand ? "brand" : "settle",
+                        attemptNo, parentId, batchId, submittedAt)
                 .update();
     }
 
@@ -82,7 +112,8 @@ public class MerchantApplicationDao {
         boolean filtered = !isBlank(status);
         String sql = "SELECT " + COLUMNS + "FROM merchant_application "
                 + (filtered ? "WHERE Status = ? " : "")
-                + "ORDER BY SubmittedAt DESC, Id DESC LIMIT ?";
+                // 批四第二批：品牌加盟申请排前（加性排序，同一批里仍按提交时间倒序）。
+                + "ORDER BY IsBrand DESC, SubmittedAt DESC, Id DESC LIMIT ?";
         JdbcClient.StatementSpec spec = jdbcClient.sql(sql);
         if (filtered) {
             spec = spec.param(status);

@@ -481,6 +481,39 @@ import static org.mockito.Mockito.when;
         //    且 smoke 打的是 Controller 的响应文案：那份状态在切片里从不被写（没人点 [开始]）⇒
         //    用例之间没有可观察的串扰。**真演练**的配置语义归 `AttackSwitchConfigTest`。
         AttackSwitchConfig.class,
+        // 批四第二批 commit 4〈售后状态机〉：新 Controller `OrderRefundController` 自动被切片扫入，
+        // 它吃 `OrderRefundService`；Service 吃 `OrderRefundDao`（+ OrderDao / GoodsDao 上面已登记）。
+        // 照本文件既有处置：**不 @Import 就整片起不来**。两个类用全限定名写在同一行，
+        // 避免加 import 行让本文件被文档按「文件:行号」引用的位置集体下移（同 eventPublisher 那条的处置）。
+        com.minke.mallmanagement.order.refund.dao.OrderRefundDao.class,
+        com.minke.mallmanagement.order.refund.service.OrderRefundService.class,
+        // 批四第二批（第三批商业闭环，2026-10-19）：四个新 Controller（`DiscountController` /
+        // `BrandController` / `MemberController` / `WalletController`）自动被切片扫入，
+        // 各吃一个新 @Service；同时 `GoodsService` / `MerchantApplicationService` /
+        // `OrderService` / `OrderController` / `OrderRefundService` 五个**既有** bean 的构造器
+        // 各多吃了新 bean（折扣快照 / 品牌审批 / 积分 / 钱包）。
+        // ⇒ **第二十六次同一处地雷**（形状两种并存：新 Controller 吃新 bean + 老 bean 多吃 bean）。
+        // 照本文件既有处置：漏一个就是整片切片上下文在加载期起不来。
+        // 依赖链：`DiscountService` → `DiscountTemplateDao`；`MemberService` → `PointsDao` +
+        // `MemberLevelDao`；`WalletService` → `WalletDao`；`BrandService` → `BrandProfileDao` +
+        // `MerchantApplicationDao` / `UserGovernanceDao`（两者上面已登记）。
+        // 五个 DAO 只吃 `JdbcTemplate` ⇒ 落回下面那个 @MockitoBean，**SQL 仍不出切片**。
+        // ⚠️ **刻意不 @Import `PointsExpireJob`**：同 `ShippingTrackAdvanceJob` 等既有处置
+        //    （@Component + @Scheduled，切片里没有调度器）。它的验证归 `MemberServiceTest` 与手验。
+        com.minke.mallmanagement.marketing.discount.dao.DiscountTemplateDao.class,
+        com.minke.mallmanagement.marketing.discount.service.DiscountService.class,
+        com.minke.mallmanagement.merchant.brand.dao.BrandProfileDao.class,
+        com.minke.mallmanagement.merchant.brand.service.BrandService.class,
+        com.minke.mallmanagement.member.dao.PointsDao.class,
+        com.minke.mallmanagement.member.dao.MemberLevelDao.class,
+        com.minke.mallmanagement.member.service.MemberService.class,
+        com.minke.mallmanagement.wallet.dao.WalletDao.class,
+        com.minke.mallmanagement.wallet.service.WalletService.class,
+        // 2026-10-19 用户令〈终局清道夫第 7 条〉：新 Controller `FavoriteController` 自动被切片扫入，
+        // 它吃 `FavoriteService`；Service 吃 `FavoriteDao`（只吃 JdbcTemplate ⇒ 落回上面那个替身）。
+        // 照本文件既有处置：**不 @Import 就整片起不来**。全限定名写在同一处，避免新增 import 行。
+        com.minke.mallmanagement.favorite.dao.FavoriteDao.class,
+        com.minke.mallmanagement.favorite.service.FavoriteService.class,
         })
 public abstract class AbstractSmokeTest {
 

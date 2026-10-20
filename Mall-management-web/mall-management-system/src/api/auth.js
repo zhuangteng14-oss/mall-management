@@ -18,7 +18,7 @@ const K = {
   // `K.password` 的那个存储键名已随 P2.6（2026-10-05）删除：明文密码不再进任何存储（墓碑见下方 getPassword 原位置）
   merchantId: 'merchantid',
   customerId: 'customerid',
-  role: 'role', token: 'authToken',   // ⚠️ 两个键**合并写在同一行**是为了保住本文件的净零行数（`:44`/`:98-103`/`:108`/`:118`/`:146` 全被文档按行号引）。`role`：止血笔新增（`loginSelect` 的 "1" 客户 / "2" 商家；基线时该值只活在 `LoginPage` 的分支里、不入存储）。`authToken`：多账户隔离笔（2026-10-06）新增 —— **同一个键名用在两个 store**（sessionStorage = 本页的票；localStorage = 「最近登录」指针），读写全在文件末尾那一节
+  role: 'role', token: 'authToken', memberLevel: 'memberLevel', balance: 'balance', isBrand: 'isBrand',   // ⚠️ 两个键**合并写在同一行**是为了保住本文件的净零行数（`:44`/`:98-103`/`:108`/`:118`/`:146` 全被文档按行号引）。`role`：止血笔新增（`loginSelect` 的 "1" 客户 / "2" 商家；基线时该值只活在 `LoginPage` 的分支里、不入存储）。`authToken`：多账户隔离笔（2026-10-06）新增 —— **同一个键名用在两个 store**（sessionStorage = 本页的票；localStorage = 「最近登录」指针），读写全在文件末尾那一节
 }
 
 function read(k) { return sessionStorage.getItem(k) }
@@ -70,12 +70,12 @@ function dropRestored() { restored = null }
  */
 export function restoreFromSession(info) {
   if (!info) return false
-  const next = { username: null, merchantId: null, customerId: null, role: null }
-  if (info.username) next.username = info.username; if (info.merchantid) next.merchantId = info.merchantid
+  const next = { username: null, merchantId: null, customerId: null, role: null, memberLevel: null, balance: null, isBrand: null }
+  if (info.username) next.username = info.username; if (info.merchantid) next.merchantId = info.merchantid; if (info.MemberLevel !== undefined && info.MemberLevel !== null) next.memberLevel = Number(info.MemberLevel) || 0; if (info.Balance !== undefined && info.Balance !== null) next.balance = Number(info.Balance) || 0; if (info.IsBrand !== undefined && info.IsBrand !== null) next.isBrand = info.IsBrand === 1 || info.IsBrand === true || info.IsBrand === '1'   // 批四第二批 commit 3：会员字段从 `/user/me` 的 `user` 整行带出（同行压缩是为保住本函数内既有行号）
   if (info.customerid) next.customerId = info.customerid
   if (info.role) next.role = String(info.role)   // ⚠️ 与上面三个同行压缩是**故意的**：保住 `:108`/`:118`/`:146` 的行号。⚠️ **`String(...)` 是本行唯一的行为改动（2026-10-11，问题①的根因）**：`/user/me` 答的 `role` 是 JSON **数字**（实测 `{"role":3,"success":true}`），而全站**一律按字符串比** —— `router/index.js` 的 `meta.roles`（`['1','3']`）、`ROLE_HOME` 的键、`roleKey()` 的返回、`AdminShell.vue:99` 的角色名表。原样存 ⇒ 恢复路径上**每个角色的比较都恒 false**（`['3'].includes(3)` 是 false）⇒ 守卫 2（`router/index.js:329-334`）把人送到 `ROLE_HOME[数字]` = `undefined` ⇒ `|| '/customer'` ⇒ 在 `/customer` 上再判一次仍 false ⇒ **重定向成环** ⇒ `router.isReady()` reject ⇒ `app.mount('#app')` **永不执行** ⇒ `#app` 空 + `data-theme="admin"` 的深色底 = **整页深色、无内容**（实测：`_work/diag-me.mjs` 第 ④ 段 `textLen=0`；且 Console 只有一条 redirect warning、Network 一片干净 —— 最像「进不去」的那种）。⚠️ 与 `LoginPage` 写入的形态**本来就该一致**：那里是 `res.text()`，从一开始就是字符串
   if (!next.username && !next.merchantId && !next.customerId && !next.role) return false
-  restored = next
+  restored = next; try { if (next.memberLevel != null) sessionStorage.setItem(K.memberLevel, String(next.memberLevel)); else sessionStorage.removeItem(K.memberLevel); if (next.balance != null) sessionStorage.setItem(K.balance, String(next.balance)); else sessionStorage.removeItem(K.balance); if (next.isBrand != null) sessionStorage.setItem(K.isBrand, next.isBrand ? '1' : '0'); else sessionStorage.removeItem(K.isBrand) } catch (e) { /* 存储不可用 ⇒ 只留内存 */ }   // 批四第二批 commit 3（同行追加）：会员三字段**落 sessionStorage** —— 刷新时 `main.js` 对「本页已有身份」直接返回、不再打 `/user/me`，不落盘就会在刷新后静默退回普通用户价。新增/管理员改档后仍以**下一次恢复**为准（登录 / 新标签页）。
   return true
 }
 
@@ -101,14 +101,14 @@ export function getCustomerId() { return pick('customerId', K.customerId) }
  *     调用方（`router/index.js` 的首页守卫）的 `getMerchantId()` 兜底**仍留着**：匿名、或没走成恢复
  *     （超时 / 后端不可达）时它仍是唯一出路。**本笔仍不从 `usertype` 反推**（那会让 `role` 有第二个来源）。
  *  ⚠️ `pick` 照用（恢复值优先、存储兜底）—— 正因如此，`/user/me` 一答 `role`，本口**一行都不用改**。 */
-export function getRole() { return pick('role', K.role) }
+export function getRole() { return getAdminUsername() ? '3' : pick('role', K.role) }   // 2026-10-19 管理员独立登录：本标签页存在管理员会话时角色恒为 "3"（不写 `K.role`，用户/商家的 role 原样保留）
 
 /** 是否已登录 —— 原**唯一**定义在 `HomePage.vue:116`（`!!loginUsername || !!merchantid`）。
  *  收敛到此处后，鉴权笔有了落点（改这里的判据即可）。
  *  ⚠️ 判据**一行未改**（仍是 `!!(username || merchantid)`），只是改从两个读口取
  *     ⇒ 恢复了身份时自然为真，未恢复时与改前逐字等价（`pick` 的兜底就是原来的 `read`）。 */
 export function isLoggedIn() {
-  return !!(getUsername() || getMerchantId())
+  return !!(getUsername() || getMerchantId() || getAdminUsername())   // 2026-10-19：管理员独立会话也算登录（不依赖用户/商家的三个键）
 }
 
 /**
@@ -157,7 +157,7 @@ export function clearCredentials() {
   sessionStorage.removeItem(K.username)
   // sessionStorage.removeItem(K.password) —— P2.6 删除（该存储键已不存在；留注释是为了让「净零行数」可核）
   sessionStorage.removeItem(K.role)   // ⚠️ 止血笔新增（见上）
-  dropRestored()
+  dropRestored(); try { sessionStorage.removeItem(K.memberLevel); sessionStorage.removeItem(K.balance); sessionStorage.removeItem(K.isBrand) } catch (e) { /* 存储不可用 ⇒ 无键可清 */ }   // 批四第二批 commit 3：登出 / 换号时会员展示态一并清，防下一位账号读到上一位的档位
 }
 
 /** 退出登录：额外清 merchantid（**仅商家侧那一支**：`UserCenter.vue:54`，`meta.logout === 'merchant'`；
@@ -201,7 +201,7 @@ export function clear() {
   clearCredentials()
   clearMerchantId()
   sessionStorage.removeItem(K.customerId)
-  clearToken()   // ⚠️ 多账户隔离笔（2026-10-06）：票也是凭据 ⇒ 「会话没了」时一并清（指针由 D6 判）
+  clearToken(); clearAdminSession()   // ⚠️ 多账户隔离笔（2026-10-06）：票也是凭据 ⇒ 「会话没了」时一并清（指针由 D6 判）；2026-10-19：管理员独立会话同样属于「会话没了」
   dropRestored()
 }
 
@@ -281,3 +281,68 @@ export function adoptSharedToken() {
  *  是已知缺口**（§十三 13-5 / 新增 TD）。 */
 export function dropPageToken() { sessionStorage.removeItem(K.token) }
 
+// ── 会员字段读口（批四第二批 commit 3，2026-10-19）──────────────────────────────
+// 数据源 = 会话恢复那一跳（`/user/me` 的 `user` 整行），并**镜像到 `sessionStorage`** ——
+// 刷新时 `main.js` 对「本页已有身份」直接返回、不再打 `/user/me`，不落盘会静默退回普通用户价。
+// 改档后的新鲜度：本人开通走 `setMemberLevel` 即时同步；管理员改他人档位则在对方下一次恢复时生效。
+// ⚠️ 不在这里额外打 `/user/me`：重复请求只会让公开页多一条 401。
+//
+// ⚠️ 读口一律在 `restored === null` 时回「普通用户」缺省值 —— 与改动前逐字等价：
+// 旧页面从不读这三个口，读到什么都不会改变既有渲染。
+/** 会员等级：0 普通 / 1 VIP。无恢复态 ⇒ 0（按普通用户）。 */
+export function getMemberLevel() { return restored && restored.memberLevel != null ? restored.memberLevel : (Number(read(K.memberLevel)) || 0) }
+/** 账户余额（展示用；真实入账以服务端为准）。无恢复态 ⇒ 0。 */
+export function getBalance() { return restored && restored.balance != null ? restored.balance : (Number(read(K.balance)) || 0) }
+/** 品牌加盟店（商家侧）：true ⇒ 商品带「品牌」标。无恢复态 ⇒ false。 */
+export function getIsBrand() { return !!(restored && restored.isBrand) || read(K.isBrand) === '1' }
+/** 开通会员成功后同步展示态（`MemberCenter` 用）：内存 + `sessionStorage` 一起写 ⇒ 刷新后仍按 VIP 展示，不必重新登录。
+ *  ⚠️ 只在**本人主动开通**这一处调用；管理员改他人档位仍走 `api/accounts.js`，被改的那一端下次恢复（刷新若已登录则不会重取）才见新值。 */
+export function setMemberLevel(level) { const n = Number(level) || 0; if (restored) restored.memberLevel = n; try { sessionStorage.setItem(K.memberLevel, String(n)) } catch (e) { /* 存储不可用 ⇒ 只留内存 */ } }
+/** 沙箱充值成功后同步余额展示态（内存 + `sessionStorage`）：真实入账在 `user_wallet`，这里只防跨页读到旧值。 */
+export function setBalance(balance) { const n = Number(balance) || 0; if (restored) restored.balance = n; try { sessionStorage.setItem(K.balance, String(n)) } catch (e) { /* 存储不可用 ⇒ 只留内存 */ } }
+
+
+// ── 管理员独立会话（2026-10-19，用户令：拆分管理员登录页）────────────────────────
+// 目的：`#/admin/login` 的管理员登录**不覆盖**用户端 / 商家端的身份键与票。
+//   · 管理员身份只落这两个**独立键**（`adminUsername` 非空 = 本标签页有管理员会话）；
+//   · `K.role` / `K.username` / `K.token` / `merchantid` / `customerid` 一个字都不写；
+//   · 真正的凭据仍是后端 `loginSelect` 建的 **cookie 会话**（role=3 时服务端才建）——
+//     前端这两个键只是「本页当前以管理员身份工作」的标记，供路由守卫与 `http.js` 判。
+// ⚠️ 管理端入口（`main-admin.js`）本就会 `dropPageToken()`；本标记额外让**同一标签页**
+//    从商城入口进 `/admin` 时也**不携带**用户/商家的 Bearer 票（否则后端 `identify` 票优先，
+//    会把管理员认成上一次登录的客户/商家）。
+const K_ADMIN_USER = 'adminUsername'
+const K_ADMIN_SESSION = 'adminSession'
+
+/** 本标签页的管理员账号（没有 ⇒ null）。 */
+export function getAdminUsername() { return usable(read(K_ADMIN_USER)) }
+
+/** 本标签页是否处于管理员会话（`adminSession === '1'`）。 */
+export function isAdminSession() { return usable(read(K_ADMIN_SESSION)) === '1' }
+
+/** 登录成功后写入管理员会话。**不写**用户/商家的任何键，也不动 `restored` ——
+ *  退出管理员后，用户/商家在本次登录前留下的身份仍可原样恢复。 */
+export function setAdminSession(username) {
+  sessionStorage.setItem(K_ADMIN_USER, username)
+  sessionStorage.setItem(K_ADMIN_SESSION, '1')
+}
+
+/** 退出管理员：只清这两个键。用户/商家的身份键与票**保留**（用户令第 4 条）。 */
+export function clearAdminSession() {
+  sessionStorage.removeItem(K_ADMIN_USER)
+  sessionStorage.removeItem(K_ADMIN_SESSION)
+}
+
+/**
+ * 「当前登录人的业务号」—— 会员中心 / 积分 / 收藏共用的身份键（2026-10-19 终局清道夫第 1 条）。
+ *
+ * ⚠️ 为什么需要它：客户有 `user.customerid`，但**商家行 `customerid` 恒为 NULL**
+ *    （VM 库实测 14/14），而商家也能从首页 dock 进会员中心 ⇒ 只读 `getCustomerId()`
+ *    会让商家看到「未识别到客户账号，积分信息暂不可用」，签到 / 领券 / 积分流水全灰。
+ *    后端 `PointsDao` / `FavoriteDao` 三个查询口都按 `customerid → merchantid → username`
+ *    三键兜底，所以这里按**同一顺序**给值即可，不必再加一套身份表。
+ * 取不到（匿名）⇒ 空串，调用方照旧走「请重新登录」提示。
+ */
+export function getMemberId() {
+  return getCustomerId() || getMerchantId() || getUsername() || ''
+}

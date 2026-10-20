@@ -76,10 +76,15 @@ export async function open({ w = 1440, h = 900, headed = false, mock = null } = 
       if (m.method !== 'Fetch.requestPaused') return
       const { requestId, request } = m.params
       try {
-        const r = mock(request.url, request.method, request.postData, request.headers) || { status: 200, body: '{}' }
-        const body = Buffer.from(r.body ?? '').toString('base64')
+        const r = mock(request.url, request.method, request.postData, request.headers)
+        // 哨兵 `'PASS'`：这一发放行到真后端。页面探针通常在 mock 里伪造接口，
+        // 但商品图 / 头像等静态资源也走同一个 8088 源 —— 全部 Fulfill 会把图片打成 JSON。
+        // 既有 mock 都返回对象或 undefined（undefined 仍按 `{}` 处理，保持原行为）。
+        if (r === 'PASS') { await send('Fetch.continueRequest', { requestId }); return }
+        const resp = r || { status: 200, body: '{}' }
+        const body = Buffer.from(resp.body ?? '').toString('base64')
         await send('Fetch.fulfillRequest', {
-          requestId, responseCode: r.status || 200,
+          requestId, responseCode: resp.status || 200,
           responseHeaders: [
             { name: 'Access-Control-Allow-Origin', value: 'http://localhost:8080' },
             { name: 'Access-Control-Allow-Credentials', value: 'true' },
@@ -88,7 +93,7 @@ export async function open({ w = 1440, h = 900, headed = false, mock = null } = 
             //    POST 预检必失败（前端报「连不上服务器」）。2026-10-08 实测踩到。
             { name: 'Access-Control-Allow-Headers', value: 'Authorization, Content-Type' },
             { name: 'Access-Control-Allow-Methods', value: 'GET,POST,OPTIONS' },
-            { name: 'Content-Type', value: r.ctype || 'application/json' }
+            { name: 'Content-Type', value: resp.ctype || 'application/json' }
           ],
           body
         })

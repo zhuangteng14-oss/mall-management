@@ -60,7 +60,7 @@ public class CouponDao {
      */
     private static final String COUPON_COLUMNS =
             "c.Id, c.CouponId, c.Name, c.Type, c.FaceValue, c.Threshold, c.TotalQty, c.ClaimedQty, "
-                    + "c.Scope, c.MerchantAccount, c.CategoryMatch, c.Status, "
+                    + "c.Scope, c.MerchantAccount, c.CategoryMatch, c.Status, c.MemberLevel, "
                     + "DATE_FORMAT(c.StartAt, '%Y-%m-%d %H:%i:%s') AS StartAt, "
                     + "DATE_FORMAT(c.EndAt, '%Y-%m-%d %H:%i:%s') AS EndAt, "
                     + "DATE_FORMAT(c.created_at, '%Y-%m-%d %H:%i:%s') AS created_at, "
@@ -288,6 +288,49 @@ public class CouponDao {
                 .params(couponId, toAccount, orderId).update();
     }
 
+    // ==================== 会员每日专属券（批四第二批 commit 3） ====================
+
+    /**
+     * 按模板复制出**今天**的会员专属券（幂等）：{@code CouponId} 每天不同
+     * （{@code VIPDAILY-<yyyyMMdd>}），故 {@code INSERT IGNORE} 撞主键即「今天已生成」。
+     *
+     * <p>为什么复制定义而不是直接发券：券定义表与原领取链路（{@code tryClaim} + {@code insertGrant}）
+     * 一字不改就能复用 —— {@code UNIQUE(CouponId, ToAccount)} 天然变成「同日一次」，不需要新表、
+     * 不需要改唯一键。模板行本身 {@code Status='stopped'}，用户侧读不到。
+     *
+     * <p>⚠️ 时间由**库时钟 + 8h** 产生（与 {@link #LOCAL_NOW} 同一口径），不用 JVM 的日期 ——
+     * 否则跨时区/跨午夜会生成一张「昨天」的券。
+     */
+    public int ensureDailyCoupon(String templateId, String couponId) {
+        String sql = "INSERT IGNORE INTO coupon "
+                + "(CouponId, Name, Type, FaceValue, Threshold, TotalQty, ClaimedQty, "
+                + " Scope, MerchantAccount, CategoryMatch, StartAt, EndAt, Status, MemberLevel) "
+                + "SELECT ?, Name, Type, FaceValue, Threshold, TotalQty, 0, "
+                + "       Scope, MerchantAccount, CategoryMatch, "
+                + "       CONCAT(DATE(" + LOCAL_NOW + "), ' 00:00:00'), "
+                + "       CONCAT(DATE(" + LOCAL_NOW + "), ' 23:59:59'), "
+                + "       'active', MemberLevel "
+                + "FROM coupon WHERE CouponId = ?";
+        return jdbcClient.sql(sql).params(couponId, templateId).update();
+    }
+
+    /** 登录名对应的会员等级；查无此人 / 列为空 ⇒ {@code 0}（与 {@code UserGovernanceDao} 同口径）。 */
+    public int selectMemberLevelByAccount(String account) {
+        List<Map<String, Object>> rows = jdbcClient
+                .sql("SELECT MemberLevel FROM user WHERE username = ? LIMIT 1")
+                .param(account).query().listOfRows();
+        if (rows.isEmpty() || rows.get(0).get("MemberLevel") == null) {
+            return 0;
+        }
+        return ((Number) rows.get(0).get("MemberLevel")).intValue();
+    }
+
+    /** 本地日期（{@code yyyyMMdd}）—— 每日券业务号的后缀，来源是库时钟（见 {@link #LOCAL_NOW}）。 */
+    public String selectLocalDateCompact() {
+        return jdbcClient.sql("SELECT DATE_FORMAT(" + LOCAL_NOW + ", '%Y%m%d')")
+                .query(String.class).single();
+    }
+
     // ==================== 读：券定义 ====================
 
     /** 管理端券列表（{@code Status} / 券名关键字 均可为空）。 */
@@ -350,7 +393,7 @@ public class CouponDao {
      * 同一份数据两次查询可能给出两种顺序）。
      */
     public List<Map<String, Object>> selectClaimable(String account, int limit, boolean thisWeekOnly) {
-        return selectClaimable(account, limit, thisWeekOnly, null);
+        return selectClaimable(account, limit, thisWeekOnly, null, 0);
     }
 
     /**
@@ -371,6 +414,20 @@ public class CouponDao {
      */
     public List<Map<String, Object>> selectClaimable(String account, int limit, boolean thisWeekOnly,
                                                      String merchantAccount) {
+        return selectClaimable(account, limit, thisWeekOnly, merchantAccount, 0);
+    }
+
+    /**
+     * 同 {@link #selectClaimable(String, int, boolean, String)}，另加**会员等级筛**
+     * （批四第二批 commit 3）：{@code MemberLevel = 0}（不限）或 {@code <= memberLevel} 的券才列出。
+     *
+     * <p>⚠️ 条件**无条件拼上**（{@code memberLevel = 0} 时它等价于「只看不限领的券」——
+     * 对普通用户正是对的）。绑参顺序因此固定为：
+     * {@code account}（JOIN）→ {@code account}（NOT_SELF 子查询）→ {@code memberLevel}
+     * → {@code merchantAccount}（仅 byMerchant）→ {@code limit}。改本方法时成对改绑参。
+     */
+    public List<Map<String, Object>> selectClaimable(String account, int limit, boolean thisWeekOnly,
+                                                     String merchantAccount, int memberLevel) {
         boolean byMerchant = merchantAccount != null && !merchantAccount.trim().isEmpty();
         StringBuilder sql = new StringBuilder("SELECT ").append(COUPON_COLUMNS)
                 .append(", (g.Id IS NOT NULL) AS Claimed ")
@@ -379,7 +436,9 @@ public class CouponDao {
                 .append("FROM coupon c LEFT JOIN coupon_grant g ")
                 .append("ON g.CouponId = c.CouponId AND g.ToAccount = ? ")
                 .append("WHERE c.Status = 'active' AND (c.EndAt IS NULL OR c.EndAt > NOW()) ")
-                .append("AND ").append(NOT_SELF_ISSUED).append(' ');
+                .append("AND ").append(NOT_SELF_ISSUED).append(' ')
+                // 批四第二批 commit 3：专属券只对够等级的会员列出（普通用户看不到 VIP 券）。
+                .append("AND (c.MemberLevel = 0 OR c.MemberLevel <= ?) ");
         if (byMerchant) {
             sql.append("AND c.Scope = 'merchant' AND c.MerchantAccount = ? ");
         }
@@ -389,7 +448,8 @@ public class CouponDao {
         }
         sql.append("ORDER BY c.updated_at ASC, c.Id ASC LIMIT ?");
         // ⚠️ 第二个 .param(account) 是 NOT_SELF_ISSUED 的子查询参数，**不是**笔误 —— 同值绑两次。
-        JdbcClient.StatementSpec spec = jdbcClient.sql(sql.toString()).param(account).param(account);
+        JdbcClient.StatementSpec spec = jdbcClient.sql(sql.toString())
+                .param(account).param(account).param(memberLevel);
         if (byMerchant) {
             spec = spec.param(merchantAccount.trim());
         }

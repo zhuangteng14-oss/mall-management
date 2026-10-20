@@ -212,12 +212,16 @@ export function cartList(customerId) {
  * `(CustomerId, ProductCode)`），而 `order.MerchantId` 是单值 ⇒ 分组键只能是商家。
  * **单商家车（常态）才是「整车一单多行」。**
  *
- * @param {{CustomerId:string, ProductCode?:string, CouponId?:string}} params
+ * @param {{CustomerId:string, ProductCode?:string, CouponId?:string, PointsUsed?:number}} params
  *        `ProductCode` 不传 ⇒ 结算**整车**。
  *        ⚠️ **C3 块 5 commit 5 新增 `CouponId`**（结算用券）：不传 ⇒ 与加它之前**逐字节同行为**。
  *        券的核销在 `OrderService.orderAdd` 的临界区内（CAS 抢不到就整单不建），
  *        且**只随「整车且单商家」那一笔走** —— 多商家整车带券会被 `CartService.checkout`
  *        直接拒（一张券只抵一笔订单）。空串会被上面的 `q()` 丢掉。
+ *        ⚠️ **第三批㉘㉙（2026-10-19）新增 `PointsUsed`**：整数积分，空值由 `q()` 丢掉 ⇒
+ *        不传时与加它之前逐字节同行为。后端 `CartService.checkout` 把它透传给
+ *        `OrderService.orderAdd`，上限与扣减都在服务端（折后价 20%、100 积分 = 1 元）；
+ *        与券同一条限制：**多商家整车带积分会被直接拒**。
  * @returns {Promise<{success:boolean, list:Array, msg?:string}>}
  *          ⚠️ 券真的核销掉时，回体里**多** `CouponId` / `Discount` 两个键（否则不出现）——
  *             判据就是「有没有 `Discount`」（`OrderController` 据此写 `coupon.redeem` 审计）。
@@ -229,7 +233,12 @@ export function cartList(customerId) {
  *             （把部分成功报成整体失败 = 让用户重复下单）。
  */
 export function cartCheckout(params) {
-  return post(endpoints.cart.checkout, q(params))
+  return post(endpoints.cart.checkout, q({
+    CustomerId: params.CustomerId,
+    ProductCode: params.ProductCode,
+    CouponId: params.CouponId,
+    PointsUsed: params.PointsUsed,
+  }))
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -320,4 +329,61 @@ export function orderAdminIntervene(params) {
  */
 export function orderDetail(orderId) {
   return post(endpoints.order.orderDetail, build({ orderId }))
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// ⑤ 售后状态机（批四第二批 commit 4）—— 用户 / 商家 / 平台三端
+//
+// ⚠️ 金额**不由前端传**：后端 `apply` 用 `order.Price` 快照（折后成交价），
+//    前端只负责填原因。⚠️ `Approve` 必须显式 `'true'` / `'false'`：缺省 ⇒ 后端报缺参，
+//    绝不默认任何一侧（尤其不能把「没点」当成「同意退款」）。
+// ⚠️ 这里用 `q()`（丢空值）而不是 `build()`：售后端点没有「空串是合法值」的列，
+//    且 `Reason` 为空本来就该由后端回「请填写售后原因」，不该发 `Reason=`。
+// ══════════════════════════════════════════════════════════════════════════════
+
+/**
+ * 用户申请 / 重申售后。`RefundStatus` 0/2 且 `ReceiveIf=1` 才受理；次数上限 2。
+ *
+ * @param {{CustomerId:string, OrderId:string, Reason:string}} params
+ * @returns {Promise<{success:boolean, msg:string, outcome?:string, refundStatus?:number, retryCount?:number}>}
+ *          ⚠️ 失败是 **HTTP 200 + `success:false`**；文案区分「非本人 / 未收货 / 次数上限 / 已退款」。
+ */
+export function orderRefundApply(params) {
+  return post(endpoints.refundB4.apply, q(params))
+}
+
+/** 我的售后单（`RefundStatus <> 0`，最近申请在前）。 */
+export function orderRefundMy(customerId) {
+  return post(endpoints.refundB4.my, q({ CustomerId: customerId }))
+}
+
+/** 商家售后队列。`status` 省略 ⇒ 全部有售后记录的单（1 = 待商家审核）。 */
+export function orderRefundMerchantList(merchantId, status) {
+  return post(endpoints.refundB4.merchantList, q({ MerchantId: merchantId, status }))
+}
+
+/**
+ * 商家同意 / 拒绝。
+ *
+ * @param {{MerchantId:string, OrderId:string, Approve:boolean|'true'|'false', Note?:string}} params
+ * @returns {Promise<{success:boolean, msg:string, outcome?:'refunded'|'rejected'|'escalated', refundAmount?:number, retryCount?:number}>}
+ *          `outcome='escalated'` = 第二次拒绝，后端已自动转平台（`RefundStatus=3`）。
+ */
+export function orderRefundMerchantHandle(params) {
+  return post(endpoints.refundB4.merchantHandle, q(params))
+}
+
+/** 平台售后队列（VIP 优先：后端按 `user.MemberLevel DESC` 排序）。 */
+export function orderRefundAdminList(status) {
+  return post(endpoints.refundB4.adminList, q({ status }))
+}
+
+/**
+ * 平台裁决已升级的售后（`RefundStatus=3`）。
+ *
+ * @param {{OrderId:string, Approve:boolean|'true'|'false', Note?:string}} params
+ * @returns {Promise<{success:boolean, msg:string, outcome?:'refunded'|'refused', refundAmount?:number}>}
+ */
+export function orderRefundAdminHandle(params) {
+  return post(endpoints.refundB4.adminHandle, q(params))
 }

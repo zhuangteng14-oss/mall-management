@@ -85,6 +85,15 @@ public class OrderController {
     @Autowired
     private AuditService auditService;
 
+    /**
+     * 积分（第三批㉘）—— 只在**收货成功**后调一次 {@code earnForOrder}。
+     * 发放失败不影响收货结论（收货是既成事实；积分可重试 / 由后台补）。
+     */
+    @Autowired
+    private com.minke.mallmanagement.member.service.MemberService memberService;
+
+    private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(OrderController.class);
+
     //创建订单时要录入数据库的信息
     // 方法体（锁编排 + 临界区内查重 + INSERT + 出生观测 + 全部文案）搬到 OrderService.orderAdd()。
     // 本方法只保留路由与入参绑定 —— ⚠️ 形参名与顺序**必须**逐字保留：@RequestParam 未写显式名，
@@ -133,6 +142,11 @@ public class OrderController {
             // ⚠️ `Source` 不是身份声明、不参与鉴权：谁能下单仍**只看** `IdentityGuard`（见下一行）；
             //    本参数的存在理由**唯一**是让演练写入的行在库里可辨认。
             @RequestParam(value = "Source", required = false, defaultValue = "") String Source,
+            // 第三批㉙：可选的余额支付开关（true ⇒ 实付从 user_wallet 扣）。
+            // ⚠️ 加在末尾（同 Quantity / Items / CouponId / ActivityId / Source 的先例）。
+            @RequestParam(value = "UseWallet", required = false) Boolean UseWallet,
+            // 第三批㉘：可选的积分抵扣数（服务端再按折后价 20% 上限校验）。
+            @RequestParam(value = "PointsUsed", required = false) Integer PointsUsed,
             HttpServletRequest request
     ) {
         // ⚠️ 第一行：订单只能下在**自己**名下（管理员豁免）—— 必须在取锁之前（否则白取一把锁）。
@@ -142,7 +156,8 @@ public class OrderController {
         }
         Map<String, Object> result = orderService.orderAdd(
                 CustomerId, MerchantId, OrderId, Price, ProductInformation, Images,
-                PayIf, DeliveryIf, ReceiveIf, Quantity, Items, CouponId, ActivityId, Source);
+                PayIf, DeliveryIf, ReceiveIf, Quantity, Items, CouponId, ActivityId, Source,
+                UseWallet, PointsUsed);
         // C3 块 5 commit 5：**券真的核销掉了**才留痕（`Discount` 只在核销成功且大于 0 时才被
         // `orderAdd` 放进回体 ⇒ 用它当判据，不重算一遍）。
         // ⚠️ 这是**下单人自己的动作**落在 `admin_audit` 里（同收货那条：actor = 当前调用者）——
@@ -257,6 +272,16 @@ public class OrderController {
         if (Boolean.TRUE.equals(result.get("success"))) {
             auditService.record(AuthSession.identify(request), AuditActions.ORDER_RECEIVE,
                     "order", orderId, null, orderActionPayload("receive"));
+            // 第三批㉘：收货即发积分（幂等键 order_earn:<OrderId>；重复收货不会重复发）。
+            try {
+                Map<String, Object> earned = memberService.earnForOrder(orderId);
+                Object points = earned.get("points");
+                if (points instanceof Number n && n.longValue() > 0) {
+                    result.put("PointsEarned", n.longValue());
+                }
+            } catch (Exception e) {
+                log.warn("收货成功但积分发放失败（ORDER）：orderId={} —— {}", orderId, e.toString());
+            }
         }
         return ResponseEntity.ok(Result.of(result));
     }

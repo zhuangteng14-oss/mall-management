@@ -359,6 +359,22 @@ public class SeckillDao {
                 .param("limit", limit).query().listOfRows();
     }
 
+    /**
+     * 库时钟的「现在」—— 秒杀页倒计时的基准。
+     *
+     * <p>⚠️ 必须是**库时钟**，不是 JVM 的 {@code LocalDateTime.now()}：{@code Stage} 是
+     * SQL 里用 {@code NOW()} 现算的（见类注释），前端若拿本机钟去比 {@code StartAt}，
+     * 手机时间偏几秒就会显示成「未开启」而服务端已判 {@code live}，两处判据互相打架。
+     * 这里把同一个 {@code NOW(3)} 连同毫秒一起回给前端，倒计时以它为零点。
+     *
+     * @return {@code {ServerNow, ServerTimestamp}}；{@code ServerTimestamp} 是 epoch 毫秒
+     */
+    public Map<String, Object> selectServerNow() {
+        return jdbc.sql("SELECT DATE_FORMAT(NOW(3), '%Y-%m-%d %H:%i:%s') AS ServerNow, "
+                        + "CAST(UNIX_TIMESTAMP(NOW(3)) * 1000 AS SIGNED) AS ServerTimestamp")
+                .query().singleRow();
+    }
+
     /** 老域 {@code goods} 表的单行读 —— 建邀请 / 报名时取原价与商家号快照（带前缀，同 {@code GoodsDao}）。 */
     public Map<String, Object> selectGoodsById(int goodsId) {
         List<Map<String, Object>> rows = jdbc.sql(

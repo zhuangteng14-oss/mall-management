@@ -3,7 +3,9 @@ package com.minke.mallmanagement.goods.service;
 import com.minke.mallmanagement.shared.web.PageLimits;
 import com.minke.mallmanagement.goods.dao.GoodsDao;
 import com.minke.mallmanagement.shared.upload.UploadStorage;
+import com.minke.mallmanagement.shared.web.UserStateLookup;
 import io.github.resilience4j.circuitbreaker.annotation.CircuitBreaker;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -101,17 +103,33 @@ public class GoodsService {
     private final GoodsAuditService goodsAuditService;
     /** 折扣上下限校验（营销域，块 5〈折扣〉）—— 只被 {@link #goodsAdd} 消费。 */
     private final com.minke.mallmanagement.marketing.discount.service.DiscountLimitService discountLimitService;
+    /** 低库存告警（批四第二批）—— 只被 {@link #skuStockUpdate} 消费。 */
+    private final com.minke.mallmanagement.notification.service.NotificationService notificationService;
+    /**
+     * 会员等级只读探针（批四第二批 commit 3）—— 只被 {@code productCodePrice} 的 4 参版本消费。
+     * ⚠️ {@link ObjectProvider}：impl 刻意不进 smoke 切片 @Import（同 {@code OrderService}），
+     * 裸注入会让切片在上下文加载期红；取不到 ⇒ 详情页按普通用户定价。
+     */
+    private final ObjectProvider<UserStateLookup> userStateLookupProvider;
+    /** 折扣模板引擎（第三批㉖）—— 只被 {@link #goodsAdd} 的服务端重算消费。 */
+    private final com.minke.mallmanagement.marketing.discount.service.DiscountService discountService;
     private final String uploadDir;
 
     public GoodsService(GoodsDao goodsDao,
                         GoodsCacheService goodsCacheService,
                         GoodsAuditService goodsAuditService,
                         com.minke.mallmanagement.marketing.discount.service.DiscountLimitService discountLimitService,
+                        com.minke.mallmanagement.notification.service.NotificationService notificationService,
+                        ObjectProvider<UserStateLookup> userStateLookupProvider,
+                        com.minke.mallmanagement.marketing.discount.service.DiscountService discountService,
                         @Value("${app.upload-dir:${user.dir}/src/main/resources/static/img/}") String uploadDir) {
         this.goodsDao = goodsDao;
         this.goodsCacheService = goodsCacheService;
         this.goodsAuditService = goodsAuditService;
         this.discountLimitService = discountLimitService;
+        this.notificationService = notificationService;
+        this.userStateLookupProvider = userStateLookupProvider;
+        this.discountService = discountService;
         this.uploadDir = uploadDir;
     }
 
@@ -165,12 +183,88 @@ public class GoodsService {
             Integer TypeId, String Detail, String Spec, String AfterSale, String SkuSpec,
             Boolean PromiseGenuine, Boolean PromiseReturn7, Boolean PromiseFastRefund, Boolean PromiseFreightIns
     ) {
+        // 旧签名（既有测试 / 老前端）：单图 + 提交审核 —— 行为与改前逐字一致。
+        return goodsAdd(MerchantId, GoodName, Price, OriginalPrice, file, GoodType, ProductCode, GoodTypeNew,
+                TypeId, Detail, Spec, AfterSale, SkuSpec,
+                PromiseGenuine, PromiseReturn7, PromiseFastRefund, PromiseFreightIns, null, false);
+    }
+
+    /**
+     * 批四第二批的新签名：多图 + 草稿。
+     *
+     * <ul>
+     *   <li>{@code files} 非空 ⇒ 逐张落盘，{@code GoodImg}=首图、{@code ImgList}=全部 URL 的 JSON 数组；</li>
+     *   <li>{@code Draft=true} ⇒ {@code goods_audit.Status='draft'}，**不发**管理端通知；</li>
+     *   <li>{@code Draft=false} ⇒ 与改前一致：{@code pending} + 「已提交审核」。</li>
+     * </ul>
+     *
+     * <p>⚠️ {@code file} 仍必填（老客户端不变）；{@code files} 为空数组 / null 时回落到它。
+     */
+    @CircuitBreaker(name = "mallMysqlWrite")
+    @Transactional
+    public Map<String, Object> goodsAdd(
+            String MerchantId,
+            String GoodName,
+            Double Price,
+            Double OriginalPrice,
+            MultipartFile file,
+            String GoodType,
+            String ProductCode,
+            int GoodTypeNew,
+            Integer TypeId, String Detail, String Spec, String AfterSale, String SkuSpec,
+            Boolean PromiseGenuine, Boolean PromiseReturn7, Boolean PromiseFastRefund, Boolean PromiseFreightIns,
+            MultipartFile[] files, Boolean Draft
+    ) {
+        // 第三批㉖：不带折扣模板的旧签名 —— 逐字沿用批四第二批的行为。
+        return goodsAdd(MerchantId, GoodName, Price, OriginalPrice, file, GoodType, ProductCode, GoodTypeNew,
+                TypeId, Detail, Spec, AfterSale, SkuSpec,
+                PromiseGenuine, PromiseReturn7, PromiseFastRefund, PromiseFreightIns,
+                files, Draft, null);
+    }
+
+    /**
+     * 第三批㉖：带折扣模板的完整签名。
+     *
+     * <p>选模板（{@code DiscountTemplateId != null}）⇒ **划线价由服务端按模板重算**并覆盖客户端
+     * {@code OriginalPrice}；未选模板 ⇒ 沿用客户端手工原价。重算在**任何 I/O 之前**完成，
+     * 失败路径与既有校验一样一条 JDBC / 一次磁盘写都不执行。
+     */
+    @CircuitBreaker(name = "mallMysqlWrite")
+    @Transactional
+    public Map<String, Object> goodsAdd(
+            String MerchantId,
+            String GoodName,
+            Double Price,
+            Double OriginalPrice,
+            MultipartFile file,
+            String GoodType,
+            String ProductCode,
+            int GoodTypeNew,
+            Integer TypeId, String Detail, String Spec, String AfterSale, String SkuSpec,
+            Boolean PromiseGenuine, Boolean PromiseReturn7, Boolean PromiseFastRefund, Boolean PromiseFreightIns,
+            MultipartFile[] files, Boolean Draft, Long DiscountTemplateId
+    ) {
         Map<String, Object> result = new HashMap<>();
+
+        // ═══ 第三批㉖：服务端反算划线价（客户端提交的原价在选了模板时**不采信**）═══
+        com.minke.mallmanagement.marketing.discount.service.DiscountService.SubmitSnapshot snapshot =
+                discountService.snapshotForSubmit(DiscountTemplateId, Price, GoodType);
+        if (!snapshot.valid()) {
+            result.put("success", false);
+            result.put("msg", snapshot.msg());
+            return result;
+        }
+        // ⚠️ 一支是 primitive double、一支是 Double ⇒ 条件表达式会走二元数值提升，
+        //    把 null 的 OriginalPrice **拆箱**成 NPE（不带原价的老调用方必炸）。
+        //    用 Double.valueOf 把两支都钉成包装类型。
+        Double effectiveOriginalPrice = snapshot.originalPrice() != null
+                ? Double.valueOf(com.minke.mallmanagement.shared.Money.doubleOf(snapshot.originalPrice()))
+                : OriginalPrice;
 
         // ═══ 块 5〈折扣〉：划线原价的**权威校验**（前端那处实时提示只是助手，不是判据）═══
         // ⚠️ 位置是刻意的：**在任何 I/O 之前**（图片落盘也不做）—— 与两条既有早退同口径，
         //    失败路径一条 JDBC、一次磁盘写都不执行。
-        String discountError = discountLimitService.validate(GoodType, Price, OriginalPrice);
+        String discountError = discountLimitService.validate(GoodType, Price, effectiveOriginalPrice);
         if (discountError != null) {
             result.put("success", false);
             result.put("msg", discountError);
@@ -180,18 +274,30 @@ public class GoodsService {
         // 图片保存路径
         Path uploadPath = Paths.get(uploadDir).toAbsolutePath().normalize();
 
-        // 图片为空判断
-        if (file.isEmpty()) {
-            result.put("success", false);
-            result.put("msg", "请选择商品图片");
-            return result;
+        // 组装待落盘的图片：多图优先；一个都没有 ⇒ 用必填的单图 file。
+        List<MultipartFile> uploads = new java.util.ArrayList<>();
+        if (files != null) {
+            for (MultipartFile f : files) {
+                if (f != null && !f.isEmpty()) {
+                    uploads.add(f);
+                }
+            }
+        }
+        if (uploads.isEmpty()) {
+            if (file == null || file.isEmpty()) {
+                result.put("success", false);
+                result.put("msg", "请选择商品图片");
+                return result;
+            }
+            uploads.add(file);
         }
 
-        // 保存图片，并拿到**实际落盘**的文件名（同名同内容→复用；同名不同内容→改名另存）。
-        // 必须用返回值拼 URL —— 改名时它和上传时的文件名不一致。
-        String originalFilename;
+        // 逐张落盘，拿到**实际落盘**的文件名（同名同内容→复用；同名不同内容→改名另存）。
+        List<String> imageUrls = new java.util.ArrayList<>();
         try {
-            originalFilename = UploadStorage.store(uploadPath, file);
+            for (MultipartFile f : uploads) {
+                imageUrls.add("http://localhost:8088/img/" + UploadStorage.store(uploadPath, f));
+            }
         } catch (Exception e) {
             // 显式失败：以前这里吞掉异常继续写库，结果是 DB 记下 URL、盘上没有那个文件
             // —— 静默脏数据，比 500 更难查。
@@ -200,22 +306,33 @@ public class GoodsService {
             result.put("msg", "商品图片保存失败");
             return result;
         }
-
-        // 最终存入数据库的图片 URL
-        String GoodImg = "http://localhost:8088/img/" + originalFilename;
+        String GoodImg = imageUrls.get(0);
+        String imgList = toJsonArray(imageUrls);
+        boolean draft = Boolean.TRUE.equals(Draft);
+        String status = draft ? GoodsAuditService.STATUS_DRAFT : GoodsAuditService.STATUS_PENDING;
 
         try {
-            // 提审：只写 goods_audit(pending)，**不写 goods 行**（提审制的定义，见类注释）。
+            // 提审 / 存草稿：只写 goods_audit，**不写 goods 行**（提审制的定义，见类注释）。
             String batchId = GoodsAuditService.newBatchId();
-            goodsAuditService.submit(MerchantId, batchId, GoodName, Price, OriginalPrice, GoodType, GoodTypeNew, TypeId,
-                    ProductCode, GoodImg, Detail, Spec, AfterSale, SkuSpec,
-                    PromiseGenuine, PromiseReturn7, PromiseFastRefund, PromiseFreightIns);
+            goodsAuditService.submit(MerchantId, batchId, GoodName, Price, effectiveOriginalPrice, GoodType, GoodTypeNew, TypeId,
+                    ProductCode, GoodImg, imgList, Detail, Spec, AfterSale, SkuSpec,
+                    PromiseGenuine, PromiseReturn7, PromiseFastRefund, PromiseFreightIns, status,
+                    snapshot.templateId(), snapshot.discountType(),
+                    snapshot.discountRate(), snapshot.discountAmount());
+
+            // 价格快照流水（旁路证据，写失败不影响提审结果）。
+            discountService.logPrice(null, batchId, MerchantId, "submit",
+                    com.minke.mallmanagement.shared.Money.of(Price),
+                    effectiveOriginalPrice == null ? null
+                            : com.minke.mallmanagement.shared.Money.of(effectiveOriginalPrice),
+                    snapshot);
 
             result.put("success", true);
-            // ⚠️ 文案已改（C3 块 3）：原「商品上架成功！」⇒「已提交审核」。
-            //    连带更新 shared/web/ResultByteEquivalenceTest.java 的标签⑦字符串（键形状不变）。
-            result.put("msg", "已提交审核");
+            // 文案：提交审核沿用块 3 的「已提交审核」；草稿另给一句（前端据此提示）。
+            result.put("msg", draft ? "已保存草稿" : "已提交审核");
             result.put("GoodImg", GoodImg);
+            result.put("ImgList", imgList);
+            result.put("status", status);
             result.put("batchId", batchId);
         } catch (Exception e) {
             e.printStackTrace();
@@ -223,10 +340,75 @@ public class GoodsService {
             //    @Transactional 看到的是正常返回、照常提交，提审单会留下 —— 那正是不想要的。
             markRollbackOnlyIfActive();
             result.put("success", false);
-            result.put("msg", "商品提交失败");
+            result.put("msg", draft ? "草稿保存失败" : "商品提交失败");
         }
 
         // ⚠️ 本方法**不调** evictByMerchant：一行未动 goods 表（见方法 javadoc）。
+        return result;
+    }
+
+    /** 图片 URL 列表 → JSON 数组串（URL 已由落盘逻辑生成，只需转义引号 / 反斜杠）。 */
+    private static String toJsonArray(List<String> values) {
+        if (values == null || values.isEmpty()) {
+            return null;
+        }
+        StringBuilder sb = new StringBuilder("[");
+        for (int i = 0; i < values.size(); i++) {
+            if (i > 0) {
+                sb.append(',');
+            }
+            String v = values.get(i);
+            sb.append('"').append(v.replace("\\", "\\\\").replace("\"", "\\\"")).append('"');
+        }
+        return sb.append(']').toString();
+    }
+
+    /**
+     * 商家改某个规格的库存（批四第二批）—— 新端点 {@code /goods/skuStockUpdate}。
+     * 改完清该商家缓存，并按阈值发低库存告警（每 SKU 每日一条）。
+     */
+    @CircuitBreaker(name = "mallMysqlWrite")
+    @Transactional
+    public Map<String, Object> skuStockUpdate(String MerchantId, Integer GoodsId, String AxisName, Integer Stock) {
+        Map<String, Object> result = new HashMap<>();
+        if (MerchantId == null || MerchantId.isBlank()
+                || GoodsId == null || GoodsId <= 0
+                || AxisName == null || AxisName.isBlank()
+                || Stock == null || Stock < 0) {
+            result.put("success", false);
+            result.put("msg", "缺少参数：MerchantId / GoodsId / AxisName / Stock（Stock 不得为负）");
+            return result;
+        }
+        try {
+            int affected = goodsDao.updateSkuStock(GoodsId, MerchantId, AxisName, Stock);
+            if (affected == 0) {
+                result.put("success", false);
+                result.put("msg", "规格不存在或不属于当前商家");
+                return result;
+            }
+            goodsCacheService.evictByMerchant(MerchantId);
+            // 告警取商品名：SKU 行里本就冗余了 GoodName，用按 GoodsId 回读的第一行。
+            List<Map<String, Object>> skus = goodsDao.selectSkusByGoodsId(GoodsId, MerchantId);
+            String goodName = null;
+            String skuCode = null;
+            for (Map<String, Object> row : skus) {
+                if (AxisName.equals(String.valueOf(row.get("AxisName")))) {
+                    skuCode = row.get("SkuCode") == null ? null : row.get("SkuCode").toString();
+                    goodName = row.get("GoodName") == null ? null : row.get("GoodName").toString();
+                    break;
+                }
+            }
+            notificationService.alertLowStock(MerchantId, skuCode, AxisName, goodName, Stock);
+
+            result.put("success", true);
+            result.put("msg", "库存已更新");
+            result.put("Stock", Stock);
+        } catch (Exception e) {
+            e.printStackTrace();
+            markRollbackOnlyIfActive();
+            result.put("success", false);
+            result.put("msg", "库存更新失败");
+        }
         return result;
     }
 
@@ -268,6 +450,20 @@ public class GoodsService {
         try {
             return goodsCacheService.listHome(normalizePageSize(limit), normalizeOffset(offset),
                     isBlank(merchantId) ? null : merchantId.trim());
+        } catch (Exception e) {
+            e.printStackTrace();
+            return cacheFailureMarker("查询失败");
+        }
+    }
+
+    /**
+     * 品牌专区列表（批四第二批 commit 2）—— 委托 + 响应组装，注解与 SQL 在
+     * {@link GoodsCacheService#brandZone}。分页参数与 {@link #goodsSelectHome} 同口径归一。
+     */
+    @CircuitBreaker(name = "mallMysqlRead")
+    public Map<String, Object> brandHome(Integer limit, Integer offset) {
+        try {
+            return goodsCacheService.brandZone(normalizePageSize(limit), normalizeOffset(offset));
         } catch (Exception e) {
             e.printStackTrace();
             return cacheFailureMarker("查询失败");
@@ -364,6 +560,19 @@ public class GoodsService {
      * 响应键 {@code goodImg} 与列名 {@code GoodImg} 不同名 —— 这是契约，别「改对」。
      */
     public Map<String, Object> productCodePrice(String MerchantId, String GoodName, String ProductCode) {
+        return productCodePrice(MerchantId, GoodName, ProductCode, null);
+    }
+
+    /**
+     * 同 {@link #productCodePrice(String, String, String)}，多一个 {@code customerId}
+     * （批四第二批 commit 3）：命中 VIP 时**加性**返回 {@code memberPrice}。
+     *
+     * <p>⚠️ 会员价由**服务端**算：详情页展示与下单落库必须同一个数（公式见
+     * {@link com.minke.mallmanagement.shared.MemberPricing}）。非会员 / 未登录 /
+     * 探针读失败 ⇒ **响应里没有这个键**，与改动前逐字相同（老前端不读它）。
+     */
+    public Map<String, Object> productCodePrice(String MerchantId, String GoodName, String ProductCode,
+                                                String customerId) {
         Map<String, Object> result = new HashMap<>();
         try {
             Map<String, Object> row =
@@ -381,6 +590,24 @@ public class GoodsService {
             // ⚠️ 块 5〈折扣〉加：**加性**键（老前端不读它，逐字节等价性不受影响）。
             //    0 / null ⇒ 详情页不画划线价那一行 —— 判据在**前端**，这里原样透出。
             result.put("originalPrice", row.get("OriginalPrice"));
+            // 2026-10-19 批四第二批：多图（JSON 数组串）—— **加性键**，老前端不读。
+            // null/空串 ⇒ 详情页只用 `goodImg`（单图路径与改前逐字一致）。
+            result.put("imgList", row.get("ImgList"));
+            // 批四第二批 commit 2：品牌标 —— **加性键**，老前端不读；1/true ⇒ 详情页画「品牌」徽标。
+            result.put("isBrand", row.get("IsBrand"));
+            // 2026-10-19 终局清道夫（补充二）：秒杀 / 国补标记 —— **加性键**，供详情页主色联动
+            // （优先级 秒杀 > 国补 > 品牌 > 普通）。谓词唯一真相在 MarketingGoodsFlags，本层只透出。
+            result.put("isSeckill", row.get("IsSeckill"));
+            result.put("isSubsidy", row.get("IsSubsidy"));
+            // 批四第二批 commit 3：会员价 —— **仅 VIP 返回**（严格加性）。算不出的价格基础不编造。
+            Object basePrice = row.get("Price");
+            if (isMember(customerId) && basePrice instanceof Number n && n.doubleValue() > 0) {
+                // ㉘ 起折扣率读 member_level（读不到 ⇒ null ⇒ MemberPricing 退回 9 折兜底），
+                // 与下单落库走**同一个**重载，详情页与实付不会差一分。
+                result.put("memberPrice",
+                        com.minke.mallmanagement.shared.MemberPricing.priceOf(
+                                n.doubleValue(), memberRateOf(customerId)));
+            }
         } catch (Exception e) {
             // 技术异常（2026-10-12〈Bug 1〉起「>1 行」不再从这里来 —— 那条路改走 MIN(Id)）：
             // 这里接住 ⇒ 仍是 200 + {success:false}，**不是 500**（对调用方零契约变更）。
@@ -388,6 +615,29 @@ public class GoodsService {
             result.put("success", false);
         }
         return result;
+    }
+
+    /** 等级折扣率；探针缺席 / 读失败 / 查无此人 ⇒ {@code null}（调用方按 9 折兜底）。 */
+    private java.math.BigDecimal memberRateOf(String customerId) {
+        try {
+            UserStateLookup lookup = userStateLookupProvider.getIfAvailable();
+            return lookup == null ? null : lookup.memberDiscountRate(customerId);
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    /** VIP 判据：探针缺席 / 读失败 / 查无此人 ⇒ {@code false}（按普通用户，fail-open）。 */
+    private boolean isMember(String customerId) {
+        if (customerId == null || customerId.isBlank()) {
+            return false;
+        }
+        try {
+            UserStateLookup lookup = userStateLookupProvider.getIfAvailable();
+            return lookup != null && lookup.memberLevel(customerId) > 0;
+        } catch (Exception e) {
+            return false;
+        }
     }
 
     // ==================== 写：下架 / 更新 ====================

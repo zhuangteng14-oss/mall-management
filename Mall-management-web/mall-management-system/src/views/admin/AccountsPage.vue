@@ -77,6 +77,7 @@
         <div class="a-card-l1">
           <code class="a-tag">#{{ r.Id }}</code>
           <b class="a-strong">{{ r.ShopName }}</b>
+          <span v-if="isBrandRow(r)" class="a-badge brandt">品牌加盟</span>
           <span class="a-badge" :class="r.Status"><IconGlyph :name="statusGlyph(r.Status)" />{{ statusLabel(r.Status) }}</span>
           <span class="a-dim">申请人 {{ r.Username }}</span>
           <span class="a-grow"></span>
@@ -202,7 +203,7 @@
           <b class="a-strong">{{ u.username }}</b>
           <span class="a-badge">{{ dash(u.usertype) }}</span>
           <span v-if="isBanned(u)" class="a-badge rejected"><IconGlyph name="no" />已封禁</span>
-          <span v-if="dgOf(u)" class="a-badge warn">{{ dgOf(u) }}</span>
+          <span v-if="dgOf(u)" class="a-badge warn">{{ dgOf(u) }}</span><span v-if="Number(u.MemberLevel) > 0" class="a-badge approved">VIP</span>
           <span class="a-grow"></span>
           <span class="a-dim">{{ idsOf(u) }}</span>
         </div>
@@ -256,7 +257,7 @@
             <IconGlyph name="ok" />解封
           </button>
           <span class="a-grow"></span>
-          <button type="button" class="a-btn" @click="pickDowngrade(u.username)">降级操作 ↓</button>
+          <button type="button" class="a-btn" :disabled="busyName !== null" @click="toggleMember(u)">{{ Number(u.MemberLevel) > 0 ? '取消 VIP' : '设为 VIP' }}</button><button type="button" class="a-btn" @click="pickDowngrade(u.username)">降级操作 ↓</button>
         </div>
       </li>
     </ol>
@@ -432,7 +433,7 @@ import {
   accountsUsers,
   downgradeCancel,
   downgradeRelist,
-  downgradeSchedule,
+  downgradeSchedule, accountsSetMember,
 } from '../../api/accounts'
 // 「选模板」弹窗 —— 两处（商家入驻驳回 `merchant.reject` / 用户封禁 `user.ban`）。
 // ⚠️ 这两条读的是**公共读** `/template/list`（`TemplatePicker` 内部走 `api/template.js`），
@@ -526,6 +527,8 @@ function statusLabel(s) {
 }
 // 状态徽章左侧那枚字形（2026-10-11 补图标；与 `CatalogPage.vue` 的 `statusGlyph` 同款）。未知态给 `wait`：原文已由 `statusLabel` 显示，符号只回答「是不是还没处理」，认不出就按待处理看。
 const statusGlyph = (s) => (s === 'approved' ? 'ok' : s === 'rejected' ? 'no' : 'wait')
+/** 批四第二批：品牌加盟行（`tinyint(1)` 到 JSON 可能是 boolean 也可能是 1，两种都认）。 */
+const isBrandRow = (r) => r && (r.IsBrand === true || r.IsBrand === 1 || String(r.IsBrand) === '1')
 
 async function loadApps() {
   loadingApps.value = true
@@ -561,6 +564,8 @@ async function approve(r) {
     // ⚠️ `outcome` 是判据（见 `api/accounts.js`）：`already-handled` **不是失败**，别报「通过成功」。
     if (data.outcome === 'already-handled') {
       say('bad', `#${r.Id} 这条已经被处理过了 —— 列表已刷新。`)
+    } else if (data.outcome === 'brand-approved') {
+      say('ok', `#${r.Id} 品牌加盟已通过：${dash(data.username)} 的商品会带品牌标并进入品牌专区。`)
     } else if (data.outcome === 'approved-restored') {
       say('ok', `#${r.Id} 通过，并恢复了 30 天冻结期内的旧商家号（${dash(data.username)}）。`)
     } else {
@@ -818,7 +823,7 @@ function onUsersPage({ limit, offset }) {
 }
 
 /** 封禁。理由**必填**，且**写给被封的人看** —— 前端先拦，后端也拦。 */
-async function ban(u) {
+const toggleMember = async (u) => { const to = Number(u.MemberLevel) > 0 ? 0 : 1; busyName.value = u.username; try { const data = await accountsSetMember({ username: u.username, level: to }); if (!data || !data.success) { say('bad', (data && data.msg) || '设置会员等级失败'); return } say('ok', `${u.username} 已${to ? '设为 VIP（全场 9 折）' : '取消 VIP'} —— 对方下一次进入页面时生效`); await loadUsers() } catch (e) { say('bad', `设置会员等级失败：${failOf(e)}`); console.error('admin member', e) } finally { busyName.value = null } }; async function ban(u) {
   const reason = banReasons[u.username]
   if (!reason) {
     say('bad', `封禁 ${u.username} 必须填写理由（该理由会展示给用户）。`)
@@ -1281,6 +1286,12 @@ onMounted(() => {
 .a-badge.rejected {
   color: var(--danger);
   background: var(--danger-ground);
+  border-color: transparent;
+}
+/* 批四第二批：品牌加盟（与审核状态并列，故不复用状态色）。 */
+.a-badge.brandt {
+  color: var(--brand-ink);
+  background: var(--brand-soft);
   border-color: transparent;
 }
 .a-dim {

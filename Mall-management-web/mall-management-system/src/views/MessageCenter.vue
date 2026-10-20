@@ -1,115 +1,464 @@
 <template>
   <div class="msg-center">
-    <div class="mc-bar" role="tablist" aria-label="消息中心">
-      <button
-        v-for="t in TABS"
-        :key="t.key"
-        class="mc-tab"
-        type="button"
-        role="tab"
-        :aria-selected="tab === t.key ? 'true' : 'false'"
-        :class="{ active: tab === t.key }"
-        @click="goTab(t.key)"
-      >
-        <IconGlyph :name="t.glyph" />{{ t.label }}
-      </button>
+    <!--
+      消息中心（2026-10-19 用户令，对齐 a.html 图四）：
+      左栏「好友会话」、右栏「最近通知」，两侧同时在场；点会话开聊天抽屉。
+      ⚠️ 两套数据链一个字都没换：左栏仍是 `message.*`，右栏仍是 `notification.*`。
+      ⚠️ 无侧栏：路由记录已带 `noRail`（`/customer/msg`、`/merchant/msg`）。
+    -->
+    <section class="page-head">
+      <div>
+        <div class="kicker">BUYER / MESSAGE CENTER</div>
+        <h1>消息中心</h1>
+        <p>左侧继续好友会话，右侧查看最近通知。点开一个会话，聊天抽屉里支持商品卡、表情与图片。</p>
+      </div>
+      <div class="head-actions">
+        <router-link class="btn" to="/customer/search">去逛逛</router-link>
+      </div>
+    </section>
+
+    <div class="mc-grid">
+      <!-- ── 左：好友会话 ─────────────────────────────────────────────── -->
+      <section class="col conv-col" aria-label="好友会话">
+        <header class="col-h">
+          <h2>好友会话</h2>
+          <span class="n">{{ conversations.length }}</span>
+          <button class="refresh" type="button" title="刷新会话" @click="loadConversations()">刷新</button>
+        </header>
+
+        <p v-if="!loggedIn" class="col-hint">登录后显示会话。</p>
+        <p v-else-if="convLoading && conversations.length === 0" class="col-hint">加载中…</p>
+        <p v-else-if="conversations.length === 0" class="col-hint">还没有会话。去商品详情页点「咨询」或到好友页发起聊天。</p>
+
+        <ul v-else class="conv-list">
+          <li v-for="conv in conversations" :key="conv.other_id">
+            <button class="conv" type="button" @click="openChat(conv)">
+              <span class="av" :class="conv.other_type">{{ initialOf(conv._name) }}</span>
+              <span class="tx">
+                <span class="l1">
+                  <span class="nm">{{ conv._name }}</span>
+                  <span class="tm">{{ conv._time }}</span>
+                </span>
+                <span class="l2">
+                  <span class="summary">{{ conv._summary || (conv.other_type === 'merchant' ? '商家会话' : '用户会话') }}</span>
+                  <span v-if="conv.unread" class="unread" title="未读">未读</span>
+                </span>
+              </span>
+            </button>
+          </li>
+        </ul>
+      </section>
+
+      <!-- ── 右：最近通知（完整复用 NotifyInbox 的读/已读/邀请应答） ────────── -->
+      <section class="col notify-col" aria-label="最近通知">
+        <NotifyInbox compact />
+      </section>
     </div>
 
-    <!-- ⚠️ **必须是 `v-if` 不是 `v-show`**：`ChatRoom` 带一支 **2s 轮询**（`:447`），`v-show` 只藏不卸
-         ⇒ 停在「通知」tab 时后台仍每 2s 打一次 `/message/*`（`AppShell.vue:99-100` 早就为 KeepAlive
-         记过同一条：「别把 ChatRoom 加进来」）。卸载则 `onUnmounted` 里的 `clearInterval` 照常回收。 -->
-    <ChatRoom v-if="tab === 'chat'" />
-    <NotifyInbox v-else />
+    <!-- ── 聊天抽屉：复用 ChatRoom（drawer 模式隐藏它自己的会话栏）────────── -->
+    <div v-if="chatOpen" class="drawer-scrim" @click.self="closeChat">
+      <aside class="chat-drawer" role="dialog" aria-modal="true" aria-label="聊天">
+        <header class="drawer-h">
+          <span class="av" :class="chatWith && chatWith.type">{{ initialOf(chatTitle) }}</span>
+          <div class="drawer-tx">
+            <strong>{{ chatTitle }}</strong>
+            <small>{{ chatWith && chatWith.id }}</small>
+          </div>
+          <button class="x" type="button" aria-label="关闭聊天" @click="closeChat">×</button>
+        </header>
+        <div class="drawer-b">
+          <ChatRoom drawer />
+        </div>
+      </aside>
+    </div>
   </div>
 </template>
 
 <script setup>
-// src/views/MessageCenter.vue —— **消息中心**：把「消息」与「通知」两个入口合并成一个页（2026-10-09）。
-//
-// ⚠️ **本组件只换「怎么进」，不换「进去干什么」**（用户口径逐字）：`ChatRoom.vue` 与
-//    `NotifyInbox.vue` 的**内部逻辑一字不动** —— 这里只做「选哪个显示」+ 一条 tab 条。
-//    后端、两张表（`message` / `notification`）、两套端点、两个 Controller **也都不动**：
-//    合并的是**前端入口**，不是两套域。所以 `NotifyInbox` 该调 `/notification/*` 还是照调。
-//
-// ⚠️ **为什么两个子组件不需要任何 prop**：它们各自从 `route` 反推身份 —— `ChatRoom.vue:180-211`
-//    读 `window.location.pathname`、`NotifyInbox.vue:99-103` 读 `route.path.startsWith('/merchant')`。
-//    本组件挂在 `${base}/msg` 下（`/customer/msg` ⇄ `/merchant/msg`），**路径前缀不变**
-//    ⇒ 两边的反推结果与合并前**逐字相同**（这正是「不改它们内部」能成立的原因）。
-//
-// ⚠️ **tab 状态住在 query（`?tab=notify`）**，不住组件内部 state（用户口径 5）：
-//    ⇒ 可深链、可刷新、可后退，且 `/customer/notify` 那条旧地址能靠 redirect 直接落到通知 tab。
-//    判据是 `route.query.tab === 'notify'`（**字符串精确比**）：`?tab=chat`、缺 `tab`、`tab` 是数组
-//    （`?tab=a&tab=b`）**一律**落「会话」—— 默认值选会话，因为它是合并前 `/…/msg` 的行为。
-import { computed } from 'vue'; import IconGlyph from '../components/ui/IconGlyph.vue'   // ⚠️ 两条 import **同行**（2026-10-11 补图标那一笔）—— 合并到既有行 = 不新增行号漂移
+/* eslint-disable no-undef */
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import { http } from '../api/http'
+import { endpoints } from '../api/endpoints'
+import { getMerchantId, getCustomerId, isLoggedIn } from '../api/auth'
 import ChatRoom from './ChatRoom.vue'
 import NotifyInbox from './NotifyInbox.vue'
-
-/** ⚠️ 顺序 = 显示顺序，且**会话在前**：与合并前「点顶栏『消息』默认进会话」一致。 */
-const TABS = [
-  // ⚠️ `glyph`（2026-10-11 补图标那一笔）与**顶栏**同一套语义：会话 = 人与人（`msg` ✉）、
-  //    通知 = 系统发给你（`notify` ✎）—— 与 `glyphs.js` 里「`msg` 一枚两处共用」的口径同源。
-  { key: 'chat', label: '会话', glyph: 'msg' },
-  { key: 'notify', label: '通知', glyph: 'notify' }
-]
 
 const route = useRoute()
 const router = useRouter()
 
-/** 当前 tab —— `route.query` 是响应式的 ⇒ 浏览器后退 / 手改地址都会跟着切。 */
-const tab = computed(() => (route.query.tab === 'notify' ? 'notify' : 'chat'))
+const currentId = ref('')
+const currentType = ref('')
+const conversations = ref([])
+const convLoading = ref(false)
+const loggedIn = ref(false)
+
+const chatOpen = ref(false)
+const chatWith = ref(null)
+
+let pollTimer = null
+const profileCache = new Map()
+const pendingProfiles = new Set()
+
+/** 与 ChatRoom 同一条身份降级链：按壳取自己的号，取不到才退回另一身份。 */
+function initIdentity() {
+  const path = route.path
+  const usable = (v) => v && v !== 'null' && v !== 'undefined'
+  const mid = getMerchantId()
+  const cid = getCustomerId()
+
+  if (path.startsWith('/merchant') && usable(mid)) {
+    currentId.value = mid
+    currentType.value = 'merchant'
+  } else if (path.startsWith('/customer') && usable(cid)) {
+    currentId.value = cid
+    currentType.value = 'customer'
+  } else if (usable(mid)) {
+    currentId.value = mid
+    currentType.value = 'merchant'
+  } else if (usable(cid)) {
+    currentId.value = cid
+    currentType.value = 'customer'
+  }
+  loggedIn.value = isLoggedIn() && !!currentId.value
+}
+
+const initialOf = (v) => (v ? String(v).trim().slice(0, 1).toUpperCase() : '?')
+
+/** 会话时间：库时钟是 UTC，补 `Z` 再按浏览器本地时区显示（与 ChatRoom 同一口径）。 */
+function fmtWhen(v) {
+  if (!v) return ''
+  const d = v instanceof Date ? v : new Date(`${String(v).replace(' ', 'T')}Z`)
+  if (Number.isNaN(d.getTime())) return String(v)
+  const p = (n) => String(n).padStart(2, '0')
+  const hm = `${p(d.getHours())}:${p(d.getMinutes())}`
+  const now = new Date()
+  return d.toDateString() === now.toDateString() ? hm : `${p(d.getMonth() + 1)}-${p(d.getDate())} ${hm}`
+}
+
+/** 摘要：商品/图片消息不显示 base64 或 JSON，只显示类型标记。 */
+function summarize(content) {
+  if (!content) return ''
+  if (content.startsWith('[PROD]')) return '[商品卡片]'
+  if (content.startsWith('[IMG]')) return '[图片]'
+  const s = String(content).replace(/\s+/g, ' ').trim()
+  return s.length > 36 ? `${s.slice(0, 36)}…` : s
+}
+
+async function fetchName(id) {
+  try {
+    const res = await http.post(endpoints.message.userSelect, new URLSearchParams({ userId: id }).toString())
+    const data = await res.json()
+    if (data.success && data.user && data.user.username) return data.user.username
+  } catch (e) { /* 名字取不到就退回 id，不阻断列表 */ }
+  return id
+}
 
 /**
- * 切 tab：**只改 query、不换路径** ⇒ 壳（`AppShell`）不重建、`route.path` 不变
- * （壳里那条清红点的 `watch` 看的是 `[route.path, route.query.tab]`，见 `AppShell.vue`）。
- *
- * ⚠️ `{ ...route.query, tab: key }` 里的 `...route.query` **不能省**：`ChatRoom` 读
- *    `otherId` / `otherType` / `_t` 三个会话参数（`ChatRoom.vue:419-445`）—— 直接
- *    `{ query: { tab: key } }` 会把它们冲掉，表现是「切去通知再切回来，会话没了」。
- * ⚠️ `replace` 而**不是** `push`：切 tab 是页内视图切换，不该在浏览器历史里堆一格
- *    （否则「后退」要点两次才回得去上一页）。⚠️ 代价：切 tab **进不了后退栈**，
- *    要分享带 tab 的地址得复制 URL —— 与「tab 住 query」的收益相比这是刻意的取舍。
+ * 头像旁的名字：只对新会话查一次，之后走 `profileCache`。
+ * ⚠️ **摘要不走 `/message/history`**：那个读接口会写已读时间（既有副作用），
+ *    逐个会话调用等于把整个列表一次标成已读。摘要直接取 `conversations` 新增的
+ *    `last_content` 列（窗口函数只读）。
  */
-function goTab(key) {
-  if (key === tab.value) return
-  router.replace({ query: { ...route.query, tab: key } })
+function enrich(id) {
+  if (pendingProfiles.has(id) || profileCache.has(id)) return
+  pendingProfiles.add(id)
+  fetchName(id)
+    .then((name) => {
+      profileCache.set(id, { name: name || id })
+      const row = conversations.value.find((c) => c.other_id === id)
+      if (row) row._name = name || id
+    })
+    .finally(() => pendingProfiles.delete(id))
 }
+
+async function loadConversations() {
+  if (!currentId.value) {
+    loggedIn.value = false
+    return
+  }
+  loggedIn.value = true
+  convLoading.value = true
+  const params = new URLSearchParams()
+  params.append('currentId', currentId.value)
+  params.append('currentType', currentType.value)
+  try {
+    const res = await http.post(endpoints.message.conversations, params.toString())
+    const data = await res.json()
+    if (!data.success) return
+    const list = Array.isArray(data.list) ? data.list : []
+    conversations.value = list.map((c) => {
+      const hit = profileCache.get(c.other_id)
+      if (!hit) enrich(c.other_id)
+      return {
+        ...c,
+        _name: hit ? hit.name : c.other_id,
+        _summary: summarize(c.last_content),
+        _time: fmtWhen(c.last_time)
+      }
+    })
+  } catch (e) {
+    // 列表失败不弹窗：右栏通知仍可用，左侧保留上一次结果。
+    console.error('加载会话列表失败', e)
+  } finally {
+    convLoading.value = false
+  }
+}
+
+const chatTitle = computed(() => (chatWith.value && chatWith.value.name) || '会话')
+
+/**
+ * 打开聊天抽屉：先把会话参数写进 query（`ChatRoom` 读的正是 `otherId` / `otherType`），
+ * 再挂载抽屉 —— 顺序反了会让 ChatRoom 读到空参数、只开着空聊天框。
+ */
+async function openChat(conv) {
+  if (!currentId.value || conv.other_id === currentId.value) return
+  chatWith.value = { id: conv.other_id, type: conv.other_type, name: conv._name }
+  await router.replace({
+    query: { ...route.query, otherId: conv.other_id, otherType: conv.other_type }
+  })
+  chatOpen.value = true
+}
+
+function closeChat() {
+  chatOpen.value = false
+  const closed = chatWith.value
+  chatWith.value = null
+  if (closed) {
+    // 抽屉里可能发过消息 ⇒ 重新拉一次会话（摘要随 `last_content` 一起刷新）。
+    loadConversations()
+  }
+  // eslint-disable-next-line no-unused-vars
+  const { otherId, otherType, _t, ...rest } = route.query
+  router.replace({ query: rest })
+}
+
+onMounted(async () => {
+  initIdentity()
+  await loadConversations()
+  // 深链 / 旧入口（商品咨询、好友「聊天」）带着 otherId 进来 ⇒ 直接开抽屉。
+  const oid = route.query.otherId
+  const otype = route.query.otherType
+  if (oid && otype && currentId.value) {
+    chatWith.value = { id: oid, type: otype, name: oid }
+    chatOpen.value = true
+  }
+  pollTimer = setInterval(() => loadConversations(), 8000)
+})
+
+onUnmounted(() => {
+  if (pollTimer) clearInterval(pollTimer)
+})
 </script>
 
 <style scoped>
-/* tab 条与两个子页**对齐**：子页（`.chat-room:489` / `.notify-room:296`）都是
-   `max-width:1180px; margin:0 auto; padding:var(--s6) var(--s5) …` ⇒ 本条约同宽同侧距，
-   否则切 tab 时内容会左右跳一下。⚠️ 下内距为 0、由子页自己的 `padding-top` 出间距（不叠加）。 */
-.mc-bar {
+.msg-center { font-family: var(--font); }
+.page-head {
   max-width: 1180px;
   margin: 0 auto;
-  padding: var(--s6) var(--s5) 0;
+  padding: var(--s7) var(--s5) 0;
   display: flex;
-  gap: var(--s2);
-  border-bottom: 1px solid var(--line);
-  font-family: var(--font);
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: var(--s5);
 }
-.mc-tab {
-  font: inherit;
-  font-size: var(--fs-sm);
-  color: var(--ink-2);
-  background: none;
-  border: 0;
-  /* 2px 底线压在 `.mc-bar` 的 1px 发丝线上（`margin-bottom:-1px`）⇒ 选中态与分隔线**同一条**，
-     不出现「双线」。改这里要跟 `.mc-bar` 的 padding-bottom 一起看。 */
-  border-bottom: 2px solid transparent;
-  margin-bottom: -1px;
-  padding: var(--s2) var(--s3);
-  cursor: pointer;
+.kicker {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: .16em;
+  text-transform: uppercase;
+  color: var(--ink-3);
 }
-.mc-tab:hover {
+.page-head h1 {
+  margin-top: 6px;
+  font-family: var(--font-display);
+  font-size: var(--fs-2xl);
+  font-weight: 600;
+  line-height: 1.1;
+  letter-spacing: -.02em;
   color: var(--ink);
 }
-/* 选中态用 `--nav-now`：与本壳顶栏「消息」项的高亮**同一个颜色**（切进本页后顶栏那项是亮的、
-   页内的 tab 也是亮的，用户看到的是同一次「我在消息里」）。 */
-.mc-tab.active {
-  color: var(--nav-now);
-  font-weight: var(--fw-semi);
-  border-bottom-color: var(--nav-now);
+.page-head p {
+  margin-top: 8px;
+  max-width: 58ch;
+  font-size: var(--fs-sm);
+  line-height: 1.7;
+  color: var(--ink-2);
+}
+.head-actions .btn {
+  display: inline-flex;
+  align-items: center;
+  height: 36px;
+  padding: 0 var(--s5);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r1);
+  font-size: var(--fs-sm);
+  color: var(--ink-2);
+  text-decoration: none;
+  background: var(--surface);
+}
+.head-actions .btn:hover { border-color: var(--brand-ink); color: var(--brand-ink); }
+
+/* 双栏：左会话（固定宽）+ 右通知（自适应）。 */
+.mc-grid {
+  max-width: 1180px;
+  margin: 0 auto;
+  padding: var(--s6) var(--s5) var(--s8);
+  display: grid;
+  grid-template-columns: 340px minmax(0, 1fr);
+  gap: var(--s5);
+  align-items: start;
+}
+.col {
+  border: 1px solid var(--line-2);
+  border-radius: var(--r2);
+  background: var(--surface);
+  overflow: hidden;
+}
+.col-h {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  padding: var(--s3) var(--s4);
+  border-bottom: 1px solid var(--line);
+  background: var(--surface-2);
+}
+.col-h h2 {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: var(--fs-md);
+  font-weight: 600;
+  color: var(--ink);
+}
+.col-h .n {
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+  color: var(--ink-3);
+}
+.refresh {
+  margin-left: auto;
+  border: 0;
+  background: none;
+  font: inherit;
+  font-size: var(--fs-xs);
+  color: var(--ink-3);
+  cursor: pointer;
+}
+.refresh:hover { color: var(--brand-ink); }
+.col-hint {
+  margin: 0;
+  padding: var(--s5) var(--s4);
+  font-size: var(--fs-sm);
+  line-height: 1.7;
+  color: var(--ink-3);
+}
+
+.conv-list { list-style: none; margin: 0; padding: 0; }
+.conv-list li + li { border-top: 1px solid var(--line); }
+.conv {
+  display: flex;
+  align-items: center;
+  gap: var(--s3);
+  width: 100%;
+  padding: var(--s3) var(--s4);
+  border: 0;
+  background: transparent;
+  text-align: left;
+  font: inherit;
+  cursor: pointer;
+}
+.conv:hover { background: var(--surface-2); }
+.av {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 38px;
+  height: 38px;
+  border-radius: 50%;
+  font-family: var(--font-mono);
+  font-size: var(--fs-sm);
+  color: var(--brand-ink);
+  background: var(--brand-tint);
+  border: 1px solid var(--line-2);
+}
+.av.merchant { color: var(--accent); background: #fbf1ed; }
+.tx { flex: 1; min-width: 0; }
+.l1, .l2 { display: flex; align-items: center; gap: var(--s2); min-width: 0; }
+.nm {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-med);
+  color: var(--ink);
+}
+.tm { flex: 0 0 auto; font-family: var(--font-mono); font-size: 10px; color: var(--ink-3); }
+.l2 { margin-top: 3px; }
+.summary {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--fs-xs);
+  color: var(--ink-3);
+}
+.unread {
+  flex: 0 0 auto;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--accent);
+  color: #fff;
+  font-size: 10px;
+  line-height: 16px;
+}
+
+.notify-col { min-width: 0; }
+
+/* ── 聊天抽屉 ─────────────────────────────────────────────────────────── */
+.drawer-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 70;
+  background: rgba(0, 0, 0, .38);
+  display: flex;
+  justify-content: flex-end;
+}
+.chat-drawer {
+  width: min(760px, 96vw);
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  background: var(--surface);
+  box-shadow: -12px 0 48px rgba(0, 0, 0, .22);
+}
+.drawer-h {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: var(--s3);
+  padding: var(--s3) var(--s4);
+  border-bottom: 1px solid var(--line);
+  background: var(--surface-2);
+}
+.drawer-tx { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.drawer-tx strong { font-size: var(--fs-sm); color: var(--ink); }
+.drawer-tx small { font-family: var(--font-mono); font-size: 10px; color: var(--ink-3); }
+.x {
+  border: 0;
+  background: transparent;
+  font-size: var(--fs-lg);
+  line-height: 1;
+  color: var(--ink-3);
+  cursor: pointer;
+}
+.drawer-b { flex: 1; min-height: 0; }
+
+@media (max-width: 900px) {
+  .mc-grid { grid-template-columns: minmax(0, 1fr); }
+  .page-head { flex-direction: column; align-items: flex-start; }
 }
 </style>

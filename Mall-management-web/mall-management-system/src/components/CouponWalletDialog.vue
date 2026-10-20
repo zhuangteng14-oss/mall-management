@@ -24,14 +24,17 @@
 -->
 <template>
   <div v-if="open" class="cscrim" @click.self="close">
-    <div class="cdlg" @click.stop>
-      <div class="cdlg-h">
-        <span>我的券包</span>
-        <button class="cx" @click="close" aria-label="关闭">×</button>
-      </div>
+    <aside class="cdlg" role="dialog" aria-modal="true" aria-label="我的券包" @click.stop>
+      <header class="cdlg-h">
+        <div class="cdlg-title">
+          <div class="w-kicker">BUYER / COUPON WALLET</div>
+          <h2>我的券包</h2>
+        </div>
+        <button class="cx" type="button" @click="close" aria-label="关闭">×</button>
+      </header>
 
       <!-- 4 个 tab。⚠️ 张数角标只数**这个 tab 真有几条**：(可领) 那档排除已领/已领完。 -->
-      <div class="w-tabs">
+      <nav class="w-tabs" aria-label="券包分类">
         <button
           v-for="t in TABS"
           :key="t.key"
@@ -40,19 +43,25 @@
           :class="{ 'w-tab-on': tab === t.key }"
           @click="pickTab(t.key)"
         >
-          {{ t.label }}<i v-if="counts[t.key] > 0" class="w-cnt">{{ counts[t.key] }}</i>
+          <span>{{ t.label }}</span>
+          <i v-if="counts[t.key] > 0" class="w-cnt">{{ counts[t.key] }}</i>
           <i v-if="t.key === 'unused' && hasExpiring" class="w-dot" title="有券快过期">●</i>
         </button>
-      </div>
+      </nav>
 
       <div class="cdlg-b">
         <p v-if="!account" class="empty-tip">登录后可查看我的券包</p>
         <p v-else-if="loading" class="empty-tip">加载中…</p>
-        <p v-else-if="loadError" class="empty-tip">{{ loadError }}</p>
+        <p v-else-if="loadError" class="empty-tip w-empty-error">{{ loadError }}</p>
         <p v-else-if="rows.length === 0" class="empty-tip">{{ EMPTY[tab] }}</p>
 
         <ul v-else class="w-list">
-          <li v-for="c in rows" :key="key(c)" class="w-row">
+          <li
+            v-for="c in rows"
+            :key="key(c)"
+            class="w-row"
+            :class="{ 'w-row-off': tagCls(c) === 'w-tag-off' }"
+          >
             <div class="w-head">
               <!-- ⚠️ 这层是 `div[role=button]` 而**不是** `<button>`：里面还要并排一颗真 `<button>`
                    （领取）。按钮套按钮是非法 HTML，浏览器会把它拆开、样式跟着崩。 -->
@@ -65,13 +74,19 @@
                 @keydown.enter.prevent="toggle(c)"
                 @keydown.space.prevent="toggle(c)"
               >
-                <span class="w-amt">{{ couponFace(c) }}</span>
+                <span class="w-cv">
+                  <b class="w-amt">{{ couponFace(c) }}</b>
+                  <small>{{ couponTypeLabel(c) }}</small>
+                </span>
                 <span class="w-mid">
-                  <b><i v-if="truthy(c.IsNew)" class="w-new">NEW</i>{{ couponName(c) }}</b>
-                  <span class="w-sub">{{ subText(c) }}</span>
+                  <b class="w-name"><i v-if="truthy(c.IsNew)" class="w-new">NEW</i>{{ couponName(c) }}</b>
+                  <small class="w-sub">{{ subText(c) }}</small>
                   <span class="w-date">有效期 {{ periodLabel(c.StartAt, c.EndAt) }}</span>
                 </span>
-                <span class="w-tag" :class="tagCls(c)">{{ tagText(c) }}</span>
+                <span class="w-tags">
+                  <span v-if="Number(c.MemberLevel) > 0" class="w-tag w-tag-vip">VIP 专享</span>
+                  <span class="w-tag" :class="tagCls(c)">{{ tagText(c) }}</span>
+                </span>
                 <span class="w-caret" :class="{ 'w-caret-on': expandedId === key(c) }">›</span>
               </div>
               <button
@@ -85,13 +100,13 @@
 
             <!-- 点击展开详情（一次只展开一条）。 -->
             <dl v-if="expandedId === key(c)" class="w-detail">
-              <div><dt>面额</dt><dd>{{ couponFace(c) }}</dd></div>
+              <div><dt>面额</dt><dd class="w-mono">{{ couponFace(c) }}</dd></div>
               <div><dt>券类型</dt><dd>{{ couponTypeLabel(c) }}</dd></div>
               <div><dt>门槛</dt><dd>{{ couponCond(c) }}</dd></div>
               <div><dt>适用范围</dt><dd>{{ scopeLabel(c) }}</dd></div>
-              <div><dt>有效期</dt><dd>{{ periodLabel(c.StartAt, c.EndAt) }}</dd></div>
-              <div v-if="c.GrantedAt"><dt>领取时间</dt><dd>{{ toLocal(c.GrantedAt) }}</dd></div>
-              <div v-if="c.UsedAt"><dt>使用时间</dt><dd>{{ toLocal(c.UsedAt) }}</dd></div>
+              <div><dt>有效期</dt><dd class="w-mono">{{ periodLabel(c.StartAt, c.EndAt) }}</dd></div>
+              <div v-if="c.GrantedAt"><dt>领取时间</dt><dd class="w-mono">{{ toLocal(c.GrantedAt) }}</dd></div>
+              <div v-if="c.UsedAt"><dt>使用时间</dt><dd class="w-mono">{{ toLocal(c.UsedAt) }}</dd></div>
               <div v-if="c.OrderId"><dt>订单号</dt><dd class="w-mono">{{ c.OrderId }}</dd></div>
               <div><dt>券编号</dt><dd class="w-mono">{{ c.CouponId }}</dd></div>
             </dl>
@@ -101,10 +116,10 @@
         <p v-if="msg" class="w-msg">{{ msg }}</p>
       </div>
 
-      <div class="cdlg-f">
-        <button class="cact" @click="close">关闭</button>
-      </div>
-    </div>
+      <footer class="cdlg-f">
+        <button class="cact" type="button" @click="close">关闭</button>
+      </footer>
+    </aside>
   </div>
 </template>
 
@@ -268,6 +283,7 @@ watch(() => props.account, (a) => { if (a && props.open) load() })
      （Vue 会把父作用域属性打在子组件根上）⇒ 两份规则叠加、改一处不知另一处在生效。
      `.w-main` / `.w-tag` / `.w-amt` 这些主页面也有同名的 `.tk-amt` 之类，撞名迟早发生。 -->
 <style scoped>
+/* ── 遮罩 + 右侧抽屉壳（A 版 `drawer` / `drawer-mask` 语言）─────────────── */
 .cscrim {
   position: fixed;
   inset: 0;
@@ -276,171 +292,377 @@ watch(() => props.account, (a) => { if (a && props.open) load() })
      用户中心没有更上层的弹窗，但档位照取 —— 别顺手降到 100/200 的「顺眼值」：
      那会重新埋回「弹窗被压住且**错得很安静**」那个 bug（`CashierDialog.vue:103` 记着全过程）。 */
   z-index: 300;
-  background: rgba(0, 0, 0, 0.42);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: var(--s5);
+  background: rgba(0, 0, 0, 0.26);
 }
 .cdlg {
-  width: min(560px, 100%);
-  max-height: 86vh;
-  overflow-y: auto;
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: min(540px, 94vw);
+  display: flex;
+  flex-direction: column;
   background: var(--surface);
-  border: 1px solid var(--line-2);
-  border-radius: var(--r2);
-  box-shadow: 0 12px 48px rgba(0, 0, 0, 0.22);
+  border-left: 1px solid var(--line);
+  box-shadow: -12px 0 32px rgba(0, 0, 0, 0.1);
+  animation: w-drawer-in 0.22s cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+@keyframes w-drawer-in {
+  from { transform: translateX(100%); }
+  to { transform: translateX(0); }
 }
 .cdlg-h {
+  flex: none;
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
-  padding: var(--s4) var(--s5);
+  gap: var(--s5);
+  padding: 20px 22px;
   border-bottom: 1px solid var(--line);
+}
+.w-kicker {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+.cdlg-h h2 {
+  margin-top: 5px;
   font-family: var(--font-display);
-  font-size: var(--fs-md);
-  font-weight: var(--fw-med);
+  font-size: 27px;
+  line-height: 1.1;
+  font-weight: var(--fw-semi);
+  letter-spacing: -0.02em;
   color: var(--ink);
 }
 .cdlg-h .cx {
-  border: 0;
-  background: transparent;
-  font-size: var(--fs-lg);
-  line-height: 1;
-  color: var(--ink-3);
-  cursor: pointer;
-}
-.cdlg-b { padding: var(--s5); }
-.cdlg-f {
-  display: flex;
-  justify-content: flex-end;
-  gap: var(--s3);
-  padding: var(--s4) var(--s5);
-  border-top: 1px solid var(--line);
-}
-.cact {
+  flex: none;
+  width: 30px;
   height: 30px;
-  padding: 0 var(--s4);
-  border: 1px solid var(--line-2);
-  border-radius: var(--r1);
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--line);
+  border-radius: 0;
   background: var(--surface);
-  color: var(--brand-ink);
-  font-size: var(--fs-xs);
-  font-weight: var(--fw-med);
-  white-space: nowrap;
+  color: var(--ink);
+  font-size: 16px;
+  line-height: 1;
   cursor: pointer;
+  transition: background-color 0.12s linear, color 0.12s linear;
 }
-.cact:hover { border-color: var(--brand); }
+.cdlg-h .cx:hover { background: var(--ink); color: var(--surface); }
+.cdlg-h .cx:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }
 
-/* 4 个 tab —— 下划线式，避免与弹窗边框叠出双线。 */
+/* ── 4 个 tab —— A 版直角色块页签（`msg-tabs` 语言），选中项反白 ──────── */
 .w-tabs {
-  display: flex;
-  gap: var(--s2);
-  padding: 0 var(--s5);
-  border-bottom: 1px solid var(--line);
+  flex: none;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  border-bottom: 1px solid var(--ink);
 }
 .w-tab {
-  font: inherit;
-  font-size: var(--fs-sm);
-  color: var(--ink-2);
-  background: transparent;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  min-width: 0;
+  padding: 10px 6px;
   border: 0;
-  border-bottom: 2px solid transparent;
-  padding: var(--s3) var(--s2);
-  cursor: pointer;
-}
-.w-tab-on { color: var(--brand-ink); border-bottom-color: var(--brand-ink); font-weight: var(--fw-med); }
-.w-cnt {
-  font-style: normal;
+  border-right: 1px solid var(--line);
+  border-radius: 0;
+  background: var(--surface);
+  color: var(--ink-2);
+  font: inherit;
   font-size: var(--fs-xs);
-  color: var(--ink-3);
-  margin-left: var(--s1);
+  cursor: pointer;
+  transition: background-color 0.12s linear, color 0.12s linear;
 }
-.w-dot { font-style: normal; font-size: var(--fs-xs); color: var(--danger); margin-left: var(--s1); }
+.w-tab:last-child { border-right: 0; }
+.w-tab:hover { background: var(--surface-2); }
+.w-tab-on,
+.w-tab-on:hover {
+  background: var(--ink);
+  border-right-color: var(--ink);
+  color: var(--surface);
+  font-weight: var(--fw-med);
+}
+.w-tab:focus-visible { outline: 2px solid var(--brand); outline-offset: -2px; }
+.w-cnt {
+  flex: none;
+  font-style: normal;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  line-height: 14px;
+  border: 1px solid currentColor;
+  padding: 0 4px;
+}
+.w-dot {
+  flex: none;
+  font-style: normal;
+  font-size: 8px;
+  line-height: 1;
+  color: var(--danger);
+}
+.w-tab-on .w-dot { color: var(--cin-300); }
 
-.w-list { display: flex; flex-direction: column; gap: var(--s2); margin: 0; padding: 0; list-style: none; }
+/* ── 抽屉正文：空态 / 加载 / 错误一律是虚线直角面板 ───────────────────── */
+.cdlg-b {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 20px 22px;
+  background: var(--surface);
+}
+.empty-tip {
+  margin: 0;
+  padding: 40px 20px;
+  border: 1px dashed var(--line-2);
+  background: var(--surface);
+  color: var(--ink-3);
+  font-size: var(--fs-xs);
+  line-height: 1.7;
+  text-align: center;
+}
+.empty-tip.w-empty-error {
+  border-style: solid;
+  border-color: var(--danger);
+  background: var(--danger-ground);
+  color: var(--danger-deep);
+}
+
+/* ── 券行：A 版 `coupon-item` 的三段式（面额块 / 信息 / 状态与动作）──────
+   `.w-main` 仍是 `div[role=button]`，领取按钮留在它外面（按钮套按钮非法）。 */
+.w-list { display: flex; flex-direction: column; gap: 12px; margin: 0; padding: 0; list-style: none; }
 .w-row {
   border: 1px solid var(--line);
-  border-radius: var(--r2);
-  background: var(--surface-2);
+  border-radius: 0;
+  background: var(--surface);
+  overflow: hidden;
 }
-.w-head { display: flex; align-items: center; gap: var(--s2); }
+.w-row:hover { border-color: var(--line-2); }
+.w-row-off { background: var(--surface-2); }
+.w-head { display: flex; align-items: stretch; }
 .w-main {
   flex: 1;
   min-width: 0;
-  display: flex;
+  display: grid;
+  grid-template-columns: 96px minmax(0, 1fr) auto 18px;
   align-items: center;
-  gap: var(--s3);
-  padding: var(--s3);
   cursor: pointer;
 }
 .w-main:focus-visible { outline: 2px solid var(--brand); outline-offset: -2px; }
-/* 面额走**大数字**（用户：每条券展示「面额大数字」）—— 与主页面那张小卡上的 `.tk-amt` 分开定尺寸。 */
+/* 面额走 A 版左侧独立数块：浅底 + 右发丝线，数字用 mono（等宽、tabular）。 */
+.w-cv {
+  align-self: stretch;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  padding: 12px 8px;
+  border-right: 1px solid var(--line);
+  background: var(--surface-2);
+}
 .w-amt {
   font-family: var(--font-mono);
-  font-size: var(--fs-lg);
-  font-weight: var(--fw-semi);
-  color: var(--brand-ink);
+  font-variant-numeric: tabular-nums;
+  font-size: 21px;
+  font-weight: var(--fw-reg);
+  line-height: 1;
+  color: var(--ink);
   white-space: nowrap;
 }
-.w-mid { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
-.w-mid b {
-  font-size: var(--fs-sm);
-  font-weight: var(--fw-med);
-  color: var(--ink);
+.w-cv small {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.04em;
+  color: var(--ink-3);
+  white-space: nowrap;
+}
+.w-row-off .w-cv { background: var(--surface-3); }
+.w-row-off .w-amt { color: var(--ink-3); }
+.w-mid {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 12px;
+}
+.w-name {
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-med);
+  color: var(--ink);
 }
+.w-row-off .w-name { color: var(--ink-3); }
 .w-new {
+  display: inline-block;
+  margin-right: 6px;
+  padding: 0 5px;
+  border-radius: 0;
+  background: var(--ink);
+  color: var(--surface);
+  font-family: var(--font-mono);
+  font-size: 9px;
   font-style: normal;
-  font-size: var(--fs-xs);
-  font-weight: var(--fw-semi);
-  color: var(--brand-ink);
-  background: var(--brand-soft);
-  border-radius: var(--r1);
-  padding: 0 4px;
-  margin-right: var(--s1);
+  font-weight: var(--fw-reg);
+  line-height: 15px;
+  letter-spacing: 0.06em;
+  vertical-align: 1px;
 }
 .w-sub,
-.w-date { font-size: var(--fs-xs); color: var(--ink-3); }
+.w-date { font-size: var(--fs-xs); line-height: 1.45; color: var(--ink-3); }
+.w-tags {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+  padding: 0 8px;
+}
 .w-tag {
-  font-size: var(--fs-xs);
-  border-radius: var(--r1);
-  padding: 1px 6px;
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 7px;
+  border: 1px solid var(--line-2);
+  border-radius: 0;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.04em;
+  line-height: 1.5;
   white-space: nowrap;
 }
-.w-tag-on { color: var(--success-deep); background: var(--success-ground); }
-.w-tag-warn { color: var(--warning-deep); background: var(--warning-ground); }
+.w-tag-on { color: var(--success-deep); background: var(--success-ground); border-color: var(--success); }
+.w-tag-warn { color: var(--warning-deep); background: var(--warning-ground); border-color: var(--warning); }
 .w-tag-off { color: var(--ink-3); background: var(--surface-3); }
-.w-caret { color: var(--ink-3); transition: transform 0.15s; }
+/* VIP 专享券（批四第二批 commit 3）：`coupon.MemberLevel > 0` 的券加一枚标签。
+   ⚠️ 与状态标签 `.w-tag` 同形，但颜色取品牌色 —— 它是**身份标签**，不与「可领取/已使用」抢语义。 */
+.w-tag-vip { color: var(--brand-ink); background: var(--brand-soft); border-color: var(--brand); }
+.w-caret {
+  padding-right: 10px;
+  color: var(--ink-3);
+  font-family: var(--font-mono);
+  font-size: 16px;
+  line-height: 1;
+  text-align: center;
+  transition: transform 0.15s linear;
+}
 .w-caret-on { transform: rotate(90deg); }
 
+/* 领取按钮：A 版实心块（`btn solid`），禁用态退回浅底。 */
 .w-get {
+  flex: none;
+  align-self: center;
+  min-width: 54px;
+  height: 30px;
+  margin: 0 12px;
+  padding: 0 12px;
+  border: 1px solid var(--ink);
+  border-radius: 0;
+  background: var(--ink);
+  color: var(--surface);
   font: inherit;
   font-size: var(--fs-xs);
-  color: var(--brand-ink);
-  background: var(--brand-soft);
-  border: 1px solid var(--brand-ink);
-  border-radius: var(--r1);
-  padding: 2px var(--s3);
-  margin-right: var(--s3);
+  line-height: 1;
   white-space: nowrap;
   cursor: pointer;
+  transition: background-color 0.12s linear, color 0.12s linear;
 }
-.w-get[disabled] { color: var(--ink-3); background: var(--surface-3); border-color: var(--line-2); cursor: default; }
+.w-get:hover { background: var(--surface); color: var(--ink); }
+.w-get:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }
+.w-get[disabled] {
+  background: var(--surface-3);
+  border-color: var(--line-2);
+  color: var(--ink-3);
+  cursor: default;
+}
 
+/* 展开详情：A 版 ledger（发丝线行 + 右侧数值），字段一个不少。 */
 .w-detail {
   margin: 0;
-  padding: var(--s3) var(--s3) var(--s3) var(--s6);
-  border-top: 1px dashed var(--line-2);
-  display: grid;
-  grid-template-columns: repeat(2, 1fr);
-  gap: var(--s2) var(--s4);
+  padding: 4px 16px 6px;
+  border-top: 1px solid var(--line);
+  background: var(--surface);
 }
-.w-detail > div { display: flex; gap: var(--s2); font-size: var(--fs-xs); }
-.w-detail dt { color: var(--ink-3); white-space: nowrap; }
-.w-detail dd { margin: 0; color: var(--ink-2); }
-.w-mono { font-family: var(--font-mono); }
-.w-msg { margin: var(--s3) 0 0; font-size: var(--fs-xs); color: var(--brand-ink); }
+.w-row-off .w-detail { background: var(--surface-2); }
+.w-detail > div {
+  display: grid;
+  grid-template-columns: 88px minmax(0, 1fr);
+  gap: 12px;
+  padding: 7px 0;
+  border-bottom: 1px solid var(--line);
+  font-size: var(--fs-xs);
+}
+.w-detail > div:last-child { border-bottom: 0; }
+.w-detail dt {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  color: var(--ink-3);
+  white-space: nowrap;
+}
+.w-detail dd {
+  margin: 0;
+  color: var(--ink-2);
+  text-align: right;
+  overflow-wrap: anywhere;
+}
+.w-mono { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+
+/* 领取反馈：直角提示块（品牌色，不与错误状态混淆）。 */
+.w-msg {
+  margin: var(--s3) 0 0;
+  padding: 9px 12px;
+  border: 1px solid var(--brand);
+  background: var(--brand-tint);
+  color: var(--brand-ink);
+  font-size: var(--fs-xs);
+}
+
+/* ── 抽屉页脚 ─────────────────────────────────────────────────────────── */
+.cdlg-f {
+  flex: none;
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--s2);
+  padding: 14px 22px;
+  border-top: 1px solid var(--line);
+  background: var(--surface-2);
+}
+.cact {
+  height: 32px;
+  padding: 0 16px;
+  border: 1px solid var(--ink);
+  border-radius: 0;
+  background: var(--surface);
+  color: var(--ink);
+  font: inherit;
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-med);
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background-color 0.12s linear, color 0.12s linear;
+}
+.cact:hover { background: var(--ink); color: var(--surface); }
+.cact:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }
+
+@media (max-width: 560px) {
+  .cdlg { width: 100vw; }
+  .cdlg-h { padding: 16px; }
+  .cdlg-b { padding: 16px; }
+  .w-main { grid-template-columns: 82px minmax(0, 1fr) auto; }
+  .w-caret { display: none; }
+  .w-mid { padding: 10px; }
+  .w-cv { padding: 10px 4px; }
+  .w-amt { font-size: 18px; }
+  .w-get { min-width: 48px; margin: 0 8px; padding: 0 10px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .cdlg { animation: none; }
+}
 </style>

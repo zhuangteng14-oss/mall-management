@@ -72,7 +72,7 @@
 import { computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ADMIN_SIDEBAR } from '../config/admin-nav'
-import { getUsername, getRole, clearCredentials, clearToken } from '../api/auth'
+import { getUsername, getRole, clearCredentials, getAdminUsername, isAdminSession, clearAdminSession } from '../api/auth'
 import { http } from '../api/http'
 import { endpoints } from '../api/endpoints'; import IconGlyph from '../components/ui/IconGlyph.vue'   // ⚠️ 两条 import **同行**（2026-10-11 补图标那一笔）—— 为**净零行数**：本文件被 `api/auth.js:76`（引 `AdminShell.vue:99` 的角色名表）与 `c3-block-1-infra.md:106`（引 `:69-90`）按行号钉住，顶部加一行会让它们漂移。下面两处侧栏 `v-for` 里的 `<IconGlyph …>` 同理是**同行**插的
 
@@ -97,7 +97,7 @@ const pageTitle = computed(() => route.meta.title || '概览')
 //   不重建本壳** ⇒ 挂载时读到的那一份身份，在整个管理端会话内不会过时。
 // ⚠️ 别为了「更实时」改成 `watch`：那要 `api/auth.js` 开一个响应式读口，为一个不会发生的场景
 //   改公共模块，不划算。
-const who = getUsername() || '管理员'
+const who = getAdminUsername() || getUsername() || '管理员'   // 2026-10-19：管理员独立登录后优先显示管理员账号（用户/商家的 username 保留不覆盖）
 const roleLabel = { '1': '客户', '2': '商家', '3': '管理员' }[getRole()] || '管理员'
 
 // ⚠️ 退出：与 `UserCenter.vue:52-65` 是**同一条契约**，但**少一支** —— 管理端没有 `merchant`
@@ -111,9 +111,11 @@ const roleLabel = { '1': '客户', '2': '商家', '3': '管理员' }[getRole()] 
 //    ⚠️ 管理员的**票本来就是空的**（TD-18：cookie 管理员铸不出票）⇒ ③ 今天是个空操作。
 //       留着它是为了「将来铸票路径定案后不用回来补」—— 而不是因为今天有用。
 const exit = () => {
-  clearCredentials()
-  router.push('/login')
-  http.post(endpoints.user.logout, null, { allowUnauthorized: true }).catch(() => {}).finally(() => clearToken())
+  const legacy = !isAdminSession()   // 旧入口（普通登录页 role=3）登录时没有管理员标记；那种才需要清用户身份键
+  http.post(endpoints.user.logout, null, { allowUnauthorized: true }).catch(() => {})   // 先发：管理员标记仍在 ⇒ `http.js` 不带用户/商家的票
+  clearAdminSession()
+  if (legacy) clearCredentials()
+  router.push('/admin/login')   // 2026-10-19 用户令：管理员退出回**管理员**登录页；用户/商家的身份键与票原样保留
 }
 
 // 预取：管理端首屏之后，空闲时先把「实时日志」页的模块**求值**掉。

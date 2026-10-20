@@ -1,95 +1,118 @@
 <template>
   <main class="ms-page">
-    <header class="ms-head">
+    <!-- A 版页头（稿 `a.html` · pageStats 的 `.page-head`）：kicker / h1 / 说明 + 右侧出口。
+         ⚠️ 右侧「刷新」调用的仍是既有 `load()`（不新增端点）；区间文案仍来自 `rangeLabel`。 -->
+    <header class="page-head">
       <div>
-        <h1 class="ms-h1">经营数据</h1>
-        <p class="ms-sub">
+        <div class="kicker">MERCHANT / STATS</div>
+        <h1>经营数据</h1>
+        <p class="lead">
           本店口径（<code>Scope = merchant</code>），业务号
-          <b class="ms-mid">{{ mid || '（未取到）' }}</b>
+          <b class="mid">{{ mid || '（未取到）' }}</b>
           · 数据来自预聚合的 <code>stats_daily</code>，不直读订单表
         </p>
       </div>
-      <div class="ms-range">
-        <span class="ms-chip">区间</span>
-        <b class="ms-rangespan">{{ rangeLabel }}</b>
+      <div class="head-actions">
+        <span class="range-chip">
+          <span class="range-k">区间</span>
+          <b>{{ rangeLabel }}</b>
+        </span>
+        <router-link class="btn" to="/merchant/user/info">返回用户中心</router-link><button type="button" class="btn" :disabled="loading" @click="load">
+          <IconGlyph name="flow" />刷新
+        </button>
       </div>
     </header>
 
-    <p v-if="loadMsg" class="ms-flash">{{ loadMsg }}</p>
+    <p v-if="loadMsg" class="flash">{{ loadMsg }}</p>
 
     <!-- ── 没预聚合过 ⇒ 说破它 ────────────────────────────────────────────────
          ⚠️ 与订单页 / 管理端看板同一条口径：`0`（真的没生意）与「还没算过」必须分得开。
          商家端**没有重建入口**（`/admin/stats/rebuild` 是管理员的）⇒ 这里只解释、不给按钮。 -->
-    <p v-if="notBuilt" class="ms-gate">
+    <p v-if="notBuilt" class="gate">
       <b>本店还没被预聚合过。</b>
       <code>stats_daily</code> 里暂时没有本店的行 ⇒ 下面全是 0，但那不代表没有订单。
       全量重建是<b>管理员</b>的动作（<code>POST /admin/stats/rebuild</code>），本页不提供入口。
     </p>
 
-    <!-- ── 区间选择 ──────────────────────────────────────────────────────────── -->
-    <form class="ms-filters" @submit.prevent="load">
-      <div class="ms-seg">
+    <!-- ── 区间选择（A 版 chips + 发丝线输入框）──────────────────────────────── -->
+    <form class="filter-bar" @submit.prevent="load">
+      <div class="chips">
         <button
           v-for="r in RANGES"
           :key="r.key"
           type="button"
-          class="ms-seg-b"
+          class="chip"
           :class="{ on: quick === r.key }"
           @click="pickQuick(r.key)"
         >{{ r.label }}</button>
       </div>
-      <label class="ms-f">
+      <label class="field">
         <span>起始（含）</span>
         <input v-model.trim="f.from" type="text" placeholder="YYYY-MM-DD" />
       </label>
-      <label class="ms-f">
+      <label class="field">
         <span>结束（含）</span>
         <input v-model.trim="f.to" type="text" placeholder="YYYY-MM-DD" />
       </label>
-      <button type="submit" class="ms-btn ms-btn-on" :disabled="loading"><IconGlyph name="ok" />查询</button>
+      <button type="submit" class="btn solid" :disabled="loading"><IconGlyph name="ok" />查询</button>
     </form>
 
-    <!-- ══ 区间合计 ═══════════════════════════════════════════════════════════ -->
-    <h2 class="ms-h2">区间合计</h2>
-    <div class="ms-kpis">
-      <KpiCard
-        label="成交额（GMV）" glyph="metrics" unit="元"
-        :value="loadFailed ? '—' : fmtMoney(totals.Gmv)"
-        :delta="deltaOf('Gmv')" delta-label="较上一等长区间" :loading="loading"
-      />
-      <KpiCard
-        label="成单数" glyph="orders" unit="单"
-        :value="loadFailed ? '—' : fmtInt(totals.Orders)"
-        :delta="deltaOf('Orders')" delta-label="较上一等长区间" :loading="loading"
-      />
-      <KpiCard
-        label="商品件数" glyph="goods" unit="件"
-        :value="loadFailed ? '—' : fmtInt(totals.Items)"
-        :delta="deltaOf('Items')" delta-label="较上一等长区间" :loading="loading"
-      />
-      <KpiCard
-        label="买家数" glyph="users" unit="人日"
-        :value="loadFailed ? '—' : fmtInt(totals.Buyers)"
-        :delta="deltaOf('Buyers')" delta-label="较上一等长区间"
-        hint="按日去重后相加，不是跨日人数" :loading="loading"
-      />
-      <KpiCard
-        label="客单价" glyph="metrics" unit="元"
-        :value="loadFailed ? '—' : fmtMoney(totals.aov)"
-        :delta="deltaOf('aov')" delta-label="较上一等长区间" :loading="loading"
-      />
-    </div>
+    <!-- ══ 区间合计（A 版 stat-band：直角 + 发丝线 + mono 数字）════════════════ -->
+    <section class="band-block">
+      <div class="section-title">
+        <h2>区间合计</h2>
+        <span class="tiny">TOTALS / RANGE</span>
+      </div>
+      <div class="stat-band">
+        <div class="stat-cell">
+          <KpiCard
+            label="成交额（GMV）" glyph="metrics" unit="元"
+            :value="loadFailed ? '—' : fmtMoney(totals.Gmv)"
+            :delta="deltaOf('Gmv')" delta-label="较上一等长区间" :loading="loading"
+          />
+        </div>
+        <div class="stat-cell">
+          <KpiCard
+            label="成单数" glyph="orders" unit="单"
+            :value="loadFailed ? '—' : fmtInt(totals.Orders)"
+            :delta="deltaOf('Orders')" delta-label="较上一等长区间" :loading="loading"
+          />
+        </div>
+        <div class="stat-cell">
+          <KpiCard
+            label="商品件数" glyph="goods" unit="件"
+            :value="loadFailed ? '—' : fmtInt(totals.Items)"
+            :delta="deltaOf('Items')" delta-label="较上一等长区间" :loading="loading"
+          />
+        </div>
+        <div class="stat-cell">
+          <KpiCard
+            label="买家数" glyph="users" unit="人日"
+            :value="loadFailed ? '—' : fmtInt(totals.Buyers)"
+            :delta="deltaOf('Buyers')" delta-label="较上一等长区间"
+            hint="按日去重后相加，不是跨日人数" :loading="loading"
+          />
+        </div>
+        <div class="stat-cell">
+          <KpiCard
+            label="客单价" glyph="metrics" unit="元"
+            :value="loadFailed ? '—' : fmtMoney(totals.aov)"
+            :delta="deltaOf('aov')" delta-label="较上一等长区间" :loading="loading"
+          />
+        </div>
+      </div>
+    </section>
 
     <!-- ══ 成交额 / 成单数趋势（双 Y 轴折线）═══════════════════════════════════
          ⚠️ 2026-10-11：与**管理端** `views/admin/StatsPage.vue` 同款整改，两边口径必须一致
          （同一个后端端点、同一批 `Scope = merchant` 的行，图长得不一样会让人以为数据不同）——
          GMV 1e7 / 单数 1e1 差三个数量级，同轴会把小的压成一条线，故拆**左右两条轴**：
          **左轴 = 成交额（万元）、右轴 = 成单数（单）**，轴各自染色（见 `LineChart.vue`）。 -->
-    <h2 class="ms-h2">
-      成交额 / 成单数趋势
-      <span class="ms-h2n">左轴 ¥ 单位万元 · 右轴 单位单 · 缺日补 0</span>
-    </h2>
-    <div class="ms-card">
+    <section class="panel">
+      <div class="section-title">
+        <h2>成交额 / 成单数趋势</h2>
+        <span class="tiny">左轴 ¥ 单位万元 · 右轴 单位单 · 缺日补 0</span>
+      </div>
       <LineChart
         :categories="seriesDates"
         :series="[
@@ -103,14 +126,17 @@
         :error="loadFailed ? loadMsg : ''"
         @retry="load"
       />
-    </div>
+    </section>
 
     <!-- ══ 商品榜 ═════════════════════════════════════════════════════════════
          ⚠️ **上线即空是预期，不是故障**（用户裁定 §三：`order_item` 不回填存量单）。
          所以这里的空态文案**必须**解释成因，而不是那句通用的「暂无数据」——
          否则商家会以为是自己这店没卖出去东西。 -->
-    <h2 class="ms-h2">商品榜 <span class="ms-h2n">实时聚合 order_item · 按销售额降序</span></h2>
-    <div class="ms-card">
+    <section class="panel">
+      <div class="section-title">
+        <h2>商品榜</h2>
+        <span class="tiny">实时聚合 order_item · 按销售额降序</span>
+      </div>
       <BarChart
         :categories="goodsNames"
         :series="[{ name: '销售额', data: goodsSales }]"
@@ -124,56 +150,63 @@
         empty-text="暂无可统计的商品明细 —— 历史单没有明细行（order_item 不回填存量单），只统计新下的单。"
         @retry="load"
       />
-    </div>
+    </section>
 
     <!-- ══ 逐日明细 ═══════════════════════════════════════════════════════════ -->
-    <h2 class="ms-h2">逐日明细 <span class="ms-h2n">升序</span></h2>
-    <p v-if="!days.length" class="ms-empty">
-      {{ loading ? '加载中…' : (notBuilt ? '还没预聚合，等管理员跑一次全量重建。' : '该区间内本店没有已聚合的日。') }}
-    </p>
-    <table v-else class="ms-tbl">
-      <thead>
-        <tr>
-          <th>日期</th>
-          <th class="num">成单数</th>
-          <th class="num">成交额（元）</th>
-          <th class="num">件数</th>
-          <th class="num">去重买家</th>
-          <th class="num">客单价（元）</th>
-        </tr>
-      </thead>
-      <tbody>
-        <tr v-for="r in pageDays" :key="r.StatDate">
-          <td class="mono">{{ r.StatDate }}</td>
-          <td class="num">{{ fmtInt(r.Orders) }}</td>
-          <td class="num">{{ fmtMoney(r.Gmv) }}</td>
-          <td class="num">{{ fmtInt(r.Items) }}</td>
-          <td class="num">{{ fmtInt(r.Buyers) }}</td>
-          <td class="num">{{ fmtMoney(r.aov) }}</td>
-        </tr>
-      </tbody>
-      <tfoot>
-        <tr>
-          <td>合计</td>
-          <td class="num">{{ fmtInt(totals.Orders) }}</td>
-          <td class="num">{{ fmtMoney(totals.Gmv) }}</td>
-          <td class="num">{{ fmtInt(totals.Items) }}</td>
-          <td class="num">{{ fmtInt(totals.Buyers) }}</td>
-          <td class="num">{{ fmtMoney(totals.aov) }}</td>
-        </tr>
-      </tfoot>
-    </table>
-    <!-- 块 7 收尾 · P1：标准分页（默认每页 20）；早先的 `tfoot` 合计仍按**整段**算。 -->
-    <Pager
-      v-if="days.length"
-      :total="days.length"
-      :limit="pageLimit"
-      :offset="pageOffset"
-      :sizes="[20, 50, 100]"
-      unit="天"
-      label="逐日明细"
-      @change="onDaysPage"
-    />
+    <section class="panel">
+      <div class="section-title">
+        <h2>逐日明细</h2>
+        <span class="tiny">ASC / 升序</span>
+      </div>
+      <p v-if="!days.length" class="empty">
+        {{ loading ? '加载中…' : (notBuilt ? '还没预聚合，等管理员跑一次全量重建。' : '该区间内本店没有已聚合的日。') }}
+      </p>
+      <div v-else class="table-wrap">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>日期</th>
+              <th class="num">成单数</th>
+              <th class="num">成交额（元）</th>
+              <th class="num">件数</th>
+              <th class="num">去重买家</th>
+              <th class="num">客单价（元）</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="r in pageDays" :key="r.StatDate">
+              <td class="mono">{{ r.StatDate }}</td>
+              <td class="num">{{ fmtInt(r.Orders) }}</td>
+              <td class="num">{{ fmtMoney(r.Gmv) }}</td>
+              <td class="num">{{ fmtInt(r.Items) }}</td>
+              <td class="num">{{ fmtInt(r.Buyers) }}</td>
+              <td class="num">{{ fmtMoney(r.aov) }}</td>
+            </tr>
+          </tbody>
+          <tfoot>
+            <tr>
+              <td>合计</td>
+              <td class="num">{{ fmtInt(totals.Orders) }}</td>
+              <td class="num">{{ fmtMoney(totals.Gmv) }}</td>
+              <td class="num">{{ fmtInt(totals.Items) }}</td>
+              <td class="num">{{ fmtInt(totals.Buyers) }}</td>
+              <td class="num">{{ fmtMoney(totals.aov) }}</td>
+            </tr>
+          </tfoot>
+        </table>
+      </div>
+      <!-- 块 7 收尾 · P1：标准分页（默认每页 20）；早先的 `tfoot` 合计仍按**整段**算。 -->
+      <Pager
+        v-if="days.length"
+        :total="days.length"
+        :limit="pageLimit"
+        :offset="pageOffset"
+        :sizes="[20, 50, 100]"
+        unit="天"
+        label="逐日明细"
+        @change="onDaysPage"
+      />
+    </section>
   </main>
 </template>
 
@@ -338,235 +371,346 @@ onMounted(load)
 </script>
 
 <style scoped>
-/* ⚠️ 2026-10-11（用户裁决 ④「经营数据入口放个人中心里」）：本页从 `/merchant/stats`
-   （`meta.layout:'page'` ⇒ 独立整页）改挂 `merchantUser` 下 ⇒ 现在渲染在**个人中心壳**
-   （`AppShell.vue` 的 `.user-page` 那个 flex 行）的右栏槽位里 —— 同槽位先例 =
-   `MerchantApplyPage.vue` / `HistoricalOrders.vue` / `FriendRoom.vue` / `GoodsAdd.vue` 各自那条
-   `.uc-main`。（本页**不叫** `uc-main`：那条规则在每个页面里都是**各页 scoped 各写一份**，
-   本页既然不要它那三条字体声明（见下 ⚠️），换个名反而更清楚 —— 元素类型 `<main>` 与那些页一致。）⇒ 两件事：
-   ① 本元素成了那个 flex 行的**直接子项** ⇒ 要 `flex:1; min-width:0` 才撑住右栏
-      （`min-width:0` 防 flex 子项被内容顶宽 —— 本页有宽表与长数字）。
-   ② 外层 chrome **交还给 `.user-page`**：它已经给了 `max-width:1140px` + `margin:0 auto` +
-      `padding: var(--s7) var(--s5) var(--s8)` ⇒ 本页**不能再各来一套**。改前那三行
-      （`1180` / `0 auto` / `--s6 --s5 --s8`）是「独立整页」时代的，留着就是**双份留白**、
-      而且 1140 与 1180 两个上限会打架。
-   ⚠️ 只动**外壳三件**：页内密度 / 字号 / 栅格一个没动 —— ④ 不夹带走 ⑥ 的版式改造。
-   ⚠️ 与 `.uc-main` 的差别：那些页面还在根上声明 `font-family:var(--font)` /
-      `font-size:var(--fs-sm)` / `color:var(--ink)`（照自己的稿），本页的字号本来**逐处显式**
-      （`--fs-lg` / `--fs-xs` / …）⇒ 不引那三条，免得顺手改了本页已验证的排版。 */
+/* ⚠️ 2026-10-11（用户裁决 ④「经营数据入口放个人中心里」）：本页跑在**个人中心壳**
+   （`AppShell.vue` 的 `.user-page` flex 行）的右栏槽位里 ⇒ ① 根元素是 flex 子项，
+   要 `flex:1; min-width:0` 才撑住右栏（min-width:0 防宽表把右栏顶宽）；② 外层居中与
+   留白交还 `.user-page`（它已给 max-width + margin auto + padding），本页不再各来一套。
+   ⚠️ 2026-10-19：版式按 A 版线框（`_work/ui-wireframe/a.html` · `pageStats`）重排 ——
+   直角、发丝线、mono 数字；只动模板结构与样式，`<script setup>` 与所有数据链原样。 */
 .ms-page {
   flex: 1;
   min-width: 0;
 }
 
-.ms-head {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: var(--s4);
-  flex-wrap: wrap;
+/* ── 页头（稿 `.page-head`）──────────────────────────────────────────────── */
+.page-head {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: var(--s5);
+  align-items: end;
+  padding-bottom: var(--s5);
+  border-bottom: 1px solid var(--line);
+  margin-bottom: var(--s6);
 }
-.ms-h1 {
-  font-size: var(--fs-lg);
+.kicker {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+.page-head h1 {
+  margin: 10px 0 12px;
+  font-family: var(--font-display);
+  font-size: var(--fs-2xl);
   font-weight: var(--fw-semi);
+  line-height: 1.05;
+  letter-spacing: -0.02em;
   color: var(--ink);
 }
-.ms-sub {
-  margin-top: var(--s1);
-  font-size: var(--fs-xs);
-  color: var(--ink-3);
+.lead {
+  max-width: 700px;
+  font-size: var(--fs-sm);
   line-height: 1.7;
+  color: var(--ink-3);
 }
-.ms-mid {
+.lead code,
+.mid {
   font-family: var(--font-mono);
   color: var(--ink-2);
 }
-.ms-range {
+.mid { font-weight: var(--fw-med); }
+.head-actions {
   display: flex;
   align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
   gap: var(--s2);
+}
+.range-chip {
+  display: flex;
+  align-items: baseline;
+  gap: var(--s2);
+  padding: 8px 10px;
+  border: 1px solid var(--line-2);
   font-size: var(--fs-xs);
   color: var(--ink-2);
-  background: var(--surface-2);
-  border: 1px solid var(--line);
-  border-radius: var(--r2);
-  padding: var(--s2) var(--s3);
 }
-.ms-chip {
-  color: var(--info);
-  background: var(--info-ground);
-  border-radius: var(--r1);
-  padding: 1px 6px;
-}
-.ms-rangespan {
+.range-k {
   font-family: var(--font-mono);
-  color: var(--brand-ink);
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  color: var(--ink-3);
+}
+.range-chip b {
+  font-family: var(--font-mono);
+  font-weight: var(--fw-reg);
+  color: var(--ink);
 }
 
-.ms-flash {
-  margin-top: var(--s4);
+/* ── 按钮（稿 `.btn` / `.btn.solid`：直角、1px 墨线）──────────────────────── */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--s2);
+  height: 36px;
+  padding: 0 var(--s5);
+  border: 1px solid var(--line-2);
+  border-radius: 0;
+  background: var(--surface);
+  color: var(--ink-2);
+  font: inherit;
+  font-size: var(--fs-sm);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.btn:hover { border-color: var(--ink); color: var(--ink); }
+.btn.solid {
+  border-color: var(--ink);
+  background: var(--ink);
+  color: var(--surface);
+}
+.btn.solid:hover { background: var(--surface); color: var(--ink); }
+.btn:disabled { opacity: 0.45; cursor: not-allowed; }
+
+/* ── 提示（原有 0 / 未聚合 / 错误文案原样保留）────────────────────────────── */
+.flash {
+  margin-top: var(--s5);
+  padding: var(--s3) var(--s4);
+  border: 1px solid var(--danger);
   font-size: var(--fs-sm);
   color: var(--danger);
   background: var(--danger-ground);
-  border-radius: var(--r2);
-  padding: var(--s3) var(--s4);
 }
-.ms-gate {
-  margin-top: var(--s4);
+.gate {
+  margin-top: var(--s5);
+  padding: var(--s4);
+  border: 1px solid var(--warning);
   font-size: var(--fs-sm);
+  line-height: 1.7;
   color: var(--warning-deep);
   background: var(--warning-ground);
-  border: 1px solid var(--warning);
-  border-radius: var(--r3);
-  padding: var(--s4) var(--s5);
-  line-height: 1.7;
 }
-.ms-gate code {
+.gate code {
   font-family: var(--font-mono);
   color: var(--ink-2);
 }
 
-.ms-filters {
+/* ── 区间筛选（稿 `.filter-bar` / `.chips` / `.chip`）────────────────────── */
+.filter-bar {
   display: flex;
   flex-wrap: wrap;
   align-items: flex-end;
   gap: var(--s4);
   margin-top: var(--s5);
-  /* ⑥：与 `.ms-card` 同一条理由（稿 `.pad` = 16 四周）。 */
   padding: var(--s4);
+  border: 1px solid var(--line);
   background: var(--surface);
-  border: 1px solid var(--line);
-  border-radius: var(--r3);
 }
-.ms-seg {
-  display: flex;
-  gap: 2px;
-  padding: 3px;
-  background: var(--surface-2);
-  border: 1px solid var(--line);
-  border-radius: var(--r2);
-}
-.ms-seg-b {
+.chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.chip {
+  padding: 7px 10px;
+  border: 1px solid var(--line-2);
+  border-radius: 0;
+  background: var(--surface);
+  color: var(--ink-2);
   font: inherit;
   font-size: var(--fs-xs);
-  color: var(--ink-3);
-  background: none;
-  border: 0;
-  border-radius: var(--r1);
-  padding: var(--s1) var(--s3);
   cursor: pointer;
   white-space: nowrap;
 }
-.ms-seg-b:hover { color: var(--ink-2); }
-.ms-seg-b.on {
-  background: var(--surface);
-  color: var(--brand-ink);
-  font-weight: var(--fw-med);
+.chip:hover { border-color: var(--ink); }
+.chip.on {
+  border-color: var(--ink);
+  background: var(--ink);
+  color: var(--surface);
 }
-.ms-f {
+.field {
   display: flex;
+  flex: 1 1 150px;
   flex-direction: column;
   gap: var(--s1);
-  font-size: var(--fs-xs);
-  color: var(--ink-3);
-  flex: 1 1 150px;
   min-width: 130px;
-}
-.ms-f input {
-  font: inherit;
-  font-size: var(--fs-sm);
-  color: var(--ink);
-  background: var(--surface-2);
-  border: 1px solid var(--line-2);
-  border-radius: var(--r2);
-  padding: var(--s2) var(--s3);
-}
-.ms-btn {
-  font: inherit;
-  font-size: var(--fs-sm);
-  color: var(--ink-2);
-  background: var(--surface-2);
-  border: 1px solid var(--line-2);
-  border-radius: var(--r2);
-  padding: var(--s2) var(--s4);
-  cursor: pointer;
-  white-space: nowrap;
-}
-.ms-btn-on {
-  color: var(--brand-ink);
-  background: var(--brand-soft);
-  border-color: var(--brand-ink);
-}
-.ms-btn:disabled { cursor: default; opacity: 0.6; }
-
-.ms-h2 {
-  display: flex;
-  align-items: baseline;
-  gap: var(--s3);
-  flex-wrap: wrap;
-  margin: var(--s6) 0 var(--s3);
-  font-size: var(--fs-md);
-  font-weight: var(--fw-semi);
-  color: var(--ink);
-}
-.ms-h2n {
-  font-family: var(--font-mono);
   font-size: var(--fs-xs);
-  font-weight: var(--fw-reg);
+  color: var(--ink-3);
+}
+.field span {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.06em;
+}
+.field input {
+  padding: 7px 10px;
+  border: 1px solid var(--line-2);
+  border-radius: 0;
+  background: var(--surface);
+  color: var(--ink);
+  font: inherit;
+  font-size: var(--fs-sm);
+}
+.field input:focus,
+.btn:focus-visible,
+.chip:focus-visible {
+  outline: 2px solid var(--brand-soft);
+  outline-offset: 1px;
+}
+
+/* ── 区块标题（稿 `.section-title`）──────────────────────────────────────── */
+.section-title {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: var(--s4);
+  padding-bottom: 10px;
+  margin-bottom: var(--s4);
+  border-bottom: 1px solid var(--line);
+}
+.section-title h2 {
+  font-family: var(--font-display);
+  font-size: var(--fs-lg);
+  font-weight: var(--fw-semi);
+  line-height: 1.1;
+  letter-spacing: -0.02em;
+  color: var(--ink);
+}
+.tiny {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.06em;
   color: var(--ink-3);
 }
 
-.ms-kpis {
+/* ── KPI 带（稿 `.stat-band` / `.stat-cell`）───────────────────────────────
+   ⚠️ 仍用 `KpiCard`（环比、骨架、`hint`、按字符数自适应字号都是它的功能），
+   只在本页把它的卡片外观压平成 stat-cell：直角、去独立边框、数字 mono。 */
+.band-block { margin-top: var(--s6); }
+.stat-band {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-  /* ⚠️ 2026-10-11（用户裁决 ⑥「去 AI 化」）：`--s4`(16) → `--s3`(12)，与 `admin/StatsPage.vue` 的
-     `.a-kpis` 同值（稿 `.kpis{gap:12px}`，`丁-运营蓝.html:176`）。 */
-  gap: var(--s3);
-}
-.ms-card {
-  background: var(--surface);
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   border: 1px solid var(--line);
-  border-radius: var(--r3);
-  /* ⑥：`--s4 --s5`（16/24）→ `--s4`（16 四周）= 稿 `.pad{padding:16px}`（`丁-运营蓝.html:173`）。 */
-  padding: var(--s4);
+  background: var(--surface);
 }
+.stat-cell {
+  min-width: 0;
+  border-right: 1px solid var(--line);
+}
+.stat-cell:last-child { border-right: 0; }
+.stat-cell :deep(.kpi) {
+  height: 100%;
+  padding: var(--s4);
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+.stat-cell :deep(.kpi-k) {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.05em;
+  color: var(--ink-3);
+}
+.stat-cell :deep(.kpi-v) { margin-top: var(--s2); }
+.stat-cell :deep(.kpi-n) {
+  font-weight: var(--fw-reg);
+  letter-spacing: -0.02em;
+}
+.stat-cell :deep(.kpi-u),
+.stat-cell :deep(.kpi-d) { font-size: 10px; }
 
-.ms-tbl {
+/* ── 图表面板（稿 `.panel`）─────────────────────────────────────────────── */
+.panel {
+  padding: var(--s5);
+  border: 1px solid var(--line);
+  background: var(--surface);
+}
+.panel + .panel { margin-top: var(--s5); }
+.band-block + .panel { margin-top: var(--s6); }
+
+/* ── 逐日明细（稿 `.log-table`：发丝线 + mono 表头 / 数字列）─────────────── */
+.table-wrap { overflow-x: auto; }
+.data-table {
   width: 100%;
   border-collapse: collapse;
   font-size: var(--fs-sm);
   color: var(--ink-2);
-  background: var(--surface);
-  border: 1px solid var(--line);
-  border-radius: var(--r3);
-  overflow: hidden;
 }
-.ms-tbl th,
-.ms-tbl td {
+.data-table th {
+  padding: 9px 8px;
+  border-bottom: 1px solid var(--line);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: var(--fw-reg);
+  letter-spacing: 0.05em;
+  color: var(--ink-3);
   text-align: left;
-  padding: var(--s2) var(--s3);
+  white-space: nowrap;
+}
+.data-table td {
+  padding: 11px 8px;
   border-bottom: 1px solid var(--line);
 }
-.ms-tbl th {
-  font-size: var(--fs-xs);
-  font-weight: var(--fw-med);
-  color: var(--ink-3);
-  background: var(--surface-2);
-}
-.ms-tbl .num {
-  text-align: right;
+.data-table tbody tr:hover { background: var(--zone); }
+.data-table .num {
+  font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
+  text-align: right;
+  white-space: nowrap;
 }
-.ms-tbl .mono { font-family: var(--font-mono); }
-.ms-tbl tfoot td {
-  font-weight: var(--fw-semi);
-  color: var(--ink);
+.data-table .mono {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.data-table tfoot td {
+  border-top: 1px solid var(--line-2);
   border-bottom: 0;
   background: var(--surface-2);
+  color: var(--ink);
+  font-weight: var(--fw-semi);
 }
-.ms-empty {
+.data-table tfoot .num { font-weight: var(--fw-semi); }
+.empty {
+  padding: var(--s7) var(--s5);
+  border: 1px dashed var(--line-2);
   font-size: var(--fs-sm);
   color: var(--ink-3);
-  padding: var(--s5) 0;
+  text-align: center;
+}
+
+/* ── 窄屏：KPI 带 3 列 → 1 列；页头与区块标题纵向堆叠 ────────────────────── */
+@media (max-width: 1100px) {
+  .stat-band { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .stat-cell { border-bottom: 1px solid var(--line); }
+  .stat-cell:nth-child(3n) { border-right: 0; }
+  .stat-cell:nth-last-child(-n + 2) { border-bottom: 0; }
+}
+@media (max-width: 760px) {
+  .page-head {
+    grid-template-columns: 1fr;
+    align-items: start;
+  }
+  .head-actions { justify-content: flex-start; }
+  .stat-band { grid-template-columns: 1fr; }
+  /* `:nth-child(n)` 与上面 1100 断点的 `:nth-last-child(-n+2)` 同特异度、靠后覆盖 ——
+     直接写 `.stat-cell` 会因特异度更低而盖不住第 4、5 格的「无下边框」。 */
+  .stat-cell:nth-child(n) {
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
+  }
+  .stat-cell:last-child { border-bottom: 0; }
+  .section-title {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: var(--s1);
+  }
+}
+
+/* 共享 `Pager` 在本页也走直角（只覆盖本页实例，不改组件本身）。 */
+.ms-page :deep(.pager .pg),
+.ms-page :deep(.pager-size select) { border-radius: 0; }
+.ms-page :deep(.pager .pg.on) {
+  border-color: var(--ink);
+  background: var(--ink);
+  color: var(--surface);
 }
 </style>

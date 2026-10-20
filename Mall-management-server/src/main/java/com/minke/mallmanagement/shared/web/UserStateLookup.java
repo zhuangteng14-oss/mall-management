@@ -74,4 +74,36 @@ public interface UserStateLookup {
      * 那一阶段商家仍可正常经营、只是「即将被降级」（见 {@code MerchantDowngradeService} 五阶段）。
      */
     boolean isMerchantFrozen(String merchantId);
+
+    /**
+     * 客户会员等级（批四第二批 commit 3，2026-10-19）：{@code 0} 普通 / {@code 1} VIP。
+     *
+     * <p>给下单链路算会员价用（{@code OrderService.addLocked}）。<b>默认实现返回 {@code 0}</b>
+     * —— 与「切片里没有实现 ⇒ 按普通用户」那条既有纪律一致：类注释第 2 条说过
+     * {@code UserStateLookupService} 刻意不被 smoke 切片 @Import，未实现该默认方法会让
+     * 每个替代实现（测试替身 / 空 provider）编译失败。
+     *
+     * <p>⚠️ 与其余四条同守 <b>fail-open</b>：读失败 / 查无此人 / 列不存在 ⇒ {@code 0}（普通用户），
+     * 理由同上 —— 一个连不上的库不该把全场打成「不能享会员价」。
+     */
+    default int memberLevel(String customerId) {
+        return 0;
+    }
+
+    /**
+     * 客户当前等级对应的**折扣率**（{@code member_level.DiscountRate}，如 {@code 0.9000}）。
+     *
+     * <p>默认实现返回 {@code null}（=「判不出来 / 不是会员」），与 {@link #memberLevel} 的
+     * 默认实现同一条纪律：替代实现（测试替身 / 空 provider）不实现也能编译。
+     *
+     * <p>⚠️ 折扣率是**配置**，权威在 {@code member_level} 表 —— 调用方不要在这一层之外
+     * 再写死 {@code 0.9}。但老口径（全场 9 折）必须保住：返回 {@code null} 时调用方
+     * 应退回 {@code MemberPricing.RATE}，而不是按原价。
+     *
+     * <p>⚠️ fail-open 与本接口其余方法一致：读失败 ⇒ {@code null}（调用方按 9 折兜底），
+     * 绝不因为库抖一下让会员价消失。
+     */
+    default java.math.BigDecimal memberDiscountRate(String customerId) {
+        return null;
+    }
 }

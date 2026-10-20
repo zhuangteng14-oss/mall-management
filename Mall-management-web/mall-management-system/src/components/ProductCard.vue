@@ -83,7 +83,7 @@
     <ProductCard :goods="g" from="search" />              ← 搜索页才传（详情页靠它回搜索页并恢复结果）
 -->
 <template>
-  <router-link class="pcard" :class="{ sold: soldOut }" :to="to" @click="onNav">
+  <router-link class="pcard" :class="[{ sold: soldOut }, priceTone]" :to="to" @click="onNav">
     <div class="pcard-img">
       <!-- ⚠️ `v-if` 不能省 —— 见文件头 ⑤（破图图标 vs 灰底；先例 `HistoricalOrders.vue:66`）。 -->
       <img v-if="goods.GoodImg" :src="goods.GoodImg" :alt="goods.GoodName" />
@@ -94,7 +94,8 @@
     </div>
     <div class="pcard-tx">
       <div class="pcard-name">{{ goods.GoodName }}</div>
-      <!-- 类别标签（秒杀 / 国补）：**独立标记、可以同屏**，也可以一枚都没有（普通商品）。
+      <!-- 类别标签（秒杀 / 国补 / 品牌）：**严格互斥**，按优先级只画一枚（2026-10-19 用户令），
+           普通商品一枚都没有。
            ⚠️ 整行**恒渲染**（不写 `v-if`）—— 一枚都没有时画一枚隐形签占住这一行的高度，
               否则「有标签的卡高、没标签的卡矮」，栅格参差。见文件头〈标签行等高占位〉。 -->
       <div class="pcard-kinds">
@@ -108,7 +109,7 @@
       </div>
       <div class="pcard-foot">
         <div class="pcard-price">
-          <span class="sym">¥</span><span class="int">{{ priceInt }}</span><span class="dec">.{{ priceDec }}</span>
+          <span class="sym">¥</span><span class="int">{{ priceInt }}</span><span class="dec">.{{ priceDec }}</span><span v-if="isVipMember && memberText" class="m-price">会员 ¥{{ memberText }}</span>
         </div>
         <!-- ⚠️ 批四起是**真加购**：走 `/cart/add`，`.stop.prevent` 防冒泡到外层 `<a>`。
              用 <span role="button"> 不用 <button>：见文件头 ④（<a> 内不得嵌交互内容）。 -->
@@ -125,7 +126,7 @@
 </template>
 
 <script setup>
-import { computed, onBeforeUnmount, ref } from 'vue'; import { useRoute, useRouter } from 'vue-router'; import { cartAdd } from '../api/order'; import { getCustomerId, getMerchantId } from '../api/auth'
+import { computed, onBeforeUnmount, ref } from 'vue'; import { useRoute, useRouter } from 'vue-router'; import { cartAdd } from '../api/order'; import { getCustomerId, getMerchantId, getMemberLevel } from '../api/auth'; import { memberPriceOf } from '../composables/useMember'   // 批四第二批 commit 3（**同行追加、不新增行**）：首页/搜索卡片只做 VIP 会员价展示
 import { productLink } from '../config/product-link'
 // ⚠️ 三个类别 / 售完判据一律从 `config/goods-flags.js` 取（**本文件不重写一遍**）—— 见文件头
 //    〈类别标签与已售完〉与被 import 那个模块的头注。
@@ -137,7 +138,7 @@ const props = defineProps({
   // 导航前的副作用（可空）。收 `goods` 参数以便调用方按行决策；见文件头 ②。
   beforeNav: { type: Function, default: null },
   // 图上角的小签（可空）。空串 ⇒ 不画。见文件头。
-  tag: { type: String, default: '' },
+  tag: { type: String, default: '' }, allKinds: { type: Boolean, default: false },
   // 来源标记（可空）。空串 ⇒ **一个键都不加**（URL 逐字同改前）。见文件头〈为什么要 `from` 这个 prop〉。
   from: { type: String, default: '' }
 })
@@ -166,7 +167,7 @@ const priceDec = computed(() => {
   if (!props.goods.Price) return '00'
   const dot = String(props.goods.Price).split('.')[1]
   return dot ? dot.padEnd(2, '0').slice(0, 2) : '00'
-})
+}); const isVipMember = computed(() => Number(getMemberLevel()) > 0); const memberText = computed(() => { const p = Number(props.goods.Price); return p > 0 ? Number(memberPriceOf(p)).toFixed(2) : '' })   // 批四第二批 commit 3（**同行追加**）：列表响应不带 `memberPrice`（那是详情端点对 VIP 的加性键）⇒ 卡片只按同一公式展示，不冒充服务端口径
 
 // `SoldQty` 由 `GoodsCacheService.listHome` 的 LEFT JOIN 补出（本笔同批后端改动）。
 // 老响应里没有这个键 ⇒ `undefined || 0` = 0 ⇒ 不画那一段（不画 ≠ 画 0）。
@@ -179,18 +180,37 @@ const soldQty = computed(() => Number(props.goods.SoldQty) || 0); /* 批四（20
 const soldOut = computed(() => isSoldOut(props.goods))
 /** 标签**有序**（秒杀在前、国补在后）且**没有就不画** —— 普通商品既不画红也不画绿。
  *  ⚠️ 「不画」不 = 「行不占位」：这一支只决定**画几枚**，占位由下面的 `rowKinds` 兜底。 */
-const kinds = computed(() => {
-  const out = []
-  if (isSeckill(props.goods)) out.push({ key: 'seckill', text: '秒杀商品' })
-  if (isSubsidy(props.goods)) out.push({ key: 'subsidy', text: '国补' })
-  return out
+// 批四第二批（2026-10-19）：品牌标 —— 后端投影 `IsBrand`（`user.IsBrand=1` 的商家）。
+// `tinyint(1)` 到 JSON 可能是 boolean / 1 / "1"，三种都认（同 MerchantApplyPage 的 isBrandRow）。
+const isBrand = computed(() => {
+  const v = props.goods && props.goods.IsBrand
+  return v === true || v === 1 || String(v) === '1'
+})
+const kinds = computed(() => { if (props.allKinds) { const all = []; if (isSeckill(props.goods)) all.push({ key: 'seckill', text: '秒杀' }); if (isSubsidy(props.goods)) all.push({ key: 'subsidy', text: '国补' }); if (isBrand.value) all.push({ key: 'brand', text: '品牌' }); return all }
+  // 2026-10-19 用户令：标签**严格互斥、按优先级只画一枚** —— 秒杀 > 国补 > 品牌。
+  // 「同屏多签」的旧口径已废弃：秒杀+国补同时命中时只留红色【秒杀】。
+  if (isSeckill(props.goods)) return [{ key: 'seckill', text: '秒杀' }]
+  if (isSubsidy(props.goods)) return [{ key: 'subsidy', text: '国补' }]
+  if (isBrand.value) return [{ key: 'brand', text: '品牌' }]
+  return []
+})
+
+/**
+ * 卡片主色按商品属性动态渲染（2026-10-19 用户令）：
+ *   秒杀 → 朱砂红；国补 → 亮绿；品牌 → 金色文字 + 黑色主色；普通 → 青瓷绿。
+ * 优先级与详情页 / `skuKind` 同序（秒杀 > 国补 > 品牌 > 普通）。
+ */
+const priceTone = computed(() => {
+  if (isSeckill(props.goods)) return 'tone-seckill'
+  if (isSubsidy(props.goods)) return 'tone-subsidy'
+  return isBrand.value ? 'tone-brand' : 'tone-normal'
 })
 
 /** 这一行**实际渲染**的签：有标签就是标签本人，没有则给一枚**隐形签**（`ghost: true`）占高度。
  *  ⚠️ 文案与类名**故意**沿用真签那一套（`秒杀商品` / `seckill`）—— 见文件头〈标签行等高占位〉：
  *     等高的保证来自「同一个元素 + 同一套 class + 同一个字体」，换一套写法就得自己去算高度了。 */
 const rowKinds = computed(() => (
-  kinds.value.length ? kinds.value : [{ key: 'seckill', text: '秒杀商品', ghost: true }]
+  kinds.value.length ? kinds.value : [{ key: 'seckill', text: '秒杀', ghost: true }]
 ))
 </script>
 
@@ -327,9 +347,20 @@ const rowKinds = computed(() => (
   background: var(--cin-100);
   color: var(--cin-700);
 }
+/* 国补 = 亮绿（2026-10-19 用户令：普通青瓷绿 / 国补亮绿，两档要一眼分得开）。 */
 .pcard-kind.subsidy {
-  background: var(--brand-tint);
-  color: var(--brand-ink);
+  background: #dcf5e7;
+  border: 1px solid #9fd9b6;
+  color: #157347;
+}
+/* 品牌标（批四第二批；2026-10-19 第二步升维）—— 用户明令「去掉浅绿色标签，用香槟金 / 黑金」：
+   墨黑底 + 香槟金字 + 发丝金边。⚠️ 这是**唯一**一处越过 tokens 青瓷绿族的颜色，按用户口令落在
+   品牌语义上，不扩用到其它标签（秒杀仍朱砂、国补仍青瓷绿）。 */
+.pcard-kind.brand {
+  background: linear-gradient(135deg, #2b2418 0%, #14110c 100%);
+  color: #e8c98a;
+  border: 1px solid rgba(201, 162, 90, 0.55);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.12);
 }
 /* ── 隐形占位签（用户 ①，2026-10-12）────────────────────────────────────────────────
    普通商品（两枚类别标签都不命中）在这一行画的那一枚：**只占高度、不显示**。
@@ -415,5 +446,21 @@ const rowKinds = computed(() => (
 .pcard-meta .sold {
   flex: none;
   font-variant-numeric: tabular-nums;
+}
+/* 会员价（批四第二批 commit 3）：与整数价同基线的小字，只在本机恢复态是 VIP 时渲染。 */
+.pcard-price .m-price { margin-left: 6px; color: var(--brand-ink); font-size: var(--fs-xs); font-weight: var(--fw-med); white-space: nowrap; }
+
+/* ══ 卡片主色按属性动态渲染（2026-10-19 用户令）══════════════════════════════
+     秒杀 → 朱砂红；国补 → 亮绿；品牌 → 金色文字 + 黑色主色；普通 → 青瓷绿。
+   与 `PriceTone` computed、详情页 `.pd-*` 三处同一套优先级（秒杀 > 国补 > 品牌 > 普通）。 */
+.pcard.tone-normal .pcard-price { color: var(--brand-ink); }
+.pcard.tone-seckill .pcard-price { color: var(--accent); }
+.pcard.tone-subsidy .pcard-price { color: #157347; }
+.pcard.tone-brand .pcard-price { color: #c9a227; }
+/* 品牌店：加购钮的 hover 实心也走黑金（平时仍幽灵，见上面那条「按钮墙」判据）。 */
+.pcard.tone-brand:hover .pcard-buy {
+  background: #101010;
+  border-color: #101010;
+  color: #e8c98a;
 }
 </style>

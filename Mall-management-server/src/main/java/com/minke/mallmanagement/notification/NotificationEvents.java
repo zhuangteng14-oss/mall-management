@@ -93,6 +93,9 @@ public final class NotificationEvents {
     /** 违规商品下架 / 删除。 */
     public static final String GOODS_VIOLATION_REMOVED = "goods.violation.removed";
 
+    /** 低库存提醒 —— 触达商家（同一 SKU 每日最多一条，批四第二批）。 */
+    public static final String GOODS_STOCK_LOW = "goods.stock.low";
+
     // ==================== 块 4（订单块）：订单治理 ====================
 
     /** 管理员介入订单。 */
@@ -232,6 +235,45 @@ public final class NotificationEvents {
      * {@code existsDelivery(收件人, 本 code, "comment", 提问Id)}。
      */
     public static final String QUESTION_TIMEOUT = "question.timeout";
+
+    /**
+     * 商家提交**品牌加盟申请** → 管理端共享收件箱（批四第二批，2026-10-19）。
+     *
+     * <p>与 {@link #MERCHANT_APPLY_SUBMITTED} 分开一条：入驻申请要「升级身份」，品牌申请只是
+     * 「挂一枚品牌标」，管理员看队列时两者的处理动作不同（后者不 promote）。同码会让收件箱
+     * 把两类待办混成一条。
+     */
+    public static final String MERCHANT_BRAND_APPLY_SUBMITTED = "merchant.brand.apply.submitted";
+
+    /** 品牌加盟审核**通过** → 触达商家。 */
+    public static final String MERCHANT_BRAND_APPROVED = "merchant.brand.approved";
+
+    /** 品牌加盟审核**驳回** → 触达商家（正文带理由）。 */
+    public static final String MERCHANT_BRAND_REJECTED = "merchant.brand.rejected";
+
+    // ==================== 批四第二批 · 售后状态机（2026-10-19）====================
+    // 五条覆盖六个状态里的四个「有人要知道」的转折；`1→5` 由 REFUND_COMPLETED、`3→4` 由
+    // REFUND_PLATFORM_REJECTED 承载。方向：
+    //   申请（用户 → 商家）/ 商家拒绝（商家 → 用户）/ 二次拒绝升级（商家 → 用户 + 管理端收件箱）
+    //   / 平台驳回（平台 → 用户）/ 退款完成（商家或平台 → 用户）。
+
+    /** 用户提交售后申请 → 触达**商家**（{@code ToType='merchant'}、{@code ToId=MerchantId}）。 */
+    public static final String REFUND_APPLIED = "order.refund.applied";
+
+    /** 商家第一次拒绝 → 触达**用户**（{@code ToType='customer'}），用户可以再次申请。 */
+    public static final String REFUND_MERCHANT_REJECTED = "order.refund.merchant.rejected";
+
+    /**
+     * 商家第二次拒绝 ⇒ 转入平台审核（{@code RefundStatus=3}）→ **两封**：
+     * 触达用户（告知已升级）+ 管理端共享收件箱（{@code ToType='admin', ToId='*'}，待办）。
+     */
+    public static final String REFUND_ESCALATED = "order.refund.escalated";
+
+    /** 平台驳回（{@code 3→4}，终态）→ 触达用户。 */
+    public static final String REFUND_PLATFORM_REJECTED = "order.refund.platform.rejected";
+
+    /** 退款完成（{@code 1→5} 或 {@code 3→5}，款项已入余额）→ 触达用户。 */
+    public static final String REFUND_COMPLETED = "order.refund.completed";
 
     private NotificationEvents() {
     }

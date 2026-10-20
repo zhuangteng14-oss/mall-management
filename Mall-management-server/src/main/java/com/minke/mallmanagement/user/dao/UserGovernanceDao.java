@@ -63,7 +63,7 @@ public class UserGovernanceDao {
             "u.username, u.usertype, u.customerid, u.merchantid, u.gender, u.age, u.email, "
                     + "u.banned, u.banReason, "
                     + "DATE_FORMAT(u.bannedAt, '%Y-%m-%d %H:%i:%s') AS bannedAt, "
-                    + "u.DowngradeState, u.DowngradeReason, "
+                    + "u.DowngradeState, u.DowngradeReason, u.MemberLevel, "   // 批四第二批 commit 3：管理端用户列表带 VIP 徽标（加性列）
                     + "DATE_FORMAT(u.ScheduledDowngradeAt, '%Y-%m-%d %H:%i:%s') AS ScheduledDowngradeAt, "
                     + "DATE_FORMAT(u.FrozenAt, '%Y-%m-%d %H:%i:%s') AS FrozenAt, "
                     + "DATE_FORMAT(u.FreezeUntil, '%Y-%m-%d %H:%i:%s') AS FreezeUntil, "
@@ -342,6 +342,75 @@ public class UserGovernanceDao {
         String sql = "INSERT INTO merchantimage (UserName, MerchantId, image) "
                 + "VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE MerchantId = ?, image = ?";
         return jdbcClient.sql(sql).params(username, merchantId, image, merchantId, image).update();
+    }
+
+    // ==================== 写：品牌加盟（批四第二批） ====================
+
+    /**
+     * 置 / 清账号的品牌店标记（{@code user.IsBrand}）。**只对已是商家的行有意义** ——
+     * 调用方（{@code MerchantApplicationService.audit} 的品牌分支）先用
+     * {@link #selectMerchantId} 校验，不在这里重复判身份。
+     *
+     * <p>⚠️ {@code IsBrand} 不在 {@code userPublic} 缓存的 5 列里，但商品列表的品牌标
+     * （{@code GoodsCacheService} 的 {@code EXISTS ... IsBrand}）走 {@code goodsHome} 缓存
+     * ⇒ 审核通过后必须由调用方 {@code evictByMerchant}，否则品牌标要到 TTL 才出现。
+     */
+    public int setBrand(String username, boolean isBrand) {
+        String sql = "UPDATE `user` SET IsBrand = ? WHERE username = ?";
+        return jdbcClient.sql(sql).params(isBrand ? 1 : 0, username).update();
+    }
+
+    // ==================== 读 / 写：会员等级（批四第二批 commit 3） ====================
+
+    /** 按**客户业务号**取会员等级（{@code user.MemberLevel}）；查不到 / 列为空 ⇒ {@code 0}。 */
+    public int selectMemberLevelByCustomerId(String customerId) {
+        return selectMemberLevel("customerid", customerId);
+    }
+
+    /** 按**登录名**取会员等级；查不到 / 列为空 ⇒ {@code 0}。 */
+    public int selectMemberLevelByUsername(String username) {
+        return selectMemberLevel("username", username);
+    }
+
+    private int selectMemberLevel(String column, String value) {
+        // ㉘ 起权威读列是 MemberLevelNo（V0–V6）；MemberLevel（0/1）只是老口径镜像。
+        // COALESCE(NULLIF(...,0), ...) 让「已回填的存量」与「只写了镜像的新行」两类都读对。
+        String sql = "SELECT COALESCE(NULLIF(MemberLevelNo, 0), MemberLevel) AS MemberLevel "
+                + "FROM `user` WHERE " + column + " = ? LIMIT 1";
+        List<Map<String, Object>> rows = jdbcClient.sql(sql).param(value).query().listOfRows();
+        if (rows.isEmpty() || rows.get(0).get("MemberLevel") == null) {
+            return 0;
+        }
+        return ((Number) rows.get(0).get("MemberLevel")).intValue();
+    }
+
+    /**
+     * 按客户业务号取**等级折扣率**（{@code member_level.DiscountRate}）。
+     *
+     * <p>生效等级与 {@link #selectMemberLevelByCustomerId} 同口径
+     * （{@code COALESCE(NULLIF(MemberLevelNo,0), MemberLevel)}），保证「判是不是会员」与
+     * 「按几折算」读的是同一个等级。查不到 / 等级表没有该行 / 列空 ⇒ {@code null}
+     * （调用方退回 {@code MemberPricing.RATE}）。
+     */
+    public java.math.BigDecimal selectMemberDiscountRateByCustomerId(String customerId) {
+        String sql = "SELECT l.DiscountRate AS DiscountRate FROM `user` u "
+                + "JOIN member_level l ON l.LevelNo = COALESCE(NULLIF(u.MemberLevelNo, 0), u.MemberLevel) "
+                + "WHERE u.customerid = ? AND l.Status = 'active' LIMIT 1";
+        List<Map<String, Object>> rows = jdbcClient.sql(sql).param(customerId).query().listOfRows();
+        if (rows.isEmpty() || rows.get(0).get("DiscountRate") == null) {
+            return null;
+        }
+        Object v = rows.get(0).get("DiscountRate");
+        return v instanceof java.math.BigDecimal b ? b : new java.math.BigDecimal(String.valueOf(v));
+    }
+
+    /**
+     * 置会员等级（管理员设置 / 客户自助开通都走这条）。
+     * {@code level} 由调用方夹在 0/1（本批只定义了普通与 VIP 两档）。
+     */
+    public int setMemberLevel(String username, int level) {
+        String sql = "UPDATE `user` SET MemberLevel = ? WHERE username = ?";
+        return jdbcClient.sql(sql).params(level, username).update();
     }
 
     // ==================== 内部 ====================

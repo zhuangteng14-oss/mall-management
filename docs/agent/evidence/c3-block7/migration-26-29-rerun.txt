@@ -1,0 +1,237 @@
+鎴彇璧风偣琛?(1-based) : 2316 / 鍏? 2867 琛?
+寰呮墽琛岃鍙ユ暟       : 117
+  [1] CREATE TABLE IF NOT EXISTS `goods_discount_template` ( `Id` bigint NOT NULL AUTO_INCREMENT COMMENT '自增主键', `Te 鈥?
+  [2] CREATE TABLE IF NOT EXISTS `goods_price_log` ( `Id` bigint NOT NULL AUTO_INCREMENT COMMENT '自增主键', `GoodsId` b 鈥?
+  [3] SET @s := (SELECT IF(COUNT(*) = 0, 'ALTER TABLE `goods` ADD COLUMN `DiscountTemplateId` bigint DEFAULT NULL CO 鈥?
+  [4] PREPARE _p FROM @s 鈥?
+  [5] EXECUTE _p 鈥?
+  [6] DEALLOCATE PREPARE _p 鈥?
+  [7] SET @s := (SELECT IF(COUNT(*) = 0, 'ALTER TABLE `goods` ADD COLUMN `DiscountType` varchar(10) DEFAULT NULL COM 鈥?
+  [8] PREPARE _p FROM @s 鈥?
+  [9] EXECUTE _p 鈥?
+  [10] DEALLOCATE PREPARE _p 鈥?
+  [11] SET @s := (SELECT IF(COUNT(*) = 0, 'ALTER TABLE `goods` ADD COLUMN `DiscountRate` decimal(5,4) DEFAULT NULL CO 鈥?
+  [12] PREPARE _p FROM @s 鈥?
+  [13] EXECUTE _p 鈥?
+  [14] DEALLOCATE PREPARE _p 鈥?
+  [15] SET @s := (SELECT IF(COUNT(*) = 0, 'ALTER TABLE `goods` ADD COLUMN `DiscountAmount` decimal(10,2) NOT NULL DEF 鈥?
+  [16] PREPARE _p FROM @s 鈥?
+  [17] EXECUTE _p 鈥?
+  [18] DEALLOCATE PREPARE _p 鈥?
+  [19] SET @s := (SELECT IF(COUNT(*) = 0, 'ALTER TABLE `goods` ADD COLUMN `PriceSnapshotAt` datetime(3) DEFAULT NULL  鈥?
+  [20] PREPARE _p FROM @s 鈥?
+  [21] EXECUTE _p 鈥?
+  [22] DEALLOCATE PREPARE _p 鈥?
+  [23] SET @s := (SELECT IF(COUNT(*) = 0, 'ALTER TABLE `goods_audit` ADD COLUMN `DiscountTemplateId` bigint DEFAULT N 鈥?
+  [24] PREPARE _p FROM @s 鈥?
+  [25] EXECUTE _p 鈥?
+  [26] DEALLOCATE PREPARE _p 鈥?
+  [27] SET @s := (SELECT IF(COUNT(*) = 0, 'ALTER TABLE `goods_audit` ADD COLUMN `DiscountType` varchar(10) DEFAULT NU 鈥?
+  [28] PREPARE _p FROM @s 鈥?
+  [29] EXECUTE _p 鈥?
+  [30] DEALLOCATE PREPARE _p 鈥?
+  [31] SET @s := (SELECT IF(COUNT(*) = 0, 'ALTER TABLE `goods_audit` ADD COLUMN `DiscountRate` decimal(5,4) DEFAULT N 鈥?
+  [32] PREPARE _p FROM @s 鈥?
+  [33] EXECUTE _p 鈥?
+  [34] DEALLOCATE PREPARE _p 鈥?
+  [35] SET @s := (SELECT IF(COUNT(*) = 0, 'ALTER TABLE `goods_audit` ADD COLUMN `DiscountAmount` decimal(10,2) NOT NU 鈥?
+  [36] PREPARE _p FROM @s 鈥?
+  [37] EXECUTE _p 鈥?
+  [38] DEALLOCATE PREPARE _p 鈥?
+  [39] SET @s := (SELECT IF(COUNT(*) = 0, 'ALTER TABLE `goods_audit` ADD COLUMN `PriceSnapshotAt` datetime(3) DEFAULT 鈥?
+  [40] PREPARE _p FROM @s 鈥?
+  [41] EXECUTE _p 鈥?
+  [42] DEALLOCATE PREPARE _p 鈥?
+  [43] INSERT IGNORE INTO `goods_discount_template` (`TemplateCode`, `Name`, `DiscountType`, `Rate`, `CutAmount`, `Ow 鈥?
+  [44] SET @s := (SELECT IF(COUNT(*) = 0, 'ALTER TABLE `merchant_application` ADD COLUMN `ApplicationType` varchar(20 鈥?
+  [45] PREPARE _p FROM @s 鈥?
+  [46] EXECUTE _p 鈥?
+  [47] DEALLOCATE PREPARE _p 鈥?
+  [48] SET @s := (SELECT IF(COUNT(*) = 0, 'ALTER TABLE `merchant_application` ADD COLUMN `AttemptNo` int NOT NULL DEF 鈥?
+  [49] PREPARE _p FROM @s 鈥?
+  [50] EXECUTE _p 鈥?
+  [51] DEALLOCATE PREPARE _p 鈥?
+  [52] SET @s := (SELECT IF(COUNT(*) = 0, 'ALTER TABLE `merchant_application` ADD COLUMN `ParentId` bigint DEFAULT NU 鈥?
+  [53] PREPARE _p FROM @s 鈥?
+  [54] EXECUTE _p 鈥?
+  [55] DEALLOCATE PREPARE _p 鈥?
+  [56] UPDATE `merchant_application` SET `ApplicationType` = 'brand' WHERE `IsBrand` = 1 鈥?
+  [57] UPDATE `merchant_application` a JOIN `merchant_application` b ON a.`Username` = b.`Username` AND a.`Applicatio 鈥?
+  [58] SET @s := (SELECT IF(COUNT(*) = 0, 'ALTER TABLE `merchant_application` ADD COLUMN `PendingGuard` varchar(90) G 鈥?
+  [59] PREPARE _p FROM @s 鈥?
+  [60] EXECUTE _p 鈥?
+  [61] DEALLOCATE PREPARE _p 鈥?
+  [62] SET @s := (SELECT IF(COUNT(*) = 0, 'ALTER TABLE `merchant_application` ADD UNIQUE KEY `uk_application_pending` 鈥?
+  [63] PREPARE _p FROM @s 鈥?
+  [64] EXECUTE _p 鈥?
+  [65] DEALLOCATE PREPARE _p 鈥?
+  [66] SET @s := (SELECT IF(COUNT(*) = 0, 'ALTER TABLE `merchant_application` ADD INDEX `idx_application_type_status` 鈥?
+  [67] PREPARE _p FROM @s 鈥?
+  [68] EXECUTE _p 鈥?
+  [69] DEALLOCATE PREPARE _p 鈥?
+  [70] CREATE TABLE IF NOT EXISTS `merchant_brand_application_detail` ( `Id` bigint NOT NULL AUTO_INCREMENT COMMENT ' 鈥?
+  [71] CREATE TABLE IF NOT EXISTS `merchant_brand_profile` ( `Id` bigint NOT NULL AUTO_INCREMENT COMMENT '自增主键', `Mer 鈥?
+  [72] INSERT IGNORE INTO `merchant_brand_profile` (`MerchantId`, `BrandName`, `Status`, `SourceApplicationId`, `Appr 鈥?
+  [73] CREATE TABLE IF NOT EXISTS `member_level` ( `Id` int NOT NULL AUTO_INCREMENT COMMENT '自增主键', `LevelNo` tinyint 鈥?
+  [74] INSERT IGNORE INTO `member_level` (`LevelNo`, `Code`, `Name`, `MinGrowth`, `DiscountRate`, `PointsRate`, `Mont 鈥?
+  [75] CREATE TABLE IF NOT EXISTS `user_points_account` ( `UserId` varchar(20) NOT NULL COMMENT '客户业务号（user.customeri 鈥?
+  [76] CREATE TABLE IF NOT EXISTS `user_points_log` ( `Id` bigint NOT NULL AUTO_INCREMENT COMMENT '自增主键', `UserId` va 鈥?
+  [77] CREATE TABLE IF NOT EXISTS `user_signin` ( `Id` bigint NOT NULL AUTO_INCREMENT COMMENT '自增主键', `UserId` varcha 鈥?
+  [78] CREATE TABLE IF NOT EXISTS `member_level_log` ( `Id` bigint NOT NULL AUTO_INCREMENT COMMENT '自增主键', `UserId` v 鈥?
+  [79] SET @s := (SELECT IF(COUNT(*) = 0, 'ALTER TABLE `user` ADD COLUMN `MemberLevelNo` tinyint NOT NULL DEFAULT 0 C 鈥?
+  [80] PREPARE _p FROM @s 鈥?
+  [81] EXECUTE _p 鈥?
+  [82] DEALLOCATE PREPARE _p 鈥?
+  [83] SET @s := (SELECT IF(COUNT(*) = 0, 'ALTER TABLE `user` ADD COLUMN `GrowthValue` bigint NOT NULL DEFAULT 0 COMM 鈥?
+  [84] PREPARE _p FROM @s 鈥?
+  [85] EXECUTE _p 鈥?
+  [86] DEALLOCATE PREPARE _p 鈥?
+  [87] SET @s := (SELECT IF(COUNT(*) = 0, 'ALTER TABLE `user` ADD COLUMN `MemberSince` datetime DEFAULT NULL COMMENT  鈥?
+  [88] PREPARE _p FROM @s 鈥?
+  [89] EXECUTE _p 鈥?
+  [90] DEALLOCATE PREPARE _p 鈥?
+  [91] UPDATE `user` SET `MemberLevelNo` = 1 WHERE `MemberLevel` = 1 AND `MemberLevelNo` = 0 鈥?
+  [92] INSERT IGNORE INTO `user_points_account` (`UserId`, `Balance`, `Frozen`, `GrowthValue`, `TotalEarned`, `TotalS 鈥?
+  [93] CREATE TABLE IF NOT EXISTS `user_wallet` ( `UserId` varchar(20) NOT NULL COMMENT '客户业务号（user.customerid）', `Av 鈥?
+  [94] CREATE TABLE IF NOT EXISTS `user_balance_log` ( `Id` bigint NOT NULL AUTO_INCREMENT COMMENT '自增主键', `UserId` v 鈥?
+  [95] CREATE TABLE IF NOT EXISTS `wallet_recharge_order` ( `Id` bigint NOT NULL AUTO_INCREMENT COMMENT '自增主键', `Rech 鈥?
+  [96] CREATE TABLE IF NOT EXISTS `wallet_withdraw_order` ( `Id` bigint NOT NULL AUTO_INCREMENT COMMENT '自增主键', `With 鈥?
+  [97] SET @s := (SELECT IF(COUNT(*) = 0, 'ALTER TABLE `order` ADD COLUMN `PayChannel` varchar(16) NOT NULL DEFAULT ' 鈥?
+  [98] PREPARE _p FROM @s 鈥?
+  [99] EXECUTE _p 鈥?
+  [100] DEALLOCATE PREPARE _p 鈥?
+  [101] SET @s := (SELECT IF(COUNT(*) = 0, 'ALTER TABLE `order` ADD COLUMN `WalletPaidAmount` decimal(10,2) NOT NULL D 鈥?
+  [102] PREPARE _p FROM @s 鈥?
+  [103] EXECUTE _p 鈥?
+  [104] DEALLOCATE PREPARE _p 鈥?
+  [105] SET @s := (SELECT IF(COUNT(*) = 0, 'ALTER TABLE `order` ADD COLUMN `PointsUsed` bigint NOT NULL DEFAULT 0 COMM 鈥?
+  [106] PREPARE _p FROM @s 鈥?
+  [107] EXECUTE _p 鈥?
+  [108] DEALLOCATE PREPARE _p 鈥?
+  [109] SET @s := (SELECT IF(COUNT(*) = 0, 'ALTER TABLE `order` ADD COLUMN `PointsDiscount` decimal(10,2) NOT NULL DEF 鈥?
+  [110] PREPARE _p FROM @s 鈥?
+  [111] EXECUTE _p 鈥?
+  [112] DEALLOCATE PREPARE _p 鈥?
+  [113] SET @s := (SELECT IF(COUNT(*) = 0, 'ALTER TABLE `order` ADD COLUMN `PointsSettled` tinyint(1) NOT NULL DEFAULT 鈥?
+  [114] PREPARE _p FROM @s 鈥?
+  [115] EXECUTE _p 鈥?
+  [116] DEALLOCATE PREPARE _p 鈥?
+  [117] INSERT IGNORE INTO `user_wallet` (`UserId`, `Available`, `Frozen`, `TotalRecharge`, `TotalRefund`, `TotalConsu 鈥?
+OK  [1] 0
+OK  [2] 0
+OK  [3] 0
+OK  [4] 0
+OK  [5] 0
+OK  [6] 0
+OK  [7] 0
+OK  [8] 0
+OK  [9] 0
+OK  [10] 0
+OK  [11] 0
+OK  [12] 0
+OK  [13] 0
+OK  [14] 0
+OK  [15] 0
+OK  [16] 0
+OK  [17] 0
+OK  [18] 0
+OK  [19] 0
+OK  [20] 0
+OK  [21] 0
+OK  [22] 0
+OK  [23] 0
+OK  [24] 0
+OK  [25] 0
+OK  [26] 0
+OK  [27] 0
+OK  [28] 0
+OK  [29] 0
+OK  [30] 0
+OK  [31] 0
+OK  [32] 0
+OK  [33] 0
+OK  [34] 0
+OK  [35] 0
+OK  [36] 0
+OK  [37] 0
+OK  [38] 0
+OK  [39] 0
+OK  [40] 0
+OK  [41] 0
+OK  [42] 0
+OK  [43] 0
+OK  [44] 0
+OK  [45] 0
+OK  [46] 0
+OK  [47] 0
+OK  [48] 0
+OK  [49] 0
+OK  [50] 0
+OK  [51] 0
+OK  [52] 0
+OK  [53] 0
+OK  [54] 0
+OK  [55] 0
+OK  [56] 1
+OK  [57] 0
+OK  [58] 0
+OK  [59] 0
+OK  [60] 0
+OK  [61] 0
+OK  [62] 0
+OK  [63] 0
+OK  [64] 0
+OK  [65] 0
+OK  [66] 0
+OK  [67] 0
+OK  [68] 0
+OK  [69] 0
+OK  [70] 0
+OK  [71] 0
+OK  [72] 0
+OK  [73] 0
+OK  [74] 0
+OK  [75] 0
+OK  [76] 0
+OK  [77] 0
+OK  [78] 0
+OK  [79] 0
+OK  [80] 0
+OK  [81] 0
+OK  [82] 0
+OK  [83] 0
+OK  [84] 0
+OK  [85] 0
+OK  [86] 0
+OK  [87] 0
+OK  [88] 0
+OK  [89] 0
+OK  [90] 0
+OK  [91] 0
+OK  [92] 0
+OK  [93] 0
+OK  [94] 0
+OK  [95] 0
+OK  [96] 0
+OK  [97] 0
+OK  [98] 0
+OK  [99] 0
+OK  [100] 0
+OK  [101] 0
+OK  [102] 0
+OK  [103] 0
+OK  [104] 0
+OK  [105] 0
+OK  [106] 0
+OK  [107] 0
+OK  [108] 0
+OK  [109] 0
+OK  [110] 0
+OK  [111] 0
+OK  [112] 0
+OK  [113] 0
+OK  [114] 0
+OK  [115] 0
+OK  [116] 0
+OK  [117] 0
+done

@@ -3,6 +3,9 @@ package com.minke.mallmanagement.admin.controller;
 import com.minke.mallmanagement.admin.AuditActions;
 import com.minke.mallmanagement.admin.service.AdminOrderService;
 import com.minke.mallmanagement.admin.service.AuditService;
+import com.minke.mallmanagement.notification.NotificationEvents;
+import com.minke.mallmanagement.notification.service.NotificationService;
+import com.minke.mallmanagement.order.refund.service.OrderRefundService;
 import com.minke.mallmanagement.shared.web.AuthSession;
 import com.minke.mallmanagement.shared.web.Result;
 import jakarta.servlet.http.HttpServletRequest;
@@ -12,7 +15,9 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.UUID;
 
 /**
  * 管理端「订单治理」Web 层（C3 块 4）—— 4 个端点：列表 / 详情 / 异常监控 / 介入。
@@ -39,10 +44,16 @@ public class AdminOrderController {
 
     private final AdminOrderService adminOrderService;
     private final AuditService auditService;
+    /** 售后状态机（批四第二批 commit 4）—— 平台侧两条端点直接转发它，**不经过 AdminOrderService**。 */
+    private final OrderRefundService refundService;
+    private final NotificationService notificationService;
 
-    public AdminOrderController(AdminOrderService adminOrderService, AuditService auditService) {
+    public AdminOrderController(AdminOrderService adminOrderService, AuditService auditService,
+                                OrderRefundService refundService, NotificationService notificationService) {
         this.adminOrderService = adminOrderService;
         this.auditService = auditService;
+        this.refundService = refundService;
+        this.notificationService = notificationService;
     }
 
     /** 全量视图。筛选项全可空；{@code status} 走白名单（未知值报错，不静默当成「不筛」）。 */
@@ -91,5 +102,78 @@ public class AdminOrderController {
                     "order", OrderId, null, after);
         }
         return Result.of(result);
+    }
+
+    // ==================== 平台售后（批四第二批 commit 4） ====================
+    // ⚠️ 售后是**旁路状态域**，所以它不走 `/intervene`（那里 `Action=refund` 仍按原口径拒绝）：
+    //    介入沿三位状态机的 CAS 边推进；售后处理的是 RefundStatus 自己的六态机。
+    // ⚠️ 平台队列按**会员等级降序**（SQL 在 `OrderRefundDao.selectPlatformRefunds`），
+    //    这是「VIP 优先售后」的落点，不在 Java 里排序（否则分页一截就失真）。
+
+    /** 平台售后队列；{@code status} 省略 ⇒ 全部有售后记录的单（3 = 待平台审核）。 */
+    @PostMapping("/refund/list")
+    public Result<Map<String, Object>> refundList(
+            @RequestParam(value = "status", required = false) Integer status,
+            @RequestParam(value = "limit", required = false) Integer limit
+    ) {
+        return Result.of(refundService.platformRefunds(status, limit));
+    }
+
+    /**
+     * 平台裁决已升级的售后（{@code RefundStatus=3}）。
+     *
+     * @param Approve {@code "true"} = 同意退款（入余额 + 回补库存）；{@code "false"} = 驳回（终态）；
+     *                缺省 / 其它 ⇒ 报缺参，绝不默认任何一侧。
+     */
+    @PostMapping("/refund/handle")
+    public Result<Map<String, Object>> refundHandle(
+            @RequestParam(value = "OrderId", required = false) String OrderId,
+            @RequestParam(value = "Approve", required = false) String Approve,
+            @RequestParam(value = "Note", required = false) String Note,
+            HttpServletRequest request
+    ) {
+        Boolean approve = parseApprove(Approve);
+        Map<String, Object> result = refundService.platformHandle(
+                AuthSession.identify(request) == null ? null : AuthSession.identify(request).userId(),
+                OrderId, approve, Note);
+        if (Boolean.TRUE.equals(result.get("success"))) {
+            Map<String, Object> after = new LinkedHashMap<>();
+            after.put("Approve", approve);
+            after.put("Outcome", result.get("outcome"));
+            after.put("Note", Note);
+            auditService.record(AuthSession.identify(request), AuditActions.REFUND_PLATFORM_HANDLE,
+                    "order", OrderId, null, after);
+
+            String customerId = result.get("customerId") == null ? null : String.valueOf(result.get("customerId"));
+            if (customerId != null && !customerId.isBlank()) {
+                boolean refunded = "refunded".equals(result.get("outcome"));
+                notificationService.send(UUID.randomUUID().toString(), customerId,
+                        NotificationService.TO_TYPE_CUSTOMER,
+                        refunded ? NotificationEvents.REFUND_COMPLETED : NotificationEvents.REFUND_PLATFORM_REJECTED,
+                        (refunded ? "退款已完成：" : "平台已驳回售后：") + OrderId,
+                        refunded
+                                ? "平台已同意订单 " + OrderId + " 的售后，退款 ¥" + result.get("refundAmount")
+                                        + " 已退回您的账户余额。"
+                                : "平台驳回了订单 " + OrderId + " 的售后申请（终态）"
+                                        + (Note == null || Note.isBlank() ? "。" : "（理由：" + Note.trim() + "）。"),
+                        "order", OrderId);
+            }
+        }
+        return Result.of(result);
+    }
+
+    /** {@code "true"}/{@code "false"}（大小写不敏感）⇒ 布尔；缺省或其它 ⇒ {@code null}。 */
+    private static Boolean parseApprove(String raw) {
+        if (raw == null) {
+            return null;
+        }
+        String v = raw.trim();
+        if ("true".equalsIgnoreCase(v)) {
+            return Boolean.TRUE;
+        }
+        if ("false".equalsIgnoreCase(v)) {
+            return Boolean.FALSE;
+        }
+        return null;
     }
 }

@@ -99,13 +99,30 @@ public class OrderDao {
      * —— 那是既有形态，理由见类注释（跟随点号的词按标识符解析，保留字也无需引号），本笔不动。
      */
     public int insertOrder(OrderRow r) {
+        // 第三批㉙：老签名委托到全列版本（支付/积分为默认值）—— SQL 只有一份。
+        return insertOrder(r, "", java.math.BigDecimal.ZERO, 0L, java.math.BigDecimal.ZERO);
+    }
+
+    /**
+     * 第三批㉙：带支付通道 / 余额支付 / 积分抵扣的完整写入。
+     *
+     * <p>{@code PointsSettled} 恒写 0（积分在**收货**时发放，见 {@code MemberService.earnForOrder}）；
+     * 其余快照列是「这一单实际用了什么」的不可变证据，退款 / 对账都读它。
+     */
+    public int insertOrder(OrderRow r, String payChannel, java.math.BigDecimal walletPaidAmount,
+                           long pointsUsed, java.math.BigDecimal pointsDiscount) {
         String sql = "INSERT INTO mall_management_sql.order " +
-                "(OrderId, CustomerId, MerchantId, Price, Quantity, ProductInformation, Images, PayIf, DeliveryIf, ReceiveIf, `Source`, BatchId, CreateTime) " +
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())";
+                "(OrderId, CustomerId, MerchantId, Price, Quantity, ProductInformation, Images, PayIf, DeliveryIf, ReceiveIf, `Source`, BatchId, " +
+                " PayChannel, WalletPaidAmount, PointsUsed, PointsDiscount, PointsSettled, CreateTime) " +
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, NOW())";
         return jdbcClient.sql(sql)
                 .params(r.orderId(), r.customerId(), r.merchantId(), r.price(), r.quantity(),
                         r.productInformation(), r.images(),
-                        r.payIf(), r.deliveryIf(), r.receiveIf(), normaliseSource(r.source()), clipBatchId(r.batchId()))
+                        r.payIf(), r.deliveryIf(), r.receiveIf(), normaliseSource(r.source()), clipBatchId(r.batchId()),
+                        payChannel == null ? "" : payChannel,
+                        walletPaidAmount == null ? java.math.BigDecimal.ZERO : walletPaidAmount,
+                        pointsUsed,
+                        pointsDiscount == null ? java.math.BigDecimal.ZERO : pointsDiscount)
                 .update();
     }
 
@@ -193,14 +210,14 @@ public class OrderDao {
 
     /** 购物车：某客户的未收货订单（{@code ReceiveIf != 1}），按创建时间倒序。 */
     public List<Map<String, Object>> selectActiveByCustomer(String customerId) {
-        String sql = "SELECT OrderId, CustomerId, MerchantId, Price, ProductInformation, Images, PayIf, DeliveryIf, ReceiveIf,CreateTime,SettlementDate, Quantity, CancelledAt " +
+        String sql = "SELECT OrderId, CustomerId, MerchantId, Price, ProductInformation, Images, PayIf, DeliveryIf, ReceiveIf,CreateTime,SettlementDate, Quantity, CancelledAt, RefundStatus, RefundRetryCount " +
                 "FROM mall_management_sql.`order` WHERE CustomerId = ? AND ReceiveIf != 1 ORDER BY CreateTime DESC";
         return jdbcClient.sql(sql).param(customerId).query().listOfRows();
     }
 
     /** 订单中心：某商家的未收货订单。与 {@link #selectByMerchant} 的 {@code active} 分支**逐字相同** —— 两条语句各有调用方，本笔不合并（合并会改变调用面）。 */
     public List<Map<String, Object>> selectActiveByMerchant(String merchantId) {
-        String sql = "SELECT OrderId, CustomerId, MerchantId, Price, ProductInformation, Images, PayIf, DeliveryIf, ReceiveIf,CreateTime,SettlementDate, Quantity, CancelledAt " +
+        String sql = "SELECT OrderId, CustomerId, MerchantId, Price, ProductInformation, Images, PayIf, DeliveryIf, ReceiveIf,CreateTime,SettlementDate, Quantity, CancelledAt, RefundStatus, RefundRetryCount " +
                 "FROM mall_management_sql.`order` WHERE MerchantId = ? AND ReceiveIf != 1 ORDER BY CreateTime DESC";
         return jdbcClient.sql(sql).param(merchantId).query().listOfRows();
     }
@@ -215,10 +232,10 @@ public class OrderDao {
     public List<Map<String, Object>> selectByMerchant(String merchantId, boolean completed) {
         String sql;
         if (completed) {
-            sql = "SELECT OrderId, CustomerId, MerchantId, Price, ProductInformation, Images, PayIf, DeliveryIf, ReceiveIf,SettlementDate, Quantity " +
+            sql = "SELECT OrderId, CustomerId, MerchantId, Price, ProductInformation, Images, PayIf, DeliveryIf, ReceiveIf,SettlementDate, Quantity, RefundStatus, RefundRetryCount " +
                     "FROM mall_management_sql.`order` WHERE MerchantId = ? AND ReceiveIf = 1 ORDER BY CreateTime DESC";
         } else {
-            sql = "SELECT OrderId, CustomerId, MerchantId, Price, ProductInformation, Images, PayIf, DeliveryIf, ReceiveIf,SettlementDate, Quantity, CancelledAt " +
+            sql = "SELECT OrderId, CustomerId, MerchantId, Price, ProductInformation, Images, PayIf, DeliveryIf, ReceiveIf,SettlementDate, Quantity, CancelledAt, RefundStatus, RefundRetryCount " +
                     "FROM mall_management_sql.`order` WHERE MerchantId = ? AND ReceiveIf != 1 ORDER BY CreateTime DESC";
         }
         return jdbcClient.sql(sql).param(merchantId).query().listOfRows();
@@ -226,7 +243,7 @@ public class OrderDao {
 
     /** 历史订单：某客户的已收货订单，按 {@code SettlementDate}（字符串列）倒序。 */
     public List<Map<String, Object>> selectHistoryByCustomer(String customerId) {
-        String sql = "SELECT OrderId, MerchantId, ProductInformation, Images, SettlementDate, Quantity " +
+        String sql = "SELECT OrderId, MerchantId, ProductInformation, Images, SettlementDate, Quantity, Price, RefundStatus, RefundRetryCount, RefundReason, RefundAmount, RefundHandledAt " +
                 "FROM mall_management_sql.`order` " +
                 "WHERE CustomerId = ? AND ReceiveIf = 1 " +
                 "ORDER BY SettlementDate DESC";
@@ -288,7 +305,8 @@ public class OrderDao {
     public Map<String, Object> selectByOrderId(String orderId) {
         String sql = "SELECT OrderId, CustomerId, MerchantId, Price, Quantity, ProductInformation, Images, "
                 + "PayIf, DeliveryIf, ReceiveIf, CreateTime, SettlementDate, "
-                + "TradeNo, PaymentMethod, PaidAt, ExpressCompany, TrackingNo, ShippedAt, ReceivedAt "
+                + "TradeNo, PaymentMethod, PaidAt, ExpressCompany, TrackingNo, ShippedAt, ReceivedAt, "
+                + "StockDeducted, RefundStatus, RefundRetryCount, RefundReason, RefundAmount, RefundApplyAt, RefundHandledAt, RefundHandler "
                 + "FROM mall_management_sql.`order` WHERE OrderId = ? LIMIT 1";
         return jdbcClient.sql(sql).param(orderId).query().listOfRows().stream().findFirst().orElse(null);
     }

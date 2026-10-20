@@ -135,6 +135,23 @@ public class CouponController {
      * 见 {@code CouponService.claimBatch} 的头两节。逐张走同一条单张路径，返回每张的成败与原因；
      * **部分失败仍回 {@code success:true}**（那里写了三条理由）。
      */
+    /**
+     * **领取今日会员专属券**（批四第二批 commit 3）。仅 VIP 可领，同一天只能领一张；
+     * 券定义由服务端按模板生成，前端不传 {@code CouponId}（与 {@code claimBatch} 同一条理由：
+     * 「今日」是服务端语义，别把定义抄到前端）。
+     */
+    @PostMapping("/coupon/daily")
+    public ResponseEntity<Object> daily(
+            @RequestParam("Account") String Account,
+            HttpServletRequest request
+    ) {
+        if (!IdentityGuard.requireSelfOrAdminByUsername(request, Account,
+                userStateLookupProvider.getIfAvailable())) {
+            return IdentityGuard.forbidden();
+        }
+        return ResponseEntity.ok(Result.of(couponService.claimDaily(Account)));
+    }
+
     @PostMapping("/coupon/claimBatch")
     public ResponseEntity<Object> claimBatch(
             @RequestParam("Account") String Account,

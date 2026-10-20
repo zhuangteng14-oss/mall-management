@@ -1,5 +1,5 @@
 <template>
-  <div class="goods-detail-page">
+  <div class="goods-detail-page" :class="pdThemeClass">
     <!-- ── 自带顶栏 ───────────────────────────────────────────────────────────────
          本页路由带 `meta.public: true` ⇒ **不进壳**：没有壳的左菜单，也没有壳顶栏。 -->
     <nav class="nav-bar">
@@ -44,16 +44,17 @@
         <span>{{ goodName }}</span>
       </nav>
 
-      <!-- ── 一、主区：图集 56 / 信息 44 ─────────────────────────────────────── -->
-      <div class="pd">
-        <div class="gal">
+      <!-- ── 一、主区：A 版左大图 / 右信息（原 56/44 两栏，机制逐字未动）── -->
+      <div class="pd pd-layout">
+        <div class="gal pd-gallery">
+          <div class="media-label"><b>封面图 / COVER</b><span>{{ gallery.length ? gallery.length + ' 张 · 当前型号图集' : '暂无图集' }}</span></div>
           <!-- `.stage` 是全页**唯一**一处 `overflow:hidden`（放大镜裁切）—— 它里面没有任何角标 -->
-          <div class="stage">
+          <div class="stage main-thumb">
             <div class="zoom">商品主图 800 × 800</div>
             <img
               v-for="(item, idx) in allItems"
               :key="idx"
-              :src="item.goodImg"
+              :src="idx === currentIndex && gallery.length > 1 ? gallery[galleryIndex] : item.goodImg"
               class="big-img"
               :class="{ active: idx === currentIndex }"
             />
@@ -62,7 +63,7 @@
             <button type="button" class="arw r" title="下一张（现有实现 scroll(+1)）" :disabled="start + 3 >= allItems.length" @click="scroll(1)">›</button>
           </div>
           <!-- 缩略图：既有真图集（`showImages` + `realIdx`），机制逐字未动；稿的 `.thb` 是灰方块 -->
-          <div class="thumbs">
+          <div class="thumbs pd-thumbs">
             <div
               v-for="(item, idx) in showImages"
               :key="idx"
@@ -74,12 +75,28 @@
               <img :src="item.goodImg" />
             </div>
           </div>
+          <!-- 2026-10-19 多图：封面之外的那几张（`ImgList`）。只有 1 张时不画这一排。 -->
+          <div v-if="gallery.length > 1" class="thumbs pd-thumbs pd-thumbs-gallery">
+            <div
+              v-for="(u, gi) in gallery"
+              :key="'g' + gi"
+              class="thb"
+              :class="{ on: gi === galleryIndex }"
+              :title="'商品图 ' + (gi + 1)"
+              @click="galleryIndex = gi"
+            >
+              <img :src="u" />
+            </div>
+          </div>
+          <p class="gallery-note">点击缩略图切换主图；下方第二排是该型号的完整图集。</p>
         </div>
 
-        <!-- 右信息区 = 本页的**一个釉面主块**（v5 由 `--glaze-deep` 换成 `--glaze-mid`）。
-             层级：商品名 24 衬线 / 现价 36 衬线朱砂 / 其余 12–19 无衬线。 -->
-        <div class="info">
-          <h1 class="pname">{{ goodName }}</h1>
+        <!-- 右信息区：A 版直落排版（发丝线分段 + display 标题 + mono 数字）。
+             原釉面主块由文件末的 `.pd-info` 覆盖；区块里的全部数据与动作保持不变。 -->
+        <div class="info pd-info">
+          <div class="kicker">{{ goodType }} / {{ currentItem.productCode || 'PRODUCT' }}</div>
+          <h1 class="pname">{{ goodName }}<span v-if="currentItem.isBrand === true || currentItem.isBrand === 1 || currentItem.isBrand === '1'" class="pname-brand">品牌</span></h1>
+          <!-- 2026-10-19 用户令：H1 下方「商品编号 · 店铺名 · 型号与数量…」整行已删（信息重复且泄版面）；保留本行注释占位，净零行数不顶漂下方行号。 -->
 
           <!-- ①【原价 / 折扣】—— C3 块 5〈折扣〉**落地**（2026-10-12 用户 A 档批准）。
                改前：`.was`（`¥199.00`）与 `.off`（`6.5 折`）是**稿内 mock 的写死字面量**，
@@ -90,8 +107,8 @@
                   这样改了现价，角标自动跟着变，不会留下一个算不出来的陈旧折率。
                ⚠️ 稿的 `.dec`（`.00`）**不落**：本仓价格没有固定小数位，硬拆会凭空空造两位。 -->
           <div class="priceline">
-            <span class="price"><span class="sym">¥</span><span class="int">{{ currentItem.price }}</span></span>
-            <span v-if="hasDiscount" class="was">¥{{ currentItem.originalPrice }}</span>
+            <span class="price" :class="{ vip: currentMemberPrice > 0 }"><span class="sym">¥</span><span class="int">{{ currentMemberPrice > 0 ? currentMemberPrice : currentItem.price }}</span><span v-if="currentMemberPrice > 0" class="vip-tag">会员价</span></span>
+            <span v-if="currentMemberPrice > 0" class="was">¥{{ currentItem.price }}</span><span v-if="hasDiscount" class="was">¥{{ currentItem.originalPrice }}</span>
             <span v-if="hasDiscount" class="off">{{ discountRate }} 折</span>
             <!-- ①-补【国家补贴】—— C3 块 5〈国补〉**落地**（2026-10-12）。
                  ⚠️ 只在「这件商品通过了国补、规则在期、商品在架」时才有个数 —— 后端 `/marketing/subsidy/goods`
@@ -190,7 +207,20 @@
             </div>
           </div>
 
+          <!-- 2026-10-19 A 版复刻：按本轮要求把数量步进器放回主区。它绑定既有 `popupQty`
+               （与购入弹窗同源、同一套 0–100 钳位），不新增状态；0 = 尚未在购入弹窗中选量。 -->
+          <div class="pd-spec qty-line">
+            <div class="label">数量</div>
+            <div class="qty">
+              <button type="button" :disabled="!currentItem.productCode" title="减一（与购入弹窗同一套 0–100 钳位）" @click="setPopQtyByCode(currentItem.productCode, -1)">−</button>
+              <span>{{ popupQty[currentItem.productCode] || 0 }}</span>
+              <button type="button" :disabled="!currentItem.productCode" title="加一（与购入弹窗同一套 0–100 钳位）" @click="setPopQtyByCode(currentItem.productCode, 1)">+</button>
+            </div>
+            <span class="qty-hint">与购入弹窗同源 · 0 = 未选</span>
+          </div>
+
           <!-- 数量选择栏 —— **C 笔 C1 下线**（2026-10-08）：用户裁定浏览态「去掉数量选择栏」。
+               （2026-10-19 A 版复刻已按新一轮要求把步进器加回主区，见上面 `.qty-line`。）
                原块 = 3 件 `disabled` 步进器（稿 `:967-975` 画的是**活控件**，而本页主区没有对应
                状态 —— 数量只在购入模块里 ⇒ 这三件曾以占位形态登记在台账 §三「稿内但本笔无法
                接线的控件」的 15 件里）+ `.stock`「现货，下单后 48 小时内发出」。
@@ -241,14 +271,14 @@
                本笔改的只有「进店逛逛」：它现在是**真按钮**（`enterShop` → `/shop`）。
                ⚠️ 店名与 `.sub` 后半句落真值（`currentItem.UserName` / `goodType`），
                摘掉稿里 mock 的「声谷小店」/「数码配件 ·」—— 与上述撤销无关，依旧有效。 -->
-          <div class="shop">
+          <div class="shop a-pd-shop">
             <span class="mark">{{ (currentItem.UserName || '商')[0] }}</span>
             <span>
               <span class="nm">{{ currentItem.UserName }}小店</span>
               <span class="sub">商品类型：{{ goodType }}</span>
             </span>
             <span class="ops">
-              <button type="button" title="现有功能 consultProduct" @click="consultProduct">客服</button>
+              <button type="button" class="fav-toggle" :class="{ on: isFav }" :title="isFav ? '取消收藏（真端点 /favorite/remove）' : '收藏这件商品（真端点 /favorite/add）'" :disabled="favBusy" @click="toggleFav">{{ isFav ? '❤ 已收藏' : '♡ 收藏' }}</button><button type="button" title="现有功能 consultProduct" @click="consultProduct">客服</button>
               <button type="button" title="真跳转：/shop 店铺主页（新建页 ShopHome，卖家 = 本页 route 的 MerchantId）" @click="enterShop">进店逛逛</button>
               <!-- 举报入口（方案 §4.4「可举报：评论 / 回复 / 商品 / 用户」）—— 商品还剩这一条：
                    对象 = 本商品的 `goods.Id`。⚠️ **「商家」那一条已不在本页**（2026-10-13 用户裁定 ①
@@ -256,6 +286,14 @@
                    ⚠️ 未登录不给（举报要有身份）：与服务端 `IdentityGuard` 同判据。 -->
               <button type="button" v-if="revAccount" @click="openReport('goods', Id, '商品')">举报商品</button>
             </span>
+          </div>
+
+          <!-- A 版「商品注释」：只落真实字段（编号 / 类型 / 商家 / 有快照时的售后原文）。 -->
+          <div class="pd-notes">
+            <div class="pd-note"><b>编号</b><span>{{ currentItem.productCode || '—' }}</span></div>
+            <div class="pd-note"><b>类型</b><span>{{ goodType || '—' }}</span></div>
+            <div class="pd-note"><b>商家</b><span>{{ currentItem.UserName ? currentItem.UserName + '小店' : '—' }}</span></div>
+            <div class="pd-note" v-if="afterSaleText"><b>售后</b><span>{{ afterSaleText }}</span></div>
           </div>
         </div>
       </div>
@@ -269,7 +307,7 @@
            ⚠️ 四枚按钮的 `on` 仍按稿的**默认切面** `desc`（`ProductPage.html:1011-1012`），
               但它现在表示「**当前面**」；键名 `desc/spec/rev/pol` 与四个面板一一对应，
               切 Tab 只换面板 ⇒ 覆盖率与切 Tab 从此不再互相牵制。 -->
-      <nav class="tabs">
+      <nav class="tabs a-pd-tabs">
         <button type="button" :class="{ on: activeTab === 'desc' }" @click="activeTab = 'desc'">商品详情</button>
         <button type="button" :class="{ on: activeTab === 'spec' }" @click="activeTab = 'spec'">规格参数</button>
         <button type="button" :class="{ on: activeTab === 'rev' }" @click="activeTab = 'rev'">累计评价<span class="cnt">{{ revTotalLabel }}</span></button>
@@ -279,7 +317,7 @@
       <!-- Tab ① 商品详情。⚠️ **批四（2026-10-18）改判**：稿的两段演示文案与 `.longimg` 假图
            一律退役 —— `goods.Detail` 为空时给「暂无数据」空态，拿耳机参数充数就是假象。
            原 `.longimg` 上的 `data-slot` 随之退役（不是「随数据浮动」，是任何数据下都不再渲染）。 -->
-      <div class="panel" v-if="activeTab === 'desc'">
+      <div class="panel a-pd-tab-body" v-if="activeTab === 'desc'">
         <p v-if="detailText" class="para pre">{{ detailText }}</p>
         <!-- 有 Detail 快照 ⇒ 真文本；没有 ⇒ 空态（不再画「声谷标准版…」与 1200×400 长图）。 -->
         <div v-else class="empty">
@@ -292,7 +330,7 @@
       <!-- Tab ② 规格参数。⚠️ **批四（2026-10-18）改判**：8 行耳机 mock（品牌 / 型号 / 材质…）
            退役 —— `goods.Spec` 为空时给空态；有真内容仍走下方同一套 `.spec`/`.r`/`.k`/`.v` 样式。
            原 `data-slot` 占位标记随之退役（与 Tab ① 的 `.longimg` 同一处置）。 -->
-      <div class="panel" v-if="activeTab === 'spec'">
+      <div class="panel a-pd-tab-body" v-if="activeTab === 'spec'">
         <div v-if="specText" class="spec"><div class="r" v-for="(r, i) in specRows" :key="i"><span class="k">{{ r.k }}</span><span class="v">{{ r.v }}</span></div></div>
         <!-- 有 Spec 快照 ⇒ 真表；没有 ⇒ 空态（不再拿「声谷 SG / SG-A2」等 8 行假参数充数）。
              ⚠️ 真实内容路径没动：`specText` 仍是 goods 快照列，有值就照旧显示，空值才落到这里。 -->
@@ -317,7 +355,7 @@
            而这几个数是**纯假数据**；真列表来了还并排画 12,043 条，等于把两个互斥的事实摆在同一块里。
            ⚠️ 数据、判定、排序**全在后端**（`CommentService`）：前端这里没有「买过没有」「能不能重复评」
            的第二份判据 —— 抄一份就等着两边慢慢分叉。 -->
-      <div class="panel" v-if="activeTab === 'rev'">
+      <div class="panel a-pd-tab-body" v-if="activeTab === 'rev'">
         <div class="rev">
           <div class="score">
             <!-- 评论子 tab：均分 + 5→1 星分布 + 实拍图墙 -->
@@ -535,7 +573,7 @@
       </div>
 
       <!-- Tab ④ 售后保障：稿判「真功能 N=0」（纯静态政策文案）⇒ 不标 slot、不 `disabled`。⚠️ **2026-10-10〈模板表通用化〉**：goods 新增 `AfterSale` 快照列 ⇒ 商家填了这段文字，本 Tab 就显示**它**（那四条平台默认政策 `v-if="!afterSaleText"` 让位）——即「商家自己的售后说明」优先于「平台通用政策」。 -->
-      <div class="panel" v-if="activeTab === 'pol'">
+      <div class="panel a-pd-tab-body" v-if="activeTab === 'pol'">
         <p v-if="afterSaleText" class="para pre">{{ afterSaleText }}</p><div v-if="!afterSaleText" class="pol">
           <div class="r"><span class="k">7 天无理由</span>
             <span class="v">签收次日起 7 天内，商品及包装保持完好、不影响二次销售的，可申请无理由退货。</span></div>
@@ -620,14 +658,14 @@
             <div class="p-row" v-for="(it, idx) in popupBuyList" :key="idx">
               <div class="thumb"><img v-if="it.goodImg" :src="it.goodImg" /></div>
               <div class="nm"><div class="t">{{ goodName }}</div><div class="sku">规格：{{ it.productCode }}</div><div class="sku">订单号 {{ popupOrderId }}</div></div>
-              <div class="unit">¥{{ Number(it.price).toFixed(2) }}</div>
+              <div class="unit"><s v-if="popupMemberOn" class="m-was">¥{{ Number(it.price).toFixed(2) }}</s><b v-if="popupMemberOn" class="m-price">¥{{ Number(memberPriceOf(it.price)).toFixed(2) }}</b><template v-else>¥{{ Number(it.price).toFixed(2) }}</template></div>
               <div class="num"><button type="button" class="pm" title="减一（`setPopQtyByCode`，沿用 min 0）" @click="setPopQtyByCode(it.productCode, -1)">−</button><span class="n">{{ it.quantity }}</span><button type="button" class="pm" title="加一（`setPopQtyByCode`，沿用 max 100）" @click="setPopQtyByCode(it.productCode, 1)">+</button></div>
-              <div class="sub">¥{{ (it.price * it.quantity).toFixed(2) }}</div>
+              <div class="sub"><s v-if="popupMemberOn" class="m-was">¥{{ (it.price * it.quantity).toFixed(2) }}</s><b v-if="popupMemberOn" class="m-price">¥{{ Number(memberPriceOf(it.price) * it.quantity).toFixed(2) }}</b><template v-else>¥{{ (it.price * it.quantity).toFixed(2) }}</template></div>
               <button type="button" class="del" title="移出本行（现有实现 `delPopItem`）" @click="delPopItem(it.productCode)">删除</button>
             </div>
           </div>
           <aside class="p-sum"><div class="p-sum-h">结算</div>
-            <div class="p-sum-r"><span class="k">商品件数</span><span class="v">{{ popupCount }}</span></div><div class="p-sum-r"><span class="k">商品总额</span><span class="v">¥{{ Number(popupTotal).toFixed(2) }}</span></div><div class="p-sum-r" v-if="popupEntry === 'buy'"><span class="k">优惠券</span><span class="v"><span class="cp" :class="{ off: !couponPickable }" :title="couponHint"><select v-model="couponId" :disabled="!couponPickable"><option value="">{{ usableCoupons.length ? '不使用优惠券' : '暂无可用券' }}</option><option v-for="c in usableCoupons" :key="c.CouponId" :value="c.CouponId" :disabled="!!couponBlockedReason(c)">{{ couponLabel(c) }}{{ couponBlockedReason(c) ? '（' + couponBlockedReason(c) + '）' : '' }}</option></select><b v-if="discount > 0" class="save">−¥{{ Number(discount).toFixed(2) }}</b></span></span></div>
+            <div class="p-sum-r"><span class="k">商品件数</span><span class="v">{{ popupCount }}</span></div><div class="p-sum-r"><span class="k">商品总额</span><span class="v"><s v-if="popupMemberOn" class="m-was">¥{{ Number(popupTotal).toFixed(2) }}</s> ¥{{ Number(popupMemberTotal).toFixed(2) }}</span></div><div class="p-sum-r" v-if="popupEntry === 'buy'"><span class="k">优惠券</span><span class="v"><span class="cp" :class="{ off: !couponPickable }" :title="couponHint"><select v-model="couponId" :disabled="!couponPickable"><option value="">{{ usableCoupons.length ? '不使用优惠券' : '暂无可用券' }}</option><option v-for="c in usableCoupons" :key="c.CouponId" :value="c.CouponId" :disabled="!!couponBlockedReason(c)">{{ couponLabel(c) }}{{ couponBlockedReason(c) ? '（' + couponBlockedReason(c) + '）' : '' }}</option></select><b v-if="discount > 0" class="save">−¥{{ Number(discount).toFixed(2) }}</b></span></span></div><div class="p-sum-r" v-if="popupMemberOn && popupTotal - popupMemberTotal > 0"><span class="k">会员优惠</span><span class="v"><b class="save">−¥{{ Number(popupTotal - popupMemberTotal).toFixed(2) }}</b></span></div>
             <div class="p-sum-r"><span class="k">运费</span><span class="v">免运费</span></div><div class="p-sum-t"><span class="k">合计</span><span class="v"><i>¥</i>{{ Number(payTotal).toFixed(2) }}</span></div>
             <button type="button" class="p-confirm" @click="confirmPurchase">{{ popupEntry === 'cart' ? '加入购物车' : '结算' }}</button>
           </aside></div>
@@ -668,8 +706,8 @@ import { ref, onMounted, computed, watch, onBeforeUnmount } from 'vue'   // ⚠�
 import { useRoute, useRouter } from 'vue-router'
 import { http, handleApiError } from '../api/http'
 import { endpoints } from '../api/endpoints'; import { orderAdd, cartAdd } from '../api/order'   // ⚠️ C3 块 4：**同行追加**（不新增行 —— 本文件 `:794`/`:803` 被 `slot-registry.md:1994-1995` 按行号引（〈Bug 1〉本笔 +19 行前为 `:775`/`:784`），此处加行会顶漂它们）。两个函数就是原先那两串 `URLSearchParams` + `http.post` + `res.json()` 的收口
-import CashierDialog from '../components/CashierDialog.vue'; import ProductCard from '../components/ProductCard.vue'; import ReportDialog from '../components/ReportDialog.vue'; import { sharedList } from '../config/goods-flags'; import { useInfiniteList } from '../composables/useInfiniteList'   // ⚠️ **同行追加** `sharedList`（C3 块 5 ·〈Bug 2/3〉落码，2026-10-12）：本页只用它算「猜你喜欢」（见 `:522` 那条按语）。本行已有一条「本笔确实新增了一行」的记账（2026-10-10 Bug 1），**这一笔不再加行** —— 本文件下面 `:571` / `:638` / `:794` / `:1032` / `:1330` 等处被文档按行号钉着   // ⚠️ 2026-10-10（Bug 1）：收银台与「我的订单」**共用同一个组件** —— 本行**确实**新增了一行；本笔在 `ProductPage.vue` 净 +19 行（`git diff` 实测：模板 `:412` 起 +5、import +1、`handlePay` 段 +13）⇒ 下面两处 `:775`/`:784` 漂到 `:794`/`:803`，随本笔一并重指（见 `slot-registry.md:1994-1995`）
-import { getMerchantId, getCustomerId, getUsername, isLoggedIn, getRole } from '../api/auth'; import IconGlyph from '../components/ui/IconGlyph.vue'; import { coupons, claim, subsidyGoods, seckillLive } from '../api/marketing'; import { couponName } from '../config/coupon-format'; import { useCouponPick } from '../composables/useCouponPick'; import { list as commentList, add as commentAdd, remove as commentRemove, accept as commentAccept, like as commentLike, myOrders as commentOrders } from '../api/comment'; import DonutChart from '../components/charts/DonutChart.vue'   // ⚠️ **块 6 整改 commit 2〈问答漏项补齐〉同行追加** `DonutChart`（§4.2「左圆比例图」，与 `views/admin/AccountsPage.vue` 的「封禁分布」同款）—— **不新增行**，故本行行号不动。⚠️ **整改 commit 4〈举报〉曾同行追加** `reportAdd`（`/report/add`；本页的「举报 / 提删」弹窗，§4.4 与 §4.2 的商家提删走同一条）—— **2026-10-13 撤出**：举报弹窗抽成 `components/ReportDialog.vue` 后本页不再自己发 `/report/add`，该 import 随弹窗搬进组件（本行仍**不新增行**）。⚠️ 六条 import **同行**（第 6 条 `../api/comment` 的六个别名：块 6 · commit 1「评论」+ commit 2「问答」的 `accept`，2026-10-12 —— 别名是必需的，`list`/`add` 这种裸名在本文件里跟 `allItems` 那些局部名撞脸，读不出是谁的）（第 5 条 `useCouponPick`：块 5 · commit 5 续笔「立即购买」也能用券，2026-10-12；与 `ShoppingCart.vue` 共用同一处，不抄第二份）（第 2、3 条：2026-10-11 补图标笔 + C3 块 5 · commit 1；第 4 条 `couponName`：块 5 · A 组 · A7 后半；`getUsername`：块 5 券口径改登录名，2026-10-12）—— 合并到既有行 = 不新增行号漂移（本文件 `:794`/`:803` 被 `slot-registry.md:1994-1995` 按行号引，上面 `:424` 那条注释记过同一件事）。⚠️ **块 5 · commit 1 仍整体 +90 行**（模板 +17 / `<script setup>` 尾 +70 / `<style>` +3）⇒ `slot-registry.md:1994` 引的 `:794` 漂 **`:881`**、`:1995` 引的 `:803` 漂 **`:890`**（两值均为 `grep -n` 实测，见 `_work/b5-repoint.md`）。⚠️ **块 6 · commit 1 又整体 +N 行**、**commit 2（问答）再 +M 行**，漂移台账见 `_work/b6-commit1-repoint.md` 与 `_work/b6-commit2-repoint.md`（收口 commit 逐处重指）。
+import CashierDialog from '../components/CashierDialog.vue'; import ProductCard from '../components/ProductCard.vue'; import ReportDialog from '../components/ReportDialog.vue'; import { sharedList, isSeckill, isSubsidy } from '../config/goods-flags'; import { useInfiniteList } from '../composables/useInfiniteList'   // ⚠️ **同行追加** `sharedList`（C3 块 5 ·〈Bug 2/3〉落码，2026-10-12）：本页只用它算「猜你喜欢」（见 `:522` 那条按语）。本行已有一条「本笔确实新增了一行」的记账（2026-10-10 Bug 1），**这一笔不再加行** —— 本文件下面 `:571` / `:638` / `:794` / `:1032` / `:1330` 等处被文档按行号钉着   // ⚠️ 2026-10-10（Bug 1）：收银台与「我的订单」**共用同一个组件** —— 本行**确实**新增了一行；本笔在 `ProductPage.vue` 净 +19 行（`git diff` 实测：模板 `:412` 起 +5、import +1、`handlePay` 段 +13）⇒ 下面两处 `:775`/`:784` 漂到 `:794`/`:803`，随本笔一并重指（见 `slot-registry.md:1994-1995`）
+import { getMerchantId, getCustomerId, getUsername, isLoggedIn, getRole, getMemberLevel } from '../api/auth'; import { favoriteAdd, favoriteRemove, favoriteCheck } from '../api/favorite'; import IconGlyph from '../components/ui/IconGlyph.vue'; import { coupons, claim, subsidyGoods, seckillLive } from '../api/marketing'; import { couponName } from '../config/coupon-format'; import { useCouponPick } from '../composables/useCouponPick'; import { list as commentList, add as commentAdd, remove as commentRemove, accept as commentAccept, like as commentLike, myOrders as commentOrders } from '../api/comment'; import DonutChart from '../components/charts/DonutChart.vue'; import { memberPriceOf } from '../composables/useMember'   // ⚠️ **块 6 整改 commit 2〈问答漏项补齐〉同行追加** `DonutChart`（§4.2「左圆比例图」，与 `views/admin/AccountsPage.vue` 的「封禁分布」同款）—— **不新增行**，故本行行号不动。⚠️ **整改 commit 4〈举报〉曾同行追加** `reportAdd`（`/report/add`；本页的「举报 / 提删」弹窗，§4.4 与 §4.2 的商家提删走同一条）—— **2026-10-13 撤出**：举报弹窗抽成 `components/ReportDialog.vue` 后本页不再自己发 `/report/add`，该 import 随弹窗搬进组件（本行仍**不新增行**）。⚠️ 六条 import **同行**（第 6 条 `../api/comment` 的六个别名：块 6 · commit 1「评论」+ commit 2「问答」的 `accept`，2026-10-12 —— 别名是必需的，`list`/`add` 这种裸名在本文件里跟 `allItems` 那些局部名撞脸，读不出是谁的）（第 5 条 `useCouponPick`：块 5 · commit 5 续笔「立即购买」也能用券，2026-10-12；与 `ShoppingCart.vue` 共用同一处，不抄第二份）（第 2、3 条：2026-10-11 补图标笔 + C3 块 5 · commit 1；第 4 条 `couponName`：块 5 · A 组 · A7 后半；`getUsername`：块 5 券口径改登录名，2026-10-12）—— 合并到既有行 = 不新增行号漂移（本文件 `:794`/`:803` 被 `slot-registry.md:1994-1995` 按行号引，上面 `:424` 那条注释记过同一件事）。⚠️ **块 5 · commit 1 仍整体 +90 行**（模板 +17 / `<script setup>` 尾 +70 / `<style>` +3）⇒ `slot-registry.md:1994` 引的 `:794` 漂 **`:881`**、`:1995` 引的 `:803` 漂 **`:890`**（两值均为 `grep -n` 实测，见 `_work/b5-repoint.md`）。⚠️ **块 6 · commit 1 又整体 +N 行**、**commit 2（问答）再 +M 行**，漂移台账见 `_work/b6-commit1-repoint.md` 与 `_work/b6-commit2-repoint.md`（收口 commit 逐处重指）。
 
 const route = useRoute()
 const router = useRouter()
@@ -691,7 +729,7 @@ const customerId = buyerId || ''
 // 数据定义
 const allItems = ref([])
 const currentIndex = ref(0)
-const currentItem = computed(() => allItems.value[currentIndex.value] || {})
+const currentItem = computed(() => allItems.value[currentIndex.value] || {}); const currentMemberPrice = computed(() => { const m = Number(currentItem.value.memberPrice); const p = Number(currentItem.value.price); return m > 0 && p > 0 && m < p ? m : 0 })   // 批四第二批 commit 3（**同行追加、不新增行**）：会员价由服务端 `productCodePrice` 只对 VIP 返回（`memberPrice`），非会员无此键 ⇒ 本 computed 恒 0（不画会员价）。
 // ── 块 5〈折扣〉：划线价 + 折扣角标（读侧现算，见模板 ① 的注释）────────────────
 // `originalPrice` 由 `/goods/productCodePrice` 透出（本笔给那条 SELECT 加的列，响应键加性）。
 // ⚠️ 老响应没有这个键 ⇒ `undefined` ⇒ `hasDiscount` 为假 ⇒ **一枚都不画**（不画 ≠ 画假的）。
@@ -738,6 +776,26 @@ const recRetry = recFeed.retry
 const start = ref(0)
 const showImages = computed(() => allItems.value.slice(start.value, start.value + 3))
 const realIdx = (i) => start.value + i
+
+// 2026-10-19 多图（批四第二批）：当前型号的图集 = `ImgList`（JSON 数组）优先，否则回落单图 `goodImg`。
+// ⚠️ 解析失败按单图走 —— 坏 JSON 不值得把整页打成错误态（同本页「数据不足不显」口径）。
+const gallery = computed(() => {
+  const it = currentItem.value || {}
+  const raw = it.imgList
+  if (raw) {
+    try {
+      const arr = typeof raw === 'string' ? JSON.parse(raw) : raw
+      if (Array.isArray(arr)) {
+        const ok = arr.filter(Boolean)
+        if (ok.length) return ok
+      }
+    } catch (e) { /* 坏 JSON ⇒ 回落单图 */ }
+  }
+  return it.goodImg ? [it.goodImg] : []
+})
+/** 图集内的当前下标（0 = 封面）。换型号 ⇒ 回到封面。 */
+const galleryIndex = ref(0)
+watch(currentIndex, () => { galleryIndex.value = 0 })
 
 const scroll = (d) => {
   const m = allItems.value.length - 3
@@ -788,6 +846,8 @@ const loadAllItems = async () => {
           price: d2.price,
           originalPrice: d2.originalPrice, // 块 5〈折扣〉：划线价（0/undefined = 不打折）
           goodImg: d2.goodImg,
+          imgList: d2.imgList, // 2026-10-19 多图：JSON 数组串（null/空 ⇒ 只用 goodImg）
+          isBrand: d2.isBrand, memberPrice: d2.memberPrice, isSeckill: d2.isSeckill, isSubsidy: d2.isSubsidy, // 批四第二批 commit 2/3 + 终局清道夫补充二（**同行追加、不新增行**）：`isBrand` = 品牌加盟店标（1/true/"1"）；`memberPrice` = **仅 VIP 响应带此键**（严格加性）、模板 `currentMemberPrice` 比价后再画；`isSeckill` / `isSubsidy` = 后端 `productCodePrice` 新透出的营销标记（真数据，驱动 `pdThemeClass`）
           UserName: ''
         })
       }
@@ -828,7 +888,7 @@ const loadPopupItems = async () => {
         items.push({
           productCode: code,
           price: d2.price,
-          goodImg: d2.goodImg
+          goodImg: d2.goodImg, memberPrice: d2.memberPrice // 批四第二批 commit 3（**同行追加**）：仅 VIP 响应带此键；SKU 行由 `mergeSkus` 按 SKU 价重算
         })
       }
     }
@@ -865,14 +925,14 @@ const popupBuyList = computed(() => {
     .map((i) => ({
       productCode: i.productCode,
       quantity: popupQty.value[i.productCode],
-      price: i.price, originalPrice: i.originalPrice,   // ⚠️ **同行追加**（本文件 `:794`/`:803` 被引，且 `:1032` 那类 `<style>` 引用都在下面 ⇒ 多一行就顶漂）。块 5〈用券规则〉2026-10-12 要用它算「本单含不含折扣商品」；`popupBuyList` 原来是 `productCode/quantity/price/goodImg` 四件，`originalPrice` 只有 `popupAllItems` 有（`:559`）。
+      price: i.price, originalPrice: i.originalPrice, memberPrice: i.memberPrice,   // ⚠️ **同行追加**（本文件 `:794`/`:803` 被引，且 `:1032` 那类 `<style>` 引用都在下面 ⇒ 多一行就顶漂）。块 5〈用券规则〉2026-10-12 要用它算「本单含不含折扣商品」；`popupBuyList` 原来是 `productCode/quantity/price/goodImg` 四件，`originalPrice` 只有 `popupAllItems` 有（`:559`）。
       goodImg: i.goodImg
     }))
 })
 
 const popupTotal = computed(() => {
   return popupBuyList.value.reduce((sum, item) => sum + item.price * item.quantity, 0)
-}); const popupCount = computed(() => popupBuyList.value.reduce((sum, it) => sum + it.quantity, 0))   // **商品件数** = Σ 数量（`图3.jpg` 那份 1+2+3 = 6）。⚠️ 旧 `.p-foot` 写的是 `popupBuyList.length` = **行数**（三行读成 3 件）⇒ 本笔按用户「商品件数」的口径改成数量之和。
+}); const popupCount = computed(() => popupBuyList.value.reduce((sum, it) => sum + it.quantity, 0)); const isVipMember = computed(() => Number(getMemberLevel()) > 0); const popupMemberOn = isVipMember; const popupMemberTotal = computed(() => isVipMember.value ? memberPriceOf(popupTotal.value) : popupTotal.value)   // 批四第二批 commit 3（**同行追加、不新增行**）：会员合计按**整单** `round(Σprice×qty × 0.9, 2)` 算 —— 与后端 `OrderService` 的 `memberPrice = MemberPricing.priceOf(Price)` **同一基数**（逐行四舍五入会与后端差到分）。非 VIP 时逐字等于 `popupTotal`。   // **商品件数** = Σ 数量（`图3.jpg` 那份 1+2+3 = 6）。⚠️ 旧 `.p-foot` 写的是 `popupBuyList.length` = **行数**（三行读成 3 件）⇒ 本笔按用户「商品件数」的口径改成数量之和。
 
 // 订单提交
 const showPayConfirm = ref(false); const lockScroll = (on) => { document.body.style.overflow = on ? 'hidden' : '' }; watch(showPopup, lockScroll); onBeforeUnmount(() => lockScroll(false))   // ⚠️ **2026-10-08 用户五条【1】**：弹窗开 = **锁 body 滚动**、关 = 解锁（用户逐字：「满占 = 弹窗 + 背后页面一起锁」）。⚠️ 用 `watch` 一处收口、**不在 `openPopup` 与各关闭点各写一行** —— 关闭有两条路（点旁边空白 / 点 X）都只置 `showPopup=false`。⚠️ `onBeforeUnmount` 是**兜底**：`/product` 是两壳的**兄弟**路由 ⇒ 切走即卸载，不兜底会把全站锁死。⚠️ **只写 `<body>` 就够**（探针 ⑪ 有对照：开窗时把这一行撤掉、同一发真滚轮立刻能滚）—— `document.scrollingElement` 虽是 `<html>`，但 `overflow:hidden` 会从 body **传给视口**。⚠️ **同行追加、不新增行**（本文件 775 / 784 两行在下面，新增行会顶漂它们）。
@@ -958,7 +1018,7 @@ const handlePay = async (ok) => {   // **C3 块 4 改判 + 2026-10-10 补丁改�
       // ⚠️ 只在**成功**这一支清券选择并重拉券包：失败时后端**没**烧券（CAS 抢不到就不建单，见
       //    `OrderService.addLocked`），留着选择让用户直接重试（同购物车页那条）。
       resetCoupon(); loadCoupons()
-      showPopup.value = false; payFor.value = { OrderId: d.OrderId, Price: Math.max(0, Number(d.Price) - Number(result.Discount || 0)) }
+      showPopup.value = false; payFor.value = { OrderId: d.OrderId, Price: Math.max(0, Number(result.MemberPrice != null ? result.MemberPrice : d.Price) - Number(result.Discount || 0)), OriginalTotal: Number(d.Price), MemberDiscount: Number(result.MemberDiscount || 0), CouponDiscount: Number(result.Discount || 0) }
     } else {
       alert('订单提交失败：' + (result.msg || '未知错误'))
     }
@@ -981,7 +1041,8 @@ const afterCashier = () => {
   payFor.value = null
   showPopup.value = false
   popupQty.value = {}
-  router.push(getMerchantId() ? '/merchant/order/cart?tab=orders' : '/customer/cart?tab=orders')
+  // 2026-10-19：落到独立的「我的订单」全宽页（旧 `?tab=orders` 地址仍可用）。
+  router.push(getMerchantId() ? '/merchant/orders' : '/customer/orders')
 }
 
 // 搜索功能
@@ -1069,7 +1130,7 @@ const consultProduct = async () => {
     alert('网络错误，请稍后重试');
   }
 };
-const enterShop = () => router.push({ path: '/shop', query: { MerchantId: sellerId } })   // ⚠️ C3 块 5 B 组（2026-10-12）：「进店逛逛」的落点，只有这一处调用方（模板里那颗按钮）。⚠️ 本行**占的**是 `consultProduct` 与 `onMounted` 之间那个**空行**（空行已撤）—— 本文件 `:1032` / `:1107` / `:1330` 等被 `docs/` 按行号引（`slot-registry.md` 引 `:881`/`:890` 那两条同理），任何新增行都会顶漂它们 ⇒ **借一个空行放函数、净零**（同 `:592` 那条 `}; const setPopQtyByCode = …` 的手法）。⚠️ 传的只有 `MerchantId`：`ShopHome` 的店名从商品行的 `UserName` 取，本页不作第二个来源（理由见那一页的 `loadShop`）。
+const enterShop = () => router.push({ path: '/shop', query: { MerchantId: sellerId, from: 'product', Id: route.query.Id, GoodName: route.query.GoodName, Price: route.query.Price, GoodImg: route.query.GoodImg, GoodType: route.query.GoodType, ProductCode: route.query.ProductCode } })   // 2026-10-19 用户令：带 `from=product` + 本页 7 个 query ⇒ 店铺页「返回」能把人送回这件商品（而不是商城首页）。 // ⚠️ C3 块 5 B 组（2026-10-12）：「进店逛逛」的落点，只有这一处调用方（模板里那颗按钮）。⚠️ 本行**占的**是 `consultProduct` 与 `onMounted` 之间那个**空行**（空行已撤）—— 本文件 `:1032` / `:1107` / `:1330` 等被 `docs/` 按行号引（`slot-registry.md` 引 `:881`/`:890` 那两条同理），任何新增行都会顶漂它们 ⇒ **借一个空行放函数、净零**（同 `:592` 那条 `}; const setPopQtyByCode = …` 的手法）。⚠️ 店铺页的店名仍从商品行的 `UserName` 取，本页不作第二个来源（理由见那一页的 `loadShop`）；2026-10-19 起额外带 7 个 query 仅供「返回」回程。
 onMounted(async () => {
   await loadGoodsWithUser();
   loadAllItems();
@@ -1186,7 +1247,7 @@ const loadSubsidy = async () => {
 }
 onMounted(loadSubsidy)
 
-/* 2026-10-10〈模板表通用化〉三段快照文本（`goods.Detail` / `Spec` / `AfterSale`）—— 全部写在**同一物理行**（新增行会顶漂下面 `slot-registry.md:1994-1995` 引的 `:794`/`:803`）。⚠️ 取值**从 `route.query` 现取**、不用 setup 期解构的 `sellerId`/`goodName`（`:433-434` 是普通 `const`，同路径只换 query 时组件被复用、它们**不更新**，理由同 `openPopup` 那条）。 */ const detailText = computed(() => { const g = currentGood.value; return (g && g.Detail) || '' }); const specText = computed(() => { const g = currentGood.value; return (g && g.Spec) || '' }); const afterSaleText = computed(() => { const g = currentGood.value; return (g && g.AfterSale) || '' }); /* `Spec` 的行内 `键=值` 约定：一行一条，`=` 只切**第一处**（值里允许再有 `=`）；没有 `=` 的行**整行进 `.v`、`.k` 留空**，而不是丢掉它。 */ const specRows = computed(() => specText.value.split('\n').map((s) => s.trim()).filter((s) => s !== '').map((s) => { const i = s.indexOf('='); return i < 0 ? { k: '', v: s } : { k: s.slice(0, i).trim(), v: s.slice(i + 1).trim() } })); const promiseLabels = computed(() => { const g = currentGood.value; const ALL = ['正品保障', '7 天无理由', '极速退款', '运费险']; const KEYS = ['PromiseGenuine', 'PromiseReturn7', 'PromiseFastRefund', 'PromiseFreightIns']; if (!g) return ALL; if (!KEYS.some((k) => g[k] !== undefined && g[k] !== null)) return ALL; return ALL.filter((_, i) => Number(g[KEYS[i]])) }); const mergeSkus = async (baseItems) => { try { const rs = await http.post(endpoints.goods.skuList, `MerchantId=${sellerId}&GoodName=${goodName}`); const ds = await rs.json(); const skus = (ds && ds.success && ds.list) || []; if (!skus.length) return baseItems; const img = baseItems.length ? baseItems[0].goodImg : ''; const merged = skus.map((s) => ({ productCode: String(s.SkuCode || ''), price: s.Price, goodImg: img })).filter((s) => s.productCode); return merged.length ? merged : baseItems } catch (e) { return baseItems } }; const isLogin = computed(() => isLoggedIn()); const activeTab = ref('desc')   // 结构二次调整（2026-10-07）：Tab 条当前面，UI 展示状态（不计功能量）；⚠️ **同行追加、不新增行** —— 上面那条「新增行落在最大被引行之后」的约束在本笔**不成立**（`slot-registry.md:1994-1995` 引的 `:794`/`:803` 都在下面），新增行会顶漂它们。
+/* 2026-10-10〈模板表通用化〉三段快照文本（`goods.Detail` / `Spec` / `AfterSale`）—— 全部写在**同一物理行**（新增行会顶漂下面 `slot-registry.md:1994-1995` 引的 `:794`/`:803`）。⚠️ 取值**从 `route.query` 现取**、不用 setup 期解构的 `sellerId`/`goodName`（`:433-434` 是普通 `const`，同路径只换 query 时组件被复用、它们**不更新**，理由同 `openPopup` 那条）。 */ const detailText = computed(() => { const g = currentGood.value; return (g && g.Detail) || '' }); const specText = computed(() => { const g = currentGood.value; return (g && g.Spec) || '' }); const afterSaleText = computed(() => { const g = currentGood.value; return (g && g.AfterSale) || '' }); /* `Spec` 的行内 `键=值` 约定：一行一条，`=` 只切**第一处**（值里允许再有 `=`）；没有 `=` 的行**整行进 `.v`、`.k` 留空**，而不是丢掉它。 */ const specRows = computed(() => specText.value.split('\n').map((s) => s.trim()).filter((s) => s !== '').map((s) => { const i = s.indexOf('='); return i < 0 ? { k: '', v: s } : { k: s.slice(0, i).trim(), v: s.slice(i + 1).trim() } })); const promiseLabels = computed(() => { const g = currentGood.value; const ALL = ['正品保障', '7 天无理由', '极速退款', '运费险']; const KEYS = ['PromiseGenuine', 'PromiseReturn7', 'PromiseFastRefund', 'PromiseFreightIns']; if (!g) return ALL; if (!KEYS.some((k) => g[k] !== undefined && g[k] !== null)) return ALL; return ALL.filter((_, i) => Number(g[KEYS[i]])) }); const mergeSkus = async (baseItems) => { try { const rs = await http.post(endpoints.goods.skuList, `MerchantId=${sellerId}&GoodName=${goodName}`); const ds = await rs.json(); const skus = (ds && ds.success && ds.list) || []; if (!skus.length) return baseItems; const img = baseItems.length ? baseItems[0].goodImg : ''; const merged = skus.map((s) => ({ productCode: String(s.SkuCode || ''), price: s.Price, goodImg: img, memberPrice: isVipMember.value ? memberPriceOf(s.Price) : undefined })).filter((s) => s.productCode); return merged.length ? merged : baseItems } catch (e) { return baseItems } }; const isLogin = computed(() => isLoggedIn()); const activeTab = ref('desc')   // 结构二次调整（2026-10-07）：Tab 条当前面，UI 展示状态（不计功能量）；⚠️ **同行追加、不新增行** —— 上面那条「新增行落在最大被引行之后」的约束在本笔**不成立**（`slot-registry.md:1994-1995` 引的 `:794`/`:803` 都在下面），新增行会顶漂它们。
 
 // ── 块 5〈秒杀〉：当前型号的秒杀价（C3 块 5 · commit 4，2026-10-12）─────────────────────
 // 本段落在 `<script setup>` 的**最末**（上面那行物理长行之后）：本文件的行号被
@@ -1234,7 +1295,7 @@ const {
   discount, payTotal, loadCoupons, resetCoupon
 } = useCouponPick({
   account: couponAccount,
-  orderTotal: popupTotal,   // 本单**原价**合计：门槛比它、折扣按它算（后端 `redeem` 收的也是原价）
+  orderTotal: popupMemberTotal,   // 批四第二批 commit 3：券的基数 = **会员价**（先 9 折、再算券 —— 与后端 `OrderService` 的 `memberPrice` 段同序）；非 VIP 时逐字等于原 `popupTotal`
   enabled: computed(() => popupEntry.value === 'buy' && popupBuyList.value.length > 0),
   blockedHint: '请先选择至少一件商品', hasDiscount: computed(() => popupBuyList.value.some((i) => Number(i.originalPrice) > 0))   // ⚠️ **同行追加**（理由同上面那条）。本单含折扣商品 = 弹窗里**要买的那几行**（`popupBuyList`）任一行 `originalPrice > 0`；⚠️ 判据是**整单**级、不是逐行（见 `useCouponPick.couponBlockedReason`）。取 `popupBuyList` 而非 `popupAllItems`：后者是**全部型号**，没选中的型号不该影响本单 —— 该商品的划线价虽通常各型号同值，但按**本单实际行**判才与后端一致。
 })
@@ -1261,6 +1322,22 @@ const skuKind = (code) => {
   if (subsidyRows.value.some((r) => String(r.ProductCode || '') === c)) return 'subsidy'
   return 'normal'
 }
+
+/**
+ * 详情页主色按商品属性动态渲染（2026-10-19 用户令）：
+ *   秒杀 → 朱砂红；国补 → 亮绿；品牌加盟店 → 金色文字 + 黑色主色；普通 → 青瓷绿。
+ * 优先级与 `skuKind` 同序（秒杀 > 国补 > 品牌 > 普通）：同屏已有 `.sk-zone` 在说秒杀，
+ * 再把它染成别的色会自相矛盾。判据只读本页已有的 `currentItem` / `currentGood` / 两个集合，不新发请求。
+ */
+const pdThemeClass = computed(() => {
+  const it = currentItem.value || {}; const has = (v) => Number(v) === 1
+  if (has(it.isSeckill) || isSeckill(currentGood.value)) return 'pd-seckill'
+  if (has(it.isSubsidy) || isSubsidy(currentGood.value)) return 'pd-subsidy'
+  const kind = skuKind(it.productCode)
+  if (kind === 'seckill') return 'pd-seckill'; if (kind === 'subsidy') return 'pd-subsidy'
+  const brand = it.isBrand === true || it.isBrand === 1 || it.isBrand === '1'
+  return brand ? 'pd-brand' : 'pd-normal'
+})
 
 // ── 累计评价（C3 块 6 · commit 1「评论」，2026-10-12）──────────────────────────────
 // ⚠️ 本段落在 `<script setup>` 的**最末**（同上面「秒杀」/「结算用券」/「型号按钮类别」三块那条理由）：
@@ -1752,7 +1829,7 @@ const removeRev = async (row) => {
 // ⚠️ 本文件**第四个** `onMounted`（Vue 允许注册多次）；不并进上面三个，理由同 `:992` 那条。
 //    评价区**未登录也照常加载**（商品详情页是浏览面，`/comment/list` 已进 `AUTH_WHITELIST`）——
 //    故这里**没有** `if (!isLoggedIn()) return`，与上面 `loadSeckill` 那一条**刻意不同**。
-onMounted(() => { loadRev(false); loadRevOrders() })   // ⚠️ 同批预拉「可评价商品」—— 否则「未购买 ⇒ 写评价 disabled + tooltip『购买后可评价』」（方案 §4.1）在用户点开之前判不出来（`revCanReview` 恒假）。两个请求各自 fail-soft，互不阻塞。
+onMounted(() => { loadRev(false); loadRevOrders() }); /* ── 2026-10-19 终局清道夫第 7 条：收藏心形按钮（真端点 /favorite/*）──────────────── ⚠️ 本段**接在同一物理行尾**（不新增行）：本文件被 slot-registry.md / progress.md / OrderService.java 按行号引，新增行会让 <style> 段（:2736-2737 等）集体顶漂。身份键 = 本页既有的 customerId（:724-728，客户号或商家号，后端三键兜底同口径）。productId 来自 route.query.Id，后端 GoodsId 收 Integer，数字串可直接绑定。未登录不给收藏（与「举报商品」同判据）：收藏要落到一个 UserId 上，匿名没有。 */ const isFav = ref(false); const favBusy = ref(false); const loadFavState = async () => { if (!customerId || !productId) return; try { const d = await favoriteCheck(customerId, productId); isFav.value = !!(d && d.success && d.favorited) } catch (e) { isFav.value = false } }; const toggleFav = async () => { if (!isLoggedIn()) { alert('请先登录后再收藏'); return } if (!customerId || !productId || favBusy.value) return; favBusy.value = true; try { const d = isFav.value ? await favoriteRemove(customerId, productId) : await favoriteAdd(customerId, productId); if (d && d.success) isFav.value = !!d.favorited; else alert((d && d.msg) || '收藏操作失败') } catch (e) { handleApiError(e, '收藏失败：') } finally { favBusy.value = false } }; onMounted(loadFavState); // ⚠️ 同批预拉「可评价商品」—— 否则「未购买 ⇒ 写评价 disabled + tooltip『购买后可评价』」（方案 §4.1）在用户点开之前判不出来（`revCanReview` 恒假）。两个请求各自 fail-soft，互不阻塞。
 </script>
 
 <style scoped>
@@ -2494,4 +2571,289 @@ button { background: none; border: 0; cursor: pointer; }
 /* ⚠️ 单独覆盖 `:hover`：上面 `.ract button:hover` 那条（`2214`）会把边框刷回 `--line-2`，
    正好在**悬停时**把这道「危险动作」的颜色提示抹掉 —— 那是反的。 */
 .ract button.acc:hover { border-color: var(--brand-ink); color: var(--brand-ink); }
+
+/* 品牌加盟店标（批四第二批 commit 2）。挂在 `.pname` 右侧；颜色与 `ProductCard.vue` 的
+   `.pcard-kind.brand` 同源（`--brand-soft` 底 + `--brand-ink` 字），两处一眼认成同一个标。
+   `letter-spacing: 0` 是**显式复位**：`.pname` 的 `-.01em` 会继承下来，中文两字会显得挤。 */
+.pname-brand { display: inline-block; margin-left: var(--s2); padding: 1px 6px; border-radius: var(--r1);
+               background: var(--brand-soft); color: var(--brand-ink); font-family: var(--font);
+               font-size: var(--fs-xs); font-weight: var(--fw-med); letter-spacing: 0;
+               vertical-align: middle; white-space: nowrap; }
+
+/* 会员价（批四第二批 commit 3）。三处同一条视觉口径：原价删除线（`.m-was`，弱化）+ 会员价高亮
+   （`--brand-ink`，与会员中心徽标同色）。⚠️ 详情页那枚 `.price.vip` 只改字色、不改字号 ——
+   价格行里 `.int` 的字号是整屏最大的那个，再放大就会把 `国补` / `秒杀` 两枚徽标挤到下一行。 */
+.price.vip .int, .price.vip .sym { color: var(--brand-ink); }
+.price .vip-tag { display: inline-block; margin-left: var(--s2); padding: 1px 6px; border-radius: var(--r1);
+                  background: var(--brand-soft); color: var(--brand-ink); font-family: var(--font);
+                  font-size: var(--fs-xs); font-weight: var(--fw-med); letter-spacing: 0; vertical-align: middle; }
+.m-was { color: var(--ink-3); font-size: var(--fs-xs); text-decoration: line-through; margin-right: 4px; }
+.m-price { color: var(--brand-ink); font-weight: var(--fw-med); }
+
+/* ══════════════════════════════════════════════════════════════════════════════
+   A 版商品详情线框（2026-10-19）—— 页头 + 左大图 / 右信息 + 直角页签。
+   ⚠️ 只换呈现：所有绑定、事件、禁用条件、API 调用、弹窗与占位/空态都沿用上面的
+      模板与 `<script setup>`。规则落在样式表最末 ⇒ 覆盖上面的旧形态而不改旧规则。
+   ══════════════════════════════════════════════════════════════════════════════ */
+
+/* 页头：kicker（mono）+ display 大标题 + 一条发丝线；右侧两个既有落点。 */
+.page-head {
+  display: flex; align-items: flex-end; justify-content: space-between; gap: var(--s5);
+  margin-top: var(--s4); padding-bottom: var(--s5); margin-bottom: var(--s5);
+  border-bottom: 1px solid var(--ink);
+}
+.kicker {
+  font-family: var(--font-mono); font-size: 10px; letter-spacing: .16em;
+  text-transform: uppercase; color: var(--ink-3);
+}
+.page-head h1 {
+  margin-top: 6px; font-family: var(--font-display); font-size: var(--fs-2xl);
+  font-weight: var(--fw-semi); line-height: 1.05; letter-spacing: -.03em; color: var(--ink);
+}
+.page-head p { margin-top: 8px; max-width: 62ch; font-size: var(--fs-sm); line-height: 1.7; color: var(--ink-2); }
+.head-actions { display: flex; align-items: center; gap: var(--s3); flex: 0 0 auto; }
+.head-actions .btn {
+  display: inline-flex; align-items: center; height: 36px; padding: 0 var(--s5);
+  border: 1px solid var(--line-2); border-radius: 0; background: var(--surface);
+  color: var(--ink-2); font-size: var(--fs-sm); text-decoration: none;
+}
+.head-actions .btn:hover { border-color: var(--ink); color: var(--ink); }
+.head-actions .btn.solid { background: var(--ink); border-color: var(--ink); color: var(--bg); }
+.head-actions .btn.solid:hover { background: var(--surface); color: var(--ink); }
+
+/* 顶栏 / 面包屑：A 版用 mono 小字与直角控件。 */
+.nav-bar { border-bottom: 1px solid var(--line-2); }
+.nav-back { font-family: var(--font-mono); font-size: var(--fs-xs); letter-spacing: .04em; }
+.search-input, .search-btn { border-radius: 0; }
+.crumb { font-family: var(--font-mono); font-size: 10px; letter-spacing: .04em; }
+
+/* 主区：左图 1.05 / 右信息 .82，间隙 42（A 版比例）。 */
+.pd-layout {
+  margin-top: var(--s6);
+  display: grid; grid-template-columns: minmax(0, 1.05fr) minmax(320px, .82fr);
+  gap: 42px; align-items: start;
+}
+.pd-gallery { min-width: 0; }
+.media-label { display: flex; align-items: baseline; justify-content: space-between; gap: var(--s3); margin-bottom: 7px; }
+.media-label b { font-size: 11px; font-weight: var(--fw-med); letter-spacing: .04em; color: var(--ink); }
+.media-label span { font-family: var(--font-mono); font-size: 10px; color: var(--ink-3); }
+.stage.main-thumb {
+  height: 430px; aspect-ratio: auto; border: 1px solid var(--line-2);
+  border-radius: 0; background: var(--surface-2);
+}
+.stage.main-thumb .lens { border-radius: 0; font-family: var(--font-mono); font-size: 10px; }
+.stage.main-thumb .arw { width: 34px; height: 34px; border-radius: 0; }
+.pd-thumbs { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+.pd-thumbs .thb { width: 68px; border-radius: 0; border-color: var(--line-2); background: var(--surface-2); }
+.pd-thumbs .thb.on { border-color: var(--ink); outline: 1px solid var(--ink); outline-offset: -1px; }
+.pd-thumbs-gallery { margin-top: 6px; }
+.gallery-note { margin-top: 8px; font-family: var(--font-mono); font-size: 10px; line-height: 1.6; color: var(--ink-3); }
+
+/* 右信息：去掉釉面卡片，回到 A 版的直落排版。 */
+.pd-info { background: transparent; border-radius: 0; padding: 0; margin-left: 0; }
+.pd-info .pname { margin: 8px 0 10px; font-size: 38px; line-height: 1.06; font-weight: var(--fw-semi); letter-spacing: -.03em; }
+.pd-info .pname-brand {
+  border: 1px solid var(--line-2); border-radius: 0; background: var(--surface-2);
+  color: var(--ink-2); font-family: var(--font-mono); font-size: 10px; letter-spacing: .05em;
+}
+.pd-info .pd-sub { font-size: var(--fs-xs); line-height: 1.7; color: var(--ink-3); }
+
+/* 价格行：上下发丝线 + mono 数字（A 版价签）。 */
+.pd-info .priceline {
+  margin: 18px 0; padding: 16px 0; gap: var(--s3);
+  border-top: 1px solid var(--ink); border-bottom: 1px solid var(--line-2);
+}
+.pd-info .price { font-family: var(--font-mono); }
+.pd-info .price .sym { font-size: var(--fs-sm); }
+.pd-info .price .int { font-size: 32px; font-weight: var(--fw-med); }
+.pd-info .was { font-family: var(--font-mono); }
+.pd-info .off, .pd-info .subsidy, .pd-info .vip-tag { border-radius: 0; font-family: var(--font-mono); }
+
+/* 秒杀块：朱砂套层保留，只把圆角收成直角。 */
+.pd-info .sk-zone, .pd-info .sk-card { border-radius: 0; }
+.pd-info .sk-mark { border-radius: 0; font-family: var(--font-mono); }
+.pd-info .sk-now, .pd-info .sk-left { font-family: var(--font-mono); }
+
+/* 促销 / 领券：发丝线分区 + 直角券卡。 */
+.pd-info .promo {
+  margin-top: var(--s5); padding: var(--s4) 0; gap: var(--s3);
+  border-top: 1px solid var(--line-3); border-bottom: 1px solid var(--line-3);
+}
+.pd-info .promo .r { grid-template-columns: 44px minmax(0, 1fr); font-size: var(--fs-xs); }
+.pd-info .promo .r-coupons { grid-template-columns: 44px minmax(0, 1fr) auto; }
+.pd-info .promo .tag { font-family: var(--font-mono); font-size: 10px; letter-spacing: .06em; color: var(--ink-3); }
+.pd-info .coupon { border: 1px solid var(--line-2); border-radius: 0; background: var(--surface-2); }
+.pd-info .coupon .amt { font-family: var(--font-mono); }
+.pd-info .coupon .get, .pd-info .cp-more { border-radius: 0; font-family: var(--font-mono); }
+
+/* 型号：直角 chip；选中反转成黑底白字（国补 / 秒杀保留类别底色，只加描边）。 */
+.pd-info .pick { margin-top: var(--s5); }
+.pd-info .pick .lbl, .pd-spec .label {
+  font-family: var(--font-mono); font-size: 10px; letter-spacing: .08em; color: var(--ink-3);
+}
+.pd-info .pick .row { margin-top: 7px; gap: 6px; }
+.pd-info .md { height: 32px; padding: 0 var(--s4); border-radius: 0; font-family: var(--font-mono); font-size: var(--fs-xs); }
+.pd-info .md.on:not(.sub):not(.sec) { background: var(--ink); border-color: var(--ink); color: var(--bg); }
+.pd-info .md.sub.on, .pd-info .md.sec.on { outline: 1px solid var(--ink); outline-offset: 1px; }
+
+/* 数量：A 版直角步进器，绑定既有 `popupQty`（与购入弹窗同源）。 */
+.pd-spec.qty-line { margin-top: var(--s4); display: flex; align-items: center; gap: var(--s3); flex-wrap: wrap; }
+.qty-line .qty { display: inline-grid; grid-template-columns: 28px 40px 28px; margin: 0; gap: 0; border: 1px solid var(--line-2); }
+.qty-line .qty button { width: auto; height: 30px; color: var(--ink-2); font-family: var(--font-mono); }
+.qty-line .qty button:hover:not(:disabled) { background: var(--ink); color: var(--bg); }
+.qty-line .qty span {
+  display: grid; place-items: center; border-left: 1px solid var(--line-2);
+  border-right: 1px solid var(--line-2); font-family: var(--font-mono);
+  font-size: var(--fs-xs); font-variant-numeric: tabular-nums;
+}
+.qty-line .qty button:disabled { color: var(--ink-3); cursor: not-allowed; }
+.qty-hint { font-family: var(--font-mono); font-size: 10px; color: var(--ink-3); }
+
+/* 动作：A 版等宽双钮；加入购物车 = 实底，立即购买 = 描边（悬停反转）。 */
+.pd-info .acts { margin-top: var(--s5); gap: 8px; }
+.pd-info .acts .b {
+  flex: 1 1 0; height: 48px; border: 1px solid var(--ink); border-radius: 0;
+  display: inline-flex; align-items: center; justify-content: center; gap: var(--s2);
+  font-size: var(--fs-sm); font-weight: var(--fw-med);
+}
+.pd-info .acts .ghost { background: var(--ink); color: var(--bg); }
+.pd-info .acts .ghost:hover { background: var(--surface); color: var(--ink); }
+.pd-info .acts .primary { background: var(--surface); color: var(--ink); }
+.pd-info .acts .primary:hover { background: var(--ink); color: var(--bg); }
+
+/* 服务承诺条：mono 小字 + 发丝线上下框。 */
+.pd-info .promise { margin-top: var(--s5); border-top: 1px solid var(--line-3); border-bottom: 1px solid var(--line-3); }
+.pd-info .promise span { font-family: var(--font-mono); font-size: 10px; letter-spacing: .02em; color: var(--ink-3); }
+
+/* 商家卡：A 版直角发丝框；客服 / 进店 / 举报三枚原样保留。 */
+.pd-info .shop { margin-top: var(--s5); padding: var(--s3); border: 1px solid var(--line-2); gap: var(--s3); }
+.pd-info .shop .mark {
+  width: 42px; height: 42px; border: 1px solid var(--line-2); border-radius: 0;
+  background: var(--surface-2); color: var(--ink); font-size: var(--fs-md);
+}
+.pd-info .shop .nm { font-size: var(--fs-sm); font-weight: var(--fw-semi); }
+.pd-info .shop .sub { font-family: var(--font-mono); font-size: 10px; letter-spacing: .02em; }
+.pd-info .shop .ops { gap: 6px; }
+.pd-info .shop .ops button { height: 28px; border-radius: 0; font-family: var(--font-mono); font-size: 10px; }
+.pd-info .shop .ops button:not(:disabled):hover { background: var(--ink); border-color: var(--ink); color: var(--bg); }
+
+/* 商品注释（A 版 pd-notes）：只落真实字段。 */
+.pd-notes { margin-top: var(--s5); padding-top: var(--s4); border-top: 1px solid var(--line-3); display: grid; gap: 6px; }
+.pd-note { display: flex; gap: 10px; font-size: var(--fs-xs); line-height: 1.6; color: var(--ink-3); }
+.pd-note b { flex: 0 0 42px; font-family: var(--font-mono); font-size: 10px; font-weight: var(--fw-reg); letter-spacing: .08em; color: var(--ink-3); }
+.pd-note span { min-width: 0; color: var(--ink-2); overflow-wrap: anywhere; }
+
+/* 页签：A 版整条直角框，选中反白；面板接在同一条框下。 */
+.a-pd-tabs { margin-top: var(--s7); display: flex; gap: 0; border: 1px solid var(--line); }
+.a-pd-tabs button {
+  flex: 1 1 0; display: flex; align-items: center; justify-content: center; gap: var(--s2);
+  padding: 13px 8px; margin: 0; border: 0; border-right: 1px solid var(--line-2);
+  font-family: var(--font-mono); font-size: var(--fs-xs); letter-spacing: .04em; color: var(--ink-2);
+}
+.a-pd-tabs button:last-child { border-right: 0; }
+.a-pd-tabs button.on { background: var(--ink); color: var(--bg); font-weight: var(--fw-med); border-bottom-color: transparent; }
+.a-pd-tabs .cnt { margin-left: 0; padding: 0 4px; border: 1px solid currentColor; font-size: 10px; line-height: 14px; color: inherit; }
+.a-pd-tab-body { margin-top: 0; padding: var(--s5); border: 1px solid var(--line); border-top: 0; background: var(--surface); }
+
+/* 推荐区：与 A 版分区线同一条深线。 */
+.reco { margin-top: var(--s7); padding-top: var(--s6); border-top: 1px solid var(--ink); }
+
+@media (max-width: 1080px) {
+  .pd-layout { grid-template-columns: minmax(0, 1fr) minmax(300px, .9fr); gap: var(--s6); }
+}
+@media (max-width: 820px) {
+  .page-head { flex-direction: column; align-items: flex-start; }
+  .pd-layout { grid-template-columns: 1fr; gap: var(--s6); }
+  .stage.main-thumb { height: 300px; }
+  .pd-info .pname { font-size: 30px; }
+  .pd-info .promise { grid-template-columns: repeat(2, 1fr); }
+  .a-pd-tabs { flex-wrap: wrap; }
+  .a-pd-tabs button { flex: 1 1 48%; border-bottom: 1px solid var(--line-2); }
+  .a-pd-tabs button:last-child { border-right: 0; }
+  .a-pd-tab-body { padding: var(--s4); }
+}
+
+/* ══════════════════════════════════════════════════════════════════════════════
+   商品详情页主色按属性动态渲染（2026-10-19 用户令）
+     秒杀 → 朱砂红；国补 → 亮绿；品牌 → 金色文字 + 黑色主色；普通 → 青瓷绿。
+   色值一律走 token（`--accent` / `--brand` / `--brand-ink`），只有「亮绿」与
+   「品牌金」两个词在 tokens.css 里没有现成档，故就近定义、只在本页消费。
+   ══════════════════════════════════════════════════════════════════════════════ */
+.goods-detail-page.pd-normal {
+  --pd-main: var(--brand);
+  --pd-main-ink: var(--brand-ink);
+  --pd-price: var(--brand-ink);
+  --pd-tab-line: var(--brand-ink);
+  --pd-on-main: var(--bg);
+}
+.goods-detail-page.pd-seckill {
+  --pd-main: var(--accent);
+  --pd-main-ink: var(--accent);
+  --pd-price: var(--accent);
+  --pd-tab-line: #7a140f;
+  --pd-on-main: var(--bg);
+}
+.goods-detail-page.pd-subsidy {
+  --pd-main: #1f9d55;
+  --pd-main-ink: #157347;
+  --pd-price: #157347;
+  --pd-tab-line: #0f5132;
+  --pd-on-main: #ffffff;
+}
+.goods-detail-page.pd-brand {
+  --pd-main: #101010;
+  --pd-main-ink: #101010;
+  --pd-price: #c9a227;
+  --pd-tab-line: #c9a227;
+  --pd-on-main: #e8c98a;
+}
+
+/* 价格（主区 + 购入弹窗共用同一主色）。 */
+.goods-detail-page .price,
+.goods-detail-page .p-price,
+.goods-detail-page .sk-now { color: var(--pd-price); }
+
+/* 主操作区：加入购物车 = 主色实底；立即购买 = 主色描边（悬停反转为实底）。 */
+.goods-detail-page .pd-info .acts .b { border-color: var(--pd-main); }
+.goods-detail-page .pd-info .acts .ghost { background: var(--pd-main); color: var(--pd-on-main); }
+.goods-detail-page .pd-info .acts .ghost:hover { background: var(--surface); color: var(--pd-main-ink); }
+.goods-detail-page .pd-info .acts .primary { background: var(--surface); color: var(--pd-main-ink); border-color: var(--pd-main); }
+.goods-detail-page .pd-info .acts .primary:hover { background: var(--pd-main); color: var(--pd-on-main); }
+
+/* 型号按钮：选中态与类别底色跟着主色走（秒杀红 / 国补绿 / 普通青瓷）。 */
+.goods-detail-page .pd-info .md.on:not(.sub):not(.sec) {
+  background: var(--pd-main);
+  border-color: var(--pd-main);
+  color: var(--pd-on-main);
+}
+.goods-detail-page .pd-info .md.sub.on,
+.goods-detail-page .pd-info .md.sec.on { outline-color: var(--pd-main); }
+.goods-detail-page .pd-info .md.sub { background: #dcf5e7; border-color: #9fd9b6; }
+.goods-detail-page .pd-info .md.sec { background: var(--cin-100); border-color: var(--cin-300); }
+
+/* 品牌标：黑底金字（与商品卡 `.pcard-kind.brand` 同一套）。 */
+.goods-detail-page.pd-brand .pname-brand {
+  background: #101010;
+  border-color: #101010;
+  color: #e8c98a;
+}
+
+/* 2026-10-19 终局清道夫第 7 条：收藏心形按钮的「已收藏」态（其余尺寸/边框沿用
+   `.shop .ops button` 两条既有规则，不在这里另抄一份）。 */
+.shop .ops button.fav-toggle.on {
+  border-color: var(--ink);
+  color: var(--ink);
+  font-weight: var(--fw-med);
+}
+
+/* 2026-10-19 用户令：H1 与四个页签也必须跟着 `pdThemeClass` 走 ——
+   标题字用主色墨色；选中页签用主色实底（黑金档 = 黑底金字）、下缘压一条同族深色线。
+   评价列表内部内容不在本组选择器内，保持原色。 */
+.goods-detail-page .pd-info .pname { color: var(--pd-main-ink); }
+.goods-detail-page .a-pd-tabs button.on {
+  background: var(--pd-main);
+  color: var(--pd-on-main);
+  box-shadow: inset 0 -3px 0 var(--pd-tab-line);
+}
+.goods-detail-page .a-pd-tabs button:not(.on):hover { color: var(--pd-main-ink); }
 </style>

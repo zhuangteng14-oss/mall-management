@@ -13,74 +13,58 @@
       <div class="nav-right" @click="goUserCenter">{{ isLogin ? '用户中心' : '登录 / 注册' }}</div>
     </nav>
 
-    <!-- ── 店铺头卡：**一条整幅的横带**，不是一张卡片 ──────────────────────────────
-         整页只有这一处「敢用块面」，三个「不做」每条都对着一条 AI 默认样：
-         · **不做**白底圆角卡 + 阴影 —— 「每块都长一样、同一个圆角、同一个 `rgba(0,0,0,.1)` 阴影」
-           是通用后台卡墙的签名；且 `tokens.css:35` 明写「禁 · 嵌套卡片」。
-         · **不做**标题上方那行全大写 eyebrow —— 那是 template chrome，与卖什么无关。
-         · **不做**「A · B · C」中圆点拼接的元信息串 —— 下面两个计数**各带各的量词**，不拼串。
-         横带的底用的是 `--zone`：`tokens.css` 自己的**区块底**（dark 主题那句写着「并排看得出
-         是一块区域」）⇒ 它说的是「这一页归这家店」，是信息不是装饰。 -->
-    <section class="band">
-      <div class="band-in">
-        <nav class="crumb">
-          <router-link :to="getMerchantId() ? '/merchant' : '/customer'">首页</router-link>
-          <i class="sp">/</i><span>{{ shopName ? shopName + '小店' : '店铺' }}</span>
-        </nav>
-        <div class="hd">
-          <span class="hd-mark">{{ (shopName || '商')[0] }}</span>
-          <span class="hd-id">
-            <span class="hd-nm">{{ shopName ? shopName + '小店' : '店铺' }}</span>
-            <span class="hd-sub">
-              <b>{{ goods.length }}</b> 件商品<template v-if="followers !== null">，<b>{{ followers }}</b> 位粉丝</template>
+    <!-- ── A 版页头 + 店铺头横带 ──────────────────────────────────────────────────
+         页头只做导航与一句说明；数据、判据与动作全部沿用原 `.band` 店铺头：
+         · 面包屑（首页 → 本店）仍是原来的 `router-link`；
+         · 店名、认证徽章、商品数 / 粉丝数、既有 facts 一项不少；
+         · 关注（`!isSelf`）、举报（`isLogin && !isSelf`）、客服三枚按钮的显示条件与
+           点击处理逐字保留；认证徽章仍只在 `CertStatus === 'approved'` 时出现。 -->
+    <div class="wrap top">
+      <nav class="crumb">
+        <router-link :to="getMerchantId() ? '/merchant' : '/customer'">首页</router-link>
+        <i class="sp">/</i><span>{{ shopName ? shopName + '小店' : '店铺' }}</span>
+      </nav>
+
+      <!-- ── A 版 `.a-shop-hero` 横带 ────────────────────────────────────────────
+           首字标 + 店名 / 认证 tag + 商品数与粉丝数 + 既有 facts + 三个既有动作。
+           ⚠️ facts 与认证徽章仍由 `<script>` 里原来的 `facts` / `certified` 计算，
+              样式层不新增任何判据。 -->
+      <section class="a-shop-hero">
+        <span class="a-shop-mark">{{ (shopName || '商')[0] }}</span>
+        <div class="a-shop-main">
+          <div class="a-shop-name">
+            <h2>{{ shopName ? shopName + '小店' : '店铺' }}</h2>
+            <span v-if="certified" class="tag dark" title="已通过平台入驻审核（读自 /shop/profile 的 CertStatus = approved）">
+              <BadgeCheck class="fact-ic" aria-hidden="true" />已认证
             </span>
-          </span>
-          <span class="hd-ops">
-            <!-- 关注按钮：**自己的店不画**（后端 `ShopFollowService.isSelf` 那道闸的前端另一半）。
-                 粉丝数照显 —— 别人关注自己的店，自己更要看得到（后端为此刻意没在 `followState` 上判 403）。 -->
-            <button
-              v-if="!isSelf"
-              type="button"
-              class="act"
-              :class="{ 'act-on': following }"
-              :disabled="busy"
-              :title="following ? '取关' : '关注这家店'"
-              @click="toggleFollow"
-            >{{ following ? '已关注' : '关注' }}</button>
-            <!-- 举报商家（2026-10-13 用户裁定 ①）—— 从 `ProductPage.vue` 那条商品行**搬过来**的：
-                 举报的是**店**，落点在店的主页上才顺（原来挤在商品页的「客服 / 进店逛逛」旁边）。
-                 ⚠️ 对象是**用户**不是店铺 ⇒ `targetId` 传商家**业务号** `shopId`
-                 （= 本页 route 的 `MerchantId`，与 `api/report.js` 的 `add` 对 `targetType='user'` 的要求一致）。
-                 ⚠️ `isLogin && !isSelf`：没登录发不出去（后端要 `Account`）；自己的店不举报自己
-                 （后端也拦，这里是不画那枚注定被拒的按钮）——与左边关注按钮同一套判据。 -->
-            <button type="button" v-if="isLogin && !isSelf" class="act"
-                    title="举报这家店（真功能：/report/add，对象为商家）"
-                    @click="openReport('user', shopId, '商家')">举报商家</button>
-            <button type="button" class="act" title="真功能：message.send（与商品页「客服」同形）" @click="consultShop">客服</button>
-          </span>
+          </div>
+          <p class="a-shop-meta">
+            <b>{{ goods.length }}</b> 件商品<template v-if="followers !== null">，<b>{{ followers }}</b> 位粉丝</template>
+          </p>
+          <div class="a-shop-facts">
+            <span v-for="f in facts" :key="f.k" class="a-fact"><i>{{ f.k }}</i><b>{{ f.v }}</b></span>
+            <span v-if="!certified && !facts.length" class="fact-none">暂无店铺资料</span>
+          </div>
         </div>
-        <!-- ── 头卡事实行（认证徽章 / 主营 / 开店 / 累计售出）────────────────────────
-             ⚠️ 本行**永远渲染**（C3 块 5 · ShopHome 布局授权笔，2026-10-12 改）—— 改前是
-                「一项都凑不齐就整行不画」，用户裁定改为「**数据不足 → 占位，不静默消失**」。
-                四项全空时画一句「暂无店铺资料」。
-             ⚠️ **每项各有各的判据**（见 `<script>` 的 `certified` / `facts`）：
-                · 认证徽章：**只有 `CertStatus === 'approved'` 才画**。`pending` / `rejected` /
-                  一条申请都没有（后端回**空串**）⇒ 都不画。
-                  ⚠️ **它没有占位，是本次唯一的一处例外**：空串的含义是「查不到」而不是「没认证」
-                  —— 实测 15 条 `merchant_application.Username` 与 13 家店名的**交集是空集**，
-                  更像两边键对不上。画一句「未认证」= 可能的一句**假否定**。**留人裁**。
-                · 主营 / 开店 / 累计售出：三个各自为空就不进 `facts`。
-             ⚠️ 各项**不拼成一句**：没有 `·`、也没有顿号 —— 那是「`·` 拼接的元信息串」这条
-                AI 默认样。靠**间距**分组，每项自带单位（「件」「个月」）。 -->
-        <div class="facts">
-          <span v-if="certified" class="fact-cert" title="已通过平台入驻审核（读自 /shop/profile 的 CertStatus = approved）">
-            <BadgeCheck class="fact-ic" aria-hidden="true" />已认证
-          </span>
-          <span v-for="f in facts" :key="f.k" class="fact"><i>{{ f.k }}</i><b>{{ f.v }}</b></span>
-          <span v-if="!certified && !facts.length" class="fact-none">暂无店铺资料</span>
+        <div class="a-shop-ops">
+          <!-- 关注：自己的店不画；粉丝数照显（判据与原实现一致）。 -->
+          <button
+            v-if="!isSelf"
+            type="button"
+            class="act"
+            :class="{ 'act-on': following }"
+            :disabled="busy"
+            :title="following ? '取关' : '关注这家店'"
+            @click="toggleFollow"
+          >{{ following ? '已关注' : '关注' }}</button>
+          <!-- 举报商家：没登录不画、自己的店不画；对象为商家业务号 `shopId`。 -->
+          <button type="button" v-if="isLogin && !isSelf" class="act"
+                  title="举报这家店（真功能：/report/add，对象为商家）"
+                  @click="openReport('user', shopId, '商家')">举报商家</button>
+          <button type="button" class="act" title="真功能：message.send（与商品页「客服」同形）" @click="consultShop">客服</button>
         </div>
-      </div>
-    </section>
+      </section>
+    </div>
 
     <!-- ══════════════════════════════════════════════════════════════════════════════
          版面 = **丙方案定稿**（用户 2026-10-12 第二次授权，逐条对照）：
@@ -105,7 +89,10 @@
               未登录 ⇒ 「登录后可领取本店优惠券」+ 一个真出口；已登录但 0 张 ⇒ 「本店暂时没有
               可领的优惠券」；还在读 ⇒ 「正在读取…」。**三句都不声称本店有没有券**，除非真查过。 -->
       <section class="blk">
-        <h2 class="sec-h">本店优惠券</h2>
+        <div class="section-title">
+          <h2>本店优惠券</h2>
+          <span class="tiny">本店当前可领取的优惠券</span>
+        </div>
         <ul v-if="shopCoupons.length" class="cpns">
           <li v-for="c in shopCoupons" :key="c.CouponId" class="cpn">
             <span class="cpn-face">{{ couponFace(c) }}</span>
@@ -135,7 +122,10 @@
               （各带一块互斥内容），不是「看起来像 tab 的链接」。用原生 `<button>`，
               键盘可达性不靠额外代码。 -->
       <section v-if="topTab === 'shop'" class="blk">
-        <h2 class="sec-h">本店商品</h2>
+        <div class="section-title">
+          <h2>本店商品</h2>
+          <span class="tiny">热销 / 全部 / 折扣三种切法</span>
+        </div>
         <div class="tabs" role="tablist">
           <button
             v-for="t in TABS"
@@ -146,7 +136,7 @@
             :class="{ 'tab-on': activeTab === t.k }"
             :aria-selected="activeTab === t.k ? 'true' : 'false'"
             @click="activeTab = t.k"
-          >{{ t.label }}</button>
+          >{{ t.label }}<span v-if="t.k === 'all'" class="cnt">{{ goods.length }}</span><span v-else-if="t.k === 'discount'" class="cnt">{{ discountGoods.length }}</span></button>
         </div>
 
         <!-- 三-a · 热销：**2-1-3 山峰式**竖直柱状图（Top3）──────────────────────────
@@ -223,12 +213,13 @@
             <p>本店「{{ activeType }}」下暂时没有商品。</p>
             <button type="button" class="retry" @click="activeType = ''">看全部 {{ goods.length }} 件</button>
           </div>
-          <div v-else class="cards">
+          <div v-else class="cards mosaic-grid">
             <ProductCard
-              v-for="g in shelfGoods"
+              v-for="(g, i) in shelfGoods"
               :key="g.Id"
               :goods="g"
               :tag="isNew(g) ? '新品' : ''"
+              :class="MOSAIC[i % MOSAIC.length]"
             />
           </div>
         </div>
@@ -241,12 +232,13 @@
              ⚠️ 所以这一格**今天必然是占位**（`本店暂无折扣商品`）—— 代码在、数据没有；
                 占位句是**用户定稿里逐字给的**，不是本笔另写的。 -->
         <div v-else class="pane">
-          <div v-if="discountGoods.length" class="cards">
+          <div v-if="discountGoods.length" class="cards mosaic-grid">
             <ProductCard
-              v-for="g in discountGoods"
+              v-for="(g, i) in discountGoods"
               :key="g.Id"
               :goods="g"
               :tag="isNew(g) ? '新品' : ''"
+              :class="MOSAIC[i % MOSAIC.length]"
             />
           </div>
           <p v-else-if="phDiscount" class="ph">{{ phDiscount }}</p>
@@ -257,13 +249,16 @@
            ⚠️ 用户给了「不管切哪个 tab 都显示（或至少默认在『全部』下方）」两条路，本笔取**前者**
               —— 硬约束是「必须在页面最底」，一直显示最不可能违反它。
            数据 = `goodsSelectHome` 的**第一页**（24 条）里 `MerchantId !== 本店` **且**
-           `GoodType === 本店主类目` 的，取 4 条（**全宽铺开**：4 列铺满 `.wrap` 的 1180px）。
+           `GoodType === 本店主类目` 的，取 4 条（A 版 `.reco-grid` 三列错落铺满 `.wrap`）。
            ⚠️ 这是全页**唯一**取别家数据的地方，也是「逛完这家还有别家」的出口；一条都取不到
               （本店主类目全站独一份 / 本店一件商品都没有）⇒ **占位**，不静默消失。 -->
       <section v-if="topTab === 'shop'" class="blk">
-        <h2 class="sec-h">猜你喜欢<i class="sec-note">别家的{{ mainCategory }}</i></h2>
-        <div v-if="recommend.length" class="cards">
-          <ProductCard v-for="g in recommend" :key="g.Id" :goods="g" />
+        <div class="section-title">
+          <h2>猜你喜欢</h2>
+          <span class="tiny">别家的{{ mainCategory }}</span>
+        </div>
+        <div v-if="recommend.length" class="cards mosaic-grid">
+          <ProductCard v-for="(g, i) in recommend" :key="g.Id" :goods="g" :class="MOSAIC[i % MOSAIC.length]" />
         </div>
         <p v-else-if="phRecommend" class="ph">{{ phRecommend }}</p>
       </section>
@@ -295,7 +290,7 @@ import { coupons, claim } from '../api/marketing'
 import { truthy, couponFace, couponName, couponLine } from '../config/coupon-format'
 import { BadgeCheck } from '@lucide/vue'
 import ProductCard from '../components/ProductCard.vue'; import PlatformActivityPanel from '../components/PlatformActivityPanel.vue'; import ReportDialog from '../components/ReportDialog.vue'   // ⚠️ 三条 import **同行**（同 `:151` / `:266` 那几条的手法）：本文件有 8 条 refs token，多一行就集体顶漂。`PlatformActivityPanel` = 一级 tab「平台活动」的面板（2026-10-12 用户裁定 ④）。`ReportDialog` = 举报弹窗（2026-10-13 用户裁定 ①，与 `ProductPage.vue` 共用同一个组件）。
-import { productLink } from '../config/product-link'
+import { productLink } from '../config/product-link'; import { MOSAIC } from '../config/mosaic'   // ⚠️ 两条 import **同行**：本文件多处被按行号引，不新增行。`MOSAIC` = 首页同款马赛克档位表（2026-10-19 用户令：店铺商品与首页同排布）。
 
 // 举报弹窗的状态（2026-10-13 用户裁定 ①「举报商家」）—— 与 `ProductPage.vue` 同款两个状态：
 // **开着没** + **举报谁**。理由 / 说明 / 提交 / 回执都在 `components/ReportDialog.vue` 里
@@ -801,9 +796,33 @@ const consultShop = async () => {
   }
 }
 
-// ⚠️ 比 `ProductPage.goBack` **少一支**：那一支是 `route.query.from === 'search'` 的回程，
-// 本页没有搜索入口 ⇒ 那条 `from` 永远不会有值。
-const goBack = () => { router.push(getMerchantId() ? '/merchant' : '/customer') }
+// 返回按来源分流（2026-10-19 用户令）：
+//   from=product ⇒ 回刚才那件商品的详情页（7 个 query 原样带回，商品页靠它们取数）；
+//   from=user    ⇒ 回个人中心（店主从「店铺信息」格进店的路径）；
+//   其它         ⇒ 原有兜底：商城首页（按壳选）。
+const goBack = () => {
+  const from = String(route.query.from || '')
+  if (from === 'product') {
+    router.push({
+      path: '/product',
+      query: {
+        Id: route.query.Id,
+        MerchantId: route.query.MerchantId,
+        GoodName: route.query.GoodName,
+        Price: route.query.Price,
+        GoodImg: route.query.GoodImg,
+        GoodType: route.query.GoodType,
+        ProductCode: route.query.ProductCode
+      }
+    })
+    return
+  }
+  if (from === 'user') {
+    router.push(getMerchantId() ? '/merchant/user/info' : '/customer/user/info')
+    return
+  }
+  router.push(getMerchantId() ? '/merchant' : '/customer')
+}
 
 const goUserCenter = () => {
   const isMerchant = getMerchantId() && getMerchantId() !== 'null'
@@ -844,67 +863,80 @@ button { background: none; border: 0; cursor: pointer; }
          text-decoration: none; }
 .nav-right { margin-left: auto; color: var(--nav-tx); font-weight: var(--fw-med); cursor: pointer; white-space: nowrap; }
 
-/* ── 店铺头卡：整幅横带 ─────────────────────────────────────────────────────── */
-.band { background: var(--zone); border-bottom: 1px solid var(--line); }
-.band-in { max-width: 1180px; margin: 0 auto; padding: var(--s4) var(--s5) var(--s5); }
+/* ── A 版页头（BUYER / SHOP HOME）───────────────────────────────────────────
+   形制照 A 版线框：kicker + 等宽小字、display 字族大标题、右侧直角动作按钮。 */
+.wrap.top { padding-bottom: 0; }
 .crumb { display: flex; align-items: center; font-size: var(--fs-xs); color: var(--ink-3); }
 .crumb a { color: inherit; text-decoration: none; }
 .crumb a:hover { color: var(--brand-ink); }
 .crumb .sp { font-style: normal; padding: 0 var(--s2); }
 
-.hd { margin-top: var(--s3); display: flex; align-items: center; gap: var(--s4); }
-.hd-mark { width: 56px; height: 56px; flex: 0 0 auto; border-radius: var(--r2); background: var(--brand-soft);
-           color: var(--brand-ink); font-family: var(--font-display); font-size: var(--fs-lg);
-           display: flex; align-items: center; justify-content: center; }
-.hd-id { min-width: 0; }
-/* ⚠️ 用 display 字族的元素一律**显式给 `line-height`**：`--font-display` 的 LXGW 楷体在本仓
-   **刻意没有 `@font-face`**（见 tokens 那块），字族一换、行高就跟着变 ⇒ 不写就会与旁边
-   同号的 `--font` 文本差 3px 左右，而这类差只有量出来才看得见。 */
-.hd-nm { display: block; font-family: var(--font-display); font-size: var(--fs-lg); font-weight: var(--fw-med);
-         line-height: 1.3; }
-.hd-sub { display: block; margin-top: var(--s1); font-size: var(--fs-xs); color: var(--ink-3); }
-.hd-sub b { color: var(--ink-2); font-weight: var(--fw-med); font-variant-numeric: tabular-nums; }
-.hd-ops { margin-left: auto; display: flex; gap: var(--s2); flex: 0 0 auto; }
+.page-head { margin-top: var(--s5); display: grid; grid-template-columns: minmax(0, 1fr) auto;
+             gap: var(--s6); align-items: end; padding-bottom: var(--s5);
+             border-bottom: 1px solid var(--line); }
+.kicker { font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.16em;
+          text-transform: uppercase; color: var(--ink-3); }
+.page-head h1 { margin-top: 6px; font-family: var(--font-display); font-size: var(--fs-2xl);
+                font-weight: var(--fw-semi); line-height: 1.1; letter-spacing: -0.02em;
+                color: var(--ink); }
+.page-head p { margin-top: var(--s2); max-width: 58ch; font-size: var(--fs-sm);
+               line-height: 1.7; color: var(--ink-2); }
+.head-actions { display: flex; gap: var(--s2); flex: 0 0 auto; }
+.head-actions .btn { display: inline-flex; align-items: center; height: 36px; padding: 0 var(--s5);
+                     border: 1px solid var(--line-2); border-radius: 0;
+                     font-size: var(--fs-sm); color: var(--ink-2); text-decoration: none;
+                     background: var(--surface); white-space: nowrap; }
+.head-actions .btn:hover { border-color: var(--brand-ink); color: var(--brand-ink); }
 
-.act { height: 34px; padding: 0 var(--s4); border: 1px solid var(--line-2); border-radius: var(--r1);
-       font-size: var(--fs-xs); color: var(--ink-2); white-space: nowrap;
-       transition: background .15s, border-color .15s, color .15s; }
-.act:hover:not(:disabled) { border-color: var(--ink-3); color: var(--ink); }
-.act:disabled { color: var(--ink-3); cursor: default; }
-/* 「关注」= 头卡里唯一一处实心块 —— 「把胆量花在一个地方、其余保持安静」。
-   未关注 = 实心 `--brand` + 白字（同 `FriendRoom.vue` 的 `.btn-solid`）；
-   ⚠️ 「已关注」**退回描边**、不保持实心：它是个**状态**，不再是一次邀请 ——
-   一个常亮的实心按钮会一直喊「点我」，而这里已经没有可做的动作。
-   ⚠️ 两态都**不吃** `--accent`（朱砂在本仓只负责价格 / 促销 / 未读）。
-   ⚠️ 「全页唯一实心块」那句**已收窄为「头卡里唯一」**：热销榜**榜首那根柱**也用实心
-      `--brand`（见 `.col-bar-hero`）。两者不冲突的理由写在那一处 —— 柱是**数据标记**，
-      没有任何可点的暗示；而这条纪律要管的是**控件**之间抢注意力。 */
-.act-on { background: var(--brand); border-color: var(--brand); color: #fff; }
-.act-on:hover:not(:disabled) { background: var(--brand-hover); border-color: var(--brand-hover); color: #fff; }
-
-/* ── 头卡事实行（认证 / 主营 / 开店 / 累计售出）───────────────────────────────
-   ⚠️ 靠**间距**分组，不用 `·` 也不用竖线分隔：竖线是另一种「拼串」，同样会把四件不相干的事
-   说成一句。每项自带标签（`i`）与值（`b`）两个色档 ⇒ 扫一眼能分出「哪一半是标签」。 */
-.facts { margin-top: var(--s4); padding-top: var(--s3); border-top: 1px solid var(--line);
-         display: flex; flex-wrap: wrap; align-items: center; gap: var(--s2) var(--s5); }
-.fact { font-size: var(--fs-xs); white-space: nowrap; }
-.fact i { font-style: normal; color: var(--ink-3); margin-right: var(--s1); }
-.fact b { color: var(--ink-2); font-weight: var(--fw-med); font-variant-numeric: tabular-nums; }
-/* 四项全空时的那一句（用户新规：数据不足 → 占位，不静默消失）。比照实项再浅一档 ——
-   它说的是「这里本该有东西」，不是信息本身。 */
+/* ── A 版店铺头横带（`.a-shop-hero`）──────────────────────────────────────────
+   首字标 = 直角方框；facts 走等宽小字的细框签；三个动作竖排。
+   ⚠️ 认证徽章 / facts / 三个按钮的显示条件与点击处理原样沿用改前实现。 */
+.a-shop-hero { margin-top: var(--s5); display: grid;
+               grid-template-columns: 96px minmax(0, 1fr) auto; gap: 20px;
+               align-items: center; border: 1px solid var(--line); padding: 20px;
+               background: var(--surface); }
+.a-shop-mark { width: 96px; height: 96px; display: grid; place-items: center;
+               border: 1px solid var(--brand-ink); background: var(--brand-tint);
+               font-family: var(--font-display); font-size: 40px; line-height: 1; flex: none; }
+.a-shop-main { min-width: 0; }
+.a-shop-name { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.a-shop-name h2 { font-family: var(--font-display); font-size: var(--fs-lg); font-weight: var(--fw-semi);
+                  line-height: 1.2; }
+/* 认证 tag：直角、墨底白字、等宽小字 —— 与「已核验」这枚事实同权重。 */
+.tag.dark { display: inline-flex; align-items: center; gap: var(--s1); height: 20px;
+            padding: 0 7px; border: 1px solid var(--brand); background: var(--brand);
+            color: var(--surface); font-family: var(--font-mono); font-size: 10px;
+            letter-spacing: 0.05em; line-height: 1; white-space: nowrap; }
+.fact-ic { width: 12px; height: 12px; }
+.a-shop-meta { margin-top: var(--s2); font-size: var(--fs-xs); color: var(--ink-3); }
+.a-shop-meta b { color: var(--ink-2); font-weight: var(--fw-med); font-variant-numeric: tabular-nums; }
+.a-shop-facts { margin-top: 10px; display: flex; flex-wrap: wrap; gap: 6px; }
+.a-shop-facts .a-fact { display: inline-flex; align-items: baseline; gap: var(--s1);
+                        border: 1px solid var(--line-2); padding: 3px 8px;
+                        font-family: var(--font-mono); font-size: 10px; color: var(--ink-3);
+                        white-space: nowrap; }
+.a-shop-facts .a-fact i { font-style: normal; }
+.a-shop-facts .a-fact b { color: var(--ink-2); font-weight: var(--fw-med); font-variant-numeric: tabular-nums; }
 .fact-none { font-size: var(--fs-xs); color: var(--ink-3); }
-/* 认证徽章 —— 「已核验」的一枚标记，不是装饰。
-   ⚠️ 只在 `CertStatus === 'approved'` 时才会被渲染出来（判据在 `<script>` 的 `certified`）。 */
-.fact-cert { display: inline-flex; align-items: center; gap: var(--s1); height: 22px; padding: 0 var(--s3);
-             border-radius: var(--r1); background: var(--success-ground); color: var(--success);
-             font-size: var(--fs-xs); font-weight: var(--fw-med); white-space: nowrap; }
-.fact-ic { width: 14px; height: 14px; }
+
+/* 三个动作：A 版直角描边按钮；「已关注」是状态，退回墨底白字。 */
+.a-shop-ops { display: flex; flex-direction: column; gap: 7px; min-width: 118px; }
+.act { height: 34px; padding: 0 var(--s3); border: 1px solid var(--brand-ink); border-radius: 0;
+       background: var(--surface); font-size: var(--fs-xs); color: var(--ink);
+       white-space: nowrap; transition: background .12s linear, color .12s linear; }
+.act:hover:not(:disabled) { background: var(--brand); color: var(--surface); }
+.act:disabled { opacity: .4; cursor: default; }
+.act-on { background: var(--brand); border-color: var(--brand); color: var(--surface); }
+.act-on:hover:not(:disabled) { background: var(--brand); border-color: var(--brand); color: var(--surface); }
 
 .wrap { max-width: 1180px; margin: 0 auto; padding: var(--s6) var(--s5) var(--s8); }
-.sec-h { font-family: var(--font-display); font-size: var(--fs-lg); font-weight: var(--fw-med); line-height: 1.3; }
-/* 栏题右侧那半句说明（「别家的电子用品」）—— 它给的是这一块的**判据**，不是装饰 ⇒
-   用最浅一档灰、字号降到 `--fs-xs`，别跟栏题抢。 */
-.sec-note { margin-left: var(--s2); font-style: normal; font-size: var(--fs-xs); font-weight: var(--fw-reg); color: var(--ink-3); }
+
+/* ── A 版栏题：标题 + 右侧等宽小字说明 + 一条发丝线 ───────────────────────── */
+.section-title { display: flex; align-items: end; justify-content: space-between; gap: var(--s4);
+                 border-bottom: 1px solid var(--line); padding-bottom: 10px; margin-bottom: var(--s3); }
+.section-title h2 { font-family: var(--font-display); font-size: var(--fs-lg);
+                    font-weight: var(--fw-semi); line-height: 1.1; }
+.tiny { font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.06em; color: var(--ink-3); }
 
 /* ── 分块间距 ────────────────────────────────────────────────────────────────
    ⚠️ 用**相邻兄弟**（`+`）而不是 `.blk { margin-top }`：第一块不该在 `.wrap` 的顶内边距之上
@@ -912,22 +944,17 @@ button { background: none; border: 0; cursor: pointer; }
    ⚠️ 丙方案下只剩三块（券 / Tab 区 / 猜你喜欢）⇒ 相邻关系只有两处。 */
 .blk + .blk { margin-top: var(--s7); }
 
-/* ── 三 · Tab 条 ─────────────────────────────────────────────────────────────
-   ⚠️ 形制选的是**下划线式**，不是胶囊 / 分段控件：
-     · 胶囊（药丸圆角）落在 `tokens.css:36` 那几条「不做」的射程内（统一大圆角）；
-     · 分段控件要在外面再套一层带底的容器 ⇒ 又一种「容器套容器」，
-       而这一页刚刚才把「纵向堆三块、各配一条栏题」的容器感减下去，不该在这里加回来。
-   ⚠️ 指示条是**底边**那 2px（贴着 tab 自己的左右缘），不是侧边强调条 —— `tokens.css:37` 禁的是
-      「卡片 / 提示左缘那根竖条」，不是 tab 的选中态。
-   ⚠️ 整条横线（`border-bottom`）铺满内容宽、选中的那一格把自身的 2px 压在它上面
-      （`bottom: -1px`）⇒ 选中态是「接上了这条线」，不是「浮在线上」。 */
-.tabs { margin-top: var(--s4); display: flex; gap: var(--s6); border-bottom: 1px solid var(--line); }
-.tab { position: relative; padding: var(--s3) 0; font-size: var(--fs-sm); color: var(--ink-3);
-       white-space: nowrap; transition: color .15s; }
-.tab:hover { color: var(--ink-2); }
-.tab-on { color: var(--ink); font-weight: var(--fw-med); }
-.tab-on::after { content: ''; position: absolute; left: 0; right: 0; bottom: -1px;
-                 height: 2px; background: var(--brand); }
+/* ── 三 · Tab 条（A 版 `.a-shop-tabs`）────────────────────────────────────────
+   直角方块：未选中透明底 + 1px 底边线；选中态整格墨底反白，计数用等宽小字。
+   ⚠️ 仍是**真 tab**：`role` / `aria-selected` / 点击处理都在模板里原样保留。 */
+.tabs { margin-top: var(--s4); display: flex; border-bottom: 1px solid var(--brand-ink); }
+.tab { display: flex; align-items: center; gap: var(--s2); padding: 10px 18px;
+       border: 1px solid transparent; border-bottom: 0; background: transparent;
+       font-size: var(--fs-xs); color: var(--ink-2); white-space: nowrap;
+       transition: color .12s linear; }
+.tab:hover { color: var(--brand-ink); }
+.tab-on { background: var(--brand); border-color: var(--brand); color: var(--surface); }
+.cnt { font-family: var(--font-mono); font-size: 9px; opacity: .75; }
 
 /* ── 占位（用户新规：数据不足 → 占位，不静默消失）─────────────────────────────
    ⚠️ 一句**素话**，不套框、不配色、不加图标：占位是「这里本该有东西」的**说明**，
@@ -938,34 +965,29 @@ button { background: none; border: 0; cursor: pointer; }
 .ph-link { margin-left: var(--s3); color: var(--brand-ink); text-decoration: none; }
 .ph-link:hover { text-decoration: underline; }
 
-/* ── 二 · 本店优惠券 ─────────────────────────────────────────────────────────
-   与主页「领券中心」的 `.tk` 同一个视觉语言（`--surface` 底 + 1px `--line` + `--r2`），
-   但**不共用那份 CSS**：那边是「横向条 + 越位渐隐 + `》` 展开」的版式，这里最多 3 张、
-   且是本店专属 ⇒ 直接换行铺开，不需要裁切那套。 */
-.cpns { margin-top: var(--s5); display: flex; flex-wrap: wrap; gap: var(--s3); list-style: none; }
-/* ⚠️ `flex: 1 1 260px` —— 260 是「面额 + 券名 + 门槛 + 领取」四段不换行的最小宽（实测本页券名
-   最长那几张）；`flex-grow: 1` 让三张铺满 1180px 的版面、不足三张也不留一条空尾巴。
-   ⚠️ **`max-width: 380px` 不能省** —— 只有 1 张券时（演示店就是这样）不加它这张卡会**拉满整行
-   1180px**：面额与券名挤在左端、领取按钮被顶到 1100px 外，中间一大片空。380 × 3 + 2 个 `--s3`
-   = 1164 ≤ 1180 ⇒ 满三张时仍然铺得下。 */
-.cpn { flex: 1 1 260px; max-width: 380px; min-width: 0; display: flex; align-items: center; gap: var(--s3);
-       padding: var(--s3) var(--s4); background: var(--surface); border: 1px solid var(--line);
-       border-radius: var(--r2); }
-/* 面额 —— 券卡上唯一的主数字，用 `--font-mono` + `--accent`（朱砂在本仓负责价格 / 促销，
-   券的面额就是促销）。⚠️ 显式 `line-height`：`--font-mono` 与本页正文不同族（同 `.hd-nm` 那条）。 */
-.cpn-face { flex: 0 0 auto; min-width: 4.5em; font-family: var(--font-mono); font-size: var(--fs-md);
-            font-weight: var(--fw-semi); line-height: 1.3; color: var(--accent);
-            font-variant-numeric: tabular-nums; }
-.cpn-tx { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+/* ── 二 · 本店优惠券（A 版 `.a-mall-coupons`）──────────────────────────────────
+   三列栅格；每张券 = 面额（虚线右隔）| 券名 / 门槛 | 领取按钮，直角 + 发丝线。 */
+.cpns { margin-top: var(--s4); display: grid; grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: var(--s3); list-style: none; }
+.cpn { display: grid; grid-template-columns: 84px minmax(0, 1fr) auto; gap: var(--s3);
+       align-items: center; min-width: 0; padding: var(--s3);
+       background: var(--surface); border: 1px solid var(--line-2); }
+/* 面额：券卡上唯一的主数字，等宽字 + 虚线右隔。 */
+.cpn-face { border-right: 1px dashed var(--line-2); padding-right: 10px;
+            font-family: var(--font-mono); font-size: 23px; font-weight: var(--fw-semi);
+            line-height: 1.1; color: var(--ink); font-variant-numeric: tabular-nums; }
+.cpn-tx { min-width: 0; display: flex; flex-direction: column; gap: 3px; }
 /* 券名是**用户填的**（管理端建券表单不限长）⇒ 单行截断，别把卡撑宽、把「领取」顶出画面。 */
-.cpn-name { font-size: var(--fs-xs); font-weight: var(--fw-semi); line-height: 1.2; color: var(--ink-2);
+.cpn-name { font-size: var(--fs-xs); font-weight: var(--fw-semi); line-height: 1.4; color: var(--ink);
             overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.cpn-cond { font-size: var(--fs-xs); line-height: 1.2; color: var(--ink-3);
+.cpn-cond { font-size: 10px; line-height: 1.5; color: var(--ink-3);
             overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.cpn-get { flex: 0 0 auto; height: 28px; padding: 0 var(--s4); border: 1px solid var(--brand-ink);
-           border-radius: var(--r1); font-size: var(--fs-xs); color: var(--brand-ink);
-           background: var(--brand-soft); white-space: nowrap; }
-.cpn-get:disabled { color: var(--ink-3); background: var(--surface-3); border-color: var(--line-2); cursor: default; }
+.cpn-get { flex: 0 0 auto; height: 28px; padding: 0 10px; border: 1px solid var(--brand-ink);
+           border-radius: 0; font-size: 11px; color: var(--ink); background: var(--surface);
+           white-space: nowrap; transition: background .12s linear, color .12s linear; }
+.cpn-get:hover:not(:disabled) { background: var(--brand); color: var(--surface); }
+.cpn-get:disabled { opacity: .4; color: var(--ink-3); background: var(--surface-2);
+                    border-color: var(--line-2); cursor: default; }
 
 /* ══ 三-a 热销：**2-1-3 山峰式**竖直柱状图 ═══════════════════════════════════
    用户定稿：「只显示 Top3」·「竖直柱状图，居中排布」·「2-1-3 山峰式」·「图片圆头」·
@@ -1009,7 +1031,7 @@ button { background: none; border: 0; cursor: pointer; }
             justify-content: flex-end; align-items: center; padding: 0 var(--s4); }
 /* 数值 —— 骑在柱顶。⚠️ `--font-mono` + `tabular-nums`：三根柱的数字要能纵向对得上；
    ⚠️ 颜色是 `--ink-2` **不是**柱色：图表规范写明「文字不该穿数据的颜色」。
-   ⚠️ 显式 `line-height`：等宽族与本页正文不同族（同 `.hd-nm` / `.cpn-face` 那两处）。 */
+   ⚠️ 显式 `line-height`：等宽族与本页正文不同族（同 `.cpn-face` 那处）。 */
 .col-val { flex: none; margin-bottom: var(--s2); font-family: var(--font-mono); font-size: var(--fs-sm);
            font-weight: var(--fw-med); line-height: 1.2; color: var(--ink-2);
            font-variant-numeric: tabular-nums; }
@@ -1023,13 +1045,11 @@ button { background: none; border: 0; cursor: pointer; }
    高度由 JS 按比例尺算好（`barPct`），圆心对齐基线。 */
 .col-bar { flex: none; width: 96px; border-radius: var(--r1) var(--r1) 0 0; background: var(--surface-3);
            transition: background .15s; }
-/* 榜首那根 —— 全页**第二处**实心 `--brand`（第一处是头卡的「关注」按钮）。
+/* 榜首那根 —— 本页唯一保留的实心 `--brand`，作为**数据标记**而不是控件。
    ⚠️ 判据是 `rank === 1` **不是下标 0**：2-1-3 山峰式下，名次 1 的那根**在中间**
       （见 `<script>` 的 `hotCols`）。按下标写会把 hero 色画到「左边第一根」上。
-   ⚠️ 为什么不算破坏「一个实心块」那条纪律：那条管的是**控件**之间抢注意力（按钮喊「点我」），
-      柱是**数据标记**、没有任何可点的暗示；而图表规范本身也建议给「hero bar」一个高亮色。
-      两者在截图里是否真的互相压住，是**量出来的**（`--brand` = `#3b7966` 低饱和墨绿、
-      「关注」是右上角 34px 高的描边小按钮）—— 实测**不打架**。 */
+   ⚠️ 头卡三个动作在 A 版里统一走墨色描边 / 墨底，不吃 `--brand` ⇒ 这里的高亮不会与
+      右上角的按钮抢注意力；柱本身也没有任何可点的暗示（图表规范建议给 hero bar 高亮色）。 */
 .col-bar-hero { background: var(--brand); }
 .col:hover .col-bar { background: var(--line-2); }
 .col:hover .col-bar-hero { background: var(--brand-hover); }
@@ -1045,20 +1065,19 @@ button { background: none; border: 0; cursor: pointer; }
           font-variant-numeric: tabular-nums; }
 .col-nm { font-size: var(--fs-xs); line-height: 1.4; color: var(--ink-2);
           display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
-.col:hover .col-nm { color: var(--ink); }
+.col:hover .col-nm { color: var(--brand-ink); }
 
-/* ── 三-b 分类筛选 chip（**只在 ≥2 个类目时渲染**，理由见模板那条注释）────────────────
-   选中态走 `--brand-soft` + `--brand-ink` **不是**实心 `--brand` —— 实心留给了「关注」与
-   榜首那根柱（见那两处注释）；chip 再抢一个，那两处就没力了。 */
+/* ── 三-b 分类筛选 chip（**只在 ≥2 个类目时渲染**，条件见模板）────────────────
+   A 版直角小签：选中态墨底反白；计数用等宽字，比类别名浅一档。 */
 .chips { margin-bottom: var(--s5); display: flex; flex-wrap: wrap; gap: var(--s2); }
-.chip { height: 30px; padding: 0 var(--s4); border: 1px solid var(--line); border-radius: var(--r1);
+.chip { height: 30px; padding: 0 var(--s3); border: 1px solid var(--line-2); border-radius: 0;
         background: var(--surface); font-size: var(--fs-xs); color: var(--ink-2);
-        white-space: nowrap; transition: border-color .15s, background .15s, color .15s; }
-.chip:hover { border-color: var(--line-2); color: var(--ink); }
-.chip-on { background: var(--brand-soft); border-color: var(--brand-ink); color: var(--brand-ink); font-weight: var(--fw-med); }
+        white-space: nowrap; transition: border-color .12s linear, background .12s linear, color .12s linear; }
+.chip:hover { border-color: var(--brand-ink); color: var(--brand-ink); }
+.chip-on { background: var(--brand); border-color: var(--brand); color: var(--surface); font-weight: var(--fw-med); }
 /* chip 上的件数 —— 比 chip 文案再浅一档（它是量词，不是类别本身）。 */
 .chip-n { font-style: normal; color: var(--ink-3); font-variant-numeric: tabular-nums; }
-.chip-on .chip-n { color: var(--brand-ink); }
+.chip-on .chip-n { color: var(--surface); opacity: .75; }
 
 /* ── 三-b 三态（载入 / 报错 / 空）────────────────────────────────────────────
    空态是**一次邀请**（给一个真能走的去处），不是一句情绪；报错说清是什么没成、
@@ -1067,9 +1086,9 @@ button { background: none; border: 0; cursor: pointer; }
 .note-err { color: var(--danger); }
 .note-empty p { margin-bottom: var(--s3); }
 .retry { display: inline-block; height: 32px; line-height: 30px; padding: 0 var(--s3);
-         border: 1px solid var(--line-2); border-radius: var(--r1); font-size: var(--fs-xs);
-         color: var(--ink-2); text-decoration: none; vertical-align: middle; }
-.retry:hover { border-color: var(--ink-3); color: var(--ink); }
+         border: 1px solid var(--brand-ink); border-radius: 0; font-size: var(--fs-xs);
+         color: var(--brand-ink); background: var(--surface); text-decoration: none; vertical-align: middle; }
+.retry:hover { background: var(--brand); color: var(--surface); }
 .note-err .retry { margin-left: var(--s2); }
 
 /* ── 三-b / 三-c / 四 商品格 —— `.cards` 是**栅格**（版面），`.card` 本体已搬进
@@ -1077,8 +1096,9 @@ button { background: none; border: 0; cursor: pointer; }
    ⚠️ 自「商品卡收成一个组件」那一笔起这一段的注释不再说「与 `ProductPage.vue` 的 `.card`
    同一套形制」—— 那句话改前是**错的**（改前实测：本页卡 1/1 图、无框、整值价；主页卡 4/3 图、
    有框、三段价），收成一件之后「三处一致」是**结构**保证的，不靠注释声明。
-   ⚠️ 猜你喜欢「**全宽铺开**」= 这一条栅格（4 列铺满 `.wrap` 的 1180px），不是铺到视口边。 */
-.cards { margin-top: var(--s5); display: grid; grid-template-columns: repeat(4, 1fr); gap: var(--s5); }
+   ⚠️ A 版 `.reco-grid` 把这一页的商品格改成**三列错落**（1.2 / 0.9 / 1）；
+   商品卡本体仍由 `ProductCard.vue` 提供，栅格变化不触碰卡内结构。 */
+.cards { margin-top: var(--s5); }
 /* ⚠️ chip 行在时它自己已经带了 `margin-bottom`，栅格的上边距就不该再叠一层（否则第一排
    商品被顶低 24px）。用**相邻兄弟**判，不靠「有没有 chip」的 if。 */
 .chips + .cards, .chips + .note { margin-top: 0; }
@@ -1086,26 +1106,20 @@ button { background: none; border: 0; cursor: pointer; }
    各有一套），少一层容器就少一处要对齐的间距。 */
 
 /* ── 一级 tab（`本店商品` / `平台活动`，2026-10-12 用户裁定 ④）────────────────────
-   ⚠️ 规则写在**文件尾**是**刻意的**：本文件有 8 条 refs token，其中 `:872/:875` 就在下面
-      这段 `<style>` 里 ⇒ 新规则落在**最大被引行之后**，一个都不漂（同上一条注释的同一笔账）。
-   ⚠️ 形制与二级 `.tabs` **有意不同**：那一套是 `--fs-sm` + **整条 `border-bottom`**（选中格把
-      自己的 2px 压在那条线上）；这一套升到栏题字号（`--fs-lg` + `--font-display`）、**不画通栏横线**，
-      选中态是**自己脚下那 2px**。两级 tab 若长得一样，读起来会是「六个平级的 tab」。
-   ⚠️ 下边距取 `--s7`（48）：与 `.blk + .blk` 的块间距同值 ⇒ 一级 tab 之下仍是一套块节奏。 */
-.pact-tabs { display: flex; gap: var(--s6); margin-bottom: var(--s7); }
+   A 版 `.a-shop-view`：直角页签、选中整格墨底反白，与二级 `.tabs` 同一套方块语言，
+   但保留 `--fs-sm` + 更大的左右留白，两级仍能分出层级。 */
+.pact-tabs { display: flex; border-bottom: 1px solid var(--brand-ink); margin-bottom: var(--s6); }
 .pact-tab {
-  position: relative;
-  padding: 0 0 var(--s3);
-  border: 0;
-  background: none;
-  font-family: var(--font-display);
-  font-size: var(--fs-lg);
-  font-weight: var(--fw-med);
-  line-height: 1.3;
-  color: var(--ink-3);
+  padding: 11px 22px;
+  border: 1px solid var(--line-2);
+  border-bottom: 0;
+  margin-right: 4px;
+  background: transparent;
+  font-size: var(--fs-sm);
+  line-height: 1.2;
+  color: var(--ink-2);
   cursor: pointer;
 }
-.pact-tab:hover { color: var(--ink-2); }
-.pact-tab-on { color: var(--ink); }
-.pact-tab-on::after { content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 2px; background: var(--brand); }
+.pact-tab:hover { border-color: var(--brand-ink); color: var(--brand-ink); }
+.pact-tab-on { background: var(--brand); border-color: var(--brand); color: var(--surface); }
 </style>

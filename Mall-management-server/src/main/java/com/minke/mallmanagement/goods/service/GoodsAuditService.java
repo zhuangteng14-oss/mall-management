@@ -7,10 +7,13 @@ import com.minke.mallmanagement.goods.dao.GoodsAuditDao;
 import com.minke.mallmanagement.goods.dao.GoodsDao;
 import com.minke.mallmanagement.marketing.coupon.dao.CouponDao;
 import com.minke.mallmanagement.marketing.coupon.service.CouponService;
+import com.minke.mallmanagement.notification.service.NotificationService;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.math.BigDecimal;
 import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -50,6 +53,7 @@ import java.util.UUID;
 public class GoodsAuditService {
 
     /** 提审单状态码 —— 与建表块里 {@code goods_audit.Status} 列的注释同源（小写）。 */
+    public static final String STATUS_DRAFT = "draft";
     public static final String STATUS_PENDING = "pending";
     public static final String STATUS_APPROVED = "approved";
     public static final String STATUS_REJECTED = "rejected";
@@ -78,17 +82,24 @@ public class GoodsAuditService {
      * 不另建（那会波及既有端点的字节）。
      */
     private final ObjectMapper objectMapper;
+    /**
+     * 低库存告警的投递口（批四第二批）。{@link NotificationService#alertLowStock} 是 fail-soft
+     * 原语 —— 审核通过 / 改库存后调用，**不影响**主流程成败。
+     */
+    private final NotificationService notificationService;
 
     public GoodsAuditService(GoodsAuditDao auditDao,
                              GoodsDao goodsDao,
                              GoodsCacheService goodsCacheService,
                              CouponDao couponDao,
-                             ObjectMapper objectMapper) {
+                             ObjectMapper objectMapper,
+                             NotificationService notificationService) {
         this.auditDao = auditDao;
         this.goodsDao = goodsDao;
         this.goodsCacheService = goodsCacheService;
         this.couponDao = couponDao;
         this.objectMapper = objectMapper;
+        this.notificationService = notificationService;
     }
 
     // ==================== 提交（提审） ====================
@@ -111,15 +122,88 @@ public class GoodsAuditService {
                                       Double price, Double originalPrice, String goodType, Integer goodTypeNew,
                                       Integer typeId, String productCode, String goodImg, String detail, String spec, String afterSale,
                                       String skuSpec, Boolean promiseGenuine, Boolean promiseReturn7, Boolean promiseFastRefund, Boolean promiseFreightIns) {
+        // 旧签名（券提审路径等）：恒 pending、无多图快照 —— 与改前逐字一致。
+        return submit(merchantId, batchId, goodName, price, originalPrice, goodType, goodTypeNew, typeId,
+                productCode, goodImg, null, detail, spec, afterSale, skuSpec,
+                promiseGenuine, promiseReturn7, promiseFastRefund, promiseFreightIns, STATUS_PENDING);
+    }
+
+    /**
+     * 新签名（批四第二批）：多带 {@code imgList}（多图 JSON 数组）与 {@code status}
+     * （{@link #STATUS_DRAFT} 草稿 / {@link #STATUS_PENDING} 提审）。
+     *
+     * <p>提醒：草稿也走本方法、也在 {@code goods_audit} 里落一行 —— 「提审制下 goods 表不出现
+     * 未通过的商品」这条不变量不变。
+     */
+    @Transactional
+    public Map<String, Object> submit(String merchantId, String batchId, String goodName,
+                                      Double price, Double originalPrice, String goodType, Integer goodTypeNew,
+                                      Integer typeId, String productCode, String goodImg, String imgList,
+                                      String detail, String spec, String afterSale,
+                                      String skuSpec, Boolean promiseGenuine, Boolean promiseReturn7,
+                                      Boolean promiseFastRefund, Boolean promiseFreightIns, String status) {
+        // 第三批㉖：不带折扣模板快照的旧签名 —— 逐字沿用改前行为。
+        return submit(merchantId, batchId, goodName, price, originalPrice, goodType, goodTypeNew, typeId,
+                productCode, goodImg, imgList, detail, spec, afterSale, skuSpec,
+                promiseGenuine, promiseReturn7, promiseFastRefund, promiseFreightIns, status,
+                null, null, null, null);
+    }
+
+    /**
+     * 第三批㉖：带折扣模板快照的新签名。快照来自 {@code DiscountService.snapshotForSubmit}
+     * （服务端反算），此处**只负责落库**，不再计算 —— 计算与落库分开，审核通过才能原样搬运。
+     */
+    @Transactional
+    public Map<String, Object> submit(String merchantId, String batchId, String goodName,
+                                      Double price, Double originalPrice, String goodType, Integer goodTypeNew,
+                                      Integer typeId, String productCode, String goodImg, String imgList,
+                                      String detail, String spec, String afterSale,
+                                      String skuSpec, Boolean promiseGenuine, Boolean promiseReturn7,
+                                      Boolean promiseFastRefund, Boolean promiseFreightIns, String status,
+                                      Long discountTemplateId, String discountType,
+                                      java.math.BigDecimal discountRate, java.math.BigDecimal discountAmount) {
         Map<String, Object> result = new HashMap<>();
         Integer effectiveTypeId = typeId != null ? typeId : goodsDao.selectTypeIdByName(goodType);
+        String effectiveStatus = isBlank(status) ? STATUS_PENDING : status;
 
         auditDao.insert(merchantId, batchId, goodName, price, originalPrice, goodType, goodTypeNew, effectiveTypeId,
-                productCode, goodImg, detail, spec, afterSale, skuSpec, LocalDateTime.now(),
-                boolOrTrue(promiseGenuine), boolOrTrue(promiseReturn7), boolOrTrue(promiseFastRefund), boolOrTrue(promiseFreightIns));
+                productCode, goodImg, imgList, detail, spec, afterSale, skuSpec, LocalDateTime.now(),
+                boolOrTrue(promiseGenuine), boolOrTrue(promiseReturn7), boolOrTrue(promiseFastRefund), boolOrTrue(promiseFreightIns),
+                effectiveStatus,
+                discountTemplateId, discountType, discountRate, discountAmount,
+                discountTemplateId == null ? null : LocalDateTime.now());
 
         result.put("success", true);
         result.put("batchId", batchId);
+        result.put("status", effectiveStatus);
+        return result;
+    }
+
+    /**
+     * 商家把草稿提交审核：{@code draft → pending} 的 CAS（幂等）。
+     * {@code 0} 行 = 不存在 / 不是自己的 / 已提交过 —— 回 {@code success:false} 并给明确文案。
+     */
+    @Transactional
+    public Map<String, Object> submitDraft(String merchantId, Long id) {
+        Map<String, Object> result = new HashMap<>();
+        if (isBlank(merchantId) || id == null || id <= 0) {
+            result.put("success", false);
+            result.put("msg", "缺少参数：MerchantId / Id");
+            return result;
+        }
+        int affected = auditDao.casSubmitDraft(id, merchantId);
+        if (affected == 0) {
+            result.put("success", false);
+            result.put("msg", "草稿不存在、不属于当前商家或已提交过");
+            return result;
+        }
+        Map<String, Object> row = auditDao.selectById(id);
+        result.put("success", true);
+        result.put("status", STATUS_PENDING);
+        if (row != null) {
+            result.put("batchId", str(row.get("BatchId")));
+            result.put("goodName", str(row.get("GoodName")));
+        }
         return result;
     }
 
@@ -229,6 +313,14 @@ public class GoodsAuditService {
         }
 
         if (!approve) {
+            // 批四第二批：**对已有 goods 行的复审**被驳回 ⇒ 同步 goods.Status=3（驳回态）。
+            // 首次提审的 GoodsId 恒 NULL（商品还没进 goods 表）⇒ 不凭空插行，驳回态只在
+            // goods_audit 里（提审制的定义，见类注释）。
+            Integer goodsId = toInteger(before.get("GoodsId"));
+            if (goodsId != null && goodsId > 0) {
+                goodsDao.updateGoodsStatus(goodsId, 3);
+                goodsCacheService.evictByMerchant(merchantId);
+            }
             result.put("success", true);
             result.put("outcome", "rejected");
             result.put("merchantId", merchantId);
@@ -286,10 +378,20 @@ public class GoodsAuditService {
                 toInt(auditRow.get("GoodTypeNew"), 0),
                 toInteger(auditRow.get("TypeId")), str(auditRow.get("Detail")), str(auditRow.get("Spec")), str(auditRow.get("AfterSale")),
                 boolOrTrue(auditRow.get("PromiseGenuine")), boolOrTrue(auditRow.get("PromiseReturn7")),
-                boolOrTrue(auditRow.get("PromiseFastRefund")), boolOrTrue(auditRow.get("PromiseFreightIns"))));
+                boolOrTrue(auditRow.get("PromiseFastRefund")), boolOrTrue(auditRow.get("PromiseFreightIns")),
+                str(auditRow.get("ImgList")), 2));
 
         Integer lastId = goodsDao.lastInsertId();
         long goodsId = lastId == null ? 0L : lastId.longValue();
+
+        // 第三批㉖：折扣模板快照原样搬进 goods（提审时服务端已反算好，此处不重算）。
+        // 与 insertGoods 同事务 ⇒ 不会留下「商品在、快照丢」的半完成态。
+        goodsDao.updatePriceSnapshot(goodsId,
+                toLong(auditRow.get("DiscountTemplateId")),
+                str(auditRow.get("DiscountType")),
+                toBigDecimal(auditRow.get("DiscountRate")),
+                toBigDecimal(auditRow.get("DiscountAmount")),
+                toLocalDateTime(auditRow.get("PriceSnapshotAt")));
 
         goodsDao.insertProductsales(str(auditRow.get("MerchantId")),
                 str(auditRow.get("GoodName")), str(auditRow.get("ProductCode")));
@@ -340,6 +442,11 @@ public class GoodsAuditService {
         }
         if (!rows.isEmpty()) {
             goodsDao.insertSkus(goodsId, str(auditRow.get("MerchantId")), str(auditRow.get("GoodName")), rows);
+            // 批四第二批：上架时库存已低于阈值 ⇒ 给商家一条站内信（每 SKU 每日最多一条）。
+            for (GoodsDao.SkuRow row : rows) {
+                notificationService.alertLowStock(str(auditRow.get("MerchantId")), row.skuCode(),
+                        row.axisName(), str(auditRow.get("GoodName")), row.stock());
+            }
         }
     }
 
@@ -377,6 +484,40 @@ public class GoodsAuditService {
     private static int toInt(Object v, int fallback) {
         Integer i = toInteger(v);
         return i == null ? fallback : i;
+    }
+
+    private static Long toLong(Object v) {
+        if (v == null) {
+            return null;
+        }
+        if (v instanceof Number n) {
+            return n.longValue();
+        }
+        return Long.valueOf(v.toString());
+    }
+
+    private static BigDecimal toBigDecimal(Object v) {
+        if (v == null) {
+            return null;
+        }
+        if (v instanceof BigDecimal bd) {
+            return bd;
+        }
+        if (v instanceof Number n) {
+            return BigDecimal.valueOf(n.doubleValue());
+        }
+        return new BigDecimal(v.toString());
+    }
+
+    /** {@code goods_audit.PriceSnapshotAt} 经 {@code DATE_FORMAT} 投影成字符串，这里解回。 */
+    private static LocalDateTime toLocalDateTime(Object v) {
+        if (v == null) {
+            return null;
+        }
+        if (v instanceof LocalDateTime dt) {
+            return dt;
+        }
+        return LocalDateTime.parse(v.toString(), DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"));
     }
 
     private static boolean isBlank(String s) {

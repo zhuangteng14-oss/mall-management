@@ -1,5 +1,6 @@
 package com.minke.mallmanagement.notification.service;
 
+import com.minke.mallmanagement.notification.NotificationEvents;
 import com.minke.mallmanagement.shared.web.PageLimits;
 import com.minke.mallmanagement.notification.dao.NotificationDao;
 import com.minke.mallmanagement.observe.metrics.NotifyMetrics;
@@ -7,10 +8,13 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
+import java.time.LocalDate;
+import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 
 /**
  * 系统通知服务（C3 块 1 · I2）—— 通知域的**全部业务动作**：
@@ -261,6 +265,54 @@ public class NotificationService {
         return AUDIENCE_ALL.equals(audience)
                 || AUDIENCE_CUSTOMER.equals(audience)
                 || AUDIENCE_MERCHANT.equals(audience);
+    }
+
+    // ==================== 低库存告警（批四第二批） ====================
+
+    /** 低库存阈值：严格小于它才告警（10 件及以上不打扰）。 */
+    public static final int LOW_STOCK_THRESHOLD = 10;
+
+    /**
+     * 商家某 SKU 库存低于阈值 ⇒ 投递一条站内信。
+     *
+     * <p>⚠️ <b>幂等粒度 = 「商家 × SKU × 自然日」</b>：同一 SKU 一天只发一条，避免每次改库存 /
+     * 每笔订单扣减都刷屏。判据落在通知表自身的 {@code existsDelivery} 上，不新增去重表。
+     *
+     * <p>⚠️ <b>fail-soft</b>：查询去重失败也照发（宁可多一条，不可漏），发送失败由 {@link #send}
+     * 吞掉并记 ERROR + NOTIFY。调用点都在业务动作成功之后。
+     *
+     * @param skuCode   SKU 编码（可为空 —— 空则用 {@code axisName} 做去重键）
+     * @param axisName  规格组合名（展示用）
+     * @param stock     当前库存（{@code null} / ≥ 阈值 ⇒ 直接返回 false）
+     * @return {@code true} = 本次真的发了一条
+     */
+    public boolean alertLowStock(String merchantId, String skuCode, String axisName,
+                                 String goodName, Integer stock) {
+        if (isBlank(merchantId) || stock == null || stock >= LOW_STOCK_THRESHOLD) {
+            return false;
+        }
+        String key = isBlank(skuCode) ? axisName : skuCode;
+        if (isBlank(key)) {
+            return false;
+        }
+        String day = LocalDate.now().format(DateTimeFormatter.BASIC_ISO_DATE);
+        String targetId = key + ":" + day;
+        try {
+            if (notificationDao.existsDelivery(merchantId, NotificationEvents.GOODS_STOCK_LOW,
+                    "goods_sku", targetId)) {
+                return false;
+            }
+        } catch (Exception e) {
+            // fail-soft：去重查询失败不阻断告警（最多多一条，不能漏）。
+            log.error("低库存告警去重查询失败（NOTIFY）：merchantId={} key={}", merchantId, key, e);
+        }
+        return send(UUID.randomUUID().toString(), merchantId, TO_TYPE_MERCHANT,
+                NotificationEvents.GOODS_STOCK_LOW,
+                "库存不足提醒",
+                "商品「" + (goodName == null ? "" : goodName) + "」的规格「"
+                        + (isBlank(axisName) ? key : axisName) + "」仅剩 " + stock
+                        + " 件，请及时补货。",
+                "goods_sku", targetId);
     }
 
     // ==================== 内部 ====================

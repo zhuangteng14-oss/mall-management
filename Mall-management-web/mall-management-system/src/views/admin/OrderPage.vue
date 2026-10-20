@@ -45,7 +45,7 @@
         type="button"
         class="a-tab"
         :class="{ on: tab === t.key }"
-        @click="tab = t.key"
+        @click="switchTab(t.key)"
       >
         {{ t.label }}<span class="a-tabn">{{ t.note() }}</span>
       </button>
@@ -285,7 +285,7 @@
     </template>
 
     <!-- ══ ③ 异常监控（tab 二）═════════════════════════════════════════════════ -->
-    <template v-else>
+    <template v-else-if="tab === 'mon'">
       <h2 class="a-h2">异常监控 <span class="a-h2n">**只读识别** —— 本页没有任何一个数字会让库发生改变</span></h2>
 
       <p class="a-hint">
@@ -326,12 +326,85 @@
         对**具体那一条**点介入（点两次确认），并且介入成功后**买卖双方都会被通知**。
       </p>
     </template>
+
+    <!-- ══ ④ 平台售后（tab 三，批四第二批 commit 4）══════════════════════════════
+         只列 `RefundStatus=3`（商家第 2 次拒绝后**强制转入**）。与「订单全量」的介入是两套域：
+         售后是旁路状态域，不推 `PayIf/DeliveryIf/ReceiveIf` 三位，也不走 `OrderStateMachine`。 -->
+    <template v-else>
+      <h2 class="a-h2">
+        平台售后
+        <span class="a-h2n">
+          只列 <code>RefundStatus=3</code>（商家二次拒绝后强制转入）· VIP 优先（后端按 <code>MemberLevel DESC</code>）
+        </span>
+      </h2>
+
+      <p class="a-hint">
+        <b>同意退款</b> = 退款金额入买家余额 + 按明细回补库存；<b>驳回</b> = 终态，买家不可再申请。
+        两条都由服务端 CAS 兜底：同一条售后被重复点击时，落空的那次不会重复入账、不会重复回补。
+      </p>
+
+      <div class="a-acts a-refund-bar">
+        <button type="button" class="a-btn" :disabled="refundLoading" @click="loadRefunds">
+          <IconGlyph name="ok" />刷新队列
+        </button>
+        <span class="a-grow"></span>
+        <span class="a-dim">{{ refundLoading ? '加载中…' : `共 ${refundRows.length} 单待平台裁决` }}</span>
+      </div>
+
+      <p v-if="!refundLoading && !refundRows.length" class="a-empty">没有待平台裁决的售后。</p>
+
+      <ol v-else class="a-stream">
+        <li v-for="r in refundRows" :key="r.OrderId" class="a-card">
+          <div class="a-card-l1">
+            <b class="a-strong a-mono">{{ dash(r.OrderId) }}</b>
+            <span v-if="Number(r.MemberLevel) > 0" class="a-badge vip">VIP</span>
+            <span class="a-badge rejected">待平台裁决</span>
+            <span class="a-tag">¥{{ dash(r.RefundAmount || r.Price) }}</span>
+            <span class="a-tag">第 {{ Number(r.RefundRetryCount) || 0 }} 次申请</span>
+            <span class="a-grow"></span>
+            <span class="a-dim">{{ toLocal(r.RefundApplyAt) }}</span>
+          </div>
+
+          <div class="a-kv">
+            <div><dt>买家</dt><dd class="a-mono">{{ dash(r.CustomerName || r.CustomerId) }}</dd></div>
+            <div><dt>商家</dt><dd class="a-mono">{{ dash(r.MerchantId) }}</dd></div>
+            <div><dt>商品</dt><dd>{{ dash(r.ProductInformation) }}</dd></div>
+            <div><dt>退款金额</dt><dd class="a-mono">¥{{ dash(r.RefundAmount || r.Price) }}</dd></div>
+          </div>
+
+          <p class="a-reason">申请原因：{{ dash(r.RefundReason) }}</p>
+
+          <div class="a-acts">
+            <button
+              type="button"
+              class="a-btn"
+              :class="{ 'a-btn-danger': refundArmed === r.OrderId + ':ok' }"
+              :disabled="refundBusy !== null"
+              @click="handleRefund(r, true)"
+            >
+              <IconGlyph :name="refundArmed === r.OrderId + ':ok' ? 'no' : 'ok'" />{{ refundArmed === r.OrderId + ':ok' ? '再点一次确认：同意退款' : '同意退款' }}
+            </button>
+            <button
+              type="button"
+              class="a-btn"
+              :class="{ 'a-btn-danger': refundArmed === r.OrderId + ':no' }"
+              :disabled="refundBusy !== null"
+              @click="handleRefund(r, false)"
+            >
+              <IconGlyph name="no" />{{ refundArmed === r.OrderId + ':no' ? '再点一次确认：驳回' : '驳回' }}
+            </button>
+            <span class="a-grow"></span>
+            <span class="a-dim">{{ refundBusy === r.OrderId ? '处理中…' : '' }}</span>
+          </div>
+        </li>
+      </ol>
+    </template>
   </section>
 </template>
 
 <script setup>
 import { ref, reactive, computed, onMounted } from 'vue'
-import { orderAdminList, orderAdminDetail, orderAdminMonitor, orderAdminIntervene } from '../../api/order'
+import { orderAdminList, orderAdminDetail, orderAdminMonitor, orderAdminIntervene, orderRefundAdminList, orderRefundAdminHandle } from '../../api/order'
 // 图表（可视化段 commit 3；2026-10-11 复合图整改）—— 本页三张：状态分布×时间堆叠柱 /
 // GMV·成单数双轴折线 / 发货时效柱。⚠️ 状态分布原先是环图、GMV 原先是单系列折线，
 // 整改后 DonutChart 本页不再用 ⇒ **import 同步删掉**（留着就是 `no-unused-vars`）。
@@ -378,7 +451,15 @@ const tab = ref('list')
 const TABS = [
   { key: 'list', label: '订单全量', note: () => `${rows.value.length} 行` },
   { key: 'mon', label: '异常监控', note: () => `${monitor.value.abnormalState} 异常态` },
+  // 平台售后（批四第二批 commit 4）：队列在第一次切进来时才拉（`switchTab`），不拖慢首屏。
+  { key: 'refund', label: '平台售后', note: () => `${refundRows.value.length} 待裁` },
 ]
+
+/** 切 tab。⚠️ 售后队列是**独立端点**（`/admin/order/refund/list`），不随订单全量刷新。 */
+function switchTab(key) {
+  tab.value = key
+  if (key === 'refund') loadRefunds()
+}
 
 // ── 全量视图 ─────────────────────────────────────────────────────────────────
 const f = reactive({ CustomerId: '', MerchantId: '', status: '', from: '', to: '', limit: 100 })
@@ -706,6 +787,66 @@ function toggleDetail(r) {
   loadDetail(r.OrderId)
 }
 
+// ── 平台售后（tab 三，批四第二批 commit 4）──────────────────────────────────
+/** 待平台裁决的售后（固定 `RefundStatus=3`）。排序在后端：`MemberLevel DESC, RefundApplyAt ASC`。 */
+const refundRows = ref([])
+const refundLoading = ref(false)
+/** 正在处理的单号（防重复点）；`null` = 空闲。 */
+const refundBusy = ref(null)
+/** 已「上膛」的那颗按钮（`OrderId:ok|no`）—— 与介入按钮同一套两次点击确认。 */
+const refundArmed = ref(null)
+
+async function loadRefunds() {
+  refundLoading.value = true
+  try {
+    const data = await orderRefundAdminList(3)
+    if (!data || !data.success) {
+      refundRows.value = []
+      say('bad', (data && data.msg) || '售后队列加载失败')
+      return
+    }
+    refundRows.value = Array.isArray(data.list) ? data.list : []
+  } catch (e) {
+    refundRows.value = []
+    say('bad', `售后队列加载失败：${failOf(e)}`)
+    console.error('admin refunds', e)
+  } finally {
+    refundLoading.value = false
+  }
+}
+
+/**
+ * 平台裁决。**两次点击**才算数（同 `intervene` 的惯例：不可逆的对外动作、页内无 `confirm()`）。
+ * ⚠️ 成功文案分两档：同意 = 已退款（入余额 + 回补）；驳回 = 终态。失败时把后端 `msg` 原样显示 ——
+ *    「CAS 落空（已被处理）」与「状态不对」必须分得出来。
+ */
+async function handleRefund(r, approve) {
+  const key = r.OrderId + ':' + (approve ? 'ok' : 'no')
+  if (refundArmed.value !== key) {
+    refundArmed.value = key
+    say('ok', `再点一次「${approve ? '同意退款' : '驳回'}」以确认：订单 ${r.OrderId}`)
+    return
+  }
+  refundArmed.value = null
+  refundBusy.value = r.OrderId
+  try {
+    const data = await orderRefundAdminHandle({ OrderId: r.OrderId, Approve: approve })
+    if (!data || !data.success) {
+      say('bad', (data && data.msg) || '售后处理失败')
+      return
+    }
+    say('ok', data.outcome === 'refunded'
+      ? `已退款：订单 ${r.OrderId}，金额已入买家余额，库存已按明细回补。`
+      : `已驳回：订单 ${r.OrderId}（终态，买家不可再申请）。`)
+    await loadRefunds()
+  } catch (e) {
+    say('bad', `售后处理失败：${failOf(e)}`)
+    console.error('admin refund handle', e)
+  } finally {
+    refundBusy.value = null
+  }
+}
+
 onMounted(() => {
   loadList()
   loadMonitor()
@@ -1020,6 +1161,25 @@ onMounted(() => {
   color: var(--danger);
   background: var(--danger-ground);
   border-color: transparent;
+}
+/* VIP 徽标（平台售后 tab）：与「待裁决」的红色区分开，用金色系语义。 */
+.a-badge.vip {
+  color: var(--warning-deep);
+  background: var(--warning-ground);
+  border-color: transparent;
+}
+.a-refund-bar {
+  margin-top: var(--s4);
+}
+.a-reason {
+  margin: var(--s3) 0 0;
+  padding: var(--s2) var(--s3);
+  border-radius: var(--r1);
+  background: var(--surface-2);
+  font-size: var(--fs-xs);
+  line-height: 1.6;
+  color: var(--ink-2);
+  overflow-wrap: anywhere;
 }
 .a-dim {
   font-size: var(--fs-xs);

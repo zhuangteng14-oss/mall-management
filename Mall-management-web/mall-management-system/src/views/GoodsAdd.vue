@@ -31,12 +31,41 @@
          ⚠️ **类名用本页稿自己的 `.head` / `.head h1` / `.head .sub`**，不去套 `UserInfoPage.vue`
          的 `.page-h`：两份稿**自己就不同**（本页 `.head` 带一条发丝线 + `--fs-xs` 副题；
          UserCenter 稿 `.page-h` 无发丝线 + `--fs-sm` 副题）⇒「同壳一套类名」的口径**在此不适用**。 -->
-    <div class="head">
-      <h1>上架商品</h1>
-      <div class="sub">新建一件商品，名称 / 价格 / 图片 / 类型 / 型号五项必填</div>
+    <!-- A 版线框（MERCHANT / GOODS STUDIO）：页头 + 步骤条 + 左步骤 / 中表单 / 右预览。
+         表单字段、校验、草稿与提审逻辑一个字不动，只换容器与呈现（2026-10-19 极速 UI 重构）。 -->
+    <section class="page-head">
+      <div>
+        <div class="kicker">MERCHANT / GOODS STUDIO</div>
+        <h1>商品发布</h1>
+        <p>新建一件商品，名称 / 价格 / 图片 / 类型 / 型号五项必填。保存草稿不生成商品行，提交审核后进入平台审核队列。</p>
+      </div>
+      <div class="head-actions">
+        <router-link class="btn" to="/merchant/user/list">商品管理</router-link>
+      </div>
+    </section>
+
+    <div class="publish-top">
+      <div class="steps">
+        <span><b>01</b> 基本信息</span>
+        <span><b>02</b> 价格库存</span>
+        <span><b>03</b> 图片</span>
+        <span><b>04</b> 详情与规格</span>
+        <span><b>05</b> 提交审核</span>
+      </div>
+      <span class="tag">草稿 · 未提交</span>
     </div>
 
-    <form class="form" @submit.prevent>
+    <div class="publish-grid">
+      <aside class="publish-steps">
+        <div class="pstep on"><b>01</b><div><span>基本信息</span><small>标题、类型、型号</small></div></div>
+        <div class="pstep"><b>02</b><div><span>价格与库存</span><small>售价 / 划线原价</small></div></div>
+        <div class="pstep"><b>03</b><div><span>商品图片</span><small>封面 1 张 · 图集最多 5 张</small></div></div>
+        <div class="pstep"><b>04</b><div><span>详情与规格</span><small>详情、规格、售后</small></div></div>
+        <div class="pstep"><b>05</b><div><span>提交审核</span><small>平台审核通过后上架</small></div></div>
+        <div class="pv-note">草稿不会生成商品行；提交后状态变为「待审」。</div>
+      </aside>
+
+      <form class="form" @submit.prevent>
 
       <!-- 校验汇总条（稿 `:519`，只在「校验态」出现）。稿写死「还有 5 项未完成」—— 那是它
            一次全空的示意值 ⇒ 本页**实时算**：数的是 `submitGoods` 那 5 个必填判据里的空项。
@@ -202,31 +231,45 @@
             <span v-else>点击选择主图</span>
           </button>
 
-          <!-- 预留位 ③（稿 `:413-421`）—— 块级 `<div class="pics">` ⇒ 只挂 `data-slot` + `title`。
-               内两只 `.picbox` 是**稿外死控件**（稿里是 `<span>`、无 `disabled`；
-               本笔照 §三 口径**不改成真控件**，改为 `span` + `off` 态样式 + `title`）⇒ 见 §三。 -->
-          <div
-            class="pics"
-            data-slot="预留 · 多图（图集）（动现有代码 ≥4 处 · 超档）"
-            title="待 C3〈商品〉——goods 表只有 GoodImg 一列（单图）：加一张图集子表或改列结构 + GoodsDao.java + GoodsService.java + GoodsController.java + GoodsAdd.vue = ≥4 处，**超档**，因清单点名而画出"
-          >
-            <span class="picbox off" title="待 C3〈商品〉——goods 只有 GoodImg 一列（≥4 处，超档）">
-              <span class="tagline">＋ 第 2 张<br>（待 C3）</span>
+          <!-- 预留位 ③ —— 2026-10-19 批四第二批**就地转真功能**（多图）：
+               迁移 ㉕ 给 `goods` / `goods_audit` 各加一列 `ImgList`（JSON 数组），
+               `GoodImg` 仍是**首图/封面**（旧单图读取路径逐字不动）。
+               ⚠️ 一次选图 = 重选整组（含主图）；不是「追加到后面」—— 追加会让「换主图」永远换不掉。 -->
+          <div class="pics">
+            <span
+              v-for="(u, i) in imagePreviews.slice(1)"
+              :key="u"
+              class="picbox extra"
+              :title="'第 ' + (i + 2) + ' 张（点 × 移除）'"
+            >
+              <img :src="u" class="picbox-img" :alt="'商品图 ' + (i + 2)">
+              <button
+                type="button"
+                class="rm-img"
+                title="移除这张"
+                @click="removeImage(i + 1)"
+              >×</button>
             </span>
-            <span class="picbox off" title="待 C3〈商品〉——同上">
-              <span class="tagline">＋ 第 3 张<br>（待 C3）</span>
-            </span>
+            <button
+              type="button"
+              class="picbox add-more"
+              title="选择图片（可多选，最多 5 张；会替换当前这一组）"
+              @click="chooseImage"
+            >
+              <span class="tagline">＋ 添加图片<br>（可多选）</span>
+            </button>
           </div>
         </div>
 
         <div v-if="showTip && !selectedFile" class="tip">请选择商品图片</div>
-        <div v-else class="pic-hint">建议 1:1 方图，长边 ≥ 800px。主图为空不能提交。</div>
+        <div v-else class="pic-hint">建议 1:1 方图，长边 ≥ 800px。第 1 张为封面；主图为空不能提交。</div>
 
         <input
           ref="fileInput"
           type="file"
           accept="image/*"
           class="file-hidden"
+          multiple
           @change="handleImageChange"
         >
       </section>
@@ -371,19 +414,48 @@
 
       <!-- ── 底部动作条（稿 `:482-489`）───────────────────────────────────── -->
       <div class="acts">
-        <!-- 预留位 ⑦（稿 `:483-485`）—— 这里**本身就是控件** ⇒ 照 §三/口径 2 落 `disabled` + `data-slot` + `title`。 -->
+        <!-- 预留位 ⑦ —— 2026-10-19 批四第二批**就地转真功能**（草稿态）：
+               `goods_audit.Status='draft'`（不写 goods 行、不进管理端待审队列），
+               在 GoodsUp 的「我的商品」里显示为「草稿」，可一键提交审核（CAS draft→pending）。 -->
         <button
           type="button"
           class="btn-draft"
-          disabled
-          data-slot="预留 · 保存草稿（动现有代码 ≥4 处 · 超档）"
-          title="待 C3〈商品〉——无草稿态：goods 表无状态列（下架 = 删行），草稿要先能存而不出现在「查看商品」里：mall_management_sql.sql + GoodsDao.java + GoodsController.java + GoodsUp.vue（列表要过滤掉草稿）= ≥4 处，**超档**，因清单点名而画出"
+          :disabled="saving"
+          @click="submitGoods(true)"
         >保存草稿</button>
 
-        <button type="button" class="btn-main" @click="submitGoods"><IconGlyph name="ok" />上架商品</button>
+        <button type="button" class="btn-main" :disabled="saving" @click="submitGoods(false)"><IconGlyph name="ok" />提交审核</button>
         <div class="hint">提交成功后会清空表单，可继续上架下一件。</div>
       </div>
     </form>
+
+      <!-- A 版右栏：买家预览 + 提交前检查（只读，数据全部来自表单实时值）。 -->
+      <aside class="publish-side">
+        <div class="side-title"><h3>买家预览</h3><span class="tiny">BUYER VIEW</span></div>
+        <div class="preview-card">
+          <div class="pv-img">
+            <img v-if="previewImg" :src="previewImg" alt="商品封面预览" />
+            <span v-else>封面图</span>
+          </div>
+          <div class="pv-name">{{ GoodName || '商品名称' }}</div>
+          <div class="pv-price">
+            <b>¥{{ Price || '0.00' }}</b>
+            <s v-if="OriginalPrice">¥{{ OriginalPrice }}</s>
+          </div>
+          <div class="pv-meta">{{ GoodType || '未选型号' }}</div>
+        </div>
+
+        <div class="side-title" style="margin-top: 18px"><h3>提交前检查</h3><span class="tiny">AUDIT</span></div>
+        <div class="audit-box">
+          <div class="audit-line" :class="{ ok: !!GoodName }"><span>商品名称</span><span>{{ GoodName ? 'PASS' : '待补' }}</span></div>
+          <div class="audit-line" :class="{ ok: !!Price }"><span>价格高于 0</span><span>{{ Price ? 'PASS' : '待补' }}</span></div>
+          <div class="audit-line" :class="{ ok: !!selectedFile }"><span>封面图 1 张</span><span>{{ selectedFile ? 'PASS' : '待补' }}</span></div>
+          <div class="audit-line" :class="{ ok: !!GoodType }"><span>商品类型</span><span>{{ GoodType ? 'PASS' : '待补' }}</span></div>
+          <div class="audit-line" :class="{ ok: !!ProductCode }"><span>商品型号</span><span>{{ ProductCode ? 'PASS' : '待补' }}</span></div>
+        </div>
+        <div class="pv-note">保存草稿不写 goods 行；提交审核后由平台审核，通过才上架。</div>
+      </aside>
+    </div>
 
     <!-- ═══ 「选模板」弹窗 ×3（2026-10-10〈模板表通用化〉）═════════════════════════
          ⚠️ 触发按钮**留在各自字段里**（`.btn-quiet`，本页既有类），组件只出弹窗 —— 见
@@ -448,8 +520,15 @@ import { getMerchantId } from '../api/auth'; import IconGlyph from '../component
 import TemplatePicker from '../components/TemplatePicker.vue'
 
 const fileInput = ref(null)
-const previewImg = ref('')
-const selectedFile = ref(null)
+// ── 多图（2026-10-19 批四第二批）：`selectedFiles[0]` 即主图 ⇒ 旧判据 `selectedFile` 不动 ──
+// ⚠️ 预览 URL 必须逐张 `revokeObjectURL`（选下一组 / 移除 / 提交成功三处），否则每选一次图就漏一份内存。
+const selectedFiles = ref([])
+const imagePreviews = ref([])
+const previewImg = computed(() => imagePreviews.value[0] || '')
+const selectedFile = computed(() => selectedFiles.value[0] || null)
+/** 一次最多 5 张（1 封面 + 4 附加）；上限只在前端拦，后端没有条数闸。 */
+const MAX_IMAGES = 5
+const saving = ref(false)
 
 const GoodName = ref('')
 const Price = ref('')
@@ -662,11 +741,40 @@ const onPickSkuTpl = (row) => {
   skuRows.value = combos.map((spec) => ({ spec, price: '', stock: '', code: '' }))
 }
 
+/** 释放当前这一组预览 URL（换组 / 清空 / 离场都用它）。 */
+const revokePreviews = () => {
+  imagePreviews.value.forEach((u) => URL.revokeObjectURL(u))
+  imagePreviews.value = []
+}
+
+const resetImages = () => {
+  revokePreviews()
+  selectedFiles.value = []
+}
+
+/**
+ * 选图：本次选中的整组**替换**当前图片（不是追加）。
+ * ⚠️ 「替换」是刻意的：追加会让主图永远停在第一次选的那张（换不掉封面）。
+ */
 const handleImageChange = (e) => {
-  const file = e.target.files[0]
-  if (!file) return
-  selectedFile.value = file
-  previewImg.value = URL.createObjectURL(file)
+  const picked = Array.from(e.target.files || []).filter(Boolean).slice(0, MAX_IMAGES)
+  if (!picked.length) {
+    // 用户点了取消：保持现状（不要把已选好的图清掉）
+    e.target.value = ''
+    return
+  }
+  revokePreviews()
+  selectedFiles.value = picked
+  imagePreviews.value = picked.map((f) => URL.createObjectURL(f))
+  e.target.value = '' // 同一张图连选两次也要触发 change
+}
+
+/** 移除第 i 张（0 = 主图）。主图不可单独移除 —— 换主图请重选整组。 */
+const removeImage = (i) => {
+  if (i <= 0 || i >= selectedFiles.value.length) return
+  URL.revokeObjectURL(imagePreviews.value[i])
+  selectedFiles.value = selectedFiles.value.filter((_, idx) => idx !== i)
+  imagePreviews.value = imagePreviews.value.filter((_, idx) => idx !== i)
 }
 
 const saveNewTypeToDB = async (typeName) => {
@@ -680,8 +788,13 @@ const saveNewTypeToDB = async (typeName) => {
   }
 }
 
-// ✅ 最终修复版：完全适配你的后端接口
-const submitGoods = async () => {
+/**
+ * 提交商品：`draft=true` ⇒ 存草稿（`goods_audit.Status='draft'`）；`false` ⇒ 提交审核（pending）。
+ * ⚠️ 草稿与提审走**同一个端点**、同一套必填判据 —— 后端 `file` / `GoodName` 等仍是必填
+ *    （草稿只是「先不送审」，不是「可以先空着」）。两处差异只有 `Draft` 形参与成功文案。
+ */
+const submitGoods = async (draft = false) => {
+  if (saving.value) return
   showTip.value = true
 
   if (!GoodName.value || !Price.value || !selectedFile.value || !GoodType.value || !ProductCode.value) {
@@ -716,6 +829,11 @@ const submitGoods = async () => {
   // （与「不打折」同义；带上空串会被 `Double` 绑定报 400）。
   if (OriginalPrice.value) formData.append('OriginalPrice', OriginalPrice.value)
   formData.append('file', selectedFile.value)
+  // 多图（2026-10-19）：`files[]` **含首图** —— 后端以 `files` 的顺序定 GoodImg（首张即封面）。
+  // ⚠️ 不能只传附加图：那样封面会变成「第 2 张」，与 `file` 的语义对不上。
+  selectedFiles.value.forEach((f) => formData.append('files', f))
+  // 草稿 / 提审是同一个端点的两态；不传 = 旧客户端 = 提审（与改前行为逐字一致）。
+  formData.append('Draft', String(!!draft))
   formData.append('GoodType', GoodType.value)
   formData.append('ProductCode', ProductCode.value)
   formData.append('GoodTypeNew', realGoodTypeNew) // 用真实值！
@@ -744,6 +862,7 @@ const submitGoods = async () => {
   formData.append('PromiseFastRefund', String(PromiseFastRefund.value))
   formData.append('PromiseFreightIns', String(PromiseFreightIns.value))
 
+  saving.value = true
   try {
     const res = await http.post(endpoints.goods.goodsAdd, formData)
     const data = await res.json()
@@ -753,14 +872,13 @@ const submitGoods = async () => {
         await saveNewTypeToDB(tempNewType.value)
       }
 
-      alert('已提交审核') // C3 块 3 提审制：goodsAdd 只落待审单、不写 goods 行 ⇒ 原文案「商品上架成功！」失真；本句与后端 msg 逐字同
+      alert(draft ? '已保存草稿' : '已提交审核') // C3 块 3 提审制：goodsAdd 只落待审单、不写 goods 行 ⇒ 原文案「商品上架成功！」失真；本句与后端 msg 逐字同
       GoodName.value = ''
       Price.value = ''
       OriginalPrice.value = '' // 块 5〈折扣〉：与 Price 同清（下一件默认不打折）
       GoodType.value = ''
       ProductCode.value = ''
-      previewImg.value = ''
-      selectedFile.value = null
+      resetImages()
       tempNewType.value = ''
       showTip.value = false
       // 三段快照文本也清空（同其余字段：提交成功即开下一件）
@@ -780,6 +898,8 @@ const submitGoods = async () => {
     }
   } catch (err) {
     alert('上架请求失败')
+  } finally {
+    saving.value = false
   }
 }
 </script>
@@ -850,6 +970,118 @@ button { background: none; border: 0; cursor: pointer; }
   font-size: var(--d2); font-weight: var(--fw-med); line-height: 1.15; letter-spacing: -.02em;
 }
 .head .sub { margin-top: var(--s1); font-size: var(--fs-xs); color: var(--ink-3); }
+
+/* ── A 版工作室布局（MERCHANT / GOODS STUDIO）──────────────────────────────── */
+.page-head {
+  display: flex; align-items: flex-end; justify-content: space-between;
+  gap: var(--s5); padding-bottom: var(--s5); border-bottom: 1px solid var(--line-2);
+}
+.page-head .kicker {
+  font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.16em;
+  text-transform: uppercase; color: var(--ink-3);
+}
+.page-head h1 {
+  margin-top: 6px; font-family: var(--font-display); font-size: var(--d2);
+  font-weight: var(--fw-med); line-height: 1.15; letter-spacing: -0.02em;
+}
+.page-head p {
+  margin-top: 8px; max-width: 62ch; font-size: var(--fs-xs);
+  line-height: 1.7; color: var(--ink-2);
+}
+.head-actions { display: flex; gap: var(--s2); flex: 0 0 auto; }
+.head-actions .btn {
+  display: inline-flex; align-items: center; height: 36px; padding: 0 var(--s5);
+  border: 1px solid var(--line-2); border-radius: var(--r1);
+  font-size: var(--fs-sm); color: var(--ink-2); text-decoration: none;
+  background: var(--surface);
+}
+.head-actions .btn:hover { border-color: var(--brand-ink); color: var(--brand-ink); }
+
+.publish-top {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: var(--s4); flex-wrap: wrap; border: 1px solid var(--line);
+  padding: 12px 16px; background: var(--zone); margin: var(--s5) 0 var(--s6);
+}
+.publish-top .steps { display: flex; gap: var(--s4); flex-wrap: wrap; }
+.publish-top .steps span {
+  font-family: var(--font-mono); font-size: 9px; letter-spacing: 0.06em; color: var(--ink-3);
+}
+.publish-top .steps b { color: var(--ink); font-weight: 400; margin-right: 5px; }
+.publish-top .tag {
+  padding: 2px var(--s2); border: 1px solid var(--line-2);
+  font-family: var(--font-mono); font-size: 9px; color: var(--ink-2); white-space: nowrap;
+}
+
+.publish-grid {
+  display: grid; grid-template-columns: 206px minmax(0, 1fr) 334px;
+  gap: 28px; align-items: start;
+}
+.publish-grid .form { margin-top: 0; max-width: none; }
+.publish-steps { border-top: 1px solid var(--line); position: sticky; top: var(--s5); }
+.pstep {
+  display: flex; gap: var(--s3); padding: var(--s3) 0;
+  border-bottom: 1px solid var(--line); color: var(--ink-3);
+}
+.pstep b {
+  font-family: var(--font-mono); font-size: 9px; font-weight: 400;
+  color: var(--ink-3); padding-top: 2px;
+}
+.pstep span { display: block; font-size: var(--fs-sm); color: var(--ink-2); }
+.pstep small { display: block; margin-top: 3px; font-size: 9px; color: var(--ink-3); }
+.pstep.on b { color: var(--brand-ink); }
+.pstep.on span { color: var(--ink); font-weight: var(--fw-med); }
+.pv-note {
+  margin-top: var(--s4); padding: var(--s3); border: 1px solid var(--line);
+  background: var(--zone); font-size: 9px; line-height: 1.7; color: var(--ink-3);
+}
+
+.publish-side { position: sticky; top: var(--s5); }
+.side-title {
+  display: flex; align-items: baseline; justify-content: space-between;
+  gap: var(--s2); margin-bottom: var(--s3);
+}
+.side-title h3 { font-size: var(--fs-sm); font-weight: var(--fw-semi); }
+.side-title .tiny { font-family: var(--font-mono); font-size: 9px; color: var(--ink-3); }
+.preview-card { border: 1px solid var(--line); background: var(--surface); padding: var(--s3); }
+.pv-img {
+  aspect-ratio: 4 / 5; display: flex; align-items: center; justify-content: center;
+  background: var(--zone); color: var(--ink-3); font-size: var(--fs-xs); overflow: hidden;
+}
+.pv-img img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.pv-name {
+  margin-top: var(--s3); font-size: var(--fs-sm); font-weight: var(--fw-med);
+  line-height: 1.4; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.pv-price { display: flex; align-items: baseline; gap: var(--s2); margin-top: 6px; }
+.pv-price b {
+  font-family: var(--font-mono); font-size: var(--fs-lg); font-weight: 400;
+  color: var(--brand-ink); font-variant-numeric: tabular-nums;
+}
+.pv-price s { font-size: var(--fs-xs); color: var(--ink-3); }
+.pv-meta { margin-top: 4px; font-size: 9px; color: var(--ink-3); }
+
+.audit-box { border: 1px solid var(--line); background: var(--surface); }
+.audit-line {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: var(--s3); padding: 8px var(--s3); border-bottom: 1px solid var(--line);
+  font-size: var(--fs-xs); color: var(--ink-2);
+}
+.audit-line:last-child { border-bottom: 0; }
+.audit-line span:last-child { font-family: var(--font-mono); font-size: 9px; color: var(--ink-3); }
+.audit-line.ok span:last-child { color: var(--brand-ink); }
+
+@media (max-width: 1280px) {
+  .publish-grid { grid-template-columns: 180px minmax(0, 1fr) 300px; gap: 20px; }
+}
+@media (max-width: 1060px) {
+  .publish-grid { grid-template-columns: minmax(0, 1fr) 320px; }
+  .publish-steps { display: none; }
+}
+@media (max-width: 820px) {
+  .publish-grid { grid-template-columns: 1fr; }
+  .publish-side { position: static; }
+  .page-head { flex-direction: column; align-items: flex-start; }
+}
 
 /* ── 分区：靠**序号 + 发丝线 + 留白**分层，不靠字号（稿 `:191-199`）────────────── */
 .form { margin-top: var(--s6); max-width: 680px; }
@@ -923,9 +1155,17 @@ textarea.inp { height: 88px; padding: var(--s3); resize: none; font-family: inhe
 .picbox.main { border-style: solid; border-color: var(--line-2); }
 /* 无图时露 `.picbox` 自己的底；有图时预览铺满（原实现的 `previewImg`） */
 .picbox-img { width: 100%; height: 100%; object-fit: cover; border-radius: inherit; display: block; }
-/* 占位多图框：稿 `:415` / `:418` 的行内态（不可点 ⇒ 不显手型、虚线、降透明） */
-.picbox.off { cursor: not-allowed; border-style: dashed; opacity: .75; }
-.picbox.off:hover { border-color: var(--line-2); color: var(--ink-3); }
+/* 多图（2026-10-19）：附加图是**真预览**（实线框，同主图）+ 右上角移除键 */
+.picbox.extra { position: relative; border-style: solid; cursor: default; padding: 0; overflow: hidden; }
+.picbox.extra:hover { border-color: var(--line-2); color: var(--ink-3); }
+.rm-img {
+  position: absolute; top: 4px; right: 4px; width: 20px; height: 20px; padding: 0;
+  border: 0; border-radius: 50%; background: rgba(0, 0, 0, .55); color: #fff;
+  font-size: 14px; line-height: 20px; text-align: center;
+}
+.rm-img:hover { background: var(--danger); }
+/* 「+ 添加图片」：虚线框提示它是**可点的新增位**，不是一张已选的图 */
+.picbox.add-more { border-style: dashed; }
 .picbox .tagline { font-size: var(--fs-xs); color: var(--ink-3); }
 .pic-hint { margin-top: var(--s2); font-size: var(--fs-xs); color: var(--ink-3); }
 
@@ -1013,7 +1253,10 @@ textarea.inp { height: 88px; padding: var(--s3); resize: none; font-family: inhe
 .acts .hint { margin-left: auto; font-size: var(--fs-xs); color: var(--ink-3); text-align: right; }
 
 /* ── 原实现的行内 `style="display:none"` ⇒ 收敛成类 ────────────────────────── */
-.file-hidden { display: none; }
+/* 2026-10-19 终局清道夫第 5 条：**不能用 `display:none`** —— Chromium/Edge 会拒绝
+   为「未渲染」的 file input 打开系统选择框（`input.click()` 不报错、也不弹窗，实测）。
+   改成「视觉隐藏但仍在渲染树里」：1px 大小 + 裁切，既能被 `.click()` 唤起，又看不见。 */
+.file-hidden { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
 
 /* ── 窄档（稿 `:296-308`）—— `.body` / `.uc-menu` 两件不在本组件 ⇒ 只搬后两条 ──── */
 @media (max-width: 1080px) {

@@ -178,7 +178,7 @@ public class CartService {
      * <p>⚠️ 前端（{@code ShoppingCart.vue}）按同一判据禁用券选择器（同 {@code MAX_QTY} 那条
      * 「两处都留，免得只在一边拦」），但**真判据在这里** —— 前端可绕过。
      */
-    public Map<String, Object> checkout(String customerId, String productCode, String couponId) {
+    public Map<String, Object> checkout(String customerId, String productCode, String couponId, Integer pointsUsed) {
         if (isBlank(customerId)) {
             return fail("缺少参数：CustomerId");
         }
@@ -226,6 +226,12 @@ public class CartService {
         if (!coupon.isEmpty() && groups.size() > 1) {
             return fail("这一车含 " + groups.size() + " 个商家，优惠券只能用在单个商家的结算上（请分单结算）");
         }
+        // 积分闸（第三批㉘㉙）：与券同一条理由 —— 一份 `PointsUsed` 无法在 M 笔订单间确定性拆分。
+        // 负值按 0 处理（与 `OrderService.addLocked` 同口径）。
+        int points = pointsUsed == null ? 0 : Math.max(0, pointsUsed);
+        if (points > 0 && groups.size() > 1) {
+            return fail("这一车含 " + groups.size() + " 个商家，积分抵扣只能用在单个商家的结算上（请分单结算）");
+        }
         for (Map.Entry<String, List<CheckoutLine>> group : groups.entrySet()) {
             String merchantId = group.getKey();
             List<CheckoutLine> groupLines = group.getValue();
@@ -237,7 +243,7 @@ public class CartService {
             //    而 `Items` 里各行的单价仍是**原价** —— 明细记的是「卖了哪几件」，与实付是两回事。
             Map<String, Object> add = orderService.orderAdd(customerId, merchantId, orderId, draft.price(),
                     draft.productInformation(), draft.images(), 0, 0, 0, draft.quantity(),
-                    orderService.encodeItems(draft.items()), coupon, "", "");   // 末两个形参 = `ActivityId`（C3 块 7 · commit 2c 新增的第 13 参）与 `Source`（边界补笔新增的第 14 参）：**购物车结算不是秒杀单、也不是演练写入** —— 活动串只有秒杀页那一路带得过来（`SeckillPage` → `/product` 的 query → `ProductPage` 的 `orderAdd`）；`Source` 只有攻击引擎传。本路径**各传空串**，后端 `required=false` + `isBlank` 判空 ⇒ 秒杀段整段跳过、`Source` 归一成空串，与加这两参之前**逐字同行为**。⚠️ **同行追加、不新增行**（本文件行号被文档按行号引）。
+                    orderService.encodeItems(draft.items()), coupon, "", "", null, points > 0 ? points : null);   // 末两参 = `UseWallet`（购物车结算不扣余额）/ `PointsUsed`（第三批㉘㉙ 积分抵扣）；前两个形参 = `ActivityId`（C3 块 7 · commit 2c 新增的第 13 参）与 `Source`（边界补笔新增的第 14 参）：**购物车结算不是秒杀单、也不是演练写入** —— 活动串只有秒杀页那一路带得过来（`SeckillPage` → `/product` 的 query → `ProductPage` 的 `orderAdd`）；`Source` 只有攻击引擎传。本路径**各传空串**，后端 `required=false` + `isBlank` 判空 ⇒ 秒杀段整段跳过、`Source` 归一成空串，与加这两参之前**逐字同行为**。⚠️ **同行追加、不新增行**（本文件行号被文档按行号引）。
             if (!Boolean.TRUE.equals(add.get("success"))) {
                 return partialFailure(created, String.valueOf(add.get("msg")));
             }
@@ -429,5 +435,15 @@ public class CartService {
 
     private static Double toDouble(Object o) {
         return o instanceof Number n ? n.doubleValue() : null;
+    }
+
+    /**
+     * 旧签名（积分透传之前）：等价于 {@code pointsUsed = null}。
+     *
+     * <p>⚠️ 放在类尾是**刻意的**：本文件 `:160-198` 被 `docs/agent/api-contract.md:279`
+     * 按行号引用，新增方法追加在最大被引行之后 ⇒ 既有引用零漂移。
+     */
+    public Map<String, Object> checkout(String customerId, String productCode, String couponId) {
+        return checkout(customerId, productCode, couponId, null);
     }
 }

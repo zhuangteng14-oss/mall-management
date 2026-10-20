@@ -9,6 +9,7 @@ import com.minke.mallmanagement.shared.web.IdentityGuard;
 import com.minke.mallmanagement.shared.web.Result;
 import com.minke.mallmanagement.shared.text.MaskedInput;
 import com.minke.mallmanagement.shared.web.UserStateLookup;
+import com.minke.mallmanagement.user.dao.UserGovernanceDao;
 import com.minke.mallmanagement.user.service.UserService;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
@@ -98,12 +99,16 @@ public class UserController {
      *  —— impl 不被 smoke 切片 @Import，裸依赖会让整个切片起不来；取不到即 fail-open。
      *  ⚠️ 它**不**让本类变成 AOP 代理（{@code userControllerIsNotAopProxied} 那条断言不受影响）。 */
     private final ObjectProvider<UserStateLookup> userStateLookupProvider;
+    /** 会员等级读写口（批四第二批 commit 3）—— 只被 {@code /user/member/open} 用。 */
+    private final UserGovernanceDao userGovernanceDao;
 
     public UserController(UserService userService, AuditService auditService,
-                          ObjectProvider<UserStateLookup> userStateLookupProvider) {
+                          ObjectProvider<UserStateLookup> userStateLookupProvider,
+                          UserGovernanceDao userGovernanceDao) {
         this.userService = userService;
         this.auditService = auditService;
         this.userStateLookupProvider = userStateLookupProvider;
+        this.userGovernanceDao = userGovernanceDao;
     }
 
     //这是一个接口（用于返回登录界面对应的数据，决定了此次登录去往哪个端【客户端or商家端】）
@@ -381,6 +386,48 @@ public class UserController {
             auditService.record(AuthSession.identify(request), AuditActions.USER_UPDATE,
                     "user", username, before, after);
         }
+        return ResponseEntity.ok(Result.of(result));
+    }
+
+    // ============ 批四第二批 commit 3：会员自助开通 ============
+
+    /**
+     * 客户**自助开通会员**（演示用，无支付通道）—— 会话内本人或管理员可调。
+     *
+     * <p>⚠️ 幂等：已是 VIP 再调一次仍答 {@code success:true}（{@code UPDATE} 不带前态条件）。
+     * 审计只记等级这一对前后值，不把整行（含余额 / 封禁理由）抄进审计。
+     */
+    @PostMapping("/member/open")
+    public ResponseEntity<Object> memberOpen(
+            @RequestParam(value = "username", required = false) String username,
+            HttpServletRequest request
+    ) {
+        if (!IdentityGuard.requireSelfOrAdminByUsername(request, username,
+                userStateLookupProvider.getIfAvailable())) {
+            return IdentityGuard.forbidden();
+        }
+        Map<String, Object> result = new HashMap<>();
+        if (username == null || username.isBlank()) {
+            result.put("success", false);
+            result.put("msg", "缺少参数：username");
+            return ResponseEntity.ok(Result.of(result));
+        }
+        int before = userGovernanceDao.selectMemberLevelByUsername(username);
+        int affected = userGovernanceDao.setMemberLevel(username, 1);
+        if (affected == 0) {
+            result.put("success", false);
+            result.put("msg", "用户不存在");
+            return ResponseEntity.ok(Result.of(result));
+        }
+        result.put("success", true);
+        result.put("memberLevel", 1);
+        result.put("msg", "会员开通成功，全场商品享 9 折");
+        Map<String, Object> beforeSnap = new HashMap<>();
+        beforeSnap.put("memberLevel", before);
+        Map<String, Object> afterSnap = new HashMap<>();
+        afterSnap.put("memberLevel", 1);
+        auditService.record(AuthSession.identify(request), AuditActions.USER_MEMBER_OPEN,
+                "user", username, beforeSnap, afterSnap);
         return ResponseEntity.ok(Result.of(result));
     }
 

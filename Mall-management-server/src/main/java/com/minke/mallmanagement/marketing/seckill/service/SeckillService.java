@@ -40,6 +40,9 @@ import java.util.regex.Pattern;
 @Service
 public class SeckillService {
 
+    private static final org.slf4j.Logger logger =
+            org.slf4j.LoggerFactory.getLogger(SeckillService.class);
+
     public static final int DEFAULT_LIMIT = PageLimits.DEFAULT_PAGE_SIZE;
 
     public static final int MAX_LIMIT = PageLimits.MAX_PAGE_SIZE;
@@ -456,6 +459,17 @@ public class SeckillService {
         result.put("list", out);
         result.put("total", out.size());
         result.put("limit", effective);
+        // 倒计时基准：库时钟（Stage 就是库时钟现算的，前端不能拿本机钟去比 StartAt）。
+        try {
+            Map<String, Object> now = seckillDao.selectServerNow();
+            if (now != null) {
+                result.put("serverNow", now.get("ServerNow"));
+                result.put("serverTimestamp", now.get("ServerTimestamp"));
+            }
+        } catch (Exception e) {
+            // 读钟失败不影响列表本身；前端缺 serverTimestamp 时退回本机钟并显示「以系统时间为准」。
+            logger.warn("读取秒杀页库时钟失败，本轮不返回 serverTimestamp", e);
+        }
         return result;
     }
 

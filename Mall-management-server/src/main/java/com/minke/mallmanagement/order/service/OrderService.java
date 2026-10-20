@@ -9,6 +9,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Service;
 
+import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
@@ -243,6 +244,23 @@ public class OrderService {
      */
     private final ProtectionMetrics protectionMetrics;
 
+    /**
+     * 钱包台账（第三批㉙）—— 余额支付走它的 {@code debit}（同事务改权威账户 + 流水 + 镜像）。
+     * <p>⚠️ 两个服务都**自带 {@code @Transactional}**，但它们各自在 {@code insertOrder} 之前返回，
+     * 不在本类的锁临界区里跨事务：钱包/积分先落账，建单失败由本类显式补偿（{@code refundSpend} /
+     * {@code credit}）。D#1 约束的是 {@code OrderService} 自身不得加事务，不是禁止调用事务方法。
+     */
+    private final com.minke.mallmanagement.wallet.service.WalletService walletService;
+    /** 会员积分（第三批㉘）—— 下单抵扣 + 收货发放。 */
+    private final com.minke.mallmanagement.member.service.MemberService memberService;
+
+    /** 单笔订单积分抵扣默认上限 = 折后价的 20%（与 {@code MemberService} 同源）。 */
+    private static final BigDecimal MAX_POINTS_DISCOUNT_PERCENT =
+            BigDecimal.valueOf(com.minke.mallmanagement.member.service.MemberService.MAX_POINTS_DISCOUNT_PERCENT);
+    /** 100 积分 = 1 元（与 {@code MemberService} 同源）。 */
+    private static final BigDecimal POINTS_PER_YUAN =
+            BigDecimal.valueOf(com.minke.mallmanagement.member.service.MemberService.POINTS_PER_YUAN);
+
     private static final Logger log = LoggerFactory.getLogger(OrderService.class);
 
     /** 支付流水号的日期段格式（{@code PAY} + {@code yyyyMMdd} + 6 位随机）。 */
@@ -260,7 +278,9 @@ public class OrderService {
                         GoodsDao goodsDao,
                         SeckillDao seckillDao,
                         StockMetrics stockMetrics,
-                        ProtectionMetrics protectionMetrics) {
+                        ProtectionMetrics protectionMetrics,
+                        com.minke.mallmanagement.wallet.service.WalletService walletService,
+                        com.minke.mallmanagement.member.service.MemberService memberService) {
         this.orderDao = orderDao;
         this.lockService = lockService;
         this.orderStateMachine = orderStateMachine;
@@ -274,6 +294,8 @@ public class OrderService {
         this.seckillDao = seckillDao;
         this.stockMetrics = stockMetrics;
         this.protectionMetrics = protectionMetrics;
+        this.walletService = walletService;
+        this.memberService = memberService;
     }
 
     // ==================== 下单 ====================
@@ -362,6 +384,37 @@ public class OrderService {
             String ActivityId,
             String Source
     ) {
+        // 第三批㉘㉙：老签名（不带钱包 / 积分）—— 逐字沿用改前行为。
+        return orderAdd(CustomerId, MerchantId, OrderId, Price, ProductInformation, Images,
+                PayIf, DeliveryIf, ReceiveIf, Quantity, Items, CouponId, ActivityId, Source,
+                null, null);
+    }
+
+    /**
+     * 第三批㉘㉙：带余额支付 / 积分抵扣的完整签名。
+     *
+     * <p>{@code UseWallet=true} ⇒ 实付部分从钱包扣（余额不足整单拒绝）；
+     * {@code PointsUsed>0} ⇒ 先按折后价 20% 上限校验，再 FIFO 扣积分。
+     * 两者都在 {@code INSERT} 之前落账，建单失败显式补偿（与券/秒杀同一条纪律）。
+     */
+    public Map<String, Object> orderAdd(
+            String CustomerId,
+            String MerchantId,
+            String OrderId,
+            float Price,
+            String ProductInformation,
+            String Images,
+            int PayIf,
+            int DeliveryIf,
+            int ReceiveIf,
+            int Quantity,
+            String Items,
+            String CouponId,
+            String ActivityId,
+            String Source,
+            Boolean UseWallet,
+            Integer PointsUsed
+    ) {
         // B#1：价格闸。放在锁外 —— 一是让非法请求不耗 Redis、不污染锁指标；二是让 addLocked
         // 的临界区保持逐字不动（B2 / D#1 的登记处就在那儿）。
         Map<String, Object> rejection = priceRejection(Price);
@@ -392,7 +445,8 @@ public class OrderService {
         }
         return lockService.runLocked(LockName.ORDER_ADD, OrderId, () -> addLocked(
                 CustomerId, MerchantId, OrderId, Price, ProductInformation, Images,
-                PayIf, DeliveryIf, ReceiveIf, Quantity, Items, CouponId, ActivityId, Source));
+                PayIf, DeliveryIf, ReceiveIf, Quantity, Items, CouponId, ActivityId, Source,
+                UseWallet, PointsUsed));
     }
 
     /**
@@ -597,7 +651,8 @@ public class OrderService {
     private Map<String, Object> addLocked(
             String CustomerId, String MerchantId, String OrderId, float Price,
             String ProductInformation, String Images, int PayIf, int DeliveryIf, int ReceiveIf, int Quantity,
-            String Items, String CouponId, String ActivityId, String Source) {
+            String Items, String CouponId, String ActivityId, String Source,
+            Boolean UseWallet, Integer PointsUsed) {
         Map<String, Object> result = new HashMap<>();
         // ⚠️ 临界区内先查后插 —— 这一段是 B2 对「同一 OrderId 落库 2 行」的真修复（A-S2a-1）：
         //    · 只有锁：并发变串行，但每个请求照旧裸 INSERT ⇒ 仍插 20 行；
@@ -624,6 +679,34 @@ public class OrderService {
             // 这条 fail-open 与本方法的锁一样是刻意的：查重是「防重复」的加固，不是下单的前置条件。
             e.printStackTrace();
         }
+
+        // ── 会员段（批四第二批 commit 3，2026-10-19）──────────────────────────────────
+        // 位置：查重**之后**、用券**之前**。三项理由：
+        //  ① 会员价是券门槛与减免的**基数**（用户裁决「券与会员价可叠加」）⇒ 必须先算出来；
+        //  ② 排在 INSERT 之前：它只影响本单金额，没有任何「占名额」的写，失败面天然小；
+        //  ③ 查等级读失败按普通用户放行（fail-open，见 UserStateLookup.memberLevel）——
+        //     绝不能因为库抖一下就让全场下单失败。
+        int memberLevel = 0;
+        if (userStateLookup != null) {
+            try {
+                memberLevel = userStateLookup.memberLevel(CustomerId);
+            } catch (Exception e) {
+                log.warn("会员等级读取失败（订单 {}）：customerId={} —— 本次按普通用户计价 {}", OrderId, CustomerId, e.toString());
+            }
+        }
+        double memberPrice = Price;
+        if (memberLevel > 0) {
+            // ㉘ 起折扣率读 member_level（V0–V6 各档不同）；读不到 ⇒ 9 折老口径兜底。
+            // ⚠️ 先判会员再读表：非会员不发这一次库读（与加会员段之前逐字节等价）。
+            java.math.BigDecimal memberRate = null;
+            try {
+                memberRate = userStateLookup.memberDiscountRate(CustomerId);
+            } catch (Exception e) {
+                log.warn("会员折扣率读取失败（订单 {}）：customerId={} —— 本次按 9 折兜底 {}", OrderId, CustomerId, e.toString());
+            }
+            memberPrice = com.minke.mallmanagement.shared.MemberPricing.priceOf(Price, memberRate);
+        }
+        double memberDiscount = memberLevel > 0 ? Price - memberPrice : 0d;
 
         // ── 用券段（C3 块 5 · commit 5）───────────────────────────────────────────────
         // 位置是**刻意**的，三条理由：
@@ -652,8 +735,9 @@ public class OrderService {
             // ⚠️ 券包的键是**登录名**，本方法的入参是**业务号** —— 这里必须翻一次
             //    （`coupon_grant.ToAccount` 的口径见 `CouponDao.insertGrant`）。
             couponAccount = usernameOf(CustomerId);
+            // ⚠️ 门槛与减免的基数 = **memberPrice**（先 9 折、再算券）—— 用户裁决的叠加顺序。
             CouponService.Redeem redeemed = couponService.redeem(
-                    couponAccount, CouponId.trim(), MerchantId, Price, hasDiscountItem, OrderId);
+                    couponAccount, CouponId.trim(), MerchantId, memberPrice, hasDiscountItem, OrderId);
             if (!redeemed.ok()) {
                 result.put("success", false);
                 result.put("msg", redeemed.msg());
@@ -664,7 +748,9 @@ public class OrderService {
         // 折后价：`Price` 是**原价**（前端 / `CartService` 传的都是合计），实付价落库。
         // `Math.max(0, …)` 防负数（券的减免上界已在 `CouponService.redeem` 里锁到 `orderTotal`，
         // 这里再兜一层：金额为负的订单在 `order.Price` 的语义里没有解释）。
-        float payPrice = (float) Math.max(0d, Price - discount);
+        // 第三批㉘㉙：这里只是**券后价**，积分抵扣与余额支付在秒杀段之后落账（见下），
+        // 最终实付 = 券后价 − 积分抵扣。全程 BigDecimal。
+        BigDecimal afterCouponPrice = com.minke.mallmanagement.shared.Money.of(Math.max(0d, memberPrice - discount));
 
         // ── 秒杀段（C3 块 7 · commit 2c，2026-10-14）────────────────────────────────────
         // 位置是**刻意**的，三条理由（前两条与上面用券段逐字同源）：
@@ -715,14 +801,96 @@ public class OrderService {
             }
         }
 
+        // ── 积分抵扣 + 余额支付（第三批㉘㉙）──────────────────────────────────────────
+        // 位置：券 / 秒杀**之后**、INSERT **之前**。三条理由与用券段同源：
+        //  ① 券后价是积分抵扣上限的基数；② 名额/券都成功后才有资格动用户资产；
+        //  ③ 任何一步失败都**一张订单都不建**（失败腿逐条补偿已动的资产，见下）。
+        int pointsUsed = PointsUsed == null ? 0 : Math.max(0, PointsUsed);
+        BigDecimal pointsDiscount = com.minke.mallmanagement.shared.Money.zero();
+        if (pointsUsed > 0) {
+            int cap = com.minke.mallmanagement.member.service.MemberService.maxDiscountPoints(afterCouponPrice);
+            if (pointsUsed > cap) {
+                releaseCoupon(couponAccount, CouponId, OrderId, discount);
+                releaseSeckill(seckillId, seckillQty, OrderId);
+                result.put("success", false);
+                result.put("msg", "本单最多可抵扣 " + cap + " 积分（折后价的 "
+                        + com.minke.mallmanagement.member.service.MemberService.MAX_POINTS_DISCOUNT_PERCENT + "%）");
+                return result;
+            }
+            pointsDiscount = com.minke.mallmanagement.member.service.MemberService.discountOf(pointsUsed);
+            if (pointsDiscount.compareTo(afterCouponPrice) > 0) {
+                releaseCoupon(couponAccount, CouponId, OrderId, discount);
+                releaseSeckill(seckillId, seckillQty, OrderId);
+                result.put("success", false);
+                result.put("msg", "积分抵扣金额不能超过本单应付金额");
+                return result;
+            }
+        }
+        BigDecimal finalPay = com.minke.mallmanagement.shared.Money.norm(afterCouponPrice.subtract(pointsDiscount));
+        if (finalPay.signum() < 0) {
+            finalPay = com.minke.mallmanagement.shared.Money.zero();
+        }
+
+        // 先扣积分（非现金），再扣余额 —— 余额扣失败时只需退回积分一条补偿腿。
+        boolean pointsSpent = false;
+        if (pointsUsed > 0) {
+            boolean ok;
+            try {
+                ok = memberService.spendForOrder(CustomerId, pointsUsed, OrderId);
+            } catch (Exception e) {
+                ok = false;
+                log.warn("订单 {} 的积分扣减异常（不建单）：customer={} points={} —— {}",
+                        OrderId, CustomerId, pointsUsed, e.toString());
+            }
+            if (!ok) {
+                releaseCoupon(couponAccount, CouponId, OrderId, discount);
+                releaseSeckill(seckillId, seckillQty, OrderId);
+                result.put("success", false);
+                result.put("msg", "积分不足，请调整抵扣数量");
+                return result;
+            }
+            pointsSpent = true;
+        }
+
+        boolean walletPaid = false;
+        BigDecimal walletPaidAmount = com.minke.mallmanagement.shared.Money.zero();
+        if (Boolean.TRUE.equals(UseWallet) && com.minke.mallmanagement.shared.Money.positive(finalPay)) {
+            boolean ok;
+            try {
+                ok = walletService.debit(CustomerId, finalPay, "consume", "order", OrderId,
+                        "order_pay:" + OrderId, "balance", "订单余额支付", "customer", CustomerId);
+            } catch (Exception e) {
+                ok = false;
+                log.warn("订单 {} 的余额扣款异常（不建单）：customer={} amount={} —— {}",
+                        OrderId, CustomerId, finalPay.toPlainString(), e.toString());
+            }
+            if (!ok) {
+                if (pointsSpent) {
+                    refundPoints(CustomerId, pointsUsed, OrderId);
+                }
+                releaseCoupon(couponAccount, CouponId, OrderId, discount);
+                releaseSeckill(seckillId, seckillQty, OrderId);
+                result.put("success", false);
+                result.put("msg", "余额不足或钱包不可用，请先充值");
+                return result;
+            }
+            walletPaid = true;
+            walletPaidAmount = finalPay;
+        } else if (Boolean.TRUE.equals(UseWallet)) {
+            // 券/积分已把应付压到 0：仍视为「余额支付成功」，通道快照记 balance、金额 0，
+            // 便于前端与对账一眼看出这张单没有走外部支付。
+            walletPaid = true;
+        }
+
         // 块 7 · 阶段 3a.3：耗时紧包这一行 INSERT。CREATE **不是 CAS**（无守卫、无前态）⇒
         // 测的是 insertOrder 本身，与其余动作的 CAS 并列成同一个「落库耗时」（口径见
         // OrderTransitionRecorder#created）。⚠️ catch 那一路不调 created（只回滚券/秒杀）⇒ 用不到它
         long createStartedNanos = System.nanoTime();
         try {
             int rows = orderDao.insertOrder(new OrderDao.OrderRow(
-                    OrderId, CustomerId, MerchantId, payPrice, Quantity, ProductInformation, Images,
-                    PayIf, DeliveryIf, ReceiveIf, Source, com.minke.mallmanagement.shared.web.TraceIdFilter.currentBatch()));   // 块 7 · commit 10：批次号**只从 MDC 取**（头通道 `X-Drill-Batch`，白名单 `[A-Za-z0-9_-]{8,64}`，日常请求为 null）；本方法**没有** batchId 形参 ⇒ 请求体/参数传不进来，影响面限于本次请求自己写的行。写全限定名而非 import，理由同 {@code StockMetrics#event}（保本文件 `:688` 的引用不下移）
+                    OrderId, CustomerId, MerchantId, finalPay.floatValue(), Quantity, ProductInformation, Images,
+                    PayIf, DeliveryIf, ReceiveIf, Source, com.minke.mallmanagement.shared.web.TraceIdFilter.currentBatch()),   // 块 7 · commit 10：批次号**只从 MDC 取**（头通道 `X-Drill-Batch`，白名单 `[A-Za-z0-9_-]{8,64}`，日常请求为 null）；本方法**没有** batchId 形参 ⇒ 请求体/参数传不进来，影响面限于本次请求自己写的行。写全限定名而非 import，理由同 {@code StockMetrics#event}（保本文件 `:688` 的引用不下移）
+                    walletPaid ? "balance" : "", walletPaidAmount, pointsUsed, pointsDiscount);
             if (rows > 0) {
                 result.put("success", true);
                 result.put("msg", "订单添加成功");
@@ -748,7 +916,7 @@ public class OrderService {
                 // Migration ⑱）—— 超时释放的前置判据**只有这一列**。
                 // ⚠️ fail-soft：标记写不进去**不改订单结论**（订单已落库是既成事实，改成失败会让
                 //    调用方重复下单），代价是那单超时取消时**不回补**（偏账方向选「少还一件」，不选「虚增」）。
-                if (deductStocks(itemSpecs)) {
+                if (deductStocks(MerchantId, itemSpecs)) {
                     markStockDeducted(OrderId);
                 }
                 if (discount > 0d) {
@@ -757,11 +925,35 @@ public class OrderService {
                     result.put("CouponId", CouponId.trim());
                     result.put("Discount", discount);
                 }
+                if (memberDiscount > 0d) {
+                    // 批四第二批 commit 3：会员单才回这两个键（**严格加性** —— 非会员的响应形状
+                    // 与改动前逐字相同）。前端收银弹窗据此画「会员优惠 -X」一行。
+                    result.put("MemberPrice", memberPrice);
+                    result.put("MemberDiscount", memberDiscount);
+                }
+                // 第三批㉘㉙：只有真的用了积分 / 余额才回这几个键（严格加性 —— 老请求形状不变）。
+                if (pointsUsed > 0) {
+                    result.put("PointsUsed", pointsUsed);
+                    result.put("PointsDiscount", pointsDiscount.doubleValue());
+                }
+                if (walletPaid) {
+                    result.put("PayChannel", "balance");
+                    result.put("WalletPaidAmount", walletPaidAmount.doubleValue());
+                }
+                if (pointsUsed > 0 || walletPaid) {
+                    result.put("PayPrice", finalPay.doubleValue());
+                }
             } else {
                 result.put("success", false);
                 result.put("msg", "订单添加失败");
                 releaseCoupon(couponAccount, CouponId, OrderId, discount);
                 releaseSeckill(seckillId, seckillQty, OrderId);
+                if (pointsSpent) {
+                    refundPoints(CustomerId, pointsUsed, OrderId);
+                }
+                if (walletPaid) {
+                    refundWallet(CustomerId, walletPaidAmount, OrderId);
+                }
             }
         } catch (Exception e) {
             e.printStackTrace();
@@ -769,6 +961,12 @@ public class OrderService {
             result.put("msg", "数据库错误：" + e.getMessage());
             releaseCoupon(couponAccount, CouponId, OrderId, discount);
             releaseSeckill(seckillId, seckillQty, OrderId);
+            if (pointsSpent) {
+                refundPoints(CustomerId, pointsUsed, OrderId);
+            }
+            if (walletPaid) {
+                refundWallet(CustomerId, walletPaidAmount, OrderId);
+            }
         }
         return result;
     }
@@ -783,6 +981,37 @@ public class OrderService {
      * 记一行 WARN 就够 —— 库里 `Status='used'` 且 `OrderId` 无对应订单行，是**可查的**痕迹
      * （同 {@code writeItems} 的 fail-open 口径）。
      */
+    /** 建单失败时退回已扣积分（第三批㉘）。**fail-soft**：退不回只记 WARN，不改返回值。 */
+    private void refundPoints(String customerId, int points, String orderId) {
+        if (points <= 0) {
+            return;
+        }
+        try {
+            memberService.refundSpend(customerId, points, orderId);
+        } catch (Exception e) {
+            log.warn("订单未建成，且积分退回失败（需人工核对）：customer={} points={} order={} —— {}",
+                    customerId, points, orderId, e.toString());
+        }
+    }
+
+    /** 建单失败时退回已扣余额（第三批㉙）。**fail-soft**，幂等键 {@code order_rollback:<OrderId>}。 */
+    private void refundWallet(String customerId, BigDecimal amount, String orderId) {
+        if (amount == null || !com.minke.mallmanagement.shared.Money.positive(amount)) {
+            return;
+        }
+        try {
+            boolean ok = walletService.credit(customerId, amount, "refund", "order", orderId,
+                    "order_rollback:" + orderId, "balance", "订单未建成，余额退回", "system", orderId);
+            if (!ok) {
+                log.warn("订单未建成，但余额退回未命中任何行：customer={} amount={} order={}",
+                        customerId, amount.toPlainString(), orderId);
+            }
+        } catch (Exception e) {
+            log.warn("订单未建成，且余额退回失败（需人工核对）：customer={} amount={} order={} —— {}",
+                    customerId, amount.toPlainString(), orderId, e.toString());
+        }
+    }
+
     private void releaseCoupon(String account, String couponId, String orderId, double discount) {
         if (discount <= 0d || couponId == null || couponId.isBlank()) {
             return;
@@ -1067,7 +1296,7 @@ public class OrderService {
      *
      * @return 是否至少有一条明细真的扣成了库存
      */
-    private boolean deductStocks(List<ItemSpec> specs) {
+    private boolean deductStocks(String merchantId, List<ItemSpec> specs) {
         boolean anyDeducted = false;
         for (ItemSpec s : specs) {
             if (s.code() == null || s.code().isBlank() || s.qty() < 1) {
@@ -1092,6 +1321,12 @@ public class OrderService {
                 // ⚠️ 读它与扣减**失败也要能分开**：stockRemaining 自己吞异常 ⇒ 读不到只是
                 //    少一个展示字段，**绝不把一次成功的 CAS 记成 error**（那是反向误报）。
                 Integer remaining = stockRemaining(sku);
+                // 批四第二批：扣减后只剩 <10 件 ⇒ 给商家一条站内信（每 SKU 每日一条）。
+                // ⚠️ 只在 rows>0（真的扣成了）且读得到剩余时发；alertLowStock 自身 fail-soft
+                //    （去重查询失败照发、send 失败吞掉），**不影响下单结论**。
+                if (rows > 0 && remaining != null) {
+                    notificationService.alertLowStock(merchantId, sku, null, s.name(), remaining);
+                }
                 // 块 7 · 观测（commit 2）：**两条通道在同一调用点**发（计数 + 事件流）——
                 // 与既有三环同款。0 行记 INSUFFICIENT 而**不是** ERROR：CAS 没命中是正常分支
                 // （库存不足 / 非矩阵商品无行，见上面的 javadoc），记成错误会让告警误报。

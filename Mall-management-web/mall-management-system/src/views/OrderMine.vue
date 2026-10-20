@@ -9,25 +9,45 @@
       · 「进行中」= `/order/orderSelect`（`OrderDao.selectActiveByCustomer`）
         —— 有 `Price` / 三个状态位 / `CreateTime` ⇒ 能画金额、状态、付款/收货。
       · 「已完成」= `/order/historicalOrdersSelect`（`OrderDao.selectHistoryByCustomer`）
-        —— **只 SELECT 六列**：`OrderId, MerchantId, ProductInformation, Images,
-        SettlementDate, Quantity`，**没有 `Price`、没有状态位、没有 `CreateTime`**。
-    把两块并成一张表 = 已完成那一半的「金额」「状态」列只能写 `—` 或假造 ⇒ 本页**不并**，
-    各画各的列。⚠️ 想补齐字段面 = 改 `selectHistoryByCustomer` 的 SELECT 列 = **改契约**
-    （硬线，须先问），不在本笔内。
+        —— 批四第二批 commit 4 起**加性**多回 `Price` / `RefundStatus` / `RefundRetryCount` /
+        `RefundReason` / `RefundAmount` / `RefundHandledAt`（旧六列一个不删）；仍**没有**三位状态位
+        与 `CreateTime`。
+    把两块并成一张表 = 已完成那一半的状态位列只能写 `—` 或假造 ⇒ 本页**不并**，
+    各画各的列。已完成块本笔只加一列**只读**售后 chip；金额展示仍归「历史订单」页
+    （两页的分工不变，避免同一事实两处各画一遍）。
   -->
   <div class="ordermine-page">
     <div class="wrap">
       <nav class="crumb">
         <span>首页</span>
         <span class="sp">/</span>
-        <span>购物车</span>
-        <span class="sp">/</span>
         <span class="cur">我的订单</span>
       </nav>
 
-      <div class="h1row">
-        <h1 class="page-h">我的订单 <span class="n">共 {{ totalCount }} 单 · 进行中 {{ activeOrders.length }} 单</span></h1>
-      </div>
+      <!-- A 版线框（BUYER / ORDERS）：页头 + 极简筛选 Chip + 一列订单卡。
+           两路数据源（进行中 / 已完成）仍分别取数，但**同一列呈现** ——
+           用户要的是「下方直接是一列订单卡片」，不再分两块。 -->
+      <section class="page-head">
+        <div>
+          <div class="kicker">BUYER / ORDERS</div>
+          <h1 class="page-h">我的订单 <span class="n">共 {{ totalCount }} 单</span></h1>
+          <p>按状态筛选订单；每张卡都带流程节点，售后状态单独标注。</p>
+        </div>
+        <div class="head-actions"><router-link class="btn" :to="cartTabPath">去购物车</router-link></div>
+      </section>
+
+      <nav class="chips" role="tablist" aria-label="订单状态筛选">
+        <button
+          v-for="f in FILTERS"
+          :key="f.key"
+          class="chip"
+          type="button"
+          role="tab"
+          :aria-selected="filter === f.key ? 'true' : 'false'"
+          :class="{ active: filter === f.key }"
+          @click="filter = f.key"
+        >{{ f.label }} <span class="n">{{ countOf(f.key) }}</span></button>
+      </nav>
 
       <div v-if="loading" class="empty">
         <div class="p">加载中…</div>
@@ -39,65 +59,65 @@
         <router-link class="go2" :to="cartTabPath">去购物车看看</router-link>
       </div>
 
-      <template v-else>
-        <!-- ── ① 进行中（未成交）──────────────────────────────────────────────── -->
-        <section v-if="activeOrders.length > 0" class="block">
-          <h2 class="block-h">进行中 <span class="n">{{ activeOrders.length }}</span></h2>
+      <div v-else-if="filteredOrders.length === 0" class="empty">
+        <div class="big">这个状态下没有订单</div>
+        <div class="p">换一个筛选，或看「全部」。</div>
+      </div>
 
-          <div class="thead">
-            <span></span><span>商品</span><span>订单号</span>
-            <span class="r">数量</span><span class="r">金额</span><span class="cen">状态</span><span class="r">操作</span>
+      <div v-else class="order-list">
+        <article v-for="order in filteredOrders" :key="order.OrderId" class="order-card">
+          <div class="order-head">
+            <span class="oid">{{ order.OrderId }}</span>
+            <span class="st" :class="statusOf(order)[0]"><IconGlyph :name="STATE_GLYPH[statusOf(order)[0]] || 'wait'" />{{ statusOf(order)[1] }}</span>
+            <span class="date">{{ dateOf(order) }}<template v-if="order.MerchantId"> · 商家 {{ order.MerchantId }}</template></span>
+            <span v-if="isHistory(order) && refundText(order)" class="rf-chip" :class="`s${Number(order.RefundStatus) || 0}`">{{ refundText(order) }}</span>
+            <span v-else-if="isHistory(order)" class="tag">无售后</span>
           </div>
-          <div v-for="order in activeOrders" :key="order.OrderId" class="trow">
-            <div class="thumb"><img v-if="order.Images" :src="order.Images" alt="商品图片" /></div>
-            <div class="pn" :title="order.ProductInformation">{{ order.ProductInformation }}</div>
-            <div class="oid">{{ order.OrderId }}</div>
-            <div class="num">{{ quantityOf(order) }}</div>
-            <div class="money">¥{{ formatPrice(order.Price) }}</div>
-            <div class="cen"><span class="st" :class="stateOf(order)[0]"><IconGlyph :name="STATE_GLYPH[stateOf(order)[0]] || 'wait'" />{{ stateOf(order)[1] }}</span></div>
-            <div class="op">
-              <button
-                v-if="order.PayIf !== 1 && !order.CancelledAt"
-                class="act"
-                @click="openPay(order)"
-              ><IconGlyph name="ok" />付款</button>
-              <button
-                v-if="canReceive(order)"
-                class="act"
-                @click="handleReceive(order)"
-              ><IconGlyph name="ok" />收货</button>
-              <!-- ⚠️ C3 块4 补丁：**发货之后**才有物流可看（`DeliveryIf === 1`）——
-                   在「待发货」上画它只会弹一个空时间线。收货后仍保留（`ReceiveIf === 1` 也是 `DeliveryIf === 1`）。 -->
-              <button
-                v-if="order.DeliveryIf === 1"
-                class="act"
-                @click="openDetail(order)"
-              ><IconGlyph name="orders" />物流</button>
-              <span v-if="order.PayIf === 1 && !canReceive(order) && order.DeliveryIf !== 1" class="dash">等待商家发货</span>
+
+          <div class="order-body">
+            <div class="order-items">
+              <div class="order-item">
+                <div class="thumb"><img v-if="order.Images" :src="order.Images" alt="商品图片" /></div>
+                <div class="oi-tx">
+                  <div class="nm" :title="order.ProductInformation">{{ order.ProductInformation }}</div>
+                  <div class="meta">数量 {{ quantityOf(order) }} 件</div>
+                </div>
+              </div>
+            </div>
+            <div class="order-total"><b>¥{{ formatPrice(order.Price) }}</b><small>共 {{ quantityOf(order) }} 件</small></div>
+          </div>
+
+          <!-- 流程节点：提交订单 → 付款 → 发货 → 收货。取消单只亮首节点并整体置灰。 -->
+          <ol class="flow" :class="{ cancelled: order.CancelledAt }" aria-label="订单流程">
+            <li
+              v-for="(step, i) in flowOf(order)"
+              :key="step.label"
+              :class="{ done: step.done, current: step.current }"
+            >
+              <span class="dot"></span>
+              <span class="lb">{{ step.label }}</span>
+              <span v-if="i < 3" class="seg" aria-hidden="true"></span>
+            </li>
+          </ol>
+
+          <div class="order-foot">
+            <span class="foot-note">{{ noteOf(order) }}</span>
+            <div class="order-actions">
+              <button v-if="!isHistory(order) && order.PayIf !== 1 && !order.CancelledAt" class="act solid" @click="openPay(order)"><IconGlyph name="ok" />付款</button>
+              <button v-if="!isHistory(order) && canReceive(order)" class="act solid" @click="handleReceive(order)"><IconGlyph name="ok" />收货</button>
+              <!-- ⚠️ **发货之后**才有物流可看（`DeliveryIf === 1`）——
+                   在「待发货」上画它只会弹一个空时间线。 -->
+              <button v-if="!isHistory(order) && order.DeliveryIf === 1" class="act" @click="openDetail(order)"><IconGlyph name="orders" />物流</button>
+              <router-link v-if="isHistory(order)" class="act" :to="historyPath">查看记录</router-link>
             </div>
           </div>
-          <p class="hint">⚠️ 数量列显示的是下单时记下的件数；`Quantity` 列是 C3 块 4 新加的，此前落库的行一律回填成 <b>1</b>。</p>
-        </section>
+        </article>
+      </div>
 
-        <!-- ── ② 已完成 ──────────────────────────────────────────────────────── -->
-        <section v-if="historyOrders.length > 0" class="block">
-          <h2 class="block-h">已完成 <span class="n">{{ historyOrders.length }}</span></h2>
-
-          <div class="thead done">
-            <span></span><span>商品</span><span>订单号</span><span>商家 ID</span>
-            <span class="r">数量</span><span>结单日期</span>
-          </div>
-          <div v-for="order in historyOrders" :key="order.OrderId" class="trow done">
-            <div class="thumb"><img v-if="order.Images" :src="order.Images" alt="商品图片" /></div>
-            <div class="pn" :title="order.ProductInformation">{{ order.ProductInformation }}</div>
-            <div class="oid">{{ order.OrderId }}</div>
-            <div class="mid">{{ order.MerchantId }}</div>
-            <div class="num">{{ quantityOf(order) }}</div>
-            <div class="time">{{ formatDateTime(order.SettlementDate) }}</div>
-          </div>
-          <p class="hint">⚠️ 这一块**没有金额列**：`historicalOrdersSelect` 的 SELECT 里就没有 `Price`（见本文件头）。要补 = 改契约，没在本笔里顺手动。</p>
-        </section>
-      </template>
+      <p v-if="!loading && totalCount > 0" class="hint">
+        ⚠️ 数量显示的是下单时记下的件数；`Quantity` 列是后加的，更早落库的行一律回填成 <b>1</b>。
+        售后申请 / 重申在「历史订单」页处理。
+      </p>
     </div>
 
     <!-- ══ 收银台弹窗（C3 块4 补丁）══════════════════════════════════════════════
@@ -172,10 +192,51 @@ const route = useRoute()
 const activeOrders = ref([])
 const historyOrders = ref([])
 const loading = ref(false)
+const filter = ref('all')
+
+/** 顶部筛选 Chip（A 版「全部 / 待付款 …」）。`key` 与 `filterKeyOf` 一一对应。 */
+const FILTERS = [
+  { key: 'all', label: '全部' },
+  { key: 'unpaid', label: '待付款' },
+  { key: 'toship', label: '待发货' },
+  { key: 'shipped', label: '已发货' },
+  { key: 'done', label: '已完成' },
+  { key: 'cancelled', label: '已取消' }
+]
+
+const isHistory = (order) => order._kind === 'history'
+
+/** 两路数据合进同一列：进行中在前、已完成在后（各自保持后端的时间倒序）。 */
+const allOrders = computed(() => [
+  ...activeOrders.value.map((o) => ({ ...o, _kind: 'active' })),
+  ...historyOrders.value.map((o) => ({ ...o, _kind: 'history' }))
+])
+
+/** 订单落在哪个筛选项（历史单没有三位状态位 ⇒ 一律算已完成）。 */
+const filterKeyOf = (order) => {
+  if (isHistory(order)) return 'done'
+  if (order.CancelledAt) return 'cancelled'
+  if (order.PayIf !== 1) return 'unpaid'
+  if (order.DeliveryIf !== 1) return 'toship'
+  if (order.ReceiveIf !== 1) return 'shipped'
+  return 'done'
+}
+
+const filteredOrders = computed(() =>
+  filter.value === 'all' ? allOrders.value : allOrders.value.filter((o) => filterKeyOf(o) === filter.value)
+)
+
+const countOf = (key) => (key === 'all'
+  ? allOrders.value.length
+  : allOrders.value.filter((o) => filterKeyOf(o) === key).length)
 
 const totalCount = computed(() => activeOrders.value.length + historyOrders.value.length)
 const cartTabPath = computed(() =>
   route.path.startsWith('/merchant') ? '/merchant/order/cart?tab=cart' : '/customer/cart?tab=cart'
+)
+// 已完成块的「查看记录」落点：历史购买记录页（两壳路径不同，同 cartTabPath 的判据）。
+const historyPath = computed(() =>
+  route.path.startsWith('/merchant') ? '/merchant/user/history' : '/customer/user/history'
 )
 
 const getBuyerId = () => resolveBuyerId()
@@ -220,7 +281,54 @@ const stateOf = (order) => {
     || ['draft', '未知状态']
 }
 
+/** 合并列表用的状态：历史单没有三位状态位，但它确定是「已完成」。 */
+const statusOf = (order) => (isHistory(order) ? ['ok', '已完成'] : stateOf(order))
+
 const canReceive = (order) => order.PayIf === 1 && order.DeliveryIf === 1 && order.ReceiveIf !== 1
+
+/** 卡片头部的日期：进行中用 `CreateTime`，已完成用 `SettlementDate`。 */
+const dateOf = (order) => (isHistory(order)
+  ? formatDateTime(order.SettlementDate)
+  : (formatDateTime(order.CreateTime) || '进行中'))
+
+/** 订单流程节点（A 版「带流程节点的小进度条」）。
+ *  ⚠️ 历史单只回成交字段、没有三位状态位 ⇒ 四个节点全亮；取消单只亮首节点。 */
+const FLOW_LABELS = ['提交订单', '付款', '发货', '收货']
+const flowOf = (order) => {
+  if (isHistory(order)) {
+    return FLOW_LABELS.map((label, i) => ({ label, done: true, current: i === FLOW_LABELS.length - 1 }))
+  }
+  if (order.CancelledAt) {
+    return FLOW_LABELS.map((label, i) => ({ label, done: i === 0, current: i === 0 }))
+  }
+  const done = [
+    true,
+    order.PayIf === 1,
+    order.DeliveryIf === 1 || order.ReceiveIf === 1,
+    order.ReceiveIf === 1
+  ]
+  const current = Math.max(0, done.lastIndexOf(true))
+  return FLOW_LABELS.map((label, i) => ({ label, done: done[i], current: i === current }))
+}
+
+/** 进行中订单卡页脚说「下一步在谁那儿」（A 版线框的 `foot-note`）。
+ *  ⚠️ 只做措辞，不改状态判据 —— 状态 chip 仍由 `stateOf` 出。 */
+const activeNote = (order) => {
+  if (order.CancelledAt) return '订单已取消'
+  if (order.PayIf !== 1) return '等待买家付款'
+  if (order.DeliveryIf !== 1) return '等待商家发货'
+  if (order.ReceiveIf !== 1) return '商家已发货，等待确认收货'
+  return stateOf(order)[1]
+}
+
+/** 合并列表的页脚文案：历史单说明结单日期，进行中沿用下一步提示。 */
+const noteOf = (order) => (isHistory(order)
+  ? `结单日期 ${formatDateTime(order.SettlementDate) || '—'}`
+  : activeNote(order))
+
+// 已完成单的只读售后态（批四第二批 commit 4）；0 = 没申请过 ⇒ 不画 chip。
+const REFUND_TEXT = { 1: '待商家审核', 2: '商家已拒绝', 3: '平台处理中', 4: '平台已拒绝', 5: '已退款' }
+const refundText = (order) => REFUND_TEXT[Number(order.RefundStatus) || 0] || ''
 
 const load = async () => {
   const customerId = getBuyerId()
@@ -362,7 +470,7 @@ onMounted(load)
   gap: var(--s4);
 }
 .thead.done, .trow.done {
-  grid-template-columns: 56px minmax(0, 1fr) 118px 88px 56px 160px;
+  grid-template-columns: 56px minmax(0, 1fr) 118px 88px 56px 160px 88px;
 }
 .thead {
   padding-bottom: var(--s3);
@@ -421,6 +529,19 @@ onMounted(load)
 .st.err { background: var(--danger-ground); color: var(--danger-deep); }
 .st.ok { background: var(--success-ground); color: var(--success-deep); }
 
+/* 已完成块的只读售后 chip（批四第二批 commit 4）：与状态 chip 同形状，色相按「要不要人处理」分。 */
+.rf-chip {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: var(--r1);
+  font-size: var(--fs-xs);
+  line-height: 1.6;
+  white-space: nowrap;
+}
+.rf-chip.s1, .rf-chip.s3 { background: var(--info-ground); color: var(--info-deep); }
+.rf-chip.s2, .rf-chip.s4 { background: var(--surface-3); color: var(--ink-2); }
+.rf-chip.s5 { background: var(--success-ground); color: var(--success-deep); }
+
 .op { display: flex; align-items: center; justify-content: flex-end; gap: var(--s3); }
 .act {
   height: 30px;
@@ -455,7 +576,7 @@ onMounted(load)
 /* 窄屏：只收紧列宽，**不改结构**（同 `OrderCenter.vue` 的口径）。 */
 @media (max-width: 1120px) {
   .thead, .trow { grid-template-columns: 48px minmax(0, 1fr) 104px 44px 80px 92px 132px; gap: var(--s3); }
-  .thead.done, .trow.done { grid-template-columns: 48px minmax(0, 1fr) 104px 80px 44px 132px; }
+  .thead.done, .trow.done { grid-template-columns: 48px minmax(0, 1fr) 104px 80px 44px 132px 80px; }
 }
 
 /* ══ 收银台 / 物流弹窗（C3 块4 补丁）═══════════════════════════════════════════
@@ -542,4 +663,191 @@ onMounted(load)
 /* 物流失败态（Bug 2）：失败**要说出来**，不能与「确实没有轨迹」同脸。 */
 .tl-err { display: flex; align-items: center; gap: var(--s3); color: var(--danger-deep); }
 .tl-err .act { flex: 0 0 auto; }
+
+/* ══ A 版线框重排（2026-10-19）：页头 + 订单卡 ══════════════════════════════
+   ⚠️ 旧表格式 `.thead/.trow` 规则原样保留（不再有元素命中）—— 删除属于独立清理，
+      不在本次「极速 UI 重构」的改动面里。 */
+.page-head {
+  margin-top: var(--s4);
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: var(--s5);
+}
+.kicker {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: .16em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+.page-head .page-h { margin-top: 6px; }
+.page-head p {
+  margin-top: 8px;
+  max-width: 58ch;
+  font-size: var(--fs-sm);
+  line-height: 1.7;
+  color: var(--ink-2);
+}
+.head-actions { display: flex; gap: var(--s2); flex: 0 0 auto; }
+.head-actions .btn {
+  display: inline-flex;
+  align-items: center;
+  height: 36px;
+  padding: 0 var(--s5);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r1);
+  font-size: var(--fs-sm);
+  color: var(--ink-2);
+  text-decoration: none;
+  background: var(--surface);
+}
+.head-actions .btn:hover { border-color: var(--brand-ink); color: var(--brand-ink); }
+
+/* ── 极简筛选 Chip（A 版「全部 / 待付款 …」）────────────────────────────── */
+.chips {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  flex-wrap: wrap;
+  margin: var(--s5) 0 var(--s4);
+}
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 32px;
+  padding: 0 var(--s4);
+  border: 1px solid var(--line-2);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--ink-2);
+  font: inherit;
+  font-size: var(--fs-xs);
+  cursor: pointer;
+}
+.chip .n { font-family: var(--font-mono); font-size: 10px; color: var(--ink-3); }
+.chip:hover { border-color: var(--brand); color: var(--brand-ink); }
+.chip.active {
+  border-color: var(--brand);
+  background: var(--brand-tint);
+  color: var(--brand-ink);
+  font-weight: var(--fw-semi);
+}
+.chip.active .n { color: var(--brand-ink); }
+
+.order-list { display: flex; flex-direction: column; gap: var(--s4); }
+.order-card {
+  border: 1px solid var(--line-2);
+  border-radius: var(--r2);
+  background: var(--surface);
+  overflow: hidden;
+}
+.order-head {
+  display: flex;
+  align-items: center;
+  gap: var(--s3);
+  flex-wrap: wrap;
+  padding: var(--s3) var(--s5);
+  border-bottom: 1px solid var(--line);
+  background: var(--surface-2);
+  font-size: var(--fs-xs);
+}
+.order-head .date { color: var(--ink-3); }
+.order-head .tag {
+  margin-left: auto;
+  padding: 2px 8px;
+  border: 1px solid var(--line-2);
+  border-radius: var(--r1);
+  color: var(--ink-3);
+  white-space: nowrap;
+}
+.order-body { display: flex; align-items: center; gap: var(--s5); padding: var(--s4) var(--s5); }
+.order-items { flex: 1; min-width: 0; }
+.order-item { display: flex; align-items: center; gap: var(--s4); min-width: 0; }
+.oi-tx { min-width: 0; }
+.oi-tx .nm {
+  font-size: var(--fs-md);
+  font-weight: var(--fw-med);
+  color: var(--ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.oi-tx .meta { margin-top: var(--s1); font-size: var(--fs-xs); color: var(--ink-3); }
+.order-total { flex: 0 0 auto; text-align: right; }
+.order-total b {
+  display: block;
+  font-family: var(--font-display);
+  font-size: var(--fs-lg);
+  font-weight: var(--fw-med);
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+}
+.order-total small { font-size: var(--fs-xs); color: var(--ink-3); }
+
+/* 流程节点小进度条：提交订单 → 付款 → 发货 → 收货 */
+.flow {
+  display: flex;
+  align-items: center;
+  list-style: none;
+  margin: 0;
+  padding: var(--s3) var(--s5);
+  border-top: 1px dashed var(--line);
+  font-size: var(--fs-xs);
+  color: var(--ink-3);
+}
+.flow li {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+}
+.flow li:last-child { flex: 0 0 auto; }
+.flow .dot {
+  flex: 0 0 auto;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--surface-3);
+  border: 1px solid var(--line-2);
+}
+.flow .seg {
+  flex: 1;
+  height: 1px;
+  margin: 0 var(--s2);
+  background: var(--line-2);
+}
+.flow li.done { color: var(--brand-ink); }
+.flow li.done .dot { background: var(--brand); border-color: var(--brand); }
+.flow li.done .seg { background: var(--brand); }
+.flow li.current .dot { box-shadow: 0 0 0 4px var(--brand-tint); }
+.flow.cancelled li { color: var(--ink-3); }
+.flow.cancelled li.done { color: var(--danger-deep); }
+.flow.cancelled li.done .dot { background: var(--danger-deep); border-color: var(--danger-deep); }
+.flow.cancelled li.done .seg { background: var(--line-2); }
+
+.order-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s4);
+  padding: var(--s3) var(--s5);
+  border-top: 1px solid var(--line);
+}
+.foot-note { font-size: var(--fs-xs); color: var(--ink-3); }
+.order-actions { display: flex; align-items: center; gap: var(--s2); flex-wrap: wrap; }
+.act { text-decoration: none; display: inline-flex; align-items: center; gap: 4px; }
+.act.solid { background: var(--brand); border-color: var(--brand); color: #fff; }
+.act.solid:hover { background: var(--brand-ink); border-color: var(--brand-ink); }
+
+@media (max-width: 760px) {
+  .page-head { flex-direction: column; align-items: flex-start; }
+  .order-body { flex-direction: column; align-items: stretch; gap: var(--s3); }
+  .order-total { text-align: left; }
+  .order-foot { flex-direction: column; align-items: flex-start; }
+  .order-head .tag { margin-left: 0; }
+}
 </style>

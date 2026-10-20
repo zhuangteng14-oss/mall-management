@@ -218,3 +218,17 @@ export function downgradeRelist(params) {
 export function accountsUserDetail(params) {
   return post(endpoints.accountsDetail.userDetail, q(params))
 }
+
+/**
+ * 设置会员等级（批四第二批 commit 3）。
+ *
+ * @param {{username:string, level:number|string}} params
+ *        `level` 只接受 `0`（普通）/ `1`（VIP）—— 其余值后端**拒绝**而不是静默夹断
+ *        （写错档位的人该看到拒绝）。等级变了**不失效**任何缓存：会员读取走
+ *        `MemberLevel` 直查（`UserStateLookup`），不在 `userPublic` 的 5 列里。
+ * @returns {Promise<{success:boolean, msg?:string, username?:string, memberLevel?:number}>}
+ *          `affected==0` ⇒ 「用户不存在」。
+ */
+export function accountsSetMember(params) {
+  return post(endpoints.memberB4.adminSet, q(params))
+}

@@ -46,8 +46,11 @@ public class AdminOrderDao {
     /** 已付款未发货超时的阈值（小时）。**同样待裁**。 */
     public static final int UNDELIVERED_HOURS = 48;
 
+    // 售后列（批四第二批 commit 4）**加性追加在尾部**：读侧多回几列，旧字段一个不删；
+    // 详情页的回显与「平台售后」tab 都靠这几列，不必再为同一张单多打一次端点。
     private static final String COLUMNS = "Id, OrderId, CustomerId, MerchantId, Price, Quantity, "
-            + "ProductInformation, Images, PayIf, DeliveryIf, ReceiveIf, CreateTime, SettlementDate, TradeNo, PaymentMethod, PaidAt, ExpressCompany, TrackingNo, ShippedAt, ReceivedAt";
+            + "ProductInformation, Images, PayIf, DeliveryIf, ReceiveIf, CreateTime, SettlementDate, TradeNo, PaymentMethod, PaidAt, ExpressCompany, TrackingNo, ShippedAt, ReceivedAt, "
+            + "StockDeducted, RefundStatus, RefundRetryCount, RefundReason, RefundAmount, RefundApplyAt, RefundHandledAt, RefundHandler";
 
     private final JdbcClient jdbcClient;
 
@@ -118,6 +121,10 @@ public class AdminOrderDao {
             case "paid" -> "PayIf = 1 AND DeliveryIf = 0";
             case "shipped" -> "DeliveryIf = 1 AND ReceiveIf = 0";
             case "completed" -> "ReceiveIf = 1";
+            // 售后是**旁路状态域**（不改三位）：这两个筛选量的是 RefundStatus，不是 PayIf/DeliveryIf/ReceiveIf。
+            // ⚠️ 它们与 completed 有交集是**故意的** —— 同一张单既可以「已收货」又「售后中」。
+            case "refunding" -> "RefundStatus = 1";
+            case "refund_platform" -> "RefundStatus = 3";
             case "abnormal" -> "PayIf = 0 AND (DeliveryIf = 1 OR ReceiveIf = 1)";
             default -> null;
         };
