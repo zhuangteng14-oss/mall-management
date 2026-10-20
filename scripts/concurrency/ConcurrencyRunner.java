@@ -2700,7 +2700,7 @@ public class ConcurrencyRunner {
             // C3 块 4（2026-10-10）cart（1 张）、C3 块 4 补丁（2026-10-10）order_shipping_track（1 张）、可视化段 commit 0（2026-10-11）order_item（1 张）、可视化段 commit 2（2026-10-11）stats_daily（1 张）、可视化段 commit 3 补丁（2026-10-11）goods_sku（1 张）
             // —— 十一张同在 mall_management_sql.sql 末尾的 Migration 块、人工落盘（见 db-schema.md「表数量：29」）。
             // ⚠️ 就地改造那笔把 notification_template 物理删了、goods_template 物理删了、新增 template ⇒ 7 → 6。
-            // ⚠️ 块 4 新增 cart ⇒ 6 → 7、块 4 补丁（2026-10-10）新增 order_shipping_track ⇒ 7 → 8、可视化段 commit 0 新增 order_item ⇒ 8 → 9、可视化段 commit 2 新增 stats_daily ⇒ 9 → 10、可视化段 commit 3 补丁（2026-10-11）新增 goods_sku ⇒ 10 → 11、C3 块 5（2026-10-11）新增 coupon / coupon_grant / subsidy_rule / subsidy_goods / seckill_invitation / seckill_application / seckill_activity ⇒ 11 → 18、C3 块 5 B 组（2026-10-12）新增 shop_follow ⇒ 18 → 19、C3 块 6（2026-10-12）新增 comment / comment_mention / comment_image / comment_like / report / sensitive_word ⇒ 19 → 25、C3 块 7（2026-10-13）新增 drill_record ⇒ 25 → 26、C3 块 7 commit 8b（2026-10-14）新增 observed_event ⇒ 26 → 27
+            // ⚠️ 块 4 新增 cart ⇒ 6 → 7、块 4 补丁（2026-10-10）新增 order_shipping_track ⇒ 7 → 8、可视化段 commit 0 新增 order_item ⇒ 8 → 9、可视化段 commit 2 新增 stats_daily ⇒ 9 → 10、可视化段 commit 3 补丁（2026-10-11）新增 goods_sku ⇒ 10 → 11、C3 块 5（2026-10-11）新增 coupon / coupon_grant / subsidy_rule / subsidy_goods / seckill_invitation / seckill_application / seckill_activity ⇒ 11 → 18、C3 块 5 B 组（2026-10-12）新增 shop_follow ⇒ 18 → 19、C3 块 6（2026-10-12）新增 comment / comment_mention / comment_image / comment_like / report / sensitive_word ⇒ 19 → 25、C3 块 7（2026-10-13）新增 drill_record ⇒ 25 → 26、C3 块 7 commit 8b（2026-10-14）新增 observed_event ⇒ 26 → 27、D3（0d5005d）新增 observed_event_dlq ⇒ 27 → 28、block7 第三批（bff5748）新增 goods_discount_template / goods_price_log / member_level / member_level_log / merchant_brand_application_detail / merchant_brand_profile / user_balance_log / user_points_account / user_points_log / user_signin / user_wallet / wallet_recharge_order / wallet_withdraw_order ⇒ 28 → 41、终局清道夫（05b70d5）新增 user_favorite ⇒ 41 → 42
             //    （**本清单、KNOWN_TABLES、上面那句表数说明、下面 P3 的 PASS 文案串 —— 四处同改**；少改一处 A3 的 P3 必红 ——
             //    而 concurrency job 是 continue-on-error，红在 job 颜色上看不出来，只能读 artifact 的 gates.count）。
             // 刻意不写死总数：运行器与那份 SQL 是两笔改动，谁先落都要能跑。但**多出来的每一张都必须点过名**
@@ -2717,14 +2717,14 @@ public class ConcurrencyRunner {
                   + "'merchant_application','goods_audit','template','cart','order_shipping_track','order_item','stats_daily','goods_sku',"
                   + "'coupon','coupon_grant','subsidy_rule','subsidy_goods','seckill_invitation','seckill_application','seckill_activity','shop_follow',"
                   + "'comment','comment_mention','comment_image','comment_like','report','sensitive_word','drill_record','observed_event',"
-                  + "'observed_event_dlq')");
-            final int KNOWN_TABLES = 28;   // = 上面 IN 清单的长度（加表时**四处同改**，见上方注释块）
+                  + "'observed_event_dlq','goods_discount_template','goods_price_log','member_level','member_level_log','merchant_brand_application_detail','merchant_brand_profile','user_balance_log','user_favorite','user_points_account','user_points_log','user_signin','user_wallet','wallet_recharge_order','wallet_withdraw_order')");
+            final int KNOWN_TABLES = 42;   // = 上面 IN 清单的长度（加表时**四处同改**，见上方注释块）
             boolean p3 = tables == 11 + known && known == KNOWN_TABLES;
             pre.put("P3", (p3 ? "PASS" : "FAIL") + " 表数=" + tables + "；已知追加表 order_state_transition /"
                     + " admin_audit / notification / merchant_application /"
                     + " goods_audit / template / cart / order_shipping_track / order_item / stats_daily / goods_sku /"
                     + " coupon / coupon_grant / subsidy_rule / subsidy_goods / seckill_invitation / seckill_application / seckill_activity / shop_follow /"
-                    + " comment / comment_mention / comment_image / comment_like / report / sensitive_word / drill_record / observed_event / observed_event_dlq 在 " + known + "/" + KNOWN_TABLES
+                    + " comment / comment_mention / comment_image / comment_like / report / sensitive_word / drill_record / observed_event / observed_event_dlq / goods_discount_template / goods_price_log / member_level / member_level_log / merchant_brand_application_detail / merchant_brand_profile / user_balance_log / user_favorite / user_points_account / user_points_log / user_signin / user_wallet / wallet_recharge_order / wallet_withdraw_order 在 " + known + "/" + KNOWN_TABLES
                     + " 张（期望表数 = 11 + " + KNOWN_TABLES + " = " + (11 + KNOWN_TABLES) + "）");
 
             // P4 种子计数：确认是刚导入过的干净实例，而非被上一轮污染过的库
