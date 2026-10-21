@@ -580,4 +580,8 @@ export const endpoints = {
   adminAuth: {
     token: '/user/adminToken',
   },
+  // 2026-10-21 智能客服（后端 ChatAgentController）：唯一端点。同样追加在文件末尾。
+  chat: {
+    ask: '/chat/ask',
+  },
 }

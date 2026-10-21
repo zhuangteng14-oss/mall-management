@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@lucide/vue": "1.55.0",
+    "driver.js": "1.10.2",
     "echarts": "5.6.0",
     "vue": "3.5.33",
     "vue-router": "4.6.4"
