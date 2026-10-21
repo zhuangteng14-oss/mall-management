@@ -64,10 +64,11 @@ jobs:
           if-no-files-found: warn
 
   # ============================================================
-  # 前端：Vue CLI 生产构建
+  # 前端：Vite 生产构建（2026-10-20 由 Vue CLI 迁移）
   # 与后端无依赖，并行执行。
   # 前端工程无测试框架、无 test 脚本，故此处只做依赖安装 + 构建。
-  # Node 版本与本地开发环境一致（v20.17.0）。
+  # Node 版本与本地开发环境一致（v20.17.0）；Vite 6 要求 ≥18，满足。
+  # 包管理器改为 pnpm（锁文件 pnpm-lock.yaml，--frozen-lockfile 保证可复现）。
   # ============================================================
   frontend:
     name: Frontend build
@@ -76,20 +77,25 @@ jobs:
       - name: 检出代码
         uses: actions/checkout@v4
 
+      - name: 配置 pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
       - name: 配置 Node
         uses: actions/setup-node@v4
         with:
           node-version: '20.17.0'
-          cache: npm
-          cache-dependency-path: Mall-management-web/mall-management-system/package-lock.json
+          cache: pnpm
+          cache-dependency-path: Mall-management-web/mall-management-system/pnpm-lock.yaml
 
       - name: 安装依赖
         working-directory: Mall-management-web/mall-management-system
-        run: npm ci
+        run: pnpm install --frozen-lockfile
 
       - name: 构建
         working-directory: Mall-management-web/mall-management-system
-        run: npm run build
+        run: pnpm build
 
   # ============================================================
   # A3 并发测试（120 QPS）—— 阶段 E 的 CI 集成

@@ -14,7 +14,13 @@ import path from 'node:path'
 
 const EDGE = 'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe'
 const MALL = 'C:/Users/86159/Desktop/软件工程/期末项目/Mall-management-web/mall-management-system'
-const WebSocket = createRequire(path.join(MALL, 'package.json'))('ws')
+// ⚠️ Vite 迁移（2026-10-20）：`ws` 原来是 Vue CLI 的传递依赖（webpack-dev-server）被 npm 摊到
+//    顶层才 require 得到。换成 pnpm 后树是严格的，且 dev server 已不再依赖 ws ⇒ 必须自备。
+//    探针依赖单独放 `_work/probe-deps`（不入库、不进前端 package.json），旧路径留作兜底。
+const WS_ROOT = fs.existsSync('C:/Users/86159/Desktop/软件工程/期末项目/_work/probe-deps/package.json')
+  ? 'C:/Users/86159/Desktop/软件工程/期末项目/_work/probe-deps'
+  : MALL
+const WebSocket = createRequire(path.join(WS_ROOT, 'package.json'))('ws')
 
 export const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 

@@ -52,6 +52,6 @@ echarts.use([
 //    **只读源码看不出最后生效的是什么** —— 而 3a.2 这件事的全部风险就是「主题写了、
 //    但被 option 覆盖了 / 没被合并进去」，那种失败**不报错、也不改变观感**（因为观感本来就
 //    是 option 给的），只能靠读合并结果发现。生产构建里这一行不执行（同 `IconGlyph.vue` 的口径）。
-if (process.env.NODE_ENV !== 'production') window.__echarts = echarts
+if (import.meta.env.DEV) window.__echarts = echarts
 
 export default echarts

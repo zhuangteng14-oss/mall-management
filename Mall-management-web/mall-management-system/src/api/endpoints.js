@@ -575,4 +575,9 @@ export const endpoints = {
     list: '/favorite/list',
     check: '/favorite/check',
   },
+  // 2026-10-20 TD-18：管理员凭据驱动铸票（未登录可达；后端 AdminAuthController）。
+  // ⚠️ 追加在文件末尾而不是并入 user 组：本文件大量按行号互引，插入会整体漂移。
+  adminAuth: {
+    token: '/user/adminToken',
+  },
 }

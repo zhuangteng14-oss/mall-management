@@ -59,10 +59,10 @@ public class WebAuthConfig implements WebMvcConfigurer {
      * <p>判据是<b>路径</b>，与 HTTP 方法无关（{@code /goods/goodstype} 是 GET/POST 双形态，
      * 一条即覆盖两者）。{@code /**} 由 {@code AntPathMatcher} 展开。
      *
-     * <h3>业务 10 条</h3>
+     * <h3>业务 11 条</h3>
      * <ul>
-     *   <li><b>登录链 3 条</b>（{@code /user/loginSelect}、{@code /user/loginAdd}、
-     *       {@code /user/getUserInfo}）—— 登录页在**未登录**状态下就打这三个，白名单少了它们
+     *   <li><b>登录链 4 条</b>（{@code /user/loginSelect}、{@code /user/adminToken}、{@code /user/loginAdd}、
+     *       {@code /user/getUserInfo}）—— 登录页在**未登录**状态下就打这四个，白名单少了它们
      *       等于闸一开就再也登不进去（⚠️ 其中 {@code /user/getUserInfo} 的前端消费点自 P2.6 起已归零、
      *       不再在登录链上 —— 仍留白名单属「端点只保留不删」，见 {@code progress.md} §5-AC）。</li>
      *   <li><b>登录前后台页面 7 条</b>（{@code /goods/goodstype}、{@code /goods/goodsSelectHome}、
@@ -107,7 +107,7 @@ public class WebAuthConfig implements WebMvcConfigurer {
      */
     public static final List<String> AUTH_WHITELIST = List.of(
             // ===== 业务：登录链 =====
-            "/user/loginSelect",
+            "/user/loginSelect", "/user/adminToken",
             "/user/loginAdd",
             "/user/getUserInfo",
             // ===== 业务：登录前后台页面（首页 / 商品页 / 搜索页 / 店铺主页）=====
@@ -175,7 +175,7 @@ public class WebAuthConfig implements WebMvcConfigurer {
     /**
      * 注册到 {@code /**}，白名单**不**走 {@code excludePathPatterns} —— ⚠️ 刻意的，别「顺手改成
      * excludePathPatterns」：被排除的路径**根本进不了 {@code preHandle}**，白名单就无法在拦截器
-     * 这一层被断言。当前写法让 {@code AuthGateSmokeTest} 能对 14 条逐条直调 {@code preHandle}
+     * 这一层被断言。当前写法让 {@code AuthGateSmokeTest} 能对 15 条逐条直调 {@code preHandle}
      * 钉死（「被排除」与「不存在」在下游都是 404，MockMvc 分不开；白名单的契约恰是「闸不拦它」）。
      */
     @Override

@@ -13,16 +13,16 @@
 //    有的走另一分支），统一判 = 一次性改 34 处行为 ⇒ 留在各 view 自己判。
 //    本层返回的是**未解析的 Response**，调用方照旧 `await res.json()`。
 //
-// 基址来源：`.env.development` / `.env.production` 的 `VUE_APP_API_BASE`（Vue CLI 构建期内联）。
+// 基址来源：`.env.development` / `.env.production` 的 `VITE_API_BASE`（Vite 构建期内联，见 vite.config.js）。
 //
 // ⚠️ 401 出口（职责③）要清本地登录态 ⇒ 依赖 `auth.js`。`auth.js` 自身**无任何 import**
 //    ⇒ 反向依赖不存在，不成环（这与 router 的情况不同 —— 见职责③的注释）。
-import { clear as clearAuth, getToken, isAdminSession } from './auth'
+import { clear as clearAuth, getToken, getAdminToken, isAdminSession } from './auth'
 
-const API_BASE = process.env.VUE_APP_API_BASE || ''
+const API_BASE = import.meta.env.VITE_API_BASE || ''
 
 // 静态资源（图片）前缀。⚠️ 与 API_BASE **分开命名** —— 反代可能给静态资源不同前缀。
-const ASSET_BASE = process.env.VUE_APP_ASSET_BASE || ''
+const ASSET_BASE = import.meta.env.VITE_ASSET_BASE || ''
 
 // ⚠️ 超时不能设小：后端 Redis 黑洞降级窗口的「首个冷读」实测 **3.376s / 3.40s / 3.38s**
 //    （`context-packs/cache-layer.md#pack-cache-layer-9-1`，2026-09-28），该耗时**整个落在 HTTP 请求里**
@@ -146,9 +146,9 @@ function buildInit(method, body) {
   //       （上面的 Content-Type 仍按原判据只发给 POST / 带 body 者）⇒ 不与「GET 不加内容头」那条判据冲突。
   //    ⚠️ 票要 **`getToken()` 现取**、不做缓存：登录 / 认领 / 登出都可能在两次请求之间改它。
   //    ⚠️ 头值逐字 `Bearer ` + 票（后端 `AuthTokenStore.BEARER` 大小写敏感，别改成小写）。
-  // ⚠️ 2026-10-19 管理员独立登录：管理员会话期间**不带**用户/商家的票。后端 `identify` 票优先
-  //    ⇒ 带着别人的票会把管理员认成客户/商家（收件箱 403、审计记错人）。管理员身份走 cookie 会话。
-  const token = isAdminSession() ? null : getToken()
+  // ⚠️ 2026-10-19 管理员独立登录 + TD-18（2026-10-20）：管理员会话期间带**管理员自己的票**
+  //    （独立键，`POST /user/adminToken` 铸），不带用户/商家的票 —— 后端票优先，带错了就认错人。
+  const token = isAdminSession() ? getAdminToken() : getToken()
   if (token) init.headers = { ...(init.headers || {}), Authorization: `Bearer ${token}` }
   return init
 }

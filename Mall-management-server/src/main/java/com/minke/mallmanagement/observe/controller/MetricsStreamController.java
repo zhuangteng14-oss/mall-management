@@ -25,7 +25,7 @@ import org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBo
  * 同 {@code AdminOrderController} / {@code AdminStatsController}：管理员 cookie 铸不出 token
  * ⇒ 加「须 role=3」会让**默认 profile 上管理员自己也 401**。真正把端点挡在门外的是
  * {@code app.auth.enabled} + {@code AuthInterceptor}（**本端点不在 {@code AUTH_WHITELIST} 里**，
- * 白名单维持 14 条不变）。⇒ 未登录打过来就是 401（**流还没开就 401**，不是「开了流再断」）。
+ * 现 15 条里没有它）。⇒ 未登录打过来就是 401（**流还没开就 401**，不是「开了流再断」）。
  *
  * <h2>【断连】</h2>
  * 客户端关页面 / 刷新 ⇒ 写已关闭的输出流抛 IOException ⇒ {@link SseStreamWriter} 的 catch
