@@ -1,0 +1,2 @@
+POST /chat/tools/invoke  tool=merchant_comments（商家会话；内置工具走注册表执行）
+{"data":{"scope":"merchant","total":0,"unanswered":0,"comments":[]},"success":true,"suggestions":["查我的订单","查售后进度","怎么开店"],"reply":"您好，您店铺的商品目前还没有收到任何评论或提问哦。平台上的评论是直接展示在商品详情页面的，目前还没有新的评论信息。","intent":"COMMENT_QUERY"}

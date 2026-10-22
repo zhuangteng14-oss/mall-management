@@ -3,6 +3,9 @@ package com.minke.mallmanagement.chat.service;
 import com.minke.mallmanagement.chat.model.ChatIntent;
 import com.minke.mallmanagement.chat.model.ResolvedIdentity;
 import com.minke.mallmanagement.chat.model.UserIdentity;
+import com.minke.mallmanagement.chat.tool.ToolContext;
+import com.minke.mallmanagement.chat.tool.ToolExecutor;
+import com.minke.mallmanagement.chat.tool.ToolRegistry;
 import com.minke.mallmanagement.comment.dao.CommentDao;
 import com.minke.mallmanagement.order.RefundStatusText;
 import com.minke.mallmanagement.order.dao.OrderDao;
@@ -106,8 +109,11 @@ public class ChatAgentService {
     private final LlmIntentClassifier llmClassifier;
     private final CommentDao commentDao;
     private final LlmReplyComposer replyComposer;
+    /** 工具注册表 / 执行器（2026-10-22 插件化）。单测走兼容构造器时为 {@code null} ⇒ 全部回退 switch。 */
+    private final ToolRegistry toolRegistry;
+    private final ToolExecutor toolExecutor;
 
-    /** 兼容入口（阶段一之前的单测 / 没装评论工具时）：两个新依赖都置空。 */
+    /** 兼容入口（阶段一之前的单测 / 没装评论工具时）：新依赖都置空。 */
     public ChatAgentService(OrderDao orderDao,
                             OrderRefundService refundService,
                             OrderStateMachine orderStateMachine,
@@ -115,7 +121,20 @@ public class ChatAgentService {
                             SessionMemoryService memoryService,
                             LlmIntentClassifier llmClassifier) {
         this(orderDao, refundService, orderStateMachine, identityResolver, memoryService,
-                llmClassifier, null, null);
+                llmClassifier, null, null, null, null);
+    }
+
+    /** 兼容入口（2026-10-22 之前的单测）：不装工具注册表。 */
+    public ChatAgentService(OrderDao orderDao,
+                            OrderRefundService refundService,
+                            OrderStateMachine orderStateMachine,
+                            IdentityResolver identityResolver,
+                            SessionMemoryService memoryService,
+                            LlmIntentClassifier llmClassifier,
+                            CommentDao commentDao,
+                            LlmReplyComposer replyComposer) {
+        this(orderDao, refundService, orderStateMachine, identityResolver, memoryService,
+                llmClassifier, commentDao, replyComposer, null, null);
     }
 
     @Autowired
@@ -126,7 +145,9 @@ public class ChatAgentService {
                             SessionMemoryService memoryService,
                             LlmIntentClassifier llmClassifier,
                             CommentDao commentDao,
-                            LlmReplyComposer replyComposer) {
+                            LlmReplyComposer replyComposer,
+                            ToolRegistry toolRegistry,
+                            ToolExecutor toolExecutor) {
         this.orderDao = orderDao;
         this.refundService = refundService;
         this.orderStateMachine = orderStateMachine;
@@ -135,6 +156,8 @@ public class ChatAgentService {
         this.llmClassifier = llmClassifier;
         this.commentDao = commentDao;
         this.replyComposer = replyComposer;
+        this.toolRegistry = toolRegistry;
+        this.toolExecutor = toolExecutor;
     }
 
     /**
@@ -171,7 +194,11 @@ public class ChatAgentService {
         ChatIntent intent = decision.intent();
         String orderId = decision.orderId();
 
-        Map<String, Object> resp = switch (intent) {
+        // 插件化路径（2026-10-22）：先问注册表。模型给了 tool 就按名字调，
+        // 没给就按意图找当前角色的内置工具；注册表没有对应工具（问候 / FAQ / 管理员）
+        // 或执行失败 ⇒ 回退下面这张 switch（既有行为逐分支保留）。
+        Map<String, Object> viaTool = executeTool(decision, message, userId, role);
+        Map<String, Object> resp = viaTool != null ? viaTool : switch (intent) {
             case ORDER_QUERY -> answerOrders(message, userId, role, orderId);
             case REFUND_QUERY -> answerRefund(message, userId, role);
             case COMMENT_QUERY -> answerComments(message, userId, role);
@@ -193,6 +220,55 @@ public class ChatAgentService {
     }
 
     /**
+     * 走注册表执行工具。
+     *
+     * <p>身份只从 {@code userId}/{@code role} 注入 {@link ToolContext} —— 工具方法签名里
+     * **没有**「代表谁」的业务参数，模型也无法从 slots 里指定身份。
+     *
+     * @return 响应体；注册表没装 / 没匹配到工具 / 执行失败 时返回 {@code null}，由调用方回退
+     */
+    private Map<String, Object> executeTool(Decision decision, String message,
+                                            String userId, Integer role) {
+        if (toolExecutor == null || toolRegistry == null) {
+            return null;
+        }
+        Map<String, Object> args = decision.args() == null
+                ? new LinkedHashMap<>() : new LinkedHashMap<>(decision.args());
+        if (!isBlank(decision.orderId())) {
+            args.putIfAbsent("orderId", decision.orderId());
+        }
+        if (decision.targetPath() != null) {
+            args.putIfAbsent("target_path", decision.targetPath());
+        }
+        if (decision.needPublish()) {
+            args.putIfAbsent("need_publish", true);
+        }
+        ToolContext context = new ToolContext(userId, role, message);
+        try {
+            if (!isBlank(decision.tool())) {
+                // 双保险：分类器已按角色校验过一次，这里再拒一次（工具名也可能来自规则层）。
+                if (!toolRegistry.allows(decision.tool(), role)) {
+                    log.warn("工具 {} 不在角色 {} 的可用列表内，回退内置分支", decision.tool(), role);
+                    return null;
+                }
+                return nonEmpty(toolExecutor.invoke(decision.tool(), context, args));
+            }
+            return nonEmpty(toolExecutor.invokeForIntent(decision.intent(), context, args));
+        } catch (ToolRegistry.ToolException e) {
+            log.warn("工具执行失败，回退内置分支：{}", e.getMessage());
+            return null;
+        } catch (RuntimeException e) {
+            log.warn("工具执行异常，回退内置分支：{}: {}",
+                    e.getClass().getSimpleName(), e.getMessage());
+            return null;
+        }
+    }
+
+    private static Map<String, Object> nonEmpty(Map<String, Object> resp) {
+        return resp == null || resp.isEmpty() ? null : resp;
+    }
+
+    /**
      * 双引擎路由：LLM 优先，规则兜底。
      *
      * <p>LLM 返回 UNKNOWN 时再走一次规则引擎 —— Prompt 没列 GREETING / HELP /
@@ -207,16 +283,21 @@ public class ChatAgentService {
                 ChatIntent intent = result.intent();
                 String orderId = result.orderId();
                 boolean needPublish = result.needPublish();
+                String tool = result.tool();
+                Map<String, Object> toolArgs = result.args();
 
                 // 政策 FAQ 是本地确定性知识：即使模型把它判成 REFUND，也不能答成「查退款进度」。
                 if (faq != null && faq.policy()) {
                     return new Decision(ChatIntent.FAQ, null, false, null);
                 }
-                if (intent == ChatIntent.UNKNOWN) {
+                // ⚠️ 只有「没选工具」的 UNKNOWN 才交给规则引擎。插件工具（intent=UNKNOWN）
+                // 是模型明确选了要调的方法 —— 送去规则引擎反而会把这次调用丢掉。
+                if (intent == ChatIntent.UNKNOWN && isBlank(tool)) {
                     return byRules(message, normalized, faq, userId, role);
                 }
                 // 「我要看评论」：旧 Prompt 教模型导航到商品管理 / 我的订单，但那些页面都看不到评论。
-                // 问的是评论内容 ⇒ 走真实查询（工具挂载）。这条判据先于下面的导航纠偏。
+                // 问的是评论内容 ⇒ 走真实查询（工具挂载）。这条判据先于下面的导航纠偏，
+                // 也先于工具：模型可能选成 navigate，但目标页里根本没有评论。
                 if (looksLikeCommentQuery(normalized)
                         && (intent == ChatIntent.ORDER_QUERY || intent == ChatIntent.REFUND_QUERY
                             || intent == ChatIntent.NAVIGATE || intent == ChatIntent.UNKNOWN)) {
@@ -256,7 +337,7 @@ public class ChatAgentService {
                 }
                 return new Decision(intent, orderId,
                         needPublish || (intent == ChatIntent.ADD_TO_SECKILL && declaresNotPublished(normalized)),
-                        result.targetPath());
+                        result.targetPath(), tool, toolArgs);
             } catch (RuntimeException e) {
                 log.warn("LLM 意图识别失败，降级规则引擎：{}: {}",
                         e.getClass().getSimpleName(), e.getMessage());
@@ -352,14 +433,23 @@ public class ChatAgentService {
      *
      * @param needPublish 只对秒杀报名有意义
      * @param targetPath  只对 NAVIGATE 有意义（已按角色归位到真实路由）
+     * @param tool        模型从动态工具目录里选的工具名；{@code null} = 按 intent 走内置工具
+     * @param args        模型填进 slots 的参数（插件工具用；内置工具只用 orderId / need_publish）
      */
-    private record Decision(ChatIntent intent, String orderId, boolean needPublish, String targetPath) {
+    private record Decision(ChatIntent intent, String orderId, boolean needPublish, String targetPath,
+                            String tool, Map<String, Object> args) {
+
+        /** 规则引擎 / 纠偏分支用：不带工具。 */
+        Decision(ChatIntent intent, String orderId, boolean needPublish, String targetPath) {
+            this(intent, orderId, needPublish, targetPath, null, null);
+        }
     }
 
     // ==================== 订单 ====================
 
-    private Map<String, Object> answerOrders(String question, String userId, Integer role,
-                                             String wantedOrderId) {
+    /** 包内可见：{@link ChatToolSet} 的 {@code buyer_orders} / {@code merchant_orders} 工具调用它。 */
+    Map<String, Object> answerOrders(String question, String userId, Integer role,
+                                     String wantedOrderId) {
         if (isBlank(userId)) {
             return notLoggedIn(ChatIntent.ORDER_QUERY);
         }
@@ -504,7 +594,8 @@ public class ChatAgentService {
 
     // ==================== 售后 ====================
 
-    private Map<String, Object> answerRefund(String question, String userId, Integer role) {
+    /** 包内可见：{@link ChatToolSet} 的 {@code buyer_refunds} / {@code merchant_refunds} 工具调用它。 */
+    Map<String, Object> answerRefund(String question, String userId, Integer role) {
         if (isBlank(userId)) {
             return notLoggedIn(ChatIntent.REFUND_QUERY);
         }
@@ -607,7 +698,8 @@ public class ChatAgentService {
      *
      * <p>两个分支都只读、只取最近 {@value #RECENT_LIMIT} 条；正文已在 SQL 里截到 60 字。
      */
-    private Map<String, Object> answerComments(String question, String userId, Integer role) {
+    /** 包内可见：{@link ChatToolSet} 的 {@code buyer_comments} / {@code merchant_comments} 工具调用它。 */
+    Map<String, Object> answerComments(String question, String userId, Integer role) {
         if (isBlank(userId)) {
             return notLoggedIn(ChatIntent.COMMENT_QUERY);
         }
@@ -807,7 +899,8 @@ public class ChatAgentService {
      * <p>不反问「您是商家还是用户」—— 身份来自会话 + 库，用户看到判断后可当场纠错；
      * 每次调用都重新 {@link IdentityResolver#resolve}，审核状态一变下一句就能反映。
      */
-    private Map<String, Object> answerOpenStore(String userId, Integer role) {
+    /** 包内可见：{@link ChatToolSet} 的 {@code open_store} 工具调用它。 */
+    Map<String, Object> answerOpenStore(String userId, Integer role) {
         ResolvedIdentity id = identityResolver.resolve(userId, role);
         String who = identitySentence(id);
         if (id.boundary() == ResolvedIdentity.Boundary.ADMIN) {
@@ -850,7 +943,8 @@ public class ChatAgentService {
      * {@code /merchant/seckill}）；无申请复用开店漫游；审核中只答不导航；被拒给
      * 「重新申请」；未登录给「登录后去报名」，前端存 pendingTour，登录后按真实角色续接。
      */
-    private Map<String, Object> answerAddToSeckill(String userId, Integer role, boolean needPublish) {
+    /** 包内可见：{@link ChatToolSet} 的 {@code seckill_signup} 工具调用它。 */
+    Map<String, Object> answerAddToSeckill(String userId, Integer role, boolean needPublish) {
         ResolvedIdentity id = identityResolver.resolve(userId, role);
         String who = identitySentence(id);
         if (id.boundary() == ResolvedIdentity.Boundary.ADMIN) {
@@ -904,8 +998,9 @@ public class ChatAgentService {
      * @param needPublish 模型抽的 {@code need_publish} 槽位；只在秒杀分流里有意义
      *                    （「还没上架」⇒ 两个胶囊），别的页面忽略
      */
-    private Map<String, Object> answerNavigate(String targetPath, String userId, Integer role,
-                                               boolean needPublish) {
+    /** 包内可见：{@link ChatToolSet} 的 {@code navigate} 工具调用它。 */
+    Map<String, Object> answerNavigate(String targetPath, String userId, Integer role,
+                                       boolean needPublish) {
         String path = RouteCatalog.resolve(targetPath, role);
         if (path == null) {
             return answerSmallTalk(ChatIntent.NAVIGATE,

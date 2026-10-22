@@ -2,10 +2,13 @@ package com.minke.mallmanagement.chat.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.minke.mallmanagement.chat.model.ChatIntent;
+import com.minke.mallmanagement.chat.tool.AgentTool;
+import com.minke.mallmanagement.chat.tool.ToolRegistry;
 import com.sun.net.httpserver.HttpServer;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.springframework.context.annotation.AnnotationConfigApplicationContext;
 
 import java.io.IOException;
 import java.net.InetSocketAddress;
@@ -62,6 +65,48 @@ class LlmIntentClassifierTest {
     private LlmIntentClassifier classifier(String url, Duration timeout) {
         return new LlmIntentClassifier(true, url, "test-key", "glm-4-flash",
                 new ObjectMapper(), HttpClient.newBuilder().connectTimeout(timeout).build(), timeout);
+    }
+
+    /** 带工具注册表的分类器：验证 Prompt 里的工具段按角色拼装 / tool 字段按角色校验。 */
+    private LlmIntentClassifier classifierWithTools(String url, Duration timeout) {
+        return new LlmIntentClassifier(true, url, "test-key", "glm-4-flash",
+                new ObjectMapper(), HttpClient.newBuilder().connectTimeout(timeout).build(), timeout,
+                registry());
+    }
+
+    /** 买家 / 商家各一份评论工具（描述里带关键说法，便于断言 Prompt 内容）。 */
+    static class CommentTools {
+
+        @AgentTool(name = "buyer_comments",
+                description = "查我发表过的评论：正文、评分、是否已被商家回复。",
+                targetRole = {1}, intent = ChatIntent.COMMENT_QUERY)
+        public String buyerComments() {
+            return "buyer";
+        }
+
+        @AgentTool(name = "merchant_comments",
+                description = "查店铺商品收到的评论：有没有差评、是否已被商家回复。",
+                targetRole = {2}, intent = ChatIntent.COMMENT_QUERY)
+        public String merchantComments() {
+            return "merchant";
+        }
+
+        @AgentTool(name = "buyer_orders", description = "查我买过的订单", targetRole = {1},
+                intent = ChatIntent.ORDER_QUERY)
+        public String buyerOrders() {
+            return "orders";
+        }
+    }
+
+    private static ToolRegistry registry() {
+        AnnotationConfigApplicationContext ctx = new AnnotationConfigApplicationContext();
+        ctx.registerBean(ObjectMapper.class);
+        ctx.register(CommentTools.class);
+        ctx.refresh();
+        ToolRegistry registry = new ToolRegistry(new ObjectMapper());
+        registry.setApplicationContext(ctx);
+        registry.scan();
+        return registry;
     }
 
     /** GLM 的响应外壳：正文放在 choices[0].message.content。 */
@@ -158,18 +203,68 @@ class LlmIntentClassifierTest {
     }
 
     @Test
-    @DisplayName("工具挂载：COMMENT_QUERY 在白名单里；Prompt 带业务数据工具字典与「评论表」说明")
+    @DisplayName("工具挂载：COMMENT_QUERY 在白名单里；Prompt 的工具目录按角色动态拼装（商家看不到买家工具）")
     void commentQueryIsAllowedAndPromptHasToolCatalog() throws IOException {
         AtomicReference<String> body = new AtomicReference<>();
-        String url = serve(200, envelope("{\"intent\":\"COMMENT_QUERY\",\"slots\":{}}"), null, body);
+        String url = serve(200, envelope("{\"intent\":\"COMMENT_QUERY\",\"tool\":\"merchant_comments\",\"slots\":{}}"),
+                null, body);
 
-        LlmIntentClassifier.Result result = classifier(url, Duration.ofSeconds(3))
+        LlmIntentClassifier.Result result = classifierWithTools(url, Duration.ofSeconds(3))
                 .classify("有没有人给我评论", 2, "/merchant");
 
         assertThat(result.intent()).isEqualTo(ChatIntent.COMMENT_QUERY);
-        // 工具字典：告诉模型「评论表里有什么」，这样它才敢判 COMMENT_QUERY 而不是导航。
-        assertThat(body.get()).contains("评论表 comment").contains("是否已被商家回复")
-                .contains("COMMENT_QUERY");
+        assertThat(result.tool()).isEqualTo("merchant_comments");
+        // 工具目录：商家 Prompt 只含商家工具 —— 这是「按需动态注入」的核心判据。
+        assertThat(body.get()).contains("merchant_comments").contains("是否已被商家回复")
+                .doesNotContain("buyer_comments").doesNotContain("buyer_orders");
+    }
+
+    @Test
+    @DisplayName("工具隔离：同一句话换成买家角色，Prompt 里只出现买家工具")
+    void promptToolCatalogIsRoleIsolatedForBuyer() throws IOException {
+        AtomicReference<String> body = new AtomicReference<>();
+        String url = serve(200, envelope("{\"intent\":\"COMMENT_QUERY\",\"tool\":\"buyer_comments\",\"slots\":{}}"),
+                null, body);
+
+        LlmIntentClassifier.Result result = classifierWithTools(url, Duration.ofSeconds(3))
+                .classify("我发过的评论商家回了吗", 1, "/customer");
+
+        assertThat(result.tool()).isEqualTo("buyer_comments");
+        assertThat(body.get()).contains("buyer_comments", "buyer_orders")
+                .doesNotContain("merchant_comments");
+    }
+
+    @Test
+    @DisplayName("tool 字段：内置工具的意图以注册表为准（模型给 NAVIGATE + 评论工具 ⇒ COMMENT_QUERY）")
+    void toolDrivesIntent() throws IOException {
+        String url = serve(200, envelope(
+                "{\"intent\":\"NAVIGATE\",\"tool\":\"merchant_comments\",\"slots\":{\"orderId\":\"ORD-1\"}}"),
+                null, null);
+
+        LlmIntentClassifier.Result result = classifierWithTools(url, Duration.ofSeconds(3))
+                .classify("我要看评论", 2, "/merchant");
+
+        assertThat(result.intent()).isEqualTo(ChatIntent.COMMENT_QUERY);
+        assertThat(result.targetPath()).isNull();
+        assertThat(result.args()).containsEntry("orderId", "ORD-1");
+    }
+
+    @Test
+    @DisplayName("tool 字段：模型调当前角色没有的工具 / 不存在的工具 ⇒ LlmException（不执行）")
+    void rejectsToolOutsideRoleOrUnknown() throws IOException {
+        String forbidden = serve(200, envelope(
+                "{\"intent\":\"COMMENT_QUERY\",\"tool\":\"buyer_comments\",\"slots\":{}}"), null, null);
+        assertThatThrownBy(() -> classifierWithTools(forbidden, Duration.ofSeconds(3))
+                .classify("我要看评论", 2, "/merchant"))
+                .isInstanceOf(LlmIntentClassifier.LlmException.class)
+                .hasMessageContaining("不适用于当前角色");
+
+        String unknown = serve(200, envelope(
+                "{\"intent\":\"ORDER_QUERY\",\"tool\":\"order_query\",\"slots\":{}}"), null, null);
+        assertThatThrownBy(() -> classifierWithTools(unknown, Duration.ofSeconds(3))
+                .classify("查我的订单", 2, "/merchant"))
+                .isInstanceOf(LlmIntentClassifier.LlmException.class)
+                .hasMessageContaining("未注册的工具");
     }
 
     @Test

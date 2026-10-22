@@ -1,7 +1,14 @@
 package com.minke.mallmanagement.chat.service;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.minke.mallmanagement.chat.model.ChatIntent;
 import com.minke.mallmanagement.chat.model.ResolvedIdentity;
+import com.minke.mallmanagement.chat.tool.AgentParam;
+import com.minke.mallmanagement.chat.tool.AgentTool;
+import com.minke.mallmanagement.chat.tool.ToolContext;
+import com.minke.mallmanagement.chat.tool.ToolExecutor;
+import com.minke.mallmanagement.chat.tool.ToolRegistry;
+import com.minke.mallmanagement.chat.tool.ToolResult;
 import com.minke.mallmanagement.comment.dao.CommentDao;
 import com.minke.mallmanagement.order.dao.OrderDao;
 import com.minke.mallmanagement.order.model.OrderStateMachine;
@@ -10,11 +17,13 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
+import org.springframework.context.annotation.AnnotationConfigApplicationContext;
 
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
@@ -70,6 +79,97 @@ class ChatAgentServiceTest {
 
     private void identity(ResolvedIdentity resolved) {
         when(identityResolver.resolve(anyString(), anyInt())).thenReturn(resolved);
+    }
+
+    // ==================== 插件化（2026-10-22）：工具由注册表分发 ====================
+
+    /** 测试用插件工具：不在 {@code ChatToolSet} 里，也没有任何 switch 分支认识它。 */
+    static class EchoTool {
+        static final AtomicReference<String> LAST_CALL = new AtomicReference<>();
+
+        @AgentTool(name = "echo_tool", description = "回显一条消息", intent = ChatIntent.UNKNOWN)
+        public ToolResult echo(@AgentParam(name = "echo", description = "回显文本", required = false)
+                               String echo, ToolContext ctx) {
+            LAST_CALL.set(echo + "|" + ctx.role() + "|" + ctx.userId());
+            return ToolResult.of("工具回显：" + echo, null);
+        }
+    }
+
+    private ToolRegistry registryWith(Class<?>... beanClasses) {
+        AnnotationConfigApplicationContext ctx = new AnnotationConfigApplicationContext();
+        ctx.registerBean(ObjectMapper.class);
+        for (Class<?> bean : beanClasses) {
+            ctx.register(bean);
+        }
+        ctx.refresh();
+        ToolRegistry registry = new ToolRegistry(new ObjectMapper());
+        registry.setApplicationContext(ctx);
+        registry.scan();
+        return registry;
+    }
+
+    /** 装好注册表的编排层（其它依赖仍是替身）。 */
+    private ChatAgentService serviceWithTools(ToolRegistry registry) {
+        return new ChatAgentService(orderDao, refundService, new OrderStateMachine(),
+                identityResolver, memoryService, llmClassifier, commentDao, replyComposer,
+                registry, new ToolExecutor(registry));
+    }
+
+    @Test
+    @DisplayName("插件化：模型选了注册表里的工具 ⇒ 直接执行它（身份由 ToolContext 注入），不经 switch")
+    void executesToolSelectedByModel() {
+        llmEnabled();
+        when(llmClassifier.classify(any(), any(), any())).thenReturn(
+                new LlmIntentClassifier.Result(ChatIntent.UNKNOWN, null, false, null,
+                        "echo_tool", Map.of("echo", "你好")));
+        EchoTool.LAST_CALL.set(null);
+        ChatAgentService service = serviceWithTools(registryWith(EchoTool.class));
+
+        Map<String, Object> resp = service.ask("随便说一句", "c1", 1);
+
+        assertThat(resp.get("success")).isEqualTo(true);
+        assertThat(resp.get("reply")).isEqualTo("工具回显：你好");
+        // 身份只从会话参数注入，不从 slots 读。
+        assertThat(EchoTool.LAST_CALL.get()).isEqualTo("你好|1|c1");
+    }
+
+    @Test
+    @DisplayName("插件化：注册表里没有对应工具（问候）⇒ 回退既有 switch，行为不变")
+    void fallsBackToSwitchWhenNoToolMatches() {
+        llmEnabled();
+        when(llmClassifier.classify(any(), any(), any())).thenReturn(
+                new LlmIntentClassifier.Result(ChatIntent.GREETING, null, false, null));
+        ChatAgentService service = serviceWithTools(registryWith(EchoTool.class));
+
+        Map<String, Object> resp = service.ask("你好", "c1", 1);
+
+        assertThat(resp.get("intent")).isEqualTo("GREETING");
+        assertThat(String.valueOf(resp.get("reply"))).contains("你好呀");
+    }
+
+    /** 永远抛错的插件工具：验证编排层吞掉工具异常、回退内置分支。 */
+    static class BrokenTool {
+        @AgentTool(name = "broken_tool", description = "永远抛错", intent = ChatIntent.UNKNOWN)
+        public ToolResult boom() {
+            throw new IllegalStateException("boom");
+        }
+    }
+
+    @Test
+    @DisplayName("插件化：工具执行抛错 ⇒ 回退既有 switch（用户不会看到 500）")
+    void toolFailureFallsBackToSwitch() {
+        llmEnabled();
+        when(llmClassifier.classify(any(), any(), any())).thenReturn(
+                new LlmIntentClassifier.Result(ChatIntent.ORDER_QUERY, null, false, null,
+                        "broken_tool", Map.of()));
+        ChatAgentService service = serviceWithTools(registryWith(EchoTool.class, BrokenTool.class));
+
+        Map<String, Object> resp = service.ask("查我的订单", "c1", 1);
+
+        // 工具抛错 → ToolException → 回退 switch 的 ORDER_QUERY 分支（DAO 替身答「没有下单记录」）。
+        assertThat(resp.get("success")).isEqualTo(true);
+        assertThat(resp.get("intent")).isEqualTo("ORDER_QUERY");
+        assertThat(String.valueOf(resp.get("reply"))).contains("下单记录");
     }
 
     private static Map<String, Object> order(String id, String product, int pay, int delivery, int receive) {

@@ -3,6 +3,8 @@ package com.minke.mallmanagement.chat.service;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.minke.mallmanagement.chat.model.ChatIntent;
+import com.minke.mallmanagement.chat.tool.ToolDescriptor;
+import com.minke.mallmanagement.chat.tool.ToolRegistry;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
@@ -59,10 +61,13 @@ public class LlmIntentClassifier {
             ChatIntent.UNKNOWN);
 
     /**
-     * Prompt 的固定部分；路由字典由 {@link RouteCatalog#promptCatalog(Integer)} 按角色追加。
-     *
-     * <p>核心变化（2026-10-22）：不再让模型穷举意图，而是让它在**路由字典**里挑一个
-     * {@code target_path}。「怎么走」不归模型管 —— 前端 NavGraph 用 BFS 算。
+     * Prompt 的固定部分；**工具目录**与**路由字典**都按角色在运行时追加：
+     * <ul>
+     *   <li>{@link ToolRegistry#promptCatalog(Integer)} —— 当前角色能调用的工具 + 反射生成的
+     *       JSON Schema（2026-10-22 插件化改造，字典不再硬编码在这段文本里）；</li>
+     *   <li>{@link RouteCatalog#promptCatalog(Integer)} —— 当前角色能去的页面。</li>
+     * </ul>
+     * 两个目录都是「按当前会话角色过滤」的 ⇒ 商家登录时模型看不到买家工具，反之亦然。
      */
     static final String SYSTEM_PROMPT = """
             你是一个电商智能客服意图路由器。请分析用户输入，严格输出 JSON 格式，不要输出任何多余文字。
@@ -92,15 +97,9 @@ public class LlmIntentClassifier {
                    「怎么开店」⇒ OPEN_STORE；「我要报名秒杀」⇒ ADD_TO_SECKILL；
                    「我的新商品要上架秒杀页，还没上架呢」⇒ ADD_TO_SECKILL，且 need_publish = true。
 
-            你可以「调用」的业务数据工具（由后端在你判出意图后**真正执行**，你不需要自己查，
-            也不要编造结果）：
-            - 订单表 order：单号、商品、金额、付款/发货/收货状态、下单时间。
-              用户问「我的订单 / 那一单 / 物流到哪 / 最近买了什么」⇒ ORDER_QUERY。
-            - 售后表（订单上的退款字段）：订单号、退款状态、退款金额、原因、申请/处理时间。
-              用户问「退款进度 / 售后结果 / 钱退到哪一步」⇒ REFUND_QUERY。
-            - 评论表 comment：评论/提问正文、评分、商品名、是否已被商家回复、回复条数。
-              商家问「有没有人评论我的商品 / 有没有差评 / 有评论没回」⇒ COMMENT_QUERY；
-              客户问「我发过的评论 / 我的评价 / 商家回复我了吗」⇒ COMMENT_QUERY。
+            B2. 工具调用：具体能用哪些工具、参数怎么填，见下方「业务工具」清单
+               （该清单已按当前登录角色过滤；商家看不到买家工具，买家也看不到商家工具）。
+               你只负责**选工具并填参数**，数据由后端真正查询，不要编造结果。
 
             规则：
             1. target_path 只能逐字取字典里的路径；字典里没有合适的页面就给 null。
@@ -108,15 +107,17 @@ public class LlmIntentClassifier {
                问「我那一笔 / 那一单 到哪了 / 进度 / 状态 / 结果 / 有没有」⇒ 数据查询。
                对照：「怎么处理退款」= NAVIGATE；「我的退款到哪了」= REFUND_QUERY。
             3. 同样一句话在不同角色下落点不同：只从字典里给当前角色列出的页面中选。
-            4. 提取槽位：
+            4. 提取槽位（slots）：
                - orderId：订单号，没有就给 null。
                - need_publish：布尔值。**仅当**目标是秒杀报名、且用户明说商品「还没上架 / 还没发布 /
                  还没有商品」时给 true；其他情况一律 false。
-            5. 只输出 JSON 本身，不要 markdown 代码块，不要解释。
+               - 工具参数：按「业务工具」清单里该工具的 schema，用**同名键**填进 slots。
+            5. tool：只能逐字填「业务工具」清单里的工具名；闲聊 / 问候 / 清单里没有合适工具时给 null。
+            6. 只输出 JSON 本身，不要 markdown 代码块，不要解释。
             """;
 
     static final String OUTPUT_FORMAT = """
-            输出格式：{"intent": "...", "target_path": null, "slots": {"orderId": null, "need_publish": false}}
+            输出格式：{"intent": "...", "tool": null, "target_path": null, "slots": {"orderId": null, "need_publish": false}}
             """;
 
     private final boolean enabled;
@@ -126,6 +127,8 @@ public class LlmIntentClassifier {
     private final ObjectMapper objectMapper;
     private final HttpClient httpClient;
     private final Duration requestTimeout;
+    /** 工具目录来源（可为 {@code null}：早期单测 / 未装注册表的场景 ⇒ Prompt 不出现工具段）。 */
+    private final ToolRegistry toolRegistry;
 
     @Autowired
     public LlmIntentClassifier(
@@ -133,16 +136,24 @@ public class LlmIntentClassifier {
             @Value("${chat.llm.url:https://open.bigmodel.cn/api/paas/v4/chat/completions}") String url,
             @Value("${chat.llm.api-key:}") String apiKey,
             @Value("${chat.llm.model:glm-4-flash}") String model,
-            ObjectMapper objectMapper) {
+            ObjectMapper objectMapper,
+            ToolRegistry toolRegistry) {
         this(enabled, url, apiKey, model, objectMapper,
                 HttpClient.newBuilder().connectTimeout(DEFAULT_TIMEOUT).build(),
-                DEFAULT_TIMEOUT);
+                DEFAULT_TIMEOUT, toolRegistry);
     }
 
-    /** 测试用：可换成本地 HttpServer、可把超时缩短到毫秒级。 */
+    /** 测试用：可换成本地 HttpServer、可把超时缩短到毫秒级；不含工具注册表。 */
     LlmIntentClassifier(boolean enabled, String url, String apiKey, String model,
                         ObjectMapper objectMapper, HttpClient httpClient,
                         Duration requestTimeout) {
+        this(enabled, url, apiKey, model, objectMapper, httpClient, requestTimeout, null);
+    }
+
+    /** 测试用：带工具注册表（验证 Prompt 里工具列表按角色隔离）。 */
+    LlmIntentClassifier(boolean enabled, String url, String apiKey, String model,
+                        ObjectMapper objectMapper, HttpClient httpClient,
+                        Duration requestTimeout, ToolRegistry toolRegistry) {
         this.enabled = enabled;
         this.url = isBlank(url) ? DEFAULT_URL : url.trim();
         this.apiKey = apiKey == null ? "" : apiKey.trim();
@@ -150,6 +161,7 @@ public class LlmIntentClassifier {
         this.objectMapper = objectMapper;
         this.httpClient = httpClient;
         this.requestTimeout = requestTimeout == null ? DEFAULT_TIMEOUT : requestTimeout;
+        this.toolRegistry = toolRegistry;
     }
 
     /** 开关打开且配了 Key 才真正出网；否则编排层直接走规则引擎，不产生 WARN。 */
@@ -223,10 +235,14 @@ public class LlmIntentClassifier {
         return parseContent(content, role);
     }
 
-    /** 固定规则 + 当前角色的路由字典 +（可选）当前页。 */
-    private static String systemPrompt(Integer role, String currentPath) {
+    /** 固定规则 + 当前角色的路由字典 + 当前角色的工具目录 +（可选）当前页。 */
+    private String systemPrompt(Integer role, String currentPath) {
         StringBuilder sb = new StringBuilder(SYSTEM_PROMPT);
         sb.append('\n').append(RouteCatalog.promptCatalog(role));
+        if (toolRegistry != null) {
+            // 动态拼装：只列当前角色能调用的工具（含反射生成的 JSON Schema）。
+            sb.append('\n').append(toolRegistry.promptCatalog(role));
+        }
         String safePath = safeCurrentPath(currentPath);
         if (safePath != null) {
             sb.append("用户当前所在页面：").append(safePath).append('\n');
@@ -327,8 +343,68 @@ public class LlmIntentClassifier {
                     : "true".equalsIgnoreCase(publishNode.asText(""));
         }
 
+        // 工具：必须是注册表里存在、且当前角色可用的名字（防「商家让模型调买家工具」）。
+        String tool = parseTool(root, role);
+        intent = withToolIntent(intent, tool);
         String targetPath = parseTargetPath(root, intent, role);
-        return new Result(intent, orderId, needPublish, targetPath);
+        return new Result(intent, orderId, needPublish, targetPath, tool, parseArgs(slots));
+    }
+
+    /**
+     * 解析 {@code tool}：{@code null} / 空串 = 没选工具；其余必须在注册表里且当前角色可用。
+     *
+     * <p>⚠️ 这条校验是角色隔离的**后端一侧**：Prompt 里不列买家工具只是「不让模型看见」，
+     * 模型仍可能凭旧记忆编出 {@code buyer_orders}；这里直接拒掉，由编排层降级规则引擎。
+     */
+    private String parseTool(JsonNode root, Integer role) {
+        JsonNode node = root.get("tool");
+        if (node == null) {
+            node = root.path("slots").get("tool");
+        }
+        if (node == null || node.isNull()) {
+            return null;
+        }
+        String name = node.asText("").trim();
+        if (name.isEmpty() || "null".equalsIgnoreCase(name)) {
+            return null;
+        }
+        if (toolRegistry == null) {
+            return name;
+        }
+        ToolDescriptor tool = toolRegistry.find(name);
+        if (tool == null) {
+            throw new LlmException("未注册的工具：" + name);
+        }
+        if (!toolRegistry.allows(tool, role)) {
+            throw new LlmException("工具 " + name + " 不适用于当前角色");
+        }
+        return name;
+    }
+
+    /** 内置工具的 intent 以注册表里的注解为准（模型可能与工具名对不上）。 */
+    private ChatIntent withToolIntent(ChatIntent parsed, String tool) {
+        if (tool == null || toolRegistry == null) {
+            return parsed;
+        }
+        ToolDescriptor descriptor = toolRegistry.find(tool);
+        if (descriptor == null || descriptor.intent() == null
+                || descriptor.intent() == ChatIntent.UNKNOWN) {
+            return parsed;
+        }
+        return descriptor.intent();
+    }
+
+    /** slots → 工具参数表（插件工具按 schema 取值；内置工具只用其中几个键）。 */
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> parseArgs(JsonNode slots) {
+        if (slots == null || !slots.isObject() || slots.isEmpty()) {
+            return null;
+        }
+        try {
+            return objectMapper.convertValue(slots, Map.class);
+        } catch (IllegalArgumentException e) {
+            return null;
+        }
     }
 
     /**
@@ -360,12 +436,20 @@ public class LlmIntentClassifier {
      * 模型的分类结果。
      *
      * <p>{@code needPublish} 只在 ADD_TO_SECKILL 时有业务意义；{@code targetPath} 只在
-     * NAVIGATE 时有值，且已按当前角色归位到真实路由。
+     * NAVIGATE 时有值，且已按当前角色归位到真实路由；{@code tool} 是模型从动态工具目录里选的
+     * 工具名（{@code null} = 按 intent 走内置分发）；{@code args} 是 slots 原文。
      */
-    public record Result(ChatIntent intent, String orderId, boolean needPublish, String targetPath) {
+    public record Result(ChatIntent intent, String orderId, boolean needPublish, String targetPath,
+                         String tool, Map<String, Object> args) {
+
         /** 兼容旧调用点 / 单测：不带 target_path 的三参构造。 */
         public Result(ChatIntent intent, String orderId, boolean needPublish) {
-            this(intent, orderId, needPublish, null);
+            this(intent, orderId, needPublish, null, null, null);
+        }
+
+        /** 兼容旧调用点 / 单测：带 target_path、不带工具。 */
+        public Result(ChatIntent intent, String orderId, boolean needPublish, String targetPath) {
+            this(intent, orderId, needPublish, targetPath, null, null);
         }
     }
 

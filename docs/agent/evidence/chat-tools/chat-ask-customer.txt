@@ -1,0 +1,13 @@
+问：我要看评论
+  intent=COMMENT_QUERY success=True
+  reply=您在我们平台上总共发表了1229条评论，不过目前平台没有独立的评价管理页，所以评论都是和商品详情一起展示的。最近您发表的3条评论都是5星好评，但是商品已经下线了，所以没有回复。
+  data={"scope": "customer", "total": 1229}
+
+问：我的订单到哪了
+  intent=ORDER_QUERY success=True
+  reply=您好，您最近下单的订单有三个，都是已取消的状态。
+  data={"total": 3708}
+
+问：我的退款进度
+  intent=REFUND_QUERY success=True
+  reply=您好，根据我们的系统查询，您目前没有售后退款记录哦。
