@@ -10,6 +10,7 @@ import com.minke.mallmanagement.chat.tool.ToolExecutor;
 import com.minke.mallmanagement.chat.tool.ToolRegistry;
 import com.minke.mallmanagement.chat.tool.ToolResult;
 import com.minke.mallmanagement.comment.dao.CommentDao;
+import com.minke.mallmanagement.goods.dao.GoodsDao;
 import com.minke.mallmanagement.order.dao.OrderDao;
 import com.minke.mallmanagement.order.model.OrderStateMachine;
 import com.minke.mallmanagement.order.refund.service.OrderRefundService;
@@ -50,6 +51,7 @@ class ChatAgentServiceTest {
     private LlmIntentClassifier llmClassifier;
     private CommentDao commentDao;
     private LlmReplyComposer replyComposer;
+    private GoodsDao goodsDao;
     private ChatAgentService service;
 
     @BeforeEach
@@ -61,6 +63,7 @@ class ChatAgentServiceTest {
         llmClassifier = mock(LlmIntentClassifier.class);
         commentDao = mock(CommentDao.class);
         replyComposer = mock(LlmReplyComposer.class);
+        goodsDao = mock(GoodsDao.class);
         // 默认：LLM 未启用（Mockito 布尔默认 false）⇒ 既有用例全部走规则引擎，行为与阶段一之前一致。
         // 默认：话术生成也不启用 ⇒ 走确定性模板，断言可以逐字写。
         // 默认：普通客户、无入驻申请；未登录走匿名。个别用例再覆盖。
@@ -69,7 +72,8 @@ class ChatAgentServiceTest {
         when(identityResolver.resolve(isNull(), isNull()))
                 .thenReturn(ResolvedIdentity.anonymous());
         service = new ChatAgentService(orderDao, refundService, new OrderStateMachine(),
-                identityResolver, memoryService, llmClassifier, commentDao, replyComposer);
+                identityResolver, memoryService, llmClassifier, commentDao, replyComposer,
+                null, null, goodsDao);
     }
 
     /** 打开 LLM 路由；具体分类结果由用例再 stub {@code classify}。 */
@@ -112,7 +116,7 @@ class ChatAgentServiceTest {
     private ChatAgentService serviceWithTools(ToolRegistry registry) {
         return new ChatAgentService(orderDao, refundService, new OrderStateMachine(),
                 identityResolver, memoryService, llmClassifier, commentDao, replyComposer,
-                registry, new ToolExecutor(registry));
+                registry, new ToolExecutor(registry), goodsDao);
     }
 
     @Test
@@ -1003,6 +1007,145 @@ class ChatAgentServiceTest {
         ArgumentCaptor<String> facts = ArgumentCaptor.forClass(String.class);
         verify(replyComposer).compose(anyString(), eq("ORDER_QUERY"), facts.capture());
         assertThat(facts.getValue()).contains("单号 r2vfwK6z3E").contains("已发货（待收货）");
+    }
+
+    // ==================== 商品查询（2026-10-22 修复） ====================
+
+    @Test
+    @DisplayName("商品查询：LLM 判 UNKNOWN 时不再命中 intent 留空的插件工具，而是查商品并明确说未找到")
+    void goodsQueryWithPrefixedCodeIsNotFound() {
+        llmEnabled();
+        when(llmClassifier.classify(any(), any(), any())).thenReturn(
+                new LlmIntentClassifier.Result(ChatIntent.UNKNOWN, null, false, null));
+        when(goodsDao.selectForChat(eq("222:ij-555"), anyInt())).thenReturn(List.of());
+
+        Map<String, Object> resp = service.ask("怎么看 222:ij-555 商品的详细数据", "c1", 1);
+
+        assertThat(resp.get("intent")).isEqualTo("GOODS_QUERY");
+        assertThat(String.valueOf(resp.get("reply")))
+                .contains("未找到商品").contains("222:ij-555");
+        verify(goodsDao).selectForChat(eq("222:ij-555"), anyInt());
+        // 商品编号不能被当成订单号，也不该触发「你最近有 N 笔订单」。
+        verify(orderDao, never()).selectRecentByCustomer(anyString(), anyInt());
+    }
+
+    @Test
+    @DisplayName("商品查询：只回买家该看的字段（名称/价格/库存/分类/状态），内部 Id 与店铺号不外泄")
+    void goodsQueryExistingProductReturnsSanitizedData() {
+        Map<String, Object> row = new HashMap<>();
+        row.put("Id", 121);
+        row.put("MerchantId", "5N1k5K2guh");
+        row.put("GoodName", "oppo12");
+        row.put("ProductCode", "OP2");
+        row.put("GoodType", "电子用品");
+        row.put("Price", 1888.0);
+        row.put("OriginalPrice", 1999.0);
+        row.put("ShelfState", 1);
+        row.put("Status", 2);
+        row.put("SkuCount", 4);
+        row.put("StockTotal", 400);
+        when(goodsDao.selectForChat(eq("oppo12"), anyInt())).thenReturn(List.of(row));
+
+        Map<String, Object> resp = service.ask("oppo12 多少钱", "c1", 1);
+
+        assertThat(resp.get("intent")).isEqualTo("GOODS_QUERY");
+        String reply = String.valueOf(resp.get("reply"));
+        assertThat(reply)
+                .contains("为您查到商品「oppo12」").contains("1888.00")
+                .contains("库存充足").contains("分类 电子用品").contains("正在热卖中")
+                .contains("直接带您去详情页");
+        // 脱敏：内部商家号 / 内部编号绝不能出现在回复里。
+        assertThat(reply).doesNotContain("5N1k5K2guh").doesNotContain("OP2")
+                .doesNotContain("MerchantId");
+
+        Map<String, Object> data = dataOf(resp);
+        assertThat(data).containsEntry("found", true).containsEntry("total", 1);
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> goods = (List<Map<String, Object>>) data.get("goods");
+        assertThat(goods).hasSize(1);
+        assertThat(goods.get(0))
+                .containsEntry("name", "oppo12").containsEntry("price", 1888.0)
+                .containsEntry("stock", 400).containsEntry("stockLabel", "库存充足")
+                .containsEntry("category", "电子用品").containsEntry("state", "在售")
+                .doesNotContainKeys("Id", "MerchantId", "ProductCode");
+        assertThat(objectSuggestions(resp))
+                .anySatisfy(s -> assertThat(s).containsEntry("routeKey", "goods")
+                        .containsEntry("keyword", "oppo12")
+                        .containsEntry("label", "带我去商品详情"));
+        verify(goodsDao).selectForChat(eq("oppo12"), anyInt());
+    }
+
+    @Test
+    @DisplayName("商品查询：没有 SKU 行 ⇒ 库存如实说「以详情页为准」，不编数字")
+    void goodsQueryWithoutSkuDoesNotInventStock() {
+        Map<String, Object> row = new HashMap<>();
+        row.put("GoodName", "oppo12");
+        row.put("GoodType", "电子用品");
+        row.put("Price", 1886.0);
+        row.put("ShelfState", 1);
+        row.put("Status", 2);
+        row.put("SkuCount", 0);
+        when(goodsDao.selectForChat(eq("oppo12"), anyInt())).thenReturn(List.of(row));
+
+        Map<String, Object> resp = service.ask("oppo12 多少钱", "c1", 1);
+
+        assertThat(String.valueOf(resp.get("reply")))
+                .contains("库存以详情页为准").doesNotContain("库存充足");
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> goods =
+                (List<Map<String, Object>>) dataOf(resp).get("goods");
+        assertThat(goods.get(0)).containsEntry("stock", null);
+    }
+
+    @Test
+    @DisplayName("商品查询：已下架的商品不喊「热卖中」，也不给「带我去详情」的胶囊")
+    void offShelfGoodsHasNoDetailCapsule() {
+        Map<String, Object> row = new HashMap<>();
+        row.put("GoodName", "oppo12");
+        row.put("Price", 1886.0);
+        row.put("ShelfState", 0);
+        row.put("Status", 2);
+        row.put("SkuCount", 4);
+        row.put("StockTotal", 400);
+        when(goodsDao.selectForChat(eq("oppo12"), anyInt())).thenReturn(List.of(row));
+
+        Map<String, Object> resp = service.ask("oppo12 多少钱", "c1", 1);
+
+        assertThat(String.valueOf(resp.get("reply")))
+                .contains("已下架").doesNotContain("正在热卖中");
+        assertThat(objectSuggestions(resp))
+                .noneSatisfy(s -> assertThat(s).containsEntry("routeKey", "goods"));
+    }
+
+    @Test
+    @DisplayName("商品查询纠偏：模型判成 ORDER_QUERY 也不行，带商品标记的句子一律走商品查询")
+    void goodsQueryOverridesOrderMisroute() {
+        llmEnabled();
+        when(llmClassifier.classify(any(), any(), any())).thenReturn(
+                new LlmIntentClassifier.Result(ChatIntent.ORDER_QUERY, "222:ij-555", false, null));
+        when(goodsDao.selectForChat(eq("222:ij-555"), anyInt())).thenReturn(List.of());
+
+        Map<String, Object> resp = service.ask("怎么看 222:ij-555 商品的详细数据", "c1", 1);
+
+        assertThat(resp.get("intent")).isEqualTo("GOODS_QUERY");
+        assertThat(String.valueOf(resp.get("reply"))).contains("未找到商品");
+        verify(orderDao, never()).selectRecentByCustomer(anyString(), anyInt());
+    }
+
+    @Test
+    @DisplayName("回归：intent=UNKNOWN 的插件工具不能被「按意图匹配」自动执行（pong 事故）")
+    void unknownIntentNeverAutoExecutesPluginTool() {
+        llmEnabled();
+        when(llmClassifier.classify(any(), any(), any())).thenReturn(
+                new LlmIntentClassifier.Result(ChatIntent.UNKNOWN, null, false, null));
+        EchoTool.LAST_CALL.set(null);
+        ChatAgentService service = serviceWithTools(registryWith(EchoTool.class));
+
+        Map<String, Object> resp = service.ask("今天天气不错", "c1", 1);
+
+        assertThat(EchoTool.LAST_CALL.get()).isNull();
+        assertThat(String.valueOf(resp.get("reply"))).doesNotContain("工具回显");
+        assertThat(resp.get("intent")).isEqualTo("UNKNOWN");
     }
 
     private static Map<String, Object> commentRow(long id, String kind, int rating, String content,

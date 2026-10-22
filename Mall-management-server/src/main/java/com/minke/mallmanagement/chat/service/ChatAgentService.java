@@ -7,6 +7,7 @@ import com.minke.mallmanagement.chat.tool.ToolContext;
 import com.minke.mallmanagement.chat.tool.ToolExecutor;
 import com.minke.mallmanagement.chat.tool.ToolRegistry;
 import com.minke.mallmanagement.comment.dao.CommentDao;
+import com.minke.mallmanagement.goods.dao.GoodsDao;
 import com.minke.mallmanagement.order.RefundStatusText;
 import com.minke.mallmanagement.order.dao.OrderDao;
 import com.minke.mallmanagement.order.model.OrderStateMachine;
@@ -112,6 +113,8 @@ public class ChatAgentService {
     /** 工具注册表 / 执行器（2026-10-22 插件化）。单测走兼容构造器时为 {@code null} ⇒ 全部回退 switch。 */
     private final ToolRegistry toolRegistry;
     private final ToolExecutor toolExecutor;
+    /** 商品查询（2026-10-22 修复）：查商品名 / 编号对应的真实商品行。 */
+    private final GoodsDao goodsDao;
 
     /** 兼容入口（阶段一之前的单测 / 没装评论工具时）：新依赖都置空。 */
     public ChatAgentService(OrderDao orderDao,
@@ -121,7 +124,7 @@ public class ChatAgentService {
                             SessionMemoryService memoryService,
                             LlmIntentClassifier llmClassifier) {
         this(orderDao, refundService, orderStateMachine, identityResolver, memoryService,
-                llmClassifier, null, null, null, null);
+                llmClassifier, null, null, null, null, null);
     }
 
     /** 兼容入口（2026-10-22 之前的单测）：不装工具注册表。 */
@@ -134,7 +137,22 @@ public class ChatAgentService {
                             CommentDao commentDao,
                             LlmReplyComposer replyComposer) {
         this(orderDao, refundService, orderStateMachine, identityResolver, memoryService,
-                llmClassifier, commentDao, replyComposer, null, null);
+                llmClassifier, commentDao, replyComposer, null, null, null);
+    }
+
+    /** 兼容入口（2026-10-22 插件化单测）：不装商品查询。 */
+    public ChatAgentService(OrderDao orderDao,
+                            OrderRefundService refundService,
+                            OrderStateMachine orderStateMachine,
+                            IdentityResolver identityResolver,
+                            SessionMemoryService memoryService,
+                            LlmIntentClassifier llmClassifier,
+                            CommentDao commentDao,
+                            LlmReplyComposer replyComposer,
+                            ToolRegistry toolRegistry,
+                            ToolExecutor toolExecutor) {
+        this(orderDao, refundService, orderStateMachine, identityResolver, memoryService,
+                llmClassifier, commentDao, replyComposer, toolRegistry, toolExecutor, null);
     }
 
     @Autowired
@@ -147,7 +165,8 @@ public class ChatAgentService {
                             CommentDao commentDao,
                             LlmReplyComposer replyComposer,
                             ToolRegistry toolRegistry,
-                            ToolExecutor toolExecutor) {
+                            ToolExecutor toolExecutor,
+                            GoodsDao goodsDao) {
         this.orderDao = orderDao;
         this.refundService = refundService;
         this.orderStateMachine = orderStateMachine;
@@ -158,6 +177,7 @@ public class ChatAgentService {
         this.replyComposer = replyComposer;
         this.toolRegistry = toolRegistry;
         this.toolExecutor = toolExecutor;
+        this.goodsDao = goodsDao;
     }
 
     /**
@@ -202,6 +222,7 @@ public class ChatAgentService {
             case ORDER_QUERY -> answerOrders(message, userId, role, orderId);
             case REFUND_QUERY -> answerRefund(message, userId, role);
             case COMMENT_QUERY -> answerComments(message, userId, role);
+            case GOODS_QUERY -> answerGoods(message, userId, role, arg(decision, "goodsKeyword"));
             case OPEN_STORE -> answerOpenStore(userId, role);
             case ADD_TO_SECKILL -> answerAddToSeckill(userId, role, decision.needPublish());
             case NAVIGATE -> answerNavigate(decision.targetPath(), userId, role, decision.needPublish());
@@ -242,6 +263,14 @@ public class ChatAgentService {
         }
         if (decision.needPublish()) {
             args.putIfAbsent("need_publish", true);
+        }
+        // 商品名 / 编号：模型漏抽时用确定性规则补一刀（编号里的冒号、连字符原样保留）。
+        if (decision.intent() == ChatIntent.GOODS_QUERY && isBlank(str(args.get("goodsKeyword")))) {
+            String keyword = ChatIntentRecognizer.extractGoodsKeyword(
+                    ChatIntentRecognizer.normalize(message));
+            if (!isBlank(keyword)) {
+                args.put("goodsKeyword", keyword);
+            }
         }
         ToolContext context = new ToolContext(userId, role, message);
         try {
@@ -302,6 +331,15 @@ public class ChatAgentService {
                         && (intent == ChatIntent.ORDER_QUERY || intent == ChatIntent.REFUND_QUERY
                             || intent == ChatIntent.NAVIGATE || intent == ChatIntent.UNKNOWN)) {
                     return new Decision(ChatIntent.COMMENT_QUERY, null, false, null);
+                }
+                // 「查某个商品的详细数据」：小模型会把它判成 NAVIGATE（去搜索页）、ORDER_QUERY
+                // （把编号当订单号）甚至 UNKNOWN。带商品名 / 编号且问的是数据 ⇒ 一律走商品查询；
+                // 模型已经显式选了 query_goods 时不打断它的参数。
+                if (ChatIntentRecognizer.looksLikeGoodsQuery(normalized)
+                        && (intent != ChatIntent.GOODS_QUERY || isBlank(tool))) {
+                    String keyword = ChatIntentRecognizer.extractGoodsKeyword(normalized);
+                    return new Decision(ChatIntent.GOODS_QUERY, null, false, null, null,
+                            isBlank(keyword) ? null : Map.of("goodsKeyword", keyword));
                 }
                 // 小模型偶尔把「我要看评论」这类「看某个页面」判成 ORDER_QUERY。
                 // 页面名以 RouteCatalog 为准：字典里有唯一且够长的说法、而用户又不是在问
@@ -368,6 +406,12 @@ public class ChatAgentService {
             if (guessed != null && !namesPageItself(normalized, guessed)) {
                 return new Decision(ChatIntent.NAVIGATE, null, false, guessed);
             }
+        }
+
+        if (intent == ChatIntent.GOODS_QUERY) {
+            String keyword = ChatIntentRecognizer.extractGoodsKeyword(normalized);
+            return new Decision(intent, null, false, null, null,
+                    isBlank(keyword) ? null : Map.of("goodsKeyword", keyword));
         }
 
         if (intent == ChatIntent.UNKNOWN) {
@@ -443,6 +487,162 @@ public class ChatAgentService {
         Decision(ChatIntent intent, String orderId, boolean needPublish, String targetPath) {
             this(intent, orderId, needPublish, targetPath, null, null);
         }
+    }
+
+    // ==================== 商品 ====================
+
+    /**
+     * 「查商品」：按商品名 / 编号查真实商品行（2026-10-22 修复）。
+     *
+     * <p>为什么不能走订单 / 导航：商品编号里可以带冒号（{@code 222:ij-555}），旧路把它当
+     * 订单号查，答成「没找到单号…你最近有 3708 笔订单」；模型判 UNKNOWN 时又会命中
+     * intent 留空的自检工具。这里按「先精确后模糊」查 goods 表，查不到就明确说未找到。
+     *
+     * <p>包内可见：{@link ChatToolSet} 的 {@code query_goods} 工具调用它。
+     */
+    Map<String, Object> answerGoods(String question, String userId, Integer role,
+                                    String wantedKeyword) {
+        String keyword = isBlank(wantedKeyword)
+                ? ChatIntentRecognizer.extractGoodsKeyword(ChatIntentRecognizer.normalize(question))
+                : wantedKeyword.trim();
+        if (isBlank(keyword)) {
+            return reply(ChatIntent.GOODS_QUERY,
+                    "请告诉我要查哪个商品：把商品名或编号发我（例如「oppo12」或「222:ij-555」），"
+                            + "我帮你查价格、库存和在售状态。",
+                    null, null, List.of("查我的订单", "怎么开店"));
+        }
+        if (goodsDao == null) {
+            return reply(ChatIntent.GOODS_QUERY,
+                    "商品查询暂时不可用，请到商城搜索页按关键词搜索。", null, null, null);
+        }
+        List<Map<String, Object>> rows;
+        try {
+            rows = goodsDao.selectForChat(keyword, RECENT_LIMIT);
+        } catch (RuntimeException e) {
+            log.warn("商品查询失败（keyword={}）：{}: {}", keyword,
+                    e.getClass().getSimpleName(), e.getMessage());
+            return reply(ChatIntent.GOODS_QUERY,
+                    "商品查询暂时失败，请稍后重试，或到商城搜索页按关键词搜索。", null, null, null);
+        }
+        Map<String, Object> data = new LinkedHashMap<>();
+        data.put("keyword", keyword);
+        if (rows == null || rows.isEmpty()) {
+            data.put("found", false);
+            data.put("total", 0);
+            return reply(ChatIntent.GOODS_QUERY,
+                    "未找到商品「" + keyword + "」。请核对商品名或编号后重试，"
+                            + "也可以到商城搜索页按关键词搜索。",
+                    data, null, List.of("查我的订单", "怎么开店"));
+        }
+        Map<String, Object> first = rows.get(0);
+        String name = str(first.get("GoodName"));
+        String type = str(first.get("GoodType"));
+        double price = doubleOf(first.get("Price"));
+        double original = doubleOf(first.get("OriginalPrice"));
+        String state = goodsState(first);
+        boolean onSale = "在售".equals(state);
+
+        StringBuilder text = new StringBuilder();
+        if (rows.size() > 1) {
+            text.append("找到 ").append(rows.size()).append(" 个相近商品，最匹配的是：");
+        }
+        text.append("为您查到商品「").append(name).append("」，当前售价 ¥").append(money(price));
+        if (original > price) {
+            text.append("（划线价 ¥").append(money(original)).append("）");
+        }
+        text.append("，").append(goodsStockLabel(first));
+        if (!isBlank(type)) {
+            text.append("，分类 ").append(type);
+        }
+        text.append("，").append(onSale ? "正在热卖中。" : "当前" + state + "。");
+        if (onSale) {
+            text.append("您可以点击下方按钮，我直接带您去详情页看看。");
+        }
+
+        List<Object> suggestions = new ArrayList<>();
+        if (onSale) {
+            suggestions.add(goodsSuggestion(name));
+        }
+        suggestions.add("查我的订单");
+        suggestions.add("怎么开店");
+
+        data.put("found", true);
+        data.put("total", rows.size());
+        data.put("goods", goodsCards(rows));
+        return reply(ChatIntent.GOODS_QUERY, text.toString(), data, null, suggestions);
+    }
+
+    /**
+     * 商品行的**买家视图** —— 只出「商品名 / 价格 / 库存 / 分类 / 在售状态」。
+     *
+     * <p>⚠️ {@code Id} / {@code MerchantId} / {@code ProductCode} 是内部定位字段
+     * （2026-10-22 用户实测：买家不该看到 {@code 5N1k5K2guh} 这种店铺号）。脱敏做在这里，
+     * 而不是指望前端不渲染 —— {@code data} 是直接下发到浏览器的。
+     */
+    private static List<Map<String, Object>> goodsCards(List<Map<String, Object>> rows) {
+        List<Map<String, Object>> cards = new ArrayList<>();
+        for (Map<String, Object> row : rows) {
+            Map<String, Object> card = new LinkedHashMap<>();
+            card.put("name", str(row.get("GoodName")));
+            double price = doubleOf(row.get("Price"));
+            double original = doubleOf(row.get("OriginalPrice"));
+            card.put("price", price);
+            if (original > price) {
+                card.put("originalPrice", original);
+            }
+            int skuCount = intOf(row.get("SkuCount"), 0);
+            card.put("stock", skuCount > 0 ? intOf(row.get("StockTotal"), 0) : null);
+            card.put("stockLabel", goodsStockLabel(row));
+            card.put("category", str(row.get("GoodType")));
+            card.put("state", goodsState(row));
+            cards.add(card);
+        }
+        return cards;
+    }
+
+    /**
+     * 库存话术：有 SKU 行才谈数量；没有 SKU 行（{@code goods} 表本身无库存列）时如实说
+     * 「以详情页为准」，绝不编一个数字。
+     */
+    private static String goodsStockLabel(Map<String, Object> row) {
+        int skuCount = intOf(row.get("SkuCount"), 0);
+        if (skuCount <= 0) {
+            return "库存以详情页为准";
+        }
+        int total = intOf(row.get("StockTotal"), 0);
+        if (total <= 0) {
+            return "暂时无货";
+        }
+        if (total < 20) {
+            return "仅剩 " + total + " 件";
+        }
+        return "库存充足";
+    }
+
+    /** 商品详情胶囊：前端据此触发「搜索框 → 搜索按钮 → 商品卡片 → 详情页」的跨页漫游。 */
+    private static Map<String, Object> goodsSuggestion(String name) {
+        Map<String, Object> item = new LinkedHashMap<>();
+        item.put("label", "带我去商品详情");
+        item.put("routeKey", "goods");
+        item.put("keyword", name);
+        return item;
+    }
+
+    /** 商品行 → 状态说明（{@code Status=2} 且 {@code ShelfState=1} 才是在售）。 */
+    private static String goodsState(Map<String, Object> row) {
+        if (intOf(row.get("Status"), 2) != 2) {
+            return "未上架（待审核或已驳回）";
+        }
+        if (intOf(row.get("ShelfState"), 1) != 1) {
+            return "已下架";
+        }
+        return "在售";
+    }
+
+    /** 从 Decision 的参数里取一个字符串槽位（缺失返回空串，交给 isBlank 判断）。 */
+    private static String arg(Decision decision, String name) {
+        Map<String, Object> args = decision.args();
+        return args == null ? null : str(args.get(name));
     }
 
     // ==================== 订单 ====================

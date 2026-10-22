@@ -2,6 +2,7 @@ package com.minke.mallmanagement.chat.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.minke.mallmanagement.chat.model.ChatIntent;
+import com.minke.mallmanagement.chat.tool.AgentParam;
 import com.minke.mallmanagement.chat.tool.AgentTool;
 import com.minke.mallmanagement.chat.tool.ToolRegistry;
 import com.sun.net.httpserver.HttpServer;
@@ -98,10 +99,25 @@ class LlmIntentClassifierTest {
         }
     }
 
+    /** 商品查询工具（全角色可见）：验证 GOODS_QUERY 允许 + goodsKeyword 槽位原样保留。 */
+    static class GoodsTools {
+
+        @AgentTool(name = "query_goods",
+                description = "查商城里的商品：按商品名或编号查价格、编号与在售状态。",
+                intent = ChatIntent.GOODS_QUERY)
+        public String queryGoods(
+                @AgentParam(name = "goodsKeyword",
+                        description = "商品名或编号，冒号与连字符原样保留", required = false)
+                String goodsKeyword) {
+            return "goods:" + goodsKeyword;
+        }
+    }
+
     private static ToolRegistry registry() {
         AnnotationConfigApplicationContext ctx = new AnnotationConfigApplicationContext();
         ctx.registerBean(ObjectMapper.class);
         ctx.register(CommentTools.class);
+        ctx.register(GoodsTools.class);
         ctx.refresh();
         ToolRegistry registry = new ToolRegistry(new ObjectMapper());
         registry.setApplicationContext(ctx);
@@ -247,6 +263,27 @@ class LlmIntentClassifierTest {
         assertThat(result.intent()).isEqualTo(ChatIntent.COMMENT_QUERY);
         assertThat(result.targetPath()).isNull();
         assertThat(result.args()).containsEntry("orderId", "ORD-1");
+    }
+
+    @Test
+    @DisplayName("商品查询：GOODS_QUERY 允许；goodsKeyword 原样保留，商品编号不会留在 orderId")
+    void goodsQueryKeepsKeywordAndDropsOrderId() throws IOException {
+        AtomicReference<String> body = new AtomicReference<>();
+        String url = serve(200, envelope(
+                "{\"intent\":\"GOODS_QUERY\",\"tool\":\"query_goods\","
+                        + "\"slots\":{\"goodsKeyword\":\"222:ij-555\",\"orderId\":\"222:ij-555\"}}"),
+                null, body);
+
+        LlmIntentClassifier.Result result = classifierWithTools(url, Duration.ofSeconds(3))
+                .classify("怎么看 222:ij-555 商品的详细数据", 1, "/customer");
+
+        assertThat(result.intent()).isEqualTo(ChatIntent.GOODS_QUERY);
+        assertThat(result.tool()).isEqualTo("query_goods");
+        assertThat(result.args()).containsEntry("goodsKeyword", "222:ij-555");
+        assertThat(result.orderId()).isNull();
+        // Prompt 里既有工具目录（含商品工具描述），也有明确的槽位说明。
+        assertThat(body.get()).contains("query_goods").contains("goodsKeyword")
+                .contains("商品名或商品编号").contains("订单号");
     }
 
     @Test

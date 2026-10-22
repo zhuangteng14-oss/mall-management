@@ -27,7 +27,7 @@
             @action="onAction"
             @suggestion="onSuggestion"
             @retry="onRetry"
-            @typed="scrollToEnd"
+            @typed="onTyped(m)"
           />
         </div>
 
@@ -82,7 +82,7 @@ import {
   resumeTourFlow,
   savePendingTour,
   SECKILL_FLOW_ID,
-  setTourNavigator, startNavGuidedTour, startTourFlow,
+  setTourNavigator, startGoodsTour, startNavGuidedTour, startTourFlow,
   startOpenStoreTour,
 } from '../../composables/useTour'
 
@@ -130,16 +130,41 @@ function isLoginPath(p) {
   return n === '/login' || n === '/register'
 }
 
-function scrollToEnd() {
+const reduceMotion = typeof window !== 'undefined' && window.matchMedia
+  ? window.matchMedia('(prefers-reduced-motion: reduce)').matches
+  : false
+
+/**
+ * 滚到底，**分两种语义**（2026-10-22 用户实测：打开面板时先甩到顶部再瞬移，掉帧闪烁）：
+ * · `smooth=false`（打开面板 / 渲染历史）：`nextTick` 里直接赋 `scrollTop` ——
+ *   回调在 Vue 打完补丁、浏览器**绘制之前**的微任务里执行，所以第一帧就已经在底部；
+ *   直接赋值还会**取消**上一段未完成的平滑滚动，不会出现两条滚动打架。
+ * · `smooth=true`（自己发消息 / 客服回复 / 打字结束）：`behavior:'smooth'`，看得到气泡滑入。
+ * `prefers-reduced-motion` 下一律瞬移。
+ */
+function scrollToEnd(smooth = false) {
   nextTick(() => {
     const el = listRef.value
-    if (el) el.scrollTop = el.scrollHeight
+    if (!el) return
+    if (smooth && !reduceMotion) {
+      el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' })
+    } else {
+      el.scrollTop = el.scrollHeight
+    }
   })
+}
+
+/** 一条客服消息打完字 ⇒ 标记成 `instant`：再次打开面板时不再重放打字机，也不触发滚动跳动。 */
+function onTyped(msg) {
+  if (msg && msg.role === 'bot') msg.instant = true
+  scrollToEnd(true)
 }
 
 function openChat() {
   open.value = true
   unread.value = 0
+  // 历史渲染：无感定位到底部（绘制前完成，不做平滑动画）。
+  scrollToEnd(false)
   nextTick(() => inputRef.value?.focus())
 }
 function close() {
@@ -151,7 +176,7 @@ function toggle() {
 
 function pushBot(text, extra = {}) {
   messages.push(reactive({ id: nextId(), role: 'bot', text, ...extra }))
-  scrollToEnd()
+  scrollToEnd(true)
 }
 
 function onSubmit() {
@@ -183,7 +208,8 @@ async function send(text, existing) {
   busy.value = true
   const bot = reactive({ id: nextId(), role: 'bot', text: '', pending: true })
   messages.push(bot)
-  scrollToEnd()
+  // 自己发出去的新消息：平滑滑入。
+  scrollToEnd(true)
 
   let ok = false
   try {
@@ -218,7 +244,8 @@ async function send(text, existing) {
   } finally {
     busy.value = false
     if (ok && !open.value) unread.value += 1
-    scrollToEnd()
+    // 回复到达：平滑滑入（面板没开时这次滚动无副作用）。
+    scrollToEnd(true)
   }
 }
 
@@ -226,8 +253,17 @@ function onRetry(msg) {
   send(msg.retryMessage || msg.text, msg)
 }
 
-function onSuggestion(s) {
+async function onSuggestion(s) {
   if (s && typeof s === 'object') {
+    if (s.routeKey === 'goods') {
+      // 商品详情：从顶栏搜索框开始一步步高亮（首页 / 搜索页 / 商家后台都能起步）。
+      close()
+      const tour = await startGoodsTour(s.keyword, route.path)
+      if (!tour) {
+        pushBot('当前页面没有顶栏搜索框。先回到商城主页，再点一次「带我去商品详情」，我从搜索框带你走。')
+      }
+      return
+    }
     if (s.routeKey === 'apply') {
       onAction({ type: 'tour', tourId: 'open-store', routeKey: 'apply', label: s.label })
       return

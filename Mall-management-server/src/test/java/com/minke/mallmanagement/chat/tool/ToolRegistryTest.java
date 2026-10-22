@@ -198,6 +198,10 @@ class ToolRegistryTest {
         assertThat(registry.forIntent(ChatIntent.ORDER_QUERY, 2)).isNull();
         assertThat(registry.forIntent(ChatIntent.ADD_TO_SECKILL, 2).name()).isEqualTo("merchant_only");
         assertThat(registry.forIntent(ChatIntent.NAVIGATE, 1)).isNull();
+        // intent 留空（UNKNOWN）的工具只能按名字显式调用：否则「没听懂」会命中它
+        // —— 2026-10-22 线上实测把「查商品」答成了自检工具的「pong」。
+        assertThat(registry.forIntent(ChatIntent.UNKNOWN, 1)).isNull();
+        assertThat(registry.forIntent(ChatIntent.UNKNOWN, 3)).isNull();
     }
 
     @Test

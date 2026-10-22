@@ -107,6 +107,26 @@ public class ChatToolSet {
         return agent.answerComments(ctx.message(), ctx.userId(), ctx.role());
     }
 
+    // ==================== 商品查询 ====================
+
+    @AgentTool(name = "query_goods",
+            description = "查商城里的商品：按商品名或商品编号查真实数据（价格、划线价、编号、所属店铺、分类、"
+                    + "在售 / 下架 / 未上架状态）。用户问「某商品多少钱 / 详细数据 / 参数 / 库存 / 怎么样」，"
+                    + "或直接贴出商品名 / 编号（可带冒号，如 222:ij-555）时用它。"
+                    + "⚠️ 查不到就明确说未找到，不要编造价格或库存；"
+                    + "⚠️ 用户问「去哪个页面上架 / 改价 / 管理商品」时不要用它，改用 navigate。",
+            targetRole = {},
+            intent = ChatIntent.GOODS_QUERY)
+    public Map<String, Object> queryGoods(
+            @AgentParam(name = "goodsKeyword",
+                    description = "商品名或商品编号；编号里的冒号、连字符原样保留（不要拆开、不要当订单号）。"
+                            + "用户没提就留空",
+                    required = false)
+            String goodsKeyword,
+            ToolContext ctx) {
+        return agent.answerGoods(ctx.message(), ctx.userId(), ctx.role(), goodsKeyword);
+    }
+
     // ==================== 开店 / 秒杀（身份分流） ====================
 
     @AgentTool(name = "open_store",

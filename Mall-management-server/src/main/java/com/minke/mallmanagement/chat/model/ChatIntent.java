@@ -28,6 +28,17 @@ public enum ChatIntent {
      */
     COMMENT_QUERY,
 
+    /**
+     * 查商品本身（2026-10-22「商品查询」修复）：用户问某个商品的价格、详情、参数、库存，
+     * 或者直接贴出商品名 / 商品编号（如 {@code 222:ij-555}）。
+     *
+     * <p>⚠️ 与 {@link #NAVIGATE} 的边界：「怎么上架 / 改价 / 管理商品」是去某个页面办事
+     * ⇒ NAVIGATE；问「这个商品多少钱 / 详细数据」才是本意图。商品编号**不是**订单号：
+     * 带冒号的编号（{@code 222:ij-555}）必须原样进 {@code goodsKeyword}，不能进
+     * {@code orderId}。
+     */
+    GOODS_QUERY,
+
     /** 怎么开店 / 商家入驻 —— 回复里带一个触发前端漫游的 action。 */
     OPEN_STORE,
 

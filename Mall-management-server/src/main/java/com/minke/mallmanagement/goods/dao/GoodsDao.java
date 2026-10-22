@@ -357,6 +357,86 @@ public class GoodsDao {
         return s.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_");
     }
 
+    // ==================== 读：智能客服查商品（2026-10-22 新增） ====================
+
+    /**
+     * 智能客服「查商品」：按商品名 / 编号 / Id 查真实商品行。
+     *
+     * <p>查询顺序：① {@code 商家:编号} 复合 token（如 {@code 222:ij-555}）→
+     * ② 整串精确匹配（{@code ProductCode} / {@code GoodName} / {@code 商家:ProductCode}）→
+     * ③ 纯数字按 {@code Id} → ④ 商品名 / 编号模糊匹配 → ⑤ 复合 token 的冒号后半段模糊匹配。
+     * 每一档非空即停，最多 {@code limit} 行。
+     *
+     * <p>⚠️ 排除已软删（{@code DeletedAt} 非空）的行；**下架 / 未上架的行保留** ——
+     * 回复层会据 {@code ShelfState} / {@code Status} 说明状态，避免「商品存在却答未找到」。
+     * 模糊档把在售行排在前面。
+     *
+     * <p>⚠️ <b>本方法返回的是「内部行」</b>（含 {@code Id} / {@code MerchantId} / {@code ProductCode}）；
+     * {@code ChatAgentService.answerGoods} 必须**脱敏后**再回给买家 —— 这三个字段只用于服务端
+     * 定位与前端详情页链接，绝不能出现在回复文本或 {@code data} 里（2026-10-22 用户实测）。
+     *
+     * <p>库存来自 SKU 表：{@code SkuCount} / {@code StockTotal} 是该商品全部规格的合计。
+     * {@code goods} 表本身没有库存列，{@code SkuCount = 0} 表示平台没有这件商品的库存数据
+     * （回复层据此说「以详情页为准」，不编造）。
+     */
+    public List<Map<String, Object>> selectForChat(String keyword, int limit) {
+        String kw = keyword == null ? "" : keyword.trim();
+        if (kw.isEmpty() || limit <= 0) {
+            return List.of();
+        }
+        String cols = "SELECT g.Id, g.MerchantId, g.GoodName, g.Price, g.OriginalPrice, "
+                + "g.GoodImg, g.GoodType, g.ProductCode, g.ShelfState, g.Status, "
+                + "(SELECT COUNT(*) FROM goods_sku s WHERE s.GoodsId = g.Id) AS SkuCount, "
+                + "(SELECT COALESCE(SUM(s.Stock), 0) FROM goods_sku s WHERE s.GoodsId = g.Id) AS StockTotal "
+                + "FROM goods g WHERE g.DeletedAt IS NULL ";
+        int colon = kw.indexOf(':');
+        if (colon > 0 && colon < kw.length() - 1) {
+            String merchant = kw.substring(0, colon);
+            String code = kw.substring(colon + 1);
+            List<Map<String, Object>> composite = jdbcClient.sql(cols
+                            + "AND g.MerchantId = ? AND (g.ProductCode = ? OR g.GoodName = ?) "
+                            + "ORDER BY g.Id DESC LIMIT ?")
+                    .params(merchant, code, code, limit).query().listOfRows();
+            if (!composite.isEmpty()) {
+                return composite;
+            }
+        }
+        List<Map<String, Object>> exact = jdbcClient.sql(cols
+                        + "AND (g.ProductCode = ? OR g.GoodName = ? "
+                        + "OR CONCAT(g.MerchantId, ':', g.ProductCode) = ?) "
+                        + "ORDER BY g.Id DESC LIMIT ?")
+                .params(kw, kw, kw, limit).query().listOfRows();
+        if (!exact.isEmpty()) {
+            return exact;
+        }
+        if (kw.length() <= 10 && kw.chars().allMatch(Character::isDigit)) {
+            try {
+                List<Map<String, Object>> byId = jdbcClient.sql(cols
+                                + "AND g.Id = ? ORDER BY g.Id DESC LIMIT ?")
+                        .params(Integer.parseInt(kw), limit).query().listOfRows();
+                if (!byId.isEmpty()) {
+                    return byId;
+                }
+            } catch (NumberFormatException ignored) {
+                // 超出 int 范围：按字符串继续走模糊匹配
+            }
+        }
+        String like = "%" + likeEscape(kw) + "%";
+        List<Map<String, Object>> fuzzy = jdbcClient.sql(cols
+                        + "AND (g.GoodName LIKE ? ESCAPE '\\\\' OR g.ProductCode LIKE ? ESCAPE '\\\\') "
+                        + "ORDER BY (g.ShelfState = 1 AND g.Status = 2) DESC, g.Id DESC LIMIT ?")
+                .params(like, like, limit).query().listOfRows();
+        if (!fuzzy.isEmpty() || colon <= 0) {
+            return fuzzy;
+        }
+        // 「222:ij-555」整串查不到时，再用冒号后的型号模糊找一次。
+        String suffixLike = "%" + likeEscape(kw.substring(colon + 1)) + "%";
+        return jdbcClient.sql(cols
+                        + "AND (g.GoodName LIKE ? ESCAPE '\\\\' OR g.ProductCode LIKE ? ESCAPE '\\\\') "
+                        + "ORDER BY (g.ShelfState = 1 AND g.Status = 2) DESC, g.Id DESC LIMIT ?")
+                .params(suffixLike, suffixLike, limit).query().listOfRows();
+    }
+
     // ==================== 读：审计快照（C3 批 A 新增，追加在类尾） ====================
 
     /**

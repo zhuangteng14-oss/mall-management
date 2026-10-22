@@ -71,6 +71,54 @@ class ChatIntentRecognizerTest {
     }
 
     @Test
+    @DisplayName("商品查询：带冒号的编号原样进商品槽位，不当订单号")
+    void goodsQueryWithPrefixedCode() {
+        String text = ChatIntentRecognizer.normalize("怎么看 222:ij-555 商品的详细数据");
+        ChatIntentRecognizer.Match m = ChatIntentRecognizer.recognize("怎么看 222:ij-555 商品的详细数据");
+
+        assertThat(m.intent()).isEqualTo(ChatIntent.GOODS_QUERY);
+        assertThat(m.hasOrderId()).isFalse();
+        assertThat(ChatIntentRecognizer.extractGoodsKeyword(text)).isEqualTo("222:ij-555");
+    }
+
+    @Test
+    @DisplayName("商品查询：型号 token（字母+数字）与「多少钱」也能识别")
+    void goodsQueryWithModelToken() {
+        ChatIntentRecognizer.Match m = ChatIntentRecognizer.recognize("oppo12 多少钱");
+
+        assertThat(m.intent()).isEqualTo(ChatIntent.GOODS_QUERY);
+        assertThat(ChatIntentRecognizer.extractGoodsKeyword(ChatIntentRecognizer.normalize("oppo12 多少钱")))
+                .isEqualTo("oppo12");
+    }
+
+    @Test
+    @DisplayName("商品边界：上架 / 改价仍是办事，订单里的商品仍归订单，评论仍归评论")
+    void goodsQueryDoesNotStealOtherIntents() {
+        assertThat(ChatIntentRecognizer.recognize("怎么上架商品").intent())
+                .isEqualTo(ChatIntent.OPEN_STORE);
+        assertThat(ChatIntentRecognizer.recognize("怎么修改商品价格").intent())
+                .isNotEqualTo(ChatIntent.GOODS_QUERY);
+        assertThat(ChatIntentRecognizer.recognize("我的订单里的商品详情").intent())
+                .isEqualTo(ChatIntent.ORDER_QUERY);
+        assertThat(ChatIntentRecognizer.recognize("我要看商品评论").intent())
+                .isEqualTo(ChatIntent.COMMENT_QUERY);
+    }
+
+    @Test
+    @DisplayName("商品边界：逛 / 看商品列表是浏览，不是查某个商品的详情")
+    void browsingPhrasesAreNotGoodsQuery() {
+        assertThat(ChatIntentRecognizer.recognize("看看商品").intent())
+                .isNotEqualTo(ChatIntent.GOODS_QUERY);
+        assertThat(ChatIntentRecognizer.recognize("逛逛商品").intent())
+                .isNotEqualTo(ChatIntent.GOODS_QUERY);
+        assertThat(ChatIntentRecognizer.recognize("去首页看看商品").intent())
+                .isNotEqualTo(ChatIntent.GOODS_QUERY);
+        // 反过来：带了具体商品 token 时，即使句中有「看看」也仍然是查商品。
+        assertThat(ChatIntentRecognizer.recognize("看看 oppo12 商品详情").intent())
+                .isEqualTo(ChatIntent.GOODS_QUERY);
+    }
+
+    @Test
     @DisplayName("问候只在整句匹配时成立：「你好，怎么开店」要继续往下走")
     void greetingOnlyWhenWholeSentence() {
         assertThat(ChatIntentRecognizer.recognize("你好！").intent()).isEqualTo(ChatIntent.GREETING);

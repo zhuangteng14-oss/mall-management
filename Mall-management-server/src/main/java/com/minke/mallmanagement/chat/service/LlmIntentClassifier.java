@@ -54,6 +54,7 @@ public class LlmIntentClassifier {
             ChatIntent.ORDER_QUERY,
             ChatIntent.REFUND_QUERY,
             ChatIntent.COMMENT_QUERY,
+            ChatIntent.GOODS_QUERY,
             ChatIntent.OPEN_STORE,
             ChatIntent.ADD_TO_SECKILL,
             ChatIntent.NAVIGATE,
@@ -89,13 +90,18 @@ public class LlmIntentClassifier {
             B. 数据查询与业务（用户问**自己那笔**的状态，这类**不要**给 target_path）
                ⇒ ORDER_QUERY（查我的订单状态/进度）、REFUND_QUERY（查我的售后进度/结果）、
                   COMMENT_QUERY（查评论/评价内容、有没有人回复我）、
+                  GOODS_QUERY（查**某个商品**的价格/详情/参数/库存）、
                   OPEN_STORE（开店/入驻）、ADD_TO_SECKILL（报名秒杀）、
                   FAQ（政策咨询）、GREETING（问候）、HELP（你能做什么）、UNKNOWN（闲聊/听不懂）。
                例：「我的订单到哪了」⇒ ORDER_QUERY；「我的退款进度」⇒ REFUND_QUERY；
                    「我要看评论」「有没有人给我评论」⇒ COMMENT_QUERY（问的是评论内容与回复状态，
                    平台没有独立的评价管理页，**不要**把它当导航）；
+                   「怎么看 222:ij-555 商品的详细数据」「oppo12 多少钱」⇒ GOODS_QUERY，
+                   商品名/编号原样放进 slots.goodsKeyword（**不要**放进 orderId）；
                    「怎么开店」⇒ OPEN_STORE；「我要报名秒杀」⇒ ADD_TO_SECKILL；
                    「我的新商品要上架秒杀页，还没上架呢」⇒ ADD_TO_SECKILL，且 need_publish = true。
+               ⚠️ 「查某个商品的数据」是 GOODS_QUERY，**不是** NAVIGATE（搜索页），
+                  也**不是** ORDER_QUERY：商品编号里的冒号、连字符不是订单号的一部分。
 
             B2. 工具调用：具体能用哪些工具、参数怎么填，见下方「业务工具」清单
                （该清单已按当前登录角色过滤；商家看不到买家工具，买家也看不到商家工具）。
@@ -104,11 +110,15 @@ public class LlmIntentClassifier {
             规则：
             1. target_path 只能逐字取字典里的路径；字典里没有合适的页面就给 null。
             2. 判断口诀：问「怎么做 / 如何办 / 去哪办 / 在哪看」⇒ NAVIGATE；
-               问「我那一笔 / 那一单 到哪了 / 进度 / 状态 / 结果 / 有没有」⇒ 数据查询。
-               对照：「怎么处理退款」= NAVIGATE；「我的退款到哪了」= REFUND_QUERY。
+               问「我那一笔 / 那一单 到哪了 / 进度 / 状态 / 结果 / 有没有」⇒ 数据查询；
+               问「某个商品多少钱 / 详细数据 / 参数 / 库存」⇒ GOODS_QUERY。
+               对照：「怎么处理退款」= NAVIGATE；「我的退款到哪了」= REFUND_QUERY；
+                     「怎么看 222:ij-555 商品的详细数据」= GOODS_QUERY。
             3. 同样一句话在不同角色下落点不同：只从字典里给当前角色列出的页面中选。
             4. 提取槽位（slots）：
-               - orderId：订单号，没有就给 null。
+               - orderId：订单号，没有就给 null。⚠️ 商品名 / 商品编号（可含冒号、连字符）**不是**
+                 订单号，绝不要放进 orderId。
+               - goodsKeyword：商品名或商品编号，原样保留（如 222:ij-555、oppo12）；用户没提就给 null。
                - need_publish：布尔值。**仅当**目标是秒杀报名、且用户明说商品「还没上架 / 还没发布 /
                  还没有商品」时给 true；其他情况一律 false。
                - 工具参数：按「业务工具」清单里该工具的 schema，用**同名键**填进 slots。
@@ -117,7 +127,7 @@ public class LlmIntentClassifier {
             """;
 
     static final String OUTPUT_FORMAT = """
-            输出格式：{"intent": "...", "tool": null, "target_path": null, "slots": {"orderId": null, "need_publish": false}}
+            输出格式：{"intent": "...", "tool": null, "target_path": null, "slots": {"orderId": null, "goodsKeyword": null, "need_publish": false}}
             """;
 
     private final boolean enabled;
@@ -346,6 +356,11 @@ public class LlmIntentClassifier {
         // 工具：必须是注册表里存在、且当前角色可用的名字（防「商家让模型调买家工具」）。
         String tool = parseTool(root, role);
         intent = withToolIntent(intent, tool);
+        // 商品查询不带订单号：模型有时会把「222:ij-555」误填进 orderId，留着会污染
+        // 会话里的「单号」上下文（下一句「到哪了」会被当成查那一单）。
+        if (intent == ChatIntent.GOODS_QUERY) {
+            orderId = null;
+        }
         String targetPath = parseTargetPath(root, intent, role);
         return new Result(intent, orderId, needPublish, targetPath, tool, parseArgs(slots));
     }

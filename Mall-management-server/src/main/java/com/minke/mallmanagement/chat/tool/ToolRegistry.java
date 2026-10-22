@@ -231,9 +231,16 @@ public class ToolRegistry implements ApplicationContextAware, SmartInitializingS
         return list;
     }
 
-    /** 按意图找当前角色的工具（内置工具一个意图一个名字）。 */
+    /**
+     * 按意图找当前角色的工具（内置工具一个意图一个名字）。
+     *
+     * <p>⚠️ {@link ChatIntent#UNKNOWN} **永不参与**意图匹配：它是「没听懂」的兜底值，
+     * 若某个工具把 intent 留空（默认 UNKNOWN），按意图查找就会把随便一句听不懂的话
+     * 路由到它 —— 2026-10-22 线上实测过：查商品被识别成 UNKNOWN 后，命中了自检工具
+     * {@code dev_ping}，回复成「pong」。这类工具只能由模型**按名字**显式选择。
+     */
     public ToolDescriptor forIntent(ChatIntent intent, Integer role) {
-        if (intent == null) {
+        if (intent == null || intent == ChatIntent.UNKNOWN) {
             return null;
         }
         for (ToolDescriptor t : forRole(role)) {

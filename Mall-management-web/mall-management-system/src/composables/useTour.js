@@ -54,6 +54,8 @@ export const PUBLISH_FLOW_ID = 'publish'
 export const SECKILL_FLOW_ID = 'seckill'
 /** 开店漫游（运行时流程，见 `startOpenStoreTour`）。 */
 export const OPEN_STORE_FLOW_ID = 'open-store'
+/** 商品详情跨页指引（运行时流程，见 `startGoodsTour`）。 */
+export const GOODS_FLOW_ID = 'goods-detail'
 
 export function isMerchantRole() {
   return String(getRole() || '') === '2'
@@ -690,7 +692,8 @@ function destroyTourDriver() {
 async function openFlowStep(flow, index) {
   const timeout = import.meta.env.DEV ? 8000 : 3000
   const step = flow.steps[index]
-  if (!(await waitForElement(step.element, timeout))) return null
+  const el = await waitStepElement(step, timeout)
+  if (!el) return null
 
   const modules = await Promise.all([
     import('driver.js'),
@@ -700,12 +703,19 @@ async function openFlowStep(flow, index) {
 
   // 等元素的过程中路由又变了（用户直接点了高亮入口）⇒ 这一步已经不属于当前页。
   // 交给下一次 `resumeTourFlow` 按新路径重新对齐，别用 dummy 元素开一个空洞的高亮。
-  if (!isVisible(document.querySelector(step.element))) return null
+  if (!isVisible(el)) return null
 
   // 先拆上一步（遮罩消失），再让悬浮球飞过去 —— **飞行这 0.8 秒页面上没有遮罩**，
   // 飞到位后才 drive()。顺序反过来就是「遮罩先盖上、小助手瞬移」。
   destroyTourDriver()
-  const el = document.querySelector(step.element)
+  // 下一步的真实地址：商品卡片是 `<router-link>`（hash 路由下 href 形如
+  // `#/product?Id=…&MerchantId=…`）。详情页的 7 个 query 参数由**页面自己**给出，
+  // 聊天接口里不必、也不该出现这些内部 Id（2026-10-22 脱敏要求）。
+  if (el.tagName === 'A' && index + 1 < flow.steps.length) {
+    const raw = el.getAttribute('href') || ''
+    const href = raw.startsWith('#') ? raw.slice(1) : raw
+    if (href.startsWith('/')) flow.steps[index + 1].navTo = href
+  }
   const arrived = await flyTo(el)
   if (!arrived || !isVisible(el)) return null
 
@@ -720,7 +730,8 @@ async function openFlowStep(flow, index) {
     stageRadius: 8,
     popoverClass: POPOVER_CLASS,
     steps: [{
-      element: step.element,
+      // 传元素本身而不是选择器：带 `matchText` 的步骤（商品卡片）要按文字挑出**正确那一张**。
+      element: el,
       popover: { title: step.title, description: step.description },
     }],
     // 没有 popover 按钮可点，但键盘 / Esc 仍可能触发 driver 自己的关闭。
@@ -747,10 +758,13 @@ function advanceFlow(flow, index) {
   }
   writeTourFlow(flow.id, next)
   destroyTourDriver()
-  const target = normalizePath(flow.steps[next].path)
+  // `navTo` 是「带参数的目标地址」（搜索页要带 `?kw=`、详情页要带路由参数）；
+  // `path` 只用于「是否已经在这一页」的比较，两者不能混用。
+  const step = flow.steps[next]
+  const target = normalizePath(step.path)
   if (target && target !== activePath) {
     activePath = target
-    navigate(target)
+    navigate(step.navTo || target)
     return
   }
   resumeTourFlow(activePath)
@@ -762,10 +776,11 @@ function retreatFlow(flow, index) {
   const prev = index - 1
   writeTourFlow(flow.id, prev)
   destroyTourDriver()
-  const target = normalizePath(flow.steps[prev].path)
+  const step = flow.steps[prev]
+  const target = normalizePath(step.path)
   if (target && target !== activePath) {
     activePath = target
-    navigate(target)
+    navigate(step.navTo || target)
     return
   }
   resumeTourFlow(activePath)
@@ -921,6 +936,41 @@ export function resumePathAfterLogin(currentPath) {
  * @param {number} timeoutMs 开发 8s / 生产 3s（由调用方给）
  * @returns {Promise<Element|null>} 超时回 null（调用方负责兜底提示）
  */
+/**
+ * 等「这一步要走的那一个元素」出现。
+ *
+ * 普通步骤按选择器取第一个可见元素；带 `matchText` 的步骤（搜索结果里的商品卡片）
+ * 还要按文字挑 —— 搜索结果第一张卡不一定是用户问的那件商品，框错了就等于指错路。
+ *
+ * @param {object} step 流程步骤
+ * @param {number} timeoutMs 开发 8s / 生产 3s（由调用方给）
+ * @returns {Promise<Element|null>}
+ */
+function waitStepElement(step, timeoutMs) {
+  return new Promise((resolve) => {
+    const started = Date.now()
+    const pick = () => {
+      for (const node of document.querySelectorAll(step.element)) {
+        if (!isVisible(node)) continue
+        if (step.matchText && !(node.textContent || '').includes(step.matchText)) continue
+        resolve(node)
+        return true
+      }
+      return false
+    }
+    if (pick()) return
+    const tick = () => {
+      if (pick()) return
+      if (Date.now() - started >= timeoutMs) {
+        resolve(null)
+        return
+      }
+      requestAnimationFrame(tick)
+    }
+    requestAnimationFrame(tick)
+  })
+}
+
 export function waitForElement(selector, timeoutMs = 3000) {
   return new Promise((resolve) => {
     const started = Date.now()
@@ -991,4 +1041,77 @@ export function startOpenStoreTour({ onDone } = {}) {
   writeTourFlow(id, 0)
   activePath = current
   return resumeTourFlow(current)
+}
+
+/**
+ * 「带我去商品详情」—— 商品查询结果的跨页指引（2026-10-22 体验闭环）。
+ *
+ * 为什么不用 `buildNavSteps` 跑 BFS：`/product` 是带 7 个 query 参数的裸页，路由图里
+ * 没有任何一条「直接进详情」的边（真实入口是搜索结果里的商品卡片）⇒ BFS 到不了。
+ * 这里把**用户真实要走的四步**写成流程：
+ *
+ *   ① 顶栏搜索框（输入商品名） → ② 搜索按钮 → ③ 搜索结果里的商品卡片 → ④ 详情页到达。
+ *
+ * 四个壳内页（首页 / 订单 / 个人中心…）共用同一个顶栏，所以 `at` 用 `isShellPage`；
+ * 商家壳与客户壳的搜索落点由 `base` 决定（`/merchant/search` ⇄ `/customer/search`），
+ * 商家在后台照样从顶栏搜索进详情 —— 不额外改商家域路由。
+ *
+ * ③ 的下一步地址由卡片的真实 `href` 决定（见 `openFlowStep`），聊天接口不传内部 Id。
+ * 裸页（`/product` / `/shop`）没有顶栏搜索框 ⇒ 返回 `null`，由调用方提示用户先回商城主页。
+ *
+ * @param {string} keyword 商品名（胶囊里带回来的）
+ * @param {string} [path] 当前路由
+ * @returns {Promise<object|null>} driver 实例；当前页不承载第一步时返回 null
+ */
+export async function startGoodsTour(keyword, path) {
+  const name = String(keyword || '').trim()
+  const current = normalizePath(path || currentTourPath())
+  if (!name || !isShellPage(current)) return null
+
+  const base = isMerchantRole() ? '/merchant' : '/customer'
+  const id = `${GOODS_FLOW_ID}-${Date.now()}`
+  runtimeFlows.set(id, {
+    id,
+    steps: [
+      {
+        element: '.top-search input',
+        at: isShellPage,
+        // 前两步都在当前页：`path` 留空 ⇒ 点「下一步」不换页，原地换高亮。
+        path: '',
+        title: `① 在搜索框里输入「${name}」`,
+        description: '顶栏这个搜索框能直接找商品。输入商品名后，我陪你去点搜索。',
+      },
+      {
+        element: '.top-search button',
+        at: isShellPage,
+        path: '',
+        title: '② 点「搜索」',
+        description: '点这里，我们一起去搜索结果页。',
+      },
+      {
+        element: '.pcard',
+        // 搜索结果第一张卡不一定是这件商品（实测：搜 oppo12 时第一张是别家的草稿商品）
+        // ⇒ 按商品名挑出**正确那一张**再高亮。
+        matchText: name,
+        at: (p) => p === '/customer/search' || p === '/merchant/search',
+        path: `${base}/search`,
+        navTo: `${base}/search?kw=${encodeURIComponent(name)}`,
+        title: `③ 点开「${name}」的商品卡片`,
+        description: '搜索结果里这张卡片就是它。点开后我们就能看详情了。',
+      },
+      {
+        element: '.goods-detail-page',
+        at: (p) => p === '/product',
+        path: '/product',
+        title: '④ 已到达商品详情页',
+        description: `这里就是「${name}」的完整详情：图集、规格、价格与购买入口。`,
+      },
+    ],
+  })
+  writeTourFlow(id, 0)
+  activePath = current
+  const tour = await resumeTourFlow(current)
+  // 锚点始终没出现（页面还没渲染 / 窄屏收起了搜索框）⇒ 别留一条半截的存档。
+  if (!tour) clearTourFlow()
+  return tour
 }
