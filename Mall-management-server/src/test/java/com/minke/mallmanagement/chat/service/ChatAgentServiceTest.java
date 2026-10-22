@@ -52,6 +52,7 @@ class ChatAgentServiceTest {
     private CommentDao commentDao;
     private LlmReplyComposer replyComposer;
     private GoodsDao goodsDao;
+    private SemanticRouter semanticRouter;
     private ChatAgentService service;
 
     @BeforeEach
@@ -64,6 +65,7 @@ class ChatAgentServiceTest {
         commentDao = mock(CommentDao.class);
         replyComposer = mock(LlmReplyComposer.class);
         goodsDao = mock(GoodsDao.class);
+        semanticRouter = mock(SemanticRouter.class);
         // 默认：LLM 未启用（Mockito 布尔默认 false）⇒ 既有用例全部走规则引擎，行为与阶段一之前一致。
         // 默认：话术生成也不启用 ⇒ 走确定性模板，断言可以逐字写。
         // 默认：普通客户、无入驻申请；未登录走匿名。个别用例再覆盖。
@@ -74,6 +76,8 @@ class ChatAgentServiceTest {
         service = new ChatAgentService(orderDao, refundService, new OrderStateMachine(),
                 identityResolver, memoryService, llmClassifier, commentDao, replyComposer,
                 null, null, goodsDao);
+        // 默认不命中语义层（Mockito 返回 null）⇒ 既有用例仍走 LLM / 规则引擎。
+        service.setSemanticRouter(semanticRouter);
     }
 
     /** 打开 LLM 路由；具体分类结果由用例再 stub {@code classify}。 */
@@ -781,7 +785,8 @@ class ChatAgentServiceTest {
                 .containsEntry("label", "开始引导");
         // 后端不返回步骤数组：怎么走是前端 NavGraph 的事。
         assertThat(resp).doesNotContainKey("steps");
-        assertThat(String.valueOf(resp.get("reply"))).contains("经营看板", "一步步");
+        // 「幽灵前缀」修复：回复不再拼页面描述（否则页面选错时会先冒出「收藏的商品。」）。
+        assertThat(String.valueOf(resp.get("reply"))).isEqualTo("好的，我来一步步教您。点击下方按钮开始。");
     }
 
     @Test
@@ -1248,6 +1253,99 @@ class ChatAgentServiceTest {
             }
         }
         return out;
+    }
+
+    @SuppressWarnings("unchecked")
+    // ==================== 语义路由（2026-10-22 企业级改造） ====================
+
+    @Test
+    @DisplayName("语义路由：怎么看我上架的商品 ⇒ GOODS_MANAGE，回复不再拼「收藏的商品」幽灵前缀")
+    void semanticGoodsManageHasNoGhostPrefix() {
+        when(semanticRouter.route(eq("怎么看我上架的商品"), eq(2)))
+                .thenReturn(new SemanticRouter.Result(ChatIntent.GOODS_MANAGE,
+                        "/merchant/user/list", 0.917, "怎么看我的商品", 0.830, true));
+
+        Map<String, Object> resp = service.ask("怎么看我上架的商品", "m1", 2);
+
+        assertThat(resp.get("intent")).isEqualTo("GOODS_MANAGE");
+        assertThat(actionOf(resp)).containsEntry("type", "tour")
+                .containsEntry("targetPath", "/merchant/user/list")
+                .containsEntry("label", "开始引导");
+        assertThat(resp.get("reply")).isEqualTo("好的，我来一步步教您。点击下方按钮开始。");
+        assertThat(String.valueOf(resp.get("reply"))).doesNotContain("收藏");
+        verify(llmClassifier, never()).classify(anyString(), any(), anyString());
+    }
+
+    @Test
+    @DisplayName("语义路由：怎么前往商家工作台 ⇒ MERCHANT_DASHBOARD，不再答「听不懂」")
+    void semanticMerchantDashboard() {
+        when(semanticRouter.route(eq("怎么前往商家工作台"), eq(2)))
+                .thenReturn(new SemanticRouter.Result(ChatIntent.MERCHANT_DASHBOARD,
+                        "/merchant", 0.964, "怎么去商家工作台", 0.690, true));
+
+        Map<String, Object> resp = service.ask("怎么前往商家工作台", "m1", 2);
+
+        assertThat(resp.get("intent")).isEqualTo("MERCHANT_DASHBOARD");
+        assertThat(actionOf(resp)).containsEntry("targetPath", "/merchant")
+                .containsEntry("type", "tour");
+        assertThat(resp.get("reply")).isEqualTo("好的，我来一步步教您。点击下方按钮开始。");
+    }
+
+    @Test
+    @DisplayName("语义路由：我花出去的钱去哪了 ⇒ ASSET_QUERY，落会员中心（商家壳归位）")
+    void semanticAssetQuery() {
+        when(semanticRouter.route(eq("我花出去的钱去哪了"), eq(2)))
+                .thenReturn(new SemanticRouter.Result(ChatIntent.ASSET_QUERY,
+                        "/customer/user/member", 1.0, "我花出去的钱去哪了", 0.709, true));
+
+        Map<String, Object> resp = service.ask("我花出去的钱去哪了", "m1", 2);
+
+        assertThat(resp.get("intent")).isEqualTo("ASSET_QUERY");
+        assertThat(actionOf(resp)).containsEntry("targetPath", "/merchant/user/member")
+                .containsEntry("type", "tour");
+    }
+
+    @Test
+    @DisplayName("语义护栏：相似度 < 0.75 ⇒ CLARIFY，不硬猜（即使 LLM 可用）")
+    void semanticLowScoreClarifies() {
+        when(semanticRouter.route(eq("今天天气不错"), eq(2)))
+                .thenReturn(new SemanticRouter.Result(ChatIntent.ORDER_QUERY,
+                        null, 0.57, "查我的订单", 0.54, false));
+        llmEnabled();
+
+        Map<String, Object> resp = service.ask("今天天气不错", "m1", 2);
+
+        assertThat(resp.get("intent")).isEqualTo("CLARIFY");
+        assertThat(resp.get("reply")).isEqualTo("请问您是想查订单、管理商品，还是去工作台？");
+        assertThat(resp).doesNotContainKey("action");
+        verify(llmClassifier, never()).classify(anyString(), any(), anyString());
+    }
+
+    @Test
+    @DisplayName("语义路由 + 直接口令：直接带我去管理商品 ⇒ GOODS_MANAGE 但动作是 jump")
+    void semanticGoodsManageHonoursDirectWording() {
+        when(semanticRouter.route(eq("直接带我去管理商品"), eq(2)))
+                .thenReturn(new SemanticRouter.Result(ChatIntent.GOODS_MANAGE,
+                        "/merchant/user/list", 0.88, "我要管理商品", 0.70, true));
+
+        Map<String, Object> resp = service.ask("直接带我去管理商品", "m1", 2);
+
+        assertThat(resp.get("intent")).isEqualTo("GOODS_MANAGE");
+        assertThat(actionOf(resp)).containsEntry("type", "jump")
+                .containsEntry("targetPath", "/merchant/user/list")
+                .containsEntry("label", "一键直达");
+    }
+
+    @Test
+    @DisplayName("语义低分但用户直接贴商品编号 ⇒ 仍走 GOODS_QUERY，不澄清")
+    void semanticLowScoreButExplicitGoodsCodeStillQueries() {
+        when(semanticRouter.route(eq("oppo12 多少钱"), eq(1)))
+                .thenReturn(new SemanticRouter.Result(ChatIntent.ORDER_QUERY,
+                        null, 0.67, "买了什么", 0.65, false));
+
+        Map<String, Object> resp = service.ask("oppo12 多少钱", "c1", 1);
+
+        assertThat(resp.get("intent")).isEqualTo("GOODS_QUERY");
     }
 
     @SuppressWarnings("unchecked")

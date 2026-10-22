@@ -131,6 +131,14 @@ public class ChatAgentService {
     private final ToolExecutor toolExecutor;
     /** 商品查询（2026-10-22 修复）：查商品名 / 编号对应的真实商品行。 */
     private final GoodsDao goodsDao;
+    /**
+     * 语义路由（2026-10-22 企业级改造）：启动预加载标准问法向量，按余弦相似度判意图。
+     *
+     * <p>用 setter 注入而不是构造器：既有的 11 参构造器被大量单测 / 冒烟切片直接 {@code new}，
+     * 语义层是可选增强，缺失时自动退回 LLM 分类器与规则引擎。冒烟切片没登记本 bean 也不会
+     * 因缺依赖起不来。
+     */
+    private SemanticRouter semanticRouter;
 
     /** 兼容入口（阶段一之前的单测 / 没装评论工具时）：新依赖都置空。 */
     public ChatAgentService(OrderDao orderDao,
@@ -196,6 +204,12 @@ public class ChatAgentService {
         this.goodsDao = goodsDao;
     }
 
+    /** 语义路由是可选增强：Spring 有该 bean 就注入；单测 / 旧切片没有也不影响启动。 */
+    @Autowired(required = false)
+    void setSemanticRouter(SemanticRouter semanticRouter) {
+        this.semanticRouter = semanticRouter;
+    }
+
     /**
      * 回答一句话。
      *
@@ -245,9 +259,15 @@ public class ChatAgentService {
                     decision.needPublish(), false);
             case DIRECT_NAVIGATION -> answerNavigate(decision.targetPath(), userId, role,
                     decision.needPublish(), true);
+            // 语义路由的三个业务导航意图：保留意图名（探针 / 排障能看到精确命中），
+            // 动作仍复用同一套 tour/jump；是否直达只看用户有没有明说「直接去」。
+            case GOODS_MANAGE, MERCHANT_DASHBOARD, ASSET_QUERY ->
+                    answerRouted(intent, decision.targetPath(), userId, role,
+                            decision.needPublish(), isDirectNavigation(normalized));
             // 旧值兜底：模型 / 旧调用点仍可能给出 NAVIGATE ⇒ 按默认引导处理。
             case NAVIGATE -> answerNavigate(decision.targetPath(), userId, role,
                     decision.needPublish(), isDirectNavigation(normalized));
+            case CLARIFY -> answerClarify(role);
             case IDENTITY_CLAIM -> answerIdentityClaim(message, userId, role);
             case GREETING -> answerSmallTalk(intent,
                     "你好呀～我可以帮你查订单、查售后进度，也能一键带你去开店。");
@@ -335,6 +355,24 @@ public class ChatAgentService {
     private Decision decide(String message, String normalized,
                             FaqKnowledgeBase.Answer faq, String userId,
                             Integer role, String currentPath) {
+        // 政策 FAQ 是本地确定性知识，先于任何模型 / 向量判断 ——
+        // 「拆封了能退货吗」里有「退货」，不能被当成查售后进度。
+        if (faq != null && faq.policy()) {
+            return new Decision(ChatIntent.FAQ, null, false, null);
+        }
+
+        // 语义路由优先（2026-10-22）：标准问法在启动时已向量化，这里只算余弦。
+        // 低于阈值 ⇒ 不硬猜，澄清；语义层不可用 ⇒ 返回 null，继续走下面的 LLM / 规则。
+        SemanticRouter.Result semantic = semanticRoute(message, role);
+        if (semantic != null) {
+            if (!semantic.confident()) {
+                Decision deterministic = deterministicFallback(message, normalized, faq, userId, role);
+                return deterministic != null ? deterministic
+                        : new Decision(ChatIntent.CLARIFY, null, false, null);
+            }
+            return semanticDecision(semantic, message, normalized, userId);
+        }
+
         if (llmClassifier != null && llmClassifier.isEnabled()) {
             try {
                 LlmIntentClassifier.Result result = llmClassifier.classify(message, role, currentPath);
@@ -420,6 +458,93 @@ public class ChatAgentService {
             }
         }
         return byRules(message, normalized, faq, userId, role);
+    }
+
+    /** 语义层调用包一层 try：语义路由故障绝不能把聊天打成 500。 */
+    private SemanticRouter.Result semanticRoute(String message, Integer role) {
+        if (semanticRouter == null) {
+            return null;
+        }
+        try {
+            return semanticRouter.route(message, role);
+        } catch (RuntimeException e) {
+            log.warn("语义路由异常，降级到意图分类器：{}: {}",
+                    e.getClass().getSimpleName(), e.getMessage());
+            return null;
+        }
+    }
+
+    /**
+     * 语义相似度不够（&lt; 0.75）时的确定性兜底。
+     *
+     * <p>只认三种「用户已经把对象说死了」的情况，避免 0.75 的护栏把明确的请求也拦掉：
+     * ① 用户直接贴了商品编号 / 型号；② 直接贴了订单号；③ 「那…呢 / 到哪了」这类
+     * 承接上一轮的短追问。其余一律澄清。
+     */
+    private Decision deterministicFallback(String message, String normalized,
+                                           FaqKnowledgeBase.Answer faq, String userId,
+                                           Integer role) {
+        if (faq != null) {
+            return new Decision(ChatIntent.FAQ, null, false, null);
+        }
+        ChatIntentRecognizer.Match rule = ChatIntentRecognizer.recognize(message);
+        String goodsKeyword = ChatIntentRecognizer.extractGoodsKeyword(normalized);
+        boolean dataOrAction = rule.intent() == ChatIntent.ORDER_QUERY
+                || rule.intent() == ChatIntent.REFUND_QUERY
+                || rule.intent() == ChatIntent.COMMENT_QUERY
+                || rule.intent() == ChatIntent.ADD_TO_SECKILL
+                || rule.intent() == ChatIntent.OPEN_STORE;
+        if (!dataOrAction && !isBlank(goodsKeyword)
+                && ChatIntentRecognizer.looksLikeGoodsQuery(normalized)) {
+            return new Decision(ChatIntent.GOODS_QUERY, null, false, null, null,
+                    Map.of("goodsKeyword", goodsKeyword));
+        }
+        if (rule.hasOrderId()
+                && (rule.intent() == ChatIntent.ORDER_QUERY || rule.intent() == ChatIntent.REFUND_QUERY)) {
+            return new Decision(rule.intent(), rule.orderId(), false, null);
+        }
+        SessionMemoryService.Context context = context(userId);
+        if (context != null && isFollowUp(normalized)
+                && context.intent() != ChatIntent.UNKNOWN
+                && context.intent() != ChatIntent.CLARIFY) {
+            String orderId = context.intent() == ChatIntent.ORDER_QUERY ? context.orderId() : null;
+            return new Decision(context.intent(), orderId, false, null);
+        }
+        return null;
+    }
+
+    /**
+     * 语义命中的结果 → 编排层决策。
+     *
+     * <p>语义层只说「像哪个意图 / 哪页」，不抽业务槽位：订单号仍由规则提取器从原文取，
+     * 商品编号原样保留；「直接去」仍由 {@link #isDirectNavigation} 的词面判据决定。
+     */
+    private Decision semanticDecision(SemanticRouter.Result result, String message,
+                                      String normalized, String userId) {
+        ChatIntent intent = result.intent();
+        if (intent == ChatIntent.GUIDE_NAVIGATION && isDirectNavigation(normalized)) {
+            intent = ChatIntent.DIRECT_NAVIGATION;
+        }
+        String orderId = null;
+        if (intent == ChatIntent.ORDER_QUERY) {
+            ChatIntentRecognizer.Match rule = ChatIntentRecognizer.recognize(message);
+            if (rule.intent() == ChatIntent.ORDER_QUERY) {
+                orderId = rule.orderId();
+            }
+            if (isBlank(orderId) && isFollowUp(normalized)) {
+                orderId = rememberedOrderId(userId);
+            }
+        }
+        Map<String, Object> args = null;
+        if (intent == ChatIntent.GOODS_QUERY) {
+            String keyword = ChatIntentRecognizer.extractGoodsKeyword(normalized);
+            if (!isBlank(keyword)) {
+                args = Map.of("goodsKeyword", keyword);
+            }
+        }
+        boolean needPublish = intent == ChatIntent.ADD_TO_SECKILL
+                && declaresNotPublished(normalized);
+        return new Decision(intent, orderId, needPublish, result.targetPath(), null, args);
     }
 
     /** 原有规则引擎（阶段一之前的行为，原样保留）。 */
@@ -1277,9 +1402,26 @@ public class ChatAgentService {
     /** 包内可见：{@link ChatToolSet} 的 {@code navigate} 工具调用它。 */
     Map<String, Object> answerNavigate(String targetPath, String userId, Integer role,
                                        boolean needPublish, boolean direct) {
+        return answerRouted(direct ? ChatIntent.DIRECT_NAVIGATION : ChatIntent.GUIDE_NAVIGATION,
+                targetPath, userId, role, needPublish, direct);
+    }
+
+    /**
+     * 导航空动作的统一出口。
+     *
+     * <p>⚠️ 2026-10-22「幽灵前缀」修复：旧实现把 {@link RouteCatalog#userSummary} 拼在
+     * 「好的，我来一步步教您…」前面。页面一旦选错（如「怎么看我的商品」被模型带到
+     * 「我的收藏」），用户就会先看到一句「收藏的商品。」再接引导语 —— 像是客服记错了
+     * 上一句。现在**不再拼任何页面描述**：话术只有一句，去哪里由 {@code action.targetPath}
+     * 承载；页面标题只用于按钮 / 引导条，不参与回复拼接。
+     *
+     * @param intent 语义路由命中的业务意图（GOODS_MANAGE 等）或 GUIDE / DIRECT
+     */
+    Map<String, Object> answerRouted(ChatIntent intent, String targetPath, String userId,
+                                     Integer role, boolean needPublish, boolean direct) {
         String path = RouteCatalog.resolve(targetPath, role);
         if (path == null) {
-            return answerSmallTalk(direct ? ChatIntent.DIRECT_NAVIGATION : ChatIntent.GUIDE_NAVIGATION,
+            return answerSmallTalk(intent,
                     "这个页面在当前身份下打不开。你可以问我订单、售后，或让我带你去个人中心。");
         }
         if (path.endsWith("/user/apply")) {
@@ -1291,13 +1433,34 @@ public class ChatAgentService {
 
         RouteCatalog.Route route = RouteCatalog.find(path);
         String title = route == null ? path : route.title();
-        // 字典里的 description 是写给模型的（含「用户说…时选它」），回给用户只取前一句。
-        String summary = route == null ? "" : RouteCatalog.userSummary(route);
-        String text = summary + (direct
-                ? "已为您准备好直达入口，点击即可前往。"
-                : "好的，我来一步步教您。点击下方按钮开始。");
-        return reply(direct ? ChatIntent.DIRECT_NAVIGATION : ChatIntent.GUIDE_NAVIGATION,
-                text, null, navAction(path, title, direct), defaultSuggestions());
+        // 资产类问题要如实回答「钱在哪」；这句话是意图自带的话术，
+        // 不是把页面摘要拼到引导语前面（幽灵前缀）。
+        String text;
+        if (intent == ChatIntent.ASSET_QUERY) {
+            text = direct
+                    ? "已为您准备好直达入口，点击即可前往会员中心查看钱包。"
+                    : "钱包余额和收支流水都在会员中心，我一步步带您过去。";
+        } else {
+            text = direct
+                    ? "已为您准备好直达入口，点击即可前往。"
+                    : "好的，我来一步步教您。点击下方按钮开始。";
+        }
+        return reply(intent, text, null, navAction(path, title, direct), defaultSuggestions());
+    }
+
+    /** 相似度低于 0.75 时的澄清问句（不猜意图）。 */
+    private Map<String, Object> answerClarify(Integer role) {
+        List<Object> chips = new ArrayList<>();
+        chips.add("查我的订单");
+        if (role == null || role == 2) {
+            chips.add("怎么看我上架的商品");
+            chips.add("怎么前往商家工作台");
+        } else {
+            chips.add("怎么去个人中心");
+            chips.add("怎么处理退款");
+        }
+        return reply(ChatIntent.CLARIFY,
+                "请问您是想查订单、管理商品，还是去工作台？", null, null, chips);
     }
 
     // ==================== 身份自述（增量-A 规则 2） ====================

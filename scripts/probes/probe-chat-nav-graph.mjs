@@ -175,8 +175,11 @@ async function navCase(question, target, spec) {
   const from = await b.evalJS('location.hash')
   const { done, body } = await sendChat(question)
   const action = body?.action || null
+  // 语义路由上线后，部分问句不再落到 GUIDE_NAVIGATION，而是更精确的业务意图
+  // （改商品价 ⇒ GOODS_MANAGE，管钱 ⇒ ASSET_QUERY）。落点与「不给步骤」的契约不变。
+  const wantIntent = spec.intent || 'GUIDE_NAVIGATION'
   ok(`「${question}」→ ${target}（模型给 target_path，不给步骤）`,
-    done && body?.intent === 'GUIDE_NAVIGATION' && action?.type === 'tour'
+    done && body?.intent === wantIntent && action?.type === 'tour'
       && action?.targetPath === target && !Array.isArray(body?.steps),
     { intent: body?.intent, action, steps: body?.steps ?? null })
 
@@ -233,6 +236,7 @@ try {
   // ── ③ 改价：模型推理到「查看商品」而不是编一个编辑页 ────────────────────
   await goHash('#/merchant')
   await navCase('我想改一下那个 299 元耳机的价格', '/merchant/user/list', {
+    intent: 'GOODS_MANAGE',
     hops: 2,
     anchors: ['#tour-entry-merchant', '[data-nav-to="/merchant/user/list"]', '.uc-main'],
     arrived: '.uc-main',
@@ -267,6 +271,7 @@ try {
   // ── ⑤ 管理钱：没有钱包页 ⇒ 会员中心 ─────────────────────────────────────
   await goHash('#/merchant')
   await navCase('我要管理我的钱', '/merchant/user/member', {
+    intent: 'ASSET_QUERY',
     hops: 2,
     anchors: ['#tour-entry-merchant', '[data-nav-to="/merchant/user/member"]', '.uc-main'],
     arrived: '.uc-main',
@@ -298,6 +303,7 @@ try {
 
   await goHash('#/customer')
   await navCase('我要管理我的钱', '/customer/user/member', {
+    intent: 'ASSET_QUERY',
     hops: 2,
     anchors: ['#tour-entry-merchant', '[data-nav-to="/customer/user/member"]', '.uc-main'],
     arrived: '.uc-main',
