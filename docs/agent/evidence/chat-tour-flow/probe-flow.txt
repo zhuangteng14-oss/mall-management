@@ -1,17 +1,23 @@
 PASS  商家登录落 /merchant  ""
+PASS  商家商城首页已就绪且顶栏有用户中心入口  {"hash":"#/merchant"}
 PASS  复杂语义拿到两枚胶囊  {"chips":["查我的订单","怎么开店","去发布商品→","去秒杀报名→"],"reply":"系统显示您当前是品牌商家。品牌：Chenguang-Brand-Store，长期有效。商品还没上架。先在「上架商品」发布商品，再回秒杀报名页选它；两个入口都在下面。"}
-PASS  Step1：当前页高亮「用户中心」入口（不瞬移）  {"hit":true,"progress":"第 1 步 / 共 5 步","active":true,"hash":"#/merchant"}
-PASS  Step2：下一步跳到个人中心并高亮「上架商品」  {"hit":true,"progress":"第 2 步 / 共 5 步","active":true,"hash":"#/merchant/user"}
-PASS  Step3：下一步跳到发布页并高亮商品名称  {"hit":true,"progress":"第 3 步 / 共 5 步","active":true,"hash":"#/merchant/user/add"}
-PASS  Step4：同页切到商品主图  {"hit":true,"progress":"第 4 步 / 共 5 步","active":true}
-PASS  Step5：同页切到提交审核  {"hit":true,"progress":"第 5 步 / 共 5 步","active":true}
-PASS  完成后浮层消失且流程存档清空  {"closed":true,"flow":null,"dom":{"count":0,"display":[],"overlay":0,"body":"","active":[]}}
+PASS  Step1：首页点胶囊后画面仍在首页，高亮右上角「用户中心」  {"hit":true,"progress":"第 1 步 / 共 7 步","active":true,"hash":"#/merchant"}
+PASS  Step2：点「下一步」才进个人中心，高亮「上架商品」  {"hit":true,"progress":"第 2 步 / 共 7 步","active":true,"hash":"#/merchant/user"}
+PASS  Step3：进发布页先高亮商品主图  {"hit":true,"progress":"第 3 步 / 共 7 步","active":true,"hash":"#/merchant/user/add"}
+PASS  发布页真实字段锚点全部渲染可见  [{"s":"#tour-publish-image","ok":true},{"s":"#tour-publish-basic","ok":true},{"s":"#tour-publish-title","ok":true},{"s":"#tour-publish-category","ok":true},{"s":"#tour-publish-pricing","ok":true},{"s":"#tour-publish-price","ok":true},{"s":"#tour-publish-stock","ok":true},{"s":"#tour-publish-detail","ok":true},{"s":"#g-desc","ok":true},{"s":"#tour-publish-submit","ok":true}]
+PASS  Step4：高亮名称与分类（同一区块含标题 / 类型）  {"hit":true,"progress":"第 4 步 / 共 7 步","active":true,"basicHas":true}
+PASS  Step5：高亮价格与库存（同一区块含售价 / 库存）  {"hit":true,"progress":"第 5 步 / 共 7 步","active":true,"pricingHas":true}
+PASS  Step6：高亮商品详情文本域  {"hit":true,"progress":"第 6 步 / 共 7 步","active":true,"detailHas":true}
+PASS  Step7：高亮提交审核按钮  {"hit":true,"progress":"第 7 步 / 共 7 步","active":true}
+PASS  完成后浮层消失且流程存档清空  {"closed":true,"flow":null}
 PASS  直接进发布页不触发高亮（无流程存档）  ""
-PASS  已在发布页：自动跳到第 3 步（不重复强调入口）  {"hit":true,"progress":"第 3 步 / 共 5 步","active":true,"clickedAgain":true,"flow":"{\"flowId\":\"publish\",\"index\":2,\"at\":1792656473839}","pop":1}
-PASS  「上一步」跨页回到个人中心并高亮上架入口  {"hit":true,"progress":"第 2 步 / 共 5 步","active":true,"hash":"#/merchant/user"}
-PASS  秒杀：落到报名页并高亮商品下拉  {"hit":true,"progress":"第 1 步 / 共 2 步","active":true,"hash":"#/merchant/seckill"}
+PASS  已在发布页：自动从第 3 步（主图）开始，不重复强调入口  {"hit":true,"progress":"第 3 步 / 共 7 步","active":true,"hash":"#/merchant/user/add"}
+PASS  「上一步」跨页回到个人中心并高亮上架入口  {"hit":true,"progress":"第 2 步 / 共 7 步","active":true,"hash":"#/merchant/user"}
+PASS  已在个人中心：Step1 留在当前页高亮「上架商品」（跳过顶栏）  {"hit":true,"progress":"第 2 步 / 共 7 步","active":true,"hash":"#/merchant/user"}
+PASS  秒杀：点胶囊落到报名页并高亮商品下拉  {"hit":true,"progress":"第 1 步 / 共 2 步","active":true,"hash":"#/merchant/seckill"}
 PASS  秒杀：同页切到提交报名  {"hit":true,"progress":"第 2 步 / 共 2 步","active":true}
 PASS  秒杀：完成后浮层消失  ""
+PASS  「怎么开店」落入驻申请页，不会误跳发布页  {"hasAction":true,"acted":true,"hash":"#/merchant/user/apply"}
 PASS  页面无未捕获异常  {"pageErrors":[]}
 
-flow: 15/15 PASS
+flow: 21/21 PASS

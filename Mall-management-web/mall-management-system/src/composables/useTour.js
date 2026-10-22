@@ -80,54 +80,87 @@ export function publishPath() {
  *             `path` 决定是否跳转（同页则原地换高亮）。⚠️ 别把 `path` 写成「下一步要去
  *             哪里」—— 跨页两跳会在一次点击里连跳两页（2026-10-22 实测踩过）。
  */
+/** 个人中心（两壳同页；商家账号在客户壳里也渲染「上架商品」快捷入口）。 */
+const PERSONAL_PATHS = [
+  USER_CENTER_PATH,
+  `${USER_CENTER_PATH}/info`,
+  '/customer/user',
+  '/customer/user/info',
+]
+const isPersonalPage = (p) => PERSONAL_PATHS.includes(p)
+/** 公域 / 后台上带「用户中心」顶栏入口的页（`/product`、`/shop` 是裸页，不在此列）。 */
+const isShellPage = (p) => p.startsWith('/merchant') || p.startsWith('/customer')
+
 const FLOWS = {
   [PUBLISH_FLOW_ID]: {
     id: PUBLISH_FLOW_ID,
     merchantOnly: true,
     steps: [
       {
+        // 第 1 步永远落在**当前页**：只要不在个人中心 / 发布页，就高亮右上角入口。
+        // ⚠️ 不能因为锚点暂时没渲染就 `router.push` —— 用户没点「下一步」前不许换页。
         element: '#tour-entry-merchant',
-        at: (p) => p.startsWith('/merchant')
-          && p !== USER_CENTER_PATH
-          && p !== `${USER_CENTER_PATH}/info`
-          && p !== PUBLISH_PATH,
+        at: (p) => isShellPage(p) && !isPersonalPage(p) && p !== PUBLISH_PATH,
         path: '/merchant',
         title: '① 进入商家后台',
-        description: '我们首先要进入商家后台，请点击这里。',
+        description: '我们首先要进入商家后台，请点击右上角的「用户中心」。',
       },
       {
         element: '#tour-menu-add',
-        at: (p) => p === USER_CENTER_PATH || p === `${USER_CENTER_PATH}/info`,
+        at: isPersonalPage,
         path: USER_CENTER_PATH,
         title: '② 上架商品',
-        description: '在这里您可以发布新的商品，点击进入。',
+        description: '在这里您可以发布新的商品，点击进入「上架商品」。',
       },
       {
-        element: '#tour-publish-title',
-        at: (p) => p === PUBLISH_PATH,
-        path: PUBLISH_PATH,
-        title: '③ 商品名称',
-        description: '先给商品起个名字。',
-      },
-      {
+        // 进入发布页后按真实表单顺序：主图 → 基本信息 → 价格库存 → 详情 → 提交。
+        // 主图在页面下方（03 区），先让用户把封面选好；后面三步再回到对应区块。
         element: '#tour-publish-image',
         at: (p) => p === PUBLISH_PATH,
         path: PUBLISH_PATH,
-        title: '④ 商品主图',
-        description: '上传商品主图。',
+        title: '③ 商品主图',
+        description: '首先，上传一张清晰的商品主图。',
+      },
+      {
+        // 这一区同时含「商品名称 / 商品型号 / 商品类型」三个必填项；
+        // driver 一个步骤只能框一个元素，故框整块，避免漏掉分类。
+        element: '#tour-publish-basic',
+        at: (p) => p === PUBLISH_PATH,
+        path: PUBLISH_PATH,
+        title: '④ 名称与分类',
+        description: '填写商品名称，并选择正确的商品分类（类型）。',
+      },
+      {
+        // 这一区含价格与库存。库存输入目前是平台预留项（disabled），文案如实说明，
+        // 不能假装它可填 —— 现状见 GoodsAdd 的 data-slot 注释。
+        element: '#tour-publish-pricing',
+        at: (p) => p === PUBLISH_PATH,
+        path: PUBLISH_PATH,
+        title: '⑤ 价格与库存',
+        description: '设置商品的售卖价格；库存当前为平台预留项（灰显），可先跳过。',
+      },
+      {
+        element: '#tour-publish-detail',
+        at: (p) => p === PUBLISH_PATH,
+        path: PUBLISH_PATH,
+        title: '⑥ 商品详情',
+        description: '填写详细的图文详情（选填），让买家更了解商品。',
       },
       {
         element: '#tour-publish-submit',
         at: (p) => p === PUBLISH_PATH,
         path: PUBLISH_PATH,
-        title: '⑤ 提交审核',
-        description: '填好后点击提交，等审核通过，您就可以去秒杀报名了。',
+        title: '⑦ 提交审核',
+        description: '检查无误后，点击提交平台审核。',
       },
     ],
   },
   [SECKILL_FLOW_ID]: {
     id: SECKILL_FLOW_ID,
     merchantOnly: true,
+    // 秒杀胶囊本身就是「带我去报名页」的导航入口（用户点它即确认跳转）；
+    // 发布流程不同：入口必须落在当前页，所以 **不能** 打开这个开关。
+    jumpToStart: true,
     steps: [
       {
         element: '#tour-seckill-select',
@@ -449,10 +482,12 @@ export async function resumeTourFlow(path) {
 }
 
 /**
- * 胶囊点击入口：决定从哪一步开始，必要时先导航。
+ * 胶囊点击入口：只决定从当前页的哪一步开始，**绝不主动换页**。
+ * 换页只发生在用户点 driver 的「下一步 / 上一步」之后（见 `advanceFlow` / `retreatFlow`）。
  *
  * @param {string} flowId `PUBLISH_FLOW_ID` / `SECKILL_FLOW_ID`
  * @param {string} [path] 当前路由
+ * @returns {Promise<object|null>} driver 实例；当前页不承载该流程时返回 null
  */
 export async function startTourFlow(flowId, path) {
   const flow = FLOWS[flowId]
@@ -464,18 +499,25 @@ export async function startTourFlow(flowId, path) {
 
   const current = normalizePath(path || currentTourPath())
   const index = pickStartIndex(flow, current)
-  writeTourFlow(flow.id, index)
-  activePath = current
-
-  // 当前页没有起始锚点（例如从 `/product` 点的胶囊）⇒ 先去它应该在的页面。
-  // 路由 watcher 会接着调 `resumeTourFlow`。
   const start = flow.steps[index]
-  const target = normalizePath(start.path)
-  if (!document.querySelector(start.element) && target && target !== current) {
-    activePath = target
-    navigate(target)
+
+  // ⚠️ 入口点击**绝不自动换页**（2026-10-22 用户实测纠偏）：
+  //    · 锚点还没渲染（异步组件 / 资料未到）⇒ 照样在当前页等它，`resumeTourFlow` 会轮询；
+  //    · 当前页压根不是这一步该出现的页（裸页 `/product` / `/shop`）⇒ 直接返回 null，
+  //      由调用方提示用户先回商城主页，而不是替用户做一次 `router.push`。
+  if (!stepAllowed(start, current)) {
+    // 只有 flow 明确声明 `jumpToStart`（秒杀报名）才允许在胶囊点击后导航到起始页。
+    // 发布流程没有这个开关 ⇒ 当前页不承载入口时返回 null，由调用方提示，绝不瞬移。
+    if (flow.jumpToStart && start.path) {
+      writeTourFlow(flow.id, index)
+      activePath = normalizePath(start.path)
+      navigate(activePath)
+    }
     return null
   }
+
+  writeTourFlow(flow.id, index)
+  activePath = current
   return resumeTourFlow(current)
 }
 

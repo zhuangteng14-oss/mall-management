@@ -79,7 +79,7 @@
       </div>
 
       <!-- ═══ 01 基本信息（稿 `:347-375`）══════════════════════════════════════ -->
-      <section class="sec">
+      <section id="tour-publish-basic" class="sec">
         <div class="sec-h"><span class="idx">01</span><h2>基本信息</h2></div>
 
         <div class="grid2">
@@ -119,7 +119,7 @@
                本页保留**既有真控件** `<input type="radio" v-model="GoodType">`（机制逐字未动），
                只取其视觉（发丝线胶囊 + 选中态染 `--brand`）。`aria-checked` 的语义由
                **原生 radio** 承担 ⇒ 比 `<button>` 更准，不是降级。 -->
-          <div class="codes" :class="{ err: showTip && !GoodType }">
+          <div id="tour-publish-category" class="codes" :class="{ err: showTip && !GoodType }">
             <label
               v-for="item in typeList"
               :key="item.Id"
@@ -152,13 +152,13 @@
       </section>
 
       <!-- ═══ 02 价格库存（稿 `:378-403`）══════════════════════════════════════ -->
-      <section class="sec">
+      <section id="tour-publish-pricing" class="sec">
         <div class="sec-h"><span class="idx">02</span><h2>价格库存</h2></div>
 
         <div class="grid2">
           <div class="f">
             <label for="g-price">商品价格</label>
-            <span class="money" :class="{ err: showTip && !Price }">
+            <span id="tour-publish-price" class="money" :class="{ err: showTip && !Price }">
               <span class="u">¥</span>
               <input id="g-price" v-model="Price" type="number" placeholder="0.00">
             </span>
@@ -192,7 +192,7 @@
 
         <!-- 预留位 ②（稿 `:395-402`）—— 块级。输入框同款死控件。 -->
         <div
-          class="f mt"
+          class="f mt" id="tour-publish-stock"
           data-slot="预留 · 库存（动现有代码 5 处 · 超档）"
           title="待 C3〈商品〉——goods 表无库存列（GoodsDao.java:77 的 INSERT 列序实测 7 列）：mall_management_sql.sql + GoodsDao.java + GoodsService.java + GoodsController.java + GoodsAdd.vue = 5 处，**超档**，因清单点名而画出（见 README 挂账表）"
         >
@@ -275,7 +275,7 @@
       </section>
 
       <!-- ═══ 04 商品详情（稿 `:427-436`）══════════════════════════════════════ -->
-      <section class="sec">
+      <section id="tour-publish-detail" class="sec">
         <div class="sec-h"><span class="idx">04</span><h2>商品详情</h2></div>
 
         <!-- ⚠️ **2026-10-10〈模板表通用化〉：预留位 ④ 就地转真功能** ——

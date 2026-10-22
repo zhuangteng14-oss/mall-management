@@ -243,7 +243,10 @@ function onSuggestion(s) {
     if (s.routeKey === 'publish') {
       // 多步路径引导：先高亮当前页的入口，用户点「下一步」才跳；不直接 push 目标页。
       close()
-      startTourFlow(PUBLISH_FLOW_ID, route.path)
+      startTourFlow(PUBLISH_FLOW_ID, route.path).then((tour) => {
+        // 裸页（商品详情 / 店铺页）没有顶栏入口 ⇒ 不替用户跳转，只提示回商城主页。
+        if (!tour) pushBot('当前页没有「用户中心」入口。先回到商城主页，再点一次「去发布商品」，我从右上角带你进去。')
+      })
       return
     }
     if (s.routeKey === 'applyStatus') {

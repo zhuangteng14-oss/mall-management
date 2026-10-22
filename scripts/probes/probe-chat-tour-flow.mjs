@@ -1,19 +1,12 @@
-// probe-chat-tour-flow.mjs —— 「多步路径引导」真链验收（2026-10-22）
+// probe-chat-tour-flow.mjs —— 「多步路径引导」真链验收（2026-10-22 纠偏版）
 //
-// 验的是用户口径：点【去发布商品】**不许直接瞬移**，必须先在当前页高亮入口，
-// 点 driver 的「下一步」才跳；跳过去再高亮下一步，五步连贯。
+// 验的是用户口径：
+//   ① 公域首页点【去发布商品】**画面必须停在首页**，高亮右上角「用户中心」；
+//   ② 个人中心点胶囊 ⇒ 从「上架商品」开始（跳过第 1 步）；
+//   ③ 进发布页后按真实表单走完 7 步：主图 → 名称/分类 → 价格/库存 → 详情 → 提交；
+//   ④ 全程只有用户点「下一步 / 上一步」才换页。
 //
-// 流程（真 dev server + 真后端 + 真模型，不 mock 任何请求）：
-//   ① 商家登录（chenguang_parts）⇒ /merchant；
-//   ② 客服发「我的新商品要上架秒杀页，还没上架呢」⇒ 点【去发布商品】；
-//   ③ 断言：当前页（/merchant）高亮 #tour-entry-merchant，进度「第 1 步 / 共 5 步」；
-//   ④ 点「下一步」⇒ /merchant/user，高亮 #tour-menu-add（第 2 步）；
-//   ⑤ 点「下一步」⇒ /merchant/user/add，依次高亮 title / image / submit（第 3–5 步）；
-//   ⑥ 点「完成」⇒ 浮层消失、sessionStorage 里的流程存档清空；
-//   ⑦ 直接深链 /merchant/user/add（无流程）⇒ 不出现任何高亮；
-//   ⑧ 已在发布页点胶囊 ⇒ 自动跳到第 3 步；点「上一步」⇒ 回到个人中心第 2 步；
-//   ⑨ 【去秒杀报名】仍能落到 /merchant/seckill 并高亮两步。
-//
+// 真 dev server + 真后端 + 真模型，不 mock 任何请求。
 // 用法：node scripts/probes/probe-chat-tour-flow.mjs
 import fs from 'node:fs'
 import path from 'node:path'
@@ -21,6 +14,7 @@ import { open, sleep } from '../../docs/美化/_cdp.mjs'
 
 const BASE = 'http://localhost:8080'
 const OUT = 'C:/Users/86159/Desktop/软件工程/期末项目/docs/agent/evidence/chat-tour-flow'
+fs.rmSync(OUT, { recursive: true, force: true })
 fs.mkdirSync(OUT, { recursive: true })
 
 const rows = []
@@ -80,6 +74,12 @@ async function login(acc, pwd) {
   return false
 }
 
+/** hash 导航（不整页刷新，保留聊天历史）。 */
+async function goHash(hash) {
+  await b.evalJS(`location.hash = ${JSON.stringify(hash)}`)
+  await sleep(500)
+}
+
 async function openPanel() {
   // ⚠️ 必须用 `.chat-root .panel`：页面上本来就有很多业务 `.panel`，
   //    裸 `.panel` 会把「客服面板没开」误判成已开。
@@ -103,13 +103,22 @@ async function sendChat(text) {
   await sleep(150)
   await b.evalJS(`document.querySelector('.composer').requestSubmit()`)
   // 完成信号 = 新的 bot 气泡已落地且「正在输入」的 dots 消失。
-  // ⚠️ 不能只看 textarea 的 disabled：真模型有 3s 超时降级，DOM 更新与 CDP 轮询之间有竞态。
   const done = await waitFor(
     `document.querySelectorAll('.bubble.bot').length > ${before} && !document.querySelector('.bubble.bot .dots')`,
     20000,
   )
   await sleep(400)
   return done
+}
+
+async function clickChip(text) {
+  await openPanel()
+  await waitFor(`[...document.querySelectorAll('.chip')].some(e => e.textContent.includes(${JSON.stringify(text)}))`, 8000)
+  return b.evalJS(`(() => {
+    const c = [...document.querySelectorAll('.chip')].find(e => e.textContent.includes(${JSON.stringify(text)}))
+    c?.click()
+    return !!c
+  })()`)
 }
 
 const popoverShown = () => `document.querySelector('.driver-popover') && getComputedStyle(document.querySelector('.driver-popover')).display !== 'none'`
@@ -129,12 +138,34 @@ async function waitStep(sel, progressText, timeout = 12000) {
   return { hit, progress: await b.evalJS(progress), active: await b.evalJS(active(sel)) }
 }
 
+const FORM_ANCHORS = [
+  '#tour-publish-image',
+  '#tour-publish-basic',
+  '#tour-publish-title',
+  '#tour-publish-category',
+  '#tour-publish-pricing',
+  '#tour-publish-price',
+  '#tour-publish-stock',
+  '#tour-publish-detail',
+  '#g-desc',
+  '#tour-publish-submit',
+]
+
 try {
   ok('商家登录落 /merchant', await login('chenguang_parts', CREDS['chenguang_parts']))
-  await b.shot(path.join(OUT, 'flow-00-merchant.png'))
+
+  // ── ① 商城首页：点胶囊必须留在首页 ──────────────────────────────────────
+  // ⚠️ 商家角色被角色守卫送回 `/merchant`（客户壳 `/customer` 只给 role 1/3），
+  //    所以商家的「商城首页」就是 `/merchant`，不是 `/customer`。别把探针前提写错。
+  const homeReady = await waitFor(
+    `location.hash === '#/merchant' && document.querySelector('#tour-entry-merchant') && document.querySelector('.chat-root .ball')`,
+    12000,
+  )
+  await b.shot(path.join(OUT, 'flow-00-merchant-home.png'))
+  ok('商家商城首页已就绪且顶栏有用户中心入口', homeReady, { hash: await b.evalJS(`location.hash`) })
 
   const done = await sendChat('我的新商品要上架秒杀页，还没上架呢')
-  // 再等一次胶囊本身：真模型有 3s 超时降级的路径，回复落地与 DOM 更新不是同一帧。
+  // 真模型有 3s 超时降级路径；再等一次胶囊本身，避免回复落地与 DOM 更新不同帧。
   const chipReady = await waitFor(
     `[...document.querySelectorAll('.chip')].some(e => e.textContent.includes('去发布商品'))`, 20000,
   )
@@ -144,96 +175,128 @@ try {
     && chips.some((x) => x.includes('去发布商品')) && chips.some((x) => x.includes('去秒杀报名')),
   { chips, reply: reply.slice(0, 100) })
 
-  // 点胶囊：**不许**直接落 /merchant/user/add，必须先在本页高亮入口。
-  await b.evalJS(`[...document.querySelectorAll('.chip')].find(e => e.textContent.includes('去发布商品'))?.click()`)
-  const s1 = await waitStep('#tour-entry-merchant', '第 1 步 / 共 5 步')
-  ok('Step1：当前页高亮「用户中心」入口（不瞬移）',
-    s1.hit && (await b.evalJS(`location.hash`)) === '#/merchant', { ...s1, hash: await b.evalJS(`location.hash`) })
-  await b.shot(path.join(OUT, 'flow-01-entry.png'))
+  const clicked = await clickChip('去发布商品')
+  const s1 = await waitStep('#tour-entry-merchant', '第 1 步 / 共 7 步')
+  ok('Step1：首页点胶囊后画面仍在首页，高亮右上角「用户中心」',
+    clicked && s1.hit && (await b.evalJS(`location.hash`)) === '#/merchant',
+    { ...s1, hash: await b.evalJS(`location.hash`) })
+  await b.shot(path.join(OUT, 'flow-01-entry-home.png'))
 
   await clickNext()
-  const s2 = await waitStep('#tour-menu-add', '第 2 步 / 共 5 步')
-  ok('Step2：下一步跳到个人中心并高亮「上架商品」',
-    s2.hit && (await b.evalJS(`location.hash`)) === '#/merchant/user', { ...s2, hash: await b.evalJS(`location.hash`) })
+  const s2 = await waitStep('#tour-menu-add', '第 2 步 / 共 7 步')
+  ok('Step2：点「下一步」才进个人中心，高亮「上架商品」',
+    s2.hit && (await b.evalJS(`location.hash`)) === '#/merchant/user',
+    { ...s2, hash: await b.evalJS(`location.hash`) })
   await b.shot(path.join(OUT, 'flow-02-menu.png'))
 
   await clickNext()
-  const s3 = await waitStep('#tour-publish-title', '第 3 步 / 共 5 步')
-  ok('Step3：下一步跳到发布页并高亮商品名称',
-    s3.hit && (await b.evalJS(`location.hash`)) === '#/merchant/user/add', { ...s3, hash: await b.evalJS(`location.hash`) })
-  await b.shot(path.join(OUT, 'flow-03-title.png'))
+  const s3 = await waitStep('#tour-publish-image', '第 3 步 / 共 7 步')
+  ok('Step3：进发布页先高亮商品主图',
+    s3.hit && (await b.evalJS(`location.hash`)) === '#/merchant/user/add',
+    { ...s3, hash: await b.evalJS(`location.hash`) })
+  await b.shot(path.join(OUT, 'flow-03-image.png'))
+
+  const formReady = await b.evalJS(`(${JSON.stringify(FORM_ANCHORS)}).map(s => {
+    const el = document.querySelector(s)
+    return { s, ok: !!el && el.getBoundingClientRect().width > 0 && el.getBoundingClientRect().height > 0 }
+  })`)
+  ok('发布页真实字段锚点全部渲染可见', formReady.every((x) => x.ok), formReady)
 
   await clickNext()
-  const s4 = await waitStep('#tour-publish-image', '第 4 步 / 共 5 步')
-  ok('Step4：同页切到商品主图', s4.hit, s4)
-  await b.shot(path.join(OUT, 'flow-04-image.png'))
+  const s4 = await waitStep('#tour-publish-basic', '第 4 步 / 共 7 步')
+  const basicHas = await b.evalJS(`(() => {
+    const box = document.querySelector('#tour-publish-basic')
+    return !!box && !!box.querySelector('#tour-publish-title') && !!box.querySelector('#tour-publish-category')
+  })()`)
+  ok('Step4：高亮名称与分类（同一区块含标题 / 类型）', s4.hit && basicHas, { ...s4, basicHas })
+  await b.shot(path.join(OUT, 'flow-04-basic.png'))
 
   await clickNext()
-  const s5 = await waitStep('#tour-publish-submit', '第 5 步 / 共 5 步')
-  ok('Step5：同页切到提交审核', s5.hit, s5)
-  await b.shot(path.join(OUT, 'flow-05-submit.png'))
+  const s5 = await waitStep('#tour-publish-pricing', '第 5 步 / 共 7 步')
+  const pricingHas = await b.evalJS(`(() => {
+    const box = document.querySelector('#tour-publish-pricing')
+    return !!box && !!box.querySelector('#tour-publish-price') && !!box.querySelector('#tour-publish-stock')
+  })()`)
+  ok('Step5：高亮价格与库存（同一区块含售价 / 库存）', s5.hit && pricingHas, { ...s5, pricingHas })
+  await b.shot(path.join(OUT, 'flow-05-pricing.png'))
+
+  await clickNext()
+  const s6 = await waitStep('#tour-publish-detail', '第 6 步 / 共 7 步')
+  const detailHas = await b.evalJS(`!!document.querySelector('#tour-publish-detail #g-desc')`)
+  ok('Step6：高亮商品详情文本域', s6.hit && detailHas, { ...s6, detailHas })
+  await b.shot(path.join(OUT, 'flow-06-detail.png'))
+
+  await clickNext()
+  const s7 = await waitStep('#tour-publish-submit', '第 7 步 / 共 7 步')
+  ok('Step7：高亮提交审核按钮', s7.hit, s7)
+  await b.shot(path.join(OUT, 'flow-07-submit.png'))
 
   await clickNext()
   const closed = await waitFor(popoverGone, 5000)
-  const dom = await b.evalJS(`({
-    count: document.querySelectorAll('.driver-popover').length,
-    display: [...document.querySelectorAll('.driver-popover')].map(e => getComputedStyle(e).display),
-    overlay: document.querySelectorAll('.driver-overlay').length,
-    body: document.body.className,
-    active: [...document.querySelectorAll('.driver-active-element')].map(e => e.id || e.className),
-  })`)
   ok('完成后浮层消失且流程存档清空',
-    closed && !(await b.evalJS(flowState)), { closed, flow: await b.evalJS(flowState), dom })
+    closed && !(await b.evalJS(flowState)), { closed, flow: await b.evalJS(flowState) })
 
-  // ⑦ 直接导航进发布页（无流程）⇒ 不出现高亮。
-  // ⚠️ 用 hash 导航而不是 goto：整页刷新会把聊天历史（那两枚胶囊）一起清掉。
-  await b.evalJS(`location.hash = '#/merchant/user/add'`)
-  await waitFor(`document.querySelector('#tour-publish-title')`, 8000)
-  await sleep(1000)
+  // ── ② 直接导航进发布页（无流程）⇒ 不出现高亮 ────────────────────────────
+  await goHash('#/merchant/user/add')
+  await waitFor(`document.querySelector('#tour-publish-image')`, 8000)
+  await sleep(800)
   ok('直接进发布页不触发高亮（无流程存档）',
-    !(await b.evalJS(popoverShown())) && !(await b.evalJS(active('#tour-publish-title'))))
+    !(await b.evalJS(popoverShown())) && !(await b.evalJS(active('#tour-publish-image'))))
 
-  // ⑧ 已在发布页点同一个胶囊 ⇒ 从第 3 步开始；点「上一步」回到个人中心第 2 步。
-  await openPanel()
-  await waitFor(`[...document.querySelectorAll('.chip')].some(e => e.textContent.includes('去发布商品'))`, 5000)
-  const clickedAgain = await b.evalJS(`(() => {
-    const c = [...document.querySelectorAll('.chip')].find(e => e.textContent.includes('去发布商品'))
-    c?.click()
-    return !!c
-  })()`)
-  const s6 = await waitStep('#tour-publish-title', '第 3 步 / 共 5 步')
-  ok('已在发布页：自动跳到第 3 步（不重复强调入口）',
-    s6.hit && (await b.evalJS(`location.hash`)) === '#/merchant/user/add',
-    { ...s6, clickedAgain, flow: await b.evalJS(flowState), pop: await b.evalJS(`document.querySelectorAll('.driver-popover').length`) })
-  await b.shot(path.join(OUT, 'flow-06-resume-title.png'))
+  // ── ③ 已在发布页点同一个胶囊 ⇒ 从第 3 步（主图）开始 ────────────────────
+  const clickedAgain = await clickChip('去发布商品')
+  const s8 = await waitStep('#tour-publish-image', '第 3 步 / 共 7 步')
+  ok('已在发布页：自动从第 3 步（主图）开始，不重复强调入口',
+    clickedAgain && s8.hit && (await b.evalJS(`location.hash`)) === '#/merchant/user/add',
+    { ...s8, hash: await b.evalJS(`location.hash`) })
+  await b.shot(path.join(OUT, 'flow-08-resume-image.png'))
 
   await b.evalJS(`document.querySelector('.driver-popover-prev-btn')?.click()`)
-  const back = await waitStep('#tour-menu-add', '第 2 步 / 共 5 步', 12000)
+  const back = await waitStep('#tour-menu-add', '第 2 步 / 共 7 步', 12000)
   ok('「上一步」跨页回到个人中心并高亮上架入口',
     back.hit && (await b.evalJS(`location.hash`)) === '#/merchant/user',
     { ...back, hash: await b.evalJS(`location.hash`) })
-  await b.shot(path.join(OUT, 'flow-07-prev.png'))
+  await b.shot(path.join(OUT, 'flow-09-prev.png'))
   await b.evalJS(`document.querySelector('.driver-popover-close-btn')?.click()`)
   await sleep(300)
 
-  // ⑨ 秒杀：胶囊 → 报名页两步。
-  await openPanel()
-  await waitFor(`[...document.querySelectorAll('.chip')].some(e => e.textContent.includes('去秒杀报名'))`, 5000)
-  const clickedSeckill = await b.evalJS(`(() => {
-    const c = [...document.querySelectorAll('.chip')].find(e => e.textContent.includes('去秒杀报名'))
-    c?.click()
-    return !!c
-  })()`)
+  // ── ④ 个人中心点胶囊 ⇒ 第 1 步就是「上架商品」，不再高亮顶栏 ─────────────
+  const personalClick = await clickChip('去发布商品')
+  const s9 = await waitStep('#tour-menu-add', '第 2 步 / 共 7 步')
+  ok('已在个人中心：Step1 留在当前页高亮「上架商品」（跳过顶栏）',
+    personalClick && s9.hit && (await b.evalJS(`location.hash`)) === '#/merchant/user',
+    { ...s9, hash: await b.evalJS(`location.hash`) })
+  await b.shot(path.join(OUT, 'flow-10-personal-start.png'))
+  await b.evalJS(`document.querySelector('.driver-popover-close-btn')?.click()`)
+  await sleep(300)
+
+  // ── ⑤ 秒杀两步流（用户点胶囊后允许直接到报名页）────────────────────────
+  const clickedSeckill = await clickChip('去秒杀报名')
   const k1 = await waitStep('#tour-seckill-select', '第 1 步 / 共 2 步')
-  ok('秒杀：落到报名页并高亮商品下拉',
-    k1.hit && (await b.evalJS(`location.hash`)) === '#/merchant/seckill',
+  ok('秒杀：点胶囊落到报名页并高亮商品下拉',
+    clickedSeckill && k1.hit && (await b.evalJS(`location.hash`)) === '#/merchant/seckill',
     { ...k1, hash: await b.evalJS(`location.hash`) })
-  await b.shot(path.join(OUT, 'flow-08-seckill.png'))
+  await b.shot(path.join(OUT, 'flow-11-seckill.png'))
   await clickNext()
   const k2 = await waitStep('#tour-seckill-submit', '第 2 步 / 共 2 步')
   ok('秒杀：同页切到提交报名', k2.hit, k2)
   await clickNext()
   ok('秒杀：完成后浮层消失', await waitFor(popoverGone, 5000))
+
+  // ── ⑥ 「怎么开店」的动作按钮只去申请页，绝不能被发布流程串台 ─────────────
+  await sendChat('怎么开店')
+  const hasAction = await waitFor(`document.querySelector('.chat-root .tour-btn')`, 15000)
+  const acted = await b.evalJS(`(() => {
+    const el = document.querySelector('.chat-root .tour-btn')
+    el?.click()
+    return !!el
+  })()`)
+  await sleep(1800)
+  const applyHash = await b.evalJS(`location.hash`)
+  ok('「怎么开店」落入驻申请页，不会误跳发布页',
+    hasAction && acted && applyHash === '#/merchant/user/apply',
+    { hasAction, acted, hash: applyHash })
+  await b.evalJS(`document.querySelector('.driver-popover-close-btn')?.click()`)
 
   ok('页面无未捕获异常', pageErrors.length === 0, { pageErrors })
 } catch (e) {
