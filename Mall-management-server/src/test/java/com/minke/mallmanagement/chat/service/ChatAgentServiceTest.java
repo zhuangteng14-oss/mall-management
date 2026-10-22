@@ -270,16 +270,61 @@ class ChatAgentServiceTest {
     }
 
     @Test
-    @DisplayName("怎么开店：带 tour action，路由键为 apply")
+    @DisplayName("怎么开店：默认给【开始引导】（不直接跳申请页）")
     void openStoreReturnsTourAction() {
         Map<String, Object> resp = service.ask("怎么开店", "c1", 1);
 
         assertThat(resp.get("intent")).isEqualTo("OPEN_STORE");
-        @SuppressWarnings("unchecked")
-        Map<String, Object> action = (Map<String, Object>) resp.get("action");
-        assertThat(action).containsEntry("type", "tour")
-                .containsEntry("tourId", "open-store")
-                .containsEntry("routeKey", "apply");
+        assertThat(actionOf(resp)).containsEntry("type", "tour")
+                .containsEntry("targetPath", "/customer/user/apply")
+                .containsEntry("label", "开始引导");
+        assertThat(String.valueOf(resp.get("reply"))).contains("一步步教您");
+    }
+
+    @Test
+    @DisplayName("怎么申请品牌：默认【开始引导】，落点是入驻申请页")
+    void brandApplyDefaultsToGuide() {
+        Map<String, Object> resp = service.ask("怎么申请品牌", "c1", 1);
+
+        assertThat(resp.get("intent")).isEqualTo("OPEN_STORE");
+        assertThat(actionOf(resp)).containsEntry("type", "tour")
+                .containsEntry("targetPath", "/customer/user/apply")
+                .containsEntry("label", "开始引导");
+        assertThat(String.valueOf(resp.get("reply")))
+                .contains("好的，我来一步步教您。点击下方按钮开始。");
+    }
+
+    @Test
+    @DisplayName("直接带我去申请品牌：明说直达 ⇒ 【一键直达】，不触发漫游")
+    void brandApplyWithDirectPhraseReturnsJump() {
+        Map<String, Object> resp = service.ask("直接带我去申请品牌", "c1", 1);
+
+        assertThat(actionOf(resp)).containsEntry("type", "jump")
+                .containsEntry("targetPath", "/customer/user/apply")
+                .containsEntry("label", "一键直达");
+        assertThat(String.valueOf(resp.get("reply")))
+                .contains("已为您准备好直达入口，点击即可前往。");
+    }
+
+    @Test
+    @DisplayName("我要去商家后台：直达口令 ⇒ 导航动作是 jump")
+    void directPhraseOpensJumpAction() {
+        Map<String, Object> resp = service.ask("我要去商家后台", "m1", 2);
+
+        assertThat(actionOf(resp)).containsEntry("type", "jump")
+                .containsEntry("label", "一键直达");
+        assertThat(String.valueOf(resp.get("reply"))).contains("已为您准备好直达入口");
+    }
+
+    @Test
+    @DisplayName("直达判据：只有明确口令才算直达，问「怎么去」不算")
+    void directPhraseDetection() {
+        assertThat(ChatAgentService.isDirectNavigation("直接带我去申请品牌")).isTrue();
+        assertThat(ChatAgentService.isDirectNavigation("我要去商家后台")).isTrue();
+        assertThat(ChatAgentService.isDirectNavigation("马上打开秒杀报名")).isTrue();
+        assertThat(ChatAgentService.isDirectNavigation("怎么申请品牌")).isFalse();
+        assertThat(ChatAgentService.isDirectNavigation("怎么去商家后台")).isFalse();
+        assertThat(ChatAgentService.isDirectNavigation("如何上架商品")).isFalse();
     }
 
     @Test
@@ -320,7 +365,8 @@ class ChatAgentServiceTest {
 
         assertThat(String.valueOf(resp.get("reply")))
                 .startsWith("系统显示您当前是普通客户，还没有提交过入驻申请。");
-        assertThat(actionOf(resp)).containsEntry("routeKey", "apply");
+        assertThat(actionOf(resp)).containsEntry("targetPath", "/customer/user/apply")
+                .containsEntry("label", "开始引导");
     }
 
     @Test
@@ -345,7 +391,8 @@ class ChatAgentServiceTest {
 
         assertThat(String.valueOf(resp.get("reply")))
                 .contains("系统显示您当前是「入驻未通过」", "原因：资料不全");
-        assertThat(actionOf(resp)).containsEntry("label", "重新申请");
+        assertThat(actionOf(resp)).containsEntry("label", "开始引导")
+                .containsEntry("targetPath", "/customer/user/apply");
 
         identity(ResolvedIdentity.rejected("demo_customer", ""));
         assertThat(String.valueOf(service.ask("怎么开店", "c1", 1).get("reply")))
@@ -361,7 +408,8 @@ class ChatAgentServiceTest {
 
         assertThat(String.valueOf(resp.get("reply")))
                 .contains("系统显示您当前是商家。", "商家号：m1。");
-        assertThat(actionOf(resp)).containsEntry("routeKey", "apply");
+        assertThat(actionOf(resp)).containsEntry("targetPath", "/merchant/user/apply")
+                .containsEntry("label", "开始引导");
     }
 
     @Test
@@ -383,7 +431,8 @@ class ChatAgentServiceTest {
         Map<String, Object> resp = service.ask("怎么开店", null, null);
 
         assertThat(String.valueOf(resp.get("reply"))).startsWith("您当前还未登录。");
-        assertThat(actionOf(resp)).containsEntry("routeKey", "apply");
+        assertThat(actionOf(resp)).containsEntry("targetPath", "/customer/user/apply")
+                .containsEntry("label", "开始引导");
     }
 
     @Test
@@ -407,7 +456,8 @@ class ChatAgentServiceTest {
 
         assertThat(String.valueOf(resp.get("reply")))
                 .startsWith("您当前是已降级/冻结商家。");
-        assertThat(actionOf(resp)).containsEntry("label", "重新申请");
+        assertThat(actionOf(resp)).containsEntry("label", "开始引导")
+                .containsEntry("targetPath", "/customer/user/apply");
     }
 
     @Test
@@ -476,7 +526,8 @@ class ChatAgentServiceTest {
 
         assertThat(String.valueOf(resp.get("reply")))
                 .contains("系统显示您当前是普通客户", "需要先完成商家入驻");
-        assertThat(actionOf(resp)).containsEntry("routeKey", "apply");
+        assertThat(actionOf(resp)).containsEntry("targetPath", "/customer/user/apply")
+                .containsEntry("label", "开始引导");
         assertThat(objectSuggestions(resp))
                 .extracting((m) -> m.get("routeKey"))
                 .doesNotContain("seckill");
@@ -714,20 +765,20 @@ class ChatAgentServiceTest {
     // ==================== NavGraph：target_path → navigate action ====================
 
     @Test
-    @DisplayName("NavGraph：LLM 判 NAVIGATE ⇒ 只回 target_path，步骤由前端 BFS 算")
+    @DisplayName("NavGraph：LLM 判 NAVIGATE ⇒ 只回 target_path，默认给「开始引导」")
     void llmNavigateReturnsAction() {
         llmEnabled();
-        when(llmClassifier.classify(eq("我要去看店铺数据"), any(), isNull()))
+        when(llmClassifier.classify(eq("怎么查看店铺数据"), any(), isNull()))
                 .thenReturn(new LlmIntentClassifier.Result(ChatIntent.NAVIGATE, null, false, "/merchant/stats"));
 
-        Map<String, Object> resp = service.ask("我要去看店铺数据", "m1", 2);
+        Map<String, Object> resp = service.ask("怎么查看店铺数据", "m1", 2);
 
-        assertThat(resp.get("intent")).isEqualTo("NAVIGATE");
+        assertThat(resp.get("intent")).isEqualTo("GUIDE_NAVIGATION");
         assertThat(actionOf(resp))
-                .containsEntry("type", "navigate")
+                .containsEntry("type", "tour")
                 .containsEntry("targetPath", "/merchant/stats")
                 .containsEntry("targetLabel", "经营数据")
-                .containsEntry("label", "带我去「经营数据」");
+                .containsEntry("label", "开始引导");
         // 后端不返回步骤数组：怎么走是前端 NavGraph 的事。
         assertThat(resp).doesNotContainKey("steps");
         assertThat(String.valueOf(resp.get("reply"))).contains("经营看板", "一步步");
@@ -743,7 +794,9 @@ class ChatAgentServiceTest {
         Map<String, Object> resp = service.ask("怎么入驻开店", "c1", 1);
 
         assertThat(resp.get("intent")).isEqualTo("OPEN_STORE");
-        assertThat(actionOf(resp)).containsEntry("type", "tour").containsEntry("routeKey", "apply");
+        assertThat(actionOf(resp)).containsEntry("type", "tour")
+                .containsEntry("targetPath", "/customer/user/apply")
+                .containsEntry("label", "开始引导");
     }
 
     @Test
@@ -801,10 +854,11 @@ class ChatAgentServiceTest {
 
         Map<String, Object> resp = service.ask("怎么上架商品", "m1", 2);
 
-        assertThat(resp.get("intent")).isEqualTo("NAVIGATE");
+        assertThat(resp.get("intent")).isEqualTo("GUIDE_NAVIGATION");
         assertThat(actionOf(resp))
-                .containsEntry("type", "navigate")
-                .containsEntry("targetPath", "/merchant/user/add");
+                .containsEntry("type", "tour")
+                .containsEntry("targetPath", "/merchant/user/add")
+                .containsEntry("label", "开始引导");
     }
 
     @Test
@@ -812,7 +866,7 @@ class ChatAgentServiceTest {
     void ruleFallbackNavigatesRefundHowTo() {
         // 默认 llmClassifier 未启用 ⇒ byRules；规则正则先命中「退款」，再由字典纠偏成导航。
         Map<String, Object> resp = service.ask("怎么处理退款", "m1", 2);
-        assertThat(resp.get("intent")).isEqualTo("NAVIGATE");
+        assertThat(resp.get("intent")).isEqualTo("GUIDE_NAVIGATION");
         assertThat(actionOf(resp)).containsEntry("targetPath", "/merchant/after-sales");
 
         when(refundService.myRefunds("c1", 1)).thenReturn(Map.of("list", List.of()));
@@ -827,10 +881,22 @@ class ChatAgentServiceTest {
         // 默认 llmClassifier.isEnabled()=false ⇒ 直接走 byRules。
         Map<String, Object> resp = service.ask("我想改一下那个 299 元耳机的价格", "m1", 2);
 
-        assertThat(resp.get("intent")).isEqualTo("NAVIGATE");
+        assertThat(resp.get("intent")).isEqualTo("GUIDE_NAVIGATION");
         assertThat(actionOf(resp))
-                .containsEntry("type", "navigate")
+                .containsEntry("type", "tour")
                 .containsEntry("targetPath", "/merchant/user/list");
+    }
+
+    @Test
+    @DisplayName("LLM 超时降级：「怎么上架商品」的「上架」不算开店，字典指向发布页")
+    void ruleFallbackPublishFromCatalog() {
+        Map<String, Object> resp = service.ask("怎么上架商品", "m1", 2);
+
+        assertThat(resp.get("intent")).isEqualTo("GUIDE_NAVIGATION");
+        assertThat(actionOf(resp))
+                .containsEntry("type", "tour")
+                .containsEntry("targetPath", "/merchant/user/add")
+                .containsEntry("label", "开始引导");
     }
 
     @Test
@@ -842,7 +908,7 @@ class ChatAgentServiceTest {
 
         Map<String, Object> resp = service.ask("怎么处理退款", "c1", 1);
 
-        assertThat(resp.get("intent")).isEqualTo("NAVIGATE");
+        assertThat(resp.get("intent")).isEqualTo("GUIDE_NAVIGATION");
         assertThat(actionOf(resp)).containsEntry("targetPath", "/customer/orders");
     }
 
@@ -856,7 +922,7 @@ class ChatAgentServiceTest {
 
         Map<String, Object> resp = service.ask("怎么处理退款", "c1", 1);
 
-        assertThat(resp.get("intent")).isEqualTo("NAVIGATE");
+        assertThat(resp.get("intent")).isEqualTo("GUIDE_NAVIGATION");
         assertThat(actionOf(resp)).containsEntry("targetPath", "/customer/orders");
     }
 

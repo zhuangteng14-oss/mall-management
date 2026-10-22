@@ -71,7 +71,7 @@ public final class RouteCatalog {
             new Route("/merchant/orders", "我的订单",
                     "买家视角的我的订单列表（含售后进度）。用户说「我的订单 / 我买的东西」时选它。", MERCHANT),
             new Route("/merchant/user", "个人中心",
-                    "用户中心：个人资料、商品、订单与资产的枢纽。用户说「个人中心 / 用户中心 / 我的主页」时选它。", MERCHANT),
+                    "用户中心：个人资料、商品、订单与资产的枢纽。用户说「个人中心 / 用户中心 / 我的主页 / 商家后台」时选它。", MERCHANT),
             new Route("/merchant/user/info", "个人信息",
                     "头像、昵称与账号资料。用户说「改头像 / 改昵称 / 账号资料」时选它。", MERCHANT),
             new Route("/merchant/user/add", "上架商品",

@@ -70,6 +70,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { Bot, Send, X } from '@lucide/vue'
 import ChatBubble from './ChatBubble.vue'
 import { askChat } from '../../api/chat'
+import { isLoggedIn } from '../../api/auth'
 import { UnauthorizedError } from '../../api/http'
 import {
   applyPath,
@@ -80,6 +81,7 @@ import {
   readPendingTour,
   resumePathAfterLogin,
   resumeTourFlow,
+  savePendingNav,
   savePendingTour,
   SECKILL_FLOW_ID,
   setTourNavigator, startGoodsTour, startNavGuidedTour, startTourFlow,
@@ -265,7 +267,8 @@ async function onSuggestion(s) {
       return
     }
     if (s.routeKey === 'apply') {
-      onAction({ type: 'tour', tourId: 'open-store', routeKey: 'apply', label: s.label })
+      // 默认引导：从当前页 BFS 走到入驻申请页，而不是瞬移过去。
+      onAction({ type: 'tour', targetPath: applyPath(), targetLabel: '商家入驻申请', label: s.label })
       return
     }
     if (s.routeKey === 'orders') {
@@ -303,16 +306,38 @@ async function onSuggestion(s) {
   send(String(s))
 }
 
+/**
+ * 动作按钮分发（2026-10-22 交互纠偏后的两种模式）：
+ * · `jump`  —— 用户明说「直接去 / 我要去」⇒ **不触发漫游**，`router.push` 直达；
+ * · `tour`  —— 默认「怎么去」⇒ 从**当前页**跑 BFS 逐步高亮，绝不替用户瞬移；
+ * · `navigate` 是旧协议的引导值，按 `tour` 处理。
+ */
 async function onAction(action) {
-  // NavGraph 自动寻路：后端只给 target_path，前端从**当前页**跑 BFS 生成逐步高亮。
-  if (action && action.type === 'navigate' && action.targetPath) {
+  if (!action) return
+  const targetPath = action.targetPath ? String(action.targetPath) : ''
+
+  if (action.type === 'jump' && targetPath) {
     close()
-    const result = await startNavGuidedTour(route.path, action.targetPath)
-    if (!result) {
-      pushBot(`当前页面没有通往「${action.targetLabel || action.targetPath}」的入口。先回到商城主页，再点一次这个按钮，我从头带你走。`)
+    if (isLoggedIn()) clearPendingTour()
+    else savePendingNav('jump', targetPath)
+    if (normalize(route.path) !== normalize(targetPath)) {
+      router.push(targetPath).catch(() => {})
     }
     return
   }
+
+  if ((action.type === 'tour' || action.type === 'navigate') && targetPath) {
+    close()
+    if (isLoggedIn()) clearPendingTour()
+    else savePendingNav('tour', targetPath)
+    const result = await startNavGuidedTour(route.path, targetPath)
+    if (!result) {
+      pushBot(`当前页面没有通往「${action.targetLabel || targetPath}」的入口。先回到商城主页，再点一次这个按钮，我从头带你走。`)
+    }
+    return
+  }
+
+  // 旧协议兜底（只有 tourId / routeKey 的入口）：先到申请页，再开两步表单高亮。
   savePendingTour(action.tourId || 'open-store', action.routeKey || 'apply')
   close()
   const target = applyPath()
@@ -371,6 +396,12 @@ watch(
       }
       const target = resumePathAfterLogin(normalize(to))
       if (target) {
+        // 登录打断了「引导」：把待办换成开店两步表单，申请页挂载后自动接着教；
+        // 「直达」则保持干脆 —— 清掉待办，落页即结束。
+        if (pending && pending.nav) {
+          if (pending.nav.type === 'tour' && isApplyPath(target)) savePendingTour('open-store', 'apply')
+          else clearPendingTour()
+        }
         router.push(target).catch(() => {})
         return
       }
@@ -628,12 +659,15 @@ onBeforeUnmount(() => {
   font-variant-numeric: tabular-nums;
 }
 .tour-bar-skip {
+  /* 弱化的文字按钮：放在操作行最左，靠 `margin-right:auto` 与右侧按钮拉开。 */
+  margin-right: auto;
   border: 0;
-  padding: 2px 4px;
+  padding: 2px 0;
   background: transparent;
   color: var(--muted, #67736e);
   font: inherit;
   font-size: var(--fs-xs, 12px);
+  white-space: nowrap;
   cursor: pointer;
   text-decoration: underline;
   text-underline-offset: 2px;

@@ -176,7 +176,7 @@ async function navCase(question, target, spec) {
   const { done, body } = await sendChat(question)
   const action = body?.action || null
   ok(`「${question}」→ ${target}（模型给 target_path，不给步骤）`,
-    done && body?.intent === 'NAVIGATE' && action?.type === 'navigate'
+    done && body?.intent === 'GUIDE_NAVIGATION' && action?.type === 'tour'
       && action?.targetPath === target && !Array.isArray(body?.steps),
     { intent: body?.intent, action, steps: body?.steps ?? null })
 
@@ -214,7 +214,7 @@ try {
   await waitFor(`document.querySelector('#tour-entry-merchant') && document.querySelector('.chat-root .ball')`, 12000)
 
   // ── ① 冷问题：店铺数据 → 经营数据 ────────────────────────────────────────
-  await navCase('我要去看店铺数据', '/merchant/stats', {
+  await navCase('怎么查看店铺数据', '/merchant/stats', {
     hops: 2,
     anchors: ['#tour-entry-merchant', '[data-nav-to="/merchant/stats"]', '.ms-page'],
     arrived: '.ms-page',
@@ -280,7 +280,8 @@ try {
     const from = await b.evalJS('location.hash')
     const { done, body } = await sendChat('怎么上架商品')
     ok('「怎么上架商品」→ /merchant/user/add',
-      done && body?.intent === 'NAVIGATE' && body?.action?.targetPath === '/merchant/user/add',
+      done && body?.intent === 'GUIDE_NAVIGATION' && body?.action?.type === 'tour'
+        && body?.action?.targetPath === '/merchant/user/add',
       { intent: body?.intent, action: body?.action })
     const clicked = await clickAction()
     const s1 = await waitStep('#tour-entry-merchant', '第 1 步 / 共 7 步')

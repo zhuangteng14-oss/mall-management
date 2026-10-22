@@ -18,7 +18,8 @@ PASS  已在个人中心：Step1 留在当前页高亮「上架商品」（跳�
 PASS  秒杀：点胶囊落到报名页并高亮商品下拉  {"hit":true,"progress":"第 1 步 / 共 2 步","active":true,"hash":"#/merchant/seckill"}
 PASS  秒杀：同页切到提交报名  {"hit":true,"progress":"第 2 步 / 共 2 步","active":true}
 PASS  秒杀：完成后浮层消失  ""
-PASS  「怎么开店」落入驻申请页，不会误跳发布页  {"hasAction":true,"acted":true,"hash":"#/merchant/user/apply"}
+PASS  「怎么开店」从当前页开始引导（不瞬移、不串到发布页）  {"hasAction":true,"acted":true,"from":"#/merchant/seckill","hash":"#/merchant/seckill","hit":true,"progress":"第 1 步 / 共 5 步","active":true}
+PASS  「怎么开店」点【跳过引导，直接前往】落到入驻申请页  {"hash":"#/merchant/user/apply"}
 PASS  页面无未捕获异常  {"pageErrors":[]}
 
-flow: 22/22 PASS
+flow: 23/23 PASS

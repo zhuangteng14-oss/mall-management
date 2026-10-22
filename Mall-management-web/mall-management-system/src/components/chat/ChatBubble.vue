@@ -44,9 +44,9 @@
           <div v-if="refund.handledAt" class="rc-row"><span>处理时间</span><b>{{ refund.handledAt }}</b></div>
         </div>
 
-        <!-- 动作：开店漫游（tour）/ 路由图自动寻路（navigate） -->
+        <!-- 动作：默认引导（tour）/ 一键直达（jump）/ 旧协议寻路（navigate） -->
         <button
-          v-if="showExtras && message.action && (message.action.type === 'tour' || message.action.type === 'navigate')"
+          v-if="showExtras && message.action && (message.action.type === 'tour' || message.action.type === 'jump' || message.action.type === 'navigate')"
           type="button"
           class="tour-btn"
           @click.stop="$emit('action', message.action)"

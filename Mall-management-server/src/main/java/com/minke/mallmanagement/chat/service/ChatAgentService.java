@@ -72,6 +72,22 @@ public class ChatAgentService {
             "我是(商家|卖家|品牌商家|品牌|商户)");
 
     /**
+     * 「明确要求直达」的确定性判据（2026-10-22 交互纠偏）。
+     *
+     * <p>默认一律给【开始引导】（BFS 逐步高亮）；只有这句话本身在说「别教我、直接送我到」
+     * 时才给【一键直达】。判据放在后端而不是只靠 Prompt：小模型对「我要去… / 马上打开…」
+     * 的语感不稳定，而「用户有没有亲口说直接」是词面事实。
+     *
+     * <p>⚠️ 不能把「我要看 / 我想看」算进来：「我要去看店铺数据」仍然是去某个页面的
+     * 普通导航，默认引导即可；真正要跳的是「直接 / 立刻 / 马上 / 一键」+ 位移动词。
+     */
+    private static final Pattern DIRECT_NAV = Pattern.compile(
+            "^(?:请|帮我|给我)?(?:直接|立刻|马上|现在就|一键)"
+                    + "(?:带我去|带我|去|到|打开|进入|前往|跳转到?|跳到)"
+                    + "|^(?:我要|我想|帮我|带我)(?:直接|立刻|马上)?"
+                    + "(?:去|到|打开|进入|前往|跳转到?|跳到)");
+
+    /**
      * 「商品还没上架」这个**前置条件**（不是意图，不决定去哪）。
      *
      * <p>只影响秒杀分流里给一枚还是两枚胶囊。模型抽 {@code need_publish} 会超时 / 漏槽，
@@ -223,9 +239,15 @@ public class ChatAgentService {
             case REFUND_QUERY -> answerRefund(message, userId, role);
             case COMMENT_QUERY -> answerComments(message, userId, role);
             case GOODS_QUERY -> answerGoods(message, userId, role, arg(decision, "goodsKeyword"));
-            case OPEN_STORE -> answerOpenStore(userId, role);
+            case OPEN_STORE -> answerOpenStore(userId, role, isDirectNavigation(normalized));
             case ADD_TO_SECKILL -> answerAddToSeckill(userId, role, decision.needPublish());
-            case NAVIGATE -> answerNavigate(decision.targetPath(), userId, role, decision.needPublish());
+            case GUIDE_NAVIGATION -> answerNavigate(decision.targetPath(), userId, role,
+                    decision.needPublish(), false);
+            case DIRECT_NAVIGATION -> answerNavigate(decision.targetPath(), userId, role,
+                    decision.needPublish(), true);
+            // 旧值兜底：模型 / 旧调用点仍可能给出 NAVIGATE ⇒ 按默认引导处理。
+            case NAVIGATE -> answerNavigate(decision.targetPath(), userId, role,
+                    decision.needPublish(), isDirectNavigation(normalized));
             case IDENTITY_CLAIM -> answerIdentityClaim(message, userId, role);
             case GREETING -> answerSmallTalk(intent,
                     "你好呀～我可以帮你查订单、查售后进度，也能一键带你去开店。");
@@ -251,6 +273,13 @@ public class ChatAgentService {
     private Map<String, Object> executeTool(Decision decision, String message,
                                             String userId, Integer role) {
         if (toolExecutor == null || toolRegistry == null) {
+            return null;
+        }
+        // 「直接带我去…」必须走直达动作，而 navigate / open_store 工具只产出引导动作。
+        // 这两类不带业务数据，交给下面的 switch 用 direct 标志重答一次即可。
+        if (isDirectNavigation(ChatIntentRecognizer.normalize(message))
+                && (decision.intent() == ChatIntent.DIRECT_NAVIGATION
+                    || decision.intent() == ChatIntent.OPEN_STORE)) {
             return null;
         }
         Map<String, Object> args = decision.args() == null
@@ -310,6 +339,15 @@ public class ChatAgentService {
             try {
                 LlmIntentClassifier.Result result = llmClassifier.classify(message, role, currentPath);
                 ChatIntent intent = result.intent();
+                boolean direct = isDirectNavigation(normalized);
+                // 旧协议 NAVIGATE / 新协议 GUIDE_NAVIGATION 都按「用户有没有明说直达」分流：
+                // 默认引导；只有「直接带我去 / 我要去」这类词面才走直达。
+                if (intent == ChatIntent.NAVIGATE || intent == ChatIntent.GUIDE_NAVIGATION) {
+                    intent = direct ? ChatIntent.DIRECT_NAVIGATION : ChatIntent.GUIDE_NAVIGATION;
+                } else if (intent == ChatIntent.DIRECT_NAVIGATION && !direct) {
+                    // 模型「脑补」出直达：用户没说直接 ⇒ 退回默认引导。
+                    intent = ChatIntent.GUIDE_NAVIGATION;
+                }
                 String orderId = result.orderId();
                 boolean needPublish = result.needPublish();
                 String tool = result.tool();
@@ -329,7 +367,7 @@ public class ChatAgentService {
                 // 也先于工具：模型可能选成 navigate，但目标页里根本没有评论。
                 if (looksLikeCommentQuery(normalized)
                         && (intent == ChatIntent.ORDER_QUERY || intent == ChatIntent.REFUND_QUERY
-                            || intent == ChatIntent.NAVIGATE || intent == ChatIntent.UNKNOWN)) {
+                            || isNavigation(intent) || intent == ChatIntent.UNKNOWN)) {
                     return new Decision(ChatIntent.COMMENT_QUERY, null, false, null);
                 }
                 // 「查某个商品的详细数据」：小模型会把它判成 NAVIGATE（去搜索页）、ORDER_QUERY
@@ -348,7 +386,7 @@ public class ChatAgentService {
                         && !asksAboutStatus(normalized)) {
                     String guessed = RouteCatalog.guess(message, role);
                     if (guessed != null && !namesPageItself(normalized, guessed)) {
-                        return new Decision(ChatIntent.NAVIGATE, null, false, guessed);
+                        return navDecision(guessed, direct);
                     }
                 }
                 // 「开店」类问题模型偶尔会认成「怎么上架商品」这类别的页面（「上架」两个字同时
@@ -357,16 +395,16 @@ public class ChatAgentService {
                 if (intent == ChatIntent.OPEN_STORE) {
                     String guessed = RouteCatalog.guess(message, role);
                     if (guessed != null && !guessed.endsWith("/user/apply")) {
-                        return new Decision(ChatIntent.NAVIGATE, null, false, guessed);
+                        return navDecision(guessed, direct);
                     }
                 }
                 // 售后类句子：模型判对了「要导航」但落点选错（实测「怎么处理退款」落到会员中心）。
                 // 只在字典有唯一命中、且用户没亲口说出模型选的那个页面名时纠正。
-                if (intent == ChatIntent.NAVIGATE && AFTER_SALES.matcher(normalized).find()) {
+                if (isNavigation(intent) && AFTER_SALES.matcher(normalized).find()) {
                     String guessed = RouteCatalog.guess(message, role);
                     if (guessed != null && !guessed.equals(result.targetPath())
                             && !namesPageItself(normalized, result.targetPath())) {
-                        return new Decision(ChatIntent.NAVIGATE, null, false, guessed);
+                        return navDecision(guessed, direct);
                     }
                 }
                 // 「到哪了」这类短追问：模型可能判对意图但抽不到单号，用上一轮补。
@@ -397,6 +435,7 @@ public class ChatAgentService {
         ChatIntentRecognizer.Match match = ChatIntentRecognizer.recognize(message);
         ChatIntent intent = match.intent();
         String orderId = match.orderId();
+        boolean direct = isDirectNavigation(normalized);
 
         // 「怎么处理退款」这类「去哪办」的句子，规则引擎只看得见「退款」两个字。
         // 与 decide() 里的字典纠偏同一条判据（在问自己那笔状态时不动），
@@ -404,7 +443,16 @@ public class ChatAgentService {
         if (intent == ChatIntent.REFUND_QUERY && !asksAboutStatus(normalized)) {
             String guessed = RouteCatalog.guess(message, role);
             if (guessed != null && !namesPageItself(normalized, guessed)) {
-                return new Decision(ChatIntent.NAVIGATE, null, false, guessed);
+                return navDecision(guessed, direct);
+            }
+        }
+
+        // 「怎么上架商品」里的「上架」同时是开店的词面；字典明确指向发布页时以字典为准
+        // （与 decide() 里的同名纠偏同一条判据）。指向入驻申请页则保留六态话术。
+        if (intent == ChatIntent.OPEN_STORE) {
+            String guessed = RouteCatalog.guess(message, role);
+            if (guessed != null && !guessed.endsWith("/user/apply")) {
+                return navDecision(guessed, direct);
             }
         }
 
@@ -431,7 +479,7 @@ public class ChatAgentService {
                 // 不在这里新增意图正则；没把握（并列 / 太短）就照旧走 UNKNOWN。
                 String guessed = RouteCatalog.guess(message, role);
                 if (guessed != null) {
-                    return new Decision(ChatIntent.NAVIGATE, null, false, guessed);
+                    return navDecision(guessed, direct);
                 }
             }
         }
@@ -442,6 +490,24 @@ public class ChatAgentService {
     /** 用户明说商品还没上架（与模型抽的 {@code need_publish} 取或）。 */
     private static boolean declaresNotPublished(String normalized) {
         return NOT_PUBLISHED.matcher(normalized).find();
+    }
+
+    /** 用户是否**明确要求直达**（词面判据，见 {@link #DIRECT_NAV}）。 */
+    static boolean isDirectNavigation(String normalized) {
+        return normalized != null && DIRECT_NAV.matcher(normalized).find();
+    }
+
+    /** 三个导航意图（含已废弃的 NAVIGATE）—— 纠偏分支要一视同仁。 */
+    private static boolean isNavigation(ChatIntent intent) {
+        return intent == ChatIntent.GUIDE_NAVIGATION
+                || intent == ChatIntent.DIRECT_NAVIGATION
+                || intent == ChatIntent.NAVIGATE;
+    }
+
+    /** 纠偏分支用的导航决策：默认引导，只有明说直达时才给 DIRECT。 */
+    private static Decision navDecision(String path, boolean direct) {
+        return new Decision(direct ? ChatIntent.DIRECT_NAVIGATION : ChatIntent.GUIDE_NAVIGATION,
+                null, false, path);
     }
 
     /** 问的是评论内容本身（不是「怎么写评论」的操作指引）。 */
@@ -1098,9 +1164,13 @@ public class ChatAgentService {
      *
      * <p>不反问「您是商家还是用户」—— 身份来自会话 + 库，用户看到判断后可当场纠错；
      * 每次调用都重新 {@link IdentityResolver#resolve}，审核状态一变下一句就能反映。
+     *
+     * <p>2026-10-22 交互纠偏：动作不再是「直接跳到申请页」，而是默认给【开始引导】
+     * （前端 BFS：用户中心 → 入驻入口 → 表单），只有用户明说「直接带我去…」才给
+     * 【一键直达】。{@code direct} 由 {@link #isDirectNavigation} 的词面判据决定。
      */
     /** 包内可见：{@link ChatToolSet} 的 {@code open_store} 工具调用它。 */
-    Map<String, Object> answerOpenStore(String userId, Integer role) {
+    Map<String, Object> answerOpenStore(String userId, Integer role, boolean direct) {
         ResolvedIdentity id = identityResolver.resolve(userId, role);
         String who = identitySentence(id);
         if (id.boundary() == ResolvedIdentity.Boundary.ADMIN) {
@@ -1108,29 +1178,32 @@ public class ChatAgentService {
                     who + "管理员不需要入驻，请在管理端处理商家审核。",
                     null, null, defaultSuggestions());
         }
+        Map<String, Object> action = navAction(applyTargetPath(role), "商家入驻申请", direct);
+        String how = direct
+                ? "已为您准备好直达入口，点击即可前往。"
+                : "好的，我来一步步教您。点击下方按钮开始。";
         if (id.boundary() == ResolvedIdentity.Boundary.DEGRADED_MERCHANT) {
             return reply(ChatIntent.OPEN_STORE,
-                    who + "重新提交入驻申请，审核通过后即可恢复商家身份。",
-                    null, applyAction("重新申请"), defaultSuggestions());
+                    who + "重新提交入驻申请，审核通过后即可恢复商家身份。" + how,
+                    null, action, defaultSuggestions());
         }
         return switch (id.identity()) {
             case MERCHANT -> reply(ChatIntent.OPEN_STORE,
-                    who + "如果要做品牌加盟，点下面的按钮，我带你到申请页，并高亮"
-                            + "「店铺名称」和「提交申请」两处。",
-                    null, applyAction("一键带我去开店"), defaultSuggestions());
+                    who + "如果要做品牌加盟，" + how,
+                    null, action, defaultSuggestions());
             case MERCHANT_BRAND -> reply(ChatIntent.OPEN_STORE,
-                    who + "如需新增品牌，可以到申请页提交品牌加盟材料。",
-                    null, applyAction("去申请品牌加盟"), defaultSuggestions());
+                    who + "如需新增品牌，可以到申请页提交品牌加盟材料。" + how,
+                    null, action, defaultSuggestions());
             case USER_PENDING -> reply(ChatIntent.OPEN_STORE,
                     who + "审核通过后账号会自动升级为商家，先不用重复提交。",
                     null, null, progressSuggestions());
             case USER_REJECTED -> reply(ChatIntent.OPEN_STORE,
-                    who + "可以修改资料后重新提交，审核通过后账号自动升级为商家。",
-                    null, applyAction("重新申请"), defaultSuggestions());
+                    who + "可以修改资料后重新提交，审核通过后账号自动升级为商家。" + how,
+                    null, action, defaultSuggestions());
             default -> reply(ChatIntent.OPEN_STORE,
                     who + "开店三步：① 填写店铺名称与营业执照号；② 提交入驻申请；③ 平台审核通过后，"
-                            + "账号自动升级为商家。点下面的按钮，我直接带你到申请页，并高亮要填的两处。",
-                    null, applyAction("一键带我去开店"), defaultSuggestions());
+                            + "账号自动升级为商家。" + how,
+                    null, action, defaultSuggestions());
         };
     }
 
@@ -1170,7 +1243,8 @@ public class ChatAgentService {
                             null, null, List.of(routeSuggestion("去秒杀报名", "seckill")));
             case USER_NO_APPLICATION -> reply(ChatIntent.ADD_TO_SECKILL,
                     who + "需要先完成商家入驻，审核通过后才能报名秒杀。",
-                    null, applyAction("先去入驻"), List.of("查我的订单"));
+                    null, navAction(applyTargetPath(role), "商家入驻申请", false),
+                    List.of("查我的订单"));
             case USER_PENDING -> reply(ChatIntent.ADD_TO_SECKILL,
                     who + "审核通过后就可以报名秒杀，现在先不用重复提交。",
                     null, null, progressSuggestions());
@@ -1190,24 +1264,26 @@ public class ChatAgentService {
      *
      * <p>两类目标仍复用已有的身份分支，不另写一套：
      * <ul>
-     *   <li>入驻申请 ⇒ {@link #answerOpenStore}（六态话术 + 开店漫游）；</li>
+     *   <li>入驻申请 ⇒ {@link #answerOpenStore}（六态话术 + 引导 / 直达）；</li>
      *   <li>秒杀报名 ⇒ {@link #answerAddToSeckill}（身份闸门 + 秒杀胶囊）。</li>
      * </ul>
-     * 其余页面返回 {@code action.type = navigate}，前端用 NavGraph BFS 从当前页算路。
+     * 其余页面返回 {@code action.type = tour}（默认，前端 BFS 逐步高亮）或
+     * {@code action.type = jump}（用户明说「直接去」，前端直接 push）。
      *
      * @param needPublish 模型抽的 {@code need_publish} 槽位；只在秒杀分流里有意义
      *                    （「还没上架」⇒ 两个胶囊），别的页面忽略
+     * @param direct      用户是否明确要求直达（见 {@link #isDirectNavigation}）
      */
     /** 包内可见：{@link ChatToolSet} 的 {@code navigate} 工具调用它。 */
     Map<String, Object> answerNavigate(String targetPath, String userId, Integer role,
-                                       boolean needPublish) {
+                                       boolean needPublish, boolean direct) {
         String path = RouteCatalog.resolve(targetPath, role);
         if (path == null) {
-            return answerSmallTalk(ChatIntent.NAVIGATE,
+            return answerSmallTalk(direct ? ChatIntent.DIRECT_NAVIGATION : ChatIntent.GUIDE_NAVIGATION,
                     "这个页面在当前身份下打不开。你可以问我订单、售后，或让我带你去个人中心。");
         }
         if (path.endsWith("/user/apply")) {
-            return answerOpenStore(userId, role);
+            return answerOpenStore(userId, role, direct);
         }
         if ("/merchant/seckill".equals(path)) {
             return answerAddToSeckill(userId, role, needPublish);
@@ -1216,14 +1292,12 @@ public class ChatAgentService {
         RouteCatalog.Route route = RouteCatalog.find(path);
         String title = route == null ? path : route.title();
         // 字典里的 description 是写给模型的（含「用户说…时选它」），回给用户只取前一句。
-        String text = (route == null ? "" : RouteCatalog.userSummary(route))
-                + "点下面的按钮，我从当前页面一步步带你过去。";
-        Map<String, Object> action = new LinkedHashMap<>();
-        action.put("type", "navigate");
-        action.put("targetPath", path);
-        action.put("targetLabel", title);
-        action.put("label", "带我去「" + title + "」");
-        return reply(ChatIntent.NAVIGATE, text, null, action, defaultSuggestions());
+        String summary = route == null ? "" : RouteCatalog.userSummary(route);
+        String text = summary + (direct
+                ? "已为您准备好直达入口，点击即可前往。"
+                : "好的，我来一步步教您。点击下方按钮开始。");
+        return reply(direct ? ChatIntent.DIRECT_NAVIGATION : ChatIntent.GUIDE_NAVIGATION,
+                text, null, navAction(path, title, direct), defaultSuggestions());
     }
 
     // ==================== 身份自述（增量-A 规则 2） ====================
@@ -1420,13 +1494,27 @@ public class ChatAgentService {
         return item;
     }
 
-    private static Map<String, Object> applyAction(String label) {
+    /**
+     * 导航动作（2026-10-22 双模式）。
+     *
+     * <ul>
+     *   <li>{@code guide}：{@code type=tour} + 【开始引导】—— 前端从当前页 BFS 逐步高亮，
+     *       漫游条里另有「跳过引导，直接前往」后门；</li>
+     *   <li>{@code direct}：{@code type=jump} + 【一键直达】—— 前端忽略中间节点直接 push。</li>
+     * </ul>
+     */
+    private static Map<String, Object> navAction(String path, String title, boolean direct) {
         Map<String, Object> action = new LinkedHashMap<>();
-        action.put("type", "tour");
-        action.put("tourId", "open-store");
-        action.put("routeKey", "apply");
-        action.put("label", label);
+        action.put("type", direct ? "jump" : "tour");
+        action.put("targetPath", path);
+        action.put("targetLabel", title);
+        action.put("label", direct ? "一键直达" : "开始引导");
         return action;
+    }
+
+    /** 入驻申请页的落点（按角色分壳；未登录按客户侧，登录后由前端守卫纠正）。 */
+    private static String applyTargetPath(Integer role) {
+        return isMerchant(role) ? "/merchant/user/apply" : "/customer/user/apply";
     }
 
     private Map<String, Object> reply(ChatIntent intent, String text, Object data,

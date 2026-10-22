@@ -57,6 +57,9 @@ public class LlmIntentClassifier {
             ChatIntent.GOODS_QUERY,
             ChatIntent.OPEN_STORE,
             ChatIntent.ADD_TO_SECKILL,
+            ChatIntent.GUIDE_NAVIGATION,
+            ChatIntent.DIRECT_NAVIGATION,
+            // 旧协议：仍接受，解析后归一为 GUIDE_NAVIGATION。
             ChatIntent.NAVIGATE,
             ChatIntent.FAQ,
             ChatIntent.UNKNOWN);
@@ -75,17 +78,22 @@ public class LlmIntentClassifier {
 
             你会收到一份「可选页面」路由字典。把用户的话归到下面两类之一：
             A. 页面导航（用户想「去哪里 / 怎么去 / 怎么处理 / 怎么办理 / 我要看 / 我要管理 / 帮我打开」某个页面）
-               ⇒ intent = NAVIGATE，并从字典里选**一个** target_path。
-               例：「怎么上架商品」⇒ 字典里的「上架商品」；「我要去看店铺数据」⇒「经营数据」；
-                   「我想改一下那个 299 元耳机的价格」⇒「查看商品」（改价与库存都在那一页）；
-                   「我要管理我的钱」⇒「会员中心」（平台没有独立的钱包页）；
-                   「怎么处理退款」⇒ 商家选「售后工作台」，客户选「我的订单」；
-                   ⚠️ 「怎么处理退款」问的是「去哪办」，**不是** ORDER_QUERY / REFUND_QUERY。
+               ⇒ 从字典里选**一个** target_path，并按语气二选一：
+               · 默认 A1（99% 的情况）⇒ intent = GUIDE_NAVIGATION：用户问「怎么去 / 怎么申请 /
+                 怎么处理 / 去哪办 / 我要看某页」—— 前端会从当前页一步步引导。
+               · 只有 A2：用户**亲口说「直接 / 立刻 / 马上 / 一键 / 带我去 / 我要去」** ⇒
+                 intent = DIRECT_NAVIGATION：前端直接跳转，不走引导。
+               例：「怎么上架商品」⇒ GUIDE_NAVIGATION「上架商品」；「怎么查看店铺数据」⇒ GUIDE_NAVIGATION
+                   「经营数据」；「我想改一下那个 299 元耳机的价格」⇒ GUIDE_NAVIGATION「查看商品」；
+                   「我要管理我的钱」⇒ GUIDE_NAVIGATION「会员中心」；
+                   「怎么处理退款」⇒ GUIDE_NAVIGATION，商家「售后工作台」、客户「我的订单」；
+                   「直接带我去申请品牌」⇒ DIRECT_NAVIGATION「商家入驻申请」；
+                   「我要去商家后台」⇒ DIRECT_NAVIGATION「个人中心」。
+               ⚠️ 拿不准就用 GUIDE_NAVIGATION —— 引导里面本来就有「跳过引导，直接前往」。
+               ⚠️ 「怎么处理退款」问的是「去哪办」，**不是** ORDER_QUERY / REFUND_QUERY。
                ⚠️ 上面只说明「意思对应哪一行」，**路径必须从下方字典逐字抄**，别照例子拼。
                ⚠️ 「钱 / 余额 / 积分 / 资产 / 优惠券」相关一律选「会员中心」。
-               ⚠️ 「怎么处理退款」「我要管理我的钱」都是 NAVIGATE（想办/想看某个页面），
-                  不要判成 REFUND_QUERY。
-               ⚠️ 「上架 / 发布商品」不是开店：「怎么上架商品」⇒ NAVIGATE「上架商品」；
+               ⚠️ 「上架 / 发布商品」不是开店：「怎么上架商品」⇒ GUIDE_NAVIGATION「上架商品」；
                   只有「开店 / 入驻 / 加盟 / 营业执照」才是 OPEN_STORE。
             B. 数据查询与业务（用户问**自己那笔**的状态，这类**不要**给 target_path）
                ⇒ ORDER_QUERY（查我的订单状态/进度）、REFUND_QUERY（查我的售后进度/结果）、
@@ -109,10 +117,12 @@ public class LlmIntentClassifier {
 
             规则：
             1. target_path 只能逐字取字典里的路径；字典里没有合适的页面就给 null。
-            2. 判断口诀：问「怎么做 / 如何办 / 去哪办 / 在哪看」⇒ NAVIGATE；
+            2. 判断口诀：问「怎么做 / 如何办 / 去哪办 / 在哪看」⇒ GUIDE_NAVIGATION；
+               只有明说「直接 / 立刻 / 马上 / 一键 / 我要去 / 带我去」⇒ DIRECT_NAVIGATION；
                问「我那一笔 / 那一单 到哪了 / 进度 / 状态 / 结果 / 有没有」⇒ 数据查询；
                问「某个商品多少钱 / 详细数据 / 参数 / 库存」⇒ GOODS_QUERY。
-               对照：「怎么处理退款」= NAVIGATE；「我的退款到哪了」= REFUND_QUERY；
+               对照：「怎么处理退款」= GUIDE_NAVIGATION；「直接带我去申请品牌」= DIRECT_NAVIGATION；
+                     「我的退款到哪了」= REFUND_QUERY；
                      「怎么看 222:ij-555 商品的详细数据」= GOODS_QUERY。
             3. 同样一句话在不同角色下落点不同：只从字典里给当前角色列出的页面中选。
             4. 提取槽位（slots）：
@@ -332,6 +342,10 @@ public class LlmIntentClassifier {
         if (!ALLOWED.contains(intent)) {
             throw new LlmException("不支持的意图：" + intentName);
         }
+        // 旧协议归一：NAVIGATE 等价于默认引导。直达与否由编排层的词面判据二次确认。
+        if (intent == ChatIntent.NAVIGATE) {
+            intent = ChatIntent.GUIDE_NAVIGATION;
+        }
 
         JsonNode slots = root.path("slots");
         String orderId = null;
@@ -401,6 +415,11 @@ public class LlmIntentClassifier {
         if (tool == null || toolRegistry == null) {
             return parsed;
         }
+        // 直达模式先于工具注解：navigate 工具声明的是默认引导，但用户若明说「直接去」，
+        // 编排层仍要产出 jump 动作（见 ChatAgentService.executeTool 的旁路）。
+        if (parsed == ChatIntent.DIRECT_NAVIGATION) {
+            return parsed;
+        }
         ToolDescriptor descriptor = toolRegistry.find(tool);
         if (descriptor == null || descriptor.intent() == null
                 || descriptor.intent() == ChatIntent.UNKNOWN) {
@@ -429,7 +448,7 @@ public class LlmIntentClassifier {
      * 把用户从订单卡旁边带走。
      */
     private static String parseTargetPath(JsonNode root, ChatIntent intent, Integer role) {
-        if (intent != ChatIntent.NAVIGATE) {
+        if (intent != ChatIntent.GUIDE_NAVIGATION && intent != ChatIntent.DIRECT_NAVIGATION) {
             return null;
         }
         JsonNode node = root.get("target_path");

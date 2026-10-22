@@ -191,7 +191,7 @@ class LlmIntentClassifierTest {
     // ==================== NavGraph（2026-10-22） ====================
 
     @Test
-    @DisplayName("NavGraph：NAVIGATE + target_path 解析后按别名归位")
+    @DisplayName("NavGraph：旧的 NAVIGATE 输入别名归一为 GUIDE_NAVIGATION")
     void parsesNavigateTargetWithAlias() throws IOException {
         String url = serve(200, envelope(
                 "{\"intent\":\"NAVIGATE\",\"target_path\":\"/merchant/aftersale\",\"slots\":{}}"),
@@ -200,7 +200,7 @@ class LlmIntentClassifierTest {
         LlmIntentClassifier.Result result = classifier(url, Duration.ofSeconds(3))
                 .classify("怎么处理退款", 2, "/merchant");
 
-        assertThat(result.intent()).isEqualTo(ChatIntent.NAVIGATE);
+        assertThat(result.intent()).isEqualTo(ChatIntent.GUIDE_NAVIGATION);
         assertThat(result.targetPath()).isEqualTo("/merchant/after-sales");
     }
 

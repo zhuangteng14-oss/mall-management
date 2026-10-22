@@ -107,6 +107,8 @@ const FLOWS = {
   [PUBLISH_FLOW_ID]: {
     id: PUBLISH_FLOW_ID,
     merchantOnly: true,
+    /** 「跳过引导，直接前往」的落点。 */
+    target: PUBLISH_PATH,
     steps: [
       {
         // 第 1 步永远落在**当前页**：只要不在个人中心 / 发布页，就高亮右上角入口。
@@ -170,6 +172,8 @@ const FLOWS = {
   [SECKILL_FLOW_ID]: {
     id: SECKILL_FLOW_ID,
     merchantOnly: true,
+    /** 「跳过引导，直接前往」的落点。 */
+    target: SECKILL_PATH,
     // 秒杀胶囊本身就是「带我去报名页」的导航入口（用户点它即确认跳转）；
     // 发布流程不同：入口必须落在当前页，所以 **不能** 打开这个开关。
     jumpToStart: true,
@@ -190,6 +194,33 @@ const FLOWS = {
       },
     ],
   },
+}
+
+/**
+ * 入驻申请页的两步表单引导（到达申请页之后）。
+ *
+ * 开店胶囊（`startOpenStoreTour`）与「怎么申请品牌」的 NavGraph 引导共用这一段，
+ * 保证两条入口最后都停在「填店铺名 → 提交」而不是只报一句「到了」。
+ */
+function applyFormSteps() {
+  const onApplyPage = (p) => normalizePath(p).endsWith('/user/apply')
+  return [
+    {
+      element: '#tour-shop-name',
+      at: onApplyPage,
+      // 两步都在申请页内：`path` 留空 ⇒ advanceFlow 不换页，原地续跑。
+      path: '',
+      title: '给店铺起个名字',
+      description: '这个名字会展示给买家（例如「米可数码专营店」），之后可以改。',
+    },
+    {
+      element: '#tour-submit',
+      at: onApplyPage,
+      path: '',
+      title: '提交入驻申请',
+      description: '填完店铺名称和营业执照号后点这里。平台审核通过，当前账号就自动升级为商家。',
+    },
+  ]
 }
 
 function normalizePath(path) {
@@ -237,10 +268,21 @@ export function hasPendingTour(tourId) {
   return !!pending && pending.tourId === tourId
 }
 
-export function savePendingTour(tourId = 'open-store', routeKey = 'apply', resume = null) {
+export function savePendingTour(tourId = 'open-store', routeKey = 'apply', resume = null, nav = null) {
+  const payload = { tourId, routeKey, resume, at: Date.now() }
+  if (nav && nav.targetPath) payload.nav = { type: nav.type || 'jump', targetPath: nav.targetPath }
   try {
-    sessionStorage.setItem(PENDING_KEY, JSON.stringify({ tourId, routeKey, resume, at: Date.now() }))
+    sessionStorage.setItem(PENDING_KEY, JSON.stringify(payload))
   } catch (e) { /* 隐私模式 / 存储满 ⇒ 本次不跨页，但不阻断跳转本身 */ }
+}
+
+/**
+ * 「一键直达 / 开始引导」撞上登录守卫时，把**目标页**记下来
+ * （2026-10-22 交互纠偏）：登录回来由 `resumePathAfterLogin` 直接续送到同一页，
+ * 不再靠 `routeKey` 猜落点。
+ */
+export function savePendingNav(type, targetPath) {
+  savePendingTour('nav', 'nav', null, { type, targetPath })
 }
 
 /** 读待办；过期的顺手清掉。 */
@@ -529,11 +571,14 @@ function ensureTourBar() {
   head.className = 'tour-bar-head'
   const stepEl = document.createElement('span')
   stepEl.className = 'tour-bar-step'
+  head.append(stepEl)
+
+  // 「跳过」后门（2026-10-22 交互纠偏）：老鸟不用陪着点完每一步，
+  // 点一下就销毁漫游、直接到最终路径。弱化成文字按钮，不跟【下一步】抢主次。
   const skip = document.createElement('button')
   skip.type = 'button'
   skip.className = 'tour-bar-skip'
-  skip.textContent = '跳过'
-  head.append(stepEl, skip)
+  skip.textContent = '跳过引导，直接前往'
 
   const titleEl = document.createElement('div')
   titleEl.className = 'tour-bar-title'
@@ -550,7 +595,7 @@ function ensureTourBar() {
   next.type = 'button'
   next.className = 'tour-bar-next'
   next.textContent = '下一步'
-  actions.append(prev, next)
+  actions.append(skip, prev, next)
 
   tourBar.append(head, titleEl, descEl, actions)
   document.body.appendChild(tourBar)
@@ -577,9 +622,15 @@ function showTourBar(flow, index, point) {
   prev.onclick = () => retreatFlow(flow, index)
   next.onclick = () => advanceFlow(flow, index)
   skip.onclick = () => {
+    // 「跳过引导，直接前往」：销毁漫游 → 直接把用户送到最终路径。
+    // `jumpTo` 是页面上真实入口的 href（如商品卡片，带 Id），比 `target` 更准；
+    // 静态流程（发布 / 秒杀 / 开店）在定义里就写了 `target`。
+    // ⚠️ 不要 `normalizePath`：它会去掉 query，而搜索落点 `?kw=` 正是跳转要用的。
+    const target = flow.jumpTo || flow.target || ''
     // 先清流程（归档 + 球归位），再拆 driver（handoff 保证不会二次 clear）。
     clearTourFlow()
     destroyTourDriver()
+    if (target) navigate(target)
   }
 
   // 贴球摆放，但**不许压住被高亮的元素** —— 否则遮罩挖出来的洞被自己的控件盖住。
@@ -711,10 +762,16 @@ async function openFlowStep(flow, index) {
   // 下一步的真实地址：商品卡片是 `<router-link>`（hash 路由下 href 形如
   // `#/product?Id=…&MerchantId=…`）。详情页的 7 个 query 参数由**页面自己**给出，
   // 聊天接口里不必、也不该出现这些内部 Id（2026-10-22 脱敏要求）。
-  if (el.tagName === 'A' && index + 1 < flow.steps.length) {
+  if (el.tagName === 'A') {
     const raw = el.getAttribute('href') || ''
     const href = raw.startsWith('#') ? raw.slice(1) : raw
-    if (href.startsWith('/')) flow.steps[index + 1].navTo = href
+    if (href.startsWith('/')) {
+      if (index + 1 < flow.steps.length) flow.steps[index + 1].navTo = href
+      // 「跳过引导」的落点只能由**最后一段真实入口**给出（商品卡片 href 带 Id）。
+      // ⚠️ 不能见 `<a>` 就写：顶栏「用户中心」也是链接，会把跳过去的中途页
+      //    （/customer/user）当成终点，跳过就停在半路（2026-10-22 探针实测）。
+      if (step.captureJumpTo) flow.jumpTo = href
+    }
   }
   const arrived = await flyTo(el)
   if (!arrived || !isVisible(el)) return null
@@ -908,9 +965,12 @@ export async function startNavGuidedTour(fromPath, targetPath) {
 
   const steps = buildNavSteps(current, target)
   if (!steps) return null
+  // 入驻申请是「到达之后还要填表」的两段式：BFS 只负责把人带到页面，
+  // 后面两步复用开店胶囊那张表单步骤表，两条入口的终点一致。
+  if (target.endsWith('/user/apply')) steps.push(...applyFormSteps())
 
   const id = `nav-${target.replace(/[^a-z0-9]+/gi, '-')}-${Date.now()}`
-  runtimeFlows.set(id, { id, steps })
+  runtimeFlows.set(id, { id, steps, target })
   writeTourFlow(id, 0)
   activePath = current
   return resumeTourFlow(current)
@@ -921,6 +981,13 @@ export function resumePathAfterLogin(currentPath) {
   if (!isLoggedIn()) return null
   const pending = readPendingTour()
   if (!pending) return null
+  // 直达 / 引导留下的目标页优先：它是后端给的、按真实身份算好的落点。
+  if (pending.nav && pending.nav.targetPath) {
+    // 返回原始地址（可能带 `?kw=` 之类的 query），只把归一化结果用于比较。
+    return normalizePath(currentPath) === normalizePath(pending.nav.targetPath)
+      ? null
+      : pending.nav.targetPath
+  }
   // 秒杀 / 发布都只属于商家壳；客户登录后不能硬闯商家路由。
   if ((pending.routeKey === 'seckill' || pending.routeKey === 'publish') && !isMerchantRole()) return null
   const target = pending.routeKey === 'seckill' ? seckillPath()
@@ -1013,27 +1080,11 @@ export function isVisible(el) {
  */
 export function startOpenStoreTour({ onDone } = {}) {
   const id = OPEN_STORE_FLOW_ID
-  const onApplyPage = (p) => normalizePath(p).endsWith('/user/apply')
   runtimeFlows.set(id, {
     id,
     onDone,
-    steps: [
-      {
-        element: '#tour-shop-name',
-        at: onApplyPage,
-        // 两步都在申请页内：`path` 留空 ⇒ advanceFlow 不换页，原地续跑。
-        path: '',
-        title: '① 给店铺起个名字',
-        description: '这个名字会展示给买家（例如「米可数码专营店」），之后可以改。',
-      },
-      {
-        element: '#tour-submit',
-        at: onApplyPage,
-        path: '',
-        title: '② 提交入驻申请',
-        description: '填完店铺名称和营业执照号后点这里。平台审核通过，当前账号就自动升级为商家。',
-      },
-    ],
+    target: applyPath(),
+    steps: applyFormSteps(),
   })
   // 待办已经兑现成流程本身：不清掉的话，回到申请页会被 watcher 再开一次。
   clearPendingTour()
@@ -1072,6 +1123,9 @@ export async function startGoodsTour(keyword, path) {
   const id = `${GOODS_FLOW_ID}-${Date.now()}`
   runtimeFlows.set(id, {
     id,
+    // 前三步还没拿到商品卡片的真实 href 时，「跳过引导」先去搜索结果页；
+    // 卡片一被高亮，`openFlowStep` 会把 `jumpTo` 换成带 Id 的详情地址。
+    target: `${base}/search?kw=${encodeURIComponent(name)}`,
     steps: [
       {
         element: '.top-search input',
@@ -1093,6 +1147,8 @@ export async function startGoodsTour(keyword, path) {
         // 搜索结果第一张卡不一定是这件商品（实测：搜 oppo12 时第一张是别家的草稿商品）
         // ⇒ 按商品名挑出**正确那一张**再高亮。
         matchText: name,
+        // 这张卡的 href 是带 7 个 query 的真实详情地址 ⇒「跳过引导」用它当落点。
+        captureJumpTo: true,
         at: (p) => p === '/customer/search' || p === '/merchant/search',
         path: `${base}/search`,
         navTo: `${base}/search?kw=${encodeURIComponent(name)}`,

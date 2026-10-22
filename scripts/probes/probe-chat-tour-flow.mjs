@@ -319,8 +319,11 @@ try {
     back.hit && (await b.evalJS(`location.hash`)) === '#/merchant/user',
     { ...back, hash: await b.evalJS(`location.hash`) })
   await b.shot(path.join(OUT, 'flow-09-prev.png'))
+  // 「跳过引导，直接前往」现在会真的走到流程终点（发布页）——本步只是收尾，
+  // 下一幕要在个人中心点胶囊，所以跳过之后把人送回个人中心。
   await realClick('.tour-bar-skip')
   await sleep(950)
+  await goHash('#/merchant/user')
 
   // ── ④ 个人中心点胶囊 ⇒ 第 1 步就是「上架商品」，不再高亮顶栏 ─────────────
   const personalClick = await clickChip('去发布商品')
@@ -331,6 +334,7 @@ try {
   await b.shot(path.join(OUT, 'flow-10-personal-start.png'))
   await realClick('.tour-bar-skip')
   await sleep(950)
+  await goHash('#/merchant/user')
 
   // ── ⑤ 秒杀两步流（用户点胶囊后允许直接到报名页）────────────────────────
   const clickedSeckill = await clickChip('去秒杀报名')
@@ -345,20 +349,27 @@ try {
   await clickNext()
   ok('秒杀：完成后浮层消失', await waitFor(barGone, 5000))
 
-  // ── ⑥ 「怎么开店」的动作按钮只去申请页，绝不能被发布流程串台 ─────────────
+  // ── ⑥ 「怎么开店」默认引导：从当前页起步，不瞬移、不串到发布流程 ──────────
   await sendChat('怎么开店')
   const hasAction = await waitFor(`document.querySelector('.chat-root .tour-btn')`, 15000)
+  const from6 = await b.evalJS(`location.hash`)
   const acted = await b.evalJS(`(() => {
-    const el = document.querySelector('.chat-root .tour-btn')
+    // 聊天记录里还有上一幕「去秒杀报名」的动作按钮 ⇒ 必须点**最后一条**回复上的那颗。
+    const btns = [...document.querySelectorAll('.chat-root .tour-btn')]
+    const el = btns[btns.length - 1]
     el?.click()
     return !!el
   })()`)
-  await sleep(1800)
-  const applyHash = await b.evalJS(`location.hash`)
-  ok('「怎么开店」落入驻申请页，不会误跳发布页',
-    hasAction && acted && applyHash === '#/merchant/user/apply',
-    { hasAction, acted, hash: applyHash })
+  const g1 = await waitStep('#tour-entry-merchant', '第 1 步 / 共 5 步', 15000)
+  const g1Hash = await b.evalJS(`location.hash`)
+  ok('「怎么开店」从当前页开始引导（不瞬移、不串到发布页）',
+    hasAction && acted && g1.hit && g1Hash === from6 && !from6.endsWith('/user/add'),
+    { hasAction, acted, from: from6, hash: g1Hash, ...g1 })
+  await b.shot(path.join(OUT, 'flow-12-open-store-guide.png'))
   await realClick('.tour-bar-skip')
+  const skipped = await waitFor(`location.hash === '#/merchant/user/apply'`, 8000)
+  ok('「怎么开店」点【跳过引导，直接前往】落到入驻申请页',
+    skipped, { hash: await b.evalJS(`location.hash`) })
 
   ok('页面无未捕获异常', pageErrors.length === 0, { pageErrors })
 } catch (e) {

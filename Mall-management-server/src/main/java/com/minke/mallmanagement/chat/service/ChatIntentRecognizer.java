@@ -98,8 +98,14 @@ public final class ChatIntentRecognizer {
     private static final Pattern GOODS_ID_PREFIX = Pattern.compile(
             "(?:商品号|商品id|商品编号|编号|货号)[:：]?([0-9]{1,12})");
 
+    /**
+     * ⚠️ 「品牌申请 / 申请品牌 / 品牌入驻」也算开店（2026-10-22 交互纠偏）：
+     * 用户问「怎么申请品牌」时落点就是入驻申请页。只加组合词，**不能**单加「品牌」——
+     * 「我是品牌商家」会先命中这里，抢走 {@link ChatIntent#IDENTITY_CLAIM}。
+     */
     private static final Pattern OPEN_STORE = Pattern.compile(
-            "开店|入驻|开个店|开一家店|开店铺|成为商家|卖东西|卖货|上架|加盟|营业执照");
+            "开店|入驻|开个店|开一家店|开店铺|成为商家|卖东西|卖货|上架|加盟|营业执照"
+                    + "|品牌申请|申请品牌|品牌入驻");
 
     /**
      * 报名秒杀 / 参加平台活动（N3 / Q5=A）。

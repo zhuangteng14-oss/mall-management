@@ -131,12 +131,13 @@ public class ChatToolSet {
 
     @AgentTool(name = "open_store",
             description = "开店 / 商家入驻：先报系统解析出的真实身份（客户 / 审核中 / 未通过 / 商家 / 品牌商家 / 管理员），"
-                    + "再给出对应下一步；需要时附带「一键带我去开店」动作（前端会启动两步高亮漫游）。"
+                    + "再给出对应下一步；默认给「开始引导」（前端从当前页逐步高亮），"
+                    + "用户明说「直接带我去」时编排层会给「一键直达」。"
                     + "用户问「怎么开店 / 我要入驻 / 我是商家」时用它。",
             targetRole = {1, 2, 3},
             intent = ChatIntent.OPEN_STORE)
     public Map<String, Object> openStore(ToolContext ctx) {
-        return agent.answerOpenStore(ctx.userId(), ctx.role());
+        return agent.answerOpenStore(ctx.userId(), ctx.role(), false);
     }
 
     @AgentTool(name = "seckill_signup",
@@ -156,16 +157,18 @@ public class ChatToolSet {
     // ==================== 页面导航 ====================
 
     @AgentTool(name = "navigate",
-            description = "按目标页面带用户过去（前端从当前页 BFS 算路并逐步高亮）。"
+            description = "按目标页面带用户过去：默认「开始引导」（前端从当前页 BFS 算路并逐步高亮）。"
                     + "target_path 必须从 System Prompt 里的「可选页面」字典逐字取，不能自己拼。"
-                    + "用户问「怎么做 / 如何办 / 去哪办 / 在哪看」某个页面时用它。",
+                    + "用户问「怎么做 / 怎么去 / 如何办 / 去哪办 / 在哪看」某个页面时用它。",
             targetRole = {},
-            intent = ChatIntent.NAVIGATE)
+            intent = ChatIntent.GUIDE_NAVIGATION)
     public Map<String, Object> navigate(
             @AgentParam(name = "target_path", description = "目标页面路径，取自「可选页面」字典") String targetPath,
             @AgentParam(name = "need_publish", description = "仅秒杀目标有意义，其余给 false", required = false)
             boolean needPublish,
             ToolContext ctx) {
-        return agent.answerNavigate(targetPath, ctx.userId(), ctx.role(), needPublish);
+        // 直达与否由编排层的词面判据决定（见 ChatAgentService.executeTool 的旁路），
+        // 工具本身只产出默认引导。
+        return agent.answerNavigate(targetPath, ctx.userId(), ctx.role(), needPublish, false);
     }
 }

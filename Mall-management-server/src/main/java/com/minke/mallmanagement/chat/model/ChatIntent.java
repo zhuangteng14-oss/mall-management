@@ -46,10 +46,26 @@ public enum ChatIntent {
     ADD_TO_SECKILL,
 
     /**
-     * 页面级导航（NavGraph，2026-10-22）：大模型只把用户的话映射到
-     * {@link com.minke.mallmanagement.chat.service.RouteCatalog} 里的一个真实路径
-     * （{@code target_path}）；「怎么走过去」由前端 BFS 计算，后端不返回步骤。
+     * 页面导航 · **默认模式**（2026-10-22 交互纠偏）：用户问「怎么去 / 怎么申请 / 怎么上架」
+     * 时给【开始引导】，前端从**当前页**跑 BFS 逐步高亮 —— 绝不替用户瞬移。
      */
+    GUIDE_NAVIGATION,
+
+    /**
+     * 页面导航 · **直达模式**：只有用户**明确说**「直接带我去 / 我要去 / 马上打开」才给
+     * 【一键直达】；前端忽略中间节点，直接 {@code router.push(targetPath)}。
+     *
+     * <p>判据是确定性的正则（{@code ChatAgentService.DIRECT_NAV}），不依赖大模型 ——
+     * 模型把「直接带我去」判成 GUIDE 也不会让用户多点两次。
+     */
+    DIRECT_NAVIGATION,
+
+    /**
+     * @deprecated 旧的单值导航意图（2026-10-22 拆成 GUIDE / DIRECT）。保留常量只为兼容
+     * 旧工具注解 / 旧调用点：模型或规则仍可能给出它，编排层一律归一为
+     * {@link #GUIDE_NAVIGATION}（默认引导）。
+     */
+    @Deprecated
     NAVIGATE,
 
     /** 用户自述身份（「我是商家」）—— 用于对照系统解析结果，不盲信（增量-A 规则 2）。 */

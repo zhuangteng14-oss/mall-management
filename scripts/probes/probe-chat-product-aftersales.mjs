@@ -187,8 +187,8 @@ try {
   // ── ① 在详情页问售后；点动作按钮后仍停在详情页、第一步指向返回 ──────────
   const { done, body } = await sendChat('我要处理售后')
   const action = body?.action || null
-  ok('详情页问「售后」→ 后端给出 NAVIGATE（不回答「当前页没有入口」）',
-    done && body?.intent === 'NAVIGATE' && action?.type === 'navigate' && !!action?.targetPath,
+  ok('详情页问「售后」→ 后端给出 GUIDE_NAVIGATION（不回答「当前页没有入口」）',
+    done && body?.intent === 'GUIDE_NAVIGATION' && action?.type === 'tour' && !!action?.targetPath,
     { intent: body?.intent, action, reply: (body?.reply || '').slice(0, 80) })
 
   const clicked = await clickAction()
