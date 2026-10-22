@@ -1,0 +1,2 @@
+2026-10-22 15:20:14.595  WARN 68808 --- [nio-8088-exec-5] [8ddef1eb-2609-4736-8146-e8162fa64be9] c.m.m.chat.service.ChatAgentService      : LLM 意图识别失败，降级规则引擎：LlmException: 请求失败：ConnectException
+2026-10-22 15:20:15.522  WARN 68808 --- [nio-8088-exec-8] [422b078c-46e0-4c55-884c-9da8f23917f5] c.m.m.chat.service.ChatAgentService      : LLM 意图识别失败，降级规则引擎：LlmException: 请求失败：ConnectException

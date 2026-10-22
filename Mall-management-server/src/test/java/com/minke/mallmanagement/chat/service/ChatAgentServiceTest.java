@@ -34,6 +34,7 @@ class ChatAgentServiceTest {
     private OrderRefundService refundService;
     private IdentityResolver identityResolver;
     private SessionMemoryService memoryService;
+    private LlmIntentClassifier llmClassifier;
     private ChatAgentService service;
 
     @BeforeEach
@@ -42,13 +43,20 @@ class ChatAgentServiceTest {
         refundService = mock(OrderRefundService.class);
         identityResolver = mock(IdentityResolver.class);
         memoryService = mock(SessionMemoryService.class);
+        llmClassifier = mock(LlmIntentClassifier.class);
+        // 默认：LLM 未启用（Mockito 布尔默认 false）⇒ 既有用例全部走规则引擎，行为与阶段一之前一致。
         // 默认：普通客户、无入驻申请；未登录走匿名。个别用例再覆盖。
         when(identityResolver.resolve(anyString(), anyInt()))
                 .thenReturn(ResolvedIdentity.noApplication("demo_customer"));
         when(identityResolver.resolve(isNull(), isNull()))
                 .thenReturn(ResolvedIdentity.anonymous());
         service = new ChatAgentService(orderDao, refundService, new OrderStateMachine(),
-                identityResolver, memoryService);
+                identityResolver, memoryService, llmClassifier);
+    }
+
+    /** 打开 LLM 路由；具体分类结果由用例再 stub {@code classify}。 */
+    private void llmEnabled() {
+        when(llmClassifier.isEnabled()).thenReturn(true);
     }
 
     private void identity(ResolvedIdentity resolved) {
@@ -483,6 +491,111 @@ class ChatAgentServiceTest {
         Map<String, Object> resp = service.ask("到哪了？", "c1", 1);
 
         assertThat(resp.get("intent")).isEqualTo("UNKNOWN");
+    }
+
+    // ==================== 阶段一：LLM 路由 + 槽位 ====================
+
+    @Test
+    @DisplayName("阶段一：LLM 判 ADD_TO_SECKILL + need_publish=true ⇒ 两个胶囊（去发布商品 / 去秒杀报名）")
+    void llmNeedPublishGivesTwoChips() {
+        llmEnabled();
+        when(llmClassifier.classify("我的新商品要上架秒杀页，还没上架呢"))
+                .thenReturn(new LlmIntentClassifier.Result(ChatIntent.ADD_TO_SECKILL, null, true));
+        identity(ResolvedIdentity.merchant("m1"));
+
+        Map<String, Object> resp = service.ask("我的新商品要上架秒杀页，还没上架呢", "m1", 2);
+
+        assertThat(resp.get("intent")).isEqualTo("ADD_TO_SECKILL");
+        assertThat(String.valueOf(resp.get("reply")))
+                .contains("系统显示您当前是商家。", "商品还没上架", "上架商品", "秒杀报名页");
+        assertThat(objectSuggestions(resp))
+                .extracting((m) -> m.get("routeKey"))
+                .containsExactly("publish", "seckill");
+        assertThat(objectSuggestions(resp))
+                .extracting((m) -> m.get("label"))
+                .containsExactly("去发布商品", "去秒杀报名");
+    }
+
+    @Test
+    @DisplayName("阶段一：LLM 抽到 orderId 槽位 ⇒ 直接按单号查，不再问「哪一笔」")
+    void llmOrderIdSlotIsUsed() {
+        llmEnabled();
+        when(llmClassifier.classify("dRD3gqtbFr 这个订单到哪了"))
+                .thenReturn(new LlmIntentClassifier.Result(ChatIntent.ORDER_QUERY, "dRD3gqtbFr", false));
+        when(orderDao.countByCustomer("c1")).thenReturn(9L);
+        when(orderDao.selectRecentByCustomer(eq("c1"), anyInt()))
+                .thenReturn(List.of(order("r2vfwK6z3E", "无线蓝牙耳机", 1, 1, 0)));
+        // LLM 槽位按用户原文回传，不走规则引擎的小写归一 ⇒ 按原样大小写查库。
+        when(orderDao.selectByOrderIdAndCustomer("c1", "dRD3gqtbFr"))
+                .thenReturn(order("dRD3gqtbFr", "Java 实战课", 1, 0, 0));
+
+        Map<String, Object> resp = service.ask("dRD3gqtbFr 这个订单到哪了", "c1", 1);
+
+        assertThat(resp.get("intent")).isEqualTo("ORDER_QUERY");
+        assertThat(String.valueOf(resp.get("reply"))).contains("订单 dRD3gqtbFr", "Java 实战课");
+    }
+
+    @Test
+    @DisplayName("阶段一：LLM 超时 / 异常 ⇒ 降级规则引擎，仍然答得出来（不抛给 Controller）")
+    void llmFailureFallsBackToRules() {
+        llmEnabled();
+        when(llmClassifier.classify(anyString()))
+                .thenThrow(new LlmIntentClassifier.LlmException("请求超时（>3s）"));
+        identity(ResolvedIdentity.merchant("m1"));
+
+        Map<String, Object> resp = service.ask("我要报名秒杀", "m1", 2);
+
+        assertThat(resp.get("success")).isEqualTo(true);
+        assertThat(resp.get("intent")).isEqualTo("ADD_TO_SECKILL");
+        assertThat(String.valueOf(resp.get("reply"))).contains("带你去秒杀报名页");
+        assertThat(objectSuggestions(resp))
+                .extracting((m) -> m.get("routeKey"))
+                .containsExactly("seckill");
+    }
+
+    @Test
+    @DisplayName("阶段一：模型把「拆封了能退货吗」判成 REFUND，本地政策 FAQ 仍然优先")
+    void llmRefundStillLosesToPolicyFaq() {
+        llmEnabled();
+        when(llmClassifier.classify("拆封了能退货吗？"))
+                .thenReturn(new LlmIntentClassifier.Result(ChatIntent.REFUND_QUERY, null, false));
+
+        Map<String, Object> resp = service.ask("拆封了能退货吗？", "c1", 1);
+
+        assertThat(resp.get("intent")).isEqualTo("FAQ");
+        assertThat(String.valueOf(resp.get("reply")))
+                .isEqualTo("支持7天无理由，但需保证不影响二次销售哦。");
+        verify(refundService, org.mockito.Mockito.never()).myRefunds(anyString(), anyInt());
+    }
+
+    @Test
+    @DisplayName("阶段一：LLM 返回 UNKNOWN 时再走一次规则引擎（问候 / 帮助不在 Prompt 白名单里）")
+    void llmUnknownDelegatesToRules() {
+        llmEnabled();
+        when(llmClassifier.classify(anyString()))
+                .thenReturn(new LlmIntentClassifier.Result(ChatIntent.UNKNOWN, null, false));
+
+        assertThat(service.ask("你好", "c1", 1).get("intent")).isEqualTo("GREETING");
+        assertThat(service.ask("你能做什么", "c1", 1).get("intent")).isEqualTo("HELP");
+    }
+
+    @Test
+    @DisplayName("阶段一：LLM 判 ORDER_QUERY 但没抽到单号，短追问「到哪了」用上一轮记忆补")
+    void llmFollowUpBackfilledFromMemory() {
+        llmEnabled();
+        when(llmClassifier.classify("到哪了？"))
+                .thenReturn(new LlmIntentClassifier.Result(ChatIntent.ORDER_QUERY, null, false));
+        when(memoryService.lastContext("c1"))
+                .thenReturn(new SessionMemoryService.Context(ChatIntent.ORDER_QUERY, "r2vfwK6z3E"));
+        when(orderDao.countByCustomer("c1")).thenReturn(1L);
+        when(orderDao.selectRecentByCustomer(eq("c1"), anyInt()))
+                .thenReturn(List.of(order("r2vfwK6z3E", "无线蓝牙耳机", 1, 1, 0)));
+        when(orderDao.selectByOrderIdAndCustomer("c1", "r2vfwK6z3E"))
+                .thenReturn(order("r2vfwK6z3E", "无线蓝牙耳机", 1, 1, 0));
+
+        Map<String, Object> resp = service.ask("到哪了？", "c1", 1);
+
+        assertThat(String.valueOf(resp.get("reply"))).contains("订单 r2vfwK6z3E", "已发货（待收货）");
     }
 
     @SuppressWarnings("unchecked")
