@@ -1,0 +1,43 @@
+PASS  商家登录落 /merchant  {"hash":"#/merchant"}
+PASS  「我要去看店铺数据」→ /merchant/stats（模型给 target_path，不给步骤）  {"intent":"NAVIGATE","action":{"type":"navigate","targetPath":"/merchant/stats","targetLabel":"经营数据","label":"带我去「经营数据」"},"steps":null}
+PASS  「我要去看店铺数据」点按钮后仍停在 #/merchant，高亮真实入口  {"clicked":{"clicked":true,"label":"↗带我去「经营数据」"},"hit":true,"progress":"第 1 步 / 共 3 步","title":"点击「用户中心」","hash":"#/merchant"}
+PASS  「我要去看店铺数据」第 2 步：按图换页（[data-nav-to="/merchant/stats"]）  {"hit":true,"progress":"第 2 步 / 共 3 步","title":"点击「经营数据」","hash":"#/merchant/user","expectHash":null}
+PASS  「我要去看店铺数据」第 3 步：到达 /merchant/stats（.ms-page）  {"hit":true,"progress":"第 3 步 / 共 3 步","title":"已到达「经营数据」","hash":"#/merchant/stats","expectHash":"#/merchant/stats"}
+PASS  「怎么处理退款」→ /merchant/after-sales（模型给 target_path，不给步骤）  {"intent":"NAVIGATE","action":{"type":"navigate","targetPath":"/merchant/after-sales","targetLabel":"售后工作台","label":"带我去「售后工作台」"},"steps":null}
+PASS  「怎么处理退款」点按钮后仍停在 #/merchant，高亮真实入口  {"clicked":{"clicked":true,"label":"↗带我去「售后工作台」"},"hit":true,"progress":"第 1 步 / 共 3 步","title":"点击「用户中心」","hash":"#/merchant"}
+PASS  「怎么处理退款」第 2 步：按图换页（[data-nav-to="/merchant/after-sales"]）  {"hit":true,"progress":"第 2 步 / 共 3 步","title":"点击「售后工作台」","hash":"#/merchant/user","expectHash":null}
+PASS  「怎么处理退款」第 3 步：到达 /merchant/after-sales（.order-center-page）  {"hit":true,"progress":"第 3 步 / 共 3 步","title":"已到达「售后工作台」","hash":"#/merchant/after-sales","expectHash":"#/merchant/after-sales"}
+PASS  「我想改一下那个 299 元耳机的价格」→ /merchant/user/list（模型给 target_path，不给步骤）  {"intent":"NAVIGATE","action":{"type":"navigate","targetPath":"/merchant/user/list","targetLabel":"查看商品","label":"带我去「查看商品」"},"steps":null}
+PASS  「我想改一下那个 299 元耳机的价格」点按钮后仍停在 #/merchant，高亮真实入口  {"clicked":{"clicked":true,"label":"↗带我去「查看商品」"},"hit":true,"progress":"第 1 步 / 共 3 步","title":"点击「用户中心」","hash":"#/merchant"}
+PASS  「我想改一下那个 299 元耳机的价格」第 2 步：按图换页（[data-nav-to="/merchant/user/list"]）  {"hit":true,"progress":"第 2 步 / 共 3 步","title":"点击「查看商品」","hash":"#/merchant/user","expectHash":null}
+PASS  「我想改一下那个 299 元耳机的价格」第 3 步：到达 /merchant/user/list（.uc-main）  {"hit":true,"progress":"第 3 步 / 共 3 步","title":"已到达「查看商品」","hash":"#/merchant/user/list","expectHash":"#/merchant/user/list"}
+PASS  「我要看评论」→ /merchant/user/list（模型给 target_path，不给步骤）  {"intent":"NAVIGATE","action":{"type":"navigate","targetPath":"/merchant/user/list","targetLabel":"查看商品","label":"带我去「查看商品」"},"steps":null}
+PASS  「我要看评论」回复如实说明：评价管理页  {"reply":"商品管理：在售 / 待审 / 驳回商品与 SKU，可编辑价格与库存；平台暂无独立的评价管理页，买家评价随商品详情展示。点下面的按钮，我从当前页面一步步带你过去。"}
+PASS  「我要看评论」点按钮后仍停在 #/merchant，高亮真实入口  {"clicked":{"clicked":true,"label":"↗带我去「查看商品」"},"hit":true,"progress":"第 1 步 / 共 3 步","title":"点击「用户中心」","hash":"#/merchant"}
+PASS  「我要看评论」第 2 步：按图换页（[data-nav-to="/merchant/user/list"]）  {"hit":true,"progress":"第 2 步 / 共 3 步","title":"点击「查看商品」","hash":"#/merchant/user","expectHash":null}
+PASS  「我要看评论」第 3 步：到达 /merchant/user/list（.uc-main）  {"hit":true,"progress":"第 3 步 / 共 3 步","title":"已到达「查看商品」","hash":"#/merchant/user/list","expectHash":"#/merchant/user/list"}
+PASS  「我要管理我的钱」→ /merchant/user/member（模型给 target_path，不给步骤）  {"intent":"NAVIGATE","action":{"type":"navigate","targetPath":"/merchant/user/member","targetLabel":"会员中心","label":"带我去「会员中心」"},"steps":null}
+PASS  「我要管理我的钱」回复如实说明：钱包  {"reply":"会员等级、积分、余额、优惠券与资产明细；平台没有独立的钱包页。点下面的按钮，我从当前页面一步步带你过去。"}
+PASS  「我要管理我的钱」点按钮后仍停在 #/merchant，高亮真实入口  {"clicked":{"clicked":true,"label":"↗带我去「会员中心」"},"hit":true,"progress":"第 1 步 / 共 3 步","title":"点击「用户中心」","hash":"#/merchant"}
+PASS  「我要管理我的钱」第 2 步：按图换页（[data-nav-to="/merchant/user/member"]）  {"hit":true,"progress":"第 2 步 / 共 3 步","title":"点击「会员中心」","hash":"#/merchant/user","expectHash":null}
+PASS  「我要管理我的钱」第 3 步：到达 /merchant/user/member（.uc-main）  {"hit":true,"progress":"第 3 步 / 共 3 步","title":"已到达「会员中心」","hash":"#/merchant/user/member","expectHash":"#/merchant/user/member"}
+PASS  「怎么上架商品」→ /merchant/user/add  {"intent":"NAVIGATE","action":{"type":"navigate","targetPath":"/merchant/user/add","targetLabel":"上架商品","label":"带我去「上架商品」"}}
+PASS  发布流：点按钮后仍停在当前页，第 1 步高亮「用户中心」  {"clicked":{"clicked":true,"label":"↗带我去「上架商品」"},"hit":true,"progress":"第 1 步 / 共 7 步","title":"① 进入商家后台","hash":"#/merchant"}
+PASS  客户登录落 /customer  {"hash":"#/customer"}
+PASS  「我要管理我的钱」→ /customer/user/member（模型给 target_path，不给步骤）  {"intent":"NAVIGATE","action":{"type":"navigate","targetPath":"/customer/user/member","targetLabel":"会员中心","label":"带我去「会员中心」"},"steps":null}
+PASS  「我要管理我的钱」回复如实说明：钱包  {"reply":"会员等级、积分、余额、优惠券与资产明细；平台没有独立的钱包页。点下面的按钮，我从当前页面一步步带你过去。"}
+PASS  「我要管理我的钱」点按钮后仍停在 #/customer，高亮真实入口  {"clicked":{"clicked":true,"label":"↗带我去「会员中心」"},"hit":true,"progress":"第 1 步 / 共 3 步","title":"点击「用户中心」","hash":"#/customer"}
+PASS  「我要管理我的钱」第 2 步：按图换页（[data-nav-to="/customer/user/member"]）  {"hit":true,"progress":"第 2 步 / 共 3 步","title":"点击「会员中心」","hash":"#/customer/user","expectHash":null}
+PASS  「我要管理我的钱」第 3 步：到达 /customer/user/member（.uc-main）  {"hit":true,"progress":"第 3 步 / 共 3 步","title":"已到达「会员中心」","hash":"#/customer/user/member","expectHash":"#/customer/user/member"}
+PASS  「怎么处理退款」→ /customer/orders（模型给 target_path，不给步骤）  {"intent":"NAVIGATE","action":{"type":"navigate","targetPath":"/customer/orders","targetLabel":"我的订单","label":"带我去「我的订单」"},"steps":null}
+PASS  「怎么处理退款」点按钮后仍停在 #/customer，高亮真实入口  {"clicked":{"clicked":true,"label":"↗带我去「我的订单」"},"hit":true,"progress":"第 1 步 / 共 3 步","title":"点击「用户中心」","hash":"#/customer"}
+PASS  「怎么处理退款」第 2 步：按图换页（[data-nav-to="/customer/orders"]）  {"hit":true,"progress":"第 2 步 / 共 3 步","title":"点击「我的订单」","hash":"#/customer/user","expectHash":null}
+PASS  「怎么处理退款」第 3 步：到达 /customer/orders（.ordermine-page）  {"hit":true,"progress":"第 3 步 / 共 3 步","title":"已到达「我的订单」","hash":"#/customer/orders","expectHash":"#/customer/orders"}
+PASS  「我要看评论」→ /customer/orders（模型给 target_path，不给步骤）  {"intent":"NAVIGATE","action":{"type":"navigate","targetPath":"/customer/orders","targetLabel":"我的订单","label":"带我去「我的订单」"},"steps":null}
+PASS  「我要看评论」回复如实说明：评价管理页  {"reply":"我的订单列表（含售后进度）；评价随订单与商品详情展示，平台没有独立的评价管理页。点下面的按钮，我从当前页面一步步带你过去。"}
+PASS  「我要看评论」点按钮后仍停在 #/customer，高亮真实入口  {"clicked":{"clicked":true,"label":"↗带我去「我的订单」"},"hit":true,"progress":"第 1 步 / 共 3 步","title":"点击「用户中心」","hash":"#/customer"}
+PASS  「我要看评论」第 2 步：按图换页（[data-nav-to="/customer/orders"]）  {"hit":true,"progress":"第 2 步 / 共 3 步","title":"点击「我的订单」","hash":"#/customer/user","expectHash":null}
+PASS  「我要看评论」第 3 步：到达 /customer/orders（.ordermine-page）  {"hit":true,"progress":"第 3 步 / 共 3 步","title":"已到达「我的订单」","hash":"#/customer/orders","expectHash":"#/customer/orders"}
+PASS  页面无未捕获异常  {"pageErrors":[]}
+
+nav: 41/41 PASS

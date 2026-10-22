@@ -15,6 +15,7 @@ import java.util.List;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
@@ -499,7 +500,7 @@ class ChatAgentServiceTest {
     @DisplayName("阶段一：LLM 判 ADD_TO_SECKILL + need_publish=true ⇒ 两个胶囊（去发布商品 / 去秒杀报名）")
     void llmNeedPublishGivesTwoChips() {
         llmEnabled();
-        when(llmClassifier.classify("我的新商品要上架秒杀页，还没上架呢"))
+        when(llmClassifier.classify(eq("我的新商品要上架秒杀页，还没上架呢"), any(), isNull()))
                 .thenReturn(new LlmIntentClassifier.Result(ChatIntent.ADD_TO_SECKILL, null, true));
         identity(ResolvedIdentity.merchant("m1"));
 
@@ -520,7 +521,7 @@ class ChatAgentServiceTest {
     @DisplayName("阶段一：LLM 抽到 orderId 槽位 ⇒ 直接按单号查，不再问「哪一笔」")
     void llmOrderIdSlotIsUsed() {
         llmEnabled();
-        when(llmClassifier.classify("dRD3gqtbFr 这个订单到哪了"))
+        when(llmClassifier.classify(eq("dRD3gqtbFr 这个订单到哪了"), any(), isNull()))
                 .thenReturn(new LlmIntentClassifier.Result(ChatIntent.ORDER_QUERY, "dRD3gqtbFr", false));
         when(orderDao.countByCustomer("c1")).thenReturn(9L);
         when(orderDao.selectRecentByCustomer(eq("c1"), anyInt()))
@@ -539,7 +540,7 @@ class ChatAgentServiceTest {
     @DisplayName("阶段一：LLM 超时 / 异常 ⇒ 降级规则引擎，仍然答得出来（不抛给 Controller）")
     void llmFailureFallsBackToRules() {
         llmEnabled();
-        when(llmClassifier.classify(anyString()))
+        when(llmClassifier.classify(anyString(), any(), isNull()))
                 .thenThrow(new LlmIntentClassifier.LlmException("请求超时（>3s）"));
         identity(ResolvedIdentity.merchant("m1"));
 
@@ -557,7 +558,7 @@ class ChatAgentServiceTest {
     @DisplayName("阶段一：模型把「拆封了能退货吗」判成 REFUND，本地政策 FAQ 仍然优先")
     void llmRefundStillLosesToPolicyFaq() {
         llmEnabled();
-        when(llmClassifier.classify("拆封了能退货吗？"))
+        when(llmClassifier.classify(eq("拆封了能退货吗？"), any(), isNull()))
                 .thenReturn(new LlmIntentClassifier.Result(ChatIntent.REFUND_QUERY, null, false));
 
         Map<String, Object> resp = service.ask("拆封了能退货吗？", "c1", 1);
@@ -572,7 +573,7 @@ class ChatAgentServiceTest {
     @DisplayName("阶段一：LLM 返回 UNKNOWN 时再走一次规则引擎（问候 / 帮助不在 Prompt 白名单里）")
     void llmUnknownDelegatesToRules() {
         llmEnabled();
-        when(llmClassifier.classify(anyString()))
+        when(llmClassifier.classify(anyString(), any(), isNull()))
                 .thenReturn(new LlmIntentClassifier.Result(ChatIntent.UNKNOWN, null, false));
 
         assertThat(service.ask("你好", "c1", 1).get("intent")).isEqualTo("GREETING");
@@ -583,7 +584,7 @@ class ChatAgentServiceTest {
     @DisplayName("阶段一：LLM 判 ORDER_QUERY 但没抽到单号，短追问「到哪了」用上一轮记忆补")
     void llmFollowUpBackfilledFromMemory() {
         llmEnabled();
-        when(llmClassifier.classify("到哪了？"))
+        when(llmClassifier.classify(eq("到哪了？"), any(), isNull()))
                 .thenReturn(new LlmIntentClassifier.Result(ChatIntent.ORDER_QUERY, null, false));
         when(memoryService.lastContext("c1"))
                 .thenReturn(new SessionMemoryService.Context(ChatIntent.ORDER_QUERY, "r2vfwK6z3E"));
@@ -596,6 +597,185 @@ class ChatAgentServiceTest {
         Map<String, Object> resp = service.ask("到哪了？", "c1", 1);
 
         assertThat(String.valueOf(resp.get("reply"))).contains("订单 r2vfwK6z3E", "已发货（待收货）");
+    }
+
+    // ==================== NavGraph：target_path → navigate action ====================
+
+    @Test
+    @DisplayName("NavGraph：LLM 判 NAVIGATE ⇒ 只回 target_path，步骤由前端 BFS 算")
+    void llmNavigateReturnsAction() {
+        llmEnabled();
+        when(llmClassifier.classify(eq("我要去看店铺数据"), any(), isNull()))
+                .thenReturn(new LlmIntentClassifier.Result(ChatIntent.NAVIGATE, null, false, "/merchant/stats"));
+
+        Map<String, Object> resp = service.ask("我要去看店铺数据", "m1", 2);
+
+        assertThat(resp.get("intent")).isEqualTo("NAVIGATE");
+        assertThat(actionOf(resp))
+                .containsEntry("type", "navigate")
+                .containsEntry("targetPath", "/merchant/stats")
+                .containsEntry("targetLabel", "经营数据")
+                .containsEntry("label", "带我去「经营数据」");
+        // 后端不返回步骤数组：怎么走是前端 NavGraph 的事。
+        assertThat(resp).doesNotContainKey("steps");
+        assertThat(String.valueOf(resp.get("reply"))).contains("经营看板", "一步步");
+    }
+
+    @Test
+    @DisplayName("NavGraph：target_path 归到入驻申请 ⇒ 复用既有开店六态（仍是 tour action）")
+    void llmNavigateApplyKeepsOpenStoreBehaviour() {
+        llmEnabled();
+        when(llmClassifier.classify(eq("怎么入驻开店"), any(), isNull()))
+                .thenReturn(new LlmIntentClassifier.Result(ChatIntent.NAVIGATE, null, false, "/customer/user/apply"));
+
+        Map<String, Object> resp = service.ask("怎么入驻开店", "c1", 1);
+
+        assertThat(resp.get("intent")).isEqualTo("OPEN_STORE");
+        assertThat(actionOf(resp)).containsEntry("type", "tour").containsEntry("routeKey", "apply");
+    }
+
+    @Test
+    @DisplayName("模型漏抽 need_publish，但用户明说「还没上架」⇒ 规则侧补上，仍给两枚胶囊")
+    void needPublishAlsoComesFromMessage() {
+        llmEnabled();
+        when(llmClassifier.classify(eq("我的新商品要上架秒杀页，还没上架呢"), any(), isNull()))
+                .thenReturn(new LlmIntentClassifier.Result(ChatIntent.ADD_TO_SECKILL, null, false));
+        identity(ResolvedIdentity.merchant("m1"));
+
+        Map<String, Object> resp = service.ask("我的新商品要上架秒杀页，还没上架呢", "m1", 2);
+
+        assertThat(resp.get("intent")).isEqualTo("ADD_TO_SECKILL");
+        assertThat(objectSuggestions(resp))
+                .extracting((m) -> m.get("routeKey"))
+                .containsExactly("publish", "seckill");
+    }
+
+    @Test
+    @DisplayName("模型超时降级：规则引擎也认「还没上架」这个前置条件（不新增意图正则）")
+    void ruleFallbackKeepsNeedPublish() {
+        // 默认 llmClassifier 未启用 ⇒ 直接走 byRules；SECKILL 正则命中，前置条件由消息补。
+        identity(ResolvedIdentity.merchant("m1"));
+
+        Map<String, Object> resp = service.ask("我的新商品要上架秒杀页，还没上架呢", "m1", 2);
+
+        assertThat(resp.get("intent")).isEqualTo("ADD_TO_SECKILL");
+        assertThat(objectSuggestions(resp))
+                .extracting((m) -> m.get("routeKey"))
+                .containsExactly("publish", "seckill");
+    }
+
+    @Test
+    @DisplayName("NavGraph：target_path 归到秒杀报名时，need_publish 槽位一并带过去（仍是两枚胶囊）")
+    void navigateToSeckillKeepsNeedPublish() {
+        llmEnabled();
+        when(llmClassifier.classify(eq("我的新商品要上架秒杀页，还没上架呢"), any(), isNull()))
+                .thenReturn(new LlmIntentClassifier.Result(ChatIntent.NAVIGATE, null, true, "/merchant/seckill"));
+        identity(ResolvedIdentity.merchant("m1"));
+
+        Map<String, Object> resp = service.ask("我的新商品要上架秒杀页，还没上架呢", "m1", 2);
+
+        assertThat(resp.get("intent")).isEqualTo("ADD_TO_SECKILL");
+        assertThat(objectSuggestions(resp))
+                .extracting((m) -> m.get("routeKey"))
+                .containsExactly("publish", "seckill");
+    }
+
+    @Test
+    @DisplayName("NavGraph：模型把「怎么上架商品」判成开店 ⇒ 字典指向发布页，以字典为准")
+    void catalogOverridesWrongOpenStoreIntent() {
+        llmEnabled();
+        when(llmClassifier.classify(eq("怎么上架商品"), any(), isNull()))
+                .thenReturn(new LlmIntentClassifier.Result(ChatIntent.OPEN_STORE, null, false));
+
+        Map<String, Object> resp = service.ask("怎么上架商品", "m1", 2);
+
+        assertThat(resp.get("intent")).isEqualTo("NAVIGATE");
+        assertThat(actionOf(resp))
+                .containsEntry("type", "navigate")
+                .containsEntry("targetPath", "/merchant/user/add");
+    }
+
+    @Test
+    @DisplayName("模型超时降级：「怎么处理退款」在规则侧也走字典导航；问状态仍留数据查询")
+    void ruleFallbackNavigatesRefundHowTo() {
+        // 默认 llmClassifier 未启用 ⇒ byRules；规则正则先命中「退款」，再由字典纠偏成导航。
+        Map<String, Object> resp = service.ask("怎么处理退款", "m1", 2);
+        assertThat(resp.get("intent")).isEqualTo("NAVIGATE");
+        assertThat(actionOf(resp)).containsEntry("targetPath", "/merchant/after-sales");
+
+        when(refundService.myRefunds("c1", 1)).thenReturn(Map.of("list", List.of()));
+        Map<String, Object> status = service.ask("我的退款到哪了", "c1", 1);
+        assertThat(status.get("intent")).isEqualTo("REFUND_QUERY");
+        assertThat(actionOf(status)).doesNotContainEntry("type", "navigate");
+    }
+
+    @Test
+    @DisplayName("LLM 不可用：规则降级仍能从路由字典命中页面（不新增意图正则）")
+    void ruleFallbackNavigatesFromCatalog() {
+        // 默认 llmClassifier.isEnabled()=false ⇒ 直接走 byRules。
+        Map<String, Object> resp = service.ask("我要看评论", "m1", 2);
+
+        assertThat(resp.get("intent")).isEqualTo("NAVIGATE");
+        assertThat(actionOf(resp))
+                .containsEntry("type", "navigate")
+                .containsEntry("targetPath", "/merchant/user/list");
+    }
+
+    @Test
+    @DisplayName("NavGraph：模型把小问题判成 ORDER_QUERY，字典里有明确页面说法 ⇒ 改判导航")
+    void catalogOverridesWrongDataIntent() {
+        llmEnabled();
+        when(llmClassifier.classify(eq("我要看评论"), any(), isNull()))
+                .thenReturn(new LlmIntentClassifier.Result(ChatIntent.ORDER_QUERY, null, false));
+
+        Map<String, Object> resp = service.ask("我要看评论", "c1", 1);
+
+        assertThat(resp.get("intent")).isEqualTo("NAVIGATE");
+        assertThat(actionOf(resp)).containsEntry("targetPath", "/customer/orders");
+    }
+
+    @Test
+    @DisplayName("NavGraph：用户直接说页面名（「查我的订单」）⇒ 仍回答数据，落点不随模型判断漂移")
+    void declaredPageNameKeepsDataQuery() {
+        llmEnabled();
+        when(llmClassifier.classify(eq("查我的订单"), any(), isNull()))
+                .thenReturn(new LlmIntentClassifier.Result(ChatIntent.ORDER_QUERY, null, false));
+        when(orderDao.countByMerchant("m1")).thenReturn(1L);
+        when(orderDao.selectRecentByMerchant(eq("m1"), anyInt()))
+                .thenReturn(List.of(order("r2vfwK6z3E", "无线蓝牙耳机", 1, 1, 0)));
+
+        Map<String, Object> resp = service.ask("查我的订单", "m1", 2);
+
+        assertThat(resp.get("intent")).isEqualTo("ORDER_QUERY");
+        assertThat(actionOf(resp)).doesNotContainEntry("type", "navigate");
+        assertThat(String.valueOf(resp.get("reply"))).contains("单号 r2vfwK6z3E");
+    }
+
+    @Test
+    @DisplayName("NavGraph：问「我那一笔到哪了」仍然是数据查询，不被带去订单页")
+    void statusQuestionStaysOrderQuery() {
+        llmEnabled();
+        when(llmClassifier.classify(eq("我的订单到哪了"), any(), isNull()))
+                .thenReturn(new LlmIntentClassifier.Result(ChatIntent.ORDER_QUERY, null, false));
+        when(orderDao.countByCustomer("c1")).thenReturn(0L);
+
+        Map<String, Object> resp = service.ask("我的订单到哪了", "c1", 1);
+
+        assertThat(resp.get("intent")).isEqualTo("ORDER_QUERY");
+        assertThat(actionOf(resp)).doesNotContainEntry("type", "navigate");
+    }
+
+    @Test
+    @DisplayName("NavGraph：模型给了当前角色没有的路径 ⇒ 降级规则引擎，不返回 navigate")
+    void llmNavigateRejectsForeignPath() {
+        llmEnabled();
+        // 分类器自己也会抛；这里模拟「已经过了分类器但路径仍不可归位」的兜底。
+        when(llmClassifier.classify(eq("我要看商家报表"), any(), isNull()))
+                .thenReturn(new LlmIntentClassifier.Result(ChatIntent.NAVIGATE, null, false, "/customer/stats"));
+
+        Map<String, Object> resp = service.ask("我要看商家报表", "c1", 1);
+
+        assertThat(actionOf(resp)).doesNotContainEntry("type", "navigate");
     }
 
     @SuppressWarnings("unchecked")

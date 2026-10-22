@@ -24,6 +24,13 @@ public enum ChatIntent {
     /** 报名秒杀 / 参加平台活动 —— 只导航 + 六态分支，不猜商品与价格（N3 / Q5=A）。 */
     ADD_TO_SECKILL,
 
+    /**
+     * 页面级导航（NavGraph，2026-10-22）：大模型只把用户的话映射到
+     * {@link com.minke.mallmanagement.chat.service.RouteCatalog} 里的一个真实路径
+     * （{@code target_path}）；「怎么走过去」由前端 BFS 计算，后端不返回步骤。
+     */
+    NAVIGATE,
+
     /** 用户自述身份（「我是商家」）—— 用于对照系统解析结果，不盲信（增量-A 规则 2）。 */
     IDENTITY_CLAIM,
 

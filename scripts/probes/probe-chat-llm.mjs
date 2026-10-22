@@ -5,7 +5,7 @@
 //   ① 商家登录（chenguang_parts，role=2）；
 //   ② 复杂语义「我的新商品要上架秒杀页，还没上架呢」⇒ 后端回 need_publish 引导 +
 //      【去发布商品】【去秒杀报名】两枚胶囊；
-//   ③ 点「去发布商品」⇒ 落到 /merchant/user/add；
+//   ③ 点「去发布商品」⇒ 留在首页起步，第 1 步高亮「用户中心」（2026-10-22 纠偏：不自动换页）；
 //   ④ 断网模式（PROBE_MODE=offline，后端以不可达 CHAT_LLM_URL 启动）⇒ 同一句话仍能回，
 //      走规则引擎（不许 500 / 不许白屏）。
 //
@@ -108,8 +108,13 @@ async function lastBotText() {
   return await b.evalJS(`[...document.querySelectorAll('.bubble.bot .txt')].pop()?.textContent || ''`)
 }
 
+/** 只看**最后一条**客服气泡的胶囊：上一轮的胶囊还留在 DOM 里，整页取会把两轮混在一起。 */
 async function chips() {
-  return await b.evalJS(`[...document.querySelectorAll('.chip')].map(e => e.textContent.trim())`)
+  return await b.evalJS(`(() => {
+    const bots = [...document.querySelectorAll('.bubble.bot')]
+    const last = bots[bots.length - 1]
+    return last ? [...last.querySelectorAll('.chip')].map(e => e.textContent.trim()) : []
+  })()`)
 }
 
 try {
@@ -128,14 +133,26 @@ try {
     ok('两枚胶囊：去发布商品 / 去秒杀报名',
       chips1.some((x) => x.includes('去发布商品')) && chips1.some((x) => x.includes('去秒杀报名')), { chips: chips1 })
 
-    // 点「去发布商品」⇒ /merchant/user/add（胶囊文案带「→」后缀，按包含匹配）
+    // 点「去发布商品」⇒ **留在当前页**起步（2026-10-22 纠偏：未经用户点「下一步」不换页），
+    // 第 1 步高亮顶栏「用户中心」；换页发生在后续步骤里。
     await b.evalJS(`[...document.querySelectorAll('.chip')].find(e => e.textContent.includes('去发布商品'))?.click()`)
-    const landed = await waitFor(`location.hash === '#/merchant/user/add'`, 8000)
-    await sleep(800)
-    ok('点「去发布商品」落到上架商品页', landed, { hash: await b.evalJS(`location.hash`) })
+    const started = await waitFor(
+      `location.hash === '#/merchant' && document.querySelector('.driver-popover')
+        && (document.querySelector('.driver-popover-progress-text')?.textContent || '').includes('第 1 步 / 共 7 步')`,
+      8000,
+    )
+    await sleep(500)
+    const step1 = await b.evalJS(`(() => ({
+      hash: location.hash,
+      progress: document.querySelector('.driver-popover-progress-text')?.textContent?.trim() || '',
+      active: document.querySelector('#tour-entry-merchant')?.classList.contains('driver-active-element') || false,
+    }))()`)
+    ok('点「去发布商品」留在首页起步（第 1 步高亮用户中心，不瞬移）',
+      started && step1.hash === '#/merchant' && step1.active, step1)
     await b.shot(path.join(OUT, `${MODE}-03-publish.png`))
   } else {
-    // 断网降级：规则引擎照样答，答复里没有 need_publish 引导（规则识别不到「还没上架」的槽位）。
+    // 断网降级：规则引擎照样答；「还没上架」这个前置条件由句面补，不依赖模型槽位。
+    // 第二句没有这个前提，因此只剩一枚「去秒杀报名」。
     const second = await sendChat('我要报名秒杀')
     const reply2 = await lastBotText()
     const chips2 = await chips()

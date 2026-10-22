@@ -18,6 +18,10 @@ import org.springframework.web.bind.annotation.RestController;
  * **没有 CustomerId / MerchantId 入参**：身份只从会话取，见
  * {@link ChatAgentService} 的类注释。
  *
+ * <p>{@code CurrentPath} 是可选的路由提示（{@code /merchant/user}），只用来让大模型
+ * 知道用户站在哪一页；它**不参与鉴权**，也不决定返回什么数据。分类器会把不符合
+ * 路由形状的值丢掉，避免外部文本混进 System Prompt。
+ *
  * <h2>【鉴权】</h2>
  * 本端点**不在白名单**里 ⇒ 默认 profile（闸开）下匿名请求在
  * {@code AuthInterceptor} 处直接 401，前端按 {@code allowUnauthorized} 旁路成
@@ -41,9 +45,10 @@ public class ChatAgentController {
 
     @PostMapping("/ask")
     public Result<Object> ask(@RequestParam(value = "Message", required = false) String message,
+                              @RequestParam(value = "CurrentPath", required = false) String currentPath,
                               HttpServletRequest request) {
         String userId = AuthSession.currentUserId(request);
         Integer role = AuthSession.currentRole(request);
-        return Result.of(chatAgentService.ask(message, userId, role));
+        return Result.of(chatAgentService.ask(message, userId, role, currentPath));
     }
 }

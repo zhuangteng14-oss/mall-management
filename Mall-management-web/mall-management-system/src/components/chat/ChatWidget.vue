@@ -82,7 +82,7 @@ import {
   resumeTourFlow,
   savePendingTour,
   SECKILL_FLOW_ID,
-  setTourNavigator, startTourFlow,
+  setTourNavigator, startNavGuidedTour, startTourFlow,
   startOpenStoreTour,
 } from '../../composables/useTour'
 
@@ -187,7 +187,8 @@ async function send(text, existing) {
 
   let ok = false
   try {
-    const res = await askChat(clean)
+    // `route.path` 让后端把「当前在哪一页」补进 Prompt；前端仍以 BFS 算路为准。
+    const res = await askChat(clean, route.path)
     const body = await res.json().catch(() => null)
     bot.pending = false
     if (!body) {
@@ -267,6 +268,15 @@ function onSuggestion(s) {
 }
 
 async function onAction(action) {
+  // NavGraph 自动寻路：后端只给 target_path，前端从**当前页**跑 BFS 生成逐步高亮。
+  if (action && action.type === 'navigate' && action.targetPath) {
+    close()
+    const result = await startNavGuidedTour(route.path, action.targetPath)
+    if (!result) {
+      pushBot(`当前页面没有通往「${action.targetLabel || action.targetPath}」的入口。先回到商城主页，再点一次这个按钮，我从头带你走。`)
+    }
+    return
+  }
   savePendingTour(action.tourId || 'open-store', action.routeKey || 'apply')
   close()
   const target = applyPath()

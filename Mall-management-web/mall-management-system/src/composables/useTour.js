@@ -20,6 +20,7 @@
 //     否则会对着上一页的锚点空等 8 秒然后整条流断掉。
 import { nextTick } from 'vue'
 import { getRole, isLoggedIn } from '../api/auth'
+import { buildNavSteps, navNode, normalizeNavPath } from '../config/navGraph'
 
 const PENDING_KEY = 'mall.chat.pendingTour.v1'
 const FLOW_KEY = 'mall.chat.tourFlow.v1'
@@ -262,6 +263,18 @@ export function clearPendingTour() {
 
 // ── 引导流（TourFlow）状态 ─────────────────────────────────────────────────────
 
+/**
+ * 运行时注册的流程（NavGraph 动态算出来的步骤表）。
+ *
+ * ⚠️ 只存内存：路由切换（`router.push`）不会丢，整页刷新会丢 —— 动态导航流刷新后自然结束，
+ *    这是有意的（用户已经离开了那条流）。`FLOWS` 里那几条静态流程不受影响。
+ */
+const runtimeFlows = new Map()
+
+function flowById(id) {
+  return FLOWS[id] || runtimeFlows.get(id) || null
+}
+
 function writeTourFlow(flowId, index) {
   try {
     sessionStorage.setItem(FLOW_KEY, JSON.stringify({ flowId, index, at: Date.now() }))
@@ -283,7 +296,7 @@ function readTourFlow() {
     clearTourFlow()
     return null
   }
-  if (!parsed || !FLOWS[parsed.flowId] || !parsed.at || Date.now() - parsed.at > FLOW_TTL_MS) {
+  if (!parsed || !flowById(parsed.flowId) || !parsed.at || Date.now() - parsed.at > FLOW_TTL_MS) {
     clearTourFlow()
     return null
   }
@@ -291,6 +304,13 @@ function readTourFlow() {
 }
 
 export function clearTourFlow() {
+  try {
+    const raw = sessionStorage.getItem(FLOW_KEY)
+    if (raw) {
+      const parsed = JSON.parse(raw)
+      if (parsed && parsed.flowId) runtimeFlows.delete(parsed.flowId)
+    }
+  } catch (e) { /* 存档坏了 ⇒ 下面照删 */ }
   try {
     sessionStorage.removeItem(FLOW_KEY)
   } catch (e) { /* 无存储可用 ⇒ 本来也没有流程 */ }
@@ -448,7 +468,7 @@ function retreatFlow(flow, index) {
 export async function resumeTourFlow(path) {
   const state = readTourFlow()
   if (!state) return null
-  const flow = FLOWS[state.flowId]
+  const flow = flowById(state.flowId)
   if (!flow) {
     clearTourFlow()
     return null
@@ -517,6 +537,45 @@ export async function startTourFlow(flowId, path) {
   }
 
   writeTourFlow(flow.id, index)
+  activePath = current
+  return resumeTourFlow(current)
+}
+
+/**
+ * 大模型给出的 `target_path` → 一段可点的自动寻路。
+ *
+ * 流程：
+ *   ① 目标页在 NavGraph 里 ⇒ 用 `buildNavSteps` 从**当前页**跑 BFS，得到逐步高亮表；
+ *   ② 发布 / 秒杀两个目标复用已有的精细流程（发布有 5 个表单步，不能被通用寻路截短）；
+ *   ③ 当前页到目标页在图上不连通（如裸页 `/product`）⇒ 返回 null，由调用方提示用户回商城首页。
+ *
+ * ⚠️ 与 `startTourFlow` 同一条铁律：**入口点击不主动换页**。动态流的每一步都落在当前页，
+ *    只有用户点「下一步」时才由 `advanceFlow` 按下一步的 `path` 推路由。
+ *
+ * @param {string} fromPath   当前路由
+ * @param {string} targetPath 大模型返回的目标路径
+ * @returns {Promise<object|true|null>} driver 实例 / 已交给跳转流程（秒杀）/ 无路可走
+ */
+export async function startNavGuidedTour(fromPath, targetPath) {
+  const target = normalizeNavPath(targetPath)
+  if (!navNode(target)) return null
+  const current = normalizePath(fromPath || currentTourPath())
+
+  if (target === PUBLISH_PATH && isMerchantRole()) {
+    return startTourFlow(PUBLISH_FLOW_ID, current)
+  }
+  if (target === SECKILL_PATH && isMerchantRole()) {
+    // 秒杀流程带 `jumpToStart`：点胶囊 = 用户确认要去报名页，允许直接导航。
+    startTourFlow(SECKILL_FLOW_ID, current)
+    return true
+  }
+
+  const steps = buildNavSteps(current, target)
+  if (!steps) return null
+
+  const id = `nav-${target.replace(/[^a-z0-9]+/gi, '-')}-${Date.now()}`
+  runtimeFlows.set(id, { id, steps })
+  writeTourFlow(id, 0)
   activePath = current
   return resumeTourFlow(current)
 }

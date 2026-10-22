@@ -65,6 +65,15 @@ public class ChatAgentService {
     private static final Pattern CLAIM_MERCHANT = Pattern.compile(
             "我是(商家|卖家|品牌商家|品牌|商户)");
 
+    /**
+     * 「商品还没上架」这个**前置条件**（不是意图，不决定去哪）。
+     *
+     * <p>只影响秒杀分流里给一枚还是两枚胶囊。模型抽 {@code need_publish} 会超时 / 漏槽，
+     * 而用户是否明说了「还没上架」是确定性事实 —— 两者取或，谁先到都不会丢这句提醒。
+     */
+    private static final Pattern NOT_PUBLISHED = Pattern.compile(
+            "(?:还没|没|未|尚未|还没有)(?:上架|发布)");
+
     private final OrderDao orderDao;
     private final OrderRefundService refundService;
     private final OrderStateMachine orderStateMachine;
@@ -95,6 +104,15 @@ public class ChatAgentService {
      * @return 顶层平铺的响应体（由 Controller 包进 {@code Result.of}）
      */
     public Map<String, Object> ask(String rawMessage, String userId, Integer role) {
+        return ask(rawMessage, userId, role, null);
+    }
+
+    /**
+     * 回答一句话（带当前页）。
+     *
+     * @param currentPath 前端传的当前路由，只用于让大模型知道「用户站在哪」；不参与鉴权
+     */
+    public Map<String, Object> ask(String rawMessage, String userId, Integer role, String currentPath) {
         if (rawMessage == null || rawMessage.trim().isEmpty()) {
             return fail("说点什么吧～");
         }
@@ -107,7 +125,7 @@ public class ChatAgentService {
         FaqKnowledgeBase.Answer faq = FaqKnowledgeBase.match(normalized);
 
         // 阶段一：LLM 优先；任何异常（含 3s 超时）都由 decide() 打 WARN 并降级规则引擎。
-        Decision decision = decide(message, normalized, faq, userId);
+        Decision decision = decide(message, normalized, faq, userId, role, currentPath);
         ChatIntent intent = decision.intent();
         String orderId = decision.orderId();
 
@@ -116,6 +134,7 @@ public class ChatAgentService {
             case REFUND_QUERY -> answerRefund(userId, role);
             case OPEN_STORE -> answerOpenStore(userId, role);
             case ADD_TO_SECKILL -> answerAddToSeckill(userId, role, decision.needPublish());
+            case NAVIGATE -> answerNavigate(decision.targetPath(), userId, role, decision.needPublish());
             case IDENTITY_CLAIM -> answerIdentityClaim(message, userId, role);
             case GREETING -> answerSmallTalk(intent,
                     "你好呀～我可以帮你查订单、查售后进度，也能一键带你去开店。");
@@ -137,51 +156,83 @@ public class ChatAgentService {
      * IDENTITY_CLAIM，这三类仍由规则识别；LLM 故障则整句交给规则引擎。
      */
     private Decision decide(String message, String normalized,
-                            FaqKnowledgeBase.Answer faq, String userId) {
+                            FaqKnowledgeBase.Answer faq, String userId,
+                            Integer role, String currentPath) {
         if (llmClassifier != null && llmClassifier.isEnabled()) {
             try {
-                LlmIntentClassifier.Result result = llmClassifier.classify(message);
+                LlmIntentClassifier.Result result = llmClassifier.classify(message, role, currentPath);
                 ChatIntent intent = result.intent();
                 String orderId = result.orderId();
                 boolean needPublish = result.needPublish();
 
                 // 政策 FAQ 是本地确定性知识：即使模型把它判成 REFUND，也不能答成「查退款进度」。
                 if (faq != null && faq.policy()) {
-                    return new Decision(ChatIntent.FAQ, null, false);
+                    return new Decision(ChatIntent.FAQ, null, false, null);
                 }
                 if (intent == ChatIntent.UNKNOWN) {
-                    return byRules(message, normalized, faq, userId);
+                    return byRules(message, normalized, faq, userId, role);
+                }
+                // 小模型偶尔把「我要看评论」这类「看某个页面」判成 ORDER_QUERY。
+                // 页面名以 RouteCatalog 为准：字典里有唯一且够长的说法、而用户又不是在问
+                // 「我那一笔到哪了」，就按导航走。判定见 asksAboutStatus。
+                if ((intent == ChatIntent.ORDER_QUERY || intent == ChatIntent.REFUND_QUERY)
+                        && !asksAboutStatus(normalized)) {
+                    String guessed = RouteCatalog.guess(message, role);
+                    if (guessed != null && !namesPageItself(normalized, guessed)) {
+                        return new Decision(ChatIntent.NAVIGATE, null, false, guessed);
+                    }
+                }
+                // 「开店」类问题模型偶尔会认成「怎么上架商品」这类别的页面（「上架」两个字同时
+                // 出现在两条意图里）。字典指向的若不是入驻申请页，就以字典为准 —— 指向申请页时
+                // 保持 OPEN_STORE 不动（六态身份话术比「带你去申请页」更有用）。
+                if (intent == ChatIntent.OPEN_STORE) {
+                    String guessed = RouteCatalog.guess(message, role);
+                    if (guessed != null && !guessed.endsWith("/user/apply")) {
+                        return new Decision(ChatIntent.NAVIGATE, null, false, guessed);
+                    }
                 }
                 // 「到哪了」这类短追问：模型可能判对意图但抽不到单号，用上一轮补。
                 if (intent == ChatIntent.ORDER_QUERY && isBlank(orderId) && isFollowUp(normalized)) {
                     orderId = rememberedOrderId(userId);
                 }
-                return new Decision(intent, orderId, needPublish);
+                return new Decision(intent, orderId,
+                        needPublish || (intent == ChatIntent.ADD_TO_SECKILL && declaresNotPublished(normalized)),
+                        result.targetPath());
             } catch (RuntimeException e) {
                 log.warn("LLM 意图识别失败，降级规则引擎：{}: {}",
                         e.getClass().getSimpleName(), e.getMessage());
             }
         }
-        return byRules(message, normalized, faq, userId);
+        return byRules(message, normalized, faq, userId, role);
     }
 
     /** 原有规则引擎（阶段一之前的行为，原样保留）。 */
     private Decision byRules(String message, String normalized,
-                             FaqKnowledgeBase.Answer faq, String userId) {
+                             FaqKnowledgeBase.Answer faq, String userId, Integer role) {
         // 政策类 FAQ 排在任务意图**前面**：用户给的例子「拆封了能退货吗」里含「退货」，
         // 会先命中 REFUND 正则 ⇒ 只在 UNKNOWN 分支查 FAQ 的话，这条示例永远答不到。
         // 其余 FAQ 仍按增量要求挂在 UNKNOWN 分支。
         if (faq != null && faq.policy()) {
-            return new Decision(ChatIntent.FAQ, null, false);
+            return new Decision(ChatIntent.FAQ, null, false, null);
         }
 
         ChatIntentRecognizer.Match match = ChatIntentRecognizer.recognize(message);
         ChatIntent intent = match.intent();
         String orderId = match.orderId();
 
+        // 「怎么处理退款」这类「去哪办」的句子，规则引擎只看得见「退款」两个字。
+        // 与 decide() 里的字典纠偏同一条判据（在问自己那笔状态时不动），
+        // 这样模型超时时落点也不变，探针不用赌那 3 秒。
+        if (intent == ChatIntent.REFUND_QUERY && !asksAboutStatus(normalized)) {
+            String guessed = RouteCatalog.guess(message, role);
+            if (guessed != null && !namesPageItself(normalized, guessed)) {
+                return new Decision(ChatIntent.NAVIGATE, null, false, guessed);
+            }
+        }
+
         if (intent == ChatIntent.UNKNOWN) {
             if (faq != null) {
-                return new Decision(ChatIntent.FAQ, null, false);
+                return new Decision(ChatIntent.FAQ, null, false, null);
             }
             // 短期记忆：只有「那…呢 / 到哪了 / 进度」这类短追问才接上一轮意图，
             // 避免把「今天天气不错」也当成订单问题。
@@ -191,9 +242,34 @@ public class ChatAgentService {
                 if (intent == ChatIntent.ORDER_QUERY && isBlank(orderId)) {
                     orderId = context.orderId();
                 }
+            } else {
+                // 大模型超时 / 未配置 Key 时的降级导航：话术取自 RouteCatalog 的「用户说」，
+                // 不在这里新增意图正则；没把握（并列 / 太短）就照旧走 UNKNOWN。
+                String guessed = RouteCatalog.guess(message, role);
+                if (guessed != null) {
+                    return new Decision(ChatIntent.NAVIGATE, null, false, guessed);
+                }
             }
         }
-        return new Decision(intent, orderId, false);
+        return new Decision(intent, orderId,
+                intent == ChatIntent.ADD_TO_SECKILL && declaresNotPublished(normalized), null);
+    }
+
+    /** 用户明说商品还没上架（与模型抽的 {@code need_publish} 取或）。 */
+    private static boolean declaresNotPublished(String normalized) {
+        return NOT_PUBLISHED.matcher(normalized).find();
+    }
+
+    /**
+     * 用户是不是**直接说了那个页面的名字**。
+     *
+     * <p>「查我的订单」里「我的订单」既是页面名也是业务对象 —— 这种要回答数据，不要被
+     * 带去订单页（每轮回复都有这枚胶囊，落点必须稳定）；而「我要看评论」没提「我的订单」，
+     * 是「想看某个页面」，交给导航。
+     */
+    private static boolean namesPageItself(String normalized, String path) {
+        RouteCatalog.Route route = RouteCatalog.find(path);
+        return route != null && normalized.contains(route.title());
     }
 
     private String rememberedOrderId(String userId) {
@@ -206,8 +282,13 @@ public class ChatAgentService {
         return memoryService == null ? null : memoryService.lastContext(userId);
     }
 
-    /** 意图 + 槽位的内部决策；{@code needPublish} 只对秒杀报名有意义。 */
-    private record Decision(ChatIntent intent, String orderId, boolean needPublish) {
+    /**
+     * 意图 + 槽位的内部决策。
+     *
+     * @param needPublish 只对秒杀报名有意义
+     * @param targetPath  只对 NAVIGATE 有意义（已按角色归位到真实路由）
+     */
+    private record Decision(ChatIntent intent, String orderId, boolean needPublish, String targetPath) {
     }
 
     // ==================== 订单 ====================
@@ -520,6 +601,48 @@ public class ChatAgentService {
         };
     }
 
+    // ==================== 页面导航（NavGraph） ====================
+
+    /**
+     * 大模型只给了 {@code target_path}；本方法把它翻成前端能点的动作。
+     *
+     * <p>两类目标仍复用已有的身份分支，不另写一套：
+     * <ul>
+     *   <li>入驻申请 ⇒ {@link #answerOpenStore}（六态话术 + 开店漫游）；</li>
+     *   <li>秒杀报名 ⇒ {@link #answerAddToSeckill}（身份闸门 + 秒杀胶囊）。</li>
+     * </ul>
+     * 其余页面返回 {@code action.type = navigate}，前端用 NavGraph BFS 从当前页算路。
+     *
+     * @param needPublish 模型抽的 {@code need_publish} 槽位；只在秒杀分流里有意义
+     *                    （「还没上架」⇒ 两个胶囊），别的页面忽略
+     */
+    private Map<String, Object> answerNavigate(String targetPath, String userId, Integer role,
+                                               boolean needPublish) {
+        String path = RouteCatalog.resolve(targetPath, role);
+        if (path == null) {
+            return answerSmallTalk(ChatIntent.NAVIGATE,
+                    "这个页面在当前身份下打不开。你可以问我订单、售后，或让我带你去个人中心。");
+        }
+        if (path.endsWith("/user/apply")) {
+            return answerOpenStore(userId, role);
+        }
+        if ("/merchant/seckill".equals(path)) {
+            return answerAddToSeckill(userId, role, needPublish);
+        }
+
+        RouteCatalog.Route route = RouteCatalog.find(path);
+        String title = route == null ? path : route.title();
+        // 字典里的 description 是写给模型的（含「用户说…时选它」），回给用户只取前一句。
+        String text = (route == null ? "" : RouteCatalog.userSummary(route))
+                + "点下面的按钮，我从当前页面一步步带你过去。";
+        Map<String, Object> action = new LinkedHashMap<>();
+        action.put("type", "navigate");
+        action.put("targetPath", path);
+        action.put("targetLabel", title);
+        action.put("label", "带我去「" + title + "」");
+        return reply(ChatIntent.NAVIGATE, text, null, action, defaultSuggestions());
+    }
+
     // ==================== 身份自述（增量-A 规则 2） ====================
 
     /**
@@ -670,6 +793,26 @@ public class ChatAgentService {
     private static boolean isFollowUp(String normalized) {
         return normalized.length() <= 20 && FOLLOW_UP.matcher(normalized).find();
     }
+
+    /**
+     * 用户是在问「我那一笔怎么样了」吗？
+     *
+     * <p>只用于一条窄判据：模型给了 ORDER_QUERY / REFUND_QUERY 时，若这句话在路由字典里
+     * 有明确的页面说法，且**不是**在问自己记录的状态，就改判导航（见 {@code decide}）。
+     * 「我的订单到哪了」必须留在这里，不能被带去订单页。
+     */
+    private static boolean asksAboutStatus(String normalized) {
+        for (String marker : STATUS_MARKERS) {
+            if (normalized.contains(marker)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static final List<String> STATUS_MARKERS = List.of(
+            "到哪", "进度", "状态", "结果", "有没有", "怎么样", "了吗", "到账", "发货",
+            "多少", "几个", "几笔");
 
     private static List<Object> defaultSuggestions() {
         List<Object> suggestions = new ArrayList<>();

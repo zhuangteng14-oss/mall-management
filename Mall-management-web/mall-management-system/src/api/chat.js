@@ -9,11 +9,17 @@
 import { http } from './http'
 import { endpoints } from './endpoints'
 
-/** @param {string} message 用户原话 */
-export function askChat(message) {
+/**
+ * @param {string} message     用户原话
+ * @param {string} [currentPath] 当前路由（`/merchant/...`）。只用于让大模型知道用户站在哪一页；
+ *        真正的「怎么走过去」由前端 NavGraph 的 BFS 计算，后端不返回路径步骤。
+ */
+export function askChat(message, currentPath) {
+  const params = new URLSearchParams({ Message: String(message ?? '') })
+  if (currentPath) params.set('CurrentPath', String(currentPath))
   return http.post(
     endpoints.chat.ask,
-    new URLSearchParams({ Message: String(message ?? '') }).toString(),
+    params.toString(),
     { allowUnauthorized: true },
   )
 }

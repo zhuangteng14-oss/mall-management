@@ -44,14 +44,14 @@
           <div v-if="refund.handledAt" class="rc-row"><span>处理时间</span><b>{{ refund.handledAt }}</b></div>
         </div>
 
-        <!-- 唯一动作：一键带我去开店 -->
+        <!-- 动作：开店漫游（tour）/ 路由图自动寻路（navigate） -->
         <button
-          v-if="showExtras && message.action && message.action.type === 'tour'"
+          v-if="showExtras && message.action && (message.action.type === 'tour' || message.action.type === 'navigate')"
           type="button"
           class="tour-btn"
           @click.stop="$emit('action', message.action)"
         >
-          <span class="tb-icon" aria-hidden="true">↗</span>{{ message.action.label || '一键带我去开店' }}
+          <span class="tb-icon" aria-hidden="true">↗</span>{{ message.action.label || '一键带我去' }}
         </button>
 
         <!-- 建议 -->

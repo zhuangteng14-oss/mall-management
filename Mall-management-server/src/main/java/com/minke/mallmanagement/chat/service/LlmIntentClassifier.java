@@ -47,22 +47,63 @@ public class LlmIntentClassifier {
     private static final String DEFAULT_MODEL = "glm-4-flash";
     private static final int MAX_ORDER_ID_LEN = 64;
 
-    /** 只接受 Prompt 里列出的六种意图；其余（含模型自创）一律视为解析失败。 */
+    /** 只接受 Prompt 里列出的意图；其余（含模型自创）一律视为解析失败。 */
     private static final Set<ChatIntent> ALLOWED = EnumSet.of(
             ChatIntent.ORDER_QUERY,
             ChatIntent.REFUND_QUERY,
             ChatIntent.OPEN_STORE,
             ChatIntent.ADD_TO_SECKILL,
+            ChatIntent.NAVIGATE,
             ChatIntent.FAQ,
             ChatIntent.UNKNOWN);
 
-    /** 与用户给定的 System Prompt 逐字一致（额外一句「不要 markdown 代码块」只为少一层剥离）。 */
+    /**
+     * Prompt 的固定部分；路由字典由 {@link RouteCatalog#promptCatalog(Integer)} 按角色追加。
+     *
+     * <p>核心变化（2026-10-22）：不再让模型穷举意图，而是让它在**路由字典**里挑一个
+     * {@code target_path}。「怎么走」不归模型管 —— 前端 NavGraph 用 BFS 算。
+     */
     static final String SYSTEM_PROMPT = """
             你是一个电商智能客服意图路由器。请分析用户输入，严格输出 JSON 格式，不要输出任何多余文字。
-            支持的意图：ORDER_QUERY（查订单）、REFUND_QUERY（查售后）、OPEN_STORE（开店）、ADD_TO_SECKILL（秒杀）、FAQ（政策咨询）、UNKNOWN（闲聊）。
-            请提取关键槽位（Slots），如：订单号（orderId）、是否需要上架前置（need_publish 布尔值）。
-            输出格式：{"intent": "...", "slots": {"orderId": null, "need_publish": false}}
-            只输出这个 JSON 对象本身，不要 markdown 代码块，不要解释。
+
+            你会收到一份「可选页面」路由字典。把用户的话归到下面两类之一：
+            A. 页面导航（用户想「去哪里 / 怎么去 / 怎么处理 / 怎么办理 / 我要看 / 我要管理 / 帮我打开」某个页面）
+               ⇒ intent = NAVIGATE，并从字典里选**一个** target_path。
+               例：「怎么上架商品」⇒ 字典里的「上架商品」；「我要去看店铺数据」⇒「经营数据」；
+                   「我想改一下那个 299 元耳机的价格」⇒「查看商品」（改价与库存都在那一页）；
+                   「我要管理我的钱」⇒「会员中心」（平台没有独立的钱包页）；
+                   「我要看评论」⇒ 商家选「查看商品」，客户选「我的订单」（平台没有独立评价页）；
+                   「怎么处理退款」⇒ 商家选「售后工作台」，客户选「我的订单」；
+                   ⚠️ 「怎么处理退款」问的是「去哪办」，**不是** ORDER_QUERY / REFUND_QUERY。
+               ⚠️ 上面只说明「意思对应哪一行」，**路径必须从下方字典逐字抄**，别照例子拼。
+               ⚠️ 「钱 / 余额 / 积分 / 资产 / 优惠券」相关一律选「会员中心」。
+               ⚠️ 「我要看评论」「怎么处理退款」「我要管理我的钱」都是 NAVIGATE（想看/想办某个页面），
+                  不要判成 ORDER_QUERY / REFUND_QUERY。
+               ⚠️ 「上架 / 发布商品」不是开店：「怎么上架商品」⇒ NAVIGATE「上架商品」；
+                  只有「开店 / 入驻 / 加盟 / 营业执照」才是 OPEN_STORE。
+            B. 数据查询与业务（用户问**自己那笔**的状态，这类**不要**给 target_path）
+               ⇒ ORDER_QUERY（查我的订单状态/进度）、REFUND_QUERY（查我的售后进度/结果）、
+                  OPEN_STORE（开店/入驻）、ADD_TO_SECKILL（报名秒杀）、
+                  FAQ（政策咨询）、GREETING（问候）、HELP（你能做什么）、UNKNOWN（闲聊/听不懂）。
+               例：「我的订单到哪了」⇒ ORDER_QUERY；「我的退款进度」⇒ REFUND_QUERY；
+                   「怎么开店」⇒ OPEN_STORE；「我要报名秒杀」⇒ ADD_TO_SECKILL；
+                   「我的新商品要上架秒杀页，还没上架呢」⇒ ADD_TO_SECKILL，且 need_publish = true。
+
+            规则：
+            1. target_path 只能逐字取字典里的路径；字典里没有合适的页面就给 null。
+            2. 判断口诀：问「怎么做 / 如何办 / 去哪办 / 在哪看」⇒ NAVIGATE；
+               问「我那一笔 / 那一单 到哪了 / 进度 / 状态 / 结果 / 有没有」⇒ 数据查询。
+               对照：「怎么处理退款」= NAVIGATE；「我的退款到哪了」= REFUND_QUERY。
+            3. 同样一句话在不同角色下落点不同：只从字典里给当前角色列出的页面中选。
+            4. 提取槽位：
+               - orderId：订单号，没有就给 null。
+               - need_publish：布尔值。**仅当**目标是秒杀报名、且用户明说商品「还没上架 / 还没发布 /
+                 还没有商品」时给 true；其他情况一律 false。
+            5. 只输出 JSON 本身，不要 markdown 代码块，不要解释。
+            """;
+
+    static final String OUTPUT_FORMAT = """
+            输出格式：{"intent": "...", "target_path": null, "slots": {"orderId": null, "need_publish": false}}
             """;
 
     private final boolean enabled;
@@ -104,11 +145,22 @@ public class LlmIntentClassifier {
     }
 
     /**
-     * 分类一句话。
+     * 分类一句话（不带角色 / 当前页 —— 单测与旧调用点的兼容入口）。
      *
      * @throws LlmException 未启用、超时、非 200、响应不是合法 JSON、意图不在白名单
      */
     public Result classify(String message) {
+        return classify(message, null, null);
+    }
+
+    /**
+     * 分类一句话，并把「当前角色能进哪些页面」注入 Prompt。
+     *
+     * @param message     用户原话
+     * @param role        1 客户 / 2 商家 / 3 管理员；{@code null} = 未知（两壳都列）
+     * @param currentPath 用户当前所在路由，仅作模型判断的上下文；不参与出参
+     */
+    public Result classify(String message, Integer role, String currentPath) {
         if (!isEnabled()) {
             throw new LlmException("LLM 未启用或未配置 API Key");
         }
@@ -122,7 +174,7 @@ public class LlmIntentClassifier {
             body.put("model", model);
             body.put("temperature", 0.1);
             body.put("messages", List.of(
-                    Map.of("role", "system", "content", SYSTEM_PROMPT),
+                    Map.of("role", "system", "content", systemPrompt(role, currentPath)),
                     Map.of("role", "user", "content", message)));
             requestBody = objectMapper.writeValueAsString(body);
         } catch (Exception e) {
@@ -155,7 +207,44 @@ public class LlmIntentClassifier {
         }
 
         String content = extractContent(response.body());
-        return parseContent(content);
+        return parseContent(content, role);
+    }
+
+    /** 固定规则 + 当前角色的路由字典 +（可选）当前页。 */
+    private static String systemPrompt(Integer role, String currentPath) {
+        StringBuilder sb = new StringBuilder(SYSTEM_PROMPT);
+        sb.append('\n').append(RouteCatalog.promptCatalog(role));
+        String safePath = safeCurrentPath(currentPath);
+        if (safePath != null) {
+            sb.append("用户当前所在页面：").append(safePath).append('\n');
+        }
+        sb.append(OUTPUT_FORMAT);
+        return sb.toString();
+    }
+
+    /**
+     * 当前页来自浏览器（可被随意构造），只接受「斜杠开头的纯路由形状」。
+     *
+     * <p>否则一段带换行的中文就能直接改写 System Prompt —— 这条路径只多了个
+     * 上下文，不值得为它开一个注入面。
+     */
+    static String safeCurrentPath(String currentPath) {
+        if (isBlank(currentPath)) {
+            return null;
+        }
+        String p = currentPath.trim();
+        if (p.length() > 120 || p.charAt(0) != '/') {
+            return null;
+        }
+        for (int i = 1; i < p.length(); i++) {
+            char c = p.charAt(i);
+            boolean ok = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
+                    || (c >= '0' && c <= '9') || c == '/' || c == '-' || c == '_';
+            if (!ok) {
+                return null;
+            }
+        }
+        return p;
     }
 
     /** 从 GLM 的 {@code choices[0].message.content} 取正文。 */
@@ -175,7 +264,7 @@ public class LlmIntentClassifier {
     }
 
     /** 容忍模型偶尔套的 markdown 代码块 / 前后解释，只取第一个 { 到最后一个 }。 */
-    private Result parseContent(String raw) {
+    private Result parseContent(String raw, Integer role) {
         String json = raw == null ? "" : raw.trim();
         int start = json.indexOf('{');
         int end = json.lastIndexOf('}');
@@ -225,11 +314,46 @@ public class LlmIntentClassifier {
                     : "true".equalsIgnoreCase(publishNode.asText(""));
         }
 
-        return new Result(intent, orderId, needPublish);
+        String targetPath = parseTargetPath(root, intent, role);
+        return new Result(intent, orderId, needPublish, targetPath);
     }
 
-    /** 模型的分类结果；{@code needPublish} 只在 ADD_TO_SECKILL 时有业务意义。 */
-    public record Result(ChatIntent intent, String orderId, boolean needPublish) {
+    /**
+     * 解析 {@code target_path}：只对 NAVIGATE 生效，且必须能在当前角色的路由字典里归位。
+     *
+     * <p>数据类意图即使模型顺手给了路径也**丢掉** —— 否则「查订单」会被前端当成导航，
+     * 把用户从订单卡旁边带走。
+     */
+    private static String parseTargetPath(JsonNode root, ChatIntent intent, Integer role) {
+        if (intent != ChatIntent.NAVIGATE) {
+            return null;
+        }
+        JsonNode node = root.get("target_path");
+        if (node == null) {
+            node = root.get("targetPath");
+        }
+        if (node == null) {
+            node = root.path("slots").get("target_path");
+        }
+        String raw = node == null || node.isNull() ? "" : node.asText("").trim();
+        String resolved = RouteCatalog.resolve(raw, role);
+        if (resolved == null) {
+            throw new LlmException("target_path 不在路由字典内：" + raw);
+        }
+        return resolved;
+    }
+
+    /**
+     * 模型的分类结果。
+     *
+     * <p>{@code needPublish} 只在 ADD_TO_SECKILL 时有业务意义；{@code targetPath} 只在
+     * NAVIGATE 时有值，且已按当前角色归位到真实路由。
+     */
+    public record Result(ChatIntent intent, String orderId, boolean needPublish, String targetPath) {
+        /** 兼容旧调用点 / 单测：不带 target_path 的三参构造。 */
+        public Result(ChatIntent intent, String orderId, boolean needPublish) {
+            this(intent, orderId, needPublish, null);
+        }
     }
 
     /** 分类失败；编排层捕获后降级规则引擎。 */
