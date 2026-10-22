@@ -7,6 +7,8 @@ import com.minke.mallmanagement.order.RefundStatusText;
 import com.minke.mallmanagement.order.dao.OrderDao;
 import com.minke.mallmanagement.order.model.OrderStateMachine;
 import com.minke.mallmanagement.order.refund.service.OrderRefundService;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
@@ -35,6 +37,8 @@ import java.util.regex.Pattern;
  */
 @Service
 public class ChatAgentService {
+
+    private static final Logger log = LoggerFactory.getLogger(ChatAgentService.class);
 
     private static final int MAX_MESSAGE_LEN = 200;
     private static final int RECENT_LIMIT = 3;
@@ -66,17 +70,20 @@ public class ChatAgentService {
     private final OrderStateMachine orderStateMachine;
     private final IdentityResolver identityResolver;
     private final SessionMemoryService memoryService;
+    private final LlmIntentClassifier llmClassifier;
 
     public ChatAgentService(OrderDao orderDao,
                             OrderRefundService refundService,
                             OrderStateMachine orderStateMachine,
                             IdentityResolver identityResolver,
-                            SessionMemoryService memoryService) {
+                            SessionMemoryService memoryService,
+                            LlmIntentClassifier llmClassifier) {
         this.orderDao = orderDao;
         this.refundService = refundService;
         this.orderStateMachine = orderStateMachine;
         this.identityResolver = identityResolver;
         this.memoryService = memoryService;
+        this.llmClassifier = llmClassifier;
     }
 
     /**
@@ -98,11 +105,74 @@ public class ChatAgentService {
 
         String normalized = ChatIntentRecognizer.normalize(message);
         FaqKnowledgeBase.Answer faq = FaqKnowledgeBase.match(normalized);
-        // ⚠️ 政策类 FAQ 排在任务意图**前面**：用户给的例子「拆封了能退货吗」里含「退货」，
-        //    会先命中 REFUND 正则 ⇒ 只在 UNKNOWN 分支查 FAQ 的话，这条示例永远答不到。
-        //    其余 FAQ 仍按增量要求挂在 UNKNOWN 分支。
+
+        // 阶段一：LLM 优先；任何异常（含 3s 超时）都由 decide() 打 WARN 并降级规则引擎。
+        Decision decision = decide(message, normalized, faq, userId);
+        ChatIntent intent = decision.intent();
+        String orderId = decision.orderId();
+
+        Map<String, Object> resp = switch (intent) {
+            case ORDER_QUERY -> answerOrders(userId, role, orderId);
+            case REFUND_QUERY -> answerRefund(userId, role);
+            case OPEN_STORE -> answerOpenStore(userId, role);
+            case ADD_TO_SECKILL -> answerAddToSeckill(userId, role, decision.needPublish());
+            case IDENTITY_CLAIM -> answerIdentityClaim(message, userId, role);
+            case GREETING -> answerSmallTalk(intent,
+                    "你好呀～我可以帮你查订单、查售后进度，也能一键带你去开店。");
+            case HELP -> answerSmallTalk(intent,
+                    "我会这些：① 查最新订单状态；② 查退款进度；③ 带你去开店（含两步高亮引导）。");
+            case FAQ -> answerFaq(faq == null
+                    ? "这类政策问题我还在学习中，建议联系店铺客服确认。"
+                    : faq.text());
+            default -> answerSmallTalk(ChatIntent.UNKNOWN,
+                    "我暂时听不懂这句话。你可以问我：查订单 / 查售后 / 怎么开店。");
+        };
+        return remember(userId, message, intent, orderIdOf(resp, orderId), resp);
+    }
+
+    /**
+     * 双引擎路由：LLM 优先，规则兜底。
+     *
+     * <p>LLM 返回 UNKNOWN 时再走一次规则引擎 —— Prompt 没列 GREETING / HELP /
+     * IDENTITY_CLAIM，这三类仍由规则识别；LLM 故障则整句交给规则引擎。
+     */
+    private Decision decide(String message, String normalized,
+                            FaqKnowledgeBase.Answer faq, String userId) {
+        if (llmClassifier != null && llmClassifier.isEnabled()) {
+            try {
+                LlmIntentClassifier.Result result = llmClassifier.classify(message);
+                ChatIntent intent = result.intent();
+                String orderId = result.orderId();
+                boolean needPublish = result.needPublish();
+
+                // 政策 FAQ 是本地确定性知识：即使模型把它判成 REFUND，也不能答成「查退款进度」。
+                if (faq != null && faq.policy()) {
+                    return new Decision(ChatIntent.FAQ, null, false);
+                }
+                if (intent == ChatIntent.UNKNOWN) {
+                    return byRules(message, normalized, faq, userId);
+                }
+                // 「到哪了」这类短追问：模型可能判对意图但抽不到单号，用上一轮补。
+                if (intent == ChatIntent.ORDER_QUERY && isBlank(orderId) && isFollowUp(normalized)) {
+                    orderId = rememberedOrderId(userId);
+                }
+                return new Decision(intent, orderId, needPublish);
+            } catch (RuntimeException e) {
+                log.warn("LLM 意图识别失败，降级规则引擎：{}: {}",
+                        e.getClass().getSimpleName(), e.getMessage());
+            }
+        }
+        return byRules(message, normalized, faq, userId);
+    }
+
+    /** 原有规则引擎（阶段一之前的行为，原样保留）。 */
+    private Decision byRules(String message, String normalized,
+                             FaqKnowledgeBase.Answer faq, String userId) {
+        // 政策类 FAQ 排在任务意图**前面**：用户给的例子「拆封了能退货吗」里含「退货」，
+        // 会先命中 REFUND 正则 ⇒ 只在 UNKNOWN 分支查 FAQ 的话，这条示例永远答不到。
+        // 其余 FAQ 仍按增量要求挂在 UNKNOWN 分支。
         if (faq != null && faq.policy()) {
-            return remember(userId, message, ChatIntent.FAQ, null, answerFaq(faq.text()));
+            return new Decision(ChatIntent.FAQ, null, false);
         }
 
         ChatIntentRecognizer.Match match = ChatIntentRecognizer.recognize(message);
@@ -111,11 +181,11 @@ public class ChatAgentService {
 
         if (intent == ChatIntent.UNKNOWN) {
             if (faq != null) {
-                return remember(userId, message, ChatIntent.FAQ, null, answerFaq(faq.text()));
+                return new Decision(ChatIntent.FAQ, null, false);
             }
             // 短期记忆：只有「那…呢 / 到哪了 / 进度」这类短追问才接上一轮意图，
             // 避免把「今天天气不错」也当成订单问题。
-            SessionMemoryService.Context context = memoryService.lastContext(userId);
+            SessionMemoryService.Context context = context(userId);
             if (context != null && isFollowUp(normalized)) {
                 intent = context.intent();
                 if (intent == ChatIntent.ORDER_QUERY && isBlank(orderId)) {
@@ -123,22 +193,21 @@ public class ChatAgentService {
                 }
             }
         }
+        return new Decision(intent, orderId, false);
+    }
 
-        Map<String, Object> resp = switch (intent) {
-            case ORDER_QUERY -> answerOrders(userId, role, orderId);
-            case REFUND_QUERY -> answerRefund(userId, role);
-            case OPEN_STORE -> answerOpenStore(userId, role);
-            case ADD_TO_SECKILL -> answerAddToSeckill(userId, role);
-            case IDENTITY_CLAIM -> answerIdentityClaim(message, userId, role);
-            case GREETING -> answerSmallTalk(match.intent(),
-                    "你好呀～我可以帮你查订单、查售后进度，也能一键带你去开店。");
-            case HELP -> answerSmallTalk(match.intent(),
-                    "我会这些：① 查最新订单状态；② 查退款进度；③ 带你去开店（含两步高亮引导）。");
-            case FAQ -> answerFaq(faq == null ? "我暂时听不懂这句话。" : faq.text());
-            default -> answerSmallTalk(ChatIntent.UNKNOWN,
-                    "我暂时听不懂这句话。你可以问我：查订单 / 查售后 / 怎么开店。");
-        };
-        return remember(userId, message, intent, orderIdOf(resp, orderId), resp);
+    private String rememberedOrderId(String userId) {
+        SessionMemoryService.Context context = context(userId);
+        return context != null && context.intent() == ChatIntent.ORDER_QUERY
+                ? context.orderId() : null;
+    }
+
+    private SessionMemoryService.Context context(String userId) {
+        return memoryService == null ? null : memoryService.lastContext(userId);
+    }
+
+    /** 意图 + 槽位的内部决策；{@code needPublish} 只对秒杀报名有意义。 */
+    private record Decision(ChatIntent intent, String orderId, boolean needPublish) {
     }
 
     // ==================== 订单 ====================
@@ -412,7 +481,7 @@ public class ChatAgentService {
      * {@code /merchant/seckill}）；无申请复用开店漫游；审核中只答不导航；被拒给
      * 「重新申请」；未登录给「登录后去报名」，前端存 pendingTour，登录后按真实角色续接。
      */
-    private Map<String, Object> answerAddToSeckill(String userId, Integer role) {
+    private Map<String, Object> answerAddToSeckill(String userId, Integer role, boolean needPublish) {
         ResolvedIdentity id = identityResolver.resolve(userId, role);
         String who = identitySentence(id);
         if (id.boundary() == ResolvedIdentity.Boundary.ADMIN) {
@@ -426,9 +495,16 @@ public class ChatAgentService {
                     null, null, List.of(routeSuggestion("重新申请", "apply")));
         }
         return switch (id.identity()) {
-            case MERCHANT, MERCHANT_BRAND -> reply(ChatIntent.ADD_TO_SECKILL,
-                    who + "带你去秒杀报名页，到了填商品和价格就行。",
-                    null, null, List.of(routeSuggestion("去秒杀报名", "seckill")));
+            case MERCHANT, MERCHANT_BRAND -> needPublish
+                    ? reply(ChatIntent.ADD_TO_SECKILL,
+                            who + "商品还没上架。先在「上架商品」发布商品，再回秒杀报名页选它；"
+                                    + "两个入口都在下面。",
+                            null, null, List.of(
+                                    routeSuggestion("去发布商品", "publish"),
+                                    routeSuggestion("去秒杀报名", "seckill")))
+                    : reply(ChatIntent.ADD_TO_SECKILL,
+                            who + "带你去秒杀报名页，到了填商品和价格就行。",
+                            null, null, List.of(routeSuggestion("去秒杀报名", "seckill")));
             case USER_NO_APPLICATION -> reply(ChatIntent.ADD_TO_SECKILL,
                     who + "需要先完成商家入驻，审核通过后才能报名秒杀。",
                     null, applyAction("先去入驻"), List.of("查我的订单"));

@@ -76,6 +76,7 @@ import {
   clearPendingTour,
   isMerchantRole,
   ordersPath,
+  publishPath,
   readPendingTour,
   resumePathAfterLogin,
   savePendingTour,
@@ -238,6 +239,12 @@ function onSuggestion(s) {
     }
     if (s.routeKey === 'seckill') {
       startSeckill()
+      return
+    }
+    if (s.routeKey === 'publish') {
+      // 阶段一：need_publish=true 时先引导去「上架商品」，不替用户猜商品/价格。
+      close()
+      router.push(publishPath()).catch(() => {})
       return
     }
     if (s.routeKey === 'applyStatus') {

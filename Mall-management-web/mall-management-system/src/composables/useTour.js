@@ -18,6 +18,8 @@ const APPLY_PATH = { customer: '/customer/user/apply', merchant: '/merchant/user
 const ORDERS_PATH = { customer: '/customer/orders', merchant: '/merchant/orders' }
 /** 商家秒杀报名页（N3 / Q5=A：只导航，不写库）。 */
 const SECKILL_PATH = '/merchant/seckill'
+/** 商家「上架商品」页（阶段一：need_publish=true 时的第一个胶囊）。 */
+const PUBLISH_PATH = '/merchant/user/add'
 
 export function isMerchantRole() {
   return String(getRole() || '') === '2'
@@ -36,6 +38,11 @@ export function applyPath() {
 /** 秒杀报名页落点（只有商家壳有这条路由，Q5 表里也只对商家给导航）。 */
 export function seckillPath() {
   return SECKILL_PATH
+}
+
+/** 商品发布页落点（只有商家壳有这条路由；非商家不会拿到这个胶囊）。 */
+export function publishPath() {
+  return PUBLISH_PATH
 }
 
 export function savePendingTour(tourId = 'open-store', routeKey = 'apply', resume = null) {
