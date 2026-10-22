@@ -7,7 +7,10 @@
 //   ① /login 上**不出现**客服球（P0-3）；
 //   ② /customer 上球存在 → 打开面板 → 查订单 → 打字机结束出订单卡（P0-2 的最近 3 笔）；
 //   ③ 点「怎么开店」→ 出现「一键带我去开店」→ 点击后跨页到申请页并自动开 driver.js；
-//   ④ 两步高亮（店铺名称 / 提交按钮）各自截图。
+//   ④ 两步高亮（店铺名称 / 提交按钮）各自截图；
+//   ⑤ 二次进入（Q10）：关掉漫游 → 回首页 → 再触发 → 漫游重新开启；
+//   ⑥ N2 六态话术逐条渲染；N7 未知 routeKey 胶囊按 label 发送（不出现 [object Object]）；
+//   ⑦ N3 商家问「我要报名秒杀」→ 胶囊导航到 /merchant/seckill。
 //
 // 用法：先 `pnpm dev`（8080），再
 //   node scripts/probes/probe-chat-tour.mjs
@@ -48,11 +51,68 @@ const OPEN_STORE_REPLY = {
   suggestions: ['查我的订单', '查售后进度'],
 }
 
+// N2 六态话术（文案与后端 ChatAgentService#identitySentence 逐字一致）。
+// 探针只验前端渲染；文案本身的生成由 ChatAgentServiceTest / IdentityResolverTest 兜底。
+const STATE_REPLIES = {
+  '身份-匿名': {
+    success: true, intent: 'OPEN_STORE', reply: '您当前还未登录。',
+    suggestions: ['查我的订单'],
+  },
+  '身份-无申请': {
+    success: true, intent: 'OPEN_STORE',
+    reply: '系统显示您当前是普通客户，还没有提交过入驻申请。',
+    suggestions: ['查我的订单'],
+  },
+  '身份-审核中': {
+    success: true, intent: 'OPEN_STORE',
+    reply: '系统显示您当前是「入驻审核中」。店铺「米可数码店」于 2026-10-20 10:00:00，正在等平台审核。',
+    suggestions: ['查入驻进度'],
+  },
+  '身份-未通过': {
+    success: true, intent: 'OPEN_STORE',
+    reply: '系统显示您当前是「入驻未通过」。原因：资料不全。',
+    suggestions: ['重新申请'],
+  },
+  '身份-商家': {
+    success: true, intent: 'OPEN_STORE',
+    reply: '系统显示您当前是商家。商家号：m1。',
+    suggestions: ['查我的订单'],
+  },
+  '身份-品牌': {
+    success: true, intent: 'OPEN_STORE',
+    reply: '系统显示您当前是品牌商家。品牌：米可，有效期至 2099-01-01 00:00:00。',
+    suggestions: ['查我的订单'],
+  },
+}
+
+// N7：未知 routeKey 的胶囊。点击后 ChatWidget 必须回退到 label 当普通消息发送。
+const UNKNOWN_ROUTE_REPLY = {
+  success: true, intent: 'UNKNOWN',
+  reply: '我暂时听不懂这句话。你可以问我：查订单 / 查售后 / 怎么开店。',
+  suggestions: [{ label: '测试未知路由', routeKey: 'unknown' }],
+}
+const ECHO_LABEL_REPLY = {
+  success: true, intent: 'UNKNOWN', reply: '收到：测试未知路由', suggestions: [],
+}
+
+// N3：商家报名秒杀 —— 只给导航胶囊，不猜商品与价格。
+const SECKILL_REPLY = {
+  success: true, intent: 'ADD_TO_SECKILL',
+  reply: '系统显示您当前是商家。带你去秒杀报名页，到了填商品和价格就行。',
+  suggestions: [{ label: '去秒杀报名', routeKey: 'seckill' }],
+}
+
 function mockFor(postData) {
   let msg = ''
   try {
     msg = new URLSearchParams(postData || '').get('Message') || ''
   } catch (e) { /* 非表单 body */ }
+  for (const [trigger, body] of Object.entries(STATE_REPLIES)) {
+    if (msg.includes(trigger)) return body
+  }
+  if (msg.includes('未知路由')) return UNKNOWN_ROUTE_REPLY
+  if (msg.includes('测试未知路由')) return ECHO_LABEL_REPLY
+  if (msg.includes('秒杀')) return SECKILL_REPLY
   return msg.includes('开店') ? OPEN_STORE_REPLY : ORDER_REPLY
 }
 
@@ -95,6 +155,45 @@ async function waitFor(expr, timeout = 12000, step = 200) {
     await sleep(step)
   }
   return false
+}
+
+/** 面板可能已被上一步 close()；只在真的关着时点球，避免把刚开的面板又关掉。 */
+async function openPanel() {
+  if (await b.evalJS(`!!document.querySelector('.panel')`)) return true
+  await b.evalJS(`document.querySelector('.ball')?.click()`)
+  const up = await waitFor(`document.querySelector('.panel')`, 4000)
+  await sleep(300)
+  return up
+}
+
+/**
+ * 发一句话并等回复落地。
+ * ⚠️ 不能以「bot 气泡数 +1」为完成信号：send() 会**先**压入 pending 占位气泡，
+ *    那个判定会立刻为真，下一句就撞在 busy=true 上被静默丢掉。
+ *    完成信号取输入框解除 disabled（finally 里置 busy=false），再点气泡跳过打字机。
+ */
+async function sendChat(text) {
+  await openPanel()
+  await b.evalJS(`(() => {
+    const el = document.querySelector('.composer textarea')
+    const set = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set
+    set.call(el, ${JSON.stringify(text)})
+    el.dispatchEvent(new Event('input', { bubbles: true }))
+    return true
+  })()`)
+  await sleep(150)
+  await b.evalJS(`document.querySelector('.composer').requestSubmit()`)
+  const done = await waitFor(
+    `document.querySelector('.composer textarea') && !document.querySelector('.composer textarea').disabled`,
+    10000,
+  )
+  await b.evalJS(`(() => { const l = document.querySelectorAll('.bubble.bot'); l[l.length - 1]?.click(); return true })()`)
+  await sleep(200)
+  return done
+}
+
+async function lastBotText() {
+  return await b.evalJS(`[...document.querySelectorAll('.bubble.bot .txt')].pop()?.textContent || ''`)
 }
 
 try {
@@ -161,6 +260,74 @@ try {
   const hl2 = await b.evalJS(`document.querySelector('.driver-active-element')?.id || ''`)
   ok('第 2 步高亮提交按钮', step2.includes('提交') && hl2 === 'tour-submit', { step2, hl2 })
   await b.shot(path.join(OUT, 'tour-step2.png'))
+
+  // ③b Q10 二次进入：关掉漫游 → 回客户首页 → 再点一次「怎么开店」
+  await b.evalJS(`document.querySelector('.driver-popover-close-btn')?.click()`)
+  await sleep(500)
+  await b.evalJS(`location.hash = '#/customer'`)
+  await sleep(2600)
+  await openPanel()
+  const welcomeChip = await b.evalJS(`[...document.querySelectorAll('.chip')].some(x => x.textContent.includes('怎么开店'))`)
+  ok('二次进入：欢迎胶囊仍在', welcomeChip)
+  await b.evalJS(`[...document.querySelectorAll('.chip')].find(x => x.textContent.includes('怎么开店')).click()`)
+  ok('二次进入：再次出现「一键带我去开店」', await waitFor(`document.querySelector('.tour-btn')`, 10000))
+  await sleep(2600)
+  await b.evalJS(`document.querySelector('.tour-btn').click()`)
+  const reTour = await waitFor(`document.querySelector('.driver-popover.chat-tour-popover')`, 12000)
+  const reStep = await b.evalJS(`document.querySelector('.driver-popover-title')?.textContent || ''`)
+  ok('二次进入：漫游重新开启且停在第 1 步', reTour && reStep.includes('店铺'), { reStep })
+  await sleep(500)
+  await b.shot(path.join(OUT, 'tour-reentry.png'))
+
+  // 关掉漫游，回客户首页做六态与兜底断言
+  await b.evalJS(`document.querySelector('.driver-popover-close-btn')?.click()`)
+  await sleep(500)
+  await b.evalJS(`location.hash = '#/customer'`)
+  await sleep(2500)
+
+  // ④ N2：六态话术逐条渲染（文案与后端逐字一致）
+  for (const [trigger, body] of Object.entries(STATE_REPLIES)) {
+    const answered = await sendChat(trigger)
+    const text = await lastBotText()
+    ok(`6 态话术：${trigger.replace('身份-', '')}`, answered && text.includes(body.reply), { text: text.slice(0, 32) })
+    if (trigger === '身份-审核中') {
+      await sleep(300)
+      await b.shot(path.join(OUT, 'chat-identity-pending.png'))
+    }
+  }
+
+  // ⑤ N7：未知 routeKey 必须按 label 当普通消息发送
+  await sendChat('未知路由')
+  ok('N7 未知 routeKey：胶囊出现', await b.evalJS(
+    `[...document.querySelectorAll('.chip')].some(x => x.textContent.includes('测试未知路由'))`))
+  await sleep(300)
+  await b.shot(path.join(OUT, 'chat-unknown-route.png'))
+  await b.evalJS(`[...document.querySelectorAll('.chip')].find(x => x.textContent.includes('测试未知路由')).click()`)
+  ok('N7 未知 routeKey：点击后按 label 发消息', await waitFor(
+    `[...document.querySelectorAll('.bubble.user .txt')].some(x => x.textContent === '测试未知路由')`, 8000))
+  await waitFor(`[...document.querySelectorAll('.bubble.bot .txt')].some(x => x.textContent.includes('收到：测试未知路由'))`, 8000)
+  ok('N7 未知 routeKey：消息区不出现 [object Object]', await b.evalJS(
+    `!document.querySelector('.list')?.textContent.includes('[object Object]')`))
+
+  // ⑥ N3：商家问秒杀 → 导航到秒杀报名页
+  await b.evalJS(`
+    sessionStorage.setItem('loginUsername', 'demo_merchant');
+    sessionStorage.setItem('role', '2');
+    sessionStorage.setItem('merchantid', 'm1');
+    sessionStorage.removeItem('customerid');
+  `)
+  await b.evalJS(`location.hash = '#/merchant'`)
+  await sleep(2800)
+  const merchantHome = await b.evalJS(`location.hash`)
+  ok('商家身份进入商家端', merchantHome.includes('/merchant'), { merchantHome })
+  await sendChat('我要报名秒杀')
+  ok('N3 秒杀：商家看到「去秒杀报名」', await waitFor(
+    `[...document.querySelectorAll('.chip')].some(x => x.textContent.includes('去秒杀报名'))`, 8000))
+  await sleep(300)
+  await b.shot(path.join(OUT, 'chat-seckill.png'))
+  await b.evalJS(`[...document.querySelectorAll('.chip')].find(x => x.textContent.includes('去秒杀报名')).click()`)
+  const onSeckill = await waitFor(`location.hash.includes('/merchant/seckill')`, 10000)
+  ok('N3 秒杀：导航到 /merchant/seckill', onSeckill, { hash: await b.evalJS(`location.hash`) })
 
   const failed = rows.filter((r) => !r.pass)
   fs.writeFileSync(path.join(OUT, 'probe-output.txt'),
